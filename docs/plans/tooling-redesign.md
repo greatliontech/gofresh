@@ -288,7 +288,7 @@
                         - [x] 5.1w.2b.3b.2a.2.2.2.2.1 Construct generic checked
                           continuations from immutable predecessor state with cumulative
                           resource bounds and independent synthetic property controls.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.2 Establish the six-clause
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.2 Establish the six-clause
                           supported-transition invariant evidence and sensitivity across
                           the complete admitted encoding and interface populations;
                           disposition every remaining uncovered population before use.

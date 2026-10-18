@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-impl-native-transition"
-reason: "The conditional checker and generic continuation constructor have clause-scoped graph, state, implication, provenance, ownership and cumulative-budget controls. The independent intent-based synthetic ISA/byte oracle checks direct and segmented programs, including projected flag values and sampled incoming flags. Complete six-clause invariant evidence remains outstanding across the complete admitted encoding and interface populations: bounded generated programs and samples do not exhaust immediate/displacement values, origin/address boundaries, region configurations, graph layouts, or malformed-byte admission. Actual startup continuation use remains blocked behind that evidence gate. No implementation contradiction is asserted; process-entry, bootstrap, source-storage association and runtime-reuse authority remain separate."
-content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
-source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
-lands { manual { condition: "tooling-redesign 5.1w.2b.3b.2a.2.2.2.2.2: establish complete supported-transition six-clause property/analyzer evidence and sensitivity across the admitted encoding/interface population before the actual startup consumer at 5.1w.2b.3b.2a.2.2.2.2.3. Generic mechanism prerequisites land at 5.1w.2b.3b.2a.2.2.2.2.1. Loader/process-input applicability, bootstrap and source-storage association remain in 5.1w.2b.3b.2a.2.2.2 and its later constituents; native records/current/historical closing remains at 5.1w.2b.4." } }

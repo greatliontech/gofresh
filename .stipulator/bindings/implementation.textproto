@@ -3806,3 +3806,652 @@ bindings {
   shape_hash: "2871054c5c3da5bb87a18b50784315bc5c703bd6d5b352f15199afe1fc6025ad"
   clause_label: "state-and-effects"
 }
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionExecutedDescriptorPopulation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "983d6f0934f23ec514d5e4952f0d264993a8a1be7b8ea49ab8ed47b0609ed82b"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionExecutedEncoding"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7503368d1c4a414523530918f6d9a64732d0ab938edc1de6e5614ff442c2840e"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionExecutedRawAdmission"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "be3045891ad7591c79b48bdea168f0cd91eb5aeac25743e7ea9114295d3be44e"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateInventory"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "07a4c795dc6d85853a5b38247d37ff65e0c383407de7a23ea42a5b9128f02667"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateSparseRel32"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "45292c02a7b4e7adf925e7cb15e4475acb3293e8624d0d9ba845b506d6e7eb9b"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateRel8"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "0f68ba4eee868d8f5adcdbd8db2845d538bb4d59325a1f2cbb6a16ad450be427"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateLongFrontier"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "629a92d2ce3c7d61c875f9f46bb38972462d9d9f01c6abdbd4d01428fe8e4269"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateEvolvingSequence"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e37eb6cd1fe8867f82ce37884eef9ce9cb8e8fcb4ffdfa8c9e149d992b42113a"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionInterfacePositiveProperties"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9eef9b2619a6891a608ba313bca7af9c0e535fb56c5d54a471c268218e1d069b"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionInterfaceConditionsAndELFEntryProperties"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9fd647b43c694bfd1595be1aebe775cc0274aa2b76a8c08bcd9bafc49f867a75"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionInterfaceSizedInitialState"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8583ffb9c8239e5d868944c4314d5fd80126170f9142447d78788e5055d1475c"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionInterfaceAggregateWords"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bc3fff9b9c66f843b83ff861c24524814af2e54f64abd525c3d0b8d8f05b49b0"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateJointValuations"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3ca0aa1392c6d165d4c25b6c516474b74998610733ddac038d16824633197de8"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionLifecycle"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "388d7b6e134612abe24ad068c2869431dd0aea457fe87388abe782134530a211"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionInterfaceAdmissibility"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "438caada35e702d11a5517b9c5ae018e2dc0748579f2949034fd4276a44cb9fb"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionInterfaceMemoryAdmissibility"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b4d9560b6325fe370752f65887eba94bff2ea3f35723061370e8d9a917bb57ff"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionInterfaceFullWidthProperties"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d55387c8bb0795f1477b22aff3ab74e4b440543fb9b80b4c85674a7ef39b70c7"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionInterfaceSmallDomainProperties"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ac04eaa40ef9632453a6e01a2e42919017511f330d60c473fb4bb05aceb02f03"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionInterfaceSingleViolationProperties"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a6a6c8880d40b96d2f3b77f353312d092f7044c0f4937782d207b04ba54bb231"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionInterfacePageUnionProperties"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ed7015c49958ba49cd4532499db8fbfdc843e966ab3993b212527af66b636116"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionInterfaceEveryMappingProperties"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "83e096c0a51648d231b68b62df12ba1019451cf2e0e99112fea58ddd5a04805b"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionInterfaceRoundedEndpointProperties"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4937581f322db69a56e66e9c48fcffbb3eb2153b64b88459ca2b808a4db50a51"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionInterfaceMemoryPopulationProperties"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d1c96e6b3d1fecce0391e9412a5058b146b6e06a630a1b52f6e73e18f1f96a03"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateCongruence"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c09af15e5a3af6ea66d9f8dc4b4271c34b29e406bab50c34031f50161ecb3eaf"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateMemoryTranslation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ccf89feff188ec9479856c8e1792665a7404a64968ff637a78a0adae904eb249"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateRawEqualAddress"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8e5a144f9af031bfbe6c450814877186a9bda4883b9986fa8a30705b2ed6bce7"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateOverlap"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "31a2c0705bf3c87f0d59cc5ec8ea6b1a61919961370c42afa2871a76d6563986"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStatefulGeometry"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3d4525b8fbe3d752cebbcda8fe89f6d253f19c25586ed8ba1be3cbcc7478e02d"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionInterfaceSizedInitialState"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8583ffb9c8239e5d868944c4314d5fd80126170f9142447d78788e5055d1475c"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionInterfaceAggregateWords"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bc3fff9b9c66f843b83ff861c24524814af2e54f64abd525c3d0b8d8f05b49b0"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateComplete"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "77c2d871d653efc5d44ccd2d0cac183f536fb390a472700af29e4c85b82aee75"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateLocal"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "783af358e7011bf55e40922f5bb0851869545d91a59131a78fb1f9ad0cca1916"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateJointValuations"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3ca0aa1392c6d165d4c25b6c516474b74998610733ddac038d16824633197de8"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateAlignmentZero"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2f779db4666ab255ab49b7e277e700cb9bd122da69e87674487860860f5684dd"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateMemoryChains"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "55193855596396e1d67a191764eb13b11f862a952faefd15874797083beb2726"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateEvolvingSequence"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e37eb6cd1fe8867f82ce37884eef9ce9cb8e8fcb4ffdfa8c9e149d992b42113a"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStatefulGeometry"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3d4525b8fbe3d752cebbcda8fe89f6d253f19c25586ed8ba1be3cbcc7478e02d"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionStateWholeProgramProperty"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e4dadd2dfd9d6d17261e12da11fc58c4c037caa7dd6b583c98e308207adf7423"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionStateMemoryTranslationProperty"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "89118f0b71694729933c79f862ac1de5548c11547d14a429d90dff90f3bfd183"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionStateJointValuationProperty"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a964602fe3b56d5b677ea227b674e452deeaf79f0414ceeb435d276529b59e6c"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionStateEvolvingSequenceProperty"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a04d1172c41c9a895fbe0a9123cd2c85a4dbe2ad69e7fd0118bba0ef92d0e0f2"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionExecutedDescriptorPopulation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "983d6f0934f23ec514d5e4952f0d264993a8a1be7b8ea49ab8ed47b0609ed82b"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionExecutedRawAdmission"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "be3045891ad7591c79b48bdea168f0cd91eb5aeac25743e7ea9114295d3be44e"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionLifecycle"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "388d7b6e134612abe24ad068c2869431dd0aea457fe87388abe782134530a211"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateInventory"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "07a4c795dc6d85853a5b38247d37ff65e0c383407de7a23ea42a5b9128f02667"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateDependentDepth"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "eeb42937a87e31c9716e22b27e8b027965e3cf67bc794244cd8e0626ca9a32cd"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionInterfaceStateLimitArithmetic"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c7f2445b8ee0ef1ad016638a45925ac00eb388ea08fc149ff3d9d94d2456737f"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionStateSequenceLimitArithmetic"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b7ffcd4d42990bbef82349fe83a2d01e1d32569290288ec8ea041c7afe292c18"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStatePartitions"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "141f27d77bbec717fa56b28a1293441aae564d64778b98f1f93d139324ac21f9"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionStatePartitionProperty"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2508472771058e90e5305f23dd869739073c7be19bf87c5c4963ea0bfee7fd6e"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateEvolvingSequence"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e37eb6cd1fe8867f82ce37884eef9ce9cb8e8fcb4ffdfa8c9e149d992b42113a"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStatefulGeometry"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3d4525b8fbe3d752cebbcda8fe89f6d253f19c25586ed8ba1be3cbcc7478e02d"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateMemoryChains"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "55193855596396e1d67a191764eb13b11f862a952faefd15874797083beb2726"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionLifecycle"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "388d7b6e134612abe24ad068c2869431dd0aea457fe87388abe782134530a211"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionStateWideDAGEvaluation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b165781e4bff5b605550054deae4f65d08052677bcfa1db636c0758c6b9dc8f0"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionStateEvaluationLimitArithmetic"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5f96893aaf33f101bc6a51b53a66e24b0ba28c59c32d8cd10357ec838df2a2ce"
+  clause_label: "independent-evidence"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateBalancedEvaluation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4b19f37546a421abcc3fe40793cd49390017addde638baebb8f1cc10c7bdc73c"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.FuzzTransitionStateBalancedEvaluation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4b19f37546a421abcc3fe40793cd49390017addde638baebb8f1cc10c7bdc73c"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "7dc89ce40f7d707f56a2cf3444043fcd42776bd932214a63b6d1d826cb823292"
+  source_hash: "87ec0ac612db0828cee98505fb0b0debfc90710317fc2b0a3de7b001b33c19d6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionRecordPopulations"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8555b2cb92a3ec208c0c42a2d4a0a324fc3577423c0e3dd9fe151a7698e119a6"
+  clause_label: "independent-evidence"
+}
