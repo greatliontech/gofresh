@@ -359,6 +359,31 @@
                           projections supply no unproved successor adapter, actual executor
                           applicability, completed bootstrap, source association or public
                           runtime-reuse authority.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.8 Establish one conditional
+                          typed-global and call-operand representation lemma over
+                          the selected runtime testAtomic64 prefix before its first
+                          Cas64 invocation and the actual optimized native prefix
+                          before its atomic instruction. Share the transition kernel
+                          through explicit executable-entry versus conditional-region
+                          root binding; retain original image ownership, arbitrary
+                          entry state, exact coverage, current state, origin, thread,
+                          frame and ordered effects through continuations, and refuse
+                          root-loading initialization for conditional regions. Bind
+                          the full selected typed source root and actual operand cut;
+                          derive claim-relevant source effects with the existing region
+                          kernel and check the fixed, untrusted disjoint uint64 image
+                          representation against both current memory and operands.
+                          Establish root inclusion, transfer closure, frame and boundary
+                          adequacy without claiming atomic semantics, whole-function
+                          equivalence, ELF-root reachability or completed bootstrap.
+                          Verify ordinary optimized stock/custom positives, map-only
+                          swaps, changed source values/native targets/pointer operands,
+                          foreign equal-byte owners, extra effects, reads before
+                          overwrite, hooks, wrong cuts, unrelated-byte preservation,
+                          consistent map/store/use permutations, and generic value,
+                          layout, ownership, cancellation, resource and continuation
+                          controls. Keep whole-source actual-use and later source-state
+                          handoff obligations open pending checked composition.
                       - [ ] 5.1w.2b.3b.2a.2.2.2.3 Establish native-storage to
                         selected-source storage and initialization correspondence before
                         supplying compiler source state; names and numeric addresses
