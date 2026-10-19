@@ -12,6 +12,11 @@
 // rewrites can hide it beneath negation. Boolean encoding is not distributed in
 // the opposite direction. Generated nodes, depth and proof work remain bounded;
 // no branch valuation or execution premise is added by this scalar identity.
+//
+// ConcatMask distributes a constant bitwise AND mask across Concat's exact low
+// and high field widths. Each field keeps its original scoped operand and its
+// corresponding mask bits; arbitrary bits disappear only where the mask is zero.
+// This scalar equality supplies no register, memory or pointer provenance.
 package bitrelation
 
 import (

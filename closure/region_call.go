@@ -53,6 +53,10 @@ type regionCallSession struct {
 	used        []*regionCallProof
 	references  map[*ssa.Function]*assemblyReference
 	source      computationSource
+	// Only the opaque source-continuation constructor supplies this checked
+	// predecessor. Its occurrence guard prevents executing retained allocations
+	// again. An arbitrary input heap has no predecessor authority.
+	predecessor *sourceOperandPrefix
 	// Only the startup composer supplies completed roots, after checking every
 	// outcome of that phase. Their allocations cannot execute again in this
 	// invocation: the new root has a distinct call-string namespace. The ordinary
@@ -180,7 +184,20 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 		if err := k.meter.tick(); err != nil {
 			return nil, err
 		}
-		if candidate.at != call || candidate.target != target || candidate.invocation != id {
+		if candidate.at != call || candidate.target != target || candidate.invocation != id || candidate.reference != nil {
+			continue
+		}
+		if len(candidate.arguments) != len(actual) {
+			continue
+		}
+		sameArguments := true
+		for i, argument := range actual {
+			if err := k.chargeValue(argument); err != nil {
+				return nil, err
+			}
+			sameArguments = sameArguments && regionSameValue(argument, candidate.arguments[i])
+		}
+		if !sameArguments {
 			continue
 		}
 		if err := child.validateState(candidate.initial); err != nil {
@@ -218,7 +235,7 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 		if len(k.session.proofs) >= k.meter.limits.nodes {
 			return nil, regionError("callee proof count exhausted")
 		}
-		proof = &regionCallProof{at: call, target: target, invocation: id, initial: initial, entries: entries}
+		proof = &regionCallProof{at: call, target: target, invocation: id, initial: initial, entries: entries, arguments: slices.Clone(actual)}
 		k.session.proofs = append(k.session.proofs, proof)
 	}
 	outcomes, checked := k.session.results[proof]
@@ -239,18 +256,10 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 		}
 	}
 	if k.trace != nil {
-		if len(outcomes) != 1 || len(actual) == 0 {
-			return nil, regionError("finite call effects require one returned state and a represented operand")
+		if len(outcomes) != 1 || len(k.trace.calls) >= k.meter.limits.nodes {
+			return nil, regionError("finite call effects require one bounded complete returned state")
 		}
-		if _, err := k.effectGlobal(actual[0]); err != nil {
-			return nil, err
-		}
-		before, beforeOK := regionUint64(readRegionLocation(caller, actual[0].location, types.Typ[types.Uint64]))
-		after, afterOK := regionUint64(readRegionLocation(outcomes[0].state, actual[0].location, types.Typ[types.Uint64]))
-		if !beforeOK || !afterOK || len(k.trace.calls) >= k.meter.limits.nodes {
-			return nil, regionError("finite call effects lack a bounded complete operand-state relation")
-		}
-		k.trace.calls = append(k.trace.calls, regionCallApplication{proof: proof, current: before, value: after, result: outcomes[0].value})
+		k.trace.calls = append(k.trace.calls, regionCallApplication{proof: proof, outcome: outcomes[0]})
 	}
 	var returned []regionState
 	for _, outcome := range outcomes {

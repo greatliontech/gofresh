@@ -209,7 +209,7 @@ func TestGlobalFunctionOccurrenceCorrespondence(t *testing.T) {
 			// All variants return the same represented bytes. Only the number of
 			// locked events differs: an unchanged write is still an observable RMW.
 			for _, address := range []uint64{0x700008, 0x700050} {
-				word, err := globalNativeWord(t.Context(), br.NewBuilder(128), bound.State.Memory, address)
+				word, err := storageNativeWord(t.Context(), br.NewBuilder(128), bound.State.Memory, nativeproof.TransitionLocation{Image: true, Offset: int64(address)}, 8)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -230,7 +230,7 @@ func TestGlobalFunctionOccurrenceCorrespondence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(proof.atomics) != 2 || len(proof.traces) != 2 || len(proof.matched) != 6 || len(proof.eliminated) != 0 {
+			if len(proof.atomics) != 2 || len(proof.traces) != 3 || len(proof.matched) != 6 || len(proof.eliminated) != 0 {
 				t.Fatal("complete source phases or repeated native effects were collapsed")
 			}
 			for index, atomic := range proof.atomics {
@@ -251,7 +251,9 @@ func TestGlobalFunctionOccurrenceCorrespondence(t *testing.T) {
 			second.ID = first.ID
 			bound.Prefix.PrimitiveEffects[1] = second
 			probe := *proof
-			if err := probe.checkEffects(t.Context(), bound); err == nil || !strings.Contains(err.Error(), "atomic accesses have another") {
+			view := bound.Prefix
+			view.Instructions, view.Accesses, view.Memory = bound.Instructions, bound.Accesses, bound.State.Memory
+			if err := probe.checkEffects(t.Context(), view); err == nil || !strings.Contains(err.Error(), "atomic accesses have another") {
 				t.Fatalf("atomic accepted another same-PC iteration's identity: %v", err)
 			}
 			// A discovery cutoff before the second RMW is not termination.

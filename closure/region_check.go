@@ -22,7 +22,6 @@ type regionKernel struct {
 	// object. Executing it now must not reset that object's surviving aliases.
 	preexisting map[regionObject]bool
 	constants   map[*ssa.Const]regionValue
-	prefix      *regionPrefixEffects
 	trace       *regionEffectTrace
 }
 
@@ -197,28 +196,51 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 	if err := k.validateState(in.initial); err != nil {
 		return nil, err
 	}
-	var remember func(regionValue)
-	remember = func(v regionValue) {
+	rememberObject := func(object regionObject) error {
+		if session.completed[object.invocation.root] {
+			return nil
+		}
+		if session.predecessor != nil {
+			_, retained, err := session.predecessor.liveAllocation(object, k.meter.tick)
+			if err != nil || retained {
+				return err
+			}
+		}
+		k.preexisting[object] = true
+		return nil
+	}
+	var remember func(regionValue) error
+	remember = func(v regionValue) error {
+		if err := k.meter.tick(); err != nil {
+			return err
+		}
 		if v.kind == regionPointer || v.kind == regionSlice {
-			if !session.completed[v.location.object.invocation.root] {
-				k.preexisting[v.location.object] = true
+			if err := rememberObject(v.location.object); err != nil {
+				return err
 			}
 		}
 		for _, list := range [][]regionValue{v.elements, v.environment} {
 			for _, item := range list {
-				remember(item)
+				if err := remember(item); err != nil {
+					return err
+				}
 			}
 		}
+		return nil
 	}
 	if !fullReturns {
 		for object, value := range in.initial.memory {
-			if !session.completed[object.invocation.root] {
-				k.preexisting[object] = true
+			if err := rememberObject(object); err != nil {
+				return nil, err
 			}
-			remember(value)
+			if err := remember(value); err != nil {
+				return nil, err
+			}
 		}
 		for _, value := range in.initial.values {
-			remember(value)
+			if err := remember(value); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return k, nil
@@ -262,7 +284,7 @@ func (k *regionKernel) owns(v ssa.Value) bool {
 		if x.Value != nil && x.Value.Kind() == constant.String && len(constant.StringVal(x.Value)) > k.meter.limits.locations {
 			return false
 		}
-		return zero || x.IsNil() || regionScalarConstant(x.Type(), x.Value)
+		return zero || x.IsNil() || regionScalarConstant(x.Type(), x.Value) || regionOpaqueScalarType(x.Type()) && x.Value != nil
 	case *ssa.Builtin:
 		return x != nil && x.Type() != nil
 	case *ssa.Global:
@@ -513,7 +535,7 @@ func checkRegionKernel(k *regionKernel, p *regionProposal) (*checkedRegion, erro
 	}
 	usage := *k.meter
 	usage.ctx = nil
-	return &checkedRegion{rules: regionRules, input: in, observations: observations, calls: k.session.used, prefix: k.prefix, trace: k.trace, usage: usage, contexts: contexts}, nil
+	return &checkedRegion{rules: regionRules, input: in, observations: observations, calls: k.session.used, trace: k.trace, usage: usage, contexts: contexts}, nil
 }
 
 func (k *regionKernel) checkEntries(entries map[*ssa.BasicBlock][]regionState) ([]regionObservation, error) {
@@ -537,17 +559,26 @@ func (k *regionKernel) checkEntries(entries map[*ssa.BasicBlock][]regionState) (
 	}
 	var observations []regionObservation
 	seen := map[*ssa.BasicBlock]bool{}
-	queue := []*ssa.BasicBlock{in.entry.block}
+	queue := []regionEdge{{block: in.entry.block, state: in.initial}}
 	for len(queue) != 0 {
-		block := queue[0]
+		next := queue[0]
+		block := next.block
 		queue = queue[1:]
 		if seen[block] {
+			if k.trace != nil {
+				return nil, regionError("finite effect scope revisits a checked block")
+			}
 			continue
 		}
 		seen[block] = true
 		states := entries[block]
 		if len(states) == 0 {
 			return nil, regionError("reachable block invariant omitted")
+		}
+		if k.trace != nil {
+			// The proposed invariant proves coverage; effects and actual phi
+			// values come from the independently transferred predecessor state.
+			states = []regionState{next.state}
 		}
 		for _, state := range states {
 			edges, outcomes, err := k.block(block, state)
@@ -563,7 +594,7 @@ func (k *regionKernel) checkEntries(entries map[*ssa.BasicBlock][]regionState) (
 				if !covered {
 					return nil, regionError("actual edge/backedge or phi transfer not included")
 				}
-				queue = append(queue, edge.block)
+				queue = append(queue, edge)
 			}
 		}
 	}
@@ -735,11 +766,6 @@ func (k *regionKernel) block(block *ssa.BasicBlock, initial regionState) ([]regi
 					return nil, nil, &regionOperationFailure{instruction, err}
 				}
 			}
-			if k.prefix != nil {
-				if err := k.prefixTransfer(s, instruction); err != nil {
-					return nil, nil, &regionOperationFailure{instruction, err}
-				}
-			}
 			switch x := instruction.(type) {
 			case *ssa.Phi:
 				// Assigned simultaneously on the actual predecessor edge below.
@@ -841,6 +867,8 @@ func (k *regionKernel) zero(t types.Type, depth int) (regionValue, error) {
 			v.scalar = constant.MakeString("")
 		case u.Info()&types.IsInteger != 0:
 			v.scalar = constant.MakeInt64(0)
+		case regionOpaqueScalarType(t):
+			return regionUnknownValue(t), nil
 		default:
 			return regionValue{}, regionError("unsupported zero scalar")
 		}
@@ -935,6 +963,12 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		// A summary site's fresh object must not reset its earlier instances.
 		// Top includes both their contents and the new zero object.
 		s.memory[object] = v
+		if k.trace != nil {
+			if len(k.trace.allocations) >= k.meter.limits.nodes {
+				return regionError("effect allocation budget exhausted")
+			}
+			k.trace.allocations = append(k.trace.allocations, regionEffectAllocation{instruction: x, invocation: k.invocation, location: regionLocation{object: object}, initializer: v})
+		}
 		return set(x, regionValue{typ: x.Type(), kind: regionPointer, location: regionLocation{object: object}})
 	case *ssa.FieldAddr:
 		v := get(x.X)

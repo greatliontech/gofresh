@@ -56,7 +56,12 @@ func globalNativeImage(t testing.TB, addresses [2]uint64, values [3]uint64, poin
 	if extra == "extra-write" {
 		store(addresses[1])
 	}
+	if extra == "matched-read" || extra == "extra-read" {
+		load(addresses[1])
+	}
 	if extra == "extra-read" {
+		// One load can implement the actual source operand read. A second is
+		// surplus even though both return the same overwritten value.
 		load(addresses[1])
 	}
 	mov(0, values[1])
@@ -199,11 +204,14 @@ func globalNativeProof(t testing.TB, f globalNativeFixture, continued bool) nati
 	return c
 }
 
-func globalRho(s computationSource, f globalNativeFixture, g [2]*ssa.Global, a [2]uint64) globalRepresentation {
-	return globalRepresentation{source: s.prog, image: f.image, globals: [2]globalImageBinding{{g[0], a[0]}, {g[1], a[1]}}}
+func globalRho(s computationSource, f globalNativeFixture, g [2]*ssa.Global, a [2]uint64) storageRepresentation {
+	return storageRepresentation{source: s.prog, image: f.image, bindings: []storageBinding{
+		{object: regionObject{kind: regionGlobal, site: g[0]}, base: nativeproof.TransitionLocation{Image: true, Offset: int64(a[0])}},
+		{object: regionObject{kind: regionGlobal, site: g[1]}, base: nativeproof.TransitionLocation{Image: true, Offset: int64(a[1])}},
+	}}
 }
 
-func checkGlobalFixture(ctx context.Context, s computationSource, call *ssa.Call, f globalNativeFixture, p *sourceOperandPrefix, n nativeproof.TransitionCertificate, rho globalRepresentation) (*globalOperandCorrespondence, error) {
+func checkGlobalFixture(ctx context.Context, s computationSource, call *ssa.Call, f globalNativeFixture, p *sourceOperandPrefix, n nativeproof.TransitionCertificate, rho storageRepresentation) (*globalOperandCorrespondence, error) {
 	return checkGlobalOperandCorrespondence(ctx, s, s.prog.Roots["F"], call, f.image, f.entry, f.cut, p, n, rho)
 }
 
@@ -212,7 +220,9 @@ func TestGlobalOperandCorrespondenceProperty(t *testing.T) {
 	for sample := 0; sample < 32; sample++ {
 		values := [3]uint64{rng.Uint64(), rng.Uint64(), rng.Uint64()}
 		base := uint64(0x700000 + 4096*sample)
-		addresses := [2]uint64{base + uint64(rng.Intn(16)), base + 64 + uint64(rng.Intn(16))}
+		// Typed uint64 globals require selected-layout alignment even though
+		// the native machine separately permits unaligned ordinary accesses.
+		addresses := [2]uint64{base + 8*uint64(rng.Intn(4)), base + 64 + 8*uint64(rng.Intn(4))}
 		payload := make([]byte, 128)
 		for i := range payload {
 			payload[i] = byte(rng.Uint32())
@@ -248,7 +258,7 @@ func FuzzGlobalOperandCorrespondence(f *testing.F) {
 	f.Add(^uint64(0), uint64(1)<<63, uint64(0xabcdefabcdefabcd), ^uint64(0), []byte{42, 0, 1})
 	f.Fuzz(func(t *testing.T, z, x, next, layout uint64, payload []byte) {
 		base := uint64(0x700000) + (layout%1024)*4096
-		a := [2]uint64{base + (layout>>10)%32, base + 64 + (layout>>15)%32}
+		a := [2]uint64{base + 8*((layout>>10)%4), base + 64 + 8*((layout>>15)%4)}
 		names := [2]string{fmt.Sprintf("left%d", layout), fmt.Sprintf("right%d", layout)}
 		if len(payload) > 128 {
 			payload = payload[:128]
@@ -262,10 +272,10 @@ func FuzzGlobalOperandCorrespondence(f *testing.F) {
 // itself uses universal checked equalities, not these concrete comparisons.
 func assertGlobalCertificate(t testing.TB, c *globalOperandCorrespondence, values [3]uint64, addresses [2]uint64, rng *rand.Rand) {
 	t.Helper()
-	if c == nil || c.rules != globalOperandRules || c.open != (computationCorrespondenceObligations{true, true, true, true, true}) || len(c.equalities) < 5 {
+	if c == nil || c.rules != globalOperandRules || c.open != (computationCorrespondenceObligations{true, true, true, true, true}) || c.account == nil || len(c.account.equalities) < 5 || len(c.account.inputs) != 2 {
 		t.Fatal("incomplete proof")
 	}
-	for _, w := range c.equalities {
+	for _, w := range c.account.equalities {
 		if !w.Valid() {
 			t.Fatal("unchecked equality")
 		}
@@ -296,12 +306,12 @@ func assertGlobalCertificate(t testing.TB, c *globalOperandCorrespondence, value
 			}
 			return v
 		}
-		for i, term := range c.initial {
+		for i, input := range c.account.inputs {
 			var word [8]byte
 			for j := range word {
 				word[j] = before[nativeproof.TransitionLocation{Image: true, Offset: int64(addresses[i]) + int64(j)}]
 			}
-			if eval(term) != binary.LittleEndian.Uint64(word[:]) {
+			if eval(input.native) != binary.LittleEndian.Uint64(word[:]) {
 				t.Fatal("initial little-endian relation differs")
 			}
 		}
@@ -340,13 +350,14 @@ func TestGlobalOperandCorrespondenceRefusals(t *testing.T) {
 			source, cut, packet, fragment, proof := s, call, prefix, f, native
 			rho := globalRho(s, f, globals, addresses)
 			ctx := t.Context()
+			var limits []globalCorrespondenceLimits
 			switch mode {
 			case "map-swap":
-				rho.globals[0].address, rho.globals[1].address = rho.globals[1].address, rho.globals[0].address
+				rho.bindings[0].base, rho.bindings[1].base = rho.bindings[1].base, rho.bindings[0].base
 			case "map-overlap":
-				rho.globals[1].address = rho.globals[0].address + 7
+				rho.bindings[1].base.Offset = rho.bindings[0].base.Offset + 7
 			case "source-alias":
-				rho.globals[1].global = rho.globals[0].global
+				rho.bindings[1].object = rho.bindings[0].object
 			case "native-target", "partial-overlap":
 				a := addresses
 				if mode == "partial-overlap" {
@@ -411,9 +422,7 @@ func TestGlobalOperandCorrespondenceRefusals(t *testing.T) {
 				proof = globalNativeProof(t, fragment, false)
 				rho.image = fragment.image
 			case "composition-budget":
-				fragment.face.Envelope.End = 4096
-				fragment.face.Regions = []nativeproof.RelativeRegion{{Bytes: nativeproof.RelativeSpan{Start: 0, End: 4096}, Readable: true, Writable: true}}
-				proof = globalNativeProof(t, fragment, false)
+				limits = []globalCorrespondenceLimits{{work: 1}}
 			case "wrong-source-cut":
 				cut = nil
 			case "cancel":
@@ -421,19 +430,22 @@ func TestGlobalOperandCorrespondenceRefusals(t *testing.T) {
 				ctx, cancel = context.WithCancel(ctx)
 				cancel()
 			}
-			got, err := checkGlobalFixture(ctx, source, cut, fragment, packet, proof, rho)
+			got, err := checkGlobalOperandCorrespondence(ctx, source, source.prog.Roots["F"], cut, fragment.image, fragment.entry, fragment.cut, packet, proof, rho, limits...)
 			if got != nil || err == nil {
 				t.Fatal("invalid relation accepted", mode)
 			}
 			if mode == "cancel" && !errors.Is(err, context.Canceled) {
 				t.Fatal(err)
 			}
+			if mode == "composition-budget" && !strings.Contains(err.Error(), "cumulative proof work exhausted") {
+				t.Fatal("composition did not exhaust its cumulative work budget", err)
+			}
 			if mode == "source-value" && strings.Contains(err.Error(), "owner") {
 				t.Fatal("value control failed for ownership instead of semantic mismatch", err)
 			}
 		})
 	}
-	for _, mode := range []string{"extra-write", "early-read", "extra-read", "hook"} {
+	for _, mode := range []string{"extra-write", "early-read", "hook"} {
 		t.Run("source-"+mode, func(t *testing.T) {
 			s, c, g := globalSourceFixture(t, names, values, mode, "")
 			p, err := checkSourceOperandPrefix(t.Context(), s, s.prog.Roots["F"], c, defaultRegistrationLimits())
@@ -442,6 +454,35 @@ func TestGlobalOperandCorrespondenceRefusals(t *testing.T) {
 			}
 			if err == nil {
 				t.Fatal("source effect escaped correspondence")
+			}
+		})
+	}
+}
+
+func TestGlobalOperandCorrespondenceOrdinaryReadAccounting(t *testing.T) {
+	values := [3]uint64{42, 7, 11}
+	addresses := [2]uint64{0x700008, 0x700048}
+	for _, mode := range []string{"source-extra-read", "matched-native-read"} {
+		t.Run(mode, func(t *testing.T) {
+			sourceExtra, nativeExtra := "", "matched-read"
+			if mode == "source-extra-read" {
+				sourceExtra, nativeExtra = "extra-read", ""
+			}
+			s, call, globals := globalSourceFixture(t, [2]string{"a", "b"}, values, sourceExtra, "")
+			prefix := globalPrefix(t, s, call)
+			fixture := globalNativeImage(t, addresses, values, addresses[0], 0x700000, nil, nativeExtra)
+			native := globalNativeProof(t, fixture, false)
+			proof, err := checkGlobalFixture(t.Context(), s, call, fixture, prefix, native, globalRho(s, fixture, globals, addresses))
+			if err != nil {
+				t.Fatal(err)
+			}
+			account := proof.account
+			if mode == "source-extra-read" {
+				if len(account.accesses) != 4 || len(account.matched) != 2 || len(account.eliminated) != 2 || account.eliminated[0] != 2 || account.eliminated[1] != 3 {
+					t.Fatal("both known source reads must be retained and explicitly eliminated")
+				}
+			} else if len(account.accesses) != 3 || len(account.matched) != 3 || len(account.eliminated) != 0 {
+				t.Fatal("actual native read must match the source operand read")
 			}
 		})
 	}
@@ -496,13 +537,13 @@ func TestGlobalOperandCorrespondenceOwnsInputs(t *testing.T) {
 	rho := globalRho(s, f, g, addresses)
 	ctx := &correspondenceCallbackContext{Context: t.Context(), mutate: func() {
 		*f.image = nativeproof.Image{}
-		rho.globals[0] = globalImageBinding{}
+		rho.bindings[0] = storageBinding{}
 	}}
 	c, err := checkGlobalFixture(ctx, s, call, f, p, n, rho)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.representation.globals[0].global != g[0] || c.representation.globals[0].address != addresses[0] {
+	if c.representation.bindings[0].object != (regionObject{kind: regionGlobal, site: g[0]}) || c.representation.bindings[0].base != (nativeproof.TransitionLocation{Image: true, Offset: int64(addresses[0])}) {
 		t.Fatal("caller mutated fixed representation")
 	}
 	if _, ok := c.native.BoundFor(c.representation.image); !ok {
@@ -587,7 +628,7 @@ func TestGlobalOperandCorrespondenceIndependentScalarRefusals(t *testing.T) {
 			}
 			builder := br.NewBuilder(0)
 			for i, address := range a {
-				actual, err := globalNativeWord(t.Context(), builder, b.Memory, address)
+				actual, err := storageNativeWord(t.Context(), builder, b.Memory, nativeproof.TransitionLocation{Image: true, Offset: int64(address)}, 8)
 				if err != nil {
 					t.Fatal(err)
 				}

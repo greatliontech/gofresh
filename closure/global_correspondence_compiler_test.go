@@ -140,20 +140,21 @@ func TestGlobalOperandCorrespondenceSelectedRuntimeArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rho := globalRepresentation{source: s.prog, image: im, globals: [2]globalImageBinding{{globals[0], a[0]}, {globals[1], a[1]}}}
+	rho := globalRho(s, globalNativeFixture{image: im}, globals, a)
 	proof, err := checkGlobalOperandCorrespondence(t.Context(), s, root, call, im, entry, cut, prefix, native, rho)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proof == nil || len(proof.equalities) < 5 {
+	if proof == nil || proof.account == nil || len(proof.account.equalities) < 5 {
 		t.Fatal("missing actual correspondence witnesses")
 	}
 	b, _ := native.Bound()
-	t.Logf("selected source=%s first call=%s; conditional native [%#x,%#x), %d instructions, %d accesses; globals=%#x/%#x; unexecuted=%x; %d universal equalities", prefix.region.root.identity.position, root.Prog.Fset.Position(call.Pos()), entry, cut, len(b.Instructions), len(b.Accesses), a[0], a[1], b.Boundary.Bytes, len(proof.equalities))
+	t.Logf("selected source=%s first call=%s; conditional native [%#x,%#x), %d instructions, %d accesses; globals=%#x/%#x; unexecuted=%x; %d universal equalities", prefix.region.root.identity.position, root.Prog.Fset.Position(call.Pos()), entry, cut, len(b.Instructions), len(b.Accesses), a[0], a[1], b.Boundary.Bytes, len(proof.account.equalities))
 	// Check both genuine foreign-owner evidence and the unchanged-image map swap,
 	// not merely malformed addresses or a sampled output disagreement.
 	swapped := rho
-	swapped.globals[0].address, swapped.globals[1].address = a[1], a[0]
+	swapped.bindings = append([]storageBinding(nil), rho.bindings...)
+	swapped.bindings[0].base.Offset, swapped.bindings[1].base.Offset = int64(a[1]), int64(a[0])
 	if c, err := checkGlobalOperandCorrespondence(t.Context(), s, root, call, im, entry, cut, prefix, native, swapped); c != nil || err == nil {
 		t.Fatal("actual map-only swap accepted")
 	}

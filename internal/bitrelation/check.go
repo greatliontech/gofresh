@@ -30,6 +30,7 @@ const (
 	SignBoundary
 	ConjunctionContradiction
 	ConditionalOperation
+	ConcatMask
 )
 
 // Step proposes an equality between Left and Right. Premises index earlier
@@ -242,6 +243,8 @@ func (c *checker) step(s Step, steps []Step) bool {
 		return c.conjunctionContradiction(a, b)
 	case ConditionalOperation:
 		return c.conditionalOperation(a, b)
+	case ConcatMask:
+		return c.concatMask(a, b)
 	}
 	return false
 }

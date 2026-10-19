@@ -222,7 +222,7 @@ func TestGlobalFunctionCompleteEffectsAndReturn(t *testing.T) {
 				t.Fatal(err)
 			}
 			bound, _ := proof.native.BoundFor(fixture.image)
-			if len(proof.inputs) != 2 || len(proof.accesses) != 4 || len(proof.traces) != 1 || len(proof.traces[0].calls) != 1 || len(proof.administrative) < 3 || !bound.State.CalleeTerminated || proof.rules != globalFunctionRules {
+			if len(proof.inputs) != 2 || len(proof.accesses) != 4 || len(proof.traces) != 2 || len(proof.traces[1].calls) != 1 || len(proof.administrative) < 3 || !bound.State.CalleeTerminated || proof.rules != globalFunctionRules {
 				t.Fatal("complete evidence or administrative account was lost")
 			}
 			if variant == "guarded" && proof.antecedent.View().Op == br.Constant {
@@ -270,7 +270,8 @@ func TestGlobalFunctionCompleteEffectsAndReturn(t *testing.T) {
 		t.Fatal("equal image bytes substituted for the owned image")
 	}
 	aliased := rho
-	aliased.globals[1].address = aliased.globals[0].address + 1
+	aliased.bindings = append([]storageBinding(nil), rho.bindings...)
+	aliased.bindings[1].base.Offset = aliased.bindings[0].base.Offset + 1
 	if p, err := checkGlobalFunctionCorrespondence(t.Context(), source, source.prog.Roots["F"], fixture.image, fixture.entry, completed, returned, aliased, nil); p != nil || err == nil {
 		t.Fatal("overlapping representation admitted")
 	}

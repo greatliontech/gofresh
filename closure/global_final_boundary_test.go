@@ -71,13 +71,13 @@ func main() { Fz(); Fx() }
 		change              func([]byte)
 	}{
 		{name: "unchanged", root: "Fz"},
-		{name: "native-address", root: "Fz", refusal: "global correspondence: final load uses another represented address", change: func(raw []byte) {
+		{name: "native-address", root: "Fz", refusal: "storage operand correspondence: native operand has another storage origin or subobject", change: func(raw []byte) {
 			binary.LittleEndian.PutUint32(raw[endpoint+3:], uint32(int64(addresses[1])-int64(baseline.next[1]+7)))
 		}},
-		{name: "native-width", root: "Fz", refusal: "global correspondence: final native boundary is not the represented unexecuted load", change: func(raw []byte) {
+		{name: "native-width", root: "Fz", refusal: "storage operand correspondence: native operand width or address mode differs", change: func(raw []byte) {
 			raw[endpoint] = 0x40 // same-length MOV EDX,[RIP+disp], rather than MOV RDX
 		}},
-		{name: "source-pointer", root: "Fx", refusal: "global correspondence: final load uses another represented address"},
+		{name: "source-pointer", root: "Fx", refusal: "storage operand correspondence: native operand has another storage origin or subobject"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

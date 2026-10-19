@@ -595,7 +595,7 @@
                             Discharge joined-state arithmetic and comparison
                             obligations with checked conditional refinements,
                             without assuming selector outcomes or widening budgets.
-                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.12c Establish typed local
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.12c Establish typed local
                             source effects from the complete entry: selected layout
                             constants, allocations, arrays, subobjects and checked
                             byte-width storage representation. Preserve whole-root

@@ -23,9 +23,10 @@ type globalCorrespondenceStep struct {
 }
 
 type globalCorrespondencePhase struct {
-	source *sourceOperandPrefix
-	use    nativeproof.TransitionCertificate
-	native nativeproof.TransitionCertificate
+	source  *sourceOperandPrefix
+	use     nativeproof.TransitionCertificate
+	native  nativeproof.TransitionCertificate
+	account *globalFunctionCorrespondence
 }
 
 // globalRegionCorrespondence owns a composition of the operand lemma with
@@ -66,7 +67,7 @@ func continueGlobalOperandCorrespondence(ctx context.Context, predecessor *globa
 	fail := func(message string) (*globalRegionCorrespondence, error) {
 		return nil, fmt.Errorf("global correspondence: %s", message)
 	}
-	if ctx == nil || predecessor == nil || predecessor.rules != globalOperandRules || predecessor.source == nil || predecessor.source.binder == nil || predecessor.limit < 1 || predecessor.work < 0 || predecessor.work >= predecessor.limit || len(references) > 256 {
+	if ctx == nil || predecessor == nil || predecessor.rules != globalOperandRules || predecessor.source == nil || predecessor.source.binder == nil || predecessor.account == nil || predecessor.account.layout == nil || predecessor.limit < 1 || predecessor.work < 0 || predecessor.work >= predecessor.limit || len(references) > 256 {
 		return fail("missing current opaque operand predecessor or resource account")
 	}
 	owned, err := captureGlobalSteps(steps)
@@ -90,9 +91,13 @@ func continueGlobalOperandCorrespondence(ctx context.Context, predecessor *globa
 		if err != nil {
 			return nil, err
 		}
-		trace := source.region.packet.trace
-		if trace == nil || len(trace.calls) != 1 || trace.calls[0].proof.at != currentSource.call {
-			return fail("phase does not consume precisely its retained source call")
+		packet := source.checkedPacket()
+		if packet == nil || source.prior != currentSource {
+			return fail("phase lacks its exact opaque source predecessor")
+		}
+		trace := packet.trace
+		if len(trace.calls) == 0 || trace.calls[0].proof == nil || trace.calls[0].proof.at != currentSource.call {
+			return fail("phase does not first consume its retained source call")
 		}
 		use, err := nativeproof.CheckTransitionContinuation(ctx, currentNative, step.use)
 		if err != nil {
@@ -110,22 +115,20 @@ func continueGlobalOperandCorrespondence(ctx context.Context, predecessor *globa
 			return nil, err
 		}
 		after, ok := native.BoundFor(predecessor.representation.image)
-		if !ok || after.Entry != before.Entry || !after.ConditionalRegion || len(after.Frames) != 0 || after.Thread.ContextChanged || len(after.Abstractions) != len(before.Abstractions) || len(after.PrimitiveEffects) != len(before.PrimitiveEffects)+1 {
+		if !ok || after.Entry != before.Entry || !after.ConditionalRegion || after.Thread.ContextChanged || len(after.Abstractions) != len(before.Abstractions) || len(after.PrimitiveEffects) != len(before.PrimitiveEffects)+1 {
 			return fail("phase has an unaccounted primitive, frame or context effect")
 		}
-		if err := proof.checkPhaseEffects(ctx, before, native, after, trace); err != nil {
+		account, err := proof.checkPhaseEffects(ctx, source, native, after)
+		if err != nil {
 			return nil, err
 		}
-		if err := proof.checkCurrentRepresentation(ctx, source, before, after); err != nil {
-			return nil, err
-		}
-		proof.phases = append(proof.phases, globalCorrespondencePhase{source, use, native})
+		account.work = meter.work
+		proof.phases = append(proof.phases, globalCorrespondencePhase{source: source, use: use, native: native, account: account})
 		currentSource, currentNative = source, native
 	}
 	// The final boundary is an actual unexecuted eight-byte load using the
 	// represented source pointer, not a caller-supplied endpoint value.
-	last, _ := currentNative.BoundFor(predecessor.representation.image)
-	if err := proof.checkLoadBoundary(currentSource, last); err != nil {
+	if err := proof.checkLoadBoundary(ctx, currentSource, currentNative); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -136,11 +139,11 @@ func continueGlobalOperandCorrespondence(ctx context.Context, predecessor *globa
 }
 
 func (p *globalRegionCorrespondence) equal(ctx context.Context, a, b br.Term) error {
-	witness, err := br.Prove(ctx, a, b, br.Limits{})
-	if err != nil {
+	account := globalFunctionCorrespondence{antecedent: p.root.account.antecedent}
+	if err := account.equal(ctx, a, b); err != nil {
 		return err
 	}
-	p.equalities = append(p.equalities, witness)
+	p.equalities = append(p.equalities, account.equalities...)
 	return nil
 }
 
@@ -151,15 +154,6 @@ func (p *globalRegionCorrespondence) constant(ctx context.Context, actual br.Ter
 		return err
 	}
 	return p.equal(ctx, actual, want)
-}
-
-func (p *globalRegionCorrespondence) address(global *ssa.Global) (uint64, bool) {
-	for _, binding := range p.root.representation.globals {
-		if binding.global == global {
-			return binding.address, true
-		}
-	}
-	return 0, false
 }
 
 func (p *globalRegionCorrespondence) checkBooleanUse(ctx context.Context, source *sourceOperandPrefix, predecessor nativeproof.TransitionCertificate, before nativeproof.TransitionBound, use nativeproof.TransitionCertificate, after nativeproof.TransitionBound, application regionCallApplication) error {
@@ -232,21 +226,29 @@ func (p *globalRegionCorrespondence) checkBooleanUse(ctx context.Context, source
 	if !atomicOK || atomic.Width != 8 || atomic.ID != before.Boundary.ID || atomic.ReadAccess != len(before.Accesses) || atomic.WriteAccess != len(before.Accesses)+1 {
 		return fail("read/write cycle lacks its retained indivisible ordering occurrence")
 	}
+	if application.proof == nil || len(application.proof.arguments) != 3 || application.proof.arguments[0].kind != regionPointer {
+		return fail("source atomic application lacks its actual pointer argument")
+	}
+	location := application.proof.arguments[0].location
+	current, currentOK := regionUint64(readRegionLocation(application.proof.initial, location, types.Typ[types.Uint64]))
+	updated, updatedOK := regionUint64(readRegionLocation(application.outcome.state, location, types.Typ[types.Uint64]))
+	if !currentOK || !updatedOK {
+		return fail("source atomic application has no exact before/after word")
+	}
 	for _, equality := range []struct {
 		actual br.Term
 		value  uint64
-	}{{atomic.Before, application.current}, {atomic.Compare, old}, {atomic.Replacement, replacement}, {atomic.After, application.value}} {
+	}{{atomic.Before, current}, {atomic.Compare, old}, {atomic.Replacement, replacement}, {atomic.After, updated}} {
 		if err := p.constant(ctx, equality.actual, equality.value); err != nil {
 			return err
 		}
 	}
-	g, ok := source.operands[0].location.object.site.(*ssa.Global)
-	address, represented := p.address(g)
-	if source.operands[0].kind != regionPointer || source.operands[0].location.object.kind != regionGlobal || len(source.operands[0].location.path) != 0 || !ok || !represented || !first.Image || !second.Image || first.ID != before.Boundary.ID || second.ID != first.ID || first.Kind != nativeproof.FrameRead || second.Kind != nativeproof.FrameWrite || first.Bytes != (nativeproof.RelativeSpan{Start: int64(address), End: int64(address + 8)}) || second.Bytes != first.Bytes {
+	footprint, represented := p.root.account.layout.locationFootprint(source.operands[0].location)
+	if source.operands[0].kind != regionPointer || !regionSameValue(source.operands[0], application.proof.arguments[0]) || !represented || footprint.Bytes.End-footprint.Bytes.Start != 8 || first.Image != footprint.Image || second.Image != footprint.Image || first.ID != before.Boundary.ID || second.ID != first.ID || first.Kind != nativeproof.FrameRead || second.Kind != nativeproof.FrameWrite || first.Bytes != footprint.Bytes || second.Bytes != first.Bytes {
 		return fail("atomic read/write occurrence differs from source pointer provenance")
 	}
 	boolean := uint64(0)
-	resultValue, known := regionBool(application.result)
+	resultValue, known := regionBool(application.outcome.value)
 	if !known {
 		return fail("source call has no established Boolean result")
 	}
@@ -256,135 +258,55 @@ func (p *globalRegionCorrespondence) checkBooleanUse(ctx context.Context, source
 	return p.constant(ctx, result, boolean)
 }
 
-func (p *globalRegionCorrespondence) checkPhaseEffects(ctx context.Context, before nativeproof.TransitionBound, native nativeproof.TransitionCertificate, after nativeproof.TransitionBound, source *regionEffectTrace) error {
-	if len(after.Accesses) < len(before.Accesses) {
-		return fmt.Errorf("global correspondence: predecessor accesses disappeared")
+// Recheck the whole cumulative effect inventory from the original arbitrary
+// native inputs. Inherited occurrences retain their identities and primitive
+// indices; no suffix projection can accidentally remap an indivisible group.
+func (p *globalRegionCorrespondence) checkPhaseEffects(ctx context.Context, source *sourceOperandPrefix, native nativeproof.TransitionCertificate, bound nativeproof.TransitionBound) (*globalFunctionCorrespondence, error) {
+	packet := source.checkedPacket()
+	if packet == nil {
+		return nil, fmt.Errorf("global correspondence: unchecked source phase")
 	}
-	accesses := after.Accesses[len(before.Accesses):]
-	for _, access := range accesses {
-		found := false
-		for _, occurrence := range after.Instructions {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if occurrence.ID != access.ID {
-				continue
-			}
-			if found {
-				return fmt.Errorf("global correspondence: ambiguous access occurrence")
-			}
-			found = true
-			if err := p.constant(ctx, occurrence.Guard, 1); err != nil {
-				return err
-			}
-		}
-		if !found {
-			return fmt.Errorf("global correspondence: access lacks its executed instruction")
-		}
+	if err := checkStoragePrefixBounds(bound, packet.trace); err != nil {
+		return nil, err
 	}
-	i := 0
-	for _, effect := range source.accesses {
+	previous := p.root.account
+	if len(p.phases) != 0 {
+		previous = p.phases[len(p.phases)-1].account
+	}
+	if len(packet.trace.accesses) > 65536-len(previous.accesses) || len(previous.traces) >= 256 {
+		return nil, fmt.Errorf("global correspondence: cumulative source effect bound exceeded")
+	}
+	occurrences := len(packet.trace.instructions)
+	for _, trace := range previous.traces {
 		if err := ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
-		address, represented := p.address(effect.global)
-		if !represented {
-			return fmt.Errorf("global correspondence: source effect is outside the fixed representation")
+		if len(trace.instructions) > 65536-occurrences {
+			return nil, fmt.Errorf("global correspondence: cumulative source occurrence bound exceeded")
 		}
-		kind := nativeproof.FrameRead
-		if effect.write {
-			kind = nativeproof.FrameWrite
-		}
-		matched := i < len(accesses) && accesses[i].Image && accesses[i].Kind == kind && accesses[i].Bytes == (nativeproof.RelativeSpan{Start: int64(address), End: int64(address + 8)})
-		if matched {
-			instruction, err := native.InstructionAt(ctx, accesses[i].ID)
-			if err != nil {
-				return err
-			}
-			matched = effect.locked == (instruction.Op == x86asm.CMPXCHG)
-		}
-		if !matched {
-			// A source ordinary read of already established live singleton storage
-			// is removable in this isolated grammar. No native access, write,
-			// locked occurrence or unknown source value is removed by this rule.
-			if !effect.write && !effect.locked {
-				continue
-			}
-			return fmt.Errorf("global correspondence: ordered read/write population differs")
-		}
-		if err := p.constant(ctx, accesses[i].Value, effect.value); err != nil {
-			return err
-		}
-		i++
+		occurrences += len(trace.instructions)
 	}
-	if i != len(accesses) {
-		return fmt.Errorf("global correspondence: native phase has extra accesses")
+	layout, err := checkStorageAuthority(ctx, source, bound, p.root.representation, storageProtectedFootprints(bound))
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	account := &globalFunctionCorrespondence{representation: layout.representation, layout: layout, antecedent: p.root.account.antecedent,
+		traces: append(slices.Clone(previous.traces), packet.trace), accesses: append(slices.Clone(previous.accesses), packet.trace.accesses...), limit: p.root.limit}
+	if err := checkStoragePrefixAccount(ctx, account, source, native, bound); err != nil {
+		return nil, err
+	}
+	return account, nil
 }
 
-func (p *globalRegionCorrespondence) checkCurrentRepresentation(ctx context.Context, source *sourceOperandPrefix, before, after nativeproof.TransitionBound) error {
-	b := br.NewBuilder(4096)
-	for _, binding := range p.root.representation.globals {
-		value := readRegionLocation(source.region.packet.observations[0].state, regionLocation{object: regionObject{kind: regionGlobal, site: binding.global}}, types.Typ[types.Uint64])
-		n, ok := regionUint64(value)
-		if !ok {
-			return fmt.Errorf("global correspondence: current source storage is unestablished")
-		}
-		word, err := globalNativeWord(ctx, b, after.Memory, binding.address)
-		if err != nil {
-			return err
-		}
-		if err := p.constant(ctx, word, n); err != nil {
-			return err
-		}
+func (p *globalRegionCorrespondence) checkLoadBoundary(ctx context.Context, source *sourceOperandPrefix, native nativeproof.TransitionCertificate) error {
+	bound, ok := native.BoundFor(p.root.representation.image)
+	if !ok || len(source.operands) != 1 || bound.Boundary.Instruction.Op != x86asm.MOV || bound.Boundary.Instruction.MemBytes != 8 {
+		return fmt.Errorf("global correspondence: final boundary is not an unexecuted word load")
 	}
-	current := make(map[nativeproof.TransitionLocation]nativeproof.TransitionByte, len(after.Memory))
-	for _, cell := range after.Memory {
-		current[cell.TransitionLocation] = cell
+	witnesses, err := checkStorageOperandBoundary(ctx, source, native, p.root.account.layout)
+	if err != nil {
+		return err
 	}
-	for _, old := range before.Memory {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		represented := false
-		for _, binding := range p.root.representation.globals {
-			represented = represented || old.Image && old.Offset >= int64(binding.address) && old.Offset < int64(binding.address+8)
-		}
-		if represented {
-			continue
-		}
-		now, found := current[old.TransitionLocation]
-		if !found || old.Pointer != now.Pointer || old.PointerLane != now.PointerLane {
-			return fmt.Errorf("global correspondence: unrelated current memory/provenance differs")
-		}
-		if err := p.equal(ctx, old.Value, now.Value); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (p *globalRegionCorrespondence) checkLoadBoundary(source *sourceOperandPrefix, native nativeproof.TransitionBound) error {
-	if len(source.operands) != 1 || source.operands[0].kind != regionPointer || source.operands[0].location.object.kind != regionGlobal || len(source.operands[0].location.path) != 0 {
-		return fmt.Errorf("global correspondence: final source operand has no exact global provenance")
-	}
-	g, ok := source.operands[0].location.object.site.(*ssa.Global)
-	address, represented := p.address(g)
-	i := native.Boundary.Instruction
-	memory, memoryOK := i.Args[1].(x86asm.Mem)
-	_, registerOK := i.Args[0].(x86asm.Reg)
-	if !ok || !represented || i.Op != x86asm.MOV || i.MemBytes != 8 || i.Mode != 64 || i.AddrSize != 64 || !memoryOK || !registerOK || memory.Base != x86asm.RIP || memory.Index != 0 || memory.Segment != 0 || i.Args[2] != nil || i.Args[3] != nil {
-		return fmt.Errorf("global correspondence: final native boundary is not the represented unexecuted load")
-	}
-	if native.Boundary.PC >= 1<<47 || uint64(i.Len) > (1<<47)-native.Boundary.PC {
-		return fmt.Errorf("global correspondence: final load instruction extent wraps")
-	}
-	next := int64(native.Boundary.PC + uint64(i.Len))
-	// The next PC is low canonical and displacement is a sign-extended int32.
-	// Their signed sum fits int64; range checking precedes conversion to uint64.
-	if memory.Disp < -(1<<31) || memory.Disp >= 1<<31 || next+memory.Disp < 0 || uint64(next+memory.Disp) != address {
-		return fmt.Errorf("global correspondence: final load uses another represented address")
-	}
+	p.equalities = append(p.equalities, witnesses...)
 	return nil
 }

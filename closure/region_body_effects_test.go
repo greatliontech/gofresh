@@ -99,7 +99,8 @@ func Run() {
 					t.Fatalf("phase %d: %+v", phase, trace.accesses)
 				}
 				for i, access := range trace.accesses[:tc.reads] {
-					if access.write || access.locked || access.value != uint64(7+2*phase) || access.invocation == (regionInvocation{}) || access.instruction.Parent() == root {
+					value, known := regionUint64(access.value)
+					if access.write || access.locked || !known || value != uint64(7+2*phase) || access.invocation == (regionInvocation{}) || access.instruction.Parent() == root {
 						t.Fatalf("phase %d read %d lost actual callee provenance/value: %+v", phase, i, access)
 					}
 				}
@@ -122,7 +123,8 @@ func Run() {
 				t.Fatalf("source completion omitted actual callee or root return: %+v", trace)
 			}
 			for _, access := range trace.accesses {
-				if access.write || access.value != 9 {
+				value, known := regionUint64(access.value)
+				if access.write || !known || value != 9 {
 					t.Fatalf("source completion lost current state: %+v", access)
 				}
 			}

@@ -318,6 +318,12 @@ func (p *proposer) rewrite(t Term) (Rule, Term, bool) {
 		if constant(y, mask(s.width)) || p.eq(x, y) {
 			return result(Algebra, tm(x))
 		}
+		if x.op == Concat && y.op == Constant {
+			low, high := x.args[0], x.args[1]
+			lo := p.make(BitAnd, low.sort, 0, tm(low), p.con(low.sort, y.imm&mask(low.sort.width)))
+			hi := p.make(BitAnd, high.sort, 0, tm(high), p.con(high.sort, y.imm>>low.sort.width))
+			return result(ConcatMask, p.make(Concat, s, 0, lo, hi))
+		}
 	case BitNot:
 		if x.op == BitNot {
 			return result(Algebra, tm(x.args[0]))

@@ -453,7 +453,12 @@ func assertPairedSource(t testing.TB, proof *globalRegionCorrespondence, intent 
 		value  uint64
 	}{{first, middle}, {second, final}} {
 		trace := proof.phases[i].source.region.packet.trace
-		if len(trace.calls) != 1 || assemblyReferenceBool(t, trace.calls[0].result) != want.result || trace.calls[0].value != want.value {
+		if len(trace.calls) != 1 {
+			t.Fatalf("phase %d lost its exact call occurrence", i)
+		}
+		location := regionLocation{object: regionObject{kind: regionGlobal, site: globals[0]}}
+		value, exact := regionUint64(readRegionLocation(trace.calls[0].outcome.state, location, types.Typ[types.Uint64]))
+		if assemblyReferenceBool(t, trace.calls[0].outcome.value) != want.result || !exact || value != want.value {
 			t.Fatalf("phase %d differs from independent intent", i)
 		}
 		lockedReads, lockedWrites := 0, 0
@@ -538,7 +543,7 @@ func checkPairedRefusals(t *testing.T, source computationSource, root *ssa.Funct
 		changed := pairedNativeImage(t, addresses, intent, dataBase, payload, "extra-write")
 		base := pairedOperandProof(t, source, root, calls, globals, addresses, changed)
 		proof, err := continueGlobalOperandCorrespondence(t.Context(), base, pairedSteps(t, changed, calls), refs)
-		if proof != nil || err == nil || !strings.Contains(err.Error(), "read/write population") {
+		if proof != nil || err == nil || !strings.Contains(err.Error(), "ordered source/native effects differ") {
 			t.Fatalf("extra native effect: %v", err)
 		}
 	})
@@ -556,7 +561,7 @@ func checkPairedRefusals(t *testing.T, source computationSource, root *ssa.Funct
 		changed := pairedNativeImage(t, addresses, intent, dataBase, payload, "wrong-second-target")
 		base := pairedOperandProof(t, source, root, calls, globals, addresses, changed)
 		proof, err := continueGlobalOperandCorrespondence(t.Context(), base, pairedSteps(t, changed, calls), refs)
-		if proof != nil || err == nil || !strings.Contains(err.Error(), "source pointer provenance") {
+		if proof != nil || err == nil || !strings.Contains(err.Error(), "native operand has another storage origin or subobject") {
 			t.Fatalf("wrong current pointer target: %v", err)
 		}
 	})

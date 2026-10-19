@@ -2,26 +2,11 @@ package closure
 
 import (
 	"context"
-	"go/token"
 	"go/types"
+	"slices"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
-
-// regionPrefixEffects is a finite, ordered effect relation produced alongside
-// the existing transfers. Its grammar is deliberately restricted to straight-line
-// uint64 global loads/stores and debug markers. Calls (even empty ones), implicit
-// allocations, branches and unknown effects cannot disappear into endpoint values.
-type regionPrefixEffects struct {
-	events []regionPrefixAccess
-}
-
-type regionPrefixAccess struct {
-	instruction ssa.Instruction
-	global      *ssa.Global
-	write       bool
-	value       regionValue
-}
 
 type sourceOperandPrefix struct {
 	region   *sourceRegion
@@ -30,29 +15,106 @@ type sourceOperandPrefix struct {
 	operands []regionValue
 	prior    *sourceOperandPrefix
 	binder   *selectedSourceBinder
+	checker  *regionKernel
+}
+
+func regionCallBoundaryOperand(call *ssa.Call) ssa.Value {
+	if len(call.Call.Args) != 0 {
+		return call.Call.Args[0]
+	}
+	return call.Call.Value
+}
+
+// The retained interpreter belongs to this exact checked source cut. A heap
+// projection or a checker for another cut is not a continuation capability.
+func (p *sourceOperandPrefix) checkedPacket() *checkedRegion {
+	if p == nil || p.checker == nil || p.region == nil || p.region.packet == nil || p.binder == nil || p.binder.source.prog == nil {
+		return nil
+	}
+	packet := checkedSourceEffectPacket(p.region, p.checker)
+	if packet == nil || p.checker.fullReturns || regionInstruction(packet.input.use.at) != p.call || p.binder.source.prog.Prog != packet.input.owner {
+		return nil
+	}
+	return packet
+}
+
+func checkedSourceEffectPacket(region *sourceRegion, checker *regionKernel) *checkedRegion {
+	if region == nil || region.packet == nil || checker == nil {
+		return nil
+	}
+	packet, input := region.packet, checker.input
+	if packet.rules != regionRules || packet.trace == nil || checker.trace != packet.trace || input.owner != packet.input.owner || input.root != packet.input.root || input.entry != packet.input.entry || input.use != packet.input.use || region.root.function != input.root {
+		return nil
+	}
+	return packet
+}
+
+// liveAllocation derives a retained singleton from the checked allocation event,
+// context and current heap. A copied heap or allocation-shaped identity supplies
+// none of this evidence. tick charges the consuming operation's work account.
+// Continuations also seed their occurrence guard from this same predecessor chain.
+func (p *sourceOperandPrefix) liveAllocation(object regionObject, tick func() error) (regionEffectAllocation, bool, error) {
+	packet := p.checkedPacket()
+	if packet == nil {
+		return regionEffectAllocation{}, false, nil
+	}
+	return liveRegionAllocation(packet, p.checker, p.prior, object, tick)
+}
+
+// Both operand cuts and completed returns use the same checked current heap and
+// occurrence chain. A completed return retains resident contents; this lookup
+// neither ends a lifetime nor supplies an escape or native-byte relation.
+func liveRegionAllocation(packet *checkedRegion, checker *regionKernel, prior *sourceOperandPrefix, object regionObject, tick func() error) (regionEffectAllocation, bool, error) {
+	if object.kind != regionAllocation || !checker.singleton(object) {
+		return regionEffectAllocation{}, false, nil
+	}
+	if len(packet.observations) != 1 {
+		return regionEffectAllocation{}, false, nil
+	}
+	if _, present := packet.observations[0].state.memory[object]; !present {
+		return regionEffectAllocation{}, false, nil
+	}
+	for {
+		if err := tick(); err != nil {
+			return regionEffectAllocation{}, false, err
+		}
+		trace := packet.trace
+		for _, allocation := range trace.allocations {
+			if err := tick(); err != nil {
+				return regionEffectAllocation{}, false, err
+			}
+			if allocation.location.object == object && trace.seen[regionEffectOccurrence{allocation.instruction, allocation.invocation}] {
+				return allocation, true, nil
+			}
+		}
+		if prior == nil {
+			break
+		}
+		packet = prior.checkedPacket()
+		if packet == nil {
+			return regionEffectAllocation{}, false, nil
+		}
+		prior = prior.prior
+	}
+	return regionEffectAllocation{}, false, nil
 }
 
 // checkSourceOperandPrefix owns the complete selected root but checks execution
 // only up to the actual call's operand boundary. The empty initial heap denotes
-// arbitrary prior values; no initialization or expected output enters the proof.
+// arbitrary prior global values; local initialization comes from actual checked
+// allocations, never a caller's proposed heap or expected output.
 // Unused pointer parameters remain arbitrary and supply no storage or effects.
 func checkSourceOperandPrefix(ctx context.Context, source computationSource, root *ssa.Function, call *ssa.Call, limits registrationLimits) (*sourceOperandPrefix, error) {
-	if ctx == nil || !limits.region.valid() || root == nil || call == nil || len(root.Blocks) == 0 || root.Blocks[0] == nil || len(root.Blocks[0].Instrs) > limits.region.nodes || len(root.Params) > limits.region.nodes || len(root.FreeVars) != 0 || call.Parent() != root || call.Block() != root.Blocks[0] || call.Call.IsInvoke() || call.Call.StaticCallee() == nil || len(call.Call.Args) == 0 || len(call.Call.Args) > limits.region.nodes {
+	if ctx == nil || !limits.region.valid() || root == nil || call == nil || len(root.Blocks) == 0 || root.Blocks[0] == nil || len(root.Blocks[0].Instrs) > limits.region.nodes || len(root.Params) > limits.region.nodes || len(root.FreeVars) != 0 || call.Parent() != root || call.Block() == nil || call.Call.IsInvoke() || call.Call.StaticCallee() == nil || len(call.Call.Args) > limits.region.nodes {
 		return nil, regionError("operand prefix requires a concrete root and actual direct call boundary")
 	}
-	at := -1
-	for i, ins := range root.Blocks[0].Instrs {
-		if ins == call {
-			at = i
-			break
-		}
-	}
+	at := slices.Index(call.Block().Instrs, ssa.Instruction(call))
 	if at < 0 {
 		return nil, regionError("operand call is not in the actual root")
 	}
 	in := regionInput{owner: root.Prog, root: root, entry: regionPoint{root.Blocks[0], 0},
-		use:      regionUse{at: regionPoint{root.Blocks[0], at}, operand: call.Call.Args[0]},
-		premises: []string{"immutable selected typed owner; isolated prefix; ordinary live typed global storage; omitted native prefix and actual use remain open"}}
+		use:      regionUse{at: regionPoint{call.Block(), at}, operand: regionCallBoundaryOperand(call)},
+		premises: []string{"immutable selected typed owner; isolated prefix; ordinary live typed storage; omitted native prefix and actual use remain open"}}
 	meter := &regionMeter{ctx: ctx, limits: limits.region}
 	for _, parameter := range root.Params {
 		if err := checkUnusedSourcePointer(root, parameter, meter.tick); err != nil {
@@ -66,7 +128,11 @@ func checkSourceOperandPrefix(ctx context.Context, source computationSource, roo
 	newKernel := func(input regionInput) (*regionKernel, error) {
 		session := newRegionCallSession(ctx, input, limits.region)
 		session.meter = meter
-		return newRegionContextKernel(input, session, regionInvocation{}, false)
+		k, err := newRegionContextKernel(input, session, regionInvocation{}, false)
+		if err == nil {
+			k.trace = &regionEffectTrace{seen: map[regionEffectOccurrence]bool{}}
+		}
+		return k, err
 	}
 	proposer, err := newKernel(in)
 	if err != nil {
@@ -84,15 +150,11 @@ func checkSourceOperandPrefix(ctx context.Context, source computationSource, roo
 	if err != nil {
 		return nil, err
 	}
-	if k.cycle[in.entry.block] || len(p.entries) != 1 || len(p.entries[in.entry.block]) != 1 {
-		return nil, regionError("operand prefix requires one straight-line entry state")
-	}
-	k.prefix = &regionPrefixEffects{}
 	packet, err := checkRegionKernel(k, p)
 	if err != nil {
 		return nil, err
 	}
-	if len(packet.observations) != 1 || len(packet.calls) != 0 {
+	if len(packet.observations) != 1 {
 		return nil, regionError("operand prefix has unaccounted paths or calls")
 	}
 	b, err := newSelectedSourceBinder(ctx, source, root, limits.source)
@@ -120,7 +182,7 @@ func checkSourceOperandPrefix(ctx context.Context, source computationSource, roo
 	}
 	packet.usage = *meter
 	packet.usage.ctx = nil
-	return &sourceOperandPrefix{region: selected, callee: callee, call: call, operands: operands, binder: b}, nil
+	return &sourceOperandPrefix{region: selected, callee: callee, call: call, operands: operands, binder: b, checker: k}, nil
 }
 
 // checkUnusedSourcePointer checks the actual whole-root operand inventory, not
@@ -145,45 +207,5 @@ func checkUnusedSourcePointer(root *ssa.Function, parameter *ssa.Parameter, tick
 			}
 		}
 	}
-	return nil
-}
-
-// prefixTransfer records operands from the same pre-state that transfer consumes.
-// No event is evidence unless that transfer and the complete region check succeed.
-func (k *regionKernel) prefixTransfer(s regionState, ins ssa.Instruction) error {
-	if err := k.meter.tick(); err != nil {
-		return err
-	}
-	var address ssa.Value
-	e := regionPrefixAccess{instruction: ins}
-	switch x := ins.(type) {
-	case *ssa.DebugRef:
-		return nil
-	case *ssa.Store:
-		address, e.write, e.value = x.Addr, true, k.value(s, x.Val)
-	case *ssa.UnOp:
-		if x.Op != token.MUL {
-			return regionError("operand prefix supports only typed loads and stores")
-		}
-		address = x.X
-	default:
-		return regionError("operand prefix has an intervening operation or call")
-	}
-	p := k.value(s, address)
-	g, err := k.effectGlobal(p)
-	if err != nil {
-		return err
-	}
-	if g.Pkg != k.input.root.Pkg {
-		return regionError("operand prefix access is not exact uint64 global storage")
-	}
-	e.global = g
-	if !e.write {
-		e.value = readRegionLocation(s, p.location, types.Typ[types.Uint64])
-	}
-	if len(k.prefix.events) >= k.meter.limits.nodes {
-		return regionError("operand prefix effect budget exhausted")
-	}
-	k.prefix.events = append(k.prefix.events, e)
 	return nil
 }

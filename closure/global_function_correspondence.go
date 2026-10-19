@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/token"
 	"go/types"
+	"maps"
 	"slices"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
@@ -13,7 +15,7 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-const globalFunctionRules = "gofresh/global-function-correspondence@2;" + regionRules + ";" + nativeproof.TransitionRules + ";" + br.RuleModel
+const globalFunctionRules = "gofresh/global-function-correspondence@3;" + regionRules + ";" + nativeproof.TransitionRules + ";" + br.RuleModel
 
 // A mapping names the actual typed parameter and its incoming full native word.
 // The present effect-only grammar admits only unused pointer parameters. A word
@@ -24,7 +26,7 @@ type globalFunctionArgument struct {
 }
 
 type globalFunctionInput struct {
-	global         *ssa.Global
+	location       regionLocation
 	source, native br.Term
 }
 
@@ -34,6 +36,12 @@ type globalFunctionAtomic struct {
 }
 
 type globalFunctionAccess struct{ source, native int }
+
+type storagePaddingAccess struct {
+	native   int
+	location nativeproof.TransitionLocation
+	value    br.Term
+}
 
 // globalFunctionCorrespondence retains BOTH complete computations. In particular
 // its native theorem starts at the supplied callee entry, never at the operand
@@ -46,7 +54,8 @@ type globalFunctionCorrespondence struct {
 	rules                string
 	source               *sourceReturnCompletion
 	native               nativeproof.TransitionReturnCertificate
-	representation       globalRepresentation
+	representation       storageRepresentation
+	layout               *storageLayout
 	arguments            []globalFunctionArgument
 	inputs               []globalFunctionInput
 	argumentInputs       []br.Term
@@ -61,6 +70,8 @@ type globalFunctionCorrespondence struct {
 	inactivePrimitives   []int
 	inactiveAbstractions []int
 	eliminated           []int
+	materialized         []int
+	padding              []storagePaddingAccess
 	equalities           []br.Witness
 	open                 computationCorrespondenceObligations
 	work, limit          int
@@ -70,10 +81,13 @@ type globalFunctionCorrespondence struct {
 // Scalar results of internal calls need not match register-by-register: their
 // actual source/native uses are included in the complete checked effects and
 // exceptional paths. No expected output or expected atomic inventory is input.
-func checkGlobalFunctionCorrespondence(ctx context.Context, source computationSource, root *ssa.Function, image *nativeproof.Image, entry uint64, completed *sourceReturnCompletion, native nativeproof.TransitionReturnCertificate, rho globalRepresentation, arguments []globalFunctionArgument, options ...globalCorrespondenceLimits) (*globalFunctionCorrespondence, error) {
+func checkGlobalFunctionCorrespondence(ctx context.Context, source computationSource, root *ssa.Function, image *nativeproof.Image, entry uint64, completed *sourceReturnCompletion, native nativeproof.TransitionReturnCertificate, rho storageRepresentation, arguments []globalFunctionArgument, options ...globalCorrespondenceLimits) (*globalFunctionCorrespondence, error) {
 	fail := func(s string) (*globalFunctionCorrespondence, error) { return nil, globalFunctionError(s) }
 	if ctx == nil || source.prog == nil || root == nil || image == nil || rho.image == nil || rho.source != source.prog || completed == nil || completed.region == nil || completed.region.packet == nil || completed.prior == nil || completed.returned == nil {
 		return fail("missing owned source completion, image or representation")
+	}
+	if len(rho.bindings) > storageMaxBindings {
+		return fail("storage binding budget exceeded")
 	}
 	limit := 2_000_000
 	if len(options) > 1 {
@@ -87,6 +101,7 @@ func checkGlobalFunctionCorrespondence(ctx context.Context, source computationSo
 	}
 	ownedImage, representedImage := *image, *rho.image
 	rho.image = &representedImage
+	rho.bindings = slices.Clone(rho.bindings)
 	arguments = slices.Clone(arguments)
 	meter := &correspondenceContext{Context: ctx, limit: limit}
 	ctx = meter
@@ -99,6 +114,14 @@ func checkGlobalFunctionCorrespondence(ctx context.Context, source computationSo
 	}
 	p := &globalFunctionCorrespondence{rules: globalFunctionRules, source: completed, native: native, representation: rho, arguments: arguments, antecedent: b.Prefix.EntryPredicate,
 		open: computationCorrespondenceObligations{true, true, true, true, true}, limit: limit}
+	view := b.Prefix
+	view.Instructions, view.Accesses, view.Memory = b.Instructions, b.Accesses, b.State.Memory
+	var err error
+	p.layout, err = checkStorageAuthority(ctx, completed, view, rho, storageProtectedFootprints(view))
+	if err != nil {
+		return nil, err
+	}
+	p.representation = p.layout.representation
 	if err := p.collectSource(ctx, source, root); err != nil {
 		return nil, err
 	}
@@ -106,7 +129,7 @@ func checkGlobalFunctionCorrespondence(ctx context.Context, source computationSo
 	if err := p.checkInputs(ctx, builder, source, root, b.Prefix); err != nil {
 		return nil, err
 	}
-	if err := p.checkEffects(ctx, b); err != nil {
+	if err := p.checkEffects(ctx, view); err != nil {
 		return nil, fmt.Errorf("complete effects: %w", err)
 	}
 	if err := p.checkFinal(ctx, builder, b); err != nil {
@@ -120,15 +143,6 @@ func checkGlobalFunctionCorrespondence(ctx context.Context, source computationSo
 }
 
 func globalFunctionError(s string) error { return fmt.Errorf("global function correspondence: %s", s) }
-
-func (p *globalFunctionCorrespondence) address(g *ssa.Global) (uint64, bool) {
-	for _, binding := range p.representation.globals {
-		if binding.global == g {
-			return binding.address, true
-		}
-	}
-	return 0, false
-}
 
 // Each opaque continuation was checked from precisely its prior current state.
 // Collecting oldest first preserves phase order without borrowing native premises
@@ -152,19 +166,10 @@ func (p *globalFunctionCorrespondence) collectSource(ctx context.Context, source
 	}
 	slices.Reverse(chain)
 	first := chain[0].region.packet
-	if first.prefix == nil || first.trace != nil || first.input.entry != (regionPoint{root.Blocks[0], 0}) || len(first.input.initial.memory) != 0 || len(first.input.initial.values) != 0 {
+	if first.trace == nil || first.input.entry != (regionPoint{root.Blocks[0], 0}) || len(first.input.initial.memory) != 0 || len(first.input.initial.values) != 0 {
 		return globalFunctionError("source does not start at the arbitrary-state root prefix")
 	}
-	for _, event := range first.prefix.events {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		value, ok := regionUint64(event.value)
-		if !ok {
-			return globalFunctionError("prefix effect has no established word")
-		}
-		p.accesses = append(p.accesses, regionEffectAccess{instruction: event.instruction, global: event.global, write: event.write, value: value})
-	}
+	p.traces = append(p.traces, first.trace)
 	for _, phase := range chain[1:] {
 		if phase.region.packet.trace == nil {
 			return globalFunctionError("missing source continuation trace")
@@ -189,62 +194,11 @@ func (p *globalFunctionCorrespondence) collectSource(ctx context.Context, source
 // predicate mentions it. Consequently each arbitrary source valuation has the
 // same nonempty native administrative domain established by the native checker.
 func (p *globalFunctionCorrespondence) checkInputs(ctx context.Context, builder *br.Builder, source computationSource, root *ssa.Function, b nativeproof.TransitionBound) error {
-	p.paired = p.antecedent
+	if err := p.checkStorageInputs(ctx, builder, b); err != nil {
+		return err
+	}
 	scope := br.NewScope()
 	variables := map[br.Term]bool{}
-	for i, binding := range p.representation.globals {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		g := binding.global
-		if g == nil || g.Pkg == nil || g.Pkg.Prog != source.prog.Prog || source.prog.Prog.Package(g.Pkg.Pkg) != g.Pkg || g.Pkg.Members[g.Name()] != g || binding.address > (1<<47)-8 {
-			return globalFunctionError("foreign global or invalid represented extent")
-		}
-		typ, ok := g.Type().Underlying().(*types.Pointer)
-		if !ok || !types.Identical(typ.Elem(), types.Typ[types.Uint64]) || p.source.region.root.pkg.TypesSizes.Sizeof(g.Type()) != 8 || p.source.region.root.pkg.TypesSizes.Sizeof(typ.Elem()) != 8 {
-			return globalFunctionError("representation is not selected 64-bit uint64 storage")
-		}
-		for _, old := range p.representation.globals[:i] {
-			if old.global == g || binding.address < old.address+8 && old.address < binding.address+8 {
-				return globalFunctionError("represented source objects or native extents alias")
-			}
-		}
-		for _, bound := range b.Interface.EntryWordUpperBounds {
-			if binding.address < bound.Address+8 && bound.Address < binding.address+8 {
-				return globalFunctionError("administrative entry predicate constrains represented source storage")
-			}
-		}
-		for lane := range 8 {
-			var found bool
-			for _, cell := range b.InitialMemory {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				if !cell.Image || cell.Offset != int64(binding.address)+int64(lane) {
-					continue
-				}
-				if found || cell.Pointer != nil || cell.Value.Sort() != br.Bits(8) || cell.Value.View().Op != br.Variable || variables[cell.Value] {
-					return globalFunctionError("represented initial bytes are not independent arbitrary inputs")
-				}
-				found, variables[cell.Value] = true, true
-			}
-			if !found {
-				return globalFunctionError("missing represented initial byte")
-			}
-		}
-		initial, err := globalNativeWord(ctx, builder, b.InitialMemory, binding.address)
-		if err != nil {
-			return err
-		}
-		input, err := builder.Input(br.Bits(64), scope, uint64(i))
-		if err != nil {
-			return err
-		}
-		p.inputs = append(p.inputs, globalFunctionInput{g, input, initial})
-		if err := p.pair(builder, input, initial); err != nil {
-			return err
-		}
-	}
 	if len(p.arguments) != len(root.Params) {
 		return globalFunctionError("typed argument mapping is incomplete")
 	}
@@ -264,13 +218,86 @@ func (p *globalFunctionCorrespondence) checkInputs(ctx context.Context, builder 
 		}
 		registers[argument.register] = true
 		variables[b.InitialRegisters[argument.register]] = true
-		input, err := builder.Input(br.Bits(64), scope, uint64(len(p.inputs)+i))
+		input, err := builder.Input(br.Bits(64), scope, uint64(i))
 		if err != nil {
 			return err
 		}
 		p.argumentInputs = append(p.argumentInputs, input)
 		if err := p.pair(builder, input, b.InitialRegisters[argument.register]); err != nil {
 			return err
+		}
+	}
+	return globalFunctionIndependent(ctx, p.antecedent, variables)
+}
+
+func (p *globalFunctionCorrespondence) checkStorageInputs(ctx context.Context, builder *br.Builder, b nativeproof.TransitionBound) error {
+	p.paired = p.antecedent
+	scope := br.NewScope()
+	variables := map[br.Term]bool{}
+	for _, binding := range p.representation.bindings {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if binding.object.kind != regionGlobal {
+			continue
+		}
+		footprint, _ := p.layout.objectFootprint(binding.object)
+		for _, bound := range b.Interface.EntryWordUpperBounds {
+			if footprint.overlaps(storageFootprint{Image: true, Bytes: nativeproof.RelativeSpan{Start: int64(bound.Address), End: int64(bound.Address + 8)}}) {
+				return globalFunctionError("administrative entry predicate constrains represented source storage")
+			}
+		}
+		for offset := footprint.Bytes.Start; offset < footprint.Bytes.End; offset++ {
+			var found bool
+			for _, cell := range b.InitialMemory {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if !cell.Image || cell.Offset != offset {
+					continue
+				}
+				if found || cell.Pointer != nil || cell.Value.Sort() != br.Bits(8) || cell.Value.View().Op != br.Variable || variables[cell.Value] {
+					return globalFunctionError("represented initial bytes are not independent arbitrary inputs")
+				}
+				found, variables[cell.Value] = true, true
+			}
+			if !found {
+				return globalFunctionError("missing represented initial byte")
+			}
+		}
+		leaves, err := p.layout.typedLeaves(ctx, binding.object)
+		if err != nil {
+			return err
+		}
+		for _, leaf := range leaves {
+			basic, ok := leaf.typ.Underlying().(*types.Basic)
+			if !ok || basic.Info()&(types.IsBoolean|types.IsInteger) == 0 {
+				return globalFunctionError("unsupported typed global input")
+			}
+			width := int(leaf.footprint.Bytes.End - leaf.footprint.Bytes.Start)
+			initial, err := storageNativeWord(ctx, builder, b.InitialMemory, nativeproof.TransitionLocation{Image: true, Offset: leaf.footprint.Bytes.Start}, width)
+			if err != nil {
+				return err
+			}
+			sort := br.Bits(width * 8)
+			if basic.Info()&types.IsBoolean != 0 {
+				sort = br.Bool()
+			}
+			input, err := builder.Input(sort, scope, uint64(len(p.inputs)))
+			if err != nil {
+				return err
+			}
+			p.inputs = append(p.inputs, globalFunctionInput{leaf.location, input, initial})
+			storage := input
+			if sort == br.Bool() {
+				storage, err = builder.Make(br.BoolToBits, br.Bits(width*8), 0, input)
+				if err != nil {
+					return err
+				}
+			}
+			if err := p.pair(builder, storage, initial); err != nil {
+				return err
+			}
 		}
 	}
 	return globalFunctionIndependent(ctx, p.antecedent, variables)
@@ -432,7 +459,7 @@ func globalFunctionNativeGroup(effect nativeproof.PrimitiveEffect) (globalFuncti
 	return globalFunctionNativeAtomic{}, false
 }
 
-func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativeproof.TransitionReturnBound) error {
+func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativeproof.TransitionBound) error {
 	guards := map[nativeproof.TransitionOccurrenceID]br.Term{}
 	for _, ins := range b.Instructions {
 		if err := ctx.Err(); err != nil {
@@ -444,7 +471,7 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 		guards[ins.ID] = ins.Guard
 	}
 	nativeGroups := map[int]globalFunctionNativeAtomic{}
-	for primitiveIndex, effect := range b.Prefix.PrimitiveEffects {
+	for primitiveIndex, effect := range b.PrimitiveEffects {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -489,7 +516,7 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 			return err
 		}
 	}
-	for index, abstraction := range b.Prefix.Abstractions {
+	for index, abstraction := range b.Abstractions {
 		guard, found := guards[abstraction.ID]
 		if !found {
 			return globalFunctionError("abstraction has no actual instruction guard")
@@ -519,7 +546,7 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 				found = found || call.proof == group.application
 			}
 			read, write := trace.accesses[a.ReadAccess], trace.accesses[a.WriteAccess]
-			if !found || read.instruction != group.application.at || write.instruction != read.instruction || read.invocation != write.invocation || read.global != write.global || read.write || !write.write || !read.locked || !write.locked {
+			if !found || read.instruction != group.application.at || write.instruction != read.instruction || read.invocation != write.invocation || read.location.object != write.location.object || !slices.Equal(read.location.path, write.location.path) || read.write || !write.write || !read.locked || !write.locked {
 				return globalFunctionError("source atomic grouping lost actual call/context/read-write provenance")
 			}
 			for _, index := range []int{base + a.ReadAccess, base + a.WriteAccess} {
@@ -560,20 +587,869 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 		}
 		observable = append(observable, index)
 	}
-	known := map[*ssa.Global]uint64{}
-	matched := map[int]int{}
-	next := 0
-	for i, source := range p.accesses {
+	return p.matchStorageEffects(ctx, b.Accesses, b.InitialMemory, observable, sourceGroups, nativeGroups)
+}
+
+func (p *globalFunctionCorrespondence) administrativeAccess(b nativeproof.TransitionBound, access nativeproof.TransitionAccess) bool {
+	if p.layout.classifyAccess(storageFootprint{Image: access.Image, Bytes: access.Bytes}) != storageDisjoint {
+		return false
+	}
+	if !access.Image {
+		if access.Kind == nativeproof.FrameReturnRead && access.Bytes == (nativeproof.RelativeSpan{Start: 0, End: 8}) && access.ID == b.Boundary.ID && access.Context == 0 {
+			return true
+		}
+		frame := b.Interface.PrivateFrame
+		return frame != nil && frame.Bytes.Start < frame.Bytes.End && frame.Bytes.End <= 0 && access.Bytes.Start >= frame.Bytes.Start && access.Bytes.End <= frame.Bytes.End && access.Bytes.Start < access.Bytes.End
+	}
+	if access.Kind != nativeproof.FrameRead {
+		return false
+	}
+	for _, bound := range b.Interface.EntryWordUpperBounds {
+		if access.Bytes.Start >= int64(bound.Address) && access.Bytes.End <= int64(bound.Address+8) && access.Bytes.Start < access.Bytes.End {
+			return true
+		}
+	}
+	return false
+}
+
+// storageEffectBytes uses the canonical typed leaves, never the aggregate's
+// padding. The event's value is the value at this occurrence, not its endpoint.
+func (p *globalFunctionCorrespondence) storageEffectBytes(ctx context.Context, access regionEffectAccess) (storageFootprint, map[nativeproof.TransitionLocation]byte, error) {
+	return p.storageValueBytes(ctx, access, false)
+}
+
+// A language initializer may retain known leaves beside opaque scalar leaves.
+// partial preserves only those known bytes; actual effect projection always
+// requires every leaf and never uses this weaker initialization-only view.
+func (p *globalFunctionCorrespondence) storageValueBytes(ctx context.Context, access regionEffectAccess, partial bool) (storageFootprint, map[nativeproof.TransitionLocation]byte, error) {
+	footprint, ok := p.layout.locationFootprint(access.location)
+	if !ok {
+		return storageFootprint{}, nil, globalFunctionError("source access leaves fixed storage")
+	}
+	meter := storageLayoutMeter{ctx: ctx}
+	_, sizes, err := meter.objectType(p.representation.source, access.location.object)
+	if err != nil {
+		return storageFootprint{}, nil, err
+	}
+	leaves, err := p.layout.typedLeaves(ctx, access.location.object)
+	if err != nil {
+		return storageFootprint{}, nil, err
+	}
+	lanes := map[nativeproof.TransitionLocation]byte{}
+leavesLoop:
+	for _, leaf := range leaves {
+		if err := ctx.Err(); err != nil {
+			return storageFootprint{}, nil, err
+		}
+		if len(leaf.location.path) < len(access.location.path) || !slices.Equal(leaf.location.path[:len(access.location.path)], access.location.path) {
+			continue
+		}
+		value := access.value
+		for _, step := range leaf.location.path[len(access.location.path):] {
+			if value.kind != regionAggregate || step.index < 0 || step.index >= int64(len(value.elements)) {
+				if partial {
+					continue leavesLoop
+				}
+				return storageFootprint{}, nil, globalFunctionError("unknown aggregate effect")
+			}
+			value = value.elements[step.index]
+		}
+		if !types.Identical(value.typ, leaf.typ) {
+			return storageFootprint{}, nil, globalFunctionError("effect type differs from canonical storage")
+		}
+		bits, width, ok := storageScalarBits(value, sizes)
+		if !ok && partial {
+			continue
+		}
+		if !ok || int64(width) != leaf.footprint.Bytes.End-leaf.footprint.Bytes.Start {
+			return storageFootprint{}, nil, globalFunctionError("effect lacks selected typed bits")
+		}
+		for lane := range width {
+			lanes[nativeproof.TransitionLocation{Image: footprint.Image, Offset: leaf.footprint.Bytes.Start + int64(lane)}] = byte(bits >> (8 * lane))
+		}
+	}
+	if len(lanes) == 0 && !partial {
+		return storageFootprint{}, nil, globalFunctionError("effect has no typed leaves")
+	}
+	return footprint, lanes, nil
+}
+
+// storageWriteRunAdjacent preserves checked call and allocation frontiers between
+// writes. Instruction/context identity, rather than source position or declaration
+// name, selects the actual interval; an effect-free call still ends a write run.
+// Reference effects attached to a call retain that barrier at either endpoint.
+func (p *globalFunctionCorrespondence) storageWriteRunAdjacent(ctx context.Context, a, b regionEffectAccess) bool {
+	if _, call := a.instruction.(*ssa.Call); call {
+		return false
+	}
+	if _, call := b.instruction.(*ssa.Call); call {
+		return false
+	}
+	if a.invocation != b.invocation {
+		return false
+	}
+	active := false
+	for _, trace := range p.traces {
+		for _, occurrence := range trace.instructions {
+			if ctx.Err() != nil {
+				return false
+			}
+			if occurrence.instruction == a.instruction && occurrence.invocation == a.invocation {
+				active = true
+				continue
+			}
+			if !active {
+				continue
+			}
+			if occurrence.instruction == b.instruction && occurrence.invocation == b.invocation {
+				return true
+			}
+			switch occurrence.instruction.(type) {
+			case *ssa.Call, *ssa.Alloc:
+				return false
+			}
+		}
+	}
+	return a.instruction == b.instruction
+}
+
+// isolatedStorage checks actual SSA pointer uses all the way through substituted
+// ordinary calls and their actual pointer results. A typed address cannot
+// disappear through a store, opaque call, escaping return, conversion or interface
+// construction. Values read through it still have
+// their checked source uses, outcomes and any resulting represented effects.
+func (p *globalFunctionCorrespondence) isolatedStorage(ctx context.Context, object regionObject) (bool, error) {
+	allocation, ok := object.site.(*ssa.Alloc)
+	if object.kind != regionAllocation || !ok {
+		return false, nil
+	}
+	seen := map[ssa.Value]bool{}
+	var visit func(ssa.Value) (bool, error)
+	visit = func(pointer ssa.Value) (bool, error) {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if seen[pointer] {
+			return true, nil
+		}
+		seen[pointer] = true
+		refs := pointer.Referrers()
+		if refs == nil {
+			return false, nil
+		}
+		for _, use := range *refs {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			switch x := use.(type) {
+			case *ssa.DebugRef:
+			case *ssa.FieldAddr:
+				if safe, err := visit(x); !safe || err != nil {
+					return safe, err
+				}
+			case *ssa.IndexAddr:
+				if safe, err := visit(x); !safe || err != nil {
+					return safe, err
+				}
+			case *ssa.UnOp:
+				if x.Op != token.MUL || x.X != pointer {
+					return false, nil
+				}
+			case *ssa.Store:
+				if x.Addr != pointer || x.Val == pointer {
+					return false, nil
+				}
+			case *ssa.Call:
+				found := false
+				for _, trace := range p.traces {
+					for _, application := range trace.calls {
+						if err := ctx.Err(); err != nil {
+							return false, err
+						}
+						proof := application.proof
+						if proof.at != x || proof.reference != nil {
+							continue
+						}
+						for i, arg := range x.Call.Args {
+							if arg == pointer {
+								if i >= len(proof.target.Params) {
+									return false, nil
+								}
+								if safe, err := visit(proof.target.Params[i]); !safe || err != nil {
+									return safe, err
+								}
+								found = true
+							}
+						}
+					}
+				}
+				if !found {
+					return false, nil
+				}
+			case *ssa.Return:
+				// A source helper's pointer result stays internal only when its
+				// checked actual outcome identifies this object and every use of
+				// the caller's returned SSA value is nonescaping in turn.
+				found := false
+				for _, trace := range p.traces {
+					for _, application := range trace.calls {
+						if err := ctx.Err(); err != nil {
+							return false, err
+						}
+						proof := application.proof
+						if proof.reference != nil || proof.target != x.Parent() || len(x.Results) != 1 || x.Results[0] != pointer || application.outcome.value.kind != regionPointer || application.outcome.value.location.object != object {
+							continue
+						}
+						if safe, err := visit(proof.at); !safe || err != nil {
+							return safe, err
+						}
+						found = true
+					}
+				}
+				if !found {
+					return false, nil
+				}
+			default:
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+	return visit(allocation)
+}
+
+// isolatedAllocatedRead derives a source-only elimination premise from the
+// checked access and its actual preceding allocation occurrence. The caller
+// separately projects the read's known typed value and retains all checked
+// dependent uses and call outcomes. Native placement/lifetime authority is a
+// prerequisite, not inferred here. This premise supplies no native byte values.
+func (p *globalFunctionCorrespondence) isolatedAllocatedRead(ctx context.Context, index int) (bool, error) {
+	if index < 0 || index >= len(p.accesses) {
+		return false, globalFunctionError("invalid source read index")
+	}
+	access := p.accesses[index]
+	object := access.location.object
+	if access.write || access.locked || object.kind != regionAllocation || p.layout == nil {
+		return false, nil
+	}
+	if _, represented := p.layout.objects[object]; !represented {
+		return false, nil
+	}
+	site, ok := object.site.(*ssa.Alloc)
+	if !ok {
+		return false, nil
+	}
+	allocated := false
+	for _, trace := range p.traces {
+		for _, occurrence := range trace.instructions {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			if occurrence.instruction == site && occurrence.invocation == object.invocation {
+				for _, allocation := range trace.allocations {
+					if err := ctx.Err(); err != nil {
+						return false, err
+					}
+					if allocation.instruction == site && allocation.invocation == occurrence.invocation && allocation.location.object == object && len(allocation.location.path) == 0 && trace.seen[occurrence] {
+						allocated = true
+						break
+					}
+				}
+			}
+			if occurrence.instruction == access.instruction && occurrence.invocation == access.invocation {
+				if !allocated || !trace.seen[occurrence] {
+					return false, nil
+				}
+				return p.isolatedStorage(ctx, object)
+			}
+		}
+	}
+	return false, nil
+}
+
+// storageEffectMismatch is a failed candidate alignment, not an operational or
+// authority failure. Only this class and an unsupported bit equality permit
+// trying another independently checked alignment.
+type storageEffectMismatch struct{ detail string }
+
+func (e *storageEffectMismatch) Error() string { return "global function correspondence: " + e.detail }
+func storageMismatch(detail string) error      { return &storageEffectMismatch{detail} }
+
+func storageEffectRetryable(err error) bool {
+	var mismatch *storageEffectMismatch
+	return errors.As(err, &mismatch) || globalFunctionUnproved(err)
+}
+
+type storageEffectReadChoice struct {
+	source int
+	retain bool
+}
+
+// A choice prefix proposes alignments only. Every use rechecks its source site
+// and read eligibility, and success still requires the entire effect relation.
+type storageReadPlan struct {
+	prefix, path []storageEffectReadChoice
+	preferRetain bool
+	bound        int
+}
+
+func (p *storageReadPlan) choose(ctx context.Context, source int) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	depth := len(p.path)
+	if depth >= p.bound || source < 0 || source >= p.bound || depth > 0 && p.path[depth-1].source >= source {
+		return false, globalFunctionError("invalid or exhausted source read-choice population")
+	}
+	retain := p.preferRetain
+	if depth < len(p.prefix) {
+		if p.prefix[depth].source != source {
+			return false, globalFunctionError("read-choice prefix has a different source occurrence")
+		}
+		retain = p.prefix[depth].retain
+	}
+	p.path = append(p.path, storageEffectReadChoice{source, retain})
+	return retain, nil
+}
+
+// matchStorageEffects is the single bytewise ordinary/indivisible relation used
+// by prefix, phase and complete-function consumers. Native indices are never
+// renumbered, and source atomic groups retain their actual reference occurrence.
+func (p *globalFunctionCorrespondence) matchStorageEffects(ctx context.Context, native []nativeproof.TransitionAccess, initialMemory []nativeproof.TransitionByte, observable []int, sourceGroups map[int]regionAtomicOccurrence, nativeGroups map[int]globalFunctionNativeAtomic) error {
+	return p.searchStorageEffects(ctx, native, initialMemory, observable, sourceGroups, nativeGroups, true)
+}
+
+// A known read may either retain an available native read (and its initializer
+// prefix) or disappear before a later ordinary write/read. Local footprint
+// agreement cannot select between those alignments: their complete continuations
+// must be checked. Depth-first replay proposes finite source-indexed choices to
+// the same checker, retaining only one path and one pending prefix. Depth is at
+// most the bounded source-access population; all attempts and replay work share
+// the caller's cumulative account. Operational failures never trigger replay.
+//
+// Each attempt owns a fresh proof delta and fresh byte/cursor/allocation state.
+// Guard, administrative and inactive accounts were checked before this search and
+// are never modified by an attempt. Only a complete successful continuation can
+// append its witnesses and effect accounts to the caller. Neither a failed choice
+// nor a successful search changes the owned source or native computations.
+func (p *globalFunctionCorrespondence) searchStorageEffects(ctx context.Context, native []nativeproof.TransitionAccess, initialMemory []nativeproof.TransitionByte, observable []int, sourceGroups map[int]regionAtomicOccurrence, nativeGroups map[int]globalFunctionNativeAtomic, preferRetain bool) error {
+	if ctx == nil || p.layout == nil || len(p.accesses) > 65536 || len(p.traces) > 65536 || len(native) > 65536 || len(observable) > len(native) || len(initialMemory) > storageMaxBytes || len(sourceGroups) > 65536 || len(nativeGroups) > 65536 {
+		return globalFunctionError("invalid or oversized effect search inputs")
+	}
+	// Public consumers already supply this account. Direct internal consumers
+	// receive the existing default once for the whole search, never per attempt.
+	if meter, ok := ctx.(*correspondenceContext); ok {
+		if meter == nil || meter.limit < 1 || meter.limit > 20_000_000 || meter.work < 0 || meter.work > meter.limit {
+			return globalFunctionError("invalid effect search work account")
+		}
+	} else {
+		limit := p.limit
+		if limit == 0 {
+			limit = 2_000_000
+		}
+		if limit < 1 || limit > 20_000_000 || p.work < 0 || p.work > limit {
+			return globalFunctionError("invalid effect search work account")
+		}
+		ctx = &correspondenceContext{Context: ctx, work: p.work, limit: limit}
+	}
+	// These are the already-owned, guarded projections. Freeze their containers
+	// once before callbacks; every replay observes exactly these same inputs.
+	native = slices.Clone(native)
+	initialMemory = slices.Clone(initialMemory)
+	observable = slices.Clone(observable)
+	sourceGroups = maps.Clone(sourceGroups)
+	nativeGroups = maps.Clone(nativeGroups)
+	accesses, traces := slices.Clone(p.accesses), slices.Clone(p.traces)
+	for range len(native) + len(initialMemory) + len(observable) + len(sourceGroups) + len(nativeGroups) + len(accesses) + len(traces) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		address, represented := p.address(source.global)
-		if !represented {
-			return globalFunctionError("source access leaves the fixed representation")
+	}
+	last := -1
+	for _, index := range observable {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if index <= last || index < 0 || index >= len(native) {
+			return globalFunctionError("invalid ordered native effect projection")
+		}
+		last = index
+	}
+	var prefix []storageEffectReadChoice
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		plan := storageReadPlan{prefix: prefix, preferRetain: preferRetain, bound: len(accesses)}
+		// Only immutable checker inputs are shared. Every mutable proof account
+		// starts empty, so abandoning an attempt cannot leak tentative evidence.
+		candidate := globalFunctionCorrespondence{representation: p.representation, layout: p.layout, antecedent: p.antecedent, accesses: accesses, traces: traces}
+		err := candidate.matchStorageEffectAttempt(ctx, native, initialMemory, observable, sourceGroups, nativeGroups, &plan)
+		if stopped := ctx.Err(); stopped != nil {
+			return stopped
+		}
+		if err == nil {
+			if len(plan.path) < len(prefix) {
+				return globalFunctionError("effect search left an unchecked choice prefix")
+			}
+			// Charge copying before any caller account is changed. The checker
+			// above is the sole writer of these six attempt-local output accounts.
+			for range len(p.equalities) + len(candidate.equalities) + len(p.matched) + len(candidate.matched) + len(p.eliminated) + len(candidate.eliminated) + len(p.materialized) + len(candidate.materialized) + len(p.padding) + len(candidate.padding) + len(p.atomics) + len(candidate.atomics) {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+			}
+			p.equalities = append(p.equalities, candidate.equalities...)
+			p.matched = append(p.matched, candidate.matched...)
+			p.eliminated = append(p.eliminated, candidate.eliminated...)
+			p.materialized = append(p.materialized, candidate.materialized...)
+			p.padding = append(p.padding, candidate.padding...)
+			p.atomics = append(p.atomics, candidate.atomics...)
+			return nil
+		}
+		if !storageEffectRetryable(err) {
+			return err
+		}
+		alternate := -1
+		for i := len(plan.path) - 1; i >= 0; i-- {
+			if stopped := ctx.Err(); stopped != nil {
+				return stopped
+			}
+			if plan.path[i].retain == preferRetain {
+				alternate = i
+				break
+			}
+		}
+		if alternate < 0 {
+			return err
+		}
+		for range alternate + 1 {
+			if stopped := ctx.Err(); stopped != nil {
+				return stopped
+			}
+		}
+		prefix = slices.Clone(plan.path[:alternate+1])
+		prefix[alternate].retain = !preferRetain
+	}
+}
+
+// One attempt checks a candidate alignment from the original initial memory.
+// Its local state and all appended proof accounts are private to the search.
+func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Context, native []nativeproof.TransitionAccess, initialMemory []nativeproof.TransitionByte, observable []int, sourceGroups map[int]regionAtomicOccurrence, nativeGroups map[int]globalFunctionNativeAtomic, plan *storageReadPlan) error {
+	known := map[nativeproof.TransitionLocation]byte{}
+	padding := map[nativeproof.TransitionLocation]br.Term{}
+	typed := map[nativeproof.TransitionLocation]bool{}
+	for object := range p.layout.objects {
+		leaves, err := p.layout.typedLeaves(ctx, object)
+		if err != nil {
+			return err
+		}
+		for _, leaf := range leaves {
+			for offset := leaf.footprint.Bytes.Start; offset < leaf.footprint.Bytes.End; offset++ {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				typed[nativeproof.TransitionLocation{Image: leaf.footprint.Image, Offset: offset}] = true
+			}
+		}
+	}
+	for _, cell := range initialMemory {
+		if p.layout.representedByte(cell.TransitionLocation) && !typed[cell.TransitionLocation] {
+			padding[cell.TransitionLocation] = cell.Value
+		}
+	}
+	initializers := map[nativeproof.TransitionLocation]byte{}
+	positions := map[regionEffectOccurrence]int{}
+	var allocations []regionEffectAllocation
+	position := 0
+	for _, trace := range p.traces {
+		allocations = append(allocations, trace.allocations...)
+		for _, occurrence := range trace.instructions {
+			positions[occurrence] = position
+			position++
+		}
+	}
+	activated := map[regionObject]bool{}
+	matched := map[int]int{}
+	next := 0
+	proveBytes := func(index int, access nativeproof.TransitionAccess, want map[nativeproof.TransitionLocation]byte) ([]storagePaddingAccess, error) {
+		width := access.Bytes.End - access.Bytes.Start
+		if width <= 0 || width > 8 || access.Value.Sort() != br.Bits(int(width*8)) {
+			return nil, globalFunctionError("unsupported native effect width")
+		}
+		var bits uint64
+		var gaps []nativeproof.TransitionLocation
+		for lane := int64(0); lane < width; lane++ {
+			location := nativeproof.TransitionLocation{Image: access.Image, Offset: access.Bytes.Start + lane}
+			v, ok := want[location]
+			if !ok {
+				if _, pad := padding[location]; !pad {
+					return nil, storageMismatch("native effect has missing or surplus byte coverage")
+				}
+				gaps = append(gaps, location)
+			}
+			bits |= uint64(v) << (8 * lane)
+		}
+		if len(gaps) == 0 {
+			return nil, p.constant(ctx, access.Value, bits)
+		}
+		if len(gaps) == int(width) {
+			return nil, storageMismatch("padding-only effect has no source operation")
+		}
+		builder := br.NewBuilder(128)
+		var paddingAccesses []storagePaddingAccess
+		for lane := int64(0); lane < width; lane++ {
+			value, err := storageNativeLane(builder, access.Value, int(lane))
+			if err != nil {
+				return nil, err
+			}
+			location := nativeproof.TransitionLocation{Image: access.Image, Offset: access.Bytes.Start + lane}
+			if v, ok := want[location]; ok {
+				if err := p.constant(ctx, value, uint64(v)); err != nil {
+					return nil, err
+				}
+				continue
+			}
+			if access.Kind == nativeproof.FrameRead {
+				if err := p.equal(ctx, value, padding[location]); err != nil {
+					return nil, err
+				}
+			}
+			paddingAccesses = append(paddingAccesses, storagePaddingAccess{index, location, value})
+		}
+		return paddingAccesses, nil
+	}
+	recordPadding := func(accesses []storagePaddingAccess) {
+		for _, access := range accesses {
+			if native[access.native].Kind == nativeproof.FrameWrite {
+				padding[access.location] = access.value
+			}
+		}
+		p.padding = append(p.padding, accesses...)
+	}
+	matchBytes := func(index int, access nativeproof.TransitionAccess, want map[nativeproof.TransitionLocation]byte) error {
+		accesses, err := proveBytes(index, access, want)
+		if err != nil {
+			return err
+		}
+		recordPadding(accesses)
+		return nil
+	}
+	knownValue := func(lanes map[nativeproof.TransitionLocation]byte) (bool, error) {
+		for location, value := range lanes {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			if old, ok := known[location]; !ok || old != value {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
+	readEliminable := func(index int, lanes map[nativeproof.TransitionLocation]byte) (bool, error) {
+		known, err := knownValue(lanes)
+		if err != nil || known {
+			return known, err
+		}
+		return p.isolatedAllocatedRead(ctx, index)
+	}
+	ordinaryReadAt := func(cursor int, footprint storageFootprint) bool {
+		if cursor >= len(observable) {
+			return false
+		}
+		index := observable[cursor]
+		access := native[index]
+		_, atomic := nativeGroups[index]
+		return !atomic && access.Kind == nativeproof.FrameRead && access.Image == footprint.Image && access.Bytes.Start >= footprint.Bytes.Start && access.Bytes.End <= footprint.Bytes.End
+	}
+	// A frontier is a position in the actual checked source instruction trace.
+	// Allocation evidence becomes available there even when no ordinary access
+	// follows it. Activation contributes only language bits; the ordered native
+	// cursor and proved writes alone establish physical materialization.
+	consumeInitializers := func(frontier int, ordinaryWrite map[nativeproof.TransitionLocation]byte, retain func(int) bool) error {
+		for _, allocation := range allocations {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			object := allocation.location.object
+			if activated[object] {
+				continue
+			}
+			allocatedAt, found := positions[regionEffectOccurrence{allocation.instruction, allocation.invocation}]
+			if !found || allocatedAt >= frontier {
+				continue
+			}
+			activated[object] = true
+			if _, represented := p.layout.objects[object]; !represented {
+				continue
+			}
+			_, lanes, err := p.storageValueBytes(ctx, regionEffectAccess{location: allocation.location, value: allocation.initializer}, true)
+			if err != nil {
+				return err
+			}
+			for location, value := range lanes {
+				initializers[location] = value
+			}
+		}
+		// Initialization is optional native work, justified by the actual source
+		// allocation. It never seeds known bytes: only an executed native write
+		// whose entire value agrees may materialize an as-yet unknown footprint.
+		// A known read may need to defer these writes to later ordinary effects.
+		// Plan them without changing the native cursor, byte knowledge or padding;
+		// retain decides whether the resulting cursor justifies that choice.
+		checkpoint := len(p.equalities)
+		cursor := next
+		pending := map[nativeproof.TransitionLocation]bool{}
+		var planned []struct {
+			index   int
+			padding []storagePaddingAccess
+		}
+		for cursor < len(observable) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			index := observable[cursor]
+			access := native[index]
+			_, nativeAtomic := nativeGroups[index]
+			if nativeAtomic || access.Kind != nativeproof.FrameWrite || access.Image || access.Bytes.End-access.Bytes.Start > 8 || access.Bytes.Start >= access.Bytes.End {
+				break
+			}
+			// Prefer the already planned ordinary run, including its narrow
+			// pieces and actual padding. A preference proof does not consume or
+			// update padding; the selected match records those bytes exactly once.
+			ordinary := ordinaryWrite != nil && p.layout.classifyAccess(storageFootprint{Bytes: access.Bytes}) == storageInside
+			covered := 0
+			for offset := access.Bytes.Start; offset < access.Bytes.End; offset++ {
+				location := nativeproof.TransitionLocation{Offset: offset}
+				_, found := ordinaryWrite[location]
+				_, pad := padding[location]
+				ordinary = ordinary && (found || pad)
+				if found {
+					covered++
+				}
+			}
+			ordinary = ordinary && covered != 0
+			if ordinary {
+				if _, err := proveBytes(index, access, ordinaryWrite); err != nil {
+					if !globalFunctionUnproved(err) {
+						return err
+					}
+					ordinary = false
+				}
+			}
+			if ordinary {
+				break
+			}
+			eligible := p.layout.classifyAccess(storageFootprint{Bytes: access.Bytes}) == storageInside
+			for offset := access.Bytes.Start; offset < access.Bytes.End; offset++ {
+				location := nativeproof.TransitionLocation{Offset: offset}
+				_, initial := initializers[location]
+				_, pad := padding[location]
+				_, materialized := known[location]
+				eligible = eligible && (initial || pad) && !materialized && !pending[location]
+			}
+			if !eligible {
+				break
+			}
+			paddingAccesses, err := proveBytes(index, access, initializers)
+			if err != nil {
+				if !globalFunctionUnproved(err) {
+					return err
+				}
+				break
+			}
+			for offset := access.Bytes.Start; offset < access.Bytes.End; offset++ {
+				location := nativeproof.TransitionLocation{Offset: offset}
+				if _, initial := initializers[location]; initial {
+					pending[location] = true
+				}
+			}
+			planned = append(planned, struct {
+				index   int
+				padding []storagePaddingAccess
+			}{index, paddingAccesses})
+			cursor++
+		}
+		if retain != nil && !retain(cursor) {
+			p.equalities = p.equalities[:checkpoint]
+			return nil
+		}
+		for _, plan := range planned {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			recordPadding(plan.padding)
+			access := native[plan.index]
+			for offset := access.Bytes.Start; offset < access.Bytes.End; offset++ {
+				location := nativeproof.TransitionLocation{Offset: offset}
+				if value, initial := initializers[location]; initial {
+					known[location] = value
+				}
+			}
+			p.materialized = append(p.materialized, plan.index)
+		}
+		next = cursor
+		return nil
+	}
+	for i := 0; i < len(p.accesses); {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		source := p.accesses[i]
+		at, atOK := positions[regionEffectOccurrence{source.instruction, source.invocation}]
+		if !atOK {
+			return globalFunctionError("effect has no checked source occurrence")
 		}
 		group, atomic := sourceGroups[i]
 		if source.locked != atomic {
 			return globalFunctionError("source locked access lacks its atomic group")
+		}
+		_, represented := p.layout.objects[source.location.object]
+		var footprint storageFootprint
+		var lanes, ordinaryWrite map[nativeproof.TransitionLocation]byte
+		if represented {
+			var err error
+			footprint, lanes, err = p.storageEffectBytes(ctx, source)
+			if err != nil {
+				return err
+			}
+		}
+		if !represented {
+			safe, err := p.isolatedStorage(ctx, source.location.object)
+			if err != nil {
+				return err
+			}
+			if !safe || atomic {
+				return globalFunctionError("unrepresented source storage is not isolated")
+			}
+			p.eliminated = append(p.eliminated, i)
+			i++
+			continue
+		}
+		// Plan one byte account before initialization can consume a competing
+		// write. Only disjoint adjacent ordinary writes join this plan; reads,
+		// calls, atomics and allocation frontiers cannot be crossed.
+		end := i + 1
+		owners := map[nativeproof.TransitionLocation]int{}
+		for location := range lanes {
+			owners[location] = i
+		}
+		for source.write && !atomic && end < len(p.accesses) && p.accesses[end].write && !p.accesses[end].locked && p.storageWriteRunAdjacent(ctx, p.accesses[end-1], p.accesses[end]) {
+			_, more, err := p.storageEffectBytes(ctx, p.accesses[end])
+			if err != nil {
+				break
+			}
+			overlap := false
+			for location := range more {
+				_, exists := lanes[location]
+				overlap = overlap || exists
+			}
+			if overlap {
+				break
+			}
+			for location, value := range more {
+				lanes[location], owners[location] = value, end
+			}
+			end++
+		}
+		if source.write {
+			ordinaryWrite = lanes
+		}
+		// An eliminated source-only access cannot consume the native write that
+		// a later represented access needs. Keep the native cursor in place until
+		// that access can exercise ordinary-write preference, or the final cut.
+		var retainRead func(int) bool
+		deferRead := false
+		var choiceErr error
+		if !source.write && !atomic {
+			eliminable, err := readEliminable(i, lanes)
+			if err != nil {
+				return err
+			}
+			if eliminable {
+				retainRead = func(cursor int) bool {
+					if !ordinaryReadAt(cursor, footprint) {
+						return false
+					}
+					var retain bool
+					retain, choiceErr = plan.choose(ctx, i)
+					deferRead = choiceErr == nil && !retain
+					return choiceErr == nil && retain
+				}
+			}
+		}
+		if err := consumeInitializers(at, ordinaryWrite, retainRead); err != nil {
+			return err
+		}
+		if choiceErr != nil {
+			return choiceErr
+		}
+		if deferRead {
+			p.eliminated = append(p.eliminated, i)
+			i++
+			continue
+		}
+		splitRead := false
+		if !source.write && !atomic && ordinaryReadAt(next, footprint) {
+			access := native[observable[next]]
+			splitRead = access.Bytes != footprint.Bytes
+		}
+		if !atomic && (source.write || splitRead) {
+			// A split ordinary read uses the same coverage plan for one source
+			// operation; only the ordinary-write planner above may extend it.
+			remaining := len(lanes)
+			seen := map[nativeproof.TransitionLocation]bool{}
+			previous := -1
+			kind := nativeproof.FrameWrite
+			if splitRead {
+				kind = nativeproof.FrameRead
+			}
+			for remaining != 0 {
+				if next >= len(observable) {
+					return storageMismatch("missing native effect bytes")
+				}
+				index := observable[next]
+				access := native[index]
+				if splitRead && (access.Image != footprint.Image || access.Bytes.Start < footprint.Bytes.Start || access.Bytes.End > footprint.Bytes.End || previous >= 0 && access.Bytes.Start < native[previous].Bytes.End) {
+					return storageMismatch("split native read leaves ordered source footprint")
+				}
+				if previous >= 0 && access.Context != native[previous].Context {
+					return storageMismatch("combined native writes cross a call boundary")
+				}
+				for between := previous + 1; previous >= 0 && between < index; between++ {
+					if native[between].Kind == nativeproof.FrameReturnRead || native[between].Context != native[previous].Context {
+						return storageMismatch("combined native writes cross a call boundary")
+					}
+				}
+				if _, atomic := nativeGroups[index]; atomic || access.Kind != kind || p.layout.classifyAccess(storageFootprint{Image: access.Image, Bytes: access.Bytes}) != storageInside {
+					return storageMismatch("ordered source/native effects differ")
+				}
+				if err := matchBytes(index, access, lanes); err != nil {
+					return err
+				}
+				accounts := map[int]bool{}
+				for offset := access.Bytes.Start; offset < access.Bytes.End; offset++ {
+					location := nativeproof.TransitionLocation{Image: access.Image, Offset: offset}
+					if seen[location] {
+						return storageMismatch("native effect repeats an already matched byte")
+					}
+					seen[location] = true
+					if _, pad := padding[location]; pad {
+						continue
+					}
+					seen[location], known[location], accounts[owners[location]] = true, lanes[location], true
+					remaining--
+				}
+				for owner := i; owner < end; owner++ {
+					if accounts[owner] {
+						p.matched = append(p.matched, globalFunctionAccess{owner, index})
+					}
+				}
+				next++
+				previous = index
+			}
+			i = end
+			continue
 		}
 		kind := nativeproof.FrameRead
 		if source.write {
@@ -582,14 +1458,14 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 		match := false
 		if next < len(observable) {
 			index := observable[next]
-			access := b.Accesses[index]
+			access := native[index]
 			nativeGroup, nativeAtomic := nativeGroups[index]
-			match = access.Image && access.Bytes == (nativeproof.RelativeSpan{Start: int64(address), End: int64(address + 8)}) && access.Kind == kind && atomic == nativeAtomic
+			match = access.Image == footprint.Image && access.Bytes == footprint.Bytes && access.Kind == kind && atomic == nativeAtomic
 			if atomic {
-				match = match && nativeGroup.kind == group.atomic.Kind
+				match = match && nativeGroup.kind == group.atomic.Kind && source.location.object.kind == regionGlobal && len(source.location.path) == 0 && types.Identical(source.value.typ, types.Typ[types.Uint64])
 			}
 			if match {
-				if err := p.constant(ctx, access.Value, source.value); err != nil {
+				if err := matchBytes(index, access, lanes); err != nil {
 					return err
 				}
 				matched[i] = index
@@ -598,16 +1474,32 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 			}
 		}
 		if !match {
-			old, established := known[source.global]
-			if source.write || source.locked || !established || old != source.value {
-				return globalFunctionError("ordered source/native effects differ")
+			if source.write || atomic {
+				return storageMismatch("ordered source/native effects differ")
+			}
+			eliminable, err := readEliminable(i, lanes)
+			if err != nil {
+				return err
+			}
+			if !eliminable {
+				return storageMismatch("source read lacks materialized native bytes")
 			}
 			p.eliminated = append(p.eliminated, i)
+		} else {
+			// Only an actual matched native access establishes native bytes. A
+			// source-only local read may have a known language value while those
+			// physical bytes remain arbitrary until a later real write.
+			for location, value := range lanes {
+				known[location] = value
+			}
 		}
-		known[source.global] = source.value
+		i++
+	}
+	if err := consumeInitializers(position, nil, nil); err != nil {
+		return err
 	}
 	if next != len(observable) {
-		return globalFunctionError("native computation has an unmatched effect")
+		return storageMismatch("native computation has an unmatched effect")
 	}
 	for i, access := range p.accesses {
 		source, atomic := sourceGroups[i]
@@ -618,81 +1510,102 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 		write, writeOK := matched[i]
 		group := nativeGroups[write]
 		if !readOK || !writeOK || group.read != read || group.write != write || read+1 != write {
-			return globalFunctionError("source indivisible group was split across native occurrences")
+			return storageMismatch("source indivisible group was split across native occurrences")
 		}
 		p.atomics = append(p.atomics, globalFunctionAtomic{source, group.effect})
 	}
 	return nil
 }
 
-func (p *globalFunctionCorrespondence) administrativeAccess(b nativeproof.TransitionReturnBound, access nativeproof.TransitionAccess) bool {
-	if !access.Image {
-		if access.Kind == nativeproof.FrameReturnRead && access.Bytes == (nativeproof.RelativeSpan{Start: 0, End: 8}) && access.ID == b.Prefix.Boundary.ID && access.Context == 0 {
-			return true
+func storageNativeLane(builder *br.Builder, value br.Term, lane int) (br.Term, error) {
+	if lane < 0 || lane >= value.Sort().Width()/8 {
+		return br.Term{}, globalFunctionError("invalid native byte lane")
+	}
+	if value.Sort() == br.Bits(8) {
+		return value, nil
+	}
+	return builder.Make(br.Extract, br.Bits(8), uint64(8*lane), value)
+}
+
+func (p *globalFunctionCorrespondence) checkStorageValues(ctx context.Context, builder *br.Builder, state regionState, memory []nativeproof.TransitionByte, globalsOnly bool) error {
+	for _, binding := range p.representation.bindings {
+		if globalsOnly && binding.object.kind != regionGlobal {
+			continue
 		}
-		frame := b.Prefix.Interface.PrivateFrame
-		return frame != nil && frame.Bytes.Start < frame.Bytes.End && frame.Bytes.End <= 0 && access.Bytes.Start >= frame.Bytes.Start && access.Bytes.End <= frame.Bytes.End && access.Bytes.Start < access.Bytes.End
-	}
-	if access.Kind != nativeproof.FrameRead {
-		return false
-	}
-	for _, binding := range p.representation.globals {
-		if access.Bytes.Start < int64(binding.address+8) && int64(binding.address) < access.Bytes.End {
-			return false
-		}
-	}
-	for _, bound := range b.Prefix.Interface.EntryWordUpperBounds {
-		if access.Bytes.Start >= int64(bound.Address) && access.Bytes.End <= int64(bound.Address+8) && access.Bytes.Start < access.Bytes.End {
-			return true
+		if err := p.checkStorageLocationValues(ctx, builder, state, memory, regionLocation{object: binding.object}); err != nil {
+			return err
 		}
 	}
-	return false
+	return nil
+}
+
+// checkStorageLocationValues checks precisely the selected subobject. A pending
+// field read cannot demand initialization of unrelated fields or padding.
+func (p *globalFunctionCorrespondence) checkStorageLocationValues(ctx context.Context, builder *br.Builder, state regionState, memory []nativeproof.TransitionByte, location regionLocation) error {
+	if _, ok := p.layout.locationFootprint(location); !ok {
+		return globalFunctionError("current location leaves fixed storage")
+	}
+	leaves, err := p.layout.typedLeaves(ctx, location.object)
+	if err != nil {
+		return err
+	}
+	meter := storageLayoutMeter{ctx: ctx}
+	_, sizes, err := meter.objectType(p.representation.source, location.object)
+	if err != nil {
+		return err
+	}
+	for _, leaf := range leaves {
+		if len(leaf.location.path) < len(location.path) || !slices.Equal(leaf.location.path[:len(location.path)], location.path) {
+			continue
+		}
+		value := readRegionLocation(state, leaf.location, leaf.typ)
+		bits, width, ok := storageScalarBits(value, sizes)
+		if !ok {
+			width = int(leaf.footprint.Bytes.End - leaf.footprint.Bytes.Start)
+		}
+		actual, err := storageNativeWord(ctx, builder, memory, nativeproof.TransitionLocation{Image: leaf.footprint.Image, Offset: leaf.footprint.Bytes.Start}, width)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			preserved := false
+			for _, input := range p.inputs {
+				if input.location.object == leaf.location.object && slices.Equal(input.location.path, leaf.location.path) {
+					if err := p.equal(ctx, actual, input.native); err != nil {
+						return err
+					}
+					preserved = true
+					break
+				}
+			}
+			if !preserved {
+				return globalFunctionError("current source leaf has no established typed value")
+			}
+			continue
+		}
+		if err := p.constant(ctx, actual, bits); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *globalFunctionCorrespondence) checkFinal(ctx context.Context, builder *br.Builder, b nativeproof.TransitionReturnBound) error {
 	if b.Prefix.Interface.Conditions.SSE != "" && (!b.State.SSE.MXCSRPreserved || !b.State.SSE.UpperVectorsPreserved) {
 		return globalFunctionError("floating control or higher vector context was not preserved")
 	}
-	for _, binding := range p.representation.globals {
-		value := readRegionLocation(p.source.region.packet.observations[0].state, regionLocation{object: regionObject{kind: regionGlobal, site: binding.global}}, types.Typ[types.Uint64])
-		word, ok := regionUint64(value)
-		if !ok {
-			return globalFunctionError("final source global has no established value")
-		}
-		actual, err := globalNativeWord(ctx, builder, b.State.Memory, binding.address)
-		if err != nil {
-			return err
-		}
-		if err := p.constant(ctx, actual, word); err != nil {
-			return err
-		}
+	// The checked root is void, and the effect relation admits neither a pointer
+	// store to externally observable storage nor an opaque pointer-consuming call.
+	// Together with private native lifetime ownership and the escape checks below,
+	// these facts permit releasing local storage. A return alone is not nonescape
+	// evidence, and release neither resets nor discards residual native bytes.
+	if err := p.checkStorageValues(ctx, builder, p.source.region.packet.observations[0].state, b.State.Memory, true); err != nil {
+		return err
 	}
-	current := map[nativeproof.TransitionLocation]nativeproof.TransitionByte{}
-	for _, cell := range b.State.Memory {
-		current[cell.TransitionLocation] = cell
-	}
-	for _, old := range b.Prefix.InitialMemory {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		private := b.Prefix.Interface.PrivateFrame
-		if !old.Image && private != nil && old.Offset >= private.Bytes.Start && old.Offset < private.Bytes.End {
-			continue
-		}
-		represented := false
-		for _, binding := range p.representation.globals {
-			represented = represented || old.Image && old.Offset >= int64(binding.address) && old.Offset < int64(binding.address+8)
-		}
-		if represented {
-			continue
-		}
-		now, found := current[old.TransitionLocation]
-		if !found || now.Pointer != old.Pointer || now.PointerLane != old.PointerLane {
-			return globalFunctionError("unrelated caller memory/provenance was not preserved")
-		}
-		if err := p.equal(ctx, old.Value, now.Value); err != nil {
-			return err
-		}
+	view := b.Prefix
+	view.Memory = b.State.Memory
+	if err := p.checkStorageFrame(ctx, view); err != nil {
+		return err
 	}
 	prefix, _ := p.native.Prefix()
 	for _, register := range b.Prefix.Interface.ReturnContext.Preserved {
@@ -730,6 +1643,36 @@ func (p *globalFunctionCorrespondence) checkFinal(ctx context.Context, builder *
 					}
 				}
 			}
+		}
+	}
+	return nil
+}
+
+// checkStorageFrame preserves the original caller bytes outside represented
+// objects and the separately owned private lifetime. It never discards residual
+// private bytes from the native theorem.
+func (p *globalFunctionCorrespondence) checkStorageFrame(ctx context.Context, b nativeproof.TransitionBound) error {
+	current := map[nativeproof.TransitionLocation]nativeproof.TransitionByte{}
+	for _, cell := range b.Memory {
+		current[cell.TransitionLocation] = cell
+	}
+	for _, old := range b.InitialMemory {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		private := b.Interface.PrivateFrame
+		if !old.Image && private != nil && old.Offset >= private.Bytes.Start && old.Offset < private.Bytes.End {
+			continue
+		}
+		if p.layout.representedByte(old.TransitionLocation) {
+			continue
+		}
+		now, found := current[old.TransitionLocation]
+		if !found || now.Pointer != old.Pointer || now.PointerLane != old.PointerLane {
+			return globalFunctionError("unrelated caller memory/provenance was not preserved")
+		}
+		if err := p.equal(ctx, old.Value, now.Value); err != nil {
+			return err
 		}
 	}
 	return nil

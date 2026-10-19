@@ -13,8 +13,10 @@ import (
 // families, and shift counts include width, above-width and uint64 extrema.
 // Conditional arithmetic/order adds both operand positions, an independent
 // third word and a condition selected from a width-independent input bit.
+// Symbolic concatenation masks retain independent low-input/high-scratch fields
+// and check the exact mask partition beside the existing width projections.
 func FuzzExactScalarSemantics(f *testing.F) {
-	for _, w := range []uint8{0, 1, 7, 31, 63} {
+	for _, w := range []uint8{0, 1, 7, 31, 62, 63} {
 		for op := uint8(0); op < 23; op++ {
 			f.Add(w, op, ^uint64(0), uint64(1), uint64(64))
 			f.Add(w|64, op, uint64(1), ^uint64(0), uint64(0))
@@ -126,6 +128,10 @@ func FuzzExactScalarSemantics(f *testing.F) {
 			v := g.variable(s, scope, 0, false)
 			high := g.variable(br.Bits(64-w), scope, 0, true)
 			full := g.make(br.Concat, br.Bits(64), 0, v, high)
+			masked, distributed := concatMaskTerms(g, v, high, shift)
+			direct(t, br.ConcatMask, masked, distributed)
+			prove(t, masked, distributed)
+			assertValues(t, masked, distributed, map[br.Term]uint64{v: a, high: b & widthMask(64-w)})
 			ext := br.ZExt
 			if selector&1 != 0 {
 				ext = br.SExt

@@ -14,6 +14,7 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/gofresh/internal/assemblycapture"
+	br "github.com/greatliontech/gofresh/internal/bitrelation"
 	"github.com/greatliontech/gofresh/internal/nativeproof"
 )
 
@@ -244,6 +245,8 @@ func TestGlobalReferenceSameValueWriteRejectsUnchangedInline(t *testing.T) {
 	refs := map[*ssa.Function]*assemblyReference{changed.target: changed.reference}
 	currentSource, currentNative := prior.source, prior.native
 	comparison := &globalRegionCorrespondence{root: prior}
+	traces := append([]*regionEffectTrace(nil), prior.account.traces...)
+	accesses := append([]regionEffectAccess(nil), prior.account.accesses...)
 	for index, step := range steps {
 		source, err := checkSourceOperandContinuation(t.Context(), currentSource, step.call, refs)
 		if err != nil {
@@ -254,20 +257,27 @@ func TestGlobalReferenceSameValueWriteRejectsUnchangedInline(t *testing.T) {
 			t.Fatal("source continuation lost the exact checked reference application")
 		}
 		application := trace.calls[0]
-		if application.proof.at != changed.calls[index] || application.current != []uint64{intent.current, middle}[index] || application.value != []uint64{middle, final}[index] || assemblyReferenceBool(t, application.result) != []bool{first, second}[index] {
+		location := regionLocation{object: regionObject{kind: regionGlobal, site: changed.globals[0]}}
+		current, currentOK := regionUint64(readRegionLocation(application.proof.initial, location, types.Typ[types.Uint64]))
+		updated, updatedOK := regionUint64(readRegionLocation(application.outcome.state, location, types.Typ[types.Uint64]))
+		if application.proof.at != changed.calls[index] || !currentOK || !updatedOK || current != []uint64{intent.current, middle}[index] || updated != []uint64{middle, final}[index] || assemblyReferenceBool(t, application.outcome.value) != []bool{first, second}[index] {
 			t.Fatal("source application scalars differ before effect comparison")
 		}
 		var fromCall []assemblyReferenceAccess
 		for _, access := range trace.accesses {
 			if access.instruction == changed.calls[index] {
-				if access.global != changed.globals[0] {
+				if access.location.object != location.object || len(access.location.path) != 0 {
 					t.Fatal("reference effect was mapped to another singleton")
 				}
-				fromCall = append(fromCall, assemblyReferenceAccess{access.write, access.locked, access.value})
+				value, exact := regionUint64(access.value)
+				if !exact {
+					t.Fatal("reference effect lost its exact typed value")
+				}
+				fromCall = append(fromCall, assemblyReferenceAccess{access.write, access.locked, value})
 			}
 		}
 		value := []uint64{middle, final}[index]
-		if !slices.Equal(fromCall, []assemblyReferenceAccess{{false, true, application.current}, {true, true, value}, {false, false, value}, {true, false, value}}) {
+		if !slices.Equal(fromCall, []assemblyReferenceAccess{{false, true, current}, {true, true, value}, {false, false, value}, {true, false, value}}) {
 			t.Fatalf("ordinary reference accesses were dropped during exact-call substitution: %+v", fromCall)
 		}
 		before, ok := currentNative.BoundFor(native.image)
@@ -293,10 +303,20 @@ func TestGlobalReferenceSameValueWriteRejectsUnchangedInline(t *testing.T) {
 		if !ok {
 			t.Fatal("native continuation lost image ownership")
 		}
-		if err := comparison.checkCurrentRepresentation(t.Context(), source, before, after); err != nil {
+		layout, err := checkStorageAuthority(t.Context(), source, after, prior.representation, storageProtectedFootprints(after))
+		if err != nil {
+			t.Fatal(err)
+		}
+		traces = append(traces, trace)
+		accesses = append(accesses, trace.accesses...)
+		account := &globalFunctionCorrespondence{representation: prior.representation, layout: layout, antecedent: after.EntryPredicate, traces: traces, accesses: accesses}
+		if err := account.checkStorageValues(t.Context(), br.NewBuilder(4096), source.region.packet.observations[0].state, after.Memory, true); err != nil {
 			t.Fatal("same-value edit changed the full represented heap or preserved native bytes:", err)
 		}
-		if err := comparison.checkPhaseEffects(t.Context(), before, afterNative, after, trace); err == nil || !strings.Contains(err.Error(), "ordered read/write population differs") {
+		if err := account.checkStorageFrame(t.Context(), after); err != nil {
+			t.Fatal("same-value edit changed preserved native bytes:", err)
+		}
+		if err := account.checkEffects(t.Context(), after); err == nil || !strings.Contains(err.Error(), "native effect has missing or surplus byte coverage") {
 			t.Fatalf("phase %d did not refuse specifically at its ordered-effect relation: %v", index, err)
 		}
 		currentSource, currentNative = source, afterNative
@@ -311,7 +331,7 @@ func TestGlobalReferenceSameValueWriteRejectsUnchangedInline(t *testing.T) {
 		}
 	}
 	proof, err := continueGlobalOperandCorrespondence(t.Context(), prior, steps, refs)
-	if proof != nil || err == nil || !strings.Contains(err.Error(), "ordered read/write population differs") {
+	if proof != nil || err == nil || !strings.Contains(err.Error(), "native effect has missing or surplus byte coverage") {
 		t.Fatalf("unchanged native paired correspondence did not reject the extra same-value reference write: %v", err)
 	}
 	t.Log("real edited assembly and both source phases succeeded; Boolean, current value, final heap and native frame matched; ordered ordinary reference writes rejected unchanged inline correspondence")

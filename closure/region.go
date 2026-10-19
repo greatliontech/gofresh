@@ -11,7 +11,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
-const regionRules = "gofresh/source-region-transport@9"
+const regionRules = "gofresh/source-region-transport@10"
 
 // This kernel is conditional on an immutable, well-typed SSA owner. Selection of
 // that owner from source/build inputs is a separate obligation. It never invokes
@@ -153,11 +153,8 @@ type checkedRegion struct {
 	// Only bodies actually checked under their actual input states appear here.
 	// Their selected-source and native bindings remain composition obligations.
 	calls []*regionCallProof
-	// Present only for the opt-in straight-line operand-prefix judgment. These
-	// are checked transfer events, never inferred from equal endpoint heaps.
-	prefix *regionPrefixEffects
-	// Optional complete finite scalar-effect coverage. Its events are produced
-	// only by checked transfers, not by the proposing worklist.
+	// Optional complete finite typed-effect coverage. Retained events come from
+	// independently checked transfers; provisional proposer events are discarded.
 	trace    *regionEffectTrace
 	usage    regionMeter
 	contexts map[regionInvocation]regionContextFacts
@@ -349,6 +346,11 @@ func (m *regionMeter) copyValue(v regionValue, depth int) (regionValue, error) {
 
 func regionUnknownValue(t types.Type) regionValue { return regionValue{typ: t} }
 
+func regionOpaqueScalarType(t types.Type) bool {
+	b, ok := t.Underlying().(*types.Basic)
+	return ok && b.Info()&(types.IsFloat|types.IsComplex) != 0
+}
+
 // No host word width participates in this kernel. Word-sized literal facts are
 // restricted to the common 32-bit range; larger build-specific numeric facts
 // need a separately bound numeric interpretation. Unknown typed words remain
@@ -473,6 +475,9 @@ func (k *regionKernel) proposeEntries() (map[*ssa.BasicBlock][]regionState, erro
 func regionConst(v *ssa.Const) regionValue {
 	if v.IsNil() {
 		return regionValue{typ: v.Type(), kind: regionNil}
+	}
+	if regionOpaqueScalarType(v.Type()) {
+		return regionUnknownValue(v.Type())
 	}
 	return regionValue{typ: v.Type(), kind: regionConstant, scalar: v.Value}
 }

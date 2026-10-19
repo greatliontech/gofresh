@@ -156,6 +156,10 @@ func regionConcreteEqual(typ types.Type, a, b any) bool {
 }
 
 func regionConcreteZero(t types.Type) any {
+	return regionConcreteZeroTyped(t, false)
+}
+
+func regionConcreteZeroTyped(t types.Type, unsigned bool) any {
 	switch u := t.Underlying().(type) {
 	case *types.Basic:
 		switch {
@@ -164,18 +168,21 @@ func regionConcreteZero(t types.Type) any {
 		case u.Info()&types.IsString != 0:
 			return ""
 		case u.Info()&types.IsInteger != 0:
+			if unsigned && u.Info()&types.IsUnsigned != 0 {
+				return uint64(0)
+			}
 			return int64(0)
 		}
 	case *types.Struct:
 		v := make([]any, u.NumFields())
 		for i := range v {
-			v[i] = regionConcreteZero(u.Field(i).Type())
+			v[i] = regionConcreteZeroTyped(u.Field(i).Type(), unsigned)
 		}
 		return v
 	case *types.Array:
 		v := make([]any, u.Len())
 		for i := range v {
-			v[i] = regionConcreteZero(u.Elem())
+			v[i] = regionConcreteZeroTyped(u.Elem(), unsigned)
 		}
 		return v
 	case *types.Pointer, *types.Signature, *types.Interface, *types.Slice:
@@ -186,10 +193,10 @@ func regionConcreteZero(t types.Type) any {
 
 func executeRegionConcrete(t testing.TB, in regionInput, args ...any) any {
 	steps := 0
-	return executeRegionConcreteFrame(t, in, map[*ssa.Global]*any{}, args, nil, false, 0, &steps)
+	return executeRegionConcreteFrame(t, in, map[*ssa.Global]*any{}, args, nil, false, 0, &steps, nil, 0)
 }
 
-func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.Global]*any, args, environment []any, whole bool, depth int, steps *int) any {
+func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.Global]*any, args, environment []any, whole bool, depth int, steps *int, run *regionConcreteExecution, invocation uint64) any {
 	t.Helper()
 	if depth > 32 {
 		t.Fatal("concrete oracle call depth exhausted")
@@ -208,7 +215,7 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 				return nil
 			}
 			if x.Value == nil {
-				return regionConcreteZero(x.Type())
+				return regionConcreteZeroTyped(x.Type(), run != nil)
 			}
 			switch x.Value.Kind() {
 			case constant.Bool:
@@ -216,6 +223,13 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 			case constant.String:
 				return constant.StringVal(x.Value)
 			case constant.Int:
+				if run != nil && x.Type().Underlying().(*types.Basic).Info()&types.IsUnsigned != 0 {
+					n, ok := constant.Uint64Val(x.Value)
+					if !ok {
+						t.Fatal("oracle unsigned integer range")
+					}
+					return n
+				}
 				n, ok := constant.Int64Val(x.Value)
 				if !ok {
 					t.Fatal("oracle integer range")
@@ -224,6 +238,9 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 			}
 		case *ssa.Global:
 			if globals[x] == nil {
+				if run != nil {
+					panic(regionConcreteFailure{fmt.Sprintf("missing explicit initial global %s", x)})
+				}
 				z := regionConcreteZero(x.Type().Underlying().(*types.Pointer).Elem())
 				globals[x] = &z
 			}
@@ -257,6 +274,17 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 				t.Fatal("concrete oracle execution bound exhausted")
 			}
 			if !whole && block == in.use.at.block && i == in.use.at.index {
+				if run != nil {
+					call, ok := block.Instrs[i].(*ssa.Call)
+					if !ok {
+						panic(regionConcreteFailure{"joint operand endpoint is not an actual call"})
+					}
+					run.cut = call
+					run.operands = make([]any, len(call.Call.Args))
+					for j, arg := range call.Call.Args {
+						run.operands[j] = run.snapshot(get(arg))
+					}
+				}
 				if in.use.operand == nil {
 					return nil
 				}
@@ -266,8 +294,11 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 			switch x := ins.(type) {
 			case *ssa.Phi, *ssa.DebugRef:
 			case *ssa.Alloc:
-				z := regionConcreteZero(x.Type().Underlying().(*types.Pointer).Elem())
+				z := regionConcreteZeroTyped(x.Type().Underlying().(*types.Pointer).Elem(), run != nil)
 				values[x] = regionConcretePointer{&z}
+				if run != nil {
+					run.allocate(x, invocation, &z)
+				}
 			case *ssa.FieldAddr:
 				p := get(x.X).(regionConcretePointer)
 				cells := (*p.cell).([]any)
@@ -283,10 +314,18 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 				}
 			case *ssa.Store:
 				p := get(x.Addr).(regionConcretePointer)
-				regionConcreteStore(p.cell, get(x.Val))
+				value := get(x.Val)
+				if run != nil {
+					run.access(x, invocation, p, x.Val.Type(), value, true)
+				}
+				regionConcreteStore(p.cell, value)
 			case *ssa.UnOp:
 				if x.Op == token.MUL {
-					values[x] = regionConcreteCopy(*get(x.X).(regionConcretePointer).cell)
+					p := get(x.X).(regionConcretePointer)
+					values[x] = regionConcreteCopy(*p.cell)
+					if run != nil {
+						run.access(x, invocation, p, x.Type(), values[x], false)
+					}
 				} else if x.Op == token.NOT {
 					values[x] = !get(x.X).(bool)
 				} else {
@@ -337,11 +376,19 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 				values[x] = get(x.X)
 			case *ssa.ChangeType:
 				values[x] = get(x.X)
+			case *ssa.Convert:
+				if run == nil {
+					t.Fatalf("oracle unsupported conversion %s", x)
+				}
+				values[x] = run.convertInteger(get(x.X), x.Type())
 			case *ssa.Field:
 				values[x] = get(x.X).([]any)[x.Field]
 			case *ssa.Index:
 				if text, ok := get(x.X).(string); ok {
 					values[x] = int64(text[get(x.Index).(int64)])
+					if run != nil {
+						values[x] = uint64(text[get(x.Index).(int64)])
+					}
 				} else {
 					values[x] = get(x.X).([]any)[get(x.Index).(int64)]
 				}
@@ -351,6 +398,20 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 					values[x] = regionConcreteEqual(x.X.Type(), a, b)
 				} else if x.Op == token.NEQ {
 					values[x] = !regionConcreteEqual(x.X.Type(), a, b)
+				} else if left, ok := a.(uint64); ok {
+					right := b.(uint64)
+					switch x.Op {
+					case token.LSS:
+						values[x] = left < right
+					case token.LEQ:
+						values[x] = left <= right
+					case token.GTR:
+						values[x] = left > right
+					case token.GEQ:
+						values[x] = left >= right
+					default:
+						t.Fatalf("oracle unsigned comparison %s", x)
+					}
 				} else if left, ok := a.(int64); ok {
 					right := b.(int64)
 					switch x.Op {
@@ -399,8 +460,15 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 					for _, arg := range x.Call.Args {
 						actual = append(actual, regionConcreteCopy(get(arg)))
 					}
+					childInvocation := uint64(0)
+					if run != nil {
+						childInvocation = run.call(x, invocation, callee.target, actual)
+					}
+					if callee.target == nil || len(callee.target.Blocks) == 0 {
+						t.Fatal("concrete oracle has no actual callee body")
+					}
 					child := regionInput{root: callee.target, entry: regionPoint{callee.target.Blocks[0], 0}}
-					result := executeRegionConcreteFrame(t, child, globals, actual, callee.environment, true, depth+1, steps).(regionConcreteResults)
+					result := executeRegionConcreteFrame(t, child, globals, actual, callee.environment, true, depth+1, steps, run, childInvocation).(regionConcreteResults)
 					if len(result) == 1 {
 						values[x] = result[0]
 					} else {
@@ -427,6 +495,9 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 				result := make(regionConcreteResults, len(x.Results))
 				for i, operand := range x.Results {
 					result[i] = regionConcreteCopy(get(operand))
+				}
+				if run != nil {
+					run.returned(x, invocation, result)
 				}
 				return result
 			default:

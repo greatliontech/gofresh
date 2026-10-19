@@ -334,7 +334,8 @@ func Run() {
 	}
 	access := trace.accesses[0]
 	nested, ok := access.instruction.(*ssa.Call)
-	if !ok || nested.Parent() != source.prog.Roots["WrappedRead"] || nested.Call.StaticCallee() != source.prog.Roots["ReadWord"] || access.invocation == (regionInvocation{}) || access.write || access.locked || access.value != 3 {
+	bits, known := regionUint64(access.value)
+	if !ok || nested.Parent() != source.prog.Roots["WrappedRead"] || nested.Call.StaticCallee() != source.prog.Roots["ReadWord"] || access.invocation == (regionInvocation{}) || access.write || access.locked || !known || bits != 3 {
 		t.Fatalf("wrapped reference access lost actual invocation provenance: %+v", access)
 	}
 }

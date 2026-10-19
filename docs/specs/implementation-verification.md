@@ -850,10 +850,15 @@ source/native relation MUST satisfy these obligations:
   A bounded region relation may instead bind an actual source operation's
   evaluated operands before its execution and a native transition's unexecuted
   boundary, retaining the full selected source root and the exact covered prefix.
-  A proposed representation of typed source globals by disjoint owned image
-  extents is an untrusted scope witness. Its widths, byte interpretation, source
-  and image ownership, and pointer provenance must be checked against the actual
-  transfers and uses; names, addresses and equal initial bytes supply no association.
+  A proposed representation of typed source storage by owned image or
+  origin-relative stack extents is an untrusted scope witness. Its object and
+  allocation-instance identity, lifetime, selected-layout extent, subobject offset,
+  width, alignment, byte interpretation, source and native ownership, and pointer
+  provenance must be checked against the actual transfers and uses. Distinct
+  simultaneously live represented objects have disjoint extents; subobject aliases
+  retain their common owning bytes. Protected control storage cannot be reassigned
+  as ordinary local storage. Names, addresses and equal initial bytes supply no
+  association, and stack-relative coordinates require the retained native origin.
 - **all-input-relation** — The checked proposition relates typed scalar values,
   effects and exceptional outcomes for every admitted input and every admissible
   native entry state, including arbitrary unspecified scratch bits and flags.
@@ -866,8 +871,10 @@ source/native relation MUST satisfy these obligations:
   this relation. Two pure computations with the same interface qualify only if
   their typed values and the other claimed behaviors actually correspond; the
   proposition is semantic, not equality of declaration names.
-  For a region representation, the initial relation includes arbitrary prior
-  typed values and corresponding native bytes, rather than proposed final values.
+  For represented globals, the initial relation includes arbitrary prior typed
+  values and corresponding native bytes, rather than proposed final values.
+  Objects introduced by checked source allocations instead retain their derived
+  language initialization and current contents.
   A source claim admitting arbitrary initial globals retains compatible native
   entry states for every such valuation. One satisfying joint valuation cannot
   narrow that source domain. Administrative entry predicates can preserve this
@@ -880,6 +887,17 @@ source/native relation MUST satisfy these obligations:
   before overwrite. This requires a checked effect relation, not necessarily
   one-to-one source/native access traces: permitted elimination, combining and
   administrative steps require their own checked justification.
+  Source allocation establishes language initialization, not values of arbitrary
+  native stack bytes. Before a native read or callee operation depends on those
+  contents, the relation establishes the relevant materialized bytes. Eliminating
+  an ordinary source access requires checked isolation and value, effect and
+  dependent-use justification. Eliminating a source allocation and its storage
+  additionally requires checked nonescape; elimination supplies no native address.
+  Ordinary combined accesses require complete byte, value and ordering
+  coverage, including any accessed padding. Atomic groups remain indivisible.
+  Represented storage cannot be hidden as administrative private-frame traffic.
+  An ended source lifetime does not reset or discard residual native bytes, nor
+  require dead local bytes to recover their initial language values.
 - **control-and-calls** — Coverage includes every source and native branch and
   terminal path within the bound scopes. A merged source value, including a phi,
   uses its actual predecessor and path condition; an omitted branch requires a
@@ -1201,6 +1219,15 @@ contracts:
   claim-relevant correlations, including each registration row's name/function
   pairing. Separate name and target sets cannot establish that pairing; lost
   correlation must widen the relation or refuse the dependent claim.
+  An opaque continuation retains established allocation-instance and cardinality
+  facts only through its checked predecessor and non-reexecution evidence; it
+  neither recreates the object nor resets its current contents. A proposed heap
+  or allocation-shaped identity alone cannot establish freshness or singleton
+  status. Conservative typed unknown contents may include an unsupported scalar's
+  initialized value while retaining object type and lifetime; they establish no
+  exact bits, scalar equality, or native initialization. Abstracting an unsupported
+  initialized scalar leaf to typed unknown does not by itself discard independently
+  established facts about supported aggregate siblings.
 - **context-and-effects** — Calls bind actual arguments, receivers, captured
   environments and concrete interface values to the exact callee context.
   Preservation across a call requires a checked read/write/escape/callback and

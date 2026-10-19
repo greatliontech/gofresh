@@ -214,7 +214,7 @@ func TestGlobalFunctionAtomicGroupingAndDeadResults(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(proof.atomics) != 3 || len(proof.traces) != 2 || len(proof.eliminated) != 2 {
+			if len(proof.atomics) != 3 || len(proof.traces) != 3 || len(proof.eliminated) != 2 {
 				t.Fatal("complete ordered source phases/effects were lost")
 			}
 			for i, want := range []x86asm.Op{x86asm.XCHG, x86asm.XADD, x86asm.XCHG} {

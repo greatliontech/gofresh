@@ -247,7 +247,6 @@ func TestSourceStartupRefusalsAreScopedAndAtomic(t *testing.T) {
 		{"blank-effect", `var _ = effect(); func effect()int{panic("effect")}`, `consume(0)`},
 		{"tuple", `var A,B=pair(); func pair()(int,int){return 1,2}`, `consume(A)`},
 		{"directive", "//go:linkname X elsewhere.X\nvar X int", `consume(X)`},
-		{"unsupported-zero", `var X float64`, `consume(0)`},
 		{"late-init", `var X=1; func init(){panic("late")}`, `consume(X)`},
 		{"late-main", `var X=1`, `panic("late"); consume(X)`},
 		{"go", `var X int; func init(){go func(){X=2}()}`, `consume(X)`},
@@ -259,6 +258,39 @@ func TestSourceStartupRefusalsAreScopedAndAtomic(t *testing.T) {
 			var refusal *sourceStartupFailure
 			if got != nil || !errors.As(err, &refusal) || refusal.packageID != "main" || len(refusal.dependencyPath) == 0 || refusal.operation == "" {
 				t.Fatalf("partial/unscoped refusal: %v %v", got, err)
+			}
+		})
+	}
+}
+
+func TestSourceStartupOpaqueInitializedLeaves(t *testing.T) {
+	for _, name := range []string{"float32", "float64", "complex64", "complex128"} {
+		t.Run(name, func(t *testing.T) {
+			text := fmt.Sprintf("package main;var F %s;var X struct{Opaque %s;Value int};func consume(int){};func main(){consume(X.Value)}", name, name)
+			in, main, use := startupFixture(t, map[string][]string{"main": {text}})
+			result, err := prepareSourceEntry(t.Context(), in, main, use, registrationLimits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !constant.Compare(startupScalar(t, result), token.EQL, constant.MakeInt64(0)) || len(result.startup.heaps) != 1 {
+				t.Fatal("opaque initialization lost the supported integer sibling")
+			}
+			memory := result.startup.heaps[0].memory
+			for _, globalName := range []string{"F", "X"} {
+				global := main.Pkg.Members[globalName].(*ssa.Global)
+				value, present := memory[regionObject{kind: regionGlobal, site: global}]
+				if !present {
+					t.Fatal("initialized object disappeared from the startup heap", globalName)
+				}
+				if globalName == "X" {
+					if value.kind != regionAggregate || len(value.elements) != 2 {
+						t.Fatal("initialized aggregate lost its typed shape")
+					}
+					value = value.elements[0]
+				}
+				if value.kind != regionUnknown || value.scalar != nil || value.typ == nil || value.typ.String() != name {
+					t.Fatalf("opaque initialized leaf acquired scalar or bit authority: %+v", value)
+				}
 			}
 		})
 	}
