@@ -92,7 +92,7 @@ func baseDescriptors(yield func(Descriptor) bool) {
 			return
 		}
 	}
-	for _, cc := range []uint8{2, 3, 4, 5, 6, 7, 12, 13, 14, 15} {
+	for _, cc := range []uint8{2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15} {
 		for _, f := range []Form{JccShort, JccNear} {
 			if !emit(Intent{Operation: Branch, Condition: cc}, Encoding{Form: f}) {
 				return

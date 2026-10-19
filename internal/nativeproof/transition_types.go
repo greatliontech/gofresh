@@ -8,16 +8,17 @@ import (
 // TransitionRules identifies the conditional symbolic-origin transition rules,
 // including initialized image roots, guarded exclusions, decoder, expression,
 // pointer-lane, bounded conditional entry/return relations and CPUID dependencies.
-const TransitionRules = "gofresh/native-transition@13;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
+const TransitionRules = "gofresh/native-transition@15;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
 
-// Locked64Model requires cacheable write-back coherent RAM, power-of-two cache
+// LockedMemoryModel requires cacheable write-back coherent RAM, power-of-two cache
 // lines of at least eight bytes aligned to their size, and enabled architectural
 // locked memory operations outside transactional/enclave contexts, with no
 // applicable bus/split-lock, debug or virtualization fault/interposition. The
-// checker establishes eight-byte alignment, preventing page/cache-line splitting.
+// checker establishes natural alignment for each admitted one-, four- or eight-byte
+// operand, preventing page/cache-line splitting.
 // Mapping, alias and interference
 // conditions remain required. This is configuration, not a normal-return premise.
-const Locked64Model = "x86-64/aligned-locked64-ordinary-ram@1"
+const LockedMemoryModel = "x86-64/aligned-locked-memory-ordinary-ram@1"
 
 const archSetFSRules = "gofresh/native-linux-arch-set-fs@1"
 
@@ -75,13 +76,16 @@ type RelativeRegion struct {
 // RAM, stable permissions, distinct-byte and alignment-exception meanings.
 type TransitionConditions struct {
 	Machine string
+	// SSE optionally selects SSEModel. Its vector state and unchanged floating
+	// context belong to the original root and cannot be added by continuation.
+	SSE string
 	// CPUID is optional for scopes that do not execute a query. Executing CPUID
 	// requires CPUIDModel; an unknown nonempty model is unsupported in any scope.
 	CPUID string
-	// Locked64 is optional; executing memory CMPXCHG64, XCHG64 or XADD64
-	// requires Locked64Model and the instruction's checked locking form.
+	// LockedMemory is optional; executing memory CMPXCHG32/64, XCHG64, XADD64
+	// or byte AND/OR requires LockedMemoryModel and the checked locking form.
 	// Continuations inherit it unchanged; selecting it requires a fresh root.
-	Locked64 string
+	LockedMemory string
 	// Syscall is optional; nonempty selects LinuxAMD64SyscallModel. Address bits
 	// must then be 48 or 57, identifying TASK_SIZE_MAX, not a kernel approval label.
 	Syscall                                           string
@@ -309,21 +313,38 @@ type ArchSetFSEffect struct {
 
 func (ArchSetFSEffect) primitiveEffect() {}
 
-// LockedCompareExchange64Effect groups two adjacent accesses into one indivisible
+// LockedCompareExchangeEffect groups two adjacent accesses into one indivisible
 // locked RMW occurrence, with architectural locked ordering relative to memory
 // operations. ReadAccess and WriteAccess index the complete cumulative Accesses.
 // The write always occurs, including failed writeback. Before, Compare and
 // Replacement are captured before any write; After and Accumulator are the
 // derived memory and RAX outputs, and Success is their equality predicate. This
 // event survives result overwrites and supplies no concurrent-history theorem.
-type LockedCompareExchange64Effect struct {
+// Width is the memory width in bytes (4 or 8); Accumulator is always full RAX.
+type LockedCompareExchangeEffect struct {
 	PC                                                        uint64
 	Context                                                   string
+	Width                                                     int
 	ReadAccess, WriteAccess                                   int
 	Before, Compare, Replacement, After, Accumulator, Success br.Term
 }
 
-func (LockedCompareExchange64Effect) primitiveEffect() {}
+func (LockedCompareExchangeEffect) primitiveEffect() {}
+
+// LockedLogicalEffect retains an indivisible byte AND/OR and architectural locked
+// ordering, including unchanged writes. Kind is AND or OR, Width is one byte, and
+// access indices identify the adjacent read/write in the cumulative access trace.
+// Before and Operand are incoming values; After is their bitwise result.
+type LockedLogicalEffect struct {
+	PC                      uint64
+	Context                 string
+	Kind                    x86asm.Op
+	Width                   int
+	ReadAccess, WriteAccess int
+	Before, Operand, After  br.Term
+}
+
+func (LockedLogicalEffect) primitiveEffect() {}
 
 // LockedExchange64Effect retains an indivisible memory XCHG with architectural
 // locked ordering, including its implicit lock without a LOCK prefix. Access
@@ -435,13 +456,17 @@ type TransitionBound struct {
 	ConditionalRegion bool
 	Interface         TransitionInterface
 	Origin            br.Term
-	// EntryPredicate is the immutable conjunction of the typed entry relations,
-	// or true when empty. Origin bounds/congruence and ExcludedOrigins remain
+	// EntryPredicate is the immutable conjunction of the typed entry relations
+	// and their checked consequences under the retained origin domain, or true
+	// when empty. Origin bounds/congruence and ExcludedOrigins remain
 	// separate applicability predicates. Every occurrence starts under this
 	// conjunction; a satisfying nonvacuity valuation is never projected.
 	EntryPredicate    br.Term
 	ExcludedOrigins   []Span
 	InitialRegisters  [16]br.Term
+	InitialVectors    TransitionVectors
+	Vectors           TransitionVectors
+	SSE               TransitionSSEContext
 	InitialPredicates TransitionPredicates
 	InitialMemory     []TransitionByte
 	Words             []TransitionWord

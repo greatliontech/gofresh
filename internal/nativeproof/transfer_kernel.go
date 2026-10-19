@@ -9,7 +9,7 @@ import (
 
 // TransferRules identifies the shared scalar ISA relations. These relations do
 // not establish instruction selection, memory applicability, ordering or a frame.
-const TransferRules = "gofresh/native-scalar-transfer@2"
+const TransferRules = "gofresh/native-scalar-transfer@3"
 
 // TransferKernel constructs exact scalar instruction relations under one
 // cumulative expression/work/depth allowance. It owns no image or certificate:
@@ -50,7 +50,7 @@ func (k *TransferKernel) inputs(terms ...br.Term) error {
 	return k.meter.err
 }
 
-// CompareExchangeResult describes CMPXCHG64's two scalar arms, with flags
+// CompareExchangeResult describes CMPXCHG's operand-width scalar arms, with flags
 // computed from incoming accumulator minus incoming memory in both arms.
 // Memory is written even on failure. A consumer must retain that write cycle
 // and the operation's lock semantics separately from these value expressions.
@@ -60,23 +60,23 @@ type CompareExchangeResult struct {
 	Predicates                   TransitionPredicates
 }
 
-// CompareExchange64 interprets the 64-bit accumulator, current memory and source
-// register values. All three are independent inputs; no callee identity is used.
-func (k *TransferKernel) CompareExchange64(compare, current, replacement br.Term) (CompareExchangeResult, error) {
+// CompareExchange interprets equal-width 32- or 64-bit accumulator, memory and
+// source values. The consumer separately applies accumulator register-write rules.
+func (k *TransferKernel) CompareExchange(compare, current, replacement br.Term) (CompareExchangeResult, error) {
 	if err := k.inputs(compare, current, replacement); err != nil {
 		return CompareExchangeResult{}, err
 	}
-	if compare.Sort() != br.Bits(64) || current.Sort() != br.Bits(64) || replacement.Sort() != br.Bits(64) {
-		return CompareExchangeResult{}, refuse(0, "relation-semantics", "CMPXCHG64 requires three full-width operands")
+	if compare.Sort() != current.Sort() || compare.Sort() != replacement.Sort() || compare.Sort() != br.Bits(32) && compare.Sort() != br.Bits(64) {
+		return CompareExchangeResult{}, refuse(0, "relation-semantics", "CMPXCHG requires three equal-width 32- or 64-bit operands")
 	}
-	r := k.meter.compareExchange64(compare, current, replacement)
+	r := k.meter.compareExchange(compare, current, replacement)
 	if k.meter.err != nil {
 		return CompareExchangeResult{}, k.meter.err
 	}
 	return r, nil
 }
 
-func (m *valueBuilder) compareExchange64(compare, current, replacement br.Term) CompareExchangeResult {
+func (m *valueBuilder) compareExchange(compare, current, replacement br.Term) CompareExchangeResult {
 	f, p := m.compareFlags(compare, current)
 	return CompareExchangeResult{Success: p.ZF, Accumulator: m.ite(p.ZF, compare, current), Memory: m.ite(p.ZF, replacement, current), Flags: f, Predicates: p}
 }
@@ -259,6 +259,10 @@ func (m *valueBuilder) compareFlags(left, right br.Term) (TransitionFlags, Trans
 
 func (m *valueBuilder) testFlags(left, right br.Term) (TransitionFlags, TransitionPredicates) {
 	result := m.binary(br.BitAnd, left, right)
+	return m.logicalFlags(result)
+}
+
+func (m *valueBuilder) logicalFlags(result br.Term) (TransitionFlags, TransitionPredicates) {
 	z, sign := m.compare(br.Equal, result, m.con(result.Sort(), 0)), m.sign(result)
 	f := TransitionFlags{CF: definedFlag(m.falsity), OF: definedFlag(m.falsity), SF: definedFlag(sign), ZF: definedFlag(z), PF: definedFlag(m.parity(result))}
 	return f, TransitionPredicates{m.falsity, z, sign}

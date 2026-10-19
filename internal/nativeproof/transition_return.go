@@ -2,6 +2,7 @@ package nativeproof
 
 import (
 	"context"
+	"unsafe"
 
 	br "github.com/greatliontech/gofresh/internal/bitrelation"
 	"golang.org/x/arch/x86/x86asm"
@@ -34,6 +35,8 @@ type NativeReturnedState struct {
 	Restored         []Register
 	Flags            TransitionFlags
 	Thread           TransitionThread
+	Vectors          TransitionVectors
+	SSE              TransitionSSEContext
 }
 
 // TransitionReturnBound is a non-authorizing projection of a complete return
@@ -198,15 +201,18 @@ func CheckTransitionReturn(ctx context.Context, prefix TransitionCertificate) (T
 	if err != nil {
 		return TransitionReturnCertificate{}, err
 	}
-	if 1024 > m.limits.LiveStateBytes-m.liveStateBytes {
+	// Include the complete architectural projection, including modeled vectors,
+	// beside conservative allocation slack and the terminal metadata containers.
+	terminalBytes := 1024 + int(unsafe.Sizeof(NativeReturnedState{}))
+	if terminalBytes > m.limits.LiveStateBytes-m.liveStateBytes {
 		return TransitionReturnCertificate{}, refuse(m.pc, "transition-budget", "terminal return state")
 	}
-	m.liveStateBytes += 1024
+	m.liveStateBytes += terminalBytes
 	m.completingReturn = true
 	if err := m.stackStep(operation{Op: x86asm.RET}, uint8(i.Len)); err != nil {
 		return TransitionReturnCertificate{}, err
 	}
-	state := NativeReturnedState{PC: target.PC, CalleeTerminated: m.returned, Memory: prior.bound.Memory, Flags: m.bound.Flags, Preserved: m.bound.Preserved, Thread: m.thread}
+	state := NativeReturnedState{PC: target.PC, CalleeTerminated: m.returned, Memory: prior.bound.Memory, Flags: m.bound.Flags, Preserved: m.bound.Preserved, Thread: m.thread, Vectors: m.vectors, SSE: m.bound.SSE}
 	for r := range state.Registers {
 		if !m.tick() {
 			return TransitionReturnCertificate{}, m.err

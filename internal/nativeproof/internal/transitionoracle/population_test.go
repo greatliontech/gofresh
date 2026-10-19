@@ -28,7 +28,7 @@ func withPayload(d Descriptor, immediate uint64, displacement int64) Intent {
 		i.Immediate = uint64(int64(int32(immediate)))
 	case SUB83, ADD83, AND83, CMP83:
 		i.Immediate = uint64(int64(int8(immediate)))
-	case MOVC6, MOVB0, TESTF6, TESTA8:
+	case MOVC6, MOVB0, TESTF6, TESTA8, CMP80, LOCKAND80, LOCKOR80:
 		i.Immediate = uint64(uint8(immediate))
 	case JMPEB, JccShort:
 		i.SignedDisp = int64(int8(displacement))
@@ -85,7 +85,7 @@ func assertIntegerPayloads(t testing.TB, b []byte, d Decoded) {
 		immWidth = 4
 	case SUB83, ADD83, AND83, CMP83:
 		immWidth = 1
-	case MOVC6, MOVB0, TESTF6, TESTA8:
+	case MOVC6, MOVB0, TESTF6, TESTA8, CMP80, LOCKAND80, LOCKOR80:
 		immWidth, signed = 1, false
 	}
 	if immWidth != 0 {
@@ -138,9 +138,11 @@ func TestDescriptorPopulation(t *testing.T) {
 		AND83: 64, AND81: 64, AND25: 8, JMPEB: 1, JMPE9: 1, CPUID0FA2: 1,
 		MOV88: 10856, MOV8A: 10856, MOVC6: 1357, MOVB0: 136,
 		ADD83: 64, ADD81: 64, ADD05: 8, CALLE8: 1, PUSH50: 16, POP58: 16, RETC3: 1, SYSCALL0F05: 1,
-		CMP39: 10568, CMP3B: 10568, TEST85: 1088, CMP83: 1321, CMP81: 1321, TESTF7: 136, CMP3D: 17, TESTA9: 17, JccShort: 10, JccNear: 10,
-		LOCKCMPXCHG0FB1: 4288, SETcc0F90: 13210, TEST84: 1088, TESTF6: 136, TESTA8: 17, NOP90: 1, NOP6690: 1,
+		CMP39: 10568, CMP3B: 10568, TEST85: 1088, CMP83: 1321, CMP81: 1321, TESTF7: 136, CMP3D: 17, TESTA9: 17, JccShort: 12, JccNear: 12,
+		LOCKCMPXCHG0FB1: 9480, SETcc0F90: 13210, TEST84: 1088, TESTF6: 136, TESTA8: 17, NOP90: 1, NOP6690: 1,
 		XCHG87: 4288, LOCKXCHG87: 4288, LOCKXADD0FC1: 4288, ADD01: 512, ADD03: 512, NOP0F1F: 797,
+		NOP660F1F: 797, CMP38: 9480, CMP3A: 9480, CMP80: 1185,
+		LOCKAND20: 9480, LOCKOR08: 9480, LOCKAND80: 1185, LOCKOR80: 1185,
 	}
 	// Per REX: non-SIB bases have 6+7+7 modes; no-index SIB
 	// bases have 7+8+8 modes times four scales, with X=0 only.
@@ -180,7 +182,7 @@ func TestDescriptorPopulation(t *testing.T) {
 			t.Fatalf("trailing bytes affected %x: %+v %v", b, parsed, err)
 		}
 	}
-	if len(seen) != 109650 || len(counts) != len(want) {
+	if len(seen) != 157118 || len(counts) != len(want) {
 		t.Fatalf("population: %d, counts %v", len(seen), counts)
 	}
 	for form, count := range want {
@@ -225,7 +227,7 @@ func TestAllByteImmediateAndDisplacementValues(t *testing.T) {
 			roundTrip(t, Intent{Operation: MoveImmediate, Dst: 0, HighDst: true, Width: 8, Immediate: uint64(value)}, Encoding{Form: form})
 			roundTrip(t, Intent{Operation: MoveImmediate, Dst: 15, Width: 8, Immediate: uint64(value)}, Encoding{Form: form, REX: 0x4f})
 		}
-		for _, cc := range []uint8{2, 3, 4, 5, 6, 7, 12, 13, 14, 15} {
+		for _, cc := range []uint8{2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15} {
 			roundTrip(t, Intent{Operation: Branch, Condition: cc, SignedDisp: signed}, Encoding{Form: JccShort})
 		}
 		roundTrip(t, Intent{Operation: Jump, SignedDisp: signed}, Encoding{Form: JMPEB})

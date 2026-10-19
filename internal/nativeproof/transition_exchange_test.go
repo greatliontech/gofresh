@@ -179,7 +179,7 @@ func TestTransitionExchangePermissionsAndAliases(t *testing.T) {
 			f := stateFace(16, 0)
 			f.Words = nil
 			f.Regions = []RelativeRegion{{Bytes: RelativeSpan{0, 8}, Readable: true, Writable: true}}
-			f.Conditions.Locked64 = Locked64Model
+			f.Conditions.LockedMemory = LockedMemoryModel
 			switch mode {
 			case "readonly":
 				f.Regions[0].Writable = false
@@ -190,7 +190,7 @@ func TestTransitionExchangePermissionsAndAliases(t *testing.T) {
 			case "unaligned":
 				f.Origin.Residue = 1
 			case "model":
-				f.Conditions.Locked64 = ""
+				f.Conditions.LockedMemory = ""
 			case "alias-unknown":
 				// RDX as both base and source is arbitrary at entry. Its numeric
 				// contents cannot create the pointer needed by the selected access.
@@ -286,7 +286,7 @@ func atomicPermissionProperty(t testing.TB, kind, source, base, permissions, ext
 		t.Fatal(err)
 	}
 	f := stateFace(16, 0)
-	f.Conditions.Locked64 = Locked64Model
+	f.Conditions.LockedMemory = LockedMemoryModel
 	f.Words = nil
 	n := int64(extent%16) + 1
 	f.Regions = []RelativeRegion{{Bytes: RelativeSpan{int64(displacement), int64(displacement) + n}, Readable: permissions&1 != 0, Writable: permissions&2 != 0}}
@@ -353,7 +353,7 @@ func TestTransitionExchangePointerWordsAndUnchangedWrites(t *testing.T) {
 		code := append(before, hexBytes(t, rmw+"488b0c24c3")...)
 		im := image(t, code)
 		f := stateFace(16, 0)
-		f.Conditions.Locked64 = Locked64Model
+		f.Conditions.LockedMemory = LockedMemoryModel
 		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(code)-1), TransitionLimits{}, TransitionExpansion{PC: testEntry + uint64(len(before))})
 		if err != nil {
 			t.Fatal(err)
@@ -389,7 +389,7 @@ func TestTransitionExchangePointerWordsAndUnchangedWrites(t *testing.T) {
 			t.Fatal(err)
 		}
 		f := stateFace(16, 0)
-		f.Conditions.Locked64 = Locked64Model
+		f.Conditions.LockedMemory = LockedMemoryModel
 		f.Words = nil
 		f.Regions = []RelativeRegion{{Bytes: RelativeSpan{0, 8}, Readable: true}}
 		c, err := CheckTransition(t.Context(), im, f, p, TransitionLimits{})
@@ -413,7 +413,7 @@ func TestTransitionExchangePointerWordsAndUnchangedWrites(t *testing.T) {
 func TestTransitionExchangeCancellationAndCumulativeAccounting(t *testing.T) {
 	im := image(t, hexBytes(t, "48871424f0480fc114244801f20f1f440000c3"))
 	f := stateFace(16, 0)
-	f.Conditions.Locked64 = Locked64Model
+	f.Conditions.LockedMemory = LockedMemoryModel
 	choices := []TransitionExpansion{{PC: testEntry}, {PC: testEntry + 4}, {PC: testEntry + 10}, {PC: testEntry + 13}}
 	p, err := ProposeTransition(t.Context(), im, testEntry+18, TransitionLimits{}, choices...)
 	if err != nil {

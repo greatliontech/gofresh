@@ -116,6 +116,17 @@
 // by this declaration. Released bytes remain concrete, so later dependent reads
 // need initialization or checking against the retained state. Actual caller
 // composition must discharge this premise from its ownership discipline.
+// CheckTransitionCallReturn binds an exact completed callee theorem to an actual
+// decoded CALL. It checks translated origin/memory grants, current entry guards,
+// context and flag definedness, and derives child scratch lifetime by containment
+// in the parent's retained discipline. One continuation driver then reconstructs
+// CALL/body/RET under the unchanged caller state. The application retains coherent
+// input associations and the exact callee identity beside that checked successor;
+// it never copies independently scoped output expressions into caller state.
+// Parent activation restoration and protection of the child's incoming control
+// slot are checked separately from return-word endpoint equality. All retained
+// evidence and construction costs remain in the cumulative resource account.
+// Typed source-call and effect-occurrence transport remain a consumer obligation.
 // One fresh stack origin is universally quantified over explicit bounds,
 // congruence and external/image-page disjointness; joint nonemptiness is checked
 // before deriving state. Relative address envelopes, memory permissions and
@@ -126,7 +137,7 @@
 // The transition grammar admits byte/32/64-bit MOV (including base/displacement
 // and RIP-relative accesses), full-width LEA, constant SUB, justified alignment
 // AND, 32-bit register self-XOR with zero extension and undefined AF,
-// nonwriting 32/64-bit CMP (including ordinary memory reads), byte/32/64-bit
+// nonwriting 32/64-bit CMP and byte memory CMP, byte/32/64-bit
 // register TEST and the ten direct conditions over CF, ZF and
 // SF!=OF, alongside relative JMP/fallthrough, immediate and register ADD64, direct near CALL,
 // register PUSH/POP and near RET. Stack operations use the same current bytes;
@@ -134,19 +145,34 @@
 // current readable return word to that active context. PUSH/POP of RSP retain
 // architectural ordering. Restored RSP does not roll back writes or effects.
 // Every access retains the actual read or supplied write term at its occurrence,
-// independently of final memory. Locked64Model optionally admits aligned memory
-// LOCK CMPXCHG64 with both permissions, an unconditional failed writeback cycle,
-// exact RAX-minus-destination flags, and one retained indivisible locked-ordering
+// independently of final memory. LockedMemoryModel optionally admits aligned memory
+// LOCK CMPXCHG32/64 with both permissions, an unconditional failed writeback cycle,
+// exact operand-width accumulator-minus-destination flags, and one retained indivisible locked-ordering
 // event grouping its adjacent read/write indices. SETcc writes exactly one byte
 // and preserves flags; other register bits and unrelated bytes are unchanged.
+// CMPXCHG32 compares EAX and writes four memory bytes. Success preserves full RAX;
+// failure writes EAX, zero-extending into RAX. LOCK AND/OR byte memory forms retain
+// their read/write cycle, incoming operands and bitwise result even for unchanged
+// bytes. CF/OF clear, SF/ZF/PF describe that byte, and AF becomes undefined.
+// Natural operand alignment and the shared cache-line premise apply at each width.
 // Memory XCHG64 (implicitly locked, with or without F0) and LOCK XADD64 share
 // those full-width alignment and permission obligations. XCHG exchanges complete
 // word provenance and preserves flags. XADD returns the old word and provenance
 // in its source register, writes the modular sum and defines all six arithmetic
 // flags. Only a literal zero delta preserves the memory word's pointer; other
 // deltas lose it. Effective addresses precede register clobbers. Register ADD64
-// likewise loses unproved pointer offsets. Unprefixed 0F 1F /0 NOP forms consume
+// likewise loses unproved pointer offsets. Unprefixed or single-66 0F 1F /0 NOP forms consume
 // their actual ModRM/SIB/displacement bytes but never evaluate a data address.
+// SSEModel optionally carries all sixteen XMM registers as original/current
+// pairs of 64-bit lanes. Legacy scalar memory loads copy exactly four/eight bytes
+// and clear the rest of the destination's low 128 bits. UCOMISS/UCOMISD derive
+// flags from generic binary32/64 bit relations after independently excluding
+// signaling NaNs and nonzero subnormals under the complete incoming guard.
+// Loads impose no such value restriction. Floating status/control and higher
+// vector state remain unchanged. JP/JNP use current defined projected parity;
+// an unavailable projection refuses rather than acquiring a fresh predicate.
+// Vector joins, continuations, calls and completed returns retain original input
+// identities, actual current lanes and the same bounded state ownership.
 // The scalar TransferKernel is shared with separately normalized source assembly.
 // It supplies value relations, never source selection, image ownership, memory
 // applicability or a frame. Its consumers independently establish those facts.
@@ -182,8 +208,9 @@
 //
 // ProposeTransition's optional occurrence-qualified expansion choices are
 // untrusted search input. TransitionExpansionRequired classifies CALL, SYSCALL,
-// XOR, CMPXCHG, XCHG, XADD, register-register ADD, SETcc, byte TEST, memory CMP
-// and NOP as optional expansions.
+// XOR, CMPXCHG, XCHG, XADD, byte memory AND/OR, register-register ADD, SETcc,
+// byte TEST, memory CMP, NOP, scalar SSE loads and unordered SSE comparisons
+// as optional expansions.
 // Other register CMP/TEST forms retain their ordinary discovery behavior.
 // Unselected optional forms remain structural terminals,
 // accepted only with an independent proof that the complete incoming guard is

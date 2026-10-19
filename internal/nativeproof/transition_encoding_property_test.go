@@ -103,6 +103,17 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 		op = map[to.Operation]x86asm.Op{to.LockedCompareExchange: x86asm.CMPXCHG, to.LockedExchange: x86asm.XCHG, to.LockedExchangeAdd: x86asm.XADD}[i.Operation]
 		mem(args[0])
 		reg(args[1], i.Src, false)
+	case to.LockedAnd, to.LockedOr, to.LockedAndImmediate, to.LockedOrImmediate:
+		op = x86asm.AND
+		if i.Operation == to.LockedOr || i.Operation == to.LockedOrImmediate {
+			op = x86asm.OR
+		}
+		mem(args[0])
+		if i.Operation == to.LockedAndImmediate || i.Operation == to.LockedOrImmediate {
+			imm(args[1], false)
+		} else {
+			reg(args[1], i.Src, false, i.HighSrc)
+		}
 	case to.AddRegister:
 		op = x86asm.ADD
 		reg(args[0], i.Dst, false)
@@ -120,12 +131,12 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 	case to.CompareMemory, to.CompareFromMemory, to.CompareMemoryImmediate:
 		op = x86asm.CMP
 		if i.Operation == to.CompareFromMemory {
-			reg(args[0], i.Dst, false)
+			reg(args[0], i.Dst, false, i.HighDst)
 			mem(args[1])
 		} else {
 			mem(args[0])
 			if i.Operation == to.CompareMemory {
-				reg(args[1], i.Src, false)
+				reg(args[1], i.Src, false, i.HighSrc)
 			} else {
 				imm(args[1], false)
 			}
@@ -209,7 +220,7 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 			imm(args[1], false)
 		}
 	case to.Branch:
-		op = map[uint8]x86asm.Op{2: x86asm.JB, 3: x86asm.JAE, 4: x86asm.JE, 5: x86asm.JNE, 6: x86asm.JBE, 7: x86asm.JA, 12: x86asm.JL, 13: x86asm.JGE, 14: x86asm.JLE, 15: x86asm.JG}[i.Condition]
+		op = map[uint8]x86asm.Op{2: x86asm.JB, 3: x86asm.JAE, 4: x86asm.JE, 5: x86asm.JNE, 6: x86asm.JBE, 7: x86asm.JA, 10: x86asm.JP, 11: x86asm.JNP, 12: x86asm.JL, 13: x86asm.JGE, 14: x86asm.JLE, 15: x86asm.JG}[i.Condition]
 		if args[0] != x86asm.Rel(i.SignedDisp) || args[1] != nil || got.targets[1] != want.Target {
 			t.Fatal("conditional successor differs", code)
 		}
@@ -232,7 +243,7 @@ func descriptorPayload(d to.Descriptor, immediate uint64, displacement int32) to
 		i.Immediate = uint64(int64(int32(immediate)))
 	case to.SUB83, to.ADD83, to.AND83, to.CMP83:
 		i.Immediate = uint64(int64(int8(immediate)))
-	case to.MOVC6, to.MOVB0, to.TESTF6, to.TESTA8:
+	case to.MOVC6, to.MOVB0, to.TESTF6, to.TESTA8, to.CMP80, to.LOCKAND80, to.LOCKOR80:
 		i.Immediate = uint64(uint8(immediate))
 	}
 	if i.Width == 32 {
@@ -263,7 +274,7 @@ func TestTransitionExecutedDescriptorPopulation(t *testing.T) {
 			compareExecutedEncoding(t, code)
 		}
 	}
-	if count != 109650 {
+	if count != 157118 {
 		t.Fatalf("descriptor population changed: %d", count)
 	}
 	// The finite encoding dimension is enumerated in each property trial;
@@ -300,6 +311,9 @@ func FuzzTransitionExecutedEncoding(f *testing.F) {
 }
 
 func FuzzTransitionExecutedRawAdmission(f *testing.F) {
+	for _, code := range [][]byte{{0xf0, 0x0f, 0xb1, 0x11}, {0xf0, 0x44, 0x0f, 0xb1, 0x11}, {0xf0, 0x80, 0x09, 0x80}, {0xf0, 0x20, 0x21}, {0x80, 0x39, 0x80}, {0x38, 0x21}, {0x3a, 0x21}, {0x66, 0x0f, 0x1f, 0x44, 0, 0}} {
+		f.Add(code)
+	}
 	f.Add([]byte{0x0f, 0xa2})
 	f.Add([]byte{0x66, 0x0f, 0xa2})
 	for _, code := range [][]byte{{0xf0, 0x48, 0x0f, 0xb1, 0x11}, {0xf0, 0x48, 0x0f, 0xb1, 0xc1}, {0xf0, 0x66, 0x48, 0x0f, 0xb1, 0x11}, {0x0f, 0x94, 0xc4}, {0x40, 0x0f, 0x94, 0xc4}, {0x0f, 0x94, 0xc8}, {0x48, 0x0f, 0x94, 0x01}, {0x84, 0xe1}, {0xf6, 0xc1, 0xff}, {0xa8, 0x80}, {0x48, 0x83, 0x39, 42}, {0x48, 0x3b, 0x11}, {0x90}, {0x66, 0x90}} {

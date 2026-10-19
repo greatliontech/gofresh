@@ -18,6 +18,16 @@ func TestAtomicLiteralForms(t *testing.T) {
 		{"4801f2", Intent{Operation: AddRegister, Dst: 2, Src: 6}, Encoding{Form: ADD01, REX: 0x48}},
 		{"4803d6", Intent{Operation: AddRegister, Dst: 2, Src: 6}, Encoding{Form: ADD03, REX: 0x48}},
 		{"0f1f440000", Intent{Operation: NoOp}, Encoding{Form: NOP0F1F, NOPModRM: 0x44}},
+		{"660f1f440000", Intent{Operation: NoOp}, Encoding{Form: NOP660F1F, NOPModRM: 0x44}},
+		{"f00fb111", Intent{Operation: LockedCompareExchange, Width: 32, Base: 1, Src: 2}, Encoding{Form: LOCKCMPXCHG0FB1}},
+		{"f0450fb14d04", Intent{Operation: LockedCompareExchange, Width: 32, Base: 13, Src: 9, SignedDisp: 4}, Encoding{Form: LOCKCMPXCHG0FB1, REX: 0x45, DispBytes: 1}},
+		{"f00811", Intent{Operation: LockedOr, Width: 8, Base: 1, Src: 2}, Encoding{Form: LOCKOR08}},
+		{"f02021", Intent{Operation: LockedAnd, Width: 8, Base: 1, Src: 0, HighSrc: true}, Encoding{Form: LOCKAND20}},
+		{"f08049ff80", Intent{Operation: LockedOrImmediate, Width: 8, Base: 1, SignedDisp: -1, Immediate: 128}, Encoding{Form: LOCKOR80, DispBytes: 1}},
+		{"f0418065017f", Intent{Operation: LockedAndImmediate, Width: 8, Base: 13, SignedDisp: 1, Immediate: 127}, Encoding{Form: LOCKAND80, REX: 0x41, DispBytes: 1}},
+		{"3831", Intent{Operation: CompareMemory, Width: 8, Base: 1, Src: 2, HighSrc: true}, Encoding{Form: CMP38}},
+		{"3a31", Intent{Operation: CompareFromMemory, Width: 8, Base: 1, Dst: 2, HighDst: true}, Encoding{Form: CMP3A}},
+		{"807901ff", Intent{Operation: CompareMemoryImmediate, Width: 8, Base: 1, SignedDisp: 1, Immediate: 255}, Encoding{Form: CMP80, DispBytes: 1}},
 		{"f0480fb111", Intent{Operation: LockedCompareExchange, Base: 1, Src: 2}, Encoding{Form: LOCKCMPXCHG0FB1, REX: 0x48}},
 		{"f04d0fb14df8", Intent{Operation: LockedCompareExchange, Base: 13, Src: 9, SignedDisp: -8}, Encoding{Form: LOCKCMPXCHG0FB1, REX: 0x4d, DispBytes: 1}},
 		{"0f94c4", Intent{Operation: SetRegister, Dst: 0, HighDst: true, Width: 8, Condition: 4}, Encoding{Form: SETcc0F90}},
@@ -48,7 +58,7 @@ func TestAtomicLiteralForms(t *testing.T) {
 			}
 		}
 	}
-	for _, s := range []string{"480fb111", "f00fb111", "f066480fb111", "f0f0480fb111", "f0480fb1d1", "f0480fb1042500000000", "f04b0fb11424", "f2480fb111", "f0480fb011", "0f94c8", "0f90c0", "0f98c0", "660f94c1", "f00f94c1", "6684c1", "f6c9ff", "0f94042500000000"} {
+	for _, s := range []string{"480fb111", "f066480fb111", "f0f0480fb111", "f0480fb1d1", "f0480fb1042500000000", "f04b0fb11424", "f2480fb111", "f0480fb011", "0f94c8", "0f90c0", "0f98c0", "660f94c1", "f00f94c1", "6684c1", "f6c9ff", "0f94042500000000", "f080c801", "f02111", "f0662011", "f080710101", "f00fc111", "f0660f1f440000"} {
 		b, _ := hex.DecodeString(s)
 		if d, err := Parse(b, 0); err == nil || d != (Decoded{}) {
 			t.Fatal("accepted unsupported form", s, d, err)
@@ -78,7 +88,7 @@ func TestRawAtomicAndSetPopulation(t *testing.T) {
 					for sib := 0; sib < n; sib++ {
 						valid := true
 						if locked {
-							valid = rex >= 0x48 && mode != 3
+							valid = mode != 3
 						} else {
 							valid = (cc >= 2 && cc <= 7 || cc >= 12) && selector == 0
 						}
@@ -117,7 +127,7 @@ func TestRawAtomicAndSetPopulation(t *testing.T) {
 			}
 		}
 	}
-	if len(accepted) != 4288+13210 {
+	if len(accepted) != 9480+13210 {
 		t.Fatal("atomic raw population", len(accepted))
 	}
 	for d := range Descriptors {
@@ -136,6 +146,9 @@ func TestRawAtomicAndSetPopulation(t *testing.T) {
 }
 
 func FuzzAtomicGrammar(f *testing.F) {
+	for _, b := range [][]byte{{0xf0, 0x0f, 0xb1, 0x11}, {0xf0, 0x44, 0x0f, 0xb1, 0x11}, {0xf0, 0x80, 0x09, 0x80}, {0xf0, 0x20, 0x21}, {0x80, 0x39, 0x80}, {0x38, 0x21}, {0x3a, 0x21}, {0x66, 0x0f, 0x1f, 0x44, 0, 0}} {
+		f.Add(b)
+	}
 	for _, b := range [][]byte{{0xf0, 0x48, 0x0f, 0xb1, 0x11}, {0x0f, 0x94, 0xc1}, {0x84, 0xc9}, {0x48, 0x83, 0x39, 42}, {0x48, 0x87, 0x11}, {0xf0, 0x48, 0x0f, 0xc1, 0x11}, {0x48, 0x01, 0xf2}, {0x0f, 0x1f, 0x44, 0, 0}} {
 		f.Add(b)
 	}

@@ -10,7 +10,7 @@ import (
 func encodeExtended(i Intent, e Encoding) ([]byte, error) {
 	bad := func() ([]byte, error) { return nil, fmt.Errorf("invalid extended intent/encoding: %+v / %+v", i, e) }
 	if i.Operation == Branch {
-		if i.Condition < 2 || i.Condition > 15 || i.Condition >= 8 && i.Condition < 12 || i.Width != 0 || i.Dst != 0 || i.Src != 0 || i.Base != 0 || i.Immediate != 0 || i.RIP || i.HighDst || i.HighSrc || e.REX != 0 || e.SIB || e.Scale != 0 || e.DispBytes != 0 {
+		if i.Condition < 2 || i.Condition > 15 || i.Condition == 8 || i.Condition == 9 || i.Width != 0 || i.Dst != 0 || i.Src != 0 || i.Base != 0 || i.Immediate != 0 || i.RIP || i.HighDst || i.HighSrc || e.REX != 0 || e.SIB || e.Scale != 0 || e.DispBytes != 0 {
 			return bad()
 		}
 		if e.Form == JccShort && int64(int8(i.SignedDisp)) == i.SignedDisp {

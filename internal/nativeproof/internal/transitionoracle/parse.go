@@ -30,7 +30,7 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 	if rex&8 != 0 {
 		width = 64
 	}
-	cc := func(n uint64) bool { return n >= 2 && n <= 7 || n >= 12 && n <= 15 }
+	cc := func(n uint64) bool { return n >= 2 && n <= 7 || n >= 10 && n <= 15 }
 	if !fs && (op == 0x01 || op == 0x03) {
 		m := r.unsigned(1)
 		if width != 64 || m/64 != 3 {
@@ -144,11 +144,11 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 			}
 		} else {
 			switch op {
-			case 0x88, 0x8a, 0xc6, 0x89, 0x8b, 0x8d, 0xc7, 0x83, 0x81, 0x39, 0x3b, 0x85, 0xf7, 0x84, 0xf6:
+			case 0x88, 0x8a, 0xc6, 0x89, 0x8b, 0x8d, 0xc7, 0x83, 0x81, 0x39, 0x3b, 0x85, 0xf7, 0x84, 0xf6, 0x38, 0x3a, 0x80:
 			default:
 				return fail("opcode outside executed grammar")
 			}
-			if op == 0x88 || op == 0x8a || op == 0xc6 || op == 0x84 || op == 0xf6 {
+			if op == 0x88 || op == 0x8a || op == 0xc6 || op == 0x84 || op == 0xf6 || op == 0x38 || op == 0x3a || op == 0x80 {
 				width = 8
 			}
 			if width != 64 {
@@ -164,6 +164,9 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 				operandRM += 8
 			}
 			memory := mode != 3
+			if (op == 0x38 || op == 0x3a || op == 0x80) && !memory {
+				return fail("byte CMP requires memory")
+			}
 			rip := memory && mode == 0 && low == 5
 			if memory {
 				base := low
@@ -246,13 +249,19 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 						d.Intent.Immediate &= 0xffffffff
 					}
 				}
-			case 0x39, 0x3b, 0x85, 0x84:
+			case 0x39, 0x3b, 0x85, 0x84, 0x38, 0x3a:
 				if memory && (op == 0x85 || op == 0x84) {
 					return fail("memory predicate operand")
 				}
 				d.Intent.Operation, d.Encoding.Form, d.Intent.Dst, d.Intent.Src = Compare, CMP39, operandRM, operandReg
-				if op == 0x3b {
+				if op == 0x3b || op == 0x3a {
 					d.Encoding.Form, d.Intent.Dst, d.Intent.Src = CMP3B, operandReg, operandRM
+				}
+				if op == 0x38 {
+					d.Encoding.Form = CMP38
+				}
+				if op == 0x3a {
+					d.Encoding.Form = CMP3A
 				}
 				if op == 0x85 {
 					d.Intent.Operation, d.Encoding.Form = Test, TEST85
@@ -261,7 +270,7 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 					d.Intent.Operation, d.Encoding.Form = Test, TEST84
 				}
 				if memory {
-					if op == 0x39 {
+					if op == 0x39 || op == 0x38 {
 						d.Intent.Operation, d.Intent.Dst = CompareMemory, 0
 					} else {
 						d.Intent.Operation, d.Intent.Src = CompareFromMemory, 0
@@ -280,6 +289,11 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 				if width == 32 {
 					d.Intent.Immediate &= 0xffffffff
 				}
+			case 0x80:
+				if selector != 7 {
+					return fail("byte CMP opcode extension")
+				}
+				d.Intent.Operation, d.Encoding.Form, d.Intent.Immediate = CompareMemoryImmediate, CMP80, r.unsigned(1)
 			case 0x83, 0x81:
 				if memory && selector != 7 || (selector != 0 && selector != 4 && selector != 5 && selector != 7) || selector != 7 && width != 64 {
 					return fail("arithmetic operand or opcode extension")
@@ -318,11 +332,11 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 				}
 			}
 			if width == 8 && rex == 0 {
-				if (d.Intent.Operation == MoveRegister || d.Intent.Operation == Load || d.Intent.Operation == MoveImmediate || d.Intent.Operation == Test || d.Intent.Operation == TestImmediate) && d.Intent.Dst >= 4 {
+				if (d.Intent.Operation == MoveRegister || d.Intent.Operation == Load || d.Intent.Operation == MoveImmediate || d.Intent.Operation == Test || d.Intent.Operation == TestImmediate || d.Intent.Operation == CompareFromMemory) && d.Intent.Dst >= 4 {
 					d.Intent.Dst -= 4
 					d.Intent.HighDst = true
 				}
-				if (d.Intent.Operation == MoveRegister || d.Intent.Operation == Store || d.Intent.Operation == Test) && d.Intent.Src >= 4 {
+				if (d.Intent.Operation == MoveRegister || d.Intent.Operation == Store || d.Intent.Operation == Test || d.Intent.Operation == CompareMemory) && d.Intent.Src >= 4 {
 					d.Intent.Src -= 4
 					d.Intent.HighSrc = true
 				}

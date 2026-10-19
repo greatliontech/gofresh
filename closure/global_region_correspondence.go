@@ -237,8 +237,8 @@ func (p *globalRegionCorrespondence) checkBooleanUse(ctx context.Context, source
 		return fail("atomic result prefix has extra effects or a different endpoint")
 	}
 	first, second := after.Accesses[len(before.Accesses)], after.Accesses[len(before.Accesses)+1]
-	atomic, atomicOK := after.PrimitiveEffects[len(before.PrimitiveEffects)].(nativeproof.LockedCompareExchange64Effect)
-	if !atomicOK || atomic.PC != before.Boundary.PC || atomic.Context != before.Boundary.Context || atomic.ReadAccess != len(before.Accesses) || atomic.WriteAccess != len(before.Accesses)+1 {
+	atomic, atomicOK := after.PrimitiveEffects[len(before.PrimitiveEffects)].(nativeproof.LockedCompareExchangeEffect)
+	if !atomicOK || atomic.Width != 8 || atomic.PC != before.Boundary.PC || atomic.Context != before.Boundary.Context || atomic.ReadAccess != len(before.Accesses) || atomic.WriteAccess != len(before.Accesses)+1 {
 		return fail("read/write cycle lacks its retained indivisible ordering occurrence")
 	}
 	for _, equality := range []struct {

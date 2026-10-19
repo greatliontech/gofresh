@@ -9,6 +9,22 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
+func TestGlobalFunctionAtomicRejectsNarrowNativeCAS(t *testing.T) {
+	// Source correspondence still consumes the uint64 assembly relation. A
+	// native four-byte CAS has different memory and accumulator semantics even
+	// when all currently known scalar values fit in uint32.
+	for _, width := range []int{0, 1, 4, 8, 16} {
+		e := nativeproof.LockedCompareExchangeEffect{Width: width}
+		_, accepted := globalFunctionNativeGroup(e)
+		if accepted != (width == 8) {
+			t.Fatalf("source64 correspondence admitted native width %d: %v", width, accepted)
+		}
+	}
+	if _, accepted := globalFunctionNativeGroup(nativeproof.LockedLogicalEffect{Width: 1, Kind: x86asm.OR}); accepted {
+		t.Fatal("source64 correspondence admitted byte logical effect")
+	}
+}
+
 func globalFunctionAtomicSource(t *testing.T) (computationSource, *sourceReturnCompletion, [2]*ssa.Global) {
 	t.Helper()
 	dir := t.TempDir()
@@ -154,7 +170,7 @@ func globalFunctionAtomicNative(t testing.TB, variant string) (globalNativeFixtu
 	f.face.Regions = []nativeproof.RelativeRegion{{Bytes: nativeproof.RelativeSpan{Start: -8, End: 0}, Readable: true, Writable: true}, {Bytes: nativeproof.RelativeSpan{Start: 0, End: 8}, Readable: true}}
 	f.face.ReturnContext = &nativeproof.TransitionReturnContext{Target: base, Preserved: []nativeproof.Register{nativeproof.RBP}}
 	f.face.PrivateFrame = &nativeproof.TransitionPrivateFrame{Bytes: nativeproof.RelativeSpan{Start: -8, End: 0}}
-	f.face.Conditions.Locked64 = nativeproof.Locked64Model
+	f.face.Conditions.LockedMemory = nativeproof.LockedMemoryModel
 	decode := globalCandidateDecoder(t, f.raw)
 	var expansions []nativeproof.TransitionExpansion
 	for at := f.entry; at < f.cut; {

@@ -53,6 +53,12 @@ func descriptorState(t testing.TB, d to.Descriptor, immediate uint64, disp int32
 			i.Immediate = ^uint64(15)
 		}
 	}
+	if i.Operation == to.Branch && (i.Condition == 10 || i.Condition == 11) {
+		// Entry PF has no projection. An actual byte TEST defines parity from
+		// the arbitrary incoming AL; no fourth private entry predicate is added.
+		producer := to.Intent{Operation: to.TestImmediate, Dst: 0, Width: 8, Immediate: 255}
+		ops = append(ops, dagScalar(producer, to.Encoding{Form: to.TESTF6}, len(ops)+1))
+	}
 	op := dagScalar(i, d.Encoding, len(ops)+1)
 	if i.RIP || i.Operation == to.LEARIP {
 		op.address = imageStateAddress + 32
@@ -90,7 +96,7 @@ func TestTransitionCompleteDescriptorStatePopulation(t *testing.T) {
 		descriptorState(t, d, 0xfedcba9876543280, -0x12345, raw)
 		count++
 	}
-	if count != 109650 {
+	if count != 157118 {
 		t.Fatal("incomplete semantic descriptor population", count)
 	}
 	for value := uint64(0); value < 256; value++ {
@@ -104,13 +110,18 @@ func TestTransitionCompleteDescriptorStatePopulation(t *testing.T) {
 
 func FuzzTransitionDescriptorState(f *testing.F) {
 	descriptors := slices.Collect(to.Descriptors)
-	newForms := map[to.Form]bool{}
+	type formWidth struct {
+		form  to.Form
+		width uint8
+	}
+	newForms := map[formWidth]bool{}
 	for index, d := range descriptors {
 		if d.Intent.Operation == to.Clear32 {
 			f.Add(uint32(index), ^uint64(0), int32(0), []byte{255, 128, 1, 0})
 		}
-		if (d.Intent.Operation >= to.LockedCompareExchange || d.Intent.Width == 8 && (d.Intent.Operation == to.Test || d.Intent.Operation == to.TestImmediate)) && !newForms[d.Encoding.Form] {
-			newForms[d.Encoding.Form] = true
+		key := formWidth{d.Encoding.Form, d.Intent.Width}
+		if (d.Intent.Operation >= to.LockedCompareExchange || d.Intent.Width == 8 && (d.Intent.Operation == to.Test || d.Intent.Operation == to.TestImmediate)) && !newForms[key] {
+			newForms[key] = true
 			f.Add(uint32(index), uint64(0x80000000ffffffff), int32(-16), []byte{255, 128, 1, 0})
 		}
 	}

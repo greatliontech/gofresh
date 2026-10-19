@@ -177,7 +177,7 @@ func TestTransitionReturnRefusals(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			im, face := returnFixture(t, tc.code)
-			face.Conditions.Locked64 = Locked64Model
+			face.Conditions.LockedMemory = LockedMemoryModel
 			// Underlying writable storage still cannot authorize writing the
 			// protected control word, even with its original numeric contents.
 			face.Regions = []RelativeRegion{{Bytes: RelativeSpan{-24, 8}, Readable: true, Writable: true}}

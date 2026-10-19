@@ -52,13 +52,16 @@ func (m *transitionChecker) validate() error {
 		return err
 	}
 	c := m.face.Conditions
+	if c.SSE != "" && c.SSE != SSEModel {
+		return refuse(m.pc, "transition-sse-premise", "unsupported SSE model")
+	}
 	if c.Syscall != "" && c.Syscall != LinuxAMD64SyscallModel || c.Syscall == "" && c.UserAddressBits != 0 || c.Syscall != "" && c.UserAddressBits != 48 && c.UserAddressBits != 57 {
 		return refuse(m.pc, "transition-primitive-model", "unsupported syscall ABI/address-ceiling configuration")
 	}
 	if c.CPUID != "" && c.CPUID != CPUIDModel {
 		return refuse(m.pc, "transition-primitive-model", "unsupported CPUID model")
 	}
-	if c.Locked64 != "" && c.Locked64 != Locked64Model {
+	if c.LockedMemory != "" && c.LockedMemory != LockedMemoryModel {
 		return refuse(m.pc, "transition-primitive-model", "unsupported locked-memory model")
 	}
 	if c.Machine != MachineModel || !c.InstructionMapping || !c.EntryState || !c.IsolatedExecution || !c.MemoryMapping || !c.NoHiddenAliases || !c.UnalignedAccess {

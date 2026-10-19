@@ -56,10 +56,15 @@ type stateAccess struct {
 
 type stateRMW struct {
 	kind                                             to.Operation
+	width                                            int
 	instruction, readAccess                          int
 	before, compare, replacement, after, accumulator uint64
 	success                                          bool
 	context                                          string
+}
+
+func stateLogical(op to.Operation) bool {
+	return op == to.LockedAnd || op == to.LockedOr || op == to.LockedAndImmediate || op == to.LockedOrImmediate
 }
 
 type stateQuery struct {
@@ -465,7 +470,7 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 			}
 		}
 		r.accesses[len(r.accesses)-1].value = current
-		q := stateRMW{kind: i.Operation, instruction: index, context: r.context, readAccess: len(r.accesses) - 1, before: current, replacement: r.regs[i.Src], after: r.regs[i.Src], accumulator: current}
+		q := stateRMW{kind: i.Operation, width: 8, instruction: index, context: r.context, readAccess: len(r.accesses) - 1, before: current, replacement: r.regs[i.Src], after: r.regs[i.Src], accumulator: current}
 		pointer := r.ptrs[i.Src]
 		if i.Operation == to.LockedExchangeAdd {
 			var carry uint64
@@ -488,6 +493,25 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 		r.primitives = append(r.primitives, q)
 		return
 	}
+	if stateLogical(i.Operation) {
+		off := access(false)
+		before, operand := uint64(r.memory[off].value), i.Immediate
+		if i.Operation == to.LockedAnd || i.Operation == to.LockedOr {
+			operand = read(i.Src, i.HighSrc)
+		}
+		after := before & operand
+		if i.Operation == to.LockedOr || i.Operation == to.LockedOrImmediate {
+			after = before | operand
+		}
+		r.accesses[len(r.accesses)-1].value = before
+		r.primitives = append(r.primitives, stateRMW{kind: i.Operation, width: 1, instruction: index, context: r.context, readAccess: len(r.accesses) - 1, before: before, replacement: operand, after: after})
+		access(true)
+		r.accesses[len(r.accesses)-1].value = after
+		r.memory[off], r.frame[off] = stateByte{value: byte(after)}, true
+		r.flags = [6]bool{false, after == 0, false, after&128 != 0, false, bits.OnesCount8(byte(after))%2 == 0}
+		r.writer = i.Operation
+		return
+	}
 	if i.Operation == to.LockedCompareExchange || i.Operation == to.CompareMemory || i.Operation == to.CompareFromMemory || i.Operation == to.CompareMemoryImmediate {
 		off := access(false)
 		var current uint64
@@ -497,31 +521,29 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 		r.accesses[len(r.accesses)-1].value = current
 		x, y := current, i.Immediate
 		if i.Operation == to.CompareMemory {
-			y = read(i.Src, false)
+			y = read(i.Src, i.HighSrc)
 		}
 		if i.Operation == to.CompareFromMemory {
-			x, y = read(i.Dst, false), current
+			x, y = read(i.Dst, i.HighDst), current
 		}
 		if i.Operation == to.LockedCompareExchange {
-			x, y = r.regs[0], current
+			x, y = read(0, false), current
 		}
 		z := x - y
-		if width == 32 {
-			z = uint64(uint32(z))
-		}
+		z &= ^uint64(0) >> (64 - width)
 		sign := uint64(1) << (width - 1)
 		r.flags = [6]bool{x < y, z == 0, (x^y)&(x^z)&sign != 0, z&sign != 0, (x^y^z)&16 != 0, bits.OnesCount8(byte(z))%2 == 0}
 		r.writer = i.Operation
 		if i.Operation != to.LockedCompareExchange {
 			return
 		}
-		q := stateRMW{instruction: index, context: r.context, readAccess: len(r.accesses) - 1, before: current, compare: x, replacement: r.regs[i.Src], after: current, accumulator: current, success: x == current}
+		q := stateRMW{kind: i.Operation, width: width / 8, instruction: index, context: r.context, readAccess: len(r.accesses) - 1, before: current, compare: x, replacement: read(i.Src, false), after: current, accumulator: current, success: x == current}
 		if q.success {
-			q.after, q.accumulator = q.replacement, x
+			q.after, q.accumulator = q.replacement, r.regs[0]
 		}
 		access(true)
 		r.accesses[len(r.accesses)-1].value = q.after
-		for lane := 0; lane < 8; lane++ {
+		for lane := 0; lane < width/8; lane++ {
 			r.memory[off.add(int64(lane))] = stateByte{value: byte(q.after >> (8 * lane))}
 			r.frame[off.add(int64(lane))] = true
 		}
@@ -1252,10 +1274,10 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 		}
 	}
 	for j, f := range []TransitionFlag{b.Flags.CF, b.Flags.ZF, b.Flags.OF, b.Flags.SF, b.Flags.AF, b.Flags.PF} {
-		if (want.writer == to.AddRegister || want.writer == to.LockedExchangeAdd) && !f.Value.Valid() {
-			t.Fatal("addition lost a required arithmetic flag relation", j)
+		if (want.writer == to.AddRegister || want.writer == to.LockedExchangeAdd || stateLogical(want.writer) && j != 4) && !f.Value.Valid() {
+			t.Fatal("operation lost a required arithmetic flag relation", j)
 		}
-		defined := want.writer != to.And && want.writer != to.Clear32 && want.writer != to.Test && want.writer != to.TestImmediate || j != 4
+		defined := want.writer != to.And && want.writer != to.Clear32 && want.writer != to.Test && want.writer != to.TestImmediate && !stateLogical(want.writer) || j != 4
 		if f.Preserved != (want.writer == 0) || f.Defined != defined || !defined && f.Value.Valid() {
 			t.Fatal("arithmetic flag defined/preserved/value status differs", j, f)
 		}

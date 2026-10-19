@@ -28,6 +28,7 @@ type transitionChecker struct {
 	expansions                 []TransitionExpansion
 	frames                     []TransitionFrame
 	thread                     TransitionThread
+	vectors                    TransitionVectors
 	completingReturn, returned bool
 }
 
@@ -255,24 +256,35 @@ func CheckTransitionContinuation(ctx context.Context, predecessor TransitionCert
 	if proposal.Entry != prior.bound.Entry || proposal.ImageDigest != prior.bound.ImageDigest {
 		return TransitionCertificate{}, refuse(proposal.Entry, "transition-proposal", "image or retained root entry differs")
 	}
-	m.expansions = proposal.Expansions
-	if proposal.Cut == prior.bound.Boundary.PC {
-		return TransitionCertificate{}, refuse(proposal.Cut, "transition-continuation", "cut must advance beyond predecessor")
+	c, err := m.continueTransition(prior, proposal.Cut, proposal.Expansions, &proposal)
+	return c, err
+}
+
+// continueTransition is the one continuation driver for proposed inventories and
+// actual-call replay. A nil proposal requests reconstruction directly from owned
+// bytes; a supplied inventory is independently checked against that same graph.
+// Both paths retain the same advancing-cut, coverage, state and resource rules.
+func (m *transitionChecker) continueTransition(prior checkedTransition, cut uint64, expansions []TransitionExpansion, proposal *TransitionProposal) (TransitionCertificate, error) {
+	m.expansions = expansions
+	if cut == prior.bound.Boundary.PC {
+		return TransitionCertificate{}, refuse(cut, "transition-continuation", "cut must advance beyond predecessor")
 	}
 	for _, span := range prior.bound.Instructions {
 		if !m.tick() {
 			return TransitionCertificate{}, m.err
 		}
-		if proposal.Cut >= span.Start && proposal.Cut < span.End {
-			return TransitionCertificate{}, refuse(proposal.Cut, "transition-continuation", "cut intersects executed predecessor")
+		if cut >= span.Start && cut < span.End {
+			return TransitionCertificate{}, refuse(cut, "transition-continuation", "cut intersects executed predecessor")
 		}
 	}
-	g, err := m.graph(proposal.Cut)
+	g, err := m.graph(cut)
 	if err != nil {
 		return TransitionCertificate{}, err
 	}
-	if err := checkContextInventory(&relationContext{Context: ctx, meter: m.valueBuilder}, g, proposal.Nodes, "transition-proposal", true); err != nil {
-		return TransitionCertificate{}, err
+	if proposal != nil {
+		if err := checkContextInventory(&relationContext{Context: m.ctx, meter: m.valueBuilder}, g, proposal.Nodes, "transition-proposal", true); err != nil {
+			return TransitionCertificate{}, err
+		}
 	}
 	start, err := m.continuationStart(g, prior)
 	if err != nil {
@@ -284,7 +296,7 @@ func CheckTransitionContinuation(ctx context.Context, predecessor TransitionCert
 	if err := m.validateReturnTargetGraph(g); err != nil {
 		return TransitionCertificate{}, err
 	}
-	m.bound.Expansions = append([]TransitionExpansion(nil), proposal.Expansions...)
+	m.bound.Expansions = append([]TransitionExpansion(nil), expansions...)
 	return m.finish(g, start)
 }
 
@@ -352,7 +364,7 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 		s = m.takeState()
 		var predicate br.Term
 		if ins.count == 2 {
-			predicate = m.predicate(ins.inst.Op, s.scalar)
+			predicate = m.transitionPredicate(ins.inst.Op, s.scalar, s.flags)
 		}
 		for edge, next := range ins.next[:ins.count] {
 			incoming := s
@@ -381,6 +393,7 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 	m.installState(cutState)
 	m.pc, m.activation = m.bound.Boundary.PC, m.bound.Boundary.Context
 	m.bound.Thread = m.thread
+	m.bound.Vectors = m.vectors
 	for range m.frames {
 		if !m.tick() {
 			return TransitionCertificate{}, m.err
@@ -459,6 +472,11 @@ func (m *transitionChecker) initial() error {
 	m.bound.InitialPredicates = TransitionPredicates{m.state.flags[flagCarry], m.state.flags[flagZero], m.state.flags[flagLess]}
 	m.bound.Origin = m.state.regs[RSP]
 	m.bound.InitialRegisters = m.state.regs
+	if m.face.Conditions.SSE == SSEModel {
+		m.vectors = m.initialSSEVectors()
+		m.bound.InitialVectors = m.vectors
+		m.bound.SSE = TransitionSSEContext{MXCSRPreserved: true, UpperVectorsPreserved: true}
+	}
 	if m.face.Conditions.Syscall != "" {
 		m.bound.InitialFS = m.scratch(br.Bits(64))
 		m.thread = TransitionThread{FS: TransitionValue{Value: m.bound.InitialFS}, SelectorPreserved: true}
@@ -671,6 +689,12 @@ func (m *transitionChecker) store(off TransitionLocation, v TransitionValue, wid
 }
 
 func (m *transitionChecker) step(i operation, size uint8) error {
+	if isTransitionSSE(i.Op) {
+		return m.sseStep(i, size, &m.vectors, m.face.Conditions.SSE)
+	}
+	if (i.Op == x86asm.AND || i.Op == x86asm.OR) && i.MemBytes == 1 {
+		return m.lockedLogical(i, size)
+	}
 	if i.Op == x86asm.CMPXCHG {
 		return m.lockedCompareExchange(i, size)
 	}
@@ -689,7 +713,7 @@ func (m *transitionChecker) step(i operation, size uint8) error {
 	if i.Op == x86asm.CPUID {
 		return m.cpuid()
 	}
-	if i.Op == x86asm.JMP || i.Op == x86asm.NOP || condition(i.Op) != 0 {
+	if i.Op == x86asm.JMP || i.Op == x86asm.NOP || condition(i.Op) != 0 || i.Op == x86asm.JP || i.Op == x86asm.JNP {
 		return nil
 	}
 	if i.Op == x86asm.CMP || i.Op == x86asm.TEST {

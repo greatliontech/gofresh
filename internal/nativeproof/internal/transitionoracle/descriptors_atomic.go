@@ -17,8 +17,10 @@ func atomicDescriptors(yield func(Descriptor) bool) {
 				n = 256
 			}
 			for sib := 0; sib < n; sib++ {
-				if !yield(Descriptor{Intent: Intent{Operation: NoOp}, Encoding: Encoding{Form: NOP0F1F, NOPModRM: uint8(mode*64 + rm), NOPSIB: uint8(sib)}}) {
-					return
+				for _, form := range []Form{NOP0F1F, NOP660F1F} {
+					if !yield(Descriptor{Intent: Intent{Operation: NoOp}, Encoding: Encoding{Form: form, NOPModRM: uint8(mode*64 + rm), NOPSIB: uint8(sib)}}) {
+						return
+					}
 				}
 			}
 		}
@@ -28,6 +30,32 @@ func atomicDescriptors(yield func(Descriptor) bool) {
 		if i.FS {
 			return true
 		}
+		if i.Operation == Store && i.Width == 32 {
+			i.Operation, e.Form = LockedCompareExchange, LOCKCMPXCHG0FB1
+			if !yield(Descriptor{i, e}) {
+				return false
+			}
+		}
+		i, e = d.Intent, d.Encoding
+		if i.Width == 8 {
+			var operations []Operation
+			var forms []Form
+			switch i.Operation {
+			case Store:
+				operations, forms = []Operation{CompareMemory, LockedAnd, LockedOr}, []Form{CMP38, LOCKAND20, LOCKOR08}
+			case Load:
+				operations, forms = []Operation{CompareFromMemory}, []Form{CMP3A}
+			case StoreImmediate:
+				operations, forms = []Operation{CompareMemoryImmediate, LockedAndImmediate, LockedOrImmediate}, []Form{CMP80, LOCKAND80, LOCKOR80}
+			}
+			for j, op := range operations {
+				i.Operation, e.Form = op, forms[j]
+				if !yield(Descriptor{i, e}) {
+					return false
+				}
+			}
+		}
+		i, e = d.Intent, d.Encoding
 		if i.Operation == MoveRegister && i.Width == 0 && (e.Form == MOV89 || e.Form == MOV8B) {
 			form := ADD01
 			if e.Form == MOV8B {

@@ -753,7 +753,7 @@ func (x *assemblyReferenceMachine) step(statement assemblyReferenceStatement, lo
 		var memory br.Term
 		switch statement.op {
 		case "CMPXCHGQ":
-			result, err := x.isa.CompareExchange64(x.r.registers[nativeproof.RAX].value, current.value, source.value)
+			result, err := x.isa.CompareExchange(x.r.registers[nativeproof.RAX].value, current.value, source.value)
 			if err != nil {
 				return err
 			}

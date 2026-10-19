@@ -179,8 +179,8 @@
     guards; distinguish expected incompatibility from a demonstrated defect.
   - [ ] 5.1w Replace toolchain-variation approval with generic implementation
     verification before resuming 5.2d/5.2e or releasing migrated consumers.
-    Follow this remaining execution order: compose the actual runtime.check call at
-    5.1w.2b.3b.2a.2.2.2.2.11 and complete
+    Follow this remaining execution order: complete runtime.check at
+    5.1w.2b.3b.2a.2.2.2.2.12 and complete
     required bootstrap and compiler
     correspondence; integrate useful stock/custom production reuse; remove the
     approval registry and release Gofresh at 5.1w.7; finish Stipulator's
@@ -538,15 +538,83 @@
                           protected-return controls, plus cancellation and bounds.
                           Keep actual caller-premise discharge at .11 and root
                           applicability at .13; no runtime grant follows here.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.11 Check the conditional
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.11 Check the conditional
                           runtime.check prefix through its actual testAtomic64 call
                           and return, composing the completed callee and its entry
                           premises. Candidate custom CALL 0x472762 targets 0x4723a0
                           and returns to 0x472767; derive these from owned bytes.
+                          Establish the callee's shifted origin domain, current guard
+                          bytes, context provenance, complete memory grants and
+                          protected continuation from the checked caller state.
+                          Derive nested scratch ownership from the parent's retained
+                          lifetime discipline. Retain the exact completed callee
+                          and actual invocation association, original caller inputs,
+                          ordered effects and residual scratch through return and
+                          subsequent reuse; no projection supplies a successor.
+                          Require stock/custom actual-call positives and generated
+                          premise, ownership, control-slot, residual-state, budget
+                          and cancellation controls before closeout.
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.11a Derive width-aware
+                            native locked compare/exchange and byte OR/AND transfers,
+                            byte comparison and the executed operand-size NOP form.
+                            Preserve failed writeback, exact flag semantics and
+                            ordered indivisible groups with generated controls.
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.11b Establish the explicit
+                            SSE applicability and state relation for actual scalar
+                            moves and unordered comparisons, including vector upper
+                            lanes, floating status/control, parity branches and
+                            exceptional outcomes. Require generic value-class and
+                            adversarial controls, not a runtime-symbol shortcut.
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.11c Compose the completed
+                            callee under checked actual-call premises and qualify
+                            the full optimized stock/custom caller prefixes. Retain
+                            guard < incoming RSP-64 as an explicit conditional
+                            parent premise until root applicability establishes it;
+                            the parent's own successful guard does not imply it.
                         - [ ] 5.1w.2b.3b.2a.2.2.2.2.12 Complete conditional
                           runtime.check, including its finite round2 loop and actual
                           return (candidate custom 0x47278f), with checked progress,
                           complete state/effect coverage and source correspondence.
+                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.12a Check native INC64,
+                            variable-count SHL32, SBB32 and scalar AND32 against
+                            exact operand/encoding rules, including carry input,
+                            preserved carry, count masking, conditional flag
+                            definedness and partial-register writes.
+                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.12b Establish finite native
+                            occurrence/progress evidence independently of call
+                            activation. Unfold actual edges under checked incoming
+                            states and prove no feasible residual traversal at the
+                            proposed bound. Continue the actual child-return
+                            successor through the loop and parent RET on both
+                            selected artifacts; retain effects and residual state.
+                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.12c Establish typed local
+                            source effects from the complete entry: selected layout
+                            constants, allocations, arrays, subobjects and checked
+                            byte-width storage representation. Preserve whole-root
+                            coverage and arbitrary represented initial globals.
+                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.12d Generalize selected
+                            assembly references and actual source-call application
+                            to CAS32 and byte OR/AND: exact argument/result layout,
+                            void-frame extent, narrow external storage and ordered
+                            indivisible effects. Reuse checked transfer semantics;
+                            neither declaration names nor comments supply meaning.
+                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.12e Check live-object unsafe
+                            integer/float bit views under selected target layout,
+                            typed conversion, float initialization and IEEE equality.
+                            Separate reflexive abstract bit identity from language
+                            NaN equality; derive every repeated source comparison
+                            and justify native elimination/reuse of pure operations.
+                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.12f Establish finite typed
+                            source arithmetic and progress for the actual round2
+                            call: selected argument, addition, shift widths, phi
+                            predecessors and checked remaining-path exhaustion.
+                            Do not generalize termination to all positive inputs.
+                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.12g Compose full selected
+                            check source with optimized stock/custom complete
+                            native return: local/global representation, narrow
+                            atomic grouping, actual source/native child association,
+                            justified ordinary-access projection and final context.
+                            Preserve conditional root premises for .13.
                         - [ ] 5.1w.2b.3b.2a.2.2.2.2.13 Compose the ELF-root
                           continuation through the native g0/m0-addressed writes,
                           CLD/XMM wrapper and completed runtime.check: candidate

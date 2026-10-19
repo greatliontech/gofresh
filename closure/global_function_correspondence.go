@@ -13,7 +13,7 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-const globalFunctionRules = "gofresh/global-function-correspondence@1;" + regionRules + ";" + nativeproof.TransitionRules + ";" + br.RuleModel
+const globalFunctionRules = "gofresh/global-function-correspondence@2;" + regionRules + ";" + nativeproof.TransitionRules + ";" + br.RuleModel
 
 // A mapping names the actual typed parameter and its incoming full native word.
 // The present effect-only grammar admits only unused pointer parameters. A word
@@ -423,8 +423,8 @@ type globalFunctionNativeAtomic struct {
 
 func globalFunctionNativeGroup(effect nativeproof.PrimitiveEffect) (globalFunctionNativeAtomic, bool) {
 	switch e := effect.(type) {
-	case nativeproof.LockedCompareExchange64Effect:
-		return globalFunctionNativeAtomic{x86asm.CMPXCHG, e.PC, e.Context, e.ReadAccess, e.WriteAccess, effect}, true
+	case nativeproof.LockedCompareExchangeEffect:
+		return globalFunctionNativeAtomic{x86asm.CMPXCHG, e.PC, e.Context, e.ReadAccess, e.WriteAccess, effect}, e.Width == 8
 	case nativeproof.LockedExchange64Effect:
 		return globalFunctionNativeAtomic{x86asm.XCHG, e.PC, e.Context, e.ReadAccess, e.WriteAccess, effect}, true
 	case nativeproof.LockedExchangeAdd64Effect:
@@ -656,6 +656,9 @@ func (p *globalFunctionCorrespondence) administrativeAccess(b nativeproof.Transi
 }
 
 func (p *globalFunctionCorrespondence) checkFinal(ctx context.Context, builder *br.Builder, b nativeproof.TransitionReturnBound) error {
+	if b.Prefix.Interface.Conditions.SSE != "" && (!b.State.SSE.MXCSRPreserved || !b.State.SSE.UpperVectorsPreserved) {
+		return globalFunctionError("floating control or higher vector context was not preserved")
+	}
 	for _, binding := range p.representation.globals {
 		value := readRegionLocation(p.source.region.packet.observations[0].state, regionLocation{object: regionObject{kind: regionGlobal, site: binding.global}}, types.Typ[types.Uint64])
 		word, ok := regionUint64(value)
@@ -723,6 +726,15 @@ func (p *globalFunctionCorrespondence) checkFinal(ctx context.Context, builder *
 			}
 			if err := globalFunctionIndependent(ctx, value.Value, map[br.Term]bool{b.Prefix.Origin: true}); err != nil {
 				return err
+			}
+		}
+		if b.Prefix.Interface.Conditions.SSE != "" {
+			for _, vector := range b.State.Vectors {
+				for _, lane := range []br.Term{vector.Lo, vector.Hi} {
+					if err := globalFunctionIndependent(ctx, lane, map[br.Term]bool{b.Prefix.Origin: true}); err != nil {
+						return fmt.Errorf("private frame address escapes in returned vector: %w", err)
+					}
+				}
 			}
 		}
 	}

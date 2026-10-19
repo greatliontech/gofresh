@@ -18,16 +18,16 @@ func atomicDescriptorState(t testing.TB, d to.Descriptor, i to.Intent, raw []byt
 	t.Helper()
 	f := stateFace(16, 0)
 	f.Regions, f.Words = nil, nil
-	f.Conditions.Locked64 = Locked64Model
+	f.Conditions.LockedMemory = LockedMemoryModel
 	var ops []dagOp
-	rmw := i.Operation == to.LockedCompareExchange || i.Operation == to.LockedExchange || i.Operation == to.LockedExchangeAdd
+	rmw := i.Operation == to.LockedCompareExchange || i.Operation == to.LockedExchange || i.Operation == to.LockedExchangeAdd || stateLogical(i.Operation)
 	mem := rmw || i.Operation == to.SetMemory || i.Operation == to.CompareMemory || i.Operation == to.CompareFromMemory || i.Operation == to.CompareMemoryImmediate
 	w := 8
 	if i.Width != 0 {
 		w = int(i.Width) / 8
 	}
 	if rmw {
-		i.SignedDisp &= ^int64(7)
+		i.SignedDisp &= ^int64(w - 1)
 	}
 	if mem && !i.RIP {
 		if i.Base != 4 {
@@ -64,7 +64,7 @@ func atomicLayout(t testing.TB, descriptors []to.Descriptor) (stateLayout, Trans
 	}
 	x := dagArrange(t, ops, 0).stateLayout
 	f := stateFace(16, 0)
-	f.Conditions.Locked64 = Locked64Model
+	f.Conditions.LockedMemory = LockedMemoryModel
 	return x, f
 }
 
@@ -128,59 +128,63 @@ func TestTransitionLocked64BothOutcomesAndBytes(t *testing.T) {
 }
 
 func TestTransferKernelIndependentArithmetic(t *testing.T) {
-	b := br.NewBuilder(3)
-	scope := br.NewScope()
-	a, _ := b.Input(br.Bits(64), scope, 0)
-	current, _ := b.Input(br.Bits(64), scope, 1)
-	replacement, _ := b.Input(br.Bits(64), scope, 2)
-	k, err := NewTransferKernel(t.Context(), RelationLimits{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, err := k.CompareExchange64(a, current, replacement)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var conditions []br.Term
-	ccs := []uint8{2, 3, 4, 5, 6, 7, 12, 13, 14, 15}
-	ops := []x86asm.Op{x86asm.SETB, x86asm.SETAE, x86asm.SETE, x86asm.SETNE, x86asm.SETBE, x86asm.SETA, x86asm.SETL, x86asm.SETGE, x86asm.SETLE, x86asm.SETG}
-	for _, op := range ops {
-		v, err := k.SetCondition(op, r.Predicates)
+	for _, width := range []int{32, 64} {
+		b := br.NewBuilder(3)
+		scope := br.NewScope()
+		a, _ := b.Input(br.Bits(width), scope, 0)
+		current, _ := b.Input(br.Bits(width), scope, 1)
+		replacement, _ := b.Input(br.Bits(width), scope, 2)
+		k, err := NewTransferKernel(t.Context(), RelationLimits{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		conditions = append(conditions, v)
-	}
-	check := func(old, now, new uint64) bool {
-		values := map[br.Term]uint64{a: old, current: now, replacement: new}
-		z := old - now
-		flags := [6]bool{old < now, z == 0, (old^now)&(old^z)&(1<<63) != 0, z>>63 != 0, (old^now^z)&16 != 0, bits.OnesCount8(byte(z))%2 == 0}
-		for j, f := range []TransitionFlag{r.Flags.CF, r.Flags.ZF, r.Flags.OF, r.Flags.SF, r.Flags.AF, r.Flags.PF} {
-			if !f.Defined || f.Preserved || (stateEval(t, f.Value, values) != 0) != flags[j] {
-				t.Fatal("CMPXCHG flag differs", j, old, now)
+		r, err := k.CompareExchange(a, current, replacement)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var conditions []br.Term
+		ccs := []uint8{2, 3, 4, 5, 6, 7, 12, 13, 14, 15}
+		ops := []x86asm.Op{x86asm.SETB, x86asm.SETAE, x86asm.SETE, x86asm.SETNE, x86asm.SETBE, x86asm.SETA, x86asm.SETL, x86asm.SETGE, x86asm.SETLE, x86asm.SETG}
+		for _, op := range ops {
+			v, err := k.SetCondition(op, r.Predicates)
+			if err != nil {
+				t.Fatal(err)
+			}
+			conditions = append(conditions, v)
+		}
+		check := func(old, now, new uint64) bool {
+			mask, sign := ^uint64(0)>>(64-width), uint64(1)<<(width-1)
+			old, now, new = old&mask, now&mask, new&mask
+			values := map[br.Term]uint64{a: old, current: now, replacement: new}
+			z := (old - now) & mask
+			flags := [6]bool{old < now, z == 0, (old^now)&(old^z)&sign != 0, z&sign != 0, (old^now^z)&16 != 0, bits.OnesCount8(byte(z))%2 == 0}
+			for j, f := range []TransitionFlag{r.Flags.CF, r.Flags.ZF, r.Flags.OF, r.Flags.SF, r.Flags.AF, r.Flags.PF} {
+				if !f.Defined || f.Preserved || (stateEval(t, f.Value, values) != 0) != flags[j] {
+					t.Fatal("CMPXCHG flag differs", j, old, now)
+				}
+			}
+			wantMemory, wantAccumulator := now, now
+			if old == now {
+				wantMemory, wantAccumulator = new, old
+			}
+			if stateEval(t, r.Memory, values) != wantMemory || stateEval(t, r.Accumulator, values) != wantAccumulator {
+				t.Fatal("CMPXCHG arm differs")
+			}
+			for j, v := range conditions {
+				if (stateEval(t, v, values) != 0) != dagCondition(t, ccs[j], flags) || stateEval(t, v, values) > 1 {
+					t.Fatal("SET predicate differs")
+				}
+			}
+			return true
+		}
+		for _, old := range []uint64{0, 1, 15, 16, 127, 128, 1<<31 - 1, 1 << 31, 1<<63 - 1, 1 << 63, ^uint64(0)} {
+			for _, now := range []uint64{0, old, ^old, old + 1} {
+				check(old, now, 17)
 			}
 		}
-		wantMemory, wantAccumulator := now, now
-		if old == now {
-			wantMemory, wantAccumulator = new, old
+		if err := quick.Check(check, &quick.Config{MaxCount: 128}); err != nil {
+			t.Fatal(err)
 		}
-		if stateEval(t, r.Memory, values) != wantMemory || stateEval(t, r.Accumulator, values) != wantAccumulator {
-			t.Fatal("CMPXCHG arm differs")
-		}
-		for j, v := range conditions {
-			if (stateEval(t, v, values) != 0) != dagCondition(t, ccs[j], flags) || stateEval(t, v, values) > 1 {
-				t.Fatal("SET predicate differs")
-			}
-		}
-		return true
-	}
-	for _, old := range []uint64{0, 1, 15, 16, 127, 128, 1<<63 - 1, 1 << 63, ^uint64(0)} {
-		for _, now := range []uint64{0, old, ^old, old + 1} {
-			check(old, now, 17)
-		}
-	}
-	if err := quick.Check(check, &quick.Config{MaxCount: 128}); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -188,6 +192,8 @@ func TestTransferKernelRefusesMissingAndExhaustedInputs(t *testing.T) {
 	b := br.NewBuilder(8)
 	word, _ := b.Const(br.Bits(64), 1)
 	narrow, _ := b.Const(br.Bits(8), 1)
+	dword, _ := b.Const(br.Bits(32), 1)
+	half, _ := b.Const(br.Bits(16), 1)
 	truth, _ := b.Const(br.Bool(), 1)
 	newKernel := func() *TransferKernel {
 		k, err := NewTransferKernel(t.Context(), RelationLimits{})
@@ -196,8 +202,8 @@ func TestTransferKernelRefusesMissingAndExhaustedInputs(t *testing.T) {
 		}
 		return k
 	}
-	for _, inputs := range [][3]br.Term{{word, word, narrow}, {word, narrow, word}, {narrow, word, word}, {word, br.Term{}, word}, {truth, word, word}} {
-		r, err := newKernel().CompareExchange64(inputs[0], inputs[1], inputs[2])
+	for _, inputs := range [][3]br.Term{{word, word, narrow}, {word, narrow, word}, {narrow, word, word}, {word, br.Term{}, word}, {truth, word, word}, {dword, word, dword}, {word, dword, dword}, {dword, dword, word}, {half, half, half}, {narrow, narrow, narrow}} {
+		r, err := newKernel().CompareExchange(inputs[0], inputs[1], inputs[2])
 		if err == nil || r != (CompareExchangeResult{}) {
 			t.Fatal("invalid typed RMW acquired result")
 		}
@@ -217,14 +223,14 @@ func TestTransferKernelRefusesMissingAndExhaustedInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancel()
-	if r, err := k.CompareExchange64(word, word, word); !errors.Is(err, context.Canceled) || r != (CompareExchangeResult{}) {
+	if r, err := k.CompareExchange(word, word, word); !errors.Is(err, context.Canceled) || r != (CompareExchangeResult{}) {
 		t.Fatal("cancelled kernel result", r, err)
 	}
 	limited, err := NewTransferKernel(t.Context(), RelationLimits{Work: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r, err := limited.CompareExchange64(word, word, word); err == nil || r != (CompareExchangeResult{}) {
+	if r, err := limited.CompareExchange(word, word, word); err == nil || r != (CompareExchangeResult{}) {
 		t.Fatal("exhausted kernel result")
 	}
 	if _, err := NewTransferKernel(nil, RelationLimits{}); err == nil {
@@ -240,7 +246,7 @@ func TestTransitionLocked64PermissionsModelAndAlignment(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := stateFace(16, 0)
-	f.Conditions.Locked64 = Locked64Model
+	f.Conditions.LockedMemory = LockedMemoryModel
 	for _, mode := range []string{"good", "missing", "unknown", "readonly", "writeonly", "unaligned", "varying-alignment", "short", "expansion", "wrong-context"} {
 		t.Run(mode, func(t *testing.T) {
 			face := cloneTransitionInterface(f)
@@ -250,9 +256,9 @@ func TestTransitionLocked64PermissionsModelAndAlignment(t *testing.T) {
 			face.Regions = []RelativeRegion{{RelativeSpan{0, 8}, true, true}}
 			switch mode {
 			case "missing":
-				face.Conditions.Locked64 = ""
+				face.Conditions.LockedMemory = ""
 			case "unknown":
-				face.Conditions.Locked64 = "unknown"
+				face.Conditions.LockedMemory = "unknown"
 			case "readonly":
 				face.Regions[0].Writable = false
 			case "writeonly":
@@ -284,7 +290,7 @@ func TestTransitionLocked64PermissionsModelAndAlignment(t *testing.T) {
 		t.Fatal(err)
 	}
 	absent := f
-	absent.Conditions.Locked64 = ""
+	absent.Conditions.LockedMemory = ""
 	root, err := CheckTransition(t.Context(), im, absent, rootP, TransitionLimits{})
 	if err != nil {
 		t.Fatal(err)
@@ -312,7 +318,7 @@ func TestTransitionLocked64PermissionsModelAndAlignment(t *testing.T) {
 func TestTransitionAtomicInspectionOwnershipAndCancellation(t *testing.T) {
 	im := image(t, hexBytes(t, "f0480fb114240f94c184c9c3"))
 	f := stateFace(16, 0)
-	f.Conditions.Locked64 = Locked64Model
+	f.Conditions.LockedMemory = LockedMemoryModel
 	p, err := ProposeTransition(t.Context(), im, testEntry+9, TransitionLimits{}, TransitionExpansion{PC: testEntry}, TransitionExpansion{PC: testEntry + 6})
 	if err != nil {
 		t.Fatal(err)
@@ -374,7 +380,7 @@ func TestTransitionAtomicInspectionOwnershipAndCancellation(t *testing.T) {
 	}
 	projection, _ := c.Bound()
 	projection.Accesses[0].Value = br.Term{}
-	projection.PrimitiveEffects[0] = LockedCompareExchange64Effect{}
+	projection.PrimitiveEffects[0] = LockedCompareExchangeEffect{}
 	after, _ := c.Bound()
 	if !reflect.DeepEqual(before, after) {
 		t.Fatal("projection/sibling changed checked state")
@@ -424,7 +430,7 @@ func TestTransitionAtomicRawEncodingControls(t *testing.T) {
 			compareExecutedEncoding(t, code[:j])
 		}
 	}
-	for _, form := range []string{"480fb111", "f00fb111", "f066480fb111", "f0f0480fb111", "f0480fb1d1", "f0480fb1042500000000", "f04b0fb11424", "f2480fb111", "f0480fb011", "0f94c8", "0f90c0", "0f98c0", "660f94c1", "f00f94c1", "6684c1", "f6c9ff", "0f94042500000000"} {
+	for _, form := range []string{"480fb111", "f066480fb111", "f0f0480fb111", "f0480fb1d1", "f0480fb1042500000000", "f04b0fb11424", "f2480fb111", "f0480fb011", "0f94c8", "0f90c0", "0f98c0", "660f94c1", "f00f94c1", "6684c1", "f6c9ff", "0f94042500000000"} {
 		compareExecutedEncoding(t, hexBytes(t, form))
 	}
 }
@@ -476,7 +482,7 @@ func TestTransitionAtomicActivationAndCumulativeResources(t *testing.T) {
 			}
 			choices := []TransitionExpansion{{PC: testEntry}, {PC: testEntry + 5}, {PC: testEntry + 11, Context: ctx1}, {PC: setPC, Context: ctx1}, {PC: testEntry + 11, Context: ctx2}, {PC: setPC, Context: ctx2}}
 			f := stateFace(16, 0)
-			f.Conditions.Locked64 = Locked64Model
+			f.Conditions.LockedMemory = LockedMemoryModel
 			p, err := ProposeTransition(t.Context(), im, end, TransitionLimits{}, choices...)
 			if err != nil {
 				t.Fatal(err)
@@ -508,7 +514,7 @@ func TestTransitionAtomicActivationAndCumulativeResources(t *testing.T) {
 				var read, write int
 				switch tc.op {
 				case x86asm.CMPXCHG:
-					e, ok := b.PrimitiveEffects[j].(LockedCompareExchange64Effect)
+					e, ok := b.PrimitiveEffects[j].(LockedCompareExchangeEffect)
 					if !ok {
 						t.Fatal("wrong CMPXCHG primitive type")
 					}
@@ -590,7 +596,7 @@ func TestTransitionExchangePreservesUndefinedFlags(t *testing.T) {
 				at := testEntry + uint64(len(prefix))
 				cut := at + uint64(len(rmw))
 				f := stateFace(16, 0)
-				f.Conditions.Locked64 = Locked64Model
+				f.Conditions.LockedMemory = LockedMemoryModel
 				first, err := ProposeTransition(t.Context(), im, at, TransitionLimits{}, TransitionExpansion{PC: testEntry})
 				if err != nil {
 					t.Fatal(err)

@@ -7,11 +7,14 @@ import "fmt"
 func encodeAtomic(i Intent, e Encoding) ([]byte, error) {
 	bad := func() ([]byte, error) { return nil, fmt.Errorf("invalid atomic/predicate intent: %+v / %+v", i, e) }
 	if i.Operation == NoOp {
-		if e.Form == NOP0F1F {
+		if e.Form == NOP0F1F || e.Form == NOP660F1F {
 			if i != (Intent{Operation: NoOp}) || e.DispBytes != 0 || e.SIB || e.Scale != 0 || e.NOPModRM&0x38 != 0 || e.REX != 0 {
 				return bad()
 			}
 			b := []byte{}
+			if e.Form == NOP660F1F {
+				b = append(b, 0x66)
+			}
 			b = append(b, 0x0f, 0x1f, e.NOPModRM)
 			mode, rm := e.NOPModRM>>6, e.NOPModRM&7
 			if mode != 3 && rm == 4 {
@@ -53,10 +56,28 @@ func encodeAtomic(i Intent, e Encoding) ([]byte, error) {
 	opcode, group, twoByte, locked, dropImmediate := byte(0), byte(0), false, false, false
 	switch i.Operation {
 	case LockedCompareExchange:
-		if i.Width != 0 || i.Dst != 0 || i.HighDst || i.HighSrc || i.Condition != 0 || i.Immediate != 0 || form != LOCKCMPXCHG0FB1 {
+		if i.Width != 0 && i.Width != 32 || i.Dst != 0 || i.HighDst || i.HighSrc || i.Condition != 0 || i.Immediate != 0 || form != LOCKCMPXCHG0FB1 {
 			return bad()
 		}
 		i.Operation, e.Form, opcode, twoByte, locked = Store, MOV89, 0xb1, true, true
+	case LockedAnd, LockedOr:
+		if i.Width != 8 || i.Condition != 0 || i.Operation == LockedAnd && form != LOCKAND20 || i.Operation == LockedOr && form != LOCKOR08 {
+			return bad()
+		}
+		opcode = 0x20
+		if i.Operation == LockedOr {
+			opcode = 0x08
+		}
+		i.Operation, e.Form, locked = Store, MOV88, true
+	case LockedAndImmediate, LockedOrImmediate:
+		if i.Width != 8 || i.Condition != 0 || i.Operation == LockedAndImmediate && form != LOCKAND80 || i.Operation == LockedOrImmediate && form != LOCKOR80 {
+			return bad()
+		}
+		group = 4
+		if i.Operation == LockedOrImmediate {
+			group = 1
+		}
+		i.Operation, e.Form, opcode, locked = StoreImmediate, MOVC6, 0x80, true
 	case LockedExchange, LockedExchangeAdd:
 		if i.Width != 0 || i.Dst != 0 || i.HighDst || i.HighSrc || i.Condition != 0 || i.Immediate != 0 {
 			return bad()
@@ -89,17 +110,25 @@ func encodeAtomic(i Intent, e Encoding) ([]byte, error) {
 		}
 		i.Condition, e.Form, opcode, twoByte, dropImmediate = 0, MOVC6, 0x90+i.Condition, true, true
 	case CompareMemory, CompareFromMemory:
-		if i.Width != 0 && i.Width != 32 || i.Condition != 0 {
+		if i.Width != 0 && i.Width != 32 && i.Width != 8 || i.Condition != 0 {
 			return bad()
 		}
-		if i.Operation == CompareMemory && form == CMP39 {
+		if i.Width == 8 && i.Operation == CompareMemory && form == CMP38 {
+			i.Operation, e.Form, opcode = Store, MOV88, 0x38
+		} else if i.Width == 8 && i.Operation == CompareFromMemory && form == CMP3A {
+			i.Operation, e.Form, opcode = Load, MOV8A, 0x3a
+		} else if i.Width != 8 && i.Operation == CompareMemory && form == CMP39 {
 			i.Operation, e.Form, opcode = Store, MOV89, 0x39
-		} else if i.Operation == CompareFromMemory && form == CMP3B {
+		} else if i.Width != 8 && i.Operation == CompareFromMemory && form == CMP3B {
 			i.Operation, e.Form, opcode = Load, MOV8B, 0x3b
 		} else {
 			return bad()
 		}
 	case CompareMemoryImmediate:
+		if i.Width == 8 && i.Condition == 0 && form == CMP80 {
+			i.Operation, e.Form, opcode, group = StoreImmediate, MOVC6, 0x80, 7
+			break
+		}
 		if i.Width != 0 && i.Width != 32 || i.Condition != 0 || form != CMP81 && form != CMP83 {
 			return bad()
 		}

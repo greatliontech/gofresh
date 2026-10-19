@@ -318,12 +318,41 @@ their names or versions confer no authority. A layer-visible exception handler o
 additional ordinary-memory effect needs its own checked composition. The model does
 not establish actual process applicability or observe any CPU response.
 
-An ordinary x86-64 locked 64-bit memory compare/exchange is an architectural
-read/modify/write occurrence. It reads the current eight destination bytes and
-compares their unsigned bit pattern with incoming RAX. Equality writes the
-incoming 64-bit source-register value to the destination and leaves RAX unchanged;
-inequality writes the read value back to the destination and replaces RAX with
-that value. The 64-bit subtraction of the original destination from incoming RAX
+An optional ordinary legacy-SSE2 model requires available and enabled SSE/SSE2,
+an execution context in which the selected instructions do not cause device-not-
+available or invalid-opcode faults, and stable architectural vector and floating
+control state under the retained interference conditions. It grants no AVX or
+floating arithmetic semantics. Scalar memory loads into XMM registers read exactly
+four or eight bytes, copy their bit patterns without numerical conversion, and
+zero the remaining bits of that 128-bit destination. Legacy encodings preserve
+the higher architectural vector state. Unspecified initial XMM bits remain
+arbitrary and retain their identities across branches, calls and continuations.
+
+Unordered scalar comparisons interpret the low binary32 or binary64 operands.
+The supported no-floating-exception relation must establish from the actual
+incoming values that neither operand is a signaling NaN or a nonzero subnormal.
+This is a checked operand condition, not an assumed normal successor. Quiet NaNs,
+infinities, normal values and both signed zeros are admitted. An unordered result
+sets carry, zero and parity; an ordered less-than result sets only carry; ordered
+equality sets only zero, with the two zeros comparing equal; ordered greater-than
+clears all three. Overflow, sign and auxiliary carry are cleared. The comparison
+changes neither operand nor floating status/control state. The retained rounding,
+exception-mask and flush controls need no fixed values for this operand domain.
+A feasible excluded operand class refuses this bounded relation instead of erasing
+its possible exception or status effect. A parity branch consumes its actual
+defined parity value, never an invented independent input after a comparison.
+The instruction definitions are the MOVSS, MOVSD, UCOMISS and UCOMISD entries
+and SIMD exception rules in the [Intel instruction-set manual](https://intel.github.io/SDM/sdm.html);
+these define machine semantics, not approval of a selected library or compiler.
+
+An ordinary x86-64 locked 32- or 64-bit memory compare/exchange is an architectural
+read/modify/write occurrence. It reads the current four or eight destination bytes
+and compares their unsigned bit pattern with incoming EAX or RAX. Equality writes
+the incoming matching-width source-register value to the destination and leaves
+the full RAX unchanged; inequality writes the read value back to the destination
+and replaces EAX or RAX with that value. A 32-bit failure zero-extends the loaded
+EAX into RAX; a 32-bit success preserves the incoming high RAX bits. The operand-
+width subtraction of the original destination from the incoming accumulator
 defines CF, PF, AF, ZF, SF and OF in both arms; other flags remain unchanged. The
 failure arm retains its write cycle and write-permission obligation even though
 the destination bytes are unchanged.
@@ -334,13 +363,24 @@ conditional store. An isolated-prefix theorem records this ordering without
 establishing a concurrent library's history, language-level synchronization,
 global execution schedule or timing property.
 
+An ordinary locked byte AND or OR reads and writes exactly one byte. Its result
+is the corresponding bitwise operation on the incoming destination and selected
+byte-register or immediate operand. It clears carry and overflow, derives zero,
+sign and parity from the byte result, and leaves auxiliary carry undefined.
+The register operand is not written. Even unchanged-byte results retain the
+write, write permission and indivisible read/write ordering occurrence. Atomic
+effect evidence identifies the actual operation and width; a narrower operation
+cannot supply a wider source relation through a shared operation name.
+
 Applicability requires the exact supported memory form, full-width canonical
 nonwrapping extent, read and write permissions, and ordinary coherent RAM under
 the retained mapping, alias and interference conditions. Alignment and applicable
 lock-fault controls must establish the ordinary successor, including split/bus-lock
 and transactional restrictions where relevant; assuming that the operation
 completed normally is insufficient. A register destination, unsupported prefix,
-width or address form gains no locked-memory semantics. Missing applicability
+width or address form gains no locked-memory semantics. Natural operand alignment
+and a power-of-two cache line of at least eight bytes establish no page/cache-line
+split for the supported one-, four- and eight-byte forms. Missing applicability
 refuses an executed occurrence. Every read/write and ordering occurrence survives
 later result overwrites and composition. Byte condition-code stores write exactly
 zero or one according to their actual defined flag predicate, change no flags,
@@ -473,6 +513,12 @@ entry-to-cut transition MUST satisfy these obligations:
   All unspecified register bits, flags and memory remain arbitrary. Entry facts and
   their authority are retained separately from derived outputs; expected outputs
   and normal completion cannot substitute for entry-state premises. Retained
+  predicates may include consequences checked under the original origin domain
+  without adding caller premises. In particular, a current unsigned word below
+  a nonwrapping original-origin-minus-distance is also below the original origin;
+  the reverse inference supplies no space for a child activation. The original
+  stronger relation remains retained, and no such equivalence is asserted outside
+  its origin domain. Retained
   entry-flag predicates have explicit
   architectural meanings and unchanged identities across later overwrites.
   The scope retains active call/return context and any per-thread machine state
@@ -691,6 +737,20 @@ conditional callee-return relation MUST establish these obligations:
   return evidence is distinct from entry-to-cut evidence and is usable only where
   the caller establishes the callee's interface from its actual incoming state.
   Copying projections or matching endpoint addresses supplies no such relation.
+  Application binds the exact subordinate theorem to the decoded CALL target,
+  actual post-CALL input state and active continuation. Shifted origin domains,
+  memory permissions, current entry relations, flag definedness, context and
+  any private lifetime follow from the unchanged caller premises. Child private
+  storage may inherit a containing parent lifetime; its control word remains
+  protected throughout the child scope, including against unchanged-value writes.
+  The returned execution must discharge that child activation and restore the
+  parent's active continuation context. Checked re-execution under the caller
+  state may supply the complete successor while retaining the applicable callee
+  theorem; copied callee outputs cannot stand for that relation. Construction,
+  premise discharge and retained dependencies share the caller's cumulative
+  resource account. Source-level use additionally establishes the actual typed
+  call, current represented state and corresponding dynamic effect occurrences;
+  callee-local input or primitive-outcome names cannot silently become caller inputs.
   This conditional fact grants no executable-root reachability, source-storage
   association, historical execution authority or ordinary runtime discharge.
 

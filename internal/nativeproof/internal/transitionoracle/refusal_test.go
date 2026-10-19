@@ -52,7 +52,8 @@ func TestOpcodeAndPrefixPopulation(t *testing.T) {
 		b := append([]byte{byte(first)}, make([]byte, 14)...)
 		valid := first >= 0xb0 && first <= 0xbf || first == 0xeb || first == 0xe9 || first >= 0x72 && first <= 0x77 || first >= 0x7c && first <= 0x7f || first == 0x3d || first == 0xa9 || first == 0x88 || first == 0x89 || first == 0x8a || first == 0x8b || first == 0xc6 || first == 0xc7
 		valid = valid || first == 0xe8 || first == 0xc3 || first >= 0x50 && first <= 0x5f
-		valid = valid || first == 0x39 || first == 0x3b || first == 0xa8 || first == 0x90
+		valid = valid || first == 0x7a || first == 0x7b
+		valid = valid || first == 0x39 || first == 0x3b || first == 0x38 || first == 0x3a || first == 0xa8 || first == 0x90
 		_, err := Parse(b, 1<<32)
 		if (err == nil) != valid {
 			t.Fatalf("first byte %x accepted=%v want %v", first, err == nil, valid)

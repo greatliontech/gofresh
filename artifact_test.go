@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -371,6 +372,30 @@ func TestValue(t *testing.T) {
 			if err := u.Submit(contribution, Terminal{Kind: NormalCompletion}); err != nil {
 				t.Fatal(err)
 			}
+			var writer *os.File
+			if mutate {
+				// Reaping the process need not immediately release the executable's
+				// write exclusion. Acquire the mutation capability before closing,
+				// but change no bytes until the sealed-view observation below.
+				// Keep the same inode: replacement would not test content motion.
+				ready, cancel := context.WithTimeout(ctx, 5*time.Second)
+				defer cancel()
+				for {
+					writer, err = os.OpenFile(binary, os.O_WRONLY, 0)
+					if !errors.Is(err, syscall.ETXTBSY) {
+						break
+					}
+					select {
+					case <-ready.Done():
+						t.Fatalf("executed artifact remained unwritable: %v: %v", ready.Err(), err)
+					case <-time.After(time.Millisecond):
+					}
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer writer.Close()
+			}
 			observed := false
 			var finalizedAccount ProcessAccount
 			priorObserve := viewTestHooks.observe
@@ -391,12 +416,8 @@ func TestValue(t *testing.T) {
 					t.Fatalf("view validation preceded normal process finalization: %+v", finalizedAccount)
 				}
 				if mutate {
-					file, err := os.OpenFile(binary, os.O_WRONLY, 0)
-					if err != nil {
-						t.Fatal(err)
-					}
-					_, err = file.WriteAt([]byte{bound.inspected.bytes[0] ^ 0xff}, 0)
-					closeErr := file.Close()
+					_, err := writer.WriteAt([]byte{bound.inspected.bytes[0] ^ 0xff}, 0)
+					closeErr := writer.Close()
 					if err != nil || closeErr != nil {
 						t.Fatalf("artifact motion: write=%v close=%v", err, closeErr)
 					}

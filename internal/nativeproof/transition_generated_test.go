@@ -356,10 +356,17 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 			}
 			continue
 		}
-		if p, ok := effect.(LockedCompareExchange64Effect); ok {
-			q, valid := b.PrimitiveEffects[j].(LockedCompareExchange64Effect)
-			if !valid || p.PC != q.PC || p.Context != q.Context || p.ReadAccess != q.ReadAccess || p.WriteAccess != q.WriteAccess {
+		if p, ok := effect.(LockedCompareExchangeEffect); ok {
+			q, valid := b.PrimitiveEffects[j].(LockedCompareExchangeEffect)
+			if !valid || p.Width != q.Width || p.PC != q.PC || p.Context != q.Context || p.ReadAccess != q.ReadAccess || p.WriteAccess != q.WriteAccess {
 				t.Fatal("locked occurrence differs")
+			}
+			continue
+		}
+		if p, ok := effect.(LockedLogicalEffect); ok {
+			q, valid := b.PrimitiveEffects[j].(LockedLogicalEffect)
+			if !valid || p.Width != q.Width || p.Kind != q.Kind || p.PC != q.PC || p.Context != q.Context || p.ReadAccess != q.ReadAccess || p.WriteAccess != q.WriteAccess {
+				t.Fatal("locked logical occurrence differs")
 			}
 			continue
 		}
@@ -426,10 +433,17 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 			}
 			continue
 		}
-		if p, ok := effect.(LockedCompareExchange64Effect); ok {
-			q := b.PrimitiveEffects[j].(LockedCompareExchange64Effect)
+		if p, ok := effect.(LockedCompareExchangeEffect); ok {
+			q := b.PrimitiveEffects[j].(LockedCompareExchangeEffect)
 			for k, root := range []br.Term{p.Before, p.Compare, p.Replacement, p.After, p.Accumulator, p.Success} {
 				equal(root, []br.Term{q.Before, q.Compare, q.Replacement, q.After, q.Accumulator, q.Success}[k])
+			}
+			continue
+		}
+		if p, ok := effect.(LockedLogicalEffect); ok {
+			q := b.PrimitiveEffects[j].(LockedLogicalEffect)
+			for k, root := range []br.Term{p.Before, p.Operand, p.After} {
+				equal(root, []br.Term{q.Before, q.Operand, q.After}[k])
 			}
 			continue
 		}

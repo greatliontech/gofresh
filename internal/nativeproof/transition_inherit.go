@@ -100,6 +100,14 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 	}
 	m.lo, m.hi, _ = originRange(m.face.Origin)
 	m.builder = br.NewBuilder(m.limits.Nodes)
+	if m.face.Conditions.SSE == SSEModel {
+		for _, vectors := range []TransitionVectors{b.InitialVectors, b.Vectors} {
+			if err := m.importSSEVectors(vectors); err != nil {
+				return err
+			}
+		}
+		m.vectors = b.Vectors
+	}
 	importRoot := func(t br.Term) error {
 		if !t.Valid() {
 			return nil // absent provenance or an intentionally unprojected flag
@@ -197,8 +205,10 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 			roots = []br.Term{e.Leaf, e.Subleaf, e.ResultsEAX, e.ResultsEBX, e.ResultsECX, e.ResultsEDX}
 		case ArchSetFSEffect:
 			roots = []br.Term{e.Number, e.Operation, e.Base, e.Valid, e.Result, e.BeforeFS, e.AfterFS}
-		case LockedCompareExchange64Effect:
+		case LockedCompareExchangeEffect:
 			roots = []br.Term{e.Before, e.Compare, e.Replacement, e.After, e.Accumulator, e.Success}
+		case LockedLogicalEffect:
+			roots = []br.Term{e.Before, e.Operand, e.After}
 		case LockedExchange64Effect:
 			roots = []br.Term{e.Before, e.Replacement, e.After, e.Register}
 		case LockedExchangeAdd64Effect:

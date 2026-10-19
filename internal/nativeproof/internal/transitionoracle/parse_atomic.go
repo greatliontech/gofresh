@@ -26,19 +26,27 @@ func parseAtomic(code []byte, pc uint64) (Decoded, bool, error) {
 			d.Encoding.Form = NOP6690
 		}
 	} else {
+		operand16 := first == 0x66
+		if operand16 {
+			first = r.unsigned(1)
+			if locked || first != 0x0f {
+				return fail()
+			}
+		}
 		if first >= 0x40 && first <= 0x4f {
 			d.Encoding.REX = byte(first)
 			first = r.unsigned(1)
 		}
 		xchg := first == 0x87
-		if first != 0x0f && !xchg {
+		logical := locked && (first == 0x20 || first == 0x08 || first == 0x80)
+		if first != 0x0f && !xchg && !logical {
 			if locked {
 				return fail()
 			}
 			return Decoded{}, false, nil
 		}
 		second := uint64(0)
-		if !xchg {
+		if !xchg && !logical {
 			second = r.unsigned(1)
 		}
 		if !locked && second == 0x1f {
@@ -50,6 +58,9 @@ func parseAtomic(code []byte, pc uint64) (Decoded, bool, error) {
 				return fail()
 			}
 			d.Intent.Operation, d.Encoding.Form, d.Encoding.NOPModRM = NoOp, NOP0F1F, uint8(m)
+			if operand16 {
+				d.Encoding.Form = NOP660F1F
+			}
 			mode, low, base := m/64, m%8, m%8
 			if mode != 3 && low == 4 {
 				s := r.unsigned(1)
@@ -71,7 +82,7 @@ func parseAtomic(code []byte, pc uint64) (Decoded, bool, error) {
 		if !locked && !set && !xchg {
 			return Decoded{}, false, nil
 		}
-		if (locked || xchg) && (d.Encoding.REX < 0x48 || !xchg && second != 0xb1 && second != 0xc1) || set && locked {
+		if operand16 || (xchg || second == 0xc1) && d.Encoding.REX < 0x48 || locked && !xchg && !logical && second != 0xb1 && second != 0xc1 || set && locked {
 			return fail()
 		}
 		m := r.unsigned(1)
@@ -92,13 +103,31 @@ func parseAtomic(code []byte, pc uint64) (Decoded, bool, error) {
 			}
 			d.Intent = Intent{Operation: LockedCompareExchange, Src: uint8(selector) + 8*((rex/4)%2)}
 			d.Encoding.Form = LOCKCMPXCHG0FB1
-			if xchg {
+			if logical {
+				d.Intent.Operation, d.Intent.Width, d.Encoding.Form = LockedAnd, 8, LOCKAND20
+				if first == 0x08 {
+					d.Intent.Operation, d.Encoding.Form = LockedOr, LOCKOR08
+				}
+				if first == 0x80 {
+					if selector != 1 && selector != 4 {
+						return fail()
+					}
+					d.Intent.Operation, d.Encoding.Form, d.Intent.Src = LockedAndImmediate, LOCKAND80, 0
+					if selector == 1 {
+						d.Intent.Operation, d.Encoding.Form = LockedOrImmediate, LOCKOR80
+					}
+				} else if rex == 0 && selector >= 4 {
+					d.Intent.Src, d.Intent.HighSrc = uint8(selector-4), true
+				}
+			} else if xchg {
 				d.Intent.Operation, d.Encoding.Form = LockedExchange, XCHG87
 				if locked {
 					d.Encoding.Form = LOCKXCHG87
 				}
 			} else if second == 0xc1 {
 				d.Intent.Operation, d.Encoding.Form = LockedExchangeAdd, LOCKXADD0FC1
+			} else if rex&8 == 0 {
+				d.Intent.Width = 32
 			}
 		}
 		if mode != 3 {
@@ -128,6 +157,9 @@ func parseAtomic(code []byte, pc uint64) (Decoded, bool, error) {
 					d.Encoding.DispBytes, d.Intent.SignedDisp = 4, r.signed(4)
 				}
 			}
+		}
+		if logical && first == 0x80 {
+			d.Intent.Immediate = r.unsigned(1)
 		}
 	}
 	if r.err || pc > ^uint64(0)-uint64(r.pos) {

@@ -47,7 +47,7 @@ type pairedNativeFixture struct {
 }
 
 func setPairedAtomicModel(face *nativeproof.TransitionInterface) {
-	face.Conditions.Locked64 = nativeproof.Locked64Model
+	face.Conditions.LockedMemory = nativeproof.LockedMemoryModel
 }
 
 func globalRegionReference(t testing.TB, source computationSource, target *ssa.Function, captureLimits ...assemblyCaptureLimits) *assemblyReference {

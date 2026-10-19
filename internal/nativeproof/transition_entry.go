@@ -175,11 +175,7 @@ func (m *transitionChecker) initialEntryRelations() error {
 			return m.err
 		}
 		word := m.memoryValue(TransitionLocation{Image: true, Offset: int64(w.Address)}, 8)
-		upper := m.bound.Origin
-		if w.OriginOffset != 0 {
-			upper = m.binary(br.Add, upper, m.con(br.Bits(64), uint64(w.OriginOffset)))
-		}
-		predicate = m.and(predicate, m.compare(br.ULT, word.Value, upper))
+		predicate = m.and(predicate, m.entryWordPredicate(word.Value, w.OriginOffset))
 	}
 	m.bound.EntryPredicate = predicate
 	m.state.path = predicate

@@ -9,46 +9,48 @@ func (m *transitionChecker) setPredicates(p TransitionPredicates) {
 	m.state.flags = [flagCount]br.Term{p.CF, p.ZF, p.SFXorOF}
 }
 
-// locked64Address establishes the full read/write extent before any register
+// lockedAddress establishes the full read/write extent before any register
 // changes, including when the source register is also the addressing base.
-func (m *transitionChecker) locked64Address(mem x86asm.Mem, size uint8) (TransitionLocation, error) {
-	if m.face.Conditions.Locked64 != Locked64Model {
-		return TransitionLocation{}, refuse(m.pc, "transition-primitive-premise", "ordinary aligned locked64 applicability is required")
+func (m *transitionChecker) lockedAddress(mem x86asm.Mem, width int, size uint8) (TransitionLocation, error) {
+	if m.face.Conditions.LockedMemory != LockedMemoryModel {
+		return TransitionLocation{}, refuse(m.pc, "transition-primitive-premise", "ordinary naturally aligned locked-memory applicability is required")
 	}
-	off, err := m.address(mem, FrameRead, 8, size)
+	off, err := m.address(mem, FrameRead, width, size)
 	if err != nil {
 		return TransitionLocation{}, err
 	}
-	aligned := uint64(off.Offset)&7 == 0
+	mask := uint64(width - 1)
+	aligned := uint64(off.Offset)&mask == 0
 	if !off.Image {
 		d := m.face.Origin
-		aligned = d.Modulus >= 8 && (d.Residue+uint64(off.Offset))&7 == 0
+		aligned = d.Modulus >= uint64(width) && (d.Residue+uint64(off.Offset))&mask == 0
 		// Singleton origin domains can establish alignment without a modulus.
 		if m.lo == m.hi {
-			aligned = (m.lo+uint64(off.Offset))&7 == 0
+			aligned = (m.lo+uint64(off.Offset))&mask == 0
 		}
 	}
 	if !aligned {
-		return TransitionLocation{}, refuse(m.pc, "transition-alignment", "locked64 requires eight-byte alignment for every origin")
+		return TransitionLocation{}, refuse(m.pc, "transition-alignment", "locked memory requires natural operand alignment for every origin")
 	}
 	// An unchanged result still writes. Both permissions apply to the incoming
 	// address, regardless of comparison outcome or source/base register aliasing.
-	if _, err := m.address(mem, FrameWrite, 8, size); err != nil {
+	if _, err := m.address(mem, FrameWrite, width, size); err != nil {
 		return TransitionLocation{}, err
 	}
 	return off, nil
 }
 
 func (m *transitionChecker) lockedCompareExchange(i operation, size uint8) error {
-	off, err := m.locked64Address(i.Args[0].(x86asm.Mem), size)
+	width := i.MemBytes
+	off, err := m.lockedAddress(i.Args[0].(x86asm.Mem), width, size)
 	if err != nil {
 		return err
 	}
 	readIndex := len(m.bound.Accesses)
-	current := m.load(off, 8, FrameRead)
-	src, _ := fullRegister(i.Args[1])
-	compare, replacement := m.state.regs[RAX], m.state.regs[src.reg]
-	r := m.valueBuilder.compareExchange64(compare, current.Value, replacement)
+	current := m.load(off, width, FrameRead)
+	src, _ := register(i.Args[1].(x86asm.Reg))
+	compare, replacement := m.read(&m.state, alias{reg: int(RAX), width: width * 8}), m.read(&m.state, src)
+	r := m.valueBuilder.compareExchange(compare, current.Value, replacement)
 	if m.err != nil {
 		return m.err
 	}
@@ -61,16 +63,25 @@ func (m *transitionChecker) lockedCompareExchange(i operation, size uint8) error
 	} else if literalBool(r.Success, 0) {
 		memoryPointer, accumulatorPointer = current.Pointer, current.Pointer
 	}
-	m.store(off, TransitionValue{r.Memory, memoryPointer}, 8)
+	if width == 4 {
+		// Success does not write EAX: the incoming upper half of RAX survives.
+		// Failure writes EAX and therefore clears the upper half.
+		r.Accumulator = m.ite(r.Success, m.state.regs[RAX], m.make(br.ZExt, br.Bits(64), 0, current.Value))
+		memoryPointer, accumulatorPointer = nil, nil
+		if literalBool(r.Success, 1) {
+			accumulatorPointer = m.pointers[RAX]
+		}
+	}
+	m.store(off, TransitionValue{r.Memory, memoryPointer}, width)
 	m.state.regs[RAX], m.pointers[RAX], m.bound.Preserved[RAX] = r.Accumulator, accumulatorPointer, 0
 	m.bound.Flags = r.Flags
 	m.setPredicates(r.Predicates)
-	m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedCompareExchange64Effect{PC: m.pc, Context: m.activation, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: current.Value, Compare: compare, Replacement: replacement, After: r.Memory, Accumulator: r.Accumulator, Success: r.Success})
+	m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedCompareExchangeEffect{PC: m.pc, Context: m.activation, Width: width, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: current.Value, Compare: compare, Replacement: replacement, After: r.Memory, Accumulator: r.Accumulator, Success: r.Success})
 	return m.err
 }
 
 func (m *transitionChecker) lockedExchange(i operation, size uint8) error {
-	off, err := m.locked64Address(i.Args[0].(x86asm.Mem), size)
+	off, err := m.lockedAddress(i.Args[0].(x86asm.Mem), 8, size)
 	if err != nil {
 		return err
 	}
@@ -106,6 +117,33 @@ func sameTransitionPointer(a, b TransitionPointer) TransitionPointer {
 		return a
 	}
 	return nil
+}
+
+func (m *transitionChecker) lockedLogical(i operation, size uint8) error {
+	off, err := m.lockedAddress(i.Args[0].(x86asm.Mem), 1, size)
+	if err != nil {
+		return err
+	}
+	readIndex := len(m.bound.Accesses)
+	before := m.load(off, 1, FrameRead).Value
+	var operand br.Term
+	if r, ok := i.Args[1].(x86asm.Reg); ok {
+		a, _ := register(r)
+		operand = m.read(&m.state, a)
+	} else {
+		operand = m.con(br.Bits(8), uint64(i.Args[1].(x86asm.Imm))&255)
+	}
+	op := br.BitAnd
+	if i.Op == x86asm.OR {
+		op = br.BitOr
+	}
+	after := m.binary(op, before, operand)
+	flags, predicates := m.logicalFlags(after)
+	m.bound.Flags = flags
+	m.setPredicates(predicates)
+	m.store(off, TransitionValue{Value: after}, 1)
+	m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedLogicalEffect{PC: m.pc, Context: m.activation, Kind: i.Op, Width: 1, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: before, Operand: operand, After: after})
+	return m.err
 }
 
 func (m *transitionChecker) setConditionByte(i operation, size uint8) error {

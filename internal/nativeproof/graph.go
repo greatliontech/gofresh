@@ -431,7 +431,7 @@ func decodeControl(pc uint64, i x86asm.Inst, b []byte) (decodedInstruction, erro
 			return decodedInstruction{}, refuse(pc, "return-interface", "only unprefixed ordinary near RET is modeled")
 		}
 		n.boundary = boundaryReturn
-	case x86asm.JMP, x86asm.JA, x86asm.JAE, x86asm.JB, x86asm.JBE, x86asm.JE, x86asm.JNE, x86asm.JL, x86asm.JLE, x86asm.JG, x86asm.JGE:
+	case x86asm.JMP, x86asm.JA, x86asm.JAE, x86asm.JB, x86asm.JBE, x86asm.JE, x86asm.JNE, x86asm.JL, x86asm.JLE, x86asm.JG, x86asm.JGE, x86asm.JP, x86asm.JNP:
 		rel, ok := i.Args[0].(x86asm.Rel)
 		if !ok || i.Args[1] != nil {
 			return decodedInstruction{}, refuse(pc, "control-target", "only direct relative branches are modeled")

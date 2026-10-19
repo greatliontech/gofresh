@@ -122,6 +122,14 @@ func globalFunctionNative(t testing.TB, variant string) (globalNativeFixture, na
 	if variant == "escape" {
 		code = append(code, 0x48, 0x89, 0xe1)
 	} // MOV RCX,RSP
+	if variant == "vector-escape" || variant == "vector-private-value" {
+		if variant == "vector-escape" {
+			code = append(code, 0x48, 0x89, 0x64, 0x24, 0xf8) // MOV [RSP-8],RSP
+		} else {
+			code = append(code, 0x48, 0x89, 0x44, 0x24, 0xf8) // MOV [RSP-8],RAX (11)
+		}
+		code = append(code, 0xf2, 0x0f, 0x10, 0x44, 0x24, 0xf8) // MOVSD X0,[RSP-8]
+	}
 	code = append(code, 0x5d) // POP RBP
 	f.cut = pc()
 	code = append(code, 0xc3)
@@ -140,9 +148,12 @@ func globalFunctionNative(t testing.TB, variant string) (globalNativeFixture, na
 	f.face.Regions = []nativeproof.RelativeRegion{{Bytes: nativeproof.RelativeSpan{Start: -8, End: 0}, Readable: true, Writable: true}, {Bytes: nativeproof.RelativeSpan{Start: 0, End: 8}, Readable: true}}
 	f.face.ReturnContext = &nativeproof.TransitionReturnContext{Target: base, Preserved: []nativeproof.Register{nativeproof.RBP, nativeproof.R14}}
 	f.face.PrivateFrame = &nativeproof.TransitionPrivateFrame{Bytes: nativeproof.RelativeSpan{Start: -8, End: 0}}
-	if variant == "private-atomic" {
+	if variant == "private-atomic" || variant == "vector-escape" || variant == "vector-private-value" {
 		f.face.Regions[0].Bytes.Start = -16
 		f.face.PrivateFrame.Bytes.Start = -16
+	}
+	if variant == "vector-escape" || variant == "vector-private-value" {
+		f.face.Conditions.SSE = nativeproof.SSEModel
 	}
 	if variant == "missing-private" {
 		f.face.PrivateFrame = nil
@@ -159,7 +170,7 @@ func globalFunctionNative(t testing.TB, variant string) (globalNativeFixture, na
 	if variant == "constrained-global" {
 		f.face.EntryWordUpperBounds = append(f.face.EntryWordUpperBounds, nativeproof.TransitionEntryWordUpperBound{Address: addresses[0]})
 	}
-	f.face.Conditions.Locked64 = nativeproof.Locked64Model
+	f.face.Conditions.LockedMemory = nativeproof.LockedMemoryModel
 	if variant == "primitive" {
 		f.face.Conditions.CPUID = nativeproof.CPUIDModel
 	}
@@ -189,18 +200,21 @@ func globalFunctionNative(t testing.TB, variant string) (globalNativeFixture, na
 
 func TestGlobalFunctionCompleteEffectsAndReturn(t *testing.T) {
 	source, completed, globals := globalFunctionSource(t)
-	for _, variant := range []string{"guarded", "unguarded", "entry-pointer-global", "retained-read", "inactive-write", "early-read", "extra-write", "unrelated-read", "unrelated-write", "conditional-write", "matched-conditional-write", "primitive", "private-atomic", "wrong-value", "escape", "missing-private", "constrained-global"} {
+	for _, variant := range []string{"guarded", "unguarded", "entry-pointer-global", "retained-read", "inactive-write", "early-read", "extra-write", "unrelated-read", "unrelated-write", "conditional-write", "matched-conditional-write", "primitive", "private-atomic", "wrong-value", "escape", "vector-escape", "vector-private-value", "missing-private", "constrained-global"} {
 		t.Run(variant, func(t *testing.T) {
 			fixture, returned := globalFunctionNative(t, variant)
 			rho := globalRho(source, fixture, globals, [2]uint64{0x700008, 0x700050})
 			proof, err := checkGlobalFunctionCorrespondence(t.Context(), source, source.prog.Roots["F"], fixture.image, fixture.entry, completed, returned, rho, nil)
-			positive := variant == "guarded" || variant == "unguarded" || variant == "entry-pointer-global" || variant == "retained-read" || variant == "inactive-write"
+			positive := variant == "guarded" || variant == "unguarded" || variant == "entry-pointer-global" || variant == "retained-read" || variant == "inactive-write" || variant == "vector-private-value"
 			if !positive {
 				if err == nil || proof != nil {
 					t.Fatalf("unaccounted effect/premise admitted: %+v", proof)
 				}
 				if variant == "matched-conditional-write" && !strings.Contains(err.Error(), "not proved to execute") {
 					t.Fatalf("conditional matched write failed for another reason: %v", err)
+				}
+				if variant == "vector-escape" && !strings.Contains(err.Error(), "private frame address escapes in returned vector") {
+					t.Fatalf("vector escape failed for another reason: %v", err)
 				}
 				return
 			}

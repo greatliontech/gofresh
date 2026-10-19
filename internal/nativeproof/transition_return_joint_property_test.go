@@ -176,7 +176,7 @@ func jointReturnProgramFor(t testing.TB, registers []byte, frame uint16, order, 
 		EntryWordUpperBounds: []TransitionEntryWordUpperBound{{Address: imageStateAddress + 16}, {Address: p.fixedAddress}},
 		ReturnContext:        &TransitionReturnContext{Target: target, Preserved: p.saved}, PrivateFrame: &TransitionPrivateFrame{Bytes: RelativeSpan{bottom, 0}},
 	}
-	p.face.Conditions.Locked64 = Locked64Model
+	p.face.Conditions.LockedMemory = LockedMemoryModel
 	if p.geometry >= 1 && p.geometry <= 3 {
 		p.face.Origin = OriginDomain{Min: imageStateAddress - 512, Max: imageStateAddress + 512, Modulus: 16}
 	}
@@ -184,7 +184,7 @@ func jointReturnProgramFor(t testing.TB, registers []byte, frame uint16, order, 
 	case 1:
 		p.face.EntryWordUpperBounds[0].OriginOffset = 1
 	case 3:
-		p.face.Conditions.Locked64 = ""
+		p.face.Conditions.LockedMemory = ""
 	case 5:
 		p.face.Regions[1].Readable = false
 	case 6:
@@ -297,7 +297,7 @@ func jointReturnActive(t testing.TB, b TransitionReturnBound, values map[br.Term
 	}
 	for _, effect := range b.Prefix.PrimitiveEffects {
 		switch e := effect.(type) {
-		case LockedCompareExchange64Effect:
+		case LockedCompareExchangeEffect:
 			r, w, yes := remap(e.PC, e.ReadAccess, e.WriteAccess)
 			if yes {
 				e.ReadAccess, e.WriteAccess = r, w

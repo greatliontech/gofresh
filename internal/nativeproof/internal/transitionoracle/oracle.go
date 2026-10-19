@@ -14,16 +14,17 @@
 // numbers RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8 through R15; one REX.W for
 // 64-bit data, and default 64-bit addressing with one base and no index. MOV
 // admits byte, 32 and 64 bits; narrow register writes preserve other byte lanes
-// or zero-extend 32 bits. CMP admits register/immediate/memory 32/64-bit forms;
-// TEST admits register/immediate 8/32/64-bit forms. Locked CMPXCHG admits memory64
-// under exactly LOCK then REX.W; SETcc admits one byte register or memory operand,
+// or zero-extend 32 bits. CMP admits register/immediate/memory 32/64-bit forms
+// and byte memory forms. TEST admits register/immediate 8/32/64-bit forms.
+// Locked CMPXCHG admits memory32/64 under LOCK then optional REX. Locked byte
+// AND/OR admit register or immediate sources. SETcc admits one byte register or memory operand,
 // with the canonical /0 field. Both use ordinary base/displacement or RIP forms.
 // Memory XCHG64, LOCK XADD64 and register-register ADD64 retain their actual
-// source and destination operands. Exact 90, 6690 and unprefixed 0F 1F /0 NOP
+// source and destination operands. Exact 90, 6690 and unprefixed/single-66 0F 1F /0 NOP
 // preserve state; a NOP's address-shaped bytes are encoding data only.
 // These are structural grammars; permission,
 // alignment and primitive applicability remain the machine consumer's obligations.
-// conditional edges use the ten conditions over CF/ZF/SF!=OF. CPUID is exact
+// conditional edges use twelve conditions over CF/ZF/SF!=OF/PF. CPUID is exact
 // operand-free 0f a2, without prefixes. Register self-XOR admits 32-bit operands,
 // clearing the full register; other XOR shapes are outside this grammar.
 // RIP-relative LEA and data accesses use
@@ -77,6 +78,10 @@ const (
 	LockedExchange
 	LockedExchangeAdd
 	AddRegister
+	LockedAnd
+	LockedOr
+	LockedAndImmediate
+	LockedOrImmediate
 )
 
 // Intent is a semantic instruction description. Registers are architectural
@@ -97,7 +102,7 @@ type Intent struct {
 	Width            uint8
 	RIP              bool
 	HighDst, HighSrc bool  // AH/CH/DH/BH, with Dst/Src in 0..3.
-	Condition        uint8 // Intel condition field, only 2..7 and 12..15.
+	Condition        uint8 // Intel condition field: branches 2..7,10..15; SETcc 2..7,12..15.
 	FS               bool  // Displacement-only FS memory; Base, RIP and index are absent.
 }
 
@@ -107,7 +112,8 @@ type Intent struct {
 func RequiresExpansion(i Intent) bool {
 	switch i.Operation {
 	case Call, Syscall, Clear32, LockedCompareExchange, SetRegister, SetMemory,
-		CompareMemory, CompareFromMemory, CompareMemoryImmediate, NoOp, LockedExchange, LockedExchangeAdd, AddRegister:
+		CompareMemory, CompareFromMemory, CompareMemoryImmediate, NoOp, LockedExchange, LockedExchangeAdd, AddRegister,
+		LockedAnd, LockedOr, LockedAndImmediate, LockedOrImmediate:
 		return true
 	case Test, TestImmediate:
 		return i.Width == 8
@@ -172,6 +178,14 @@ const (
 	ADD01
 	ADD03
 	NOP0F1F
+	NOP660F1F
+	CMP38
+	CMP3A
+	CMP80
+	LOCKAND20
+	LOCKOR08
+	LOCKAND80
+	LOCKOR80
 )
 
 // Encoding preserves choices that semantic intent deliberately forgets. REX is

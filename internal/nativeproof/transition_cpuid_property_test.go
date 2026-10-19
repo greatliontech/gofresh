@@ -13,6 +13,7 @@ import (
 
 	br "github.com/greatliontech/gofresh/internal/bitrelation"
 	to "github.com/greatliontech/gofresh/internal/nativeproof/internal/transitionoracle"
+	"golang.org/x/arch/x86/x86asm"
 )
 
 // Only a checked occurrence shape supplies assignment meaning. Numerical answers
@@ -65,7 +66,7 @@ func statePrimitiveBindings(t testing.TB, b TransitionBound, x stateLayout, want
 				known[term], values[term] = uint64(q.results[slot]), uint64(q.results[slot])
 			}
 		case stateRMW:
-			e, ok := b.PrimitiveEffects[j].(LockedCompareExchange64Effect)
+			e, ok := b.PrimitiveEffects[j].(LockedCompareExchangeEffect)
 			var terms []br.Term
 			var expected []uint64
 			switch q.kind {
@@ -79,18 +80,31 @@ func statePrimitiveBindings(t testing.TB, b TransitionBound, x stateLayout, want
 				ok = valid
 				e.PC, e.Context, e.ReadAccess, e.WriteAccess, e.Before, e.After = x.PC, x.Context, x.ReadAccess, x.WriteAccess, x.Before, x.After
 				terms, expected = []br.Term{x.Before, x.Delta, x.After, x.Register}, []uint64{q.before, q.replacement, q.after, q.accumulator}
+			case to.LockedAnd, to.LockedOr, to.LockedAndImmediate, to.LockedOrImmediate:
+				x, valid := b.PrimitiveEffects[j].(LockedLogicalEffect)
+				kind := x86asm.AND
+				if q.kind == to.LockedOr || q.kind == to.LockedOrImmediate {
+					kind = x86asm.OR
+				}
+				ok = valid && x.Width == q.width && x.Kind == kind
+				e.PC, e.Context, e.ReadAccess, e.WriteAccess, e.Before, e.After = x.PC, x.Context, x.ReadAccess, x.WriteAccess, x.Before, x.After
+				terms, expected = []br.Term{x.Before, x.Operand, x.After}, []uint64{q.before, q.replacement, q.after}
 			default:
+				ok = ok && e.Width == q.width
 				success := uint64(0)
 				if q.success {
 					success = 1
 				}
 				terms, expected = []br.Term{e.Before, e.Compare, e.Replacement, e.After, e.Accumulator, e.Success}, []uint64{q.before, q.compare, q.replacement, q.after, q.accumulator, success}
 			}
-			if !ok || e.PC != x.pcs[q.instruction] || e.Context != q.context || e.ReadAccess != q.readAccess || e.WriteAccess != q.readAccess+1 || e.ReadAccess < 0 || e.WriteAccess >= len(b.Accesses) || b.Interface.Conditions.Locked64 != Locked64Model {
+			if !ok || e.PC != x.pcs[q.instruction] || e.Context != q.context || e.ReadAccess != q.readAccess || e.WriteAccess != q.readAccess+1 || e.ReadAccess < 0 || e.WriteAccess >= len(b.Accesses) || b.Interface.Conditions.LockedMemory != LockedMemoryModel {
 				return fmt.Errorf("primitive %d locked occurrence/group differs", j)
 			}
 			for k, term := range terms {
-				width := br.Bits(64)
+				width := br.Bits(q.width * 8)
+				if q.kind == to.LockedCompareExchange && k == 4 {
+					width = br.Bits(64)
+				}
 				if k == 5 {
 					width = br.Bool()
 				}

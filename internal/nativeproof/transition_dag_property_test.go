@@ -166,6 +166,10 @@ func dagCondition(t testing.TB, cc uint8, flags [6]bool) bool {
 		return c || z
 	case 7:
 		return !c && !z
+	case 10:
+		return flags[5]
+	case 11:
+		return !flags[5]
 	case 12:
 		return l
 	case 13:
@@ -418,7 +422,7 @@ func dagAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, face
 		if f.Preserved && r.writer != 0 {
 			t.Fatal("false flag preservation")
 		}
-		undefinedAF := (r.writer == to.And || r.writer == to.Test || r.writer == to.TestImmediate || r.writer == to.Clear32) && j == 4
+		undefinedAF := (r.writer == to.And || r.writer == to.Test || r.writer == to.TestImmediate || r.writer == to.Clear32 || stateLogical(r.writer)) && j == 4
 		if f.Defined && undefinedAF || !f.Defined && f.Value.Valid() {
 			t.Fatal("false flag definedness")
 		}
