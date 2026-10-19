@@ -161,9 +161,6 @@ func (p *proposer) rewrite(t Term) (Rule, Term, bool) {
 	if n.arity > 0 && all {
 		return result(ConstantFold, p.con(s, primitive(n, values)))
 	}
-	if rule, next, ok := p.controlRewrite(t); ok || p.err != nil {
-		return rule, next, ok
-	}
 	switch n.op {
 	case Not:
 		if x.op == Not {
@@ -329,6 +326,14 @@ func (p *proposer) rewrite(t Term) (Rule, Term, bool) {
 		if n.imm == 0 {
 			return result(Algebra, tm(x))
 		}
+	}
+	// Keep cheap identities first, then lift conditionals before an order rule
+	// can hide them beneath NOT (for example ULE -> !ULT with swapped operands).
+	if rule, next, ok := p.conditionalOperationRewrite(t); ok || p.err != nil {
+		return rule, next, ok
+	}
+	if rule, next, ok := p.controlRewrite(t); ok || p.err != nil {
+		return rule, next, ok
 	}
 	if n.op == And && y.op == SLT && y.args[1].op == Constant {
 		var low *node

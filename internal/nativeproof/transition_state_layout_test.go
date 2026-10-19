@@ -15,22 +15,7 @@ import (
 
 func stateSameInventory(t testing.TB, got, want TransitionProposal) {
 	t.Helper()
-	if got.Entry != want.Entry || got.Cut != want.Cut || got.ImageDigest != want.ImageDigest || len(got.Nodes) != len(want.Nodes) {
-		t.Fatal("proposer scope differs from independent layout")
-	}
-	nodes := map[uint64]Node{}
-	for _, n := range got.Nodes {
-		if _, duplicate := nodes[n.PC]; duplicate {
-			t.Fatal("duplicate proposed node")
-		}
-		nodes[n.PC] = n
-	}
-	for _, n := range want.Nodes {
-		g, ok := nodes[n.PC]
-		if !ok || g.Size != n.Size || !slices.Equal(g.Successors, n.Successors) {
-			t.Fatal("proposer instruction/edge differs from independent layout", g, n)
-		}
-	}
+	transitionInventoryMap(t, got, want)
 }
 
 func FuzzTransitionStateInventory(f *testing.F) {
@@ -95,13 +80,13 @@ func FuzzTransitionStateInventory(f *testing.F) {
 		case 0:
 			bad.Nodes = append(bad.Nodes[:node], bad.Nodes[node+1:]...)
 		case 1:
-			bad.Nodes = append(bad.Nodes, Node{PC: x.pcs[0] + 31, Size: 1})
+			bad.Nodes = append(bad.Nodes, TransitionNode{ID: TransitionOccurrenceID(x.pcs[0] + 31), PC: x.pcs[0] + 31, Size: 1})
 		case 2:
 			bad.Nodes = append(bad.Nodes, bad.Nodes[node])
 		case 3:
 			bad.Nodes[node].Size++
 		case 4:
-			bad.Nodes[0].Successors = []uint64{x.pcs[0]}
+			bad.Nodes[0].Successors = []TransitionOccurrenceID{bad.Root}
 		case 5:
 			bad.Entry++
 		case 6:
@@ -111,7 +96,7 @@ func FuzzTransitionStateInventory(f *testing.F) {
 		case 8:
 			bad.Nodes[node].PC++
 		case 9:
-			bad.Nodes[cut].Successors = []uint64{x.pcs[0]}
+			bad.Nodes[cut].Successors = []TransitionOccurrenceID{bad.Root}
 		case 10:
 			bad.Nodes[0].Successors = append(bad.Nodes[0].Successors, bad.Nodes[0].Successors[0])
 		}
@@ -280,7 +265,7 @@ func stateRelativeJump(t testing.TB, displacement int64, short bool, valuation u
 		return
 	}
 	p := x.proposal(1)
-	p.Nodes[0].Successors[0] = target // actual encoded edge, not the desired cut
+	p.Nodes[0].Successors[0] = TransitionOccurrenceID(target) // actual encoded edge, not the desired cut
 	c, err := CheckTransition(t.Context(), im, face, p, TransitionLimits{})
 	transitionRefused(t, c, err)
 	// Even a rejected-distance invocation contains a constructed positive case.

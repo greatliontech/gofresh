@@ -17,7 +17,7 @@ func TestTransitionPrivateFrameRetainedPremise(t *testing.T) {
 	face.PrivateFrame = &TransitionPrivateFrame{Bytes: RelativeSpan{-24, 0}}
 	p := entryRelationProposal(t, im, testEntry+4)
 	first := entryRelationCheck(t, im, face, p)
-	q := entryRelationProposal(t, im, testEntry+5)
+	q := continuationProposal(t, first, testEntry+5)
 	next, err := CheckTransitionContinuation(t.Context(), first, q)
 	if err != nil {
 		t.Fatal(err)

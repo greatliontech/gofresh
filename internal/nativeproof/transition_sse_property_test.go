@@ -248,11 +248,11 @@ func (p *sseSeqProgram) encode() {
 	}
 }
 
-func (p sseSeqProgram) activation(j int) string {
+func (p sseSeqProgram) activation(j int) TransitionActivationID {
 	if p.ops[j].owner < 0 {
-		return ""
+		return 0
 	}
-	return fmt.Sprintf("/%016x", p.pcs[p.ops[j].owner])
+	return TransitionActivationID(p.ops[j].owner + 1)
 }
 
 func (p sseSeqProgram) inventory(cut int) (map[int]bool, []TransitionExpansion) {
@@ -268,7 +268,7 @@ func (p sseSeqProgram) inventory(cut int) (map[int]bool, []TransitionExpansion) 
 		seen[j] = true
 		o := p.ops[j]
 		if o.kind == sseSeqLoad || o.kind == sseSeqCompare || o.kind == sseSeqTest || o.kind == sseSeqCall {
-			expansions = append(expansions, TransitionExpansion{PC: p.pcs[j], Context: p.activation(j)})
+			expansions = append(expansions, TransitionExpansion{PC: p.pcs[j], AllActivations: true})
 		}
 		switch o.kind {
 		case sseSeqBranch:
@@ -284,12 +284,46 @@ func (p sseSeqProgram) inventory(cut int) (map[int]bool, []TransitionExpansion) 
 
 type sseSeqAccess struct {
 	pc         uint64
-	activation string
+	activation TransitionActivationID
 	kind       AccessKind
 	offset     int64
 	width      int
 	value      uint64
 }
+
+func (p sseSeqProgram) proposal(digest [32]byte, cut int) TransitionProposal {
+	seen, choices := p.inventory(cut)
+	seen[cut] = true
+	expanded := map[uint64]bool{}
+	for _, e := range choices {
+		expanded[e.PC] = true
+	}
+	q := TransitionProposal{ImageDigest: digest, Entry: p.pcs[0], Cut: p.pcs[cut], Root: 1}
+	for j := 0; j <= len(p.ops); j++ {
+		if !seen[j] {
+			continue
+		}
+		n := TransitionNode{ID: TransitionOccurrenceID(j + 1), PC: p.pcs[j], Size: 5}
+		if j < len(p.ops) {
+			n.Size = uint8(p.pcs[j+1] - p.pcs[j])
+		}
+		if j != cut {
+			n.Expanded = expanded[n.PC]
+			o := p.ops[j]
+			switch o.kind {
+			case sseSeqBranch:
+				n.Successors = []TransitionOccurrenceID{TransitionOccurrenceID(j + 2), TransitionOccurrenceID(o.target + 1)}
+			case sseSeqJump, sseSeqCall, sseSeqReturn:
+				n.Successors = []TransitionOccurrenceID{TransitionOccurrenceID(o.target + 1)}
+			default:
+				n.Successors = []TransitionOccurrenceID{TransitionOccurrenceID(j + 2)}
+			}
+		}
+		q.Nodes = append(q.Nodes, n)
+	}
+	return q
+}
+
 type sseSeqState struct {
 	regs     [16]uint64
 	vectors  [16][2]uint64
@@ -488,7 +522,7 @@ func sseSeqAssert(t testing.TB, p sseSeqProgram, b TransitionBound, cut int, bra
 	}
 	expected, _ := p.inventory(cut)
 	written := map[int]bool{}
-	wantAccesses := map[programPoint]sseSeqAccess{}
+	wantAccesses := map[transitionTestPoint]sseSeqAccess{}
 	for j := range expected {
 		o := p.ops[j]
 		if o.kind == sseSeqImmediate {
@@ -513,7 +547,7 @@ func sseSeqAssert(t testing.TB, p sseSeqProgram, b TransitionBound, cut int, bra
 		default:
 			continue
 		}
-		wantAccesses[programPoint{a.pc, a.activation}] = a
+		wantAccesses[transitionTestPoint{a.pc, a.activation}] = a
 	}
 	for j, reg := range b.Registers {
 		preserved := ^uint64(0)
@@ -534,7 +568,7 @@ func sseSeqAssert(t testing.TB, p sseSeqProgram, b TransitionBound, cut int, bra
 	if len(b.Instructions) != len(expected) {
 		t.Fatal("extra or omitted instruction occurrences")
 	}
-	active := map[programPoint]bool{}
+	active := map[transitionTestPoint]bool{}
 	var trace []int
 	for _, ins := range b.Instructions {
 		j, ok := slices.BinarySearch(p.pcs, ins.Start)
@@ -544,7 +578,7 @@ func sseSeqAssert(t testing.TB, p sseSeqProgram, b TransitionBound, cut int, bra
 		delete(expected, j)
 		if eval(ins.Guard) == 1 {
 			trace = append(trace, j)
-			active[programPoint{ins.Start, ins.Context}] = true
+			active[transitionTestPoint{ins.Start, ins.Context}] = true
 		}
 	}
 	if !slices.Equal(trace, r.trace) {
@@ -555,13 +589,13 @@ func sseSeqAssert(t testing.TB, p sseSeqProgram, b TransitionBound, cut int, bra
 		t.Fatal("extra or omitted access occurrences")
 	}
 	for _, a := range b.Accesses {
-		key := programPoint{a.PC, a.Context}
+		key := transitionTestPoint{a.PC, a.Context}
 		want, ok := wantAccesses[key]
 		if !ok || a.Image || a.Kind != want.kind || a.Bytes.Start != want.offset || a.Bytes.End != want.offset+int64(want.width) || a.Value.Sort() != br.Bits(want.width*8) {
 			t.Fatal("access occurrence differs from intent")
 		}
 		delete(wantAccesses, key)
-		if active[programPoint{a.PC, a.Context}] {
+		if active[transitionTestPoint{a.PC, a.Context}] {
 			accesses = append(accesses, sseSeqAccess{a.PC, a.Context, a.Kind, a.Bytes.Start, int(a.Bytes.End - a.Bytes.Start), eval(a.Value)})
 		}
 	}
@@ -587,11 +621,13 @@ func sseSeqCheck(t testing.TB, data []byte, coverage *sseSeqCoverage) {
 	limits := TransitionLimits{RelationLimits: RelationLimits{Nodes: 131072, Work: 8_000_000, Depth: 512}}
 	proposal := func(cut int) TransitionProposal {
 		_, choices := p.inventory(cut)
-		q, err := ProposeTransition(t.Context(), im, p.pcs[cut], limits, choices...)
+		q, err := ProposeTransition(t.Context(), im, p.pcs[cut], limits, TransitionOptions{Expansions: choices})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return q
+		independent := p.proposal(im.digest, cut)
+		stateSameContextInventory(t, q, independent)
+		return independent
 	}
 	final := len(p.ops)
 	direct, err := CheckTransition(t.Context(), im, face, proposal(final), limits)
@@ -689,7 +725,7 @@ func TestTransitionSSEEvolvingRefusals(t *testing.T) {
 	face.Conditions.SSE = SSEModel
 	im := image(t, append(append([]byte{}, p.code...), 0xbb, 0, 0, 0, 0))
 	_, choices := p.inventory(len(p.ops))
-	q, err := ProposeTransition(t.Context(), im, p.pcs[len(p.ops)], TransitionLimits{}, choices...)
+	q, err := ProposeTransition(t.Context(), im, p.pcs[len(p.ops)], TransitionLimits{}, TransitionOptions{Expansions: choices})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -720,7 +756,7 @@ func TestTransitionSSEEvolvingRefusals(t *testing.T) {
 		t.Fatal("root cancellation was replaced by another refusal", err)
 	}
 	_, prefixChoices := p.inventory(p.cuts[0])
-	pre, err := ProposeTransition(t.Context(), im, p.pcs[p.cuts[0]], TransitionLimits{}, prefixChoices...)
+	pre, err := ProposeTransition(t.Context(), im, p.pcs[p.cuts[0]], TransitionLimits{}, TransitionOptions{Expansions: prefixChoices})
 	if err != nil {
 		t.Fatal(err)
 	}

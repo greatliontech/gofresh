@@ -180,7 +180,7 @@ func globalFunctionAtomicNative(t testing.TB, variant string) (globalNativeFixtu
 		}
 		at += uint64(i.Len)
 	}
-	proposal, err := nativeproof.ProposeRegionTransition(t.Context(), f.image, f.entry, f.cut, nativeproof.TransitionLimits{}, expansions...)
+	proposal, err := nativeproof.ProposeRegionTransition(t.Context(), f.image, f.entry, f.cut, nativeproof.TransitionLimits{}, nativeproof.TransitionOptions{Expansions: expansions})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -293,7 +293,7 @@ func TestLocalRuleAdversarialCrossProduct(t *testing.T) {
 			if a.Sort() != b.Sort() {
 				continue
 			}
-			for rule := br.ConstantFold; rule <= br.ConjunctionContradiction; rule++ {
+			for rule := br.ConstantFold; rule <= br.ConditionalOperation; rule++ {
 				w, err := br.Check(context.Background(), a, b, br.Proof{Steps: []br.Step{{Rule: rule, Left: a, Right: b}}}, br.Limits{})
 				if err != nil {
 					if w.Valid() {

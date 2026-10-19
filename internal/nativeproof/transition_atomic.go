@@ -76,7 +76,7 @@ func (m *transitionChecker) lockedCompareExchange(i operation, size uint8) error
 	m.state.regs[RAX], m.pointers[RAX], m.bound.Preserved[RAX] = r.Accumulator, accumulatorPointer, 0
 	m.bound.Flags = r.Flags
 	m.setPredicates(r.Predicates)
-	m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedCompareExchangeEffect{PC: m.pc, Context: m.activation, Width: width, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: current.Value, Compare: compare, Replacement: replacement, After: r.Memory, Accumulator: r.Accumulator, Success: r.Success})
+	m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedCompareExchangeEffect{ID: m.occurrence, PC: m.pc, Context: m.activation, Width: width, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: current.Value, Compare: compare, Replacement: replacement, After: r.Memory, Accumulator: r.Accumulator, Success: r.Success})
 	return m.err
 }
 
@@ -94,7 +94,7 @@ func (m *transitionChecker) lockedExchange(i operation, size uint8) error {
 	if i.Op == x86asm.XCHG {
 		r := m.exchange64(current.Value, replacement)
 		register, memory, pointer = r.Register, r.Memory, m.pointers[src.reg]
-		m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedExchange64Effect{PC: m.pc, Context: m.activation, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: current.Value, Replacement: replacement, After: memory, Register: register})
+		m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedExchange64Effect{ID: m.occurrence, PC: m.pc, Context: m.activation, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: current.Value, Replacement: replacement, After: memory, Register: register})
 	} else {
 		r := m.exchangeAdd64(current.Value, replacement)
 		register, memory = r.Register, r.Memory
@@ -105,7 +105,7 @@ func (m *transitionChecker) lockedExchange(i operation, size uint8) error {
 		}
 		m.bound.Flags = r.Flags
 		m.setPredicates(r.Predicates)
-		m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedExchangeAdd64Effect{PC: m.pc, Context: m.activation, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: current.Value, Delta: replacement, After: memory, Register: register})
+		m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedExchangeAdd64Effect{ID: m.occurrence, PC: m.pc, Context: m.activation, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: current.Value, Delta: replacement, After: memory, Register: register})
 	}
 	m.store(off, TransitionValue{Value: memory, Pointer: pointer}, 8)
 	m.state.regs[src.reg], m.pointers[src.reg], m.bound.Preserved[src.reg] = register, current.Pointer, 0
@@ -142,7 +142,7 @@ func (m *transitionChecker) lockedLogical(i operation, size uint8) error {
 	m.bound.Flags = flags
 	m.setPredicates(predicates)
 	m.store(off, TransitionValue{Value: after}, 1)
-	m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedLogicalEffect{PC: m.pc, Context: m.activation, Kind: i.Op, Width: 1, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: before, Operand: operand, After: after})
+	m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedLogicalEffect{ID: m.occurrence, PC: m.pc, Context: m.activation, Kind: i.Op, Width: 1, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: before, Operand: operand, After: after})
 	return m.err
 }
 

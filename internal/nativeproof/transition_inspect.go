@@ -10,23 +10,21 @@ import (
 // InstructionAt decodes the certificate's own immutable bytes for one retained
 // executed occurrence. Its guard still determines whether that occurrence runs;
 // excluded boundaries and the unexecuted cut are not executed instructions.
-func (c TransitionCertificate) InstructionAt(ctx context.Context, pc uint64, activation string) (x86asm.Inst, error) {
+func (c TransitionCertificate) InstructionAt(ctx context.Context, id TransitionOccurrenceID) (x86asm.Inst, error) {
 	if ctx == nil || c.checked == nil {
-		return x86asm.Inst{}, refuse(pc, "transition-inspection", "missing context or checked transition")
+		return x86asm.Inst{}, refuse(0, "transition-inspection", "missing context or checked transition")
 	}
 	if err := ctx.Err(); err != nil {
 		return x86asm.Inst{}, err
-	}
-	if len(activation) > c.checked.limits.Work {
-		return x86asm.Inst{}, refuse(pc, "transition-inspection", "activation exceeds retained bound")
 	}
 	for _, occurrence := range c.checked.bound.Instructions {
 		if err := ctx.Err(); err != nil {
 			return x86asm.Inst{}, err
 		}
-		if occurrence.Start != pc || occurrence.Context != activation {
+		if occurrence.ID != id {
 			continue
 		}
+		pc := occurrence.Start
 		i, _, err := decodeBytes(c.checked.image, pc)
 		if err != nil {
 			return x86asm.Inst{}, err
@@ -39,7 +37,7 @@ func (c TransitionCertificate) InstructionAt(ctx context.Context, pc uint64, act
 		}
 		return i, nil
 	}
-	return x86asm.Inst{}, refuse(pc, "transition-inspection", "no retained executed occurrence")
+	return x86asm.Inst{}, refuse(0, "transition-inspection", "no retained executed occurrence")
 }
 
 // RegisterValue projects exactly an integer alias at the current unexecuted cut.

@@ -43,11 +43,22 @@ func statePrimitiveBindings(t testing.TB, b TransitionBound, x stateLayout, want
 		}
 	}
 	scopes := map[br.Scope]bool{entry: true}
+	owners := map[TransitionOccurrenceID]GuardedInstruction{}
+	for _, ins := range b.Instructions {
+		if ins.ID == 0 || owners[ins.ID].ID != 0 {
+			return fmt.Errorf("invalid instruction occurrence identity")
+		}
+		owners[ins.ID] = ins
+	}
+	owned := func(id TransitionOccurrenceID, pc uint64, activation TransitionActivationID) bool {
+		ins, ok := owners[id]
+		return ok && ins.Start == pc && ins.Context == activation
+	}
 	for j, reference := range want.primitives {
 		switch q := reference.(type) {
 		case stateQuery:
 			e, ok := b.PrimitiveEffects[j].(CPUIDEffect)
-			if !ok || b.Interface.Conditions.CPUID != CPUIDModel || e.PC != x.pcs[q.instruction] || e.Context != q.context || e.Leaf.Sort() != br.Bits(32) || e.Subleaf.Sort() != br.Bits(32) {
+			if !ok || !owned(e.ID, e.PC, e.Context) || b.Interface.Conditions.CPUID != CPUIDModel || e.PC != x.pcs[q.instruction] || e.Context != q.context || e.Leaf.Sort() != br.Bits(32) || e.Subleaf.Sort() != br.Bits(32) {
 				return fmt.Errorf("primitive %d kind/PC/context/model/selector width differs", j)
 			}
 			if stateEval(t, e.Leaf, known) != uint64(q.leaf) || stateEval(t, e.Subleaf, known) != uint64(q.subleaf) {
@@ -74,11 +85,13 @@ func statePrimitiveBindings(t testing.TB, b TransitionBound, x stateLayout, want
 				x, valid := b.PrimitiveEffects[j].(LockedExchange64Effect)
 				ok = valid
 				e.PC, e.Context, e.ReadAccess, e.WriteAccess, e.Before, e.After = x.PC, x.Context, x.ReadAccess, x.WriteAccess, x.Before, x.After
+				e.ID = x.ID
 				terms, expected = []br.Term{x.Before, x.Replacement, x.After, x.Register}, []uint64{q.before, q.replacement, q.after, q.accumulator}
 			case to.LockedExchangeAdd:
 				x, valid := b.PrimitiveEffects[j].(LockedExchangeAdd64Effect)
 				ok = valid
 				e.PC, e.Context, e.ReadAccess, e.WriteAccess, e.Before, e.After = x.PC, x.Context, x.ReadAccess, x.WriteAccess, x.Before, x.After
+				e.ID = x.ID
 				terms, expected = []br.Term{x.Before, x.Delta, x.After, x.Register}, []uint64{q.before, q.replacement, q.after, q.accumulator}
 			case to.LockedAnd, to.LockedOr, to.LockedAndImmediate, to.LockedOrImmediate:
 				x, valid := b.PrimitiveEffects[j].(LockedLogicalEffect)
@@ -88,6 +101,7 @@ func statePrimitiveBindings(t testing.TB, b TransitionBound, x stateLayout, want
 				}
 				ok = valid && x.Width == q.width && x.Kind == kind
 				e.PC, e.Context, e.ReadAccess, e.WriteAccess, e.Before, e.After = x.PC, x.Context, x.ReadAccess, x.WriteAccess, x.Before, x.After
+				e.ID = x.ID
 				terms, expected = []br.Term{x.Before, x.Operand, x.After}, []uint64{q.before, q.replacement, q.after}
 			default:
 				ok = ok && e.Width == q.width
@@ -97,7 +111,7 @@ func statePrimitiveBindings(t testing.TB, b TransitionBound, x stateLayout, want
 				}
 				terms, expected = []br.Term{e.Before, e.Compare, e.Replacement, e.After, e.Accumulator, e.Success}, []uint64{q.before, q.compare, q.replacement, q.after, q.accumulator, success}
 			}
-			if !ok || e.PC != x.pcs[q.instruction] || e.Context != q.context || e.ReadAccess != q.readAccess || e.WriteAccess != q.readAccess+1 || e.ReadAccess < 0 || e.WriteAccess >= len(b.Accesses) || b.Interface.Conditions.LockedMemory != LockedMemoryModel {
+			if !ok || !owned(e.ID, e.PC, e.Context) || e.PC != x.pcs[q.instruction] || e.Context != q.context || e.ReadAccess != q.readAccess || e.WriteAccess != q.readAccess+1 || e.ReadAccess < 0 || e.WriteAccess >= len(b.Accesses) || b.Interface.Conditions.LockedMemory != LockedMemoryModel {
 				return fmt.Errorf("primitive %d locked occurrence/group differs", j)
 			}
 			for k, term := range terms {
@@ -113,7 +127,7 @@ func statePrimitiveBindings(t testing.TB, b TransitionBound, x stateLayout, want
 				}
 			}
 			read, write := b.Accesses[e.ReadAccess], b.Accesses[e.WriteAccess]
-			if read.Kind != FrameRead || write.Kind != FrameWrite || read.PC != e.PC || write.PC != e.PC || read.Context != e.Context || write.Context != e.Context || read.Bytes != write.Bytes || read.Image != write.Image || read.Value != e.Before || write.Value != e.After {
+			if read.ID != e.ID || write.ID != e.ID || read.Kind != FrameRead || write.Kind != FrameWrite || read.PC != e.PC || write.PC != e.PC || read.Context != e.Context || write.Context != e.Context || read.Bytes != write.Bytes || read.Image != write.Image || read.Value != e.Before || write.Value != e.After {
 				return fmt.Errorf("locked read/write lost grouping")
 			}
 		default:
@@ -218,7 +232,7 @@ func TestTransitionCPUIDEncoding(t *testing.T) {
 
 func TestTransitionCPUIDPremisesAndIdentity(t *testing.T) {
 	im, cut := transitionFixture(t, "0fa2")
-	p := continuationProposal(t, im, cut)
+	p := rootTransitionProposal(t, im, cut)
 	face := cpuidFace()
 	for _, model := range []string{"", "unknown", CPUIDModel + ";extra"} {
 		bad := cloneTransitionInterface(face)
@@ -267,14 +281,14 @@ func TestTransitionCPUIDInheritedEffectsAndSiblings(t *testing.T) {
 	before := lifecycleSnapshot(root.checked.bound)
 	// The next boundary follows complete result overwrite; another continuation
 	// must retain selectors and outputs that have no remaining state users.
-	middle := continuationProposal(t, im, cut-2)
+	middle := continuationProposal(t, root, cut-2)
 	parent, err := CheckTransitionContinuation(t.Context(), root, middle)
 	if err != nil {
 		t.Fatal(err)
 	}
 	stateInheritedInputs(t, before, parent.checked.bound)
 	old := lifecycleSnapshot(parent.checked.bound)
-	proposal := continuationProposal(t, im, cut)
+	proposal := continuationProposal(t, parent, cut)
 	assertTransitionRetainedExpressionUnion(t, parent, proposal)
 	left, err := CheckTransitionContinuation(t.Context(), parent, proposal)
 	if err != nil {
@@ -346,8 +360,8 @@ func TestTransitionCPUIDRetainedBudgets(t *testing.T) {
 	// the new query exceed that same combined allowance.
 	code := "0fa248b8000000000000000048bb000000000000000048b9000000000000000048ba00000000000000000fa2"
 	im, cut := transitionFixture(t, code)
-	p := continuationProposal(t, im, cut)
 	root := continuationRoot(t, im, cut-2, face, TransitionLimits{RelationLimits: RelationLimits{Nodes: 32}})
+	p := continuationProposal(t, root, cut)
 	c, err := CheckTransitionContinuation(t.Context(), root, p)
 	sequenceRefused(t, c, err, "relation-budget", cut-2)
 	root = continuationRoot(t, im, cut-2, face, TransitionLimits{})
@@ -369,7 +383,7 @@ func TestTransitionCPUIDRetainedBudgets(t *testing.T) {
 	// A deep old selector retained only by the event remains an import root.
 	im, cut = transitionFixture(t, strings.Repeat("488d4001", 20)+code)
 	root = continuationRoot(t, im, cut-2, face, TransitionLimits{})
-	assertTransitionRetainedExpressionUnion(t, root, continuationProposal(t, im, cut))
+	assertTransitionRetainedExpressionUnion(t, root, continuationProposal(t, root, cut))
 	m, err := newTransitionChecker(t.Context(), im, transitionRoot{entry: im.entry}, root.checked.limits, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -381,7 +395,7 @@ func TestTransitionCPUIDRetainedBudgets(t *testing.T) {
 	// An executed query's selector extraction itself must respect depth, even
 	// though its new register values have shallow depth two.
 	root = continuationRoot(t, im, testEntry+80, face, TransitionLimits{RelationLimits: RelationLimits{Depth: 21}})
-	c, err = CheckTransitionContinuation(t.Context(), root, continuationProposal(t, im, testEntry+82))
+	c, err = CheckTransitionContinuation(t.Context(), root, continuationProposal(t, root, testEntry+82))
 	stateExpressionDepthRefused(t, c, err, testEntry+80)
 }
 

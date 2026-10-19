@@ -117,7 +117,10 @@ func TestTransitionGuardedCancellationAndRetainedRoots(t *testing.T) {
 	// later instructions overwrite all corresponding current registers/flags.
 	ops = append(ops, dagScalar(to.Intent{Operation: to.MoveImmediate32, Dst: 0}, to.Encoding{Form: to.MOVB8Imm32}, 5))
 	y := dagArrange(t, ops, 31)
-	r := continuationRoot(t, y.im, y.pcs[8], face, TransitionLimits{})
+	r, err := CheckTransition(t.Context(), y.im, face, y.proposal(8), TransitionLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	assertTransitionRetainedExpressionUnion(t, r, y.proposal(10))
 	if c.checked.bound.InitialPredicates != before.InitialPredicates {
 		t.Fatal("root predicate identities changed")
@@ -176,8 +179,8 @@ func TestTransitionGuardedLiveStateAccounting(t *testing.T) {
 			low = mid + 1
 		}
 	}
-	// Each additional occurrence owns 2048 metadata bytes and one state slot.
-	room := low + (2048+8)*(len(x.pcs)-1)
+	// Each additional occurrence owns 4096 metadata bytes and one state slot.
+	room := low + (4096+8)*(len(x.pcs)-1)
 	p := x.proposal(len(ops) * 2)
 	c, err := CheckTransition(t.Context(), x.im, face, p, TransitionLimits{LiveStateBytes: room})
 	transitionRefused(t, c, err)
@@ -187,7 +190,7 @@ func TestTransitionGuardedLiveStateAccounting(t *testing.T) {
 	}
 	// Two live states suffice irrespective of how many earlier joins were
 	// consumed. Holding every historical state would exhaust this allowance.
-	c, err = CheckTransition(t.Context(), x.im, face, p, TransitionLimits{LiveStateBytes: room + low - 2048 - 8})
+	c, err = CheckTransition(t.Context(), x.im, face, p, TransitionLimits{LiveStateBytes: room + low - 4096 - 8})
 	if err != nil {
 		t.Fatal("consumed node state was retained", err)
 	}

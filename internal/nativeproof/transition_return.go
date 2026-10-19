@@ -50,7 +50,16 @@ type TransitionReturnBound struct {
 	Instructions []GuardedInstruction
 	Accesses     []TransitionAccess
 	State        NativeReturnedState
-	Continuation CutBoundary
+	Continuation TransitionReturnBoundary
+}
+
+// TransitionReturnBoundary is the structurally decoded incoming continuation
+// interface. It lies outside the completed callee's occurrence DAG: it is neither
+// an executed instruction nor another callee cut and carries no occurrence ID.
+type TransitionReturnBoundary struct {
+	PC          uint64
+	Instruction x86asm.Inst
+	Bytes       []byte
 }
 
 // TransitionReturnCertificate owns a checked conditional terminal relation. Its
@@ -63,7 +72,7 @@ type checkedTransitionReturn struct {
 	state        NativeReturnedState
 	instruction  GuardedInstruction
 	access       TransitionAccess
-	continuation CutBoundary
+	continuation TransitionReturnBoundary
 	proofs       []br.Witness
 	work         int
 }
@@ -117,17 +126,17 @@ func (c TransitionReturnCertificate) RegisterValue(ctx context.Context, reg x86a
 
 // InstructionAt decodes an executed occurrence, including the terminal RET.
 // The unexecuted continuation contributes no new instruction occurrence.
-func (c TransitionReturnCertificate) InstructionAt(ctx context.Context, pc uint64, activation string) (x86asm.Inst, error) {
+func (c TransitionReturnCertificate) InstructionAt(ctx context.Context, id TransitionOccurrenceID) (x86asm.Inst, error) {
 	if ctx == nil || c.checked == nil {
-		return x86asm.Inst{}, refuse(pc, "transition-inspection", "missing context or checked return")
+		return x86asm.Inst{}, refuse(0, "transition-inspection", "missing context or checked return")
 	}
 	if err := ctx.Err(); err != nil {
 		return x86asm.Inst{}, err
 	}
-	if pc == c.checked.instruction.Start && activation == "" {
+	if id == c.checked.instruction.ID {
 		return c.checked.prefix.checked.bound.Boundary.Instruction, nil
 	}
-	return c.checked.prefix.InstructionAt(ctx, pc, activation)
+	return c.checked.prefix.InstructionAt(ctx, id)
 }
 
 // EntryValueRegister identifies this certificate's private caller-value lineage.
@@ -159,7 +168,7 @@ func CheckTransitionReturn(ctx context.Context, prefix TransitionCertificate) (T
 	if b.Rules != TransitionRules || !b.ConditionalRegion || b.Interface.ReturnContext == nil {
 		return TransitionReturnCertificate{}, refuse(b.Boundary.PC, "transition-return", "conditional incoming return context is required")
 	}
-	if len(b.Frames) != 0 || b.Boundary.Context != "" {
+	if len(b.Frames) != 0 || b.Boundary.Context != 0 {
 		return TransitionReturnCertificate{}, refuse(b.Boundary.PC, "transition-return", "root return cannot consume an active child context")
 	}
 	m, err := newTransitionChecker(ctx, prior.image, transitionRoot{entry: b.Entry, region: true}, prior.limits, prior.work)
@@ -169,7 +178,7 @@ func CheckTransitionReturn(ctx context.Context, prefix TransitionCertificate) (T
 	if err := m.inherit(prior); err != nil {
 		return TransitionReturnCertificate{}, err
 	}
-	m.pc, m.activation = b.Boundary.PC, ""
+	m.pc, m.activation, m.occurrence = b.Boundary.PC, 0, b.Boundary.ID
 	i, raw, err := transitionEncoding(m.im, m.pc)
 	if err != nil {
 		return TransitionReturnCertificate{}, err
@@ -225,7 +234,7 @@ func CheckTransitionReturn(ctx context.Context, prefix TransitionCertificate) (T
 	}
 	return TransitionReturnCertificate{&checkedTransitionReturn{
 		prefix: prefix, state: state, continuation: target, work: m.work,
-		instruction: GuardedInstruction{Span: Span{m.pc, m.pc + uint64(i.Len)}, Guard: b.CutGuard},
+		instruction: GuardedInstruction{ID: b.Boundary.ID, Span: Span{m.pc, m.pc + uint64(i.Len)}, Guard: b.CutGuard},
 		access:      m.bound.Accesses[len(m.bound.Accesses)-1],
 		proofs:      append([]br.Witness(nil), m.justifications[len(prior.justifications):]...),
 	}}, nil
@@ -289,16 +298,16 @@ func (m *transitionChecker) validateReturnContext() error {
 	return err
 }
 
-func (m *transitionChecker) returnContinuation() (CutBoundary, error) {
+func (m *transitionChecker) returnContinuation() (TransitionReturnBoundary, error) {
 	if !m.tick() {
-		return CutBoundary{}, m.err
+		return TransitionReturnBoundary{}, m.err
 	}
 	pc := m.face.ReturnContext.Target
 	i, raw, err := decodeBytes(m.im, pc)
 	if err != nil {
-		return CutBoundary{}, err
+		return TransitionReturnBoundary{}, err
 	}
-	return CutBoundary{PC: pc, Instruction: i, Bytes: append([]byte(nil), raw...)}, nil
+	return TransitionReturnBoundary{PC: pc, Instruction: i, Bytes: append([]byte(nil), raw...)}, nil
 }
 
 // A conditional continuation is a separately decoded entry, not caller history.

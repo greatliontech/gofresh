@@ -177,7 +177,13 @@ func globalNativeProof(t testing.TB, f globalNativeFixture, continued bool) nati
 	}
 	var c nativeproof.TransitionCertificate
 	for i, cut := range f.cuts {
-		p, err := nativeproof.ProposeRegionTransition(t.Context(), f.image, f.entry, cut, nativeproof.TransitionLimits{})
+		var p nativeproof.TransitionProposal
+		var err error
+		if i == 0 {
+			p, err = nativeproof.ProposeRegionTransition(t.Context(), f.image, f.entry, cut, nativeproof.TransitionLimits{})
+		} else {
+			p, err = nativeproof.ProposeTransitionContinuation(t.Context(), c, cut)
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

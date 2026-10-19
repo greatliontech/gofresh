@@ -30,9 +30,9 @@ func TestTransitionDeferredXORPreservesDeadCycle(t *testing.T) {
 			im := image(t, code)
 			propose := func(stop uint64, choices ...TransitionExpansion) (TransitionProposal, error) {
 				if region {
-					return ProposeRegionTransition(t.Context(), im, entry, stop, TransitionLimits{}, choices...)
+					return ProposeRegionTransition(t.Context(), im, entry, stop, TransitionLimits{}, TransitionOptions{Expansions: choices})
 				}
-				return ProposeTransition(t.Context(), im, stop, TransitionLimits{}, choices...)
+				return ProposeTransition(t.Context(), im, stop, TransitionLimits{}, TransitionOptions{Expansions: choices})
 			}
 			check := func(p TransitionProposal) (TransitionCertificate, error) {
 				if region {
@@ -53,7 +53,7 @@ func TestTransitionDeferredXORPreservesDeadCycle(t *testing.T) {
 			if err0 != nil {
 				t.Fatal(err0)
 			}
-			next, nextErr := CheckTransitionContinuation(t.Context(), prior, p)
+			next, nextErr := CheckTransitionContinuation(t.Context(), prior, continuationProposal(t, prior, entry+cut))
 			if mode == "live" || mode == "unknown" {
 				transitionRefused(t, c, err)
 				transitionRefused(t, next, nextErr)
@@ -89,11 +89,11 @@ func TestTransitionXORExpansionEvidence(t *testing.T) {
 	im := image(t, hexBytes(t, "e806000000e801000000c331c9c3"))
 	end := testEntry + 10
 	choices := []TransitionExpansion{{PC: testEntry}, {PC: testEntry + 5},
-		{PC: testEntry + 11, Context: callContext("", testEntry)},
-		{PC: testEntry + 11, Context: callContext("", testEntry+5)}}
+		{PC: testEntry + 11, Context: 1},
+		{PC: testEntry + 11, Context: 4}}
 	f := transitionFace()
 	f.Regions = append(f.Regions, RelativeRegion{Bytes: RelativeSpan{Start: -8, End: 0}, Readable: true, Writable: true})
-	p, err := ProposeTransition(t.Context(), im, end, TransitionLimits{}, choices...)
+	p, err := ProposeTransition(t.Context(), im, end, TransitionLimits{}, TransitionOptions{Expansions: choices})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestTransitionXORExpansionEvidence(t *testing.T) {
 	}
 	// The cut at the first call's continuation has only the first activation's
 	// expansion choices. Extending it must preserve those exact occurrences.
-	first, err := ProposeTransition(t.Context(), im, testEntry+5, TransitionLimits{}, choices[0], choices[2])
+	first, err := ProposeTransition(t.Context(), im, testEntry+5, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{choices[0], choices[2]}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,26 +111,26 @@ func TestTransitionXORExpansionEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	continued, err := CheckTransitionContinuation(t.Context(), prior, p)
+	nextProposal := continuationProposal(t, prior, end, TransitionOptions{Expansions: []TransitionExpansion{choices[1], choices[3]}})
+	continued, err := CheckTransitionContinuation(t.Context(), prior, nextProposal)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertCallTLSAlpha(t, flat, continued)
 	before, _ := flat.Bound()
 	for _, mode := range []string{"omitted", "duplicate", "unused", "wrong-context", "cancel", "budget"} {
-		q := p
-		q.Expansions = append([]TransitionExpansion(nil), p.Expansions...)
+		q := lifecycleProposal(p)
 		ctx := t.Context()
 		limits := TransitionLimits{}
 		switch mode {
 		case "omitted":
-			q.Expansions = q.Expansions[:2]
+			q.Nodes[1].Expanded = false
 		case "duplicate":
-			q.Expansions = append(q.Expansions, q.Expansions[2])
+			q.Nodes = append(q.Nodes, q.Nodes[1])
 		case "unused":
-			q.Expansions = append(q.Expansions, TransitionExpansion{PC: end})
+			q.Nodes[len(q.Nodes)-1].Expanded = true
 		case "wrong-context":
-			q.Expansions[2].Context = "/foreign"
+			q.Nodes[0].Successors[0] = q.Nodes[4].ID
 		case "cancel":
 			var cancel context.CancelFunc
 			ctx, cancel = context.WithCancel(ctx)
@@ -144,12 +144,11 @@ func TestTransitionXORExpansionEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	owned := p
-	owned.Expansions = append([]TransitionExpansion(nil), p.Expansions...)
+	owned := lifecycleProposal(p)
 	ctx := &imageCallbackContext{Context: t.Context(), onErr: func(n int) {
 		if n == 1 {
-			owned.Expansions[2].PC++
-			owned.Expansions[2].Context = "foreign"
+			owned.Nodes[1].PC++
+			owned.Nodes[1].Expanded = false
 		}
 	}}
 	if _, err := CheckTransition(ctx, im, f, owned, TransitionLimits{}); err != nil {

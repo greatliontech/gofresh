@@ -15,35 +15,38 @@ func transitionCopyWork(work *int, limit int, counts ...int) error {
 }
 
 func captureTransitionProposal(p TransitionProposal, l TransitionLimits, work *int) (TransitionProposal, error) {
-	if len(p.Nodes) > l.Instructions || len(p.Expansions) > l.Instructions {
+	if len(p.Nodes) > l.Instructions || len(p.Nodes) > l.LiveStateBytes/512 {
 		return TransitionProposal{}, refuse(0, "transition-budget", "input inventory exceeds limits")
 	}
-	if err := transitionCopyWork(work, l.Work, len(p.Nodes), len(p.Expansions)); err != nil {
+	if err := transitionCopyWork(work, l.Work, len(p.Nodes)); err != nil {
 		return TransitionProposal{}, err
 	}
 	for _, n := range p.Nodes {
 		if len(n.Successors) > 2 {
 			return TransitionProposal{}, refuse(n.PC, "transition-proposal", "unsupported successor count")
 		}
-		if err := transitionCopyWork(work, l.Work, len(n.Successors), len(n.Context)); err != nil {
+		if err := transitionCopyWork(work, l.Work, len(n.Successors)); err != nil {
 			return TransitionProposal{}, err
 		}
 	}
-	for _, e := range p.Expansions {
-		if err := transitionCopyWork(work, l.Work, len(e.Context)); err != nil {
-			return TransitionProposal{}, err
-		}
-	}
-	p.Expansions = append([]TransitionExpansion(nil), p.Expansions...)
-	p.Nodes = append([]Node(nil), p.Nodes...)
+	p.Nodes = append([]TransitionNode(nil), p.Nodes...)
 	for j := range p.Nodes {
-		p.Nodes[j].Successors = append([]uint64(nil), p.Nodes[j].Successors...)
+		p.Nodes[j].Successors = append([]TransitionOccurrenceID(nil), p.Nodes[j].Successors...)
 	}
 	return p, nil
 }
 
 func (m *transitionChecker) inherit(prior checkedTransition) error {
 	b := prior.bound
+	// Reserve cloned projection containers before allocation. Expression handles
+	// and image backing remain immutable, but sharing them does not exempt the
+	// successor's independently owned slices and byte-state inventory.
+	for _, n := range []int{len(b.InitialMemory), len(b.Memory), len(b.Words), len(b.Instructions), len(b.Accesses), len(b.PrimitiveEffects), len(b.Abstractions), len(b.Frames), len(b.Expansions), len(b.ExcludedOrigins), len(b.Interface.Regions), len(b.Interface.ImageRegions), len(b.Interface.EntryImagePointers), len(b.Interface.EntryWordUpperBounds), len(prior.justifications)} {
+		if n > (m.limits.LiveStateBytes-m.liveStateBytes)/256 {
+			return refuse(m.pc, "transition-budget", "inherited evidence storage")
+		}
+		m.liveStateBytes += n * 256
+	}
 	if len(prior.exclusions) != len(b.ExcludedBoundaries) {
 		return refuse(m.pc, "transition-predecessor", "incomplete exclusions")
 	}
@@ -68,16 +71,6 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 			if !m.tick() {
 				return m.err
 			}
-		}
-	}
-	for _, frame := range b.Frames {
-		if err := transitionCopyWork(&m.work, m.limits.Work, len(frame.Context)); err != nil {
-			return err
-		}
-	}
-	for _, e := range b.Expansions {
-		if err := transitionCopyWork(&m.work, m.limits.Work, len(e.Context)); err != nil {
-			return err
 		}
 	}
 	m.face = b.Interface
@@ -154,6 +147,9 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 			return m.err
 		}
 		left, right := e.Roots()
+		if !e.Valid() || left != b.ExcludedBoundaries[j].Guard || !literalBool(right, 0) || right.Sort() != br.Bool() {
+			return refuse(b.ExcludedBoundaries[j].PC, "transition-predecessor", "invalid retained exclusion")
+		}
 		for _, root := range []br.Term{b.ExcludedBoundaries[j].Guard, left, right} {
 			if err := importRoot(root); err != nil {
 				return err

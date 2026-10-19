@@ -183,7 +183,7 @@ func globalFunctionNative(t testing.TB, variant string) (globalNativeFixture, na
 		}
 		at += uint64(instruction.Len)
 	}
-	proposal, err := nativeproof.ProposeRegionTransition(t.Context(), f.image, f.entry, f.cut, nativeproof.TransitionLimits{}, expansions...)
+	proposal, err := nativeproof.ProposeRegionTransition(t.Context(), f.image, f.entry, f.cut, nativeproof.TransitionLimits{}, nativeproof.TransitionOptions{Expansions: expansions})
 	if err != nil {
 		t.Fatal(err)
 	}

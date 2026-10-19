@@ -71,7 +71,7 @@ func selectedCheckPrefix(t testing.TB, raw []byte, image *nativeproof.Image, loc
 	setPairedAtomicModel(&face)
 	face.Conditions.SSE = nativeproof.SSEModel
 	limits := nativeproof.TransitionLimits{RelationLimits: nativeproof.RelationLimits{Work: 8_000_000, Nodes: 131072}}
-	proposal, err := nativeproof.ProposeRegionTransition(t.Context(), image, entry, call, limits, expansions...)
+	proposal, err := nativeproof.ProposeRegionTransition(t.Context(), image, entry, call, limits, nativeproof.TransitionOptions{Expansions: expansions})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,12 +122,13 @@ func TestGlobalCallerSelectedRuntimeArtifact(t *testing.T) {
 	}
 	b, ok := application.BoundFor(image)
 	child, _ := callee.Bound()
-	if !ok || !application.AppliesTo(callee) || b.StackShift != -64 || b.Continuation != child.State.PC || len(b.Successor.PrimitiveEffects) != 10 || len(b.Successor.Frames) != 0 || b.Successor.Boundary.Context != "" || b.Successor.Registers[nativeproof.RSP].Pointer != (nativeproof.OriginPointer{Origin: b.Successor.Origin, Offset: -56}) || b.Successor.Registers[nativeproof.RBP].Pointer != (nativeproof.OriginPointer{Origin: b.Successor.Origin, Offset: -8}) {
+	if !ok || !application.AppliesTo(callee) || b.StackShift != -64 || b.Continuation != child.State.PC || len(b.Successor.PrimitiveEffects) != 10 || len(b.Successor.Frames) != 0 || b.Successor.Boundary.Context != 0 || b.Successor.Registers[nativeproof.RSP].Pointer != (nativeproof.OriginPointer{Origin: b.Successor.Origin, Offset: -56}) || b.Successor.Registers[nativeproof.RBP].Pointer != (nativeproof.OriginPointer{Origin: b.Successor.Origin, Offset: -8}) {
 		t.Fatal("actual application lost callee identity, effects or caller frame")
 	}
 	if !b.Successor.SSE.MXCSRPreserved || !b.Successor.SSE.UpperVectorsPreserved || b.Successor.Vectors != b.ChildEntry.Vectors {
 		t.Fatal("integer callee application lost caller's floating/vector context")
 	}
 	t.Logf("actual composed return=%#x instructions=%d accesses=%d primitives=%d exclusions=%d", b.Continuation, len(b.Successor.Instructions), len(b.Successor.Accesses), len(b.Successor.PrimitiveEffects), len(b.Successor.ExcludedBoundaries))
-	selectedCheckFirstLoopCut(t, raw, image, application)
+	header := selectedCheckFirstLoopCut(t, raw, image, application)
+	selectedCheckCompleteReturn(t, raw, image, application, header)
 }

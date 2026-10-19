@@ -411,7 +411,7 @@ func scalarTailCarryContinuation(t *testing.T, carry uint64) {
 		pc += uint64(i.Len)
 	}
 	cut := testEntry + uint64(len(code))
-	p, err := ProposeTransition(t.Context(), im, cut, TransitionLimits{}, expansions...)
+	p, err := ProposeTransition(t.Context(), im, cut, TransitionLimits{}, TransitionOptions{Expansions: expansions})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +433,7 @@ func scalarTailCarryContinuation(t *testing.T, carry uint64) {
 	}
 	// Split immediately before SBB; continuation must keep INC's carry identity.
 	split := testEntry + 21
-	pre, err := ProposeTransition(t.Context(), im, split, TransitionLimits{}, expansions[:1]...)
+	pre, err := ProposeTransition(t.Context(), im, split, TransitionLimits{}, TransitionOptions{Expansions: expansions[:1]})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,7 +445,8 @@ func scalarTailCarryContinuation(t *testing.T, carry uint64) {
 	if stateEval(t, before.Flags.CF.Value, nil) != carry {
 		t.Fatal("INC changed the incoming comparison carry")
 	}
-	continued, err := CheckTransitionContinuation(t.Context(), first, p)
+	nextProposal := continuationProposal(t, first, cut, TransitionOptions{Expansions: expansions[1:]})
+	continued, err := CheckTransitionContinuation(t.Context(), first, nextProposal)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,8 +487,17 @@ func scalarTailCarryContinuation(t *testing.T, carry uint64) {
 
 func scalarJoinProposal(t testing.TB, im *Image, cut uint64) TransitionProposal {
 	t.Helper()
+	p, err := ProposeTransition(t.Context(), im, cut, TransitionLimits{}, scalarJoinOptions(t, im, testEntry, cut))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func scalarJoinOptions(t testing.TB, im *Image, start, cut uint64) TransitionOptions {
+	t.Helper()
 	var expansions []TransitionExpansion
-	for pc := testEntry; pc < cut; {
+	for pc := start; pc < cut; {
 		i, _, err := transitionEncoding(im, pc)
 		if err != nil {
 			t.Fatal(err)
@@ -497,11 +507,7 @@ func scalarJoinProposal(t testing.TB, im *Image, cut uint64) TransitionProposal 
 		}
 		pc += uint64(i.Len)
 	}
-	p, err := ProposeTransition(t.Context(), im, cut, TransitionLimits{}, expansions...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return p
+	return TransitionOptions{Expansions: expansions}
 }
 
 func TestTransitionScalarUnavailablePredicateJoin(t *testing.T) {
@@ -532,7 +538,8 @@ func TestTransitionScalarUnavailablePredicateJoin(t *testing.T) {
 					t.Fatal("join lost carry or invented a signed predicate")
 				}
 				before, _ := first.BoundFor(im)
-				continued, nextErr := CheckTransitionContinuation(t.Context(), first, p)
+				nextProposal := continuationProposal(t, first, cut, scalarJoinOptions(t, im, join, cut))
+				continued, nextErr := CheckTransitionContinuation(t.Context(), first, nextProposal)
 				after, _ := first.BoundFor(im)
 				if !reflect.DeepEqual(before, after) {
 					t.Fatal("join continuation mutated its predecessor")

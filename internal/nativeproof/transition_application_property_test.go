@@ -113,7 +113,7 @@ func applicationPopulationBuild(t testing.TB, p applicationPopulation) applicati
 
 type applicationConcreteAccess struct {
 	pc      uint64
-	context string
+	context TransitionActivationID
 	kind    AccessKind
 	span    RelativeSpan
 	value   uint64
@@ -131,7 +131,7 @@ func (s applicationConcreteState) clone() applicationConcreteState {
 	return s
 }
 
-func (s *applicationConcreteState) load(pc uint64, context string, offset int64, width int, kind AccessKind) uint64 {
+func (s *applicationConcreteState) load(pc uint64, context TransitionActivationID, offset int64, width int, kind AccessKind) uint64 {
 	var value uint64
 	for lane := 0; lane < width; lane++ {
 		value |= uint64(s.bytes[TransitionLocation{Offset: offset + int64(lane)}]) << (8 * lane)
@@ -140,7 +140,7 @@ func (s *applicationConcreteState) load(pc uint64, context string, offset int64,
 	return value
 }
 
-func (s *applicationConcreteState) store(pc uint64, context string, offset int64, width int, value uint64) {
+func (s *applicationConcreteState) store(pc uint64, context TransitionActivationID, offset int64, width int, value uint64) {
 	for lane := 0; lane < width; lane++ {
 		s.bytes[TransitionLocation{Offset: offset + int64(lane)}] = byte(value >> (8 * lane))
 	}
@@ -149,21 +149,20 @@ func (s *applicationConcreteState) store(pc uint64, context string, offset int64
 
 // The oracle is the grammar's imperative contract, independent of symbolic
 // transfer, provenance, guarded-join machinery and native instruction decoding.
-func applicationConcreteRun(p applicationPopulation, code applicationPopulationProgram, initial applicationConcreteState) (entry, returned, completed applicationConcreteState) {
+func applicationConcreteRun(p applicationPopulation, code applicationPopulationProgram, initial applicationConcreteState, activation TransitionActivationID) (entry, returned, completed applicationConcreteState) {
 	s := initial.clone()
 	base := s.regs[RSP]
 	if p.bp == 1 {
 		s.regs[RBP] = base + 24
 	}
 	if p.seeded {
-		s.store(code.pc["seed"], "", int64(-p.delta-24), 8, s.regs[RDI])
+		s.store(code.pc["seed"], 0, int64(-p.delta-24), 8, s.regs[RDI])
 	}
 	s.regs[RSP] -= uint64(p.delta)
 	childSP := int64(-p.delta - 8)
 	s.regs[RSP] -= 8
-	s.store(code.call, "", childSP, 8, code.call+5)
+	s.store(code.call, 0, childSP, 8, code.call+5)
 	entry = s.clone()
-	activation := callContext("", code.call)
 	s.regs[RSP] -= 8
 	s.store(code.pc["save"], activation, childSP-8, 8, s.regs[RBP])
 	s.regs[RBP] = s.regs[RSP]
@@ -183,11 +182,11 @@ func applicationConcreteRun(p applicationPopulation, code applicationPopulationP
 	s.load(code.childRet, activation, childSP, 8, FrameReturnRead)
 	s.regs[RSP] += 8
 	returned = s.clone()
-	s.regs[R9] = s.load(code.pc["released-word"], "", local, 8, FrameRead)
-	low := s.load(code.pc["released-byte"], "", local+8, 1, FrameRead)
+	s.regs[R9] = s.load(code.pc["released-word"], 0, local, 8, FrameRead)
+	low := s.load(code.pc["released-byte"], 0, local+8, 1, FrameRead)
 	s.regs[R10] = s.regs[R10]&^255 | low
 	s.regs[RSP] += uint64(p.delta)
-	s.load(code.rootRet, "", 0, 8, FrameReturnRead)
+	s.load(code.rootRet, 0, 0, 8, FrameReturnRead)
 	s.regs[RSP] += 8
 	return entry, returned, s
 }
@@ -246,13 +245,13 @@ func applicationPopulationAssert(t testing.TB, registers [16]TransitionValue, me
 			t.Fatalf("byte %+v = %#x, want %#x", v.TransitionLocation, got, want.bytes[v.TransitionLocation])
 		}
 	}
-	guards := make(map[programPoint]bool)
+	guards := make(map[TransitionOccurrenceID]bool)
 	for _, ins := range instructions {
-		guards[programPoint{ins.Start, ins.Context}] = stateEval(t, ins.Guard, values) == 1
+		guards[ins.ID] = stateEval(t, ins.Guard, values) == 1
 	}
 	var actual []applicationConcreteAccess
 	for _, access := range accesses {
-		active, exists := guards[programPoint{access.PC, access.Context}]
+		active, exists := guards[access.ID]
 		if !exists {
 			t.Fatal("access lost its occurrence guard")
 		}
@@ -283,7 +282,7 @@ func TestTransitionApplicationJointPopulation(t *testing.T) {
 							t.Fatal(err)
 						}
 						b, _ := application.Bound()
-						if !application.AppliesTo(child) || b.StackShift != int64(-delta-8) || len(b.ChildEntry.Frames) != 1 || len(b.Successor.Frames) != 0 || b.Successor.Boundary.PC != code.call+5 || b.Successor.Boundary.Context != "" {
+						if !application.AppliesTo(child) || b.Activation != TransitionActivationID(parent.checked.bound.Boundary.ID) || b.StackShift != int64(-delta-8) || len(b.ChildEntry.Frames) != 1 || len(b.Successor.Frames) != 0 || b.Successor.Boundary.PC != code.call+5 || b.Successor.Boundary.Context != 0 {
 							t.Fatal("application lost exact child or restored activation")
 						}
 						if b.Successor.Registers[RBP].Pointer != parent.checked.bound.Registers[RBP].Pointer {
@@ -313,7 +312,7 @@ func TestTransitionApplicationJointPopulation(t *testing.T) {
 							}
 						}
 						successor, _ := application.Successor()
-						proposal, err := ProposeRegionTransition(t.Context(), code.im, testEntry, code.rootRet, TransitionLimits{}, b.Successor.Expansions...)
+						proposal, err := ProposeTransitionContinuation(t.Context(), successor, code.rootRet)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -331,7 +330,7 @@ func TestTransitionApplicationJointPopulation(t *testing.T) {
 						for origin := 0; origin < 4; origin++ {
 							for arm := 0; arm < 2; arm++ {
 								values, initial := applicationPopulationInputs(t, b.Successor, p, origin, arm)
-								entry, returned, complete := applicationConcreteRun(p, code, initial)
+								entry, returned, complete := applicationConcreteRun(p, code, initial, TransitionActivationID(parent.checked.bound.Boundary.ID))
 								var incomingWord uint64
 								for lane := 0; lane < 8; lane++ {
 									incomingWord |= uint64(entry.bytes[TransitionLocation{Offset: b.StackShift - 16 + int64(lane)}]) << (8 * lane)

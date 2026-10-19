@@ -187,7 +187,7 @@ func assertInitializationGeometry(t testing.TB, raw []byte, loads []interfaceMap
 		declared += int(s.End - s.Start)
 	}
 	limits := TransitionLimits{Bytes: declared, RelationLimits: RelationLimits{Nodes: 2*declared + 4096, Work: 256*declared + 100000}}
-	p := TransitionProposal{ImageDigest: im.digest, Entry: testEntry, Cut: testEntry, Nodes: []Node{{PC: testEntry, Size: 1}}}
+	p := TransitionProposal{ImageDigest: im.digest, Entry: testEntry, Cut: testEntry, Root: 1, Nodes: []TransitionNode{{ID: 1, PC: testEntry, Size: 1}}}
 	c, err := CheckTransition(t.Context(), im, face, p, limits)
 	if err != nil {
 		t.Fatal(err)

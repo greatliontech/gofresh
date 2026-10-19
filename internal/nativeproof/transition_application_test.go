@@ -66,7 +66,7 @@ func (f applicationFixture) certificates(t testing.TB) (TransitionCertificate, T
 
 func applicationRoot(t testing.TB, im *Image, entry, cut uint64, face TransitionInterface, expansions []TransitionExpansion) TransitionCertificate {
 	t.Helper()
-	p, err := ProposeRegionTransition(t.Context(), im, entry, cut, TransitionLimits{}, expansions...)
+	p, err := ProposeRegionTransition(t.Context(), im, entry, cut, TransitionLimits{}, TransitionOptions{Expansions: expansions})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestTransitionApplicationActualCallAndResidualState(t *testing.T) {
 	if actual, ok := c.Callee(); !ok || actual.checked != child.checked {
 		t.Fatal("lost subordinate certificate")
 	}
-	if b.StackShift != -8 || b.Activation != callContext("", f.call) || b.ChildEntry.Boundary.PC != applicationChild || b.Successor.Boundary.PC != f.call+5 || len(b.Successor.Frames) != 0 || b.Successor.Boundary.Context != "" {
+	if b.StackShift != -8 || b.Activation != TransitionActivationID(before.Boundary.ID) || b.ChildEntry.Boundary.PC != applicationChild || b.Successor.Boundary.PC != f.call+5 || len(b.Successor.Frames) != 0 || b.Successor.Boundary.Context != 0 {
 		t.Fatal("incorrect activation/return relationship")
 	}
 	stateInheritedInputs(t, before, b.Successor)
@@ -125,7 +125,7 @@ func TestTransitionApplicationActualCallAndResidualState(t *testing.T) {
 		}
 	}
 	successor, _ := c.Successor()
-	p, err := ProposeRegionTransition(t.Context(), f.im, testEntry, f.call+10, TransitionLimits{}, b.Successor.Expansions...)
+	p, err := ProposeTransitionContinuation(t.Context(), successor, f.call+10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +401,7 @@ func TestTransitionApplicationNestedActivation(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := c.Bound()
-	if b.StackShift != -16 || len(b.ChildEntry.Frames) != 2 || !slices.Equal(b.Successor.Frames, parent.checked.bound.Frames) || b.Successor.Boundary.Context != callContext("", testEntry) {
+	if b.StackShift != -16 || len(b.ChildEntry.Frames) != 2 || !slices.Equal(b.Successor.Frames, parent.checked.bound.Frames) || b.Successor.Boundary.Context != parent.checked.bound.Boundary.Context {
 		t.Fatal("same numeric continuation lost parent activation")
 	}
 }
@@ -416,7 +416,7 @@ func TestTransitionApplicationRebasesCalleeExpansions(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := c.Bound()
-	nested := callContext(b.Activation, applicationChild)
+	nested := TransitionActivationID(b.Successor.Accesses[1].ID)
 	if len(b.Successor.Accesses) != 4 || b.Successor.Accesses[1].Context != b.Activation || b.Successor.Accesses[2].Context != nested || b.Successor.Accesses[3].Context != b.Activation || len(b.Successor.Frames) != 0 {
 		t.Fatal("callee expansion lost nested activation or return ordering")
 	}
@@ -430,12 +430,13 @@ func TestTransitionApplicationProtectedControlScan(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := c.Bound()
-	for _, context := range []string{b.Activation, callContext(b.Activation, applicationChild)} {
+	for _, context := range []TransitionActivationID{b.Activation, b.Activation + 1000} {
 		m, err := newTransitionChecker(t.Context(), f.im, transitionRoot{entry: testEntry, region: true}, parent.checked.limits, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
 		m.bound.Accesses = slices.Clone(b.ChildEntry.Accesses)
+		m.activations = map[TransitionActivationID]transitionActivation{b.Activation: {}, b.Activation + 1000: {parent: b.Activation}}
 		// The supplied value is exactly the initiating CALL value. A final-value
 		// comparison would wrongly accept this write; the footprint must refuse.
 		m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{PC: applicationChild, Context: context, Kind: FrameWrite, Bytes: RelativeSpan{-8, 0}, Value: b.ChildEntry.Accesses[len(b.ChildEntry.Accesses)-1].Value})

@@ -12,7 +12,7 @@ import (
 // This cut covers the first actual loop header, not a completed loop. Discovery
 // selects the first backward signed branch; the checked continuation reconstructs
 // the prefix from its original caller root and keeps that branch unexecuted.
-func selectedCheckFirstLoopCut(t testing.TB, raw []byte, image *nativeproof.Image, application nativeproof.TransitionCallCertificate) {
+func selectedCheckFirstLoopCut(t testing.TB, raw []byte, image *nativeproof.Image, application nativeproof.TransitionCallCertificate) nativeproof.TransitionCertificate {
 	t.Helper()
 	prior, ok := application.Successor()
 	if !ok {
@@ -23,7 +23,7 @@ func selectedCheckFirstLoopCut(t testing.TB, raw []byte, image *nativeproof.Imag
 		t.Fatal("caller successor belongs to another image")
 	}
 	decode := globalCandidateDecoder(t, raw)
-	expansions := append([]nativeproof.TransitionExpansion(nil), b.Expansions...)
+	var expansions []nativeproof.TransitionExpansion
 	pc := b.Boundary.PC
 	var cut uint64
 	for count := 0; count < 32; count++ {
@@ -43,7 +43,7 @@ func selectedCheckFirstLoopCut(t testing.TB, raw []byte, image *nativeproof.Imag
 	if cut == 0 {
 		t.Fatal("selected artifact lacks the candidate first loop branch")
 	}
-	proposal, err := nativeproof.ProposeRegionTransition(t.Context(), image, b.Entry, cut, nativeproof.TransitionLimits{}, expansions...)
+	proposal, err := nativeproof.ProposeTransitionContinuation(t.Context(), prior, cut, nativeproof.TransitionOptions{Expansions: expansions})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,4 +67,5 @@ func selectedCheckFirstLoopCut(t testing.TB, raw []byte, image *nativeproof.Imag
 		t.Fatal("scalar header changed original scope, frame, memory effects or vector context")
 	}
 	t.Logf("actual first loop branch=%#x instructions=%d accesses=%d primitives=%d; backedge remains unexecuted", cut, len(after.Instructions), len(after.Accesses), len(after.PrimitiveEffects))
+	return checked
 }

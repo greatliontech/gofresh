@@ -10,15 +10,17 @@ import (
 )
 
 type instruction struct {
-	context  string
-	boundary boundaryKind
-	pc       uint64
-	inst     operation
-	next     [2]int
-	count    uint8
-	size     uint8
-	parent   int
-	indegree int
+	id         TransitionOccurrenceID
+	activation TransitionActivationID
+	context    string
+	boundary   boundaryKind
+	pc         uint64
+	inst       operation
+	next       [2]int
+	count      uint8
+	size       uint8
+	parent     int
+	indegree   int
 }
 
 // operation retains only what scalar transfer reads. The complete decoder
@@ -53,6 +55,7 @@ func (i instruction) point() programPoint { return programPoint{i.pc, i.context}
 type graph struct {
 	nodes   []instruction
 	byPoint map[programPoint]int
+	byID    map[TransitionOccurrenceID]int
 	order   []int
 }
 
@@ -65,6 +68,7 @@ const (
 	boundaryReturn
 	boundaryCut
 	boundaryUnsupported
+	boundaryFrontier
 )
 
 func (g *graph) failure(pc uint64, err error) error {
@@ -72,12 +76,31 @@ func (g *graph) failure(pc uint64, err error) error {
 }
 
 func (g *graph) failureAt(point programPoint, err error) error {
+	index := -1
+	if at, ok := g.byPoint[point]; ok {
+		index = at
+	}
+	return g.failureIndex(index, point.pc, err)
+}
+
+func (g *graph) failureInstruction(ins instruction, err error) error {
+	if ins.id == 0 {
+		return g.failureAt(ins.point(), err)
+	}
+	index := -1
+	if at, ok := g.byID[ins.id]; ok {
+		index = at
+	}
+	return g.failureIndex(index, ins.pc, err)
+}
+
+func (g *graph) failureIndex(index int, pc uint64, err error) error {
 	r, ok := err.(*Refusal)
 	if !ok {
 		return err
 	}
-	path := []uint64{point.pc}
-	if index, ok := g.byPoint[point]; ok {
+	path := []uint64{pc}
+	if index >= 0 {
 		for parent := g.nodes[index].parent; parent >= 0; parent = g.nodes[parent].parent {
 			path = append(path, g.nodes[parent].pc)
 		}
@@ -85,6 +108,67 @@ func (g *graph) failureAt(point programPoint, err error) error {
 	slices.Reverse(path)
 	r.Path = path
 	return r
+}
+
+// establishParents records a finite root path even for an invalid candidate
+// graph. Missing edges are diagnosed by the caller; unreachable nodes keep no
+// ancestry. Seen membership prevents a candidate cycle from looping diagnostics.
+func (g *graph) establishParents(ctx context.Context, root int) ([]int, error) {
+	seen := make([]bool, len(g.nodes))
+	queue := []int{root}
+	seen[root] = true
+	g.nodes[root].parent = -1
+	for at := 0; at < len(queue); at++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		n := g.nodes[queue[at]]
+		for _, next := range n.next[:n.count] {
+			if next < 0 || next >= len(g.nodes) || seen[next] {
+				continue
+			}
+			seen[next] = true
+			g.nodes[next].parent = queue[at]
+			queue = append(queue, next)
+		}
+	}
+	return queue, nil
+}
+
+type instructionOccupancy struct {
+	bytes   map[uint64]uint64
+	extents map[uint64]uint8
+}
+
+func newInstructionOccupancy() instructionOccupancy {
+	return instructionOccupancy{make(map[uint64]uint64), make(map[uint64]uint8)}
+}
+func (o instructionOccupancy) start(pc uint64) error {
+	if owner, ok := o.bytes[pc]; ok && owner != pc {
+		return refuse(pc, "instruction-overlap", fmt.Sprintf("target enters instruction at %#x", owner))
+	}
+	return nil
+}
+func (o instructionOccupancy) add(pc uint64, size uint8) error {
+	if size == 0 || size > 15 {
+		return refuse(pc, "instruction-decode", "invalid graph extent")
+	}
+	if _, ok := plus(pc, uint64(size)); !ok {
+		return refuse(pc, "instruction-overlap", "extent overflow")
+	}
+	if old, ok := o.extents[pc]; ok && old != size {
+		return refuse(pc, "instruction-overlap", "occurrence decode extent differs")
+	}
+	for off := uint64(0); off < uint64(size); off++ {
+		if owner, ok := o.bytes[pc+off]; ok && owner != pc {
+			return refuse(pc, "instruction-overlap", fmt.Sprintf("instruction intersects start %#x", owner))
+		}
+	}
+	o.extents[pc] = size
+	for off := uint64(0); off < uint64(size); off++ {
+		o.bytes[pc+off] = pc
+	}
+	return nil
 }
 
 // Propose discovers an untrusted graph. Check performs a fresh traversal of the
@@ -157,8 +241,7 @@ func decodeOccurrenceGraph(ctx context.Context, entry uint64, limit int, decodeO
 	// Discovery order is the queue; membership and parent ownership are recorded
 	// once when a target first receives its index. Occupancy is a different fact:
 	// it records decoded byte extents, including instruction interiors.
-	occupied := make(map[uint64]uint64)
-	extents := make(map[uint64]uint8)
+	occupancy := newInstructionOccupancy()
 	for at := 0; at < len(g.nodes); at++ {
 		pc := g.nodes[at].pc
 		point := g.nodes[at].point()
@@ -168,8 +251,8 @@ func decodeOccurrenceGraph(ctx context.Context, entry uint64, limit int, decodeO
 				return nil, err
 			}
 		}
-		if owner, ok := occupied[pc]; ok && owner != pc {
-			return nil, g.failureAt(point, refuse(pc, "instruction-overlap", fmt.Sprintf("target enters instruction at %#x", owner)))
+		if err := occupancy.start(pc); err != nil {
+			return nil, g.failureAt(point, err)
 		}
 		if at == 0 {
 			ins = first
@@ -179,15 +262,8 @@ func decodeOccurrenceGraph(ctx context.Context, entry uint64, limit int, decodeO
 				return nil, g.failureAt(point, err)
 			}
 		}
-		if old, ok := extents[pc]; ok && old != ins.size {
-			return nil, g.failureAt(point, refuse(pc, "instruction-overlap", "activation decode extent differs"))
-		}
-		extents[pc] = ins.size
-		for off := uint64(0); off < uint64(ins.size); off++ {
-			if owner, ok := occupied[pc+off]; ok && owner != pc {
-				return nil, g.failureAt(point, refuse(pc, "instruction-overlap", fmt.Sprintf("instruction intersects start %#x", owner)))
-			}
-			occupied[pc+off] = pc
+		if err := occupancy.add(pc, ins.size); err != nil {
+			return nil, g.failureAt(point, err)
 		}
 		g.nodes[at].inst = ins.inst
 		g.nodes[at].boundary = ins.boundary
@@ -207,7 +283,58 @@ func decodeOccurrenceGraph(ctx context.Context, entry uint64, limit int, decodeO
 			// Appending can move the node slice. Resolve through its current base
 			// rather than keeping a node pointer across discovery of a successor.
 			g.nodes[at].next[edge] = next
+		}
+	}
+	if err := g.validate(ctx, 0); err != nil {
+		return nil, err
+	}
+	return g, nil
+}
+
+// validate is the shared image-wide occupancy, exact rooted membership and DAG
+// kernel. Reverse topological position is a finite rank strictly decreasing on
+// every edge, including both slots when conditional targets coincide.
+func (g *graph) validate(ctx context.Context, root int) error {
+	if root < 0 || root >= len(g.nodes) {
+		return refuse(0, "graph-root", "missing root")
+	}
+	for idx := range g.nodes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n := &g.nodes[idx]
+		if n.size == 0 || n.size > 15 || n.count > 2 {
+			return refuse(n.pc, "instruction-decode", "invalid graph extent or edges")
+		}
+		n.indegree = 0
+	}
+	queue, err := g.establishParents(ctx, root)
+	if err != nil {
+		return err
+	}
+	for _, idx := range queue {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n := &g.nodes[idx]
+		for _, next := range n.next[:n.count] {
+			if next < 0 || next >= len(g.nodes) {
+				return refuse(n.pc, "graph-edge", "missing successor")
+			}
 			g.nodes[next].indegree++
+		}
+	}
+	if len(queue) != len(g.nodes) {
+		return refuse(g.nodes[root].pc, "graph-membership", "disconnected occurrence")
+	}
+	occupancy := newInstructionOccupancy()
+	for _, idx := range queue {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n := g.nodes[idx]
+		if err := occupancy.add(n.pc, n.size); err != nil {
+			return g.failureInstruction(n, err)
 		}
 	}
 	// A topological traversal both rejects cycles and ensures all incoming states
@@ -215,7 +342,7 @@ func decodeOccurrenceGraph(ctx context.Context, entry uint64, limit int, decodeO
 	g.order = make([]int, 0, len(g.nodes))
 	for index := range g.nodes {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
 		if g.nodes[index].indegree == 0 {
 			g.order = append(g.order, index)
@@ -224,7 +351,7 @@ func decodeOccurrenceGraph(ctx context.Context, entry uint64, limit int, decodeO
 	// The ready queue becomes the final order in place.
 	for at := 0; at < len(g.order); at++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
 		ins := &g.nodes[g.order[at]]
 		for _, next := range ins.next[:ins.count] {
@@ -238,11 +365,11 @@ func decodeOccurrenceGraph(ctx context.Context, entry uint64, limit int, decodeO
 		for _, ins := range g.nodes {
 			if ins.indegree != 0 {
 				pc := ins.pc
-				return nil, g.failureAt(ins.point(), refuse(pc, "acyclic-control", "reachable cycle is unsupported"))
+				return g.failureInstruction(ins, refuse(pc, "acyclic-control", "reachable cycle is unsupported"))
 			}
 		}
 	}
-	return g, nil
+	return nil
 }
 
 func decode(im *Image, pc uint64) (decodedInstruction, error) {

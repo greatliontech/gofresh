@@ -140,7 +140,7 @@ func checkReturnFramePopulation(t testing.TB, registers []byte, frame uint16, se
 		t.Fatal("RET failed to advance the restored stack")
 	}
 	prior := returnPrefix(t, im, face, firstCut)
-	segmented, err := CheckTransitionContinuation(t.Context(), prior, entryRelationProposal(t, im, ret))
+	segmented, err := CheckTransitionContinuation(t.Context(), prior, continuationProposal(t, prior, ret))
 	if err != nil {
 		t.Fatal(err)
 	}

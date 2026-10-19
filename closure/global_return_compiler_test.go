@@ -65,7 +65,7 @@ func selectedAtomicReturn(t testing.TB, raw []byte, image *nativeproof.Image, lo
 	face.ReturnContext = &nativeproof.TransitionReturnContext{Target: continuation, Preserved: []nativeproof.Register{nativeproof.RBP, nativeproof.R14}}
 	face.PrivateFrame = &nativeproof.TransitionPrivateFrame{Bytes: nativeproof.RelativeSpan{Start: -24, End: 0}}
 	setPairedAtomicModel(&face)
-	p, err := nativeproof.ProposeRegionTransition(t.Context(), image, entry, ret, nativeproof.TransitionLimits{}, expansions...)
+	p, err := nativeproof.ProposeRegionTransition(t.Context(), image, entry, ret, nativeproof.TransitionLimits{}, nativeproof.TransitionOptions{Expansions: expansions})
 	if err != nil {
 		t.Fatal(err)
 	}

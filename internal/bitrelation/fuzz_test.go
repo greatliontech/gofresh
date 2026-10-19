@@ -11,10 +11,13 @@ import (
 // for every primitive, plus symbolic interval and truncation rules. Widths are
 // uniform over 1..64, the operator selector covers arithmetic/comparison/shift
 // families, and shift counts include width, above-width and uint64 extrema.
+// Conditional arithmetic/order adds both operand positions, an independent
+// third word and a condition selected from a width-independent input bit.
 func FuzzExactScalarSemantics(f *testing.F) {
 	for _, w := range []uint8{0, 1, 7, 31, 63} {
 		for op := uint8(0); op < 23; op++ {
 			f.Add(w, op, ^uint64(0), uint64(1), uint64(64))
+			f.Add(w|64, op, uint64(1), ^uint64(0), uint64(0))
 		}
 	}
 	f.Fuzz(func(t *testing.T, wByte, selector uint8, a, b, shift uint64) {
@@ -108,6 +111,13 @@ func FuzzExactScalarSemantics(f *testing.F) {
 			prove(t, pair[0], pair[1])
 			assertValues(t, pair[0], pair[1], map[br.Term]uint64{vx: a, vy: b, bp: shift & 1, bq: (shift >> 1) & 1})
 		}
+		vz := g.variable(s, br.NewScope(), 0, false)
+		operation := conditionalOperations[int(selector)%len(conditionalOperations)]
+		position := int(selector) / len(conditionalOperations) % 2
+		conditional, distributed := conditionalOperationTerms(g, operation, position, bp, vx, vy, vz)
+		direct(t, br.ConditionalOperation, conditional, distributed)
+		prove(t, conditional, distributed)
+		assertValues(t, conditional, distributed, map[br.Term]uint64{vx: a, vy: b, vz: shift & widthMask(w), bp: uint64(wByte >> 6 & 1)})
 		// A symbolic low field plus arbitrary upper scratch bits must project
 		// exactly, regardless of extension sign or discarded native register bits.
 		// Trunc requires a strictly narrower result, so width 64 has no such case.

@@ -67,7 +67,7 @@ func (m *transitionChecker) archSetFS(size uint8) error {
 			after.Pointer = before.Pointer
 		}
 	}
-	m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, ArchSetFSEffect{PC: m.pc, Context: m.activation, Number: number, Operation: option, Base: base, Valid: valid, Result: result, BeforeFS: before.Value, AfterFS: after.Value})
+	m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, ArchSetFSEffect{ID: m.occurrence, PC: m.pc, Context: m.activation, Number: number, Operation: option, Base: base, Valid: valid, Result: result, BeforeFS: before.Value, AfterFS: after.Value})
 	m.thread.FS = after
 	// Success may replace the selector through either a descriptor or base
 	// register. Failure preserves it, but no blanket preservation is inferred
@@ -88,7 +88,7 @@ func (m *transitionChecker) archSetFS(size uint8) error {
 	}
 	m.remember(v, 1)
 	m.state.regs[R11] = v
-	m.bound.Abstractions = append(m.bound.Abstractions, TransitionAbstraction{PC: m.pc, Context: m.activation, Value: v, Predicates: TransitionPredicates{m.state.flags[flagCarry], m.state.flags[flagZero], m.state.flags[flagLess]}})
+	m.bound.Abstractions = append(m.bound.Abstractions, TransitionAbstraction{ID: m.occurrence, PC: m.pc, Context: m.activation, Value: v, Predicates: TransitionPredicates{m.state.flags[flagCarry], m.state.flags[flagZero], m.state.flags[flagLess]}})
 	for _, reg := range []Register{RAX, RCX, R11} {
 		m.pointers[reg], m.bound.Preserved[reg] = nil, 0
 	}

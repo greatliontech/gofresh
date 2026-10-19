@@ -66,13 +66,13 @@ func exclusionBudgetFixture(t testing.TB, l TransitionLimits) (*Image, Transitio
 	face := stateFace(16, 0)
 	face.Regions = []RelativeRegion{{RelativeSpan{0, 64}, true, true}}
 	face.Words = nil
-	prefix := TransitionProposal{ImageDigest: im.digest, Entry: testEntry, Cut: testEntry + 3, Nodes: []Node{{PC: testEntry, Size: 3, Successors: []uint64{testEntry + 3}}, {PC: testEntry + 3, Size: 2}}}
+	prefix := TransitionProposal{ImageDigest: im.digest, Entry: testEntry, Cut: testEntry + 3, Root: 1, Nodes: []TransitionNode{{ID: 1, PC: testEntry, Size: 3, Successors: []TransitionOccurrenceID{2}}, {ID: 2, PC: testEntry + 3, Size: 2}}}
 	root, err := CheckTransition(t.Context(), im, face, prefix, l)
 	if err != nil {
 		t.Fatal("same-allowance prefix refused", err)
 	}
 	stateBindings(t, root, face, stateRawInitial(face, nil))
-	full := TransitionProposal{ImageDigest: im.digest, Entry: testEntry, Cut: testEntry + 7, Nodes: []Node{{PC: testEntry, Size: 3, Successors: []uint64{testEntry + 3}}, {PC: testEntry + 3, Size: 2, Successors: []uint64{testEntry + 5, testEntry + 7}}, {PC: testEntry + 5, Size: 2}, {PC: testEntry + 7, Size: 2}}}
+	full := TransitionProposal{ImageDigest: im.digest, Entry: testEntry, Cut: testEntry + 7, Root: 1, Nodes: []TransitionNode{{ID: 1, PC: testEntry, Size: 3, Successors: []TransitionOccurrenceID{2}}, {ID: 2, PC: testEntry + 3, Size: 2, Successors: []TransitionOccurrenceID{3, 4}}, {ID: 3, PC: testEntry + 5, Size: 2}, {ID: 4, PC: testEntry + 7, Size: 2}}}
 	return im, root, full
 }
 
@@ -129,9 +129,11 @@ func TestTransitionExclusionProofNodeAndStorageBudgets(t *testing.T) {
 	// their types/count, not sampled from a failing checker or its spent counter.
 	stateBytes := int(unsafe.Sizeof(transitionNodeState{})) + 1024 + 64*(2*int(unsafe.Sizeof(TransitionLocation{})+unsafe.Sizeof(TransitionByte{}))+64)
 	inputNodes, _ := exclusionTermInventory(guard, falsity)
-	// Full and reconstructed two-node prefix graphs coexist; root contexts
-	// have no path bytes, and each occurrence reserves 2048 metadata bytes.
-	occupied := 2*stateBytes + 8*len(p.Nodes) + 2048*(len(p.Nodes)+2)
+	// One owned full occurrence witness replaces prefix reconstruction. Graph
+	// nodes reserve 4096 bytes; inherited projection elements reserve 256 each.
+	retained := template.checked.bound
+	inherited := 256 * (len(retained.InitialMemory) + len(retained.Memory) + len(retained.Instructions) + len(retained.ExcludedOrigins) + len(retained.Interface.Regions))
+	occupied := 2*stateBytes + 8*len(p.Nodes) + 4096*len(p.Nodes) + inherited + 64*(len(template.checked.witness.Nodes)-1)
 	storage := occupied + 4096*(inputNodes-1)
 	_, low, full = exclusionBudgetFixture(t, TransitionLimits{LiveStateBytes: storage})
 	c, err = CheckTransitionContinuation(t.Context(), low, full)

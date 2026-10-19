@@ -8,7 +8,7 @@ import (
 // TransitionRules identifies the conditional symbolic-origin transition rules,
 // including initialized image roots, guarded exclusions, decoder, expression,
 // pointer-lane, bounded conditional entry/return relations and CPUID dependencies.
-const TransitionRules = "gofresh/native-transition@16;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
+const TransitionRules = "gofresh/native-transition@17;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
 
 // LockedMemoryModel requires cacheable write-back coherent RAM, power-of-two cache
 // lines of at least eight bytes aligned to their size, and enabled architectural
@@ -170,27 +170,70 @@ type TransitionLimits struct {
 type TransitionProposal struct {
 	ImageDigest [32]byte
 	Entry, Cut  uint64
-	Nodes       []Node
-	// Expansions selects candidate coverage for TransitionExpansionRequired's
-	// operation/operand families. An unselected occurrence is a structural
-	// terminal requiring a checked false full incoming guard.
-	Expansions []TransitionExpansion
+	Root        TransitionOccurrenceID
+	Nodes       []TransitionNode
+	// After zero selects the numeric whole-root first hit. Nonzero selects the
+	// first target encounter after the opaque predecessor's boundary executes;
+	// checking requires exact equality with that predecessor-owned boundary ID.
+	After TransitionOccurrenceID
 }
 
-// TransitionExpansion is an untrusted search choice, not a semantic premise. Context
-// is the activation path emitted by discovery (empty at the bound root); PC names
-// an actual optional operation/form within it (TransitionExpansionRequired). Only admitted operand forms can
-// execute; selecting an unsupported form grants no semantics. Duplicate, unused or
-// other choices refuse.
-// Each ancestor CALL appends '/' and its PC in exactly sixteen lowercase hex
-// digits, outermost first. This is a candidate coordinate, not an execution ID
-// or persisted evidence. A proposer can expose a child's context by stopping at
-// that child's first unexecuted boundary before proposing a longer scope.
-// Unselected optional operations retain their structural-terminal interpretation,
-// including when no primitive applicability condition is available.
+// TransitionEndpointMode identifies the checked endpoint selection rule.
+type TransitionEndpointMode uint8
+
+const (
+	// TransitionNumericFirstHit selects the original scope's first target hit.
+	TransitionNumericFirstHit TransitionEndpointMode = iota + 1
+	// TransitionFirstAfter selects the first target hit after its bound anchor.
+	TransitionFirstAfter
+)
+
+// TransitionEndpoint is a non-authorizing endpoint projection. Cut is the
+// independently resolved common occurrence, not a caller-selected node. Actual
+// callee completion may anchor the same rule at its exact checked terminal RET.
+type TransitionEndpoint struct {
+	Mode        TransitionEndpointMode
+	Anchor, Cut TransitionOccurrenceID
+}
+
+// TransitionOccurrenceID identifies one node within its owning proof. Zero is invalid.
+type TransitionOccurrenceID uint64
+
+// TransitionActivationID identifies an actual call activation within its proof.
+// Zero is the root; a child is identified by its invoking CALL occurrence.
+type TransitionActivationID uint64
+
+// TransitionNode proposes one finite occurrence and its ordered decoded edge slots.
+// Expanded selects an optional transfer. Frontier instead defers a supported
+// transfer and requires an independently checked false incoming guard. Neither
+// choice supplies execution semantics. Activation and decreasing rank are derived.
+type TransitionNode struct {
+	ID                 TransitionOccurrenceID
+	PC                 uint64
+	Size               uint8
+	Successors         []TransitionOccurrenceID
+	Expanded, Frontier bool
+}
+
+// TransitionOptions controls untrusted discovery only. MaxOccurrences bounds
+// path depth, leaving decoded residual frontiers; zero requests acyclic discovery.
+// The resource limits remain refusal boundaries, never successful endpoints.
+type TransitionOptions struct {
+	MaxOccurrences int
+	Expansions     []TransitionExpansion
+}
+
+// TransitionExpansion selects a static optional form in an activation during
+// discovery. ID zero selects every repeat; a nonzero ID selects that occurrence
+// only. Checked projections always carry the exact occurrence ID. Unselected
+// optional forms require a false incoming guard, even when semantics are available.
 type TransitionExpansion struct {
-	Context string
+	ID      TransitionOccurrenceID
+	Context TransitionActivationID
 	PC      uint64
+	// AllActivations is discovery-only: select this exact static form in each
+	// discovered activation. Checked projections always qualify the occurrence.
+	AllActivations bool
 }
 
 // TransitionPointer is a closed provenance sum. Nil means no provenance. Its
@@ -267,11 +310,12 @@ type TransitionWord struct {
 	Value  br.Term
 }
 
-// TransitionAccess retains a conditional full-operand access. Context and PC identify
-// the owning instruction guard; filtering those guards yields execution order.
+// TransitionAccess retains a conditional full-operand access. ID identifies the
+// owning instruction guard; filtering those guards yields execution order.
 type TransitionAccess struct {
+	ID      TransitionOccurrenceID
 	PC      uint64
-	Context string
+	Context TransitionActivationID
 	Kind    AccessKind
 	Bytes   RelativeSpan
 	// Image selects absolute low-canonical coordinates in Bytes.
@@ -282,7 +326,7 @@ type TransitionAccess struct {
 }
 
 // PrimitiveEffect is a closed sum of checked machine/OS primitive occurrences.
-// Each activation/PC inherits its instruction's guard. Filtering those guards supplies the
+// Each ID inherits its exact instruction occurrence's guard. Filtering those guards supplies the
 // occurrence order and interleaving with other transfers. These are dependencies,
 // not observations or claims that every listed occurrence executes.
 type PrimitiveEffect interface{ primitiveEffect() }
@@ -292,8 +336,9 @@ type PrimitiveEffect interface{ primitiveEffect() }
 // independent arbitrary BV32 in this occurrence's private scope. It claims no
 // repeatability, feature consistency, latency, cache, TLB or host-state behavior.
 type CPUIDEffect struct {
+	ID                                             TransitionOccurrenceID
 	PC                                             uint64
-	Context                                        string
+	Context                                        TransitionActivationID
 	Leaf, Subleaf                                  br.Term
 	ResultsEAX, ResultsEBX, ResultsECX, ResultsEDX br.Term
 }
@@ -306,8 +351,9 @@ func (CPUIDEffect) primitiveEffect() {}
 // next IP, saves RF-cleared flags in R11, clears RF on return and establishes
 // native user CS/SS. Effective FS success does not specify its selector.
 type ArchSetFSEffect struct {
+	ID                                                        TransitionOccurrenceID
 	PC                                                        uint64
-	Context                                                   string
+	Context                                                   TransitionActivationID
 	Number, Operation, Base, Valid, Result, BeforeFS, AfterFS br.Term
 }
 
@@ -322,8 +368,9 @@ func (ArchSetFSEffect) primitiveEffect() {}
 // event survives result overwrites and supplies no concurrent-history theorem.
 // Width is the memory width in bytes (4 or 8); Accumulator is always full RAX.
 type LockedCompareExchangeEffect struct {
+	ID                                                        TransitionOccurrenceID
 	PC                                                        uint64
-	Context                                                   string
+	Context                                                   TransitionActivationID
 	Width                                                     int
 	ReadAccess, WriteAccess                                   int
 	Before, Compare, Replacement, After, Accumulator, Success br.Term
@@ -336,8 +383,9 @@ func (LockedCompareExchangeEffect) primitiveEffect() {}
 // access indices identify the adjacent read/write in the cumulative access trace.
 // Before and Operand are incoming values; After is their bitwise result.
 type LockedLogicalEffect struct {
+	ID                      TransitionOccurrenceID
 	PC                      uint64
-	Context                 string
+	Context                 TransitionActivationID
 	Kind                    x86asm.Op
 	Width                   int
 	ReadAccess, WriteAccess int
@@ -351,8 +399,9 @@ func (LockedLogicalEffect) primitiveEffect() {}
 // indices address the cumulative access trace; the write occurs even for equal
 // values. All scalar inputs precede the memory and register writes.
 type LockedExchange64Effect struct {
+	ID                                   TransitionOccurrenceID
 	PC                                   uint64
-	Context                              string
+	Context                              TransitionActivationID
 	ReadAccess, WriteAccess              int
 	Before, Replacement, After, Register br.Term
 }
@@ -363,8 +412,9 @@ func (LockedExchange64Effect) primitiveEffect() {}
 // locked ordering. Before and Delta are incoming values; Register is the old
 // memory and After its modular sum. Even a zero delta retains both accesses.
 type LockedExchangeAdd64Effect struct {
+	ID                             TransitionOccurrenceID
 	PC                             uint64
-	Context                        string
+	Context                        TransitionActivationID
 	ReadAccess, WriteAccess        int
 	Before, Delta, After, Register br.Term
 }
@@ -377,8 +427,9 @@ func (LockedExchangeAdd64Effect) primitiveEffect() {}
 // dependencies; no correlation with Value is claimed. Every actual saved value
 // is included, and a consumer needing that lost correlation must refuse.
 type TransitionAbstraction struct {
+	ID         TransitionOccurrenceID
 	PC         uint64
-	Context    string
+	Context    TransitionActivationID
 	Value      br.Term
 	Predicates TransitionPredicates
 }
@@ -395,7 +446,8 @@ type TransitionThread struct {
 // TransitionFrame is an active checked call's continuation and actual stack slot.
 // It carries no saved caller heap/register snapshot and grants no permissions.
 type TransitionFrame struct {
-	Context      string
+	ID           TransitionOccurrenceID
+	Context      TransitionActivationID
 	Call, Return uint64
 	Slot         OriginPointer
 }
@@ -419,18 +471,20 @@ type TransitionFlags struct{ CF, OF, SF, ZF, AF, PF TransitionFlag }
 type TransitionPredicates struct{ CF, ZF, SFXorOF br.Term }
 
 // GuardedInstruction is the sole occurrence guard. Accesses and primitive effects
-// inherit it by activation/PC. Filtering this topological inventory gives the executed order.
+// inherit it by ID. Filtering this topological inventory gives the executed order.
 type GuardedInstruction struct {
+	ID TransitionOccurrenceID
 	Span
 	Guard   br.Term
-	Context string
+	Context TransitionActivationID
 }
 
 // CutBoundary records a decoded but unexecuted instruction. Its bytes
 // establish the boundary, not that its effects have been modeled.
 type CutBoundary struct {
+	ID          TransitionOccurrenceID
 	PC          uint64
-	Context     string
+	Context     TransitionActivationID
 	Instruction x86asm.Inst
 	Bytes       []byte
 }
@@ -440,6 +494,8 @@ type CutBoundary struct {
 type ExcludedBoundary struct {
 	CutBoundary
 	Guard br.Term
+	// Frontier distinguishes a deferred supported transfer from an unsupported boundary.
+	Frontier bool
 }
 
 // TransitionBound is a cloned, non-authorizing projection. Origin exclusions are
@@ -450,6 +506,7 @@ type ExcludedBoundary struct {
 // Instructions contains guarded fetch occurrences. Filtering their guards gives
 // the executed trace. Boundary and ExcludedBoundaries are unexecuted.
 type TransitionBound struct {
+	Endpoint    TransitionEndpoint
 	ImageDigest [32]byte
 	Rules       string
 	Entry       uint64
@@ -496,10 +553,12 @@ type TransitionBound struct {
 // Its zero value carries no authority; projections cannot reconstruct it.
 type TransitionCertificate struct{ checked *checkedTransition }
 type checkedTransition struct {
-	image  *Image
-	bound  TransitionBound
-	limits TransitionLimits
-	work   int
+	// witness is the sole owned structural occurrence inventory.
+	witness TransitionProposal
+	image   *Image
+	bound   TransitionBound
+	limits  TransitionLimits
+	work    int
 	// Private predicates and checked exclusion witnesses supplement the bound's
 	// sole state/structural snapshot. No builder or predecessor is retained.
 	flags          [flagCount]br.Term

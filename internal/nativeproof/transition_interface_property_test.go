@@ -836,7 +836,8 @@ func TestTransitionInterfaceConditionsAndELFEntryProperties(t *testing.T) {
 		// Both starts are genuine mapped RETs. Even a self-consistent candidate
 		// cannot replace the executable format's entry with the other one.
 		proposal.Entry, proposal.Cut = testEntry, testEntry
-		proposal.Nodes = []Node{{PC: testEntry, Size: 1}}
+		proposal.Root = 1
+		proposal.Nodes = []TransitionNode{{ID: 1, PC: testEntry, Size: 1}}
 		c, err := CheckTransition(t.Context(), x.im, good, proposal, interfacePropertyLimits())
 		var refusal *Refusal
 		if _, ok := c.Bound(); ok || !errors.As(err, &refusal) || refusal.Premise != "transition-proposal" {

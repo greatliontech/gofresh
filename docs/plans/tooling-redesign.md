@@ -580,18 +580,30 @@
                             exact operand/encoding rules, including carry input,
                             preserved carry, count masking, conditional flag
                             definedness and partial-register writes.
-                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.12b Establish finite native
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.12b Establish finite native
                             occurrence/progress evidence independently of call
                             activation. Unfold actual edges under checked incoming
                             states and prove no feasible residual traversal at the
                             proposed bound. Continue the actual child-return
                             successor through the loop and parent RET on both
                             selected artifacts; retain effects and residual state.
+                            Preserve exact occurrence ownership and call ancestry
+                            through composition, including repeated theorem
+                            application at one call site. Keep numeric first-hit
+                            cuts distinct from checked first-future encounters
+                            anchored to an owned predecessor boundary.
+                            Discharge joined-state arithmetic and comparison
+                            obligations with checked conditional refinements,
+                            without assuming selector outcomes or widening budgets.
                           - [ ] 5.1w.2b.3b.2a.2.2.2.2.12c Establish typed local
                             source effects from the complete entry: selected layout
                             constants, allocations, arrays, subobjects and checked
                             byte-width storage representation. Preserve whole-root
                             coverage and arbitrary represented initial globals.
+                            Unify entry/continuation effect traces and selected-layout
+                            storage footprints across operand, phase and complete
+                            correspondence; keep represented locals distinct from
+                            administrative private-frame projection.
                           - [ ] 5.1w.2b.3b.2a.2.2.2.2.12d Generalize selected
                             assembly references and actual source-call application
                             to CAS32 and byte OR/AND: exact argument/result layout,

@@ -415,8 +415,7 @@ func globalFunctionUnproved(err error) bool {
 
 type globalFunctionNativeAtomic struct {
 	kind        x86asm.Op
-	pc          uint64
-	context     string
+	id          nativeproof.TransitionOccurrenceID
 	read, write int
 	effect      nativeproof.PrimitiveEffect
 }
@@ -424,30 +423,25 @@ type globalFunctionNativeAtomic struct {
 func globalFunctionNativeGroup(effect nativeproof.PrimitiveEffect) (globalFunctionNativeAtomic, bool) {
 	switch e := effect.(type) {
 	case nativeproof.LockedCompareExchangeEffect:
-		return globalFunctionNativeAtomic{x86asm.CMPXCHG, e.PC, e.Context, e.ReadAccess, e.WriteAccess, effect}, e.Width == 8
+		return globalFunctionNativeAtomic{x86asm.CMPXCHG, e.ID, e.ReadAccess, e.WriteAccess, effect}, e.Width == 8
 	case nativeproof.LockedExchange64Effect:
-		return globalFunctionNativeAtomic{x86asm.XCHG, e.PC, e.Context, e.ReadAccess, e.WriteAccess, effect}, true
+		return globalFunctionNativeAtomic{x86asm.XCHG, e.ID, e.ReadAccess, e.WriteAccess, effect}, true
 	case nativeproof.LockedExchangeAdd64Effect:
-		return globalFunctionNativeAtomic{x86asm.XADD, e.PC, e.Context, e.ReadAccess, e.WriteAccess, effect}, true
+		return globalFunctionNativeAtomic{x86asm.XADD, e.ID, e.ReadAccess, e.WriteAccess, effect}, true
 	}
 	return globalFunctionNativeAtomic{}, false
 }
 
 func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativeproof.TransitionReturnBound) error {
-	type occurrence struct {
-		pc      uint64
-		context string
-	}
-	guards := map[occurrence]br.Term{}
+	guards := map[nativeproof.TransitionOccurrenceID]br.Term{}
 	for _, ins := range b.Instructions {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		key := occurrence{ins.Start, ins.Context}
-		if _, found := guards[key]; found {
+		if _, found := guards[ins.ID]; found || ins.ID == 0 {
 			return globalFunctionError("ambiguous native dynamic occurrence")
 		}
-		guards[key] = ins.Guard
+		guards[ins.ID] = ins.Guard
 	}
 	nativeGroups := map[int]globalFunctionNativeAtomic{}
 	for primitiveIndex, effect := range b.Prefix.PrimitiveEffects {
@@ -456,12 +450,12 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 		}
 		group, ok := globalFunctionNativeGroup(effect)
 		if !ok {
-			var at occurrence
+			var at nativeproof.TransitionOccurrenceID
 			switch e := effect.(type) {
 			case nativeproof.CPUIDEffect:
-				at = occurrence{e.PC, e.Context}
+				at = e.ID
 			case nativeproof.ArchSetFSEffect:
-				at = occurrence{e.PC, e.Context}
+				at = e.ID
 			default:
 				return globalFunctionError("unknown primitive cannot be projected away")
 			}
@@ -480,12 +474,12 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 		}
 		for _, index := range []int{group.read, group.write} {
 			access := b.Accesses[index]
-			if _, found := nativeGroups[index]; found || access.PC != group.pc || access.Context != group.context {
+			if _, found := nativeGroups[index]; found || access.ID != group.id {
 				return globalFunctionError("atomic accesses have another statement or activation")
 			}
 			nativeGroups[index] = group
 		}
-		guard, found := guards[occurrence{group.pc, group.context}]
+		guard, found := guards[group.id]
 		if !found {
 			return globalFunctionError("atomic has no actual instruction guard")
 		}
@@ -496,7 +490,7 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 		}
 	}
 	for index, abstraction := range b.Prefix.Abstractions {
-		guard, found := guards[occurrence{abstraction.PC, abstraction.Context}]
+		guard, found := guards[abstraction.ID]
 		if !found {
 			return globalFunctionError("abstraction has no actual instruction guard")
 		}
@@ -544,7 +538,7 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		guard, found := guards[occurrence{access.PC, access.Context}]
+		guard, found := guards[access.ID]
 		if !found {
 			return globalFunctionError("access has no instruction occurrence")
 		}
@@ -633,7 +627,7 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 
 func (p *globalFunctionCorrespondence) administrativeAccess(b nativeproof.TransitionReturnBound, access nativeproof.TransitionAccess) bool {
 	if !access.Image {
-		if access.Kind == nativeproof.FrameReturnRead && access.Bytes == (nativeproof.RelativeSpan{Start: 0, End: 8}) && access.PC == b.Prefix.Boundary.PC && access.Context == "" {
+		if access.Kind == nativeproof.FrameReturnRead && access.Bytes == (nativeproof.RelativeSpan{Start: 0, End: 8}) && access.ID == b.Prefix.Boundary.ID && access.Context == 0 {
 			return true
 		}
 		frame := b.Prefix.Interface.PrivateFrame

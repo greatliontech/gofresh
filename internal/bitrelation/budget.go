@@ -7,7 +7,7 @@ import (
 
 // RuleModel identifies the scalar language and independently checked calculus.
 // Its dependencies are process-local; there is deliberately no persisted format.
-const RuleModel = "gofresh/scalar-bitrelation@3"
+const RuleModel = "gofresh/scalar-bitrelation@4"
 
 // Code distinguishes absence of proof from a malformed proposal or cancellation.
 type Code string

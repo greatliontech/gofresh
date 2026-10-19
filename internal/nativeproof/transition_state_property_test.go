@@ -50,7 +50,7 @@ type stateAccess struct {
 	write       bool
 	off         stateLocation
 	width       int
-	context     string
+	context     TransitionActivationID
 	returnRead  bool
 	value       uint64
 }
@@ -61,7 +61,7 @@ type stateRMW struct {
 	instruction, readAccess                          int
 	before, compare, replacement, after, accumulator uint64
 	success                                          bool
-	context                                          string
+	context                                          TransitionActivationID
 }
 
 func stateLogical(op to.Operation) bool {
@@ -72,7 +72,7 @@ type stateQuery struct {
 	instruction   int
 	leaf, subleaf uint32
 	results       [4]uint32 // EAX, EBX, ECX, EDX, chosen before checking
-	context       string
+	context       TransitionActivationID
 }
 
 type stateReference struct {
@@ -101,14 +101,14 @@ type stateReference struct {
 	fs                             uint64
 	fsp                            statePointer
 	flagExtra                      uint64
-	context                        string
+	context                        TransitionActivationID
 	returnTarget                   uint64
 	addressBits                    int
 }
 
 type stateSyscall struct {
 	instruction                                      int
-	context                                          string
+	context                                          TransitionActivationID
 	number, option, base, before, after, result, r11 uint64
 	valid                                            bool
 	predicates                                       [3]bool
@@ -1173,13 +1173,13 @@ type stateLayout struct {
 }
 
 func (x stateLayout) proposal(cut int) TransitionProposal {
-	p := TransitionProposal{ImageDigest: x.digest, Entry: x.pcs[0], Cut: x.pcs[cut]}
+	p := TransitionProposal{ImageDigest: x.digest, Entry: x.pcs[0], Cut: x.pcs[cut], Root: 1}
 	for j := 0; j <= cut; j++ {
-		n := Node{PC: x.pcs[j], Size: uint8(len(x.encoded[j]))}
+		n := TransitionNode{ID: TransitionOccurrenceID(j + 1), PC: x.pcs[j], Size: uint8(len(x.encoded[j]))}
 		if j < cut {
-			n.Successors = []uint64{x.pcs[j+1]}
+			n.Successors = []TransitionOccurrenceID{TransitionOccurrenceID(j + 2)}
 			if to.RequiresExpansion(x.intents[j]) {
-				p.Expansions = append(p.Expansions, TransitionExpansion{PC: x.pcs[j]})
+				n.Expanded = true
 			}
 		}
 		p.Nodes = append(p.Nodes, n)
@@ -1269,11 +1269,11 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 		t.Fatal("executed fetch count", len(b.Instructions), cut)
 	}
 	for j, span := range b.Instructions {
-		if span.Span != (Span{x.pcs[j], x.pcs[j] + uint64(len(x.encoded[j]))}) || stateEval(t, span.Guard, values) != 1 {
+		if span.ID != TransitionOccurrenceID(j+1) || span.Context != 0 || span.Span != (Span{x.pcs[j], x.pcs[j] + uint64(len(x.encoded[j]))}) || stateEval(t, span.Guard, values) != 1 {
 			t.Fatal("fetch ordering/extent", j, span)
 		}
 	}
-	if b.Boundary.PC != x.pcs[cut] || b.Boundary.Instruction.Len != len(x.encoded[cut]) || !bytes.Equal(b.Boundary.Bytes, x.encoded[cut]) {
+	if b.Boundary.ID != TransitionOccurrenceID(cut+1) || b.Boundary.Context != 0 || b.Boundary.PC != x.pcs[cut] || b.Boundary.Instruction.Len != len(x.encoded[cut]) || !bytes.Equal(b.Boundary.Bytes, x.encoded[cut]) {
 		t.Fatal("unexecuted boundary not retained separately")
 	}
 	if len(b.Accesses) != len(want.accesses) {
@@ -1291,7 +1291,7 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 		got := b.Accesses[j]
 		value := got.Value
 		got.Value = br.Term{}
-		if got != (TransitionAccess{PC: x.pcs[a.instruction], Kind: kind, Bytes: RelativeSpan{a.off.off, a.off.off + int64(a.width)}, Image: a.off.image}) || value.Sort() != br.Bits(a.width*8) || stateEval(t, value, values) != a.value {
+		if got != (TransitionAccess{ID: TransitionOccurrenceID(a.instruction + 1), PC: x.pcs[a.instruction], Kind: kind, Bytes: RelativeSpan{a.off.off, a.off.off + int64(a.width)}, Image: a.off.image}) || value.Sort() != br.Bits(a.width*8) || stateEval(t, value, values) != a.value {
 			t.Fatal("ordered access differs", j, b.Accesses[j], a)
 		}
 	}

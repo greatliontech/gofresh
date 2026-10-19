@@ -271,7 +271,7 @@ func jointReturnActive(t testing.TB, b TransitionReturnBound, values map[br.Term
 	guards := map[uint64]bool{}
 	var fetches []uint64
 	for _, i := range b.Instructions {
-		if i.Context != "" {
+		if i.Context != 0 {
 			t.Fatal("joint call-free grammar acquired an activation")
 		}
 		guards[i.Start] = stateEval(t, i.Guard, values) != 0

@@ -9,10 +9,9 @@ import (
 )
 
 func lifecycleProposal(p TransitionProposal) TransitionProposal {
-	p.Nodes = append([]Node(nil), p.Nodes...)
-	p.Expansions = slices.Clone(p.Expansions)
+	p.Nodes = append([]TransitionNode(nil), p.Nodes...)
 	for i := range p.Nodes {
-		p.Nodes[i].Successors = append([]uint64(nil), p.Nodes[i].Successors...)
+		p.Nodes[i].Successors = append([]TransitionOccurrenceID(nil), p.Nodes[i].Successors...)
 	}
 	return p
 }
@@ -148,7 +147,7 @@ func FuzzTransitionLifecycle(f *testing.F) {
 			t.Fatal("cancelled root published evidence", err)
 		}
 
-		next, err := ProposeTransition(t.Context(), im, cut+uint64(len(suffix)), TransitionLimits{})
+		next, err := ProposeTransitionContinuation(t.Context(), root, cut+uint64(len(suffix)))
 		if err != nil {
 			t.Fatal(err)
 		}

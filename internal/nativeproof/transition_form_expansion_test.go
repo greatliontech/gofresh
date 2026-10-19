@@ -40,9 +40,9 @@ func TestTransitionNewFormsDeferredAcrossDeadCycles(t *testing.T) {
 					cut := testEntry + uint64(len(code)-1)
 					propose := func(ctx context.Context, stop uint64, l TransitionLimits, expansions ...TransitionExpansion) (TransitionProposal, error) {
 						if region {
-							return ProposeRegionTransition(ctx, im, entry, stop, l, expansions...)
+							return ProposeRegionTransition(ctx, im, entry, stop, l, TransitionOptions{Expansions: expansions})
 						}
-						return ProposeTransition(ctx, im, stop, l, expansions...)
+						return ProposeTransition(ctx, im, stop, l, TransitionOptions{Expansions: expansions})
 					}
 					check := func(ctx context.Context, p TransitionProposal, l TransitionLimits) (TransitionCertificate, error) {
 						if region {
@@ -63,7 +63,8 @@ func TestTransitionNewFormsDeferredAcrossDeadCycles(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					next, nextErr := CheckTransitionContinuation(t.Context(), root, p)
+					suffix := continuationProposal(t, root, cut)
+					next, nextErr := CheckTransitionContinuation(t.Context(), root, suffix)
 					if guard != "dead" {
 						transitionRefused(t, flat, flatErr)
 						transitionRefused(t, next, nextErr)
@@ -94,7 +95,7 @@ func TestTransitionNewFormsDeferredAcrossDeadCycles(t *testing.T) {
 					if !errors.Is(err, context.Canceled) {
 						t.Fatal(err)
 					}
-					c, err = CheckTransitionContinuation(ctx, root, p)
+					c, err = CheckTransitionContinuation(ctx, root, suffix)
 					transitionRefused(t, c, err)
 					if !errors.Is(err, context.Canceled) {
 						t.Fatal(err)
@@ -137,7 +138,7 @@ func TestTransitionOptionalNewFormsStillValidate(t *testing.T) {
 		// memory applicability rather than accepting a boundary declaration.
 		code = append(append([]byte(nil), boundary...), 0xc3)
 		im = image(t, code)
-		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(boundary)), TransitionLimits{}, TransitionExpansion{PC: testEntry})
+		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(boundary)), TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry}}})
 		if err != nil {
 			t.Fatal(err)
 		}

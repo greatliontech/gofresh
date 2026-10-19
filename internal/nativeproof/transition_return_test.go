@@ -79,7 +79,7 @@ func TestTransitionReturnActualGuardedFrame(t *testing.T) {
 	if len(b.Prefix.Instructions) != 8 || len(b.Instructions) != 9 || len(b.Prefix.Accesses) != 3 || len(b.Accesses) != 4 || len(b.Prefix.ExcludedBoundaries) != 1 || b.Prefix.ExcludedBoundaries[0].PC != testEntry+25 {
 		t.Fatal("incomplete actual prologue/body/epilogue/return coverage")
 	}
-	if b.Instructions[8] != (GuardedInstruction{Span: Span{ret, ret + 1}, Guard: b.Prefix.CutGuard}) || b.Accesses[3].Kind != FrameReturnRead || b.Accesses[3].Bytes != (RelativeSpan{0, 8}) || b.Accesses[3].PC != ret || b.Accesses[3].Context != "" {
+	if b.Instructions[8] != (GuardedInstruction{ID: b.Prefix.Boundary.ID, Span: Span{ret, ret + 1}, Guard: b.Prefix.CutGuard}) || b.Accesses[3].ID != b.Prefix.Boundary.ID || b.Accesses[3].Kind != FrameReturnRead || b.Accesses[3].Bytes != (RelativeSpan{0, 8}) || b.Accesses[3].PC != ret || b.Accesses[3].Context != 0 {
 		t.Fatal("RET did not execute once in the root context")
 	}
 	if b.Accesses[1].Bytes != (RelativeSpan{-8, 0}) || b.Accesses[1].Kind != FrameWrite || b.Accesses[2].Bytes != (RelativeSpan{-8, 0}) || b.Accesses[2].Kind != FrameRead {
@@ -92,10 +92,10 @@ func TestTransitionReturnActualGuardedFrame(t *testing.T) {
 	if !ok || reg != RBP || b.State.Registers[R14].Pointer != b.Prefix.Registers[R14].Pointer {
 		t.Fatal("caller value lineage or concrete entry pointer was not restored")
 	}
-	if i, err := complete.InstructionAt(t.Context(), ret, ""); err != nil || i.Op != x86asm.RET {
+	if i, err := complete.InstructionAt(t.Context(), b.Prefix.Boundary.ID); err != nil || i.Op != x86asm.RET {
 		t.Fatal("terminal inspection omitted actual RET", err)
 	}
-	if _, err := complete.InstructionAt(t.Context(), returnContinuation, ""); err == nil {
+	if _, err := complete.InstructionAt(t.Context(), ^TransitionOccurrenceID(0)); err == nil {
 		t.Fatal("unexecuted caller continuation gained an executed occurrence")
 	}
 	if value, err := complete.RegisterValue(t.Context(), x86asm.RSP); err != nil || value != b.State.Registers[RSP].Value {
@@ -126,7 +126,7 @@ func TestTransitionReturnActualGuardedFrame(t *testing.T) {
 	initial, _ := segmented.Bound()
 	for _, cut := range []uint64{testEntry + 7, testEntry + 14, testEntry + 23, ret} {
 		var err error
-		segmented, err = CheckTransitionContinuation(t.Context(), segmented, entryRelationProposal(t, im, cut, TransitionExpansion{PC: testEntry}))
+		segmented, err = CheckTransitionContinuation(t.Context(), segmented, continuationProposal(t, segmented, cut))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -337,7 +337,7 @@ func TestTransitionReturnOwnershipCancellationBudgets(t *testing.T) {
 	if _, err := zero.RegisterValue(t.Context(), x86asm.RSP); err == nil {
 		t.Fatal("zero terminal certificate fabricated a register")
 	}
-	if _, err := zero.InstructionAt(t.Context(), testEntry, ""); err == nil {
+	if _, err := zero.InstructionAt(t.Context(), 1); err == nil {
 		t.Fatal("zero terminal certificate fabricated an instruction")
 	}
 	if reflect.TypeFor[TransitionCertificate]() == reflect.TypeFor[TransitionReturnCertificate]() {

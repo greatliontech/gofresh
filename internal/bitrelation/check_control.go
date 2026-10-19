@@ -1,5 +1,42 @@
 package bitrelation
 
+// conditionalOperation distributes a closed set of total bit-vector operations
+// through one conditional operand. Addition/subtraction remain modular; each
+// comparison keeps its exact signedness and Boolean result sort. The condition,
+// branch ordering, fixed operand and complete operator head are independently
+// checked. No branch assumption or variable assignment is introduced.
+func (c *checker) conditionalOperation(a, b *node) bool {
+	switch a.op {
+	case Add, Sub, Equal, ULT, ULE, SLT, SLE:
+	default:
+		return false
+	}
+	if a.arity != 2 || a.args[0].sort.IsBool() || b.op != ITE {
+		return false
+	}
+	for position := 0; position < 2; position++ {
+		if c.err = c.e.m.tick(); c.err != nil {
+			return false
+		}
+		x := a.args[position]
+		if x.op != ITE || !c.eq(x.args[0], b.args[0]) {
+			continue
+		}
+		matches := true
+		for arm := 1; arm <= 2; arm++ {
+			branch := b.args[arm]
+			if !sameHead(a, branch) || !c.eq(branch.args[position], x.args[arm]) || !c.eq(branch.args[1-position], a.args[1-position]) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return c.err == nil
+		}
+	}
+	return false
+}
+
 // conjunctionContradiction checks that one conjunct and its exact negation
 // occur beneath Boolean ANDs. It never descends through OR, ITE or negation:
 // a predicate in those positions need not hold when the whole formula holds.

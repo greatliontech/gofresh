@@ -16,7 +16,7 @@ func TestTransitionExclusionExactProofBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := continuationProposal(t, im, cut)
+	p := continuationProposal(t, root, cut)
 	assertTransitionRetainedExpressionUnion(t, root, p)
 	builder := br.NewBuilder(30)
 	zero, _ := builder.Make(br.Constant, br.Bool(), 0)
@@ -117,7 +117,7 @@ func TestTransitionExclusionStructuralFailures(t *testing.T) {
 
 func TestTransitionExclusionCumulativeResources(t *testing.T) {
 	im, face, cut, _ := initializedDecision(t, 0, false, false, nil)
-	p := continuationProposal(t, im, cut)
+	p := rootTransitionProposal(t, im, cut)
 	count := &imageCallbackContext{Context: t.Context()}
 	c, err := CheckTransition(count, im, face, p, TransitionLimits{})
 	if err != nil {
@@ -178,7 +178,7 @@ func TestTransitionExclusionCumulativeResources(t *testing.T) {
 	}
 	// A predecessor retains its spent proof work, not just transfer work.
 	l := TransitionLimits{RelationLimits: RelationLimits{Work: c.checked.work}}
-	root, err := CheckTransition(t.Context(), im, face, continuationProposal(t, im, cut-3), l)
+	root, err := CheckTransition(t.Context(), im, face, rootTransitionProposal(t, im, cut-3), l)
 	if err != nil {
 		t.Fatal(err)
 	}

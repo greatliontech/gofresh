@@ -54,9 +54,9 @@ func TestTransitionVEXZeroCutMetadata(t *testing.T) {
 				im := image(t, append(hexBytes(t, "4889e0"), append(append([]byte(nil), code...), hexBytes(t, tail)...)...))
 				cut := testEntry + 3
 				// Supply the ISA-sized proposal independently of the proposer.
-				p := TransitionProposal{ImageDigest: im.digest, Entry: testEntry, Cut: cut, Nodes: []Node{
-					{PC: testEntry, Size: 3, Successors: []uint64{cut}},
-					{PC: cut, Size: uint8(len(code))},
+				p := TransitionProposal{ImageDigest: im.digest, Entry: testEntry, Cut: cut, Root: 1, Nodes: []TransitionNode{
+					{ID: 1, PC: testEntry, Size: 3, Successors: []TransitionOccurrenceID{2}},
+					{ID: 2, PC: cut, Size: uint8(len(code))},
 				}}
 				c, err := CheckTransition(t.Context(), im, transitionFace(), p, TransitionLimits{})
 				if err != nil {
@@ -255,9 +255,9 @@ func TestTransitionVectorCutStructuralBytes(t *testing.T) {
 					body = append(body, byte(following))
 				}
 				im := image(t, body)
-				p := TransitionProposal{ImageDigest: im.digest, Entry: testEntry, Cut: cut, Nodes: []Node{
-					{PC: testEntry, Size: 3, Successors: []uint64{cut}},
-					{PC: cut, Size: uint8(len(code))},
+				p := TransitionProposal{ImageDigest: im.digest, Entry: testEntry, Cut: cut, Root: 1, Nodes: []TransitionNode{
+					{ID: 1, PC: testEntry, Size: 3, Successors: []TransitionOccurrenceID{2}},
+					{ID: 2, PC: cut, Size: uint8(len(code))},
 				}}
 				c, err := CheckTransition(t.Context(), im, transitionFace(), p, TransitionLimits{})
 				if err != nil {

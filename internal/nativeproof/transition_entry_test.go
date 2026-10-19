@@ -31,7 +31,7 @@ func entryRelationFixture(t testing.TB, code string) (*Image, TransitionInterfac
 
 func entryRelationProposal(t testing.TB, im *Image, cut uint64, expansions ...TransitionExpansion) TransitionProposal {
 	t.Helper()
-	p, err := ProposeRegionTransition(t.Context(), im, testEntry, cut, TransitionLimits{}, expansions...)
+	p, err := ProposeRegionTransition(t.Context(), im, testEntry, cut, TransitionLimits{}, TransitionOptions{Expansions: expansions})
 	if err != nil {
 		t.Fatal(err)
 	}

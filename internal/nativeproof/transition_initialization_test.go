@@ -132,7 +132,7 @@ func TestTransitionInitializedDeadCall(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			continued, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, im, cut))
+			continued, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, root, cut))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -242,10 +242,10 @@ func TestTransitionInitializationCurrentWrites(t *testing.T) {
 				want &= (uint64(1) << width) - 1
 			}
 			if want != 0 {
-				c, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, im, cut))
+				c, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, root, cut))
 				transitionRefused(t, c, err)
 			} else {
-				c, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, im, cut))
+				c, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, root, cut))
 				if err != nil {
 					t.Fatal(err)
 				}

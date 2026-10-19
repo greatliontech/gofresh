@@ -49,7 +49,7 @@ func FuzzTransitionInitializedDecision(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		after, err := CheckTransitionContinuation(t.Context(), before, continuationProposal(t, im, testEntry+10))
+		after, err := CheckTransitionContinuation(t.Context(), before, continuationProposal(t, before, testEntry+10))
 		if err != nil {
 			t.Fatal(err)
 		}

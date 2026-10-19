@@ -202,8 +202,10 @@
 // Narrow register writes clear pointer provenance; partial memory overwrites
 // clear affected pointer lanes even when the scalar bytes agree. One instruction
 // occurrence owns each reach guard; accesses and primitive effects inherit it by
-// activation and PC. Identical image bytes may execute in separate activations;
-// their guards and outcome scopes never collapse. Call-free domains accept only
+// proof-local occurrence ID. Identical image bytes may execute repeatedly within
+// one activation or in separate activations; their guards and outcome scopes
+// never collapse. A child activation is identified by its actual invoking CALL
+// occurrence, independently of loop progress. Call-free domains accept only
 // root-context inventories. Filtering the deterministic topological order gives the actual trace. An
 // inactive query's arbitrary outcome totalizations cannot affect that trace or
 // the merged state. Registers, private predicates and every declared byte merge
@@ -213,7 +215,7 @@
 // discovery only with independently proposed and checked BOOL-false proofs for
 // their complete incoming guards. Their bytes/extents remain structural coverage,
 // without fetch, call, return or other execution effects. Structural decoding
-// failure and discovered cycles always refuse. Complete-cut induction combines
+// failure and cycles in the finite occurrence witness always refuse. Complete-cut induction combines
 // exact edge partitions, complete incoming unions and checked false terminals;
 // its actual symbolic reach term remains unchanged, never replaced by closure.
 // The cut instruction is not executed or relabeled RET. Arithmetic flag values
@@ -238,7 +240,25 @@
 // a successful boundary. A numeric cut means first hit, with exactly one
 // activation context in the stopped graph; ambiguous contexts and advancing to a
 // later occurrence of the same numeric cut are unsupported. The resolved context
-// is retained, so later explicit occurrence selection can preserve this theorem.
+// is retained. ProposeNextTransitionContinuation separately selects the first
+// target encounter after the opaque predecessor's boundary executes. Its After
+// must match that exact boundary ID; a root cannot assert an inherited anchor.
+// Equal anchor/target addresses require a distinct later occurrence. Checking
+// preserves old executed and excluded dispositions before recognizing endpoints,
+// requires the anchor to execute, and refuses an executed first future target
+// followed by a later claimed cut. Endpoint retains mode, anchor and resolved cut.
+// Actual CALL entry and checked terminal-RET application use this same endpoint
+// mechanism; a target encountered inside the callee before its terminal RET
+// cannot impersonate the actual completed return.
+// TransitionOptions.MaxOccurrences optionally proposes a bounded unfolding, with
+// structurally decoded supported residual frontiers. Every frontier requires a
+// checked false full incoming guard; a feasible one refuses. The discovery bound
+// is no execution premise. Both bounded and acyclic discovery feed one occurrence
+// checker, which accepts arbitrary root-connected finite DAGs and derives a rank
+// strictly decreasing on every edge from their topological order. Both decoded
+// conditional slots are required even when targets coincide. Instruction-byte
+// occupancy remains image-wide across all occurrences. Sparse IDs allocate by
+// actual population, never by their maximum value.
 //
 // LinuxAMD64SyscallModel and its explicit 48/57-bit address configuration admit
 // the ordinary native ARCH_SET_FS relation. Actual low RAX/RDI selectors must be
@@ -275,8 +295,9 @@
 // not prove numerical inequality outside the declared disjoint footprints.
 //
 // CheckTransitionContinuation consumes only an immutable predecessor and a full
-// root-to-new-cut proposal. It reconstructs the prefix stopping at the old cut,
-// checks exact membership/edges, including excluded terminals and their private
+// root-to-new-cut proposal. ProposeTransitionContinuation preserves the owned
+// predecessor witness's IDs, edges and exclusions. Checking compares that exact
+// prefix, including excluded terminals and their private
 // proof roots, and that the old cut separates every feasible full path,
 // inherits the same symbolic inputs and derived state, and executes only the
 // suffix. Normalized root limits and cumulative work also govern inherited terms,

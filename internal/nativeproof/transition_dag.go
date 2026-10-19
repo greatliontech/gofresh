@@ -137,109 +137,102 @@ func (m *transitionChecker) mergeState(slot **transitionNodeState, src *transiti
 	m.merge(&dst.scalar, src.scalar)
 }
 
-// Recover the prefix from the owned bytes, stopping at C, then check its exact
-// membership and edges in root->D, including every proved-false terminal.
-// Reaching D in the stopped walk is a bypass. Full-graph occupancy/cycle checks exclude overlaps
-// and suffix re-entry. No second authoritative graph survives the call.
+// Match the predecessor's owned witness exactly, including every excluded
+// terminal. Only its common unexecuted cut may gain outgoing edges. New suffix
+// edges cannot enter old executed/excluded occurrences, even at equal addresses.
 func (m *transitionChecker) continuationStart(g *graph, prior checkedTransition) (int, error) {
 	old := prior.bound.Boundary
-	prefix, err := m.graphPrefix(old.PC, true)
-	if err != nil {
-		return 0, err
-	}
-	if len(prior.exclusions) != len(prior.bound.ExcludedBoundaries) || len(prefix.nodes) != len(prior.bound.Instructions)+len(prior.exclusions)+1 {
+	if len(prior.witness.Nodes) != len(prior.bound.Instructions)+len(prior.bound.ExcludedBoundaries)+1 || len(prior.exclusions) != len(prior.bound.ExcludedBoundaries) {
 		return 0, refuse(old.PC, "transition-continuation", "predecessor coverage differs")
 	}
-	coverage := make(map[programPoint]Span, len(prior.bound.Instructions))
-	for _, occurrence := range prior.bound.Instructions {
+	covered := map[TransitionOccurrenceID]bool{old.ID: true}
+	for _, ins := range prior.bound.Instructions {
 		if !m.tick() {
 			return 0, m.err
 		}
-		key := programPoint{occurrence.Start, occurrence.Context}
-		if _, exists := coverage[key]; exists {
-			return 0, refuse(old.PC, "transition-continuation", "duplicate predecessor occurrence")
+		idx, ok := g.byID[ins.ID]
+		if !ok || covered[ins.ID] {
+			return 0, refuse(ins.Start, "transition-continuation", "predecessor occurrence coverage differs")
 		}
-		coverage[key] = occurrence.Span
+		n := g.nodes[idx]
+		if n.pc != ins.Start || n.pc+uint64(n.size) != ins.End || n.activation != ins.Context || n.boundary != boundaryNone {
+			return 0, refuse(ins.Start, "transition-continuation", "predecessor occurrence relation differs")
+		}
+		covered[ins.ID] = true
 	}
-	excluded := make(map[programPoint]ExcludedBoundary, len(prior.exclusions))
-	for j, e := range prior.exclusions {
+	for j, b := range prior.bound.ExcludedBoundaries {
 		if !m.tick() {
 			return 0, m.err
 		}
-		b := prior.bound.ExcludedBoundaries[j]
-		left, right := e.Roots()
-		if !e.Valid() || left != b.Guard || !literalBool(right, 0) || right.Sort() != br.Bool() {
+		left, right := prior.exclusions[j].Roots()
+		if !prior.exclusions[j].Valid() || left != b.Guard || !literalBool(right, 0) || right.Sort() != br.Bool() {
 			return 0, refuse(b.PC, "transition-continuation", "invalid retained exclusion")
 		}
-		key := programPoint{b.PC, b.Context}
-		if _, exists := coverage[key]; exists {
-			return 0, refuse(b.PC, "transition-continuation", "duplicate excluded boundary")
+		idx, ok := g.byID[b.ID]
+		if !ok || covered[b.ID] {
+			return 0, refuse(b.PC, "transition-continuation", "excluded occurrence coverage differs")
 		}
-		coverage[key] = Span{b.PC, b.PC + uint64(len(b.Bytes))}
-		excluded[key] = b
+		n := g.nodes[idx]
+		i, raw, err := decodeBytes(m.im, b.PC)
+		if err != nil {
+			return 0, err
+		}
+		kind := boundaryUnsupported
+		if b.Frontier {
+			kind = boundaryFrontier
+		}
+		if n.pc != b.PC || n.activation != b.Context || n.boundary != kind || i != b.Instruction || !bytes.Equal(raw, b.Bytes) {
+			return 0, refuse(b.PC, "transition-continuation", "excluded boundary differs")
+		}
+		covered[b.ID] = true
 	}
-	for _, n := range prefix.nodes {
-		if !m.tick() {
-			return 0, m.err
-		}
-		key := n.point()
-		idx, exists := g.byPoint[key]
-		if !exists {
-			return 0, refuse(n.pc, "transition-continuation", "predecessor absent from full graph")
-		}
-		full := g.nodes[idx]
-		if full.size != n.size {
-			return 0, refuse(n.pc, "transition-continuation", "predecessor extent differs")
-		}
-		if key == (programPoint{old.PC, old.Context}) {
-			continue
-		}
-		if n.boundary == boundaryCut {
-			return 0, refuse(n.pc, "transition-continuation", "predecessor cut activation differs")
-		}
-		wantBoundary := boundaryNone
-		if b, exists := excluded[key]; exists {
-			wantBoundary = boundaryUnsupported
-			i, raw, err := decodeBytes(m.im, n.pc)
-			if err != nil {
-				return 0, err
-			}
-			if i != b.Instruction || !bytes.Equal(raw, b.Bytes) {
-				return 0, refuse(n.pc, "transition-continuation", "excluded bytes differ")
-			}
-		}
-		if coverage[key] != (Span{n.pc, n.pc + uint64(n.size)}) || full.boundary != wantBoundary || n.boundary != wantBoundary || n.count != full.count {
-			return 0, refuse(n.pc, "transition-continuation", "predecessor membership or terminal differs")
-		}
-		for edge, next := range n.next[:n.count] {
-			if prefix.nodes[next].point() != g.nodes[full.next[edge]].point() {
-				return 0, refuse(n.pc, "transition-continuation", "predecessor edge differs")
-			}
-		}
-	}
-	i, encoded, err := decodeBytes(m.im, old.PC)
+	i, raw, err := decodeBytes(m.im, old.PC)
 	if err != nil {
 		return 0, err
 	}
-	if i != old.Instruction || !bytes.Equal(encoded, old.Bytes) {
-		return 0, refuse(old.PC, "transition-continuation", "predecessor boundary differs")
+	if i != old.Instruction || !bytes.Equal(raw, old.Bytes) {
+		return 0, refuse(old.PC, "transition-continuation", "retained boundary bytes differ")
 	}
-	// Dead terminals may sort after C without executing there. Partition the
-	// topological order by the reconstructed complete prefix, while refusing every
-	// suffix edge back into it. This preserves all incoming control dependencies.
+	if m.witness.Root != prior.witness.Root {
+		return 0, refuse(old.PC, "transition-continuation", "root occurrence changed")
+	}
+	before := make(map[TransitionOccurrenceID]bool, len(prior.witness.Nodes))
+	for _, n := range prior.witness.Nodes {
+		if !m.tick() {
+			return 0, m.err
+		}
+		idx, exists := g.byID[n.ID]
+		if !exists {
+			return 0, refuse(n.PC, "transition-continuation", "predecessor occurrence absent")
+		}
+		full := m.witness.Nodes[idx]
+		if n.PC != full.PC || n.Size != full.Size {
+			return 0, refuse(n.PC, "transition-continuation", "predecessor extent changed")
+		}
+		if n.ID == old.ID {
+			if g.nodes[idx].activation != old.Context {
+				return 0, refuse(n.PC, "transition-continuation", "cut activation changed")
+			}
+			continue
+		}
+		if n.Expanded != full.Expanded || n.Frontier != full.Frontier || !slices.Equal(n.Successors, full.Successors) {
+			return 0, refuse(n.PC, "transition-continuation", "predecessor choices or edges changed")
+		}
+		before[n.ID] = true
+	}
 	order := make([]int, 0, len(g.order))
 	for _, idx := range g.order {
 		if !m.tick() {
 			return 0, m.err
 		}
-		point := g.nodes[idx].point()
-		if _, before := coverage[point]; before {
+		n := g.nodes[idx]
+		if before[n.id] {
 			order = append(order, idx)
 			continue
 		}
-		for _, next := range g.nodes[idx].next[:g.nodes[idx].count] {
-			if _, before := coverage[g.nodes[next].point()]; before {
-				return 0, refuse(point.pc, "transition-continuation", "suffix re-enters prefix")
+		for _, next := range n.next[:n.count] {
+			if before[g.nodes[next].id] {
+				return 0, refuse(n.pc, "transition-continuation", "suffix re-enters old occurrence")
 			}
 		}
 	}
@@ -248,11 +241,11 @@ func (m *transitionChecker) continuationStart(g *graph, prior checkedTransition)
 		if !m.tick() {
 			return 0, m.err
 		}
-		if _, before := coverage[g.nodes[idx].point()]; !before {
+		if !before[g.nodes[idx].id] {
 			order = append(order, idx)
 		}
 	}
-	if start >= len(order) || g.nodes[order[start]].point() != (programPoint{old.PC, old.Context}) {
+	if start >= len(order) || g.nodes[order[start]].id != old.ID {
 		return 0, refuse(old.PC, "transition-continuation", "cut does not separate prefix and suffix")
 	}
 	g.order = order

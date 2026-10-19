@@ -125,7 +125,7 @@ func dagArrangePermutation(t testing.TB, ops []dagOp, permutation []int) dagLayo
 }
 
 func (x dagLayout) proposal(cut int) TransitionProposal {
-	p := TransitionProposal{ImageDigest: x.digest, Entry: x.pcs[0], Cut: x.pcs[cut]}
+	p := TransitionProposal{ImageDigest: x.digest, Entry: x.pcs[0], Cut: x.pcs[cut], Root: 1}
 	seen := map[int]bool{}
 	queue := []int{0}
 	for len(queue) > 0 {
@@ -135,13 +135,13 @@ func (x dagLayout) proposal(cut int) TransitionProposal {
 			continue
 		}
 		seen[j] = true
-		n := Node{PC: x.pcs[j], Size: uint8(len(x.encoded[j]))}
+		n := TransitionNode{ID: TransitionOccurrenceID(j + 1), PC: x.pcs[j], Size: uint8(len(x.encoded[j]))}
 		if j != cut {
 			if j < len(x.intents) && to.RequiresExpansion(x.intents[j]) {
-				p.Expansions = append(p.Expansions, TransitionExpansion{PC: x.pcs[j]})
+				n.Expanded = true
 			}
 			for _, next := range x.edges[j] {
-				n.Successors = append(n.Successors, x.pcs[next])
+				n.Successors = append(n.Successors, TransitionOccurrenceID(next+1))
 				queue = append(queue, next)
 			}
 		}
@@ -247,7 +247,7 @@ func dagAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, face
 	if len(inventory.Nodes) != len(b.Instructions)+len(b.ExcludedBoundaries)+1 {
 		t.Fatal("structural coverage differs")
 	}
-	structural := map[uint64]Node{}
+	structural := map[uint64]TransitionNode{}
 	for _, n := range inventory.Nodes {
 		structural[n.PC] = n
 	}

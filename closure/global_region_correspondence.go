@@ -46,25 +46,16 @@ func captureGlobalSteps(steps []globalCorrespondenceStep) ([]globalCorrespondenc
 	nodes := 0
 	for i := range owned {
 		for _, p := range []*nativeproof.TransitionProposal{&owned[i].use, &owned[i].next} {
-			if len(p.Nodes) > 65536-nodes || len(p.Expansions) > 65536-nodes {
+			if len(p.Nodes) > 65536-nodes {
 				return nil, fmt.Errorf("global correspondence: proposal capture bound exceeded")
 			}
-			nodes += len(p.Nodes) + len(p.Expansions)
-			if nodes > 65536 {
-				return nil, fmt.Errorf("global correspondence: cumulative proposal capture bound exceeded")
-			}
+			nodes += len(p.Nodes)
 			p.Nodes = slices.Clone(p.Nodes)
 			for j := range p.Nodes {
-				if len(p.Nodes[j].Successors) > 2 || len(p.Nodes[j].Context) > 4096 {
+				if len(p.Nodes[j].Successors) > 2 {
 					return nil, fmt.Errorf("global correspondence: invalid node capture extent")
 				}
 				p.Nodes[j].Successors = slices.Clone(p.Nodes[j].Successors)
-			}
-			p.Expansions = slices.Clone(p.Expansions)
-			for _, expansion := range p.Expansions {
-				if len(expansion.Context) > 4096 {
-					return nil, fmt.Errorf("global correspondence: expansion context bound exceeded")
-				}
 			}
 		}
 	}
@@ -213,13 +204,13 @@ func (p *globalRegionCorrespondence) checkBooleanUse(ctx context.Context, source
 		if err := p.constant(ctx, occurrence.Guard, 1); err != nil {
 			return err
 		}
-		instruction, err := use.InstructionAt(ctx, occurrence.Start, occurrence.Context)
+		instruction, err := use.InstructionAt(ctx, occurrence.ID)
 		if err != nil {
 			return err
 		}
 		switch index {
 		case 0:
-			if instruction.Op != x86asm.CMPXCHG {
+			if instruction.Op != x86asm.CMPXCHG || occurrence.ID != before.Boundary.ID {
 				return fail("first occurrence is not the retained atomic operation")
 			}
 		case 1:
@@ -238,7 +229,7 @@ func (p *globalRegionCorrespondence) checkBooleanUse(ctx context.Context, source
 	}
 	first, second := after.Accesses[len(before.Accesses)], after.Accesses[len(before.Accesses)+1]
 	atomic, atomicOK := after.PrimitiveEffects[len(before.PrimitiveEffects)].(nativeproof.LockedCompareExchangeEffect)
-	if !atomicOK || atomic.Width != 8 || atomic.PC != before.Boundary.PC || atomic.Context != before.Boundary.Context || atomic.ReadAccess != len(before.Accesses) || atomic.WriteAccess != len(before.Accesses)+1 {
+	if !atomicOK || atomic.Width != 8 || atomic.ID != before.Boundary.ID || atomic.ReadAccess != len(before.Accesses) || atomic.WriteAccess != len(before.Accesses)+1 {
 		return fail("read/write cycle lacks its retained indivisible ordering occurrence")
 	}
 	for _, equality := range []struct {
@@ -251,7 +242,7 @@ func (p *globalRegionCorrespondence) checkBooleanUse(ctx context.Context, source
 	}
 	g, ok := source.operands[0].location.object.site.(*ssa.Global)
 	address, represented := p.address(g)
-	if source.operands[0].kind != regionPointer || source.operands[0].location.object.kind != regionGlobal || len(source.operands[0].location.path) != 0 || !ok || !represented || !first.Image || !second.Image || first.PC != before.Boundary.PC || second.PC != first.PC || first.Context != before.Boundary.Context || second.Context != first.Context || first.Kind != nativeproof.FrameRead || second.Kind != nativeproof.FrameWrite || first.Bytes != (nativeproof.RelativeSpan{Start: int64(address), End: int64(address + 8)}) || second.Bytes != first.Bytes {
+	if source.operands[0].kind != regionPointer || source.operands[0].location.object.kind != regionGlobal || len(source.operands[0].location.path) != 0 || !ok || !represented || !first.Image || !second.Image || first.ID != before.Boundary.ID || second.ID != first.ID || first.Kind != nativeproof.FrameRead || second.Kind != nativeproof.FrameWrite || first.Bytes != (nativeproof.RelativeSpan{Start: int64(address), End: int64(address + 8)}) || second.Bytes != first.Bytes {
 		return fail("atomic read/write occurrence differs from source pointer provenance")
 	}
 	boolean := uint64(0)
@@ -276,7 +267,7 @@ func (p *globalRegionCorrespondence) checkPhaseEffects(ctx context.Context, befo
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if occurrence.Start != access.PC || occurrence.Context != access.Context {
+			if occurrence.ID != access.ID {
 				continue
 			}
 			if found {
@@ -306,7 +297,7 @@ func (p *globalRegionCorrespondence) checkPhaseEffects(ctx context.Context, befo
 		}
 		matched := i < len(accesses) && accesses[i].Image && accesses[i].Kind == kind && accesses[i].Bytes == (nativeproof.RelativeSpan{Start: int64(address), End: int64(address + 8)})
 		if matched {
-			instruction, err := native.InstructionAt(ctx, accesses[i].PC, accesses[i].Context)
+			instruction, err := native.InstructionAt(ctx, accesses[i].ID)
 			if err != nil {
 				return err
 			}

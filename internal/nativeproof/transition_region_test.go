@@ -15,7 +15,7 @@ func TestTransitionConditionalRegionBinding(t *testing.T) {
 	im, cut := transitionFixture(t, "c3b82a00000031c9")
 	entry := testEntry + 1
 	face := transitionFace()
-	p, err := ProposeRegionTransition(t.Context(), im, entry, cut, TransitionLimits{}, TransitionExpansion{PC: entry + 5})
+	p, err := ProposeRegionTransition(t.Context(), im, entry, cut, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: entry + 5}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +104,7 @@ func TestTransitionConditionalRegionBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := prior.Bound()
+	p = continuationProposal(t, prior, cut, TransitionOptions{Expansions: []TransitionExpansion{{PC: entry + 5}}})
 	// Determine a finite allowance that admits this exact root, then require the
 	// longer suffix to share it rather than receiving a fresh work budget.
 	limited, err := CheckRegionTransition(t.Context(), im, entry, face, first, TransitionLimits{RelationLimits: RelationLimits{Work: prior.checked.work + 1}})
@@ -196,7 +197,7 @@ func TestTransitionConditionalRegionClear32Population(t *testing.T) {
 		code := append([]byte{0xc3}, encoded...)
 		cut := testEntry + uint64(len(code))
 		im := image(t, append(code, 0xc3))
-		p, err := ProposeRegionTransition(t.Context(), im, testEntry+1, cut, TransitionLimits{}, TransitionExpansion{PC: testEntry + 1})
+		p, err := ProposeRegionTransition(t.Context(), im, testEntry+1, cut, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry + 1}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -234,7 +235,7 @@ func TestTransitionConditionalRegionClear32Population(t *testing.T) {
 	}
 	for _, bad := range [][]byte{{0x31, 0xc1}, {0x48, 0x31, 0xc0}, {0x66, 0x31, 0xc0}, {0x31, 0x00}, {0xf0, 0x31, 0xc0}} {
 		im := image(t, append(append([]byte{}, bad...), 0xc3))
-		p, err := ProposeRegionTransition(t.Context(), im, testEntry, testEntry+uint64(len(bad)), TransitionLimits{}, TransitionExpansion{PC: testEntry})
+		p, err := ProposeRegionTransition(t.Context(), im, testEntry, testEntry+uint64(len(bad)), TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry}}})
 		if err == nil {
 			_, err = CheckRegionTransition(t.Context(), im, testEntry, transitionFace(), p, TransitionLimits{})
 		}

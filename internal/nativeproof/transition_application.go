@@ -3,7 +3,6 @@ package nativeproof
 import (
 	"context"
 	"slices"
-	"strings"
 
 	br "github.com/greatliontech/gofresh/internal/bitrelation"
 	"golang.org/x/arch/x86/x86asm"
@@ -26,8 +25,9 @@ type TransitionCallWord struct {
 // state; they are not an output-expression evaluator or source-call transport.
 // Flags retains definedness even where an architectural value is unprojected.
 type TransitionCallBound struct {
+	ID                 TransitionOccurrenceID
 	Call, Continuation uint64
-	Activation         string
+	Activation         TransitionActivationID
 	StackShift         int64
 	Inputs             [16]br.Term
 	Registers          [16]TransitionValue
@@ -193,28 +193,23 @@ func CheckTransitionCallReturn(ctx context.Context, caller TransitionCertificate
 		return TransitionCallCertificate{}, refuse(b.Boundary.PC, "transition-budget", "retained callee expression dependencies")
 	}
 	prior.limits.Nodes -= len(dep.depth)
-	choices, err := captureTransitionProposal(TransitionProposal{Expansions: b.Expansions}, prior.limits, &prior.work)
+	entryProposal, err := applicationEntryProposal(&prior, child.bound.Entry)
 	if err != nil {
 		return TransitionCallCertificate{}, err
 	}
-	if err := transitionCopyWork(&prior.work, prior.limits.Work, 1, len(b.Boundary.Context)); err != nil {
-		return TransitionCallCertificate{}, err
-	}
-	expansions := choices.Expansions
-	expansions = append(expansions, TransitionExpansion{Context: b.Boundary.Context, PC: b.Boundary.PC})
-	entry, m, err := applicationContinue(ctx, prior, child.bound.Entry, expansions)
+	entry, m, err := applicationContinue(ctx, prior, entryProposal, 0)
 	if err != nil {
 		return TransitionCallCertificate{}, err
 	}
-	activation := callContext(b.Boundary.Context, b.Boundary.PC)
+	activation := TransitionActivationID(b.Boundary.ID)
 	if entry.checked.bound.Boundary.Context != activation || len(m.frames) != len(b.Frames)+1 || !slices.Equal(m.frames[:len(b.Frames)], b.Frames) {
 		return TransitionCallCertificate{}, refuse(b.Boundary.PC, "transition-application", "CALL did not establish the expected child activation")
 	}
 	sp, ok := m.pointers[RSP].(OriginPointer)
-	if !ok || sp.Origin != b.Origin || m.frames[len(m.frames)-1] != (TransitionFrame{Context: activation, Call: b.Boundary.PC, Return: continuation, Slot: sp}) {
+	if !ok || sp.Origin != b.Origin || m.frames[len(m.frames)-1] != (TransitionFrame{ID: b.Boundary.ID, Context: activation, Call: b.Boundary.PC, Return: continuation, Slot: sp}) {
 		return TransitionCallCertificate{}, refuse(b.Boundary.PC, "transition-application", "CALL did not establish the expected control slot")
 	}
-	a := TransitionCallBound{Call: b.Boundary.PC, Continuation: continuation, Activation: activation, StackShift: sp.Offset}
+	a := TransitionCallBound{ID: b.Boundary.ID, Call: b.Boundary.PC, Continuation: continuation, Activation: activation, StackShift: sp.Offset}
 	proofStart := len(m.justifications)
 	if err := m.applicationPremises(child.bound, &a); err != nil {
 		return TransitionCallCertificate{}, err
@@ -251,17 +246,12 @@ func CheckTransitionCallReturn(ctx context.Context, caller TransitionCertificate
 		return TransitionCallCertificate{}, refuse(m.pc, "transition-budget", "retained child-entry expression dependencies")
 	}
 	advanced.limits.Nodes -= len(m.depth)
-	for _, e := range child.bound.Expansions {
-		if !m.tick() {
-			return TransitionCallCertificate{}, m.err
-		}
-		if err := transitionCopyWork(&m.work, m.limits.Work, len(activation), len(e.Context)); err != nil {
-			return TransitionCallCertificate{}, err
-		}
-		expansions = append(expansions, TransitionExpansion{Context: activation + e.Context, PC: e.PC})
-	}
 	advanced.work = m.work
-	successor, replay, err := applicationContinue(ctx, advanced, continuation, expansions)
+	replayProposal, err := applicationCalleeProposal(ctx, &advanced, *child, continuation)
+	if err != nil {
+		return TransitionCallCertificate{}, err
+	}
+	successor, replay, err := applicationContinue(ctx, advanced, replayProposal, replayProposal.After)
 	if err != nil {
 		return TransitionCallCertificate{}, err
 	}
@@ -296,18 +286,19 @@ func CheckTransitionCallReturn(ctx context.Context, caller TransitionCertificate
 
 // Internal discovery uses the same checker/meter as replay. Unlike a public
 // proposal, the graph here already comes from independently decoded owned bytes.
-func applicationContinue(ctx context.Context, prior checkedTransition, cut uint64, expansions []TransitionExpansion) (TransitionCertificate, *transitionChecker, error) {
+func applicationContinue(ctx context.Context, prior checkedTransition, proposal TransitionProposal, returnAnchor TransitionOccurrenceID) (TransitionCertificate, *transitionChecker, error) {
 	m, err := newTransitionChecker(ctx, prior.image, transitionRoot{entry: prior.bound.Entry, region: prior.bound.ConditionalRegion}, prior.limits, prior.work)
 	if err != nil {
 		return TransitionCertificate{}, nil, err
 	}
-	c, err := m.continueTransition(prior, cut, expansions, nil)
+	m.returnAnchor = returnAnchor
+	c, err := m.continueTransition(prior, proposal)
 	return c, m, err
 }
 
 // The initiating CALL's write is in entry.Accesses, outside this suffix. Every
 // later descendant write counts, even a same-value store or failed locked RMW.
-func (m *transitionChecker) applicationProtectedSlot(entry TransitionBound, activation string, shift int64) error {
+func (m *transitionChecker) applicationProtectedSlot(entry TransitionBound, activation TransitionActivationID, shift int64) error {
 	end, ok := signedPlus(shift, 8)
 	if !ok {
 		return refuse(m.pc, "transition-application", "control-slot extent overflow")
@@ -316,10 +307,22 @@ func (m *transitionChecker) applicationProtectedSlot(entry TransitionBound, acti
 		if !m.tick() {
 			return m.err
 		}
-		if err := transitionCopyWork(&m.work, m.limits.Work, len(access.Context), len(activation)); err != nil {
-			return err
+		descendant := false
+		for at := access.Context; at != 0; {
+			if !m.tick() {
+				return m.err
+			}
+			if at == activation {
+				descendant = true
+				break
+			}
+			a, ok := m.activations[at]
+			if !ok {
+				return refuse(access.PC, "transition-application", "missing checked activation ancestry")
+			}
+			at = a.parent
 		}
-		if (access.Context == activation || strings.HasPrefix(access.Context, activation+"/")) && !access.Image && access.Kind == FrameWrite && access.Bytes.Start < end && access.Bytes.End > shift {
+		if descendant && !access.Image && access.Kind == FrameWrite && access.Bytes.Start < end && access.Bytes.End > shift {
 			return refuse(access.PC, "transition-application-protected", "child write overlaps incoming control storage")
 		}
 	}
@@ -341,14 +344,137 @@ func (m *transitionChecker) applicationEvidenceBytes(b TransitionBound) (int, er
 			bytes += 4096
 		}
 	}
-	for _, ins := range b.Instructions {
-		if err := transitionCopyWork(&m.work, m.limits.Work, len(ins.Context)); err != nil {
-			return 0, err
-		}
-		if len(ins.Context) > m.limits.LiveStateBytes-bytes {
-			return 0, refuse(m.pc, "transition-budget", "application context storage")
-		}
-		bytes += len(ins.Context)
-	}
 	return bytes, nil
+}
+
+func applicationEntryProposal(prior *checkedTransition, target uint64) (TransitionProposal, error) {
+	p, err := captureTransitionProposal(prior.witness, prior.limits, &prior.work)
+	if err != nil {
+		return p, err
+	}
+	if len(p.Nodes) >= prior.limits.Instructions || len(p.Nodes)+1 > prior.limits.LiveStateBytes/4096 {
+		return p, refuse(target, "transition-budget", "CALL entry occurrence storage")
+	}
+	if err := transitionCopyWork(&prior.work, prior.limits.Work, len(p.Nodes), 2); err != nil {
+		return p, err
+	}
+	used := make(map[TransitionOccurrenceID]bool, len(p.Nodes))
+	for _, n := range p.Nodes {
+		used[n.ID] = true
+	}
+	id := TransitionOccurrenceID(1)
+	for used[id] {
+		id++
+	}
+	i, _, err := decodeBytes(prior.image, target)
+	if err != nil {
+		return p, err
+	}
+	for j := range p.Nodes {
+		if p.Nodes[j].ID == prior.bound.Boundary.ID {
+			p.Nodes[j].Expanded = true
+			p.Nodes[j].Successors = []TransitionOccurrenceID{id}
+		}
+	}
+	p.Nodes = append(p.Nodes, TransitionNode{ID: id, PC: target, Size: uint8(i.Len)})
+	p.Cut = target
+	p.After = prior.bound.Boundary.ID
+	return p, nil
+}
+
+// Embed the complete callee witness injectively. The old child-entry boundary
+// supplies its root identity; all other callee occurrences and the parent
+// continuation receive fresh IDs. The checker rederives every activation and
+// executes the actual terminal RET against the current protected control word.
+func applicationCalleeProposal(ctx context.Context, prior *checkedTransition, child checkedTransition, continuation uint64) (TransitionProposal, error) {
+	count := len(prior.witness.Nodes) + len(child.witness.Nodes)
+	if count > prior.limits.Instructions || count > prior.limits.LiveStateBytes/4096 {
+		return TransitionProposal{}, refuse(continuation, "transition-budget", "callee occurrence embedding")
+	}
+	if err := transitionCopyWork(&prior.work, prior.limits.Work, count, len(child.witness.Nodes)); err != nil {
+		return TransitionProposal{}, err
+	}
+	p, err := captureTransitionProposal(prior.witness, prior.limits, &prior.work)
+	if err != nil {
+		return p, err
+	}
+	used := make(map[TransitionOccurrenceID]bool, count)
+	for _, n := range p.Nodes {
+		used[n.ID] = true
+	}
+	next := TransitionOccurrenceID(1)
+	fresh := func() TransitionOccurrenceID {
+		for used[next] {
+			next++
+		}
+		id := next
+		used[id] = true
+		return id
+	}
+	ids := map[TransitionOccurrenceID]TransitionOccurrenceID{child.witness.Root: prior.bound.Boundary.ID}
+	for _, n := range child.witness.Nodes {
+		if n.ID != child.witness.Root {
+			ids[n.ID] = fresh()
+		}
+	}
+	after := fresh()
+	if err := transitionCopyWork(&prior.work, prior.limits.Work, len(child.bound.ExcludedBoundaries)*3); err != nil {
+		return p, err
+	}
+	excluded := make(map[TransitionOccurrenceID]bool, len(child.bound.ExcludedBoundaries))
+	for _, b := range child.bound.ExcludedBoundaries {
+		excluded[b.ID] = true
+	}
+	for _, n := range child.witness.Nodes {
+		if err := ctx.Err(); err != nil {
+			return p, err
+		}
+		oldID := n.ID
+		// Recheck classification when moving evidence into an actual activation.
+		// An encoded transfer excluded for lack of root control context may now
+		// be supported. Keep it deferred, with its full actual incoming guard
+		// independently reproved false by replay. Unselected optional forms stay
+		// unselected; available semantics never force expansion of dead arms.
+		if excluded[oldID] && !n.Frontier {
+			i, _, err := decodeBytes(prior.image, n.PC)
+			if err != nil {
+				return p, err
+			}
+			if !TransitionExpansionRequired(i) || n.Expanded {
+				d, err := decodeTransitionBoundary(prior.image, n.PC, ^uint64(0))
+				if err != nil {
+					return p, err
+				}
+				if d.boundary == boundaryNone {
+					n.Frontier = true
+				}
+			}
+		}
+		n.ID = ids[oldID]
+		n.Successors = slices.Clone(n.Successors)
+		for j, id := range n.Successors {
+			n.Successors[j] = ids[id]
+		}
+		if oldID == child.bound.Boundary.ID {
+			n.Successors = []TransitionOccurrenceID{after}
+		}
+		if oldID == child.witness.Root {
+			for j := range p.Nodes {
+				if p.Nodes[j].ID == n.ID {
+					p.Nodes[j] = n
+					break
+				}
+			}
+		} else {
+			p.Nodes = append(p.Nodes, n)
+		}
+	}
+	i, _, err := decodeBytes(prior.image, continuation)
+	if err != nil {
+		return p, err
+	}
+	p.Nodes = append(p.Nodes, TransitionNode{ID: after, PC: continuation, Size: uint8(i.Len)})
+	p.Cut = continuation
+	p.After = ids[child.bound.Boundary.ID]
+	return p, nil
 }

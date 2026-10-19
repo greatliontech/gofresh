@@ -72,7 +72,7 @@ func TestTransitionDeadDirectCallPopulation(t *testing.T) {
 		bad, err := CheckTransition(t.Context(), live, lf, lp, TransitionLimits{})
 		transitionRefused(t, bad, err)
 		// Explicit expansion never turns a bad target into a normal-return premise.
-		expanded, err := ProposeTransition(t.Context(), live, lp.Cut, TransitionLimits{}, TransitionExpansion{PC: testEntry + 13})
+		expanded, err := ProposeTransition(t.Context(), live, lp.Cut, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry + 13}}})
 		if err == nil {
 			bad, err = CheckTransition(t.Context(), live, lf, expanded, TransitionLimits{})
 			transitionRefused(t, bad, err)
@@ -166,14 +166,20 @@ func TestTransitionCallReturnControls(t *testing.T) {
 		transitionRefused(t, c, err)
 	}
 	for _, change := range []func(*TransitionProposal){
-		func(p *TransitionProposal) { p.Expansions = append(p.Expansions, p.Expansions[0]) },
-		func(p *TransitionProposal) { p.Expansions[0].Context = "/forged" },
-		func(p *TransitionProposal) { p.Expansions[0].PC++ },
-		func(p *TransitionProposal) { p.Nodes[0].Context = "/forged" },
-		func(p *TransitionProposal) { p.Expansions = p.Expansions[1:] },
+		func(p *TransitionProposal) { p.Nodes = append(p.Nodes, p.Nodes[0]) },
+		func(p *TransitionProposal) { p.Nodes[0].Successors[0] = p.Root },
+		func(p *TransitionProposal) { p.Nodes[0].PC++ },
+		func(p *TransitionProposal) { p.Nodes[0].ID = 0 },
+		func(p *TransitionProposal) {
+			for j := range p.Nodes {
+				if p.Nodes[j].Expanded {
+					p.Nodes[j].Expanded = false
+					return
+				}
+			}
+		},
 	} {
 		q := lifecycleProposal(p)
-		q.Expansions = slices.Clone(p.Expansions)
 		change(&q)
 		c, err := CheckTransition(t.Context(), x.im, f, q, TransitionLimits{})
 		transitionRefused(t, c, err)
@@ -220,7 +226,7 @@ func TestTransitionCallTLSOwnershipAndBudgets(t *testing.T) {
 		t.Fatal("ownership fixture lacks an active frame")
 	}
 	rootProjection.Frames[0].Slot.Offset++
-	rootProjection.Expansions[0].Context = "forged"
+	rootProjection.Expansions[0].Context = 999
 	rootProjection.Thread.FS.Value = br.Term{}
 	sibling, err := CheckTransitionContinuation(t.Context(), root, p)
 	if err != nil {
@@ -235,11 +241,8 @@ func TestTransitionCallTLSOwnershipAndBudgets(t *testing.T) {
 		callback := &imageCallbackContext{Context: t.Context(), onErr: func(n int) {
 			if n == at {
 				for j := range owned.Nodes {
-					owned.Nodes[j].Context = "changed"
-				}
-				for j := range owned.Expansions {
-					owned.Expansions[j].PC++
-					owned.Expansions[j].Context = "changed"
+					owned.Nodes[j].ID++
+					owned.Nodes[j].Expanded = !owned.Nodes[j].Expanded
 				}
 			}
 		}}
@@ -468,15 +471,15 @@ func TestTransitionInventoryActivationPaths(t *testing.T) {
 	f := stateFace(16, 0)
 	f.Regions = []RelativeRegion{{RelativeSpan{-16, 16}, true, true}}
 	f.Words = nil
-	p, err := ProposeTransition(t.Context(), im, testEntry+10, TransitionLimits{}, TransitionExpansion{PC: testEntry}, TransitionExpansion{PC: testEntry + 5})
+	p, err := ProposeTransition(t.Context(), im, testEntry+10, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry}, {PC: testEntry + 5}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c, err := CheckTransition(t.Context(), im, f, p, TransitionLimits{}); err != nil || c.checked == nil {
 		t.Fatal("valid repeated-call inventory refused", err)
 	}
-	for _, call := range []uint64{testEntry, testEntry + 5} {
-		context := referenceContext("", call)
+	for ordinal, call := range []uint64{testEntry, testEntry + 5} {
+		id := transitionTestID(t, p, testEntry+16, ordinal)
 		want := []uint64{testEntry, testEntry + 16}
 		if call != testEntry {
 			want = []uint64{testEntry, testEntry + 16, testEntry + 19, testEntry + 5, testEntry + 16}
@@ -485,7 +488,7 @@ func TestTransitionInventoryActivationPaths(t *testing.T) {
 			q := lifecycleProposal(p)
 			at := -1
 			for j, n := range q.Nodes {
-				if n.PC == testEntry+16 && n.Context == context {
+				if n.ID == id {
 					at = j
 					break
 				}
@@ -503,20 +506,20 @@ func TestTransitionInventoryActivationPaths(t *testing.T) {
 			case "successor-count":
 				q.Nodes[at].Successors = nil
 			case "successor-target":
-				q.Nodes[at].Successors[0] = testEntry + 10
+				q.Nodes[at].Successors[0] = transitionTestID(t, p, testEntry+10, 0)
 			}
 			c, err := CheckTransition(t.Context(), im, f, q, TransitionLimits{})
 			transitionRefused(t, c, err)
 			var r *Refusal
 			if !errors.As(err, &r) || r.Premise != "transition-proposal" || r.PC != testEntry+16 || !slices.Equal(r.Path, want) {
-				t.Fatalf("%s in %s lost its activation ancestry: %+v", fault, context, r)
+				t.Fatalf("%s in occurrence %d lost its activation ancestry: %+v", fault, id, r)
 			}
 		}
 	}
 	// This PC is reachable at the root, but not in the invented child context.
 	// Duplicating that undiscovered point must not borrow the root's ancestry.
 	q := lifecycleProposal(p)
-	extra := Node{PC: testEntry + 5, Context: referenceContext("", testEntry), Size: 5}
+	extra := TransitionNode{ID: 999, PC: testEntry + 5, Size: 5}
 	q.Nodes = append(q.Nodes, extra, extra)
 	c, err := CheckTransition(t.Context(), im, f, q, TransitionLimits{})
 	transitionRefused(t, c, err)

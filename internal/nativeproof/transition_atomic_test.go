@@ -241,7 +241,7 @@ func TestTransferKernelRefusesMissingAndExhaustedInputs(t *testing.T) {
 func TestTransitionLocked64PermissionsModelAndAlignment(t *testing.T) {
 	im := image(t, hexBytes(t, "f0480fb114240f94c184c9c3"))
 	choices := []TransitionExpansion{{PC: testEntry}, {PC: testEntry + 6}, {PC: testEntry + 9}}
-	p, err := ProposeTransition(t.Context(), im, testEntry+11, TransitionLimits{}, choices...)
+	p, err := ProposeTransition(t.Context(), im, testEntry+11, TransitionLimits{}, TransitionOptions{Expansions: choices})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,8 +250,7 @@ func TestTransitionLocked64PermissionsModelAndAlignment(t *testing.T) {
 	for _, mode := range []string{"good", "missing", "unknown", "readonly", "writeonly", "unaligned", "varying-alignment", "short", "expansion", "wrong-context"} {
 		t.Run(mode, func(t *testing.T) {
 			face := cloneTransitionInterface(f)
-			q := p
-			q.Expansions = append([]TransitionExpansion(nil), p.Expansions...)
+			q := lifecycleProposal(p)
 			face.Words = nil
 			face.Regions = []RelativeRegion{{RelativeSpan{0, 8}, true, true}}
 			switch mode {
@@ -270,9 +269,9 @@ func TestTransitionLocked64PermissionsModelAndAlignment(t *testing.T) {
 			case "short":
 				face.Regions[0].Bytes.End = 7
 			case "expansion":
-				q.Expansions = q.Expansions[1:]
+				q.Nodes[0].Expanded = false
 			case "wrong-context":
-				q.Expansions[0].Context = "/foreign"
+				q.Nodes[0].Successors[0] = q.Root
 			}
 			c, err := CheckTransition(t.Context(), im, face, q, TransitionLimits{})
 			if mode == "good" {
@@ -300,7 +299,7 @@ func TestTransitionLocked64PermissionsModelAndAlignment(t *testing.T) {
 	// Loading current then incrementing RAX forces inequality even at modular
 	// wrap. Failure still needs write permission, despite leaving bytes equal.
 	failedImage := image(t, hexBytes(t, "488b04244883c001f0480fb11424c3"))
-	failedProposal, err := ProposeTransition(t.Context(), failedImage, testEntry+14, TransitionLimits{}, TransitionExpansion{PC: testEntry + 8})
+	failedProposal, err := ProposeTransition(t.Context(), failedImage, testEntry+14, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry + 8}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +318,7 @@ func TestTransitionAtomicInspectionOwnershipAndCancellation(t *testing.T) {
 	im := image(t, hexBytes(t, "f0480fb114240f94c184c9c3"))
 	f := stateFace(16, 0)
 	f.Conditions.LockedMemory = LockedMemoryModel
-	p, err := ProposeTransition(t.Context(), im, testEntry+9, TransitionLimits{}, TransitionExpansion{PC: testEntry}, TransitionExpansion{PC: testEntry + 6})
+	p, err := ProposeTransition(t.Context(), im, testEntry+9, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry}, {PC: testEntry + 6}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,14 +327,14 @@ func TestTransitionAtomicInspectionOwnershipAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := c.Bound()
-	i, err := c.InstructionAt(t.Context(), testEntry+6, "")
+	i, err := c.InstructionAt(t.Context(), transitionTestID(t, p, testEntry+6, 0))
 	if err != nil || i.Op != x86asm.SETE || i.Args[0] != x86asm.CL {
 		t.Fatal(i, err)
 	}
-	if _, err := c.InstructionAt(t.Context(), testEntry+9, ""); err == nil {
+	if _, err := c.InstructionAt(t.Context(), before.Boundary.ID); err == nil {
 		t.Fatal("cut relabeled executed")
 	}
-	if _, err := c.InstructionAt(t.Context(), testEntry, "/foreign"); err == nil {
+	if _, err := c.InstructionAt(t.Context(), ^TransitionOccurrenceID(0)); err == nil {
 		t.Fatal("foreign occurrence")
 	}
 	if _, err := c.RegisterValue(t.Context(), x86asm.X0); err == nil {
@@ -368,7 +367,7 @@ func TestTransitionAtomicInspectionOwnershipAndCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := c.InstructionAt(ctx, testEntry, ""); !errors.Is(err, context.Canceled) {
+	if _, err := c.InstructionAt(ctx, p.Root); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	if _, err := c.RegisterValue(ctx, x86asm.CL); !errors.Is(err, context.Canceled) {
@@ -408,7 +407,7 @@ func TestTransitionDeferredAtomicBoundaries(t *testing.T) {
 		if len(c.checked.bound.ExcludedBoundaries) != 1 || len(c.checked.bound.PrimitiveEffects) != 0 {
 			t.Fatal("dead boundary executed")
 		}
-		if _, err := ProposeTransition(t.Context(), im, cut, TransitionLimits{}, TransitionExpansion{PC: testEntry + 9}); err == nil {
+		if _, err := ProposeTransition(t.Context(), im, cut, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry + 9}}}); err == nil {
 			t.Fatal("expanded cycle accepted")
 		}
 	}
@@ -476,18 +475,18 @@ func TestTransitionAtomicActivationAndCumulativeResources(t *testing.T) {
 			im := image(t, code)
 			end := testEntry + 10
 			setPC := testEntry + 11 + uint64(len(hexBytes(t, tc.rmw)))
-			ctx1, ctx2 := callContext("", testEntry), callContext("", testEntry+5)
-			if ctx1 == "" || ctx2 == "" || ctx1 == ctx2 {
+			ctx1, ctx2 := TransitionActivationID(1), TransitionActivationID(5)
+			if ctx1 == 0 || ctx2 == 0 || ctx1 == ctx2 {
 				t.Fatal("fixture lacks distinct callee activations")
 			}
 			choices := []TransitionExpansion{{PC: testEntry}, {PC: testEntry + 5}, {PC: testEntry + 11, Context: ctx1}, {PC: setPC, Context: ctx1}, {PC: testEntry + 11, Context: ctx2}, {PC: setPC, Context: ctx2}}
 			f := stateFace(16, 0)
 			f.Conditions.LockedMemory = LockedMemoryModel
-			p, err := ProposeTransition(t.Context(), im, end, TransitionLimits{}, choices...)
+			p, err := ProposeTransition(t.Context(), im, end, TransitionLimits{}, TransitionOptions{Expansions: choices})
 			if err != nil {
 				t.Fatal(err)
 			}
-			first, err := ProposeTransition(t.Context(), im, testEntry+5, TransitionLimits{}, choices[0], choices[2], choices[3])
+			first, err := ProposeTransition(t.Context(), im, testEntry+5, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{choices[0], choices[2], choices[3]}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -495,7 +494,8 @@ func TestTransitionAtomicActivationAndCumulativeResources(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			c, err := CheckTransitionContinuation(t.Context(), prior, p)
+			nextProposal := continuationProposal(t, prior, end, TransitionOptions{Expansions: []TransitionExpansion{choices[1], choices[4], choices[5]}})
+			c, err := CheckTransitionContinuation(t.Context(), prior, nextProposal)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -508,9 +508,10 @@ func TestTransitionAtomicActivationAndCumulativeResources(t *testing.T) {
 			if len(b.PrimitiveEffects) != 2 || len(b.Frames) != 0 || len(b.Accesses) != 10 {
 				t.Fatal("incomplete repeated activation effects", len(b.Accesses))
 			}
-			for j, context := range []string{ctx1, ctx2} {
+			for j, context := range []TransitionActivationID{ctx1, ctx2} {
 				var pc uint64
-				var activation string
+				var activation TransitionActivationID
+				var id TransitionOccurrenceID
 				var read, write int
 				switch tc.op {
 				case x86asm.CMPXCHG:
@@ -519,35 +520,38 @@ func TestTransitionAtomicActivationAndCumulativeResources(t *testing.T) {
 						t.Fatal("wrong CMPXCHG primitive type")
 					}
 					pc, activation, read, write = e.PC, e.Context, e.ReadAccess, e.WriteAccess
+					id = e.ID
 				case x86asm.XCHG:
 					e, ok := b.PrimitiveEffects[j].(LockedExchange64Effect)
 					if !ok {
 						t.Fatal("wrong XCHG primitive type")
 					}
 					pc, activation, read, write = e.PC, e.Context, e.ReadAccess, e.WriteAccess
+					id = e.ID
 				case x86asm.XADD:
 					e, ok := b.PrimitiveEffects[j].(LockedExchangeAdd64Effect)
 					if !ok {
 						t.Fatal("wrong XADD primitive type")
 					}
 					pc, activation, read, write = e.PC, e.Context, e.ReadAccess, e.WriteAccess
+					id = e.ID
 				}
 				if activation != context || pc != testEntry+11 || read != j*5+1 || write != j*5+2 {
 					t.Fatal("collapsed dynamic RMW", b.PrimitiveEffects[j])
 				}
 				for _, index := range []int{read, write} {
-					if b.Accesses[index].PC != pc || b.Accesses[index].Context != context {
+					if b.Accesses[index].ID != id || b.Accesses[index].PC != pc || b.Accesses[index].Context != context {
 						t.Fatal("RMW access borrowed another activation", index)
 					}
 				}
-				i, err := c.InstructionAt(t.Context(), pc, context)
+				i, err := c.InstructionAt(t.Context(), id)
 				if err != nil || i.Op != tc.op {
 					t.Fatal(i, err)
 				}
-				for _, wrong := range []string{"", "/foreign"} {
-					_, err := c.InstructionAt(t.Context(), pc, wrong)
+				for _, wrong := range []TransitionOccurrenceID{0, ^TransitionOccurrenceID(0)} {
+					_, err := c.InstructionAt(t.Context(), wrong)
 					var refusal *Refusal
-					if !errors.As(err, &refusal) || refusal.PC != pc || refusal.Premise != "transition-inspection" {
+					if !errors.As(err, &refusal) || refusal.Premise != "transition-inspection" {
 						t.Fatal("RMW context was not the deciding refusal", wrong, err)
 					}
 				}
@@ -565,11 +569,8 @@ func TestTransitionAtomicActivationAndCumulativeResources(t *testing.T) {
 			}
 			failed, err := CheckTransitionContinuation(t.Context(), limited, p)
 			transitionRefused(t, failed, err)
-			for _, choice := range []TransitionExpansion{{PC: testEntry + 11}, {PC: testEntry + 11, Context: "/foreign"}, {PC: setPC, Context: "/foreign"}, {PC: testEntry + 5, Context: ctx1}} {
-				q := p
-				q.Expansions = append(append([]TransitionExpansion(nil), p.Expansions...), choice)
-				failed, err := CheckTransitionContinuation(t.Context(), prior, q)
-				transitionRefused(t, failed, err)
+			for _, choice := range []TransitionExpansion{{PC: testEntry + 11}, {PC: testEntry + 11, Context: 999}, {PC: setPC, Context: 999}, {PC: testEntry + 5, Context: ctx1}} {
+				_, err := ProposeTransitionContinuation(t.Context(), prior, end, TransitionOptions{Expansions: []TransitionExpansion{choices[1], choices[4], choices[5], choice}})
 				var refusal *Refusal
 				if !errors.As(err, &refusal) || refusal.PC != choice.PC || refusal.Premise != "transition-expansion" {
 					t.Fatal("wrong-context choice was not the deciding refusal", choice, err)
@@ -597,7 +598,7 @@ func TestTransitionExchangePreservesUndefinedFlags(t *testing.T) {
 				cut := at + uint64(len(rmw))
 				f := stateFace(16, 0)
 				f.Conditions.LockedMemory = LockedMemoryModel
-				first, err := ProposeTransition(t.Context(), im, at, TransitionLimits{}, TransitionExpansion{PC: testEntry})
+				first, err := ProposeTransition(t.Context(), im, at, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry}}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -609,7 +610,7 @@ func TestTransitionExchangePreservesUndefinedFlags(t *testing.T) {
 				if before.AF != (TransitionFlag{}) {
 					t.Fatal("producer did not establish undefined AF", before.AF)
 				}
-				p, err := ProposeTransition(t.Context(), im, cut, TransitionLimits{}, TransitionExpansion{PC: testEntry}, TransitionExpansion{PC: at})
+				p, err := ProposeTransition(t.Context(), im, cut, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry}, {PC: at}}})
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -53,8 +53,8 @@ func sseIntegrationStore(bits uint64, offset int8) []byte {
 func sseIntegrationCheck(t testing.TB, code []byte, face TransitionInterface, expansions ...TransitionExpansion) (TransitionCertificate, error) {
 	t.Helper()
 	im := image(t, append(append([]byte{}, code...), 0xbb, 0, 0, 0, 0))
-	expansions = append(expansions, sseIntegrationExpansions(code, testEntry, "")...)
-	p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(code)), TransitionLimits{}, expansions...)
+	expansions = append(expansions, sseIntegrationExpansions(code, testEntry)...)
+	p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(code)), TransitionLimits{}, TransitionOptions{Expansions: expansions})
 	if err != nil {
 		return TransitionCertificate{}, err
 	}
@@ -63,7 +63,7 @@ func sseIntegrationCheck(t testing.TB, code []byte, face TransitionInterface, ex
 
 // Fixtures contain contiguous instruction bytes, with no embedded data. These
 // choices request SSE and byte TEST discovery; the checker still validates every form.
-func sseIntegrationExpansions(code []byte, pc uint64, activation string) []TransitionExpansion {
+func sseIntegrationExpansions(code []byte, pc uint64) []TransitionExpansion {
 	var choices []TransitionExpansion
 	for len(code) != 0 {
 		i, err := x86asm.Decode(code, 64)
@@ -72,7 +72,7 @@ func sseIntegrationExpansions(code []byte, pc uint64, activation string) []Trans
 		}
 		switch i.Op {
 		case x86asm.MOVSS, x86asm.MOVSD_XMM, x86asm.UCOMISS, x86asm.UCOMISD, x86asm.TEST:
-			choices = append(choices, TransitionExpansion{PC: pc, Context: activation})
+			choices = append(choices, TransitionExpansion{PC: pc, AllActivations: true})
 		}
 		pc += uint64(i.Len)
 		code = code[i.Len:]
@@ -325,7 +325,7 @@ func TestTransitionSSEIntegrationBranchContinuation(t *testing.T) {
 	finalCut := len(code)
 	im := image(t, append(code, 0xbd, 0, 0, 0, 0))
 	proposal := func(cut int) TransitionProposal {
-		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(cut), TransitionLimits{}, sseIntegrationExpansions(code[:cut], testEntry, "")...)
+		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(cut), TransitionLimits{}, TransitionOptions{Expansions: sseIntegrationExpansions(code[:cut], testEntry)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -342,7 +342,9 @@ func TestTransitionSSEIntegrationBranchContinuation(t *testing.T) {
 	original, _ := segmented.Bound()
 	predecessor := segmented
 	for _, cut := range []int{joinCut, finalCut} {
-		segmented, err = CheckTransitionContinuation(t.Context(), segmented, proposal(cut))
+		start := int(segmented.checked.bound.Boundary.PC - testEntry)
+		q := continuationProposal(t, segmented, testEntry+uint64(cut), TransitionOptions{Expansions: sseIntegrationExpansions(code[start:cut], testEntry+uint64(start))})
+		segmented, err = CheckTransitionContinuation(t.Context(), segmented, q)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -408,7 +410,7 @@ func TestTransitionSSEIntegrationModelsAndUnsupportedForms(t *testing.T) {
 	}
 	projection.Interface.Conditions.SSE = SSEModel
 	face.Conditions.SSE = SSEModel
-	p, err = ProposeTransition(t.Context(), im, testEntry+uint64(len(code)), TransitionLimits{}, sseIntegrationExpansions(code, testEntry, "")...)
+	p, err = ProposeTransitionContinuation(t.Context(), parent, testEntry+uint64(len(code)), TransitionOptions{Expansions: sseIntegrationExpansions(code[5:], testEntry+5)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,9 +489,9 @@ func TestTransitionSSEIntegrationCallAndCompletedReturn(t *testing.T) {
 	code = append(code, sseIntegrationLoad(64, 15, 16)...)
 	code = append(code, 0xc3)
 	im := image(t, code)
-	expansions := append(sseIntegrationExpansions(code[:call], testEntry, ""), TransitionExpansion{PC: testEntry + uint64(call)})
-	expansions = append(expansions, sseIntegrationExpansions(code[cut+5:], testEntry+uint64(cut+5), fmt.Sprintf("/%016x", testEntry+uint64(call)))...)
-	p, err := ProposeTransition(t.Context(), im, testEntry+uint64(cut), TransitionLimits{}, expansions...)
+	expansions := append(sseIntegrationExpansions(code[:call], testEntry), TransitionExpansion{PC: testEntry + uint64(call)})
+	expansions = append(expansions, sseIntegrationExpansions(code[cut+5:], testEntry+uint64(cut+5))...)
+	p, err := ProposeTransition(t.Context(), im, testEntry+uint64(cut), TransitionLimits{}, TransitionOptions{Expansions: expansions})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,7 +511,7 @@ func TestTransitionSSEIntegrationCallAndCompletedReturn(t *testing.T) {
 	callee = append(callee, 0xc3)
 	ri, rf := returnFixture(t, fmt.Sprintf("%x", callee))
 	rf.Conditions.SSE = SSEModel
-	prefix := returnPrefix(t, ri, rf, testEntry+uint64(retOffset), sseIntegrationExpansions(callee[:retOffset], testEntry, "")...)
+	prefix := returnPrefix(t, ri, rf, testEntry+uint64(retOffset), sseIntegrationExpansions(callee[:retOffset], testEntry)...)
 	returned := checkedReturn(t, prefix)
 	r, ok := returned.Bound()
 	if !ok || !r.State.CalleeTerminated || r.State.Vectors != r.Prefix.Vectors || r.State.SSE != r.Prefix.SSE || !r.State.SSE.MXCSRPreserved || !r.State.SSE.UpperVectorsPreserved {

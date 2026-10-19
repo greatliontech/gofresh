@@ -104,7 +104,7 @@ func TestTransitionOptimizedArtifacts(t *testing.T) {
 				t.Fatal("selected startup boundary is not the expected base-pointer initialization")
 			}
 			nextCut := b.Boundary.PC + uint64(len(b.Boundary.Bytes))
-			proposal, err := ProposeTransition(t.Context(), im, nextCut, TransitionLimits{})
+			proposal, err := ProposeTransitionContinuation(t.Context(), c, nextCut)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -160,7 +160,7 @@ func TestTransitionOptimizedArtifacts(t *testing.T) {
 			for i := range attempt.Nodes {
 				attempt.Nodes[i].Successors = slices.Clone(attempt.Nodes[i].Successors)
 				if attempt.Nodes[i].PC == nextCut {
-					attempt.Nodes[i].Successors = []uint64{after}
+					attempt.Nodes[i].Successors = []TransitionOccurrenceID{TransitionOccurrenceID(after)}
 				}
 			}
 			raw, err = im.instructionBytes(end)
@@ -171,7 +171,7 @@ func TestTransitionOptimizedArtifacts(t *testing.T) {
 			if err != nil || boundary.Len <= 0 {
 				t.Fatal("following candidate boundary is unavailable", err)
 			}
-			attempt.Nodes = append(attempt.Nodes, Node{PC: after, Size: uint8(stackLEA.Len), Successors: []uint64{end}}, Node{PC: end, Size: uint8(boundary.Len)})
+			attempt.Nodes = append(attempt.Nodes, TransitionNode{ID: TransitionOccurrenceID(after), PC: after, Size: uint8(stackLEA.Len), Successors: []TransitionOccurrenceID{TransitionOccurrenceID(end)}}, TransitionNode{ID: TransitionOccurrenceID(end), PC: end, Size: uint8(boundary.Len)})
 			proposed, err := ProposeTransition(t.Context(), im, end, TransitionLimits{})
 			if err != nil {
 				t.Fatal(err)

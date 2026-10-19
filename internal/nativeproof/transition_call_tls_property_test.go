@@ -3,11 +3,8 @@ package nativeproof
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"fmt"
 	"reflect"
 	"slices"
-	"strconv"
-	"strings"
 	"testing"
 	"testing/quick"
 
@@ -76,19 +73,22 @@ func (r *stateReference) referenceStack(t testing.TB, i to.Intent, index int, ne
 }
 
 type referenceOccurrence struct {
-	context string
+	context TransitionActivationID
 	index   int
 }
 type referenceActivation struct {
-	parent      string
+	parent      TransitionActivationID
 	after, call int
 	slot        uint64
 }
 
-// This is the documented locator spelling, not production callContext.
-func referenceContext(parent string, pc uint64) string {
-	hex := strconv.FormatUint(pc, 16)
-	return parent + "/" + strings.Repeat("0", 16-len(hex)) + hex
+// Fixture IDs are independent of discovery order, bounded by the generated
+// population's depth and 4096-operation limit. Activation is the actual CALL ID.
+func referenceID(parent TransitionActivationID, index int) TransitionOccurrenceID {
+	return TransitionOccurrenceID(parent)*4096 + TransitionOccurrenceID(index+1)
+}
+func referenceContext(parent TransitionActivationID, index int) TransitionActivationID {
+	return TransitionActivationID(referenceID(parent, index))
 }
 
 func referenceCallAfter(x dagLayout, j int) int {
@@ -100,10 +100,10 @@ func referenceCallAfter(x dagLayout, j int) int {
 
 func callInventory(t testing.TB, x dagLayout, cut int) TransitionProposal {
 	t.Helper()
-	p := TransitionProposal{ImageDigest: x.digest, Entry: x.pcs[0], Cut: x.pcs[cut]}
+	p := TransitionProposal{ImageDigest: x.digest, Entry: x.pcs[0], Cut: x.pcs[cut], Root: referenceID(0, 0)}
 	queue := []referenceOccurrence{{}}
 	seen := map[referenceOccurrence]bool{}
-	contexts := map[string]referenceActivation{}
+	contexts := map[TransitionActivationID]referenceActivation{}
 	for at := 0; at < len(queue); at++ {
 		o := queue[at]
 		if seen[o] {
@@ -114,16 +114,16 @@ func callInventory(t testing.TB, x dagLayout, cut int) TransitionProposal {
 			t.Fatal("independent occurrence inventory bound")
 		}
 		j := o.index
-		n := Node{PC: x.pcs[j], Context: o.context, Size: uint8(len(x.encoded[j]))}
+		n := TransitionNode{ID: referenceID(o.context, j), PC: x.pcs[j], Size: uint8(len(x.encoded[j]))}
 		var next []referenceOccurrence
 		if j != cut {
 			i := x.intents[j]
 			switch i.Operation {
 			case to.Call:
-				child := referenceContext(o.context, x.pcs[j])
+				child := referenceContext(o.context, j)
 				contexts[child] = referenceActivation{parent: o.context, after: referenceCallAfter(x, j), call: j}
 				next = []referenceOccurrence{{child, x.edges[j][0]}}
-				p.Expansions = append(p.Expansions, TransitionExpansion{Context: o.context, PC: x.pcs[j]})
+				n.Expanded = true
 			case to.Return:
 				a, ok := contexts[o.context]
 				if !ok {
@@ -135,12 +135,12 @@ func callInventory(t testing.TB, x dagLayout, cut int) TransitionProposal {
 					next = append(next, referenceOccurrence{o.context, k})
 				}
 				if to.RequiresExpansion(i) {
-					p.Expansions = append(p.Expansions, TransitionExpansion{Context: o.context, PC: x.pcs[j]})
+					n.Expanded = true
 				}
 			}
 		}
 		for _, k := range next {
-			n.Successors = append(n.Successors, x.pcs[k.index])
+			n.Successors = append(n.Successors, referenceID(k.context, k.index))
 			queue = append(queue, k)
 		}
 		p.Nodes = append(p.Nodes, n)
@@ -149,10 +149,11 @@ func callInventory(t testing.TB, x dagLayout, cut int) TransitionProposal {
 }
 
 type callEvent struct {
-	pc            uint64
-	context, kind string
-	off           stateLocation
-	width         int
+	pc      uint64
+	context TransitionActivationID
+	kind    string
+	off     stateLocation
+	width   int
 }
 
 func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, face TransitionInterface, initial stateReference) {
@@ -161,7 +162,7 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 	r.loads = x.mappings
 	var want []callEvent
 	var active []referenceActivation
-	context := ""
+	context := TransitionActivationID(0)
 	for j, steps := 0, 0; j != cut; steps++ {
 		if steps >= 4096 {
 			t.Fatal("reference execution did not reach cut")
@@ -197,7 +198,7 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 		switch i.Operation {
 		case to.Call:
 			active = append(active, referenceActivation{parent: context, after: referenceCallAfter(x, j), call: j, slot: r.regs[4]})
-			context = referenceContext(context, x.pcs[j])
+			context = referenceContext(context, j)
 			j = x.edges[j][0]
 		case to.Return:
 			if len(active) == 0 {
@@ -225,22 +226,22 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 	if len(inventory.Nodes) != len(b.Instructions)+len(b.ExcludedBoundaries)+1 {
 		t.Fatal("call/TLS structural population differs")
 	}
-	if b.Boundary.PC != x.pcs[cut] || b.Boundary.Context != context || !slices.Equal(b.Boundary.Bytes, x.encoded[cut]) {
+	if b.Boundary.ID != referenceID(context, cut) || b.Boundary.PC != x.pcs[cut] || b.Boundary.Context != context || !slices.Equal(b.Boundary.Bytes, x.encoded[cut]) {
 		t.Fatal("wrong cut occurrence")
 	}
 	values := stateBindings(t, c, face, initial)
 	type key struct {
 		pc      uint64
-		context string
+		context TransitionActivationID
 	}
 	guards := map[key]br.Term{}
-	structural := map[key]Node{}
+	structural := map[key]TransitionNode{}
 	for _, n := range inventory.Nodes {
-		structural[key{n.PC, n.Context}] = n
+		structural[key{n.PC, TransitionActivationID((n.ID - 1) / 4096)}] = n
 	}
 	for _, i := range b.Instructions {
 		k := key{i.Start, i.Context}
-		if guards[k].Valid() || structural[k].Size != uint8(i.End-i.Start) {
+		if guards[k].Valid() || structural[k].ID != i.ID || structural[k].Size != uint8(i.End-i.Start) {
 			t.Fatal("collapsed occurrence")
 		}
 		guards[k] = i.Guard
@@ -256,6 +257,9 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 	abstractions := map[key]TransitionAbstraction{}
 	for _, a := range b.Abstractions {
 		k := key{a.PC, a.Context}
+		if structural[k].ID != a.ID {
+			t.Fatal("abstraction lost exact occurrence")
+		}
 		if _, ok := abstractions[k]; ok {
 			t.Fatal("duplicate abstraction")
 		}
@@ -269,7 +273,7 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 		case CPUIDEffect:
 			k := key{e.PC, e.Context}
 			g, exists := guards[k]
-			if !exists || primitiveKinds[k] != "" {
+			if !exists || structural[k].ID != e.ID || primitiveKinds[k] != "" {
 				t.Fatal("unbound primitive occurrence")
 			}
 			active := stateEval(t, g, values) != 0
@@ -303,7 +307,7 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 		case ArchSetFSEffect:
 			k := key{e.PC, e.Context}
 			g, exists := guards[k]
-			if !exists || primitiveKinds[k] != "" {
+			if !exists || structural[k].ID != e.ID || primitiveKinds[k] != "" {
 				t.Fatal("unbound syscall occurrence")
 			}
 			active := stateEval(t, g, values) != 0
@@ -349,7 +353,7 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 	var orderedAccess []callEvent
 	for _, a := range b.Accesses {
 		k := key{a.PC, a.Context}
-		if !guards[k].Valid() {
+		if !guards[k].Valid() || structural[k].ID != a.ID {
 			t.Fatal("access without occurrence")
 		}
 		accesses[k] = append(accesses[k], a)
@@ -407,7 +411,7 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 	assertCallTLSState(t, c, r, initial, values, active)
 	for j, frame := range b.Frames {
 		a := active[j]
-		if frame.Context != referenceContext(a.parent, x.pcs[a.call]) || frame.Call != x.pcs[a.call] || frame.Return != x.pcs[a.after] || frame.Slot.Origin != b.Origin || frame.Slot.Offset != int64(a.slot-initial.origin) {
+		if frame.ID != referenceID(a.parent, a.call) || frame.Context != referenceContext(a.parent, a.call) || frame.Call != x.pcs[a.call] || frame.Return != x.pcs[a.after] || frame.Slot.Origin != b.Origin || frame.Slot.Offset != int64(a.slot-initial.origin) {
 			t.Fatal("active frame relation differs")
 		}
 	}
@@ -576,9 +580,9 @@ func checkCallTLSRootPopulation(t testing.TB, seed uint64, raw []byte, region bo
 	var proposed TransitionProposal
 	var err error
 	if region {
-		proposed, err = ProposeRegionTransition(t.Context(), x.im, x.pcs[0], p.Cut, TransitionLimits{}, p.Expansions...)
+		proposed, err = ProposeRegionTransition(t.Context(), x.im, x.pcs[0], p.Cut, TransitionLimits{}, transitionTestOptions(p))
 	} else {
-		proposed, err = ProposeTransition(t.Context(), x.im, p.Cut, TransitionLimits{}, p.Expansions...)
+		proposed, err = ProposeTransition(t.Context(), x.im, p.Cut, TransitionLimits{}, transitionTestOptions(p))
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -625,7 +629,7 @@ func assertCallTLSAlpha(t testing.TB, a, b TransitionCertificate) {
 	t.Helper()
 	normalize := func(c TransitionCertificate) TransitionBound {
 		x := lifecycleSnapshot(c.checked.bound)
-		less := func(ac string, ap uint64, bc string, bp uint64) int {
+		less := func(ac TransitionActivationID, ap uint64, bc TransitionActivationID, bp uint64) int {
 			if ac < bc {
 				return -1
 			}
@@ -649,23 +653,7 @@ func assertCallTLSAlpha(t testing.TB, a, b TransitionCertificate) {
 
 func stateSameContextInventory(t testing.TB, a, b TransitionProposal) {
 	t.Helper()
-	if a.Entry != b.Entry || a.Cut != b.Cut || a.ImageDigest != b.ImageDigest || len(a.Nodes) != len(b.Nodes) || !slices.Equal(a.Expansions, b.Expansions) {
-		t.Fatal("occurrence proposal scope differs")
-	}
-	m := map[string]Node{}
-	for _, n := range a.Nodes {
-		k := fmt.Sprintf("%s:%x", n.Context, n.PC)
-		if _, ok := m[k]; ok {
-			t.Fatal("duplicate occurrence")
-		}
-		m[k] = n
-	}
-	for _, n := range b.Nodes {
-		v, ok := m[fmt.Sprintf("%s:%x", n.Context, n.PC)]
-		if !ok || v.Size != n.Size || !slices.Equal(v.Successors, n.Successors) {
-			t.Fatal("occurrence edges differ", v, n)
-		}
-	}
+	transitionInventoryMap(t, a, b)
 }
 
 func TestTransitionCallTLSCompositions(t *testing.T) {

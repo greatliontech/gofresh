@@ -1,5 +1,57 @@
 package bitrelation
 
+// Lift one conditional operand outward, preferring the left operand. The closed
+// arithmetic/order vocabulary excludes BoolToBits, so this orientation cannot
+// reverse ConditionalBits. Local checking shares none of this search's matching
+// decisions. Construction, resulting depth and normalization use the same meter.
+func (p *proposer) conditionalOperationRewrite(t Term) (Rule, Term, bool) {
+	n := t.n
+	switch n.op {
+	case Add, Sub, Equal, ULT, ULE, SLT, SLE:
+	default:
+		return 0, Term{}, false
+	}
+	if n.args[0].sort.IsBool() {
+		return 0, Term{}, false
+	}
+	for position := 0; position < 2; position++ {
+		if p.err = p.m.tick(); p.err != nil {
+			return 0, Term{}, false
+		}
+		x := n.args[position]
+		if x.op != ITE {
+			continue
+		}
+		var branches [2]Term
+		for arm := 0; arm < 2; arm++ {
+			if p.err = p.m.tick(); p.err != nil {
+				return 0, Term{}, false
+			}
+			args := [2]Term{{n.args[0]}, {n.args[1]}}
+			args[position] = Term{x.args[arm+1]}
+			branches[arm] = p.make(n.op, n.sort, n.imm, args[:]...)
+			if p.err != nil {
+				return 0, Term{}, false
+			}
+		}
+		if p.err = p.m.tick(); p.err != nil {
+			return 0, Term{}, false
+		}
+		out := p.make(ITE, n.sort, 0, Term{x.args[0]}, branches[0], branches[1])
+		if p.err != nil {
+			return 0, Term{}, false
+		}
+		// Moving the unchanged operand beneath ITE can deepen a term. Admit the
+		// generated graph before recursively searching it, under the existing
+		// fixed depth ceiling and current cumulative work allowance.
+		if p.err = graph(p.m, []Term{out}); p.err != nil {
+			return 0, Term{}, false
+		}
+		return ConditionalOperation, out, true
+	}
+	return 0, Term{}, false
+}
+
 // controlRewrite proposes oriented order/path/projection rules. Checker rule
 // recognition is separate: these patterns are search hints, never premises.
 func (p *proposer) controlRewrite(t Term) (Rule, Term, bool) {

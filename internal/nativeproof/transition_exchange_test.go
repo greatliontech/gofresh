@@ -159,7 +159,7 @@ func TestTransitionExchangeRawForms(t *testing.T) {
 		code := hexBytes(t, form)
 		compareExecutedEncoding(t, code)
 		im := image(t, append(code, 0xc3))
-		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(code)), TransitionLimits{}, TransitionExpansion{PC: testEntry})
+		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(code)), TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry}}})
 		if err == nil {
 			c, err := CheckTransition(t.Context(), im, stateFace(16, 0), p, TransitionLimits{})
 			transitionRefused(t, c, err)
@@ -171,7 +171,7 @@ func TestTransitionExchangePermissionsAndAliases(t *testing.T) {
 	for _, form := range []string{"48871424", "f0480fc11424"} {
 		code := hexBytes(t, form)
 		im := image(t, append(code, 0xc3))
-		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(code)), TransitionLimits{}, TransitionExpansion{PC: testEntry})
+		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(code)), TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -196,7 +196,7 @@ func TestTransitionExchangePermissionsAndAliases(t *testing.T) {
 				// contents cannot create the pointer needed by the selected access.
 				code = hexBytes(t, map[bool]string{true: "488712", false: "f0480fc112"}[form == "48871424"])
 				im = image(t, append(code, 0xc3))
-				p, err = ProposeTransition(t.Context(), im, testEntry+uint64(len(code)), TransitionLimits{}, TransitionExpansion{PC: testEntry})
+				p, err = ProposeTransition(t.Context(), im, testEntry+uint64(len(code)), TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry}}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -281,7 +281,7 @@ func atomicPermissionProperty(t testing.TB, kind, source, base, permissions, ext
 	cut := testEntry + uint64(len(code))
 	code = append(code, 0xc3)
 	im := image(t, code)
-	p, err := ProposeTransition(t.Context(), im, cut, TransitionLimits{}, TransitionExpansion{PC: at})
+	p, err := ProposeTransition(t.Context(), im, cut, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: at}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func atomicPermissionProperty(t testing.TB, kind, source, base, permissions, ext
 func TestTransitionAddressShapedNOPNeverReads(t *testing.T) {
 	code := hexBytes(t, "0f1f440000c3")
 	im := image(t, code)
-	p, err := ProposeTransition(t.Context(), im, testEntry+5, TransitionLimits{}, TransitionExpansion{PC: testEntry})
+	p, err := ProposeTransition(t.Context(), im, testEntry+5, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +354,7 @@ func TestTransitionExchangePointerWordsAndUnchangedWrites(t *testing.T) {
 		im := image(t, code)
 		f := stateFace(16, 0)
 		f.Conditions.LockedMemory = LockedMemoryModel
-		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(code)-1), TransitionLimits{}, TransitionExpansion{PC: testEntry + uint64(len(before))})
+		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(code)-1), TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry + uint64(len(before))}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -384,7 +384,7 @@ func TestTransitionExchangePointerWordsAndUnchangedWrites(t *testing.T) {
 		if raw[0] == 'b' {
 			at = testEntry + 5
 		}
-		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(code)-1), TransitionLimits{}, TransitionExpansion{PC: at})
+		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(code)-1), TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: at}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -402,7 +402,7 @@ func TestTransitionExchangePointerWordsAndUnchangedWrites(t *testing.T) {
 	// Addition of an arbitrary register is not a justified offset, even when a
 	// sampled assignment would happen to leave the numeric pointer unchanged.
 	im := image(t, hexBytes(t, "4889e14801d1488b01c3"))
-	p, err := ProposeTransition(t.Context(), im, testEntry+9, TransitionLimits{}, TransitionExpansion{PC: testEntry + 3})
+	p, err := ProposeTransition(t.Context(), im, testEntry+9, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry + 3}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,7 +415,7 @@ func TestTransitionExchangeCancellationAndCumulativeAccounting(t *testing.T) {
 	f := stateFace(16, 0)
 	f.Conditions.LockedMemory = LockedMemoryModel
 	choices := []TransitionExpansion{{PC: testEntry}, {PC: testEntry + 4}, {PC: testEntry + 10}, {PC: testEntry + 13}}
-	p, err := ProposeTransition(t.Context(), im, testEntry+18, TransitionLimits{}, choices...)
+	p, err := ProposeTransition(t.Context(), im, testEntry+18, TransitionLimits{}, TransitionOptions{Expansions: choices})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +437,7 @@ func TestTransitionExchangeCancellationAndCumulativeAccounting(t *testing.T) {
 			t.Fatal("cancellation acquired result", at, err)
 		}
 	}
-	first, err := ProposeTransition(t.Context(), im, testEntry+4, TransitionLimits{}, choices[0])
+	first, err := ProposeTransition(t.Context(), im, testEntry+4, TransitionLimits{}, TransitionOptions{Expansions: choices[:1]})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,6 +449,7 @@ func TestTransitionExchangeCancellationAndCumulativeAccounting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	p = continuationProposal(t, prior, p.Cut, TransitionOptions{Expansions: choices[1:]})
 	failed, err := CheckTransitionContinuation(t.Context(), limited, p)
 	transitionRefused(t, failed, err)
 	next, err := CheckTransitionContinuation(t.Context(), prior, p)

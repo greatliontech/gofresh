@@ -4,6 +4,14 @@
 // must establish those facts and the correspondence of their actual roots and
 // input scopes independently. A well-typed caller-authored term proves nothing
 // about an arbitrary program that the caller says it describes.
+//
+// ConditionalOperation distributes modular Add/Sub and the five bit-vector
+// equality/order predicates through either operand's ITE. It preserves the
+// exact condition, scoped values, fixed operand, branch order and typed operator.
+// Search lifts one conditional at a time after cheap identities, before order
+// rewrites can hide it beneath negation. Boolean encoding is not distributed in
+// the opposite direction. Generated nodes, depth and proof work remain bounded;
+// no branch valuation or execution premise is added by this scalar identity.
 package bitrelation
 
 import (

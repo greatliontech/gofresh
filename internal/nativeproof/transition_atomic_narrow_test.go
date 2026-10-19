@@ -84,7 +84,7 @@ func TestTransitionNarrowLockedPremisesAndLimits(t *testing.T) {
 	for _, code := range []string{"f00fb11424", "f0800c2480", "f08024247f", "f0800c2400", "f0802424ff"} {
 		raw := hexBytes(t, code)
 		im := image(t, append(raw, 0xc3))
-		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(raw)), TransitionLimits{}, TransitionExpansion{PC: testEntry})
+		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(raw)), TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -164,7 +164,7 @@ func TestTransitionNarrowLockedPremisesAndLimits(t *testing.T) {
 func TestTransitionNarrowFailedWritebackAndPointerLanes(t *testing.T) {
 	// Loading EAX then incrementing RAX forces unequal low 32 bits even at wrap.
 	im := image(t, hexBytes(t, "8b04244883c001f00fb11424c3"))
-	p, err := ProposeTransition(t.Context(), im, testEntry+12, TransitionLimits{}, TransitionExpansion{PC: testEntry + 7})
+	p, err := ProposeTransition(t.Context(), im, testEntry+12, TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry + 7}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestTransitionNarrowFailedWritebackAndPointerLanes(t *testing.T) {
 		}
 		raw = append(raw, hexBytes(t, "488b0424488b08c3")...)
 		im := image(t, raw)
-		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(raw)-1), TransitionLimits{}, expansions...)
+		p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(raw)-1), TransitionLimits{}, TransitionOptions{Expansions: expansions})
 		if err != nil {
 			t.Fatal(err)
 		}

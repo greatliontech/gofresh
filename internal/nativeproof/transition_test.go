@@ -229,7 +229,7 @@ func assertTransitionOracle(t testing.TB, im *Image, b TransitionBound, samples 
 			}
 			pc = next
 		}
-		assertConcreteAccesses(t, b.Accesses, accesses, values)
+		assertConcreteAccesses(t, b.Accesses, accesses, values, b.Instructions)
 		for r, v := range b.Registers {
 			if got := evalRelationTerm(t, v.Value, values, rng.Uint64()); got != regs[r] {
 				t.Fatalf("register %d S=%#x: got %#x want %#x", r, s, got, regs[r])
@@ -352,12 +352,16 @@ func TestTransitionControlAndEncodingRefusals(t *testing.T) {
 	for _, change := range []func(*TransitionProposal){
 		func(p *TransitionProposal) { p.Nodes = p.Nodes[1:] },
 		func(p *TransitionProposal) { p.Nodes[0].Successors = nil },
-		func(p *TransitionProposal) { p.Nodes[0].Successors = []uint64{cut} },
+		func(p *TransitionProposal) {
+			p.Nodes[0].Successors = []TransitionOccurrenceID{transitionTestID(t, *p, cut, 0)}
+		},
 		func(p *TransitionProposal) { p.Entry += 4 },
-		func(p *TransitionProposal) { p.Nodes[len(p.Nodes)-1].Successors = []uint64{cut + 5} },
+		func(p *TransitionProposal) {
+			p.Nodes[len(p.Nodes)-1].Successors = []TransitionOccurrenceID{TransitionOccurrenceID(cut + 5)}
+		},
 	} {
 		q := p
-		q.Nodes = append([]Node(nil), p.Nodes...)
+		q.Nodes = append([]TransitionNode(nil), p.Nodes...)
 		change(&q)
 		c, err := CheckTransition(t.Context(), im, transitionFace(), q, TransitionLimits{})
 		transitionRefused(t, c, err)

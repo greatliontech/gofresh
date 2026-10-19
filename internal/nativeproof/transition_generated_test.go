@@ -18,13 +18,26 @@ func concreteAccessValue(v uint64, width int) br.Term {
 	return t
 }
 
-func assertConcreteAccesses(t testing.TB, got, want []TransitionAccess, values map[br.Term]uint64) {
+func assertConcreteAccesses(t testing.TB, got, want []TransitionAccess, values map[br.Term]uint64, instructions []GuardedInstruction) {
 	t.Helper()
+	owners := map[uint64]TransitionOccurrenceID{}
+	ids := map[TransitionOccurrenceID]bool{}
+	for _, ins := range instructions {
+		if ins.ID == 0 || ids[ins.ID] || owners[ins.Start] != 0 {
+			t.Fatal("nonunique straight-line fixture occurrence")
+		}
+		ids[ins.ID] = true
+		owners[ins.Start] = ins.ID
+	}
 	if len(got) != len(want) {
 		t.Fatal("access count differs")
 	}
 	for j, g := range got {
 		w := want[j]
+		w.ID = owners[w.PC]
+		if w.ID == 0 {
+			t.Fatal("reference access has no instruction occurrence")
+		}
 		gv, wv := g.Value, w.Value
 		g.Value, w.Value = br.Term{}, br.Term{}
 		if g != w || gv.Sort() != wv.Sort() || stateEval(t, gv, values) != stateEval(t, wv, nil) {
@@ -286,7 +299,7 @@ func assertIntentReference(t testing.TB, c TransitionCertificate, program []tran
 	for j, i := range program {
 		r.step(i, pcs[j])
 	}
-	assertConcreteAccesses(t, b.Accesses, r.accesses, values)
+	assertConcreteAccesses(t, b.Accesses, r.accesses, values, b.Instructions)
 	for j, v := range b.Registers {
 		if got := evalRelationTerm(t, v.Value, values, 0); got != r.regs[j] {
 			t.Fatalf("register%d got%x want%x", j, got, r.regs[j])
@@ -558,7 +571,7 @@ func checkSyntheticContinuations(t testing.TB, program []transitionIntent, varia
 	if variant%3 == 2 {
 		face.Regions = append(face.Regions, RelativeRegion{RelativeSpan{-32, 32}, true, true})
 	}
-	direct, err := CheckTransition(t.Context(), im, face, continuationProposal(t, im, cut), TransitionLimits{})
+	direct, err := CheckTransition(t.Context(), im, face, rootTransitionProposal(t, im, cut), TransitionLimits{})
 	if err != nil {
 		t.Fatalf("synthetic program %x\n%+v\n%v", code, program, err)
 	}
@@ -570,7 +583,7 @@ func checkSyntheticContinuations(t testing.TB, program []transitionIntent, varia
 			next = pcs[j+1]
 		}
 		var err error
-		segmented, err = CheckTransitionContinuation(t.Context(), segmented, continuationProposal(t, im, next))
+		segmented, err = CheckTransitionContinuation(t.Context(), segmented, continuationProposal(t, segmented, next))
 		if err != nil {
 			t.Fatalf("segment%d intent%+v: %v", j, program[j], err)
 		}
@@ -586,7 +599,7 @@ func checkSyntheticContinuations(t testing.TB, program []transitionIntent, varia
 	// A different split has the same theorem despite a different work history.
 	if len(program) > 1 {
 		middle := continuationRoot(t, im, pcs[len(program)/2], face, TransitionLimits{})
-		other, err := CheckTransitionContinuation(t.Context(), middle, continuationProposal(t, im, cut))
+		other, err := CheckTransitionContinuation(t.Context(), middle, continuationProposal(t, middle, cut))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -677,7 +690,7 @@ func FuzzTransitionSyntheticContinuation(f *testing.F) {
 func TestTransitionContinuationBackwardAcyclic(t *testing.T) {
 	im, _ := transitionFixture(t, "eb064889e04889c34889e0ebf5")
 	root := continuationRoot(t, im, testEntry+11, transitionFace(), TransitionLimits{})
-	c, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, im, testEntry+5))
+	c, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, root, testEntry+5))
 	if err != nil {
 		t.Fatal(err)
 	}

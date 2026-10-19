@@ -26,9 +26,9 @@ func TestTransitionOwnershipAndCancellation(t *testing.T) {
 		supplied := *im
 		face := transitionFace()
 		proposal := p
-		proposal.Nodes = append([]Node(nil), p.Nodes...)
+		proposal.Nodes = append([]TransitionNode(nil), p.Nodes...)
 		for j := range proposal.Nodes {
-			proposal.Nodes[j].Successors = append([]uint64(nil), proposal.Nodes[j].Successors...)
+			proposal.Nodes[j].Successors = append([]TransitionOccurrenceID(nil), proposal.Nodes[j].Successors...)
 		}
 		ctx := &imageCallbackContext{Context: t.Context(), onErr: func(n int) {
 			if n == at {

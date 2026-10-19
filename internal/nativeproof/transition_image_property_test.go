@@ -95,7 +95,7 @@ func imageInterfaceFixture(t testing.TB, loads []interfaceMapping) interfaceImag
 		x.loads = append(x.loads, [2]uint64{m.start, m.end})
 		x.dataLoads = append(x.dataLoads, m)
 	}
-	x.proposal = TransitionProposal{ImageDigest: x.digest, Entry: testEntry, Cut: testEntry, Nodes: []Node{{PC: testEntry, Size: 1}}}
+	x.proposal = TransitionProposal{ImageDigest: x.digest, Entry: testEntry, Cut: testEntry, Root: 1, Nodes: []TransitionNode{{ID: 1, PC: testEntry, Size: 1}}}
 	return x
 }
 
@@ -580,7 +580,7 @@ func FuzzTransitionImageRIPArithmetic(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		p := TransitionProposal{ImageDigest: sha256.Sum256(raw), Entry: pc, Cut: pc + 7, Nodes: []Node{{PC: pc, Size: 7, Successors: []uint64{pc + 7}}, {PC: pc + 7, Size: 2}}}
+		p := TransitionProposal{ImageDigest: sha256.Sum256(raw), Entry: pc, Cut: pc + 7, Root: 1, Nodes: []TransitionNode{{ID: 1, PC: pc, Size: 7, Successors: []TransitionOccurrenceID{2}}, {ID: 2, PC: pc + 7, Size: 2}}}
 		face := stateFace(16, 0)
 		c, err := CheckTransition(t.Context(), im, face, p, TransitionLimits{})
 		if !valid {

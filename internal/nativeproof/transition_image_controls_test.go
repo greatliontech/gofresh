@@ -36,14 +36,14 @@ func assertCPUQueryExecutionRefused(t testing.TB, im *Image, face TransitionInte
 			if attempt.Nodes[j].Size != 2 || len(attempt.Nodes[j].Successors) != 0 {
 				t.Fatal("old cut inventory differs")
 			}
-			attempt.Nodes[j].Successors = []uint64{next}
+			attempt.Nodes[j].Successors = []TransitionOccurrenceID{TransitionOccurrenceID(next)}
 			found = true
 		}
 	}
 	if !found {
 		t.Fatal("missing old cut")
 	}
-	attempt.Nodes = append(attempt.Nodes, Node{PC: next, Size: uint8(instruction.Len)})
+	attempt.Nodes = append(attempt.Nodes, TransitionNode{ID: TransitionOccurrenceID(next), PC: next, Size: uint8(instruction.Len)})
 	proposed, err := ProposeTransition(t.Context(), im, next, TransitionLimits{})
 	if err != nil {
 		t.Fatal("structurally valid CPUID proposal refused", err)

@@ -561,8 +561,32 @@ entry-to-cut transition MUST satisfy these obligations:
   entry state reaches that cut; cycles require a checked finite-progress argument
   or refusal. A numeric cut selects the first encounter with that address and
   requires one activation context in the stopped scope. Ambiguous contexts and
-  continuation to a later occurrence of the same numeric cut refuse; a future
-  explicit occurrence locator must retain the same complete-cut obligations.
+  continuation to a later occurrence of the same numeric cut refuse. An explicit
+  occurrence locator is distinct from a numeric first-hit cut and retains the
+  same complete-cut obligations.
+  An anchored locator binds the unexecuted boundary of an actual checked
+  predecessor and selects the first target-address encounter after that boundary
+  executes. Its authority retains the endpoint mode, anchor and resolved cut
+  occurrence. A fresh-root claim cannot assert an inherited anchor. The checker,
+  independently of discovery, requires the anchor to execute and every feasible
+  suffix encounter at the target to stop at the selected common cut, with one
+  activation and compatible frames. When target and anchor addresses agree, the
+  cut is a distinct later occurrence. Existing prefix occurrences retain their
+  dispositions even when their addresses equal the new target; an independently
+  excluded boundary does not become a cut encounter through address equality.
+  Matching occurrence coordinates from another proof supply no anchor authority.
+  A finite occurrence witness may establish progress when the checker validates
+  every actual successor and its activation transition, includes all admitted
+  initial states, and establishes a well-founded occurrence rank that strictly
+  decreases along every execution edge. Every terminal is the selected common cut
+  or has an independently checked false incoming condition. A supported transfer
+  deferred beyond a proposed unfolding remains a distinct residual-frontier
+  obligation, not an unsupported operation or a successful endpoint. A feasible
+  residual frontier refuses; the discovery bound supplies no execution premise.
+  Occurrence membership is exact and root-connected, while instruction-byte
+  occupancy remains image-wide: distinct occurrences cannot hide overlapping or
+  inconsistent decoding. Both conditional successor slots remain required even
+  when their decoded target addresses agree.
   A structurally decoded boundary without an admitted transfer may
   terminate discovery only when an independently checked proof establishes that
   its complete incoming execution condition is false for every admissible state.
@@ -655,6 +679,13 @@ entry-to-cut transition MUST satisfy these obligations:
   guard/value correlations; pointer, preservation and definedness claims must hold
   on every contributing path. Inactive outcome names cannot affect the filtered
   executed trace or the final state.
+  Repeated executions of the same instruction have distinct owned occurrence
+  identities. Instruction guards, accesses, primitive effects, abstractions and
+  boundaries identify those exact occurrences; equal addresses or activation
+  names cannot collapse them. Occurrence coordinates have meaning only within
+  their owning evidence. Call activation follows the actual invoking occurrence,
+  independently of loop progress; repeated calls at one address cannot share
+  an activation merely because their target and continuation addresses agree.
   Calls, pushes, pops, returns and explicit stack adjustments derive their exact
   stack-pointer, byte-memory, flag and register effects, including implicit return
   stores and loads. Adjusting the stack pointer grants no storage, initialization
@@ -694,9 +725,15 @@ entry-to-cut transition MUST satisfy these obligations:
   additional input can stand in for a checked primitive effect.
   The predecessor's cut must be a common boundary of every path being extended.
   Reconstructed prefix and suffix coverage exclude bypass, overlapping instruction
-  decoding and unaccounted re-entry into an executed prefix. Repeated execution of
-  the same instruction in distinct activations requires distinct checked dynamic
-  occurrences, including their primitive-outcome origins, or explicit refusal;
+  decoding and unaccounted re-entry into an executed prefix. Composition retains
+  the predecessor's exact occurrence identities, edges and exclusions; extending
+  its unexecuted cut cannot redirect an edge into an old executed occurrence.
+  An anchored extension inherits that exact boundary and current state; it cannot
+  leave the anchor unexecuted as a new cut or a successful unfolding frontier.
+  A fresh occurrence may execute previously covered bytes only through checked
+  transfers and progress evidence. Repeated execution of the same instruction,
+  within one activation or in distinct activations, requires distinct checked
+  dynamic occurrences, including their primitive-outcome origins, or refusal;
   a program-counter-only identity cannot collapse them. Active return contexts
   survive cuts and compose only through compatible joins; differing contexts
   must retain their path association or refuse, never select one silently.
@@ -779,6 +816,11 @@ conditional callee-return relation MUST establish these obligations:
   resource account. Source-level use additionally establishes the actual typed
   call, current represented state and corresponding dynamic effect occurrences;
   callee-local input or primitive-outcome names cannot silently become caller inputs.
+  Embedding callee occurrence evidence uses an injective, consistent mapping of
+  occurrences, edges, residual frontiers and activation ancestry under the actual
+  invoking call. The completed return consumes the exact retained return
+  occurrence and actual protected control word. Equal addresses do not authorize
+  borrowing another invocation's return or an earlier iteration's effect guard.
   This conditional fact grants no executable-root reachability, source-storage
   association, historical execution authority or ordinary runtime discharge.
 
@@ -1131,9 +1173,18 @@ contracts:
   proposal labels. This includes every backedge and the actual predecessor/value
   association of each phi, with path conditions and exceptional outcomes retained.
   Excluding an edge requires a checked argument. Loops and recursive contexts
-  require inductive justification at their boundaries, not finite unrolling or
-  mutually assumed summaries. The invariant at each claimed use entails the
-  claimed operand relation. Unsupported transfers, unclosed invariants, exhausted
+  require inductive justification at their boundaries, not finite unfolding alone
+  or mutually assumed summaries. A complete finite occurrence witness can supply
+  that justification only when independently checked typed transfers cover every
+  required edge and phi predecessor, all admitted initial states are included,
+  and every residual frontier is independently proved unreachable. At each static
+  boundary, the union of complete correlated entry relations for occurrences of
+  that boundary supplies its invariant; independent projections of their
+  components do not. A checked well-founded occurrence rank strictly decreasing
+  along every execution edge establishes finite progress, separately from those
+  invariants; the discovery bound is not an execution premise. The invariant at
+  each claimed use entails the claimed operand relation. Unsupported transfers,
+  unclosed invariants, exhausted
   bounds or cancellation yield no partial positive certificate.
 - **memory-and-callables** — The finite typed region model distinguishes selected
   globals, allocation sites with bounded context, closure environments, formal
@@ -1211,9 +1262,13 @@ equality of memory before and after execution.
   their uncertainty: treating them as scalar results cannot justify subsequent
   addressing, dispatch or heap stability. The decoded control-flow graph is
   covered under REQ-impl-native-entry; any proposed invariants include all admitted
-  entry states and are preserved on every edge, including backedges. Finite unrolling,
-  unclosed invariants, unsupported effects, exhausted bounds or cancellation
-  provide no accepted prefix of a frame theorem.
+  entry states and are preserved on every edge, including backedges. Finite
+  unfolding alone, unclosed invariants, unsupported effects, exhausted bounds or
+  cancellation provide no accepted prefix of a frame theorem.
+  Complete finite occurrence evidence may establish coverage and progress under
+  REQ-impl-native-transition only with all required transfers checked and every
+  residual frontier independently proved unreachable; no incomplete prefix
+  acquires frame authority through its discovery bound.
 - **calls-and-primitives** — Each call derives its frame by checked execution of
   the callee or composes a separately checked callee frame at the actual target,
   arguments, context and continuation under REQ-impl-callback-transfer and, when

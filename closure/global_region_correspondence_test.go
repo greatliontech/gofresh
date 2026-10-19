@@ -189,10 +189,11 @@ func pairedSteps(t testing.TB, f pairedNativeFixture, calls [3]*ssa.Call) []glob
 					expansions = append(expansions, candidate)
 				}
 			}
-			proposal, err := nativeproof.ProposeRegionTransition(t.Context(), f.image, f.entry, cut, nativeproof.TransitionLimits{}, expansions...)
+			proposal, err := nativeproof.ProposeRegionTransition(t.Context(), f.image, f.entry, cut, nativeproof.TransitionLimits{}, nativeproof.TransitionOptions{Expansions: expansions})
 			if err != nil {
 				t.Fatal(err)
 			}
+			proposal = pairedProposalIDs(t, proposal)
 			if j == 0 {
 				step.use = proposal
 			} else {
@@ -202,6 +203,31 @@ func pairedSteps(t testing.TB, f pairedNativeFixture, calls [3]*ssa.Call) []glob
 		steps = append(steps, step)
 	}
 	return steps
+}
+
+// These call-free acyclic fixtures construct independent, possibly invalid
+// continuation candidates before checking them. Unique PCs provide stable test
+// coordinates across their cuts; they are not the production occurrence identity
+// rule. Reject repetitions here rather than collapsing dynamic occurrences.
+func pairedProposalIDs(t testing.TB, p nativeproof.TransitionProposal) nativeproof.TransitionProposal {
+	t.Helper()
+	ids := make(map[nativeproof.TransitionOccurrenceID]nativeproof.TransitionOccurrenceID, len(p.Nodes))
+	seen := make(map[uint64]bool, len(p.Nodes))
+	for _, node := range p.Nodes {
+		if node.PC == 0 || seen[node.PC] {
+			t.Fatal("paired fixture requires unique nonzero instruction addresses")
+		}
+		seen[node.PC] = true
+		ids[node.ID] = nativeproof.TransitionOccurrenceID(node.PC)
+	}
+	p.Root = ids[p.Root]
+	for i := range p.Nodes {
+		p.Nodes[i].ID = ids[p.Nodes[i].ID]
+		for j, next := range p.Nodes[i].Successors {
+			p.Nodes[i].Successors[j] = ids[next]
+		}
+	}
+	return p
 }
 
 // This decoder locates candidate operand forms only. Its bytes are independently
@@ -267,7 +293,7 @@ func pairedOperandProof(t testing.TB, source computationSource, root *ssa.Functi
 	if err != nil {
 		t.Fatal(err)
 	}
-	native, err := nativeproof.CheckRegionTransition(t.Context(), fixture.image, fixture.entry, face, proposal, nativeproof.TransitionLimits{})
+	native, err := nativeproof.CheckRegionTransition(t.Context(), fixture.image, fixture.entry, face, pairedProposalIDs(t, proposal), nativeproof.TransitionLimits{})
 	if err != nil {
 		t.Fatal(err)
 	}

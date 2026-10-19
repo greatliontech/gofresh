@@ -137,11 +137,11 @@ func TestGlobalRegionCorrespondenceSelectedRuntimeArtifact(t *testing.T) {
 			prefixExpansions = append(prefixExpansions, e)
 		}
 	}
-	proposal, err := nativeproof.ProposeRegionTransition(t.Context(), image, fixture.entry, fixture.cut, nativeproof.TransitionLimits{}, prefixExpansions...)
+	proposal, err := nativeproof.ProposeRegionTransition(t.Context(), image, fixture.entry, fixture.cut, nativeproof.TransitionLimits{}, nativeproof.TransitionOptions{Expansions: prefixExpansions})
 	if err != nil {
 		t.Fatal(err)
 	}
-	native, err := nativeproof.CheckRegionTransition(t.Context(), image, fixture.entry, fixture.face, proposal, nativeproof.TransitionLimits{})
+	native, err := nativeproof.CheckRegionTransition(t.Context(), image, fixture.entry, fixture.face, pairedProposalIDs(t, proposal), nativeproof.TransitionLimits{})
 	if err != nil {
 		t.Fatal(err)
 	}

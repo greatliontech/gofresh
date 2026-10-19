@@ -136,7 +136,7 @@ func checkOptimizedCallTLS(t testing.TB, im *Image, face TransitionInterface, pr
 		face.Origin.Min = max(face.Origin.Min, 96)
 	}
 	p := callInventory(t, x, end)
-	proposed, err := ProposeTransition(t.Context(), im, p.Cut, TransitionLimits{}, p.Expansions...)
+	proposed, err := ProposeTransition(t.Context(), im, p.Cut, TransitionLimits{}, transitionTestOptions(p))
 	if err != nil {
 		t.Fatal(err)
 	}

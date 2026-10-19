@@ -24,12 +24,17 @@ type transitionChecker struct {
 	liveStateBytes, stateBytes int
 	exclusions                 []br.Witness
 	justifications             []br.Witness
-	activation                 string
-	expansions                 []TransitionExpansion
+	activation                 TransitionActivationID
+	occurrence                 TransitionOccurrenceID
+	activations                map[TransitionActivationID]transitionActivation
+	retainedPrefix             map[TransitionOccurrenceID]bool
+	endpoint                   TransitionEndpoint
+	witness                    TransitionProposal
 	frames                     []TransitionFrame
 	thread                     TransitionThread
 	vectors                    TransitionVectors
 	completingReturn, returned bool
+	returnAnchor               TransitionOccurrenceID
 }
 
 func transitionLimits(l TransitionLimits) (TransitionLimits, error) {
@@ -90,29 +95,29 @@ func newTransitionChecker(ctx context.Context, im *Image, root transitionRoot, l
 // stopped graph. Unselected TransitionExpansionRequired forms remain structural terminals,
 // with no execution or successor inspection. Expansion choices select search
 // only; their use and actual supported operand forms are checked later.
-func ProposeTransition(ctx context.Context, im *Image, cut uint64, limits TransitionLimits, expansions ...TransitionExpansion) (TransitionProposal, error) {
+func ProposeTransition(ctx context.Context, im *Image, cut uint64, limits TransitionLimits, options ...TransitionOptions) (TransitionProposal, error) {
 	im = im.snapshot()
 	var entry uint64
 	if im != nil {
 		entry = im.entry
 	}
-	return proposeRootedTransition(ctx, im, transitionRoot{entry: entry}, cut, limits, expansions)
+	return proposeRootedTransition(ctx, im, transitionRoot{entry: entry}, cut, limits, options)
 }
 
 // ProposeRegionTransition discovers candidate coverage from an explicitly
 // selected conditional entry in the original image. It establishes no reachability
 // from the ELF entry. CheckRegionTransition independently binds entry and bytes.
-func ProposeRegionTransition(ctx context.Context, im *Image, entry, cut uint64, limits TransitionLimits, expansions ...TransitionExpansion) (TransitionProposal, error) {
-	return proposeRootedTransition(ctx, im.snapshot(), transitionRoot{entry: entry, region: true}, cut, limits, expansions)
+func ProposeRegionTransition(ctx context.Context, im *Image, entry, cut uint64, limits TransitionLimits, options ...TransitionOptions) (TransitionProposal, error) {
+	return proposeRootedTransition(ctx, im.snapshot(), transitionRoot{entry: entry, region: true}, cut, limits, options)
 }
 
-func proposeRootedTransition(ctx context.Context, im *Image, root transitionRoot, cut uint64, limits TransitionLimits, expansions []TransitionExpansion) (TransitionProposal, error) {
+func proposeRootedTransition(ctx context.Context, im *Image, root transitionRoot, cut uint64, limits TransitionLimits, options []TransitionOptions) (TransitionProposal, error) {
 	l, err := transitionLimits(limits)
 	if err != nil {
 		return TransitionProposal{}, refuse(0, "transition-budget", err.Error())
 	}
 	work := 0
-	p, err := captureTransitionProposal(TransitionProposal{Expansions: expansions}, l, &work)
+	o, err := captureTransitionOptions(options, l, &work)
 	if err != nil {
 		return TransitionProposal{}, err
 	}
@@ -120,26 +125,7 @@ func proposeRootedTransition(ctx context.Context, im *Image, root transitionRoot
 	if err != nil {
 		return TransitionProposal{}, err
 	}
-	m.expansions = p.Expansions
-	g, err := m.graph(cut)
-	if err != nil {
-		return TransitionProposal{}, err
-	}
-	p.ImageDigest, p.Entry, p.Cut = im.digest, root.entry, cut
-	for _, ins := range g.nodes {
-		if !m.tick() {
-			return TransitionProposal{}, m.err
-		}
-		n := Node{PC: ins.pc, Size: ins.size, Context: ins.context}
-		for _, next := range ins.next[:ins.count] {
-			n.Successors = append(n.Successors, g.nodes[next].pc)
-		}
-		p.Nodes = append(p.Nodes, n)
-	}
-	if !m.tick() {
-		return TransitionProposal{}, m.err
-	}
-	return p, nil
+	return m.discoverTransition(cut, o, nil, 0)
 }
 
 // CheckTransition derives a universally quantified conditional ELF-entry-to-cut
@@ -166,6 +152,9 @@ func CheckRegionTransition(ctx context.Context, im *Image, entry uint64, face Tr
 }
 
 func checkRootedTransition(ctx context.Context, im *Image, root transitionRoot, face TransitionInterface, proposal TransitionProposal, limits TransitionLimits) (TransitionCertificate, error) {
+	if proposal.After != 0 {
+		return TransitionCertificate{}, refuse(proposal.Cut, "transition-anchor", "fresh root cannot inherit an anchor")
+	}
 	l, err := transitionLimits(limits)
 	if err != nil {
 		return TransitionCertificate{}, refuse(0, "transition-budget", err.Error())
@@ -206,20 +195,16 @@ func checkRootedTransition(ctx context.Context, im *Image, root transitionRoot, 
 		return TransitionCertificate{}, refuse(root.entry, "transition-proposal", "image or independently selected entry differs")
 	}
 	m.face = face
-	m.expansions = proposal.Expansions
-	m.bound = TransitionBound{ImageDigest: im.digest, Rules: TransitionRules, Entry: root.entry, ConditionalRegion: root.region, Interface: face, Expansions: append([]TransitionExpansion(nil), proposal.Expansions...)}
+	m.witness = proposal
+	m.bound = TransitionBound{ImageDigest: im.digest, Rules: TransitionRules, Entry: root.entry, ConditionalRegion: root.region, Interface: face}
 	if err := m.validate(); err != nil {
 		return TransitionCertificate{}, err
 	}
-	g, err := m.graph(proposal.Cut)
+	g, err := m.occurrenceGraph(proposal)
 	if err != nil {
 		return TransitionCertificate{}, err
 	}
-	bounded := &relationContext{Context: ctx, meter: m.valueBuilder}
 	if err := m.validateReturnTargetGraph(g); err != nil {
-		return TransitionCertificate{}, err
-	}
-	if err := checkContextInventory(bounded, g, proposal.Nodes, "transition-proposal", true); err != nil {
 		return TransitionCertificate{}, err
 	}
 	if err := m.initial(); err != nil {
@@ -256,35 +241,43 @@ func CheckTransitionContinuation(ctx context.Context, predecessor TransitionCert
 	if proposal.Entry != prior.bound.Entry || proposal.ImageDigest != prior.bound.ImageDigest {
 		return TransitionCertificate{}, refuse(proposal.Entry, "transition-proposal", "image or retained root entry differs")
 	}
-	c, err := m.continueTransition(prior, proposal.Cut, proposal.Expansions, &proposal)
+	c, err := m.continueTransition(prior, proposal)
 	return c, err
 }
 
-// continueTransition is the one continuation driver for proposed inventories and
-// actual-call replay. A nil proposal requests reconstruction directly from owned
-// bytes; a supplied inventory is independently checked against that same graph.
-// Both paths retain the same advancing-cut, coverage, state and resource rules.
-func (m *transitionChecker) continueTransition(prior checkedTransition, cut uint64, expansions []TransitionExpansion, proposal *TransitionProposal) (TransitionCertificate, error) {
-	m.expansions = expansions
+// Numeric continuation advances beyond every previously executed address.
+// Anchored continuation and actual-call application instead retain the explicitly
+// selected anchor, with the same exact-prefix, transfer and resource checks.
+func (m *transitionChecker) advancingCut(prior checkedTransition, cut uint64) error {
 	if cut == prior.bound.Boundary.PC {
-		return TransitionCertificate{}, refuse(cut, "transition-continuation", "cut must advance beyond predecessor")
+		return refuse(cut, "transition-continuation", "cut must advance beyond predecessor")
 	}
 	for _, span := range prior.bound.Instructions {
 		if !m.tick() {
-			return TransitionCertificate{}, m.err
+			return m.err
 		}
 		if cut >= span.Start && cut < span.End {
-			return TransitionCertificate{}, refuse(cut, "transition-continuation", "cut intersects executed predecessor")
+			return refuse(cut, "transition-continuation", "cut intersects executed predecessor")
 		}
 	}
-	g, err := m.graph(cut)
-	if err != nil {
-		return TransitionCertificate{}, err
-	}
-	if proposal != nil {
-		if err := checkContextInventory(&relationContext{Context: m.ctx, meter: m.valueBuilder}, g, proposal.Nodes, "transition-proposal", true); err != nil {
+	return nil
+}
+
+func (m *transitionChecker) continueTransition(prior checkedTransition, proposal TransitionProposal) (TransitionCertificate, error) {
+	if proposal.After == 0 {
+		if err := m.advancingCut(prior, proposal.Cut); err != nil {
 			return TransitionCertificate{}, err
 		}
+	} else if proposal.After != prior.bound.Boundary.ID && (m.returnAnchor == 0 || proposal.After != m.returnAnchor) {
+		return TransitionCertificate{}, refuse(proposal.Cut, "transition-anchor", "anchor is not the checked predecessor boundary")
+	}
+	m.witness = proposal
+	if err := m.retainPrefix(prior); err != nil {
+		return TransitionCertificate{}, err
+	}
+	g, err := m.occurrenceGraph(proposal)
+	if err != nil {
+		return TransitionCertificate{}, err
 	}
 	start, err := m.continuationStart(g, prior)
 	if err != nil {
@@ -296,7 +289,6 @@ func (m *transitionChecker) continueTransition(prior checkedTransition, cut uint
 	if err := m.validateReturnTargetGraph(g); err != nil {
 		return TransitionCertificate{}, err
 	}
-	m.bound.Expansions = append([]TransitionExpansion(nil), expansions...)
 	return m.finish(g, start)
 }
 
@@ -313,9 +305,9 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 	for _, idx := range g.order[start:] {
 		ins := g.nodes[idx]
 		m.pc = ins.pc
-		m.activation = ins.context
+		m.activation, m.occurrence = ins.activation, ins.id
 		if !m.tick() {
-			return TransitionCertificate{}, g.failureAt(ins.point(), m.err)
+			return TransitionCertificate{}, g.failureInstruction(ins, m.err)
 		}
 		s := states[idx]
 		states[idx] = nil
@@ -326,26 +318,29 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 		if ins.boundary == boundaryCut {
 			i, bytes, err := decodeBytes(m.im, ins.pc)
 			if err != nil {
-				return TransitionCertificate{}, g.failureAt(ins.point(), err)
+				return TransitionCertificate{}, g.failureInstruction(ins, err)
 			}
-			m.bound.Boundary = CutBoundary{PC: ins.pc, Context: ins.context, Instruction: i, Bytes: append([]byte(nil), bytes...)}
+			m.bound.Boundary = CutBoundary{ID: ins.id, PC: ins.pc, Context: ins.activation, Instruction: i, Bytes: append([]byte(nil), bytes...)}
 			m.bound.CutGuard = m.state.path
 			cutState = m.takeState()
 			continue
 		}
-		if ins.boundary == boundaryUnsupported {
+		if ins.boundary == boundaryUnsupported || ins.boundary == boundaryFrontier {
 			w, err := m.proveFalseGuard(m.state.path)
 			if err != nil {
-				return TransitionCertificate{}, g.failureAt(ins.point(), err)
+				if r, ok := err.(*Refusal); ok && ins.boundary == boundaryFrontier && r.Premise == "transition-guard" {
+					err = refuse(ins.pc, "transition-frontier", "residual supported transfer has no checked false incoming guard")
+				}
+				return TransitionCertificate{}, g.failureInstruction(ins, err)
 			}
 			i, raw, err := decodeBytes(m.im, ins.pc)
 			if err != nil {
-				return TransitionCertificate{}, g.failureAt(ins.point(), err)
+				return TransitionCertificate{}, g.failureInstruction(ins, err)
 			}
 			if err := m.reserveExclusion(); err != nil {
 				return TransitionCertificate{}, err
 			}
-			b := ExcludedBoundary{CutBoundary{PC: ins.pc, Context: ins.context, Instruction: i, Bytes: append([]byte(nil), raw...)}, m.state.path}
+			b := ExcludedBoundary{CutBoundary: CutBoundary{ID: ins.id, PC: ins.pc, Context: ins.activation, Instruction: i, Bytes: append([]byte(nil), raw...)}, Guard: m.state.path, Frontier: ins.boundary == boundaryFrontier}
 			m.bound.ExcludedBoundaries = append(m.bound.ExcludedBoundaries, b)
 			m.exclusions = append(m.exclusions, w)
 			m.memory = nil
@@ -357,10 +352,13 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 		// transfers even if a stronger solver might prove them impossible.
 		if !literalBool(guard, 0) {
 			if err := m.step(ins.inst, ins.size); err != nil {
-				return TransitionCertificate{}, g.failureAt(ins.point(), err)
+				return TransitionCertificate{}, g.failureInstruction(ins, err)
 			}
 		}
-		m.bound.Instructions = append(m.bound.Instructions, GuardedInstruction{Span: Span{ins.pc, ins.pc + uint64(ins.size)}, Guard: guard, Context: ins.context})
+		m.bound.Instructions = append(m.bound.Instructions, GuardedInstruction{ID: ins.id, Span: Span{ins.pc, ins.pc + uint64(ins.size)}, Guard: guard, Context: ins.activation})
+		if m.witness.Nodes[idx].Expanded {
+			m.bound.Expansions = append(m.bound.Expansions, TransitionExpansion{ID: ins.id, PC: ins.pc, Context: ins.activation})
+		}
 		s = m.takeState()
 		var predicate br.Term
 		if ins.count == 2 {
@@ -384,14 +382,16 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 			m.mergeState(&states[next], incoming)
 		}
 		if m.err != nil {
-			return TransitionCertificate{}, g.failureAt(ins.point(), m.err)
+			return TransitionCertificate{}, g.failureInstruction(ins, m.err)
 		}
 	}
 	if cutState == nil {
 		return TransitionCertificate{}, refuse(m.pc, "transition-cut", "missing cut state")
 	}
 	m.installState(cutState)
+	m.bound.Endpoint = m.endpoint
 	m.pc, m.activation = m.bound.Boundary.PC, m.bound.Boundary.Context
+	m.occurrence = m.bound.Boundary.ID
 	m.bound.Thread = m.thread
 	m.bound.Vectors = m.vectors
 	for range m.frames {
@@ -408,7 +408,7 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 	}
 	m.bound.Memory = m.projectMemory()
 	if !m.tick() {
-		return TransitionCertificate{}, g.failureAt(programPoint{m.pc, m.activation}, m.err)
+		return TransitionCertificate{}, m.err
 	}
 	// Complete-cut induction, rather than propositional normalization: the root
 	// condition is EntryPredicate (or the predecessor's exact proved-total cut condition).
@@ -417,7 +417,7 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 	// once. All terminals other than this cut have checked false incoming guards.
 	// Thus every admitted valuation contributes to this exact CutGuard. No graph
 	// closure assertion substitutes a literal true or discards a transfer.
-	return TransitionCertificate{&checkedTransition{image: m.im, bound: m.bound, limits: m.limits, work: m.work, flags: m.state.flags, exclusions: m.exclusions, justifications: m.justifications, coverageGuard: m.bound.CutGuard}}, nil
+	return TransitionCertificate{&checkedTransition{witness: m.witness, image: m.im, bound: m.bound, limits: m.limits, work: m.work, flags: m.state.flags, exclusions: m.exclusions, justifications: m.justifications, coverageGuard: m.bound.CutGuard}}, nil
 }
 
 func (m *transitionChecker) projectMemory() []TransitionByte {
@@ -641,7 +641,7 @@ func (m *transitionChecker) recordAccess(off TransitionLocation, width int, kind
 	if !m.tick() {
 		return
 	}
-	m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{PC: m.pc, Context: m.activation, Kind: kind, Bytes: RelativeSpan{off.Offset, off.Offset + int64(width)}, Image: off.Image, Value: value})
+	m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{ID: m.occurrence, PC: m.pc, Context: m.activation, Kind: kind, Bytes: RelativeSpan{off.Offset, off.Offset + int64(width)}, Image: off.Image, Value: value})
 }
 
 func (m *transitionChecker) load(off TransitionLocation, width int, kind AccessKind) TransitionValue {

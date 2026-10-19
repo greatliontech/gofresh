@@ -132,7 +132,7 @@ func TestGlobalOperandCorrespondenceSelectedRuntimeArtifact(t *testing.T) {
 		t.Fatal("bounded candidate discovery did not locate the operand region")
 	}
 	face := globalNativeFace([]nativeproof.Span{{Start: a[0], End: a[0] + 8}, {Start: a[1], End: a[1] + 8}})
-	p, err := nativeproof.ProposeRegionTransition(t.Context(), im, entry, cut, nativeproof.TransitionLimits{}, expansions...)
+	p, err := nativeproof.ProposeRegionTransition(t.Context(), im, entry, cut, nativeproof.TransitionLimits{}, nativeproof.TransitionOptions{Expansions: expansions})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,6 +172,10 @@ func TestGlobalOperandCorrespondenceSelectedRuntimeArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	prior, err := nativeproof.CheckRegionTransition(t.Context(), im, entry, face, p0, nativeproof.TransitionLimits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err = nativeproof.ProposeTransitionContinuation(t.Context(), prior, cut, nativeproof.TransitionOptions{Expansions: expansions})
 	if err != nil {
 		t.Fatal(err)
 	}

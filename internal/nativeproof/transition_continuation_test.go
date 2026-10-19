@@ -12,7 +12,7 @@ import (
 	br "github.com/greatliontech/gofresh/internal/bitrelation"
 )
 
-func continuationProposal(t testing.TB, im *Image, cut uint64) TransitionProposal {
+func rootTransitionProposal(t testing.TB, im *Image, cut uint64) TransitionProposal {
 	t.Helper()
 	p, err := ProposeTransition(t.Context(), im, cut, TransitionLimits{})
 	if err != nil {
@@ -21,9 +21,18 @@ func continuationProposal(t testing.TB, im *Image, cut uint64) TransitionProposa
 	return p
 }
 
+func continuationProposal(t testing.TB, prior TransitionCertificate, cut uint64, options ...TransitionOptions) TransitionProposal {
+	t.Helper()
+	p, err := ProposeTransitionContinuation(t.Context(), prior, cut, options...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func continuationRoot(t testing.TB, im *Image, cut uint64, face TransitionInterface, limits TransitionLimits) TransitionCertificate {
 	t.Helper()
-	c, err := CheckTransition(t.Context(), im, face, continuationProposal(t, im, cut), limits)
+	c, err := CheckTransition(t.Context(), im, face, rootTransitionProposal(t, im, cut), limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +56,7 @@ func TestTransitionContinuationState(t *testing.T) {
 			oldCut := testEntry + uint64(len(hexBytes(t, entryPrefix)))
 			root := continuationRoot(t, im, oldCut, f, TransitionLimits{})
 			before, _ := root.Bound()
-			c, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, im, cut))
+			c, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, root, cut))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -81,7 +90,7 @@ func TestTransitionContinuationMOV32AndFlags(t *testing.T) {
 				im, cut := transitionFixture(t, prefix+code)
 				oldCut := testEntry + uint64(len(hexBytes(t, prefix)))
 				root := continuationRoot(t, im, oldCut, transitionFace(), TransitionLimits{})
-				p, err := ProposeTransition(t.Context(), im, cut, TransitionLimits{})
+				p, err := ProposeTransitionContinuation(t.Context(), root, cut)
 				if err != nil {
 					t.Fatalf("proposal %s %s: %v", prefix, code, err)
 				}
@@ -128,7 +137,7 @@ func TestTransitionContinuationMOV32AndFlags(t *testing.T) {
 func TestTransitionContinuationRefusals(t *testing.T) {
 	im, cut := transitionFixture(t, "eb0248894889e04889c34889d9")
 	root := continuationRoot(t, im, testEntry+7, transitionFace(), TransitionLimits{})
-	p := continuationProposal(t, im, cut)
+	p := continuationProposal(t, root, cut)
 	for _, target := range []uint64{testEntry, testEntry + 1, testEntry + 2, testEntry + 4, testEntry + 5, testEntry + 7, cut + 1, cut + 5} {
 		q := p
 		q.Cut = target
@@ -141,11 +150,16 @@ func TestTransitionContinuationRefusals(t *testing.T) {
 		func(p *TransitionProposal) { p.Nodes = p.Nodes[1:] },
 		func(p *TransitionProposal) { p.Nodes[0].PC++ },
 		func(p *TransitionProposal) { p.Nodes[0].Size++ },
-		func(p *TransitionProposal) { p.Nodes[0].Successors = []uint64{cut} },
-		func(p *TransitionProposal) { p.Nodes[0].Successors = []uint64{cut, cut} },
+		func(p *TransitionProposal) {
+			p.Nodes[0].Successors = []TransitionOccurrenceID{transitionTestID(t, *p, cut, 0)}
+		},
+		func(p *TransitionProposal) {
+			id := transitionTestID(t, *p, cut, 0)
+			p.Nodes[0].Successors = []TransitionOccurrenceID{id, id}
+		},
 	} {
 		q := p
-		q.Nodes = append([]Node(nil), p.Nodes...)
+		q.Nodes = append([]TransitionNode(nil), p.Nodes...)
 		change(&q)
 		c, err := CheckTransitionContinuation(t.Context(), root, q)
 		transitionRefused(t, c, err)
@@ -163,8 +177,11 @@ func TestTransitionContinuationRefusals(t *testing.T) {
 	for _, code := range []string{"4889e0ebfb", "4889e0ebfc", "4889e0ebfd", "4889e00f05", "4889e0488d0440"} {
 		im, cut := transitionFixture(t, code)
 		root := continuationRoot(t, im, testEntry+3, transitionFace(), TransitionLimits{})
-		p := TransitionProposal{ImageDigest: im.digest, Entry: im.entry, Cut: cut}
-		c, err := CheckTransitionContinuation(t.Context(), root, p)
+		p, err := ProposeTransitionContinuation(t.Context(), root, cut)
+		var c TransitionCertificate
+		if err == nil {
+			c, err = CheckTransitionContinuation(t.Context(), root, p)
+		}
 		transitionRefused(t, c, err)
 		var r *Refusal
 		if !errors.As(err, &r) || r.Premise == "transition-proposal" {
@@ -198,7 +215,7 @@ func TestTransitionContinuationPremisesCannotStrengthen(t *testing.T) {
 		projection, _ := root.Bound()
 		projection.Interface.Origin.Modulus = 16
 		projection.Interface.Regions = []RelativeRegion{{RelativeSpan{-48, 8}, true, true}}
-		c, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, im, cut))
+		c, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, root, cut))
 		transitionRefused(t, c, err)
 		var r *Refusal
 		if !errors.As(err, &r) || r.Premise != tt.premise {
@@ -210,7 +227,7 @@ func TestTransitionContinuationPremisesCannotStrengthen(t *testing.T) {
 func TestTransitionContinuationOwnershipCancellationAndSiblings(t *testing.T) {
 	im, cut := transitionFixture(t, entryPrefix+"bd00000000")
 	root := continuationRoot(t, im, cut-5, transitionFace(), TransitionLimits{})
-	p := continuationProposal(t, im, cut)
+	p := continuationProposal(t, root, cut)
 	count := &imageCallbackContext{Context: t.Context()}
 	first, err := CheckTransitionContinuation(count, root, p)
 	if err != nil {
@@ -219,9 +236,9 @@ func TestTransitionContinuationOwnershipCancellationAndSiblings(t *testing.T) {
 	before, _ := root.Bound()
 	for at := 1; at <= count.calls; at++ {
 		q := p
-		q.Nodes = append([]Node(nil), p.Nodes...)
+		q.Nodes = append([]TransitionNode(nil), p.Nodes...)
 		for j := range q.Nodes {
-			q.Nodes[j].Successors = append([]uint64(nil), q.Nodes[j].Successors...)
+			q.Nodes[j].Successors = append([]TransitionOccurrenceID(nil), q.Nodes[j].Successors...)
 		}
 		local := root
 		projection, _ := local.Bound()
@@ -272,6 +289,7 @@ func TestTransitionContinuationOwnershipCancellationAndSiblings(t *testing.T) {
 	want := map[string]reflect.Type{"image": reflect.TypeFor[*Image](), "bound": reflect.TypeFor[TransitionBound](), "limits": reflect.TypeFor[TransitionLimits](), "work": reflect.TypeFor[int](), "flags": reflect.TypeFor[[flagCount]br.Term]()}
 	want["exclusions"], want["coverageGuard"] = reflect.TypeFor[[]br.Witness](), reflect.TypeFor[br.Term]()
 	want["justifications"] = reflect.TypeFor[[]br.Witness]()
+	want["witness"] = reflect.TypeFor[TransitionProposal]()
 	for j := 0; j < typ.NumField(); j++ {
 		f := typ.Field(j)
 		if want[f.Name] != f.Type {
@@ -286,17 +304,19 @@ func TestTransitionContinuationCumulativeBudgets(t *testing.T) {
 	face.Words = nil
 	im, cut := transitionFixture(t, strings.Repeat("4883e801", 6))
 	oldCut := testEntry + 4
+	proposalRoot := continuationRoot(t, im, oldCut, face, TransitionLimits{})
+	fullProposal := continuationProposal(t, proposalRoot, cut)
 	for _, limits := range []TransitionLimits{
 		{RelationLimits: RelationLimits{Instructions: 4}},
 	} {
 		root := continuationRoot(t, im, oldCut, face, limits)
-		c, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, im, cut))
+		c, err := CheckTransitionContinuation(t.Context(), root, fullProposal)
 		transitionRefused(t, c, err)
 	}
 	// Three prior SUBs fit depth five (including ZF); one more exceeds it.
 	// Resetting imported nodes to depth one would incorrectly accept this suffix.
 	deep := continuationRoot(t, im, testEntry+12, face, TransitionLimits{RelationLimits: RelationLimits{Depth: 5}})
-	c, err := CheckTransitionContinuation(t.Context(), deep, continuationProposal(t, im, testEntry+16))
+	c, err := CheckTransitionContinuation(t.Context(), deep, continuationProposal(t, deep, testEntry+16))
 	transitionRefused(t, c, err)
 	// Find the actual retained union, then leave enough capacity for either the
 	// imported DAG or the new arena alone, but not for their union.
@@ -310,22 +330,24 @@ func TestTransitionContinuationCumulativeBudgets(t *testing.T) {
 	}
 	cap := len(m.depth) + 3 // root construction also allocated three now-dead initial predicates
 	root = continuationRoot(t, im, oldCut, face, TransitionLimits{RelationLimits: RelationLimits{Nodes: cap}})
-	c, err = CheckTransitionContinuation(t.Context(), root, continuationProposal(t, im, oldCut+4))
+	c, err = CheckTransitionContinuation(t.Context(), root, continuationProposal(t, root, oldCut+4))
 	transitionRefused(t, c, err)
 	// Root and each one-instruction suffix are small; all construction and full
 	// graph checks still accumulate, including prior continuation construction.
 	root = continuationRoot(t, im, oldCut, face, TransitionLimits{})
-	second, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, im, oldCut+4))
+	secondProposal := continuationProposal(t, root, oldCut+4)
+	second, err := CheckTransitionContinuation(t.Context(), root, secondProposal)
 	if err != nil {
 		t.Fatal(err)
 	}
 	limit := second.checked.work + 1
+	thirdProposal := continuationProposal(t, second, oldCut+8)
 	bounded := continuationRoot(t, im, oldCut, face, TransitionLimits{RelationLimits: RelationLimits{Work: limit}})
-	second, err = CheckTransitionContinuation(t.Context(), bounded, continuationProposal(t, im, oldCut+4))
+	second, err = CheckTransitionContinuation(t.Context(), bounded, secondProposal)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err = CheckTransitionContinuation(t.Context(), second, continuationProposal(t, im, oldCut+8))
+	c, err = CheckTransitionContinuation(t.Context(), second, thirdProposal)
 	transitionRefused(t, c, err)
 	if root.checked.work >= limit || second.checked.work >= limit {
 		t.Fatal("control did not isolate cumulative exhaustion")
@@ -336,7 +358,8 @@ func TestTransitionContinuationCumulativeBudgets(t *testing.T) {
 	face.Envelope = RelativeSpan{-48, 2048}
 	face.Origin.Max = 1<<47 - 4096
 	root = continuationRoot(t, im, oldCut, face, TransitionLimits{})
-	large, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, im, oldCut+4))
+	largeProposal := continuationProposal(t, root, oldCut+4)
+	large, err := CheckTransitionContinuation(t.Context(), root, largeProposal)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +367,7 @@ func TestTransitionContinuationCumulativeBudgets(t *testing.T) {
 		t.Fatal("memory construction escaped work accounting")
 	}
 	bounded = continuationRoot(t, im, oldCut, face, TransitionLimits{RelationLimits: RelationLimits{Work: root.checked.work + 2048}})
-	c, err = CheckTransitionContinuation(t.Context(), bounded, continuationProposal(t, im, oldCut+4))
+	c, err = CheckTransitionContinuation(t.Context(), bounded, largeProposal)
 	transitionRefused(t, c, err)
 }
 
@@ -358,7 +381,7 @@ func TestTransitionContinuationSignedDisplacement(t *testing.T) {
 	f.Regions = []RelativeRegion{{RelativeSpan{1<<32 - 8, 1 << 32}, true, false}}
 	f.Words = nil
 	root := continuationRoot(t, im, testEntry+3, f, TransitionLimits{})
-	c, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, im, cut))
+	c, err := CheckTransitionContinuation(t.Context(), root, continuationProposal(t, root, cut))
 	transitionRefused(t, c, err)
 	var r *Refusal
 	if !errors.As(err, &r) || r.Premise != "transition-permission" {
@@ -367,7 +390,7 @@ func TestTransitionContinuationSignedDisplacement(t *testing.T) {
 	// With the actual negative extent admitted, the same selected bytes succeed.
 	f.Regions[0].Bytes = RelativeSpan{-8, 0}
 	root = continuationRoot(t, im, testEntry+3, f, TransitionLimits{})
-	c, err = CheckTransitionContinuation(t.Context(), root, continuationProposal(t, im, cut))
+	c, err = CheckTransitionContinuation(t.Context(), root, continuationProposal(t, root, cut))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +414,7 @@ func TestTransitionContinuationRetainedExpressionUnion(t *testing.T) {
 	}
 	im, cut := transitionFixture(t, code+"bd01000000")
 	root := continuationRoot(t, im, cut-5, f, TransitionLimits{})
-	assertTransitionRetainedExpressionUnion(t, root, continuationProposal(t, im, cut))
+	assertTransitionRetainedExpressionUnion(t, root, continuationProposal(t, root, cut))
 }
 
 // Both stack-only and mixed image/stack populations use this complete union

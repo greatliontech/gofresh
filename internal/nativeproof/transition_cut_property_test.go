@@ -34,12 +34,12 @@ func cutPropertyImage(t testing.TB, window, artifact []byte, moved bool) *Image 
 
 // This inventory is constructed from fixture layout, never from ProposeTransition.
 func cutPropertyProposal(im *Image, size int, moved bool) TransitionProposal {
-	p := TransitionProposal{ImageDigest: im.digest, Entry: testEntry, Cut: testEntry}
+	p := TransitionProposal{ImageDigest: im.digest, Entry: testEntry, Cut: testEntry, Root: TransitionOccurrenceID(testEntry)}
 	if moved {
 		p.Cut += 3
-		p.Nodes = append(p.Nodes, Node{PC: testEntry, Size: 3, Successors: []uint64{p.Cut}})
+		p.Nodes = append(p.Nodes, TransitionNode{ID: TransitionOccurrenceID(testEntry), PC: testEntry, Size: 3, Successors: []TransitionOccurrenceID{TransitionOccurrenceID(p.Cut)}})
 	}
-	p.Nodes = append(p.Nodes, Node{PC: p.Cut, Size: uint8(size)})
+	p.Nodes = append(p.Nodes, TransitionNode{ID: TransitionOccurrenceID(p.Cut), PC: p.Cut, Size: uint8(size)})
 	return p
 }
 
@@ -245,7 +245,7 @@ func FuzzTransitionCutBinding(f *testing.F) {
 			case 2:
 				p.Nodes[last].PC += 1 + uint64(perturb)
 			case 3:
-				p.Nodes[last].Successors = []uint64{p.Cut + uint64(size)}
+				p.Nodes[last].Successors = []TransitionOccurrenceID{TransitionOccurrenceID(p.Cut + uint64(size))}
 			case 4:
 				p.ImageDigest[int(perturb)%32] ^= 1
 			case 5:
