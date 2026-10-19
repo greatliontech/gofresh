@@ -498,6 +498,9 @@
                           CI, installation and reader restart at 5.2d/5.2e; development
                           qualification is not released-consumer acceptance. Separate
                           repository-analyzer work remains in its existing fleet slot.
+                          Deliver the tooling features through the queued breaking
+                          changes and normal releases. Cerebro's owner retains
+                          application E2E validation; it is not a tooling delivery gate.
                         - [ ] 5.1w.2b.3b.2a.2.2.2.2.10 Complete conditional
                           testAtomic64 correspondence through remaining Load64,
                           Store64, Xadd64 and Xchg64 operations and its actual
