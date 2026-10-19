@@ -1170,7 +1170,7 @@ func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, 
 		// cores, memory, kernel) cannot hot-change under a running test
 		// process — the projection equality at revalidation IS their
 		// binding (REQ-inputs-machine-identity).
-		if id.Kind == pathAbs && machineFactIdentities[id.Path] {
+		if machineProjected(id) {
 			continue
 		}
 		// Existence-bound identities - external directories and absent
@@ -2323,6 +2323,10 @@ var machineFactIdentities = func() map[string]bool {
 	return m
 }()
 
+// machineProjected is the value-kind decision shared by eligibility, bracket
+// admission and hashing; the projection's source census stays with its owner.
+func machineProjected(id pathID) bool { return id.Kind == pathAbs && machineFactIdentities[id.Path] }
+
 // currentMachineFacts is the projection source, a variable so the
 // ungatherable arm is testable; production always points at the guard.
 var currentMachineFacts = guard.CurrentMachineFacts
@@ -2345,7 +2349,7 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 	if err := ctx.Err(); err != nil {
 		return false, "", err
 	}
-	if id.Kind == pathAbs && machineFactIdentities[id.Path] {
+	if machineProjected(id) {
 		facts, err := currentMachineFacts()
 		if err != nil {
 			fprintf(h, "path %s %s machine-unhashable\n", id.Kind, id.Path)

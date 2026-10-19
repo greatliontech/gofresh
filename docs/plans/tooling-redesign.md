@@ -179,8 +179,8 @@
     guards; distinguish expected incompatibility from a demonstrated defect.
   - [ ] 5.1w Replace toolchain-variation approval with generic implementation
     verification before resuming 5.2d/5.2e or releasing migrated consumers.
-    Follow this remaining execution order: derive and integrate the Cerebro
-    capabilities at 5.1w.2b.3b.2a.2.2.2.2.9a and .9b; resume .10 and complete
+    Follow this remaining execution order: complete the derived Cerebro consumer
+    integration at 5.1w.2b.3b.2a.2.2.2.2.9b; resume .10 and complete
     required bootstrap and compiler
     correspondence; integrate useful stock/custom production reuse; remove the
     approval registry and release Gofresh at 5.1w.7; finish Stipulator's
@@ -457,8 +457,9 @@
                           not compiler-internal recognition or out-of-line link
                           inclusion; retain omitted prologue, higher-root coverage,
                           source-state handoff and runtime applicability obligations.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.9a Derive Cerebro's
-                          cross-tool requirements from its actual native-test and
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.9a Derive Cerebro's
+                          cross-tool requirements from consumer handoff 95f6fb15's
+                          actual native-test and
                           manifest consumers and the canonical native-producing,
                           implementation-verification and structured-judgment
                           contracts before selecting an API. Trace production of the

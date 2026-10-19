@@ -851,6 +851,39 @@ prove a read's target freshly created, that proof remains the
 declaration-free instrument; the namespace is the enforced fallback for
 scratch disciplines no sound flow analysis can follow.
 
+**REQ-inputs-file-eligibility** (behavior): A producer-side preflight for an
+explicit existing regular file MUST judge eligibility for raw-byte observation
+under these obligations:
+
+- **producing-context** — The query uses the producer facade's effective-root
+  resolution, exclusions and path-value classifications. It distinguishes
+  raw-byte-eligible, recordless, projected and unverifiable paths; every non-raw
+  result names its reason, and an absent result grants nothing. The caller supplies
+  the same absolute evidence-root and process directories, complete process
+  environment with matching PWD, runner, operation-scoped roots memo, exclusions
+  and minted scratch root as the actual producer. A build or analysis environment
+  cannot substitute for a different process environment.
+- **classification** — The query preserves cache-subtree exceptions,
+  overlapping-root precedence and tree-overlap degradation, including settings
+  resolved through the Go environment configuration. It accepts only clean absolute
+  existing regular files without symlink components. Volatile paths never require
+  reading their contents, and stable-machine projections remain distinct from raw
+  bytes. Existing regular temp descendants remain eligible unless another
+  classification excludes them; a file held present before capture cannot qualify
+  as newly minted scratch. Exclusions retain their ordinary precedence and never
+  make a file raw-byte eligible.
+- **authority** — The file and classification inputs obey the existing hold-still
+  obligation from preflight through capture, execution and finalization; a changed
+  context requires a new judgment. Missing files, unresolved roots and cancellation
+  fail closed. Eligibility does not read or hash the file as an observed input;
+  resolving classification roots can still read required configuration or toolchain
+  inputs, including the selected file when it has both roles. Those resolution
+  reads construct no consumer observation, completion or outcome evidence, and
+  the query overrides no classification. Eligibility does
+  not promise a successful read, hash, bracket or later reuse. The actual execution
+  supplies its observations and ordinary closing checks. A manifest's content can
+  be such an input; its recorded bytes do not confer authority on assertions inside it.
+
 **REQ-inputs-producer-facade** (behavior): The library MUST expose one
 producer facade owning the completed-observation conjunction every
 external producer previously hand-assembled: frame capture resolves the
