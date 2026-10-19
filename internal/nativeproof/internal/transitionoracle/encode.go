@@ -10,6 +10,9 @@ import (
 // Branch displacements are already relative to the eventual instruction end;
 // address applicability is checked by Parse when the caller supplies a PC.
 func Encode(i Intent, e Encoding) ([]byte, error) {
+	if i.Operation != NoOp && (e.NOPModRM != 0 || e.NOPSIB != 0 || e.NOPDisp != 0) {
+		return nil, fmt.Errorf("NOP address fields on another operation")
+	}
 	if i.Operation >= LockedCompareExchange || i.Width == 8 && (i.Operation == Test || i.Operation == TestImmediate) {
 		return encodeAtomic(i, e)
 	}

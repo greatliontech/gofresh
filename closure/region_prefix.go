@@ -35,8 +35,9 @@ type sourceOperandPrefix struct {
 // checkSourceOperandPrefix owns the complete selected root but checks execution
 // only up to the actual call's operand boundary. The empty initial heap denotes
 // arbitrary prior values; no initialization or expected output enters the proof.
+// Unused pointer parameters remain arbitrary and supply no storage or effects.
 func checkSourceOperandPrefix(ctx context.Context, source computationSource, root *ssa.Function, call *ssa.Call, limits registrationLimits) (*sourceOperandPrefix, error) {
-	if ctx == nil || !limits.region.valid() || root == nil || call == nil || len(root.Blocks) == 0 || root.Blocks[0] == nil || len(root.Blocks[0].Instrs) > limits.region.nodes || len(root.Params) != 0 || len(root.FreeVars) != 0 || call.Parent() != root || call.Block() != root.Blocks[0] || call.Call.IsInvoke() || call.Call.StaticCallee() == nil || len(call.Call.Args) != 3 {
+	if ctx == nil || !limits.region.valid() || root == nil || call == nil || len(root.Blocks) == 0 || root.Blocks[0] == nil || len(root.Blocks[0].Instrs) > limits.region.nodes || len(root.Params) > limits.region.nodes || len(root.FreeVars) != 0 || call.Parent() != root || call.Block() != root.Blocks[0] || call.Call.IsInvoke() || call.Call.StaticCallee() == nil || len(call.Call.Args) == 0 || len(call.Call.Args) > limits.region.nodes {
 		return nil, regionError("operand prefix requires a concrete root and actual direct call boundary")
 	}
 	at := -1
@@ -53,6 +54,11 @@ func checkSourceOperandPrefix(ctx context.Context, source computationSource, roo
 		use:      regionUse{at: regionPoint{root.Blocks[0], at}, operand: call.Call.Args[0]},
 		premises: []string{"immutable selected typed owner; isolated prefix; ordinary live typed global storage; omitted native prefix and actual use remain open"}}
 	meter := &regionMeter{ctx: ctx, limits: limits.region}
+	for _, parameter := range root.Params {
+		if err := checkUnusedSourcePointer(root, parameter, meter.tick); err != nil {
+			return nil, err
+		}
+	}
 	in, _, err := regionCaptureMeter(in, nil, meter)
 	if err != nil {
 		return nil, err
@@ -115,6 +121,31 @@ func checkSourceOperandPrefix(ctx context.Context, source computationSource, roo
 	packet.usage = *meter
 	packet.usage.ctx = nil
 	return &sourceOperandPrefix{region: selected, callee: callee, call: call, operands: operands, binder: b}, nil
+}
+
+// checkUnusedSourcePointer checks the actual whole-root operand inventory, not
+// referrer metadata or only the prefix. Even a use in an excluded arm is outside
+// this deliberately bounded unused-argument grammar. Debug markers are inert.
+func checkUnusedSourcePointer(root *ssa.Function, parameter *ssa.Parameter, tick func() error) error {
+	if _, ok := parameter.Type().Underlying().(*types.Pointer); !ok {
+		return regionError("unused root argument is not a typed pointer")
+	}
+	for _, block := range root.Blocks {
+		for _, ins := range block.Instrs {
+			if err := tick(); err != nil {
+				return err
+			}
+			if _, debug := ins.(*ssa.DebugRef); debug {
+				continue
+			}
+			for _, operand := range ins.Operands(nil) {
+				if operand != nil && *operand == parameter {
+					return regionError("pointer parameter is used by source computation")
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // prefixTransfer records operands from the same pre-state that transfer consumes.

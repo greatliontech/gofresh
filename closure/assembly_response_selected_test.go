@@ -85,7 +85,7 @@ func TestAssemblyResponseSelectedReference(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if got.Result != sample.result || got.Value != sample.value {
+				if assemblyReferenceBool(t, got.Result) != sample.result || got.Value != sample.value {
 					t.Fatalf("real action/reference disagreement: %+v", got)
 				}
 			}

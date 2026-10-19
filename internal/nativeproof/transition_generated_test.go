@@ -342,6 +342,20 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 		t.Fatal("primitive occurrence count differs")
 	}
 	for j, effect := range a.PrimitiveEffects {
+		if p, ok := effect.(LockedExchange64Effect); ok {
+			q, valid := b.PrimitiveEffects[j].(LockedExchange64Effect)
+			if !valid || p.PC != q.PC || p.Context != q.Context || p.ReadAccess != q.ReadAccess || p.WriteAccess != q.WriteAccess {
+				t.Fatal("exchange occurrence differs")
+			}
+			continue
+		}
+		if p, ok := effect.(LockedExchangeAdd64Effect); ok {
+			q, valid := b.PrimitiveEffects[j].(LockedExchangeAdd64Effect)
+			if !valid || p.PC != q.PC || p.Context != q.Context || p.ReadAccess != q.ReadAccess || p.WriteAccess != q.WriteAccess {
+				t.Fatal("exchange-add occurrence differs")
+			}
+			continue
+		}
 		if p, ok := effect.(LockedCompareExchange64Effect); ok {
 			q, valid := b.PrimitiveEffects[j].(LockedCompareExchange64Effect)
 			if !valid || p.PC != q.PC || p.Context != q.Context || p.ReadAccess != q.ReadAccess || p.WriteAccess != q.WriteAccess {
@@ -398,6 +412,20 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 		t.Fatal("independent roots unexpectedly share namespace")
 	}
 	for j, effect := range a.PrimitiveEffects {
+		if p, ok := effect.(LockedExchange64Effect); ok {
+			q := b.PrimitiveEffects[j].(LockedExchange64Effect)
+			for k, root := range []br.Term{p.Before, p.Replacement, p.After, p.Register} {
+				equal(root, []br.Term{q.Before, q.Replacement, q.After, q.Register}[k])
+			}
+			continue
+		}
+		if p, ok := effect.(LockedExchangeAdd64Effect); ok {
+			q := b.PrimitiveEffects[j].(LockedExchangeAdd64Effect)
+			for k, root := range []br.Term{p.Before, p.Delta, p.After, p.Register} {
+				equal(root, []br.Term{q.Before, q.Delta, q.After, q.Register}[k])
+			}
+			continue
+		}
 		if p, ok := effect.(LockedCompareExchange64Effect); ok {
 			q := b.PrimitiveEffects[j].(LockedCompareExchange64Effect)
 			for k, root := range []br.Term{p.Before, p.Compare, p.Replacement, p.After, p.Accumulator, p.Success} {
@@ -428,6 +456,7 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 		equal(occurrence.Guard, b.Instructions[j].Guard)
 	}
 	equal(a.CutGuard, b.CutGuard)
+	equal(a.EntryPredicate, b.EntryPredicate)
 	if len(a.ExcludedBoundaries) != len(b.ExcludedBoundaries) {
 		t.Fatal("excluded coverage differs")
 	}
@@ -462,6 +491,12 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 			if p != y {
 				t.Fatal("image pointer owner/mapping/address differs")
 			}
+		case entryValueLineage:
+			q, ok := y.(entryValueLineage)
+			if !ok {
+				t.Fatal("entry value lineage kind differs")
+			}
+			equal(p.value, q.value)
 		default:
 			t.Fatal("unknown pointer arm")
 		}

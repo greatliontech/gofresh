@@ -31,7 +31,18 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 		width = 64
 	}
 	cc := func(n uint64) bool { return n >= 2 && n <= 7 || n >= 12 && n <= 15 }
-	if !fs && (op == 0x31 || op == 0x33) {
+	if !fs && (op == 0x01 || op == 0x03) {
+		m := r.unsigned(1)
+		if width != 64 || m/64 != 3 {
+			return fail("not a full-width register ADD")
+		}
+		reg, rm := uint8((m/8)%8)+8*((rex/4)%2), uint8(m%8)+8*(rex%2)
+		d.Intent = Intent{Operation: AddRegister, Dst: rm, Src: reg}
+		d.Encoding.Form = ADD01
+		if op == 0x03 {
+			d.Intent.Dst, d.Intent.Src, d.Encoding.Form = reg, rm, ADD03
+		}
+	} else if !fs && (op == 0x31 || op == 0x33) {
 		m := r.unsigned(1)
 		reg, rm := uint8((m/8)%8)+8*((rex/4)%2), uint8(m%8)+8*(rex%2)
 		if width != 32 || m/64 != 3 || reg != rm {

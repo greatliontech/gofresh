@@ -70,7 +70,7 @@ func TestOpcodeAndPrefixPopulation(t *testing.T) {
 				valid = valid || op >= 0xb8 && op <= 0xbf || op >= 0x50 && op <= 0x5f
 			}
 			if rex >= 0x48 {
-				valid = valid || op >= 0xb8 && op <= 0xbf || op == 0x25 || op == 0x2d || op == 0x05 || op == 0x81 || op == 0x83
+				valid = valid || op >= 0xb8 && op <= 0xbf || op == 0x25 || op == 0x2d || op == 0x05 || op == 0x81 || op == 0x83 || op == 0x01 || op == 0x03
 			} else {
 				valid = valid || op >= 0xb0 && op <= 0xb7 || op == 0x88 || op == 0x8a || op == 0xc6
 				valid = valid || (op == 0x31 || op == 0x33) && rex&1 == (rex>>2)&1
@@ -85,6 +85,10 @@ func TestOpcodeAndPrefixPopulation(t *testing.T) {
 
 func TestEncodeRefusesNormalization(t *testing.T) {
 	cases := []Descriptor{
+		{Intent{Operation: MoveRegister}, Encoding{Form: MOV89, REX: 0x48, NOPModRM: 0x44}},
+		{Intent{Operation: NoOp}, Encoding{Form: NOP0F1F, NOPModRM: 0x4c}},
+		{Intent{Operation: NoOp}, Encoding{Form: NOP0F1F, NOPModRM: 0xc0, NOPDisp: 1}},
+		{Intent{Operation: NoOp}, Encoding{Form: NOP0F1F, REX: 0x48}},
 		{Intent{Operation: Clear32, Src: 1}, Encoding{Form: XOR31}},
 		{Intent{Operation: Clear32, Immediate: 1}, Encoding{Form: XOR31}},
 		{Intent{Operation: Clear32, Width: 32}, Encoding{Form: XOR31}},

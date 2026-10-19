@@ -9,7 +9,7 @@ import (
 
 // TransferRules identifies the shared scalar ISA relations. These relations do
 // not establish instruction selection, memory applicability, ordering or a frame.
-const TransferRules = "gofresh/native-scalar-transfer@1"
+const TransferRules = "gofresh/native-scalar-transfer@2"
 
 // TransferKernel constructs exact scalar instruction relations under one
 // cumulative expression/work/depth allowance. It owns no image or certificate:
@@ -79,6 +79,85 @@ func (k *TransferKernel) CompareExchange64(compare, current, replacement br.Term
 func (m *valueBuilder) compareExchange64(compare, current, replacement br.Term) CompareExchangeResult {
 	f, p := m.compareFlags(compare, current)
 	return CompareExchangeResult{Success: p.ZF, Accumulator: m.ite(p.ZF, compare, current), Memory: m.ite(p.ZF, replacement, current), Flags: f, Predicates: p}
+}
+
+// ArithmeticResult retains the modular sum and all six defined arithmetic flags.
+type ArithmeticResult struct {
+	Value      br.Term
+	Flags      TransitionFlags
+	Predicates TransitionPredicates
+}
+
+// Add derives exact addition at the operands' common width (8, 32 or 64 bits).
+func (k *TransferKernel) Add(left, right br.Term) (ArithmeticResult, error) {
+	if err := k.scalarInputs(left, right); err != nil {
+		return ArithmeticResult{}, err
+	}
+	r := k.meter.add(left, right)
+	if k.meter.err != nil {
+		return ArithmeticResult{}, k.meter.err
+	}
+	return r, nil
+}
+
+// ExchangeResult relates incoming memory and replacement to the exchanged outputs.
+type ExchangeResult struct{ Register, Memory br.Term }
+
+// Exchange64 derives scalar exchange; the consumer separately checks the locked
+// memory occurrence, permissions and provenance. Architectural flags are unchanged.
+func (k *TransferKernel) Exchange64(current, replacement br.Term) (ExchangeResult, error) {
+	if err := k.wordInputs(current, replacement); err != nil {
+		return ExchangeResult{}, err
+	}
+	return k.meter.exchange64(current, replacement), nil
+}
+
+// ExchangeAddResult retains the old memory in Register and modular sum in Memory.
+type ExchangeAddResult struct {
+	Register, Memory br.Term
+	Flags            TransitionFlags
+	Predicates       TransitionPredicates
+}
+
+// ExchangeAdd64 derives XADD's full-width scalar and arithmetic flag relations.
+// Its consumer retains the memory write even when the delta is zero.
+func (k *TransferKernel) ExchangeAdd64(current, delta br.Term) (ExchangeAddResult, error) {
+	if err := k.wordInputs(current, delta); err != nil {
+		return ExchangeAddResult{}, err
+	}
+	r := k.meter.exchangeAdd64(current, delta)
+	if k.meter.err != nil {
+		return ExchangeAddResult{}, k.meter.err
+	}
+	return r, nil
+}
+
+func (k *TransferKernel) wordInputs(left, right br.Term) error {
+	if err := k.inputs(left, right); err != nil {
+		return err
+	}
+	if left.Sort() != br.Bits(64) || right.Sort() != br.Bits(64) {
+		return refuse(0, "relation-semantics", "exchange requires two full-width operands")
+	}
+	return nil
+}
+
+func (m *valueBuilder) exchange64(current, replacement br.Term) ExchangeResult {
+	return ExchangeResult{Register: current, Memory: replacement}
+}
+
+func (m *valueBuilder) exchangeAdd64(current, delta br.Term) ExchangeAddResult {
+	r := m.add(current, delta)
+	return ExchangeAddResult{Register: current, Memory: r.Value, Flags: r.Flags, Predicates: r.Predicates}
+}
+
+func (m *valueBuilder) add(left, right br.Term) ArithmeticResult {
+	result := m.binary(br.Add, left, right)
+	c, z, sign := m.compare(br.ULT, result, left), m.compare(br.Equal, result, m.con(result.Sort(), 0)), m.sign(result)
+	overflow := m.and(m.compare(br.Equal, m.sign(left), m.sign(right)), m.different(m.sign(left), sign))
+	aux := m.compare(br.ULT, m.extract(result, 0, 4), m.extract(left, 0, 4))
+	f := TransitionFlags{CF: definedFlag(c), OF: definedFlag(overflow), SF: definedFlag(sign), ZF: definedFlag(z), AF: definedFlag(aux), PF: definedFlag(m.parity(result))}
+	return ArithmeticResult{Value: result, Flags: f, Predicates: TransitionPredicates{c, z, m.different(sign, overflow)}}
 }
 
 // Compare derives all six subtraction flags without writing either operand.

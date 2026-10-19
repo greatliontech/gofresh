@@ -18,7 +18,10 @@
 // TEST admits register/immediate 8/32/64-bit forms. Locked CMPXCHG admits memory64
 // under exactly LOCK then REX.W; SETcc admits one byte register or memory operand,
 // with the canonical /0 field. Both use ordinary base/displacement or RIP forms.
-// Exact 90 and 6690 NOP preserve state. These are structural grammars; permission,
+// Memory XCHG64, LOCK XADD64 and register-register ADD64 retain their actual
+// source and destination operands. Exact 90, 6690 and unprefixed 0F 1F /0 NOP
+// preserve state; a NOP's address-shaped bytes are encoding data only.
+// These are structural grammars; permission,
 // alignment and primitive applicability remain the machine consumer's obligations.
 // conditional edges use the ten conditions over CF/ZF/SF!=OF. CPUID is exact
 // operand-free 0f a2, without prefixes. Register self-XOR admits 32-bit operands,
@@ -71,6 +74,9 @@ const (
 	CompareFromMemory // Dst - memory; no write.
 	CompareMemoryImmediate
 	NoOp
+	LockedExchange
+	LockedExchangeAdd
+	AddRegister
 )
 
 // Intent is a semantic instruction description. Registers are architectural
@@ -101,7 +107,7 @@ type Intent struct {
 func RequiresExpansion(i Intent) bool {
 	switch i.Operation {
 	case Call, Syscall, Clear32, LockedCompareExchange, SetRegister, SetMemory,
-		CompareMemory, CompareFromMemory, CompareMemoryImmediate, NoOp:
+		CompareMemory, CompareFromMemory, CompareMemoryImmediate, NoOp, LockedExchange, LockedExchangeAdd, AddRegister:
 		return true
 	case Test, TestImmediate:
 		return i.Width == 8
@@ -160,6 +166,12 @@ const (
 	TESTA8
 	NOP90
 	NOP6690
+	XCHG87
+	LOCKXCHG87
+	LOCKXADD0FC1
+	ADD01
+	ADD03
+	NOP0F1F
 )
 
 // Encoding preserves choices that semantic intent deliberately forgets. REX is
@@ -175,6 +187,9 @@ type Encoding struct {
 	DispBytes uint8
 	SIB       bool
 	Scale     uint8
+	// NOP address fields are encoding-only: they never name a data access.
+	NOPModRM, NOPSIB uint8
+	NOPDisp          int32
 }
 
 // Decoded retains the semantic instruction and its exact encoding choices.

@@ -608,7 +608,10 @@ func (m *valueBuilder) transfer(pc uint64, i operation, s *symbolicState) error 
 		m.write(s, a, right)
 		return m.err
 	case x86asm.ADD:
-		v = m.binary(br.Add, left, right)
+		r := m.add(left, right)
+		m.write(s, a, r.Value)
+		s.flags = [flagCount]br.Term{r.Predicates.CF, r.Predicates.ZF, r.Predicates.SFXorOF}
+		return m.err
 	case x86asm.SUB:
 		v = m.binary(br.Sub, left, right)
 	case x86asm.CMP:
@@ -628,11 +631,6 @@ func (m *valueBuilder) transfer(pc uint64, i operation, s *symbolicState) error 
 	case x86asm.SUB:
 		s.flags[flagCarry] = m.compare(br.ULT, left, right)
 		s.flags[flagLess] = m.compare(br.SLT, left, right)
-	case x86asm.ADD:
-		s.flags[flagCarry] = m.compare(br.ULT, v, left)
-		sign, leftSign, rightSign := m.sign(v), m.sign(left), m.sign(right)
-		overflow := m.and(m.compare(br.Equal, leftSign, rightSign), m.different(sign, leftSign))
-		s.flags[flagLess] = m.different(sign, overflow)
 	default:
 		s.flags[flagCarry] = m.falsity
 		s.flags[flagLess] = m.sign(v) // Logical operations clear OF.

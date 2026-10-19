@@ -81,6 +81,41 @@
 // conditional-root authority through graph reconstruction and continuations;
 // it establishes no path from the ELF entry. Region roots cannot replay loading
 // initialization. Current bytes and unspecified scratch state start arbitrary.
+// Fresh conditional roots may explicitly bind full non-RSP registers to declared
+// readable owned image addresses and constrain current image words by unsigned
+// strict upper bounds against original RSP plus checked signed offsets. The
+// immutable EntryPredicate retains their conjunction, including the register-bit
+// equalities; execution and exclusions start under it. These premises grant no
+// extra dereference permission, source-object meaning or ordinary runtime claim.
+// Joint nonvacuity uses one coherent byte valuation respecting immutable code
+// bytes and the greatest page-admissible origin. That witness supplies no symbolic
+// initial values: universal reasoning still covers every admitted state. Empty
+// entry relations preserve the arbitrary-entry model. Continuations retain the
+// original declarations and predicate without introducing new premises.
+// An optional incoming ReturnContext fixes the original stack control word to
+// an independently decoded continuation in the same image and protects that slot
+// against every write, including unchanged locked writeback. It is a conditional
+// caller interface, not an executed CALL or loading fact. Required full-register
+// restoration transports arbitrary caller value/provenance through private
+// complete-word lineage and the same ordered byte lanes as concrete pointers.
+// Lineage grants no address capability, arithmetic provenance or alias exclusion;
+// partial writes lose it and scalar equality cannot recreate it. Concrete entry
+// image bindings retain their existing provenance instead. Required restoration
+// follows these value/provenance invariants, not never-written register masks.
+// CheckTransitionReturn consumes a checked root-RET prefix and the remaining
+// cumulative budget, executes the shared RET transfer, and publishes a distinct
+// terminal certificate. Its final state has RSP=S+8 and PC at the incoming
+// continuation, retains residual frame writes and the complete ordered effects,
+// and discharges the callee context. Its projection separates the prefix state
+// from the returned state; it cannot resume as an inside-callee transition.
+// An optional fresh-root PrivateFrame retains a separate scratch ownership and
+// lifetime premise. It excludes observation through preexisting and newly exposed
+// aliases, without asserting inequality of arbitrary pointer bits. Permissions,
+// CALL and restored context cannot establish it. Source projection must still
+// check effects, disjointness and nonescape; primitive ordering is never hidden
+// by this declaration. Released bytes remain concrete, so later dependent reads
+// need initialization or checking against the retained state. Actual caller
+// composition must discharge this premise from its ownership discipline.
 // One fresh stack origin is universally quantified over explicit bounds,
 // congruence and external/image-page disjointness; joint nonemptiness is checked
 // before deriving state. Relative address envelopes, memory permissions and
@@ -93,7 +128,7 @@
 // AND, 32-bit register self-XOR with zero extension and undefined AF,
 // nonwriting 32/64-bit CMP (including ordinary memory reads), byte/32/64-bit
 // register TEST and the ten direct conditions over CF, ZF and
-// SF!=OF, alongside relative JMP/fallthrough, constant ADD, direct near CALL,
+// SF!=OF, alongside relative JMP/fallthrough, immediate and register ADD64, direct near CALL,
 // register PUSH/POP and near RET. Stack operations use the same current bytes;
 // CALL stores the actual decoded continuation and RET proves equality of its
 // current readable return word to that active context. PUSH/POP of RSP retain
@@ -104,6 +139,14 @@
 // exact RAX-minus-destination flags, and one retained indivisible locked-ordering
 // event grouping its adjacent read/write indices. SETcc writes exactly one byte
 // and preserves flags; other register bits and unrelated bytes are unchanged.
+// Memory XCHG64 (implicitly locked, with or without F0) and LOCK XADD64 share
+// those full-width alignment and permission obligations. XCHG exchanges complete
+// word provenance and preserves flags. XADD returns the old word and provenance
+// in its source register, writes the modular sum and defines all six arithmetic
+// flags. Only a literal zero delta preserves the memory word's pointer; other
+// deltas lose it. Effective addresses precede register clobbers. Register ADD64
+// likewise loses unproved pointer offsets. Unprefixed 0F 1F /0 NOP forms consume
+// their actual ModRM/SIB/displacement bytes but never evaluate a data address.
 // The scalar TransferKernel is shared with separately normalized source assembly.
 // It supplies value relations, never source selection, image ownership, memory
 // applicability or a frame. Its consumers independently establish those facts.
@@ -139,7 +182,8 @@
 //
 // ProposeTransition's optional occurrence-qualified expansion choices are
 // untrusted search input. TransitionExpansionRequired classifies CALL, SYSCALL,
-// XOR, CMPXCHG, SETcc, byte TEST, memory CMP and NOP as optional expansions.
+// XOR, CMPXCHG, XCHG, XADD, register-register ADD, SETcc, byte TEST, memory CMP
+// and NOP as optional expansions.
 // Other register CMP/TEST forms retain their ordinary discovery behavior.
 // Unselected optional forms remain structural terminals,
 // accepted only with an independent proof that the complete incoming guard is

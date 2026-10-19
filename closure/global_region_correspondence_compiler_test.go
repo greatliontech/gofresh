@@ -165,4 +165,58 @@ func TestGlobalRegionCorrespondenceSelectedRuntimeArtifact(t *testing.T) {
 	}
 	t.Logf("source %s -> unexecuted %s; native entry=%#x atomic=%#x/%#x TEST=%#x/%#x load=%#x; globals=%#x/%#x; instructions=%d accesses=%d primitives=%d universal equalities=%d cumulative work=%d", source.prog.Prog.Fset.Position(calls[0].Pos()), source.prog.Prog.Fset.Position(calls[2].Pos()), fixture.entry, fixture.cut, fixture.next[0], fixture.use[0], fixture.use[1], fixture.next[1], addresses[0], addresses[1], len(final.Instructions), len(final.Accesses), len(final.PrimitiveEffects), len(proof.equalities), proof.work)
 	t.Logf("scope remains conditional; open obligations=%+v", prior.open)
+	// Complete the source leg independently, retaining the actual Go load body
+	// and selected assembly bodies. This does not extend the native prefix above
+	// or establish its omitted prologue and return.
+	references := map[*ssa.Function]*assemblyReference{target: reference}
+	var returned *ssa.Return
+	for _, block := range root.Blocks {
+		for _, instruction := range block.Instrs {
+			if ret, ok := instruction.(*ssa.Return); ok {
+				if returned != nil {
+					t.Fatal("selected fixture has multiple proposed return endpoints")
+				}
+				returned = ret
+			}
+			call, ok := instruction.(*ssa.Call)
+			if !ok {
+				continue
+			}
+			callee := call.Call.StaticCallee()
+			if callee == nil || len(callee.Blocks) != 0 || references[callee] != nil {
+				continue
+			}
+			checked, err := checkAssemblyReference(t.Context(), source, callee, reference.checked.acquisition, assemblyReferenceLimits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			references[callee] = checked
+		}
+	}
+	completed, err := checkSourceReturnContinuation(t.Context(), proof.phases[len(proof.phases)-1].source, returned, references)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := completed.region.packet.trace
+	if len(trace.calls) != 7 || len(trace.accesses) != 10 || len(trace.atomics) != 3 || completed.returned != returned {
+		t.Fatalf("selected source suffix lost calls, effects or its actual return: calls=%d accesses=%d", len(trace.calls), len(trace.accesses))
+	}
+	for i, want := range []struct {
+		kind        x86asm.Op
+		read, write int
+	}{{x86asm.XCHG, 1, 2}, {x86asm.XADD, 4, 5}, {x86asm.XCHG, 7, 8}} {
+		got := trace.atomics[i]
+		if got.application == nil || got.application.reference == nil || got.atomic.Kind != want.kind || got.atomic.ReadAccess != want.read || got.atomic.WriteAccess != want.write {
+			t.Fatalf("selected source atomic %d lost call provenance or cumulative access indices: %+v", i, got)
+		}
+	}
+	nativeReturn := selectedAtomicReturn(t, raw, image, locations)
+	complete, err := checkGlobalFunctionCorrespondence(t.Context(), source, root, image, function, completed, nativeReturn, rho, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(complete.atomics) != 5 || len(complete.inputs) != 2 || len(complete.administrative) != 4 {
+		t.Fatal("complete correspondence lost paired inputs, atomic groups or administrative effects")
+	}
+	t.Logf("complete void correspondence: %d source accesses, %d matched accesses, %d eliminated ordinary reads, %d atomic groups, %d administrative accesses, %d equalities; work=%d", len(complete.accesses), len(complete.matched), len(complete.eliminated), len(complete.atomics), len(complete.administrative), len(complete.equalities), complete.work)
 }

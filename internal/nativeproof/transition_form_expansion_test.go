@@ -12,7 +12,7 @@ func TestTransitionNewFormsDeferredAcrossDeadCycles(t *testing.T) {
 	// Each byte spelling was a structural-only boundary before its transfer
 	// grammar existed. Admitting that transfer must not expose its dead cycle.
 	for _, form := range []string{"84c9", "84e1", "4084e4", "f6c1ff", "a8ff",
-		"393424", "48393424", "3b3424", "483b3424", "833c2400", "48833c2400", "813c2400000000", "48813c2400000000", "90", "6690"} {
+		"393424", "48393424", "3b3424", "483b3424", "833c2400", "48833c2400", "813c2400000000", "48813c2400000000", "90", "6690", "488711", "f0480fc111", "4801f2", "0f1f440000"} {
 		for _, region := range []bool{false, true} {
 			for _, guard := range []string{"dead", "live", "unknown"} {
 				t.Run(form+"/"+guard+map[bool]string{false: "/elf", true: "/region"}[region], func(t *testing.T) {

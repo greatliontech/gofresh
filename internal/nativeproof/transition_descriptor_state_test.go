@@ -90,7 +90,7 @@ func TestTransitionCompleteDescriptorStatePopulation(t *testing.T) {
 		descriptorState(t, d, 0xfedcba9876543280, -0x12345, raw)
 		count++
 	}
-	if count != 94965 {
+	if count != 109650 {
 		t.Fatal("incomplete semantic descriptor population", count)
 	}
 	for value := uint64(0); value < 256; value++ {

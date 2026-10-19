@@ -171,7 +171,7 @@ func (p *globalRegionCorrespondence) address(global *ssa.Global) (uint64, bool) 
 	return 0, false
 }
 
-func (p *globalRegionCorrespondence) checkBooleanUse(ctx context.Context, source *sourceOperandPrefix, predecessor nativeproof.TransitionCertificate, before nativeproof.TransitionBound, use nativeproof.TransitionCertificate, after nativeproof.TransitionBound, application regionReferenceApplication) error {
+func (p *globalRegionCorrespondence) checkBooleanUse(ctx context.Context, source *sourceOperandPrefix, predecessor nativeproof.TransitionCertificate, before nativeproof.TransitionBound, use nativeproof.TransitionCertificate, after nativeproof.TransitionBound, application regionCallApplication) error {
 	fail := func(s string) error { return fmt.Errorf("global correspondence Boolean use: %s", s) }
 	boundary := before.Boundary.Instruction
 	if boundary.Op != x86asm.CMPXCHG || boundary.MemBytes != 8 || len(source.operands) != 3 || after.Boundary.Instruction.Op != x86asm.TEST || after.Boundary.Instruction.MemBytes != 0 || after.Boundary.Context != before.Boundary.Context {
@@ -255,7 +255,11 @@ func (p *globalRegionCorrespondence) checkBooleanUse(ctx context.Context, source
 		return fail("atomic read/write occurrence differs from source pointer provenance")
 	}
 	boolean := uint64(0)
-	if application.result {
+	resultValue, known := regionBool(application.result)
+	if !known {
+		return fail("source call has no established Boolean result")
+	}
+	if resultValue {
 		boolean = 1
 	}
 	return p.constant(ctx, result, boolean)

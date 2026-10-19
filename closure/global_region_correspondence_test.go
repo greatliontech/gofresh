@@ -427,7 +427,7 @@ func assertPairedSource(t testing.TB, proof *globalRegionCorrespondence, intent 
 		value  uint64
 	}{{first, middle}, {second, final}} {
 		trace := proof.phases[i].source.region.packet.trace
-		if len(trace.calls) != 1 || trace.calls[0].result != want.result || trace.calls[0].value != want.value {
+		if len(trace.calls) != 1 || assemblyReferenceBool(t, trace.calls[0].result) != want.result || trace.calls[0].value != want.value {
 			t.Fatalf("phase %d differs from independent intent", i)
 		}
 		lockedReads, lockedWrites := 0, 0

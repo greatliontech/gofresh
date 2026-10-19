@@ -96,7 +96,7 @@ func TestAssemblyReferenceSelectedOwnedProviders(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.Value != tc.value || got.Result != tc.result {
+			if got.Value != tc.value || assemblyReferenceBool(t, got.Result) != tc.result {
 				t.Fatalf("actual selected body produced %+v", got)
 			}
 			if tc.name == "Swap" {
@@ -138,7 +138,7 @@ func TestAssemblyReferenceSelectedOwnedProviders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Result || got.Value != 5 || !slices.Equal(got.Accesses, []assemblyReferenceAccess{{false, true, 5}, {true, true, 5}}) {
+	if assemblyReferenceBool(t, got.Result) || got.Value != 5 || !slices.Equal(got.Accesses, []assemblyReferenceAccess{{false, true, 5}, {true, true, 5}}) {
 		t.Fatal("failure writeback disappeared", got)
 	}
 	other := assemblyReferenceSelectedSource(t, dir)
@@ -164,7 +164,7 @@ func TestAssemblyReferenceSelectedOwnedProviders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Result || got.Value != 9 {
+	if assemblyReferenceBool(t, got.Result) || got.Value != 9 {
 		t.Fatal("changed captured include did not change relation", got)
 	}
 }

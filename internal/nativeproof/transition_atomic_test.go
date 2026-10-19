@@ -20,12 +20,13 @@ func atomicDescriptorState(t testing.TB, d to.Descriptor, i to.Intent, raw []byt
 	f.Regions, f.Words = nil, nil
 	f.Conditions.Locked64 = Locked64Model
 	var ops []dagOp
-	mem := i.Operation == to.LockedCompareExchange || i.Operation == to.SetMemory || i.Operation == to.CompareMemory || i.Operation == to.CompareFromMemory || i.Operation == to.CompareMemoryImmediate
+	rmw := i.Operation == to.LockedCompareExchange || i.Operation == to.LockedExchange || i.Operation == to.LockedExchangeAdd
+	mem := rmw || i.Operation == to.SetMemory || i.Operation == to.CompareMemory || i.Operation == to.CompareFromMemory || i.Operation == to.CompareMemoryImmediate
 	w := 8
 	if i.Width != 0 {
 		w = int(i.Width) / 8
 	}
-	if i.Operation == to.LockedCompareExchange {
+	if rmw {
 		i.SignedDisp &= ^int64(7)
 	}
 	if mem && !i.RIP {
@@ -455,58 +456,202 @@ func TestTransitionAtomicEffectsSurviveOverwrites(t *testing.T) {
 }
 
 func TestTransitionAtomicActivationAndCumulativeResources(t *testing.T) {
-	// Two calls enter the same body; its data lies above the actual CALL word.
-	code := hexBytes(t, "e806000000e801000000c3f0480fb15424080f94442410c3")
-	im := image(t, code)
-	end := testEntry + 10
-	ctx1, ctx2 := callContext("", testEntry), callContext("", testEntry+5)
-	choices := []TransitionExpansion{{PC: testEntry}, {PC: testEntry + 5}, {PC: testEntry + 11, Context: ctx1}, {PC: testEntry + 18, Context: ctx1}, {PC: testEntry + 11, Context: ctx2}, {PC: testEntry + 18, Context: ctx2}}
-	f := stateFace(16, 0)
-	f.Conditions.Locked64 = Locked64Model
-	p, err := ProposeTransition(t.Context(), im, end, TransitionLimits{}, choices...)
-	if err != nil {
-		t.Fatal(err)
+	for _, tc := range []struct {
+		name, rmw string
+		op        x86asm.Op
+	}{
+		{"cmpxchg", "f0480fb1542408", x86asm.CMPXCHG},
+		{"xchg", "4887542408", x86asm.XCHG},
+		{"xadd", "f0480fc1542408", x86asm.XADD},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Two calls enter the same body; its data lies above the actual CALL word.
+			code := hexBytes(t, "e806000000e801000000c3"+tc.rmw+"0f94442410c3")
+			im := image(t, code)
+			end := testEntry + 10
+			setPC := testEntry + 11 + uint64(len(hexBytes(t, tc.rmw)))
+			ctx1, ctx2 := callContext("", testEntry), callContext("", testEntry+5)
+			if ctx1 == "" || ctx2 == "" || ctx1 == ctx2 {
+				t.Fatal("fixture lacks distinct callee activations")
+			}
+			choices := []TransitionExpansion{{PC: testEntry}, {PC: testEntry + 5}, {PC: testEntry + 11, Context: ctx1}, {PC: setPC, Context: ctx1}, {PC: testEntry + 11, Context: ctx2}, {PC: setPC, Context: ctx2}}
+			f := stateFace(16, 0)
+			f.Conditions.Locked64 = Locked64Model
+			p, err := ProposeTransition(t.Context(), im, end, TransitionLimits{}, choices...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := ProposeTransition(t.Context(), im, testEntry+5, TransitionLimits{}, choices[0], choices[2], choices[3])
+			if err != nil {
+				t.Fatal(err)
+			}
+			prior, err := CheckTransition(t.Context(), im, f, first, TransitionLimits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err := CheckTransitionContinuation(t.Context(), prior, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			direct, err := CheckTransition(t.Context(), im, f, p, TransitionLimits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertTransitionAlpha(t, direct, c)
+			b := c.checked.bound
+			if len(b.PrimitiveEffects) != 2 || len(b.Frames) != 0 || len(b.Accesses) != 10 {
+				t.Fatal("incomplete repeated activation effects", len(b.Accesses))
+			}
+			for j, context := range []string{ctx1, ctx2} {
+				var pc uint64
+				var activation string
+				var read, write int
+				switch tc.op {
+				case x86asm.CMPXCHG:
+					e, ok := b.PrimitiveEffects[j].(LockedCompareExchange64Effect)
+					if !ok {
+						t.Fatal("wrong CMPXCHG primitive type")
+					}
+					pc, activation, read, write = e.PC, e.Context, e.ReadAccess, e.WriteAccess
+				case x86asm.XCHG:
+					e, ok := b.PrimitiveEffects[j].(LockedExchange64Effect)
+					if !ok {
+						t.Fatal("wrong XCHG primitive type")
+					}
+					pc, activation, read, write = e.PC, e.Context, e.ReadAccess, e.WriteAccess
+				case x86asm.XADD:
+					e, ok := b.PrimitiveEffects[j].(LockedExchangeAdd64Effect)
+					if !ok {
+						t.Fatal("wrong XADD primitive type")
+					}
+					pc, activation, read, write = e.PC, e.Context, e.ReadAccess, e.WriteAccess
+				}
+				if activation != context || pc != testEntry+11 || read != j*5+1 || write != j*5+2 {
+					t.Fatal("collapsed dynamic RMW", b.PrimitiveEffects[j])
+				}
+				for _, index := range []int{read, write} {
+					if b.Accesses[index].PC != pc || b.Accesses[index].Context != context {
+						t.Fatal("RMW access borrowed another activation", index)
+					}
+				}
+				i, err := c.InstructionAt(t.Context(), pc, context)
+				if err != nil || i.Op != tc.op {
+					t.Fatal(i, err)
+				}
+				for _, wrong := range []string{"", "/foreign"} {
+					_, err := c.InstructionAt(t.Context(), pc, wrong)
+					var refusal *Refusal
+					if !errors.As(err, &refusal) || refusal.PC != pc || refusal.Premise != "transition-inspection" {
+						t.Fatal("RMW context was not the deciding refusal", wrong, err)
+					}
+				}
+			}
+			stateInheritedInputs(t, prior.checked.bound, b)
+			prefix := prior.checked.bound
+			if !reflect.DeepEqual(prefix.Accesses, b.Accesses[:len(prefix.Accesses)]) || !reflect.DeepEqual(prefix.Instructions, b.Instructions[:len(prefix.Instructions)]) {
+				t.Fatal("continuation changed the first activation's access/instruction prefix")
+			}
+			// The exact prefix fits an allowance smaller than the whole derivation. A
+			// continuation must inherit it rather than resetting it at the second CALL.
+			limited, err := CheckTransition(t.Context(), im, f, first, TransitionLimits{RelationLimits: RelationLimits{Work: prior.checked.work + 10}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			failed, err := CheckTransitionContinuation(t.Context(), limited, p)
+			transitionRefused(t, failed, err)
+			for _, choice := range []TransitionExpansion{{PC: testEntry + 11}, {PC: testEntry + 11, Context: "/foreign"}, {PC: setPC, Context: "/foreign"}, {PC: testEntry + 5, Context: ctx1}} {
+				q := p
+				q.Expansions = append(append([]TransitionExpansion(nil), p.Expansions...), choice)
+				failed, err := CheckTransitionContinuation(t.Context(), prior, q)
+				transitionRefused(t, failed, err)
+				var refusal *Refusal
+				if !errors.As(err, &refusal) || refusal.PC != choice.PC || refusal.Premise != "transition-expansion" {
+					t.Fatal("wrong-context choice was not the deciding refusal", choice, err)
+				}
+			}
+		})
 	}
-	first, err := ProposeTransition(t.Context(), im, testEntry+5, TransitionLimits{}, choices[0], choices[2], choices[3])
-	if err != nil {
-		t.Fatal(err)
-	}
-	prior, err := CheckTransition(t.Context(), im, f, first, TransitionLimits{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, err := CheckTransitionContinuation(t.Context(), prior, p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b := c.checked.bound
-	if len(b.PrimitiveEffects) != 2 || len(b.Frames) != 0 || len(b.Accesses) != 10 {
-		t.Fatal("incomplete repeated activation effects", len(b.Accesses))
-	}
-	for j, context := range []string{ctx1, ctx2} {
-		e := b.PrimitiveEffects[j].(LockedCompareExchange64Effect)
-		if e.Context != context || e.PC != testEntry+11 || e.ReadAccess != j*5+1 || e.WriteAccess != j*5+2 {
-			t.Fatal("collapsed dynamic RMW", e)
+}
+
+func TestTransitionExchangePreservesUndefinedFlags(t *testing.T) {
+	for _, producer := range []struct {
+		name, code string
+		clear      bool
+	}{
+		{"byte-test", "84c0", false},
+		{"self-xor", "31c0", true},
+	} {
+		for _, exchange := range []string{"48871424", "f048871424"} {
+			t.Run(producer.name+"/"+exchange, func(t *testing.T) {
+				prefix := hexBytes(t, producer.code)
+				rmw := hexBytes(t, exchange)
+				code := append(append(prefix, rmw...), 0xc3)
+				im := image(t, code)
+				at := testEntry + uint64(len(prefix))
+				cut := at + uint64(len(rmw))
+				f := stateFace(16, 0)
+				f.Conditions.Locked64 = Locked64Model
+				first, err := ProposeTransition(t.Context(), im, at, TransitionLimits{}, TransitionExpansion{PC: testEntry})
+				if err != nil {
+					t.Fatal(err)
+				}
+				prior, err := CheckTransition(t.Context(), im, f, first, TransitionLimits{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				before := prior.checked.bound.Flags
+				if before.AF != (TransitionFlag{}) {
+					t.Fatal("producer did not establish undefined AF", before.AF)
+				}
+				p, err := ProposeTransition(t.Context(), im, cut, TransitionLimits{}, TransitionExpansion{PC: testEntry}, TransitionExpansion{PC: at})
+				if err != nil {
+					t.Fatal(err)
+				}
+				next, err := CheckTransitionContinuation(t.Context(), prior, p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if next.checked.bound.Flags != before || next.checked.flags != prior.checked.flags {
+					t.Fatal("XCHG changed flag definedness, preservation, value identity or private predicates")
+				}
+				stateInheritedInputs(t, prior.checked.bound, next.checked.bound)
+				direct, err := CheckTransition(t.Context(), im, f, p, TransitionLimits{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertTransitionAlpha(t, direct, next)
+				flags := func(f TransitionFlags) []TransitionFlag { return []TransitionFlag{f.CF, f.ZF, f.OF, f.SF, f.AF, f.PF} }
+				for _, c := range []TransitionCertificate{prior, next, direct} {
+					for j, flag := range flags(c.checked.bound.Flags) {
+						original := flags(before)[j]
+						if flag.Defined != original.Defined || flag.Preserved != original.Preserved || flag.Value.Valid() != original.Value.Valid() {
+							t.Fatal("XCHG changed public flag status", j)
+						}
+						if j != 4 && (!flag.Defined || flag.Preserved || !flag.Value.Valid()) {
+							t.Fatal("missing producer flag relation", j)
+						}
+					}
+					for _, input := range []uint64{0, 1, 127, 128, 255, 256, ^uint64(0)} {
+						result := byte(input)
+						if producer.clear {
+							result = 0
+						}
+						want := [6]bool{false, result == 0, false, result&128 != 0, false, bits.OnesCount8(result)%2 == 0}
+						values := map[br.Term]uint64{c.checked.bound.InitialRegisters[RAX]: input}
+						for j, flag := range flags(c.checked.bound.Flags) {
+							if j != 4 && (stateEval(t, flag.Value, values) != 0) != want[j] {
+								t.Fatal("XCHG changed a defined flag value", j, input)
+							}
+						}
+						for j, predicate := range c.checked.flags {
+							if !predicate.Valid() || predicate.Sort() != br.Bool() || (stateEval(t, predicate, values) != 0) != [3]bool{want[0], want[1], want[3] != want[2]}[j] {
+								t.Fatal("XCHG changed private predicate", j, input)
+							}
+						}
+					}
+				}
+			})
 		}
-		i, err := c.InstructionAt(t.Context(), e.PC, context)
-		if err != nil || i.Op != x86asm.CMPXCHG {
-			t.Fatal(i, err)
-		}
-	}
-	stateInheritedInputs(t, prior.checked.bound, b)
-	// The exact prefix fits an allowance smaller than the whole derivation. A
-	// continuation must inherit it rather than resetting it at the second CALL.
-	limited, err := CheckTransition(t.Context(), im, f, first, TransitionLimits{RelationLimits: RelationLimits{Work: prior.checked.work + 10}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	failed, err := CheckTransitionContinuation(t.Context(), limited, p)
-	transitionRefused(t, failed, err)
-	for _, choice := range []TransitionExpansion{{PC: testEntry + 11}, {PC: testEntry + 18, Context: "/foreign"}, {PC: testEntry + 5, Context: ctx1}} {
-		q := p
-		q.Expansions = append(append([]TransitionExpansion(nil), p.Expansions...), choice)
-		failed, err := CheckTransitionContinuation(t.Context(), prior, q)
-		transitionRefused(t, failed, err)
 	}
 }
 
@@ -518,7 +663,16 @@ func FuzzTransitionAtomicValues(f *testing.F) {
 	for phase := uint8(0); phase < 16; phase++ {
 		f.Add(uint64(42), uint64(42), uint64(99), phase<<4|1, uint8(4), []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})
 	}
+	for kind := uint8(1); kind <= 2; kind++ {
+		for _, v := range []uint64{0, 15, 1<<63 - 1, 1 << 63, ^uint64(0)} {
+			f.Add(v, v, ^v, uint8(0), kind<<6|4, []byte{255, 128, 17, 0})
+		}
+	}
+	for _, v := range []uint64{15, 1<<63 - 1, ^uint64(0)} {
+		f.Add(v, uint64(0), uint64(1), uint8(0), uint8(2<<6|4), []byte{})
+	}
 	f.Fuzz(func(t *testing.T, current, old, replacement uint64, alias, condition uint8, responses []byte) {
+		atomicPermissionProperty(t, condition>>6, alias, condition, byte(current), byte(old), int8(replacement))
 		ccs := []uint8{2, 3, 4, 5, 6, 7, 12, 13, 14, 15}
 		cc := ccs[int(condition)%len(ccs)]
 		dst := alias % 16
@@ -535,7 +689,8 @@ func FuzzTransitionAtomicValues(f *testing.F) {
 		if phase&1 != 0 {
 			program = append(program, query)
 		}
-		program = append(program, to.Descriptor{Intent: to.Intent{Operation: to.LockedCompareExchange, Base: 4, Src: 2}, Encoding: to.Encoding{Form: to.LOCKCMPXCHG0FB1, REX: 0x48, SIB: true}})
+		rmwKind := int(condition>>6) % 3
+		program = append(program, to.Descriptor{Intent: to.Intent{Operation: []to.Operation{to.LockedCompareExchange, to.LockedExchange, to.LockedExchangeAdd}[rmwKind], Base: 4, Src: 2}, Encoding: to.Encoding{Form: []to.Form{to.LOCKCMPXCHG0FB1, to.XCHG87, to.LOCKXADD0FC1}[rmwKind], REX: 0x48, SIB: true}})
 		if phase&2 != 0 {
 			program = append(program, query)
 		}

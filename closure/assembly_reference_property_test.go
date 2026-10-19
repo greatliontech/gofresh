@@ -9,6 +9,7 @@ import (
 
 	br "github.com/greatliontech/gofresh/internal/bitrelation"
 	"github.com/greatliontech/gofresh/internal/nativeproof"
+	"golang.org/x/arch/x86/x86asm"
 )
 
 // This bounded grammar varies real instruction operands and effects: eight
@@ -50,7 +51,13 @@ func assemblyReferencePropertyBody(shape uint16, literal uint64) assemblyReferen
 	return p
 }
 
-func (p assemblyReferencePropertyProgram) oracle(current, old, replacement uint64) assemblyReferenceResult {
+type assemblyReferenceBooleanOracle struct {
+	Value    uint64
+	Result   bool
+	Accesses []assemblyReferenceAccess
+}
+
+func (p assemblyReferencePropertyProgram) oracle(current, old, replacement uint64) assemblyReferenceBooleanOracle {
 	comparison, next := old, replacement
 	if p.swapped {
 		comparison, next = replacement, old
@@ -65,13 +72,16 @@ func (p assemblyReferencePropertyProgram) oracle(current, old, replacement uint6
 		value = p.constant
 		accesses = append(accesses, assemblyReferenceAccess{true, false, value})
 	}
-	return assemblyReferenceResult{Value: value, Result: success != p.inverted, Accesses: accesses}
+	return assemblyReferenceBooleanOracle{Value: value, Result: success != p.inverted, Accesses: accesses}
 }
 
-func assemblyReferencePropertyResult(t testing.TB, got, want assemblyReferenceResult) {
+func assemblyReferencePropertyResult(t testing.TB, got assemblyReferenceResult, want assemblyReferenceBooleanOracle) {
 	t.Helper()
-	if got.Value != want.Value || got.Result != want.Result || !slices.Equal(got.Accesses, want.Accesses) {
+	if got.Value != want.Value || assemblyReferenceBool(t, got.Result) != want.Result || !slices.Equal(got.Accesses, want.Accesses) {
 		t.Fatalf("relation = %+v; integer oracle = %+v", got, want)
+	}
+	if len(got.Atomics) != 1 || got.Atomics[0].Kind != x86asm.CMPXCHG || got.Atomics[0].ReadAccess != 0 || got.Atomics[0].WriteAccess != 1 {
+		t.Fatalf("generated CAS reference lost its indivisible occurrence: %+v", got.Atomics)
 	}
 }
 
@@ -96,7 +106,7 @@ func FuzzAssemblyReferenceBodyAndPrivateFrame(f *testing.F) {
 			assemblyReferencePropertyResult(t, assemblyReferenceUnitApply(t, r, value, old, replacement), p.oracle(value, old, replacement))
 		}
 
-		if r.frame.arguments != ([3]assemblyReferenceSlot{{8, 8}, {16, 8}, {24, 8}}) || r.frame.result != (assemblyReferenceSlot{32, 1}) || r.frame.size != 33 {
+		if !slices.Equal(r.frame.arguments, []assemblyReferenceSlot{{8, 8}, {16, 8}, {24, 8}}) || r.frame.result != (assemblyReferenceSlot{32, 1}) || r.frame.size != 33 {
 			t.Fatal("typed ABI0 layout changed")
 		}
 		// Retain every administrative access in order, but project only the

@@ -12,8 +12,13 @@ import (
 // independently proved false. Register CMP and nonbyte TEST retain their ordinary
 // discovery behavior; memory CMP and byte TEST are distinct operand families.
 func TransitionExpansionRequired(i x86asm.Inst) bool {
-	if i.Op == x86asm.CALL || i.Op == x86asm.SYSCALL || i.Op == x86asm.XOR || i.Op == x86asm.CMPXCHG || isTransitionSet(i.Op) || i.Op == x86asm.NOP {
+	if i.Op == x86asm.CALL || i.Op == x86asm.SYSCALL || i.Op == x86asm.XOR || i.Op == x86asm.CMPXCHG || i.Op == x86asm.XCHG || i.Op == x86asm.XADD || isTransitionSet(i.Op) || i.Op == x86asm.NOP {
 		return true
+	}
+	if i.Op == x86asm.ADD {
+		_, left := i.Args[0].(x86asm.Reg)
+		_, right := i.Args[1].(x86asm.Reg)
+		return left && right
 	}
 	if i.Op == x86asm.CMP {
 		for _, arg := range i.Args {
@@ -53,9 +58,9 @@ func transitionEncoding(im *Image, pc uint64) (x86asm.Inst, []byte, error) {
 	if err != nil {
 		return i, nil, err
 	}
-	if len(b) >= 5 && b[0] == 0xf0 {
-		// LOCK belongs to this exact REX.W memory CMPXCHG, not a separate step.
-		if i.Op != x86asm.CMPXCHG || b[1] < 0x48 || b[1] > 0x4f || b[2] != 0x0f || b[3] != 0xb1 {
+	if len(b) > 0 && b[0] == 0xf0 {
+		// LOCK belongs to the selected full-width memory RMW, not a separate step.
+		if len(b) < 4 || b[1] < 0x48 || b[1] > 0x4f || !(i.Op == x86asm.CMPXCHG && b[2] == 0x0f && b[3] == 0xb1 || i.Op == x86asm.XADD && b[2] == 0x0f && b[3] == 0xc1 || i.Op == x86asm.XCHG && b[2] == 0x87) {
 			return i, nil, refuse(pc, "transition-form", "unsupported locked instruction")
 		}
 		copy := i
@@ -113,7 +118,42 @@ func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
 		if len(b) == 1 && b[0] == 0x90 || len(b) == 2 && b[0] == 0x66 && b[1] == 0x90 {
 			return nil
 		}
+		// 0F 1F /0 is an address-shaped no-op, not a memory read. Prefix
+		// validation has already excluded segment/address overrides and repeats.
+		if len(b) >= 3 && b[0] == 0x0f && b[1] == 0x1f && b[2]&0x38 == 0 && i.Args[1] == nil {
+			return nil
+		}
 		return bad()
+	}
+	if i.Op == x86asm.XCHG || i.Op == x86asm.XADD {
+		at := 0
+		if len(b) > 0 && b[0] == 0xf0 {
+			at++
+		}
+		if i.Op == x86asm.XADD && at == 0 {
+			return bad()
+		}
+		if len(b) < at+3 || b[at] < 0x48 || b[at] > 0x4f {
+			return bad()
+		}
+		at++
+		if i.Op == x86asm.XADD {
+			if len(b) < at+3 || b[at] != 0x0f || b[at+1] != 0xc1 {
+				return bad()
+			}
+			at += 2
+		} else {
+			if b[at] != 0x87 {
+				return bad()
+			}
+			at++
+		}
+		mem, ok := i.Args[0].(x86asm.Mem)
+		_, source := fullRegister(i.Args[1])
+		if b[at]&0xc0 == 0xc0 || !ok || !source || mem.Segment != 0 || !transitionMemory(mem) || i.MemBytes != 8 || i.DataSize != 64 {
+			return bad()
+		}
+		return nil
 	}
 	if i.Op == x86asm.CMPXCHG {
 		mem, ok := i.Args[0].(x86asm.Mem)
@@ -297,7 +337,7 @@ func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
 		return bad()
 	}
 	if reg(i.Args[1], w) || i.Op == x86asm.CMP && memory(i.Args[1]) {
-		if !(i.Op == x86asm.CMP && (op == 0x39 || op == 0x3b) || i.Op == x86asm.TEST && (op == 0x85 || op == 0x84)) {
+		if !(i.Op == x86asm.CMP && (op == 0x39 || op == 0x3b) || i.Op == x86asm.TEST && (op == 0x85 || op == 0x84) || i.Op == x86asm.ADD && (op == 0x01 || op == 0x03) && len(b) == at+2 && b[at+1]&0xc0 == 0xc0) {
 			return bad()
 		}
 		return nil

@@ -184,7 +184,13 @@ func (m *transitionChecker) validate() error {
 			}
 		}
 	}
-	return m.err
+	if err := m.validateReturnContext(); err != nil {
+		return err
+	}
+	if err := m.validatePrivateFrame(); err != nil {
+		return err
+	}
+	return m.validateEntryRelations()
 }
 
 func (m *transitionChecker) permission(s RelativeSpan, kind AccessKind) bool {

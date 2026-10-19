@@ -55,6 +55,7 @@ type stateAccess struct {
 }
 
 type stateRMW struct {
+	kind                                             to.Operation
 	instruction, readAccess                          int
 	before, compare, replacement, after, accumulator uint64
 	success                                          bool
@@ -452,6 +453,41 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 		r.accesses = append(r.accesses, stateAccess{instruction: index, write: write, off: off, width: width / 8, context: r.context})
 		return off
 	}
+	if i.Operation == to.LockedExchange || i.Operation == to.LockedExchangeAdd {
+		off := access(false)
+		var current uint64
+		oldPointer := r.memory[off].ptr
+		for lane := uint8(0); lane < 8; lane++ {
+			b := r.memory[off.add(int64(lane))]
+			current |= uint64(b.value) << (8 * lane)
+			if b.ptr != r.memory[off].ptr || b.lane != lane {
+				oldPointer = statePointer{}
+			}
+		}
+		r.accesses[len(r.accesses)-1].value = current
+		q := stateRMW{kind: i.Operation, instruction: index, context: r.context, readAccess: len(r.accesses) - 1, before: current, replacement: r.regs[i.Src], after: r.regs[i.Src], accumulator: current}
+		pointer := r.ptrs[i.Src]
+		if i.Operation == to.LockedExchangeAdd {
+			var carry uint64
+			q.after, carry = bits.Add64(current, q.replacement, 0)
+			z, x, y := q.after, current, q.replacement
+			r.flags = [6]bool{carry != 0, z == 0, ^(x^y)&(x^z)&(1<<63) != 0, z>>63 != 0, (x^y^z)&16 != 0, bits.OnesCount8(byte(z))%2 == 0}
+			r.writer = i.Operation
+			pointer = statePointer{}
+		}
+		access(true) // Evaluate with the incoming base even when Base == Src.
+		r.accesses[len(r.accesses)-1].value = q.after
+		for lane := uint8(0); lane < 8; lane++ {
+			b := stateByte{value: byte(q.after >> (8 * lane)), ptr: pointer}
+			if pointer.valid {
+				b.lane = lane
+			}
+			r.memory[off.add(int64(lane))], r.frame[off.add(int64(lane))] = b, true
+		}
+		r.regs[i.Src], r.ptrs[i.Src], r.written[i.Src], r.writtenBits[i.Src] = current, oldPointer, true, ^uint64(0)
+		r.primitives = append(r.primitives, q)
+		return
+	}
 	if i.Operation == to.LockedCompareExchange || i.Operation == to.CompareMemory || i.Operation == to.CompareFromMemory || i.Operation == to.CompareMemoryImmediate {
 		off := access(false)
 		var current uint64
@@ -584,15 +620,19 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 			r.ptrs[i.Dst].off -= int64(y)
 		}
 		r.writer = to.Subtract
-	case to.Add:
+	case to.Add, to.AddRegister:
 		x, y := r.regs[i.Dst], i.Immediate
+		if i.Operation == to.AddRegister {
+			y = r.regs[i.Src]
+			r.ptrs[i.Dst] = statePointer{}
+		}
 		z, carry := bits.Add64(x, y, 0)
 		r.regs[i.Dst] = z
 		r.flags = [6]bool{carry != 0, z == 0, ^(x^y)&(x^z)&(1<<63) != 0, z>>63 != 0, (x^y^z)&16 != 0, bits.OnesCount8(byte(z))%2 == 0}
 		if r.ptrs[i.Dst].valid {
 			r.ptrs[i.Dst].off += int64(y)
 		}
-		r.writer = to.Add
+		r.writer = i.Operation
 	case to.And:
 		r.regs[i.Dst] &= i.Immediate
 		z := r.regs[i.Dst]
@@ -1212,6 +1252,9 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 		}
 	}
 	for j, f := range []TransitionFlag{b.Flags.CF, b.Flags.ZF, b.Flags.OF, b.Flags.SF, b.Flags.AF, b.Flags.PF} {
+		if (want.writer == to.AddRegister || want.writer == to.LockedExchangeAdd) && !f.Value.Valid() {
+			t.Fatal("addition lost a required arithmetic flag relation", j)
+		}
 		defined := want.writer != to.And && want.writer != to.Clear32 && want.writer != to.Test && want.writer != to.TestImmediate || j != 4
 		if f.Preserved != (want.writer == 0) || f.Defined != defined || !defined && f.Value.Valid() {
 			t.Fatal("arithmetic flag defined/preserved/value status differs", j, f)
@@ -1243,7 +1286,7 @@ func stateInheritedInputs(t testing.TB, original, current TransitionBound) {
 	if original.InitialFS != current.InitialFS || len(current.Abstractions) < len(original.Abstractions) || !slices.Equal(current.Abstractions[:len(original.Abstractions)], original.Abstractions) {
 		t.Fatal("continuation replaced thread input or analysis abstraction origins")
 	}
-	if current.Origin != original.Origin || current.InitialRegisters != original.InitialRegisters || current.InitialPredicates != original.InitialPredicates ||
+	if current.Origin != original.Origin || current.EntryPredicate != original.EntryPredicate || current.InitialRegisters != original.InitialRegisters || current.InitialPredicates != original.InitialPredicates ||
 		!slices.Equal(current.InitialMemory, original.InitialMemory) || !slices.Equal(current.Words, original.Words) ||
 		!slices.Equal(current.ExcludedOrigins, original.ExcludedOrigins) || !reflect.DeepEqual(current.Interface, original.Interface) {
 		t.Fatal("continuation replaced original terms, memory, or origin/interface premises")

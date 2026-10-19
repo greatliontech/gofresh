@@ -11,7 +11,9 @@ import (
 func TestTransitionMixedPrimitiveOrderSurvivesOverwrites(t *testing.T) {
 	query := to.Descriptor{Intent: to.Intent{Operation: to.CPUID}, Encoding: to.Encoding{Form: to.CPUID0FA2}}
 	rmw := to.Descriptor{Intent: to.Intent{Operation: to.LockedCompareExchange, Base: 4, Src: 2}, Encoding: to.Encoding{Form: to.LOCKCMPXCHG0FB1, REX: 0x48, SIB: true}}
-	program := []to.Descriptor{query, rmw, query, rmw}
+	exchange := to.Descriptor{Intent: to.Intent{Operation: to.LockedExchange, Base: 4, Src: 2}, Encoding: to.Encoding{Form: to.XCHG87, REX: 0x48, SIB: true}}
+	xadd := to.Descriptor{Intent: to.Intent{Operation: to.LockedExchangeAdd, Base: 4, Src: 2}, Encoding: to.Encoding{Form: to.LOCKXADD0FC1, REX: 0x48, SIB: true}}
+	program := []to.Descriptor{query, rmw, exchange, query, xadd, rmw}
 	for _, reg := range []uint8{0, 1, 2, 3} {
 		program = append(program, to.Descriptor{Intent: to.Intent{Operation: to.MoveImmediate32, Dst: reg}, Encoding: to.Encoding{Form: to.MOVB8Imm32}})
 	}
@@ -31,7 +33,7 @@ func TestTransitionMixedPrimitiveOrderSurvivesOverwrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := c.checked.bound
-	if len(want.primitives) != 6 {
+	if len(want.primitives) != 8 {
 		t.Fatal("fixture lost mixed stream")
 	}
 	// Independent permutations alter only the projected event order: the final

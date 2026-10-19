@@ -1,5 +1,45 @@
 package bitrelation
 
+// conjunctionContradiction checks that one conjunct and its exact negation
+// occur beneath Boolean ANDs. It never descends through OR, ITE or negation:
+// a predicate in those positions need not hold when the whole formula holds.
+func (c *checker) conjunctionContradiction(a, b *node) bool {
+	if a.op != And || !a.sort.IsBool() || !b.sort.IsBool() || !constant(b, 0) {
+		return false
+	}
+	pending := []*node{a}
+	var leaves []*node
+	seen := map[*node]bool{}
+	for len(pending) != 0 {
+		if c.err = c.e.m.tick(); c.err != nil {
+			return false
+		}
+		n := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		if seen[n] {
+			continue
+		}
+		seen[n] = true
+		if n.op == And {
+			pending = append(pending, n.args[0], n.args[1])
+			continue
+		}
+		for _, other := range leaves {
+			if c.err = c.e.m.tick(); c.err != nil {
+				return false
+			}
+			if n.op == Not && c.eq(n.args[0], other) || other.op == Not && c.eq(other.args[0], n) {
+				return c.err == nil
+			}
+			if c.err != nil {
+				return false
+			}
+		}
+		leaves = append(leaves, n)
+	}
+	return false
+}
+
 // signBoundary relates the unsigned lower half to nonnegative two's-complement
 // values. The exact half-range bound and zero comparison are both necessary.
 func (c *checker) signBoundary(a, b *node) bool {

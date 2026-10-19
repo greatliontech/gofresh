@@ -124,6 +124,9 @@ func (p *proposer) normalize(t Term) normal {
 		return normal{}
 	}
 	step := p.emit(Congruence, t, cur, premises...)
+	if p.err != nil {
+		return normal{}
+	}
 	// Every proposed local rewrite has its own certificate step. Recursively
 	// reducing the newly formed expression lets an ITE expose an interval rule.
 	if rule, next, ok := p.rewrite(cur); ok && p.err == nil {

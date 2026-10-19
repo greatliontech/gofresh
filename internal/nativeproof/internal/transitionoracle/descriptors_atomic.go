@@ -8,10 +8,34 @@ func atomicDescriptors(yield func(Descriptor) bool) {
 	if !yield(Descriptor{Intent: Intent{Operation: NoOp}, Encoding: Encoding{Form: NOP90}}) || !yield(Descriptor{Intent: Intent{Operation: NoOp}, Encoding: Encoding{Form: NOP6690}}) {
 		return
 	}
+	// All /0 address spellings, including arbitrary indexes and absent bases:
+	// these bytes affect decoding length but never require a usable pointer.
+	for mode := 0; mode < 4; mode++ {
+		for rm := 0; rm < 8; rm++ {
+			n := 1
+			if mode != 3 && rm == 4 {
+				n = 256
+			}
+			for sib := 0; sib < n; sib++ {
+				if !yield(Descriptor{Intent: Intent{Operation: NoOp}, Encoding: Encoding{Form: NOP0F1F, NOPModRM: uint8(mode*64 + rm), NOPSIB: uint8(sib)}}) {
+					return
+				}
+			}
+		}
+	}
 	baseDescriptors(func(d Descriptor) bool {
 		i, e := d.Intent, d.Encoding
 		if i.FS {
 			return true
+		}
+		if i.Operation == MoveRegister && i.Width == 0 && (e.Form == MOV89 || e.Form == MOV8B) {
+			form := ADD01
+			if e.Form == MOV8B {
+				form = ADD03
+			}
+			if !yield(Descriptor{Intent: Intent{Operation: AddRegister, Dst: i.Dst, Src: i.Src}, Encoding: Encoding{Form: form, REX: e.REX}}) {
+				return false
+			}
 		}
 		if (i.Operation == Store || i.Operation == Load) && i.Width != 8 {
 			if i.Operation == Store {
@@ -20,9 +44,11 @@ func atomicDescriptors(yield func(Descriptor) bool) {
 					return false
 				}
 				if i.Width == 0 {
-					i.Operation, e.Form = LockedCompareExchange, LOCKCMPXCHG0FB1
-					if !yield(Descriptor{i, e}) {
-						return false
+					for j, form := range []Form{LOCKCMPXCHG0FB1, XCHG87, LOCKXCHG87, LOCKXADD0FC1} {
+						i.Operation, e.Form = []Operation{LockedCompareExchange, LockedExchange, LockedExchange, LockedExchangeAdd}[j], form
+						if !yield(Descriptor{i, e}) {
+							return false
+						}
 					}
 				}
 			} else {

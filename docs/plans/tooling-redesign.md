@@ -179,14 +179,18 @@
     guards; distinguish expected incompatibility from a demonstrated defect.
   - [ ] 5.1w Replace toolchain-variation approval with generic implementation
     verification before resuming 5.2d/5.2e or releasing migrated consumers.
-    Follow this remaining execution order: resume conditional testAtomic64 at
-    5.1w.2b.3b.2a.2.2.2.2.10 and complete
+    Follow this remaining execution order: compose the actual runtime.check call at
+    5.1w.2b.3b.2a.2.2.2.2.11 and complete
     required bootstrap and compiler
     correspondence; integrate useful stock/custom production reuse; remove the
     approval registry and release Gofresh at 5.1w.7; finish Stipulator's
     clean-break migration and delivery at 5.2; complete remaining fleet work;
     then run the deferred full performance pass. Bring other work ahead of the
     active chunk only for a demonstrated blocker to completing it.
+    Qualify these chunks with direct suites, targeted probes and records-only
+    checks. Keep Stipulator witness execution out of the current delivery gates
+    while its verification path is being corrected; qualify the corrected tool
+    at its delivery step rather than treating the installed tool as a prerequisite.
     Preserve the existing compiler/language and executor premises, with explicit
     foundational machine and primitive-effect semantics. No implementation-name
     assertion or relabeled primitive replaces a property that needs proof.
@@ -501,12 +505,39 @@
                           Deliver the tooling features through the queued breaking
                           changes and normal releases. Cerebro's owner retains
                           application E2E validation; it is not a tooling delivery gate.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.10 Complete conditional
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.10 Complete conditional
                           testAtomic64 correspondence through remaining Load64,
                           Store64, Xadd64 and Xchg64 operations and its actual
                           prologue/epilogue. Settle the required reference, native
                           and frame mechanisms before implementation; preserve the
                           selected build and complete exceptional-path coverage.
+                          Establish a fresh callee-entry relation with owned context
+                          pointer provenance, current unsigned guard-word inequality,
+                          a satisfiable interface and protected incoming continuation;
+                          prove each transfer for all admitted states while retaining
+                          arbitrary represented source globals. Derive stack/frame
+                          restoration through actual PUSH/POP and RET, including all
+                          administrative accesses and preserved pointer provenance.
+                          Bind any private-frame projection's ownership and lifetime
+                          premise at that fresh root, covering preexisting observable
+                          aliases and later scratch reuse. Keep concrete residual
+                          bytes and all primitive ordering; derive child ownership
+                          from the parent's retained discipline at .11 rather than
+                          treating CALL or preserved context as exclusive ownership.
+                          Interpret the selected Load64 Go body and selected assembly
+                          bodies for word-returning and void calls with signed or
+                          unsigned word arguments. Cover implicit-lock memory XCHG,
+                          locked XADD and its actual returned-value ADD, and the
+                          executed multi-byte NOP without inventing a data read.
+                          Generalize typed result-use and return endpoints while
+                          retaining fixed representation, effect order, ownership,
+                          entry predicates and cumulative limits. Require optimized
+                          stock/custom complete positives, generated all-input
+                          reference/frame controls, feasible slow/throwing-arm
+                          negatives, nonvacuity, width, alias, restored-context and
+                          protected-return controls, plus cancellation and bounds.
+                          Keep actual caller-premise discharge at .11 and root
+                          applicability at .13; no runtime grant follows here.
                         - [ ] 5.1w.2b.3b.2a.2.2.2.2.11 Check the conditional
                           runtime.check prefix through its actual testAtomic64 call
                           and return, composing the completed callee and its entry

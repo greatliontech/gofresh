@@ -66,19 +66,35 @@ func statePrimitiveBindings(t testing.TB, b TransitionBound, x stateLayout, want
 			}
 		case stateRMW:
 			e, ok := b.PrimitiveEffects[j].(LockedCompareExchange64Effect)
+			var terms []br.Term
+			var expected []uint64
+			switch q.kind {
+			case to.LockedExchange:
+				x, valid := b.PrimitiveEffects[j].(LockedExchange64Effect)
+				ok = valid
+				e.PC, e.Context, e.ReadAccess, e.WriteAccess, e.Before, e.After = x.PC, x.Context, x.ReadAccess, x.WriteAccess, x.Before, x.After
+				terms, expected = []br.Term{x.Before, x.Replacement, x.After, x.Register}, []uint64{q.before, q.replacement, q.after, q.accumulator}
+			case to.LockedExchangeAdd:
+				x, valid := b.PrimitiveEffects[j].(LockedExchangeAdd64Effect)
+				ok = valid
+				e.PC, e.Context, e.ReadAccess, e.WriteAccess, e.Before, e.After = x.PC, x.Context, x.ReadAccess, x.WriteAccess, x.Before, x.After
+				terms, expected = []br.Term{x.Before, x.Delta, x.After, x.Register}, []uint64{q.before, q.replacement, q.after, q.accumulator}
+			default:
+				success := uint64(0)
+				if q.success {
+					success = 1
+				}
+				terms, expected = []br.Term{e.Before, e.Compare, e.Replacement, e.After, e.Accumulator, e.Success}, []uint64{q.before, q.compare, q.replacement, q.after, q.accumulator, success}
+			}
 			if !ok || e.PC != x.pcs[q.instruction] || e.Context != q.context || e.ReadAccess != q.readAccess || e.WriteAccess != q.readAccess+1 || e.ReadAccess < 0 || e.WriteAccess >= len(b.Accesses) || b.Interface.Conditions.Locked64 != Locked64Model {
 				return fmt.Errorf("primitive %d locked occurrence/group differs", j)
 			}
-			success := uint64(0)
-			if q.success {
-				success = 1
-			}
-			for k, term := range []br.Term{e.Before, e.Compare, e.Replacement, e.After, e.Accumulator, e.Success} {
+			for k, term := range terms {
 				width := br.Bits(64)
 				if k == 5 {
 					width = br.Bool()
 				}
-				if term.Sort() != width || stateEval(t, term, known) != []uint64{q.before, q.compare, q.replacement, q.after, q.accumulator, success}[k] {
+				if term.Sort() != width || stateEval(t, term, known) != expected[k] {
 					return fmt.Errorf("locked scalar relation %d differs", k)
 				}
 			}

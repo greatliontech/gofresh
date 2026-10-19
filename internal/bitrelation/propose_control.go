@@ -3,11 +3,53 @@ package bitrelation
 // controlRewrite proposes oriented order/path/projection rules. Checker rule
 // recognition is separate: these patterns are search hints, never premises.
 func (p *proposer) controlRewrite(t Term) (Rule, Term, bool) {
+	if p.err != nil {
+		return 0, Term{}, false
+	}
 	n := t.n
 	tm := func(n *node) Term { return Term{n} }
 	result := func(rule Rule, t Term) (Rule, Term, bool) { return rule, t, true }
 	x, y := n.args[0], n.args[1]
 	switch n.op {
+	case And:
+		// Search only conjunction leaves. The emitted rule independently checks
+		// both occurrences and their scopes; this search result is not authority.
+		queue := []*node{n}
+		var positive, negative []*node
+		visited := map[*node]bool{}
+		for len(queue) != 0 {
+			if p.err = p.m.tick(); p.err != nil {
+				return 0, Term{}, false
+			}
+			at := queue[0]
+			queue = queue[1:]
+			if visited[at] {
+				continue
+			}
+			visited[at] = true
+			if at.op == And {
+				queue = append(queue, at.args[0], at.args[1])
+				continue
+			}
+			if at.op == Not {
+				negative = append(negative, at.args[0])
+			} else {
+				positive = append(positive, at)
+			}
+		}
+		for _, a := range positive {
+			for _, b := range negative {
+				if p.err = p.m.tick(); p.err != nil {
+					return 0, Term{}, false
+				}
+				if p.eq(a, b) {
+					return result(ConjunctionContradiction, p.con(Bool(), 0))
+				}
+				if p.err != nil {
+					return 0, Term{}, false
+				}
+			}
+		}
 	case ULT:
 		if constant(y, uint64(1)<<(x.sort.width-1)) {
 			return result(SignBoundary, p.make(Not, Bool(), 0, p.make(SLT, Bool(), 0, tm(x), p.con(x.sort, 0))))

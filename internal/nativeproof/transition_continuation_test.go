@@ -417,6 +417,7 @@ func assertTransitionRetainedExpressionUnion(t testing.TB, root TransitionCertif
 	}
 	visit(b.Origin)
 	visit(b.CutGuard)
+	visit(b.EntryPredicate)
 	visit(root.checked.coverageGuard)
 	for j, e := range root.checked.exclusions {
 		left, right := e.Roots()

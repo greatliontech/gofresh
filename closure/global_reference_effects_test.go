@@ -179,7 +179,7 @@ func TestGlobalReferenceCWDTextflagChangesBoolean(t *testing.T) {
 		if err != nil {
 			t.Fatal("valid shadowed reference could not be applied:", err)
 		}
-		if ordinary.Value != inverted.Value || ordinary.Result == inverted.Result || !slices.Equal(ordinary.Accesses, inverted.Accesses) {
+		if ordinary.Value != inverted.Value || assemblyReferenceBool(t, ordinary.Result) == assemblyReferenceBool(t, inverted.Result) || !slices.Equal(ordinary.Accesses, inverted.Accesses) {
 			t.Fatalf("shadow did not change only the derived Boolean: ordinary=%+v shadow=%+v", ordinary, inverted)
 		}
 	}
@@ -235,7 +235,7 @@ func TestGlobalReferenceSameValueWriteRejectsUnchangedInline(t *testing.T) {
 		}
 		wantResult, wantValue := []bool{first, second}[index], []uint64{middle, final}[index]
 		wantAccesses := []assemblyReferenceAccess{{false, true, args[0]}, {true, true, wantValue}, {false, false, wantValue}, {true, false, wantValue}}
-		if withWrite.Value != ordinary.Value || withWrite.Result != ordinary.Result || withWrite.Value != wantValue || withWrite.Result != wantResult || !slices.Equal(withWrite.Accesses, wantAccesses) {
+		if withWrite.Value != ordinary.Value || assemblyReferenceBool(t, withWrite.Result) != assemblyReferenceBool(t, ordinary.Result) || withWrite.Value != wantValue || assemblyReferenceBool(t, withWrite.Result) != wantResult || !slices.Equal(withWrite.Accesses, wantAccesses) {
 			t.Fatalf("phase %d did not preserve scalar results and retain the additional ordinary write: normal=%+v edited=%+v", index, ordinary, withWrite)
 		}
 	}
@@ -254,7 +254,7 @@ func TestGlobalReferenceSameValueWriteRejectsUnchangedInline(t *testing.T) {
 			t.Fatal("source continuation lost the exact checked reference application")
 		}
 		application := trace.calls[0]
-		if application.proof.at != changed.calls[index] || application.current != []uint64{intent.current, middle}[index] || application.value != []uint64{middle, final}[index] || application.result != []bool{first, second}[index] {
+		if application.proof.at != changed.calls[index] || application.current != []uint64{intent.current, middle}[index] || application.value != []uint64{middle, final}[index] || assemblyReferenceBool(t, application.result) != []bool{first, second}[index] {
 			t.Fatal("source application scalars differ before effect comparison")
 		}
 		var fromCall []assemblyReferenceAccess

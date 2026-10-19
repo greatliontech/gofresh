@@ -2,6 +2,7 @@ package closure
 
 import (
 	"context"
+	"go/constant"
 	"go/types"
 	"slices"
 	"strconv"
@@ -31,22 +32,60 @@ type assemblyReferencePermission struct {
 // ABI0 scratch (including R14); no operation here changes MXCSR or direction.
 type assemblyReferenceFrame struct {
 	frameSpace, targetSpace int
-	arguments               [3]assemblyReferenceSlot
+	arguments               []assemblyReferenceSlot
 	result                  assemblyReferenceSlot
+	resultType              types.Type
 	size                    int
 	permissions             []assemblyReferencePermission
 }
 
+const assemblyReferenceMaxArguments = 16
+
+func assemblyReferenceWordType(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	b, ok := t.Underlying().(*types.Basic)
+	return ok && (b.Kind() == types.Uint64 || b.Kind() == types.Int64)
+}
+
+func assemblyReferenceResultWidth(t types.Type) (int, bool) {
+	if t == nil {
+		return 0, false
+	}
+	if tuple, ok := t.(*types.Tuple); ok {
+		return 0, tuple.Len() == 0
+	}
+	if b, ok := t.Underlying().(*types.Basic); ok && b.Kind() == types.Bool {
+		return 1, true
+	}
+	return 8, assemblyReferenceWordType(t)
+}
+
 func assemblyReferenceABI(sig *types.Signature, sizes types.Sizes) (assemblyReferenceFrame, error) {
 	var f assemblyReferenceFrame
-	if sig == nil || sizes == nil || sig.Recv() != nil || sig.Variadic() || sig.TypeParams().Len() != 0 || sig.RecvTypeParams().Len() != 0 || sig.Params().Len() != 3 || sig.Results().Len() != 1 || !types.Identical(sig.Params().At(0).Type(), types.NewPointer(types.Typ[types.Uint64])) || !types.Identical(sig.Params().At(1).Type(), types.Typ[types.Uint64]) || !types.Identical(sig.Params().At(2).Type(), types.Typ[types.Uint64]) || !types.Identical(sig.Results().At(0).Type(), types.Typ[types.Bool]) {
+	if sig == nil || sizes == nil || sig.Recv() != nil || sig.Variadic() || sig.TypeParams().Len() != 0 || sig.RecvTypeParams().Len() != 0 || sig.Params().Len() < 1 || sig.Params().Len() > assemblyReferenceMaxArguments || sig.Results().Len() > 1 || !types.Identical(sig.Params().At(0).Type(), types.NewPointer(types.Typ[types.Uint64])) {
 		return f, assemblyReferenceError("unsupported exact typed reference interface")
 	}
+	for i := 1; i < sig.Params().Len(); i++ {
+		if !assemblyReferenceWordType(sig.Params().At(i).Type()) {
+			return f, assemblyReferenceError("reference scalar parameter is not a signed or unsigned word")
+		}
+	}
+	f.resultType = sig.Results()
+	if sig.Results().Len() == 1 {
+		f.resultType = sig.Results().At(0).Type()
+	}
+	resultWidth, valid := assemblyReferenceResultWidth(f.resultType)
+	if !valid {
+		return f, assemblyReferenceError("unsupported reference result interpretation")
+	}
 	word := sizes.Sizeof(types.Typ[types.Uintptr])
-	if word != 8 || sizes.Alignof(types.Typ[types.Uint64]) != 8 || sizes.Sizeof(types.Typ[types.Uint64]) != 8 || sizes.Sizeof(types.Typ[types.Bool]) != 1 {
+	if word != 8 || sizes.Alignof(types.Typ[types.Uint64]) != 8 || sizes.Sizeof(types.Typ[types.Uint64]) != 8 || sizes.Alignof(types.Typ[types.Int64]) != 8 || sizes.Sizeof(types.Typ[types.Int64]) != 8 || sizes.Sizeof(types.Typ[types.Bool]) != 1 || sizes.Alignof(types.Typ[types.Bool]) != 1 {
 		return f, assemblyReferenceError("selected widths/alignment do not describe amd64 ABI0")
 	}
 	f.frameSpace, f.targetSpace = 1, 2
+	f.arguments = make([]assemblyReferenceSlot, sig.Params().Len())
 	// ABI0 places its argument base one return word above entry SP. Parameters
 	// follow their selected typed alignments; results begin at pointer alignment.
 	next := int(word)
@@ -62,14 +101,19 @@ func assemblyReferenceABI(sig *types.Signature, sizes types.Sizes) (assemblyRefe
 		next += width
 	}
 	next = align(next, int(word))
-	f.result = assemblyReferenceSlot{next, int(sizes.Sizeof(sig.Results().At(0).Type()))}
+	if resultWidth != 0 && int(sizes.Sizeof(f.resultType)) != resultWidth {
+		return f, assemblyReferenceError("selected result width differs from its scalar interpretation")
+	}
+	f.result = assemblyReferenceSlot{next, resultWidth}
 	f.size = next + f.result.width
 	f.permissions = []assemblyReferencePermission{
 		{f.frameSpace, 0, int(word), true, false},
 		{f.frameSpace, int(word), next, true, false},
-		{f.frameSpace, next, f.size, true, true},
-		{f.targetSpace, 0, 8, true, true},
 	}
+	if resultWidth != 0 {
+		f.permissions = append(f.permissions, assemblyReferencePermission{f.frameSpace, next, f.size, true, true})
+	}
+	f.permissions = append(f.permissions, assemblyReferencePermission{f.targetSpace, 0, 8, true, true})
 	return f, nil
 }
 
@@ -94,7 +138,7 @@ type assemblyReferenceSymbolicAccess struct {
 // state. Only the source projection hides the proven disjoint administrative
 // frame. In particular an RMW always contributes both external accesses.
 type assemblyReferenceRelation struct {
-	inputs                    [3]br.Term // current memory, comparison, replacement -- independent
+	inputs                    []br.Term // current memory, then independent scalar argument words
 	value, result             br.Term
 	accesses                  []assemblyReferenceSymbolicAccess
 	definition                assemblyReferenceDefinition
@@ -208,11 +252,19 @@ func (x *assemblyReferenceMachine) word(cells []assemblyReferenceCell, at, width
 }
 
 func assemblyReferenceInterpret(m *assemblyReferenceMeter, definition assemblyReferenceDefinition, frame assemblyReferenceFrame) (*assemblyReferenceRelation, error) {
+	if err := m.Err(); err != nil {
+		return nil, err
+	}
+	if len(frame.arguments) < 1 || len(frame.arguments) > assemblyReferenceMaxArguments || len(frame.permissions) > m.limits.nodes {
+		return nil, assemblyReferenceError("invalid reference interface population")
+	}
+	frame.arguments = slices.Clone(frame.arguments)
+	frame.permissions = slices.Clone(frame.permissions)
 	if definition.symbol.abi != "ABI0" || definition.locals != 0 || definition.flags&4 == 0 || definition.flags & ^uint64(4|512) != 0 || definition.arguments != int64(frame.size-8) || frame.frameSpace == 0 || frame.targetSpace == 0 || frame.frameSpace == frame.targetSpace {
 		return nil, assemblyReferenceError("ABI0 frame, separated storage or zero-leaf prologue conditions disagree")
 	}
-	// The interpreter's scalar operands are full words and its one projected
-	// result is a byte. Consume the typed layout, without a second table of
+	// The interpreter's scalar operands are full words. Its optional result is
+	// a Boolean byte or full word. Consume the typed layout, without a table of
 	// parameter names or precomputed ABI offsets.
 	next := 8
 	for _, slot := range frame.arguments {
@@ -221,7 +273,8 @@ func assemblyReferenceInterpret(m *assemblyReferenceMeter, definition assemblyRe
 		}
 		next += slot.width
 	}
-	if frame.result.offset != next || frame.result.width != 1 || frame.size != next+frame.result.width {
+	resultWidth, valid := assemblyReferenceResultWidth(frame.resultType)
+	if !valid || frame.result.offset != next || frame.result.width != resultWidth || frame.size != next+resultWidth {
 		return nil, assemblyReferenceError("result layout disagrees with the scalar interface")
 	}
 	for i, permission := range frame.permissions {
@@ -253,7 +306,7 @@ func assemblyReferenceInterpret(m *assemblyReferenceMeter, definition assemblyRe
 	if err != nil {
 		return nil, err
 	}
-	x := &assemblyReferenceMachine{m: m, b: br.NewBuilder(m.limits.nodes), isa: kernel, r: assemblyReferenceRelation{definition: definition, frame: frame, private: make([]assemblyReferenceCell, frame.size), external: make([]assemblyReferenceCell, 8)}}
+	x := &assemblyReferenceMachine{m: m, b: br.NewBuilder(m.limits.nodes), isa: kernel, r: assemblyReferenceRelation{definition: definition, frame: frame, inputs: make([]br.Term, len(frame.arguments)), private: make([]assemblyReferenceCell, frame.size), external: make([]assemblyReferenceCell, 8)}}
 	scope := br.NewScope()
 	for i := range x.r.inputs {
 		x.r.inputs[i], err = x.b.Input(br.Bits(64), scope, uint64(i))
@@ -261,11 +314,11 @@ func assemblyReferenceInterpret(m *assemblyReferenceMeter, definition assemblyRe
 			return nil, err
 		}
 	}
-	pointer, err := x.b.Input(br.Bits(64), scope, 3)
+	pointer, err := x.b.Input(br.Bits(64), scope, uint64(len(x.r.inputs)))
 	if err != nil {
 		return nil, err
 	}
-	x.entrySP, err = x.b.Input(br.Bits(64), scope, 4)
+	x.entrySP, err = x.b.Input(br.Bits(64), scope, uint64(len(x.r.inputs)+1))
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +345,7 @@ func assemblyReferenceInterpret(m *assemblyReferenceMeter, definition assemblyRe
 	// architectural identities retained. SETcc before an overwrite stays unknown.
 	flagFields := []*nativeproof.TransitionFlag{&x.r.flags.CF, &x.r.flags.OF, &x.r.flags.SF, &x.r.flags.ZF, &x.r.flags.AF, &x.r.flags.PF}
 	for i, field := range flagFields {
-		t, err := x.b.Scratch(br.Bool(), scope, uint64(i+128))
+		t, err := x.b.Scratch(br.Bool(), scope, uint64(i+32+len(x.r.private)))
 		if err != nil {
 			return nil, err
 		}
@@ -301,8 +354,9 @@ func assemblyReferenceInterpret(m *assemblyReferenceMeter, definition assemblyRe
 	x.flags = x.predicates(x.r.flags)
 	x.seed(x.r.private, 0, 8, x.entryReturn, assemblyReferencePointer{})
 	x.seed(x.r.private, frame.arguments[0].offset, 8, pointer, assemblyReferencePointer{frame.targetSpace, 0})
-	x.seed(x.r.private, frame.arguments[1].offset, 8, x.r.inputs[1], assemblyReferencePointer{})
-	x.seed(x.r.private, frame.arguments[2].offset, 8, x.r.inputs[2], assemblyReferencePointer{})
+	for i := 1; i < len(frame.arguments); i++ {
+		x.seed(x.r.private, frame.arguments[i].offset, 8, x.r.inputs[i], assemblyReferencePointer{})
+	}
 	x.seed(x.r.external, 0, 8, x.r.inputs[0], assemblyReferencePointer{})
 	locked, returned := false, false
 	for index, statement := range definition.body {
@@ -323,7 +377,7 @@ func assemblyReferenceInterpret(m *assemblyReferenceMeter, definition assemblyRe
 			locked = true
 			continue
 		}
-		if locked && statement.op != "CMPXCHGQ" {
+		if _, supported := assemblyReferenceRMW(statement.op); locked && !supported {
 			return nil, assemblyReferenceError("LOCK does not prefix its supported RMW instruction")
 		}
 		if statement.op == "RET" {
@@ -357,20 +411,28 @@ func assemblyReferenceInterpret(m *assemblyReferenceMeter, definition assemblyRe
 	if !returned || locked {
 		return nil, assemblyReferenceError("complete body lacks its ordinary return")
 	}
-	byteResult := x.word(x.r.private, frame.result.offset, frame.result.width).value
-	x.r.result = x.make(br.Nonzero, br.Bool(), 0, byteResult)
-	canonical := x.make(br.BoolToBits, br.Bits(8), 0, x.r.result)
-	if x.err != nil {
-		return nil, x.err
-	}
-	x.r.booleanProof, err = br.Prove(m, byteResult, canonical, br.Limits{Nodes: m.limits.nodes, Work: m.limits.work})
-	if err != nil {
-		return nil, err
+	if frame.result.width != 0 {
+		x.r.result = x.word(x.r.private, frame.result.offset, frame.result.width).value
+		if frame.result.width == 1 {
+			byteResult := x.r.result
+			x.r.result = x.make(br.Nonzero, br.Bool(), 0, byteResult)
+			canonical := x.make(br.BoolToBits, br.Bits(8), 0, x.r.result)
+			if x.err != nil {
+				return nil, x.err
+			}
+			x.r.booleanProof, err = br.Prove(m, byteResult, canonical, br.Limits{Nodes: m.limits.nodes, Work: m.limits.work})
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	x.r.value = x.word(x.r.external, 0, 8).value
 	// Frame/address values and incoming scratch may not escape to the source
 	// projection, including through a partial scalar write that erased provenance.
-	roots := []br.Term{x.r.value, x.r.result}
+	roots := []br.Term{x.r.value}
+	if x.r.result.Valid() {
+		roots = append(roots, x.r.result)
+	}
 	for _, access := range x.r.accesses {
 		if access.space == frame.targetSpace {
 			roots = append(roots, access.value)
@@ -632,6 +694,18 @@ func assemblyReferenceCondition(op string) (x86asm.Op, bool) {
 	return 0, false
 }
 
+func assemblyReferenceRMW(op string) (x86asm.Op, bool) {
+	switch op {
+	case "CMPXCHGQ":
+		return x86asm.CMPXCHG, true
+	case "XADDQ":
+		return x86asm.XADD, true
+	case "XCHGQ":
+		return x86asm.XCHG, true
+	}
+	return 0, false
+}
+
 func (x *assemblyReferenceMachine) step(statement assemblyReferenceStatement, locked bool) error {
 	args := statement.args
 	if op, ok := assemblyReferenceCondition(statement.op); ok {
@@ -647,13 +721,13 @@ func (x *assemblyReferenceMachine) step(statement assemblyReferenceStatement, lo
 	if len(args) != 2 {
 		return assemblyReferenceError("unsupported body transfer or operand count: " + statement.op)
 	}
-	if statement.op == "CMPXCHGQ" {
-		if !locked || len(args[0]) != 1 {
-			return assemblyReferenceError("compare/exchange requires locked memory and a full register source")
+	if _, atomic := assemblyReferenceRMW(statement.op); atomic {
+		if statement.op != "XCHGQ" && !locked || len(args[0]) != 1 {
+			return assemblyReferenceError("RMW requires its lock semantics and a full register source")
 		}
 		reg, ok := assemblyReferenceRegisterName(args[0][0], 64)
 		if !ok {
-			return assemblyReferenceError("compare/exchange replacement is not a full register")
+			return assemblyReferenceError("RMW source is not a full register")
 		}
 		full, _, _, _ := nativeproof.RegisterAlias(reg)
 		source := x.r.registers[full]
@@ -673,16 +747,65 @@ func (x *assemblyReferenceMachine) step(statement assemblyReferenceStatement, lo
 		if err != nil {
 			return err
 		}
-		if source.pointer.space != 0 || x.r.registers[nativeproof.RAX].pointer.space != 0 {
+		if source.pointer.space != 0 || statement.op == "CMPXCHGQ" && x.r.registers[nativeproof.RAX].pointer.space != 0 {
 			return assemblyReferenceError("RMW operands carry escaping pointer representations")
 		}
-		result, err := x.isa.CompareExchange64(x.r.registers[nativeproof.RAX].value, current.value, source.value)
+		var memory br.Term
+		switch statement.op {
+		case "CMPXCHGQ":
+			result, err := x.isa.CompareExchange64(x.r.registers[nativeproof.RAX].value, current.value, source.value)
+			if err != nil {
+				return err
+			}
+			x.r.flags, x.flags = result.Flags, result.Predicates
+			x.r.registers[nativeproof.RAX] = assemblyReferenceRegister{value: result.Accumulator}
+			memory = result.Memory
+		case "XADDQ":
+			result, err := x.isa.ExchangeAdd64(current.value, source.value)
+			if err != nil {
+				return err
+			}
+			if err := x.destination(args[0], 64, assemblyReferenceRegister{value: result.Register}); err != nil {
+				return err
+			}
+			x.r.flags, x.flags = result.Flags, result.Predicates
+			memory = result.Memory
+		case "XCHGQ":
+			result, err := x.isa.Exchange64(current.value, source.value)
+			if err != nil {
+				return err
+			}
+			if err := x.destination(args[0], 64, assemblyReferenceRegister{value: result.Register}); err != nil {
+				return err
+			}
+			memory = result.Memory
+		}
+		return x.writeMemory(p, 8, assemblyReferenceRegister{value: memory}, true)
+	}
+	if statement.op == "ADDQ" {
+		if len(args[1]) != 1 || len(args[0]) != 1 && (len(args[0]) == 0 || args[0][0] != "$") {
+			return assemblyReferenceError("ADDQ requires a register destination and scalar register or immediate source")
+		}
+		if _, ok := assemblyReferenceRegisterName(args[1][0], 64); !ok {
+			return assemblyReferenceError("ADDQ destination is not a full register")
+		}
+		left, err := x.operand(args[0], 64)
+		if err != nil {
+			return err
+		}
+		right, err := x.operand(args[1], 64)
+		if err != nil {
+			return err
+		}
+		if left.pointer.space != 0 || right.pointer.space != 0 || args[0][0] == "$" && !assemblyReferenceSignedImmediate32(left.value) {
+			return assemblyReferenceError("ADDQ lacks scalar operands or a sign-extended immediate")
+		}
+		result, err := x.isa.Add(right.value, left.value)
 		if err != nil {
 			return err
 		}
 		x.r.flags, x.flags = result.Flags, result.Predicates
-		x.r.registers[nativeproof.RAX] = assemblyReferenceRegister{value: result.Accumulator}
-		return x.writeMemory(p, 8, assemblyReferenceRegister{value: result.Memory}, true)
+		return x.destination(args[1], 64, assemblyReferenceRegister{value: result.Value})
 	}
 	width := 0
 	switch statement.op {
@@ -740,7 +863,7 @@ func assemblyReferenceSignedImmediate32(t br.Term) bool {
 	return v.Op == br.Constant && t.Sort() == br.Bits(64) && uint64(int64(int32(v.Immediate))) == v.Immediate
 }
 
-func assemblyReferenceScalarClosure(m *assemblyReferenceMeter, roots []br.Term, inputs [3]br.Term) error {
+func assemblyReferenceScalarClosure(m *assemblyReferenceMeter, roots []br.Term, inputs []br.Term) error {
 	type item struct {
 		term  br.Term
 		depth int
@@ -767,7 +890,7 @@ func assemblyReferenceScalarClosure(m *assemblyReferenceMeter, roots []br.Term, 
 			return assemblyReferenceError("scalar graph node budget exhausted")
 		}
 		v := at.term.View()
-		if v.Op == br.Variable && !slices.Contains(inputs[:], at.term) {
+		if v.Op == br.Variable && !slices.Contains(inputs, at.term) {
 			return assemblyReferenceError("pointer, private bytes or arbitrary scratch escape the scalar projection")
 		}
 		for _, child := range v.Args {
@@ -777,19 +900,26 @@ func assemblyReferenceScalarClosure(m *assemblyReferenceMeter, roots []br.Term, 
 	return nil
 }
 
-// evaluate applies only the three retained input variables. It preserves every
+// evaluate applies only the retained memory and scalar argument variables. It preserves every
 // other variable and obtains constants from independently checked normalization,
 // never from assigning arbitrary scratch bits or evaluating samples.
-func (r *assemblyReference) evaluate(ctx context.Context, current, old, replacement uint64) (assemblyReferenceResult, error) {
+func (r *assemblyReference) evaluate(ctx context.Context, current uint64, arguments ...uint64) (assemblyReferenceResult, error) {
 	if r == nil || r.checked == nil || r.checked.rules != assemblyReferenceRules || r.checked.relation == nil {
 		return assemblyReferenceResult{}, assemblyReferenceError("missing checked reference")
 	}
 	p := r.checked
 	m := &assemblyReferenceMeter{Context: ctx, limits: p.limits}
-	return assemblyReferenceApply(m, p.relation, [3]uint64{current, old, replacement})
+	if len(arguments) != len(p.relation.inputs)-1 {
+		return assemblyReferenceResult{}, assemblyReferenceError("scalar argument population differs from the checked interface")
+	}
+	return assemblyReferenceApply(m, p.relation, append([]uint64{current}, arguments...))
 }
 
-func assemblyReferenceApply(m *assemblyReferenceMeter, r *assemblyReferenceRelation, values [3]uint64) (assemblyReferenceResult, error) {
+func assemblyReferenceApply(m *assemblyReferenceMeter, r *assemblyReferenceRelation, values []uint64) (assemblyReferenceResult, error) {
+	if r == nil || len(r.inputs) < 1 || len(r.inputs) > assemblyReferenceMaxArguments || len(values) != len(r.inputs) {
+		return assemblyReferenceResult{}, assemblyReferenceError("missing or mismatched scalar reference inputs")
+	}
+	values = slices.Clone(values)
 	b := br.NewBuilder(m.limits.nodes)
 	substitution := map[br.Term]br.Term{}
 	for i, input := range r.inputs {
@@ -842,7 +972,7 @@ func assemblyReferenceApply(m *assemblyReferenceMeter, r *assemblyReferenceRelat
 		cache[t] = result
 		return result, nil
 	}
-	constant := func(t br.Term) (uint64, error) {
+	instantiate := func(t br.Term) (uint64, error) {
 		instantiated, err := substitute(t, 0)
 		if err != nil {
 			return 0, err
@@ -851,26 +981,61 @@ func assemblyReferenceApply(m *assemblyReferenceMeter, r *assemblyReferenceRelat
 	}
 	var result assemblyReferenceResult
 	var err error
-	result.Value, err = constant(r.value)
+	result.Value, err = instantiate(r.value)
 	if err != nil {
 		return assemblyReferenceResult{}, err
 	}
-	boolean, err := constant(r.result)
-	if err != nil {
-		return assemblyReferenceResult{}, err
+	width, valid := assemblyReferenceResultWidth(r.frame.resultType)
+	if !valid || width != r.frame.result.width {
+		return assemblyReferenceResult{}, assemblyReferenceError("reference result interpretation differs from its frame")
 	}
-	if !r.result.Sort().IsBool() || boolean > 1 {
-		return assemblyReferenceResult{}, assemblyReferenceError("reference result is not Boolean")
+	result.Result = regionValue{typ: r.frame.resultType, kind: regionAggregate}
+	if width != 0 {
+		bits, err := instantiate(r.result)
+		if err != nil {
+			return assemblyReferenceResult{}, err
+		}
+		result.Result.kind = regionConstant
+		if width == 1 {
+			if !r.result.Sort().IsBool() || bits > 1 {
+				return assemblyReferenceResult{}, assemblyReferenceError("reference result is not Boolean")
+			}
+			result.Result.scalar = constant.MakeBool(bits == 1)
+		} else {
+			if r.result.Sort() != br.Bits(64) {
+				return assemblyReferenceResult{}, assemblyReferenceError("reference result is not a complete word")
+			}
+			if r.frame.resultType.Underlying().(*types.Basic).Kind() == types.Int64 {
+				result.Result.scalar = constant.MakeInt64(int64(bits))
+			} else {
+				result.Result.scalar = constant.MakeUint64(bits)
+			}
+		}
+	} else if r.result.Valid() {
+		return assemblyReferenceResult{}, assemblyReferenceError("void reference invented a scalar result")
 	}
-	result.Result = boolean == 1
-	for _, access := range r.accesses {
+	for index, access := range r.accesses {
 		if err := m.Err(); err != nil {
 			return assemblyReferenceResult{}, err
 		}
 		if access.space != r.frame.targetSpace {
 			continue
 		}
-		value, err := constant(access.value)
+		if access.locked && !access.write {
+			// Reconstruct grouping from the checked statement and full trace,
+			// before discarding private-frame accesses. Two locked Boolean access
+			// labels alone do not establish one indivisible machine occurrence.
+			if access.statement < 0 || access.statement >= len(r.definition.body) || index+1 >= len(r.accesses) {
+				return assemblyReferenceResult{}, assemblyReferenceError("atomic projection lacks its checked statement or write")
+			}
+			write := r.accesses[index+1]
+			kind, supported := assemblyReferenceRMW(r.definition.body[access.statement].op)
+			if !supported || !write.locked || !write.write || write.statement != access.statement || write.space != access.space || write.offset != access.offset || write.width != access.width || access.width != 8 {
+				return assemblyReferenceResult{}, assemblyReferenceError("atomic projection does not bind one complete checked RMW")
+			}
+			result.Atomics = append(result.Atomics, assemblyReferenceAtomic{Statement: access.statement, Kind: kind, ReadAccess: len(result.Accesses), WriteAccess: len(result.Accesses) + 1})
+		}
+		value, err := instantiate(access.value)
 		if err != nil {
 			return assemblyReferenceResult{}, err
 		}

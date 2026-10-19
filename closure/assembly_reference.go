@@ -14,9 +14,10 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	br "github.com/greatliontech/gofresh/internal/bitrelation"
 	"github.com/greatliontech/gofresh/internal/nativeproof"
+	"golang.org/x/arch/x86/x86asm"
 )
 
-const assemblyReferenceRules = "gofresh/selected-assembly-reference@1;go-amd64-abi0;" + br.RuleModel + ";" + nativeproof.TransferRules
+const assemblyReferenceRules = "gofresh/selected-assembly-reference@2;go-amd64-abi0;" + br.RuleModel + ";" + nativeproof.TransferRules
 
 // assemblyReference is source-owned evidence, not an observed native image. Only
 // checking a selected acquisition and its complete provider scope constructs it.
@@ -45,8 +46,17 @@ type assemblyReferenceAccess struct {
 
 type assemblyReferenceResult struct {
 	Value    uint64
-	Result   bool
+	Result   regionValue
 	Accesses []assemblyReferenceAccess
+	Atomics  []assemblyReferenceAtomic
+}
+
+// Indices address the projected access sequence; Statement identifies the actual
+// checked assembly occurrence. Kind records ISA semantics, not a callee summary.
+type assemblyReferenceAtomic struct {
+	Statement               int
+	Kind                    x86asm.Op
+	ReadAccess, WriteAccess int
 }
 
 type assemblyReferenceLimits struct {

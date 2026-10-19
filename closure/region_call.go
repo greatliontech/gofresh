@@ -138,9 +138,6 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 	if callable.kind == regionCallable && k.session.references[callable.target] != nil {
 		return k.callReference(call, caller, callable, actual)
 	}
-	if k.trace != nil {
-		return nil, regionError("effect-covered call lacks an exact checked reference")
-	}
 	if callable.kind != regionCallable || !regionSourceCallBody(callable.target) {
 		return nil, regionError("call target has no supported ordinary source body")
 	}
@@ -208,6 +205,12 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 		if !k.session.proposing {
 			return nil, regionError("missing callee proof for the exact actual input and context")
 		}
+		if k.trace != nil {
+			// Nested checked references also need effect-aware proposal execution.
+			// Its events are provisional: checking below replays the body into the
+			// parent's trace under the same cumulative meter.
+			child.trace = &regionEffectTrace{seen: map[regionEffectOccurrence]bool{}}
+		}
 		entries, err := child.proposeEntries()
 		if err != nil {
 			return nil, err
@@ -219,13 +222,35 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 		k.session.proofs = append(k.session.proofs, proof)
 	}
 	outcomes, checked := k.session.results[proof]
-	if !checked {
+	// A finite effect trace must visit this invocation's actual instructions even
+	// if an earlier proposal checked its return values. Cached endpoint states do
+	// not establish access order or account for discarded reads.
+	if k.trace != nil {
+		child.trace = k.trace
+	}
+	if !checked || k.trace != nil {
 		outcomes, err = child.checkEntries(proof.entries)
 		if err != nil {
 			return nil, err
 		}
 		k.session.results[proof] = outcomes
-		k.session.used = append(k.session.used, proof)
+		if !checked {
+			k.session.used = append(k.session.used, proof)
+		}
+	}
+	if k.trace != nil {
+		if len(outcomes) != 1 || len(actual) == 0 {
+			return nil, regionError("finite call effects require one returned state and a represented operand")
+		}
+		if _, err := k.effectGlobal(actual[0]); err != nil {
+			return nil, err
+		}
+		before, beforeOK := regionUint64(readRegionLocation(caller, actual[0].location, types.Typ[types.Uint64]))
+		after, afterOK := regionUint64(readRegionLocation(outcomes[0].state, actual[0].location, types.Typ[types.Uint64]))
+		if !beforeOK || !afterOK || len(k.trace.calls) >= k.meter.limits.nodes {
+			return nil, regionError("finite call effects lack a bounded complete operand-state relation")
+		}
+		k.trace.calls = append(k.trace.calls, regionCallApplication{proof: proof, current: before, value: after, result: outcomes[0].value})
 	}
 	var returned []regionState
 	for _, outcome := range outcomes {

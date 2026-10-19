@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -98,13 +99,21 @@ func assemblyReferenceUnitRelation(t testing.TB, text string) *assemblyReference
 	return r
 }
 
-func assemblyReferenceUnitApply(t testing.TB, r *assemblyReferenceRelation, current, old, replacement uint64) assemblyReferenceResult {
+func assemblyReferenceUnitApply(t testing.TB, r *assemblyReferenceRelation, current uint64, arguments ...uint64) assemblyReferenceResult {
 	t.Helper()
-	result, err := assemblyReferenceApply(&assemblyReferenceMeter{Context: t.Context(), limits: defaultAssemblyReferenceLimits()}, r, [3]uint64{current, old, replacement})
+	result, err := assemblyReferenceApply(&assemblyReferenceMeter{Context: t.Context(), limits: defaultAssemblyReferenceLimits()}, r, append([]uint64{current}, arguments...))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return result
+}
+
+func assemblyReferenceBool(t testing.TB, value regionValue) bool {
+	t.Helper()
+	if !types.Identical(value.typ, types.Typ[types.Bool]) || value.kind != regionConstant || value.scalar == nil || value.scalar.Kind() != constant.Bool {
+		t.Fatalf("reference did not return a typed Boolean: %+v", value)
+	}
+	return constant.BoolVal(value.scalar)
 }
 
 func TestAssemblyReferenceUniversalOperandsAndBothWriteCycles(t *testing.T) {
@@ -115,7 +124,7 @@ func TestAssemblyReferenceUniversalOperandsAndBothWriteCycles(t *testing.T) {
 	if len(r.accesses) != 7 {
 		t.Fatalf("full accesses=%d, want three arguments, RMW pair, result and return", len(r.accesses))
 	}
-	if r.frame.arguments != ([3]assemblyReferenceSlot{{8, 8}, {16, 8}, {24, 8}}) || r.frame.result != (assemblyReferenceSlot{32, 1}) {
+	if !slices.Equal(r.frame.arguments, []assemblyReferenceSlot{{8, 8}, {16, 8}, {24, 8}}) || r.frame.result != (assemblyReferenceSlot{32, 1}) {
 		t.Fatal("wrong typed ABI0 slot derivation")
 	}
 	// This oracle is ordinary integer code independent of the instruction-term
@@ -134,7 +143,7 @@ func TestAssemblyReferenceUniversalOperandsAndBothWriteCycles(t *testing.T) {
 			want = replacement
 		}
 		got := assemblyReferenceUnitApply(t, r, current, old, replacement)
-		if got.Value != want || got.Result != (current == old) {
+		if got.Value != want || assemblyReferenceBool(t, got.Result) != (current == old) {
 			t.Fatalf("%x: got %+v, want value %#x and result %v", values, got, want, current == old)
 		}
 		if !slices.Equal(got.Accesses, []assemblyReferenceAccess{{false, true, current}, {true, true, want}}) {
@@ -159,7 +168,7 @@ func TestAssemblyReferenceSourceEditsDeriveDifferentRelations(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := assemblyReferenceUnitRelation(t, tc.body)
 			got := assemblyReferenceUnitApply(t, r, 5, 5, 9)
-			if got.Value != tc.value || got.Result != tc.result || len(got.Accesses) != tc.accesses {
+			if got.Value != tc.value || assemblyReferenceBool(t, got.Result) != tc.result || len(got.Accesses) != tc.accesses {
 				t.Fatalf("edited source not reflected: %+v", got)
 			}
 		})
@@ -167,7 +176,7 @@ func TestAssemblyReferenceSourceEditsDeriveDifferentRelations(t *testing.T) {
 	// Result flag inversion does not invert the memory-write condition.
 	r := assemblyReferenceUnitRelation(t, strings.Replace(assemblyReferenceUnitBody, "SETEQ", "SETNE", 1))
 	got := assemblyReferenceUnitApply(t, r, 5, 7, 9)
-	if !got.Result || got.Value != 5 || got.Accesses[1].Value != 5 {
+	if !assemblyReferenceBool(t, got.Result) || got.Value != 5 || got.Accesses[1].Value != 5 {
 		t.Fatal("SETNE changed failure writeback")
 	}
 }
@@ -248,7 +257,7 @@ func TestAssemblyReferenceGenericBodyAndRegisterAliases(t *testing.T) {
 	// instructions, not the signature or symbol, determine its result/effects.
 	r := assemblyReferenceUnitRelation(t, "TEXT ·Different(SB),4,$0-25\nMOVB $1, ret+24(FP)\nRET\n")
 	got := assemblyReferenceUnitApply(t, r, 17, 23, 31)
-	if got.Value != 17 || !got.Result || len(got.Accesses) != 0 {
+	if got.Value != 17 || !assemblyReferenceBool(t, got.Result) || len(got.Accesses) != 0 {
 		t.Fatal("ordinary constant body acquired a canned operation summary", got)
 	}
 	for _, tc := range []struct {
@@ -262,7 +271,7 @@ func TestAssemblyReferenceGenericBodyAndRegisterAliases(t *testing.T) {
 	} {
 		r := assemblyReferenceUnitRelation(t, tc.body)
 		got := assemblyReferenceUnitApply(t, r, 5, 5, 9)
-		if got.Value != 9 || got.Result != tc.result {
+		if got.Value != 9 || assemblyReferenceBool(t, got.Result) != tc.result {
 			t.Fatalf("partial register/flag semantics: %+v", got)
 		}
 	}
@@ -270,7 +279,7 @@ func TestAssemblyReferenceGenericBodyAndRegisterAliases(t *testing.T) {
 	// memory MOVQ or CMPQ immediate, it must not be truncated/sign-extended.
 	r = assemblyReferenceUnitRelation(t, strings.Replace(assemblyReferenceUnitBody, "MOVQ old+8(FP), AX", "MOVQ $4294967295, AX", 1))
 	got = assemblyReferenceUnitApply(t, r, 4294967295, 7, 9)
-	if !got.Result || got.Value != 9 {
+	if !assemblyReferenceBool(t, got.Result) || got.Value != 9 {
 		t.Fatal("64-bit register immediate was sign-extended", got)
 	}
 }
@@ -338,28 +347,28 @@ func TestAssemblyReferenceCancellationAndCumulativeBudget(t *testing.T) {
 	r := assemblyReferenceUnitRelation(t, assemblyReferenceUnitBody)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if result, err := assemblyReferenceApply(&assemblyReferenceMeter{Context: ctx, limits: defaultAssemblyReferenceLimits()}, r, [3]uint64{1, 1, 2}); !errors.Is(err, context.Canceled) || len(result.Accesses) != 0 {
+	if result, err := assemblyReferenceApply(&assemblyReferenceMeter{Context: ctx, limits: defaultAssemblyReferenceLimits()}, r, []uint64{1, 1, 2}); !errors.Is(err, context.Canceled) || len(result.Accesses) != 0 {
 		t.Fatalf("cancellation returned authority: %+v %v", result, err)
 	}
 	base := &assemblyReferenceMeter{Context: t.Context(), limits: defaultAssemblyReferenceLimits()}
-	if _, err := assemblyReferenceApply(base, r, [3]uint64{1, 1, 2}); err != nil {
+	if _, err := assemblyReferenceApply(base, r, []uint64{1, 1, 2}); err != nil {
 		t.Fatal(err)
 	}
 	spent := base.work
 	for _, bound := range []int{1, spent / 2, spent - 1} {
 		limits := defaultAssemblyReferenceLimits()
 		limits.work = bound
-		if result, err := assemblyReferenceApply(&assemblyReferenceMeter{Context: t.Context(), limits: limits}, r, [3]uint64{1, 1, 2}); err == nil || len(result.Accesses) != 0 {
+		if result, err := assemblyReferenceApply(&assemblyReferenceMeter{Context: t.Context(), limits: limits}, r, []uint64{1, 1, 2}); err == nil || len(result.Accesses) != 0 {
 			t.Fatalf("budget %d accepted partial specialization", bound)
 		}
 	}
 	// The enclosing region-style context charges repeated calls to one account.
 	shared := &assemblyReferenceMeter{Context: t.Context(), limits: defaultAssemblyReferenceLimits()}
 	shared.limits.work = spent + spent/2
-	if _, err := assemblyReferenceApply(&assemblyReferenceMeter{Context: shared, limits: defaultAssemblyReferenceLimits()}, r, [3]uint64{1, 1, 2}); err != nil {
+	if _, err := assemblyReferenceApply(&assemblyReferenceMeter{Context: shared, limits: defaultAssemblyReferenceLimits()}, r, []uint64{1, 1, 2}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := assemblyReferenceApply(&assemblyReferenceMeter{Context: shared, limits: defaultAssemblyReferenceLimits()}, r, [3]uint64{1, 1, 2}); err == nil {
+	if _, err := assemblyReferenceApply(&assemblyReferenceMeter{Context: shared, limits: defaultAssemblyReferenceLimits()}, r, []uint64{1, 1, 2}); err == nil {
 		t.Fatal("second specialization reset its caller budget")
 	}
 	for _, change := range []func(*assemblyReferenceLimits){func(l *assemblyReferenceLimits) { l.bytes = 1 }, func(l *assemblyReferenceLimits) { l.instructions = 2 }, func(l *assemblyReferenceLimits) { l.work = 1 }} {

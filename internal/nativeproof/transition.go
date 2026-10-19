@@ -28,6 +28,7 @@ type transitionChecker struct {
 	expansions                 []TransitionExpansion
 	frames                     []TransitionFrame
 	thread                     TransitionThread
+	completingReturn, returned bool
 }
 
 func transitionLimits(l TransitionLimits) (TransitionLimits, error) {
@@ -157,7 +158,8 @@ func CheckTransition(ctx context.Context, im *Image, face TransitionInterface, p
 // CheckRegionTransition checks a conditional entry-to-cut relation in the original
 // owned image. Entry is selected independently of proposal.Entry. It supplies no
 // ELF-entry reachability, omitted-prefix or source association. Root-loading image
-// initialization is refused: memory starts arbitrary under the declared permissions.
+// initialization is refused: current memory starts under the explicit entry
+// relations and declared permissions, with all remaining bytes arbitrary.
 func CheckRegionTransition(ctx context.Context, im *Image, entry uint64, face TransitionInterface, proposal TransitionProposal, limits TransitionLimits) (TransitionCertificate, error) {
 	return checkRootedTransition(ctx, im.snapshot(), transitionRoot{entry: entry, region: true}, face, proposal, limits)
 }
@@ -167,11 +169,27 @@ func checkRootedTransition(ctx context.Context, im *Image, root transitionRoot, 
 	if err != nil {
 		return TransitionCertificate{}, refuse(0, "transition-budget", err.Error())
 	}
-	if len(face.Regions) > l.Regions || len(face.ImageRegions) > l.Regions-len(face.Regions) || len(face.Words) > l.Bytes/8 {
+	if len(face.Regions) > l.Regions || len(face.ImageRegions) > l.Regions-len(face.Regions) || len(face.Words) > l.Bytes/8 || len(face.EntryImagePointers) > 15 || len(face.EntryWordUpperBounds) > l.Bytes/8 {
 		return TransitionCertificate{}, refuse(0, "transition-budget", "input inventory exceeds limits")
 	}
 	work := 0
-	if err := transitionCopyWork(&work, l.Work, len(face.Regions), len(face.ImageRegions), len(face.Words)); err != nil {
+	if face.PrivateFrame != nil {
+		if err := transitionCopyWork(&work, l.Work, 1); err != nil {
+			return TransitionCertificate{}, err
+		}
+	}
+	if face.ReturnContext != nil {
+		if len(face.ReturnContext.Preserved) > 15 {
+			return TransitionCertificate{}, refuse(0, "transition-budget", "return-context input inventory")
+		}
+		if returnContextBytes(face.ReturnContext) > l.LiveStateBytes {
+			return TransitionCertificate{}, refuse(0, "transition-budget", "incoming return context storage")
+		}
+		if err := transitionCopyWork(&work, l.Work, 1, len(face.ReturnContext.Preserved)); err != nil {
+			return TransitionCertificate{}, err
+		}
+	}
+	if err := transitionCopyWork(&work, l.Work, len(face.Regions), len(face.ImageRegions), len(face.Words), len(face.EntryImagePointers), len(face.EntryWordUpperBounds)); err != nil {
 		return TransitionCertificate{}, err
 	}
 	proposal, err = captureTransitionProposal(proposal, l, &work)
@@ -197,6 +215,9 @@ func checkRootedTransition(ctx context.Context, im *Image, root transitionRoot, 
 		return TransitionCertificate{}, err
 	}
 	bounded := &relationContext{Context: ctx, meter: m.valueBuilder}
+	if err := m.validateReturnTargetGraph(g); err != nil {
+		return TransitionCertificate{}, err
+	}
 	if err := checkContextInventory(bounded, g, proposal.Nodes, "transition-proposal", true); err != nil {
 		return TransitionCertificate{}, err
 	}
@@ -258,6 +279,9 @@ func CheckTransitionContinuation(ctx context.Context, predecessor TransitionCert
 		return TransitionCertificate{}, err
 	}
 	if err := m.inherit(prior); err != nil {
+		return TransitionCertificate{}, err
+	}
+	if err := m.validateReturnTargetGraph(g); err != nil {
 		return TransitionCertificate{}, err
 	}
 	m.bound.Expansions = append([]TransitionExpansion(nil), proposal.Expansions...)
@@ -374,7 +398,7 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 		return TransitionCertificate{}, g.failureAt(programPoint{m.pc, m.activation}, m.err)
 	}
 	// Complete-cut induction, rather than propositional normalization: the root
-	// condition is true (or the predecessor's exact proved-total cut condition).
+	// condition is EntryPredicate (or the predecessor's exact proved-total cut condition).
 	// Each fork above produces G&!P and G&P, each join consumes their complete
 	// incoming union, and the acyclic schedule processes every such edge exactly
 	// once. All terminals other than this cut have checked false incoming guards.
@@ -489,6 +513,12 @@ func (m *transitionChecker) initial() error {
 			m.memory[key] = TransitionByte{TransitionLocation: key, Value: m.extract(a, j*8, 8)}
 		}
 	}
+	if err := m.initialEntryRelations(); err != nil {
+		return err
+	}
+	if err := m.initialReturnContext(); err != nil {
+		return err
+	}
 	m.bound.InitialMemory = m.projectMemory()
 	return m.err
 }
@@ -577,6 +607,9 @@ func (m *transitionChecker) accessPointer(p TransitionPointer, kind AccessKind, 
 		return TransitionLocation{}, err
 	}
 	span := RelativeSpan{stack.Offset, end}
+	if kind == FrameWrite && m.face.ReturnContext != nil && span.Start < 8 && span.End > 0 {
+		return TransitionLocation{}, refuse(m.pc, "transition-return-protected", "write overlaps the incoming continuation control word")
+	}
 	if !m.permission(span, kind) {
 		if m.err != nil {
 			return TransitionLocation{}, m.err
@@ -594,6 +627,14 @@ func (m *transitionChecker) recordAccess(off TransitionLocation, width int, kind
 }
 
 func (m *transitionChecker) load(off TransitionLocation, width int, kind AccessKind) TransitionValue {
+	v := m.memoryValue(off, width)
+	m.recordAccess(off, width, kind, v.Value)
+	return v
+}
+
+// memoryValue assembles the current byte relation without an executed access.
+// Entry relations and actual loads must use exactly the same overlapping bytes.
+func (m *transitionChecker) memoryValue(off TransitionLocation, width int) TransitionValue {
 	var lanes [8]pointerLane[TransitionPointer]
 	var v br.Term
 	for j := 0; j < width; j++ {
@@ -610,7 +651,6 @@ func (m *transitionChecker) load(off TransitionLocation, width int, kind AccessK
 	if width == 8 {
 		pointer = orderedPointer(lanes[:])
 	}
-	m.recordAccess(off, width, kind, v)
 	return TransitionValue{v, pointer}
 }
 
@@ -633,6 +673,9 @@ func (m *transitionChecker) store(off TransitionLocation, v TransitionValue, wid
 func (m *transitionChecker) step(i operation, size uint8) error {
 	if i.Op == x86asm.CMPXCHG {
 		return m.lockedCompareExchange(i, size)
+	}
+	if i.Op == x86asm.XCHG || i.Op == x86asm.XADD {
+		return m.lockedExchange(i, size)
 	}
 	if isTransitionSet(i.Op) {
 		return m.setConditionByte(i, size)
@@ -729,7 +772,7 @@ func (m *transitionChecker) step(i operation, size uint8) error {
 			return m.err
 		}
 		base, _ := fullRegister(mem.Base)
-		if m.pointers[base.reg] != nil {
+		if addressCapability(m.pointers[base.reg]) != nil {
 			var err error
 			p, err = m.advance(m.pointers[base.reg], mem.Disp)
 			if err != nil {
@@ -737,16 +780,32 @@ func (m *transitionChecker) step(i operation, size uint8) error {
 			}
 		}
 	case x86asm.SUB, x86asm.ADD:
-		delta := int64(i.Args[1].(x86asm.Imm))
+		imm, immediate := i.Args[1].(x86asm.Imm)
+		delta := int64(imm)
 		if i.Op == x86asm.SUB {
 			delta = -delta
 		} // checked signed imm8/imm32
-		if m.pointers[a.reg] != nil {
+		if immediate && addressCapability(m.pointers[a.reg]) != nil {
 			var err error
 			p, err = m.advance(m.pointers[a.reg], delta)
 			if err != nil {
 				return err
 			}
+		}
+		if i.Op == x86asm.ADD {
+			var right br.Term
+			if immediate {
+				right = m.con(br.Bits(a.width), uint64(imm)&mask(a.width))
+			} else {
+				src, _ := register(i.Args[1].(x86asm.Reg))
+				right = m.read(&m.state, src)
+			}
+			r := m.add(m.read(&m.state, a), right)
+			m.write(&m.state, a, r.Value)
+			m.bound.Flags = r.Flags
+			m.setPredicates(r.Predicates)
+			m.pointers[a.reg] = p
+			return m.err
 		}
 		// SUB defines all six arithmetic flags. Their values are deliberately
 		// unprojected; shared scalar transfer retains the accurate private CF,

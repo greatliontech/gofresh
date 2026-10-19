@@ -55,7 +55,7 @@ func (m *transitionChecker) archSetFS(size uint8) error {
 	}
 	failure := false
 	if success {
-		after.Pointer = m.pointers[RSI]
+		after.Pointer = addressCapability(m.pointers[RSI])
 	} else {
 		failure, err = m.tryFalse(m.and(m.state.path, valid))
 		if err != nil {

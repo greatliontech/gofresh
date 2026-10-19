@@ -207,14 +207,11 @@ func (m *transitionChecker) stackStep(i operation, size uint8) error {
 		return err
 	}
 	if i.Op == x86asm.RET {
-		if len(m.frames) == 0 {
-			return refuse(m.pc, "transition-return", "missing active call")
+		target, root, err := m.activeReturn(sp)
+		if err != nil {
+			return err
 		}
-		frame := m.frames[len(m.frames)-1]
-		if frame.Context != m.activation || frame.Slot != sp {
-			return refuse(m.pc, "transition-return", "return stack/context differs from actual CALL")
-		}
-		wrong := m.and(m.state.path, m.not(m.compare(br.Equal, v.Value, m.con(br.Bits(64), frame.Return))))
+		wrong := m.and(m.state.path, m.not(m.compare(br.Equal, v.Value, m.con(br.Bits(64), target))))
 		ok, err := m.tryFalse(wrong)
 		if err != nil {
 			return err
@@ -222,7 +219,11 @@ func (m *transitionChecker) stackStep(i operation, size uint8) error {
 		if !ok {
 			return refuse(m.pc, "transition-return", "actual return word does not establish the active continuation")
 		}
-		m.frames = m.frames[:len(m.frames)-1]
+		if root {
+			m.returned = true
+		} else {
+			m.frames = m.frames[:len(m.frames)-1]
+		}
 	}
 	m.setStack(p, m.binary(br.Add, old.Value, m.con(br.Bits(64), 8)))
 	if i.Op == x86asm.POP {
@@ -231,4 +232,20 @@ func (m *transitionChecker) stackStep(i operation, size uint8) error {
 		m.state.regs[a.reg], m.pointers[a.reg], m.bound.Preserved[a.reg] = v.Value, v.Pointer, 0
 	}
 	return m.err
+}
+
+// Both actual CALL activations and an explicitly supplied incoming callee
+// context use the same RET load, target equality and stack increment above.
+func (m *transitionChecker) activeReturn(sp OriginPointer) (uint64, bool, error) {
+	if len(m.frames) != 0 {
+		frame := m.frames[len(m.frames)-1]
+		if m.completingReturn || frame.Context != m.activation || frame.Slot != sp {
+			return 0, false, refuse(m.pc, "transition-return", "return stack/context differs from actual CALL")
+		}
+		return frame.Return, false, nil
+	}
+	if !m.completingReturn || !m.root.region || m.face.ReturnContext == nil || m.activation != "" || sp != (OriginPointer{Origin: m.bound.Origin}) {
+		return 0, false, refuse(m.pc, "transition-return", "missing incoming root context or original control slot")
+	}
+	return m.face.ReturnContext.Target, true, nil
 }

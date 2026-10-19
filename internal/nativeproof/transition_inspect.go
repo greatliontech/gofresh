@@ -51,11 +51,15 @@ func (c TransitionCertificate) RegisterValue(ctx context.Context, reg x86asm.Reg
 	if err := ctx.Err(); err != nil {
 		return br.Term{}, err
 	}
+	return projectTransitionRegister(ctx, c.checked.bound.Registers, reg)
+}
+
+func projectTransitionRegister(ctx context.Context, registers [16]TransitionValue, reg x86asm.Reg) (br.Term, error) {
 	a, ok := register(reg)
 	if !ok {
 		return br.Term{}, refuse(0, "transition-inspection", "unsupported register alias")
 	}
-	v := c.checked.bound.Registers[a.reg].Value
+	v := registers[a.reg].Value
 	if a.width == 64 {
 		return v, nil
 	}

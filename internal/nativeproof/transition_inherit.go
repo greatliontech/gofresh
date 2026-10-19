@@ -63,7 +63,7 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 	// Charge every element copied into the successor's proof, including the
 	// immutable root projections. Only expression nodes and image bytes share
 	// immutable ownership; no predecessor container or construction arena survives.
-	for _, n := range []int{len(b.Interface.Regions), len(b.Interface.ImageRegions), len(b.Interface.Words), len(b.ExcludedOrigins), len(b.InitialMemory), len(b.Words), len(b.Memory), len(b.Instructions), len(b.Accesses), len(b.PrimitiveEffects), len(b.Boundary.Bytes), len(b.Frames), len(b.Expansions), len(b.Abstractions), len(prior.justifications), 16} {
+	for _, n := range []int{len(b.Interface.Regions), len(b.Interface.ImageRegions), len(b.Interface.Words), len(b.Interface.EntryImagePointers), len(b.Interface.EntryWordUpperBounds), len(b.ExcludedOrigins), len(b.InitialMemory), len(b.Words), len(b.Memory), len(b.Instructions), len(b.Accesses), len(b.PrimitiveEffects), len(b.Boundary.Bytes), len(b.Frames), len(b.Expansions), len(b.Abstractions), len(prior.justifications), 16} {
 		for range n {
 			if !m.tick() {
 				return m.err
@@ -80,9 +80,24 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 			return err
 		}
 	}
+	m.face = b.Interface
+	if err := m.reservePrivateFrame(); err != nil {
+		return err
+	}
+	if m.face.ReturnContext != nil {
+		if err := transitionCopyWork(&m.work, m.limits.Work, 1, len(m.face.ReturnContext.Preserved)); err != nil {
+			return err
+		}
+		if err := m.reserveReturnContext(); err != nil {
+			return err
+		}
+	}
 	m.bound = cloneTransitionBound(b)
 	m.frames, m.thread = m.bound.Frames, m.bound.Thread
 	m.face = m.bound.Interface
+	if err := m.reserveEntryRelations(); err != nil {
+		return err
+	}
 	m.lo, m.hi, _ = originRange(m.face.Origin)
 	m.builder = br.NewBuilder(m.limits.Nodes)
 	importRoot := func(t br.Term) error {
@@ -144,7 +159,7 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 	if err := m.admitInitialization(); err != nil {
 		return err
 	}
-	for _, root := range []br.Term{b.InitialPredicates.CF, b.InitialPredicates.ZF, b.InitialPredicates.SFXorOF, b.CutGuard} {
+	for _, root := range []br.Term{b.InitialPredicates.CF, b.InitialPredicates.ZF, b.InitialPredicates.SFXorOF, b.EntryPredicate, b.CutGuard} {
 		if err := importRoot(root); err != nil {
 			return err
 		}
@@ -184,6 +199,10 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 			roots = []br.Term{e.Number, e.Operation, e.Base, e.Valid, e.Result, e.BeforeFS, e.AfterFS}
 		case LockedCompareExchange64Effect:
 			roots = []br.Term{e.Before, e.Compare, e.Replacement, e.After, e.Accumulator, e.Success}
+		case LockedExchange64Effect:
+			roots = []br.Term{e.Before, e.Replacement, e.After, e.Register}
+		case LockedExchangeAdd64Effect:
+			roots = []br.Term{e.Before, e.Delta, e.After, e.Register}
 		default:
 			return refuse(m.pc, "transition-predecessor", "unknown retained primitive")
 		}

@@ -7,8 +7,8 @@ import (
 
 // TransitionRules identifies the conditional symbolic-origin transition rules,
 // including initialized image roots, guarded exclusions, decoder, expression,
-// pointer-lane and CPUID dependencies.
-const TransitionRules = "gofresh/native-transition@10;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
+// pointer-lane, bounded conditional entry/return relations and CPUID dependencies.
+const TransitionRules = "gofresh/native-transition@13;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
 
 // Locked64Model requires cacheable write-back coherent RAM, power-of-two cache
 // lines of at least eight bytes aligned to their size, and enabled architectural
@@ -64,7 +64,8 @@ type RelativeRegion struct {
 // for an entry-to-cut scope. A continuation retains these as premises over the
 // entire longer scope, not as observed stability facts from its predecessor.
 // Machine uses MachineModel's baseline execution restrictions;
-// no return slot or normal-completion premise is imported. EntryState asserts
+// no implicit return slot or normal-completion premise is imported. ReturnContext
+// separately declares an incoming callee continuation. EntryState asserts
 // applicability of the declared symbolic state at the bound entry. InstructionMapping
 // has Conditions' static ELF/4KiB meaning. IsolatedExecution excludes asynchronous
 // behavior-changing interference, external termination and unmodeled thread or
@@ -77,7 +78,8 @@ type TransitionConditions struct {
 	// CPUID is optional for scopes that do not execute a query. Executing CPUID
 	// requires CPUIDModel; an unknown nonempty model is unsupported in any scope.
 	CPUID string
-	// Locked64 is optional; executing a locked CMPXCHG64 requires Locked64Model.
+	// Locked64 is optional; executing memory CMPXCHG64, XCHG64 or XADD64
+	// requires Locked64Model and the instruction's checked locking form.
 	// Continuations inherit it unchanged; selecting it requires a fresh root.
 	Locked64 string
 	// Syscall is optional; nonempty selects LinuxAMD64SyscallModel. Address bits
@@ -89,7 +91,8 @@ type TransitionConditions struct {
 }
 
 // TransitionInterface declares only entry premises. RSP is the fresh origin S;
-// all other registers and flags are arbitrary. Each Words offset introduces a
+// other registers and flags are arbitrary except for explicit entry relations.
+// Each Words offset introduces a
 // fresh arbitrary 64-bit scalar in eight readable bytes, with no pointer or
 // process-argument meaning. Other declared bytes are fresh arbitrary bytes;
 // undeclared memory remains arbitrary and inaccessible. Expected outputs and
@@ -105,8 +108,41 @@ type TransitionInterface struct {
 	// Initialization optionally refines root image bytes under its retained loading
 	// applicability condition. Only a fresh root check may select this relation.
 	Initialization ImageInitialization
-	Words          []int64
-	Conditions     TransitionConditions
+	// EntryImagePointers binds distinct full GPRs other than RSP to owned,
+	// declared readable image addresses. It grants no additional dereference
+	// permission. EntryWordUpperBounds constrains current arbitrary image bytes,
+	// never ELF data initialization. Both are conditional-region root premises;
+	// ELF roots refuse them and continuations inherit them without additions.
+	EntryImagePointers   []TransitionEntryImagePointer
+	EntryWordUpperBounds []TransitionEntryWordUpperBound
+	// ReturnContext optionally binds an incoming callee continuation. Only a
+	// fresh conditional root can select it. Its original S[0:8] control word is
+	// protected against every write, independently of memory write permissions.
+	ReturnContext *TransitionReturnContext
+	// PrivateFrame optionally retains a separate ownership/lifetime antecedent.
+	// It grants neither permissions nor automatic projection of frame effects.
+	PrivateFrame *TransitionPrivateFrame
+	Words        []int64
+	Conditions   TransitionConditions
+}
+
+// TransitionEntryImagePointer requires the original full register bits to equal
+// Address and assigns owned image provenance. It supplies no source-object or
+// runtime meaning. Address must identify a declared readable mapped byte.
+type TransitionEntryImagePointer struct {
+	Register Register
+	Address  uint64
+}
+
+// TransitionEntryWordUpperBound requires the unsigned little-endian 64-bit word
+// in eight declared readable image bytes at Address to be strictly less than
+// original RSP + OriginOffset. The signed offset must be canonical and nonwrapping
+// throughout the origin domain. Overlapping relations refer to the same bytes.
+// These image extents also expose the complete memory dependency of the entry
+// relations for consumers checking separation from a source representation.
+type TransitionEntryWordUpperBound struct {
+	Address      uint64
+	OriginOffset int64
 }
 
 // TransitionLimits bounds graph/expression work and finite declared memory.
@@ -154,8 +190,10 @@ type TransitionExpansion struct {
 }
 
 // TransitionPointer is a closed provenance sum. Nil means no provenance. Its
-// arms identify a symbolic stack origin or an owned image mapping; equality of
-// scalar values never creates either. Distinct arms do not prove numerical
+// address arms identify a symbolic stack origin or an owned image mapping.
+// A private entry-value arm retains caller value/provenance lineage without any
+// address capability. Equality of scalar values never creates these facts.
+// Distinct arms do not prove numerical
 // inequality outside the declared, disjoint memory footprints.
 type TransitionPointer interface{ transitionPointer() }
 
@@ -177,6 +215,23 @@ type ImagePointer struct {
 }
 
 func (ImagePointer) transitionPointer() {}
+
+// entryValueLineage is parametric caller context, not a third address space.
+// Complete ordered word copies preserve the original bits and any caller-side
+// provenance; arithmetic, partial writes and incomplete lanes cannot recreate it.
+// Distinct tokens assert neither inequality nor nonaliasing. Actual application
+// substitutes the caller's existing value/provenance, never an address from bits.
+type entryValueLineage struct{ value br.Term }
+
+func (entryValueLineage) transitionPointer() {}
+
+func addressCapability(p TransitionPointer) TransitionPointer {
+	switch p.(type) {
+	case OriginPointer, ImagePointer:
+		return p
+	}
+	return nil
+}
 
 // TransitionLocation is a byte coordinate in the single current memory map.
 // Image selects an absolute low-canonical address; otherwise Offset is relative
@@ -270,6 +325,31 @@ type LockedCompareExchange64Effect struct {
 
 func (LockedCompareExchange64Effect) primitiveEffect() {}
 
+// LockedExchange64Effect retains an indivisible memory XCHG with architectural
+// locked ordering, including its implicit lock without a LOCK prefix. Access
+// indices address the cumulative access trace; the write occurs even for equal
+// values. All scalar inputs precede the memory and register writes.
+type LockedExchange64Effect struct {
+	PC                                   uint64
+	Context                              string
+	ReadAccess, WriteAccess              int
+	Before, Replacement, After, Register br.Term
+}
+
+func (LockedExchange64Effect) primitiveEffect() {}
+
+// LockedExchangeAdd64Effect retains an indivisible LOCK XADD and architectural
+// locked ordering. Before and Delta are incoming values; Register is the old
+// memory and After its modular sum. Even a zero delta retains both accesses.
+type LockedExchangeAdd64Effect struct {
+	PC                             uint64
+	Context                        string
+	ReadAccess, WriteAccess        int
+	Before, Delta, After, Register br.Term
+}
+
+func (LockedExchangeAdd64Effect) primitiveEffect() {}
+
 // TransitionAbstraction records deliberate loss of precision, not machine
 // nondeterminism. Value universally over-approximates the saved architectural
 // RFLAGS at this occurrence. Predicates retain its available incoming flag
@@ -355,6 +435,11 @@ type TransitionBound struct {
 	ConditionalRegion bool
 	Interface         TransitionInterface
 	Origin            br.Term
+	// EntryPredicate is the immutable conjunction of the typed entry relations,
+	// or true when empty. Origin bounds/congruence and ExcludedOrigins remain
+	// separate applicability predicates. Every occurrence starts under this
+	// conjunction; a satisfying nonvacuity valuation is never projected.
+	EntryPredicate    br.Term
 	ExcludedOrigins   []Span
 	InitialRegisters  [16]br.Term
 	InitialPredicates TransitionPredicates
@@ -378,8 +463,9 @@ type TransitionBound struct {
 	ExcludedBoundaries []ExcludedBoundary
 }
 
-// TransitionCertificate owns a conditional entry-to-cut theorem. It cannot be
-// converted to return, frame, value-call, source-startup or runtime reuse evidence.
+// TransitionCertificate owns a conditional entry-to-cut theorem. It supplies no
+// return, frame, value-call, source-startup or runtime reuse evidence by itself.
+// CheckTransitionReturn can separately complete an eligible actual root RET.
 // Its zero value carries no authority; projections cannot reconstruct it.
 type TransitionCertificate struct{ checked *checkedTransition }
 type checkedTransition struct {
@@ -402,6 +488,17 @@ func cloneTransitionInterface(f TransitionInterface) TransitionInterface {
 	f.Regions = append([]RelativeRegion(nil), f.Regions...)
 	f.ImageRegions = append([]Span(nil), f.ImageRegions...)
 	f.Words = append([]int64(nil), f.Words...)
+	f.EntryImagePointers = append([]TransitionEntryImagePointer(nil), f.EntryImagePointers...)
+	f.EntryWordUpperBounds = append([]TransitionEntryWordUpperBound(nil), f.EntryWordUpperBounds...)
+	if f.ReturnContext != nil {
+		c := *f.ReturnContext
+		c.Preserved = append([]Register(nil), c.Preserved...)
+		f.ReturnContext = &c
+	}
+	if f.PrivateFrame != nil {
+		frame := *f.PrivateFrame
+		f.PrivateFrame = &frame
+	}
 	return f
 }
 

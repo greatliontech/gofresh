@@ -140,6 +140,7 @@ func TestDescriptorPopulation(t *testing.T) {
 		ADD83: 64, ADD81: 64, ADD05: 8, CALLE8: 1, PUSH50: 16, POP58: 16, RETC3: 1, SYSCALL0F05: 1,
 		CMP39: 10568, CMP3B: 10568, TEST85: 1088, CMP83: 1321, CMP81: 1321, TESTF7: 136, CMP3D: 17, TESTA9: 17, JccShort: 10, JccNear: 10,
 		LOCKCMPXCHG0FB1: 4288, SETcc0F90: 13210, TEST84: 1088, TESTF6: 136, TESTA8: 17, NOP90: 1, NOP6690: 1,
+		XCHG87: 4288, LOCKXCHG87: 4288, LOCKXADD0FC1: 4288, ADD01: 512, ADD03: 512, NOP0F1F: 797,
 	}
 	// Per REX: non-SIB bases have 6+7+7 modes; no-index SIB
 	// bases have 7+8+8 modes times four scales, with X=0 only.
@@ -179,7 +180,7 @@ func TestDescriptorPopulation(t *testing.T) {
 			t.Fatalf("trailing bytes affected %x: %+v %v", b, parsed, err)
 		}
 	}
-	if len(seen) != 94965 || len(counts) != len(want) {
+	if len(seen) != 109650 || len(counts) != len(want) {
 		t.Fatalf("population: %d, counts %v", len(seen), counts)
 	}
 	for form, count := range want {

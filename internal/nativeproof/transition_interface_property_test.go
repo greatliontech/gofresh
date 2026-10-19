@@ -407,6 +407,9 @@ type interfaceVariable struct {
 
 func interfaceInitialState(t testing.TB, f TransitionInterface, b TransitionBound) {
 	t.Helper()
+	if len(f.EntryImagePointers) == 0 && len(f.EntryWordUpperBounds) == 0 && !literalBool(b.EntryPredicate, 1) {
+		t.Fatal("empty entry relations constrained arbitrary entry state")
+	}
 	// Build the exact byte-key set from the input union, not from either of
 	// the checker's memory projections. Only already-budgeted faces reach here.
 	want := map[stateLocation]bool{}

@@ -12,6 +12,12 @@ func TestAtomicLiteralForms(t *testing.T) {
 		i    Intent
 		e    Encoding
 	}{
+		{"488711", Intent{Operation: LockedExchange, Base: 1, Src: 2}, Encoding{Form: XCHG87, REX: 0x48}},
+		{"f0488711", Intent{Operation: LockedExchange, Base: 1, Src: 2}, Encoding{Form: LOCKXCHG87, REX: 0x48}},
+		{"f0480fc111", Intent{Operation: LockedExchangeAdd, Base: 1, Src: 2}, Encoding{Form: LOCKXADD0FC1, REX: 0x48}},
+		{"4801f2", Intent{Operation: AddRegister, Dst: 2, Src: 6}, Encoding{Form: ADD01, REX: 0x48}},
+		{"4803d6", Intent{Operation: AddRegister, Dst: 2, Src: 6}, Encoding{Form: ADD03, REX: 0x48}},
+		{"0f1f440000", Intent{Operation: NoOp}, Encoding{Form: NOP0F1F, NOPModRM: 0x44}},
 		{"f0480fb111", Intent{Operation: LockedCompareExchange, Base: 1, Src: 2}, Encoding{Form: LOCKCMPXCHG0FB1, REX: 0x48}},
 		{"f04d0fb14df8", Intent{Operation: LockedCompareExchange, Base: 13, Src: 9, SignedDisp: -8}, Encoding{Form: LOCKCMPXCHG0FB1, REX: 0x4d, DispBytes: 1}},
 		{"0f94c4", Intent{Operation: SetRegister, Dst: 0, HighDst: true, Width: 8, Condition: 4}, Encoding{Form: SETcc0F90}},
@@ -130,7 +136,7 @@ func TestRawAtomicAndSetPopulation(t *testing.T) {
 }
 
 func FuzzAtomicGrammar(f *testing.F) {
-	for _, b := range [][]byte{{0xf0, 0x48, 0x0f, 0xb1, 0x11}, {0x0f, 0x94, 0xc1}, {0x84, 0xc9}, {0x48, 0x83, 0x39, 42}} {
+	for _, b := range [][]byte{{0xf0, 0x48, 0x0f, 0xb1, 0x11}, {0x0f, 0x94, 0xc1}, {0x84, 0xc9}, {0x48, 0x83, 0x39, 42}, {0x48, 0x87, 0x11}, {0xf0, 0x48, 0x0f, 0xc1, 0x11}, {0x48, 0x01, 0xf2}, {0x0f, 0x1f, 0x44, 0, 0}} {
 		f.Add(b)
 	}
 	f.Fuzz(func(t *testing.T, b []byte) {

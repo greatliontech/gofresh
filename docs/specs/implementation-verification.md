@@ -460,11 +460,20 @@ entry-to-cut transition MUST satisfy these obligations:
   retains which entry authority it uses; a conditional-region entry establishes
   no reachability from the executable entry or omitted prefix. Its initial state
   includes every state admitted by its explicit entry and frame premises. It
-  cannot apply the executable's root-loading initialization relation: current
-  memory remains arbitrary unless separately established by checked composition.
+  cannot apply the executable's root-loading initialization relation. Current
+  memory remains arbitrary except as constrained by explicitly retained entry-state
+  relations or established by checked composition. An entry-state relation identifies
+  its owned locations, widths, interpretations and original entry variables. The
+  checker establishes that the complete interface admits a state and proves its
+  transfers for every state satisfying the relation. A satisfying valuation can
+  establish nonvacuity only, never replace universal reasoning or restrict the
+  theorem to that valuation. These relations are antecedents of the conditional
+  claim, not evidence that an actual execution satisfies them. Applying the claim
+  requires independently establishing them from the actual incoming state.
   All unspecified register bits, flags and memory remain arbitrary. Entry facts and
-  their authority are retained separately from derived outputs; an expected output
-  is not an input premise. Retained entry-flag predicates have explicit
+  their authority are retained separately from derived outputs; expected outputs
+  and normal completion cannot substitute for entry-state premises. Retained
+  entry-flag predicates have explicit
   architectural meanings and unchanged identities across later overwrites.
   The scope retains active call/return context and any per-thread machine state
   needed by its transfers. Unspecified entry FS state remains arbitrary; an
@@ -493,8 +502,9 @@ entry-to-cut transition MUST satisfy these obligations:
   interpreting the target, pushing a return word or inventing an after-call
   state. Expansion choices are untrusted search choices, not premises; an
   expanded callee may itself contain independently excluded boundaries.
-  The same choice may leave register self-XOR, a locked read/modify/write, a
-  condition-code byte store, a byte TEST, a memory CMP or a NOP as a structural
+  The same choice may leave register self-XOR, register-register arithmetic,
+  an explicitly or implicitly locked read/modify/write, a condition-code byte
+  store, a byte TEST, a memory CMP or a NOP as a structural
   boundary rather than expand its admitted transfer. Operand-form selection
   preserves automatic transfer of the previously admitted register CMP and
   register/immediate TEST at 32 or 64 bits. A structural boundary's complete
@@ -633,6 +643,57 @@ entry-to-cut transition MUST satisfy these obligations:
   before it can supply source state. The transition grants no historical execution
   authority, source-subject coverage or public runtime discharge.
 
+## Conditional native return completion
+
+**REQ-impl-native-return** (invariant, refines REQ-impl-native-entry): An accepted
+conditional callee-return relation MUST establish these obligations:
+
+- **entry-and-continuation** — The claim binds the actual callee entry in its
+  owned image and an explicit incoming continuation interface, including the
+  control word's location, interpretation and validity, protected storage and
+  caller context. Entry relations satisfy REQ-impl-native-transition's ownership,
+  consistency and universal-coverage obligations. An incoming continuation is a
+  conditional context premise, not evidence of an executed caller or an invented
+  CALL inside the callee's coverage. A control word supplies no scalar argument
+  or expected computation result. Unsupported protected-return mechanisms refuse.
+- **complete-return** — Every admitted entry state reaches a checked return to
+  the declared continuation. Coverage includes the prologue, body, epilogue,
+  actual return transfer and every applicable exceptional path. Excluding a slow
+  or throwing arm requires proving its complete incoming guard false under the
+  retained entry relation; a normal-completion assumption is insufficient. The
+  return reads the actual current control word and establishes its executable
+  target and compatible continuation boundary. Stopping before RET, reaching a
+  numeric cut or observing restored stack-pointer bits is not return completion.
+- **restored-frame** — Every stack access has established extent, permissions,
+  backing and alias conditions. Stack-pointer arithmetic grants no memory. Saved
+  and restored context is related to its original entry values, including required
+  definedness and provenance; a never-written mask cannot certify a restored
+  register. The actual final stack-pointer relation includes return's advancement.
+  Protected control storage remains protected throughout, not merely equal at the
+  endpoints. Restoring registers or leaving a frame erases no stack write or access.
+- **complete-effects** — The returned state and ordered effects cover every
+  admitted transfer, including implicit accesses and primitive effects whose values
+  are discarded. Administrative frame effects remain recorded. Hiding them in a
+  source projection requires checked ownership, disjointness, nonescape and
+  preservation relative to the source representation; equal final globals alone
+  cannot establish correspondence. Return completion supplies no result bits
+  where the selected interface has no scalar result.
+  Private-frame projection retains a fresh-root ownership and lifetime premise
+  excluding observation through preexisting aliases as well as newly exposed
+  ones. Preserving an incoming pointer does not establish this premise. Released
+  scratch contents remain in the concrete state; later dependent reads require
+  initialization or explicit checking against that state. Bounds, permissions and
+  an actual CALL establish neither exclusive ownership nor nonobservability.
+- **composition** — Evidence retains its original entry authority, entry
+  relations, input identities, complete current state, continuation, ordered
+  effects and cumulative resource account. An entry-to-cut predecessor can supply
+  current state but cannot acquire new premises during continuation. Completed
+  return evidence is distinct from entry-to-cut evidence and is usable only where
+  the caller establishes the callee's interface from its actual incoming state.
+  Copying projections or matching endpoint addresses supplies no such relation.
+  This conditional fact grants no executable-root reachability, source-storage
+  association, historical execution authority or ordinary runtime discharge.
+
 ## Conditional numeric source/native correspondence
 
 Numeric correspondence relates a selected source computation to a bound native
@@ -677,6 +738,10 @@ source/native relation MUST satisfy these obligations:
   proposition is semantic, not equality of declaration names.
   For a region representation, the initial relation includes arbitrary prior
   typed values and corresponding native bytes, rather than proposed final values.
+  A source claim admitting arbitrary initial globals retains compatible native
+  entry states for every such valuation. One satisfying joint valuation cannot
+  narrow that source domain. Administrative entry predicates can preserve this
+  independence through checked separation from the represented source storage.
   Checked transfer closure establishes the represented current state and actual
   operands at the cut for every such initial state and arbitrary native scratch
   state. Every source observable effect, exceptional path and callback, every
@@ -706,7 +771,9 @@ source/native relation MUST satisfy these obligations:
   inference rule. Unclosed control or call cycles, incomplete path relations,
   unsupported operations, unproved equality, exhausted budgets or cancellation
   produce no positive correspondence certificate. No bounded prefix is treated
-  as the complete computation.
+  as the complete computation. A completed-function relation includes the actual
+  source return and native return completion under REQ-impl-native-return; an
+  operand boundary or an unexecuted return instruction remains a prefix.
 - **certificate-authority** — The certificate retains the source root, contexts,
   typed output projections, native image and interface, preconditions, proved
   value/effect/exception relation and preserved-context relation, with their

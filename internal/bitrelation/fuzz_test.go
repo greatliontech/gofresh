@@ -101,7 +101,10 @@ func FuzzExactScalarSemantics(f *testing.F) {
 		direct(t, br.TotalOrder, signedFlags, signedInclusive)
 		partition := g.make(br.Or, br.Bool(), 0, not(bp), g.make(br.And, br.Bool(), 0, bp, bq))
 		partitioned := not(g.make(br.And, br.Bool(), 0, bp, not(bq)))
-		for _, pair := range [][2]br.Term{{carry, carryFlags}, {signedFlags, signedInclusive}, {partition, partitioned}, {g.make(br.ITE, s, 0, not(bp), vx, vy), g.make(br.ITE, s, 0, bp, vy, vx)}} {
+		conjunction := g.make(br.And, br.Bool(), 0, g.make(br.And, br.Bool(), 0, bp, bq), not(bq))
+		falsity := g.con(br.Bool(), 0)
+		direct(t, br.ConjunctionContradiction, conjunction, falsity)
+		for _, pair := range [][2]br.Term{{carry, carryFlags}, {signedFlags, signedInclusive}, {partition, partitioned}, {conjunction, falsity}, {g.make(br.ITE, s, 0, not(bp), vx, vy), g.make(br.ITE, s, 0, bp, vy, vx)}} {
 			prove(t, pair[0], pair[1])
 			assertValues(t, pair[0], pair[1], map[br.Term]uint64{vx: a, vy: b, bp: shift & 1, bq: (shift >> 1) & 1})
 		}

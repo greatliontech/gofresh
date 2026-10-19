@@ -7,6 +7,33 @@ import "fmt"
 func encodeAtomic(i Intent, e Encoding) ([]byte, error) {
 	bad := func() ([]byte, error) { return nil, fmt.Errorf("invalid atomic/predicate intent: %+v / %+v", i, e) }
 	if i.Operation == NoOp {
+		if e.Form == NOP0F1F {
+			if i != (Intent{Operation: NoOp}) || e.DispBytes != 0 || e.SIB || e.Scale != 0 || e.NOPModRM&0x38 != 0 || e.REX != 0 {
+				return bad()
+			}
+			b := []byte{}
+			b = append(b, 0x0f, 0x1f, e.NOPModRM)
+			mode, rm := e.NOPModRM>>6, e.NOPModRM&7
+			if mode != 3 && rm == 4 {
+				b = append(b, e.NOPSIB)
+			} else if e.NOPSIB != 0 {
+				return bad()
+			}
+			n := 0
+			if mode == 1 {
+				n = 1
+			}
+			if mode == 2 || mode == 0 && (rm == 5 || rm == 4 && e.NOPSIB&7 == 5) {
+				n = 4
+			}
+			if n == 0 && e.NOPDisp != 0 || n == 1 && int32(int8(e.NOPDisp)) != e.NOPDisp {
+				return bad()
+			}
+			for j := 0; j < n; j++ {
+				b = append(b, byte(uint32(e.NOPDisp)>>(8*j)))
+			}
+			return b, nil
+		}
 		if i != (Intent{Operation: NoOp}) || e != (Encoding{Form: e.Form}) {
 			return bad()
 		}
@@ -30,6 +57,28 @@ func encodeAtomic(i Intent, e Encoding) ([]byte, error) {
 			return bad()
 		}
 		i.Operation, e.Form, opcode, twoByte, locked = Store, MOV89, 0xb1, true, true
+	case LockedExchange, LockedExchangeAdd:
+		if i.Width != 0 || i.Dst != 0 || i.HighDst || i.HighSrc || i.Condition != 0 || i.Immediate != 0 {
+			return bad()
+		}
+		if i.Operation == LockedExchange && (form == XCHG87 || form == LOCKXCHG87) {
+			i.Operation, e.Form, opcode, locked = Store, MOV89, 0x87, form == LOCKXCHG87
+		} else if i.Operation == LockedExchangeAdd && form == LOCKXADD0FC1 {
+			i.Operation, e.Form, opcode, twoByte, locked = Store, MOV89, 0xc1, true, true
+		} else {
+			return bad()
+		}
+	case AddRegister:
+		if i.Width != 0 || i.Condition != 0 || i.HighDst || i.HighSrc {
+			return bad()
+		}
+		if form == ADD01 {
+			i.Operation, e.Form, opcode = MoveRegister, MOV89, 0x01
+		} else if form == ADD03 {
+			i.Operation, e.Form, opcode = MoveRegister, MOV8B, 0x03
+		} else {
+			return bad()
+		}
 	case SetRegister, SetMemory:
 		if i.Width != 8 || i.Src != 0 || i.HighSrc || i.Immediate != 0 || form != SETcc0F90 || !(i.Condition >= 2 && i.Condition <= 7 || i.Condition >= 12 && i.Condition <= 15) {
 			return bad()

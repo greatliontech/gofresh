@@ -99,9 +99,13 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 	switch i.Operation {
 	case to.NoOp:
 		op = x86asm.NOP
-	case to.LockedCompareExchange:
-		op = x86asm.CMPXCHG
+	case to.LockedCompareExchange, to.LockedExchange, to.LockedExchangeAdd:
+		op = map[to.Operation]x86asm.Op{to.LockedCompareExchange: x86asm.CMPXCHG, to.LockedExchange: x86asm.XCHG, to.LockedExchangeAdd: x86asm.XADD}[i.Operation]
 		mem(args[0])
+		reg(args[1], i.Src, false)
+	case to.AddRegister:
+		op = x86asm.ADD
+		reg(args[0], i.Dst, false)
 		reg(args[1], i.Src, false)
 	case to.SetRegister, to.SetMemory:
 		op = map[uint8]x86asm.Op{2: x86asm.SETB, 3: x86asm.SETAE, 4: x86asm.SETE, 5: x86asm.SETNE, 6: x86asm.SETBE, 7: x86asm.SETA, 12: x86asm.SETL, 13: x86asm.SETGE, 14: x86asm.SETLE, 15: x86asm.SETG}[i.Condition]
@@ -259,7 +263,7 @@ func TestTransitionExecutedDescriptorPopulation(t *testing.T) {
 			compareExecutedEncoding(t, code)
 		}
 	}
-	if count != 94965 {
+	if count != 109650 {
 		t.Fatalf("descriptor population changed: %d", count)
 	}
 	// The finite encoding dimension is enumerated in each property trial;

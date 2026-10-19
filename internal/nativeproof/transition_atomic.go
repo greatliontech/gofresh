@@ -9,14 +9,15 @@ func (m *transitionChecker) setPredicates(p TransitionPredicates) {
 	m.state.flags = [flagCount]br.Term{p.CF, p.ZF, p.SFXorOF}
 }
 
-func (m *transitionChecker) lockedCompareExchange(i operation, size uint8) error {
+// locked64Address establishes the full read/write extent before any register
+// changes, including when the source register is also the addressing base.
+func (m *transitionChecker) locked64Address(mem x86asm.Mem, size uint8) (TransitionLocation, error) {
 	if m.face.Conditions.Locked64 != Locked64Model {
-		return refuse(m.pc, "transition-primitive-premise", "ordinary aligned locked64 applicability is required")
+		return TransitionLocation{}, refuse(m.pc, "transition-primitive-premise", "ordinary aligned locked64 applicability is required")
 	}
-	mem := i.Args[0].(x86asm.Mem)
 	off, err := m.address(mem, FrameRead, 8, size)
 	if err != nil {
-		return err
+		return TransitionLocation{}, err
 	}
 	aligned := uint64(off.Offset)&7 == 0
 	if !off.Image {
@@ -28,11 +29,19 @@ func (m *transitionChecker) lockedCompareExchange(i operation, size uint8) error
 		}
 	}
 	if !aligned {
-		return refuse(m.pc, "transition-alignment", "locked64 requires eight-byte alignment for every origin")
+		return TransitionLocation{}, refuse(m.pc, "transition-alignment", "locked64 requires eight-byte alignment for every origin")
 	}
-	// Both permissions are required regardless of comparison. Address evaluation
-	// precedes changes to RAX, including when RAX is the addressing register.
+	// An unchanged result still writes. Both permissions apply to the incoming
+	// address, regardless of comparison outcome or source/base register aliasing.
 	if _, err := m.address(mem, FrameWrite, 8, size); err != nil {
+		return TransitionLocation{}, err
+	}
+	return off, nil
+}
+
+func (m *transitionChecker) lockedCompareExchange(i operation, size uint8) error {
+	off, err := m.locked64Address(i.Args[0].(x86asm.Mem), size)
+	if err != nil {
 		return err
 	}
 	readIndex := len(m.bound.Accesses)
@@ -57,6 +66,38 @@ func (m *transitionChecker) lockedCompareExchange(i operation, size uint8) error
 	m.bound.Flags = r.Flags
 	m.setPredicates(r.Predicates)
 	m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedCompareExchange64Effect{PC: m.pc, Context: m.activation, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: current.Value, Compare: compare, Replacement: replacement, After: r.Memory, Accumulator: r.Accumulator, Success: r.Success})
+	return m.err
+}
+
+func (m *transitionChecker) lockedExchange(i operation, size uint8) error {
+	off, err := m.locked64Address(i.Args[0].(x86asm.Mem), size)
+	if err != nil {
+		return err
+	}
+	readIndex := len(m.bound.Accesses)
+	current := m.load(off, 8, FrameRead)
+	src, _ := fullRegister(i.Args[1])
+	replacement := m.state.regs[src.reg]
+	var register, memory br.Term
+	var pointer TransitionPointer
+	if i.Op == x86asm.XCHG {
+		r := m.exchange64(current.Value, replacement)
+		register, memory, pointer = r.Register, r.Memory, m.pointers[src.reg]
+		m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedExchange64Effect{PC: m.pc, Context: m.activation, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: current.Value, Replacement: replacement, After: memory, Register: register})
+	} else {
+		r := m.exchangeAdd64(current.Value, replacement)
+		register, memory = r.Register, r.Memory
+		// Arbitrary arithmetic does not establish a pointer offset. Exact zero
+		// leaves the complete incoming pointer word unchanged.
+		if v := replacement.View(); v.Op == br.Constant && v.Immediate == 0 {
+			pointer = current.Pointer
+		}
+		m.bound.Flags = r.Flags
+		m.setPredicates(r.Predicates)
+		m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedExchangeAdd64Effect{PC: m.pc, Context: m.activation, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: current.Value, Delta: replacement, After: memory, Register: register})
+	}
+	m.store(off, TransitionValue{Value: memory, Pointer: pointer}, 8)
+	m.state.regs[src.reg], m.pointers[src.reg], m.bound.Preserved[src.reg] = register, current.Pointer, 0
 	return m.err
 }
 
