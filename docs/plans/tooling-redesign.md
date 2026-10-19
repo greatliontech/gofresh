@@ -179,8 +179,8 @@
     guards; distinguish expected incompatibility from a demonstrated defect.
   - [ ] 5.1w Replace toolchain-variation approval with generic implementation
     verification before resuming 5.2d/5.2e or releasing migrated consumers.
-    Follow this remaining execution order: complete the derived Cerebro consumer
-    integration at 5.1w.2b.3b.2a.2.2.2.2.9b; resume .10 and complete
+    Follow this remaining execution order: resume conditional testAtomic64 at
+    5.1w.2b.3b.2a.2.2.2.2.10 and complete
     required bootstrap and compiler
     correspondence; integrate useful stock/custom production reuse; remove the
     approval registry and release Gofresh at 5.1w.7; finish Stipulator's
@@ -483,7 +483,7 @@
                           before landing the main-line API. Retain its normal release
                           at 5.1w.7; the v0.116.3 handoff base is not a compatibility
                           release target.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.9b Implement the derived
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.9b Implement the derived
                           Cerebro consumer contract in Stipulator's pending clean-break
                           migration, adapting the reviewed handoff where it satisfies
                           that design. Carry typed resolved linker
