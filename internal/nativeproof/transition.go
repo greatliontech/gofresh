@@ -689,6 +689,16 @@ func (m *transitionChecker) store(off TransitionLocation, v TransitionValue, wid
 }
 
 func (m *transitionChecker) step(i operation, size uint8) error {
+	if i.Op == x86asm.INC || i.Op == x86asm.SHL || i.Op == x86asm.SBB {
+		return m.scalarTail(i)
+	}
+	if i.Op == x86asm.AND {
+		if r, ok := i.Args[0].(x86asm.Reg); ok {
+			if a, valid := register(r); valid && a.width == 32 {
+				return m.scalarTail(i)
+			}
+		}
+	}
 	if isTransitionSSE(i.Op) {
 		return m.sseStep(i, size, &m.vectors, m.face.Conditions.SSE)
 	}

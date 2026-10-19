@@ -97,6 +97,25 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 	}
 	op := x86asm.MOV
 	switch i.Operation {
+	case to.Increment64:
+		op = x86asm.INC
+		reg(args[0], i.Dst, false)
+		if args[1] != nil {
+			t.Fatal("INC extra operand")
+		}
+	case to.ShiftLeft32CL:
+		op = x86asm.SHL
+		reg(args[0], i.Dst, true)
+		if args[1] != x86asm.CL {
+			t.Fatal("shift count is not CL")
+		}
+	case to.SubtractBorrow32, to.AndRegister32:
+		op = x86asm.SBB
+		if i.Operation == to.AndRegister32 {
+			op = x86asm.AND
+		}
+		reg(args[0], i.Dst, true)
+		reg(args[1], i.Src, true)
 	case to.NoOp:
 		op = x86asm.NOP
 	case to.LockedCompareExchange, to.LockedExchange, to.LockedExchangeAdd:
@@ -274,7 +293,7 @@ func TestTransitionExecutedDescriptorPopulation(t *testing.T) {
 			compareExecutedEncoding(t, code)
 		}
 	}
-	if count != 157118 {
+	if count != 159558 {
 		t.Fatalf("descriptor population changed: %d", count)
 	}
 	// The finite encoding dimension is enumerated in each property trial;
@@ -296,6 +315,13 @@ func TestTransitionExecutedDescriptorPopulation(t *testing.T) {
 
 func FuzzTransitionExecutedEncoding(f *testing.F) {
 	descriptors := slices.Collect(to.Descriptors)
+	forms := map[to.Form]bool{}
+	for index, d := range descriptors {
+		if d.Intent.Operation >= to.Increment64 && !forms[d.Encoding.Form] {
+			forms[d.Encoding.Form] = true
+			f.Add(uint32(index), uint64(0xfedcba9876543210), int32(-8))
+		}
+	}
 	for _, seed := range []uint32{0, 1, 2, 17, 255, 4096, 14641, 0x80000000, 0xffffffff} {
 		f.Add(seed, uint64(0x1234567887654321), int32(-8))
 	}
@@ -311,6 +337,9 @@ func FuzzTransitionExecutedEncoding(f *testing.F) {
 }
 
 func FuzzTransitionExecutedRawAdmission(f *testing.F) {
+	for _, code := range [][]byte{{0x49, 0xff, 0xc7}, {0xd3, 0xe1}, {0x45, 0x19, 0xc7}, {0x45, 0x1b, 0xf8}, {0x41, 0x21, 0xd1}, {0x44, 0x23, 0xca}, {0x48, 0xd3, 0xe0}, {0x66, 0xd3, 0xe0}, {0x48, 0xff}, {0xd3, 0x20}} {
+		f.Add(code)
+	}
 	for _, code := range [][]byte{{0xf0, 0x0f, 0xb1, 0x11}, {0xf0, 0x44, 0x0f, 0xb1, 0x11}, {0xf0, 0x80, 0x09, 0x80}, {0xf0, 0x20, 0x21}, {0x80, 0x39, 0x80}, {0x38, 0x21}, {0x3a, 0x21}, {0x66, 0x0f, 0x1f, 0x44, 0, 0}} {
 		f.Add(code)
 	}

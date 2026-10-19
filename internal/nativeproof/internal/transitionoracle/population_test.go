@@ -132,6 +132,7 @@ func literalInteger(little []byte, signed bool) *big.Int {
 
 func TestDescriptorPopulation(t *testing.T) {
 	want := map[Form]int{
+		INCFF: 64, SHLD3: 72, SBB19: 576, SBB1B: 576, AND21: 576, AND23: 576,
 		XOR31: 40, XOR33: 40,
 		MOV89: 10856, MOV8B: 10856, MOVB8Imm64: 64, MOVB8Imm32: 16,
 		MOVC7: 1357, LEA8D: 4288, SUB83: 64, SUB81: 64, SUB2D: 8,
@@ -182,7 +183,7 @@ func TestDescriptorPopulation(t *testing.T) {
 			t.Fatalf("trailing bytes affected %x: %+v %v", b, parsed, err)
 		}
 	}
-	if len(seen) != 157118 || len(counts) != len(want) {
+	if len(seen) != 159558 || len(counts) != len(want) {
 		t.Fatalf("population: %d, counts %v", len(seen), counts)
 	}
 	for form, count := range want {
@@ -196,6 +197,66 @@ func TestDescriptorPopulation(t *testing.T) {
 		t.Fatalf("iterator ignored stop: %d", n)
 	}
 	t.Logf("%d unique descriptors; per-form counts: %v; full payload products are sampled, not exhausted", len(seen), counts)
+}
+
+func TestRawScalarPopulation(t *testing.T) {
+	prefixes := []byte{0}
+	for rex := byte(0x40); rex <= 0x4f; rex++ {
+		prefixes = append(prefixes, rex)
+	}
+	accepted := map[string]bool{}
+	trials := 0
+	for _, rex := range prefixes {
+		for _, op := range []byte{0xff, 0xd3, 0x19, 0x1b, 0x21, 0x23} {
+			for m := 0; m < 256; m++ {
+				trials++
+				valid := m/64 == 3 && rex&8 == 0
+				if op == 0xff {
+					valid = m/64 == 3 && rex&8 != 0 && (m/8)%8 == 0
+				}
+				if op == 0xd3 {
+					valid = valid && (m/8)%8 == 4
+				}
+				var code []byte
+				if rex != 0 {
+					code = append(code, rex)
+				}
+				code = append(code, op, byte(m))
+				d, err := Parse(append(append([]byte(nil), code...), make([]byte, 12)...), 1<<32)
+				if (err == nil) != valid {
+					t.Fatalf("scalar raw %x accepted=%v want=%v", code, err == nil, valid)
+				}
+				if !valid {
+					if d != (Decoded{}) {
+						t.Fatal("partial scalar refusal")
+					}
+					continue
+				}
+				encoded, err := Encode(d.Intent, d.Encoding)
+				if err != nil || d.Length != len(code) || !bytes.Equal(encoded, code) {
+					t.Fatalf("scalar spelling changed: %x %+v %v", code, d, err)
+				}
+				accepted[string(code)] = true
+			}
+		}
+	}
+	if trials != 26112 || len(accepted) != 2440 {
+		t.Fatal("scalar raw population", trials, len(accepted))
+	}
+	for d := range Descriptors {
+		if d.Intent.Operation < Increment64 {
+			continue
+		}
+		code, err := Encode(d.Intent, d.Encoding)
+		if err != nil || !accepted[string(code)] {
+			t.Fatalf("scalar descriptor absent from raw grammar: %+v %v", d, err)
+		}
+		delete(accepted, string(code))
+	}
+	if len(accepted) != 0 {
+		t.Fatal("raw scalar grammar missing descriptors", len(accepted))
+	}
+	t.Log("26,112 raw scalar prefix/opcode/ModRM trials; 2,440 admitted spellings")
 }
 
 func TestAllByteImmediateAndDisplacementValues(t *testing.T) {

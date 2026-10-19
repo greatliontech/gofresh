@@ -345,6 +345,33 @@ The instruction definitions are the MOVSS, MOVSD, UCOMISS and UCOMISD entries
 and SIMD exception rules in the [Intel instruction-set manual](https://intel.github.io/SDM/sdm.html);
 these define machine semantics, not approval of a selected library or compiler.
 
+Ordinary register increment computes its operand-width modular sum with one and
+derives overflow, auxiliary carry, sign, zero and parity from that addition. It
+preserves the actual incoming carry state, including its definedness and value.
+Subtract-with-borrow captures both incoming operands and the current defined carry
+before any destination write. It computes their operand-width modular difference
+minus that carry. Carry records unsigned borrow, auxiliary carry records low-nibble
+borrow, and overflow uses the original operand signs and final result sign.
+A prior entry carry cannot replace a current carry changed by intervening work.
+Scalar register AND computes the bitwise conjunction, clears carry and overflow,
+derives sign, zero and parity, and leaves auxiliary carry undefined. A written
+32-bit general-purpose destination zeroes its upper half.
+
+An ordinary 32-bit register left shift by CL captures the incoming count even
+when the destination overlaps the count register. The effective count is the low
+five bits; the result is the low 32 bits of the shifted value, with the destination's
+upper 32 bits cleared even for effective count zero. Effective zero preserves all
+incoming arithmetic flags. Otherwise carry is the last bit shifted out, sign,
+zero and parity describe the result, and auxiliary carry is undefined. Overflow
+is defined only for effective count one, as result sign XOR carry; for larger
+counts it is undefined. A flag is guaranteed defined only across the complete
+represented incoming scope. A mixture of defined and undefined cases cannot be
+reported as guaranteed defined; lack of that guarantee does not assert that every
+case is undefined. Available combined predicates remain distinct from individual
+flag projections. Count-dependent guarantees require checked incoming-path
+implications, retaining the same original inputs and cumulative proof account;
+no unavailable old flag or predicate is replaced by a fresh input.
+
 An ordinary x86-64 locked 32- or 64-bit memory compare/exchange is an architectural
 read/modify/write occurrence. It reads the current four or eight destination bytes
 and compares their unsigned bit pattern with incoming EAX or RAX. Equality writes
@@ -549,6 +576,7 @@ entry-to-cut transition MUST satisfy these obligations:
   state. Expansion choices are untrusted search choices, not premises; an
   expanded callee may itself contain independently excluded boundaries.
   The same choice may leave register self-XOR, register-register arithmetic,
+  increment, variable-count scalar shift, subtract-with-borrow,
   an explicitly or implicitly locked read/modify/write, a condition-code byte
   store, a byte TEST, a memory CMP or a NOP as a structural
   boundary rather than expand its admitted transfer. Operand-form selection

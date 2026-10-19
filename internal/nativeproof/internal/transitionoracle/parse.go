@@ -31,7 +31,38 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 		width = 64
 	}
 	cc := func(n uint64) bool { return n >= 2 && n <= 7 || n >= 10 && n <= 15 }
-	if !fs && (op == 0x01 || op == 0x03) {
+	if !fs && (op == 0xff || op == 0xd3 || op == 0x19 || op == 0x1b || op == 0x21 || op == 0x23) {
+		m := r.unsigned(1)
+		if m/64 != 3 {
+			return fail("scalar operand is not a register")
+		}
+		reg, rm := uint8((m/8)%8)+8*((rex/4)%2), uint8(m%8)+8*(rex%2)
+		switch op {
+		case 0xff:
+			if width != 64 || (m/8)%8 != 0 {
+				return fail("not INC64 /0")
+			}
+			d.Intent, d.Encoding.Form = Intent{Operation: Increment64, Dst: rm}, INCFF
+		case 0xd3:
+			if width != 32 || (m/8)%8 != 4 {
+				return fail("not SHL32 CL /4")
+			}
+			d.Intent, d.Encoding.Form = Intent{Operation: ShiftLeft32CL, Dst: rm, Width: 32}, SHLD3
+		default:
+			if width != 32 {
+				return fail("not 32-bit scalar binary operation")
+			}
+			d.Intent = Intent{Operation: SubtractBorrow32, Dst: rm, Src: reg, Width: 32}
+			d.Encoding.Form = SBB19
+			if op == 0x21 || op == 0x23 {
+				d.Intent.Operation, d.Encoding.Form = AndRegister32, AND21
+			}
+			if op == 0x1b || op == 0x23 {
+				d.Intent.Dst, d.Intent.Src = reg, rm
+				d.Encoding.Form++
+			}
+		}
+	} else if !fs && (op == 0x01 || op == 0x03) {
 		m := r.unsigned(1)
 		if width != 64 || m/64 != 3 {
 			return fail("not a full-width register ADD")

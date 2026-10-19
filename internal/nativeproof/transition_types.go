@@ -8,7 +8,7 @@ import (
 // TransitionRules identifies the conditional symbolic-origin transition rules,
 // including initialized image roots, guarded exclusions, decoder, expression,
 // pointer-lane, bounded conditional entry/return relations and CPUID dependencies.
-const TransitionRules = "gofresh/native-transition@15;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
+const TransitionRules = "gofresh/native-transition@16;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
 
 // LockedMemoryModel requires cacheable write-back coherent RAM, power-of-two cache
 // lines of at least eight bytes aligned to their size, and enabled architectural
@@ -402,7 +402,9 @@ type TransitionFrame struct {
 
 // TransitionFlag describes an architectural status independently of projection.
 // Preserved flags retain their arbitrary entry value; Defined flags may have no
-// projected value. Undefined flags have no invented symbolic value.
+// projected value. Defined=false means definedness is not guaranteed across the
+// complete scope, not that every execution leaves the flag undefined. Unavailable
+// values have no invented symbolic replacement.
 type TransitionFlag struct {
 	Preserved, Defined bool
 	Value              br.Term

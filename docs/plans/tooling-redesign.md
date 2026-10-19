@@ -575,7 +575,7 @@
                           runtime.check, including its finite round2 loop and actual
                           return (candidate custom 0x47278f), with checked progress,
                           complete state/effect coverage and source correspondence.
-                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.12a Check native INC64,
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.12a Check native INC64,
                             variable-count SHL32, SBB32 and scalar AND32 against
                             exact operand/encoding rules, including carry input,
                             preserved carry, count masking, conditional flag

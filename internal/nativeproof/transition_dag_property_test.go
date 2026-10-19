@@ -413,12 +413,19 @@ func dagAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, face
 		}
 	}
 	for j, v := range c.checked.flags {
+		if !v.Valid() && r.writer == to.ShiftLeft32CL && j == 2 {
+			continue
+		}
 		w := []bool{r.flags[0], r.flags[1], r.flags[3] != r.flags[2]}[j]
 		if v.Sort() != br.Bool() || (stateEval(t, v, values) != 0) != w {
 			t.Fatal("merged predicate differs", j)
 		}
 	}
 	for j, f := range []TransitionFlag{b.Flags.CF, b.Flags.ZF, b.Flags.OF, b.Flags.SF, b.Flags.AF, b.Flags.PF} {
+		if r.writer >= to.Increment64 {
+			stateAssertScalarFlag(t, j, f, r, values)
+			continue
+		}
 		if f.Preserved && r.writer != 0 {
 			t.Fatal("false flag preservation")
 		}

@@ -129,4 +129,5 @@ func TestGlobalCallerSelectedRuntimeArtifact(t *testing.T) {
 		t.Fatal("integer callee application lost caller's floating/vector context")
 	}
 	t.Logf("actual composed return=%#x instructions=%d accesses=%d primitives=%d exclusions=%d", b.Continuation, len(b.Successor.Instructions), len(b.Successor.Accesses), len(b.Successor.PrimitiveEffects), len(b.Successor.ExcludedBoundaries))
+	selectedCheckFirstLoopCut(t, raw, image, application)
 }

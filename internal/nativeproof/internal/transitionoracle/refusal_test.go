@@ -71,8 +71,10 @@ func TestOpcodeAndPrefixPopulation(t *testing.T) {
 				valid = valid || op >= 0xb8 && op <= 0xbf || op >= 0x50 && op <= 0x5f
 			}
 			if rex >= 0x48 {
+				valid = valid || op == 0xff // INC64 /0 register
 				valid = valid || op >= 0xb8 && op <= 0xbf || op == 0x25 || op == 0x2d || op == 0x05 || op == 0x81 || op == 0x83 || op == 0x01 || op == 0x03
 			} else {
+				valid = valid || op == 0x19 || op == 0x1b || op == 0x21 || op == 0x23
 				valid = valid || op >= 0xb0 && op <= 0xb7 || op == 0x88 || op == 0x8a || op == 0xc6
 				valid = valid || (op == 0x31 || op == 0x33) && rex&1 == (rex>>2)&1
 			}
@@ -86,6 +88,17 @@ func TestOpcodeAndPrefixPopulation(t *testing.T) {
 
 func TestEncodeRefusesNormalization(t *testing.T) {
 	cases := []Descriptor{
+		{Intent{Operation: Increment64}, Encoding{Form: INCFF}},
+		{Intent{Operation: Increment64, Width: 32}, Encoding{Form: INCFF, REX: 0x48}},
+		{Intent{Operation: Increment64, Src: 1}, Encoding{Form: INCFF, REX: 0x48}},
+		{Intent{Operation: ShiftLeft32CL, Width: 32, Src: 1}, Encoding{Form: SHLD3}},
+		{Intent{Operation: ShiftLeft32CL, Width: 32}, Encoding{Form: SHLD3, REX: 0x48}},
+		{Intent{Operation: ShiftLeft32CL, Width: 32, Dst: 16}, Encoding{Form: SHLD3}},
+		{Intent{Operation: SubtractBorrow32, Width: 32, Dst: 8}, Encoding{Form: SBB19}},
+		{Intent{Operation: SubtractBorrow32, Width: 32, Src: 8}, Encoding{Form: SBB1B}},
+		{Intent{Operation: AndRegister32, Width: 32, Immediate: 1}, Encoding{Form: AND21}},
+		{Intent{Operation: AndRegister32, Width: 32}, Encoding{Form: AND23, DispBytes: 1}},
+		{Intent{Operation: AndRegister32, Width: 32}, Encoding{Form: AND23, NOPModRM: 1}},
 		{Intent{Operation: MoveRegister}, Encoding{Form: MOV89, REX: 0x48, NOPModRM: 0x44}},
 		{Intent{Operation: NoOp}, Encoding{Form: NOP0F1F, NOPModRM: 0x4c}},
 		{Intent{Operation: NoOp}, Encoding{Form: NOP0F1F, NOPModRM: 0xc0, NOPDisp: 1}},

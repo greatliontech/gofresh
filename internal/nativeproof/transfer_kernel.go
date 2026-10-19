@@ -9,7 +9,7 @@ import (
 
 // TransferRules identifies the shared scalar ISA relations. These relations do
 // not establish instruction selection, memory applicability, ordering or a frame.
-const TransferRules = "gofresh/native-scalar-transfer@3"
+const TransferRules = "gofresh/native-scalar-transfer@4"
 
 // TransferKernel constructs exact scalar instruction relations under one
 // cumulative expression/work/depth allowance. It owns no image or certificate:
@@ -81,7 +81,7 @@ func (m *valueBuilder) compareExchange(compare, current, replacement br.Term) Co
 	return CompareExchangeResult{Success: p.ZF, Accumulator: m.ite(p.ZF, compare, current), Memory: m.ite(p.ZF, replacement, current), Flags: f, Predicates: p}
 }
 
-// ArithmeticResult retains the modular sum and all six defined arithmetic flags.
+// ArithmeticResult retains a modular arithmetic result and its flag relations.
 type ArithmeticResult struct {
 	Value      br.Term
 	Flags      TransitionFlags
@@ -158,6 +158,117 @@ func (m *valueBuilder) add(left, right br.Term) ArithmeticResult {
 	aux := m.compare(br.ULT, m.extract(result, 0, 4), m.extract(left, 0, 4))
 	f := TransitionFlags{CF: definedFlag(c), OF: definedFlag(overflow), SF: definedFlag(sign), ZF: definedFlag(z), AF: definedFlag(aux), PF: definedFlag(m.parity(result))}
 	return ArithmeticResult{Value: result, Flags: f, Predicates: TransitionPredicates{c, z, m.different(sign, overflow)}}
+}
+
+// SubtractBorrow derives left-right-carry at a common width of 8, 32 or 64
+// bits. Carry is the actual incoming BOOL carry predicate, not a wrapped addend.
+func (k *TransferKernel) SubtractBorrow(left, right, carry br.Term) (ArithmeticResult, error) {
+	if err := k.scalarInputs(left, right); err != nil {
+		return ArithmeticResult{}, err
+	}
+	if err := k.inputs(carry); err != nil {
+		return ArithmeticResult{}, err
+	}
+	if carry.Sort() != br.Bool() {
+		return ArithmeticResult{}, refuse(0, "relation-semantics", "SBB requires a BOOL carry")
+	}
+	r := k.meter.subtractBorrow(left, right, carry)
+	if k.meter.err != nil {
+		return ArithmeticResult{}, k.meter.err
+	}
+	return r, k.meter.err
+}
+
+func (m *valueBuilder) subtractBorrow(left, right, carry br.Term) ArithmeticResult {
+	result := m.binary(br.Sub, m.binary(br.Sub, left, right), m.make(br.BoolToBits, left.Sort(), 0, carry))
+	borrow := func(a, b br.Term) br.Term {
+		return m.or(m.compare(br.ULT, a, b), m.and(m.compare(br.Equal, a, b), carry))
+	}
+	c, z, sign := borrow(left, right), m.compare(br.Equal, result, m.con(result.Sort(), 0)), m.sign(result)
+	// Overflow compares the original operands' signs: right+carry may wrap.
+	overflow := m.and(m.different(m.sign(left), m.sign(right)), m.different(m.sign(left), sign))
+	aux := borrow(m.extract(left, 0, 4), m.extract(right, 0, 4))
+	f := TransitionFlags{CF: definedFlag(c), OF: definedFlag(overflow), SF: definedFlag(sign), ZF: definedFlag(z), AF: definedFlag(aux), PF: definedFlag(m.parity(result))}
+	return ArithmeticResult{result, f, TransitionPredicates{c, z, m.different(sign, overflow)}}
+}
+
+// ShiftLeft32Result retains SHL's masked-count relation. Carry is meaningful
+// for nonzero counts and Overflow for count one. Zero counts preserve incoming
+// flags; counts greater than one leave OF undefined, and nonzero counts leave
+// AF undefined. Consumers must apply those conditions to their incoming state.
+type ShiftLeft32Result struct {
+	Value, ZeroCount, OneCount          br.Term
+	Carry, Overflow, Sign, Zero, Parity br.Term
+}
+
+// ShiftLeft32 derives the low 32-bit result from a BV32 operand and incoming
+// BV8 CL. It uses only constant shifts and BOOL selection. Register zero extension
+// and guarded flag definedness remain consumer obligations, including count zero.
+func (k *TransferKernel) ShiftLeft32(value, count br.Term) (ShiftLeft32Result, error) {
+	if err := k.inputs(value, count); err != nil {
+		return ShiftLeft32Result{}, err
+	}
+	if value.Sort() != br.Bits(32) || count.Sort() != br.Bits(8) {
+		return ShiftLeft32Result{}, refuse(0, "relation-semantics", "SHL32 requires BV32 operand and BV8 count")
+	}
+	r := k.meter.shiftLeft32(value, count)
+	if k.meter.err != nil {
+		return ShiftLeft32Result{}, k.meter.err
+	}
+	return r, k.meter.err
+}
+
+func (m *valueBuilder) shiftLeft32(value, count br.Term) ShiftLeft32Result {
+	var countBits [5]br.Term
+	zero, highZero := m.truth, m.truth
+	x := m.make(br.ZExt, br.Bits(33), 0, value)
+	for bit := 0; bit < 5; bit++ {
+		selected := m.scalarCountBit(count, bit)
+		countBits[bit] = selected
+		zero = m.and(zero, m.not(selected))
+		if bit != 0 {
+			highZero = m.and(highZero, m.not(selected))
+		}
+		x = m.ite(selected, m.make(br.Shl, br.Bits(33), uint64(1<<bit), x), x)
+	}
+	result := m.extract(x, 0, 32)
+	carry := m.make(br.Nonzero, br.Bool(), 0, m.extract(x, 32, 1))
+	sign := m.sign(result)
+	return ShiftLeft32Result{Value: result,
+		ZeroCount: zero,
+		OneCount:  m.and(countBits[0], highZero),
+		Carry:     carry, Overflow: m.different(sign, carry), Sign: sign,
+		Zero: m.compare(br.Equal, result, m.con(br.Bits(32), 0)), Parity: m.parity(result)}
+}
+
+// scalarCountBit preserves the Boolean structure of masked and joined counts.
+// Reading a bit through conversions, conjunction and ITE is exact; retaining
+// that structure lets the existing checked Boolean rewrites prove count-domain
+// guarantees without treating a known-bit estimate as proof. Every recursive
+// visit consumes the shared work allowance, including visits that fold away.
+func (m *valueBuilder) scalarCountBit(value br.Term, bit int) br.Term {
+	if !m.tick() {
+		return br.Term{}
+	}
+	v := value.View()
+	switch v.Op {
+	case br.Constant:
+		return m.con(br.Bool(), v.Immediate>>uint(bit)&1)
+	case br.Extract:
+		return m.scalarCountBit(v.Args[0], bit+int(v.Immediate))
+	case br.Trunc:
+		return m.scalarCountBit(v.Args[0], bit)
+	case br.ZExt:
+		if bit >= v.Args[0].Sort().Width() {
+			return m.falsity
+		}
+		return m.scalarCountBit(v.Args[0], bit)
+	case br.BitAnd:
+		return m.and(m.scalarCountBit(v.Args[0], bit), m.scalarCountBit(v.Args[1], bit))
+	case br.ITE:
+		return m.ite(v.Args[0], m.scalarCountBit(v.Args[1], bit), m.scalarCountBit(v.Args[2], bit))
+	}
+	return m.make(br.Nonzero, br.Bool(), 0, m.extract(value, bit, 1))
 }
 
 // Compare derives all six subtraction flags without writing either operand.

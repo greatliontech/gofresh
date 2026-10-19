@@ -119,7 +119,7 @@ func FuzzTransitionStateComplete(f *testing.F) {
 // architectural register can be destination/source/base, including RSP and R12.
 // All selected intermediate cuts are checked against a reference prefix.
 func FuzzTransitionStateLocal(f *testing.F) {
-	for op := uint8(0); op < 10; op++ {
+	for op := uint8(0); op < 14; op++ {
 		f.Add(op, uint8(op+7), uint8(op+3), uint8(op+5), ^uint64(0)-uint64(op), int32(-2147483648+int64(op)), uint8(op), uint64(op)*0x654321fedcba)
 	}
 	f.Add(uint8(8), uint8(0), uint8(15), uint8(4), uint64(0x8000000000000000), int32(2147483647), uint8(31), uint64(1))
@@ -137,7 +137,7 @@ func FuzzTransitionStateLocal(f *testing.F) {
 		face := stateFace(1<<31, valuation%(1<<31))
 		var ops []stateInstruction
 		add := func(i to.Intent) { ops = append(ops, stateOp(i, form)) }
-		switch kind % 10 {
+		switch kind % 14 {
 		case 0:
 			add(to.Intent{Operation: to.MoveRegister, Dst: dst, Src: src})
 		case 1:
@@ -169,6 +169,26 @@ func FuzzTransitionStateLocal(f *testing.F) {
 			// Arbitrary entry operand, independent of the immediate payload.
 			// RSP is the pointer case; all other initial registers are scalars.
 			add(to.Intent{Operation: to.Subtract, Dst: dst, Immediate: uint64(int64(int32(immediate)))})
+		case 10:
+			add(to.Intent{Operation: to.Increment64, Dst: dst})
+		case 11:
+			add(to.Intent{Operation: to.MoveImmediate, Dst: 1, Immediate: immediate})
+			add(to.Intent{Operation: to.ShiftLeft32CL, Dst: dst, Width: 32})
+		case 12:
+			add(to.Intent{Operation: to.SubtractBorrow32, Dst: dst, Src: src, Width: 32})
+		case 13:
+			add(to.Intent{Operation: to.AndRegister32, Dst: dst, Src: src, Width: 32})
+		}
+		if kind%14 >= 10 {
+			ds := make([]to.Descriptor, len(ops))
+			for j, op := range ops {
+				ds[j] = to.Descriptor{Intent: op.intent, Encoding: stateEncoding(op.intent, op.choice)}
+			}
+			x, _ := atomicLayout(t, ds)
+			// This bounded local factor checks complete state and every split;
+			// the established depth-frontier oracle below remains unchanged.
+			atomicStateCuts(t, x, face, stateInitial(face, valuation))
+			return
 		}
 		stateCheckProgram(t, ops, face, stateInitial(face, valuation), immediate, valuation, true)
 	})

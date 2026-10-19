@@ -15,7 +15,45 @@ func Descriptors(yield func(Descriptor) bool) {
 	more := true
 	baseDescriptors(func(d Descriptor) bool { more = yield(d); return more })
 	if more {
-		atomicDescriptors(yield)
+		atomicDescriptors(func(d Descriptor) bool { more = yield(d); return more })
+	}
+	if more {
+		scalarDescriptors(yield)
+	}
+}
+
+func scalarDescriptors(yield func(Descriptor) bool) {
+	prefixes := []byte{0}
+	for rex := byte(0x40); rex <= 0x4f; rex++ {
+		prefixes = append(prefixes, rex)
+	}
+	for _, rex := range prefixes {
+		for rm := uint8(0); rm < 8; rm++ {
+			i, e := Intent{Operation: ShiftLeft32CL, Dst: rm + 8*(rex&1), Width: 32}, Encoding{Form: SHLD3, REX: rex}
+			if rex&8 != 0 {
+				i.Operation, i.Width, e.Form = Increment64, 0, INCFF
+			}
+			if !yield(Descriptor{i, e}) {
+				return
+			}
+			if rex&8 != 0 {
+				continue
+			}
+			for reg := uint8(0); reg < 8; reg++ {
+				for _, f := range []Form{SBB19, SBB1B, AND21, AND23} {
+					i := Intent{Operation: SubtractBorrow32, Width: 32, Dst: rm + 8*(rex&1), Src: reg + 8*((rex>>2)&1)}
+					if f == AND21 || f == AND23 {
+						i.Operation = AndRegister32
+					}
+					if f == SBB1B || f == AND23 {
+						i.Dst, i.Src = i.Src, i.Dst
+					}
+					if !yield(Descriptor{i, Encoding{Form: f, REX: rex}}) {
+						return
+					}
+				}
+			}
+		}
 	}
 }
 

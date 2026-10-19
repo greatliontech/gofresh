@@ -27,6 +27,9 @@
 // conditional edges use twelve conditions over CF/ZF/SF!=OF/PF. CPUID is exact
 // operand-free 0f a2, without prefixes. Register self-XOR admits 32-bit operands,
 // clearing the full register; other XOR shapes are outside this grammar.
+// Scalar register forms admit INC64 (FF /0 with REX.W), SHL32 by CL (D3 /4),
+// SBB32 (19/1B) and AND32 (21/23). The unary selector is not extended by REX.R;
+// binary register selectors retain both directions and every architectural GPR.
 // RIP-relative LEA and data accesses use
 // next IP. Direct CALL uses signed rel32, near RET reads the actual return word,
 // PUSH/POP admit the canonical 64-bit register forms, and SYSCALL is exact 0f05.
@@ -82,6 +85,10 @@ const (
 	LockedOr
 	LockedAndImmediate
 	LockedOrImmediate
+	Increment64
+	ShiftLeft32CL
+	SubtractBorrow32
+	AndRegister32
 )
 
 // Intent is a semantic instruction description. Registers are architectural
@@ -113,7 +120,8 @@ func RequiresExpansion(i Intent) bool {
 	switch i.Operation {
 	case Call, Syscall, Clear32, LockedCompareExchange, SetRegister, SetMemory,
 		CompareMemory, CompareFromMemory, CompareMemoryImmediate, NoOp, LockedExchange, LockedExchangeAdd, AddRegister,
-		LockedAnd, LockedOr, LockedAndImmediate, LockedOrImmediate:
+		LockedAnd, LockedOr, LockedAndImmediate, LockedOrImmediate,
+		Increment64, ShiftLeft32CL, SubtractBorrow32, AndRegister32:
 		return true
 	case Test, TestImmediate:
 		return i.Width == 8
@@ -186,6 +194,12 @@ const (
 	LOCKOR08
 	LOCKAND80
 	LOCKOR80
+	INCFF
+	SHLD3
+	SBB19
+	SBB1B
+	AND21
+	AND23
 )
 
 // Encoding preserves choices that semantic intent deliberately forgets. REX is

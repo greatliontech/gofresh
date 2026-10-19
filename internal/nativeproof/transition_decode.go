@@ -12,6 +12,14 @@ import (
 // independently proved false. Register CMP and nonbyte TEST retain their ordinary
 // discovery behavior; memory CMP and byte TEST are distinct operand families.
 func TransitionExpansionRequired(i x86asm.Inst) bool {
+	if i.Op == x86asm.INC || i.Op == x86asm.SHL || i.Op == x86asm.SBB {
+		return true
+	}
+	if i.Op == x86asm.AND && i.DataSize == 32 && i.MemBytes == 0 {
+		_, left := i.Args[0].(x86asm.Reg)
+		_, right := i.Args[1].(x86asm.Reg)
+		return left && right
+	}
 	if isTransitionSSE(i.Op) {
 		return true
 	}
@@ -130,6 +138,9 @@ func transitionEncoding(im *Image, pc uint64) (x86asm.Inst, []byte, error) {
 // Immediate sign extension is checked against bytes, including imm8 and imm32
 // arithmetic; operand widths are the actual register aliases, never a mnemonic.
 func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
+	if i.Op == x86asm.INC || i.Op == x86asm.SHL || i.Op == x86asm.SBB || i.Op == x86asm.AND && i.DataSize == 32 && i.MemBytes == 0 {
+		return validateScalarTailForm(pc, i, b)
+	}
 	if isTransitionSSE(i.Op) {
 		return validateTransitionSSEForm(pc, i, b)
 	}

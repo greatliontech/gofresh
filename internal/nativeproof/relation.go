@@ -493,6 +493,14 @@ func (m *valueBuilder) merge(dst *symbolicState, src symbolicState) {
 		if !m.tick() {
 			return
 		}
+		// A missing private predicate remains unavailable across feasible arms;
+		// defer refusal until a consumer needs it, since an overwrite may precede
+		// that use. Literal guards retain ITE's selected-arm behavior, including
+		// ignoring an unavailable predicate on the unselected arm.
+		if !literalBool(src.path, 0) && !literalBool(src.path, 1) && (!src.flags[i].Valid() || !dst.flags[i].Valid()) {
+			dst.flags[i] = br.Term{}
+			continue
+		}
 		dst.flags[i] = m.ite(src.path, src.flags[i], dst.flags[i])
 	}
 	dst.path = m.or(dst.path, src.path)

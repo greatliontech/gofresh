@@ -140,8 +140,23 @@
 // nonwriting 32/64-bit CMP and byte memory CMP, byte/32/64-bit
 // register TEST and the ten direct conditions over CF, ZF and
 // SF!=OF, alongside relative JMP/fallthrough, immediate and register ADD64, direct near CALL,
-// register PUSH/POP and near RET. Stack operations use the same current bytes;
-// CALL stores the actual decoded continuation and RET proves equality of its
+// register PUSH/POP and near RET.
+// Narrow ordinary scalar forms also admit INC64 (FF /0 register), SBB32
+// (19/1B register-register), AND32 (21/23 register-register) and SHL32 by CL
+// (D3 /4 register), with optional discovery expansion. INC preserves the actual
+// current CF metadata and predicate; only checked affine offsets transport pointer
+// provenance. SBB uses the current defined carry predicate, even when its public
+// flag value is unprojected. AND clears CF/OF and leaves AF undefined. All 32-bit
+// writes zero-extend and drop provenance. SHL reads incoming CL before writing,
+// masks the count to five bits, and zero-extends even at count zero. Zero counts
+// preserve flags exactly; nonzero counts define CF/SF/ZF/PF, only count one defines
+// OF, and nonzero counts leave AF undefined. Guarded side proofs retain guarantees
+// over the complete incoming scope. Public flag values and private condition
+// predicates merge only available feasible arms; missing values are never invented.
+// Defined=false means not guaranteed across the scope, rather than undefined on
+// every execution. These scalar rules supply no loop-completion mechanism.
+// Stack operations use the same current bytes. CALL stores the actual decoded
+// continuation and RET proves equality of its
 // current readable return word to that active context. PUSH/POP of RSP retain
 // architectural ordering. Restored RSP does not roll back writes or effects.
 // Every access retains the actual read or supplied write term at its occurrence,

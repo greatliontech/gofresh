@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"iter"
+	"math"
 	"math/big"
 	"math/bits"
 	"math/rand/v2"
@@ -75,29 +76,34 @@ type stateQuery struct {
 }
 
 type stateReference struct {
-	origin uint64
-	regs   [16]uint64
-	ptrs   [16]statePointer
-	memory map[stateLocation]stateByte
+	origin   uint64
+	envelope RelativeSpan
+	regs     [16]uint64
+	ptrs     [16]statePointer
+	memory   map[stateLocation]stateByte
 	// Input-owned fixture coverage, never read from a checker certificate.
 	initialized map[stateLocation]bool
 	words       map[int64]uint64
 	written     [16]bool
 	writtenBits Masks
 	// CF, ZF, OF, SF, AF, PF. Undefined AF has no compared value.
-	flags        [6]bool
-	writer       to.Operation
-	accesses     []stateAccess
-	frame        map[stateLocation]bool
-	loads        []interfaceMapping
-	outcomes     [][4]uint32
-	primitives   []statePrimitive
-	fs           uint64
-	fsp          statePointer
-	flagExtra    uint64
-	context      string
-	returnTarget uint64
-	addressBits  int
+	flags  [6]bool
+	writer to.Operation
+	// Concrete ISA status for count-dependent scalar flags. A symbolic scope
+	// may guarantee fewer flags than this selected valuation defines.
+	scalarDefined, scalarPreserved [6]bool
+	scalarConditionalCarry         bool
+	accesses                       []stateAccess
+	frame                          map[stateLocation]bool
+	loads                          []interfaceMapping
+	outcomes                       [][4]uint32
+	primitives                     []statePrimitive
+	fs                             uint64
+	fsp                            statePointer
+	flagExtra                      uint64
+	context                        string
+	returnTarget                   uint64
+	addressBits                    int
 }
 
 type stateSyscall struct {
@@ -144,6 +150,7 @@ func stateFace(modulus, residue uint64) TransitionInterface {
 func stateInitial(face TransitionInterface, seed uint64) stateReference {
 	rng := rand.New(rand.NewPCG(seed, 0x5154415445))
 	r := stateReference{memory: map[stateLocation]stateByte{}, words: map[int64]uint64{}, frame: map[stateLocation]bool{}}
+	r.envelope = face.Envelope
 	r.fs = seed*0x1234567 + 0x87654321
 	r.addressBits = face.Conditions.UserAddressBits
 	r.flagExtra = 0x202 | (seed&1)<<10
@@ -201,6 +208,7 @@ func stateRawInitial(face TransitionInterface, data []byte) stateReference {
 		return out
 	}
 	r := stateReference{memory: map[stateLocation]stateByte{}, words: map[int64]uint64{}, frame: map[stateLocation]bool{}}
+	r.envelope = face.Envelope
 	index := binary.LittleEndian.Uint64(read(8))
 	first := face.Origin.Min + (face.Origin.Residue+face.Origin.Modulus-face.Origin.Min%face.Origin.Modulus)%face.Origin.Modulus
 	r.origin = first + index%((face.Origin.Max-first)/face.Origin.Modulus+1)*face.Origin.Modulus
@@ -377,6 +385,60 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 		default:
 			r.regs[reg] = value
 		}
+	}
+	if i.Operation >= to.Increment64 {
+		defined, preserved := r.flagStatus()
+		conditionalCarry := r.writer >= to.Increment64 && r.scalarConditionalCarry
+		pointer := statePointer{}
+		x, y, z := read(i.Dst, false), read(i.Src, false), uint64(0)
+		switch i.Operation {
+		case to.Increment64:
+			z = x + 1
+			p := r.ptrs[i.Dst]
+			if p.valid && p.off != math.MaxInt64 {
+				p.off++
+				if p.image {
+					load := r.loads[p.load]
+					if uint64(p.off) >= load.start && uint64(p.off) <= load.end && uint64(p.off) < 1<<47 {
+						pointer = p
+					}
+				} else if p.off >= r.envelope.Start && p.off <= r.envelope.End {
+					pointer = p
+				}
+			}
+			cf := r.flags[0]
+			r.flags = [6]bool{cf, z == 0, x == 0x7fffffffffffffff, z>>63 != 0, x&15 == 15, bits.OnesCount8(byte(z))%2 == 0}
+			defined = [6]bool{defined[0], true, true, true, true, true}
+			preserved = [6]bool{preserved[0]}
+		case to.SubtractBorrow32:
+			conditionalCarry = false
+			borrow := uint64(0)
+			if r.flags[0] {
+				borrow = 1
+			}
+			z = uint64(uint32(x - y - borrow))
+			r.flags = [6]bool{x < y+borrow, z == 0, (x^y)&(x^z)&(1<<31) != 0, z>>31 != 0, x&15 < (y&15)+borrow, bits.OnesCount8(byte(z))%2 == 0}
+			defined, preserved = [6]bool{true, true, true, true, true, true}, [6]bool{}
+		case to.AndRegister32:
+			conditionalCarry = false
+			z = x & y
+			r.flags = [6]bool{false, z == 0, false, z>>31 != 0, false, bits.OnesCount8(byte(z))%2 == 0}
+			defined, preserved = [6]bool{true, true, true, true, false, true}, [6]bool{}
+		case to.ShiftLeft32CL:
+			conditionalCarry = true
+			n := r.regs[1] & 31 // capture before the ECX destination can change
+			z = uint64(uint32(x << n))
+			if n != 0 {
+				cf := (x>>(32-n))&1 != 0
+				r.flags = [6]bool{cf, z == 0, (z>>31 != 0) != cf, z>>31 != 0, false, bits.OnesCount8(byte(z))%2 == 0}
+				defined, preserved = [6]bool{true, true, n == 1, true, false, true}, [6]bool{}
+			}
+		}
+		write(i.Dst, false, z)
+		r.ptrs[i.Dst] = pointer
+		r.writer, r.scalarDefined, r.scalarPreserved = i.Operation, defined, preserved
+		r.scalarConditionalCarry = conditionalCarry
+		return
 	}
 	if i.Operation == to.SetRegister {
 		v := uint64(0)
@@ -989,6 +1051,32 @@ func (d stateDepthProfile) assertProjection(t testing.TB, c TransitionCertificat
 // Encoding choices are constrained only by their representable payload. No
 // semantic operand is reconstructed by parsing the resulting bytes.
 func stateEncoding(i to.Intent, choice uint8) to.Encoding {
+	if i.Operation >= to.Increment64 {
+		e := to.Encoding{Form: to.INCFF, REX: 0x48}
+		rm, reg := i.Dst, i.Src
+		switch i.Operation {
+		case to.Increment64:
+			e.REX |= choice & 6
+		case to.ShiftLeft32CL:
+			e.Form, e.REX = to.SHLD3, 0
+			e.REX = choice & 6
+		default:
+			e.Form, e.REX = to.SBB19, choice&2
+			if i.Operation == to.AndRegister32 {
+				e.Form = to.AND21
+			}
+			if choice&1 != 0 {
+				e.Form++
+				rm, reg = i.Src, i.Dst
+			}
+			e.REX |= reg / 8 << 2
+		}
+		e.REX |= rm / 8
+		if e.REX != 0 || choice&8 != 0 {
+			e.REX |= 0x40
+		}
+		return e
+	}
 	if i.Operation == to.Clear32 {
 		e := to.Encoding{Form: to.XOR31}
 		if choice&1 != 0 {
@@ -1274,6 +1362,10 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 		}
 	}
 	for j, f := range []TransitionFlag{b.Flags.CF, b.Flags.ZF, b.Flags.OF, b.Flags.SF, b.Flags.AF, b.Flags.PF} {
+		if want.writer >= to.Increment64 {
+			stateAssertScalarFlag(t, j, f, want, values)
+			continue
+		}
 		if (want.writer == to.AddRegister || want.writer == to.LockedExchangeAdd || stateLogical(want.writer) && j != 4) && !f.Value.Valid() {
 			t.Fatal("operation lost a required arithmetic flag relation", j)
 		}
@@ -1285,10 +1377,42 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 			t.Fatal("projected arithmetic flag value differs", j)
 		}
 	}
-	for j, want := range []bool{want.flags[0], want.flags[1], want.flags[3] != want.flags[2]} {
-		if c.checked.flags[j].Sort() != br.Bool() || (stateEval(t, c.checked.flags[j], values) != 0) != want {
+	for j, value := range []bool{want.flags[0], want.flags[1], want.flags[3] != want.flags[2]} {
+		if !c.checked.flags[j].Valid() && want.writer == to.ShiftLeft32CL && j == 2 {
+			continue
+		}
+		if c.checked.flags[j].Sort() != br.Bool() || (stateEval(t, c.checked.flags[j], values) != 0) != value {
 			t.Fatal("private CF/ZF/SF!=OF differs", j)
 		}
+	}
+}
+
+func (r stateReference) flagStatus() (defined, preserved [6]bool) {
+	if r.writer >= to.Increment64 {
+		return r.scalarDefined, r.scalarPreserved
+	}
+	for j := range defined {
+		defined[j] = j != 4 || !(r.writer == to.And || r.writer == to.Clear32 || r.writer == to.Test || r.writer == to.TestImmediate || stateLogical(r.writer))
+		preserved[j] = r.writer == 0
+	}
+	return
+}
+
+func stateAssertScalarFlag(t testing.TB, j int, f TransitionFlag, want stateReference, values map[br.Term]uint64) {
+	t.Helper()
+	defined, preserved := want.flagStatus()
+	if f.Defined && !defined[j] || f.Preserved && !preserved[j] || !f.Defined && f.Value.Valid() {
+		t.Fatal("false scalar flag guarantee", j, f, defined, preserved)
+	}
+	conditional := want.writer == to.ShiftLeft32CL || want.writer == to.Increment64 && j == 0 && want.scalarConditionalCarry
+	if !conditional && (f.Defined != defined[j] || f.Preserved != preserved[j]) {
+		t.Fatal("lost scalar flag guarantee", j, f, defined, preserved)
+	}
+	if f.Defined && f.Value.Valid() && (f.Value.Sort() != br.Bool() || (stateEval(t, f.Value, values) != 0) != want.flags[j]) {
+		t.Fatal("scalar flag value differs", j)
+	}
+	if want.writer != to.ShiftLeft32CL && !(want.writer == to.Increment64 && j == 0) && f.Defined && !f.Value.Valid() {
+		t.Fatal("missing scalar flag value", j)
 	}
 }
 
