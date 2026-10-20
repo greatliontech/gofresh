@@ -20,8 +20,10 @@ func assertSelectedRuntimeRootedApplication(t *testing.T, raw []byte, image *nat
 	// argument slots need their own grants before this fresh root is checked.
 	x.face.Regions[1].Readable = true
 	x.face.Regions = append(x.face.Regions,
-		nativeproof.RelativeRegion{Bytes: nativeproof.RelativeSpan{Start: -48, End: -44}, Writable: true},
-		nativeproof.RelativeRegion{Bytes: nativeproof.RelativeSpan{Start: -40, End: -32}, Writable: true})
+		nativeproof.RelativeRegion{Bytes: nativeproof.RelativeSpan{Start: -48, End: -44}, Readable: true, Writable: true},
+		nativeproof.RelativeRegion{Bytes: nativeproof.RelativeSpan{Start: -40, End: -32}, Readable: true, Writable: true})
+	args := selectedArgsCandidate(t, raw, locations, until)
+	x.face.ImageRegions = append(x.face.ImageRegions, args.regions...)
 	limits := nativeproof.TransitionLimits{RelationLimits: nativeproof.RelationLimits{Work: 8_000_000, Nodes: 131072}}
 	proposal, err := nativeproof.ProposeTransition(t.Context(), image, body.Prefix.Entry, limits, nativeproof.TransitionOptions{Expansions: x.expansions})
 	if err != nil {
@@ -124,6 +126,8 @@ func assertSelectedRuntimeRootedApplication(t *testing.T, raw []byte, image *nat
 		t.Fatal("rooted body has an unaccounted atomic occurrence")
 	}
 	t.Logf("complete selected source/native body applies from ELF root %#x through actual wrapper return %#x; exact source/model scope, ten atomic groups, startup effects and residual state retained; process/compiler/use/harness obligations remain", before.Entry, until)
-	assertSelectedStartupWordTransfer(t, raw, image, successor, locations)
+	words := assertSelectedStartupWordTransfer(t, raw, image, successor, locations)
+	assertSelectedArgsPrefix(t, raw, image, words, args)
 	assertSelectedStartupWordPermissions(t, raw, image, x.face, proposal, limits, proof.native)
+	assertSelectedArgsPermissions(t, raw, image, locations, x.face, proposal, limits, proof.native, args)
 }

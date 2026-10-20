@@ -700,7 +700,7 @@
                           under REQ-impl-process-entry; preserve original inputs,
                           current bytes, pointer provenance, frames and effects.
                           Arbitrary entry words alone supply no argc/vector authority.
-                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.16a Compose the actual
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.16a Compose the actual
                             native wrapper and initial stores from current rooted
                             bytes, deriving stack-growth and write-barrier exclusions
                             and stopping before the sysargs call. Preserve the raw
@@ -715,6 +715,33 @@
                             selected scan; retain actual producing applicability and
                             selected-source storage association at their existing
                             slots.
+                            - [ ] 5.1w.2b.3b.2a.2.2.2.2.16b.1 Establish common
+                              logical backing and symbolic address coordinates,
+                              preserving stack/image cases, coherent current bytes,
+                              provenance, aliases, separation, inhabited joint
+                              address domains and continuation ownership. Derive
+                              and encode the native contract before changing the
+                              shared representation. Bind finite logical shapes to
+                              existing owned launch boundaries, including actual
+                              forwarded argv[0] and raw argument/environment order;
+                              executor knowledge alone supplies no evidence binding.
+                              Do not require concrete stack-relative string offsets
+                              or introduce a second process-input memory map.
+                            - [ ] 5.1w.2b.3b.2a.2.2.2.2.16b.2 Construct the
+                              identified fresh-root ordered input relation from
+                              finite logical shapes with universally admissible
+                              physical placement. Derive counts, vector members,
+                              separators, string backing/termination, permissions
+                              and lifetimes without caller-authored symbolic
+                              certificates or observed stack layouts. Auxiliary
+                              coordinates alone grant no tail interpretation.
+                            - [ ] 5.1w.2b.3b.2a.2.2.2.2.16b.3 Replay the complete
+                              rooted prefix under that relation through the initial
+                              argument stores. Establish their meaning from current
+                              bytes, preserve input identities and intervening
+                              effects, and derive arithmetic/indexed-access premises
+                              for the selected scan. Retain later typed-source and
+                              producing-applicability obligations explicitly.
                         - [ ] 5.1w.2b.3b.2a.2.2.2.2.17 Check the environment
                           scan through its actual auxiliary-vector boundary, with
                           selected signed-count conversions, increments, full-access

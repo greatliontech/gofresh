@@ -18787,3 +18787,47 @@ bindings {
   shape_hash: "23a40364b91f0ebcfbbad24791bd2813a5b49d970c90180a58fd0cd53944a4e8"
   clause_label: "current-action-acquisition"
 }
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "24a9daf536d37504cdb444c71d27246ef7416caeebbe98f9ca1a911f74b485fd"
+  source_hash: "cdb9fba0d776b3fcaf7a40f87f4c6e25098a1eaa22cb889183eef32264ac9e13"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestNarrowReferenceSelectedRuntimeArgsControls"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6383842c5e151b1ca9b2e4ec60cf77be6531e487fc6ea19feedc702fb7106d4e"
+  clause_label: "complete-cut"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "24a9daf536d37504cdb444c71d27246ef7416caeebbe98f9ca1a911f74b485fd"
+  source_hash: "cdb9fba0d776b3fcaf7a40f87f4c6e25098a1eaa22cb889183eef32264ac9e13"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestNarrowReferenceSelectedRuntimeArgsControls"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6383842c5e151b1ca9b2e4ec60cf77be6531e487fc6ea19feedc702fb7106d4e"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "24a9daf536d37504cdb444c71d27246ef7416caeebbe98f9ca1a911f74b485fd"
+  source_hash: "cdb9fba0d776b3fcaf7a40f87f4c6e25098a1eaa22cb889183eef32264ac9e13"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestNarrowReferenceSelectedRuntimeArgsControls"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6383842c5e151b1ca9b2e4ec60cf77be6531e487fc6ea19feedc702fb7106d4e"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "24a9daf536d37504cdb444c71d27246ef7416caeebbe98f9ca1a911f74b485fd"
+  source_hash: "cdb9fba0d776b3fcaf7a40f87f4c6e25098a1eaa22cb889183eef32264ac9e13"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestNarrowReferenceSelectedRuntimeArgsControls"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6383842c5e151b1ca9b2e4ec60cf77be6531e487fc6ea19feedc702fb7106d4e"
+  clause_label: "conditional-composition"
+}

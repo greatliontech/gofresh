@@ -11,7 +11,7 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-func assertSelectedStartupWordTransfer(t testing.TB, raw []byte, image *nativeproof.Image, prior nativeproof.TransitionCertificate, locations map[string]uint64) {
+func assertSelectedStartupWordTransfer(t testing.TB, raw []byte, image *nativeproof.Image, prior nativeproof.TransitionCertificate, locations map[string]uint64) nativeproof.TransitionCertificate {
 	t.Helper()
 	before, ok := prior.BoundFor(image)
 	if !ok || before.ConditionalRegion {
@@ -112,6 +112,7 @@ func assertSelectedStartupWordTransfer(t testing.TB, raw []byte, image *nativepr
 		t.Fatal(err)
 	}
 	t.Logf("rooted startup reloads original low32 entry word and origin+8 through outgoing slots to unexecuted CALL %#x; process argument/vector interpretation remains open", cut)
+	return continued
 }
 
 func assertSelectedStartupWordPermissions(t testing.TB, raw []byte, image *nativeproof.Image, face nativeproof.TransitionInterface, proposal nativeproof.TransitionProposal, limits nativeproof.TransitionLimits, body nativeproof.TransitionReturnCertificate) {
