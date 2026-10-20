@@ -84,6 +84,9 @@ func checkedSourceEffectPacket(region *sourceRegion, checker *regionKernel) *che
 		return nil
 	}
 	packet, input := region.packet, checker.input
+	if packet.input.normalReturns || input.normalReturns {
+		return nil
+	}
 	if packet.rules != regionRules || packet.trace == nil || packet.trace.owner == nil || checker.trace != packet.trace || input.owner != packet.input.owner || input.selection != packet.input.selection || input.root != packet.input.root || input.entry != packet.input.entry || input.use != packet.input.use || input.storageModel != packet.input.storageModel || region.root.function != input.root {
 		return nil
 	}

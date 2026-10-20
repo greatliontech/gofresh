@@ -11,7 +11,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
-const regionRules = "gofresh/source-region-transport@13"
+const regionRules = "gofresh/source-region-transport@14"
 
 // This kernel is conditional on an immutable, well-typed SSA owner. Selection of
 // that owner from source/build inputs is a separate obligation. It never invokes
@@ -19,8 +19,8 @@ const regionRules = "gofresh/source-region-transport@13"
 //
 // States are disjunctions of WHOLE heaps and environments. Joining individual
 // fields would lose the correlation between a registration name and its callback.
-// Exceeding the disjunction bound widens the whole state, never constructs a
-// Cartesian product that could subsequently be mistaken for exact rows.
+// Exceeding the disjunction bound retains common whole terms and explicitly
+// projected map bounds. It never reconstructs exact rows from separate fields.
 type regionKind uint8
 
 const (
@@ -34,6 +34,9 @@ const (
 	regionAggregate
 	regionFloat
 	regionUnsafePointer
+	regionMap
+	regionMapContents
+	regionStrings
 )
 
 type regionObjectKind uint8
@@ -44,11 +47,12 @@ const (
 	regionClosureEnvironment
 	regionFormal
 	regionUnknownObject
+	regionMapAllocation
 )
 
-// Object identity includes the allocating function context. Allocations in a
-// control-flow cycle, formal objects and unknown objects are summaries. Closure
-// environments are retained with the callable, including captured cell aliases.
+// Object identity includes the allocating function context. Recurrent sites are
+// summaries unless checked local uses establish activation-local storage without
+// surviving aliases. Closure environments retain captured cells and values.
 type regionObject struct {
 	kind       regionObjectKind
 	site       ssa.Value
@@ -81,6 +85,8 @@ type regionValue struct {
 	target      *ssa.Function
 	environment []regionValue
 	elements    []regionValue
+	keys        *regionMapKeys
+	strings     []string
 }
 
 // An absent register or object is unknown, not bottom or zero. In particular an
@@ -104,12 +110,15 @@ type regionUse struct {
 }
 
 type regionInput struct {
-	selection *program
-	owner     *ssa.Program
-	root      *ssa.Function
-	entry     regionPoint
-	use       regionUse
-	initial   regionState
+	// normalReturns proves only the states of normally returning invocations.
+	// Exceptional outcomes carry no frame or intermediate-effect authority.
+	normalReturns bool
+	selection     *program
+	owner         *ssa.Program
+	root          *ssa.Function
+	entry         regionPoint
+	use           regionUse
+	initial       regionState
 	// A distinct conditional storage antecedent. It is never inferred from the
 	// selected sizes, string premises or an observed machine/build label.
 	storageModel regionStorageModel
@@ -121,7 +130,7 @@ type regionInput struct {
 // All dimensions bound both proposal and checking. Defaults are deliberately
 // small; reaching any work/storage bound refuses rather than accepting a prefix.
 // alternatives is the whole-state widening threshold, not a truncated path
-// count: crossing it replaces the disjunction by top in the nonfinite invariant
+// count: crossing it computes a common-information upper bound in the invariant
 // arm. Finite occurrence populations never widen or truncate at this threshold.
 type regionLimits struct {
 	nodes, states, locations, alternatives, depth, work int
@@ -157,6 +166,7 @@ type regionObservation struct {
 // row/operand fact: a consumer must establish its required relation for EVERY
 // observation, including the reachable heap and captured environments.
 type checkedRegion struct {
+	exceptional  []regionExcludedContinuation
 	rules        string
 	input        regionInput
 	observations []regionObservation
@@ -185,14 +195,20 @@ type regionOperationFailure struct {
 	cause       error
 }
 
-func (f *regionOperationFailure) Error() string { return f.cause.Error() }
+func (f *regionOperationFailure) Error() string {
+	return fmt.Sprintf("%s [%s: %s]", f.cause, f.instruction.Parent(), f.instruction)
+}
 func (f *regionOperationFailure) Unwrap() error { return f.cause }
 
 type regionMeter struct {
-	ctx                 context.Context
-	limits              regionLimits
-	work, nodes, states int
-	locations           int
+	applications, reused int
+	keyCopies            map[*regionMapKeys]*regionMapKeys
+	stringCopies         map[regionStringSlice][]string
+	stringAtoms          map[string]bool
+	ctx                  context.Context
+	limits               regionLimits
+	work, nodes, states  int
+	locations            int
 }
 
 func (m *regionMeter) tick() error {
@@ -349,12 +365,24 @@ func (m *regionMeter) copyValue(v regionValue, depth int) (regionValue, error) {
 	}
 	m.locations++
 	if depth > m.limits.depth || m.locations > m.limits.locations || len(v.location.path) > m.limits.depth || len(v.location.object.invocation.path) > m.limits.depth*96 ||
-		len(v.environment) > m.limits.locations || len(v.elements) > m.limits.locations {
+		len(v.environment) > m.limits.locations || len(v.elements) > m.limits.locations || len(v.strings) > regionProjectionAlternatives {
 		return regionValue{}, regionError("value/location/depth budget exhausted")
 	}
 	v.location.path = slices.Clone(v.location.path)
 	v.environment = slices.Clone(v.environment)
 	v.elements = slices.Clone(v.elements)
+	var err error
+	v.strings, err = m.copyStrings(v.strings)
+	if err != nil {
+		return regionValue{}, err
+	}
+	if v.keys != nil {
+		keys, err := m.copyMapKeys(v.keys)
+		if err != nil {
+			return regionValue{}, err
+		}
+		v.keys = keys
+	}
 	for _, values := range [][]regionValue{v.environment, v.elements} {
 		for i := range values {
 			var err error
@@ -412,6 +440,12 @@ func regionScalarConstant(t types.Type, value constant.Value) bool {
 }
 
 func regionSameValue(a, b regionValue) bool {
+	if !slices.Equal(a.strings, b.strings) {
+		return false
+	}
+	if !regionSameMapKeys(a.keys, b.keys) {
+		return false
+	}
 	if a.kind != b.kind || !types.Identical(a.typ, b.typ) || a.floatBits != b.floatBits || a.target != b.target || a.start != b.start || a.length != b.length || a.capacity != b.capacity ||
 		a.location.object != b.location.object || !slices.Equal(a.location.path, b.location.path) || len(a.elements) != len(b.elements) || len(a.environment) != len(b.environment) {
 		return false
@@ -429,11 +463,11 @@ func regionSameValue(a, b regionValue) bool {
 	return true
 }
 
-// Inclusion is intentionally coarse: only a whole unknown value or exact term
-// equality covers a value. In particular, independently merged aggregate fields
-// are not silently treated as a relational registration invariant.
+// Ordinary aggregate inclusion remains whole-term inclusion. Explicit finite
+// string and projected-map sets additionally use subset inclusion; their lost
+// correlations cannot become an exact registration invariant.
 func regionValueIncluded(a, b regionValue) bool {
-	return types.Identical(a.typ, b.typ) && (b.kind == regionUnknown || regionSameValue(a, b))
+	return types.Identical(a.typ, b.typ) && (b.kind == regionUnknown || regionSameValue(a, b) || regionStringsIncluded(a, b) || a.kind == regionMapContents && b.kind == regionMapContents && regionMapKeysIncluded(a.keys, b.keys))
 }
 
 // proposeRegion constructs an untrusted post-fixpoint candidate. Checking does
@@ -459,7 +493,38 @@ func proposeRegionKernel(k *regionKernel) (*regionProposal, error) {
 	if err := k.meter.ctx.Err(); err != nil {
 		return nil, err
 	}
-	return &regionProposal{input: k.input, entries: entries, occurrences: occurrences, calls: k.session.proofs}, nil
+	proofs := k.session.proofs
+	if k.input.normalReturns {
+		live := map[*regionCallProof]bool{}
+		var visit func(*regionCallProof) error
+		visit = func(p *regionCallProof) error {
+			if err := k.meter.tick(); err != nil {
+				return err
+			}
+			if live[p] {
+				return nil
+			}
+			live[p] = true
+			for dep := range k.session.dependencies[p] {
+				if err := visit(dep); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		for p := range k.applied {
+			if err := visit(p); err != nil {
+				return nil, err
+			}
+		}
+		proofs = nil
+		for _, p := range k.session.proofs {
+			if live[p] {
+				proofs = append(proofs, p)
+			}
+		}
+	}
+	return &regionProposal{input: k.input, entries: entries, occurrences: occurrences, calls: proofs}, nil
 }
 
 func (k *regionKernel) proposeEntries() (map[*ssa.BasicBlock][]regionState, error) {
@@ -467,10 +532,12 @@ func (k *regionKernel) proposeEntries() (map[*ssa.BasicBlock][]regionState, erro
 	entries := map[*ssa.BasicBlock][]regionState{in.entry.block: {in.initial}}
 	queue := []*ssa.BasicBlock{in.entry.block}
 	queued := map[*ssa.BasicBlock]bool{in.entry.block: true}
+	applications := map[*ssa.BasicBlock]map[*regionCallProof]bool{}
 	for len(queue) != 0 {
 		block := queue[0]
 		queue = queue[1:]
 		queued[block] = false
+		k.applied = map[*regionCallProof]bool{}
 		for _, state := range slices.Clone(entries[block]) {
 			edges, _, err := k.block(block, state)
 			if err != nil {
@@ -488,9 +555,16 @@ func (k *regionKernel) proposeEntries() (map[*ssa.BasicBlock][]regionState, erro
 				}
 			}
 		}
+		applications[block] = k.applied
 	}
 	if err := k.meter.ctx.Err(); err != nil {
 		return nil, err
+	}
+	k.applied = map[*regionCallProof]bool{}
+	for _, calls := range applications {
+		for call := range calls {
+			k.applied[call] = true
+		}
 	}
 	return entries, nil
 }

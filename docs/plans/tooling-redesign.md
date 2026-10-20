@@ -1251,6 +1251,30 @@
         permitted builds; correct-cache equivalence alone cannot bridge them.
         Preserve language latitude and result-owner responsibilities without
         assuming byte determinism or numerical equality the claim does not need.
+        - [x] 9.4a.1a Extend the existing region kernel with canonical map backing,
+          bounded projected-string key summaries, common-information widening and
+          explicit normal-return postconditions. Independently check loop and call
+          invariants, aliases, allocation cardinality and exceptional exclusion;
+          share checked abstract calls with justified input/frame association and
+          cumulative accounting. Qualify complete selected intrinsic-table
+          construction on stock/custom Go with all configuration and SIMD arms,
+          factories and callbacks covered; derive package-key exclusion from actual
+          operands rather than a compiler/package-name rule. Check conditional
+          normalized-key lookup separately. Retain the intervening preservation,
+          compiler execution, native and public-applicability obligations.
+        - [ ] 9.4a.1b Apply the construction theorem through its actual
+          initialization-to-lookup control and object-preservation relation,
+          including mutable predicate targets and runtime-package normalization.
+          Start from the selected gc.Main control flow; distinguish construction's
+          normal return from outer panic recovery. Derive the protected-object
+          alias/escape and unsafe/opaque write frames, publication to concurrent
+          readers, and actual package/symbol-cache lineage under the selected IR
+          decoder. Identify the first unresolved edge and its bounded deciding
+          experiment before choosing another general mechanism; source reference
+          inventories and RTA supply candidates, not those proofs. Retain the
+          separate compiler-source/executable association obligation.
+          Inventory every remaining implementation-changing route for the selected
+          occurrence before consuming exclusion as selection-stability evidence.
       - [ ] 9.4a.2 Qualify one complete implicit-lowering applicability bridge
         from the actual TestScalar invocation path before more compiler startup
         work. Use the selected testing.tRunner stack-check/retry fragment as the

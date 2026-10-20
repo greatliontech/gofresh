@@ -82,6 +82,9 @@ func (k *regionKernel) proposeFlow() (map[*ssa.BasicBlock][]regionState, *region
 }
 
 func (k *regionKernel) checkFlow(entries map[*ssa.BasicBlock][]regionState, path *regionOccurrencePath) ([]regionObservation, error) {
+	if k.input.normalReturns && k.trace != nil {
+		return nil, regionError("normal-return postcondition has no complete effect authority")
+	}
 	if k.trace != nil {
 		if entries != nil || path == nil {
 			return nil, regionError("finite flow requires only an occurrence proof")

@@ -37,6 +37,9 @@ type selectedSourceBinder struct {
 	packages    map[*packages.Package]selectedSourcePackage
 	bound       map[*ssa.Function]selectedSourceDeclaration
 	callables   map[*ssa.Function]selectedSourceCallable
+	// Published only after a complete checked walk of this immutable parent's
+	// syntax. Counts retain duplicate-node refusals, not just membership labels.
+	lexical map[ast.Node]map[*ast.FuncLit]int
 }
 
 type selectedSourceInput struct{ kind, name string }
@@ -261,6 +264,13 @@ func (c *selectedSourceBinder) callable(fn *ssa.Function, depth int) (selectedSo
 }
 
 func (c *selectedSourceBinder) lexicalLiteral(fn *ssa.Function, parent ast.Node, literal *ast.FuncLit) (occurrences int, err error) {
+	if err := c.tick(fn, fn.Pos()); err != nil {
+		return 0, err
+	}
+	if prior, ok := c.lexical[parent]; ok {
+		return prior[literal], nil
+	}
+	counts := map[*ast.FuncLit]int{}
 	defer func() {
 		if p := recover(); p != nil {
 			if stop, ok := p.(selectedSourceWalkStop); ok {
@@ -281,14 +291,16 @@ func (c *selectedSourceBinder) lexicalLiteral(fn *ssa.Function, parent ast.Node,
 			return true
 		}
 		if child, ok := n.(*ast.FuncLit); ok {
-			if child == literal {
-				occurrences++
-			}
+			counts[child]++
 			return false
 		}
 		return true
 	})
-	return occurrences, nil
+	if c.lexical == nil {
+		c.lexical = map[ast.Node]map[*ast.FuncLit]int{}
+	}
+	c.lexical[parent] = counts
+	return counts[literal], nil
 }
 
 // Bound the type graph before constraint validation/instantiation. Recursive

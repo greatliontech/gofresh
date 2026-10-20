@@ -2,6 +2,7 @@ package closure
 
 import (
 	"context"
+	"fmt"
 	"go/constant"
 	"go/token"
 	"go/types"
@@ -11,7 +12,10 @@ import (
 )
 
 type regionKernel struct {
-	sizes types.Sizes
+	applied  map[*regionCallProof]bool
+	frame    regionWriteFrame
+	terminal map[*ssa.BasicBlock]bool
+	sizes    types.Sizes
 	// The cursor belongs to checked execution, never to a proposal node.
 	next        uint64
 	current     regionEffectOccurrence
@@ -34,7 +38,7 @@ type regionKernel struct {
 // labels. The source loader's SSA/type objects must remain immutable throughout.
 func newRegionKernel(ctx context.Context, in regionInput, limits regionLimits) (*regionKernel, error) {
 	session := newRegionCallSession(ctx, in, limits)
-	return newRegionContextKernel(in, session, regionInvocation{}, false)
+	return newRegionContextKernel(in, session, regionInvocation{}, in.normalReturns)
 }
 
 func newRegionContextKernel(in regionInput, session *regionCallSession, invocation regionInvocation, fullReturns bool) (*regionKernel, error) {
@@ -63,136 +67,140 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 			return nil, regionError("missing actual consuming operand")
 		}
 	}
-	for _, parameter := range fn.Params {
-		k.owned[parameter] = true
-	}
-	for _, free := range fn.FreeVars {
-		k.owned[free] = true
-	}
-	blocks := map[*ssa.BasicBlock]bool{}
-	for i, block := range fn.Blocks {
-		if err := k.meter.tick(); err != nil {
-			return nil, err
+	if facts, ok := session.functions[fn]; ok {
+		k.owned, k.cycle, k.constants = facts.owned, facts.cycle, facts.constants
+	} else {
+		for _, parameter := range fn.Params {
+			k.owned[parameter] = true
 		}
-		if block == nil || block.Parent() != fn || block.Index != i || blocks[block] || len(block.Instrs) == 0 || len(block.Preds) > len(fn.Blocks) || len(block.Succs) > 2 {
-			return nil, regionError("invalid block ownership")
+		for _, free := range fn.FreeVars {
+			k.owned[free] = true
 		}
-		blocks[block] = true
-		k.meter.nodes += len(block.Instrs)
-		if k.meter.nodes > limits.nodes {
-			return nil, regionError("node budget exhausted")
-		}
-		seenNonPhi := false
-		for _, instruction := range block.Instrs {
+		blocks := map[*ssa.BasicBlock]bool{}
+		for i, block := range fn.Blocks {
 			if err := k.meter.tick(); err != nil {
 				return nil, err
 			}
-			if instruction == nil || instruction.Block() != block || instruction.Parent() != fn {
-				return nil, regionError("invalid instruction ownership")
+			if block == nil || block.Parent() != fn || block.Index != i || blocks[block] || len(block.Instrs) == 0 || len(block.Preds) > len(fn.Blocks) || len(block.Succs) > 2 {
+				return nil, regionError("invalid block ownership")
 			}
-			if !regionBoundedOperands(instruction, limits.nodes) {
-				return nil, regionError("instruction operand budget exhausted")
+			blocks[block] = true
+			k.meter.nodes += len(block.Instrs)
+			if k.meter.nodes > limits.nodes {
+				return nil, regionError("node budget exhausted")
 			}
-			if value, ok := instruction.(ssa.Value); ok {
-				k.owned[value] = true
-			}
-			if phi, ok := instruction.(*ssa.Phi); ok {
-				if seenNonPhi || len(phi.Edges) != len(block.Preds) {
-					return nil, regionError("phi does not cover actual predecessors")
+			seenNonPhi := false
+			for _, instruction := range block.Instrs {
+				if err := k.meter.tick(); err != nil {
+					return nil, err
 				}
-			} else {
-				seenNonPhi = true
+				if instruction == nil || instruction.Block() != block || instruction.Parent() != fn {
+					return nil, regionError("invalid instruction ownership")
+				}
+				if in.normalReturns {
+					switch instruction.(type) {
+					case *ssa.Defer, *ssa.RunDefers, *ssa.Go:
+						return nil, regionError("normal-return scope has unproved deferred or concurrent control")
+					}
+				}
+				if !regionBoundedOperands(instruction, limits.nodes) {
+					return nil, regionError("instruction operand budget exhausted")
+				}
+				if value, ok := instruction.(ssa.Value); ok {
+					k.owned[value] = true
+				}
+				if phi, ok := instruction.(*ssa.Phi); ok {
+					if seenNonPhi || len(phi.Edges) != len(block.Preds) {
+						return nil, regionError("phi does not cover actual predecessors")
+					}
+				} else {
+					seenNonPhi = true
+				}
 			}
 		}
-	}
-	if !blocks[in.entry.block] || !fullReturns && !blocks[in.use.at.block] {
-		return nil, regionError("scope outside root")
+		if !blocks[in.entry.block] || !fullReturns && !blocks[in.use.at.block] {
+			return nil, regionError("scope outside root")
+		}
+		for _, block := range fn.Blocks {
+			for _, pair := range []struct {
+				edges   []*ssa.BasicBlock
+				forward bool
+			}{{block.Succs, true}, {block.Preds, false}} {
+				seen := map[*ssa.BasicBlock]bool{}
+				for _, edge := range pair.edges {
+					if !blocks[edge] || seen[edge] {
+						return nil, regionError("invalid or duplicate CFG edge")
+					}
+					seen[edge] = true
+					back := edge.Succs
+					if pair.forward {
+						back = edge.Preds
+					}
+					if !slices.Contains(back, block) {
+						return nil, regionError("CFG edge lacks reverse predecessor")
+					}
+				}
+			}
+			for i, instruction := range block.Instrs {
+				for _, operand := range instruction.Operands(nil) {
+					if err := k.meter.tick(); err != nil {
+						return nil, err
+					}
+					if operand != nil {
+						if c, ok := (*operand).(*ssa.Const); ok && c.Value == nil && !c.IsNil() {
+							if _, exists := k.constants[c]; !exists {
+								zero, err := k.zero(c.Type(), 0)
+								if err != nil {
+									return nil, err
+								}
+								k.constants[c] = zero
+							}
+						}
+					}
+					if operand != nil && *operand != nil && !k.owns(*operand) {
+						return nil, regionError("operand is outside typed owner")
+					}
+				}
+				last := i == len(block.Instrs)-1
+				switch instruction.(type) {
+				case *ssa.If:
+					if !last || len(block.Succs) != 2 {
+						return nil, regionError("invalid branch successors")
+					}
+				case *ssa.Jump:
+					if !last || len(block.Succs) != 1 {
+						return nil, regionError("invalid jump successor")
+					}
+				case *ssa.Return, *ssa.Panic:
+					if !last || len(block.Succs) != 0 {
+						return nil, regionError("invalid terminal successors")
+					}
+				default:
+					if last {
+						return nil, regionError("missing terminal instruction")
+					}
+				}
+			}
+		}
+		if err := k.findCycles(); err != nil {
+			return nil, err
+		}
+		last, uses, err := k.regionLocalLast(fn)
+		if err != nil {
+			return nil, err
+		}
+		session.functions[fn] = regionFunctionFacts{k.owned, k.cycle, k.constants, last, uses}
 	}
 	if !fullReturns && in.use.operand != nil {
 		found := false
 		for _, operand := range regionInstruction(in.use.at).Operands(nil) {
+			if err := k.meter.tick(); err != nil {
+				return nil, err
+			}
 			found = found || operand != nil && *operand == in.use.operand
 		}
 		if !found {
 			return nil, regionError("claimed value is not the actual consuming operand")
-		}
-	}
-	for _, block := range fn.Blocks {
-		for _, pair := range []struct {
-			edges   []*ssa.BasicBlock
-			forward bool
-		}{{block.Succs, true}, {block.Preds, false}} {
-			seen := map[*ssa.BasicBlock]bool{}
-			for _, edge := range pair.edges {
-				if !blocks[edge] || seen[edge] {
-					return nil, regionError("invalid or duplicate CFG edge")
-				}
-				seen[edge] = true
-				back := edge.Succs
-				if pair.forward {
-					back = edge.Preds
-				}
-				if !slices.Contains(back, block) {
-					return nil, regionError("CFG edge lacks reverse predecessor")
-				}
-			}
-		}
-		for i, instruction := range block.Instrs {
-			for _, operand := range instruction.Operands(nil) {
-				if operand != nil {
-					if c, ok := (*operand).(*ssa.Const); ok && c.Value == nil && !c.IsNil() {
-						if _, exists := k.constants[c]; !exists {
-							zero, err := k.zero(c.Type(), 0)
-							if err != nil {
-								return nil, err
-							}
-							k.constants[c] = zero
-						}
-					}
-				}
-				if operand != nil && *operand != nil && !k.owns(*operand) {
-					return nil, regionError("operand is outside typed owner")
-				}
-			}
-			last := i == len(block.Instrs)-1
-			switch instruction.(type) {
-			case *ssa.If:
-				if !last || len(block.Succs) != 2 {
-					return nil, regionError("invalid branch successors")
-				}
-			case *ssa.Jump:
-				if !last || len(block.Succs) != 1 {
-					return nil, regionError("invalid jump successor")
-				}
-			case *ssa.Return, *ssa.Panic:
-				if !last || len(block.Succs) != 0 {
-					return nil, regionError("invalid terminal successors")
-				}
-			default:
-				if last {
-					return nil, regionError("missing terminal instruction")
-				}
-			}
-		}
-		// A bounded graph search proves whether this site's allocation can recur.
-		// This is a cost-bounded structural check, not execution unrolling.
-		seen := map[*ssa.BasicBlock]bool{}
-		queue := slices.Clone(block.Succs)
-		for len(queue) != 0 {
-			if err := k.meter.tick(); err != nil {
-				return nil, err
-			}
-			next := queue[0]
-			queue = queue[1:]
-			if next == block {
-				k.cycle[block] = true
-				break
-			}
-			if seen[next] {
-				continue
-			}
-			seen[next] = true
-			queue = append(queue, next.Succs...)
 		}
 	}
 	// A mid-block entry is a genuine scope cut, not permission to skip that
@@ -225,7 +233,7 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 		if err := k.meter.tick(); err != nil {
 			return err
 		}
-		if v.kind == regionPointer || v.kind == regionUnsafePointer || v.kind == regionSlice {
+		if v.kind == regionPointer || v.kind == regionUnsafePointer || v.kind == regionSlice || v.kind == regionMap {
 			if err := rememberObject(v.location.object); err != nil {
 				return err
 			}
@@ -239,7 +247,7 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 		}
 		return nil
 	}
-	if !fullReturns {
+	if !fullReturns || in.normalReturns && invocation == (regionInvocation{}) {
 		for object, value := range in.initial.memory {
 			if err := rememberObject(object); err != nil {
 				return nil, err
@@ -308,6 +316,12 @@ func (k *regionKernel) owns(v ssa.Value) bool {
 
 func (k *regionKernel) objectType(o regionObject) types.Type {
 	switch o.kind {
+	case regionMapAllocation:
+		a, ok := o.site.(*ssa.MakeMap)
+		if !ok || a == nil || a.Parent() != o.context || o.context == nil || o.context.Prog != k.input.owner || a.Block() == nil || !slices.Contains(a.Block().Instrs, ssa.Instruction(a)) {
+			return nil
+		}
+		return a.Type()
 	case regionGlobal:
 		g, ok := o.site.(*ssa.Global)
 		if !ok || g == nil || !k.owns(g) || o.context != nil || o.invocation != (regionInvocation{}) {
@@ -379,7 +393,7 @@ func (k *regionKernel) locationType(loc regionLocation) types.Type {
 
 func (k *regionKernel) validateState(s regionState) error {
 	for key, value := range s.values {
-		if !k.owned[key] || !types.Identical(key.Type(), value.typ) {
+		if !k.owned[key] || !types.Identical(key.Type(), value.typ) || value.kind == regionMapContents {
 			return regionError("invalid typed register invariant")
 		}
 		if err := k.validateValue(value, 0); err != nil {
@@ -387,8 +401,17 @@ func (k *regionKernel) validateState(s regionState) error {
 		}
 	}
 	for object, value := range s.memory {
-		if !types.Identical(k.objectType(object), value.typ) {
+		if value.kind == regionMapContents && object.kind != regionMapAllocation || object.kind == regionMapAllocation && value.kind != regionMapContents && value.kind != regionUnknown {
+			return regionError("map backing contents escaped their storage")
+		}
+		if value.typ == nil || k.objectType(object) == nil || !types.Identical(k.objectType(object), value.typ) {
 			return regionError("invalid typed memory invariant")
+		}
+		if value.kind == regionMapContents {
+			if err := k.validateMapKeys(value); err != nil {
+				return err
+			}
+			continue
 		}
 		if err := k.validateValue(value, 0); err != nil {
 			return err
@@ -405,7 +428,7 @@ func (k *regionKernel) validateValue(v regionValue, depth int) error {
 		return regionError("invalid value type/depth")
 	}
 	hasLocation := v.location.object != (regionObject{}) || len(v.location.path) != 0
-	if v.scalar != nil && v.kind != regionConstant || v.floatBits != 0 && v.kind != regionFloat || hasLocation && v.kind != regionPointer && v.kind != regionUnsafePointer && v.kind != regionSlice && v.kind != regionCallable ||
+	if len(v.strings) != 0 && v.kind != regionStrings || v.keys != nil && v.kind != regionMapContents || v.scalar != nil && v.kind != regionConstant || v.floatBits != 0 && v.kind != regionFloat || hasLocation && v.kind != regionPointer && v.kind != regionUnsafePointer && v.kind != regionSlice && v.kind != regionCallable && v.kind != regionMap ||
 		(v.start != 0 || v.length != 0 || v.capacity != 0) && v.kind != regionSlice || v.target != nil && v.kind != regionCallable ||
 		len(v.environment) != 0 && v.kind != regionCallable || len(v.elements) != 0 && v.kind != regionAggregate && v.kind != regionInterface {
 		return regionError("noncanonical value payload")
@@ -421,6 +444,23 @@ func (k *regionKernel) validateValue(v regionValue, depth int) error {
 	}
 	valid := false
 	switch v.kind {
+	case regionStrings:
+		b, ok := v.typ.Underlying().(*types.Basic)
+		valid = ok && b.Info()&types.IsString != 0 && len(v.strings) > 1 && len(v.strings) <= regionProjectionAlternatives && slices.IsSorted(v.strings) && len(slices.Compact(slices.Clone(v.strings))) == len(v.strings)
+		for _, text := range v.strings {
+			if err := k.meter.tick(); err != nil {
+				return err
+			}
+			if len(text) > k.meter.limits.locations {
+				return regionError("string set storage exhausted")
+			}
+		}
+	case regionMapContents:
+		return regionError("map backing contents are not a language value")
+	case regionMap:
+		_, ok := v.typ.Underlying().(*types.Map)
+		storage := k.objectType(v.location.object)
+		valid = ok && storage != nil && v.location.object.kind == regionMapAllocation && len(v.location.path) == 0 && regionMapAliasTypes(v.typ, storage)
 	case regionUnknown:
 		valid = true
 	case regionConstant:
@@ -518,7 +558,7 @@ func checkRegion(ctx context.Context, input regionInput, proposal *regionProposa
 
 func checkRegionKernel(k *regionKernel, p *regionProposal) (*checkedRegion, error) {
 	in := k.input
-	if p == nil || p.input.owner != in.owner || p.input.selection != in.selection || p.input.root != in.root || p.input.entry != in.entry || p.input.use != in.use || p.input.storageModel != in.storageModel || !slices.Equal(p.input.premises, in.premises) {
+	if p == nil || p.input.normalReturns != in.normalReturns || p.input.owner != in.owner || p.input.selection != in.selection || p.input.root != in.root || p.input.entry != in.entry || p.input.use != in.use || p.input.storageModel != in.storageModel || !slices.Equal(p.input.premises, in.premises) {
 		return nil, regionError("proposal is not bound to the complete input")
 	}
 	k.session.proofs = p.calls
@@ -548,12 +588,23 @@ func checkRegionKernel(k *regionKernel, p *regionProposal) (*checkedRegion, erro
 		}
 		contexts[id] = facts
 	}
+	var exceptional []regionExcludedContinuation
+	for point := range k.session.exceptional {
+		if err := k.meter.tick(); err != nil {
+			return nil, err
+		}
+		exceptional = append(exceptional, point)
+	}
 	usage := *k.meter
 	usage.ctx = nil
-	return &checkedRegion{rules: regionRules, input: in, observations: observations, calls: k.session.used, trace: k.trace, usage: usage, contexts: contexts}, nil
+	usage.keyCopies = nil
+	usage.stringCopies = nil
+	usage.stringAtoms = nil
+	return &checkedRegion{exceptional: exceptional, rules: regionRules, input: in, observations: observations, calls: k.session.used, trace: k.trace, usage: usage, contexts: contexts}, nil
 }
 
 func (k *regionKernel) checkEntries(entries map[*ssa.BasicBlock][]regionState) ([]regionObservation, error) {
+	k.applied = map[*regionCallProof]bool{}
 	in := k.input
 	for block, states := range entries {
 		if block == nil || block.Parent() != in.root || !slices.Contains(in.root.Blocks, block) || len(states) == 0 {
@@ -599,13 +650,13 @@ func (k *regionKernel) checkEntries(entries map[*ssa.BasicBlock][]regionState) (
 					return nil, err
 				}
 				if !covered {
-					return nil, regionError("actual edge/backedge or phi transfer not included")
+					return nil, regionError(fmt.Sprintf("actual edge/backedge or phi transfer not included [%s block %d -> %d]", k.input.root, block.Index, edge.block.Index))
 				}
 				queue = append(queue, edge)
 			}
 		}
 	}
-	if len(seen) != len(entries) || len(observations) == 0 {
+	if len(seen) != len(entries) || len(observations) == 0 && !in.normalReturns {
 		return nil, regionError("unused invariant or consuming use is unreachable")
 	}
 	if err := k.meter.ctx.Err(); err != nil {
@@ -626,6 +677,15 @@ type regionEdge struct {
 func (k *regionKernel) chargeValue(v regionValue) error {
 	if err := k.meter.tick(); err != nil {
 		return err
+	}
+	if v.keys != nil {
+		for _, p := range v.keys.projections {
+			for range len(p.path) + len(p.strings) + 1 {
+				if err := k.meter.tick(); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	for _, list := range [][]regionValue{v.elements, v.environment} {
 		for _, item := range list {
@@ -691,7 +751,15 @@ func (k *regionKernel) join(states []regionState, state regionState) ([]regionSt
 		}
 	}
 	if len(joined) >= k.meter.limits.alternatives {
-		return []regionState{{}}, true, nil
+		common := state
+		for _, old := range joined {
+			var err error
+			common, err = k.commonState(common, old)
+			if err != nil {
+				return nil, false, err
+			}
+		}
+		return []regionState{common}, true, nil
 	}
 	return append(joined, state), true, nil
 }
@@ -753,6 +821,18 @@ func (k *regionKernel) block(block *ssa.BasicBlock, initial regionState) ([]regi
 // Each CFG re-entry begins at zero, even when the original scope started at a cut.
 func (k *regionKernel) blockFrom(at regionPoint, initial regionState) ([]regionEdge, []regionObservation, error) {
 	block, start := at.block, at.index
+	if k.input.normalReturns {
+		excluded, err := k.noNormalExit(at)
+		if err != nil {
+			return nil, nil, err
+		}
+		if excluded {
+			if err := k.excludeContinuation(at, false); err != nil {
+				return nil, nil, err
+			}
+			return nil, nil, nil
+		}
+	}
 	s, err := k.clone(initial)
 	if err != nil {
 		return nil, nil, err
@@ -851,6 +931,12 @@ func (k *regionKernel) blockFrom(at regionPoint, initial regionState) ([]regionE
 					}
 				}
 			default:
+				if update, ok := x.(*ssa.MapUpdate); ok && k.input.normalReturns && k.value(s, update.Map).kind == regionNil {
+					if err := k.excludeContinuation(regionPoint{block, index}, true); err != nil {
+						return nil, nil, err
+					}
+					continue
+				}
 				if err := k.transfer(&s, x); err != nil {
 					return nil, nil, &regionOperationFailure{instruction, err}
 				}
@@ -861,6 +947,14 @@ func (k *regionKernel) blockFrom(at regionPoint, initial regionState) ([]regionE
 			return edges, observations, nil
 		}
 		states = continuing
+		for i := range states {
+			if err := k.dropLocalValues(&states[i], block.Instrs[index]); err != nil {
+				return nil, nil, err
+			}
+		}
+		if len(states) == 0 && k.input.normalReturns {
+			return nil, nil, nil
+		}
 	}
 	return nil, nil, regionError("scope has no terminal transfer")
 }
@@ -929,8 +1023,16 @@ func (k *regionKernel) singleton(object regionObject) bool {
 	if object.kind == regionGlobal {
 		return true
 	}
+	if object.kind == regionMapAllocation {
+		a, ok := object.site.(*ssa.MakeMap)
+		info, derived := k.session.contexts[object.invocation]
+		return ok && derived && object.context == info.function && !info.repeated && !info.cycle[a.Block()] && !k.preexisting[object]
+	}
 	a, ok := object.site.(*ssa.Alloc)
 	info, derived := k.session.contexts[object.invocation]
+	if k.input.normalReturns && object.kind == regionAllocation && ok && derived && object.context == info.function && !k.preexisting[object] && k.privateAllocation(a) {
+		return true
+	}
 	return object.kind == regionAllocation && ok && derived && object.context == info.function && !info.repeated && !info.cycle[a.Block()] && !k.preexisting[object]
 }
 
@@ -947,27 +1049,46 @@ func regionReplace(v regionValue, path []regionStep, value regionValue) regionVa
 	return v
 }
 
-func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) error {
-	set := func(value ssa.Value, result regionValue) error {
-		if !types.Identical(value.Type(), result.typ) {
-			return regionError("instruction result type mismatch")
-		}
-		if len(s.values)+len(s.memory) >= k.meter.limits.locations {
-			return regionError("location budget exhausted")
-		}
-		if err := k.validateValue(result, 0); err != nil {
+func (k *regionKernel) setValue(s *regionState, value ssa.Value, result regionValue) error {
+	if !types.Identical(value.Type(), result.typ) {
+		return regionError("instruction result type mismatch")
+	}
+	if len(s.values)+len(s.memory) >= k.meter.limits.locations {
+		return regionError("location budget exhausted")
+	}
+	if err := k.validateValue(result, 0); err != nil {
+		return err
+	}
+	if k.trace != nil {
+		if err := k.effectValue(result); err != nil {
 			return err
 		}
-		if k.trace != nil {
-			if err := k.effectValue(result); err != nil {
-				return err
-			}
-		}
-		s.values[value] = result
-		return nil
 	}
+	s.values[value] = result
+	return nil
+}
+
+func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) error {
+	if handled, err := k.abstractTransfer(s, instruction); handled || err != nil {
+		return err
+	}
+	set := func(value ssa.Value, result regionValue) error { return k.setValue(s, value, result) }
 	get := func(value ssa.Value) regionValue { return k.value(*s, value) }
 	switch x := instruction.(type) {
+	case *ssa.MakeMap:
+		v, err := k.makeMap(s, x)
+		if err != nil {
+			return err
+		}
+		return set(x, v)
+	case *ssa.MapUpdate:
+		return k.updateMap(s, x)
+	case *ssa.Lookup:
+		v, err := k.lookupMap(*s, x)
+		if err != nil {
+			return err
+		}
+		return set(x, v)
 	case *ssa.DebugRef:
 		return nil
 	case *ssa.Alloc:
@@ -976,6 +1097,9 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 			return regionError("allocation is not typed storage")
 		}
 		object := regionObject{kind: regionAllocation, site: x, context: k.input.root, invocation: k.invocation}
+		if err := k.writeObject(object); err != nil {
+			return err
+		}
 		v := regionUnknownValue(p.Elem())
 		if k.singleton(object) {
 			var err error
@@ -1062,17 +1186,14 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		if !ok {
 			return regionError("store has no supported storage view")
 		}
-		// Formal regions may alias any selected object. A write through one
-		// invalidates the whole heap; a concrete write invalidates every formal
-		// view of it. No implicit disjointness premise is inferred from names.
-		if addr.location.object.kind == regionFormal {
-			clear(s.memory)
-			return nil
+		if err := k.writeObject(addr.location.object); err != nil {
+			return err
 		}
-		for object := range s.memory {
-			if object.kind == regionFormal || object.kind == regionUnknownObject {
-				delete(s.memory, object)
-			}
+		if err := k.invalidateRegionAliases(s, addr.location.object); err != nil {
+			return err
+		}
+		if regionOpenObject(addr.location.object) {
+			return nil
 		}
 		old, ok := s.memory[addr.location.object]
 		if !ok {
@@ -1208,7 +1329,7 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		}
 		return set(x, regionUnknownValue(x.Type()))
 	case *ssa.ChangeType:
-		if !types.Identical(x.Type().Underlying(), x.X.Type().Underlying()) && !regionPointerChange(x.X.Type(), x.Type()) {
+		if !types.Identical(x.Type().Underlying(), x.X.Type().Underlying()) && !regionPointerChange(x.X.Type(), x.Type()) && !regionMapAliasTypes(x.X.Type(), x.Type()) {
 			return regionError("unsupported representation change")
 		}
 		v := get(x.X)

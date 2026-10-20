@@ -293,6 +293,27 @@ callee-replay costs require qualification against the same required population.
 9.4a remains open until these results establish the bounded implementation path;
 the lifecycle design and additional plan slots alone do not close it.
 
+The first selection constituent, at 9.4a.1a, checks a normal-return postcondition
+of selected intrinsic-table construction. Fresh map replacement can eliminate
+dependence on arbitrary prior table contents; inductive projected-key summaries
+can cover all configuration branches without reconstructing their exact values.
+The complete source construction includes SIMD registrars, actual helper and
+callback arguments, and invoked factory bodies. Stored builder closures are not
+invoked merely by insertion. The checker derives the resulting package-key
+exclusion from actual typed writes; neither compiler names nor a list of approved
+package strings supplies a rule. This is one selected substitution mechanism,
+not a census of every implementation-changing route.
+
+This theorem concerns normal return, not intermediate effects or termination.
+An opaque formatting call followed on every continuation by unrecovered panic
+cannot reach that invocation's normal return, but its effects remain unknown.
+Recovery and other feasible normal exits invalidate such an exclusion unless
+accounted for. The conditional lookup theorem uses the actual normalized key:
+the compiler's runtime-package-object special case means a raw package path alone
+is insufficient. Initialization-to-use preservation, mutable predicate targets
+and package-object association remain separate obligations at 9.4a.1b. Closing
+the construction experiment supplies none of those facts by implication.
+
 The user selected existing test/benchmark workflows as the public acceptance
 target when offered an opt-in Linux/amd64 traced scalar-call protocol. Native
 entry and source/native relation checks remain useful subordinate mechanisms,

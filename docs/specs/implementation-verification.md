@@ -1393,6 +1393,11 @@ contracts:
   use provenance. Entry-state premises, covered paths and terminal uses are
   explicit. Source selection establishes identity, not an effect bound, and a
   local transport scope cannot weaken a whole-startup claim's obligations.
+  A normal-return postcondition is a distinct scope: it describes the state of
+  that invocation only if it returns normally. It asserts neither eventual
+  return, absence of exceptional outcomes nor an effect bound on intermediate
+  execution. Its consumers retain that distinction; it cannot supply complete
+  effects, prefix safety or native return completion.
 - **inductive-transfer** — Proposed block-entry states and invariants are checked
   against the actual control-flow graph and typed operations. Every admitted
   initial state is included in the entry invariant; on every edge, the checked
@@ -1414,6 +1419,12 @@ contracts:
   each claimed use entails the claimed operand relation. Unsupported transfers,
   unclosed invariants, exhausted
   bounds or cancellation yield no partial positive certificate.
+  Widening and joining must over-approximate every incoming state. Common
+  facts may survive when their ownership and meaning agree in every alternative;
+  absence of a fact means unknown, not an empty value. Independently abstracted
+  collection projections cannot reconstruct exact correlated rows or operands.
+  An inductive safety or normal-return postcondition requires preservation on
+  backedges, but does not acquire a termination obligation or a progress theorem.
 - **memory-and-callables** — The finite typed region model distinguishes selected
   globals, allocation sites with bounded context, closure environments, formal
   inputs and unknown memory; locations retain field/index paths and their possible
@@ -1438,6 +1449,23 @@ contracts:
   exact bits, scalar equality, or native initialization. Abstracting an unsupported
   initialized scalar leaf to typed unknown does not by itself discard independently
   established facts about supported aggregate siblings.
+  Map references retain their backing identity separately from the contents they
+  reference. All aliases observe updates to that same backing; replacing one
+  reference with a fresh empty map does not clear its previous backing or other
+  aliases. Nil, fresh empty contents and unknown incoming contents remain
+  distinct. Repeated allocations cannot initialize older instances represented
+  by an allocation summary.
+
+  A projected map-key summary over-approximates every key present in the backing,
+  including keys whose stored values are zero or nil. A projection used to prove
+  absence respects the key type's equality; ignored fields and unavailable
+  components cannot supply distinguishing evidence. An insertion accounts for
+  its actual destination key, through the actual receiver, aliases and argument
+  flow. Each projection may widen independently to unknown. Such a summary may
+  establish a definite lookup miss when the actual query cannot match any
+  represented key; it supplies no invented matching key, payload, cardinality or
+  correlation between projections. Unknown mutations invalidate affected facts
+  unless a checked frame excludes them.
 - **conditional-storage-model** — A source derivation interpreting integer/float
   bit views identifies its storage model separately from language semantics and
   from selected native applicability. A binary32/binary64 model gives exact bit
@@ -1495,6 +1523,25 @@ contracts:
   call contexts and resource account; copying a heap projection cannot establish
   a successor or restart the proof budget. Independently proved false guards may
   exclude throwing or other opaque arms without granting them call semantics.
+  For a normal-return postcondition only, a checked continuation with no normal
+  exit from the claimed invocation may exclude that outcome from the returned
+  state relation. Every ordinary successor of the continuation is accounted for;
+  an assumed nonreturning callee, a discovery bound or a cycle alone is not such
+  evidence. Deferred recovery, callbacks and other control transfers capable of
+  producing a normal return must be covered or refuse the exclusion. An opaque
+  call on an excluded outcome retains arbitrary effects and exceptional or
+  divergent behavior: exclusion supplies no purity, frame or intermediate-state
+  theorem. A caller that recovers an exceptional exit cannot apply the callee's
+  normal-return postcondition as though that invocation returned normally.
+
+  Reusing a checked abstract call relation requires proving that its input
+  relation includes the actual arguments, captured environment and incoming
+  state, with a checked association of object identities, aliases and lifetimes.
+  Applying the relation preserves its justified frame and accounts for every
+  possible normal successor; exceptional scope remains explicit. Equal function
+  names or cached output heaps cannot replace this judgment. Shared evidence and
+  each application retain their complete dependencies and cumulative resource
+  accounts, without renewing allocation identities or resetting allowances.
 - **conditional-composition** — A local positive may relate registration
   construction to an actual consuming operand while retaining explicit imported
   initialization, intervening-frame, concurrency, callee, native and harness

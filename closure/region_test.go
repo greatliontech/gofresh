@@ -1147,20 +1147,35 @@ func TestRegionOwnershipBudgetsAndCancellation(t *testing.T) {
 }
 
 func TestRegionFormalAliasesInvalidateConcreteFacts(t *testing.T) {
-	for _, text := range []string{
-		`var g int;func F(p *int)int{*p=2;return g}`,
-		`var g int;func F(p *int)int{g=2;return *p}`,
-	} {
-		in := regionFixture(t, text)
-		global := in.owner.Package(in.root.Pkg.Pkg).Members["g"].(*ssa.Global)
-		formal := regionObject{kind: regionFormal, site: in.root.Params[0], context: in.root}
-		g := regionObject{kind: regionGlobal, site: global}
-		one := regionValue{typ: types.Typ[types.Int], kind: regionConstant, scalar: constant.MakeInt64(1)}
-		in.initial = regionState{values: map[ssa.Value]regionValue{in.root.Params[0]: {typ: in.root.Params[0].Type(), kind: regionPointer, location: regionLocation{object: formal}}}, memory: map[regionObject]regionValue{formal: one, g: one}}
-		in.premises = append(in.premises, "p is nonnil; p may equal &g; both cells initially contain one")
-		checked, _ := proveRegionFixture(t, in)
-		if len(checked.observations) != 1 || checked.observations[0].value.kind != regionUnknown {
-			t.Fatal("possible formal/global alias retained stale facts")
+	// A concrete permitted entry aliases the formal with the global. The native
+	// result is two; retaining the formal's old one would omit that execution.
+	gNative := 1
+	pNative := &gNative
+	hNative := func() { gNative = 2 }
+	hNative()
+	if *pNative != 2 {
+		t.Fatal("native alias control failed")
+	}
+	for _, normal := range []bool{false, true} {
+		for _, text := range []string{
+			`var g int;func F(p *int)int{*p=2;return g}`,
+			`var g int;func F(p *int)int{g=2;return *p}`,
+			`var g int;func H(){g=2};func F(p *int)int{H();return *p}`,
+			`var g int;func H(){g=2};func middle(){H()};func F(p *int)int{middle();return *p}`,
+			`var g int;func H(p *int){*p=2};func F(p *int)int{H(p);return g}`,
+		} {
+			in := regionFixture(t, text)
+			in.normalReturns = normal
+			global := in.owner.Package(in.root.Pkg.Pkg).Members["g"].(*ssa.Global)
+			formal := regionObject{kind: regionFormal, site: in.root.Params[0], context: in.root}
+			g := regionObject{kind: regionGlobal, site: global}
+			one := regionValue{typ: types.Typ[types.Int], kind: regionConstant, scalar: constant.MakeInt64(1)}
+			in.initial = regionState{values: map[ssa.Value]regionValue{in.root.Params[0]: {typ: in.root.Params[0].Type(), kind: regionPointer, location: regionLocation{object: formal}}}, memory: map[regionObject]regionValue{formal: one, g: one}}
+			in.premises = append(in.premises, "p is nonnil; p may equal &g; both cells initially contain one")
+			checked, _ := proveRegionFixture(t, in)
+			if len(checked.observations) != 1 || checked.observations[0].value.kind != regionUnknown {
+				t.Fatal("possible formal/global alias retained stale facts")
+			}
 		}
 	}
 }
