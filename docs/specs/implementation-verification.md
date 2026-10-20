@@ -536,6 +536,89 @@ Equal-byte independent images cannot borrow the relation. Initialized numeric by
 acquire no pointer or source-storage provenance, and the arbitrary-image model
 remains available without this refinement.
 
+**REQ-impl-process-entry** (invariant): An accepted argument, environment,
+auxiliary-vector or inherited-descriptor interpretation of a native process
+entry MUST satisfy these obligations:
+
+- **bound-entry** — The claim identifies the selected immutable executable,
+  identified machine/loading/entry relation, original process-input authority,
+  admitted entry-state population and interference conditions. Direct entry and
+  entry after an interpreter or wrapper retain their distinct loading and
+  intervening-state obligations. Exec failure or termination before entry cannot
+  provide an entry state. A conditional relation may describe well-formed states;
+  production application separately establishes actual artifact execution,
+  launch-input correspondence and applicability of that relation. A kernel
+  version, symbol name, matching source or successful diagnostic run establishes
+  none of those facts.
+- **ordered-inputs** — Counts and vector extents follow from the entry relation.
+  In the native 64-bit Linux ELF model, let the original stack origin be S,
+  argument count A, environment count E and vector base V=S+8. The count word
+  represents A; V[0..A) contains argument pointers, V[A] is NULL,
+  V[A+1..A+1+E) contains environment pointers and V[A+1+E] is NULL.
+  Auxiliary pairs begin at V+8(A+E+2). Counts are mathematical nonnegative
+  integers, with all selected count conversions, increments and address
+  calculations justified. For the selected consumer's signed 32-bit scan through
+  these separators, A+E+2 <= INT32_MAX suffices; another selected consumer may
+  establish its own checked arithmetic argument without using this index shape.
+  Input order, duplicates, empty strings and bytes remain represented; argv[0]
+  need not be the executable pathname. Any empty-vector adjustment belongs to
+  the identified entry relation. Arbitrary scalar words and numeric addresses
+  supply no count or vector meaning on their own.
+- **storage-and-progress** — Every used slot, string, payload and native frame
+  has established backing, extent, permissions, lifetime and alias relations.
+  Pointer bytes correspond to their represented targets; numerical coincidence
+  supplies no provenance. Universal origin domains retain admissible relocation
+  and alignment without a sampled stack address. Full accesses are canonical
+  and nonwrapping, with necessary separation from image, control and private
+  storage. Logical string termination alone authorizes no wider overread.
+  Unsafe language views grant neither backing nor allocation ownership.
+  Completed scans require checked progress under the admitted population; an
+  established first terminator may supply a decreasing remaining-distance rank.
+  Analysis budgets are not execution bounds. Each later scan or parser retains
+  its own coverage, access and progress obligations.
+- **state-through-use** — Input stability applies through the actual relevant
+  reads, not indefinitely. The relation accounts for input copying, intervening
+  native/loader effects, selected-program writes and external interference.
+  The actual selected copying and alias behavior determines lifetimes and
+  effects. For example, non-copying argument strings, copied environment strings
+  and writable random payloads retain their distinct obligations where those
+  are the selected operations. Source initialization
+  cannot stand in for native bytes, and native numeric stores require checked
+  selected-source linkage and representation before supplying typed state.
+- **auxiliary-and-kernel-state** — Auxiliary entries remain an ordered sequence
+  through the first AT_NULL, with accessible bounds. Unknown or duplicate keys
+  cannot silently disappear; exclusion, uniqueness or irrelevance requires the
+  entry relation or checked consumer behavior. Entries retain their identified
+  interpretations, including null or absent meanings; uninterpreted entries may
+  remain raw ordered words. Scalar entries agree with their identified
+  configuration where used. Interpreting or using a value as a pointer requires
+  target provenance, backing, permissions and extent; merely retaining an
+  address-valued entry does not assert backing at that address. AT_RANDOM
+  supplies its accessible 16-byte payload, not an
+  assumption that any byte is nonzero. AT_SECURE follows the exec security
+  relation, not an environment assertion. A vDSO entry does not itself prove
+  parser safety, progress or callable implementation semantics. Empty-auxv
+  fallback is excluded only when established entry facts and checked control
+  justify that exclusion. Inherited descriptors are separate post-exec kernel
+  state, accounting for close-on-exec and subsequent changes. Relevant flags,
+  open-file-description identity, aliasing, contents, offsets and operation
+  outcomes need their own relations; descriptor numbers, stack bytes and
+  security flags do not establish them.
+- **applicability-and-outcomes** — The claim retains failures, faults, partial
+  effects and termination alternatives relevant to its admitted model. An entry
+  relation may describe the successful exec branch while retaining the other
+  exec outcomes. A composed transition must still prove complete-cut or return
+  coverage under its admitted entry conditions; conditional normal completion
+  cannot discharge that obligation by assuming startup succeeded. Actual launch
+  inputs and the producer's normalized
+  environment are related to the admitted raw vectors; this does not relax the
+  producer's duplicate-refusing normalization contract. Runtime transformations
+  such as early environment lookup, secure rewriting and descriptor preparation
+  retain their actual order and outcomes. The resulting relation remains
+  subordinate to source-storage correspondence, complete bootstrap/use/harness
+  coverage and producing applicability. A nonvacuous conditional theorem alone
+  is not public runtime-reuse authority.
+
 **REQ-impl-native-transition** (invariant): An accepted conditional native
 entry-to-cut transition MUST satisfy these obligations:
 

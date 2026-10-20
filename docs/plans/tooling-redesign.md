@@ -684,7 +684,7 @@
                           add action/path/phase attribution, and land any confirmed
                           causal repair with genuine mutation-and-restore controls
                           before resuming process-entry design.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.15 Settle the identified
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.15 Settle the identified
                           process-entry contract for counts, ordered argument and
                           environment vectors, accessible terminated strings,
                           auxiliary-vector scalar/pointer entries and inherited
@@ -693,6 +693,56 @@
                           args wrapper, environment scan and later OS/scheduler
                           preparation; retain actual producer applicability and
                           native-to-typed-source association separately.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.16 Carry the checked root
+                          through the actual args wrapper and initial count/vector
+                          stores to the unexecuted environment scan. Establish the
+                          process-entry count, ordered-vector and storage premises
+                          under REQ-impl-process-entry; preserve original inputs,
+                          current bytes, pointer provenance, frames and effects.
+                          Arbitrary entry words alone supply no argc/vector authority.
+                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.16a Compose the actual
+                            native wrapper and initial stores from current rooted
+                            bytes, deriving stack-growth and write-barrier exclusions
+                            and stopping before the sysargs call. Preserve the raw
+                            low32 entry word and original-origin pointer without
+                            assigning process-input meaning or renewing expired
+                            scratch ownership.
+                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.16b Establish the identified
+                            conditional entry count, ordered vector, separator,
+                            backing and lifetime relation before interpreting those
+                            native stores as process inputs. Bind all arithmetic,
+                            pointer-provenance and stability premises needed by the
+                            selected scan; retain actual producing applicability and
+                            selected-source storage association at their existing
+                            slots.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.17 Check the environment
+                          scan through its actual auxiliary-vector boundary, with
+                          selected signed-count conversions, increments, full-access
+                          extents and finite progress established from the admitted
+                          separators. Preserve raw order, duplicates, empty strings
+                          and intervening state; a scan budget supplies no bound.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.18 Check the selected
+                          auxiliary-vector consumers, including vDSO parsing and
+                          dependent uses. Retain first-AT_NULL bounds, unknown and
+                          duplicate entries, null/absent interpretations and raw
+                          address values without fabricated backing. Establish each
+                          used scalar/payload relation, pointer access and parser's
+                          progress; retain random-payload writes, security provenance
+                          and empty-auxv fallback unless checked entry/control facts
+                          exclude it. A vDSO entry supplies no callable semantics.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.19 Complete the required
+                          OS/scheduler preparation and ordered primitive effects,
+                          argument/environment construction, early lookup, secure
+                          rewriting and inherited-descriptor preparation. Establish
+                          actual copying, alias and lifetime relations, full string
+                          access extents and progress through every relevant read;
+                          retain faults, partial effects and termination alternatives.
+                          Relate raw vectors to the producer's duplicate-refusing
+                          normalized environment and establish separate descriptor
+                          state/outcome relations. Keep native-to-typed association
+                          at 5.1w.2b.3b.2a.2.2.2.3 and actual producing applicability
+                          at 5.1w.2b.4; conditional completion alone supplies neither
+                          whole-bootstrap/use/harness coverage nor runtime reuse.
                       - [ ] 5.1w.2b.3b.2a.2.2.2.3 Establish native-storage to
                         selected-source storage and initialization correspondence before
                         supplying compiler source state; names and numeric addresses
