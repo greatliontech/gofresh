@@ -475,7 +475,14 @@ func TestTransitionApplicationMachineAndOrderedEffects(t *testing.T) {
 	f.parentExp = []TransitionExpansion{{PC: testEntry + 13}}
 	parent, child = f.certificates(t)
 	c, err = CheckTransitionCallReturn(t.Context(), parent, child)
-	applicationRefused(t, c, err)
+	if err != nil {
+		t.Fatal("modeled FS replacement prevented a compatible child application", err)
+	}
+	b, _ = c.Bound()
+	before, _ := parent.Bound()
+	if !c.AppliesTo(child) || !before.Thread.ContextChanged || before.Thread.SelectorPreserved || before.Thread.FS.Pointer != (OriginPointer{Origin: before.Origin}) || b.Thread != before.Thread || b.Successor.Thread != before.Thread {
+		t.Fatal("compatible child discarded actual FS provenance or prior context history")
+	}
 }
 
 func TestTransitionApplicationCurrentWordAndImageProvenance(t *testing.T) {

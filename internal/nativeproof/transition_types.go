@@ -7,8 +7,9 @@ import (
 
 // TransitionRules identifies the conditional symbolic-origin transition rules,
 // including initialized image roots, guarded exclusions, decoder, expression,
-// pointer-lane, bounded conditional entry/return relations and CPUID dependencies.
-const TransitionRules = "gofresh/native-transition@18;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
+// pointer-lane, bounded conditional entry/return relations, finite root private
+// lifetimes and CPUID dependencies.
+const TransitionRules = "gofresh/native-transition@19;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
 
 // LockedMemoryModel requires cacheable write-back coherent RAM, power-of-two cache
 // lines of at least eight bytes aligned to their size, and enabled architectural
@@ -589,6 +590,10 @@ func cloneTransitionInterface(f TransitionInterface) TransitionInterface {
 	}
 	if f.PrivateFrame != nil {
 		frame := *f.PrivateFrame
+		if frame.Until != nil {
+			until := *frame.Until
+			frame.Until = &until
+		}
 		f.PrivateFrame = &frame
 	}
 	return f

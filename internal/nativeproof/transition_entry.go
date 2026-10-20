@@ -57,11 +57,8 @@ func (m *transitionChecker) validateEntryRelations() error {
 		// This is a numeric upper bound, not a pointer or a memory grant. Its
 		// offset need not lie in the pointer envelope, but must be representable
 		// at both rounded extremes, before any image-page exclusions.
-		for _, s := range []uint64{m.lo, m.hi} {
-			v, ok := relative(s, w.OriginOffset)
-			if !ok || v >= 1<<47 {
-				return refuse(m.pc, "transition-entry", "entry upper bound wraps or is noncanonical for an origin")
-			}
+		if !m.originOffsetCanonical(w.OriginOffset) {
+			return refuse(m.pc, "transition-entry", "entry upper bound wraps or is noncanonical for an origin")
 		}
 		var word uint64
 		for lane := uint64(0); lane < 8; lane++ {

@@ -266,6 +266,11 @@ func CheckTransitionCallReturn(ctx context.Context, caller TransitionCertificate
 	if end.Boundary.Context != b.Boundary.Context || !slices.Equal(end.Frames, b.Frames) || end.Registers[RSP].Pointer != b.Registers[RSP].Pointer {
 		return TransitionCallCertificate{}, refuse(continuation, "transition-application", "return failed to consume child activation and restore parent context")
 	}
+	if child.bound.Interface.PrivateFrame != nil {
+		if err := replay.checkPrivateLifetimeHistory(); err != nil {
+			return TransitionCallCertificate{}, err
+		}
+	}
 	if err := replay.applicationProtectedSlot(entry.checked.bound, activation, sp.Offset); err != nil {
 		return TransitionCallCertificate{}, err
 	}

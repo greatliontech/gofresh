@@ -56,6 +56,7 @@ func selectedCheckPrefix(t testing.TB, raw []byte, image *nativeproof.Image, loc
 		t.Fatal("candidate caller, call or incoming continuation missing")
 	}
 	face := globalNativeFace(child.Prefix.Interface.ImageRegions)
+	face.Origin = child.Prefix.Interface.Origin
 	// The child's origin is S-64, so all translated origins stay in its declared
 	// domain. These are conditional bounds, not observed stack coordinates.
 	face.Origin.Min += 64

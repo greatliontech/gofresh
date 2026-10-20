@@ -133,7 +133,7 @@ func selectedStartupMemoryFrame(before, after []nativeproof.TransitionByte, writ
 	return nil
 }
 
-func selectedStartupFixture(t *testing.T) ([]byte, *nativeproof.Image, selectedStartupCandidate) {
+func selectedStartupFixture(t *testing.T) ([]byte, *nativeproof.Image, map[string]uint64, selectedStartupCandidate) {
 	t.Helper()
 	dir := t.TempDir()
 	writeTree(t, dir, map[string]string{"go.mod": "module example.com/startupprefix\n\ngo 1.27\n"})
@@ -142,7 +142,7 @@ func selectedStartupFixture(t *testing.T) ([]byte, *nativeproof.Image, selectedS
 		t.Fatal(err)
 	}
 	raw, image, locations := selectedRuntimeCheckArtifact(t, h)
-	return raw, image, selectedStartupLayout(t, raw, image, locations)
+	return raw, image, locations, selectedStartupLayout(t, raw, image, locations)
 }
 
 func TestRuntimeStartupSelectedWrites(t *testing.T) {
@@ -152,7 +152,7 @@ func TestRuntimeStartupSelectedWrites(t *testing.T) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skip("selected startup model is Linux amd64")
 	}
-	raw, image, x := selectedStartupFixture(t)
+	raw, image, _, x := selectedStartupFixture(t)
 	prior, err := checkSelectedStartupRoot(t.Context(), image, x, x.join)
 	if err != nil {
 		t.Fatal(err)

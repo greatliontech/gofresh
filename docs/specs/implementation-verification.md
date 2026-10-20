@@ -677,6 +677,14 @@ entry-to-cut transition MUST satisfy these obligations:
   may transport provenance only from its actual argument through its established
   state relation. Equal scalar addresses do not create provenance, a separate TLS
   heap, new storage or new permissions; unsupported resolution refuses the access.
+  A full-width comparison may use the checked pointer/value invariant for two
+  offsets of the same exact origin. When both values are nonwrapping throughout
+  the original low-canonical domain, offset order establishes unsigned and signed
+  order and equality. This is an origin-domain inference, not an unconditional
+  scalar identity. Partial-width values, foreign origins, opaque entry-value
+  lineage and numerical coincidence supply no such inference. Actual operand
+  reads remain accounted for; refined flag projections and branch predicates
+  agree, while other flags retain their checked instruction semantics.
 - **state-and-effects** — The checker derives the claimed register, flag and
   byte-memory relations from exact operand forms and execution order. Instruction
   fetch and every data access remain accounted for, including writes whose final
@@ -820,6 +828,21 @@ conditional callee-return relation MUST establish these obligations:
   scratch contents remain in the concrete state; later dependent reads require
   initialization or explicit checking against that state. Bounds, permissions and
   an actual CALL establish neither exclusive ownership nor nonobservability.
+  An executable-entry claim may instead retain an explicit finite scratch
+  ownership antecedent ending at the first actual arrival at an independently
+  decoded instruction boundary. The deadline is fixed by the original root;
+  declaring it supplies no progress or eventual-arrival proof. Ownership ends
+  before that boundary's instruction executes. Before borrowing, every earlier
+  deadline occurrence must be established unreachable, and a current deadline
+  boundary grants no new use. A borrowed invocation must remain within the
+  lifetime through its actual return; its final transfer may arrive at the
+  deadline, but it cannot reach the deadline earlier and continue borrowing.
+  Deadline decoding must agree with established instruction occupancy. Later
+  continuations retain the declaration, occurrence history and residual bytes,
+  without renewing expired ownership. A source projection must establish that
+  its complete claimed use lies within the admitted lifetime. This remains a
+  conditional ownership premise; actual process-entry ownership is a separate
+  applicability obligation, not a fact derived from permissions or isolation.
 - **composition** — Evidence retains its original entry authority, entry
   relations, input identities, complete current state, continuation, ordered
   effects and cumulative resource account. An entry-to-cut predecessor can supply
@@ -833,6 +856,12 @@ conditional callee-return relation MUST establish these obligations:
   any private lifetime follow from the unchanged caller premises. Child private
   storage may inherit a containing parent lifetime; its control word remains
   protected throughout the child scope, including against unchanged-value writes.
+  A prior modeled context change does not alone invalidate application: the
+  current state must satisfy the callee's identified machine and primitive
+  models. Callee inputs associate with that actual current state, including the
+  effective FS state when required. Original caller context history remains
+  cumulative; callee-relative preservation cannot become a claim that the
+  caller's original context was unchanged.
   The returned execution must discharge that child activation and restore the
   parent's active continuation context. Checked re-execution under the caller
   state may supply the complete successor while retaining the applicable callee

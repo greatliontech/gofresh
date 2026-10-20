@@ -18,7 +18,7 @@ func TestRuntimeStartupSelectedClear(t *testing.T) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skip("selected startup model is Linux amd64")
 	}
-	raw, image, x := selectedStartupFixture(t)
+	raw, image, _, x := selectedStartupFixture(t)
 	// A new original root declares SSE applicability before any continuation.
 	// The narrower startup certificate cannot acquire that premise afterward.
 	x.face.Conditions.SSE = nativeproof.SSEModel

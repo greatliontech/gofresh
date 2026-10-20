@@ -39,9 +39,7 @@ func (m *transitionChecker) offset(d int64) error {
 	if d < m.face.Envelope.Start || d > m.face.Envelope.End {
 		return refuse(m.pc, "transition-envelope", "pointer escapes representable address envelope")
 	}
-	lo, a := relative(m.lo, d)
-	hi, b := relative(m.hi, d)
-	if !a || !b || lo >= 1<<47 || hi >= 1<<47 {
+	if !m.originOffsetCanonical(d) {
 		return refuse(m.pc, "transition-origin", "address wraps or is noncanonical for an admitted origin")
 	}
 	return nil

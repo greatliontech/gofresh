@@ -319,18 +319,27 @@ func (m *transitionChecker) validateReturnTargetGraph(g *graph) error {
 	if m.face.ReturnContext == nil {
 		return nil
 	}
-	target, err := m.returnContinuation()
+	return m.validateDecodedBoundaryGraph(g, m.face.ReturnContext.Target, "transition-return", "continuation conflicts with an established instruction boundary")
+}
+
+// Separately declared boundaries use the same image-wide occupancy rule as
+// incoming continuations: any overlap must be the exact established instruction.
+func (m *transitionChecker) validateDecodedBoundaryGraph(g *graph, pc uint64, premise, detail string) error {
+	if !m.tick() {
+		return m.err
+	}
+	_, raw, err := decodeBytes(m.im, pc)
 	if err != nil {
 		return err
 	}
-	span := Span{target.PC, target.PC + uint64(len(target.Bytes))}
+	span := Span{pc, pc + uint64(len(raw))}
 	for _, n := range g.nodes {
 		if !m.tick() {
 			return m.err
 		}
 		instruction := Span{n.pc, n.pc + uint64(n.size)}
 		if overlap(span, instruction) && span != instruction {
-			return refuse(target.PC, "transition-return", "continuation conflicts with an established instruction boundary")
+			return refuse(pc, premise, detail)
 		}
 	}
 	return nil

@@ -660,7 +660,7 @@
                             actual legacy XMM-clear form with complete direction,
                             arithmetic-flag, vector and floating-context state;
                             retain exact operand and encoding restrictions.
-                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.13c Establish root scratch
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.13c Establish root scratch
                             ownership under the identified entry model and compose
                             after the retained FS replacement without erasing its
                             history. Rederive the conditional callee relations for

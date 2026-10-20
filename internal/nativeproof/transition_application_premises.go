@@ -5,10 +5,10 @@ import br "github.com/greatliontech/gofresh/internal/bitrelation"
 // applicationMachineCompatible is the integration point for additional machine
 // state (for example vector state). Extra primitive conditions are harmless only
 // when they leave the child's admitted transfer semantics unchanged.
-func applicationMachineCompatible(parent, child TransitionConditions, thread TransitionThread) bool {
-	if thread.ContextChanged {
-		return false // no implicit transport across a changed FS/thread context
-	}
+// Compatibility is about the current modeled state, not whether an earlier
+// operation changed it. Associations and replay retain that actual state and
+// its cumulative history; child-local preservation never resets parent history.
+func applicationMachineCompatible(parent, child TransitionConditions) bool {
 	if child.CPUID == "" {
 		parent.CPUID = ""
 	}
@@ -29,7 +29,7 @@ func (m *transitionChecker) applicationPremises(child TransitionBound, a *Transi
 	if !m.tick() {
 		return m.err
 	}
-	if !applicationMachineCompatible(m.face.Conditions, f.Conditions, m.thread) {
+	if !applicationMachineCompatible(m.face.Conditions, f.Conditions) {
 		return refuse(m.pc, "transition-application-machine", "callee machine/primitive context does not follow from caller")
 	}
 	for _, flag := range []TransitionFlag{m.bound.Flags.CF, m.bound.Flags.OF, m.bound.Flags.SF, m.bound.Flags.ZF, m.bound.Flags.AF, m.bound.Flags.PF} {
@@ -102,6 +102,9 @@ func (m *transitionChecker) applicationPremises(child TransitionBound, a *Transi
 		if m.face.PrivateFrame == nil || span.Start < m.face.PrivateFrame.Bytes.Start || span.End > m.face.PrivateFrame.Bytes.End {
 			return refuse(m.pc, "transition-application-private", "callee private lifetime does not follow from retained parent ownership")
 		}
+		if err := m.checkPrivateLifetimeEntry(); err != nil {
+			return err
+		}
 	}
 	for _, p := range f.EntryImagePointers {
 		if !m.tick() {
@@ -124,6 +127,16 @@ func (m *transitionChecker) applicationPremises(child TransitionBound, a *Transi
 			return refuse(m.pc, "transition-application-origin", "guard origin offset overflow")
 		}
 		word := m.memoryValue(TransitionLocation{Image: true, Offset: int64(w.Address)}, 8)
+		holds, known, err := m.originWordUpperBound(word, offset)
+		if err != nil {
+			return err
+		}
+		if known {
+			if !holds {
+				return refuse(m.pc, "transition-application-premise", "current origin-relative word does not satisfy callee entry bound")
+			}
+			continue
+		}
 		upper := m.bound.Origin
 		if offset != 0 {
 			upper = m.binary(br.Add, upper, m.con(br.Bits(64), uint64(offset)))

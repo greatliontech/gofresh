@@ -55,6 +55,11 @@ func selectedAtomicReturn(t testing.TB, raw []byte, image *nativeproof.Image, lo
 		{Start: locations["runtime.test_x64"], End: locations["runtime.test_x64"] + 8},
 		{Start: context, End: context + 24},
 	})
+	// Admit the actual translated startup entries (S-120) as well as a broad
+	// surrounding domain. This is a newly checked interface, not a modified
+	// theorem projection or an assertion that startup reaches this callee.
+	face.Origin.Min -= 256
+	face.Origin.Residue = 8
 	face.Envelope = nativeproof.RelativeSpan{Start: -24, End: 8}
 	face.Regions = []nativeproof.RelativeRegion{
 		{Bytes: nativeproof.RelativeSpan{Start: -24, End: 0}, Readable: true, Writable: true},
@@ -81,7 +86,7 @@ func selectedAtomicReturn(t testing.TB, raw []byte, image *nativeproof.Image, lo
 	if !ok || b.Prefix.Entry != entry || !b.State.CalleeTerminated || b.State.PC != continuation || len(b.Prefix.PrimitiveEffects) != 5 || len(b.Instructions) != len(b.Prefix.Instructions)+1 || b.Instructions[len(b.Instructions)-1].Start != ret || b.Accesses[len(b.Accesses)-1].Kind != nativeproof.FrameReturnRead {
 		t.Fatal("fresh theorem lost complete entry, atomic effects or executed RET")
 	}
-	t.Logf("actual entry=%#x RET=%#x continuation=%#x instructions=%d accesses=%d primitives=%d excluded=%d", entry, ret, continuation, len(b.Instructions), len(b.Accesses), len(b.Prefix.PrimitiveEffects), len(b.Prefix.ExcludedBoundaries))
+	t.Logf("actual entry=%#x RET=%#x continuation=%#x origin=%+v instructions=%d accesses=%d primitives=%d excluded=%d", entry, ret, continuation, b.Prefix.Interface.Origin, len(b.Instructions), len(b.Accesses), len(b.Prefix.PrimitiveEffects), len(b.Prefix.ExcludedBoundaries))
 	return returned
 }
 

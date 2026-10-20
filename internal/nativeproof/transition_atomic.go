@@ -162,21 +162,25 @@ func (m *transitionChecker) compareOrTest(i operation, size uint8) error {
 	if width == 0 {
 		width = i.MemBytes * 8
 	}
-	read := func(arg x86asm.Arg) (br.Term, error) {
+	read := func(arg x86asm.Arg) (TransitionValue, error) {
 		switch x := arg.(type) {
 		case x86asm.Reg:
 			a, _ := register(x)
-			return m.read(&m.state, a), m.err
+			v := TransitionValue{Value: m.read(&m.state, a)}
+			if a.width == 64 {
+				v.Pointer = m.pointers[a.reg]
+			}
+			return v, m.err
 		case x86asm.Imm:
-			return m.con(br.Bits(width), uint64(x)&mask(width)), m.err
+			return TransitionValue{Value: m.con(br.Bits(width), uint64(x)&mask(width))}, m.err
 		case x86asm.Mem:
 			off, err := m.address(x, FrameRead, width/8, size)
 			if err != nil {
-				return br.Term{}, err
+				return TransitionValue{}, err
 			}
-			return m.load(off, width/8, FrameRead).Value, m.err
+			return m.load(off, width/8, FrameRead), m.err
 		}
-		return br.Term{}, refuse(m.pc, "transition-form", "unsupported predicate operand")
+		return TransitionValue{}, refuse(m.pc, "transition-form", "unsupported predicate operand")
 	}
 	left, err := read(i.Args[0])
 	if err != nil {
@@ -188,10 +192,16 @@ func (m *transitionChecker) compareOrTest(i operation, size uint8) error {
 	}
 	var p TransitionPredicates
 	if i.Op == x86asm.CMP {
-		m.bound.Flags, p = m.compareFlags(left, right)
+		m.bound.Flags, p = m.compareFlags(left.Value, right.Value)
 	} else {
-		m.bound.Flags, p = m.testFlags(left, right)
+		m.bound.Flags, p = m.testFlags(left.Value, right.Value)
 	}
 	m.setPredicates(p)
+	if i.Op == x86asm.CMP {
+		_, err = m.refineOriginCompare(left, right)
+		if err != nil {
+			return err
+		}
+	}
 	return m.err
 }

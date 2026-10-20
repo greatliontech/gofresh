@@ -208,6 +208,9 @@ func checkRootedTransition(ctx context.Context, im *Image, root transitionRoot, 
 	if err := m.validateReturnTargetGraph(g); err != nil {
 		return TransitionCertificate{}, err
 	}
+	if err := m.validatePrivateDeadlineGraph(g); err != nil {
+		return TransitionCertificate{}, err
+	}
 	if err := m.initial(); err != nil {
 		return TransitionCertificate{}, err
 	}
@@ -288,6 +291,9 @@ func (m *transitionChecker) continueTransition(prior checkedTransition, proposal
 		return TransitionCertificate{}, err
 	}
 	if err := m.validateReturnTargetGraph(g); err != nil {
+		return TransitionCertificate{}, err
+	}
+	if err := m.validatePrivateDeadlineGraph(g); err != nil {
 		return TransitionCertificate{}, err
 	}
 	return m.finish(g, start)
@@ -751,6 +757,13 @@ func (m *transitionChecker) step(i operation, size uint8) error {
 				if i.Op == x86asm.TEST {
 					m.bound.Flags.OF.Value, m.bound.Flags.SF.Value = m.falsity, m.state.flags[flagLess]
 					m.bound.Flags.AF = TransitionFlag{}
+				}
+				if right, full := fullRegister(i.Args[1]); i.Op == x86asm.CMP && a.width == 64 && full {
+					if _, err := m.refineOriginCompare(
+						TransitionValue{Value: m.state.regs[a.reg], Pointer: m.pointers[a.reg]},
+						TransitionValue{Value: m.state.regs[right.reg], Pointer: m.pointers[right.reg]}); err != nil {
+						return err
+					}
 				}
 				return m.err
 			}
