@@ -727,6 +727,32 @@
                               executor knowledge alone supplies no evidence binding.
                               Do not require concrete stack-relative string offsets
                               or introduce a second process-input memory map.
+                              - [x] 5.1w.2b.3b.2a.2.2.2.2.16b.1a Settle the
+                                joint-placement, coherent-backing and checked
+                                application-association contract. Derive the closed
+                                finite declaration grammar and independently
+                                checked nonvacuity-witness boundary; retain the
+                                actual owned tool-forwarding input binding and
+                                ordered implementation prerequisites.
+                              - [ ] 5.1w.2b.3b.2a.2.2.2.2.16b.1b Migrate existing
+                                stack/image locations, pointers, accesses and
+                                source-storage footprints to common owned backing
+                                coordinates without adding a new admitted storage
+                                population. Centralize geometry, permissions and
+                                protection; preserve logical image-load boundaries,
+                                alias coherence, application/replay, current state,
+                                exact continuation identity, expression accounting
+                                and independent alpha-equivalence comparators.
+                              - [ ] 5.1w.2b.3b.2a.2.2.2.2.16b.1c Admit finite
+                                declared objects and affine shared views with fresh
+                                symbolic bases, joint placement constraints and
+                                independently validated inhabitedness. Retain all
+                                address/entry dependencies in cumulative accounts;
+                                establish universal full extents, coherent shared
+                                bytes and checked application associations, including
+                                noninjective views. Preserve refusal of unsupported
+                                foreign-stack operations and forbid witness values
+                                from initializing universal symbolic inputs.
                             - [ ] 5.1w.2b.3b.2a.2.2.2.2.16b.2 Construct the
                               identified fresh-root ordered input relation from
                               finite logical shapes with universally admissible

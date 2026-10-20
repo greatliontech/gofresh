@@ -753,6 +753,26 @@ entry-to-cut transition MUST satisfy these obligations:
   represented but cannot authorize a read. Pointer-word provenance survives a
   memory round trip only through its complete correctly ordered bytes; partial or
   overlapping writes invalidate affected provenance.
+  A claim with multiple address origins retains one joint admissible placement
+  relation. Each accessible logical backing has an owned identity, byte extent,
+  address relation, permissions and lifetime. Different identities alone prove
+  neither separation nor unequal pointer values. The checker establishes that
+  the complete placement and memory relation is inhabited and proves transfers
+  for every admitted placement, not only for a satisfying example. Every used
+  address, full extent and pointer offset preserves canonical nonwrapping bounds
+  throughout that joint domain. Placement constraints are retained antecedents,
+  not observations of an actual process or freely imported scalar conclusions.
+  Logical object membership and finite extents do not require concrete distances
+  from the stack origin. Relocating a fixed layout alone does not establish a
+  relation that permits variable distances between input objects.
+  All addressing paths into an admitted shared backing resolve to the same
+  current bytes and provenance lanes. Views or alternative coordinates of shared
+  storage cannot introduce independent initial values or hide overlapping writes.
+  Distinct backings whose accessible extents could alias require a checked shared
+  storage relation or a separation premise established for the entire admitted
+  placement population; unsupported overlap refuses. Image, stack, thread-relative
+  and process-input accesses retain one coherent memory relation. A new address
+  origin grants neither storage nor permissions, initial values or input meaning.
   Segment-relative addressing uses the applicable thread's effective base and
   exact address-size, displacement and full-width operand semantics. It resolves
   into the same owned byte-memory as ordinary addressing, with canonical,
@@ -839,6 +859,20 @@ entry-to-cut transition MUST satisfy these obligations:
   identities and the complete ordered effect dependencies. New occurrences have
   distinct outcome identities; neither a replacement entry state nor an unbound
   additional input can stand in for a checked primitive effect.
+  Extension retains the predecessor's logical backing identities, joint placement
+  predicates, input variables, current bytes and lifetimes together. Application
+  may instantiate or rename independently rooted backing and input identities
+  through a checked association with the actual incoming state; literal identity
+  equality is not required. The association preserves the joint placement
+  conditions, current bytes and provenance, admitted aliases, permissions,
+  complete access extents and applicable lifetimes. Several views may resolve to
+  the same shared storage; the association does not impose injectivity on views.
+  Fresh roots instantiate fresh owned input variables. Immutable layout
+  descriptions may be shared but confer no cross-root execution identity.
+  Equal names, numeric addresses or byte projections do not
+  authorize importing an unrelated backing, strengthening its conditions or
+  reapplying initial input values. Private-frame expiration and control-word
+  protection continue to apply through every coordinate for the same storage.
   The predecessor's cut must be a common boundary of every path being extended.
   Reconstructed prefix and suffix coverage exclude bypass, overlapping instruction
   decoding and unaccounted re-entry into an executed prefix. Composition retains
