@@ -17500,3 +17500,36 @@ bindings {
   shape_hash: "7511d4bf81f3cb923bbf4d59c9b7782f00c955b6a1aa3e77d8da30bb3938ed1c"
   clause_label: "composition-boundary"
 }
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "93a06e0604d1932874bfe0dc7a734fbbca7712267078c7d8395d6955b8d39321"
+  source_hash: "b68748f51ba4983a1f2ece7200bef2830d595435b97a1fcb6afe763bd1a506a4"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRuntimeStartupSelectedWrites"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2412723b5eedde7c25294342ca238639f9b87ba53df593cb7699ff70184e2968"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "93a06e0604d1932874bfe0dc7a734fbbca7712267078c7d8395d6955b8d39321"
+  source_hash: "b68748f51ba4983a1f2ece7200bef2830d595435b97a1fcb6afe763bd1a506a4"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRuntimeStartupSelectedWrites"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2412723b5eedde7c25294342ca238639f9b87ba53df593cb7699ff70184e2968"
+  clause_label: "state-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "93a06e0604d1932874bfe0dc7a734fbbca7712267078c7d8395d6955b8d39321"
+  source_hash: "b68748f51ba4983a1f2ece7200bef2830d595435b97a1fcb6afe763bd1a506a4"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRuntimeStartupSelectedWrites"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2412723b5eedde7c25294342ca238639f9b87ba53df593cb7699ff70184e2968"
+  clause_label: "conditional-composition"
+}

@@ -647,8 +647,31 @@
                           g0/m0 association. Establish the entry-state premises
                           retained by the composed storage/operation relations.
                           Settle new mechanisms before executable
-                          work and retain the parent's remaining arguments,
-                          environment, auxiliary-vector and secure-descriptor queue.
+                           work and retain the parent's remaining arguments,
+                           environment, auxiliary-vector and secure-descriptor queue.
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.13a Consume the checked
+                            ELF-entry, initialized-image and TLS prefix through the
+                            shared native interface, then establish the actual
+                            g0/m0-addressed writes up to unexecuted CLD. Retain
+                            original inputs, ordered CPU/syscall effects, exclusions
+                            and startup spills; numeric provenance supplies no typed
+                            association or private-lifetime authority.
+                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.13b Check CLD and the
+                            actual legacy XMM-clear form with complete direction,
+                            arithmetic-flag, vector and floating-context state;
+                            retain exact operand and encoding restrictions.
+                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.13c Establish root scratch
+                            ownership under the identified entry model and compose
+                            after the retained FS replacement without erasing its
+                            history. Rederive the conditional callee relations for
+                            the actual translated origin congruence and establish
+                            their current guard, mapping and frame premises.
+                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.13d Carry the actual outer
+                            CALL through its wrapper and tail transfer into the
+                            exact complete source/native correspondence. Preserve
+                            the active continuation, storage-coordinate and input
+                            associations, scoped model consequences and complete
+                            current state through the returned root successor.
                       - [ ] 5.1w.2b.3b.2a.2.2.2.3 Establish native-storage to
                         selected-source storage and initialization correspondence before
                         supplying compiler source state; names and numeric addresses
