@@ -96,9 +96,9 @@ that grammar. The actual compiler substituted a CPU-feature-dependent POPCNT
 operation with the Go body as fallback. Under `GOAMD64=v1`, one retained binary
 returned 1 normally and 0 with `GODEBUG=cpu.popcnt=off`, while code-result
 fingerprints agreed and public checking returned Valid without purity or
-observation authority. The local prototype regression is
-`TestComputationAcceptanceCompilerIntrinsicRuntimeDispatch`; its committed
-acceptance belongs to 5.1w.2b. The reproduction preserves the selected library's
+observation authority. The retained regression is
+`TestComputationAcceptanceCompilerIntrinsicRuntimeDispatch` in the prototype
+checkpoint below; its mainline acceptance belongs to 5.1w.2b. The reproduction preserves the selected library's
 exports, replaces the two de Bruijn byte-array variables with byte-identical
 constant strings, and replaces the linknamed error variables with constant
 strings, so package storage/directives do not independently defeat the source
@@ -122,6 +122,41 @@ including inline instances and dispatch. The current opaque `BindBuilt` identity
 is an execution-owner declaration, not readable code or an implementation proof.
 Extend the existing generation/build boundary with the required bound evidence
 rather than introducing a parallel execution framework.
+
+## Retained public-adoption prototype
+
+The six-file prototype is preserved byte-for-byte at
+`a3d9ebae5d69fdf45c46c76d3aefea392a0d3053` on branch
+`reconcile/computation-adoption-prototype`, based on
+`88a069fc8789ec934c7e165cd1a08c7ce8e3258b`:
+
+- `closure/dependencies.go`
+- `closure/maximal.go`
+- `closure/policymemo_test.go`
+- `closure/computation_integration_linux_test.go`
+- `closure/computation_public_linux_test.go`
+- `computation_acceptance_test.go`
+
+This is unvalidated WIP, not release-ready; do not merge it wholesale. It is the
+post-cutoff prototype: it retains the intrinsic counterexample fixture, but its
+maximal consumer no longer contains the original unsound runtime grant. That
+consumer loads and checks source, then retains every conservative refusal. Its
+discharge comments are obsolete. A direct stock-Go run confirms that
+`TestComputationSelectedImplementations` fails its useful-positive assertion with
+`compiler-selected implementation binding is unavailable`. Preserve that positive
+expectation; refusal is not equivalent acceptance.
+
+Extract and adapt the checkpoint's obligations at their existing landing slots:
+
+| Lands | Required integration |
+|---|---|
+| 5.1w.2b, including 5.1w.2b.4 | Useful selected-source/callback positives and the retained intrinsic-dispatch regression before restoring maximal runtime discharge; unsupported effect, native and initialization negatives remain required. |
+| 5.1w.6 | Replace the disabled consumer attempt with actual checked-claim integration; bind the complete adopted semantic dependencies in policy/memos, retaining cancellation, cold/warm/discarded-cache equivalence, capture/check/closing, historical evidence and measurement guards. Reconsider `toolchain-policy@2` with that integration rather than landing the prototype's identity change alone. |
+| 5.1w.7 | Run these positive and adversarial cases as required release gates and remove superseded mechanisms; do not delete positives or make them expect universal refusal. |
+
+The checkpoint is recovery and acceptance material, not authority for current
+reuse. Mainline keeps the committed conservative consumer while these already
+scheduled prerequisites are completed.
 
 ## Public adoption boundary
 

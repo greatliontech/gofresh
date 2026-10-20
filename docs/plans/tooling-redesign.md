@@ -217,6 +217,9 @@
         Carry the structured failed premise, phase, entry and dependency edges
         into native/public refusal accounts, including proposal exhaustion;
         diagnostic text alone does not complete this vertical.
+        Recover the retained public-adoption prototype from the
+        [registry issue](../issues/toolchain-variation-admission-registry.md#retained-public-adoption-prototype),
+        preserving useful positives and intrinsic-dispatch negatives for 5.1w.2b.4.
         - [x] 5.1w.2b.1 Inspect immutable retained-artifact inputs on the existing
           snapshot/build binding and enforce their producer-span agreement at
           registration and closing. Preserve declaration-only bindings, actual
@@ -746,6 +749,10 @@
       Verify cold/warm/discarded-cache equivalence,
       policy/content movement, checking/closing and historical non-upgrade. Migrate
       native consumers without relabeling assertions or losing identity-only facts.
+      Reconcile the retained prototype's consumer, policy identity and cache/lifecycle
+      tests from the [registry issue](../issues/toolchain-variation-admission-registry.md#retained-public-adoption-prototype)
+      against the actual checked-claim integration; do not import its disabled grant
+      attempt or incomplete policy dependencies as finished mechanisms.
     - [ ] 5.1w.7 Remove the selection-wide admission Boolean, approved-content
       chains, flavor canaries and superseded summary mechanisms after useful
       positive and adversarial acceptance. Converge independent review, direct

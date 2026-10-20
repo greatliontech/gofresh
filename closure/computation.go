@@ -16,8 +16,9 @@ import (
 )
 
 // computationRules identifies the language-computation checker, not an approved
-// implementation. Its facts are pass-local; the policy identity includes the
-// rules so dependent persisted judgments cannot inherit changed semantics.
+// implementation. Its facts are pass-local. Any consumer that persists judgments
+// derived from them must include these rules in its semantic-policy dependencies;
+// the current inventory-only admission identity does not supply that binding.
 //
 // The claim bounds the selected source SSA, not whichever implementation the
 // compiler emits for a source-level callee. Native freshness additionally needs
