@@ -314,6 +314,40 @@ is insufficient. Initialization-to-use preservation, mutable predicate targets
 and package-object association remain separate obligations at 9.4a.1b. Closing
 the construction experiment supplies none of those facts by implication.
 
+The selected source continuation exposes a concrete preservation boundary before
+parsing or compiler worker creation. After `gc.Main` calls `ssagen.InitTables`,
+it calls `noder.LoadPackage(flag.Args())`; that function unconditionally calls
+`base.Timer.Start`, whose append operation evaluates `time.Now`. Its bodyless
+`time.runtimeNow` call requires selected linkage and an applicable frame. Treating
+the time result as arbitrary does not establish that obtaining it preserves the
+actual table reference/backing or the installed predicate values. The construction
+postcondition supplies the map fact, not those earlier predicate assignments.
+
+On the selected Linux/amd64 native path, the linked clock implementation obtains
+the current thread state from machine context, writes runtime bookkeeping fields,
+may switch to the runtime stack, and calls the target loaded from
+`runtime.vdsoClockgettimeSym`; the alternative path invokes `clock_gettime`.
+Passing no protected pointer does not exclude these ambient writes. A closed
+source alias/escape analysis therefore cannot alone establish the required
+preservation. The source model's custom simulation branches require checked
+selection or coverage too; comments about their elimination are not evidence.
+There is no demonstrated harmful table write here: this is a missing applicable
+frame, including disjointness from protected storage and actual indirect-target
+coverage. The existing native-frame contract keeps vDSO functions as selected
+implementations, not primitives approved by their names or ABI.
+
+At 9.4a.1b, use this boundary to decide the applicability route before expanding
+native prefixes. A deciding positive must cover the complete selected clock
+call's protected-state frame on stock and custom Go, composed with the actual
+construction poststate and independently established predicate bindings. It must
+cover every feasible native arm and derive required runtime/scratch separation;
+an invented entry heap, syscall-only proof or synthetic safe leaf is insufficient.
+Controls must reject protected writes without passed pointers, overlapping
+scratch, callbacks redirecting predicates and missing or conflicting indirect
+target evidence. Even a complete clock frame would leave the remaining
+construction-to-use interval and compiler-source/executable association open.
+No bounded complete application route is established by this source inventory.
+
 The user selected existing test/benchmark workflows as the public acceptance
 target when offered an opt-in Linux/amd64 traced scalar-call protocol. Native
 entry and source/native relation checks remain useful subordinate mechanisms,

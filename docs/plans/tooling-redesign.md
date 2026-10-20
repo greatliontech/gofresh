@@ -1273,6 +1273,12 @@
           experiment before choosing another general mechanism; source reference
           inventories and RTA supply candidates, not those proofs. Retain the
           separate compiler-source/executable association obligation.
+          Decide the postconstruction timing-call frame at time.runtimeNow before
+          extending native prefixes: complete stock/custom coverage must include
+          ambient writes, derived runtime/scratch separation and every feasible
+          vDSO/syscall arm, with protected-write, callback and target-substitution
+          adversaries. A missing frame keeps this application route unestablished;
+          a complete local frame alone does not close the remaining interval.
           Inventory every remaining implementation-changing route for the selected
           occurrence before consuming exclusion as selection-stability evidence.
       - [ ] 9.4a.2 Qualify one complete implicit-lowering applicability bridge
