@@ -11,6 +11,11 @@ import (
 )
 
 type regionKernel struct {
+	sizes types.Sizes
+	// The cursor belongs to checked execution, never to a proposal node.
+	next        uint64
+	current     regionEffectOccurrence
+	boundaries  map[regionPoint][]regionState
 	input       regionInput
 	meter       *regionMeter
 	session     *regionCallSession
@@ -45,6 +50,9 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 	}
 	if !in.storageModel.valid(in) {
 		return nil, regionError("storage model is not bound to the typed source owner")
+	}
+	if err := k.selectSizes(); err != nil {
+		return nil, err
 	}
 	if regionInstruction(in.entry) == nil || in.entry.block.Parent() != fn || !fullReturns && (regionInstruction(in.use.at) == nil || in.use.at.block.Parent() != fn) {
 		return nil, regionError("invalid scope instruction boundary")
@@ -287,7 +295,7 @@ func (k *regionKernel) owns(v ssa.Value) bool {
 		if x.Value != nil && x.Value.Kind() == constant.String && len(constant.StringVal(x.Value)) > k.meter.limits.locations {
 			return false
 		}
-		return zero || x.IsNil() || regionScalarConstant(x.Type(), x.Value) || regionOpaqueScalarType(x.Type()) && x.Value != nil
+		return zero || x.IsNil() || k.scalarConstant(x.Type(), x.Value) || regionOpaqueScalarType(x.Type()) && x.Value != nil
 	case *ssa.Builtin:
 		return x != nil && x.Type() != nil
 	case *ssa.Global:
@@ -416,7 +424,7 @@ func (k *regionKernel) validateValue(v regionValue, depth int) error {
 	case regionUnknown:
 		valid = true
 	case regionConstant:
-		valid = regionScalarConstant(v.typ, v.scalar)
+		valid = k.scalarConstant(v.typ, v.scalar)
 		if valid && v.scalar.Kind() == constant.String && len(constant.StringVal(v.scalar)) > k.meter.limits.locations {
 			return regionError("constant storage budget exhausted")
 		}
@@ -510,7 +518,7 @@ func checkRegion(ctx context.Context, input regionInput, proposal *regionProposa
 
 func checkRegionKernel(k *regionKernel, p *regionProposal) (*checkedRegion, error) {
 	in := k.input
-	if p == nil || p.input.owner != in.owner || p.input.root != in.root || p.input.entry != in.entry || p.input.use != in.use || p.input.storageModel != in.storageModel || !slices.Equal(p.input.premises, in.premises) {
+	if p == nil || p.input.owner != in.owner || p.input.selection != in.selection || p.input.root != in.root || p.input.entry != in.entry || p.input.use != in.use || p.input.storageModel != in.storageModel || !slices.Equal(p.input.premises, in.premises) {
 		return nil, regionError("proposal is not bound to the complete input")
 	}
 	k.session.proofs = p.calls
@@ -526,7 +534,7 @@ func checkRegionKernel(k *regionKernel, p *regionProposal) (*checkedRegion, erro
 			return nil, regionError("proposal initial premise differs from input")
 		}
 	}
-	observations, err := k.checkEntries(p.entries)
+	observations, err := k.checkFlow(p.entries, p.occurrences)
 	if err != nil {
 		return nil, err
 	}
@@ -572,20 +580,12 @@ func (k *regionKernel) checkEntries(entries map[*ssa.BasicBlock][]regionState) (
 		block := next.block
 		queue = queue[1:]
 		if seen[block] {
-			if k.trace != nil {
-				return nil, regionError("finite effect scope revisits a checked block")
-			}
 			continue
 		}
 		seen[block] = true
 		states := entries[block]
 		if len(states) == 0 {
 			return nil, regionError("reachable block invariant omitted")
-		}
-		if k.trace != nil {
-			// The proposed invariant proves coverage; effects and actual phi
-			// values come from the independently transferred predecessor state.
-			states = []regionState{next.state}
 		}
 		for _, state := range states {
 			edges, outcomes, err := k.block(block, state)
@@ -615,6 +615,7 @@ func (k *regionKernel) checkEntries(entries map[*ssa.BasicBlock][]regionState) (
 }
 
 type regionEdge struct {
+	slot  int
 	block *ssa.BasicBlock
 	state regionState
 }
@@ -742,13 +743,19 @@ func (k *regionKernel) clone(s regionState) (regionState, error) {
 }
 
 func (k *regionKernel) block(block *ssa.BasicBlock, initial regionState) ([]regionEdge, []regionObservation, error) {
-	s, err := k.clone(initial)
-	if err != nil {
-		return nil, nil, err
-	}
 	start := 0
 	if block == k.input.entry.block {
 		start = k.input.entry.index
+	}
+	return k.blockFrom(regionPoint{block, start}, initial)
+}
+
+// Each CFG re-entry begins at zero, even when the original scope started at a cut.
+func (k *regionKernel) blockFrom(at regionPoint, initial regionState) ([]regionEdge, []regionObservation, error) {
+	block, start := at.block, at.index
+	s, err := k.clone(initial)
+	if err != nil {
+		return nil, nil, err
 	}
 	states := []regionState{s}
 	for index := start; index < len(block.Instrs); index++ {
@@ -764,7 +771,7 @@ func (k *regionKernel) block(block *ssa.BasicBlock, initial regionState) ([]regi
 				if k.input.use.operand != nil {
 					value = k.value(s, k.input.use.operand)
 				}
-				observations = append(observations, regionObservation{value: value, state: s})
+				observations = append(observations, regionObservation{value: value, state: s, occurrence: k.boundaryOccurrence(regionInstruction(k.input.use.at))})
 				continue
 			}
 			instruction := block.Instrs[index]
@@ -781,6 +788,9 @@ func (k *regionKernel) block(block *ssa.BasicBlock, initial regionState) ([]regi
 				for i, successor := range block.Succs {
 					if branch, ok := instruction.(*ssa.If); ok {
 						if b, known := regionBool(k.value(s, branch.Cond)); known && b != (i == 0) {
+							if k.trace != nil {
+								k.trace.excluded = append(k.trace.excluded, regionExcludedEdge{regionEffectOccurrence: k.current, branch: branch, successor: successor, condition: b})
+							}
 							continue
 						}
 					}
@@ -810,7 +820,7 @@ func (k *regionKernel) block(block *ssa.BasicBlock, initial regionState) ([]regi
 						}
 						next.values[phi] = k.value(s, phi.Edges[pred])
 					}
-					edges = append(edges, regionEdge{block: successor, state: next})
+					edges = append(edges, regionEdge{slot: i, block: successor, state: next})
 				}
 			case *ssa.Return:
 				if !k.fullReturns {
@@ -820,7 +830,7 @@ func (k *regionKernel) block(block *ssa.BasicBlock, initial regionState) ([]regi
 				if err != nil {
 					return nil, nil, &regionOperationFailure{instruction, err}
 				}
-				observations = append(observations, regionObservation{value: value, state: s})
+				observations = append(observations, regionObservation{value: value, state: s, occurrence: k.current})
 			case *ssa.Call:
 				if _, builtin := x.Call.Value.(*ssa.Builtin); builtin {
 					if err := k.transfer(&s, x); err != nil {
@@ -981,7 +991,7 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 			if len(k.trace.allocations) >= k.meter.limits.nodes {
 				return regionError("effect allocation budget exhausted")
 			}
-			k.trace.allocations = append(k.trace.allocations, regionEffectAllocation{instruction: x, invocation: k.invocation, location: regionLocation{object: object}, initializer: v})
+			k.trace.allocations = append(k.trace.allocations, regionEffectAllocation{regionEffectOccurrence: k.current, location: regionLocation{object: object}, initializer: v})
 		}
 		return set(x, regionValue{typ: x.Type(), kind: regionPointer, location: regionLocation{object: object}})
 	case *ssa.FieldAddr:
@@ -1206,7 +1216,7 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		return set(x, v)
 	case *ssa.Convert:
 		v := get(x.X)
-		if k.input.storageModel.source == nil || !k.input.storageModel.valid(k.input) {
+		if k.input.storageModel.interpretation != regionIEEE754LittleEndian || !k.input.storageModel.valid(k.input) {
 			return regionError("unsafe bit view requires a conditional storage model")
 		}
 		if p, ok := x.X.Type().Underlying().(*types.Pointer); ok && regionUnsafePointerType(x.Type()) && v.kind == regionPointer && k.liveView(*s, v.location, p.Elem()) {
@@ -1219,6 +1229,13 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		}
 		return k.storageViewError("unsupported numeric or unsafe pointer conversion")
 	case *ssa.BinOp:
+		if regionIntegerOperation(x) {
+			value, err := k.integerBinary(x, get(x.X), get(x.Y))
+			if err != nil {
+				return err
+			}
+			return set(x, value)
+		}
 		if !regionIsComparison(x.Op) {
 			return regionError("unsupported numeric transfer")
 		}

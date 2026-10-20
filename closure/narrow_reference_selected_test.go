@@ -126,6 +126,17 @@ func TestNarrowReferenceSelectedRuntime(t *testing.T) {
 	if len(references) != 3 {
 		t.Fatal("selected narrow references are incomplete")
 	}
+	for _, name := range []string{"Cas64", "Store64", "Xadd64", "Xchg64"} {
+		target := provider.Func(name)
+		if target == nil {
+			t.Fatal("selected wide reference declaration is absent", name)
+		}
+		reference, err := checkAssemblyReference(t.Context(), source, target, packet, assemblyReferenceLimits{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		references[target] = reference
+	}
 	assertNarrowSelectedSourcePrefix(t, source, references)
 }
 
@@ -167,6 +178,10 @@ func assertNarrowSelectedSourcePrefix(t *testing.T, source computationSource, re
 	}
 	limits := defaultRegistrationLimits()
 	limits.source.work, limits.source.bytes = 16<<20, 512<<20
+	// The complete caller relation retains its earlier states and every finite
+	// child occurrence under one cumulative value-copy allowance.
+	limits.region.locations = 16 << 10
+	limits.region.nodes = 16 << 10
 	first, err := checkSourceOperandPrefix(t.Context(), source, root, calls[0], limits)
 	if err != nil {
 		t.Fatal(err)

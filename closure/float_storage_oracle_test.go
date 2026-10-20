@@ -365,7 +365,8 @@ func checkFloatStorageOracle(t testing.TB, source computationSource, in regionIn
 func checkFloatOracleRegion(t testing.TB, source computationSource, in regionInput, globals map[*ssa.Global]any, prefix, whole storageSourceResult) {
 	t.Helper()
 	in.premises = []string{"immutable selected typed source; exact supplied initial globals; omitted initialization and external interference remain open"}
-	in.storageModel = conditionalRegionStorageModel(source)
+	in.selection = source.prog
+	in.storageModel = conditionalRegionStorageModel()
 	in.initial = regionState{memory: map[regionObject]regionValue{}}
 	for global, value := range globals {
 		typ := global.Type().Underlying().(*types.Pointer).Elem()
@@ -658,7 +659,8 @@ func F()(bool,bool,Word){
 					t.Fatal("float write failed to update the canonical integer cell")
 				}
 				in.premises = []string{"immutable selected typed source; exact supplied initial globals; omitted initialization and interference remain open"}
-				in.storageModel = conditionalRegionStorageModel(source)
+				in.selection = source.prog
+				in.storageModel = conditionalRegionStorageModel()
 				in.initial.memory = map[regionObject]regionValue{}
 				for global, value := range globals {
 					in.initial.memory[regionObject{kind: regionGlobal, site: global}] = regionValue{typ: global.Type().Underlying().(*types.Pointer).Elem(), kind: regionConstant, scalar: constant.MakeUint64(value.(uint64))}

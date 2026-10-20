@@ -26,10 +26,14 @@ type regionContextFacts struct {
 	depth    int
 }
 
-// A candidate proposes only entry states and block invariants. There is no
+// A source candidate proposes only entry states and block invariants or a finite
+// occurrence path, with those two arms mutually exclusive. There is no
 // producer-supplied return, preserved-heap, callback-free, or closed flag.
 // Returns and their ENTIRE resulting heaps are derived again by the checker.
 type regionCallProof struct {
+	caller       regionEffectOccurrence
+	selection    *program
+	occurrences  *regionOccurrencePath
 	at           *ssa.Call
 	target       *ssa.Function
 	invocation   regionInvocation
@@ -94,6 +98,12 @@ func regionSourceCallBody(fn *ssa.Function) bool {
 }
 
 func (k *regionKernel) invocationAt(call *ssa.Call, target *ssa.Function) (regionInvocation, error) {
+	// Finite cyclic call sites remain refused. Consequently the existing actual
+	// call string is injective over admitted activations; the exact caller event
+	// binds proof applications without a second activation-identity mechanism.
+	if k.trace != nil && (k.cycle[call.Block()] || k.current.instruction != call || k.current.invocation != k.invocation || k.current.owner != k.trace.owner || !k.trace.seen[k.current]) {
+		return regionInvocation{}, regionError("call lacks its exact checked invoking occurrence")
+	}
 	parent, ok := k.session.contexts[k.invocation]
 	if !ok || parent.function != k.input.root || call.Parent() != k.input.root {
 		return regionInvocation{}, regionError("call context is not the actual caller")
@@ -178,7 +188,7 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 		}
 		initial.values[free] = value
 	}
-	in := regionInput{owner: k.input.owner, root: target, entry: regionPoint{target.Blocks[0], 0}, initial: initial, premises: k.input.premises, storageModel: k.input.storageModel}
+	in := regionInput{owner: k.input.owner, selection: k.input.selection, root: target, entry: regionPoint{target.Blocks[0], 0}, initial: initial, premises: k.input.premises, storageModel: k.input.storageModel}
 	child, err := newRegionContextKernel(in, k.session, id, true)
 	if err != nil {
 		return nil, err
@@ -188,7 +198,7 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 		if err := k.meter.tick(); err != nil {
 			return nil, err
 		}
-		if candidate.at != call || candidate.target != target || candidate.invocation != id || candidate.reference != nil || candidate.storageModel != k.input.storageModel {
+		if candidate.at != call || candidate.target != target || candidate.invocation != id || candidate.caller != k.current || candidate.reference != nil || candidate.selection != k.input.selection || candidate.storageModel != k.input.storageModel {
 			continue
 		}
 		if len(candidate.arguments) != len(actual) {
@@ -230,16 +240,16 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 			// Nested checked references also need effect-aware proposal execution.
 			// Its events are provisional: checking below replays the body into the
 			// parent's trace under the same cumulative meter.
-			child.trace = &regionEffectTrace{seen: map[regionEffectOccurrence]bool{}}
+			child.trace = &regionEffectTrace{owner: k.trace.owner, seen: map[regionEffectOccurrence]bool{}}
 		}
-		entries, err := child.proposeEntries()
+		entries, occurrences, err := child.proposeFlow()
 		if err != nil {
 			return nil, err
 		}
 		if len(k.session.proofs) >= k.meter.limits.nodes {
 			return nil, regionError("callee proof count exhausted")
 		}
-		proof = &regionCallProof{at: call, target: target, invocation: id, initial: initial, entries: entries, arguments: slices.Clone(actual), storageModel: k.input.storageModel}
+		proof = &regionCallProof{at: call, target: target, invocation: id, caller: k.current, initial: initial, entries: entries, occurrences: occurrences, arguments: slices.Clone(actual), storageModel: k.input.storageModel, selection: k.input.selection}
 		k.session.proofs = append(k.session.proofs, proof)
 	}
 	outcomes, checked := k.session.results[proof]
@@ -248,9 +258,10 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 	// not establish access order or account for discarded reads.
 	if k.trace != nil {
 		child.trace = k.trace
+		child.next, child.current = 0, regionEffectOccurrence{}
 	}
 	if !checked || k.trace != nil {
-		outcomes, err = child.checkEntries(proof.entries)
+		outcomes, err = child.checkFlow(proof.entries, proof.occurrences)
 		if err != nil {
 			return nil, err
 		}

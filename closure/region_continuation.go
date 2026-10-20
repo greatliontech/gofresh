@@ -16,12 +16,11 @@ import (
 // an independently checked reference at its exact call. Private reference-frame
 // accesses remain in that reference's evidence rather than in this projection.
 type regionEffectAccess struct {
-	instruction ssa.Instruction
-	invocation  regionInvocation
-	location    regionLocation
-	write       bool
-	value       regionValue
-	locked      bool
+	regionEffectOccurrence
+	location regionLocation
+	write    bool
+	value    regionValue
+	locked   bool
 }
 
 // Allocation is a language initialization/lifetime event, not an ordinary store
@@ -29,17 +28,16 @@ type regionEffectAccess struct {
 // Identity, storage type and cardinality use the existing object/context model.
 // No lifetime end is inferred from an SSA value's last syntactic use.
 type regionEffectAllocation struct {
-	instruction *ssa.Alloc
-	invocation  regionInvocation
+	regionEffectOccurrence
 	location    regionLocation
 	initializer regionValue
 }
 
 type regionExcludedEdge struct {
-	branch     *ssa.If
-	invocation regionInvocation
-	successor  *ssa.BasicBlock
-	condition  bool
+	regionEffectOccurrence
+	branch    *ssa.If
+	successor *ssa.BasicBlock
+	condition bool
 }
 
 type regionCallApplication struct {
@@ -48,6 +46,7 @@ type regionCallApplication struct {
 }
 
 type regionEffectTrace struct {
+	owner        *regionOccurrenceOwner
 	accesses     []regionEffectAccess
 	allocations  []regionEffectAllocation
 	atomics      []regionAtomicOccurrence
@@ -67,21 +66,30 @@ type regionAtomicOccurrence struct {
 type regionEffectOccurrence struct {
 	instruction ssa.Instruction
 	invocation  regionInvocation
+	owner       *regionOccurrenceOwner
+	ordinal     uint64
 }
 
-// An instruction in the retained predecessor cannot be executed again by a
-// continuation. This is deliberately a finite, acyclic, one-state effect grammar;
-// the general inductive region checker remains available without this refinement.
+// An executed occurrence in the retained predecessor cannot be executed again by a
+// continuation. Static instructions may recur only along independently checked
+// CFG edges and then receive the next ordinal. The flattened checked instruction
+// order, including child entries/returns, supplies a strictly decreasing remaining
+// instruction rank; complete occurrence closure separately rules out truncation.
 func (k *regionKernel) effectTransfer(state regionState, instruction ssa.Instruction) error {
 	if err := k.meter.tick(); err != nil {
 		return err
 	}
-	occurrence := regionEffectOccurrence{instruction, k.invocation}
-	if k.trace.seen[occurrence] || len(k.trace.instructions) >= k.meter.limits.nodes {
-		return regionError("effect scope repeats an occurrence or exhausts its bound")
+	occurrence := k.boundaryOccurrence(instruction)
+	if occurrence.owner == nil || k.trace.seen[occurrence] {
+		return regionError("effect scope lacks an owner or repeats an executed occurrence")
+	}
+	if k.next >= uint64(k.meter.limits.nodes) || len(k.trace.instructions) >= k.meter.limits.nodes {
+		return regionError("effect occurrence budget exhausted")
 	}
 	k.trace.seen[occurrence] = true
 	k.trace.instructions = append(k.trace.instructions, occurrence)
+	k.current = occurrence
+	k.next++
 	var address ssa.Value
 	var value regionValue
 	write := false
@@ -104,17 +112,15 @@ func (k *regionKernel) effectTransfer(state regionState, instruction ssa.Instruc
 		// The ordinary transfer checks the actual projected result in set.
 		return nil
 	case *ssa.If:
-		condition, known := regionBool(k.value(state, x.Cond))
+		_, known := regionBool(k.value(state, x.Cond))
 		if !known {
 			return regionError("finite effect scope has an unresolved branch condition")
 		}
-		excluded := 0
-		if condition {
-			excluded = 1
-		}
-		k.trace.excluded = append(k.trace.excluded, regionExcludedEdge{branch: x, invocation: k.invocation, successor: x.Block().Succs[excluded], condition: condition})
 		return nil
 	case *ssa.BinOp:
+		if regionIntegerOperation(x) {
+			return k.effectOperands(state, instruction)
+		}
 		if !regionIsComparison(x.Op) {
 			return regionError("finite effect scope requires a supported comparison")
 		}
@@ -123,6 +129,9 @@ func (k *regionKernel) effectTransfer(state regionState, instruction ssa.Instruc
 		}
 		return k.effectComparisonValue(k.value(state, x.Y), 0)
 	case *ssa.Call:
+		if k.cycle[x.Block()] {
+			return regionError("finite effect scope has a recurrent call site")
+		}
 		if builtin, ok := x.Call.Value.(*ssa.Builtin); ok && (builtin.Name() == "len" || builtin.Name() == "cap") {
 			return k.effectOperands(state, instruction)
 		}
@@ -159,7 +168,7 @@ func (k *regionKernel) effectTransfer(state regionState, instruction ssa.Instruc
 	if err := k.effectValue(value); err != nil {
 		return err
 	}
-	return k.addEffectAccess(regionEffectAccess{instruction: instruction, invocation: k.invocation, location: pointer.location, write: write, value: value})
+	return k.addEffectAccess(regionEffectAccess{regionEffectOccurrence: occurrence, location: pointer.location, write: write, value: value})
 }
 
 // Unknown supported scalar values remain universally quantified. Unsupported
@@ -354,7 +363,7 @@ func (k *regionKernel) callReference(call *ssa.Call, caller regionState, callabl
 		if err := k.meter.tick(); err != nil {
 			return nil, err
 		}
-		if candidate.at != call || candidate.target != target || candidate.invocation != id || candidate.reference != reference || candidate.storageModel != k.input.storageModel || len(candidate.entries) != 0 || len(candidate.arguments) != len(actual) {
+		if candidate.at != call || candidate.target != target || candidate.invocation != id || candidate.caller != k.current || candidate.reference != reference || candidate.selection != k.input.selection || candidate.storageModel != k.input.storageModel || candidate.entries != nil || candidate.occurrences != nil || len(candidate.arguments) != len(actual) {
 			continue
 		}
 		if err := k.validateState(candidate.initial); err != nil {
@@ -385,7 +394,7 @@ func (k *regionKernel) callReference(call *ssa.Call, caller regionState, callabl
 		if err != nil {
 			return nil, err
 		}
-		proof = &regionCallProof{at: call, target: target, invocation: id, initial: initial, reference: reference, arguments: slices.Clone(actual), storageModel: k.input.storageModel}
+		proof = &regionCallProof{at: call, target: target, invocation: id, caller: k.current, initial: initial, reference: reference, arguments: slices.Clone(actual), storageModel: k.input.storageModel, selection: k.input.selection}
 		if len(k.session.proofs) >= k.meter.limits.nodes {
 			return nil, regionError("reference proof count exhausted")
 		}
@@ -425,7 +434,7 @@ func (k *regionKernel) callReference(call *ssa.Call, caller regionState, callabl
 		if err != nil {
 			return nil, err
 		}
-		if err := k.addEffectAccess(regionEffectAccess{instruction: call, invocation: k.invocation, location: actual[0].location, write: access.Write, value: value, locked: access.Locked}); err != nil {
+		if err := k.addEffectAccess(regionEffectAccess{regionEffectOccurrence: k.current, location: actual[0].location, write: access.Write, value: value, locked: access.Locked}); err != nil {
 			return nil, err
 		}
 	}
@@ -487,7 +496,7 @@ func checkSourceOperandContinuation(ctx context.Context, predecessor sourceResum
 	}
 	packet.usage = *checked.checker.meter
 	packet.usage.ctx = nil
-	core := &sourceEffectPrefix{region: checked.region, binder: checked.binder, checker: checked.checker, prior: checked.prior, boundary: call}
+	core := &sourceEffectPrefix{region: checked.region, binder: checked.binder, checker: checked.checker, prior: checked.prior, boundary: call, cursor: packet.observations[0].occurrence}
 	core.self = core
 	prefix := &sourceOperandPrefix{sourceEffectPrefix: core, callee: callee, call: call, operands: operands}
 	prefix.self = prefix
@@ -498,11 +507,12 @@ func checkSourceOperandContinuation(ctx context.Context, predecessor sourceResum
 // cannot be used as an operand prefix or resumed inside the completed invocation.
 // Native return completion and actual caller applicability remain separate.
 type sourceReturnCompletion struct {
-	region   *sourceRegion
-	prior    *sourceEffectPrefix
-	returned *ssa.Return
-	checker  *regionKernel
-	self     *sourceReturnCompletion
+	occurrence regionEffectOccurrence
+	region     *sourceRegion
+	prior      *sourceEffectPrefix
+	returned   *ssa.Return
+	checker    *regionKernel
+	self       *sourceReturnCompletion
 }
 
 func (r *sourceReturnCompletion) checkedPacket() *checkedRegion {
@@ -510,7 +520,7 @@ func (r *sourceReturnCompletion) checkedPacket() *checkedRegion {
 		return nil
 	}
 	packet := checkedSourceEffectPacket(r.region, r.checker)
-	if packet == nil || !r.checker.fullReturns || regionInstruction(packet.input.use.at) != r.returned || packet.input.root != r.prior.region.packet.input.root || packet.input.storageModel != r.prior.region.packet.input.storageModel {
+	if packet == nil || !r.checker.fullReturns || r.prior != r.checker.session.predecessor || len(packet.observations) != 1 || r.occurrence != packet.observations[0].occurrence || r.occurrence.instruction != r.returned || !packet.trace.seen[r.occurrence] || r.occurrence.owner != r.prior.cursor.owner || regionInstruction(packet.input.use.at) != r.returned || packet.input.root != r.prior.region.packet.input.root || packet.input.selection != r.prior.region.packet.input.selection || packet.input.storageModel != r.prior.region.packet.input.storageModel {
 		return nil
 	}
 	return packet
@@ -532,7 +542,7 @@ func checkSourceReturnContinuation(ctx context.Context, predecessor sourceResuma
 	if err != nil {
 		return nil, err
 	}
-	complete := &sourceReturnCompletion{region: checked.region, prior: checked.prior, returned: returned, checker: checked.checker}
+	complete := &sourceReturnCompletion{region: checked.region, prior: checked.prior, returned: returned, checker: checked.checker, occurrence: checked.region.packet.observations[0].occurrence}
 	complete.self = complete
 	return complete, nil
 }
@@ -549,7 +559,7 @@ func checkSourceInstructionContinuation(ctx context.Context, predecessor sourceR
 	if err != nil {
 		return nil, err
 	}
-	prefix := &sourceEffectPrefix{region: checked.region, binder: checked.binder, checker: checked.checker, prior: checked.prior, boundary: regionInstruction(use.at)}
+	prefix := &sourceEffectPrefix{region: checked.region, binder: checked.binder, checker: checked.checker, prior: checked.prior, boundary: regionInstruction(use.at), cursor: checked.region.packet.observations[0].occurrence}
 	prefix.self = prefix
 	return prefix, nil
 }
@@ -615,7 +625,8 @@ func checkSourceEffectContinuation(ctx context.Context, receipt sourceResumableP
 		if err != nil {
 			return nil, err
 		}
-		k.trace = &regionEffectTrace{seen: map[regionEffectOccurrence]bool{}}
+		k.trace = &regionEffectTrace{owner: predecessor.cursor.owner, seen: map[regionEffectOccurrence]bool{}}
+		k.next = predecessor.cursor.ordinal
 		for p := predecessor; p != nil; p = p.prior {
 			if err := meter.tick(); err != nil {
 				return nil, err
@@ -629,6 +640,9 @@ func checkSourceEffectContinuation(ctx context.Context, receipt sourceResumableP
 					k.trace.seen[instruction] = true
 				}
 			}
+		}
+		if k.boundaryOccurrence(predecessor.boundary) != predecessor.cursor || k.trace.seen[predecessor.cursor] {
+			return nil, regionError("continuation does not inherit its exact unexecuted cursor")
 		}
 		return k, nil
 	}

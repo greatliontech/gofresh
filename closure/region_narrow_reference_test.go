@@ -39,7 +39,7 @@ func TestRegionNarrowInstructionContinuations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if middle.boundary != stores[0] || middle.prior != first.sourceEffectPrefix || middle.region.packet.trace.seen[regionEffectOccurrence{instruction: stores[0]}] {
+	if middle.boundary != stores[0] || middle.prior != first.sourceEffectPrefix || middle.region.packet.trace.seen[middle.cursor] {
 		t.Fatal("generic prefix consumed its boundary or lost its actual predecessor")
 	}
 	location := first.operands[0].location

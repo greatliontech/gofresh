@@ -15,7 +15,8 @@ func TestFloatSourceModelSelectedOwner(t *testing.T) {
 	owner := *source.prog
 	other.prog = &owner // Same SSA program, a different selected-layout owner.
 	for _, selected := range []computationSource{source, other} {
-		in.storageModel = conditionalRegionStorageModel(selected)
+		in.selection = selected.prog
+		in.storageModel = conditionalRegionStorageModel()
 		proposal, err := proposeRegion(t.Context(), in, defaultRegionLimits())
 		if err != nil {
 			t.Fatal(err)
@@ -27,7 +28,7 @@ func TestFloatSourceModelSelectedOwner(t *testing.T) {
 			}
 			continue
 		}
-		if err != nil || packet == nil || packet.packet.input.storageModel != in.storageModel {
+		if err != nil || packet == nil || packet.packet.input.storageModel != in.storageModel || packet.packet.input.selection != in.selection {
 			t.Fatalf("selected binding lost its explicit conditional model: %v", err)
 		}
 	}
@@ -61,7 +62,7 @@ func assertFloatSelectedSourceContinuation(t *testing.T, prior *sourceEffectPref
 	if packet.usage.work <= prior.region.packet.usage.work {
 		t.Fatal("float continuation restarted its work account")
 	}
-	if packet.input.storageModel == (regionStorageModel{}) || packet.input.storageModel != prior.region.packet.input.storageModel || packet.input.storageModel != conditionalRegionStorageModel(completed.binder.source) {
+	if packet.input.storageModel == (regionStorageModel{}) || packet.input.storageModel != prior.region.packet.input.storageModel || packet.input.storageModel != conditionalRegionStorageModel() || packet.input.selection != prior.region.packet.input.selection || packet.input.selection != completed.binder.source.prog {
 		t.Fatal("float continuation dropped or moved its conditional storage model")
 	}
 	state := packet.observations[0].state
@@ -128,4 +129,5 @@ func assertFloatSelectedSourceContinuation(t *testing.T, prior *sourceEffectPref
 		t.Fatal("selected float interval omitted a bit store")
 	}
 	t.Log("complete selected source entry through four bit stores and eight IEEE comparisons; testAtomic64 remains unexecuted; native applicability remains conditional")
+	assertRoundSelectedSourceCompletion(t, completed, references)
 }

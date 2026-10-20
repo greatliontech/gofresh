@@ -15,7 +15,7 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-const globalFunctionRules = "gofresh/global-function-correspondence@5;" + regionRules + ";" + nativeproof.TransitionRules + ";" + br.RuleModel
+const globalFunctionRules = "gofresh/global-function-correspondence@6;" + regionRules + ";" + nativeproof.TransitionRules + ";" + br.RuleModel
 
 // A mapping names the actual typed parameter and its incoming full native word.
 // The present effect-only grammar admits only unused pointer parameters. A word
@@ -552,7 +552,7 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 				found = found || call.proof == group.application
 			}
 			read, write := trace.accesses[a.ReadAccess], trace.accesses[a.WriteAccess]
-			if !found || read.instruction != group.application.at || write.instruction != read.instruction || read.invocation != write.invocation || read.location.object != write.location.object || !slices.Equal(read.location.path, write.location.path) || read.write || !write.write || !read.locked || !write.locked {
+			if !found || read.regionEffectOccurrence != group.application.caller || write.regionEffectOccurrence != read.regionEffectOccurrence || read.instruction != group.application.at || read.location.object != write.location.object || !slices.Equal(read.location.path, write.location.path) || read.write || !write.write || !read.locked || !write.locked {
 				return globalFunctionError("source atomic grouping lost actual call/context/read-write provenance")
 			}
 			footprint, represented := p.layout.locationFootprint(read.location)
@@ -691,7 +691,7 @@ leavesLoop:
 }
 
 // storageWriteRunAdjacent preserves checked call and allocation frontiers between
-// writes. Instruction/context identity, rather than source position or declaration
+// writes. Complete occurrence identity, rather than source position or declaration
 // name, selects the actual interval; an effect-free call still ends a write run.
 // Reference effects attached to a call retain that barrier at either endpoint.
 func (p *globalFunctionCorrespondence) storageWriteRunAdjacent(ctx context.Context, a, b regionEffectAccess) bool {
@@ -701,7 +701,7 @@ func (p *globalFunctionCorrespondence) storageWriteRunAdjacent(ctx context.Conte
 	if _, call := b.instruction.(*ssa.Call); call {
 		return false
 	}
-	if a.invocation != b.invocation {
+	if a.owner != b.owner || a.invocation != b.invocation {
 		return false
 	}
 	active := false
@@ -710,14 +710,17 @@ func (p *globalFunctionCorrespondence) storageWriteRunAdjacent(ctx context.Conte
 			if ctx.Err() != nil {
 				return false
 			}
-			if occurrence.instruction == a.instruction && occurrence.invocation == a.invocation {
+			if occurrence == a.regionEffectOccurrence {
+				if occurrence == b.regionEffectOccurrence {
+					return trace.seen[occurrence]
+				}
 				active = true
 				continue
 			}
 			if !active {
 				continue
 			}
-			if occurrence.instruction == b.instruction && occurrence.invocation == b.invocation {
+			if occurrence == b.regionEffectOccurrence {
 				return true
 			}
 			switch occurrence.instruction.(type) {
@@ -726,7 +729,7 @@ func (p *globalFunctionCorrespondence) storageWriteRunAdjacent(ctx context.Conte
 			}
 		}
 	}
-	return a.instruction == b.instruction
+	return false
 }
 
 // isolatedStorage checks actual SSA pointer uses all the way through substituted
@@ -907,13 +910,13 @@ func (p *globalFunctionCorrespondence) isolatedAllocatedRead(ctx context.Context
 					if err := ctx.Err(); err != nil {
 						return false, err
 					}
-					if allocation.instruction == site && allocation.invocation == occurrence.invocation && allocation.location.object == object && len(allocation.location.path) == 0 && trace.seen[occurrence] {
+					if allocation.regionEffectOccurrence == occurrence && allocation.location.object == object && len(allocation.location.path) == 0 && trace.seen[occurrence] {
 						allocated = true
 						break
 					}
 				}
 			}
-			if occurrence.instruction == access.instruction && occurrence.invocation == access.invocation {
+			if occurrence == access.regionEffectOccurrence {
 				if !allocated || !trace.seen[occurrence] {
 					return false, nil
 				}
@@ -1122,6 +1125,9 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 	for _, trace := range p.traces {
 		allocations = append(allocations, trace.allocations...)
 		for _, occurrence := range trace.instructions {
+			if _, duplicate := positions[occurrence]; duplicate || !trace.seen[occurrence] {
+				return globalFunctionError("source instruction occurrence is repeated or unestablished")
+			}
 			positions[occurrence] = position
 			position++
 		}
@@ -1232,7 +1238,7 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 			if activated[object] {
 				continue
 			}
-			allocatedAt, found := positions[regionEffectOccurrence{allocation.instruction, allocation.invocation}]
+			allocatedAt, found := positions[allocation.regionEffectOccurrence]
 			if !found || allocatedAt >= frontier {
 				continue
 			}
@@ -1353,7 +1359,7 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 			return err
 		}
 		source := p.accesses[i]
-		at, atOK := positions[regionEffectOccurrence{source.instruction, source.invocation}]
+		at, atOK := positions[source.regionEffectOccurrence]
 		if !atOK {
 			return globalFunctionError("effect has no checked source occurrence")
 		}

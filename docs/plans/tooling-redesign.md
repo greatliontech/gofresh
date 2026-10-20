@@ -620,7 +620,7 @@
                             continuations. Discharge selected-operation applicability
                             and native elimination/reuse in .12g, and rooted
                             entry-state premises in .13.
-                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.12f Establish finite typed
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.12f Establish finite typed
                             source arithmetic and progress for the actual round2
                             call: selected argument, addition, shift widths, phi
                             predecessors and checked remaining-path exhaustion.

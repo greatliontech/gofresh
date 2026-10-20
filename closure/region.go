@@ -11,7 +11,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
-const regionRules = "gofresh/source-region-transport@12"
+const regionRules = "gofresh/source-region-transport@13"
 
 // This kernel is conditional on an immutable, well-typed SSA owner. Selection of
 // that owner from source/build inputs is a separate obligation. It never invokes
@@ -104,11 +104,12 @@ type regionUse struct {
 }
 
 type regionInput struct {
-	owner   *ssa.Program
-	root    *ssa.Function
-	entry   regionPoint
-	use     regionUse
-	initial regionState
+	selection *program
+	owner     *ssa.Program
+	root      *ssa.Function
+	entry     regionPoint
+	use       regionUse
+	initial   regionState
 	// A distinct conditional storage antecedent. It is never inferred from the
 	// selected sizes, string premises or an observed machine/build label.
 	storageModel regionStorageModel
@@ -120,7 +121,8 @@ type regionInput struct {
 // All dimensions bound both proposal and checking. Defaults are deliberately
 // small; reaching any work/storage bound refuses rather than accepting a prefix.
 // alternatives is the whole-state widening threshold, not a truncated path
-// count: crossing it replaces the disjunction by top.
+// count: crossing it replaces the disjunction by top in the nonfinite invariant
+// arm. Finite occurrence populations never widen or truncate at this threshold.
 type regionLimits struct {
 	nodes, states, locations, alternatives, depth, work int
 }
@@ -136,14 +138,16 @@ func (l regionLimits) valid() bool {
 }
 
 type regionProposal struct {
-	input   regionInput
-	entries map[*ssa.BasicBlock][]regionState
-	calls   []*regionCallProof
+	occurrences *regionOccurrencePath
+	input       regionInput
+	entries     map[*ssa.BasicBlock][]regionState
+	calls       []*regionCallProof
 }
 
 type regionObservation struct {
-	value regionValue
-	state regionState
+	occurrence regionEffectOccurrence
+	value      regionValue
+	state      regionState
 }
 
 // checkedRegion owns every mutable proposal/input container. Its only authority
@@ -236,7 +240,14 @@ func regionCaptureMeter(input regionInput, proposal *regionProposal, m *regionMe
 	if m.nodes > limits.nodes {
 		return regionInput{}, nil, regionError("node budget exhausted")
 	}
-	p := &regionProposal{entries: make(map[*ssa.BasicBlock][]regionState, len(proposal.entries))}
+	p := &regionProposal{}
+	if proposal.entries != nil {
+		p.entries = make(map[*ssa.BasicBlock][]regionState, len(proposal.entries))
+	}
+	p.occurrences, err = m.copyOccurrences(proposal.occurrences)
+	if err != nil {
+		return regionInput{}, nil, err
+	}
 	p.input, err = copyInput(proposal.input)
 	if err != nil {
 		return regionInput{}, nil, err
@@ -282,7 +293,13 @@ func regionCaptureMeter(input regionInput, proposal *regionProposal, m *regionMe
 			return regionInput{}, nil, regionError("callee node budget exhausted")
 		}
 		m.nodes += len(call.entries)
-		copy.entries = make(map[*ssa.BasicBlock][]regionState, len(call.entries))
+		if call.entries != nil {
+			copy.entries = make(map[*ssa.BasicBlock][]regionState, len(call.entries))
+		}
+		copy.occurrences, err = m.copyOccurrences(call.occurrences)
+		if err != nil {
+			return regionInput{}, nil, err
+		}
 		for block, states := range call.entries {
 			if len(states) > limits.alternatives {
 				return regionInput{}, nil, regionError("callee alternative budget exhausted")
@@ -435,14 +452,14 @@ func proposeRegion(ctx context.Context, input regionInput, limits regionLimits) 
 
 func proposeRegionKernel(k *regionKernel) (*regionProposal, error) {
 	k.session.proposing = true
-	entries, err := k.proposeEntries()
+	entries, occurrences, err := k.proposeFlow()
 	if err != nil {
 		return nil, err
 	}
 	if err := k.meter.ctx.Err(); err != nil {
 		return nil, err
 	}
-	return &regionProposal{input: k.input, entries: entries, calls: k.session.proofs}, nil
+	return &regionProposal{input: k.input, entries: entries, occurrences: occurrences, calls: k.session.proofs}, nil
 }
 
 func (k *regionKernel) proposeEntries() (map[*ssa.BasicBlock][]regionState, error) {

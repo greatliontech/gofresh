@@ -214,6 +214,46 @@ func regionConcreteZeroTyped(t types.Type, unsigned bool) any {
 	panic("oracle unsupported type")
 }
 
+// Bounds are decoded before conversion to the host index type. The limit is an
+// actual concrete string/array/slice extent, so a successful check also proves
+// that conversion to int cannot truncate a large unsigned language value.
+// Slice endpoints may equal their limit; element indices must be strictly below it.
+func regionConcreteBound(value any, limit int, endpoint bool) int {
+	var index uint64
+	switch value := value.(type) {
+	case int64:
+		if value < 0 {
+			panic(regionConcreteFailure{"oracle negative index or slice bound"})
+		}
+		index = uint64(value)
+	case uint64:
+		index = value
+	default:
+		panic(regionConcreteFailure{"oracle index or slice bound is not an integer"})
+	}
+	if limit < 0 || index > uint64(limit) || !endpoint && index == uint64(limit) {
+		panic(regionConcreteFailure{"oracle index or slice bound out of range"})
+	}
+	return int(index)
+}
+
+// Both simple and full slicing obey low <= high <= max <= capacity; a simple
+// slice uses the original capacity as max. An omitted high defaults to length,
+// even when the operand is a shortened view with a larger capacity.
+func regionConcreteSliceBounds(ins *ssa.Slice, length, capacity int, get func(ssa.Value) any) (low, high, max int) {
+	bound := func(operand ssa.Value, fallback, limit int) int {
+		value := any(int64(fallback))
+		if operand != nil {
+			value = get(operand)
+		}
+		return regionConcreteBound(value, limit, true)
+	}
+	max = bound(ins.Max, capacity, capacity)
+	high = bound(ins.High, length, max)
+	low = bound(ins.Low, 0, high)
+	return low, high, max
+}
+
 func executeRegionConcrete(t testing.TB, in regionInput, args ...any) any {
 	steps := 0
 	return executeRegionConcreteFrame(t, in, map[*ssa.Global]*any{}, args, nil, false, 0, &steps, nil, 0)
@@ -222,6 +262,9 @@ func executeRegionConcrete(t testing.TB, in regionInput, args ...any) any {
 func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.Global]*any, args, environment []any, whole bool, depth int, steps *int, run *regionConcreteExecution, invocation uint64) any {
 	t.Helper()
 	if depth > 32 {
+		if run != nil {
+			panic(regionConcreteFailure{"concrete oracle call depth exhausted"})
+		}
 		t.Fatal("concrete oracle call depth exhausted")
 	}
 	values := map[ssa.Value]any{}
@@ -307,7 +350,7 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 		return v
 	}
 	block, predecessor, start := in.entry.block, (*ssa.BasicBlock)(nil), in.entry.index
-	for work := 0; work < 1000; work++ {
+	for work := 0; run != nil || work < 1000; work++ {
 		phis := map[ssa.Value]any{}
 		for _, ins := range block.Instrs {
 			p, ok := ins.(*ssa.Phi)
@@ -321,10 +364,6 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 		}
 		var next *ssa.BasicBlock
 		for i := start; i < len(block.Instrs); i++ {
-			*steps++
-			if *steps > 10000 {
-				t.Fatal("concrete oracle execution bound exhausted")
-			}
 			if !whole && block == in.use.at.block && i == in.use.at.index {
 				if run != nil {
 					call, ok := block.Instrs[i].(*ssa.Call)
@@ -342,7 +381,21 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 				}
 				return get(in.use.operand)
 			}
+			*steps++
+			if run != nil && *steps > run.maxSteps {
+				panic(regionConcreteFailure{"concrete oracle instruction budget exhausted"})
+			}
+			if run == nil && *steps > 10000 {
+				t.Fatal("concrete oracle execution bound exhausted")
+			}
 			ins := block.Instrs[i]
+			observation := -1
+			if run != nil {
+				observation = run.instruction(ins, invocation, predecessor)
+				if phi, ok := ins.(*ssa.Phi); ok {
+					run.instructions[observation].Value = run.snapshot(values[phi])
+				}
+			}
 			switch x := ins.(type) {
 			case *ssa.Phi, *ssa.DebugRef:
 			case *ssa.Alloc:
@@ -356,13 +409,15 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 				cells := (*p.cell).([]any)
 				values[x] = regionConcretePointer{&cells[x.Field]}
 			case *ssa.IndexAddr:
-				index := int(get(x.Index).(int64))
+				index := get(x.Index)
 				switch p := get(x.X).(type) {
+				case nil:
+					panic(regionConcreteFailure{"oracle index through nil slice or array pointer"})
 				case regionConcretePointer:
 					cells := (*p.cell).([]any)
-					values[x] = regionConcretePointer{&cells[index]}
+					values[x] = regionConcretePointer{&cells[regionConcreteBound(index, len(cells), false)]}
 				case regionConcreteSlice:
-					values[x] = regionConcretePointer{&p.cells[p.start+index]}
+					values[x] = regionConcretePointer{&p.cells[p.start+regionConcreteBound(index, p.length, false)]}
 				}
 			case *ssa.Store:
 				p := get(x.Addr).(regionConcretePointer)
@@ -387,35 +442,29 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 					t.Fatalf("oracle unary %v", x)
 				}
 			case *ssa.Slice:
-				if text, ok := get(x.X).(string); ok {
-					lo, hi := int64(0), int64(len(text))
-					if x.Low != nil {
-						lo = get(x.Low).(int64)
-					}
-					if x.High != nil {
-						hi = get(x.High).(int64)
-					}
+				base := get(x.X)
+				if text, ok := base.(string); ok {
+					lo, hi, _ := regionConcreteSliceBounds(x, len(text), len(text), get)
 					values[x] = text[lo:hi]
 					break
 				}
+				if base == nil {
+					if _, slice := x.X.Type().Underlying().(*types.Slice); !slice {
+						panic(regionConcreteFailure{"oracle slice through nil array pointer"})
+					}
+					regionConcreteSliceBounds(x, 0, 0, get)
+					values[x] = nil
+					break
+				}
 				var s regionConcreteSlice
-				switch base := get(x.X).(type) {
+				switch base := base.(type) {
 				case regionConcretePointer:
 					cells := (*base.cell).([]any)
 					s = regionConcreteSlice{cells: cells, length: len(cells), capacity: len(cells)}
 				case regionConcreteSlice:
 					s = base
 				}
-				lo, hi, max := 0, s.length, s.capacity
-				if x.Low != nil {
-					lo = int(get(x.Low).(int64))
-				}
-				if x.High != nil {
-					hi = int(get(x.High).(int64))
-				}
-				if x.Max != nil {
-					max = int(get(x.Max).(int64))
-				}
+				lo, hi, max := regionConcreteSliceBounds(x, s.length, s.capacity, get)
 				s.start += lo
 				s.length, s.capacity = hi-lo, max-lo
 				values[x] = s
@@ -442,16 +491,27 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 			case *ssa.Field:
 				values[x] = get(x.X).([]any)[x.Field]
 			case *ssa.Index:
-				if text, ok := get(x.X).(string); ok {
-					values[x] = int64(text[get(x.Index).(int64)])
+				base, index := get(x.X), get(x.Index)
+				if text, ok := base.(string); ok {
+					at := regionConcreteBound(index, len(text), false)
+					values[x] = int64(text[at])
 					if run != nil {
-						values[x] = uint64(text[get(x.Index).(int64)])
+						values[x] = uint64(text[at])
 					}
 				} else {
-					values[x] = get(x.X).([]any)[get(x.Index).(int64)]
+					array := base.([]any)
+					values[x] = array[regionConcreteBound(index, len(array), false)]
 				}
 			case *ssa.BinOp:
 				a, b := get(x.X), get(x.Y)
+				if run != nil {
+					run.instructions[observation].Operands = []any{run.snapshot(a), run.snapshot(b)}
+					if x.Op == token.ADD || x.Op == token.SHL {
+						values[x] = run.integerBinary(x, a, b)
+						run.instructions[observation].Value = run.snapshot(values[x])
+						break
+					}
+				}
 				if run != nil && (x.Op == token.EQL || x.Op == token.NEQ) {
 					run.checkEquality(x.X.Type(), x.Y.Type(), a, b)
 				}
@@ -490,14 +550,28 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 				} else {
 					t.Fatalf("oracle comparison %s", x)
 				}
+				if run != nil {
+					run.instructions[observation].Value = run.snapshot(values[x])
+				}
 			case *ssa.If:
-				if get(x.Cond).(bool) {
+				condition := get(x.Cond).(bool)
+				if condition {
 					next = block.Succs[0]
 				} else {
 					next = block.Succs[1]
 				}
+				if run != nil {
+					run.instructions[observation].Value = condition
+					run.instructions[observation].Successor = 0
+					if !condition {
+						run.instructions[observation].Successor = 1
+					}
+				}
 			case *ssa.Jump:
 				next = block.Succs[0]
+				if run != nil {
+					run.instructions[observation].Successor = 0
+				}
 			case *ssa.Call:
 				b, builtin := x.Call.Value.(*ssa.Builtin)
 				if !builtin {
@@ -537,11 +611,16 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 					}
 					break
 				}
-				if text, ok := get(x.Call.Args[0]).(string); ok && b.Name() == "len" {
+				argument := get(x.Call.Args[0])
+				if text, ok := argument.(string); ok && b.Name() == "len" {
 					values[x] = int64(len(text))
 					break
 				}
-				s := get(x.Call.Args[0]).(regionConcreteSlice)
+				if _, slice := x.Call.Args[0].Type().Underlying().(*types.Slice); argument == nil && slice && (b.Name() == "len" || b.Name() == "cap") {
+					values[x] = int64(0)
+					break
+				}
+				s := argument.(regionConcreteSlice)
 				n := s.length
 				if b.Name() == "cap" {
 					n = s.capacity

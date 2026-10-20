@@ -38,8 +38,8 @@ func checkSourceRegion(ctx context.Context, source computationSource, input regi
 // checkSourceRegion composes the checked transport with exact selected ownership.
 // A whole-program source consumer shares this binder across its startup phases.
 func (b *selectedSourceBinder) checkSourceRegion(packet *checkedRegion) (*sourceRegion, error) {
-	if packet != nil && packet.input.storageModel != (regionStorageModel{}) && packet.input.storageModel != conditionalRegionStorageModel(b.source) {
-		return nil, regionError("conditional storage model has another selected layout owner")
+	if packet == nil || packet.input.selection != nil && packet.input.selection != b.source.prog {
+		return nil, regionError("region has another selected layout owner")
 	}
 	root, err := b.bindCallable(packet.input.root)
 	if err != nil {

@@ -1128,30 +1128,9 @@ func assemblyReferenceApply(m *assemblyReferenceMeter, r *assemblyReferenceRelat
 }
 
 func assemblyReferenceConstant(m *assemblyReferenceMeter, term br.Term) (uint64, error) {
-	// Search may propose a normal form, but only Check's equality at these exact
-	// endpoints establishes a result for all remaining admitted variables.
-	limits := br.Limits{Nodes: m.limits.nodes, Work: m.limits.work}
-	proposal, err := br.Propose(m, term, term, limits)
-	if err != nil {
-		return 0, err
+	value, err := checkedScalarConstant(m, term, br.Limits{Nodes: m.limits.nodes, Work: m.limits.work})
+	if err == errScalarConstantEndpoints || err == errScalarConstantUnknown {
+		return 0, assemblyReferenceError(err.Error())
 	}
-	for i, step := range proposal.Steps {
-		if err := m.Err(); err != nil {
-			return 0, err
-		}
-		v := step.Right.View()
-		if step.Left != term || v.Op != br.Constant || step.Right.Sort() != term.Sort() {
-			continue
-		}
-		w, err := br.Check(m, term, step.Right, br.Proof{Steps: proposal.Steps[:i+1]}, limits)
-		if err != nil {
-			return 0, err
-		}
-		left, right := w.Roots()
-		if !w.Valid() || left != term || right != step.Right {
-			return 0, assemblyReferenceError("scalar specialization proof endpoints differ")
-		}
-		return v.Immediate, nil
-	}
-	return 0, assemblyReferenceError("scalar specialization retains unproved arbitrary state")
+	return value, err
 }

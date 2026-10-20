@@ -3,6 +3,7 @@ package closure
 import (
 	"errors"
 	"fmt"
+	"go/token"
 	"go/types"
 	"reflect"
 	"slices"
@@ -23,6 +24,8 @@ type storageSourceRun struct {
 	Globals map[*ssa.Global]any
 	Sizes   types.Sizes
 	Whole   bool
+	// MaxSteps bounds actual instructions across all invocations. Zero uses 10000.
+	MaxSteps int
 }
 
 // Locations identify actual cells. An allocation site alone never identifies an
@@ -65,25 +68,62 @@ type storageSourceInvocation struct {
 	Returned   bool
 }
 
-type storageSourceResult struct {
-	Cut         *ssa.Call
+// Instruction observations are separate from storage events so existing effect
+// projections retain their grammar. Ordinals are one-based within each actual
+// invocation, while slice order is the complete interprocedural execution order.
+// Predecessor records the actual block entry used by simultaneous phi selection;
+// Successor is the taken CFG slot, or -1 for a non-control instruction.
+type storageSourceInstruction struct {
+	Instruction ssa.Instruction
+	Invocation  uint64
+	Ordinal     uint64
+	Predecessor *ssa.BasicBlock
+	Successor   int
 	Operands    []any
-	Results     []any
-	Objects     []storageSourceObject
-	Events      []storageSourceEvent
-	Invocations []storageSourceInvocation
-	Returned    bool
+	Value       any
+}
+
+// Compound snapshots own their mutable containers. Types and function targets
+// retain the immutable typed SSA owner; pointer-like values retain cell locations
+// rather than copying mutable pointees or exposing host addresses.
+type storageSourceInterface struct {
+	Type  types.Type
+	Value any
+}
+
+type storageSourceFunction struct {
+	Target      *ssa.Function
+	Environment []any
+}
+
+type storageSourceSlice struct {
+	Cells                   []storageSourceLocation
+	Start, Length, Capacity int
+}
+
+type storageSourceResult struct {
+	Cut          *ssa.Call
+	Operands     []any
+	Results      []any
+	Objects      []storageSourceObject
+	Events       []storageSourceEvent
+	Invocations  []storageSourceInvocation
+	Instructions []storageSourceInstruction
+	Returned     bool
 }
 
 type regionConcreteExecution struct {
-	sizes       types.Sizes
-	cells       map[*any]storageSourceLocation
-	objects     []storageSourceObject
-	roots       []*any
-	events      []storageSourceEvent
-	invocations []storageSourceInvocation
-	cut         *ssa.Call
-	operands    []any
+	sizes        types.Sizes
+	cells        map[*any]storageSourceLocation
+	objects      []storageSourceObject
+	roots        []*any
+	events       []storageSourceEvent
+	invocations  []storageSourceInvocation
+	cut          *ssa.Call
+	operands     []any
+	instructions []storageSourceInstruction
+	ordinals     map[uint64]uint64
+	maxSteps     int
 }
 
 // executeStorageSource runs the same interpreter as executeRegionConcrete, with
@@ -106,8 +146,15 @@ func executeStorageSource(t testing.TB, in regionInput, config storageSourceRun)
 	if config.Sizes == nil || in.root == nil || len(in.root.Params) != 0 || len(in.root.FreeVars) != 0 {
 		return result, errors.New("joint oracle needs selected sizes and a closed zero-argument root")
 	}
+	if config.MaxSteps < 0 {
+		return result, errors.New("joint oracle has negative instruction budget")
+	}
+	if config.MaxSteps == 0 {
+		config.MaxSteps = 10000
+	}
 	run := &regionConcreteExecution{sizes: config.Sizes, cells: map[*any]storageSourceLocation{},
-		invocations: []storageSourceInvocation{{ID: 1, Target: in.root}}}
+		invocations: []storageSourceInvocation{{ID: 1, Target: in.root}},
+		ordinals:    map[uint64]uint64{}, maxSteps: config.MaxSteps}
 	globals := map[*ssa.Global]*any{}
 	keys := make([]*ssa.Global, 0, len(config.Globals))
 	for global := range config.Globals {
@@ -137,7 +184,56 @@ func executeStorageSource(t testing.TB, in regionInput, config storageSourceRun)
 		result.Objects = append(result.Objects, object)
 	}
 	result.Events, result.Invocations = run.events, run.invocations
+	result.Instructions = run.instructions
 	return result, nil
+}
+
+// integerBinary executes Go's typed modular arithmetic directly in the oracle.
+// Host uint64 addition supplies only the low 64 bits; conversion below projects
+// those bits to the explicitly selected result width and signed interpretation.
+// No production integer transfer or symbolic normalization participates.
+func (r *regionConcreteExecution) integerBinary(ins *ssa.BinOp, left, right any) any {
+	left = r.checkedValue(ins.X.Type(), left)
+	right = r.checkedValue(ins.Y.Type(), right)
+	bits := func(value any) uint64 {
+		switch value := value.(type) {
+		case int64:
+			return uint64(value)
+		case uint64:
+			return value
+		default:
+			panic(regionConcreteFailure{"oracle arithmetic needs integer operands"})
+		}
+	}
+	var value uint64
+	switch ins.Op {
+	case token.ADD:
+		value = bits(left) + bits(right)
+	case token.SHL:
+		if count, signed := right.(int64); signed && count < 0 {
+			panic(regionConcreteFailure{"oracle negative shift count"})
+		}
+		// A Go shift is not masked by the machine's word width. All result
+		// bits are zero once the count reaches the selected left width.
+		count := bits(right)
+		width := uint64(r.sizes.Sizeof(ins.X.Type()) * 8)
+		if width == 0 || width > 64 {
+			panic(regionConcreteFailure{"oracle shift has unsupported selected width"})
+		}
+		if count < width {
+			value = bits(left) << count
+		}
+	default:
+		panic(regionConcreteFailure{"oracle unsupported integer operator"})
+	}
+	return r.convertInteger(value, ins.Type())
+}
+
+func (r *regionConcreteExecution) instruction(ins ssa.Instruction, invocation uint64, predecessor *ssa.BasicBlock) int {
+	r.ordinals[invocation]++
+	r.instructions = append(r.instructions, storageSourceInstruction{Instruction: ins, Invocation: invocation,
+		Ordinal: r.ordinals[invocation], Predecessor: predecessor, Successor: -1})
+	return len(r.instructions) - 1
 }
 
 func (r *regionConcreteExecution) checkedValue(typ types.Type, value any) any {
@@ -291,6 +387,19 @@ func (r *regionConcreteExecution) snapshot(value any) any {
 		return value
 	case regionConcretePointer:
 		return r.location(value)
+	case regionConcreteInterface:
+		return storageSourceInterface{Type: value.typ, Value: r.snapshot(value.value)}
+	case regionConcreteFunction:
+		return storageSourceFunction{Target: value.target, Environment: r.snapshot(value.environment).([]any)}
+	case regionConcreteSlice:
+		// Copy the location inventory, not the backing values. Subslice bounds
+		// and common cell identities preserve aliases across observations. An
+		// empty nonnil slice remains a descriptor with no fabricated address.
+		cells := make([]storageSourceLocation, len(value.cells))
+		for i := range value.cells {
+			cells[i] = r.location(regionConcretePointer{cell: &value.cells[i]})
+		}
+		return storageSourceSlice{Cells: cells, Start: value.start, Length: value.length, Capacity: value.capacity}
 	case []any:
 		out := make([]any, len(value))
 		for i := range value {
@@ -463,7 +572,7 @@ type storageOracleValueCase struct {
 	seed     uint64
 }
 
-// Supplements retain the same 22 shapes. They select three causal value/order
+// Supplements retain the original shape indices. They select three causal value/order
 // cases, not another constructor or a claim about all possible optimizations.
 func storageOracleValueCases() []storageOracleValueCase {
 	return []storageOracleValueCase{
@@ -473,8 +582,9 @@ func storageOracleValueCases() []storageOracleValueCase {
 	}
 }
 
-// Deterministic tests and fuzzing use exactly this constructor. The 22 templates
+// Deterministic tests and fuzzing use exactly this constructor. The 24 templates
 // vary source construction and native intent independently of checker acceptance.
+// The two loop-read templates append to the original 22-shape population.
 func storageOracleTemplates(seed uint64) []storageOracleTemplate {
 	var out []storageOracleTemplate
 	for _, count := range []int{0, 1, 3} {
@@ -494,6 +604,9 @@ func storageOracleTemplates(seed uint64) []storageOracleTemplate {
 		}
 	}
 	out = append(out, storageOracleTemplate{Kind: "eliminated", Width: 8}, storageOracleTemplate{Kind: "alias", Width: 1})
+	for _, width := range []int{4, 8} {
+		out = append(out, storageOracleTemplate{Kind: "loop-read", Globals: 1, Width: width})
+	}
 	for i := range out {
 		c := &out[i]
 		c.Type = fmt.Sprintf("uint%d", c.Width*8)
@@ -530,7 +643,7 @@ func storageOracleTemplates(seed uint64) []storageOracleTemplate {
 
 // Three additional shapes share one source computation. Native intent may delete
 // either known read or retain both after an actual optional initializer.
-// The base constructor remains exactly 22 shapes for its separately counted run.
+// The base constructor has 24 shapes for its separately counted run.
 func storageOracleReadChoiceTemplates(seed uint64) []storageOracleTemplate {
 	value := uint64(uint32(seed)^7) | 1
 	return []storageOracleTemplate{
@@ -541,7 +654,12 @@ func storageOracleReadChoiceTemplates(seed uint64) []storageOracleTemplate {
 }
 
 func storageOracleFuzzTemplates(seed uint64) []storageOracleTemplate {
-	return append(append(storageOracleTemplates(seed), storageOracleReadChoiceTemplates(seed)...), storageOracleSourceZeroTemplates(seed)...)
+	base := storageOracleTemplates(seed)
+	// Preserve all existing fuzz coordinates, including the five supplemental
+	// shapes at 22..26. The new base shapes follow them at 27..28.
+	out := append(base[:22:22], storageOracleReadChoiceTemplates(seed)...)
+	out = append(out, storageOracleSourceZeroTemplates(seed)...)
+	return append(out, base[22:]...)
 }
 
 func storageOracleSourceZeroTemplates(seed uint64) []storageOracleTemplate {
@@ -561,7 +679,12 @@ func (c storageOracleTemplate) sourceText() string {
 	if c.Kind == "array" {
 		helperType = "uint8"
 	}
-	fmt.Fprintf(&text, "func Read(p *%s)%s{return *p};func Write(p *%s,v %s){*p=v};", helperType, helperType, helperType, helperType)
+	if c.Kind == "loop-read" {
+		fmt.Fprintf(&text, "func Read(p *%s)%s{for i:=uint32(0);i<2;i++{if *p!=%d{panic(1)}};return *p};", helperType, helperType, c.Value)
+	} else {
+		fmt.Fprintf(&text, "func Read(p *%s)%s{return *p};", helperType, helperType)
+	}
+	fmt.Fprintf(&text, "func Write(p *%s,v %s){*p=v};", helperType, helperType)
 	if c.Kind == "zero-arg" {
 		fmt.Fprintf(&text, "func Tick(){g0=%d};func F(){Tick();if g0!=%d{panic(1)}}", c.Value, c.Value)
 		return text.String()
@@ -745,6 +868,8 @@ func (c storageOracleTemplate) nativeIntent(layout storageOracleLayout) (program
 		store(layout.Local, c.Width, c.Value)
 		read(layout.Local, c.Width, c.Value)
 	default:
+		// loop-read shares the materialized scalar intent: the three checked
+		// source reads are optimized to this one retained native read.
 		value := c.Value
 		if c.Kind == "zero" {
 			value = 0
@@ -934,6 +1059,9 @@ func checkStorageOracleCase(t testing.TB, c storageOracleTemplate, source comput
 	if c.Kind == "source-zero" {
 		storageOracleCheckSourceZero(t, c, whole, native, layout, initial)
 	}
+	if c.Kind == "loop-read" {
+		storageOracleCheckLoopRead(t, c, prefix, whole, native, layout)
+	}
 	localID := storageOracleLocalID(t, c, prefix)
 	for _, object := range prefix.Objects {
 		var at storageByteLocation
@@ -1062,7 +1190,7 @@ func checkStorageOracleCase(t testing.TB, c storageOracleTemplate, source comput
 
 func TestStorageOraclePopulation(t *testing.T) {
 	templates := storageOracleTemplates(0)
-	if len(templates) != 22 {
+	if len(templates) != 24 {
 		t.Fatal("bounded reference template population changed")
 	}
 	count := 0
@@ -1077,10 +1205,10 @@ func TestStorageOraclePopulation(t *testing.T) {
 			}
 		})
 	}
-	if count != 132 {
-		t.Fatalf("reference configurations=%d, want 132", count)
+	if count != 144 {
+		t.Fatalf("reference configurations=%d, want 144", count)
 	}
-	t.Log("132 finite reference configurations; each executes source prefix and whole return plus independent byte intent; no production correspondence judgment")
+	t.Log("144 finite reference configurations; each executes source prefix and whole return plus independent byte intent; no production correspondence judgment")
 }
 
 func FuzzStorageOraclePopulation(f *testing.F) {
@@ -1096,12 +1224,170 @@ func FuzzStorageOraclePopulation(f *testing.F) {
 	for i := range storageOracleSourceZeroTemplates(0) {
 		f.Add(uint8(25+i), uint8(0), uint8(2), uint64(0))
 	}
+	for i := range storageOracleTemplates(0)[22:] {
+		f.Add(uint8(27+i), uint8(0), uint8(2), uint64(0))
+	}
 	f.Fuzz(func(t *testing.T, index, permutation, valuation uint8, seed uint64) {
 		templates := storageOracleFuzzTemplates(seed)
 		c := templates[int(index)%len(templates)]
 		source, in, first := storageSourceFixture(t, c, 64)
 		checkStorageOracleCase(t, c, source, in, first, int(permutation%2), int(valuation%3), seed)
 	})
+}
+
+func storageOracleCheckLoopRead(t testing.TB, c storageOracleTemplate, prefix, source storageSourceResult, native storageByteResult, layout storageOracleLayout) {
+	t.Helper()
+	var reads []storageSourceEvent
+	for _, event := range source.Events {
+		if event.Kind == "read" {
+			reads = append(reads, event)
+		}
+	}
+	if len(reads) != 3 || reads[0].Instruction != reads[1].Instruction || reads[0].Instruction == reads[2].Instruction {
+		t.Fatal("loop-read source lost two visits to its body load and its final return load")
+	}
+	location := prefix.Operands[0].(storageSourceLocation)
+	for _, read := range reads {
+		if read.Invocation != 2 || !reflect.DeepEqual(read.Location, location) || read.Value != c.Value || read.Width != int64(c.Width) {
+			t.Fatal("loop-read occurrence lost its actual invocation, typed cell or value")
+		}
+	}
+	var loadOccurrences []storageSourceInstruction
+	headerVisits, bodyVisits := 0, 0
+	for _, occurrence := range source.Instructions {
+		if occurrence.Invocation != 2 {
+			continue
+		}
+		if instruction, ok := occurrence.Instruction.(*ssa.UnOp); ok && instruction.Op == token.MUL {
+			loadOccurrences = append(loadOccurrences, occurrence)
+		}
+		if instruction, ok := occurrence.Instruction.(*ssa.If); ok {
+			switch instruction.Cond.(*ssa.BinOp).Op {
+			case token.LSS:
+				if occurrence.Value != (headerVisits < 2) {
+					t.Fatal("loop-read header took a different iteration count")
+				}
+				headerVisits++
+			case token.NEQ:
+				if occurrence.Value != false {
+					t.Fatal("loop-read body did not exclude its actual failure arm")
+				}
+				bodyVisits++
+			default:
+				t.Fatal("loop-read helper has an unexpected branch operator")
+			}
+		}
+	}
+	if len(loadOccurrences) != 3 || loadOccurrences[0].Ordinal >= loadOccurrences[1].Ordinal || loadOccurrences[1].Ordinal >= loadOccurrences[2].Ordinal || headerVisits != 3 || bodyVisits != 2 {
+		t.Fatal("loop-read dynamic load/control population differs")
+	}
+	checkRegionOracleInstructionOrder(t, source)
+	var nativeReads []storageByteEvent
+	for _, event := range native.Events {
+		if !event.Write {
+			nativeReads = append(nativeReads, event)
+		}
+	}
+	if len(nativeReads) != 1 || nativeReads[0].At != layout.Local || nativeReads[0].Width != c.Width || nativeReads[0].Value != c.Value {
+		t.Fatal("loop-read native intent did not retain exactly one matching scalar load")
+	}
+}
+
+func TestStorageOracleLoopReadCounterexamples(t *testing.T) {
+	for _, c := range storageOracleTemplates(0)[22:] {
+		t.Run(c.Name, func(t *testing.T) {
+			s := storageJointSourceCase(t, c)
+			layout := storageOraclePlacement(c.Globals, 0)
+			program, cut := c.nativeIntent(layout)
+			initial := storageJointInitial(c, layout)
+			baseline, err := executeStorageBytes(initial, program)
+			if err != nil {
+				t.Fatal(err)
+			}
+			good := storageJointEncode(t, program, cut)
+			returned, err := storageJointReturn(t, good)
+			if err != nil {
+				t.Fatal(err)
+			}
+			proof, err := checkGlobalFunctionCorrespondence(t.Context(), s.source, s.input.root, good.image, good.entry, s.complete, returned, s.representation(t, c, layout, good.image), nil)
+			if err != nil || proof == nil {
+				t.Fatalf("loop-read negative controls lack an accepted baseline: %v", err)
+			}
+			storageJointCheckSource(t, s, proof, false)
+			storageJointCheckNative(t, c, layout, good, s, proof, 2, 0)
+			if len(proof.accesses) != 5 || len(proof.matched) != 3 || len(proof.eliminated) != 2 {
+				t.Fatal("three loop-read occurrences lack one matched and two eliminated read accounts")
+			}
+			seen := map[int]bool{}
+			for _, index := range proof.eliminated {
+				if index < 2 || index > 4 || seen[index] {
+					t.Fatal("loop-read elimination collapsed occurrences or removed a write")
+				}
+				seen[index] = true
+			}
+			for _, match := range proof.matched {
+				if match.source >= 2 {
+					if match.source > 4 || seen[match.source] || match.native != 2 {
+						t.Fatal("loop-read matching borrowed another occurrence's disposition")
+					}
+					seen[match.source] = true
+				}
+			}
+			if len(seen) != 3 {
+				t.Fatal("loop-read projection lost an executed source read")
+			}
+			// A lost load with its dependent guard still present has no concrete
+			// loaded value. Deleting both could be valid read elimination and is
+			// deliberately not asserted to be an invalid implementation.
+			lost := slices.DeleteFunc(slices.Clone(program), func(step storageByteStep) bool { return step.Kind == "load" })
+			if _, err := executeStorageBytes(initial, lost); err == nil {
+				t.Fatal("lost native load fabricated its guard's operand")
+			}
+			for _, variant := range []string{"early-read", "wrong-read", "wrong-value"} {
+				t.Run(variant, func(t *testing.T) {
+					bad := slices.DeleteFunc(slices.Clone(program), func(step storageByteStep) bool { return step.Kind == "guard" })
+					switch variant {
+					case "early-read":
+						bad = append([]storageByteStep{{Kind: "load", At: layout.Local, Width: c.Width}}, bad...)
+					case "wrong-read":
+						for i := range bad {
+							if bad[i].Kind == "load" {
+								bad[i].Indirect = false
+								// Equal stored bits do not associate a read of the
+								// represented global with a source local read.
+								bad[i].At = layout.Globals[0]
+							}
+						}
+					case "wrong-value":
+						for i := range bad {
+							if bad[i].Kind == "store" && bad[i].At == layout.Local {
+								bad[i].Value ^= 1
+							}
+						}
+					}
+					changed, err := executeStorageBytes(initial, bad)
+					if err != nil || storageJointSameByteEffects(baseline.Events, changed.Events) {
+						t.Fatalf("loop-read mutation has no concrete effect/value discrepancy: %v", err)
+					}
+					if variant != "wrong-value" && !reflect.DeepEqual(baseline.Memory, changed.Memory) {
+						t.Fatal("read-only counterexample unexpectedly changed final memory")
+					}
+					encoded := storageJointEncode(t, bad, 0)
+					completed, err := storageJointReturn(t, encoded)
+					if err != nil {
+						t.Fatalf("counterexample needs a valid native completion: %v", err)
+					}
+					proof, err := checkGlobalFunctionCorrespondence(t.Context(), s.source, s.input.root, encoded.image, encoded.entry, s.complete, completed, s.representation(t, c, layout, encoded.image), nil)
+					if err == nil || proof != nil {
+						t.Fatal("loop-read concrete effect/value discrepancy acquired correspondence")
+					}
+					if strings.Contains(err.Error(), "owner") || strings.Contains(err.Error(), "budget") {
+						t.Fatalf("loop-read counterexample refused for an unrelated premise: %v", err)
+					}
+				})
+			}
+		})
+	}
 }
 
 func storageOracleCheckReadChoice(t testing.TB, c storageOracleTemplate, source storageSourceResult, native storageByteResult, layout storageOracleLayout) {
@@ -1167,7 +1453,7 @@ func TestStorageOracleReadChoiceSupplements(t *testing.T) {
 	if count != 18 {
 		t.Fatalf("read-choice reference configurations=%d want 18", count)
 	}
-	t.Log("18 read-choice supplemental configurations; base 132 and zero/mixed 18 remain separately counted")
+	t.Log("18 read-choice supplemental configurations; base 144 and zero/mixed 18 remain separately counted")
 }
 
 func storageOracleCheckSourceZero(t testing.TB, c storageOracleTemplate, source storageSourceResult, native storageByteResult, layout storageOracleLayout, initial map[storageByteLocation]byte) {
@@ -1222,7 +1508,7 @@ func TestStorageOracleSourceZeroSupplements(t *testing.T) {
 	if count != 12 {
 		t.Fatalf("source-zero reference configurations=%d want 12", count)
 	}
-	t.Log("12 source-zero configurations; 132 base, 18 zero/mixed, and 18 read-choice remain separate")
+	t.Log("12 source-zero configurations; 144 base, 18 zero/mixed, and 18 read-choice remain separate")
 }
 
 func TestStorageOracleZeroValueSupplements(t *testing.T) {
@@ -1256,7 +1542,7 @@ func TestStorageOracleZeroValueSupplements(t *testing.T) {
 	if count != 18 {
 		t.Fatalf("zero/mixed reference configurations=%d want 18", count)
 	}
-	t.Log("18 supplemental configurations across three shared zero/mixed value cases; base population remains 132")
+	t.Log("18 supplemental configurations across three shared zero/mixed value cases; base population is 144")
 }
 
 func TestStorageOracleExplicitGlobalsAndSnapshots(t *testing.T) {

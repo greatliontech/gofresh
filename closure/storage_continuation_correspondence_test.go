@@ -87,7 +87,7 @@ func storageContinuationAccount(t testing.TB, source *sourceOperandPrefix, nativ
 func storageContinuationCurrent(t testing.TB, endpoint storageSourceEndpoint, object regionObject, want uint64) {
 	t.Helper()
 	allocation, live, err := endpoint.liveAllocation(object, t.Context().Err)
-	if err != nil || !live || allocation.location.object != object || allocation.instruction != object.site || allocation.invocation != object.invocation {
+	if err != nil || !live || allocation.location.object != object || allocation.instruction != object.site.(*ssa.Alloc) || allocation.invocation != object.invocation {
 		t.Fatalf("missing retained allocation instance: live=%v error=%v", live, err)
 	}
 	localEffectInteger(t, allocation.initializer, 0)

@@ -17,7 +17,7 @@ func regionFloatInput(t testing.TB, text string) (computationSource, regionInput
 	source := relationFixture(t, text, 64)
 	root := source.prog.Roots["F"]
 	in := regionInput{owner: root.Prog, root: root, entry: regionPoint{root.Blocks[0], 0},
-		storageModel: conditionalRegionStorageModel(source), premises: []string{"conditional source storage; entry and native applicability remain open"}}
+		selection: source.prog, storageModel: conditionalRegionStorageModel(), premises: []string{"conditional source storage; entry and native applicability remain open"}}
 	for _, block := range root.Blocks {
 		for i, instruction := range block.Instrs {
 			if ret, ok := instruction.(*ssa.Return); ok {
@@ -141,7 +141,9 @@ type regionFloatCancelSizes struct {
 }
 
 func (s regionFloatCancelSizes) Alignof(typ types.Type) int64 {
-	s.cancel()
+	if basic, ok := typ.Underlying().(*types.Basic); ok && basic.Info()&types.IsFloat != 0 {
+		s.cancel()
+	}
 	return s.Sizes.Alignof(typ)
 }
 
@@ -149,9 +151,13 @@ func TestRegionFloatLayoutCancellation(t *testing.T) {
 	source, in := regionFloatInput(t, `import "unsafe";func F()float64{var x uint64;return *(*float64)(unsafe.Pointer(&x))}`)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	source.prog.Pkgs[0].TypesSizes = regionFloatCancelSizes{source.prog.Pkgs[0].TypesSizes, cancel}
+	enteredFloat := false
+	source.prog.Pkgs[0].TypesSizes = regionFloatCancelSizes{source.prog.Pkgs[0].TypesSizes, func() { enteredFloat = true; cancel() }}
 	if proof, err := proposeRegion(ctx, in, defaultRegionLimits()); proof != nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("layout cancellation lost: %v", err)
+	}
+	if !enteredFloat {
+		t.Fatal("cancellation did not reach the float storage layout")
 	}
 }
 
@@ -179,7 +185,8 @@ func TestRegionFloatViewRefusals(t *testing.T) {
 				in.storageModel = regionStorageModel{}
 			case "foreign-model":
 				other, _ := regionFloatInput(t, `func F(){}`)
-				in.storageModel = conditionalRegionStorageModel(other)
+				in.selection = other.prog
+				in.storageModel = conditionalRegionStorageModel()
 			case "alignment":
 				source.prog.Pkgs[0].TypesSizes = regionFloatMisalignedSizes{source.prog.Pkgs[0].TypesSizes}
 			case "missing-sizes":
@@ -206,8 +213,8 @@ func TestRegionFloatProposalModelAndBitForgery(t *testing.T) {
 			case "changed-model":
 				proposal.input.storageModel.interpretation++
 			case "moved-source":
-				copy := *proposal.input.storageModel.source
-				proposal.input.storageModel.source = &copy
+				copy := *proposal.input.selection
+				proposal.input.selection = &copy
 			case "call-model":
 				proposal.calls[0].storageModel = regionStorageModel{}
 			}
@@ -307,7 +314,7 @@ func TestRegionFloatFiniteContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, prefix := range []*sourceOperandPrefix{first, second} {
-		if equal, known := regionBool(prefix.operands[1]); !known || !equal || prefix.checkedPacket() == nil || prefix.region.packet.input.storageModel != in.storageModel {
+		if equal, known := regionBool(prefix.operands[1]); !known || !equal || prefix.checkedPacket() == nil || prefix.region.packet.input.storageModel != in.storageModel || prefix.region.packet.input.selection != in.selection {
 			t.Fatal("finite float facts or model lost")
 		}
 	}
@@ -326,14 +333,15 @@ func TestRegionFloatFiniteContinuation(t *testing.T) {
 	}
 	first.region.packet.input.storageModel = saved
 	first.checker.input.storageModel = saved
-	foreign := *saved.source
-	first.region.packet.input.storageModel.source = &foreign
-	first.checker.input.storageModel.source = &foreign
+	selection := first.region.packet.input.selection
+	foreign := *selection
+	first.region.packet.input.selection = &foreign
+	first.checker.input.selection = &foreign
 	if first.checkedPacket() != nil {
 		t.Fatal("opaque receipt borrowed an equal-SSA foreign source model")
 	}
-	first.region.packet.input.storageModel = saved
-	first.checker.input.storageModel = saved
+	first.region.packet.input.selection = selection
+	first.checker.input.selection = selection
 	copy := *second.sourceEffectPrefix
 	if copy.checkedPacket() != nil {
 		t.Fatal("copied receipt acquired continuation authority")

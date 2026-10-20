@@ -80,9 +80,10 @@
 # The existing FuzzTransitionAtomicValues and FuzzAssemblyReferenceBodyAndPrivateFrame
 # rows include their expanded narrow grammars without duplicate binding claims.
 # TestNarrowReferenceSelectedRuntime acquires the actual current selected actions
-# and checks the selected source entry through three CAS32 and two byte operations,
-# stopping before the actual unsafe conversion. It checks call-time heap and SSA
-# value-map snapshots, not whole-runtime native correspondence or unsafe semantics.
+# and checks the source from entry through narrow atomics, conditional live-object
+# float bit views, the actual testAtomic64 invocation and finite round2 call to the
+# actual return. It retains call-time heap and SSA value-map snapshots; this is
+# conditional source transport, not native correspondence or rooted applicability.
 # TestRegionNarrowSelectedReferenceApplications additionally checks same-block
 # later writes against retained complete incoming, call-time and endpoint heaps.
 # NarrowJoint generated/fuzz claims compare production conditional correspondence
@@ -15791,7 +15792,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.conditionalRegionStorageModel"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "afb3c684e657ac4194b009307a823629c335cae0aad14f14a744141547493c1a"
+  shape_hash: "9338243652b890e9833f1583c1b0029f51c6f5f0e4885945cd5befe9f7e38403"
   clause_label: "conditional-storage-model"
 }
 
@@ -16431,4 +16432,576 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "bb2ffb5ec964f3f41a3efb0f4dbec77667b4d8890e7b2ca79d19eafac7cf0f89"
   clause_label: "memory-and-callables"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.regionKernel.selectSizes"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "98916f2114091ed6dca7a842af1c135d16bc0ecc130fb3b3fb586119b5bb1e79"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.regionKernel.boundaryOccurrence"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "92fb6b1261e8087549338628b1d90692a7363e43b2710396ca0c135c299aabb9"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.regionKernel.checkFlow"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "34d7fd501e0d0c02057fdcc675aee1a3da9ecf6c062d0f28fb641da0032f274e"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.regionKernel.checkOccurrences"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "f07901b73857053ecb2bb310a9e048cd47f5c05e27ad4006b2144239e8ef91a5"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.regionKernel.blockFrom"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "c4abc869bf6fa9c0e014f14d00aa0a608af3fecf56e8af46d63ecf78f6266de7"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.regionKernel.integerBinary"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "1d16a39a846dd4df0cdd81814cb3ba411264da41be0292fb527d8aca8f1c4f61"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.regionKernel.scalarConstant"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "c9ccbeb6951e7cd4569a4ec3f9616f756b2f9ae1aa0807e1cd2716562af5ae03"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.regionMeter.copyOccurrences"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "fd3573bad2137bf008cce632817218c2920670863a3e4b6b5ad0839a6a41b7d1"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionIntegerArithmetic"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "aeddb15e943f5a15ccd41a55fb88f431211632e80aef28f6cb2bf58d45a32e22"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionIntegerSelectedConstants"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "09c2fcfc2b9181994486ad723e02f4dd2c602c1069f5449f8136915595c4eada"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionIntegerEvaluatedShiftCount"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "39c111e596d6ebde972dcc3a5d117003600841f558ac58eb37449dd4c36937e7"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionIntegerRefusals"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "93e05552750c5378c7489af78bf3163d8b31a010bf42b29e8b31d7ac36f51c3e"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionIntegerProofResources"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a3269e0d3f3de42d637649320500321957142f9583d7a2dd27360c51157dca5f"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceFiniteFamilies"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1a5d6020d966ee673b8251b686b2d57c7e5b4025e90c069515e7af24a2455f76"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceSimultaneousPhiCorrelation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bb91ecfc7322a45a980383bb833aa697db46f7fbebdfdf20bbeaed4fdb1345b7"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceProofCorruption"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1275ab92272757d2447ed7d83c208fe614a47464a907cafa1ac362764f2eb4ba"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceRefusalAndBounds"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ab5ccf67298212c4b03a73105d5dd973c9af15092256a4c49794258d8b959586"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceDiscoveryBoundIsNotPremise"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ba07c93f8353246845971cb8f837507aa865c26fdb56e55f73c6d2e72ca79863"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceExactWholeEntry"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f9545dc158e04aea21bce156bac22e1b429b8b7d40d5a9116967641dc8f7589f"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceOraclePopulation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a195ea227407f75e3f03d4be70d6ae66a88303ce68b0709c95a6a74e2105cda9"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.FuzzRegionOccurrenceOracle"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1f0956ad6b1037e70912493f10fca4c35186f91c5332ec40635e7a639d1884fd"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceOracleSourceRefusal"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "589325d2068f02379905d66a2039b6b37cf77fb029bfb00a3890a5873966ce87"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceOracleUnsignedShiftCount"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c450b2a9ba586995bdbfcc9117a865fb81ba690a1ecf74f0d20ab93dd4b1d98c"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceOracleIntegerBoundaries"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1be128bcc3acef992d7f302ea19dd736e7701ebe27ad1afada4a30714b40936d"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestNarrowReferenceSelectedRuntime"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "17dad48806b2bf4e6cf8dd1f389becbb894fec4b5b86a3bd7bb6a5d3c5cd993d"
+  clause_label: "inductive-transfer"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceSelectedSizesOwnership"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2d2ebd58141c1219ebbf3569d5dfbe054d3273f2836e1305171d939db76eb3a2"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceSelectedSizesOperationalRefusal"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "41ec05d3e67bc4800ac06b79ed504c8c951f83c3f3d42f241d3551ff3c00d535"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceCallProofBinding"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9955e39bb4203d02c916682f556a9f25f19fe37191d8cab2977bf1264b458c44"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceRepeatedAccessIdentity"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "38d72cadf7d40a4fc2b3722b8b9ccb47a1594ad72cd2f03de863ab8f7f9a2373"
+  clause_label: "memory-and-callables"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceNestedCallAndContinuation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7ae6b45f3f3809c362e95da24d2211c2a86fd9e1dac202d715ff5bf963583730"
+  clause_label: "memory-and-callables"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceOracleRepeatedInvocationObjects"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c0b0e22bf2ce955caa7e1fc342d95bde6db1a83097704e288e099db55be4e5c0"
+  clause_label: "memory-and-callables"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceNestedCallAndContinuation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7ae6b45f3f3809c362e95da24d2211c2a86fd9e1dac202d715ff5bf963583730"
+  clause_label: "context-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceCallProofBinding"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9955e39bb4203d02c916682f556a9f25f19fe37191d8cab2977bf1264b458c44"
+  clause_label: "context-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceRepeatedAccessIdentity"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "38d72cadf7d40a4fc2b3722b8b9ccb47a1594ad72cd2f03de863ab8f7f9a2373"
+  clause_label: "context-and-effects"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceCaptureOwnsPath"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "af2b9d74d87ec168a8959d05f03ceda2fabd67c80c9a74e43fb2f8e2f234ad96"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceNestedCallAndContinuation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7ae6b45f3f3809c362e95da24d2211c2a86fd9e1dac202d715ff5bf963583730"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "ff58f1a9bdb602333bbea2d95d96e5a193e7cde4dc689e9dcda23b0559b63e69"
+  source_hash: "946e975750f7d3241bf91e5795163bd91a1567bc8a2b3e3f03a69fe64cb8e690"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionOccurrenceSelectedSizesOwnership"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2d2ebd58141c1219ebbf3569d5dfbe054d3273f2836e1305171d939db76eb3a2"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "6c83e203b901b5509b0b70e2394ab83f4181297c5af60c048ebc2e19b90a75b8"
+  source_hash: "4cfeeada97dc619f897dea2e8a59b7c1a152ffb2a36e7bac5606a239783dd633"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.checkedScalarConstant"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "12d1e60bcb4d3927a91e9a24a5bde72ccdb78d30f29c97e241529562564e8687"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "6c83e203b901b5509b0b70e2394ab83f4181297c5af60c048ebc2e19b90a75b8"
+  source_hash: "4cfeeada97dc619f897dea2e8a59b7c1a152ffb2a36e7bac5606a239783dd633"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.regionKernel.integerBinary"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "1d16a39a846dd4df0cdd81814cb3ba411264da41be0292fb527d8aca8f1c4f61"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-assembly-reference"
+  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
+  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.checkedScalarConstant"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "12d1e60bcb4d3927a91e9a24a5bde72ccdb78d30f29c97e241529562564e8687"
+  clause_label: "checked-substitution"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "6c83e203b901b5509b0b70e2394ab83f4181297c5af60c048ebc2e19b90a75b8"
+  source_hash: "4cfeeada97dc619f897dea2e8a59b7c1a152ffb2a36e7bac5606a239783dd633"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestCheckedScalarConstantEndpoints"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bfa51289b52308e77f9062a6cd6503f73aadbebdd7be854c27ca1077d56f1f5e"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "6c83e203b901b5509b0b70e2394ab83f4181297c5af60c048ebc2e19b90a75b8"
+  source_hash: "4cfeeada97dc619f897dea2e8a59b7c1a152ffb2a36e7bac5606a239783dd633"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestCheckedScalarConstantCheckerPhase"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3a0631a1f44e20856bfc8bbee371453ebded40cfd8a68d7f1ea883dec4b3549d"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "6c83e203b901b5509b0b70e2394ab83f4181297c5af60c048ebc2e19b90a75b8"
+  source_hash: "4cfeeada97dc619f897dea2e8a59b7c1a152ffb2a36e7bac5606a239783dd633"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionIntegerArithmetic"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "aeddb15e943f5a15ccd41a55fb88f431211632e80aef28f6cb2bf58d45a32e22"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "6c83e203b901b5509b0b70e2394ab83f4181297c5af60c048ebc2e19b90a75b8"
+  source_hash: "4cfeeada97dc619f897dea2e8a59b7c1a152ffb2a36e7bac5606a239783dd633"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionIntegerEvaluatedShiftCount"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "39c111e596d6ebde972dcc3a5d117003600841f558ac58eb37449dd4c36937e7"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "6c83e203b901b5509b0b70e2394ab83f4181297c5af60c048ebc2e19b90a75b8"
+  source_hash: "4cfeeada97dc619f897dea2e8a59b7c1a152ffb2a36e7bac5606a239783dd633"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionIntegerProofResources"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a3269e0d3f3de42d637649320500321957142f9583d7a2dd27360c51157dca5f"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-assembly-reference"
+  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
+  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestCheckedScalarConstantEndpoints"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bfa51289b52308e77f9062a6cd6503f73aadbebdd7be854c27ca1077d56f1f5e"
+  clause_label: "checked-substitution"
+}
+
+bindings {
+  requirement_id: "REQ-impl-assembly-reference"
+  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
+  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestCheckedScalarConstantCheckerPhase"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3a0631a1f44e20856bfc8bbee371453ebded40cfd8a68d7f1ea883dec4b3549d"
+  clause_label: "checked-substitution"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "6c83e203b901b5509b0b70e2394ab83f4181297c5af60c048ebc2e19b90a75b8"
+  source_hash: "4cfeeada97dc619f897dea2e8a59b7c1a152ffb2a36e7bac5606a239783dd633"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestStorageFunctionRepeatedSourceOccurrences"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e9a60a9fc61d99299bf2568c4339dbd8b316290cf28b7ed106f48d7967a22f94"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "6c83e203b901b5509b0b70e2394ab83f4181297c5af60c048ebc2e19b90a75b8"
+  source_hash: "4cfeeada97dc619f897dea2e8a59b7c1a152ffb2a36e7bac5606a239783dd633"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestStorageFunctionRepeatedSourceOccurrences"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e9a60a9fc61d99299bf2568c4339dbd8b316290cf28b7ed106f48d7967a22f94"
+  clause_label: "all-input-relation"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "6c83e203b901b5509b0b70e2394ab83f4181297c5af60c048ebc2e19b90a75b8"
+  source_hash: "4cfeeada97dc619f897dea2e8a59b7c1a152ffb2a36e7bac5606a239783dd633"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestStorageFunctionRepeatedSourceOccurrences"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e9a60a9fc61d99299bf2568c4339dbd8b316290cf28b7ed106f48d7967a22f94"
+  clause_label: "control-and-calls"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "6c83e203b901b5509b0b70e2394ab83f4181297c5af60c048ebc2e19b90a75b8"
+  source_hash: "4cfeeada97dc619f897dea2e8a59b7c1a152ffb2a36e7bac5606a239783dd633"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestStorageFunctionRepeatedSourceOccurrences"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "e9a60a9fc61d99299bf2568c4339dbd8b316290cf28b7ed106f48d7967a22f94"
+  clause_label: "composition-boundary"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "6c83e203b901b5509b0b70e2394ab83f4181297c5af60c048ebc2e19b90a75b8"
+  source_hash: "4cfeeada97dc619f897dea2e8a59b7c1a152ffb2a36e7bac5606a239783dd633"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestStorageOracleLoopReadCounterexamples"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "93dc08543909ceb4aec26400c49a092d2baad3aeb36173dfa8eaf1f969bdc671"
+  clause_label: "all-input-relation"
 }

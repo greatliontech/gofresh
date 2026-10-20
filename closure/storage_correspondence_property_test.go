@@ -902,7 +902,7 @@ func storageJointCheckSource(t testing.TB, s storageJointSource, p *globalFuncti
 			switch instruction := occurrence.instruction.(type) {
 			case *ssa.Alloc:
 				for _, allocation := range trace.allocations {
-					if allocation.instruction == instruction && allocation.invocation == occurrence.invocation {
+					if allocation.regionEffectOccurrence == occurrence {
 						e.Kind = "allocate"
 						e.Location = loc(allocation.location)
 						e.Type = allocation.initializer.typ
@@ -915,7 +915,7 @@ func storageJointCheckSource(t testing.TB, s storageJointSource, p *globalFuncti
 					continue
 				}
 				for _, access := range trace.accesses {
-					if access.instruction == instruction && access.invocation == occurrence.invocation {
+					if access.regionEffectOccurrence == occurrence {
 						if access.locked {
 							t.Fatal("ordinary source unexpectedly atomic")
 						}
@@ -931,7 +931,7 @@ func storageJointCheckSource(t testing.TB, s storageJointSource, p *globalFuncti
 				}
 			case *ssa.Call:
 				for _, app := range applications {
-					if app.proof.at == instruction {
+					if app.proof.caller == occurrence {
 						e.Kind = "call"
 						e.Child = invocations[app.proof.invocation]
 						e.Operands = make([]any, len(app.proof.arguments))
@@ -1028,8 +1028,8 @@ func checkStorageJointCase(t testing.TB, c storageOracleTemplate, s storageJoint
 
 func TestStorageJointCorrespondencePopulation(t *testing.T) {
 	templates := storageOracleTemplates(0)
-	if len(templates) != 22 {
-		t.Fatal("joint template population differs from its bounded 22-case contract")
+	if len(templates) != 24 {
+		t.Fatal("joint template population differs from its bounded 24-case contract")
 	}
 	for _, c := range templates {
 		t.Run(c.Name, func(t *testing.T) {
@@ -1039,7 +1039,7 @@ func TestStorageJointCorrespondencePopulation(t *testing.T) {
 			}
 		})
 	}
-	t.Log("44 complete-function relations; 132 joint source/native valuations, with universal initial-variable binding inspected separately")
+	t.Log("48 complete-function relations; 144 joint source/native valuations, with universal initial-variable binding inspected separately")
 }
 
 func checkStorageJointPrefix(t testing.TB, c storageOracleTemplate, s storageJointSource, permutation int, seed uint64) {
@@ -1336,6 +1336,9 @@ func FuzzStorageJointCorrespondencePopulation(f *testing.F) {
 	for i := range storageOracleSourceZeroTemplates(0) {
 		f.Add(uint8(25+i), uint8(0), uint64(0))
 	}
+	for i := range 2 {
+		f.Add(uint8(27+i), uint8(i%2), uint64(i)*0x102030405060708)
+	}
 	f.Fuzz(func(t *testing.T, index, permutation uint8, seed uint64) {
 		templates := storageOracleFuzzTemplates(seed)
 		c := templates[int(index)%len(templates)]
@@ -1522,7 +1525,7 @@ func TestStorageJointReadChoiceSupplements(t *testing.T) {
 			}
 		})
 	}
-	t.Log("six read-choice complete-function relations and actual Keep prefixes, each with three valuations; base 132 and zero/mixed 18 remain separate")
+	t.Log("six read-choice complete-function relations and actual Keep prefixes, each with three valuations; base 144 and zero/mixed 18 remain separate")
 }
 
 func TestStorageJointReadChoiceCounterexamples(t *testing.T) {
@@ -1630,7 +1633,7 @@ func TestStorageJointZeroValueSupplements(t *testing.T) {
 			}
 		})
 	}
-	t.Log("six supplemental complete-function and operand relations, each with three concrete valuations; base 44/132 population unchanged")
+	t.Log("six supplemental complete-function and operand relations, each with three concrete valuations; separate from the base 48/144 population")
 }
 
 func storageJointReturn(t testing.TB, f storageJointNative) (nativeproof.TransitionReturnCertificate, error) {

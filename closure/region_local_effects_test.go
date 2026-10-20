@@ -76,7 +76,7 @@ func TestRegionLocalTypedEffects(t *testing.T) {
 			current := readRegionLocation(packet.observations[0].state, pointer.location, prefix.operands[1].typ)
 			localEffectInteger(t, current, tc.want)
 			allocation, live, err := prefix.liveAllocation(pointer.location.object, func() error { return nil })
-			if err != nil || !live || allocation.instruction != pointer.location.object.site || allocation.invocation != pointer.location.object.invocation {
+			if err != nil || !live || allocation.instruction != pointer.location.object.site.(*ssa.Alloc) || allocation.invocation != pointer.location.object.invocation {
 				t.Fatalf("lost checked live allocation: live=%v error=%v", live, err)
 			}
 			last := packet.trace.accesses[len(packet.trace.accesses)-1]

@@ -812,7 +812,7 @@ func TestStorageFunctionWriteRunAllocationFrontier(t *testing.T) {
 	allocation := object.site.(*ssa.Alloc)
 	passedGlobal := false
 	for _, occurrence := range trace.instructions {
-		if occurrence.instruction == trace.accesses[0].instruction {
+		if occurrence == trace.accesses[0].regionEffectOccurrence {
 			passedGlobal = true
 		}
 		if occurrence.instruction == allocation && !passedGlobal {

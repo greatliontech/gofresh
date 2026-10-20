@@ -11,6 +11,7 @@ import (
 // sourceEffectPrefix owns an actual unexecuted instruction boundary and its
 // checked current state. It is independent of call-specific operand evidence.
 type sourceEffectPrefix struct {
+	cursor   regionEffectOccurrence
 	region   *sourceRegion
 	prior    *sourceEffectPrefix
 	binder   *selectedSourceBinder
@@ -71,19 +72,19 @@ func (p *sourceEffectPrefix) checkedPacket() *checkedRegion {
 		return nil
 	}
 	packet := checkedSourceEffectPacket(p.region, p.checker)
-	if packet == nil || p.checker.fullReturns || p.boundary == nil || regionInstruction(packet.input.use.at) != p.boundary || p.binder.source.prog.Prog != packet.input.owner || packet.input.storageModel != conditionalRegionStorageModel(p.binder.source) ||
-		p.prior != nil && (p.prior.checkedPacket() == nil || p.prior.region.packet.input.storageModel != packet.input.storageModel) {
+	if packet == nil || p.checker.fullReturns || p.prior != p.checker.session.predecessor || p.boundary == nil || len(packet.observations) != 1 || p.cursor != packet.observations[0].occurrence || p.cursor != p.checker.boundaryOccurrence(p.boundary) || p.cursor.owner == nil || packet.trace.seen[p.cursor] || regionInstruction(packet.input.use.at) != p.boundary || p.binder.source.prog.Prog != packet.input.owner || packet.input.selection != p.binder.source.prog || packet.input.storageModel != conditionalRegionStorageModel() ||
+		p.prior != nil && (p.prior.checkedPacket() == nil || p.prior.region.packet.input.storageModel != packet.input.storageModel || p.prior.region.packet.input.selection != packet.input.selection || p.prior.cursor.owner != p.cursor.owner) {
 		return nil
 	}
 	return packet
 }
 
 func checkedSourceEffectPacket(region *sourceRegion, checker *regionKernel) *checkedRegion {
-	if region == nil || region.packet == nil || checker == nil {
+	if region == nil || region.packet == nil || checker == nil || checker.session == nil {
 		return nil
 	}
 	packet, input := region.packet, checker.input
-	if packet.rules != regionRules || packet.trace == nil || checker.trace != packet.trace || input.owner != packet.input.owner || input.root != packet.input.root || input.entry != packet.input.entry || input.use != packet.input.use || input.storageModel != packet.input.storageModel || region.root.function != input.root {
+	if packet.rules != regionRules || packet.trace == nil || packet.trace.owner == nil || checker.trace != packet.trace || input.owner != packet.input.owner || input.selection != packet.input.selection || input.root != packet.input.root || input.entry != packet.input.entry || input.use != packet.input.use || input.storageModel != packet.input.storageModel || region.root.function != input.root {
 		return nil
 	}
 	return packet
@@ -131,7 +132,7 @@ func liveRegionAllocation(packet *checkedRegion, checker *regionKernel, prior *s
 			if err := tick(); err != nil {
 				return regionEffectAllocation{}, false, err
 			}
-			if allocation.location.object == object && trace.seen[regionEffectOccurrence{allocation.instruction, allocation.invocation}] {
+			if allocation.location.object == object && trace.seen[allocation.regionEffectOccurrence] {
 				return allocation, true, nil
 			}
 		}
@@ -160,8 +161,8 @@ func checkSourceOperandPrefix(ctx context.Context, source computationSource, roo
 	if at < 0 {
 		return nil, regionError("operand call is not in the actual root")
 	}
-	in := regionInput{owner: root.Prog, root: root, entry: regionPoint{root.Blocks[0], 0},
-		storageModel: conditionalRegionStorageModel(source),
+	in := regionInput{owner: root.Prog, selection: source.prog, root: root, entry: regionPoint{root.Blocks[0], 0},
+		storageModel: conditionalRegionStorageModel(),
 		use:          regionUse{at: regionPoint{call.Block(), at}, operand: regionCallBoundaryOperand(call)},
 		premises:     []string{"immutable selected typed owner; isolated prefix; ordinary live typed storage; omitted native prefix and actual use remain open"}}
 	meter := &regionMeter{ctx: ctx, limits: limits.region}
@@ -174,13 +175,14 @@ func checkSourceOperandPrefix(ctx context.Context, source computationSource, roo
 	if err != nil {
 		return nil, err
 	}
+	owner := &regionOccurrenceOwner{}
 	newKernel := func(input regionInput) (*regionKernel, error) {
 		session := newRegionCallSession(ctx, input, limits.region)
 		session.meter = meter
 		session.source = source
 		k, err := newRegionContextKernel(input, session, regionInvocation{}, false)
 		if err == nil {
-			k.trace = &regionEffectTrace{seen: map[regionEffectOccurrence]bool{}}
+			k.trace = &regionEffectTrace{owner: owner, seen: map[regionEffectOccurrence]bool{}}
 		}
 		return k, err
 	}
@@ -232,7 +234,7 @@ func checkSourceOperandPrefix(ctx context.Context, source computationSource, roo
 	}
 	packet.usage = *meter
 	packet.usage.ctx = nil
-	core := &sourceEffectPrefix{region: selected, binder: b, checker: k, boundary: call}
+	core := &sourceEffectPrefix{region: selected, binder: b, checker: k, boundary: call, cursor: packet.observations[0].occurrence}
 	core.self = core
 	prefix := &sourceOperandPrefix{sourceEffectPrefix: core, callee: callee, call: call, operands: operands}
 	prefix.self = prefix

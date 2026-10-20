@@ -7,12 +7,11 @@ import (
 )
 
 // regionStorageModel is an explicit conditional antecedent, not a selected
-// implementation verdict. Its comparable identity binds the immutable selected
-// typed owner that supplies layouts. Sizes alone never select these semantics.
+// implementation verdict. The input's separate selection supplies layouts;
+// sizes alone never select these semantics.
 // The zero value grants no integer/float bit interpretation.
 type regionStorageModel struct {
 	interpretation regionStorageInterpretation
-	source         *program
 }
 
 type regionStorageInterpretation uint8
@@ -23,12 +22,12 @@ type regionStorageInterpretation uint8
 // and type sizes do not prove its applicability to a machine execution.
 const regionIEEE754LittleEndian regionStorageInterpretation = 1
 
-func conditionalRegionStorageModel(source computationSource) regionStorageModel {
-	return regionStorageModel{interpretation: regionIEEE754LittleEndian, source: source.prog}
+func conditionalRegionStorageModel() regionStorageModel {
+	return regionStorageModel{interpretation: regionIEEE754LittleEndian}
 }
 
 func (m regionStorageModel) valid(in regionInput) bool {
-	return m == (regionStorageModel{}) || m.interpretation == regionIEEE754LittleEndian && m.source != nil && m.source.Prog == in.owner
+	return m == (regionStorageModel{}) || m.interpretation == regionIEEE754LittleEndian && in.selection != nil && in.selection.Prog == in.owner
 }
 
 func regionFloatWidth(typ types.Type) int {
@@ -142,7 +141,7 @@ func (k *regionKernel) storageViewError(message string) error {
 func (k *regionKernel) bitStorageView(loc regionLocation, view types.Type) (valid bool) {
 	storage := k.locationType(loc)
 	model := k.input.storageModel
-	if !model.valid(k.input) || model.source == nil || regionBitViewWidth(storage) == 0 || regionBitViewWidth(view) == 0 ||
+	if !model.valid(k.input) || model.interpretation != regionIEEE754LittleEndian || k.sizes == nil || regionBitViewWidth(storage) == 0 || regionBitViewWidth(view) == 0 ||
 		!regionAccessType(storage, view) && !regionBitViewTypes(storage, view) || !k.singleton(loc.object) {
 		return false
 	}
@@ -155,7 +154,7 @@ func (k *regionKernel) bitStorageView(loc regionLocation, view types.Type) (vali
 		}
 	}()
 	m := storageLayoutMeter{ctx: regionProofContext{k.meter.ctx, k.meter}}
-	typ, sizes, err := m.objectType(model.source, loc.object)
+	typ, sizes, err := m.objectType(k.input.selection, loc.object)
 	if err != nil || typ == nil || sizes == nil {
 		return false
 	}
@@ -193,7 +192,7 @@ func (k *regionKernel) viewValue(value regionValue, typ types.Type) (regionValue
 	if viewed, ok := regionViewValue(value, typ); ok {
 		return viewed, true
 	}
-	if k.input.storageModel.source == nil || !k.input.storageModel.valid(k.input) || !regionBitViewTypes(value.typ, typ) {
+	if k.input.storageModel.interpretation != regionIEEE754LittleEndian || !k.input.storageModel.valid(k.input) || !regionBitViewTypes(value.typ, typ) {
 		return regionValue{}, false
 	}
 	if value.kind == regionUnknown {
