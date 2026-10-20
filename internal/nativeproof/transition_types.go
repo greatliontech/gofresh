@@ -9,7 +9,7 @@ import (
 // including initialized image roots, guarded exclusions, decoder, expression,
 // pointer-lane, bounded conditional entry/return relations, finite root private
 // lifetimes and CPUID dependencies.
-const TransitionRules = "gofresh/native-transition@19;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
+const TransitionRules = "gofresh/native-transition@20;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
 
 // LockedMemoryModel requires cacheable write-back coherent RAM, power-of-two cache
 // lines of at least eight bytes aligned to their size, and enabled architectural

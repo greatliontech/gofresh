@@ -440,7 +440,7 @@ func TestTransitionApplicationProtectedControlScan(t *testing.T) {
 		// The supplied value is exactly the initiating CALL value. A final-value
 		// comparison would wrongly accept this write; the footprint must refuse.
 		m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{PC: applicationChild, Context: context, Kind: FrameWrite, Bytes: RelativeSpan{-8, 0}, Value: b.ChildEntry.Accesses[len(b.ChildEntry.Accesses)-1].Value})
-		if err := m.applicationProtectedSlot(b.ChildEntry, b.Activation, -8); err == nil {
+		if err := m.applicationProtectedSlot(len(b.ChildEntry.Accesses), b.Activation, -8); err == nil {
 			t.Fatal("same-value descendant write acquired control-slot authority")
 		}
 	}

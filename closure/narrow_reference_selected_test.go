@@ -26,7 +26,8 @@ func TestNarrowReferenceSelectedRuntime(t *testing.T) {
 	source, _, h := loadSourceCommandFixture(t, dir, "cmd/compile")
 	raw, image, locations := selectedRuntimeCheckArtifact(t, h)
 	complete, child := selectedCheckSource(t, source)
-	assertSelectedRuntimeCheckCorrespondence(t, source, raw, image, locations, complete, child)
+	proof := assertSelectedRuntimeCheckCorrespondence(t, source, raw, image, locations, complete, child)
+	assertSelectedRuntimeRootedApplication(t, raw, image, locations, proof)
 }
 
 func selectedCheckSource(t *testing.T, source computationSource) (*sourceReturnCompletion, *sourceOperandPrefix) {

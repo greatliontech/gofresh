@@ -26,28 +26,8 @@ func TestRuntimeStartupSelectedAtomicApplication(t *testing.T) {
 		t.Fatal("selected conditional theorems were not rederived for actual entry congruence")
 	}
 	decode := globalCandidateDecoder(t, raw)
+	x, until := selectedRuntimeRootCandidate(t, raw, locations, x)
 	outerCall := x.cut + uint64(decode(x.cut).Len)
-	call := decode(outerCall)
-	rel, direct := call.Args[0].(x86asm.Rel)
-	if call.Op != x86asm.CALL || !direct {
-		t.Fatal("startup candidate has no actual wrapper CALL")
-	}
-	wrapper := uint64(int64(outerCall) + int64(call.Len) + int64(rel))
-	if decode(wrapper).Op != x86asm.XORPS {
-		t.Fatal("selected wrapper candidate no longer starts with its vector clear")
-	}
-	until := outerCall + uint64(call.Len)
-	x.face.PrivateFrame = &nativeproof.TransitionPrivateFrame{Bytes: nativeproof.RelativeSpan{Start: -144, End: -48}, Until: &until}
-	x.face.Regions[2].Bytes = x.face.PrivateFrame.Bytes
-	x.face.Conditions.SSE = nativeproof.SSEModel
-	setPairedAtomicModel(&x.face)
-	for _, name := range []string{"runtime.test_x64", "runtime.test_z64"} {
-		x.face.ImageRegions = append(x.face.ImageRegions, nativeproof.Span{Start: locations[name], End: locations[name] + 8})
-	}
-	x.expansions = append(x.expansions,
-		nativeproof.TransitionExpansion{PC: x.cut, AllActivations: true},
-		nativeproof.TransitionExpansion{PC: outerCall, AllActivations: true},
-		nativeproof.TransitionExpansion{PC: wrapper, AllActivations: true})
 	for _, expansion := range candidate.Expansions {
 		x.expansions = append(x.expansions, nativeproof.TransitionExpansion{PC: expansion.PC, AllActivations: true})
 	}
@@ -108,4 +88,32 @@ func TestRuntimeStartupSelectedAtomicApplication(t *testing.T) {
 		t.Fatalf("root permissions were promoted to private lifetime: %v", err)
 	}
 	t.Logf("ELF root %#x establishes child entry shift -120 and current guard under declared root ownership through %#x; returned child retains outer wrapper activation and FS history; process ownership and complete source/native wrapper composition remain open", before.Entry, until)
+}
+
+func selectedRuntimeRootCandidate(t testing.TB, raw []byte, locations map[string]uint64, x selectedStartupCandidate) (selectedStartupCandidate, uint64) {
+	t.Helper()
+	decode := globalCandidateDecoder(t, raw)
+	outerCall := x.cut + uint64(decode(x.cut).Len)
+	call := decode(outerCall)
+	rel, direct := call.Args[0].(x86asm.Rel)
+	if call.Op != x86asm.CALL || !direct {
+		t.Fatal("startup candidate has no actual wrapper CALL")
+	}
+	wrapper := uint64(int64(outerCall) + int64(call.Len) + int64(rel))
+	if decode(wrapper).Op != x86asm.XORPS {
+		t.Fatal("selected wrapper candidate no longer starts with its vector clear")
+	}
+	until := outerCall + uint64(call.Len)
+	x.face.PrivateFrame = &nativeproof.TransitionPrivateFrame{Bytes: nativeproof.RelativeSpan{Start: -144, End: -48}, Until: &until}
+	x.face.Regions[2].Bytes = x.face.PrivateFrame.Bytes
+	x.face.Conditions.SSE = nativeproof.SSEModel
+	setPairedAtomicModel(&x.face)
+	for _, name := range []string{"runtime.test_x64", "runtime.test_z64"} {
+		x.face.ImageRegions = append(x.face.ImageRegions, nativeproof.Span{Start: locations[name], End: locations[name] + 8})
+	}
+	x.expansions = append(x.expansions,
+		nativeproof.TransitionExpansion{PC: x.cut, AllActivations: true},
+		nativeproof.TransitionExpansion{PC: outerCall, AllActivations: true},
+		nativeproof.TransitionExpansion{PC: wrapper, AllActivations: true})
+	return x, until
 }

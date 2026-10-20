@@ -850,12 +850,22 @@ conditional callee-return relation MUST establish these obligations:
   return evidence is distinct from entry-to-cut evidence and is usable only where
   the caller establishes the callee's interface from its actual incoming state.
   Copying projections or matching endpoint addresses supplies no such relation.
-  Application binds the exact subordinate theorem to the decoded CALL target,
-  actual post-CALL input state and active continuation. Shifted origin domains,
+  Direct application binds the exact subordinate theorem to the decoded CALL
+  target, actual post-CALL input state and active continuation. Application may
+  instead begin at the theorem's entry already reached within the innermost
+  active CALL. The owned prefix then establishes intervening wrapper and tail
+  transfers; it does not pretend that the original CALL targeted the later body.
+  The current stack pointer must identify that invocation's actual control slot,
+  and the theorem must return to its actual continuation. Entry associations and
+  preserved-register conclusions are relative to this selected body-entry state,
+  not to an earlier state before wrapper effects. Shifted origin domains,
   memory permissions, current entry relations, flag definedness, context and
   any private lifetime follow from the unchanged caller premises. Child private
   storage may inherit a containing parent lifetime; its control word remains
   protected throughout the child scope, including against unchanged-value writes.
+  For active-entry application, that protection includes all intervening
+  descendant writes after the initiating CALL's own control-word store, not only
+  writes after the later body entry.
   A prior modeled context change does not alone invalidate application: the
   current state must satisfy the callee's identified machine and primitive
   models. Callee inputs associate with that actual current state, including the
@@ -875,6 +885,12 @@ conditional callee-return relation MUST establish these obligations:
   invoking call. The completed return consumes the exact retained return
   occurrence and actual protected control word. Equal addresses do not authorize
   borrowing another invocation's return or an earlier iteration's effect guard.
+  Retained occurrence associations identify the exact checked embedding,
+  including excluded boundaries, residual frontiers and terminal return. They
+  confer no independent authority and do not associate the new parent
+  continuation with a child occurrence. Specialization may exclude an originally
+  conditional transfer; access counts or a fixed index offset cannot replace
+  actual occurrence and effect association.
   This conditional fact grants no executable-root reachability, source-storage
   association, historical execution authority or ordinary runtime discharge.
 
@@ -1006,6 +1022,20 @@ source/native relation MUST satisfy these obligations:
   Multiple representations are permitted when their complete claimed behavior
   satisfies the relation; uniqueness is not a premise. Whole-source actual-use
   coverage and reachability of a conditional native region remain separate proofs.
+  A rooted application retains the exact complete correspondence and its checked
+  native application rather than replacing the original source, native theorem or
+  representation. For every admitted root state, the actual body-entry bytes and
+  registers must supply a total typed source valuation satisfying the original
+  input relation. Boolean storage requires established canonical encoding;
+  adding a desired encoding as a fresh antecedent is insufficient. Source
+  initialization cannot supply missing native bytes. Stack-coordinate translation
+  is confined to the retained body representation and its materialization and
+  lifetime account; eliminated storage acquires no address. Actual occurrence
+  associations carry nested effects without equating access counts. The rooted
+  successor retains earlier wrapper and primitive effects, residual bytes and
+  original context history. The original source-model antecedent, scoped model
+  consequences and broader process, compiler, use and harness obligations remain
+  explicit.
 
 ## Selected assembly call references
 

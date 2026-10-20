@@ -153,7 +153,7 @@ func selectedRuntimeCheckStorage(t *testing.T, source computationSource, image *
 	return rho
 }
 
-func assertSelectedRuntimeCheckCorrespondence(t *testing.T, source computationSource, raw []byte, image *nativeproof.Image, locations map[string]uint64, completed *sourceReturnCompletion, child *sourceOperandPrefix) {
+func assertSelectedRuntimeCheckCorrespondence(t *testing.T, source computationSource, raw []byte, image *nativeproof.Image, locations map[string]uint64, completed *sourceReturnCompletion, child *sourceOperandPrefix) *globalFunctionCorrespondence {
 	t.Helper()
 	callee := selectedAtomicReturn(t, raw, image, locations)
 	caller := selectedCheckPrefix(t, raw, image, locations, callee)
@@ -217,6 +217,7 @@ func assertSelectedRuntimeCheckCorrespondence(t *testing.T, source computationSo
 	}
 	t.Logf("complete selected actual-call correspondence: eight objects, ten atomic groups, %d source/%d native float comparisons, scoped model consequences; root/use/harness/producing obligations retained", sourceComparisons, nativeComparisons)
 	t.Logf("complete actual-call correspondence work=%d", proof.work)
+	return proof
 }
 
 // Qualification counts actual operations, not merely retained instructions on

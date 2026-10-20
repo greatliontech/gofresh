@@ -638,7 +638,7 @@
                             including eliminated/reused pure source operations and
                             native floating-point exception/status conditions.
                             Preserve conditional root premises for .13.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.13 Compose the ELF-root
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.13 Compose the ELF-root
                           continuation through the native g0/m0-addressed writes,
                           CLD/XMM wrapper and completed runtime.check: candidate
                           custom 0x4a3858 to 0x4a7a20 to 0x4725a0 and return to
@@ -666,7 +666,7 @@
                             history. Rederive the conditional callee relations for
                             the actual translated origin congruence and establish
                             their current guard, mapping and frame premises.
-                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.13d Carry the actual outer
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.13d Carry the actual outer
                             CALL through its wrapper and tail transfer into the
                             exact complete source/native correspondence. Preserve
                             the active continuation, storage-coordinate and input

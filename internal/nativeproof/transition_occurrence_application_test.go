@@ -36,6 +36,7 @@ func TestTransitionOccurrenceApplicationExcludedRootReturn(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := applied.Bound()
+	assertApplicationOccurrences(t, applied, theorem)
 	if !applied.AppliesTo(theorem) || len(b.Successor.ExcludedBoundaries) != 1 || !b.Successor.ExcludedBoundaries[0].Frontier || b.Successor.ExcludedBoundaries[0].PC != occurrenceEntry+26 || b.Successor.ExcludedBoundaries[0].Context != b.Activation {
 		t.Fatal("mapped return exclusion lost bytes/context or frontier obligation")
 	}
