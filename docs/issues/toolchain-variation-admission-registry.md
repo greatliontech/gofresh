@@ -200,6 +200,99 @@ full performance pass retains its existing post-adoption order.
 
 ## Public adoption boundary
 
+### First consumer and dependency path
+
+The first ordinary thread is the existing `TestScalar` fixture in
+`closure/computation_callback_selected_test.go`: its selected computation calls
+`unicode/utf16.IsSurrogate`, and its optimized body has an independently checked
+return with the failing source branch excluded. The local proof deliberately
+leaves initialization, actual use, harness and applicability open. The public
+acceptance case is `TestComputationOrdinaryCaptureCheck_TestScalar`: stock and
+harmless custom selected source must acquire the same generic proof authority,
+old selected-content evidence must stale, and a fresh custom production must
+qualify without an approval row or purity assertion. This first thread does not
+complete callbacks, benchmark pacing, environment verification or the remaining
+supported families.
+
+The production path is `Session.Snapshot` / `observeView` /
+`ComputeMaximalBatch`, then `BindArtifact`, unit registration and close, native
+record serialization, and `RuntimeBinding.Check` / checking close. Its missing
+edges have separate owners:
+
+| Edge | Required change | Lands |
+|---|---|---|
+| Shared typed load to later proof acquisition | Retain exact selected-source ownership and complete conservative blockers without a second unrelated load. | 5.1w.2b.4a |
+| Bound source/native facts to ordinary implementation authority | Complete actual-use, initialization, harness and selected-implementation coverage; establish claim-specific current applicability. Local callback or startup certificates cannot supply it. | 9.4a.1-2 qualify the route; 5.1w.2b.3 and 5.1w.2b.4d implement and consume it. |
+| Inspected artifact to preparation | Admit immutable scoped claims and select residual obligations for the whole runnable roster before execution. | 5.1w.2b.4b/d |
+| Prepared evidence to close | Validate each unit's dependencies and obligations without mutating its shared snapshot or borrowing sibling authority. | 5.1w.2b.4b |
+| Producing theorem to current check | Retain sufficient historical evidence and check the applicable selection theorem and current dependencies. | 5.1w.2b.4c/d |
+| Checked claims to warm serving | Include complete rule/premise/dependency identities; deleting disposable memos changes cost, not authority. | 5.1w.2b.4c; all remaining consumers at 5.1w.6 |
+
+### Evidence ownership and applicability
+
+The lifecycle refactor separates three concepts currently combined in
+`closure.Closure`: immutable source identity, conservative implementation
+blockers, and evidence-dependent disposition. `observeView` classifies before
+`BindArtifact` can observe a producing executable; registration only retains and
+validates that artifact, while closing compares classifications as snapshot
+facts. Mutating the snapshot after artifact analysis would leak authority between
+siblings; comparing a refined closure with an artifact-free conservative closure
+would instead reject the refinement. The causal repair is immutable base facts
+plus scoped checked claims and transaction-local applicability, not a comparison
+exception or a local bypass of observer preparation.
+
+One evidence-selection operation must prepare the complete runnable roster's
+residual obligations. Source-only support, identity-only diagnostics, observation
+coverage, delivery, operation outcomes and terminal completion retain distinct
+authority. `producingUnit.register` currently sends every non-diagnostic unit
+through `PrepareOutcomeSupport` and `CaptureObservedBatch`; that control split
+cannot represent the new independent source-only channel merely by relabeling
+diagnostic units. Existing singleton/package/retry and closing ownership remains
+the common lifecycle.
+
+Historical artifact bytes are proof inputs, not automatically live current
+filesystem dependencies. Conversely, retaining yesterday's executable does not
+prove a property of every implementation allowed by today's selection. A complete
+artifact theorem, universal over its runtime states, needs a separately checked
+selection-stability argument before it can authorize artifact-free current reuse.
+That argument preserves the particular public proposition, not native addresses,
+frame layouts or exact numerical equalities the proposition does not require.
+The correct-cache premise in [runtime inputs](../specs/runtime-inputs.md) concerns
+cache-state independence; it does not silently remove the implementation latitude
+retained by [implementation verification](../specs/implementation-verification.md).
+
+The target is one native record carrying sufficient immutable historical evidence
+to check its claimed authority, with the existing disposable memos providing only
+acceleration. A digest or stored approval bit is insufficient. Current checking
+admits each record's own evidence against the freshly observed source/build,
+selected-implementation, rule and applicability dependencies; it does not claim to
+have inspected a new executable or repair missing producing facts. The original
+executable's deletion and disposable-cache eviction must preserve a successfully
+established selection-applicable claim. This requires an explicit evidence
+contract before implementation; existing records acquire no such authority.
+
+### Unestablished proof mechanism
+
+Compiler-bootstrap execution is a chosen applicability construction, not a
+requirement of the governing contract. Two legitimate mechanisms remain: prove
+the relevant selected lowering association and use the existing implicit-language
+premise, or independently prove the needed native behavior, including the slow
+path. Matching call shapes, source proximity, labels or compiler metadata close
+neither argument. The existing local native and source proofs establish neither
+complete mechanism for the ordinary consumer yet.
+
+The next work is therefore 9.4a.1's precise selection-applicability rule, followed
+by 9.4a.2's complete lowering/native bridge and 9.4a.3's consumer-sized composition
+qualification. The selected `testing.tRunner` stack-check/retry fragment is the
+initial bridge candidate, not an approved helper or an assertion of feasibility.
+If it needs a compiler-state invariant, name that invariant and its influencing
+path before scheduling its smallest prerequisite. Do not presume that replaying
+the compiler from ELF entry is necessary, or that calling the alternative
+translation validation makes it complete. The existing continuation/history and
+callee-replay costs require qualification against the same required population.
+9.4a remains open until these results establish the bounded implementation path;
+the lifecycle design and additional plan slots alone do not close it.
+
 The user selected existing test/benchmark workflows as the public acceptance
 target when offered an opt-in Linux/amd64 traced scalar-call protocol. Native
 entry and source/native relation checks remain useful subordinate mechanisms,

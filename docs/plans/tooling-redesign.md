@@ -870,6 +870,33 @@
           and unsupported-implementation refusals beside ordinary test/benchmark
           acceptance. Production acquisition and composition must construct their
           evidence without test-private proof orchestration or approval entries.
+          - [ ] 5.1w.2b.4a After 9.4a, separate immutable selected-source/build
+            identities and complete structured blockers from evidence-dependent
+            disposition. Retain the source owner from the existing shared load;
+            preserve ordinary verdicts as projections while removing the need to
+            mutate a snapshot when a later artifact supplies checked evidence.
+          - [ ] 5.1w.2b.4b Centralize scoped evidence admission and applicability
+            across production and checking. Prepare each unit's complete runnable
+            roster and residual obligations from base facts plus admitted claims;
+            distinguish source-only support from identity-only diagnostics and
+            observation support. Preserve immutable sharing, independent retries,
+            cancellation, completion facts and all closing/refusal precedence.
+          - [ ] 5.1w.2b.4c Define and implement the native record's sufficient
+            historical implementation evidence and claim-specific applicability.
+            Keep proof inputs distinct from live current dependencies; require
+            checked selection stability for artifact-free current applicability.
+            Preserve cold/warm/discarded-memo authority and fingerprint value
+            semantics. Reuse existing disposable memo infrastructure only for
+            acceleration; no proof bit, digest registry or missing-history upgrade.
+          - [ ] 5.1w.2b.4d Connect production-owned proof acquisition, complete
+            implementation/use/harness coverage and the checked applicability
+            rule to exact blocker discharge. Close the TestScalar stock/custom
+            thread through execution, closing, record roundtrip and current check
+            after removing disposable memos and the original executable. Retain
+            intrinsic/fallback negatives, relevant-selector drift, unselected
+            sibling exclusion and the complete actually selected package roster.
+            Close the other preserved public acceptance cases and benchmark
+            obligations before claiming the parent population complete.
     - [ ] 5.1w.2p After the feature implementation and rewrite/refactor are complete,
       run the full performance pass over artifact capture, repeated validation and
       the usable native/source proof paths. Record cold/warm workloads, accepted/refused
@@ -1216,3 +1243,34 @@
       forks with the user; retain all other supported-family obligations and the
       release, Stipulator, fleet and deferred-performance order. Close only with
       a concrete bounded implementation path, not another list of proof prefixes.
+      - [ ] 9.4a.1 Establish the claim-specific selection-applicability rule for
+        the ordinary TestScalar/utf16.IsSurrogate stock/custom thread. Identify
+        the exact public proposition, every relevant permitted implementation
+        choice and the checked evidence preserving that proposition. Distinguish
+        a universal runtime-state theorem for one artifact from a theorem over
+        permitted builds; correct-cache equivalence alone cannot bridge them.
+        Preserve language latitude and result-owner responsibilities without
+        assuming byte determinism or numerical equality the claim does not need.
+      - [ ] 9.4a.2 Qualify one complete implicit-lowering applicability bridge
+        from the actual TestScalar invocation path before more compiler startup
+        work. Use the selected testing.tRunner stack-check/retry fragment as the
+        initial candidate; bind its exact source context, emitted boundaries,
+        fast/slow successors and continuation. Establish each needed compiler-state
+        invariant or independently derive the complete native behavior. Compatible
+        explicit calls, omitted inline instances, opaque slow paths and altered
+        metadata must not acquire implicit-language authority. If the candidate
+        cannot close, identify its exact missing theorem and reassess the route;
+        do not automatically expand into another bootstrap prerequisite chain.
+      - [ ] 9.4a.3 Qualify cumulative composition resources against the resulting
+        consumer-required population. Compare the same complete CALL/RET, current
+        bytes, branch effects and continuation scope under whole and partitioned
+        construction, with independent semantic controls. Use the existing rooted
+        chain only as a cost baseline, not ordinary applicability evidence. Repair
+        demonstrated representation costs before extending that route; increasing
+        budgets or reducing the required population does not establish feasibility.
+      - [ ] 9.4a.4 Reconcile the proven dependency path with all existing bootstrap,
+        compiler and public-adoption slots. Order consumer-justified commit-sized
+        work and the 5.1w.2b.4a-d lifecycle refactor; remove a prerequisite only
+        after its consuming obligation has an established replacement. Preserve
+        conditional proofs as reusable machinery without counting them as public
+        acceptance, and leave 9.4a open if the bounded path is still unestablished.
