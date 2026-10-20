@@ -158,6 +158,40 @@ The checkpoint is recovery and acceptance material, not authority for current
 reuse. Mainline keeps the committed conservative consumer while these already
 scheduled prerequisites are completed.
 
+## Acceptance and architectural exit conditions
+
+Lands: 5.1w.2b.4 for the first public proof thread, 5.1w.6 for complete consumer
+and memo adoption, and 5.1w.7 for preserved-family acceptance and removal.
+
+The retained `TestComputationAcceptanceUnlistedSource` and
+`TestComputationOrdinaryCaptureCheck` cases define useful new-proof acceptance,
+old-content staleness, cold/warm/discarded-cache agreement and closing drift.
+`TestComputationAcceptanceCompilerIntrinsicRuntimeDispatch` and
+`TestComputationAcceptanceUnsupportedSelectedSource` retain the deciding
+adversarial cases. Adapt their construction to the actual public API without
+weakening their authority assertions or substituting a private native invocation
+for the ordinary test/benchmark workflow. Genuine source-only support remains
+separate from observation delivery and actual producing applicability.
+
+These assertions are preserved in the checkpoint rather than integrated into
+current public qualification. The new top-level computation/correspondence
+checkers have no production-classification callers yet, while the approval
+registry still supplies those consumers. Passing subordinate proof suites does
+not close this validation gap. The first integrated path must acquire and compose
+its evidence through production code rather than test-private proof orchestration.
+
+The remaining bootstrap/compiler route also needs consumer-bounded architectural
+qualification. Process-input construction at 5.1w.2b.3b.2a.2.2.2.2.16b.2 must
+consume owned launch inputs without fixture-authored physical placement; .17
+qualifies increasing finite input shapes and cumulative proof budgets; .19 checks
+the completed bootstrap interface against its typed-state consumer. Before
+extending the frontend at 5.1w.2b.3b.2a.2.3, establish the concrete dependency path
+to the public acceptance case and justify each scope by its downstream claim.
+Repeated full-history copying and actual callee replay are sound mechanisms, but
+their present implementation alone does not establish that this larger consumer
+fits its resource bounds. Structural feasibility belongs at those slots; the
+full performance pass retains its existing post-adoption order.
+
 ## Public adoption boundary
 
 The user selected existing test/benchmark workflows as the public acceptance

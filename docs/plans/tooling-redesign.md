@@ -179,9 +179,8 @@
     guards; distinguish expected incompatibility from a demonstrated defect.
   - [ ] 5.1w Replace toolchain-variation approval with generic implementation
     verification before resuming 5.2d/5.2e or releasing migrated consumers.
-    Follow this remaining execution order: complete runtime.check at
-    5.1w.2b.3b.2a.2.2.2.2.12 and complete
-    required bootstrap and compiler
+    Follow this remaining execution order: complete common backing and process
+    inputs at 5.1w.2b.3b.2a.2.2.2.2.16b, then required bootstrap and compiler
     correspondence; integrate useful stock/custom production reuse; remove the
     approval registry and release Gofresh at 5.1w.7; finish Stipulator's
     clean-break migration and delivery at 5.2; complete remaining fleet work;
@@ -743,6 +742,10 @@
                                 alias coherence, application/replay, current state,
                                 exact continuation identity, expression accounting
                                 and independent alpha-equivalence comparators.
+                                Share owned-view arithmetic and full-extent judgment
+                                between resolution and native execution; retain
+                                separate aggregate coverage, operand permissions,
+                                control protection and effect recording.
                               - [ ] 5.1w.2b.3b.2a.2.2.2.2.16b.1c Admit finite
                                 declared objects and affine shared views with fresh
                                 symbolic bases, joint placement constraints and
@@ -752,7 +755,9 @@
                                 bytes and checked application associations, including
                                 noninjective views. Preserve refusal of unsupported
                                 foreign-stack operations and forbid witness values
-                                from initializing universal symbolic inputs.
+                                from initializing universal symbolic inputs. Retain
+                                immutable layout/domain sharing and account for
+                                unique backing, view and expression populations.
                             - [ ] 5.1w.2b.3b.2a.2.2.2.2.16b.2 Construct the
                               identified fresh-root ordered input relation from
                               finite logical shapes with universally admissible
@@ -760,7 +765,10 @@
                               separators, string backing/termination, permissions
                               and lifetimes without caller-authored symbolic
                               certificates or observed stack layouts. Auxiliary
-                              coordinates alone grant no tail interpretation.
+                              coordinates alone grant no tail interpretation. Drive
+                              construction from the owned forwarded tool, raw argument
+                              suffix and environment; qualify their exact association
+                              without fixture-authored physical layouts.
                             - [ ] 5.1w.2b.3b.2a.2.2.2.2.16b.3 Replay the complete
                               rooted prefix under that relation through the initial
                               argument stores. Establish their meaning from current
@@ -774,6 +782,10 @@
                           extents and finite progress established from the admitted
                           separators. Preserve raw order, duplicates, empty strings
                           and intervening state; a scan budget supplies no bound.
+                          Qualify increasing finite input shapes against cumulative
+                          proof work and retained evidence; expose a representation
+                          limit before extending the consumer, rather than treating
+                          a larger unfolding allowance as proof of progress.
                         - [ ] 5.1w.2b.3b.2a.2.2.2.2.18 Check the selected
                           auxiliary-vector consumers, including vDSO parsing and
                           dependent uses. Retain first-AT_NULL bounds, unknown and
@@ -796,6 +808,8 @@
                           at 5.1w.2b.3b.2a.2.2.2.3 and actual producing applicability
                           at 5.1w.2b.4; conditional completion alone supplies neither
                           whole-bootstrap/use/harness coverage nor runtime reuse.
+                          Check the completed bootstrap interface against the actual
+                          typed-state consumer before extending compiler traversal.
                       - [ ] 5.1w.2b.3b.2a.2.2.2.3 Establish native-storage to
                         selected-source storage and initialization correspondence before
                         supplying compiler source state; names and numeric addresses
@@ -803,6 +817,11 @@
                   - [ ] 5.1w.2b.3b.2a.2.3 Check the rooted main/frontend transfer
                     through the selected typed package and whole enclosing body,
                     retaining actual compiler-state and representation association.
+                    Before extending traversal, establish the concrete dependency
+                    path from that state to 5.1w.2b.4's ordinary public acceptance;
+                    distinguish established from missing edges and justify each
+                    compiler/bootstrap scope by the claim its consumer needs.
+                    Qualify the consumer against cumulative composition bounds.
                 - [ ] 5.1w.2b.3b.2a.3 Check operation/context correspondence through
                   inlining, escape/order/walk, SSA construction and subsequent
                   transformations, preserving explicit-call distinctions and exact
@@ -842,6 +861,13 @@
           Keep genuinely source-only support distinct from incomplete selected
           observation: an absent capture cannot satisfy today's observing unit
           protocol, and a source-only claim acquires no log-delivery requirement.
+          Adapt the retained TestComputationAcceptanceUnlistedSource,
+          TestComputationOrdinaryCaptureCheck and intrinsic-runtime-dispatch
+          acceptance cases to the actual public API. Preserve valid new proofs,
+          stale prior content, cold/warm/discarded-cache agreement, closing drift
+          and unsupported-implementation refusals beside ordinary test/benchmark
+          acceptance. Production acquisition and composition must construct their
+          evidence without test-private proof orchestration or approval entries.
     - [ ] 5.1w.2p After the feature implementation and rewrite/refactor are complete,
       run the full performance pass over artifact capture, repeated validation and
       the usable native/source proof paths. Record cold/warm workloads, accepted/refused
