@@ -178,8 +178,8 @@ func checkOptimizedCallTLS(t testing.TB, im *Image, face TransitionInterface, pr
 	// storage. The theorem's input did not seed this expected value.
 	var bytes [8]byte
 	for _, cell := range c.checked.bound.Memory {
-		if cell.Image && cell.Offset >= int64(tls) && cell.Offset < int64(tls+8) {
-			bytes[cell.Offset-int64(tls)] = byte(stateEval(t, cell.Value, nil))
+		if cell.isImage() && cell.offset >= int64(tls) && cell.offset < int64(tls+8) {
+			bytes[cell.offset-int64(tls)] = byte(stateEval(t, cell.Value, nil))
 		}
 	}
 	if binary.LittleEndian.Uint64(bytes[:]) != 0x123 {

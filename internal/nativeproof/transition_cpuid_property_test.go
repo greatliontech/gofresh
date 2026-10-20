@@ -127,7 +127,7 @@ func statePrimitiveBindings(t testing.TB, b TransitionBound, x stateLayout, want
 				}
 			}
 			read, write := b.Accesses[e.ReadAccess], b.Accesses[e.WriteAccess]
-			if read.ID != e.ID || write.ID != e.ID || read.Kind != FrameRead || write.Kind != FrameWrite || read.PC != e.PC || write.PC != e.PC || read.Context != e.Context || write.Context != e.Context || read.Bytes != write.Bytes || read.Image != write.Image || read.Value != e.Before || write.Value != e.After {
+			if read.ID != e.ID || write.ID != e.ID || read.Kind != FrameRead || write.Kind != FrameWrite || read.PC != e.PC || write.PC != e.PC || read.Context != e.Context || write.Context != e.Context || read.Bytes != write.Bytes || read.Value != e.Before || write.Value != e.After {
 				return fmt.Errorf("locked read/write lost grouping")
 			}
 		default:

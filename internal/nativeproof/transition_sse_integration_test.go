@@ -145,7 +145,7 @@ func TestTransitionSSEIntegrationArbitraryLoadsAndPermissions(t *testing.T) {
 			face.Regions = []RelativeRegion{{Bytes: RelativeSpan{1, 1 + int64(width/8)}, Readable: true}}
 			code := sseIntegrationLoad(width, reg, 1)
 			b := sseIntegrationRequire(t, code, face)
-			if len(b.Accesses) != 1 || b.Accesses[0].Kind != FrameRead || b.Accesses[0].Bytes != face.Regions[0].Bytes || b.Accesses[0].Value.Sort() != br.Bits(width) || len(b.Instructions) != 1 {
+			if len(b.Accesses) != 1 || b.Accesses[0].Kind != FrameRead || extentCoordinates(b.Accesses[0].Bytes) != face.Regions[0].Bytes || b.Accesses[0].Value.Sort() != br.Bits(width) || len(b.Instructions) != 1 {
 				t.Fatal("scalar load did not read exactly its admitted bytes")
 			}
 			for _, flag := range []TransitionFlag{b.Flags.CF, b.Flags.ZF, b.Flags.PF, b.Flags.OF, b.Flags.SF, b.Flags.AF} {
@@ -161,7 +161,7 @@ func TestTransitionSSEIntegrationArbitraryLoadsAndPermissions(t *testing.T) {
 			for _, bits := range sseEdgeBits(width) {
 				values := sseIntegrationValues(t, b)
 				for _, cell := range b.InitialMemory {
-					values[cell.Value] = bits >> (8 * uint(cell.Offset-1)) & 255
+					values[cell.Value] = bits >> (8 * uint(cell.offset-1)) & 255
 				}
 				sseIntegrationVectors(t, b, values, map[int]uint64{reg: bits})
 				if evalRelationTerm(t, b.Accesses[0].Value, values, 0) != bits {

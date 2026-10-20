@@ -136,7 +136,7 @@ func TestTransitionEntryRelationOverlappingBytes(t *testing.T) {
 			raw[5], raw[6], raw[7], raw[8] = 0, 0, 0, 0
 		}
 		for _, byteValue := range b.InitialMemory {
-			i := byteValue.Offset - int64(imageStateAddress+16)
+			i := byteValue.offset - int64(imageStateAddress+16)
 			if i >= 0 && i < int64(len(raw)) {
 				v[byteValue.Value] = uint64(raw[i])
 			}

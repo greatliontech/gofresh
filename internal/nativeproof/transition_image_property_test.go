@@ -219,7 +219,7 @@ func TestTransitionImagePointerOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := c.checked.bound.Registers[12].Pointer
-	if _, ok := p.(ImagePointer); !ok {
+	if pointer, ok := p.(AddressPointer); !ok || !pointer.isImage() {
 		t.Fatal("RIP did not establish Image provenance")
 	}
 	// Equal bytes are not the same owner, while copies of the constructed Image
@@ -239,7 +239,7 @@ func TestTransitionImagePointerOwnership(t *testing.T) {
 	// A projection may contain a syntactically plausible provenance arm, but
 	// cannot reconstruct a certificate or replace its private current cells.
 	b, _ := c.Bound()
-	b.Registers[12].Pointer = OriginPointer{Origin: b.Origin}
+	b.Registers[12].Pointer = b.Geometry.stackPointer(0)
 	b.Interface.ImageRegions[0] = Span{0, math.MaxUint64}
 	next, err := CheckTransitionContinuation(t.Context(), c, x.proposal(3))
 	if err != nil {
@@ -249,7 +249,7 @@ func TestTransitionImagePointerOwnership(t *testing.T) {
 		t.Fatal("projection granted authority")
 	}
 	for _, cell := range next.checked.bound.InitialMemory {
-		if cell.Image && (cell.Pointer != nil || cell.Value.View().Op != br.Variable) {
+		if cell.isImage() && (cell.Pointer != nil || cell.Value.View().Op != br.Variable) {
 			t.Fatal("raw image cell acquired loader facts")
 		}
 	}
@@ -451,10 +451,10 @@ func TestTransitionImageAndStackTagsDoNotProveInequality(t *testing.T) {
 	if stateEval(t, b.Registers[12].Value, values) != stateEval(t, b.Registers[2].Value, values) {
 		t.Fatal("control lost numerical alias")
 	}
-	if _, ok := b.Registers[12].Pointer.(ImagePointer); !ok {
+	if p, ok := b.Registers[12].Pointer.(AddressPointer); !ok || !p.isImage() {
 		t.Fatal("image arm missing")
 	}
-	if requireStackPointer(t, b.Registers[2].Pointer).Offset != -65536 {
+	if requireStackPointer(t, b.Registers[2].Pointer).offset != -65536 {
 		t.Fatal("stack arm missing")
 	}
 	refused, err := CheckTransitionContinuation(t.Context(), c, x.proposal(5))
@@ -491,7 +491,7 @@ func TestTransitionImageFourWordPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := c.checked.bound
-	if b.Registers[RDI].Pointer != (ImagePointer{Address: imageStateAddress, owner: &im.data[0], load: 1}) {
+	if b.Registers[RDI].Pointer != b.Geometry.imagePointer(1, imageStateAddress) {
 		t.Fatal("wrong image base")
 	}
 	for _, reg := range []Register{RBP, RAX} {
@@ -500,15 +500,15 @@ func TestTransitionImageFourWordPrefix(t *testing.T) {
 		}
 	}
 	for _, cell := range b.Memory {
-		if !cell.Image {
+		if !cell.isImage() {
 			continue
 		}
-		off := cell.Offset - int64(imageStateAddress)
+		off := cell.offset - int64(imageStateAddress)
 		want := int64(-65584)
 		if off >= 8 && off < 16 {
 			want = -48
 		}
-		if cell.Pointer != (OriginPointer{b.Origin, want}) || cell.PointerLane != uint8(off%8) {
+		if cell.Pointer != b.Geometry.stackPointer(want) || cell.PointerLane != uint8(off%8) {
 			t.Fatal("incorrect image pointer word/lane", cell)
 		}
 		for _, s := range []uint64{1 << 32, 1 << 40, 1 << 46} {
@@ -522,7 +522,7 @@ func TestTransitionImageFourWordPrefix(t *testing.T) {
 	}
 	for j, off := range []int64{16, 24, 0, 8} {
 		a := b.Accesses[j+3]
-		if !a.Image || a.Kind != FrameWrite || a.Bytes != (RelativeSpan{int64(imageStateAddress) + off, int64(imageStateAddress) + off + 8}) {
+		if !a.Bytes.start.isImage() || a.Kind != FrameWrite || extentCoordinates(a.Bytes) != (RelativeSpan{int64(imageStateAddress) + off, int64(imageStateAddress) + off + 8}) {
 			t.Fatal("wrong store order")
 		}
 	}
@@ -591,7 +591,7 @@ func FuzzTransitionImageRIPArithmetic(f *testing.F) {
 			t.Fatal("valid independent RIP construction refused", err)
 		}
 		b := c.checked.bound
-		if len(b.Accesses) != 0 || b.Registers[dst].Pointer != (ImagePointer{Address: target.Uint64(), owner: &im.data[0], load: loadIndex}) || stateEval(t, b.Registers[dst].Value, nil) != target.Uint64() {
+		if len(b.Accesses) != 0 || b.Registers[dst].Pointer != b.Geometry.imagePointer(loadIndex, target.Uint64()) || stateEval(t, b.Registers[dst].Value, nil) != target.Uint64() {
 			t.Fatal("RIP address relation differs")
 		}
 	})

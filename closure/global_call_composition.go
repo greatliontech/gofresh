@@ -236,11 +236,11 @@ func (p *globalFunctionCorrespondence) checkCallCheckpoint(ctx context.Context, 
 			return err
 		}
 		footprint, _ := p.layout.objectFootprint(binding.object)
-		for offset := footprint.Bytes.Start; offset < footprint.Bytes.End; offset++ {
+		for offset := int64(0); offset < footprint.Bytes.Width(); offset++ {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			location := nativeproof.TransitionLocation{Image: footprint.Image, Offset: offset}
+			location, _ := footprint.Bytes.Byte(offset)
 			materialized, exists := known[location]
 			if !exists {
 				continue
@@ -249,7 +249,8 @@ func (p *globalFunctionCorrespondence) checkCallCheckpoint(ctx context.Context, 
 			if !exact || materialized != logical {
 				return storageMismatch("materialized local differs at actual call checkpoint")
 			}
-			actual, err := storageNativeWord(ctx, builder, bound.Memory, location, 1)
+			extent, _ := footprint.Bytes.Subextent(offset, 1)
+			actual, err := storageNativeWord(ctx, builder, bound.Memory, extent, 1)
 			if err != nil {
 				return err
 			}

@@ -18,7 +18,14 @@ func concreteAccessValue(v uint64, width int) br.Term {
 	return t
 }
 
-func assertConcreteAccesses(t testing.TB, got, want []TransitionAccess, values map[br.Term]uint64, instructions []GuardedInstruction) {
+type concreteTransitionAccess struct {
+	PC    uint64
+	Kind  AccessKind
+	Bytes RelativeSpan
+	Value br.Term
+}
+
+func assertConcreteAccesses(t testing.TB, got []TransitionAccess, want []concreteTransitionAccess, values map[br.Term]uint64, instructions []GuardedInstruction) {
 	t.Helper()
 	owners := map[uint64]TransitionOccurrenceID{}
 	ids := map[TransitionOccurrenceID]bool{}
@@ -34,13 +41,12 @@ func assertConcreteAccesses(t testing.TB, got, want []TransitionAccess, values m
 	}
 	for j, g := range got {
 		w := want[j]
-		w.ID = owners[w.PC]
-		if w.ID == 0 {
+		id := owners[w.PC]
+		if id == 0 {
 			t.Fatal("reference access has no instruction occurrence")
 		}
 		gv, wv := g.Value, w.Value
-		g.Value, w.Value = br.Term{}, br.Term{}
-		if g != w || gv.Sort() != wv.Sort() || stateEval(t, gv, values) != stateEval(t, wv, nil) {
+		if g.ID != id || g.PC != w.PC || g.Kind != w.Kind || g.Context != 0 || g.Bytes.start.backing == nil || g.Bytes.start.isImage() || extentCoordinates(g.Bytes) != w.Bytes || gv.Sort() != wv.Sort() || stateEval(t, gv, values) != stateEval(t, wv, nil) {
 			t.Fatal("independent access/value sequence differs", j, g, w)
 		}
 	}
@@ -157,7 +163,7 @@ type transitionReference struct {
 	// CF, ZF, OF, SF, AF, PF. AF's value is ignored after logical operations;
 	// its undefined status is checked separately from these concrete oracle bits.
 	flags      [6]bool
-	accesses   []TransitionAccess
+	accesses   []concreteTransitionAccess
 	written    [16]bool
 	flagWriter string
 	origin     uint64
@@ -175,7 +181,7 @@ func (r *transitionReference) step(i transitionIntent, pc uint64) {
 	address := r.regs[i.base] + uint64(int64(i.disp))
 	access := func(kind AccessKind) {
 		off := int64(address - r.origin)
-		r.accesses = append(r.accesses, TransitionAccess{PC: pc, Kind: kind, Bytes: RelativeSpan{off, off + 8}})
+		r.accesses = append(r.accesses, concreteTransitionAccess{PC: pc, Kind: kind, Bytes: RelativeSpan{off, off + 8}})
 	}
 	store := func(v uint64, p *int64) {
 		access(FrameWrite)
@@ -294,7 +300,7 @@ func assertIntentReference(t testing.TB, c TransitionCertificate, program []tran
 		if v.Value.View().Op == br.Variable {
 			values[v.Value] = uint64(byte(rng.Uint32()))
 		}
-		r.memory[origin+uint64(v.Offset)] = byte(evalRelationTerm(t, v.Value, values, 0))
+		r.memory[origin+uint64(v.offset)] = byte(evalRelationTerm(t, v.Value, values, 0))
 	}
 	for j, i := range program {
 		r.step(i, pcs[j])
@@ -306,7 +312,7 @@ func assertIntentReference(t testing.TB, c TransitionCertificate, program []tran
 		}
 		var expected TransitionPointer
 		if r.pointers[j] != nil {
-			expected = OriginPointer{b.Origin, *r.pointers[j]}
+			expected = b.Geometry.stackPointer(*r.pointers[j])
 		}
 		if v.Pointer != expected {
 			t.Fatal("register provenance differs", j)
@@ -316,17 +322,17 @@ func assertIntentReference(t testing.TB, c TransitionCertificate, program []tran
 		}
 	}
 	for _, v := range b.Memory {
-		address := origin + uint64(v.Offset)
+		address := origin + uint64(v.offset)
 		if got := byte(evalRelationTerm(t, v.Value, values, 0)); got != r.memory[address] {
-			t.Fatal("memory value differs", v.Offset)
+			t.Fatal("memory value differs", v.offset)
 		}
 		lane, found := r.lanes[address]
 		var expected TransitionPointer
 		if found {
-			expected = OriginPointer{b.Origin, lane.offset}
+			expected = b.Geometry.stackPointer(lane.offset)
 		}
-		if v.Image || v.Pointer != expected || found && int(v.PointerLane) != lane.lane {
-			t.Fatal("byte provenance differs", v.Offset)
+		if v.isImage() || v.Pointer != expected || found && int(v.PointerLane) != lane.lane {
+			t.Fatal("byte provenance differs", v.offset)
 		}
 	}
 	private := [3]bool{r.flags[0], r.flags[1], r.flags[3] != r.flags[2]}
@@ -431,6 +437,9 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 	if a.Origin == b.Origin {
 		t.Fatal("independent roots unexpectedly share namespace")
 	}
+	if a.Geometry == b.Geometry || a.Geometry.Origin() != a.Origin || b.Geometry.Origin() != b.Origin {
+		t.Fatal("independent roots did not own their geometry")
+	}
 	for j, effect := range a.PrimitiveEffects {
 		if p, ok := effect.(LockedExchange64Effect); ok {
 			q := b.PrimitiveEffects[j].(LockedExchange64Effect)
@@ -471,6 +480,10 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 	for j, access := range a.Accesses {
 		other := b.Accesses[j]
 		equal(access.Value, other.Value)
+		if !a.Geometry.owns(access.Bytes.start) || !b.Geometry.owns(other.Bytes.start) || access.Bytes.width != other.Bytes.width || access.Bytes.start.offset != other.Bytes.start.offset || access.Bytes.start.isImage() != other.Bytes.start.isImage() {
+			t.Fatal("direct/segmented access coordinate differs")
+		}
+		access.Bytes, other.Bytes = TransitionExtent{}, TransitionExtent{}
 		access.Value, other.Value = br.Term{}, br.Term{}
 		if access != other {
 			t.Fatal("direct/segmented access differs")
@@ -510,16 +523,15 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 			if y != nil {
 				t.Fatal("pointer kind differs")
 			}
-		case OriginPointer:
-			q, ok := y.(OriginPointer)
-			if !ok || p.Offset != q.Offset {
-				t.Fatal("stack pointer differs")
+		case AddressPointer:
+			q, ok := y.(AddressPointer)
+			if !ok || !a.Geometry.ownsPointer(p) || !b.Geometry.ownsPointer(q) || p.offset != q.offset || p.view.bounds != q.view.bounds || p.view.load != q.view.load || p.view.backing.role != q.view.backing.role {
+				t.Fatal("address pointer owner/view/coordinate differs")
 			}
-			equal(p.Origin, q.Origin)
-		case ImagePointer:
-			if p != y {
-				t.Fatal("image pointer owner/mapping/address differs")
+			if p.isImage() && !sameImage(p.view.backing.geometry.image, q.view.backing.geometry.image) {
+				t.Fatal("image owner differs")
 			}
+			equal(p.view.backing.geometry.origin, q.view.backing.geometry.origin)
 		case entryValueLineage:
 			q, ok := y.(entryValueLineage)
 			if !ok {
@@ -541,7 +553,7 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 		w := b.Memory[j]
 		equal(v.Value, w.Value)
 		pointer(v.Pointer, w.Pointer)
-		if v.TransitionLocation != w.TransitionLocation || v.PointerLane != w.PointerLane {
+		if !a.Geometry.owns(v.TransitionLocation) || !b.Geometry.owns(w.TransitionLocation) || v.isImage() != w.isImage() || v.offset != w.offset || v.PointerLane != w.PointerLane {
 			t.Fatal("memory relation differs")
 		}
 	}

@@ -365,17 +365,18 @@ func TestTransitionScalarIncrementProvenance(t *testing.T) {
 		m.bound.Origin = m.scratch(br.Bits(64))
 		m.lo, m.hi = 0x800000, 0x900000
 		m.face.Envelope = RelativeSpan{0, 8}
+		fixtureGeometry(t, m)
 		offset := int64(8)
 		if valid {
 			offset = 7
 		}
-		m.pointers[RAX] = OriginPointer{m.bound.Origin, offset}
+		m.pointers[RAX] = m.bound.Geometry.stackPointer(offset)
 		m.state.regs[RAX] = m.binary(br.Add, m.bound.Origin, m.con(br.Bits(64), uint64(offset)))
 		if err := m.scalarTail(operation{Op: x86asm.INC, Args: [2]x86asm.Arg{x86asm.RAX}}); err != nil {
 			t.Fatal("scalar INC cannot fault", err)
 		}
 		if valid {
-			if m.pointers[RAX] != (OriginPointer{m.bound.Origin, 8}) {
+			if m.pointers[RAX] != m.bound.Geometry.stackPointer(8) {
 				t.Fatal("lost affine pointer")
 			}
 		} else if m.pointers[RAX] != nil {

@@ -181,7 +181,13 @@ not close this validation gap. The first integrated path must acquire and compos
 its evidence through production code rather than test-private proof orchestration.
 
 The remaining bootstrap/compiler route also needs consumer-bounded architectural
-qualification. Process-input construction at 5.1w.2b.3b.2a.2.2.2.2.16b.2 must
+qualification. The dependency-path analysis lands at 9.4a before starting
+5.1w.2b.3b.2a.2.2.2.2.16b.1c: identify each missing edge's production caller,
+required evidence, reusable mechanism, deciding positive/adversarial test and
+ordered implementation slot. Resolve genuine trust or population forks with the
+user before extending the route; a first accepted consumer does not discharge
+the other supported families. Process-input construction at
+5.1w.2b.3b.2a.2.2.2.2.16b.2 must
 consume owned launch inputs without fixture-authored physical placement; .17
 qualifies increasing finite input shapes and cumulative proof budgets; .19 checks
 the completed bootstrap interface against its typed-state consumer. Before

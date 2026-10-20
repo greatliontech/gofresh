@@ -269,7 +269,7 @@ func TestTransitionGuardedPredicatesDoNotWrite(t *testing.T) {
 					t.Fatal("predicate wrote register or preservation", reg)
 				}
 			}
-			if b.Registers[RSP].Pointer != (OriginPointer{Origin: b.Origin}) {
+			if b.Registers[RSP].Pointer != b.Geometry.stackPointer(0) {
 				t.Fatal("predicate destroyed pointer provenance")
 			}
 			dagAssert(t, c, x, 2, face, stateInitial(face, 37), nil)

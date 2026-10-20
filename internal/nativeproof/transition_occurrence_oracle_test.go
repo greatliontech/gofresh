@@ -382,7 +382,7 @@ func occurrenceOracleInitial(p occurrenceOracleProgram, selector uint64, variant
 	s.outcomes = make([][4]uint32, 8)
 	for j := range s.outcomes {
 		for lane := range s.outcomes[j] {
-			s.outcomes[j][lane] = uint32(0x80000001 + j*257 + lane*37 + variant*19)
+			s.outcomes[j][lane] = uint32(0x80000001) + uint32(j*257+lane*37+variant*19)
 		}
 	}
 	put := func(off int64, width int, value uint64) {

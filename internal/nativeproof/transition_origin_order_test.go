@@ -24,11 +24,12 @@ func originOrderChecker(t testing.TB, domain OriginDomain, envelope RelativeSpan
 	}
 	m.bound.Origin = m.scratch(br.Bits(64))
 	m.bound.EntryPredicate = m.truth
+	fixtureGeometry(t, m)
 	return m
 }
 
 func originOrderValue(m *transitionChecker, offset int64) TransitionValue {
-	return TransitionValue{Value: m.binary(br.Add, m.bound.Origin, m.con(br.Bits(64), uint64(offset))), Pointer: OriginPointer{Origin: m.bound.Origin, Offset: offset}}
+	return TransitionValue{Value: m.binary(br.Add, m.bound.Origin, m.con(br.Bits(64), uint64(offset))), Pointer: m.bound.Geometry.stackPointer(offset)}
 }
 
 // The concrete oracle uses unbounded integer subtraction for every flag. Small
@@ -101,10 +102,10 @@ func TestTransitionOriginOrderApplicability(t *testing.T) {
 			case "pointerless":
 				left.Pointer = nil
 			case "foreign", "foreign-pair":
-				foreign := m.scratch(br.Bits(64))
-				left.Pointer = OriginPointer{Origin: foreign, Offset: -8}
+				foreign := newTransitionGeometry(m.im, cloneTransitionInterface(m.face), m.scratch(br.Bits(64)))
+				left.Pointer = foreign.stackPointer(-8)
 				if mode == "foreign-pair" {
-					right.Pointer = OriginPointer{Origin: foreign, Offset: 8}
+					right.Pointer = foreign.stackPointer(8)
 				}
 			case "entry-lineage":
 				left.Pointer = entryValueLineage{value: left.Value}
@@ -339,10 +340,11 @@ func TestTransitionOriginOrderMemoryReadAndFlags(t *testing.T) {
 	m := originOrderChecker(t, OriginDomain{Min: 1 << 32, Max: 1 << 44, Modulus: 16}, RelativeSpan{-70000, 64})
 	m.memory = make(map[TransitionLocation]TransitionByte)
 	m.face.Regions = []RelativeRegion{{Bytes: RelativeSpan{0, 8}, Readable: true, Writable: true}}
-	m.state.regs[RSP], m.pointers[RSP] = m.bound.Origin, OriginPointer{Origin: m.bound.Origin}
+	fixtureGeometry(t, m)
+	m.state.regs[RSP], m.pointers[RSP] = m.bound.Origin, m.bound.Geometry.stackPointer(0)
 	guard := originOrderValue(m, -65584)
-	m.store(TransitionLocation{}, guard, 8)
-	m.state.regs[RAX], m.pointers[RAX] = m.bound.Origin, OriginPointer{Origin: m.bound.Origin}
+	m.store(m.bound.Geometry.stackLocation(0), guard, 8)
+	m.state.regs[RAX], m.pointers[RAX] = m.bound.Origin, m.bound.Geometry.stackPointer(0)
 	before := make(map[TransitionLocation]TransitionByte)
 	for key, value := range m.memory {
 		before[key] = value
@@ -354,7 +356,7 @@ func TestTransitionOriginOrderMemoryReadAndFlags(t *testing.T) {
 	if len(m.bound.Accesses) != accesses+1 || m.bound.Accesses[accesses].Kind != FrameRead || !reflect.DeepEqual(before, m.memory) || m.state.flags != ([flagCount]br.Term{m.falsity, m.falsity, m.falsity}) || m.bound.EntryPredicate != m.truth {
 		t.Fatal("memory CMP erased read, changed memory or lost domain order")
 	}
-	word := m.memoryValue(TransitionLocation{}, 8)
+	word := m.memoryValue(m.bound.Geometry.stackLocation(0), 8)
 	if holds, known, err := m.originWordUpperBound(word, -120); err != nil || !known || !holds {
 		t.Fatal("actual stored guard lost applicability", holds, known, err)
 	}

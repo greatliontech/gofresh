@@ -179,8 +179,10 @@
     guards; distinguish expected incompatibility from a demonstrated defect.
   - [ ] 5.1w Replace toolchain-variation approval with generic implementation
     verification before resuming 5.2d/5.2e or releasing migrated consumers.
-    Follow this remaining execution order: complete common backing and process
-    inputs at 5.1w.2b.3b.2a.2.2.2.2.16b, then required bootstrap and compiler
+    Follow this remaining execution order: bound the public acceptance dependency
+    path at 9.4a before starting 5.1w.2b.3b.2a.2.2.2.2.16b.1c; complete the
+    consumer-justified common-backing and process-input work at
+    5.1w.2b.3b.2a.2.2.2.2.16b, then required bootstrap and compiler
     correspondence; integrate useful stock/custom production reuse; remove the
     approval registry and release Gofresh at 5.1w.7; finish Stipulator's
     clean-break migration and delivery at 5.2; complete remaining fleet work;
@@ -733,7 +735,7 @@
                                 checked nonvacuity-witness boundary; retain the
                                 actual owned tool-forwarding input binding and
                                 ordered implementation prerequisites.
-                              - [ ] 5.1w.2b.3b.2a.2.2.2.2.16b.1b Migrate existing
+                              - [x] 5.1w.2b.3b.2a.2.2.2.2.16b.1b Migrate existing
                                 stack/image locations, pointers, accesses and
                                 source-storage footprints to common owned backing
                                 coordinates without adding a new admitted storage
@@ -1201,3 +1203,16 @@
     after promoting its surviving rationale and routing every residual. Preserve
     conditional platform/protocol/backend capabilities under observable triggers;
     inventory completeness does not commission their implementation.
+    - [ ] 9.4a Before starting 5.1w.2b.3b.2a.2.2.2.2.16b.1c, bound one ordinary
+      test/benchmark path through the existing public API to registry-free stock
+      and harmless-custom acceptance. Map every missing dependency to its
+      production caller, required evidence, reusable machinery, deciding positive
+      and adversarial tests, and ordered commit-sized landing slot. Preserve
+      changed-input invalidation, intrinsic/fallback controls, capture/closing,
+      independent retries and cache agreement. Justify compiler/bootstrap scope
+      from downstream claims rather than assuming whole-compiler verification.
+      Establish the first representative composition/resource feasibility check
+      before expanding that route. Resolve genuine trust or supported-population
+      forks with the user; retain all other supported-family obligations and the
+      release, Stipulator, fleet and deferred-performance order. Close only with
+      a concrete bounded implementation path, not another list of proof prefixes.

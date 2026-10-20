@@ -121,7 +121,7 @@ type applicationConcreteAccess struct {
 
 type applicationConcreteState struct {
 	regs   [16]uint64
-	bytes  map[TransitionLocation]byte
+	bytes  map[stateLocation]byte
 	access []applicationConcreteAccess
 }
 
@@ -134,7 +134,7 @@ func (s applicationConcreteState) clone() applicationConcreteState {
 func (s *applicationConcreteState) load(pc uint64, context TransitionActivationID, offset int64, width int, kind AccessKind) uint64 {
 	var value uint64
 	for lane := 0; lane < width; lane++ {
-		value |= uint64(s.bytes[TransitionLocation{Offset: offset + int64(lane)}]) << (8 * lane)
+		value |= uint64(s.bytes[stateLocation{off: offset + int64(lane)}]) << (8 * lane)
 	}
 	s.access = append(s.access, applicationConcreteAccess{pc, context, kind, RelativeSpan{offset, offset + int64(width)}, value})
 	return value
@@ -142,7 +142,7 @@ func (s *applicationConcreteState) load(pc uint64, context TransitionActivationI
 
 func (s *applicationConcreteState) store(pc uint64, context TransitionActivationID, offset int64, width int, value uint64) {
 	for lane := 0; lane < width; lane++ {
-		s.bytes[TransitionLocation{Offset: offset + int64(lane)}] = byte(value >> (8 * lane))
+		s.bytes[stateLocation{off: offset + int64(lane)}] = byte(value >> (8 * lane))
 	}
 	s.access = append(s.access, applicationConcreteAccess{pc, context, FrameWrite, RelativeSpan{offset, offset + int64(width)}, value})
 }
@@ -194,7 +194,7 @@ func applicationConcreteRun(p applicationPopulation, code applicationPopulationP
 func applicationPopulationInputs(t testing.TB, b TransitionBound, p applicationPopulation, ordinal, arm int) (map[br.Term]uint64, applicationConcreteState) {
 	t.Helper()
 	base := uint64(65536) + b.Interface.Origin.Residue + uint64(ordinal)*b.Interface.Origin.Modulus
-	state := applicationConcreteState{bytes: make(map[TransitionLocation]byte)}
+	state := applicationConcreteState{bytes: make(map[stateLocation]byte)}
 	values := make(map[br.Term]uint64)
 	for r := range state.regs {
 		state.regs[r] = uint64(r+1)*0x9e3779b97f4a7c15 ^ uint64(ordinal+1)*0x13579bdf2468ace0
@@ -214,15 +214,15 @@ func applicationPopulationInputs(t testing.TB, b TransitionBound, p applicationP
 		values[input] = uint64((ordinal + j) & 1)
 	}
 	for _, input := range b.InitialMemory {
-		value := byte(uint64(input.Offset)*73 + uint64(ordinal*41+arm*19+17))
-		if !input.Image && input.Offset >= 0 && input.Offset < 8 {
-			value = byte((testEntry + 256) >> (8 * uint(input.Offset)))
+		value := byte(uint64(input.offset)*73 + uint64(ordinal*41+arm*19+17))
+		if !input.isImage() && input.offset >= 0 && input.offset < 8 {
+			value = byte((testEntry + 256) >> (8 * uint(input.offset)))
 		} else if input.Value.View().Op == br.Variable {
 			values[input.Value] = uint64(value)
 		} else {
 			t.Fatal("grammar's arbitrary incoming byte was unexpectedly constrained")
 		}
-		state.bytes[input.TransitionLocation] = value
+		state.bytes[stateByteLocation(input)] = value
 	}
 	if stateEval(t, b.EntryPredicate, values) != 1 {
 		t.Fatal("generated valuation violates parent entry relation")
@@ -241,8 +241,8 @@ func applicationPopulationAssert(t testing.TB, registers [16]TransitionValue, me
 		t.Fatalf("retained memory has %d bytes, want %d", len(memory), len(want.bytes))
 	}
 	for _, v := range memory {
-		if got := stateEval(t, v.Value, values); got != uint64(want.bytes[v.TransitionLocation]) {
-			t.Fatalf("byte %+v = %#x, want %#x", v.TransitionLocation, got, want.bytes[v.TransitionLocation])
+		if got := stateEval(t, v.Value, values); got != uint64(want.bytes[stateByteLocation(v)]) {
+			t.Fatalf("byte %+v = %#x, want %#x", v.TransitionLocation, got, want.bytes[stateByteLocation(v)])
 		}
 	}
 	guards := make(map[TransitionOccurrenceID]bool)
@@ -256,10 +256,10 @@ func applicationPopulationAssert(t testing.TB, registers [16]TransitionValue, me
 			t.Fatal("access lost its occurrence guard")
 		}
 		if active {
-			if access.Image {
+			if access.Bytes.start.isImage() {
 				t.Fatal("grammar unexpectedly accessed image memory")
 			}
-			actual = append(actual, applicationConcreteAccess{access.PC, access.Context, access.Kind, access.Bytes, stateEval(t, access.Value, values)})
+			actual = append(actual, applicationConcreteAccess{access.PC, access.Context, access.Kind, extentCoordinates(access.Bytes), stateEval(t, access.Value, values)})
 		}
 	}
 	if !slices.Equal(actual, want.access) {
@@ -289,10 +289,10 @@ func TestTransitionApplicationJointPopulation(t *testing.T) {
 							t.Fatal("child did not preserve actual incoming BP provenance")
 						}
 						frame := b.ChildEntry.Frames[0]
-						if frame.Call != code.call || frame.Return != code.call+5 || frame.Context != b.Activation || frame.Slot != (OriginPointer{Origin: b.Successor.Origin, Offset: b.StackShift}) {
+						if frame.Call != code.call || frame.Return != code.call+5 || frame.Context != b.Activation || frame.Slot != b.Successor.Geometry.stackPointer(b.StackShift) {
 							t.Fatal("actual CALL frame does not bind its parent-root control word")
 						}
-						if len(b.Words) != 1 || b.Words[0].Input.Offset != -16 {
+						if len(b.Words) != 1 || b.Words[0].Input.Bytes.start.offset != -16 {
 							t.Fatal("callee word association lost its grouping")
 						}
 						var wordPointer TransitionPointer
@@ -304,9 +304,9 @@ func TestTransitionApplicationJointPopulation(t *testing.T) {
 						}
 						for _, saved := range b.Successor.Memory {
 							start := b.StackShift - 8
-							if !saved.Image && saved.Offset >= start && saved.Offset < start+8 {
+							if !saved.isImage() && saved.offset >= start && saved.offset < start+8 {
 								want := parent.checked.bound.Registers[RBP].Pointer
-								if saved.Pointer != want || want != nil && saved.PointerLane != uint8(saved.Offset-start) {
+								if saved.Pointer != want || want != nil && saved.PointerLane != uint8(saved.offset-start) {
 									t.Fatal("saved BP residual lanes lost actual pointer provenance")
 								}
 							}
@@ -333,7 +333,7 @@ func TestTransitionApplicationJointPopulation(t *testing.T) {
 								entry, returned, complete := applicationConcreteRun(p, code, initial, TransitionActivationID(parent.checked.bound.Boundary.ID))
 								var incomingWord uint64
 								for lane := 0; lane < 8; lane++ {
-									incomingWord |= uint64(entry.bytes[TransitionLocation{Offset: b.StackShift - 16 + int64(lane)}]) << (8 * lane)
+									incomingWord |= uint64(entry.bytes[stateLocation{off: b.StackShift - 16 + int64(lane)}]) << (8 * lane)
 								}
 								if stateEval(t, b.Words[0].Current.Value, values) != incomingWord {
 									t.Fatal("callee arbitrary input word was not specialized to current bytes")

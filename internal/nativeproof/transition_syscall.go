@@ -26,21 +26,17 @@ func (m *transitionChecker) archSetFS(size uint8) error {
 	var low, high uint64
 	known := false
 	switch p := m.pointers[RSI].(type) {
-	case OriginPointer:
-		if p.Origin != m.bound.Origin {
-			return refuse(m.pc, "transition-provenance", "foreign syscall pointer")
-		}
-		if err := m.offset(p.Offset); err != nil {
-			return err
-		}
-		low, _ = relative(m.lo, p.Offset)
-		high, _ = relative(m.hi, p.Offset)
-		known = true
-	case ImagePointer:
+	case AddressPointer:
 		if _, err := m.advance(p, 0); err != nil {
 			return err
 		}
-		low, high, known = p.Address, p.Address, true
+		if p.isImage() {
+			low, high = uint64(p.offset), uint64(p.offset)
+		} else {
+			low, _ = relative(m.lo, p.offset)
+			high, _ = relative(m.hi, p.offset)
+		}
+		known = true
 	}
 	if known && high < ceiling {
 		valid = m.truth

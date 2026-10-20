@@ -100,7 +100,7 @@ func TestNarrowOperandCorrespondenceByteLogical(t *testing.T) {
 					if !owned || bound.Boundary.PC != fixture.cut || bound.Boundary.Instruction.Op != kind || len(bound.PrimitiveEffects) != 0 || len(bound.Accesses) != 1 {
 						t.Fatal("native preparation must stop before the byte operation")
 					}
-					rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: object, base: nativeproof.TransitionLocation{Offset: -16}}}}
+					rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: object, base: nativeproof.StackOffset(-16)}}}
 					proof, err := checkGlobalOperandCorrespondence(t.Context(), source, root, calls[0], fixture.image, fixture.entry, fixture.cut, prefix, native, rho)
 					if fault == "" {
 						if err != nil || proof == nil {
@@ -176,7 +176,7 @@ func TestNarrowOperandCorrespondenceImmediateStore(t *testing.T) {
 					if !owned || len(bound.Accesses) != 0 || len(bound.PrimitiveEffects) != 0 || bound.Boundary.Instruction.Op != x86asm.MOV || bound.Boundary.Instruction.MemBytes != width {
 						t.Fatal("unexecuted store acquired execution or initialization")
 					}
-					rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: prefix.operands[0].location.object, base: nativeproof.TransitionLocation{Offset: -16}}}}
+					rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: prefix.operands[0].location.object, base: nativeproof.StackOffset(-16)}}}
 					proof, err := checkGlobalOperandCorrespondence(t.Context(), source, root, calls[0], fixture.image, fixture.entry, fixture.cut, prefix, native, rho)
 					if !wrong {
 						if err != nil || proof == nil || len(proof.account.materialized) != 0 || len(proof.account.accesses) != 0 {

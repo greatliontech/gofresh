@@ -129,7 +129,7 @@ func checkGlobalFunctionAccount(meter *correspondenceContext, source computation
 	view := b.Prefix
 	view.Instructions, view.Accesses, view.Memory = b.Instructions, b.Accesses, b.State.Memory
 	var err error
-	p.layout, err = checkStorageAuthority(ctx, completed, view, rho, storageProtectedFootprints(view))
+	p.layout, err = checkStorageAuthority(ctx, completed, view, rho, storageProtectedFootprints(ctx, view))
 	if err != nil {
 		return nil, err
 	}
@@ -270,17 +270,23 @@ func (p *globalFunctionCorrespondence) checkStorageInputs(ctx context.Context, b
 		}
 		footprint, _ := p.layout.objectFootprint(binding.object)
 		for _, bound := range b.Interface.EntryWordUpperBounds {
-			if footprint.overlaps(storageFootprint{Image: true, Bytes: nativeproof.RelativeSpan{Start: int64(bound.Address), End: int64(bound.Address + 8)}}) {
+			extent, err := b.Geometry.ResolveStorage(ctx, nativeproof.ImageAddress(bound.Address), 8)
+			if err != nil {
+				return err
+			}
+			overlaps, err := b.Geometry.Overlaps(footprint.Bytes, extent)
+			if err != nil || overlaps {
 				return globalFunctionError("administrative entry predicate constrains represented source storage")
 			}
 		}
-		for offset := footprint.Bytes.Start; offset < footprint.Bytes.End; offset++ {
+		for offset := int64(0); offset < footprint.Bytes.Width(); offset++ {
+			location, _ := footprint.Bytes.Byte(offset)
 			var found bool
 			for _, cell := range b.InitialMemory {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				if !cell.Image || cell.Offset != offset {
+				if cell.TransitionLocation != location {
 					continue
 				}
 				if found || cell.Pointer != nil || cell.Value.Sort() != br.Bits(8) || cell.Value.View().Op != br.Variable || variables[cell.Value] {
@@ -301,8 +307,8 @@ func (p *globalFunctionCorrespondence) checkStorageInputs(ctx context.Context, b
 			if !ok || basic.Info()&(types.IsBoolean|types.IsInteger) == 0 {
 				return globalFunctionError("unsupported typed global input")
 			}
-			width := int(leaf.footprint.Bytes.End - leaf.footprint.Bytes.Start)
-			initial, err := storageNativeWord(ctx, builder, b.InitialMemory, nativeproof.TransitionLocation{Image: true, Offset: leaf.footprint.Bytes.Start}, width)
+			width := int(leaf.footprint.Bytes.Width())
+			initial, err := storageNativeWord(ctx, builder, b.InitialMemory, leaf.footprint.Bytes, width)
 			if err != nil {
 				return err
 			}
@@ -582,7 +588,7 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 			if _, found := nativeGroups[index]; found || access.ID != group.id {
 				return globalFunctionError("atomic accesses have another statement or activation")
 			}
-			if access.Bytes.End-access.Bytes.Start != int64(group.width) {
+			if access.Bytes.Width() != int64(group.width) {
 				return globalFunctionError("atomic access width differs from its primitive")
 			}
 			nativeGroups[index] = group
@@ -631,7 +637,7 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 				return globalFunctionError("source atomic grouping lost actual call/context/read-write provenance")
 			}
 			footprint, represented := p.layout.locationFootprint(read.location)
-			if !represented || a.Width <= 0 || footprint.Bytes.End-footprint.Bytes.Start != int64(a.Width) {
+			if !represented || a.Width <= 0 || footprint.Bytes.Width() != int64(a.Width) {
 				return globalFunctionError("source atomic width differs from its represented typed location")
 			}
 			for _, index := range []int{base + a.ReadAccess, base + a.WriteAccess} {
@@ -661,7 +667,7 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 			return err
 		}
 		_, atomic := nativeGroups[index]
-		if !atomic && p.administrativeAccess(b, access) {
+		if !atomic && p.administrativeAccess(ctx, b, access) {
 			p.administrative = append(p.administrative, index)
 			continue
 		}
@@ -675,22 +681,28 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 	return p.matchStorageEffects(ctx, b.Accesses, b.InitialMemory, observable, sourceGroups, nativeGroups)
 }
 
-func (p *globalFunctionCorrespondence) administrativeAccess(b nativeproof.TransitionBound, access nativeproof.TransitionAccess) bool {
-	if p.layout.classifyAccess(storageFootprint{Image: access.Image, Bytes: access.Bytes}) != storageDisjoint {
+func (p *globalFunctionCorrespondence) administrativeAccess(ctx context.Context, b nativeproof.TransitionBound, access nativeproof.TransitionAccess) bool {
+	if p.layout.classifyAccess(storageFootprint{Bytes: access.Bytes}) != storageDisjoint {
 		return false
 	}
-	if !access.Image {
-		if access.Kind == nativeproof.FrameReturnRead && access.Bytes == (nativeproof.RelativeSpan{Start: 0, End: 8}) && access.ID == b.Boundary.ID && access.Context == 0 {
+	if p.layout.stackExtent(access.Bytes) {
+		control, err := b.Geometry.ResolveStorage(ctx, nativeproof.StackOffset(0), 8)
+		if err == nil && access.Kind == nativeproof.FrameReturnRead && access.Bytes == control && access.ID == b.Boundary.ID && access.Context == 0 {
 			return true
 		}
 		frame := b.Interface.PrivateFrame
-		return frame != nil && frame.Bytes.Start < frame.Bytes.End && frame.Bytes.End <= 0 && access.Bytes.Start >= frame.Bytes.Start && access.Bytes.End <= frame.Bytes.End && access.Bytes.Start < access.Bytes.End
+		if frame == nil || frame.Bytes.Start >= frame.Bytes.End || frame.Bytes.End > 0 {
+			return false
+		}
+		extent, err := b.Geometry.ResolveStorage(ctx, nativeproof.StackOffset(frame.Bytes.Start), frame.Bytes.End-frame.Bytes.Start)
+		return err == nil && p.layout.contains(extent, access.Bytes)
 	}
 	if access.Kind != nativeproof.FrameRead {
 		return false
 	}
 	for _, bound := range b.Interface.EntryWordUpperBounds {
-		if access.Bytes.Start >= int64(bound.Address) && access.Bytes.End <= int64(bound.Address+8) && access.Bytes.Start < access.Bytes.End {
+		extent, err := b.Geometry.ResolveStorage(ctx, nativeproof.ImageAddress(bound.Address), 8)
+		if err == nil && p.layout.contains(extent, access.Bytes) {
 			return true
 		}
 	}
@@ -752,11 +764,12 @@ leavesLoop:
 		if !ok && partial {
 			continue
 		}
-		if !ok || int64(width) != leaf.footprint.Bytes.End-leaf.footprint.Bytes.Start {
+		if !ok || int64(width) != leaf.footprint.Bytes.Width() {
 			return storageFootprint{}, nil, globalFunctionError("effect lacks selected typed bits")
 		}
 		for lane := range width {
-			lanes[nativeproof.TransitionLocation{Image: footprint.Image, Offset: leaf.footprint.Bytes.Start + int64(lane)}] = byte(bits >> (8 * lane))
+			location, _ := leaf.footprint.Bytes.Byte(int64(lane))
+			lanes[location] = byte(bits >> (8 * lane))
 		}
 	}
 	if len(lanes) == 0 && !partial {
@@ -1180,11 +1193,12 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 			return err
 		}
 		for _, leaf := range leaves {
-			for offset := leaf.footprint.Bytes.Start; offset < leaf.footprint.Bytes.End; offset++ {
+			for offset := int64(0); offset < leaf.footprint.Bytes.Width(); offset++ {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				typed[nativeproof.TransitionLocation{Image: leaf.footprint.Image, Offset: offset}] = true
+				location, _ := leaf.footprint.Bytes.Byte(offset)
+				typed[location] = true
 			}
 		}
 	}
@@ -1224,14 +1238,14 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 		return cursor < len(observable) && observable[cursor] < ceiling()
 	}
 	proveBytes := func(index int, access nativeproof.TransitionAccess, want map[nativeproof.TransitionLocation]byte) ([]storagePaddingAccess, error) {
-		width := access.Bytes.End - access.Bytes.Start
+		width := access.Bytes.Width()
 		if width <= 0 || width > 8 || access.Value.Sort() != br.Bits(int(width*8)) {
 			return nil, globalFunctionError("unsupported native effect width")
 		}
 		var bits uint64
 		var gaps []nativeproof.TransitionLocation
 		for lane := int64(0); lane < width; lane++ {
-			location := nativeproof.TransitionLocation{Image: access.Image, Offset: access.Bytes.Start + lane}
+			location, _ := access.Bytes.Byte(lane)
 			v, ok := want[location]
 			if !ok {
 				if _, pad := padding[location]; !pad {
@@ -1254,7 +1268,7 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 			if err != nil {
 				return nil, err
 			}
-			location := nativeproof.TransitionLocation{Image: access.Image, Offset: access.Bytes.Start + lane}
+			location, _ := access.Bytes.Byte(lane)
 			if v, ok := want[location]; ok {
 				if err := p.constant(ctx, value, uint64(v)); err != nil {
 					return nil, err
@@ -1311,7 +1325,7 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 		index := observable[cursor]
 		access := native[index]
 		_, atomic := nativeGroups[index]
-		return !atomic && access.Kind == nativeproof.FrameRead && access.Image == footprint.Image && access.Bytes.Start >= footprint.Bytes.Start && access.Bytes.End <= footprint.Bytes.End
+		return !atomic && access.Kind == nativeproof.FrameRead && p.layout.contains(footprint.Bytes, access.Bytes)
 	}
 	// A frontier is a position in the actual checked source instruction trace.
 	// Allocation evidence becomes available there even when no ordinary access
@@ -1363,7 +1377,7 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 			index := observable[cursor]
 			access := native[index]
 			_, nativeAtomic := nativeGroups[index]
-			if nativeAtomic || access.Kind != nativeproof.FrameWrite || access.Image || access.Bytes.End-access.Bytes.Start > 8 || access.Bytes.Start >= access.Bytes.End {
+			if nativeAtomic || access.Kind != nativeproof.FrameWrite || !p.layout.stackExtent(access.Bytes) || access.Bytes.Width() > 8 || access.Bytes.Width() <= 0 {
 				break
 			}
 			// Prefer the already planned ordinary run, including its narrow
@@ -1371,8 +1385,8 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 			// update padding; the selected match records those bytes exactly once.
 			ordinary := ordinaryWrite != nil && p.layout.classifyAccess(storageFootprint{Bytes: access.Bytes}) == storageInside
 			covered := 0
-			for offset := access.Bytes.Start; offset < access.Bytes.End; offset++ {
-				location := nativeproof.TransitionLocation{Offset: offset}
+			for offset := int64(0); offset < access.Bytes.Width(); offset++ {
+				location, _ := access.Bytes.Byte(offset)
 				_, found := ordinaryWrite[location]
 				_, pad := padding[location]
 				ordinary = ordinary && (found || pad)
@@ -1393,8 +1407,8 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 				break
 			}
 			eligible := p.layout.classifyAccess(storageFootprint{Bytes: access.Bytes}) == storageInside
-			for offset := access.Bytes.Start; offset < access.Bytes.End; offset++ {
-				location := nativeproof.TransitionLocation{Offset: offset}
+			for offset := int64(0); offset < access.Bytes.Width(); offset++ {
+				location, _ := access.Bytes.Byte(offset)
 				_, initial := initializers[location]
 				_, pad := padding[location]
 				_, materialized := known[location]
@@ -1413,8 +1427,8 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 				}
 				break
 			}
-			for offset := access.Bytes.Start; offset < access.Bytes.End; offset++ {
-				location := nativeproof.TransitionLocation{Offset: offset}
+			for offset := int64(0); offset < access.Bytes.Width(); offset++ {
+				location, _ := access.Bytes.Byte(offset)
 				if _, initial := initializers[location]; initial {
 					pending[location] = true
 				}
@@ -1438,8 +1452,8 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 			}
 			recordPadding(plan.padding)
 			access := native[plan.index]
-			for offset := access.Bytes.Start; offset < access.Bytes.End; offset++ {
-				location := nativeproof.TransitionLocation{Offset: offset}
+			for offset := int64(0); offset < access.Bytes.Width(); offset++ {
+				location, _ := access.Bytes.Byte(offset)
 				if value, initial := initializers[location]; initial {
 					known[location] = value
 				}
@@ -1592,7 +1606,7 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 				}
 				index := observable[next]
 				access := native[index]
-				if splitRead && (access.Image != footprint.Image || access.Bytes.Start < footprint.Bytes.Start || access.Bytes.End > footprint.Bytes.End || previous >= 0 && access.Bytes.Start < native[previous].Bytes.End) {
+				if splitRead && (!p.layout.contains(footprint.Bytes, access.Bytes) || previous >= 0 && !p.layout.ordered(native[previous].Bytes.End(), access.Bytes.Start())) {
 					return storageMismatch("split native read leaves ordered source footprint")
 				}
 				if previous >= 0 && access.Context != native[previous].Context {
@@ -1603,15 +1617,15 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 						return storageMismatch("combined native writes cross a call boundary")
 					}
 				}
-				if _, atomic := nativeGroups[index]; atomic || access.Kind != kind || p.layout.classifyAccess(storageFootprint{Image: access.Image, Bytes: access.Bytes}) != storageInside {
+				if _, atomic := nativeGroups[index]; atomic || access.Kind != kind || p.layout.classifyAccess(storageFootprint{Bytes: access.Bytes}) != storageInside {
 					return storageMismatch("ordered source/native effects differ")
 				}
 				if err := matchBytes(index, access, lanes); err != nil {
 					return err
 				}
 				accounts := map[int]bool{}
-				for offset := access.Bytes.Start; offset < access.Bytes.End; offset++ {
-					location := nativeproof.TransitionLocation{Image: access.Image, Offset: offset}
+				for offset := int64(0); offset < access.Bytes.Width(); offset++ {
+					location, _ := access.Bytes.Byte(offset)
 					if seen[location] {
 						return storageMismatch("native effect repeats an already matched byte")
 					}
@@ -1642,9 +1656,9 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 			index := observable[next]
 			access := native[index]
 			nativeGroup, nativeAtomic := nativeGroups[index]
-			match = access.Image == footprint.Image && access.Bytes == footprint.Bytes && access.Kind == kind && atomic == nativeAtomic
+			match = access.Bytes == footprint.Bytes && access.Kind == kind && atomic == nativeAtomic
 			if atomic {
-				match = match && nativeGroup.kind == group.atomic.Kind && nativeGroup.width == group.atomic.Width && footprint.Bytes.End-footprint.Bytes.Start == int64(group.atomic.Width)
+				match = match && nativeGroup.kind == group.atomic.Kind && nativeGroup.width == group.atomic.Width && footprint.Bytes.Width() == int64(group.atomic.Width)
 			}
 			if match {
 				if err := matchBytes(index, access, lanes); err != nil {
@@ -1746,9 +1760,9 @@ func (p *globalFunctionCorrespondence) checkStorageLocationValues(ctx context.Co
 		value := readRegionLocation(state, leaf.location, leaf.typ)
 		bits, width, ok := storageScalarBits(value, sizes)
 		if !ok {
-			width = int(leaf.footprint.Bytes.End - leaf.footprint.Bytes.Start)
+			width = int(leaf.footprint.Bytes.Width())
 		}
-		actual, err := storageNativeWord(ctx, builder, memory, nativeproof.TransitionLocation{Image: leaf.footprint.Image, Offset: leaf.footprint.Bytes.Start}, width)
+		actual, err := storageNativeWord(ctx, builder, memory, leaf.footprint.Bytes, width)
 		if err != nil {
 			return err
 		}
@@ -1800,7 +1814,9 @@ func (p *globalFunctionCorrespondence) checkFinal(ctx context.Context, builder *
 		if !slices.Contains(b.State.Restored, register) {
 			return globalFunctionError("required caller register lacks derived restoration")
 		}
-		if _, image := b.State.Registers[register].Pointer.(nativeproof.ImagePointer); !image {
+		description, err := b.Prefix.Geometry.DescribePointer(b.State.Registers[register].Pointer)
+		_, image := description.Coordinate.(nativeproof.ImageAddress)
+		if err != nil || !image {
 			original, ok := prefix.EntryValueRegister(b.State.Registers[register].Pointer)
 			if !ok || original != register {
 				return globalFunctionError("restored register lost incoming value lineage")
@@ -1821,7 +1837,7 @@ func (p *globalFunctionCorrespondence) checkFinal(ctx context.Context, builder *
 			if nativeproof.Register(register) == nativeproof.RSP || slices.Contains(b.State.Restored, nativeproof.Register(register)) {
 				continue
 			}
-			if pointer, ok := value.Pointer.(nativeproof.OriginPointer); ok && pointer.Offset < 0 {
+			if offset, ok := b.Prefix.Geometry.OriginalStack(value.Pointer); ok && offset < 0 {
 				return globalFunctionError("private frame pointer escapes in returned context")
 			}
 			if err := independent(value.Value); err != nil {
@@ -1864,8 +1880,14 @@ func (p *globalFunctionCorrespondence) checkStorageFrame(ctx context.Context, b 
 			return err
 		}
 		private := b.Interface.PrivateFrame
-		if !old.Image && private != nil && old.Offset >= private.Bytes.Start && old.Offset < private.Bytes.End {
-			continue
+		if private != nil {
+			extent, err := b.Geometry.ResolveStorage(ctx, nativeproof.StackOffset(private.Bytes.Start), private.Bytes.End-private.Bytes.Start)
+			if err != nil {
+				return err
+			}
+			if p.layout.ordered(extent.Start(), old.TransitionLocation) && old.TransitionLocation != extent.End() && p.layout.ordered(old.TransitionLocation, extent.End()) {
+				continue
+			}
 		}
 		if p.layout.representedByte(old.TransitionLocation) {
 			continue

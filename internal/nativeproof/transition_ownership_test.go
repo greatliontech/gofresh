@@ -67,7 +67,7 @@ func TestTransitionOwnershipAndCancellation(t *testing.T) {
 	b.InitialMemory[0].Value = br.Term{}
 	b.Memory[0].Pointer = nil
 	b.Words[0].Value = br.Term{}
-	b.Accesses[0].Bytes = RelativeSpan{}
+	b.Accesses[0].Bytes = TransitionExtent{}
 	b.Instructions[0] = GuardedInstruction{}
 	b.Boundary.Bytes[0] = 0
 	b.ExcludedOrigins[0] = Span{}

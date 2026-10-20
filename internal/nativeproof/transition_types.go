@@ -238,31 +238,12 @@ type TransitionExpansion struct {
 }
 
 // TransitionPointer is a closed provenance sum. Nil means no provenance. Its
-// address arms identify a symbolic stack origin or an owned image mapping.
+// address arm identifies an owned stack or logical image arithmetic view.
 // A private entry-value arm retains caller value/provenance lineage without any
 // address capability. Equality of scalar values never creates these facts.
 // Distinct arms do not prove numerical
 // inequality outside the declared, disjoint memory footprints.
 type TransitionPointer interface{ transitionPointer() }
-
-// OriginPointer associates an exact signed offset with the fresh scalar origin.
-type OriginPointer struct {
-	Origin br.Term
-	Offset int64
-}
-
-func (OriginPointer) transitionPointer() {}
-
-// ImagePointer identifies an address within one owned logical load (including
-// its canonical one-past address). The private backing owner survives Image's
-// container snapshots, but not independent construction from equal bytes.
-type ImagePointer struct {
-	Address uint64
-	owner   *byte
-	load    int
-}
-
-func (ImagePointer) transitionPointer() {}
 
 // entryValueLineage is parametric caller context, not a third address space.
 // Complete ordered word copies preserve the original bits and any caller-side
@@ -275,18 +256,10 @@ func (entryValueLineage) transitionPointer() {}
 
 func addressCapability(p TransitionPointer) TransitionPointer {
 	switch p.(type) {
-	case OriginPointer, ImagePointer:
+	case AddressPointer:
 		return p
 	}
 	return nil
-}
-
-// TransitionLocation is a byte coordinate in the single current memory map.
-// Image selects an absolute low-canonical address; otherwise Offset is relative
-// to S. The namespaces are disjoint only for declared accessible memory.
-type TransitionLocation struct {
-	Image  bool
-	Offset int64
 }
 
 // TransitionValue is a scalar relation with separately justified provenance.
@@ -295,7 +268,7 @@ type TransitionValue struct {
 	Pointer TransitionPointer
 }
 
-// TransitionByte is a byte relation at a tagged stack/image location. PointerLane
+// TransitionByte is a byte relation at an owned canonical location. PointerLane
 // is meaningful only with a non-nil Pointer and reconstructs provenance only
 // when all eight ordered lanes of the same pointer are loaded together.
 type TransitionByte struct {
@@ -307,8 +280,8 @@ type TransitionByte struct {
 
 // TransitionWord records a fresh arbitrary input word, not an expected output.
 type TransitionWord struct {
-	Offset int64
-	Value  br.Term
+	Bytes TransitionExtent
+	Value br.Term
 }
 
 // TransitionAccess retains a conditional full-operand access. ID identifies the
@@ -318,9 +291,7 @@ type TransitionAccess struct {
 	PC      uint64
 	Context TransitionActivationID
 	Kind    AccessKind
-	Bytes   RelativeSpan
-	// Image selects absolute low-canonical coordinates in Bytes.
-	Image bool
+	Bytes   TransitionExtent
 	// Value is the read value or supplied write value at this exact occurrence,
 	// at the full access width. Later writes cannot replace this dependency.
 	Value br.Term
@@ -450,7 +421,7 @@ type TransitionFrame struct {
 	ID           TransitionOccurrenceID
 	Context      TransitionActivationID
 	Call, Return uint64
-	Slot         OriginPointer
+	Slot         AddressPointer
 }
 
 // TransitionFlag describes an architectural status independently of projection.
@@ -508,6 +479,8 @@ type ExcludedBoundary struct {
 // Instructions contains guarded fetch occurrences. Filtering their guards gives
 // the executed trace. Boundary and ExcludedBoundaries are unexecuted.
 type TransitionBound struct {
+	// Geometry retains this exact root's immutable storage identity and premises.
+	Geometry    ActualTransitionGeometry
 	Endpoint    TransitionEndpoint
 	ImageDigest [32]byte
 	Rules       string

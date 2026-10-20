@@ -106,11 +106,24 @@ func checkSelectedStartupRoot(ctx context.Context, image *nativeproof.Image, can
 // The suffix writes only these footprints. Other current bytes, including
 // startup spills and returned call-frame scratch, keep their exact value and
 // provenance; retaining initial memory or access history alone cannot show that.
-func selectedStartupMemoryFrame(before, after []nativeproof.TransitionByte, writes []storageFootprint) error {
+func selectedStartupMemoryFrame(geometry nativeproof.ActualTransitionGeometry, before, after []nativeproof.TransitionByte, writes []storageFootprint) error {
 	if len(before) != len(after) {
 		return fmt.Errorf("startup memory membership changed")
 	}
 	current := make(map[nativeproof.TransitionLocation]nativeproof.TransitionByte, len(after))
+	written := map[nativeproof.TransitionLocation]bool{}
+	for _, span := range writes {
+		if ok, err := geometry.Contains(span.Bytes, span.Bytes); err != nil || !ok {
+			return fmt.Errorf("foreign write extent")
+		}
+		for i := int64(0); i < span.Bytes.Width(); i++ {
+			key, err := span.Bytes.Byte(i)
+			if err != nil {
+				return err
+			}
+			written[key] = true
+		}
+	}
 	for _, cell := range after {
 		if _, exists := current[cell.TransitionLocation]; exists {
 			return fmt.Errorf("startup memory location repeated")
@@ -122,11 +135,7 @@ func selectedStartupMemoryFrame(before, after []nativeproof.TransitionByte, writ
 		if !found {
 			return fmt.Errorf("startup memory location disappeared")
 		}
-		written := false
-		for _, span := range writes {
-			written = written || old.Image == span.Image && old.Offset >= span.Bytes.Start && old.Offset < span.Bytes.End
-		}
-		if !written && old != now {
+		if !written[old.TransitionLocation] && old != now {
 			return fmt.Errorf("untouched startup byte or provenance changed at %+v", old.TransitionLocation)
 		}
 	}
@@ -176,7 +185,7 @@ func TestRuntimeStartupSelectedWrites(t *testing.T) {
 	if len(b.Instructions) != len(before.Instructions)+5 || !reflect.DeepEqual(b.Instructions[:len(before.Instructions)], before.Instructions) || len(b.Accesses) != len(before.Accesses)+3 || !reflect.DeepEqual(b.Accesses[:len(before.Accesses)], before.Accesses) || !reflect.DeepEqual(b.PrimitiveEffects, before.PrimitiveEffects) || !reflect.DeepEqual(b.ExcludedBoundaries, before.ExcludedBoundaries) || b.Flags != before.Flags || b.Thread != before.Thread {
 		t.Fatal("numeric context writes lost prefix effects, exclusions or machine state")
 	}
-	if !b.Thread.ContextChanged || b.Thread.SelectorPreserved || b.Registers[nativeproof.RSP].Pointer != (nativeproof.OriginPointer{Origin: b.Origin, Offset: -48}) {
+	if !b.Thread.ContextChanged || b.Thread.SelectorPreserved || !storageTestStack(b.Geometry, b.Registers[nativeproof.RSP].Pointer, -48) {
 		t.Fatal("prior FS replacement or current stack relation was erased")
 	}
 	queries, replacements := 0, 0
@@ -193,16 +202,16 @@ func TestRuntimeStartupSelectedWrites(t *testing.T) {
 	if queries != 2 || replacements != 1 || len(b.ExcludedBoundaries) != 3 {
 		t.Fatal("lost conditional CPU queries, actual FS replacement or excluded error arms")
 	}
-	if err := selectedStartupMemoryFrame(before.Memory, b.Memory, []storageFootprint{{Image: true, Bytes: nativeproof.RelativeSpan{Start: int64(x.tls), End: int64(x.tls + 8)}}, {Image: true, Bytes: nativeproof.RelativeSpan{Start: int64(x.machine), End: int64(x.machine + 8)}}, {Image: true, Bytes: nativeproof.RelativeSpan{Start: int64(x.context + 48), End: int64(x.context + 56)}}}); err != nil {
+	if err := selectedStartupMemoryFrame(b.Geometry, before.Memory, b.Memory, []storageFootprint{{Bytes: storageTestExtent(t, b.Geometry, nativeproof.ImageAddress(x.tls), 8)}, {Bytes: storageTestExtent(t, b.Geometry, nativeproof.ImageAddress(x.machine), 8)}, {Bytes: storageTestExtent(t, b.Geometry, nativeproof.ImageAddress(x.context+48), 8)}}); err != nil {
 		t.Fatal(err)
 	}
 	builder := br.NewBuilder(32)
 	for i, tc := range []struct{ address, value uint64 }{{x.tls, x.context}, {x.machine, x.context}, {x.context + 48, x.machine}} {
 		access := b.Accesses[len(before.Accesses)+i]
-		if !access.Image || access.Kind != nativeproof.FrameWrite || access.Bytes != (nativeproof.RelativeSpan{Start: int64(tc.address), End: int64(tc.address + 8)}) {
+		if access.Kind != nativeproof.FrameWrite || access.Bytes != storageTestExtent(t, b.Geometry, nativeproof.ImageAddress(tc.address), 8) {
 			t.Fatal("numeric startup write footprint/order differs")
 		}
-		value, err := storageNativeWord(t.Context(), builder, b.Memory, nativeproof.TransitionLocation{Image: true, Offset: int64(tc.address)}, 8)
+		value, err := storageNativeWord(t.Context(), builder, b.Memory, access.Bytes, 8)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -211,11 +220,11 @@ func TestRuntimeStartupSelectedWrites(t *testing.T) {
 			t.Fatal("numeric startup pointer value differs", err)
 		}
 		for _, cell := range b.Memory {
+			cell := storageTestByte(t, b.Geometry, cell)
 			if !cell.Image || cell.Offset < int64(tc.address) || cell.Offset >= int64(tc.address+8) {
 				continue
 			}
-			pointer, ok := cell.Pointer.(nativeproof.ImagePointer)
-			if !ok || pointer.Address != tc.value || cell.PointerLane != uint8(cell.Offset-int64(tc.address)) {
+			if !storageTestImagePointer(b.Geometry, cell.Pointer, tc.value) || cell.PointerLane != uint8(cell.Offset-int64(tc.address)) {
 				t.Fatal("numeric startup pointer store lost owned image provenance")
 			}
 		}
@@ -256,23 +265,21 @@ func TestSelectedStartupMemoryFrame(t *testing.T) {
 	b := br.NewBuilder(8)
 	value, _ := b.Const(br.Bits(8), 7)
 	other, _ := b.Const(br.Bits(8), 9)
-	origin, _ := b.Input(br.Bits(64), br.NewScope(), 0)
-	_, owned := globalFunctionNative(t, "entry-pointer-global")
-	_, foreign := globalFunctionNative(t, "entry-pointer-global")
-	ownedBound, _ := owned.Bound()
-	foreignBound, _ := foreign.Bound()
-	pointer := ownedBound.State.Registers[nativeproof.R14].Pointer
-	foreignPointer := foreignBound.State.Registers[nativeproof.R14].Pointer
-	if pointer == nil || pointer == foreignPointer || !reflect.DeepEqual(pointer, foreignPointer) {
+	_, ownedBound := storageGeometryFixture(t, 0)
+	_, foreignBound := storageGeometryFixture(t, 0)
+	geometry := ownedBound.Geometry
+	pointer := ownedBound.Registers[nativeproof.R14].Pointer
+	foreignPointer := foreignBound.Registers[nativeproof.R14].Pointer
+	if pointer == nil || pointer == foreignPointer || !storageTestImagePointer(geometry, pointer, 0x1000) || !storageTestImagePointer(foreignBound.Geometry, foreignPointer, 0x1000) {
 		t.Fatal("foreign-owner control must share bytes/address but not pointer identity")
 	}
 	before := []nativeproof.TransitionByte{
-		{TransitionLocation: nativeproof.TransitionLocation{Offset: -24}, Value: value},
-		{TransitionLocation: nativeproof.TransitionLocation{Offset: -56}, Value: value, Pointer: nativeproof.OriginPointer{Origin: origin, Offset: -48}, PointerLane: 1},
-		{TransitionLocation: nativeproof.TransitionLocation{Image: true, Offset: 0x700000}, Value: value, Pointer: pointer},
-		{TransitionLocation: nativeproof.TransitionLocation{Image: true, Offset: 0x700030}, Value: value},
+		{TransitionLocation: storageTestLocation(t, geometry, nativeproof.StackOffset(16)), Value: value},
+		{TransitionLocation: storageTestLocation(t, geometry, nativeproof.StackOffset(-56)), Value: value, Pointer: ownedBound.Registers[nativeproof.RCX].Pointer, PointerLane: 1},
+		{TransitionLocation: storageTestLocation(t, geometry, nativeproof.ImageAddress(0x1000)), Value: value, Pointer: pointer},
+		{TransitionLocation: storageTestLocation(t, geometry, nativeproof.ImageAddress(0x1030)), Value: value},
 	}
-	writes := []storageFootprint{{Image: true, Bytes: nativeproof.RelativeSpan{Start: 0x700030, End: 0x700038}}}
+	writes := []storageFootprint{{Bytes: storageTestExtent(t, geometry, nativeproof.ImageAddress(0x1030), 8)}}
 	for _, variant := range []string{"unchanged", "allowed-write", "allowed-stack", "wrong-space", "spill-value", "scratch-pointer", "scratch-lane", "prior-image", "foreign-image", "missing", "duplicate", "moved"} {
 		t.Run(variant, func(t *testing.T) {
 			after := slices.Clone(before)
@@ -282,7 +289,7 @@ func TestSelectedStartupMemoryFrame(t *testing.T) {
 				after[3].Value = other
 			case "allowed-stack", "wrong-space":
 				after[0].Value = other
-				admitted = append(admitted, storageFootprint{Image: variant == "wrong-space", Bytes: nativeproof.RelativeSpan{Start: -24, End: -23}})
+				admitted = append(admitted, storageFootprint{Bytes: storageTestExtent(t, geometry, storageTestSelector(variant == "wrong-space", 16), 1)})
 			case "spill-value":
 				after[0].Value = other
 			case "scratch-pointer":
@@ -298,9 +305,9 @@ func TestSelectedStartupMemoryFrame(t *testing.T) {
 			case "duplicate":
 				after[0] = after[1]
 			case "moved":
-				after[0].Offset--
+				after[0].TransitionLocation = storageTestLocation(t, geometry, nativeproof.StackOffset(15))
 			}
-			err := selectedStartupMemoryFrame(before, after, admitted)
+			err := selectedStartupMemoryFrame(geometry, before, after, admitted)
 			if (err == nil) != (variant == "unchanged" || variant == "allowed-write" || variant == "allowed-stack") {
 				t.Fatalf("startup frame %s: %v", variant, err)
 			}

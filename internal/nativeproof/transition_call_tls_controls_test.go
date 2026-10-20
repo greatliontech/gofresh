@@ -225,7 +225,7 @@ func TestTransitionCallTLSOwnershipAndBudgets(t *testing.T) {
 	if len(rootProjection.Frames) == 0 {
 		t.Fatal("ownership fixture lacks an active frame")
 	}
-	rootProjection.Frames[0].Slot.Offset++
+	rootProjection.Frames[0].Slot.offset++
 	rootProjection.Expansions[0].Context = 999
 	rootProjection.Thread.FS.Value = br.Term{}
 	sibling, err := CheckTransitionContinuation(t.Context(), root, p)

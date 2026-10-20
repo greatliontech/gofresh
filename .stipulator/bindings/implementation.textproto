@@ -97,6 +97,12 @@
 # before their actual instructions and supply no executed atomic or store effect.
 # NarrowAccumulatorProvenance checks full-RAX scalar behavior and conservative
 # CAS32 pointer metadata; it does not claim new positive pointer inference.
+# Geometry claims exercise finite existing stack/image fixtures: aggregate union
+# coverage versus native operand grants, adjacent logical-load boundaries, owned
+# coordinates, checked application associations and exact continuation identity.
+# Source-layout controls retain foreign-extent refusals, including empty layouts,
+# and cumulative expression charging. These examples admit no additional storage
+# population and supply no process-input interpretation or actual-use authority.
 
 bindings {
   requirement_id: "REQ-impl-native-entry"
@@ -8958,7 +8964,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.globalFunctionCorrespondence.administrativeAccess"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "389cd3169cc403764c51515221335882b3229c71fa695f0332d5171fd441694e"
+  shape_hash: "06105b4079ca546fa5604cee8e9c4e91957feb8507c6b7c89d2171f17274d8ee"
   clause_label: "all-input-relation"
 }
 
@@ -13057,7 +13063,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.resolveStorageRepresentation"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "f32cbce953dec8c14f14b78ab2c495b4a42bec198b9e67ab65dd74e6ba004765"
+  shape_hash: "5060dc13c7b5725310f7d8aa25a2da065d1dbed27f83e29108946195b8c3408b"
   clause_label: "bound-scope"
 }
 
@@ -13112,7 +13118,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.storageProtectedFootprints"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "06988a24f58a5662ef1d89891abcc009140caa110ac2e7e338502435d2187b9f"
+  shape_hash: "bf32775c1c7991f6318140dc1e49f8f6f20ff128f6cd4f039b5e6affaf76a956"
   clause_label: "bound-scope"
 }
 
@@ -13123,7 +13129,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.storageBoundaryLocation"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "ed0b2e3226f22ca1021264feb0ac0d73b26c714a530a6cc29004075d490d4fd4"
+  shape_hash: "1e210ea8650f770a99df93bc4e910517d1eeeaa3e5fc842a9adf7780b4b49b91"
   clause_label: "bound-scope"
 }
 
@@ -13233,7 +13239,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.storageNativeWord"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "0f867cdb4aa500a9bdf27d800b3cddb4134360e1a68a8cd949ab5c5229a0794e"
+  shape_hash: "bcc1bddb7692647d03d64c49887f4477deb3116540d6c51a92a15b3496f22586"
   clause_label: "all-input-relation"
 }
 
@@ -18830,4 +18836,125 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "6383842c5e151b1ca9b2e4ec60cf77be6531e487fc6ea19feedc702fb7106d4e"
   clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "bd21b156f19fc5c5d8790a1de8fc1bc95a5cb4c37f84465829566013343c02e4"
+  source_hash: "b1dcbb16cd2ca68e9ddfedea085b16a1a9337ec04edd89212d5826c5fa94d3bc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.ActualTransitionGeometry.ResolveStorage"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "45fee5cc797ac6aa73bf3d46a832385afa3994d416e90a2d5a8dca79966d81e6"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "bd21b156f19fc5c5d8790a1de8fc1bc95a5cb4c37f84465829566013343c02e4"
+  source_hash: "b1dcbb16cd2ca68e9ddfedea085b16a1a9337ec04edd89212d5826c5fa94d3bc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.ActualTransitionGeometry.ResolvePointer"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "64be7d10f8bedb22b810a5e348edb5d766fc8c26fc545b75fba29c499431d644"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "bd21b156f19fc5c5d8790a1de8fc1bc95a5cb4c37f84465829566013343c02e4"
+  source_hash: "b1dcbb16cd2ca68e9ddfedea085b16a1a9337ec04edd89212d5826c5fa94d3bc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TransitionGeometryAssociation.ResolveExtent"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "9f6a09788f4e090c27dcd75656378ce90d92b3e69dc8897341a693912d813bd6"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "bd21b156f19fc5c5d8790a1de8fc1bc95a5cb4c37f84465829566013343c02e4"
+  source_hash: "b1dcbb16cd2ca68e9ddfedea085b16a1a9337ec04edd89212d5826c5fa94d3bc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionGeometryOwnedCoverageAndAccess"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "84b615d517ed6947ac9a17c154a34d549dbddeb53dbda8b0989cfcc8a69a83b7"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "bd21b156f19fc5c5d8790a1de8fc1bc95a5cb4c37f84465829566013343c02e4"
+  source_hash: "b1dcbb16cd2ca68e9ddfedea085b16a1a9337ec04edd89212d5826c5fa94d3bc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionGeometryLogicalLoadBoundary"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "78d289e827b74242b198b620f981da25b49d5531359a8b1160f2f343bd0d8d93"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "bd21b156f19fc5c5d8790a1de8fc1bc95a5cb4c37f84465829566013343c02e4"
+  source_hash: "b1dcbb16cd2ca68e9ddfedea085b16a1a9337ec04edd89212d5826c5fa94d3bc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionGeometryApplicationAssociation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bd86587594a36b90198b3617b3030c9af3053193051103f1f57b09dfc8ec5f5a"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "bd21b156f19fc5c5d8790a1de8fc1bc95a5cb4c37f84465829566013343c02e4"
+  source_hash: "b1dcbb16cd2ca68e9ddfedea085b16a1a9337ec04edd89212d5826c5fa94d3bc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionGeometryForeignAndProjectionIsolation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4a24b5c0f1cdb4f67b20cd2facbae2cd03413aa40893aab85083c13d6b6c3e82"
+  clause_label: "symbolic-origins"
+}
+
+bindings {
+  requirement_id: "REQ-impl-native-transition"
+  content_hash: "bd21b156f19fc5c5d8790a1de8fc1bc95a5cb4c37f84465829566013343c02e4"
+  source_hash: "b1dcbb16cd2ca68e9ddfedea085b16a1a9337ec04edd89212d5826c5fa94d3bc"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/nativeproof.TestTransitionGeometryForeignAndProjectionIsolation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4a24b5c0f1cdb4f67b20cd2facbae2cd03413aa40893aab85083c13d6b6c3e82"
+  clause_label: "conditional-composition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestStorageGeometryOwnershipAndAggregateCoverage"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fb3746c5bb607d1ac6aefdd4a543601d40603b8524f4d6312c7d8c1d70006ae3"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestStorageGeometryCumulativeAccount"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d55f5eec76a0ba81d170aeb7970458fd57f2bd5d4f8daed1bd249e6b07290504"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.chargeStorageGeometry"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "1be6a212baa53fa0adeb63b8f20a32b5184876fc46596b5da8d33908d3cff834"
+  clause_label: "checked-equality"
 }

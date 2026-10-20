@@ -14,9 +14,10 @@ func (m *transitionChecker) originOffsetCanonical(offset int64) bool {
 // currentOriginOperand recognizes the closed pointer/value invariant, not a
 // scalar equality or opaque entry-value lineage. Foreign origins are outside
 // this rule and leave ordinary scalar reasoning available.
-func (m *transitionChecker) currentOriginOperand(v TransitionValue) (OriginPointer, bool) {
-	p, ok := v.Pointer.(OriginPointer)
-	return p, ok && v.Value.Sort() == br.Bits(64) && m.bound.Origin.Valid() && p.Origin == m.bound.Origin
+func (m *transitionChecker) currentOriginOperand(v TransitionValue) (AddressPointer, bool) {
+	p, ok := v.Pointer.(AddressPointer)
+	_, original := m.bound.Geometry.OriginalStack(p)
+	return p, ok && v.Value.Sort() == br.Bits(64) && original
 }
 
 // refineOriginCompare refines an actual full-width CMP after its normal flag
@@ -33,18 +34,18 @@ func (m *transitionChecker) refineOriginCompare(left, right TransitionValue) (bo
 	if !aOK || !bOK {
 		return false, nil
 	}
-	if err := m.offset(a.Offset); err != nil {
+	if err := m.offset(a.offset); err != nil {
 		return false, err
 	}
-	if err := m.offset(b.Offset); err != nil {
+	if err := m.offset(b.offset); err != nil {
 		return false, err
 	}
 	less, equal := m.falsity, m.falsity
 	// Do not subtract signed offsets: their difference need not be representable.
-	if a.Offset < b.Offset {
+	if a.offset < b.offset {
 		less = m.truth
 	}
-	if a.Offset == b.Offset {
+	if a.offset == b.offset {
 		equal = m.truth
 	}
 	m.bound.Flags.CF.Value, m.bound.Flags.ZF.Value = less, equal
@@ -64,11 +65,11 @@ func (m *transitionChecker) originWordUpperBound(word TransitionValue, upperOffs
 	if !ok {
 		return false, false, nil
 	}
-	if err := m.offset(p.Offset); err != nil {
+	if err := m.offset(p.offset); err != nil {
 		return false, false, err
 	}
 	if !m.originOffsetCanonical(upperOffset) {
 		return false, false, refuse(m.pc, "transition-origin", "numeric upper bound wraps or is noncanonical for an admitted origin")
 	}
-	return p.Offset < upperOffset, true, nil
+	return p.offset < upperOffset, true, nil
 }

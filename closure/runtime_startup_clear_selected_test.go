@@ -66,12 +66,12 @@ func TestRuntimeStartupSelectedClear(t *testing.T) {
 	if c.Flags != before.Flags || c.Registers != before.Registers || c.Vectors != before.Vectors || c.SSE != before.SSE || c.Thread != before.Thread || !reflect.DeepEqual(c.PrimitiveEffects, before.PrimitiveEffects) || !reflect.DeepEqual(c.Accesses, before.Accesses) || !reflect.DeepEqual(c.Frames, before.Frames) {
 		t.Fatal("CLD changed another architectural component or erased earlier effects")
 	}
-	if err := selectedStartupMemoryFrame(before.Memory, c.Memory, nil); err != nil {
+	if err := selectedStartupMemoryFrame(c.Geometry, before.Memory, c.Memory, nil); err != nil {
 		t.Fatal(err)
 	}
 	entered := continueAt(cleared, wrapperPC, callPC)
 	w, _ := entered.BoundFor(image)
-	if len(w.Frames) != 1 || w.Frames[0].Call != callPC || w.Frames[0].Return != callPC+uint64(call.Len) || w.Frames[0].Slot != (nativeproof.OriginPointer{Origin: w.Origin, Offset: -56}) || w.Boundary.Context != w.Frames[0].Context || w.Registers[nativeproof.RSP].Pointer != w.Frames[0].Slot || w.Direction != c.Direction || w.InitialDirection != c.InitialDirection {
+	if len(w.Frames) != 1 || w.Frames[0].Call != callPC || w.Frames[0].Return != callPC+uint64(call.Len) || !storageTestStack(w.Geometry, w.Frames[0].Slot, -56) || w.Boundary.Context != w.Frames[0].Context || w.Registers[nativeproof.RSP].Pointer != w.Frames[0].Slot || w.Direction != c.Direction || w.InitialDirection != c.InitialDirection {
 		t.Fatal("actual wrapper call lost its continuation, shifted origin or current direction")
 	}
 	if len(w.Instructions) != len(c.Instructions)+1 || !reflect.DeepEqual(w.Instructions[:len(c.Instructions)], c.Instructions) || len(w.Accesses) != len(c.Accesses)+1 || !reflect.DeepEqual(w.Accesses[:len(c.Accesses)], c.Accesses) || w.Flags != c.Flags || w.Vectors != c.Vectors || w.SSE != c.SSE || w.Thread != c.Thread || !reflect.DeepEqual(w.PrimitiveEffects, c.PrimitiveEffects) || !reflect.DeepEqual(w.Abstractions, c.Abstractions) || !reflect.DeepEqual(w.ExcludedBoundaries, c.ExcludedBoundaries) {
@@ -83,15 +83,15 @@ func TestRuntimeStartupSelectedClear(t *testing.T) {
 		}
 	}
 	control := w.Accesses[len(c.Accesses)]
-	if control.ID != w.Frames[0].ID || control.Context != c.Boundary.Context || control.PC != callPC || control.Image || control.Kind != nativeproof.FrameWrite || control.Bytes != (nativeproof.RelativeSpan{Start: -56, End: -48}) {
+	if control.ID != w.Frames[0].ID || control.Context != c.Boundary.Context || control.PC != callPC || control.Kind != nativeproof.FrameWrite || control.Bytes != storageTestExtent(t, w.Geometry, nativeproof.StackOffset(-56), 8) {
 		t.Fatal("actual wrapper CALL lacks its exact control-word write")
 	}
-	if err := selectedStartupMemoryFrame(c.Memory, w.Memory, []storageFootprint{{Bytes: control.Bytes}}); err != nil {
+	if err := selectedStartupMemoryFrame(w.Geometry, c.Memory, w.Memory, []storageFootprint{{Bytes: control.Bytes}}); err != nil {
 		t.Fatal(err)
 	}
 	controlBuilder := br.NewBuilder(32)
 	continuation, _ := controlBuilder.Const(br.Bits(64), callPC+uint64(call.Len))
-	word, err := storageNativeWord(t.Context(), controlBuilder, w.Memory, nativeproof.TransitionLocation{Offset: -56}, 8)
+	word, err := storageNativeWord(t.Context(), controlBuilder, w.Memory, control.Bytes, 8)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestRuntimeStartupSelectedClear(t *testing.T) {
 	if memory, ok := reload.Args[1].(x86asm.Mem); !ok || reload.Args[0] != x86asm.R14 || reload.MemBytes != 8 || reload.AddrSize != 64 || memory.Segment != x86asm.FS || memory.Base != 0 || memory.Index != 0 || memory.Disp != -8 {
 		t.Fatal("following unexecuted boundary is not the actual FS-relative TLS reload")
 	}
-	if err := selectedStartupMemoryFrame(w.Memory, after.Memory, nil); err != nil {
+	if err := selectedStartupMemoryFrame(after.Geometry, w.Memory, after.Memory, nil); err != nil {
 		t.Fatal(err)
 	}
 	wordZero, _ := b.Const(br.Bits(64), 0)

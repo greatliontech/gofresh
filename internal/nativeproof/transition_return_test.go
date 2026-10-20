@@ -79,13 +79,13 @@ func TestTransitionReturnActualGuardedFrame(t *testing.T) {
 	if len(b.Prefix.Instructions) != 8 || len(b.Instructions) != 9 || len(b.Prefix.Accesses) != 3 || len(b.Accesses) != 4 || len(b.Prefix.ExcludedBoundaries) != 1 || b.Prefix.ExcludedBoundaries[0].PC != testEntry+25 {
 		t.Fatal("incomplete actual prologue/body/epilogue/return coverage")
 	}
-	if b.Instructions[8] != (GuardedInstruction{ID: b.Prefix.Boundary.ID, Span: Span{ret, ret + 1}, Guard: b.Prefix.CutGuard}) || b.Accesses[3].ID != b.Prefix.Boundary.ID || b.Accesses[3].Kind != FrameReturnRead || b.Accesses[3].Bytes != (RelativeSpan{0, 8}) || b.Accesses[3].PC != ret || b.Accesses[3].Context != 0 {
+	if b.Instructions[8] != (GuardedInstruction{ID: b.Prefix.Boundary.ID, Span: Span{ret, ret + 1}, Guard: b.Prefix.CutGuard}) || b.Accesses[3].ID != b.Prefix.Boundary.ID || b.Accesses[3].Kind != FrameReturnRead || extentCoordinates(b.Accesses[3].Bytes) != (RelativeSpan{0, 8}) || b.Accesses[3].PC != ret || b.Accesses[3].Context != 0 {
 		t.Fatal("RET did not execute once in the root context")
 	}
-	if b.Accesses[1].Bytes != (RelativeSpan{-8, 0}) || b.Accesses[1].Kind != FrameWrite || b.Accesses[2].Bytes != (RelativeSpan{-8, 0}) || b.Accesses[2].Kind != FrameRead {
+	if extentCoordinates(b.Accesses[1].Bytes) != (RelativeSpan{-8, 0}) || b.Accesses[1].Kind != FrameWrite || extentCoordinates(b.Accesses[2].Bytes) != (RelativeSpan{-8, 0}) || b.Accesses[2].Kind != FrameRead {
 		t.Fatal("saved caller word lost ordered write/read effects")
 	}
-	if b.State.Preserved[RBP] != 0 || b.State.Preserved[RSP] != 0 || b.State.Preserved[R14] != math.MaxUint64 || b.State.Registers[RSP].Pointer != (OriginPointer{Origin: b.Prefix.Origin, Offset: 8}) || !slices.Equal(b.State.Memory, b.Prefix.Memory) {
+	if b.State.Preserved[RBP] != 0 || b.State.Preserved[RSP] != 0 || b.State.Preserved[R14] != math.MaxUint64 || b.State.Registers[RSP].Pointer != b.Prefix.Geometry.stackPointer(8) || !slices.Equal(b.State.Memory, b.Prefix.Memory) {
 		t.Fatal("restored frame was mistaken for an unwritten frame or writes rolled back")
 	}
 	reg, ok := direct.EntryValueRegister(b.State.Registers[RBP].Pointer)
@@ -112,8 +112,8 @@ func TestTransitionReturnActualGuardedFrame(t *testing.T) {
 				t.Fatal("actual final state disagrees with caller frame semantics")
 			}
 			for _, v := range b.State.Memory {
-				if !v.Image && v.Offset >= -8 && v.Offset < 0 {
-					if stateEval(t, v.Value, values) != originalBP>>(8*uint(v.Offset+8))&255 || v.Pointer != b.State.Registers[RBP].Pointer || v.PointerLane != uint8(v.Offset+8) {
+				if !v.isImage() && v.offset >= -8 && v.offset < 0 {
+					if stateEval(t, v.Value, values) != originalBP>>(8*uint(v.offset+8))&255 || v.Pointer != b.State.Registers[RBP].Pointer || v.PointerLane != uint8(v.offset+8) {
 						t.Fatal("saved bytes or full-word lineage did not survive return")
 					}
 				}
@@ -350,7 +350,7 @@ func TestTransitionReturnOwnershipCancellationBudgets(t *testing.T) {
 	constant, _ := br.NewBuilder(1).Const(br.Bits(8), 0)
 	for j := range corrupt.bound.Memory {
 		v := &corrupt.bound.Memory[j]
-		if !v.Image && v.Offset == 0 {
+		if !v.isImage() && v.offset == 0 {
 			v.Value = constant
 		}
 	}

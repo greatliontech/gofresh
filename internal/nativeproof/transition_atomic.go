@@ -19,15 +19,9 @@ func (m *transitionChecker) lockedAddress(mem x86asm.Mem, width int, size uint8)
 	if err != nil {
 		return TransitionLocation{}, err
 	}
-	mask := uint64(width - 1)
-	aligned := uint64(off.Offset)&mask == 0
-	if !off.Image {
-		d := m.face.Origin
-		aligned = d.Modulus >= uint64(width) && (d.Residue+uint64(off.Offset))&mask == 0
-		// Singleton origin domains can establish alignment without a modulus.
-		if m.lo == m.hi {
-			aligned = (m.lo+uint64(off.Offset))&mask == 0
-		}
+	aligned, err := m.bound.Geometry.CheckAlignment(TransitionExtent{off, int64(width)}, int64(width))
+	if err != nil {
+		return TransitionLocation{}, err
 	}
 	if !aligned {
 		return TransitionLocation{}, refuse(m.pc, "transition-alignment", "locked memory requires natural operand alignment for every origin")

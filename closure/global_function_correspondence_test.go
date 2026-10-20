@@ -281,7 +281,7 @@ func TestGlobalFunctionCompleteEffectsAndReturn(t *testing.T) {
 	}
 	aliased := rho
 	aliased.bindings = append([]storageBinding(nil), rho.bindings...)
-	aliased.bindings[1].base.Offset = aliased.bindings[0].base.Offset + 1
+	aliased.bindings[1].base = aliased.bindings[0].base.(nativeproof.ImageAddress) + 1
 	if p, err := checkGlobalFunctionCorrespondence(t.Context(), source, source.prog.Roots["F"], fixture.image, fixture.entry, completed, returned, aliased, nil); p != nil || err == nil {
 		t.Fatal("overlapping representation admitted")
 	}

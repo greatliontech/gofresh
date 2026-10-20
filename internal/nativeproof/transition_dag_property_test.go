@@ -321,7 +321,7 @@ func dagAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, face
 			if a.Kind == FrameWrite {
 				kind = "write"
 			}
-			orderedAccesses = append(orderedAccesses, dagEvent{a.PC, kind, a.Bytes.Start, int(a.Bytes.End - a.Bytes.Start), a.Image})
+			orderedAccesses = append(orderedAccesses, dagEvent{a.PC, kind, a.Bytes.start.offset, int(a.Bytes.Width()), a.Bytes.start.isImage()})
 		}
 	}
 	var wantQueries, wantAccesses []dagEvent
@@ -350,7 +350,7 @@ func dagAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, face
 			if a.Kind == FrameWrite {
 				kind = "write"
 			}
-			got = append(got, dagEvent{i.Start, kind, a.Bytes.Start, int(a.Bytes.End - a.Bytes.Start), a.Image})
+			got = append(got, dagEvent{i.Start, kind, a.Bytes.start.offset, int(a.Bytes.Width()), a.Bytes.start.isImage()})
 		}
 		if queryPCs[i.Start] {
 			got = append(got, dagEvent{pc: i.Start, kind: "query"})
@@ -380,14 +380,15 @@ func dagAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, face
 			t.Fatal("invented pointer", got)
 		}
 		switch p := got.(type) {
-		case OriginPointer:
-			if want.image || p.Origin != b.Origin || p.Offset != want.off {
-				t.Fatal("wrong stack provenance")
+		case AddressPointer:
+			if !b.Geometry.ownsPointer(p) || p.isImage() != want.image || p.offset != want.off {
+				t.Fatal("wrong owned address provenance")
 			}
-		case ImagePointer:
-			if !want.image || p.Address != uint64(want.off) || p.load != want.load || p.owner != &x.im.data[0] {
+			if p.isImage() && (p.view.load != want.load || !sameImage(p.view.backing.geometry.image, x.im)) {
 				t.Fatal("wrong image provenance")
 			}
+		default:
+			t.Fatal("unknown pointer arm")
 		}
 	}
 	for reg, v := range b.Registers {

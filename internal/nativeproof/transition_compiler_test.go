@@ -92,7 +92,7 @@ func TestTransitionOptimizedArtifacts(t *testing.T) {
 				t.Fatal(err)
 			}
 			b, _ := c.Bound()
-			if requireStackPointer(t, b.Registers[RSP].Pointer).Offset != -48 || requireStackPointer(t, b.Registers[RSI].Pointer).Offset != 8 || requireStackPointer(t, b.Registers[RBX].Pointer).Offset != 8 || len(b.Accesses) != 3 {
+			if requireStackPointer(t, b.Registers[RSP].Pointer).offset != -48 || requireStackPointer(t, b.Registers[RSI].Pointer).offset != 8 || requireStackPointer(t, b.Registers[RBX].Pointer).offset != 8 || len(b.Accesses) != 3 {
 				t.Fatal("unexpected actual spill relation", b.Accesses)
 			}
 			assertTransitionOracle(t, im, b, 40)
@@ -246,11 +246,11 @@ func checkOptimizedImagePrefix(t testing.TB, im *Image, ripPC uint64) {
 		t.Fatal(err)
 	}
 	b := c.checked.bound
-	image, ok := b.Registers[RDI].Pointer.(ImagePointer)
-	if !ok || image.Address != address || image.owner != &im.data[0] {
+	image, ok := b.Registers[RDI].Pointer.(AddressPointer)
+	if !ok || !image.isImage() || uint64(image.offset) != address || !b.Geometry.ownsPointer(image) || !sameImage(image.view.backing.geometry.image, im) {
 		t.Fatal("actual image address/provenance differs")
 	}
-	if requireStackPointer(t, b.Registers[RSP].Pointer).Offset != -48 || requireStackPointer(t, b.Registers[RBX].Pointer).Offset != -65584 {
+	if requireStackPointer(t, b.Registers[RSP].Pointer).offset != -48 || requireStackPointer(t, b.Registers[RBX].Pointer).offset != -65584 {
 		t.Fatal("actual stack-relative values differ")
 	}
 	for _, reg := range []Register{RBP, RAX} {
@@ -260,16 +260,16 @@ func checkOptimizedImagePrefix(t testing.TB, im *Image, ripPC uint64) {
 	}
 	count := 0
 	for _, cell := range b.Memory {
-		if !cell.Image {
+		if !cell.isImage() {
 			continue
 		}
 		count++
-		off := cell.Offset - int64(address)
+		off := cell.offset - int64(address)
 		want := int64(-65584)
 		if off >= 8 && off < 16 {
 			want = -48
 		}
-		if off < 0 || off >= 32 || cell.Pointer != (OriginPointer{b.Origin, want}) || cell.PointerLane != uint8(off%8) {
+		if off < 0 || off >= 32 || cell.Pointer != b.Geometry.stackPointer(want) || cell.PointerLane != uint8(off%8) {
 			t.Fatalf("actual image word/lane differs at offset %d: pointer=%+v lane=%d, want stack offset %d", off, cell.Pointer, cell.PointerLane, want)
 		}
 		for _, s := range []uint64{1 << 32, 1 << 40, 1 << 46} {
@@ -283,7 +283,7 @@ func checkOptimizedImagePrefix(t testing.TB, im *Image, ripPC uint64) {
 	}
 	for j, off := range []int64{16, 24, 0, 8} {
 		a := b.Accesses[j+3]
-		if !a.Image || a.Kind != FrameWrite || a.Bytes != (RelativeSpan{int64(address) + off, int64(address) + off + 8}) {
+		if !a.Bytes.start.isImage() || a.Kind != FrameWrite || extentCoordinates(a.Bytes) != (RelativeSpan{int64(address) + off, int64(address) + off + 8}) {
 			t.Fatal("actual image store order differs")
 		}
 	}

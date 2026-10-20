@@ -93,11 +93,11 @@ func assertCutOnly(t testing.TB, b TransitionBound, code []byte, moved bool) {
 		var pointer TransitionPointer
 		preserved := ^uint64(0)
 		if Register(r) == RSP {
-			pointer = OriginPointer{Origin: b.Origin}
+			pointer = b.Geometry.stackPointer(0)
 		}
 		if moved && Register(r) == RAX {
 			want = b.InitialRegisters[RSP]
-			pointer = OriginPointer{Origin: b.Origin}
+			pointer = b.Geometry.stackPointer(0)
 			preserved = 0
 		}
 		if got.Value != want || got.Pointer != pointer || b.Preserved[r] != preserved {
@@ -300,10 +300,42 @@ func assertCutStateAlpha(t testing.TB, a, b TransitionBound) {
 			term(x.Interface().(br.Term), y.Interface().(br.Term))
 			return
 		}
-		if x.Type() == reflect.TypeOf(ImagePointer{}) {
-			if x.Interface().(ImagePointer) != y.Interface().(ImagePointer) {
-				t.Fatal("image pointer changed")
+		if x.Type() == reflect.TypeOf(ActualTransitionGeometry{}) {
+			p, q := x.Interface().(ActualTransitionGeometry), y.Interface().(ActualTransitionGeometry)
+			if p != a.Geometry || q != b.Geometry || !reflect.DeepEqual(p.root.face, q.root.face) {
+				t.Fatal("geometry owner or premises changed")
 			}
+			term(p.Origin(), q.Origin())
+			return
+		}
+		if x.Type() == reflect.TypeOf(AddressPointer{}) {
+			p, q := x.Interface().(AddressPointer), y.Interface().(AddressPointer)
+			if !a.Geometry.ownsPointer(p) || !b.Geometry.ownsPointer(q) || p.offset != q.offset || p.view.bounds != q.view.bounds || p.view.load != q.view.load || p.view.backing.role != q.view.backing.role {
+				t.Fatal("pointer owner or arithmetic view changed")
+			}
+			if p.isImage() && !sameImage(p.view.backing.geometry.image, q.view.backing.geometry.image) {
+				t.Fatal("image pointer owner changed")
+			}
+			term(p.view.backing.geometry.origin, q.view.backing.geometry.origin)
+			return
+		}
+		if x.Type() == reflect.TypeOf(TransitionLocation{}) {
+			p, q := x.Interface().(TransitionLocation), y.Interface().(TransitionLocation)
+			if !a.Geometry.owns(p) || !b.Geometry.owns(q) || p.offset != q.offset || p.isImage() != q.isImage() {
+				t.Fatal("canonical location changed")
+			}
+			return
+		}
+		if x.Type() == reflect.TypeOf(TransitionExtent{}) {
+			p, q := x.Interface().(TransitionExtent), y.Interface().(TransitionExtent)
+			if p.width != q.width {
+				t.Fatal("extent width changed")
+			}
+			walk(reflect.ValueOf(p.start), reflect.ValueOf(q.start))
+			return
+		}
+		if x.Type() == reflect.TypeOf(entryValueLineage{}) {
+			term(x.Interface().(entryValueLineage).value, y.Interface().(entryValueLineage).value)
 			return
 		}
 		if x.Type() == reflect.TypeOf(ImageInitialization{}) {

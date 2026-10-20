@@ -44,7 +44,7 @@ func TestRuntimeStartupSelectedAtomicApplication(t *testing.T) {
 		t.Fatal("root-to-actual-call prefix", err)
 	}
 	before, ok := caller.BoundFor(image)
-	if !ok || before.ConditionalRegion || len(before.Frames) != 1 || before.Frames[0].Call != outerCall || before.Frames[0].Return != until || before.Registers[nativeproof.RSP].Pointer != (nativeproof.OriginPointer{Origin: before.Origin, Offset: -112}) || !before.Thread.ContextChanged {
+	if !ok || before.ConditionalRegion || len(before.Frames) != 1 || before.Frames[0].Call != outerCall || before.Frames[0].Return != until || !storageTestStack(before.Geometry, before.Registers[nativeproof.RSP].Pointer, -112) || !before.Thread.ContextChanged {
 		t.Fatal("rooted caller lost the actual wrapper frame, stack relation or FS history")
 	}
 	application, err := nativeproof.CheckTransitionCallReturn(t.Context(), caller, callee)

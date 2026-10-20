@@ -236,7 +236,7 @@ func assertSelectedArgsPrefix(t testing.TB, raw []byte, image *nativeproof.Image
 		t.Fatal("argument prefix lost prior effects or executed beyond the cut")
 	}
 	decode := globalCandidateDecoder(t, raw)
-	if len(after.Frames) != 2 || after.Frames[0].Call != x.call || after.Frames[0].Return != x.call+uint64(decode(x.call).Len) || after.Frames[0].Slot.Offset != -56 || after.Frames[1].Call != x.nested || after.Frames[1].Return != x.nested+uint64(decode(x.nested).Len) || after.Frames[1].Slot.Offset != -88 || after.Boundary.Context != nativeproof.TransitionActivationID(after.Frames[1].ID) {
+	if len(after.Frames) != 2 || after.Frames[0].Call != x.call || after.Frames[0].Return != x.call+uint64(decode(x.call).Len) || !storageTestStack(after.Geometry, after.Frames[0].Slot, -56) || after.Frames[1].Call != x.nested || after.Frames[1].Return != x.nested+uint64(decode(x.nested).Len) || !storageTestStack(after.Geometry, after.Frames[1].Slot, -88) || after.Boundary.Context != nativeproof.TransitionActivationID(after.Frames[1].ID) {
 		t.Fatal("argument prefix lost actual nested control words or active contexts")
 	}
 	b := br.NewBuilder(4096)
@@ -251,7 +251,7 @@ func assertSelectedArgsPrefix(t testing.TB, raw []byte, image *nativeproof.Image
 	}
 	word := func(memory []nativeproof.TransitionByte, image bool, offset int64, width int) br.Term {
 		t.Helper()
-		v, err := storageNativeWord(t.Context(), b, memory, nativeproof.TransitionLocation{Image: image, Offset: offset}, width)
+		v, err := storageNativeWord(t.Context(), b, memory, storageTestExtent(t, before.Geometry, storageTestSelector(image, offset), int64(width)), width)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -282,7 +282,7 @@ func assertSelectedArgsPrefix(t testing.TB, raw []byte, image *nativeproof.Image
 		equal(flag.actual.Value, want)
 	}
 	for reg, offset := range map[nativeproof.Register]int64{nativeproof.RSP: -112, nativeproof.RBP: -96, nativeproof.RBX: 8} {
-		if after.Registers[reg].Pointer != (nativeproof.OriginPointer{Origin: before.Origin, Offset: offset}) {
+		if !storageTestStack(before.Geometry, after.Registers[reg].Pointer, offset) {
 			t.Fatal("argument register lost origin provenance", reg)
 		}
 	}
@@ -304,29 +304,33 @@ func assertSelectedArgsPrefix(t testing.TB, raw []byte, image *nativeproof.Image
 		}
 	}
 	for _, cell := range after.Memory {
+		cell := storageTestByte(t, after.Geometry, cell)
 		if cell.Image && cell.Offset >= int64(x.argv) && cell.Offset < int64(x.argv+8) && (cell.Pointer != after.Registers[nativeproof.RBX].Pointer || cell.PointerLane != uint8(cell.Offset-int64(x.argv))) {
 			t.Fatal("stored full pointer lost its ordered origin lanes")
 		}
-		if !cell.Image && cell.Offset >= -96 && cell.Offset < -88 && (cell.Pointer != (nativeproof.OriginPointer{Origin: before.Origin, Offset: -64}) || cell.PointerLane != uint8(cell.Offset+96)) {
+		if !cell.Image && cell.Offset >= -96 && cell.Offset < -88 && (!storageTestStack(before.Geometry, cell.Pointer, -64) || cell.PointerLane != uint8(cell.Offset+96)) {
 			t.Fatal("saved wrapper BP lost its full original-origin relation")
 		}
 	}
-	writes := []storageFootprint{{Bytes: nativeproof.RelativeSpan{Start: -56, End: -48}}, {Bytes: nativeproof.RelativeSpan{Start: -64, End: -56}}, {Bytes: nativeproof.RelativeSpan{Start: -88, End: -80}}, {Bytes: nativeproof.RelativeSpan{Start: -96, End: -88}}, {Image: true, Bytes: nativeproof.RelativeSpan{Start: int64(x.argc), End: int64(x.argc + 4)}}, {Image: true, Bytes: nativeproof.RelativeSpan{Start: int64(x.argv), End: int64(x.argv + 8)}}}
-	if err := selectedStartupMemoryFrame(before.Memory, after.Memory, writes); err != nil {
+	writes := []storageFootprint{{Bytes: storageTestExtent(t, after.Geometry, nativeproof.StackOffset(-56), 8)}, {Bytes: storageTestExtent(t, after.Geometry, nativeproof.StackOffset(-64), 8)}, {Bytes: storageTestExtent(t, after.Geometry, nativeproof.StackOffset(-88), 8)}, {Bytes: storageTestExtent(t, after.Geometry, nativeproof.StackOffset(-96), 8)}, {Bytes: storageTestExtent(t, after.Geometry, nativeproof.ImageAddress(x.argc), 4)}, {Bytes: storageTestExtent(t, after.Geometry, nativeproof.ImageAddress(x.argv), 8)}}
+	if err := selectedStartupMemoryFrame(after.Geometry, before.Memory, after.Memory, writes); err != nil {
 		t.Fatal(err)
 	}
-	fs, fsOK := before.Thread.FS.Pointer.(nativeproof.ImagePointer)
-	context, contextOK := after.Registers[nativeproof.R14].Pointer.(nativeproof.ImagePointer)
-	if !fsOK || !contextOK {
+	fsDescription, fsErr := before.Geometry.DescribePointer(before.Thread.FS.Pointer)
+	contextDescription, contextErr := after.Geometry.DescribePointer(after.Registers[nativeproof.R14].Pointer)
+	fs, fsOK := fsDescription.Coordinate.(nativeproof.ImageAddress)
+	context, contextOK := contextDescription.Coordinate.(nativeproof.ImageAddress)
+	if fsErr != nil || contextErr != nil || !fsOK || !contextOK {
 		t.Fatal("wrapper lost current FS/image provenance")
 	}
-	equal(after.Registers[nativeproof.R14].Value, word(before.Memory, true, int64(fs.Address)-8, 8))
+	equal(after.Registers[nativeproof.R14].Value, word(before.Memory, true, int64(fs)-8, 8))
 	// Origin alignment is part of the opaque native theorem, not an
 	// unconditional scalar rewrite of the startup AND. Check its exact origin
 	// lanes and unchanged current bytes; do not invent an extra scalar premise.
-	guardValue := word(before.Memory, true, int64(context.Address+16), 8)
+	guardValue := word(before.Memory, true, int64(context+16), 8)
 	for _, cell := range before.Memory {
-		if cell.Image && cell.Offset >= int64(context.Address+16) && cell.Offset < int64(context.Address+24) && (cell.Pointer != (nativeproof.OriginPointer{Origin: before.Origin, Offset: -65584}) || cell.PointerLane != uint8(cell.Offset-int64(context.Address+16))) {
+		cell := storageTestByte(t, before.Geometry, cell)
+		if cell.Image && cell.Offset >= int64(context+16) && cell.Offset < int64(context+24) && (!storageTestStack(before.Geometry, cell.Pointer, -65584) || cell.PointerLane != uint8(cell.Offset-int64(context+16))) {
 			t.Fatal("current guard lacks full original-origin provenance")
 		}
 	}
@@ -347,9 +351,9 @@ func assertSelectedArgsPrefix(t testing.TB, raw []byte, image *nativeproof.Image
 		{false, nativeproof.FrameWrite, -64, 8, before.Registers[nativeproof.RBP].Value},
 		{false, nativeproof.FrameRead, -48, 4, count},
 		{false, nativeproof.FrameRead, -40, 8, vector},
-		{true, nativeproof.FrameRead, int64(fs.Address) - 8, 8, after.Registers[nativeproof.R14].Value},
+		{true, nativeproof.FrameRead, int64(fs) - 8, 8, after.Registers[nativeproof.R14].Value},
 		{false, nativeproof.FrameWrite, -88, 8, innerReturn},
-		{true, nativeproof.FrameRead, int64(context.Address + 16), 8, guardValue},
+		{true, nativeproof.FrameRead, int64(context + 16), 8, guardValue},
 		{false, nativeproof.FrameWrite, -96, 8, wrapperBP},
 		{true, nativeproof.FrameWrite, int64(x.argc), 4, count},
 		{true, nativeproof.FrameRead, int64(x.barrier), 4, zero32},
@@ -361,7 +365,7 @@ func assertSelectedArgsPrefix(t testing.TB, raw []byte, image *nativeproof.Image
 		t.Fatalf("argument prefix has %d accesses, want %d", len(accesses), len(expected))
 	}
 	for i, want := range expected {
-		got := accesses[i]
+		got := storageTestAccess(t, after.Geometry, accesses[i])
 		if got.Image != want.image || got.Kind != want.kind || got.Bytes != (nativeproof.RelativeSpan{Start: want.start, End: want.start + int64(want.width)}) {
 			t.Fatal("argument access lost exact width or order", i, got)
 		}

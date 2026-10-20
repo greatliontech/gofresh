@@ -67,7 +67,7 @@ func TestTransitionEntryPrefix(t *testing.T) {
 		t.Fatalf("incomplete executed coverage: %v %v", b.Instructions, b.Accesses)
 	}
 	for j, want := range []RelativeSpan{{0, 8}, {-24, -16}, {-16, -8}} {
-		if b.Accesses[j].Bytes != want || (b.Accesses[j].Kind == FrameRead) != (j == 0) {
+		if extentCoordinates(b.Accesses[j].Bytes) != want || (b.Accesses[j].Kind == FrameRead) != (j == 0) {
 			t.Fatal("access inventory", b.Accesses)
 		}
 	}
@@ -76,7 +76,7 @@ func TestTransitionEntryPrefix(t *testing.T) {
 		if r == RSP {
 			want = -48
 		}
-		if b.Registers[r].Pointer != (OriginPointer{b.Origin, want}) {
+		if b.Registers[r].Pointer != b.Geometry.stackPointer(want) {
 			t.Fatal("wrong origin relation", r, b.Registers[r])
 		}
 	}
@@ -151,14 +151,14 @@ func assertTransitionOracle(t testing.TB, im *Image, b TransitionBound, samples 
 			if v.Value.View().Op == br.Variable {
 				values[v.Value] = uint64(rng.Uint32() & 255)
 			}
-			memory[s+uint64(v.Offset)] = byte(evalRelationTerm(t, v.Value, values, 0))
+			memory[s+uint64(v.offset)] = byte(evalRelationTerm(t, v.Value, values, 0))
 		}
 		initialRegs := regs
 		initialMemory := map[uint64]byte{}
 		for p, v := range memory {
 			initialMemory[p] = v
 		}
-		var accesses []TransitionAccess
+		var accesses []concreteTransitionAccess
 		pc := b.Entry
 		for steps := 0; pc != b.Boundary.PC; steps++ {
 			if steps > len(b.Instructions) {
@@ -186,7 +186,7 @@ func assertTransitionOracle(t testing.TB, im *Image, b TransitionBound, samples 
 					for j := range bytes {
 						bytes[j] = memory[p+uint64(j)]
 					}
-					accesses = append(accesses, TransitionAccess{PC: pc, Kind: FrameRead, Bytes: RelativeSpan{int64(p - s), int64(p-s) + 8}, Value: concreteAccessValue(binary.LittleEndian.Uint64(bytes[:]), 64)})
+					accesses = append(accesses, concreteTransitionAccess{PC: pc, Kind: FrameRead, Bytes: RelativeSpan{int64(p - s), int64(p-s) + 8}, Value: concreteAccessValue(binary.LittleEndian.Uint64(bytes[:]), 64)})
 					return binary.LittleEndian.Uint64(bytes[:])
 				default:
 					t.Fatalf("oracle operand %v", arg)
@@ -205,7 +205,7 @@ func assertTransitionOracle(t testing.TB, im *Image, b TransitionBound, samples 
 					for j, x := range bytes {
 						memory[p+uint64(j)] = x
 					}
-					accesses = append(accesses, TransitionAccess{PC: pc, Kind: FrameWrite, Bytes: RelativeSpan{int64(p - s), int64(p-s) + 8}, Value: concreteAccessValue(v, 64)})
+					accesses = append(accesses, concreteTransitionAccess{PC: pc, Kind: FrameWrite, Bytes: RelativeSpan{int64(p - s), int64(p-s) + 8}, Value: concreteAccessValue(v, 64)})
 				} else {
 					r := i.Args[0].(x86asm.Reg)
 					if r >= x86asm.EAX && r <= x86asm.R15L {
@@ -237,28 +237,28 @@ func assertTransitionOracle(t testing.TB, im *Image, b TransitionBound, samples 
 			if b.Preserved[r] != 0 && regs[r] != initialRegs[r] {
 				t.Fatal("preserved GPR changed", r)
 			}
-			if v.Pointer != nil && (requireStackPointer(t, v.Pointer).Origin != b.Origin || regs[r] != s+uint64(requireStackPointer(t, v.Pointer).Offset)) {
+			if v.Pointer != nil && (requireStackPointer(t, v.Pointer).view.backing.geometry.origin != b.Origin || regs[r] != s+uint64(requireStackPointer(t, v.Pointer).offset)) {
 				t.Fatal("pointer/scalar disagreement", r)
 			}
 		}
 		for _, v := range b.Memory {
-			p := s + uint64(v.Offset)
+			p := s + uint64(v.offset)
 			if got := byte(evalRelationTerm(t, v.Value, values, rng.Uint64())); got != memory[p] {
-				t.Fatalf("memory offset %d: %#x != %#x", v.Offset, got, memory[p])
+				t.Fatalf("memory offset %d: %#x != %#x", v.offset, got, memory[p])
 			}
 			written := false
 			for _, access := range accesses {
-				written = written || access.Kind == FrameWrite && v.Offset >= access.Bytes.Start && v.Offset < access.Bytes.End
+				written = written || access.Kind == FrameWrite && v.offset >= access.Bytes.Start && v.offset < access.Bytes.End
 			}
 			if !written && memory[p] != initialMemory[p] {
 				t.Fatal("memory outside write footprint changed")
 			}
-			if v.Pointer != nil && memory[p] != byte((s+uint64(requireStackPointer(t, v.Pointer).Offset))>>(8*v.PointerLane)) {
+			if v.Pointer != nil && memory[p] != byte((s+uint64(requireStackPointer(t, v.Pointer).offset))>>(8*v.PointerLane)) {
 				t.Fatal("pointer byte relation differs")
 			}
 		}
 		var pointer [8]byte
-		spill := b.Accesses[2].Bytes.Start
+		spill := b.Accesses[2].Bytes.start.offset
 		for j := range pointer {
 			pointer[j] = memory[s+uint64(spill)+uint64(j)]
 		}
@@ -505,7 +505,7 @@ func TestTransitionAlignmentResiduesAndImmediateExtensions(t *testing.T) {
 		}
 		b, _ := c.Bound()
 		want := -int64(40 + (residue+8)%16)
-		if requireStackPointer(t, b.Registers[RSP].Pointer).Offset != want {
+		if requireStackPointer(t, b.Registers[RSP].Pointer).offset != want {
 			t.Fatal("alignment assumed zero residue", residue, b.Registers[RSP])
 		}
 		// The independent reference machine covers the complete register/byte
@@ -527,11 +527,11 @@ func TestTransitionAlignmentResiduesAndImmediateExtensions(t *testing.T) {
 		vals := map[br.Term]uint64{b.Origin: 0x100000000}
 		switch code {
 		case "4889e0482d280000004825f0ffffff":
-			if requireStackPointer(t, b.Registers[RAX].Pointer).Offset != -48 || evalRelationTerm(t, b.Registers[RAX].Value, vals, 7) != 0x100000000-48 {
+			if requireStackPointer(t, b.Registers[RAX].Pointer).offset != -48 || evalRelationTerm(t, b.Registers[RAX].Value, vals, 7) != 0x100000000-48 {
 				t.Fatal("accumulator imm32 extension")
 			}
 		case "4881ec280000004881e4f0ffffff":
-			if requireStackPointer(t, b.Registers[RSP].Pointer).Offset != -48 || evalRelationTerm(t, b.Registers[RSP].Value, vals, 7) != 0x100000000-48 {
+			if requireStackPointer(t, b.Registers[RSP].Pointer).offset != -48 || evalRelationTerm(t, b.Registers[RSP].Value, vals, 7) != 0x100000000-48 {
 				t.Fatal("group imm32 extension")
 			}
 		case "48c7c0ffffffff48bb8877665544332211":
@@ -539,7 +539,7 @@ func TestTransitionAlignmentResiduesAndImmediateExtensions(t *testing.T) {
 				t.Fatal("MOV immediate extension")
 			}
 		default:
-			if requireStackPointer(t, b.Registers[RSP].Pointer).Offset != 0 || evalRelationTerm(t, b.Registers[RSP].Value, vals, 7) != 0x100000000 {
+			if requireStackPointer(t, b.Registers[RSP].Pointer).offset != 0 || evalRelationTerm(t, b.Registers[RSP].Value, vals, 7) != 0x100000000 {
 				t.Fatal("negative SUB immediate extension")
 			}
 		}

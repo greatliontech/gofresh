@@ -255,11 +255,11 @@ func (s storageJointSource) representation(t testing.TB, c storageOracleTemplate
 	rho := storageRepresentation{source: s.source.prog, image: image}
 	for i, at := range layout.Globals {
 		global := s.input.root.Pkg.Members[fmt.Sprintf("g%d", i)].(*ssa.Global)
-		rho.bindings = append(rho.bindings, storageBinding{object: regionObject{kind: regionGlobal, site: global}, base: nativeproof.TransitionLocation{Image: at.Image, Offset: at.Offset}})
+		rho.bindings = append(rho.bindings, storageBinding{object: regionObject{kind: regionGlobal, site: global}, base: storageTestSelector(at.Image, at.Offset)})
 	}
 	if c.Kind != "zero-arg" && c.Kind != "eliminated" {
 		id := storageOracleLocalID(t, c, s.initialReference)
-		rho.bindings = append(rho.bindings, storageBinding{object: s.objects[id], base: nativeproof.TransitionLocation{Offset: layout.Local.Offset}})
+		rho.bindings = append(rho.bindings, storageBinding{object: s.objects[id], base: nativeproof.StackOffset(layout.Local.Offset)})
 	}
 	return rho
 }
@@ -347,7 +347,7 @@ func storageJointCheckInputs(t testing.TB, c storageOracleTemplate, layout stora
 		var ordered []storageJointVariable
 		for lane := range c.Width {
 			at := storageAt(layout.Globals[i], int64(lane))
-			term := initial[nativeproof.TransitionLocation{Image: true, Offset: at.Offset}]
+			term := initial[storageTestLocation(t, b.Geometry, nativeproof.ImageAddress(at.Offset))]
 			id, variable := storageJointVariableOf(term)
 			if !variable || term.Sort() != br.Bits(8) || seen[id] || antecedent[id] {
 				t.Fatal("native initial global bytes lack original independent variable identities")
@@ -425,7 +425,7 @@ func storageJointAssignments(t testing.TB, b nativeproof.TransitionBound, initia
 		t.Fatalf("initial native byte domain=%d want %d", len(b.InitialMemory), len(initial))
 	}
 	for _, cell := range b.InitialMemory {
-		value, present := initial[storageByteLocation{cell.Image, cell.Offset}]
+		value, present := initial[storageTestCoordinate(t, b.Geometry, cell.TransitionLocation)]
 		if !present {
 			t.Fatal("certificate introduced storage outside fixture domain")
 		}
@@ -436,7 +436,7 @@ func storageJointAssignments(t testing.TB, b nativeproof.TransitionBound, initia
 		assignments = append(assignments, br.Assignment{Variable: variable, Value: value})
 	}
 	for _, cell := range b.InitialMemory {
-		if storageJointEval(t, cell.Value, assignments) != uint64(initial[storageByteLocation{cell.Image, cell.Offset}]) {
+		if storageJointEval(t, cell.Value, assignments) != uint64(initial[storageTestCoordinate(t, b.Geometry, cell.TransitionLocation)]) {
 			t.Fatal("native entry relation silently initialized fixture scratch")
 		}
 	}
@@ -486,7 +486,7 @@ func storageJointCheckNative(t testing.TB, c storageOracleTemplate, placement st
 	}
 	seen := map[storageByteLocation]bool{}
 	for _, cell := range b.State.Memory {
-		at := storageByteLocation{cell.Image, cell.Offset}
+		at := storageTestCoordinate(t, b.Prefix.Geometry, cell.TransitionLocation)
 		expected, present := want.Memory[at]
 		if !present || seen[at] || storageJointEval(t, cell.Value, assignments) != uint64(expected) {
 			t.Fatalf("native current byte %+v differs from independent intent/sentinel", at)
@@ -504,6 +504,7 @@ func storageJointCheckNative(t testing.TB, c storageOracleTemplate, placement st
 		t.Fatal("native read/write/return population differs from independent intent")
 	}
 	for i, access := range b.Accesses {
+		access := storageTestAccess(t, b.Prefix.Geometry, access)
 		if guard, exists := guards[access.ID]; !exists || guard != 1 || access.Context != 0 {
 			t.Fatal("access lacks its actual executing occurrence/activation guard")
 		}
@@ -632,7 +633,7 @@ func storageJointCheckAccounts(t testing.TB, c storageOracleTemplate, p *globalF
 			t.Fatal("matched account lost source occurrence")
 		}
 		sourceCovered[match.source] = true
-		event, access := sourceEvents[match.source], accesses[match.native]
+		event, access := sourceEvents[match.source], storageTestAccess(t, p.layout.geometry, accesses[match.native])
 		if (event.Kind == "write") != (access.Kind == nativeproof.FrameWrite) {
 			t.Fatal("matched source/native account changes access direction")
 		}
@@ -694,7 +695,7 @@ func storageJointCheckAccounts(t testing.TB, c storageOracleTemplate, p *globalF
 		at     storageByteLocation
 	}]bool{}
 	for _, pad := range p.padding {
-		at := storageByteLocation{pad.location.Image, pad.location.Offset}
+		at := storageTestCoordinate(t, p.layout.geometry, pad.location)
 		key := struct {
 			native int
 			at     storageByteLocation
@@ -704,13 +705,13 @@ func storageJointCheckAccounts(t testing.TB, c storageOracleTemplate, p *globalF
 		}
 		paddingSeen[key] = true
 		nativeLanes[pad.native][at] = true
-		access := accesses[pad.native]
+		access := storageTestAccess(t, p.layout.geometry, accesses[pad.native])
 		if at.Offset < access.Bytes.Start || at.Offset >= access.Bytes.End || byte(storageJointEval(t, access.Value, assignments)>>uint(8*(at.Offset-access.Bytes.Start))) != byte(storageJointEval(t, pad.value, assignments)) {
 			t.Fatal("padding account is detached from its actual native access")
 		}
 	}
 	for i, class := range classes {
-		if class == "matched" && int64(len(nativeLanes[i])) != accesses[i].Bytes.End-accesses[i].Bytes.Start {
+		if class == "matched" && int64(len(nativeLanes[i])) != accesses[i].Bytes.Width() {
 			t.Fatal("matched native access has bytes absent from typed/padding accounts")
 		}
 	}
@@ -743,7 +744,7 @@ func storageJointCheckAccounts(t testing.TB, c storageOracleTemplate, p *globalF
 			t.Fatalf("read-choice account differs from independent occurrence mapping: matched=%v eliminated=%v materialized=%v", p.matched, p.eliminated, p.materialized)
 		}
 		if len(materialized) != 0 {
-			actual := accesses[1]
+			actual := storageTestAccess(t, p.layout.geometry, accesses[1])
 			if actual.Kind != nativeproof.FrameWrite || actual.Image || actual.Bytes.Start != placement.Local.Offset || actual.Bytes.End != placement.Local.Offset+4 || storageJointEval(t, actual.Value, assignments) != 0 {
 				t.Fatal("retained-read initializer is not the actual zero write to X")
 			}
@@ -765,7 +766,7 @@ func storageJointCheckAccounts(t testing.TB, c storageOracleTemplate, p *globalF
 			t.Fatalf("source-zero account differs from independent source-only elimination/materialized-read intent: matched=%v eliminated=%v materialized=%v", p.matched, p.eliminated, p.materialized)
 		}
 		if len(materialized) != 0 {
-			actual := accesses[0]
+			actual := storageTestAccess(t, p.layout.geometry, accesses[0])
 			if actual.Kind != nativeproof.FrameWrite || actual.Image || actual.Bytes.Start != placement.Local.Offset || actual.Bytes.End != placement.Local.Offset+4 || storageJointEval(t, actual.Value, assignments) != 0 {
 				t.Fatal("retained source-zero read lacks its actual zero initializer")
 			}
@@ -1099,7 +1100,7 @@ func checkStorageJointPrefix(t testing.TB, c storageOracleTemplate, s storageJoi
 		}
 		seen := map[storageByteLocation]bool{}
 		for _, cell := range bound.Memory {
-			at := storageByteLocation{cell.Image, cell.Offset}
+			at := storageTestCoordinate(t, bound.Geometry, cell.TransitionLocation)
 			v, exists := want.Memory[at]
 			if !exists || seen[at] || storageJointEval(t, cell.Value, assignments) != uint64(v) {
 				t.Fatal("prefix current bytes differ from independent scratch/materialization intent")
@@ -1117,6 +1118,7 @@ func checkStorageJointPrefix(t testing.TB, c storageOracleTemplate, s storageJoi
 			guards[instruction.ID] = storageJointEval(t, instruction.Guard, assignments)
 		}
 		for i, access := range bound.Accesses {
+			access := storageTestAccess(t, bound.Geometry, access)
 			w := want.Events[i]
 			kind := nativeproof.FrameRead
 			if w.Write {
@@ -1259,7 +1261,7 @@ func TestStorageJointStoreOperandCounterexamples(t *testing.T) {
 					}
 					assignments, _ := storageJointAssignments(t, bound, initial, 1<<40, 0x1234)
 					for _, cell := range bound.Memory {
-						if storageJointEval(t, cell.Value, assignments) != uint64(initial[storageByteLocation{cell.Image, cell.Offset}]) {
+						if storageJointEval(t, cell.Value, assignments) != uint64(initial[storageTestCoordinate(t, bound.Geometry, cell.TransitionLocation)]) {
 							t.Fatal("mutated operand preparation changed a prior native byte")
 						}
 					}
@@ -1485,7 +1487,7 @@ func TestStorageJointSourceZeroReadOperandNeedsMaterialization(t *testing.T) {
 			}
 			assignments, _ := storageJointAssignments(t, bound, initial, 1<<40, 0)
 			for _, cell := range bound.Memory {
-				if storageJointEval(t, cell.Value, assignments) != uint64(want.Memory[storageByteLocation{cell.Image, cell.Offset}]) {
+				if storageJointEval(t, cell.Value, assignments) != uint64(want.Memory[storageTestCoordinate(t, bound.Geometry, cell.TransitionLocation)]) {
 					t.Fatal("actual read boundary borrowed source zero for native storage")
 				}
 			}
@@ -1809,7 +1811,7 @@ func TestStorageJointRepresentationCounterexamples(t *testing.T) {
 			case "wrong-local-context":
 				candidate.bindings[len(candidate.bindings)-1].object.context = s.input.root.Pkg.Func("Read")
 			case "root-control-slot":
-				candidate.bindings[len(candidate.bindings)-1].base.Offset = 0
+				candidate.bindings[len(candidate.bindings)-1].base = nativeproof.StackOffset(0)
 			case "foreign-image":
 				other, err := nativeproof.NewImage(t.Context(), f.raw)
 				if err != nil {
@@ -1928,7 +1930,7 @@ func TestStorageJointAlignedPartialGlobalOverlap(t *testing.T) {
 	}
 	rho := storageRepresentation{source: source.prog, image: f.image}
 	for i, global := range globals {
-		rho.bindings = append(rho.bindings, storageBinding{object: regionObject{kind: regionGlobal, site: global}, base: nativeproof.TransitionLocation{Image: true, Offset: at[i].Offset}})
+		rho.bindings = append(rho.bindings, storageBinding{object: regionObject{kind: regionGlobal, site: global}, base: nativeproof.ImageAddress(at[i].Offset)})
 	}
 	baseline, err := checkGlobalOperandCorrespondence(t.Context(), source, root, call, f.image, f.entry, f.prefixCut, prefix, native, rho)
 	if err != nil || baseline == nil {
@@ -1940,17 +1942,17 @@ func TestStorageJointAlignedPartialGlobalOverlap(t *testing.T) {
 	}
 	assignments, _ := storageJointAssignments(t, bound, initial, 1<<40, 0)
 	for _, cell := range bound.Memory {
-		if storageJointEval(t, cell.Value, assignments) != uint64(want.Memory[storageByteLocation{cell.Image, cell.Offset}]) {
+		if storageJointEval(t, cell.Value, assignments) != uint64(want.Memory[storageTestCoordinate(t, bound.Geometry, cell.TransitionLocation)]) {
 			t.Fatal("array baseline native bytes differ from independent intent")
 		}
 	}
-	if layout, err := checkStorageAuthority(t.Context(), prefix, bound, rho, storageProtectedFootprints(bound)); err != nil || layout == nil {
+	if layout, err := checkStorageAuthority(t.Context(), prefix, bound, rho, storageProtectedFootprints(t.Context(), bound)); err != nil || layout == nil {
 		t.Fatalf("original relation lacks actual checked authority: %v", err)
 	}
 	overlap := rho
 	overlap.bindings = slices.Clone(rho.bindings)
-	overlap.bindings[1].base.Offset = overlap.bindings[0].base.Offset + 7
-	layout, err := checkStorageAuthority(t.Context(), prefix, bound, overlap, storageProtectedFootprints(bound))
+	overlap.bindings[1].base = overlap.bindings[0].base.(nativeproof.ImageAddress) + 7
+	layout, err := checkStorageAuthority(t.Context(), prefix, bound, overlap, storageProtectedFootprints(t.Context(), bound))
 	if layout != nil || err == nil || err.Error() != "storage layout: overlapping live objects" {
 		t.Fatalf("aligned partial overlap did not refuse on disjoint live-object extents: %v", err)
 	}
@@ -2021,7 +2023,7 @@ func TestStorageJointConditionalMatchedWrite(t *testing.T) {
 		}
 	}
 	for _, cell := range b.State.Memory {
-		if storageJointEval(t, cell.Value, assignments) != uint64(want.Memory[storageByteLocation{cell.Image, cell.Offset}]) {
+		if storageJointEval(t, cell.Value, assignments) != uint64(want.Memory[storageTestCoordinate(t, b.Prefix.Geometry, cell.TransitionLocation)]) {
 			t.Fatal("native chosen false-write path differs from independent concrete counterexample")
 		}
 	}

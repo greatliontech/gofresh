@@ -37,7 +37,7 @@ func TestTransitionPrivateFrameRetainedPremise(t *testing.T) {
 	for _, access := range b.Accesses {
 		if access.Kind == FrameWrite {
 			writes++
-			if access.Bytes != (RelativeSpan{-8, 0}) || stateEval(t, access.Value, values) != origin-8 {
+			if extentCoordinates(access.Bytes) != (RelativeSpan{-8, 0}) || stateEval(t, access.Value, values) != origin-8 {
 				t.Fatal("private write was erased or changed")
 			}
 		}
@@ -46,8 +46,8 @@ func TestTransitionPrivateFrameRetainedPremise(t *testing.T) {
 		t.Fatal("return lost the private write occurrence")
 	}
 	for _, cell := range b.State.Memory {
-		if !cell.Image && cell.Offset >= -8 && cell.Offset < 0 {
-			want := (origin - 8) >> (8 * uint(cell.Offset+8)) & 255
+		if !cell.isImage() && cell.offset >= -8 && cell.offset < 0 {
+			want := (origin - 8) >> (8 * uint(cell.offset+8)) & 255
 			if stateEval(t, cell.Value, values) != want {
 				t.Fatal("release rolled back residual bytes")
 			}

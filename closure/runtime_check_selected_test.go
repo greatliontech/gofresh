@@ -80,8 +80,8 @@ func selectedRuntimeCheckStorage(t *testing.T, source computationSource, image *
 	}
 	traces = append(traces, completed.region.packet.trace)
 	rho := storageRepresentation{source: source.prog, image: image}
-	bound := map[regionObject]nativeproof.TransitionLocation{}
-	add := func(object regionObject, location nativeproof.TransitionLocation) {
+	bound := map[regionObject]nativeproof.StorageSelector{}
+	add := func(object regionObject, location nativeproof.StorageSelector) {
 		if prior, exists := bound[object]; exists {
 			if prior != location {
 				t.Fatal("source object has conflicting candidate placements")
@@ -102,12 +102,12 @@ func selectedRuntimeCheckStorage(t *testing.T, source computationSource, image *
 				if len(access.location.path) != 0 {
 					t.Fatal("selected CAS32 operand is not the scalar allocation")
 				}
-				add(access.location.object, nativeproof.TransitionLocation{Offset: -36})
+				add(access.location.object, nativeproof.StackOffset(-36))
 			case occurrence.atomic.Width == 1:
 				if !slices.Equal(access.location.path, []regionStep{{index: 1}}) {
 					t.Fatal("selected byte atomic lost its array subobject")
 				}
-				add(access.location.object, nativeproof.TransitionLocation{Offset: -40})
+				add(access.location.object, nativeproof.StackOffset(-40))
 			}
 		}
 		for _, access := range trace.accesses {
@@ -136,7 +136,7 @@ func selectedRuntimeCheckStorage(t *testing.T, source computationSource, image *
 			default:
 				t.Fatal("selected float bit-store candidate changed")
 			}
-			add(access.location.object, nativeproof.TransitionLocation{Offset: offset})
+			add(access.location.object, nativeproof.StackOffset(offset))
 		}
 	}
 	for _, name := range []string{"test_z64", "test_x64"} {
@@ -145,7 +145,7 @@ func selectedRuntimeCheckStorage(t *testing.T, source computationSource, image *
 		if !ok || address == 0 {
 			t.Fatal("selected global placement candidate is absent", name)
 		}
-		add(regionObject{kind: regionGlobal, site: global}, nativeproof.TransitionLocation{Image: true, Offset: int64(address)})
+		add(regionObject{kind: regionGlobal, site: global}, nativeproof.ImageAddress(int64(address)))
 	}
 	if len(rho.bindings) != 8 {
 		t.Fatalf("selected representation has %d objects, expected six locals and two globals", len(rho.bindings))

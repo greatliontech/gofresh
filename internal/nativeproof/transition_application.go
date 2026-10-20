@@ -34,10 +34,12 @@ type TransitionCallBound struct {
 	Call, Continuation uint64
 	Activation         TransitionActivationID
 	StackShift         int64
-	Inputs             [16]br.Term
-	Registers          [16]TransitionValue
-	Memory             []TransitionCallByte
-	Words              []TransitionCallWord
+	// Geometry is the checked association from callee storage to actual caller storage.
+	Geometry  TransitionGeometryAssociation
+	Inputs    [16]br.Term
+	Registers [16]TransitionValue
+	Memory    []TransitionCallByte
+	Words     []TransitionCallWord
 	// Occurrences includes every child witness node, including excluded and
 	// frontier nodes and terminal RET, but not the new parent continuation.
 	Occurrences     []TransitionCallOccurrence
@@ -255,8 +257,9 @@ func checkTransitionApplication(ctx context.Context, caller TransitionCertificat
 	}
 	frame := m.frames[len(m.frames)-1]
 	activation, continuation := frame.Context, frame.Return
-	sp, ok := m.pointers[RSP].(OriginPointer)
-	if !ok || sp.Origin != b.Origin || sp != frame.Slot || frame.ID == 0 || activation != TransitionActivationID(frame.ID) || entry.checked.bound.Boundary.Context != activation || child.bound.Interface.ReturnContext == nil || child.bound.Interface.ReturnContext.Target != continuation {
+	sp, ok := m.pointers[RSP].(AddressPointer)
+	_, original := m.bound.Geometry.OriginalStack(sp)
+	if !ok || !original || sp != frame.Slot || frame.ID == 0 || activation != TransitionActivationID(frame.ID) || entry.checked.bound.Boundary.Context != activation || child.bound.Interface.ReturnContext == nil || child.bound.Interface.ReturnContext.Target != continuation {
 		return TransitionCallCertificate{}, refuse(b.Boundary.PC, "transition-application", "active control slot or continuation differs from callee interface")
 	}
 	if !active && (frame.ID != b.Boundary.ID || frame.Call != b.Boundary.PC || len(m.frames) != len(b.Frames)+1 || !slices.Equal(m.frames[:len(b.Frames)], b.Frames)) {
@@ -271,11 +274,11 @@ func checkTransitionApplication(ctx context.Context, caller TransitionCertificat
 	if err != nil {
 		return TransitionCallCertificate{}, err
 	}
-	returnedOffset, ok := signedPlus(sp.Offset, 8)
+	returnedOffset, ok := signedPlus(sp.offset, 8)
 	if !ok {
 		return TransitionCallCertificate{}, refuse(frame.Call, "transition-application", "control-slot extent overflow")
 	}
-	a := TransitionCallBound{ID: frame.ID, Call: frame.Call, Continuation: continuation, Activation: activation, StackShift: sp.Offset}
+	a := TransitionCallBound{ID: frame.ID, Call: frame.Call, Continuation: continuation, Activation: activation, StackShift: sp.offset}
 	proofStart := len(m.justifications)
 	if err := m.applicationPremises(child.bound, &a); err != nil {
 		return TransitionCallCertificate{}, err
@@ -293,14 +296,14 @@ func checkTransitionApplication(ctx context.Context, caller TransitionCertificat
 	}
 	advanced := *entry.checked
 	advanced.bound = cloneTransitionBound(entry.checked.bound)
-	// OriginPointer is a checked scalar/provenance invariant, not an equality
+	// The owned stack pointer is a checked scalar/provenance invariant, not an equality
 	// guessed from bits. Re-express the actual body-entry RSP in its parent-root
 	// coordinate so child guards use the same modular affine spelling as their
 	// established entry bounds, including chains of SUB and implicit CALL pushes.
 	// The original child-entry certificate and association retain the actual term.
 	advanced.bound.Registers[RSP].Value = m.bound.Origin
-	if sp.Offset != 0 {
-		advanced.bound.Registers[RSP].Value = m.binary(br.Add, m.bound.Origin, m.con(br.Bits(64), uint64(sp.Offset)))
+	if sp.offset != 0 {
+		advanced.bound.Registers[RSP].Value = m.binary(br.Add, m.bound.Origin, m.con(br.Bits(64), uint64(sp.offset)))
 	}
 	if m.err != nil {
 		return TransitionCallCertificate{}, m.err
@@ -322,7 +325,7 @@ func checkTransitionApplication(ctx context.Context, caller TransitionCertificat
 		return TransitionCallCertificate{}, err
 	}
 	end := successor.checked.bound
-	if end.Boundary.Context != parentContext || !slices.Equal(end.Frames, parentFrames) || end.Registers[RSP].Pointer != (OriginPointer{Origin: b.Origin, Offset: returnedOffset}) {
+	if end.Boundary.Context != parentContext || !slices.Equal(end.Frames, parentFrames) || end.Registers[RSP].Pointer != b.Geometry.stackPointer(returnedOffset) {
 		return TransitionCallCertificate{}, refuse(continuation, "transition-application", "return failed to consume child activation and restore parent context")
 	}
 	if child.bound.Interface.PrivateFrame != nil {
@@ -330,7 +333,7 @@ func checkTransitionApplication(ctx context.Context, caller TransitionCertificat
 			return TransitionCallCertificate{}, err
 		}
 	}
-	if err := replay.applicationProtectedSlot(controlStart, activation, sp.Offset); err != nil {
+	if err := replay.applicationProtectedSlot(controlStart, activation, sp.offset); err != nil {
 		return TransitionCallCertificate{}, err
 	}
 	for _, r := range child.bound.Interface.ReturnContext.Preserved {
@@ -398,8 +401,8 @@ func (m *transitionChecker) applicationControlStart(witness TransitionProposal, 
 			instructionFound = instruction.Start == frame.Call && instruction.End == frame.Return && instruction.Context == parent
 		}
 	}
-	end, ok := signedPlus(frame.Slot.Offset, 8)
-	if !nodeFound || !instructionFound || !ok {
+	_, original := m.bound.Geometry.OriginalStack(frame.Slot)
+	if !nodeFound || !instructionFound || !original {
 		return 0, refuse(frame.Call, "transition-application", "initiating CALL missing from retained occurrence evidence")
 	}
 	start := -1
@@ -411,7 +414,7 @@ func (m *transitionChecker) applicationControlStart(witness TransitionProposal, 
 			continue
 		}
 		value := access.Value.View()
-		if start >= 0 || access.PC != frame.Call || access.Context != parent || access.Kind != FrameWrite || access.Image || access.Bytes != (RelativeSpan{frame.Slot.Offset, end}) || value.Op != br.Constant || value.Sort != br.Bits(64) || value.Immediate != frame.Return {
+		if start >= 0 || access.PC != frame.Call || access.Context != parent || access.Kind != FrameWrite || access.Bytes != (TransitionExtent{m.bound.Geometry.stackLocation(frame.Slot.offset), 8}) || value.Op != br.Constant || value.Sort != br.Bits(64) || value.Immediate != frame.Return {
 			return 0, refuse(frame.Call, "transition-application", "initiating CALL lacks its exact control store")
 		}
 		start = j + 1
@@ -425,10 +428,7 @@ func (m *transitionChecker) applicationControlStart(witness TransitionProposal, 
 // Only the initiating CALL's store is excluded. Every subsequent descendant
 // write counts, including wrappers before body entry and unchanged-value stores.
 func (m *transitionChecker) applicationProtectedSlot(start int, activation TransitionActivationID, shift int64) error {
-	end, ok := signedPlus(shift, 8)
-	if !ok {
-		return refuse(m.pc, "transition-application", "control-slot extent overflow")
-	}
+	slot := TransitionExtent{m.bound.Geometry.stackLocation(shift), 8}
 	for _, access := range m.bound.Accesses[start:] {
 		if !m.tick() {
 			return m.err
@@ -448,7 +448,11 @@ func (m *transitionChecker) applicationProtectedSlot(start int, activation Trans
 			}
 			at = a.parent
 		}
-		if descendant && !access.Image && access.Kind == FrameWrite && access.Bytes.Start < end && access.Bytes.End > shift {
+		overlaps, err := m.bound.Geometry.Overlaps(access.Bytes, slot)
+		if err != nil {
+			return err
+		}
+		if descendant && access.Kind == FrameWrite && overlaps {
 			return refuse(access.PC, "transition-application-protected", "child write overlaps incoming control storage")
 		}
 	}
@@ -458,7 +462,10 @@ func (m *transitionChecker) applicationProtectedSlot(start int, activation Trans
 // Reserve conservative retained-container and expression storage. Immutable
 // handles may be shared, but their dependency cost stays in the successor limit.
 func (m *transitionChecker) applicationEvidenceBytes(b TransitionBound) (int, error) {
-	bytes := 8192
+	bytes := max(8192, geometryStorageBytes(len(b.Geometry.root.imageViews)))
+	if bytes > m.limits.LiveStateBytes {
+		return 0, refuse(m.pc, "transition-budget", "application geometry storage")
+	}
 	for _, n := range []int{len(m.depth), len(b.InitialMemory), len(b.Memory), len(b.Words), len(b.Instructions), len(b.Accesses), len(b.PrimitiveEffects), len(b.Abstractions), len(b.Frames), len(b.Expansions), len(b.ExcludedOrigins), len(b.ExcludedBoundaries), len(m.justifications), len(b.Interface.Regions), len(b.Interface.ImageRegions), len(b.Interface.EntryImagePointers), len(b.Interface.EntryWordUpperBounds)} {
 		for range n {
 			if !m.tick() {

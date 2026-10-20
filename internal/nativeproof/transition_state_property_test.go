@@ -37,7 +37,7 @@ type stateLocation struct {
 }
 
 func (p stateLocation) add(n int64) stateLocation      { p.off += n; return p }
-func stateByteLocation(b TransitionByte) stateLocation { return stateLocation{b.Image, b.Offset} }
+func stateByteLocation(b TransitionByte) stateLocation { return stateLocation{b.isImage(), b.offset} }
 
 type stateByte struct {
 	value byte
@@ -847,12 +847,12 @@ func stateBindings(t testing.TB, c TransitionCertificate, face TransitionInterfa
 	}
 	words := map[int64]br.Term{}
 	for _, w := range b.Words {
-		v, ok := initial.words[w.Offset]
-		if !ok || words[w.Offset].Valid() {
-			t.Fatal("extra/duplicate input word", w.Offset)
+		v, ok := initial.words[w.Bytes.start.offset]
+		if !ok || words[w.Bytes.start.offset].Valid() {
+			t.Fatal("extra/duplicate input word", w.Bytes)
 		}
 		variable(w.Value, br.Bits(64), v)
-		words[w.Offset] = w.Value
+		words[w.Bytes.start.offset] = w.Value
 	}
 	if len(b.InitialMemory) != len(initial.memory) {
 		t.Fatalf("initial byte keyset size %d, expected %d", len(b.InitialMemory), len(initial.memory))
@@ -872,18 +872,18 @@ func stateBindings(t testing.TB, c TransitionCertificate, face TransitionInterfa
 		key := stateByteLocation(b)
 		want, ok := initial.memory[key]
 		if !ok || byteSeen[key] || b.Pointer != nil || b.PointerLane != 0 {
-			t.Fatal("initial byte keyset/provenance differs", b.Offset)
+			t.Fatal("initial byte keyset/provenance differs", b.offset)
 		}
 		byteSeen[key] = true
-		if lane, grouped := wordBytes[b.Offset]; grouped && !b.Image {
+		if lane, grouped := wordBytes[b.offset]; grouped && !b.isImage() {
 			v := b.Value.View()
 			if v.Op != br.Extract || v.Sort != br.Bits(8) || v.Immediate != lane.bit || len(v.Args) != 1 || v.Args[0] != lane.word {
-				t.Fatal("initial word byte has wrong independent slice", b.Offset)
+				t.Fatal("initial word byte has wrong independent slice", b.offset)
 			}
-		} else if b.Image && initial.initialized[key] {
+		} else if b.isImage() && initial.initialized[key] {
 			v := b.Value.View()
 			if v.Op != br.Constant || v.Sort != br.Bits(8) || v.Immediate != uint64(want.value) {
-				t.Fatal("initialized byte differs from fixture", b.Offset)
+				t.Fatal("initialized byte differs from fixture", b.offset)
 			}
 		} else {
 			variable(b.Value, br.Bits(8), uint64(want.value))
@@ -901,7 +901,7 @@ func stateBindings(t testing.TB, c TransitionCertificate, face TransitionInterfa
 	}
 	for _, b := range b.InitialMemory {
 		if stateEval(t, b.Value, values) != uint64(initial.memory[stateByteLocation(b)].value) {
-			t.Fatal("initial byte value differs", b.Offset)
+			t.Fatal("initial byte value differs", b.offset)
 		}
 	}
 	return values
@@ -1053,7 +1053,7 @@ func (d stateDepthProfile) assertProjection(t testing.TB, c TransitionCertificat
 	}
 	for _, b := range c.checked.bound.Memory {
 		if stateTermHeight(b.Value, memo) != d.memory[stateByteLocation(b)] {
-			t.Fatal("byte constructor-depth premise changed", b.Offset)
+			t.Fatal("byte constructor-depth premise changed", b.offset)
 		}
 	}
 	for j, flag := range c.checked.flags {
@@ -1312,7 +1312,7 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 		got := b.Accesses[j]
 		value := got.Value
 		got.Value = br.Term{}
-		if got != (TransitionAccess{ID: TransitionOccurrenceID(a.instruction + 1), PC: x.pcs[a.instruction], Kind: kind, Bytes: RelativeSpan{a.off.off, a.off.off + int64(a.width)}, Image: a.off.image}) || value.Sort() != br.Bits(a.width*8) || stateEval(t, value, values) != a.value {
+		if got.ID != TransitionOccurrenceID(a.instruction+1) || got.PC != x.pcs[a.instruction] || got.Context != 0 || got.Kind != kind || !b.Geometry.owns(got.Bytes.start) || got.Bytes.start.isImage() != a.off.image || extentCoordinates(got.Bytes) != (RelativeSpan{a.off.off, a.off.off + int64(a.width)}) || value.Sort() != br.Bits(a.width*8) || stateEval(t, value, values) != a.value {
 			t.Fatal("ordered access differs", j, b.Accesses[j], a)
 		}
 	}
@@ -1323,19 +1323,19 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 		t.Helper()
 		var expected TransitionPointer
 		if p.valid && p.image {
-			actual, ok := got.(ImagePointer)
-			if !ok || actual.Address != uint64(p.off) || actual.owner != &x.im.data[0] {
+			actual, ok := got.(AddressPointer)
+			if !ok || !actual.isImage() || actual.offset != p.off || !b.Geometry.ownsPointer(actual) || !sameImage(actual.view.backing.geometry.image, x.im) {
 				t.Fatal("image provenance differs", got, p)
 			}
 			// The reference's fixture mapping, not the returned pointer, fixes
 			// ownership and logical extent. Address-to-load checks are separate.
-			if actual.load != p.load || p.load < 0 || p.load >= len(x.mappings) || actual.Address < x.mappings[p.load].start || actual.Address > x.mappings[p.load].end {
+			if actual.view.load != p.load || p.load < 0 || p.load >= len(x.mappings) || uint64(actual.offset) < x.mappings[p.load].start || uint64(actual.offset) > x.mappings[p.load].end {
 				t.Fatal("image mapping provenance differs")
 			}
 			return
 		}
 		if p.valid {
-			expected = OriginPointer{Origin: b.Origin, Offset: p.off}
+			expected = b.Geometry.stackPointer(p.off)
 		}
 		if got != expected {
 			t.Fatal("origin provenance differs", got, expected)
@@ -1368,15 +1368,15 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 		key := stateByteLocation(v)
 		w, ok := want.memory[key]
 		if !ok || seen[key] {
-			t.Fatal("extra/duplicate final byte", v.Offset)
+			t.Fatal("extra/duplicate final byte", v.offset)
 		}
 		seen[key] = true
 		if v.Value.Sort() != br.Bits(8) || stateEval(t, v.Value, values) != uint64(w.value) {
-			t.Fatal("final byte differs", v.Offset)
+			t.Fatal("final byte differs", v.offset)
 		}
 		pointer(v.Pointer, w.ptr)
 		if v.PointerLane != w.lane {
-			t.Fatal("pointer lane differs", v.Offset)
+			t.Fatal("pointer lane differs", v.offset)
 		}
 		if !frame[key] && w != initial.memory[key] {
 			t.Fatal("reference changed byte outside write frame")
@@ -1453,7 +1453,7 @@ func stateInheritedInputs(t testing.TB, original, current TransitionBound) {
 	if original.InitialFS != current.InitialFS || len(current.Abstractions) < len(original.Abstractions) || !slices.Equal(current.Abstractions[:len(original.Abstractions)], original.Abstractions) {
 		t.Fatal("continuation replaced thread input or analysis abstraction origins")
 	}
-	if current.InitialDirection != original.InitialDirection || current.Origin != original.Origin || current.EntryPredicate != original.EntryPredicate || current.InitialRegisters != original.InitialRegisters || current.InitialPredicates != original.InitialPredicates ||
+	if current.Geometry != original.Geometry || current.InitialDirection != original.InitialDirection || current.Origin != original.Origin || current.EntryPredicate != original.EntryPredicate || current.InitialRegisters != original.InitialRegisters || current.InitialPredicates != original.InitialPredicates ||
 		!slices.Equal(current.InitialMemory, original.InitialMemory) || !slices.Equal(current.Words, original.Words) ||
 		!slices.Equal(current.ExcludedOrigins, original.ExcludedOrigins) || !reflect.DeepEqual(current.Interface, original.Interface) {
 		t.Fatal("continuation replaced original terms, memory, or origin/interface premises")

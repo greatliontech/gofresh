@@ -62,7 +62,7 @@ func (m *transitionChecker) validateEntryRelations() error {
 		}
 		var word uint64
 		for lane := uint64(0); lane < 8; lane++ {
-			v, err := m.entryWitnessByte(TransitionLocation{Image: true, Offset: int64(w.Address + lane)})
+			v, err := m.entryWitnessByte(w.Address + lane)
 			if err != nil {
 				return err
 			}
@@ -128,17 +128,10 @@ func (m *transitionChecker) greatestEntryOrigin() (uint64, error) {
 // every checked nonwrapping upper bound. Thus this candidate establishes joint
 // nonvacuity. Universal transfer still ranges over ALL states satisfying the
 // retained predicate; neither this candidate nor its origin escapes into evidence.
-func (m *transitionChecker) entryWitnessByte(location TransitionLocation) (byte, error) {
+func (m *transitionChecker) entryWitnessByte(address uint64) (byte, error) {
 	if !m.tick() {
 		return 0, m.err
 	}
-	if !location.Image {
-		if c := m.face.ReturnContext; c != nil && location.Offset >= 0 && location.Offset < 8 {
-			return byte(c.Target >> (8 * uint(location.Offset))), nil
-		}
-		return 0, nil
-	}
-	address := uint64(location.Offset)
 	index, err := m.imageLoad(Span{address, address + 1}, false)
 	if err != nil {
 		return 0, err
@@ -161,7 +154,7 @@ func (m *transitionChecker) initialEntryRelations() error {
 		if err != nil {
 			return err
 		}
-		m.pointers[p.Register] = ImagePointer{Address: p.Address, owner: &m.im.data[0], load: load}
+		m.pointers[p.Register] = m.bound.Geometry.imagePointer(load, p.Address)
 		// Keep the original entry variable and preservation mask. Provenance
 		// agrees with its bits under this explicit equality, not by replacing
 		// the input with a fabricated register constant or a machine write.
@@ -171,7 +164,7 @@ func (m *transitionChecker) initialEntryRelations() error {
 		if !m.tick() {
 			return m.err
 		}
-		word := m.memoryValue(TransitionLocation{Image: true, Offset: int64(w.Address)}, 8)
+		word := m.memoryValue(m.bound.Geometry.imageLocation(int64(w.Address)), 8)
 		predicate = m.and(predicate, m.entryWordPredicate(word.Value, w.OriginOffset))
 	}
 	m.bound.EntryPredicate = predicate

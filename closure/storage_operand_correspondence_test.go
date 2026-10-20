@@ -82,12 +82,14 @@ func TestStorageOperandCorrespondenceNarrowLocal(t *testing.T) {
 						t.Fatal("native baseline must stop before executing the atomic")
 					}
 					for index, access := range bound.Accesses {
+						access := storageTestAccess(t, bound.Geometry, access)
 						want := nativeproof.RelativeSpan{Start: -16 + int64(4*index), End: -12 + int64(4*index)}
 						if access.Image || access.Kind != nativeproof.FrameWrite || access.Bytes != want {
 							t.Fatal("native baseline lost the ordinary local materialization")
 						}
 					}
 					for _, cell := range bound.InitialMemory {
+						cell := storageTestByte(t, bound.Geometry, cell)
 						if !cell.Image && cell.Offset >= -16 && cell.Offset < -8 && cell.Value.View().Op != br.Variable {
 							t.Fatal("local native input was initialized instead of arbitrary")
 						}
@@ -98,14 +100,14 @@ func TestStorageOperandCorrespondenceNarrowLocal(t *testing.T) {
 							t.Fatalf("full register lost its nonzero high bits: value=%#x error=%v", value, err)
 						}
 					}
-					rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: object, base: nativeproof.TransitionLocation{Offset: -16}}}}
+					rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: object, base: nativeproof.StackOffset(-16)}}}
 					proof, err := checkGlobalOperandCorrespondence(t.Context(), source, root, call, fixture.image, fixture.entry, fixture.cut, prefix, native, rho)
 					if variant == "prepared" {
 						if err != nil || proof == nil {
 							t.Fatalf("narrow operand preparation refused: %v", err)
 						}
 						footprint, represented := proof.account.layout.locationFootprint(prefix.operands[0].location)
-						if !represented || footprint.Image || footprint.Bytes != (nativeproof.RelativeSpan{Start: -12, End: -8}) || len(proof.account.inputs) != 0 || len(proof.account.atomics) != 0 || len(proof.account.matched) != 2 || len(proof.account.equalities) == 0 {
+						if !represented || footprint.Bytes != storageTestExtent(t, bound.Geometry, nativeproof.StackOffset(-12), 4) || len(proof.account.inputs) != 0 || len(proof.account.atomics) != 0 || len(proof.account.matched) != 2 || len(proof.account.equalities) == 0 {
 							t.Fatal("proof lost subobject/materialization evidence or invented local input/atomic semantics")
 						}
 						return

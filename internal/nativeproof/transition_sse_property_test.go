@@ -384,8 +384,8 @@ func sseSeqInitial(b TransitionBound, branches uint64) (sseSeqState, map[br.Term
 		v[x.Lo], v[x.Hi] = r.vectors[j][0], r.vectors[j][1]
 	}
 	for _, cell := range b.InitialMemory {
-		r.memory[cell.Offset] = byte(uint64(cell.Offset)*37 + branches)
-		v[cell.Value] = uint64(r.memory[cell.Offset])
+		r.memory[cell.offset] = byte(uint64(cell.offset)*37 + branches)
+		v[cell.Value] = uint64(r.memory[cell.offset])
 	}
 	for _, term := range []br.Term{b.InitialPredicates.CF, b.InitialPredicates.ZF, b.InitialPredicates.SFXorOF} {
 		v[term] = 0
@@ -546,7 +546,7 @@ func sseSeqAssert(t testing.TB, p sseSeqProgram, b TransitionBound, cut int, bra
 		}
 	}
 	for _, cell := range b.Memory {
-		if eval(cell.Value) != uint64(r.memory[cell.Offset]) || cell.Pointer != nil {
+		if eval(cell.Value) != uint64(r.memory[cell.offset]) || cell.Pointer != nil {
 			t.Fatal("current byte memory differs")
 		}
 	}
@@ -604,7 +604,7 @@ func sseSeqAssert(t testing.TB, p sseSeqProgram, b TransitionBound, cut int, bra
 			t.Fatal("GPR preservation mask differs")
 		}
 		if j == int(RSP) {
-			if reg.Pointer != (OriginPointer{Origin: b.Origin, Offset: int64(r.regs[j] - r.base)}) {
+			if reg.Pointer != b.Geometry.stackPointer(int64(r.regs[j]-r.base)) {
 				t.Fatal("stack scalar/provenance differs")
 			}
 		} else if reg.Pointer != nil {
@@ -637,12 +637,12 @@ func sseSeqAssert(t testing.TB, p sseSeqProgram, b TransitionBound, cut int, bra
 	for _, a := range b.Accesses {
 		key := transitionTestPoint{a.PC, a.Context}
 		want, ok := wantAccesses[key]
-		if !ok || a.Image || a.Kind != want.kind || a.Bytes.Start != want.offset || a.Bytes.End != want.offset+int64(want.width) || a.Value.Sort() != br.Bits(want.width*8) {
+		if !ok || a.Bytes.start.isImage() || a.Kind != want.kind || a.Bytes.start.offset != want.offset || a.Bytes.End().offset != want.offset+int64(want.width) || a.Value.Sort() != br.Bits(want.width*8) {
 			t.Fatal("access occurrence differs from intent")
 		}
 		delete(wantAccesses, key)
 		if active[transitionTestPoint{a.PC, a.Context}] {
-			accesses = append(accesses, sseSeqAccess{a.PC, a.Context, a.Kind, a.Bytes.Start, int(a.Bytes.End - a.Bytes.Start), eval(a.Value)})
+			accesses = append(accesses, sseSeqAccess{a.PC, a.Context, a.Kind, a.Bytes.start.offset, int(a.Bytes.Width()), eval(a.Value)})
 		}
 	}
 	if !slices.Equal(accesses, r.accesses) || len(b.PrimitiveEffects) != 0 {

@@ -228,7 +228,7 @@ func F() { var x uint64; A=7; B=9; %s Child(); %s B=Read(&x) }
 	rho := globalRho(source, f, globals, addresses)
 	for object := range prefixes[0].region.packet.observations[0].state.memory {
 		if object.site == local {
-			rho.bindings = append(rho.bindings, storageBinding{object: object, base: nativeproof.TransitionLocation{Offset: -16}})
+			rho.bindings = append(rho.bindings, storageBinding{object: object, base: nativeproof.StackOffset(-16)})
 		}
 	}
 	if len(rho.bindings) != 3 {
@@ -279,7 +279,7 @@ func TestGlobalCallCompositionActualCurrentState(t *testing.T) {
 				t.Fatal("lost actual call, completed return or cumulative work")
 			}
 			builder := br.NewBuilder(128)
-			residual, e := storageNativeWord(t.Context(), builder, b.State.Memory, nativeproof.TransitionLocation{Offset: -48}, 8)
+			residual, e := storageNativeWord(t.Context(), builder, b.State.Memory, storageTestExtent(t, b.Prefix.Geometry, nativeproof.StackOffset(-48), 8), 8)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -346,7 +346,7 @@ func TestGlobalCallCompositionOwnershipAndBounds(t *testing.T) {
 			case "tail":
 				bad.tail.Nodes = nil
 			case "control-slot":
-				bad.rho.bindings[2].base.Offset = -40
+				bad.rho.bindings[2].base = nativeproof.StackOffset(-40)
 			}
 			if p, err := bad.check(t.Context()); p != nil || err == nil {
 				t.Fatalf("foreign/incomplete %s accepted", variant)
@@ -413,13 +413,13 @@ func TestGlobalCallCompositionCaptureBeforeCallbacks(t *testing.T) {
 		if len(f.tail.Nodes[0].Successors) != 0 {
 			f.tail.Nodes[0].Successors[0]++
 		}
-		f.rho.bindings[0].base.Offset++
+		f.rho.bindings[0].base = f.rho.bindings[0].base.(nativeproof.ImageAddress) + 1
 	}}
 	p, err := f.check(ctx)
 	if err != nil || p == nil {
 		t.Fatalf("caller mutation crossed the capture boundary: %v", err)
 	}
-	if p.representation.bindings[0].base.Offset == f.rho.bindings[0].base.Offset {
+	if p.representation.bindings[0].base == f.rho.bindings[0].base {
 		t.Fatal("representation retained caller-owned container")
 	}
 	if _, err := f.check(t.Context()); err == nil || !strings.Contains(err.Error(), "transition") {

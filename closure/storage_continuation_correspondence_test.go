@@ -57,7 +57,7 @@ func storageContinuationAccount(t testing.TB, source *sourceOperandPrefix, nativ
 	if !owned {
 		t.Fatal("prefix account lacks its owned native endpoint")
 	}
-	layout, err := checkStorageAuthority(t.Context(), source, bound, rho, storageProtectedFootprints(bound))
+	layout, err := checkStorageAuthority(t.Context(), source, bound, rho, storageProtectedFootprints(t.Context(), bound))
 	if err != nil {
 		return nil, err
 	}
@@ -158,9 +158,9 @@ func TestStorageContinuationFactoryInstances(t *testing.T) {
 			storageContinuationCurrent(t, first, p, 3)
 			storageContinuationCurrent(t, second, p, values.retained)
 
-			pBase := nativeproof.TransitionLocation{Offset: -32}
-			qBase := nativeproof.TransitionLocation{Offset: -16}
-			pAt, qAt := storageByteLocation{Offset: pBase.Offset}, storageByteLocation{Offset: qBase.Offset}
+			pBase := nativeproof.StackOffset(-32)
+			qBase := nativeproof.StackOffset(-16)
+			pAt, qAt := storageByteLocation{Offset: int64(pBase)}, storageByteLocation{Offset: int64(qBase)}
 			program := []storageByteStep{
 				{Kind: "store", At: pAt, Width: 4, Value: 3},
 				{Kind: "load", At: pAt, Width: 4},
@@ -190,16 +190,17 @@ func TestStorageContinuationFactoryInstances(t *testing.T) {
 				t.Fatal("native endpoints do not cover the intended complete history")
 			}
 			for _, cell := range firstBound.InitialMemory {
-				if !cell.Image && (cell.Offset >= pBase.Offset && cell.Offset < pBase.Offset+4 || cell.Offset >= qBase.Offset && cell.Offset < qBase.Offset+4) && cell.Value.View().Op != br.Variable {
+				cell := storageTestByte(t, firstBound.Geometry, cell)
+				if !cell.Image && (cell.Offset >= int64(pBase) && cell.Offset < int64(pBase)+4 || cell.Offset >= int64(qBase) && cell.Offset < int64(qBase)+4) && cell.Value.View().Op != br.Variable {
 					t.Fatal("source allocation supplied native initial bytes")
 				}
 			}
 			for _, current := range []struct {
 				memory []nativeproof.TransitionByte
-				base   nativeproof.TransitionLocation
+				base   nativeproof.StorageSelector
 				want   uint64
 			}{{firstBound.Memory, pBase, 3}, {secondBound.Memory, pBase, values.retained}, {secondBound.Memory, qBase, values.second}, {returnBound.State.Memory, pBase, 7}, {returnBound.State.Memory, qBase, 9}} {
-				term, err := storageNativeWord(t.Context(), br.NewBuilder(64), current.memory, current.base, 4)
+				term, err := storageNativeWord(t.Context(), br.NewBuilder(64), current.memory, storageTestExtent(t, firstBound.Geometry, current.base, 4), 4)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -252,7 +253,7 @@ func TestStorageContinuationFactoryInstances(t *testing.T) {
 				// later object's value. Neither bytes nor the same SSA site grant
 				// that future invocation allocation authority at the earlier cut.
 				future.bindings = []storageBinding{{object: q, base: pBase}}
-				if got, err := checkStorageAuthority(t.Context(), first, firstBound, future, storageProtectedFootprints(firstBound)); got != nil || err == nil || !strings.Contains(err.Error(), "allocation lacks actual live singleton evidence") {
+				if got, err := checkStorageAuthority(t.Context(), first, firstBound, future, storageProtectedFootprints(t.Context(), firstBound)); got != nil || err == nil || !strings.Contains(err.Error(), "allocation lacks actual live singleton evidence") {
 					t.Fatalf("future object not refused for missing allocation authority: %v", err)
 				}
 			})
@@ -260,7 +261,7 @@ func TestStorageContinuationFactoryInstances(t *testing.T) {
 				overlap := rho
 				overlap.bindings = slices.Clone(rho.bindings)
 				overlap.bindings[1].base = pBase
-				if got, err := checkStorageAuthority(t.Context(), second, secondBound, overlap, storageProtectedFootprints(secondBound)); got != nil || err == nil || !strings.Contains(err.Error(), "overlapping live objects") {
+				if got, err := checkStorageAuthority(t.Context(), second, secondBound, overlap, storageProtectedFootprints(t.Context(), secondBound)); got != nil || err == nil || !strings.Contains(err.Error(), "overlapping live objects") {
 					t.Fatalf("live overlap not refused at authority: %v", err)
 				}
 			})
@@ -272,7 +273,7 @@ func TestStorageContinuationFactoryInstances(t *testing.T) {
 				if got, err := storageContinuationAccount(t, second, nativeSecond, hidden); got != nil || err == nil || !strings.Contains(err.Error(), "unrepresented source storage is not isolated") {
 					t.Fatalf("hidden old storage not refused by its isolation obligation: %v", err)
 				}
-				layout, err := checkStorageAuthority(t.Context(), second, secondBound, hidden, storageProtectedFootprints(secondBound))
+				layout, err := checkStorageAuthority(t.Context(), second, secondBound, hidden, storageProtectedFootprints(t.Context(), secondBound))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -284,7 +285,7 @@ func TestStorageContinuationFactoryInstances(t *testing.T) {
 				swapped := rho
 				swapped.bindings = slices.Clone(rho.bindings)
 				swapped.bindings[0].base, swapped.bindings[1].base = qBase, pBase
-				layout, err := checkStorageAuthority(t.Context(), second, secondBound, swapped, storageProtectedFootprints(secondBound))
+				layout, err := checkStorageAuthority(t.Context(), second, secondBound, swapped, storageProtectedFootprints(t.Context(), secondBound))
 				if err != nil {
 					t.Fatal(err)
 				}

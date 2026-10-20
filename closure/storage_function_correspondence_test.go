@@ -17,7 +17,7 @@ import (
 )
 
 type storageFunctionOperation struct {
-	location nativeproof.TransitionLocation
+	location nativeproof.StorageSelector
 	width    int
 	write    bool
 	value    uint64
@@ -66,15 +66,15 @@ func storageFunctionNative(t testing.TB, operations []storageFunctionOperation, 
 			}
 		}
 		code = append(code, opcode)
-		if operation.location.Image {
+		if address, image := operation.location.(nativeproof.ImageAddress); image {
 			code = append(code, 0x05)
 			length := uint64(6)
 			if operation.width == 8 {
 				length++
 			}
-			code = binary.LittleEndian.AppendUint32(code, uint32(operation.location.Offset-int64(pc+length)))
+			code = binary.LittleEndian.AppendUint32(code, uint32(int64(address)-int64(pc+length)))
 		} else {
-			code = append(code, 0x44, 0x24, byte(operation.location.Offset+64))
+			code = append(code, 0x44, 0x24, byte(operation.location.(nativeproof.StackOffset)+64))
 		}
 	}
 	code = append(code, 0x48, 0x83, 0xc4, 0x40) // ADD RSP,64
@@ -175,7 +175,7 @@ func TestStorageFunctionScalarLocalWidths(t *testing.T) {
 	for _, width := range []int{1, 4, 8} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			source, completed := storageFunctionSource(t, fmt.Sprintf(`func Stop(p *uint%d){if *p!=7 {panic(1)}};func F(){var x uint%d;x=7;Stop(&x)}`, width*8, width*8))
-			location := nativeproof.TransitionLocation{Offset: -16}
+			location := nativeproof.StackOffset(-16)
 			for _, variant := range []string{"stored", "retained-read", "initialized-then-overwritten", "missing-write", "early-read", "extra-read", "wrong-value"} {
 				t.Run(variant, func(t *testing.T) {
 					ops := []storageFunctionOperation{{location, width, true, 7}}
@@ -220,7 +220,7 @@ func TestStorageFunctionGlobalPopulation(t *testing.T) {
 			for i := range count {
 				declarations += fmt.Sprintf("var G%d uint32;", i)
 				body += fmt.Sprintf("G%d=%d;", i, i+7)
-				ops = append(ops, storageFunctionOperation{nativeproof.TransitionLocation{Image: true, Offset: int64(0x700008 + 8*i)}, 4, true, uint64(i + 7)})
+				ops = append(ops, storageFunctionOperation{nativeproof.ImageAddress(int64(0x700008 + 8*i)), 4, true, uint64(i + 7)})
 			}
 			source, completed := storageFunctionSource(t, declarations+"func Stop(){};func F(){"+body+"Stop()}")
 			fixture, native := storageFunctionNative(t, ops, nativeproof.OriginDomain{})
@@ -248,10 +248,10 @@ func TestStorageFunctionGlobalPopulation(t *testing.T) {
 
 func TestStorageFunctionArrayWriteCoverage(t *testing.T) {
 	source, completed := storageFunctionSource(t, `func Stop(p *[2]uint32){if p[0]!=7||p[1]!=9 {panic(1)}};func F(){var a [2]uint32;a[0]=7;a[1]=9;Stop(&a)}`)
-	base := nativeproof.TransitionLocation{Offset: -16}
+	base := nativeproof.StackOffset(-16)
 	for _, variant := range []string{"separate", "combined", "reversed", "partial", "wrong-lane", "surplus"} {
 		t.Run(variant, func(t *testing.T) {
-			ops := []storageFunctionOperation{{base, 4, true, 7}, {nativeproof.TransitionLocation{Offset: -12}, 4, true, 9}}
+			ops := []storageFunctionOperation{{base, 4, true, 7}, {nativeproof.StackOffset(-12), 4, true, 9}}
 			switch variant {
 			case "combined":
 				ops = []storageFunctionOperation{{base, 8, true, 7 | uint64(9)<<32}}
@@ -285,7 +285,7 @@ func TestStorageFunctionLocalInitialization(t *testing.T) {
 				value = 9
 			}
 			source, completed := storageFunctionSource(t, `func Stop(p *uint32){`+helper+`};func F(){var x uint32;Stop(&x)}`)
-			base := nativeproof.TransitionLocation{Offset: -16}
+			base := nativeproof.StackOffset(-16)
 			ops := []storageFunctionOperation{{base, 4, true, value}}
 			if !writeOnly {
 				ops = append(ops, storageFunctionOperation{base, 4, false, 0})
@@ -318,7 +318,7 @@ func TestStorageFunctionAuthorityOriginAndControl(t *testing.T) {
 		{"root-control-slot", 0, 8, 0, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			base := nativeproof.TransitionLocation{Offset: test.offset}
+			base := nativeproof.StackOffset(test.offset)
 			ops := []storageFunctionOperation{{base, 8, true, 7}}
 			if test.offset == 0 {
 				ops = nil
@@ -345,7 +345,7 @@ func TestStorageFunctionTerminalAllocationAndIsolation(t *testing.T) {
 	for _, represented := range []bool{false, true} {
 		t.Run(fmt.Sprint(represented), func(t *testing.T) {
 			var ops []storageFunctionOperation
-			base := nativeproof.TransitionLocation{Offset: -16}
+			base := nativeproof.StackOffset(-16)
 			if represented {
 				ops = []storageFunctionOperation{{base, 4, true, 7}}
 			}
@@ -367,12 +367,12 @@ func TestStorageFunctionTerminalAllocationAndIsolation(t *testing.T) {
 
 func TestStorageFunctionPaddingCannotHideAccess(t *testing.T) {
 	source, completed := storageFunctionSource(t, `type S struct{A uint8;B uint32};func Stop(p *S){if p.A!=7||p.B!=9 {panic(1)}};func F(){var x S;x.A=7;x.B=9;Stop(&x)}`)
-	base := nativeproof.TransitionLocation{Offset: -16}
+	base := nativeproof.StackOffset(-16)
 	for _, extra := range []bool{false, true} {
 		t.Run(fmt.Sprint(extra), func(t *testing.T) {
-			ops := []storageFunctionOperation{{base, 1, true, 7}, {nativeproof.TransitionLocation{Offset: -12}, 4, true, 9}}
+			ops := []storageFunctionOperation{{base, 1, true, 7}, {nativeproof.StackOffset(-12), 4, true, 9}}
 			if extra {
-				ops = append(ops, storageFunctionOperation{nativeproof.TransitionLocation{Offset: -15}, 1, false, 0})
+				ops = append(ops, storageFunctionOperation{nativeproof.StackOffset(-15), 1, false, 0})
 			}
 			fixture, native := storageFunctionNative(t, ops, nativeproof.OriginDomain{})
 			rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: storageFunctionLocal(t, completed), base: base}}}
@@ -386,7 +386,7 @@ func TestStorageFunctionPaddingCannotHideAccess(t *testing.T) {
 
 func TestStorageFunctionCombinedPaddingRetainsActualBytes(t *testing.T) {
 	source, completed := storageFunctionSource(t, `type S struct{A uint8;B uint32};func Stop(p *S){if p.A!=7||p.B!=9 {panic(1)}};func F(){var x S;x.A=7;x.B=9;Stop(&x)}`)
-	base := nativeproof.TransitionLocation{Offset: -16}
+	base := nativeproof.StackOffset(-16)
 	// The native padding is deliberately nonzero. Source allocation cannot justify
 	// any value for it; only this actual write establishes its residual bytes.
 	fixture, native := storageFunctionNative(t, []storageFunctionOperation{{base, 8, true, uint64(9)<<32 | 0xa1b2c307}}, nativeproof.OriginDomain{})
@@ -402,7 +402,7 @@ func TestStorageFunctionCombinedPaddingRetainsActualBytes(t *testing.T) {
 	for i, want := range []uint64{0xc3, 0xb2, 0xa1} {
 		found := false
 		for _, cell := range bound.State.Memory {
-			if cell.TransitionLocation == (nativeproof.TransitionLocation{Offset: -15 + int64(i)}) {
+			if cell.TransitionLocation == storageTestLocation(t, bound.Prefix.Geometry, nativeproof.StackOffset(-15+i)) {
 				if err := proof.constant(t.Context(), cell.Value, want); err != nil {
 					t.Fatal(err)
 				}
@@ -438,7 +438,7 @@ func TestStorageFunctionCurrentObjectAcrossCuts(t *testing.T) {
 	if middle.operands[0].location.object != object || storageBoundaryOperands(t, first.prior)[0].location.object != object {
 		t.Fatal("source allocation was reset at a cut")
 	}
-	base := nativeproof.TransitionLocation{Offset: -16}
+	base := nativeproof.StackOffset(-16)
 	fixture, native := storageFunctionNative(t, []storageFunctionOperation{{base, 4, true, 7}, {base, 4, true, 9}}, nativeproof.OriginDomain{})
 	rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: object, base: base}}}
 	proof, err := checkGlobalFunctionCorrespondence(t.Context(), source, root, fixture.image, fixture.entry, completed, native, rho, nil)
@@ -462,7 +462,7 @@ func TestStorageFunctionDistinctInvocationLocals(t *testing.T) {
 	}
 	var ops []storageFunctionOperation
 	for i := range allocations {
-		ops = append(ops, storageFunctionOperation{nativeproof.TransitionLocation{Offset: -16 + int64(8*i)}, 4, true, 7})
+		ops = append(ops, storageFunctionOperation{nativeproof.StackOffset(-16 + int64(8*i)), 4, true, 7})
 	}
 	fixture, native := storageFunctionNative(t, ops, nativeproof.OriginDomain{})
 	rho := storageRepresentation{source: source.prog, image: fixture.image}
@@ -480,7 +480,7 @@ func TestStorageFunctionDistinctInvocationLocals(t *testing.T) {
 
 func TestStorageFunctionLocalRequiresNativeLifetimeOwnership(t *testing.T) {
 	source, completed := storageFunctionSource(t, `func Stop(p *uint32){if *p!=7 {panic(1)}};func F(){var x uint32;x=7;Stop(&x)}`)
-	base := nativeproof.TransitionLocation{Offset: -16}
+	base := nativeproof.StackOffset(-16)
 	for _, absent := range []bool{true, false} {
 		t.Run(fmt.Sprint(absent), func(t *testing.T) {
 			fixture, native := storageFunctionNative(t, []storageFunctionOperation{{base, 4, true, 7}}, nativeproof.OriginDomain{}, func(face *nativeproof.TransitionInterface) {
@@ -506,9 +506,9 @@ func TestStorageFunctionCombinedWritesRespectNativeCallContext(t *testing.T) {
 		t.Run(fmt.Sprint(child), func(t *testing.T) {
 			var fixture globalNativeFixture
 			var native nativeproof.TransitionReturnCertificate
-			base := nativeproof.TransitionLocation{Offset: -16}
+			base := nativeproof.StackOffset(-16)
 			if !child {
-				fixture, native = storageFunctionNative(t, []storageFunctionOperation{{base, 4, true, 7}, {nativeproof.TransitionLocation{Offset: -12}, 4, true, 9}}, nativeproof.OriginDomain{})
+				fixture, native = storageFunctionNative(t, []storageFunctionOperation{{base, 4, true, 7}, {nativeproof.StackOffset(-12), 4, true, 9}}, nativeproof.OriginDomain{})
 			} else {
 				code := []byte{0xc3, 0x48, 0x83, 0xec, 0x40, 0xb8, 7, 0, 0, 0, 0x89, 0x44, 0x24, 48}
 				call := len(code)
@@ -525,6 +525,7 @@ func TestStorageFunctionCombinedWritesRespectNativeCallContext(t *testing.T) {
 				bound, _ := native.BoundFor(fixture.image)
 				var contexts []nativeproof.TransitionActivationID
 				for _, access := range bound.Accesses {
+					access := storageTestAccess(t, bound.Prefix.Geometry, access)
 					if access.Kind == nativeproof.FrameWrite && access.Bytes.Start >= -16 && access.Bytes.End <= -8 {
 						contexts = append(contexts, access.Context)
 					}
@@ -550,7 +551,7 @@ func TestStorageFunctionCombinedWritesRespectNativeCallContext(t *testing.T) {
 
 func TestStorageFunctionBindingBudgetPrecedesCallbacks(t *testing.T) {
 	source, completed := storageFunctionSource(t, `func Stop(p *uint32){if *p!=7 {panic(1)}};func F(){var x uint32;x=7;Stop(&x)}`)
-	base := nativeproof.TransitionLocation{Offset: -16}
+	base := nativeproof.StackOffset(-16)
 	fixture, native := storageFunctionNative(t, []storageFunctionOperation{{base, 4, true, 7}}, nativeproof.OriginDomain{})
 	rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: make([]storageBinding, storageMaxBindings+1)}
 	for i := range rho.bindings {
@@ -576,7 +577,7 @@ func TestStorageFunctionSourcePointerEscapeRefused(t *testing.T) {
 			source, completed := storageFunctionSource(t, `var Escaped *uint32;`+copy+`func Stop(p *uint32){`+store+`};func F(){var x uint32;x=7;Stop(&x)}`)
 			for _, represented := range []bool{false, true} {
 				t.Run(fmt.Sprint(represented), func(t *testing.T) {
-					base := nativeproof.TransitionLocation{Offset: -16}
+					base := nativeproof.StackOffset(-16)
 					var ops []storageFunctionOperation
 					if represented {
 						ops = []storageFunctionOperation{{base, 4, true, 7}}
@@ -613,7 +614,7 @@ func TestStorageFunctionInternalPointerReturnRetainsDependentEffect(t *testing.T
 	source, completed := storageFunctionSource(t, `var G uint32;func Copy(p *uint32)*uint32{return p};func Read(p *uint32)uint32{return *p};func F(){var x uint32;x=7;G=Read(Copy(&x))}`)
 	for _, value := range []uint64{7, 8} {
 		t.Run(fmt.Sprint(value), func(t *testing.T) {
-			base := nativeproof.TransitionLocation{Image: true, Offset: 0x700008}
+			base := nativeproof.ImageAddress(0x700008)
 			fixture, native := storageFunctionNative(t, []storageFunctionOperation{{base, 4, true, value}}, nativeproof.OriginDomain{})
 			rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: regionObject{kind: regionGlobal, site: source.prog.Roots["F"].Pkg.Members["G"].(*ssa.Global)}, base: base}}}
 			proof, err := checkGlobalFunctionCorrespondence(t.Context(), source, source.prog.Roots["F"], fixture.image, fixture.entry, completed, native, rho, nil)
@@ -635,7 +636,7 @@ func TestStorageFunctionInternalPointerReturnRetainsDependentEffect(t *testing.T
 
 func TestStorageFunctionKnownInitializerFieldBesideOpaqueLeaf(t *testing.T) {
 	source, completed := storageFunctionSource(t, `type S struct{X uint32;Y float64};func Stop(p *S){if p.X!=0 {panic(1)}};func F(){var x S;Stop(&x)}`)
-	base := nativeproof.TransitionLocation{Offset: -32}
+	base := nativeproof.StackOffset(-32)
 	fixture, native := storageFunctionNative(t, []storageFunctionOperation{{base, 4, true, 0}, {base, 4, false, 0}}, nativeproof.OriginDomain{})
 	rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: storageFunctionLocal(t, completed), base: base}}}
 	proof, err := checkGlobalFunctionCorrespondence(t.Context(), source, source.prog.Roots["F"], fixture.image, fixture.entry, completed, native, rho, nil)
@@ -649,8 +650,8 @@ func TestStorageFunctionKnownInitializerFieldBesideOpaqueLeaf(t *testing.T) {
 
 func TestStorageFunctionAggregateReadByteCoverage(t *testing.T) {
 	source, completed := storageFunctionSource(t, `func Stop(p *[2]uint64){v:=*p;if v[0]!=7||v[1]!=9 {panic(1)}};func F(){var a [2]uint64;a[0]=7;a[1]=9;Stop(&a)}`)
-	base := nativeproof.TransitionLocation{Offset: -32}
-	second := nativeproof.TransitionLocation{Offset: -24}
+	base := nativeproof.StackOffset(-32)
+	second := nativeproof.StackOffset(-24)
 	for _, extra := range []bool{false, true} {
 		t.Run(fmt.Sprint(extra), func(t *testing.T) {
 			ops := []storageFunctionOperation{{base, 8, true, 7}, {second, 8, true, 9}, {base, 8, false, 0}, {second, 8, false, 0}}
@@ -675,8 +676,8 @@ func TestStorageFunctionAggregateReadByteCoverage(t *testing.T) {
 
 func TestStorageFunctionInitializerAtFinalFrontier(t *testing.T) {
 	source, completed := storageFunctionSource(t, `var G uint32;func Start(){};func Keep(*uint32){};func F(){G=7;Start();var x uint32;Keep(&x)}`)
-	local := nativeproof.TransitionLocation{Offset: -16}
-	global := nativeproof.TransitionLocation{Image: true, Offset: 0x700008}
+	local := nativeproof.StackOffset(-16)
+	global := nativeproof.ImageAddress(0x700008)
 	for _, variant := range []string{"materialized", "omitted", "reinitialized", "wrong-value", "early-read", "before-allocation-frontier"} {
 		t.Run(variant, func(t *testing.T) {
 			storeGlobal := storageFunctionOperation{global, 4, true, 7}
@@ -724,7 +725,7 @@ func TestStorageFunctionEliminatedAccessPreservesWritePreference(t *testing.T) {
 	if object == storageBoundaryOperands(t, completed.prior)[0].location.object {
 		t.Fatal("fixture does not have distinct represented and eliminated locals")
 	}
-	base := nativeproof.TransitionLocation{Offset: -16}
+	base := nativeproof.StackOffset(-16)
 	for _, variant := range []string{"matched-write", "missing-write", "surplus-write"} {
 		t.Run(variant, func(t *testing.T) {
 			ops := []storageFunctionOperation{{base, 4, true, 0}}
@@ -758,8 +759,8 @@ func TestStorageFunctionEliminatedAccessPreservesWritePreference(t *testing.T) {
 }
 
 func TestStorageFunctionWriteRunPrecedesInitialization(t *testing.T) {
-	base := nativeproof.TransitionLocation{Offset: -16}
-	second := nativeproof.TransitionLocation{Offset: -12}
+	base := nativeproof.StackOffset(-16)
+	second := nativeproof.StackOffset(-12)
 	for _, test := range []struct {
 		name, source string
 		operations   []storageFunctionOperation
@@ -819,8 +820,8 @@ func TestStorageFunctionWriteRunAllocationFrontier(t *testing.T) {
 			t.Fatal("fixture allocation does not follow the global write")
 		}
 	}
-	global := nativeproof.TransitionLocation{Image: true, Offset: 0x700008}
-	local := nativeproof.TransitionLocation{Offset: -16}
+	global := nativeproof.ImageAddress(0x700008)
+	local := nativeproof.StackOffset(-16)
 	for _, reversed := range []bool{false, true} {
 		t.Run(fmt.Sprint(reversed), func(t *testing.T) {
 			ops := []storageFunctionOperation{{global, 4, true, 7}, {local, 4, true, 0}}
@@ -882,8 +883,8 @@ TEXT ·Put(SB),NOSPLIT,$0-8
 	if err != nil || len(outcome.Accesses) != 1 || outcome.Accesses[0] != (assemblyReferenceAccess{Write: true, Value: 0, Width: 8}) || len(outcome.Atomics) != 0 {
 		t.Fatalf("selected ordinary write reference was not established: %+v %v", outcome, err)
 	}
-	g := nativeproof.TransitionLocation{Image: true, Offset: 0x700008}
-	h := nativeproof.TransitionLocation{Image: true, Offset: 0x700050}
+	g := nativeproof.ImageAddress(0x700008)
+	h := nativeproof.ImageAddress(0x700050)
 	for _, endpoint := range []string{"start", "end"} {
 		t.Run(endpoint, func(t *testing.T) {
 			name := "Start"
@@ -964,8 +965,8 @@ func TestStorageFunctionKnownReadDefersAmbiguousInitialization(t *testing.T) {
 	if xObject == yObject {
 		t.Fatal("fixture locals alias")
 	}
-	x := nativeproof.TransitionLocation{Offset: -16}
-	y := nativeproof.TransitionLocation{Offset: -24}
+	x := nativeproof.StackOffset(-16)
+	y := nativeproof.StackOffset(-24)
 	for _, variant := range []string{"eliminated-read", "retained-read", "initializer-retained-read", "missing-write", "surplus-write"} {
 		t.Run(variant, func(t *testing.T) {
 			writeY := storageFunctionOperation{y, 4, true, 7}
@@ -1053,8 +1054,8 @@ func storageFunctionReadChoices(t testing.TB, variant string) storageFunctionRea
 	}
 	xObject := storageBoundaryOperands(t, completed.prior)[0].location.object
 	yObject := calls[1].proof.arguments[0].location.object
-	x := nativeproof.TransitionLocation{Offset: -16}
-	y := nativeproof.TransitionLocation{Offset: -24}
+	x := nativeproof.StackOffset(-16)
+	y := nativeproof.StackOffset(-24)
 	writeY := storageFunctionOperation{y, 4, true, 7}
 	writeX := storageFunctionOperation{x, 4, true, 0}
 	readY := storageFunctionOperation{y, 4, false, 0}
@@ -1110,7 +1111,7 @@ func storageFunctionSearchAccount(t testing.TB, f storageFunctionReadChoiceFixtu
 	}
 	view := bound.Prefix
 	view.Accesses, view.Instructions, view.Memory = bound.Accesses, bound.Instructions, bound.State.Memory
-	layout, err := checkStorageAuthority(t.Context(), f.completed, view, f.rho, storageProtectedFootprints(view))
+	layout, err := checkStorageAuthority(t.Context(), f.completed, view, f.rho, storageProtectedFootprints(t.Context(), view))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1133,7 +1134,7 @@ func storageFunctionSearchAccount(t testing.TB, f storageFunctionReadChoiceFixtu
 	}
 	var observable []int
 	for index, access := range view.Accesses {
-		if p.administrativeAccess(view, access) {
+		if p.administrativeAccess(t.Context(), view, access) {
 			p.administrative = append(p.administrative, index)
 		} else {
 			observable = append(observable, index)
@@ -1282,7 +1283,7 @@ func TestStorageFunctionReadChoiceFailureClasses(t *testing.T) {
 
 func TestStorageFunctionEliminatesUnmaterializedSourceRead(t *testing.T) {
 	source, completed := storageFunctionSource(t, `func Read(p *uint32)uint32{return *p};func Keep(*uint32){};func F(){var x uint32;if Read(&x)!=0 {panic(1)};x=7;Keep(&x)}`)
-	base := nativeproof.TransitionLocation{Offset: -16}
+	base := nativeproof.StackOffset(-16)
 	object := storageBoundaryOperands(t, completed.prior)[0].location.object
 	for _, variant := range []string{"eliminated", "materialized", "early-read", "missing-write", "wrong-write"} {
 		t.Run(variant, func(t *testing.T) {
@@ -1305,7 +1306,7 @@ func TestStorageFunctionEliminatesUnmaterializedSourceRead(t *testing.T) {
 			if variant == "early-read" || variant == "materialized" {
 				var actual nativeproof.TransitionAccess
 				for _, access := range bound.Accesses {
-					if access.Kind == nativeproof.FrameRead && access.Image == base.Image && access.Bytes.Start == base.Offset {
+					if access.Kind == nativeproof.FrameRead && access.Bytes == storageTestExtent(t, bound.Prefix.Geometry, base, 4) {
 						actual = access
 						break
 					}
@@ -1316,7 +1317,8 @@ func TestStorageFunctionEliminatesUnmaterializedSourceRead(t *testing.T) {
 				if variant == "early-read" {
 					var assignments []br.Assignment
 					for _, cell := range bound.Prefix.InitialMemory {
-						if !cell.Image && cell.Offset >= base.Offset && cell.Offset < base.Offset+4 {
+						cell := storageTestByte(t, bound.Prefix.Geometry, cell)
+						if !cell.Image && cell.Offset >= int64(base) && cell.Offset < int64(base)+4 {
 							if cell.Value.View().Op != br.Variable || cell.Value.Sort() != br.Bits(8) || cell.Pointer != nil {
 								t.Fatal("native initial local bytes were specialized")
 							}
@@ -1382,8 +1384,8 @@ func TestStorageFunctionEliminatesUnmaterializedSourceRead(t *testing.T) {
 
 func TestStorageFunctionEliminatedReadDoesNotMaterialize(t *testing.T) {
 	source, completed := storageFunctionSource(t, `var G uint32;func Read(p *uint32)uint32{return *p};func Keep(*uint32){};func F(){var x uint32;if Read(&x)!=0 {panic(1)};G=7;if Read(&x)!=0 {panic(1)};x=7;Keep(&x)}`)
-	x := nativeproof.TransitionLocation{Offset: -16}
-	g := nativeproof.TransitionLocation{Image: true, Offset: 0x700008}
+	x := nativeproof.StackOffset(-16)
+	g := nativeproof.ImageAddress(0x700008)
 	ops := []storageFunctionOperation{{g, 4, true, 7}, {x, 4, true, 0}, {x, 4, false, 0}, {x, 4, true, 7}}
 	fixture, native := storageFunctionNative(t, ops, nativeproof.OriginDomain{})
 	rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{
@@ -1435,7 +1437,7 @@ func TestStorageFunctionLocalReadDoesNotEraseAtomic(t *testing.T) {
 			} else if len(bound.Prefix.PrimitiveEffects) != 0 {
 				t.Fatal("ordinary control acquired an atomic")
 			}
-			rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: storageBoundaryOperands(t, completed.prior)[0].location.object, base: nativeproof.TransitionLocation{Offset: -16}}}}
+			rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: storageBoundaryOperands(t, completed.prior)[0].location.object, base: nativeproof.StackOffset(-16)}}}
 			proof, err := checkGlobalFunctionCorrespondence(t.Context(), source, source.prog.Roots["F"], fixture.image, fixture.entry, completed, native, rho, nil)
 			if !atomic {
 				if err != nil || proof == nil || len(proof.materialized) != 1 || len(proof.matched) != 2 || len(proof.eliminated) != 0 {
@@ -1456,7 +1458,7 @@ func TestStorageFunctionLocalReadIsolation(t *testing.T) {
 				keep = `var Escaped *uint32;func Keep(p *uint32){Escaped=p}`
 			}
 			source, completed := storageFunctionSource(t, `func Read(p *uint32)uint32{return *p};`+keep+`;func F(){var x uint32;if Read(&x)!=0 {panic(1)};x=7;Keep(&x)}`)
-			base := nativeproof.TransitionLocation{Offset: -16}
+			base := nativeproof.StackOffset(-16)
 			fixture, native := storageFunctionNative(t, []storageFunctionOperation{{base, 4, true, 7}}, nativeproof.OriginDomain{})
 			object := storageBoundaryOperands(t, completed.prior)[0].location.object
 			rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: object, base: base}}}

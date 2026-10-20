@@ -125,12 +125,12 @@ func checkReturnFramePopulation(t testing.TB, registers []byte, frame uint16, se
 			t.Fatal("caller provenance lineage was not restored", r)
 		}
 		slot := int64(-8 * (j + 1))
-		if b.Accesses[j].Bytes != (RelativeSpan{slot, slot + 8}) || b.Accesses[j].Kind != FrameWrite || b.Accesses[len(saved)+j].Kind != FrameRead {
+		if extentCoordinates(b.Accesses[j].Bytes) != (RelativeSpan{slot, slot + 8}) || b.Accesses[j].Kind != FrameWrite || b.Accesses[len(saved)+j].Kind != FrameRead {
 			t.Fatal("push/pop stack slot or order differs")
 		}
 		for _, v := range b.State.Memory {
-			if !v.Image && v.Offset >= slot && v.Offset < slot+8 {
-				if stateEval(t, v.Value, values) != original[r]>>(8*uint(v.Offset-slot))&255 {
+			if !v.isImage() && v.offset >= slot && v.offset < slot+8 {
+				if stateEval(t, v.Value, values) != original[r]>>(8*uint(v.offset-slot))&255 {
 					t.Fatal("return erased or changed residual saved bytes")
 				}
 			}
@@ -199,7 +199,7 @@ func TestTransitionReturnValueLineageLanes(t *testing.T) {
 	face.ReturnContext.Preserved = []Register{R14}
 	prefix := returnPrefix(t, im, face, testEntry+10)
 	b, _ := checkedReturn(t, prefix).Bound()
-	if _, ok := b.State.Registers[R14].Pointer.(ImagePointer); !ok {
+	if p, ok := b.State.Registers[R14].Pointer.(AddressPointer); !ok || !p.isImage() {
 		t.Fatal("concrete entry pointer became unconstrained lineage")
 	}
 	values := entryRelationValues(b.Prefix, 4096, 0)

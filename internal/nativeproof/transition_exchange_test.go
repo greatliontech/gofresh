@@ -300,7 +300,7 @@ func atomicPermissionProperty(t testing.TB, kind, source, base, permissions, ext
 		t.Fatal("admissible RMW refused", kind, source, base, permissions, extent, displacement, err)
 	}
 	b := c.checked.bound
-	if len(b.Accesses) != 2 || b.Accesses[0].Bytes != (RelativeSpan{int64(displacement), int64(displacement) + 8}) || b.Accesses[0].Bytes != b.Accesses[1].Bytes || b.Accesses[0].Kind != FrameRead || b.Accesses[1].Kind != FrameWrite {
+	if len(b.Accesses) != 2 || extentCoordinates(b.Accesses[0].Bytes) != (RelativeSpan{int64(displacement), int64(displacement) + 8}) || b.Accesses[0].Bytes != b.Accesses[1].Bytes || b.Accesses[0].Kind != FrameRead || b.Accesses[1].Kind != FrameWrite {
 		t.Fatal("RMW extent/permission oracle mismatch")
 	}
 }
@@ -363,15 +363,15 @@ func TestTransitionExchangePointerWordsAndUnchangedWrites(t *testing.T) {
 			t.Fatal(err)
 		}
 		b := c.checked.bound
-		if b.Registers[RDX].Pointer != (OriginPointer{Origin: b.Origin, Offset: 8}) {
+		if b.Registers[RDX].Pointer != b.Geometry.stackPointer(8) {
 			t.Fatal("old memory pointer lost", kind, b.Registers[RDX].Pointer)
 		}
 		var want TransitionPointer
 		if kind == "exchange" {
-			want = OriginPointer{Origin: b.Origin, Offset: 0}
+			want = b.Geometry.stackPointer(0)
 		}
 		if kind == "zero" {
-			want = OriginPointer{Origin: b.Origin, Offset: 8}
+			want = b.Geometry.stackPointer(8)
 		}
 		if b.Registers[RCX].Pointer != want {
 			t.Fatal("new memory provenance unjustified", kind, b.Registers[RCX].Pointer)

@@ -34,7 +34,7 @@ func TestFloatStorageEliminatedComparisonEffects(t *testing.T) {
 				text := fmt.Sprintf(`import "unsafe";var G uint32;func Check(p *float%d){if *p==*p {G=1}else{G=2}};func F(){var x float%d;*(*uint%d)(unsafe.Pointer(&x))=%d;Check(&x)}`, width*8, width*8, width*8, tc.bits)
 				source, completed := storageFunctionSource(t, text)
 				global := source.prog.Roots["F"].Pkg.Members["G"].(*ssa.Global)
-				base := nativeproof.TransitionLocation{Image: true, Offset: 0x700008}
+				base := nativeproof.ImageAddress(0x700008)
 				for _, value := range []uint64{tc.want, 3 - tc.want} {
 					fixture, native := storageFunctionNative(t, []storageFunctionOperation{{base, 4, true, value}}, nativeproof.OriginDomain{})
 					rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: regionObject{kind: regionGlobal, site: global}, base: base}}}
@@ -67,7 +67,7 @@ func TestFloatStorageMaterializationAndReadOrder(t *testing.T) {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			bits := ^uint64(0) >> (64 - width*8)
 			source, completed := storageFunctionSource(t, fmt.Sprintf(`import "unsafe";func Check(p *float%d){if *p==*p {panic(1)}};func F(){var x float%d;*(*uint%d)(unsafe.Pointer(&x))=%d;Check(&x)}`, width*8, width*8, width*8, bits))
-			base := nativeproof.TransitionLocation{Offset: -16}
+			base := nativeproof.StackOffset(-16)
 			for _, variant := range []string{"stored", "initialized", "read", "wrong", "early-read", "extra-read"} {
 				t.Run(variant, func(t *testing.T) {
 					ops := []storageFunctionOperation{{base, width, true, bits}}

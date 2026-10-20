@@ -142,7 +142,7 @@ func occurrencePropertyEval(ctx context.Context, term br.Term, values map[br.Ter
 }
 
 func occurrencePropertyInputs(ctx context.Context, p occurrenceOracleProgram, b TransitionBound, input occurrenceOracleInput) (map[br.Term]uint64, error) {
-	if !reflect.DeepEqual(b.Interface, p.face) || b.Origin != b.InitialRegisters[RSP] || len(b.InitialMemory) != len(input.state.memory) || len(b.Words) != 0 || b.InitialFS.Valid() {
+	if b.Geometry.root == nil || b.Geometry.root.origin != b.Origin || !reflect.DeepEqual(b.Geometry.root.face, p.face) || !reflect.DeepEqual(b.Interface, p.face) || b.Origin != b.InitialRegisters[RSP] || len(b.InitialMemory) != len(input.state.memory) || len(b.Words) != 0 || b.InitialFS.Valid() {
 		return nil, errors.New("joint initial interface/domain differs")
 	}
 	values := map[br.Term]uint64{}
@@ -192,7 +192,7 @@ func occurrencePropertyInputs(ctx context.Context, p occurrenceOracleProgram, b 
 			return nil, errors.New("joint initial byte keyset differs")
 		}
 		bytes[key] = true
-		if !cell.Image && cell.Offset >= 0 && cell.Offset < 8 {
+		if !cell.isImage() && cell.offset >= 0 && cell.offset < 8 {
 			actual, err := occurrencePropertyEval(ctx, cell.Value, nil)
 			if err != nil || actual != uint64(value.value) {
 				return nil, errors.New("protected input control byte differs")
@@ -311,13 +311,13 @@ func occurrencePropertyPointer(owner TransitionCertificate, image *Image, origin
 		if want.lineage.valid {
 			return errors.New("reference confuses address capability with caller lineage")
 		}
-		if want.address.image {
-			pointer, ok := got.(ImagePointer)
-			if !ok || pointer.Address != uint64(want.address.off) || pointer.owner != &image.data[0] || pointer.load != want.address.load {
-				return errors.New("owned image provenance differs")
-			}
-		} else if pointer, ok := got.(OriginPointer); !ok || pointer.Origin != origin || pointer.Offset != want.address.off {
-			return errors.New("origin provenance differs or is absent")
+		pointer, ok := got.(AddressPointer)
+		g := owner.checked.bound.Geometry
+		if !ok || !g.ownsPointer(pointer) || pointer.isImage() != want.address.image || pointer.offset != want.address.off || g.Origin() != origin {
+			return errors.New("owned address provenance differs")
+		}
+		if pointer.isImage() && (!sameImage(pointer.view.backing.geometry.image, image) || pointer.view.load != want.address.load) {
+			return errors.New("owned image provenance differs")
 		}
 		return nil
 	}
@@ -524,7 +524,7 @@ func occurrencePropertyJointObserved(ctx context.Context, f occurrencePropertyFi
 				return errors.New("original indivisible access indices differ")
 			}
 			r, w := b.Accesses[read], b.Accesses[write]
-			if r.ID != id || w.ID != id || r.Kind != FrameRead || w.Kind != FrameWrite || r.Bytes != w.Bytes || r.Image != w.Image || r.Value != before || w.Value != after {
+			if r.ID != id || w.ID != id || r.Kind != FrameRead || w.Kind != FrameWrite || r.Bytes != w.Bytes || r.Value != before || w.Value != after {
 				return errors.New("indivisible access group lost exact identity/value")
 			}
 		}
@@ -574,7 +574,7 @@ func occurrencePropertyJointObserved(ctx context.Context, f occurrencePropertyFi
 			} else if w.returnRead {
 				kind, event = FrameReturnRead, "return-read"
 			}
-			if w.instruction != visit.instruction || a.Kind != kind || a.Image != w.off.image || a.Bytes != (RelativeSpan{w.off.off, w.off.off + int64(w.width)}) {
+			if w.instruction != visit.instruction || a.Kind != kind || !b.Geometry.owns(a.Bytes.start) || a.Bytes.start.isImage() != w.off.image || extentCoordinates(a.Bytes) != (RelativeSpan{w.off.off, w.off.off + int64(w.width)}) {
 				return errors.New("ordered active access differs")
 			}
 			if err := equal(a.Value, br.Bits(w.width*8), w.value); err != nil {
@@ -716,7 +716,7 @@ func occurrencePropertyJointObserved(ctx context.Context, f occurrencePropertyFi
 			return fmt.Errorf("GPR%d provenance: %w", reg, err)
 		}
 	}
-	if b.Registers[RSP].Pointer != (OriginPointer{Origin: b.Origin, Offset: int64(want.state.regs[RSP] - input.state.origin)}) {
+	if b.Registers[RSP].Pointer != b.Geometry.stackPointer(int64(want.state.regs[RSP]-input.state.origin)) {
 		return errors.New("current SP provenance differs")
 	}
 	for reg, vector := range b.Vectors {
@@ -743,7 +743,7 @@ func occurrencePropertyJointObserved(ctx context.Context, f occurrencePropertyFi
 		if err := equal(cell.Value, br.Bits(8), uint64(w.value)); err != nil {
 			return fmt.Errorf("memory %+v: %w", key, err)
 		}
-		required := !cell.Image && cell.Offset >= -8 && cell.Offset < 0
+		required := !cell.isImage() && cell.offset >= -8 && cell.offset < 0
 		if err := occurrencePropertyPointer(owner, f.image, b.Origin, cell.Pointer, cell.PointerLane, provenance.memory[key], required); err != nil {
 			return fmt.Errorf("byte %+v provenance: %w", key, err)
 		}
@@ -772,7 +772,7 @@ func occurrencePropertyJointObserved(ctx context.Context, f occurrencePropertyFi
 	for j, frame := range b.Frames {
 		w := want.frames[j]
 		id := path.referenceID[w.activation]
-		if frame.ID != id || frame.Context != TransitionActivationID(id) || frame.Call != p.pcs[w.call] || frame.Return != p.pcs[w.after] || frame.Slot != (OriginPointer{Origin: b.Origin, Offset: int64(w.slot - input.state.origin)}) {
+		if frame.ID != id || frame.Context != TransitionActivationID(id) || frame.Call != p.pcs[w.call] || frame.Return != p.pcs[w.after] || frame.Slot != b.Geometry.stackPointer(int64(w.slot-input.state.origin)) {
 			return errors.New("active frame occurrence/control slot differs")
 		}
 	}
@@ -977,11 +977,11 @@ func TestTransitionOccurrenceJointWholeStateSensitivity(t *testing.T) {
 					}
 				}
 			case "register-image-pointer":
-				bad.Registers[R14].Pointer = ImagePointer{Address: input.state.origin, owner: &f.image.data[0], load: 0}
+				bad.Registers[R14].Pointer = b.Geometry.imagePointer(0, input.state.origin)
 			case "register-provenance-absent":
 				bad.Registers[R14].Pointer = nil
 			case "arbitrary-register-alias":
-				bad.Registers[R15].Pointer = OriginPointer{Origin: b.Origin, Offset: 16}
+				bad.Registers[R15].Pointer = b.Geometry.stackPointer(16)
 			case "scratch-pointer-lane", "scratch-orphan-lane", "saved-lineage-absent", "saved-lineage-lane":
 				offset := int64(-24)
 				if mode == "saved-lineage-absent" {
@@ -991,10 +991,10 @@ func TestTransitionOccurrenceJointWholeStateSensitivity(t *testing.T) {
 				}
 				found := false
 				for j := range bad.Memory {
-					if !bad.Memory[j].Image && bad.Memory[j].Offset == offset {
+					if !bad.Memory[j].isImage() && bad.Memory[j].offset == offset {
 						switch mode {
 						case "scratch-pointer-lane":
-							bad.Memory[j].Pointer = OriginPointer{Origin: b.Origin, Offset: -24}
+							bad.Memory[j].Pointer = b.Geometry.stackPointer(-24)
 						case "scratch-orphan-lane":
 							bad.Memory[j].PointerLane = 5
 						case "saved-lineage-absent":

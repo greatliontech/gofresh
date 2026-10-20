@@ -110,8 +110,8 @@ func (m *transitionChecker) applicationPremises(child TransitionBound, a *Transi
 		if !m.tick() {
 			return m.err
 		}
-		actual, ok := m.pointers[p.Register].(ImagePointer)
-		if !ok || actual.owner != &m.im.data[0] || actual.Address != p.Address {
+		actual, ok := m.pointers[p.Register].(AddressPointer)
+		if !ok || !m.bound.Geometry.ownsPointer(actual) || !actual.isImage() || uint64(actual.offset) != p.Address {
 			return refuse(m.pc, "transition-application-pointer", "callee entry pointer lacks current owned provenance")
 		}
 		if err := m.applicationEstablish(m.compare(br.Equal, m.state.regs[p.Register], m.con(br.Bits(64), p.Address))); err != nil {
@@ -126,7 +126,7 @@ func (m *transitionChecker) applicationPremises(child TransitionBound, a *Transi
 		if !ok {
 			return refuse(m.pc, "transition-application-origin", "guard origin offset overflow")
 		}
-		word := m.memoryValue(TransitionLocation{Image: true, Offset: int64(w.Address)}, 8)
+		word := m.memoryValue(m.bound.Geometry.imageLocation(int64(w.Address)), 8)
 		holds, known, err := m.originWordUpperBound(word, offset)
 		if err != nil {
 			return err
@@ -145,13 +145,14 @@ func (m *transitionChecker) applicationPremises(child TransitionBound, a *Transi
 			return err
 		}
 	}
-	control := m.memoryValue(TransitionLocation{Offset: a.StackShift}, 8)
+	control := m.memoryValue(m.bound.Geometry.stackLocation(a.StackShift), 8)
 	if err := m.applicationEstablish(m.compare(br.Equal, control.Value, m.con(br.Bits(64), f.ReturnContext.Target))); err != nil {
 		return err
 	}
 	// Associations specialize all arbitrary callee inputs coherently. They keep
 	// the caller's original variables, byte sharing, ordered lanes, and primitive
 	// outcomes; no child variable is inserted into the native successor state.
+	a.Geometry = TransitionGeometryAssociation{child.Geometry, m.bound.Geometry, a.StackShift}
 	a.Inputs, a.InputPredicates, a.InputFS = child.InitialRegisters, child.InitialPredicates, child.InitialFS
 	a.InputDirection, a.Direction = child.InitialDirection, m.direction
 	a.Predicates = TransitionPredicates{m.state.flags[flagCarry], m.state.flags[flagZero], m.state.flags[flagLess]}
@@ -180,13 +181,9 @@ func (m *transitionChecker) applicationPremises(child TransitionBound, a *Transi
 		if !m.tick() {
 			return m.err
 		}
-		key := input.TransitionLocation
-		if !key.Image {
-			var ok bool
-			key.Offset, ok = signedPlus(key.Offset, a.StackShift)
-			if !ok {
-				return refuse(m.pc, "transition-application-origin", "entry byte offset overflow")
-			}
+		key, err := a.Geometry.associateLocation(input.TransitionLocation)
+		if err != nil {
+			return err
 		}
 		current, ok := m.memory[key]
 		if !ok {
@@ -198,11 +195,11 @@ func (m *transitionChecker) applicationPremises(child TransitionBound, a *Transi
 		if !m.tick() {
 			return m.err
 		}
-		offset, ok := signedPlus(word.Offset, a.StackShift)
-		if !ok {
-			return refuse(m.pc, "transition-application-origin", "entry word offset overflow")
+		key, err := a.Geometry.associateLocation(word.Bytes.Start())
+		if err != nil {
+			return err
 		}
-		a.Words = append(a.Words, TransitionCallWord{Input: word, Current: m.memoryValue(TransitionLocation{Offset: offset}, 8)})
+		a.Words = append(a.Words, TransitionCallWord{Input: word, Current: m.memoryValue(key, 8)})
 	}
 	return m.err
 }

@@ -58,8 +58,8 @@ func entryRelationValues(b TransitionBound, origin, guard uint64) map[br.Term]ui
 	}
 	for _, v := range b.InitialMemory {
 		values[v.Value] = 0
-		if v.Image && v.Offset >= int64(imageStateAddress+16) && v.Offset < int64(imageStateAddress+24) {
-			values[v.Value] = guard >> (8 * uint(v.Offset-int64(imageStateAddress+16))) & 255
+		if v.isImage() && v.offset >= int64(imageStateAddress+16) && v.offset < int64(imageStateAddress+24) {
+			values[v.Value] = guard >> (8 * uint(v.offset-int64(imageStateAddress+16))) & 255
 		}
 	}
 	return values
@@ -97,14 +97,14 @@ func TestTransitionEntryRelationRealPrologue(t *testing.T) {
 	if !b.ConditionalRegion || b.EntryPredicate.Sort() != br.Bool() || literalBool(b.EntryPredicate, 1) || len(b.ExcludedBoundaries) != 1 || b.ExcludedBoundaries[0].PC != testEntry+18 {
 		t.Fatal("missing actual entry antecedent or slow-path exclusion")
 	}
-	if len(b.Accesses) != 1 || b.Accesses[0].Bytes != (RelativeSpan{int64(imageStateAddress + 16), int64(imageStateAddress + 24)}) || !b.Accesses[0].Image || b.Accesses[0].Kind != FrameRead {
+	if len(b.Accesses) != 1 || b.Accesses[0].Bytes != (TransitionExtent{b.Geometry.imageLocation(int64(imageStateAddress + 16)), 8}) || b.Accesses[0].Kind != FrameRead {
 		t.Fatal("entry declaration fabricated access or CMP lost its full read", b.Accesses)
 	}
 	if b.Instructions[0].Guard != b.EntryPredicate || b.Registers[R14].Value != b.InitialRegisters[R14] || b.Preserved[R14] != math.MaxUint64 || b.Preserved[RSP] != math.MaxUint64 {
 		t.Fatal("entry binding lost original variable, preservation or guard")
 	}
-	ptr, ok := b.Registers[R14].Pointer.(ImagePointer)
-	if !ok || ptr.Address != imageStateAddress || ptr.owner != &im.data[0] || b.Registers[RSP].Pointer != (OriginPointer{Origin: b.Origin}) {
+	ptr, ok := b.Registers[R14].Pointer.(AddressPointer)
+	if !ok || !ptr.isImage() || uint64(ptr.offset) != imageStateAddress || !b.Geometry.ownsPointer(ptr) || !sameImage(ptr.view.backing.geometry.image, im) || b.Registers[RSP].Pointer != b.Geometry.stackPointer(0) {
 		t.Fatal("missing owned entry provenance")
 	}
 	for _, v := range b.InitialMemory {

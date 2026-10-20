@@ -34,7 +34,7 @@ func assertSelectedRuntimeRootedApplication(t *testing.T, raw []byte, image *nat
 		t.Fatal("root-to-body entry", err)
 	}
 	before, _ := entered.BoundFor(image)
-	if before.ConditionalRegion || before.Boundary.PC != body.Prefix.Entry || len(before.Frames) != 1 || before.Frames[0].Return != until || before.Registers[nativeproof.RSP].Pointer != (nativeproof.OriginPointer{Origin: before.Origin, Offset: -56}) || !before.Thread.ContextChanged {
+	if before.ConditionalRegion || before.Boundary.PC != body.Prefix.Entry || len(before.Frames) != 1 || before.Frames[0].Return != until || !storageTestStack(before.Geometry, before.Registers[nativeproof.RSP].Pointer, -56) || !before.Thread.ContextChanged {
 		t.Fatal("selected body entry lacks its actual wrapper activation or root history")
 	}
 	oldSource, oldNative, oldLayout, oldPairing := proof.source, proof.native, proof.layout, proof.paired
@@ -61,10 +61,14 @@ func assertSelectedRuntimeRootedApplication(t *testing.T, raw []byte, image *nat
 	for i, input := range rooted.inputs {
 		original := proof.inputs[i]
 		footprint, found := proof.layout.locationFootprint(original.location)
-		if !found || !footprint.Image || input.index != i || input.native.Sort() != original.native.Sort() || input.source.Sort() != original.source.Sort() {
+		if !found || original.location.object.kind != regionGlobal || input.index != i || input.native.Sort() != original.native.Sort() || input.source.Sort() != original.source.Sort() {
 			t.Fatal("rooted input changed its original identity, selected width or storage")
 		}
-		current, err := storageNativeWord(t.Context(), inputBuilder, a.ChildEntry.Memory, nativeproof.TransitionLocation{Image: true, Offset: footprint.Bytes.Start}, int(footprint.Bytes.End-footprint.Bytes.Start))
+		mapped, err := a.Geometry.ResolveExtent(t.Context(), footprint.Bytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		current, err := storageNativeWord(t.Context(), inputBuilder, a.ChildEntry.Memory, mapped, int(mapped.Width()))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -73,7 +77,7 @@ func assertSelectedRuntimeRootedApplication(t *testing.T, raw []byte, image *nat
 		}
 	}
 	end := a.Successor
-	if end.Boundary.PC != until || end.Boundary.Context != 0 || len(end.Frames) != 0 || end.Registers[nativeproof.RSP].Pointer != (nativeproof.OriginPointer{Origin: before.Origin, Offset: -48}) || end.Thread != before.Thread || end.Direction != before.Direction || !end.SSE.MXCSRPreserved || !end.SSE.UpperVectorsPreserved {
+	if end.Boundary.PC != until || end.Boundary.Context != 0 || len(end.Frames) != 0 || !storageTestStack(before.Geometry, end.Registers[nativeproof.RSP].Pointer, -48) || end.Thread != before.Thread || end.Direction != before.Direction || !end.SSE.MXCSRPreserved || !end.SSE.UpperVectorsPreserved {
 		t.Fatal("complete body failed to discharge the wrapper activation with preserved current context")
 	}
 	if len(end.PrimitiveEffects) != len(before.PrimitiveEffects)+10 || !reflect.DeepEqual(end.PrimitiveEffects[:len(before.PrimitiveEffects)], before.PrimitiveEffects) || !reflect.DeepEqual(end.Abstractions, before.Abstractions) || len(end.Accesses) <= len(before.Accesses) || !reflect.DeepEqual(end.Accesses[:len(before.Accesses)], before.Accesses) {
@@ -82,14 +86,18 @@ func assertSelectedRuntimeRootedApplication(t *testing.T, raw []byte, image *nat
 	// The completed body releases its private locals. Only its retained write
 	// footprint may differ; startup spills, context words and the outer control
 	// word remain concrete and unchanged, not reconstructed from source zeros.
-	writes := []storageFootprint{{Bytes: nativeproof.RelativeSpan{Start: -144, End: -56}}}
+	writes := []storageFootprint{{Bytes: storageTestExtent(t, end.Geometry, nativeproof.StackOffset(-144), 88)}}
 	for _, binding := range proof.representation.bindings {
 		if binding.object.kind == regionGlobal {
 			footprint, _ := proof.layout.objectFootprint(binding.object)
-			writes = append(writes, footprint)
+			mapped, err := a.Geometry.ResolveExtent(t.Context(), footprint.Bytes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writes = append(writes, storageFootprint{Bytes: mapped})
 		}
 	}
-	if err := selectedStartupMemoryFrame(before.Memory, end.Memory, writes); err != nil {
+	if err := selectedStartupMemoryFrame(end.Geometry, before.Memory, end.Memory, writes); err != nil {
 		t.Fatal(err)
 	}
 	mapping := map[nativeproof.TransitionOccurrenceID]nativeproof.TransitionOccurrenceID{}

@@ -223,10 +223,10 @@ func checkOptimizedGuarded(t testing.TB, im *Image, oldFace TransitionInterface,
 					}
 				}
 				for _, cell := range b.Memory {
-					if !cell.Image {
+					if !cell.isImage() {
 						continue
 					}
-					address := uint64(cell.Offset)
+					address := uint64(cell.offset)
 					if address == flag {
 						want := uint64(initial.memory[stateLocation{true, int64(flag)}].value)
 						if V {

@@ -449,19 +449,11 @@ func (m *transitionChecker) projectMemory() []TransitionByte {
 		}
 	}
 	slices.SortFunc(bytes, func(a, b TransitionByte) int {
-		if a.Image != b.Image {
-			if a.Image {
-				return 1
-			}
-			return -1
+		n, err := m.bound.Geometry.Compare(a.TransitionLocation, b.TransitionLocation)
+		if err != nil {
+			m.err = err
 		}
-		if a.Offset < b.Offset {
-			return -1
-		}
-		if a.Offset > b.Offset {
-			return 1
-		}
-		return 0
+		return n
 	})
 	return bytes
 }
@@ -491,7 +483,6 @@ func (m *transitionChecker) initial() error {
 		m.bound.InitialFS = m.scratch(br.Bits(64))
 		m.thread = TransitionThread{FS: TransitionValue{Value: m.bound.InitialFS}, SelectorPreserved: true}
 	}
-	m.pointers[RSP] = OriginPointer{Origin: m.bound.Origin}
 	f := TransitionFlag{Preserved: true, Defined: true}
 	m.bound.Flags = TransitionFlags{f, f, f, f, f, f}
 	total := 0
@@ -504,13 +495,18 @@ func (m *transitionChecker) initial() error {
 	if err := m.reserveState(total); err != nil {
 		return err
 	}
+	if err := m.reserveGeometry(); err != nil {
+		return err
+	}
+	m.bound.Geometry = newTransitionGeometry(m.im, m.face, m.bound.Origin)
+	m.pointers[RSP] = m.bound.Geometry.stackPointer(0)
 	m.memory = make(map[TransitionLocation]TransitionByte)
 	for _, r := range m.face.Regions {
 		for off := r.Bytes.Start; off < r.Bytes.End; off++ {
 			if !m.tick() {
 				return m.err
 			}
-			key := TransitionLocation{Offset: off}
+			key := m.bound.Geometry.stackLocation(off)
 			if _, exists := m.memory[key]; !exists {
 				m.memory[key] = TransitionByte{TransitionLocation: key, Value: m.scratch(br.Bits(8))}
 			}
@@ -521,7 +517,7 @@ func (m *transitionChecker) initial() error {
 			if !m.tick() {
 				return m.err
 			}
-			key := TransitionLocation{Image: true, Offset: int64(addr)}
+			key := m.bound.Geometry.imageLocation(int64(addr))
 			if _, exists := m.memory[key]; !exists {
 				var value br.Term
 				if v, known := m.initialImageByte(addr); known {
@@ -535,9 +531,9 @@ func (m *transitionChecker) initial() error {
 	}
 	for _, off := range m.face.Words {
 		a := m.scratch(br.Bits(64))
-		m.bound.Words = append(m.bound.Words, TransitionWord{off, a})
+		m.bound.Words = append(m.bound.Words, TransitionWord{TransitionExtent{m.bound.Geometry.stackLocation(off), 8}, a})
 		for j := 0; j < 8; j++ {
-			key := TransitionLocation{Offset: off + int64(j)}
+			key := m.bound.Geometry.stackLocation(off + int64(j))
 			m.memory[key] = TransitionByte{TransitionLocation: key, Value: m.extract(a, j*8, 8)}
 		}
 	}
@@ -552,30 +548,13 @@ func (m *transitionChecker) initial() error {
 }
 
 func (m *transitionChecker) advance(pointer TransitionPointer, delta int64) (TransitionPointer, error) {
-	if p, ok := pointer.(ImagePointer); ok {
-		if p.owner != &m.im.data[0] || p.load < 0 || p.load >= len(m.im.loads) {
-			return nil, refuse(m.pc, "transition-provenance", "image pointer belongs to another owner")
-		}
-		load := m.im.loads[p.load]
-		address, ok := relative(p.Address, delta)
-		if !ok || p.Address < load.va || p.Address > load.end || address < load.va || address > load.end || address >= 1<<47 {
-			return nil, refuse(m.pc, "transition-image", "pointer escapes its logical image mapping")
-		}
-		p.Address = address
-		return p, nil
-	}
-	p, valid := pointer.(OriginPointer)
-	if !valid || p.Origin != m.bound.Origin || p.Origin == (br.Term{}) {
+	if m.bound.Geometry.root == nil || !sameImage(m.bound.Geometry.root.image, m.im) {
 		return nil, refuse(m.pc, "transition-provenance", "address lacks the checked origin")
 	}
-	d, ok := signedPlus(p.Offset, delta)
-	if !ok {
-		return nil, refuse(m.pc, "transition-origin", "signed offset overflow")
+	p, _, failure := m.bound.Geometry.pointerRange(pointer, delta, 0, m.pc)
+	if failure != nil {
+		return nil, failure
 	}
-	if err := m.offset(d); err != nil {
-		return nil, err
-	}
-	p.Offset = d
 	return p, nil
 }
 
@@ -589,7 +568,7 @@ func (m *transitionChecker) ripPointer(disp int64, size uint8) (TransitionPointe
 	if err != nil {
 		return nil, err
 	}
-	return ImagePointer{Address: address, owner: &m.im.data[0], load: load}, nil
+	return m.bound.Geometry.imagePointer(load, address), nil
 }
 
 func (m *transitionChecker) address(mem x86asm.Mem, kind AccessKind, width int, size uint8) (TransitionLocation, error) {
@@ -610,31 +589,23 @@ func (m *transitionChecker) address(mem x86asm.Mem, kind AccessKind, width int, 
 }
 
 func (m *transitionChecker) accessPointer(p TransitionPointer, kind AccessKind, width int) (TransitionLocation, error) {
-	if image, ok := p.(ImagePointer); ok {
-		end, valid := plus(image.Address, uint64(width))
-		if !valid || end > m.im.loads[image.load].end || end > 1<<47 {
-			return TransitionLocation{}, refuse(m.pc, "transition-image", "full access escapes logical mapping")
-		}
-		if !m.imagePermission(Span{image.Address, end}, kind) {
+	if width <= 0 {
+		return TransitionLocation{}, refuse(m.pc, "transition-provenance", "access lacks current memory provenance")
+	}
+	address, end, failure := m.bound.Geometry.pointerRange(p, 0, int64(width), m.pc)
+	if failure != nil {
+		return TransitionLocation{}, failure
+	}
+	if address.isImage() {
+		if !m.imagePermission(Span{uint64(address.offset), uint64(end)}, kind) {
 			if m.err != nil {
 				return TransitionLocation{}, m.err
 			}
 			return TransitionLocation{}, refuse(m.pc, "transition-permission", "full image access lacks declared permission")
 		}
-		return TransitionLocation{Image: true, Offset: int64(image.Address)}, nil
+		return m.bound.Geometry.imageLocation(address.offset), nil
 	}
-	stack, valid := p.(OriginPointer)
-	if !valid || stack.Origin != m.bound.Origin {
-		return TransitionLocation{}, refuse(m.pc, "transition-provenance", "access lacks current memory provenance")
-	}
-	end, ok := signedPlus(stack.Offset, int64(width))
-	if !ok {
-		return TransitionLocation{}, refuse(m.pc, "transition-origin", "access offset overflow")
-	}
-	if err := m.offset(end); err != nil {
-		return TransitionLocation{}, err
-	}
-	span := RelativeSpan{stack.Offset, end}
+	span := RelativeSpan{address.offset, end}
 	if kind == FrameWrite && m.face.ReturnContext != nil && span.Start < 8 && span.End > 0 {
 		return TransitionLocation{}, refuse(m.pc, "transition-return-protected", "write overlaps the incoming continuation control word")
 	}
@@ -644,14 +615,14 @@ func (m *transitionChecker) accessPointer(p TransitionPointer, kind AccessKind, 
 		}
 		return TransitionLocation{}, refuse(m.pc, "transition-permission", "full access lacks declared permission")
 	}
-	return TransitionLocation{Offset: stack.Offset}, nil
+	return m.bound.Geometry.stackLocation(address.offset), nil
 }
 
 func (m *transitionChecker) recordAccess(off TransitionLocation, width int, kind AccessKind, value br.Term) {
 	if !m.tick() {
 		return
 	}
-	m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{ID: m.occurrence, PC: m.pc, Context: m.activation, Kind: kind, Bytes: RelativeSpan{off.Offset, off.Offset + int64(width)}, Image: off.Image, Value: value})
+	m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{ID: m.occurrence, PC: m.pc, Context: m.activation, Kind: kind, Bytes: TransitionExtent{off, int64(width)}, Value: value})
 }
 
 func (m *transitionChecker) load(off TransitionLocation, width int, kind AccessKind) TransitionValue {
@@ -666,7 +637,7 @@ func (m *transitionChecker) memoryValue(off TransitionLocation, width int) Trans
 	var lanes [8]pointerLane[TransitionPointer]
 	var v br.Term
 	for j := 0; j < width; j++ {
-		key := TransitionLocation{off.Image, off.Offset + int64(j)}
+		key := off.add(int64(j))
 		b := m.memory[key]
 		lanes[j] = pointerLane[TransitionPointer]{b.Pointer, b.PointerLane}
 		if j == 0 {
@@ -688,7 +659,7 @@ func (m *transitionChecker) store(off TransitionLocation, v TransitionValue, wid
 		v.Pointer = nil
 	}
 	for j := 0; j < width; j++ {
-		b := TransitionByte{TransitionLocation: TransitionLocation{off.Image, off.Offset + int64(j)}, Value: m.extract(v.Value, j*8, 8), Pointer: v.Pointer}
+		b := TransitionByte{TransitionLocation: off.add(int64(j)), Value: m.extract(v.Value, j*8, 8), Pointer: v.Pointer}
 		if v.Pointer != nil {
 			b.PointerLane = uint8(j)
 		}
@@ -822,7 +793,7 @@ func (m *transitionChecker) step(i operation, size uint8) error {
 			}
 			// RIP is not a GPR. Its exact decoded next PC supplies this scalar,
 			// separately from the shared base-register LEA interpreter.
-			m.state.regs[a.reg] = m.con(br.Bits(64), p.(ImagePointer).Address)
+			m.state.regs[a.reg] = m.con(br.Bits(64), uint64(p.(AddressPointer).offset))
 			m.pointers[a.reg] = p
 			return m.err
 		}
@@ -868,19 +839,20 @@ func (m *transitionChecker) step(i operation, size uint8) error {
 		f := TransitionFlag{Defined: true}
 		m.bound.Flags = TransitionFlags{f, f, f, f, f, f}
 	case x86asm.AND:
-		old, stack := m.pointers[a.reg].(OriginPointer)
+		old, stack := m.pointers[a.reg].(AddressPointer)
 		k := -uint64(i.Args[1].(x86asm.Imm))
-		d, ok := alignmentOffset(old.Offset, m.face.Origin.Modulus, m.face.Origin.Residue, k)
-		if !stack || old.Origin != m.bound.Origin || !ok {
+		d, ok := alignmentOffset(old.offset, m.face.Origin.Modulus, m.face.Origin.Residue, k)
+		_, original := m.bound.Geometry.OriginalStack(old)
+		if !stack || !original || !ok {
 			return refuse(m.pc, "transition-alignment", "mask or pointer congruence cannot justify alignment")
 		}
-		if err := m.offset(old.Offset); err != nil {
+		if err := m.offset(old.offset); err != nil {
 			return err
 		}
 		if err := m.offset(d); err != nil {
 			return err
 		}
-		p = OriginPointer{old.Origin, d}
+		p = m.bound.Geometry.stackPointer(d)
 		zero := TransitionFlag{Defined: true, Value: m.falsity}
 		z := TransitionFlag{Defined: true}
 		low, _ := relative(m.lo, d)

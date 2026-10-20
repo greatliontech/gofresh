@@ -208,8 +208,8 @@ func globalNativeProof(t testing.TB, f globalNativeFixture, continued bool) nati
 
 func globalRho(s computationSource, f globalNativeFixture, g [2]*ssa.Global, a [2]uint64) storageRepresentation {
 	return storageRepresentation{source: s.prog, image: f.image, bindings: []storageBinding{
-		{object: regionObject{kind: regionGlobal, site: g[0]}, base: nativeproof.TransitionLocation{Image: true, Offset: int64(a[0])}},
-		{object: regionObject{kind: regionGlobal, site: g[1]}, base: nativeproof.TransitionLocation{Image: true, Offset: int64(a[1])}},
+		{object: regionObject{kind: regionGlobal, site: g[0]}, base: nativeproof.ImageAddress(int64(a[0]))},
+		{object: regionObject{kind: regionGlobal, site: g[1]}, base: nativeproof.ImageAddress(int64(a[1]))},
 	}}
 }
 
@@ -345,13 +345,14 @@ func assertGlobalCertificate(t testing.TB, c *globalOperandCorrespondence, value
 		for i, input := range c.account.inputs {
 			var word [8]byte
 			for j := range word {
-				word[j] = before[nativeproof.TransitionLocation{Image: true, Offset: int64(addresses[i]) + int64(j)}]
+				word[j] = before[storageTestLocation(t, b.Geometry, nativeproof.ImageAddress(addresses[i]+uint64(j)))]
 			}
 			if eval(input.native) != binary.LittleEndian.Uint64(word[:]) {
 				t.Fatal("initial little-endian relation differs")
 			}
 		}
 		for _, cell := range b.Memory {
+			cell := storageTestByte(t, b.Geometry, cell)
 			want := before[cell.TransitionLocation]
 			for i, a := range addresses {
 				if cell.Image && cell.Offset >= int64(a) && cell.Offset < int64(a+8) {
@@ -391,7 +392,7 @@ func TestGlobalOperandCorrespondenceRefusals(t *testing.T) {
 			case "map-swap":
 				rho.bindings[0].base, rho.bindings[1].base = rho.bindings[1].base, rho.bindings[0].base
 			case "map-overlap":
-				rho.bindings[1].base.Offset = rho.bindings[0].base.Offset + 7
+				rho.bindings[1].base = rho.bindings[0].base.(nativeproof.ImageAddress) + 7
 			case "source-alias":
 				rho.bindings[1].object = rho.bindings[0].object
 			case "native-target", "partial-overlap":
@@ -579,7 +580,7 @@ func TestGlobalOperandCorrespondenceOwnsInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.representation.bindings[0].object != (regionObject{kind: regionGlobal, site: g[0]}) || c.representation.bindings[0].base != (nativeproof.TransitionLocation{Image: true, Offset: int64(addresses[0])}) {
+	if c.representation.bindings[0].object != (regionObject{kind: regionGlobal, site: g[0]}) || c.representation.bindings[0].base != nativeproof.ImageAddress(addresses[0]) {
 		t.Fatal("caller mutated fixed representation")
 	}
 	if _, ok := c.native.BoundFor(c.representation.image); !ok {
@@ -589,7 +590,7 @@ func TestGlobalOperandCorrespondenceOwnsInputs(t *testing.T) {
 	b.ConditionalRegion = false
 	b.Entry = 0
 	b.Memory[0].Value = br.Term{}
-	b.Accesses[0].Bytes = nativeproof.RelativeSpan{}
+	b.Accesses[0].Bytes = nativeproof.TransitionExtent{}
 	still, _ := c.native.Bound()
 	if !still.ConditionalRegion || still.Entry != f.entry || !still.Memory[0].Value.Valid() {
 		t.Fatal("projection mutated opaque proof")
@@ -664,7 +665,7 @@ func TestGlobalOperandCorrespondenceIndependentScalarRefusals(t *testing.T) {
 			}
 			builder := br.NewBuilder(0)
 			for i, address := range a {
-				actual, err := storageNativeWord(t.Context(), builder, b.Memory, nativeproof.TransitionLocation{Image: true, Offset: int64(address)}, 8)
+				actual, err := storageNativeWord(t.Context(), builder, b.Memory, storageTestExtent(t, b.Geometry, nativeproof.ImageAddress(address), 8), 8)
 				if err != nil {
 					t.Fatal(err)
 				}

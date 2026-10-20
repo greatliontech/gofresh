@@ -67,8 +67,8 @@ func TestTransitionActiveApplicationWrapperTailAndBodyPreservation(t *testing.T)
 	}
 	lanes := 0
 	for _, association := range b.Memory {
-		if !association.Input.Image && association.Input.Offset >= -24 && association.Input.Offset < -16 {
-			if association.Current.Offset != association.Input.Offset+b.StackShift || association.Current.Pointer != before.Registers[RBP].Pointer || association.Current.PointerLane != uint8(association.Input.Offset+24) {
+		if !association.Input.isImage() && association.Input.offset >= -24 && association.Input.offset < -16 {
+			if association.Current.offset != association.Input.offset+b.StackShift || association.Current.Pointer != before.Registers[RBP].Pointer || association.Current.PointerLane != uint8(association.Input.offset+24) {
 				t.Fatal("body byte association lost actual wrapper memory or pointer lane")
 			}
 			lanes++
@@ -158,7 +158,7 @@ func TestTransitionActiveApplicationNestedParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := c.Bound()
-	if len(before.Frames) != 2 || b.StackShift != -16 || b.Call != applicationChild || b.Continuation != applicationChild+5 || !slices.Equal(b.Successor.Frames, before.Frames[:1]) || b.Successor.Boundary.Context != before.Frames[0].Context || b.Successor.Registers[RSP].Pointer != (OriginPointer{Origin: before.Origin, Offset: -8}) {
+	if len(before.Frames) != 2 || b.StackShift != -16 || b.Call != applicationChild || b.Continuation != applicationChild+5 || !slices.Equal(b.Successor.Frames, before.Frames[:1]) || b.Successor.Boundary.Context != before.Frames[0].Context || b.Successor.Registers[RSP].Pointer != before.Geometry.stackPointer(-8) {
 		t.Fatal("active return lost its still-active parent frame")
 	}
 	assertApplicationOccurrences(t, c, child)
@@ -201,11 +201,11 @@ func TestTransitionActiveApplicationEntryControls(t *testing.T) {
 		{"frame-context", func(c *checkedTransition) { c.bound.Frames[0].Context++ }},
 		{"frame-id", func(c *checkedTransition) { c.bound.Frames[0].ID++ }},
 		{"frame-call", func(c *checkedTransition) { c.bound.Frames[0].Call++ }},
-		{"frame-slot", func(c *checkedTransition) { c.bound.Frames[0].Slot.Offset++ }},
+		{"frame-slot", func(c *checkedTransition) { c.bound.Frames[0].Slot.offset++ }},
 		{"frame-return", func(c *checkedTransition) { c.bound.Frames[0].Return++ }},
 		{"missing-call-store", func(c *checkedTransition) { c.bound.Accesses = nil }},
 		{"call-store-context", func(c *checkedTransition) { c.bound.Accesses[0].Context = c.bound.Frames[0].Context }},
-		{"call-store-extent", func(c *checkedTransition) { c.bound.Accesses[0].Bytes.End++ }},
+		{"call-store-extent", func(c *checkedTransition) { c.bound.Accesses[0].Bytes.width++ }},
 		{"missing-call-instruction", func(c *checkedTransition) { c.bound.Instructions = c.bound.Instructions[1:] }},
 		{"missing-call-witness", func(c *checkedTransition) { c.witness.Nodes = c.witness.Nodes[1:] }},
 		{"old-rules", func(c *checkedTransition) { c.bound.Rules = "gofresh/native-transition@19" }},

@@ -352,7 +352,10 @@ func (m *transitionChecker) entryRegisterProvenance(r Register) (TransitionPoint
 		}
 		if p.Register == r {
 			load, err := m.imageLoad(Span{p.Address, p.Address + 1}, false)
-			return ImagePointer{Address: p.Address, owner: &m.im.data[0], load: load}, err
+			if err != nil {
+				return nil, err
+			}
+			return m.bound.Geometry.imagePointer(load, p.Address), nil
 		}
 	}
 	return entryValueLineage{value: m.bound.InitialRegisters[r]}, nil
@@ -365,11 +368,11 @@ func (m *transitionChecker) initialReturnContext() error {
 	// The control word is an explicit incoming relation, not a CALL write or
 	// image-loading fact. Validation excluded overlapping arbitrary word inputs.
 	for lane := int64(0); lane < 8; lane++ {
-		key := TransitionLocation{Offset: lane}
-		value, err := m.entryWitnessByte(key)
-		if err != nil {
-			return err
+		key := m.bound.Geometry.stackLocation(lane)
+		if !m.tick() {
+			return m.err
 		}
+		value := byte(m.face.ReturnContext.Target >> (8 * uint(lane)))
 		m.memory[key] = TransitionByte{TransitionLocation: key, Value: m.con(br.Bits(8), uint64(value))}
 	}
 	for _, r := range m.face.ReturnContext.Preserved {

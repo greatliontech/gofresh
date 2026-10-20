@@ -134,6 +134,19 @@
 // share the value calculus, while origin arithmetic and alignment justify their
 // pointer provenance under the retained conditions. Full ordered pointer lanes
 // survive spills and reloads; numeric coincidence cannot create an origin.
+// Logical storage identity is separate from its placement and address views.
+// Each checked root owns immutable geometry for its original stack and image;
+// continuations retain those exact identities. Address pointers keep their owned
+// arithmetic view, including the actual logical PT_LOAD boundary and one-past
+// endpoint, while every access normalizes to one comparable canonical byte key.
+// Direct and FS-relative aliases therefore share current values and pointer lanes.
+// Geometry selectors are untrusted stack offsets or image addresses. Resolving
+// their full declared-byte union supplies coordinates, not pointer provenance or
+// permission for a native operand; instruction accesses still require their
+// complete grants and control protection. Zero or foreign geometry refuses rather
+// than implying disjoint storage. Independent callee application checks placement,
+// grants and current state before associating its geometry with the caller's;
+// copying numeric coordinates or mutable projections cannot create that relation.
 // The transition grammar admits byte/32/64-bit MOV (including base/displacement
 // and RIP-relative accesses), full-width LEA, constant SUB, justified alignment
 // AND, 32-bit register self-XOR with zero extension and undefined AF,

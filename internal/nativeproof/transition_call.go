@@ -18,8 +18,9 @@ func (m *transitionChecker) setStack(p TransitionPointer, value br.Term) {
 
 func (m *transitionChecker) stackStep(i operation, size uint8) error {
 	old := TransitionValue{m.state.regs[RSP], m.pointers[RSP]}
-	sp, ok := old.Pointer.(OriginPointer)
-	if !ok || sp.Origin != m.bound.Origin {
+	sp, ok := old.Pointer.(AddressPointer)
+	_, original := m.bound.Geometry.OriginalStack(sp)
+	if !ok || !original {
 		return refuse(m.pc, "transition-stack", "stack lacks the root origin")
 	}
 	if i.Op == x86asm.PUSH || i.Op == x86asm.CALL {
@@ -50,7 +51,7 @@ func (m *transitionChecker) stackStep(i operation, size uint8) error {
 				}
 			}
 			m.liveStateBytes += bytes
-			m.frames = append(slices.Clone(m.frames), TransitionFrame{ID: m.occurrence, Context: TransitionActivationID(m.occurrence), Call: m.pc, Return: m.pc + uint64(size), Slot: p.(OriginPointer)})
+			m.frames = append(slices.Clone(m.frames), TransitionFrame{ID: m.occurrence, Context: TransitionActivationID(m.occurrence), Call: m.pc, Return: m.pc + uint64(size), Slot: p.(AddressPointer)})
 		} else {
 			a, _ := fullRegister(i.Args[0])
 			v = TransitionValue{m.state.regs[a.reg], m.pointers[a.reg]}
@@ -103,7 +104,7 @@ func (m *transitionChecker) stackStep(i operation, size uint8) error {
 
 // Both actual CALL activations and an explicitly supplied incoming callee
 // context use the same RET load, target equality and stack increment above.
-func (m *transitionChecker) activeReturn(sp OriginPointer) (uint64, bool, error) {
+func (m *transitionChecker) activeReturn(sp AddressPointer) (uint64, bool, error) {
 	if len(m.frames) != 0 {
 		frame := m.frames[len(m.frames)-1]
 		if m.completingReturn || frame.Context != m.activation || frame.Slot != sp {
@@ -111,7 +112,7 @@ func (m *transitionChecker) activeReturn(sp OriginPointer) (uint64, bool, error)
 		}
 		return frame.Return, false, nil
 	}
-	if !m.completingReturn || !m.root.region || m.face.ReturnContext == nil || m.activation != 0 || sp != (OriginPointer{Origin: m.bound.Origin}) {
+	if !m.completingReturn || !m.root.region || m.face.ReturnContext == nil || m.activation != 0 || sp != m.bound.Geometry.stackPointer(0) {
 		return 0, false, refuse(m.pc, "transition-return", "missing incoming root context or original control slot")
 	}
 	return m.face.ReturnContext.Target, true, nil

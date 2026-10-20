@@ -37,6 +37,7 @@ func lifecycleFace(extra uint8) TransitionInterface {
 // Expected snapshots must not rely on Bound's copying behavior: that behavior
 // is under test. Expression handles remain immutable; every mutable container is
 // independently copied here before a different projection is deliberately changed.
+// Geometry is an immutable handle, retained by exact identity rather than cloned.
 func lifecycleSnapshot(b TransitionBound) TransitionBound {
 	b.Interface.Regions = slices.Clone(b.Interface.Regions)
 	b.Interface.ImageRegions = slices.Clone(b.Interface.ImageRegions)
@@ -97,7 +98,7 @@ func FuzzTransitionLifecycle(f *testing.F) {
 		before := lifecycleSnapshot(bound(root))
 		inherited := func(b TransitionBound) {
 			t.Helper()
-			if b.Origin != before.Origin || b.InitialRegisters != before.InitialRegisters ||
+			if b.Geometry != before.Geometry || b.Origin != before.Origin || b.InitialRegisters != before.InitialRegisters ||
 				!reflect.DeepEqual(b.InitialMemory, before.InitialMemory) || !reflect.DeepEqual(b.Words, before.Words) ||
 				!reflect.DeepEqual(b.Interface, before.Interface) {
 				t.Fatal("continuation replaced inherited inputs or premises")

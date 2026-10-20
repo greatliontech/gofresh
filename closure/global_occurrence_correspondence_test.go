@@ -209,7 +209,7 @@ func TestGlobalFunctionOccurrenceCorrespondence(t *testing.T) {
 			// All variants return the same represented bytes. Only the number of
 			// locked events differs: an unchanged write is still an observable RMW.
 			for _, address := range []uint64{0x700008, 0x700050} {
-				word, err := storageNativeWord(t.Context(), br.NewBuilder(128), bound.State.Memory, nativeproof.TransitionLocation{Image: true, Offset: int64(address)}, 8)
+				word, err := storageNativeWord(t.Context(), br.NewBuilder(128), bound.State.Memory, storageTestExtent(t, bound.Prefix.Geometry, nativeproof.ImageAddress(address), 8), 8)
 				if err != nil {
 					t.Fatal(err)
 				}

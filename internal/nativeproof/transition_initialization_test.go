@@ -254,8 +254,8 @@ func TestTransitionInitializationCurrentWrites(t *testing.T) {
 				}
 			}
 			for _, cell := range before.Memory {
-				if cell.Image && uint64(cell.Offset) >= imageStateAddress+64 && uint64(cell.Offset) < imageStateAddress+72 {
-					if stateEval(t, cell.Value, nil) != uint64(byte(want>>(8*(uint64(cell.Offset)-imageStateAddress-64)))) {
+				if cell.isImage() && uint64(cell.offset) >= imageStateAddress+64 && uint64(cell.offset) < imageStateAddress+72 {
+					if stateEval(t, cell.Value, nil) != uint64(byte(want>>(8*(uint64(cell.offset)-imageStateAddress-64)))) {
 						t.Fatal("current overwritten lane differs")
 					}
 				}

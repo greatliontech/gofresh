@@ -244,7 +244,7 @@ func (p *globalRegionCorrespondence) checkBooleanUse(ctx context.Context, source
 		}
 	}
 	footprint, represented := p.root.account.layout.locationFootprint(source.operands[0].location)
-	if source.operands[0].kind != regionPointer || !regionSameValue(source.operands[0], application.proof.arguments[0]) || !represented || footprint.Bytes.End-footprint.Bytes.Start != 8 || first.Image != footprint.Image || second.Image != footprint.Image || first.ID != before.Boundary.ID || second.ID != first.ID || first.Kind != nativeproof.FrameRead || second.Kind != nativeproof.FrameWrite || first.Bytes != footprint.Bytes || second.Bytes != first.Bytes {
+	if source.operands[0].kind != regionPointer || !regionSameValue(source.operands[0], application.proof.arguments[0]) || !represented || footprint.Bytes.Width() != 8 || first.ID != before.Boundary.ID || second.ID != first.ID || first.Kind != nativeproof.FrameRead || second.Kind != nativeproof.FrameWrite || first.Bytes != footprint.Bytes || second.Bytes != first.Bytes {
 		return fail("atomic read/write occurrence differs from source pointer provenance")
 	}
 	boolean := uint64(0)
@@ -286,7 +286,7 @@ func (p *globalRegionCorrespondence) checkPhaseEffects(ctx context.Context, sour
 		}
 		occurrences += len(trace.instructions)
 	}
-	layout, err := checkStorageAuthority(ctx, source, bound, p.root.representation, storageProtectedFootprints(bound))
+	layout, err := checkStorageAuthority(ctx, source, bound, p.root.representation, storageProtectedFootprints(ctx, bound))
 	if err != nil {
 		return nil, err
 	}

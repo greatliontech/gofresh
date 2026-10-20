@@ -303,7 +303,7 @@ func TestGlobalReferenceSameValueWriteRejectsUnchangedInline(t *testing.T) {
 		if !ok {
 			t.Fatal("native continuation lost image ownership")
 		}
-		layout, err := checkStorageAuthority(t.Context(), source, after, prior.representation, storageProtectedFootprints(after))
+		layout, err := checkStorageAuthority(t.Context(), source, after, prior.representation, storageProtectedFootprints(t.Context(), after))
 		if err != nil {
 			t.Fatal(err)
 		}

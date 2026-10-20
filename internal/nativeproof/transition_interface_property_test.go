@@ -437,7 +437,7 @@ func interfaceInitialState(t testing.TB, f TransitionInterface, b TransitionBoun
 		variable(term, 64)
 		var pointer TransitionPointer
 		if r == int(RSP) {
-			pointer = OriginPointer{Origin: term}
+			pointer = b.Geometry.stackPointer(0)
 			if b.Origin != term {
 				t.Fatal("RSP is not the quantified origin")
 			}
@@ -456,7 +456,7 @@ func interfaceInitialState(t testing.TB, f TransitionInterface, b TransitionBoun
 	lanes := map[int64]lane{}
 	for i, off := range f.Words {
 		w := b.Words[i]
-		if w.Offset != off {
+		if w.Bytes != (TransitionExtent{b.Geometry.stackLocation(off), 8}) {
 			t.Fatal("word order or offset changed")
 		}
 		variable(w.Value, 64)
@@ -475,13 +475,13 @@ func interfaceInitialState(t testing.TB, f TransitionInterface, b TransitionBoun
 		}
 		key := stateByteLocation(byteValue)
 		if !want[key] {
-			t.Fatal("extra or duplicate byte", byteValue.Offset)
+			t.Fatal("extra or duplicate byte", byteValue.offset)
 		}
 		delete(want, key)
 		if byteValue.Pointer != nil || byteValue.PointerLane != 0 || byteValue.Value.Sort() != br.Bits(8) {
 			t.Fatal("initial byte acquired pointer meaning or wrong width")
 		}
-		if w, ok := lanes[byteValue.Offset]; ok && !byteValue.Image {
+		if w, ok := lanes[byteValue.offset]; ok && !byteValue.isImage() {
 			v := byteValue.Value.View()
 			if v.Op != br.Extract || v.Immediate != w.bit || len(v.Args) != 1 || v.Args[0] != w.word {
 				t.Fatal("grouped bytes do not alias the exact arbitrary word in little-endian order")

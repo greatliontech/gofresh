@@ -394,7 +394,7 @@ func TestTransitionContinuationSignedDisplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := c.checked.bound.Accesses; len(got) != 1 || got[0].Bytes != (RelativeSpan{-8, 0}) {
+	if got := c.checked.bound.Accesses; len(got) != 1 || extentCoordinates(got[0].Bytes) != (RelativeSpan{-8, 0}) {
 		t.Fatal(got)
 	}
 }
@@ -461,15 +461,19 @@ func assertTransitionRetainedExpressionUnion(t testing.TB, root TransitionCertif
 	}
 	for _, v := range b.Registers {
 		visit(v.Value)
-		if p, ok := v.Pointer.(OriginPointer); ok {
-			visit(p.Origin)
+		if p, ok := v.Pointer.(AddressPointer); ok {
+			visit(p.view.backing.geometry.origin)
+		} else if p, ok := v.Pointer.(entryValueLineage); ok {
+			visit(p.value)
 		}
 	}
 	for _, memory := range [][]TransitionByte{b.InitialMemory, b.Memory} {
 		for _, v := range memory {
 			visit(v.Value)
-			if p, ok := v.Pointer.(OriginPointer); ok {
-				visit(p.Origin)
+			if p, ok := v.Pointer.(AddressPointer); ok {
+				visit(p.view.backing.geometry.origin)
+			} else if p, ok := v.Pointer.(entryValueLineage); ok {
+				visit(p.value)
 			}
 		}
 	}

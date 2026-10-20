@@ -372,7 +372,7 @@ func assertJointReturn(t testing.TB, p jointReturnProgram, c TransitionReturnCer
 		} else if expected.returnRead {
 			kind = FrameReturnRead
 		}
-		if a.PC != p.x.pcs[expected.instruction] || a.Context != expected.context || a.Image != expected.off.image || a.Kind != kind || a.Bytes != (RelativeSpan{expected.off.off, expected.off.off + int64(expected.width)}) || stateEval(t, a.Value, values) != expected.value {
+		if a.PC != p.x.pcs[expected.instruction] || a.Context != expected.context || !b.Prefix.Geometry.owns(a.Bytes.start) || a.Bytes.start.isImage() != expected.off.image || a.Kind != kind || extentCoordinates(a.Bytes) != (RelativeSpan{expected.off.off, expected.off.off + int64(expected.width)}) || stateEval(t, a.Value, values) != expected.value {
 			t.Fatalf("ordered access %d differs: %+v versus %+v", j, a, expected)
 		}
 	}
@@ -384,14 +384,14 @@ func assertJointReturn(t testing.TB, p jointReturnProgram, c TransitionReturnCer
 			t.Fatal("joint final register differs", r)
 		}
 	}
-	if b.State.Registers[RSP].Pointer != (OriginPointer{Origin: b.Prefix.Origin, Offset: 8}) || want.regs[RSP] != initial.origin+8 {
+	if b.State.Registers[RSP].Pointer != b.Prefix.Geometry.stackPointer(8) || want.regs[RSP] != initial.origin+8 {
 		t.Fatal("return did not consume the original control slot")
 	}
 	prefix, _ := c.Prefix()
 	for _, r := range p.saved {
 		if r == R14 {
-			ptr, valid := b.State.Registers[r].Pointer.(ImagePointer)
-			if !valid || ptr.Address != imageStateAddress || ptr.owner != &p.x.im.data[0] {
+			ptr, valid := b.State.Registers[r].Pointer.(AddressPointer)
+			if !valid || !ptr.isImage() || uint64(ptr.offset) != imageStateAddress || !b.Prefix.Geometry.ownsPointer(ptr) || !sameImage(ptr.view.backing.geometry.image, p.x.im) {
 				t.Fatal("restored concrete image pointer differs")
 			}
 		} else if reg, valid := prefix.EntryValueRegister(b.State.Registers[r].Pointer); !valid || reg != r {
@@ -411,15 +411,15 @@ func assertJointReturn(t testing.TB, p jointReturnProgram, c TransitionReturnCer
 		seen[key] = true
 		for j, r := range p.saved {
 			slot := -8 * int64(j+1)
-			if v.Image || v.Offset < slot || v.Offset >= slot+8 {
+			if v.isImage() || v.offset < slot || v.offset >= slot+8 {
 				continue
 			}
-			if v.PointerLane != uint8(v.Offset-slot) {
+			if v.PointerLane != uint8(v.offset-slot) {
 				t.Fatal("residual saved word lost ordered lanes")
 			}
 			if r == R14 {
-				ptr, valid := v.Pointer.(ImagePointer)
-				if !valid || ptr.Address != imageStateAddress || ptr.owner != &p.x.im.data[0] {
+				ptr, valid := v.Pointer.(AddressPointer)
+				if !valid || !ptr.isImage() || uint64(ptr.offset) != imageStateAddress || !b.Prefix.Geometry.ownsPointer(ptr) || !sameImage(ptr.view.backing.geometry.image, p.x.im) {
 					t.Fatal("residual concrete saved pointer differs")
 				}
 			} else if reg, valid := prefix.EntryValueRegister(v.Pointer); !valid || reg != r {

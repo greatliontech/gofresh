@@ -367,9 +367,9 @@ func narrowJointNative(t testing.TB, p narrowJointIntent, fault string) (globalN
 }
 
 func narrowJointRepresentation(source computationSource, root *ssa.Function, s narrowJointSourceProof, image *nativeproof.Image) storageRepresentation {
-	rho := storageRepresentation{source: source.prog, image: image, bindings: []storageBinding{{object: s.local, base: nativeproof.TransitionLocation{Offset: -16}}, {object: s.array, base: nativeproof.TransitionLocation{Offset: -24}}}}
+	rho := storageRepresentation{source: source.prog, image: image, bindings: []storageBinding{{object: s.local, base: nativeproof.StackOffset(-16)}, {object: s.array, base: nativeproof.StackOffset(-24)}}}
 	for i, name := range narrowJointGlobals {
-		rho.bindings = append(rho.bindings, storageBinding{object: regionObject{kind: regionGlobal, site: root.Pkg.Members[name].(*ssa.Global)}, base: nativeproof.TransitionLocation{Image: true, Offset: narrowJointGlobal(i).Offset}})
+		rho.bindings = append(rho.bindings, storageBinding{object: regionObject{kind: regionGlobal, site: root.Pkg.Members[name].(*ssa.Global)}, base: nativeproof.ImageAddress(narrowJointGlobal(i).Offset)})
 	}
 	return rho
 }
@@ -514,7 +514,7 @@ func narrowJointCheck(t testing.TB, p narrowJointIntent, source computationSourc
 	antecedentVariables := storageJointVariables(proof.antecedent)
 	initialTerms := map[storageByteLocation]br.Term{}
 	for _, cell := range b.Prefix.InitialMemory {
-		initialTerms[storageByteLocation{Image: cell.Image, Offset: cell.Offset}] = cell.Value
+		initialTerms[storageTestCoordinate(t, b.Prefix.Geometry, cell.TransitionLocation)] = cell.Value
 	}
 	inputVariables := map[storageJointVariable]bool{}
 	for _, input := range proof.inputs {
@@ -572,7 +572,7 @@ func narrowJointCheck(t testing.TB, p narrowJointIntent, source computationSourc
 	}
 	seen := map[storageByteLocation]bool{}
 	for _, cell := range b.State.Memory {
-		at := storageByteLocation{Image: cell.Image, Offset: cell.Offset}
+		at := storageTestCoordinate(t, b.Prefix.Geometry, cell.TransitionLocation)
 		v, present := want.final[at]
 		if !present || seen[at] || storageJointEval(t, cell.Value, assignments) != uint64(v) {
 			t.Fatalf("residual native byte %+v differs from integer intent", at)
@@ -591,6 +591,7 @@ func narrowJointCheck(t testing.TB, p narrowJointIntent, source computationSourc
 	}
 	event := 0
 	for _, access := range b.Accesses {
+		access := storageTestAccess(t, b.Prefix.Geometry, access)
 		guard, present := guards[access.ID]
 		if !present || access.Context != 0 {
 			t.Fatal("access lost actual instruction activation")
@@ -686,7 +687,7 @@ func narrowJointCheck(t testing.TB, p narrowJointIntent, source computationSourc
 		}
 		primitiveIDs[id] = true
 		for lane, index := range []int{readIndex, writeIndex} {
-			access := b.Accesses[index]
+			access := storageTestAccess(t, b.Prefix.Geometry, b.Accesses[index])
 			w := expected[lane]
 			if access.ID != id || access.PC != pc || access.Context != 0 || access.Image != w.at.Image || access.Bytes.Start != w.at.Offset || access.Bytes.End-access.Bytes.Start != int64(width) || storageJointEval(t, access.Value, assignments) != w.value {
 				t.Fatal("native atomic index lost actual full-width occurrence")
@@ -996,6 +997,7 @@ func WideRoot(){var x uint64;x=7;Wide(&x,7,1)}
 				t.Fatal("width baseline must actually succeed")
 			}
 			for i, access := range bound.Accesses {
+				access := storageTestAccess(t, bound.Prefix.Geometry, access)
 				start, extent, value, kind := int64(-16), int64(width), uint64(7), nativeproof.FrameRead
 				switch i {
 				case 0:
@@ -1021,7 +1023,7 @@ func WideRoot(){var x uint64;x=7;Wide(&x,7,1)}
 			}
 			got := map[storageByteLocation]byte{}
 			for _, cell := range bound.State.Memory {
-				at := storageByteLocation{Image: cell.Image, Offset: cell.Offset}
+				at := storageTestCoordinate(t, bound.Prefix.Geometry, cell.TransitionLocation)
 				value := storageJointEval(t, cell.Value, assignments)
 				if _, duplicate := got[at]; duplicate || value > 255 {
 					t.Fatal("returned native byte population is invalid")
@@ -1079,7 +1081,7 @@ func WideRoot(){var x uint64;x=7;Wide(&x,7,1)}
 		for _, nativeWidth := range []int{4, 8} {
 			t.Run(fmt.Sprintf("source%d/native%d", tc.width*8, nativeWidth*8), func(t *testing.T) {
 				n := natives[nativeWidth]
-				rho := storageRepresentation{source: source.prog, image: n.fixture.image, bindings: []storageBinding{{object: object, base: nativeproof.TransitionLocation{Offset: -16}}}}
+				rho := storageRepresentation{source: source.prog, image: n.fixture.image, bindings: []storageBinding{{object: object, base: nativeproof.StackOffset(-16)}}}
 				proof, err := checkGlobalFunctionCorrespondence(t.Context(), source, root, n.fixture.image, n.fixture.entry, complete, n.returned, rho, nil)
 				if tc.width == nativeWidth {
 					if err != nil || proof == nil {
@@ -1087,7 +1089,7 @@ func WideRoot(){var x uint64;x=7;Wide(&x,7,1)}
 					}
 					whole, owned := proof.layout.objectFootprint(object)
 					actual, represented := proof.layout.locationFootprint(prefix.operands[0].location)
-					if !owned || !represented || whole.Image || whole.Bytes != (nativeproof.RelativeSpan{Start: -16, End: -8}) || actual.Bytes != (nativeproof.RelativeSpan{Start: -16, End: -16 + int64(tc.width)}) || len(proof.atomics) != 1 {
+					if !owned || !represented || whole.Bytes != storageTestExtent(t, proof.layout.geometry, nativeproof.StackOffset(-16), 8) || actual.Bytes != storageTestExtent(t, proof.layout.geometry, nativeproof.StackOffset(-16), int64(tc.width)) || len(proof.atomics) != 1 {
 						t.Fatal("matching-width proof lost whole-object versus atomic-subobject extents")
 					}
 					return

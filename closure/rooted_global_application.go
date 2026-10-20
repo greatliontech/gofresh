@@ -17,9 +17,9 @@ type rootedGlobalInput struct {
 }
 
 // rootedGlobalApplication retains the original complete relation and its exact
-// checked native application. The latter owns the rooted successor, stack shift,
+// checked native application. The latter owns the rooted successor, geometry,
 // occurrence associations and current context beside the original root history.
-// Its stack shift projects only the retained layout's materialized storage; it
+// Its checked geometry association maps the retained materialized storage; it
 // grants no address to eliminated objects. Occurrence associations identify
 // witnesses, not execution: their native guards and exclusions remain required.
 // Neither owner is replaced, and the original input relation, source-model
@@ -88,6 +88,9 @@ func checkRootedGlobalApplication(ctx context.Context, p *globalFunctionCorrespo
 	// BoundFor captures owned projections, including the retained endpoints. Pay
 	// for those new containers without importing either owner's prior proof work.
 	for _, bound := range []nativeproof.TransitionBound{a.ChildEntry, a.Successor, n} {
+		if err := chargeStorageGeometry(ctx, bound.Geometry); err != nil {
+			return nil, err
+		}
 		for _, count := range []int{len(bound.InitialMemory), len(bound.Memory), len(bound.Words), len(bound.Instructions), len(bound.Accesses), len(bound.PrimitiveEffects), len(bound.Abstractions), len(bound.Frames), len(bound.Expansions), len(bound.ExcludedBoundaries), len(bound.ExcludedOrigins), len(bound.Interface.Regions), len(bound.Interface.ImageRegions), len(bound.Interface.Words), len(bound.Interface.EntryImagePointers), len(bound.Interface.EntryWordUpperBounds)} {
 			if count > 65536 {
 				return fail("endpoint projection exceeds finite bounds")

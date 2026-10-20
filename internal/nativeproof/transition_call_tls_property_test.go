@@ -366,7 +366,7 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 			t.Fatal("unknown access")
 		}
 		if stateEval(t, guards[k], values) != 0 {
-			orderedAccess = append(orderedAccess, callEvent{a.PC, a.Context, kind, stateLocation{a.Image, a.Bytes.Start}, int(a.Bytes.End - a.Bytes.Start)})
+			orderedAccess = append(orderedAccess, callEvent{a.PC, a.Context, kind, stateLocation{a.Bytes.start.isImage(), a.Bytes.start.offset}, int(a.Bytes.Width())})
 		}
 	}
 	var got []callEvent
@@ -384,7 +384,7 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 			if a.Kind == FrameReturnRead {
 				kind = "return-read"
 			}
-			got = append(got, callEvent{a.PC, a.Context, kind, stateLocation{a.Image, a.Bytes.Start}, int(a.Bytes.End - a.Bytes.Start)})
+			got = append(got, callEvent{a.PC, a.Context, kind, stateLocation{a.Bytes.start.isImage(), a.Bytes.start.offset}, int(a.Bytes.Width())})
 		}
 		if kind := primitiveKinds[k]; kind != "" {
 			got = append(got, callEvent{pc: i.Start, context: i.Context, kind: kind})
@@ -411,7 +411,7 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 	assertCallTLSState(t, c, r, initial, values, active)
 	for j, frame := range b.Frames {
 		a := active[j]
-		if frame.ID != referenceID(a.parent, a.call) || frame.Context != referenceContext(a.parent, a.call) || frame.Call != x.pcs[a.call] || frame.Return != x.pcs[a.after] || frame.Slot.Origin != b.Origin || frame.Slot.Offset != int64(a.slot-initial.origin) {
+		if frame.ID != referenceID(a.parent, a.call) || frame.Context != referenceContext(a.parent, a.call) || frame.Call != x.pcs[a.call] || frame.Return != x.pcs[a.after] || frame.Slot != b.Geometry.stackPointer(int64(a.slot-initial.origin)) {
 			t.Fatal("active frame relation differs")
 		}
 	}
@@ -435,12 +435,11 @@ func assertCallTLSState(t testing.TB, c TransitionCertificate, r, initial stateR
 			t.Fatal("invented pointer")
 		}
 		switch p := p.(type) {
-		case OriginPointer:
-			if w.image || p.Origin != b.Origin || p.Offset != w.off {
-				t.Fatal("wrong origin pointer")
+		case AddressPointer:
+			if !b.Geometry.ownsPointer(p) || p.isImage() != w.image || p.offset != w.off {
+				t.Fatal("wrong owned address pointer")
 			}
-		case ImagePointer:
-			if !w.image || p.Address != uint64(w.off) || p.owner != &c.checked.image.data[0] || p.load != w.load {
+			if p.isImage() && (p.view.load != w.load || !sameImage(p.view.backing.geometry.image, c.checked.image)) {
 				t.Fatal("wrong image pointer")
 			}
 		default:

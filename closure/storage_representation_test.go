@@ -27,7 +27,7 @@ func storageGlobal(r storageRepresentation, name string) regionObject {
 }
 
 func storageImageBinding(object regionObject, offset int64) storageBinding {
-	return storageBinding{object: object, base: nativeproof.TransitionLocation{Image: true, Offset: offset}}
+	return storageBinding{object: object, base: nativeproof.ImageAddress(offset)}
 }
 
 func TestStorageRepresentationNestedLayoutAndPadding(t *testing.T) {
@@ -35,38 +35,45 @@ func TestStorageRepresentationNestedLayoutAndPadding(t *testing.T) {
 		var A [2]Alias; var B uint64; var C byte
 		func F() {}`)
 	a, b, c := storageGlobal(r, "A"), storageGlobal(r, "B"), storageGlobal(r, "C")
-	r.bindings = []storageBinding{storageImageBinding(a, 0x1000), storageImageBinding(b, 0x2000), storageImageBinding(c, 0x3000)}
-	layout, err := resolveStorageRepresentation(t.Context(), r, nil)
-	if err != nil {
-		t.Fatal(err)
+	shapes := map[regionObject]*storageTypeLayout{}
+	for _, object := range []regionObject{a, b, c} {
+		m := storageLayoutMeter{ctx: t.Context()}
+		typ, sizes, err := m.objectType(r.source, object)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shapes[object], err = m.layout(typ, sizes, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	for _, tc := range []struct {
 		location   regionLocation
 		start, end int64
 	}{
-		{regionLocation{object: a}, 0x1000, 0x1010},
-		{regionLocation{object: a, path: []regionStep{{index: 1}, {field: true, index: 1}}}, 0x100c, 0x1010},
-		{regionLocation{object: a, path: []regionStep{{index: 1}, {field: true}}}, 0x1008, 0x1009},
-		{regionLocation{object: b}, 0x2000, 0x2008},
-		{regionLocation{object: c}, 0x3000, 0x3001},
+		{regionLocation{object: a}, 0, 16},
+		{regionLocation{object: a, path: []regionStep{{index: 1}, {field: true, index: 1}}}, 12, 16},
+		{regionLocation{object: a, path: []regionStep{{index: 1}, {field: true}}}, 8, 9},
+		{regionLocation{object: b}, 0, 8},
+		{regionLocation{object: c}, 0, 1},
 	} {
-		f, ok := layout.locationFootprint(tc.location)
-		if !ok || !f.Image || f.Bytes.Start != tc.start || f.Bytes.End != tc.end {
-			t.Fatalf("footprint %+v = %+v, %v", tc.location, f, ok)
+		n, offset, ok := storagePath(shapes[tc.location.object], tc.location.path)
+		if !ok || offset != tc.start || offset+n.size != tc.end {
+			t.Fatalf("path %+v = %+v/%d, %v", tc.location, n, offset, ok)
 		}
 	}
-	leaves, err := layout.typedLeaves(t.Context(), a)
+	leaves, err := storageLeaves(t.Context(), shapes[a])
 	if err != nil || len(leaves) != 4 {
 		t.Fatalf("leaves: %v, %v", leaves, err)
 	}
 	mask := make([]bool, 16)
 	for _, leaf := range leaves {
-		f, ok := layout.locationFootprint(leaf.location)
-		if !ok || f != leaf.footprint {
+		n, offset, ok := storagePath(shapes[a], leaf.path)
+		if !ok || n != leaf.shape || offset != leaf.offset {
 			t.Fatal("leaf does not resolve to its owning bytes")
 		}
-		for i := f.Bytes.Start; i < f.Bytes.End; i++ {
-			mask[i-0x1000] = true
+		for i := offset; i < offset+n.size; i++ {
+			mask[i] = true
 		}
 	}
 	want := []bool{true, false, false, false, true, true, true, true, true, false, false, false, true, true, true, true}
@@ -74,16 +81,16 @@ func TestStorageRepresentationNestedLayoutAndPadding(t *testing.T) {
 		t.Fatalf("padding became typed bytes: %v", mask)
 	}
 	// Returned paths are owned; mutating one cannot alter the resolver or peers.
-	leaves[0].location.path[0].index = 99
-	again, err := layout.typedLeaves(t.Context(), a)
-	if err != nil || again[0].location.path[0].index != 0 || leaves[1].location.path[0].index != 0 {
+	leaves[0].path[0].index = 99
+	again, err := storageLeaves(t.Context(), shapes[a])
+	if err != nil || again[0].path[0].index != 0 || leaves[1].path[0].index != 0 {
 		t.Fatal("leaf path aliases escaped")
 	}
 	for _, path := range [][]regionStep{
 		{{summary: true}}, {{index: -1}}, {{index: 2}}, {{field: true}},
 		{{index: 0}, {field: true, index: 2}}, {{index: 0}, {index: 0}},
 	} {
-		if _, ok := layout.locationFootprint(regionLocation{object: a, path: path}); ok {
+		if _, _, ok := storagePath(shapes[a], path); ok {
 			t.Fatalf("invalid/unknown path accepted: %+v", path)
 		}
 	}
@@ -125,9 +132,11 @@ func TestStorageSelectedLayoutsAndWidths(t *testing.T) {
 }
 
 func TestStorageRepresentationRefusals(t *testing.T) {
+	image, bound := storageGeometryFixture(t, 0)
 	for _, name := range []string{"duplicate", "overlap", "negative-image", "canonical-overflow", "misalignment", "foreign", "wrong-space", "missing-sizes", "pointer32", "bindings-budget", "protected-partial", "protected-enclosing", "invalid-protected"} {
 		t.Run(name, func(t *testing.T) {
 			r := storageFixture(t, `var A uint64; var B uint64; func F() {}`)
+			r.image = image
 			a, b := storageGlobal(r, "A"), storageGlobal(r, "B")
 			r.bindings = []storageBinding{storageImageBinding(a, 0x1000), storageImageBinding(b, 0x2000)}
 			var protected []storageFootprint
@@ -135,18 +144,18 @@ func TestStorageRepresentationRefusals(t *testing.T) {
 			case "duplicate":
 				r.bindings[1].object = a
 			case "overlap":
-				r.bindings[1].base.Offset = 0x1000
+				r.bindings[1].base = nativeproof.ImageAddress(0x1000)
 			case "negative-image":
-				r.bindings[0].base.Offset = -8
+				r.bindings[0].base = nativeproof.ImageAddress(-8)
 			case "canonical-overflow":
-				r.bindings[0].base.Offset = 1 << 47
+				r.bindings[0].base = nativeproof.ImageAddress(1 << 47)
 			case "misalignment":
-				r.bindings[0].base.Offset++
+				r.bindings[0].base = nativeproof.ImageAddress(0x1001)
 			case "foreign":
 				other := storageFixture(t, `var A uint64; func F() {}`)
 				r.bindings[0].object = storageGlobal(other, "A")
 			case "wrong-space":
-				r.bindings[0].base.Image = false
+				r.bindings[0].base = nativeproof.StackOffset(0x1000)
 			case "missing-sizes":
 				r.source.Pkgs[0].TypesSizes = nil
 			case "pointer32":
@@ -154,13 +163,13 @@ func TestStorageRepresentationRefusals(t *testing.T) {
 			case "bindings-budget":
 				r.bindings = make([]storageBinding, storageMaxBindings+1)
 			case "protected-partial":
-				protected = []storageFootprint{{Image: true, Bytes: nativeproof.RelativeSpan{Start: 0xfff, End: 0x1001}}}
+				protected = []storageFootprint{{Bytes: storageTestExtent(t, bound.Geometry, nativeproof.ImageAddress(0xfff), 2)}}
 			case "protected-enclosing":
-				protected = []storageFootprint{{Image: true, Bytes: nativeproof.RelativeSpan{Start: 0xfff, End: 0x2008}}}
+				protected = []storageFootprint{{Bytes: storageTestExtent(t, bound.Geometry, nativeproof.ImageAddress(0xfff), 0x1009)}}
 			case "invalid-protected":
-				protected = []storageFootprint{{Bytes: nativeproof.RelativeSpan{Start: 1, End: 1}}}
+				protected = []storageFootprint{{}}
 			}
-			if got, err := resolveStorageRepresentation(t.Context(), r, protected); err == nil || got != nil {
+			if got, err := resolveStorageRepresentation(t.Context(), r, bound.Geometry, protected); err == nil || got != nil {
 				t.Fatalf("bad representation accepted: %+v, %v", got, err)
 			}
 		})
@@ -169,6 +178,8 @@ func TestStorageRepresentationRefusals(t *testing.T) {
 
 func TestStorageOriginRelativeAndWholeAccess(t *testing.T) {
 	r := storageFixture(t, `var A uint64; func F() *uint64 { return new(uint64) }`)
+	image, bound := storageGeometryFixture(t, 0)
+	r.image = image
 	var alloc *ssa.Alloc
 	root := r.source.Roots["F"]
 	for _, block := range root.Blocks {
@@ -186,9 +197,9 @@ func TestStorageOriginRelativeAndWholeAccess(t *testing.T) {
 	// Equal offsets in the two coordinate spaces do not constitute aliasing.
 	// This checks layout only: even an escaping Alloc does not obtain lifetime,
 	// singleton, origin provenance, or correspondence authority here.
-	r.bindings = []storageBinding{storageImageBinding(a, 16), {object: local, base: nativeproof.TransitionLocation{Offset: 16}}}
-	protected := []storageFootprint{{Bytes: nativeproof.RelativeSpan{Start: 0, End: 8}}, {Bytes: nativeproof.RelativeSpan{Start: -24, End: -16}}}
-	layout, err := resolveStorageRepresentation(t.Context(), r, protected)
+	r.bindings = []storageBinding{storageImageBinding(a, 16), {object: local, base: nativeproof.StackOffset(16)}}
+	protected := []storageFootprint{{Bytes: storageTestExtent(t, bound.Geometry, nativeproof.StackOffset(0), 8)}, {Bytes: storageTestExtent(t, bound.Geometry, nativeproof.StackOffset(-24), 8)}}
+	layout, err := resolveStorageRepresentation(t.Context(), r, bound.Geometry, protected)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +212,10 @@ func TestStorageOriginRelativeAndWholeAccess(t *testing.T) {
 		{24, 32, storageDisjoint}, {16, 16, storagePartial},
 	} {
 		for _, image := range []bool{true, false} {
-			f := storageFootprint{Image: image, Bytes: nativeproof.RelativeSpan{Start: tc.start, End: tc.end}}
+			var f storageFootprint
+			if tc.start < tc.end {
+				f.Bytes = storageTestExtent(t, bound.Geometry, storageTestSelector(image, tc.start), tc.end-tc.start)
+			}
 			if got := layout.classifyAccess(f); got != tc.class {
 				t.Fatalf("classification %+v = %v, want %v", f, got, tc.class)
 			}
@@ -209,41 +223,41 @@ func TestStorageOriginRelativeAndWholeAccess(t *testing.T) {
 	}
 	for _, image := range []bool{true, false} {
 		for _, off := range []int64{15, 16, 23, 24} {
-			if got := layout.representedByte(nativeproof.TransitionLocation{Image: image, Offset: off}); got != (off >= 16 && off < 24) {
+			if got := layout.representedByte(storageTestLocation(t, bound.Geometry, storageTestSelector(image, off))); got != (off >= 16 && off < 24) {
 				t.Fatalf("byte membership %v:%d = %v", image, off, got)
 			}
 		}
 	}
 	for _, offset := range []int64{0, -24, math.MaxInt64 - 7} {
-		r.bindings[1].base.Offset = offset
-		if got, err := resolveStorageRepresentation(t.Context(), r, protected); err == nil || got != nil {
+		r.bindings[1].base = nativeproof.StackOffset(offset)
+		if got, err := resolveStorageRepresentation(t.Context(), r, bound.Geometry, protected); err == nil || got != nil {
 			t.Fatalf("control/overflow slot accepted: %d", offset)
 		}
 	}
 	// A private-frame local away from the actual control slots is permitted.
-	r.bindings[1].base.Offset = -16
-	if _, err := resolveStorageRepresentation(t.Context(), r, protected); err != nil {
+	r.bindings[1].base = nativeproof.StackOffset(-16)
+	if _, err := resolveStorageRepresentation(t.Context(), r, bound.Geometry, protected); err != nil {
 		t.Fatal(err)
 	}
 	t.Run("candidate-alignment", func(t *testing.T) {
 		candidate := r
 		candidate.bindings = slices.Clone(r.bindings)
-		candidate.bindings[1].base.Offset = 4
-		// S+4 is aligned for uint64 when S%8=4. No retained origin domain
-		// is supplied here, so this is only a coordinate/layout candidate,
-		// not an alignment certificate. This scope declares no control slots.
-		resolved, err := resolveStorageRepresentation(t.Context(), candidate, nil)
+		candidate.bindings[1].base = nativeproof.StackOffset(4)
+		// S+4 is aligned only under this authentic root's S%8=4 domain.
+		image, aligned := storageGeometryFixture(t, 4)
+		candidate.image = image
+		resolved, err := resolveStorageRepresentation(t.Context(), candidate, aligned.Geometry, nil)
 		if err != nil {
 			t.Fatalf("relative offset mistaken for absolute alignment: %v", err)
 		}
 		f, ok := resolved.objectFootprint(local)
-		if !ok || f.Image || f.Bytes != (nativeproof.RelativeSpan{Start: 4, End: 12}) {
+		if !ok || f.Bytes != storageTestExtent(t, aligned.Geometry, nativeproof.StackOffset(4), 8) {
 			t.Fatalf("relative candidate footprint = %+v, %v", f, ok)
 		}
 		// The same offset is an unaligned absolute image address: accepting
 		// relative candidates must not remove this independent image check.
-		candidate.bindings[0].base.Offset = 4
-		if got, err := resolveStorageRepresentation(t.Context(), candidate, nil); err == nil || got != nil {
+		candidate.bindings[0].base = nativeproof.ImageAddress(4)
+		if got, err := resolveStorageRepresentation(t.Context(), candidate, aligned.Geometry, nil); err == nil || got != nil {
 			t.Fatalf("unaligned image candidate accepted: %+v, %v", got, err)
 		}
 	})
@@ -255,7 +269,7 @@ func TestStorageOriginRelativeAndWholeAccess(t *testing.T) {
 		{kind: regionFormal, site: alloc, context: root},
 	} {
 		r.bindings[1].object = object
-		if _, err := resolveStorageRepresentation(t.Context(), r, protected); err == nil {
+		if _, err := resolveStorageRepresentation(t.Context(), r, bound.Geometry, protected); err == nil {
 			t.Fatalf("unowned or unsupported local accepted: %+v", object)
 		}
 	}
@@ -280,27 +294,30 @@ func (c *storageCallbackContext) Err() error {
 
 func TestStorageFreezeAndCancellation(t *testing.T) {
 	r := storageFixture(t, `var A uint64; var B uint64; func F() {}`)
+	ownedImage, bound := storageGeometryFixture(t, 0)
+	r.image = ownedImage
 	a := storageGlobal(r, "A")
 	r.bindings = []storageBinding{storageImageBinding(a, 0x1000), storageImageBinding(storageGlobal(r, "B"), 0x3000)}
 	image := *r.image
-	protected := []storageFootprint{{Image: true, Bytes: nativeproof.RelativeSpan{Start: 0x2000, End: 0x2008}}}
+	protected := []storageFootprint{{Bytes: storageTestExtent(t, bound.Geometry, nativeproof.ImageAddress(0x2000), 8)}}
+	replacement := storageTestExtent(t, bound.Geometry, nativeproof.ImageAddress(0x1000), 8)
 	ctx := &storageCallbackContext{Context: t.Context(), callback: func() {
-		r.bindings[0].base.Offset = 0x2000
-		r.bindings[1].base.Offset = 0x1000
+		r.bindings[0].base = nativeproof.ImageAddress(0x2000)
+		r.bindings[1].base = nativeproof.ImageAddress(0x1000)
 		*r.image = nativeproof.Image{}
-		protected[0].Bytes.Start = 0x1000
+		protected[0].Bytes = replacement
 	}}
-	layout, err := resolveStorageRepresentation(ctx, r, protected)
+	layout, err := resolveStorageRepresentation(ctx, r, bound.Geometry, protected)
 	if err != nil {
 		t.Fatal(err)
 	}
 	f, ok := layout.objectFootprint(a)
-	if !ok || f.Bytes.Start != 0x1000 || layout.representation.bindings[0].base.Offset != 0x1000 || !reflect.DeepEqual(*layout.representation.image, image) {
+	if !ok || f.Bytes != replacement || layout.representation.bindings[0].base != nativeproof.ImageAddress(0x1000) || !reflect.DeepEqual(*layout.representation.image, image) {
 		t.Fatal("callback replaced captured representation")
 	}
 	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
-	if got, err := resolveStorageRepresentation(canceled, r, nil); !errors.Is(err, context.Canceled) || got != nil {
+	if got, err := resolveStorageRepresentation(canceled, r, bound.Geometry, nil); !errors.Is(err, context.Canceled) || got != nil {
 		t.Fatalf("cancellation = %+v, %v", got, err)
 	}
 	if leaves, err := layout.typedLeaves(canceled, a); !errors.Is(err, context.Canceled) || leaves != nil {
@@ -309,13 +326,13 @@ func TestStorageFreezeAndCancellation(t *testing.T) {
 	midway, stop := context.WithCancel(t.Context())
 	defer stop()
 	ctx = &storageCallbackContext{Context: midway, remaining: 3, callback: stop}
-	if got, err := resolveStorageRepresentation(ctx, layout.representation, nil); !errors.Is(err, context.Canceled) || got != nil {
+	if got, err := resolveStorageRepresentation(ctx, layout.representation, bound.Geometry, nil); !errors.Is(err, context.Canceled) || got != nil {
 		t.Fatalf("mid-resolution cancellation = %+v, %v", got, err)
 	}
 	called := false
 	r.bindings = make([]storageBinding, storageMaxBindings+1)
 	ctx.callback = func() { called = true }
-	if _, err := resolveStorageRepresentation(ctx, r, nil); err == nil || called {
+	if _, err := resolveStorageRepresentation(ctx, r, bound.Geometry, nil); err == nil || called {
 		t.Fatal("container bound was not checked before callback/copy")
 	}
 }
@@ -356,9 +373,15 @@ func TestStorageLayoutBounds(t *testing.T) {
 	if _, err := m.layout(types.Typ[types.Byte], sizes, 0); err == nil {
 		t.Fatal("work budget ignored")
 	}
-	r := storageFixture(t, `var A [1048576]byte; var B byte; func F() {}`)
-	r.bindings = []storageBinding{storageImageBinding(storageGlobal(r, "A"), 0x1000), storageImageBinding(storageGlobal(r, "B"), 0x200000)}
-	if _, err := resolveStorageRepresentation(t.Context(), r, nil); err == nil {
+	budget := storageLayoutMeter{ctx: t.Context()}
+	array, err := budget.layout(types.NewArray(types.Typ[types.Byte], storageMaxBytes), sizes, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := budget.reserveBytes(array.size); err != nil {
+		t.Fatal(err)
+	}
+	if err := budget.reserveBytes(1); err == nil {
 		t.Fatal("combined live byte budget ignored")
 	}
 }
@@ -434,16 +457,19 @@ func TestStorageScalarProjection(t *testing.T) {
 }
 
 func TestStorageNativeLittleEndianProjection(t *testing.T) {
+	_, bound := storageGeometryFixture(t, 0)
+	extent := storageTestExtent(t, bound.Geometry, nativeproof.StackOffset(16), 8)
 	b := br.NewBuilder(4096)
 	memory := make([]nativeproof.TransitionByte, 0, 16)
 	for lane := range 8 {
 		value, _ := b.Const(br.Bits(8), uint64(lane+1))
 		other, _ := b.Const(br.Bits(8), 255)
-		memory = append(memory, nativeproof.TransitionByte{TransitionLocation: nativeproof.TransitionLocation{Offset: 16 + int64(lane)}, Value: value})
-		memory = append(memory, nativeproof.TransitionByte{TransitionLocation: nativeproof.TransitionLocation{Image: true, Offset: 16 + int64(lane)}, Value: other})
+		memory = append(memory, nativeproof.TransitionByte{TransitionLocation: storageTestLocation(t, bound.Geometry, nativeproof.StackOffset(16+lane)), Value: value})
+		memory = append(memory, nativeproof.TransitionByte{TransitionLocation: storageTestLocation(t, bound.Geometry, nativeproof.ImageAddress(16+lane)), Value: other})
 	}
 	for width := 1; width <= 8; width++ {
-		got, err := storageNativeWord(t.Context(), b, memory, nativeproof.TransitionLocation{Offset: 16}, width)
+		part, _ := extent.Subextent(0, int64(width))
+		got, err := storageNativeWord(t.Context(), b, memory, part, width)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -453,18 +479,18 @@ func TestStorageNativeLittleEndianProjection(t *testing.T) {
 		}
 	}
 	for _, changed := range [][]nativeproof.TransitionByte{memory[2:], append(slices.Clone(memory), memory[0])} {
-		if _, err := storageNativeWord(t.Context(), b, changed, nativeproof.TransitionLocation{Offset: 16}, 8); err == nil {
+		if _, err := storageNativeWord(t.Context(), b, changed, extent, 8); err == nil {
 			t.Fatal("missing/duplicate bytes accepted")
 		}
 	}
 	owned := slices.Clone(memory)
 	ctx := &storageCallbackContext{Context: t.Context(), callback: func() { owned[0].Value = br.Term{} }}
-	if _, err := storageNativeWord(ctx, b, owned, nativeproof.TransitionLocation{Offset: 16}, 8); err != nil {
+	if _, err := storageNativeWord(ctx, b, owned, extent, 8); err != nil {
 		t.Fatalf("callback replaced native projection: %v", err)
 	}
 	canceled, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := storageNativeWord(canceled, b, memory, nativeproof.TransitionLocation{Offset: 16}, 8); !errors.Is(err, context.Canceled) {
+	if _, err := storageNativeWord(canceled, b, memory, extent, 8); !errors.Is(err, context.Canceled) {
 		t.Fatalf("native byte cancellation: %v", err)
 	}
 }

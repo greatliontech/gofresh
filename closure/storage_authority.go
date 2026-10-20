@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 
+	br "github.com/greatliontech/gofresh/internal/bitrelation"
 	"github.com/greatliontech/gofresh/internal/nativeproof"
 )
 
@@ -21,10 +22,11 @@ func (p *sourceReturnCompletion) storagePacket() *checkedRegion { return p.check
 // storageProtectedFootprints retains control slots over the entire native scope,
 // including child calls already returned at the endpoint. Saved required caller
 // registers cannot be reassigned to source storage either.
-func storageProtectedFootprints(b nativeproof.TransitionBound) []storageFootprint {
+func storageProtectedFootprints(ctx context.Context, b nativeproof.TransitionBound) []storageFootprint {
 	var out []storageFootprint
 	if b.Interface.ReturnContext != nil {
-		out = append(out, storageFootprint{Bytes: nativeproof.RelativeSpan{Start: 0, End: 8}})
+		extent, _ := b.Geometry.ResolveStorage(ctx, nativeproof.StackOffset(0), 8)
+		out = append(out, storageFootprint{Bytes: extent})
 	}
 	for _, access := range b.Accesses {
 		protected := access.Kind == nativeproof.FrameReturnRead
@@ -34,11 +36,12 @@ func storageProtectedFootprints(b nativeproof.TransitionBound) []storageFootprin
 			}
 		}
 		if protected {
-			out = append(out, storageFootprint{Image: access.Image, Bytes: access.Bytes})
+			out = append(out, storageFootprint{Bytes: access.Bytes})
 		}
 	}
 	for _, frame := range b.Frames {
-		out = append(out, storageFootprint{Bytes: nativeproof.RelativeSpan{Start: frame.Slot.Offset, End: frame.Slot.Offset + 8}})
+		extent, _ := b.Geometry.ResolvePointer(ctx, frame.Slot, 0, 8)
+		out = append(out, storageFootprint{Bytes: extent})
 	}
 	return out
 }
@@ -47,6 +50,9 @@ func storageProtectedFootprints(b nativeproof.TransitionBound) []storageFootprin
 // caller has obtained native from BoundFor(proposal.image). A TransitionBound is
 // only a projection: this helper does not confer image/certificate ownership.
 func checkStorageAuthority(ctx context.Context, endpoint storageSourceEndpoint, native nativeproof.TransitionBound, proposal storageRepresentation, protected []storageFootprint) (*storageLayout, error) {
+	if err := chargeStorageGeometry(ctx, native.Geometry); err != nil {
+		return nil, err
+	}
 	var owner *program
 	switch source := endpoint.(type) {
 	case *sourceOperandPrefix:
@@ -69,9 +75,7 @@ func checkStorageAuthority(ctx context.Context, endpoint storageSourceEndpoint, 
 	}
 	native.InitialMemory = slices.Clone(native.InitialMemory)
 	native.Memory = slices.Clone(native.Memory)
-	native.Interface.Regions = slices.Clone(native.Interface.Regions)
-	native.Interface.ImageRegions = slices.Clone(native.Interface.ImageRegions)
-	layout, err := resolveStorageRepresentation(ctx, proposal, protected)
+	layout, err := resolveStorageRepresentation(ctx, proposal, native.Geometry, protected)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +96,7 @@ func checkStorageAuthority(ctx context.Context, endpoint storageSourceEndpoint, 
 			memory.counts[cell.TransitionLocation]++
 		}
 	}
-	for object, storage := range layout.objects {
+	for object := range layout.objects {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -106,46 +110,57 @@ func checkStorageAuthority(ctx context.Context, endpoint storageSourceEndpoint, 
 			}
 			frame := native.Interface.PrivateFrame
 			footprint, _ := layout.objectFootprint(object)
-			if frame == nil || footprint.Bytes.Start < frame.Bytes.Start || footprint.Bytes.End > frame.Bytes.End {
+			if frame == nil {
 				return nil, fmt.Errorf("storage authority: allocation lacks native private lifetime ownership")
 			}
-			origin := native.Interface.Origin
-			align := uint64(storage.shape.align)
-			if origin.Modulus == 0 || origin.Modulus%align != 0 || (origin.Residue+uint64(storage.base.Offset))%align != 0 {
-				return nil, fmt.Errorf("storage authority: retained origin does not establish alignment")
+			private, err := native.Geometry.ResolveStorage(ctx, nativeproof.StackOffset(frame.Bytes.Start), frame.Bytes.End-frame.Bytes.Start)
+			if err != nil {
+				return nil, err
+			}
+			if contains, err := native.Geometry.Contains(private, footprint.Bytes); err != nil || !contains {
+				return nil, fmt.Errorf("storage authority: allocation lacks native private lifetime ownership")
 			}
 		}
 		footprint, _ := layout.objectFootprint(object)
-		for offset := footprint.Bytes.Start; offset < footprint.Bytes.End; offset++ {
+		for offset := int64(0); offset < footprint.Bytes.Width(); offset++ {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			location := nativeproof.TransitionLocation{Image: footprint.Image, Offset: offset}
+			location, err := footprint.Bytes.Byte(offset)
+			if err != nil {
+				return nil, err
+			}
 			if initial[location] != 1 || current[location] != 1 {
 				return nil, fmt.Errorf("storage authority: missing or duplicate represented byte")
-			}
-			mapped := false
-			if footprint.Image {
-				for _, span := range native.Interface.ImageRegions {
-					if err := ctx.Err(); err != nil {
-						return nil, err
-					}
-					mapped = mapped || uint64(offset) >= span.Start && uint64(offset) < span.End
-				}
-			} else {
-				for _, region := range native.Interface.Regions {
-					if err := ctx.Err(); err != nil {
-						return nil, err
-					}
-					// Permissions come from the checked interface; actual read/write
-					// accesses are separately authorized by the native theorem.
-					mapped = mapped || offset >= region.Bytes.Start && offset < region.Bytes.End && (region.Readable || region.Writable)
-				}
-			}
-			if !mapped {
-				return nil, fmt.Errorf("storage authority: extent leaves checked mapping")
 			}
 		}
 	}
 	return layout, nil
+}
+
+// Geometry retains original placement and entry expressions even when current
+// register or memory projections no longer mention them. Walk their DAG under
+// the same cumulative correspondence context as all other proof work.
+func chargeStorageGeometry(ctx context.Context, geometry nativeproof.ActualTransitionGeometry) error {
+	if ctx == nil || geometry == (nativeproof.ActualTransitionGeometry{}) {
+		return fmt.Errorf("storage authority: missing context or native geometry")
+	}
+	seen := map[br.Term]bool{}
+	pending := geometry.ExpressionRoots()
+	for len(pending) != 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		term := pending[len(pending)-1]
+		pending = pending[:len(pending)-1]
+		if seen[term] {
+			continue
+		}
+		if !term.Valid() || len(seen) >= 65536 {
+			return fmt.Errorf("storage authority: geometry expression bound exceeded")
+		}
+		seen[term] = true
+		pending = append(pending, term.View().Args...)
+	}
+	return nil
 }

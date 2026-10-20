@@ -81,7 +81,7 @@ func selectedCheckPrefix(t testing.TB, raw []byte, image *nativeproof.Image, loc
 		t.Fatal(err)
 	}
 	b, _ := checked.Bound()
-	if b.Entry != entry || b.Boundary.PC != call || len(b.PrimitiveEffects) != 5 || len(b.Frames) != 0 || b.Registers[nativeproof.RSP].Pointer != (nativeproof.OriginPointer{Origin: b.Origin, Offset: -56}) || b.Registers[nativeproof.RBP].Pointer != (nativeproof.OriginPointer{Origin: b.Origin, Offset: -8}) {
+	if b.Entry != entry || b.Boundary.PC != call || len(b.PrimitiveEffects) != 5 || len(b.Frames) != 0 || !storageTestStack(b.Geometry, b.Registers[nativeproof.RSP].Pointer, -56) || !storageTestStack(b.Geometry, b.Registers[nativeproof.RBP].Pointer, -8) {
 		t.Fatal("caller prefix lost actual stack, context or atomic effects")
 	}
 	t.Logf("actual caller entry=%#x CALL=%#x instructions=%d accesses=%d primitives=%d exclusions=%d", entry, call, len(b.Instructions), len(b.Accesses), len(b.PrimitiveEffects), len(b.ExcludedBoundaries))
@@ -123,7 +123,7 @@ func TestGlobalCallerSelectedRuntimeArtifact(t *testing.T) {
 	}
 	b, ok := application.BoundFor(image)
 	child, _ := callee.Bound()
-	if !ok || !application.AppliesTo(callee) || b.StackShift != -64 || b.Continuation != child.State.PC || len(b.Successor.PrimitiveEffects) != 10 || len(b.Successor.Frames) != 0 || b.Successor.Boundary.Context != 0 || b.Successor.Registers[nativeproof.RSP].Pointer != (nativeproof.OriginPointer{Origin: b.Successor.Origin, Offset: -56}) || b.Successor.Registers[nativeproof.RBP].Pointer != (nativeproof.OriginPointer{Origin: b.Successor.Origin, Offset: -8}) {
+	if !ok || !application.AppliesTo(callee) || b.StackShift != -64 || b.Continuation != child.State.PC || len(b.Successor.PrimitiveEffects) != 10 || len(b.Successor.Frames) != 0 || b.Successor.Boundary.Context != 0 || !storageTestStack(b.Successor.Geometry, b.Successor.Registers[nativeproof.RSP].Pointer, -56) || !storageTestStack(b.Successor.Geometry, b.Successor.Registers[nativeproof.RBP].Pointer, -8) {
 		t.Fatal("actual application lost callee identity, effects or caller frame")
 	}
 	if !b.Successor.SSE.MXCSRPreserved || !b.Successor.SSE.UpperVectorsPreserved || b.Successor.Vectors != b.ChildEntry.Vectors {

@@ -42,7 +42,7 @@ func TestTransitionNarrowAccumulatorProvenance(t *testing.T) {
 				t.Fatal(err)
 			}
 			incomingBound, _ := prior.Bound()
-			if incomingBound.Registers[RAX].Pointer != (OriginPointer{Origin: incomingBound.Origin, Offset: 8}) {
+			if incomingBound.Registers[RAX].Pointer != incomingBound.Geometry.stackPointer(8) {
 				t.Fatal("fixture lacks actual incoming RAX pointer provenance")
 			}
 			c, err := CheckTransitionContinuation(t.Context(), prior, p)
@@ -56,7 +56,7 @@ func TestTransitionNarrowAccumulatorProvenance(t *testing.T) {
 			if b.Registers[RAX].Pointer != nil || b.Registers[RCX].Pointer != nil {
 				t.Fatal("CAS32 accumulator/memory provenance", b.Registers[RAX].Pointer, b.Registers[RCX].Pointer)
 			}
-			if b.Registers[RDX].Pointer != (OriginPointer{Origin: b.Origin}) {
+			if b.Registers[RDX].Pointer != b.Geometry.stackPointer(0) {
 				t.Fatal("fixture lost its actual incoming replacement pointer")
 			}
 			e := b.PrimitiveEffects[0].(LockedCompareExchangeEffect)
@@ -67,7 +67,7 @@ func TestTransitionNarrowAccumulatorProvenance(t *testing.T) {
 				for _, incoming := range []uint64{origin + 8, origin + 9} {
 					values := map[br.Term]uint64{b.Origin: origin}
 					for _, cell := range b.InitialMemory {
-						values[cell.Value] = incoming >> uint(8*(cell.Offset%8)) & 255
+						values[cell.Value] = incoming >> uint(8*(cell.offset%8)) & 255
 					}
 					now := incoming
 					if outcome == "success" {
@@ -87,7 +87,7 @@ func TestTransitionNarrowAccumulatorProvenance(t *testing.T) {
 			}
 			for j, index := range []int{e.ReadAccess, e.WriteAccess} {
 				a := b.Accesses[index]
-				if a.ID != e.ID || a.PC != e.PC || a.Context != e.Context || a.Bytes != (RelativeSpan{0, 4}) || a.Kind != []AccessKind{FrameRead, FrameWrite}[j] || e.WriteAccess != e.ReadAccess+1 {
+				if a.ID != e.ID || a.PC != e.PC || a.Context != e.Context || extentCoordinates(a.Bytes) != (RelativeSpan{0, 4}) || a.Kind != []AccessKind{FrameRead, FrameWrite}[j] || e.WriteAccess != e.ReadAccess+1 {
 					t.Fatal("CAS32 lost actual read/write occurrence")
 				}
 			}

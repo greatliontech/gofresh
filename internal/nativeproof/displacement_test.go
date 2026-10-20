@@ -133,7 +133,7 @@ func TestTransitionSignedDisplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := c.Bound()
-	if b.Registers[RAX].Pointer != (OriginPointer{b.Origin, -8}) {
+	if b.Registers[RAX].Pointer != b.Geometry.stackPointer(-8) {
 		t.Fatalf("wrong pointer correspondence: %+v", b.Registers[RAX])
 	}
 	for _, origin := range []uint64{64, 1 << 32, 1<<47 - 16} {

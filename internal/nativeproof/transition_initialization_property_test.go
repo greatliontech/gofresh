@@ -68,7 +68,7 @@ func FuzzTransitionInitializedDecision(f *testing.F) {
 			}
 		} else {
 			for _, cell := range b.InitialMemory {
-				if cell.Image && uint64(cell.Offset) >= imageStateAddress+64 && uint64(cell.Offset) < imageStateAddress+72 && cell.Value.View().Op != br.Variable {
+				if cell.isImage() && uint64(cell.offset) >= imageStateAddress+64 && uint64(cell.offset) < imageStateAddress+72 && cell.Value.View().Op != br.Variable {
 					t.Fatal("unknown BSS gained a constant")
 				}
 			}

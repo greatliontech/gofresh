@@ -108,6 +108,29 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 		}
 		return m.importTerm(t)
 	}
+	importPointer := func(pointer TransitionPointer) error {
+		switch p := pointer.(type) {
+		case nil:
+			return nil
+		case AddressPointer:
+			if !b.Geometry.ownsPointer(p) {
+				return geometryError("foreign retained pointer")
+			}
+			return importRoot(p.view.backing.geometry.origin)
+		case entryValueLineage:
+			return importRoot(p.value)
+		default:
+			return geometryError("unknown retained pointer")
+		}
+	}
+	for _, root := range b.Geometry.ExpressionRoots() {
+		if err := importRoot(root); err != nil {
+			return err
+		}
+	}
+	if err := importPointer(b.Thread.FS.Pointer); err != nil {
+		return err
+	}
 	for _, e := range prior.justifications {
 		if err := m.reserveExclusion(); err != nil {
 			return err
@@ -129,7 +152,7 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 		}
 	}
 	for _, frame := range b.Frames {
-		if err := importRoot(frame.Slot.Origin); err != nil {
+		if err := importPointer(frame.Slot); err != nil {
 			return err
 		}
 	}
@@ -176,6 +199,9 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 	}
 	m.state.path, m.state.present = b.CutGuard, true
 	for r, v := range b.Registers {
+		if err := importPointer(v.Pointer); err != nil {
+			return err
+		}
 		m.state.regs[r], m.pointers[r] = v.Value, v.Pointer
 		for _, root := range []br.Term{b.InitialRegisters[r], v.Value} {
 			if err := importRoot(root); err != nil {
@@ -227,10 +253,13 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 			if err := importRoot(v.Value); err != nil {
 				return err
 			}
+			if err := importPointer(v.Pointer); err != nil {
+				return err
+			}
 		}
 	}
-	// Every Stack arm retains this same root term by construction. Image arms
-	// contain only owned mapping coordinates and introduce no expression roots.
+	// Stack and image address views retain the same owned geometry and its
+	// origin term. Retain that root even when no current pointer refers to it.
 	if err := importRoot(b.Origin); err != nil {
 		return err
 	}
@@ -250,6 +279,9 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 		return m.err
 	}
 	if err := m.reserveState(len(b.Memory)); err != nil {
+		return err
+	}
+	if err := m.reserveGeometry(); err != nil {
 		return err
 	}
 	m.memory = make(map[TransitionLocation]TransitionByte, len(b.Memory))

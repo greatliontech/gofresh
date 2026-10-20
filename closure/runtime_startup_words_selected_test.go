@@ -55,7 +55,7 @@ func assertSelectedStartupWordTransfer(t testing.TB, raw []byte, image *nativepr
 		t.Fatal("outgoing-word transfer lost ordered coverage or access history")
 	}
 	b := br.NewBuilder(256)
-	initial, err := storageNativeWord(t.Context(), b, before.InitialMemory, nativeproof.TransitionLocation{Offset: 0}, 8)
+	initial, err := storageNativeWord(t.Context(), b, before.InitialMemory, storageTestExtent(t, before.Geometry, nativeproof.StackOffset(0), 8), 8)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func assertSelectedStartupWordTransfer(t testing.TB, raw []byte, image *nativepr
 	} {
 		access := after.Accesses[len(before.Accesses)+i]
 		instruction := after.Instructions[len(before.Instructions)+i]
-		if access.Image || access.Kind != expected.kind || access.Bytes != expected.span || access.ID != instruction.ID || access.Context != 0 {
+		if access.Kind != expected.kind || access.Bytes != storageTestExtent(t, after.Geometry, nativeproof.StackOffset(expected.span.Start), expected.span.End-expected.span.Start) || access.ID != instruction.ID || access.Context != 0 {
 			t.Fatal("outgoing-word access lost exact width, order or occurrence")
 		}
 		if instruction.Guard != before.CutGuard {
@@ -88,7 +88,7 @@ func assertSelectedStartupWordTransfer(t testing.TB, raw []byte, image *nativepr
 			t.Fatalf("outgoing word %d differs from the original entry relation: %v", i, err)
 		}
 		if expected.kind == nativeproof.FrameWrite {
-			value, err := storageNativeWord(t.Context(), b, after.Memory, nativeproof.TransitionLocation{Offset: expected.span.Start}, int(expected.span.End-expected.span.Start))
+			value, err := storageNativeWord(t.Context(), b, after.Memory, access.Bytes, int(access.Bytes.Width()))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,17 +97,18 @@ func assertSelectedStartupWordTransfer(t testing.TB, raw []byte, image *nativepr
 			}
 		}
 	}
-	if err := account.equal(t.Context(), after.Registers[nativeproof.RAX].Value, vector); err != nil || after.Registers[nativeproof.RAX].Pointer != (nativeproof.OriginPointer{Origin: before.Origin, Offset: 8}) {
+	if err := account.equal(t.Context(), after.Registers[nativeproof.RAX].Value, vector); err != nil || !storageTestStack(before.Geometry, after.Registers[nativeproof.RAX].Pointer, 8) {
 		t.Fatal("reloaded full word lost original-root address provenance", err)
 	}
 	for _, cell := range after.Memory {
+		cell := storageTestByte(t, after.Geometry, cell)
 		if !cell.Image && cell.Offset >= -40 && cell.Offset < -32 && (cell.Pointer != after.Registers[nativeproof.RAX].Pointer || cell.PointerLane != uint8(cell.Offset+40)) {
 			t.Fatal("outgoing full-word store lost ordered provenance lanes")
 		}
 	}
-	if err := selectedStartupMemoryFrame(before.Memory, after.Memory, []storageFootprint{
-		{Bytes: nativeproof.RelativeSpan{Start: -48, End: -44}},
-		{Bytes: nativeproof.RelativeSpan{Start: -40, End: -32}},
+	if err := selectedStartupMemoryFrame(after.Geometry, before.Memory, after.Memory, []storageFootprint{
+		{Bytes: storageTestExtent(t, after.Geometry, nativeproof.StackOffset(-48), 4)},
+		{Bytes: storageTestExtent(t, after.Geometry, nativeproof.StackOffset(-40), 8)},
 	}); err != nil {
 		t.Fatal(err)
 	}

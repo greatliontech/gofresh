@@ -143,7 +143,7 @@ func assertSelectedCheckReturn(t testing.TB, image *nativeproof.Image, incoming 
 		t.Fatalf("completed caller has %d active epilogue accesses, want two", len(active))
 	}
 	readBP, readReturn := active[0], active[1]
-	if readBP.Image || readBP.Kind != nativeproof.FrameRead || readBP.Bytes != (nativeproof.RelativeSpan{Start: -8, End: 0}) || readReturn.Image || readReturn.Kind != nativeproof.FrameReturnRead || readReturn.Bytes != (nativeproof.RelativeSpan{Start: 0, End: 8}) {
+	if readBP.Kind != nativeproof.FrameRead || readBP.Bytes != storageTestExtent(t, incoming.Geometry, nativeproof.StackOffset(-8), 8) || readReturn.Kind != nativeproof.FrameReturnRead || readReturn.Bytes != storageTestExtent(t, incoming.Geometry, nativeproof.StackOffset(0), 8) {
 		t.Fatal("epilogue did not read the saved frame pointer and original control word in order")
 	}
 	for register, want := range map[nativeproof.Register]uint64{nativeproof.RAX: 11, nativeproof.RCX: 11, nativeproof.RDX: 2048, nativeproof.RSI: 0xffffffff} {
@@ -169,7 +169,7 @@ func assertSelectedCheckReturn(t testing.TB, image *nativeproof.Image, incoming 
 	if err := selectedCheckEqual(t.Context(), b.Prefix.EntryPredicate, b.State.Registers[nativeproof.RBP].Value, incoming.InitialRegisters[nativeproof.RBP], &budget); err != nil {
 		t.Fatalf("original frame pointer was not restored: %v", err)
 	}
-	if b.State.Registers[nativeproof.RSP].Pointer != (nativeproof.OriginPointer{Origin: incoming.Origin, Offset: 8}) {
+	if !storageTestStack(incoming.Geometry, b.State.Registers[nativeproof.RSP].Pointer, 8) {
 		t.Fatal("return did not consume the original control slot")
 	}
 }

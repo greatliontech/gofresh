@@ -10,8 +10,8 @@ import (
 func TestStorageFunctionRepeatedSourceOccurrences(t *testing.T) {
 	source, completed := storageFunctionSource(t, `var G uint32;func Start(*uint32){};func F(){var x uint32;Start(&x);for i:=uint32(1);i<3;i++ {x=i;G=x}}`)
 	root := source.prog.Roots["F"]
-	local := nativeproof.TransitionLocation{Offset: -16}
-	global := nativeproof.TransitionLocation{Image: true, Offset: 0x700008}
+	local := nativeproof.StackOffset(-16)
+	global := nativeproof.ImageAddress(0x700008)
 	accesses := completed.region.packet.trace.accesses
 	if len(accesses) != 6 || accesses[0].instruction != accesses[3].instruction || accesses[0].regionEffectOccurrence == accesses[3].regionEffectOccurrence || accesses[1].instruction != accesses[4].instruction || accesses[1].regionEffectOccurrence == accesses[4].regionEffectOccurrence {
 		t.Fatal("finite loop collapsed distinct visits of its actual store/load")

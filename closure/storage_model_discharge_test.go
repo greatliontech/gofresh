@@ -36,7 +36,7 @@ func storageModelEliminatedFixture(t testing.TB, floating bool) *globalFunctionC
 func storageModelEffectFixture(t testing.TB, text string) *globalFunctionCorrespondence {
 	t.Helper()
 	source, completed := storageFunctionSource(t, text)
-	base := nativeproof.TransitionLocation{Image: true, Offset: 0x700008}
+	base := nativeproof.ImageAddress(0x700008)
 	f, native := storageFunctionNative(t, []storageFunctionOperation{{base, 4, true, 1}}, nativeproof.OriginDomain{})
 	rho := storageRepresentation{source: source.prog, image: f.image, bindings: []storageBinding{{object: regionObject{kind: regionGlobal, site: source.prog.Roots["F"].Pkg.Members["G"].(*ssa.Global)}, base: base}}}
 	p, err := checkGlobalFunctionCorrespondence(t.Context(), source, source.prog.Roots["F"], f.image, f.entry, completed, native, rho, nil)
@@ -276,8 +276,8 @@ func TestScopedStorageModelActualSSEConsequences(t *testing.T) {
 						t.Fatal(err)
 					}
 					rho := storageRepresentation{source: source.prog, image: f.image, bindings: []storageBinding{
-						{object: storageFunctionLocal(t, completed), base: nativeproof.TransitionLocation{Offset: -16}},
-						{object: regionObject{kind: regionGlobal, site: source.prog.Roots["F"].Pkg.Members["G"].(*ssa.Global)}, base: nativeproof.TransitionLocation{Image: true, Offset: 0x700008}},
+						{object: storageFunctionLocal(t, completed), base: nativeproof.StackOffset(-16)},
+						{object: regionObject{kind: regionGlobal, site: source.prog.Roots["F"].Pkg.Members["G"].(*ssa.Global)}, base: nativeproof.ImageAddress(0x700008)},
 					}}
 					p, err := checkGlobalFunctionCorrespondence(t.Context(), source, source.prog.Roots["F"], f.image, f.entry, completed, native, rho, nil)
 					positive := variant == "correct" || tc.name == "quiet-nan"

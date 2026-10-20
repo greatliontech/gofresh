@@ -154,7 +154,7 @@ func TestGlobalOperandCorrespondenceSelectedRuntimeArtifact(t *testing.T) {
 	// not merely malformed addresses or a sampled output disagreement.
 	swapped := rho
 	swapped.bindings = append([]storageBinding(nil), rho.bindings...)
-	swapped.bindings[0].base.Offset, swapped.bindings[1].base.Offset = int64(a[1]), int64(a[0])
+	swapped.bindings[0].base, swapped.bindings[1].base = nativeproof.ImageAddress(a[1]), nativeproof.ImageAddress(a[0])
 	if c, err := checkGlobalOperandCorrespondence(t.Context(), s, root, call, im, entry, cut, prefix, native, swapped); c != nil || err == nil {
 		t.Fatal("actual map-only swap accepted")
 	}

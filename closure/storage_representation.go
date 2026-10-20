@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"go/types"
-	"math"
 	"slices"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
@@ -22,12 +21,11 @@ type storageRepresentation struct {
 
 type storageBinding struct {
 	object regionObject
-	base   nativeproof.TransitionLocation
+	base   nativeproof.StorageSelector
 }
 
 type storageFootprint struct {
-	Image bool
-	Bytes nativeproof.RelativeSpan
+	Bytes nativeproof.TransitionExtent
 }
 
 type storageAccessClass uint8
@@ -38,19 +36,18 @@ const (
 	storagePartial
 )
 
-// storageLayout resolves a frozen candidate's coordinates, not its ownership.
-// Before using these coordinates as correspondence evidence, the consumer checks
-// the actual opaque source endpoints (including allocation instance, singleton,
-// lifetime and nonescape facts), image owner, declared mapped memory and retained
-// stack origin, including alignment of origin plus offset. Relative offsets need
-// not themselves be aligned. Successful layout never initializes native bytes.
+// storageLayout binds a frozen proposal to canonical extents from authenticated
+// native geometry. It checks mapping, alignment, overlap and control protection.
+// The consumer still establishes actual source allocation instances, singleton,
+// lifetime and nonescape facts. Successful layout never initializes native bytes.
 type storageLayout struct {
 	representation storageRepresentation
+	geometry       nativeproof.ActualTransitionGeometry
 	objects        map[regionObject]storageObjectLayout
 }
 
 type storageObjectLayout struct {
-	base  nativeproof.TransitionLocation
+	bytes nativeproof.TransitionExtent
 	shape *storageTypeLayout
 }
 
@@ -83,6 +80,15 @@ const (
 type storageLayoutMeter struct {
 	ctx         context.Context
 	work, nodes int
+	bytes       int64
+}
+
+func (m *storageLayoutMeter) reserveBytes(size int64) error {
+	if size <= 0 || size > storageMaxBytes-m.bytes {
+		return fmt.Errorf("storage layout: live byte budget exceeded")
+	}
+	m.bytes += size
+	return nil
 }
 
 func (m *storageLayoutMeter) tick() error {
@@ -99,14 +105,13 @@ func (m *storageLayoutMeter) tick() error {
 	return nil
 }
 
-// resolveStorageRepresentation checks structural ownership and selected layout.
-// It deliberately returns a candidate resolver, not a checked correspondence.
-// Only image coordinates establish absolute alignment here. Stack alignment is
-// checked by the authority consumer against its retained native origin domain.
+// resolveStorageRepresentation checks selected layout against native geometry
+// obtained from the exact certificate's BoundFor projection. A resolved layout
+// supplies neither source lifetime evidence nor checked correspondence.
 // protected must include every actual control slot throughout the composition;
 // a private frame is not itself protected, since represented locals may live in it.
-func resolveStorageRepresentation(ctx context.Context, proposal storageRepresentation, protected []storageFootprint) (_ *storageLayout, err error) {
-	if ctx == nil || proposal.source == nil || proposal.source.Prog == nil || proposal.image == nil || len(proposal.bindings) > storageMaxBindings || len(protected) > storageMaxBindings {
+func resolveStorageRepresentation(ctx context.Context, proposal storageRepresentation, geometry nativeproof.ActualTransitionGeometry, protected []storageFootprint) (_ *storageLayout, err error) {
+	if ctx == nil || geometry == (nativeproof.ActualTransitionGeometry{}) || proposal.source == nil || proposal.source.Prog == nil || proposal.image == nil || len(proposal.bindings) > storageMaxBindings || len(protected) > storageMaxBindings {
 		return nil, fmt.Errorf("storage layout: missing owner or container budget exceeded")
 	}
 	// Image backing arrays are immutable and private to nativeproof. Freeze both
@@ -116,9 +121,8 @@ func resolveStorageRepresentation(ctx context.Context, proposal storageRepresent
 	proposal.bindings = slices.Clone(proposal.bindings)
 	protected = slices.Clone(protected)
 	m := storageLayoutMeter{ctx: ctx}
-	result := &storageLayout{representation: proposal, objects: make(map[regionObject]storageObjectLayout, len(proposal.bindings))}
+	result := &storageLayout{representation: proposal, geometry: geometry, objects: make(map[regionObject]storageObjectLayout, len(proposal.bindings))}
 	spans := make([]storageFootprint, 0, len(proposal.bindings))
-	var bytes int64
 	// Malformed selected sizes may panic rather than return a negative size.
 	// Such a selection supplies no usable representation.
 	defer func() {
@@ -127,7 +131,7 @@ func resolveStorageRepresentation(ctx context.Context, proposal storageRepresent
 		}
 	}()
 	for _, p := range protected {
-		if !p.valid() {
+		if valid, e := geometry.Contains(p.Bytes, p.Bytes); e != nil || !valid {
 			return nil, fmt.Errorf("storage layout: invalid protected extent")
 		}
 	}
@@ -145,54 +149,51 @@ func resolveStorageRepresentation(ctx context.Context, proposal storageRepresent
 		if typ == nil || sizes == nil || sizes.Sizeof(types.NewPointer(typ)) != 8 {
 			return nil, fmt.Errorf("storage layout: unowned object or unsupported pointer width")
 		}
-		if binding.base.Image != (binding.object.kind == regionGlobal) {
+		_, image := binding.base.(nativeproof.ImageAddress)
+		_, stack := binding.base.(nativeproof.StackOffset)
+		if image != (binding.object.kind == regionGlobal) || !image && !stack {
 			return nil, fmt.Errorf("storage layout: globals require image and allocations require origin-relative storage")
 		}
 		shape, err := m.layout(typ, sizes, 0)
 		if err != nil {
 			return nil, err
 		}
-		if shape.size > storageMaxBytes-bytes {
-			return nil, fmt.Errorf("storage layout: live byte budget exceeded")
+		if err := m.reserveBytes(shape.size); err != nil {
+			return nil, err
 		}
-		bytes += shape.size
-		span, ok := storageSpan(binding.base, shape.size)
-		if !ok || binding.base.Image && binding.base.Offset%shape.align != 0 {
+		extent, e := geometry.ResolveStorage(ctx, binding.base, shape.size)
+		if e != nil {
+			return nil, fmt.Errorf("storage layout: invalid extent: %w", e)
+		}
+		aligned, e := geometry.CheckAlignment(extent, shape.align)
+		if e != nil || !aligned {
 			return nil, fmt.Errorf("storage layout: invalid or misaligned extent")
 		}
+		span := storageFootprint{Bytes: extent}
 		for _, p := range protected {
 			if err := m.tick(); err != nil {
 				return nil, err
 			}
-			if span.overlaps(p) {
+			overlaps, e := geometry.Overlaps(span.Bytes, p.Bytes)
+			if e != nil || overlaps {
 				return nil, fmt.Errorf("storage layout: represented object overlaps protected control storage")
 			}
 		}
-		result.objects[binding.object] = storageObjectLayout{base: binding.base, shape: shape}
+		result.objects[binding.object] = storageObjectLayout{bytes: extent, shape: shape}
 		spans = append(spans, span)
 	}
 	// All bindings conservatively remain live for the entire composition. Sorting
 	// checks disjointness without a quadratic pairwise object walk.
 	slices.SortFunc(spans, func(a, b storageFootprint) int {
-		if a.Image != b.Image {
-			if a.Image {
-				return 1
-			}
-			return -1
-		}
-		if a.Bytes.Start < b.Bytes.Start {
-			return -1
-		}
-		if a.Bytes.Start > b.Bytes.Start {
-			return 1
-		}
-		return 0
+		order, _ := geometry.Compare(a.Bytes.Start(), b.Bytes.Start()) // both resolved above
+		return order
 	})
 	for i := 1; i < len(spans); i++ {
 		if err := m.tick(); err != nil {
 			return nil, err
 		}
-		if spans[i-1].overlaps(spans[i]) {
+		overlaps, e := geometry.Overlaps(spans[i-1].Bytes, spans[i].Bytes)
+		if e != nil || overlaps {
 			return nil, fmt.Errorf("storage layout: overlapping live objects")
 		}
 	}
@@ -326,20 +327,24 @@ func (m *storageLayoutMeter) layout(typ types.Type, sizes types.Sizes, depth int
 	return n, nil
 }
 
-func storageSpan(base nativeproof.TransitionLocation, width int64) (storageFootprint, bool) {
-	if width <= 0 || base.Offset > math.MaxInt64-width {
-		return storageFootprint{}, false
-	}
-	f := storageFootprint{Image: base.Image, Bytes: nativeproof.RelativeSpan{Start: base.Offset, End: base.Offset + width}}
-	return f, f.valid()
-}
-
 func (f storageFootprint) valid() bool {
-	return f.Bytes.Start < f.Bytes.End && (!f.Image || f.Bytes.Start >= 0 && f.Bytes.End <= 1<<47)
+	return f.Bytes.Width() > 0
 }
 
-func (f storageFootprint) overlaps(g storageFootprint) bool {
-	return f.Image == g.Image && f.Bytes.Start < g.Bytes.End && g.Bytes.Start < f.Bytes.End
+func (r *storageLayout) contains(outer, inner nativeproof.TransitionExtent) bool {
+	ok, err := r.geometry.Contains(outer, inner)
+	return err == nil && ok
+}
+
+func (r *storageLayout) ordered(a, b nativeproof.TransitionLocation) bool {
+	order, err := r.geometry.Compare(a, b)
+	return err == nil && order <= 0
+}
+
+func (r *storageLayout) stackExtent(extent nativeproof.TransitionExtent) bool {
+	selector, err := r.geometry.Describe(extent.Start())
+	_, stack := selector.(nativeproof.StackOffset)
+	return err == nil && stack && r.contains(extent, extent)
 }
 
 func (r *storageLayout) objectFootprint(object regionObject) (storageFootprint, bool) {
@@ -350,7 +355,7 @@ func (r *storageLayout) objectFootprint(object regionObject) (storageFootprint, 
 	if !ok {
 		return storageFootprint{}, false
 	}
-	return storageSpan(o.base, o.shape.size)
+	return storageFootprint{Bytes: o.bytes}, true
 }
 
 func (r *storageLayout) locationFootprint(location regionLocation) (storageFootprint, bool) {
@@ -361,27 +366,39 @@ func (r *storageLayout) locationFootprint(location regionLocation) (storageFootp
 	if !ok {
 		return storageFootprint{}, false
 	}
-	n, offset := o.shape, int64(0)
-	for _, step := range location.path {
+	n, offset, ok := storagePath(o.shape, location.path)
+	if !ok {
+		return storageFootprint{}, false
+	}
+	extent, err := o.bytes.Subextent(offset, n.size)
+	return storageFootprint{Bytes: extent}, err == nil
+}
+
+// storagePath resolves only selected type structure, without native authority.
+func storagePath(n *storageTypeLayout, path []regionStep) (*storageTypeLayout, int64, bool) {
+	if n == nil || len(path) >= storageMaxDepth {
+		return nil, 0, false
+	}
+	var offset int64
+	for _, step := range path {
 		if step.summary || step.index < 0 {
-			return storageFootprint{}, false
+			return nil, 0, false
 		}
 		if step.field {
 			if step.index >= int64(len(n.fields)) {
-				return storageFootprint{}, false
+				return nil, 0, false
 			}
 			offset += n.fieldOffsets[step.index]
 			n = n.fields[step.index]
 		} else {
 			if n.element == nil || step.index >= n.count {
-				return storageFootprint{}, false
+				return nil, 0, false
 			}
 			offset += step.index * n.stride
 			n = n.element
 		}
 	}
-	o.base.Offset += offset // bounded by the already checked owning extent
-	return storageSpan(o.base, n.size)
+	return n, offset, true
 }
 
 // classifyAccess considers the full access, including padding and intersections
@@ -391,10 +408,17 @@ func (r *storageLayout) classifyAccess(access storageFootprint) storageAccessCla
 	if r == nil || !access.valid() {
 		return storagePartial
 	}
+	if valid, err := r.geometry.Contains(access.Bytes, access.Bytes); err != nil || !valid {
+		return storagePartial
+	}
 	for object := range r.objects {
 		f, _ := r.objectFootprint(object)
-		if f.overlaps(access) {
-			if f.Bytes.Start <= access.Bytes.Start && access.Bytes.End <= f.Bytes.End {
+		overlaps, err := r.geometry.Overlaps(f.Bytes, access.Bytes)
+		if err != nil {
+			return storagePartial
+		}
+		if overlaps {
+			if inside, err := r.geometry.Contains(f.Bytes, access.Bytes); err == nil && inside {
 				return storageInside
 			}
 			return storagePartial
@@ -404,8 +428,17 @@ func (r *storageLayout) classifyAccess(access storageFootprint) storageAccessCla
 }
 
 func (r *storageLayout) representedByte(location nativeproof.TransitionLocation) bool {
-	f, ok := storageSpan(location, 1)
-	return ok && r.classifyAccess(f) == storageInside
+	if r == nil {
+		return false
+	}
+	for _, object := range r.objects {
+		start, e1 := r.geometry.Compare(object.bytes.Start(), location)
+		end, e2 := r.geometry.Compare(location, object.bytes.End())
+		if e1 == nil && e2 == nil && start <= 0 && end < 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // typedLeaves returns owned paths and typed scalar footprints. The complement
@@ -418,8 +451,35 @@ func (r *storageLayout) typedLeaves(ctx context.Context, object regionObject) ([
 	if !ok {
 		return nil, fmt.Errorf("storage layout: unrepresented object")
 	}
+	structural, err := storageLeaves(ctx, o.shape)
+	if err != nil {
+		return nil, err
+	}
+	leaves := make([]storageLeaf, 0, len(structural))
+	for _, leaf := range structural {
+		extent, err := o.bytes.Subextent(leaf.offset, leaf.shape.size)
+		if err != nil {
+			return nil, err
+		}
+		leaves = append(leaves, storageLeaf{location: regionLocation{object: object, path: leaf.path}, typ: leaf.shape.typ, footprint: storageFootprint{Bytes: extent}})
+	}
+	return leaves, nil
+}
+
+type storageStructuralLeaf struct {
+	shape  *storageTypeLayout
+	offset int64
+	path   []regionStep
+}
+
+// storageLeaves enumerates only selected type paths and offsets. Native storage
+// is resolved separately against the owning certificate's geometry.
+func storageLeaves(ctx context.Context, shape *storageTypeLayout) ([]storageStructuralLeaf, error) {
+	if shape == nil {
+		return nil, fmt.Errorf("storage layout: missing type")
+	}
 	m := storageLayoutMeter{ctx: ctx}
-	var leaves []storageLeaf
+	var leaves []storageStructuralLeaf
 	var walk func(*storageTypeLayout, int64, []regionStep) error
 	walk = func(n *storageTypeLayout, offset int64, path []regionStep) error {
 		if err := m.tick(); err != nil {
@@ -441,14 +501,11 @@ func (r *storageLayout) typedLeaves(ctx context.Context, object regionObject) ([
 			if len(leaves) >= storageMaxNodes {
 				return fmt.Errorf("storage layout: leaf budget exceeded")
 			}
-			base := o.base
-			base.Offset += offset
-			f, _ := storageSpan(base, n.size)
-			leaves = append(leaves, storageLeaf{location: regionLocation{object: object, path: slices.Clone(path)}, typ: n.typ, footprint: f})
+			leaves = append(leaves, storageStructuralLeaf{shape: n, offset: offset, path: slices.Clone(path)})
 		}
 		return nil
 	}
-	if err := walk(o.shape, 0, nil); err != nil {
+	if err := walk(shape, 0, nil); err != nil {
 		return nil, err
 	}
 	return leaves, nil
@@ -489,27 +546,36 @@ func storageScalarBits(value regionValue, sizes types.Sizes) (uint64, int, bool)
 }
 
 // storageNativeWord reads one to eight bytes in the native little-endian model.
-// Coordinates include their space: equal image and stack offsets never alias.
+// Canonical keys retain their owned backing; arbitrary numeric coordinates
+// cannot select bytes, and alternate views of one backing read the same lanes.
 // The caller separately proves accessibility and source/native value equality.
-func storageNativeWord(ctx context.Context, builder *br.Builder, memory []nativeproof.TransitionByte, base nativeproof.TransitionLocation, width int) (br.Term, error) {
+func storageNativeWord(ctx context.Context, builder *br.Builder, memory []nativeproof.TransitionByte, extent nativeproof.TransitionExtent, width int) (br.Term, error) {
 	if ctx == nil || builder == nil || width < 1 || width > 8 || len(memory) > storageMaxBytes {
 		return br.Term{}, fmt.Errorf("storage projection: invalid width or byte budget")
 	}
-	if _, ok := storageSpan(base, int64(width)); !ok {
+	if extent.Width() != int64(width) {
 		return br.Term{}, fmt.Errorf("storage projection: invalid extent")
 	}
 	// Do not allow a context callback to replace bytes while they are read.
 	memory = slices.Clone(memory)
 	var lanes [8]br.Term
+	indices := make(map[nativeproof.TransitionLocation]int, width)
+	for i := range width {
+		key, err := extent.Byte(int64(i))
+		if err != nil {
+			return br.Term{}, err
+		}
+		indices[key] = i
+	}
 	m := storageLayoutMeter{ctx: ctx}
 	for _, cell := range memory {
 		if err := m.tick(); err != nil {
 			return br.Term{}, err
 		}
-		if cell.Image != base.Image || cell.Offset < base.Offset || cell.Offset >= base.Offset+int64(width) {
+		lane, present := indices[cell.TransitionLocation]
+		if !present {
 			continue
 		}
-		lane := cell.Offset - base.Offset
 		if lanes[lane].Valid() || cell.Value.Sort() != br.Bits(8) {
 			return br.Term{}, fmt.Errorf("storage projection: duplicate or invalid byte")
 		}

@@ -115,7 +115,7 @@ func TestTransitionApplicationActualCallAndResidualState(t *testing.T) {
 	if b.Registers[RBP].Pointer != before.Registers[RBP].Pointer || b.Successor.Registers[RBP].Pointer != before.Registers[RBP].Pointer || len(b.Words) != 1 || b.Inputs != child.checked.prefix.checked.bound.InitialRegisters {
 		t.Fatal("lost actual caller provenance or entry grouping")
 	}
-	if len(b.Successor.Accesses) != 4 || b.Successor.Accesses[0].Kind != FrameWrite || b.Successor.Accesses[0].Bytes != (RelativeSpan{-8, 0}) || b.Successor.Accesses[3].Kind != FrameReturnRead || b.Successor.Accesses[3].Context != b.Activation {
+	if len(b.Successor.Accesses) != 4 || b.Successor.Accesses[0].Kind != FrameWrite || extentCoordinates(b.Successor.Accesses[0].Bytes) != (RelativeSpan{-8, 0}) || b.Successor.Accesses[3].Kind != FrameReturnRead || b.Successor.Accesses[3].Context != b.Activation {
 		t.Fatal("CALL/save/restore/RET trace incomplete")
 	}
 	for _, base := range []uint64{65536, 100000, 131072} {
@@ -144,12 +144,12 @@ func TestTransitionApplicationActualCallAndResidualState(t *testing.T) {
 		t.Fatal("caller input mutated")
 	}
 	b.Memory[0].Current.PointerLane = 99
-	b.Words[0].Input.Offset = 99
+	b.Words[0].Input.Bytes.start.offset = 99
 	b.ChildEntry.Memory = nil
 	b.Successor.Interface.Regions[0].Bytes.Start = 99
 	b.Successor.Boundary.Bytes[0] ^= 1
 	fresh, _ := c.Bound()
-	if fresh.Memory[0].Current.PointerLane == 99 || fresh.Words[0].Input.Offset == 99 || len(fresh.ChildEntry.Memory) == 0 || fresh.Successor.Interface.Regions[0].Bytes.Start == 99 || slices.Equal(fresh.Successor.Boundary.Bytes, b.Successor.Boundary.Bytes) {
+	if fresh.Memory[0].Current.PointerLane == 99 || fresh.Words[0].Input.Bytes.start.offset == 99 || len(fresh.ChildEntry.Memory) == 0 || fresh.Successor.Interface.Regions[0].Bytes.Start == 99 || slices.Equal(fresh.Successor.Boundary.Bytes, b.Successor.Boundary.Bytes) {
 		t.Fatal("mutable application projection aliases authority")
 	}
 }
@@ -243,7 +243,7 @@ func TestTransitionApplicationSubtractedStackGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := c.Bound()
-	if b.StackShift != -64 || b.Successor.Registers[RSP].Pointer != (OriginPointer{Origin: parent.checked.bound.Origin, Offset: -56}) {
+	if b.StackShift != -64 || b.Successor.Registers[RSP].Pointer != parent.checked.bound.Geometry.stackPointer(-56) {
 		t.Fatal("subtracted SP chain did not preserve its parent-root relation")
 	}
 }
@@ -436,10 +436,11 @@ func TestTransitionApplicationProtectedControlScan(t *testing.T) {
 			t.Fatal(err)
 		}
 		m.bound.Accesses = slices.Clone(b.ChildEntry.Accesses)
+		m.bound.Geometry = b.ChildEntry.Geometry
 		m.activations = map[TransitionActivationID]transitionActivation{b.Activation: {}, b.Activation + 1000: {parent: b.Activation}}
 		// The supplied value is exactly the initiating CALL value. A final-value
 		// comparison would wrongly accept this write; the footprint must refuse.
-		m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{PC: applicationChild, Context: context, Kind: FrameWrite, Bytes: RelativeSpan{-8, 0}, Value: b.ChildEntry.Accesses[len(b.ChildEntry.Accesses)-1].Value})
+		m.bound.Accesses = append(m.bound.Accesses, TransitionAccess{PC: applicationChild, Context: context, Kind: FrameWrite, Bytes: TransitionExtent{b.ChildEntry.Geometry.stackLocation(-8), 8}, Value: b.ChildEntry.Accesses[len(b.ChildEntry.Accesses)-1].Value})
 		if err := m.applicationProtectedSlot(len(b.ChildEntry.Accesses), b.Activation, -8); err == nil {
 			t.Fatal("same-value descendant write acquired control-slot authority")
 		}
@@ -480,7 +481,7 @@ func TestTransitionApplicationMachineAndOrderedEffects(t *testing.T) {
 	}
 	b, _ = c.Bound()
 	before, _ := parent.Bound()
-	if !c.AppliesTo(child) || !before.Thread.ContextChanged || before.Thread.SelectorPreserved || before.Thread.FS.Pointer != (OriginPointer{Origin: before.Origin}) || b.Thread != before.Thread || b.Successor.Thread != before.Thread {
+	if !c.AppliesTo(child) || !before.Thread.ContextChanged || before.Thread.SelectorPreserved || before.Thread.FS.Pointer != before.Geometry.stackPointer(0) || b.Thread != before.Thread || b.Successor.Thread != before.Thread {
 		t.Fatal("compatible child discarded actual FS provenance or prior context history")
 	}
 }
@@ -508,9 +509,9 @@ func TestTransitionApplicationCurrentWordAndImageProvenance(t *testing.T) {
 	}
 	lanes := 0
 	for _, binding := range b.Memory {
-		if !binding.Input.Image && binding.Input.Offset >= -24 && binding.Input.Offset < -16 {
-			lane := uint8(binding.Input.Offset + 24)
-			if binding.Current.Offset != binding.Input.Offset-8 || binding.Current.Pointer != want.Pointer || binding.Current.PointerLane != lane {
+		if !binding.Input.isImage() && binding.Input.offset >= -24 && binding.Input.offset < -16 {
+			lane := uint8(binding.Input.offset + 24)
+			if binding.Current.offset != binding.Input.offset-8 || binding.Current.Pointer != want.Pointer || binding.Current.PointerLane != lane {
 				t.Fatal("byte and word substitutions disagree")
 			}
 			lanes++

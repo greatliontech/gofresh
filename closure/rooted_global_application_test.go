@@ -33,13 +33,13 @@ func newRootedGlobalFixture(t testing.TB, boolean, local string) rootedGlobalFix
 	const global, boolB, boolC = int64(0x700008), int64(0x700020), int64(0x700021)
 	text := `var G uint64;var B,C bool;func Stop(){};func F(){G=7;B=true;C=false;Stop()}`
 	ops := []storageFunctionOperation{
-		{nativeproof.TransitionLocation{Image: true, Offset: global}, 8, true, 7},
-		{nativeproof.TransitionLocation{Image: true, Offset: boolB}, 1, true, 1},
-		{nativeproof.TransitionLocation{Image: true, Offset: boolC}, 1, true, 0},
+		{nativeproof.ImageAddress(global), 8, true, 7},
+		{nativeproof.ImageAddress(boolB), 1, true, 1},
+		{nativeproof.ImageAddress(boolC), 1, true, 0},
 	}
 	if local == "materialized" {
 		text = `var G uint64;var B,C bool;func Stop(p *uint64){if *p!=13{panic(1)}};func F(){G=7;B=true;C=false;var x uint64;x=13;Stop(&x)}`
-		ops = append(ops, storageFunctionOperation{nativeproof.TransitionLocation{Offset: -16}, 8, true, 13})
+		ops = append(ops, storageFunctionOperation{nativeproof.StackOffset(-16), 8, true, 13})
 	} else if local == "eliminated" {
 		text = `var G uint64;var B,C bool;func Stop(p *float64){if *p!=0{panic(1)}};func F(){G=7;B=true;C=false;var x float64;Stop(&x)}`
 	} else if local == "argument" {
@@ -141,7 +141,7 @@ func newRootedGlobalFixture(t testing.TB, boolean, local string) rootedGlobalFix
 		rho.bindings = append(rho.bindings, storageBinding{object: regionObject{kind: regionGlobal, site: source.prog.Roots["F"].Pkg.Members[name].(*ssa.Global)}, base: ops[i].location})
 	}
 	if local == "materialized" {
-		rho.bindings = append(rho.bindings, storageBinding{object: storageFunctionLocal(t, completed), base: nativeproof.TransitionLocation{Offset: -16}})
+		rho.bindings = append(rho.bindings, storageBinding{object: storageFunctionLocal(t, completed), base: nativeproof.StackOffset(-16)})
 	}
 	var arguments []globalFunctionArgument
 	if local == "argument" {
@@ -250,10 +250,14 @@ func TestRootedGlobalApplicationCurrentTypedInputs(t *testing.T) {
 				}
 				if local == "materialized" {
 					footprint, ok := p.layout.objectFootprint(storageFunctionLocal(t, p.source))
-					if !ok || footprint.Image || footprint.Bytes.Start != -16 {
+					if !ok || footprint.Bytes != storageTestExtent(t, p.layout.geometry, nativeproof.StackOffset(-16), 8) {
 						t.Fatal("body-local layout was replaced by root coordinates")
 					}
-					actual, err := storageNativeWord(t.Context(), builder, bound.Successor.Memory, nativeproof.TransitionLocation{Offset: footprint.Bytes.Start + bound.StackShift}, 8)
+					mapped, err := bound.Geometry.ResolveExtent(t.Context(), footprint.Bytes)
+					if err != nil {
+						t.Fatal(err)
+					}
+					actual, err := storageNativeWord(t.Context(), builder, bound.Successor.Memory, mapped, 8)
 					if err != nil {
 						t.Fatal(err)
 					}

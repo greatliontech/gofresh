@@ -14,47 +14,36 @@ import (
 // by the operand relation. The cut is unexecuted: this resolution grants neither
 // access permission nor instruction semantics. Register provenance comes from
 // the checked current state, not from numerically address-shaped scalar bits.
-func storageBoundaryLocation(bound nativeproof.TransitionBound, memory x86asm.Mem) (nativeproof.TransitionLocation, bool) {
-	if memory.Index != 0 || memory.Segment != 0 {
-		return nativeproof.TransitionLocation{}, false
+func storageBoundaryLocation(ctx context.Context, bound nativeproof.TransitionBound, memory x86asm.Mem, width int64) (nativeproof.TransitionExtent, bool) {
+	if memory.Index != 0 || memory.Segment != 0 && memory.Segment != x86asm.FS {
+		return nativeproof.TransitionExtent{}, false
+	}
+	if memory.Segment == x86asm.FS {
+		if memory.Base != 0 {
+			return nativeproof.TransitionExtent{}, false
+		}
+		extent, err := bound.Geometry.ResolvePointer(ctx, bound.Thread.FS.Pointer, memory.Disp, width)
+		return extent, err == nil
 	}
 	if memory.Base == x86asm.RIP {
 		pc := bound.Boundary.PC
 		size := uint64(len(bound.Boundary.Bytes))
 		if pc >= 1<<47 || size > (1<<47)-pc {
-			return nativeproof.TransitionLocation{}, false
+			return nativeproof.TransitionExtent{}, false
 		}
-		return storageOffset(nativeproof.TransitionLocation{Image: true, Offset: int64(pc + size)}, memory.Disp)
-	}
-	register, offset, width, ok := nativeproof.RegisterAlias(memory.Base)
-	if !ok || offset != 0 || width != 64 {
-		return nativeproof.TransitionLocation{}, false
-	}
-	switch pointer := bound.Registers[register].Pointer.(type) {
-	case nativeproof.ImagePointer:
-		if pointer.Address >= 1<<47 {
-			return nativeproof.TransitionLocation{}, false
+		address := int64(pc + size)
+		if memory.Disp > 0 && address > math.MaxInt64-memory.Disp || memory.Disp < 0 && address < math.MinInt64-memory.Disp {
+			return nativeproof.TransitionExtent{}, false
 		}
-		return storageOffset(nativeproof.TransitionLocation{Image: true, Offset: int64(pointer.Address)}, memory.Disp)
-	case nativeproof.OriginPointer:
-		if pointer.Origin != bound.Origin {
-			return nativeproof.TransitionLocation{}, false
-		}
-		return storageOffset(nativeproof.TransitionLocation{Offset: pointer.Offset}, memory.Disp)
-	default:
-		return nativeproof.TransitionLocation{}, false
+		extent, err := bound.Geometry.ResolveStorage(ctx, nativeproof.ImageAddress(address+memory.Disp), width)
+		return extent, err == nil
 	}
-}
-
-func storageOffset(base nativeproof.TransitionLocation, delta int64) (nativeproof.TransitionLocation, bool) {
-	if delta > 0 && base.Offset > math.MaxInt64-delta || delta < 0 && base.Offset < math.MinInt64-delta {
-		return nativeproof.TransitionLocation{}, false
+	register, offset, registerWidth, ok := nativeproof.RegisterAlias(memory.Base)
+	if !ok || offset != 0 || registerWidth != 64 {
+		return nativeproof.TransitionExtent{}, false
 	}
-	base.Offset += delta
-	if base.Image && (base.Offset < 0 || base.Offset >= 1<<47) {
-		return nativeproof.TransitionLocation{}, false
-	}
-	return base, true
+	extent, err := bound.Geometry.ResolvePointer(ctx, bound.Registers[register].Pointer, memory.Disp, width)
+	return extent, err == nil
 }
 
 // checkStorageOperandBoundary checks actual operands at two owned, unexecuted
@@ -121,11 +110,11 @@ func checkStorageOperandBoundary(ctx context.Context, source *sourceOperandPrefi
 	default:
 		return fail("unsupported actual operand boundary")
 	}
-	if instruction.Mode != 64 || instruction.AddrSize != 64 || instruction.Args[2] != nil || instruction.Args[3] != nil || int64(instruction.MemBytes) != footprint.Bytes.End-footprint.Bytes.Start {
+	if instruction.Mode != 64 || instruction.AddrSize != 64 || instruction.Args[2] != nil || instruction.Args[3] != nil || int64(instruction.MemBytes) != footprint.Bytes.Width() {
 		return fail("native operand width or address mode differs")
 	}
-	location, resolved := storageBoundaryLocation(bound, memory)
-	if !resolved || location.Image != footprint.Image || location.Offset != footprint.Bytes.Start {
+	location, resolved := storageBoundaryLocation(ctx, bound, memory, int64(instruction.MemBytes))
+	if !resolved || location != footprint.Bytes {
 		return fail("native operand has another storage origin or subobject")
 	}
 	if instruction.Op == x86asm.CMPXCHG {

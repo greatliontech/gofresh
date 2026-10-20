@@ -90,7 +90,7 @@ func checkGlobalOperandCorrespondence(ctx context.Context, source computationSou
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	layout, err := checkStorageAuthority(ctx, prefix, b, rho, storageProtectedFootprints(b))
+	layout, err := checkStorageAuthority(ctx, prefix, b, rho, storageProtectedFootprints(ctx, b))
 	if err != nil {
 		return nil, err
 	}
