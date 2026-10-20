@@ -235,7 +235,7 @@ func TestGlobalReferenceSameValueWriteRejectsUnchangedInline(t *testing.T) {
 			t.Fatal("valid edited reference failed application:", err)
 		}
 		wantResult, wantValue := []bool{first, second}[index], []uint64{middle, final}[index]
-		wantAccesses := []assemblyReferenceAccess{{false, true, args[0]}, {true, true, wantValue}, {false, false, wantValue}, {true, false, wantValue}}
+		wantAccesses := []assemblyReferenceAccess{{false, true, args[0], 8}, {true, true, wantValue, 8}, {false, false, wantValue, 8}, {true, false, wantValue, 8}}
 		if withWrite.Value != ordinary.Value || assemblyReferenceBool(t, withWrite.Result) != assemblyReferenceBool(t, ordinary.Result) || withWrite.Value != wantValue || assemblyReferenceBool(t, withWrite.Result) != wantResult || !slices.Equal(withWrite.Accesses, wantAccesses) {
 			t.Fatalf("phase %d did not preserve scalar results and retain the additional ordinary write: normal=%+v edited=%+v", index, ordinary, withWrite)
 		}
@@ -273,11 +273,11 @@ func TestGlobalReferenceSameValueWriteRejectsUnchangedInline(t *testing.T) {
 				if !exact {
 					t.Fatal("reference effect lost its exact typed value")
 				}
-				fromCall = append(fromCall, assemblyReferenceAccess{access.write, access.locked, value})
+				fromCall = append(fromCall, assemblyReferenceAccess{access.write, access.locked, value, 8})
 			}
 		}
 		value := []uint64{middle, final}[index]
-		if !slices.Equal(fromCall, []assemblyReferenceAccess{{false, true, current}, {true, true, value}, {false, false, value}, {true, false, value}}) {
+		if !slices.Equal(fromCall, []assemblyReferenceAccess{{false, true, current, 8}, {true, true, value, 8}, {false, false, value, 8}, {true, false, value, 8}}) {
 			t.Fatalf("ordinary reference accesses were dropped during exact-call substitution: %+v", fromCall)
 		}
 		before, ok := currentNative.BoundFor(native.image)

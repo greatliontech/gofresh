@@ -23,6 +23,25 @@ type storageFunctionOperation struct {
 	value    uint64
 }
 
+// Inspect actual arguments in an authenticated boundary's checked state. This
+// returns test data, not a call receipt or a new continuation capability.
+func storageBoundaryOperands(t testing.TB, prefix *sourceEffectPrefix) []regionValue {
+	t.Helper()
+	packet := prefix.checkedPacket()
+	if packet == nil || len(packet.observations) != 1 {
+		t.Fatal("missing authenticated source boundary state")
+	}
+	call, ok := prefix.boundary.(*ssa.Call)
+	if !ok {
+		t.Fatal("fixture boundary is not an actual call")
+	}
+	var values []regionValue
+	for _, operand := range call.Call.Args {
+		values = append(values, prefix.checker.value(packet.observations[0].state, operand))
+	}
+	return values
+}
+
 func storageFunctionNative(t testing.TB, operations []storageFunctionOperation, domain nativeproof.OriginDomain, configure ...func(*nativeproof.TransitionInterface)) (globalNativeFixture, nativeproof.TransitionReturnCertificate) {
 	t.Helper()
 	const base = uint64(0x401000)
@@ -402,7 +421,7 @@ func TestStorageFunctionCurrentObjectAcrossCuts(t *testing.T) {
 	var second *ssa.Call
 	for _, block := range root.Blocks {
 		for _, instruction := range block.Instrs {
-			if call, ok := instruction.(*ssa.Call); ok && call.Call.StaticCallee() != nil && call != first.prior.call {
+			if call, ok := instruction.(*ssa.Call); ok && call.Call.StaticCallee() != nil && call != first.prior.boundary {
 				second = call
 			}
 		}
@@ -416,7 +435,7 @@ func TestStorageFunctionCurrentObjectAcrossCuts(t *testing.T) {
 		t.Fatal(err)
 	}
 	object := storageFunctionLocal(t, completed)
-	if middle.operands[0].location.object != object || first.prior.operands[0].location.object != object {
+	if middle.operands[0].location.object != object || storageBoundaryOperands(t, first.prior)[0].location.object != object {
 		t.Fatal("source allocation was reset at a cut")
 	}
 	base := nativeproof.TransitionLocation{Offset: -16}
@@ -702,7 +721,7 @@ func TestStorageFunctionEliminatedAccessPreservesWritePreference(t *testing.T) {
 		t.Fatal("fixture lost its actual source calls")
 	}
 	object := calls[1].proof.arguments[0].location.object
-	if object == completed.prior.operands[0].location.object {
+	if object == storageBoundaryOperands(t, completed.prior)[0].location.object {
 		t.Fatal("fixture does not have distinct represented and eliminated locals")
 	}
 	base := nativeproof.TransitionLocation{Offset: -16}
@@ -860,7 +879,7 @@ TEXT ·Put(SB),NOSPLIT,$0-8
 		t.Fatal(err)
 	}
 	outcome, err := reference.evaluate(t.Context(), 3)
-	if err != nil || len(outcome.Accesses) != 1 || outcome.Accesses[0] != (assemblyReferenceAccess{Write: true, Value: 0}) || len(outcome.Atomics) != 0 {
+	if err != nil || len(outcome.Accesses) != 1 || outcome.Accesses[0] != (assemblyReferenceAccess{Write: true, Value: 0, Width: 8}) || len(outcome.Atomics) != 0 {
 		t.Fatalf("selected ordinary write reference was not established: %+v %v", outcome, err)
 	}
 	g := nativeproof.TransitionLocation{Image: true, Offset: 0x700008}
@@ -937,10 +956,10 @@ TEXT ·Put(SB),NOSPLIT,$0-8
 func TestStorageFunctionKnownReadDefersAmbiguousInitialization(t *testing.T) {
 	source, completed := storageFunctionSource(t, `func Keep(*uint32){};func F(){var x,y uint32;y=7;if y!=7{panic(1)};x=0;Keep(&x);Keep(&y)}`)
 	calls := completed.region.packet.trace.calls
-	if len(calls) != 2 || len(completed.prior.operands) != 1 || len(calls[1].proof.arguments) != 1 {
+	if len(calls) != 2 || len(storageBoundaryOperands(t, completed.prior)) != 1 || len(calls[1].proof.arguments) != 1 {
 		t.Fatal("fixture lost its actual local arguments")
 	}
-	xObject := completed.prior.operands[0].location.object
+	xObject := storageBoundaryOperands(t, completed.prior)[0].location.object
 	yObject := calls[1].proof.arguments[0].location.object
 	if xObject == yObject {
 		t.Fatal("fixture locals alias")
@@ -1011,7 +1030,7 @@ func storageFunctionReadChoices(t testing.TB, variant string) storageFunctionRea
 	if len(calls) != 2 {
 		t.Fatal("fixture lost its checked local calls")
 	}
-	xObject := completed.prior.operands[0].location.object
+	xObject := storageBoundaryOperands(t, completed.prior)[0].location.object
 	yObject := calls[1].proof.arguments[0].location.object
 	x := nativeproof.TransitionLocation{Offset: -16}
 	y := nativeproof.TransitionLocation{Offset: -24}
@@ -1243,7 +1262,7 @@ func TestStorageFunctionReadChoiceFailureClasses(t *testing.T) {
 func TestStorageFunctionEliminatesUnmaterializedSourceRead(t *testing.T) {
 	source, completed := storageFunctionSource(t, `func Read(p *uint32)uint32{return *p};func Keep(*uint32){};func F(){var x uint32;if Read(&x)!=0 {panic(1)};x=7;Keep(&x)}`)
 	base := nativeproof.TransitionLocation{Offset: -16}
-	object := completed.prior.operands[0].location.object
+	object := storageBoundaryOperands(t, completed.prior)[0].location.object
 	for _, variant := range []string{"eliminated", "materialized", "early-read", "missing-write", "wrong-write"} {
 		t.Run(variant, func(t *testing.T) {
 			write := storageFunctionOperation{base, 4, true, 7}
@@ -1296,7 +1315,11 @@ func TestStorageFunctionEliminatesUnmaterializedSourceRead(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				operand, err := checkGlobalOperandCorrespondence(t.Context(), source, source.prog.Roots["F"], completed.prior.call, fixture.image, fixture.entry, actual.PC, completed.prior, prefix, rho)
+				call := completed.prior.boundary.(*ssa.Call)
+				// Obtain a real call-operand receipt for this separate operand
+				// judgment; the completed return retains only its common prefix.
+				callPrefix := globalPrefix(t, source, call)
+				operand, err := checkGlobalOperandCorrespondence(t.Context(), source, source.prog.Roots["F"], call, fixture.image, fixture.entry, actual.PC, callPrefix, prefix, rho)
 				if variant == "materialized" {
 					if err != nil || operand == nil {
 						t.Fatalf("actual initialized read boundary refused: %v", err)
@@ -1322,7 +1345,7 @@ func TestStorageFunctionEliminatesUnmaterializedSourceRead(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if proof.accesses[0].instruction.Parent() != completed.prior.call.Call.StaticCallee() || proof.accesses[0].invocation == (regionInvocation{}) {
+			if proof.accesses[0].instruction.Parent() != completed.prior.boundary.(*ssa.Call).Call.StaticCallee() || proof.accesses[0].invocation == (regionInvocation{}) {
 				t.Fatal("source read lacks actual checked child invocation")
 			}
 			if variant == "eliminated" {
@@ -1343,7 +1366,7 @@ func TestStorageFunctionEliminatedReadDoesNotMaterialize(t *testing.T) {
 	ops := []storageFunctionOperation{{g, 4, true, 7}, {x, 4, true, 0}, {x, 4, false, 0}, {x, 4, true, 7}}
 	fixture, native := storageFunctionNative(t, ops, nativeproof.OriginDomain{})
 	rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{
-		{object: completed.prior.operands[0].location.object, base: x},
+		{object: storageBoundaryOperands(t, completed.prior)[0].location.object, base: x},
 		{object: regionObject{kind: regionGlobal, site: source.prog.Roots["F"].Pkg.Members["G"].(*ssa.Global)}, base: g},
 	}}
 	proof, err := checkGlobalFunctionCorrespondence(t.Context(), source, source.prog.Roots["F"], fixture.image, fixture.entry, completed, native, rho, nil)
@@ -1358,28 +1381,49 @@ func TestStorageFunctionEliminatedReadDoesNotMaterialize(t *testing.T) {
 func TestStorageFunctionLocalReadDoesNotEraseAtomic(t *testing.T) {
 	source, completed := storageFunctionSource(t, `func Read(p *uint32)uint32{return *p};func Keep(*uint32){};func F(){var x uint32;if Read(&x)!=0 {panic(1)};x=7;Keep(&x)}`)
 	const pc = uint64(0x401000)
-	code := []byte{0xc3, 0x48, 0x83, 0xec, 0x40,
-		0xb8, 0, 0, 0, 0, 0xba, 7, 0, 0, 0,
-		0xf0, 0x0f, 0xb1, 0x54, 0x24, 48, // actual LOCK CMPXCHG32 at the local
-		0xb8, 7, 0, 0, 0, 0x89, 0x44, 0x24, 48,
-		0x48, 0x83, 0xc4, 0x40}
-	cut := pc + uint64(len(code))
-	code = append(code, 0xc3)
-	fixture, native := storageFunctionNativeProgram(t, code, cut, nativeproof.OriginDomain{}, func(face *nativeproof.TransitionInterface) {
-		face.Conditions.LockedMemory = nativeproof.LockedMemoryModel
-	})
-	bound, _ := native.BoundFor(fixture.image)
-	if len(bound.Prefix.PrimitiveEffects) != 1 {
-		t.Fatal("fixture lost its actual atomic primitive")
-	}
-	atomic, ok := bound.Prefix.PrimitiveEffects[0].(nativeproof.LockedCompareExchangeEffect)
-	if !ok || atomic.Width != 4 {
-		t.Fatal("fixture did not execute the selected narrow native atomic")
-	}
-	rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: completed.prior.operands[0].location.object, base: nativeproof.TransitionLocation{Offset: -16}}}}
-	proof, err := checkGlobalFunctionCorrespondence(t.Context(), source, source.prog.Roots["F"], fixture.image, fixture.entry, completed, native, rho, nil)
-	if proof != nil || err == nil || !strings.Contains(err.Error(), "unknown primitive cannot be projected away") {
-		t.Fatalf("local read elimination erased an unsupported actual atomic: %v", err)
+	for _, atomic := range []bool{false, true} {
+		t.Run(fmt.Sprint(atomic), func(t *testing.T) {
+			// Both variants materialize zero, then read zero and write seven.
+			// Only the indivisible nature of those last two accesses differs.
+			code := []byte{0xc3, 0x48, 0x83, 0xec, 0x40,
+				0xb8, 0, 0, 0, 0, 0x89, 0x44, 0x24, 48,
+				0xba, 7, 0, 0, 0}
+			if atomic {
+				code = append(code, 0xf0, 0x0f, 0xb1, 0x54, 0x24, 48)
+			} else {
+				code = append(code, 0x8b, 0x44, 0x24, 48, 0x89, 0x54, 0x24, 48)
+			}
+			code = append(code, 0x48, 0x83, 0xc4, 0x40)
+			cut := pc + uint64(len(code))
+			code = append(code, 0xc3)
+			fixture, native := storageFunctionNativeProgram(t, code, cut, nativeproof.OriginDomain{}, func(face *nativeproof.TransitionInterface) {
+				face.Conditions.LockedMemory = nativeproof.LockedMemoryModel
+			})
+			bound, _ := native.BoundFor(fixture.image)
+			if len(bound.Accesses) != 4 {
+				t.Fatal("fixture lost materialization, read/write or actual return")
+			}
+			if atomic {
+				if len(bound.Prefix.PrimitiveEffects) != 1 {
+					t.Fatal("fixture lost its actual atomic primitive")
+				}
+				effect, ok := bound.Prefix.PrimitiveEffects[0].(nativeproof.LockedCompareExchangeEffect)
+				if !ok || effect.Width != 4 || effect.ReadAccess != 1 || effect.WriteAccess != 2 {
+					t.Fatal("fixture did not execute the intended narrow atomic group")
+				}
+			} else if len(bound.Prefix.PrimitiveEffects) != 0 {
+				t.Fatal("ordinary control acquired an atomic")
+			}
+			rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: storageBoundaryOperands(t, completed.prior)[0].location.object, base: nativeproof.TransitionLocation{Offset: -16}}}}
+			proof, err := checkGlobalFunctionCorrespondence(t.Context(), source, source.prog.Roots["F"], fixture.image, fixture.entry, completed, native, rho, nil)
+			if !atomic {
+				if err != nil || proof == nil || len(proof.materialized) != 1 || len(proof.matched) != 2 || len(proof.eliminated) != 0 {
+					t.Fatalf("ordinary read/write control refused: %v", err)
+				}
+			} else if proof != nil || err == nil || !strings.Contains(err.Error(), "ordered source/native effects differ") {
+				t.Fatalf("ordinary source accesses erased an actual atomic group: %v", err)
+			}
+		})
 	}
 }
 
@@ -1393,7 +1437,7 @@ func TestStorageFunctionLocalReadIsolation(t *testing.T) {
 			source, completed := storageFunctionSource(t, `func Read(p *uint32)uint32{return *p};`+keep+`;func F(){var x uint32;if Read(&x)!=0 {panic(1)};x=7;Keep(&x)}`)
 			base := nativeproof.TransitionLocation{Offset: -16}
 			fixture, native := storageFunctionNative(t, []storageFunctionOperation{{base, 4, true, 7}}, nativeproof.OriginDomain{})
-			object := completed.prior.operands[0].location.object
+			object := storageBoundaryOperands(t, completed.prior)[0].location.object
 			rho := storageRepresentation{source: source.prog, image: fixture.image, bindings: []storageBinding{{object: object, base: base}}}
 			f := storageFunctionReadChoiceFixture{source, completed, fixture, native, rho}
 			account, _, _ := storageFunctionSearchAccount(t, f)

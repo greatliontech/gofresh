@@ -15,6 +15,7 @@ type storageSourceEndpoint interface {
 }
 
 func (p *sourceOperandPrefix) storagePacket() *checkedRegion    { return p.checkedPacket() }
+func (p *sourceEffectPrefix) storagePacket() *checkedRegion     { return p.checkedPacket() }
 func (p *sourceReturnCompletion) storagePacket() *checkedRegion { return p.checkedPacket() }
 
 // storageProtectedFootprints retains control slots over the entire native scope,
@@ -49,11 +50,15 @@ func checkStorageAuthority(ctx context.Context, endpoint storageSourceEndpoint, 
 	var owner *program
 	switch source := endpoint.(type) {
 	case *sourceOperandPrefix:
-		if source != nil && source.binder != nil {
+		if source.checkedPacket() != nil {
+			owner = source.binder.source.prog
+		}
+	case *sourceEffectPrefix:
+		if source.checkedPacket() != nil {
 			owner = source.binder.source.prog
 		}
 	case *sourceReturnCompletion:
-		if source != nil && source.prior != nil && source.prior.binder != nil {
+		if source.checkedPacket() != nil {
 			owner = source.prior.binder.source.prog
 		}
 	default:

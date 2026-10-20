@@ -77,14 +77,14 @@ func assemblyWordBody(t testing.TB, kind, register uint8) (string, assemblyRefer
 func assertAssemblyWordResult(t testing.TB, result assemblyReferenceResult, kind uint8, current, argument uint64) {
 	t.Helper()
 	wantValue, wantResult := current, current
-	accesses := []assemblyReferenceAccess{{false, false, current}}
+	accesses := []assemblyReferenceAccess{{false, false, current, 8}}
 	if kind != 0 {
 		wantValue = argument
 		if kind == 2 {
 			wantValue = current + argument
 			wantResult = wantValue
 		}
-		accesses = []assemblyReferenceAccess{{false, true, current}, {true, true, wantValue}}
+		accesses = []assemblyReferenceAccess{{false, true, current, 8}, {true, true, wantValue, 8}}
 	}
 	if result.Value != wantValue || !slices.Equal(result.Accesses, accesses) {
 		t.Fatalf("kind %d: memory/effects %+v, want value %#x and %v", kind, result, wantValue, accesses)
@@ -384,8 +384,8 @@ RET
 `
 	relation := assemblyWordRelation(t, body, frame)
 	got := assemblyReferenceUnitApply(t, relation, 7, 3)
-	want := []assemblyReferenceAtomic{{Statement: 3, Kind: x86asm.XADD, ReadAccess: 0, WriteAccess: 1}, {Statement: 5, Kind: x86asm.XCHG, ReadAccess: 2, WriteAccess: 3}}
-	if !slices.Equal(got.Atomics, want) || !slices.Equal(got.Accesses, []assemblyReferenceAccess{{false, true, 7}, {true, true, 10}, {false, true, 10}, {true, true, 3}}) {
+	want := []assemblyReferenceAtomic{{Statement: 3, Kind: x86asm.XADD, ReadAccess: 0, WriteAccess: 1, Width: 8}, {Statement: 5, Kind: x86asm.XCHG, ReadAccess: 2, WriteAccess: 3, Width: 8}}
+	if !slices.Equal(got.Atomics, want) || !slices.Equal(got.Accesses, []assemblyReferenceAccess{{false, true, 7, 8}, {true, true, 10, 8}, {false, true, 10, 8}, {true, true, 3, 8}}) {
 		t.Fatalf("mixed reference lost occurrence order or indivisible pairs: %+v", got)
 	}
 	got.Atomics[0].Kind = x86asm.NOP

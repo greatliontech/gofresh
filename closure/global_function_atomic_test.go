@@ -9,19 +9,24 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-func TestGlobalFunctionAtomicRejectsNarrowNativeCAS(t *testing.T) {
-	// Source correspondence still consumes the uint64 assembly relation. A
-	// native four-byte CAS has different memory and accumulator semantics even
-	// when all currently known scalar values fit in uint32.
+func TestGlobalFunctionAtomicNativeWidths(t *testing.T) {
+	// Classification retains the exact width. Actual correspondence separately
+	// checks the typed source footprint, values and indivisible access group.
 	for _, width := range []int{0, 1, 4, 8, 16} {
 		e := nativeproof.LockedCompareExchangeEffect{Width: width}
-		_, accepted := globalFunctionNativeGroup(e)
-		if accepted != (width == 8) {
-			t.Fatalf("source64 correspondence admitted native width %d: %v", width, accepted)
+		group, accepted := globalFunctionNativeGroup(e)
+		if accepted != (width == 4 || width == 8) || accepted && (group.width != width || group.kind != x86asm.CMPXCHG) {
+			t.Fatalf("incorrect native CAS width classification %d: %v", width, accepted)
 		}
 	}
-	if _, accepted := globalFunctionNativeGroup(nativeproof.LockedLogicalEffect{Width: 1, Kind: x86asm.OR}); accepted {
-		t.Fatal("source64 correspondence admitted byte logical effect")
+	for _, width := range []int{0, 1, 4, 8} {
+		for _, kind := range []x86asm.Op{x86asm.AND, x86asm.OR, x86asm.XOR, x86asm.MOV} {
+			group, accepted := globalFunctionNativeGroup(nativeproof.LockedLogicalEffect{Width: width, Kind: kind})
+			want := width == 1 && (kind == x86asm.AND || kind == x86asm.OR)
+			if accepted != want || accepted && (group.width != width || group.kind != kind) {
+				t.Fatalf("incorrect native logical classification %s/%d: %v", kind, width, accepted)
+			}
+		}
 	}
 }
 

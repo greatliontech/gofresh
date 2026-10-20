@@ -6,8 +6,94 @@ import (
 	"testing"
 	"testing/quick"
 
+	br "github.com/greatliontech/gofresh/internal/bitrelation"
 	to "github.com/greatliontech/gofresh/internal/nativeproof/internal/transitionoracle"
 )
+
+func TestTransitionNarrowAccumulatorProvenance(t *testing.T) {
+	for _, outcome := range []string{"success", "failure", "unknown"} {
+		t.Run(outcome, func(t *testing.T) {
+			// RAX and the replacement originate in actual stack-pointer transfers.
+			// The memory pointer on each established arm is also a complete word.
+			prefix := "4889e2488d442408" // MOV RDX,RSP; LEA RAX,[RSP+8]
+			switch outcome {
+			case "success":
+				prefix += "48890424" // MOV [RSP],RAX
+			case "failure":
+				prefix += "488d4c240948890c24" // LEA RCX,[RSP+9]; MOV [RSP],RCX
+			}
+			before := hexBytes(t, prefix)
+			code := append(before, hexBytes(t, "f00fb11424488b0c24c3")...)
+			im := image(t, code)
+			face := stateFace(16, 0)
+			face.Words = nil
+			face.Conditions.LockedMemory = LockedMemoryModel
+			face.Origin.Min, face.Origin.Max = 0x123400000000, 0x123500000000
+			p, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(code)-1), TransitionLimits{}, TransitionOptions{Expansions: []TransitionExpansion{{PC: testEntry + uint64(len(before))}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry, err := ProposeTransition(t.Context(), im, testEntry+uint64(len(before)), TransitionLimits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			prior, err := CheckTransition(t.Context(), im, face, entry, TransitionLimits{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			incomingBound, _ := prior.Bound()
+			if incomingBound.Registers[RAX].Pointer != (OriginPointer{Origin: incomingBound.Origin, Offset: 8}) {
+				t.Fatal("fixture lacks actual incoming RAX pointer provenance")
+			}
+			c, err := CheckTransitionContinuation(t.Context(), prior, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, _ := c.Bound()
+			// The checker retains an unevaluated comparison predicate even for
+			// the equal-word fixture. Scalar success therefore preserves the
+			// pointer bits while retaining conservative pointer metadata.
+			if b.Registers[RAX].Pointer != nil || b.Registers[RCX].Pointer != nil {
+				t.Fatal("CAS32 accumulator/memory provenance", b.Registers[RAX].Pointer, b.Registers[RCX].Pointer)
+			}
+			if b.Registers[RDX].Pointer != (OriginPointer{Origin: b.Origin}) {
+				t.Fatal("fixture lost its actual incoming replacement pointer")
+			}
+			e := b.PrimitiveEffects[0].(LockedCompareExchangeEffect)
+			if e.Compare.Sort() != br.Bits(32) || e.Accumulator.Sort() != br.Bits(64) {
+				t.Fatal("CAS32 metadata widths")
+			}
+			for _, origin := range []uint64{face.Origin.Min, face.Origin.Min + 16, face.Origin.Max - 16} {
+				for _, incoming := range []uint64{origin + 8, origin + 9} {
+					values := map[br.Term]uint64{b.Origin: origin}
+					for _, cell := range b.InitialMemory {
+						values[cell.Value] = incoming >> uint(8*(cell.Offset%8)) & 255
+					}
+					now := incoming
+					if outcome == "success" {
+						now = origin + 8
+					} else if outcome == "failure" {
+						now = origin + 9
+					}
+					equal := uint32(now) == uint32(origin+8)
+					want := uint64(uint32(now))
+					if equal {
+						want = origin + 8
+					}
+					if (stateEval(t, e.Success, values) != 0) != equal || stateEval(t, e.Compare, values) != uint64(uint32(origin+8)) || stateEval(t, b.Registers[RAX].Value, values) != want {
+						t.Fatal("CAS32 must compare low origin bits and preserve full RAX only on success", outcome, origin, now)
+					}
+				}
+			}
+			for j, index := range []int{e.ReadAccess, e.WriteAccess} {
+				a := b.Accesses[index]
+				if a.ID != e.ID || a.PC != e.PC || a.Context != e.Context || a.Bytes != (RelativeSpan{0, 4}) || a.Kind != []AccessKind{FrameRead, FrameWrite}[j] || e.WriteAccess != e.ReadAccess+1 {
+					t.Fatal("CAS32 lost actual read/write occurrence")
+				}
+			}
+		})
+	}
+}
 
 func TestTransitionLocked32AccumulatorAndLanes(t *testing.T) {
 	for _, source := range []uint8{0, 2, 9} {

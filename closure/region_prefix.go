@@ -8,14 +8,46 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
-type sourceOperandPrefix struct {
+// sourceEffectPrefix owns an actual unexecuted instruction boundary and its
+// checked current state. It is independent of call-specific operand evidence.
+type sourceEffectPrefix struct {
 	region   *sourceRegion
+	prior    *sourceEffectPrefix
+	binder   *selectedSourceBinder
+	checker  *regionKernel
+	boundary ssa.Instruction
+	self     *sourceEffectPrefix
+}
+
+type sourceOperandPrefix struct {
+	*sourceEffectPrefix
 	callee   selectedSourceDeclaration
 	call     *ssa.Call
 	operands []regionValue
-	prior    *sourceOperandPrefix
-	binder   *selectedSourceBinder
-	checker  *regionKernel
+	self     *sourceOperandPrefix
+}
+
+// Completed returns deliberately do not implement this interface. Authenticate
+// the dynamic receipt before extracting its common continuation state.
+type sourceResumablePrefix interface {
+	resumableSourcePrefix()
+}
+
+func (*sourceEffectPrefix) resumableSourcePrefix()  {}
+func (*sourceOperandPrefix) resumableSourcePrefix() {}
+
+func checkedSourcePrefix(prefix sourceResumablePrefix) *sourceEffectPrefix {
+	switch p := prefix.(type) {
+	case *sourceOperandPrefix:
+		if p.checkedPacket() != nil {
+			return p.sourceEffectPrefix
+		}
+	case *sourceEffectPrefix:
+		if p.checkedPacket() != nil {
+			return p
+		}
+	}
+	return nil
 }
 
 func regionCallBoundaryOperand(call *ssa.Call) ssa.Value {
@@ -28,11 +60,18 @@ func regionCallBoundaryOperand(call *ssa.Call) ssa.Value {
 // The retained interpreter belongs to this exact checked source cut. A heap
 // projection or a checker for another cut is not a continuation capability.
 func (p *sourceOperandPrefix) checkedPacket() *checkedRegion {
-	if p == nil || p.checker == nil || p.region == nil || p.region.packet == nil || p.binder == nil || p.binder.source.prog == nil {
+	if p == nil || p.self != p || p.call == nil || p.sourceEffectPrefix.checkedPacket() == nil || p.boundary != p.call {
+		return nil
+	}
+	return p.region.packet
+}
+
+func (p *sourceEffectPrefix) checkedPacket() *checkedRegion {
+	if p == nil || p.self != p || p.checker == nil || p.region == nil || p.region.packet == nil || p.binder == nil || p.binder.source.prog == nil {
 		return nil
 	}
 	packet := checkedSourceEffectPacket(p.region, p.checker)
-	if packet == nil || p.checker.fullReturns || regionInstruction(packet.input.use.at) != p.call || p.binder.source.prog.Prog != packet.input.owner {
+	if packet == nil || p.checker.fullReturns || p.boundary == nil || regionInstruction(packet.input.use.at) != p.boundary || p.binder.source.prog.Prog != packet.input.owner {
 		return nil
 	}
 	return packet
@@ -61,10 +100,18 @@ func (p *sourceOperandPrefix) liveAllocation(object regionObject, tick func() er
 	return liveRegionAllocation(packet, p.checker, p.prior, object, tick)
 }
 
+func (p *sourceEffectPrefix) liveAllocation(object regionObject, tick func() error) (regionEffectAllocation, bool, error) {
+	packet := p.checkedPacket()
+	if packet == nil {
+		return regionEffectAllocation{}, false, nil
+	}
+	return liveRegionAllocation(packet, p.checker, p.prior, object, tick)
+}
+
 // Both operand cuts and completed returns use the same checked current heap and
 // occurrence chain. A completed return retains resident contents; this lookup
 // neither ends a lifetime nor supplies an escape or native-byte relation.
-func liveRegionAllocation(packet *checkedRegion, checker *regionKernel, prior *sourceOperandPrefix, object regionObject, tick func() error) (regionEffectAllocation, bool, error) {
+func liveRegionAllocation(packet *checkedRegion, checker *regionKernel, prior *sourceEffectPrefix, object regionObject, tick func() error) (regionEffectAllocation, bool, error) {
 	if object.kind != regionAllocation || !checker.singleton(object) {
 		return regionEffectAllocation{}, false, nil
 	}
@@ -182,7 +229,11 @@ func checkSourceOperandPrefix(ctx context.Context, source computationSource, roo
 	}
 	packet.usage = *meter
 	packet.usage.ctx = nil
-	return &sourceOperandPrefix{region: selected, callee: callee, call: call, operands: operands, binder: b, checker: k}, nil
+	core := &sourceEffectPrefix{region: selected, binder: b, checker: k, boundary: call}
+	core.self = core
+	prefix := &sourceOperandPrefix{sourceEffectPrefix: core, callee: callee, call: call, operands: operands}
+	prefix.self = prefix
+	return prefix, nil
 }
 
 // checkUnusedSourcePointer checks the actual whole-root operand inventory, not

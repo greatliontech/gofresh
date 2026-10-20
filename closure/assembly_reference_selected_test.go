@@ -1,6 +1,8 @@
 package closure
 
 import (
+	"go/constant"
+	"go/types"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -70,11 +72,11 @@ func TestAssemblyReferenceSelectedOwnedProviders(t *testing.T) {
 		assembly += body
 	}
 	goSource += "func Missing(ptr *uint64, old, replacement uint64) bool\nfunc LocalOnly(ptr *uint64, old, replacement uint64) bool\n"
-	goSource += "func DifferentWidth(ptr *uint32, old, replacement uint64) bool\nfunc DifferentResult(ptr *uint64, old, replacement uint64) uint8\n"
+	goSource += "func DifferentWidth(ptr *uint32, old, replacement uint64) bool\nfunc ByteResult(ptr *uint64, old, replacement uint64) uint8\n"
 	assembly += strings.Replace(assemblyReferenceUnitBody, "·Swap(SB)", "LocalOnly<>(SB)", 1)
-	for _, name := range []string{"DifferentWidth", "DifferentResult"} {
-		assembly += strings.Replace(assemblyReferenceUnitBody, "·Swap(SB)", "·"+name+"(SB)", 1)
-	}
+	assembly += strings.Replace(assemblyReferenceUnitBody, "·Swap(SB)", "·DifferentWidth(SB)", 1)
+	byteResult := strings.Replace(assemblyReferenceUnitBody, "·Swap(SB)", "·ByteResult(SB)", 1)
+	assembly += strings.Replace(byteResult, "SETEQ ret+24(FP)", "MOVB $128, ret+24(FP)", 1)
 	writeTree(t, dir, map[string]string{"go.mod": "module example.com/asmref\n\ngo 1.27\n", "p.go": goSource, "linkname.go": "package p\nimport _ \"unsafe\"\n//go:linknamestd Swap\n", "body_amd64.s": assembly, "operation.h": "#define RESULT SETEQ\n"})
 	source := assemblyReferenceSelectedSource(t, dir)
 	target := source.prog.Roots["Swap"]
@@ -107,10 +109,21 @@ func TestAssemblyReferenceSelectedOwnedProviders(t *testing.T) {
 	if original == nil {
 		t.Fatal("baseline reference missing")
 	}
-	for _, name := range []string{"Missing", "LocalOnly", "DifferentWidth", "DifferentResult"} {
+	for _, name := range []string{"Missing", "LocalOnly", "DifferentWidth"} {
 		if r, err := checkAssemblyReference(t.Context(), source, source.prog.Roots[name], packet, assemblyReferenceLimits{}); err == nil || r != nil {
 			t.Fatalf("%s acquired external provider", name)
 		}
+	}
+	byteReference, err := checkAssemblyReference(t.Context(), source, source.prog.Roots["ByteResult"], packet, assemblyReferenceLimits{})
+	if err != nil {
+		t.Fatal("selected integer-byte result refused:", err)
+	}
+	byteOutcome, err := byteReference.evaluate(t.Context(), 5, 5, 9)
+	if err != nil || byteOutcome.Value != 9 || byteOutcome.Result.kind != regionConstant || !types.Identical(byteOutcome.Result.typ, types.Typ[types.Uint8]) || byteOutcome.Result.scalar == nil || byteOutcome.Result.scalar.Kind() != constant.Int {
+		t.Fatalf("selected byte result was interpreted as Boolean: %+v %v", byteOutcome, err)
+	}
+	if bits, exact := constant.Uint64Val(byteOutcome.Result.scalar); !exact || bits != 128 {
+		t.Fatal("selected byte result lost its non-Boolean value")
 	}
 	for range 2 {
 		if err := original.boundTo(source, target); err != nil {
@@ -138,7 +151,7 @@ func TestAssemblyReferenceSelectedOwnedProviders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if assemblyReferenceBool(t, got.Result) || got.Value != 5 || !slices.Equal(got.Accesses, []assemblyReferenceAccess{{false, true, 5}, {true, true, 5}}) {
+	if assemblyReferenceBool(t, got.Result) || got.Value != 5 || !slices.Equal(got.Accesses, []assemblyReferenceAccess{{false, true, 5, 8}, {true, true, 5, 8}}) {
 		t.Fatal("failure writeback disappeared", got)
 	}
 	other := assemblyReferenceSelectedSource(t, dir)

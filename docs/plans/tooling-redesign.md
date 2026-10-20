@@ -604,7 +604,7 @@
                             storage footprints across operand, phase and complete
                             correspondence; keep represented locals distinct from
                             administrative private-frame projection.
-                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.12d Generalize selected
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.12d Generalize selected
                             assembly references and actual source-call application
                             to CAS32 and byte OR/AND: exact argument/result layout,
                             void-frame extent, narrow external storage and ordered

@@ -131,7 +131,7 @@ func TestTransferKernelIndependentArithmetic(t *testing.T) {
 	for _, width := range []int{32, 64} {
 		b := br.NewBuilder(3)
 		scope := br.NewScope()
-		a, _ := b.Input(br.Bits(width), scope, 0)
+		a, _ := b.Input(br.Bits(64), scope, 0)
 		current, _ := b.Input(br.Bits(width), scope, 1)
 		replacement, _ := b.Input(br.Bits(width), scope, 2)
 		k, err := NewTransferKernel(t.Context(), RelationLimits{})
@@ -153,9 +153,13 @@ func TestTransferKernelIndependentArithmetic(t *testing.T) {
 			conditions = append(conditions, v)
 		}
 		check := func(old, now, new uint64) bool {
+			incoming := old
 			mask, sign := ^uint64(0)>>(64-width), uint64(1)<<(width-1)
 			old, now, new = old&mask, now&mask, new&mask
-			values := map[br.Term]uint64{a: old, current: now, replacement: new}
+			values := map[br.Term]uint64{a: incoming, current: now, replacement: new}
+			if r.Accumulator.Sort() != br.Bits(64) || r.Compare.Sort() != br.Bits(width) || stateEval(t, r.Compare, values) != old {
+				t.Fatal("CMPXCHG accumulator/compare width or value differs")
+			}
 			z := (old - now) & mask
 			flags := [6]bool{old < now, z == 0, (old^now)&(old^z)&sign != 0, z&sign != 0, (old^now^z)&16 != 0, bits.OnesCount8(byte(z))%2 == 0}
 			for j, f := range []TransitionFlag{r.Flags.CF, r.Flags.ZF, r.Flags.OF, r.Flags.SF, r.Flags.AF, r.Flags.PF} {
@@ -165,7 +169,7 @@ func TestTransferKernelIndependentArithmetic(t *testing.T) {
 			}
 			wantMemory, wantAccumulator := now, now
 			if old == now {
-				wantMemory, wantAccumulator = new, old
+				wantMemory, wantAccumulator = new, incoming
 			}
 			if stateEval(t, r.Memory, values) != wantMemory || stateEval(t, r.Accumulator, values) != wantAccumulator {
 				t.Fatal("CMPXCHG arm differs")
@@ -202,7 +206,7 @@ func TestTransferKernelRefusesMissingAndExhaustedInputs(t *testing.T) {
 		}
 		return k
 	}
-	for _, inputs := range [][3]br.Term{{word, word, narrow}, {word, narrow, word}, {narrow, word, word}, {word, br.Term{}, word}, {truth, word, word}, {dword, word, dword}, {word, dword, dword}, {dword, dword, word}, {half, half, half}, {narrow, narrow, narrow}} {
+	for _, inputs := range [][3]br.Term{{word, word, narrow}, {word, narrow, word}, {narrow, word, word}, {word, br.Term{}, word}, {truth, word, word}, {dword, word, dword}, {dword, dword, dword}, {dword, dword, word}, {half, half, half}, {narrow, narrow, narrow}} {
 		r, err := newKernel().CompareExchange(inputs[0], inputs[1], inputs[2])
 		if err == nil || r != (CompareExchangeResult{}) {
 			t.Fatal("invalid typed RMW acquired result")
@@ -466,6 +470,9 @@ func TestTransitionAtomicActivationAndCumulativeResources(t *testing.T) {
 		op        x86asm.Op
 	}{
 		{"cmpxchg", "f0480fb1542408", x86asm.CMPXCHG},
+		{"cmpxchg32", "f00fb1542408", x86asm.CMPXCHG},
+		{"or8", "f008542408", x86asm.OR},
+		{"and8", "f020542408", x86asm.AND},
 		{"xchg", "4887542408", x86asm.XCHG},
 		{"xadd", "f0480fc1542408", x86asm.XADD},
 	} {
@@ -514,6 +521,12 @@ func TestTransitionAtomicActivationAndCumulativeResources(t *testing.T) {
 				var id TransitionOccurrenceID
 				var read, write int
 				switch tc.op {
+				case x86asm.OR, x86asm.AND:
+					e, ok := b.PrimitiveEffects[j].(LockedLogicalEffect)
+					if !ok || e.Kind != tc.op || e.Width != 1 {
+						t.Fatal("wrong byte logical primitive")
+					}
+					pc, activation, read, write, id = e.PC, e.Context, e.ReadAccess, e.WriteAccess, e.ID
 				case x86asm.CMPXCHG:
 					e, ok := b.PrimitiveEffects[j].(LockedCompareExchangeEffect)
 					if !ok {
@@ -521,6 +534,13 @@ func TestTransitionAtomicActivationAndCumulativeResources(t *testing.T) {
 					}
 					pc, activation, read, write = e.PC, e.Context, e.ReadAccess, e.WriteAccess
 					id = e.ID
+					width := 8
+					if tc.name == "cmpxchg32" {
+						width = 4
+					}
+					if e.Width != width || e.Compare.Sort() != br.Bits(width*8) || e.Accumulator.Sort() != br.Bits(64) {
+						t.Fatal("CMPXCHG operand/full-accumulator metadata widths differ")
+					}
 				case x86asm.XCHG:
 					e, ok := b.PrimitiveEffects[j].(LockedExchange64Effect)
 					if !ok {
@@ -672,11 +692,19 @@ func FuzzTransitionAtomicValues(f *testing.F) {
 	}
 	for kind := uint8(1); kind <= 2; kind++ {
 		for _, v := range []uint64{0, 15, 1<<63 - 1, 1 << 63, ^uint64(0)} {
-			f.Add(v, v, ^v, uint8(0), kind<<6|4, []byte{255, 128, 17, 0})
+			f.Add(v, v, ^v, uint8(0), kind<<5|4, []byte{255, 128, 17, 0})
 		}
 	}
 	for _, v := range []uint64{15, 1<<63 - 1, ^uint64(0)} {
-		f.Add(v, uint64(0), uint64(1), uint8(0), uint8(2<<6|4), []byte{})
+		f.Add(v, uint64(0), uint64(1), uint8(0), uint8(2<<5|4), []byte{})
+	}
+	for kind := uint8(3); kind < 8; kind++ {
+		for _, alias := range []uint8{0, 4, 9, 0x20, 0x40} {
+			// Narrow success and failure retain independent upper RAX bits;
+			// byte forms include AL, AH, extended registers and immediates.
+			f.Add(uint64(0x80000080), uint64(0xfedcba9880000080), uint64(0x0102807f), alias, kind<<5|4, []byte{})
+			f.Add(uint64(0xffffffff), uint64(0x12345678fffffffe), uint64(0xff), alias, kind<<5|5, []byte{})
+		}
 	}
 	f.Fuzz(func(t *testing.T, current, old, replacement uint64, alias, condition uint8, responses []byte) {
 		atomicPermissionProperty(t, condition>>6, alias, condition, byte(current), byte(old), int8(replacement))
@@ -696,8 +724,32 @@ func FuzzTransitionAtomicValues(f *testing.F) {
 		if phase&1 != 0 {
 			program = append(program, query)
 		}
-		rmwKind := int(condition>>6) % 3
-		program = append(program, to.Descriptor{Intent: to.Intent{Operation: []to.Operation{to.LockedCompareExchange, to.LockedExchange, to.LockedExchangeAdd}[rmwKind], Base: 4, Src: 2}, Encoding: to.Encoding{Form: []to.Form{to.LOCKCMPXCHG0FB1, to.XCHG87, to.LOCKXADD0FC1}[rmwKind], REX: 0x48, SIB: true}})
+		rmwKind := condition >> 5
+		rmw := to.Descriptor{Intent: to.Intent{Base: 4, Src: 2}, Encoding: to.Encoding{REX: 0x48, SIB: true}}
+		switch rmwKind {
+		case 0, 1, 2:
+			rmw.Intent.Operation = []to.Operation{to.LockedCompareExchange, to.LockedExchange, to.LockedExchangeAdd}[rmwKind]
+			rmw.Encoding.Form = []to.Form{to.LOCKCMPXCHG0FB1, to.XCHG87, to.LOCKXADD0FC1}[rmwKind]
+		case 3:
+			rmw.Intent.Operation, rmw.Intent.Width, rmw.Intent.Src = to.LockedCompareExchange, 32, alias%16
+			rmw.Encoding.Form, rmw.Encoding.REX = to.LOCKCMPXCHG0FB1, 0
+			if rmw.Intent.Src >= 8 {
+				rmw.Encoding.REX = 0x44
+			}
+		default:
+			rmw.Intent.Operation = []to.Operation{to.LockedOr, to.LockedAnd, to.LockedOrImmediate, to.LockedAndImmediate}[rmwKind-4]
+			rmw.Encoding.Form = []to.Form{to.LOCKOR08, to.LOCKAND20, to.LOCKOR80, to.LOCKAND80}[rmwKind-4]
+			rmw.Intent.Width, rmw.Encoding.REX = 8, 0
+			rmw.Intent.Src, rmw.Intent.HighSrc = alias%4, alias&4 != 0
+			if alias&8 != 0 {
+				rmw.Intent.Src, rmw.Intent.HighSrc, rmw.Encoding.REX = 8+alias%8, false, 0x44
+			}
+			if rmwKind >= 6 {
+				rmw.Intent.Src, rmw.Intent.HighSrc, rmw.Encoding.REX = 0, false, 0
+				rmw.Intent.Immediate = replacement & 255
+			}
+		}
+		program = append(program, rmw)
 		if phase&2 != 0 {
 			program = append(program, query)
 		}

@@ -215,16 +215,25 @@ func (k *regionKernel) effectOperands(state regionState, instruction ssa.Instruc
 	return nil
 }
 
-func (k *regionKernel) effectGlobal(pointer regionValue) (*ssa.Global, error) {
-	g, ok := pointer.location.object.site.(*ssa.Global)
-	if pointer.kind != regionPointer || pointer.location.object.kind != regionGlobal || len(pointer.location.path) != 0 || !ok || !k.owns(g) || !k.singleton(pointer.location.object) || !types.Identical(k.locationType(pointer.location), types.Typ[types.Uint64]) {
-		return nil, regionError("reference access lacks exact singleton uint64 provenance")
+func (k *regionKernel) referenceLocation(pointer regionValue, target types.Type) (types.Type, error) {
+	storage := k.locationType(pointer.location)
+	view, ok := pointer.typ.Underlying().(*types.Pointer)
+	if pointer.kind != regionPointer || !ok || !types.Identical(view.Elem(), target) || !regionAccessType(storage, target) || !k.singleton(pointer.location.object) {
+		return nil, regionError("reference access lacks exact singleton typed provenance")
 	}
-	object, ok := g.Object().(*types.Var)
-	if !ok || object.Pkg() != g.Pkg.Pkg || object.Parent() != g.Pkg.Pkg.Scope() || object.Parent().Lookup(object.Name()) != object {
-		return nil, regionError("global access has no exact selected typed declaration")
+	if pointer.location.object.kind == regionGlobal {
+		global := pointer.location.object.site.(*ssa.Global) // locationType established its owner and kind.
+		object, ok := global.Object().(*types.Var)
+		if !ok || object.Pkg() != global.Pkg.Pkg || object.Parent() != global.Pkg.Pkg.Scope() || object.Parent().Lookup(object.Name()) != object {
+			return nil, regionError("global access has no exact selected typed declaration")
+		}
 	}
-	return g, nil
+	for _, step := range pointer.location.path {
+		if step.summary {
+			return nil, regionError("reference access has an inexact subobject path")
+		}
+	}
+	return storage, nil
 }
 
 func (k *regionKernel) addEffectAccess(access regionEffectAccess) error {
@@ -248,15 +257,40 @@ type regionProofContext struct {
 
 func (c regionProofContext) Err() error { return c.meter.tick() }
 
-func regionReferenceWord(value regionValue) (uint64, bool) {
-	if value.kind != regionConstant || value.scalar == nil || value.scalar.Kind() != constant.Int || !assemblyReferenceWordType(value.typ) {
+// Width is the selected reference ABI's extent, not a host word size. Negative
+// language integers become precisely that extent's two's-complement bit pattern.
+func regionReferenceWord(value regionValue, width int) (uint64, bool) {
+	if value.typ == nil || value.kind != regionConstant || value.scalar == nil || value.scalar.Kind() != constant.Int || width < 1 || width > 8 {
 		return 0, false
 	}
-	if value.typ.Underlying().(*types.Basic).Kind() == types.Int64 {
-		n, ok := constant.Int64Val(value.scalar)
-		return uint64(n), ok
+	basic, ok := value.typ.Underlying().(*types.Basic)
+	if !ok || basic.Info()&types.IsInteger == 0 {
+		return 0, false
 	}
-	return constant.Uint64Val(value.scalar)
+	shift := 64 - width*8
+	mask := ^uint64(0) >> shift
+	if basic.Info()&types.IsUnsigned == 0 {
+		n, ok := constant.Int64Val(value.scalar)
+		return uint64(n) & mask, ok && int64(uint64(n)<<shift)>>shift == n
+	}
+	n, ok := constant.Uint64Val(value.scalar)
+	return n, ok && n <= mask
+}
+
+func regionReferenceValue(bits uint64, typ types.Type, width int) (regionValue, error) {
+	if typ == nil || width < 1 || width > 8 || bits > ^uint64(0)>>(64-width*8) {
+		return regionValue{}, regionError("reference value exceeds its selected extent")
+	}
+	basic, ok := typ.Underlying().(*types.Basic)
+	if !ok || basic.Info()&types.IsInteger == 0 {
+		return regionValue{}, regionError("reference value lacks a selected integer interpretation")
+	}
+	value := regionValue{typ: typ, kind: regionConstant, scalar: constant.MakeUint64(bits)}
+	if basic.Info()&types.IsUnsigned == 0 {
+		shift := 64 - width*8
+		value.scalar = constant.MakeInt64(int64(bits<<shift) >> shift)
+	}
+	return value, nil
 }
 
 func (k *regionKernel) callReference(call *ssa.Call, caller regionState, callable regionValue, actual []regionValue) ([]regionState, error) {
@@ -276,16 +310,18 @@ func (k *regionKernel) callReference(call *ssa.Call, caller regionState, callabl
 			return nil, err
 		}
 	}
-	if _, err := k.effectGlobal(actual[0]); err != nil {
+	frame := reference.checked.relation.frame
+	storageType, err := k.referenceLocation(actual[0], frame.targetType)
+	if err != nil {
 		return nil, err
 	}
-	current, cOK := regionUint64(readRegionLocation(caller, actual[0].location, types.Typ[types.Uint64]))
+	current, cOK := regionReferenceWord(readRegionLocation(caller, actual[0].location, frame.targetType), frame.targetWidth)
 	if !cOK {
 		return nil, regionError("reference scalar instantiation is not established")
 	}
 	words := make([]uint64, len(actual)-1)
 	for i, argument := range actual[1:] {
-		word, ok := regionReferenceWord(argument)
+		word, ok := regionReferenceWord(argument, frame.arguments[i+1].width)
 		if !ok {
 			return nil, regionError("reference scalar argument is not an established word")
 		}
@@ -351,11 +387,26 @@ func (k *regionKernel) callReference(call *ssa.Call, caller regionState, callabl
 	if err != nil {
 		return nil, err
 	}
-	after.memory[actual[0].location.object] = regionValue{typ: types.Typ[types.Uint64], kind: regionConstant, scalar: constant.MakeUint64(result.Value)}
+	value, err := regionReferenceValue(result.Value, frame.targetType, frame.targetWidth)
+	if err != nil {
+		return nil, err
+	}
+	stored, ok := regionViewValue(value, storageType)
+	if !ok {
+		return nil, regionError("reference result cannot return to canonical typed storage")
+	}
+	location := actual[0].location
+	after.memory[location.object] = regionReplace(after.memory[location.object], location.path, stored)
 	after.values[call] = result.Result
 	base := len(k.trace.accesses)
 	for _, access := range result.Accesses {
-		value := regionValue{typ: types.Typ[types.Uint64], kind: regionConstant, scalar: constant.MakeUint64(access.Value)}
+		if access.Width != frame.targetWidth {
+			return nil, regionError("reference access width differs from selected target")
+		}
+		value, err := regionReferenceValue(access.Value, frame.targetType, access.Width)
+		if err != nil {
+			return nil, err
+		}
 		if err := k.addEffectAccess(regionEffectAccess{instruction: call, invocation: k.invocation, location: actual[0].location, write: access.Write, value: value, locked: access.Locked}); err != nil {
 			return nil, err
 		}
@@ -367,11 +418,24 @@ func (k *regionKernel) callReference(call *ssa.Call, caller regionState, callabl
 		if len(k.trace.atomics) >= k.meter.limits.nodes {
 			return nil, regionError("atomic occurrence budget exhausted")
 		}
+		if atomic.Width != frame.targetWidth || atomic.ReadAccess < 0 || atomic.WriteAccess != atomic.ReadAccess+1 || atomic.WriteAccess >= len(result.Accesses) {
+			return nil, regionError("reference atomic lacks exact adjacent access ownership")
+		}
+		read, write := result.Accesses[atomic.ReadAccess], result.Accesses[atomic.WriteAccess]
+		if read.Write || !write.Write || !read.Locked || !write.Locked || read.Width != atomic.Width || write.Width != atomic.Width {
+			return nil, regionError("reference atomic access interpretation differs")
+		}
 		atomic.ReadAccess += base
 		atomic.WriteAccess += base
 		k.trace.atomics = append(k.trace.atomics, regionAtomicOccurrence{application: proof, atomic: atomic})
 	}
-	k.trace.calls = append(k.trace.calls, regionCallApplication{proof: proof, outcome: regionObservation{value: result.Result, state: after}})
+	// Retained call-time evidence must not share mutable maps with subsequent
+	// caller transfers. Values and aggregate paths retain their existing copy-on-write ownership.
+	outcome, err := k.clone(after)
+	if err != nil {
+		return nil, err
+	}
+	k.trace.calls = append(k.trace.calls, regionCallApplication{proof: proof, outcome: regionObservation{value: result.Result, state: outcome}})
 	k.session.used = append(k.session.used, proof)
 	return []regionState{after}, nil
 }
@@ -379,11 +443,11 @@ func (k *regionKernel) callReference(call *ssa.Call, caller regionState, callabl
 // checkSourceOperandContinuation starts with the opaque predecessor's checked
 // current state. No initial heap, expected result, root, selection or resource
 // allowance is supplied by the caller. The new call is an untrusted endpoint.
-func checkSourceOperandContinuation(ctx context.Context, predecessor *sourceOperandPrefix, call *ssa.Call, references map[*ssa.Function]*assemblyReference) (*sourceOperandPrefix, error) {
-	if call == nil || call.Call.IsInvoke() || call.Call.StaticCallee() == nil {
+func checkSourceOperandContinuation(ctx context.Context, predecessor sourceResumablePrefix, call *ssa.Call, references map[*ssa.Function]*assemblyReference) (*sourceOperandPrefix, error) {
+	if call == nil || call.Block() == nil || call.Call.IsInvoke() || call.Call.StaticCallee() == nil {
 		return nil, regionError("continuation endpoint is not an actual consuming call")
 	}
-	checked, err := checkSourceEffectContinuation(ctx, predecessor, call, references)
+	checked, err := checkSourceEffectContinuation(ctx, predecessor, regionUse{at: regionPoint{call.Block(), slices.Index(call.Block().Instrs, ssa.Instruction(call))}, operand: regionCallBoundaryOperand(call)}, false, references)
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +469,11 @@ func checkSourceOperandContinuation(ctx context.Context, predecessor *sourceOper
 	}
 	packet.usage = *checked.checker.meter
 	packet.usage.ctx = nil
-	return &sourceOperandPrefix{region: checked.region, callee: callee, call: call, operands: operands, prior: predecessor, binder: checked.binder, checker: checked.checker}, nil
+	core := &sourceEffectPrefix{region: checked.region, binder: checked.binder, checker: checked.checker, prior: checked.prior, boundary: call}
+	core.self = core
+	prefix := &sourceOperandPrefix{sourceEffectPrefix: core, callee: callee, call: call, operands: operands}
+	prefix.self = prefix
+	return prefix, nil
 }
 
 // sourceReturnCompletion includes execution of the selected source return. It
@@ -413,13 +481,14 @@ func checkSourceOperandContinuation(ctx context.Context, predecessor *sourceOper
 // Native return completion and actual caller applicability remain separate.
 type sourceReturnCompletion struct {
 	region   *sourceRegion
-	prior    *sourceOperandPrefix
+	prior    *sourceEffectPrefix
 	returned *ssa.Return
 	checker  *regionKernel
+	self     *sourceReturnCompletion
 }
 
 func (r *sourceReturnCompletion) checkedPacket() *checkedRegion {
-	if r == nil || r.prior.checkedPacket() == nil {
+	if r == nil || r.self != r || r.prior.checkedPacket() == nil {
 		return nil
 	}
 	packet := checkedSourceEffectPacket(r.region, r.checker)
@@ -437,49 +506,57 @@ func (r *sourceReturnCompletion) liveAllocation(object regionObject, tick func()
 	return liveRegionAllocation(packet, r.checker, r.prior, object, tick)
 }
 
-func checkSourceReturnContinuation(ctx context.Context, predecessor *sourceOperandPrefix, returned *ssa.Return, references map[*ssa.Function]*assemblyReference) (*sourceReturnCompletion, error) {
-	if returned == nil || len(returned.Results) != 0 {
+func checkSourceReturnContinuation(ctx context.Context, predecessor sourceResumablePrefix, returned *ssa.Return, references map[*ssa.Function]*assemblyReference) (*sourceReturnCompletion, error) {
+	if returned == nil || returned.Block() == nil || len(returned.Results) != 0 {
 		return nil, regionError("source return completion requires an actual void return")
 	}
-	checked, err := checkSourceEffectContinuation(ctx, predecessor, returned, references)
+	checked, err := checkSourceEffectContinuation(ctx, predecessor, regionUse{at: regionPoint{returned.Block(), slices.Index(returned.Block().Instrs, ssa.Instruction(returned))}}, true, references)
 	if err != nil {
 		return nil, err
 	}
-	return &sourceReturnCompletion{region: checked.region, prior: predecessor, returned: returned, checker: checked.checker}, nil
+	complete := &sourceReturnCompletion{region: checked.region, prior: checked.prior, returned: returned, checker: checked.checker}
+	complete.self = complete
+	return complete, nil
 }
 
+// checkSourceInstructionContinuation stops before an actual non-call,
+// non-return instruction. The kernel checks the supplied operand's membership
+// and owner; nil observations and invented expected values confer no authority.
+func checkSourceInstructionContinuation(ctx context.Context, predecessor sourceResumablePrefix, use regionUse, references map[*ssa.Function]*assemblyReference) (*sourceEffectPrefix, error) {
+	switch regionInstruction(use.at).(type) {
+	case nil, *ssa.Call, *ssa.Return:
+		return nil, regionError("instruction prefix requires an actual non-call, non-return boundary")
+	}
+	checked, err := checkSourceEffectContinuation(ctx, predecessor, use, false, references)
+	if err != nil {
+		return nil, err
+	}
+	prefix := &sourceEffectPrefix{region: checked.region, binder: checked.binder, checker: checked.checker, prior: checked.prior, boundary: regionInstruction(use.at)}
+	prefix.self = prefix
+	return prefix, nil
+}
+
+// The shared check result has no resumable authority. Its constructor turns it
+// into either an unexecuted prefix or a consumed return, never both.
 type sourceEffectContinuation struct {
 	region  *sourceRegion
 	binder  *selectedSourceBinder
 	checker *regionKernel
+	prior   *sourceEffectPrefix
 }
 
-// Both endpoint kinds share the same current-state, ownership and work account.
+// All endpoint kinds share the same current-state, ownership and work account.
 // Only a return endpoint enables complete-return checking; it is then consumed
 // by the interpreter rather than treated as an unexecuted operand observation.
-func checkSourceEffectContinuation(ctx context.Context, predecessor *sourceOperandPrefix, endpoint ssa.Instruction, references map[*ssa.Function]*assemblyReference) (*sourceEffectContinuation, error) {
-	if ctx == nil || predecessor.checkedPacket() == nil || endpoint == nil {
+func checkSourceEffectContinuation(ctx context.Context, receipt sourceResumablePrefix, use regionUse, completion bool, references map[*ssa.Function]*assemblyReference) (*sourceEffectContinuation, error) {
+	predecessor := checkedSourcePrefix(receipt)
+	endpoint := regionInstruction(use.at)
+	if ctx == nil || predecessor == nil || endpoint == nil {
 		return nil, regionError("missing source continuation predecessor or endpoint")
 	}
 	prior := predecessor.region.packet
-	if prior.rules != regionRules || len(prior.observations) != 1 || endpoint.Block() == nil || endpoint.Parent() != prior.input.root || endpoint == predecessor.call || !prior.usage.limits.valid() || len(references) > prior.usage.limits.nodes {
+	if prior.rules != regionRules || len(prior.observations) != 1 || endpoint.Block() == nil || endpoint.Parent() != prior.input.root || endpoint == predecessor.boundary || !prior.usage.limits.valid() || len(references) > prior.usage.limits.nodes {
 		return nil, regionError("source continuation scope or cumulative account differs")
-	}
-	var operand ssa.Value
-	completion := false
-	switch at := endpoint.(type) {
-	case *ssa.Call:
-		if at.Call.IsInvoke() || at.Call.StaticCallee() == nil {
-			return nil, regionError("unsupported call endpoint")
-		}
-		operand = regionCallBoundaryOperand(at)
-	case *ssa.Return:
-		if len(at.Results) != 0 {
-			return nil, regionError("unsupported return endpoint")
-		}
-		completion = true
-	default:
-		return nil, regionError("unsupported source endpoint")
 	}
 	ownedReferences := maps.Clone(references)
 	meter := prior.usage
@@ -500,7 +577,7 @@ func checkSourceEffectContinuation(ctx context.Context, predecessor *sourceOpera
 		return nil, regionError("continuation endpoint is not an actual instruction")
 	}
 	in := prior.input
-	in.entry, in.use = prior.input.use.at, regionUse{regionPoint{endpoint.Block(), at}, operand}
+	in.entry, in.use = prior.input.use.at, use
 	in.initial = prior.observations[0].state
 	in, _, err := regionCaptureMeter(in, nil, &meter)
 	if err != nil {
@@ -590,7 +667,7 @@ func checkSourceEffectContinuation(ctx context.Context, predecessor *sourceOpera
 	}
 	packet.usage = meter
 	packet.usage.ctx = nil
-	return &sourceEffectContinuation{region: selected, binder: binder, checker: checker}, nil
+	return &sourceEffectContinuation{region: selected, binder: binder, checker: checker, prior: predecessor}, nil
 }
 
 // The binder's selected objects and cached entries are immutable; its mutable

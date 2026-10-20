@@ -90,7 +90,7 @@ func checkStorageOperandBoundary(ctx context.Context, source *sourceOperandPrefi
 	}
 	instruction := bound.Boundary.Instruction
 	var memory x86asm.Mem
-	var scalarRegisters []x86asm.Reg
+	var scalarOperands []x86asm.Arg
 	switch instruction.Op {
 	case x86asm.CMPXCHG:
 		var valid bool
@@ -100,11 +100,10 @@ func checkStorageOperandBoundary(ctx context.Context, source *sourceOperandPrefi
 		}
 	case x86asm.MOV:
 		if destination, store := instruction.Args[0].(x86asm.Mem); store {
-			value, register := instruction.Args[1].(x86asm.Reg)
-			if !register || len(source.operands) != 2 {
+			if len(source.operands) != 2 {
 				return fail("store operand shape differs")
 			}
-			memory, scalarRegisters = destination, []x86asm.Reg{value}
+			memory, scalarOperands = destination, []x86asm.Arg{instruction.Args[1]}
 		} else {
 			var valid bool
 			memory, valid = instruction.Args[1].(x86asm.Mem)
@@ -112,6 +111,13 @@ func checkStorageOperandBoundary(ctx context.Context, source *sourceOperandPrefi
 				return fail("load operand shape differs")
 			}
 		}
+	case x86asm.AND, x86asm.OR:
+		var valid bool
+		memory, valid = instruction.Args[0].(x86asm.Mem)
+		if !valid || len(source.operands) != 2 || instruction.MemBytes != 1 {
+			return fail("byte logical operand shape differs")
+		}
+		scalarOperands = []x86asm.Arg{instruction.Args[1]}
 	default:
 		return fail("unsupported actual operand boundary")
 	}
@@ -131,20 +137,35 @@ func checkStorageOperandBoundary(ctx context.Context, source *sourceOperandPrefi
 		if instruction.MemBytes == 4 {
 			accumulator = x86asm.EAX
 		}
-		scalarRegisters = []x86asm.Reg{accumulator, replacement}
+		scalarOperands = []x86asm.Arg{accumulator, replacement}
 	}
 	relation := globalFunctionCorrespondence{antecedent: bound.CutGuard}
-	for index, register := range scalarRegisters {
+	for index, operand := range scalarOperands {
 		value, width, exact := storageScalarBits(source.operands[index+1], source.region.root.pkg.TypesSizes)
 		if !exact || width != instruction.MemBytes {
 			return fail("typed scalar width differs from actual native operand")
 		}
-		actual, err := native.RegisterValue(ctx, register)
+		var actual br.Term
+		var err error
+		switch argument := operand.(type) {
+		case x86asm.Reg:
+			actual, err = native.RegisterValue(ctx, argument)
+		case x86asm.Imm:
+			// Decoded signed immediates denote their operand-width bit pattern.
+			// This does not execute the boundary or supply a memory value.
+			bits := uint64(argument)
+			if width < 8 {
+				bits &= uint64(1)<<(width*8) - 1
+			}
+			actual, err = br.NewBuilder(1).Const(br.Bits(width*8), bits)
+		default:
+			return fail("scalar operand is not an actual register or immediate")
+		}
 		if err != nil {
 			return nil, err
 		}
 		if actual.Sort() != br.Bits(width*8) {
-			return fail("actual register operand has another width")
+			return fail("actual scalar operand has another width")
 		}
 		if err := relation.constant(ctx, actual, value); err != nil {
 			return nil, err

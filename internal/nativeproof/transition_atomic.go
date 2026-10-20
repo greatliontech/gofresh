@@ -49,34 +49,25 @@ func (m *transitionChecker) lockedCompareExchange(i operation, size uint8) error
 	readIndex := len(m.bound.Accesses)
 	current := m.load(off, width, FrameRead)
 	src, _ := register(i.Args[1].(x86asm.Reg))
-	compare, replacement := m.read(&m.state, alias{reg: int(RAX), width: width * 8}), m.read(&m.state, src)
-	r := m.valueBuilder.compareExchange(compare, current.Value, replacement)
+	replacement := m.read(&m.state, src)
+	r := m.valueBuilder.compareExchange(m.state.regs[RAX], current.Value, replacement)
 	if m.err != nil {
 		return m.err
 	}
-	// A merged pointer is valid only if both possible source provenances agree.
-	// Scalar equality never manufactures pointer provenance.
-	memoryPointer := sameTransitionPointer(m.pointers[src.reg], current.Pointer)
-	accumulatorPointer := sameTransitionPointer(m.pointers[RAX], current.Pointer)
-	if literalBool(r.Success, 1) {
-		memoryPointer, accumulatorPointer = m.pointers[src.reg], m.pointers[RAX]
-	} else if literalBool(r.Success, 0) {
-		memoryPointer, accumulatorPointer = current.Pointer, current.Pointer
-	}
-	if width == 4 {
-		// Success does not write EAX: the incoming upper half of RAX survives.
-		// Failure writes EAX and therefore clears the upper half.
-		r.Accumulator = m.ite(r.Success, m.state.regs[RAX], m.make(br.ZExt, br.Bits(64), 0, current.Value))
-		memoryPointer, accumulatorPointer = nil, nil
-		if literalBool(r.Success, 1) {
-			accumulatorPointer = m.pointers[RAX]
-		}
+	// The comparison remains symbolic; scalar equality supplies no outcome-
+	// specific provenance. Full-width results retain only common provenance.
+	// CAS32 drops memory and RAX provenance even when its scalar success arm
+	// preserves all incoming RAX bits: failure replaces RAX with a narrow value.
+	var memoryPointer, accumulatorPointer TransitionPointer
+	if width == 8 {
+		memoryPointer = sameTransitionPointer(m.pointers[src.reg], current.Pointer)
+		accumulatorPointer = sameTransitionPointer(m.pointers[RAX], current.Pointer)
 	}
 	m.store(off, TransitionValue{r.Memory, memoryPointer}, width)
 	m.state.regs[RAX], m.pointers[RAX], m.bound.Preserved[RAX] = r.Accumulator, accumulatorPointer, 0
 	m.bound.Flags = r.Flags
 	m.setPredicates(r.Predicates)
-	m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedCompareExchangeEffect{ID: m.occurrence, PC: m.pc, Context: m.activation, Width: width, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: current.Value, Compare: compare, Replacement: replacement, After: r.Memory, Accumulator: r.Accumulator, Success: r.Success})
+	m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedCompareExchangeEffect{ID: m.occurrence, PC: m.pc, Context: m.activation, Width: width, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: current.Value, Compare: r.Compare, Replacement: replacement, After: r.Memory, Accumulator: r.Accumulator, Success: r.Success})
 	return m.err
 }
 
@@ -133,16 +124,11 @@ func (m *transitionChecker) lockedLogical(i operation, size uint8) error {
 	} else {
 		operand = m.con(br.Bits(8), uint64(i.Args[1].(x86asm.Imm))&255)
 	}
-	op := br.BitAnd
-	if i.Op == x86asm.OR {
-		op = br.BitOr
-	}
-	after := m.binary(op, before, operand)
-	flags, predicates := m.logicalFlags(after)
-	m.bound.Flags = flags
-	m.setPredicates(predicates)
-	m.store(off, TransitionValue{Value: after}, 1)
-	m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedLogicalEffect{ID: m.occurrence, PC: m.pc, Context: m.activation, Kind: i.Op, Width: 1, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: before, Operand: operand, After: after})
+	r := m.valueBuilder.logical(i.Op, before, operand)
+	m.bound.Flags = r.Flags
+	m.setPredicates(r.Predicates)
+	m.store(off, TransitionValue{Value: r.Value}, 1)
+	m.bound.PrimitiveEffects = append(m.bound.PrimitiveEffects, LockedLogicalEffect{ID: m.occurrence, PC: m.pc, Context: m.activation, Kind: i.Op, Width: 1, ReadAccess: readIndex, WriteAccess: readIndex + 1, Before: before, Operand: operand, After: r.Value})
 	return m.err
 }
 

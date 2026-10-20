@@ -13,7 +13,7 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-const globalOperandRules = "gofresh/global-operand-correspondence@3;" + regionRules + ";" + nativeproof.TransitionRules
+const globalOperandRules = "gofresh/global-operand-correspondence@4;" + regionRules + ";" + nativeproof.TransitionRules
 
 // globalOperandCorrespondence relates a checked source prefix to a conditional
 // native prefix at their actual unexecuted operand boundaries. The common account

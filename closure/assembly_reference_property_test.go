@@ -2,6 +2,7 @@ package closure
 
 import (
 	"fmt"
+	"go/types"
 	"runtime"
 	"slices"
 	"strings"
@@ -15,11 +16,16 @@ import (
 // This bounded grammar varies real instruction operands and effects: eight
 // pointer registers, four replacement registers, both result predicates, swapped
 // argument slots, a register-staged result, and an optional signed immediate
-// post-write. The integer oracle below does not interpret instruction terms.
+// post-write. Its selected-width extension adds CAS32 and byte OR/AND, including
+// low/high-byte register aliases and void results. The integer oracle below does
+// not interpret instruction terms.
 type assemblyReferencePropertyProgram struct {
 	body, pointer            string
 	inverted, swapped, extra bool
 	constant                 uint64
+	width                    int
+	op                       x86asm.Op
+	signed, integerResult    bool
 }
 
 func assemblyReferencePropertyBody(shape uint16, literal uint64) assemblyReferencePropertyProgram {
@@ -29,9 +35,38 @@ func assemblyReferencePropertyBody(shape uint16, literal uint64) assemblyReferen
 		swapped:  shape&64 != 0,
 		extra:    shape&256 != 0,
 		constant: uint64(int64(int32(literal))),
+		width:    8, op: x86asm.CMPXCHG,
+	}
+	// High shape bits extend the same operand/effect grammar. The original
+	// 512 CAS64 shapes keep their exact meanings.
+	switch (shape >> 9) & 3 {
+	case 1:
+		p.width = 4
+	case 2:
+		p.width, p.op = 1, x86asm.OR
+	case 3:
+		p.width, p.op = 1, x86asm.AND
+	}
+	p.signed, p.integerResult = shape&4096 != 0, shape&2048 != 0
+	if p.width < 8 {
+		p.constant = literal & ((1 << (p.width * 8)) - 1)
 	}
 	replacement := []string{"CX", "R9", "R11", "R13"}[(shape>>3)&3]
-	comparisonOffset, replacementOffset := 8, 16
+	if p.width == 1 {
+		mask := []string{"AX", "AH", "CX", "CH", "R9", "R11", "R13", "R15"}[(shape>>3)&7]
+		// High-byte aliases have no REX encoding; keep their address register
+		// in the legacy bank so generated text is also actually assemblable.
+		if mask == "AH" || mask == "CH" {
+			p.pointer = []string{"BX", "DX", "SI", "DI"}[shape&3]
+		}
+		p.body = fmt.Sprintf("TEXT ·Swap(SB),4,$0-9\nMOVQ arbitrary+0(FP), %s\nMOVB mask+8(FP), %s\nLOCK\n%sB %s, 0(%s)\n", p.pointer, mask, p.op, mask, p.pointer)
+		if p.extra {
+			p.body += fmt.Sprintf("MOVB $%d, 0(%s)\n", int8(p.constant), p.pointer)
+		}
+		p.body += "RET\n"
+		return p
+	}
+	comparisonOffset, replacementOffset := 8, 8+p.width
 	if p.swapped {
 		comparisonOffset, replacementOffset = replacementOffset, comparisonOffset
 	}
@@ -39,16 +74,48 @@ func assemblyReferencePropertyBody(shape uint16, literal uint64) assemblyReferen
 	if p.inverted {
 		set = "SETNE"
 	}
-	result := set + " result+24(FP)\n"
+	resultOffset := 8 + 2*p.width
+	result := fmt.Sprintf("%s result+%d(FP)\n", set, resultOffset)
 	if shape&128 != 0 {
-		result = set + " R15\nMOVB R15, result+24(FP)\n"
+		result = fmt.Sprintf("%s R15\nMOVB R15, result+%d(FP)\n", set, resultOffset)
 	}
-	p.body = fmt.Sprintf("TEXT ·Swap(SB),4,$0-25\nMOVQ arbitrary+0(FP), %s\nMOVQ comparison+%d(FP), AX\nMOVQ replacement+%d(FP), %s\nLOCK\nCMPXCHGQ %s, 0(%s)\n%s", p.pointer, comparisonOffset, replacementOffset, replacement, replacement, p.pointer, result)
+	suffix := "Q"
+	if p.width == 4 {
+		suffix = "L"
+	}
+	p.body = fmt.Sprintf("TEXT ·Swap(SB),4,$0-%d\nMOVQ arbitrary+0(FP), %s\nMOV%s comparison+%d(FP), AX\nMOV%s replacement+%d(FP), %s\nLOCK\nCMPXCHG%s %s, 0(%s)\n%s", resultOffset+1, p.pointer, suffix, comparisonOffset, suffix, replacementOffset, replacement, suffix, replacement, p.pointer, result)
 	if p.extra {
-		p.body += fmt.Sprintf("MOVQ $%d, 0(%s)\n", int64(p.constant), p.pointer)
+		p.body += fmt.Sprintf("MOV%s $%d, 0(%s)\n", suffix, int64(int32(p.constant)), p.pointer)
 	}
 	p.body += "RET\n"
 	return p
+}
+
+// The signature is generated from instruction intent, never inferred from a
+// production frame. Names intentionally say nothing about operand semantics.
+func (p assemblyReferencePropertyProgram) signature() *types.Signature {
+	kind := types.Uint64
+	if p.width == 4 {
+		kind = types.Uint32
+	}
+	if p.width == 1 {
+		kind = types.Uint8
+	}
+	if p.signed {
+		kind = map[int]types.BasicKind{1: types.Int8, 4: types.Int32, 8: types.Int64}[p.width]
+	}
+	scalar := types.Typ[kind]
+	params := []*types.Var{types.NewVar(0, nil, "arbitrary", types.NewPointer(scalar)), types.NewVar(0, nil, "x", scalar)}
+	results := types.NewTuple()
+	if p.op == x86asm.CMPXCHG {
+		params = append(params, types.NewVar(0, nil, "y", scalar))
+		result := types.Typ[types.Bool]
+		if p.integerResult {
+			result = types.Typ[types.Uint8]
+		}
+		results = types.NewTuple(types.NewVar(0, nil, "z", result))
+	}
+	return types.NewSignatureType(nil, nil, nil, types.NewTuple(params...), results, false)
 }
 
 type assemblyReferenceBooleanOracle struct {
@@ -67,10 +134,16 @@ func (p assemblyReferencePropertyProgram) oracle(current, old, replacement uint6
 	if success {
 		value = next
 	}
-	accesses := []assemblyReferenceAccess{{false, true, current}, {true, true, value}}
+	if p.op == x86asm.OR {
+		value = current | old
+	}
+	if p.op == x86asm.AND {
+		value = current & old
+	}
+	accesses := []assemblyReferenceAccess{{false, true, current, p.width}, {true, true, value, p.width}}
 	if p.extra {
 		value = p.constant
-		accesses = append(accesses, assemblyReferenceAccess{true, false, value})
+		accesses = append(accesses, assemblyReferenceAccess{true, false, value, p.width})
 	}
 	return assemblyReferenceBooleanOracle{Value: value, Result: success != p.inverted, Accesses: accesses}
 }
@@ -80,7 +153,7 @@ func assemblyReferencePropertyResult(t testing.TB, got assemblyReferenceResult, 
 	if got.Value != want.Value || assemblyReferenceBool(t, got.Result) != want.Result || !slices.Equal(got.Accesses, want.Accesses) {
 		t.Fatalf("relation = %+v; integer oracle = %+v", got, want)
 	}
-	if len(got.Atomics) != 1 || got.Atomics[0].Kind != x86asm.CMPXCHG || got.Atomics[0].ReadAccess != 0 || got.Atomics[0].WriteAccess != 1 {
+	if len(got.Atomics) != 1 || got.Atomics[0].Kind != x86asm.CMPXCHG || got.Atomics[0].Width != 8 || got.Atomics[0].ReadAccess != 0 || got.Atomics[0].WriteAccess != 1 {
 		t.Fatalf("generated CAS reference lost its indivisible occurrence: %+v", got.Atomics)
 	}
 }
@@ -91,10 +164,17 @@ func assemblyReferencePropertyResult(t testing.TB, got assemblyReferenceResult, 
 // universal equivalence proof and confer no selected-source binding authority.
 func FuzzAssemblyReferenceBodyAndPrivateFrame(f *testing.F) {
 	for i := range 16 {
-		f.Add(uint64(i)*0x100000001, ^uint64(i), uint64(i)<<60|uint64(i)*0x10203041, uint16(i*37), uint8(i))
+		f.Add(uint64(i)*0x100000001, ^uint64(i), uint64(i)<<60|uint64(i)*0x10203041, uint16(i*37)&511, uint8(i))
+	}
+	for _, shape := range []uint16{512, 639, 896, 1024, 1080, 1287, 1536, 1599, 1920, 2560, 4736, 5631} {
+		f.Add(uint64(0x80000001), uint64(0xffffffff), uint64(0x80000000), shape, uint8(shape>>4))
 	}
 	f.Fuzz(func(t *testing.T, current, old, replacement uint64, shape uint16, fault uint8) {
 		p := assemblyReferencePropertyBody(shape, replacement)
+		if p.width != 8 {
+			assemblyNarrowPropertyCase(t, p, current, old, replacement, fault)
+			return
+		}
 		r := assemblyReferenceUnitRelation(t, p.body)
 		// Always exercise success and failure as well as the independent fuzz
 		// triple, including when replacement happens to equal the current value.
@@ -235,7 +315,7 @@ func FuzzAssemblyReferenceSelectedOwnershipAndBinding(f *testing.F) {
 		mode := seed & 3
 		name := fmt.Sprintf("Operation%d", (seed>>4)&255)
 		pkg := fmt.Sprintf("example.com/ref%d", (seed>>12)&15)
-		p := assemblyReferencePropertyBody(uint16(seed>>2), replacement)
+		p := assemblyReferencePropertyBody(uint16(seed>>2)&511, replacement)
 		// RESULT is selected only through a transitive captured header. The
 		// other header exists with the opposite meaning, so ignoring selection
 		// or include bytes cannot satisfy both predicates in the corpus.

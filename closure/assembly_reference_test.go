@@ -146,7 +146,7 @@ func TestAssemblyReferenceUniversalOperandsAndBothWriteCycles(t *testing.T) {
 		if got.Value != want || assemblyReferenceBool(t, got.Result) != (current == old) {
 			t.Fatalf("%x: got %+v, want value %#x and result %v", values, got, want, current == old)
 		}
-		if !slices.Equal(got.Accesses, []assemblyReferenceAccess{{false, true, current}, {true, true, want}}) {
+		if !slices.Equal(got.Accesses, []assemblyReferenceAccess{{false, true, current, 8}, {true, true, want, 8}}) {
 			t.Fatalf("%x: lost ordered locked read/write cycle: %+v", values, got.Accesses)
 		}
 	}

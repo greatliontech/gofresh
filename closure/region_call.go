@@ -56,7 +56,7 @@ type regionCallSession struct {
 	// Only the opaque source-continuation constructor supplies this checked
 	// predecessor. Its occurrence guard prevents executing retained allocations
 	// again. An arbitrary input heap has no predecessor authority.
-	predecessor *sourceOperandPrefix
+	predecessor *sourceEffectPrefix
 	// Only the startup composer supplies completed roots, after checking every
 	// outcome of that phase. Their allocations cannot execute again in this
 	// invocation: the new root has a distinct call-string namespace. The ordinary

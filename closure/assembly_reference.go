@@ -17,7 +17,7 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-const assemblyReferenceRules = "gofresh/selected-assembly-reference@2;go-amd64-abi0;" + br.RuleModel + ";" + nativeproof.TransferRules
+const assemblyReferenceRules = "gofresh/selected-assembly-reference@3;go-amd64-abi0;" + br.RuleModel + ";" + nativeproof.TransferRules
 
 // assemblyReference is source-owned evidence, not an observed native image. Only
 // checking a selected acquisition and its complete provider scope constructs it.
@@ -42,6 +42,7 @@ type assemblyReferenceProof struct {
 type assemblyReferenceAccess struct {
 	Write, Locked bool
 	Value         uint64
+	Width         int // bytes of the exact selected target access
 }
 
 type assemblyReferenceResult struct {
@@ -57,6 +58,7 @@ type assemblyReferenceAtomic struct {
 	Statement               int
 	Kind                    x86asm.Op
 	ReadAccess, WriteAccess int
+	Width                   int // bytes of both indivisible accesses
 }
 
 type assemblyReferenceLimits struct {

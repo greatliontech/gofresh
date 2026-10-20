@@ -19,7 +19,8 @@ type assemblyReferencePermission struct {
 }
 
 // The two spaces are separated allocations of the reference semantics. Q and P
-// range over canonical, nonwrapping, eight-aligned origins whose full extents
+// range over canonical, nonwrapping origins aligned to the frame's pointer word
+// and the selected target's natural alignment respectively, whose full extents
 // are disjoint ordinary coherent RAM, mapped for their declared lifetimes and
 // permissions. These are reference-model conditions, not sampled addresses or
 // assertions about an inline machine frame. Alignment excludes split/bus locks;
@@ -31,22 +32,42 @@ type assemblyReferencePermission struct {
 // RBP retains the caller's frame chain. Other admitted general registers are
 // ABI0 scratch (including R14); no operation here changes MXCSR or direction.
 type assemblyReferenceFrame struct {
-	frameSpace, targetSpace int
-	arguments               []assemblyReferenceSlot
-	result                  assemblyReferenceSlot
-	resultType              types.Type
-	size                    int
-	permissions             []assemblyReferencePermission
+	frameSpace, targetSpace      int
+	targetType                   types.Type
+	targetWidth, targetAlignment int
+	arguments                    []assemblyReferenceSlot
+	result                       assemblyReferenceSlot
+	resultType                   types.Type
+	size                         int
+	permissions                  []assemblyReferencePermission
 }
 
 const assemblyReferenceMaxArguments = 16
 
-func assemblyReferenceWordType(t types.Type) bool {
+func assemblyReferenceIntegerWidth(t types.Type) (int, bool) {
+	if t == nil {
+		return 0, false
+	}
+	b, ok := t.Underlying().(*types.Basic)
+	if ok {
+		switch b.Kind() {
+		case types.Uint8, types.Int8:
+			return 1, true
+		case types.Uint32, types.Int32:
+			return 4, true
+		case types.Uint64, types.Int64:
+			return 8, true
+		}
+	}
+	return 0, false
+}
+
+func assemblyReferenceBooleanType(t types.Type) bool {
 	if t == nil {
 		return false
 	}
 	b, ok := t.Underlying().(*types.Basic)
-	return ok && (b.Kind() == types.Uint64 || b.Kind() == types.Int64)
+	return ok && b.Kind() == types.Bool
 }
 
 func assemblyReferenceResultWidth(t types.Type) (int, bool) {
@@ -56,20 +77,30 @@ func assemblyReferenceResultWidth(t types.Type) (int, bool) {
 	if tuple, ok := t.(*types.Tuple); ok {
 		return 0, tuple.Len() == 0
 	}
-	if b, ok := t.Underlying().(*types.Basic); ok && b.Kind() == types.Bool {
+	if assemblyReferenceBooleanType(t) {
 		return 1, true
 	}
-	return 8, assemblyReferenceWordType(t)
+	return assemblyReferenceIntegerWidth(t)
 }
 
 func assemblyReferenceABI(sig *types.Signature, sizes types.Sizes) (assemblyReferenceFrame, error) {
 	var f assemblyReferenceFrame
-	if sig == nil || sizes == nil || sig.Recv() != nil || sig.Variadic() || sig.TypeParams().Len() != 0 || sig.RecvTypeParams().Len() != 0 || sig.Params().Len() < 1 || sig.Params().Len() > assemblyReferenceMaxArguments || sig.Results().Len() > 1 || !types.Identical(sig.Params().At(0).Type(), types.NewPointer(types.Typ[types.Uint64])) {
+	if sig == nil || sizes == nil || sig.Recv() != nil || sig.Variadic() || sig.TypeParams().Len() != 0 || sig.RecvTypeParams().Len() != 0 || sig.Params().Len() < 1 || sig.Params().Len() > assemblyReferenceMaxArguments || sig.Results().Len() > 1 {
 		return f, assemblyReferenceError("unsupported exact typed reference interface")
 	}
+	pointer, ok := sig.Params().At(0).Type().Underlying().(*types.Pointer)
+	if !ok {
+		return f, assemblyReferenceError("reference target is not a selected pointer")
+	}
+	f.targetType = pointer.Elem()
+	f.targetWidth, ok = assemblyReferenceIntegerWidth(f.targetType)
+	if !ok || int(sizes.Sizeof(f.targetType)) != f.targetWidth || int(sizes.Alignof(f.targetType)) != f.targetWidth {
+		return f, assemblyReferenceError("unsupported selected target width or alignment")
+	}
+	f.targetAlignment = int(sizes.Alignof(f.targetType))
 	for i := 1; i < sig.Params().Len(); i++ {
-		if !assemblyReferenceWordType(sig.Params().At(i).Type()) {
-			return f, assemblyReferenceError("reference scalar parameter is not a signed or unsigned word")
+		if _, ok := assemblyReferenceIntegerWidth(sig.Params().At(i).Type()); !ok {
+			return f, assemblyReferenceError("unsupported selected integer parameter")
 		}
 	}
 	f.resultType = sig.Results()
@@ -93,16 +124,22 @@ func assemblyReferenceABI(sig *types.Signature, sizes types.Sizes) (assemblyRefe
 	for i := range f.arguments {
 		t := sig.Params().At(i).Type()
 		width, alignment := int(sizes.Sizeof(t)), int(sizes.Alignof(t))
-		if width != 8 || alignment != 8 {
-			return f, assemblyReferenceError("selected parameter layout is not a full ABI0 word")
+		want := 8
+		if i != 0 {
+			want, _ = assemblyReferenceIntegerWidth(t)
+		}
+		if width != want || alignment != want {
+			return f, assemblyReferenceError("selected parameter layout differs from its scalar interpretation")
 		}
 		next = align(next, alignment)
 		f.arguments[i] = assemblyReferenceSlot{next, width}
 		next += width
 	}
-	next = align(next, int(word))
-	if resultWidth != 0 && int(sizes.Sizeof(f.resultType)) != resultWidth {
-		return f, assemblyReferenceError("selected result width differs from its scalar interpretation")
+	if resultWidth != 0 {
+		next = align(next, int(word))
+		if int(sizes.Sizeof(f.resultType)) != resultWidth || int(sizes.Alignof(f.resultType)) != resultWidth {
+			return f, assemblyReferenceError("selected result layout differs from its scalar interpretation")
+		}
 	}
 	f.result = assemblyReferenceSlot{next, resultWidth}
 	f.size = next + f.result.width
@@ -113,7 +150,7 @@ func assemblyReferenceABI(sig *types.Signature, sizes types.Sizes) (assemblyRefe
 	if resultWidth != 0 {
 		f.permissions = append(f.permissions, assemblyReferencePermission{f.frameSpace, next, f.size, true, true})
 	}
-	f.permissions = append(f.permissions, assemblyReferencePermission{f.targetSpace, 0, 8, true, true})
+	f.permissions = append(f.permissions, assemblyReferencePermission{f.targetSpace, 0, f.targetWidth, true, true})
 	return f, nil
 }
 
@@ -138,7 +175,7 @@ type assemblyReferenceSymbolicAccess struct {
 // state. Only the source projection hides the proven disjoint administrative
 // frame. In particular an RMW always contributes both external accesses.
 type assemblyReferenceRelation struct {
-	inputs                    []br.Term // current memory, then independent scalar argument words
+	inputs                    []br.Term // current memory, then independent selected-width scalar arguments
 	value, result             br.Term
 	accesses                  []assemblyReferenceSymbolicAccess
 	definition                assemblyReferenceDefinition
@@ -263,17 +300,27 @@ func assemblyReferenceInterpret(m *assemblyReferenceMeter, definition assemblyRe
 	if definition.symbol.abi != "ABI0" || definition.locals != 0 || definition.flags&4 == 0 || definition.flags & ^uint64(4|512) != 0 || definition.arguments != int64(frame.size-8) || frame.frameSpace == 0 || frame.targetSpace == 0 || frame.frameSpace == frame.targetSpace {
 		return nil, assemblyReferenceError("ABI0 frame, separated storage or zero-leaf prologue conditions disagree")
 	}
-	// The interpreter's scalar operands are full words. Its optional result is
-	// a Boolean byte or full word. Consume the typed layout, without a table of
-	// parameter names or precomputed ABI offsets.
+	// Consume the selected scalar layout, without a table of parameter names or
+	// precomputed ABI offsets. Only an actual result aligns the result area.
+	targetWidth, valid := assemblyReferenceIntegerWidth(frame.targetType)
+	if !valid || frame.targetWidth != targetWidth || frame.targetAlignment != targetWidth {
+		return nil, assemblyReferenceError("target layout disagrees with its selected scalar type")
+	}
 	next := 8
-	for _, slot := range frame.arguments {
-		if slot.offset != next || slot.width != 8 {
+	for i, slot := range frame.arguments {
+		if i == 0 && slot.width != 8 || slot.width != 1 && slot.width != 4 && slot.width != 8 {
+			return nil, assemblyReferenceError("unsupported scalar argument width")
+		}
+		next = (next + slot.width - 1) / slot.width * slot.width
+		if slot.offset != next {
 			return nil, assemblyReferenceError("argument layout disagrees with the scalar interface")
 		}
 		next += slot.width
 	}
 	resultWidth, valid := assemblyReferenceResultWidth(frame.resultType)
+	if resultWidth != 0 {
+		next = (next + 7) / 8 * 8
+	}
 	if !valid || frame.result.offset != next || frame.result.width != resultWidth || frame.size != next+resultWidth {
 		return nil, assemblyReferenceError("result layout disagrees with the scalar interface")
 	}
@@ -283,7 +330,7 @@ func assemblyReferenceInterpret(m *assemblyReferenceMeter, definition assemblyRe
 		}
 		bound := frame.size
 		if permission.space == frame.targetSpace {
-			bound = 8
+			bound = frame.targetWidth
 		} else if permission.space != frame.frameSpace {
 			return nil, assemblyReferenceError("permission has an unknown allocation origin")
 		}
@@ -306,10 +353,14 @@ func assemblyReferenceInterpret(m *assemblyReferenceMeter, definition assemblyRe
 	if err != nil {
 		return nil, err
 	}
-	x := &assemblyReferenceMachine{m: m, b: br.NewBuilder(m.limits.nodes), isa: kernel, r: assemblyReferenceRelation{definition: definition, frame: frame, inputs: make([]br.Term, len(frame.arguments)), private: make([]assemblyReferenceCell, frame.size), external: make([]assemblyReferenceCell, 8)}}
+	x := &assemblyReferenceMachine{m: m, b: br.NewBuilder(m.limits.nodes), isa: kernel, r: assemblyReferenceRelation{definition: definition, frame: frame, inputs: make([]br.Term, len(frame.arguments)), private: make([]assemblyReferenceCell, frame.size), external: make([]assemblyReferenceCell, frame.targetWidth)}}
 	scope := br.NewScope()
 	for i := range x.r.inputs {
-		x.r.inputs[i], err = x.b.Input(br.Bits(64), scope, uint64(i))
+		width := frame.targetWidth
+		if i != 0 {
+			width = frame.arguments[i].width
+		}
+		x.r.inputs[i], err = x.b.Input(br.Bits(width*8), scope, uint64(i))
 		if err != nil {
 			return nil, err
 		}
@@ -355,9 +406,9 @@ func assemblyReferenceInterpret(m *assemblyReferenceMeter, definition assemblyRe
 	x.seed(x.r.private, 0, 8, x.entryReturn, assemblyReferencePointer{})
 	x.seed(x.r.private, frame.arguments[0].offset, 8, pointer, assemblyReferencePointer{frame.targetSpace, 0})
 	for i := 1; i < len(frame.arguments); i++ {
-		x.seed(x.r.private, frame.arguments[i].offset, 8, x.r.inputs[i], assemblyReferencePointer{})
+		x.seed(x.r.private, frame.arguments[i].offset, frame.arguments[i].width, x.r.inputs[i], assemblyReferencePointer{})
 	}
-	x.seed(x.r.external, 0, 8, x.r.inputs[0], assemblyReferencePointer{})
+	x.seed(x.r.external, 0, frame.targetWidth, x.r.inputs[0], assemblyReferencePointer{})
 	locked, returned := false, false
 	for index, statement := range definition.body {
 		x.index = index
@@ -413,7 +464,7 @@ func assemblyReferenceInterpret(m *assemblyReferenceMeter, definition assemblyRe
 	}
 	if frame.result.width != 0 {
 		x.r.result = x.word(x.r.private, frame.result.offset, frame.result.width).value
-		if frame.result.width == 1 {
+		if assemblyReferenceBooleanType(frame.resultType) {
 			byteResult := x.r.result
 			x.r.result = x.make(br.Nonzero, br.Bool(), 0, byteResult)
 			canonical := x.make(br.BoolToBits, br.Bits(8), 0, x.r.result)
@@ -426,7 +477,7 @@ func assemblyReferenceInterpret(m *assemblyReferenceMeter, definition assemblyRe
 			}
 		}
 	}
-	x.r.value = x.word(x.r.external, 0, 8).value
+	x.r.value = x.word(x.r.external, 0, frame.targetWidth).value
 	// Frame/address values and incoming scratch may not escape to the source
 	// projection, including through a partial scalar write that erased provenance.
 	roots := []br.Term{x.r.value}
@@ -471,8 +522,8 @@ func (x *assemblyReferenceMachine) memory(p assemblyReferencePointer, width int,
 	if p.offset < 0 || width <= 0 || p.offset > len(cells)-width {
 		return nil, assemblyReferenceError("full memory access escapes its owned extent")
 	}
-	if p.space == x.r.frame.targetSpace && (p.offset != 0 || width != 8) {
-		return nil, assemblyReferenceError("source projection requires a full typed uint64 access")
+	if p.space == x.r.frame.targetSpace && (p.offset != 0 || width != x.r.frame.targetWidth) {
+		return nil, assemblyReferenceError("source projection requires the exact selected target access")
 	}
 	for _, permission := range x.r.frame.permissions {
 		if err := x.m.Err(); err != nil {
@@ -696,12 +747,16 @@ func assemblyReferenceCondition(op string) (x86asm.Op, bool) {
 
 func assemblyReferenceRMW(op string) (x86asm.Op, bool) {
 	switch op {
-	case "CMPXCHGQ":
+	case "CMPXCHGQ", "CMPXCHGL":
 		return x86asm.CMPXCHG, true
 	case "XADDQ":
 		return x86asm.XADD, true
 	case "XCHGQ":
 		return x86asm.XCHG, true
+	case "ORB":
+		return x86asm.OR, true
+	case "ANDB":
+		return x86asm.AND, true
 	}
 	return 0, false
 }
@@ -721,38 +776,48 @@ func (x *assemblyReferenceMachine) step(statement assemblyReferenceStatement, lo
 	if len(args) != 2 {
 		return assemblyReferenceError("unsupported body transfer or operand count: " + statement.op)
 	}
-	if _, atomic := assemblyReferenceRMW(statement.op); atomic {
-		if statement.op != "XCHGQ" && !locked || len(args[0]) != 1 {
-			return assemblyReferenceError("RMW requires its lock semantics and a full register source")
+	if op, rmw := assemblyReferenceRMW(statement.op); rmw {
+		logical := op == x86asm.AND || op == x86asm.OR
+		if !logical && op != x86asm.XCHG && !locked || len(args[0]) != 1 {
+			return assemblyReferenceError("RMW requires supported lock semantics and a register source")
 		}
-		reg, ok := assemblyReferenceRegisterName(args[0][0], 64)
+		width := 64
+		if statement.op == "CMPXCHGL" {
+			width = 32
+		} else if logical {
+			width = 8
+		}
+		_, ok := assemblyReferenceRegisterName(args[0][0], width)
 		if !ok {
-			return assemblyReferenceError("RMW source is not a full register")
+			return assemblyReferenceError("RMW source is not a register of the instruction width")
 		}
-		full, _, _, _ := nativeproof.RegisterAlias(reg)
-		source := x.r.registers[full]
+		source, err := x.operand(args[0], width)
+		if err != nil {
+			return err
+		}
 		p, err := x.address(args[1])
 		if err != nil {
 			return err
 		}
 		// Write permission is required before either arm, including failure's
-		// unchanged-value write cycle. Only an external uint64 is projected.
+		// unchanged-value write cycle. Only the exact selected target is projected.
 		if p.space != x.r.frame.targetSpace {
 			return assemblyReferenceError("RMW destination is not represented source storage")
 		}
-		if _, err := x.memory(p, 8, true); err != nil {
+		if _, err := x.memory(p, width/8, true); err != nil {
 			return err
 		}
-		current, err := x.readMemory(p, 8, true, false)
+		atomic := locked || op == x86asm.XCHG
+		current, err := x.readMemory(p, width/8, atomic, false)
 		if err != nil {
 			return err
 		}
-		if source.pointer.space != 0 || statement.op == "CMPXCHGQ" && x.r.registers[nativeproof.RAX].pointer.space != 0 {
+		if source.pointer.space != 0 || op == x86asm.CMPXCHG && x.r.registers[nativeproof.RAX].pointer.space != 0 {
 			return assemblyReferenceError("RMW operands carry escaping pointer representations")
 		}
 		var memory br.Term
-		switch statement.op {
-		case "CMPXCHGQ":
+		switch op {
+		case x86asm.CMPXCHG:
 			result, err := x.isa.CompareExchange(x.r.registers[nativeproof.RAX].value, current.value, source.value)
 			if err != nil {
 				return err
@@ -760,7 +825,7 @@ func (x *assemblyReferenceMachine) step(statement assemblyReferenceStatement, lo
 			x.r.flags, x.flags = result.Flags, result.Predicates
 			x.r.registers[nativeproof.RAX] = assemblyReferenceRegister{value: result.Accumulator}
 			memory = result.Memory
-		case "XADDQ":
+		case x86asm.XADD:
 			result, err := x.isa.ExchangeAdd64(current.value, source.value)
 			if err != nil {
 				return err
@@ -770,7 +835,7 @@ func (x *assemblyReferenceMachine) step(statement assemblyReferenceStatement, lo
 			}
 			x.r.flags, x.flags = result.Flags, result.Predicates
 			memory = result.Memory
-		case "XCHGQ":
+		case x86asm.XCHG:
 			result, err := x.isa.Exchange64(current.value, source.value)
 			if err != nil {
 				return err
@@ -779,8 +844,15 @@ func (x *assemblyReferenceMachine) step(statement assemblyReferenceStatement, lo
 				return err
 			}
 			memory = result.Memory
+		case x86asm.OR, x86asm.AND:
+			result, err := x.isa.Logical(op, current.value, source.value)
+			if err != nil {
+				return err
+			}
+			x.r.flags, x.flags = result.Flags, result.Predicates
+			memory = result.Value
 		}
-		return x.writeMemory(p, 8, assemblyReferenceRegister{value: memory}, true)
+		return x.writeMemory(p, width/8, assemblyReferenceRegister{value: memory}, atomic)
 	}
 	if statement.op == "ADDQ" {
 		if len(args[1]) != 1 || len(args[0]) != 1 && (len(args[0]) == 0 || args[0][0] != "$") {
@@ -916,7 +988,7 @@ func (r *assemblyReference) evaluate(ctx context.Context, current uint64, argume
 }
 
 func assemblyReferenceApply(m *assemblyReferenceMeter, r *assemblyReferenceRelation, values []uint64) (assemblyReferenceResult, error) {
-	if r == nil || len(r.inputs) < 1 || len(r.inputs) > assemblyReferenceMaxArguments || len(values) != len(r.inputs) {
+	if r == nil || len(r.inputs) < 1 || len(r.inputs) > assemblyReferenceMaxArguments || len(values) != len(r.inputs) || len(r.frame.arguments) != len(r.inputs) {
 		return assemblyReferenceResult{}, assemblyReferenceError("missing or mismatched scalar reference inputs")
 	}
 	values = slices.Clone(values)
@@ -926,8 +998,15 @@ func assemblyReferenceApply(m *assemblyReferenceMeter, r *assemblyReferenceRelat
 		if err := m.Err(); err != nil {
 			return assemblyReferenceResult{}, err
 		}
-		if !input.Valid() || input.View().Op != br.Variable || input.View().Scratch || input.Sort() != br.Bits(64) {
+		width := r.frame.targetWidth
+		if i != 0 {
+			width = r.frame.arguments[i].width
+		}
+		if width != 1 && width != 4 && width != 8 || !input.Valid() || input.View().Op != br.Variable || input.View().Scratch || input.Sort() != br.Bits(width*8) {
 			return assemblyReferenceResult{}, assemblyReferenceError("invalid retained formal input")
+		}
+		if values[i] > ^uint64(0)>>(64-width*8) {
+			return assemblyReferenceResult{}, assemblyReferenceError("scalar input exceeds its selected width")
 		}
 		t, err := b.Const(input.Sort(), values[i])
 		if err != nil {
@@ -996,17 +1075,18 @@ func assemblyReferenceApply(m *assemblyReferenceMeter, r *assemblyReferenceRelat
 			return assemblyReferenceResult{}, err
 		}
 		result.Result.kind = regionConstant
-		if width == 1 {
+		if assemblyReferenceBooleanType(r.frame.resultType) {
 			if !r.result.Sort().IsBool() || bits > 1 {
 				return assemblyReferenceResult{}, assemblyReferenceError("reference result is not Boolean")
 			}
 			result.Result.scalar = constant.MakeBool(bits == 1)
 		} else {
-			if r.result.Sort() != br.Bits(64) {
-				return assemblyReferenceResult{}, assemblyReferenceError("reference result is not a complete word")
+			if r.result.Sort() != br.Bits(width*8) {
+				return assemblyReferenceResult{}, assemblyReferenceError("reference result is not a complete selected scalar")
 			}
-			if r.frame.resultType.Underlying().(*types.Basic).Kind() == types.Int64 {
-				result.Result.scalar = constant.MakeInt64(int64(bits))
+			if r.frame.resultType.Underlying().(*types.Basic).Info()&types.IsUnsigned == 0 {
+				shift := 64 - width*8
+				result.Result.scalar = constant.MakeInt64(int64(bits<<shift) >> shift)
 			} else {
 				result.Result.scalar = constant.MakeUint64(bits)
 			}
@@ -1030,16 +1110,16 @@ func assemblyReferenceApply(m *assemblyReferenceMeter, r *assemblyReferenceRelat
 			}
 			write := r.accesses[index+1]
 			kind, supported := assemblyReferenceRMW(r.definition.body[access.statement].op)
-			if !supported || !write.locked || !write.write || write.statement != access.statement || write.space != access.space || write.offset != access.offset || write.width != access.width || access.width != 8 {
+			if !supported || !write.locked || !write.write || write.statement != access.statement || write.space != access.space || write.offset != access.offset || write.width != access.width || access.width != r.frame.targetWidth {
 				return assemblyReferenceResult{}, assemblyReferenceError("atomic projection does not bind one complete checked RMW")
 			}
-			result.Atomics = append(result.Atomics, assemblyReferenceAtomic{Statement: access.statement, Kind: kind, ReadAccess: len(result.Accesses), WriteAccess: len(result.Accesses) + 1})
+			result.Atomics = append(result.Atomics, assemblyReferenceAtomic{Statement: access.statement, Kind: kind, ReadAccess: len(result.Accesses), WriteAccess: len(result.Accesses) + 1, Width: access.width})
 		}
 		value, err := instantiate(access.value)
 		if err != nil {
 			return assemblyReferenceResult{}, err
 		}
-		result.Accesses = append(result.Accesses, assemblyReferenceAccess{access.write, access.locked, value})
+		result.Accesses = append(result.Accesses, assemblyReferenceAccess{Write: access.write, Locked: access.locked, Value: value, Width: access.width})
 	}
 	if err := m.Err(); err != nil {
 		return assemblyReferenceResult{}, err

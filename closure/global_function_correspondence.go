@@ -15,7 +15,7 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-const globalFunctionRules = "gofresh/global-function-correspondence@3;" + regionRules + ";" + nativeproof.TransitionRules + ";" + br.RuleModel
+const globalFunctionRules = "gofresh/global-function-correspondence@4;" + regionRules + ";" + nativeproof.TransitionRules + ";" + br.RuleModel
 
 // A mapping names the actual typed parameter and its incoming full native word.
 // The present effect-only grammar admits only unused pointer parameters. A word
@@ -152,13 +152,13 @@ func (p *globalFunctionCorrespondence) collectSource(ctx context.Context, source
 	if root.Signature.Results().Len() != 0 || len(root.FreeVars) != 0 || packet.rules != regionRules || packet.input.owner != source.prog.Prog || packet.input.root != root || p.source.region.root.function != root || p.source.returned.Parent() != root || len(p.source.returned.Results) != 0 || packet.trace == nil || len(packet.observations) != 1 {
 		return globalFunctionError("source is not the selected void root's checked return")
 	}
-	var chain []*sourceOperandPrefix
-	seen := map[*sourceOperandPrefix]bool{}
+	var chain []*sourceEffectPrefix
+	seen := map[*sourceEffectPrefix]bool{}
 	for at := p.source.prior; at != nil; at = at.prior {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if seen[at] || len(chain) >= 256 || at.region == nil || at.region.packet == nil || at.binder == nil || at.region.packet.rules != regionRules || at.region.packet.input.root != root || at.region.packet.input.owner != source.prog.Prog {
+		if seen[at] || len(chain) >= 256 || at.checkedPacket() == nil || at.region.packet.input.root != root || at.region.packet.input.owner != source.prog.Prog {
 			return globalFunctionError("source continuation chain has a foreign owner or repeated phase")
 		}
 		seen[at] = true
@@ -442,6 +442,7 @@ func globalFunctionUnproved(err error) bool {
 
 type globalFunctionNativeAtomic struct {
 	kind        x86asm.Op
+	width       int
 	id          nativeproof.TransitionOccurrenceID
 	read, write int
 	effect      nativeproof.PrimitiveEffect
@@ -450,11 +451,13 @@ type globalFunctionNativeAtomic struct {
 func globalFunctionNativeGroup(effect nativeproof.PrimitiveEffect) (globalFunctionNativeAtomic, bool) {
 	switch e := effect.(type) {
 	case nativeproof.LockedCompareExchangeEffect:
-		return globalFunctionNativeAtomic{x86asm.CMPXCHG, e.ID, e.ReadAccess, e.WriteAccess, effect}, e.Width == 8
+		return globalFunctionNativeAtomic{x86asm.CMPXCHG, e.Width, e.ID, e.ReadAccess, e.WriteAccess, effect}, e.Width == 4 || e.Width == 8
 	case nativeproof.LockedExchange64Effect:
-		return globalFunctionNativeAtomic{x86asm.XCHG, e.ID, e.ReadAccess, e.WriteAccess, effect}, true
+		return globalFunctionNativeAtomic{x86asm.XCHG, 8, e.ID, e.ReadAccess, e.WriteAccess, effect}, true
 	case nativeproof.LockedExchangeAdd64Effect:
-		return globalFunctionNativeAtomic{x86asm.XADD, e.ID, e.ReadAccess, e.WriteAccess, effect}, true
+		return globalFunctionNativeAtomic{x86asm.XADD, 8, e.ID, e.ReadAccess, e.WriteAccess, effect}, true
+	case nativeproof.LockedLogicalEffect:
+		return globalFunctionNativeAtomic{e.Kind, e.Width, e.ID, e.ReadAccess, e.WriteAccess, effect}, e.Width == 1 && (e.Kind == x86asm.AND || e.Kind == x86asm.OR)
 	}
 	return globalFunctionNativeAtomic{}, false
 }
@@ -504,6 +507,9 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 			if _, found := nativeGroups[index]; found || access.ID != group.id {
 				return globalFunctionError("atomic accesses have another statement or activation")
 			}
+			if access.Bytes.End-access.Bytes.Start != int64(group.width) {
+				return globalFunctionError("atomic access width differs from its primitive")
+			}
 			nativeGroups[index] = group
 		}
 		guard, found := guards[group.id]
@@ -548,6 +554,10 @@ func (p *globalFunctionCorrespondence) checkEffects(ctx context.Context, b nativ
 			read, write := trace.accesses[a.ReadAccess], trace.accesses[a.WriteAccess]
 			if !found || read.instruction != group.application.at || write.instruction != read.instruction || read.invocation != write.invocation || read.location.object != write.location.object || !slices.Equal(read.location.path, write.location.path) || read.write || !write.write || !read.locked || !write.locked {
 				return globalFunctionError("source atomic grouping lost actual call/context/read-write provenance")
+			}
+			footprint, represented := p.layout.locationFootprint(read.location)
+			if !represented || a.Width <= 0 || footprint.Bytes.End-footprint.Bytes.Start != int64(a.Width) {
+				return globalFunctionError("source atomic width differs from its represented typed location")
 			}
 			for _, index := range []int{base + a.ReadAccess, base + a.WriteAccess} {
 				if _, found := sourceGroups[index]; found {
@@ -654,7 +664,8 @@ leavesLoop:
 			}
 			value = value.elements[step.index]
 		}
-		if !types.Identical(value.typ, leaf.typ) {
+		value, viewed := regionViewValue(value, leaf.typ)
+		if !viewed {
 			return storageFootprint{}, nil, globalFunctionError("effect type differs from canonical storage")
 		}
 		bits, width, ok := storageScalarBits(value, sizes)
@@ -1462,7 +1473,7 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 			nativeGroup, nativeAtomic := nativeGroups[index]
 			match = access.Image == footprint.Image && access.Bytes == footprint.Bytes && access.Kind == kind && atomic == nativeAtomic
 			if atomic {
-				match = match && nativeGroup.kind == group.atomic.Kind && source.location.object.kind == regionGlobal && len(source.location.path) == 0 && types.Identical(source.value.typ, types.Typ[types.Uint64])
+				match = match && nativeGroup.kind == group.atomic.Kind && nativeGroup.width == group.atomic.Width && footprint.Bytes.End-footprint.Bytes.Start == int64(group.atomic.Width)
 			}
 			if match {
 				if err := matchBytes(index, access, lanes); err != nil {

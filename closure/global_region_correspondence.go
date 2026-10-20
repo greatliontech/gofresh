@@ -92,7 +92,7 @@ func continueGlobalOperandCorrespondence(ctx context.Context, predecessor *globa
 			return nil, err
 		}
 		packet := source.checkedPacket()
-		if packet == nil || source.prior != currentSource {
+		if packet == nil || source.prior != currentSource.sourceEffectPrefix {
 			return fail("phase lacks its exact opaque source predecessor")
 		}
 		trace := packet.trace

@@ -195,11 +195,14 @@ func TestRegionLocalContinuationRetainsAllocationAndCurrentContents(t *testing.T
 	if _, err := checkSourceOperandContinuation(t.Context(), current, calls[0], nil); err == nil {
 		t.Fatal("continuation replayed an earlier occurrence")
 	}
-	projection := &sourceOperandPrefix{region: prefix.region, binder: prefix.binder, call: prefix.call, operands: prefix.operands}
+	projection := &sourceOperandPrefix{sourceEffectPrefix: &sourceEffectPrefix{region: prefix.region, binder: prefix.binder}, call: prefix.call, operands: prefix.operands}
 	if _, err := checkSourceOperandContinuation(t.Context(), projection, calls[1], nil); err == nil {
 		t.Fatal("copied projection manufactured an opaque continuation")
 	}
 	wrongCut := *prefix
+	wrongCore := *prefix.sourceEffectPrefix
+	wrongCut.sourceEffectPrefix = &wrongCore
+	wrongCut.self, wrongCore.self = &wrongCut, &wrongCore
 	wrongCut.checker = current.checker
 	if _, err := checkSourceOperandContinuation(t.Context(), &wrongCut, calls[1], nil); err == nil {
 		t.Fatal("checker from a different cut established predecessor authority")

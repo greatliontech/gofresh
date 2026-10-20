@@ -17,7 +17,7 @@ import (
 // particular, this fixture needs no source reference or native CAS32 semantics.
 func storageOperandNarrowNative(t testing.TB, highA, highD uint32, variant string) (globalNativeFixture, nativeproof.TransitionCertificate) {
 	t.Helper()
-	const base, data = uint64(0x401000), uint64(0x700000)
+	const base = uint64(0x401000)
 	code := []byte{0xc3, 0x48, 0x83, 0xec, 0x40} // SUB RSP,64
 	mov := func(register byte, value uint64) {
 		code = append(code, 0x48, 0xb8+register)
@@ -49,24 +49,7 @@ func storageOperandNarrowNative(t testing.TB, highA, highD uint32, variant strin
 		displacement = 0
 	}
 	code = append(code, 0x0f, 0xb1, 0x51, displacement, 0xc3) // LOCK CMPXCHG [RCX+disp8],EDX/RDX
-	f := globalNativeImage(t, [2]uint64{data + 8, data + 80}, [3]uint64{}, data+8, data, nil, "")
-	f.cut = cut
-	copy(f.raw[4096:], code)
-	binary.LittleEndian.PutUint64(f.raw[64+32:], uint64(len(code)))
-	binary.LittleEndian.PutUint64(f.raw[64+40:], uint64(len(code)))
-	var err error
-	f.image, err = nativeproof.NewImage(t.Context(), f.raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.face.Envelope = nativeproof.RelativeSpan{Start: -64, End: 16}
-	f.face.Regions = []nativeproof.RelativeRegion{
-		{Bytes: nativeproof.RelativeSpan{Start: -64, End: 0}, Readable: true, Writable: true},
-		{Bytes: nativeproof.RelativeSpan{Start: 0, End: 8}, Readable: true},
-	}
-	f.face.PrivateFrame = &nativeproof.TransitionPrivateFrame{Bytes: nativeproof.RelativeSpan{Start: -64, End: 0}}
-	f.face.ReturnContext = &nativeproof.TransitionReturnContext{Target: base}
-	return f, globalNativeProof(t, f, false)
+	return storageOperandNativeImage(t, code, cut)
 }
 
 func TestStorageOperandCorrespondenceNarrowLocal(t *testing.T) {

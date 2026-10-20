@@ -9,7 +9,7 @@ import (
 
 // TransferRules identifies the shared scalar ISA relations. These relations do
 // not establish instruction selection, memory applicability, ordering or a frame.
-const TransferRules = "gofresh/native-scalar-transfer@4"
+const TransferRules = "gofresh/native-scalar-transfer@5"
 
 // TransferKernel constructs exact scalar instruction relations under one
 // cumulative expression/work/depth allowance. It owns no image or certificate:
@@ -50,42 +50,75 @@ func (k *TransferKernel) inputs(terms ...br.Term) error {
 	return k.meter.err
 }
 
-// CompareExchangeResult describes CMPXCHG's operand-width scalar arms, with flags
-// computed from incoming accumulator minus incoming memory in both arms.
+// CompareExchangeResult describes CMPXCHG's full BV64 Accumulator and operand-width
+// Compare and Memory. Compare is the incoming accumulator's operand-width bits;
+// flags describe Compare minus incoming memory in both arms.
 // Memory is written even on failure. A consumer must retain that write cycle
 // and the operation's lock semantics separately from these value expressions.
 type CompareExchangeResult struct {
-	Success, Accumulator, Memory br.Term
-	Flags                        TransitionFlags
-	Predicates                   TransitionPredicates
+	Success, Compare, Accumulator, Memory br.Term
+	Flags                                 TransitionFlags
+	Predicates                            TransitionPredicates
 }
 
-// CompareExchange interprets equal-width 32- or 64-bit accumulator, memory and
-// source values. The consumer separately applies accumulator register-write rules.
-func (k *TransferKernel) CompareExchange(compare, current, replacement br.Term) (CompareExchangeResult, error) {
-	if err := k.inputs(compare, current, replacement); err != nil {
+// CompareExchange takes full BV64 incoming RAX and matching BV32 or BV64 memory
+// and source values. Success preserves all incoming RAX bits; failure replaces
+// RAX with current, zero-extended for a 32-bit operation.
+func (k *TransferKernel) CompareExchange(accumulator, current, replacement br.Term) (CompareExchangeResult, error) {
+	if err := k.inputs(accumulator, current, replacement); err != nil {
 		return CompareExchangeResult{}, err
 	}
-	if compare.Sort() != current.Sort() || compare.Sort() != replacement.Sort() || compare.Sort() != br.Bits(32) && compare.Sort() != br.Bits(64) {
-		return CompareExchangeResult{}, refuse(0, "relation-semantics", "CMPXCHG requires three equal-width 32- or 64-bit operands")
+	if accumulator.Sort() != br.Bits(64) || current.Sort() != replacement.Sort() || current.Sort() != br.Bits(32) && current.Sort() != br.Bits(64) {
+		return CompareExchangeResult{}, refuse(0, "relation-semantics", "CMPXCHG requires BV64 RAX and matching BV32 or BV64 memory and source operands")
 	}
-	r := k.meter.compareExchange(compare, current, replacement)
+	r := k.meter.compareExchange(accumulator, current, replacement)
 	if k.meter.err != nil {
 		return CompareExchangeResult{}, k.meter.err
 	}
 	return r, nil
 }
 
-func (m *valueBuilder) compareExchange(compare, current, replacement br.Term) CompareExchangeResult {
+func (m *valueBuilder) compareExchange(accumulator, current, replacement br.Term) CompareExchangeResult {
+	compare, failedAccumulator := accumulator, current
+	if current.Sort() == br.Bits(32) {
+		compare = m.extract(accumulator, 0, 32)
+		failedAccumulator = m.make(br.ZExt, br.Bits(64), 0, current)
+	}
 	f, p := m.compareFlags(compare, current)
-	return CompareExchangeResult{Success: p.ZF, Accumulator: m.ite(p.ZF, compare, current), Memory: m.ite(p.ZF, replacement, current), Flags: f, Predicates: p}
+	return CompareExchangeResult{Success: p.ZF, Compare: compare, Accumulator: m.ite(p.ZF, accumulator, failedAccumulator), Memory: m.ite(p.ZF, replacement, current), Flags: f, Predicates: p}
 }
 
-// ArithmeticResult retains a modular arithmetic result and its flag relations.
+// ArithmeticResult retains a scalar arithmetic or logical result and its flags.
 type ArithmeticResult struct {
 	Value      br.Term
 	Flags      TransitionFlags
 	Predicates TransitionPredicates
+}
+
+// Logical derives AND or OR at the operands' common width (8, 32 or 64 bits).
+// CF and OF are cleared, SF/ZF/PF describe Value, and AF remains undefined.
+func (k *TransferKernel) Logical(op x86asm.Op, left, right br.Term) (ArithmeticResult, error) {
+	if op != x86asm.AND && op != x86asm.OR {
+		return ArithmeticResult{}, refuse(0, "relation-semantics", "unsupported logical operation")
+	}
+	if err := k.scalarInputs(left, right); err != nil {
+		return ArithmeticResult{}, err
+	}
+	r := k.meter.logical(op, left, right)
+	if k.meter.err != nil {
+		return ArithmeticResult{}, k.meter.err
+	}
+	return r, nil
+}
+
+func (m *valueBuilder) logical(op x86asm.Op, left, right br.Term) ArithmeticResult {
+	operation := br.BitAnd
+	if op == x86asm.OR {
+		operation = br.BitOr
+	}
+	value := m.binary(operation, left, right)
+	f, p := m.logicalFlags(value)
+	return ArithmeticResult{Value: value, Flags: f, Predicates: p}
 }
 
 // Add derives exact addition at the operands' common width (8, 32 or 64 bits).

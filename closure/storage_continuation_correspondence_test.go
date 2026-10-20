@@ -61,8 +61,8 @@ func storageContinuationAccount(t testing.TB, source *sourceOperandPrefix, nativ
 	if err != nil {
 		return nil, err
 	}
-	var chain []*sourceOperandPrefix
-	for at := source; at != nil; at = at.prior {
+	var chain []*sourceEffectPrefix
+	for at := source.sourceEffectPrefix; at != nil; at = at.prior {
 		chain = append(chain, at)
 	}
 	slices.Reverse(chain)
@@ -141,7 +141,7 @@ func TestStorageContinuationFactoryInstances(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if second.prior != first || completed.prior != second || len(first.checkedPacket().trace.allocations) != 1 || len(second.checkedPacket().trace.allocations) != 1 || len(completed.checkedPacket().trace.allocations) != 0 {
+			if second.prior != first.sourceEffectPrefix || completed.prior != second.sourceEffectPrefix || len(first.checkedPacket().trace.allocations) != 1 || len(second.checkedPacket().trace.allocations) != 1 || len(completed.checkedPacket().trace.allocations) != 0 {
 				t.Fatal("source did not retain two separate allocation-bearing phases")
 			}
 			p := first.checkedPacket().trace.allocations[0].location.object
