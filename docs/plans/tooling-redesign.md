@@ -679,8 +679,8 @@
                           word widths, provenance and untouched current bytes;
                           check contiguous scalar-slice reassembly independently.
                           Arbitrary entry words retain no process-argument meaning.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.14r Reproduce and disposition
-                          the [capture close-event refusal](../issues/assembly-capture-close-event.md),
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.14r Reproduce and disposition
+                          the capture close-event refusal,
                           add action/path/phase attribution, and land any confirmed
                           causal repair with genuine mutation-and-restore controls
                           before resuming process-entry design.

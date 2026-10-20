@@ -130,18 +130,21 @@ func (s *inputSet) validate() error {
 		return err
 	}
 	if err := s.watch.drain(); err != nil {
-		return err
+		return fmt.Errorf("assembly capture: initial validation drain: %w", err)
 	}
 	for path, want := range s.files {
 		got, err := readObservation(s.ctx, path, s.m)
 		if err != nil {
-			return err
+			return fmt.Errorf("assembly capture: validation read %s: %w", path, err)
 		}
 		if !sameObservation(want, got) {
 			return fmt.Errorf("assembly capture: input or lookup changed: %s", path)
 		}
 	}
-	return s.watch.drain()
+	if err := s.watch.drain(); err != nil {
+		return fmt.Errorf("assembly capture: final validation drain: %w", err)
+	}
+	return nil
 }
 
 func absolute(cwd, path string) string {

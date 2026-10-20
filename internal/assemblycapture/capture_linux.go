@@ -144,7 +144,7 @@ func Acquire(ctx context.Context, s *Selection, instance string, limits Limits) 
 		return nil, err
 	}
 	if err = guard.validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("assembly capture: before-build owner validation: %w", err)
 	}
 	server, err := startServer(work, cancel, s, p, m, temp)
 	if err != nil {
@@ -199,7 +199,7 @@ func Acquire(ctx context.Context, s *Selection, instance string, limits Limits) 
 		return nil, err
 	}
 	if err = guard.validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("assembly capture: after-build owner validation: %w", err)
 	}
 	packet, err := server.finish()
 	if err != nil {
@@ -394,7 +394,7 @@ func (c *captureServer) handle(conn *net.UnixConn) error {
 	if err = c.prepare(action, inputs); err != nil {
 		return err
 	}
-	if err = inputs.validate(); err != nil {
+	if err = action.validateInputs(inputs, "before-tool"); err != nil {
 		return err
 	}
 	if err = enc.Encode(boundaryReply{Observe: true}); err != nil {
@@ -404,7 +404,7 @@ func (c *captureServer) handle(conn *net.UnixConn) error {
 	if err = dec.Decode(&finish); err != nil {
 		return err
 	}
-	if err = inputs.validate(); err != nil {
+	if err = action.validateInputs(inputs, "after-tool"); err != nil {
 		return err
 	}
 	if tool == "preprofile" && finish.Exit == 0 && finish.Signal == 0 && finish.Error == "" {
@@ -418,7 +418,7 @@ func (c *captureServer) handle(conn *net.UnixConn) error {
 			return fmt.Errorf("assembly capture: profile output missing")
 		}
 		action.output = slices.Clone(o.data)
-		if err = inputs.validate(); err != nil {
+		if err = action.validateInputs(inputs, "preprofile-output"); err != nil {
 			return err
 		}
 	}
@@ -432,6 +432,13 @@ func (c *captureServer) handle(conn *net.UnixConn) error {
 	c.actions = append(c.actions, action)
 	c.mu.Unlock()
 	return enc.Encode(boundaryReply{})
+}
+
+func (a *capturedAction) validateInputs(inputs *inputSet, phase string) error {
+	if err := inputs.validate(); err != nil {
+		return fmt.Errorf("assembly capture: action instance %q, tool %q, directory %q, output %q, validation phase %s: %w", a.inv.Instance, a.inv.Tool, a.inv.CWD, a.inv.Output, phase, err)
+	}
+	return nil
 }
 
 func (c *captureServer) checkEnvironment(inv Invocation) error {

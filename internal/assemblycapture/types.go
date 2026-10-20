@@ -1,10 +1,12 @@
 // Package assemblycapture acquires current Go assembly inputs at the actual
 // tool-execution boundary. Its packets are observations, not implementation
-// proofs. The caller retains source/build hold-still obligations: inotify does
-// not observe mmap writes, remote filesystem writes, or mount substitution and
-// does not establish universal absence of mutation-and-restore. Those remain
-// under the caller's source/build exclusion; local notified mutations and
-// observable post-snapshot drift invalidate the acquisition.
+// proofs. The caller retains source/build hold-still obligations: inotify has
+// unobserved channels including mmap and native AIO writes, remote filesystem
+// writes, mount substitution, and kernel/filesystem notification gaps. It does
+// not establish universal absence of mutation-and-restore. Those intervals remain
+// under the caller's source/build exclusion; notified mutations, observation loss,
+// and observable post-snapshot drift invalidate the acquisition. Closing a
+// writable description alone establishes no mutation.
 package assemblycapture
 
 import (

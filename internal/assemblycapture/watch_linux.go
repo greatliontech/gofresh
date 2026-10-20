@@ -6,8 +6,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -16,6 +18,10 @@ import (
 type watchInterest struct {
 	all   bool
 	names map[string]bool
+	// paths retains the coordinates reached by the component/symlink walk.
+	// Several coordinates can share an inode watch. They are diagnostic facts
+	// from registration, never re-resolved after a namespace mutation.
+	paths map[string]bool
 }
 type watcher struct {
 	fd      int
@@ -47,7 +53,9 @@ func (w *watcher) add(name, child string, nofollow bool) error {
 	if err := w.m.charge("watches", 1); err != nil {
 		return err
 	}
-	mask := uint32(unix.IN_MODIFY | unix.IN_ATTRIB | unix.IN_CLOSE_WRITE | unix.IN_CREATE | unix.IN_DELETE | unix.IN_MOVED_FROM | unix.IN_MOVED_TO | unix.IN_DELETE_SELF | unix.IN_MOVE_SELF | unix.IN_UNMOUNT | unix.IN_MASK_ADD)
+	// Closing a writable description need not change the file, even when its
+	// final reference outlives the original writer and watch installation.
+	mask := uint32(unix.IN_MODIFY | unix.IN_ATTRIB | unix.IN_CREATE | unix.IN_DELETE | unix.IN_MOVED_FROM | unix.IN_MOVED_TO | unix.IN_DELETE_SELF | unix.IN_MOVE_SELF | unix.IN_UNMOUNT | unix.IN_MASK_ADD)
 	if nofollow {
 		mask |= unix.IN_DONT_FOLLOW
 	}
@@ -57,9 +65,10 @@ func (w *watcher) add(name, child string, nofollow bool) error {
 	}
 	e := w.entries[wd]
 	if e == nil {
-		e = &watchInterest{names: map[string]bool{}}
+		e = &watchInterest{names: map[string]bool{}, paths: map[string]bool{}}
 		w.entries[wd] = e
 	}
+	e.paths[name] = true
 	if child == "" {
 		e.all = true
 	} else {
@@ -140,8 +149,11 @@ func (w *watcher) drain() error {
 		if errors.Is(err, unix.EAGAIN) {
 			return nil
 		}
-		if err != nil || n == 0 {
-			return fmt.Errorf("assembly capture: mutation observation lost: %v", err)
+		if err != nil {
+			return fmt.Errorf("assembly capture: mutation observation lost: %w", err)
+		}
+		if n == 0 {
+			return fmt.Errorf("assembly capture: mutation observation lost: end of event stream")
 		}
 		if err := w.acceptEvents(buf[:n]); err != nil {
 			return err
@@ -165,16 +177,27 @@ func (w *watcher) acceptEvents(buf []byte) error {
 		}
 		name := strings.TrimRight(string(buf[at+unix.SizeofInotifyEvent:at+unix.SizeofInotifyEvent+int(length)]), "\x00")
 		if mask&(unix.IN_Q_OVERFLOW|unix.IN_IGNORED|unix.IN_UNMOUNT) != 0 {
-			return fmt.Errorf("assembly capture: mutation observation incomplete (mask %#x)", mask)
+			return w.eventError("mutation observation incomplete", wd, name, mask)
 		}
 		e := w.entries[wd]
 		if e == nil {
-			return fmt.Errorf("assembly capture: unknown mutation watch")
+			return w.eventError("unknown mutation watch", wd, name, mask)
 		}
 		if e.all || e.names[name] || mask&(unix.IN_MOVE_SELF|unix.IN_DELETE_SELF) != 0 || name == "" && mask&unix.IN_ATTRIB != 0 {
-			return fmt.Errorf("assembly capture: protected input namespace mutated (name %q, mask %#x)", name, mask)
+			return w.eventError("protected input namespace mutated", wd, name, mask)
 		}
 		at += unix.SizeofInotifyEvent + int(length)
 	}
 	return nil
+}
+
+func (w *watcher) eventError(reason string, wd int, name string, mask uint32) error {
+	var roots, paths []string
+	if e := w.entries[wd]; e != nil {
+		roots = slices.Sorted(maps.Keys(e.paths))
+		for _, root := range roots {
+			paths = append(paths, filepath.Join(root, name))
+		}
+	}
+	return fmt.Errorf("assembly capture: %s (wd %d, watch paths %q, paths %q, name %q, mask %#x)", reason, wd, roots, paths, name, mask)
 }

@@ -6830,8 +6830,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.loadSelectedSource"
   role: BINDING_ROLE_IMPLEMENTS
@@ -6841,8 +6841,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.Selection.Seal"
   role: BINDING_ROLE_IMPLEMENTS
@@ -6852,8 +6852,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.preprocess"
   role: BINDING_ROLE_IMPLEMENTS
@@ -6863,8 +6863,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.assemblyReference.boundTo"
   role: BINDING_ROLE_IMPLEMENTS
@@ -6874,8 +6874,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestSelectedSourceOwnerParserAndInstances"
   role: BINDING_ROLE_TESTS
@@ -6885,8 +6885,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceOwnerCannotBeManufactured"
   role: BINDING_ROLE_TESTS
@@ -6896,8 +6896,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceSelectedOwnedProviders"
   role: BINDING_ROLE_TESTS
@@ -6907,8 +6907,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestPreprocessOwnsShadowAndNestedLookup"
   role: BINDING_ROLE_TESTS
@@ -6918,8 +6918,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestPreprocessCompleteGrammarAndRefusals"
   role: BINDING_ROLE_TESTS
@@ -6929,8 +6929,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.acquireSelectedAssembly"
   role: BINDING_ROLE_IMPLEMENTS
@@ -6940,8 +6940,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.Acquire"
   role: BINDING_ROLE_IMPLEMENTS
@@ -6951,8 +6951,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.captureServer.handle"
   role: BINDING_ROLE_IMPLEMENTS
@@ -6962,8 +6962,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.captureServer.finish"
   role: BINDING_ROLE_IMPLEMENTS
@@ -6973,8 +6973,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.checkImports"
   role: BINDING_ROLE_IMPLEMENTS
@@ -6984,8 +6984,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyCaptureExactTestVariant"
   role: BINDING_ROLE_TESTS
@@ -6995,8 +6995,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyResponseSelectedReference"
   role: BINDING_ROLE_TESTS
@@ -7006,8 +7006,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestAcquireCurrentFinalAssembly"
   role: BINDING_ROLE_TESTS
@@ -7017,8 +7017,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestCaptureRefusesMissingActionsAndUnsealedOwner"
   role: BINDING_ROLE_TESTS
@@ -7028,8 +7028,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestCaptureRejectsPreexistingInterposition"
   role: BINDING_ROLE_TESTS
@@ -7039,8 +7039,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestMutationEventOverflowAndIncompleteRefuse"
   role: BINDING_ROLE_TESTS
@@ -7050,8 +7050,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestPreprocessPreservesDirectKernelPathResolution"
   role: BINDING_ROLE_TESTS
@@ -7061,8 +7061,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestMutationObservationFailsClosed"
   role: BINDING_ROLE_TESTS
@@ -7072,8 +7072,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestCompilerImportConfigurationBindsWholeOwnedGraph"
   role: BINDING_ROLE_TESTS
@@ -7083,8 +7083,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestCompilerRejectsUnownedSourceAndEffectiveOptions"
   role: BINDING_ROLE_TESTS
@@ -7094,8 +7094,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestPreprocessRefusesBudgetAndCancellation"
   role: BINDING_ROLE_TESTS
@@ -7105,8 +7105,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestResponseFilesOwnGrammarAndInputs"
   role: BINDING_ROLE_TESTS
@@ -7116,8 +7116,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestResponseEOFAndQuotedCommandGrammar"
   role: BINDING_ROLE_TESTS
@@ -7127,8 +7127,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.FuzzResponseGrammarBoundaries"
   role: BINDING_ROLE_TESTS
@@ -7138,8 +7138,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestActualReceiptRosterAndProfileRefusals"
   role: BINDING_ROLE_TESTS
@@ -7149,8 +7149,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestPrivateBoundaryForwardsDispositionAndStreams"
   role: BINDING_ROLE_TESTS
@@ -7160,8 +7160,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestHandlerClosingValidationAndCancellation"
   role: BINDING_ROLE_TESTS
@@ -7171,8 +7171,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestHandlerFIFOReplacementCannotStrandCancellation"
   role: BINDING_ROLE_TESTS
@@ -7182,8 +7182,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestAcquireCumulativeObservationLimits"
   role: BINDING_ROLE_TESTS
@@ -7193,8 +7193,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestAcquireTemporaryDirectoryWholeWordQuoting"
   role: BINDING_ROLE_TESTS
@@ -7204,8 +7204,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.checkAssemblyReference"
   role: BINDING_ROLE_IMPLEMENTS
@@ -7215,8 +7215,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.assemblyReferenceDefinitions"
   role: BINDING_ROLE_IMPLEMENTS
@@ -7226,8 +7226,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.assemblyReferenceDirectives"
   role: BINDING_ROLE_IMPLEMENTS
@@ -7237,8 +7237,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceCompleteDefinitionInventory"
   role: BINDING_ROLE_TESTS
@@ -7248,8 +7248,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferencePackageWideDirectives"
   role: BINDING_ROLE_TESTS
@@ -7259,8 +7259,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceSelectedRedirectRefusal"
   role: BINDING_ROLE_TESTS
@@ -7270,8 +7270,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceSelectedCompetingProvider"
   role: BINDING_ROLE_TESTS
@@ -7281,8 +7281,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceSelectedOwnedProviders"
   role: BINDING_ROLE_TESTS
@@ -7292,8 +7292,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.assemblyReferenceInterpret"
   role: BINDING_ROLE_IMPLEMENTS
@@ -7303,8 +7303,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.assemblyReferenceMachine.step"
   role: BINDING_ROLE_IMPLEMENTS
@@ -7314,8 +7314,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceUniversalOperandsAndBothWriteCycles"
   role: BINDING_ROLE_TESTS
@@ -7325,8 +7325,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceSourceEditsDeriveDifferentRelations"
   role: BINDING_ROLE_TESTS
@@ -7336,8 +7336,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceBodyAndFrameRefusals"
   role: BINDING_ROLE_TESTS
@@ -7347,8 +7347,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceGenericBodyAndRegisterAliases"
   role: BINDING_ROLE_TESTS
@@ -7358,8 +7358,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceInvocationOptions"
   role: BINDING_ROLE_TESTS
@@ -7369,8 +7369,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.assemblyReferenceABI"
   role: BINDING_ROLE_IMPLEMENTS
@@ -7380,8 +7380,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.assemblyReferenceInterpret"
   role: BINDING_ROLE_IMPLEMENTS
@@ -7391,8 +7391,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.assemblyReferenceApply"
   role: BINDING_ROLE_IMPLEMENTS
@@ -7402,8 +7402,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceBodyAndFrameRefusals"
   role: BINDING_ROLE_TESTS
@@ -7413,8 +7413,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceUniversalOperandsAndBothWriteCycles"
   role: BINDING_ROLE_TESTS
@@ -7424,8 +7424,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceSpecializationDoesNotAssignScratch"
   role: BINDING_ROLE_TESTS
@@ -7435,8 +7435,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.regionKernel.callReference"
   role: BINDING_ROLE_IMPLEMENTS
@@ -7446,8 +7446,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.continueGlobalOperandCorrespondence"
   role: BINDING_ROLE_IMPLEMENTS
@@ -7457,8 +7457,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceCancellationAndCumulativeBudget"
   role: BINDING_ROLE_TESTS
@@ -7468,8 +7468,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestGlobalRegionCorrespondencePopulation"
   role: BINDING_ROLE_TESTS
@@ -7479,8 +7479,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestGlobalReferenceCWDTextflagChangesBoolean"
   role: BINDING_ROLE_TESTS
@@ -7490,8 +7490,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestGlobalReferenceSameValueWriteRejectsUnchangedInline"
   role: BINDING_ROLE_TESTS
@@ -7501,8 +7501,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestGlobalRegionCorrespondenceSelectedRuntimeArtifact"
   role: BINDING_ROLE_TESTS
@@ -8172,8 +8172,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.FuzzAssemblyReferenceSelectedOwnershipAndBinding"
   role: BINDING_ROLE_TESTS
@@ -8183,8 +8183,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.FuzzAssemblyReferenceSelectedOwnershipAndBinding"
   role: BINDING_ROLE_TESTS
@@ -8194,8 +8194,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.FuzzAssemblyReferenceBodyAndPrivateFrame"
   role: BINDING_ROLE_TESTS
@@ -8205,8 +8205,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.FuzzAssemblyReferenceBodyAndPrivateFrame"
   role: BINDING_ROLE_TESTS
@@ -8216,8 +8216,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.FuzzGlobalRegionReferenceSubstitution"
   role: BINDING_ROLE_TESTS
@@ -9250,8 +9250,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceWordAndVoidInterfaces"
   role: BINDING_ROLE_TESTS
@@ -9261,8 +9261,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceWordResultAndStorageRefusals"
   role: BINDING_ROLE_TESTS
@@ -9272,8 +9272,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.FuzzAssemblyWordReferenceRelations"
   role: BINDING_ROLE_TESTS
@@ -9283,8 +9283,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceWordFlagConsumers"
   role: BINDING_ROLE_TESTS
@@ -9294,8 +9294,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceMixedAtomicOccurrenceOrder"
   role: BINDING_ROLE_TESTS
@@ -9305,8 +9305,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceWordAndVoidInterfaces"
   role: BINDING_ROLE_TESTS
@@ -9316,8 +9316,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceWordResultAndStorageRefusals"
   role: BINDING_ROLE_TESTS
@@ -9327,8 +9327,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceOwnsExpandedFrameAndInputPopulation"
   role: BINDING_ROLE_TESTS
@@ -9338,8 +9338,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.FuzzAssemblyWordReferenceRelations"
   role: BINDING_ROLE_TESTS
@@ -9349,8 +9349,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceSelectedWordSubstitution"
   role: BINDING_ROLE_TESTS
@@ -9360,8 +9360,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestGlobalFunctionAtomicGroupingAndDeadResults"
   role: BINDING_ROLE_TESTS
@@ -14775,8 +14775,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.checkSourceOperandContinuation"
   role: BINDING_ROLE_IMPLEMENTS
@@ -14852,8 +14852,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.assemblyReferenceABI"
   role: BINDING_ROLE_IMPLEMENTS
@@ -14863,8 +14863,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.assemblyReferenceIntegerWidth"
   role: BINDING_ROLE_IMPLEMENTS
@@ -14874,8 +14874,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.assemblyReferenceBooleanType"
   role: BINDING_ROLE_IMPLEMENTS
@@ -14885,8 +14885,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.assemblyReferenceResultWidth"
   role: BINDING_ROLE_IMPLEMENTS
@@ -14896,8 +14896,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.assemblyReferenceApply"
   role: BINDING_ROLE_IMPLEMENTS
@@ -14907,8 +14907,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.assemblyReference.evaluate"
   role: BINDING_ROLE_IMPLEMENTS
@@ -14918,8 +14918,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.regionKernel.referenceLocation"
   role: BINDING_ROLE_IMPLEMENTS
@@ -14929,8 +14929,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.regionReferenceWord"
   role: BINDING_ROLE_IMPLEMENTS
@@ -14940,8 +14940,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.regionReferenceValue"
   role: BINDING_ROLE_IMPLEMENTS
@@ -15039,8 +15039,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferenceTypedCAS"
   role: BINDING_ROLE_TESTS
@@ -15050,8 +15050,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferenceFullCASAccumulator"
   role: BINDING_ROLE_TESTS
@@ -15061,8 +15061,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferenceByteLogical"
   role: BINDING_ROLE_TESTS
@@ -15072,8 +15072,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferenceScalarResultViews"
   role: BINDING_ROLE_TESTS
@@ -15083,8 +15083,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferenceExactExtentAndScratchRefusals"
   role: BINDING_ROLE_TESTS
@@ -15094,8 +15094,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferencePaddingAndResultInterpretation"
   role: BINDING_ROLE_TESTS
@@ -15105,8 +15105,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferenceReadableWrongSlotsAndByteLanes"
   role: BINDING_ROLE_TESTS
@@ -15116,8 +15116,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferenceLogicalFlagsAndOccurrenceOrder"
   role: BINDING_ROLE_TESTS
@@ -15127,8 +15127,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferenceUnsupportedTypedInterfaces"
   role: BINDING_ROLE_TESTS
@@ -15138,8 +15138,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceNarrowGeneratedBodies"
   role: BINDING_ROLE_TESTS
@@ -15149,8 +15149,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceNarrowSemanticAlternatives"
   role: BINDING_ROLE_TESTS
@@ -15160,8 +15160,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.FuzzAssemblyReferenceNarrowAccumulator"
   role: BINDING_ROLE_TESTS
@@ -15171,8 +15171,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferenceTypedCAS"
   role: BINDING_ROLE_TESTS
@@ -15182,8 +15182,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferenceByteLogical"
   role: BINDING_ROLE_TESTS
@@ -15193,8 +15193,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferenceScalarResultViews"
   role: BINDING_ROLE_TESTS
@@ -15204,8 +15204,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferenceExactExtentAndScratchRefusals"
   role: BINDING_ROLE_TESTS
@@ -15215,8 +15215,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferencePaddingAndResultInterpretation"
   role: BINDING_ROLE_TESTS
@@ -15226,8 +15226,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyNarrowReferenceLogicalFlagsAndOccurrenceOrder"
   role: BINDING_ROLE_TESTS
@@ -15237,8 +15237,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceNarrowGeneratedBodies"
   role: BINDING_ROLE_TESTS
@@ -15248,8 +15248,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestAssemblyReferenceNarrowSemanticAlternatives"
   role: BINDING_ROLE_TESTS
@@ -15259,8 +15259,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.FuzzAssemblyReferenceNarrowAccumulator"
   role: BINDING_ROLE_TESTS
@@ -15347,8 +15347,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestRegionNarrowSelectedReferenceApplications"
   role: BINDING_ROLE_TESTS
@@ -15358,8 +15358,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestNarrowReferenceSelectedRuntime"
   role: BINDING_ROLE_TESTS
@@ -15369,8 +15369,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestNarrowReferenceSelectedRuntime"
   role: BINDING_ROLE_TESTS
@@ -15380,8 +15380,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestNarrowReferenceSelectedRuntime"
   role: BINDING_ROLE_TESTS
@@ -15391,8 +15391,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestNarrowReferenceSelectedRuntime"
   role: BINDING_ROLE_TESTS
@@ -15402,8 +15402,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestNarrowReferenceSelectedRuntime"
   role: BINDING_ROLE_TESTS
@@ -15622,8 +15622,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestNarrowJointCorrespondenceGenerated"
   role: BINDING_ROLE_TESTS
@@ -15633,8 +15633,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.FuzzNarrowJointCorrespondence"
   role: BINDING_ROLE_TESTS
@@ -15644,8 +15644,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestNarrowJointSemanticDisagreements"
   role: BINDING_ROLE_TESTS
@@ -15655,8 +15655,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestNarrowJointCompleteAtomicWidthBoundary"
   role: BINDING_ROLE_TESTS
@@ -16865,8 +16865,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.checkedScalarConstant"
   role: BINDING_ROLE_IMPLEMENTS
@@ -16931,8 +16931,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestCheckedScalarConstantEndpoints"
   role: BINDING_ROLE_TESTS
@@ -16942,8 +16942,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-impl-assembly-reference"
-  content_hash: "2480ea39e3e7c6132e131f77d6ff4e2210fd78ff4fd011dbf88dee28c38aa59f"
-  source_hash: "7b858938fa7b6cc363e8595e2ab1b2e0c96f225e6de5f663c69ea253af3f5cbe"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestCheckedScalarConstantCheckerPhase"
   role: BINDING_ROLE_TESTS
@@ -18731,4 +18731,59 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "b6c028ea54bdfe5e24e39a95da9d860db6f2869edaad5e385c9bad0144157e43"
   clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-assembly-reference"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestInputSetAcceptsRetainedWriterClose"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b96045a3c5c6e3d1e6c6e274cc8dc8f7a5bc92e87171b5241946d1461036fce2"
+  clause_label: "current-action-acquisition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-assembly-reference"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestInputSetDetectsMutationBeforeWriterClose"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a2adacf9295647b947ccdfa48fd0621681cc236efc900ef30404206a89da2930"
+  clause_label: "current-action-acquisition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-assembly-reference"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestActionValidationAttributesResolvedMutation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "daa8fefe16849a41138d3e6e27bf4997b957967b027767105f89d65d6a33cb98"
+  clause_label: "current-action-acquisition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-assembly-reference"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestActionValidationPreservesUnderlyingErrors"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9835bd56a3c3cc3aeaf3dd115e22a5cd445a5a147005ea19a24fb7c6a14edc49"
+  clause_label: "current-action-acquisition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-assembly-reference"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestMutationDiagnosticRetainsSharedWatchCoordinates"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "23a40364b91f0ebcfbbad24791bd2813a5b49d970c90180a58fd0cd53944a4e8"
+  clause_label: "current-action-acquisition"
 }

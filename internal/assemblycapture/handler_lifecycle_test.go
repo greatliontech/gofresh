@@ -227,6 +227,11 @@ func TestHandlerClosingValidationAndCancellation(t *testing.T) {
 				if result.err == nil || !strings.Contains(result.err.Error(), "protected input namespace mutated") || packet != nil || finishErr == nil {
 					t.Fatalf("closing action guard absent: packet=%v run=%v finish=%v", packet, result.err, finishErr)
 				}
+				for _, token := range []string{"after-tool", strconv.Quote(f.provider.ID), strconv.Quote(filepath.Join(f.selection.goenv["GOTOOLDIR"], "asm")), strconv.Quote(f.header), "wd "} {
+					if !strings.Contains(result.err.Error(), token) {
+						t.Errorf("closing action attribution lacks %q: %v", token, result.err)
+					}
+				}
 			case "cancel-after-completion":
 				if ctx.Err() != context.Canceled || result.err == nil || packet != nil || finishErr == nil {
 					t.Fatalf("post-completion cancellation accepted: packet=%v run=%v finish=%v", packet, result.err, finishErr)

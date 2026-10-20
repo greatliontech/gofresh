@@ -1084,7 +1084,12 @@ reference at a source call MUST satisfy these obligations:
   Capture establishes agreeing path/content and lookup observations and protects
   them through that action's input-use interval. Relevant namespace and content
   mutations, including creation of an earlier candidate, invalidate acquisition;
-  incomplete mutation observation supplies no protection. Source/build exclusion
+  loss of mutation observation refuses acquisition; incomplete observation supplies
+  no protection. Descriptor release alone establishes no namespace or content
+  mutation. Unobserved mutation channels, including native AIO, memory-mapped and
+  remote writes, mount substitution, and kernel/filesystem notification gaps,
+  remain under caller-owned exclusion; agreeing endpoints do not prove the
+  absence of an intervening mutation. Source/build exclusion
   and mutation-and-restore residuals remain explicit under
   REQ-fresh-coherent-view and REQ-fresh-producer-view. Transient inputs are copied
   and validated before their namespace is released; subsequent cleanup supplies
