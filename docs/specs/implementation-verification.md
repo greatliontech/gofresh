@@ -1241,6 +1241,17 @@ contracts:
   model, and checked surrounding composition must establish their entry-state
   premises. A version, name, source example, equal width or successful execution
   cannot discharge these conditions.
+  A complete source/native relation may discharge the model-dependent value,
+  effect, control and exceptional-outcome consequences for its exact selected
+  scope under the retained machine/entry conditions and original input relation.
+  This scoped discharge leaves the original source antecedent intact. It grants
+  neither an unqualified encoding theorem nor applicability to another invocation,
+  inline copy, prefix or source-only conclusion. When pure computations or storage
+  are eliminated, checked isolation, value and complete dependent-use reasoning
+  may establish the same claimed consequences without asserting a physical object
+  or operation that does not exist. Actual native floating operations still require
+  their own checked operand, exception/status and preserved-context conditions;
+  final byte equality alone cannot discharge them.
   A permitted bit view preserves the live object's allocation identity, lifetime,
   offset and owning bytes, with checked extent and alignment for both views.
   Reads and writes use one canonical object state, so an alias cannot retain stale

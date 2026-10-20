@@ -23,7 +23,14 @@ func TestNarrowReferenceSelectedRuntime(t *testing.T) {
 	}
 	dir := t.TempDir()
 	writeTree(t, dir, map[string]string{"go.mod": "module example.com/narrowreference\n\ngo 1.27\n"})
-	source, _, _ := loadSourceCommandFixture(t, dir, "cmd/compile")
+	source, _, h := loadSourceCommandFixture(t, dir, "cmd/compile")
+	raw, image, locations := selectedRuntimeCheckArtifact(t, h)
+	complete, child := selectedCheckSource(t, source)
+	assertSelectedRuntimeCheckCorrespondence(t, source, raw, image, locations, complete, child)
+}
+
+func selectedCheckSource(t *testing.T, source computationSource) (*sourceReturnCompletion, *sourceOperandPrefix) {
+	t.Helper()
 	var provider *ssa.Package
 	for _, pkg := range source.prog.Pkgs {
 		if pkg.PkgPath == "internal/runtime/atomic" {
@@ -137,10 +144,10 @@ func TestNarrowReferenceSelectedRuntime(t *testing.T) {
 		}
 		references[target] = reference
 	}
-	assertNarrowSelectedSourcePrefix(t, source, references)
+	return assertNarrowSelectedSourcePrefix(t, source, references)
 }
 
-func assertNarrowSelectedSourcePrefix(t *testing.T, source computationSource, references map[*ssa.Function]*assemblyReference) {
+func assertNarrowSelectedSourcePrefix(t *testing.T, source computationSource, references map[*ssa.Function]*assemblyReference) (*sourceReturnCompletion, *sourceOperandPrefix) {
 	t.Helper()
 	var root *ssa.Function
 	for _, pkg := range source.prog.Pkgs {
@@ -330,7 +337,7 @@ func assertNarrowSelectedSourcePrefix(t *testing.T, source computationSource, re
 		assertInteger(readRegionLocation(beforeAnd.region.packet.observations[0].state, location, types.Typ[types.Uint8]), 0xff)
 	}
 	t.Log("complete selected source entry through CAS32 success/failure/high-bit and byte OR/AND; sibling guards checked, unsafe conversion unexecuted")
-	assertFloatSelectedSourceContinuation(t, completed, references)
+	return assertFloatSelectedSourceContinuation(t, completed, references)
 }
 
 func assertNarrowSelectedReferenceGroup(t *testing.T, got assemblyReferenceResult, kind x86asm.Op, before, after uint64) {

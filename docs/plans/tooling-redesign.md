@@ -574,7 +574,7 @@
                             guard < incoming RSP-64 as an explicit conditional
                             parent premise until root applicability establishes it;
                             the parent's own successful guard does not imply it.
-                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.12 Complete conditional
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.12 Complete conditional
                           runtime.check, including its finite round2 loop and actual
                           return (candidate custom 0x47278f), with checked progress,
                           complete state/effect coverage and source correspondence.
@@ -628,7 +628,7 @@
                             call: selected argument, addition, shift widths, phi
                             predecessors and checked remaining-path exhaustion.
                             Do not generalize termination to all positive inputs.
-                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.12g Compose full selected
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.12g Compose full selected
                             check source with optimized stock/custom complete
                             native return: local/global representation, narrow
                             atomic grouping, actual source/native child association,

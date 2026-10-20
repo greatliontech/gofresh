@@ -1011,6 +1011,27 @@ func TestStorageFunctionKnownReadDefersAmbiguousInitialization(t *testing.T) {
 			if variant == "eliminated-read" && (proof.matched[0].source != 0 || proof.matched[1].source != 2 || proof.eliminated[0] != 1) {
 				t.Fatal("known read stole the later explicit zero write")
 			}
+			if variant == "eliminated-read" {
+				// Initializer lookahead proves x's zero write before deciding to
+				// eliminate the y read. That abandoned lookahead must not let the
+				// later real write match borrow a discarded equality witness.
+				bound, _ := native.BoundFor(fixture.image)
+				actual := bound.Accesses[proof.matched[1].native].Value
+				b := br.NewBuilder(8)
+				zero, _ := b.Const(actual.Sort(), 0)
+				equal, _ := b.Make(br.Equal, br.Bool(), 0, actual, zero)
+				unequal, _ := b.Make(br.Not, br.Bool(), 0, equal)
+				violation, _ := b.Make(br.And, br.Bool(), 0, proof.antecedent, unequal)
+				falsity, _ := b.Const(br.Bool(), 0)
+				retained := false
+				for _, witness := range proof.equalities {
+					left, right := witness.Roots()
+					retained = retained || witness.Valid() && left.Digest() == violation.Digest() && right.Digest() == falsity.Digest()
+				}
+				if !retained {
+					t.Fatal("matched zero write lost its checked equality after lookahead rollback")
+				}
+			}
 		})
 	}
 }

@@ -12,7 +12,7 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-func selectedCheckCompleteReturn(t testing.TB, raw []byte, image *nativeproof.Image, application nativeproof.TransitionCallCertificate, header nativeproof.TransitionCertificate) {
+func selectedCheckCompleteReturn(t testing.TB, raw []byte, image *nativeproof.Image, application nativeproof.TransitionCallCertificate, header nativeproof.TransitionCertificate) (nativeproof.TransitionReturnCertificate, nativeproof.TransitionProposal) {
 	t.Helper()
 	prior, ok := application.Successor()
 	if !ok {
@@ -37,7 +37,9 @@ func selectedCheckCompleteReturn(t testing.TB, raw []byte, image *nativeproof.Im
 	if ret == 0 {
 		t.Fatal("candidate native epilogue has no actual RET")
 	}
-	for _, start := range []nativeproof.TransitionCertificate{prior, header} {
+	var parentReturn nativeproof.TransitionReturnCertificate
+	var parentTail nativeproof.TransitionProposal
+	for index, start := range []nativeproof.TransitionCertificate{prior, header} {
 		b, _ := start.Bound()
 		choices := expansions
 		if b.Boundary.ID == firstHeader.Boundary.ID {
@@ -64,6 +66,9 @@ func selectedCheckCompleteReturn(t testing.TB, raw []byte, image *nativeproof.Im
 			t.Fatal(err)
 		}
 		assertSelectedCheckReturn(t, image, incoming, completed)
+		if index == 0 {
+			parentReturn, parentTail = completed, proposal
+		}
 		result, _ := completed.Bound()
 		t.Logf("actual complete native caller RET=%#x from cut=%#x: %d retained instruction occurrences, %d accesses, %d primitives", ret, b.Boundary.PC, len(result.Instructions), len(result.Accesses), len(result.Prefix.PrimitiveEffects))
 	}
@@ -82,6 +87,7 @@ func selectedCheckCompleteReturn(t testing.TB, raw []byte, image *nativeproof.Im
 	if _, accepted := bad.Bound(); accepted || !errors.As(err, &refusal) || refusal.Premise != "transition-frontier" {
 		t.Fatalf("incomplete native loop did not refuse at its feasible frontier: %v", err)
 	}
+	return parentReturn, parentTail
 }
 
 // The tail's source correspondence is a separate obligation. These assertions

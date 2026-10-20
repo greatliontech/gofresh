@@ -34,7 +34,7 @@ func TestFloatSourceModelSelectedOwner(t *testing.T) {
 	}
 }
 
-func assertFloatSelectedSourceContinuation(t *testing.T, prior *sourceEffectPrefix, references map[*ssa.Function]*assemblyReference) {
+func assertFloatSelectedSourceContinuation(t *testing.T, prior *sourceEffectPrefix, references map[*ssa.Function]*assemblyReference) (*sourceReturnCompletion, *sourceOperandPrefix) {
 	t.Helper()
 	root := prior.region.packet.input.root
 	var boundary *ssa.Call
@@ -129,5 +129,5 @@ func assertFloatSelectedSourceContinuation(t *testing.T, prior *sourceEffectPref
 		t.Fatal("selected float interval omitted a bit store")
 	}
 	t.Log("complete selected source entry through four bit stores and eight IEEE comparisons; testAtomic64 remains unexecuted; native applicability remains conditional")
-	assertRoundSelectedSourceCompletion(t, completed, references)
+	return assertRoundSelectedSourceCompletion(t, completed, references), completed
 }

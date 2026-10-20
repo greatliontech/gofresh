@@ -301,3 +301,87 @@ func TestGlobalFunctionGuardImplication(t *testing.T) {
 		t.Fatal("active occurrence erased")
 	}
 }
+
+func TestGlobalFunctionSharedGuardDAG(t *testing.T) {
+	b := br.NewBuilder(256)
+	scope := br.NewScope()
+	guard, _ := b.Input(br.Bool(), scope, 0)
+	antecedent := guard
+	for i := 1; i <= 12; i++ {
+		leaf, err := b.Input(br.Bool(), scope, uint64(i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		antecedent, err = b.Make(br.And, br.Bool(), 0, antecedent, leaf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		right, err := b.Make(br.And, br.Bool(), 0, guard, leaf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		guard, err = b.Make(br.And, br.Bool(), 0, guard, right)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Every leaf is required by the antecedent, but each preceding guard is
+	// shared by two successors. Unfolding this DAG as a tree exhausts the
+	// ordinary cumulative allowance despite its small unique population.
+	p := &globalFunctionCorrespondence{antecedent: antecedent}
+	meter := &correspondenceContext{Context: t.Context(), limit: 2_000_000}
+	if err := p.constant(meter, guard, 1); err != nil {
+		t.Fatalf("shared guard failed after %d work: %v", meter.work, err)
+	}
+	if err := p.constant(meter, guard, 0); !globalFunctionUnproved(err) {
+		t.Fatalf("active shared guard did not retain refusal: %v", err)
+	}
+	unknown, _ := b.Input(br.Bool(), br.NewScope(), 0)
+	p.antecedent = unknown
+	if err := p.constant(meter, guard, 1); !globalFunctionUnproved(err) {
+		t.Fatalf("proof borrowed another antecedent: %v", err)
+	}
+	p.antecedent = antecedent
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := p.constant(cancelled, guard, 1); !errors.Is(err, context.Canceled) {
+		t.Fatalf("repeated implication masked cancellation: %v", err)
+	}
+}
+
+func TestGlobalFunctionConditionalIndependence(t *testing.T) {
+	b := br.NewBuilder(64)
+	origin, _ := b.Input(br.Bits(64), br.NewScope(), 0)
+	limit, _ := b.Const(br.Bits(64), 4096)
+	guard, _ := b.Make(br.ULT, br.Bool(), 0, origin, limit)
+	negated, _ := b.Make(br.Not, br.Bool(), 0, guard)
+	value, _ := b.Const(br.Bits(64), 11)
+	left, _ := b.Make(br.ITE, br.Bits(64), 0, guard, value, origin)
+	right, _ := b.Make(br.ITE, br.Bits(64), 0, guard, origin, value)
+	unknown, _ := b.Input(br.Bool(), br.NewScope(), 0)
+	for _, tc := range []struct {
+		name             string
+		antecedent, term br.Term
+		accept           bool
+	}{
+		{"true-arm", guard, left, true},
+		{"false-arm", negated, right, true},
+		{"live-origin-left", guard, right, false},
+		{"live-origin-right", negated, left, false},
+		{"unknown-selector", unknown, left, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &globalFunctionCorrespondence{antecedent: tc.antecedent}
+			prove := func(term br.Term, value uint64) error { return p.constant(t.Context(), term, value) }
+			if err := globalFunctionIndependentWhen(t.Context(), tc.term, map[br.Term]bool{origin: true}, prove); (err == nil) != tc.accept {
+				t.Fatalf("conditional independence: %v", err)
+			}
+			if tc.accept && len(p.equalities) == 0 {
+				t.Fatal("selected branch has no retained implication witness")
+			}
+		})
+	}
+	if err := globalFunctionIndependent(t.Context(), left, map[br.Term]bool{origin: true}); err == nil {
+		t.Fatal("unconditional entry separation borrowed a conditional premise")
+	}
+}

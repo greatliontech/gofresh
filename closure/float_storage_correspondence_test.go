@@ -13,6 +13,10 @@ import (
 // constant effect must agree with every checked source comparison it replaces.
 func TestFloatStorageEliminatedComparisonEffects(t *testing.T) {
 	for _, width := range []int{4, 8} {
+		quiet := uint64(1) << 22
+		if width == 8 {
+			quiet = uint64(1) << 51
+		}
 		for _, tc := range []struct {
 			name string
 			bits uint64
@@ -21,6 +25,10 @@ func TestFloatStorageEliminatedComparisonEffects(t *testing.T) {
 			{"zero", 0, 1},
 			{"negative-zero", uint64(1) << (width*8 - 1), 1},
 			{"nan", ^uint64(0) >> (64 - width*8), 2},
+			// These source encodings are valid even though actually executing
+			// UCOMIS on them would fail its independent no-exception proof.
+			{"signaling-nan", (^uint64(0) >> (64 - width*8)) &^ quiet, 2},
+			{"subnormal", 1, 1},
 		} {
 			t.Run(fmt.Sprintf("%d/%s", width, tc.name), func(t *testing.T) {
 				text := fmt.Sprintf(`import "unsafe";var G uint32;func Check(p *float%d){if *p==*p {G=1}else{G=2}};func F(){var x float%d;*(*uint%d)(unsafe.Pointer(&x))=%d;Check(&x)}`, width*8, width*8, width*8, tc.bits)
@@ -42,6 +50,11 @@ func TestFloatStorageEliminatedComparisonEffects(t *testing.T) {
 					}
 					if len(proof.eliminated) != 3 || len(proof.matched) != 1 || !proof.open.applicability || !proof.open.initialization || !proof.open.actualUse {
 						t.Fatal("float elimination lost its source effects or open composition conditions")
+					}
+					requireScopedStorageModel(t, proof)
+					bound, _ := native.Bound()
+					if bound.Prefix.Interface.Conditions.SSE != "" || len(proof.representation.bindings) != 1 {
+						t.Fatal("eliminated float acquired an invented machine premise or physical object")
 					}
 				}
 			})
@@ -87,6 +100,7 @@ func TestFloatStorageMaterializationAndReadOrder(t *testing.T) {
 					if variant == "initialized" && len(proof.materialized) != 1 {
 						t.Fatal("actual float-zero materialization was not justified")
 					}
+					requireScopedStorageModel(t, proof)
 				})
 			}
 		})

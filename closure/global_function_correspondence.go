@@ -15,7 +15,7 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-const globalFunctionRules = "gofresh/global-function-correspondence@6;" + regionRules + ";" + nativeproof.TransitionRules + ";" + br.RuleModel
+const globalFunctionRules = "gofresh/global-function-correspondence@7;" + regionRules + ";" + nativeproof.TransitionRules + ";" + br.RuleModel
 
 // A mapping names the actual typed parameter and its incoming full native word.
 // The present effect-only grammar admits only unused pointer parameters. A word
@@ -54,6 +54,9 @@ type globalFunctionCorrespondence struct {
 	rules                string
 	source               *sourceReturnCompletion
 	native               nativeproof.TransitionReturnCertificate
+	call                 *globalCallComposition
+	completion           *globalFunctionCompletion
+	storageModel         *scopedStorageModelDischarge
 	representation       storageRepresentation
 	layout               *storageLayout
 	arguments            []globalFunctionArgument
@@ -73,6 +76,7 @@ type globalFunctionCorrespondence struct {
 	materialized         []int
 	padding              []storagePaddingAccess
 	equalities           []br.Witness
+	constants            map[globalFunctionConstant]error
 	open                 computationCorrespondenceObligations
 	work, limit          int
 }
@@ -104,16 +108,24 @@ func checkGlobalFunctionCorrespondence(ctx context.Context, source computationSo
 	rho.bindings = slices.Clone(rho.bindings)
 	arguments = slices.Clone(arguments)
 	meter := &correspondenceContext{Context: ctx, limit: limit}
-	ctx = meter
-	b, ok := native.BoundFor(&ownedImage)
+	return checkGlobalFunctionAccount(meter, source, root, &ownedImage, entry, completed, native, rho, arguments, nil)
+}
+
+// The complete-return consumers share one account. Actual-call construction passes
+// its already-running meter and owned association, so continuation and alignment
+// retries cannot each acquire a fresh allowance.
+func checkGlobalFunctionAccount(meter *correspondenceContext, source computationSource, root *ssa.Function, image *nativeproof.Image, entry uint64, completed *sourceReturnCompletion, native nativeproof.TransitionReturnCertificate, rho storageRepresentation, arguments []globalFunctionArgument, call *globalCallComposition) (*globalFunctionCorrespondence, error) {
+	ctx := context.Context(meter)
+	fail := func(s string) (*globalFunctionCorrespondence, error) { return nil, globalFunctionError(s) }
+	b, ok := native.BoundFor(image)
 	if _, represented := native.BoundFor(rho.image); !ok || !represented || !b.Prefix.ConditionalRegion || b.Prefix.Rules != nativeproof.TransitionRules || b.Prefix.Entry != entry || b.Prefix.Interface.ReturnContext == nil || !b.State.CalleeTerminated || b.State.PC != b.Prefix.Interface.ReturnContext.Target || b.Continuation.PC != b.State.PC || len(b.Prefix.Frames) != 0 || b.State.Thread.ContextChanged {
 		return fail("missing actual-entry complete native return under the same image")
 	}
 	if len(b.Accesses) > 65536 || len(b.Instructions) > 65536 || len(b.State.Memory) > 65536 || len(b.Prefix.InitialMemory) > 65536 {
 		return fail("complete projection exceeds finite correspondence bounds")
 	}
-	p := &globalFunctionCorrespondence{rules: globalFunctionRules, source: completed, native: native, representation: rho, arguments: arguments, antecedent: b.Prefix.EntryPredicate,
-		open: computationCorrespondenceObligations{true, true, true, true, true}, limit: limit}
+	p := &globalFunctionCorrespondence{rules: globalFunctionRules, source: completed, native: native, call: call, representation: rho, arguments: arguments, antecedent: b.Prefix.EntryPredicate,
+		open: computationCorrespondenceObligations{true, true, true, true, true}, limit: meter.limit}
 	view := b.Prefix
 	view.Instructions, view.Accesses, view.Memory = b.Instructions, b.Accesses, b.State.Memory
 	var err error
@@ -125,6 +137,11 @@ func checkGlobalFunctionCorrespondence(ctx context.Context, source computationSo
 	if err := p.collectSource(ctx, source, root); err != nil {
 		return nil, err
 	}
+	if call != nil {
+		if err := p.bindActualCall(ctx, source, root, view); err != nil {
+			return nil, err
+		}
+	}
 	builder := br.NewBuilder(65536)
 	if err := p.checkInputs(ctx, builder, source, root, b.Prefix); err != nil {
 		return nil, err
@@ -134,6 +151,16 @@ func checkGlobalFunctionCorrespondence(ctx context.Context, source computationSo
 	}
 	if err := p.checkFinal(ctx, builder, b); err != nil {
 		return nil, fmt.Errorf("returned state: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Only this full-return exit issues completion authority. Prefix accounts and
+	// failed alignment candidates cannot acquire it by copying projections.
+	p.completion = &globalFunctionCompletion{owner: p}
+	p.storageModel, err = checkScopedStorageModel(ctx, p)
+	if err != nil {
+		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -313,6 +340,15 @@ func (p *globalFunctionCorrespondence) pair(b *br.Builder, source, native br.Ter
 }
 
 func globalFunctionIndependent(ctx context.Context, term br.Term, forbidden map[br.Term]bool) error {
+	return globalFunctionIndependentWhen(ctx, term, forbidden, nil)
+}
+
+// A returned scalar may retain a joined expression whose untaken branch or
+// selector mentions the stack origin. A checked guard implication permits
+// inspecting just its selected arm; absent that proof, every operand remains
+// required. Entry-domain separation calls this with no conditional discharge,
+// since using the entry predicate to justify its own independence is circular.
+func globalFunctionIndependentWhen(ctx context.Context, term br.Term, forbidden map[br.Term]bool, prove func(br.Term, uint64) error) error {
 	seen := map[br.Term]bool{}
 	var visit func(br.Term) error
 	visit = func(t br.Term) error {
@@ -326,7 +362,17 @@ func globalFunctionIndependent(ctx context.Context, term br.Term, forbidden map[
 			return nil
 		}
 		seen[t] = true
-		for _, arg := range t.View().Args {
+		view := t.View()
+		if prove != nil && view.Op == br.ITE {
+			for _, value := range []uint64{1, 0} {
+				if err := prove(view.Args[0], value); err == nil {
+					return visit(view.Args[2-int(value)])
+				} else if !globalFunctionUnproved(err) {
+					return err
+				}
+			}
+		}
+		for _, arg := range view.Args {
 			if err := visit(arg); err != nil {
 				return err
 			}
@@ -363,10 +409,39 @@ func (p *globalFunctionCorrespondence) equal(ctx context.Context, a, b br.Term) 
 	return err
 }
 
+// Exact immutable term handles retain variable scopes as well as expression
+// identity. The antecedent is part of the query: a proof under one entry domain
+// cannot authorize the same expression under a different domain.
+type globalFunctionConstant struct {
+	antecedent, actual br.Term
+	value              uint64
+}
+
 func (p *globalFunctionCorrespondence) constant(ctx context.Context, actual br.Term, value uint64) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	key := globalFunctionConstant{p.antecedent, actual, value}
+	if result, found := p.constants[key]; found {
+		return result
+	}
+	err := p.constantUncached(ctx, actual, value)
+	if stopped := ctx.Err(); stopped != nil {
+		return stopped
+	}
+	if err == nil || globalFunctionUnproved(err) {
+		// Success retains its checked witnesses in this account. Unsupported is
+		// only a remembered search refusal, never a proof of the opposite value.
+		// Failed, cancelled and budget-exhausted work cannot become authority.
+		if p.constants == nil {
+			p.constants = make(map[globalFunctionConstant]error)
+		}
+		p.constants[key] = err
+	}
+	return err
+}
+
+func (p *globalFunctionCorrespondence) constantUncached(ctx context.Context, actual br.Term, value uint64) error {
 	direct := p.constantDirect(ctx, actual, value)
 	if direct == nil || !globalFunctionUnproved(direct) {
 		return direct
@@ -1043,7 +1118,7 @@ func (p *globalFunctionCorrespondence) searchStorageEffects(ctx context.Context,
 		plan := storageReadPlan{prefix: prefix, preferRetain: preferRetain, bound: len(accesses)}
 		// Only immutable checker inputs are shared. Every mutable proof account
 		// starts empty, so abandoning an attempt cannot leak tentative evidence.
-		candidate := globalFunctionCorrespondence{representation: p.representation, layout: p.layout, antecedent: p.antecedent, accesses: accesses, traces: traces}
+		candidate := globalFunctionCorrespondence{representation: p.representation, layout: p.layout, antecedent: p.antecedent, inputs: p.inputs, accesses: accesses, traces: traces, call: p.call}
 		err := candidate.matchStorageEffectAttempt(ctx, native, initialMemory, observable, sourceGroups, nativeGroups, &plan)
 		if stopped := ctx.Err(); stopped != nil {
 			return stopped
@@ -1119,6 +1194,7 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 		}
 	}
 	initializers := map[nativeproof.TransitionLocation]byte{}
+	initializerChild := map[nativeproof.TransitionLocation]bool{}
 	positions := map[regionEffectOccurrence]int{}
 	var allocations []regionEffectAllocation
 	position := 0
@@ -1135,6 +1211,18 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 	activated := map[regionObject]bool{}
 	matched := map[int]int{}
 	next := 0
+	// The cursor ceiling is an actual application-owned cumulative index, not a
+	// child slice. It changes only after checking the corresponding source frontier.
+	fence := 0
+	ceiling := func() int {
+		if p.call != nil && fence < 2 {
+			return p.call.nativeFence[fence]
+		}
+		return len(native)
+	}
+	available := func(cursor int) bool {
+		return cursor < len(observable) && observable[cursor] < ceiling()
+	}
 	proveBytes := func(index int, access nativeproof.TransitionAccess, want map[nativeproof.TransitionLocation]byte) ([]storagePaddingAccess, error) {
 		width := access.Bytes.End - access.Bytes.Start
 		if width <= 0 || width > 8 || access.Value.Sort() != br.Bits(int(width*8)) {
@@ -1217,7 +1305,7 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 		return p.isolatedAllocatedRead(ctx, index)
 	}
 	ordinaryReadAt := func(cursor int, footprint storageFootprint) bool {
-		if cursor >= len(observable) {
+		if !available(cursor) {
 			return false
 		}
 		index := observable[cursor]
@@ -1252,6 +1340,7 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 			}
 			for location, value := range lanes {
 				initializers[location] = value
+				initializerChild[location] = p.call != nil && allocatedAt > p.call.sourceFence[0] && allocatedAt < p.call.sourceFence[1]
 			}
 		}
 		// Initialization is optional native work, justified by the actual source
@@ -1267,7 +1356,7 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 			index   int
 			padding []storagePaddingAccess
 		}
-		for cursor < len(observable) {
+		for available(cursor) {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
@@ -1310,6 +1399,9 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 				_, pad := padding[location]
 				_, materialized := known[location]
 				eligible = eligible && (initial || pad) && !materialized && !pending[location]
+				if p.call != nil && initial && initializerChild[location] != (fence == 1) {
+					eligible = false
+				}
 			}
 			if !eligible {
 				break
@@ -1335,6 +1427,9 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 		}
 		if retain != nil && !retain(cursor) {
 			p.equalities = p.equalities[:checkpoint]
+			// Successful memo entries refer to witnesses in this account. The
+			// abandoned lookahead cannot leave a success whose witness was cut.
+			p.constants = nil
 			return nil
 		}
 		for _, plan := range planned {
@@ -1354,6 +1449,27 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 		next = cursor
 		return nil
 	}
+	advanceCallFences := func(frontier int) error {
+		for p.call != nil && fence < 2 && p.call.sourceFence[fence] <= frontier {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			// Even a child without accesses has checked instruction entry/return
+			// frontiers. Complete the preceding initialization work under its own
+			// native ceiling, then check the actual current state before crossing.
+			if err := consumeInitializers(p.call.sourceFence[fence], nil, nil); err != nil {
+				return err
+			}
+			if available(next) {
+				return storageMismatch("unmatched native effect before actual-call fence")
+			}
+			if err := p.checkCallCheckpoint(ctx, fence == 1, known); err != nil {
+				return err
+			}
+			fence++
+		}
+		return nil
+	}
 	for i := 0; i < len(p.accesses); {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -1362,6 +1478,9 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 		at, atOK := positions[source.regionEffectOccurrence]
 		if !atOK {
 			return globalFunctionError("effect has no checked source occurrence")
+		}
+		if err := advanceCallFences(at); err != nil {
+			return err
 		}
 		group, atomic := sourceGroups[i]
 		if source.locked != atomic {
@@ -1468,7 +1587,7 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 				kind = nativeproof.FrameRead
 			}
 			for remaining != 0 {
-				if next >= len(observable) {
+				if !available(next) {
 					return storageMismatch("missing native effect bytes")
 				}
 				index := observable[next]
@@ -1519,7 +1638,7 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 			kind = nativeproof.FrameWrite
 		}
 		match := false
-		if next < len(observable) {
+		if available(next) {
 			index := observable[next]
 			access := native[index]
 			nativeGroup, nativeAtomic := nativeGroups[index]
@@ -1557,6 +1676,9 @@ func (p *globalFunctionCorrespondence) matchStorageEffectAttempt(ctx context.Con
 			}
 		}
 		i++
+	}
+	if err := advanceCallFences(position); err != nil {
+		return err
 	}
 	if err := consumeInitializers(position, nil, nil); err != nil {
 		return err
@@ -1687,6 +1809,11 @@ func (p *globalFunctionCorrespondence) checkFinal(ctx context.Context, builder *
 	// At the void return no private address may escape via another register. The
 	// fresh-root ownership premise separately excludes preexisting aliases.
 	if b.Prefix.Interface.PrivateFrame != nil {
+		independent := func(term br.Term) error {
+			return globalFunctionIndependentWhen(ctx, term, map[br.Term]bool{b.Prefix.Origin: true}, func(guard br.Term, value uint64) error {
+				return p.constant(ctx, guard, value)
+			})
+		}
 		for register, value := range b.State.Registers {
 			if nativeproof.Register(register) == nativeproof.RSP || slices.Contains(b.State.Restored, nativeproof.Register(register)) {
 				continue
@@ -1694,14 +1821,14 @@ func (p *globalFunctionCorrespondence) checkFinal(ctx context.Context, builder *
 			if pointer, ok := value.Pointer.(nativeproof.OriginPointer); ok && pointer.Offset < 0 {
 				return globalFunctionError("private frame pointer escapes in returned context")
 			}
-			if err := globalFunctionIndependent(ctx, value.Value, map[br.Term]bool{b.Prefix.Origin: true}); err != nil {
-				return err
+			if err := independent(value.Value); err != nil {
+				return fmt.Errorf("private frame address escapes in returned register %d: %w", register, err)
 			}
 		}
 		if b.Prefix.Interface.Conditions.SSE != "" {
 			for _, vector := range b.State.Vectors {
 				for _, lane := range []br.Term{vector.Lo, vector.Hi} {
-					if err := globalFunctionIndependent(ctx, lane, map[br.Term]bool{b.Prefix.Origin: true}); err != nil {
+					if err := independent(lane); err != nil {
 						return fmt.Errorf("private frame address escapes in returned vector: %w", err)
 					}
 				}

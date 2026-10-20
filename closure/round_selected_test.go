@@ -8,7 +8,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
-func assertRoundSelectedSourceCompletion(t *testing.T, prior *sourceOperandPrefix, references map[*ssa.Function]*assemblyReference) {
+func assertRoundSelectedSourceCompletion(t *testing.T, prior *sourceOperandPrefix, references map[*ssa.Function]*assemblyReference) *sourceReturnCompletion {
 	t.Helper()
 	root := prior.region.packet.input.root
 	var round *ssa.Call
@@ -135,4 +135,5 @@ func assertRoundSelectedSourceCompletion(t *testing.T, prior *sourceOperandPrefi
 	}
 	t.Log("complete selected runtime.check source: actual testAtomic64 application, derived round2 argument, eleven backedges and checked caller return; native/root applicability remains open")
 	t.Logf("cumulative source account: nodes=%d states=%d locations=%d work=%d", packet.usage.nodes, packet.usage.states, packet.usage.locations, packet.usage.work)
+	return complete
 }
