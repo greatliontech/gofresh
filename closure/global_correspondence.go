@@ -129,6 +129,9 @@ func checkStoragePrefixBounds(native nativeproof.TransitionBound, trace *regionE
 // Native access indices and source atomic indices remain in their original
 // inventories; slicing away the inherited accesses would corrupt their pairing.
 func checkStoragePrefixAccount(ctx context.Context, account *globalFunctionCorrespondence, source *sourceOperandPrefix, native nativeproof.TransitionCertificate, bound nativeproof.TransitionBound) error {
+	if err := account.checkDirection(ctx, bound.InitialDirection, bound.Direction); err != nil {
+		return err
+	}
 	builder := br.NewBuilder(65536)
 	if err := account.checkStorageInputs(ctx, builder, bound); err != nil {
 		return err

@@ -17,6 +17,7 @@ type transitionNodeState struct {
 	frames    []TransitionFrame
 	thread    TransitionThread
 	vectors   TransitionVectors
+	direction br.Term
 }
 
 // The allowance includes conservative map bucket/slack and per-entry storage,
@@ -34,7 +35,7 @@ func (m *transitionChecker) reserveState(n int) error {
 }
 
 func (m *transitionChecker) takeState() *transitionNodeState {
-	s := &transitionNodeState{m.state, m.pointers, m.memory, m.bound.Preserved, m.bound.Flags, m.frames, m.thread, m.vectors}
+	s := &transitionNodeState{m.state, m.pointers, m.memory, m.bound.Preserved, m.bound.Flags, m.frames, m.thread, m.vectors, m.direction}
 	m.memory = nil
 	return s
 }
@@ -44,6 +45,7 @@ func (m *transitionChecker) installState(s *transitionNodeState) {
 	m.bound.Preserved, m.bound.Flags = s.preserved, s.flags
 	m.frames, m.thread = s.frames, s.thread
 	m.vectors = s.vectors
+	m.direction = s.direction
 }
 
 func (m *transitionChecker) copyState(s *transitionNodeState) *transitionNodeState {
@@ -134,6 +136,7 @@ func (m *transitionChecker) mergeState(slot **transitionNodeState, src *transiti
 	if m.face.Conditions.SSE == SSEModel {
 		m.mergeSSEVectors(&dst.vectors, src.vectors, src.scalar.path)
 	}
+	dst.direction = m.ite(src.scalar.path, src.direction, dst.direction)
 	m.merge(&dst.scalar, src.scalar)
 }
 

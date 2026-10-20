@@ -84,6 +84,8 @@ func Parse(code []byte, pc uint64) (Decoded, error) {
 		if op == 0x33 {
 			d.Encoding.Form = XOR33
 		}
+	} else if !fs && rex == 0 && op == 0xfc {
+		d.Intent.Operation, d.Encoding.Form = ClearDirection, CLDFC
 	} else if !fs && rex == 0 && (op == 0xe8 || op == 0xc3) {
 		if op == 0xe8 {
 			d.Intent.Operation, d.Encoding.Form, d.Intent.SignedDisp = Call, CALLE8, r.signed(4)

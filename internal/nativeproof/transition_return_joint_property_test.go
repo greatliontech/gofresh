@@ -329,6 +329,13 @@ func assertJointReturn(t testing.TB, p jointReturnProgram, c TransitionReturnCer
 		t.Fatal("joint returned scope/context differs")
 	}
 	values := map[br.Term]uint64{}
+	values[b.Prefix.InitialDirection] = 0
+	if initial.direction {
+		values[b.Prefix.InitialDirection] = 1
+	}
+	if b.State.Direction.Sort() != br.Bool() || (stateEval(t, b.State.Direction, values) != 0) != want.direction {
+		t.Fatal("returned direction differs")
+	}
 	for r, v := range b.Prefix.InitialRegisters {
 		values[v] = initial.regs[r]
 	}

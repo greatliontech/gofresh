@@ -87,8 +87,9 @@ type stateReference struct {
 	written     [16]bool
 	writtenBits Masks
 	// CF, ZF, OF, SF, AF, PF. Undefined AF has no compared value.
-	flags  [6]bool
-	writer to.Operation
+	flags     [6]bool
+	direction bool
+	writer    to.Operation
 	// Concrete ISA status for count-dependent scalar flags. A symbolic scope
 	// may guarantee fewer flags than this selected valuation defines.
 	scalarDefined, scalarPreserved [6]bool
@@ -153,7 +154,8 @@ func stateInitial(face TransitionInterface, seed uint64) stateReference {
 	r.envelope = face.Envelope
 	r.fs = seed*0x1234567 + 0x87654321
 	r.addressBits = face.Conditions.UserAddressBits
-	r.flagExtra = 0x202 | (seed&1)<<10
+	r.flagExtra = 0x202
+	r.direction = seed&1 != 0
 	// This range is deliberately far from every synthetic image. It is selected
 	// from the interface, not from the checker's origin exclusions or outputs.
 	first := face.Origin.Min + (face.Origin.Residue+face.Origin.Modulus-face.Origin.Min%face.Origin.Modulus)%face.Origin.Modulus
@@ -192,7 +194,7 @@ func stateInitial(face TransitionInterface, seed uint64) stateReference {
 }
 
 // Raw valuations are a product, not a PRNG's 64-bit subset of that product.
-// Layout: origin index (8 bytes), sixteen GPR words (128 bytes), six flag bits
+// Layout: origin index (8 bytes), sixteen GPR words (128 bytes), six arithmetic flag bits and DF
 // (one byte), then every declared byte in increasing offset order. Missing data
 // is zero padded. RSP is necessarily the chosen origin, not an independent GPR;
 // its eight input bytes are consumed but cannot weaken that interface premise.
@@ -217,6 +219,7 @@ func stateRawInitial(face TransitionInterface, data []byte) stateReference {
 	}
 	r.regs[4], r.ptrs[4] = r.origin, statePointer{valid: true}
 	flags := read(1)[0]
+	r.direction = flags&64 != 0
 	for j := range r.flags {
 		r.flags[j] = flags&(1<<j) != 0
 	}
@@ -268,7 +271,7 @@ func stateRawInitial(face TransitionInterface, data []byte) stateReference {
 	if face.Conditions.Syscall != "" {
 		r.fs = binary.LittleEndian.Uint64(read(8))
 		extra := read(1)[0]
-		r.flagExtra = 0x202 | uint64(extra&1)<<10 | uint64((extra>>1)&1)<<16 | uint64((extra>>2)&1)<<18 | uint64((extra>>3)&1)<<21
+		r.flagExtra = 0x202 | uint64((extra>>1)&1)<<16 | uint64((extra>>2)&1)<<18 | uint64((extra>>3)&1)<<21
 		r.addressBits = face.Conditions.UserAddressBits
 	}
 	for len(data) != 0 {
@@ -298,6 +301,10 @@ func (r stateReference) clone() stateReference {
 
 func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nextPC ...uint64) {
 	t.Helper()
+	if i.Operation == to.ClearDirection {
+		r.direction = false
+		return
+	}
 	if i.Operation == to.Clear32 {
 		r.regs[i.Dst], r.ptrs[i.Dst], r.written[i.Dst] = 0, statePointer{}, true
 		r.writtenBits[i.Dst] = ^uint64(0)
@@ -334,6 +341,9 @@ func (r *stateReference) referenceExec(t testing.TB, i to.Intent, index int, nex
 		}
 		q.after = r.fs
 		q.r11 = r.flagExtra &^ uint64(1<<16)
+		if r.direction {
+			q.r11 |= 1 << 10
+		}
 		r.flagExtra &^= uint64(1 << 16)
 		for j, bit := range []uint{0, 6, 11, 7, 4, 2} {
 			if r.flags[j] {
@@ -822,6 +832,11 @@ func stateBindings(t testing.TB, c TransitionCertificate, face TransitionInterfa
 	for j, x := range b.InitialRegisters {
 		variable(x, br.Bits(64), initial.regs[j])
 	}
+	direction := uint64(0)
+	if initial.direction {
+		direction = 1
+	}
+	variable(b.InitialDirection, br.Bool(), direction)
 	if face.Conditions.Syscall != "" {
 		variable(b.InitialFS, br.Bits(64), initial.fs)
 	} else if b.InitialFS.Valid() {
@@ -1051,6 +1066,9 @@ func (d stateDepthProfile) assertProjection(t testing.TB, c TransitionCertificat
 // Encoding choices are constrained only by their representable payload. No
 // semantic operand is reconstructed by parsing the resulting bytes.
 func stateEncoding(i to.Intent, choice uint8) to.Encoding {
+	if i.Operation == to.ClearDirection {
+		return to.Encoding{Form: to.CLDFC}
+	}
 	if i.Operation >= to.Increment64 {
 		e := to.Encoding{Form: to.INCFF, REX: 0x48}
 		rm, reg := i.Dst, i.Src
@@ -1261,6 +1279,9 @@ func stateAssert(t testing.TB, c TransitionCertificate, x stateLayout, cut int, 
 	t.Helper()
 	b := c.checked.bound
 	stateQueryBindings(t, b, x, want, values)
+	if b.Direction.Sort() != br.Bool() || (stateEval(t, b.Direction, values) != 0) != want.direction {
+		t.Fatal("current direction differs from executed intent")
+	}
 	straightFetches(t, b)
 	if b.ImageDigest != x.digest || b.Entry != x.pcs[0] || b.Rules != TransitionRules {
 		t.Fatal("state lost image/entry/rule binding")
@@ -1432,7 +1453,7 @@ func stateInheritedInputs(t testing.TB, original, current TransitionBound) {
 	if original.InitialFS != current.InitialFS || len(current.Abstractions) < len(original.Abstractions) || !slices.Equal(current.Abstractions[:len(original.Abstractions)], original.Abstractions) {
 		t.Fatal("continuation replaced thread input or analysis abstraction origins")
 	}
-	if current.Origin != original.Origin || current.EntryPredicate != original.EntryPredicate || current.InitialRegisters != original.InitialRegisters || current.InitialPredicates != original.InitialPredicates ||
+	if current.InitialDirection != original.InitialDirection || current.Origin != original.Origin || current.EntryPredicate != original.EntryPredicate || current.InitialRegisters != original.InitialRegisters || current.InitialPredicates != original.InitialPredicates ||
 		!slices.Equal(current.InitialMemory, original.InitialMemory) || !slices.Equal(current.Words, original.Words) ||
 		!slices.Equal(current.ExcludedOrigins, original.ExcludedOrigins) || !reflect.DeepEqual(current.Interface, original.Interface) {
 		t.Fatal("continuation replaced original terms, memory, or origin/interface premises")

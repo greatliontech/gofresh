@@ -59,6 +59,9 @@ func scalarDescriptors(yield func(Descriptor) bool) {
 
 func baseDescriptors(yield func(Descriptor) bool) {
 	emit := func(i Intent, e Encoding) bool { return yield(Descriptor{i, e}) }
+	if !emit(Intent{Operation: ClearDirection}, Encoding{Form: CLDFC}) {
+		return
+	}
 	for _, d := range []Descriptor{{Intent{Operation: Call}, Encoding{Form: CALLE8}}, {Intent{Operation: Return}, Encoding{Form: RETC3}}, {Intent{Operation: Syscall}, Encoding{Form: SYSCALL0F05}}} {
 		if !yield(d) {
 			return

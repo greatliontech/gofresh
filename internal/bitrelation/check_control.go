@@ -1,13 +1,14 @@
 package bitrelation
 
 // conditionalOperation distributes a closed set of total bit-vector operations
-// through one conditional operand. Addition/subtraction remain modular; each
-// comparison keeps its exact signedness and Boolean result sort. The condition,
-// branch ordering, fixed operand and complete operator head are independently
-// checked. No branch assumption or variable assignment is introduced.
+// through a conditional operand. Addition/subtraction remain modular, comparisons
+// retain their interpretation, and concatenation retains its low/high widths.
+// For concatenation the other operand may stay fixed or select the corresponding
+// arm of the exact same condition. Both choices are independently checked; no branch assumption
+// or variable assignment is introduced into the enclosing proposition.
 func (c *checker) conditionalOperation(a, b *node) bool {
 	switch a.op {
-	case Add, Sub, Equal, ULT, ULE, SLT, SLE:
+	case Add, Sub, Equal, ULT, ULE, SLT, SLE, Concat:
 	default:
 		return false
 	}
@@ -25,7 +26,12 @@ func (c *checker) conditionalOperation(a, b *node) bool {
 		matches := true
 		for arm := 1; arm <= 2; arm++ {
 			branch := b.args[arm]
-			if !sameHead(a, branch) || !c.eq(branch.args[position], x.args[arm]) || !c.eq(branch.args[1-position], a.args[1-position]) {
+			if !sameHead(a, branch) || !c.eq(branch.args[position], x.args[arm]) {
+				matches = false
+				break
+			}
+			fixed, actual := a.args[1-position], branch.args[1-position]
+			if !c.eq(actual, fixed) && (a.op != Concat || fixed.op != ITE || !c.eq(fixed.args[0], x.args[0]) || !c.eq(actual, fixed.args[arm])) {
 				matches = false
 				break
 			}

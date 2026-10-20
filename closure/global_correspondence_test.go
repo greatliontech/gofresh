@@ -85,6 +85,8 @@ func globalNativeImage(t testing.TB, addresses [2]uint64, values [3]uint64, poin
 		code = append(code, 0x49, 0xb8)
 		code = binary.LittleEndian.AppendUint64(code, 17)
 		cuts = append(cuts, base+uint64(len(code)))
+	case "direction":
+		code = append(code, 0xfc)
 	}
 	cut := base + uint64(len(code))
 	code = append(code, 0xf0, 0x48, 0x0f, 0xb1, 0x11, 0xc3)
@@ -213,6 +215,40 @@ func globalRho(s computationSource, f globalNativeFixture, g [2]*ssa.Global, a [
 
 func checkGlobalFixture(ctx context.Context, s computationSource, call *ssa.Call, f globalNativeFixture, p *sourceOperandPrefix, n nativeproof.TransitionCertificate, rho storageRepresentation) (*globalOperandCorrespondence, error) {
 	return checkGlobalOperandCorrespondence(ctx, s, s.prog.Roots["F"], call, f.image, f.entry, f.cut, p, n, rho)
+}
+
+func TestGlobalOperandDirectionPreservation(t *testing.T) {
+	values := [3]uint64{7, 9, 11}
+	addresses := [2]uint64{0x700008, 0x700050}
+	source, call, globals := globalSourceFixture(t, [2]string{"A", "B"}, values, "", "")
+	prefix := globalPrefix(t, source, call)
+	for _, changed := range []bool{false, true} {
+		extra := ""
+		if changed {
+			extra = "direction"
+		}
+		f := globalNativeImage(t, addresses, values, addresses[0], 0x700000, nil, extra)
+		options := nativeproof.TransitionOptions{}
+		if changed {
+			options.Expansions = []nativeproof.TransitionExpansion{{PC: f.cut - 1}}
+		}
+		proposal, err := nativeproof.ProposeRegionTransition(t.Context(), f.image, f.entry, f.cut, nativeproof.TransitionLimits{}, options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		native, err := nativeproof.CheckRegionTransition(t.Context(), f.image, f.entry, f.face, proposal, nativeproof.TransitionLimits{})
+		if err != nil {
+			t.Fatal("direction control lacks a valid native prefix", err)
+		}
+		proof, err := checkGlobalFixture(t.Context(), source, call, f, prefix, native, globalRho(source, f, globals, addresses))
+		if changed {
+			if proof != nil || err == nil || !strings.Contains(err.Error(), "source correspondence direction was not preserved") {
+				t.Fatalf("published source prefix erased direction change: %v", err)
+			}
+		} else if err != nil || proof == nil {
+			t.Fatalf("unchanged direction prefix: %v", err)
+		}
+	}
 }
 
 func TestGlobalOperandCorrespondenceProperty(t *testing.T) {

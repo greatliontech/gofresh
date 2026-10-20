@@ -294,6 +294,16 @@ architectural meanings and identities survive later flag overwrites; generated
 slot numbers supply no substitute for that binding. These predicates imply no
 separately observed sign, overflow, auxiliary-carry or parity value.
 
+The direction flag has a separate arbitrary Boolean entry value; an ABI name or
+an assumed normal call supplies no clear-direction fact. CLD clears that flag
+without changing arithmetic flags, registers or ordinary memory. Its current
+value follows the actual path through joins, calls, continuations and return,
+retaining the original input identity. Composition associates a callee's entry
+direction with the caller's actual current direction rather than introducing a
+fresh value. Other admitted operations preserve it unless their identified
+semantics state otherwise. The instruction definition is the CLD entry in the
+[Intel instruction-set manual](https://intel.github.io/SDM/sdm.html).
+
 The ordinary x86-64 CPU-query model interprets the exact CPUID instruction at the
 architectural machine layer identified by the transition. CPUID must be available
 and enabled at the executing privilege level, with applicable faulting controls
@@ -327,6 +337,17 @@ four or eight bytes, copy their bit patterns without numerical conversion, and
 zero the remaining bits of that 128-bit destination. Legacy encodings preserve
 the higher architectural vector state. Unspecified initial XMM bits remain
 arbitrary and retain their identities across branches, calls and continuations.
+
+An admitted legacy register-to-register XORPS computes the bitwise exclusive OR
+of both complete incoming 128-bit operands and replaces only that destination's
+low 128 bits. Overlapping operands use their values before the write; equal
+operands therefore clear the complete destination. This is a bit operation, not
+a floating comparison or conversion: all bit patterns are admitted without a
+floating exception or status change. It preserves arithmetic and direction
+flags, ordinary memory, floating control/status and higher architectural vector
+state. Its encoding and operand form remain checked, and its SSE applicability
+is the same explicit machine premise as other admitted legacy SSE operations.
+The instruction definition is the XORPS entry in the Intel instruction-set manual.
 
 Unordered scalar comparisons interpret the low binary32 or binary64 operands.
 The supported no-floating-exception relation must establish from the actual
@@ -600,7 +621,8 @@ entry-to-cut transition MUST satisfy these obligations:
   state. Expansion choices are untrusted search choices, not premises; an
   expanded callee may itself contain independently excluded boundaries.
   The same choice may leave register self-XOR, register-register arithmetic,
-  increment, variable-count scalar shift, subtract-with-borrow,
+  increment, variable-count scalar shift, subtract-with-borrow, CLD,
+  supported legacy SSE transfers,
   an explicitly or implicitly locked read/modify/write, a condition-code byte
   store, a byte TEST, a memory CMP or a NOP as a structural
   boundary rather than expand its admitted transfer. Operand-form selection
@@ -662,6 +684,9 @@ entry-to-cut transition MUST satisfy these obligations:
   claimed preserved context remain unchanged under the retained frame premises.
   Undefined flags stay undefined; omitting a flag value from a projection does not
   establish that the flag was preserved.
+  Direction-state transport retains both its original entry identity and actual
+  current Boolean value. Arithmetic-flag replacement cannot overwrite it, and
+  calls and returns do not implicitly restore a saved direction value.
   Image zero-fill or source-language zero initialization supplies no initial
   native-memory value without its applicable initialization relation. Such facts
   derive from owned file/zero-fill coverage under the identified loading relation
@@ -895,6 +920,10 @@ source/native relation MUST satisfy these obligations:
   additionally requires checked nonescape; elimination supplies no native address.
   Ordinary combined accesses require complete byte, value and ordering
   coverage, including any accessed padding. Atomic groups remain indivisible.
+  For this bounded ordinary typed-source correspondence, direction is preserved
+  caller context. At corresponding published boundaries and return, the native
+  direction must equal its incoming value under the existing entry conditions;
+  neither arithmetic-flag clobbering nor an assumed clear entry erases this duty.
   Represented storage cannot be hidden as administrative private-frame traffic.
   An ended source lifetime does not reset or discard residual native bytes, nor
   require dead local bytes to recover their initial language values.

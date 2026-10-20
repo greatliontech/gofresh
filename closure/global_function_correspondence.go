@@ -1776,6 +1776,9 @@ func (p *globalFunctionCorrespondence) checkStorageLocationValues(ctx context.Co
 }
 
 func (p *globalFunctionCorrespondence) checkFinal(ctx context.Context, builder *br.Builder, b nativeproof.TransitionReturnBound) error {
+	if err := p.checkDirection(ctx, b.Prefix.InitialDirection, b.State.Direction); err != nil {
+		return err
+	}
 	if b.Prefix.Interface.Conditions.SSE != "" && (!b.State.SSE.MXCSRPreserved || !b.State.SSE.UpperVectorsPreserved) {
 		return globalFunctionError("floating control or higher vector context was not preserved")
 	}
@@ -1834,6 +1837,16 @@ func (p *globalFunctionCorrespondence) checkFinal(ctx context.Context, builder *
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// Direction is preserved caller context for the bounded ordinary source model.
+// Prove preservation under the existing input relation, never by adding a clear
+// entry premise or replacing the actual native state with a desired value.
+func (p *globalFunctionCorrespondence) checkDirection(ctx context.Context, incoming, current br.Term) error {
+	if err := p.equal(ctx, current, incoming); err != nil {
+		return fmt.Errorf("source correspondence direction was not preserved: %w", err)
 	}
 	return nil
 }

@@ -140,6 +140,7 @@ func (m *transitionChecker) applicationPremises(child TransitionBound, a *Transi
 	// the caller's original variables, byte sharing, ordered lanes, and primitive
 	// outcomes; no child variable is inserted into the native successor state.
 	a.Inputs, a.InputPredicates, a.InputFS = child.InitialRegisters, child.InitialPredicates, child.InitialFS
+	a.InputDirection, a.Direction = child.InitialDirection, m.direction
 	a.Predicates = TransitionPredicates{m.state.flags[flagCarry], m.state.flags[flagZero], m.state.flags[flagLess]}
 	a.Flags, a.Thread = m.bound.Flags, m.thread
 	a.InputVectors, a.Vectors, a.SSE = child.InitialVectors, m.bound.Vectors, m.bound.SSE

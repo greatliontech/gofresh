@@ -97,6 +97,11 @@ func compareExecutedEncoding(t testing.TB, code []byte) {
 	}
 	op := x86asm.MOV
 	switch i.Operation {
+	case to.ClearDirection:
+		op = x86asm.CLD
+		if args != ([2]x86asm.Arg{}) {
+			t.Fatal("CLD extra operand")
+		}
 	case to.Increment64:
 		op = x86asm.INC
 		reg(args[0], i.Dst, false)
@@ -293,7 +298,7 @@ func TestTransitionExecutedDescriptorPopulation(t *testing.T) {
 			compareExecutedEncoding(t, code)
 		}
 	}
-	if count != 159558 {
+	if count != 159559 {
 		t.Fatalf("descriptor population changed: %d", count)
 	}
 	// The finite encoding dimension is enumerated in each property trial;

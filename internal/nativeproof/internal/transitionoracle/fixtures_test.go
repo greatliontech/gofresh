@@ -17,6 +17,7 @@ func TestLiteralEncodings(t *testing.T) {
 		i         Intent
 		e         Encoding
 	}{
+		{"cld", "fc", Intent{Operation: ClearDirection}, Encoding{Form: CLDFC}},
 		{"call-rel32", "e8f8ffffff", Intent{Operation: Call, SignedDisp: -8}, Encoding{Form: CALLE8}},
 		{"push-rsp", "54", Intent{Operation: Push, Dst: 4}, Encoding{Form: PUSH50}},
 		{"pop-r12", "415c", Intent{Operation: Pop, Dst: 12}, Encoding{Form: POP58, REX: 0x41}},

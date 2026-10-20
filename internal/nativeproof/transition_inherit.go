@@ -87,6 +87,7 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 	}
 	m.bound = cloneTransitionBound(b)
 	m.frames, m.thread = m.bound.Frames, m.bound.Thread
+	m.direction = b.Direction
 	m.face = m.bound.Interface
 	if err := m.reserveEntryRelations(); err != nil {
 		return err
@@ -122,7 +123,7 @@ func (m *transitionChecker) inherit(prior checkedTransition) error {
 		}
 		m.justifications = append(m.justifications, e)
 	}
-	for _, root := range []br.Term{b.InitialFS, b.Thread.FS.Value} {
+	for _, root := range []br.Term{b.InitialDirection, b.Direction, b.InitialFS, b.Thread.FS.Value} {
 		if err := importRoot(root); err != nil {
 			return err
 		}

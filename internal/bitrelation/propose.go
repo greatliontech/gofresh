@@ -17,29 +17,40 @@ func Propose(ctx context.Context, left, right Term, limits Limits) (Proof, error
 		return Proof{}, refuse(Unsupported, "different result sorts")
 	}
 	p := proposer{m: m, b: NewBuilder(m.limits.Nodes), memo: make(map[*node]normal), e: equality{m: m, seen: make(map[pair]bool)}}
-	l := p.normalize(left)
-	r := p.normalize(right)
-	if p.err != nil {
-		return Proof{}, p.err
+	for {
+		l := p.normalize(left)
+		r := p.normalize(right)
+		if p.err != nil {
+			return Proof{}, p.err
+		}
+		ok, err := p.e.same(l.term.n, r.term.n)
+		if err != nil {
+			return Proof{}, err
+		}
+		if !ok {
+			if !p.conditionalConcat && p.deferredConcat {
+				// Preserve the established arithmetic/mask/projection normal form
+				// first. Only an unjoined pair with a conditional Concat retries.
+				// Keep the meter, builder, valid earlier steps and structural cache:
+				// no work, generated-node or certificate-step allowance restarts.
+				p.conditionalConcat = true
+				clear(p.memo)
+				continue
+			}
+			return Proof{}, refuse(Unsupported, "bounded rewrites did not join")
+		}
+		bridge := p.emit(Reflexivity, l.term, r.term)
+		back := p.emit(Symmetry, r.term, right, r.step)
+		mid := p.emit(Transitivity, left, r.term, l.step, bridge)
+		p.emit(Transitivity, left, right, mid, back)
+		if p.err != nil {
+			return Proof{}, p.err
+		}
+		if err = m.tick(); err != nil {
+			return Proof{}, err
+		}
+		return p.proof, nil
 	}
-	ok, err := p.e.same(l.term.n, r.term.n)
-	if err != nil {
-		return Proof{}, err
-	}
-	if !ok {
-		return Proof{}, refuse(Unsupported, "bounded rewrites did not join")
-	}
-	bridge := p.emit(Reflexivity, l.term, r.term)
-	back := p.emit(Symmetry, r.term, right, r.step)
-	mid := p.emit(Transitivity, left, r.term, l.step, bridge)
-	p.emit(Transitivity, left, right, mid, back)
-	if p.err != nil {
-		return Proof{}, p.err
-	}
-	if err = m.tick(); err != nil {
-		return Proof{}, err
-	}
-	return p.proof, nil
 }
 
 // Prove proposes, then independently checks under separate finite budgets. It
@@ -57,12 +68,13 @@ type normal struct {
 	step int
 }
 type proposer struct {
-	m     *meter
-	b     *Builder
-	proof Proof
-	memo  map[*node]normal
-	e     equality
-	err   error
+	m                                 *meter
+	b                                 *Builder
+	proof                             Proof
+	memo                              map[*node]normal
+	e                                 equality
+	err                               error
+	conditionalConcat, deferredConcat bool
 }
 
 func (p *proposer) emit(rule Rule, a, b Term, premises ...int) int {

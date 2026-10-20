@@ -52,6 +52,7 @@ func FuzzRawParse(f *testing.F) {
 		"498b042500000000", "67488b00", "664889c0", "c5f877", "488b04",
 		"49ffc7", "d3e1", "45d3e7", "4519c7", "451bf8", "4121d1", "4423ca",
 		"ffcf", "48d3e0", "4819c0", "4821c0", "66d3e0", "d3e8",
+		"fc", "fd", "66fc", "40fc", "f3fc",
 	} {
 		b, _ := hex.DecodeString(text)
 		f.Add(b, uint64(1<<32))
@@ -64,7 +65,7 @@ func FuzzRawParse(f *testing.F) {
 			}
 			return
 		}
-		if d.Length < 2 || d.Length > 15 || d.Length > len(code) {
+		if d.Length < 1 || d.Length > 15 || d.Length > len(code) {
 			t.Fatalf("length %d from %x", d.Length, code)
 		}
 		b, err := Encode(d.Intent, d.Encoding)

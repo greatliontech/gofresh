@@ -103,10 +103,10 @@ func checkSelectedStartupRoot(ctx context.Context, image *nativeproof.Image, can
 	return nativeproof.CheckTransition(ctx, image, candidate.face, proposal, nativeproof.TransitionLimits{})
 }
 
-// The suffix writes only these image words. Other current bytes, including
+// The suffix writes only these footprints. Other current bytes, including
 // startup spills and returned call-frame scratch, keep their exact value and
 // provenance; retaining initial memory or access history alone cannot show that.
-func selectedStartupMemoryFrame(before, after []nativeproof.TransitionByte, writes []nativeproof.Span) error {
+func selectedStartupMemoryFrame(before, after []nativeproof.TransitionByte, writes []storageFootprint) error {
 	if len(before) != len(after) {
 		return fmt.Errorf("startup memory membership changed")
 	}
@@ -124,13 +124,25 @@ func selectedStartupMemoryFrame(before, after []nativeproof.TransitionByte, writ
 		}
 		written := false
 		for _, span := range writes {
-			written = written || old.Image && old.Offset >= 0 && uint64(old.Offset) >= span.Start && uint64(old.Offset) < span.End
+			written = written || old.Image == span.Image && old.Offset >= span.Bytes.Start && old.Offset < span.Bytes.End
 		}
 		if !written && old != now {
 			return fmt.Errorf("untouched startup byte or provenance changed at %+v", old.TransitionLocation)
 		}
 	}
 	return nil
+}
+
+func selectedStartupFixture(t *testing.T) ([]byte, *nativeproof.Image, selectedStartupCandidate) {
+	t.Helper()
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{"go.mod": "module example.com/startupprefix\n\ngo 1.27\n"})
+	h, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, image, locations := selectedRuntimeCheckArtifact(t, h)
+	return raw, image, selectedStartupLayout(t, raw, image, locations)
 }
 
 func TestRuntimeStartupSelectedWrites(t *testing.T) {
@@ -140,14 +152,7 @@ func TestRuntimeStartupSelectedWrites(t *testing.T) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		t.Skip("selected startup model is Linux amd64")
 	}
-	dir := t.TempDir()
-	writeTree(t, dir, map[string]string{"go.mod": "module example.com/startupprefix\n\ngo 1.27\n"})
-	h, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, image, locations := selectedRuntimeCheckArtifact(t, h)
-	x := selectedStartupLayout(t, raw, image, locations)
+	raw, image, x := selectedStartupFixture(t)
 	prior, err := checkSelectedStartupRoot(t.Context(), image, x, x.join)
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +193,7 @@ func TestRuntimeStartupSelectedWrites(t *testing.T) {
 	if queries != 2 || replacements != 1 || len(b.ExcludedBoundaries) != 3 {
 		t.Fatal("lost conditional CPU queries, actual FS replacement or excluded error arms")
 	}
-	if err := selectedStartupMemoryFrame(before.Memory, b.Memory, []nativeproof.Span{{Start: x.tls, End: x.tls + 8}, {Start: x.machine, End: x.machine + 8}, {Start: x.context + 48, End: x.context + 56}}); err != nil {
+	if err := selectedStartupMemoryFrame(before.Memory, b.Memory, []storageFootprint{{Image: true, Bytes: nativeproof.RelativeSpan{Start: int64(x.tls), End: int64(x.tls + 8)}}, {Image: true, Bytes: nativeproof.RelativeSpan{Start: int64(x.machine), End: int64(x.machine + 8)}}, {Image: true, Bytes: nativeproof.RelativeSpan{Start: int64(x.context + 48), End: int64(x.context + 56)}}}); err != nil {
 		t.Fatal(err)
 	}
 	builder := br.NewBuilder(32)
@@ -267,13 +272,17 @@ func TestSelectedStartupMemoryFrame(t *testing.T) {
 		{TransitionLocation: nativeproof.TransitionLocation{Image: true, Offset: 0x700000}, Value: value, Pointer: pointer},
 		{TransitionLocation: nativeproof.TransitionLocation{Image: true, Offset: 0x700030}, Value: value},
 	}
-	writes := []nativeproof.Span{{Start: 0x700030, End: 0x700038}}
-	for _, variant := range []string{"unchanged", "allowed-write", "spill-value", "scratch-pointer", "scratch-lane", "prior-image", "foreign-image", "missing", "duplicate", "moved"} {
+	writes := []storageFootprint{{Image: true, Bytes: nativeproof.RelativeSpan{Start: 0x700030, End: 0x700038}}}
+	for _, variant := range []string{"unchanged", "allowed-write", "allowed-stack", "wrong-space", "spill-value", "scratch-pointer", "scratch-lane", "prior-image", "foreign-image", "missing", "duplicate", "moved"} {
 		t.Run(variant, func(t *testing.T) {
 			after := slices.Clone(before)
+			admitted := slices.Clone(writes)
 			switch variant {
 			case "allowed-write":
 				after[3].Value = other
+			case "allowed-stack", "wrong-space":
+				after[0].Value = other
+				admitted = append(admitted, storageFootprint{Image: variant == "wrong-space", Bytes: nativeproof.RelativeSpan{Start: -24, End: -23}})
 			case "spill-value":
 				after[0].Value = other
 			case "scratch-pointer":
@@ -291,8 +300,8 @@ func TestSelectedStartupMemoryFrame(t *testing.T) {
 			case "moved":
 				after[0].Offset--
 			}
-			err := selectedStartupMemoryFrame(before, after, writes)
-			if (err == nil) != (variant == "unchanged" || variant == "allowed-write") {
+			err := selectedStartupMemoryFrame(before, after, admitted)
+			if (err == nil) != (variant == "unchanged" || variant == "allowed-write" || variant == "allowed-stack") {
 				t.Fatalf("startup frame %s: %v", variant, err)
 			}
 		})

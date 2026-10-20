@@ -15,6 +15,8 @@ import (
 // third word and a condition selected from a width-independent input bit.
 // Symbolic concatenation masks retain independent low-input/high-scratch fields
 // and check the exact mask partition beside the existing width projections.
+// Conditional concatenation covers either or both fields under an exact shared
+// selector, with arbitrary unequal widths and all four independent field values.
 func FuzzExactScalarSemantics(f *testing.F) {
 	for _, w := range []uint8{0, 1, 7, 31, 62, 63} {
 		for op := uint8(0); op < 23; op++ {
@@ -23,6 +25,7 @@ func FuzzExactScalarSemantics(f *testing.F) {
 		}
 	}
 	f.Fuzz(func(t *testing.T, wByte, selector uint8, a, b, shift uint64) {
+		rawA, rawB := a, b
 		w := int(wByte%64) + 1
 		s := br.Bits(w)
 		a &= widthMask(w)
@@ -128,6 +131,16 @@ func FuzzExactScalarSemantics(f *testing.F) {
 			v := g.variable(s, scope, 0, false)
 			high := g.variable(br.Bits(64-w), scope, 0, true)
 			full := g.make(br.Concat, br.Bits(64), 0, v, high)
+			otherLow := g.variable(s, scope, 1, false)
+			otherHigh := g.variable(br.Bits(64-w), scope, 1, true)
+			joined, split := conditionalConcatTerms(g, bp, v, otherLow, high, otherHigh, int(selector%3))
+			direct(t, br.ConditionalOperation, joined, split)
+			prove(t, joined, split)
+			assertValues(t, joined, split, map[br.Term]uint64{bp: uint64(wByte >> 6 & 1), v: a, otherLow: b, high: rawA >> uint(w), otherHigh: rawB >> uint(w)})
+			maskedJoin, maskedFields := concatMaskTerms(g, joined.View().Args[0], joined.View().Args[1], shift)
+			direct(t, br.ConcatMask, maskedJoin, maskedFields)
+			prove(t, maskedJoin, maskedFields)
+			assertValues(t, maskedJoin, maskedFields, map[br.Term]uint64{bp: uint64(wByte >> 6 & 1), v: a, otherLow: b, high: rawA >> uint(w), otherHigh: rawB >> uint(w)})
 			masked, distributed := concatMaskTerms(g, v, high, shift)
 			direct(t, br.ConcatMask, masked, distributed)
 			prove(t, masked, distributed)

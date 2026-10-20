@@ -34,9 +34,11 @@ type NativeReturnedState struct {
 	Preserved        Masks
 	Restored         []Register
 	Flags            TransitionFlags
-	Thread           TransitionThread
-	Vectors          TransitionVectors
-	SSE              TransitionSSEContext
+	// Direction is the actual post-RET DF, not an implicitly restored entry value.
+	Direction br.Term
+	Thread    TransitionThread
+	Vectors   TransitionVectors
+	SSE       TransitionSSEContext
 }
 
 // TransitionReturnBound is a non-authorizing projection of a complete return
@@ -221,7 +223,7 @@ func CheckTransitionReturn(ctx context.Context, prefix TransitionCertificate) (T
 	if err := m.stackStep(operation{Op: x86asm.RET}, uint8(i.Len)); err != nil {
 		return TransitionReturnCertificate{}, err
 	}
-	state := NativeReturnedState{PC: target.PC, CalleeTerminated: m.returned, Memory: prior.bound.Memory, Flags: m.bound.Flags, Preserved: m.bound.Preserved, Thread: m.thread, Vectors: m.vectors, SSE: m.bound.SSE}
+	state := NativeReturnedState{PC: target.PC, CalleeTerminated: m.returned, Memory: prior.bound.Memory, Flags: m.bound.Flags, Direction: m.direction, Preserved: m.bound.Preserved, Thread: m.thread, Vectors: m.vectors, SSE: m.bound.SSE}
 	for r := range state.Registers {
 		if !m.tick() {
 			return TransitionReturnCertificate{}, m.err

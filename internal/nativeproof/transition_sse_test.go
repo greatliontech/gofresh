@@ -3,6 +3,7 @@ package nativeproof
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"testing"
@@ -178,6 +179,59 @@ func TestTransitionSSEGuardedOperandDomain(t *testing.T) {
 			if _, err := m.checkedSSECompare(left, zero, width, m.not(guard)); err == nil {
 				t.Fatal("inverse guard admitted feasible exceptional operand")
 			}
+		}
+	}
+}
+
+func TestTransitionSSEJoinedByteOperandDomain(t *testing.T) {
+	// A load after a memory join reconstructs a scalar from independently
+	// represented bytes with the same path selector. The complete word is one
+	// incoming value or the other, never a mixture of their exponent/payload bits.
+	for _, width := range []int{32, 64} {
+		for _, class := range []string{"quiet-nan", "signaling-nan", "subnormal"} {
+			t.Run(fmt.Sprintf("binary%d/%s", width, class), func(t *testing.T) {
+				m := sseTestChecker(t)
+				guard := m.scratch(br.Bool())
+				a, b := uint64(0xffe0e555), uint64(0x80000000)
+				quiet := uint64(1) << 22
+				if width == 64 {
+					a, b = 0xfff8000000000555, 0x8000000000000000
+					quiet = uint64(1) << 51
+				}
+				switch class {
+				case "signaling-nan":
+					a &^= quiet
+				case "subnormal":
+					a = 1
+				}
+				left, right := m.con(br.Bits(width), a), m.con(br.Bits(width), b)
+				var word br.Term
+				for byteIndex := 0; byteIndex < width/8; byteIndex++ {
+					part := m.ite(guard, m.extract(left, byteIndex*8, 8), m.extract(right, byteIndex*8, 8))
+					if byteIndex == 0 {
+						word = part
+					} else {
+						word = m.make(br.Concat, br.Bits((byteIndex+1)*8), 0, word, part)
+					}
+				}
+				v := m.sseMemoryVector(word)
+				for value, want := range []uint64{b, a} {
+					if got := evalRelationTerm(t, v.Lo, map[br.Term]uint64{guard: uint64(value)}, 0); got != want {
+						t.Fatalf("joined word = %#x, want %#x", got, want)
+					}
+				}
+				_, err := m.checkedSSECompare(v.Lo, v.Lo, width, m.truth)
+				if class == "quiet-nan" {
+					if err != nil {
+						t.Fatal("quiet NaN or signed zero is a valid comparison operand", err)
+					}
+				} else {
+					var refusal *Refusal
+					if !errors.As(err, &refusal) || refusal.Premise != "transition-sse-operands" {
+						t.Fatal("joined exceptional operand was not refused", err)
+					}
+				}
+			})
 		}
 	}
 }

@@ -39,7 +39,7 @@ func sequenceRecords(data, blocks []byte, instructionLimit int) []stateInstructi
 		imm := binary.LittleEndian.Uint64(record[8:16])
 		disp := int64(int32(binary.LittleEndian.Uint32(record[24:28])))
 		var i to.Intent
-		switch record[0] % 12 {
+		switch record[0] % 13 {
 		case 0:
 			i = to.Intent{Operation: to.MoveRegister, Dst: dst, Src: src}
 		case 1:
@@ -64,6 +64,8 @@ func sequenceRecords(data, blocks []byte, instructionLimit int) []stateInstructi
 			i = to.Intent{Operation: to.CPUID}
 		case 11:
 			i = to.Intent{Operation: to.Clear32, Dst: dst}
+		case 12:
+			i = to.Intent{Operation: to.ClearDirection}
 		}
 		program = append(program, stateOp(i, record[4]))
 		if len(program) >= instructionLimit {
@@ -671,7 +673,7 @@ func checkStateSequenceRootAt(t testing.TB, face TransitionInterface, program []
 
 func sequenceRecord(i to.Intent, form byte) []byte {
 	r := make([]byte, 32)
-	operations := []to.Operation{to.MoveRegister, to.MoveImmediate, to.MoveImmediate32, to.Load, to.Store, to.StoreImmediate, to.LEA, to.Subtract, to.And, to.LEARIP, to.CPUID, to.Clear32}
+	operations := []to.Operation{to.MoveRegister, to.MoveImmediate, to.MoveImmediate32, to.Load, to.Store, to.StoreImmediate, to.LEA, to.Subtract, to.And, to.LEARIP, to.CPUID, to.Clear32, to.ClearDirection}
 	for j, operation := range operations {
 		if i.Operation == operation {
 			r[0] = byte(j)
@@ -733,6 +735,7 @@ func FuzzTransitionStateEvolvingSequence(f *testing.F) {
 		f.Add(make([]byte, 32*4097), []byte{}, []byte{0x55}, values, limit, uint64(917), uint32(7))
 	}
 	for _, i := range []to.Intent{
+		{Operation: to.ClearDirection},
 		{Operation: to.Load, Dst: 1, Base: 0},
 		{Operation: to.Load, Dst: 1, Base: 4, SignedDisp: 56},
 		{Operation: to.And, Dst: 0, Immediate: ^uint64(15)},
@@ -740,6 +743,9 @@ func FuzzTransitionStateEvolvingSequence(f *testing.F) {
 	} {
 		f.Add(sequenceRecord(i, 0), []byte{}, []byte{0xff}, values, uint64(65536), uint64(971), uint32(3))
 	}
+	setDirection := slices.Clone(values)
+	setDirection[136] |= 64
+	f.Add(sequenceRecord(to.Intent{Operation: to.ClearDirection}, 0), []byte{}, []byte{0xff}, setDirection, uint64(64), uint64(971), uint32(3))
 	f.Fuzz(func(t *testing.T, records, blocks, cuts, valuation []byte, requestedLimit, layout uint64, residue uint32) {
 		limit := sequencePositiveLimit(requestedLimit)
 		checkStateSequence(t, sequenceFace(residue), sequenceRecords(records, blocks, limit), valuation, cuts, layout, limit)

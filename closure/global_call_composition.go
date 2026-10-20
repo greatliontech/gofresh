@@ -216,6 +216,9 @@ func (p *globalFunctionCorrespondence) checkCallCheckpoint(ctx context.Context, 
 	if after {
 		state, bound = p.call.application.outcome.state, p.call.bound.Successor
 	}
+	if err := p.checkDirection(ctx, bound.InitialDirection, bound.Direction); err != nil {
+		return err
+	}
 	builder := br.NewBuilder(65536)
 	if err := p.checkStorageValues(ctx, builder, state, bound.Memory, true); err != nil {
 		return err

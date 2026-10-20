@@ -5,12 +5,14 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-// SSEModel identifies ordinary legacy scalar SSE/SSE2 loads and unordered
-// comparisons. SSE/SSE2 must be available and enabled with no #UD, #NM or
-// layer-visible interposition. Vector and floating control state must be stable
-// under the transition's interference premises. It grants no AVX semantics.
+// SSEModel identifies ordinary legacy scalar SSE/SSE2 loads, unordered
+// comparisons and register-register XORPS. SSE/SSE2 must be available and enabled
+// with no #UD, #NM or layer-visible interposition. Vector and floating control
+// state must be stable under the transition's interference premises. It grants
+// no AVX semantics.
 // Comparisons separately prove that neither incoming operand is a signaling NaN
 // or nonzero subnormal; selecting this model does not assume normal completion.
+// XORPS accepts every operand bit pattern and preserves floating status/control.
 const SSEModel = "x86-64/ordinary-legacy-sse2@1"
 
 // TransitionVector is the complete low 128-bit XMM value, as two BV64 terms.
@@ -33,7 +35,7 @@ type TransitionSSEContext struct {
 }
 
 func isTransitionSSE(op x86asm.Op) bool {
-	return op == x86asm.MOVSS || op == x86asm.MOVSD_XMM || op == x86asm.UCOMISS || op == x86asm.UCOMISD
+	return op == x86asm.MOVSS || op == x86asm.MOVSD_XMM || op == x86asm.UCOMISS || op == x86asm.UCOMISD || op == x86asm.XORPS
 }
 
 func transitionXMM(arg x86asm.Arg) (int, bool) {
@@ -43,11 +45,12 @@ func transitionXMM(arg x86asm.Arg) (int, bool) {
 
 // validateTransitionSSEForm is an alternative to the integer prefix validator,
 // not an exception after that validator. Mandatory F2/F3/66 precedes at most one
-// non-W REX. Only 0F 10 memory loads and 0F 2E register comparisons are modeled;
+// non-W REX. Only 0F 10 memory loads, 0F 2E register comparisons and unprefixed
+// 0F 57 register XORPS are modeled (each permits that optional non-W REX);
 // the MOVSD string mnemonic, stores, register moves and VEX/EVEX forms refuse.
 func validateTransitionSSEForm(pc uint64, i x86asm.Inst, b []byte) error {
 	bad := func() error {
-		return refuse(pc, "transition-form", "unsupported legacy scalar SSE encoding or operand form")
+		return refuse(pc, "transition-form", "unsupported legacy SSE encoding or operand form")
 	}
 	if !isTransitionSSE(i.Op) || i.Mode != 64 || i.AddrSize != 64 || i.Len != len(b) || i.Args[2] != nil || i.Args[3] != nil {
 		return bad()
@@ -60,6 +63,8 @@ func validateTransitionSSEForm(pc uint64, i x86asm.Inst, b []byte) error {
 		prefix, opcode, width = 0xf2, 0x10, 64
 	case x86asm.UCOMISD:
 		prefix, width = 0x66, 64
+	case x86asm.XORPS:
+		opcode = 0x57
 	}
 	at := 0
 	if prefix != 0 {
@@ -115,6 +120,17 @@ func (m *transitionChecker) sseStep(i operation, size uint8, vectors *Transition
 		return m.err
 	}
 	src, _ := transitionXMM(i.Args[1])
+	if i.Op == x86asm.XORPS {
+		// Capture both complete incoming vectors before replacing the destination,
+		// including when the two register operands alias. No floating classification
+		// or flag transfer applies to this bitwise operation.
+		left, right := vectors[dst], vectors[src]
+		vectors[dst] = TransitionVector{
+			m.make(br.BitXor, br.Bits(64), 0, left.Lo, right.Lo),
+			m.make(br.BitXor, br.Bits(64), 0, left.Hi, right.Hi),
+		}
+		return m.err
+	}
 	width := 32
 	if i.Op == x86asm.UCOMISD {
 		width = 64
@@ -251,7 +267,7 @@ func (m *valueBuilder) sseCompare(left, right br.Term, width int) sseComparison 
 // impossible and retains the checked witness through tryFalse. Invalid/denormal
 // exceptions are the only floating exceptions of UCOMISS/UCOMISD. Removing both
 // classes preserves all MXCSR status and controls regardless of their settings.
-// Loads themselves accept every bit pattern, including excluded compare inputs.
+// Loads and XORPS accept every bit pattern, including excluded compare inputs.
 func (m *transitionChecker) checkedSSECompare(left, right br.Term, width int, guard br.Term) (sseComparison, error) {
 	r := m.sseCompare(left, right, width)
 	bad := m.and(guard, r.Excluded)

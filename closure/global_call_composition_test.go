@@ -154,6 +154,9 @@ func F() { var x uint64; A=7; B=9; %s Child(); %s B=Read(&x) }
 		mov(11)
 		store(addresses[0])
 	}
+	if variant == "direction" {
+		code = append(code, 0xfc) // The native child may clear DF; the source cannot.
+	}
 	childRET := pc()
 	code = append(code, 0xc3)
 	copy(f.raw[4096:], code)
@@ -239,13 +242,16 @@ func (f globalCallFixture) check(ctx context.Context, options ...globalCorrespon
 }
 
 func TestGlobalCallCompositionActualCurrentState(t *testing.T) {
-	for _, variant := range []string{"ordinary", "zero", "nested", "two", "eliminated", "retry", "swap", "early", "corrupt"} {
+	for _, variant := range []string{"ordinary", "zero", "nested", "two", "eliminated", "retry", "swap", "early", "corrupt", "direction"} {
 		t.Run(variant, func(t *testing.T) {
 			f := globalCallCompositionFixture(t, variant)
 			p, err := f.check(t.Context())
-			if variant == "swap" || variant == "early" || variant == "corrupt" {
+			if variant == "swap" || variant == "early" || variant == "corrupt" || variant == "direction" {
 				if err == nil || p != nil {
 					t.Fatalf("unaccounted call effect accepted: %s", variant)
+				}
+				if variant == "direction" && !strings.Contains(err.Error(), "source correspondence direction was not preserved") {
+					t.Fatalf("child direction change failed for another reason: %v", err)
 				}
 				if variant == "swap" {
 					// The unconstrained full effect relation is valid: only actual-call

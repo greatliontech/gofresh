@@ -484,6 +484,8 @@ func assertTransitionAlpha(t testing.TB, direct, segmented TransitionCertificate
 	}
 	equal(a.CutGuard, b.CutGuard)
 	equal(a.EntryPredicate, b.EntryPredicate)
+	equal(a.InitialDirection, b.InitialDirection)
+	equal(a.Direction, b.Direction)
 	if len(a.ExcludedBoundaries) != len(b.ExcludedBoundaries) {
 		t.Fatal("excluded coverage differs")
 	}

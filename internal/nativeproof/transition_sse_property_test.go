@@ -18,11 +18,13 @@ import (
 
 // This bounded evolving grammar complements the integer-only sequence grammar.
 // It has 1..4 stages, eight initialized scalar vector registers (XMM0..3 binary32
-// and XMM8..11 binary64), eight arbitrary untouched vectors, and 96 owned bytes.
+// and XMM8..11 binary64), eight arbitrary bitwise-work vectors, and 96 owned bytes.
 // Each stage forks on a different entry-DL bit, changes current memory/vectors,
 // joins, compares current vectors, optionally overwrites flags with byte TEST,
 // and branches on actual parity. Optional ordinary CALL/RET transfers a current
-// memory value to another vector. Later stages consume the preceding state.
+// memory value to another vector. XORPS evolves arbitrary complete vectors in
+// both branch arms and callees, including self-aliases and cross-bank sources,
+// without changing live TEST/compare flags. Later stages consume preceding state.
 // Operands range over normals, infinities, zeros and quiet NaNs, with randomized
 // payload/sign bits. Separate negative cases introduce exceptional operands.
 // These tests sample this grammar, not all SSE programs or symbolic domains.
@@ -34,6 +36,7 @@ const (
 	sseSeqImmediate sseSeqKind = iota
 	sseSeqStore
 	sseSeqLoad
+	sseSeqXORPS
 	sseSeqCompare
 	sseSeqTest
 	sseSeqBranch
@@ -113,6 +116,16 @@ func sseSeqGenerate(data []byte) sseSeqProgram {
 		return v
 	}
 	emit := func(op sseSeqOp) int { op.owner = -1; p.ops = append(p.ops, op); return len(p.ops) - 1 }
+	xor := func() int {
+		// Keep compare operands in their checked floating domain, while the
+		// other bank evolves unrestricted 128-bit values across every stage.
+		dst := 4 + int(next()%4) + 8*int(next()%2)
+		src := int(next() % 16)
+		if next()&1 != 0 {
+			src = dst
+		}
+		return emit(sseSeqOp{kind: sseSeqXORPS, reg: dst, other: src})
+	}
 	store := func(value uint64, off int8) {
 		emit(sseSeqOp{kind: sseSeqImmediate, reg: int(RAX), width: 64, value: value})
 		emit(sseSeqOp{kind: sseSeqStore, reg: int(RAX), offset: off})
@@ -137,11 +150,13 @@ func sseSeqGenerate(data []byte) sseSeqProgram {
 		dst, src := bank+int(next()%4), bank+int(next()%4)
 		off := int8(8 + 8*(next()%6))
 		emit(sseSeqOp{kind: sseSeqTest, reg: int(RDX), value: 1 << uint(stage)})
+		xor() // Must preserve the actual TEST flags consumed by this fork.
 		fork := emit(sseSeqOp{kind: sseSeqBranch, near: next()&1 != 0})
 		for arm := 0; arm < 2; arm++ {
 			if arm == 1 {
 				p.ops[fork].target = len(p.ops)
 			}
+			xor()
 			store(sseSeqBits(width, next(), payload()), off)
 			emit(sseSeqOp{kind: sseSeqLoad, reg: dst, width: width, offset: off})
 			if next()&1 != 0 {
@@ -164,6 +179,7 @@ func sseSeqGenerate(data []byte) sseSeqProgram {
 			emit(sseSeqOp{kind: sseSeqImmediate, reg: int(RAX), width: 8, value: uint64(next())})
 			emit(sseSeqOp{kind: sseSeqTest, reg: int(RAX), value: uint64(next())})
 		}
+		xor() // Neither UCOMI's PF nor TEST's AF definedness may be replaced.
 		parity := emit(sseSeqOp{kind: sseSeqBranch, condition: 1 + next()%2, near: next()&1 != 0})
 		emit(sseSeqOp{kind: sseSeqImmediate, reg: int(RBX), width: 32, value: 100 + uint64(stage)})
 		skip := emit(sseSeqOp{kind: sseSeqJump})
@@ -177,6 +193,8 @@ func sseSeqGenerate(data []byte) sseSeqProgram {
 			p.ops[call].target = len(p.ops)
 			p.cuts = append(p.cuts, len(p.ops)) // common cut inside the active callee
 			body := emit(sseSeqOp{kind: sseSeqLoad, reg: bank + int(next()%4), width: width, offset: off + 8})
+			p.ops[body].owner = call
+			body = xor()
 			p.ops[body].owner = call
 			ret := emit(sseSeqOp{kind: sseSeqReturn, target: call + 1})
 			p.ops[ret].owner = call
@@ -203,6 +221,8 @@ func (p *sseSeqProgram) encode() {
 			return []byte{0x48, 0x89, 0x44 | byte(o.reg)<<3, 0x24, byte(o.offset)}
 		case sseSeqLoad:
 			return sseIntegrationLoad(o.width, o.reg, o.offset)
+		case sseSeqXORPS:
+			return sseXORPSBytes(o.reg, o.other)
 		case sseSeqCompare:
 			return sseIntegrationCompare(o.width, o.reg, o.other)
 		case sseSeqTest:
@@ -267,7 +287,7 @@ func (p sseSeqProgram) inventory(cut int) (map[int]bool, []TransitionExpansion) 
 		}
 		seen[j] = true
 		o := p.ops[j]
-		if o.kind == sseSeqLoad || o.kind == sseSeqCompare || o.kind == sseSeqTest || o.kind == sseSeqCall {
+		if o.kind == sseSeqLoad || o.kind == sseSeqXORPS || o.kind == sseSeqCompare || o.kind == sseSeqTest || o.kind == sseSeqCall {
 			expansions = append(expansions, TransitionExpansion{PC: p.pcs[j], AllActivations: true})
 		}
 		switch o.kind {
@@ -325,14 +345,15 @@ func (p sseSeqProgram) proposal(digest [32]byte, cut int) TransitionProposal {
 }
 
 type sseSeqState struct {
-	regs     [16]uint64
-	vectors  [16][2]uint64
-	memory   map[int64]byte
-	flags    [6]bool // CF, OF, SF, ZF, AF, PF
-	defined  [6]bool
-	trace    []int
-	accesses []sseSeqAccess
-	base     uint64
+	regs      [16]uint64
+	vectors   [16][2]uint64
+	memory    map[int64]byte
+	flags     [6]bool // CF, OF, SF, ZF, AF, PF
+	defined   [6]bool
+	direction bool
+	trace     []int
+	accesses  []sseSeqAccess
+	base      uint64
 }
 type sseSeqCoverage struct {
 	compareWidth    [2]bool
@@ -343,6 +364,10 @@ type sseSeqCoverage struct {
 	encoding        [2]bool
 	call, overwrite bool
 	partitions      [3]bool // single suffix, multiple suffixes, active-callee cut
+	xorAlias        [2]bool // distinct operands, self-alias
+	xorDestination  [2]bool // low and high register bank
+	xorSource       [2]bool
+	xorCallee       bool
 }
 
 func sseSeqInitial(b TransitionBound, branches uint64) (sseSeqState, map[br.Term]uint64) {
@@ -365,6 +390,8 @@ func sseSeqInitial(b TransitionBound, branches uint64) (sseSeqState, map[br.Term
 	for _, term := range []br.Term{b.InitialPredicates.CF, b.InitialPredicates.ZF, b.InitialPredicates.SFXorOF} {
 		v[term] = 0
 	}
+	r.direction = branches&1 != 0
+	v[b.InitialDirection] = branches & 1
 	for j := range r.defined {
 		r.defined[j] = true
 	}
@@ -407,8 +434,24 @@ func (p sseSeqProgram) execute(t testing.TB, r sseSeqState, cut int, coverage *s
 			v := access(j, FrameRead, int64(r.regs[RSP]-r.base)+int64(o.offset), o.width/8, 0)
 			r.vectors[o.reg] = [2]uint64{v, 0}
 			coverage.width[o.width/32-1] = true
+		case sseSeqXORPS:
+			// Concrete host integer XOR is independent of symbolic transfers,
+			// floating classification and production flag helpers.
+			a, b := r.vectors[o.reg], r.vectors[o.other]
+			r.vectors[o.reg] = [2]uint64{a[0] ^ b[0], a[1] ^ b[1]}
+			alias := 0
+			if o.reg == o.other {
+				alias = 1
+			}
+			coverage.xorAlias[alias] = true
+			coverage.xorDestination[o.reg/8] = true
+			coverage.xorSource[o.other/8] = true
+			coverage.xorCallee = coverage.xorCallee || o.owner >= 0
 		case sseSeqCompare:
 			coverage.compareWidth[o.width/32-1] = true
+			if bad, _, _, _ := sseReference(o.width, r.vectors[o.reg][0], r.vectors[o.other][0]); bad {
+				t.Fatalf("positive sequence reaches excluded binary%d operands at %#x: XMM%d=%#x, XMM%d=%#x", o.width, p.pcs[j], o.reg, r.vectors[o.reg][0], o.other, r.vectors[o.other][0])
+			}
 			decode := func(v uint64) float64 {
 				if o.width == 32 {
 					return float64(math.Float32frombits(uint32(v)))
@@ -488,6 +531,9 @@ func sseSeqAssert(t testing.TB, p sseSeqProgram, b TransitionBound, cut int, bra
 	eval := func(term br.Term) uint64 { return evalRelationTerm(t, term, values, 0) }
 	if b.Interface.Conditions.SSE != SSEModel || !b.SSE.MXCSRPreserved || !b.SSE.UpperVectorsPreserved || eval(b.CutGuard) != 1 {
 		t.Fatal("lost complete-cut or SSE context")
+	}
+	if b.Direction != b.InitialDirection || b.Direction.Sort() != br.Bool() || (eval(b.Direction) == 1) != r.direction {
+		t.Fatal("sequence changed incoming direction state")
 	}
 	for j, v := range b.Vectors {
 		if v.Lo.Sort() != br.Bits(64) || v.Hi.Sort() != br.Bits(64) || eval(v.Lo) != r.vectors[j][0] || eval(v.Hi) != r.vectors[j][1] {
@@ -667,7 +713,7 @@ func sseSeqCheck(t testing.TB, data []byte, coverage *sseSeqCoverage) {
 		b, _ := current.Bound()
 		if j == 0 {
 			initial = b
-		} else if b.InitialVectors != initial.InitialVectors || b.InitialRegisters != initial.InitialRegisters || b.InitialPredicates != initial.InitialPredicates || b.SSE != initial.SSE {
+		} else if b.InitialVectors != initial.InitialVectors || b.InitialRegisters != initial.InitialRegisters || b.InitialPredicates != initial.InitialPredicates || b.InitialDirection != initial.InitialDirection || b.SSE != initial.SSE {
 			t.Fatal("partition restarted entry identities/context")
 		}
 		if cut < final && p.ops[cut].owner >= 0 {
@@ -692,7 +738,7 @@ func TestTransitionSSEEvolvingSequences(t *testing.T) {
 		}
 		t.Run(fmt.Sprint(seed), func(t *testing.T) { sseSeqCheck(t, data, &coverage) })
 	}
-	for _, group := range [][]bool{coverage.width[:], coverage.compareWidth[:], coverage.result[:], coverage.fork[:], coverage.parity[:], coverage.condition[:], coverage.encoding[:], coverage.partitions[:], {coverage.call, coverage.overwrite}} {
+	for _, group := range [][]bool{coverage.width[:], coverage.compareWidth[:], coverage.result[:], coverage.fork[:], coverage.parity[:], coverage.condition[:], coverage.encoding[:], coverage.partitions[:], coverage.xorAlias[:], coverage.xorDestination[:], coverage.xorSource[:], {coverage.call, coverage.overwrite, coverage.xorCallee}} {
 		for _, hit := range group {
 			if !hit {
 				t.Fatalf("generated population missed required dimension: %+v", coverage)

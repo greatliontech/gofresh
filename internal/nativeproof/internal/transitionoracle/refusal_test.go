@@ -18,6 +18,7 @@ func TestExecutedOnlyRefusals(t *testing.T) {
 		"43b800000000", "44b800000000", "45b800000000", "46b800000000", "47b800000000",
 		"674888c0", "67488ac0", "c5f877", "c4e17877", "62f17c4858c0",
 		"488b", "488b04", "488b4424", "48b800000000", "41b8000000",
+		"fd", "66fc", "40fc", "f3fc",
 	} {
 		b, err := hex.DecodeString(text)
 		if err != nil {
@@ -34,7 +35,7 @@ func TestExecutedOnlyRefusals(t *testing.T) {
 	for p := byte(0x40); p <= 0x4f; p++ {
 		prefixes = append(prefixes, p)
 	}
-	for _, text := range []string{"4889c0", "488b0424", "eb00", "e900000000", "41b800000000", "0fa2"} {
+	for _, text := range []string{"4889c0", "488b0424", "eb00", "e900000000", "41b800000000", "0fa2", "fc"} {
 		b, _ := hex.DecodeString(text)
 		for _, prefix := range prefixes {
 			input := append([]byte{prefix}, b...)
@@ -51,7 +52,7 @@ func TestOpcodeAndPrefixPopulation(t *testing.T) {
 	for first := 0; first < 256; first++ {
 		b := append([]byte{byte(first)}, make([]byte, 14)...)
 		valid := first >= 0xb0 && first <= 0xbf || first == 0xeb || first == 0xe9 || first >= 0x72 && first <= 0x77 || first >= 0x7c && first <= 0x7f || first == 0x3d || first == 0xa9 || first == 0x88 || first == 0x89 || first == 0x8a || first == 0x8b || first == 0xc6 || first == 0xc7
-		valid = valid || first == 0xe8 || first == 0xc3 || first >= 0x50 && first <= 0x5f
+		valid = valid || first == 0xfc || first == 0xe8 || first == 0xc3 || first >= 0x50 && first <= 0x5f
 		valid = valid || first == 0x7a || first == 0x7b
 		valid = valid || first == 0x39 || first == 0x3b || first == 0x38 || first == 0x3a || first == 0xa8 || first == 0x90
 		_, err := Parse(b, 1<<32)
@@ -88,6 +89,9 @@ func TestOpcodeAndPrefixPopulation(t *testing.T) {
 
 func TestEncodeRefusesNormalization(t *testing.T) {
 	cases := []Descriptor{
+		{Intent{Operation: ClearDirection, Dst: 1}, Encoding{Form: CLDFC}},
+		{Intent{Operation: ClearDirection}, Encoding{Form: CLDFC, REX: 0x40}},
+		{Intent{Operation: ClearDirection}, Encoding{Form: CLDFC, NOPModRM: 1}},
 		{Intent{Operation: Increment64}, Encoding{Form: INCFF}},
 		{Intent{Operation: Increment64, Width: 32}, Encoding{Form: INCFF, REX: 0x48}},
 		{Intent{Operation: Increment64, Src: 1}, Encoding{Form: INCFF, REX: 0x48}},

@@ -423,6 +423,9 @@ func callTLSAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, 
 func assertCallTLSState(t testing.TB, c TransitionCertificate, r, initial stateReference, values map[br.Term]uint64, frames []referenceActivation) {
 	t.Helper()
 	b := c.checked.bound
+	if b.Direction.Sort() != br.Bool() || (stateEval(t, b.Direction, values) != 0) != r.direction {
+		t.Fatal("call/syscall current direction differs")
+	}
 	pointer := func(p TransitionPointer, w statePointer) {
 		t.Helper()
 		if p == nil {

@@ -1,13 +1,20 @@
 package bitrelation
 
-// Lift one conditional operand outward, preferring the left operand. The closed
-// arithmetic/order vocabulary excludes BoolToBits, so this orientation cannot
-// reverse ConditionalBits. Local checking shares none of this search's matching
-// decisions. Construction, resulting depth and normalization use the same meter.
+// Lift a conditional operand outward, preferring the left operand. Concatenation
+// additionally cofactors the other operand under the exact same selector, keeping
+// joined bytes linear instead of manufacturing impossible mixed-byte paths. The
+// existing arithmetic/order normal form continues to lift one operand at a time.
+// The closed vocabulary excludes BoolToBits, so this cannot reverse ConditionalBits.
+// Local checking shares none of this search's matching decisions. Construction,
+// resulting depth and normalization use the same meter.
 func (p *proposer) conditionalOperationRewrite(t Term) (Rule, Term, bool) {
 	n := t.n
+	if n.op == Concat && !p.conditionalConcat {
+		p.deferredConcat = p.deferredConcat || n.args[0].op == ITE || n.args[1].op == ITE
+		return 0, Term{}, false
+	}
 	switch n.op {
-	case Add, Sub, Equal, ULT, ULE, SLT, SLE:
+	case Add, Sub, Equal, ULT, ULE, SLT, SLE, Concat:
 	default:
 		return 0, Term{}, false
 	}
@@ -29,6 +36,10 @@ func (p *proposer) conditionalOperationRewrite(t Term) (Rule, Term, bool) {
 			}
 			args := [2]Term{{n.args[0]}, {n.args[1]}}
 			args[position] = Term{x.args[arm+1]}
+			other := n.args[1-position]
+			if n.op == Concat && other.op == ITE && p.eq(other.args[0], x.args[0]) {
+				args[1-position] = Term{other.args[arm+1]}
+			}
 			branches[arm] = p.make(n.op, n.sort, n.imm, args[:]...)
 			if p.err != nil {
 				return 0, Term{}, false

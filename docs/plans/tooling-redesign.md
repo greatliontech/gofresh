@@ -656,7 +656,7 @@
                             original inputs, ordered CPU/syscall effects, exclusions
                             and startup spills; numeric provenance supplies no typed
                             association or private-lifetime authority.
-                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.13b Check CLD and the
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.13b Check CLD and the
                             actual legacy XMM-clear form with complete direction,
                             arithmetic-flag, vector and floating-context state;
                             retain exact operand and encoding restrictions.

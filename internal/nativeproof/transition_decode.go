@@ -12,7 +12,7 @@ import (
 // independently proved false. Register CMP and nonbyte TEST retain their ordinary
 // discovery behavior; memory CMP and byte TEST are distinct operand families.
 func TransitionExpansionRequired(i x86asm.Inst) bool {
-	if i.Op == x86asm.INC || i.Op == x86asm.SHL || i.Op == x86asm.SBB {
+	if i.Op == x86asm.CLD || i.Op == x86asm.INC || i.Op == x86asm.SHL || i.Op == x86asm.SBB {
 		return true
 	}
 	if i.Op == x86asm.AND && i.DataSize == 32 && i.MemBytes == 0 {
@@ -145,6 +145,12 @@ func validateTransitionForm(pc uint64, i x86asm.Inst, b []byte) error {
 		return validateTransitionSSEForm(pc, i, b)
 	}
 	bad := func() error { return refuse(pc, "transition-form", "unsupported transition encoding or operand form") }
+	if i.Op == x86asm.CLD {
+		if len(b) != 1 || b[0] != 0xfc || i.Args != (x86asm.Args{}) {
+			return bad()
+		}
+		return nil
+	}
 	if i.Op == x86asm.NOP {
 		if len(b) == 1 && b[0] == 0x90 || len(b) == 2 && b[0] == 0x66 && b[1] == 0x90 {
 			return nil

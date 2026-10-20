@@ -35,14 +35,18 @@ type TransitionCallBound struct {
 	Words              []TransitionCallWord
 	InputPredicates    TransitionPredicates
 	Predicates         TransitionPredicates
-	Flags              TransitionFlags
-	InputFS            br.Term
-	Thread             TransitionThread
-	InputVectors       TransitionVectors
-	Vectors            TransitionVectors
-	SSE                TransitionSSEContext
-	ChildEntry         TransitionBound
-	Successor          TransitionBound
+	// InputDirection is the exact callee entry DF; Direction associates it with
+	// the caller's actual current DF after CALL, without introducing a new input.
+	InputDirection br.Term
+	Direction      br.Term
+	Flags          TransitionFlags
+	InputFS        br.Term
+	Thread         TransitionThread
+	InputVectors   TransitionVectors
+	Vectors        TransitionVectors
+	SSE            TransitionSSEContext
+	ChildEntry     TransitionBound
+	Successor      TransitionBound
 }
 
 // TransitionCallCertificate establishes exact-callee applicability and an actual
@@ -169,6 +173,9 @@ func CheckTransitionCallReturn(ctx context.Context, caller TransitionCertificate
 		}
 	}
 	if err := dep.importTerm(callee.checked.access.Value); err != nil {
+		return TransitionCallCertificate{}, err
+	}
+	if err := dep.importTerm(callee.checked.state.Direction); err != nil {
 		return TransitionCallCertificate{}, err
 	}
 	for _, proof := range callee.checked.proofs {

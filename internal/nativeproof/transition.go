@@ -33,6 +33,7 @@ type transitionChecker struct {
 	frames                     []TransitionFrame
 	thread                     TransitionThread
 	vectors                    TransitionVectors
+	direction                  br.Term
 	completingReturn, returned bool
 	returnAnchor               TransitionOccurrenceID
 }
@@ -394,6 +395,7 @@ func (m *transitionChecker) finish(g *graph, start int) (TransitionCertificate, 
 	m.occurrence = m.bound.Boundary.ID
 	m.bound.Thread = m.thread
 	m.bound.Vectors = m.vectors
+	m.bound.Direction = m.direction
 	for range m.frames {
 		if !m.tick() {
 			return TransitionCertificate{}, m.err
@@ -470,6 +472,8 @@ func (m *transitionChecker) initial() error {
 		m.state.flags[f] = m.scratch(br.Bool())
 	}
 	m.bound.InitialPredicates = TransitionPredicates{m.state.flags[flagCarry], m.state.flags[flagZero], m.state.flags[flagLess]}
+	m.direction = m.scratch(br.Bool())
+	m.bound.InitialDirection = m.direction
 	m.bound.Origin = m.state.regs[RSP]
 	m.bound.InitialRegisters = m.state.regs
 	if m.face.Conditions.SSE == SSEModel {
@@ -689,6 +693,10 @@ func (m *transitionChecker) store(off TransitionLocation, v TransitionValue, wid
 }
 
 func (m *transitionChecker) step(i operation, size uint8) error {
+	if i.Op == x86asm.CLD {
+		m.direction = m.falsity
+		return m.err
+	}
 	if i.Op == x86asm.INC || i.Op == x86asm.SHL || i.Op == x86asm.SBB {
 		return m.scalarTail(i)
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	br "github.com/greatliontech/gofresh/internal/bitrelation"
 	"github.com/greatliontech/gofresh/internal/nativeproof"
+	"golang.org/x/arch/x86/x86asm"
 )
 
 func globalFunctionSource(t testing.TB) (computationSource, *sourceReturnCompletion, [2]*ssa.Global) {
@@ -119,6 +120,12 @@ func globalFunctionNative(t testing.TB, variant string) (globalNativeFixture, na
 		mov(12)
 	}
 	store(addresses[0])
+	if variant == "direction" {
+		code = append(code, 0xfc) // CLD changes preserved source context.
+	}
+	if variant == "inactive-direction" {
+		code = append(code, 0x48, 0x85, 0xc0, 0x75, 1, 0xfc) // known nonzero; JNE over CLD
+	}
 	if variant == "escape" {
 		code = append(code, 0x48, 0x89, 0xe1)
 	} // MOV RCX,RSP
@@ -178,7 +185,7 @@ func globalFunctionNative(t testing.TB, variant string) (globalNativeFixture, na
 	var expansions []nativeproof.TransitionExpansion
 	for at := f.entry; at < f.cut; {
 		instruction := decode(at)
-		if nativeproof.TransitionExpansionRequired(instruction) {
+		if nativeproof.TransitionExpansionRequired(instruction) && !(variant == "inactive-direction" && instruction.Op == x86asm.CLD) {
 			expansions = append(expansions, nativeproof.TransitionExpansion{PC: at})
 		}
 		at += uint64(instruction.Len)
@@ -200,12 +207,12 @@ func globalFunctionNative(t testing.TB, variant string) (globalNativeFixture, na
 
 func TestGlobalFunctionCompleteEffectsAndReturn(t *testing.T) {
 	source, completed, globals := globalFunctionSource(t)
-	for _, variant := range []string{"guarded", "unguarded", "entry-pointer-global", "retained-read", "inactive-write", "early-read", "extra-write", "unrelated-read", "unrelated-write", "conditional-write", "matched-conditional-write", "primitive", "private-atomic", "wrong-value", "escape", "vector-escape", "vector-private-value", "missing-private", "constrained-global"} {
+	for _, variant := range []string{"guarded", "unguarded", "entry-pointer-global", "retained-read", "inactive-write", "inactive-direction", "direction", "early-read", "extra-write", "unrelated-read", "unrelated-write", "conditional-write", "matched-conditional-write", "primitive", "private-atomic", "wrong-value", "escape", "vector-escape", "vector-private-value", "missing-private", "constrained-global"} {
 		t.Run(variant, func(t *testing.T) {
 			fixture, returned := globalFunctionNative(t, variant)
 			rho := globalRho(source, fixture, globals, [2]uint64{0x700008, 0x700050})
 			proof, err := checkGlobalFunctionCorrespondence(t.Context(), source, source.prog.Roots["F"], fixture.image, fixture.entry, completed, returned, rho, nil)
-			positive := variant == "guarded" || variant == "unguarded" || variant == "entry-pointer-global" || variant == "retained-read" || variant == "inactive-write" || variant == "vector-private-value"
+			positive := variant == "guarded" || variant == "unguarded" || variant == "entry-pointer-global" || variant == "retained-read" || variant == "inactive-write" || variant == "inactive-direction" || variant == "vector-private-value"
 			if !positive {
 				if err == nil || proof != nil {
 					t.Fatalf("unaccounted effect/premise admitted: %+v", proof)
@@ -215,6 +222,9 @@ func TestGlobalFunctionCompleteEffectsAndReturn(t *testing.T) {
 				}
 				if variant == "vector-escape" && !strings.Contains(err.Error(), "private frame address escapes in returned vector") {
 					t.Fatalf("vector escape failed for another reason: %v", err)
+				}
+				if variant == "direction" && !strings.Contains(err.Error(), "source correspondence direction was not preserved") {
+					t.Fatalf("direction change failed for another reason: %v", err)
 				}
 				return
 			}

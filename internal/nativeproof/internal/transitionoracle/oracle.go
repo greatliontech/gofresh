@@ -30,6 +30,7 @@
 // Scalar register forms admit INC64 (FF /0 with REX.W), SHL32 by CL (D3 /4),
 // SBB32 (19/1B) and AND32 (21/23). The unary selector is not extended by REX.R;
 // binary register selectors retain both directions and every architectural GPR.
+// CLD is exact operand-free FC with no prefix; STD is outside this grammar.
 // RIP-relative LEA and data accesses use
 // next IP. Direct CALL uses signed rel32, near RET reads the actual return word,
 // PUSH/POP admit the canonical 64-bit register forms, and SYSCALL is exact 0f05.
@@ -85,6 +86,7 @@ const (
 	LockedOr
 	LockedAndImmediate
 	LockedOrImmediate
+	ClearDirection // CLD clears DF without changing arithmetic flags or operands.
 	Increment64
 	ShiftLeft32CL
 	SubtractBorrow32
@@ -121,7 +123,7 @@ func RequiresExpansion(i Intent) bool {
 	case Call, Syscall, Clear32, LockedCompareExchange, SetRegister, SetMemory,
 		CompareMemory, CompareFromMemory, CompareMemoryImmediate, NoOp, LockedExchange, LockedExchangeAdd, AddRegister,
 		LockedAnd, LockedOr, LockedAndImmediate, LockedOrImmediate,
-		Increment64, ShiftLeft32CL, SubtractBorrow32, AndRegister32:
+		ClearDirection, Increment64, ShiftLeft32CL, SubtractBorrow32, AndRegister32:
 		return true
 	case Test, TestImmediate:
 		return i.Width == 8
@@ -200,6 +202,7 @@ const (
 	SBB1B
 	AND21
 	AND23
+	CLDFC
 )
 
 // Encoding preserves choices that semantic intent deliberately forgets. REX is

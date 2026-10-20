@@ -8,7 +8,7 @@ import (
 // TransitionRules identifies the conditional symbolic-origin transition rules,
 // including initialized image roots, guarded exclusions, decoder, expression,
 // pointer-lane, bounded conditional entry/return relations and CPUID dependencies.
-const TransitionRules = "gofresh/native-transition@17;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
+const TransitionRules = "gofresh/native-transition@18;" + ValueRules + ";" + cpuidRules + ";" + archSetFSRules + ";" + imageInitializationRules + ";" + TransferRules
 
 // LockedMemoryModel requires cacheable write-back coherent RAM, power-of-two cache
 // lines of at least eight bytes aligned to their size, and enabled architectural
@@ -462,8 +462,9 @@ type TransitionFlag struct {
 	Value              br.Term
 }
 
-// TransitionFlags covers the arithmetic flags. Every other flag/context component
-// follows the retained primitive/context relations when a syscall executes.
+// TransitionFlags covers the arithmetic flags. Direction is a separate always-
+// defined Boolean. Other flag/context components follow the retained primitive/
+// context relations when a syscall executes.
 type TransitionFlags struct{ CF, OF, SF, ZF, AF, PF TransitionFlag }
 
 // TransitionPredicates binds the three independent architectural entry predicates.
@@ -527,13 +528,18 @@ type TransitionBound struct {
 	Vectors           TransitionVectors
 	SSE               TransitionSSEContext
 	InitialPredicates TransitionPredicates
-	InitialMemory     []TransitionByte
-	Words             []TransitionWord
-	Registers         [16]TransitionValue
-	Memory            []TransitionByte
-	Preserved         Masks
-	Flags             TransitionFlags
-	Instructions      []GuardedInstruction
+	// InitialDirection is the arbitrary original DF input, independent of arithmetic
+	// predicates and optional machine models. Direction is its current path-derived
+	// value; calls and returns do not save or restore it implicitly.
+	InitialDirection br.Term
+	Direction        br.Term
+	InitialMemory    []TransitionByte
+	Words            []TransitionWord
+	Registers        [16]TransitionValue
+	Memory           []TransitionByte
+	Preserved        Masks
+	Flags            TransitionFlags
+	Instructions     []GuardedInstruction
 	// CutGuard is the derived reach expression, never inferred from graph closure.
 	CutGuard           br.Term
 	Accesses           []TransitionAccess

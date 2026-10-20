@@ -354,13 +354,18 @@ func TestTransitionCPUIDCoincidentPointerDestruction(t *testing.T) {
 func TestTransitionCPUIDRetainedBudgets(t *testing.T) {
 	face := cpuidFace()
 	face.Regions, face.ImageRegions, face.Words = nil, nil, nil
-	// Initial 16 registers, 3 predicates and 2 constants; the query adds two
+	// Initial 16 registers, 3 predicates, direction and 2 constants; the query adds two
 	// selectors, four variables and four extensions. One shared constant replaces
-	// every result. The root needs 32 nodes, while inherited event-only roots plus
+	// every result. The root needs 33 nodes, while inherited event-only roots plus
 	// the new query exceed that same combined allowance.
 	code := "0fa248b8000000000000000048bb000000000000000048b9000000000000000048ba00000000000000000fa2"
 	im, cut := transitionFixture(t, code)
-	root := continuationRoot(t, im, cut-2, face, TransitionLimits{RelationLimits: RelationLimits{Nodes: 32}})
+	limited, err := CheckTransition(t.Context(), im, face, rootTransitionProposal(t, im, cut-2), TransitionLimits{RelationLimits: RelationLimits{Nodes: 32}})
+	var nodeRefusal *Refusal
+	if limited.checked != nil || !errors.As(err, &nodeRefusal) || nodeRefusal.Premise != "relation-budget" {
+		t.Fatalf("root omitted the independent direction input from its node account: %v", err)
+	}
+	root := continuationRoot(t, im, cut-2, face, TransitionLimits{RelationLimits: RelationLimits{Nodes: 33}})
 	p := continuationProposal(t, root, cut)
 	c, err := CheckTransitionContinuation(t.Context(), root, p)
 	sequenceRefused(t, c, err, "relation-budget", cut-2)

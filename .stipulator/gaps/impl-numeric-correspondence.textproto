@@ -3,7 +3,7 @@
 
 requirement_id: "REQ-impl-numeric-correspondence"
 reason: "Clause-scoped source/native derivation, exact multi-result composition, typed-local storage and effect correspondence, selected-package artifact positives and adversarial examples support local numeric correspondence. Complete invariant evidence across all six clauses remains outstanding: bounded scalar/rewrite and typed-storage grammars, finite joint populations, small-width exhaustive grids and wide-value samples do not establish every accepted source context, path, effect/exception, native state, equality inference and certificate dependency together. This record alleges no implementation contradiction. Pass-local correspondence retains its explicit initialization, harness, actual-use, source/artifact-span and applicability obligations and supplies no public runtime grant."
-content_hash: "6c83e203b901b5509b0b70e2394ab83f4181297c5af60c048ebc2e19b90a75b8"
-source_hash: "4cfeeada97dc619f897dea2e8a59b7c1a152ffb2a36e7bac5606a239783dd633"
+content_hash: "da0f19faa698d6d442993a958ee6a73c0bea121f609d227ddca95545b8d598c5"
+source_hash: "c8e2f440dc4f17ba1f6c82a634eeff46aecb6f05347bc855a0b69e6fd88dc49f"
 lands { manual { condition: "tooling-redesign 5.1w.2b.3a: property witnesses or analyzer evidence establish the complete conditional numeric-correspondence invariant for the supported language and native model, including selected typed ownership and widths, exact contexts and argument/result mapping, every branch and result equality, effect/exception preservation, rewrite side conditions, immutable dependencies and bounded/cancelled refusal. Converged source-resource and composer review and the complete selected same-build positive/negative population remain required. Ordinary whole-operation coverage stays at 5.1w.2b.3b and producing/current/historical applicability at 5.1w.2b.4; local equality cannot discharge them." } }
 excuses: GAP_EXCUSE_UNCOVERED

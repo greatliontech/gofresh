@@ -36,6 +36,20 @@ func conditionalJoinedCounter(t testing.TB) (br.Term, br.Term) {
 
 var conditionalOperations = []br.Op{br.Add, br.Sub, br.Equal, br.ULT, br.ULE, br.SLT, br.SLE}
 
+func TestConditionalOperationRetainsOneOperandNormalForm(t *testing.T) {
+	for _, op := range conditionalOperations {
+		f := newFactory(t)
+		s := br.Bits(32)
+		p := f.variable(br.Bool(), br.NewScope(), 0, false)
+		a, b, c, d := f.variable(s, br.NewScope(), 0, false), f.variable(s, br.NewScope(), 0, false), f.variable(s, br.NewScope(), 0, false), f.variable(s, br.NewScope(), 0, false)
+		fixed := f.make(br.ITE, s, 0, p, c, d)
+		left, right := conditionalOperationTerms(f, op, 0, p, a, b, fixed)
+		// The existing arithmetic/order search joins this one-operand lifting
+		// form even when the fixed operand has a correlated conditional.
+		prove(t, left, right)
+	}
+}
+
 func conditionalOperationTerms(f factory, op br.Op, position int, p, a, b, fixed br.Term) (br.Term, br.Term) {
 	s := a.Sort()
 	out := s

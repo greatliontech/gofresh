@@ -71,7 +71,7 @@ func sseIntegrationExpansions(code []byte, pc uint64) []TransitionExpansion {
 			break
 		}
 		switch i.Op {
-		case x86asm.MOVSS, x86asm.MOVSD_XMM, x86asm.UCOMISS, x86asm.UCOMISD, x86asm.TEST:
+		case x86asm.MOVSS, x86asm.MOVSD_XMM, x86asm.UCOMISS, x86asm.UCOMISD, x86asm.XORPS, x86asm.TEST:
 			choices = append(choices, TransitionExpansion{PC: pc, AllActivations: true})
 		}
 		pc += uint64(i.Len)

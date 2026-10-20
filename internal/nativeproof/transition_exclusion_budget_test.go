@@ -39,7 +39,7 @@ func exclusionPrefixRoots(t testing.TB, c TransitionCertificate) []br.Term {
 	if len(b.Words) != 0 || len(b.PrimitiveEffects) != 0 || len(b.ExcludedBoundaries) != 0 || len(b.Accesses) != 0 {
 		t.Fatal("budget fixture acquired uncounted dependency kinds")
 	}
-	r := []br.Term{b.Origin, b.EntryPredicate, b.CutGuard, b.InitialPredicates.CF, b.InitialPredicates.ZF, b.InitialPredicates.SFXorOF}
+	r := []br.Term{b.Origin, b.EntryPredicate, b.CutGuard, b.InitialDirection, b.Direction, b.InitialPredicates.CF, b.InitialPredicates.ZF, b.InitialPredicates.SFXorOF}
 	r = append(r, b.InitialRegisters[:]...)
 	r = append(r, c.checked.flags[:]...)
 	for _, v := range b.Registers {

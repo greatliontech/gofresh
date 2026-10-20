@@ -10,6 +10,12 @@ import (
 // Branch displacements are already relative to the eventual instruction end;
 // address applicability is checked by Parse when the caller supplies a PC.
 func Encode(i Intent, e Encoding) ([]byte, error) {
+	if i.Operation == ClearDirection {
+		if i != (Intent{Operation: ClearDirection}) || e != (Encoding{Form: CLDFC}) {
+			return nil, fmt.Errorf("invalid CLD intent/encoding")
+		}
+		return []byte{0xfc}, nil
+	}
 	if i.Operation >= Increment64 {
 		return encodeScalar(i, e)
 	}

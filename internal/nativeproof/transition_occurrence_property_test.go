@@ -161,6 +161,13 @@ func occurrencePropertyInputs(ctx context.Context, p occurrenceOracleProgram, b 
 			return nil, err
 		}
 	}
+	direction := uint64(0)
+	if input.state.direction {
+		direction = 1
+	}
+	if err := variable(b.InitialDirection, br.Bool(), direction); err != nil {
+		return nil, err
+	}
 	for reg, vector := range b.InitialVectors {
 		for lane, term := range []br.Term{vector.Lo, vector.Hi} {
 			if err := variable(term, br.Bits(64), input.vectors[reg][lane]); err != nil {
@@ -1053,7 +1060,7 @@ func TestTransitionOccurrenceJointPopulation(t *testing.T) {
 func occurrencePropertyPrefixRetained(before, after TransitionCertificate) error {
 	a, _ := before.Bound()
 	b, _ := after.Bound()
-	if a.Origin != b.Origin || a.InitialRegisters != b.InitialRegisters || a.InitialVectors != b.InitialVectors || a.InitialPredicates != b.InitialPredicates || a.EntryPredicate != b.EntryPredicate || !reflect.DeepEqual(a.InitialMemory, b.InitialMemory) || !reflect.DeepEqual(a.Interface, b.Interface) {
+	if a.InitialDirection != b.InitialDirection || a.Origin != b.Origin || a.InitialRegisters != b.InitialRegisters || a.InitialVectors != b.InitialVectors || a.InitialPredicates != b.InitialPredicates || a.EntryPredicate != b.EntryPredicate || !reflect.DeepEqual(a.InitialMemory, b.InitialMemory) || !reflect.DeepEqual(a.Interface, b.Interface) {
 		return errors.New("continuation replaced original state identities/premises")
 	}
 	old := before.checked.witness

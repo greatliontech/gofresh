@@ -243,6 +243,9 @@ func dagAssert(t testing.TB, c TransitionCertificate, x dagLayout, cut int, face
 		t.Fatal("DAG scope binding differs")
 	}
 	values := stateBindings(t, c, face, initial)
+	if b.Direction.Sort() != br.Bool() || (stateEval(t, b.Direction, values) != 0) != r.direction {
+		t.Fatal("DAG current direction differs from executed intent")
+	}
 	inventory := x.proposal(cut)
 	if len(inventory.Nodes) != len(b.Instructions)+len(b.ExcludedBoundaries)+1 {
 		t.Fatal("structural coverage differs")
