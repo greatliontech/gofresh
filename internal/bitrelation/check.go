@@ -329,6 +329,34 @@ func (c *checker) boolean(a, b *node) bool {
 func (c *checker) conversion(a, b *node) bool {
 	x := a.args[0]
 	switch a.op {
+	case Concat:
+		// Both fields must be exact adjacent ranges of one scoped term. A
+		// whole-width identity is not a field here: it leaves no room for a
+		// second nonempty adjacent range within that same base.
+		low, high := a.args[0], a.args[1]
+		var bases [2]*node
+		var offsets [2]uint64
+		for i, field := range []*node{low, high} {
+			switch field.op {
+			case Trunc:
+				bases[i] = field.args[0]
+			case Extract:
+				bases[i], offsets[i] = field.args[0], field.imm
+			default:
+				return false
+			}
+		}
+		width := uint64(low.sort.width) + uint64(high.sort.width)
+		if width != uint64(a.sort.width) || offsets[1] != offsets[0]+uint64(low.sort.width) || offsets[0]+width > uint64(bases[0].sort.width) || !c.eq(bases[0], bases[1]) {
+			return false
+		}
+		if offsets[0] == 0 {
+			if a.sort == bases[0].sort {
+				return c.eq(bases[0], b)
+			}
+			return b.op == Trunc && c.eq(bases[0], b.args[0])
+		}
+		return b.op == Extract && b.imm == offsets[0] && c.eq(bases[0], b.args[0])
 	case Trunc:
 		switch x.op {
 		case Concat:

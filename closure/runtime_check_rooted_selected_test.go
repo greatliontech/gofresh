@@ -16,6 +16,12 @@ func assertSelectedRuntimeRootedApplication(t *testing.T, raw []byte, image *nat
 		t.Fatal("complete correspondence has another native owner")
 	}
 	x, until := selectedRuntimeRootCandidate(t, raw, locations, selectedStartupLayout(t, raw, image, locations))
+	// Later spill reloads require readable original slots, and the outgoing
+	// argument slots need their own grants before this fresh root is checked.
+	x.face.Regions[1].Readable = true
+	x.face.Regions = append(x.face.Regions,
+		nativeproof.RelativeRegion{Bytes: nativeproof.RelativeSpan{Start: -48, End: -44}, Writable: true},
+		nativeproof.RelativeRegion{Bytes: nativeproof.RelativeSpan{Start: -40, End: -32}, Writable: true})
 	limits := nativeproof.TransitionLimits{RelationLimits: nativeproof.RelationLimits{Work: 8_000_000, Nodes: 131072}}
 	proposal, err := nativeproof.ProposeTransition(t.Context(), image, body.Prefix.Entry, limits, nativeproof.TransitionOptions{Expansions: x.expansions})
 	if err != nil {
@@ -118,4 +124,6 @@ func assertSelectedRuntimeRootedApplication(t *testing.T, raw []byte, image *nat
 		t.Fatal("rooted body has an unaccounted atomic occurrence")
 	}
 	t.Logf("complete selected source/native body applies from ELF root %#x through actual wrapper return %#x; exact source/model scope, ten atomic groups, startup effects and residual state retained; process/compiler/use/harness obligations remain", before.Entry, until)
+	assertSelectedStartupWordTransfer(t, raw, image, successor, locations)
+	assertSelectedStartupWordPermissions(t, raw, image, x.face, proposal, limits, proof.native)
 }

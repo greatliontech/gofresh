@@ -37,6 +37,14 @@ func Propose(ctx context.Context, left, right Term, limits Limits) (Proof, error
 				clear(p.memo)
 				continue
 			}
+			if !p.sliceReassembly && p.deferredSlices {
+				// Reassembly can hide fields used by mask/projection rewrites.
+				// Try it only after the established normal forms fail to join,
+				// retaining their cumulative meter, arena and certificate steps.
+				p.sliceReassembly = true
+				clear(p.memo)
+				continue
+			}
 			return Proof{}, refuse(Unsupported, "bounded rewrites did not join")
 		}
 		bridge := p.emit(Reflexivity, l.term, r.term)
@@ -75,6 +83,7 @@ type proposer struct {
 	e                                 equality
 	err                               error
 	conditionalConcat, deferredConcat bool
+	sliceReassembly, deferredSlices   bool
 }
 
 func (p *proposer) emit(rule Rule, a, b Term, premises ...int) int {
@@ -120,6 +129,18 @@ func (p *proposer) normalize(t Term) normal {
 		return v
 	}
 	n := t.n
+	if p.sliceReassembly && n.op == Concat {
+		// Keep a slice tree's original common base until the tree is joined.
+		// Otherwise child conversions can hide that base in only one field
+		// (Trunc(Trunc(x)) beside Extract(Trunc(x))). Every intermediate join
+		// still emits its own independently checked Conversion step.
+		if joined, ok := p.reassembleTree(t); ok && p.err == nil {
+			norm := p.normalize(joined.term)
+			v := normal{norm.term, p.emit(Transitivity, t, norm.term, joined.step, norm.step)}
+			p.memo[n] = v
+			return v
+		}
+	}
 	if n.arity == 0 {
 		v := normal{t, p.emit(Reflexivity, t, t)}
 		p.memo[n] = v
@@ -138,6 +159,11 @@ func (p *proposer) normalize(t Term) normal {
 	step := p.emit(Congruence, t, cur, premises...)
 	if p.err != nil {
 		return normal{}
+	}
+	if n.op == Concat && !p.sliceReassembly {
+		// Record original candidates even if child normalization hid their
+		// shared base. Reassembly remains deferred behind established forms.
+		p.reassembleSlices(t)
 	}
 	// Every proposed local rewrite has its own certificate step. Recursively
 	// reducing the newly formed expression lets an ITE expose an interval rule.
@@ -174,6 +200,10 @@ func (p *proposer) rewrite(t Term) (Rule, Term, bool) {
 		return result(ConstantFold, p.con(s, primitive(n, values)))
 	}
 	switch n.op {
+	case Concat:
+		if next, ok := p.reassembleSlices(t); ok {
+			return result(Conversion, next)
+		}
 	case Not:
 		if x.op == Not {
 			return result(BooleanLaw, tm(x.args[0]))
@@ -377,4 +407,74 @@ func (p *proposer) rewrite(t Term) (Rule, Term, bool) {
 		}
 	}
 	return 0, Term{}, false
+}
+
+// reassembleSlices proposes a joined slice of original or normalized operands.
+// Its recognition is separate from the checker's Conversion side conditions.
+func (p *proposer) reassembleSlices(t Term) (Term, bool) {
+	n := t.n
+	low, high := n.args[0], n.args[1]
+	if (low.op != Trunc && low.op != Extract) || (high.op != Trunc && high.op != Extract) {
+		return Term{}, false
+	}
+	lo, hi := uint64(0), uint64(0)
+	if low.op == Extract {
+		lo = low.imm
+	}
+	if high.op == Extract {
+		hi = high.imm
+	}
+	base := low.args[0]
+	if hi != lo+uint64(low.sort.width) || lo+uint64(n.sort.width) > uint64(base.sort.width) || !p.eq(base, high.args[0]) {
+		return Term{}, false
+	}
+	if !p.sliceReassembly {
+		p.deferredSlices = true
+		return Term{}, false
+	}
+	if lo == 0 {
+		if n.sort == base.sort {
+			return Term{base}, true
+		}
+		return p.make(Trunc, n.sort, 0, Term{base}), true
+	}
+	return p.make(Extract, n.sort, lo, Term{base}), true
+}
+
+// reassembleTree joins original slice fields without normalizing an intermediate
+// range away from their common base. It searches no equalities between bases;
+// reassembleSlices requires their exact scoped structural identity at each join.
+func (p *proposer) reassembleTree(t Term) (normal, bool) {
+	if p.err != nil {
+		return normal{}, false
+	}
+	if p.err = p.m.tick(); p.err != nil {
+		return normal{}, false
+	}
+	n := t.n
+	if n.op == Trunc || n.op == Extract {
+		return normal{t, p.emit(Reflexivity, t, t)}, true
+	}
+	if n.op != Concat {
+		return normal{}, false
+	}
+	low, ok := p.reassembleTree(Term{n.args[0]})
+	if !ok {
+		return normal{}, false
+	}
+	high, ok := p.reassembleTree(Term{n.args[1]})
+	if !ok {
+		return normal{}, false
+	}
+	joined := p.make(Concat, n.sort, 0, low.term, high.term)
+	if p.err != nil {
+		return normal{}, false
+	}
+	next, ok := p.reassembleSlices(joined)
+	if !ok || p.err != nil {
+		return normal{}, false
+	}
+	congruence := p.emit(Congruence, t, joined, low.step, high.step)
+	local := p.emit(Conversion, joined, next)
+	return normal{next, p.emit(Transitivity, t, next, congruence, local)}, true
 }

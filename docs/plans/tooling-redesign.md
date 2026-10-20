@@ -672,6 +672,27 @@
                             the active continuation, storage-coordinate and input
                             associations, scoped model consequences and complete
                             current state through the returned root successor.
+                        - [x] 5.1w.2b.3b.2a.2.2.2.2.14 Carry the returned root
+                          through startup spill reloads and outgoing slot writes
+                          to the unexecuted argument-preparation call. Declare
+                          required permissions at the original root, preserve
+                          word widths, provenance and untouched current bytes;
+                          check contiguous scalar-slice reassembly independently.
+                          Arbitrary entry words retain no process-argument meaning.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.14r Reproduce and disposition
+                          the [capture close-event refusal](../issues/assembly-capture-close-event.md),
+                          add action/path/phase attribution, and land any confirmed
+                          causal repair with genuine mutation-and-restore controls
+                          before resuming process-entry design.
+                        - [ ] 5.1w.2b.3b.2a.2.2.2.2.15 Settle the identified
+                          process-entry contract for counts, ordered argument and
+                          environment vectors, accessible terminated strings,
+                          auxiliary-vector scalar/pointer entries and inherited
+                          descriptor state. Derive bounded index/progress and
+                          storage-provenance obligations before implementing the
+                          args wrapper, environment scan and later OS/scheduler
+                          preparation; retain actual producer applicability and
+                          native-to-typed-source association separately.
                       - [ ] 5.1w.2b.3b.2a.2.2.2.3 Establish native-storage to
                         selected-source storage and initialization correspondence before
                         supplying compiler source state; names and numeric addresses

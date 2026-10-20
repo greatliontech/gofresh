@@ -8,6 +8,7 @@ verification. The doc is deleted when its obligation resolves (git holds history
 | issue | summary | Lands |
 |---|---|---|
 | [toolchain-variation-admission-registry](toolchain-variation-admission-registry.md) | Replace combination approval with independently checked implementation derivations and useful end-to-end acceptance | tooling-redesign 5.1w.7 |
+| [assembly-capture-close-event](assembly-capture-close-event.md) | Attribute the observed importcfg close-event refusal and distinguish a harmless retained-writer close from protected mutations | tooling-redesign 5.1w.2b.3b.2a.2.2.2.2.14r |
 | [coverage-testmain-export-load-failure](coverage-testmain-export-load-failure.md) | Covered `go list -test` constructs an invalid generated-source path; preserve refusal until a selected-toolchain repair establishes proof support | tooling-redesign 7.8 |
 | [persistent-memo-disk-retention](persistent-memo-disk-retention.md) | 16 GiB shared memo store without global retention; bound disk growth and expose safe reclamation | tooling-redesign 7.9a |
 | [toolchain-dependency-consumer-adoption](toolchain-dependency-consumer-adoption.md) | adopt native dependency evidence and unreleased v4-only runtime evidence end to end, preserving old bytes as history; source-certificate dependencies already landed | tooling-redesign 5.2d |

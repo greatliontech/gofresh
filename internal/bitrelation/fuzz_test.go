@@ -17,7 +17,12 @@ import (
 // and check the exact mask partition beside the existing width projections.
 // Conditional concatenation covers either or both fields under an exact shared
 // selector, with arbitrary unequal widths and all four independent field values.
+// Slice reassembly covers arbitrary adjacent ranges and field splits of a
+// symbolic sum, plus two-level whole-word byte spills and byte-sized reloads.
 func FuzzExactScalarSemantics(f *testing.F) {
+	// A 51-bit sum spilled to six bytes and reloaded through three bytes:
+	// intermediate projection normalization must not hide the common base.
+	f.Add(uint8(114), uint8(8), ^uint64(0), uint64(76), uint64(122))
 	for _, w := range []uint8{0, 1, 7, 31, 62, 63} {
 		for op := uint8(0); op < 23; op++ {
 			f.Add(w, op, ^uint64(0), uint64(1), uint64(64))
@@ -102,6 +107,39 @@ func FuzzExactScalarSemantics(f *testing.F) {
 		bp, bq := g.variable(br.Bool(), controlScope, 2, false), g.variable(br.Bool(), controlScope, 3, false)
 		not := func(v br.Term) br.Term { return g.make(br.Not, br.Bool(), 0, v) }
 		sum := g.make(br.Add, s, 0, vx, vy)
+		if w >= 2 {
+			span := 2 + int(shift%uint64(w-1))
+			offset := int(rawA % uint64(w-span+1))
+			low := 1 + int(rawB%uint64(span-1))
+			joined, sliced := sliceFields(g, sum, offset, low, span-low, selector&1 != 0)
+			direct(t, br.Conversion, joined, sliced)
+			prove(t, joined, sliced)
+			assertValues(t, joined, sliced, map[br.Term]uint64{vx: a, vy: b})
+		}
+		if w >= 8 {
+			// A non-byte-sized base also admits a byte-sized prefix spill. Keep
+			// its common base through all intermediate joins before projection.
+			prefix := byteReload(g, sum, 8*(w/8))
+			prefixWidth := 8 * (1 + int(shift%uint64(w/8)))
+			prefixLoad := byteReload(g, prefix, prefixWidth)
+			prefixWant := sum
+			if prefixWidth < w {
+				prefixWant = g.make(br.Trunc, br.Bits(prefixWidth), 0, sum)
+			}
+			prove(t, prefixLoad, prefixWant)
+			assertValues(t, prefixLoad, prefixWant, map[br.Term]uint64{vx: a, vy: b})
+			wide := g.variable(br.Bits(64), controlScope, 4, false)
+			word := g.make(br.Add, br.Bits(64), 0, wide, g.con(br.Bits(64), shift))
+			initial := byteReload(g, word, 64)
+			reloadWidth := 8 * (1 + int(rawB%8))
+			loaded := byteReload(g, initial, reloadWidth)
+			want := word
+			if reloadWidth < 64 {
+				want = g.make(br.Trunc, br.Bits(reloadWidth), 0, word)
+			}
+			prove(t, loaded, want)
+			assertValues(t, loaded, want, map[br.Term]uint64{wide: rawA})
+		}
 		carry := g.make(br.ULT, br.Bool(), 0, sum, vx)
 		carryFlags := not(g.make(br.Or, br.Bool(), 0, g.make(br.ULT, br.Bool(), 0, vx, sum), g.make(br.Equal, br.Bool(), 0, vx, sum)))
 		signedInclusive := g.make(br.SLE, br.Bool(), 0, vx, vy)

@@ -22,6 +22,16 @@
 // and high field widths. Each field keeps its original scoped operand and its
 // corresponding mask bits; arbitrary bits disappear only where the mask is zero.
 // This scalar equality supplies no register, memory or pointer provenance.
+//
+// Conversion reassembles adjacent low/high slices of the exact same scoped
+// immutable term, preserving each field's width and offset within the base.
+// A complete range yields the base; a proper range yields Trunc or Extract.
+// Search attempts reassembly only after the established normal forms fail to
+// join, with no reset of its work, generated-node or certificate-step limits.
+// It retains original slice trees beside child-normalized candidates so that
+// intermediate projection rewrites cannot erase their common scoped base.
+// Reassembling stored bytes establishes only scalar equality, not an access,
+// storage, initialization or pointer-provenance claim.
 package bitrelation
 
 import (

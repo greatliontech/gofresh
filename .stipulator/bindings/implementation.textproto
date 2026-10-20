@@ -18600,3 +18600,135 @@ bindings {
   shape_hash: "17dad48806b2bf4e6cf8dd1f389becbb894fec4b5b86a3bd7bb6a5d3c5cd993d"
   clause_label: "certificate-authority"
 }
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/bitrelation.checker.conversion"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "0e5401debb839a35516cb86e71f1ce1d5e67e114d8edd7f45f87b407acd02f5f"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/bitrelation.TestSliceReassemblyTwoLevelByteReload"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2006694fcfb118b34f1c05b5e5b00bb2fd777ea11fc0e870accd9e3f237e925a"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/bitrelation.TestSliceReassemblyEverySmallRangeAndValuation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ad2d3027c52cc4a61635f859d14efdab371df58b2e4dfb40585ed722e53d686a"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/bitrelation.TestSliceReassemblyWideBoundaries"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d9f2def90a30e57d33d1f2571608c434afc419f86ed4d70a1119e52b69949e18"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/bitrelation.TestSliceReassemblyExactScopedBaseAcrossBuilders"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "97c7df73663cb6f02314436edae14447d4514088eb7f47f04422c897b11f2ed7"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/bitrelation.TestSliceReassemblyRetainsOriginalCommonBase"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8e98ce0b27e1509cb5548a42a0d585c6c19191cb5883a334a29cbcb2737bf3b5"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/bitrelation.TestSliceReassemblyAfterCheckedChildNormalization"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "a77cc81af752bf7ccbf00ecd13ce7c6e47d904d5f8dab68abe8c7202cdd66672"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/bitrelation.TestSliceReassemblyRejectsWrongRangesAndScopes"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "277e42822aed14f09cf92f2e71b9239b6486350f432e1c1f36029925b09cfbe9"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/bitrelation.TestSliceReassemblyPreservesEstablishedNormalForms"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7ce34014f1e602d0daf5c96e2f37caaa4d681277e3550dba4df08b01c1f4be0e"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/bitrelation.TestSliceReassemblyCompleteProofCorruption"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "67bfa229f1f3ed718984ce5d6b44a339ef20d883117ab1b3dd9248638d538f06"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/bitrelation.TestSliceReassemblyCancellationBudgetsAndOwnership"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6757d069d4d8c6795f239b24a835a4e89c6b1042acfed503365c41c7bc8f1a6c"
+  clause_label: "checked-equality"
+}
+
+bindings {
+  requirement_id: "REQ-impl-numeric-correspondence"
+  content_hash: "b7d363c9f8a5b737efb40b5137789be7b876400c7089dc56a3e6f6fd001261ef"
+  source_hash: "70444566f056157475a2123d4165f7f9388772577f44859026e1824d84265a82"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/bitrelation.TestSliceReassemblyGeneratedNodesStayCumulative"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b6c028ea54bdfe5e24e39a95da9d860db6f2869edaad5e385c9bad0144157e43"
+  clause_label: "checked-equality"
+}
