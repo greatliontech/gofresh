@@ -288,6 +288,12 @@ func TestSourceStartupOpaqueInitializedLeaves(t *testing.T) {
 					}
 					value = value.elements[0]
 				}
+				if name == "float32" || name == "float64" {
+					if value.kind != regionFloat || value.floatBits != 0 || value.typ == nil || value.typ.String() != name {
+						t.Fatalf("initialized float lost its exact language zero: %+v", value)
+					}
+					continue
+				}
 				if value.kind != regionUnknown || value.scalar != nil || value.typ == nil || value.typ.String() != name {
 					t.Fatalf("opaque initialized leaf acquired scalar or bit authority: %+v", value)
 				}

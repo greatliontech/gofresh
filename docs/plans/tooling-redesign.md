@@ -610,12 +610,16 @@
                             void-frame extent, narrow external storage and ordered
                             indivisible effects. Reuse checked transfer semantics;
                             neither declaration names nor comments supply meaning.
-                          - [ ] 5.1w.2b.3b.2a.2.2.2.2.12e Check live-object unsafe
-                            integer/float bit views under selected target layout,
+                          - [x] 5.1w.2b.3b.2a.2.2.2.2.12e Check live-object unsafe
+                            integer/float bit views under an explicit conditional
+                            IEEE storage model and selected target layout,
                             typed conversion, float initialization and IEEE equality.
                             Separate reflexive abstract bit identity from language
                             NaN equality; derive every repeated source comparison
-                            and justify native elimination/reuse of pure operations.
+                            and retain model applicability through calls and
+                            continuations. Discharge selected-operation applicability
+                            and native elimination/reuse in .12g, and rooted
+                            entry-state premises in .13.
                           - [ ] 5.1w.2b.3b.2a.2.2.2.2.12f Establish finite typed
                             source arithmetic and progress for the actual round2
                             call: selected argument, addition, shift widths, phi
@@ -626,6 +630,10 @@
                             native return: local/global representation, narrow
                             atomic grouping, actual source/native child association,
                             justified ordinary-access projection and final context.
+                            Discharge the conditional IEEE storage model against
+                            actual selected storage, operations and dependent uses,
+                            including eliminated/reused pure source operations and
+                            native floating-point exception/status conditions.
                             Preserve conditional root premises for .13.
                         - [ ] 5.1w.2b.3b.2a.2.2.2.2.13 Compose the ELF-root
                           continuation through the native g0/m0-addressed writes,
@@ -633,7 +641,9 @@
                           custom 0x4a3858 to 0x4a7a20 to 0x4725a0 and return to
                           0x4a385d. Derive all stack, context and frame premises from
                           the root before use; numeric storage creates no typed
-                          g0/m0 association. Settle new mechanisms before executable
+                          g0/m0 association. Establish the entry-state premises
+                          retained by the composed storage/operation relations.
+                          Settle new mechanisms before executable
                           work and retain the parent's remaining arguments,
                           environment, auxiliary-vector and secure-descriptor queue.
                       - [ ] 5.1w.2b.3b.2a.2.2.2.3 Establish native-storage to

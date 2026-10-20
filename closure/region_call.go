@@ -30,11 +30,12 @@ type regionContextFacts struct {
 // producer-supplied return, preserved-heap, callback-free, or closed flag.
 // Returns and their ENTIRE resulting heaps are derived again by the checker.
 type regionCallProof struct {
-	at         *ssa.Call
-	target     *ssa.Function
-	invocation regionInvocation
-	initial    regionState
-	entries    map[*ssa.BasicBlock][]regionState
+	at           *ssa.Call
+	target       *ssa.Function
+	invocation   regionInvocation
+	initial      regionState
+	storageModel regionStorageModel
+	entries      map[*ssa.BasicBlock][]regionState
 	// A checked assembly reference is a distinct closed evidence arm. It carries
 	// no proposed successor heap or result and is applied again by the checker.
 	reference *assemblyReference
@@ -137,6 +138,9 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 		actual = append(actual, receiver)
 	}
 	for _, operand := range call.Call.Args {
+		if k.value(caller, operand).kind == regionUnsafePointer {
+			return nil, regionError("unsafe pointer view cannot escape through a call")
+		}
 		actual = append(actual, k.value(caller, operand))
 	}
 	if callable.kind == regionCallable && k.session.references[callable.target] != nil {
@@ -174,7 +178,7 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 		}
 		initial.values[free] = value
 	}
-	in := regionInput{owner: k.input.owner, root: target, entry: regionPoint{target.Blocks[0], 0}, initial: initial, premises: k.input.premises}
+	in := regionInput{owner: k.input.owner, root: target, entry: regionPoint{target.Blocks[0], 0}, initial: initial, premises: k.input.premises, storageModel: k.input.storageModel}
 	child, err := newRegionContextKernel(in, k.session, id, true)
 	if err != nil {
 		return nil, err
@@ -184,7 +188,7 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 		if err := k.meter.tick(); err != nil {
 			return nil, err
 		}
-		if candidate.at != call || candidate.target != target || candidate.invocation != id || candidate.reference != nil {
+		if candidate.at != call || candidate.target != target || candidate.invocation != id || candidate.reference != nil || candidate.storageModel != k.input.storageModel {
 			continue
 		}
 		if len(candidate.arguments) != len(actual) {
@@ -235,7 +239,7 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 		if len(k.session.proofs) >= k.meter.limits.nodes {
 			return nil, regionError("callee proof count exhausted")
 		}
-		proof = &regionCallProof{at: call, target: target, invocation: id, initial: initial, entries: entries, arguments: slices.Clone(actual)}
+		proof = &regionCallProof{at: call, target: target, invocation: id, initial: initial, entries: entries, arguments: slices.Clone(actual), storageModel: k.input.storageModel}
 		k.session.proofs = append(k.session.proofs, proof)
 	}
 	outcomes, checked := k.session.results[proof]
@@ -287,6 +291,9 @@ func (k *regionKernel) returnValue(ret *ssa.Return, state regionState) (regionVa
 	tuple := regionValue{typ: results, kind: regionAggregate}
 	for i, operand := range ret.Results {
 		value := k.value(state, operand)
+		if k.escapingView(value) {
+			return regionValue{}, regionError("storage view cannot escape through a return")
+		}
 		if !types.Identical(value.typ, results.At(i).Type()) {
 			return regionValue{}, regionError("return result type mismatch")
 		}

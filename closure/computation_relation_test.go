@@ -374,7 +374,7 @@ func relationFixture(t testing.TB, text string, word int) computationSource {
 	// Re-type-check with the explicitly selected width. The common helper's
 	// implicit default sizes must not stand in for a cross-architecture load.
 	pkg := types.NewPackage(p.PkgPath, p.Name)
-	ssaPkg, info, err := ssautil.BuildPackage(&types.Config{Sizes: p.TypesSizes}, p.Fset, pkg, p.Syntax, ssa.SanityCheckFunctions)
+	ssaPkg, info, err := ssautil.BuildPackage(&types.Config{Importer: assemblyReferenceUnsafeImporter{}, Sizes: p.TypesSizes}, p.Fset, pkg, p.Syntax, ssa.SanityCheckFunctions)
 	if err != nil {
 		t.Fatal(err)
 	}

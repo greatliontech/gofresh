@@ -98,10 +98,11 @@ func (k *regionKernel) effectTransfer(state regionState, instruction ssa.Instruc
 		// The ordinary typed transfer checks bounds and storage provenance;
 		// allocation emits its initializer only after deriving it there.
 		return nil
-	case *ssa.Field, *ssa.Index, *ssa.Extract, *ssa.ChangeType:
+	case *ssa.Field, *ssa.Index, *ssa.Extract, *ssa.ChangeType, *ssa.Convert:
 		// Projection consumes the selected value, not every sibling in the
 		// aggregate being transported. Its typed transfer checks the selection.
-		return k.effectValue(regionUnknownValue(instruction.(ssa.Value).Type()))
+		// The ordinary transfer checks the actual projected result in set.
+		return nil
 	case *ssa.If:
 		condition, known := regionBool(k.value(state, x.Cond))
 		if !known {
@@ -117,7 +118,10 @@ func (k *regionKernel) effectTransfer(state regionState, instruction ssa.Instruc
 		if !regionIsComparison(x.Op) {
 			return regionError("finite effect scope requires a supported comparison")
 		}
-		return k.effectComparisonType(x.X.Type(), 0)
+		if err := k.effectComparisonValue(k.value(state, x.X), 0); err != nil {
+			return err
+		}
+		return k.effectComparisonValue(k.value(state, x.Y), 0)
 	case *ssa.Call:
 		if builtin, ok := x.Call.Value.(*ssa.Builtin); ok && (builtin.Name() == "len" || builtin.Name() == "cap") {
 			return k.effectOperands(state, instruction)
@@ -150,7 +154,7 @@ func (k *regionKernel) effectTransfer(state regionState, instruction ssa.Instruc
 		return regionError("finite effect access lacks exact singleton typed provenance")
 	}
 	if !write {
-		value = readRegionLocation(state, pointer.location, instruction.(ssa.Value).Type())
+		value = k.readLocation(state, pointer.location, instruction.(ssa.Value).Type())
 	}
 	if err := k.effectValue(value); err != nil {
 		return err
@@ -167,23 +171,34 @@ func (k *regionKernel) effectValue(value regionValue) error {
 	if err := k.meter.tick(); err != nil {
 		return err
 	}
-	if regionOpaqueScalarType(value.typ) {
+	if regionOpaqueScalarType(value.typ) && value.kind != regionFloat {
 		return regionError("finite effect scope consumes an unsupported scalar")
 	}
 	return nil
 }
 
-func (k *regionKernel) effectComparisonType(typ types.Type, depth int) error {
-	if err := k.effectValue(regionUnknownValue(typ)); err != nil {
+func (k *regionKernel) effectComparisonValue(value regionValue, depth int) error {
+	if err := k.effectValue(value); err != nil {
 		return err
 	}
 	if depth > k.meter.limits.depth {
 		return regionError("effect comparison type depth exhausted")
 	}
-	switch t := typ.Underlying().(type) {
+	child := func(typ types.Type, index int) regionValue {
+		if value.kind == regionAggregate && index < len(value.elements) {
+			return value.elements[index]
+		}
+		return regionUnknownValue(typ)
+	}
+	switch t := value.typ.Underlying().(type) {
 	case *types.Array:
-		if t.Len() != 0 {
-			return k.effectComparisonType(t.Elem(), depth+1)
+		if t.Len() != 0 && value.kind != regionAggregate {
+			return k.effectComparisonValue(regionUnknownValue(t.Elem()), depth+1)
+		}
+		for i := range value.elements {
+			if err := k.effectComparisonValue(child(t.Elem(), i), depth+1); err != nil {
+				return err
+			}
 		}
 	case *types.Struct:
 		for i := 0; i < t.NumFields(); i++ {
@@ -191,7 +206,7 @@ func (k *regionKernel) effectComparisonType(typ types.Type, depth int) error {
 				return err
 			}
 			if t.Field(i).Name() != "_" {
-				if err := k.effectComparisonType(t.Field(i).Type(), depth+1); err != nil {
+				if err := k.effectComparisonValue(child(t.Field(i).Type(), i), depth+1); err != nil {
 					return err
 				}
 			}
@@ -218,8 +233,8 @@ func (k *regionKernel) effectOperands(state regionState, instruction ssa.Instruc
 func (k *regionKernel) referenceLocation(pointer regionValue, target types.Type) (types.Type, error) {
 	storage := k.locationType(pointer.location)
 	view, ok := pointer.typ.Underlying().(*types.Pointer)
-	if pointer.kind != regionPointer || !ok || !types.Identical(view.Elem(), target) || !regionAccessType(storage, target) || !k.singleton(pointer.location.object) {
-		return nil, regionError("reference access lacks exact singleton typed provenance")
+	if pointer.kind != regionPointer || !ok || !types.Identical(view.Elem(), target) || !k.storageView(pointer.location, target) || !k.singleton(pointer.location.object) {
+		return nil, k.storageViewError("reference access lacks exact singleton typed provenance")
 	}
 	if pointer.location.object.kind == regionGlobal {
 		global := pointer.location.object.site.(*ssa.Global) // locationType established its owner and kind.
@@ -315,9 +330,12 @@ func (k *regionKernel) callReference(call *ssa.Call, caller regionState, callabl
 	if err != nil {
 		return nil, err
 	}
-	current, cOK := regionReferenceWord(readRegionLocation(caller, actual[0].location, frame.targetType), frame.targetWidth)
+	if !regionAccessType(storageType, frame.targetType) && !k.liveView(caller, actual[0].location, frame.targetType) {
+		return nil, k.storageViewError("reference bit view lacks live storage")
+	}
+	current, cOK := regionReferenceWord(k.readLocation(caller, actual[0].location, frame.targetType), frame.targetWidth)
 	if !cOK {
-		return nil, regionError("reference scalar instantiation is not established")
+		return nil, k.storageViewError("reference scalar instantiation is not established")
 	}
 	words := make([]uint64, len(actual)-1)
 	for i, argument := range actual[1:] {
@@ -336,7 +354,7 @@ func (k *regionKernel) callReference(call *ssa.Call, caller regionState, callabl
 		if err := k.meter.tick(); err != nil {
 			return nil, err
 		}
-		if candidate.at != call || candidate.target != target || candidate.invocation != id || candidate.reference != reference || len(candidate.entries) != 0 || len(candidate.arguments) != len(actual) {
+		if candidate.at != call || candidate.target != target || candidate.invocation != id || candidate.reference != reference || candidate.storageModel != k.input.storageModel || len(candidate.entries) != 0 || len(candidate.arguments) != len(actual) {
 			continue
 		}
 		if err := k.validateState(candidate.initial); err != nil {
@@ -367,7 +385,7 @@ func (k *regionKernel) callReference(call *ssa.Call, caller regionState, callabl
 		if err != nil {
 			return nil, err
 		}
-		proof = &regionCallProof{at: call, target: target, invocation: id, initial: initial, reference: reference, arguments: slices.Clone(actual)}
+		proof = &regionCallProof{at: call, target: target, invocation: id, initial: initial, reference: reference, arguments: slices.Clone(actual), storageModel: k.input.storageModel}
 		if len(k.session.proofs) >= k.meter.limits.nodes {
 			return nil, regionError("reference proof count exhausted")
 		}
@@ -391,7 +409,7 @@ func (k *regionKernel) callReference(call *ssa.Call, caller regionState, callabl
 	if err != nil {
 		return nil, err
 	}
-	stored, ok := regionViewValue(value, storageType)
+	stored, ok := k.viewValue(value, storageType)
 	if !ok {
 		return nil, regionError("reference result cannot return to canonical typed storage")
 	}
@@ -492,7 +510,7 @@ func (r *sourceReturnCompletion) checkedPacket() *checkedRegion {
 		return nil
 	}
 	packet := checkedSourceEffectPacket(r.region, r.checker)
-	if packet == nil || !r.checker.fullReturns || regionInstruction(packet.input.use.at) != r.returned || packet.input.root != r.prior.region.packet.input.root {
+	if packet == nil || !r.checker.fullReturns || regionInstruction(packet.input.use.at) != r.returned || packet.input.root != r.prior.region.packet.input.root || packet.input.storageModel != r.prior.region.packet.input.storageModel {
 		return nil
 	}
 	return packet

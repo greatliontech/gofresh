@@ -7,6 +7,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -125,6 +126,24 @@ func regionConcreteEqual(typ types.Type, a, b any) bool {
 		panic("oracle comparison of incomparable dynamic type")
 	}
 	switch t := typ.Underlying().(type) {
+	case *types.Basic:
+		if t.Kind() == types.Float32 {
+			x, xok := a.(float32)
+			y, yok := b.(float32)
+			if !xok || !yok {
+				panic(regionConcreteFailure{"oracle float32 equality type mismatch"})
+			}
+			return x == y
+		}
+		if t.Kind() == types.Float64 {
+			x, xok := a.(float64)
+			y, yok := b.(float64)
+			if !xok || !yok {
+				panic(regionConcreteFailure{"oracle float64 equality type mismatch"})
+			}
+			return x == y
+		}
+		return a == b
 	case *types.Interface:
 		x, y := a.(regionConcreteInterface), b.(regionConcreteInterface)
 		if !types.Identical(x.typ, y.typ) {
@@ -167,6 +186,10 @@ func regionConcreteZeroTyped(t types.Type, unsigned bool) any {
 			return false
 		case u.Info()&types.IsString != 0:
 			return ""
+		case u.Kind() == types.Float32:
+			return float32(0)
+		case u.Kind() == types.Float64:
+			return float64(0)
 		case u.Info()&types.IsInteger != 0:
 			if unsigned && u.Info()&types.IsUnsigned != 0 {
 				return uint64(0)
@@ -216,6 +239,35 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 			}
 			if x.Value == nil {
 				return regionConcreteZeroTyped(x.Type(), run != nil)
+			}
+			if basic, ok := x.Type().Underlying().(*types.Basic); ok && basic.Info()&types.IsFloat != 0 {
+				var value any
+				switch basic.Kind() {
+				case types.Float32:
+					v, _ := constant.Float32Val(x.Value)
+					if math.IsInf(float64(v), 0) {
+						panic(regionConcreteFailure{"oracle float32 constant overflow"})
+					}
+					if v == 0 {
+						v = 0 // Language constants have unsigned zero, even after underflow.
+					}
+					value = v
+				case types.Float64:
+					v, _ := constant.Float64Val(x.Value)
+					if math.IsInf(v, 0) {
+						panic(regionConcreteFailure{"oracle float64 constant overflow"})
+					}
+					if v == 0 {
+						v = 0
+					}
+					value = v
+				default:
+					panic(regionConcreteFailure{"oracle unsupported float constant type"})
+				}
+				if run != nil {
+					return run.checkedValue(x.Type(), value)
+				}
+				return value
 			}
 			switch x.Value.Kind() {
 			case constant.Bool:
@@ -316,14 +368,17 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 				p := get(x.Addr).(regionConcretePointer)
 				value := get(x.Val)
 				if run != nil {
+					run.store(p, x.Addr.Type(), x.Val.Type(), value)
 					run.access(x, invocation, p, x.Val.Type(), value, true)
+				} else {
+					regionConcreteStore(p.cell, value)
 				}
-				regionConcreteStore(p.cell, value)
 			case *ssa.UnOp:
 				if x.Op == token.MUL {
 					p := get(x.X).(regionConcretePointer)
 					values[x] = regionConcreteCopy(*p.cell)
 					if run != nil {
+						values[x] = run.load(p, x.X.Type(), x.Type())
 						run.access(x, invocation, p, x.Type(), values[x], false)
 					}
 				} else if x.Op == token.NOT {
@@ -375,12 +430,15 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 			case *ssa.ChangeInterface:
 				values[x] = get(x.X)
 			case *ssa.ChangeType:
+				// Typed SSA defines ChangeType as value-preserving, including
+				// names, pointer views, channel directions and instantiations.
+				// Numeric and unsafe reinterpretations are Convert instructions.
 				values[x] = get(x.X)
 			case *ssa.Convert:
 				if run == nil {
 					t.Fatalf("oracle unsupported conversion %s", x)
 				}
-				values[x] = run.convertInteger(get(x.X), x.Type())
+				values[x] = run.convert(get(x.X), x.X.Type(), x.Type())
 			case *ssa.Field:
 				values[x] = get(x.X).([]any)[x.Field]
 			case *ssa.Index:
@@ -394,6 +452,9 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 				}
 			case *ssa.BinOp:
 				a, b := get(x.X), get(x.Y)
+				if run != nil && (x.Op == token.EQL || x.Op == token.NEQ) {
+					run.checkEquality(x.X.Type(), x.Y.Type(), a, b)
+				}
 				if x.Op == token.EQL {
 					values[x] = regionConcreteEqual(x.X.Type(), a, b)
 				} else if x.Op == token.NEQ {
@@ -534,6 +595,20 @@ func regionMatchesConcrete(v regionValue, state regionState, concrete any, depth
 		case int64:
 			n, ok := constant.Int64Val(v.scalar)
 			return ok && n == c
+		case uint64:
+			n, ok := constant.Uint64Val(v.scalar)
+			return ok && n == c
+		}
+	case regionFloat:
+		basic, ok := v.typ.Underlying().(*types.Basic)
+		if !ok {
+			return false
+		}
+		switch c := concrete.(type) {
+		case float32:
+			return basic.Kind() == types.Float32 && v.floatBits == uint64(math.Float32bits(c))
+		case float64:
+			return basic.Kind() == types.Float64 && v.floatBits == math.Float64bits(c)
 		}
 	case regionPointer:
 		p, ok := concrete.(regionConcretePointer)

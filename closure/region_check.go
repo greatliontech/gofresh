@@ -43,6 +43,9 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 		len(fn.Params) > limits.nodes || len(fn.FreeVars) > limits.nodes || fn.Signature == nil || fn.Signature.TypeParams().Len() != 0 && fn.Origin() == nil || len(in.premises) == 0 {
 		return nil, regionError("missing typed owner, concrete root, or explicit entry/frame premises")
 	}
+	if !in.storageModel.valid(in) {
+		return nil, regionError("storage model is not bound to the typed source owner")
+	}
 	if regionInstruction(in.entry) == nil || in.entry.block.Parent() != fn || !fullReturns && (regionInstruction(in.use.at) == nil || in.use.at.block.Parent() != fn) {
 		return nil, regionError("invalid scope instruction boundary")
 	}
@@ -214,7 +217,7 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 		if err := k.meter.tick(); err != nil {
 			return err
 		}
-		if v.kind == regionPointer || v.kind == regionSlice {
+		if v.kind == regionPointer || v.kind == regionUnsafePointer || v.kind == regionSlice {
 			if err := rememberObject(v.location.object); err != nil {
 				return err
 			}
@@ -394,7 +397,7 @@ func (k *regionKernel) validateValue(v regionValue, depth int) error {
 		return regionError("invalid value type/depth")
 	}
 	hasLocation := v.location.object != (regionObject{}) || len(v.location.path) != 0
-	if v.scalar != nil && v.kind != regionConstant || hasLocation && v.kind != regionPointer && v.kind != regionSlice && v.kind != regionCallable ||
+	if v.scalar != nil && v.kind != regionConstant || v.floatBits != 0 && v.kind != regionFloat || hasLocation && v.kind != regionPointer && v.kind != regionUnsafePointer && v.kind != regionSlice && v.kind != regionCallable ||
 		(v.start != 0 || v.length != 0 || v.capacity != 0) && v.kind != regionSlice || v.target != nil && v.kind != regionCallable ||
 		len(v.environment) != 0 && v.kind != regionCallable || len(v.elements) != 0 && v.kind != regionAggregate && v.kind != regionInterface {
 		return regionError("noncanonical value payload")
@@ -417,6 +420,8 @@ func (k *regionKernel) validateValue(v regionValue, depth int) error {
 		if valid && v.scalar.Kind() == constant.String && len(constant.StringVal(v.scalar)) > k.meter.limits.locations {
 			return regionError("constant storage budget exhausted")
 		}
+	case regionFloat:
+		_, valid = regionScalarBits(v, regionFloatWidth(v.typ))
 	case regionNil:
 		switch v.typ.Underlying().(type) {
 		case *types.Pointer, *types.Slice, *types.Signature, *types.Interface, *types.Map, *types.Chan:
@@ -424,7 +429,9 @@ func (k *regionKernel) validateValue(v regionValue, depth int) error {
 		}
 	case regionPointer:
 		p, ok := v.typ.Underlying().(*types.Pointer)
-		valid = ok && regionAccessType(k.locationType(v.location), p.Elem())
+		valid = ok && k.storageView(v.location, p.Elem())
+	case regionUnsafePointer:
+		valid = regionUnsafePointerType(v.typ) && k.bitStorageView(v.location, k.locationType(v.location))
 	case regionSlice:
 		s, ok := v.typ.Underlying().(*types.Slice)
 		t := k.locationType(v.location)
@@ -482,7 +489,7 @@ func (k *regionKernel) validateValue(v regionValue, depth int) error {
 		}
 	}
 	if !valid {
-		return regionError("invalid typed region value")
+		return k.storageViewError("invalid typed region value")
 	}
 	return nil
 }
@@ -503,7 +510,7 @@ func checkRegion(ctx context.Context, input regionInput, proposal *regionProposa
 
 func checkRegionKernel(k *regionKernel, p *regionProposal) (*checkedRegion, error) {
 	in := k.input
-	if p == nil || p.input.owner != in.owner || p.input.root != in.root || p.input.entry != in.entry || p.input.use != in.use || !slices.Equal(p.input.premises, in.premises) {
+	if p == nil || p.input.owner != in.owner || p.input.root != in.root || p.input.entry != in.entry || p.input.use != in.use || p.input.storageModel != in.storageModel || !slices.Equal(p.input.premises, in.premises) {
 		return nil, regionError("proposal is not bound to the complete input")
 	}
 	k.session.proofs = p.calls
@@ -867,6 +874,8 @@ func (k *regionKernel) zero(t types.Type, depth int) (regionValue, error) {
 			v.scalar = constant.MakeString("")
 		case u.Info()&types.IsInteger != 0:
 			v.scalar = constant.MakeInt64(0)
+		case regionFloatWidth(t) != 0:
+			v.kind = regionFloat
 		case regionOpaqueScalarType(t):
 			return regionUnknownValue(t), nil
 		default:
@@ -938,6 +947,11 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		}
 		if err := k.validateValue(result, 0); err != nil {
 			return err
+		}
+		if k.trace != nil {
+			if err := k.effectValue(result); err != nil {
+				return err
+			}
 		}
 		s.values[value] = result
 		return nil
@@ -1025,10 +1039,16 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		t := k.locationType(addr.location)
 		v := get(x.Val)
 		pointer, ok := addr.typ.Underlying().(*types.Pointer)
-		if !ok || !types.Identical(pointer.Elem(), v.typ) || !regionAccessType(t, pointer.Elem()) {
-			return regionError("store type mismatch")
+		if !ok || !types.Identical(pointer.Elem(), v.typ) || !k.storageView(addr.location, pointer.Elem()) {
+			return k.storageViewError("store type mismatch")
 		}
-		v, ok = regionViewValue(v, t)
+		if !regionAccessType(t, pointer.Elem()) && !k.liveView(*s, addr.location, pointer.Elem()) {
+			return k.storageViewError("bit-view store lacks live storage")
+		}
+		if k.escapingView(v) {
+			return regionError("storage view cannot escape through memory")
+		}
+		v, ok = k.viewValue(v, t)
 		if !ok {
 			return regionError("store has no supported storage view")
 		}
@@ -1071,7 +1091,10 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 			if v.kind != regionPointer {
 				return regionError("unknown/nil load may panic")
 			}
-			return set(x, readRegionLocation(*s, v.location, x.Type()))
+			if !k.storageView(v.location, x.Type()) || !regionAccessType(k.locationType(v.location), x.Type()) && !k.liveView(*s, v.location, x.Type()) {
+				return k.storageViewError("bit-view load lacks live compatible storage")
+			}
+			return set(x, k.readLocation(*s, v.location, x.Type()))
 		}
 		if x.Op == token.NOT {
 			if b, known := regionBool(v); known {
@@ -1150,10 +1173,16 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		}
 		v := regionValue{typ: x.Type(), kind: regionCallable, target: target, location: regionLocation{object: regionObject{kind: regionClosureEnvironment, site: x, context: k.input.root, invocation: k.invocation}}}
 		for _, binding := range x.Bindings {
+			if k.escapingView(get(binding)) {
+				return regionError("storage view cannot escape through a closure")
+			}
 			v.environment = append(v.environment, get(binding))
 		}
 		return set(x, v)
 	case *ssa.MakeInterface:
+		if k.escapingView(get(x.X)) {
+			return regionError("storage view cannot escape through an interface")
+		}
 		return set(x, regionValue{typ: x.Type(), kind: regionInterface, elements: []regionValue{get(x.X)}})
 	case *ssa.ChangeInterface:
 		v := get(x.X)
@@ -1175,12 +1204,29 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		v := get(x.X)
 		v.typ = x.Type()
 		return set(x, v)
+	case *ssa.Convert:
+		v := get(x.X)
+		if k.input.storageModel.source == nil || !k.input.storageModel.valid(k.input) {
+			return regionError("unsafe bit view requires a conditional storage model")
+		}
+		if p, ok := x.X.Type().Underlying().(*types.Pointer); ok && regionUnsafePointerType(x.Type()) && v.kind == regionPointer && k.liveView(*s, v.location, p.Elem()) {
+			v.typ, v.kind = x.Type(), regionUnsafePointer
+			return set(x, v)
+		}
+		if p, ok := x.Type().Underlying().(*types.Pointer); ok && regionUnsafePointerType(x.X.Type()) && v.kind == regionUnsafePointer && k.liveView(*s, v.location, p.Elem()) {
+			v.typ, v.kind = x.Type(), regionPointer
+			return set(x, v)
+		}
+		return k.storageViewError("unsupported numeric or unsafe pointer conversion")
 	case *ssa.BinOp:
 		if !regionIsComparison(x.Op) {
 			return regionError("unsupported numeric transfer")
 		}
 		a, b := get(x.X), get(x.Y)
 		if x.Op == token.EQL || x.Op == token.NEQ {
+			if equal, known := regionFloatEquality(a, b); known {
+				return set(x, regionValue{typ: x.Type(), kind: regionConstant, scalar: constant.MakeBool(equal == (x.Op == token.EQL))})
+			}
 			if equal, known := regionNilEquality(a, b); known {
 				return set(x, regionValue{typ: x.Type(), kind: regionConstant, scalar: constant.MakeBool(equal == (x.Op == token.EQL))})
 			}
@@ -1196,6 +1242,9 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 					return regionError("equality has no proof against dynamic-comparison panic")
 				}
 			}
+		}
+		if regionFloatWidth(a.typ) != 0 && x.Op != token.EQL && x.Op != token.NEQ {
+			return regionError("unsupported floating comparison")
 		}
 		if a.kind == regionConstant && b.kind == regionConstant {
 			return set(x, regionValue{typ: x.Type(), kind: regionConstant, scalar: constant.MakeBool(constant.Compare(a.scalar, x.Op, b.scalar))})

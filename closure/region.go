@@ -11,7 +11,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
-const regionRules = "gofresh/source-region-transport@11"
+const regionRules = "gofresh/source-region-transport@12"
 
 // This kernel is conditional on an immutable, well-typed SSA owner. Selection of
 // that owner from source/build inputs is a separate obligation. It never invokes
@@ -32,6 +32,8 @@ const (
 	regionCallable
 	regionInterface
 	regionAggregate
+	regionFloat
+	regionUnsafePointer
 )
 
 type regionObjectKind uint8
@@ -71,6 +73,7 @@ type regionValue struct {
 	typ         types.Type
 	kind        regionKind
 	scalar      constant.Value
+	floatBits   uint64
 	location    regionLocation
 	start       int64
 	length      int64
@@ -106,6 +109,9 @@ type regionInput struct {
 	entry   regionPoint
 	use     regionUse
 	initial regionState
+	// A distinct conditional storage antecedent. It is never inferred from the
+	// selected sizes, string premises or an observed machine/build label.
+	storageModel regionStorageModel
 	// These are antecedents, never derived assertions. Even an empty initial heap
 	// retains the omitted-prefix/frame obligation when entry is a mid-body cut.
 	premises []string
@@ -354,7 +360,7 @@ func regionOpaqueScalarType(t types.Type) bool {
 // No host word width participates in this kernel. Word-sized literal facts are
 // restricted to the common 32-bit range; larger build-specific numeric facts
 // need a separately bound numeric interpretation. Unknown typed words remain
-// universally quantified. Floating-point rounding is outside this grammar.
+// universally quantified. Exact floats have their own bit representation.
 func regionScalarConstant(t types.Type, value constant.Value) bool {
 	if t == nil || value == nil {
 		return false
@@ -389,7 +395,7 @@ func regionScalarConstant(t types.Type, value constant.Value) bool {
 }
 
 func regionSameValue(a, b regionValue) bool {
-	if a.kind != b.kind || !types.Identical(a.typ, b.typ) || a.target != b.target || a.start != b.start || a.length != b.length || a.capacity != b.capacity ||
+	if a.kind != b.kind || !types.Identical(a.typ, b.typ) || a.floatBits != b.floatBits || a.target != b.target || a.start != b.start || a.length != b.length || a.capacity != b.capacity ||
 		a.location.object != b.location.object || !slices.Equal(a.location.path, b.location.path) || len(a.elements) != len(b.elements) || len(a.environment) != len(b.environment) {
 		return false
 	}
@@ -476,6 +482,9 @@ func regionConst(v *ssa.Const) regionValue {
 	if v.IsNil() {
 		return regionValue{typ: v.Type(), kind: regionNil}
 	}
+	if value, ok := regionFloatConstant(v.Type(), v.Value); ok {
+		return value
+	}
 	if regionOpaqueScalarType(v.Type()) {
 		return regionUnknownValue(v.Type())
 	}
@@ -507,7 +516,8 @@ func regionBool(v regionValue) (bool, bool) {
 }
 
 // readRegionLocation is also useful to an assembly inspecting an owned outcome.
-// It never follows an unknown/summary path as if it denoted a particular row.
+// It never follows an unknown/summary path as if it denoted a particular row and
+// grants no integer/float reinterpretation without the kernel's storage model.
 func readRegionLocation(state regionState, loc regionLocation, typ types.Type) regionValue {
 	v, ok := state.memory[loc.object]
 	if !ok {

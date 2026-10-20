@@ -3,8 +3,6 @@ package closure
 import (
 	"context"
 	"fmt"
-	"go/constant"
-	"go/token"
 	"go/types"
 	"math"
 	"slices"
@@ -57,7 +55,7 @@ type storageObjectLayout struct {
 }
 
 // The derived layout retains padding as gaps between leaves, never as zero bits.
-// Float leaves describe storage only; storageScalarBits refuses float values.
+// A leaf's layout supplies no initial bytes or storage-model applicability.
 type storageTypeLayout struct {
 	typ          types.Type
 	size, align  int64
@@ -459,8 +457,10 @@ func (r *storageLayout) typedLeaves(ctx context.Context, object regionObject) ([
 // storageScalarBits projects a known typed value to its selected little-endian
 // storage bits. Boolean values use a byte containing 0 or 1, not arbitrary bits
 // of a logical one-bit sort. Negative integers use their width's two's complement.
+// Float bits use the conditional IEEE model retained by the source proof; this
+// projection does not discharge its selected-implementation applicability.
 func storageScalarBits(value regionValue, sizes types.Sizes) (uint64, int, bool) {
-	if sizes == nil || value.typ == nil || value.kind != regionConstant || value.scalar == nil {
+	if sizes == nil || value.typ == nil {
 		return 0, 0, false
 	}
 	t, ok := value.typ.Underlying().(*types.Basic)
@@ -472,33 +472,20 @@ func storageScalarBits(value regionValue, sizes types.Sizes) (uint64, int, bool)
 		return 0, 0, false
 	}
 	if t.Info()&types.IsBoolean != 0 {
-		if value.scalar.Kind() != constant.Bool || width != 1 {
+		boolean, exact := regionBool(value)
+		if !exact || width != 1 {
 			return 0, 0, false
 		}
-		if constant.BoolVal(value.scalar) {
+		if boolean {
 			return 1, 1, true
 		}
 		return 0, 1, true
 	}
-	if t.Info()&types.IsInteger == 0 || value.scalar.Kind() != constant.Int {
+	result, ok := regionScalarBits(value, int(width))
+	if !ok {
 		return 0, 0, false
 	}
-	bits := uint(width * 8)
-	limit := constant.Shift(constant.MakeInt64(1), token.SHL, bits)
-	x := value.scalar
-	if t.Info()&types.IsUnsigned == 0 {
-		half := constant.Shift(constant.MakeInt64(1), token.SHL, bits-1)
-		if constant.Compare(x, token.LSS, constant.UnaryOp(token.SUB, half, 0)) || constant.Compare(x, token.GEQ, half) {
-			return 0, 0, false
-		}
-		if constant.Sign(x) < 0 {
-			x = constant.BinaryOp(x, token.ADD, limit)
-		}
-	} else if constant.Sign(x) < 0 || constant.Compare(x, token.GEQ, limit) {
-		return 0, 0, false
-	}
-	result, ok := constant.Uint64Val(x)
-	return result, int(width), ok
+	return result, int(width), true
 }
 
 // storageNativeWord reads one to eight bytes in the native little-endian model.

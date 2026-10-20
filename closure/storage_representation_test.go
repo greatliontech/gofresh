@@ -406,6 +406,31 @@ func TestStorageScalarProjection(t *testing.T) {
 	if _, _, ok := storageScalarBits(regionValue{kind: regionUnknown, typ: types.Typ[types.Uint64]}, types.SizesFor("gc", "amd64")); ok {
 		t.Fatal("unknown became initialized bits")
 	}
+	for _, tc := range []struct {
+		kind types.BasicKind
+		bits uint64
+	}{
+		{types.Float32, 0}, {types.Float32, 1 << 31}, {types.Float32, 0xffffffff},
+		{types.Float64, 0}, {types.Float64, 1 << 63}, {types.Float64, 0xffffffffffffffff},
+	} {
+		value := regionValue{kind: regionFloat, typ: types.Typ[tc.kind], floatBits: tc.bits}
+		for _, arch := range []string{"386", "amd64"} {
+			sizes := types.SizesFor("gc", arch)
+			bits, width, exact := storageScalarBits(value, sizes)
+			if !exact || bits != tc.bits || int64(width) != sizes.Sizeof(value.typ) {
+				t.Fatalf("float bit projection changed payload or selected extent: %s/%v %x/%d/%v", arch, value.typ, bits, width, exact)
+			}
+		}
+	}
+	for _, value := range []regionValue{
+		{kind: regionFloat, typ: types.Typ[types.Float32], floatBits: 1 << 32},
+		{kind: regionFloat, typ: types.Typ[types.Uint64], floatBits: 1},
+		{kind: regionUnknown, typ: types.Typ[types.Float64]},
+	} {
+		if _, _, exact := storageScalarBits(value, types.SizesFor("gc", "amd64")); exact {
+			t.Fatal("invalid float representation acquired exact storage bits")
+		}
+	}
 }
 
 func TestStorageNativeLittleEndianProjection(t *testing.T) {

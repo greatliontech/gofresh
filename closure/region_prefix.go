@@ -71,7 +71,8 @@ func (p *sourceEffectPrefix) checkedPacket() *checkedRegion {
 		return nil
 	}
 	packet := checkedSourceEffectPacket(p.region, p.checker)
-	if packet == nil || p.checker.fullReturns || p.boundary == nil || regionInstruction(packet.input.use.at) != p.boundary || p.binder.source.prog.Prog != packet.input.owner {
+	if packet == nil || p.checker.fullReturns || p.boundary == nil || regionInstruction(packet.input.use.at) != p.boundary || p.binder.source.prog.Prog != packet.input.owner || packet.input.storageModel != conditionalRegionStorageModel(p.binder.source) ||
+		p.prior != nil && (p.prior.checkedPacket() == nil || p.prior.region.packet.input.storageModel != packet.input.storageModel) {
 		return nil
 	}
 	return packet
@@ -82,7 +83,7 @@ func checkedSourceEffectPacket(region *sourceRegion, checker *regionKernel) *che
 		return nil
 	}
 	packet, input := region.packet, checker.input
-	if packet.rules != regionRules || packet.trace == nil || checker.trace != packet.trace || input.owner != packet.input.owner || input.root != packet.input.root || input.entry != packet.input.entry || input.use != packet.input.use || region.root.function != input.root {
+	if packet.rules != regionRules || packet.trace == nil || checker.trace != packet.trace || input.owner != packet.input.owner || input.root != packet.input.root || input.entry != packet.input.entry || input.use != packet.input.use || input.storageModel != packet.input.storageModel || region.root.function != input.root {
 		return nil
 	}
 	return packet
@@ -160,8 +161,9 @@ func checkSourceOperandPrefix(ctx context.Context, source computationSource, roo
 		return nil, regionError("operand call is not in the actual root")
 	}
 	in := regionInput{owner: root.Prog, root: root, entry: regionPoint{root.Blocks[0], 0},
-		use:      regionUse{at: regionPoint{call.Block(), at}, operand: regionCallBoundaryOperand(call)},
-		premises: []string{"immutable selected typed owner; isolated prefix; ordinary live typed storage; omitted native prefix and actual use remain open"}}
+		storageModel: conditionalRegionStorageModel(source),
+		use:          regionUse{at: regionPoint{call.Block(), at}, operand: regionCallBoundaryOperand(call)},
+		premises:     []string{"immutable selected typed owner; isolated prefix; ordinary live typed storage; omitted native prefix and actual use remain open"}}
 	meter := &regionMeter{ctx: ctx, limits: limits.region}
 	for _, parameter := range root.Params {
 		if err := checkUnusedSourcePointer(root, parameter, meter.tick); err != nil {
@@ -175,6 +177,7 @@ func checkSourceOperandPrefix(ctx context.Context, source computationSource, roo
 	newKernel := func(input regionInput) (*regionKernel, error) {
 		session := newRegionCallSession(ctx, input, limits.region)
 		session.meter = meter
+		session.source = source
 		k, err := newRegionContextKernel(input, session, regionInvocation{}, false)
 		if err == nil {
 			k.trace = &regionEffectTrace{seen: map[regionEffectOccurrence]bool{}}

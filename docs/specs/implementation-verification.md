@@ -1228,6 +1228,34 @@ contracts:
   exact bits, scalar equality, or native initialization. Abstracting an unsupported
   initialized scalar leaf to typed unknown does not by itself discard independently
   established facts about supported aggregate siblings.
+- **conditional-storage-model** — A source derivation interpreting integer/float
+  bit views identifies its storage model separately from language semantics and
+  from selected native applicability. A binary32/binary64 model gives exact bit
+  encodings, byte order and typed access interpretation; selected type sizes and
+  alignment alone do not establish that model's applicability. A conditional
+  source proof may use this model as an explicit antecedent. Every dependent
+  claim, call substitution and continuation retains that antecedent and its scope;
+  copying values or heaps cannot erase it. Before such a conclusion authorizes
+  runtime reuse, checked selected-implementation correspondence must establish
+  the relevant actual storage, operations and uses under the identified machine
+  model, and checked surrounding composition must establish their entry-state
+  premises. A version, name, source example, equal width or successful execution
+  cannot discharge these conditions.
+  A permitted bit view preserves the live object's allocation identity, lifetime,
+  offset and owning bytes, with checked extent and alignment for both views.
+  Reads and writes use one canonical object state, so an alias cannot retain stale
+  contents after a write through another view. Pointer provenance supplies no
+  numeric address, and bit reinterpretation supplies no numeric conversion rule.
+  Unsupported address arithmetic, escaping views or unestablished object/layout
+  relations yield no dependent proof. Source initialization establishes language
+  values only, never native bytes.
+  Exact float values distinguish bit identity from language equality. IEEE
+  equality makes every NaN unequal, including to itself, and opposite signed zeros
+  equal; abstract state identity may still distinguish those zeros and identify
+  identical NaN encodings. Typed constants obey target-precision rounding to
+  nearest, ties to even, and unsigned zero; bit views may introduce signed zero,
+  infinities and NaNs. Native floating-point exception/status conditions remain
+  separate obligations: language equality alone does not discharge them.
 - **context-and-effects** — Calls bind actual arguments, receivers, captured
   environments and concrete interface values to the exact callee context.
   Preservation across a call requires a checked read/write/escape/callback and

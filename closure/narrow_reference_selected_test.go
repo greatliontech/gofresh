@@ -315,6 +315,7 @@ func assertNarrowSelectedSourcePrefix(t *testing.T, source computationSource, re
 		assertInteger(readRegionLocation(beforeAnd.region.packet.observations[0].state, location, types.Typ[types.Uint8]), 0xff)
 	}
 	t.Log("complete selected source entry through CAS32 success/failure/high-bit and byte OR/AND; sibling guards checked, unsafe conversion unexecuted")
+	assertFloatSelectedSourceContinuation(t, completed, references)
 }
 
 func assertNarrowSelectedReferenceGroup(t *testing.T, got assemblyReferenceResult, kind x86asm.Op, before, after uint64) {

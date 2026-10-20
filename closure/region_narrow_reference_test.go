@@ -152,6 +152,7 @@ func TestRegionNarrowSelectedReferenceApplications(t *testing.T) {
 	}
 	dir := t.TempDir()
 	const text = `package p
+import "unsafe"
 type Byte byte
 func Cas(p *uint32, old, replacement uint32) bool
 func SignedCas(p *int32, old, replacement int32) bool
@@ -164,6 +165,7 @@ func Array(){a:=[3]uint32{3,0x80000000,5};if !Cas(&a[1],0x80000000,0xffffffff){p
 func Bytes(){a:=[3]Byte{3,0x80,5};p:=(*byte)(&a[1]);Or(p,0);And(p,0xff);Or(p,1);And(p,0x80);if a[0]!=3||a[1]!=0x80||a[2]!=5{panic(nil)};Stop()}
 func Signed(){x:=int32(-2147483648);if !SignedCas(&x,-2147483648,-1){panic(nil)};if SignedCas(&x,0,1){panic(nil)};if x!=-1{panic(nil)};Stop()}
 func SignedByte(){x:=int8(-128);SignedAnd(&x,-1);if x!=-128{panic(nil)};Stop()}
+func FloatView(){var x float32;p:=(*uint32)(unsafe.Pointer(&x));if !Cas(p,0,0xffffffff){panic(nil)};if x==x{panic(nil)};if Cas(p,0,1){panic(nil)};if x==x{panic(nil)};Stop()}
 func SnapshotStop(*byte,*byte) {}
 func SnapshotStop32(*uint32,*uint32) {}
 func ByteSnapshot(){var a [3]byte;a[0]=2;a[2]=4;other:=byte(6);Or(&a[1],1);a[1]=7;a[0]=8;other=9;SnapshotStop(&a[1],&other)}
@@ -192,7 +194,7 @@ func CASSnapshot(){var a [3]uint32;a[0]=2;a[2]=4;other:=uint32(6);Cas(&a[1],0,1)
 		root, first  string
 		width, calls int
 		want         uint64
-	}{{"Scalar", "Cas", 4, 2, 0x80000000}, {"Array", "Cas", 4, 1, 0xffffffff}, {"Bytes", "Or", 1, 4, 0x80}, {"Signed", "SignedCas", 4, 2, 0xffffffff}, {"SignedByte", "SignedAnd", 1, 1, 0x80}} {
+	}{{"Scalar", "Cas", 4, 2, 0x80000000}, {"Array", "Cas", 4, 1, 0xffffffff}, {"Bytes", "Or", 1, 4, 0x80}, {"Signed", "SignedCas", 4, 2, 0xffffffff}, {"SignedByte", "SignedAnd", 1, 1, 0x80}, {"FloatView", "Cas", 4, 2, 0xffffffff}} {
 		t.Run(tc.root, func(t *testing.T) {
 			root := source.prog.Roots[tc.root]
 			firstCall := localEffectCalls(t, root, tc.first)[0]
@@ -202,7 +204,7 @@ func CASSnapshot(){var a [3]uint32;a[0]=2;a[2]=4;other:=uint32(6);Cas(&a[1],0,1)
 			}
 			location := first.operands[0].location
 			targetType := firstCall.Call.StaticCallee().Signature.Params().At(0).Type().Underlying().(*types.Pointer).Elem()
-			original := readRegionLocation(first.region.packet.observations[0].state, location, targetType)
+			original := first.checker.readLocation(first.region.packet.observations[0].state, location, targetType)
 			stop := localEffectCalls(t, root, "Stop")[0]
 			ownedReferences := maps.Clone(references)
 			end, err := checkSourceOperandContinuation(t.Context(), first, stop, ownedReferences)
@@ -217,7 +219,7 @@ func CASSnapshot(){var a [3]uint32;a[0]=2;a[2]=4;other:=uint32(6);Cas(&a[1],0,1)
 			if len(trace.atomics) != tc.calls || len(trace.calls) != tc.calls || len(trace.excluded) == 0 {
 				t.Fatal("selected application lost atomic occurrences, calls or checked guards")
 			}
-			current := readRegionLocation(end.region.packet.observations[0].state, location, targetType)
+			current := end.checker.readLocation(end.region.packet.observations[0].state, location, targetType)
 			bits, ok := regionReferenceWord(current, tc.width)
 			if !ok || bits != tc.want {
 				t.Fatalf("wrong selected-width current value: %v", current.scalar)
@@ -228,6 +230,7 @@ func CASSnapshot(){var a [3]uint32;a[0]=2;a[2]=4;other:=uint32(6);Cas(&a[1],0,1)
 				"Bytes":      {{0x80, 0x80}, {0x80, 0x80}, {0x80, 0x81}, {0x81, 0x80}},
 				"Signed":     {{0x80000000, 0xffffffff}, {0xffffffff, 0xffffffff}},
 				"SignedByte": {{0x80, 0x80}},
+				"FloatView":  {{0, 0xffffffff}, {0xffffffff, 0xffffffff}},
 			}[tc.root]
 			for i, group := range trace.atomics {
 				if group.atomic.Width != tc.width || group.atomic.WriteAccess != group.atomic.ReadAccess+1 || group.application == nil || group.application.at == nil || group.atomic.Statement < 0 {
@@ -268,12 +271,33 @@ func CASSnapshot(){var a [3]uint32;a[0]=2;a[2]=4;other:=uint32(6);Cas(&a[1],0,1)
 					t.Fatal("signed raw bits were reconstructed as an unsigned constant")
 				}
 			}
+			if tc.root == "FloatView" {
+				value := end.region.packet.observations[0].state.memory[location.object]
+				if value.kind != regionFloat || !types.Identical(value.typ, types.Typ[types.Float32]) || value.floatBits != tc.want || end.region.packet.input.storageModel != first.region.packet.input.storageModel {
+					t.Fatal("integer reference lost canonical float storage or its model condition")
+				}
+				t.Run("cancellation-checkpoints", func(t *testing.T) {
+					baseline := &relationCallbackContext{Context: t.Context()}
+					if _, err := checkSourceOperandContinuation(baseline, first, stop, references); err != nil {
+						t.Fatal(err)
+					}
+					for checkpoint := 1; checkpoint <= baseline.checks; checkpoint++ {
+						ctx, cancel := context.WithCancel(t.Context())
+						interrupted := &relationCallbackContext{Context: ctx, at: checkpoint, callback: cancel}
+						proof, err := checkSourceOperandContinuation(interrupted, first, stop, references)
+						cancel()
+						if proof != nil || !errors.Is(err, context.Canceled) {
+							t.Fatalf("reference float-view checkpoint %d/%d erased cancellation: %v", checkpoint, baseline.checks, err)
+						}
+					}
+				})
+			}
 			// Re-evaluating an independent branch must not mutate the first receipt.
 			again, err := checkSourceOperandContinuation(t.Context(), first, stop, references)
 			if err != nil || !regionSameValue(again.region.packet.observations[0].state.memory[location.object], end.region.packet.observations[0].state.memory[location.object]) {
 				t.Fatalf("reference continuation branches disagree: %v", err)
 			}
-			if !regionSameValue(original, readRegionLocation(first.region.packet.observations[0].state, location, targetType)) {
+			if !regionSameValue(original, first.checker.readLocation(first.region.packet.observations[0].state, location, targetType)) {
 				t.Fatal("reference application mutated the predecessor snapshot")
 			}
 		})

@@ -34,7 +34,7 @@ func computationFixture(t testing.TB, text string) computationSource {
 		t.Fatal(err)
 	}
 	pkg := types.NewPackage(path, "p")
-	ssaPkg, info, err := ssautil.BuildPackage(&types.Config{}, fset, pkg, []*ast.File{file}, ssa.SanityCheckFunctions)
+	ssaPkg, info, err := ssautil.BuildPackage(&types.Config{Importer: assemblyReferenceUnsafeImporter{}}, fset, pkg, []*ast.File{file}, ssa.SanityCheckFunctions)
 	if err != nil {
 		t.Fatal(err)
 	}

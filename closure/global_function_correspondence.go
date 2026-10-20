@@ -15,7 +15,7 @@ import (
 	"golang.org/x/arch/x86/x86asm"
 )
 
-const globalFunctionRules = "gofresh/global-function-correspondence@4;" + regionRules + ";" + nativeproof.TransitionRules + ";" + br.RuleModel
+const globalFunctionRules = "gofresh/global-function-correspondence@5;" + regionRules + ";" + nativeproof.TransitionRules + ";" + br.RuleModel
 
 // A mapping names the actual typed parameter and its incoming full native word.
 // The present effect-only grammar admits only unused pointer parameters. A word
@@ -664,10 +664,15 @@ leavesLoop:
 			}
 			value = value.elements[step.index]
 		}
-		value, viewed := regionViewValue(value, leaf.typ)
-		if !viewed {
+		if viewed, sameDomain := regionViewValue(value, leaf.typ); sameDomain {
+			value = viewed
+		} else if !regionBitViewTypes(value.typ, leaf.typ) {
 			return storageFootprint{}, nil, globalFunctionError("effect type differs from canonical storage")
 		}
+		// A checked source bit-view event retains its access interpretation while
+		// the leaf retains canonical ownership. Their common exact-width word is
+		// compared as bytes; no numeric conversion or new alias is inferred here.
+		// The owning source proof still carries the storage-model antecedent.
 		bits, width, ok := storageScalarBits(value, sizes)
 		if !ok && partial {
 			continue
@@ -726,8 +731,10 @@ func (p *globalFunctionCorrespondence) storageWriteRunAdjacent(ctx context.Conte
 
 // isolatedStorage checks actual SSA pointer uses all the way through substituted
 // ordinary calls and their actual pointer results. A typed address cannot
-// disappear through a store, opaque call, escaping return, conversion or interface
-// construction. Values read through it still have
+// disappear through a store, opaque call, escaping return, address-observing
+// conversion or interface construction. An actually checked provenance-preserving
+// view remains traversable; every use of that view is checked in turn.
+// Values read through it still have
 // their checked source uses, outcomes and any resulting represented effects.
 func (p *globalFunctionCorrespondence) isolatedStorage(ctx context.Context, object regionObject) (bool, error) {
 	allocation, ok := object.site.(*ssa.Alloc)
@@ -754,6 +761,26 @@ func (p *globalFunctionCorrespondence) isolatedStorage(ctx context.Context, obje
 			}
 			switch x := use.(type) {
 			case *ssa.DebugRef:
+			case *ssa.Convert:
+				if x.X != pointer {
+					return false, nil
+				}
+				if admitted, err := p.checkedStorageView(ctx, x); !admitted || err != nil {
+					return admitted, err
+				}
+				if safe, err := visit(x); !safe || err != nil {
+					return safe, err
+				}
+			case *ssa.ChangeType:
+				if x.X != pointer {
+					return false, nil
+				}
+				if admitted, err := p.checkedStorageView(ctx, x); !admitted || err != nil {
+					return admitted, err
+				}
+				if safe, err := visit(x); !safe || err != nil {
+					return safe, err
+				}
 			case *ssa.FieldAddr:
 				if safe, err := visit(x); !safe || err != nil {
 					return safe, err
@@ -827,6 +854,25 @@ func (p *globalFunctionCorrespondence) isolatedStorage(ctx context.Context, obje
 		return true, nil
 	}
 	return visit(allocation)
+}
+
+// The finite source checker admits pointer conversions only as checked live-object
+// views. A syntactically plausible conversion in an unexecuted arm supplies no
+// such evidence. Consuming its actual checked occurrence avoids a second layout
+// or unsafe-conversion rule in the native effect matcher. The enclosing source
+// certificate continues to own the conditional storage-model antecedent.
+func (p *globalFunctionCorrespondence) checkedStorageView(ctx context.Context, instruction ssa.Instruction) (bool, error) {
+	for _, trace := range p.traces {
+		for _, occurrence := range trace.instructions {
+			if err := ctx.Err(); err != nil {
+				return false, err
+			}
+			if occurrence.instruction == instruction && trace.seen[occurrence] {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // isolatedAllocatedRead derives a source-only elimination premise from the

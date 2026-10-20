@@ -299,7 +299,7 @@ func TestRegionLocalLaterFactoryDoesNotResetEarlierObject(t *testing.T) {
 	}
 }
 
-func TestRegionLocalOpaqueFloatInitialization(t *testing.T) {
+func TestRegionLocalScalarInitialization(t *testing.T) {
 	_, prefix := localEffectPrefix(t, `type Mixed struct{Word uint32;Float float64};func Stop(*Mixed,uint32){};func F(){var x Mixed;x.Word=7;Stop(&x,x.Word)}`)
 	localEffectInteger(t, prefix.operands[1], 7)
 	object := prefix.operands[0].location.object
@@ -308,27 +308,35 @@ func TestRegionLocalOpaqueFloatInitialization(t *testing.T) {
 		t.Fatalf("mixed allocation lost initialized shape: %+v %v", allocation, err)
 	}
 	localEffectInteger(t, allocation.initializer.elements[0], 0)
-	unknown := allocation.initializer.elements[1]
-	if unknown.kind != regionUnknown || !types.Identical(unknown.typ, types.Typ[types.Float64]) || unknown.scalar != nil {
-		t.Fatal("unknown float initialization invented bits")
+	zero := allocation.initializer.elements[1]
+	if bits, width, exact := storageScalarBits(zero, prefix.region.root.pkg.TypesSizes); !exact || bits != 0 || width != 8 {
+		t.Fatal("float initialization lost exact positive zero")
+	}
+	_, scalar := localEffectPrefix(t, `func Stop(bool){};func F(){var x float64;Stop(x==x)}`)
+	if value, known := regionBool(scalar.operands[0]); !known || !value {
+		t.Fatal("initialized float equality is not derived")
 	}
 	for _, body := range []string{
-		`var x float64;Stop(x==x)`,
-		`var x struct{F float64};Stop(x==x)`,
+		`Stop(Unknown==Unknown)`,
+		`var x complex128;Stop(x==x)`,
 	} {
-		source := relationFixture(t, `func Stop(bool){};func F(){`+body+`}`, 64)
+		source := relationFixture(t, `var Unknown float64;func Stop(bool){};func F(){`+body+`}`, 64)
 		root := source.prog.Roots["F"]
-		if _, err := checkSourceOperandPrefix(t.Context(), source, root, localEffectCalls(t, root, "Stop")[0], defaultRegistrationLimits()); err == nil || !strings.Contains(err.Error(), "unsupported scalar") {
-			t.Fatalf("float consumption admitted or wrong refusal: %v", err)
+		if _, err := checkSourceOperandPrefix(t.Context(), source, root, localEffectCalls(t, root, "Stop")[0], defaultRegistrationLimits()); err == nil {
+			t.Fatal("unknown float or complex consumption acquired an exact finite proof")
 		}
 	}
 	// Copying an aggregate and selecting its supported field does not evaluate
-	// the unsupported sibling as a scalar expression.
-	_, copied := localEffectPrefix(t, `type Mixed struct{Word uint32;Float float64};func Stop(*Mixed,uint32){};func word(x Mixed)uint32{return x.Word};func F(){var x Mixed;x.Word=7;y:=x;Stop(&x,word(y))}`)
+	// an unsupported complex sibling as a scalar expression.
+	_, copied := localEffectPrefix(t, `type Mixed struct{Word uint32;Opaque complex128};func Stop(*Mixed,uint32){};func word(x Mixed)uint32{return x.Word};func F(){var x Mixed;x.Word=7;y:=x;Stop(&x,word(y))}`)
 	localEffectInteger(t, copied.operands[1], 7)
 	broad, _ := proveRegionFixture(t, regionFixture(t, `func F()bool{p:=new(float64);return *p==*p}`))
-	if broad.observations[0].value.kind != regionUnknown {
-		t.Fatal("broad unknown-float transport inferred Go scalar equality")
+	if equal, exact := regionBool(broad.observations[0].value); !exact || !equal {
+		t.Fatal("broad initialized-float transport lost Go scalar equality")
+	}
+	unknown, _ := proveRegionFixture(t, regionFixture(t, `func F(x float64)bool{return x==x}`))
+	if unknown.observations[0].value.kind != regionUnknown {
+		t.Fatal("unknown float was assumed reflexive")
 	}
 }
 

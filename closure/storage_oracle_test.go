@@ -87,7 +87,9 @@ type regionConcreteExecution struct {
 }
 
 // executeStorageSource runs the same interpreter as executeRegionConcrete, with
-// explicit globals and exact unsigned values. Errors cover invalid joint inputs;
+// explicit globals and exact integer/IEEE values. Float views use the test's
+// conditional binary32/binary64 storage model, not discovered native applicability.
+// Errors cover invalid joint inputs;
 // unsupported interpreter instructions remain test failures, never broad unknowns.
 // Returned snapshots own their containers and contain no mutable heap-cell pointers.
 func executeStorageSource(t testing.TB, in regionInput, config storageSourceRun) (result storageSourceResult, err error) {
@@ -141,6 +143,15 @@ func executeStorageSource(t testing.TB, in regionInput, config storageSourceRun)
 func (r *regionConcreteExecution) checkedValue(typ types.Type, value any) any {
 	switch u := typ.Underlying().(type) {
 	case *types.Basic:
+		if u.Kind() == types.UnsafePointer {
+			if value == nil {
+				return nil
+			}
+			if p, ok := value.(regionConcretePointer); ok {
+				r.location(p)
+				return p
+			}
+		}
 		if u.Info()&types.IsInteger != 0 {
 			width := uint(r.sizes.Sizeof(typ) * 8)
 			if width == 0 || width > 64 {
@@ -158,6 +169,14 @@ func (r *regionConcreteExecution) checkedValue(typ types.Type, value any) any {
 			if v, ok := value.(bool); ok {
 				return v
 			}
+		} else if u.Kind() == types.Float32 {
+			if v, ok := value.(float32); ok && r.sizes.Sizeof(typ) == 4 {
+				return v
+			}
+		} else if u.Kind() == types.Float64 {
+			if v, ok := value.(float64); ok && r.sizes.Sizeof(typ) == 8 {
+				return v
+			}
 		} else if u.Info()&types.IsString != 0 {
 			if v, ok := value.(string); ok {
 				return v
@@ -170,6 +189,18 @@ func (r *regionConcreteExecution) checkedValue(typ types.Type, value any) any {
 				out[i] = r.checkedValue(u.Elem(), values[i])
 			}
 			return out
+		}
+	case *types.Pointer:
+		if value == nil {
+			return nil
+		}
+		if p, ok := value.(regionConcretePointer); ok {
+			r.location(p)
+			return p
+		}
+	case *types.Interface, *types.Signature, *types.Slice:
+		if value == nil {
+			return nil
 		}
 	case *types.Struct:
 		if values, ok := value.([]any); ok && len(values) == u.NumFields() {
@@ -256,7 +287,7 @@ func (r *regionConcreteExecution) location(pointer regionConcretePointer) storag
 
 func (r *regionConcreteExecution) snapshot(value any) any {
 	switch value := value.(type) {
-	case nil, uint64, int64, bool, string:
+	case nil, uint64, int64, float32, float64, bool, string:
 		return value
 	case regionConcretePointer:
 		return r.location(value)
@@ -808,18 +839,7 @@ func storageSourceBytes(sizes types.Sizes, typ types.Type, value any) map[int64]
 				emit(fields[i].Type(), field, offset+offsets[i])
 			}
 		case *types.Basic:
-			if u.Info()&types.IsInteger == 0 {
-				panic("unsupported source byte leaf")
-			}
-			var bits uint64
-			switch v := value.(type) {
-			case uint64:
-				bits = v
-			case int64:
-				bits = uint64(v)
-			default:
-				panic("nonconcrete source byte leaf")
-			}
+			bits := (&regionConcreteExecution{sizes: sizes}).scalarBits(typ, value)
 			for lane := int64(0); lane < sizes.Sizeof(typ); lane++ {
 				out[offset+lane] = byte(bits >> (8 * lane))
 			}

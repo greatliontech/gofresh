@@ -2048,9 +2048,9 @@ func TestStorageJointUnsupportedSelectionAndScalar(t *testing.T) {
 		}
 	})
 	t.Run("float-consumption", func(t *testing.T) {
-		// This explicit refusal is outside the reference integer grammar. Its
-		// checked integer prefix supplies no IEEE or native float-bit authority.
-		source := relationFixture(t, `type S struct{B uint32;F float64};func Stop(p *uint32){};func F(){var x S;x.B=7;Stop(&x.B);if x.F!=0{panic(1)}}`, 64)
+		// A prior unknown float remains outside the exact finite source grammar.
+		// Independent local initialization supplies no value for this global.
+		source := relationFixture(t, `var Unknown float64;type S struct{B uint32;F float64};func Stop(p *uint32){};func F(){var x S;x.B=7;Stop(&x.B);if Unknown!=0{panic(1)}}`, 64)
 		root := source.prog.Roots["F"]
 		calls := storageOracleInstructions[*ssa.Call](root)
 		returns := storageOracleInstructions[*ssa.Return](root)

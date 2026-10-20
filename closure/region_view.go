@@ -18,7 +18,7 @@ func regionScalarView(storage, view types.Type) bool {
 		return false
 	}
 	b, ok := view.Underlying().(*types.Basic)
-	return ok && types.Identical(a, b) && a.Info()&(types.IsBoolean|types.IsInteger|types.IsString) != 0
+	return ok && types.Identical(a, b) && a.Info()&(types.IsBoolean|types.IsInteger|types.IsString|types.IsFloat) != 0
 }
 
 func regionAccessType(storage, view types.Type) bool {
@@ -44,7 +44,7 @@ func regionViewValue(value regionValue, typ types.Type) (regionValue, bool) {
 	if types.Identical(value.typ, typ) {
 		return value, true
 	}
-	if !regionScalarView(value.typ, typ) || value.kind != regionUnknown && value.kind != regionConstant {
+	if !regionScalarView(value.typ, typ) || value.kind != regionUnknown && value.kind != regionConstant && value.kind != regionFloat {
 		return regionValue{}, false
 	}
 	value.typ = typ
