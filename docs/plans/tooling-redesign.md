@@ -264,6 +264,11 @@
                 operands, successors and continuations. Compiler reports propose
                 candidates; names, compatible call shapes and graph alignment
                 alone cannot establish that association.
+                Qualify this compiler-origin route against an actual-artifact
+                consumer at 9.4a.2 before extending it. Historical-result retention
+                alone does not require compiler execution or a theorem over every
+                permitted rebuild; reconcile an independently checked native
+                replacement and retire superseded candidate steps at 9.4a.4.
                 - [x] 5.1w.2b.3b.2a.1 Derive source-model startup heaps from the
                   complete selected package graph, eligible language-zero storage,
                   ready-package initialization order and checked initializer effects.
@@ -824,6 +829,40 @@
                     distinguish established from missing edges and justify each
                     compiler/bootstrap scope by the claim its consumer needs.
                     Qualify the consumer against cumulative composition bounds.
+                  - [x] 5.1w.2b.3b.2a.2.4 Extend the existing region kernel with
+                    canonical map backing, bounded projected-string key summaries,
+                    common-information widening and explicit normal-return
+                    postconditions. Independently check loop and call invariants,
+                    aliases, allocation cardinality and exceptional exclusion;
+                    share checked abstract calls with justified input/frame
+                    association and cumulative accounting. Qualify complete selected
+                    intrinsic-table construction on stock/custom Go with all
+                    configuration and SIMD arms, factories and callbacks covered;
+                    derive package-key exclusion from actual operands rather than
+                    a compiler/package-name rule. Check conditional normalized-key
+                    lookup separately; retain preservation and applicability duties.
+                  - [ ] 5.1w.2b.3b.2a.2.5 If 9.4a.2 establishes a consumer for
+                    compiler-origin exclusion, apply construction through the actual
+                    initialization-to-lookup control and object-preservation relation,
+                    mutable predicates and runtime-package normalization. Start at
+                    selected gc.Main; distinguish normal construction return from
+                    outer panic recovery. Derive alias/escape and unsafe/opaque
+                    frames, concurrent publication and actual package/symbol-cache
+                    lineage under the selected IR decoder. Retain the separate
+                    compiler-source/executable association obligation. Decide the
+                    time.runtimeNow frame before extending native prefixes: establish
+                    logical-poststate/native-support association and allocation-instance
+                    ownership across acquisition, cache/pool transfer, relocation and
+                    retirement, rather than assuming context-local separation. Bind
+                    dynamic images to the relevant execution, resolver and both uses;
+                    a diagnostic compilation cannot replace historical warm-build
+                    evidence. Choose a storage interface only after its complete
+                    application path is established. Cover stock/custom ambient
+                    writes, runtime/scratch separation and every feasible vDSO/syscall
+                    arm, with protected-write, overlap, callback and substituted-target
+                    adversaries. A complete local frame does not close the remaining
+                    interval. Inventory all implementation-changing routes whenever
+                    the consuming claim requires selection-wide coverage.
                 - [ ] 5.1w.2b.3b.2a.3 Check operation/context correspondence through
                   inlining, escape/order/walk, SSA construction and subsequent
                   transformations, preserving explicit-call distinctions and exact
@@ -883,8 +922,11 @@
             cancellation, completion facts and all closing/refusal precedence.
           - [ ] 5.1w.2b.4c Define and implement the native record's sufficient
             historical implementation evidence and claim-specific applicability.
-            Keep proof inputs distinct from live current dependencies; require
-            checked selection stability for artifact-free current applicability.
+            Keep immutable historical proof inputs distinct from live current
+            dependencies; enforce REQ-fresh-historical-implementation without
+            transferring the producing theorem to another artifact or a shared
+            source classification. Check complete selection agreement, original
+            producing bindings, compatible proof and applicable runtime premises.
             Preserve cold/warm/discarded-memo authority and fingerprint value
             semantics. Reuse existing disposable memo infrastructure only for
             acceleration; no proof bit, digest registry or missing-history upgrade.
@@ -1243,50 +1285,19 @@
       forks with the user; retain all other supported-family obligations and the
       release, Stipulator, fleet and deferred-performance order. Close only with
       a concrete bounded implementation path, not another list of proof prefixes.
-      - [ ] 9.4a.1 Establish the claim-specific selection-applicability rule for
-        the ordinary TestScalar/utf16.IsSurrogate stock/custom thread. Identify
-        the exact public proposition, every relevant permitted implementation
-        choice and the checked evidence preserving that proposition. Distinguish
-        a universal runtime-state theorem for one artifact from a theorem over
-        permitted builds; correct-cache equivalence alone cannot bridge them.
-        Preserve language latitude and result-owner responsibilities without
-        assuming byte determinism or numerical equality the claim does not need.
-        - [x] 9.4a.1a Extend the existing region kernel with canonical map backing,
-          bounded projected-string key summaries, common-information widening and
-          explicit normal-return postconditions. Independently check loop and call
-          invariants, aliases, allocation cardinality and exceptional exclusion;
-          share checked abstract calls with justified input/frame association and
-          cumulative accounting. Qualify complete selected intrinsic-table
-          construction on stock/custom Go with all configuration and SIMD arms,
-          factories and callbacks covered; derive package-key exclusion from actual
-          operands rather than a compiler/package-name rule. Check conditional
-          normalized-key lookup separately. Retain the intervening preservation,
-          compiler execution, native and public-applicability obligations.
-        - [ ] 9.4a.1b Apply the construction theorem through its actual
-          initialization-to-lookup control and object-preservation relation,
-          including mutable predicate targets and runtime-package normalization.
-          Start from the selected gc.Main control flow; distinguish construction's
-          normal return from outer panic recovery. Derive the protected-object
-          alias/escape and unsafe/opaque write frames, publication to concurrent
-          readers, and actual package/symbol-cache lineage under the selected IR
-          decoder. Identify the first unresolved edge and its bounded deciding
-          experiment before choosing another general mechanism; source reference
-          inventories and RTA supply candidates, not those proofs. Retain the
-          separate compiler-source/executable association obligation.
-          Decide the postconstruction timing-call frame at time.runtimeNow before
-          extending native prefixes. First establish the checked logical-map
-          poststate/native-support relation; a geometry proposal or complete-effect
-          packet substitution cannot supply it. Bind dynamic images to the relevant
-          execution and resolver/use relation, preserving warm-build applicability
-          rather than substituting a diagnostic compilation. Choose a storage
-          interface only after its complete application path is established.
-          Complete stock/custom coverage must include
-          ambient writes, derived runtime/scratch separation and every feasible
-          vDSO/syscall arm, with protected-write, callback and target-substitution
-          adversaries. A missing frame keeps this application route unestablished;
-          a complete local frame alone does not close the remaining interval.
-          Inventory every remaining implementation-changing route for the selected
-          occurrence before consuming exclusion as selection-stability evidence.
+      - [x] 9.4a.1 Derive and specify scoped historical-result applicability for
+        the ordinary TestScalar/utf16.IsSurrogate stock/custom thread under
+        REQ-fresh-historical-implementation. Distinguish retaining the complete
+        producing-artifact theorem from granting it to another artifact or every
+        permitted build. Preserve complete historical proof, truthful producing
+        bindings, current selection agreement, compatible rules, runtime guards
+        and consumer conditions; membership alone grants no behavior. Preserve
+        actual intrinsic/fallback/dispatch negatives, ordinary source-symbol
+        result models and all remaining implementation coverage. Keep exact-value
+        proofs as precision where required by caller reasoning, not a demand for
+        identical future outcomes. Retain compiler-origin construction and
+        preservation candidates at 5.1w.2b.3b.2a.2.4-5 only for demonstrated
+        consumers of that mechanism.
       - [ ] 9.4a.2 Qualify one complete implicit-lowering applicability bridge
         from the actual TestScalar invocation path before more compiler startup
         work. Use the selected testing.tRunner stack-check/retry fragment as the

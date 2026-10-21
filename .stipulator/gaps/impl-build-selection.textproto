@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-impl-build-selection"
 reason: "Existing inventory examples do not establish actual effective build selection for every new implementation claim and implicitly linked dependency. The isolated compiler-intrinsic regression demonstrated that nominal Go-source checking can miss CPU-feature-dependent implementation dispatch. Its runtime grant is cut off pending checked compiler-selected correspondence; the source proof alone grants none."
-content_hash: "d8291c2815a18b8fd134dcd05445b10eaa00b77348ccfaab70f2283f95ab4e93"
-source_hash: "3f77c8c2ba647c8ef52092a13c700c211b7b31abac3f49b58579b63a7c9abf1c"
+content_hash: "299acc1c19c51791aba4361757795102f7b6cc844d2229cfae5b28a0f69e67fc"
+source_hash: "17adb799fdfbf38b1cad86c01d0844954598e55532d30b3b8ea0276e79422348"
 lands { manual { condition: "tooling-redesign 5.1w.2: actual subject/build selection is reconciled to complete claim inputs in the source/native verticals and every consuming tier in 5.1w.6; tooling-redesign 5.1w.2b additionally establishes actual compiler-selected implementation and inline/dispatch scope before runtime discharge, preserving the requested build and the independent same-binary POPCNT negative" } }

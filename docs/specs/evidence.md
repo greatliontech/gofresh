@@ -427,10 +427,61 @@ these obligations:
   record represents native implementation evidence. Absence of artifact fields in
   such a record is therefore not a missing required guard for its unchanged
   ordinary evidence channel, and its inspection supplies no stronger reuse claim.
-  Current or historical native-artifact-dependent reuse requires separately
-  represented producing evidence and an explicitly governed current-artifact
-  selection and comparison. A present inspection cannot add that authority to an
-  old record, and artifact-free checking cannot implicitly select an artifact.
+  Native-artifact-dependent reuse requires separately represented producing
+  evidence and governed applicability. REQ-fresh-historical-implementation governs
+  retaining support for the original historical result without selecting a current
+  artifact. A claim about a current artifact instead requires its explicit
+  selection, binding and comparison. A present inspection cannot add either
+  authority to an old record, and artifact-free checking cannot implicitly select
+  an artifact.
+
+**REQ-fresh-historical-implementation** (invariant): An artifact-free judgment
+MUST use retained implementation evidence only within the scope of the original
+historical result, under the following obligations:
+
+- **producing-support** — The record retains its original subject, source/build
+  identity, actual producing-artifact binding, contributing executions, authority
+  classes and successfully closed obligations. Its implementation proof establishes
+  the claimed behavior for that artifact under applicable premises, with the
+  selected replacements, inline instances, dispatch, initialization, harness and
+  actual-use coverage required by REQ-impl-build-selection. Observed success,
+  artifact membership, a nominal source body or one sampled native arm supplies
+  none of the missing semantic evidence. Executor build/execution declarations
+  retain their existing assertion authority; they do not become derived facts.
+- **retained-evidence** — Durable evidence retains sufficient immutable inputs and
+  checked reasoning to judge that historical support under recognized compatible
+  rules. Historical artifact bytes are proof inputs, not automatically current
+  filesystem dependencies. Deleting the original executable or disposable analysis
+  memos cannot withdraw otherwise sufficient retained evidence. Missing historical
+  inputs, premises or bindings cannot be supplied from a new execution, today's
+  artifact or an approval bit. Integrity alone is not semantic authority.
+- **current-applicability** — Current checking establishes agreement of the complete
+  source/build and implementation-selection dependencies required by the historical
+  claim, or a separately licensed applicability endpoint preserving its original
+  support. It also establishes compatibility of proof rules and premises, every
+  applicable runtime and ordinary guard, and the result owner's further conditions.
+  On the unchanged-selection path, the truthful original build binding and complete
+  selection agreement preserve that artifact's membership in the current permitted
+  selection; they do not prove its behavior. An applicability transformation must
+  establish its own endpoint; the historical artifact theorem alone supplies none.
+  The compilation environment remains distinct from the execution environment.
+  Hidden build inputs or changed runtime selectors cannot be relabeled as language
+  nondeterminism. Judgment remains provisional until its checking close succeeds.
+- **scope-preservation** — The conclusion concerns reuse of the original result,
+  not support for a newly built artifact or a selection-wide implementation claim.
+  It need not establish the same subordinate effect bound for every other build
+  permitted by the selection, nor identical future outcomes. A claim ranging over
+  those implementations still needs that coverage. New production needs its own
+  bound evidence admission and producing obligations; a historical judgment cannot
+  refine a shared source snapshot, authorize a sibling execution or substitute for
+  that admission. A consumer requiring a particular current executable or a
+  stronger population claim retains that requirement.
+
+This rule preserves the existing historical-result model. It does not turn a
+partial implementation proof into complete producing support, license a new
+source-only classification, or upgrade an existing record without the required
+evidence. In particular, retaining a complete artifact theorem is distinct from
+transferring that theorem to another artifact or to every permitted build.
 
 **REQ-fresh-checking-unit** (behavior): Checking a batch of existing native
 records MUST admit an independently closing transaction over a declared subject

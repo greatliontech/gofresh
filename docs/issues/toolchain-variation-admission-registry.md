@@ -222,10 +222,10 @@ edges have separate owners:
 | Edge | Required change | Lands |
 |---|---|---|
 | Shared typed load to later proof acquisition | Retain exact selected-source ownership and complete conservative blockers without a second unrelated load. | 5.1w.2b.4a |
-| Bound source/native facts to ordinary implementation authority | Complete actual-use, initialization, harness and selected-implementation coverage; establish claim-specific current applicability. Local callback or startup certificates cannot supply it. | 9.4a.1-2 qualify the route; 5.1w.2b.3 and 5.1w.2b.4d implement and consume it. |
+| Bound source/native facts to ordinary implementation authority | Complete actual-use, initialization, harness and selected-implementation coverage for the producing artifact; retain its historical scope at current checking. Local callback or startup certificates cannot supply it. | 9.4a.1-2 qualify the route; 5.1w.2b.3 and 5.1w.2b.4d implement and consume it. |
 | Inspected artifact to preparation | Admit immutable scoped claims and select residual obligations for the whole runnable roster before execution. | 5.1w.2b.4b/d |
 | Prepared evidence to close | Validate each unit's dependencies and obligations without mutating its shared snapshot or borrowing sibling authority. | 5.1w.2b.4b |
-| Producing theorem to current check | Retain sufficient historical evidence and check the applicable selection theorem and current dependencies. | 5.1w.2b.4c/d |
+| Producing theorem to current check | Retain sufficient historical evidence and check its original producing binding, compatible proof, complete current selection agreement and applicable runtime dependencies. | 5.1w.2b.4c/d |
 | Checked claims to warm serving | Include complete rule/premise/dependency identities; deleting disposable memos changes cost, not authority. | 5.1w.2b.4c; all remaining consumers at 5.1w.6 |
 
 ### Evidence ownership and applicability
@@ -251,15 +251,28 @@ diagnostic units. Existing singleton/package/retry and closing ownership remains
 the common lifecycle.
 
 Historical artifact bytes are proof inputs, not automatically live current
-filesystem dependencies. Conversely, retaining yesterday's executable does not
-prove a property of every implementation allowed by today's selection. A complete
-artifact theorem, universal over its runtime states, needs a separately checked
-selection-stability argument before it can authorize artifact-free current reuse.
-That argument preserves the particular public proposition, not native addresses,
-frame layouts or exact numerical equalities the proposition does not require.
-The correct-cache premise in [runtime inputs](../specs/runtime-inputs.md) concerns
-cache-state independence; it does not silently remove the implementation latitude
-retained by [implementation verification](../specs/implementation-verification.md).
+filesystem dependencies. The historical-result rule in
+[evidence](../specs/evidence.md) retains a complete artifact theorem within the
+original recording's scope. Current checking establishes its original truthful
+producing binding, sufficient retained proof, compatible premises and rules,
+complete source/build-selection agreement or a separately licensed applicability
+endpoint, applicable runtime guards and consumer conditions. Unchanged complete
+selection preserves the historical artifact's membership in that selection;
+membership alone proves no behavior.
+
+This corrects the earlier requirement to prove the same effect bound for every
+permitted rebuild before retaining a historical result. That universal theorem
+is needed for a selection-wide claim, not for keeping an established theorem
+attached to its own result. The governing model does not promise identical future
+outcomes: supported runtime observations likewise guard the identities actually
+read by the contributing execution, rather than every input another permitted
+execution could read. A direct existing-channel experiment confirmed that a
+completed no-read execution remains valid after an unread environment value
+changes, although the same binary can subsequently take its language-permitted
+read branch and fail. This comparison concerns applicability scope; it supplies
+no native implementation proof. It neither creates a certified-only population
+nor transfers historical support to a fresh production. Hidden build dependencies
+and unguarded runtime dispatch remain obligations, not language nondeterminism.
 
 The target is one native record carrying sufficient immutable historical evidence
 to check its claimed authority, with the existing disposable memos providing only
@@ -268,8 +281,9 @@ admits each record's own evidence against the freshly observed source/build,
 selected-implementation, rule and applicability dependencies; it does not claim to
 have inspected a new executable or repair missing producing facts. The original
 executable's deletion and disposable-cache eviction must preserve a successfully
-established selection-applicable claim. This requires an explicit evidence
-contract before implementation; existing records acquire no such authority.
+supported historical claim. The historical rule governs applicability; sufficient
+native-record representation and its implementation still land at 5.1w.2b.4c.
+Existing records acquire no such authority.
 
 ### Unestablished proof mechanism
 
@@ -281,9 +295,10 @@ path. Matching call shapes, source proximity, labels or compiler metadata close
 neither argument. The existing local native and source proofs establish neither
 complete mechanism for the ordinary consumer yet.
 
-The next work is therefore 9.4a.1's precise selection-applicability rule, followed
-by 9.4a.2's complete lowering/native bridge and 9.4a.3's consumer-sized composition
-qualification. The selected `testing.tRunner` stack-check/retry fragment is the
+The historical-applicability rule is settled at 9.4a.1. The next work is
+9.4a.2's complete actual-artifact lowering/native bridge and 9.4a.3's
+consumer-sized composition qualification. The selected `testing.tRunner`
+stack-check/retry fragment is the
 initial bridge candidate, not an approved helper or an assertion of feasibility.
 If it needs a compiler-state invariant, name that invariant and its influencing
 path before scheduling its smallest prerequisite. Do not presume that replaying
@@ -293,7 +308,7 @@ callee-replay costs require qualification against the same required population.
 9.4a remains open until these results establish the bounded implementation path;
 the lifecycle design and additional plan slots alone do not close it.
 
-The first selection constituent, at 9.4a.1a, checks a normal-return postcondition
+The compiler-origin candidate at 5.1w.2b.3b.2a.2.4 checks a normal-return postcondition
 of selected intrinsic-table construction. Fresh map replacement can eliminate
 dependence on arbitrary prior table contents; inductive projected-key summaries
 can cover all configuration branches without reconstructing their exact values.
@@ -311,7 +326,7 @@ Recovery and other feasible normal exits invalidate such an exclusion unless
 accounted for. The conditional lookup theorem uses the actual normalized key:
 the compiler's runtime-package-object special case means a raw package path alone
 is insufficient. Initialization-to-use preservation, mutable predicate targets
-and package-object association remain separate obligations at 9.4a.1b. Closing
+and package-object association remain separate obligations at 5.1w.2b.3b.2a.2.5. Closing
 the construction experiment supplies none of those facts by implication.
 
 The selected source continuation exposes a concrete preservation boundary before
@@ -336,8 +351,10 @@ frame, including disjointness from protected storage and actual indirect-target
 coverage. The existing native-frame contract keeps vDSO functions as selected
 implementations, not primitives approved by their names or ABI.
 
-At 9.4a.1b, use this boundary to decide the applicability route before expanding
-native prefixes. A deciding positive must cover the complete selected clock
+At 5.1w.2b.3b.2a.2.5, use this boundary if the actual-artifact bridge requires
+the compiler-origin route; historical-result retention alone does not require
+it. Establish that consumer need at 9.4a.2 before expanding native prefixes.
+A deciding positive must cover the complete selected clock
 call's protected-state frame on stock and custom Go, composed with the actual
 construction poststate and independently established predicate bindings. It must
 cover every feasible native arm and derive required runtime/scratch separation;
@@ -373,15 +390,16 @@ indirect-target, loop, timestamp-instruction or clock-syscall semantics.
 
 The actual selected construction still passes on both compilers; the experimental
 native-admission checks reproduce refusals, not complete clock-frame positives.
-The first refactoring obligation is therefore the checked association between a
-logical poststate and its native supporting storage, with scope and ownership
-preserved. Establish that relation's complete application path before designing
+Within this compiler-origin candidate, the first refactoring obligation is the
+checked association between a logical poststate and its native supporting storage,
+with scope and ownership preserved. Establish that relation's complete application path before designing
 a replacement storage interface. Dynamic-image acquisition and semantics remain
 separate obligations. Runtime resolver execution, pointer/mapping preservation
-through both target loads, the whole caller frame and selection-wide applicability
-are still missing. Neither decoding more clock instructions nor retaining one
-observed mapped image closes those gaps. They remain at 9.4a.1b; this experiment
-does not reopen bootstrap-prefix expansion or close the parent gate.
+through both target loads, the whole caller frame and the consuming theorem's
+applicability are still missing. Neither decoding more clock instructions nor
+retaining one observed mapped image closes those gaps. They remain at
+5.1w.2b.3b.2a.2.5; this experiment does not reopen bootstrap-prefix expansion or
+close the parent gate.
 
 The runtime-context producer audit gives a concrete cutoff. The existing rooted
 native fixtures establish the initial TLS/context/machine pointer writes and
@@ -401,6 +419,20 @@ context. A local checked ownership invariant could replace whole-bootstrap
 replay, but its establishment and preservation producer is still missing. This
 is a derivation obligation under the existing contract, not a reason to add an
 ABI-correctness or runtime-isolation assumption.
+
+A context-local ownership invariant is also insufficient. The selected
+`stackalloc` cache-hit branch pops an unsafe numeric extent from a stack cache.
+An entry model can have valid current context links and disjoint current stacks
+while its free-list head overlaps protected map support. Checking the later
+context assignments would not reject that model. This is a counterexample to
+the proposed local induction, not a reachable corruption demonstrated in Go.
+Excluding it requires allocation-instance ownership across acquisition, cache/pool
+transfer, relocation and retirement: stack pools return spans to the heap,
+retired machines release their runtime stacks, and GC can trigger stack shrinking.
+A simultaneous resource invariant can keep map support abstract, but its base,
+transition closure and actual source/native association must be checked. This
+candidate remains subject to the actual consumer-need gate above; the historical
+applicability correction grants none of its missing runtime facts.
 
 The user selected existing test/benchmark workflows as the public acceptance
 target when offered an opt-in Linux/amd64 traced scalar-call protocol. Native

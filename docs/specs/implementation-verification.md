@@ -70,6 +70,15 @@ Relevant CPU-feature or runtime-configuration inputs remain dependencies even
 when nominal source and compilation flags agree. A compiler report identifying
 a substitution is discovery data, not proof of its semantic properties.
 
+Implementation coverage follows the claim's scope. A selection-wide source claim
+must cover the implementations it ranges over. Retaining a complete proof about
+the actual historical artifact for its original execution result instead follows
+REQ-fresh-historical-implementation in [evidence.md](evidence.md); it does not
+transfer that proof to an uninspected rebuild. Every relevant implementation and
+dispatch arm within the historical claim still requires coverage, and a new
+production needs its own bound admission. This distinction supplies no missing
+source/native correspondence or runtime-selector evidence.
+
 ## Semantic authority
 
 **REQ-impl-no-approval-registry** (invariant): Semantic acceptance MUST NOT be
