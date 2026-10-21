@@ -383,6 +383,25 @@ are still missing. Neither decoding more clock instructions nor retaining one
 observed mapped image closes those gaps. They remain at 9.4a.1b; this experiment
 does not reopen bootstrap-prefix expansion or close the parent gate.
 
+The runtime-context producer audit gives a concrete cutoff. The existing rooted
+native fixtures establish the initial TLS/context/machine pointer writes and
+carry them through the checked argument prefix to the unexecuted `sysargs` call.
+These are numeric image/stack facts under retained entry premises, not a typed
+ownership world at the compiler's timing call. No checked continuation crosses
+that call and the later scheduler initialization, goroutine creation and
+resumption to reach the required boundary. In the selected source, `execute`
+assigns the running goroutine's machine link, and `gogo` installs TLS, R14 and
+the saved stack pointer. The runtime stack's saved SP is established separately
+by `mstart1`; newly allocated goroutine stacks come through `stackalloc`, and
+reused goroutines retain their own lifetime obligations. Those source locations
+identify candidate producers, not checked native facts. The main goroutine is
+unlocked from its OS thread before the application main call, so initial
+`g0`/`m0` identities cannot simply be carried forward as the compiler's current
+context. A local checked ownership invariant could replace whole-bootstrap
+replay, but its establishment and preservation producer is still missing. This
+is a derivation obligation under the existing contract, not a reason to add an
+ABI-correctness or runtime-isolation assumption.
+
 The user selected existing test/benchmark workflows as the public acceptance
 target when offered an opt-in Linux/amd64 traced scalar-call protocol. Native
 entry and source/native relation checks remain useful subordinate mechanisms,
