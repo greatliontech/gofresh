@@ -24,7 +24,7 @@ tasks:
   test:
     desc: "The full tier: fixture-driven engine runs and observability proofs (minutes; the merge gate, budget in .github/workflows/ci.yaml)"
     cmds:
-      - go test -count=1 -timeout=30m ./...
+      - go test -count=1 -timeout=30m {{.CLI_ARGS}} ./...
 
   tidy:
     desc: Tidy modules

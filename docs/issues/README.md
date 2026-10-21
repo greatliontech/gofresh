@@ -31,6 +31,7 @@ verification. The doc is deleted when its obligation resolves (git holds history
 | [attestation-keyed-record](attestation-keyed-record.md) | consolidate positive-assertion discharge plumbing; GeneralExecution supplies no third positive assertion | tooling-redesign 7.1 |
 | [registration-audit-walk-helper-unification](registration-audit-walk-helper-unification.md) | share registration shape walks without merging their proof gates | tooling-redesign 7.8 |
 | [fixture-tier-parallelism](fixture-tier-parallelism.md) | require measured benefit and explicit shared-state ownership before broader fixture scheduling | tooling-redesign 7.7 |
+| [runtime-type-parameter-rescan](runtime-type-parameter-rescan.md) | measure and remove repeated structural scans after an already-covered runtime-type mask, preserving generic and mask behavior | tooling-redesign 7.7a |
 | [memo-scope-axes](memo-scope-axes.md) | remaining memo/read/result folds and the unfulfilled per-run standard-digest cost question, without cross-generation sharing | tooling-redesign 7.8 |
 | [attribution-mask-width](attribution-mask-width.md) | measure current slice cost before changing mask width, memory or cancellation granularity | tooling-redesign 7.7 |
 | [net-url-parse-godebug-channel](net-url-parse-godebug-channel.md) | parsing stays conservative until runtime configuration and in-process mutation have sound authority | tooling-redesign 7.8 |

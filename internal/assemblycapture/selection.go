@@ -543,11 +543,11 @@ func (s *Selection) validate(ctx context.Context, m *meter) error {
 		return err
 	}
 	for path, want := range s.files {
-		got, err := readObservation(ctx, path, m)
+		matches, err := matchesObservation(ctx, path, want, m)
 		if err != nil {
 			return err
 		}
-		if !sameObservation(want, got) {
+		if !matches {
 			return fmt.Errorf("assembly capture: selected input changed: %s", path)
 		}
 	}

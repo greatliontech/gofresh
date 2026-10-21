@@ -1238,6 +1238,10 @@
     Recover Cerebro's candidate/cache identity before scoped-discovery attribution;
     preserve its selected-witness completion criterion for authorized acceptance
     at 9.3, without treating synthetic baselines as corpus completion.
+    - [ ] 7.7a Measure repeated runtime-type parameter scans for zero mask deltas
+      and remove demonstrated redundant work while preserving attributed masks,
+      generic/unsupported-shape behavior and independent RTA agreement;
+      docs/issues/runtime-type-parameter-rescan.md.
   - [ ] 7.8 Share parsing/loading/proofs under complete generation identities;
     reject decisive source/guard mismatches before unnecessary refinement.
     Preserve full-inventory requests and explicit applicability transformations;
@@ -1416,6 +1420,23 @@
                   unresolved frontier supplies no terminal projection.
                   Repair source-binder continuation ownership of the lexical
                   parent cache and verify independent sibling accounting.
+                - [ ] 9.4a.2b.3b.2a-perf Attribute recurring full-gate cost and
+                  eliminate demonstrated avoidable work before the next functional
+                  chunk. Collect per-test timing
+                  and CPU/allocation evidence from the same completed workload;
+                  distinguish compilation, loading, analysis, collection and
+                  waiting before selecting a fix. Preserve assertions, population
+                  and isolation, and retain low-cost timing evidence for later
+                  changesets. Broader fleet/performance obligations remain at 7.7.
+                  - [x] 9.4a.2b.3b.2a-perf.1 Remove duplicate full-file buffering
+                    from assembly-input validation, preserve complete observation
+                    checks, and retain timings from the ordinary full gate.
+                  - [ ] 9.4a.2b.3b.2a-perf.2 Measure shared immutable parsing/type
+                    preparation for fixed fixture rosters under one configuration,
+                    retaining distinct per-package SSA programs, exact dependency
+                    subgraphs, independent analysis and failure isolation. Land
+                    only demonstrated preparation savings and compare the full
+                    gate before resuming functional work.
                 - [ ] 9.4a.2b.3b.2b Check finite roster occurrences and actual
                   goroutine capture/signal composition through the root callback,
                   T.Run and child tRunner, retaining separate activation identities,

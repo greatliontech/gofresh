@@ -1,0 +1,57 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.BindingSet
+
+bindings {
+  requirement_id: "REQ-impl-assembly-reference"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.matchesObservation"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "f618fee79d66e85c5e55547a3d175246d5b224f2f77b9eb7ecfb824ad7065c86"
+  clause_label: "current-action-acquisition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-assembly-reference"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestObservationStreamingMatchesRetainedBytes"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "734b718f7ec10fea1afb2d3d6188732ac4aea352b28a4808ec69bac15ac401d1"
+  clause_label: "current-action-acquisition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-assembly-reference"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestObservationStreamingNamespaceAndLength"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8c8edabd4877a4e217b38089248321b23e67a92f63c799af9202df677826d16c"
+  clause_label: "current-action-acquisition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-assembly-reference"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestObservationStreamingIdentityAndResolution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "31e15d93ce40d2fc4b89dfa88d22031c9b5b05bc2774bac91ac136fc862b1702"
+  clause_label: "current-action-acquisition"
+}
+
+bindings {
+  requirement_id: "REQ-impl-assembly-reference"
+  content_hash: "d8c421a581ead8ad891b8f92c17c68500bcce77358cb135cf430950e1aed9c61"
+  source_hash: "7293a377cfa4dd88d6b2121cf9dd95db45e417a39d09aea2a68dfe1ceae3cbd2"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/assemblycapture.TestObservationStreamingCancellationAndBudget"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2b0d1be44fd84e44e71e64e5327f639e4c5a495b5f47beaa239f2c238d7f5bcd"
+  clause_label: "current-action-acquisition"
+}

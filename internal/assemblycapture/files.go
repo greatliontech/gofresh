@@ -19,6 +19,38 @@ type fileObservation struct {
 // readObservation only admits regular files and ENOENT lookup failures. An
 // inaccessible earlier candidate is never reclassified as an empty namespace.
 func readObservation(ctx context.Context, path string, m *meter) (fileObservation, error) {
+	var buf bytes.Buffer
+	o, err := observeFile(ctx, path, m, func(block []byte) { buf.Write(block) })
+	if err == nil && !o.absent {
+		o.data = buf.Bytes()
+	}
+	return o, err
+}
+
+// matchesObservation performs the same complete observation as acquisition but
+// compares bytes as they arrive. Validation needs no second retained file copy.
+// A mismatch does not stop the read or bypass cancellation, budget or stat checks.
+func matchesObservation(ctx context.Context, path string, want fileObservation, m *meter) (bool, error) {
+	remaining, equal := want.data, true
+	got, err := observeFile(ctx, path, m, func(block []byte) {
+		if !equal {
+			return
+		}
+		if len(block) > len(remaining) || !bytes.Equal(block, remaining[:len(block)]) {
+			equal = false
+			return
+		}
+		remaining = remaining[len(block):]
+	})
+	if err != nil {
+		return false, err
+	}
+	return sameObservationMetadata(want, got) && (want.absent || equal && len(remaining) == 0), nil
+}
+
+// observeFile owns the common namespace, regular-file, read, and stability
+// checks. consume borrows each block only until it returns.
+func observeFile(ctx context.Context, path string, m *meter, consume func([]byte)) (fileObservation, error) {
 	o := fileObservation{path: path}
 	if err := ctx.Err(); err != nil {
 		return o, err
@@ -48,7 +80,6 @@ func readObservation(ctx context.Context, path string, m *meter) (fileObservatio
 	if err != nil {
 		return o, err
 	}
-	var buf bytes.Buffer
 	block := make([]byte, 32768)
 	for {
 		if err := ctx.Err(); err != nil {
@@ -60,7 +91,7 @@ func readObservation(ctx context.Context, path string, m *meter) (fileObservatio
 				return o, err
 			}
 		}
-		buf.Write(block[:n])
+		consume(block[:n])
 		if err == io.EOF {
 			break
 		}
@@ -75,7 +106,6 @@ func readObservation(ctx context.Context, path string, m *meter) (fileObservatio
 	if !sameStat(o.info, after) {
 		return o, fmt.Errorf("assembly capture: input changed while reading %s", path)
 	}
-	o.data = buf.Bytes()
 	return o, nil
 }
 
@@ -84,7 +114,11 @@ func sameStat(a, b os.FileInfo) bool {
 }
 
 func sameObservation(a, b fileObservation) bool {
-	return a.path == b.path && a.absent == b.absent && (a.absent || a.resolved == b.resolved && sameStat(a.info, b.info) && bytes.Equal(a.data, b.data))
+	return sameObservationMetadata(a, b) && (a.absent || bytes.Equal(a.data, b.data))
+}
+
+func sameObservationMetadata(a, b fileObservation) bool {
+	return a.path == b.path && a.absent == b.absent && (a.absent || a.resolved == b.resolved && sameStat(a.info, b.info))
 }
 
 // inputSet installs watches before taking the observation that can authorize
@@ -133,11 +167,11 @@ func (s *inputSet) validate() error {
 		return fmt.Errorf("assembly capture: initial validation drain: %w", err)
 	}
 	for path, want := range s.files {
-		got, err := readObservation(s.ctx, path, s.m)
+		matches, err := matchesObservation(s.ctx, path, want, s.m)
 		if err != nil {
 			return fmt.Errorf("assembly capture: validation read %s: %w", path, err)
 		}
-		if !sameObservation(want, got) {
+		if !matches {
 			return fmt.Errorf("assembly capture: input or lookup changed: %s", path)
 		}
 	}
