@@ -1420,7 +1420,7 @@
                   unresolved frontier supplies no terminal projection.
                   Repair source-binder continuation ownership of the lexical
                   parent cache and verify independent sibling accounting.
-                - [ ] 9.4a.2b.3b.2a-perf Attribute recurring full-gate cost and
+                - [x] 9.4a.2b.3b.2a-perf Attribute recurring full-gate cost and
                   eliminate demonstrated avoidable work before the next functional
                   chunk. Collect per-test timing
                   and CPU/allocation evidence from the same completed workload;
@@ -1431,7 +1431,7 @@
                   - [x] 9.4a.2b.3b.2a-perf.1 Remove duplicate full-file buffering
                     from assembly-input validation, preserve complete observation
                     checks, and retain timings from the ordinary full gate.
-                  - [ ] 9.4a.2b.3b.2a-perf.2 Measure shared immutable parsing/type
+                  - [x] 9.4a.2b.3b.2a-perf.2 Measure shared immutable parsing/type
                     preparation for fixed fixture rosters under one configuration,
                     retaining distinct per-package SSA programs, exact dependency
                     subgraphs, independent analysis and failure isolation. Land

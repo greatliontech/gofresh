@@ -67,6 +67,53 @@ requires attribution and safe reuse of parsing/type preparation while preserving
 each fixture's independent program and judgments, not extrapolation from the
 file-validation benchmark.
 
+## Immutable fixture preparation
+
+Fixed fixture tables can prepare syntax and types once under one unchanged source
+and build configuration, then construct a separate SSA program for each package's
+exact initial roots and dependency closure. They do not share a union SSA program:
+that would introduce unrelated initializers and callers. Generated test-main
+membership includes its actual association with owned test variants; an ordinary
+command whose import path ends in `.test` is not that evidence.
+
+The observability and unverifiable-analysis matrices retain their 164 and 30
+cases, original order, and assertions. Their explicit helper typed loads fall
+from 80 and 28 to one each; SSA construction remains 80 and 28. Analysis results
+and failure probes remain independent. Preparation is lazy until a case executes,
+and cleanup drops both the typed generation and the latest retained SSA program.
+Source-changing and independent-load controls retain independent loading.
+
+Five exclusively coordinated, single-iteration benchmark repetitions over the
+same four fixture packages gave these medians on Go 1.27.1 linux/amd64:
+
+| Frontend preparation | Time/iteration | Allocated bytes/iteration |
+|---|---:|---:|
+| Four independent typed loads and SSA builds | 3.820 s | 2,192,112,648 |
+| One typed preparation and four separate SSA builds | 2.431 s | 1,182,494,352 |
+
+The benchmark computes no proof memos in either arm. Its approximately 36% lower
+elapsed time and 46% lower allocation concern this four-package workload.
+
+Paired diagnostic executions of the complete two matrices retained the same 196
+passing test names, including their parent tests. Combined elapsed time changed
+from 176.293 to 124.173 seconds. While each table owner remained live, an explicit
+GC followed by heap observation gave approximately 276→294 MB for the analysis
+matrix and 299→302 MB for observability. The same process's cumulative high-water
+RSS increased from 607,908 to 719,784 kB. These distinguish retained Go heap from
+peak process residency; neither includes child-process peaks. Sharing typed input
+therefore has a memory tradeoff even though allocation traffic falls. The matrix
+wall times are shared-machine observations, not a statistical whole-gate speedup
+estimate.
+
+The subsequent full JSON gate passed: root 555.085 seconds and closure 1122.285
+seconds, versus 557.099 and 1175.283 seconds in the preceding gate. The observed
+closure reduction is approximately 53 seconds; these shared-machine runs are not
+a statistical estimate of the whole-gate improvement. The two matrices took
+29.93 and 104.56 seconds in that full run, with their original cases and the new
+isolation regressions present. The remaining gate is still integration-heavy;
+retain per-test timing on future gates and profile measured regressions or dominant
+workloads rather than rerunning a full profiling suite for every change.
+
 ## Earlier investigation
 
 The root and closure packages exhausted the 30-minute plain-test package budget

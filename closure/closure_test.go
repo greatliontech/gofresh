@@ -1563,14 +1563,13 @@ func TestAnalysisReachesUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	fixtures := newFixturePrograms(t, h)
 	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
 	// retainedEffect pins a classified fact that must survive among the
 	// subject's effects when a higher-ranked diagnostic is preferred: the
 	// unix fixtures reach golang.org/x/sys/unix, whose non-toolchain assembly
 	// downgrades the subject (REQ-closure-blindspot) ahead of the file-I/O
 	// classification of the wrapper itself.
-	for _, tc := range []struct{ pkg, bench, reason, retainedEffect string }{
+	cases := []struct{ pkg, bench, reason, retainedEffect string }{
 		{"external", "BenchmarkReadFile", "file I/O", ""},
 		{"initfile", "BenchmarkInitFile", "file I/O", ""},
 		{"initcwd", "BenchmarkInitCWD", "file I/O", ""},
@@ -1601,8 +1600,19 @@ func TestAnalysisReachesUnverifiable(t *testing.T) {
 		{"filemutations", "BenchmarkWriteFile", "filesystem mutation", ""},
 		{"unixopencreate", "BenchmarkUnixOpenCreate", "filesystem mutation", ""},
 		{"mixedexternal", "BenchmarkMixedExternal", "network I/O", ""},
-	} {
+	}
+	var roster []string
+	for _, tc := range cases {
+		roster = append(roster, base+tc.pkg)
+	}
+	fixtures := newFixturePrograms(t, h, roster...)
+	transitions, previous := 0, ""
+	for _, tc := range cases {
 		t.Run(tc.pkg+"/"+tc.bench, func(t *testing.T) {
+			if previous != tc.pkg {
+				transitions++
+				previous = tc.pkg
+			}
 			fixtures.supply(t, base+tc.pkg)
 			tr, err := computeTier2Result(h, base+tc.pkg, tc.bench)
 			if err != nil {
@@ -1624,6 +1634,7 @@ func TestAnalysisReachesUnverifiable(t *testing.T) {
 			}
 		})
 	}
+	fixtures.checkPreparationCounts(t, transitions)
 }
 
 func TestTier2RetainsEveryReachedExternalEffect(t *testing.T) {
@@ -1661,9 +1672,8 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixtures := newFixturePrograms(t, h)
 	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
-	for _, tc := range []struct {
+	cases := []struct {
 		fixture, subject string
 		observable       bool
 		reason           string
@@ -1991,8 +2001,19 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// clause) — the deliberate flip of the former package-scan pin.
 		{fixture: "harnessroot", subject: "BenchmarkProd", observable: true},
 		{fixture: "mixedexternal", subject: "BenchmarkMixedExternal", reason: "subject reachability"},
-	} {
+	}
+	var roster []string
+	for _, tc := range cases {
+		roster = append(roster, base+tc.fixture)
+	}
+	fixtures := newFixturePrograms(t, h, roster...)
+	transitions, previous := 0, ""
+	for _, tc := range cases {
 		t.Run(tc.fixture+"/"+tc.subject, func(t *testing.T) {
+			if previous != tc.fixture {
+				transitions++
+				previous = tc.fixture
+			}
 			subject := Subject{Package: base + tc.fixture, Symbol: tc.subject}
 			fixtures.supply(t, subject.Package)
 			results, err := h.ComputeObservabilityBatch([]Subject{subject})
@@ -2008,6 +2029,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 			}
 		})
 	}
+	fixtures.checkPreparationCounts(t, transitions)
 }
 
 // The registration-facts sink judgment is pinned white-box for the

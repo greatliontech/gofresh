@@ -14,6 +14,8 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
+	"github.com/greatliontech/gofresh/closure/internal/compartment"
+	"github.com/greatliontech/gofresh/closure/internal/listing"
 )
 
 // Program is one package test binary's whole-program SSA with its
@@ -50,11 +52,148 @@ func loadConfigEnv(ctx context.Context, dir string, env []string, buildFlags ...
 
 // Load builds pkgPath's test-binary Program.
 func Load(ctx context.Context, dir string, env, buildFlags []string, pkgPath string) (*Program, error) {
-	roots, err := packages.Load(loadConfigEnv(ctx, dir, env, buildFlags...), pkgPath)
+	roots, err := load(ctx, dir, env, buildFlags, []string{pkgPath})
 	if err != nil {
 		return nil, fmt.Errorf("closure: load %s: %w", pkgPath, err)
 	}
 	return build(ctx, pkgPath, roots)
+}
+
+// Prepared holds one source/type generation for an explicit roster of package
+// import paths. Its private initial-root partitions retain the loader's exact
+// dependency instances; no SSA or analysis results are shared between builds.
+// The caller keeps source and effective build configuration quiescent from
+// preparation through the last consumer, and treats all returned syntax/types
+// as read-only. A new generation requires a new Prepare. Owners and consumers
+// are sequential, including analysis that lazily constructs generic methods.
+type Prepared struct {
+	roots map[string][]*packages.Package
+	errs  map[string]error
+}
+
+// Prepare loads the roster and its dependencies once, under the complete env
+// and ordered buildFlags. Input containers are copied before invoking ctx.
+// Package errors remain local to each Build's dependency closure. Load-wide
+// operational errors (including caller cancellation) refuse preparation; an
+// empty roster is invalid.
+func Prepare(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*Prepared, error) {
+	pkgPaths = append([]string(nil), pkgPaths...)
+	if len(pkgPaths) == 0 {
+		return nil, fmt.Errorf("closure: prepare requires an explicit package roster")
+	}
+	roots, err := load(ctx, dir, env, buildFlags, pkgPaths)
+	if err != nil {
+		return nil, fmt.Errorf("closure: prepare: %w", err)
+	}
+	p := &Prepared{roots: map[string][]*packages.Package{}, errs: map[string]error{}}
+	requested := make(map[string]bool, len(pkgPaths))
+	for _, path := range pkgPaths {
+		requested[path] = true
+	}
+	for _, path := range pkgPaths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if p.errs[path] != nil {
+			continue
+		}
+		var base *packages.Package
+		for _, root := range roots {
+			if root.ID == path && root.ForTest == "" {
+				base = root
+				break
+			}
+		}
+		if base == nil {
+			p.errs[path] = fmt.Errorf("closure: prepare %s: ordinary initial root absent", path)
+			continue
+		}
+		// A test-only package's ordinary root can have no GoFiles. Dir is
+		// loader metadata, never inferred from an optional source member.
+		if base.Dir == "" && len(base.Errors) == 0 {
+			p.errs[path] = fmt.Errorf("closure: prepare %s: ordinary root directory absent", path)
+			continue
+		}
+		ownVariants := map[string]*packages.Package{}
+		for _, root := range roots {
+			meta := listing.Package{ImportPath: root.ID, Name: root.Name, Dir: root.Dir, ForTest: root.ForTest}
+			if compartment.OwnVariantOf(meta, path, base.Dir) {
+				ownVariants[root.ID] = root
+			}
+		}
+		// An explicitly requested ordinary command can have the same ID as
+		// this target's generated main. The loader may refuse that collision
+		// globally; if it returned one graph, do not invent which request owns
+		// the merged identity. Neither affected root can safely be built.
+		if len(ownVariants) > 0 && requested[path+".test"] {
+			err := fmt.Errorf("closure: prepare %s: generated main identity collides with requested package %s.test", path, path)
+			p.errs[path], p.errs[path+".test"] = err, err
+			delete(p.roots, path+".test")
+			continue
+		}
+		var selected []*packages.Package
+		var main bool
+		for _, root := range roots {
+			meta := listing.Package{ImportPath: root.ID, Name: root.Name, Dir: root.Dir, ForTest: root.ForTest}
+			generated := false
+			if meta.IsGeneratedTestMainFor(path) {
+				// Name and ID only locate a candidate in a multi-root load.
+				// Actual generated mains import a target-owned test variant;
+				// an ordinary q.test command importing plain q does not.
+				for _, imported := range root.Imports {
+					if ownVariants[imported.ID] == imported {
+						generated = true
+						break
+					}
+				}
+			}
+			if root == base || ownVariants[root.ID] == root || generated {
+				selected = append(selected, root)
+			}
+			main = main || generated
+		}
+		if len(ownVariants) > 0 && !main {
+			p.errs[path] = fmt.Errorf("closure: prepare %s: generated test main absent", path)
+			continue
+		}
+		p.roots[path] = selected
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// Build constructs a fresh SSA program for a registered package, using only its
+// initial roots and their dependency closure. It retains Prepare's generation;
+// it does not re-observe files or configuration. Returned typed inputs remain
+// borrowed read-only data; SSA and analysis state belong to this build alone.
+func (p *Prepared) Build(ctx context.Context, pkgPath string) (*Program, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if p != nil {
+		if err := p.errs[pkgPath]; err != nil {
+			return nil, err
+		}
+		if roots, ok := p.roots[pkgPath]; ok {
+			return build(ctx, pkgPath, roots)
+		}
+	}
+	return nil, fmt.Errorf("closure: package %s was not prepared", pkgPath)
+}
+
+func load(ctx context.Context, dir string, env, flags, paths []string) ([]*packages.Package, error) {
+	cfg := loadConfigEnv(ctx, dir, env, flags...)
+	paths = append([]string(nil), paths...)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	roots, err := packages.Load(cfg, paths...)
+	if cancelled := ctx.Err(); cancelled != nil {
+		return nil, cancelled
+	}
+	return roots, err
 }
 
 // build builds whole-program SSA for one package's test binary from its
@@ -63,6 +202,9 @@ func Load(ctx context.Context, dir string, env, buildFlags []string, pkgPath str
 // partial program could miss reachable code and report a stale result valid
 // (REQ-fresh-sound).
 func build(ctx context.Context, pkgPath string, roots []*packages.Package) (*Program, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var errs []string
 	var all []*packages.Package
 	seen := map[*packages.Package]bool{}
@@ -232,6 +374,9 @@ func build(ctx context.Context, pkgPath string, roots []*packages.Package) (*Pro
 				addRoot(key, fn)
 			}
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return &Program{PkgPath: pkgPath, Prog: prog, Pkgs: all, Roots: funcRoots, Ambiguous: ambiguousRoots, TestMain: testMain}, nil
 }
