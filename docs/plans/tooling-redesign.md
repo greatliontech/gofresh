@@ -1315,12 +1315,14 @@
         identical future outcomes. Retain compiler-origin construction and
         preservation candidates at 5.1w.2b.3b.2a.2.4-5 only for demonstrated
         consumers of that mechanism.
-      - [ ] 9.4a.2 Qualify one complete implicit-lowering applicability bridge
-        from the actual TestScalar invocation path before more compiler startup
-        work. Use the selected testing.tRunner stack-check/retry fragment as the
-        initial candidate; bind its exact source context, emitted boundaries,
-        fast/slow successors and continuation. Establish each needed compiler-state
-        invariant or independently derive the complete native behavior. Compatible
+      - [ ] 9.4a.2 Qualify one complete actual TestScalar invocation path before
+        more compiler startup work. Use source-language invocation semantics when
+        the composition remains at that boundary; establish a complete lifting
+        relation wherever it consumes a native lemma. The selected testing.tRunner
+        stack-check/retry fragment is the native candidate: bind its exact source
+        context, emitted boundaries, fast/slow successors and continuation.
+        Establish each needed compiler-state invariant or independently derive the
+        complete native behavior. Compatible
         explicit calls, omitted inline instances, opaque slow paths and altered
         metadata must not acquire implicit-language authority. If the candidate
         cannot close, identify its exact missing theorem and reassess the route;
@@ -1332,7 +1334,32 @@
           insertion path, suspension/relocation outcomes and distinct explicit
           harness calls; reject template/metadata origin authority and unconditional
           finite-progress substitution for the language invocation model.
-        - [ ] 9.4a.2b Establish and independently check an occurrence-specific,
+        - [ ] 9.4a.2b Qualify a complete source-level invocation route before
+          extending the native stack bridge. Interpret ordinary typed invocation,
+          allocation and capture under the existing language premise; derive
+          selected explicit implementations, their effects and actual-use coverage
+          independently. Do not apply an isolated native callback theorem without
+          its native lifting obligations, or use arbitrary call results as frames.
+          - [x] 9.4a.2b.1 Add checked channel creation required by the actual T.Run
+            constructor and preserve typed field/argument transport. Retain fresh
+            identity, capacity, aliases and allocation cardinality without
+            manufacturing channel contents, synchronization, native layout or
+            goroutine execution. Qualify both actual channel operations and identify
+            the next unresolved entry-state or explicit-call obligation on stock
+            and harmless-custom source.
+          - [ ] 9.4a.2b.2 Establish construction-to-goroutine capture and runner
+            entry, including parent state and the context/cancellation closure.
+            Complete explicit callerName/runtime-inspection, synchronization and
+            clock frames at their actual uses; current scratch ownership is the
+            clock's local requirement, with allocator/cache preservation proved
+            only where the supplying ownership construction consumes it.
+          - [ ] 9.4a.2b.3 Check deferred capture and execution, exceptional outcomes,
+            completion/reporting and relevant interference over the same invocation.
+            Separate clock-value relevance from the clock call's effects. Establish
+            actual compiler replacement/dispatch coverage before lifting any source
+            claim to the producing artifact and public historical acceptance.
+        - [ ] 9.4a.2c If needed by the chosen composition, establish and independently
+          check an occurrence-specific,
           source-anchored translation/origin certificate and logical-state relation
           for the actual invocation. Bind typed context and all relevant explicit
           operations/replacements through checked transformation steps to decoded

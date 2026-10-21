@@ -117,13 +117,13 @@ func (p *sourceEffectPrefix) liveAllocation(object regionObject, tick func() err
 // occurrence chain. A completed return retains resident contents; this lookup
 // neither ends a lifetime nor supplies an escape or native-byte relation.
 func liveRegionAllocation(packet *checkedRegion, checker *regionKernel, prior *sourceEffectPrefix, object regionObject, tick func() error) (regionEffectAllocation, bool, error) {
-	if object.kind != regionAllocation || !checker.singleton(object) {
+	if object.kind != regionAllocation && object.kind != regionChannelAllocation || !checker.singleton(object) {
 		return regionEffectAllocation{}, false, nil
 	}
 	if len(packet.observations) != 1 {
 		return regionEffectAllocation{}, false, nil
 	}
-	if _, present := packet.observations[0].state.memory[object]; !present {
+	if _, present := packet.observations[0].state.memory[object]; !present && object.kind != regionChannelAllocation {
 		return regionEffectAllocation{}, false, nil
 	}
 	for {

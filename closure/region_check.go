@@ -233,7 +233,7 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 		if err := k.meter.tick(); err != nil {
 			return err
 		}
-		if v.kind == regionPointer || v.kind == regionUnsafePointer || v.kind == regionSlice || v.kind == regionMap {
+		if regionObjectReference(v) {
 			if err := rememberObject(v.location.object); err != nil {
 				return err
 			}
@@ -428,8 +428,8 @@ func (k *regionKernel) validateValue(v regionValue, depth int) error {
 		return regionError("invalid value type/depth")
 	}
 	hasLocation := v.location.object != (regionObject{}) || len(v.location.path) != 0
-	if len(v.strings) != 0 && v.kind != regionStrings || v.keys != nil && v.kind != regionMapContents || v.scalar != nil && v.kind != regionConstant || v.floatBits != 0 && v.kind != regionFloat || hasLocation && v.kind != regionPointer && v.kind != regionUnsafePointer && v.kind != regionSlice && v.kind != regionCallable && v.kind != regionMap ||
-		(v.start != 0 || v.length != 0 || v.capacity != 0) && v.kind != regionSlice || v.target != nil && v.kind != regionCallable ||
+	if len(v.strings) != 0 && v.kind != regionStrings || v.keys != nil && v.kind != regionMapContents || v.scalar != nil && v.kind != regionConstant || v.floatBits != 0 && v.kind != regionFloat || hasLocation && !regionObjectReference(v) && v.kind != regionCallable ||
+		(v.start != 0 || v.length != 0) && v.kind != regionSlice || v.capacity != 0 && v.kind != regionSlice && v.kind != regionChannel || v.target != nil && v.kind != regionCallable ||
 		len(v.environment) != 0 && v.kind != regionCallable || len(v.elements) != 0 && v.kind != regionAggregate && v.kind != regionInterface {
 		return regionError("noncanonical value payload")
 	}
@@ -444,6 +444,8 @@ func (k *regionKernel) validateValue(v regionValue, depth int) error {
 	}
 	valid := false
 	switch v.kind {
+	case regionChannel:
+		valid = k.validChannel(v)
 	case regionStrings:
 		b, ok := v.typ.Underlying().(*types.Basic)
 		valid = ok && b.Info()&types.IsString != 0 && len(v.strings) > 1 && len(v.strings) <= regionProjectionAlternatives && slices.IsSorted(v.strings) && len(slices.Compact(slices.Clone(v.strings))) == len(v.strings)
@@ -1023,17 +1025,34 @@ func (k *regionKernel) singleton(object regionObject) bool {
 	if object.kind == regionGlobal {
 		return true
 	}
-	if object.kind == regionMapAllocation {
-		a, ok := object.site.(*ssa.MakeMap)
-		info, derived := k.session.contexts[object.invocation]
-		return ok && derived && object.context == info.function && !info.repeated && !info.cycle[a.Block()] && !k.preexisting[object]
-	}
-	a, ok := object.site.(*ssa.Alloc)
 	info, derived := k.session.contexts[object.invocation]
-	if k.input.normalReturns && object.kind == regionAllocation && ok && derived && object.context == info.function && !k.preexisting[object] && k.privateAllocation(a) {
-		return true
+	if !derived || object.context != info.function || k.preexisting[object] {
+		return false
 	}
-	return object.kind == regionAllocation && ok && derived && object.context == info.function && !info.repeated && !info.cycle[a.Block()] && !k.preexisting[object]
+	var site ssa.Instruction
+	switch a := object.site.(type) {
+	case *ssa.Alloc:
+		if a == nil || object.kind != regionAllocation {
+			return false
+		}
+		if k.input.normalReturns && k.privateAllocation(a) {
+			return true
+		}
+		site = a
+	case *ssa.MakeMap:
+		if a == nil || object.kind != regionMapAllocation {
+			return false
+		}
+		site = a
+	case *ssa.MakeChan:
+		if a == nil || object.kind != regionChannelAllocation {
+			return false
+		}
+		site = a
+	default:
+		return false
+	}
+	return !info.repeated && !info.cycle[site.Block()]
 }
 
 func regionReplace(v regionValue, path []regionStep, value regionValue) regionValue {
@@ -1075,6 +1094,12 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 	set := func(value ssa.Value, result regionValue) error { return k.setValue(s, value, result) }
 	get := func(value ssa.Value) regionValue { return k.value(*s, value) }
 	switch x := instruction.(type) {
+	case *ssa.MakeChan:
+		v, err := k.makeChannel(*s, x)
+		if err != nil {
+			return err
+		}
+		return set(x, v)
 	case *ssa.MakeMap:
 		v, err := k.makeMap(s, x)
 		if err != nil {
@@ -1329,7 +1354,7 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		}
 		return set(x, regionUnknownValue(x.Type()))
 	case *ssa.ChangeType:
-		if !types.Identical(x.Type().Underlying(), x.X.Type().Underlying()) && !regionPointerChange(x.X.Type(), x.Type()) && !regionMapAliasTypes(x.X.Type(), x.Type()) {
+		if !types.Identical(x.Type().Underlying(), x.X.Type().Underlying()) && !regionPointerChange(x.X.Type(), x.Type()) && !regionMapAliasTypes(x.X.Type(), x.Type()) && !regionChannelChange(x.X.Type(), x.Type()) {
 			return regionError("unsupported representation change")
 		}
 		v := get(x.X)
@@ -1337,6 +1362,10 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		return set(x, v)
 	case *ssa.Convert:
 		v := get(x.X)
+		if regionChannelChange(x.X.Type(), x.Type()) {
+			v.typ = x.Type()
+			return set(x, v)
+		}
 		if k.input.storageModel.interpretation != regionIEEE754LittleEndian || !k.input.storageModel.valid(k.input) {
 			return regionError("unsafe bit view requires a conditional storage model")
 		}
@@ -1371,6 +1400,9 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 			if equal, known := k.pointerEquality(a, b); known {
 				return set(x, regionValue{typ: x.Type(), kind: regionConstant, scalar: constant.MakeBool(equal == (x.Op == token.EQL))})
 			}
+			if equal, known := k.channelEquality(a, b); known {
+				return set(x, regionValue{typ: x.Type(), kind: regionConstant, scalar: constant.MakeBool(equal == (x.Op == token.EQL))})
+			}
 			if a.kind != regionNil && b.kind != regionNil {
 				total, err := k.equalityTotal(x.X.Type(), true, 0, map[types.Type]bool{})
 				if err != nil {
@@ -1403,6 +1435,11 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 				return set(x, regionUnknownValue(x.Type()))
 			}
 			n = int64(len(text))
+		} else if v.kind == regionChannel {
+			if builtin.Name() == "len" {
+				return set(x, regionUnknownValue(x.Type()))
+			}
+			n = v.capacity
 		} else if v.kind == regionSlice {
 			n = v.length
 			if builtin.Name() == "cap" {
@@ -1410,7 +1447,7 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 			}
 		} else if v.kind == regionNil {
 			switch v.typ.Underlying().(type) {
-			case *types.Slice:
+			case *types.Slice, *types.Chan:
 			default:
 				return regionError("unsupported nil builtin operand")
 			}

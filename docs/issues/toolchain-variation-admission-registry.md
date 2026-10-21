@@ -294,18 +294,20 @@ Existing records acquire no such authority.
 ### Unestablished proof mechanism
 
 Compiler-bootstrap execution is a chosen applicability construction, not a
-requirement of the governing contract. Two legitimate mechanisms remain: prove
-the relevant selected lowering association and use the existing implicit-language
-premise, or independently prove the needed native behavior, including the slow
-path. Matching call shapes, source proximity, labels or compiler metadata close
-neither argument. The existing local native and source proofs establish neither
-complete mechanism for the ordinary consumer yet.
+requirement of the governing contract. A source-level invocation proof may use
+the existing language premise directly while independently covering selected
+explicit implementations and their effects. When a composition consumes native
+claims, it must instead establish the relevant selected lowering association or
+independently prove the needed native behavior, including the slow path. Matching
+call shapes, source proximity, labels or compiler metadata supply neither
+relation. The existing local native and source proofs establish no complete
+ordinary-consumer mechanism yet.
 
-The historical-applicability rule is settled at 9.4a.1. The next work is
-9.4a.2's complete actual-artifact lowering/native bridge and 9.4a.3's
-consumer-sized composition qualification. The selected `testing.tRunner`
-stack-check/retry fragment is the
-initial bridge candidate, not an approved helper or an assertion of feasibility.
+The historical-applicability rule is settled at 9.4a.1. The next work is source-level
+invocation qualification at 9.4a.2b, followed by 9.4a.3's consumer-sized composition
+qualification. The selected `testing.tRunner` stack-check/retry fragment remains
+the native-composition candidate at 9.4a.2c if the chosen proof consumes that
+boundary, not an approved helper or an assertion of feasibility.
 If it needs a compiler-state invariant, name that invariant and its influencing
 path before scheduling its smallest prerequisite. Do not presume that replaying
 the compiler from ELF entry is necessary, or that calling the alternative
@@ -378,7 +380,7 @@ emission, not this artifact's occurrence or logical-state association. The
 intrinsic-table exclusion theorem does not supply those inputs or establish this
 separate insertion path.
 
-The next deciding work at 9.4a.2b is an independently checked, source-anchored
+The native-composition candidate at 9.4a.2c is an independently checked, source-anchored
 translation/origin certificate for this occurrence. Its checked steps must bind
 the selected typed invocation, explicit operations and replacement instances,
 relevant transformation state and final decoded artifact boundaries. Its logical
@@ -392,8 +394,42 @@ implicit-origin authority. Changed native targets, spills or edges cannot borrow
 an existing certificate whose bound inputs no longer agree; a fresh independently
 checked derivation remains available for valid changed implementations. Harmless
 diagnostic metadata changes need not defeat independently established association.
-This is the minimum missing theorem, not an implemented certificate format or a
-claim that the full proof already fits a bounded derivation.
+This is the missing theorem for that native composition, not a prerequisite for
+every source-language proof, an implemented certificate format or a claim that
+the full proof already fits a bounded derivation.
+
+A source-level route at 9.4a.2b can interpret ordinary typed invocation under the
+existing language premise without reconstructing its stack machine code. It must
+actually replace the conditional native composition, rather than clear that
+composition's open obligations. Selected explicit replacements, bodyless calls
+and surrounding effects still need their own checked implementation coverage.
+An independently checked semantic derivation need not reconstruct historical
+compiler intermediate states; checking that an arbitrary compiler-source
+algorithm emits matching bytes is not such a derivation.
+
+The actual source consumer narrows the next executable work. On both stock and
+harmless-custom source, the existing region checker accepts the real
+`testing.tRunner` callback operation through the selected `TestScalar` and
+`unicode/utf16.IsSurrogate` bodies, conditional on its incoming callable relation.
+The actual generated registration supplies that callable candidate; no proof yet
+transports it to the runner. The argument can remain an arbitrary typed `*T`
+because the selected callback's failure branch is excluded. This local source
+fact supplies no prefix, deferred-work, interference or selected-native authority.
+
+Starting instead at the actual `T.Run` allocation now checks both channel
+constructions, with capacities zero and one, on stock and harmless-custom source.
+The next refusal is the unknown parent receiver at `&t.common`; the actual field
+stores beyond that expression remain unproved. The complete path still needs the
+parent, channels, context/cancellation closure and callback carried to the actual
+goroutine capture and runner entry. Supplying a conditional live `T` at the runner
+entry exposes the first explicit boundary at `internal/runtime/sys.GetCallerSP`,
+through `callerName` and `runtime.Callers`; it is not a derived incoming object.
+Normal-return checking separately refuses the runner's deferred control.
+The clock wrapper reaches bodyless `time.runtimeNow`. Its result feeds duration
+storage and reporting, including formatting before the chatty-mode branch, so
+verdict-value independence would not establish output equality or a memory frame.
+The remaining boundaries are ordered at 9.4a.2b.2–3; the local callback positive does
+not close the ordinary acceptance gate.
 
 The reassessed route therefore does not commission compiler-runtime ownership
 work merely because the emitted helper manipulates stacks. Such work is needed
@@ -539,6 +575,18 @@ A simultaneous resource invariant can keep map support abstract, but its base,
 transition closure and actual source/native association must be checked. This
 candidate remains subject to the actual consumer-need gate above; the historical
 applicability correction grants none of its missing runtime facts.
+
+This producer obligation is distinct from the clock's local frame. The selected
+clock body does not allocate, copy, retire or acquire a cached stack. Its frame
+needs the actual caller/control storage, current machine bookkeeping fields and
+current-or-g0 scratch, plus the selected vDSO or syscall footprint. A dormant
+cache extent is not an additional write performed by that call. Even mutually
+disjoint current stacks do not establish this narrower frame: a protected live
+object could occupy the spare bytes just below the saved g0 SP, and the clock's
+aligned result buffer would overwrite it. Logical allocation freshness alone
+does not associate that raw reserve with exclusive native ownership. Prove
+actual scratch/support separation at the call; traverse allocator/cache lifetime
+rules only when the chosen producer of that separation depends on them.
 
 The user selected existing test/benchmark workflows as the public acceptance
 target when offered an opt-in Linux/amd64 traced scalar-call protocol. Native

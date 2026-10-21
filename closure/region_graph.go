@@ -155,7 +155,7 @@ func (k *regionKernel) trimHeap(s *regionState) error {
 		if err := k.meter.tick(); err != nil {
 			return err
 		}
-		if v.kind == regionPointer || v.kind == regionSlice || v.kind == regionMap || v.kind == regionUnsafePointer {
+		if regionObjectReference(v) {
 			o := v.location.object
 			if !seen[o] {
 				seen[o] = true

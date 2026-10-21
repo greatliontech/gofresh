@@ -11,7 +11,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
-const regionRules = "gofresh/source-region-transport@14"
+const regionRules = "gofresh/source-region-transport@15"
 
 // This kernel is conditional on an immutable, well-typed SSA owner. Selection of
 // that owner from source/build inputs is a separate obligation. It never invokes
@@ -37,6 +37,7 @@ const (
 	regionMap
 	regionMapContents
 	regionStrings
+	regionChannel
 )
 
 type regionObjectKind uint8
@@ -48,6 +49,7 @@ const (
 	regionFormal
 	regionUnknownObject
 	regionMapAllocation
+	regionChannelAllocation
 )
 
 // Object identity includes the allocating function context. Recurrent sites are
@@ -87,6 +89,17 @@ type regionValue struct {
 	elements    []regionValue
 	keys        *regionMapKeys
 	strings     []string
+}
+
+// Object references retain their identity through entry capture and heap
+// reachability. A callable's captured values are traversed separately; its
+// optional closure-environment location is a provenance token, not a heap cell.
+func regionObjectReference(v regionValue) bool {
+	switch v.kind {
+	case regionPointer, regionUnsafePointer, regionSlice, regionMap, regionChannel:
+		return true
+	}
+	return false
 }
 
 // An absent register or object is unknown, not bottom or zero. In particular an

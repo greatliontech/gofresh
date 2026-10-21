@@ -21,7 +21,7 @@ func regionNilEquality(a, b regionValue) (bool, bool) {
 		other = b
 	}
 	switch other.kind {
-	case regionPointer, regionSlice, regionCallable, regionInterface, regionMap:
+	case regionPointer, regionSlice, regionCallable, regionInterface, regionMap, regionChannel:
 		return false, true
 	}
 	return false, false

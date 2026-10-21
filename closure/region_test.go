@@ -81,6 +81,11 @@ type regionConcreteInterface struct {
 }
 type regionConcreteResults []any
 
+type regionConcreteChannel struct {
+	site  *ssa.MakeChan
+	value chan struct{}
+}
+
 func regionConcreteCopy(value any) any {
 	if fields, ok := value.([]any); ok {
 		copy := make([]any, len(fields))
@@ -208,7 +213,7 @@ func regionConcreteZeroTyped(t types.Type, unsigned bool) any {
 			v[i] = regionConcreteZeroTyped(u.Elem(), unsigned)
 		}
 		return v
-	case *types.Pointer, *types.Signature, *types.Interface, *types.Slice:
+	case *types.Pointer, *types.Signature, *types.Interface, *types.Slice, *types.Chan:
 		return nil
 	}
 	panic("oracle unsupported type")
@@ -468,6 +473,9 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 				s.start += lo
 				s.length, s.capacity = hi-lo, max-lo
 				values[x] = s
+			case *ssa.MakeChan:
+				n := regionConcreteBound(get(x.Size), 4096, true)
+				values[x] = regionConcreteChannel{site: x, value: make(chan struct{}, n)}
 			case *ssa.MakeClosure:
 				f := regionConcreteFunction{target: x.Fn.(*ssa.Function)}
 				for _, b := range x.Bindings {
@@ -612,11 +620,21 @@ func executeRegionConcreteFrame(t testing.TB, in regionInput, globals map[*ssa.G
 					break
 				}
 				argument := get(x.Call.Args[0])
+				if channel, ok := argument.(regionConcreteChannel); ok {
+					n := len(channel.value)
+					if b.Name() == "cap" {
+						n = cap(channel.value)
+					}
+					values[x] = int64(n)
+					break
+				}
 				if text, ok := argument.(string); ok && b.Name() == "len" {
 					values[x] = int64(len(text))
 					break
 				}
-				if _, slice := x.Call.Args[0].Type().Underlying().(*types.Slice); argument == nil && slice && (b.Name() == "len" || b.Name() == "cap") {
+				_, slice := x.Call.Args[0].Type().Underlying().(*types.Slice)
+				_, channel := x.Call.Args[0].Type().Underlying().(*types.Chan)
+				if argument == nil && (slice || channel) && (b.Name() == "len" || b.Name() == "cap") {
 					values[x] = int64(0)
 					break
 				}
@@ -663,6 +681,9 @@ func regionMatchesConcrete(v regionValue, state regionState, concrete any, depth
 		return true
 	}
 	switch v.kind {
+	case regionChannel:
+		c, ok := concrete.(regionConcreteChannel)
+		return ok && c.site == v.location.object.site && int64(cap(c.value)) == v.capacity
 	case regionNil:
 		return concrete == nil
 	case regionConstant:
@@ -1294,7 +1315,7 @@ func FuzzRegionRegistrationOracle(f *testing.F) {
 		}
 		// Retain an element-field pointer across a whole-row overwrite, then
 		// read through it. This exercises both aggregate copying and stable cells.
-		text := fmt.Sprintf(`type Row[T any] struct{Name string; F T};func a(){};func b(){};func F(flag bool)[]Row[func()]{ x:=[]Row[func()]{{%s,a},{%s,b}};p:=&x[0].F;if flag{x[0]=Row[func()]{x[0].Name,b};x[1].F=a};x[0].F=*p;return x }`, strconv.Quote(a), strconv.Quote(b))
+		text := fmt.Sprintf(`type Row[T any] struct{Name string; F T; C chan struct{}};func a(){};func b(){};func F(flag bool)[]Row[func()]{ c,d:=make(chan struct{},%d),make(chan struct{},%d);x:=[]Row[func()]{{%s,a,c},{%s,b,d}};p:=&x[0].F;if flag{x[0]=Row[func()]{x[0].Name,b,d};x[1].F=a};x[0].F=*p;return x }`, len(a), len(b), strconv.Quote(a), strconv.Quote(b))
 		in := regionFixture(t, text)
 		c, _ := proveRegionFixture(t, in)
 		assertRegionCovers(t, c, executeRegionConcrete(t, in, swap))

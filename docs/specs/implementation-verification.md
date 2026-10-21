@@ -1465,6 +1465,22 @@ contracts:
   distinct. Repeated allocations cannot initialize older instances represented
   by an allocation summary.
 
+  Channel construction retains a fresh logical identity for the actual language
+  allocation and its bounded context, selected element type and direction, and
+  checked capacity in the common nonnegative signed 32-bit range. The bounded
+  capacity relation refuses unknown, negative or out-of-range capacities; it
+  does not assume successful execution
+  of an explicit runtime allocator. Copying, direction narrowing, aggregate
+  fields and captured environments preserve aliases and immutable capacity.
+  Identity equality requires established singleton cardinality; recurrent sites
+  and merged activations cannot equate their different concrete instances.
+  Checked predecessor continuity preserves existing identities without replaying
+  allocation. Channel identity and capacity establish no contents, closed state,
+  stable length, send/receive/select/close effects or concurrent-use completion.
+  They grant no addressable backing, native layout, allocation lifetime ownership
+  or separation from the current native stack. Those require independently checked
+  storage and implementation correspondence, not the implicit language operation.
+
   A projected map-key summary over-approximates every key present in the backing,
   including keys whose stored values are zero or nil. A projection used to prove
   absence respects the key type's equality; ignored fields and unavailable

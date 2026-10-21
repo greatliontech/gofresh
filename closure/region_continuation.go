@@ -102,6 +102,12 @@ func (k *regionKernel) effectTransfer(state regionState, instruction ssa.Instruc
 			return regionError("finite effect allocation is not a fresh singleton")
 		}
 		return nil
+	case *ssa.MakeChan:
+		object := regionObject{kind: regionChannelAllocation, site: x, context: k.input.root, invocation: k.invocation}
+		if !k.singleton(object) {
+			return regionError("finite effect channel allocation is not a fresh singleton")
+		}
+		return nil
 	case *ssa.FieldAddr, *ssa.IndexAddr:
 		// The ordinary typed transfer checks bounds and storage provenance;
 		// allocation emits its initializer only after deriving it there.
