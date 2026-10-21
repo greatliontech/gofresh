@@ -61,6 +61,24 @@ inputs; durable evidence retains the immutable inputs and reasoning it needs,
 not mutable analysis handles. Representation sharing changes cost, never premise
 ownership or another unit's admission.
 
+The maximal scan retains classifications over the whole selected test-binary
+source scope. Equal classifications at several sites may share one obligation:
+discharge must then cover or exclude **all** matching origins and occurrences.
+Referenced package/symbol coordinates locate candidates, not exact call sites or
+proof coverage. This grouped scope avoids duplicating the selected-source
+checker's occurrence association. Consumer-tier openness, shared-state,
+ambiguous-identity and externality obligations remain independent of the maximal
+effects and of which diagnostic is displayed. A budget cut in shared-state
+analysis does not neutralize the other obligations.
+
+Retained typed inputs mean inputs actually captured in the generation. An
+ordinary scan memo can avoid loading entirely; a roots-only load can lack a
+dependency body. Neither case supplies those missing proof inputs. A concrete
+implementation acquisition must establish its required input coverage and
+generation association before accepting claims, on cold and warm paths alike.
+Retaining a load alone establishes no selected assembly-action ownership, complete
+source/native binding or safe concurrent use of mutable analysis state.
+
 ## Proof demand and composition
 
 Start from the public judgment and identify the smallest property needed to

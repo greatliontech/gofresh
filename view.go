@@ -148,7 +148,7 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		// between uncut passes, and the view takes the cut pass's
 		// fail-closed shape for the subject (REQ-fresh-context).
 		cut := first.cut[subject] || second.cut[subject]
-		if dischargeNeutral(first.maximal[subject], cut) != dischargeNeutral(second.maximal[subject], cut) {
+		if !first.maximal[subject].equal(second.maximal[subject], cut) {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
@@ -233,8 +233,12 @@ type observationFacts struct {
 	snapshot *gotool.EnvSnapshot
 	// reader is the construction pass's reader, the snapshot's home: the
 	// bracket's constructor reads the construction snapshot through it.
-	reader                *gotool.EnvReader
-	maximal               map[Subject]closure.Closure
+	reader  *gotool.EnvReader
+	maximal map[Subject]subjectFacts
+	// source retains only typed inputs actually loaded by this generation. A
+	// warm scan memo can leave it absent or partially populated; that is not
+	// permission to acquire replacement inputs or infer implementation support.
+	source                *closure.ViewLoad
 	guards                guard.Guards
 	purity                map[Subject]string
 	vouchDischarges       map[Subject]string
@@ -421,7 +425,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if viewTestHooks.factScope != nil {
 		viewTestHooks.factScope(scope.Facts())
 	}
-	scan, _, cut, err := scanViewSubjects(ctx, hasher, scope, e.buildFlags, e.analysisBudget, packages...)
+	scan, source, cut, err := scanViewSubjects(ctx, hasher, scope, e.buildFlags, e.analysisBudget, packages...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -440,7 +444,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	if viewTestHooks.maximalBatch != nil {
 		viewTestHooks.maximalBatch()
 	}
-	computed, sources, err := hasher.ComputeMaximalBatch(requests)
+	computed, sources, err := hasher.ComputeMaximalFactsBatch(requests)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -448,7 +452,8 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		cut:                      cut,
 		snapshot:                 snapshot,
 		reader:                   reader,
-		maximal:                  make(map[Subject]closure.Closure, len(subjects)),
+		maximal:                  make(map[Subject]subjectFacts, len(subjects)),
+		source:                   source,
 		guards:                   guards,
 		purity:                   make(map[Subject]string, len(subjects)),
 		vouchDischarges:          make(map[Subject]string, len(subjects)),
@@ -487,7 +492,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		}
 	}
 	for _, subject := range subjects {
-		maximal := computed[closure.Subject{Package: subject.Package, Symbol: subject.Symbol}]
+		maximal := subjectFacts{source: computed[closure.Subject{Package: subject.Package, Symbol: subject.Symbol}]}
 		// The two consumer-tier judgments — signature dynamism and
 		// shared dynamic state — ran under the selection the Hasher
 		// resolved, so each attributes it at its own composition, as
@@ -495,9 +500,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		// below (ambiguous identity, the external directive) are no
 		// degraded judgment and carry none (REQ-closure-refusal-channels).
 		if term := openWorld[subject]; term != "" {
-			maximal.Unverifiable = true
-			maximal.Refusal = closure.OpenWorldRefusal
-			maximal.Reason = closure.AttributeSelection("subject accepts caller-supplied dynamic behavior through its "+term+" (dischargeable by bounding that type away from dynamic carriers, or by "+closure.PurityResponsibility+")", hasher.SelectionAttribution())
+			maximal.openWorld = &subjectRefusal{closure.AttributeSelection("subject accepts caller-supplied dynamic behavior through its "+term+" (dischargeable by bounding that type away from dynamic carriers, or by "+closure.PurityResponsibility+")", hasher.SelectionAttribution())}
 		}
 		if reason := scan.downgradeReason[subject]; reason != "" {
 			// A culprit the budget left unjudged names the budget: the
@@ -507,9 +510,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 			if cut[subject] {
 				reason += " (reachability unjudged: " + budgetExhausted(e.analysisBudget) + ")"
 			}
-			maximal.Unverifiable = true
-			maximal.Refusal = closure.SharedDynamicStateRefusal
-			maximal.Reason = closure.AttributeSelection(reason, hasher.SelectionAttribution())
+			maximal.sharedState = &subjectRefusal{closure.AttributeSelection(reason, hasher.SelectionAttribution())}
 		}
 		if discharges := scan.vouchDischarges[subject]; discharges != "" {
 			observation.vouchDischarges[subject] = discharges
@@ -526,18 +527,14 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 			// closure stays the sound floor (it spans every declaring
 			// variant), but no evidence can say WHICH declaration it
 			// vouches for (REQ-purity-directive).
-			maximal.Unverifiable = true
-			maximal.Refusal = closure.AmbiguousSubjectRefusal
-			maximal.Reason = "ambiguous subject identity: " + detail + "; rename one declaration to address either"
+			maximal.ambiguous = &subjectRefusal{"ambiguous subject identity: " + detail + "; rename one declaration to address either"}
 		}
 		if external[subject] {
 			// The author declared external state: unverifiable by
 			// declaration, and no purity attribution is recorded — a purity
 			// assertion confers nothing on an external-state subject
 			// (REQ-external-directive, REQ-external-precedence).
-			maximal.External = true
-			maximal.Unverifiable = true
-			maximal.Reason = "external directive"
+			maximal.external = true
 		}
 		observation.maximal[subject] = maximal
 		request := closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
@@ -579,7 +576,7 @@ func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error
 	if err := v.requireMembers([]Subject{subject}); err != nil {
 		return Fingerprint{}, err
 	}
-	return v.fingerprintLocked(subject, v.facts.maximal[subject]), nil
+	return v.fingerprintLocked(subject, v.facts.closure(subject)), nil
 }
 
 // SourceFiles returns the absolute mutable source paths whose bytes contribute
@@ -634,7 +631,7 @@ func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error
 	}
 	result := make(map[Subject]Fingerprint, len(v.subjects))
 	for _, subject := range v.subjects {
-		cl := v.facts.maximal[subject]
+		cl := v.facts.closure(subject)
 		result[subject] = v.fingerprintLocked(subject, cl)
 	}
 	return result, nil
@@ -711,7 +708,7 @@ func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
 		Reason:     disposition.Reason,
 	}
 	const assertion = "caller assertion"
-	fingerprint := v.fingerprintLocked(subject, v.facts.maximal[subject])
+	fingerprint := v.fingerprintLocked(subject, v.facts.closure(subject))
 	fingerprint.ObservationAssertion, fingerprint.ObservationProof = assertion, proof
 	fingerprint.ObservationProof.Evidence = observationProofEvidence(fingerprint)
 	return fingerprint
@@ -744,7 +741,7 @@ func (v *View) attachRuntimeState(subject Subject, fingerprint Fingerprint, stat
 	if err := v.requireMembers([]Subject{subject}); err != nil {
 		return Fingerprint{}, err
 	}
-	want := v.fingerprintLocked(subject, v.facts.maximal[subject])
+	want := v.fingerprintLocked(subject, v.facts.closure(subject))
 	if observed {
 		want = v.observedFingerprintLocked(subject)
 	}
@@ -1013,7 +1010,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 	// validation-time observation over the subset compares equal on an
 	// unchanged tree.
 	sourceFilesBySubject := make(map[Subject][]string, len(unique))
-	maximal := make(map[Subject]closure.Closure, len(unique))
+	maximal := make(map[Subject]subjectFacts, len(unique))
 	observable := make(map[Subject]closure.Observability, len(unique))
 	purity := make(map[Subject]string, len(unique))
 	vouchDischarges := make(map[Subject]string, len(unique))
@@ -1075,6 +1072,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 			snapshot:                 v.facts.snapshot,
 			reader:                   v.facts.reader,
 			maximal:                  maximal,
+			source:                   v.facts.source,
 			guards:                   v.facts.guards,
 			purity:                   purity,
 			vouchDischarges:          vouchDischarges,
@@ -1545,20 +1543,12 @@ func (v *View) compareObservationContext(ctx context.Context, observation observ
 	return v.compareFactsContext(ctx, observation.guards, observation.sourceFiles, observation.maximal, observation.purity, observation.sourceFilesBySubject, observation.fileDigests, observation.cut)
 }
 
-// dischargeNeutral is the closure with the fields the dynamic-state
-// discharge shapes cleared when cut is set — the comparison form for a
-// subject a budget cut left unjudged in either compared observation.
-func dischargeNeutral(c closure.Closure, cut bool) closure.Closure {
-	if cut {
-		c.Unverifiable, c.Reason, c.Refusal = false, "", closure.DependenceRefusal
-	}
-	return c
-}
-
 // takeCut adopts the other observation's fail-closed shape for a subject
 // it cut: the undischarged downgrade and the absent discharges.
 func (f *observationFacts) takeCut(other observationFacts, subject Subject) {
-	f.maximal[subject] = other.maximal[subject]
+	base := f.maximal[subject]
+	base.sharedState = other.maximal[subject].sharedState
+	f.maximal[subject] = base
 	delete(f.attestationDischarges, subject)
 	delete(f.packageProcessDischarges, subject)
 	if f.cut == nil {
@@ -1598,7 +1588,7 @@ func reportBudgetCut(progress func(Progress), budget time.Duration, cut int, sta
 // a discharge delta cannot occur while every compared input holds
 // (construction's paired observations still compare discharges
 // directly, where no such immutability argument is available).
-func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sourceFiles []string, maximal map[Subject]closure.Closure, purity map[Subject]string, sourceFilesBySubject map[Subject][]string, fileDigests map[string]string, cut map[Subject]bool) error {
+func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sourceFiles []string, maximal map[Subject]subjectFacts, purity map[Subject]string, sourceFilesBySubject map[Subject][]string, fileDigests map[string]string, cut map[Subject]bool) error {
 	if ctx == nil {
 		return errors.New("gofresh: nil analysis context")
 	}
@@ -1636,13 +1626,13 @@ func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sou
 		// alone carry is the analysis's unavailability, reported after
 		// every other comparison held (REQ-fresh-context).
 		cutHere := cut[subject] || v.facts.cut[subject]
-		if dischargeNeutral(maximal[subject], cutHere) != dischargeNeutral(v.facts.maximal[subject], cutHere) {
+		if !maximal[subject].equal(v.facts.maximal[subject], cutHere) {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
 			return fmt.Errorf("%w: closure for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(v.facts.sourceFilesBySubject[subject], sourceFilesBySubject[subject], v.facts.fileDigests, fileDigests))
 		}
-		if cutHere && maximal[subject] != v.facts.maximal[subject] {
+		if cutHere && !maximal[subject].equal(v.facts.maximal[subject], false) {
 			unjudged = append(unjudged, subject)
 		}
 		if purity[subject] != v.facts.purity[subject] {

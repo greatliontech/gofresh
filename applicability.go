@@ -99,7 +99,7 @@ func (v *View) prepareInertExtension(recorded Fingerprint, prior TestVariantLedg
 	refuse := func(verdict Verdict, err error) (Fingerprint, TestVariantLedger, Verdict, error) {
 		return Fingerprint{}, TestVariantLedger{}, verdict, err
 	}
-	cl := v.facts.maximal[subject]
+	cl := v.facts.closure(subject)
 	if !recorded.recognizedApplicability() || recorded.EffectiveTestVariantClosure() == "" {
 		condition := Missing
 		if !recorded.recognizedApplicability() {

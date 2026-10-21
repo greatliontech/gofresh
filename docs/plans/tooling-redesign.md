@@ -912,7 +912,7 @@
           and unsupported-implementation refusals beside ordinary test/benchmark
           acceptance. Production acquisition and composition must construct their
           evidence without test-private proof orchestration or approval entries.
-          - [ ] 5.1w.2b.4a After 9.4a.0, separate immutable selected-source/build
+          - [x] 5.1w.2b.4a After 9.4a.0, separate immutable selected-source/build
             identities and complete structured blockers from evidence-dependent
             disposition. Retain the source owner from the existing shared load;
             preserve ordinary verdicts as projections while removing the need to
@@ -935,6 +935,9 @@
               applicability. Retain the existing channel distinctions and complete
               runnable roster while removing classification-dependent snapshot
               mutation and diagnostic-text control from admission/finalization.
+              Establish the demanded source/native input coverage and coherent
+              generation association before admission when retained scan inputs
+              are absent or incomplete; cache warmth must not select authority.
           - [ ] 5.1w.2b.4c Define and implement the native record's sufficient
             historical implementation evidence and claim-specific applicability.
             Keep immutable historical proof inputs distinct from live current

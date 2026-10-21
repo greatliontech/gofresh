@@ -99,7 +99,8 @@ func TestUnauditedSelectionAttributesTierRefusals(t *testing.T) {
 		if symbol == shared.Symbol {
 			subject = shared
 		}
-		cl, ok := view.facts.maximal[subject]
+		facts, ok := view.facts.maximal[subject]
+		cl := facts.closure()
 		if !ok || !cl.Unverifiable {
 			t.Fatalf("%s = %+v, want an unverifiable maximal closure", symbol, cl)
 		}
@@ -134,7 +135,8 @@ func TestUnauditedSelectionAttributesTierRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for symbol, cl := range plain.facts.maximal {
+	for symbol, facts := range plain.facts.maximal {
+		cl := facts.closure()
 		if strings.Contains(cl.Reason, "judged under") {
 			t.Fatalf("audited selection attributed %s: %q", symbol.Symbol, cl.Reason)
 		}

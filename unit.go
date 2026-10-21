@@ -284,7 +284,7 @@ func (u *producingUnit) register(ctx context.Context, build BuildBinding, proces
 		// snapshot, not a second set of purity or closure admission rules.
 		for _, subject := range u.view.subjects {
 			fp := fingerprints[subject]
-			if decide(fp, u.view.facts.maximal[subject], u.view.guards(), runtimeinput.State{}, u.view.kind, u.view.purityMatches(fp, subject)).Status != Valid {
+			if decide(fp, u.view.facts.closure(subject), u.view.guards(), runtimeinput.State{}, u.view.kind, u.view.purityMatches(fp, subject)).Status != Valid {
 				observed[subject] = true
 			}
 		}

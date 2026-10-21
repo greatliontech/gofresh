@@ -8,14 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
 func TestMembershipRefusalsCollectOrderedSubjectsAndScope(t *testing.T) {
 	known := Subject{Package: "p", Symbol: "Known"}
 	a, b := Subject{Package: "p", Symbol: "A"}, Subject{Package: "p", Symbol: "B"}
-	v := &View{subjects: []Subject{known}, facts: &observationFacts{maximal: map[Subject]closure.Closure{known: {}}}}
+	v := &View{subjects: []Subject{known}, facts: &observationFacts{maximal: map[Subject]subjectFacts{known: {}}}}
 	for _, tc := range []struct{ request, want []Subject }{
 		{[]Subject{b, known, a, b, a}, []Subject{b, a}},
 		{[]Subject{a, a, known, b, known}, []Subject{a, b}},
@@ -53,7 +52,7 @@ func TestRecordedBatchPreparationHasDeterministicCompleteTiers(t *testing.T) {
 	good := Fingerprint{ResultKind: CodeResult}
 	wrongKind := Fingerprint{ResultKind: Measurement}
 	malformed := Fingerprint{ResultKind: Kind(99)}
-	v := &View{engine: &Engine{}, kind: CodeResult, facts: &observationFacts{maximal: map[Subject]closure.Closure{known: {}}}}
+	v := &View{engine: &Engine{}, kind: CodeResult, facts: &observationFacts{maximal: map[Subject]subjectFacts{known: {}}}}
 	work := 0
 	oldWindow := viewTestHooks.runtimeWindow
 	viewTestHooks.runtimeWindow = func() { work++ }

@@ -72,7 +72,7 @@ func applicabilityFixture(t *testing.T) (*View, Fingerprint, Subject, TestVarian
 	s := Subject{"example.com/p", "BenchmarkEnv"}
 	f := Fingerprint{MaximalClosure: "core", ToolchainContent: "stdlib", AdmissionPolicy: "audit", TestVariantClosure: "A", ClosureStrategy: ClosureStrategy, DynamicStateStrategy: DynamicStateStrategy, ResultKind: Measurement, Guards: guard.Guards{Toolchain: "go", BuildConfig: "build", Machine: "machine", RuntimeConfig: "runtime"}}
 	l := TestVariantLedger{BindingStrategy: testvariant.BindingStrategy}
-	v := &View{engine: &Engine{}, subjects: []Subject{s}, kind: Measurement, facts: &observationFacts{maximal: map[Subject]closure.Closure{s: {Hash: "core", ToolchainContent: "stdlib", AdmissionPolicy: "audit", TestVariants: "B"}}, guards: f.Guards, testVariantLedgers: map[string]TestVariantLedger{s.Package: l}}, observable: map[Subject]closure.Observability{}}
+	v := &View{engine: &Engine{}, subjects: []Subject{s}, kind: Measurement, facts: &observationFacts{maximal: map[Subject]subjectFacts{s: testSubjectFacts(closure.Closure{Hash: "core", ToolchainContent: "stdlib", AdmissionPolicy: "audit", TestVariants: "B"})}, guards: f.Guards, testVariantLedgers: map[string]TestVariantLedger{s.Package: l}}, observable: map[Subject]closure.Observability{}}
 	return v, f, s, l
 }
 
@@ -99,16 +99,18 @@ func TestInertExtensionRequiresEveryGuardAndRecognizedEvidence(t *testing.T) {
 			l.Declarations = []TestVariantDeclaration{{File: "p_test.go", Kind: "func", Name: "Removed", Hash: "h"}}
 		},
 		"external": func(v *View, f *Fingerprint, l *TestVariantLedger) {
-			for s, c := range v.facts.maximal {
+			for s := range v.facts.maximal {
+				c := v.facts.closure(s)
 				c.External = true
-				v.facts.maximal[s] = c
+				v.facts.maximal[s] = testSubjectFacts(c)
 			}
 		},
 		"unverifiable": func(v *View, f *Fingerprint, l *TestVariantLedger) {
-			for s, c := range v.facts.maximal {
+			for s := range v.facts.maximal {
+				c := v.facts.closure(s)
 				c.Unverifiable = true
 				c.Reason = "file dependence"
-				v.facts.maximal[s] = c
+				v.facts.maximal[s] = testSubjectFacts(c)
 			}
 		},
 	} {
@@ -126,9 +128,9 @@ func TestInertExtensionRequiresEveryGuardAndRecognizedEvidence(t *testing.T) {
 	for _, pure := range []bool{false, true} {
 		v, f, s, l := applicabilityFixture(t)
 		if pure {
-			c := v.facts.maximal[s]
+			c := v.facts.closure(s)
 			c.Unverifiable = true
-			v.facts.maximal[s] = c
+			v.facts.maximal[s] = testSubjectFacts(c)
 			v.facts.purity = map[Subject]string{s: "caller assertion"}
 			f.PurityAssertion = "caller assertion"
 		}
@@ -190,7 +192,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 		return newViewIn(t, env, extra...)
 	}
 	producer := newView()
-	if !producer.facts.maximal[s].Unverifiable {
+	if !producer.facts.closure(s).Unverifiable {
 		t.Fatal("sibling did not establish maximal ClassB dependence")
 	}
 	frame := runtimeinput.CaptureProducerFrame(ctx, dir, dir, runtimeinput.FrameOptions{})

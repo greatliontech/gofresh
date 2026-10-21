@@ -1,0 +1,83 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.BindingSet
+
+bindings {
+  requirement_id: "REQ-fresh-producer-view"
+  content_hash: "2421425af262da6a7b65763d35c959b8d405971da1be018a797ce40904e21c95"
+  source_hash: "b61e5471f23253c3a2b8511b0ad8321a2e019f29c6c8359882f10e3db451212f"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSubjectFactsHiddenObligations"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "936ff921ea313664b43e24fe3167c27165ef13db139d18ae4df0df4173e86a65"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-coherent-view"
+  content_hash: "14e5b0c385c14150694869b4cc51e5712bce6023051cff24cba86e18a7bd3d97"
+  source_hash: "6d9185a1e67655db4453679f0b4c60273615579e9f6e47b27203606f540e1b59"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSubjectFactsProjectionAndSiblingIsolation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f384e25da5f4e95b6f6279076c320f6ec073fb49e9162d4ac466e35ee4272d24"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-context"
+  content_hash: "2ec34b1b5d9dfa90b796b555dd94d2fc01662f829be4755cdf9c221b95d2d4ad"
+  source_hash: "918fc44cbcc3bf90e394247c7c6bcdbd7ebf7445354281a5073c1228599ead8c"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestSubjectFactsHiddenObligations"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "936ff921ea313664b43e24fe3167c27165ef13db139d18ae4df0df4173e86a65"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-coherent-view"
+  content_hash: "14e5b0c385c14150694869b4cc51e5712bce6023051cff24cba86e18a7bd3d97"
+  source_hash: "6d9185a1e67655db4453679f0b4c60273615579e9f6e47b27203606f540e1b59"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestViewBaseFactsKeepMaskedEffects"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "26e796a8dc580db4cfc417322e064045c533916256799eace91a8852bd3d6650"
+}
+
+bindings {
+  requirement_id: "REQ-closure-view-maximal"
+  content_hash: "8110fffe88dabb5be2701c7470a9a2b35e1830c2be4dea00a2468fd02a21ff6e"
+  source_hash: "87a981d1ca0d797bd67729d7cf6bced71a401900c51e23ca15eeda1736deb8a6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestComputeMaximalFactsBatchPreservesCompleteScanAndProjection"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5d82761b5678b4d8b5d243abe6f2e8ba7bc1300789315d2bc848d64e124865a0"
+  clause_label: "maximal-identity"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-coherent-view"
+  content_hash: "14e5b0c385c14150694869b4cc51e5712bce6023051cff24cba86e18a7bd3d97"
+  source_hash: "6d9185a1e67655db4453679f0b4c60273615579e9f6e47b27203606f540e1b59"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestMaximalFactsOwnTheirInputsAndProjections"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fee1d242fd12854eb8bcd21d2c51dfaf748365c275240092098e951c57a04f28"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-producer-view"
+  content_hash: "2421425af262da6a7b65763d35c959b8d405971da1be018a797ce40904e21c95"
+  source_hash: "b61e5471f23253c3a2b8511b0ad8321a2e019f29c6c8359882f10e3db451212f"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestMaximalFactsRetainHiddenBlockers"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b859c44b2bc3fe3bc46aefece1230dc11dc91d49d5f1a2627015b37792701e02"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-context"
+  content_hash: "2ec34b1b5d9dfa90b796b555dd94d2fc01662f829be4755cdf9c221b95d2d4ad"
+  source_hash: "918fc44cbcc3bf90e394247c7c6bcdbd7ebf7445354281a5073c1228599ead8c"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestComputeMaximalFactsBatchCancellationReturnsNoFacts"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f48b7f2c0c822d58e5edc0cb235b5d5cdfea47297a63b9b5dc404abf557bb069"
+}

@@ -395,11 +395,11 @@ func TestProd(t *testing.T) {
 	// fallback reason) - and the diagnostic must name the backed fact,
 	// never the fallback.
 	for _, pkg := range []string{"example.com/prop", "example.com/prop/propquiet"} {
-		unverifiable, selected, err := h.maximalUnverifiable(pkg)
+		effects, selected, err := h.maximalExternalEffects(pkg)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !unverifiable {
+		if len(effects) == 0 {
 			t.Fatalf("%s verified by hash alone: the audit must admit observation, never purity", pkg)
 		}
 		if selected == "" {

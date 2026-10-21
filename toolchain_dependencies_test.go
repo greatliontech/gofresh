@@ -246,12 +246,12 @@ func TestPolicyMismatchCannotLiftClosureRefusal(t *testing.T) {
 	}
 	// Model the stored policy of an older build after establishing the shared
 	// disposition. This is not a claim of production under that live policy.
-	cl := producer.facts.maximal[subject]
+	cl := producer.facts.closure(subject)
 	if cl.AdmissionPolicy == "" {
 		t.Fatal("current policy missing")
 	}
 	cl.AdmissionPolicy = "historical-" + cl.AdmissionPolicy
-	producer.facts.maximal[subject] = cl
+	producer.facts.maximal[subject] = testSubjectFacts(cl)
 	recorded, err := producer.CaptureObserved(t.Context(), subject)
 	if err != nil {
 		t.Fatal(err)

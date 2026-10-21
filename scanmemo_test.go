@@ -53,7 +53,7 @@ func scanOutputs(t *testing.T, view *View, subjects []Subject) map[Subject]strin
 		if err != nil {
 			t.Fatal(err)
 		}
-		out[s] = fp.MaximalClosure + "|" + fp.PurityAssertion + "|" + boolWord(view.facts.maximal[s].Unverifiable) + "|" + view.facts.maximal[s].Reason + "|" + view.facts.vouchDischarges[s] + "|" + view.facts.packageProcessDischarges[s] + "|" + view.facts.attestationDischarges[s]
+		out[s] = fp.MaximalClosure + "|" + fp.PurityAssertion + "|" + boolWord(view.facts.closure(s).Unverifiable) + "|" + view.facts.closure(s).Reason + "|" + view.facts.vouchDischarges[s] + "|" + view.facts.packageProcessDischarges[s] + "|" + view.facts.attestationDischarges[s]
 	}
 	return out
 }
@@ -83,6 +83,9 @@ func TestScanMemoServesTheWholeScanWithoutATypedLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := scanOutputs(t, cold, scanMemoSubjects)
+	if cold.facts.source == nil {
+		t.Fatal("cold construction discarded its shared typed inputs")
+	}
 	loads := 0
 	viewTestHooks.typedLoad = func() { loads++ }
 	defer func() { viewTestHooks.typedLoad = nil }()
@@ -97,6 +100,14 @@ func TestScanMemoServesTheWholeScanWithoutATypedLoad(t *testing.T) {
 	}
 	if loads != 0 {
 		t.Fatalf("the warm view paid %d typed loads", loads)
+	}
+	if warm.facts.source != nil {
+		t.Fatal("warm memo invented a typed source generation")
+	}
+	for _, subject := range scanMemoSubjects {
+		if !cold.facts.maximal[subject].equal(warm.facts.maximal[subject], false) {
+			t.Fatalf("complete base facts differ across cold/warm paths for %v", subject)
+		}
 	}
 	served, testingServed, typechecks := 0, 0, 0
 	for _, e := range events {
@@ -292,7 +303,7 @@ func TestScanMemoKeyTracksTheTestBinaryGraph(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, subject := range scanMemoSubjects {
-			if changedView.facts.maximal[subject].Hash != restoredView.facts.maximal[subject].Hash {
+			if changedView.facts.closure(subject).Hash != restoredView.facts.closure(subject).Hash {
 				t.Fatal("comment edit moved public core equivalence")
 			}
 		}

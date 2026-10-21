@@ -162,7 +162,7 @@ func (v *View) checkRecords(ctx context.Context, records []recordCheck, deferClo
 	positives := make([]ObservationAuthority, len(records))
 	hasRuntime := false
 	for i, record := range records {
-		cl := v.facts.maximal[record.Subject]
+		cl := v.facts.closure(record.Subject)
 		verdict, refused := record.refusal, record.refusal.Status != ""
 		if !refused {
 			verdict, refused = recordedEvidenceVerdict(record.Recorded, cl)
@@ -191,7 +191,7 @@ func (v *View) checkRecords(ctx context.Context, records []recordCheck, deferClo
 		if !results[i].evaluated || !record.observed {
 			continue
 		}
-		cl, rec := v.facts.maximal[record.Subject], record.Recorded
+		cl, rec := v.facts.closure(record.Subject), record.Recorded
 		pure := v.purityMatches(rec, record.Subject)
 		ordinary := decideAfterClosure(rec, cl, v.guards(), before[i], v.kind, pure)
 		if ordinary.Status == Unverifiable && positives[i].accepted() && rec.InertTestVariantApplicability != (InertTestVariantApplicability{}) && decideAfterClosureObserved(rec, cl, v.guards(), before[i], v.kind, pure, positives[i]).Status == Valid {
@@ -222,7 +222,7 @@ func (v *View) checkRecords(ctx context.Context, records []recordCheck, deferClo
 				}
 			}
 		}
-		cl, rec := v.facts.maximal[record.Subject], record.Recorded
+		cl, rec := v.facts.closure(record.Subject), record.Recorded
 		pure := v.purityMatches(rec, record.Subject)
 		verdict := decideAfterClosure(rec, cl, v.guards(), before[i], v.kind, pure)
 		if record.observed {

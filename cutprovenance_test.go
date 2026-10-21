@@ -191,14 +191,14 @@ func FuzzSiblingCutProjection(f *testing.F) {
 			data = data[:32]
 		}
 		parent := &View{facts: &observationFacts{
-			maximal: map[Subject]closure.Closure{},
+			maximal: map[Subject]subjectFacts{},
 			cut:     map[Subject]bool{},
 		}}
 		var selected []Subject
 		for i, b := range data {
 			s := Subject{Package: "example.com/property", Symbol: fmt.Sprintf("F%d", i)}
 			parent.subjects = append(parent.subjects, s)
-			parent.facts.maximal[s] = closure.Closure{Hash: fmt.Sprintf("hash%d", i), Unverifiable: true, Reason: "refusal"}
+			parent.facts.maximal[s] = testSubjectFacts(closure.Closure{Hash: fmt.Sprintf("hash%d", i), Unverifiable: true, Refusal: closure.SharedDynamicStateRefusal, Reason: "refusal"})
 			if b&1 != 0 {
 				parent.facts.cut[s] = true
 			}
@@ -226,8 +226,8 @@ func FuzzSiblingCutProjection(f *testing.F) {
 		s := selected[0]
 		current := *nested.facts
 		cl := current.maximal[s]
-		cl.Unverifiable, cl.Reason = false, ""
-		current.maximal = map[Subject]closure.Closure{s: cl}
+		cl.sharedState = nil
+		current.maximal = map[Subject]subjectFacts{s: cl}
 		current.cut = nil
 		err = nested.compareObservationContext(context.Background(), current)
 		if parent.facts.cut[s] {
@@ -239,7 +239,7 @@ func FuzzSiblingCutProjection(f *testing.F) {
 			// a cut is a real difference, not a licensed neutralization.
 			t.Fatal("uncut difference was neutralized")
 		}
-		cl.Hash = "moved"
+		cl.source.Identity.Hash = "moved"
 		current.maximal[s] = cl
 		if err := nested.compareObservationContext(context.Background(), current); !errors.Is(err, ErrViewChanged) {
 			t.Fatalf("hash movement: %v", err)

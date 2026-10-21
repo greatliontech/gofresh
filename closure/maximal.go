@@ -29,13 +29,34 @@ import (
 // each subject's maximal closure. Cache-module and standard-library inputs
 // remain represented by their existing guards.
 func (h *Hasher) ComputeMaximalBatch(subjects []Subject) (map[Subject]Closure, map[Subject][]string, error) {
+	facts, sources, err := h.ComputeMaximalFactsBatch(subjects)
+	if err != nil {
+		return nil, nil, err
+	}
+	results := make(map[Subject]Closure, len(facts))
+	for subject, fact := range facts {
+		results[subject] = fact.Closure()
+	}
+	if err := h.contextErr(); err != nil {
+		return nil, nil, err
+	}
+	return results, sources, nil
+}
+
+// ComputeMaximalFactsBatch returns caller-owned maximal identities and complete
+// conservative blocker classifications for every subject, together with the
+// mutable source paths described by ComputeMaximalBatch. Each blocker's scope is
+// the subject's whole selected test-binary source closure, not an individual
+// occurrence or a precise reachability result. One call observes one generation
+// through the same listing, source fold and effect scan as ComputeMaximalBatch.
+func (h *Hasher) ComputeMaximalFactsBatch(subjects []Subject) (map[Subject]MaximalFacts, map[Subject][]string, error) {
 	if err := h.contextErr(); err != nil {
 		return nil, nil, err
 	}
 	// One call observes one tree generation; a later call re-observes.
 	h.resetCallScope()
 	defer func() { h.contents = nil }()
-	results := make(map[Subject]Closure, len(subjects))
+	results := make(map[Subject]MaximalFacts, len(subjects))
 	sources := make(map[Subject][]string, len(subjects))
 	byPackage := make(map[string][]Subject)
 	var packages []string
@@ -63,28 +84,23 @@ func (h *Hasher) ComputeMaximalBatch(subjects []Subject) (map[Subject]Closure, m
 		if err != nil {
 			return nil, nil, err
 		}
-		unverifiable, reason, err := h.maximalUnverifiable(pkgPath)
+		effects, reason, err := h.maximalExternalEffects(pkgPath)
 		if err != nil {
 			return nil, nil, err
 		}
+		// Selection attribution belongs to the preferred closure diagnostic;
+		// the complete effect facts retain the scan's unattributed values.
+		base := newMaximalFacts(MaximalIdentity{
+			ToolchainContent: h.ToolchainContent(),
+			AdmissionPolicy:  h.AdmissionPolicy(),
+			TestVariants:     h.testVariants[pkgPath].Hash,
+		}, effects, AttributeSelection(reason, h.SelectionAttribution()))
 		for _, subject := range byPackage[pkgPath] {
-			results[subject] = Closure{
-				Hash:             maximalSubjectHash(hash, subject),
-				ToolchainContent: h.ToolchainContent(),
-				AdmissionPolicy:  h.AdmissionPolicy(),
-				TestVariants:     h.testVariants[pkgPath].Hash,
-				Unverifiable:     unverifiable,
-				// The closure tier's refusal attributes the selection it
-				// was judged under at its own composition; the effect
-				// fold beneath stays selection-keyed and unattributed
-				// (REQ-closure-refusal-channels). A verifiable closure
-				// carrying an import-candidate diagnostic needs no guard:
-				// under an unaudited selection every standard selector
-				// is an effect and the blank and dot spellings refuse,
-				// so that state exists only under an audited selection,
-				// whose attribution is empty.
-				Reason: AttributeSelection(reason, h.SelectionAttribution()),
-			}
+			// Sort the package's classification set once, but return independent
+			// caller-owned slices for each subject.
+			facts := base.Clone()
+			facts.Identity.Hash = maximalSubjectHash(hash, subject)
+			results[subject] = facts
 			sources[subject] = append([]string(nil), files...)
 		}
 		if err := h.contextErr(); err != nil {
@@ -98,15 +114,6 @@ func (h *Hasher) ComputeMaximalBatch(subjects []Subject) (map[Subject]Closure, m
 func maximalSubjectHash(packageHash string, subject Subject) string {
 	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s", len(packageHash), packageHash, len(subject.Package), subject.Package, len(subject.Symbol), subject.Symbol))
 	return hex.EncodeToString(sum[:])[:32]
-}
-
-// maximalUnverifiable conservatively scans every non-standard source file in
-// the maximal closure for the high-confidence external-dependence classes. A
-// package-wide hit applies to every subject sharing this maximal closure; the
-// safe failure direction is a spurious unverifiable verdict.
-func (h *Hasher) maximalUnverifiable(pkgPath string) (bool, string, error) {
-	effects, selected, err := h.maximalExternalEffects(pkgPath)
-	return len(effects) != 0, selected, err
 }
 
 // maximalEffectsResult memoizes one package's complete external-effect scan

@@ -114,6 +114,25 @@ isolation regressions present. The remaining gate is still integration-heavy;
 retain per-test timing on future gates and profile measured regressions or dominant
 workloads rather than rerunning a full profiling suite for every change.
 
+## Base-fact retention gate
+
+The full JSON gate after separating immutable base facts from verdict projections
+passed with root at 560.920 seconds and closure at 1132.633 seconds. The preceding
+finite-occurrence gate was 545.080 and 1114.775 seconds. Short/build/vet checks and
+targeted mutation probes overlapped part of the newer run under shared machine
+coordination; these wall times do not isolate a retention cost or establish a
+statistical regression. Classification ordering is computed once per package,
+with independently owned returned subject slices. Typed inputs are retained only
+where the existing construction load acquired them; ordinary warm scan hits still
+perform no typed load.
+
+A Python wrapper measured the same task's wall time at 1134.019 seconds and Linux
+`getrusage(RUSAGE_CHILDREN).ru_maxrss` at 12,498,096 KiB. This is a child-process
+high-water observation, not aggregate simultaneous memory, live Go heap or an
+attribution to retained views. There is no comparable preceding whole-task RSS
+sample. The raw JSON remains the source for test-level attribution; no extra full
+profiling run or benchmark was added to this structural change.
+
 ## Earlier investigation
 
 The root and closure packages exhausted the 30-minute plain-test package budget

@@ -175,7 +175,7 @@ The confirmed structural findings are:
 | Finding | Evidence and consequence | Disposition |
 |---|---|---|
 | Local proof construction is disconnected from admission. | `checkComputation` and `deriveComputationCallback` have no production callers. Callback/correspondence objects intentionally retain open initialization, use, harness and applicability obligations. More supported instructions alone cannot change public checking. | Retain the checked lemmas; drive acquisition from production-owned source and actual blocker demands at 5.1w.2b.4a/b/d. |
-| Identity and evidence-dependent disposition share the snapshot comparison. | `observeView` classifies before `BindArtifact`; `Closure` carries identities beside refusal, and view validation compares the combined value. Refining shared state would leak between units or disagree with artifact-free closing. | Separate base facts, scoped checked claims and unit/candidate admission at 5.1w.2b.4a/b. Keep the existing producing/checking state machines. |
+| Identity and evidence-dependent disposition shared the snapshot comparison. | `observeView` runs before `BindArtifact`; comparing its selected refusal with a later refined decision would disagree at closing, while mutating shared state would leak between units. | Base observations now retain identity and all conservative obligations separately from the ordinary verdict projection. Scoped checked claims and unit/candidate admission remain at 5.1w.2b.4b. Keep the existing producing/checking state machines. |
 | A chosen strong proof became the default prerequisite. | The actual callback proof is conditional; the route then follows complete activation, stack inspection and suspension/retry. Native complete-cut progress and exact state reconstruction are stronger than many effect claims, while ordinary freshness promises neither termination nor identical future outcomes. | Choose the smallest proposition needed by the consuming claim at 9.4a.2. Prefer checked inductive effect/call relations when sufficient; preserve finite replay as an optional producer. |
 | Historical support has no durable adoption path yet. | Artifact inspection owns bytes but grants no semantics; the fingerprint does not retain the new implementation derivations. Deletion/cache-eviction acceptance cannot follow from a process-local proof. | Integrate sufficient native historical evidence and candidate-local checking at 5.1w.2b.4c/d. Never store a replacement approval bit. |
 
@@ -272,16 +272,35 @@ edges have separate owners:
 
 ### Evidence ownership and applicability
 
-The lifecycle refactor separates three concepts currently combined in
-`closure.Closure`: immutable source identity, conservative implementation
-blockers, and evidence-dependent disposition. `observeView` classifies before
-`BindArtifact` can observe a producing executable; registration only retains and
-validates that artifact, while closing compares classifications as snapshot
-facts. Mutating the snapshot after artifact analysis would leak authority between
-siblings; comparing a refined closure with an artifact-free conservative closure
-would instead reject the refinement. The causal repair is immutable base facts
-plus scoped checked claims and transaction-local applicability, not a comparison
-exception or a local bypass of observer preparation.
+The lifecycle refactor separates immutable source identity, conservative
+implementation blockers and evidence-dependent disposition. Base observations
+now retain the complete maximal classification set and independent consumer-tier
+refusals; `closure.Closure` is the ordinary verdict projection. Closing compares
+the base facts, including obligations hidden by a higher-priority diagnostic.
+Only shared-state discharge is neutralized by its analysis-budget cut. Later
+scoped evidence still needs unit/candidate-local admission: `observeView` runs
+before `BindArtifact`, and registration currently only retains and validates that
+artifact. Mutating the shared base facts after artifact analysis would leak
+authority between siblings. The remaining repair is scoped checked claims and
+transaction-local applicability, not a comparison exception or a bypass of
+observer preparation.
+
+The retained maximal classifications cover every matching occurrence across the
+selected test-binary source scope; they are not a per-site inventory. A proof
+about one referenced symbol or occurrence cannot erase that whole obligation.
+Consumer-tier refusals likewise retain their whole signature/package/identity
+scope rather than treating the selected diagnostic's example as the only cause.
+The existing scan memo formats and ordinary classifications remain unchanged.
+
+The snapshot also retains the typed load actually acquired by its construction
+pass, without retaining a mutable Hasher or new SSA cache. This is not the stronger
+selected-source/native owner: ordinary warm scan hits may retain no load, and
+roots-only loading may omit dependency bodies. Lands: 5.1w.2b.4b.2/4d must select
+the concrete producing proof's required input coverage and establish its coherent
+generation association on cold and warm paths before admission. The ordinary
+zero-load warm scan contract is preserved; absent typed or native inputs grant no
+claim and cannot be supplied by an unrelated later load. No concurrency-safe
+typed-input acquisition or assembly-action ownership follows from retention alone.
 
 One evidence-selection operation must prepare the complete runnable roster's
 residual obligations. Source-only support, identity-only diagnostics, observation

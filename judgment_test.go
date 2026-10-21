@@ -50,7 +50,7 @@ func judgmentFixture(t *testing.T) (*View, Subject, Fingerprint, runtimeinput.St
 	v := &View{
 		engine: &Engine{deferredCheckClose: true, singleSubjectExecution: true, packageProcessExecution: true},
 		kind:   CodeResult, subjects: []Subject{subject},
-		facts: &observationFacts{maximal: map[Subject]closure.Closure{subject: cl}, guards: fp.Guards,
+		facts: &observationFacts{maximal: map[Subject]subjectFacts{subject: testSubjectFacts(cl)}, guards: fp.Guards,
 			purity: map[Subject]string{}, vouchDischarges: map[Subject]string{subject: "dependency.Current"},
 			attestationDischarges: map[Subject]string{subject: "dependency.Single"}, packageProcessDischarges: map[Subject]string{subject: "dependency.Package"}},
 		runtimeCurrent: func(context.Context, string, string) (runtimeinput.State, error) { return state, nil },
@@ -83,28 +83,28 @@ func TestJudgmentAuthorityAndScope(t *testing.T) {
 			f.ObservationProof.Evidence = observationProofEvidence(*f)
 		}, status: Unverifiable, cause: ClosureDependenceCause},
 		{name: "policy movement", change: func(v *View, s Subject, _ *Fingerprint) {
-			cl := v.facts.maximal[s]
+			cl := v.facts.closure(s)
 			cl.AdmissionPolicy = "new"
-			v.facts.maximal[s] = cl
+			v.facts.maximal[s] = testSubjectFacts(cl)
 		}, status: Unverifiable, cause: ClosureDependenceCause},
 		{name: "external dominates assertions", change: func(v *View, s Subject, f *Fingerprint) {
-			cl := v.facts.maximal[s]
+			cl := v.facts.closure(s)
 			cl.External = true
-			v.facts.maximal[s] = cl
+			v.facts.maximal[s] = testSubjectFacts(cl)
 			f.PurityAssertion = "caller assertion"
 			v.facts.purity[s] = "caller assertion"
 		}, status: Unverifiable, cause: ExternalDirectiveCause},
 		{name: "guard drift dominates external", change: func(v *View, s Subject, f *Fingerprint) {
-			cl := v.facts.maximal[s]
+			cl := v.facts.closure(s)
 			cl.External = true
-			v.facts.maximal[s] = cl
+			v.facts.maximal[s] = testSubjectFacts(cl)
 			f.Guards.BuildConfig = "moved"
 		}, status: Stale, cause: BuildConfigCause},
 		{name: "source mismatch skips all authority", change: func(_ *View, _ Subject, f *Fingerprint) { f.MaximalClosure = "moved" }, status: Stale, cause: ClosureCause},
 		{name: "ordinary proof needs no observation", change: func(v *View, s Subject, f *Fingerprint) {
-			cl := v.facts.maximal[s]
+			cl := v.facts.closure(s)
 			cl.Unverifiable = false
-			v.facts.maximal[s] = cl
+			v.facts.maximal[s] = testSubjectFacts(cl)
 			f.RuntimeInputs, f.RuntimeDigest = "", ""
 		}, status: Valid},
 	} {
@@ -155,7 +155,7 @@ func TestJudgmentAuthorityAndScope(t *testing.T) {
 
 func TestJudgmentDoesNotReadDiagnosticAuthority(t *testing.T) {
 	v, subject, fp, state := judgmentFixture(t)
-	cl := v.facts.maximal[subject]
+	cl := v.facts.closure(subject)
 	observed := admittedObservation(fp, subject, cl)
 	if !observed.accepted() {
 		t.Fatal("fixture has no admitted observation")
@@ -184,7 +184,7 @@ func TestJudgmentDoesNotReadDiagnosticAuthority(t *testing.T) {
 func TestJudgmentRuntimeRefusalAndWindowPrecedence(t *testing.T) {
 	for _, condition := range []CauseCondition{Changed, Unavailable} {
 		v, subject, fp, state := judgmentFixture(t)
-		cl := v.facts.maximal[subject]
+		cl := v.facts.closure(subject)
 		refused := state
 		refused.Unverifiable, refused.Reason = true, "same text"
 		proof := admittedObservation(fp, subject, cl)
@@ -224,7 +224,7 @@ func TestJudgmentRuntimeRefusalAndWindowPrecedence(t *testing.T) {
 
 func TestJudgmentGuardConditions(t *testing.T) {
 	v, subject, base, state := judgmentFixture(t)
-	cl := v.facts.maximal[subject]
+	cl := v.facts.closure(subject)
 	for _, tc := range []struct {
 		name   string
 		change func(*Fingerprint, *runtimeinput.State)
