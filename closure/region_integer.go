@@ -79,6 +79,20 @@ func regionIntegerOperation(op *ssa.BinOp) bool {
 	return false
 }
 
+// The outcome machine additionally admits exact finite arithmetic needed for
+// countdowns and recursive products. Older invariant/native rule identities do
+// not acquire that grammar through the shared typed transfer.
+func (k *regionKernel) integerOperation(op *ssa.BinOp) bool {
+	if regionIntegerOperation(op) {
+		return true
+	}
+	if k.session == nil || !k.session.finite || op == nil || op.X == nil || op.Y == nil || op.Op != token.SUB && op.Op != token.MUL {
+		return false
+	}
+	_, integer := regionIntegerKind(op.Type())
+	return integer && types.Identical(op.Type(), op.X.Type()) && types.Identical(op.Type(), op.Y.Type())
+}
+
 // scalarConstant retains the common-32-bit policy without selection, extending
 // only int/uint facts when their selected word extent is available.
 func (k *regionKernel) scalarConstant(typ types.Type, value constant.Value) bool {
@@ -98,7 +112,7 @@ func (k *regionKernel) integerBinary(op *ssa.BinOp, left, right regionValue) (re
 	if err := k.meter.tick(); err != nil {
 		return regionValue{}, err
 	}
-	if !regionIntegerOperation(op) || !types.Identical(left.typ, op.X.Type()) || !types.Identical(right.typ, op.Y.Type()) {
+	if !k.integerOperation(op) || !types.Identical(left.typ, op.X.Type()) || !types.Identical(right.typ, op.Y.Type()) {
 		return regionValue{}, regionError("unsupported integer operation or operand types")
 	}
 	width, ok := regionIntegerWidth(op.Type(), k.sizes)
@@ -116,7 +130,7 @@ func (k *regionKernel) integerBinary(op *ssa.BinOp, left, right regionValue) (re
 		return regionValue{}, err
 	}
 	var term br.Term
-	if op.Op == token.ADD {
+	if op.Op == token.ADD || op.Op == token.SUB || op.Op == token.MUL {
 		value, ok := regionReferenceWord(right, width)
 		if !ok {
 			return regionValue{}, regionError("integer addition lacks an exact right operand")
@@ -125,7 +139,28 @@ func (k *regionKernel) integerBinary(op *ssa.BinOp, left, right regionValue) (re
 		if err != nil {
 			return regionValue{}, err
 		}
-		term, err = b.Make(br.Add, sort, 0, x, y)
+		switch op.Op {
+		case token.ADD:
+			term, err = b.Make(br.Add, sort, 0, x, y)
+		case token.SUB:
+			term, err = b.Make(br.Sub, sort, 0, x, y)
+		case token.MUL:
+			// Exact multiplication is a bounded sum of shifted bit vectors. Every
+			// add/shift uses the same checked width and modular scalar evaluator.
+			term, err = b.Const(sort, 0)
+			for shift := uint64(0); value != 0 && err == nil; shift, value = shift+1, value>>1 {
+				if err = k.meter.tick(); err != nil {
+					break
+				}
+				if value&1 != 0 {
+					var part br.Term
+					part, err = b.Make(br.Shl, sort, shift, x)
+					if err == nil {
+						term, err = b.Make(br.Add, sort, 0, term, part)
+					}
+				}
+			}
+		}
 	} else {
 		count := right.scalar
 		if c, literal := op.Y.(*ssa.Const); literal {

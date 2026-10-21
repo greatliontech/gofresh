@@ -740,5 +740,24 @@ func FuzzRegionDeferCaptureOracle(f *testing.F) {
 		if want := abruptOracle(); !exact || got != int64(want) {
 			t.Fatalf("abrupt got %d/%v, actual Go %d", got, exact, want)
 		}
+		// Repeated registrations at one actual SSA site capture distinct values,
+		// while each dispatch reads the current cell, not an old heap snapshot.
+		n := int(uint8(a)%3) + 1
+		loopOracle := func() (r int) {
+			x := int(a)
+			for i := 0; i < n; i++ {
+				defer func(v int) { r = r*10 + v + x }(i)
+			}
+			x = int(b)
+			return
+		}
+		loop := fmt.Sprintf(`func F()(r int){x:=%d;for i:=0;i<%d;i++{defer func(v int){r=r*10+v+x}(i)};x=%d;return}`, a, n, b)
+		finite, _ := proveActivation(t, loop)
+		_, resumed := activationPartition(t, finite.input, uint64(uint8(b))%(finite.snapshot.transitions-1)+1)
+		equalActivations(t, finite, resumed)
+		got, exact = regionInt(resumed.outcomes[0].value)
+		if want := loopOracle(); !exact || got != int64(want) {
+			t.Fatalf("finite captures got %d/%v, actual Go %d", got, exact, want)
+		}
 	})
 }

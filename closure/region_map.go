@@ -354,7 +354,10 @@ func (k *regionKernel) makeMap(s *regionState, x *ssa.MakeMap) (regionValue, err
 			return regionValue{}, regionError("map allocation hint may panic")
 		}
 	}
-	object := regionObject{kind: regionMapAllocation, site: x, context: k.input.root, invocation: k.invocation}
+	object, err := k.constructObject(regionMapAllocation, x, 0)
+	if err != nil {
+		return regionValue{}, err
+	}
 	if err := k.writeObject(object); err != nil {
 		return regionValue{}, err
 	}

@@ -11,6 +11,9 @@ import (
 // or current-stack separation is inferred. Construction uses Go's conditional
 // normal-return contract, not a proof of allocator outcomes.
 func (k *regionKernel) channelType(object regionObject) *types.Chan {
+	if !k.validInstance(object) {
+		return nil
+	}
 	a, ok := object.site.(*ssa.MakeChan)
 	if object.kind != regionChannelAllocation || !ok || a == nil || object.context == nil || object.context.Prog != k.input.owner || a.Parent() != object.context || a.Block() == nil || len(a.Block().Instrs) > k.meter.limits.nodes {
 		return nil
@@ -58,7 +61,10 @@ func (k *regionKernel) channelConstruction(s regionState, x *ssa.MakeChan) (regi
 	if !exact || n < 0 || n > 1<<31-1 {
 		return regionValue{}, regionError("channel capacity is unknown, negative or outside the bounded int range")
 	}
-	object := regionObject{kind: regionChannelAllocation, site: x, context: k.input.root, invocation: k.invocation}
+	object, err := k.constructObject(regionChannelAllocation, x, 0)
+	if err != nil {
+		return regionValue{}, err
+	}
 	return regionValue{typ: x.Type(), kind: regionChannel, location: regionLocation{object: object}, capacity: n}, nil
 }
 

@@ -7,7 +7,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
-const regionActivationRules = "gofresh/source-activation-outcomes@2"
+const regionActivationRules = "gofresh/source-activation-outcomes@3"
 
 // The activation arm covers normal, panic and noncompletion alternatives, not
 // strict safety or native applicability. A limit is an unexecuted root boundary;
@@ -48,7 +48,7 @@ const (
 	activationRecoveryEntry
 	activationReturn
 	activationEscape
-	activationChannelSuccess
+	activationConstructionSuccess
 	activationNoncompletion
 	activationFrontier
 )
@@ -161,6 +161,9 @@ func activationKernelMeter(ctx context.Context, in regionActivationInput, meter 
 	}
 	r := in.regionInput()
 	session := newRegionCallSession(ctx, r, meter.limits)
+	session.finite = true
+	session.instances = map[regionObject]bool{}
+	session.occurrences = map[regionEffectOccurrence]bool{}
 	meter.ctx, session.meter = ctx, meter
 	k, err := newRegionContextKernel(r, session, regionInvocation{}, in.limit == nil)
 	if err == nil && !regionSourceCallBody(in.root) {
@@ -298,7 +301,7 @@ func (p *checkedRegionActivation) projectNormal(ctx context.Context, value regio
 		return nil, regionError("missing projection context")
 	}
 	meter.ctx = ctx
-	k := p.snapshot.root.kernel(&regionCallSession{meter: &meter, contexts: p.snapshot.contexts, preexisting: p.snapshot.preexisting})
+	k := p.snapshot.root.kernel(&regionCallSession{meter: &meter, contexts: p.snapshot.contexts, preexisting: p.snapshot.preexisting, finite: true, instances: p.snapshot.instances, occurrences: p.snapshot.occurrences})
 	if err := k.validateValue(want, 0); err != nil {
 		return nil, err
 	}

@@ -50,6 +50,7 @@ const (
 	regionUnknownObject
 	regionMapAllocation
 	regionChannelAllocation
+	regionSliceAllocation
 )
 
 // Object identity includes the allocating function context. Recurrent sites are
@@ -60,6 +61,10 @@ type regionObject struct {
 	site       ssa.Value
 	context    *ssa.Function
 	invocation regionInvocation
+	// Nonzero instances are issued only by the complete activation machine.
+	// These scalar coordinates carry no authority without its private ledger.
+	instance uint64
+	extent   int64
 }
 
 type regionStep struct {

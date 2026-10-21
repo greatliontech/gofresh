@@ -1680,6 +1680,63 @@ contracts:
   names or cached output heaps cannot replace this judgment. Shared evidence and
   each application retain their complete dependencies and cumulative resource
   accounts, without renewing allocation identities or resetting allowances.
+- **concurrent-source-execution** — A bounded concurrent source relation retains
+  each correlated configuration's shared logical store, distinct goroutine and
+  activation occurrences, pending communication, and activation-local deferred
+  and exceptional control. Evaluated fork operands retain their values and alias
+  identities; a new goroutine inherits neither the parent's panic nor its recovery
+  eligibility. An argument-evaluation failure precedes the fork and belongs to
+  the evaluating goroutine. A child panic never unwinds its parent's call stack.
+  Finite occurrence coverage checks actual control edges and predecessor values;
+  repetition of a static allocation or call site does not merge its dynamic
+  instances. Bounds on discovery establish neither finite execution nor fairness.
+
+  Communication uses the same established channel backing identity through every
+  alias. Construction success establishes fresh open, empty backing; an incoming
+  identity/capacity fact alone supplies no contents or closed-state evidence.
+  Buffered messages preserve order, value and sending occurrence. Blocking retains
+  already evaluated operands. Send, receive, close and select retain their actual
+  ready, blocked and exceptional alternatives; close does not discard buffered
+  values, and default requires exclusion of every ready select alternative.
+  Synchronization follows the identified language memory model's actual fork,
+  matched communication, closed-zero receive and capacity-ordering relations.
+  Exploration order, a message's value, or goroutine exit supplies no additional
+  happens-before edge. Neither waiter order nor scheduler fairness is assumed.
+
+  A precise shared-read fact requires complete relevant-access and memory-integrity
+  evidence for that read occurrence. Every potentially overlapping write, including
+  future writes and indirect corruption, is covered and independently proved to
+  happen-before or happen-after the read, or excluded. The identified memory model
+  determines the allowed visible writes; a unique justified visible value may then
+  be used.
+  Word-sized read rules cannot supply larger-value coherence without the required
+  component and representation argument. An unproved racing multiword access
+  cannot be modeled solely as a well-formed typed unknown: possible corruption
+  leaves dependent memory, control and provenance claims unsupported unless its
+  influence is independently excluded or established happens-after the claimed read.
+
+  Relevant-access discovery cannot use a read's proposed value to exclude its own
+  possible writers or establish its own integrity. Dependencies through guards,
+  addresses, callables and synchronization are acyclic and independently checked.
+  An auxiliary suffix bound may establish complete access exclusion while execution
+  remains at a frontier; it quantifies over all admitted suffix states and paths,
+  supplies no execution or termination fact, and cannot borrow a narrower cut's
+  allocation-cardinality argument for later work. Unknown calls and unestablished
+  aliases supply no preservation or integrity frame. Such occurrence-conditioned
+  read facts establish neither whole-program race freedom nor global sequential
+  consistency. External interference retains its separately established conditions.
+
+  Noncompletion of one operation or goroutine retains other goroutines and their
+  possible future effects. Process termination is a separate outcome requiring
+  its own justified scope and preceding-effect coverage; unknown scope remains a
+  frontier. Implicit language-operation noncompletion does not license arbitrary
+  logical program writes or callbacks, while physical resource and independently
+  admitted interference obligations remain separate. Root return with a live child
+  retains the complete configuration as a frontier unless an independently checked
+  rule closes the outstanding work. Complete relevant-access evidence is distinct
+  from complete activation evidence: a feasible frontier still prevents terminal
+  projection, and communication alone establishes neither callback execution nor
+  child completion.
 - **conditional-composition** — A local positive may relate registration
   construction to an actual consuming operand while retaining explicit imported
   initialization, intervening-frame, concurrency, callee, native and harness

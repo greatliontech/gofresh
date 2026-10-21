@@ -220,11 +220,11 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 	// hence before any CFG successor. Whole-function recurrence does not imply
 	// recurrence within that scope. Keep the cached function facts unchanged:
 	// children and wider continuations still use their actual cyclic graphs.
-	if !fullReturns && in.entry.block == in.use.at.block && in.entry.index <= in.use.at.index {
+	if !session.finite && !fullReturns && in.entry.block == in.use.at.block && in.entry.index <= in.use.at.index {
 		k.cycle = map[*ssa.BasicBlock]bool{}
 	}
 	// Other mid-block entries cannot skip their prefix again on a backedge.
-	if in.entry.index != 0 && k.cycle[in.entry.block] {
+	if !session.finite && in.entry.index != 0 && k.cycle[in.entry.block] {
 		return nil, regionError("mid-block entry has a backedge")
 	}
 	info := session.contexts[invocation]
@@ -346,7 +346,16 @@ func (k *regionKernel) owns(v ssa.Value) bool {
 }
 
 func (k *regionKernel) objectType(o regionObject) types.Type {
+	if !k.validInstance(o) {
+		return nil
+	}
 	switch o.kind {
+	case regionSliceAllocation:
+		a, ok := o.site.(*ssa.MakeSlice)
+		if !ok || a == nil || o.instance == 0 {
+			return nil
+		}
+		return types.NewArray(a.Type().Underlying().(*types.Slice).Elem(), o.extent)
 	case regionMapAllocation:
 		a, ok := o.site.(*ssa.MakeMap)
 		if !ok || a == nil || a.Parent() != o.context || o.context == nil || o.context.Prog != k.input.owner || a.Block() == nil || !slices.Contains(a.Block().Instrs, ssa.Instruction(a)) {
@@ -462,6 +471,9 @@ func (k *regionKernel) validateValue(v regionValue, depth int) error {
 		return regionError("invalid value type/depth")
 	}
 	hasLocation := v.location.object != (regionObject{}) || len(v.location.path) != 0
+	if hasLocation && !k.validInstance(v.location.object) {
+		return regionError("object instance lacks checked allocation authority")
+	}
 	if len(v.strings) != 0 && v.kind != regionStrings || v.keys != nil && v.kind != regionMapContents || v.scalar != nil && v.kind != regionConstant || v.floatBits != 0 && v.kind != regionFloat || hasLocation && !regionObjectReference(v) && v.kind != regionCallable ||
 		(v.start != 0 || v.length != 0) && v.kind != regionSlice || v.capacity != 0 && v.kind != regionSlice && v.kind != regionChannel || v.target != nil && v.kind != regionCallable ||
 		len(v.environment) != 0 && v.kind != regionCallable || len(v.elements) != 0 && v.kind != regionAggregate && v.kind != regionInterface {
@@ -1082,6 +1094,9 @@ func (k *regionKernel) zero(t types.Type, depth int) (regionValue, error) {
 }
 
 func (k *regionKernel) singleton(object regionObject) bool {
+	if object.instance != 0 {
+		return k.validInstance(object)
+	}
 	if object.kind == regionGlobal {
 		return true
 	}
@@ -1154,6 +1169,8 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 	set := func(value ssa.Value, result regionValue) error { return k.setValue(s, value, result) }
 	get := func(value ssa.Value) regionValue { return k.value(*s, value) }
 	switch x := instruction.(type) {
+	case *ssa.MakeSlice:
+		return regionError("slice construction requires complete activation outcomes")
 	case *ssa.MakeChan:
 		v, err := k.makeChannel(*s, x)
 		if err != nil {
@@ -1181,7 +1198,10 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		if !ok {
 			return regionError("allocation is not typed storage")
 		}
-		object := regionObject{kind: regionAllocation, site: x, context: k.input.root, invocation: k.invocation}
+		object, err := k.constructObject(regionAllocation, x, 0)
+		if err != nil {
+			return err
+		}
 		if err := k.writeObject(object); err != nil {
 			return err
 		}
@@ -1387,7 +1407,11 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		if !ok || !k.owns(target) || len(x.Bindings) != len(target.FreeVars) {
 			return regionError("unbound closure context")
 		}
-		v := regionValue{typ: x.Type(), kind: regionCallable, target: target, location: regionLocation{object: regionObject{kind: regionClosureEnvironment, site: x, context: k.input.root, invocation: k.invocation}}}
+		object, err := k.constructObject(regionClosureEnvironment, x, 0)
+		if err != nil {
+			return err
+		}
+		v := regionValue{typ: x.Type(), kind: regionCallable, target: target, location: regionLocation{object: object}}
 		for _, binding := range x.Bindings {
 			if k.escapingView(get(binding)) {
 				return regionError("storage view cannot escape through a closure")
@@ -1439,7 +1463,7 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		}
 		return k.storageViewError("unsupported numeric or unsafe pointer conversion")
 	case *ssa.BinOp:
-		if regionIntegerOperation(x) {
+		if k.integerOperation(x) {
 			value, err := k.integerBinary(x, get(x.X), get(x.Y))
 			if err != nil {
 				return err

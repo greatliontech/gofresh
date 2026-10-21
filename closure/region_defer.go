@@ -87,16 +87,18 @@ func (k *regionKernel) validateDefers(s regionDeferStack) error {
 		return regionError("invalid pending defer stack")
 	}
 	seen := map[*ssa.Defer]bool{}
+	occurrences := map[regionEffectOccurrence]bool{}
 	for _, c := range s.captures {
 		// A retained local-stack premise cannot retarget an actual registration
 		// on another frame, even when entry is after the registration itself.
 		if c.site != nil && c.site.DeferStack != nil {
 			return regionError("alternate defer stack has no checked target provenance")
 		}
-		if c.site == nil || c.site.Parent() != k.input.root || c.site.Block() == nil || !slices.Contains(c.site.Block().Instrs, ssa.Instruction(c.site)) || seen[c.site] || k.cycle[c.site.Block()] || c.registration.instruction != c.site || c.registration.invocation != k.invocation {
+		if c.site == nil || c.site.Parent() != k.input.root || c.site.Block() == nil || !slices.Contains(c.site.Block().Instrs, ssa.Instruction(c.site)) || !k.session.finite && (seen[c.site] || k.cycle[c.site.Block()]) || c.registration.instruction != c.site || c.registration.invocation != k.invocation || k.session.finite && (!k.session.occurrences[c.registration] || occurrences[c.registration]) {
 			return regionError("defer capture lacks its actual registration")
 		}
 		seen[c.site] = true
+		occurrences[c.registration] = true
 		if err := k.validateValue(c.callable, 0); err != nil {
 			return err
 		}
@@ -137,14 +139,14 @@ func (k *regionKernel) registerDeferOccurrence(s *regionState, site *ssa.Defer, 
 	if site.DeferStack != nil {
 		return regionError("alternate defer stack has no checked target provenance")
 	}
-	if k.input.normalReturns || !s.pending.known || k.cycle[site.Block()] || k.session.contexts[k.invocation].repeated {
+	if k.input.normalReturns || !s.pending.known || !k.session.finite && (k.cycle[site.Block()] || k.session.contexts[k.invocation].repeated) || k.session.finite && !k.session.occurrences[registration] {
 		return regionError("defer registration lacks bounded known activation control")
 	}
 	for _, c := range s.pending.captures {
 		if err := k.meter.tick(); err != nil {
 			return err
 		}
-		if c.site == site {
+		if c.registration == registration || !k.session.finite && c.site == site {
 			return regionError("recurrent defer registration")
 		}
 	}

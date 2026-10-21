@@ -75,6 +75,7 @@ func equalActivations(t testing.TB, whole, partitioned *checkedRegionActivation)
 // literal Go oracle separately checks the shared complete relation's meaning.
 func TestRegionActivationPartitionEquivalence(t *testing.T) {
 	cases := slices.Clone(regionActivationCases)
+	cases = append(cases, finiteActivationCases...)
 	cases = append(cases, struct{ name, source string }{"queued-channel-alternatives", `var B bool;func child(p *int)int{*p=8;c:=make(chan int,1);return cap(c)};func F()(r int){defer func(){if recover()!=nil{r+=10}}();if B{return 3};x:=1;r=child(&x);return r+x}`})
 	phases := map[activationPhase]bool{}
 	for _, tc := range cases {
@@ -284,14 +285,14 @@ func TestRegionActivationScopedFrontier(t *testing.T) {
 		t.Fatal(counts)
 	}
 	j := whole.snapshot.frontiers[0]
-	k := j.top().context.kernel(&regionCallSession{meter: &regionMeter{ctx: t.Context(), limits: defaultRegionLimits()}, contexts: whole.snapshot.contexts, preexisting: whole.snapshot.preexisting})
+	k := j.top().context.kernel(&regionCallSession{meter: &regionMeter{ctx: t.Context(), limits: defaultRegionLimits()}, contexts: whole.snapshot.contexts, preexisting: whole.snapshot.preexisting, finite: true, instances: whole.snapshot.instances, occurrences: whole.snapshot.occurrences})
 	call := regionInstruction(in.limit.at).(*ssa.Call)
 	p := k.value(j.state(), call.Call.Args[0])
 	localEffectInteger(t, j.heap[p.location.object], 9)
 	if !k.singleton(p.location.object) {
 		t.Fatal("child allocation lost singleton continuity")
 	}
-	if !whole.snapshot.functions[in.root].cycle[in.entry.block] || len(whole.snapshot.contexts[regionInvocation{}].cycle) != 0 {
+	if !whole.snapshot.functions[in.root].cycle[in.entry.block] || !whole.snapshot.contexts[regionInvocation{}].cycle[in.entry.block] {
 		t.Fatal("scope changed whole-function recurrence")
 	}
 	for cut := uint64(1); cut < whole.snapshot.transitions; cut++ {
@@ -331,8 +332,8 @@ func TestRegionActivationScopedFrontier(t *testing.T) {
 		}
 	}
 	cyclic := activationScopedFixture(t, `func child()*int{for{p:=new(int);if p!=nil{return p}}};func before(){};func Stop(*int){};func F(){for{before();p:=child();Stop(p)}}`)
-	if p, err := proposeRegionActivation(t.Context(), cyclic, defaultRegionLimits()); err == nil || p != nil {
-		t.Fatal("root segment erased child recurrence")
+	if p := activationWhole(t, cyclic); len(p.snapshot.frontiers) != 1 || !p.snapshot.functions[cyclic.root.Pkg.Func("child")].cycle[cyclic.root.Pkg.Func("child").Blocks[1]] {
+		t.Fatal("finite child did not retain its actual cyclic graph")
 	}
 }
 
@@ -351,9 +352,7 @@ func TestRegionActivationRetainsEarlierAliases(t *testing.T) {
 	old := in.root.Pkg.Members["old"].(*ssa.Global)
 	in.initial.memory = map[regionObject]regionValue{object: {typ: types.Typ[types.Int], kind: regionConstant, scalar: constant.MakeInt64(1)}, {kind: regionGlobal, site: old}: {typ: allocation.Type(), kind: regionPointer, location: regionLocation{object: object}}}
 	whole := activationWhole(t, in)
-	if whole.snapshot.frontiers[0].heap[object].kind != regionUnknown {
-		t.Fatal("new instance reset earlier aliases")
-	}
+	localEffectInteger(t, whole.snapshot.frontiers[0].heap[object], 1)
 	_, after := activationPartition(t, in, whole.snapshot.transitions/2)
 	equalActivations(t, whole, after)
 }

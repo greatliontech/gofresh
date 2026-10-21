@@ -53,6 +53,9 @@ type regionCallProof struct {
 }
 
 type regionCallSession struct {
+	finite       bool
+	instances    map[regionObject]bool
+	occurrences  map[regionEffectOccurrence]bool
 	exceptional  map[regionExcludedContinuation]bool
 	dependencies map[*regionCallProof]map[*regionCallProof]bool
 	suspended    []regionState
@@ -124,9 +127,8 @@ func (k *regionKernel) invocationFor(call ssa.CallInstruction, target *ssa.Funct
 // dispatch is the actual instruction causing a drain, including a checked
 // exceptional transfer. It is never a fabricated ordinary CFG edge.
 func (k *regionKernel) invocationDispatch(call ssa.CallInstruction, target *ssa.Function, capture *regionDeferredCall, dispatch ssa.Instruction) (regionInvocation, error) {
-	// Finite cyclic call sites remain refused. Consequently the existing actual
-	// call string is injective over admitted activations; the exact caller event
-	// binds proof applications without a second activation-identity mechanism.
+	// Strict evidence retains its static call policy. The activation arm instead
+	// derives a distinct context from each actual checked dispatch occurrence.
 	invoking := ssa.Instruction(call)
 	if capture != nil {
 		invoking = dispatch
@@ -153,6 +155,16 @@ func (k *regionKernel) invocationDispatch(call ssa.CallInstruction, target *ssa.
 		id.path += fmt.Sprintf("/defer:%d:%d:%d", capture.registration.ordinal, dispatch.Block().Index, slices.Index(dispatch.Block().Instrs, dispatch))
 	}
 	facts := regionContextFacts{function: target, repeated: parent.repeated || k.cycle[call.Block()], depth: parent.depth + 1, deferred: parent.deferred || capture != nil}
+	if k.session.finite {
+		if k.current.instruction != invoking || k.current.invocation != k.invocation || !k.session.occurrences[k.current] {
+			return regionInvocation{}, regionError("activation call lacks checked dispatch occurrence")
+		}
+		if capture != nil && !k.session.occurrences[capture.registration] {
+			return regionInvocation{}, regionError("activation defer lacks checked registration occurrence")
+		}
+		id.path += fmt.Sprintf("/occ:%d", k.current.ordinal)
+		facts.repeated = false
+	}
 	// Normal-return summaries intentionally merge activations. Escaping objects
 	// are summaries; only independently proved activation-local storage may be
 	// strongly initialized. The strict occurrence arm retains exact call strings.
@@ -417,10 +429,23 @@ func (k *regionKernel) invoke(call ssa.CallInstruction, caller regionState, call
 	return returned, nil
 }
 
-// callEntry is shared by strict, normal-return and activation-outcome checking.
-// It binds actual values to the selected body, retaining the current shared heap
-// and establishing only the child's fresh local defer stack.
+// callEntry applies the strict and normal-return recursion policy before binding
+// actual values. Those arms require induction for an active recursive component.
 func (k *regionKernel) callEntry(caller regionState, callable regionValue, actual []regionValue) (regionState, error) {
+	if k.session.active[callable.target] {
+		return regionState{}, regionError("recursive call component has no inductive call proof")
+	}
+	if len(k.session.active) >= k.meter.limits.depth {
+		return regionState{}, regionError("call stack depth exhausted")
+	}
+	return k.bindCallEntry(caller, callable, actual)
+}
+
+// Binding is independent of the caller's coverage policy. The finite machine
+// closes actual recursive activations; the invariant arm requires induction.
+// Actual arguments and captures enter the selected body over the current shared
+// heap, with only the child's local deferred stack freshly empty.
+func (k *regionKernel) bindCallEntry(caller regionState, callable regionValue, actual []regionValue) (regionState, error) {
 	if err := k.validateValue(callable, 0); err != nil {
 		return regionState{}, err
 	}
@@ -428,12 +453,6 @@ func (k *regionKernel) callEntry(caller regionState, callable regionValue, actua
 		return regionState{}, regionError("call target has no supported ordinary source body")
 	}
 	target := callable.target
-	if k.session.active[target] {
-		return regionState{}, regionError("recursive call component has no inductive call proof")
-	}
-	if len(k.session.active) >= k.meter.limits.depth {
-		return regionState{}, regionError("call stack depth exhausted")
-	}
 	if len(actual) != len(target.Params) || len(callable.environment) != len(target.FreeVars) {
 		return regionState{}, regionError("actual call arguments or closure environment are incomplete")
 	}

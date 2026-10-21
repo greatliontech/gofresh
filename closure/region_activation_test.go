@@ -69,13 +69,15 @@ func TestRegionActivationGoOracle(t *testing.T) {
 		t.Skip("compile and execute literal Go activation oracle")
 	}
 	var text strings.Builder
+	cases := append(slices.Clone(regionActivationCases), finiteActivationCases...)
+	cases = append(cases, finiteChannelCases...)
 	text.WriteString("package main\nimport \"fmt\"\n")
-	for i, tc := range regionActivationCases {
+	for i, tc := range cases {
 		text.WriteString(strings.Replace(tc.source, "func F()", fmt.Sprintf("func case%d()", i), 1) + "\n")
 	}
 	text.WriteString(`func observe(f func()int)(r int,p bool,payload int){defer func(){if v:=recover();v!=nil{p=true;payload=v.(int)}}();r=f();return}`)
 	text.WriteString("\nfunc main(){\n")
-	for i := range regionActivationCases {
+	for i := range cases {
 		fmt.Fprintf(&text, "fmt.Println(observe(case%d))\n", i)
 	}
 	text.WriteString("}\n")
@@ -88,10 +90,10 @@ func TestRegionActivationGoOracle(t *testing.T) {
 		t.Fatalf("Go oracle: %v\n%s", err, output)
 	}
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-	if len(lines) != len(regionActivationCases) {
+	if len(lines) != len(cases) {
 		t.Fatalf("oracle results: %s", output)
 	}
-	for i, tc := range regionActivationCases {
+	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			fields := strings.Fields(lines[i])
 			if len(fields) != 3 {
@@ -111,6 +113,42 @@ func TestRegionActivationGoOracle(t *testing.T) {
 			_, partitioned := activationPartition(t, packet.input, packet.snapshot.transitions/2)
 			equalActivations(t, packet, partitioned)
 			packet = partitioned
+			if tc.name == "finite-slice-recovered" {
+				values := map[int64]int{}
+				stopped := 0
+				for _, out := range packet.outcomes {
+					if out.kind == activationStopped {
+						stopped++
+						continue
+					}
+					n, exact := regionInt(out.value)
+					if out.kind != activationNormal || !exact {
+						t.Fatal("slice recovery failed to retain precise normal alternatives")
+					}
+					values[n]++
+				}
+				if panics || want != 2 || len(values) != 3 || values[want] != 1 || values[9] != 1 || values[0] != 1 || stopped != 1 {
+					t.Fatalf("compiled success or complete recovered slice outcomes differ: Go=%d values=%v stopped=%d", want, values, stopped)
+				}
+				return
+			}
+			if strings.HasPrefix(tc.name, "finite-channel-") || tc.name == "finite-slice-alias" {
+				counts := [3]int{}
+				for _, out := range packet.outcomes {
+					counts[out.kind]++
+					if out.kind == activationNormal {
+						localEffectInteger(t, out.value, uint64(want))
+					}
+				}
+				allocations := 2
+				if tc.name == "finite-channel-three" || tc.name == "finite-slice-alias" {
+					allocations = 3
+				}
+				if panics || counts != [3]int{1, allocations, allocations} {
+					t.Fatalf("compiled construction result or complete alternatives differ: %v", counts)
+				}
+				return
+			}
 			if len(packet.outcomes) != 1 {
 				t.Fatalf("unexpected terminal alternatives: %+v", packet.outcomes)
 			}

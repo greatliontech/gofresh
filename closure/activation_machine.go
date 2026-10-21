@@ -91,6 +91,8 @@ type activationSnapshot struct {
 	contexts    map[regionInvocation]regionContextFacts
 	functions   map[*ssa.Function]regionFunctionFacts
 	preexisting map[regionObject]bool
+	instances   map[regionObject]bool
+	occurrences map[regionEffectOccurrence]bool
 	transitions uint64
 	usage       regionMeter
 }
@@ -178,7 +180,9 @@ func continueActivation(ctx context.Context, prior *checkedRegionActivation, sto
 	s.contexts = maps.Clone(s.contexts)
 	s.functions = maps.Clone(s.functions)
 	s.preexisting = maps.Clone(s.preexisting)
-	for range len(s.events) + len(s.calls) + len(s.outcomes) + len(s.contexts) + len(s.functions) + len(s.preexisting) {
+	s.instances = maps.Clone(s.instances)
+	s.occurrences = maps.Clone(s.occurrences)
+	for range len(s.events) + len(s.calls) + len(s.outcomes) + len(s.contexts) + len(s.functions) + len(s.preexisting) + len(s.instances) + len(s.occurrences) {
 		if err := meter.tick(); err != nil {
 			return nil, nil, err
 		}
@@ -189,6 +193,7 @@ func continueActivation(ctx context.Context, prior *checkedRegionActivation, sto
 	meter.ctx = ctx
 	session := newRegionCallSession(ctx, in.regionInput(), meter.limits)
 	session.meter, session.contexts, session.functions, session.preexisting = &meter, s.contexts, s.functions, s.preexisting
+	session.finite, session.instances, session.occurrences = true, s.instances, s.occurrences
 	m := &activationMachine{activationSnapshot: s, session: session}
 	if p != nil {
 		if err := sameActivationInput(s.root.kernel(session), in, p.input); err != nil {
@@ -201,6 +206,7 @@ func continueActivation(ctx context.Context, prior *checkedRegionActivation, sto
 func (m *activationMachine) publish() (*checkedRegionActivation, error) {
 	s := m.activationSnapshot
 	s.contexts, s.functions, s.preexisting = m.session.contexts, m.session.functions, m.session.preexisting
+	s.instances, s.occurrences = m.session.instances, m.session.occurrences
 	// Inspection fields are owned projections, never aliases of the authenticated
 	// payload. In particular, copying an aggregate value must not let a consumer
 	// rewrite the checked outcome by modifying its elements or a recovered payload.
@@ -247,6 +253,13 @@ func (m *activationMachine) publish() (*checkedRegionActivation, error) {
 }
 
 func (m *activationMachine) run(stop uint64) error {
+	// Each checked transition extends the execution tree, even when its static
+	// instruction repeats. Jobs retain whole correlated states, and branchEdges
+	// supplies every feasible actual successor with simultaneous predecessor phi
+	// values. There are no edges back to an earlier occurrence. On exhaustion of
+	// work, reverse transition order is a well-founded rank and the occurrence
+	// states at each static boundary form its covering invariant. A requested
+	// pause retains the residual jobs; budget exhaustion never closes them.
 	if stop > uint64(m.session.meter.limits.nodes) {
 		return regionError("activation stop exceeds bounded transition inventory")
 	}
@@ -292,6 +305,10 @@ func (m *activationMachine) event(k *regionKernel, ins ssa.Instruction, rule reg
 	}
 	o := regionEffectOccurrence{instruction: ins, invocation: k.invocation, ordinal: uint64(len(m.events))}
 	m.events = append(m.events, e)
+	if rule == activationStep || rule == activationCall {
+		m.session.occurrences[o] = true
+		k.current = o
+	}
 	return o, nil
 }
 
@@ -320,12 +337,6 @@ func (m *activationMachine) step() error {
 	if f.depth > m.session.meter.limits.depth {
 		return regionError("activation path depth exhausted")
 	}
-	// Active calls are ancestry of this alternative, not the union of queued
-	// siblings. A shared mutable kernel would silently retain the wrong ancestry.
-	m.session.active = make(map[*ssa.Function]bool, len(j.frames))
-	for _, frame := range j.frames {
-		m.session.active[frame.context.input.root] = true
-	}
 	k := f.context.kernel(m.session)
 	switch f.control.phase {
 	case activationExecute:
@@ -351,8 +362,8 @@ func (m *activationMachine) execute(k *regionKernel, j activationJob) error {
 	f := j.top()
 	at := f.control.at
 	ins := regionInstruction(at)
-	if ins == nil || k.cycle[at.block] {
-		return regionError("activation has an invalid boundary or reachable cycle")
+	if ins == nil {
+		return regionError("activation has an invalid boundary")
 	}
 	if len(j.frames) == 1 && m.input.limit != nil && at == m.input.limit.at {
 		if _, err := m.event(k, ins, activationFrontier, 0, nil); err != nil {
@@ -415,34 +426,8 @@ func (m *activationMachine) execute(k *regionKernel, j activationJob) error {
 			return regionError("explicit nil panic has no selected panic-nil semantics")
 		}
 		return m.beginPanic(k, j, payload)
-	case *ssa.MakeChan:
-		value, err := k.channelConstruction(s, x)
-		if err != nil {
-			return err
-		}
-		stopped, err := cloneActivationJob(j, k.meter)
-		if err != nil {
-			return err
-		}
-		panicking, err := cloneActivationJob(j, k.meter)
-		if err != nil {
-			return err
-		}
-		stopped.top().control.phase = activationStopAlternative
-		panicking.top().control.phase = activationPanicAlternative
-		if err := m.push(stopped); err != nil {
-			return err
-		}
-		if err := m.push(panicking); err != nil {
-			return err
-		}
-		if err := k.setValue(&s, x, value); err != nil {
-			return err
-		}
-		if _, err := m.event(k, ins, activationChannelSuccess, 0, nil); err != nil {
-			return err
-		}
-		f.depth++
+	case *ssa.MakeChan, *ssa.MakeSlice:
+		return m.construction(k, j, ins)
 	case *ssa.RunDefers:
 		f.control = activationControl{phase: activationUnwind, at: at, next: next}
 		return m.push(j)
@@ -494,6 +479,56 @@ func (m *activationMachine) execute(k *regionKernel, j activationJob) error {
 	return m.push(j)
 }
 
+// Construction retains success, language panic and noncompletion separately.
+// Capture both abrupt alternatives after operand evaluation but before a helper
+// creates success-only backing or a value. Representable extents constrain the
+// value on success; neither those extents nor checking budgets prove success.
+func (m *activationMachine) construction(k *regionKernel, j activationJob, ins ssa.Instruction) error {
+	stopped, err := cloneActivationJob(j, k.meter)
+	if err != nil {
+		return err
+	}
+	panicking, err := cloneActivationJob(j, k.meter)
+	if err != nil {
+		return err
+	}
+	s := j.state()
+	var value regionValue
+	var result ssa.Value
+	switch x := ins.(type) {
+	case *ssa.MakeChan:
+		result = x
+		value, err = k.channelConstruction(s, x)
+	case *ssa.MakeSlice:
+		result = x
+		value, err = k.makeSlice(&s, x)
+	default:
+		return regionError("unsupported implicit construction")
+	}
+	if err != nil {
+		return err
+	}
+	stopped.top().control.phase = activationStopAlternative
+	panicking.top().control.phase = activationPanicAlternative
+	if err := m.push(stopped); err != nil {
+		return err
+	}
+	if err := m.push(panicking); err != nil {
+		return err
+	}
+	if err := k.setValue(&s, result, value); err != nil {
+		return err
+	}
+	if _, err := m.event(k, ins, activationConstructionSuccess, 0, nil); err != nil {
+		return err
+	}
+	j.install(s)
+	f := j.top()
+	f.depth++
+	f.control = activationControl{phase: activationExecute, at: regionPoint{f.control.at.block, f.control.at.index + 1}}
+	return m.push(j)
+}
+
 func (m *activationMachine) beginPanic(k *regionKernel, j activationJob, payload regionValue) error {
 	if payload.typ == nil {
 		return regionError("panic payload lacks a type")
@@ -512,15 +547,18 @@ func (m *activationMachine) beginPanic(k *regionKernel, j activationJob, payload
 
 func (m *activationMachine) invoke(k *regionKernel, j activationJob, call ssa.CallInstruction, dispatch ssa.Instruction, callable regionValue, args []regionValue, capture *regionDeferredCall, eligible *regionActivationPanic) error {
 	k.meter.applications++
-	initial, err := k.callEntry(j.state(), callable, args)
+	if len(j.frames) >= k.meter.limits.depth {
+		return regionError("activation call stack depth exhausted")
+	}
+	initial, err := k.bindCallEntry(j.state(), callable, args)
 	if err != nil {
 		return &regionOperationFailure{call, err}
 	}
-	id, err := k.invocationDispatch(call, callable.target, capture, dispatch)
-	if err != nil {
+	if _, err := m.event(k, dispatch, activationCall, 0, callable.target); err != nil {
 		return err
 	}
-	if _, err := m.event(k, dispatch, activationCall, 0, callable.target); err != nil {
+	id, err := k.invocationDispatch(call, callable.target, capture, dispatch)
+	if err != nil {
 		return err
 	}
 	if len(m.calls) >= k.meter.limits.nodes {

@@ -1462,7 +1462,7 @@
                   goroutine capture/signal composition through the root callback,
                   T.Run and child tRunner, retaining separate activation identities,
                   parent recovery, blocked outcomes and actual sender provenance.
-                  - [ ] 9.4a.2b.3b.2b.1 Check finite repeated source occurrences,
+                  - [x] 9.4a.2b.3b.2b.1 Check finite repeated source occurrences,
                     fresh per-occurrence allocation/call/defer identity and actual
                     loop/recursive edges, preserving earlier aliases, independent
                     continuation and complete residual-frontier refusal.

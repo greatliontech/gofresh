@@ -555,8 +555,27 @@ deadline, context and cancellation remain unknown. The frontier establishes no
 `Verbose`, `tRunner` or subject execution, and cannot supply terminal projection
 or cross its scope boundary. This conditional prefix fits the existing default
 region limits; it does not close representative whole-harness feasibility.
-Reachable cycles, recursive calls, opaque operations, explicit nil-panic semantics
-and deferred builtins remain outside this bounded relation. Actual parent/runner
+Finite repeated occurrences now retain distinct allocation, call and defer
+identities through checked loop and recursive edges. Earlier aliases survive later
+allocations at the same site; pauses preserve the issued identity ledger and
+current caller/unwind state. Unknown residual recurrence or exhausted bounds
+still cannot produce a complete result. Slice construction, like channel
+construction, retains panic and noncompletion beside successful construction;
+checker extent bounds supply no allocation-success theorem.
+
+On stock and harmless-custom source, the actual `runTests$1` prefix carries the
+one-row slice from the selected generated registration to the real `T.Run` call
+boundary, keeping the row's name and callable correlated. It retains explicit
+captured-input, omitted-prefix and receiver conditions and does not execute
+`T.Run`. Actual `utf16.Encode` loops also check for conditional two/three-rune
+inputs, with exact replacement-rune contents on normal return and separate
+escaping-panic/noncompletion outcomes. The incoming backing remains conditional;
+no execution of the function whose allocation supplies its selected type is
+thereby established. These are selected-source qualifications, not public reuse
+or whole-harness acceptance.
+
+Opaque operations, explicit nil-panic semantics, deferred builtins and concurrent
+execution remain outside this bounded relation. Actual parent/runner
 composition and subject-execution/terminal binding still land in
 `9.4a.2b.3b.2`; this relation alone supplies no callback-execution or PASS fact.
 
