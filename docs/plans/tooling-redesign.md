@@ -179,11 +179,14 @@
     guards; distinguish expected incompatibility from a demonstrated defect.
   - [ ] 5.1w Replace toolchain-variation approval with generic implementation
     verification before resuming 5.2d/5.2e or releasing migrated consumers.
-    Follow this remaining execution order: bound the public acceptance dependency
-    path at 9.4a before starting 5.1w.2b.3b.2a.2.2.2.2.16b.1c; complete the
-    consumer-justified common-backing and process-input work at
-    5.1w.2b.3b.2a.2.2.2.2.16b, then required bootstrap and compiler
-    correspondence; integrate useful stock/custom production reuse; remove the
+    Follow this remaining execution order: settle the architecture audit at
+    9.4a.0; separate production-owned base facts at 5.1w.2b.4a and establish
+    scoped admission at 5.1w.2b.4b.2; drive the first complete stock/custom
+    production and historical-check path at 5.1w.2b.4c/d from its concrete
+    missing claims, qualified at 9.4a.2-3. Further interpreter, concurrency,
+    bootstrap and compiler work is conditional on an identified consuming
+    obligation, not the next unsupported instruction. Preserve all remaining
+    family coverage and integrate useful ordinary production reuse; remove the
     approval registry and release Gofresh at 5.1w.7; finish Stipulator's
     clean-break migration and delivery at 5.2; complete remaining fleet work;
     then run the deferred full performance pass. Bring other work ahead of the
@@ -909,7 +912,7 @@
           and unsupported-implementation refusals beside ordinary test/benchmark
           acceptance. Production acquisition and composition must construct their
           evidence without test-private proof orchestration or approval entries.
-          - [ ] 5.1w.2b.4a After 9.4a, separate immutable selected-source/build
+          - [ ] 5.1w.2b.4a After 9.4a.0, separate immutable selected-source/build
             identities and complete structured blockers from evidence-dependent
             disposition. Retain the source owner from the existing shared load;
             preserve ordinary verdicts as projections while removing the need to
@@ -927,7 +930,7 @@
               needs observation. Qualify actual singleton/package production,
               mixed-roster preservation, explicit externality, independent closing
               and retries without adding native authority.
-            - [ ] 5.1w.2b.4b.2 After 9.4a and immutable base-fact separation, extend
+            - [ ] 5.1w.2b.4b.2 After 9.4a.0 and immutable base-fact separation, extend
               the common selection to scoped implementation claims and historical
               applicability. Retain the existing channel distinctions and complete
               runnable roster while removing classification-dependent snapshot
@@ -1306,6 +1309,16 @@
       forks with the user; retain all other supported-family obligations and the
       release, Stipulator, fleet and deferred-performance order. Close only with
       a concrete bounded implementation path, not another list of proof prefixes.
+      - [x] 9.4a.0 Re-derive the mapping-removal architecture from the governing
+        result/authority contracts and the ordinary public acceptance case before
+        further feature expansion. Preserve the pending finite-occurrence change
+        and reuse its completed verification; its completion does not select the
+        next mechanism. Audit consumer-owned execution/outcome facts, required
+        implementation claims, actual production callers, scoped evidence lifetime
+        and historical admission. Distinguish necessary obligations from chosen
+        interpreter/bootstrap mechanisms; independently review the architectural
+        disposition and replace the next execution schedule with a decisive
+        end-to-end qualification before commissioning further prerequisites.
       - [x] 9.4a.1 Derive and specify scoped historical-result applicability for
         the ordinary TestScalar/utf16.IsSurrogate stock/custom thread under
         REQ-fresh-historical-implementation. Distinguish retaining the complete
@@ -1319,18 +1332,26 @@
         identical future outcomes. Retain compiler-origin construction and
         preservation candidates at 5.1w.2b.3b.2a.2.4-5 only for demonstrated
         consumers of that mechanism.
-      - [ ] 9.4a.2 Qualify one complete actual TestScalar invocation path before
-        more compiler startup work. Use source-language invocation semantics when
-        the composition remains at that boundary; establish a complete lifting
-        relation wherever it consumes a native lemma. The selected testing.tRunner
-        stack-check/retry fragment is the native candidate: bind its exact source
-        context, emitted boundaries, fast/slow successors and continuation.
-        Establish each needed compiler-state invariant or independently derive the
-        complete native behavior. Compatible
+      - [ ] 9.4a.2 Qualify the minimum complete implementation-evidence composition
+        required by the ordinary TestScalar production/checking path. Bind every
+        missing claim to its public consumer, scope, accepted authority and exact
+        applicability premises before choosing its proof mechanism. Use checked
+        call/effect summaries where sufficient; retain consumer-owned execution
+        and outcome facts without promoting them into semantic frames. Do not
+        require derived PASS, exact irrelevant values or finite termination for
+        a claim that needs none of them. Use source-language invocation semantics
+        where applicable; establish lifting only where a native lemma is consumed.
+        The selected testing.tRunner stack-check/retry fragment remains one native
+        candidate, not a mandatory route. Bind any consumed native fragment's
+        source context, boundaries, successors and continuation. Compatible
         explicit calls, omitted inline instances, opaque slow paths and altered
         metadata must not acquire implicit-language authority. If the candidate
         cannot close, identify its exact missing theorem and reassess the route;
         do not automatically expand into another bootstrap prerequisite chain.
+        Existing subchunks retain conditional mechanism work, not authority to
+        resume expansion before the production consumer requires it. Keep the
+        public stock/custom positive and intrinsic-dispatch adversary as the exit
+        gate; an auxiliary summary experiment is not a substitute milestone.
         - [x] 9.4a.2a Inspect stock/custom actual invocation boundaries and qualify
           the current proof boundary. Check the local callback positives, expose
           the native guard's unestablished context provenance, and build an explicit
@@ -1441,6 +1462,19 @@
                   goroutine capture/signal composition through the root callback,
                   T.Run and child tRunner, retaining separate activation identities,
                   parent recovery, blocked outcomes and actual sender provenance.
+                  - [ ] 9.4a.2b.3b.2b.1 Check finite repeated source occurrences,
+                    fresh per-occurrence allocation/call/defer identity and actual
+                    loop/recursive edges, preserving earlier aliases, independent
+                    continuation and complete residual-frontier refusal.
+                  - [ ] 9.4a.2b.3b.2b.2 Compose shared-store goroutine configurations
+                    and channel protocols, with occurrence-conditioned shared-read
+                    access/integrity evidence, independent language oracles and
+                    all outstanding work retained at open frontiers.
+                  - [ ] 9.4a.2b.3b.2b.3 Qualify the actual stock/custom roster,
+                    fork, callback and signal occurrences under their checked
+                    source bindings and explicit prefix/entry conditions; preserve
+                    the unresolved explicit-call and terminal obligations at
+                    9.4a.2b.3b.2c and 9.4a.2b.3b.2d.
                 - [ ] 9.4a.2b.3b.2c Close the explicit selected callerName chain,
                   clock, synchronization, cancellation and reporting relations at
                   their actual uses, including relevant replacements and incoming

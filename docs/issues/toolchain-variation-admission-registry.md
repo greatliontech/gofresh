@@ -160,6 +160,48 @@ scheduled prerequisites are completed.
 
 ## Acceptance and architectural exit conditions
 
+### Architecture audit and execution priority
+
+The audit's governing boundary is documented in
+[claim-directed implementation evidence](../notes/implementation-evidence-architecture.md).
+The top-level contract requires checked implementation properties used by reuse,
+not a general compiler/runtime interpreter or a derived passing test verdict.
+Consumer-owned execution/outcome truth supplies no unproved frame or dispatch
+property. Changing that division would require an explicit trust decision; this
+audit introduces none.
+
+The confirmed structural findings are:
+
+| Finding | Evidence and consequence | Disposition |
+|---|---|---|
+| Local proof construction is disconnected from admission. | `checkComputation` and `deriveComputationCallback` have no production callers. Callback/correspondence objects intentionally retain open initialization, use, harness and applicability obligations. More supported instructions alone cannot change public checking. | Retain the checked lemmas; drive acquisition from production-owned source and actual blocker demands at 5.1w.2b.4a/b/d. |
+| Identity and evidence-dependent disposition share the snapshot comparison. | `observeView` classifies before `BindArtifact`; `Closure` carries identities beside refusal, and view validation compares the combined value. Refining shared state would leak between units or disagree with artifact-free closing. | Separate base facts, scoped checked claims and unit/candidate admission at 5.1w.2b.4a/b. Keep the existing producing/checking state machines. |
+| A chosen strong proof became the default prerequisite. | The actual callback proof is conditional; the route then follows complete activation, stack inspection and suspension/retry. Native complete-cut progress and exact state reconstruction are stronger than many effect claims, while ordinary freshness promises neither termination nor identical future outcomes. | Choose the smallest proposition needed by the consuming claim at 9.4a.2. Prefer checked inductive effect/call relations when sufficient; preserve finite replay as an optional producer. |
+| Historical support has no durable adoption path yet. | Artifact inspection owns bytes but grants no semantics; the fingerprint does not retain the new implementation derivations. Deletion/cache-eviction acceptance cannot follow from a process-local proof. | Integrate sufficient native historical evidence and candidate-local checking at 5.1w.2b.4c/d. Never store a replacement approval bit. |
+
+These are architecture/integration defects and unestablished proof capabilities,
+not a demonstrated current false-valid caused by the registry's fail-closed
+mismatch. The removed nominal-source intrinsic prototype remains a concrete
+false-valid counterexample to the shortcut it tried.
+
+The execution order is now the audit at 9.4a.0, base-fact separation at
+5.1w.2b.4a, scoped admission at 5.1w.2b.4b.2, and the complete producing/retained
+evidence/checking thread at 5.1w.2b.4c/d with consumer-required proof cuts
+qualified at 9.4a.2-3. Concurrency, bootstrap and further interpreter expansion
+are conditional mechanism slots, not automatic successors to the pending finite
+occurrence work. That reviewed work and its verification remain preserved.
+No generic summary platform or synthetic-only positive is the next acceptance
+milestone. Removal/release, Stipulator adoption, installation, fleet and broader
+performance obligations retain their existing order.
+
+The architectural direction does not establish ordinary-consumer feasibility.
+In particular, the selected stack-inspection and clock effects and their actual
+ownership/context applicability remain unresolved wherever the chosen claim uses
+them. Summaries must prove those bounds; an unknown return, private-runtime label,
+receipt or matching content cannot substitute. If the first complete composition
+cannot close such a cut under the retained premises, report the exact obstacle
+and reconsider the boundary before commissioning another prerequisite chain.
+
 Lands: 5.1w.2b.4 for the first public proof thread, 5.1w.6 for complete consumer
 and memo adoption, and 5.1w.7 for preserved-family acceptance and removal.
 
@@ -303,9 +345,10 @@ call shapes, source proximity, labels or compiler metadata supply neither
 relation. The existing local native and source proofs establish no complete
 ordinary-consumer mechanism yet.
 
-The historical-applicability rule is settled at 9.4a.1. The next work is source-level
-invocation qualification at 9.4a.2b, followed by 9.4a.3's consumer-sized composition
-qualification. The selected `testing.tRunner` stack-check/retry fragment remains
+The historical-applicability rule is settled at 9.4a.1. Following 9.4a.0's audit,
+production base-fact/admission separation precedes claim-directed qualification at
+9.4a.2 and 9.4a.3. Source-level invocation at 9.4a.2b remains one candidate
+mechanism. The selected `testing.tRunner` stack-check/retry fragment remains
 the native-composition candidate at 9.4a.2c if the chosen proof consumes that
 boundary, not an approved helper or an assertion of feasibility.
 If it needs a compiler-state invariant, name that invariant and its influencing
@@ -318,8 +361,10 @@ the lifecycle design and additional plan slots alone do not close it.
 
 ### Actual invocation bridge qualification
 
-Lands: 9.4a.2, before composition qualification at 9.4a.3 and the lifecycle
-integration at 5.1w.2b.4d. The initial stock/custom artifact inspection confirms
+Lands: 9.4a.2-3 qualify the consumer-required composition alongside production
+and historical integration at 5.1w.2b.4c/d, after 5.1w.2b.4a/b.2. Public
+qualification closes only when that integrated path passes. The initial
+stock/custom artifact inspection confirms
 the existing callback theorem but does not close the implicit-lowering bridge.
 The default-optimized five-callback fixture still passes
 `TestComputationCallbackSelectedTestBodies` on both selections. `TestScalar` is
