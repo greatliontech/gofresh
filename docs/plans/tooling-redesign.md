@@ -1308,6 +1308,28 @@
         metadata must not acquire implicit-language authority. If the candidate
         cannot close, identify its exact missing theorem and reassess the route;
         do not automatically expand into another bootstrap prerequisite chain.
+        - [x] 9.4a.2a Inspect stock/custom actual invocation boundaries and qualify
+          the current proof boundary. Check the local callback positives, expose
+          the native guard's unestablished context provenance, and build an explicit
+          assembly guard/spill/helper/reload/retry control. Identify the selected
+          insertion path, suspension/relocation outcomes and distinct explicit
+          harness calls; reject template/metadata origin authority and unconditional
+          finite-progress substitution for the language invocation model.
+        - [ ] 9.4a.2b Establish and independently check an occurrence-specific,
+          source-anchored translation/origin certificate and logical-state relation
+          for the actual invocation. Bind typed context and all relevant explicit
+          operations/replacements through checked transformation steps to decoded
+          boundaries, arguments, fast/slow outcomes and continuation; retain selected
+          hooks/instrumentation and suspension/relocation without assuming termination.
+          Reject invented incoming compiler state, omitted relevant instances and
+          reuse of mismatched target/spill/retry evidence. Explicit compatible calls
+          and altered metadata must not supply missing implicit-origin authority;
+          retain fresh derivation for valid changed implementations. Require a
+          demonstrated consumer, exact missing invariant and bounded application
+          path before commissioning compiler-runtime prerequisites; an independent
+          native alternative must instead close its
+          actual ownership and scheduler obligations. Keep the parent open until
+          one complete mechanism qualifies on stock and harmless-custom selections.
       - [ ] 9.4a.3 Qualify cumulative composition resources against the resulting
         consumer-required population. Compare the same complete CALL/RET, current
         bytes, branch effects and continuation scope under whole and partitioned

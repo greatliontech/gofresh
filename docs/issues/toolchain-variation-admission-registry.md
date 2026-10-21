@@ -308,6 +308,106 @@ callee-replay costs require qualification against the same required population.
 9.4a remains open until these results establish the bounded implementation path;
 the lifecycle design and additional plan slots alone do not close it.
 
+### Actual invocation bridge qualification
+
+Lands: 9.4a.2, before composition qualification at 9.4a.3 and the lifecycle
+integration at 5.1w.2b.4d. The initial stock/custom artifact inspection confirms
+the existing callback theorem but does not close the implicit-lowering bridge.
+The default-optimized five-callback fixture still passes
+`TestComputationCallbackSelectedTestBodies` on both selections. `TestScalar` is
+one `RET`; the local descriptor/load/CALL proof remains conditional on incoming
+descriptor provenance, stack backing and isolated invocation.
+
+The enclosing selected `testing.tRunner` has the following concrete candidate
+scope, with offsets relative to its discovered entry. Offsets describe these
+inspected artifacts, not generic recognition or approval rules:
+
+| Boundary | Selected behavior |
+|---|---|
+| `+0` / `+4` | Compare RSP with the word at R14+16; unsigned-below-or-equal branches to `+0x134`, otherwise enters the body at `+0xa`. |
+| `+0x134` / `+0x139` | Spill RAX and RBX at incoming RSP+8 and RSP+16. |
+| `+0x140` / `+0x145` | Call the linked `morestack_noctxt` entry; its continuation reloads the spilled arguments. |
+| `+0x14f` | Jump back to the original guard, not directly into the body. |
+| `+0xe0` / `+0xe8` / `+0xea` | Load the callback target, invoke it and reach the local callback proof's continuation. |
+
+The captured stock entry is `0x4edc60`, custom `0x4edd00`. The helper clears RDX,
+jumps to `morestack`, obtains context through FS, writes goroutine/machine
+bookkeeping, switches stacks and invokes `newstack`. The selected `newstack`
+has distinct preemption, parking, stack shrinking and stack-copying paths before
+resumption; the slow arm is not an ordinary returning leaf that preserves one
+numeric RSP. Relevant source locators are `runtime/asm_amd64.s`'s `morestack` and
+`runtime/stack.go`'s `newstack`/`copystack`. These locate obligations, not checked
+runtime summaries.
+
+Two missing relations are distinct. First, the entry guard needs actual current
+context and stack provenance: an arbitrary R14 word and a declared stack extent
+do not associate the guard with accessible call space. Second, the slow path
+needs a logical-state simulation across suspension and possible relocation,
+including both arguments, caller continuation, pointer adjustments and protected
+storage. Replacing this with unchanged physical addresses would exclude supported
+executions. The ordinary result model requires accounting for relevant effects
+and outcomes, not a universal promise of termination or a fixed retry count.
+The native complete-cut checker deliberately proves a stronger finite-progress
+proposition; finite unfolding and a larger budget cannot establish the required
+unbounded suspension/retry relation. An independently established applicable
+implicit-language relation could supply this transport; an explicit runtime call
+retains its own implementation obligations.
+
+A separately built assembly control contains the same guard, argument-spill,
+explicit `CALL runtime.morestack_noctxt`, reload and backedge shape under
+`NOSPLIT|NOFRAME`. It is author-written assembly, not an inserted language
+operation. The control was built and disassembled, not executed or admitted as a
+proof. Thus even the complete familiar shell and actual helper target do not
+establish implicit origin. Source positions, helper names or a matching compiler
+report cannot repair that distinction. A metadata-only or byte-pattern origin
+classifier would not meet REQ-impl-callback-transfer.
+
+The selected emission path is concrete: `cmd/internal/obj/x86`'s `preprocess`
+invokes `stacksplit`; the latter emits the comparison, optional `MayMoreStack`
+hook, argument spills, helper call, reloads and retry. Register spill records
+come from `cmd/compile/internal/amd64`'s `ssaGenValue` and are emitted by
+`SpillRegisterArgs`/`UnspillRegisterArgs` in `cmd/internal/obj`. Checking those
+source bodies on invented function, ABI or spill inputs would prove a possible
+emission, not this artifact's occurrence or logical-state association. The
+intrinsic-table exclusion theorem does not supply those inputs or establish this
+separate insertion path.
+
+The next deciding work at 9.4a.2b is an independently checked, source-anchored
+translation/origin certificate for this occurrence. Its checked steps must bind
+the selected typed invocation, explicit operations and replacement instances,
+relevant transformation state and final decoded artifact boundaries. Its logical
+representation relation must establish both arguments and continuation through
+every admitted fast/slow outcome, including selected hooks and instrumentation.
+This uses the existing implicit-language premise only after its applicability
+is established; it does not grant a named helper summary. A proposed certificate
+or replay with fabricated incoming IR/state or omitted relevant instances must
+refuse. Altered metadata and explicit compatible calls cannot supply missing
+implicit-origin authority. Changed native targets, spills or edges cannot borrow
+an existing certificate whose bound inputs no longer agree; a fresh independently
+checked derivation remains available for valid changed implementations. Harmless
+diagnostic metadata changes need not defeat independently established association.
+This is the minimum missing theorem, not an implemented certificate format or a
+claim that the full proof already fits a bounded derivation.
+
+The reassessed route therefore does not commission compiler-runtime ownership
+work merely because the emitted helper manipulates stacks. Such work is needed
+only if an actual-state compiler proof consumes it. Conversely, an independent
+native alternative genuinely needs the selected runtime's ownership and
+scheduler relations; the local-context countermodel below still applies. The
+existing checker is correctly conservative: a private entry-to-fast-boundary
+probe on both artifacts discovers the guard and slow frontier, then refuses the
+first guard access with `transition-provenance: address lacks the checked origin`.
+That diagnostic proves neither a runtime defect nor that adding one entry-pointer
+premise would complete the bridge. Neither route has yet established the bounded
+ordinary acceptance required to close 9.4a.
+
+The body also performs explicit `callerName`, `time.Now`, race-state and locking
+operations, plus deferred cleanup. Closing the stack bridge would not establish
+their frames or the registration-to-use chain. In particular the clock call in
+the ordinary harness is a consumer obligation distinct from the clock call in
+the compiler-origin preservation candidate. Neither may borrow the other's
+artifact, context or execution evidence.
+
 The compiler-origin candidate at 5.1w.2b.3b.2a.2.4 checks a normal-return postcondition
 of selected intrinsic-table construction. Fresh map replacement can eliminate
 dependence on arbitrary prior table contents; inductive projected-key summaries
