@@ -106,6 +106,11 @@ func TestRegionActivationGoOracle(t *testing.T) {
 				t.Fatal(err)
 			}
 			packet, _ := proveActivation(t, tc.source)
+			// The same independently compiled result must hold after a suspended
+			// invocation, not only when the complete machine runs in one pass.
+			_, partitioned := activationPartition(t, packet.input, packet.snapshot.transitions/2)
+			equalActivations(t, packet, partitioned)
+			packet = partitioned
 			if len(packet.outcomes) != 1 {
 				t.Fatalf("unexpected terminal alternatives: %+v", packet.outcomes)
 			}

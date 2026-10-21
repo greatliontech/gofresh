@@ -716,7 +716,8 @@ func continueSourceBinder(ctx context.Context, predecessor *selectedSourceBinder
 	b.ctx = ctx
 	b.pkgs, b.metas = maps.Clone(b.pkgs), maps.Clone(b.metas)
 	b.packages, b.bound, b.callables = maps.Clone(b.packages), maps.Clone(b.bound), maps.Clone(b.callables)
-	for range len(b.pkgs) + len(b.metas) + len(b.packages) + len(b.bound) + len(b.callables) {
+	b.lexical = maps.Clone(b.lexical)
+	for range len(b.pkgs) + len(b.metas) + len(b.packages) + len(b.bound) + len(b.callables) + len(b.lexical) {
 		if err := b.tick(nil, token.NoPos); err != nil {
 			return nil, err
 		}

@@ -11,6 +11,7 @@ import (
 	"go/types"
 	"hash"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -87,7 +88,22 @@ type selectedSourceCallable struct {
 }
 
 func (c *selectedSourceBinder) bindCallable(fn *ssa.Function) (selectedSourceCallable, error) {
-	return c.callable(fn, 0)
+	bound, err := c.callable(fn, 0)
+	if err != nil {
+		return selectedSourceCallable{}, err
+	}
+	// The cache owns its specialization container. A consumer may copy and edit
+	// its descriptor without changing later bindings or a sibling continuation.
+	if len(bound.typeArguments) != 0 {
+		if len(bound.typeArguments) > (c.limits.bytes-c.bytes)/16 {
+			return selectedSourceCallable{}, computationRefusal(fn, fn.Pos(), "callable projection byte budget exhausted")
+		}
+		if err := c.chargeBytes(fn, fn.Pos(), len(bound.typeArguments)*16); err != nil {
+			return selectedSourceCallable{}, err
+		}
+		bound.typeArguments = slices.Clone(bound.typeArguments)
+	}
+	return bound, nil
 }
 
 func (c *selectedSourceBinder) callable(fn *ssa.Function, depth int) (selectedSourceCallable, error) {

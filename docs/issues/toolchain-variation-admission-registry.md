@@ -499,20 +499,21 @@ with matcher and parallelism unknown; deleting the panic inference refuses.
 These constructions precede the caller's `tRunner` invocation, so the runner's
 later defers cannot recover their earlier panics. Their actual caller
 continuations remain part of the parent-composition obligation.
+The actual `runTests` segment from its `newTestState` call to the unexecuted
+`Verbose` boundary now retains the constructor result, deadline store, root T
+and its signal/barrier channels in one checked relation. Stock and harmless-custom
+selections each retain one successful frontier, three escaping-panic alternatives
+and three noncompletion alternatives, with no normal `runTests` return. Partitioned
+checking preserves those alternatives, current heaps, object identities and call
+dependencies without replaying construction. Incoming matcher, parallelism,
+deadline, context and cancellation remain unknown. The frontier establishes no
+`Verbose`, `tRunner` or subject execution, and cannot supply terminal projection
+or cross its scope boundary. This conditional prefix fits the existing default
+region limits; it does not close representative whole-harness feasibility.
 Reachable cycles, recursive calls, opaque operations, explicit nil-panic semantics
 and deferred builtins remain outside this bounded relation. Actual parent/runner
 composition and subject-execution/terminal binding still land in
 `9.4a.2b.3b.2`; this relation alone supplies no callback-execution or PASS fact.
-
-Source-binder continuation ownership has an adjacent gap scheduled with the
-resumable outcome relation at `9.4a.2b.3b.2a`: `continueSourceBinder` clones the
-other mutable caches but shares an already initialized `lexical` outer map.
-Binding a literal under a new parent through `lexicalLiteral` then inserts into
-the predecessor's map, changing a sibling continuation's cached work without
-charging that sibling's original traversal. Clone and charge this outer map at
-continuation creation; completed inner count maps remain immutable. The new
-complete-activation arm does not yet use binder continuation. The repair belongs
-with its next source-continuation integration and sibling-isolation regression.
 
 Deferred execution can likewise be checked in a bounded, non-unwinding source
 grammar without first admitting arbitrary panic/recovery outcomes. Each evaluated
@@ -551,6 +552,23 @@ their frames or the registration-to-use chain. In particular the clock call in
 the ordinary harness is a consumer obligation distinct from the clock call in
 the compiler-origin preservation candidate. Neither may borrow the other's
 artifact, context or execution evidence.
+
+The selected `callerName` chain can project the returned string's contents to
+unknown only after checking its effects, outcomes and backing lifetime. It is
+not read-only inspection: `systemstack` changes saved stack state and TLS, and
+symbolization updates runtime caches, lock/preemption fields and random state.
+The actual `tracebackPCs` loop executes its `u.next()` post statement even after
+filling the one-element output buffer; `Frames.Next` also computes file/line
+information that its immediate caller discards. Neither operation disappears
+because its result is unused. Foreign callback arms require checked exclusion or
+their own relation. The explicit-call work at `9.4a.2b.3b.2c` therefore needs an
+occurrence-bound association of the actual stack/context, protected caller
+storage, borrowed output buffer and separately owned runtime storage, followed
+by the complete selected chain and actual caller application. A numeric SP,
+private ABI frame, arbitrary returned name or handwritten runtime-private label
+does not establish that association. This obligation concerns explicit runtime
+inspection; ordinary source-level calls do not thereby acquire native startup or
+stack-reconstruction prerequisites.
 
 The compiler-origin candidate at 5.1w.2b.3b.2a.2.4 checks a normal-return postcondition
 of selected intrinsic-table construction. Fresh map replacement can eliminate

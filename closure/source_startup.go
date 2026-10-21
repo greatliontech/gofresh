@@ -136,25 +136,14 @@ func prepareSourceEntry(ctx context.Context, input sourceStartupInput, main *ssa
 	}
 	// Own selection containers before any user context callback. The typed owner
 	// (including AST/SSA and loader package objects) stays immutable by contract.
-	if len(input.linkerFlags) > limits.source.work || len(input.source.metas) > limits.source.work-len(input.linkerFlags) {
-		return nil, startupFailure(nil, sourceStartupSelection, "capture", regionError("selection budget exhausted"))
+	capture, err := captureSelectedSource(input.source, limits.source)
+	if err != nil {
+		return nil, startupFailure(nil, sourceStartupSelection, "capture", err)
 	}
-	input.linkerFlags = slices.Clone(input.linkerFlags)
-	input.source.metas = slices.Clone(input.source.metas)
-	remaining := limits.source.work - len(input.linkerFlags) - len(input.source.metas)
-	for i := range input.source.metas {
-		m := &input.source.metas[i]
-		if m.Error != nil {
-			copy := *m.Error
-			m.Error = &copy
-		}
-		for _, field := range []*[]string{&m.GoFiles, &m.CgoFiles, &m.CgoCFLAGS, &m.CgoCPPFLAGS, &m.CgoCXXFLAGS, &m.CgoFFLAGS, &m.CgoPkgConfig, &m.CFiles, &m.CXXFiles, &m.MFiles, &m.HFiles, &m.FFiles, &m.SFiles, &m.SwigFiles, &m.SwigCXXFiles, &m.SysoFiles, &m.EmbedFiles, &m.EmbedPatterns, &m.TestEmbedPatterns, &m.XTestEmbedPatterns, &m.CgoLDFLAGS, &m.Imports, &m.Deps} {
-			if len(*field) > remaining {
-				return nil, startupFailure(nil, sourceStartupSelection, "capture", regionError("selection budget exhausted"))
-			}
-			remaining -= len(*field)
-			*field = slices.Clone(*field)
-		}
+	input.source = capture.source
+	input.linkerFlags, err = capture.strings(input.linkerFlags)
+	if err != nil {
+		return nil, startupFailure(nil, sourceStartupSelection, "capture", err)
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, startupFailure(nil, sourceStartupSelection, "capture", err)
@@ -162,15 +151,10 @@ func prepareSourceEntry(ctx context.Context, input sourceStartupInput, main *ssa
 	if input.initialization != sourceLanguageInitialization || len(input.linkerFlags) != 0 {
 		return nil, startupFailure(nil, sourceStartupSelection, "external-initialization", regionError("ordinary language initialization and default linker inputs must be explicit"))
 	}
-	b, err := newSelectedSourceBinder(ctx, input.source, main, limits.source)
+	b, err := capture.binder(ctx, main)
 	if err != nil {
 		return nil, startupFailure(nil, sourceStartupSelection, "owner", err)
 	}
-	captured := limits.source.work - remaining
-	if captured > b.limits.work-b.work {
-		return nil, startupFailure(nil, sourceStartupSelection, "capture", regionError("selection work budget exhausted"))
-	}
-	b.work += captured
 	c := &sourceStartupChecker{selectedSourceBinder: b, meter: &regionMeter{ctx: ctx, limits: limits.region}, contexts: map[regionInvocation]regionContextFacts{}, completed: map[*ssa.Function]bool{}, packages: map[*packages.Package]*sourceStartupPackage{}}
 	var root *sourceStartupPackage
 	if main.Pkg != nil {

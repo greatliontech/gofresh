@@ -727,6 +727,12 @@ func FuzzRegionDeferCaptureOracle(f *testing.F) {
 		}
 		abrupt := fmt.Sprintf(`func F()(r int){x:=%d;defer func(v int){r=(r<<3)+v}(x);defer func(){if %t{defer func(){if recover()!=nil{r=999};r+=3}()};recover();r=x}();x=%d;panic(1)}`, a, nested, b)
 		completed, _ := proveActivation(t, abrupt)
+		// Vary the suspension boundary as well as the source capture grammar.
+		// The literal Go closure remains the independent semantic oracle.
+		cut := uint64(uint8(a)^uint8(b))%(completed.snapshot.transitions-1) + 1
+		_, continued := activationPartition(t, completed.input, cut)
+		equalActivations(t, completed, continued)
+		completed = continued
 		if len(completed.outcomes) != 1 || completed.outcomes[0].kind != activationNormal {
 			t.Fatal("abrupt capture grammar lost normal recovery")
 		}

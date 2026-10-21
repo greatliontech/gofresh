@@ -1632,6 +1632,18 @@ contracts:
   control, an unclosed execution frontier or exhausted checking bounds refuses
   the dependent proof rather than truncating the outcome set.
 
+  An open checked source relation may retain every unfinished execution as an
+  owned frontier, including its suspended caller and deferred continuations,
+  current logical store, panic and recovery state, and actual instruction
+  occurrence. Such a frontier establishes only the checked prefix relation; it
+  is neither a return nor a noncompletion outcome. Resumption binds its checked
+  predecessor and retains the original premises, object identities, pending work,
+  complete alternatives and cumulative resource account. It cannot recreate an
+  entry from a copied heap, replay completed operations or enlarge a scope whose
+  boundary established non-reexecution. Independent resumptions cannot mutate
+  their predecessor or each other's preparation. Any remaining feasible frontier
+  prevents complete-activation authority or terminal-conditioned projection.
+
   A terminal-conditioned conclusion is projected only after the complete relation
   is established. Every matching outcome must entail the claimed property;
   recovered failures which can reach that terminal remain included. The terminal

@@ -1408,7 +1408,7 @@
                 channel/goroutine and native applicability obligations wherever
                 the composed path consumes them; do not substitute process
                 completion or a conditional constructor fact for those facts.
-                - [ ] 9.4a.2b.3b.2a Retain owned outcome frontiers and checked
+                - [x] 9.4a.2b.3b.2a Retain owned outcome frontiers and checked
                   suspended call/unwind continuations with cumulative budgets;
                   qualify partitioned versus whole checking and the actual
                   stock/custom runTests constructor-to-Verbose segment. Preserve

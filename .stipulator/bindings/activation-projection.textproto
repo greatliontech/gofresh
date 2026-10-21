@@ -1,0 +1,46 @@
+# proto-file: proto/stipulator/v1/records.proto
+# proto-message: stipulator.v1.BindingSet
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "0954fa65ca9038bebe26e8d7ea26066a2d449c17d69b5257bd9f6653fb4c7ea9"
+  source_hash: "4a1e13b9abf47486884926ce588704fb9236f4e098241a7b9a1835bb268e1d72"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionActivationProjectionOwnership"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "de8e679a8e96af1fa4c1fc0ac915af3b8ecb78fce4f246906ea2c3124ee103ed"
+  clause_label: "memory-and-callables"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "0954fa65ca9038bebe26e8d7ea26066a2d449c17d69b5257bd9f6653fb4c7ea9"
+  source_hash: "4a1e13b9abf47486884926ce588704fb9236f4e098241a7b9a1835bb268e1d72"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestRegionActivationProjectedPredecessorIsolation"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "395cf6e75c304534253c057b8ee6fc5cb02893ff9793b590c725a8dc41c1fb27"
+  clause_label: "memory-and-callables"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "0954fa65ca9038bebe26e8d7ea26066a2d449c17d69b5257bd9f6653fb4c7ea9"
+  source_hash: "4a1e13b9abf47486884926ce588704fb9236f4e098241a7b9a1835bb268e1d72"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestSourceActivationProjectedCallsAreNotAuthority"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1ec037b15774f69558581a38bc69121a98a460ea74404aed2af7dd7e8dbe76c1"
+  clause_label: "bound-scope"
+}
+
+bindings {
+  requirement_id: "REQ-impl-region-transport"
+  content_hash: "0954fa65ca9038bebe26e8d7ea26066a2d449c17d69b5257bd9f6653fb4c7ea9"
+  source_hash: "4a1e13b9abf47486884926ce588704fb9236f4e098241a7b9a1835bb268e1d72"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.TestSourceActivationSpecializationProjectionOwnership"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3714565f184138370fd0461485c63b1941493c7f9746ef88c0435fb2cc045007"
+  clause_label: "bound-scope"
+}

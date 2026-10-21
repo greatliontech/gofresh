@@ -121,6 +121,19 @@ func (k *regionKernel) validateDefers(s regionDeferStack) error {
 }
 
 func (k *regionKernel) registerDefer(s *regionState, site *ssa.Defer) error {
+	registration := k.current
+	if k.trace == nil {
+		registration = regionEffectOccurrence{instruction: site, invocation: k.invocation}
+	}
+	return k.registerDeferOccurrence(s, site, registration)
+}
+
+// registerDeferOccurrence shares capture semantics with outcome execution, whose
+// occurrence ledger does not carry strict/native effect-trace authority.
+func (k *regionKernel) registerDeferOccurrence(s *regionState, site *ssa.Defer, registration regionEffectOccurrence) error {
+	if registration.instruction != site || registration.invocation != k.invocation {
+		return regionError("defer registration occurrence differs")
+	}
 	if site.DeferStack != nil {
 		return regionError("alternate defer stack has no checked target provenance")
 	}
@@ -146,10 +159,6 @@ func (k *regionKernel) registerDefer(s *regionState, site *ssa.Defer) error {
 	k.meter.locations += len(s.pending.captures) + len(actual) + 1
 	if k.meter.locations > k.meter.limits.locations {
 		return regionError("defer capture storage budget exhausted")
-	}
-	registration := k.current
-	if k.trace == nil {
-		registration = regionEffectOccurrence{instruction: site, invocation: k.invocation}
 	}
 	s.pending.captures = append(slices.Clone(s.pending.captures), regionDeferredCall{site, registration, callable, actual})
 	return nil
