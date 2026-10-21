@@ -1353,6 +1353,12 @@
             clock frames at their actual uses; current scratch ownership is the
             clock's local requirement, with allocator/cache preservation proved
             only where the supplying ownership construction consumes it.
+            - [x] 9.4a.2b.2a Derive allocation cardinality for an actual straight-line
+              entry-to-use scope inside an enclosing loop without changing shared
+              whole-function recurrence. Preserve earlier-instance aliases, wider
+              child scopes and continuation guards. Qualify the actual runTests
+              root T constructor through its next call boundary, retaining unknown
+              prefix context/matcher/flag inputs and unproved subsequent transport.
           - [ ] 9.4a.2b.3 Check deferred capture and execution, exceptional outcomes,
             completion/reporting and relevant interference over the same invocation.
             Separate clock-value relevance from the clock call's effects. Establish

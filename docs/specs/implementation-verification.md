@@ -1465,6 +1465,14 @@ contracts:
   distinct. Repeated allocations cannot initialize older instances represented
   by an allocation summary.
 
+  Allocation cardinality is scoped to the checked activation. A validated
+  straight-line entry-to-use segment ending before its block's successor edges
+  cannot repeat an allocation merely because the enclosing function is cyclic.
+  That local non-reexecution fact preserves incoming aliases to earlier instances;
+  it does not apply to child calls' wider control flow, later loop iterations or
+  a continuation that can cross a backedge. Whole-function control facts remain
+  distinct from the narrower scoped relation.
+
   Channel construction retains a fresh logical identity for the actual language
   allocation and its bounded context, selected element type and direction, and
   checked capacity in the common nonnegative signed 32-bit range. The bounded

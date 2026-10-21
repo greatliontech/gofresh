@@ -203,8 +203,14 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 			return nil, regionError("claimed value is not the actual consuming operand")
 		}
 	}
-	// A mid-block entry is a genuine scope cut, not permission to skip that
-	// prefix again when a backedge returns to the block.
+	// A forward cut in this block is observed before its instruction executes,
+	// hence before any CFG successor. Whole-function recurrence does not imply
+	// recurrence within that scope. Keep the cached function facts unchanged:
+	// children and wider continuations still use their actual cyclic graphs.
+	if !fullReturns && in.entry.block == in.use.at.block && in.entry.index <= in.use.at.index {
+		k.cycle = map[*ssa.BasicBlock]bool{}
+	}
+	// Other mid-block entries cannot skip their prefix again on a backedge.
 	if in.entry.index != 0 && k.cycle[in.entry.block] {
 		return nil, regionError("mid-block entry has a backedge")
 	}

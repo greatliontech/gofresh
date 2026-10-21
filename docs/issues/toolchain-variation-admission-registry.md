@@ -431,6 +431,18 @@ verdict-value independence would not establish output equality or a memory frame
 The remaining boundaries are ordered at 9.4a.2b.2–3; the local callback positive does
 not close the ordinary acceptance gate.
 
+The enclosing `runTests` root constructor exposes a separate scope precision
+problem. Its allocation and the boundary before `Verbose` occupy one straight-line
+block segment, but whole-function loop membership previously rejected that segment
+as a mid-block backedge. A validated forward same-block cut executes no successor
+edge; its local allocation cardinality can be derived without changing shared
+whole-function facts or admitting later iterations. The scoped proof checks the
+actual root T's zero failure/completion/parallel fields, nil parent, and constructed
+signal/barrier capacities. Incoming context, cancellation and test-state values
+remain unknown, and the subsequent `Verbose` call is not executed by this proof.
+This constructor relation does not transport the parent through the runner and
+into the child `T.Run`, nor supply the omitted prefix or explicit-call frames.
+
 The reassessed route therefore does not commission compiler-runtime ownership
 work merely because the emitted helper manipulates stacks. Such work is needed
 only if an actual-state compiler proof consumes it. Conversely, an independent

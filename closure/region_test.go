@@ -1319,5 +1319,6 @@ func FuzzRegionRegistrationOracle(f *testing.F) {
 		in := regionFixture(t, text)
 		c, _ := proveRegionFixture(t, in)
 		assertRegionCovers(t, c, executeRegionConcrete(t, in, swap))
+		checkScopedRegistrationOracle(t, a, b, swap)
 	})
 }
