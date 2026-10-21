@@ -114,12 +114,22 @@ func (k *regionKernel) invocationAt(call ssa.CallInstruction, target *ssa.Functi
 }
 
 func (k *regionKernel) invocationFor(call ssa.CallInstruction, target *ssa.Function, capture *regionDeferredCall, drain *ssa.RunDefers) (regionInvocation, error) {
+	var dispatch ssa.Instruction
+	if drain != nil {
+		dispatch = drain
+	}
+	return k.invocationDispatch(call, target, capture, dispatch)
+}
+
+// dispatch is the actual instruction causing a drain, including a checked
+// exceptional transfer. It is never a fabricated ordinary CFG edge.
+func (k *regionKernel) invocationDispatch(call ssa.CallInstruction, target *ssa.Function, capture *regionDeferredCall, dispatch ssa.Instruction) (regionInvocation, error) {
 	// Finite cyclic call sites remain refused. Consequently the existing actual
 	// call string is injective over admitted activations; the exact caller event
 	// binds proof applications without a second activation-identity mechanism.
 	invoking := ssa.Instruction(call)
 	if capture != nil {
-		invoking = drain
+		invoking = dispatch
 	}
 	if k.trace != nil && (k.cycle[call.Block()] || k.current.instruction != invoking || k.current.invocation != k.invocation || k.current.owner != k.trace.owner || !k.trace.seen[k.current]) {
 		return regionInvocation{}, regionError("call lacks its exact checked invoking occurrence")
@@ -137,10 +147,10 @@ func (k *regionKernel) invocationFor(call ssa.CallInstruction, target *ssa.Funct
 	}
 	id := regionInvocation{root: k.session.root, path: k.invocation.path + fmt.Sprintf("/%d:%d:%p", call.Block().Index, index, target)}
 	if capture != nil {
-		if capture.site != call || drain == nil || drain.Parent() != k.input.root || capture.registration.instruction != call || capture.registration.invocation != k.invocation || k.trace != nil && (capture.registration.owner != k.trace.owner || !k.trace.seen[capture.registration]) {
+		if capture.site != call || dispatch == nil || dispatch.Parent() != k.input.root || dispatch.Block() == nil || !slices.Contains(dispatch.Block().Instrs, dispatch) || capture.registration.instruction != call || capture.registration.invocation != k.invocation || k.trace != nil && (capture.registration.owner != k.trace.owner || !k.trace.seen[capture.registration]) {
 			return regionInvocation{}, regionError("deferred invocation lacks checked registration and drain")
 		}
-		id.path += fmt.Sprintf("/defer:%d:%d:%d", capture.registration.ordinal, drain.Block().Index, slices.Index(drain.Block().Instrs, ssa.Instruction(drain)))
+		id.path += fmt.Sprintf("/defer:%d:%d:%d", capture.registration.ordinal, dispatch.Block().Index, slices.Index(dispatch.Block().Instrs, dispatch))
 	}
 	facts := regionContextFacts{function: target, repeated: parent.repeated || k.cycle[call.Block()], depth: parent.depth + 1, deferred: parent.deferred || capture != nil}
 	// Normal-return summaries intentionally merge activations. Escaping objects
@@ -217,40 +227,14 @@ func (k *regionKernel) invoke(call ssa.CallInstruction, caller regionState, call
 		}
 		return k.callReference(ordinary, caller, callable, actual)
 	}
-	if callable.kind != regionCallable || !regionSourceCallBody(callable.target) {
-		return nil, regionError("call target has no supported ordinary source body")
+	initial, err := k.callEntry(caller, callable, actual)
+	if err != nil {
+		return nil, err
 	}
 	target := callable.target
-	if k.session.active[target] {
-		return nil, regionError("recursive call component has no inductive call proof")
-	}
-	if len(k.session.active) >= k.meter.limits.depth {
-		return nil, regionError("call stack depth exhausted")
-	}
-	if len(actual) != len(target.Params) || len(callable.environment) != len(target.FreeVars) {
-		return nil, regionError("actual call arguments or closure environment are incomplete")
-	}
 	id, err := k.invocationFor(call, target, capture, drain)
 	if err != nil {
 		return nil, err
-	}
-	initial, err := k.clone(regionState{memory: caller.memory, pending: regionDeferStack{known: true}})
-	if err != nil {
-		return nil, err
-	}
-	for i, parameter := range target.Params {
-		value := actual[i]
-		if !types.Identical(parameter.Type(), value.typ) {
-			return nil, regionError("actual/formal argument type mismatch")
-		}
-		initial.values[parameter] = value
-	}
-	for i, free := range target.FreeVars {
-		value := callable.environment[i]
-		if !types.Identical(free.Type(), value.typ) {
-			return nil, regionError("captured environment type mismatch")
-		}
-		initial.values[free] = value
 	}
 	in := regionInput{normalReturns: k.input.normalReturns, unwind: k.input.unwind, owner: k.input.owner, selection: k.input.selection, root: target, entry: regionPoint{target.Blocks[0], 0}, initial: initial, premises: k.input.premises, storageModel: k.input.storageModel}
 	child, err := newRegionContextKernel(in, k.session, id, true)
@@ -431,6 +415,47 @@ func (k *regionKernel) invoke(call ssa.CallInstruction, caller regionState, call
 		returned = append(returned, after)
 	}
 	return returned, nil
+}
+
+// callEntry is shared by strict, normal-return and activation-outcome checking.
+// It binds actual values to the selected body, retaining the current shared heap
+// and establishing only the child's fresh local defer stack.
+func (k *regionKernel) callEntry(caller regionState, callable regionValue, actual []regionValue) (regionState, error) {
+	if err := k.validateValue(callable, 0); err != nil {
+		return regionState{}, err
+	}
+	if callable.kind != regionCallable || !regionSourceCallBody(callable.target) {
+		return regionState{}, regionError("call target has no supported ordinary source body")
+	}
+	target := callable.target
+	if k.session.active[target] {
+		return regionState{}, regionError("recursive call component has no inductive call proof")
+	}
+	if len(k.session.active) >= k.meter.limits.depth {
+		return regionState{}, regionError("call stack depth exhausted")
+	}
+	if len(actual) != len(target.Params) || len(callable.environment) != len(target.FreeVars) {
+		return regionState{}, regionError("actual call arguments or closure environment are incomplete")
+	}
+	initial, err := k.clone(regionState{memory: caller.memory, pending: regionDeferStack{known: true}})
+	if err != nil {
+		return regionState{}, err
+	}
+	for i, parameter := range target.Params {
+		value := actual[i]
+		if !types.Identical(parameter.Type(), value.typ) {
+			return regionState{}, regionError("actual/formal argument type mismatch")
+		}
+		initial.values[parameter] = value
+	}
+	for i, free := range target.FreeVars {
+		value := callable.environment[i]
+		if !types.Identical(free.Type(), value.typ) {
+			return regionState{}, regionError("captured environment type mismatch")
+		}
+		initial.values[free] = value
+	}
+	return initial, nil
 }
 
 func (k *regionKernel) returnValue(ret *ssa.Return, state regionState) (regionValue, error) {

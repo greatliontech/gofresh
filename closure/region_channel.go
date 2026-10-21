@@ -44,6 +44,12 @@ func (k *regionKernel) makeChannel(s regionState, x *ssa.MakeChan) (regionValue,
 	if !k.input.normalReturns {
 		return regionValue{}, regionError("channel allocation outcomes are unsupported outside normal-return scope")
 	}
+	return k.channelConstruction(s, x)
+}
+
+// channelConstruction is the value on the successful language alternative. Its
+// callers separately establish the scope and account for other outcomes.
+func (k *regionKernel) channelConstruction(s regionState, x *ssa.MakeChan) (regionValue, error) {
 	n, exact := regionInt(k.value(s, x.Size))
 	// The common language int range bounds this leaf independently of host or
 	// runtime allocation layout. Unknown and exceptional capacities refuse even

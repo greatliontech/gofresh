@@ -906,43 +906,11 @@ func (k *regionKernel) blockFrom(at regionPoint, initial regionState) ([]regionE
 				// Assigned simultaneously on the actual predecessor edge below.
 				continuing = append(continuing, s)
 			case *ssa.Jump, *ssa.If:
-				for i, successor := range block.Succs {
-					if branch, ok := instruction.(*ssa.If); ok {
-						if b, known := regionBool(k.value(s, branch.Cond)); known && b != (i == 0) {
-							if k.trace != nil {
-								k.trace.excluded = append(k.trace.excluded, regionExcludedEdge{regionEffectOccurrence: k.current, branch: branch, successor: successor, condition: b})
-							}
-							continue
-						}
-					}
-					next, err := k.clone(s)
-					if err != nil {
-						return nil, nil, err
-					}
-					if branch, ok := instruction.(*ssa.If); ok {
-						if _, known := regionBool(k.value(s, branch.Cond)); !known {
-							// The condition itself is an immutable SSA value. Retain the
-							// selected edge's Boolean fact, without inventing relations
-							// between an unmodeled comparison's operands.
-							next.values[branch.Cond] = regionValue{typ: branch.Cond.Type(), kind: regionConstant, scalar: constant.MakeBool(i == 0)}
-						}
-					}
-					pred := slices.Index(successor.Preds, block)
-					if pred < 0 {
-						return nil, nil, regionError("missing actual phi predecessor")
-					}
-					for _, ins := range successor.Instrs {
-						phi, ok := ins.(*ssa.Phi)
-						if !ok {
-							break
-						}
-						if pred >= len(phi.Edges) {
-							return nil, nil, regionError("missing actual phi edge")
-						}
-						next.values[phi] = k.value(s, phi.Edges[pred])
-					}
-					edges = append(edges, regionEdge{slot: i, block: successor, state: next})
+				actual, err := k.branchEdges(instruction, s)
+				if err != nil {
+					return nil, nil, err
 				}
+				edges = append(edges, actual...)
 			case *ssa.Return:
 				if !k.fullReturns {
 					return nil, nil, &regionOperationFailure{instruction, regionError("terminal path is outside the named use boundary")}
@@ -1009,6 +977,48 @@ func (k *regionKernel) blockFrom(at regionPoint, initial regionState) ([]regionE
 		}
 	}
 	return nil, nil, regionError("scope has no terminal transfer")
+}
+
+// branchEdges interprets actual ordered successors and simultaneous phi inputs.
+// Both invariant checking and full activation checking use this one transfer.
+func (k *regionKernel) branchEdges(instruction ssa.Instruction, s regionState) ([]regionEdge, error) {
+	block := instruction.Block()
+	var edges []regionEdge
+	for i, successor := range block.Succs {
+		if branch, ok := instruction.(*ssa.If); ok {
+			if b, known := regionBool(k.value(s, branch.Cond)); known && b != (i == 0) {
+				if k.trace != nil {
+					k.trace.excluded = append(k.trace.excluded, regionExcludedEdge{regionEffectOccurrence: k.current, branch: branch, successor: successor, condition: b})
+				}
+				continue
+			}
+		}
+		next, err := k.clone(s)
+		if err != nil {
+			return nil, err
+		}
+		if branch, ok := instruction.(*ssa.If); ok {
+			if _, known := regionBool(k.value(s, branch.Cond)); !known {
+				next.values[branch.Cond] = regionValue{typ: branch.Cond.Type(), kind: regionConstant, scalar: constant.MakeBool(i == 0)}
+			}
+		}
+		pred := slices.Index(successor.Preds, block)
+		if pred < 0 {
+			return nil, regionError("missing actual phi predecessor")
+		}
+		for _, ins := range successor.Instrs {
+			phi, ok := ins.(*ssa.Phi)
+			if !ok {
+				break
+			}
+			if pred >= len(phi.Edges) {
+				return nil, regionError("missing actual phi edge")
+			}
+			next.values[phi] = k.value(s, phi.Edges[pred])
+		}
+		edges = append(edges, regionEdge{slot: i, block: successor, state: next})
+	}
+	return edges, nil
 }
 
 func (k *regionKernel) zero(t types.Type, depth int) (regionValue, error) {

@@ -1602,6 +1602,45 @@ contracts:
   exceptional exclusions. Native and reference consumers without the corresponding
   control and antecedent accounting refuse these source evidence arms.
 
+  An outcome-sensitive source relation is distinct from the non-unwinding scope.
+  It retains all admitted normal and abrupt continuations over correlated logical
+  stores and activation-local deferred work. An implicit channel construction may
+  produce its language-defined fresh handle, initiate a panic, or fail to complete;
+  a successful construction is not an entry assumption. At success or language-
+  panic initiation, unrelated pre-existing program locations retain their values
+  after the actual operand evaluations. This logical frame follows the implicit
+  operation's language semantics: it grants no arbitrary program stores or
+  callbacks, but excludes neither evaluated operand effects, subsequent deferred
+  execution nor independently admitted interference. It supplies no frame for
+  explicit runtime calls, private allocator bookkeeping, physical resources or
+  native memory ownership. Unknown recovered payloads confer no callable or
+  method-effect authority.
+
+  Panic activity is distinct from its payload, including a nil payload wherever
+  the identified panic model permits one. Direct recovery eligibility belongs to
+  the particular deferred invocation of the panicking activation; ordinary helper
+  calls cannot inherit it. A recovery consumes that eligible panic at most once.
+  Successful recovery does not end the recovering deferred invocation; its
+  remaining execution and effects are checked. If that invocation returns normally,
+  remaining defers of the recovering activation execute against the current heap,
+  and normal completion uses its actual result continuation, never the instruction
+  after the panic. A replacement panic or other abrupt outcome retains its own
+  propagation. Nested unwinding distinguishes recovery confined within a deferred
+  invocation, after which suspended outer unwinding resumes, from propagation
+  that supersedes or aborts that outer control.
+  A non-returning operation supplies no ordinary successor. Unsupported exceptional
+  control, an unclosed execution frontier or exhausted checking bounds refuses
+  the dependent proof rather than truncating the outcome set.
+
+  A terminal-conditioned conclusion is projected only after the complete relation
+  is established. Every matching outcome must entail the claimed property;
+  recovered failures which can reach that terminal remain included. The terminal
+  predicate cannot justify an exclusion while deriving the relation itself.
+  Application requires independently bound actual execution and terminal facts;
+  normal process completion establishes neither a passing subject verdict nor
+  execution of a particular callback. No such projection supplies strict safety,
+  native completion, source purity or an intermediate-effect bound.
+
   A bodyless call may instead consume the checked selected-assembly relation of
   REQ-impl-assembly-reference at that exact occurrence and context. The relation
   supplies its derived result and complete relevant heap/effects, never an

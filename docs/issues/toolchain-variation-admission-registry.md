@@ -470,16 +470,49 @@ A complete outcome-sensitive source relation is a distinct route: it can retain
 allocation failure and actual panic/recovery propagation, then prove an implication
 restricted to independently established terminal outcomes. It must not assume the
 terminal predicate during transfer, erase recovered failures that can still pass,
-or give all resource failures a language-panic frame. Unknown effects remain
-unknown. This can avoid an allocation-infallibility theorem where the consumer
+or give all physical resource failures a native preservation frame. Under the
+existing faithful implicit-lowering premise, success and language-panic initiation
+preserve unrelated logical program variables after operand evaluation: arbitrary
+source-visible mutations and callbacks are not additional language `make` outcomes.
+Actual defers and admitted interference retain their effects; explicit runtime
+calls, allocator bookkeeping, physical resources and native ownership remain
+separate. This can avoid an allocation-infallibility theorem where the consumer
 uses the outcome-sensitive relation instead of strict safety. It does not remove
 explicit-call, selected-implementation or actual-use obligations.
 The native process terminal currently distinguishes normal completion, abnormal
 completion and never-started; normal completion includes failed tests. A stronger
 subject-PASS predicate therefore needs its own correctly bound consumer evidence,
 and package PASS alone would not establish that the requested callback executed.
-The abrupt-completion relation and its consumer qualification are scheduled at
-9.4a.2b.3b, without treating the present strict subset as an implementation of it.
+The bounded source-activation relation checks normal returns, escaping panics and
+noncompletion as separate alternatives. Its inference transcript is replayed
+against actual typed instructions before any normal-return projection; it binds
+the root and every executed ordinary or deferred callee to selected source.
+Direct recovery, nested replacement and confined recovery use the current heap
+and actual result continuation. The real 386 direct and child construction cases
+retain both the successful capacity alternative and the exact recovered `-1`
+alternative, so an exact-capacity normal projection refuses. This is conservative
+outcome coverage, not a theorem that the oversized construction succeeds.
+For actual stock and harmless-custom `newTestState`, the same relation checks
+one normal, one escaping-panic and one noncompletion alternative. The normal
+alternative retains `running = 1`, `numWaiting = 0` and the zero-capacity channel,
+with matcher and parallelism unknown; deleting the panic inference refuses.
+These constructions precede the caller's `tRunner` invocation, so the runner's
+later defers cannot recover their earlier panics. Their actual caller
+continuations remain part of the parent-composition obligation.
+Reachable cycles, recursive calls, opaque operations, explicit nil-panic semantics
+and deferred builtins remain outside this bounded relation. Actual parent/runner
+composition and subject-execution/terminal binding still land in
+`9.4a.2b.3b.2`; this relation alone supplies no callback-execution or PASS fact.
+
+Source-binder continuation ownership has an adjacent gap scheduled with the
+resumable outcome relation at `9.4a.2b.3b.2a`: `continueSourceBinder` clones the
+other mutable caches but shares an already initialized `lexical` outer map.
+Binding a literal under a new parent through `lexicalLiteral` then inserts into
+the predecessor's map, changing a sibling continuation's cached work without
+charging that sibling's original traversal. Clone and charge this outer map at
+continuation creation; completed inner count maps remain immutable. The new
+complete-activation arm does not yet use binder continuation. The repair belongs
+with its next source-continuation integration and sibling-isolation regression.
 
 Deferred execution can likewise be checked in a bounded, non-unwinding source
 grammar without first admitting arbitrary panic/recovery outcomes. Each evaluated

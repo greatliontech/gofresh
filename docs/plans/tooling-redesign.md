@@ -1386,11 +1386,48 @@
             - [ ] 9.4a.2b.3b Establish a compositional abrupt-completion relation
               before using recovered allocation paths: correlated current heaps,
               per-activation deferred work, panic propagation, direct recovery,
-              nested unwind and actual named-result continuations. Retain unknown
-              resource-failure effects and explicit runtime-call boundaries. Derive
+              nested unwind and actual named-result continuations. Retain physical
+              resource, interference and explicit runtime-call boundaries. Derive
               any terminal-conditioned projection independently, then establish its
               actual subject-execution and consumer-outcome bindings; normal process
               completion alone supplies neither PASS nor callback execution.
+              - [x] 9.4a.2b.3b.1 Check complete bounded source-activation outcomes
+                over shared typed transfer and call machinery. Retain normal,
+                panic and noncompletion alternatives; check actual deferred
+                dispatch, direct recovery, nested replacement and result
+                continuations, including the real 386 channel-allocation cases.
+                Preserve the language operation's logical source frame separately
+                from native resource and interference obligations. Bind every
+                used source body and independently check outcome coverage before
+                deriving a terminal projection; keep strict and native consumers
+                distinct.
+              - [ ] 9.4a.2b.3b.2 Compose actual stock/custom constructor outcomes
+                with their caller's recovery and deferred bodies, then qualify
+                actual subject-execution and terminal bindings on the selected
+                registration-to-runner path. Retain explicit-call, concurrent
+                channel/goroutine and native applicability obligations wherever
+                the composed path consumes them; do not substitute process
+                completion or a conditional constructor fact for those facts.
+                - [ ] 9.4a.2b.3b.2a Retain owned outcome frontiers and checked
+                  suspended call/unwind continuations with cumulative budgets;
+                  qualify partitioned versus whole checking and the actual
+                  stock/custom runTests constructor-to-Verbose segment. Preserve
+                  all allocation alternatives and prior object identities; an
+                  unresolved frontier supplies no terminal projection.
+                  Repair source-binder continuation ownership of the lexical
+                  parent cache and verify independent sibling accounting.
+                - [ ] 9.4a.2b.3b.2b Check finite roster occurrences and actual
+                  goroutine capture/signal composition through the root callback,
+                  T.Run and child tRunner, retaining separate activation identities,
+                  parent recovery, blocked outcomes and actual sender provenance.
+                - [ ] 9.4a.2b.3b.2c Close the explicit selected callerName chain,
+                  clock, synchronization, cancellation and reporting relations at
+                  their actual uses, including relevant replacements and incoming
+                  context; exclude irrelevant arms only by checked reasoning.
+                - [ ] 9.4a.2b.3b.2d Bind the derived callback occurrence and
+                  consumer terminal facts to production evidence; qualify skipped
+                  and failed tests, early signals, changed captures and cleanup
+                  failures before claiming ordinary stock/custom acceptance.
         - [ ] 9.4a.2c If needed by the chosen composition, establish and independently
           check an occurrence-specific,
           source-anchored translation/origin certificate and logical-state relation

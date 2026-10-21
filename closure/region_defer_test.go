@@ -169,6 +169,8 @@ func TestRegionDeferChannelAllocationGo386Oracle(t *testing.T) {
 	}
 	t.Logf("actual selected Go oracle: %s", strings.TrimSpace(string(output)))
 	source := relationFixture(t, child+";"+direct+";"+caller, 32)
+	checkActivationChannelCover(t, source, "F", 1<<30, false)
+	checkActivationChannelCover(t, source, "G", 1<<30, true)
 	input := func(name string) regionInput {
 		root := source.prog.Roots["F"].Pkg.Func(name)
 		return regionInput{owner: root.Prog, selection: source.prog, root: root, entry: regionPoint{root.Blocks[0], 0}, unwind: regionNoActiveUnwind,
@@ -626,6 +628,10 @@ func TestRegionDeferRuntimeGoexitRefuses(t *testing.T) {
 		t.Fatal("runtime.Goexit gained implicit primitive authority")
 	}
 	t.Logf("actual selected runtime.Goexit refusal: %v", err)
+	abrupt := regionActivationInput{owner: root.Prog, root: root, unwind: regionNoActiveUnwind, premises: slices.Clone(in.premises)}
+	if p, err := proposeRegionActivation(t.Context(), abrupt, defaultRegionLimits()); err == nil || p != nil {
+		t.Fatal("activation outcome arm granted runtime.Goexit a named theorem")
+	}
 }
 
 func TestRegionDeferWideningAndCaptureOwnership(t *testing.T) {
@@ -697,6 +703,36 @@ func FuzzRegionDeferCaptureOracle(f *testing.F) {
 		got, exact := regionInt(packet.observations[0].value)
 		if want := oracle(); !exact || got != int64(want) {
 			t.Fatalf("got %d/%v, actual Go %d", got, exact, want)
+		}
+		// The same capture grammar now also crosses an abrupt body exit. The
+		// directly dispatched defer recovers before updating the shared cell;
+		// its own normally drained defer cannot recover the parent again.
+		abruptOracle := func() (r int) {
+			x := int(a)
+			defer func(v int) { r = (r << 3) + v }(x)
+			defer func() {
+				if nested {
+					defer func() {
+						if recover() != nil {
+							r = 999
+						}
+						r += 3
+					}()
+				}
+				recover()
+				r = x
+			}()
+			x = int(b)
+			panic(1)
+		}
+		abrupt := fmt.Sprintf(`func F()(r int){x:=%d;defer func(v int){r=(r<<3)+v}(x);defer func(){if %t{defer func(){if recover()!=nil{r=999};r+=3}()};recover();r=x}();x=%d;panic(1)}`, a, nested, b)
+		completed, _ := proveActivation(t, abrupt)
+		if len(completed.outcomes) != 1 || completed.outcomes[0].kind != activationNormal {
+			t.Fatal("abrupt capture grammar lost normal recovery")
+		}
+		got, exact = regionInt(completed.outcomes[0].value)
+		if want := abruptOracle(); !exact || got != int64(want) {
+			t.Fatalf("abrupt got %d/%v, actual Go %d", got, exact, want)
 		}
 	})
 }
