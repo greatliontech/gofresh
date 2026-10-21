@@ -244,11 +244,17 @@ exception or a local bypass of observer preparation.
 One evidence-selection operation must prepare the complete runnable roster's
 residual obligations. Source-only support, identity-only diagnostics, observation
 coverage, delivery, operation outcomes and terminal completion retain distinct
-authority. `producingUnit.register` currently sends every non-diagnostic unit
-through `PrepareOutcomeSupport` and `CaptureObservedBatch`; that control split
-cannot represent the new independent source-only channel merely by relabeling
-diagnostic units. Existing singleton/package/retry and closing ownership remains
-the common lifecycle.
+authority. Ordinary production selects existing source/assertion support using
+the same evidence ladder as checking; those subjects acquire no observation
+assertion. If any subject selects observation, `PrepareOutcomeSupport` still
+checks every runnable contributor's inventory: a sibling's purity assertion does
+not prove preservation of the observing subject's environment. A capture-free
+source-supported unit retains independent closing and artifact validation without
+claiming observation facts. Optional captures retain their ordinary identity guards.
+This separates the existing channels without admitting a new artifact theorem;
+the scoped-claim admission and applicability refactor at 5.1w.2b.4b still must
+consume independently established implementation evidence. Existing
+singleton/package/retry and closing ownership remains the common lifecycle.
 
 Historical artifact bytes are proof inputs, not automatically live current
 filesystem dependencies. The historical-result rule in

@@ -920,6 +920,18 @@
             distinguish source-only support from identity-only diagnostics and
             observation support. Preserve immutable sharing, independent retries,
             cancellation, completion facts and all closing/refusal precedence.
+            - [x] 5.1w.2b.4b.1 Select existing source/assertion support per subject
+              through the ordinary evidence ladder. Permit normally completed
+              source-supported units without capture, retain optional identity
+              guards, and prepare every runnable contributor when any subject
+              needs observation. Qualify actual singleton/package production,
+              mixed-roster preservation, explicit externality, independent closing
+              and retries without adding native authority.
+            - [ ] 5.1w.2b.4b.2 After 9.4a and immutable base-fact separation, extend
+              the common selection to scoped implementation claims and historical
+              applicability. Retain the existing channel distinctions and complete
+              runnable roster while removing classification-dependent snapshot
+              mutation and diagnostic-text control from admission/finalization.
           - [ ] 5.1w.2b.4c Define and implement the native record's sufficient
             historical implementation evidence and claim-specific applicability.
             Keep immutable historical proof inputs distinct from live current
@@ -1091,6 +1103,11 @@
           scope-preserving retry waves within this migration. Use its complete
           compilation-environment guard and finish one clean replacement;
           an older-baseline runner release is not a separate deliverable.
+          Adopt per-subject producing-evidence selection: retain publication of
+          source/assertion-supported results with identity-only captures, and
+          verify the complete process outcome roster independently of which
+          subject fingerprints selected observation. Update the consumer's
+          support-roster assertions with the released native dependency.
     - [ ] 5.2e Verify restart, revoked declarations, historical non-upgrade,
       package failure and cancellation, and the independent completed prefix.
       Complete and verify the preparation sharing designed before 5.2d.2's

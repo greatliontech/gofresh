@@ -730,6 +730,12 @@ func (v *View) attachObservation(subject Subject, fingerprint Fingerprint, obser
 	if err != nil {
 		return Fingerprint{}, err
 	}
+	return v.attachRuntimeState(subject, fingerprint, &state, observed)
+}
+
+// attachRuntimeState validates the exact prepared fingerprint even when no
+// observation was selected. Nil state supplies no runtime evidence or assertion.
+func (v *View) attachRuntimeState(subject Subject, fingerprint Fingerprint, state *runtimeinput.State, observed bool) (Fingerprint, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.sealed {
@@ -745,12 +751,15 @@ func (v *View) attachObservation(subject Subject, fingerprint Fingerprint, obser
 	if (observed && !v.capturedObserved[subject]) || fingerprint != want {
 		return Fingerprint{}, errors.New("gofresh: observation does not match captured subject proof")
 	}
+	if state == nil {
+		return fingerprint, nil
+	}
 	if _, attached := v.attachedObservations[subject]; attached {
 		return Fingerprint{}, errors.New("gofresh: runtime observation already attached for subject")
 	}
 	fingerprint.RuntimeInputs = state.Manifest
 	fingerprint.RuntimeDigest = state.Digest
-	v.attachedObservations[subject] = state
+	v.attachedObservations[subject] = *state
 	return fingerprint, nil
 }
 

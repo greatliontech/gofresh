@@ -280,6 +280,16 @@ identity-only observation, incomplete process and supported observation have
 different permitted uses; closing preserves those distinctions rather than
 requiring every unit to claim an executed, supported success.
 
+Ordinary production selects observation obligations per subject from the same
+admitted source and assertion evidence used by checking. A subject already
+supported without observation acquires no observation-completeness assertion on
+its fingerprint. A unit whose subjects are all supported this way needs no outcome
+proof. A normally completed unit with no selected observation
+obligation may omit its capture; that absence establishes no observation facts,
+rather than an incomplete observation. A supplied optional capture retains its
+ordinary input guards and refusals without becoming outcome authority. Explicit
+identity-only diagnostic selection remains distinct from this automatic selection.
+
 Operation cancellation prevents new producing work. A consumer can finish
 already-paid successful work in a separately declared, bounded closing phase,
 using the context it supplies for that phase and retaining the interruption
@@ -312,8 +322,9 @@ or a proof that an arbitrary compiler followed the description. The execution
 uses that artifact under the runtime description; a compiling go command under
 the latter is not that execution. The singleton form admits one subject and exactly one
 contributing process per unit; a second registration refuses. Registration fixes
-the process identity, capture path and observation declarations before execution,
-with an exclusively assigned capture protected through finalization. Malformed
+the process identity, any capture path and observation declarations before execution,
+with each selected capture exclusively assigned and protected through finalization.
+Malformed
 scratch namespace declarations refuse before frame/proof preparation or reservation
 of the contribution, using the runtime-input namespace grammar. A relative
 capture path resolves against the admitted runtime directory; execution and
@@ -322,7 +333,8 @@ path's filesystem meaning rather than lexically cancelling its components.
 Submission
 accepts only its opaque contribution handle and one explicit normal, abnormal or
 never-started terminal disposition. Normality includes harness completion and
-flush, not merely a zero exit code, and says nothing about sample success. A
+flush of any selected capture, not merely a zero exit code, and says nothing about
+sample success. A
 never-started process produces no executed fingerprint. Closing freezes the
 roster before work, owns finalization and validation under its context, and
 returns the native fingerprint, terminal fact, observation support class and
@@ -518,16 +530,20 @@ admit package-process production under these obligations:
   complete batch before producing work. A declared single-subject model refuses
   a larger set; the package form does not change accepted assertion policy.
 - **process-binding** — One process has one retained-artifact binding, frame,
-  actual environment, exclusively assigned capture and explicit terminal
+  actual environment, any exclusively assigned capture and explicit terminal
   disposition. A second registration refuses. The observation stream has no
   per-subject attribution: each subject's fingerprint retains all process
   identities and refusals beside its own source/proof and assertion facts.
-- **outcome-scope** — Outcome support is prepared over the whole selected set
-  and requires every member's admitted inventory, not just published members.
+- **outcome-scope** — When any subject selects observation, outcome support is
+  prepared over the whole selected set and requires every member's admitted
+  inventory, not just published or observation-dependent members. Source/assertion
+  support for a member does not establish preservation of a sibling's environment.
+  Every contributing inventory remains a closing obligation, while each subject's
+  fingerprint retains only its selected observation assertion and proof.
   Unsupported inventory preserves identity-only evidence; package isolation and
   normal completion do not establish outcome support. A subject's purity override
   changes neither process observation authority nor a sibling's judgment.
-- **closing-protocol** — Closing finalizes the capture once and exposes
+- **closing-protocol** — Closing finalizes any selected capture once and exposes
   subject-indexed native evidence and judgments only after the whole execution's
   closing validation succeeds. The final account retains the process and artifact,
   actual terminal assertion and separate observation-completeness and outcome-support

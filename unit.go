@@ -27,6 +27,8 @@ var ErrUnitAborted = errors.New("gofresh: unit aborted before closing completed"
 // this contribution through finalization. A relative path resolves against the
 // binding's runtime directory at registration, and the same absolute coordinate
 // is returned to the executor and read by closing. It is not supplied at Submit.
+// Capture may be omitted when the selected source/assertion evidence needs no
+// observation. A supplied capture still contributes ordinary input guards.
 type ProcessDescription struct {
 	Identity          string
 	Capture           string
@@ -40,7 +42,7 @@ type ProcessDescription struct {
 type TerminalKind uint8
 
 const (
-	// NormalCompletion asserts ordinary harness completion and capture flush,
+	// NormalCompletion asserts ordinary harness completion and flush of any capture,
 	// including an ordinarily completed failing test, never merely exit code zero.
 	NormalCompletion TerminalKind = iota + 1
 	// AbnormalCompletion names an incomplete, crashed or killed execution.
@@ -115,6 +117,7 @@ type unitExecution struct {
 	frame         runtimeinput.ProducerFrame
 	support       runtimeinput.OutcomeSupport
 	fingerprints  map[Subject]Fingerprint
+	observed      map[Subject]bool
 	outcomeReason string
 	observation   finalizedProcessObservation
 	terminal      Terminal
@@ -138,7 +141,7 @@ type PackageUnit struct {
 }
 
 // producingUnit is the single lifecycle for singleton and package executions.
-// The immutable subject set is also the process's complete proof obligation.
+// The immutable subject set is also the complete roster for process-wide proofs.
 type producingUnit struct {
 	mu            sync.Mutex
 	phase         unitPhase
@@ -273,15 +276,30 @@ func (u *producingUnit) register(ctx context.Context, build BuildBinding, proces
 	u.execution = x
 	u.mu.Unlock()
 	frame := runtimeinput.CaptureProducerFrame(preparing, e.evidenceRootFor(e.dir), dir, runtimeinput.FrameOptions{BracketPaths: process.BracketPaths, ExcludedPaths: process.ExcludedPaths})
-	var err error
 	var support runtimeinput.OutcomeSupport
-	var fingerprints map[Subject]Fingerprint
-	if u.identityOnly {
-		fingerprints, err = u.view.CaptureBatch(preparing)
-	} else {
+	fingerprints, err := u.view.CaptureBatch(preparing)
+	observed := make(map[Subject]bool)
+	if err == nil && !u.identityOnly {
+		// Selection uses the ordinary evidence ladder over this immutable
+		// snapshot, not a second set of purity or closure admission rules.
+		for _, subject := range u.view.subjects {
+			fp := fingerprints[subject]
+			if decide(fp, u.view.facts.maximal[subject], u.view.guards(), runtimeinput.State{}, u.view.kind, u.view.purityMatches(fp, subject)).Status != Valid {
+				observed[subject] = true
+			}
+		}
+	}
+	if err == nil && len(observed) != 0 {
+		// Even a source-supported or asserted-pure contributor can affect an
+		// observing sibling's environment. Preserve the entire process roster
+		// in outcome preparation and its closing proof obligations.
 		support, err = u.view.PrepareOutcomeSupport(preparing, frame, process.Identity)
 		if err == nil {
-			fingerprints, err = u.view.CaptureObservedBatch(preparing)
+			var all map[Subject]Fingerprint
+			all, err = u.view.CaptureObservedBatch(preparing)
+			for subject := range observed {
+				fingerprints[subject] = all[subject]
+			}
 		}
 	}
 	if err == nil {
@@ -313,8 +331,11 @@ func (u *producingUnit) register(ctx context.Context, build BuildBinding, proces
 		return Contribution{}, err
 	}
 	x.frame, x.support, x.fingerprints, x.outcomeReason = frame, support, fingerprints, support.Reason(binding)
+	x.observed = observed
 	if u.identityOnly {
 		x.outcomeReason = "identity-only execution selected"
+	} else if len(observed) == 0 {
+		x.outcomeReason = "source/assertion evidence selected; observation support not required"
 	}
 	x.ready = true
 	return Contribution{unit: u, execution: x}, nil
@@ -431,9 +452,11 @@ type ObservationDisposition uint8
 
 const (
 	// UnknownObservation means finalization has not established observation facts.
-	// It includes work not attempted or interrupted before finalization completed.
+	// It includes an unselected optional capture, work not attempted, or work
+	// interrupted before finalization completed. Terminal completion is separate.
 	UnknownObservation ObservationDisposition = iota
-	// SupportedObservation carries the subject's admitted outcome support.
+	// SupportedObservation carries process-wide outcome support for the subjects
+	// selecting observation evidence.
 	SupportedObservation
 	// IdentityObservation carries finalized input guards, not outcome support.
 	IdentityObservation
@@ -517,28 +540,39 @@ func (u *producingUnit) close(ctx context.Context) (result FinalizedProcess, err
 	if x.terminal.Kind == NeverStarted {
 		return FinalizedProcess{}, fmt.Errorf("gofresh: execution %q never started: %s", x.process.Identity, x.terminal.Reason)
 	}
-	receipt, err := x.frame.Completion(x.process.Identity, x.env, x.terminal.Reason)
-	if err != nil {
-		return FinalizedProcess{}, err
-	}
-	s := u.snapshot.session
-	in := runtimeinput.ProducerIngest{Identity: x.process.Identity, Env: x.env, Runner: s.engine.runner, Roots: &s.roots, Completion: receipt, Outcome: x.support, ScratchRoot: x.process.ScratchRoot, ExcludedPaths: x.process.ExcludedPaths, ScratchNamespaces: x.process.ScratchNamespaces}
 	var observation runtimeinput.Observation
-	var observationReason string
-	if x.outcomeReason == "" {
-		observation, observationReason, err = x.frame.Observe(ctx, x.process.Capture, in)
-	} else {
-		observation, observationReason, err = x.frame.ObserveInputs(ctx, x.process.Capture, in)
-	}
-	if err != nil {
-		return FinalizedProcess{}, err
-	}
-	if err := u.recordObservation(observation, observationReason); err != nil {
-		return FinalizedProcess{}, err
+	var inputs *runtimeinput.State
+	// An absent optional capture is not an incomplete observation. Diagnostic
+	// identity units and abnormal executions retain their explicit finalization
+	// semantics, as do ordinary units that selected observation obligations.
+	if len(x.observed) != 0 || u.identityOnly || x.process.Capture != "" || x.terminal.Kind != NormalCompletion {
+		receipt, err := x.frame.Completion(x.process.Identity, x.env, x.terminal.Reason)
+		if err != nil {
+			return FinalizedProcess{}, err
+		}
+		s := u.snapshot.session
+		in := runtimeinput.ProducerIngest{Identity: x.process.Identity, Env: x.env, Runner: s.engine.runner, Roots: &s.roots, Completion: receipt, Outcome: x.support, ScratchRoot: x.process.ScratchRoot, ExcludedPaths: x.process.ExcludedPaths, ScratchNamespaces: x.process.ScratchNamespaces}
+		var observationReason string
+		if x.outcomeReason == "" {
+			observation, observationReason, err = x.frame.Observe(ctx, x.process.Capture, in)
+		} else {
+			observation, observationReason, err = x.frame.ObserveInputs(ctx, x.process.Capture, in)
+		}
+		if err != nil {
+			return FinalizedProcess{}, err
+		}
+		if err := u.recordObservation(observation, observationReason); err != nil {
+			return FinalizedProcess{}, err
+		}
+		state, err := runtimeinput.CompletedState(observation)
+		if err != nil {
+			return FinalizedProcess{}, err
+		}
+		inputs = &state
 	}
 	fingerprints := make(map[Subject]Fingerprint, len(u.view.subjects))
 	for _, subject := range u.view.subjects {
-		fp, err := u.view.attachObservation(subject, x.fingerprints[subject], observation, !u.identityOnly)
+		fp, err := u.view.attachRuntimeState(subject, x.fingerprints[subject], inputs, x.observed[subject])
 		if err != nil {
 			return FinalizedProcess{}, err
 		}

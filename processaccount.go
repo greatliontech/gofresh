@@ -83,7 +83,10 @@ func (u *producingUnit) account() (ProcessAccount, bool) {
 		if x.observation.reason != "" {
 			disposition = IncompleteObservation
 		} else {
-			for _, subject := range u.view.subjects {
+			if len(x.observed) == 0 {
+				disposition = IdentityObservation
+			}
+			for subject := range x.observed {
 				// Attachment adds only runtime inputs and their digest; neither
 				// is part of the prepared outcome-subject identity.
 				if !runtimeinput.HasOutcomeSupport(x.observation.inputs.Manifest, outcomeSubject(x.fingerprints[subject], subject)) {
