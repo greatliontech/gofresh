@@ -489,11 +489,11 @@ func F()[]int{return []int{invoke(A{11}),invoke(A{13}),invoke(&B{22}),invoke(&B{
 			t.Fatal("binding detached from checked dependency")
 		}
 		call := binding.call
-		if !call.at.Call.IsInvoke() {
+		if !call.at.Common().IsInvoke() {
 			continue
 		}
 		if invoke == nil {
-			invoke = call.at
+			invoke = call.at.(*ssa.Call)
 		}
 		if call.at != invoke {
 			t.Fatal("fixture did not reuse one interface invoke site")

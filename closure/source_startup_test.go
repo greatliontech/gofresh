@@ -250,7 +250,7 @@ func TestSourceStartupRefusalsAreScopedAndAtomic(t *testing.T) {
 		{"late-init", `var X=1; func init(){panic("late")}`, `consume(X)`},
 		{"late-main", `var X=1`, `panic("late"); consume(X)`},
 		{"go", `var X int; func init(){go func(){X=2}()}`, `consume(X)`},
-		{"defer", `var X int; func init(){defer func(){X=2}()}`, `consume(X)`},
+		{"defer", `var X int; func init(){defer func(){X=2;panic("deferred")}()}`, `consume(X)`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in, main, use := startupFixture(t, map[string][]string{"main": {"package main\n" + tc.extra + "\nfunc consume(int){};func main(){" + tc.body + "}"}})

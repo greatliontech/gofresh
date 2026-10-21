@@ -20,11 +20,11 @@ func checkScopedRegistrationOracle(t testing.TB, a, b string, swap bool) {
 	if swap {
 		write = `x[0]=Row[func()]{x[0].Name,b,d};x[1].F=a;`
 	}
-	text := fmt.Sprintf(`type Row[T any] struct{Name string;F T;C chan struct{}};var again bool;func a(){};func b(){};func before(){};func Stop([2]Row[func()]){};func F()[2]Row[func()]{for{before();c,d:=make(chan struct{},%d),make(chan struct{},%d);x:=[2]Row[func()]{{%s,a,c},{%s,b,d}};p:=&x[0].F;%sx[0].F=*p;Stop(x);if !again{return x}}}`, len(a), len(b), strconv.Quote(a), strconv.Quote(b), write)
+	text := fmt.Sprintf(`type Row[T any] struct{Name string;F T;C *int};var again bool;func a(){};func b(){};func before(){};func Stop([2]Row[func()]){};func F()[2]Row[func()]{for{before();c,d:=new(int),new(int);*c=%d;*d=%d;x:=[2]Row[func()]{{%s,a,c},{%s,b,d}};p:=&x[0].F;%sx[0].F=*p;Stop(x);if !again{return x}}}`, len(a), len(b), strconv.Quote(a), strconv.Quote(b), write)
 	in := regionAtCall(t, regionFixture(t, text), "Stop", 0)
 	found := false
 	for i, instruction := range in.use.at.block.Instrs {
-		if _, ok := instruction.(*ssa.MakeChan); ok {
+		if _, ok := instruction.(*ssa.Alloc); ok {
 			in.entry = regionPoint{in.use.at.block, i}
 			found = true
 			break
@@ -93,7 +93,7 @@ func checkLinearLoop(t testing.TB, in regionInput, finite bool) (*checkedRegion,
 }
 
 func TestRegionStraightLineLoopConstruction(t *testing.T) {
-	in := linearLoopFixture(t, `type Box struct{X,Y int;C chan bool};func before(){};func Stop(*Box){};func F(again bool)*Box{for{before();p:=new(Box);p.X=7;p.C=make(chan bool,3);Stop(p);if !again{return p}}}`)
+	in := linearLoopFixture(t, `type Box struct{X,Y int;C *[3]bool};func before(){};func Stop(*Box){};func F(again bool)*Box{for{before();p:=new(Box);p.X=7;p.C=new([3]bool);Stop(p);if !again{return p}}}`)
 	if in.entry.index == 0 {
 		t.Fatal("fixture does not exercise a mid-block entry")
 	}
@@ -112,8 +112,9 @@ func TestRegionStraightLineLoopConstruction(t *testing.T) {
 		}
 		localEffectInteger(t, box.elements[0], 7)
 		localEffectInteger(t, box.elements[1], 0)
-		if channel := box.elements[2]; channel.kind != regionChannel || channel.capacity != 3 || !k.singleton(channel.location.object) {
-			t.Fatal("constructed channel lost capacity or instance identity")
+		array := box.elements[2]
+		if array.kind != regionPointer || !k.singleton(array.location.object) || len(out.state.memory[array.location.object].elements) != 3 {
+			t.Fatal("constructed array lost extent or instance identity")
 		}
 		for _, again := range []bool{false, true} {
 			assertRegionCovers(t, checked, executeRegionConcrete(t, in, again))

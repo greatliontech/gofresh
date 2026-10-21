@@ -181,7 +181,27 @@ func (k *regionKernel) trimHeap(s *regionState) error {
 		}
 	}
 	for _, roots := range k.session.suspended {
-		for _, v := range roots {
+		for _, v := range roots.values {
+			if err := visit(v); err != nil {
+				return err
+			}
+		}
+		for _, capture := range roots.pending.captures {
+			if err := visit(capture.callable); err != nil {
+				return err
+			}
+			for _, v := range capture.arguments {
+				if err := visit(v); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	for _, capture := range s.pending.captures {
+		if err := visit(capture.callable); err != nil {
+			return err
+		}
+		for _, v := range capture.arguments {
 			if err := visit(v); err != nil {
 				return err
 			}

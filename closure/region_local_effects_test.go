@@ -211,6 +211,8 @@ func TestRegionLocalContinuationRetainsAllocationAndCurrentContents(t *testing.T
 	in := prefix.region.packet.input
 	in.entry, in.use = in.use.at, regionUse{at: regionPoint{calls[1].Block(), slices.Index(calls[1].Block().Instrs, ssa.Instruction(calls[1]))}, operand: calls[1].Call.Args[1]}
 	in.initial = prefix.region.packet.observations[0].state
+	// This projection claims heap facts only, not predecessor control authority.
+	in.initial.pending = regionDeferStack{}
 	k, err := newRegionKernel(t.Context(), in, defaultRegionLimits())
 	if err != nil {
 		t.Fatal(err)

@@ -135,7 +135,7 @@ func (p *globalFunctionCorrespondence) bindActualCall(ctx context.Context, sourc
 	usage := p.source.region.packet.usage
 	usage.ctx = ctx
 	checker := regionKernel{meter: &usage}
-	current := regionState{memory: packet.observations[0].state.memory}
+	current := regionState{memory: packet.observations[0].state.memory, pending: regionDeferStack{known: true}}
 	for _, pair := range [][2]regionState{{current, proof.initial}, {proof.initial, current}} {
 		included, err := checker.included(pair[0], pair[1])
 		if err != nil {

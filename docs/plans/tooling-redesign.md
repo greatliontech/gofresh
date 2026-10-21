@@ -1340,30 +1340,57 @@
           selected explicit implementations, their effects and actual-use coverage
           independently. Do not apply an isolated native callback theorem without
           its native lifting obligations, or use arbitrary call results as frames.
-          - [x] 9.4a.2b.1 Add checked channel creation required by the actual T.Run
+          - [ ] 9.4a.2b.1 Add checked channel creation required by the actual T.Run
             constructor and preserve typed field/argument transport. Retain fresh
             identity, capacity, aliases and allocation cardinality without
             manufacturing channel contents, synchronization, native layout or
             goroutine execution. Qualify both actual channel operations and identify
             the next unresolved entry-state or explicit-call obligation on stock
             and harmless-custom source.
+            - [ ] 9.4a.2b.1a Establish selected channel-allocation outcomes before
+              strict construction admission: actual element layout, capacity and
+              extent guards, selected helper/allocator paths, and applicable
+              resource-state and exceptional-control conditions. Retain normal-return
+              identity/capacity postconditions separately; neither a small capacity
+              nor successful guard arithmetic establishes allocation safety.
+              Require this no-unwind theorem only where the selected composition
+              consumes strict safety; complete outcome propagation at 9.4a.2b.3b
+              may instead retain allocation failures without assuming success.
           - [ ] 9.4a.2b.2 Establish construction-to-goroutine capture and runner
             entry, including parent state and the context/cancellation closure.
             Complete explicit callerName/runtime-inspection, synchronization and
             clock frames at their actual uses; current scratch ownership is the
             clock's local requirement, with allocator/cache preservation proved
             only where the supplying ownership construction consumes it.
-            - [x] 9.4a.2b.2a Derive allocation cardinality for an actual straight-line
+            - [ ] 9.4a.2b.2a Derive allocation cardinality for an actual straight-line
               entry-to-use scope inside an enclosing loop without changing shared
               whole-function recurrence. Preserve earlier-instance aliases, wider
               child scopes and continuation guards. Qualify the actual runTests
               root T constructor through its next call boundary, retaining unknown
               prefix context/matcher/flag inputs and unproved subsequent transport.
+              Requalify the constructor after 9.4a.2b.1a or 9.4a.2b.3b supplies
+              the allocation outcomes its composition consumes; scoped
+              non-reexecution alone is insufficient.
           - [ ] 9.4a.2b.3 Check deferred capture and execution, exceptional outcomes,
             completion/reporting and relevant interference over the same invocation.
             Separate clock-value relevance from the clock call's effects. Establish
             actual compiler replacement/dispatch coverage before lifting any source
             claim to the producing artifact and public historical acceptance.
+            - [x] 9.4a.2b.3a Check captured deferred calls through normal LIFO
+              execution in the strict non-unwinding source grammar. Preserve current
+              heap, activation-local stacks, named-result timing, actual call sites
+              and retained control antecedents; refuse alternate-stack registration,
+              possible unwinding and unproved native calls. Keep normal-return-only
+              summaries separate and qualify actual runner capture boundaries without
+              granting execution of their unresolved bodies or native applicability.
+            - [ ] 9.4a.2b.3b Establish a compositional abrupt-completion relation
+              before using recovered allocation paths: correlated current heaps,
+              per-activation deferred work, panic propagation, direct recovery,
+              nested unwind and actual named-result continuations. Retain unknown
+              resource-failure effects and explicit runtime-call boundaries. Derive
+              any terminal-conditioned projection independently, then establish its
+              actual subject-execution and consumer-outcome bindings; normal process
+              completion alone supplies neither PASS nor callback execution.
         - [ ] 9.4a.2c If needed by the chosen composition, establish and independently
           check an occurrence-specific,
           source-anchored translation/origin certificate and logical-state relation

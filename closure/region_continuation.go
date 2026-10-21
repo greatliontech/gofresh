@@ -94,8 +94,10 @@ func (k *regionKernel) effectTransfer(state regionState, instruction ssa.Instruc
 	var value regionValue
 	write := false
 	switch x := instruction.(type) {
-	case *ssa.DebugRef, *ssa.Jump, *ssa.Phi:
+	case *ssa.DebugRef, *ssa.Jump, *ssa.Phi, *ssa.RunDefers:
 		return nil
+	case *ssa.MakeClosure, *ssa.MakeInterface, *ssa.ChangeInterface, *ssa.Defer:
+		return k.effectOperands(state, instruction)
 	case *ssa.Alloc:
 		object := regionObject{kind: regionAllocation, site: x, context: k.input.root, invocation: k.invocation}
 		if !k.singleton(object) {
@@ -103,10 +105,8 @@ func (k *regionKernel) effectTransfer(state regionState, instruction ssa.Instruc
 		}
 		return nil
 	case *ssa.MakeChan:
-		object := regionObject{kind: regionChannelAllocation, site: x, context: k.input.root, invocation: k.invocation}
-		if !k.singleton(object) {
-			return regionError("finite effect channel allocation is not a fresh singleton")
-		}
+		// The common transfer refuses construction without checked allocation
+		// outcomes. No finite allocation event can be produced on this path.
 		return nil
 	case *ssa.FieldAddr, *ssa.IndexAddr:
 		// The ordinary typed transfer checks bounds and storage provenance;
@@ -138,13 +138,11 @@ func (k *regionKernel) effectTransfer(state regionState, instruction ssa.Instruc
 		if k.cycle[x.Block()] {
 			return regionError("finite effect scope has a recurrent call site")
 		}
-		if builtin, ok := x.Call.Value.(*ssa.Builtin); ok && (builtin.Name() == "len" || builtin.Name() == "cap") {
+		if builtin, ok := x.Call.Value.(*ssa.Builtin); ok && (builtin.Name() == "len" || builtin.Name() == "cap" || builtin.Name() == "recover") {
 			return k.effectOperands(state, instruction)
 		}
-		target := x.Call.StaticCallee()
-		if x.Call.IsInvoke() || target == nil || len(target.Blocks) == 0 && k.session.references[target] == nil {
-			return regionError("finite effect scope call has no checkable body or reference")
-		}
+		// The shared call transfer resolves the actual callable and checks its
+		// complete body. StaticCallee alone would reject captured dynamic values.
 		return k.effectOperands(state, instruction)
 	case *ssa.Return:
 		if !k.fullReturns {
@@ -526,6 +524,9 @@ func (r *sourceReturnCompletion) checkedPacket() *checkedRegion {
 		return nil
 	}
 	packet := checkedSourceEffectPacket(r.region, r.checker)
+	if packet != nil && (packet.input.unwind != r.prior.region.packet.input.unwind || packet.input.pendingAntecedent != r.prior.region.packet.input.pendingAntecedent || !slices.Equal(packet.input.premises, r.prior.region.packet.input.premises)) {
+		return nil
+	}
 	if packet == nil || !r.checker.fullReturns || r.prior != r.checker.session.predecessor || len(packet.observations) != 1 || r.occurrence != packet.observations[0].occurrence || r.occurrence.instruction != r.returned || !packet.trace.seen[r.occurrence] || r.occurrence.owner != r.prior.cursor.owner || regionInstruction(packet.input.use.at) != r.returned || packet.input.root != r.prior.region.packet.input.root || packet.input.selection != r.prior.region.packet.input.selection || packet.input.storageModel != r.prior.region.packet.input.storageModel {
 		return nil
 	}

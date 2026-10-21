@@ -20,6 +20,7 @@ type regionInvocation struct {
 }
 
 type regionContextFacts struct {
+	deferred bool
 	function *ssa.Function
 	cycle    map[*ssa.BasicBlock]bool
 	repeated bool
@@ -36,7 +37,10 @@ type regionCallProof struct {
 	caller       regionEffectOccurrence
 	selection    *program
 	occurrences  *regionOccurrencePath
-	at           *ssa.Call
+	at           ssa.CallInstruction
+	registration regionEffectOccurrence
+	drain        *ssa.RunDefers
+	unwind       regionUnwindScope
 	target       *ssa.Function
 	invocation   regionInvocation
 	initial      regionState
@@ -51,7 +55,7 @@ type regionCallProof struct {
 type regionCallSession struct {
 	exceptional  map[regionExcludedContinuation]bool
 	dependencies map[*regionCallProof]map[*regionCallProof]bool
-	suspended    []map[ssa.Value]regionValue
+	suspended    []regionState
 	functions    map[*ssa.Function]regionFunctionFacts
 	root         *ssa.Function
 	meter        *regionMeter
@@ -105,11 +109,19 @@ func regionSourceCallBody(fn *ssa.Function) bool {
 	return origin != nil && origin != fn && origin.Syntax() == fn.Syntax() && len(fn.TypeArgs()) != 0
 }
 
-func (k *regionKernel) invocationAt(call *ssa.Call, target *ssa.Function) (regionInvocation, error) {
+func (k *regionKernel) invocationAt(call ssa.CallInstruction, target *ssa.Function) (regionInvocation, error) {
+	return k.invocationFor(call, target, nil, nil)
+}
+
+func (k *regionKernel) invocationFor(call ssa.CallInstruction, target *ssa.Function, capture *regionDeferredCall, drain *ssa.RunDefers) (regionInvocation, error) {
 	// Finite cyclic call sites remain refused. Consequently the existing actual
 	// call string is injective over admitted activations; the exact caller event
 	// binds proof applications without a second activation-identity mechanism.
-	if k.trace != nil && (k.cycle[call.Block()] || k.current.instruction != call || k.current.invocation != k.invocation || k.current.owner != k.trace.owner || !k.trace.seen[k.current]) {
+	invoking := ssa.Instruction(call)
+	if capture != nil {
+		invoking = drain
+	}
+	if k.trace != nil && (k.cycle[call.Block()] || k.current.instruction != invoking || k.current.invocation != k.invocation || k.current.owner != k.trace.owner || !k.trace.seen[k.current]) {
 		return regionInvocation{}, regionError("call lacks its exact checked invoking occurrence")
 	}
 	parent, ok := k.session.contexts[k.invocation]
@@ -124,7 +136,13 @@ func (k *regionKernel) invocationAt(call *ssa.Call, target *ssa.Function) (regio
 		return regionInvocation{}, regionError("call is not an actual instruction")
 	}
 	id := regionInvocation{root: k.session.root, path: k.invocation.path + fmt.Sprintf("/%d:%d:%p", call.Block().Index, index, target)}
-	facts := regionContextFacts{function: target, repeated: parent.repeated || k.cycle[call.Block()], depth: parent.depth + 1}
+	if capture != nil {
+		if capture.site != call || drain == nil || drain.Parent() != k.input.root || capture.registration.instruction != call || capture.registration.invocation != k.invocation || k.trace != nil && (capture.registration.owner != k.trace.owner || !k.trace.seen[capture.registration]) {
+			return regionInvocation{}, regionError("deferred invocation lacks checked registration and drain")
+		}
+		id.path += fmt.Sprintf("/defer:%d:%d:%d", capture.registration.ordinal, drain.Block().Index, slices.Index(drain.Block().Instrs, ssa.Instruction(drain)))
+	}
+	facts := regionContextFacts{function: target, repeated: parent.repeated || k.cycle[call.Block()], depth: parent.depth + 1, deferred: parent.deferred || capture != nil}
 	// Normal-return summaries intentionally merge activations. Escaping objects
 	// are summaries; only independently proved activation-local storage may be
 	// strongly initialized. The strict occurrence arm retains exact call strings.
@@ -134,7 +152,7 @@ func (k *regionKernel) invocationAt(call *ssa.Call, target *ssa.Function) (regio
 		facts.depth = 1
 	}
 	if old, exists := k.session.contexts[id]; exists {
-		if old.function != target || old.repeated != facts.repeated || old.depth != facts.depth {
+		if old.function != target || old.repeated != facts.repeated || old.depth != facts.depth || old.deferred != facts.deferred {
 			return regionInvocation{}, regionError("inconsistent derived call context")
 		}
 	} else {
@@ -151,33 +169,53 @@ func (k *regionKernel) invocationAt(call *ssa.Call, target *ssa.Function) (regio
 }
 
 func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, error) {
-	k.meter.applications++
-	if err := k.meter.tick(); err != nil {
+	callable, actual, err := k.callOperands(call, caller)
+	if err != nil {
 		return nil, err
 	}
-	k.session.suspended = append(k.session.suspended, caller.values)
-	defer func() { k.session.suspended = k.session.suspended[:len(k.session.suspended)-1] }()
-	callable := k.value(caller, call.Call.Value)
+	return k.invoke(call, caller, callable, actual, nil, nil)
+}
+
+func (k *regionKernel) callOperands(call ssa.CallInstruction, caller regionState) (regionValue, []regionValue, error) {
+	common := call.Common()
+	callable := k.value(caller, common.Value)
 	if err := k.validateValue(callable, 0); err != nil {
-		return nil, err
+		return regionValue{}, nil, err
 	}
 	var actual []regionValue
-	if call.Call.IsInvoke() {
+	if common.IsInvoke() {
 		target, receiver, err := k.interfaceTarget(call, callable)
 		if err != nil {
-			return nil, err
+			return regionValue{}, nil, err
 		}
 		callable = regionValue{typ: target.Type(), kind: regionCallable, target: target}
 		actual = append(actual, receiver)
 	}
-	for _, operand := range call.Call.Args {
+	for _, operand := range common.Args {
 		if k.value(caller, operand).kind == regionUnsafePointer {
-			return nil, regionError("unsafe pointer view cannot escape through a call")
+			return regionValue{}, nil, regionError("unsafe pointer view cannot escape through a call")
 		}
 		actual = append(actual, k.value(caller, operand))
 	}
+	return callable, actual, nil
+}
+
+func (k *regionKernel) invoke(call ssa.CallInstruction, caller regionState, callable regionValue, actual []regionValue, capture *regionDeferredCall, drain *ssa.RunDefers) ([]regionState, error) {
+	k.meter.applications++
+	if err := k.meter.tick(); err != nil {
+		return nil, err
+	}
+	k.session.suspended = append(k.session.suspended, caller)
+	defer func() { k.session.suspended = k.session.suspended[:len(k.session.suspended)-1] }()
+	if err := k.validateValue(callable, 0); err != nil {
+		return nil, err
+	}
 	if callable.kind == regionCallable && k.session.references[callable.target] != nil {
-		return k.callReference(call, caller, callable, actual)
+		ordinary, ok := call.(*ssa.Call)
+		if !ok || capture != nil || k.session.contexts[k.invocation].deferred || k.input.unwind != regionUnknownUnwind || len(caller.pending.captures) != 0 {
+			return nil, regionError("reference cannot account for deferred control or unwind antecedent")
+		}
+		return k.callReference(ordinary, caller, callable, actual)
 	}
 	if callable.kind != regionCallable || !regionSourceCallBody(callable.target) {
 		return nil, regionError("call target has no supported ordinary source body")
@@ -192,11 +230,11 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 	if len(actual) != len(target.Params) || len(callable.environment) != len(target.FreeVars) {
 		return nil, regionError("actual call arguments or closure environment are incomplete")
 	}
-	id, err := k.invocationAt(call, target)
+	id, err := k.invocationFor(call, target, capture, drain)
 	if err != nil {
 		return nil, err
 	}
-	initial, err := k.clone(regionState{memory: caller.memory})
+	initial, err := k.clone(regionState{memory: caller.memory, pending: regionDeferStack{known: true}})
 	if err != nil {
 		return nil, err
 	}
@@ -214,12 +252,16 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 		}
 		initial.values[free] = value
 	}
-	in := regionInput{normalReturns: k.input.normalReturns, owner: k.input.owner, selection: k.input.selection, root: target, entry: regionPoint{target.Blocks[0], 0}, initial: initial, premises: k.input.premises, storageModel: k.input.storageModel}
+	in := regionInput{normalReturns: k.input.normalReturns, unwind: k.input.unwind, owner: k.input.owner, selection: k.input.selection, root: target, entry: regionPoint{target.Blocks[0], 0}, initial: initial, premises: k.input.premises, storageModel: k.input.storageModel}
 	child, err := newRegionContextKernel(in, k.session, id, true)
 	if err != nil {
 		return nil, err
 	}
 	var proof *regionCallProof
+	registration := regionEffectOccurrence{}
+	if capture != nil {
+		registration = capture.registration
+	}
 	if k.session.byTarget == nil {
 		k.session.byTarget = map[*ssa.Function][]*regionCallProof{}
 		for _, p := range k.session.proofs {
@@ -234,7 +276,7 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 		if err := k.meter.tick(); err != nil {
 			return nil, err
 		}
-		if !k.input.normalReturns && candidate.at != call || candidate.target != target || candidate.invocation != id || candidate.caller != k.current || candidate.reference != nil || candidate.selection != k.input.selection || candidate.storageModel != k.input.storageModel {
+		if !k.input.normalReturns && candidate.at != call || candidate.target != target || candidate.invocation != id || candidate.caller != k.current || candidate.reference != nil || candidate.selection != k.input.selection || candidate.storageModel != k.input.storageModel || candidate.unwind != k.input.unwind || candidate.registration != registration || candidate.drain != drain {
 			continue
 		}
 		if len(candidate.arguments) != len(actual) {
@@ -306,7 +348,7 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 		if len(k.session.proofs) >= k.meter.limits.nodes {
 			return nil, regionError("callee proof count exhausted")
 		}
-		proof = &regionCallProof{at: call, target: target, invocation: id, caller: k.current, initial: initial, entries: entries, occurrences: occurrences, arguments: slices.Clone(actual), storageModel: k.input.storageModel, selection: k.input.selection}
+		proof = &regionCallProof{at: call, registration: registration, drain: drain, unwind: k.input.unwind, target: target, invocation: id, caller: k.current, initial: initial, entries: entries, occurrences: occurrences, arguments: slices.Clone(actual), storageModel: k.input.storageModel, selection: k.input.selection}
 		k.session.proofs = append(k.session.proofs, proof)
 		k.session.byTarget[target] = append(k.session.byTarget[target], proof)
 	}
@@ -359,17 +401,19 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 	}
 	var returned []regionState
 	for _, outcome := range outcomes {
-		if !types.Identical(outcome.value.typ, call.Type()) {
+		if !types.Identical(outcome.value.typ, regionInvocationResult(call)) {
 			return nil, regionError("callee return does not match actual call result")
 		}
 		// SSA registers are immutable language values. Heap facts come from the
 		// checked outcome or its independently derived normal-return frame. Facts
 		// a callee may have changed are never resurrected from the caller.
-		after, err := k.clone(regionState{values: caller.values, memory: outcome.state.memory})
+		after, err := k.clone(regionState{values: caller.values, memory: outcome.state.memory, pending: caller.pending})
 		if err != nil {
 			return nil, err
 		}
-		after.values[call] = outcome.value
+		if ordinary, ok := call.(*ssa.Call); ok {
+			after.values[ordinary] = outcome.value
+		}
 		if k.input.normalReturns {
 			for object, value := range caller.memory {
 				preserved, err := k.framePreserves(frame, object)
@@ -390,6 +434,9 @@ func (k *regionKernel) call(call *ssa.Call, caller regionState) ([]regionState, 
 }
 
 func (k *regionKernel) returnValue(ret *ssa.Return, state regionState) (regionValue, error) {
+	if !state.pending.known || len(state.pending.captures) != 0 {
+		return regionValue{}, regionError("return has unknown or pending deferred work")
+	}
 	results := k.input.root.Signature.Results()
 	if len(ret.Results) != results.Len() {
 		return regionValue{}, regionError("return omits actual result values")

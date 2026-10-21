@@ -11,7 +11,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
 
-const regionRules = "gofresh/source-region-transport@16"
+const regionRules = "gofresh/source-region-transport@18"
 
 // This kernel is conditional on an immutable, well-typed SSA owner. Selection of
 // that owner from source/build inputs is a separate obligation. It never invokes
@@ -105,8 +105,9 @@ func regionObjectReference(v regionValue) bool {
 // An absent register or object is unknown, not bottom or zero. In particular an
 // input heap cannot silently assert zero initialization of a selected global.
 type regionState struct {
-	values map[ssa.Value]regionValue
-	memory map[regionObject]regionValue
+	values  map[ssa.Value]regionValue
+	memory  map[regionObject]regionValue
+	pending regionDeferStack
 }
 
 type regionPoint struct {
@@ -126,12 +127,16 @@ type regionInput struct {
 	// normalReturns proves only the states of normally returning invocations.
 	// Exceptional outcomes carry no frame or intermediate-effect authority.
 	normalReturns bool
-	selection     *program
-	owner         *ssa.Program
-	root          *ssa.Function
-	entry         regionPoint
-	use           regionUse
-	initial       regionState
+	// Typed conditional control antecedents; neither is inferred from normal
+	// completion, an empty heap, or the spelling of a premise string.
+	unwind            regionUnwindScope
+	pendingAntecedent bool
+	selection         *program
+	owner             *ssa.Program
+	root              *ssa.Function
+	entry             regionPoint
+	use               regionUse
+	initial           regionState
 	// A distinct conditional storage antecedent. It is never inferred from the
 	// selected sizes, string premises or an observed machine/build label.
 	storageModel regionStorageModel
@@ -352,6 +357,11 @@ func (m *regionMeter) copyState(s regionState) (regionState, error) {
 		return regionState{}, regionError("state/location budget exhausted")
 	}
 	r := regionState{values: make(map[ssa.Value]regionValue, len(s.values)), memory: make(map[regionObject]regionValue, len(s.memory))}
+	var err error
+	r.pending, err = m.copyDefers(s.pending)
+	if err != nil {
+		return regionState{}, err
+	}
 	for k, v := range s.values {
 		v, err := m.copyValue(v, 0)
 		if err != nil {

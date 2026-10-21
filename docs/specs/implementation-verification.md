@@ -1473,12 +1473,22 @@ contracts:
   a continuation that can cross a backedge. Whole-function control facts remain
   distinct from the narrower scoped relation.
 
-  Channel construction retains a fresh logical identity for the actual language
-  allocation and its bounded context, selected element type and direction, and
-  checked capacity in the common nonnegative signed 32-bit range. The bounded
-  capacity relation refuses unknown, negative or out-of-range capacities; it
-  does not assume successful execution
-  of an explicit runtime allocator. Copying, direction narrowing, aggregate
+  A channel construction's normal-return postcondition retains a fresh logical
+  identity for the actual language allocation and its bounded context, selected
+  element type and direction, and checked capacity in the common nonnegative
+  signed 32-bit range. The bounded capacity relation refuses unknown, negative
+  or out-of-range capacities. It establishes neither existence of a successful
+  construction nor absence of allocation failure, panic or other exceptional
+  outcomes. Capacity representability and payload-layout bounds alone cannot
+  establish those outcomes. Strict invariant and complete finite-occurrence
+  scopes require independently checked allocation-outcome evidence before
+  producing a construction value or effect; without it, reachable construction
+  refuses even for zero or one capacity and without deferred control. No named
+  runtime, capacity threshold or success assertion supplies that evidence.
+  Validation of an incoming channel handle remains distinct from proving its
+  construction. Allocation-free nil-channel length and capacity and independently
+  excluded unreachable constructions retain their own supported relations.
+  Copying, direction narrowing, aggregate
   fields and captured environments preserve aliases and immutable capacity.
   Identity equality requires established singleton cardinality; recurrent sites
   and merged activations cannot equate their different concrete instances.
@@ -1548,6 +1558,50 @@ contracts:
   reachable heap or completion of the invoked work. Goroutine and deferred calls
   retain their own execution, continuation and exceptional effects; concurrency
   or delayed mutation cannot disappear into a value-transport fact.
+
+  A bounded non-unwinding deferred-execution relation retains an ordered pending
+  stack in each whole correlated activation state. Actual fresh function entry
+  establishes an empty local stack by language semantics. At a mid-body entry,
+  absence is unknown: a known stack requires checked predecessor continuity or
+  an explicit retained conditional control antecedent. Registration captures the
+  actual registration occurrence, callable and environment, receiver and evaluated
+  argument values without executing the call. The registration's actual target
+  defer list must be respected: a local-stack antecedent cannot retarget an
+  explicitly designated alternate list. Such a target requires checked provenance
+  and effects for that list or refuses, including in retained captures supplied
+  at a later conditional entry. Pointer and captured-cell identity
+  survives; registration does not freeze reachable heap contents. Draining removes
+  the last capture before dispatch, checks its complete invocation against the
+  current heap, and retains every checked successor. The child has its own fresh
+  stack, while remaining parent captures stay suspended and rooted. Nested drains
+  follow that same rule. A completed return requires a known-empty stack; its
+  results follow the actual post-drain loads rather than an early result snapshot.
+
+  This relation admits only operations and reachable callees whose complete
+  safety follows under their actual inputs. Possible panic, uncertain partial
+  operations, unknown targets, opaque leaves and unsupported exceptional control
+  refuse, including when a deferred recovery could produce a normal outcome.
+  No normal-return-only subordinate can establish that safety, including a
+  channel constructor whose exceptional exit a caller could recover. Recursion and
+  recurrent registration or drain sites may conservatively refuse. The invariant
+  safety arm establishes no termination claim; complete finite occurrence evidence
+  retains its separate coverage and progress obligations. Stack order and capture
+  relations cannot disappear under inclusion or widening: incompatible bounded
+  control shapes refuse. Continuations preserve pending work, current heap and
+  original control antecedents without replaying registration or draining twice.
+
+  Interpreting builtin recover as nil requires an established typed no-active-
+  unwind scope, propagated through checked ordinary calls and normal deferred
+  dispatch. At a conditional root this is an explicit retained entry antecedent,
+  unless checked surrounding startup supplies it. Neither a fresh empty local
+  stack nor a strict safety claim establishes that scope: the root could itself
+  be invoked as a defer during an outer panic. Unknown entry scope supplies no
+  recover result. Parent-panic recovery and Goexit behavior require their own
+  checked semantics; a routine's name supplies none. Normal-return-only scopes
+  continue to refuse deferred and concurrent control and retain their existing
+  exceptional exclusions. Native and reference consumers without the corresponding
+  control and antecedent accounting refuse these source evidence arms.
+
   A bodyless call may instead consume the checked selected-assembly relation of
   REQ-impl-assembly-reference at that exact occurrence and context. The relation
   supplies its derived result and complete relevant heap/effects, never an

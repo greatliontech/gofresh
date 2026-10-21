@@ -80,6 +80,9 @@ func checkStorageAuthority(ctx context.Context, endpoint storageSourceEndpoint, 
 		return nil, err
 	}
 	packet := endpoint.storagePacket()
+	if err := regionNativeControl(packet); err != nil {
+		return nil, err
+	}
 	if packet == nil || packet.input.owner != layout.representation.source.Prog || len(packet.observations) != 1 || native.Rules != nativeproof.TransitionRules {
 		return nil, fmt.Errorf("storage authority: foreign or unchecked endpoint")
 	}

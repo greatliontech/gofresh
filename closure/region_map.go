@@ -445,6 +445,11 @@ func (k *regionKernel) lookupMap(s regionState, x *ssa.Lookup) (regionValue, err
 // The upper bound keeps whole common terms, not independently chosen fields of
 // registration rows. Map projections explicitly denote a Cartesian relaxation.
 func (k *regionKernel) commonState(a, b regionState) (regionState, error) {
+	if same, err := k.sameDefers(a.pending, b.pending); err != nil {
+		return regionState{}, err
+	} else if !same {
+		return regionState{}, regionError("incompatible deferred control cannot be widened")
+	}
 	r, err := k.clone(a)
 	if err != nil {
 		return regionState{}, err

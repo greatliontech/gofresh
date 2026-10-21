@@ -122,6 +122,9 @@ func checkStoragePrefixBounds(native nativeproof.TransitionBound, trace *regionE
 	if trace == nil || len(trace.accesses) > 65536 || len(trace.instructions) > 65536 || len(trace.allocations) > 65536 || len(trace.calls) > 65536 || len(trace.atomics) > 65536 || len(native.Instructions) > 65536 || len(native.Accesses) > 65536 || len(native.InitialMemory) > 65536 || len(native.Memory) > 65536 || len(native.PrimitiveEffects) > 65536 || len(native.Abstractions) > 65536 || len(native.Frames) > 65536 {
 		return fmt.Errorf("global correspondence: finite prefix projection bound exceeded")
 	}
+	if err := regionNativeTraceControl(trace); err != nil {
+		return err
+	}
 	return nil
 }
 

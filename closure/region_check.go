@@ -61,6 +61,19 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 	if regionInstruction(in.entry) == nil || in.entry.block.Parent() != fn || !fullReturns && (regionInstruction(in.use.at) == nil || in.use.at.block.Parent() != fn) {
 		return nil, regionError("invalid scope instruction boundary")
 	}
+	if in.unwind > regionNoActiveUnwind {
+		return nil, regionError("unknown unwind scope")
+	}
+	fresh := in.entry == (regionPoint{fn.Blocks[0], 0}) && session.predecessor == nil
+	if fresh {
+		if len(in.initial.pending.captures) != 0 {
+			return nil, regionError("fresh activation has pending defers")
+		}
+		in.initial.pending.known = true
+	} else if session.predecessor == nil && !in.pendingAntecedent && (in.initial.pending.known || len(in.initial.pending.captures) != 0) {
+		return nil, regionError("mid-body deferred control lacks predecessor or conditional antecedent")
+	}
+	k.input = in
 	if !fullReturns && in.use.operand == nil {
 		ret, ok := regionInstruction(in.use.at).(*ssa.Return)
 		if !ok || len(ret.Results) != 0 {
@@ -253,7 +266,7 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 		}
 		return nil
 	}
-	if !fullReturns || in.normalReturns && invocation == (regionInvocation{}) {
+	if !fullReturns || invocation == (regionInvocation{}) {
 		for object, value := range in.initial.memory {
 			if err := rememberObject(object); err != nil {
 				return nil, err
@@ -265,6 +278,16 @@ func newRegionContextKernel(in regionInput, session *regionCallSession, invocati
 		for _, value := range in.initial.values {
 			if err := remember(value); err != nil {
 				return nil, err
+			}
+		}
+		for _, capture := range in.initial.pending.captures {
+			if err := remember(capture.callable); err != nil {
+				return nil, err
+			}
+			for _, value := range capture.arguments {
+				if err := remember(value); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -284,7 +307,9 @@ func regionBoundedOperands(instruction ssa.Instruction, limit int) bool {
 	case *ssa.Go:
 		return len(x.Call.Args) < limit
 	case *ssa.Defer:
-		return len(x.Call.Args) < limit
+		// Operands includes both the callable and the target-stack slot, even
+		// when the latter is nil and denotes the current activation's stack.
+		return limit >= 2 && len(x.Call.Args) <= limit-2
 	case *ssa.Return:
 		return len(x.Results) <= limit
 	case *ssa.Select:
@@ -398,6 +423,9 @@ func (k *regionKernel) locationType(loc regionLocation) types.Type {
 }
 
 func (k *regionKernel) validateState(s regionState) error {
+	if err := k.validateDefers(s.pending); err != nil {
+		return err
+	}
 	for key, value := range s.values {
 		if !k.owned[key] || !types.Identical(key.Type(), value.typ) || value.kind == regionMapContents {
 			return regionError("invalid typed register invariant")
@@ -566,7 +594,7 @@ func checkRegion(ctx context.Context, input regionInput, proposal *regionProposa
 
 func checkRegionKernel(k *regionKernel, p *regionProposal) (*checkedRegion, error) {
 	in := k.input
-	if p == nil || p.input.normalReturns != in.normalReturns || p.input.owner != in.owner || p.input.selection != in.selection || p.input.root != in.root || p.input.entry != in.entry || p.input.use != in.use || p.input.storageModel != in.storageModel || !slices.Equal(p.input.premises, in.premises) {
+	if p == nil || p.input.normalReturns != in.normalReturns || p.input.unwind != in.unwind || p.input.pendingAntecedent != in.pendingAntecedent || p.input.owner != in.owner || p.input.selection != in.selection || p.input.root != in.root || p.input.entry != in.entry || p.input.use != in.use || p.input.storageModel != in.storageModel || !slices.Equal(p.input.premises, in.premises) {
 		return nil, regionError("proposal is not bound to the complete input")
 	}
 	k.session.proofs = p.calls
@@ -706,6 +734,9 @@ func (k *regionKernel) chargeValue(v regionValue) error {
 }
 
 func (k *regionKernel) included(a, b regionState) (bool, error) {
+	if same, err := k.sameDefers(a.pending, b.pending); err != nil || !same {
+		return same, err
+	}
 	for key, value := range b.values {
 		if err := k.chargeValue(value); err != nil {
 			return false, err
@@ -803,6 +834,8 @@ func (k *regionKernel) clone(s regionState) (regionState, error) {
 		return regionState{}, regionError("state/location budget exhausted")
 	}
 	r := regionState{values: make(map[ssa.Value]regionValue, len(s.values)), memory: make(map[regionObject]regionValue, len(s.memory))}
+	// Captures are immutable; push copies the slice and pop only reslices it.
+	r.pending = s.pending
 	for key, v := range s.values {
 		if err := k.meter.tick(); err != nil {
 			return regionState{}, err
@@ -919,6 +952,17 @@ func (k *regionKernel) blockFrom(at regionPoint, initial regionState) ([]regionE
 					return nil, nil, &regionOperationFailure{instruction, err}
 				}
 				observations = append(observations, regionObservation{value: value, state: s, occurrence: k.current})
+			case *ssa.RunDefers:
+				returned, err := k.drainDefers(s, x)
+				if err != nil {
+					return nil, nil, &regionOperationFailure{instruction, err}
+				}
+				for _, after := range returned {
+					continuing, _, err = k.join(continuing, after)
+					if err != nil {
+						return nil, nil, err
+					}
+				}
 			case *ssa.Call:
 				if _, builtin := x.Call.Value.(*ssa.Builtin); builtin {
 					if err := k.transfer(&s, x); err != nil {
@@ -1428,6 +1472,12 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		return set(x, regionUnknownValue(x.Type()))
 	case *ssa.Call:
 		builtin, ok := x.Call.Value.(*ssa.Builtin)
+		if ok && builtin.Name() == "recover" {
+			if k.input.normalReturns || k.input.unwind != regionNoActiveUnwind || x.Call.IsInvoke() || len(x.Call.Args) != 0 {
+				return regionError("recover lacks established no-active-unwind scope")
+			}
+			return set(x, regionValue{typ: x.Type(), kind: regionNil})
+		}
 		if !ok || x.Call.IsInvoke() || len(x.Call.Args) != 1 || builtin.Name() != "len" && builtin.Name() != "cap" {
 			return regionError("call effects, callbacks and continuation are unproved")
 		}
@@ -1463,8 +1513,8 @@ func (k *regionKernel) transfer(s *regionState, instruction ssa.Instruction) err
 		return set(x, regionValue{typ: x.Type(), kind: regionConstant, scalar: constant.MakeInt64(n)})
 	case *ssa.Go:
 		return regionError("goroutine capture has open invocation, concurrency and continuation effects")
-	case *ssa.Defer, *ssa.RunDefers:
-		return regionError("deferred capture has open invocation and continuation effects")
+	case *ssa.Defer:
+		return k.registerDefer(s, x)
 	default:
 		return regionError("unsupported instruction transfer")
 	}

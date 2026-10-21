@@ -929,7 +929,7 @@ func TestRegionRefusesUnmodeledEffectsAndExceptions(t *testing.T) {
 	for _, body := range []string{
 		`func opaque();func F()int{opaque();return 1}`,
 		`func F()int{go func(){}();return 1}`,
-		`func F()int{defer func(){}();return 1}`,
+		`func F()int{defer func(){panic(1)}();return 1}`,
 		`func F(p *int)int{*p=1;return 1}`,
 		`func F(p *int)int{return *p}`,
 		`func F()int{x:=[]int{1};return x[1]}`,
@@ -1315,9 +1315,14 @@ func FuzzRegionRegistrationOracle(f *testing.F) {
 		}
 		// Retain an element-field pointer across a whole-row overwrite, then
 		// read through it. This exercises both aggregate copying and stable cells.
-		text := fmt.Sprintf(`type Row[T any] struct{Name string; F T; C chan struct{}};func a(){};func b(){};func F(flag bool)[]Row[func()]{ c,d:=make(chan struct{},%d),make(chan struct{},%d);x:=[]Row[func()]{{%s,a,c},{%s,b,d}};p:=&x[0].F;if flag{x[0]=Row[func()]{x[0].Name,b,d};x[1].F=a};x[0].F=*p;return x }`, len(a), len(b), strconv.Quote(a), strconv.Quote(b))
+		text := fmt.Sprintf(`type Row[T any] struct{Name string; F T};func a(){};func b(){};func F(flag bool)[]Row[func()]{x:=[]Row[func()]{{%s,a},{%s,b}};p:=&x[0].F;if flag{x[0]=Row[func()]{x[0].Name,b};x[1].F=a};x[0].F=*p;return x }`, strconv.Quote(a), strconv.Quote(b))
 		in := regionFixture(t, text)
 		c, _ := proveRegionFixture(t, in)
+		for _, out := range c.observations {
+			if !regionTestPrecise(out.value, out.state, 0) {
+				t.Fatal("registration row/function correlation widened")
+			}
+		}
 		assertRegionCovers(t, c, executeRegionConcrete(t, in, swap))
 		checkScopedRegistrationOracle(t, a, b, swap)
 	})

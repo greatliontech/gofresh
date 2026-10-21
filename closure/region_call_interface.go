@@ -31,13 +31,13 @@ func regionNilEquality(a, b regionValue) (bool, bool) {
 // and receiver. FuncValue is a read-only object lookup. MethodValue/LookupMethod
 // are deliberately not used: they may materialize forwarding wrappers and thus
 // change the supposedly immutable source owner during checking.
-func (k *regionKernel) interfaceTarget(call *ssa.Call, carrier regionValue) (*ssa.Function, regionValue, error) {
+func (k *regionKernel) interfaceTarget(call ssa.CallInstruction, carrier regionValue) (*ssa.Function, regionValue, error) {
 	refuse := func(message string) (*ssa.Function, regionValue, error) {
 		return nil, regionValue{}, regionError(message)
 	}
-	method := call.Call.Method
-	static, ok := call.Call.Value.Type().Underlying().(*types.Interface)
-	if !ok || method == nil || !types.Identical(carrier.typ, call.Call.Value.Type()) {
+	method := call.Common().Method
+	static, ok := call.Common().Value.Type().Underlying().(*types.Interface)
+	if !ok || method == nil || !types.Identical(carrier.typ, call.Common().Value.Type()) {
 		return refuse("invoke has no exact static interface method")
 	}
 	if carrier.kind != regionInterface || len(carrier.elements) != 1 {
@@ -58,7 +58,7 @@ func (k *regionKernel) interfaceTarget(call *ssa.Call, carrier regionValue) (*ss
 			return nil, regionValue{}, err
 		}
 	}
-	declared := types.NewMethodSet(call.Call.Value.Type()).Lookup(method.Pkg(), method.Name())
+	declared := types.NewMethodSet(call.Common().Value.Type()).Lookup(method.Pkg(), method.Name())
 	if declared == nil || declared.Obj() != method {
 		return refuse("invoke method is not the actual interface member")
 	}

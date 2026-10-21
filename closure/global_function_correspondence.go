@@ -176,6 +176,9 @@ func globalFunctionError(s string) error { return fmt.Errorf("global function co
 // from any older region correspondence that may have supplied these source phases.
 func (p *globalFunctionCorrespondence) collectSource(ctx context.Context, source computationSource, root *ssa.Function) error {
 	packet := p.source.region.packet
+	if err := regionNativeControl(packet); err != nil {
+		return err
+	}
 	if root.Signature.Results().Len() != 0 || len(root.FreeVars) != 0 || packet.rules != regionRules || packet.input.owner != source.prog.Prog || packet.input.root != root || p.source.region.root.function != root || p.source.returned.Parent() != root || len(p.source.returned.Results) != 0 || packet.trace == nil || len(packet.observations) != 1 {
 		return globalFunctionError("source is not the selected void root's checked return")
 	}
@@ -189,6 +192,9 @@ func (p *globalFunctionCorrespondence) collectSource(ctx context.Context, source
 			return globalFunctionError("source continuation chain has a foreign owner or repeated phase")
 		}
 		seen[at] = true
+		if err := regionNativeControl(at.region.packet); err != nil {
+			return err
+		}
 		chain = append(chain, at)
 	}
 	slices.Reverse(chain)
@@ -929,7 +935,11 @@ func (p *globalFunctionCorrespondence) isolatedStorage(ctx context.Context, obje
 						if proof.reference != nil || proof.target != x.Parent() || len(x.Results) != 1 || x.Results[0] != pointer || application.outcome.value.kind != regionPointer || application.outcome.value.location.object != object {
 							continue
 						}
-						if safe, err := visit(proof.at); !safe || err != nil {
+						ordinary, ok := proof.at.(*ssa.Call)
+						if !ok {
+							return false, nil
+						}
+						if safe, err := visit(ordinary); !safe || err != nil {
 							return safe, err
 						}
 						found = true

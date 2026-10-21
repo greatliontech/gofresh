@@ -416,10 +416,13 @@ transports it to the runner. The argument can remain an arbitrary typed `*T`
 because the selected callback's failure branch is excluded. This local source
 fact supplies no prefix, deferred-work, interference or selected-native authority.
 
-Starting instead at the actual `T.Run` allocation now checks both channel
-constructions, with capacities zero and one, on stock and harmless-custom source.
-The next refusal is the unknown parent receiver at `&t.common`; the actual field
-stores beyond that expression remain unproved. The complete path still needs the
+Starting instead at the actual `T.Run` allocation requires channel construction
+with capacities zero and one. Earlier strict positives for these operations are
+withdrawn: capacity representability did not establish their allocation outcomes.
+Normal-return-only channel identity and capacity facts remain useful, but do not
+establish this strict prefix. After allocation admission is established, the
+previous diagnostic also identified the unknown parent receiver at `&t.common`;
+the actual field stores beyond that expression remain unproved. The path needs the
 parent, channels, context/cancellation closure and callback carried to the actual
 goroutine capture and runner entry. Supplying a conditional live `T` at the runner
 entry exposes the first explicit boundary at `internal/runtime/sys.GetCallerSP`,
@@ -428,7 +431,7 @@ Normal-return checking separately refuses the runner's deferred control.
 The clock wrapper reaches bodyless `time.runtimeNow`. Its result feeds duration
 storage and reporting, including formatting before the chatty-mode branch, so
 verdict-value independence would not establish output equality or a memory frame.
-The remaining boundaries are ordered at 9.4a.2b.2–3; the local callback positive does
+The remaining boundaries are ordered at 9.4a.2b.1–3; the local callback positive does
 not close the ordinary acceptance gate.
 
 The enclosing `runTests` root constructor exposes a separate scope precision
@@ -436,12 +439,66 @@ problem. Its allocation and the boundary before `Verbose` occupy one straight-li
 block segment, but whole-function loop membership previously rejected that segment
 as a mid-block backedge. A validated forward same-block cut executes no successor
 edge; its local allocation cardinality can be derived without changing shared
-whole-function facts or admitting later iterations. The scoped proof checks the
-actual root T's zero failure/completion/parallel fields, nil parent, and constructed
-signal/barrier capacities. Incoming context, cancellation and test-state values
-remain unknown, and the subsequent `Verbose` call is not executed by this proof.
-This constructor relation does not transport the parent through the runner and
-into the child `T.Run`, nor supply the omitted prefix or explicit-call frames.
+whole-function facts or admitting later iterations. That cardinality refinement
+remains valid, but the root T and `newTestState` constructor qualifications also
+depended on the unsupported strict channel-allocation rule. Their earlier field,
+capacity and returned-object positives must be requalified after allocation
+outcomes are established. They supply no parent transport through the runner into
+the child `T.Run`, earlier context/matcher/parallelism facts, or explicit-call frames.
+
+The allocation defect is executable: on selected 32-bit Go,
+`make(chan [1024]byte, 1<<30)` panics before allocation because the payload extent
+overflows uintptr. An enclosing deferred recovery returns `-1`; both strict source
+proof arms instead previously certified capacity `1<<30`. Entry without an active
+unwind does not exclude this later catchable panic. Capacity range alone, a small
+numeric cutoff, or a guard-only proof cannot establish the allocator's remaining
+outcomes. Strict construction must refuse until selected layout, actual extent
+guards and reachable construction paths have complete applicable evidence.
+Normal-return postconditions neither assert that allocation succeeds nor cover
+recovery paths. The missing allocation theorem lands at 9.4a.2b.1a; both constructor
+qualification items are reopened rather than treating the refusal as completion.
+
+The useful selected-source constructor fact is separately qualified as a
+normal-return postcondition. On stock and harmless-custom source,
+`newTestState` returns an object with `running = 1`, `numWaiting = 0` and a nonnil
+zero-capacity `startParallel` channel, while its matcher and parallelism arguments
+remain unknown. The same actual body refuses strict construction. This proves an
+implication about normally returning invocations, not that an invocation returns,
+and supplies no allocation-safety or complete-effect evidence to its caller.
+
+A complete outcome-sensitive source relation is a distinct route: it can retain
+allocation failure and actual panic/recovery propagation, then prove an implication
+restricted to independently established terminal outcomes. It must not assume the
+terminal predicate during transfer, erase recovered failures that can still pass,
+or give all resource failures a language-panic frame. Unknown effects remain
+unknown. This can avoid an allocation-infallibility theorem where the consumer
+uses the outcome-sensitive relation instead of strict safety. It does not remove
+explicit-call, selected-implementation or actual-use obligations.
+The native process terminal currently distinguishes normal completion, abnormal
+completion and never-started; normal completion includes failed tests. A stronger
+subject-PASS predicate therefore needs its own correctly bound consumer evidence,
+and package PASS alone would not establish that the requested callback executed.
+The abrupt-completion relation and its consumer qualification are scheduled at
+9.4a.2b.3b, without treating the present strict subset as an implementation of it.
+
+Deferred execution can likewise be checked in a bounded, non-unwinding source
+grammar without first admitting arbitrary panic/recovery outcomes. Each evaluated
+operation and deferred body must check safe under its actual inputs; a possible
+panic or unsupported call refuses that relation. Capture retains evaluated values
+and live aliases, while LIFO dispatch uses the current heap and the child
+activation's own stack. A retained no-active-unwind antecedent is required wherever
+`recover` is interpreted as nil; a fresh local stack alone does not imply it.
+Normal-return-only summaries cannot supply this complete source safety relation.
+
+The actual `tRunner` capture prefix checks both selected deferred callables under
+an explicit empty-local-stack entry hypothesis, with prior fields, callerName,
+interference and invocation applicability still open. It does not execute either
+body. Alternate-stack SSA defers, including range-over-function lowering that
+registers on an enclosing activation, require separate target provenance and
+remain refused by both capture and retained-state validation. Treating those as
+local would falsify the pending-stack relation even when the local stack starts
+empty. Full runner composition still requires the deferred bodies' explicit
+runtime, synchronization, cancellation, reporting and channel relations.
 
 The reassessed route therefore does not commission compiler-runtime ownership
 work merely because the emitted helper manipulates stacks. Such work is needed

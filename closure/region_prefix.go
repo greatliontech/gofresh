@@ -73,7 +73,7 @@ func (p *sourceEffectPrefix) checkedPacket() *checkedRegion {
 	}
 	packet := checkedSourceEffectPacket(p.region, p.checker)
 	if packet == nil || p.checker.fullReturns || p.prior != p.checker.session.predecessor || p.boundary == nil || len(packet.observations) != 1 || p.cursor != packet.observations[0].occurrence || p.cursor != p.checker.boundaryOccurrence(p.boundary) || p.cursor.owner == nil || packet.trace.seen[p.cursor] || regionInstruction(packet.input.use.at) != p.boundary || p.binder.source.prog.Prog != packet.input.owner || packet.input.selection != p.binder.source.prog || packet.input.storageModel != conditionalRegionStorageModel() ||
-		p.prior != nil && (p.prior.checkedPacket() == nil || p.prior.region.packet.input.storageModel != packet.input.storageModel || p.prior.region.packet.input.selection != packet.input.selection || p.prior.cursor.owner != p.cursor.owner) {
+		p.prior != nil && (p.prior.checkedPacket() == nil || p.prior.region.packet.input.unwind != packet.input.unwind || p.prior.region.packet.input.pendingAntecedent != packet.input.pendingAntecedent || !slices.Equal(p.prior.region.packet.input.premises, packet.input.premises) || p.prior.region.packet.input.storageModel != packet.input.storageModel || p.prior.region.packet.input.selection != packet.input.selection || p.prior.cursor.owner != p.cursor.owner) {
 		return nil
 	}
 	return packet
@@ -87,7 +87,7 @@ func checkedSourceEffectPacket(region *sourceRegion, checker *regionKernel) *che
 	if packet.input.normalReturns || input.normalReturns {
 		return nil
 	}
-	if packet.rules != regionRules || packet.trace == nil || packet.trace.owner == nil || checker.trace != packet.trace || input.owner != packet.input.owner || input.selection != packet.input.selection || input.root != packet.input.root || input.entry != packet.input.entry || input.use != packet.input.use || input.storageModel != packet.input.storageModel || region.root.function != input.root {
+	if packet.rules != regionRules || packet.trace == nil || packet.trace.owner == nil || checker.trace != packet.trace || input.unwind != packet.input.unwind || input.pendingAntecedent != packet.input.pendingAntecedent || !slices.Equal(input.premises, packet.input.premises) || input.owner != packet.input.owner || input.selection != packet.input.selection || input.root != packet.input.root || input.entry != packet.input.entry || input.use != packet.input.use || input.storageModel != packet.input.storageModel || region.root.function != input.root {
 		return nil
 	}
 	return packet
@@ -117,13 +117,13 @@ func (p *sourceEffectPrefix) liveAllocation(object regionObject, tick func() err
 // occurrence chain. A completed return retains resident contents; this lookup
 // neither ends a lifetime nor supplies an escape or native-byte relation.
 func liveRegionAllocation(packet *checkedRegion, checker *regionKernel, prior *sourceEffectPrefix, object regionObject, tick func() error) (regionEffectAllocation, bool, error) {
-	if object.kind != regionAllocation && object.kind != regionChannelAllocation || !checker.singleton(object) {
+	if object.kind != regionAllocation || !checker.singleton(object) {
 		return regionEffectAllocation{}, false, nil
 	}
 	if len(packet.observations) != 1 {
 		return regionEffectAllocation{}, false, nil
 	}
-	if _, present := packet.observations[0].state.memory[object]; !present && object.kind != regionChannelAllocation {
+	if _, present := packet.observations[0].state.memory[object]; !present {
 		return regionEffectAllocation{}, false, nil
 	}
 	for {
@@ -156,7 +156,9 @@ func liveRegionAllocation(packet *checkedRegion, checker *regionKernel, prior *s
 // arbitrary prior global values; local initialization comes from actual checked
 // allocations, never a caller's proposed heap or expected output.
 // Unused pointer parameters remain arbitrary and supply no storage or effects.
-func checkSourceOperandPrefix(ctx context.Context, source computationSource, root *ssa.Function, call *ssa.Call, limits registrationLimits) (*sourceOperandPrefix, error) {
+// An optional unwind scope is an explicit conditional entry antecedent, not
+// evidence that the omitted caller or startup established ordinary invocation.
+func checkSourceOperandPrefix(ctx context.Context, source computationSource, root *ssa.Function, call *ssa.Call, limits registrationLimits, scope ...regionUnwindScope) (*sourceOperandPrefix, error) {
 	if ctx == nil || !limits.region.valid() || root == nil || call == nil || len(root.Blocks) == 0 || root.Blocks[0] == nil || len(root.Blocks[0].Instrs) > limits.region.nodes || len(root.Params) > limits.region.nodes || len(root.FreeVars) != 0 || call.Parent() != root || call.Block() == nil || call.Call.IsInvoke() || call.Call.StaticCallee() == nil || len(call.Call.Args) > limits.region.nodes {
 		return nil, regionError("operand prefix requires a concrete root and actual direct call boundary")
 	}
@@ -168,6 +170,12 @@ func checkSourceOperandPrefix(ctx context.Context, source computationSource, roo
 		storageModel: conditionalRegionStorageModel(),
 		use:          regionUse{at: regionPoint{call.Block(), at}, operand: regionCallBoundaryOperand(call)},
 		premises:     []string{"immutable selected typed owner; isolated prefix; ordinary live typed storage; omitted native prefix and actual use remain open"}}
+	if len(scope) > 1 {
+		return nil, regionError("multiple unwind scopes")
+	}
+	if len(scope) == 1 {
+		in.unwind = scope[0]
+	}
 	meter := &regionMeter{ctx: ctx, limits: limits.region}
 	for _, parameter := range root.Params {
 		if err := checkUnusedSourcePointer(root, parameter, meter.tick); err != nil {

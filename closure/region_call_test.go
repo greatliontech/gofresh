@@ -107,7 +107,7 @@ func TestRegionCallRefusals(t *testing.T) {
 		`func helper()int{return F()};func F()int{return helper()}`,
 		`func F(f func()int)int{return f()}`,
 		`func helper(){go func(){}()};func F()int{helper();return 1}`,
-		`func helper(){defer func(){}()};func F()int{helper();return 1}`,
+		`func helper(){defer func(){panic(1)}()};func F()int{helper();return 1}`,
 		`type S struct{X int};func(s *S)M()int{return s.X};func F()int{s:=S{1};f:=s.M;return f()}`,
 	} {
 		t.Run(source, func(t *testing.T) {
