@@ -348,6 +348,41 @@ target evidence. Even a complete clock frame would leave the remaining
 construction-to-use interval and compiler-source/executable association open.
 No bounded complete application route is established by this source inventory.
 
+The deciding acquisition experiment subsequently captured the initial auxiliary
+vector, mappings and complete mapped vDSO bytes from separately owned stock and
+custom compiler children stopped at successful exec. Both unmodified compilers
+then completed a real compilation. The capture checked executable identity and
+rejected a sibling child's PID, a different expected executable, a truncated
+image and disagreement between the auxiliary-vector address and mapping base.
+This establishes a practical private acquisition seam, not transparency of
+tracing for arbitrary builds, historical producing applicability, or the target
+of either later indirect call. The diagnostic compilation is not a replacement
+for a producing compilation; a Go-cache hit may execute no compiler at all.
+
+Applying the existing admission rules to those actual inputs exposes two
+structural boundaries. First, the checked construction poststate owns a logical
+map backing, while native storage admission covers ordinary scalar/aggregate
+objects, not that map's native footprint. The selected map-valued global also
+lacks an admitted storage representation. An address/extent proposal or geometry
+certificate alone cannot establish that these bytes carry this logical map fact.
+Normal-return poststates cannot be promoted through the complete-effect packet
+gate to manufacture that association. Second, the captured vDSO is a dynamic
+mapped image, while the native image checker admits static executable images.
+Relaxing that format check would not supply loading, mutable kernel-data,
+indirect-target, loop, timestamp-instruction or clock-syscall semantics.
+
+The actual selected construction still passes on both compilers; the experimental
+native-admission checks reproduce refusals, not complete clock-frame positives.
+The first refactoring obligation is therefore the checked association between a
+logical poststate and its native supporting storage, with scope and ownership
+preserved. Establish that relation's complete application path before designing
+a replacement storage interface. Dynamic-image acquisition and semantics remain
+separate obligations. Runtime resolver execution, pointer/mapping preservation
+through both target loads, the whole caller frame and selection-wide applicability
+are still missing. Neither decoding more clock instructions nor retaining one
+observed mapped image closes those gaps. They remain at 9.4a.1b; this experiment
+does not reopen bootstrap-prefix expansion or close the parent gate.
+
 The user selected existing test/benchmark workflows as the public acceptance
 target when offered an opt-in Linux/amd64 traced scalar-call protocol. Native
 entry and source/native relation checks remain useful subordinate mechanisms,

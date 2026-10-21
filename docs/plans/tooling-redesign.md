@@ -1274,7 +1274,13 @@
           inventories and RTA supply candidates, not those proofs. Retain the
           separate compiler-source/executable association obligation.
           Decide the postconstruction timing-call frame at time.runtimeNow before
-          extending native prefixes: complete stock/custom coverage must include
+          extending native prefixes. First establish the checked logical-map
+          poststate/native-support relation; a geometry proposal or complete-effect
+          packet substitution cannot supply it. Bind dynamic images to the relevant
+          execution and resolver/use relation, preserving warm-build applicability
+          rather than substituting a diagnostic compilation. Choose a storage
+          interface only after its complete application path is established.
+          Complete stock/custom coverage must include
           ambient writes, derived runtime/scratch separation and every feasible
           vDSO/syscall arm, with protected-write, callback and target-substitution
           adversaries. A missing frame keeps this application route unestablished;
