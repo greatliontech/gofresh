@@ -103,7 +103,7 @@ This is the single canonical plan for `gofresh` and its consumer ecosystem (`sti
 ## Post-`gofresh` Ecosystem Verification & Release Train
 
 - [x] Re-pin and run `stipulator verify --no-test` and `task check` on `gofresh`.
-- [ ] Update `stipulator`, `gomutant`, and `pew` to the finalized `gofresh` commit, align `pew` guidance helpers (`guidance.PrintsDefault`, `Document.Served`, `Registration.LongHelp`), run `stipulator pin` and `stipulator verify --no-test` across all 4 repositories, and install updated binaries via `task install`.
+- [x] Update `stipulator`, `gomutant`, and `pew` to the finalized `gofresh` commit, align `pew` guidance helpers (`guidance.PrintsDefault`, `Document.Served`, `Registration.LongHelp`), run `stipulator pin` and `stipulator verify --no-test` across all 4 repositories, and install updated binaries via `task install`.
 - [ ] Execute tagged release train (`gofresh` -> `pew`, `stipulator`, `gomutant`) when ready for downstream distribution.
 
 ---
