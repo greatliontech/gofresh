@@ -50,7 +50,7 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 		// audited harness methods or analyzed functions of indexed
 		// packages - does not widen when its operand's dynamic types are
 		// fully determined by the subject's own flow
-		// (REQ-closure-observability-analysis). The operand proof is the
+		// (REQ-closure-observability-dispatch). The operand proof is the
 		// soundness pillar: it puts the runtime callee's concrete type
 		// inside the enumerated set, so the admission never outruns
 		// classification. An unindexed target refuses the admission.
@@ -97,7 +97,7 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 			// call in some analyzed flow created it: every flow that can
 			// call into the harness carries the boundary gate, so its
 			// bindings are already judged
-			// (REQ-closure-observability-analysis).
+			// (REQ-closure-observability-property-harness).
 			if a.propertyHarnessAudited(idx.path) {
 				if target.Parent() == nil {
 					a.requestWiden("property harness reached as a dynamic target in " + site.Parent().String())
@@ -118,7 +118,7 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 				// The audited-pure admissions hold for an enumerated
 				// dynamic target exactly as for a static callee - the
 				// admission is a property of the operation, not of the
-				// call form (REQ-closure-observability-analysis).
+				// call form (REQ-closure-observability-audited-set).
 				name := functionSymbolName(target)
 				if !auditedStandardCallee(h.SelectionAudited(), idx.path, name, target) {
 					effect = unauditedStandardEffect(idx.path, name)
@@ -208,7 +208,7 @@ type tier2Base struct {
 	// flagUntraceable records, per package path, a registration whose
 	// registered storage the judgment could not trace - such a package
 	// blocks every subject sharing the program
-	// (REQ-closure-observability-analysis). Both computed once per base.
+	// (REQ-closure-observability-flag-registration). Both computed once per base.
 	flagBacked      map[*ssa.Global]bool
 	flagUntraceable map[string]string
 	// flagProven records the carriers — constructor values and the loads
@@ -556,7 +556,7 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 	if a.propertyHarnessAudited(idx.path) {
 		// Audited property-harness surface: bodies are never walked -
 		// the boundary gate at the call site is the whole judgment
-		// (REQ-closure-observability-analysis).
+		// (REQ-closure-observability-property-harness).
 		return
 	}
 	if !idx.std {
@@ -698,7 +698,7 @@ func (a *tier2Analyzer) scanInstruction(idx *pkgIndex, caller *ssa.Function, ins
 	// command-line input the test log cannot audit - and an address
 	// escaping into the flow can only be read or laundered, so the
 	// operand reference itself refuses
-	// (REQ-closure-observability-analysis).
+	// (REQ-closure-observability-flag-registration).
 	recordFlagBackedReferences(a.flagBacked, a.recordExternalEffect, instr)
 	switch x := instr.(type) {
 	case ssa.CallInstruction:
@@ -733,7 +733,7 @@ func testingRuntimeFieldEffect(t types.Type, index int) (externalEffect, bool) {
 	if name := structure.Field(index).Name(); name == "N" {
 		// The harness's iteration count is benchmark pacing: an
 		// admitted harness fact, never an input
-		// (REQ-closure-observability-analysis's benchmark-pacing clause).
+		// (REQ-closure-observability-benchmark-pacing).
 		return harnessPacingEffect("B.N"), true
 	}
 	return externalEffect{}, false
@@ -784,7 +784,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		// here - judged callables become subject flow through the
 		// harness's own dispatch; a judged call passes silently
 		// exactly as the exempted standard harness does
-		// (REQ-closure-observability-analysis).
+		// (REQ-closure-observability-property-harness).
 		if !propertyHarnessClosedArgs(c, a.fresh) {
 			a.requestWiden("property-harness argument is not locally closed in " + caller.String())
 		}
@@ -809,7 +809,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		// redefinition panic crashes loudly, never a silent input. The
 		// registration admission would otherwise be defeated by the
 		// internals it statically reaches
-		// (REQ-closure-observability-analysis).
+		// (REQ-closure-observability-flag-registration).
 		if callerIdx != nil && callerIdx.path == "flag" && effect.kind == externalEffectFormattedOutput {
 			return
 		}

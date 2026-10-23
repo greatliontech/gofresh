@@ -252,7 +252,7 @@ func TestPackageUnitRefusesIncompatibleScope(t *testing.T) {
 	a := Subject{Package: "example.com/a", Symbol: "TestA"}
 	b := Subject{Package: a.Package, Symbol: "TestB"}
 	c := Subject{Package: "example.com/c", Symbol: "TestC"}
-	engine := &Engine{singleSubjectExecution: true}
+	engine := &Engine{executionModel: ExecutionAssertions{SingleSubject: true}}
 	view := &View{engine: engine, subjects: []Subject{a, b, c}, packages: []string{a.Package, c.Package}, facts: &observationFacts{}}
 	snapshot := &Snapshot{session: &Session{engine: engine}, view: view}
 	execution := &RuntimeBinding{snapshot: snapshot}
@@ -265,7 +265,7 @@ func TestPackageUnitRefusesIncompatibleScope(t *testing.T) {
 	if err != nil || !slices.Equal(u.producing.view.subjects, []Subject{a}) {
 		t.Fatalf("singleton package scope refused: %v", err)
 	}
-	engine.singleSubjectExecution = false
+	engine.executionModel.SingleSubject = false
 	u, err = execution.BeginPackage([]Subject{b, a, b})
 	if err != nil || !slices.Equal(u.producing.view.subjects, []Subject{b, a}) {
 		t.Fatalf("package scope or order lost: %v", err)

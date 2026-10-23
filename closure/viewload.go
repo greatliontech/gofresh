@@ -81,15 +81,7 @@ func loadView(ctx context.Context, reader *gotool.EnvReader, buildFlags []string
 	if deps {
 		mode |= packages.NeedDeps
 	}
-	cfg := &packages.Config{
-		Context:    ctx,
-		Mode:       mode,
-		Tests:      true,
-		Dir:        dir,
-		Env:        append([]string(nil), packageEnv...),
-		BuildFlags: append([]string(nil), buildFlags...),
-	}
-	pkgs, err := packages.Load(cfg, pkgPaths...)
+	pkgs, err := gotool.LoadPackages(ctx, mode, dir, packageEnv, buildFlags, pkgPaths...)
 	if err != nil {
 		return nil, err
 	}

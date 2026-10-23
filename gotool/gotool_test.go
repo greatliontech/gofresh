@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/greatliontech/go-x-tools/go/packages"
 )
 
 func TestRunOK(t *testing.T) {
@@ -35,5 +37,14 @@ func TestRunRefusesANilEnvironment(t *testing.T) {
 	}
 	if _, err := (Runner{}).TakeEnvSnapshot(context.Background(), "", nil); err == nil {
 		t.Fatal("a nil environment snapshotted the ambient one")
+	}
+	if _, err := LoadPackages(context.Background(), packages.NeedName, "", nil, nil, "."); err == nil {
+		t.Fatal("a nil environment loaded packages under the ambient one")
+	}
+	if _, err := LoadPackages(nil, packages.NeedName, "", []string{}, nil, "."); err == nil {
+		t.Fatal("a nil context loaded packages")
+	}
+	if _, err := LoadPackages(context.Background(), packages.NeedName, "", []string{"GOPACKAGESDRIVER=custom"}, nil, "."); err == nil {
+		t.Fatal("an external package driver was accepted")
 	}
 }

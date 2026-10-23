@@ -79,7 +79,7 @@ func symbolExternalEffect(kind externalEffectKind, pkgPath, name, reason string)
 // A bound method value's wrapper declares the method it delegates to,
 // so the enumerated-target arm judges it as that method through this
 // ladder; the wrapper's own body is never walked
-// (REQ-closure-observability-analysis).
+// (REQ-closure-observability-audited-set).
 func auditedStandardMethod(audited bool, fn *ssa.Function) bool {
 	if !audited || fn == nil {
 		return false
@@ -212,7 +212,7 @@ var classBTable, classBPackages = func() (map[string]map[string]classBEntry, map
 		{
 			// crypto/rand's operation surface is the entropy class: Read, Text,
 			// Prime, and Int are classified as external system calls rather than
-			// left to the unaudited fallback (REQ-closure-observability-audited-set).
+			// left to the unaudited fallback (REQ-closure-observability-entropy).
 			pkgs:   []string{"crypto/rand"},
 			kind:   externalEffectNative,
 			suffix: " (entropy)",
@@ -421,7 +421,7 @@ func harnessInvokeAdmitted(audited bool, fn *ssa.Function) bool {
 }
 
 // auditedHarnessLogging reports whether a testing-package symbol is the
-// harness's failure/logging channel (REQ-closure-observability-analysis).
+// harness's failure/logging channel (REQ-closure-observability-harness-logging).
 func auditedHarnessLogging(audited bool, pkgPath, name string) bool {
 	return audited && pkgPath == "testing" && harnessAdmissions[name].family == harnessFamilyLogging
 }
@@ -433,7 +433,7 @@ func harnessLoggingEffect(name string) externalEffect {
 }
 
 // auditedHarnessPacing reports whether a testing-package symbol is the
-// benchmark harness's pacing protocol (REQ-closure-observability-analysis).
+// benchmark harness's pacing protocol (REQ-closure-observability-benchmark-pacing).
 func auditedHarnessPacing(audited bool, pkgPath, name string) bool {
 	return audited && pkgPath == "testing" && harnessAdmissions[name].family == harnessFamilyPacing
 }
@@ -485,7 +485,7 @@ func harnessSubtestDriverEffect() externalEffect {
 // of such a type classifies at its own site. math/big is admitted
 // whole as a member of the audited-pure package set
 // (isSourceOnlyStandardPackage), not operation by operation here.
-// Grows only by source audit (REQ-closure-observability-analysis).
+// Grows only by source audit (REQ-closure-observability-audited-set).
 func classBPureStandard(audited bool, pkgPath, name string) bool {
 	// Every per-package audited surface is one table in internal/auditset.
 	return audited && auditset.Symbol(pkgPath, name)

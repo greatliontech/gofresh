@@ -1516,7 +1516,7 @@ func Count(root string) int {
 	}
 	// A refusal names its tier: the file fold's carries the "package
 	// scan: " prefix, the walk's does not — so each tier's arm is
-	// pinned on its own (REQ-closure-observability-analysis).
+	// pinned on its own (REQ-closure-observability-audited-set).
 	cases := []struct{ pkg, symbol, refusal string }{
 		{"urlhost", "Host", "package scan: reaches unaudited standard operation net/url.Parse"},
 		{"urlvalues", "Compose", ""},
@@ -1551,7 +1551,7 @@ func Count(root string) int {
 // The benchmark harness's pacing — b.N, b.Loop, the timer controls — is
 // harness protocol: benchmarks reading it and the tests beside them
 // prove observable, while every other benchmark surface keeps its
-// class (REQ-closure-observability-analysis's benchmark-pacing clause).
+// class (REQ-closure-observability-benchmark-pacing).
 func TestBenchmarkPacingIsHarnessProtocol(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -1684,7 +1684,7 @@ func BenchmarkResultField(b *testing.B) {
 // legacy projection stays unverifiable with the pacing reason and the
 // recorded fact observable, and a subject mixing pacing with a causal
 // effect keeps the causal reason
-// (REQ-closure-observability-analysis's benchmark-pacing clause).
+// (REQ-closure-observability-benchmark-pacing).
 func TestBenchmarkPacingIsNotPurityEvidence(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
@@ -1764,7 +1764,7 @@ func TestTestingScanStrategyVersion(t *testing.T) {
 // of B alone, N as a field of B — BenchmarkResult and the fuzz result
 // declare an N too, which the field arm's receiver check excludes — and
 // none as a package-level function. A drifting toolchain fails here
-// instead of silently widening (REQ-closure-observability-analysis).
+// instead of silently widening (REQ-closure-observability-benchmark-pacing).
 func TestBenchmarkPacingDeclarationInventory(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

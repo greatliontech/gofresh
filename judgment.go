@@ -181,7 +181,7 @@ func admittedObservation(rec Fingerprint, subject Subject, cl closure.Closure) O
 func (v *View) judgmentFor(subject Subject, verdict Verdict) Verdict {
 	verdict.Ground.Scope = JudgmentScope{Subject: subject, ResultKind: v.kind}
 	if v.engine != nil {
-		verdict.Ground.Scope.ExecutionModel = ExecutionAssertions{SingleSubject: v.engine.singleSubjectExecution, PackageProcess: v.engine.packageProcessExecution}
+		verdict.Ground.Scope.ExecutionModel = v.engine.executionModel
 	}
 	// A cut is the immutable pass's unavailability, not proof that the
 	// surviving culprit affects this subject. It still blocks observation lift.
@@ -189,9 +189,10 @@ func (v *View) judgmentFor(subject Subject, verdict Verdict) Verdict {
 		verdict.Ground.Cause.Condition = Unavailable
 	}
 	if verdict.Ground.Accepted.GuardAgreement {
+		d := v.facts.discharges[subject]
 		verdict.Ground.Accepted.DynamicStateVouches = v.facts.vouchDischarges[subject]
-		verdict.Ground.Accepted.SingleSubjectDischarges = v.facts.attestationDischarges[subject]
-		verdict.Ground.Accepted.PackageProcessDischarges = v.facts.packageProcessDischarges[subject]
+		verdict.Ground.Accepted.SingleSubjectDischarges = d.singleSubject
+		verdict.Ground.Accepted.PackageProcessDischarges = d.packageProcess
 	}
 	return verdict
 }

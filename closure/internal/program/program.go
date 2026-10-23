@@ -16,6 +16,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
 	"github.com/greatliontech/gofresh/closure/internal/compartment"
 	"github.com/greatliontech/gofresh/closure/internal/listing"
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // Program is one package test binary's whole-program SSA with its
@@ -37,17 +38,6 @@ type Program struct {
 	// one probe per program (and per harness arm) serves every failing
 	// batch.
 	PkgScopeProbe map[bool]error
-}
-
-func loadConfigEnv(ctx context.Context, dir string, env []string, buildFlags ...string) *packages.Config {
-	return &packages.Config{
-		Context:    ctx,
-		Mode:       packages.LoadAllSyntax | packages.NeedForTest | packages.NeedModule,
-		Tests:      true,
-		Dir:        dir,
-		Env:        append([]string(nil), env...),
-		BuildFlags: append([]string(nil), buildFlags...),
-	}
 }
 
 // Load builds pkgPath's test-binary Program.
@@ -205,16 +195,14 @@ func (p *Prepared) Release(pkgPath string) {
 }
 
 func load(ctx context.Context, dir string, env, flags, paths []string) ([]*packages.Package, error) {
-	cfg := loadConfigEnv(ctx, dir, env, flags...)
-	paths = append([]string(nil), paths...)
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	roots, err := packages.Load(cfg, paths...)
-	if cancelled := ctx.Err(); cancelled != nil {
-		return nil, cancelled
-	}
-	return roots, err
+	return gotool.LoadPackages(
+		ctx,
+		packages.LoadAllSyntax|packages.NeedForTest|packages.NeedModule,
+		dir,
+		env,
+		flags,
+		paths...,
+	)
 }
 
 // build builds whole-program SSA for one package's test binary from its

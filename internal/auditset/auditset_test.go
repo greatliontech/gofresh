@@ -110,7 +110,7 @@ func TestBoundedTokenNeverShadowsALongerName(t *testing.T) {
 
 // A standard package is admitted whole or by symbol, never both: the
 // two consulting predicates would otherwise answer differently for one
-// package (REQ-closure-observability-analysis).
+// package (REQ-closure-observability-audited-set).
 func TestAuditedShapesAreDisjoint(t *testing.T) {
 	for pkgPath := range symbolTables {
 		if purePackages[pkgPath] {

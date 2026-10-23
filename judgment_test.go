@@ -48,11 +48,11 @@ func judgmentFixture(t *testing.T) (*View, Subject, Fingerprint, runtimeinput.St
 	fp.RuntimeDigest = state.Digest
 	cl := closure.Closure{Hash: fp.MaximalClosure, TestVariants: fp.TestVariantClosure, ToolchainContent: fp.ToolchainContent, AdmissionPolicy: fp.AdmissionPolicy, Unverifiable: true, Reason: "diagnostic only"}
 	v := &View{
-		engine: &Engine{deferredCheckClose: true, singleSubjectExecution: true, packageProcessExecution: true},
+		engine: &Engine{deferredCheckClose: true, executionModel: ExecutionAssertions{SingleSubject: true, PackageProcess: true}},
 		kind:   CodeResult, subjects: []Subject{subject},
 		facts: &observationFacts{maximal: map[Subject]subjectFacts{subject: testSubjectFacts(cl)}, guards: fp.Guards,
 			purity: map[Subject]string{}, vouchDischarges: map[Subject]string{subject: "dependency.Current"},
-			attestationDischarges: map[Subject]string{subject: "dependency.Single"}, packageProcessDischarges: map[Subject]string{subject: "dependency.Package"}},
+			discharges: map[Subject]attestationDischarges{subject: {singleSubject: "dependency.Single", packageProcess: "dependency.Package"}}},
 		runtimeCurrent: func(context.Context, string, string) (runtimeinput.State, error) { return state, nil },
 	}
 	return v, subject, fp, state

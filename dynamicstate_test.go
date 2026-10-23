@@ -1688,7 +1688,7 @@ func TestCarrierStoreLinkRecordedAndCallResultsUnlinked(t *testing.T) {
 // A cross-carrier storage link crosses mutation marks symmetrically: a
 // mutation recorded against an aliasing key refuses the linked origin
 // key too - one backing under every name it carries
-// (REQ-closure-shared-dynamic-state-escape-narrowings).
+// (REQ-closure-shared-dynamic-state-init-aliasing).
 func TestCarrierLinkCrossesMutationMarks(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

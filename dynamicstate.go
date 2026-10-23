@@ -765,12 +765,14 @@ func dischargeUnreachableCulprits(ctx, analysisCtx context.Context, hasher *clos
 		// attestation-borne acceptances exactly as the audited sets'
 		// (REQ-vouch-recorded).
 		if len(dischargedKeys) > 0 {
-			for _, key := range strings.Split(scan.attestationDischarges[subject], ",") {
+			d := scan.discharges[subject]
+			for _, key := range strings.Split(d.singleSubject, ",") {
 				if key != "" {
 					dischargedKeys[key] = true
 				}
 			}
-			scan.attestationDischarges[subject] = joinDischargedKeys(dischargedKeys)
+			d.singleSubject = joinDischargedKeys(dischargedKeys)
+			scan.discharges[subject] = d
 		}
 	}
 	return nil, nil
@@ -859,7 +861,9 @@ func dischargeBinaryUnreachableCulprits(ctx, analysisCtx context.Context, hasher
 			// included, exactly as the per-subject scoping records:
 			// attestation-borne acceptances (REQ-vouch-recorded).
 			if len(dischargedKeys) > 0 {
-				scan.packageProcessDischarges[subject] = joinDischargedKeys(dischargedKeys)
+				d := scan.discharges[subject]
+				d.packageProcess = joinDischargedKeys(dischargedKeys)
+				scan.discharges[subject] = d
 			}
 		}
 	}
@@ -880,11 +884,11 @@ func dischargeCulprits(proof closure.RootedFunctions, state *viewDynamicState, p
 	for _, culprit := range state.rootCulprits[pkgPath] {
 		sites := state.culpritSites[pkgPath][culprit.key]
 		if sites.unattributed {
-			return culprit.text, discharged
+			return culprit.reasonBody(), discharged
 		}
 		for fn := range sites.fns {
 			if proof.Fns[fn] {
-				return culprit.text, discharged
+				return culprit.reasonBody(), discharged
 			}
 		}
 		discharged[culprit.key] = true
@@ -960,13 +964,73 @@ func generatedProtoHeader(text string) string {
 	return ""
 }
 
+type culpritVerb uint8
+
+const (
+	culpritMutated culpritVerb = iota + 1
+	culpritEscapes
+	culpritEnvCarrying
+)
+
+func (v culpritVerb) clause() string {
+	switch v {
+	case culpritMutated:
+		return " is mutated"
+	case culpritEscapes:
+		return " escapes writable"
+	case culpritEnvCarrying:
+		return " registers function values outside the environment-free audit"
+	default:
+		return ""
+	}
+}
+
+type culpritChannel uint8
+
+const (
+	channelCallerVouch culpritChannel = iota + 1
+	channelCallerVouchEnvFree
+	channelRestructureOrDirective
+	channelRestructureDirectiveSingleSubjectOnly
+	channelRestructureUnbackedDirective
+)
+
+func (ch culpritChannel) clause(pkgPath, key string) string {
+	switch ch {
+	case channelRestructureUnbackedDirective:
+		return " (its //gofresh:single-subject directive is backed by no single-subject attestation here; dischargeable by restructuring the state)"
+	case channelRestructureDirectiveSingleSubjectOnly:
+		return " (dischargeable by restructuring the state; the //gofresh:single-subject directive discharges only under the caller's single-subject attestation, which the package-process model does not give)"
+	case channelRestructureOrDirective:
+		return " (dischargeable by restructuring the state, or by the //gofresh:single-subject directive on the declaration under the caller's single-subject attestation)"
+	case channelCallerVouch, channelCallerVouchEnvFree:
+		imp, bare := pkgPath, key
+		if i := strings.LastIndexByte(key, '.'); i >= 0 {
+			imp, bare = key[:i], key[i+1:]
+		}
+		obligation := "initialized once and never written"
+		if ch == channelCallerVouchEnvFree {
+			obligation += ", registering only environment-free function values"
+		}
+		return " (dischargeable by a caller vouch for " + imp + "." + bare + " — e.g. --vouch " + imp + ":" + bare + " where the consumer takes flags — on a source audit that the variable is " + obligation + ")"
+	default:
+		return ""
+	}
+}
+
 // dynCulprit is one open package's named culprit in the downgrade
-// walk's order: the variable key and the full reason body ("pkg: key
-// <verb>") the refusal would name (REQ-closure-shared-dynamic-state,
-// REQ-closure-shared-dynamic-state-reason).
+// walk's order: the owning package, variable key, semantic verb, and
+// deciding discharge channel, rendered once by reasonBody
+// (REQ-closure-shared-dynamic-state, REQ-closure-shared-dynamic-state-reason).
 type dynCulprit struct {
-	key  string
-	text string
+	pkgPath string
+	key     string
+	verb    culpritVerb
+	channel culpritChannel
+}
+
+func (c dynCulprit) reasonBody() string {
+	return c.pkgPath + ": " + c.key + c.verb.clause() + c.channel.clause(c.pkgPath, c.key)
 }
 
 // culpritSiteSet is one culprit variable's marking-site inventory for
@@ -1835,68 +1899,47 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 		}
 		return true
 	}
-	// openWorld maps each open package to one culprit description — the
-	// downgrade's refusal must name the owning package and variable.
-	// pkgCulprits additionally keeps EVERY culprit per package in rank
-	// order, for the per-subject reachability re-judgment under the
-	// single-subject attestation (REQ-closure-shared-dynamic-state).
-	openWorld := map[string]string{}
+	// pkgCulprits keeps every culprit per package in rank order — the
+	// first entry names the package's immediate downgrade, and the full
+	// slice feeds the reachability re-judgment
+	// (REQ-closure-shared-dynamic-state).
 	pkgCulprits := map[string][]dynCulprit{}
 	culpritSeen := map[string]bool{}
-	const (
-		verbMutated     = " is mutated"
-		verbEscapes     = " escapes writable"
-		verbEnvCarrying = " registers function values outside the environment-free audit"
-	)
-	// dischargeChannel names the lift the culprit's boundary affords, so
-	// the refusal is never a dead end
-	// (REQ-closure-shared-dynamic-state-reason): a version-pinned
-	// dependency variable names the caller-vouch channel — dependency
-	// code cannot be edited — by the variable's canonical identity
-	// (derived from the KEY, whose halves are what a vouch must match;
-	// pkgPath can differ on the persisted-fact channel's foreign keys),
-	// illustrating the flag spelling consumers that take flags share; a
-	// mutable-local variable names the restructure and the
-	// single-subject directive, the vouch boundary's exact inverse —
-	// under the package-process attestation, which the directive's
-	// discharge does not ride, the channel names the restructure as the
-	// one remedy left, the directive as present and unbacked where the
-	// declaration carries it and as single-subject-only where it does
-	// not: a consumer whose model forbids single-subject execution is
-	// never pointed at it, nor at a directive that would only move it
-	// to the unbacked text (an unattested consumer is still pointed at
-	// the directive and the attestation — its own half to give). The
-	// audit obligation follows the CARRIER, not the reported verb: the
-	// culprit list dedupes per variable with mutation and escape
-	// outranking the environment mark, so a function-value carrier can
-	// surface under the escape verb — its vouch still lifts the
-	// environment-audit rank, so its stated audit must cover the
-	// registered values' environments regardless of which verb won the
-	// rank (REQ-vouch-discharge's whole-surface exemption).
-	dischargeChannel := func(pkgPath, key string) string {
+	// channelFor classifies the semantic discharge channel the culprit's
+	// boundary affords, so the refusal is never a dead end and a reason
+	// naming an unhonored channel is unrepresentable
+	// (REQ-closure-shared-dynamic-state-reason). The audit obligation
+	// follows the CARRIER, not the reported verb: the culprit list
+	// dedupes per variable with mutation and escape outranking the
+	// environment mark, so a function-value carrier can surface under the
+	// escape verb — its vouch still lifts the environment-audit rank, so
+	// its stated audit must cover the registered values' environments
+	// regardless of which verb won the rank (REQ-vouch-discharge).
+	channelFor := func(pkgPath, key string) culpritChannel {
 		if mutableLocalPkg[pkgPath] {
 			switch {
 			case packageProcess && directiveCovered[key]:
-				return " (its //gofresh:single-subject directive is backed by no single-subject attestation here; dischargeable by restructuring the state)"
+				return channelRestructureUnbackedDirective
 			case packageProcess:
-				return " (dischargeable by restructuring the state; the //gofresh:single-subject directive discharges only under the caller's single-subject attestation, which the package-process model does not give)"
+				return channelRestructureDirectiveSingleSubjectOnly
+			default:
+				return channelRestructureOrDirective
 			}
-			return " (dischargeable by restructuring the state, or by the //gofresh:single-subject directive on the declaration under the caller's single-subject attestation)"
 		}
-		imp, bare := pkgPath, key
-		if i := strings.LastIndexByte(key, '.'); i >= 0 {
-			imp, bare = key[:i], key[i+1:]
-		}
-		obligation := "initialized once and never written"
 		if envCarrying[key] {
-			obligation += ", registering only environment-free function values"
+			return channelCallerVouchEnvFree
 		}
-		return " (dischargeable by a caller vouch for " + imp + "." + bare + " — e.g. --vouch " + imp + ":" + bare + " where the consumer takes flags — on a source audit that the variable is " + obligation + ")"
+		return channelCallerVouch
 	}
-	recordCulprit := func(pkgPath, key, verb string) {
+	recordCulprit := func(pkgPath, key string, verb culpritVerb) {
 		if seen := pkgPath + "\x00" + key; !culpritSeen[seen] {
 			culpritSeen[seen] = true
-			pkgCulprits[pkgPath] = append(pkgCulprits[pkgPath], dynCulprit{key: key, text: pkgPath + ": " + key + verb + dischargeChannel(pkgPath, key)})
+			pkgCulprits[pkgPath] = append(pkgCulprits[pkgPath], dynCulprit{
+				pkgPath: pkgPath,
+				key:     key,
+				verb:    verb,
+				channel: channelFor(pkgPath, key),
+			})
 		}
 	}
 	pkgPaths := make([]string, 0, len(allFacts))
@@ -1915,20 +1958,14 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 		for _, fact := range allFacts[pkgPath] {
 			for _, key := range fact.Declares {
 				if mutated[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
-					recordCulprit(pkgPath, key, verbMutated)
-					if _, ok := openWorld[pkgPath]; !ok {
-						openWorld[pkgPath] = key + verbMutated + dischargeChannel(pkgPath, key)
-					}
+					recordCulprit(pkgPath, key, culpritMutated)
 				}
 			}
 		}
 		for _, fact := range allFacts[pkgPath] {
 			for _, key := range fact.Declares {
 				if escaped[key] && notOpaque[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
-					recordCulprit(pkgPath, key, verbEscapes)
-					if _, ok := openWorld[pkgPath]; !ok {
-						openWorld[pkgPath] = key + verbEscapes + dischargeChannel(pkgPath, key)
-					}
+					recordCulprit(pkgPath, key, culpritEscapes)
 				}
 			}
 		}
@@ -1939,10 +1976,7 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 		for _, fact := range allFacts[pkgPath] {
 			for _, key := range fact.Declares {
 				if envCarrying[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
-					recordCulprit(pkgPath, key, verbEnvCarrying)
-					if _, ok := openWorld[pkgPath]; !ok {
-						openWorld[pkgPath] = key + verbEnvCarrying + dischargeChannel(pkgPath, key)
-					}
+					recordCulprit(pkgPath, key, culpritEnvCarrying)
 				}
 			}
 		}
@@ -1964,8 +1998,8 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 		if classes[listing] == closure.StandardPackage {
 			return ""
 		}
-		if culprit, ok := openWorld[pkgPathOf[listing]]; ok {
-			return pkgPathOf[listing] + ": " + culprit
+		if culprits := pkgCulprits[pkgPathOf[listing]]; len(culprits) > 0 {
+			return culprits[0].reasonBody()
 		}
 		for _, imported := range imports[listing] {
 			if _, ok := pkgPathOf[imported]; !ok {

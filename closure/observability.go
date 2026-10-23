@@ -515,7 +515,7 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 	// walk cannot trace must block every subject sharing the program -
 	// the program is this package's own test binary, so the poisoned
 	// package is always in the subject's world
-	// (REQ-closure-observability-analysis).
+	// (REQ-closure-observability-flag-registration).
 	if _, poisonedPkgs := base.flagRegistrationFacts(); len(poisonedPkgs) != 0 {
 		paths := slices.Sorted(maps.Keys(poisonedPkgs))
 		return Observability{Reason: poisonedPkgs[paths[0]]}, nil
@@ -592,7 +592,7 @@ func testMainObservedEffects(base *tier2Base, reachable attributedReachability) 
 				// read side exactly as in subject flow - it can steer the
 				// harness verdict (an exit-code mask, at minimum) on
 				// command-line state the test log cannot audit
-				// (REQ-closure-observability-analysis).
+				// (REQ-closure-observability-flag-registration).
 				recordFlagBackedReferences(analyzer.flagBacked, analyzer.recordExternalEffect, instruction)
 				site, ok := instruction.(ssa.CallInstruction)
 				if !ok || site.Common() == nil {
@@ -627,14 +627,14 @@ func recordTestMainCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, sit
 	// Static sites only: the facts walk can sink-judge only a statically
 	// dispatched registration, so a dynamically dispatched family-named
 	// target keeps its classification - fail-closed
-	// (REQ-closure-observability-analysis).
+	// (REQ-closure-observability-flag-registration).
 	if flagRegistrationSymbol(pkgPath, name) && site.Common().StaticCallee() == callee {
 		return
 	}
 	// The property-harness boundary gate holds in test-main flow
 	// exactly as in subject flow: the harness's bodies are unscanned,
 	// so a callable crossing here is judged at the boundary or not at
-	// all (REQ-closure-observability-analysis).
+	// all (REQ-closure-observability-property-harness).
 	if analyzer.propertyHarnessAudited(pkgPath) {
 		if site.Common().StaticCallee() != callee {
 			analyzer.requestWiden("property harness reached as a dynamic target in test-main flow")
@@ -670,7 +670,7 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 	// judgment requires - an initializer composing generators
 	// (rapid.Deriv(rapid.Int())) is the same sanctioned crossing as in
 	// subject flow. Parameter crossing stays refused exactly as with a
-	// nil analysis (REQ-closure-observability-analysis).
+	// nil analysis (REQ-closure-observability-property-harness).
 	if reachable.propertyHarnessAudited {
 		analyzer.fresh = &freshParamAnalysis{propertyHarnessAudited: true, selectionAudited: analyzer.h.SelectionAudited()}
 	}
@@ -688,7 +688,7 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 				// state (q = &registered), an alias the mark cannot
 				// follow - both refuse, keeping the admission's guard
 				// airtight in every analyzed flow
-				// (REQ-closure-observability-analysis).
+				// (REQ-closure-observability-flag-registration).
 				recordFlagBackedReferences(analyzer.flagBacked, analyzer.recordExternalEffect, instruction)
 				site, ok := instruction.(ssa.CallInstruction)
 				if !ok || site.Common() == nil {
@@ -733,7 +733,7 @@ func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site 
 	pkgPath, name := funcPkgPath(callee), functionSymbolName(callee)
 	// Static sites only, exactly as the test-main walk: the facts walk
 	// cannot sink-judge a dynamically dispatched registration target
-	// (REQ-closure-observability-analysis).
+	// (REQ-closure-observability-flag-registration).
 	if flagRegistrationSymbol(pkgPath, name) && site.Common().StaticCallee() == callee {
 		return
 	}
@@ -741,7 +741,7 @@ func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site 
 	// initializer can create harness values (a package-level MakeCheck
 	// callback) whose bindings must be judged where they cross - the
 	// anonymous-target admission downstream rests on every flow
-	// carrying this gate (REQ-closure-observability-analysis).
+	// carrying this gate (REQ-closure-observability-property-harness).
 	if analyzer.propertyHarnessAudited(pkgPath) {
 		if site.Common().StaticCallee() != callee {
 			analyzer.requestWiden("property harness reached as a dynamic target in startup flow")
@@ -789,13 +789,13 @@ func maximalObservabilityBlocker(audited bool, effect externalEffect) bool {
 	// subject in a package declaring one fuzz test; both narrow to
 	// diagnostics - the subject tier classifies each reached driver by
 	// its receiver, and a fuzz subject still refuses there
-	// (REQ-closure-observability-analysis).
+	// (REQ-closure-observability-subtest-driver).
 	if effect.packagePath == "testing" && (effect.symbol == "Run" || effect.symbol == "Fuzz") {
 		return false
 	}
 	// The property-harness fact keeps the closure verdict unverifiable
 	// without blocking observability: the subject tiers judge every
-	// harness crossing precisely (REQ-closure-observability-analysis).
+	// harness crossing precisely (REQ-closure-observability-property-harness).
 	if effect.kind == externalEffectTestRuntime && propertyHarnessPath(effect.packagePath) {
 		return false
 	}
@@ -868,7 +868,7 @@ func isOpenFlagSymbol(symbol string) bool {
 // flagRegistrationSymbol reports whether pkg.name is standard flag
 // REGISTRATION with a value-shaped sink - a process-local registry
 // mutation whose registered storage the registration facts walk can
-// trace and guard (REQ-closure-observability-analysis).
+// trace and guard (REQ-closure-observability-flag-registration).
 func flagRegistrationSymbol(pkgPath, name string) bool {
 	return pkgPath == "flag" && auditset.FlagSurface(name).IsRegistration()
 }
@@ -902,7 +902,7 @@ func flagPointerRegistration(pkgPath, name string) bool {
 // cover exactly what source can express. Standard-library bodies are
 // excluded exactly as the direct walks exclude them: the harness's own
 // registrations are audited surface
-// (REQ-closure-observability-analysis).
+// (REQ-closure-observability-flag-registration).
 func (b *tier2Base) flagRegistrationFacts() (map[*ssa.Global]bool, map[string]string) {
 	if b.flagBacked != nil {
 		return b.flagBacked, b.flagUntraceable

@@ -223,7 +223,7 @@ func (f ProducerFrame) incomplete(ctx context.Context, in ProducerIngest, reason
 	if err := ctx.Err(); err != nil {
 		return Observation{}, "", err
 	}
-	observation, err := Incomplete(f.Root, in.Identity, reason, in.Env)
+	observation, err := IncompleteContext(ctx, f.Root, in.Identity, reason, in.Env)
 	if err := ctx.Err(); err != nil {
 		return Observation{}, "", err
 	}

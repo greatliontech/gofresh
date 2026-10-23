@@ -53,7 +53,8 @@ func scanOutputs(t *testing.T, view *View, subjects []Subject) map[Subject]strin
 		if err != nil {
 			t.Fatal(err)
 		}
-		out[s] = fp.MaximalClosure + "|" + fp.PurityAssertion + "|" + boolWord(view.facts.closure(s).Unverifiable) + "|" + view.facts.closure(s).Reason + "|" + view.facts.vouchDischarges[s] + "|" + view.facts.packageProcessDischarges[s] + "|" + view.facts.attestationDischarges[s]
+		d := view.facts.discharges[s]
+		out[s] = fp.MaximalClosure + "|" + fp.PurityAssertion + "|" + boolWord(view.facts.closure(s).Unverifiable) + "|" + view.facts.closure(s).Reason + "|" + view.facts.vouchDischarges[s] + "|" + d.packageProcess + "|" + d.singleSubject
 	}
 	return out
 }
@@ -476,8 +477,8 @@ func TestScanEntryRoundTripsEveryOutput(t *testing.T) {
 		known: map[Subject]bool{s("A"): true, s("B"): true, s("C"): true}, pure: map[Subject]bool{s("A"): true},
 		openWorld: map[Subject]string{s("B"): "parameter f func()"}, external: map[Subject]bool{s("C"): true},
 		downgradeReason: map[Subject]string{s("B"): "reason"}, vouchDischarges: map[Subject]string{s("A"): "v"},
-		attestationDischarges: map[Subject]string{s("B"): "att"}, packageProcessDischarges: map[Subject]string{s("C"): "pp"},
-		ambiguous: map[Subject]string{s("C"): "declared twice"},
+		discharges: map[Subject]attestationDischarges{s("B"): {singleSubject: "att"}, s("C"): {packageProcess: "pp"}},
+		ambiguous:  map[Subject]string{s("C"): "declared twice"},
 	}
 	raw, err := json.Marshal(entryOf(scan, pkg))
 	if err != nil {

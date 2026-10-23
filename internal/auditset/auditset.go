@@ -67,13 +67,13 @@ var syncMethods = map[string][]string{
 // the analyzed program alone, admitted at the effect classification
 // tiers; the shared-dynamic-state discharge is the data memo's content
 // judgment, never this set's. Grows only by source audit
-// (REQ-closure-shared-dynamic-state-audited-discharges).
+// (REQ-closure-shared-dynamic-state-memo).
 var memoMethods = map[string][]string{
 	"Map": {"Load", "Store", "LoadOrStore"},
 }
 
 // poolMethods is the audited pooling set: sync.Pool and its Get and
-// Put operations (REQ-closure-shared-dynamic-state-audited-discharges).
+// Put operations (REQ-closure-shared-dynamic-state-pool).
 var poolMethods = map[string][]string{
 	"Pool": {"Get", "Put"},
 }
@@ -326,7 +326,7 @@ func (r FlagRole) IsRegistration() bool {
 //   - FlagRoleAudited: the default set's variable, the set constructor,
 //     the error-handling constants, and the type names — each a selector
 //     a registration's receiver or argument spells and none an input
-//     channel by itself (REQ-closure-observability-audited-set).
+//     channel by itself (REQ-closure-observability-flag-registration).
 //   - FlagRoleValueRegistration / FlagRolePointerRegistration: the
 //     value- and pointer-shaped registration families whose storage
 //     flagRegistrationFacts traces program-wide.

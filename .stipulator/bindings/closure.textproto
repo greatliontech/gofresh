@@ -762,7 +762,7 @@ bindings {
 }
 
 bindings {
-  requirement_id: "REQ-closure-shared-dynamic-state-escape-narrowings"
+  requirement_id: "REQ-closure-shared-dynamic-state-init-aliasing"
   content_hash: "4fffdc5b77a061c6120b40c3134785a64a1e4e18027fbfc7802acaeb3d0ca17e"
   source_hash: "2bd1a41b6c92a77e165e3963f636b7b3e06896edb27000f06828332f144c916b"
   backend: "go"

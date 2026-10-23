@@ -1589,7 +1589,7 @@ func TestFormattedReaderInputIsUnverifiable(t *testing.T) {
 
 // The benchmark's iteration count is harness pacing: a measurement-kind
 // view proves the b.N reader observable and its verdict valid
-// (REQ-closure-observability-analysis's benchmark-pacing clause).
+// (REQ-closure-observability-benchmark-pacing).
 func TestBenchmarkIterationCountIsHarnessPacing(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
@@ -3713,7 +3713,7 @@ func TestMemoStoreKnobContainsPersistentWrites(t *testing.T) {
 // initializers - its own package's and a sibling's - proves init-only
 // across the graph, and the registry mutation inside it is startup
 // flow; one program-code caller anywhere poisons the proof
-// (REQ-closure-shared-dynamic-state-escape-narrowings).
+// (REQ-closure-shared-dynamic-state-init-flow).
 func TestCrossPackageInitOnlyRegistration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over a fixture (measured heavy under the fast tier)")

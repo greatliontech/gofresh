@@ -166,13 +166,13 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 			}
 			return nil, fmt.Errorf("%w: vouch discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 		}
-		if !cut && first.attestationDischarges[subject] != second.attestationDischarges[subject] {
+		if !cut && first.discharges[subject].singleSubject != second.discharges[subject].singleSubject {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 			return nil, fmt.Errorf("%w: single-subject attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 		}
-		if !cut && first.packageProcessDischarges[subject] != second.packageProcessDischarges[subject] {
+		if !cut && first.discharges[subject].packageProcess != second.discharges[subject].packageProcess {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
@@ -239,13 +239,10 @@ type observationFacts struct {
 	// warm scan memo can leave it absent or partially populated; that is not
 	// permission to acquire replacement inputs or infer implementation support.
 	source                *closure.ViewLoad
-	guards                guard.Guards
-	purity                map[Subject]string
-	vouchDischarges       map[Subject]string
-	attestationDischarges map[Subject]string
-	// packageProcessDischarges mirrors attestationDischarges for the
-	// package-process attestation's binary-scoped discharges.
-	packageProcessDischarges map[Subject]string
+	guards          guard.Guards
+	purity          map[Subject]string
+	vouchDischarges map[Subject]string
+	discharges      map[Subject]attestationDischarges
 	// cut is the set of subjects the analysis budget left undischarged
 	// in this pass — a fact of the pass, never of the tree: the fields
 	// the discharge shapes (the downgrade in maximal, the attestation
@@ -449,18 +446,17 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		return observationFacts{}, err
 	}
 	observation := observationFacts{
-		cut:                      cut,
-		snapshot:                 snapshot,
-		reader:                   reader,
-		maximal:                  make(map[Subject]subjectFacts, len(subjects)),
-		source:                   source,
-		guards:                   guards,
-		purity:                   make(map[Subject]string, len(subjects)),
-		vouchDischarges:          make(map[Subject]string, len(subjects)),
-		attestationDischarges:    make(map[Subject]string, len(subjects)),
-		packageProcessDischarges: make(map[Subject]string, len(subjects)),
-		sourceFilesBySubject:     make(map[Subject][]string, len(subjects)),
-		testVariantLedgers:       make(map[string]testvariant.TestVariantLedger, len(packages)),
+		cut:                  cut,
+		snapshot:             snapshot,
+		reader:               reader,
+		maximal:              make(map[Subject]subjectFacts, len(subjects)),
+		source:               source,
+		guards:               guards,
+		purity:               make(map[Subject]string, len(subjects)),
+		vouchDischarges:      make(map[Subject]string, len(subjects)),
+		discharges:           make(map[Subject]attestationDischarges, len(subjects)),
+		sourceFilesBySubject: make(map[Subject][]string, len(subjects)),
+		testVariantLedgers:   make(map[string]testvariant.TestVariantLedger, len(packages)),
 	}
 	for _, pkg := range packages {
 		// Served from the hasher's compartment memo: the ledger was derived
@@ -515,11 +511,8 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		if discharges := scan.vouchDischarges[subject]; discharges != "" {
 			observation.vouchDischarges[subject] = discharges
 		}
-		if attested := scan.attestationDischarges[subject]; attested != "" {
-			observation.attestationDischarges[subject] = attested
-		}
-		if attested := scan.packageProcessDischarges[subject]; attested != "" {
-			observation.packageProcessDischarges[subject] = attested
+		if d := scan.discharges[subject]; d != (attestationDischarges{}) {
+			observation.discharges[subject] = d
 		}
 		if detail := scan.ambiguous[subject]; detail != "" {
 			// Distinct declarations collapsed onto this identity: capture
@@ -640,13 +633,14 @@ func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error
 // fingerprintLocked projects the view's immutable producing facts. Callers
 // hold the view lock; observed capture adds its independently derived proof.
 func (v *View) fingerprintLocked(subject Subject, cl closure.Closure) Fingerprint {
+	d := v.facts.discharges[subject]
 	return Fingerprint{
 		MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants,
 		ToolchainContent: cl.ToolchainContent, AdmissionPolicy: cl.AdmissionPolicy,
 		Guards: v.guards(), PurityAssertion: v.facts.purity[subject],
 		DynamicStateVouches:      v.facts.vouchDischarges[subject],
-		SingleSubjectDischarges:  v.facts.attestationDischarges[subject],
-		PackageProcessDischarges: v.facts.packageProcessDischarges[subject],
+		SingleSubjectDischarges:  d.singleSubject,
+		PackageProcessDischarges: d.packageProcess,
 		DynamicStateStrategy:     DynamicStateStrategy, ClosureStrategy: ClosureStrategy,
 		ResultKind: v.kind,
 	}
@@ -1014,8 +1008,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 	observable := make(map[Subject]closure.Observability, len(unique))
 	purity := make(map[Subject]string, len(unique))
 	vouchDischarges := make(map[Subject]string, len(unique))
-	attestationDischarges := make(map[Subject]string, len(unique))
-	packageProcessDischarges := make(map[Subject]string, len(unique))
+	discharges := make(map[Subject]attestationDischarges, len(unique))
 	cut := make(map[Subject]bool, len(unique))
 	capturedObserved := make(map[Subject]bool, len(unique))
 	ledgers := make(map[string]testvariant.TestVariantLedger, len(packages))
@@ -1032,14 +1025,11 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 		if assertion, ok := v.facts.purity[subject]; ok {
 			purity[subject] = assertion
 		}
-		if discharges, ok := v.facts.vouchDischarges[subject]; ok {
-			vouchDischarges[subject] = discharges
+		if dischargesVal, ok := v.facts.vouchDischarges[subject]; ok {
+			vouchDischarges[subject] = dischargesVal
 		}
-		if attested, ok := v.facts.attestationDischarges[subject]; ok {
-			attestationDischarges[subject] = attested
-		}
-		if attested, ok := v.facts.packageProcessDischarges[subject]; ok {
-			packageProcessDischarges[subject] = attested
+		if d, ok := v.facts.discharges[subject]; ok {
+			discharges[subject] = d
 		}
 		if v.facts.cut[subject] {
 			cut[subject] = true
@@ -1069,20 +1059,19 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 		moduleDir: v.moduleDir,
 		kind:      v.kind,
 		facts: &observationFacts{
-			snapshot:                 v.facts.snapshot,
-			reader:                   v.facts.reader,
-			maximal:                  maximal,
-			source:                   v.facts.source,
-			guards:                   v.facts.guards,
-			purity:                   purity,
-			vouchDischarges:          vouchDischarges,
-			attestationDischarges:    attestationDischarges,
-			packageProcessDischarges: packageProcessDischarges,
-			cut:                      cut,
-			sourceFiles:              sourceFiles,
-			sourceFilesBySubject:     sourceFilesBySubject,
-			fileDigests:              v.facts.fileDigests,
-			testVariantLedgers:       ledgers,
+			snapshot:             v.facts.snapshot,
+			reader:               v.facts.reader,
+			maximal:              maximal,
+			source:               v.facts.source,
+			guards:               v.facts.guards,
+			purity:               purity,
+			vouchDischarges:      vouchDischarges,
+			discharges:           discharges,
+			cut:                  cut,
+			sourceFiles:          sourceFiles,
+			sourceFilesBySubject: sourceFilesBySubject,
+			fileDigests:          v.facts.fileDigests,
+			testVariantLedgers:   ledgers,
 		},
 		observable:           observable,
 		capturedObserved:     capturedObserved,
@@ -1549,8 +1538,7 @@ func (f *observationFacts) takeCut(other observationFacts, subject Subject) {
 	base := f.maximal[subject]
 	base.sharedState = other.maximal[subject].sharedState
 	f.maximal[subject] = base
-	delete(f.attestationDischarges, subject)
-	delete(f.packageProcessDischarges, subject)
+	delete(f.discharges, subject)
 	if f.cut == nil {
 		f.cut = map[Subject]bool{}
 	}
@@ -1864,7 +1852,7 @@ func (e *Engine) analysisScope(guards guard.Guards) closure.AnalysisScope {
 	return closure.AnalysisScope{
 		ProofStrategy: ObservationRTA, FactStrategy: DynamicStateStrategy,
 		Toolchain: guards.Toolchain, BuildConfig: guards.BuildConfig,
-		SingleSubject: e.singleSubjectExecution, PackageProcess: e.packageProcessExecution,
+		SingleSubject: e.executionModel.SingleSubject, PackageProcess: e.executionModel.PackageProcess,
 		Vouches: vouches,
 	}
 }

@@ -106,6 +106,13 @@ func TestEngineSpawnSitesReadARunner(t *testing.T) {
 	if len(bare) != 0 {
 		t.Fatalf("free-function spawns outside gotool: %v", bare)
 	}
+	loads, err := barePackageLoadSites(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loads) != 0 {
+		t.Fatalf("direct packages.Load calls outside gotool.LoadPackages: %v", loads)
+	}
 }
 
 // The walk's logic over synthetic sources: the free spawn functions
@@ -245,6 +252,70 @@ func bareSpawnSites(root string, free []string) ([]string, error) {
 						sites = append(sites, rel+":"+strconv.Itoa(line)+" "+local+".Runner{}."+sel.Sel.Name)
 					}
 				}
+			}
+			return true
+		})
+		return nil
+	})
+	return sites, err
+}
+
+// barePackageLoadSites walks the non-test Go sources under root, outside
+// the gotool package, for direct calls to x/tools/go/packages.Load so
+// every package-loader invocation rides gotool.LoadPackages.
+func barePackageLoadSites(root string) ([]string, error) {
+	var sites []string
+	fset := token.NewFileSet()
+	const packagesPath = "github.com/greatliontech/go-x-tools/go/packages"
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, path)
+		if d.IsDir() {
+			if name := d.Name(); path != root && (strings.HasPrefix(name, ".") || name == "testdata" || name == "fixtures" || rel == "gotool") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return err
+		}
+		local := ""
+		for _, imp := range file.Imports {
+			if strings.Trim(imp.Path.Value, "\"") != packagesPath {
+				continue
+			}
+			local = "packages"
+			if imp.Name != nil {
+				local = imp.Name.Name
+			}
+		}
+		if local == "" {
+			return nil
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			line := fset.Position(call.Pos()).Line
+			if local == "." {
+				if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "Load" {
+					sites = append(sites, rel+":"+strconv.Itoa(line)+" .Load")
+				}
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if id, ok := sel.X.(*ast.Ident); ok && id.Name == local && sel.Sel.Name == "Load" {
+				sites = append(sites, rel+":"+strconv.Itoa(line)+" "+local+".Load")
 			}
 			return true
 		})

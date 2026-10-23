@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // ComputeMaximalBatch returns the maximal sound closure for every subject. All
@@ -180,7 +181,7 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 			// recorded fact keeps the package unverifiable-by-hash: the
 			// audit admits observation, never purity - a property run's
 			// outcome rides the harness's log-surfaced configuration,
-			// not the sources alone (REQ-closure-observability-analysis).
+			// not the sources alone (REQ-closure-observability-property-harness).
 			record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact()}})
 			continue
 		}
@@ -277,7 +278,7 @@ func (h *Hasher) maximalFileEffectsCachedWithNames(pkgPath, path string, declare
 // within a rank - exactly the shared cause-preference order with the
 // legacy projection's tie-break, so the maximal instance and the
 // legacy projection order every tie identically
-// (REQ-closure-observability-analysis). The unrefinable bit takes no
+// (REQ-closure-observability-cause-order). The unrefinable bit takes no
 // tie-break leg: no consumer reads the selected reason's refinability,
 // so a privilege here would be an order this diagnostic alone obeys.
 func preferEffectReason(candidate, current externalEffect) bool {
@@ -335,14 +336,14 @@ func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, e
 		}
 		h.emitUnit("typecheck", pkgPath, 0, 1)
 		var err error
-		loaded, err = packages.Load(&packages.Config{
-			Context:    h.ctx,
-			Mode:       packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports | packages.NeedForTest,
-			Tests:      true,
-			Dir:        h.dir,
-			Env:        append([]string(nil), h.packageEnv...),
-			BuildFlags: append([]string(nil), h.buildFlags...),
-		}, pkgPath)
+		loaded, err = gotool.LoadPackages(
+			h.ctx,
+			packages.NeedName|packages.NeedFiles|packages.NeedCompiledGoFiles|packages.NeedSyntax|packages.NeedTypes|packages.NeedTypesInfo|packages.NeedImports|packages.NeedForTest,
+			h.dir,
+			h.packageEnv,
+			h.buildFlags,
+			pkgPath,
+		)
 		if err != nil {
 			return maximalEffectScan{}, err
 		}
@@ -478,7 +479,7 @@ func maximalFileEffectsContentWithNames(audited bool, filename string, content [
 	// unclaimed and unique. A clash within a tier is what the language
 	// forbids and refuses the file fail-closed, except two derived
 	// version-element primaries, whose identifiers live on their
-	// secondaries (REQ-closure-observability-analysis).
+	// secondaries (REQ-closure-observability-declaration-bindings).
 	secondaries := map[string][]string{}
 	versioned := map[string]bool{}
 	explicit := map[string]bool{}
@@ -523,7 +524,7 @@ func maximalFileEffectsContentWithNames(audited bool, filename string, content [
 	// effect set under the shared cause-preference order
 	// (preferredEffectReason); the potential-external import fallback
 	// names a dependence only for an effect-less file
-	// (REQ-closure-observability-analysis).
+	// (REQ-closure-observability-cause-order).
 	potentialExternal := ""
 	if hasWasmImport {
 		effect := opaqueExternalEffect(externalEffectLinkage, "reaches go:wasmimport")
@@ -568,7 +569,7 @@ func maximalFileEffectsContentWithNames(audited bool, filename string, content [
 	// unaudited operation: os.Exit inside the user TestMain(*testing.M)
 	// declaration is admitted exactly as the observed test-main walk
 	// admits it - it runs post-bracket and adds no input channel to any
-	// subject's execution (REQ-closure-observability-analysis).
+	// subject's execution (REQ-closure-observability-testmain-exit).
 	testMainDecl := userTestMainDecl(file, aliases)
 	inTestMain := func(node ast.Node) bool {
 		return testMainDecl != nil && node.Pos() >= testMainDecl.Pos() && node.End() <= testMainDecl.End()
@@ -588,7 +589,7 @@ func maximalFileEffectsContentWithNames(audited bool, filename string, content [
 					// guards every call site program-wide - traced
 					// storage refuses on reference, an untraceable
 					// sink poisons the package
-					// (REQ-closure-observability-analysis).
+					// (REQ-closure-observability-flag-registration).
 				} else if !auditedStandardSymbol(audited, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isStandardFallbackExempt(audited, pkgPath)) {
 					scan.add(unauditedStandardEffect(pkgPath, sel.Sel.Name))
 				}
@@ -905,7 +906,7 @@ func isAlwaysExternalPackage(pkgPath string) bool {
 // networkPackage is the one spelling of the net tree's network-I/O
 // classification: net and every package beneath it except net/url —
 // value computation with no socket, admitted by symbol
-// (REQ-closure-observability-analysis).
+// (REQ-closure-observability-audited-set).
 func networkPackage(pkgPath string) bool {
 	return pkgPath == "net" || (strings.HasPrefix(pkgPath, "net/") && pkgPath != "net/url")
 }
@@ -943,7 +944,7 @@ func isSourceOnlyStandardPackage(audited bool, pkgPath string) bool {
 	// and sync/atomic (sync.Pool is runtime-backed and GC-coupled);
 	// time, math/rand, hash/maphash (ambient clock and entropy); and
 	// every I/O-acquiring package
-	// (REQ-closure-observability-analysis). The set itself is one table
+	// (REQ-closure-observability-audited-set). The set itself is one table
 	// in internal/auditset beside the other audited sets.
 	return auditset.PurePackage(pkgPath)
 }

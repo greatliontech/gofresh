@@ -21,7 +21,7 @@ func TestAnalysisScopeWiresTheStrategyConstants(t *testing.T) {
 	if plain.Proofs() != "" || plain.Facts() != "" || plain.Scan() != "" || plain.TestingScan() != "" {
 		t.Fatal("reported guards without source dependencies armed a memo")
 	}
-	attested := (&Engine{singleSubjectExecution: true, packageProcessExecution: true, dynamicStateVouches: map[string]bool{"example.com/dep:Hooks": true, "a.example/x:Y": true}}).analysisScope(guards)
+	attested := (&Engine{executionModel: ExecutionAssertions{SingleSubject: true, PackageProcess: true}, dynamicStateVouches: map[string]bool{"example.com/dep:Hooks": true, "a.example/x:Y": true}}).analysisScope(guards)
 	slices.Sort(attested.Vouches)
 	if !attested.SingleSubject || !attested.PackageProcess || plain.SingleSubject || plain.PackageProcess || !slices.Equal(attested.Vouches, []string{"a.example/x:Y", "example.com/dep:Hooks"}) || len(plain.Vouches) != 0 {
 		t.Fatalf("assertion axes not preserved: plain=%+v attested=%+v", plain, attested)

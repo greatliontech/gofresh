@@ -1818,7 +1818,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// Sprint-equivalent when the writer provably pins an audited
 		// in-memory sink; every unproven provenance — call results, phi
 		// escapes, mixed helper callers — keeps the formatted-output
-		// refusal (REQ-closure-observability-analysis).
+		// refusal (REQ-closure-observability-writer-sink).
 		{fixture: "fmtsink", subject: "TestFprintfBuffer", observable: true},
 		{fixture: "fmtsink", subject: "TestFprintlnBuilder", observable: true},
 		{fixture: "fmtsink", subject: "TestFprintfHelperBuffer", observable: true},
@@ -1997,8 +1997,8 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "flagregdep", subject: "TestProd", reason: "untraceable sink in github.com/greatliontech/gofresh/closure/fixtures/flagregescape"},
 		// The benchmark-bearing sibling proves observable: b.Loop is
 		// benchmark pacing, an admitted harness fact the fold ignores
-		// (REQ-closure-observability-analysis's benchmark-pacing
-		// clause) — the deliberate flip of the former package-scan pin.
+		// (REQ-closure-observability-benchmark-pacing) — the deliberate
+		// flip of the former package-scan pin.
 		{fixture: "harnessroot", subject: "BenchmarkProd", observable: true},
 		{fixture: "mixedexternal", subject: "BenchmarkMixedExternal", reason: "subject reachability"},
 	}

@@ -17,7 +17,7 @@ import (
 // fold binding math/rand/v2's declared name as a secondary beside its
 // last element, never shadowing a primary; and two imports binding one
 // identifier — what the language forbids — refuse the file fail-closed
-// (REQ-closure-observability-audited-set).
+// (REQ-closure-observability-entropy).
 func TestCryptoRandIsTheEntropyClass(t *testing.T) {
 	for _, name := range []string{"Read", "Text", "Int", "Prime"} {
 		effect, ok := classBEffect("crypto/rand", name)
@@ -148,7 +148,7 @@ func TestClassBPackagesMatchTheArms(t *testing.T) {
 
 // An unnamed import binds the identifier the toolchain's package
 // clause declares for a major-versioned path: the last element past
-// the version (REQ-closure-observability-audited-set).
+// the version (REQ-closure-observability-declaration-bindings).
 func TestImplicitImportNameSkipsMajorVersionElements(t *testing.T) {
 	for pkgPath, want := range map[string]string{
 		"math/rand/v2": "rand", "math/rand": "rand", "encoding/json/v2": "json", "fmt": "fmt",
@@ -164,7 +164,7 @@ func TestImplicitImportNameSkipsMajorVersionElements(t *testing.T) {
 // own package names: for every importable standard package the derived
 // identifier is the declared one, so a release adding a path whose
 // declared name the rule cannot derive fails here instead of opening a
-// silent fold hole (REQ-closure-observability-audited-set).
+// silent fold hole (REQ-closure-observability-declaration-bindings).
 func TestImplicitImportNameMatchesTheToolchain(t *testing.T) {
 	if testing.Short() {
 		t.Skip("lists the standard library")

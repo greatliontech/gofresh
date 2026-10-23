@@ -30,6 +30,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/greatliontech/go-x-tools/go/packages"
 )
 
 // Runner runs the go command line tool — and prepares a consumer's own
@@ -494,4 +496,45 @@ func CanonicalDir(dir string) (string, error) {
 		raw = cwd + string(os.PathSeparator) + raw
 	}
 	return filepath.EvalSymlinks(raw)
+}
+
+// LoadPackages loads patterns through x/tools/go/packages under the
+// policy's package-loader environment (EnvForPackages, with GOPACKAGESDRIVER
+// pinned off and a non-nil Config.Env guaranteed so x/tools never falls
+// back to os.Environ()), explicit working directory, and caller context.
+// Input containers are copied before consulting ctx. Because
+// x/tools/go/packages.Config carries no spawn hook, the loader's `go list`
+// children spawn outside any Runner's Containment or Prepare hook
+// (REQ-fresh-go-command-policy, REQ-fresh-coherent-view).
+func LoadPackages(ctx context.Context, mode packages.LoadMode, dir string, env, buildFlags []string, patterns ...string) ([]*packages.Package, error) {
+	if ctx == nil {
+		return nil, errors.New("gotool: nil context")
+	}
+	if env == nil {
+		return nil, errors.New("gotool: nil environment")
+	}
+	packageEnv, err := EnvForPackages(env)
+	if err != nil {
+		return nil, err
+	}
+	if packageEnv == nil {
+		packageEnv = []string{}
+	}
+	cfg := &packages.Config{
+		Context:    ctx,
+		Mode:       mode,
+		Tests:      true,
+		Dir:        dir,
+		Env:        packageEnv,
+		BuildFlags: slices.Clone(buildFlags),
+	}
+	patterns = slices.Clone(patterns)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	pkgs, err := packages.Load(cfg, patterns...)
+	if cancelled := ctx.Err(); cancelled != nil {
+		return nil, cancelled
+	}
+	return pkgs, err
 }

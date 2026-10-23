@@ -429,7 +429,7 @@ func TestMaximalPackageMarksImplicitCgoExternal(t *testing.T) {
 // strata first, lexicographic least within a rank - the unrefinable
 // bit earns no tie-break, so both instances of the one shared order
 // resolve every tie identically
-// (REQ-closure-observability-analysis).
+// (REQ-closure-observability-cause-order).
 func TestPreferredReasonOrdersRankThenLexicographic(t *testing.T) {
 	native := opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly")
 	unaudited := symbolExternalEffect(externalEffectUnauditedStandard, "os", "Getpid", "reaches unaudited standard operation os.Getpid")
@@ -823,7 +823,7 @@ func FuzzPreferredReasonTotalAndRankMaximal(f *testing.F) {
 }
 
 // The shared rank table's symbol-free arms
-// (REQ-closure-observability-analysis): a symbol-free unaudited-import
+// (REQ-closure-observability-cause-order): a symbol-free unaudited-import
 // effect ranks with the down-ranked unaudited classification - never as
 // a structural finding - while the receiver-escape structural finding
 // (test-runtime kind, no symbol) keeps the top stratum, and the

@@ -613,7 +613,7 @@ func isTestingMRun(fn *ssa.Function) bool {
 // bit. Receiver discrimination is load-bearing: (*testing.M).Run is
 // the test-main driver and (*testing.F).Fuzz dispatches its target
 // reflectively over corpus files - both keep their classifications
-// (REQ-closure-observability-analysis).
+// (REQ-closure-observability-subtest-driver).
 func auditedHarnessSubtestDriver(audited bool, fn *ssa.Function) bool {
 	_, ok := harnessCalleeEffect(audited, fn, false)
 	return ok && functionSymbolName(fn) == "Run"

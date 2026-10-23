@@ -1,14 +1,12 @@
 package gofresh
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"strings"
 
 	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/jsonrecord"
 )
 
 // fingerprintRecord is the fingerprint's one record form
@@ -123,20 +121,16 @@ func (f Fingerprint) MarshalJSON() ([]byte, error) {
 // decodes to the evidence it was written from, re-encoding to its
 // compact bytes, or names its fault (REQ-fresh-fingerprint-record).
 func (f *Fingerprint) UnmarshalJSON(data []byte) error {
-	fields, err := uniqueObjectFields("fingerprint record", data)
+	fields, err := jsonrecord.UniqueObjectFields("fingerprint record", data)
 	if err != nil {
 		return err
 	}
-	for name, value := range fields {
-		if isJSONNull(value) {
-			return fmt.Errorf("gofresh: fingerprint record field %q is null", name)
-		}
+	if err := jsonrecord.RejectNullFields("fingerprint record", fields); err != nil {
+		return err
 	}
 	var rec fingerprintRecord
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&rec); err != nil {
-		return recordFault("fingerprint record", err)
+	if err := jsonrecord.DecodeObject("fingerprint record", data, &rec); err != nil {
+		return err
 	}
 	decoded := Fingerprint{
 		MaximalClosure:     rec.MaximalClosure,
@@ -183,101 +177,34 @@ func (f *Fingerprint) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	// Compact cannot fail here — uniqueObjectFields walked the bytes as
-	// one well-formed object and the decoder read them — so its error
-	// is unreachable and discarded rather than guarded by a dead arm.
-	var compact bytes.Buffer
-	_ = json.Compact(&compact, data)
-	if !bytes.Equal(canonical, compact.Bytes()) {
+	if !jsonrecord.CanonicalEqual(canonical, data, true) {
 		return errors.New("gofresh: fingerprint record is not the form's own encoding")
 	}
 	*f = decoded
 	return nil
 }
 
-// recordFault names a decoding fault in the record's own vocabulary:
-// the package's own refusals pass through, a value of the wrong JSON
-// kind names the field and the kind, anything else carries the object's
-// noun — never the internal record type's name.
-func recordFault(object string, err error) error {
-	var typed *json.UnmarshalTypeError
-	switch {
-	case strings.HasPrefix(err.Error(), "gofresh: "):
-		return err
-	case errors.As(err, &typed):
-		return fmt.Errorf("gofresh: %s field %q cannot hold a JSON %s", object, typed.Field, typed.Value)
-	default:
-		return fmt.Errorf("gofresh: %s: %w", object, err)
-	}
-}
-
 func (p *observationProofRecord) UnmarshalJSON(data []byte) error {
 	type plain observationProofRecord
-	fields, err := uniqueObjectFields("observation proof", data)
+	fields, err := jsonrecord.UniqueObjectFields("observation proof", data)
 	if err != nil {
 		return err
 	}
-	for name, value := range fields {
-		if isJSONNull(value) {
-			return fmt.Errorf("gofresh: observation proof field %q is null", name)
-		}
+	if err := jsonrecord.RejectNullFields("observation proof", fields); err != nil {
+		return err
 	}
 	if _, ok := fields["observable"]; !ok {
 		return errors.New("gofresh: observation proof carries no observable")
 	}
 	var decoded plain
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&decoded); err != nil {
-		return recordFault("observation proof", err)
+	if err := jsonrecord.DecodeObject("observation proof", data, &decoded); err != nil {
+		return err
 	}
 	if _, hasReason := fields["reason"]; decoded.Observable && hasReason {
 		return errors.New("gofresh: positive observation proof carries a reason")
 	}
 	*p = observationProofRecord(decoded)
 	return nil
-}
-
-// uniqueObjectFields reads one JSON object's fields under the object's
-// noun, refusing a duplicated key — encoding/json takes the last, which
-// would let a record carry two values for one fact — and anything after
-// the object.
-func uniqueObjectFields(object string, data []byte) (map[string]json.RawMessage, error) {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	start, err := dec.Token()
-	if err != nil || start != json.Delim('{') {
-		return nil, fmt.Errorf("gofresh: %s is not a JSON object", object)
-	}
-	fields := make(map[string]json.RawMessage)
-	for dec.More() {
-		token, err := dec.Token()
-		if err != nil {
-			return nil, fmt.Errorf("gofresh: %s: %w", object, err)
-		}
-		name, ok := token.(string)
-		if !ok {
-			return nil, fmt.Errorf("gofresh: %s: expected an object field", object)
-		}
-		if _, exists := fields[name]; exists {
-			return nil, fmt.Errorf("gofresh: %s field %q is duplicated", object, name)
-		}
-		var value json.RawMessage
-		if err := dec.Decode(&value); err != nil {
-			return nil, fmt.Errorf("gofresh: %s: %w", object, err)
-		}
-		fields[name] = value
-	}
-	if _, err := dec.Token(); err != nil {
-		return nil, fmt.Errorf("gofresh: %s: %w", object, err)
-	}
-	if _, err := dec.Token(); err != io.EOF {
-		return nil, fmt.Errorf("gofresh: %s carries trailing data", object)
-	}
-	return fields, nil
-}
-
-func isJSONNull(value json.RawMessage) bool {
-	return bytes.Equal(bytes.TrimSpace(value), []byte("null"))
 }
 
 type inertTestVariantApplicabilityRecord struct {
@@ -287,21 +214,17 @@ type inertTestVariantApplicabilityRecord struct {
 
 func (a *inertTestVariantApplicabilityRecord) UnmarshalJSON(data []byte) error {
 	const object = "inert test-variant applicability"
-	fields, err := uniqueObjectFields(object, data)
+	fields, err := jsonrecord.UniqueObjectFields(object, data)
 	if err != nil {
 		return err
 	}
-	for name, value := range fields {
-		if isJSONNull(value) {
-			return fmt.Errorf("gofresh: %s field %q is null", object, name)
-		}
+	if err := jsonrecord.RejectNullFields(object, fields); err != nil {
+		return err
 	}
 	type plain inertTestVariantApplicabilityRecord
 	var decoded plain
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&decoded); err != nil {
-		return recordFault(object, err)
+	if err := jsonrecord.DecodeObject(object, data, &decoded); err != nil {
+		return err
 	}
 	if decoded.Strategy == "" || decoded.TestVariantClosure == "" {
 		return fmt.Errorf("gofresh: %s requires strategy and testVariantClosure", object)

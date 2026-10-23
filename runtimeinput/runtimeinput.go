@@ -56,6 +56,7 @@ import (
 
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/jsonrecord"
 	"github.com/greatliontech/gofresh/internal/outcome"
 )
 
@@ -174,6 +175,18 @@ type pathInput struct {
 // environment. Process must identify that contributing process uniquely
 // and consistently across every observation in a merge.
 func Incomplete(moduleDir, process, reason string, env []string) (Observation, error) {
+	return IncompleteContext(context.Background(), moduleDir, process, reason, env)
+}
+
+// IncompleteContext constructs canonical evidence for an incomplete runtime-input
+// observation under ctx.
+func IncompleteContext(ctx context.Context, moduleDir, process, reason string, env []string) (Observation, error) {
+	if ctx == nil {
+		return Observation{}, errors.New("runtimeinputs: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return Observation{}, err
+	}
 	if err := validateProcess(process); err != nil {
 		return Observation{}, err
 	}
@@ -188,7 +201,7 @@ func Incomplete(moduleDir, process, reason string, env []string) (Observation, e
 	if err != nil {
 		return Observation{}, err
 	}
-	state, err := currentWithNormalizedEnv(encoded, moduleDir, normalized)
+	state, err := currentWithNormalizedEnvContext(ctx, encoded, moduleDir, normalized)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -199,7 +212,13 @@ func Incomplete(moduleDir, process, reason string, env []string) (Observation, e
 // evidence whose path identities are all absolute. This permits sound
 // cross-module merge.
 func Absolute(observation Observation, moduleDir string, env []string) (Observation, error) {
-	return convertIdentityKinds(observation, moduleDir, env, identityConversion{
+	return AbsoluteContext(context.Background(), observation, moduleDir, env)
+}
+
+// AbsoluteContext revalidates state under ctx, moduleDir, and env and returns
+// equivalent evidence whose path identities are all absolute.
+func AbsoluteContext(ctx context.Context, observation Observation, moduleDir string, env []string) (Observation, error) {
+	return convertIdentityKinds(ctx, observation, moduleDir, env, identityConversion{
 		name: "absolute",
 		convert: func(moduleDir, path string) pathID {
 			return pathID{Kind: pathAbs, Path: path}
@@ -222,7 +241,13 @@ func Absolute(observation Observation, moduleDir string, env []string) (Observat
 // of the same content, so evidence is keyed by what was measured, never by
 // the checkout root that measured it (REQ-inputs-relative-identities).
 func Relative(observation Observation, moduleDir string, env []string) (Observation, error) {
-	return convertIdentityKinds(observation, moduleDir, env, identityConversion{
+	return RelativeContext(context.Background(), observation, moduleDir, env)
+}
+
+// RelativeContext revalidates state under ctx, moduleDir, and env and returns
+// equivalent evidence whose in-module path identities are module-relative.
+func RelativeContext(ctx context.Context, observation Observation, moduleDir string, env []string) (Observation, error) {
+	return convertIdentityKinds(ctx, observation, moduleDir, env, identityConversion{
 		name: "relative",
 		convert: func(moduleDir, path string) pathID {
 			if rel, ok := relativeSpelling(moduleDir, path); ok {
@@ -296,16 +321,12 @@ func parseOperationAttribution(s string) (op, quotedName, dir string, ok bool) {
 		if !found {
 			continue
 		}
-		name, err := strconv.QuotedPrefix(rest)
-		if err != nil {
-			return "", "", "", false
-		}
-		rest, found = strings.CutPrefix(rest[len(name):], " in ")
+		name, rest, found := quotedPrefixThen(rest, " in ")
 		if !found {
 			return "", "", "", false
 		}
-		quoted, err := strconv.QuotedPrefix(rest)
-		if err != nil || rest[len(quoted):] != "" {
+		quoted, tail, found := quotedPrefixThen(rest, "")
+		if !found || tail != "" {
 			return "", "", "", false
 		}
 		unquoted, err := strconv.Unquote(quoted)
@@ -328,7 +349,13 @@ func relativeSpelling(moduleDir, p string) (string, bool) {
 	return filepath.ToSlash(rel), true
 }
 
-func convertIdentityKinds(observation Observation, moduleDir string, env []string, conversion identityConversion) (Observation, error) {
+func convertIdentityKinds(ctx context.Context, observation Observation, moduleDir string, env []string, conversion identityConversion) (Observation, error) {
+	if ctx == nil {
+		return Observation{}, errors.New("runtimeinputs: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return Observation{}, err
+	}
 	if err := validateObservation(observation, false); err != nil {
 		return Observation{}, err
 	}
@@ -340,7 +367,7 @@ func convertIdentityKinds(observation Observation, moduleDir string, env []strin
 	if err != nil {
 		return Observation{}, err
 	}
-	current, err := currentWithNormalizedEnv(state.Manifest, moduleDir, normalized)
+	current, err := currentWithNormalizedEnvContext(ctx, state.Manifest, moduleDir, normalized)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -378,7 +405,7 @@ func convertIdentityKinds(observation Observation, moduleDir string, env []strin
 	}
 	m.Paths = convertedPaths
 	sortManifest(&m)
-	converted, err := stateFromManifest(context.Background(), m, moduleDir, normalized)
+	converted, err := stateFromManifest(ctx, m, moduleDir, normalized)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -820,7 +847,16 @@ func excludesIdentity(excluded []pathID, id pathID) bool {
 // normal-process assertion or bracket; the producer facade supplies that separate
 // premise from its execution-bound capability.
 func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ...TestLogOption) (Observation, error) {
-	return fromTestLog(context.Background(), log, moduleDir, packageDir, env, opts...)
+	return FromTestLogContext(context.Background(), log, moduleDir, packageDir, env, opts...)
+}
+
+// FromTestLogContext builds a runtime-input manifest from a Go testlog stream
+// under ctx.
+func FromTestLogContext(ctx context.Context, log []byte, moduleDir, packageDir string, env []string, opts ...TestLogOption) (Observation, error) {
+	if ctx == nil {
+		return Observation{}, errors.New("runtimeinputs: nil context")
+	}
+	return fromTestLog(ctx, log, moduleDir, packageDir, env, opts...)
 }
 
 func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, env []string, opts ...TestLogOption) (Observation, error) {
@@ -1252,6 +1288,18 @@ func validateObservation(observation Observation, _ bool) error {
 // it observes nothing new and confers no completeness beyond what the
 // manifest recorded. The result participates in ordinary Merge.
 func Adopt(encoded, moduleDir, process string, env []string) (Observation, error) {
+	return AdoptContext(context.Background(), encoded, moduleDir, process, env)
+}
+
+// AdoptContext re-admits a persisted encoded manifest as a completed
+// observation under ctx, process, and env (REQ-inputs-adoption).
+func AdoptContext(ctx context.Context, encoded, moduleDir, process string, env []string) (Observation, error) {
+	if ctx == nil {
+		return Observation{}, errors.New("runtimeinputs: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return Observation{}, err
+	}
 	if err := validateProcess(process); err != nil {
 		return Observation{}, err
 	}
@@ -1259,12 +1307,12 @@ func Adopt(encoded, moduleDir, process string, env []string) (Observation, error
 	if err != nil {
 		return Observation{}, err
 	}
-	current, err := currentWithNormalizedEnv(encoded, moduleDir, normalized)
+	current, err := currentWithNormalizedEnvContext(ctx, encoded, moduleDir, normalized)
 	if err != nil {
 		return Observation{}, err
 	}
 	if current.Manifest != encoded {
-		movers, moveErr := MovedInputs(context.Background(), encoded, moduleDir, env)
+		movers, moveErr := MovedInputs(ctx, encoded, moduleDir, env)
 		switch {
 		case moveErr != nil:
 			return Observation{}, fmt.Errorf("runtimeinputs: adopted manifest moved; attribution unavailable: %w", moveErr)
@@ -1286,6 +1334,18 @@ func Adopt(encoded, moduleDir, process string, env []string) (Observation, error
 // finalized state from Incomplete is accepted as explicit unverifiable
 // evidence.
 func Merge(moduleDir string, env []string, observations ...Observation) (Observation, error) {
+	return MergeContext(context.Background(), moduleDir, env, observations...)
+}
+
+// MergeContext revalidates independently completed runtime-input observations
+// under ctx, moduleDir, and env, then returns their deterministic manifest union.
+func MergeContext(ctx context.Context, moduleDir string, env []string, observations ...Observation) (Observation, error) {
+	if ctx == nil {
+		return Observation{}, errors.New("runtimeinputs: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return Observation{}, err
+	}
 	normalized, err := normalizeEnvironment(env)
 	if err != nil {
 		return Observation{}, err
@@ -1310,7 +1370,7 @@ func Merge(moduleDir string, env []string, observations ...Observation) (Observa
 		if !input.OK || input.Manifest == "" || input.Digest == "" {
 			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d is incomplete", i)
 		}
-		current, err := currentWithNormalizedEnv(input.Manifest, moduleDir, normalized)
+		current, err := currentWithNormalizedEnvContext(ctx, input.Manifest, moduleDir, normalized)
 		if err != nil {
 			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
 		}
@@ -1348,7 +1408,7 @@ func Merge(moduleDir string, env []string, observations ...Observation) (Observa
 	if err != nil {
 		return Observation{}, err
 	}
-	state, err := currentWithNormalizedEnv(result, moduleDir, normalized)
+	state, err := currentWithNormalizedEnvContext(ctx, result, moduleDir, normalized)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -2005,11 +2065,12 @@ func splitBracketAttribution(reason string) (clause, attribution string, ok bool
 	// Go quoted string after the clause's prefix: the split consumes it
 	// whole and reads the list after it, never a " [" inside it.
 	if rest, found := strings.CutPrefix(reason, movedBracketClause+": \""); found {
-		if root, err := strconv.QuotedPrefix("\"" + rest); err == nil {
-			clause = movedBracketClause + ": " + root
-			if suffix := reason[len(clause):]; strings.HasPrefix(suffix, " [") && bracketAttributionWellFormed(suffix[1:]) {
-				return clause, suffix[2 : len(suffix)-1], true
+		if root, list, quoted := quotedPrefixThen("\""+rest, " "); quoted {
+			if bracketAttributionWellFormed(list) {
+				return movedBracketClause + ": " + root, list[1 : len(list)-1], true
 			}
+			return reason, "", false
+		} else if _, _, quotedRootOnly := quotedPrefixThen("\""+rest, ""); quotedRootOnly {
 			return reason, "", false
 		}
 	}
@@ -2026,22 +2087,29 @@ func splitBracketAttribution(reason string) (clause, attribution string, ok bool
 	return reason, "", false
 }
 
+// quotedPrefixThen parses one Go quoted string at the start of s followed by
+// prefix, returning the quoted literal and the remainder after prefix.
+func quotedPrefixThen(s, prefix string) (quoted, rest string, ok bool) {
+	q, err := strconv.QuotedPrefix(s)
+	if err != nil {
+		return "", "", false
+	}
+	rest, ok = strings.CutPrefix(s[len(q):], prefix)
+	if !ok {
+		return "", "", false
+	}
+	return q, rest, true
+}
+
 // quotedThen reports whether s is a quoted string, then mid, then a
 // quoted string, then exactly tail.
 func quotedThen(s, mid, tail string) bool {
-	first, err := strconv.QuotedPrefix(s)
-	if err != nil {
-		return false
-	}
-	rest, ok := strings.CutPrefix(s[len(first):], mid)
+	_, rest, ok := quotedPrefixThen(s, mid)
 	if !ok {
 		return false
 	}
-	second, err := strconv.QuotedPrefix(rest)
-	if err != nil {
-		return false
-	}
-	return rest[len(second):] == tail
+	_, after, ok := quotedPrefixThen(rest, tail)
+	return ok && after == ""
 }
 
 // operationAttribution is a classification refusal's attribution
@@ -2827,12 +2895,7 @@ func decode(s string) (manifest, error) {
 		return manifest{}, fmt.Errorf("runtimeinputs: manifest is not valid UTF-8")
 	}
 	var m manifest
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&m); err != nil {
-		return manifest{}, fmt.Errorf("runtimeinputs: parse manifest: %w", err)
-	}
-	if err := requireJSONEnd(dec); err != nil {
+	if err := jsonrecord.DecodeSingleValue("runtimeinputs: parse manifest", b, &m); err != nil {
 		return manifest{}, err
 	}
 	if err := validateManifest(m); err != nil {
@@ -2843,7 +2906,7 @@ func decode(s string) (manifest, error) {
 	if err != nil {
 		return manifest{}, err
 	}
-	if !bytes.Equal(canonical, b) {
+	if !jsonrecord.CanonicalEqual(canonical, b, false) {
 		return manifest{}, fmt.Errorf("runtimeinputs: non-canonical manifest encoding")
 	}
 	return m, nil
@@ -2941,17 +3004,6 @@ func validatePathID(id pathID) error {
 		}
 	default:
 		return fmt.Errorf("runtimeinputs: unknown path kind %q", id.Kind)
-	}
-	return nil
-}
-
-func requireJSONEnd(dec *json.Decoder) error {
-	var extra any
-	if err := dec.Decode(&extra); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("runtimeinputs: parse manifest: trailing JSON value")
-		}
-		return fmt.Errorf("runtimeinputs: parse manifest: %w", err)
 	}
 	return nil
 }

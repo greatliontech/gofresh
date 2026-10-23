@@ -485,8 +485,10 @@ where it is written), receiver-neutral and never
 process-external because lock state cannot change dispatch — MUST require a
 checked derivation of those properties for the selected implementation,
 including its native leaves. The same claim applies identically at the effect
-classification tiers. Pooling — `sync.Pool` with its `Get` and `Put`
-operations — has two distinct claims at two tiers, each requiring its own
+classification tiers.
+
+**REQ-closure-shared-dynamic-state-pool** (invariant): Pooling — `sync.Pool` with its `Get` and `Put`
+operations — MUST have two distinct claims at two tiers, each requiring its own
 checked derivation. At the effect classification tiers the required claim is
 receiver-neutral and independent of the execution-model assertion: `Get` and
 `Put` touch only process memory fed by the analyzed program, so they
@@ -559,10 +561,12 @@ load-bearing attestation is recorded on the subject's evidence exactly
 as a vouch discharge is — naming the discharged pool variables,
 auditable and never silent (REQ-vouch-recorded in
 [purity.md](purity.md)). Every additional implementation discharge requires the
-same generic checked derivation. The mapping claim —
+same generic checked derivation.
+
+**REQ-closure-shared-dynamic-state-mapping** (invariant): The mapping claim —
 `golang.org/x/sys/unix`'s package-level `mapper`
 bookkeeping, written by the mapping calls (`Mmap`, `Munmap`, and their
-variants) — is admissible in any execution model only under a checked
+variants) — MUST be admissible in any execution model only under a checked
 derivation over the selected module and its dependencies, including the
 per-GOOS declaration split and any claim-relevant kernel or native behavior.
 Version pins identify source; they confer no behavioral approval. The required
@@ -590,7 +594,8 @@ the engine's own derived verdict: no attestation, with complete checked
 dependencies. It covers only variables for which these properties are
 established. A module version or mutable-local origin neither establishes nor
 refutes the claim; missing semantic support retains the marks.
-The `//gofresh:single-subject` variable
+
+**REQ-closure-shared-dynamic-state-directive** (invariant): The `//gofresh:single-subject` variable
 directive is the mapping set's own-code dual: a durable in-source
 directive on a package-level variable declaration — discovered under
 the same build-flag-selected source discipline as `//gofresh:pure`
@@ -598,7 +603,7 @@ the same build-flag-selected source discipline as `//gofresh:pure`
 author's authority, that the variable's state is subject-own under
 the single-subject-process execution model: process-local, fed only
 by the program's own rooted flow, no cross-subject channel when each
-subject owns its process. Both legs are required — the directive is
+subject owns its process. Both legs MUST be required — the directive is
 the author's half and the caller's attestation the protocol's half;
 either alone confers nothing. The discharge covers the variable's
 mutation, escape, and environment-audit refusals alike (the
@@ -612,10 +617,12 @@ variant declaring the variable carries it (a variant without the
 directive keeps every mark, fail-closed), and a load-bearing
 discharge is recorded on the subject's evidence with the
 attestation's other discharges (REQ-vouch-recorded in
-[purity.md](purity.md)). The generated-proto descriptor cluster is an
+[purity.md](purity.md)).
+
+**REQ-closure-shared-dynamic-state-proto** (invariant): The generated-proto descriptor cluster is an
 implementation claim about build-once descriptor state and lazy message-info
 memoization: the stored values are content-invariant functions of the compiled-in
-schema. Discharge requires a checked derivation over the selected generated
+schema. Discharge MUST require a checked derivation over the selected generated
 source, its protobuf or gRPC runtime and all subordinate implementation claims,
 together with the caller's single-subject-process assertion. A
 generated-file header, generator name or runtime version is neither an author
@@ -623,11 +630,12 @@ assertion nor a proof. The same derivation rules apply to generated and
 handwritten source, pinned dependencies and mutable-local checkouts. A
 load-bearing execution-model assertion remains recorded with its discharged
 variables; unsupported implementation behavior retains the marks.
-The memoization claim —
+
+**REQ-closure-shared-dynamic-state-memo** (invariant): The memoization claim —
 `gopkg.in/yaml.v3`'s `structMap`, a mutex-guarded type-to-structInfo
 cache filled at exactly one site by a pure function of the type
 (field ordering by struct index, no map-iteration order in stored
-data, no options input, values never rewritten after the store) — is
+data, no options input, values never rewritten after the store) — MUST be
 admissible only when a checked derivation establishes those properties for
 the selected implementation, with no version-approved exception. The required
 property is that the memoized computation is
@@ -797,7 +805,7 @@ other's facts.
 **REQ-closure-shared-dynamic-state-escape-narrowings** (invariant): One narrowing applies to
 the escape class alone (the escape marks
 REQ-closure-shared-dynamic-state-mutation-shape defines): an
-interface-typed variable is object-closed when every attributable `init`-flow
+interface-typed variable MUST be object-closed when every attributable `init`-flow
 store — a direct store the auditing package resolves to the variable, from any
 package — is a construction with a checked immutability derivation
 (`errors.New`; a value of static type `reflect.Type` only when the selected
@@ -835,7 +843,9 @@ errors' `Error` and `Unwrap`, the runtime type descriptors' view methods), a
 constant-boxed referent dispatches value-receiver copies that cannot reach
 the box, and a nil referent panics before writing. The
 construction claim requires checked implementation evidence at every new
-selection; a familiar type or constructor name supplies none. An escape MUST NOT
+selection; a familiar type or constructor name supplies none.
+
+**REQ-closure-shared-dynamic-state-init-aliasing** (invariant): An escape MUST NOT
 discharge by init flow — the alias outlives initialization. Proven
 init-only functions are scanned for escapes under the full use-shape
 rules; `init` bodies and qualified helpers are scanned exactly for
@@ -869,8 +879,10 @@ bind or store whose target is itself a carrier links the two keys as
 one storage — mutation, escape, and environment marks crossing the
 pair symmetrically and transitively at composition, since the shared
 backing is one object under every name it carries — reach-free
-sources recording no key and staying unlinked. Two further narrowings
-discharge specific escape shapes by proof: a carrier passed as a direct
+sources recording no key and staying unlinked.
+
+**REQ-closure-shared-dynamic-state-leak-free** (invariant): Two further narrowings
+MUST discharge specific escape shapes by proof: a carrier passed as a direct
 call argument to a plain named function — a deferred call included, a go
 statement's arguments never, since the goroutine runs concurrently, and
 init flow like program code, since the alias outlives initialization —
@@ -946,8 +958,10 @@ receiver-read-only methods; inside the
 judgment as at the discharge, no call within a go statement's subtree
 defers its arguments or its method receivers — a goroutine literal
 wrapping the call is the
-same concurrent execution as the direct spelling. A third narrowing
-admits return-position handouts: a range binding returned by an
+same concurrent execution as the direct spelling.
+
+**REQ-closure-shared-dynamic-state-parameter-facts** (invariant): A third narrowing
+MUST admit return-position handouts: a range binding returned by an
 unexported plain named function discharges when every in-package use of
 that function contains the handed-out alias — a call result bound to
 identifiers proven leak-free over the using body by the same judgment,
@@ -1007,13 +1021,14 @@ otherwise unattributable argument value breaks every reach-bearing
 tracked name it reaches. Unnamed and blank parameters are
 insertion-free by construction; variadic trailing arguments key the
 final declared parameter's index.
-Every admitted read path is sound only under the environment-free
+
+**REQ-closure-shared-dynamic-state-registration-audit** (invariant): Every admitted read path is sound only under the environment-free
 registration audit: a function-carrying value a package's direct code
 stores into a carrier — its own or a foreign one, initializer
 expressions and builtin copies included, a store through a local alias
 of the carrier resolved to it, stores inside nested literals
 and go statements excluded as program code the mutation rules refuse on
-their own — must be environment-free. A plain named function, a method
+their own — MUST be environment-free. A plain named function, a method
 expression, and nil carry no environment; a function literal is
 environment-free when every variable it references from an enclosing
 function scope proves leak-free under the use-shape judgment over the
@@ -1131,7 +1146,8 @@ registered closure's environment can write state the settled verdict
 assumed stable. The audited carrier keys ride the per-package fact as a
 plain key list, unioned at composition; mutation and writable-escape
 culprits outrank this one.
-`init` flow is the initializer expressions, the `init` bodies, and the
+
+**REQ-closure-shared-dynamic-state-init-flow** (invariant): `init` flow is the initializer expressions, the `init` bodies, and the
 init-only-reachable functions: plain named functions — exported included —
 whose every reference, in every package of the analyzed graph, is a direct
 call from an initializer expression, an `init` body, or another such function,
@@ -1141,7 +1157,7 @@ conservatism, and a function no fact references refuses by absence); any value
 reference, any receiver, or any reference from ordinary program code — a
 nested function literal wherever it appears, and a go statement launched from
 init flow in its entirety, callee and arguments alike, since the goroutine
-outlives initialization (a deferred init call stays init flow) — refuses the
+outlives initialization (a deferred init call stays init flow) — MUST refuse the
 class fail-closed anywhere in the graph. Carrier mutations and method uses in
 such a function's direct body attribute to it and are judged by the resolved
 class; literals and go statements nested inside it remain program code. A
@@ -1346,8 +1362,10 @@ answers to, with a blocking test-main effect refusing under its own
 reason. The canonical test-main epilogue `os.Exit` can be treated as harness
 protocol only under a checked claim that it runs post-bracket and adds no
 input channel or lost required observation. An exit before the harness run
-supplies no subject execution or completion evidence. The benchmark harness's
-pacing likewise requires a checked protocol claim: the iteration count
+supplies no subject execution or completion evidence.
+
+**REQ-closure-observability-benchmark-pacing** (invariant): The benchmark harness's
+pacing likewise MUST require a checked protocol claim: the iteration count
 `b.N`, the `b.Loop` protocol, and the timer controls (ResetTimer, StartTimer,
 StopTimer) are the harness's own — the count derived from its flags and its
 previous iteration's timing, the controls moving only its clock and allocation
@@ -1366,10 +1384,12 @@ into the harness body,
 while every other benchmark surface keeps its class: Elapsed and RunParallel
 their test-runtime classification, and the harness's remaining surface
 (ReportMetric, ReportAllocs, SetBytes) requires body analysis or its own
-checked summary, never a package-wide exemption. The observed walk can apply
+checked summary, never a package-wide exemption.
+
+**REQ-closure-observability-testmain-exit** (invariant): The observed walk can apply
 the exit protocol claim throughout user test-main flow, helpers included,
 only where its completion and delivery premises hold, while the package-scan
-backstop scopes its admission to the syntactic `TestMain(*testing.M)`
+backstop MUST scope its admission to the syntactic `TestMain(*testing.M)`
 declaration, the conservative direction for text the scan cannot
 attribute to flow.
 
@@ -1488,18 +1508,18 @@ The following families state the properties such derivations must establish:
   over supplied data; io-interface wrappers retain the effects of their
   concrete operands, and exported encoding variables require state analysis.
 
-Entropy operations, including crypto/rand's Read, Text, Prime and Int and
-unseeded math/rand sources, retain their input classification unless a checked
+**REQ-closure-observability-entropy** (invariant): Entropy operations, including crypto/rand's Read, Text, Prime and Int and
+unseeded math/rand sources, MUST retain their input classification unless a checked
 claim accounts for every relevant source. A supplied reader, familiar API name
 or reported Go release does not prove which source the implementation uses.
 Mutable exported globals, including Reader, io.EOF-shaped variables and
 flag.CommandLine, require their own state judgment; the registration claim in
 REQ-closure-observability-flag-registration is not a global-read exemption.
 
-A reference to a type or constant can be execution-free under language
+**REQ-closure-observability-declaration-bindings** (invariant): A reference to a type or constant can be execution-free under language
 semantics once its declaration and use are resolved. It supplies no claim about
 a method with the same name or dispatch through a value of that type.
-Import bindings come from the selected package declarations; a name heuristic
+Import bindings MUST come from the selected package declarations; a name heuristic
 may conservatively flag an effect but cannot authorize a positive claim.
 Reflection and registration retain the additional obligations below
 (REQ-closure-observability-reflect-exclusion and

@@ -605,12 +605,10 @@ type Engine struct {
 	// that owns its own reviewed set supplies it whole through the
 	// option instead of reading two homes.
 	withoutRepositoryVouches bool
-	// singleSubjectExecution is the caller's attestation that every
-	// subject is measured in a process of its own
-	// (WithSingleSubjectExecution); it arms the audited pooling set's
-	// shared-dynamic-state discharge (REQ-closure-shared-dynamic-state).
-	singleSubjectExecution  bool
-	packageProcessExecution bool
+	// executionModel holds the caller's positive execution-model
+	// attestations (WithSingleSubjectExecution, WithPackageProcessExecution);
+	// the zero value is GeneralExecution, which supplies no positive assertion.
+	executionModel ExecutionAssertions
 }
 
 // viewTestHooks holds internal observation callbacks and explicitly named
@@ -900,7 +898,7 @@ func WithoutRepositoryVouches() Option {
 // fact identity and option-on and option-off sessions never serve each
 // other's facts.
 func WithSingleSubjectExecution() Option {
-	return func(e *Engine) { e.singleSubjectExecution = true }
+	return func(e *Engine) { e.executionModel.SingleSubject = true }
 }
 
 // WithPackageProcessExecution attests the package-process execution
@@ -932,7 +930,7 @@ func WithSingleSubjectExecution() Option {
 // consumer that runs subjects through any OTHER binary — another
 // package's tests importing the subject's package — must not set it.
 func WithPackageProcessExecution() Option {
-	return func(e *Engine) { e.packageProcessExecution = true }
+	return func(e *Engine) { e.executionModel.PackageProcess = true }
 }
 
 // WithDeferredCheckClose defers each check's closing base observation —

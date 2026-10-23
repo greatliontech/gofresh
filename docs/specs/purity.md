@@ -153,7 +153,7 @@ culprit in the current derivation and the verdict refuses on its own, while the
 explain surface still derives a vouched variable's chain on request — the vouch
 suppresses the verdict's downgrade, never the derivation a caller audits. The
 single-subject-process attestation (the checked pooling claim's
-discharge condition, REQ-closure-shared-dynamic-state-audited-discharges
+discharge condition, REQ-closure-shared-dynamic-state-pool
 in [closure.md](closure.md)) is the same kind of unverifiable caller
 assertion and records under exactly this requirement's
 discipline: the variables whose discharge the attestation

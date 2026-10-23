@@ -192,7 +192,7 @@ func (s *RuntimeBinding) begin(subjects []Subject, identityOnly bool) (*producin
 	if len(v.packages) != 1 {
 		return nil, errors.New("gofresh: a producing execution must belong to one package")
 	}
-	if len(v.subjects) > 1 && v.engine.singleSubjectExecution {
+	if len(v.subjects) > 1 && v.engine.executionModel.SingleSubject {
 		return nil, errors.New("gofresh: a multi-subject execution contradicts the single-subject assertion")
 	}
 	return &producingUnit{snapshot: s.snapshot, view: v, identityOnly: identityOnly}, nil

@@ -111,19 +111,7 @@ func (v *View) ExplainDynamicState(ctx context.Context, pkgPath, varName string)
 	if len(patterns) == 0 {
 		patterns = []string{pkgPath}
 	}
-	packageEnv, err := gotool.EnvForPackages(env)
-	if err != nil {
-		return Chain{}, fmt.Errorf("explain: environment: %w", err)
-	}
-	cfg := &packages.Config{
-		Context:    ctx,
-		Mode:       packages.LoadAllSyntax | packages.NeedModule,
-		Dir:        dir,
-		BuildFlags: flags,
-		Tests:      true,
-		Env:        packageEnv,
-	}
-	pkgs, err := packages.Load(cfg, patterns...)
+	pkgs, err := gotool.LoadPackages(ctx, packages.LoadAllSyntax|packages.NeedModule, dir, env, flags, patterns...)
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: load: %w", err)
 	}
@@ -137,7 +125,7 @@ func (v *View) ExplainDynamicState(ctx context.Context, pkgPath, varName string)
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: toolchain selection: %w", err)
 	}
-	return explainCulprit(notice == "", pkgs, pkgPath, varKey, varName, v.engine.singleSubjectExecution)
+	return explainCulprit(notice == "", pkgs, pkgPath, varKey, varName, v.engine.executionModel.SingleSubject)
 }
 
 // explainCulprit re-derives every loaded package's fact with mark

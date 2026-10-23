@@ -243,6 +243,15 @@ type packageScanEntry struct {
 	Subjects map[string]subjectScanEntry `json:"subjects"`
 }
 
+// attestationDischarges holds the positive execution-model attestations'
+// load-bearing discharge sets for one subject: carried as one comparable value
+// across subjectScan, observationFacts, and View.Sibling so no attestation axis
+// can be omitted when copying or clearing subject facts.
+type attestationDischarges struct {
+	singleSubject  string
+	packageProcess string
+}
+
 // entryOf projects the scan's outputs for one package into its entry.
 func entryOf(scan *subjectScan, pkgPath string) packageScanEntry {
 	entry := packageScanEntry{Version: scanEntryVersion, Subjects: map[string]subjectScanEntry{}}
@@ -250,10 +259,11 @@ func entryOf(scan *subjectScan, pkgPath string) packageScanEntry {
 		if subject.Package != pkgPath {
 			continue
 		}
+		d := scan.discharges[subject]
 		entry.Subjects[subject.Symbol] = subjectScanEntry{
 			Pure: scan.pure[subject], OpenWorld: scan.openWorld[subject], External: scan.external[subject],
 			DowngradeReason: scan.downgradeReason[subject], VouchDischarges: scan.vouchDischarges[subject],
-			AttestationDischarges: scan.attestationDischarges[subject], PackageProcessDischarges: scan.packageProcessDischarges[subject],
+			AttestationDischarges: d.singleSubject, PackageProcessDischarges: d.packageProcess,
 			Ambiguous: scan.ambiguous[subject],
 		}
 	}
@@ -281,11 +291,11 @@ func mergeEntries(scan *subjectScan, served map[string]packageScanEntry) {
 			if e.VouchDischarges != "" {
 				scan.vouchDischarges[subject] = e.VouchDischarges
 			}
-			if e.AttestationDischarges != "" {
-				scan.attestationDischarges[subject] = e.AttestationDischarges
-			}
-			if e.PackageProcessDischarges != "" {
-				scan.packageProcessDischarges[subject] = e.PackageProcessDischarges
+			if e.AttestationDischarges != "" || e.PackageProcessDischarges != "" {
+				scan.discharges[subject] = attestationDischarges{
+					singleSubject:  e.AttestationDischarges,
+					packageProcess: e.PackageProcessDischarges,
+				}
 			}
 			if e.Ambiguous != "" {
 				scan.ambiguous[subject] = e.Ambiguous
@@ -298,8 +308,8 @@ func mergeEntries(scan *subjectScan, served map[string]packageScanEntry) {
 func scanFromEntries(served map[string]packageScanEntry) *subjectScan {
 	scan := &subjectScan{
 		pure: map[Subject]bool{}, known: map[Subject]bool{}, openWorld: map[Subject]string{}, external: map[Subject]bool{},
-		downgradeReason: map[Subject]string{}, vouchDischarges: map[Subject]string{}, attestationDischarges: map[Subject]string{},
-		packageProcessDischarges: map[Subject]string{}, ambiguous: map[Subject]string{},
+		downgradeReason: map[Subject]string{}, vouchDischarges: map[Subject]string{}, discharges: map[Subject]attestationDischarges{},
+		ambiguous: map[Subject]string{},
 	}
 	mergeEntries(scan, served)
 	return scan
@@ -325,17 +335,10 @@ type subjectScan struct {
 	// comma-joined caller-vouch identities that discharged would-be
 	// culprits reachable from its package (REQ-vouch-recorded).
 	vouchDischarges map[Subject]string
-	// attestationDischarges maps each subject to the canonical sorted
-	// comma-joined variable keys whose discharge the caller's
-	// single-subject-process attestation carried — a pool variable's
-	// admitted Get/Put, a single-subject-directed variable —
-	// reachable from its package; the vouch-recording discipline's
-	// parallel (REQ-vouch-recorded).
-	attestationDischarges map[Subject]string
-	// packageProcessDischarges mirrors attestationDischarges for the
-	// package-process attestation's binary-scoped reachability judgment
-	// (REQ-vouch-recorded).
-	packageProcessDischarges map[Subject]string
+	// discharges maps each subject to the positive execution-model
+	// attestations' load-bearing discharge sets (single-subject and
+	// package-process) reachable from its package (REQ-vouch-recorded).
+	discharges map[Subject]attestationDischarges
 	// ambiguous holds, per subject whose identity is declared more than
 	// once across the package and its test variants, the message naming
 	// both declarations. Capture is refused for exactly these subjects —
@@ -353,15 +356,14 @@ func (s *subjectScan) directivePure(subject Subject) bool { return s.pure[subjec
 // directives (REQ-fresh-coherent-view, REQ-closure-shared-dynamic-state).
 func scanSubjectsFromLoaded(audited bool, pkgs []*packages.Package, state *viewDynamicState, pkgPaths ...string) (*subjectScan, error) {
 	scan := &subjectScan{
-		pure:                     map[Subject]bool{},
-		known:                    map[Subject]bool{},
-		openWorld:                map[Subject]string{},
-		external:                 map[Subject]bool{},
-		downgradeReason:          map[Subject]string{},
-		vouchDischarges:          map[Subject]string{},
-		attestationDischarges:    map[Subject]string{},
-		packageProcessDischarges: map[Subject]string{},
-		ambiguous:                map[Subject]string{},
+		pure:            map[Subject]bool{},
+		known:           map[Subject]bool{},
+		openWorld:       map[Subject]string{},
+		external:        map[Subject]bool{},
+		downgradeReason: map[Subject]string{},
+		vouchDischarges: map[Subject]string{},
+		discharges:      map[Subject]attestationDischarges{},
+		ambiguous:       map[Subject]string{},
 	}
 	pure, external, known, openWorld := scan.pure, scan.external, scan.known, scan.openWorld
 	requestedPackages := make(map[string]bool, len(pkgPaths))
@@ -543,7 +545,7 @@ func scanSubjectsFromLoaded(audited bool, pkgs []*packages.Package, state *viewD
 			scan.vouchDischarges[subject] = discharges
 		}
 		if attested := state.attestationDischarges[subject.Package]; attested != "" {
-			scan.attestationDischarges[subject] = attested
+			scan.discharges[subject] = attestationDischarges{singleSubject: attested}
 		}
 	}
 	return scan, nil
@@ -672,7 +674,7 @@ func recordDynamicGlobalMutations(audited bool, p *packages.Package, mutated map
 // named function instead of marking immediately: composition
 // discharges it when the whole graph proves the function reachable
 // only from init flow, and promotes it otherwise
-// (REQ-closure-shared-dynamic-state-escape-narrowings).
+// (REQ-closure-shared-dynamic-state-init-flow).
 type attributedUse struct {
 	fn, key string
 	escape  bool
@@ -3583,7 +3585,7 @@ func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, re
 	// insFree marks fnName\x00idx parameters whose argument-storage
 	// insertions all judge environment-free (possibly conditionally,
 	// via insDeps edges); absence is poison, fail-closed
-	// (REQ-closure-shared-dynamic-state-escape-narrowings
+	// (REQ-closure-shared-dynamic-state-parameter-facts
 	// clause).
 	insFree := map[string]bool{}
 	insDeps := map[string]map[string]bool{}
@@ -4117,7 +4119,7 @@ func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, re
 							}
 							// Every argument is classified by the write
 							// path its value hands the callee
-							// (REQ-closure-shared-dynamic-state-escape-narrowings). A
+							// (REQ-closure-shared-dynamic-state-parameter-facts). A
 							// tracked chain-rooted argument whose value
 							// hands out mutable reach defers to the
 							// callee's per-parameter insertion fact — the
@@ -4904,7 +4906,7 @@ func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, re
 				delete(localFree, k)
 			}
 			// Per-parameter argument-storage insertion facts
-			// (REQ-closure-shared-dynamic-state-escape-narrowings): a parameter's
+			// (REQ-closure-shared-dynamic-state-parameter-facts): a parameter's
 			// component judges by what the body stores into it. A
 			// capture-broken component's insertions are unknowable —
 			// poison, absent. A stored bare unrebroken parameter is the
@@ -8211,7 +8213,7 @@ func recvTypeNameOf(p *packages.Package, sel *ast.SelectorExpr) string {
 // execute, and a value cannot be handed out, unless the encloser ran);
 // a literal or value reference in init flow or method bodies stays
 // "prog", poisoned everywhere — its creation site the regions cannot
-// bound (REQ-closure-shared-dynamic-state-escape-narrowings and
+// bound (REQ-closure-shared-dynamic-state-init-flow and
 // init-reach dual). Keys are pkgPath NUL name; edges are
 // joined caller NUL callee at composition via the fact schema.
 func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]bool, refs map[string]map[string]bool) {
