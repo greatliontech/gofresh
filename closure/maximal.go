@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -160,6 +161,8 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 		return nil, "", err
 	}
 	record(testingEffects)
+	declaredNames := listedDeclaredNames(pkgs)
+	overridesKey := declaredOverridesKey(declaredNames)
 	for _, pkg := range pkgs {
 		if err := h.contextErr(); err != nil {
 			return nil, "", err
@@ -181,7 +184,7 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 			record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact()}})
 			continue
 		}
-		if scan, ok, err := h.pinnedEffectScan(pkg); err != nil {
+		if scan, ok, err := h.pinnedEffectScanWithNames(pkg, declaredNames, overridesKey); err != nil {
 			return nil, "", err
 		} else if ok {
 			record(scan)
@@ -193,7 +196,7 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 			if err := h.contextErr(); err != nil {
 				return nil, "", err
 			}
-			scan, err := h.maximalFileEffectsCached(pkg.ImportPath, filepath.Join(pkg.Dir, name))
+			scan, err := h.maximalFileEffectsCachedWithNames(pkg.ImportPath, filepath.Join(pkg.Dir, name), declaredNames, overridesKey)
 			if err != nil {
 				return nil, "", err
 			}
@@ -220,7 +223,12 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 // digested every pass, the parse only on a miss
 // (REQ-closure-effect-scan-memo).
 func (h *Hasher) maximalFileEffectsCached(pkgPath, path string) (maximalEffectScan, error) {
-	if scan, ok := h.maximalFiles[path]; ok {
+	return h.maximalFileEffectsCachedWithNames(pkgPath, path, nil, "")
+}
+
+func (h *Hasher) maximalFileEffectsCachedWithNames(pkgPath, path string, declaredNames map[string]string, overridesKey string) (maximalEffectScan, error) {
+	cacheKey := path + overridesKey
+	if scan, ok := h.maximalFiles[cacheKey]; ok {
 		return scan, nil
 	}
 	dir := filepath.Dir(path)
@@ -229,33 +237,38 @@ func (h *Hasher) maximalFileEffectsCached(pkgPath, path string) (maximalEffectSc
 		// package-level effect-scan memo, and read only when that memo
 		// misses — it takes no per-file entry and no place in the
 		// call's content cache.
-		scan, err := maximalFileEffects(h.SelectionAudited(), path)
+		content, err := os.ReadFile(path)
 		if err != nil {
 			return maximalEffectScan{}, err
 		}
-		h.maximalFiles[path] = scan
+		scan, err := maximalFileEffectsContentWithNames(h.SelectionAudited(), path, content, declaredNames)
+		if err != nil {
+			return maximalEffectScan{}, err
+		}
+		h.maximalFiles[cacheKey] = scan
 		return scan, nil
 	}
 	fb, err := h.readFile(path)
 	if err != nil {
 		return maximalEffectScan{}, err
 	}
-	if scan, ok, stored := h.fileScan(dir, fb.digest()); ok {
+	digestKey := fb.digest() + overridesKey
+	if scan, ok, stored := h.fileScan(dir, digestKey); ok {
 		if stored {
 			h.Served("file scan", pkgPath)
 		}
-		h.maximalFiles[path] = scan
+		h.maximalFiles[cacheKey] = scan
 		return scan, nil
 	}
 	if analysisTestHooks.fileParse != nil {
 		analysisTestHooks.fileParse(path)
 	}
-	scan, err := maximalFileEffectsContent(h.SelectionAudited(), path, fb.content)
+	scan, err := maximalFileEffectsContentWithNames(h.SelectionAudited(), path, fb.content, declaredNames)
 	if err != nil {
 		return maximalEffectScan{}, err
 	}
-	h.recordFileScan(dir, fb.digest(), scan)
-	h.maximalFiles[path] = scan
+	h.recordFileScan(dir, digestKey, scan)
+	h.maximalFiles[cacheKey] = scan
 	return scan, nil
 }
 
@@ -437,6 +450,13 @@ func maximalFileEffects(audited bool, filename string) (maximalEffectScan, error
 
 // maximalFileEffectsContent is the scan over bytes already read.
 func maximalFileEffectsContent(audited bool, filename string, content []byte) (maximalEffectScan, error) {
+	return maximalFileEffectsContentWithNames(audited, filename, content, nil)
+}
+
+// maximalFileEffectsContentWithNames scans file bytes using declaredNames
+// (when supplied by the package listing) to bind unnamed imports to their
+// actual declared package names before falling back to path derivation.
+func maximalFileEffectsContentWithNames(audited bool, filename string, content []byte, declaredNames map[string]string) (maximalEffectScan, error) {
 	text := string(content)
 	hasWasmImport := strings.Contains(text, "//go:wasmimport")
 	hasLinkname := strings.Contains(text, "//go:linkname") && !auditedLinknamesOnly(audited, text)
@@ -451,14 +471,13 @@ func maximalFileEffectsContent(audited bool, filename string, content []byte) (m
 	var collisions []string
 	// Three tiers bind an identifier at this syntactic tier, a lower
 	// never displacing a higher: an explicit alias is ground truth; an
-	// unnamed import's last element is the derived primary (what the
-	// compiler binds for an API-version directory whose package clause
-	// really is v1); a trailing major-version element additionally
-	// derives the element before it as a secondary — the name the
-	// toolchain's package clause declares for math/rand/v2 — bound only
-	// where unclaimed and unique. A clash within a tier is what the
-	// language forbids and refuses the file fail-closed, except two
-	// derived version-element primaries, whose identifiers live on their
+	// unnamed import's declared package name from the listing (when
+	// known) or last path element is the primary; a trailing
+	// major-version element without a known declared name additionally
+	// derives the element before it as a secondary, bound only where
+	// unclaimed and unique. A clash within a tier is what the language
+	// forbids and refuses the file fail-closed, except two derived
+	// version-element primaries, whose identifiers live on their
 	// secondaries (REQ-closure-observability-analysis).
 	secondaries := map[string][]string{}
 	versioned := map[string]bool{}
@@ -479,7 +498,9 @@ func maximalFileEffectsContent(audited bool, filename string, content []byte) (m
 			imports = append(imports, importAlias{alias: alias, pkgPath: pkgPath})
 			continue
 		}
-		if derived := implicitImportName(pkgPath); derived != alias {
+		if declared := declaredNames[pkgPath]; declared != "" {
+			alias = declared
+		} else if derived := implicitImportName(pkgPath); derived != alias {
 			secondaries[derived] = append(secondaries[derived], pkgPath)
 			versioned[pkgPath] = true
 		}
@@ -1042,15 +1063,10 @@ func packageHasClassifiedExternalAPI(pkgPath string) bool {
 	return classBPackages[pkgPath]
 }
 
-// implicitImportName is the identifier the toolchain's package clause
-// declares for an importable standard package: the path's last element,
-// past a trailing major-version element (math/rand/v2 declares rand;
-// pinned against the toolchain's own names). The fold binds it as a
-// secondary beside the last element itself, since an API-version
-// directory declares the element as its name. A package whose declared
-// name differs from its path in any other way (a dotted or renamed last
-// element) stays outside the classified set —
-// docs/issues/fold-import-name-declared.md.
+// implicitImportName is the fallback identifier derived from an import
+// path when no package listing supplies the declared package name: the
+// path's last element, past a trailing major-version element
+// (math/rand/v2 declares rand; pinned against the toolchain's own names).
 func implicitImportName(pkgPath string) string {
 	base := path.Base(pkgPath)
 	if len(base) > 1 && base[0] == 'v' && strings.TrimLeft(base[1:], "0123456789") == "" {
@@ -1059,6 +1075,46 @@ func implicitImportName(pkgPath string) string {
 		}
 	}
 	return base
+}
+
+func listedDeclaredNames(pkgs []listPkg) map[string]string {
+	if len(pkgs) == 0 {
+		return nil
+	}
+	names := make(map[string]string, len(pkgs))
+	for _, p := range pkgs {
+		if p.Name == "" || p.Name == "main" || strings.HasSuffix(p.Name, "_test") {
+			continue
+		}
+		src := p.SourcePath()
+		if existing, exists := names[src]; exists && existing != p.Name {
+			names[src] = ""
+		} else {
+			names[src] = p.Name
+		}
+	}
+	return names
+}
+
+func declaredOverridesKey(declaredNames map[string]string) string {
+	if len(declaredNames) == 0 {
+		return ""
+	}
+	var overrides []string
+	for pkgPath, name := range declaredNames {
+		if name == "" {
+			continue
+		}
+		if name != path.Base(pkgPath) || implicitImportName(pkgPath) != path.Base(pkgPath) {
+			overrides = append(overrides, pkgPath+"="+name)
+		}
+	}
+	if len(overrides) == 0 {
+		return ""
+	}
+	slices.Sort(overrides)
+	sum := sha256.Sum256([]byte(strings.Join(overrides, "\x00")))
+	return "\x00" + hex.EncodeToString(sum[:16])
 }
 
 func trueReason(pkgPath string) string {
@@ -1099,11 +1155,15 @@ func trueExternalEffect(pkgPath string) externalEffect {
 // whose pin would carry no signal. The caller guarantees
 // pkg.Module != nil.
 func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) {
+	return h.pinnedEffectScanWithNames(pkg, nil, "")
+}
+
+func (h *Hasher) pinnedEffectScanWithNames(pkg listPkg, declaredNames map[string]string, overridesKey string) (maximalEffectScan, bool, error) {
 	if pkg.Module.Version == "" || !h.pinnedPackage(&pkg) || pkg.Module.Dir == "" {
 		return maximalEffectScan{}, false, nil
 	}
 	pin := h.modulePin(pkg.Module)
-	key := effectScanKey(pin, pkg.ImportPath, pkg.GoFiles, pkg.CgoFiles)
+	key := effectScanKey(pin+overridesKey, pkg.ImportPath, pkg.GoFiles, pkg.CgoFiles)
 	composite := maximalPackageExternalEffects(&pkg)
 	// A backed scan's preferred is ignored by the package selection
 	// (the union argmax re-derives it); only an effect-less scan's
@@ -1136,7 +1196,7 @@ func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) 
 		if err := h.contextErr(); err != nil {
 			return maximalEffectScan{}, false, err
 		}
-		scan, err := h.maximalFileEffectsCached(pkg.ImportPath, filepath.Join(pkg.Dir, name))
+		scan, err := h.maximalFileEffectsCachedWithNames(pkg.ImportPath, filepath.Join(pkg.Dir, name), declaredNames, overridesKey)
 		if err != nil {
 			return maximalEffectScan{}, false, err
 		}

@@ -145,179 +145,309 @@ func appendExternalEffect(effects []externalEffect, effect externalEffect) []ext
 	return append(effects, effect)
 }
 
+type classBEntry struct {
+	kind   externalEffectKind
+	suffix string
+}
+
+// classBTable is the one declarative classification table for effect-bearing
+// packages, and classBPackages is derived from its keys so the classifier
+// and the maximal tier's dot-import backstop (packageHasClassifiedExternalAPI)
+// can never disagree (REQ-closure-observability-audited-set).
+var classBTable, classBPackages = func() (map[string]map[string]classBEntry, map[string]bool) {
+	arms := []struct {
+		pkgs   []string
+		kind   externalEffectKind
+		suffix string
+		names  []string
+	}{
+		{
+			pkgs:   []string{"fmt"},
+			kind:   externalEffectStandardInput,
+			suffix: " (standard input)",
+			names:  []string{"Scan", "Scanf", "Scanln", "Fscan", "Fscanf", "Fscanln"},
+		},
+		{
+			pkgs:   []string{"fmt"},
+			kind:   externalEffectFormattedOutput,
+			suffix: " (formatted output)",
+			names:  []string{"Print", "Printf", "Println", "Fprint", "Fprintf", "Fprintln"},
+		},
+		{
+			pkgs:   []string{"os"},
+			kind:   externalEffectEnvironment,
+			suffix: " (environment input)",
+			names:  []string{"Getenv", "LookupEnv", "Environ", "ExpandEnv"},
+		},
+		{
+			pkgs:   []string{"os"},
+			kind:   externalEffectFileIO,
+			suffix: " (file I/O)",
+			names:  []string{"Open", "OpenFile", "ReadFile", "ReadDir", "Stat", "Lstat"},
+		},
+		{
+			pkgs:   []string{"os"},
+			kind:   externalEffectFilesystemMutation,
+			suffix: " (filesystem mutation)",
+			names:  []string{"Create", "CreateTemp", "WriteFile"},
+		},
+		{
+			pkgs:   []string{"os"},
+			kind:   externalEffectPathMutation,
+			suffix: " (path mutation)",
+			names:  []string{"CopyFS", "Link", "Mkdir", "MkdirAll", "MkdirTemp", "Remove", "RemoveAll", "Rename", "Symlink"},
+		},
+		{
+			pkgs:   []string{"syscall", "golang.org/x/sys/unix"},
+			kind:   externalEffectFilesystemMutation,
+			suffix: " (filesystem mutation)",
+			names:  []string{"Creat"},
+		},
+		{
+			pkgs:   []string{"syscall", "golang.org/x/sys/unix"},
+			kind:   externalEffectPathMutation,
+			suffix: " (path mutation)",
+			names:  []string{"Link", "Linkat", "Mkdir", "Mkdirat", "Rename", "Renameat", "Renameat2", "Rmdir", "Symlink", "Symlinkat", "Unlink", "Unlinkat"},
+		},
+		{
+			// crypto/rand's operation surface is the entropy class: Read, Text,
+			// Prime, and Int are classified as external system calls rather than
+			// left to the unaudited fallback (REQ-closure-observability-audited-set).
+			pkgs:   []string{"crypto/rand"},
+			kind:   externalEffectNative,
+			suffix: " (entropy)",
+			names:  []string{"Read", "Text", "Int", "Prime"},
+		},
+		{
+			pkgs:   []string{"testing"},
+			kind:   externalEffectPathMutation,
+			suffix: " (process or path mutation)",
+			names:  []string{"TempDir", "Chdir", "Setenv"},
+		},
+		{
+			pkgs:   []string{"testing"},
+			kind:   externalEffectTestRuntime,
+			suffix: " (test runtime configuration)",
+			names:  []string{"Short", "Verbose", "Testing", "CoverMode", "Coverage", "Deadline", "Parallel", "ArtifactDir", "Context"},
+		},
+		{
+			pkgs:   []string{"testing"},
+			kind:   externalEffectTestRuntime,
+			suffix: " (test runtime execution)",
+			names:  []string{"Run", "Fuzz", "RunParallel", "Elapsed", "Result", "AllocsPerRun", "Benchmark", "RunBenchmarks", "RunExamples", "RunTests", "Main", "MainStart"},
+		},
+		{
+			pkgs:   []string{"net"},
+			kind:   externalEffectNetwork,
+			suffix: " (network I/O)",
+			names:  []string{"Dial", "DialContext", "DialTCP", "DialUDP", "DialIP", "Listen", "ListenTCP", "ListenUDP", "ListenIP", "ListenPacket"},
+		},
+		{
+			pkgs:   []string{"net/http"},
+			kind:   externalEffectNetwork,
+			suffix: " (network I/O)",
+			names:  []string{"Get", "Head", "Post", "PostForm", "Do", "ListenAndServe", "ListenAndServeTLS", "Serve", "ServeTLS"},
+		},
+		{
+			pkgs:   []string{"html/template", "text/template"},
+			kind:   externalEffectFileIO,
+			suffix: " (file I/O)",
+			names:  []string{"ParseFiles", "ParseGlob"},
+		},
+		{
+			pkgs:   []string{"plugin"},
+			kind:   externalEffectPlugin,
+			suffix: "",
+			names:  []string{"Open", "Lookup"},
+		},
+	}
+	table := make(map[string]map[string]classBEntry)
+	pkgs := make(map[string]bool)
+	for _, arm := range arms {
+		for _, pkg := range arm.pkgs {
+			pkgs[pkg] = true
+			byName := table[pkg]
+			if byName == nil {
+				byName = make(map[string]classBEntry, len(arm.names))
+				table[pkg] = byName
+			}
+			for _, name := range arm.names {
+				byName[name] = classBEntry{kind: arm.kind, suffix: arm.suffix}
+			}
+		}
+	}
+	return table, pkgs
+}()
+
 func classBEffect(pkgPath, name string) (externalEffect, bool) {
-	// The classified-package set gates every arm below: an arm for an
-	// unlisted package is dead, never a classification the dot-import
-	// backstop does not know.
-	if !classBPackages[pkgPath] {
+	entry, ok := classBTable[pkgPath][name]
+	if !ok {
 		return externalEffect{}, false
 	}
-	if pkgPath == "fmt" {
-		switch name {
-		case "Scan", "Scanf", "Scanln", "Fscan", "Fscanf", "Fscanln":
-			return symbolExternalEffect(externalEffectStandardInput, pkgPath, name, "reaches fmt."+name+" (standard input)"), true
-		case "Print", "Printf", "Println", "Fprint", "Fprintf", "Fprintln":
-			return symbolExternalEffect(externalEffectFormattedOutput, pkgPath, name, "reaches fmt."+name+" (formatted output)"), true
+	return symbolExternalEffect(entry.kind, pkgPath, name, "reaches "+pkgPath+"."+name+entry.suffix), true
+}
+
+type harnessFamily uint8
+
+const (
+	harnessFamilyNone harnessFamily = iota
+	harnessFamilyLogging
+	harnessFamilyPacing
+	harnessFamilySubtestDriver
+	harnessFamilyFuzzDriver
+)
+
+type harnessAdmission struct {
+	family         harnessFamily
+	receivers      []string
+	reasonSuffix   string
+	dynamicTarget  bool
+	invokeAdmitted bool
+}
+
+// harnessAdmissions is the one table classifying the four testing-harness
+// families across static calls, enumerated dynamic targets, invoke admission,
+// body-scan cutting, and immutable-environment outcome eligibility
+// (REQ-closure-observability-analysis).
+var harnessAdmissions = func() map[string]harnessAdmission {
+	out := map[string]harnessAdmission{
+		"Run": {
+			family:       harnessFamilySubtestDriver,
+			receivers:    []string{"T", "B"},
+			reasonSuffix: " (test harness subtest execution)",
+		},
+		"Fuzz": {
+			family:    harnessFamilyFuzzDriver,
+			receivers: []string{"F"},
+		},
+	}
+	for _, name := range []string{"Fatal", "Fatalf", "Error", "Errorf", "Log", "Logf", "Skip", "Skipf", "SkipNow", "Fail", "FailNow"} {
+		out[name] = harnessAdmission{
+			family:         harnessFamilyLogging,
+			reasonSuffix:   " (test harness logging)",
+			dynamicTarget:  true,
+			invokeAdmitted: true,
 		}
 	}
-	if pkgPath == "os" {
-		switch name {
-		case "Getenv", "LookupEnv", "Environ", "ExpandEnv":
-			return symbolExternalEffect(externalEffectEnvironment, pkgPath, name, "reaches os."+name+" (environment input)"), true
-		case "Open", "OpenFile", "ReadFile", "ReadDir", "Stat", "Lstat":
-			return symbolExternalEffect(externalEffectFileIO, pkgPath, name, "reaches os."+name+" (file I/O)"), true
-		case "Create", "CreateTemp", "WriteFile":
-			return symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches os."+name+" (filesystem mutation)"), true
-		case "CopyFS", "Link", "Mkdir", "MkdirAll", "MkdirTemp", "Remove", "RemoveAll", "Rename", "Symlink":
-			return symbolExternalEffect(externalEffectPathMutation, pkgPath, name, "reaches os."+name+" (path mutation)"), true
+	for _, name := range []string{"N", "Loop", "ResetTimer", "StartTimer", "StopTimer"} {
+		out[name] = harnessAdmission{
+			family:        harnessFamilyPacing,
+			reasonSuffix:  " (benchmark pacing)",
+			dynamicTarget: true,
 		}
 	}
-	if pkgPath == "syscall" || pkgPath == "golang.org/x/sys/unix" {
-		switch name {
-		case "Creat":
-			return symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (filesystem mutation)"), true
-		case "Link", "Linkat", "Mkdir", "Mkdirat", "Rename", "Renameat", "Renameat2", "Rmdir", "Symlink", "Symlinkat", "Unlink", "Unlinkat":
-			return symbolExternalEffect(externalEffectPathMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (path mutation)"), true
+	return out
+}()
+
+func harnessReceiverMatches(fn *ssa.Function, receivers []string) bool {
+	if len(receivers) == 0 {
+		return true
+	}
+	if fn == nil || fn.Signature == nil || fn.Signature.Recv() == nil {
+		return false
+	}
+	recv := fn.Signature.Recv().Type()
+	if ptr, ok := types.Unalias(recv).(*types.Pointer); ok {
+		recv = ptr.Elem()
+	}
+	named, ok := types.Unalias(recv).(*types.Named)
+	if !ok || named.Obj() == nil {
+		return false
+	}
+	name := named.Obj().Name()
+	for _, want := range receivers {
+		if name == want {
+			return true
 		}
 	}
-	if pkgPath == "crypto/rand" {
-		// The package's whole operation surface is the entropy class:
-		// Read and Text read the kernel's entropy directly; Prime reads
-		// it through a reader the toolchain ignores since Go 1.26 unless
-		// a GODEBUG setting says otherwise
-		// (crypto/internal/rand.CustomReader); Int reads the reader it is
-		// given, an operand no read-side admission proves, so it stays
-		// fail-closed in the same class. An input no guard pins and no
-		// bracket records, classified as the external system call it is
-		// rather than left to the unaudited fallback. Reader, the
-		// exported variable, refuses as an unaudited selector at the
-		// file fold (REQ-closure-observability-audited-set).
-		switch name {
-		case "Read", "Text", "Int", "Prime":
-			return symbolExternalEffect(externalEffectNative, pkgPath, name, "reaches crypto/rand."+name+" (entropy)"), true
-		}
+	return false
+}
+
+func harnessClassifiedEffect(name, suffix string) externalEffect {
+	effect := symbolExternalEffect(externalEffectTestRuntime, "testing", name, "reaches testing."+name+suffix)
+	effect.observable = true
+	return effect
+}
+
+// harnessCalleeEffect classifies a static or dynamic testing-harness callee
+// through the single harnessAdmissions table.
+func harnessCalleeEffect(audited bool, fn *ssa.Function, dynamic bool) (externalEffect, bool) {
+	if !audited || fn == nil || funcPkgPath(fn) != "testing" {
+		return externalEffect{}, false
 	}
-	if pkgPath == "testing" {
-		switch name {
-		case "TempDir", "Chdir", "Setenv":
-			return symbolExternalEffect(externalEffectPathMutation, pkgPath, name, "reaches testing."+name+" (process or path mutation)"), true
-		case "Short", "Verbose", "Testing", "CoverMode", "Coverage", "Deadline", "Parallel", "ArtifactDir", "Context":
-			return symbolExternalEffect(externalEffectTestRuntime, pkgPath, name, "reaches testing."+name+" (test runtime configuration)"), true
-		case "Run", "Fuzz", "RunParallel", "Elapsed", "Result", "AllocsPerRun", "Benchmark", "RunBenchmarks", "RunExamples", "RunTests", "Main", "MainStart":
-			return symbolExternalEffect(externalEffectTestRuntime, pkgPath, name, "reaches testing."+name+" (test runtime execution)"), true
-		}
+	name := functionSymbolName(fn)
+	entry, ok := harnessAdmissions[name]
+	if !ok || entry.reasonSuffix == "" || (dynamic && !entry.dynamicTarget) || !harnessReceiverMatches(fn, entry.receivers) {
+		return externalEffect{}, false
 	}
-	if pkgPath == "net" {
-		switch name {
-		case "Dial", "DialContext", "DialTCP", "DialUDP", "DialIP", "Listen", "ListenTCP", "ListenUDP", "ListenIP", "ListenPacket":
-			return symbolExternalEffect(externalEffectNetwork, pkgPath, name, "reaches net."+name+" (network I/O)"), true
-		}
+	return harnessClassifiedEffect(name, entry.reasonSuffix), true
+}
+
+// harnessBodyCut reports whether a testing-harness function's body is cut from
+// the walk (logging, pacing, subtest driver when audited; fuzz driver always).
+func harnessBodyCut(audited bool, fn *ssa.Function) bool {
+	if fn == nil || funcPkgPath(fn) != "testing" {
+		return false
 	}
-	if pkgPath == "net/http" {
-		switch name {
-		case "Get", "Head", "Post", "PostForm", "Do", "ListenAndServe", "ListenAndServeTLS", "Serve", "ServeTLS":
-			return symbolExternalEffect(externalEffectNetwork, pkgPath, name, "reaches net/http."+name+" (network I/O)"), true
-		}
+	entry, ok := harnessAdmissions[functionSymbolName(fn)]
+	if !ok || !harnessReceiverMatches(fn, entry.receivers) {
+		return false
 	}
-	if pkgPath == "html/template" || pkgPath == "text/template" {
-		switch name {
-		case "ParseFiles", "ParseGlob":
-			return symbolExternalEffect(externalEffectFileIO, pkgPath, name, "reaches "+pkgPath+"."+name+" (file I/O)"), true
-		}
+	return entry.family == harnessFamilyFuzzDriver || audited
+}
+
+// harnessOutcomeAdmitted reports whether an observable testing-runtime effect
+// belongs to the admitted harness families (logging, pacing including B.N,
+// or subtest driver) that do not veto immutable-environment outcomes.
+func harnessOutcomeAdmitted(effect externalEffect) bool {
+	if !effect.observable || effect.kind != externalEffectTestRuntime || effect.packagePath != "testing" {
+		return false
 	}
-	if pkgPath == "plugin" && (name == "Open" || name == "Lookup") {
-		return symbolExternalEffect(externalEffectPlugin, pkgPath, name, "reaches plugin."+name), true
+	if effect.symbol == "B.N" {
+		return true
 	}
-	return externalEffect{}, false
+	entry, ok := harnessAdmissions[effect.symbol]
+	return ok && entry.reasonSuffix != ""
+}
+
+// harnessInvokeAdmitted reports whether a testing-harness method is admitted as
+// an RTA-enumerated interface-invoke target on testing.TB.
+func harnessInvokeAdmitted(audited bool, fn *ssa.Function) bool {
+	if !audited || fn == nil || funcPkgPath(fn) != "testing" {
+		return false
+	}
+	entry, ok := harnessAdmissions[functionSymbolName(fn)]
+	return ok && entry.invokeAdmitted && harnessReceiverMatches(fn, entry.receivers)
 }
 
 // auditedHarnessLogging reports whether a testing-package symbol is the
-// harness's failure/logging channel: output lands only in the harness's
-// own in-memory buffer and the run's captured output, both already part
-// of the recorded test outcome, so the channel is output-only and adds
-// no testlog-invisible input (REQ-closure-observability-analysis).
-// Argument method sets stay visible to reachability at the call site,
-// exactly as fmt's Sprint family. Deliberately excluded: the harness's
-// ambient-input and mutation surfaces (Setenv, Chdir, TempDir, the
-// runtime-configuration reads) keep their own classifications.
+// harness's failure/logging channel (REQ-closure-observability-analysis).
 func auditedHarnessLogging(audited bool, pkgPath, name string) bool {
-	if !audited || pkgPath != "testing" {
-		return false
-	}
-	switch name {
-	case "Fatal", "Fatalf", "Error", "Errorf", "Log", "Logf", "Skip", "Skipf", "SkipNow", "Fail", "FailNow":
-		return true
-	}
-	return false
+	return audited && pkgPath == "testing" && harnessAdmissions[name].family == harnessFamilyLogging
 }
 
 // harnessLoggingEffect is the admitted harness fact the walk records in
-// place of descending into harness internals: observable, so the
-// observation proof never blocks on it, while the record still flips the
-// legacy unverifiable projection — an audited harness call is not purity
-// evidence.
+// place of descending into harness internals.
 func harnessLoggingEffect(name string) externalEffect {
-	effect := symbolExternalEffect(externalEffectTestRuntime, "testing", name, "reaches testing."+name+" (test harness logging)")
-	effect.observable = true
-	return effect
+	return harnessClassifiedEffect(name, harnessAdmissions["Log"].reasonSuffix)
 }
 
 // auditedHarnessPacing reports whether a testing-package symbol is the
-// benchmark harness's pacing protocol: the iteration count N, the Loop
-// protocol, and the timer controls. The count is the harness's own —
-// derived from its flags and its previous iteration's timing — and the
-// timer controls move only the harness's clock and allocation
-// bookkeeping, so none is an input to the measured computation, whose
-// per-iteration result the benchmark contract makes invariant in the
-// count. Admitted as harness facts on an audited toolchain exactly as
-// the logging family is: the walk records the fact at the call site,
-// the B.N field read, and a dynamic target, and never descends into
-// the harness body; the file fold records nothing
-// (REQ-closure-observability-analysis's benchmark-pacing clause).
-// Every other B surface keeps its class.
+// benchmark harness's pacing protocol (REQ-closure-observability-analysis).
 func auditedHarnessPacing(audited bool, pkgPath, name string) bool {
-	if !audited || pkgPath != "testing" {
-		return false
-	}
-	switch name {
-	case "N", "Loop", "ResetTimer", "StartTimer", "StopTimer":
-		return true
-	}
-	return false
+	return audited && pkgPath == "testing" && harnessAdmissions[name].family == harnessFamilyPacing
 }
 
 // harnessPacingEffect is the admitted harness fact the walk records for
-// a pacing call or the B.N field read; observable, so it never blocks,
-// while the record keeps the legacy projection unverifiable — an
-// audited harness call is not purity evidence.
+// a pacing call or the B.N field read.
 func harnessPacingEffect(name string) externalEffect {
-	effect := symbolExternalEffect(externalEffectTestRuntime, "testing", name, "reaches testing."+name+" (benchmark pacing)")
-	effect.observable = true
-	return effect
+	return harnessClassifiedEffect(name, harnessAdmissions["Loop"].reasonSuffix)
 }
 
 // harnessSubtestDriverEffect is the admitted harness fact recorded for a
-// reached subtest driver ((*T).Run, (*B).Run) in place of descending
-// into harness internals: observable, so the observation proof never
-// blocks on it, while the record still flips the legacy unverifiable
-// projection - an admitted driver is not purity evidence.
+// reached subtest driver ((*T).Run, (*B).Run).
 func harnessSubtestDriverEffect() externalEffect {
-	effect := symbolExternalEffect(externalEffectTestRuntime, "testing", "Run", "reaches testing.Run (test harness subtest execution)")
-	effect.observable = true
-	return effect
-}
-
-// classBPackages is the set of packages classBEffect classifies for:
-// the classifier is gated on it, so an arm for an unlisted package is
-// dead rather than a classification the maximal tier's dot-import
-// backstop (packageHasClassifiedExternalAPI) does not know — the two
-// consumers cannot disagree. It lives beside the arms because it is
-// the classifier's own gate, not an audited surface. Every listed
-// package classifies at least one name (TestClassBPackagesMatchTheArms).
-var classBPackages = map[string]bool{
-	"fmt": true, "os": true, "syscall": true, "golang.org/x/sys/unix": true, "testing": true,
-	"net": true, "net/http": true, "html/template": true, "text/template": true, "plugin": true,
-	"crypto/rand": true,
+	return harnessClassifiedEffect("Run", harnessAdmissions["Run"].reasonSuffix)
 }
 
 // classBPureStandard audits specific operations of effect-bearing

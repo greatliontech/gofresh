@@ -490,38 +490,8 @@ func isTestingMRun(fn *ssa.Function) bool {
 // reflectively over corpus files - both keep their classifications
 // (REQ-closure-observability-analysis).
 func auditedHarnessSubtestDriver(audited bool, fn *ssa.Function) bool {
-	if !audited || fn == nil || fn.Name() != "Run" || funcPkgPath(fn) != "testing" {
-		return false
-	}
-	if fn.Signature == nil || fn.Signature.Recv() == nil {
-		return false
-	}
-	recv := fn.Signature.Recv().Type()
-	if ptr, ok := types.Unalias(recv).(*types.Pointer); ok {
-		recv = ptr.Elem()
-	}
-	named, ok := types.Unalias(recv).(*types.Named)
-	return ok && named.Obj() != nil && (named.Obj().Name() == "T" || named.Obj().Name() == "B")
-}
-
-// harnessFuzzDriver reports (*testing.F).Fuzz - never admitted (its
-// target dispatches reflectively over corpus files), but its
-// harness-internal body is cut from the walk so the refusal names the
-// driver itself rather than the harness's own formatting internals
-// (REQ-closure-observability-analysis).
-func harnessFuzzDriver(fn *ssa.Function) bool {
-	if fn == nil || fn.Name() != "Fuzz" || funcPkgPath(fn) != "testing" {
-		return false
-	}
-	if fn.Signature == nil || fn.Signature.Recv() == nil {
-		return false
-	}
-	recv := fn.Signature.Recv().Type()
-	if ptr, ok := types.Unalias(recv).(*types.Pointer); ok {
-		recv = ptr.Elem()
-	}
-	named, ok := types.Unalias(recv).(*types.Named)
-	return ok && named.Obj() != nil && named.Obj().Name() == "F"
+	_, ok := harnessCalleeEffect(audited, fn, false)
+	return ok && functionSymbolName(fn) == "Run"
 }
 
 // enumerationClosure is one signature-open subject's whole-view caller

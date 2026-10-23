@@ -953,16 +953,12 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 			t.Errorf("classBPureStandard(true, %s, %s) = false, want audited", tc.pkg, tc.name)
 		}
 	}
+	for _, name := range auditset.FlagNonAuditedNames() {
+		if classBPureStandard(true, "flag", name) {
+			t.Errorf("classBPureStandard(true, flag, %s) = true, want outside the audited set", name)
+		}
+	}
 	for _, tc := range []struct{ pkg, name string }{
-		// flag's registration families (Bool, BoolVar, Var, Func, …) are
-		// admitted program-wide as sinks by the registration-facts
-		// judgment, never by this predicate: the rows below pin that no
-		// flag operation is pure-admitted by name.
-		{"flag", "Parse"}, {"flag", "Parsed"}, {"flag", "Lookup"}, {"flag", "Set"}, {"flag", "Args"}, {"flag", "NArg"},
-		{"flag", "Name"}, {"flag", "UnquoteUsage"},
-		{"flag", "Arg"}, {"flag", "NFlag"}, {"flag", "Visit"}, {"flag", "VisitAll"}, {"flag", "PrintDefaults"},
-		{"flag", "Output"}, {"flag", "SetOutput"}, {"flag", "Init"}, {"flag", "Usage"}, {"flag", "Var"}, {"flag", "Func"},
-		{"flag", "BoolFunc"}, {"flag", "TextVar"}, {"flag", "Bool"}, {"flag", "BoolVar"}, {"flag", "ErrHelp"},
 		{"net/url", "Parse"}, {"net/url", "ParseRequestURI"}, {"net/url", "ParseQuery"}, {"net/url", "Query"},
 		{"net/url", "JoinPath"}, {"net/url", "UnmarshalBinary"},
 		{"path/filepath", "Abs"}, {"path/filepath", "EvalSymlinks"}, {"path/filepath", "Glob"},

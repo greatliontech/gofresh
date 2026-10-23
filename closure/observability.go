@@ -15,6 +15,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
 
 	prog "github.com/greatliontech/gofresh/closure/internal/program"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/outcome"
 )
 
@@ -553,7 +554,7 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 func immutableEnvironmentMethod(sets ...[]externalEffect) string {
 	for _, effects := range sets {
 		for _, effect := range effects {
-			if effect.observable && effect.kind == externalEffectTestRuntime && (auditedHarnessLogging(true, effect.packagePath, effect.symbol) || auditedHarnessPacing(true, effect.packagePath, effect.symbol) || effect.packagePath == "testing" && (effect.symbol == "Run" || effect.symbol == "B.N")) {
+			if harnessOutcomeAdmitted(effect) {
 				continue
 			}
 			if !effect.observable || effect.packagePath != "os" || (effect.symbol != "Getenv" && effect.symbol != "LookupEnv") {
@@ -867,42 +868,21 @@ func isOpenFlagSymbol(symbol string) bool {
 // flagRegistrationSymbol reports whether pkg.name is standard flag
 // REGISTRATION with a value-shaped sink - a process-local registry
 // mutation whose registered storage the registration facts walk can
-// trace and guard. The callback families (Var, TextVar, Func,
-// BoolFunc) run arbitrary code at Parse and keep the audited-pure
-// exclusion. The read side - Parse and every reference to registered
-// storage - keeps the exclusion too; this admission is consulted by
-// the startup and test-main direct walks and the package-scan
-// backstop, and is sound only because flagRegistrationFacts judges
-// every call site's sinks program-wide
-// (REQ-closure-observability-analysis).
+// trace and guard (REQ-closure-observability-analysis).
 func flagRegistrationSymbol(pkgPath, name string) bool {
-	return flagValueRegistration(pkgPath, name) || flagPointerRegistration(pkgPath, name)
+	return pkgPath == "flag" && auditset.FlagSurface(name).IsRegistration()
 }
 
 // flagValueRegistration matches the value families: the registered
 // storage is the returned pointer's target.
 func flagValueRegistration(pkgPath, name string) bool {
-	if pkgPath != "flag" {
-		return false
-	}
-	switch name {
-	case "Bool", "Int", "Int64", "Uint", "Uint64", "String", "Float64", "Duration":
-		return true
-	}
-	return false
+	return pkgPath == "flag" && auditset.FlagSurface(name) == auditset.FlagRoleValueRegistration
 }
 
 // flagPointerRegistration matches the pointer families: the registered
 // storage is the first argument's target.
 func flagPointerRegistration(pkgPath, name string) bool {
-	if pkgPath != "flag" {
-		return false
-	}
-	switch name {
-	case "BoolVar", "IntVar", "Int64Var", "UintVar", "Uint64Var", "StringVar", "Float64Var", "DurationVar":
-		return true
-	}
-	return false
+	return pkgPath == "flag" && auditset.FlagSurface(name) == auditset.FlagRolePointerRegistration
 }
 
 // flagRegistrationFacts walks every function body in the program's
@@ -1237,7 +1217,7 @@ func (b *tier2Base) flagSetProvenance(userPaths map[string]bool, userFunctions [
 // accessor. Every other method — the parsed-state readers, the
 // callback families, Usage — keeps the set unproven.
 func flagProvenSetMethod(name string) bool {
-	return name == "Parse" || name == "ErrorHandling" || flagRegistrationSymbol("flag", name)
+	return name == "Parse" || name == "ErrorHandling" || auditset.FlagSurface(name).IsRegistration()
 }
 
 // flagProvenSetUse reports whether a statically dispatched call is
@@ -1248,7 +1228,7 @@ func flagProvenSetUse(proven map[ssa.Value]flagSetKind, pkgPath, name string, c 
 	if pkgPath != "flag" || len(c.Args) == 0 || proven[c.Args[0]] == flagSetUnproven {
 		return false
 	}
-	return name == "Parse" || flagRegistrationSymbol(pkgPath, name)
+	return name == "Parse" || auditset.FlagSurface(name).IsRegistration()
 }
 
 // closedParseArgument reports whether a Parse argument is the program's

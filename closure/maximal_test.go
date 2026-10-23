@@ -596,6 +596,103 @@ func TestMaximalPackageEffectsRetainEveryNativeFact(t *testing.T) {
 	}
 }
 
+func TestMaximalFileEffectsDeclaredImportNames(t *testing.T) {
+	src := []byte(`package p
+import (
+	"example.com/a/client"
+	"example.com/b/client"
+)
+func Use() { _ = aclient.New(); _ = bclient.New() }
+`)
+	// Without declared names from the listing, two unnamed imports sharing
+	// path.Base("client") collide fail-closed.
+	fallbackScan, err := maximalFileEffectsContent(true, "p.go", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fallbackScan.effects) != 1 || !strings.Contains(fallbackScan.preferred, "import name collision") {
+		t.Fatalf("fallback scan = %+v, want fail-closed collision", fallbackScan)
+	}
+	// With declared names from the listing, each unnamed import binds its
+	// declared package name without false collision.
+	declared := listedDeclaredNames([]listPkg{
+		{ImportPath: "example.com/a/client", Name: "aclient"},
+		{ImportPath: "example.com/b/client", Name: "bclient"},
+	})
+	resolvedScan, err := maximalFileEffectsContentWithNames(true, "p.go", src, declared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolvedScan.effects) != 0 || resolvedScan.preferred != "" {
+		t.Fatalf("declared-names scan = %+v, want no false collision", resolvedScan)
+	}
+
+	// Conflicting listing nodes for the same SourcePath leave the binding
+	// unresolved in both listing orders rather than picking whichever node
+	// appeared first.
+	conflictAB := listedDeclaredNames([]listPkg{
+		{ImportPath: "example.com/a/client", Name: "aclient"},
+		{ImportPath: "example.com/a/client [p.test]", Name: "other"},
+		{ImportPath: "example.com/b/client", Name: "bclient"},
+	})
+	conflictBA := listedDeclaredNames([]listPkg{
+		{ImportPath: "example.com/a/client [p.test]", Name: "other"},
+		{ImportPath: "example.com/a/client", Name: "aclient"},
+		{ImportPath: "example.com/b/client", Name: "bclient"},
+	})
+	if conflictAB["example.com/a/client"] != "" || conflictBA["example.com/a/client"] != "" {
+		t.Fatalf("conflicting SourcePath bindings = %q / %q, want empty (unresolved)", conflictAB["example.com/a/client"], conflictBA["example.com/a/client"])
+	}
+	if declaredOverridesKey(conflictAB) != declaredOverridesKey(conflictBA) {
+		t.Fatalf("declaredOverridesKey order mismatch: %q != %q", declaredOverridesKey(conflictAB), declaredOverridesKey(conflictBA))
+	}
+
+	// Major-versioned imports (/v2) have distinct alias-binding states for
+	// nil declaredNames, declared "v2", and declared "foo", so each must
+	// produce a distinct overridesKey and never serve a stale cached scan.
+	v2Src := []byte(`package p
+import (
+	"example.com/a/foo"
+	"example.com/b/foo/v2"
+)
+func Use() { _ = foo.A() }
+`)
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "v2.go")
+	if err := os.WriteFile(filePath, v2Src, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := &Hasher{
+		maximalFiles:      map[string]maximalEffectScan{},
+		selectionResolved: true,
+	}
+	unlistedScan, err := h.maximalFileEffectsCached("example.com/p", filePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unlistedScan.effects) != 0 {
+		t.Fatalf("unlisted /v2 scan = %+v, want clean secondary fallback", unlistedScan)
+	}
+	declaredFoo := map[string]string{
+		"example.com/a/foo":    "foo",
+		"example.com/b/foo/v2": "foo",
+	}
+	declaredV2 := map[string]string{
+		"example.com/a/foo":    "foo",
+		"example.com/b/foo/v2": "v2",
+	}
+	if kFoo, kV2 := declaredOverridesKey(declaredFoo), declaredOverridesKey(declaredV2); kFoo == "" || kV2 == "" || kFoo == kV2 {
+		t.Fatalf("versioned overridesKey = (%q, %q), want distinct non-empty keys", kFoo, kV2)
+	}
+	collisionScan, err := h.maximalFileEffectsCachedWithNames("example.com/p", filePath, declaredFoo, declaredOverridesKey(declaredFoo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collisionScan.effects) != 1 || !strings.Contains(collisionScan.preferred, "import name collision") {
+		t.Fatalf("declared foo /v2 scan = %+v, want collision on foo", collisionScan)
+	}
+}
+
 func TestComputeMaximalBatchHonorsCancellationDuringTraversal(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")

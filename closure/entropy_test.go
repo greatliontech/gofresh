@@ -112,14 +112,9 @@ func TestCryptoRandIsTheEntropyClass(t *testing.T) {
 	}
 }
 
-// The classifier is gated on the classified-package set the maximal
-// tier's dot-import backstop reads, so the two cannot disagree; this
-// pins the direction the gate leaves open — every listed package has
-// an arm that classifies at least one name — and spot-checks the gate.
-// The gate's own deletion is not test-distinguishable while no arm for
-// an unlisted package exists; the table collapse that removes the gate
-// with the hazard is docs/issues/classb-arms-one-table.md
-// (REQ-closure-observability-audited-set).
+// classBPackages is derived from classBTable's keys so the classifier
+// and the maximal tier's dot-import backstop (packageHasClassifiedExternalAPI)
+// share one table by construction (REQ-closure-observability-audited-set).
 func TestClassBPackagesMatchTheArms(t *testing.T) {
 	samples := map[string]string{
 		"fmt": "Println", "os": "Getenv", "syscall": "Mkdir", "golang.org/x/sys/unix": "Mkdir", "testing": "Short",

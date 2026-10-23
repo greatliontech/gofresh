@@ -68,7 +68,7 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 		if a.rtaResolved[site] && !a.openWorld && len(targets) != 0 {
 			admitted := true
 			for target := range targets {
-				if harnessLoggingFunction(h.SelectionAudited(), target) {
+				if harnessInvokeAdmitted(h.SelectionAudited(), target) {
 					continue
 				}
 				idx := a.idxForFunction(target)
@@ -108,16 +108,11 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 				continue
 			}
 			effect, ok := classBEffectForFunction(target)
-			if !ok && harnessLoggingFunction(h.SelectionAudited(), target) {
-				a.recordExternalEffect(harnessLoggingEffect(functionSymbolName(target)))
-				continue
-			}
-			if !ok && harnessPacingFunction(h.SelectionAudited(), target) {
-				// A pacing method reached as a dynamic target — an
-				// interface holding the *B — classifies as the static
-				// call does (REQ-closure-observability-analysis).
-				a.recordExternalEffect(harnessPacingEffect(functionSymbolName(target)))
-				continue
+			if !ok {
+				if harnessEffect, harnessOK := harnessCalleeEffect(h.SelectionAudited(), target, true); harnessOK {
+					a.recordExternalEffect(harnessEffect)
+					continue
+				}
 			}
 			if !ok && !callerIdx.std && !isSourceOnlyStandardPackage(h.SelectionAudited(), idx.path) {
 				// The audited-pure admissions hold for an enumerated
@@ -753,49 +748,15 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	if c.IsInvoke() && observableDirEntryCall(site) {
 		return
 	}
-	// One value walk under the subject's fresh analysis: its callers
-	// are the subject's provenance frames alone (the reach is narrowed
-	// to subjectFunctions before this walk) while its dynamic-target
-	// set stays mask-wide, which is exactly what lets a callee's
-	// parameter cross to the subject's own call sites without an
-	// initializer's or a dynamic dispatch's argument leaking in
-	// (REQ-closure-observability-dispatch).
-	operandClosed := subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh)
-	// A computed call whose operand's functions the collector names,
-	// every one of them analyzed content of an indexed non-standard
-	// package, is resolved by the operand alone: the site needs no
-	// RTA attribution, since its targets are exactly those bodies and
-	// the scan of the operand's values has queued each of them — the
-	// drained initializer frame's recursive closure resolves here
-	// (REQ-closure-observability-dispatch).
-	heldKnown := false
-	if !c.IsInvoke() && c.StaticCallee() == nil && !(fromRTA && a.rtaResolved[site]) {
-		if held, ok := closedDynamicTargets(c.Value, a.fresh); ok {
-			heldKnown = true
-			for fn := range held {
-				idx := a.idxForFunction(fn)
-				if idx == nil || idx.std || idx.cache || idx.testMain || a.propertyHarnessAudited(idx.path) {
-					heldKnown = false
-					break
-				}
+	if !callerStd {
+		if c.IsInvoke() {
+			if !a.dispatchAdmitted(site, fromRTA) {
+				a.requestWiden("interface invoke outside RTA: " + invokeEdgeName(c, caller))
 			}
-			// The route's premise holds by the scan's own rule: every
-			// held function is a closure creation or a function
-			// constant stored into the cell from a frame this walk
-			// scans (the cell's frame or a closure it created, itself
-			// scanned as an operand), and the value scan walks an
-			// anonymous function's body when it meets it — so the
-			// site's targets are analyzed content whatever frame
-			// reached them.
-		}
-	}
-	resolved := ((fromRTA && a.rtaResolved[site]) || heldKnown) && !a.openWorld && operandClosed
-	if c.IsInvoke() && !resolved && !callerStd && !(fromRTA && a.subjectDeterminedInvokes[site] && operandClosed) {
-		a.requestWiden("interface invoke outside RTA: " + invokeEdgeName(c, caller))
-	}
-	if !c.IsInvoke() && c.StaticCallee() == nil {
-		if _, ok := c.Value.(*ssa.Builtin); !ok && !callerStd && !resolved {
-			a.requestWiden("computed function call in " + caller.String() + computedEdgeSuffix(c))
+		} else if c.StaticCallee() == nil {
+			if _, ok := c.Value.(*ssa.Builtin); !ok && !a.dispatchAdmitted(site, fromRTA) {
+				a.requestWiden("computed function call in " + caller.String() + computedEdgeSuffix(c))
+			}
 		}
 	}
 	callee := c.StaticCallee()
@@ -813,25 +774,8 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		a.requestWiden("interface dispatch on unattributable state in " + caller.String())
 		return
 	}
-	if auditedHarnessLogging(a.h.SelectionAudited(), pkgPath, name) {
-		a.recordExternalEffect(harnessLoggingEffect(name))
-		return
-	}
-	if auditedHarnessPacing(a.h.SelectionAudited(), pkgPath, name) {
-		// Benchmark pacing is the harness's own protocol: the fact is
-		// recorded — an audited harness call is not purity evidence, so
-		// the legacy projection stays unverifiable exactly as for the
-		// logging family — and the harness body is never descended into
-		// (REQ-closure-observability-analysis's benchmark-pacing clause).
-		a.recordExternalEffect(harnessPacingEffect(name))
-		return
-	}
-	if auditedHarnessSubtestDriver(a.h.SelectionAudited(), callee) {
-		// The callback is subject flow reached through the harness's own
-		// dispatch and classified at its own sites; the driver itself is
-		// an admitted harness fact, never descended into
-		// (REQ-closure-observability-subtest-driver).
-		a.recordExternalEffect(harnessSubtestDriverEffect())
+	if harnessEffect, ok := harnessCalleeEffect(a.h.SelectionAudited(), callee, false); ok {
+		a.recordExternalEffect(harnessEffect)
 		return
 	}
 	if !callerStd && a.propertyHarnessAudited(pkgPath) {
@@ -928,24 +872,50 @@ func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name
 	return effect, classified
 }
 
+// dispatchAdmitted is the one predicate deciding whether a computed call
+// or interface invoke is admitted without widening the subject world
+// (REQ-closure-observability-dispatch): the world must be closed, the
+// dispatch operand must be closed under the subject's own flow, and the
+// site's target set must be wholly analyzed/admitted — either through
+// RTA enumeration (every enumerated target an audited harness logging
+// method or an indexed non-test-main function) or, for a computed call
+// outside RTA, through the operand's own closed function-value set
+// (every held function an indexed non-standard, non-cached, non-test-main
+// function outside the property harness).
+func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool) bool {
+	if a.openWorld {
+		return false
+	}
+	c := site.Common()
+	if c == nil || !subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh) {
+		return false
+	}
+	if fromRTA && a.subjectDeterminedInvokes[site] {
+		return true
+	}
+	if !c.IsInvoke() && c.StaticCallee() == nil {
+		if held, ok := closedDynamicTargets(c.Value, a.fresh); ok {
+			for fn := range held {
+				idx := a.idxForFunction(fn)
+				if idx == nil || idx.std || idx.cache || idx.testMain || a.propertyHarnessAudited(idx.path) {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	return false
+}
+
 // stdBodyCut reports a standard-library body whose classification is
 // complete at its call sites, so the walk never descends: classified
 // file-I/O operations, atomic observability operations, and the
-// harness's logging, subtest-driver, and fuzz-driver families - one
-// membership list, so the category grows in one place
+// harness's logging, pacing, subtest-driver, and fuzz-driver families -
+// one membership list, so the category grows in one place
 // (the one-site-classifier collapse).
 func stdBodyCut(audited bool, fn *ssa.Function, classified externalEffect, classifiedOK bool) bool {
 	return classifiedOK && classified.kind == externalEffectFileIO ||
-		atomicObservabilityOperation(fn) || harnessLoggingFunction(audited, fn) || harnessPacingFunction(audited, fn) ||
-		auditedHarnessSubtestDriver(audited, fn) || harnessFuzzDriver(fn)
-}
-
-// harnessPacingFunction gates the body-scan cut and the dynamic-target
-// admission on the same pacing set, so a pacing method reached through
-// an RTA-resolved dispatch classifies exactly as a static call to it
-// would (REQ-closure-observability-analysis's benchmark-pacing clause).
-func harnessPacingFunction(audited bool, fn *ssa.Function) bool {
-	return fn != nil && auditedHarnessPacing(audited, funcPkgPath(fn), functionSymbolName(fn))
+		atomicObservabilityOperation(fn) || harnessBodyCut(audited, fn)
 }
 
 func (a *tier2Analyzer) addInterfaceMethodSet(t types.Type) {
@@ -1459,14 +1429,6 @@ func functionSymbolName(fn *ssa.Function) string {
 		return obj.Name()
 	}
 	return fn.Name()
-}
-
-// harnessLoggingFunction gates both the body-scan cut and the
-// dynamic-target admission on the same audited set, so a harness logging
-// method reached through an interface method set or an RTA-resolved
-// dispatch classifies exactly as a static call to it would.
-func harnessLoggingFunction(audited bool, fn *ssa.Function) bool {
-	return fn != nil && auditedHarnessLogging(audited, funcPkgPath(fn), functionSymbolName(fn))
 }
 
 func classBReasonForFunction(fn *ssa.Function) string {

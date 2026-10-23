@@ -304,31 +304,86 @@ var urlSymbols = map[string]bool{
 	"Unwrap": true, "Timeout": true, "Temporary": true,
 }
 
-// flagSymbols is the audited surface of package flag beside the
-// registration families the closure walks admit by name: the default
-// set's variable, the set constructor (an allocation binding its own
-// usage method), the error-handling constants, and the type names —
-// each a selector a registration's receiver or argument spells and
-// none an input channel by itself. Parse, Parsed, Lookup, Set, Args,
-// NArg, Arg, NFlag, Visit, VisitAll, PrintDefaults, Output, SetOutput,
-// Init, Usage, Name, UnquoteUsage, ErrHelp, and the callback families
-// never enter: they read or write parsed state, exit, or run arbitrary
-// code at Parse. A subject-time read of CommandLine still refuses at
-// the walk as a standard global; the registration-facts judgment
-// covers every registration's storage program-wide, the method form's
-// receiver included. CommandLine is the one exported mutable variable
-// an audited row admits: a startup-flow replacement of the default set
-// adds no channel, the storage judgment being per registration call
-// and set-blind, and every channel the variable carries is a method
-// refused by name. The admission is by bare name at every tier, so the
-// ErrorHandling name also admits the (*FlagSet).ErrorHandling accessor
-// — a field written only at construction and by Init, which refuses.
-// Audited on go1.27.0-dst.14 (REQ-closure-observability-audited-set).
-var flagSymbols = map[string]bool{
-	"NewFlagSet": true, "CommandLine": true,
-	"FlagSet": true, "Flag": true, "Value": true, "Getter": true, "ErrorHandling": true,
-	"ContinueOnError": true, "ExitOnError": true, "PanicOnError": true,
+// FlagRole classifies a symbol of standard package flag across the
+// audited-pure surface, the registration-facts sink judgments, and
+// the refused parsed-input / callback surface.
+type FlagRole uint8
+
+const (
+	FlagRoleRefused FlagRole = iota
+	FlagRoleAudited
+	FlagRoleValueRegistration
+	FlagRolePointerRegistration
+)
+
+// IsRegistration reports whether the role is one of the value- or
+// pointer-shaped flag registration families.
+func (r FlagRole) IsRegistration() bool {
+	return r == FlagRoleValueRegistration || r == FlagRolePointerRegistration
 }
+
+// flagSurface is the one table classifying standard package flag:
+//   - FlagRoleAudited: the default set's variable, the set constructor,
+//     the error-handling constants, and the type names — each a selector
+//     a registration's receiver or argument spells and none an input
+//     channel by itself (REQ-closure-observability-audited-set).
+//   - FlagRoleValueRegistration / FlagRolePointerRegistration: the
+//     value- and pointer-shaped registration families whose storage
+//     flagRegistrationFacts traces program-wide.
+//   - FlagRoleRefused: parsed-state readers/writers, exit/usage helpers,
+//     and callback registration families (Parse, Parsed, Lookup, Set,
+//     Args, NArg, Arg, NFlag, Visit, VisitAll, PrintDefaults, Output,
+//     SetOutput, Init, Usage, Name, UnquoteUsage, ErrHelp, Var, TextVar,
+//     Func, BoolFunc); any unlisted symbol also defaults to FlagRoleRefused.
+var flagSurface = map[string]FlagRole{
+	// Audited pure / type / constant surface
+	"NewFlagSet": FlagRoleAudited, "CommandLine": FlagRoleAudited,
+	"FlagSet": FlagRoleAudited, "Flag": FlagRoleAudited, "Value": FlagRoleAudited, "Getter": FlagRoleAudited, "ErrorHandling": FlagRoleAudited,
+	"ContinueOnError": FlagRoleAudited, "ExitOnError": FlagRoleAudited, "PanicOnError": FlagRoleAudited,
+	// Value-returning registration families
+	"Bool": FlagRoleValueRegistration, "Int": FlagRoleValueRegistration, "Int64": FlagRoleValueRegistration,
+	"Uint": FlagRoleValueRegistration, "Uint64": FlagRoleValueRegistration, "String": FlagRoleValueRegistration,
+	"Float64": FlagRoleValueRegistration, "Duration": FlagRoleValueRegistration,
+	// Pointer-taking registration families
+	"BoolVar": FlagRolePointerRegistration, "IntVar": FlagRolePointerRegistration, "Int64Var": FlagRolePointerRegistration,
+	"UintVar": FlagRolePointerRegistration, "Uint64Var": FlagRolePointerRegistration, "StringVar": FlagRolePointerRegistration,
+	"Float64Var": FlagRolePointerRegistration, "DurationVar": FlagRolePointerRegistration,
+	// Refused parsed-input, output, and callback families
+	"Parse": FlagRoleRefused, "Parsed": FlagRoleRefused, "Lookup": FlagRoleRefused, "Set": FlagRoleRefused,
+	"Args": FlagRoleRefused, "NArg": FlagRoleRefused, "Arg": FlagRoleRefused, "NFlag": FlagRoleRefused,
+	"Visit": FlagRoleRefused, "VisitAll": FlagRoleRefused, "PrintDefaults": FlagRoleRefused,
+	"Output": FlagRoleRefused, "SetOutput": FlagRoleRefused, "Init": FlagRoleRefused, "Usage": FlagRoleRefused,
+	"Name": FlagRoleRefused, "UnquoteUsage": FlagRoleRefused, "ErrHelp": FlagRoleRefused,
+	"Var": FlagRoleRefused, "TextVar": FlagRoleRefused, "Func": FlagRoleRefused, "BoolFunc": FlagRoleRefused,
+}
+
+// FlagSurface returns the classification of a symbol in package flag.
+func FlagSurface(name string) FlagRole {
+	return flagSurface[name]
+}
+
+// FlagNonAuditedNames lists the explicitly classified flag symbols
+// outside FlagRoleAudited (registrations and refused operations), sorted.
+func FlagNonAuditedNames() []string {
+	var out []string
+	for name, role := range flagSurface {
+		if role != FlagRoleAudited {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+var flagSymbols = func() map[string]bool {
+	out := make(map[string]bool)
+	for name, role := range flagSurface {
+		if role == FlagRoleAudited {
+			out[name] = true
+		}
+	}
+	return out
+}()
 
 // symbolTables is the one table of per-package audited surfaces the
 // class-B ladder consults; a widening is a row here, never a new
