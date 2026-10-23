@@ -82,7 +82,7 @@ everything" when it didn't.
 Red facts become durable filings, never chat. The judge WRITES an
 issue doc under the owning repo's `docs/issues/` with a `Lands:` line
 slotted per that repo's own conventions: for the tool repos the
-register is the cross-tool train (`docs/plans/cross-tool-train.md`);
+register is the canonical plan (`docs/plans/plan.md`);
 elsewhere the strict order is a chunk of that repo's active plan, a
 checkable condition (a repo's next change-set gate that forces the
 diagnosis is a legitimate condition), and only then `user decision`.

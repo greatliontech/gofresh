@@ -77,7 +77,7 @@ $STATE/runbook.md, then disposition every RED fact per
 the runbook's filing doctrine: write (do not commit — the wrapper
 commits) an issue doc under the owning repo's docs/issues/ with a
 Lands: line per that repo's own conventions — for the tool repos, the
-cross-tool train plan at $STATE/cross-tool-train.md (a read copy)
+canonical plan at $STATE/plan.md (a read copy)
 is the register; elsewhere prefer, in strict order, a chunk of that
 repo's active plan, a checkable condition (a repo's next change-set
 gate that forces the fact's diagnosis is a legitimate condition), and
@@ -120,7 +120,7 @@ added from its content before anything else."
 # at worst a wrong filing inside docs/issues — which the commit walk
 # scopes and the weekly review reads — never a write elsewhere.
 cp "$GL/gofresh/docs/fleet-sweep.md" "$STATE/runbook.md" || { echo "runbook copy failed; a stale doctrine must not judge $(date -Is)" >> "$judgelog"; exit 1; }
-cp "$GL/gofresh/docs/plans/cross-tool-train.md" "$STATE/cross-tool-train.md" || { echo "train-plan copy failed; a stale register must not slot $(date -Is)" >> "$judgelog"; exit 1; }
+cp "$GL/gofresh/docs/plans/plan.md" "$STATE/plan.md" || { echo "plan copy failed; a stale register must not slot $(date -Is)" >> "$judgelog"; exit 1; }
 adddirs=(--add-dir "$STATE")
 for r in "${ESTATE_REPOS[@]}"; do
   [ -d "$GL/$r/docs/issues" ] && adddirs+=(--add-dir "$GL/$r/docs/issues")
