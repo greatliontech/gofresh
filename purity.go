@@ -556,113 +556,11 @@ func scanSubjectsFromLoaded(audited bool, pkgs []*packages.Package, state *viewD
 // closed signature. The term is the refusal's identity: the operator
 // bounds exactly that type (REQ-closure-refusal-channels).
 func openWorldTerm(audited bool, sig *types.Signature) string {
-	if sig == nil {
-		// Unreachable — a *types.Func's type is always a signature —
-		// kept fail-closed rather than trusted.
-		return "unresolved signature"
-	}
-	if isHarnessSignature(sig) {
-		return ""
-	}
-	// The type-parameter lists are consulted directly: a zero-parameter
-	// generic reads closed through Params alone, and both tiers must
-	// give one openness answer (REQ-closure-analysis's
-	// parameterized-subject arm).
-	for _, list := range []*types.TypeParamList{sig.TypeParams(), sig.RecvTypeParams()} {
-		for i := 0; list != nil && i < list.Len(); i++ {
-			if param := list.At(i); !closure.TypeParamBoundsAwayFromDynamic(audited, param) {
-				return "type parameter " + param.Obj().Name() + " constrained by " + types.TypeString(param.Constraint(), packageNameQualifier)
-			}
-		}
-	}
-	// One fresh map per parameter, mirroring the closure tier: no
-	// cross-parameter mark leakage, cycle-safe within each evaluation.
-	if recv := sig.Recv(); recv != nil && typeMayCarryUnknownDynamic(audited, recv.Type(), make(map[types.Type]bool)) {
-		return "receiver " + types.TypeString(recv.Type(), packageNameQualifier)
-	}
-	params := sig.Params()
-	for i := 0; params != nil && i < params.Len(); i++ {
-		param := params.At(i)
-		if typeMayCarryUnknownDynamic(audited, param.Type(), make(map[types.Type]bool)) {
-			name := param.Name()
-			if name == "" || name == "_" {
-				name = "#" + strconv.Itoa(i+1)
-			}
-			return "parameter " + name + " " + types.TypeString(param.Type(), packageNameQualifier)
-		}
-	}
-	return ""
-}
-
-// packageNameQualifier renders a type's package by name, the spelling
-// the declaration itself uses.
-func packageNameQualifier(pkg *types.Package) string { return pkg.Name() }
-
-func isHarnessSignature(sig *types.Signature) bool {
-	if sig == nil || sig.Recv() != nil || sig.Params().Len() != 1 {
-		return false
-	}
-	pointer, ok := sig.Params().At(0).Type().(*types.Pointer)
-	if !ok {
-		return false
-	}
-	named, ok := pointer.Elem().(*types.Named)
-	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "testing" {
-		return false
-	}
-	switch named.Obj().Name() {
-	case "T", "B", "F", "M":
-		return true
-	default:
-		return false
-	}
+	return closure.SignatureOpenWorldTerm(audited, sig, nil, true, closure.CarrierPolicyConsumer)
 }
 
 func typeMayCarryUnknownDynamic(audited bool, t types.Type, seen map[types.Type]bool) bool {
-	if t == nil || seen[t] {
-		return false
-	}
-	seen[t] = true
-	switch t := types.Unalias(t).(type) {
-	case *types.Basic:
-		return t.Kind() == types.UnsafePointer
-	case *types.Interface, *types.Signature:
-		return true
-	case *types.TypeParam:
-		return !closure.TypeParamBoundsAwayFromDynamic(audited, t)
-	case *types.Named:
-		// The audited atomic transparency (closure.AuditedAtomicPointerElem
-		// carries the audit): sync/atomic.Pointer[T] is walked as *T.
-		// The uninstantiated generic inside sync/atomic itself falls
-		// through to the fail-closed type-parameter judgment.
-		if elem, ok := closure.AuditedAtomicPointerElem(audited, t); ok {
-			return typeMayCarryUnknownDynamic(audited, elem, seen)
-		}
-		return typeMayCarryUnknownDynamic(audited, t.Underlying(), seen)
-	case *types.Pointer:
-		return typeMayCarryUnknownDynamic(audited, t.Elem(), seen)
-	case *types.Slice:
-		return typeMayCarryUnknownDynamic(audited, t.Elem(), seen)
-	case *types.Array:
-		return typeMayCarryUnknownDynamic(audited, t.Elem(), seen)
-	case *types.Map:
-		return typeMayCarryUnknownDynamic(audited, t.Key(), seen) || typeMayCarryUnknownDynamic(audited, t.Elem(), seen)
-	case *types.Chan:
-		return typeMayCarryUnknownDynamic(audited, t.Elem(), seen)
-	case *types.Struct:
-		for i := 0; i < t.NumFields(); i++ {
-			if typeMayCarryUnknownDynamic(audited, t.Field(i).Type(), seen) {
-				return true
-			}
-		}
-	case *types.Tuple:
-		for i := 0; i < t.Len(); i++ {
-			if typeMayCarryUnknownDynamic(audited, t.At(i).Type(), seen) {
-				return true
-			}
-		}
-	}
-	return false
+	return closure.WalkDynamicCarrier(audited, t, seen, closure.CarrierPolicyConsumer)
 }
 
 // nodeDeclarationKey and objectDeclarationKey derive the identity the
@@ -957,33 +855,10 @@ func recordDynamicGlobalUses(audited bool, p *packages.Package, mutated, escaped
 	// across bodies; seedingPass suppresses the scan's advisory side
 	// channels (escapes, links, explain marks) while the package-level
 	// seed fixpoint converges, so nothing double-records.
-	initOnlyParams := map[*types.Func][]types.Object{}
+	initOnlyParams := directCallSites(p).funcParamsOf(initOnly)
 	paramSeeds := map[types.Object]map[string]bool{}
 	paramSeedGrowth := false
 	seedingPass := false
-	for _, file := range p.Syntax {
-		for _, decl := range file.Decls {
-			fd, ok := decl.(*ast.FuncDecl)
-			if !ok || fd.Recv != nil || fd.Name == nil || !initOnly[fd.Name.Name] || fd.Type == nil || fd.Type.Params == nil {
-				continue
-			}
-			fn, ok := p.TypesInfo.Defs[fd.Name].(*types.Func)
-			if !ok {
-				continue
-			}
-			var params []types.Object
-			for _, field := range fd.Type.Params.List {
-				if len(field.Names) == 0 {
-					params = append(params, nil)
-					continue
-				}
-				for _, name := range field.Names {
-					params = append(params, p.TypesInfo.Defs[name])
-				}
-			}
-			initOnlyParams[fn] = params
-		}
-	}
 	// initAliasedLocals maps an init-flow body's locals bound from
 	// carriers to the carrier keys they alias, to a fixpoint over
 	// assignment and range chains, with nested literals and go
@@ -3059,13 +2934,10 @@ func classifyRegistrantComposite(audited bool, p *packages.Package, lit *ast.Com
 			classifyRegistrantFlow(audited, p, value, emit)
 		}
 	case *types.Map, *types.Slice, *types.Array:
-		for _, elt := range lit.Elts {
-			value := elt
-			if kv, ok := elt.(*ast.KeyValueExpr); ok {
-				value = kv.Value
-			}
+		eachCompositeLitValue(lit, func(value ast.Expr) bool {
 			classifyRegistrantFlow(audited, p, value, emit)
-		}
+			return true
+		})
 	default:
 		emit(fieldRegMark{class: 'p', idx: -1})
 	}
@@ -3355,18 +3227,11 @@ func recordEnvCarryingRegistrations(audited bool, p *packages.Package, envCarryi
 	carrying = func(expr ast.Expr) bool {
 		switch e := unparen(expr).(type) {
 		case *ast.CompositeLit:
-			for _, elt := range e.Elts {
-				value := elt
-				if kv, ok := elt.(*ast.KeyValueExpr); ok {
-					// Map keys cannot be function-typed (not comparable);
-					// struct field keys are names, not values.
-					value = kv.Value
-				}
-				if carrying(value) {
-					return true
-				}
-			}
-			return false
+			// Map keys cannot be function-typed (not comparable);
+			// struct field keys are names, not values.
+			return !eachCompositeLitValue(e, func(value ast.Expr) bool {
+				return !carrying(value)
+			})
 		case *ast.UnaryExpr:
 			if e.Op == token.AND {
 				return carrying(e.X)
@@ -3810,11 +3675,10 @@ func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, re
 				}
 				return v, true
 			}
-			// breakTargets breaks every tracked local or parameter an
-			// expression subtree reaches - the fail-closed disposition
-			// for address captures, whose write path the binding walk
-			// cannot see.
-			breakTargets := func(expr ast.Expr) {
+			// breakIdents breaks every tracked local or parameter an
+			// expression subtree reaches that satisfies gate (nil = all),
+			// marking captureBroken alongside localBroken when capture is set.
+			breakIdents := func(expr ast.Expr, capture bool, gate func(types.Object) bool) {
 				ast.Inspect(expr, func(n ast.Node) bool {
 					if ident, ok := n.(*ast.Ident); ok {
 						obj := p.TypesInfo.Uses[ident]
@@ -3822,14 +3686,23 @@ func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, re
 							obj = p.TypesInfo.Defs[ident]
 						}
 						if obj != nil {
-							if _, ok := trackedVar(obj); ok || params[obj] {
+							if _, ok := trackedVar(obj); (ok || params[obj]) && (gate == nil || gate(obj)) {
 								localBroken[obj] = true
-								captureBroken[obj] = true
+								if capture {
+									captureBroken[obj] = true
+								}
 							}
 						}
 					}
 					return true
 				})
+			}
+			// breakTargets breaks every tracked local or parameter an
+			// expression subtree reaches - the fail-closed disposition
+			// for address captures, whose write path the binding walk
+			// cannot see.
+			breakTargets := func(expr ast.Expr) {
+				breakIdents(expr, true, nil)
 			}
 			// chainRoot walks a written or addressed chain to its
 			// terminal expression: selector, index, slice, and
@@ -3937,13 +3810,10 @@ func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, re
 				case *ast.Ident, *ast.SelectorExpr, *ast.IndexExpr, *ast.StarExpr, *ast.SliceExpr:
 					linkValue(obj, e, sharesHeader(p.TypesInfo.TypeOf(e)))
 				case *ast.CompositeLit:
-					for _, elt := range v.Elts {
-						value := elt
-						if kv, ok := elt.(*ast.KeyValueExpr); ok {
-							value = kv.Value
-						}
+					eachCompositeLitValue(v, func(value ast.Expr) bool {
 						linkBacking(obj, value)
-					}
+						return true
+					})
 				case *ast.UnaryExpr:
 					if v.Op == token.AND {
 						linkBacking(obj, v.X)
@@ -4266,39 +4136,20 @@ func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, re
 							// value-plane callees are proven non-mutating
 							// and classify nothing.
 							sig, _ := fn.Type().(*types.Signature)
-							var breakReachIn func(e ast.Expr)
-							breakReachIn = func(e ast.Expr) {
-								ast.Inspect(e, func(inner ast.Node) bool {
-									if ident, ok := inner.(*ast.Ident); ok {
-										obj := p.TypesInfo.Uses[ident]
-										if obj == nil {
-											obj = p.TypesInfo.Defs[ident]
-										}
-										if obj != nil {
-											if _, ok := trackedVar(obj); ok || params[obj] {
-												if typeHandsOutMutableReach(obj.Type(), make(map[types.Type]bool)) {
-													localBroken[obj] = true
-													captureBroken[obj] = true
-												}
-											}
-										}
-									}
-									return true
+							breakReachIn := func(e ast.Expr) {
+								breakIdents(e, true, func(obj types.Object) bool {
+									return typeHandsOutMutableReach(obj.Type(), make(map[types.Type]bool))
 								})
 							}
 							var classifyLit func(lit *ast.CompositeLit)
 							classifyLit = func(lit *ast.CompositeLit) {
-								for _, elt := range lit.Elts {
-									value := elt
-									if kv, ok := elt.(*ast.KeyValueExpr); ok {
-										value = kv.Value
-									}
+								eachCompositeLitValue(lit, func(value ast.Expr) bool {
 									value = unparen(value)
 									// An element whose value hands no mutable
 									// reach copies into the literal's fresh
 									// storage - no write path back.
 									if t := p.TypesInfo.TypeOf(value); t != nil && !typeHandsOutMutableReach(t, make(map[types.Type]bool)) {
-										continue
+										return true
 									}
 									switch v := value.(type) {
 									case *ast.CompositeLit:
@@ -4307,7 +4158,7 @@ func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, re
 										if v.Op == token.AND {
 											if inner, ok := unparen(v.X).(*ast.CompositeLit); ok {
 												classifyLit(inner)
-												continue
+												return true
 											}
 										}
 										breakReachIn(value)
@@ -4315,7 +4166,8 @@ func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, re
 									default:
 										breakReachIn(value)
 									}
-								}
+									return true
+								})
 							}
 							elemReach := func(t types.Type) bool {
 								if t == nil {
@@ -4591,20 +4443,7 @@ func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, re
 					// inheriting the break. Only breakTargets-class
 					// causes poison insertions, so localBroken is set
 					// directly here, never captureBroken.
-					ast.Inspect(ps.root, func(n ast.Node) bool {
-						if ident, ok := n.(*ast.Ident); ok {
-							obj := p.TypesInfo.Uses[ident]
-							if obj == nil {
-								obj = p.TypesInfo.Defs[ident]
-							}
-							if obj != nil {
-								if _, ok := trackedVar(obj); ok || params[obj] {
-									localBroken[obj] = true
-								}
-							}
-						}
-						return true
-					})
+					breakIdents(ps.root, false, nil)
 					insertionWrites[ps.robj] = append(insertionWrites[ps.robj], ps.source)
 					linkBacking(ps.robj, ps.source)
 					continue
@@ -4804,16 +4643,7 @@ func returnEnvFreeFunctions(audited bool, p *packages.Package, paramLeakFree, re
 				case *ast.BasicLit:
 					return true
 				case *ast.CompositeLit:
-					for _, elt := range e.Elts {
-						value := elt
-						if kv, ok := elt.(*ast.KeyValueExpr); ok {
-							value = kv.Value
-						}
-						if !free(value) {
-							return false
-						}
-					}
-					return true
+					return eachCompositeLitValue(e, free)
 				case *ast.UnaryExpr:
 					if e.Op == token.AND {
 						return free(e.X)
@@ -5372,152 +5202,7 @@ func initOnlyReachableHelpers(p *packages.Package) map[string]bool {
 	if p == nil || p.TypesInfo == nil || p.Types == nil {
 		return nil
 	}
-	candidates := map[string]bool{}
-	bodies := map[string]*ast.FuncDecl{}
-	for _, file := range p.Syntax {
-		for _, decl := range file.Decls {
-			fd, ok := decl.(*ast.FuncDecl)
-			if !ok || fd.Recv != nil || fd.Name == nil || fd.Name.Name == "init" {
-				continue
-			}
-			if fd.Name.IsExported() {
-				continue
-			}
-			candidates[fd.Name.Name] = true
-			bodies[fd.Name.Name] = fd
-		}
-	}
-	if len(candidates) == 0 {
-		return nil
-	}
-	isCandidateFunc := func(ident *ast.Ident) (string, bool) {
-		obj, ok := p.TypesInfo.Uses[ident]
-		if !ok {
-			return "", false
-		}
-		fn, ok := obj.(*types.Func)
-		if !ok || fn.Pkg() == nil || fn.Pkg() != p.Types || fn.Type().(*types.Signature).Recv() != nil {
-			return "", false
-		}
-		if !candidates[fn.Name()] {
-			return "", false
-		}
-		return fn.Name(), true
-	}
-	// references[caller] lists candidate names referenced from region
-	// caller; "" is the init region (initializer expressions and init
-	// bodies), "!" the ordinary-program region. A non-call reference
-	// anywhere disqualifies immediately.
-	disqualified := map[string]bool{}
-	references := map[string]map[string]bool{}
-	addRef := func(region, name string) {
-		if references[region] == nil {
-			references[region] = map[string]bool{}
-		}
-		references[region][name] = true
-	}
-	var scanRegion func(region string, root ast.Node)
-	scanRegion = func(region string, root ast.Node) {
-		calls := map[*ast.Ident]bool{}
-		ast.Inspect(root, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.FuncLit:
-				// A nested literal is program code whatever encloses
-				// it - its references never count as init flow.
-				if n != root && n.Body != nil {
-					scanRegion("!", n.Body)
-					return false
-				}
-			case *ast.GoStmt:
-				// A go-statement callee runs concurrently with program
-				// code even when launched from init - never init flow.
-				scanRegion("!", n.Call)
-				return false
-			case *ast.CallExpr:
-				if ident, ok := n.Fun.(*ast.Ident); ok {
-					if _, is := isCandidateFunc(ident); is {
-						calls[ident] = true
-					}
-				}
-			case *ast.Ident:
-				if name, is := isCandidateFunc(n); is {
-					if calls[n] {
-						addRef(region, name)
-					} else {
-						disqualified[name] = true
-					}
-				}
-			}
-			return true
-		})
-	}
-	for _, file := range p.Syntax {
-		for _, decl := range file.Decls {
-			switch decl := decl.(type) {
-			case *ast.FuncDecl:
-				switch {
-				case decl.Recv == nil && decl.Name != nil && decl.Name.Name == "init":
-					if decl.Body != nil {
-						scanRegion("", decl.Body)
-					}
-				case decl.Recv == nil && decl.Name != nil && candidates[decl.Name.Name]:
-					if decl.Body != nil {
-						scanRegion(decl.Name.Name, decl.Body)
-					}
-				default:
-					if decl.Body != nil {
-						scanRegion("!", decl.Body)
-					}
-				}
-			default:
-				scanRegion("", decl)
-			}
-		}
-	}
-	for name := range references["!"] {
-		disqualified[name] = true
-	}
-	// Fixed point: a disqualified helper's body is ordinary program
-	// code, so its references disqualify in turn.
-	for changed := true; changed; {
-		changed = false
-		for caller, refs := range references {
-			if caller == "" || caller == "!" || !disqualified[caller] {
-				continue
-			}
-			for name := range refs {
-				if !disqualified[name] {
-					disqualified[name] = true
-					changed = true
-				}
-			}
-		}
-	}
-	qualified := map[string]bool{}
-	for name := range candidates {
-		if disqualified[name] {
-			continue
-		}
-		// Only helpers actually referenced from init flow (directly or
-		// through qualified helpers) matter; an unreferenced helper is
-		// dead code either way and stays program code fail-closed.
-		qualified[name] = true
-	}
-	// Keep only helpers reachable from the init region through
-	// qualified callers - an unexported helper called from nowhere
-	// stays ordinary program code.
-	reachable := map[string]bool{}
-	var mark func(region string)
-	mark = func(region string) {
-		for name := range references[region] {
-			if qualified[name] && !reachable[name] {
-				reachable[name] = true
-				mark(name)
-			}
-		}
-	}
-	mark("")
-	return reachable
+	return directCallSites(p).initOnlyHelpers()
 }
 
 // boundValueLeakFree proves that every value bound from the given root
@@ -6710,15 +6395,20 @@ func onceFieldOfDo(audited bool, info *types.Info, call *ast.CallExpr) *types.Va
 // callSiteIndex is one package's direct-call-site index: the
 // unexported plain functions only ever referenced as a direct call's
 // callee, their parameters by position, the parameters that stand in
-// a write position in their own body, and every direct call site. A
-// judgment asking what a parameter can hold resolves it through the
-// call sites' arguments (REQ-closure-shared-dynamic-state).
+// a write position in their own body, every direct call site, and the
+// bare-identifier call references by region that feed the init-only
+// helper judgment. A judgment asking what a parameter can hold resolves
+// it through the call sites' arguments (REQ-closure-shared-dynamic-state).
 type callSiteIndex struct {
-	info    *types.Info
-	params  map[*types.Var]callSiteParam
-	written map[*types.Var]bool
-	escaped map[*types.Func]bool
-	calls   map[*types.Func][]*ast.CallExpr
+	info         *types.Info
+	callable     map[string]bool
+	funcParams   map[*types.Func][]types.Object
+	params       map[*types.Var]callSiteParam
+	written      map[*types.Var]bool
+	escaped      map[*types.Func]bool
+	calls        map[*types.Func][]*ast.CallExpr
+	bareCallRefs map[string]map[string]bool
+	bareEscaped  map[string]bool
 }
 
 type callSiteParam struct {
@@ -6733,12 +6423,22 @@ type callSiteParam struct {
 // directCallSites builds the package's call-site index.
 func directCallSites(p *packages.Package) *callSiteIndex {
 	info := p.TypesInfo
-	idx := &callSiteIndex{info: info, params: map[*types.Var]callSiteParam{}, written: map[*types.Var]bool{}, escaped: map[*types.Func]bool{}, calls: map[*types.Func][]*ast.CallExpr{}}
+	idx := &callSiteIndex{
+		info:         info,
+		callable:     map[string]bool{},
+		funcParams:   map[*types.Func][]types.Object{},
+		params:       map[*types.Var]callSiteParam{},
+		written:      map[*types.Var]bool{},
+		escaped:      map[*types.Func]bool{},
+		calls:        map[*types.Func][]*ast.CallExpr{},
+		bareCallRefs: map[string]map[string]bool{},
+		bareEscaped:  map[string]bool{},
+	}
 	callable := map[*types.Func]bool{}
 	for _, file := range p.Syntax {
 		for _, decl := range file.Decls {
 			fd, ok := decl.(*ast.FuncDecl)
-			if !ok || fd.Recv != nil || fd.Name == nil || fd.Type == nil || fd.Type.Params == nil {
+			if !ok || fd.Recv != nil || fd.Name == nil || fd.Name.Name == "init" || fd.Type == nil || fd.Type.Params == nil {
 				continue
 			}
 			fn, ok := info.Defs[fd.Name].(*types.Func)
@@ -6746,22 +6446,28 @@ func directCallSites(p *packages.Package) *callSiteIndex {
 				continue
 			}
 			callable[fn] = true
+			idx.callable[fd.Name.Name] = true
 			position := 0
+			var paramObjs []types.Object
 			for _, field := range fd.Type.Params.List {
 				// The ellipsis on the field is the mark: it names
 				// exactly the trailing parameter, where the signature's
 				// own flag names the whole function.
 				_, variadic := field.Type.(*ast.Ellipsis)
 				for _, name := range field.Names {
-					if v, ok := info.Defs[name].(*types.Var); ok {
+					def := info.Defs[name]
+					paramObjs = append(paramObjs, def)
+					if v, ok := def.(*types.Var); ok {
 						idx.params[v] = callSiteParam{fn: fn, index: position, variadic: variadic}
 					}
 					position++
 				}
 				if len(field.Names) == 0 {
+					paramObjs = append(paramObjs, nil)
 					position++
 				}
 			}
+			idx.funcParams[fn] = paramObjs
 			// A parameter standing in a write position anywhere in its
 			// body — reassigned, address-taken, a range target,
 			// incremented — no longer holds its call site's argument.
@@ -6797,38 +6503,156 @@ func directCallSites(p *packages.Package) *callSiteIndex {
 			})
 		}
 	}
-	// Direct call sites per callable, and the callables referenced any
-	// other way — a function value escapes its call sites.
-	callFun := map[ast.Expr]bool{}
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			fun := unwrapCallee(call.Fun)
-			if ident, ok := fun.(*ast.Ident); ok {
-				if fn, ok := info.Uses[ident].(*types.Func); ok && callable[fn] {
-					idx.calls[fn] = append(idx.calls[fn], call)
-					callFun[ident] = true
+	if len(callable) == 0 {
+		return idx
+	}
+	// Direct call sites per callable, escaped references, and bare-Ident
+	// call references by region ("" = init, "!" = ordinary program code,
+	// helper name = candidate helper body).
+	callFun := map[*ast.Ident]bool{}
+	bareCallFun := map[*ast.Ident]bool{}
+	addBareRef := func(region, name string) {
+		if idx.bareCallRefs[region] == nil {
+			idx.bareCallRefs[region] = map[string]bool{}
+		}
+		idx.bareCallRefs[region][name] = true
+	}
+	var scanRegion func(region string, root ast.Node)
+	scanRegion = func(region string, root ast.Node) {
+		if root == nil {
+			return
+		}
+		ast.Inspect(root, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.FuncLit:
+				// A nested literal is program code whatever encloses
+				// it — its references never count as init flow.
+				if n != root {
+					if n.Type != nil {
+						scanRegion("!", n.Type)
+					}
+					if n.Body != nil {
+						scanRegion("!", n.Body)
+					}
+					return false
+				}
+			case *ast.GoStmt:
+				// A go-statement callee runs concurrently with program
+				// code even when launched from init — never init flow.
+				if n.Call != nil {
+					scanRegion("!", n.Call)
+				}
+				return false
+			case *ast.CallExpr:
+				fun := unwrapCallee(n.Fun)
+				if ident, ok := fun.(*ast.Ident); ok {
+					if fn, ok := info.Uses[ident].(*types.Func); ok && callable[fn] {
+						idx.calls[fn] = append(idx.calls[fn], n)
+						callFun[ident] = true
+						if n.Fun == ident {
+							bareCallFun[ident] = true
+							addBareRef(region, fn.Name())
+						}
+					}
+				}
+			case *ast.Ident:
+				if fn, ok := info.Uses[n].(*types.Func); ok && callable[fn] {
+					if !callFun[n] {
+						idx.escaped[fn] = true
+					}
+					if !bareCallFun[n] {
+						idx.bareEscaped[fn.Name()] = true
+					}
 				}
 			}
 			return true
 		})
 	}
 	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			ident, ok := n.(*ast.Ident)
-			if !ok || callFun[ident] {
-				return true
+		for _, decl := range file.Decls {
+			switch decl := decl.(type) {
+			case *ast.FuncDecl:
+				if decl.Recv != nil {
+					scanRegion("!", decl.Recv)
+				}
+				if decl.Type != nil {
+					scanRegion("!", decl.Type)
+				}
+				if decl.Body != nil {
+					switch {
+					case decl.Recv == nil && decl.Name != nil && decl.Name.Name == "init":
+						scanRegion("", decl.Body)
+					case decl.Recv == nil && decl.Name != nil && idx.callable[decl.Name.Name]:
+						scanRegion(decl.Name.Name, decl.Body)
+					default:
+						scanRegion("!", decl.Body)
+					}
+				}
+			default:
+				scanRegion("", decl)
 			}
-			if fn, ok := info.Uses[ident].(*types.Func); ok && callable[fn] {
-				idx.escaped[fn] = true
-			}
-			return true
-		})
+		}
 	}
 	return idx
+}
+
+// initOnlyHelpers derives the package-local fixed point of unexported plain
+// helpers reachable only from init flow via bare-identifier calls.
+func (idx *callSiteIndex) initOnlyHelpers() map[string]bool {
+	if len(idx.callable) == 0 {
+		return nil
+	}
+	disqualified := map[string]bool{}
+	for name := range idx.bareEscaped {
+		disqualified[name] = true
+	}
+	for name := range idx.bareCallRefs["!"] {
+		disqualified[name] = true
+	}
+	for changed := true; changed; {
+		changed = false
+		for caller, refs := range idx.bareCallRefs {
+			if caller == "" || caller == "!" || !disqualified[caller] {
+				continue
+			}
+			for name := range refs {
+				if !disqualified[name] {
+					disqualified[name] = true
+					changed = true
+				}
+			}
+		}
+	}
+	qualified := map[string]bool{}
+	for name := range idx.callable {
+		if !disqualified[name] {
+			qualified[name] = true
+		}
+	}
+	reachable := map[string]bool{}
+	var mark func(region string)
+	mark = func(region string) {
+		for name := range idx.bareCallRefs[region] {
+			if qualified[name] && !reachable[name] {
+				reachable[name] = true
+				mark(name)
+			}
+		}
+	}
+	mark("")
+	return reachable
+}
+
+// funcParamsOf returns the positional parameter objects of the named subset of
+// unexported plain functions.
+func (idx *callSiteIndex) funcParamsOf(names map[string]bool) map[*types.Func][]types.Object {
+	out := map[*types.Func][]types.Object{}
+	for fn, params := range idx.funcParams {
+		if names[fn.Name()] {
+			out[fn] = params
+		}
+	}
+	return out
 }
 
 // resolveParam resolves an expression that is an identifier bound to
@@ -6867,63 +6691,41 @@ func (idx *callSiteIndex) resolveParam(expr ast.Expr, seen map[*types.Var]bool, 
 	return true
 }
 
-// dataMemoVars judges which package-level sync.Map variables hold no
-// dynamic carrier: an unexported variable of type sync.Map by value
-// whose every use is the receiver of a Load, Store, or LoadOrStore
-// call whose key and value arguments have carrier-free static types —
-// a parameter of static interface type resolving through its direct
-// call sites the same way. The variable's TYPE carries dynamic
-// behavior (an interface at every key and value); its CONTENT provably
-// never does, so it is the data-only variable the invariant leaves
-// out. Any other method call — Range, Delete, Swap, CompareAndSwap,
-// CompareAndDelete, Clear — opens it; every non-call use (the address taken, the
-// variable passed or bound or rebound) is the uses walk's own mark;
-// an exported or pointer variable another package can fill is never a
-// candidate (REQ-closure-shared-dynamic-state).
-func dataMemoVars(audited bool, p *packages.Package) map[*types.Var]bool {
-	if p == nil || p.TypesInfo == nil || p.Types == nil {
-		return nil
-	}
-	info := p.TypesInfo
-	isSyncMap := func(t types.Type) bool {
-		named, ok := types.Unalias(t).(*types.Named)
-		return ok && named.Obj() != nil && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "sync" && named.Obj().Name() == "Map"
-	}
-	candidates := map[*types.Var]bool{}
-	scope := p.Types.Scope()
-	for _, name := range scope.Names() {
-		v, ok := scope.Lookup(name).(*types.Var)
-		if !ok || v.Exported() || !isSyncMap(v.Type()) {
-			continue
-		}
-		candidates[v] = true
-	}
-	if len(candidates) == 0 {
-		return nil
-	}
-	var index *callSiteIndex
-	var carrierFree func(expr ast.Expr, seen map[*types.Var]bool) bool
-	carrierFree = func(expr ast.Expr, seen map[*types.Var]bool) bool {
-		for {
-			paren, ok := expr.(*ast.ParenExpr)
-			if !ok {
-				break
-			}
-			expr = paren.X
-		}
-		t := info.TypeOf(expr)
+// judgeExpr unparens expr, evaluates leaf on its static type, and when leaf
+// requests parameter resolution (decided == false), resolves expr as an
+// unwritten direct-call parameter whose every call-site argument satisfies
+// judgeExpr under the same leaf.
+func (idx *callSiteIndex) judgeExpr(expr ast.Expr, leaf func(types.Type) (decided, ok bool)) bool {
+	var walk func(expr ast.Expr, seen map[*types.Var]bool) bool
+	walk = func(expr ast.Expr, seen map[*types.Var]bool) bool {
+		expr = unparenExpr(expr)
+		t := idx.info.TypeOf(expr)
 		if t == nil {
 			return false
 		}
-		if !typeMayCarryUnknownDynamic(audited, t, map[types.Type]bool{}) {
-			return true
+		if decided, ok := leaf(t); decided {
+			return ok
 		}
-		if index == nil {
-			index = directCallSites(p)
-		}
-		return index.resolveParam(expr, seen, carrierFree)
+		return idx.resolveParam(expr, seen, walk)
 	}
-	open := map[*types.Var]bool{}
+	return walk(expr, map[*types.Var]bool{})
+}
+
+// walkSyncVarCalls walks one package's syntax for calls on candidate
+// package-level sync variables. judgeCall reports whether a selector call on
+// candidate v names an admitted method and whether the site's arguments
+// conform. An unadmitted method call (or, when evictNonCallUses is false, a
+// non-conforming argument) evicts v from candidates; when evictNonCallUses is
+// true, any identifier use of v outside an admitted method call's receiver
+// also evicts v, and conformingSites returns the surviving admitted call
+// selectors.
+func walkSyncVarCalls(p *packages.Package, candidates map[*types.Var]bool, evictNonCallUses bool, judgeCall func(v *types.Var, sel *ast.SelectorExpr, call *ast.CallExpr) (admittedMethod, siteConforms bool)) map[*ast.SelectorExpr]bool {
+	if len(candidates) == 0 {
+		return nil
+	}
+	info := p.TypesInfo
+	receiver := map[*ast.Ident]bool{}
+	conformingBySelector := map[*ast.SelectorExpr]*types.Var{}
 	for _, file := range p.Syntax {
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
@@ -6942,32 +6744,101 @@ func dataMemoVars(audited bool, p *packages.Package) map[*types.Var]bool {
 			if !ok || !candidates[v] {
 				return true
 			}
-			// The memo set is the audited table's; every argument of an
-			// admitted operation — the key, and the value where there
-			// is one — must be carrier-free.
-			admitted := auditset.MemoMethod("Map", sel.Sel.Name)
-			for _, arg := range call.Args {
-				if !admitted {
-					break
-				}
-				admitted = carrierFree(arg, map[*types.Var]bool{})
+			admittedMethod, siteConforms := judgeCall(v, sel, call)
+			if !admittedMethod {
+				delete(candidates, v)
+				return true
 			}
-			if !admitted {
-				open[v] = true
+			receiver[ident] = true
+			if siteConforms {
+				conformingBySelector[sel] = v
+			} else if !evictNonCallUses {
+				delete(candidates, v)
 			}
 			return true
 		})
 	}
-	// Every use of the variable that is not one of these calls — the
-	// address taken, a bind, a rebind, a method value, an argument — is
-	// the uses walk's own mark: it needs no census here.
-	memos := map[*types.Var]bool{}
-	for v := range candidates {
-		if !open[v] {
-			memos[v] = true
+	if evictNonCallUses {
+		for _, file := range p.Syntax {
+			ast.Inspect(file, func(n ast.Node) bool {
+				ident, ok := n.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				v, ok := info.Uses[ident].(*types.Var)
+				if ok && candidates[v] && !receiver[ident] {
+					delete(candidates, v)
+				}
+				return true
+			})
 		}
 	}
-	return memos
+	calls := map[*ast.SelectorExpr]bool{}
+	for sel, v := range conformingBySelector {
+		if candidates[v] {
+			calls[sel] = true
+		}
+	}
+	return calls
+}
+
+// dataMemoVars judges which package-level sync.Map variables hold no
+// dynamic carrier: an unexported variable of type sync.Map by value
+// whose every use is the receiver of a Load, Store, or LoadOrStore
+// call whose key and value arguments have carrier-free static types —
+// a parameter of static interface type resolving through its direct
+// call sites the same way. The variable's TYPE carries dynamic
+// behavior (an interface at every key and value); its CONTENT provably
+// never does, so it is the data-only variable the invariant leaves
+// out. Any other method call — Range, Delete, Swap, CompareAndSwap,
+// CompareAndDelete, Clear — opens it; every non-call use (the address taken, the
+// variable passed or bound or rebound) is the uses walk's own mark;
+// an exported or pointer variable another package can fill is never a
+// candidate (REQ-closure-shared-dynamic-state).
+func dataMemoVars(audited bool, p *packages.Package) map[*types.Var]bool {
+	if p == nil || p.TypesInfo == nil || p.Types == nil {
+		return nil
+	}
+	isSyncMap := func(t types.Type) bool {
+		named, ok := types.Unalias(t).(*types.Named)
+		return ok && named.Obj() != nil && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "sync" && named.Obj().Name() == "Map"
+	}
+	candidates := map[*types.Var]bool{}
+	scope := p.Types.Scope()
+	for _, name := range scope.Names() {
+		v, ok := scope.Lookup(name).(*types.Var)
+		if !ok || v.Exported() || !isSyncMap(v.Type()) {
+			continue
+		}
+		candidates[v] = true
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	var index *callSiteIndex
+	carrierFree := func(expr ast.Expr) bool {
+		if index == nil {
+			index = directCallSites(p)
+		}
+		return index.judgeExpr(expr, func(t types.Type) (bool, bool) {
+			if !typeMayCarryUnknownDynamic(audited, t, map[types.Type]bool{}) {
+				return true, true
+			}
+			return false, false
+		})
+	}
+	walkSyncVarCalls(p, candidates, false, func(_ *types.Var, sel *ast.SelectorExpr, call *ast.CallExpr) (bool, bool) {
+		if !auditset.MemoMethod("Map", sel.Sel.Name) {
+			return false, false
+		}
+		for _, arg := range call.Args {
+			if !carrierFree(arg) {
+				return true, false
+			}
+		}
+		return true, true
+	})
+	return candidates
 }
 
 // closedInterfaceFields judges, per unexported interface-typed field of
@@ -6990,11 +6861,6 @@ func closedInterfaceFields(p *packages.Package) map[*types.Var][]string {
 		return nil
 	}
 	info := p.TypesInfo
-	// Plain unexported functions and their parameters.
-	type paramKey struct {
-		fn    *types.Func
-		index int
-	}
 	// candidateField reports whether a field variable is one this
 	// judgment tracks: an unexported interface-typed field declared in
 	// this package — the one identity every store and every dispatch
@@ -7027,35 +6893,22 @@ func closedInterfaceFields(p *packages.Package) map[*types.Var][]string {
 	index := directCallSites(p)
 	// memberTypes resolves a stored expression to its member names, or
 	// reports the field open.
-	var memberTypes func(expr ast.Expr, seen map[*types.Var]bool) ([]string, bool)
-	memberTypes = func(expr ast.Expr, seen map[*types.Var]bool) ([]string, bool) {
-		for {
-			paren, ok := expr.(*ast.ParenExpr)
-			if !ok {
-				break
+	memberTypes := func(expr ast.Expr) ([]string, bool) {
+		var members []string
+		ok := index.judgeExpr(expr, func(t types.Type) (bool, bool) {
+			if _, isIface := types.Unalias(t).Underlying().(*types.Interface); isIface {
+				return false, false
 			}
-			expr = paren.X
-		}
-		t := info.TypeOf(expr)
-		if t == nil {
-			return nil, false
-		}
-		if _, isIface := types.Unalias(t).Underlying().(*types.Interface); !isIface {
 			concrete := types.Unalias(t)
 			if ptr, ok := concrete.(*types.Pointer); ok {
 				concrete = types.Unalias(ptr.Elem())
 			}
 			named, ok := concrete.(*types.Named)
 			if !ok || named.Obj() == nil || named.Obj().Pkg() != p.Types {
-				return nil, false
+				return true, false
 			}
-			return []string{named.Obj().Name()}, true
-		}
-		var members []string
-		ok := index.resolveParam(expr, seen, func(arg ast.Expr, seen map[*types.Var]bool) bool {
-			more, ok := memberTypes(arg, seen)
-			members = append(members, more...)
-			return ok
+			members = append(members, named.Obj().Name())
+			return true, true
 		})
 		return members, ok
 	}
@@ -7081,7 +6934,7 @@ func closedInterfaceFields(p *packages.Package) map[*types.Var][]string {
 		if !candidateField(field) || open[field] {
 			return
 		}
-		more, ok := memberTypes(value, map[*types.Var]bool{})
+		more, ok := memberTypes(value)
 		if !ok {
 			open[field] = true
 			delete(members, field)
@@ -8183,72 +8036,24 @@ func provenSharedPools(audited bool, p *packages.Package) (proven map[*types.Var
 	if len(proven) == 0 {
 		return proven, calls
 	}
-	// One walk resolves every audited Get/Put call on a candidate: the
-	// receiver idents (the only appearances that do not evict) and the
-	// per-site conformance verdict. The receiver shape is exactly what
-	// the admission gates consult — an unparenthesized selector on an
-	// unparenthesized ident — judged here once, so a shape a gate
-	// would not admit evicts, fail-closed.
-	receiver := map[*ast.Ident]bool{}
-	type poolCall struct {
-		variable *types.Var
-		conforms bool
+	candidates := make(map[*types.Var]bool, len(proven))
+	for v := range proven {
+		candidates[v] = true
 	}
-	sites := map[*ast.SelectorExpr]poolCall{}
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			ident, ok := sel.X.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			selection, ok := p.TypesInfo.Selections[sel]
-			if !ok || selection.Kind() != types.MethodVal {
-				return true
-			}
-			fn, ok := selection.Obj().(*types.Func)
-			if !ok || !auditedPooling(audited, fn) {
-				return true
-			}
-			receiver[ident] = true
-			variable, ok := p.TypesInfo.Uses[ident].(*types.Var)
-			if !ok {
-				return true
-			}
-			if content, candidate := proven[variable]; candidate {
-				sites[sel] = poolCall{variable: variable, conforms: provenPoolCallConforms(p, fn, call, content)}
-			}
-			return true
-		})
-	}
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			ident, ok := n.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			variable, ok := p.TypesInfo.Uses[ident].(*types.Var)
-			if !ok {
-				return true
-			}
-			if _, candidate := proven[variable]; candidate && !receiver[ident] {
-				delete(proven, variable)
-			}
-			return true
-		})
-	}
-	// Admitted calls are derived after eviction so an evicted pool's
-	// sites never admit.
-	for sel, site := range sites {
-		if _, stands := proven[site.variable]; stands && site.conforms {
-			calls[sel] = true
+	calls = walkSyncVarCalls(p, candidates, true, func(v *types.Var, sel *ast.SelectorExpr, call *ast.CallExpr) (bool, bool) {
+		selection, ok := p.TypesInfo.Selections[sel]
+		if !ok || selection.Kind() != types.MethodVal {
+			return false, false
+		}
+		fn, ok := selection.Obj().(*types.Func)
+		if !ok || !auditedPooling(audited, fn) {
+			return false, false
+		}
+		return true, provenPoolCallConforms(p, fn, call, proven[v])
+	})
+	for v := range proven {
+		if !candidates[v] {
+			delete(proven, v)
 		}
 	}
 	return proven, calls
@@ -8950,47 +8755,18 @@ func rangeBindsAlias(t types.Type) bool {
 // and by-value composites of them are copies — reading them cannot
 // reach the shared cell (REQ-closure-shared-dynamic-state).
 func typeHandsOutDynamicAlias(audited bool, t types.Type, seen map[types.Type]bool) bool {
-	if t == nil || seen[t] {
-		return false
-	}
-	seen[t] = true
-	switch t := types.Unalias(t).(type) {
-	case *types.Basic:
-		return t.Kind() == types.UnsafePointer
-	case *types.Interface:
-		return true
-	case *types.Chan:
-		return typeMayCarryUnknownDynamic(audited, t.Elem(), make(map[types.Type]bool))
-	case *types.Pointer:
-		return typeMayCarryUnknownDynamic(audited, t.Elem(), make(map[types.Type]bool))
-	case *types.Map:
-		return typeMayCarryUnknownDynamic(audited, t.Key(), make(map[types.Type]bool)) || typeMayCarryUnknownDynamic(audited, t.Elem(), make(map[types.Type]bool))
-	case *types.Slice:
-		return typeMayCarryUnknownDynamic(audited, t.Elem(), make(map[types.Type]bool))
-	case *types.Named:
-		// The audited atomic transparency: the toolchain's atomic
-		// pointer reads as *T, so it hands out an alias exactly when a
-		// *T read would — the Pointer arm's judgment of T.
-		if elem, ok := closure.AuditedAtomicPointerElem(audited, t); ok {
-			return typeMayCarryUnknownDynamic(audited, elem, make(map[types.Type]bool))
+	return closure.WalkDynamicCarrier(audited, t, seen, closure.CarrierPolicyAlias)
+}
+
+func eachCompositeLitValue(lit *ast.CompositeLit, fn func(ast.Expr) bool) bool {
+	for _, elt := range lit.Elts {
+		value := elt
+		if kv, ok := elt.(*ast.KeyValueExpr); ok {
+			value = kv.Value
 		}
-		return typeHandsOutDynamicAlias(audited, t.Underlying(), seen)
-	case *types.TypeParam:
-		return typeHandsOutDynamicAlias(audited, t.Constraint(), seen)
-	case *types.Struct:
-		for i := 0; i < t.NumFields(); i++ {
-			if typeHandsOutDynamicAlias(audited, t.Field(i).Type(), seen) {
-				return true
-			}
-		}
-	case *types.Array:
-		return typeHandsOutDynamicAlias(audited, t.Elem(), seen)
-	case *types.Tuple:
-		for i := 0; i < t.Len(); i++ {
-			if typeHandsOutDynamicAlias(audited, t.At(i).Type(), seen) {
-				return true
-			}
+		if !fn(value) {
+			return false
 		}
 	}
-	return false
+	return true
 }

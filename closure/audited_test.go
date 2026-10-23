@@ -1283,11 +1283,11 @@ func TestUnauditedToolchainDropsAdmissions(t *testing.T) {
 	if isSourceOnlyStandardPackage(false, "strings") || isSourceOnlyStandardPackage(false, "math/big") {
 		t.Error("isSourceOnlyStandardPackage admits strings or math/big on an unaudited toolchain")
 	}
-	if auditedSyncSymbol(false, "sync", "Lock") {
-		t.Error("auditedSyncSymbol admits sync.Lock on an unaudited toolchain")
+	if auditedStandardSymbol(false, "sync", "Lock") {
+		t.Error("auditedStandardSymbol admits sync.Lock on an unaudited toolchain")
 	}
-	if auditedPoolSymbol(false, "sync", "Get") {
-		t.Error("auditedPoolSymbol admits sync.Get on an unaudited toolchain")
+	if auditedStandardSymbol(false, "sync", "Get") {
+		t.Error("auditedStandardSymbol admits sync.Get on an unaudited toolchain")
 	}
 	if classBPureStandard(false, "reflect", "TypeOf") {
 		t.Error("classBPureStandard admits reflect.TypeOf on an unaudited toolchain")

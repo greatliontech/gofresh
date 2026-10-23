@@ -4,6 +4,7 @@ import (
 	"context"
 	"go/types"
 	"sort"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -651,37 +652,59 @@ func rootMayReceiveUnknownDynamic(audited bool, prog *program, root *ssa.Functio
 	if root == nil || root.Signature == nil {
 		return true
 	}
-	// A parameterized subject's openness is decided by its constraints,
-	// consulted on the type-parameter list itself - a zero-parameter
-	// generic (func Value[T any]() int) reads closed through Params
-	// alone, so the params walk below can never be the whole answer. A
-	// constraint that provably bounds its type set away from dynamic
-	// carriers closes the caller's instantiation choice: every in-binary
-	// instantiation then dispatches concretely and roots the walk.
-	// Anything unbounded (any, comparable, a method-bearing constraint)
-	// keeps the forced open world
-	// (REQ-closure-analysis's parameterized-subject arm).
-	if parameterizedBody(root) && !typeParamListsBoundAwayFromDynamic(audited, root) {
-		return true
+	var extraTypeParams *types.TypeParamList
+	if root.Signature.TypeParams() == nil {
+		extraTypeParams = root.TypeParams()
 	}
-	if subjectRunsThroughHarness(prog, root) && isHarnessSubjectSignature(root.Signature) {
-		return false
+	return SignatureOpenWorldTerm(audited, root.Signature, extraTypeParams, subjectRunsThroughHarness(prog, root), CarrierPolicyClosure) != ""
+}
+
+// SignatureOpenWorldTerm names the first term of a signature that confers
+// openness on its subject — a type parameter whose constraint does not bound
+// its type set away from dynamic carriers, or a receiver or parameter whose
+// type carries dynamic reach under policy — and returns "" for a closed
+// signature (REQ-closure-analysis, REQ-closure-refusal-channels).
+func SignatureOpenWorldTerm(audited bool, sig *types.Signature, extraTypeParams *types.TypeParamList, allowHarnessSignature bool, policy CarrierWalkPolicy) string {
+	if sig == nil {
+		return "unresolved signature"
+	}
+	for _, list := range []*types.TypeParamList{extraTypeParams, sig.TypeParams(), sig.RecvTypeParams()} {
+		for i := 0; list != nil && i < list.Len(); i++ {
+			if param := list.At(i); !TypeParamBoundsAwayFromDynamic(audited, param) {
+				return "type parameter " + param.Obj().Name() + " constrained by " + types.TypeString(param.Constraint(), packageNameQualifier)
+			}
+		}
+	}
+	if allowHarnessSignature && isHarnessSubjectSignature(sig) {
+		return ""
 	}
 	// One fresh map per parameter: sharing across parameters would let
 	// one walk's marks short-circuit another's (a constraint interface
 	// marked by a bounding evaluation reading clean as a later value
 	// type); within one parameter's evaluation the map is shared - the
 	// cycle guard for recursive constraints.
-	if recv := root.Signature.Recv(); recv != nil && typeMayCarryDynamic(audited, recv.Type(), make(map[types.Type]bool)) {
-		return true
+	if recv := sig.Recv(); recv != nil && WalkDynamicCarrier(audited, recv.Type(), make(map[types.Type]bool), policy) {
+		return "receiver " + types.TypeString(recv.Type(), packageNameQualifier)
 	}
-	params := root.Signature.Params()
+	params := sig.Params()
 	for i := 0; params != nil && i < params.Len(); i++ {
-		if typeMayCarryDynamic(audited, params.At(i).Type(), make(map[types.Type]bool)) {
-			return true
+		param := params.At(i)
+		if WalkDynamicCarrier(audited, param.Type(), make(map[types.Type]bool), policy) {
+			name := param.Name()
+			if name == "" || name == "_" {
+				name = "#" + strconv.Itoa(i+1)
+			}
+			return "parameter " + name + " " + types.TypeString(param.Type(), packageNameQualifier)
 		}
 	}
-	return false
+	return ""
+}
+
+func packageNameQualifier(pkg *types.Package) string {
+	if pkg == nil {
+		return ""
+	}
+	return pkg.Name()
 }
 
 func isHarnessSubjectSignature(sig *types.Signature) bool {
@@ -729,56 +752,88 @@ func AuditedAtomicPointerElem(audited bool, t *types.Named) (types.Type, bool) {
 	return t.TypeArgs().At(0), true
 }
 
-func typeMayCarryDynamic(audited bool, t types.Type, seen map[types.Type]bool) bool {
+// CarrierWalkPolicy parameterizes WalkDynamicCarrier across the three carrier
+// walk surfaces:
+//   - CarrierPolicyClosure: the closure tier's carries-dynamic walk
+//     (typeMayCarryDynamic), sharing seen into TypeParam constraint bounds.
+//   - CarrierPolicyConsumer: the consumer tier's carries-dynamic walk
+//     (typeMayCarryUnknownDynamic), entering TypeParam constraint bounds with
+//     a fresh seen map.
+//   - CarrierPolicyAlias: the consumer tier's alias-handing walk
+//     (typeHandsOutDynamicAlias), where Signature is not an alias, TypeParam
+//     recurses into t.Constraint() with seen, and reference-header elements
+//     delegate to CarrierPolicyConsumer with a fresh seen map.
+type CarrierWalkPolicy uint8
+
+const (
+	CarrierPolicyClosure CarrierWalkPolicy = iota
+	CarrierPolicyConsumer
+	CarrierPolicyAlias
+)
+
+// WalkDynamicCarrier is the one structural carrier walk shared by the closure
+// and consumer tiers (REQ-closure-analysis, REQ-closure-shared-dynamic-state).
+func WalkDynamicCarrier(audited bool, t types.Type, seen map[types.Type]bool, policy CarrierWalkPolicy) bool {
 	if t == nil || seen[t] {
 		return false
 	}
 	seen[t] = true
+	aliasMode := policy == CarrierPolicyAlias
+	refElem := func(elem types.Type) bool {
+		if aliasMode {
+			return WalkDynamicCarrier(audited, elem, make(map[types.Type]bool), CarrierPolicyConsumer)
+		}
+		return WalkDynamicCarrier(audited, elem, seen, policy)
+	}
 	switch t := types.Unalias(t).(type) {
 	case *types.Basic:
 		return t.Kind() == types.UnsafePointer
-	case *types.Interface, *types.Signature:
+	case *types.Interface:
 		return true
+	case *types.Signature:
+		return !aliasMode
 	case *types.TypeParam:
-		// The evaluation's own map is shared into the bounding walk: the
-		// marks placed at each walk's entry are the cycle guards for
-		// self- and mutually-referential constraints (~[]A on A is legal
-		// Go). The interface-mark cut decides the recursive cases -
-		// pessimistically, not-bounded, so a recursive constraint reads
-		// open; the type-parameter mark's clean cut only governs term
-		// structure inside one evaluation, where a carrier-free cycle
-		// path adds no carrier. Cross-parameter decoupling lives at the
-		// walk entries, which hand each parameter a fresh map.
-		return !constraintBoundsAwayFromDynamic(audited, t.Constraint(), seen)
+		switch policy {
+		case CarrierPolicyClosure:
+			return !constraintBoundsAwayFromDynamic(audited, t.Constraint(), seen)
+		case CarrierPolicyConsumer:
+			return !TypeParamBoundsAwayFromDynamic(audited, t)
+		case CarrierPolicyAlias:
+			return WalkDynamicCarrier(audited, t.Constraint(), seen, policy)
+		}
 	case *types.Named:
 		if elem, ok := AuditedAtomicPointerElem(audited, t); ok {
-			return typeMayCarryDynamic(audited, elem, seen)
+			return refElem(elem)
 		}
-		return typeMayCarryDynamic(audited, t.Underlying(), seen)
+		return WalkDynamicCarrier(audited, t.Underlying(), seen, policy)
 	case *types.Pointer:
-		return typeMayCarryDynamic(audited, t.Elem(), seen)
+		return refElem(t.Elem())
 	case *types.Slice:
-		return typeMayCarryDynamic(audited, t.Elem(), seen)
-	case *types.Array:
-		return typeMayCarryDynamic(audited, t.Elem(), seen)
-	case *types.Map:
-		return typeMayCarryDynamic(audited, t.Key(), seen) || typeMayCarryDynamic(audited, t.Elem(), seen)
+		return refElem(t.Elem())
 	case *types.Chan:
-		return typeMayCarryDynamic(audited, t.Elem(), seen)
+		return refElem(t.Elem())
+	case *types.Map:
+		return refElem(t.Key()) || refElem(t.Elem())
+	case *types.Array:
+		return WalkDynamicCarrier(audited, t.Elem(), seen, policy)
 	case *types.Struct:
 		for i := 0; i < t.NumFields(); i++ {
-			if typeMayCarryDynamic(audited, t.Field(i).Type(), seen) {
+			if WalkDynamicCarrier(audited, t.Field(i).Type(), seen, policy) {
 				return true
 			}
 		}
 	case *types.Tuple:
 		for i := 0; i < t.Len(); i++ {
-			if typeMayCarryDynamic(audited, t.At(i).Type(), seen) {
+			if WalkDynamicCarrier(audited, t.At(i).Type(), seen, policy) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func typeMayCarryDynamic(audited bool, t types.Type, seen map[types.Type]bool) bool {
+	return WalkDynamicCarrier(audited, t, seen, CarrierPolicyClosure)
 }
 
 // TypeParamBoundsAwayFromDynamic reports whether one type parameter's
@@ -791,20 +846,6 @@ func TypeParamBoundsAwayFromDynamic(audited bool, tp *types.TypeParam) bool {
 		return false
 	}
 	return constraintBoundsAwayFromDynamic(audited, tp.Constraint(), make(map[types.Type]bool))
-}
-
-// typeParamListsBoundAwayFromDynamic reports whether every type parameter
-// of fn (function and receiver lists both) carries a constraint that
-// provably bounds its type set away from dynamic carriers.
-func typeParamListsBoundAwayFromDynamic(audited bool, fn *ssa.Function) bool {
-	for _, list := range []*types.TypeParamList{fn.TypeParams(), fn.Signature.RecvTypeParams()} {
-		for i := 0; list != nil && i < list.Len(); i++ {
-			if !constraintBoundsAwayFromDynamic(audited, list.At(i).Constraint(), make(map[types.Type]bool)) {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 // constraintBoundsAwayFromDynamic reports whether a type parameter's

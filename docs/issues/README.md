@@ -24,20 +24,15 @@ verification. The doc is deleted when its obligation resolves (git holds history
 | [per-file-memos-one-shape](per-file-memos-one-shape.md) | share memo mechanics while retaining each payload's complete dependency scope | tooling-redesign 7.8 |
 | [binary-roots-single-mask-union](binary-roots-single-mask-union.md) | assess an all-roots union without discarding required per-subject attribution or existing release | tooling-redesign 7.8 |
 | [discharge-reason-channel-one-source](discharge-reason-channel-one-source.md) | carry semantic discharge channels and render their reasons once | tooling-redesign 7.1 |
-| [unify-carrier-walks](unify-carrier-walks.md) | share structural carrier traversal while preserving TypeParam and alias policies | tooling-redesign 7.8 |
 | [grpc-runtime-memo-and-registry-discharges](grpc-runtime-memo-and-registry-discharges.md) | re-establish the historical memo and channelz cases under distinct immutability and execution-model arguments | tooling-redesign 7.8 |
 | [attestation-keyed-record](attestation-keyed-record.md) | consolidate positive-assertion discharge plumbing; GeneralExecution supplies no third positive assertion | tooling-redesign 7.1 |
-| [registration-audit-walk-helper-unification](registration-audit-walk-helper-unification.md) | share registration shape walks without merging their proof gates | tooling-redesign 7.8 |
 | [fixture-tier-parallelism](fixture-tier-parallelism.md) | require measured benefit and explicit shared-state ownership before broader fixture scheduling | tooling-redesign 7.7 |
 | [memo-scope-axes](memo-scope-axes.md) | remaining memo/read/result folds and the unfulfilled per-run standard-digest cost question, without cross-generation sharing | tooling-redesign 7.8 |
 | [attribution-mask-width](attribution-mask-width.md) | measure current slice cost before changing mask width, memory or cancellation granularity | tooling-redesign 7.7 |
 | [net-url-parse-godebug-channel](net-url-parse-godebug-channel.md) | parsing stays conservative until runtime configuration and in-process mutation have sound authority | tooling-redesign 7.8 |
 | [dependency-nested-closures-outside-the-drain](dependency-nested-closures-outside-the-drain.md) | cached dependency bodies are scanned; isolate the nested-function-value precision residual | tooling-redesign 7.8 |
-| [closed-value-ladders-one-source](closed-value-ladders-one-source.md) | consolidate closure and target traversals; the collector is already gated by closedness | tooling-redesign 7.8 |
 | [invoke-targets-narrowed-by-operand](invoke-targets-narrowed-by-operand.md) | prove complete operand/method-set bounds before narrowing an invoke's conservative projection | tooling-redesign 7.8 |
-| [sync-variable-judgments-one-shape](sync-variable-judgments-one-shape.md) | share sync-variable traversal while preserving pool and carrier-free memo proof conditions | tooling-redesign 7.8 |
 | [immutable-after-construction-objects](immutable-after-construction-objects.md) | object immutability needs external-alias closure, not only private fields and read-only methods | tooling-redesign 7.8 |
-| [direct-call-site-index-one-source](direct-call-site-index-one-source.md) | fold remaining init-helper provenance beside the existing shared call-site index | tooling-redesign 7.8 |
 | [runtime-input-entries-implicit-context](runtime-input-entries-implicit-context.md) | close FromState/adoption/conversion/merge context gaps; Describe and Paths do not spawn go env | tooling-redesign 5.5 |
 | [root-directory-input-with-empty-manifest](root-directory-input-with-empty-manifest.md) | preserve historical slash-open reports and conservative classification; caller attribution needs actual provenance | tooling-redesign 8.3 |
 | [iterator-calls-and-std-invokes-open-the-closure](iterator-calls-and-std-invokes-open-the-closure.md) | exact SplitSeq/SHA invoke cases unresolved; general positive iterator support already exists | tooling-redesign 7.8 |

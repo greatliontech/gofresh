@@ -1019,46 +1019,6 @@ func auditedLinknamesOnly(audited bool, text string) bool {
 	}
 }
 
-// auditedSyncSymbol reports whether a sync-package symbol is in the
-// audited synchronization set: the mutex types and their lock
-// operations, and Once's Do, whose state cannot change dispatch and
-// which acquire no process-external state (the function Do runs is
-// the caller's own, judged where written). sync exports no top-level functions by these
-// names, so the method names are unambiguous. Grows only by source
-// audit (REQ-closure-shared-dynamic-state-audited-discharges).
-func auditedSyncSymbol(audited bool, pkgPath, name string) bool {
-	return audited && pkgPath == "sync" && auditset.SyncName(name)
-}
-
-// auditedPoolSymbol reports whether a sync-package symbol is in the
-// audited pooling set: the pool type and its Get and Put operations.
-// This admission is UNCONDITIONAL — it concerns runtime-input
-// observability alone: Get and Put touch only process memory fed by the
-// analyzed program, so they introduce no external input channel
-// whatever the execution schedule. Cross-subject state through pool
-// contents (sibling subjects sharing a process) is a different hazard,
-// priced by the shared-dynamic-state judgment, whose pooling discharge
-// is gated on the caller's single-subject-process attestation
-// (WithSingleSubjectExecution) — not here. The values passed and
-// produced keep their own classifications. sync exports no top-level
-// functions by these names, so the method names are unambiguous. Grows
-// only by source audit (REQ-closure-shared-dynamic-state-audited-discharges).
-func auditedPoolSymbol(audited bool, pkgPath, name string) bool {
-	return audited && pkgPath == "sync" && auditset.PoolName(name)
-}
-
-// auditedMemoSymbol reports whether a sync-package symbol is in the
-// audited memo set: sync.Map and its Load, Store, and LoadOrStore
-// operations, process-memory reads and writes fed by the analyzed
-// program alone, admitted at the effect classification tiers; the
-// values stored and produced keep their own classifications, and the
-// shared-dynamic-state judgment is the data memo's. sync exports no
-// top-level functions by these names. Grows only by source audit
-// (REQ-closure-shared-dynamic-state-audited-discharges).
-func auditedMemoSymbol(audited bool, pkgPath, name string) bool {
-	return audited && pkgPath == "sync" && auditset.MemoName(name)
-}
-
 func packageHasClassifiedExternalAPI(pkgPath string) bool {
 	return classBPackages[pkgPath]
 }

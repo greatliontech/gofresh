@@ -195,7 +195,7 @@ func TestEffectScanScopeDiscriminatesContentAndPolicy(t *testing.T) {
 // ordinary fail-closed classification — the same posture as an
 // unlisted toolchain — at the admission functions themselves.
 func TestUnauditedSelectionDisablesAdmissions(t *testing.T) {
-	if auditedSyncSymbol(true, "sync", "Lock") == auditedSyncSymbol(false, "sync", "Lock") {
+	if auditedStandardSymbol(true, "sync", "Lock") == auditedStandardSymbol(false, "sync", "Lock") {
 		t.Error("sync admission ignores the selection verdict")
 	}
 	if classBPureStandard(true, "fmt", "Sprintf") == classBPureStandard(false, "fmt", "Sprintf") {

@@ -494,11 +494,11 @@ func classBPureStandard(audited bool, pkgPath, name string) bool {
 // auditedStandardSymbol is the one ladder every tier consults for a
 // standard package's symbol-level admissions — the class-B pure
 // operations (every per-package symbol table, reflect's included) and
-// the audited sync, pool, and memo symbols — so a further table can
-// never be added at two consulting sites and missed at the third.
+// the audited sync surface (synchronization, pooling, and memo sets) —
+// so a further table can never be added at two consulting sites and
+// missed at the third.
 func auditedStandardSymbol(audited bool, pkgPath, name string) bool {
-	return classBPureStandard(audited, pkgPath, name) || auditedSyncSymbol(audited, pkgPath, name) ||
-		auditedPoolSymbol(audited, pkgPath, name) || auditedMemoSymbol(audited, pkgPath, name)
+	return classBPureStandard(audited, pkgPath, name) || (audited && pkgPath == "sync" && auditset.SyncSurfaceName(name))
 }
 
 // fmtFprintFamily names fmt's writer-first print operations — the one

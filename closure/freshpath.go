@@ -1064,26 +1064,50 @@ func subjectClosedDynamicValue(value ssa.Value, seen map[ssa.Value]bool, fp *fre
 // operand order, fail-closed, never a wrong acceptance — gray only ever
 // forces false and every combinator is conjunctive.
 func closedDynamicValue(value ssa.Value, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+	return walkDynamicValue(value, nil, seen, done, fp)
+}
+
+// walkDynamicValue is the single SSA shape ladder serving both the
+// closed-value judgment (targets == nil, with a gray seen set and done memo)
+// and the function-target collector (targets != nil, visited after
+// subjectClosedDynamicValue has verified closure).
+func walkDynamicValue(value ssa.Value, targets map[*ssa.Function]bool, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
 	if value == nil {
 		return false
 	}
-	if r, ok := done[value]; ok {
-		return r
+	collecting := targets != nil
+	if collecting {
+		if seen[value] {
+			return true
+		}
+		seen[value] = true
+	} else {
+		if r, ok := done[value]; ok {
+			return r
+		}
+		if seen[value] {
+			return false
+		}
+		seen[value] = true
+		defer delete(seen, value)
 	}
-	if seen[value] {
-		return false
+	r := walkDynamicValueUncached(value, targets, seen, done, fp)
+	if !collecting {
+		done[value] = r
 	}
-	seen[value] = true
-	defer delete(seen, value)
-	r := closedDynamicValueUncached(value, seen, done, fp)
-	done[value] = r
 	return r
 }
 
-func closedDynamicValueUncached(value ssa.Value, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+func walkDynamicValueUncached(value ssa.Value, targets map[*ssa.Function]bool, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+	collecting := targets != nil
+	recurse := func(next ssa.Value) bool {
+		return walkDynamicValue(next, targets, seen, done, fp)
+	}
 	switch v := value.(type) {
-	case *ssa.Builtin, *ssa.Const:
-		return true
+	case *ssa.Builtin:
+		return !collecting
+	case *ssa.Const:
+		return !collecting || v.Value == nil
 	case *ssa.MakeInterface:
 		// An interface value pins its dynamic type at this instruction —
 		// closed for dispatch enumeration. A FUNCTION laundered through an
@@ -1091,8 +1115,8 @@ func closedDynamicValueUncached(value ssa.Value, seen, done map[ssa.Value]bool, 
 		// function (its contents must be asserted back out first), so the
 		// walk here is judging the function value's provenance, and the
 		// interface hop must not wash the wrapper obligation — recurse.
-		if _, isFunc := types.Unalias(v.X.Type()).Underlying().(*types.Signature); isFunc {
-			return closedDynamicValue(v.X, seen, done, fp)
+		if _, isFunc := types.Unalias(v.X.Type()).Underlying().(*types.Signature); isFunc || collecting {
+			return recurse(v.X)
 		}
 		return true
 	case *ssa.Function:
@@ -1100,49 +1124,72 @@ func closedDynamicValueUncached(value ssa.Value, seen, done map[ssa.Value]bool, 
 		// its receiver arrives at call sites the value walk cannot see.
 		// Direct static calls to a thunk judge the receiver argument at
 		// the site instead and never consult the value walk for it.
-		return !(syntheticInterfaceMethodWrapper(v) && len(v.FreeVars) == 0)
+		if syntheticInterfaceMethodWrapper(v) && len(v.FreeVars) == 0 {
+			return false
+		}
+		if collecting {
+			targets[v] = true
+		}
+		return true
 	case *ssa.MakeClosure:
 		// A synthetic interface-method bound wrapper performs the real
 		// dispatch on its captured receiver inside a body no walk scans:
 		// the closure value is closed only through its bindings, whatever
 		// later carries it to a call site.
-		if fn, ok := v.Fn.(*ssa.Function); ok && syntheticInterfaceMethodWrapper(fn) {
-			for _, binding := range v.Bindings {
-				if !closedDynamicValue(binding, seen, done, fp) {
-					return false
+		fn, ok := v.Fn.(*ssa.Function)
+		if !collecting {
+			if ok && syntheticInterfaceMethodWrapper(fn) {
+				for _, binding := range v.Bindings {
+					if !recurse(binding) {
+						return false
+					}
 				}
 			}
+			return true
 		}
+		if !ok {
+			return false
+		}
+		targets[fn] = true
 		return true
 	case *ssa.ChangeInterface:
-		return closedDynamicValue(v.X, seen, done, fp)
+		return recurse(v.X)
 	case *ssa.TypeAssert:
-		return closedDynamicValue(v.X, seen, done, fp)
+		return recurse(v.X)
 	case *ssa.ChangeType:
-		return closedDynamicValue(v.X, seen, done, fp)
+		return recurse(v.X)
 	case *ssa.Convert:
-		return closedDynamicValue(v.X, seen, done, fp)
+		return recurse(v.X)
 	case *ssa.Call:
 		// A gate-passing static call into the property harness yields a
 		// closed value: the harness wraps exactly the closed callables
 		// the boundary gate judged (rapid.MakeCheck's returned callback
 		// feeding the subtest driver is the driving shape). Every other
 		// call result stays open.
-		return propertyHarnessClosedResult(v, fp)
+		return !collecting && propertyHarnessClosedResult(v, fp)
 	case *ssa.Phi:
 		if len(v.Edges) == 0 {
 			return false
 		}
 		for _, edge := range v.Edges {
-			if !closedDynamicValue(edge, seen, done, fp) {
+			if !recurse(edge) {
 				return false
 			}
 		}
 		return true
 	case *ssa.Extract:
-		return closedDynamicValue(v.Tuple, seen, done, fp)
+		return recurse(v.Tuple)
 	case *ssa.Parameter:
-		return subjectClosedParameter(v, seen, done, fp)
+		args, ok := attributedParameterArgs(v, fp)
+		if !ok {
+			return false
+		}
+		for _, arg := range args {
+			if !recurse(arg) {
+				return false
+			}
+		}
+		return true
 	case *ssa.UnOp:
 		// A load from a closed cell: the recursive local closure's
 		// idiom (`var visit func(); visit = func() { visit() }`) calls
@@ -1151,7 +1198,17 @@ func closedDynamicValueUncached(value ssa.Value, seen, done map[ssa.Value]bool, 
 			return false
 		}
 		cell := cellOf(v.X, map[ssa.Value]bool{})
-		return cell != nil && closedCell(cell, seen, done, fp)
+		if cell == nil {
+			return false
+		}
+		if !collecting {
+			if seen[cell] {
+				return false
+			}
+			seen[cell] = true
+			defer delete(seen, cell)
+		}
+		return walkCellReferrers(cell, map[ssa.Value]bool{}, recurse)
 	default:
 		return false
 	}
@@ -1210,27 +1267,10 @@ func closureCreations(fn *ssa.Function) []*ssa.MakeClosure {
 	return creations
 }
 
-// closedCell judges a local allocation closed for dispatch: every
-// referrer of the cell — and of every free variable a closure binds to
-// it, recursively — is a debug reference, a store into it of a closed
-// value, a load from it, or a closure creation binding it. The cell's
-// address held anywhere else (passed, stored, compared) leaves it
-// open, as does a store the walk cannot close. A cell reached again
-// while its own stores are being judged (a store of a load of itself)
-// refuses, as every cycle in the walk does; the recursive closure's
-// idiom never re-enters — a closure creation closes without recursing.
-// The walk's memo is not consulted for the cell: it records closed
-// VALUES, and a cell is an address.
-func closedCell(cell *ssa.Alloc, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
-	if seen[cell] {
-		return false
-	}
-	seen[cell] = true
-	defer delete(seen, cell)
-	return cellReferrersClosed(cell, cell, seen, done, fp, map[ssa.Value]bool{})
-}
-
-func cellReferrersClosed(cell *ssa.Alloc, alias ssa.Value, seen, done map[ssa.Value]bool, fp *freshParamAnalysis, visited map[ssa.Value]bool) bool {
+// walkCellReferrers walks every referrer of a local cell (and of every free
+// variable a closure binds to it, recursively), applying walkVal to each
+// stored value and failing closed on any address escape.
+func walkCellReferrers(alias ssa.Value, visited map[ssa.Value]bool, walkVal func(ssa.Value) bool) bool {
 	if visited[alias] {
 		return true
 	}
@@ -1243,7 +1283,7 @@ func cellReferrersClosed(cell *ssa.Alloc, alias ssa.Value, seen, done map[ssa.Va
 		switch r := ref.(type) {
 		case *ssa.DebugRef:
 		case *ssa.Store:
-			if r.Addr != alias || !closedDynamicValue(r.Val, seen, done, fp) {
+			if r.Addr != alias || !walkVal(r.Val) {
 				return false
 			}
 		case *ssa.UnOp:
@@ -1257,7 +1297,7 @@ func cellReferrersClosed(cell *ssa.Alloc, alias ssa.Value, seen, done map[ssa.Va
 			}
 			for i, binding := range r.Bindings {
 				if binding == alias {
-					if i >= len(fn.FreeVars) || !cellReferrersClosed(cell, fn.FreeVars[i], seen, done, fp, visited) {
+					if i >= len(fn.FreeVars) || !walkCellReferrers(fn.FreeVars[i], visited, walkVal) {
 						return false
 					}
 				}
@@ -1284,102 +1324,10 @@ func closedDynamicTargets(value ssa.Value, fp *freshParamAnalysis) (map[*ssa.Fun
 		return nil, false
 	}
 	targets := map[*ssa.Function]bool{}
-	if !collectDynamicTargets(value, targets, map[ssa.Value]bool{}, fp) {
+	if !walkDynamicValue(value, targets, map[ssa.Value]bool{}, nil, fp) {
 		return nil, false
 	}
 	return targets, true
-}
-
-func collectDynamicTargets(value ssa.Value, targets map[*ssa.Function]bool, seen map[ssa.Value]bool, fp *freshParamAnalysis) bool {
-	if seen[value] {
-		return true
-	}
-	seen[value] = true
-	switch v := value.(type) {
-	case *ssa.Function:
-		targets[v] = true
-		return true
-	case *ssa.MakeClosure:
-		fn, ok := v.Fn.(*ssa.Function)
-		if !ok {
-			return false
-		}
-		targets[fn] = true
-		return true
-	case *ssa.Const:
-		// A nil function value: no target — the call cannot proceed.
-		return v.Value == nil
-	case *ssa.Phi:
-		for _, edge := range v.Edges {
-			if !collectDynamicTargets(edge, targets, seen, fp) {
-				return false
-			}
-		}
-		return true
-	case *ssa.Extract:
-		return collectDynamicTargets(v.Tuple, targets, seen, fp)
-	case *ssa.ChangeType:
-		return collectDynamicTargets(v.X, targets, seen, fp)
-	case *ssa.Convert:
-		return collectDynamicTargets(v.X, targets, seen, fp)
-	case *ssa.TypeAssert:
-		return collectDynamicTargets(v.X, targets, seen, fp)
-	case *ssa.ChangeInterface:
-		return collectDynamicTargets(v.X, targets, seen, fp)
-	case *ssa.MakeInterface:
-		return collectDynamicTargets(v.X, targets, seen, fp)
-	case *ssa.UnOp:
-		if v.Op != token.MUL {
-			return false
-		}
-		cell := cellOf(v.X, map[ssa.Value]bool{})
-		if cell == nil {
-			return false
-		}
-		return collectCellStores(cell, cell, targets, seen, fp, map[ssa.Value]bool{})
-	case *ssa.Parameter:
-		args, ok := attributedParameterArgs(v, fp)
-		if !ok {
-			return false
-		}
-		for _, arg := range args {
-			if !collectDynamicTargets(arg, targets, seen, fp) {
-				return false
-			}
-		}
-		return true
-	}
-	return false
-}
-
-func collectCellStores(cell *ssa.Alloc, alias ssa.Value, targets map[*ssa.Function]bool, seen map[ssa.Value]bool, fp *freshParamAnalysis, visited map[ssa.Value]bool) bool {
-	if visited[alias] {
-		return true
-	}
-	visited[alias] = true
-	refs := alias.Referrers()
-	if refs == nil {
-		return true
-	}
-	for _, ref := range *refs {
-		switch r := ref.(type) {
-		case *ssa.Store:
-			if r.Addr == alias && !collectDynamicTargets(r.Val, targets, seen, fp) {
-				return false
-			}
-		case *ssa.MakeClosure:
-			fn, ok := r.Fn.(*ssa.Function)
-			if !ok {
-				return false
-			}
-			for i, binding := range r.Bindings {
-				if binding == alias && (i >= len(fn.FreeVars) || !collectCellStores(cell, fn.FreeVars[i], targets, seen, fp, visited)) {
-					return false
-				}
-			}
-		}
-	}
-	return true
 }
 
 // narrowedTargets returns a computed call's targets narrowed to the
@@ -1411,19 +1359,6 @@ func narrowedTargets(site ssa.CallInstruction, targets map[*ssa.Function]bool, f
 		return targets
 	}
 	return narrowed
-}
-
-func subjectClosedParameter(param *ssa.Parameter, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
-	args, ok := attributedParameterArgs(param, fp)
-	if !ok {
-		return false
-	}
-	for _, arg := range args {
-		if !closedDynamicValue(arg, seen, done, fp) {
-			return false
-		}
-	}
-	return true
 }
 
 // attributedParameterArgs returns the value passed at param's position by

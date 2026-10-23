@@ -12,12 +12,12 @@ import (
 // (REQ-closure-shared-dynamic-state-audited-discharges).
 func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
 	for _, name := range []string{"Mutex", "RWMutex", "Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock", "Once", "Do"} {
-		if !auditedSyncSymbol(true, "sync", name) || !auditset.SyncName(name) {
+		if !auditedStandardSymbol(true, "sync", name) || !auditset.SyncName(name) {
 			t.Errorf("sync name %s not admitted", name)
 		}
 	}
 	for _, name := range []string{"Pool", "Get", "Put"} {
-		if !auditedPoolSymbol(true, "sync", name) || !auditset.PoolName(name) {
+		if !auditedStandardSymbol(true, "sync", name) || !auditset.PoolName(name) {
 			t.Errorf("pool name %s not admitted", name)
 		}
 	}
@@ -44,16 +44,16 @@ func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
 		}
 	}
 	for _, name := range []string{"Map", "Load", "Store", "LoadOrStore"} {
-		if !auditedMemoSymbol(true, "sync", name) || !auditset.MemoName(name) {
+		if !auditedStandardSymbol(true, "sync", name) || !auditset.MemoName(name) {
 			t.Errorf("memo name %s not admitted", name)
 		}
 	}
 	for _, stray := range []string{"OnceFunc", "OnceValue", "WaitGroup", "Range", "Delete", "Swap", "New", "ValueOf", "Copy"} {
-		if auditedSyncSymbol(true, "sync", stray) || auditedPoolSymbol(true, "sync", stray) || auditedMemoSymbol(true, "sync", stray) || classBPureStandard(true, "reflect", stray) {
+		if auditedStandardSymbol(true, "sync", stray) || classBPureStandard(true, "reflect", stray) {
 			t.Errorf("%s admitted outside the tables", stray)
 		}
 	}
-	if auditedSyncSymbol(false, "sync", "Lock") || auditedPoolSymbol(false, "sync", "Get") || classBPureStandard(false, "reflect", "TypeOf") {
+	if auditedStandardSymbol(false, "sync", "Lock") || auditedStandardSymbol(false, "sync", "Get") || classBPureStandard(false, "reflect", "TypeOf") {
 		t.Fatal("an unaudited toolchain admitted an audited symbol")
 	}
 	if auditset.SyncName("Pool") || auditset.PoolName("Mutex") {

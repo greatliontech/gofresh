@@ -495,6 +495,12 @@ func MemoMethod(receiver, method string) bool { return slices.Contains(memoMetho
 // belongs to the audited memo set.
 func MemoName(name string) bool { return slices.Contains(memoNames, name) }
 
+// SyncSurfaceName reports whether a sync symbol name — receiver or method —
+// belongs to any of the audited sync sets (synchronization, pooling, or memo).
+func SyncSurfaceName(name string) bool {
+	return SyncName(name) || PoolName(name) || MemoName(name)
+}
+
 // ReflectImmutable reports whether a reflect type is in the audited
 // immutable-type set.
 func ReflectImmutable(name string) bool { return reflectImmutableTypes[name] }

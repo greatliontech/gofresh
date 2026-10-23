@@ -3268,3 +3268,67 @@ func TestBinaryRootedFunctionsReleaseThePackagesProgram(t *testing.T) {
 		t.Fatalf("%d programs retained after the incomplete exit", len(h.progs))
 	}
 }
+
+func TestWalkDynamicCarrierPolicies(t *testing.T) {
+	const src = `package p
+type Fn func()
+type FnStruct struct{ f func() }
+type FnArray [1]func()
+type ErrStruct struct{ err error }
+type Node struct {
+	fn   func()
+	next *Node
+}
+type Tree struct {
+	fn       func()
+	children []Tree
+}
+type ScalarNode struct {
+	x    int
+	next *ScalarNode
+}
+type ScalarChan chan int
+type FnChan chan func()
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "p.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf := types.Config{}
+	pkg, err := conf.Check("example/p", fset, []*ast.File{file}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name                      string
+		wantClosure, wantConsumer bool
+		wantAlias                 bool
+	}{
+		{name: "Fn", wantClosure: true, wantConsumer: true, wantAlias: false},
+		{name: "FnStruct", wantClosure: true, wantConsumer: true, wantAlias: false},
+		{name: "FnArray", wantClosure: true, wantConsumer: true, wantAlias: false},
+		{name: "ErrStruct", wantClosure: true, wantConsumer: true, wantAlias: true},
+		{name: "Node", wantClosure: true, wantConsumer: true, wantAlias: true},
+		{name: "Tree", wantClosure: true, wantConsumer: true, wantAlias: true},
+		{name: "ScalarNode", wantClosure: false, wantConsumer: false, wantAlias: false},
+		{name: "ScalarChan", wantClosure: false, wantConsumer: false, wantAlias: false},
+		{name: "FnChan", wantClosure: true, wantConsumer: true, wantAlias: true},
+	}
+	for _, tc := range cases {
+		typ := pkg.Scope().Lookup(tc.name).Type()
+		for _, p := range []struct {
+			name   string
+			policy CarrierWalkPolicy
+			want   bool
+		}{
+			{"Closure", CarrierPolicyClosure, tc.wantClosure},
+			{"Consumer", CarrierPolicyConsumer, tc.wantConsumer},
+			{"Alias", CarrierPolicyAlias, tc.wantAlias},
+		} {
+			if got := WalkDynamicCarrier(true, typ, make(map[types.Type]bool), p.policy); got != p.want {
+				t.Errorf("WalkDynamicCarrier(%s, %s) = %v, want %v", tc.name, p.name, got, p.want)
+			}
+		}
+	}
+}
