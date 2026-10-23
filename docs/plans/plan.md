@@ -100,10 +100,30 @@ This is the single canonical plan for `gofresh` and its consumer ecosystem (`sti
 
 ---
 
+## Consumer Ecosystem First-Principles Refactoring & Issue Retirement
+
+### `pew` (`23cd9b8` — 0 Open Issues, 0 Gaps)
+- [x] **Contextual Stat Policies & Confidence Derivation**: Enforce contextual `StatPolicy` (`StatCompare`, `StatDetectChange`, `StatExplore`) with `Summary.DerivedConfidence(level)` (`DerivedConfidence`, `RankConfidenceFromSamples`, `ShiftConfidenceInterval`) and retire `confidence-knob-unwitnessed.md` and `exploratory-profile-mode.md`.
+- [x] **Subprocess Cleanup & Witness Coverage**: Enforce `CleanupWaitDelay` and group cleanup on `ABRun`, bind all remaining 6 stipulator gaps (`434 bindings (0 stale), 0 gaps`), retire `docs/plans/performance-evidence.md` and all 11 open issues in `docs/issues/`, and install clean `pew` binary.
+
+### `stipulator` (`b995160` — 0 Open Issues)
+- [x] **Pillar S1: Corpus Identity, Pin Atomicity, & Cache Lifecycle**: Atomic `pin` rollback on context cancellation (`WithContext`), bounded global cache disk retention (`PruneCache`, `DefaultCacheMaxBytes = 4 << 30`), explicit authoring scope resolution (`LoadDeclarationsInScope`), and zero-unpinned shape invariants (`8` issues retired).
+- [x] **Pillar S2: Verification Semantics, Structural Sub-Clauses, & Gap Classification**: Sub-clause decomposition and verification attribution, witness-level staleness precision, and deterministic multi-package test attribution (`12` issues retired).
+- [x] **Pillar S3: Change-Impact, Context Budgets, & Diff Attribution**: Scoped diff-to-requirement mapping, token-budgeted context rendering, and change-surface witness alignment (`11` issues retired).
+- [x] **Pillar S4: CLI / MCP Surfaces, Guidance Parity, & Fleet-Sweep Dispositions**: Shared CLI/MCP surface invariants, guidance parity, and retirement of all remaining field reports (`11` issues retired; `1564 bindings (0 stale), 14 gaps`), and install clean `stipulator` binary.
+
+### `gomutant` (`364ef34` — 0 Open Issues)
+- [x] **Pillar M1: Findings Document Lifecycle, Selection Coexistence, & Attestation Management**: Selection-coexisting findings records (Version 17), `Reattest` and `WithdrawAttestation` across shared and local layers, cross-selection `OtherSelection` advisory verdicts, duplicate-key rejection in interned tables (`interned.go`), `LoadEphemeralAttestations` / `Prune` / `Retarget` for ephemeral attestations, `PruneCache` preserving local overlay entries (`DefaultCacheMaxBytes = 4 << 30`), and `baselineBank` cross-process file lock + immediate persistence (`6` issues retired).
+- [x] **Pillar M2: Provenance, Purity Assertions, & Evidence-Fault Separation**: Separate `f.EvidenceFault` from `f.Dirty` (git worktree drift) across `stampProvenance`, `portableLineWalk`, `stampUnverifiable`, `judgeAdmittedContext`, `evidenceSetMatchesContextWithCurrent`, `shapedEvidenceMatchesContext`, `coveredExemptions`, and `unstableForBuckets` (running `stampProvenance` before `stampExemptions` in all `aggregateWindow` arms); add `SetPurityAssertion(bool)`, `SetPureSubjects(symbols ...string)`, and `PurityAssertion() bool` on `Tree` (`11` issues retired).
+- [x] **Pillar M3: Execution Engine, Crash Diagnostics, & Explicit `testdata` Target Loading**: Append running-test panic/fatal stack blocks to package-scope crash evidence (`packageCrashTail`), guard `OracleMemoryBytesFromMiB` against `int64` overflow, and support explicit `testdata` package targets via `HasTestdataSegment`, `LoadExplicitDirContext`, and `LoadExplicitImportContext` synchronized by `loadMu` and `directiveOnce` across `ephemeral.go`, `selection.go`, `run.go`, and `freshness.go` (`14` issues retired).
+- [x] **Pillar M4: CLI `explain` Face, Progress Cadence, MCP Bounded Rendering, & Field-Report Dispositions**: Preserve non-zero candidate progress counters across `auditing` events (`internal/cmd/report.go`), expose `gomutant explain` on the CLI (`internal/cmd/explain.go`), preserve committed `Summary`, `Residue`, `Outcome`, `Document`, `Note`, and partial `Findings` when `postCommitRenderBound` expires (`internal/mcpserver/server.go`), retire all remaining 22 field reports (`826 bindings (0 stale), 3 gaps`), and install clean `gomutant` binary.
+
+---
+
 ## Post-`gofresh` Ecosystem Verification & Release Train
 
 - [x] Re-pin and run `stipulator verify --no-test` and `task check` on `gofresh`.
-- [x] Update `stipulator`, `gomutant`, and `pew` to the finalized `gofresh` commit, align `pew` guidance helpers (`guidance.PrintsDefault`, `Document.Served`, `Registration.LongHelp`), run `stipulator pin` and `stipulator verify --no-test` across all 4 repositories, and install updated binaries via `task install`.
+- [x] Update `stipulator`, `gomutant`, and `pew` to the finalized `gofresh` commit, align `pew` guidance helpers (`guidance.PrintsDefault`, `Document.Served`, `Registration.LongHelp`), complete first-principles refactoring and retire all open issues across all 4 repositories (`gofresh`: 50 retired, `pew`: 11 retired, `stipulator`: 42 retired, `gomutant`: 53 retired), run `stipulator pin` and `stipulator verify --no-test` across all 4 repositories, and install updated binaries via `task install`.
 - [ ] Execute tagged release train (`gofresh` -> `pew`, `stipulator`, `gomutant`) when ready for downstream distribution.
 
 ---
