@@ -506,9 +506,11 @@ func (r *attributedRTA) addRuntimeType(T types.Type, masks uint64, skip bool) {
 	if delta == 0 {
 		return
 	}
-	clear(r.typeParamSeen)
-	if ContainsTypeParam(T, r.typeParamSeen) {
-		return
+	if previous == 0 {
+		clear(r.typeParamSeen)
+		if ContainsTypeParam(T, r.typeParamSeen) {
+			return
+		}
 	}
 	r.runtimeTypes.Set(T, previous|delta)
 

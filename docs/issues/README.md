@@ -1,20 +1,18 @@
 # Issues
 
 Parked deferrals. Each source issue has one primary open slot in
-`docs/plans/tooling-redesign.md`; secondary constituents are stated in its doc.
+`docs/plans/plan.md`; secondary constituents are stated in its doc.
 Historical reports remain attributed and do not assert current runtime
 verification. The doc is deleted when its obligation resolves (git holds history).
 
 | issue | summary | Lands |
 |---|---|---|
-| [toolchain-variation-admission-registry](toolchain-variation-admission-registry.md) | Replace combination approval with independently checked implementation derivations and useful end-to-end acceptance | tooling-redesign 5.1w.7 |
 | [coverage-testmain-export-load-failure](coverage-testmain-export-load-failure.md) | Covered `go list -test` constructs an invalid generated-source path; preserve refusal until a selected-toolchain repair establishes proof support | tooling-redesign 7.8 |
 | [persistent-memo-disk-retention](persistent-memo-disk-retention.md) | 16 GiB shared memo store without global retention; bound disk growth and expose safe reclamation | tooling-redesign 7.9a |
 | [toolchain-dependency-consumer-adoption](toolchain-dependency-consumer-adoption.md) | adopt native dependency evidence and unreleased v4-only runtime evidence end to end, preserving old bytes as history; source-certificate dependencies already landed | tooling-redesign 5.2d |
 | [audit-boundary-residue](audit-boundary-residue.md) | adopt shared package-producing and typed-judgment boundaries, with secondary consumer residues; landed constructor/declaration/certificate controls retained | tooling-redesign 5.2d |
 | [tooling-redesign-obligation-map](tooling-redesign-obligation-map.md) | every retained charter, issue and checkpoint mapped to the active redesign, its authority boundary and deciding regression | tooling-redesign 9.4: complete obligation reconciliation before plan deletion |
 | [resident-walk-counts-a-vfork-child-twice](resident-walk-counts-a-vfork-child-twice.md) | attribute duplicate held-page accounting for vfork and persistent shared mappings; equal counters and double sampling prove no ownership | tooling-redesign 7.7 |
-| [cold-analysis-pass-program-retention](cold-analysis-pass-program-retention.md) | measure the remaining cold working set; completed and rootless proof-group release already exists | tooling-redesign 7.7 |
 | [generated-proto-discharge-single-subject-only](generated-proto-discharge-single-subject-only.md) | establish package-process eligibility separately from the existing single-subject generated-descriptor channel | tooling-redesign 7.8 |
 | [explain-no-chain-for-a-dependency-culprit](explain-no-chain-for-a-dependency-culprit.md) | exact historical missing-chain report unresolved; current explanation does load and scan dependencies | tooling-redesign 8.3 |
 | [prints-default-one-home](prints-default-one-home.md) | Pew's local zeroDefault remains beside the adopted shared Coverage lint | tooling-redesign 5.6 |
@@ -31,7 +29,6 @@ verification. The doc is deleted when its obligation resolves (git holds history
 | [attestation-keyed-record](attestation-keyed-record.md) | consolidate positive-assertion discharge plumbing; GeneralExecution supplies no third positive assertion | tooling-redesign 7.1 |
 | [registration-audit-walk-helper-unification](registration-audit-walk-helper-unification.md) | share registration shape walks without merging their proof gates | tooling-redesign 7.8 |
 | [fixture-tier-parallelism](fixture-tier-parallelism.md) | require measured benefit and explicit shared-state ownership before broader fixture scheduling | tooling-redesign 7.7 |
-| [runtime-type-parameter-rescan](runtime-type-parameter-rescan.md) | measure and remove repeated structural scans after an already-covered runtime-type mask, preserving generic and mask behavior | tooling-redesign 7.7a |
 | [memo-scope-axes](memo-scope-axes.md) | remaining memo/read/result folds and the unfulfilled per-run standard-digest cost question, without cross-generation sharing | tooling-redesign 7.8 |
 | [attribution-mask-width](attribution-mask-width.md) | measure current slice cost before changing mask width, memory or cancellation granularity | tooling-redesign 7.7 |
 | [net-url-parse-godebug-channel](net-url-parse-godebug-channel.md) | parsing stays conservative until runtime configuration and in-process mutation have sound authority | tooling-redesign 7.8 |
@@ -46,8 +43,6 @@ verification. The doc is deleted when its obligation resolves (git holds history
 | [direct-call-site-index-one-source](direct-call-site-index-one-source.md) | fold remaining init-helper provenance beside the existing shared call-site index | tooling-redesign 7.8 |
 | [flag-surface-one-table](flag-surface-one-table.md) | one flag-surface classification, with storage provenance and parsed-input refusal preserved | tooling-redesign 7.1 |
 | [classb-arms-one-table](classb-arms-one-table.md) | consolidate effect classification; entropy behavior changes require a separate proof judgment | tooling-redesign 7.1 |
-| [runtime-inputs-dirty-unadopted](runtime-inputs-dirty-unadopted.md) | retire the unused inspector API and its clause together in the implementation slot | tooling-redesign 5.6 |
-| [static-input-root-unadopted](static-input-root-unadopted.md) | retire the unused static-root option and its clause together in the implementation slot | tooling-redesign 5.6 |
 | [runtime-input-entries-implicit-context](runtime-input-entries-implicit-context.md) | close FromState/adoption/conversion/merge context gaps; Describe and Paths do not spawn go env | tooling-redesign 5.5 |
 | [root-directory-input-with-empty-manifest](root-directory-input-with-empty-manifest.md) | preserve historical slash-open reports and conservative classification; caller attribution needs actual provenance | tooling-redesign 8.3 |
 | [iterator-calls-and-std-invokes-open-the-closure](iterator-calls-and-std-invokes-open-the-closure.md) | exact SplitSeq/SHA invoke cases unresolved; general positive iterator support already exists | tooling-redesign 7.8 |

@@ -103,10 +103,6 @@ corresponding values, inserted verbatim; fields are separated by single ASCII
 spaces and sets use canonical manifest order. Identity and refusal validation
 excludes line-framing bytes, and entry digests have fixed width.
 
-**dirty recording** (term): a recording whose source or inputs are not faithfully
-reproducible from its recorded commit, usable for working-tree reuse but barred as a
-baseline.
-
 **observation bracket** (term): a fingerprint over a caller-declared set of
 candidate runtime-input roots — module-relative or clean absolute paths, each a
 regular file, a directory tree, or absent — captured before the producing process
@@ -151,7 +147,7 @@ undisclosed.
 
 **REQ-inputs-observation-coherence** (invariant): The caller MUST exclude runtime
 input mutation throughout each producing run and its observation finalization, and
-while merge, dirty inspection, or a current check observes inputs — the
+while merge or a current check observes inputs — the
 classification roots' resolution inputs and their consumer-held memo included (one
 judged run — the consumer's one verb invocation, a long-lived server's per-request
 operation — never a process, as the toolchain sampler's), as
@@ -162,7 +158,7 @@ also re-observes around a check to detect ordinary drift. It cannot prove the ab
 of a mutation-and-restore interval within one observation or construct an atomic
 snapshot spanning process environment, several files, and directory trees; allowing
 such an interval forfeits the proof that the digest describes the run or check.
-Every environment-aware finalization, merge, absolute conversion, dirty inspection,
+Every environment-aware finalization, merge, absolute conversion,
 and current check uses the same complete process environment as the producing or
 checking process; ambient convenience operations use the ambient environment at the
 operation. Mixing an explicitly configured process with ambient environment hashing
@@ -714,41 +710,6 @@ REQ-inputs-observation-coherence already places on the caller, the consumer-held
 memo of a resolution (one judged run) included — guards pin covered content, never the shape of the
 path that reached it.
 
-**REQ-inputs-static-inputs** (behavior): Observation construction from a
-test-harness log MUST accept caller-declared static-input roots — each a
-module-relative identity-form path naming a committed file or tree (go.mod,
-a committed command or spec tree) whose content the CALLER's own record
-already pins, a generation snapshot digesting the named surface being the
-motivating class. A read provably inside a declared static root records
-neither a path identity nor a per-path disposition, under exactly the
-guard-covered class's resolution rules: inside in its declared or resolved
-form, the existing object it resolves to inside, every traversed symlink
-inside, and missing, uninspectable, or ambiguously resolved objects staying
-observed — the region's fail-closed boundary is the guard-covered one with
-the pinning evidence swapped from a toolchain guard to the caller's record.
-The declaration exists because re-observing content the caller's record
-pins adds no protection while its churn forfeits reuse for free: the
-repo-root discovery walk every source-reading test performs, and
-tree-scanning oracles over committed content, otherwise convert static repo
-surface into per-witness runtime-input records that can never prove
-reusable. The soundness input is the guard-covered class's, stated the same
-way: declaring a root is the caller's assertion that its record pins the
-named surface for the span, and a declaration the record does not actually
-pin silently vacates observation for everything beneath it — one declared
-surface wide. The module root itself is refused outright: a whole-module
-static declaration would vacate every module-relative
-observation rather than name a surface. The refusal binds in BOTH forms and
-loudly: a declared root must resolve strictly inside the module tree's
-interior — a committed symlink at the declared position pointing to the
-module root, an ancestor, or an external target refuses at ingest, because
-the caller's record pins the link string, never the target's content — and
-a root that does not resolve refuses the same way, a typo'd repo surface
-being a declaration error, never an empty one. Metadata rides the
-guard-covered carve-out with the evidence swapped: the motivating snapshot
-digests content, never mtimes, so a subject depending on a static surface's
-metadata beyond what the caller's record pins is outside the admitted
-observation set, exactly as covered-tree metadata dependence already is.
-
 **REQ-inputs-ephemeral-root** (behavior): Observation construction from a
 test-harness log MUST classify under the producing environment's ephemeral temp
 roots — what the run's own temp-directory resolution named: TMPDIR when set, the
@@ -1114,20 +1075,6 @@ in the reason itself — its target is state, whole in the reason, reproduced
 by every derivation — and never on the observation's field. The process's
 own attribution stays REQ-inputs-incomplete's; the field case is a
 parent-directory fsync walk opening `/`.
-
-**REQ-inputs-dirty** (behavior): A recording backed by a module-local input whose
-Git-representable state is not reproducible from its recorded commit MUST be marked
-as a dirty recording, because the recording is not faithful to that commit; the mark
-bars it as a baseline while leaving it usable for working-tree reuse. The comparison
-includes absence, regular-file content and executable mode, symlink target, and
-directory tree membership and member state, thereby covering gitignored, untracked,
-modified, or run-created inputs and targets reached through committed symlinks. Dirty
-evidence is the caller-facing result of testing every module-relative identity in the
-final merged manifest after revalidating that completed state against the same current
-module view; if the state moved the inspection is refused, and if any identity is not
-reproducible the result is dirty. The commit and dirty mark do not enter the
-fingerprint or validity predicate, and an inspection failure or unrepresentable
-comparison is returned rather than interpreted as clean.
 
 **REQ-inputs-unbounded** (behavior): An observed input whose full observed value the
 analysis cannot bound — a metadata-only inspection of an identity outside every

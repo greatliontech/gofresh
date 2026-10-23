@@ -23,10 +23,6 @@ func ambientRelative(observation Observation, moduleDir string) (Observation, er
 	return Relative(observation, moduleDir, os.Environ())
 }
 
-func ambientDirty(observation Observation, moduleDir, commit string, inspector CommitInspector) (bool, error) {
-	return Dirty(observation, moduleDir, commit, inspector, os.Environ())
-}
-
 func ambientMerge(moduleDir string, observations ...Observation) (Observation, error) {
 	return Merge(moduleDir, os.Environ(), observations...)
 }

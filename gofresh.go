@@ -225,7 +225,7 @@ const ClosureStrategy = closure.IdentityStrategy
 // recorded proofs from the prior interpretation refuse instead of serving
 // under semantics they were not computed by. Caller-vouched vocabulary is
 // the one exception: a new opt-in declaration class (exclusions,
-// static-input roots) leaves every undeclared run byte-identical and
+// scratch namespaces) leaves every undeclared run byte-identical and
 // rides no bump — @7 admitted the testing
 // harness's failure/logging channel as an audited harness fact instead
 // of descending into harness internals; @8 extends the admission to

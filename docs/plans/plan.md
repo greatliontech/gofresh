@@ -47,12 +47,12 @@ This is the single canonical plan for `gofresh` and its consumer ecosystem (`sti
 ## Active `gofresh` First-Principles Refactoring & Issue Retirement (Pillars 1–6)
 
 ### Pillar 1: Retire Resolved Issues & Remove Unadopted `runtimeinput` Surface
-- [ ] **`runtime-type-parameter-rescan.md`**: Verify focused regression test coverage for self-referential named types + staggered masks in `closure/internal/rta/rta_test.go` (implemented in `c7667be`) and delete issue doc.
-- [ ] **`toolchain-variation-admission-registry.md`**: Retired by structural AST/directive verification (`gofresh/toolchain-verifier@5` in `12e22dd`); delete issue doc.
-- [ ] **`cold-analysis-pass-program-retention.md`**: Retired by lazy `batchPreparer.release` and `delete(h.progs, group.path)` in `c7667be`; delete issue doc.
-- [ ] **`runtime-inputs-dirty-unadopted.md`**: Remove unadopted `runtimeinput/dirty.go` (`CommitInspector`, `Dirty`) and its tests, remove `REQ-inputs-dirty` from `docs/specs/runtime-inputs.md`, reconcile `.stipulator/bindings/runtime-inputs.textproto`, and delete issue doc.
-- [ ] **`static-input-root-unadopted.md`**: Remove unadopted `runtimeinput.WithStaticInputRoot` and its tests, remove the static-input-root clause from `docs/specs/runtime-inputs.md`, reconcile `.stipulator/bindings/runtime-inputs.textproto`, and delete issue doc.
-- [ ] Run `go test ./...`, `task check`, adversarial review, and commit Pillar 1.
+- [x] **`runtime-type-parameter-rescan.md`**: Verify focused regression test coverage for self-referential named types + staggered masks in `closure/internal/rta/rta_test.go` (implemented in `c7667be`) and delete issue doc.
+- [x] **`toolchain-variation-admission-registry.md`**: Retired by structural AST/directive verification (`gofresh/toolchain-verifier@5` in `12e22dd`); delete issue doc.
+- [x] **`cold-analysis-pass-program-retention.md`**: Retired by lazy `batchPreparer.release` and `delete(h.progs, group.path)` in `c7667be`; delete issue doc.
+- [x] **`runtime-inputs-dirty-unadopted.md`**: Remove unadopted `runtimeinput/dirty.go` (`CommitInspector`, `Dirty`) and its tests, remove `REQ-inputs-dirty` from `docs/specs/runtime-inputs.md`, reconcile `.stipulator/bindings/runtime-inputs.textproto`, and delete issue doc.
+- [x] **`static-input-root-unadopted.md`**: Remove unadopted `runtimeinput.WithStaticInputRoot` and its tests, remove the static-input-root clause from `docs/specs/runtime-inputs.md`, reconcile `.stipulator/bindings/runtime-inputs.textproto`, and delete issue doc.
+- [x] Run `go test ./...`, `task check`, adversarial review, and commit Pillar 1.
 
 ### Pillar 2: Collapse `closure` Classification Tables & Predicates
 - [ ] **`flag-surface-one-table.md`**: Collapse `flagSymbols` (`internal/auditset`), `flagRegistrationSymbol` / `flagValueRegistration` / `flagPointerRegistration` (`closure/observability.go`), `flagProvenSetMethod` / `flagProvenSetUse`, and the refused-rows test table (`closure/audited_test.go`) into one `auditset.FlagSurface(name)` table, and share the unaudited-standard symbol ladder between `closure/maximal.go` and `closure/analyzer.go` while keeping refusal tier observable and storage provenance independent.

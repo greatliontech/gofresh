@@ -1047,9 +1047,6 @@ func TestProducerOperationsRejectRecomputedState(t *testing.T) {
 	if _, err := ambientAbsolute(forged, moduleDir); err == nil {
 		t.Fatal("absolute conversion accepted checker-recomputed state")
 	}
-	if _, err := ambientDirty(forged, moduleDir, "commit", fakeInspector{}); err == nil {
-		t.Fatal("dirty inspection accepted checker-recomputed state")
-	}
 	valid, err := ambientFromTestLog([]byte("getenv HOME\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
 	if err != nil {
 		t.Fatal(err)
@@ -1060,9 +1057,6 @@ func TestProducerOperationsRejectRecomputedState(t *testing.T) {
 	}
 	if _, err := ambientAbsolute(valid, moduleDir); err == nil {
 		t.Fatal("absolute conversion accepted transplanted state under genuine provenance")
-	}
-	if _, err := ambientDirty(valid, moduleDir, "commit", fakeInspector{}); err == nil {
-		t.Fatal("dirty inspection accepted transplanted state under genuine provenance")
 	}
 }
 

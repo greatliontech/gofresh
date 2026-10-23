@@ -600,28 +600,6 @@ func TestBindingReasonsSurviveAbsoluteConversion(t *testing.T) {
 	}
 }
 
-// TestDirtyInspectsBindingUnverifiableState pins the dirty leg of
-// REQ-inputs-value-binding under REQ-inputs-dirty: a state carrying binding
-// reasons — including through a prior merge — still revalidates and yields
-// dirty evidence from every module-relative identity's reproducibility alone;
-// the binding disposition neither fakes nor suppresses dirt.
-func TestDirtyInspectsBindingUnverifiableState(t *testing.T) {
-	moduleDir := bindingModule(t)
-	moved, uncovered, bound := bindingReasonObservations(t, moduleDir)
-	merged, err := Merge(moduleDir, nil, moved, uncovered, bound)
-	if err != nil {
-		t.Fatal(err)
-	}
-	reproducible := fakeInspector{reproducible: map[string]bool{"data/fixture.txt": true, "other.txt": true}}
-	if dirty, err := Dirty(merged, moduleDir, "commit", reproducible, nil); err != nil || dirty {
-		t.Fatalf("reproducible binding-unverifiable state: dirty=%v err=%v, want false, nil", dirty, err)
-	}
-	partial := fakeInspector{reproducible: map[string]bool{"data/fixture.txt": true}}
-	if dirty, err := Dirty(merged, moduleDir, "commit", partial, nil); err != nil || !dirty {
-		t.Fatalf("non-reproducible binding-unverifiable state: dirty=%v err=%v, want true, nil", dirty, err)
-	}
-}
-
 // TestBracketNeverWeakensDisposition pins the never-weakens clause of
 // REQ-inputs-bracket-coverage as an example: an out-of-root stat's
 // metadata seal stands identically with and without the bracket — the
