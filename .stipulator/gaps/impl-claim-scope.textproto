@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-impl-claim-scope"
-reason: "Scoped proposition, subjects, phase/model, dependencies and premises are not established across existing implementation admissions."
-content_hash: "db62f8abb370a7c9b7f9008147932d675b131191dc92e82b1a3c53f2af5980d3"
-source_hash: "2f65d58427604b1f1eccbdb476f81bf4d42cb111366b351ce7dcab2a050e7df4"
-lands { manual { condition: "tooling-redesign 5.1w.2: a useful source-computation consumer carries checked claim scope and authority, followed by all consumers in 5.1w.6" } }

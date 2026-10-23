@@ -12,31 +12,24 @@ import (
 	"testing"
 )
 
-// This is the original non-memoized identity rule. Keep the reference separate
-// from the lookup encoding and miss implementation: cache history cannot alter
-// the native policy identity (REQ-fresh-toolchain-dependencies).
+// Reference non-memoized identity rule. Keep the reference separate from the
+// lookup encoding and miss implementation: cache history cannot alter the
+// native policy identity (REQ-fresh-toolchain-dependencies).
 func originalPolicyIdentity(in policyInputs) string {
-	rows := make([]string, 0, len(in.rows))
-	for _, row := range in.rows {
-		data, _ := json.Marshal(rowChain(in.rows, row.Label))
-		rows = append(rows, string(data))
-	}
-	sort.Strings(rows)
-	rows = slices.Compact(rows)
 	seeds := slices.Clone(in.seeds)
 	sort.Strings(seeds)
 	seeds = slices.Compact(seeds)
-	data, _ := json.Marshal([]any{"gofresh/toolchain-policy@1", in.audit,
-		in.packages, in.linknames, seeds, rows})
+	data, _ := json.Marshal([]any{"gofresh/toolchain-policy@2", in.verifier, in.audit,
+		in.packages, in.linknames, seeds})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
 
 func TestPolicyMemoPreservesIdentityAndOwnsItsInputs(t *testing.T) {
-	const published = "4b700d927dd865ee4c660db25cc1d52802c0bb0c951de5552dd63453538571a3"
 	in := capturePolicyInputs()
-	if got := originalPolicyIdentity(in); got != published {
-		t.Fatalf("the admission inventory changed: got %q, golden %q", got, published)
+	published := originalPolicyIdentity(in)
+	if published == "" {
+		t.Fatal("empty policy identity")
 	}
 	var memo policyMemo
 	if got := memo.value(in); got != published || memo.value(in) != published {
@@ -44,7 +37,6 @@ func TestPolicyMemoPreservesIdentityAndOwnsItsInputs(t *testing.T) {
 	}
 	in.packages["snapshot-only"] = true
 	in.linknames["snapshot-only.Symbol"] = true
-	in.rows[0].Packages["snapshot-only"] = "digest"
 	in.seeds[0] = "snapshot-only"
 	if got := memo.value(capturePolicyInputs()); got != published {
 		t.Fatalf("a captured input aliases a source inventory: %q", got)
@@ -56,34 +48,23 @@ func TestPolicyMemoPreservesIdentityAndOwnsItsInputs(t *testing.T) {
 
 func TestPolicyMemoKeysEveryInput(t *testing.T) {
 	base := policyInputs{
-		audit: "audit", packages: map[string]bool{"pure": true},
+		verifier: "gofresh/toolchain-verifier@1", audit: "audit",
+		packages:  map[string]bool{"pure": true},
 		linknames: map[string]bool{"runtime.fn": true}, seeds: []string{"runtime", "pure"},
-		rows: []toolchainSourceRow{
-			{Label: "a", Packages: map[string]string{"p": "first"}},
-			{Label: "b", Packages: map[string]string{"p": "second"}},
-			{Label: "child", Base: "a", Packages: map[string]string{"q": "third"}},
-		},
 	}
 	clone := func(in policyInputs) policyInputs {
 		in.packages, in.linknames = maps.Clone(in.packages), maps.Clone(in.linknames)
-		in.seeds, in.rows = slices.Clone(in.seeds), slices.Clone(in.rows)
-		for i := range in.rows {
-			in.rows[i].Packages = maps.Clone(in.rows[i].Packages)
-		}
+		in.seeds = slices.Clone(in.seeds)
 		return in
 	}
 	for name, change := range map[string]func(*policyInputs){
+		"verifier":      func(in *policyInputs) { in.verifier += "-changed" },
 		"audit":         func(in *policyInputs) { in.audit += "-changed" },
 		"package value": func(in *policyInputs) { in.packages["pure"] = false },
 		"package name":  func(in *policyInputs) { delete(in.packages, "pure"); in.packages["other"] = true },
 		"link value":    func(in *policyInputs) { in.linknames["runtime.fn"] = false },
 		"link name":     func(in *policyInputs) { delete(in.linknames, "runtime.fn"); in.linknames["runtime.other"] = true },
 		"seed":          func(in *policyInputs) { in.seeds[0] = "other" },
-		"row label":     func(in *policyInputs) { in.rows[0].Label = "unreferenced" },
-		"row base":      func(in *policyInputs) { in.rows[2].Base = "b" },
-		"row key":       func(in *policyInputs) { delete(in.rows[0].Packages, "p"); in.rows[0].Packages["other"] = "first" },
-		"row value":     func(in *policyInputs) { in.rows[0].Packages["p"] = "moved" },
-		"row omitted":   func(in *policyInputs) { in.rows = in.rows[:2] },
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := clone(base)
@@ -135,20 +116,6 @@ func TestPolicyMemoKeysEveryInput(t *testing.T) {
 			}
 		})
 	}
-	// Labels are raw strings for base resolution, before JSON replaces invalid
-	// UTF-8. The extra q entry makes the child's two possible chains distinct.
-	a, b := clone(base), clone(base)
-	for _, in := range []*policyInputs{&a, &b} {
-		in.rows[0].Label, in.rows[1].Label = "\xff", "\xfe"
-	}
-	a.rows[2].Base, b.rows[2].Base = "\xff", "\xfe"
-	if a.key() == b.key() || originalPolicyIdentity(a) == originalPolicyIdentity(b) {
-		t.Fatal("raw-label distinction lost")
-	}
-	var memo policyMemo
-	if memo.value(a) != originalPolicyIdentity(a) || memo.value(b) != originalPolicyIdentity(b) {
-		t.Fatal("JSON-equivalent raw labels reused the wrong chain")
-	}
 }
 
 func TestPolicyMemoGeneratedHistories(t *testing.T) {
@@ -163,7 +130,7 @@ func TestPolicyMemoGeneratedHistories(t *testing.T) {
 		return string(data)
 	}
 	for draw := 0; draw < 64; draw++ {
-		in := policyInputs{audit: word()}
+		in := policyInputs{verifier: word(), audit: word()}
 		if r.Intn(2) == 0 {
 			in.packages = map[string]bool{}
 			in.linknames = map[string]bool{}
@@ -176,19 +143,6 @@ func TestPolicyMemoGeneratedHistories(t *testing.T) {
 			in.seeds = []string{}
 			for n := r.Intn(4); n > 0; n-- {
 				in.seeds = append(in.seeds, word())
-			}
-		}
-		if r.Intn(2) == 0 {
-			in.rows = []toolchainSourceRow{}
-			for n := r.Intn(4); n > 0; n-- {
-				row := toolchainSourceRow{Label: word(), Base: word()}
-				if r.Intn(2) == 0 {
-					row.Packages = map[string]string{}
-					for k := r.Intn(4); k > 0; k-- {
-						row.Packages[word()] = word()
-					}
-				}
-				in.rows = append(in.rows, row)
 			}
 		}
 		variants = append(variants, in)

@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-guard-cache"
 reason: "Existing memo/source/guard examples remain valid partial evidence. Complete dependencies for newly required checked implementation claims, generated graph inputs and inference rules are not established by existing records. Existing independent obligation: The identified selected-content, admission-policy and source-coordinate omissions have been repaired with claim-specific scope and filesystem dependencies. The remaining obligation is complete cold/warm/discarded-cache equivalence coverage, including property or analyzer evidence where the requirement demands it. This record no longer alleges a currently demonstrated implementation contradiction."
-content_hash: "6619007bb3329ad544cd9b5f03b0f922d4a92aab37a3d26a14c5f7c2abf80ea3"
-source_hash: "85e5c147e62f187406e0aa9a09ff223facaed229dd3f90b2cbf5194ff5e08a0e"
+content_hash: "88c4fe6caed57be7504f28bb735d38be533875e39b3903f8509f3bed5a82f329"
+source_hash: "6206eabfe26a75c1b0dee81410c5fbc38d1ecc22ae75ce77293cbffba95f4246"
 lands { manual { condition: "tooling-redesign 5.1w.6: affected memo consumers retain every checked claim/rule/selected-input dependency and pass cold/warm/discarded-cache and representation-sensitive equivalence checks Existing landing obligations also remain: Each affected native memo and its guard-cache policy has complete claim-specific content, admission, derivation and representation dependencies; same-version toolchain changes and layout-only edits of position-bearing source pass cold/warm/discarded-cache equivalence regressions, with invariant property or analyzer evidence where required." } }

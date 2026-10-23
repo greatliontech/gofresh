@@ -222,7 +222,7 @@ whose result never escapes (ReadFile's buffer-sizing stat) stay out of it —
 logging an observation the subject cannot read would collapse the content
 class for the dominant read idiom exactly as omitting a real one
 under-pins it. These are properties to establish from the actually selected
-implementation under REQ-impl-observation-claims, not from a build flavor or
+implementation under REQ-inputs-producer-premises, not from a build flavor or
 version. If metadata can reach the subject without a corresponding supported
 observation and guard class, the dependent observability claim refuses. A
 same-toolchain pin cannot make a known metadata hole sound. Proving that the
@@ -341,7 +341,7 @@ Unsupported operation classes remain incomplete rather than inheriting the
 semantics of a supported class.
 
 Implementation-derived outcome support obeys
-[implementation-verification.md](implementation-verification.md): a checked
+[closure.md](closure.md): a checked
 derivation establishes the operation's relation to guarded inputs independently
 of coverage and delivery claims. Native steps, initialization and exceptional
 paths needed for that relation cannot be replaced by a name or digest-approved

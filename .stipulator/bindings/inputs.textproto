@@ -803,8 +803,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-observation-class"
-  content_hash: "f32f64a5c8424ab35eb55e479a9ceb63d1c71435fd5a2a79e11f66a44779957a"
-  source_hash: "9c432416b905cdeb51f5ce0b8e031880cc2e7401adac50fa4326298513c3bb83"
+  content_hash: "ddeddf8cea6e7ba1c2c261070b81a32e4848087a996faa0a47c85ea027cff330"
+  source_hash: "82309b495a4396eedabbf3f950becb80c47ce39d103cbe72755f39aa17c1b4e4"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestOpenObservedEvidenceTravelsAcrossCheckouts"
   role: BINDING_ROLE_TESTS
@@ -813,8 +813,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-observation-class"
-  content_hash: "f32f64a5c8424ab35eb55e479a9ceb63d1c71435fd5a2a79e11f66a44779957a"
-  source_hash: "9c432416b905cdeb51f5ce0b8e031880cc2e7401adac50fa4326298513c3bb83"
+  content_hash: "ddeddf8cea6e7ba1c2c261070b81a32e4848087a996faa0a47c85ea027cff330"
+  source_hash: "82309b495a4396eedabbf3f950becb80c47ce39d103cbe72755f39aa17c1b4e4"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestStatObservedEvidenceStaysMetadataBound"
   role: BINDING_ROLE_TESTS
@@ -823,8 +823,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-observation-class"
-  content_hash: "f32f64a5c8424ab35eb55e479a9ceb63d1c71435fd5a2a79e11f66a44779957a"
-  source_hash: "9c432416b905cdeb51f5ce0b8e031880cc2e7401adac50fa4326298513c3bb83"
+  content_hash: "ddeddf8cea6e7ba1c2c261070b81a32e4848087a996faa0a47c85ea027cff330"
+  source_hash: "82309b495a4396eedabbf3f950becb80c47ce39d103cbe72755f39aa17c1b4e4"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/runtimeinput.TestConversionsPreserveMetadataClass"
   role: BINDING_ROLE_TESTS

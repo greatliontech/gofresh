@@ -56,8 +56,6 @@ a second home would mean a second implementation.
 ## Documents
 
 - [evidence.md](evidence.md) — result models, authority and ownership.
-- [implementation-verification.md](implementation-verification.md) — generic
-  implementation claims, dependency identity and checked semantic derivations.
 - [controls.md](controls.md) — control ownership and operation scope.
 - [closure.md](closure.md) — the source closure and its tiers.
 - [guards.md](guards.md) — the guards beside the closure.
@@ -167,7 +165,7 @@ valid nor shown stale by source alone.
 ## The contract
 
 The semantic authority of every implementation-dependent claim is governed by
-[implementation-verification.md](implementation-verification.md). Selected content
+[closure.md](closure.md) and [evidence.md](evidence.md). Selected content
 identity and semantic justification are separate: no name, flavor, version or
 digest-approval registry establishes implementation behavior. References to
 implementation admission or admission-policy identity identify the applicable
@@ -273,7 +271,7 @@ judge toolchain dependencies under these distinct obligations:
   to its memos. Producer and checking closure comparisons retain them through
   sibling selection, applicability extension and closing validation.
 - **historical-authority** — The proof compatibility strategy identifies the
-  semantic rules established under REQ-impl-historical-authority. Historical
+  semantic rules established under REQ-fresh-dependency-identities. Historical
   `gofresh/observation-rta@44` proofs and earlier strategies acquire no generic
   implementation-verification authority merely by remaining readable or
   retaining matching dependency identities.

@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-impl-no-approval-registry"
-reason: "Existing effect and dynamic-state consumers still grant positive claims through package/symbol/version tables and selection-wide approved-content chains."
-content_hash: "dc50580deeab0b4b55673498e5531d931d763a2fbaf5c61b724feb9d4f49a63c"
-source_hash: "21c8994598a2d64cee754f4438e9d4a6235469d2fa1a35f39f264d774a962fe0"
-lands { manual { condition: "tooling-redesign 5.1w.7: useful checked positive verticals from 5.1w.2-3 and 5.1w.5-6 replace every admission consumer, then all approval chains, flavor canaries and superseded summaries are retired" contradicted: true } }

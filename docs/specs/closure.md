@@ -7,8 +7,8 @@ subject reported valid while source it depends on has changed. This document def
 what the closure covers and how every gap in the static picture is dispositioned so
 the covered set never narrows below the truth.
 
-Implementation claims follow
-[implementation-verification.md](implementation-verification.md). The operation
+Implementation claims follow REQ-closure-observability-toolchain-key and
+REQ-fresh-dependency-identities. The operation
 families below specify properties and use-site obligations to verify, not
 permission obtained by recognizing a package, declaration, type, version or
 generated-file label. Every positive implementation claim requires a checked
@@ -61,7 +61,7 @@ declarations from the hash while still traversing call edges through them — th
 standard-library dependency is represented by toolchain evidence rather than
 duplicated in every subject's closure. A reported version alone does not
 establish source-content identity or implementation semantics: analyses obey
-REQ-fresh-dependency-identities and REQ-impl-compositional-derivation. Excluding
+REQ-fresh-dependency-identities and REQ-closure-observability-toolchain-key. Excluding
 standard declarations from the closure hash does not exclude their dependencies
 from implementation identity or grant a semantic claim about their behavior. A callback
 from a standard-library function back into the subject's own code still stays
@@ -102,8 +102,8 @@ preserve the source guard separately from implementation refinement:
   typed blockers; a diagnostic string, package name or undifferentiated proof
   bit cannot select them. Every other blocker and applicable guard remains
   decisive. Nominal Go bodies alone cannot discharge runtime dependences:
-  REQ-impl-build-selection additionally binds the claim to compiler-selected
-  implementations and any intrinsic/fallback dispatch. This refinement grants
+  REQ-closure-observability-toolchain-key additionally binds the claim to
+  selected standard-library implementations. This refinement grants
   no observation coverage, delivery, outcome or harness-completion authority,
   and retains the declared model's machine, timing and termination limits.
 
@@ -323,7 +323,7 @@ directory to the hash, and reached non-toolchain assembly widens the subject
 and blocks its observability proof. Selected toolchain assembly participates
 in implementation dependence identity; hashing it is not a semantic proof.
 Any claim reaching an unsupported opaque leaf refuses under
-REQ-impl-opaque-leaves, including a leaf behind an otherwise analyzed trampoline.
+REQ-closure-observability-toolchain-key, including a leaf behind an otherwise analyzed trampoline.
 
 **REQ-closure-shared-dynamic-state** (invariant): A package-level variable able to
 carry dynamic behavior — a function, an interface, a channel of dynamic carriers,
@@ -1200,7 +1200,7 @@ channel: bounding that type away from dynamic carriers, or the purity
 responsibility; the term is the persisted open-world fact itself, so an open
 subject without its term is unrepresentable. A refusal depending on an
 unsupported implementation claim carries that claim's failed premise and
-dependency path under REQ-impl-claim-refusal. It does not attribute unrelated
+dependency path under REQ-closure-observability-toolchain-key. It does not attribute unrelated
 refusals to a global disabled-admission state. An author's external declaration
 and an ambiguous identity are their own causes. The reached operation, the
 conferring term, the channel, and the attributed premise are the contract; the spellings are
@@ -1645,7 +1645,7 @@ preserve these distinct obligations:
 
 - **semantic-authority** — Every selected-implementation claim retains its
   complete dependence identity separately from its checked derivation under
-  REQ-impl-dependence-identity and REQ-impl-compositional-derivation. This applies
+  REQ-fresh-dependency-identities and REQ-fresh-toolchain-dependencies. This applies
   at every tier, including value computation, observation operations,
   synchronization, pooling, immutable types, atomic transparency, harness
   protocol, writer sinks and linkage. There is no whole-selection approval
@@ -1654,7 +1654,7 @@ preserve these distinct obligations:
   about the same selection. Changed inference semantics requires a
   distinguishable compatibility judgment; a cache-layout change alone changes
   no semantic authority. Compiler/linker correctness supplies no native,
-  intrinsic or instrumented behavior beyond REQ-impl-premise-boundary.
+  intrinsic or instrumented behavior beyond REQ-fresh-dependency-identities.
 - **selected-inventory** — The shared standard-library inventory covers `std`
   and its dependencies and every standard package in the actual subject graph,
   including selected Go, native, assembly, object and embedded members. Actual
@@ -1707,14 +1707,14 @@ preserve these distinct obligations:
   every entry. Individual directory-stamp reads and stored-stamp comparisons
   are not interrupted, bounded by the recorded directory inventory.
 - **observation-premises** — Coverage, delivery and outcome binding are distinct
-  under REQ-impl-observation-claims. Delivery establishes that every required
+  under REQ-inputs-producer-premises. Delivery establishes that every required
   observation reaches finalization or its loss prevents supported completion,
   including failed writes and flushes. A hook name, release label, declaration
   canary or successful execution cannot establish this. The result owner still
   supplies the actual harness completion receipt; a delivery derivation supplies
   no receipt for a particular process.
 - **claim-rechecking** — Changed selected content or other claim dependencies
-  require rechecking affected derivations under REQ-impl-derivation-reuse,
+  require rechecking affected derivations under REQ-fresh-dependency-identities,
   never approval by adding a row. Diagnostics identify failed selection
   observations, dependency disagreements or unsupported claims with their
   deciding premises and dependency paths. Structured causes and human
@@ -1911,7 +1911,7 @@ discarded incrementally rather than growing with every subject in the view.
 ## Cross-module dependencies
 
 Every memo below follows REQ-fresh-dependency-identities and
-REQ-impl-derivation-reuse. Where a derivation uses implementation semantics,
+REQ-closure-observability-toolchain-key. Where a derivation uses implementation semantics,
 its scope includes the complete selected implementation content, checked
 subordinate claims and inference rules, not merely a version or a Boolean
 admission verdict. Changing any such dependency rechecks the affected claim;

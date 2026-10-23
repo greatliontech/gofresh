@@ -12,7 +12,7 @@ defines the distinct caller-responsible assertion channels. The authority and
 ownership rules here apply to those forms alike; they do not broaden an
 admitted observation operation or supply a missing producing premise.
 
-[Implementation verification](implementation-verification.md) governs derived
+[The source closure](closure.md) governs derived
 semantic claims about selected implementations. Dependency identity identifies
 the inputs to that judgment; it does not confer their behavioral meaning.
 
@@ -148,7 +148,7 @@ derived claim MUST preserve these identity and authority boundaries:
   Neither is a language-series judgment or toolchain label. Compiler/linker
   correctness and toolchain-mediated-cache integrity neither exempt selected
   content changes nor assert implementation behavior beyond the foundational
-  premises of REQ-impl-premise-boundary. Existing admission-policy identities
+  premises of REQ-closure-observability-toolchain-key. Existing admission-policy identities
   identify inference and compatibility rules, not approved implementations.
 - **compatibility** — A memo representation change may require recomputation
   without invalidating semantically compatible history. A changed proof, outcome
@@ -430,7 +430,7 @@ these obligations:
   actual execution, observation completeness or operation outcomes. Inspection
   selects no new result model and discharges no maximal-tier blocker. Any use for
   runtime reuse still requires independently checked implementation coverage and
-  semantic evidence under REQ-impl-build-selection and the existing authority
+  semantic evidence under REQ-closure-observability-toolchain-key and the existing authority
   contracts. Ordinary source/build/runtime guards and explicit assertion rules
   continue to apply.
 - **applicability-boundary** — Successful inspection and span validation establish
@@ -456,7 +456,7 @@ historical result, under the following obligations:
   classes and successfully closed obligations. Its implementation proof establishes
   the claimed behavior for that artifact under applicable premises, with the
   selected replacements, inline instances, dispatch, initialization, harness and
-  actual-use coverage required by REQ-impl-build-selection. Observed success,
+  actual-use coverage required by REQ-closure-observability-toolchain-key. Observed success,
   artifact membership, a nominal source body or one sampled native arm supplies
   none of the missing semantic evidence. Executor build/execution declarations
   retain their existing assertion authority; they do not become derived facts.

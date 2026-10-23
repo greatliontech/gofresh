@@ -1,31 +1,44 @@
 package closure
 
 import (
+	"context"
 	"maps"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/greatliontech/gofresh/gotool"
 )
 
-func TestAuditedExperimentRejectsUnlistedSourceChanges(t *testing.T) {
-	for _, suffix := range []string{"", " race", " plan9/amd64", " cgo0"} {
-		t.Run(suffix, func(t *testing.T) {
-			packages := rowChain(auditedToolchainSources, "go1.27.1-X:nodwarf5"+suffix)
-			if len(packages) == 0 {
-				t.Fatal("audited source chain is missing")
-			}
-			// Labels do not grant admission: these exact bytes remain known
-			// even when an otherwise identical compiler has another label.
-			if d := toolchainSourceDegradation("rebuilt-toolchain", sourceDigests{Packages: packages}, nil); !d.audited() {
-				t.Fatalf("audited content rejected under a different label: %s", d.notice())
-			}
-			for _, key := range []string{"internal/goexperiment", "runtime"} {
-				changed := maps.Clone(packages)
-				changed[key] = "unlisted-source-change"
-				d := toolchainSourceDegradation("go1.27.1-X:nodwarf5", sourceDigests{Packages: changed}, nil)
-				if d.audited() || !strings.Contains(d.notice(), key) {
-					t.Fatalf("changed %s admitted or not named: %s", key, d.notice())
-				}
-			}
-		})
+func TestAuditedExperimentRejectsUnverifiedSourceChanges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("lists the standard library")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	ctx := context.Background()
+	dir := t.TempDir()
+	snapshot, err := (gotool.Runner{}).TakeEnvSnapshot(ctx, dir, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := gotool.NormalizeEnv(os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := toolchainSourceDigests(ctx, gotool.Runner{}, dir, env, snapshot, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deg := toolchainSourceDegradation("rebuilt-toolchain", d, nil); !deg.audited() {
+		t.Fatalf("verified content rejected under a different label: %s", deg.notice())
+	}
+	for _, key := range []string{"internal/goexperiment", "runtime", "strings"} {
+		changed := d
+		changed.Packages = maps.Clone(d.Packages)
+		changed.Packages[key] = "unverified-source-change"
+		deg := toolchainSourceDegradation("rebuilt-toolchain", changed, nil)
+		if deg.audited() || !strings.Contains(deg.notice(), key) {
+			t.Fatalf("changed %s admitted or not named: %s", key, deg.notice())
+		}
 	}
 }

@@ -17,28 +17,60 @@ import (
 func (h *Hasher) ToolchainContent() string { return h.source.Content }
 
 // AdmissionPolicy identifies the data governing the source audit, separately
-// from derivation versions and memo representation. Labels are documentary:
-// the effective row-chain inventories, not their labels, enter the identity.
+// from derivation versions and memo representation.
 func (h *Hasher) AdmissionPolicy() string { return h.source.Policy }
 
 type policyInputs struct {
+	verifier  string
 	audit     string
 	packages  map[string]bool
 	linknames map[string]bool
 	seeds     []string
-	rows      []toolchainSourceRow
 }
 
 // capturePolicyInputs owns every input before keying or deriving a policy.
 // Production inventories change only through source edits; tests may replace
 // them between calls. The memo holds no aliases into either form.
 func capturePolicyInputs() policyInputs {
-	rows := slices.Clone(auditedToolchainSources)
-	for i := range rows {
-		rows[i].Packages = maps.Clone(rows[i].Packages)
+	packages := maps.Clone(classBPackages)
+	for k, v := range pureDelegatePackages {
+		packages["pure-delegate:"+k] = v
 	}
-	return policyInputs{audit: auditset.Identity(), packages: maps.Clone(classBPackages),
-		linknames: maps.Clone(auditedLinknameTargets), seeds: surfaceSeeds(), rows: rows}
+	for k, v := range allowedPureSupportImports {
+		packages["pure-import:"+k] = v
+	}
+	for k, v := range forbiddenPureTimeSelectors {
+		packages["pure-time-forbid:"+k] = v
+	}
+	for k, v := range allowedPureMathRandSelectors {
+		packages["pure-rand-allow:"+k] = v
+	}
+	for k, v := range allowedPureRuntimeSelectors {
+		packages["pure-runtime-allow:"+k] = v
+	}
+	for k, v := range forbiddenPureFmtSelectors {
+		packages["pure-fmt-forbid:"+k] = v
+	}
+	for k, v := range allowedPureFilepathliteSyscallSelectors {
+		packages["pure-filepathlite-syscall-allow:"+k] = v
+	}
+	for k, v := range allowedPureFilepathliteWindowsSelectors {
+		packages["pure-filepathlite-windows-allow:"+k] = v
+	}
+	linknames := maps.Clone(auditedLinknameTargets)
+	for k, v := range allowedPureLinknameTargets {
+		linknames["pure-link2:"+k] = v
+	}
+	for k, v := range allowedPureSingleArgLinknames {
+		linknames["pure-link1:"+k] = v
+	}
+	return policyInputs{
+		verifier:  toolchainVerifierVersion,
+		audit:     auditset.Identity(),
+		packages:  packages,
+		linknames: linknames,
+		seeds:     surfaceSeeds(),
+	}
 }
 
 var sourcePolicyMemo policyMemo
@@ -48,18 +80,11 @@ func admissionPolicy() string {
 }
 
 func (in policyInputs) derive() string {
-	rows := make([]string, 0, len(in.rows))
-	for _, row := range in.rows {
-		data, _ := json.Marshal(rowChain(in.rows, row.Label))
-		rows = append(rows, string(data))
-	}
-	sort.Strings(rows)
-	rows = slices.Compact(rows)
 	seeds := slices.Clone(in.seeds)
 	sort.Strings(seeds)
 	seeds = slices.Compact(seeds)
-	data, _ := json.Marshal([]any{"gofresh/toolchain-policy@1", in.audit,
-		in.packages, in.linknames, seeds, rows})
+	data, _ := json.Marshal([]any{"gofresh/toolchain-policy@2", in.verifier, in.audit,
+		in.packages, in.linknames, seeds})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }

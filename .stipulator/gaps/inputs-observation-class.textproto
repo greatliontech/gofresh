@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-inputs-observation-class"
 reason: "Direct content/metadata digest examples do not establish producer fd-stat coverage. Existing same-toolchain handling lacks the new checked local coverage/refusal obligation."
-content_hash: "f32f64a5c8424ab35eb55e479a9ceb63d1c71435fd5a2a79e11f66a44779957a"
-source_hash: "9c432416b905cdeb51f5ce0b8e031880cc2e7401adac50fa4326298513c3bb83"
+content_hash: "ddeddf8cea6e7ba1c2c261070b81a32e4848087a996faa0a47c85ea027cff330"
+source_hash: "82309b495a4396eedabbf3f950becb80c47ce39d103cbe72755f39aa17c1b4e4"
 lands { manual { condition: "tooling-redesign 5.1w.5: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7" contradicted: true } }

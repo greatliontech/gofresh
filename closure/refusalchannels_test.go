@@ -73,7 +73,7 @@ func TestObservabilityRefusalAttributesTheUnauditedSelection(t *testing.T) {
 	// every host reaches; the closest chain is the toolchain's base row
 	// under cgo and its cgo0 row without (net's netgo file is the one
 	// key off either; plugin's stub is a second key off the base).
-	axis := " (judged under an unaudited toolchain selection: the audited surface of " + runtime.Version() + " moved in 1 keys off " + runtime.Version() + closestChainSuffix(t) + ": net)"
+	axis := " (judged under an unaudited toolchain selection: the audited surface of " + runtime.Version() + " moved in 1 keys: net)"
 	var cold Observability
 	for pass, want := range []int{1, 0} {
 		h, err := newAt(dir, "-tags=netgo")

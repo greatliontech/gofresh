@@ -36,7 +36,7 @@ generated code the closure deliberately does not hash, stales every result recor
 under the old toolchain. This reported identity is not proof that selected
 standard-library source has unchanged content or justified semantics. Dependent
 analysis and recorded proof additionally obey REQ-fresh-dependency-identities
-and [implementation-verification.md](implementation-verification.md); the label
+and [closure.md](closure.md); the label
 does not replace complete selected-content evidence, a checked derivation or
 its compatibility judgment.
 The identity is read from the pass's one environment
@@ -175,7 +175,7 @@ memoization keyed by complete dependency identities, not a commit address or
 reported toolchain label alone — source membership/content, resolved build
 configuration, subject scope, inference rules, checked subordinate claims and
 selected implementation content on which the fact depends
-(REQ-fresh-dependency-identities and REQ-impl-derivation-reuse) — never
+(REQ-fresh-dependency-identities and REQ-closure-observability-toolchain-key) — never
 as the source of truth, so recomputing or discarding it never changes source
 equivalence, and evidence that disagrees with recomputation from source can never
 make an unsound result look valid.

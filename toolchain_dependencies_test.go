@@ -172,8 +172,8 @@ func TestToolchainContentBindsRecordedApplicability(t *testing.T) {
 				if current.AdmissionPolicy != record.AdmissionPolicy {
 					t.Fatal("a source edit moved the policy identity")
 				}
-				if tc.observed && current.ObservationProof.Observable {
-					t.Fatal("unlisted source retained an admitted proof")
+				if tc.observed && !current.ObservationProof.Observable {
+					t.Fatalf("structurally valid source change lost observability: %+v", current.ObservationProof)
 				}
 				if state == "warm" {
 					warm = current

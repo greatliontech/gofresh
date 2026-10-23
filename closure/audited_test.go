@@ -1250,29 +1250,27 @@ func TestAuditedLinknameFloorBounds(t *testing.T) {
 	}
 }
 
-// The toolchain-audit canary: a toolchain move fails HERE, as one named
-// test naming the required walk, instead of surfacing as a scatter of
-// fixture flips (the go1.27 drift arrived exactly that way). The
-// audited sets claim properties of specific standard-library source;
-// this test is the release listing's enforcement pointer.
+// The toolchain-audit canary: the running toolchain's audited standard-library
+// surface satisfies the structural AST and directive contracts across standard
+// build selections.
 func TestAuditedToolchainCoversRunningToolchain(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	for _, sel := range listedSelections {
-		h, err := newAtEnv(context.Background(), ".", environmentWith(sel.Env...), sel.Flags...)
+	for _, sel := range []struct {
+		suffix string
+		env    []string
+		flags  []string
+	}{
+		{"", nil, nil},
+		{" race", nil, []string{"-race"}},
+		{" plan9/amd64", []string{"GOOS=plan9", "GOARCH=amd64"}, nil},
+		{" cgo0", []string{"CGO_ENABLED=0"}, nil},
+	} {
+		h, err := newAtEnv(context.Background(), ".", environmentWith(sel.env...), sel.flags...)
 		if err != nil {
 			t.Fatal(err)
-		}
-		version, demanded, err := canarySelection(context.Background(), h, sel)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !demanded {
-			t.Logf("selection %q requires godst %s or later; inspecting %s", sel.Suffix, sel.Since, version)
-			continue
 		}
 		if !h.SelectionAudited() {
-			moved, closest := movedKeys(h.source, auditedToolchainSources)
-			t.Fatalf("inspected toolchain %q under %v %v is not listed in auditedToolchainSources — %s. %s\n%s", version, sel.Env, sel.Flags, h.SelectionNotice(), listingInstruction(moved), h.source.rowLiteral(version+sel.Suffix, closest, moved))
+			t.Fatalf("inspected toolchain under %v %v failed structural verification — %s", sel.env, sel.flags, h.SelectionNotice())
 		}
 	}
 }

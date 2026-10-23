@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-stdlib-cut"
 reason: "Existing contribution examples establish hash exclusion only; excluded standard implementations still require complete identities and checked semantics for every dependent positive claim."
-content_hash: "66dfd99dd2ef80d2502be9b2c0367cdb800a217eca147fce57c57ab66266a103"
-source_hash: "682da028d16df66104877ccf6ce496e1e1fe472eeee163f71a92fac2207cdfba"
+content_hash: "46b585a2935b13e931c9d66d80bee050e0fc7c146ae7dadf9d1a8aff7cf00bb9"
+source_hash: "9a462d217cc229caa4219d979c48a03b4b3ad897a9d9f11f8d4729d27c3056df"
 lands { manual { condition: "tooling-redesign 5.1w.6: all positive consumers preserve excluded standard implementation dependencies and checked claims while callbacks remain reachable and hashed" } }

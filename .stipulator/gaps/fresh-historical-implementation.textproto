@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-fresh-historical-implementation"
 reason: "The historical-artifact applicability rule is specified, but production classification, native-record evidence, admission and checking do not yet implement it. Existing artifact inspection and local native/source theorems do not supply complete historical producing support, actual-use/harness coverage or a native runtime discharge. The observed-history diagnostic concerns the existing observation channel only; it is not a witness for this implementation invariant."
-content_hash: "5e25c20aad418757c55eb82da675e930b2926f593d58189c0af9d9b11f4c0857"
-source_hash: "86055253c18dfc53e22a861b7fe5a4834c08283ad670560af33db1cc4d2f07f8"
+content_hash: "4e1e298fc1d3043452fa9e84e7f5e3651b743f0529943386224a8bbd6b045eb5"
+source_hash: "3aecc731ac7b5e5319b752fc32c67ec67c63a5fd9a9420991b063e2ede9563a8"
 lands { manual { condition: "tooling-redesign 5.1w.2b.4c defines and implements sufficient immutable native-record evidence and scoped historical applicability; 5.1w.2b.4d integrates complete actual-artifact production and checking. Qualify stock/custom ordinary TestScalar, historical support after executable deletion and memo eviction, complete selection/runtime drift, missing or incompatible evidence, dispatch coverage, independent close and rejection of authority transfer to another artifact, sibling or shared source snapshot." } }

@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-guard-toolchain"
 reason: "Existing tests establish reported go-version identity and pass sampling, not selected content or implementation semantics required by dependent claims."
-content_hash: "012539ac477a2182a6ebb664df2d87ea3272e417bb9ad6801f377f0cabc2d139"
-source_hash: "93cb8de5a13d32d4766a1b4a5ff42c79c3a73943d18edd7fc7fbc6c7eab42e92"
+content_hash: "a2678703d05a31c86365081dfccbfca6b92c14c1bbf49ed75019c42d7a585787"
+source_hash: "92361cd2bcb23ef38b41e81d6e69442ea9665baf3a2c5e9b6e9a1346e1b4d0ff"
 lands { manual { condition: "tooling-redesign 5.1w.6: reported identity remains independent of complete selected implementation evidence and checked dependent claims at all consumers" } }

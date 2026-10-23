@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-impl-compositional-derivation"
-reason: "Existing positive implementation admissions use unchecked summaries rather than compositional checked body evidence. Concurrent new code is not yet independently accepted by these records."
-content_hash: "df976fac696e6a0bdc005179d695b7e166bf7dfefd1cc667f83048b1565ae214"
-source_hash: "92c7ae5dd0611830c8303bd3740cae859c51a1e842e246995aae361abb3c8bf0"
-lands { manual { condition: "tooling-redesign 5.1w.2: a useful independently checked computation vertical composes required premises, native boundaries in 5.1w.3 and observation claims in 5.1w.5, with all consumers integrated in 5.1w.6" contradicted: true } }

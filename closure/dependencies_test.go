@@ -2,6 +2,7 @@ package closure
 
 import (
 	"context"
+	"maps"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -93,21 +94,19 @@ func TestHasherSuppliesCompleteMemoDependencies(t *testing.T) {
 }
 
 func TestAdmissionPolicyTracksInventoryNotLabels(t *testing.T) {
-	original := auditedToolchainSources
-	t.Cleanup(func() { auditedToolchainSources = original })
-	auditedToolchainSources = []toolchainSourceRow{
-		{Label: "base", Packages: map[string]string{"strings": "a", "runtime": "b"}},
-		{Label: "delta", Base: "base", Packages: map[string]string{"strings": "c"}},
-	}
+	original := maps.Clone(auditedLinknameTargets)
+	t.Cleanup(func() { auditedLinknameTargets = original })
 	base := admissionPolicy()
-	auditedToolchainSources[0].Label = "renamed"
-	auditedToolchainSources[1].Base = "renamed"
-	slices.Reverse(auditedToolchainSources)
-	auditedToolchainSources = append(auditedToolchainSources, toolchainSourceRow{Label: "duplicate-content", Base: "renamed"})
-	if admissionPolicy() != base { t.Fatal("documentary labels, order or duplicate inventories moved policy") }
-	auditedToolchainSources[0].Packages["strings"] = "changed"
-	if admissionPolicy() == base { t.Fatal("changed admission bytes did not move policy") }
-	if (&Hasher{}).AdmissionPolicy() != "" { t.Fatal("an unconstructed hasher claimed a policy dependency") }
+	if base == "" {
+		t.Fatal("empty policy identity")
+	}
+	auditedLinknameTargets["runtime.extraTargetForTest"] = true
+	if admissionPolicy() == base {
+		t.Fatal("changed admission inventory did not move policy")
+	}
+	if (&Hasher{}).AdmissionPolicy() != "" {
+		t.Fatal("an unconstructed hasher claimed a policy dependency")
+	}
 }
 
 func TestPositionBearingProofMemoTracksSourceSpelling(t *testing.T) {

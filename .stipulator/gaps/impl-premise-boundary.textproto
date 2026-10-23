@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-impl-premise-boundary"
-reason: "Named atomic, runtime, linkage and library admissions currently inherit semantic summaries without identified checked native arguments; compiler correctness alone does not establish them. The isolated compiler-intrinsic regression demonstrated that nominal Go-source checking can miss CPU-feature-dependent implementation dispatch. Its runtime grant is cut off pending checked compiler-selected correspondence; the source proof alone grants none."
-content_hash: "c2032447bb1f583c7ad2471c01fe2fdc974f704e2b5b39388b3c0501c2960926"
-source_hash: "45a036f5551de01d57b5699a3b23b435407409e07dd7458d665598ad48c5df00"
-lands { manual { condition: "tooling-redesign 5.1w.3: useful native derivations expose applicable language, machine and primitive-effect premises without library-summary axioms, integrated across dependent consumers in 5.1w.6; tooling-redesign 5.1w.2b additionally establishes actual compiler-selected implementation and inline/dispatch scope before runtime discharge, preserving the requested build and the independent same-binary POPCNT negative" contradicted: true } }

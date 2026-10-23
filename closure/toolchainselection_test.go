@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -13,15 +12,11 @@ import (
 	"github.com/greatliontech/gofresh/gotool"
 )
 
-// Every selection the content key admits or refuses, on the running
-// toolchain (the canary pins that it is listed): the default and race
-// selections admit — the race selection selects the same audited files
-// (the recorded fact, now enforced by equality); a tag no audited file
-// is constrained on selects the same files and admits BY CONTENT (the
-// selection axis dissolved); and an unclassifiable flag set refuses
-// (REQ-closure-observability-toolchain-key). A tag that selects different
-// audited bytes — the dst hook tag on a godst toolchain — is
-// TestDstSelectionIsJudgedByContentNeverByTag's.
+// Every selection the structural content verifier admits or refuses on the
+// running toolchain: the default, race, tag, cross-platform, and cgo-off
+// selections admit by structural AST verification without hardcoded per-release
+// digest tables; an unclassifiable flag set refuses
+// (REQ-closure-observability-toolchain-key).
 func TestSelectionsAdmitByContent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("lists the standard library under several selections")
@@ -37,18 +32,16 @@ func TestSelectionsAdmitByContent(t *testing.T) {
 		return h
 	}
 	if h := hasher(); !h.SelectionAudited() {
-		t.Skipf("running toolchain unlisted (the canary covers it): %s", h.SelectionNotice())
+		t.Fatalf("running toolchain failed structural verification: %s", h.SelectionNotice())
 	}
-	// The race arms need cgo: the go command refuses a race listing
-	// without it.
 	cgo := cgoEnabled(t)
 	for _, tc := range []struct {
 		name  string
 		flags []string
 		cgo   bool
 	}{
-		{"race selects the same audited files", []string{"-race"}, true},
-		{"a tag no audited file is constrained on selects the same files", []string{"-tags=dup"}, false},
+		{"race selection", []string{"-race"}, true},
+		{"a tag no audited file is constrained on", []string{"-tags=dup"}, false},
 		{"race with such a tag", []string{"-race", "-tags=dup"}, true},
 	} {
 		if tc.cgo && !cgo {
@@ -65,21 +58,14 @@ func TestSelectionsAdmitByContent(t *testing.T) {
 	if h := hasher("-tags"); h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "could not be read") {
 		t.Errorf("unclassifiable flags: audited=%v attribution %q", h.SelectionAudited(), h.SelectionAttribution())
 	}
-	// A tag that selects audited bytes refuses naming the package: netgo
-	// selects net's netgo-constrained files on every listed toolchain;
-	// the refusal labels the surface by the go command's own version
-	// (the pass snapshot's), never the analyzing process's.
+	// A tag that selects netgo resolver override files refuses naming net.
 	snapshot, err := (gotool.Runner{}).TakeEnvSnapshot(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h := hasher("-tags=netgo"); h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "the audited surface of "+snapshot.Value("GOVERSION")+" moved in 1 keys off") || !strings.HasSuffix(h.SelectionAttribution(), ": net") {
-		t.Errorf("netgo selection: audited=%v attribution %q, want net named as moved off the snapshot's version", h.SelectionAudited(), h.SelectionAttribution())
+	if h := hasher("-tags=netgo"); h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "the audited surface of "+snapshot.Value("GOVERSION")+" moved in 1 keys: net") {
+		t.Errorf("netgo selection: audited=%v attribution %q, want net named as moved", h.SelectionAudited(), h.SelectionAttribution())
 	}
-	// An explicit flag overrides GOFLAGS, as the go command merges them:
-	// `-tags=dup` under GOFLAGS=-tags=netgo selects no netgo file and
-	// admits, and the union spelled explicitly — refused — shares no
-	// memo record with it (the scope is the snapshot's identity).
 	if h, err := newAtEnv(context.Background(), dir, environmentWith("GOFLAGS=-tags=netgo"), "-tags=dup"); err != nil {
 		t.Fatal(err)
 	} else if !h.SelectionAudited() {
@@ -88,42 +74,56 @@ func TestSelectionsAdmitByContent(t *testing.T) {
 	if h := hasher("-tags=dup,netgo"); h.SelectionAudited() || !strings.HasSuffix(h.SelectionAttribution(), ": net") {
 		t.Errorf("the explicit union served the override's record: audited=%v attribution %q", h.SelectionAudited(), h.SelectionAttribution())
 	}
-	// Another platform's analysis selects other bytes — its split
-	// files: a listed platform row (plan9/amd64, listed from this host
-	// over its default row) admits by content; a platform no row covers
-	// refuses until a host lists it.
-	if h, err := newAtEnv(context.Background(), dir, environmentWith("GOOS=plan9", "GOARCH=amd64")); err != nil {
-		t.Fatal(err)
-	} else if !h.SelectionAudited() {
-		t.Errorf("the listed plan9/amd64 selection refused: %s", h.SelectionNotice())
-	}
-	// cgo off — every host without a C compiler — is listed from this
-	// host as the same kind of delta row.
-	if h, err := newAtEnv(context.Background(), dir, environmentWith("CGO_ENABLED=0")); err != nil {
-		t.Fatal(err)
-	} else if !h.SelectionAudited() {
-		t.Errorf("the listed cgo-off selection refused: %s", h.SelectionNotice())
-	}
-	if h, err := newAtEnv(context.Background(), dir, environmentWith("GOOS=windows", "GOARCH=arm64")); err != nil {
-		t.Fatal(err)
-	} else if h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "moved in") {
-		t.Errorf("an unlisted platform: audited=%v attribution %q, want the moved keys named", h.SelectionAudited(), h.SelectionAttribution())
+	// Cross-platform and cgo-off selections admit structurally without needing
+	// per-platform digest rows.
+	for _, env := range [][]string{
+		environmentWith("GOOS=plan9", "GOARCH=amd64"),
+		environmentWith("CGO_ENABLED=0"),
+		environmentWith("GOOS=windows", "GOARCH=arm64"),
+	} {
+		if h, err := newAtEnv(context.Background(), dir, env); err != nil {
+			t.Fatal(err)
+		} else if !h.SelectionAudited() {
+			t.Errorf("selection %v refused: %s", env, h.SelectionNotice())
+		}
 	}
 }
 
-// The degradation over explicit inputs — the unlisted world a listed
-// toolchain cannot reach: an unclassifiable flag set, an unreadable
-// surface, moved keys named and bounded with the lacking ones, and the
-// audited verdict; the notice is axis + consequence + remedy, and the
-// attribution the bare axis (REQ-closure-refusal-channels).
+// The degradation over explicit inputs: an unclassifiable flag set, an
+// unreadable surface, packages failing structural verification named and
+// bounded, and the audited verdict; the notice is axis + consequence + remedy,
+// and the attribution the bare axis (REQ-closure-refusal-channels).
 func TestToolchainSourceDegradationNamesEveryAxis(t *testing.T) {
-	prior := auditedToolchainSources
-	t.Cleanup(func() { auditedToolchainSources = prior })
-	auditedToolchainSources = []toolchainSourceRow{{Label: "go1.99.0", Packages: map[string]string{"strings": "a", "bytes": "b", "runtime": "s"}}}
-	same := sourceDigests{Packages: map[string]string{"strings": "a", "bytes": "b", "runtime": "s"}}
-	if d := toolchainSourceDegradation("go1.99.0", same, nil); !d.audited() || d.notice() != "" || d.axis != "" {
-		t.Fatalf("every digest listed, yet %+v", d)
+	base := sourceDigests{
+		Packages:  map[string]string{},
+		inventory: map[string]listedPackage{},
 	}
+	for _, root := range auditedSurfaceTables() {
+		first, _, _ := strings.Cut(root, "/")
+		if strings.Contains(first, ".") {
+			continue
+		}
+		digest := "digest-" + root
+		base.Packages[root] = digest
+		base.inventory[root] = listedPackage{ImportPath: root, Audited: true, digest: digest}
+		memoKey := verifiedPackageMemoKey(root, digest)
+		verifiedPackageMemo.Store(memoKey, true)
+		t.Cleanup(func() { verifiedPackageMemo.Delete(memoKey) })
+	}
+	if d := toolchainSourceDegradation("go1.99.0", base, nil); !d.audited() || d.notice() != "" || d.axis != "" {
+		t.Fatalf("every package verified, yet %+v", d)
+	}
+
+	unverifiedBytes := sourceDigests{
+		Packages:  map[string]string{},
+		inventory: map[string]listedPackage{},
+	}
+	for k, v := range base.Packages {
+		unverifiedBytes.Packages[k] = v
+		unverifiedBytes.inventory[k] = base.inventory[k]
+	}
+	unverifiedBytes.Packages["bytes"] = "corrupt-digest"
+
 	for _, tc := range []struct {
 		name    string
 		d       sourceDigests
@@ -132,9 +132,7 @@ func TestToolchainSourceDegradationNamesEveryAxis(t *testing.T) {
 		remedy  string
 	}{
 		{"unreadable surface (an unclassifiable flag set included)", sourceDigests{}, errors.New("listing the standard library: boom"), "could not be read: listing the standard library: boom", "listed and readable"},
-		{"one package moved", sourceDigests{Packages: map[string]string{"strings": "a", "bytes": "moved", "runtime": "s"}}, nil, "moved in 1 keys off go1.99.0: bytes", "walked against the admissions"},
-		{"the runtime moved", sourceDigests{Packages: map[string]string{"strings": "a", "bytes": "b", "runtime": "moved"}}, nil, "moved in 1 keys off go1.99.0: runtime", "digests listed"},
-		{"a key the row lacks", sourceDigests{Packages: map[string]string{"strings": "a", "bytes": "b", "runtime": "s", "unique": "u"}}, nil, "moved in 1 keys off go1.99.0: unique", "listed"},
+		{"one package failed verification", unverifiedBytes, nil, "moved in 1 keys: bytes", "structural source contracts"},
 	} {
 		d := toolchainSourceDegradation("go1.99.0", tc.d, tc.listErr)
 		if d.audited() || !strings.Contains(d.axis, tc.axis) || !strings.Contains(d.remedy, tc.remedy) {
@@ -145,29 +143,36 @@ func TestToolchainSourceDegradationNamesEveryAxis(t *testing.T) {
 		}
 		requireBareAxis(t, tc.name, d.notice(), d.axis)
 	}
-	// Many moved keys: packages first, then symbols, bounded and the
-	// rest counted.
-	many := sourceDigests{Packages: map[string]string{}}
+	// Many failed keys: bounded to 8 and the rest counted.
+	many := sourceDigests{
+		Packages:  map[string]string{},
+		inventory: map[string]listedPackage{},
+	}
 	for _, p := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"} {
 		many.Packages[p] = "x"
 	}
 	d := toolchainSourceDegradation("go1.99.0", many, nil)
-	if want := "moved in 11 keys off go1.99.0: a, b, c, d, e, f, g, h (+3 more)"; !strings.Contains(d.axis, want) {
-		t.Fatalf("bounded naming: %q, want %q", d.axis, want)
-	}
-	// No row listed at all: every key moved, off no row.
-	auditedToolchainSources = nil
-	if d := toolchainSourceDegradation("go1.99.0", same, nil); !strings.Contains(d.axis, "moved in 3 keys (no row listed): bytes, runtime, strings") {
-		t.Fatalf("no rows: %q", d.axis)
+	if !strings.Contains(d.axis, "moved in ") || !strings.Contains(d.axis, "a, b, c, d, e, f, g, h (+") {
+		t.Fatalf("bounded naming: %q", d.axis)
 	}
 }
 
-// Equal admission Booleans cannot alias different source or policy inputs.
+// Equal admission Booleans cannot alias different source or policy inputs, and
+// an unaudited selection never shares an effectScanScope or AnalysisScope with
+// an audited selection over identical content and policy.
 func TestEffectScanScopeDiscriminatesContentAndPolicy(t *testing.T) {
 	h := Hasher{selectionResolved: true, source: sourceDigests{Content: "content-a", Policy: "policy-a"}}
 	base := h.effectScanScope()
 	if base != effectScanStrategy+" "+runtime.Version()+"|content-a|policy-a" {
 		t.Fatalf("effect scope lost a dependency: %q", base)
+	}
+	unaudited := Hasher{selectionResolved: true, selection: selectionDegradation{axis: "moved"}, source: sourceDigests{Content: "content-a", Policy: "policy-a"}}
+	if unaudited.effectScanScope() == base {
+		t.Fatal("unaudited selection shared effectScanScope with audited selection")
+	}
+	caller := AnalysisScope{ProofStrategy: "proof", FactStrategy: "facts", Toolchain: "tc", BuildConfig: "bc"}
+	if auditedScope, unauditedScope := h.SetAnalysisScope(caller), unaudited.SetAnalysisScope(caller); auditedScope.Proofs() == unauditedScope.Proofs() || auditedScope.Facts() == unauditedScope.Facts() {
+		t.Fatal("unaudited selection shared AnalysisScope with audited selection")
 	}
 	for _, source := range []sourceDigests{
 		{Content: "content-b", Policy: "policy-a"},
@@ -234,15 +239,15 @@ func TestUnlistedSurfaceRefusesObservability(t *testing.T) {
 	if o := listedObs[subject]; !o.Observable {
 		t.Fatalf("fixture assumption moved: TestReadFile not observable under the listed toolchain: %+v", o)
 	}
-	prior := auditedToolchainSources
-	t.Cleanup(func() { auditedToolchainSources = prior })
-	auditedToolchainSources = nil
+	memoKey := verifiedPackageMemoKey("strings", listed.source.Packages["strings"])
+	verifiedPackageMemo.Store(memoKey, false)
+	t.Cleanup(func() { verifiedPackageMemo.Delete(memoKey) })
 	unlisted, err := newAt(fixture)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if unlisted.SelectionAudited() || !strings.Contains(unlisted.SelectionAttribution(), "moved in") {
-		t.Fatalf("an emptied listing admitted: %v %q", unlisted.SelectionAudited(), unlisted.SelectionAttribution())
+		t.Fatalf("an unverified surface admitted: %v %q", unlisted.SelectionAudited(), unlisted.SelectionAttribution())
 	}
 	unlistedObs, err := unlisted.ComputeObservabilityBatch([]Subject{subject})
 	if err != nil {
@@ -347,22 +352,4 @@ func environmentWith(settings ...string) []string {
 		}
 	}
 	return append(env, settings...)
-}
-
-// The listing hosts list the stated selection set — the host default,
-// the race seams, the platforms the fleet analyzes for from another
-// host, and cgo off — exactly: a selection struck from the set would
-// leave the canary silent about a row the fleet relies on.
-func TestListedSelectionsAreTheStatedSet(t *testing.T) {
-	want := []listedSelection{
-		{},
-		{Suffix: " race", Flags: []string{"-race"}},
-		{Suffix: " plan9/amd64", Env: []string{"GOOS=plan9", "GOARCH=amd64"}},
-		{Suffix: " cgo0", Env: []string{"CGO_ENABLED=0"}},
-		{Suffix: " dst", Flags: []string{"-tags", "dst"}, Since: "go1.27.2-dst.15"},
-		{Suffix: " dst race", Flags: []string{"-tags", "dst", "-race"}, Since: "go1.27.2-dst.15"},
-	}
-	if !reflect.DeepEqual(listedSelections, want) {
-		t.Fatalf("listedSelections = %+v, want the stated set %+v", listedSelections, want)
-	}
 }

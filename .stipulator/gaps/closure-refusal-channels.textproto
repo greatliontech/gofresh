@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-refusal-channels"
 reason: "Ambient and signature diagnostics remain tested, but unsupported implementation failures still attribute to a global unaudited selection rather than structured deciding premise paths."
-content_hash: "a299db532da4aa1e195efcb1137cee4f676c3c70a03cd9e2395bd7d9088cfe53"
-source_hash: "b5503f2be1c65321b0f9b98ba7976cb3f6dc1db2c3cc783e876060d91ac514c7"
+content_hash: "a4138cf1179b5906f14167a35e5606b933943ab2e8f8cbd7ca0901938c32e1e5"
+source_hash: "b514a93ac048baedeee8d4c2c01d9922f5b08eee1e76e9c04b1c0fbd31a4f09c"
 lands { manual { condition: "tooling-redesign 5.1w.6: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7" contradicted: true } }

@@ -395,6 +395,15 @@ func (s *Snapshot) TestVariantLedger(subject Subject) (TestVariantLedger, error)
 	return s.view.TestVariantLedger(subject)
 }
 
+// ExplainDynamicState derives the refusal chain for a dynamic-state culprit
+// against the snapshot's package scope and configuration.
+func (s *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName string) (Chain, error) {
+	if s == nil || s.view == nil {
+		return Chain{}, errors.New("gofresh: uninitialized snapshot")
+	}
+	return s.view.ExplainDynamicState(ctx, pkgPath, varName)
+}
+
 // CurrentFacts returns this binding's analysis-only fingerprint projection for
 // explanations. It carries neither an execution receipt nor runtime observation
 // or selected producing proof. It is not a newly produced result.

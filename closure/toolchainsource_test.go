@@ -2,12 +2,12 @@ package closure
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -381,117 +381,299 @@ func TestListingErrorsRefuseByNameAndTheEmptySelectionDigests(t *testing.T) {
 	}
 }
 
-// movedKeys judges per row chain: a row's chain (its own keys over its
-// base's) must list EVERY key — a toolchain mixing two listed releases'
-// packages is no listed toolchain, one release's race runtime over the
-// other's files included: a selection's row is a delta over its own
-// toolchain's row and admits nothing over another's; the closest
-// chain names the refusal, sorted; with no row listed every key is
-// moved.
-func TestMovedKeysJudgePerRowChain(t *testing.T) {
-	rows := []toolchainSourceRow{
-		{Label: "go1.99.0", Packages: map[string]string{"a": "1", "b": "1", "c": "1", "runtime": "1"}},
-		{Label: "go1.99.1", Base: "go1.99.0", Packages: map[string]string{"a": "2", "runtime": "2"}},
-		{Label: "go1.99.0 race", Base: "go1.99.0", Packages: map[string]string{"c": "race", "runtime": "1r"}},
-		{Label: "go1.99.1 race", Base: "go1.99.1", Packages: map[string]string{"c": "race", "runtime": "2r"}},
-	}
-	digests := func(a, b, c, r string) sourceDigests {
-		return sourceDigests{Packages: map[string]string{"a": a, "b": b, "c": c, "runtime": r}}
-	}
-	for _, tc := range []struct {
-		name    string
-		d       sourceDigests
-		moved   []string
-		closest string
-	}{
-		{"the root row", digests("1", "1", "1", "1"), nil, "go1.99.0"},
-		{"the delta row over its base", digests("2", "1", "1", "2"), nil, "go1.99.1"},
-		{"each toolchain's race row over its own chain", digests("2", "1", "race", "2r"), nil, "go1.99.1 race"},
-		{"the other toolchain's race row", digests("1", "1", "race", "1r"), nil, "go1.99.0 race"},
-		{"one release's race runtime over the other's files refuses (a tie, the first race row named)", digests("2", "1", "race", "1r"), []string{"a"}, "go1.99.0 race"},
-		{"a mix of two releases refuses (a tie names the first row)", digests("2", "1", "1", "1"), []string{"a"}, "go1.99.0"},
-		{"a mix the other way", digests("1", "1", "1", "2"), []string{"runtime"}, "go1.99.0"},
-		{"a mix closer to the delta row", digests("2", "9", "1", "2"), []string{"b"}, "go1.99.1"},
-		{"the race seam under the default runtime", digests("1", "1", "race", "1"), []string{"c"}, "go1.99.0"},
-		{"the closest row names the fewest moved, sorted", digests("3", "9", "1", "3"), []string{"a", "b", "runtime"}, "go1.99.0"},
-	} {
-		moved, closest := movedKeys(tc.d, rows)
-		if !reflect.DeepEqual(moved, tc.moved) || closest != tc.closest {
-			t.Errorf("%s: moved %v off %q, want %v off %q", tc.name, moved, closest, tc.moved, tc.closest)
+// verifyToolchainSurface and verifyListedPackage enforce the structural AST and
+// directive contracts over standard-library packages without hardcoded release
+// digest tables.
+func TestVerifyToolchainSurfaceEnforcesStructuralContracts(t *testing.T) {
+	t.Parallel()
+	writePkg := func(importPath string, files map[string]string) listedPackage {
+		t.Helper()
+		dir := t.TempDir()
+		var names []string
+		for name, content := range files {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		digest, err := digestFiles(context.Background(), dir, names)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return listedPackage{
+			ImportPath: importPath,
+			Dir:        dir,
+			Files:      names,
+			Audited:    true,
+			digest:     digest,
 		}
 	}
-	if moved, closest := movedKeys(digests("1", "1", "1", "1"), nil); !reflect.DeepEqual(moved, []string{"a", "b", "c", "runtime"}) || closest != "" {
-		t.Fatalf("no rows: moved %v off %q", moved, closest)
+
+	validPure := writePkg("strings", map[string]string{
+		"strings.go": "package strings\nimport _ \"unsafe\"\n// prose comment mentioning //go:linkname foo bar mid-line is ignored\n//go:linkname divideError runtime.divideError\nfunc Compare(a, b string) int { return 0 }\n",
+	})
+	if err := verifyListedPackage(validPure); err != nil {
+		t.Fatalf("valid pure package refused: %v", err)
 	}
+
+	badImportPure := writePkg("strings", map[string]string{
+		"strings.go": "package strings\nimport \"os\"\nvar _ = os.Args\n",
+	})
+	if err := verifyListedPackage(badImportPure); err == nil {
+		t.Fatal("pure package importing os admitted")
+	}
+
+	unlistedInternalPure := writePkg("strings", map[string]string{
+		"strings.go": "package strings\nimport \"internal/poll\"\nvar _ = poll.ErrNetClosing\n",
+	})
+	if err := verifyListedPackage(unlistedInternalPure); err == nil {
+		t.Fatal("pure package importing unlisted internal/poll admitted")
+	}
+
+	badDelegateImport := writePkg("internal/bytealg", map[string]string{
+		"bytealg.go": "package bytealg\nimport \"os\"\nvar _ = os.Getenv\n",
+	})
+	if err := verifyListedPackage(badDelegateImport); err == nil {
+		t.Fatal("pure-delegate package importing os admitted")
+	}
+
+	validTimePure := writePkg("encoding/asn1", map[string]string{
+		"asn1.go": "package asn1\nimport \"time\"\nvar _ = time.UTC\n",
+	})
+	if err := verifyListedPackage(validTimePure); err != nil {
+		t.Fatalf("pure package using pure time selector refused: %v", err)
+	}
+
+	badTimeNowPure := writePkg("encoding/asn1", map[string]string{
+		"asn1.go": "package asn1\nimport \"time\"\nvar _ = time.Now()\n",
+	})
+	if err := verifyListedPackage(badTimeNowPure); err == nil {
+		t.Fatal("pure package calling time.Now() admitted")
+	}
+
+	badTimeAliasPure := writePkg("encoding/asn1", map[string]string{
+		"asn1.go": "package asn1\nimport t \"time\"\nvar _ = t.Now()\n",
+	})
+	if err := verifyListedPackage(badTimeAliasPure); err == nil {
+		t.Fatal("pure package aliasing time import admitted")
+	}
+
+	validMathBigRand := writePkg("math/big", map[string]string{
+		"nat.go": "package big\nimport \"math/rand\"\ntype r = *rand.Rand\n",
+	})
+	if err := verifyListedPackage(validMathBigRand); err != nil {
+		t.Fatalf("valid math/big rand.Rand reference refused: %v", err)
+	}
+
+	badMathBigRand := writePkg("math/big", map[string]string{
+		"nat.go": "package big\nimport \"math/rand\"\nvar _ = rand.Int()\n",
+	})
+	if err := verifyListedPackage(badMathBigRand); err == nil {
+		t.Fatal("math/big calling global rand.Int() admitted")
+	}
+
+	badRuntimePure := writePkg("strings", map[string]string{
+		"strings.go": "package strings\nimport \"runtime\"\nvar _ = runtime.NumCPU()\n",
+	})
+	if err := verifyListedPackage(badRuntimePure); err == nil {
+		t.Fatal("pure package calling runtime.NumCPU() admitted")
+	}
+
+	validScanner := writePkg("text/scanner", map[string]string{
+		"scanner.go": "package scanner\nimport \"os\"\nvar _ = os.Stderr\n",
+	})
+	if err := verifyListedPackage(validScanner); err != nil {
+		t.Fatalf("valid text/scanner os.Stderr reference refused: %v", err)
+	}
+
+	for name, src := range map[string]string{
+		"Getenv":       "package scanner\nimport \"os\"\nvar _ = os.Getenv(\"X\")\n",
+		"StderrWrite":  "package scanner\nimport \"os\"\nfunc f() { _, _ = os.Stderr.Write(nil) }\n",
+		"StderrAssign": "package scanner\nimport \"os\"\nfunc f() { os.Stderr = nil }\n",
+		"StderrAddr":   "package scanner\nimport \"os\"\nvar _ = &os.Stderr\n",
+		"AliasedOS":    "package scanner\nimport myos \"os\"\nvar _ = myos.Getenv(\"X\")\n",
+	} {
+		badScanner := writePkg("text/scanner", map[string]string{"scanner.go": src})
+		if err := verifyListedPackage(badScanner); err == nil {
+			t.Fatalf("text/scanner violation %s admitted", name)
+		}
+	}
+
+	for name, src := range map[string]string{
+		"two-arg unapproved": "package strings\nimport _ \"unsafe\"\n//go:linkname secret runtime.getAuxv\nfunc secret() uintptr\n",
+		"one-arg unapproved": "package strings\nimport _ \"unsafe\"\n//go:linkname ExportedSecret\nfunc ExportedSecret() {}\n",
+		"wasmimport":         "package strings\n//go:wasmimport env clock\nfunc clock() int64\n",
+		"cgo directive":      "package strings\n//go:cgo_import_dynamic libc_open open \"libc.so\"\n",
+		"fmt Println":        "package strings\nimport \"fmt\"\nfunc f() { fmt.Println(\"leak\") }\n",
+		"fmt aliased":        "package strings\nimport f \"fmt\"\nvar _ = f.Sprintf(\"x\")\n",
+	} {
+		badDirPure := writePkg("strings", map[string]string{"strings.go": src})
+		if err := verifyListedPackage(badDirPure); err == nil {
+			t.Fatalf("pure package directive/selector violation %s admitted", name)
+		}
+	}
+
+	for name, pkg := range map[string]listedPackage{
+		"delegate os import": writePkg("crypto/internal/fips140/sha256", map[string]string{
+			"sha256.go": "package sha256\nimport \"os\"\nvar _ = os.Getenv(\"X\")\n",
+		}),
+		"delegate unapproved 1-arg linkname": writePkg("internal/bytealg", map[string]string{
+			"bytealg.go": "package bytealg\nimport _ \"unsafe\"\n//go:linkname unapprovedHook\nfunc unapprovedHook()\n",
+		}),
+		"filepathlite bad syscall": writePkg("internal/filepathlite", map[string]string{
+			"path.go": "package filepathlite\nimport \"syscall\"\nvar _, _ = syscall.Getenv(\"X\")\n",
+		}),
+		"filepathlite bad windows": writePkg("internal/filepathlite", map[string]string{
+			"path.go": "package filepathlite\nimport \"internal/syscall/windows\"\nvar _ = windows.GetStdHandle(0)\n",
+		}),
+		"jsonv2 bare time.Unix": writePkg("encoding/json/v2", map[string]string{
+			"time.go": "package json\nimport \"time\"\nvar _ = time.Unix(0, 0)\n",
+		}),
+	} {
+		if err := verifyListedPackage(pkg); err == nil {
+			t.Fatalf("delegate package violation %s admitted", name)
+		}
+	}
+
+	validJsonV2TimeUnixUTC := writePkg("encoding/json/v2", map[string]string{
+		"time.go": "package json\nimport \"time\"\nvar _ = time.Unix(0, 0).UTC()\n",
+	})
+	if err := verifyListedPackage(validJsonV2TimeUnixUTC); err != nil {
+		t.Fatalf("encoding/json/v2 time.Unix(0, 0).UTC() refused: %v", err)
+	}
+
+	nativeFilePure := writePkg("strings", map[string]string{
+		"strings.go": "package strings\n",
+		"native.c":   "int x = 0;\n",
+	})
+	if err := verifyListedPackage(nativeFilePure); err == nil {
+		t.Fatal("pure package selecting native C file admitted")
+	}
+
+	validOS := writePkg("os", map[string]string{
+		"os.go": "package os\nimport \"internal/testlog\"\nfunc Getenv(k string) string { testlog.Getenv(k); return \"\" }\nfunc LookupEnv(k string) (string, bool) { testlog.Getenv(k); return \"\", false }\nfunc OpenFile(n string) { testlog.Open(n) }\nfunc openDir(n string) { testlog.Open(n) }\nfunc Stat(n string) { testlog.Stat(n) }\nfunc Lstat(n string) { testlog.Stat(n) }\nfunc Chdir(d string) error { testlog.Open(d); testlog.Logger().Chdir(d); return nil }\n",
+	})
+	if err := verifyListedPackage(validOS); err != nil {
+		t.Fatalf("valid os package refused: %v", err)
+	}
+
+	badOSMissingLookupEnv := writePkg("os", map[string]string{
+		"os.go": "package os\nimport \"internal/testlog\"\nfunc Getenv(k string) string { testlog.Getenv(k); return \"\" }\nfunc OpenFile(n string) { testlog.Open(n) }\nfunc openDir(n string) { testlog.Open(n) }\nfunc Stat(n string) { testlog.Stat(n) }\nfunc Lstat(n string) { testlog.Stat(n) }\nfunc Chdir(d string) error { testlog.Open(d); testlog.Logger().Chdir(d); return nil }\n",
+	})
+	if err := verifyListedPackage(badOSMissingLookupEnv); err == nil {
+		t.Fatal("os package missing LookupEnv admitted")
+	}
+
+	badOSChdirMissingOpen := writePkg("os", map[string]string{
+		"os.go": "package os\nimport \"internal/testlog\"\nfunc Getenv(k string) string { testlog.Getenv(k); return \"\" }\nfunc LookupEnv(k string) (string, bool) { testlog.Getenv(k); return \"\", false }\nfunc OpenFile(n string) { testlog.Open(n) }\nfunc openDir(n string) { testlog.Open(n) }\nfunc Stat(n string) { testlog.Stat(n) }\nfunc Lstat(n string) { testlog.Stat(n) }\nfunc Chdir(d string) error { testlog.Logger().Chdir(d); return nil }\n",
+	})
+	if err := verifyListedPackage(badOSChdirMissingOpen); err == nil {
+		t.Fatal("os package Chdir missing testlog.Open admitted")
+	}
+
+	badOSMissingHook := writePkg("os", map[string]string{
+		"os.go": "package os\nimport \"internal/testlog\"\nfunc hooks() { testlog.Open(\"a\") }\n",
+	})
+	if err := verifyListedPackage(badOSMissingHook); err == nil {
+		t.Fatal("os package missing testlog hooks admitted")
+	}
+
+	badOSSyscallChdirOnly := writePkg("os", map[string]string{
+		"os.go": "package os\nimport (\"internal/testlog\"; \"syscall\")\nfunc hooks() { testlog.Open(\"a\"); testlog.Stat(\"b\"); testlog.Getenv(\"c\"); _ = testlog.Logger(); _ = syscall.Chdir(\"d\") }\n",
+	})
+	if err := verifyListedPackage(badOSSyscallChdirOnly); err == nil {
+		t.Fatal("os package with only syscall.Chdir and no testlog Chdir hook admitted")
+	}
+
+	badOSUnhookedGetenv := writePkg("os", map[string]string{
+		"os.go": "package os\nimport \"internal/testlog\"\nfunc Getenv(k string) string { return \"\" }\nfunc other() { testlog.Open(\"a\"); testlog.Stat(\"b\"); testlog.Getenv(\"c\"); testlog.Logger().Chdir(\"d\") }\n",
+	})
+	if err := verifyListedPackage(badOSUnhookedGetenv); err == nil {
+		t.Fatal("os package with unhooked Getenv function admitted")
+	}
+
+	validTestdeps := writePkg("testing/internal/testdeps", map[string]string{
+		"deps.go": "package testdeps\nimport \"internal/testlog\"\nfunc StartTestLog() { testlog.SetLogger(nil) }\nfunc StopTestLog() error { w.Flush(); return nil }\n",
+	})
+	if err := verifyListedPackage(validTestdeps); err != nil {
+		t.Fatalf("valid testdeps package refused: %v", err)
+	}
+
+	validTestingStock := writePkg("testing", map[string]string{
+		"testing.go": "package testing\nfunc run() { deps.StartTestLog(nil); if err := deps.StopTestLog(); err != nil { panic(err) } }\n",
+	})
+	if err := verifyListedPackage(validTestingStock); err != nil {
+		t.Fatalf("valid stock testing package refused: %v", err)
+	}
+
+	discardedStopTesting := writePkg("testing", map[string]string{
+		"testing.go": "package testing\nfunc run() { deps.StartTestLog(nil); _ = deps.StopTestLog() }\n",
+	})
+	if err := verifyListedPackage(discardedStopTesting); err == nil {
+		t.Fatal("testing package discarding StopTestLog error admitted")
+	}
+
+	validTestingDst := writePkg("testing", map[string]string{
+		"testing.go":    "package testing\nfunc run() { deps.StartTestLog(dstWrapTestlogWriter(nil)); if err := deps.StopTestLog(); err != nil { panic(err) } }\n",
+		"dst_hostio.go": "package testing\nfunc dstHostStreamWrite(fd int, header, payload []byte) (int, error) { return 0, nil }\nfunc (w *dstTestlogWriter) writeFromBubble(p []byte) (int, error) { n, err := dstHostStreamWrite(0, nil, p); return n, err }\n",
+	})
+	if err := verifyListedPackage(validTestingDst); err != nil {
+		t.Fatalf("valid repaired godst testing package refused: %v", err)
+	}
+
+	unwrappedTestingDst := writePkg("testing", map[string]string{
+		"testing.go":    "package testing\nfunc run() { deps.StartTestLog(nil); if err := deps.StopTestLog(); err != nil { panic(err) } }\n",
+		"dst_hostio.go": "package testing\nfunc dstHostStreamWrite(fd int, header, payload []byte) (int, error) { return 0, nil }\nfunc (w *dstTestlogWriter) writeFromBubble(p []byte) (int, error) { n, err := dstHostStreamWrite(0, nil, p); return n, err }\n",
+	})
+	if err := verifyListedPackage(unwrappedTestingDst); err == nil {
+		t.Fatal("godst testing package without dstWrapTestlogWriter admitted")
+	}
+
+	brokenTestingDst := writePkg("testing", map[string]string{
+		"testing.go":    "package testing\nfunc run() { deps.StartTestLog(dstWrapTestlogWriter(nil)); if err := deps.StopTestLog(); err != nil { panic(err) } }\n",
+		"dst_hostio.go": "package testing\nfunc dstHostStreamWrite(fd int, header, payload []byte) {}\nfunc (w *dstTestlogWriter) writeFromBubble(p []byte) (int, error) { return 0, nil }\n",
+	})
+	if err := verifyListedPackage(brokenTestingDst); err == nil {
+		t.Fatal("broken godst testing package dropping write errors admitted")
+	}
+
+	missingFnTestingDst := writePkg("testing", map[string]string{
+		"testing.go":    "package testing\nfunc run() { deps.StartTestLog(dstWrapTestlogWriter(nil)); if err := deps.StopTestLog(); err != nil { panic(err) } }\n",
+		"dst_hostio.go": "package testing\nfunc otherHelper() {}\n",
+	})
+	if err := verifyListedPackage(missingFnTestingDst); err == nil {
+		t.Fatal("testing package with dst_hostio.go missing dstHostStreamWrite admitted")
+	}
+
 	if got := namedMoved([]string{"a", "b"}); got != "a, b" {
 		t.Fatalf("namedMoved = %q", got)
 	}
-	packages := rowChain(rows, "go1.99.1")
-	if packages["a"] != "2" || packages["b"] != "1" || packages["runtime"] != "2" {
-		t.Fatalf("the chain resolves %v", packages)
-	}
-	if packages := rowChain(rows, "go1.99.1 race"); packages["a"] != "2" || packages["b"] != "1" || packages["c"] != "race" || packages["runtime"] != "2r" {
-		t.Fatalf("the race row's chain resolves %v, want its seams over its toolchain's chain", packages)
-	}
-}
 
-// validChains judges a listing's shape: labels unique, every Base
-// naming a row, no chain cycling, every row listing at least one key
-// (a root row's completeness is the canary's judgment over the running
-// toolchain — no other host can judge it).
-func validChains(rows []toolchainSourceRow) error {
-	byLabel := map[string]toolchainSourceRow{}
-	for _, row := range rows {
-		if _, dup := byLabel[row.Label]; dup {
-			return fmt.Errorf("label %q listed twice", row.Label)
-		}
-		if len(row.Packages) == 0 {
-			return fmt.Errorf("row %q lists no key", row.Label)
-		}
-		byLabel[row.Label] = row
+	// A package whose on-disk bytes drift from lp.digest during verification
+	// reports a read degradation rather than "moved in N keys" and never caches
+	// the stale verdict under lp.digest.
+	toctouPkg := writePkg("strings", map[string]string{
+		"strings.go": "package strings\nfunc Clone(s string) string { return s }\n",
+	})
+	origDigest, err := digestFiles(t.Context(), toctouPkg.Dir, toctouPkg.Files)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, row := range rows {
-		seen := map[string]bool{}
-		for label := row.Label; label != ""; label = byLabel[label].Base {
-			if seen[label] {
-				return fmt.Errorf("row %q: chain cycles at %q", row.Label, label)
-			}
-			seen[label] = true
-			if _, ok := byLabel[label]; !ok {
-				return fmt.Errorf("row %q: base %q names no row", row.Label, label)
-			}
-		}
+	toctouPkg.digest = origDigest
+	if err := os.WriteFile(filepath.Join(toctouPkg.Dir, "strings.go"), []byte("package strings\nimport \"os\"\nvar _ = os.Getenv(\"X\")\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	return nil
-}
-
-// The listing's shape is the one rowChain relies on (validChains): a
-// misspelled base would otherwise resolve to the delta row alone,
-// refusing with a misleading closest row on the one host that could
-// notice; the judgment is pinned over planted shapes and applied to
-// the real listing (a source literal, so the pin judges every edit of
-// it on every tier).
-func TestToolchainSourceRowsFormValidChains(t *testing.T) {
-	if err := validChains(auditedToolchainSources); err != nil {
-		t.Fatalf("auditedToolchainSources: %v", err)
+	toctouSurface := sourceDigests{
+		Packages:  map[string]string{"strings": origDigest},
+		inventory: map[string]listedPackage{"strings": toctouPkg},
 	}
-	complete := toolchainSourceRow{Label: "go1.99.0", Packages: map[string]string{"a": "1"}}
-	if err := validChains([]toolchainSourceRow{complete, {Label: "go1.99.1", Base: "go1.99.0", Packages: map[string]string{"a": "2"}}, {Label: "go1.99.1 race", Base: "go1.99.1", Packages: map[string]string{"a": "r"}}}); err != nil {
-		t.Fatalf("a valid listing refused: %v", err)
+	deg := toolchainSourceDegradation("go1.test", toctouSurface, nil)
+	if deg.audited() || !strings.Contains(deg.axis, "could not be read") {
+		t.Fatalf("TOCTOU degradation = %+v, want could not be read", deg)
 	}
-	for _, tc := range []struct {
-		name string
-		rows []toolchainSourceRow
-	}{
-		{"a duplicated label", []toolchainSourceRow{complete, {Label: "go1.99.0", Packages: map[string]string{"a": "2"}}}},
-		{"a misspelled base", []toolchainSourceRow{complete, {Label: "go1.99.1", Base: "go1.99.0 ", Packages: map[string]string{"a": "2"}}}},
-		{"a cycle", []toolchainSourceRow{{Label: "x", Base: "y", Packages: map[string]string{"a": "1"}}, {Label: "y", Base: "x", Packages: map[string]string{"a": "2"}}}},
-		{"a self-based row", []toolchainSourceRow{{Label: "x", Base: "x", Packages: map[string]string{"a": "1"}}}},
-		{"an empty row", []toolchainSourceRow{complete, {Label: "go1.99.1", Base: "go1.99.0", Packages: map[string]string{}}}},
-	} {
-		if validChains(tc.rows) == nil {
-			t.Errorf("%s admitted", tc.name)
-		}
+	if _, cached := verifiedPackageMemo.Load(verifiedPackageMemoKey("strings", origDigest)); cached {
+		t.Fatal("TOCTOU verification failure poisoned verifiedPackageMemo")
 	}
 }
 

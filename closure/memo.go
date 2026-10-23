@@ -26,6 +26,9 @@ import (
 // policy dependencies for sibling derivations such as dynamic-state facts.
 func (h *Hasher) SetAnalysisScope(scope AnalysisScope) AnalysisScope {
 	scope.toolchainContent, scope.admissionPolicy = h.ToolchainContent(), h.AdmissionPolicy()
+	if !h.SelectionAudited() && scope.admissionPolicy != "" {
+		scope.admissionPolicy += "|unaudited"
+	}
 	h.scope = scope
 	return scope
 }

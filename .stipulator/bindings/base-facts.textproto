@@ -43,8 +43,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-view-maximal"
-  content_hash: "8110fffe88dabb5be2701c7470a9a2b35e1830c2be4dea00a2468fd02a21ff6e"
-  source_hash: "87a981d1ca0d797bd67729d7cf6bced71a401900c51e23ca15eeda1736deb8a6"
+  content_hash: "2830ba1a4213aa9875874529d7810ecabe6667f6f3a6c6ee4ccfa1249cfb275e"
+  source_hash: "b062925be9893922d671d13afe826d24f12411be25d4f3c94cdc2aab65eb76e5"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure.TestComputeMaximalFactsBatchPreservesCompleteScanAndProjection"
   role: BINDING_ROLE_TESTS

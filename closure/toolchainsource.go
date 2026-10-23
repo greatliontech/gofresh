@@ -161,6 +161,7 @@ type listedPackage struct {
 	Files      []string `json:"files"`
 	EmbedRoots []string `json:"embedRoots"`
 	Audited    bool     `json:"audited"`
+	digest     string
 }
 
 // dirStamp is one directory's entries at listing time: the package
@@ -522,6 +523,7 @@ func digestListing(ctx context.Context, l surfaceListing) (sourceDigests, error)
 		if err != nil {
 			return sourceDigests{}, fmt.Errorf("%s: %w", p.ImportPath, err)
 		}
+		p.digest = digest
 		all[p.ImportPath] = digest
 		d.inventory[p.ImportPath] = p
 		if p.Audited {
@@ -617,76 +619,6 @@ func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir strin
 	return digestListing(ctx, l)
 }
 
-// toolchainSourceRow is one listing: the label names the toolchain and
-// selection the row was listed over (a version string and the
-// selection's suffix, documentary); the digests are the key — one per
-// surface package. A root row (no Base) lists the whole surface; a row
-// with a Base lists the keys that differ from its base row's chain —
-// a point release off the audited surface, a vendor build's hook
-// files, another platform's split files, a build selection's seams
-// (the race files over the toolchain's default row) — so a selection's
-// row is bound to its toolchain's chain and never admits a key over
-// another toolchain's.
-type toolchainSourceRow struct {
-	Label    string
-	Base     string
-	Packages map[string]string
-}
-
-// rowChain resolves a row's effective digests: its own over its base's
-// chain. Labels are unique, every base names a row, and no chain
-// cycles (TestToolchainSourceRowsFormValidChains refuses any other
-// listing).
-func rowChain(rows []toolchainSourceRow, label string) map[string]string {
-	packages := map[string]string{}
-	seen := map[string]bool{}
-	for label != "" && !seen[label] {
-		seen[label] = true
-		var row *toolchainSourceRow
-		for i := range rows {
-			if rows[i].Label == label {
-				row = &rows[i]
-			}
-		}
-		if row == nil {
-			break
-		}
-		for k, v := range row.Packages {
-			if _, set := packages[k]; !set {
-				packages[k] = v
-			}
-		}
-		label = row.Base
-	}
-	return packages
-}
-
-// movedKeys names the surface keys whose running digest the CLOSEST
-// row's chain does not carry, sorted, and that row's label; empty
-// exactly when some row's chain lists every key. Keys are judged per
-// row chain, never across rows: a toolchain mixing two listed
-// releases' packages — one release's race runtime over another's
-// files included — is no listed toolchain.
-func movedKeys(d sourceDigests, rows []toolchainSourceRow) (moved []string, closest string) {
-	first := true
-	for _, row := range rows {
-		packages := rowChain(rows, row.Label)
-		var rowMoved []string
-		for _, key := range sortedKeys(boolKeys(d.Packages)) {
-			if v, ok := packages[key]; !(ok && v == d.Packages[key]) {
-				rowMoved = append(rowMoved, key)
-			}
-		}
-		if first || len(rowMoved) < len(moved) {
-			moved, closest, first = rowMoved, row.Label, false
-		}
-	}
-	if first {
-		moved = sortedKeys(boolKeys(d.Packages))
-	}
-	return moved, closest
-}
-
 func boolKeys(m map[string]string) map[string]bool {
 	set := make(map[string]bool, len(m))
 	for k := range m {
@@ -698,7 +630,7 @@ func boolKeys(m map[string]string) map[string]bool {
 // movedKeysBound bounds the keys a refusal names; the rest are counted.
 const movedKeysBound = 8
 
-// namedMoved renders moved keys for a refusal: up to the bound named,
+// namedMoved renders failed/moved keys for a refusal: up to the bound named,
 // the remainder counted.
 func namedMoved(moved []string) string {
 	shown := moved
@@ -712,45 +644,8 @@ func namedMoved(moved []string) string {
 	return text
 }
 
-// rowLiteral renders the running digests of the given keys as the Go
-// literal a listing commit adds to auditedToolchainSources, labelled
-// as given — the canary prints it, over the moved keys alone with the
-// closest row as the base, when the toolchain is unlisted: a build
-// that differs from a listed row in one package lists one key.
-func (d sourceDigests) rowLiteral(label, base string, keys []string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "\t{\n\t\tLabel: %q,\n", label)
-	if base != "" {
-		fmt.Fprintf(&b, "\t\tBase: %q,\n", base)
-	}
-	b.WriteString("\t\tPackages: map[string]string{\n")
-	for _, k := range keys {
-		if digest, ok := d.Packages[k]; ok {
-			fmt.Fprintf(&b, "\t\t\t%q: %q,\n", k, digest)
-		}
-	}
-	b.WriteString("\t\t},\n\t},\n")
-	return b.String()
-}
-
 // harnessPremisePackages hold the testing harness's test-log writer —
-// the premise a listing asserts beside the admissions
-// (REQ-closure-observability-toolchain-key): testing wraps the file
-// the harness writes, testing/internal/testdeps buffers the records
-// and returns StopTestLog's flush error, which fails the binary. Both
-// are surface seeds; a key of theirs moving names the premise in the
-// listing instruction.
+// testing wraps the file the harness writes, testing/internal/testdeps
+// buffers the records and returns StopTestLog's flush error, which fails
+// the binary. Both are surface seeds.
 var harnessPremisePackages = []string{"testing", "testing/internal/testdeps"}
-
-// listingInstruction is the listing procedure the canary prints for an
-// unlisted running toolchain: the walk of the moved keys' delta against
-// every admission, and — a harness premise package among the moved
-// keys — the harness's write-propagation premise a listing asserts
-// beside the admissions (REQ-closure-observability-toolchain-key).
-func listingInstruction(moved []string) string {
-	text := "Walk the moved keys' delta against the audited admissions (the source-only set, class-B operations, sync/pool/reflect symbols, atomic transparency, harness channels, writer-sink family, the linkname floor)"
-	if slices.ContainsFunc(moved, func(key string) bool { return slices.Contains(harnessPremisePackages, key) }) {
-		text += ", and — the harness among the moved keys — the harness's write-propagation premise the listing asserts (every test-log write the harness attempts lands or fails the binary)"
-	}
-	return text + ", then list this row in closure/toolchainaudit.go:"
-}

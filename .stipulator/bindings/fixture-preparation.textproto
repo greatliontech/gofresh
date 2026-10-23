@@ -90,14 +90,3 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "d758076b824f26323f22daa9cbdec375938bb39d2aeef9a63abcb33a132c3eb4"
 }
-
-bindings {
-  requirement_id: "REQ-impl-region-transport"
-  content_hash: "07b377c401b32978eb97fbf5ac176977e92b2607b545adb1b9eb106c685a7334"
-  source_hash: "159ac09200f7fadd4f2952635db1770ee9b002f60385373885cf7fcc2d969ef6"
-  backend: "go"
-  symbol: "github.com/greatliontech/gofresh/closure.TestFixturePreparationKeepsSSAConsumerOwnership"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "80dfed21352d4d16d6b7834d1bbf59033d8bf9230f8cf9eb576155c4b8125812"
-  clause_label: "bound-scope"
-}

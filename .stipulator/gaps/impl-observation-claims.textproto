@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-impl-observation-claims"
-reason: "Current positive observation support relies on approved harness and operation summaries rather than separate checked coverage, delivery and outcome-binding claims."
-content_hash: "c2bec092e206ab308226de8475475e161b3c8246d0497a51a3fa69a8a1667ac4"
-source_hash: "9281d9cbc1609581b28f4dc4e0d3b621acfac0ccd15742975cd97502a180512b"
-lands { manual { condition: "tooling-redesign 5.1w.5: useful observation positives and added-input, lost-write/flush and borrowed-support negatives establish all three independent claims over actual selected implementations" contradicted: true } }

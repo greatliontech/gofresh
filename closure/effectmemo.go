@@ -72,7 +72,11 @@ func (h *Hasher) effectScanScope() string {
 	if h.ToolchainContent() == "" || h.AdmissionPolicy() == "" {
 		return ""
 	}
-	return effectScanStrategy + " " + AnalyzingFrontend() + "|" + h.ToolchainContent() + "|" + h.AdmissionPolicy()
+	scope := effectScanStrategy + " " + AnalyzingFrontend() + "|" + h.ToolchainContent() + "|" + h.AdmissionPolicy()
+	if !h.SelectionAudited() {
+		scope += "|unaudited"
+	}
+	return scope
 }
 
 // testingScanStrategy versions the typed testing-effect scan's semantics:

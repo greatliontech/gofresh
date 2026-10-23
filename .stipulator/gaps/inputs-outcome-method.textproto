@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-inputs-outcome-method"
 reason: "Actual-environment and receipt bindings do not establish the method semantics independently of completion or checked native, initialization and exceptional-operation behavior."
-content_hash: "ceb04a76198d1b8f8a8d568dd46e8e905d77bbb06bf285afdc57f11079ecb787"
-source_hash: "8e069c7c7fe20046b4b3201cfab7b3a06a67426c3a165f1aee7df04ec432752c"
+content_hash: "07d93699bb099aa8f2fc0bed09a0297187464e937742d50e4a35930949fe5227"
+source_hash: "625af9a6d366179ecf677f985490e83cc76eb4a15527c26bfb8b125c48f713c5"
 lands { manual { condition: "tooling-redesign 5.1w.5: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7" contradicted: true } }

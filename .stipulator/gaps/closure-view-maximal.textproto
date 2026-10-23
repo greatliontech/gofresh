@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-view-maximal"
 reason: "Existing tests establish core/compartment hash identity only. The new optional checked per-subject refinement needs independently accepted evidence for exact structured blockers without granting observation authority; concurrently authored code is not consented here. The isolated compiler-intrinsic regression demonstrated that nominal Go-source checking can miss CPU-feature-dependent implementation dispatch. Its runtime grant is cut off pending checked compiler-selected correspondence; the source proof alone grants none."
-content_hash: "8110fffe88dabb5be2701c7470a9a2b35e1830c2be4dea00a2468fd02a21ff6e"
-source_hash: "87a981d1ca0d797bd67729d7cf6bced71a401900c51e23ca15eeda1736deb8a6"
+content_hash: "2830ba1a4213aa9875874529d7810ecabe6667f6f3a6c6ee4ccfa1249cfb275e"
+source_hash: "b062925be9893922d671d13afe826d24f12411be25d4f3c94cdc2aab65eb76e5"
 lands { manual { condition: "tooling-redesign 5.1w.2: the useful source-computation consumer passes independent positive and adversarial acceptance for exact blocker refinement with every unaffected blocker and guard preserved, followed by tier-wide integration in 5.1w.6; tooling-redesign 5.1w.2b additionally establishes actual compiler-selected implementation and inline/dispatch scope before runtime discharge, preserving the requested build and the independent same-binary POPCNT negative" } }
