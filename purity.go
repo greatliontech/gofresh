@@ -859,6 +859,7 @@ func recordDynamicGlobalUses(audited bool, p *packages.Package, mutated, escaped
 	// seed fixpoint converges, so nothing double-records.
 	initOnlyParams := directCallSites(p).funcParamsOf(initOnly)
 	paramSeeds := map[types.Object]map[string]bool{}
+	paramLinkSeeds := map[types.Object]map[string]bool{}
 	paramSeedGrowth := false
 	seedingPass := false
 	// initAliasedLocals maps an init-flow body's locals bound from
@@ -874,6 +875,14 @@ func recordDynamicGlobalUses(audited bool, p *packages.Package, mutated, escaped
 				set[key] = true
 			}
 			aliased[obj] = set
+		}
+		linkAliased := map[types.Object]map[string]bool{}
+		for obj, keys := range paramLinkSeeds {
+			set := map[string]bool{}
+			for key := range keys {
+				set[key] = true
+			}
+			linkAliased[obj] = set
 		}
 		rhsKeys := func(expr ast.Expr) map[string]bool {
 			keys := map[string]bool{}
@@ -909,7 +918,7 @@ func recordDynamicGlobalUses(audited bool, p *packages.Package, mutated, escaped
 					if obj, ok := resolve(n); ok {
 						if variable, ok := dynamicPackageVar(obj); ok {
 							keys[dynamicVarKey(variable)] = true
-						} else if source := aliased[obj]; source != nil {
+						} else if source := linkAliased[obj]; source != nil {
 							for key := range source {
 								keys[key] = true
 							}
@@ -1091,6 +1100,17 @@ func recordDynamicGlobalUses(audited bool, p *packages.Package, mutated, escaped
 					changed = true
 				}
 			}
+			if len(lkeys) != 0 {
+				if linkAliased[obj] == nil {
+					linkAliased[obj] = map[string]bool{}
+				}
+				for key := range lkeys {
+					if !linkAliased[obj][key] {
+						linkAliased[obj][key] = true
+						changed = true
+					}
+				}
+			}
 			return changed
 		}
 		for changed := true; changed; {
@@ -1208,6 +1228,15 @@ func recordDynamicGlobalUses(audited bool, p *packages.Package, mutated, escaped
 										}
 										if !paramSeeds[param][key] {
 											paramSeeds[param][key] = true
+											paramSeedGrowth = true
+										}
+									}
+									for key := range linkKeys(arg) {
+										if paramLinkSeeds[param] == nil {
+											paramLinkSeeds[param] = map[string]bool{}
+										}
+										if !paramLinkSeeds[param][key] {
+											paramLinkSeeds[param][key] = true
 											paramSeedGrowth = true
 										}
 									}

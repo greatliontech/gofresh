@@ -60,10 +60,9 @@ healthy verdict into a timeout.
   one `IMPORT-PATH:VARIABLE` per line, and declines the module's own
   file for its engines — REQ-vouch-input's channel, one set one home;
   `--vouch` flags only extend that set, so a store whose file is
-  reviewed needs no mirrored flag list — tugboat's set moves into
-  its store's file when that session resumes, and the gatherer's
-  flags stay until it does; protodb's store has no assessed set yet
-  and its unverifiable rows are expected).
+  reviewed (`tugboat`'s `benchmarks/vouches`) needs no mirrored flag
+  list; `protodb`'s store has no assessed set yet and its unverifiable
+  rows are expected).
   `unverifiable` is a defect class exactly like stale/unrecorded.
   Long row lists are capped in the report and the report SAYS so
   ("showing N of M") — a cap is a visible fact, never a silent one.

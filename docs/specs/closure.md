@@ -1859,11 +1859,16 @@ claim or body analysis, and
 every other target's body classifies its own effects into the subject
 exactly as reachable content always does),
 AND the dispatch operand's dynamic types are fully determined by
-the subject's own flow — the operand derives from local construction or
+the subject's own flow — the operand derives from local construction,
+from the return expressions of a static call to an audited
+standard-library function whose arguments carry no dynamic dispatch, or
 from a parameter whose function is not dynamically targeted, closes over
 nothing, is not variadic, and has at least one subject-attributed call
 site, every such site feeding a subject-closed value (zero enumerable
-callers is absence of provenance, refused, never a vacuous pass) — the
+callers is absence of provenance, refused, never a vacuous pass), with
+an interface invoke's target set narrowed to the concrete types its
+closed operand wraps when every resolved method has an analyzed or
+audited body — the
 crossing holding for every closed-world subject whatever its own enumeration
 state, an iterator's yield bound by the subject's range statement or call the
 canonical shape, and the subject-attributed sites being the subject's own

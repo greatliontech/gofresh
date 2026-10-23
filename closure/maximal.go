@@ -946,7 +946,7 @@ func isSourceOnlyStandardPackage(audited bool, pkgPath string) bool {
 	// every I/O-acquiring package
 	// (REQ-closure-observability-audited-set). The set itself is one table
 	// in internal/auditset beside the other audited sets.
-	return auditset.PurePackage(pkgPath)
+	return auditset.PurePackage(pkgPath) || (pureDelegatePackages[pkgPath] && (strings.HasPrefix(pkgPath, "internal/") || strings.Contains(pkgPath, "/internal/")))
 }
 
 // auditedLinknameTargets is the audited linkname-target set: standard

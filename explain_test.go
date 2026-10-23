@@ -4,10 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/greatliontech/go-x-tools/go/packages"
 )
 
 // explainView builds a view over the module tree and returns the
@@ -655,3 +661,108 @@ func TestExplainStraddlesALaterEdit(t *testing.T) {
 		t.Fatalf("chain after the edit = %+v, want the edited tree's empty chain, not the captured verdict's", chain)
 	}
 }
+
+func TestExplainCarrierLinkedCulpritAndCallResultNonLink(t *testing.T) {
+	const src = `package p
+
+type Info struct{ Fn func() }
+type Desc interface{ Name() string }
+type Out struct{ File Desc }
+type Builder struct{ Table []Info }
+
+func (b Builder) Build() Out {
+	return Out{}
+}
+
+var (
+	backing  = []Info{{}}
+	Aliased  []Info
+	msgTypes = []Info{{}}
+	FileDesc Desc
+)
+
+func init() {
+	initHelper()
+}
+
+func initHelper() {
+	Aliased = backing
+	out := Builder{Table: msgTypes}.Build()
+	FileDesc = out.File
+}
+
+func Mutate() {
+	backing[0] = Info{}
+	msgTypes[0] = Info{}
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "p.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := &types.Info{
+		Types:      map[ast.Expr]types.TypeAndValue{},
+		Defs:       map[*ast.Ident]types.Object{},
+		Uses:       map[*ast.Ident]types.Object{},
+		Selections: map[*ast.SelectorExpr]*types.Selection{},
+	}
+	typesPkg, err := (&types.Config{}).Check("example.com/p", fset, []*ast.File{file}, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg := &packages.Package{
+		ID:        "example.com/p",
+		Name:      "p",
+		PkgPath:   "example.com/p",
+		Fset:      fset,
+		Syntax:    []*ast.File{file},
+		Types:     typesPkg,
+		TypesInfo: info,
+	}
+	fact := dynamicStateFactOf(true, pkg, false)
+	for _, link := range fact.CarrierLinks {
+		if strings.Contains(link, "FileDesc") && strings.Contains(link, "msgTypes") {
+			t.Fatalf("call result out := Builder{Table: msgTypes}.Build() falsely linked FileDesc to msgTypes: %q", link)
+		}
+	}
+	sawAliasLink := false
+	for _, link := range fact.CarrierLinks {
+		if strings.Contains(link, "Aliased") && strings.Contains(link, "backing") {
+			sawAliasLink = true
+		}
+	}
+	if !sawAliasLink {
+		t.Fatalf("direct carrier assignment Aliased = backing missing from CarrierLinks: %v", fact.CarrierLinks)
+	}
+
+	// Verify envAuditTrail follows linkedKeys across CarrierLinks.
+	linkedFacts := map[string][]dynamicStateFact{
+		"example.com/p": {{
+			CarrierLinks: []string{"example.com/p.Aliased\x01example.com/p.backing"},
+			EnvCarrying:  []string{"example.com/p.backing"},
+			EnvCallUses:  []string{"example.com/p.backing\x01example.com/dep\x00Make"},
+		}},
+	}
+	edges, refusedFn, refusedPath := envAuditTrail(
+		map[string][]*packages.Package{"example.com/dep": {{}}},
+		linkedFacts,
+		map[string]bool{"example.com/p.Aliased": true, "example.com/p.backing": true},
+		"Aliased",
+	)
+	if len(edges) == 0 || refusedFn != "Make" || refusedPath != "example.com/dep" {
+		t.Fatalf("carrier-linked envAuditTrail = (%+v, %q, %q), want edge to example.com/dep.Make", edges, refusedFn, refusedPath)
+	}
+
+	if !testing.Short() {
+		dir := writeModuleTree(t, map[string]string{
+			"go.mod":     "module example.com/explain\n\ngo 1.26\n",
+			"reg/reg.go": "package reg\n\ntype Info struct{ Fn func() }\n\nvar (\n\tbacking = []Info{{}}\n\tAliased []Info\n)\n\nfunc init() {\n\tAliased = backing\n}\n\nfunc Mutate() {\n\tbacking[0] = Info{}\n}\n\nfunc Count() int { return len(Aliased) }\n",
+		})
+		chain := explainView(t, dir, "example.com/explain/reg", "Aliased")
+		if chain.Arm != "mutation" || len(chain.Links) == 0 {
+			t.Fatalf("explainView(Aliased) = %+v, want mutation chain derived via CarrierLinks from backing", chain)
+		}
+	}
+}
+

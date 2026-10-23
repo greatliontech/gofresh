@@ -154,13 +154,22 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	}, nil)
 
 	var mu sync.Mutex
-	var sites []ChainLink
-	var stores []ChainLink
+	type siteObservation struct {
+		key  string
+		link ChainLink
+	}
+	type storeObservation struct {
+		key  string
+		link ChainLink
+	}
 	type deferralObservation struct {
+		key       string
 		kind      byte
 		resolvent string
 		link      ChainLink
 	}
+	var sites []siteObservation
+	var stores []storeObservation
 	var deferrals []deferralObservation
 	pos := func(p *packages.Package, at token.Pos) string {
 		if !at.IsValid() {
@@ -171,28 +180,19 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	}
 	explainHooks.Store(&explainHookSet{
 		site: func(p *packages.Package, kind, key string, at token.Pos) {
-			if key != varKey {
-				return
-			}
 			mu.Lock()
 			defer mu.Unlock()
-			sites = append(sites, ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Clause: kind, Pos: pos(p, at)})
+			sites = append(sites, siteObservation{key: key, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Clause: kind, Pos: pos(p, at)}})
 		},
 		store: func(p *packages.Package, key string, at token.Pos) {
-			if key != varKey {
-				return
-			}
 			mu.Lock()
 			defer mu.Unlock()
-			stores = append(stores, ChainLink{Kind: "store", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)})
+			stores = append(stores, storeObservation{key: key, link: ChainLink{Kind: "store", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)}})
 		},
 		deferral: func(p *packages.Package, kind byte, key, resolvent string, at token.Pos) {
-			if key != varKey {
-				return
-			}
 			mu.Lock()
 			defer mu.Unlock()
-			deferrals = append(deferrals, deferralObservation{kind: kind, resolvent: resolvent, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)}})
+			deferrals = append(deferrals, deferralObservation{key: key, kind: kind, resolvent: resolvent, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)}})
 		},
 	})
 	// Every compilation variant's fact joins the union, exactly as
@@ -203,24 +203,73 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	}
 	explainHooks.Store(nil)
 	mu.Lock()
-	collectedSites := append([]ChainLink(nil), sites...)
-	collectedStores := append([]ChainLink(nil), stores...)
-	collectedDeferrals := append([]deferralObservation(nil), deferrals...)
+	allSites := append([]siteObservation(nil), sites...)
+	allStores := append([]storeObservation(nil), stores...)
+	allDeferrals := append([]deferralObservation(nil), deferrals...)
 	mu.Unlock()
+
+	// CarrierLinks join shared-backing carriers across facts at
+	// composition (REQ-closure-shared-dynamic-state): a mark or deferral
+	// on any carrier in varKey's connected component decided varKey's
+	// refusal and belongs to its derivation chain (REQ-explain-chain).
+	linkAdj := map[string]map[string]bool{}
+	for _, fl := range facts {
+		for _, fact := range fl {
+			for _, pair := range fact.CarrierLinks {
+				a, b, ok := strings.Cut(pair, "\x01")
+				if !ok || a == "" || b == "" {
+					continue
+				}
+				if linkAdj[a] == nil {
+					linkAdj[a] = map[string]bool{}
+				}
+				if linkAdj[b] == nil {
+					linkAdj[b] = map[string]bool{}
+				}
+				linkAdj[a][b] = true
+				linkAdj[b][a] = true
+			}
+		}
+	}
+	linkedKeys := map[string]bool{varKey: true}
+	for changed := len(linkAdj[varKey]) > 0; changed; {
+		changed = false
+		for a := range linkedKeys {
+			for b := range linkAdj[a] {
+				if !linkedKeys[b] {
+					linkedKeys[b] = true
+					changed = true
+				}
+			}
+		}
+	}
 
 	// The verdict's composed proof state gates chains exactly as it
 	// gated the refusal: an object-closed variable's escapes never
 	// refused, so escape-kind sites and deferrals contribute no links
 	// for it - a Valid verdict has no chain (REQ-explain-chain).
 	resolution := newDeferralResolution(facts, nil)
-	if !resolution.notOpaque[varKey] {
-		kept := collectedSites[:0]
-		for _, s := range collectedSites {
-			if s.Clause == "mutation" {
-				kept = append(kept, s)
-			}
+	var collectedSites []ChainLink
+	for _, obs := range allSites {
+		if !linkedKeys[obs.key] {
+			continue
 		}
-		collectedSites = kept
+		if obs.link.Clause != "mutation" && !resolution.notOpaque[varKey] {
+			continue
+		}
+		collectedSites = append(collectedSites, obs.link)
+	}
+	var collectedStores []ChainLink
+	for _, obs := range allStores {
+		if linkedKeys[obs.key] {
+			collectedStores = append(collectedStores, obs.link)
+		}
+	}
+	var collectedDeferrals []deferralObservation
+	for _, obs := range allDeferrals {
+		if linkedKeys[obs.key] {
+			collectedDeferrals = append(collectedDeferrals, obs)
+		}
 	}
 	// A deferred use whose resolvent no fact proves is the composition's
 	// escape or mutation - the deciding site is the deferring use, the
@@ -281,7 +330,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 			if !ok || !resolution.notOpaque[varKey] {
 				continue
 			}
-			proves, failParam := resolution.fieldPopulationProves(varKey, field, idx)
+			proves, failParam := resolution.fieldPopulationProves(obs.key, field, idx)
 			if proves {
 				continue
 			}
@@ -324,13 +373,13 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	for _, fl := range facts {
 		for _, f := range fl {
 			for _, key := range f.EnvCarrying {
-				if key == varKey {
+				if linkedKeys[key] {
 					carrying = true
 				}
 			}
 		}
 	}
-	edges, refusedFn, refusedPath := envAuditTrail(variants, facts, varKey, varName)
+	edges, refusedFn, refusedPath := envAuditTrail(variants, facts, linkedKeys, varName)
 	// A fired store hook always rides an environment-carrying mark -
 	// the same arm sets both - so the carrying union subsumes the
 	// stores here.
@@ -377,7 +426,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 // culprit's registrations to the first function whose proof failed
 // locally. A registration whose every callee resolves contributes no
 // edges: a proven constructor is no refusal (REQ-explain-chain).
-func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]dynamicStateFact, varKey, varName string) ([]ChainLink, string, string) {
+func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]dynamicStateFact, linkedKeys map[string]bool, varName string) ([]ChainLink, string, string) {
 	ea := resolveEnvAudit(facts, nil)
 	// render splits an audit key: a function key yields (pkg, name); a
 	// parameter key yields (pkg, name, index) with the edge label
@@ -417,7 +466,7 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 		for _, f := range fl {
 			for _, use := range f.EnvCallUses {
 				key, callee, ok := strings.Cut(use, "\x01")
-				if ok && key == varKey && !ea.resolved[callee] {
+				if ok && linkedKeys[key] && !ea.resolved[callee] {
 					callees = append(callees, rootedCallee{fromPath, callee})
 				}
 			}

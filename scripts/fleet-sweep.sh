@@ -35,27 +35,18 @@ STIPULATOR_REPOS=(stipulator gofresh gomutant tugboat ocifs pando pb)
 # Repos with pew stores; per-repo standing vouches below.
 PEW_REPOS=(tugboat protodb)
 
-# Per-repo standing pew arguments: the reviewed vouch set AND the
-# store's variant label. pew reads a store's standing vouch set from
-# the `vouches` file at the store root (one IMPORT-PATH:VARIABLE per
-# line; the flags here only extend it), so a repo whose store carries
-# the file needs no --vouch list here. tugboat's list below is the
-# audited set from its CLAUDE.md "Standing vouch" section and stays
-# until tugboat's store carries benchmarks/vouches, at which point it
-# is deleted from both. Its store is unlabeled. protodb's store records under the
+# Per-repo standing pew arguments: the store's variant label. pew reads
+# a store's standing vouch set from the `vouches` file at the store root
+# (`benchmarks/vouches`, one IMPORT-PATH:VARIABLE per line; `--vouch`
+# only extends it), so a repo whose store carries the file needs no
+# --vouch list here. tugboat's store is unlabeled and carries
+# `benchmarks/vouches`. protodb's store records under the
 # pebble-dragonboat label — statusing without it reads every recorded
 # arm as unrecorded, a false red the second production run's judge
 # caught — and has no assessed vouch set yet (unverifiable rows are
 # expected and self-announcing until one is recorded).
 pew_args() {
   case "$1" in
-    tugboat) printf '%s\n' \
-      --vouch github.com/zeebo/xxh3:key \
-      --vouch pgregory.net/rapid:anyRuneGen \
-      --vouch go.uber.org/goleak:_osStderr \
-      --vouch google.golang.org/grpc:globalDialOptions \
-      --vouch google.golang.org/grpc:globalPerTargetDialOptions \
-      --vouch google.golang.org/grpc:globalServerOptions ;;
     protodb) printf '%s\n' --label pebble-dragonboat ;;
     *) ;;
   esac
@@ -245,10 +236,12 @@ section "pew store freshness"
 for r in "${PEW_REPOS[@]}"; do
   [ -d "$GL/$r" ] || { echo "$r: REPO ABSENT"; continue; }
   mapfile -t pewargs < <(pew_args "$r")
-  case " ${pewargs[*]-} " in
-    *" --vouch "*) : ;;
-    *) echo "$r: NOTE — no assessed vouch set; unverifiable rows expected until one is recorded" ;;
-  esac
+  if [ ! -s "$GL/$r/benchmarks/vouches" ]; then
+    case " ${pewargs[*]-} " in
+      *" --vouch "*) : ;;
+      *) echo "$r: NOTE — no assessed vouch set; unverifiable rows expected until one is recorded" ;;
+    esac
+  fi
   report=$(mktemp_tracked)
   (cd "$GL/$r" && runlocked 3600 pew status ${pewargs[@]+"${pewargs[@]}"} ./...) > "$report" 2>&1
   rc=$?

@@ -173,14 +173,14 @@ func TestExplainEnvAuditOutsideScopeEndsAtEdges(t *testing.T) {
 			EnvCallUses: []string{culprit + "\x01example.com/dep\x00Make"},
 		}},
 	}
-	edges, refusedFn, refusedPath := envAuditTrail(map[string][]*packages.Package{}, facts, culprit, "Registry")
+	edges, refusedFn, refusedPath := envAuditTrail(map[string][]*packages.Package{}, facts, map[string]bool{culprit: true}, "Registry")
 	if len(edges) == 0 {
 		t.Fatalf("outside-scope callee produced no edge: %+v", edges)
 	}
 	if refusedFn != "" || refusedPath != "" {
 		t.Fatalf("outside-scope callee produced a refusal site: %q in %q", refusedFn, refusedPath)
 	}
-	edges, refusedFn, refusedPath = envAuditTrail(map[string][]*packages.Package{"example.com/dep": {{}}}, facts, culprit, "Registry")
+	edges, refusedFn, refusedPath = envAuditTrail(map[string][]*packages.Package{"example.com/dep": {{}}}, facts, map[string]bool{culprit: true}, "Registry")
 	if len(edges) == 0 || refusedFn != "Make" || refusedPath != "example.com/dep" {
 		t.Fatalf("in-scope contrast arm did not name the refusal site: edges=%+v fn=%q path=%q", edges, refusedFn, refusedPath)
 	}
@@ -208,7 +208,7 @@ func TestExplainEnvAuditInsertionChain(t *testing.T) {
 			ParamInsertionFree: []string{"example.com/dep\x00Fill\x001"},
 		}},
 	}
-	edges, refusedFn, refusedPath := envAuditTrail(map[string][]*packages.Package{"example.com/dep": {{}}}, facts, culprit, "Registry")
+	edges, refusedFn, refusedPath := envAuditTrail(map[string][]*packages.Package{"example.com/dep": {{}}}, facts, map[string]bool{culprit: true}, "Registry")
 	if refusedFn != "Sink" || refusedPath != "example.com/dep" {
 		t.Fatalf("refusal site = %q in %q, want Sink in example.com/dep", refusedFn, refusedPath)
 	}

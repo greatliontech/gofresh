@@ -2,6 +2,7 @@ package closure
 
 import (
 	"context"
+	"go/token"
 	"go/types"
 	"sort"
 	"strconv"
@@ -768,6 +769,15 @@ func collectClosedDynamicSeeds(value ssa.Value, enc *enumerationClosure, seen ma
 	case *ssa.Phi:
 		for _, edge := range v.Edges {
 			collectClosedDynamicSeeds(edge, enc, seen)
+		}
+	case *ssa.UnOp:
+		if v.Op == token.MUL {
+			if cell := cellOf(v.X, map[ssa.Value]bool{}); cell != nil {
+				walkCellReferrers(cell, map[ssa.Value]bool{}, func(val ssa.Value) bool {
+					collectClosedDynamicSeeds(val, enc, seen)
+					return true
+				})
+			}
 		}
 	}
 }

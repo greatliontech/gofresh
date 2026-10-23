@@ -49,6 +49,20 @@ type freshParamAnalysis struct {
 	// walk's audited-set arms consult it exactly as the harness arms
 	// consult propertyHarnessAudited.
 	selectionAudited bool
+	// isStd reports whether a function belongs to a standard-library
+	// package according to the program's listed metadata (falling back
+	// to the import-path heuristic when nil).
+	isStd func(*ssa.Function) bool
+}
+
+func (fp *freshParamAnalysis) isStdFunc(fn *ssa.Function) bool {
+	if fn == nil {
+		return false
+	}
+	if fp != nil && fp.isStd != nil {
+		return fp.isStd(fn)
+	}
+	return isStdImportPath(funcPkgPath(fn))
 }
 
 type freshParamKey struct {

@@ -28,6 +28,7 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 	a.skipOriginScan = reachable.instantiatedOrigins
 	a.openWorld = reachable.openWorld
 	a.fresh = newFreshParamAnalysis(h.SelectionAudited(), reachable)
+	a.fresh.isStd = a.isStdFunction
 	for site, targets := range reachable.dynamicTargets {
 		if !reachable.functions[site.Parent()] {
 			continue
@@ -511,7 +512,7 @@ func (a *tier2Analyzer) addFunction(fn *ssa.Function) {
 		fn = origin
 	}
 	idx := a.idxForFunction(fn)
-	if idx == nil || idx.std || idx.cache || idx.testMain {
+	if idx == nil || idx.std || idx.testMain {
 		return
 	}
 	if fn.Synthetic == "package initializer" || (fn.Name() == "init" && fn.Object() == nil) {
@@ -893,16 +894,43 @@ func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool)
 	if fromRTA && a.subjectDeterminedInvokes[site] {
 		return true
 	}
-	if !c.IsInvoke() && c.StaticCallee() == nil {
-		if held, ok := closedDynamicTargets(c.Value, a.fresh); ok {
-			for fn := range held {
-				idx := a.idxForFunction(fn)
-				if idx == nil || idx.std || idx.cache || idx.testMain || a.propertyHarnessAudited(idx.path) {
+	var held map[*ssa.Function]bool
+	var ok bool
+	if c.IsInvoke() {
+		held, ok = closedInvokeTargets(site, a.fresh)
+	} else if c.StaticCallee() == nil {
+		held, ok = closedDynamicTargets(c.Value, a.fresh)
+	}
+	if ok {
+		for fn := range held {
+			idx := a.idxForFunction(fn)
+			if idx == nil || idx.testMain || a.propertyHarnessAudited(idx.path) {
+				return false
+			}
+			if idx.std {
+				if observableFileMethod(fn) {
 					return false
 				}
+				if !isSourceOnlyStandardPackage(a.h.SelectionAudited(), idx.path) && !auditedStandardCallee(a.h.SelectionAudited(), idx.path, functionSymbolName(fn), fn) {
+					return false
+				}
+				if _, classB := classBEffectForFunction(fn); classB {
+					return false
+				}
+				if _, harnessOK := harnessCalleeEffect(a.h.SelectionAudited(), fn, true); harnessOK {
+					return false
+				}
+			} else if len(fn.Blocks) == 0 {
+				return false
 			}
-			return true
 		}
+		for fn := range held {
+			a.addFunction(fn)
+			if idx := a.idxForFunction(fn); idx == nil || !idx.std {
+				a.scanFunction(fn)
+			}
+		}
+		return true
 	}
 	return false
 }
@@ -1531,6 +1559,16 @@ func syscallOpenMayCreate(pkgPath, name string, c *ssa.CallCommon) bool {
 
 func (a *tier2Analyzer) idxForFunction(fn *ssa.Function) *pkgIndex {
 	return idxForFunctionIn(a.idxByTypes, fn)
+}
+
+func (a *tier2Analyzer) isStdFunction(fn *ssa.Function) bool {
+	if fn == nil {
+		return false
+	}
+	if idx := a.idxForFunction(fn); idx != nil {
+		return idx.std
+	}
+	return isStdImportPath(funcPkgPath(fn))
 }
 
 func (b *tier2Base) idxForFunction(fn *ssa.Function) *pkgIndex {

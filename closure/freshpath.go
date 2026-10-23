@@ -1067,15 +1067,24 @@ func closedDynamicValue(value ssa.Value, seen, done map[ssa.Value]bool, fp *fres
 	return walkDynamicValue(value, nil, seen, done, fp)
 }
 
-// walkDynamicValue is the single SSA shape ladder serving both the
-// closed-value judgment (targets == nil, with a gray seen set and done memo)
-// and the function-target collector (targets != nil, visited after
-// subjectClosedDynamicValue has verified closure).
-func walkDynamicValue(value ssa.Value, targets map[*ssa.Function]bool, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+type dynamicValueCollector struct {
+	funcs map[*ssa.Function]bool
+	types map[types.Type]bool
+}
+
+func (c *dynamicValueCollector) collecting() bool {
+	return c != nil
+}
+
+// walkDynamicValue is the single SSA shape ladder serving the
+// closed-value judgment (collect == nil, with a gray seen set and done memo),
+// the function-target collector (collect.funcs != nil), and the concrete
+// interface-type collector (collect.types != nil).
+func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
 	if value == nil {
 		return false
 	}
-	collecting := targets != nil
+	collecting := collect.collecting()
 	if collecting {
 		if seen[value] {
 			return true
@@ -1091,17 +1100,17 @@ func walkDynamicValue(value ssa.Value, targets map[*ssa.Function]bool, seen, don
 		seen[value] = true
 		defer delete(seen, value)
 	}
-	r := walkDynamicValueUncached(value, targets, seen, done, fp)
+	r := walkDynamicValueUncached(value, collect, seen, done, fp)
 	if !collecting {
 		done[value] = r
 	}
 	return r
 }
 
-func walkDynamicValueUncached(value ssa.Value, targets map[*ssa.Function]bool, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
-	collecting := targets != nil
+func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+	collecting := collect.collecting()
 	recurse := func(next ssa.Value) bool {
-		return walkDynamicValue(next, targets, seen, done, fp)
+		return walkDynamicValue(next, collect, seen, done, fp)
 	}
 	switch v := value.(type) {
 	case *ssa.Builtin:
@@ -1115,7 +1124,14 @@ func walkDynamicValueUncached(value ssa.Value, targets map[*ssa.Function]bool, s
 		// function (its contents must be asserted back out first), so the
 		// walk here is judging the function value's provenance, and the
 		// interface hop must not wash the wrapper obligation — recurse.
-		if _, isFunc := types.Unalias(v.X.Type()).Underlying().(*types.Signature); isFunc || collecting {
+		if _, isIface := types.Unalias(v.X.Type()).Underlying().(*types.Interface); isIface {
+			return false
+		}
+		if collect != nil && collect.types != nil {
+			collect.types[v.X.Type()] = true
+			return true
+		}
+		if _, isFunc := types.Unalias(v.X.Type()).Underlying().(*types.Signature); isFunc || (collect != nil && collect.funcs != nil) {
 			return recurse(v.X)
 		}
 		return true
@@ -1127,8 +1143,11 @@ func walkDynamicValueUncached(value ssa.Value, targets map[*ssa.Function]bool, s
 		if syntheticInterfaceMethodWrapper(v) && len(v.FreeVars) == 0 {
 			return false
 		}
-		if collecting {
-			targets[v] = true
+		if collect != nil {
+			if collect.funcs == nil {
+				return false
+			}
+			collect.funcs[v] = true
 		}
 		return true
 	case *ssa.MakeClosure:
@@ -1147,10 +1166,10 @@ func walkDynamicValueUncached(value ssa.Value, targets map[*ssa.Function]bool, s
 			}
 			return true
 		}
-		if !ok {
+		if !ok || collect.funcs == nil {
 			return false
 		}
-		targets[fn] = true
+		collect.funcs[fn] = true
 		return true
 	case *ssa.ChangeInterface:
 		return recurse(v.X)
@@ -1164,9 +1183,11 @@ func walkDynamicValueUncached(value ssa.Value, targets map[*ssa.Function]bool, s
 		// A gate-passing static call into the property harness yields a
 		// closed value: the harness wraps exactly the closed callables
 		// the boundary gate judged (rapid.MakeCheck's returned callback
-		// feeding the subtest driver is the driving shape). Every other
-		// call result stays open.
-		return !collecting && propertyHarnessClosedResult(v, fp)
+		// feeding the subtest driver is the driving shape).
+		if !collecting && propertyHarnessClosedResult(v, fp) {
+			return true
+		}
+		return staticCallResultDynamicValue(v, -1, collect, seen, done, fp)
 	case *ssa.Phi:
 		if len(v.Edges) == 0 {
 			return false
@@ -1178,6 +1199,12 @@ func walkDynamicValueUncached(value ssa.Value, targets map[*ssa.Function]bool, s
 		}
 		return true
 	case *ssa.Extract:
+		if call, ok := v.Tuple.(*ssa.Call); ok {
+			if !collecting && propertyHarnessClosedResult(call, fp) {
+				return true
+			}
+			return staticCallResultDynamicValue(call, v.Index, collect, seen, done, fp)
+		}
 		return recurse(v.Tuple)
 	case *ssa.Parameter:
 		args, ok := attributedParameterArgs(v, fp)
@@ -1212,6 +1239,61 @@ func walkDynamicValueUncached(value ssa.Value, targets map[*ssa.Function]bool, s
 	default:
 		return false
 	}
+}
+
+// staticCallResultDynamicValue steps through a static call's returned SSA
+// expressions when the callee belongs to the audited standard-library
+// surface and none of the call's arguments can carry dynamic dispatch
+// (functions or interfaces). This closes standard iterator constructors
+// (strings.SplitSeq) and pure constructors returning interfaces
+// (crypto/sha256.New, strings.NewReader, bytes.NewReader) without
+// stepping through arbitrary user calls (REQ-closure-observability-dispatch).
+func staticCallResultDynamicValue(call *ssa.Call, tupleIndex int, collect *dynamicValueCollector, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+	if fp == nil || !fp.selectionAudited || call == nil || call.Common() == nil || call.Common().IsInvoke() {
+		return false
+	}
+	if fp.functions != nil && !fp.functions[call.Parent()] && !fp.isStdFunc(call.Parent()) {
+		return false
+	}
+	callee := call.Common().StaticCallee()
+	if callee == nil || callee.Synthetic != "" || len(callee.Blocks) == 0 || len(callee.FreeVars) != 0 {
+		return false
+	}
+	pkgPath := funcPkgPath(callee)
+	if !fp.isStdFunc(callee) || (!isSourceOnlyStandardPackage(fp.selectionAudited, pkgPath) && !auditedStandardCallee(fp.selectionAudited, pkgPath, functionSymbolName(callee), callee)) {
+		return false
+	}
+	for _, arg := range call.Common().Args {
+		if arg == nil || typeMayCarryDynamic(fp.selectionAudited, arg.Type(), map[types.Type]bool{}) {
+			return false
+		}
+	}
+	hasReturn := false
+	for _, block := range callee.Blocks {
+		for _, instr := range block.Instrs {
+			ret, ok := instr.(*ssa.Return)
+			if !ok {
+				continue
+			}
+			var res ssa.Value
+			if tupleIndex < 0 {
+				if len(ret.Results) != 1 {
+					return false
+				}
+				res = ret.Results[0]
+			} else {
+				if tupleIndex < 0 || tupleIndex >= len(ret.Results) {
+					return false
+				}
+				res = ret.Results[tupleIndex]
+			}
+			hasReturn = true
+			if !walkDynamicValue(res, collect, seen, done, fp) {
+				return false
+			}
+		}
+	}
+	return hasReturn
 }
 
 // cellOf resolves a load's address to the local allocation it names —
@@ -1324,22 +1406,88 @@ func closedDynamicTargets(value ssa.Value, fp *freshParamAnalysis) (map[*ssa.Fun
 		return nil, false
 	}
 	targets := map[*ssa.Function]bool{}
-	if !walkDynamicValue(value, targets, map[ssa.Value]bool{}, nil, fp) {
+	if !walkDynamicValue(value, &dynamicValueCollector{funcs: targets}, map[ssa.Value]bool{}, nil, fp) {
 		return nil, false
 	}
 	return targets, true
 }
 
-// narrowedTargets returns a computed call's targets narrowed to the
-// functions its operand can hold, within the enumeration's own set;
-// an invoke, a static call, or an operand yielding no set keeps the
-// enumeration's targets whole (REQ-closure-observability-dispatch).
+// closedInvokeTargets resolves the methods of the invoked name on the concrete
+// types an interface operand can hold, through the program's method sets.
+// An operand the walk cannot close, a closed operand naming no concrete type,
+// or a method the concrete type promotes from an unscanned body returns false
+// so the enumeration's projection stays whole (REQ-closure-observability-dispatch).
+func closedInvokeTargets(site ssa.CallInstruction, fp *freshParamAnalysis) (map[*ssa.Function]bool, bool) {
+	if site == nil || site.Parent() == nil || site.Parent().Prog == nil {
+		return nil, false
+	}
+	c := site.Common()
+	if c == nil || !c.IsInvoke() || c.Method == nil {
+		return nil, false
+	}
+	if !subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), fp) {
+		return nil, false
+	}
+	concreteTypes := map[types.Type]bool{}
+	if !walkDynamicValue(c.Value, &dynamicValueCollector{types: concreteTypes}, map[ssa.Value]bool{}, nil, fp) || len(concreteTypes) == 0 {
+		return nil, false
+	}
+	prog := site.Parent().Prog
+	iface, _ := types.Unalias(c.Value.Type()).Underlying().(*types.Interface)
+	targets := make(map[*ssa.Function]bool, len(concreteTypes))
+	for ct := range concreteTypes {
+		if iface != nil && !types.Implements(ct, iface) {
+			continue
+		}
+		sel := prog.MethodSets.MethodSet(ct).Lookup(c.Method.Pkg(), c.Method.Name())
+		if sel == nil {
+			return nil, false
+		}
+		fnObj, ok := sel.Obj().(*types.Func)
+		if !ok || fnObj == nil {
+			return nil, false
+		}
+		declFn := prog.FuncValue(fnObj)
+		if declFn == nil || len(declFn.Blocks) == 0 || propertyHarnessPath(funcPkgPath(declFn)) {
+			return nil, false
+		}
+		if fp.isStdFunc(declFn) {
+			if len(sel.Index()) > 1 {
+				return nil, false
+			}
+			audited := fp != nil && fp.selectionAudited
+			if typeMayCarryDynamic(audited, ct, map[types.Type]bool{}) {
+				return nil, false
+			}
+		}
+		cmethod := prog.LookupMethod(ct, c.Method.Pkg(), c.Method.Name())
+		if cmethod == nil || len(cmethod.Blocks) == 0 {
+			return nil, false
+		}
+		targets[cmethod] = true
+	}
+	if len(targets) == 0 {
+		return nil, false
+	}
+	return targets, true
+}
+
+// narrowedTargets returns a dynamic call's or interface invoke's targets
+// narrowed to the functions or concrete-type methods its operand can hold,
+// within the enumeration's own set; a static call or an operand yielding no
+// set keeps the enumeration's targets whole (REQ-closure-observability-dispatch).
 func narrowedTargets(site ssa.CallInstruction, targets map[*ssa.Function]bool, fp *freshParamAnalysis) map[*ssa.Function]bool {
 	c := site.Common()
-	if c == nil || c.IsInvoke() || c.StaticCallee() != nil || len(targets) == 0 {
+	if c == nil || c.StaticCallee() != nil || len(targets) == 0 {
 		return targets
 	}
-	held, ok := closedDynamicTargets(c.Value, fp)
+	var held map[*ssa.Function]bool
+	var ok bool
+	if c.IsInvoke() {
+		held, ok = closedInvokeTargets(site, fp)
+	} else {
+		held, ok = closedDynamicTargets(c.Value, fp)
+	}
 	if !ok {
 		return targets
 	}

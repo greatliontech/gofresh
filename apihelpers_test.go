@@ -56,14 +56,3 @@ func cgoEnabled(t *testing.T) bool {
 	}
 	return snapshot.Value("CGO_ENABLED") == "1"
 }
-
-// closestChainSuffix is the label suffix of the chain closest to a
-// netgo listing on this host: the toolchain's base row under cgo, its
-// cgo0 row without.
-func closestChainSuffix(t *testing.T) string {
-	t.Helper()
-	if cgoEnabled(t) {
-		return ""
-	}
-	return " cgo0"
-}

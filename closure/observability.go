@@ -579,6 +579,7 @@ func immutableEnvironmentMethod(sets ...[]externalEffect) string {
 func testMainObservedEffects(base *tier2Base, reachable attributedReachability) tier2Result {
 	analyzer := base.analyzer()
 	analyzer.fresh = newFreshParamAnalysis(base.h.SelectionAudited(), reachable)
+	analyzer.fresh.isStd = analyzer.isStdFunction
 	for function := range reachable.functions {
 		idx := analyzer.idxForFunction(function)
 		if idx == nil || idx.std || idx.testMain {
@@ -598,7 +599,7 @@ func testMainObservedEffects(base *tier2Base, reachable attributedReachability) 
 				if !ok || site.Common() == nil {
 					continue
 				}
-				if !dispatchProvenanceClosed(site, nil) {
+				if !dispatchProvenanceClosed(site, &freshParamAnalysis{propertyHarnessAudited: reachable.propertyHarnessAudited, selectionAudited: base.h.SelectionAudited(), isStd: analyzer.isStdFunction}) {
 					analyzer.requestWiden("test-main dispatch on unattributable state in " + function.String())
 				}
 				if callee := site.Common().StaticCallee(); callee != nil {
@@ -671,9 +672,7 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 	// (rapid.Deriv(rapid.Int())) is the same sanctioned crossing as in
 	// subject flow. Parameter crossing stays refused exactly as with a
 	// nil analysis (REQ-closure-observability-property-harness).
-	if reachable.propertyHarnessAudited {
-		analyzer.fresh = &freshParamAnalysis{propertyHarnessAudited: true, selectionAudited: analyzer.h.SelectionAudited()}
-	}
+	analyzer.fresh = &freshParamAnalysis{propertyHarnessAudited: reachable.propertyHarnessAudited, selectionAudited: analyzer.h.SelectionAudited(), isStd: analyzer.isStdFunction}
 	for function := range reachable.functions {
 		idx := analyzer.idxForFunction(function)
 		if idx == nil || idx.std || idx.testMain {

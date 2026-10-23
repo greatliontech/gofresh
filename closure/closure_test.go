@@ -3332,3 +3332,205 @@ type FnChan chan func()
 		}
 	}
 }
+
+func TestClosedInvokeTargetsAndStaticCallReturnWalk(t *testing.T) {
+	const src = `package p
+
+type I interface {
+	Do() int
+}
+
+type goodImpl struct{}
+func (goodImpl) Do() int { return 1 }
+
+type badImpl struct{}
+func (badImpl) Do() int { return 2 }
+
+func newGood() I {
+	return goodImpl{}
+}
+
+func seqOf(a, b int) func(func(int) bool) {
+	return func(yield func(int) bool) {
+		if !yield(a) {
+			return
+		}
+		yield(b)
+	}
+}
+
+func UseGood() int {
+	var _ I = badImpl{}
+	var i I = goodImpl{}
+	return i.Do()
+}
+
+func UseStaticHelper() int {
+	var _ I = badImpl{}
+	h := newGood()
+	return h.Do()
+}
+
+func UseIterator() int {
+	sum := 0
+	for x := range seqOf(1, 2) {
+		sum += x
+	}
+	return sum
+}
+
+func UseOpen(i I) int {
+	return i.Do()
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "p.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := &types.Info{
+		Types:      map[ast.Expr]types.TypeAndValue{},
+		Defs:       map[*ast.Ident]types.Object{},
+		Uses:       map[*ast.Ident]types.Object{},
+		Selections: map[*ast.SelectorExpr]*types.Selection{},
+	}
+	typesPkg, err := (&types.Config{}).Check("strings", fset, []*ast.File{file}, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ssaProg := ssa.NewProgram(fset, ssa.InstantiateGenerics)
+	ssaPkg := ssaProg.CreatePackage(typesPkg, []*ast.File{file}, info, true)
+	ssaPkg.Build()
+	fp := &freshParamAnalysis{selectionAudited: true}
+
+	firstCallSite := func(fnName string, invoke bool) ssa.CallInstruction {
+		fn := ssaPkg.Func(fnName)
+		if fn == nil {
+			t.Fatalf("missing function %s", fnName)
+		}
+		for _, b := range fn.Blocks {
+			for _, instr := range b.Instrs {
+				site, ok := instr.(ssa.CallInstruction)
+				if !ok {
+					continue
+				}
+				if site.Common().IsInvoke() == invoke {
+					return site
+				}
+			}
+		}
+		t.Fatalf("no matching call site in %s", fnName)
+		return nil
+	}
+
+	for _, fnName := range []string{"UseGood", "UseStaticHelper"} {
+		site := firstCallSite(fnName, true)
+		targets, ok := closedInvokeTargets(site, fp)
+		var only *ssa.Function
+		for fn := range targets {
+			only = fn
+		}
+		if !ok || len(targets) != 1 || only.Name() != "Do" || !strings.Contains(only.String(), "goodImpl") {
+			t.Fatalf("%s closedInvokeTargets = (%v, %v), want [(goodImpl).Do]", fnName, targets, ok)
+		}
+	}
+
+	openSite := firstCallSite("UseOpen", true)
+	if targets, ok := closedInvokeTargets(openSite, fp); ok {
+		t.Fatalf("UseOpen closedInvokeTargets = (%v, true), want false for open parameter", targets)
+	}
+
+	// Range-over-func calls the iterator returned by seqOf(1, 2): the second
+	// static/dynamic call instruction in UseIterator is the computed call to
+	// the returned iterator closure.
+	iterFn := ssaPkg.Func("UseIterator")
+	var computedSite ssa.CallInstruction
+	for _, b := range iterFn.Blocks {
+		for _, instr := range b.Instrs {
+			site, ok := instr.(ssa.CallInstruction)
+			if ok && site.Common().StaticCallee() == nil {
+				computedSite = site
+			}
+		}
+	}
+	if computedSite == nil {
+		t.Fatal("missing computed iterator call in UseIterator")
+	}
+	targets, ok := closedDynamicTargets(computedSite.Common().Value, fp)
+	var onlyIter *ssa.Function
+	for fn := range targets {
+		onlyIter = fn
+	}
+	if !ok || len(targets) != 1 || !strings.Contains(onlyIter.Name(), "seqOf$") {
+		t.Fatalf("UseIterator closedDynamicTargets = (%v, %v), want [seqOf$1]", targets, ok)
+	}
+
+	// Non-standard package calls (when isStd returns false) must NOT be
+	// traversed by staticCallResultDynamicValue.
+	userFP := &freshParamAnalysis{
+		selectionAudited: true,
+		isStd:            func(*ssa.Function) bool { return false },
+	}
+	if targets, ok := closedInvokeTargets(firstCallSite("UseStaticHelper", true), userFP); ok {
+		t.Fatalf("non-std UseStaticHelper closedInvokeTargets = (%v, true), want false", targets)
+	}
+}
+
+func TestCachedDependencyNestedClosureWalked(t *testing.T) {
+	const src = `package dep
+
+var Captured = 1
+
+func Outer() int {
+	fn := func() int {
+		return Captured
+	}
+	return fn()
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "dep.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := &types.Info{
+		Types:      map[ast.Expr]types.TypeAndValue{},
+		Defs:       map[*ast.Ident]types.Object{},
+		Uses:       map[*ast.Ident]types.Object{},
+		Selections: map[*ast.SelectorExpr]*types.Selection{},
+	}
+	typesPkg, err := (&types.Config{}).Check("example.com/dep", fset, []*ast.File{file}, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ssaProg := ssa.NewProgram(fset, ssa.InstantiateGenerics)
+	ssaPkg := ssaProg.CreatePackage(typesPkg, []*ast.File{file}, info, true)
+	ssaPkg.Build()
+
+	depIdx := &pkgIndex{
+		pkg:       &packages.Package{ID: "example.com/dep", PkgPath: "example.com/dep", Types: typesPkg, TypesInfo: info, Syntax: []*ast.File{file}},
+		cache:     true,
+		decls:     map[types.Object]ast.Node{},
+		linknames: map[types.Object]string{},
+	}
+	a := &tier2Analyzer{
+		h:           &Hasher{},
+		prog:        &program{Prog: ssaProg},
+		idxByTypes:  map[*types.Package]*pkgIndex{typesPkg: depIdx},
+		seenObjects: map[types.Object]bool{},
+		seenTypes:   map[types.Type]bool{},
+		filePkgs:    map[*pkgIndex]bool{},
+		rtaReach:    map[*ssa.Function]bool{},
+		scanned:     map[*ssa.Function]bool{},
+	}
+	outerFn := ssaPkg.Func("Outer")
+	if len(outerFn.AnonFuncs) != 1 {
+		t.Fatalf("Outer.AnonFuncs = %d, want 1", len(outerFn.AnonFuncs))
+	}
+	anonFn := outerFn.AnonFuncs[0]
+	a.addFunction(anonFn)
+	if !a.scanned[anonFn] {
+		t.Fatal("cached dependency anonymous closure was skipped by addFunction instead of scanning its SSA body")
+	}
+}
+
