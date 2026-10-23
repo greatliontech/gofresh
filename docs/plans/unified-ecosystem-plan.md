@@ -60,10 +60,10 @@ To succeed in the hot development loop across all projects, the 4-repository sta
 
 ### Phase 5: Atomic Commits, Consumer `task install` Rebuilds, & Warm-Loop Verification
 - [x] Commit Phase 1–3 foundation in `gofresh` (`12e22dd`).
-- [ ] Re-pin `gofresh` bindings (`stipulator pin`) and commit Phase 4 performance optimizations in `gofresh`.
-- [ ] Commit consumer alignment changes in `../stipulator` and `../gomutant`.
-- [ ] Rebuild and install all 3 consumer CLIs (`task install` in `../stipulator`, `../pew`, and `../gomutant`) so `~/.local/bin` embeds the optimized `gofresh` engine.
-- [ ] Measure warm `stipulator verify --no-test` latency and memory across all 4 repositories.
+- [x] Re-pin `gofresh` bindings (`stipulator pin`) and commit Phase 4 performance optimizations in `gofresh` (`c7667be`).
+- [x] Commit consumer alignment changes in `../stipulator` and `../gomutant`.
+- [x] Rebuild and install all 3 consumer CLIs (`task install` in `../stipulator`, `../pew`, and `../gomutant`) so `~/.local/bin` embeds the optimized `gofresh` engine.
+- [x] Measure warm `stipulator verify --no-test` latency and memory across all 4 repositories.
 
 ---
 
@@ -88,14 +88,17 @@ To succeed in the hot development loop across all projects, the 4-repository sta
 | `BenchmarkArtifact/bytes=4194304/capture-24` | `5,759,788 ns/op` (**5.76 ms**) | `1,456.41 MB/s` | `4,196,756 B/op` | `21 allocs/op` |
 | `BenchmarkArtifact/bytes=4194304/validate-24` | `387,705 ns/op` (**0.39 ms**) | `10,818.29 MB/s` | `1,128 B/op` | `9 allocs/op` |
 
-### 3.3 Repository Gate & Verification Telemetry
+### 3.3 Repository Gate & Verification Telemetry (Cold vs. Warm)
 
 | Repository & Operation | Wall Time | Resident / Peak Memory | Verdict / Cache Status |
 | :--- | :--- | :--- | :--- |
-| **`gofresh`** (`stipulator verify --no-test`) | **28.9s** (compile 16.4s, discovery 6.3s, verify 6.1s) | End: **75 MiB**, Peak: **389 MiB** (descendants **311 MiB**) | `864 bindings (0 stale), 0 unpinned, 0 moved` (`309 served, 346 typed`) |
+| **`gofresh`** (`stipulator verify --no-test`, cold) | **24.1s** (compile 7.1s, discovery 9.2s, verify 7.8s) | End: **71 MiB**, Peak: **348 MiB** (descendants **372 MiB**) | `864 bindings (0 stale), 0 unpinned, 0 moved` (`653 records published`) |
+| **`gofresh`** (`stipulator verify --no-test`, **warm**) | **11.1s** (compile 7.1s, discovery 2.5s, **verify 1.4s**) | End: **52 MiB**, Peak: **135 MiB** (descendants **285 MiB**) | `864 bindings (0 stale), 0 unpinned, 0 moved` (`653 served, 2 typed`) |
 | **`stipulator`** (`stipulator verify --no-test`, cold) | **2m22.1s** (compile 0s, discovery 40.8s, verify 1m41s) | End: **171 MiB**, Peak: **2.1 GiB** (descendants **1.2 GiB**) | `1550 bindings (0 stale), 0 unpinned, 0 moved` (`1149 records published`) |
-| **`pew`** (`stipulator verify --no-test`) | **< 15s** | Peak **< 650 MiB** | `432 bindings (0 stale), 0 unpinned, 0 moved` |
-| **`gomutant`** (`stipulator verify --no-test`) | **13.6s** (compile 5.7s, discovery 3.3s, verify 4.6s) | End: **71 MiB**, Peak: **623 MiB** (descendants **197 MiB**) | `826 bindings (0 stale), 0 unpinned, 0 moved` |
+| **`stipulator`** (`stipulator verify --no-test`, **warm**) | **1m06.4s** (compile 54.5s, discovery 8.0s, **verify 3.9s**) | End: **62 MiB**, Peak: **278 MiB** (descendants **677 MiB**) | `1550 bindings (0 stale), 0 unpinned, 0 moved` (`1149 served, 4 typed`) |
+| **`pew`** (`stipulator verify --no-test`, **warm**) | **3.6s** (compile 3.6s, **discovery 0s, verify 0s**) | End: **45 MiB**, Peak: **106 MiB** (0 descendants) | `432 bindings (0 stale), 0 unpinned, 0 moved` (`309 served, 0 typed`) |
+| **`gomutant`** (`stipulator verify --no-test`, cold) | **19.2s** (compile 11.6s, discovery 3.1s, verify 4.5s) | End: **77 MiB**, Peak: **963 MiB** (descendants **181 MiB**) | `826 bindings (0 stale), 0 unpinned, 0 moved` (`718 records published`) |
+| **`gomutant`** (`stipulator verify --no-test`, **warm**) | **4.3s** (compile 4.3s, **discovery 0s, verify 0s**) | End: **53 MiB**, Peak: **177 MiB** (0 descendants) | `826 bindings (0 stale), 0 unpinned, 0 moved` (`718 served, 0 typed`) |
 | **`gofresh`** (`task check`: `vet` + `test:short`) | **~18.4s** (`gofresh` 2.0s, `closure` 4.6s, `gotool` 11.8s, `runtimeinput` 2.7s) | Within budget | All packages pass |
 | **`stipulator`** (`task vet test:short`) | **~1m57s** (`backends/golang` 89.1s, `check` 12.5s, `mcpserver` 7.4s, `cmd` 5.8s) | Within budget | All packages pass |
 | **`pew`** (`task check`: `vet` + `test:short`) | **~12.5s** (`gotool` 5.1s, `cmd/pew` 4.3s, `run` 2.6s) | Within budget | All packages pass |
