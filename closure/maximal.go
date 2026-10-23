@@ -441,11 +441,11 @@ type importAlias struct {
 // collection and the preferred-reason derivation
 // (equivalence-pinned by TestFileEffectScanMatchesTwoPassReference).
 func maximalFileEffects(audited bool, filename string) (maximalEffectScan, error) {
-	content, err := os.ReadFile(filename)
+	fb, err := readBytes(filename)
 	if err != nil {
 		return maximalEffectScan{}, err
 	}
-	return maximalFileEffectsContent(audited, filename, content)
+	return maximalFileEffectsContent(audited, filename, fb.content)
 }
 
 // maximalFileEffectsContent is the scan over bytes already read.

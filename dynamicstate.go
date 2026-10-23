@@ -668,10 +668,6 @@ var processFactCache sync.Map
 // construction: their declaration side is excluded and toolchain source
 // cannot reach module variables (imports are acyclic).
 type viewDynamicState struct {
-	// facts by type-checker package path, one view package's cone —
-	// set on a composition; test-variant facts merge into the same key
-	// exactly as their compilations collapse there.
-	facts map[string][]dynamicStateFact
 	// cones holds, per view package, the facts of its own test-binary
 	// graph — the only facts any judgment or lookup for that package
 	// reads (REQ-closure-shared-dynamic-state).
@@ -707,6 +703,16 @@ type viewDynamicState struct {
 	// env-carrying registrations — an unattributed mark foreclosing the
 	// reachability discharge fail-closed.
 	culpritSites map[string]map[string]culpritSiteSet
+}
+
+// coneDynamicState is one view package's composed dynamic-state judgment over
+// its own test-binary cone.
+type coneDynamicState struct {
+	downgraded            string
+	vouchDischarges       string
+	attestationDischarges string
+	rootCulprits          []dynCulprit
+	culpritSites          map[string]culpritSiteSet
 }
 
 // dischargeUnreachableCulprits applies the single-subject reachability
@@ -1195,28 +1201,28 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		coneMeta, coneFacts := dynamicStateCone(meta, nodesByListing, factsByListing, viewPackage)
 		state.cones[viewPackage] = coneFacts
 		cone := composeDynamicState(coneMeta, coneFacts, viewPackage, vouches, singleSubject, packageProcess)
-		if reason := cone.downgraded[viewPackage]; reason != "" {
-			state.downgraded[viewPackage] = reason
+		if cone.downgraded != "" {
+			state.downgraded[viewPackage] = cone.downgraded
 		}
-		if discharges := cone.vouchDischarges[viewPackage]; discharges != "" {
+		if cone.vouchDischarges != "" {
 			if state.vouchDischarges == nil {
 				state.vouchDischarges = map[string]string{}
 			}
-			state.vouchDischarges[viewPackage] = discharges
+			state.vouchDischarges[viewPackage] = cone.vouchDischarges
 		}
-		if attested := cone.attestationDischarges[viewPackage]; attested != "" {
+		if cone.attestationDischarges != "" {
 			if state.attestationDischarges == nil {
 				state.attestationDischarges = map[string]string{}
 			}
-			state.attestationDischarges[viewPackage] = attested
+			state.attestationDischarges[viewPackage] = cone.attestationDischarges
 		}
-		if culprits := cone.rootCulprits[viewPackage]; len(culprits) > 0 {
+		if len(cone.rootCulprits) > 0 {
 			if state.rootCulprits == nil {
 				state.rootCulprits = map[string][]dynCulprit{}
 				state.culpritSites = map[string]map[string]culpritSiteSet{}
 			}
-			state.rootCulprits[viewPackage] = culprits
-			state.culpritSites[viewPackage] = cone.culpritSites[viewPackage]
+			state.rootCulprits[viewPackage] = cone.rootCulprits
+			state.culpritSites[viewPackage] = cone.culpritSites
 		}
 	}
 	return state, nil
@@ -1231,9 +1237,8 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 // for each exactly the judgment its solitary view yields, and a
 // package's outputs are a pure function of its own graph
 // (REQ-closure-shared-dynamic-state, REQ-closure-scan-memo).
-func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamicStateFact, viewPackage string, vouches map[string]bool, singleSubject, packageProcess bool) *viewDynamicState {
-	state := &viewDynamicState{facts: facts, downgraded: map[string]string{}}
-	viewPackages := []string{viewPackage}
+func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dynamicStateFact, viewPackage string, vouches map[string]bool, singleSubject, packageProcess bool) coneDynamicState {
+	var state coneDynamicState
 	// Compose: the demonstrated-mutation and escape unions across the
 	// graph, the declaring package's opacity intersection, then per-node
 	// declaration matching and reachability from each view package's
@@ -1245,7 +1250,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 	mutated := map[string]bool{}
 	escaped := map[string]bool{}
 	envCarrying := map[string]bool{}
-	for _, facts := range state.facts {
+	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, key := range fact.Mutates {
 				mutated[key] = true
@@ -1264,13 +1269,13 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 	// every callee it depends on resolves, so cycles and absent foreign
 	// proofs fail closed; an unresolved callee keeps the store's poison
 	// (REQ-closure-shared-dynamic-state).
-	resolution := newDeferralResolution(state.facts, func(fact dynamicStateFact) {
+	resolution := newDeferralResolution(allFacts, func(fact dynamicStateFact) {
 		for _, key := range fact.Declares {
 			mutated[key] = true
 		}
 	})
 	envFreeResolved := resolution.envFreeResolved
-	for _, facts := range state.facts {
+	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, use := range fact.EnvCallUses {
 				varKey, callee, ok := strings.Cut(use, "\x01")
@@ -1294,7 +1299,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 	// - fail-closed, the address-capture semantics the call site
 	// withheld (REQ-closure-shared-dynamic-state).
 	readOnly := resolution.readOnly
-	for _, facts := range state.facts {
+	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, use := range fact.MethodUses {
 				varKey, methodKey, ok := strings.Cut(use, "\x00")
@@ -1338,7 +1343,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 	// included, because an alias outlives initialization
 	// (REQ-closure-shared-dynamic-state).
 	paramLeakFree := resolution.paramLeakFree
-	for _, facts := range state.facts {
+	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, use := range fact.ParamUses {
 				parts := strings.SplitN(use, "\x00", 2)
@@ -1378,7 +1383,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 	// dependency edges. Any poison, any unproven deferral, any unresolved
 	// constructor, and any malformed record keeps the escape - fail-closed
 	// (REQ-closure-shared-dynamic-state).
-	for _, facts := range state.facts {
+	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, use := range fact.FieldParamUses {
 				varKey, position, ok := strings.Cut(use, "\x01")
@@ -1419,7 +1424,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 	// absence of references fails closed. Attributed uses of proven
 	// functions discharge; the rest promote to their immediate class.
 	refRegions := map[string]map[string]bool{}
-	for _, facts := range state.facts {
+	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, edge := range fact.FuncRefs {
 				callee, region, ok := strings.Cut(edge, "\x01")
@@ -1513,7 +1518,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 		unattributedMark[key] = true
 	}
 	envCallable := map[string]bool{}
-	for _, facts := range state.facts {
+	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, key := range fact.EnvCallable {
 				envCallable[key] = true
@@ -1536,7 +1541,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 		}
 		siteFns[key][fn] = true
 	}
-	for _, facts := range state.facts {
+	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, use := range fact.AttributedUses {
 				parts := strings.Split(use, "\x00")
@@ -1614,7 +1619,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 	// - a mark on either side refuses both
 	// (REQ-closure-shared-dynamic-state).
 	linkAdj := map[string]map[string]bool{}
-	for _, facts := range state.facts {
+	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, link := range fact.CarrierLinks {
 				a, b, ok := strings.Cut(link, "\x01")
@@ -1730,7 +1735,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 	// attestation's other discharges (REQ-closure-shared-dynamic-state,
 	// REQ-vouch-recorded).
 	directiveCovered := map[string]bool{}
-	for _, pkgFacts := range state.facts {
+	for _, pkgFacts := range allFacts {
 		perKey := map[string]bool{}
 		for _, fact := range pkgFacts {
 			directed := make(map[string]bool, len(fact.SingleSubjectVars))
@@ -1779,7 +1784,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 	// hand-written variables in sibling files keep every mark
 	// (REQ-closure-shared-dynamic-state, REQ-vouch-recorded).
 	generatedProtoVars := map[string]bool{}
-	for _, pkgFacts := range state.facts {
+	for _, pkgFacts := range allFacts {
 		for _, fact := range pkgFacts {
 			for _, key := range fact.GeneratedProtoVars {
 				generatedProtoVars[key] = true
@@ -1810,7 +1815,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 		}
 	}
 	generatedGrpcVars := map[string]bool{}
-	for _, pkgFacts := range state.facts {
+	for _, pkgFacts := range allFacts {
 		for _, fact := range pkgFacts {
 			for _, key := range fact.GeneratedGrpcVars {
 				generatedGrpcVars[key] = true
@@ -1894,8 +1899,8 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 			pkgCulprits[pkgPath] = append(pkgCulprits[pkgPath], dynCulprit{key: key, text: pkgPath + ": " + key + verb + dischargeChannel(pkgPath, key)})
 		}
 	}
-	pkgPaths := make([]string, 0, len(state.facts))
-	for pkgPath := range state.facts {
+	pkgPaths := make([]string, 0, len(allFacts))
+	for pkgPath := range allFacts {
 		pkgPaths = append(pkgPaths, pkgPath)
 	}
 	sort.Strings(pkgPaths)
@@ -1907,7 +1912,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 		// name every load-bearing vouch, not the ones lexical order
 		// happened to reach first (REQ-vouch-recorded); the first
 		// unvouched hit per rank order still names the culprit.
-		for _, fact := range state.facts[pkgPath] {
+		for _, fact := range allFacts[pkgPath] {
 			for _, key := range fact.Declares {
 				if mutated[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
 					recordCulprit(pkgPath, key, verbMutated)
@@ -1917,7 +1922,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 				}
 			}
 		}
-		for _, fact := range state.facts[pkgPath] {
+		for _, fact := range allFacts[pkgPath] {
 			for _, key := range fact.Declares {
 				if escaped[key] && notOpaque[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
 					recordCulprit(pkgPath, key, verbEscapes)
@@ -1931,7 +1936,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 		// audit refuses regardless of use shape: any admitted read path
 		// can extract and execute the value, and its environment can
 		// write state the settled verdict assumed stable.
-		for _, fact := range state.facts[pkgPath] {
+		for _, fact := range allFacts[pkgPath] {
 			for _, key := range fact.Declares {
 				if envCarrying[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
 					recordCulprit(pkgPath, key, verbEnvCarrying)
@@ -1949,10 +1954,6 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 		imports[node.ImportPath] = node.Imports
 		classes[node.ImportPath] = node.Class
 		pkgPathOf[node.ImportPath] = node.PkgPath
-	}
-	isView := make(map[string]bool, len(viewPackages))
-	for _, pkgPath := range viewPackages {
-		isView[pkgPath] = true
 	}
 	var walk func(listing string, seen map[string]bool) string
 	walk = func(listing string, seen map[string]bool) string {
@@ -1983,11 +1984,11 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 		} else if node.TestMain {
 			continue
 		}
-		if !isView[root] || state.downgraded[root] != "" {
+		if root != viewPackage || state.downgraded != "" {
 			continue
 		}
 		if culprit := walk(node.ImportPath, map[string]bool{}); culprit != "" {
-			state.downgraded[root] = culprit
+			state.downgraded = culprit
 		}
 	}
 	// The per-subject reachability inventory: for every downgraded view
@@ -1997,9 +1998,8 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 	// subject under the single-subject attestation; the first surviving
 	// culprit keeps the downgrade with its own name, and an empty
 	// survivor set lifts it (REQ-closure-shared-dynamic-state).
-	if len(pkgCulprits) > 0 {
-		state.rootCulprits = map[string][]dynCulprit{}
-		state.culpritSites = map[string]map[string]culpritSiteSet{viewPackage: {}}
+	if len(pkgCulprits) > 0 && state.downgraded != "" {
+		state.culpritSites = map[string]culpritSiteSet{}
 		var collectOrdered func(listing string, seen map[string]bool, acc *[]dynCulprit)
 		collectOrdered = func(listing string, seen map[string]bool, acc *[]dynCulprit) {
 			if seen[listing] {
@@ -2017,7 +2017,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 				collectOrdered(imported, seen, acc)
 			}
 		}
-		rootSeen := map[string]map[string]bool{}
+		seen := map[string]bool{}
 		for _, node := range meta {
 			root := node.PkgPath
 			if node.ForTest != "" {
@@ -2025,30 +2025,23 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 			} else if node.TestMain {
 				continue
 			}
-			if !isView[root] || state.downgraded[root] == "" {
+			if root != viewPackage {
 				continue
-			}
-			seen := rootSeen[root]
-			if seen == nil {
-				seen = map[string]bool{}
-				rootSeen[root] = seen
 			}
 			var acc []dynCulprit
 			collectOrdered(node.ImportPath, seen, &acc)
-			state.rootCulprits[root] = append(state.rootCulprits[root], acc...)
+			state.rootCulprits = append(state.rootCulprits, acc...)
 		}
-		for _, culprits := range state.rootCulprits {
-			for _, culprit := range culprits {
-				if _, done := state.culpritSites[viewPackage][culprit.key]; done {
-					continue
-				}
-				fns := siteFns[culprit.key]
-				state.culpritSites[viewPackage][culprit.key] = culpritSiteSet{
-					fns: fns,
-					// A siteless mark is a bookkeeping hole, never a
-					// discharge: fail-closed with the unattributed class.
-					unattributed: unattributedMark[culprit.key] || len(fns) == 0,
-				}
+		for _, culprit := range state.rootCulprits {
+			if _, done := state.culpritSites[culprit.key]; done {
+				continue
+			}
+			fns := siteFns[culprit.key]
+			state.culpritSites[culprit.key] = culpritSiteSet{
+				fns: fns,
+				// A siteless mark is a bookkeeping hole, never a
+				// discharge: fail-closed with the unattributed class.
+				unattributed: unattributedMark[culprit.key] || len(fns) == 0,
 			}
 		}
 	}
@@ -2057,11 +2050,10 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 	// graph reaches joins its canonical sorted comma-joined record.
 	// Unlike the culprit walk this one never short-circuits — the record
 	// carries every load-bearing acceptance (REQ-vouch-recorded).
-	collectReachable := func(source map[string][]string) map[string]string {
-		result := map[string]string{}
-		perRoot := map[string]map[string]bool{}
-		var collect func(listing string, seen, acc map[string]bool)
-		collect = func(listing string, seen, acc map[string]bool) {
+	collectReachable := func(source map[string][]string) string {
+		acc := map[string]bool{}
+		var collect func(listing string, seen map[string]bool)
+		collect = func(listing string, seen map[string]bool) {
 			if seen[listing] {
 				return
 			}
@@ -2076,7 +2068,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 				if _, ok := pkgPathOf[imported]; !ok {
 					continue
 				}
-				collect(imported, seen, acc)
+				collect(imported, seen)
 			}
 		}
 		for _, node := range meta {
@@ -2086,28 +2078,20 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 			} else if node.TestMain {
 				continue
 			}
-			if !isView[root] {
+			if root != viewPackage {
 				continue
 			}
-			acc := perRoot[root]
-			if acc == nil {
-				acc = map[string]bool{}
-				perRoot[root] = acc
-			}
-			collect(node.ImportPath, map[string]bool{}, acc)
+			collect(node.ImportPath, map[string]bool{})
 		}
-		for root, acc := range perRoot {
-			if len(acc) == 0 {
-				continue
-			}
-			keys := make([]string, 0, len(acc))
-			for key := range acc {
-				keys = append(keys, key)
-			}
-			sort.Strings(keys)
-			result[root] = strings.Join(keys, ",")
+		if len(acc) == 0 {
+			return ""
 		}
-		return result
+		keys := make([]string, 0, len(acc))
+		for key := range acc {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		return strings.Join(keys, ",")
 	}
 	if len(vouchDischarged) > 0 {
 		// The discharge record is per view package: every vouch that
@@ -2127,7 +2111,7 @@ func composeDynamicState(meta []closure.GraphPackage, facts map[string][]dynamic
 	evidenceDischarged := map[string][]string{}
 	evidenceSeen := map[string]bool{}
 	for _, pkgPath := range pkgPaths {
-		for _, fact := range state.facts[pkgPath] {
+		for _, fact := range allFacts[pkgPath] {
 			for _, key := range fact.PoolDischarges {
 				if seen := pkgPath + "\x00" + key; !evidenceSeen[seen] {
 					evidenceSeen[seen] = true

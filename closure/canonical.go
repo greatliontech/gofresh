@@ -7,7 +7,6 @@ import (
 	"go/token"
 	"strings"
 
-	"github.com/greatliontech/gofresh/closure/internal/cachefile"
 	"github.com/greatliontech/gofresh/closure/internal/digest"
 	"github.com/greatliontech/gofresh/internal/generatedmark"
 )
@@ -244,16 +243,7 @@ func cgoPreamble(items []tokenItem, i int, inImportGroup bool) bool {
 // discipline).
 func (h *Hasher) canonicalFileDigest(dir, byteDigest string, content []byte) string {
 	if h.fileMemo != nil {
-		entries, loaded := h.fileMemo.canonical[dir]
-		if !loaded {
-			entries = map[string]string{}
-			cachefile.Load(canonicalDirName, canonicalScope(), dir, &entries)
-			h.fileMemo.canonical[dir] = entries
-		}
-		if canon, ok := entries[byteDigest]; ok {
-			return canon
-		}
-		if canon, ok := h.fileMemo.pendingCanonical[dir][byteDigest]; ok {
+		if canon, ok, _ := h.fileMemo.canonical.lookup(canonicalScope(), dir, byteDigest, true); ok {
 			return canon
 		}
 	}
@@ -265,10 +255,7 @@ func (h *Hasher) canonicalFileDigest(dir, byteDigest string, content []byte) str
 		canon = byteDigest
 	}
 	if h.fileMemo != nil {
-		if h.fileMemo.pendingCanonical[dir] == nil {
-			h.fileMemo.pendingCanonical[dir] = map[string]string{}
-		}
-		h.fileMemo.pendingCanonical[dir][byteDigest] = canon
+		h.fileMemo.canonical.record(canonicalScope(), dir, byteDigest, canon)
 	}
 	return canon
 }

@@ -1950,8 +1950,15 @@ of a completed derivation; a miss can leave analysis unavailable under the
 same budget — writes atomically, and a missing, unreadable, corrupt, or
 key-mismatched entry recomputes silently; no entry is
 trusted beyond its complete dependencies and retained checked authority — key
-agreement alone cannot supply a missing derivation. Entries accumulate one per closure version and the cache is
-deletable wholesale at any time. Proofs persist as each attribution slice
+agreement alone cannot supply a missing derivation. Entries accumulate across
+closure versions under a shared byte retention bound (`DefaultMemoMaxBytes` =
+2 GiB across all memo classes, configurable via `SetMemoMaxBytes` and
+explicitly collectable via `PruneMemos`, which preserves in-flight `.cache-*`
+writes, reclaims obsolete memo classes and abandoned keys alongside active
+ones, and reports used, reclaimed, and remaining bytes plus removed and
+skipped entry counts); eviction changes only cold recomputation cost, never
+freshness or verdict authority, and the cache is deletable wholesale at any
+time. Proofs persist as each attribution slice
 completes: an analysis deadline expiring mid-group forfeits only the
 interrupted slice's proofs, and a later pass serves every completed
 slice's from the memo. A violation of the caller's quiescence

@@ -41,40 +41,29 @@ func parseMeminfo(text string) (Memory, bool) {
 // below the live set buys continuous collection and nothing else.
 const CeilingFloor = int64(1) << 30
 
-// familyRoom is what the host has for a process's family: what it has
-// available plus what the family — the process and its descendants —
-// holds that the host cannot reclaim (the anonymous and shared-memory
-// pages; a file-backed page is the page cache's and counted in the
-// host's availability already). The kernel states availability net of
-// the held pages, so a derivation taken while the family holds a
-// working set must add that set back, or it counts the consumer's own
-// pages as the host's unavailability and installs a ceiling under a
-// live heap. The room counts what the walk sees, each member's held
-// set as its status states it: a page shared among k members is
-// counted k−1 times over, and a child still in its vfork window (its
-// memory the parent's until it execs) counts the parent's held set
-// once more — both transient and small, since Go spawns only to exec;
-// and a family's memory the host cannot reclaim that no process holds
-// (its unmapped tmpfs files, the kernel's allocations on its behalf)
-// reads as the host's, so the room errs low there, never high.
+// familyRoom is the room reading for a process's family: what the host
+// reports available plus the family's summed per-process held counters
+// (each member's RssAnon + RssShmem as its /proc/<pid>/status states
+// them; a file-backed page is the page cache's and counted in the host's
+// availability already). Summing per-process status counters is a
+// soft-target input, not a count of unique physical pages: it
+// understates family-caused memory for unmapped tmpfs files, kernel
+// allocations on the family's behalf, or a leaving descendant, and
+// overstates unique physical pages when multiple members map the same
+// shared page (RssShmem) or while a child sits between
+// CLONE_VM|CLONE_VFORK and execve.
 func familyRoom(m Memory, family uint64) uint64 {
 	return m.AvailableBytes + family
 }
 
-// ceiling is the rule: half of the room the host has for the family —
-// the other half left to the processes the consumer spawns — floored
-// at CeilingFloor, so the runtime collects against the ceiling instead
-// of growing its slack toward twice the live set while child processes
-// need the memory; 0 for a host without the reading (the zero Memory),
+// ceiling is the rule: half of the family room reading —
+// floored at CeilingFloor, so the runtime collects against the ceiling
+// instead of growing its slack toward twice the live set while child
+// processes run; 0 for a host without the reading (the zero Memory),
 // which installs no ceiling — a host with nothing available is a
-// reading, and the room is then what the family holds. The base is the
-// family's room, not the host's bare availability: pages moving between
-// the host's free pool and the family's processes leave the derivation
-// unchanged, so a later derivation rises or falls with the host's other
-// tenants and with the family's memory the walk cannot see
-// (familyRoom), never with the family's own held pages. The rule takes
-// the held set as a number; Reading.Ceiling is the one caller that
-// knows whether the walk read it.
+// reading, and the room reading is then the summed held counters. The
+// rule takes the held sum as a number; Reading.Ceiling is the one caller
+// that knows whether the walk read it.
 func ceiling(m Memory, family uint64) int64 {
 	if m == (Memory{}) {
 		return 0
@@ -82,8 +71,10 @@ func ceiling(m Memory, family uint64) int64 {
 	return max(int64(familyRoom(m, family)/2), CeilingFloor)
 }
 
-// childrenBudget is the other half: the room less the ceiling, 0 for a
-// host without the reading or a room the floor consumed.
+// childrenBudget is the complementary soft collection-target half: the
+// room reading less the ceiling, 0 for a host without the reading or a
+// room the floor consumed. It is a soft child-target complement, not a
+// measure of physical host availability or physical spawn admission.
 func childrenBudget(m Memory, family uint64) int64 {
 	c := ceiling(m, family)
 	if c == 0 {
@@ -225,13 +216,13 @@ func (r Reading) Ceiling() (int64, bool) {
 	return ceiling(r.Host, r.held()), true
 }
 
-// ChildrenBudget derives the other half from the reading: the room the
-// host has for the family less the process's own ceiling — what a
-// consumer may hand the processes it spawns in total (an oracle tree's
-// bound, a spawn admission's memory term: a spawn is admitted against
-// the budget less the children's held set), 0 where the floor consumed
-// the room. ok is false exactly where Ceiling's is: a budget over a
-// held set the walk never read cannot be expressed
+// ChildrenBudget derives the complementary soft collection-target half
+// from the reading: the family room reading less the process's own
+// ceiling — a soft collection-target complement a consumer may hand down
+// to child runtimes, distinct from physical host availability and
+// physical spawn admission (REQ-control-authority) — 0 where the floor
+// consumed the room. ok is false exactly where Ceiling's is: a budget
+// over a held set the walk never read cannot be expressed
 // (REQ-fresh-resident-readings).
 func (r Reading) ChildrenBudget() (int64, bool) {
 	if !r.Set.HeldKnown {

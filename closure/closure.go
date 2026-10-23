@@ -673,7 +673,7 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 		if err != nil {
 			return "", nil, err
 		}
-		if include, err := cgoEscapingInclude(&p, files); err != nil {
+		if include, err := cgoEscapingIncludeWith(&p, files, h.readFile); err != nil {
 			return "", nil, err
 		} else if include != "" {
 			return "", nil, fmt.Errorf("closure: cgo include escapes package dir: %s", include)
@@ -920,6 +920,10 @@ func cleanCgoIncludeDir(p *listPkg, dir string) string {
 }
 
 func cgoEscapingInclude(p *listPkg, files []string) (string, error) {
+	return cgoEscapingIncludeWith(p, files, readBytes)
+}
+
+func cgoEscapingIncludeWith(p *listPkg, files []string, read func(string) (fileBytes, error)) (string, error) {
 	if p == nil || p.Dir == "" {
 		return "", nil
 	}
@@ -929,10 +933,11 @@ func cgoEscapingInclude(p *listPkg, files []string) (string, error) {
 			continue
 		}
 		path := filepath.Join(p.Dir, rel)
-		content, err := os.ReadFile(path)
+		fb, err := read(path)
 		if err != nil {
 			return "", fmt.Errorf("closure: read %s: %w", path, err)
 		}
+		content := fb.content
 		goFile := strings.EqualFold(filepath.Ext(rel), ".go")
 		text := string(content)
 		if goFile {

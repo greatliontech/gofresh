@@ -14,7 +14,6 @@ import (
 	"golang.org/x/mod/modfile"
 
 	"github.com/greatliontech/gofresh/closure/internal/cachefile"
-	"github.com/greatliontech/gofresh/closure/internal/digest"
 )
 
 // The listing memo serves a package's `go list -json -deps -test` output
@@ -216,7 +215,7 @@ func (h *Hasher) listingInputs(pkgPath string, pkgs []listPkg) (*listingRecord, 
 		if _, done := rec.Files[path]; done || absent[path] {
 			return nil, true
 		}
-		content, err := os.ReadFile(path)
+		fb, err := h.readFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
 				absent[path] = true
@@ -224,8 +223,8 @@ func (h *Hasher) listingInputs(pkgPath string, pkgs []listPkg) (*listingRecord, 
 			}
 			return nil, false
 		}
-		rec.Files[path] = digest.Content(content)
-		return content, true
+		rec.Files[path] = fb.digest()
+		return fb.content, true
 	}
 	addDir := func(dir string) bool {
 		if _, done := rec.Dirs[dir]; done {
@@ -271,11 +270,14 @@ func (h *Hasher) listingInputs(pkgPath string, pkgs []listPkg) (*listingRecord, 
 		if _, ok := addFile(filepath.Join(dir, "go.sum")); !ok {
 			return false
 		}
-		content, err := os.ReadFile(goMod)
+		if absent[goMod] {
+			return true
+		}
+		fb, err := h.readFile(goMod)
 		if err != nil {
 			return os.IsNotExist(err)
 		}
-		f, err := modfile.Parse(goMod, content, nil)
+		f, err := modfile.Parse(goMod, fb.content, nil)
 		if err != nil {
 			h.emitDiagnostic("listing-unmodelled", pkgPath, goMod+": "+err.Error()+"; the listing is spawned every pass")
 			return false

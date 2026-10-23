@@ -78,6 +78,23 @@ type Subject struct {
 // it to scratch. Set at process start, before any Engine runs.
 func SetMemoRoot(dir string) { closure.SetMemoRoot(dir) }
 
+// DefaultMemoMaxBytes is the default retention ceiling (2 GiB) for the
+// persistent memo store across all memo classes.
+const DefaultMemoMaxBytes = closure.DefaultMemoMaxBytes
+
+// MemoPruneReport summarizes one retention pass over the persistent memo store.
+type MemoPruneReport = closure.MemoPruneReport
+
+// SetMemoMaxBytes sets the automatic byte retention ceiling for the persistent
+// memo store. Zero restores DefaultMemoMaxBytes; a negative value disables
+// automatic pruning on Store while leaving explicit PruneMemos calls available.
+// Eviction changes only cold recomputation cost, never a verdict.
+func SetMemoMaxBytes(maxBytes int64) { closure.SetMemoMaxBytes(maxBytes) }
+
+// PruneMemos evicts persistent memo entries under <storeRoot>/gofresh until
+// retained bytes are at most maxBytes (0 or negative evicts all memo entries).
+func PruneMemos(maxBytes int64) (MemoPruneReport, error) { return closure.PruneMemos(maxBytes) }
+
 // DynamicStateStrategy identifies the shared-dynamic-state fact derivation
 // whose per-package facts the persistent memo serves for version-pinned
 // packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps

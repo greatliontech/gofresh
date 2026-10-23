@@ -44,6 +44,27 @@ func SetMemoRoot(dir string) {
 	cachefile.SetRoot(dir)
 }
 
+// DefaultMemoMaxBytes is the default retention ceiling (2 GiB) for the
+// persistent memo store across all memo classes.
+const DefaultMemoMaxBytes = cachefile.DefaultMaxBytes
+
+// MemoPruneReport summarizes one retention pass over the persistent memo store.
+type MemoPruneReport = cachefile.PruneReport
+
+// SetMemoMaxBytes sets the automatic byte retention ceiling for the persistent
+// memo store. Zero restores DefaultMemoMaxBytes; a negative value disables
+// automatic pruning on Store while leaving explicit PruneMemos calls available.
+// Eviction changes only cold recomputation cost, never a verdict.
+func SetMemoMaxBytes(maxBytes int64) {
+	cachefile.SetMaxBytes(maxBytes)
+}
+
+// PruneMemos evicts persistent memo entries under <storeRoot>/gofresh until
+// retained bytes are at most maxBytes (0 or negative evicts all memo entries).
+func PruneMemos(maxBytes int64) (MemoPruneReport, error) {
+	return cachefile.Prune(maxBytes)
+}
+
 // observabilityDirName is the observability memo's sibling store
 // directory under the shared cache-file mechanism.
 const observabilityDirName = "observability"

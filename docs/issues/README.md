@@ -8,11 +8,9 @@ verification. The doc is deleted when its obligation resolves (git holds history
 | issue | summary | Lands |
 |---|---|---|
 | [coverage-testmain-export-load-failure](coverage-testmain-export-load-failure.md) | Covered `go list -test` constructs an invalid generated-source path; preserve refusal until a selected-toolchain repair establishes proof support | tooling-redesign 7.8 |
-| [persistent-memo-disk-retention](persistent-memo-disk-retention.md) | 16 GiB shared memo store without global retention; bound disk growth and expose safe reclamation | tooling-redesign 7.9a |
 | [toolchain-dependency-consumer-adoption](toolchain-dependency-consumer-adoption.md) | adopt native dependency evidence and unreleased v4-only runtime evidence end to end, preserving old bytes as history; source-certificate dependencies already landed | tooling-redesign 5.2d |
 | [audit-boundary-residue](audit-boundary-residue.md) | adopt shared package-producing and typed-judgment boundaries, with secondary consumer residues; landed constructor/declaration/certificate controls retained | tooling-redesign 5.2d |
 | [tooling-redesign-obligation-map](tooling-redesign-obligation-map.md) | every retained charter, issue and checkpoint mapped to the active redesign, its authority boundary and deciding regression | tooling-redesign 9.4: complete obligation reconciliation before plan deletion |
-| [resident-walk-counts-a-vfork-child-twice](resident-walk-counts-a-vfork-child-twice.md) | attribute duplicate held-page accounting for vfork and persistent shared mappings; equal counters and double sampling prove no ownership | tooling-redesign 7.7 |
 | [generated-proto-discharge-single-subject-only](generated-proto-discharge-single-subject-only.md) | establish package-process eligibility separately from the existing single-subject generated-descriptor channel | tooling-redesign 7.8 |
 | [explain-no-chain-for-a-dependency-culprit](explain-no-chain-for-a-dependency-culprit.md) | exact historical missing-chain report unresolved; current explanation does load and scan dependencies | tooling-redesign 8.3 |
 | [prints-default-one-home](prints-default-one-home.md) | Pew's local zeroDefault remains beside the adopted shared Coverage lint | tooling-redesign 5.6 |
@@ -21,14 +19,9 @@ verification. The doc is deleted when its obligation resolves (git holds history
 | [cli-long-help-rendering-two-homes](cli-long-help-rendering-two-homes.md) | Pew reads Help rather than LongHelp and omits the shared prose pointer | tooling-redesign 8.3 |
 | [closure-sub-contract-granularity-residue](closure-sub-contract-granularity-residue.md) | remaining bundled closure rules need independently scoped identities, bindings and citations | tooling-redesign 9.2 |
 | [loader-spawns-outside-the-runner](loader-spawns-outside-the-runner.md) | one loading seam must preserve complete configuration and the already-declared x/tools containment exclusion | tooling-redesign 7.1 |
-| [per-file-memos-one-shape](per-file-memos-one-shape.md) | share memo mechanics while retaining each payload's complete dependency scope | tooling-redesign 7.8 |
-| [binary-roots-single-mask-union](binary-roots-single-mask-union.md) | assess an all-roots union without discarding required per-subject attribution or existing release | tooling-redesign 7.8 |
 | [discharge-reason-channel-one-source](discharge-reason-channel-one-source.md) | carry semantic discharge channels and render their reasons once | tooling-redesign 7.1 |
 | [grpc-runtime-memo-and-registry-discharges](grpc-runtime-memo-and-registry-discharges.md) | re-establish the historical memo and channelz cases under distinct immutability and execution-model arguments | tooling-redesign 7.8 |
 | [attestation-keyed-record](attestation-keyed-record.md) | consolidate positive-assertion discharge plumbing; GeneralExecution supplies no third positive assertion | tooling-redesign 7.1 |
-| [fixture-tier-parallelism](fixture-tier-parallelism.md) | require measured benefit and explicit shared-state ownership before broader fixture scheduling | tooling-redesign 7.7 |
-| [memo-scope-axes](memo-scope-axes.md) | remaining memo/read/result folds and the unfulfilled per-run standard-digest cost question, without cross-generation sharing | tooling-redesign 7.8 |
-| [attribution-mask-width](attribution-mask-width.md) | measure current slice cost before changing mask width, memory or cancellation granularity | tooling-redesign 7.7 |
 | [net-url-parse-godebug-channel](net-url-parse-godebug-channel.md) | parsing stays conservative until runtime configuration and in-process mutation have sound authority | tooling-redesign 7.8 |
 | [dependency-nested-closures-outside-the-drain](dependency-nested-closures-outside-the-drain.md) | cached dependency bodies are scanned; isolate the nested-function-value precision residual | tooling-redesign 7.8 |
 | [invoke-targets-narrowed-by-operand](invoke-targets-narrowed-by-operand.md) | prove complete operand/method-set bounds before narrowing an invoke's conservative projection | tooling-redesign 7.8 |
@@ -42,5 +35,4 @@ verification. The doc is deleted when its obligation resolves (git holds history
 | [in-module-generated-descriptor-writes-have-no-discharge](in-module-generated-descriptor-writes-have-no-discharge.md) | own-code generated descriptors already have a single-subject channel; package-process residual duplicates the generated-proto issue | tooling-redesign 7.8 |
 | [go-types-named-unpack-races-iscomplete](go-types-named-unpack-races-iscomplete.md) | retain the attributed toolchain-race report and verify restoration against the actual listed gate pin | tooling-redesign 9.3 |
 | [assembly-fixtures-amd64-only](assembly-fixtures-amd64-only.md) | disposition architecture-specific fixtures when an actual non-amd64 capability is selected | tooling-redesign 9.3 |
-| [children-budget-bounded-by-available](children-budget-bounded-by-available.md) | reconcile the soft-budget admission claim with physical room; no predetermined arithmetic patch | tooling-redesign 7.4 |
 | [attribution-splits-one-quoted-string-helper](attribution-splits-one-quoted-string-helper.md) | share quoted-prefix parsing while preserving distinct tails and historical re-key behavior | tooling-redesign 5.6 |

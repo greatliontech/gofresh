@@ -454,6 +454,130 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 	return reachable, nil
 }
 
+// binaryReachableUnion computes the binary-wide union of every harness root's
+// post-initialization attributed reach in a single all-roots RTA and provenance
+// walk (REQ-closure-shared-dynamic-state-reachability).
+func binaryReachableUnion(ctx context.Context, audited bool, prog *program, subjects []Subject) (RootedFunctions, error) {
+	if len(subjects) == 0 {
+		return RootedFunctions{Fns: map[string]bool{}, Complete: true}, nil
+	}
+	const unionMask uint64 = 1
+	roots := make(map[*ssa.Function]uint64)
+	var subjectProvenance []*ssa.Function
+	includeTestMain := false
+	var allFunctions map[*ssa.Function]bool
+	openCandidates := map[*ssa.Function]bool{}
+	for _, subject := range subjects {
+		root := prog.Roots[subject.Symbol]
+		if root == nil {
+			return RootedFunctions{}, nil
+		}
+		switch {
+		case !parameterizedBody(root):
+			roots[root] |= unionMask
+			subjectProvenance = append(subjectProvenance, root)
+			if rootMayReceiveUnknownDynamic(audited, prog, root) {
+				openCandidates[root] = true
+			}
+		case !rootMayReceiveUnknownDynamic(audited, prog, root):
+			if allFunctions == nil {
+				allFunctions = ssautil.AllFunctions(prog.Prog)
+			}
+			instantiatedAny := false
+			for fn := range allFunctions {
+				if fn != nil && fn != root && fn.Origin() == root {
+					if args := fn.TypeArgs(); len(args) > 0 {
+						parameterized := false
+						for _, arg := range args {
+							if rta.ContainsTypeParam(arg, make(map[types.Type]bool)) {
+								parameterized = true
+								break
+							}
+						}
+						if parameterized {
+							continue
+						}
+					}
+					roots[fn] |= unionMask
+					subjectProvenance = append(subjectProvenance, fn)
+					instantiatedAny = true
+				}
+			}
+			if !instantiatedAny {
+				subjectProvenance = append(subjectProvenance, root)
+			}
+		default:
+			return RootedFunctions{}, nil
+		}
+		if subjectRunsThroughHarness(prog, root) {
+			includeTestMain = true
+		}
+	}
+	var seeds *rta.Seeds
+	if len(openCandidates) > 0 {
+		if allFunctions == nil {
+			allFunctions = ssautil.AllFunctions(prog.Prog)
+		}
+		callerSites, valueRefs, _ := enumerateCallerReferences(openCandidates, allFunctions)
+		for root := range openCandidates {
+			enc, ok := subjectEnumerationClosure(audited, root, callerSites[root], valueRefs[root])
+			if !ok {
+				return RootedFunctions{}, nil
+			}
+			if seeds == nil {
+				seeds = &rta.Seeds{AddrTaken: map[*ssa.Function]uint64{}}
+			}
+			for fn := range enc.addrTaken {
+				seeds.AddrTaken[fn] |= unionMask
+			}
+			for _, t := range enc.types {
+				seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: t, Masks: unionMask})
+			}
+		}
+	}
+	if prog.TestMain != nil && includeTestMain {
+		roots[prog.TestMain] |= unionMask
+		subjectProvenance = append(subjectProvenance, prog.TestMain)
+	}
+	for _, p := range prog.Prog.AllPackages() {
+		if isGeneratedTestMainPackage(prog, p) {
+			continue
+		}
+		if init := p.Func("init"); init != nil {
+			roots[init] |= unionMask
+		}
+	}
+	res, err := rta.Analyze(ctx, roots, seeds)
+	if err != nil {
+		if ctx.Err() != nil {
+			return RootedFunctions{}, err
+		}
+		if shapeFailure(err) {
+			return RootedFunctions{}, nil
+		}
+		return RootedFunctions{}, err
+	}
+	for _, subject := range subjects {
+		if origin := prog.Roots[subject.Symbol]; parameterizedBody(origin) {
+			res.Reachable[origin] |= unionMask
+		}
+	}
+	provenance, err := provenanceReachable(ctx, subjectProvenance, unionMask, res, propertyHarnessAuditedProg(prog), userModulePaths(prog.Pkgs), nil)
+	if err != nil {
+		return RootedFunctions{}, err
+	}
+	fns := make(map[string]bool, len(provenance))
+	for fn := range provenance {
+		if key := rootedFunctionKey(fn); key != "" {
+			fns[key] = true
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return RootedFunctions{}, err
+	}
+	return RootedFunctions{Fns: fns, Complete: true}, nil
+}
+
 func isTestingMRun(fn *ssa.Function) bool {
 	if fn == nil {
 		return false

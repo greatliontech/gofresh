@@ -336,16 +336,16 @@ func TestFileScanGatesModuleCacheFilesAndPendingSiblings(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("pinned scan = %+v, want %+v", got, want)
 	}
-	if _, cached := h.contents[pinned]; cached || len(h.fileMemo.pendingScans) != 0 {
-		t.Fatalf("a module-cache file entered the content cache (%t) or the per-file memo (%d dirs pending)", cached, len(h.fileMemo.pendingScans))
+	if _, cached := h.contents[pinned]; cached || len(h.fileMemo.scans.pending) != 0 {
+		t.Fatalf("a module-cache file entered the content cache (%t) or the per-file memo (%d dirs pending)", cached, len(h.fileMemo.scans.pending))
 	}
 	for _, path := range []string{first, second} {
 		if got, err := h.maximalFileEffectsCached("example.com/local", path); err != nil || !reflect.DeepEqual(got, want) {
 			t.Fatalf("%s: scan = %+v (err %v), want %+v", path, got, err, want)
 		}
 	}
-	if _, cached := h.contents[first]; !cached || len(h.fileMemo.pendingScans[localDir]) != 1 {
-		t.Fatalf("the mutable-local files did not enter the content cache (%t) and one pending entry (%d)", cached, len(h.fileMemo.pendingScans[localDir]))
+	if _, cached := h.contents[first]; !cached || len(h.fileMemo.scans.pending[localDir]) != 1 {
+		t.Fatalf("the mutable-local files did not enter the content cache (%t) and one pending entry (%d)", cached, len(h.fileMemo.scans.pending[localDir]))
 	}
 	if !reflect.DeepEqual(parsed, []string{"a.go"}) {
 		t.Fatalf("parsed %v, want the first sibling alone", parsed)

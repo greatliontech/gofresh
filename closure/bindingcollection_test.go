@@ -77,10 +77,10 @@ func TestBindingResolutionPreservesSharedParseMemo(t *testing.T) {
 				t.Fatalf("%s: resolved name %q, want %q", header.File, got, name)
 			}
 		}
-		if len(h.fileMemo.parses[dir]) != 2 {
-			t.Fatalf("memo has %d entries, want base and test files", len(h.fileMemo.parses[dir]))
+		if len(h.fileMemo.parses.loaded[dir]) != 2 {
+			t.Fatalf("memo has %d entries, want base and test files", len(h.fileMemo.parses.loaded[dir]))
 		}
-		for key, payload := range h.fileMemo.parses[dir] {
+		for key, payload := range h.fileMemo.parses.loaded[dir] {
 			if payload.Header.Hash == "" || payload.Header.Bindings.Imports[0].Name != "" {
 				t.Fatalf("listing resolution contaminated syntax memo %s: %+v", key, payload.Header)
 			}

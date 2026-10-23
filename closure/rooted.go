@@ -256,13 +256,15 @@ func (h *Hasher) ComputeBinaryRootedFunctions(ctx context.Context, pkgPaths []st
 		}
 		results[path] = inventory
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+	}
 	return results, nil
 }
 
-// binaryRootedPackage derives one package's binary inventory, releasing
-// the binary's program on every exit of the package — the incomplete
-// (tombstoned-root) exit included; the per-root pass releases it again
-// per group, harmlessly.
+// binaryRootedPackage derives one package's binary inventory in one
+// all-roots attributed RTA walk, releasing the binary's program on every
+// exit of the package — the incomplete (tombstoned-root) exit included.
 func (h *Hasher) binaryRootedPackage(ctx context.Context, path string, bp *batchPreparer) (RootedFunctions, error) {
 	if err := ctx.Err(); err != nil {
 		return RootedFunctions{}, fmt.Errorf("closure: analysis cancelled: %w", err)
@@ -287,20 +289,10 @@ func (h *Hasher) binaryRootedPackage(ctx context.Context, path string, bp *batch
 		}
 		subjects = append(subjects, Subject{Package: path, Symbol: name})
 	}
+	if len(subjects) == 0 {
+		return RootedFunctions{Fns: map[string]bool{}, Complete: true}, nil
+	}
 	sort.Slice(subjects, func(i, j int) bool { return subjects[i].Symbol < subjects[j].Symbol })
-	perRoot, err := h.ComputeRootedFunctions(ctx, subjects)
-	if err != nil {
-		return RootedFunctions{}, err
-	}
-	union := map[string]bool{}
-	for _, subject := range subjects {
-		rooted := perRoot[subject]
-		if !rooted.Complete {
-			return RootedFunctions{}, nil
-		}
-		for fn := range rooted.Fns {
-			union[fn] = true
-		}
-	}
-	return RootedFunctions{Fns: union, Complete: true}, nil
+	h.emitUnit("prove", path, 1, 1)
+	return binaryReachableUnion(ctx, h.SelectionAudited(), prog, subjects)
 }

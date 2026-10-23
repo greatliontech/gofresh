@@ -85,19 +85,84 @@ type variantParsePayload struct {
 	Header       testvariant.TestVariantFileHeader    `json:"header"`
 }
 
-// fileMemos is a Hasher's view of the two per-file memos: entries loaded
+// dirMemo holds one per-directory persistent memo's load-on-first-use,
+// serve-from-store-or-pending, record-pending, and merge-on-flush state,
+// while each caller supplies its complete scope and payload-specific key.
+type dirMemo[T any] struct {
+	dirName string
+	loaded  map[string]map[string]T
+	pending map[string]map[string]T
+}
+
+func newDirMemo[T any](dirName string) dirMemo[T] {
+	return dirMemo[T]{
+		dirName: dirName,
+		loaded:  map[string]map[string]T{},
+		pending: map[string]map[string]T{},
+	}
+}
+
+func (m *dirMemo[T]) lookup(scope, dir, key string, checkPending bool) (val T, ok, fromStore bool) {
+	if scope == "" {
+		return val, false, false
+	}
+	entries, ok := m.loaded[dir]
+	if !ok {
+		entries = map[string]T{}
+		cachefile.Load(m.dirName, scope, dir, &entries)
+		m.loaded[dir] = entries
+	}
+	if val, ok = entries[key]; ok {
+		return val, true, true
+	}
+	if checkPending {
+		if val, ok = m.pending[dir][key]; ok {
+			return val, true, false
+		}
+	}
+	return val, false, false
+}
+
+func (m *dirMemo[T]) record(scope, dir, key string, val T) {
+	if scope == "" {
+		return
+	}
+	if m.pending[dir] == nil {
+		m.pending[dir] = map[string]T{}
+	}
+	m.pending[dir][key] = val
+}
+
+func (m *dirMemo[T]) flush(scope string) bool {
+	if len(m.pending) == 0 {
+		return false
+	}
+	for dir, additions := range m.pending {
+		cachefile.Merge(m.dirName, scope, dir, additions)
+		if m.loaded[dir] == nil {
+			m.loaded[dir] = map[string]T{}
+		}
+		for k, v := range additions {
+			m.loaded[dir][k] = v
+		}
+	}
+	m.pending = map[string]map[string]T{}
+	return true
+}
+
+// fileMemos is a Hasher's view of the three per-file memos: entries loaded
 // per directory on first use, and the pass's misses pending their merge.
 type fileMemos struct {
-	scans, pendingScans         map[string]map[string]effectScanPayload
-	parses, pendingParses       map[string]map[string]variantParsePayload
-	canonical, pendingCanonical map[string]map[string]string
+	scans     dirMemo[effectScanPayload]
+	parses    dirMemo[variantParsePayload]
+	canonical dirMemo[string]
 }
 
 func newFileMemos() *fileMemos {
 	return &fileMemos{
-		scans: map[string]map[string]effectScanPayload{}, pendingScans: map[string]map[string]effectScanPayload{},
-		parses: map[string]map[string]variantParsePayload{}, pendingParses: map[string]map[string]variantParsePayload{},
-		canonical: map[string]map[string]string{}, pendingCanonical: map[string]map[string]string{},
+		scans:     newDirMemo[effectScanPayload](fileScanDirName),
+		parses:    newDirMemo[variantParsePayload](variantParseDirName),
+		canonical: newDirMemo[string](canonicalDirName),
 	}
 }
 
@@ -105,20 +170,10 @@ func newFileMemos() *fileMemos {
 // persistent store (stored true), or from a byte-identical sibling
 // derived earlier in this pass and still pending its merge.
 func (h *Hasher) fileScan(dir, digest string) (scan maximalEffectScan, ok, stored bool) {
-	if h.fileMemo == nil || h.effectScanScope() == "" {
+	if h.fileMemo == nil {
 		return maximalEffectScan{}, false, false
 	}
-	entries, loaded := h.fileMemo.scans[dir]
-	if !loaded {
-		entries = map[string]effectScanPayload{}
-		cachefile.Load(fileScanDirName, h.effectScanScope(), dir, &entries)
-		h.fileMemo.scans[dir] = entries
-	}
-	payload, ok := entries[digest]
-	stored = ok
-	if !ok {
-		payload, ok = h.fileMemo.pendingScans[dir][digest]
-	}
+	payload, ok, stored := h.fileMemo.scans.lookup(h.effectScanScope(), dir, digest, true)
 	if !ok {
 		return maximalEffectScan{}, false, false
 	}
@@ -128,13 +183,10 @@ func (h *Hasher) fileScan(dir, digest string) (scan maximalEffectScan, ok, store
 // recordFileScan queues one freshly derived scan for the directory's
 // merge.
 func (h *Hasher) recordFileScan(dir, digest string, scan maximalEffectScan) {
-	if h.fileMemo == nil || h.effectScanScope() == "" {
+	if h.fileMemo == nil {
 		return
 	}
-	if h.fileMemo.pendingScans[dir] == nil {
-		h.fileMemo.pendingScans[dir] = map[string]effectScanPayload{}
-	}
-	h.fileMemo.pendingScans[dir][digest] = effectScanPayload{Effects: encodeEffects(scan.effects), ImportCandidates: encodeEffects(scan.importCandidates), Selected: scan.preferred}
+	h.fileMemo.scans.record(h.effectScanScope(), dir, digest, effectScanPayload{Effects: encodeEffects(scan.effects), ImportCandidates: encodeEffects(scan.importCandidates), Selected: scan.preferred})
 }
 
 // The two seams the compartment computation reads through: the Hasher
@@ -155,16 +207,10 @@ func (m variantParseMemo) Parsed(name, digest string) ([]testvariant.TestVariant
 	if m.h.fileMemo == nil {
 		return nil, testvariant.TestVariantFileHeader{}, false
 	}
-	entries, ok := m.h.fileMemo.parses[m.dir]
-	if !ok {
-		entries = map[string]variantParsePayload{}
-		cachefile.Load(variantParseDirName, variantParseScope(), m.dir, &entries)
-		m.h.fileMemo.parses[m.dir] = entries
-	}
 	// No pending consult: a compartment's members are distinct names,
 	// and the fold flushes after each identity, so no member is asked
 	// twice before its merge.
-	payload, ok := entries[name+"\x00"+digest]
+	payload, ok, _ := m.h.fileMemo.parses.lookup(variantParseScope(), m.dir, name+"\x00"+digest, false)
 	if !ok {
 		return nil, testvariant.TestVariantFileHeader{}, false
 	}
@@ -179,10 +225,7 @@ func (m variantParseMemo) Record(name, digest string, declarations []testvariant
 	if m.h.fileMemo == nil {
 		return
 	}
-	if m.h.fileMemo.pendingParses[m.dir] == nil {
-		m.h.fileMemo.pendingParses[m.dir] = map[string]variantParsePayload{}
-	}
-	m.h.fileMemo.pendingParses[m.dir][name+"\x00"+digest] = variantParsePayload{Declarations: declarations, Header: header}
+	m.h.fileMemo.parses.record(variantParseScope(), m.dir, name+"\x00"+digest, variantParsePayload{Declarations: declarations, Header: header})
 }
 
 // flushFileMemos merges the pass's pending derivations into their
@@ -191,35 +234,13 @@ func (h *Hasher) flushFileMemos() {
 	if h.fileMemo == nil {
 		return
 	}
-	stored := false
-	for dir, additions := range h.fileMemo.pendingScans {
-		cachefile.Merge(fileScanDirName, h.effectScanScope(), dir, additions)
-		for k, v := range additions {
-			h.fileMemo.scans[dir][k] = v
-		}
-		stored = true
-	}
-	for dir, additions := range h.fileMemo.pendingParses {
-		cachefile.Merge(variantParseDirName, variantParseScope(), dir, additions)
-		for k, v := range additions {
-			h.fileMemo.parses[dir][k] = v
-		}
-		stored = true
-	}
-	for dir, additions := range h.fileMemo.pendingCanonical {
-		cachefile.Merge(canonicalDirName, canonicalScope(), dir, additions)
-		for k, v := range additions {
-			h.fileMemo.canonical[dir][k] = v
-		}
-		stored = true
-	}
-	if stored {
+	s := h.fileMemo.scans.flush(h.effectScanScope())
+	p := h.fileMemo.parses.flush(variantParseScope())
+	c := h.fileMemo.canonical.flush(canonicalScope())
+	if s || p || c {
 		// One package's per-file derivations count as one persisted scan.
 		h.persisted.scans++
 	}
-	h.fileMemo.pendingScans = map[string]map[string]effectScanPayload{}
-	h.fileMemo.pendingParses = map[string]map[string]variantParsePayload{}
-	h.fileMemo.pendingCanonical = map[string]map[string]string{}
 }
 
 // ReadFile implements compartment.Source over the Hasher's once-per-pass
