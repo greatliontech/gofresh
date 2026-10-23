@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-shared-dynamic-state-escape-narrowings"
 reason: "Immutable errors/fmt/reflect constructions, clone helper value-plane effects and generated test-main registration exclusions retain unchecked implementation summaries; carrier-link examples do not discharge those new premises. Existing independent obligation: invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
-content_hash: "4fffdc5b77a061c6120b40c3134785a64a1e4e18027fbfc7802acaeb3d0ca17e"
-source_hash: "2bd1a41b6c92a77e165e3963f636b7b3e06896edb27000f06828332f144c916b"
+content_hash: "88c1f0560574c6b3862de1e60e95c01279260ba54000b3138ce1c32a02a31c0e"
+source_hash: "b6aae39b9658ccbef50e032a5b41242da6771e2932c50d9faef7a4c2f7035efc"
 lands { manual { condition: "tooling-redesign 5.1w.6: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7 Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" contradicted: true } }

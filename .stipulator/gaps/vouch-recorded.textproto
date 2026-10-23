@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-vouch-recorded"
 reason: "Explicit-vouch recording examples remain independent authority. Pool/generated implementation discharges must separately establish checked premises before any load-bearing execution assertion is recorded."
-content_hash: "72a291d4d4868c2a5168fb8fb794038ee0b79775554cb753f03f66eff6211456"
-source_hash: "b270bdb1738a492eb3b5e4840af88d4e193a56fcd75889539094279b95b2d5e4"
+content_hash: "4786d14d564f438783e42b942adaf97fd5b89d3fc8975a22a38ecd891e9dab4d"
+source_hash: "30e1702ecde1c996a421dca25988d78723ff99f09300d844ee1da6879955357e"
 lands { manual { condition: "tooling-redesign 5.1w.6: checked pool/generated/runtime claims compose with existing sorted, attributable assertion discharge recording without promoting the assertion to implementation proof" } }

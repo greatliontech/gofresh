@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-observability-benchmark-pacing"
 reason: "Invariant coverage is by example pins over module fixtures; a property witness or analyzer proof is pending"
-content_hash: "0000000000000000000000000000000000000000000000000000000000000000"
-source_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+content_hash: "d10857218211ddd6ce2dd26b0bdff7c56933c043cda868ba1f5d24f6b9740311"
+source_hash: "03f2a0a1ecdb3a9f337b70e64af52d757f4ee38494ba367fd939d56047038cee"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" contradicted: true } }

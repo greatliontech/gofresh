@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-shared-dynamic-state-audited-discharges"
 reason: "Synchronization, pooling, x/sys mapping, YAML memoization, sync.Map and generated protobuf/gRPC descriptor discharges still use approved names, versions or generated markers rather than complete checked selected-body/runtime dependencies. Existing independent obligation: invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
-content_hash: "b4cf3772f00224c772d95066da9065c0831cb74c1eb7f812ed82ee6758955806"
-source_hash: "5db54c67500e181cbc08dbb39ff450f1053cc5eaf83d62e5683bf893f0377b60"
+content_hash: "de273f8cacdbaa7260593448ca849eedecacff88cef2a507c8539329e156d25d"
+source_hash: "6ce8adfa7a9449289dd59c8f07d0325c1261c1d8ca8f5f4e34a1623e4d9b9a4e"
 lands { manual { condition: "tooling-redesign 5.1w.6: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7 Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" contradicted: true } }

@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-observability-analysis"
 reason: "Test-main observation installation, epilogue delivery and benchmark pacing currently use named protocol admissions without checked selected-implementation derivations. Existing independent obligation: invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "e24c0615b389092252e40501c7b7c605d20df6ed1a72fd99d93840c3675e96e1"
-source_hash: "13dba7156ceba0fe517479819f8e77349a04c202eaababd898021b081081f3fc"
+content_hash: "906793d4c13fddf80dbdb27eb9f7a71446eb0c70c5aba51ef3b7998bdd746d23"
+source_hash: "57970ee9bc0569880e46b3e84590ce6a3f4d86971c2e6a0c3df786379a461ce3"
 lands { manual { condition: "tooling-redesign 5.1w.5: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7 Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" contradicted: true } }

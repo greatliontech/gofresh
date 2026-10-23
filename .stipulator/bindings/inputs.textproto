@@ -93,8 +93,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-observation-coherence"
-  content_hash: "5f37985620c80cb675bd1bf69dca0989ba3902cb8283af9aadd12d7e43d047dd"
-  source_hash: "dfd674d4d939e834873cd0b6758af794515e6643817e1943f7b098239c723318"
+  content_hash: "8466dc518dc2a167fa1d650d16d218bcc5ce54e015188b4f395c98022e7b9b5e"
+  source_hash: "b2dd46fcac68ad6b88c8c9868d9d4a59608a875474fb79bdabd61c22b275fd1a"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.View.runtimeMotion"
   role: BINDING_ROLE_IMPLEMENTS
@@ -103,8 +103,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-observation-coherence"
-  content_hash: "5f37985620c80cb675bd1bf69dca0989ba3902cb8283af9aadd12d7e43d047dd"
-  source_hash: "dfd674d4d939e834873cd0b6758af794515e6643817e1943f7b098239c723318"
+  content_hash: "8466dc518dc2a167fa1d650d16d218bcc5ce54e015188b4f395c98022e7b9b5e"
+  source_hash: "b2dd46fcac68ad6b88c8c9868d9d4a59608a875474fb79bdabd61c22b275fd1a"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestRuntimeInputCheckDetectsMovementBetweenSnapshots"
   role: BINDING_ROLE_TESTS
@@ -983,8 +983,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-inputs-observation-coherence"
-  content_hash: "5f37985620c80cb675bd1bf69dca0989ba3902cb8283af9aadd12d7e43d047dd"
-  source_hash: "dfd674d4d939e834873cd0b6758af794515e6643817e1943f7b098239c723318"
+  content_hash: "8466dc518dc2a167fa1d650d16d218bcc5ce54e015188b4f395c98022e7b9b5e"
+  source_hash: "b2dd46fcac68ad6b88c8c9868d9d4a59608a875474fb79bdabd61c22b275fd1a"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/gotool.TestMemoKeyCoversTheCoordinateAndEnvironment"
   role: BINDING_ROLE_TESTS

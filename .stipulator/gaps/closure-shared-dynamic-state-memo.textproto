@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-shared-dynamic-state-memo"
 reason: "Invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
-content_hash: "0000000000000000000000000000000000000000000000000000000000000000"
-source_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+content_hash: "bc970d813f2cf51e2d30f20642974729dd688b195d4c539557d0c659f48e4e5d"
+source_hash: "c4efe89c99dc645a638a6736df460e346c9f787459db142ee664ce4c51542509"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" contradicted: true } }

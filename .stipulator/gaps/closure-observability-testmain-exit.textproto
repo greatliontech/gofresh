@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-observability-testmain-exit"
 reason: "Invariant coverage is by example pins over module fixtures; a property witness or analyzer proof is pending"
-content_hash: "0000000000000000000000000000000000000000000000000000000000000000"
-source_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+content_hash: "ababcc692d78a7ff1c756fcdde29f37a783880e5d76a388d0b05117affa9cf99"
+source_hash: "903effec04036df32ecee16cb72d21eeab3eb05b76200fbf1898415bf3c05164"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" contradicted: true } }

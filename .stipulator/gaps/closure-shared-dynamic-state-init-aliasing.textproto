@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-shared-dynamic-state-init-aliasing"
 reason: "Invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
-content_hash: "0000000000000000000000000000000000000000000000000000000000000000"
-source_hash: "0000000000000000000000000000000000000000000000000000000000000000"
+content_hash: "ca3fedd608a86f69cc9f447f8a4dd1ca3de0afb2fafa765b8913ca679419656f"
+source_hash: "14dea4149ace40527de5891067dcc0a787775610f7e794c07ce168e12d8957ab"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" contradicted: true } }

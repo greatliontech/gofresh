@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-observability-dispatch"
 reason: "Local operand-provenance examples survive, but harness/standard targets and wrapper delegation still need checked implementation premises. Existing independent obligation: invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "5c1bf1897b6a7a94bf3d79c4f0623f355d0069adf138aea6682b9b0bf1e0a4af"
-source_hash: "74e9d2643c4aad98aa505bf4f2ca75f1d930a1373bd7d3770ceab9536b4a8c8c"
+content_hash: "42ad27d2200297ae642af0c7bb116da5635b303876c96ac17e8f2bb7fac88083"
+source_hash: "6bdc1dbf01755f178872974ed9149d985971a9b3a5b4c702524dc95ff934ca4b"
 lands { manual { condition: "tooling-redesign 5.1w.6: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7 Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" contradicted: true } }
