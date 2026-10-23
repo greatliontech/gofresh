@@ -49,6 +49,7 @@ type attributedRTA struct {
 	concreteTypes  typeutil.Map
 	interfaceTypes typeutil.Map
 	runtimeTypes   typeutil.Map // type -> subject mask
+	typeParamSeen  map[types.Type]bool
 }
 
 func (r *attributedRTA) addResolvedTarget(site ssa.CallInstruction, target *ssa.Function, masks uint64) {
@@ -313,9 +314,10 @@ func Analyze(ctx context.Context, roots map[*ssa.Function]uint64, seeds *Seeds) 
 			Resolved:  make(map[ssa.CallInstruction]uint64),
 			Targets:   make(map[ssa.CallInstruction]map[*ssa.Function]uint64),
 		},
-		prog:    prog,
-		pending: make(map[*ssa.Function]uint64),
-		queued:  make(map[*ssa.Function]bool),
+		prog:          prog,
+		pending:       make(map[*ssa.Function]uint64),
+		queued:        make(map[*ssa.Function]bool),
+		typeParamSeen: make(map[types.Type]bool),
 	}
 
 	if reflectPkg := prog.ImportedPackage("reflect"); reflectPkg != nil {
@@ -414,15 +416,21 @@ func (r *attributedRTA) implementations(I *types.Interface) []types.Type {
 // shape: T", one generic-shaped symbol darkening whole packages
 // through the batch). The seen map breaks reference cycles.
 func ContainsTypeParam(t types.Type, seen map[types.Type]bool) bool {
-	if t == nil || seen[t] {
+	if t == nil {
 		return false
 	}
-	seen[t] = true
-	switch t := types.Unalias(t).(type) {
+	unaliased := types.Unalias(t)
+	switch unaliased.(type) {
 	case *types.TypeParam, *types.Union:
 		return true
 	case *types.Basic:
 		return false
+	}
+	if seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch t := unaliased.(type) {
 	case *types.Pointer:
 		return ContainsTypeParam(t.Elem(), seen)
 	case *types.Slice:
@@ -493,12 +501,13 @@ func ContainsTypeParam(t types.Type, seen map[types.Type]bool) bool {
 // upstream RTA's exported-method and recursive runtime-type behavior.
 func (r *attributedRTA) addRuntimeType(T types.Type, masks uint64, skip bool) {
 	T = types.Unalias(T)
-	if ContainsTypeParam(T, make(map[types.Type]bool)) {
-		return
-	}
 	previous, _ := r.runtimeTypes.At(T).(uint64)
 	delta := masks &^ previous
 	if delta == 0 {
+		return
+	}
+	clear(r.typeParamSeen)
+	if ContainsTypeParam(T, r.typeParamSeen) {
 		return
 	}
 	r.runtimeTypes.Set(T, previous|delta)

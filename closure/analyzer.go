@@ -401,6 +401,9 @@ func (a *tier2Analyzer) buildIndex(p *packages.Package) *pkgIndex {
 	for _, f := range p.Syntax {
 		for _, cg := range f.Comments {
 			for _, c := range cg.List {
+				if !strings.Contains(c.Text, "go:linkname") && !strings.Contains(c.Text, "go:wasmimport") {
+					continue
+				}
 				text := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
 				text = strings.TrimSpace(strings.TrimPrefix(text, "/*"))
 				text = strings.TrimSpace(strings.TrimSuffix(text, "*/"))
@@ -1641,14 +1644,20 @@ func isPackageLevelObject(obj types.Object) bool {
 }
 
 func linknamesFromDoc(doc *ast.CommentGroup) map[string]string {
-	out := map[string]string{}
 	if doc == nil {
-		return out
+		return nil
 	}
+	var out map[string]string
 	for _, c := range doc.List {
+		if !strings.Contains(c.Text, "go:linkname") {
+			continue
+		}
 		text := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
 		fields := strings.Fields(text)
 		if len(fields) >= 3 && fields[0] == "go:linkname" {
+			if out == nil {
+				out = map[string]string{}
+			}
 			out[fields[1]] = fields[2]
 		}
 	}

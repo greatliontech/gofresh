@@ -2,6 +2,7 @@ package closure
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"go/token"
 	"go/types"
@@ -41,7 +42,39 @@ func (h *Hasher) loadCached(pkgPath string) (*program, error) {
 // Hasher's analysis context — the dynamic-state discharge's budget-bounded
 // pass. A load the context ends is never memoized as a failure: the next
 // analysis under a live context loads again.
+type batchPreparer struct {
+	h          *Hasher
+	candidates func() []string
+	attempted  bool
+	prepared   *prog.Prepared
+}
+
+func (bp *batchPreparer) prepare(ctx context.Context) (*prog.Prepared, error) {
+	if bp == nil {
+		return nil, nil
+	}
+	if !bp.attempted {
+		bp.attempted = true
+		var err error
+		bp.prepared, err = bp.h.prepareBatch(ctx, bp.candidates())
+		if err != nil {
+			return nil, err
+		}
+	}
+	return bp.prepared, nil
+}
+
+func (bp *batchPreparer) release(pkgPath string) {
+	if bp != nil && bp.prepared != nil {
+		bp.prepared.Release(pkgPath)
+	}
+}
+
 func (h *Hasher) loadCachedContext(ctx context.Context, pkgPath string) (*program, error) {
+	return h.loadCachedFrom(ctx, pkgPath, nil)
+}
+
+func (h *Hasher) loadCachedFrom(ctx context.Context, pkgPath string, bp *batchPreparer) (*program, error) {
 	if p, ok := h.progs[pkgPath]; ok {
 		return p, nil
 	}
@@ -49,15 +82,50 @@ func (h *Hasher) loadCachedContext(ctx context.Context, pkgPath string) (*progra
 		return nil, err
 	}
 	h.emitProgress("load", pkgPath)
-	p, err := prog.Load(ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
+	prepared, err := bp.prepare(ctx)
 	if err != nil {
-		if ctx.Err() == nil {
+		return nil, err
+	}
+	defer bp.release(pkgPath)
+	var p *program
+	if prepared != nil && prepared.HasRoots(pkgPath) {
+		p, err = prepared.Build(ctx, pkgPath)
+	} else {
+		p, err = prog.Load(ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
+	}
+	if err != nil {
+		if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			h.progErrs[pkgPath] = err
 		}
 		return nil, err
 	}
 	h.progs[pkgPath] = p
 	return p, nil
+}
+
+// prepareBatch loads syntax and types once across a multi-package batch so each
+// package's subsequent Build constructs isolated SSA without re-parsing and
+// re-typechecking shared dependencies. Single-package batches and load-wide
+// non-cancellation failures return nil so callers fall back to independent
+// per-package loads with identical error isolation.
+func (h *Hasher) prepareBatch(ctx context.Context, uncached []string) (*prog.Prepared, error) {
+	if len(uncached) <= 1 {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+	}
+	prepared, err := prog.Prepare(ctx, h.dir, h.packageEnv, h.buildFlags, uncached...)
+	if err != nil {
+		if cause := ctx.Err(); cause != nil {
+			return nil, fmt.Errorf("closure: analysis cancelled: %w", cause)
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+		}
+		return nil, nil
+	}
+	return prepared, nil
 }
 
 // subjectRunsThroughHarness reports whether fn executes through the Go test harness
@@ -119,8 +187,11 @@ const maxAttributedSubjects = subjectMaskBits
 
 // packageBatch groups one package's requested subjects for shared analysis.
 type packageBatch struct {
-	path     string
-	subjects []Subject
+	path        string
+	closureHash string
+	memoized    map[string]Observability
+	memoChecked bool
+	subjects    []Subject
 }
 
 // ComputeObservabilityBatch computes caller-selected per-subject observation
@@ -149,7 +220,43 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		}
 		group.subjects = append(group.subjects, subject)
 	}
-	for _, group := range groups {
+	resolveGroupMemo := func(group *packageBatch) {
+		if !group.memoChecked {
+			group.memoChecked = true
+			group.closureHash, group.memoized = h.groupMemo(group.path)
+		}
+	}
+	currentIdx := 0
+	bp := &batchPreparer{
+		h: h,
+		candidates: func() []string {
+			var uncached []string
+			for _, g := range groups[currentIdx:] {
+				if _, ok := h.progs[g.path]; ok {
+					continue
+				}
+				if _, failed := h.progErrs[g.path]; failed {
+					continue
+				}
+				resolveGroupMemo(g)
+				allMemoized := len(g.memoized) > 0
+				if allMemoized {
+					for _, s := range g.subjects {
+						if _, ok := g.memoized[s.Symbol]; !ok {
+							allMemoized = false
+							break
+						}
+					}
+				}
+				if !allMemoized {
+					uncached = append(uncached, g.path)
+				}
+			}
+			return uncached
+		},
+	}
+	for i, group := range groups {
+		currentIdx = i
 		if err := h.ctx.Err(); err != nil {
 			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 		}
@@ -158,11 +265,11 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		// under the complete key is byte-equivalent to recomputation
 		// (REQ-closure-observability-memo). A full-group hit skips the
 		// SSA build entirely.
-		closureHash, memoized := h.groupMemo(group.path)
-		if len(memoized) > 0 {
+		resolveGroupMemo(group)
+		if len(group.memoized) > 0 {
 			remaining := group.subjects[:0:0]
 			for _, subject := range group.subjects {
-				if proof, ok := memoized[subject.Symbol]; ok {
+				if proof, ok := group.memoized[subject.Symbol]; ok {
 					results[subject] = proof
 					continue
 				}
@@ -178,106 +285,9 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 				continue
 			}
 		}
-		prog, err := h.loadCached(group.path)
-		if err != nil {
+		if err := h.observabilityGroup(group, bp, results); err != nil {
 			return nil, err
 		}
-		// A symbol absent from the loaded program's roots is a subject-local
-		// fact — a production symbol can be unreachable as a root of its
-		// external-test binary — so it degrades to an unavailable proof for
-		// that subject alone and never denies a sibling's analysis.
-		memoScope := h.scope.Proofs()
-		memoArmed := memoScope != "" && closureHash != ""
-		unrooted := map[string]Observability{}
-		rooted := group.subjects[:0:0]
-		for _, subject := range group.subjects {
-			if prog.Roots[subject.Symbol] == nil {
-				reason := fmt.Sprintf("observation analysis unavailable: subject %s not found in %s", subject.Symbol, group.path)
-				if prog.Ambiguous[subject.Symbol] {
-					reason = fmt.Sprintf("observation analysis unavailable: subject name %s is ambiguous in %s (declared by both the package and its external test package)", subject.Symbol, group.path)
-				}
-				proof := Observability{Reason: reason}
-				results[subject] = proof
-				unrooted[subject.Symbol] = proof
-				continue
-			}
-			rooted = append(rooted, subject)
-		}
-		group.subjects = rooted
-		if len(group.subjects) == 0 {
-			if memoArmed {
-				storeMemo(memoScope, closureHash, unrooted)
-				h.persisted.proofs++
-			}
-			delete(h.progs, group.path)
-			continue
-		}
-		metas, err := h.list(group.path)
-		if err != nil {
-			return nil, err
-		}
-		base := newTier2Base(h, prog, metas)
-		// Proofs persist as each attribution slice completes: an analysis
-		// deadline expiring mid-group forfeits only the interrupted
-		// slice, and the next pass serves every completed slice's proofs
-		// from the memo (REQ-closure-observability-memo).
-		if memoArmed && len(unrooted) > 0 {
-			storeMemo(memoScope, closureHash, unrooted)
-			h.persisted.proofs++
-		}
-		slices := (len(group.subjects) + maxAttributedSubjects - 1) / maxAttributedSubjects
-		for start := 0; start < len(group.subjects); start += maxAttributedSubjects {
-			if err := h.ctx.Err(); err != nil {
-				return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
-			}
-			h.emitUnit("prove", group.path, start/maxAttributedSubjects+1, slices)
-			end := min(start+maxAttributedSubjects, len(group.subjects))
-			batch := group.subjects[start:end]
-			reachable, err := attributedReachableSets(h.ctx, h.SelectionAudited(), prog, batch)
-			if err != nil {
-				return nil, err
-			}
-			sliceProofs := make(map[string]Observability, len(batch))
-			for i, subject := range batch {
-				if err := h.ctx.Err(); err != nil {
-					return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
-				}
-				if reachable[i].unavailable != "" {
-					// The bisection isolated this subject's analysis
-					// failure: it refuses alone, fail-closed, and its
-					// siblings keep their evidence
-					// (REQ-closure-analysis). The visited-function
-					// provenance is walk-order-dependent, so it rides
-					// the progress channel; the memoized, hashed Reason
-					// stays byte-stable across recomputation
-					// (REQ-closure-observability-memo).
-					full := reachable[i].unavailable
-					h.emitDiagnostic("analysis-unavailable", subject.Package, subject.Symbol+": "+full)
-					result := Observability{Observable: false, Reason: unsupportedShapeReason}
-					results[subject] = result
-					sliceProofs[subject.Symbol] = result
-					continue
-				}
-				result, err := h.observabilityFromReachability(base, subject.Package, reachable[i])
-				if err != nil {
-					return nil, err
-				}
-				results[subject] = result
-				sliceProofs[subject.Symbol] = result
-			}
-			if memoArmed {
-				storeMemo(memoScope, closureHash, sliceProofs)
-				h.persisted.proofs++
-			}
-		}
-		// Programs are per-package test binaries: no later group can reuse
-		// this one, so retaining it would grow peak memory with the batch's
-		// package count instead of its largest single binary (measured
-		// 10.4 GB against 614 MB on a 33-package set). Load failures stay
-		// memoized so the isolation retry never repeats a failing load; a
-		// completed group's subjects retry through the full-group memo hit,
-		// so only a failed memo write makes a retry reload.
-		delete(h.progs, group.path)
 	}
 	if err := h.ctx.Err(); err != nil {
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
@@ -294,6 +304,110 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		}
 	}
 	return results, nil
+}
+
+func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, results map[Subject]Observability) error {
+	closureHash := group.closureHash
+	prog, err := h.loadCachedFrom(h.ctx, group.path, bp)
+	if err != nil {
+		return err
+	}
+	// Programs are per-package test binaries: no later group can reuse
+	// this one, so retaining it would grow peak memory with the batch's
+	// package count instead of its largest single binary (measured
+	// 10.4 GB against 614 MB on a 33-package set). Load failures stay
+	// memoized so the isolation retry never repeats a failing load; a
+	// completed group's subjects retry through the full-group memo hit,
+	// so only a failed memo write makes a retry reload.
+	defer delete(h.progs, group.path)
+	// A symbol absent from the loaded program's roots is a subject-local
+	// fact — a production symbol can be unreachable as a root of its
+	// external-test binary — so it degrades to an unavailable proof for
+	// that subject alone and never denies a sibling's analysis.
+	memoScope := h.scope.Proofs()
+	memoArmed := memoScope != "" && closureHash != ""
+	unrooted := map[string]Observability{}
+	rooted := group.subjects[:0:0]
+	for _, subject := range group.subjects {
+		if prog.Roots[subject.Symbol] == nil {
+			reason := fmt.Sprintf("observation analysis unavailable: subject %s not found in %s", subject.Symbol, group.path)
+			if prog.Ambiguous[subject.Symbol] {
+				reason = fmt.Sprintf("observation analysis unavailable: subject name %s is ambiguous in %s (declared by both the package and its external test package)", subject.Symbol, group.path)
+			}
+			proof := Observability{Reason: reason}
+			results[subject] = proof
+			unrooted[subject.Symbol] = proof
+			continue
+		}
+		rooted = append(rooted, subject)
+	}
+	group.subjects = rooted
+	if len(group.subjects) == 0 {
+		if memoArmed {
+			storeMemo(memoScope, closureHash, unrooted)
+			h.persisted.proofs++
+		}
+		return nil
+	}
+	metas, err := h.list(group.path)
+	if err != nil {
+		return err
+	}
+	base := newTier2Base(h, prog, metas)
+	// Proofs persist as each attribution slice completes: an analysis
+	// deadline expiring mid-group forfeits only the interrupted
+	// slice, and the next pass serves every completed slice's proofs
+	// from the memo (REQ-closure-observability-memo).
+	if memoArmed && len(unrooted) > 0 {
+		storeMemo(memoScope, closureHash, unrooted)
+		h.persisted.proofs++
+	}
+	slices := (len(group.subjects) + maxAttributedSubjects - 1) / maxAttributedSubjects
+	for start := 0; start < len(group.subjects); start += maxAttributedSubjects {
+		if err := h.ctx.Err(); err != nil {
+			return fmt.Errorf("closure: analysis cancelled: %w", err)
+		}
+		h.emitUnit("prove", group.path, start/maxAttributedSubjects+1, slices)
+		end := min(start+maxAttributedSubjects, len(group.subjects))
+		batch := group.subjects[start:end]
+		reachable, err := attributedReachableSets(h.ctx, h.SelectionAudited(), prog, batch)
+		if err != nil {
+			return err
+		}
+		sliceProofs := make(map[string]Observability, len(batch))
+		for i, subject := range batch {
+			if err := h.ctx.Err(); err != nil {
+				return fmt.Errorf("closure: analysis cancelled: %w", err)
+			}
+			if reachable[i].unavailable != "" {
+				// The bisection isolated this subject's analysis
+				// failure: it refuses alone, fail-closed, and its
+				// siblings keep their evidence
+				// (REQ-closure-analysis). The visited-function
+				// provenance is walk-order-dependent, so it rides
+				// the progress channel; the memoized, hashed Reason
+				// stays byte-stable across recomputation
+				// (REQ-closure-observability-memo).
+				full := reachable[i].unavailable
+				h.emitDiagnostic("analysis-unavailable", subject.Package, subject.Symbol+": "+full)
+				result := Observability{Observable: false, Reason: unsupportedShapeReason}
+				results[subject] = result
+				sliceProofs[subject.Symbol] = result
+				continue
+			}
+			result, err := h.observabilityFromReachability(base, subject.Package, reachable[i])
+			if err != nil {
+				return err
+			}
+			results[subject] = result
+			sliceProofs[subject.Symbol] = result
+		}
+		if memoArmed {
+			storeMemo(memoScope, closureHash, sliceProofs)
+			h.persisted.proofs++
+		}
+	}
+	return nil
 }
 
 // observabilityFromReachability classifies one subject's attributed
@@ -816,7 +930,19 @@ func (b *tier2Base) flagRegistrationFacts() (map[*ssa.Global]bool, map[string]st
 	backed := map[*ssa.Global]bool{}
 	poisoned := map[string]string{}
 	userPaths := userModulePaths(b.prog.Pkgs)
-	proven := b.flagSetProvenance(userPaths)
+	// Filter once across both flag passes: the skip keys on the load's
+	// module facts, never on path shape alone (a dotless user module
+	// skipped here would leave its flag registrations unjudged, breaking
+	// the dotless-module soundness family).
+	var userFunctions []*ssa.Function
+	for fn := range ssautil.AllFunctions(b.prog.Prog) {
+		pkgPath := funcPkgPath(fn)
+		if pkgPath == "" || (isStdImportPath(pkgPath) && !userPaths[pkgPath]) {
+			continue
+		}
+		userFunctions = append(userFunctions, fn)
+	}
+	proven := b.flagSetProvenance(userPaths, userFunctions)
 	poison := func(fn *ssa.Function, instr ssa.Instruction, what string) {
 		pkgPath := funcPkgPath(fn)
 		if pkgPath == "" {
@@ -852,16 +978,7 @@ func (b *tier2Base) flagRegistrationFacts() (map[*ssa.Global]bool, map[string]st
 			poisoned[pkgPath] = reason
 		}
 	}
-	for fn := range ssautil.AllFunctions(b.prog.Prog) {
-		pkgPath := funcPkgPath(fn)
-		// The skip keys on the load's module facts, never on path shape
-		// alone: a dotless user module skipped here would leave its flag
-		// registrations unjudged - no traced storage to refuse, no
-		// untraceable sink to poison - breaking the admission's stated
-		// soundness argument (the dotless-module soundness family).
-		if pkgPath == "" || (isStdImportPath(pkgPath) && !userPaths[pkgPath]) {
-			continue
-		}
+	for _, fn := range userFunctions {
 		for _, block := range fn.Blocks {
 			for _, instr := range block.Instrs {
 				site, ok := instr.(ssa.CallInstruction)
@@ -987,18 +1104,14 @@ const (
 // bodies make. Every unknown shape fails closed: the set keeps the
 // mark-and-poison judgment (REQ-closure-observability-flag-registration's
 // FlagSet provenance rule).
-func (b *tier2Base) flagSetProvenance(userPaths map[string]bool) map[ssa.Value]flagSetKind {
+func (b *tier2Base) flagSetProvenance(userPaths map[string]bool, userFunctions []*ssa.Function) map[ssa.Value]flagSetKind {
 	if b.flagProven != nil {
 		return b.flagProven
 	}
 	proven := map[ssa.Value]flagSetKind{}
 	var ctors []*ssa.Call
 	globalUses := map[*ssa.Global][]ssa.Instruction{}
-	for fn := range ssautil.AllFunctions(b.prog.Prog) {
-		pkgPath := funcPkgPath(fn)
-		if pkgPath == "" || (isStdImportPath(pkgPath) && !userPaths[pkgPath]) {
-			continue
-		}
+	for _, fn := range userFunctions {
 		for _, block := range fn.Blocks {
 			for _, instr := range block.Instrs {
 				if call, ok := instr.(*ssa.Call); ok && call.Common() != nil {

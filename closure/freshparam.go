@@ -100,25 +100,39 @@ func newFreshParamAnalysis(audited bool, reach attributedReachability) *freshPar
 // parameter in a deterministic order, so recursion's fail-closed
 // refusal is identical run to run regardless of map iteration.
 func (fp *freshParamAnalysis) resolve() {
-	keys := make([]freshParamKey, 0, len(fp.callers))
+	type sortKey struct {
+		key    freshParamKey
+		fnName string
+	}
+	var keys []sortKey
 	for fn := range fp.callers {
+		if !fp.paramCrossingEligible(fn) {
+			continue
+		}
+		var fnName string
 		for i := range fn.Params {
-			keys = append(keys, freshParamKey{fn: fn, idx: i})
+			if !fp.paramEligible(fn, i) {
+				continue
+			}
+			if fnName == "" {
+				fnName = fn.String()
+			}
+			keys = append(keys, sortKey{key: freshParamKey{fn: fn, idx: i}, fnName: fnName})
 		}
 	}
 	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].fn != keys[j].fn {
-			return keys[i].fn.String() < keys[j].fn.String()
+		if keys[i].key.fn != keys[j].key.fn {
+			return keys[i].fnName < keys[j].fnName
 		}
-		return keys[i].idx < keys[j].idx
+		return keys[i].key.idx < keys[j].key.idx
 	})
 	inArg := map[freshParamKey]bool{}
-	for _, key := range keys {
-		fp.paramArgFreshMemo(key, inArg)
+	for _, entry := range keys {
+		fp.paramArgFreshMemo(entry.key, inArg)
 	}
 	inUses := map[freshParamKey]bool{}
-	for _, key := range keys {
-		fp.paramUsesObservableMemo(key, inUses)
+	for _, entry := range keys {
+		fp.paramUsesObservableMemo(entry.key, inUses)
 	}
 }
 

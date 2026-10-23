@@ -28,7 +28,14 @@ const toolchainVerifierVersion = "gofresh/toolchain-verifier@5"
 var verifiedPackageMemo sync.Map
 
 func verifiedPackageMemoKey(importPath, digest string) string {
-	return toolchainVerifierVersion + "|" + admissionPolicy() + "|" + importPath + "|" + digest
+	return verifiedPackageMemoKeyWithPolicy("", importPath, digest)
+}
+
+func verifiedPackageMemoKeyWithPolicy(policy, importPath, digest string) string {
+	if policy == "" {
+		policy = admissionPolicy()
+	}
+	return toolchainVerifierVersion + "|" + policy + "|" + importPath + "|" + digest
 }
 
 // pureDelegatePackages lists internal and delegate standard-library packages
@@ -297,6 +304,10 @@ func verifyToolchainSurfaceWithIO(ctx context.Context, d sourceDigests) (failed 
 			failedSet[root] = true
 		}
 	}
+	policy := d.Policy
+	if policy == "" {
+		policy = admissionPolicy()
+	}
 	for _, pkg := range keys {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, err
@@ -307,7 +318,7 @@ func verifyToolchainSurfaceWithIO(ctx context.Context, d sourceDigests) (failed 
 			failedSet[pkg] = true
 			continue
 		}
-		verified, err := verifyListedPackageMemoized(lp)
+		verified, err := verifyListedPackageMemoized(lp, policy)
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return nil, nil, ctxErr
@@ -324,13 +335,16 @@ func verifyToolchainSurfaceWithIO(ctx context.Context, d sourceDigests) (failed 
 	return sortedKeys(failedSet), nil, nil
 }
 
-func verifyListedPackageMemoized(lp listedPackage) (bool, error) {
-	memoKey := verifiedPackageMemoKey(lp.ImportPath, lp.digest)
+func verifyListedPackageMemoized(lp listedPackage, policy string) (bool, error) {
+	if policy == "" {
+		policy = admissionPolicy()
+	}
+	memoKey := verifiedPackageMemoKeyWithPolicy(policy, lp.ImportPath, lp.digest)
 	if v, ok := verifiedPackageMemo.Load(memoKey); ok {
 		return v.(bool), nil
 	}
 	var cached bool
-	scope := "verified-package|" + toolchainVerifierVersion + "|" + admissionPolicy()
+	scope := "verified-package|" + toolchainVerifierVersion + "|" + policy
 	if cachefile.Load(sourceDigestsDirName, scope, lp.ImportPath+"|"+lp.digest, &cached) {
 		verifiedPackageMemo.Store(memoKey, cached)
 		return cached, nil

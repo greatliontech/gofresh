@@ -91,8 +91,24 @@ func (h *Hasher) ComputeRootedFunctions(ctx context.Context, subjects []Subject)
 		}
 		group.subjects = append(group.subjects, subject)
 	}
-	for _, group := range groups {
-		if err := h.rootedGroup(ctx, group, results); err != nil {
+	currentIdx := 0
+	bp := &batchPreparer{
+		h: h,
+		candidates: func() []string {
+			var uncached []string
+			for _, g := range groups[currentIdx:] {
+				if _, ok := h.progs[g.path]; !ok {
+					if _, failed := h.progErrs[g.path]; !failed {
+						uncached = append(uncached, g.path)
+					}
+				}
+			}
+			return uncached
+		},
+	}
+	for i, group := range groups {
+		currentIdx = i
+		if err := h.rootedGroup(ctx, group, bp, results); err != nil {
 			return nil, err
 		}
 	}
@@ -107,12 +123,12 @@ func (h *Hasher) ComputeRootedFunctions(ctx context.Context, subjects []Subject)
 // cut's or an error's included — never retained across groups, so peak
 // memory does not grow with the pass's package count (the observability
 // batch's measured discipline).
-func (h *Hasher) rootedGroup(ctx context.Context, group *packageBatch, results map[Subject]RootedFunctions) error {
+func (h *Hasher) rootedGroup(ctx context.Context, group *packageBatch, bp *batchPreparer, results map[Subject]RootedFunctions) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
 	h.emitUnit("prove", group.path, 1, 1)
-	prog, err := h.loadCachedContext(ctx, group.path)
+	prog, err := h.loadCachedFrom(ctx, group.path, bp)
 	if err != nil {
 		return err
 	}
@@ -209,12 +225,32 @@ func harnessRootName(name string) bool {
 func (h *Hasher) ComputeBinaryRootedFunctions(ctx context.Context, pkgPaths []string) (map[string]RootedFunctions, error) {
 	results := make(map[string]RootedFunctions, len(pkgPaths))
 	seen := map[string]bool{}
+	var paths []string
 	for _, path := range pkgPaths {
 		if seen[path] {
 			continue
 		}
 		seen[path] = true
-		inventory, err := h.binaryRootedPackage(ctx, path)
+		paths = append(paths, path)
+	}
+	currentIdx := 0
+	bp := &batchPreparer{
+		h: h,
+		candidates: func() []string {
+			var uncached []string
+			for _, p := range paths[currentIdx:] {
+				if _, ok := h.progs[p]; !ok {
+					if _, failed := h.progErrs[p]; !failed {
+						uncached = append(uncached, p)
+					}
+				}
+			}
+			return uncached
+		},
+	}
+	for i, path := range paths {
+		currentIdx = i
+		inventory, err := h.binaryRootedPackage(ctx, path, bp)
 		if err != nil {
 			return nil, err
 		}
@@ -227,11 +263,11 @@ func (h *Hasher) ComputeBinaryRootedFunctions(ctx context.Context, pkgPaths []st
 // the binary's program on every exit of the package — the incomplete
 // (tombstoned-root) exit included; the per-root pass releases it again
 // per group, harmlessly.
-func (h *Hasher) binaryRootedPackage(ctx context.Context, path string) (RootedFunctions, error) {
+func (h *Hasher) binaryRootedPackage(ctx context.Context, path string, bp *batchPreparer) (RootedFunctions, error) {
 	if err := ctx.Err(); err != nil {
 		return RootedFunctions{}, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
-	prog, err := h.loadCachedContext(ctx, path)
+	prog, err := h.loadCachedFrom(ctx, path, bp)
 	if err != nil {
 		return RootedFunctions{}, err
 	}

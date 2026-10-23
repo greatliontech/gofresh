@@ -183,6 +183,27 @@ func (p *Prepared) Build(ctx context.Context, pkgPath string) (*Program, error) 
 	return nil, fmt.Errorf("closure: package %s was not prepared", pkgPath)
 }
 
+// HasRoots reports whether Prepare selected an initial-root partition for
+// pkgPath. When false, callers that need single-package error isolation (for
+// example when pkgPath and pkgPath+".test" were requested in the same batch)
+// can fall back to Load(pkgPath).
+func (p *Prepared) HasRoots(pkgPath string) bool {
+	if p == nil {
+		return false
+	}
+	_, ok := p.roots[pkgPath]
+	return ok
+}
+
+// Release drops pkgPath's retained root slice once its SSA program has been
+// built, allowing roots not imported by remaining prepared packages to be
+// collected before the batch completes.
+func (p *Prepared) Release(pkgPath string) {
+	if p != nil {
+		delete(p.roots, pkgPath)
+	}
+}
+
 func load(ctx context.Context, dir string, env, flags, paths []string) ([]*packages.Package, error) {
 	cfg := loadConfigEnv(ctx, dir, env, flags...)
 	paths = append([]string(nil), paths...)
