@@ -67,13 +67,20 @@ type RootedFunctions struct {
 // from the same attributed RTA the observability proof rides — the
 // masks are conservative over-approximations (address-taken functions
 // of matching signature included), so a spurious member only withholds
-// a discharge, never grants one. No memo layer: the inventory is
-// recomputed per pass, exactly as the pass's fact composition is. ctx
-// governs the analysis and must descend from the Hasher's own: the
+// a discharge, never grants one. When the hasher's AnalysisScope arms
+// Rooted(), completed package inventories persist under (scope.Rooted(),
+// testBinaryClosureKey) and serve across passes without rebuilding SSA.
+// ctx governs the analysis and must descend from the Hasher's own: the
 // caller's analysis budget rides it (REQ-fresh-context), so a cut ends
-// the pass with the context's error and memoizes no load failure — the
-// discharge then grants nothing, exactly as every other gap.
+// the pass with the context's error and memoizes no load failure or
+// partial package derivation — the discharge then grants nothing,
+// exactly as every other gap.
 func (h *Hasher) ComputeRootedFunctions(ctx context.Context, subjects []Subject) (map[Subject]RootedFunctions, error) {
+	h.resetCallScope()
+	defer func() { h.contents = nil }()
+	prevCtx := h.ctx
+	h.ctx = ctx
+	defer func() { h.ctx = prevCtx }()
 	results := make(map[Subject]RootedFunctions, len(subjects))
 	byPackage := map[string]*packageBatch{}
 	var groups []*packageBatch
@@ -91,16 +98,39 @@ func (h *Hasher) ComputeRootedFunctions(ctx context.Context, subjects []Subject)
 		}
 		group.subjects = append(group.subjects, subject)
 	}
+	resolveGroupMemo := func(group *packageBatch) {
+		if !group.rootedMemoChecked && ctx.Err() == nil {
+			group.rootedMemoChecked = true
+			group.closureHash, group.rootedMemo = h.rootedGroupMemo(group.path)
+		}
+	}
 	currentIdx := 0
 	bp := &batchPreparer{
 		h: h,
 		candidates: func() []string {
 			var uncached []string
 			for _, g := range groups[currentIdx:] {
-				if _, ok := h.progs[g.path]; !ok {
-					if _, failed := h.progErrs[g.path]; !failed {
-						uncached = append(uncached, g.path)
+				if ctx.Err() != nil {
+					break
+				}
+				if _, ok := h.progs[g.path]; ok {
+					continue
+				}
+				if _, failed := h.progErrs[g.path]; failed {
+					continue
+				}
+				resolveGroupMemo(g)
+				allMemoized := len(g.rootedMemo) > 0
+				if allMemoized {
+					for _, s := range g.subjects {
+						if _, ok := g.rootedMemo[s.Symbol]; !ok {
+							allMemoized = false
+							break
+						}
 					}
+				}
+				if !allMemoized {
+					uncached = append(uncached, g.path)
 				}
 			}
 			return uncached
@@ -108,6 +138,27 @@ func (h *Hasher) ComputeRootedFunctions(ctx context.Context, subjects []Subject)
 	}
 	for i, group := range groups {
 		currentIdx = i
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+		}
+		resolveGroupMemo(group)
+		if len(group.rootedMemo) > 0 {
+			remaining := group.subjects[:0:0]
+			for _, subject := range group.subjects {
+				if inv, ok := group.rootedMemo[subject.Symbol]; ok {
+					results[subject] = inv
+					continue
+				}
+				remaining = append(remaining, subject)
+			}
+			if len(remaining) < len(group.subjects) {
+				h.Served("rooted functions", group.path)
+			}
+			group.subjects = remaining
+			if len(group.subjects) == 0 {
+				continue
+			}
+		}
 		if err := h.rootedGroup(ctx, group, bp, results); err != nil {
 			return nil, err
 		}
@@ -116,6 +167,21 @@ func (h *Hasher) ComputeRootedFunctions(ctx context.Context, subjects []Subject)
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
 	return results, nil
+}
+
+func rootedFunctionsFromReachability(reach attributedReachability) RootedFunctions {
+	if reach.unavailable != "" || reach.openWorld {
+		return RootedFunctions{}
+	}
+	fns := make(map[string]bool, len(reach.subjectFunctions)+len(reach.testMainFunctions))
+	for _, provenance := range []map[*ssa.Function]bool{reach.subjectFunctions, reach.testMainFunctions} {
+		for fn := range provenance {
+			if key := rootedFunctionKey(fn); key != "" {
+				fns[key] = true
+			}
+		}
+	}
+	return RootedFunctions{Fns: fns, Complete: true}
 }
 
 // rootedGroup derives one package group's inventories into results. The
@@ -133,12 +199,14 @@ func (h *Hasher) rootedGroup(ctx context.Context, group *packageBatch, bp *batch
 		return err
 	}
 	defer delete(h.progs, group.path)
+	computed := make(map[string]RootedFunctions, len(group.subjects))
 	rooted := group.subjects[:0:0]
 	for _, subject := range group.subjects {
 		if prog.Roots[subject.Symbol] == nil {
 			// An absent or ambiguous root grants no inventory for
 			// that subject alone — incomplete, fail-closed.
 			results[subject] = RootedFunctions{}
+			computed[subject.Symbol] = RootedFunctions{}
 			continue
 		}
 		rooted = append(rooted, subject)
@@ -154,30 +222,21 @@ func (h *Hasher) rootedGroup(ctx context.Context, group *packageBatch, bp *batch
 			return err
 		}
 		for i, subject := range batch {
-			reach := reachable[i]
-			if reach.unavailable != "" {
-				// An isolated analysis failure degrades this subject
-				// alone, in the surface's own fail-closed vocabulary
-				// - the incomplete RootedFunctions an absent root and
-				// an open world already produce
-				// (REQ-closure-analysis).
-				results[subject] = RootedFunctions{}
-				continue
-			}
-			if reach.openWorld {
-				results[subject] = RootedFunctions{}
-				continue
-			}
-			fns := make(map[string]bool, len(reach.subjectFunctions)+len(reach.testMainFunctions))
-			for _, provenance := range []map[*ssa.Function]bool{reach.subjectFunctions, reach.testMainFunctions} {
-				for fn := range provenance {
-					if key := rootedFunctionKey(fn); key != "" {
-						fns[key] = true
-					}
-				}
-			}
-			results[subject] = RootedFunctions{Fns: fns, Complete: true}
+			// An isolated analysis failure degrades this subject
+			// alone, in the surface's own fail-closed vocabulary
+			// - the incomplete RootedFunctions an absent root and
+			// an open world already produce
+			// (REQ-closure-analysis).
+			inv := rootedFunctionsFromReachability(reachable[i])
+			results[subject] = inv
+			computed[subject.Symbol] = inv
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("closure: analysis cancelled: %w", err)
+	}
+	if memoScope := h.scope.Rooted(); memoScope != "" && group.closureHash != "" && len(computed) > 0 {
+		storeRootedMemo(memoScope, group.closureHash, computed)
 	}
 	return nil
 }
@@ -223,6 +282,11 @@ func harnessRootName(name string) bool {
 // (REQ-closure-shared-dynamic-state-reachability). ctx is the analysis
 // context exactly as ComputeRootedFunctions takes it.
 func (h *Hasher) ComputeBinaryRootedFunctions(ctx context.Context, pkgPaths []string) (map[string]RootedFunctions, error) {
+	h.resetCallScope()
+	defer func() { h.contents = nil }()
+	prevCtx := h.ctx
+	h.ctx = ctx
+	defer func() { h.ctx = prevCtx }()
 	results := make(map[string]RootedFunctions, len(pkgPaths))
 	seen := map[string]bool{}
 	var paths []string
@@ -233,24 +297,60 @@ func (h *Hasher) ComputeBinaryRootedFunctions(ctx context.Context, pkgPaths []st
 		seen[path] = true
 		paths = append(paths, path)
 	}
+	type binaryEntry struct {
+		closureHash string
+		inventory   RootedFunctions
+		memoized    bool
+		checked     bool
+	}
+	memoByPath := make(map[string]*binaryEntry, len(paths))
+	resolveBinaryMemo := func(path string) *binaryEntry {
+		entry := memoByPath[path]
+		if entry == nil {
+			entry = &binaryEntry{}
+			memoByPath[path] = entry
+		}
+		if !entry.checked && ctx.Err() == nil {
+			entry.checked = true
+			entry.closureHash, entry.inventory, entry.memoized = h.binaryRootedMemo(path)
+		}
+		return entry
+	}
 	currentIdx := 0
 	bp := &batchPreparer{
 		h: h,
 		candidates: func() []string {
 			var uncached []string
 			for _, p := range paths[currentIdx:] {
-				if _, ok := h.progs[p]; !ok {
-					if _, failed := h.progErrs[p]; !failed {
-						uncached = append(uncached, p)
-					}
+				if ctx.Err() != nil {
+					break
 				}
+				if _, ok := h.progs[p]; ok {
+					continue
+				}
+				if _, failed := h.progErrs[p]; failed {
+					continue
+				}
+				if resolveBinaryMemo(p).memoized {
+					continue
+				}
+				uncached = append(uncached, p)
 			}
 			return uncached
 		},
 	}
 	for i, path := range paths {
 		currentIdx = i
-		inventory, err := h.binaryRootedPackage(ctx, path, bp)
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+		}
+		entry := resolveBinaryMemo(path)
+		if entry.memoized {
+			h.Served("binary rooted functions", path)
+			results[path] = entry.inventory
+			continue
+		}
+		inventory, err := h.binaryRootedPackage(ctx, path, entry.closureHash, bp)
 		if err != nil {
 			return nil, err
 		}
@@ -265,7 +365,7 @@ func (h *Hasher) ComputeBinaryRootedFunctions(ctx context.Context, pkgPaths []st
 // binaryRootedPackage derives one package's binary inventory in one
 // all-roots attributed RTA walk, releasing the binary's program on every
 // exit of the package — the incomplete (tombstoned-root) exit included.
-func (h *Hasher) binaryRootedPackage(ctx context.Context, path string, bp *batchPreparer) (RootedFunctions, error) {
+func (h *Hasher) binaryRootedPackage(ctx context.Context, path, closureHash string, bp *batchPreparer) (RootedFunctions, error) {
 	if err := ctx.Err(); err != nil {
 		return RootedFunctions{}, fmt.Errorf("closure: analysis cancelled: %w", err)
 	}
@@ -274,13 +374,22 @@ func (h *Hasher) binaryRootedPackage(ctx context.Context, path string, bp *batch
 		return RootedFunctions{}, err
 	}
 	defer delete(h.progs, path)
+	persist := func(inv RootedFunctions) (RootedFunctions, error) {
+		if err := ctx.Err(); err != nil {
+			return RootedFunctions{}, fmt.Errorf("closure: analysis cancelled: %w", err)
+		}
+		if memoScope := h.scope.Rooted(); memoScope != "" && closureHash != "" {
+			storeBinaryRootedMemo(memoScope, closureHash, inv)
+		}
+		return inv, nil
+	}
 	var subjects []Subject
 	for name := range prog.Ambiguous {
 		if harnessRootName(name) {
 			// A tombstoned harness name is a root whose flow cannot
 			// be bounded: the binary runs one of the colliding
 			// functions, and the inventory cannot say which.
-			return RootedFunctions{}, nil
+			return persist(RootedFunctions{})
 		}
 	}
 	for name := range prog.Roots {
@@ -290,9 +399,13 @@ func (h *Hasher) binaryRootedPackage(ctx context.Context, path string, bp *batch
 		subjects = append(subjects, Subject{Package: path, Symbol: name})
 	}
 	if len(subjects) == 0 {
-		return RootedFunctions{Fns: map[string]bool{}, Complete: true}, nil
+		return persist(RootedFunctions{Fns: map[string]bool{}, Complete: true})
 	}
 	sort.Slice(subjects, func(i, j int) bool { return subjects[i].Symbol < subjects[j].Symbol })
 	h.emitUnit("prove", path, 1, 1)
-	return binaryReachableUnion(ctx, h.SelectionAudited(), prog, subjects)
+	inv, err := binaryReachableUnion(ctx, h.SelectionAudited(), prog, subjects)
+	if err != nil {
+		return RootedFunctions{}, err
+	}
+	return persist(inv)
 }

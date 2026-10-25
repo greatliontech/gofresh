@@ -19,20 +19,25 @@ import (
 // carrying their refusal; they never turn process health into outcome evidence.
 // Preparation selects each subject's observation proof for producer validation.
 func (v *View) PrepareOutcomeSupport(ctx context.Context, frame runtimeinput.ProducerFrame, process string) (runtimeinput.OutcomeSupport, error) {
+	support, _, err := v.prepareOutcomeSupport(ctx, frame, process)
+	return support, err
+}
+
+func (v *View) prepareOutcomeSupport(ctx context.Context, frame runtimeinput.ProducerFrame, process string) (runtimeinput.OutcomeSupport, map[Subject]Fingerprint, error) {
 	if len(v.subjects) == 0 {
-		return runtimeinput.OutcomeSupport{}, fmt.Errorf("gofresh: outcome support needs contributing subjects")
+		return runtimeinput.OutcomeSupport{}, nil, fmt.Errorf("gofresh: outcome support needs contributing subjects")
 	}
 	env, err := gotool.EnvForCommand(v.evidenceEnv(), frame.PkgDir)
 	if err != nil {
-		return runtimeinput.OutcomeSupport{}, err
+		return runtimeinput.OutcomeSupport{}, nil, err
 	}
 	binding, err := frame.OutcomeBinding(process, env)
 	if err != nil {
-		return runtimeinput.OutcomeSupport{}, err
+		return runtimeinput.OutcomeSupport{}, nil, err
 	}
 	fingerprints, err := v.CaptureObservedBatch(ctx)
 	if err != nil {
-		return runtimeinput.OutcomeSupport{}, err
+		return runtimeinput.OutcomeSupport{}, nil, err
 	}
 	if v.beforeOutcomeIssue != nil {
 		v.beforeOutcomeIssue()
@@ -40,10 +45,10 @@ func (v *View) PrepareOutcomeSupport(ctx context.Context, frame runtimeinput.Pro
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	if v.sealed {
-		return runtimeinput.OutcomeSupport{}, ErrViewSealed
+		return runtimeinput.OutcomeSupport{}, nil, ErrViewSealed
 	}
 	if err := ctx.Err(); err != nil {
-		return runtimeinput.OutcomeSupport{}, err
+		return runtimeinput.OutcomeSupport{}, nil, err
 	}
 	var subjects []string
 	reason := ""
@@ -54,7 +59,7 @@ func (v *View) PrepareOutcomeSupport(ctx context.Context, frame runtimeinput.Pro
 		}
 		subjects = append(subjects, outcomeSubject(fingerprints[subject], subject))
 	}
-	return outcome.Prepare(binding, subjects, reason), nil
+	return outcome.Prepare(binding, subjects, reason), fingerprints, nil
 }
 
 func outcomeSubject(fingerprint Fingerprint, subject Subject) string {

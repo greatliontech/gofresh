@@ -10,13 +10,14 @@ import (
 )
 
 // SetAnalysisScope arms every persistent closure memo that needs the
-// caller's guards — the observability proofs and the typed
-// testing-effect scan — under scope, the analysis identity outside the
-// source closure: the Hasher reads its proof-strategy version and its
-// code guards (the fact strategy, the attestations, and the vouches key
-// the derivations the observation pass performs beside the Hasher), and
-// each memo key adds the package test-binary closure hash, completing
-// the pure function's input identity (REQ-closure-observability-memo,
+// caller's guards — the observability proofs, the typed testing-effect
+// scan, and the rooted-function inventories — under scope, the analysis
+// identity outside the source closure: the Hasher reads its
+// proof-strategy version and its code guards (the fact strategy, the
+// attestations, and the vouches key the derivations the observation
+// pass performs beside the Hasher), and each memo key adds the package
+// test-binary closure hash, completing the pure function's input
+// identity (REQ-closure-observability-memo,
 // REQ-closure-testing-scan-memo). The zero scope leaves those memos
 // inert — every pass recomputes. Those
 // memos live under the consumer-controlled store root (the user cache
@@ -200,4 +201,65 @@ func (h *Hasher) groupMemo(pkgPath string) (closureHash string, proofs map[strin
 		return "", nil
 	}
 	return key, loadMemo(h.scope.Proofs(), key)
+}
+
+const (
+	rootedDirName       = "rooted"
+	binaryRootedDirName = "binaryrooted"
+)
+
+func loadRootedMemo(scope, closureKey string) map[string]RootedFunctions {
+	var inventories map[string]RootedFunctions
+	if !cachefile.Load(rootedDirName, scope, closureKey, &inventories) {
+		return nil
+	}
+	for k, inv := range inventories {
+		if inv.Complete && inv.Fns == nil {
+			inv.Fns = map[string]bool{}
+			inventories[k] = inv
+		}
+	}
+	return inventories
+}
+
+func storeRootedMemo(scope, closureKey string, inventories map[string]RootedFunctions) {
+	cachefile.Merge(rootedDirName, scope, closureKey, inventories)
+}
+
+func (h *Hasher) rootedGroupMemo(pkgPath string) (closureHash string, inventories map[string]RootedFunctions) {
+	if h.scope.Rooted() == "" {
+		return "", nil
+	}
+	key, err := h.testBinaryClosureKey(pkgPath)
+	if err != nil {
+		return "", nil
+	}
+	return key, loadRootedMemo(h.scope.Rooted(), key)
+}
+
+func loadBinaryRootedMemo(scope, closureKey string) (RootedFunctions, bool) {
+	var inventory RootedFunctions
+	if !cachefile.Load(binaryRootedDirName, scope, closureKey, &inventory) {
+		return RootedFunctions{}, false
+	}
+	if inventory.Complete && inventory.Fns == nil {
+		inventory.Fns = map[string]bool{}
+	}
+	return inventory, true
+}
+
+func storeBinaryRootedMemo(scope, closureKey string, inventory RootedFunctions) {
+	cachefile.Store(binaryRootedDirName, scope, closureKey, inventory)
+}
+
+func (h *Hasher) binaryRootedMemo(pkgPath string) (closureHash string, inventory RootedFunctions, ok bool) {
+	if h.scope.Rooted() == "" {
+		return "", RootedFunctions{}, false
+	}
+	key, err := h.testBinaryClosureKey(pkgPath)
+	if err != nil {
+		return "", RootedFunctions{}, false
+	}
+	inv, ok := loadBinaryRootedMemo(h.scope.Rooted(), key)
+	return key, inv, ok
 }

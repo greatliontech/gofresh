@@ -12,18 +12,19 @@ import (
 // caller's vouch set. Every persistent memo that depends on any of
 // these renders its own scope from this one value, naming exactly the
 // axes it reads — the observability proofs, the typed testing scan,
-// the dynamic-state facts, and the view scan — so an axis one memo needs
-// cannot be joined by hand at one site and forgotten at another, and an
-// axis a memo does not depend on (the proof-strategy version, for the
-// typed testing scan) never widens its misses. The listing memo and the
-// classification-root resolution also need their environment; the listing
-// additionally depends on selected standard source. The zero value arms
-// nothing: every memo stays inert
-// and every pass recomputes. The Hasher reads the proof and testing-scan
-// renderings; the fact strategy, the attestations, and the vouches key
-// the facts and the view scan the observation pass derives, and the
-// attestations and vouches are also what that derivation applies — one
-// source for what a memo is keyed on and what the pass computed.
+// the rooted-function inventories, the dynamic-state facts, and the
+// view scan — so an axis one memo needs cannot be joined by hand at one
+// site and forgotten at another, and an axis a memo does not depend on
+// (the proof-strategy version, for the typed testing scan) never widens
+// its misses. The listing memo and the classification-root resolution
+// also need their environment; the listing additionally depends on
+// selected standard source. The zero value arms nothing: every memo
+// stays inert and every pass recomputes. The Hasher reads the proof,
+// testing-scan, and rooted-function renderings; the fact strategy, the
+// attestations, and the vouches key the facts and the view scan the
+// observation pass derives, and the attestations and vouches are also
+// what that derivation applies — one source for what a memo is keyed on
+// and what the pass computed.
 type AnalysisScope struct {
 	// ProofStrategy versions the observability proof derivation;
 	// FactStrategy the shared-dynamic-state fact derivation and the
@@ -78,6 +79,18 @@ func (s AnalysisScope) TestingScan() string {
 		return ""
 	}
 	return testingScanStrategy + "|" + s.guards()
+}
+
+const rootedFunctionsStrategy = "gofresh/rooted-functions@1"
+
+// Rooted is the rooted-functions and binary-rooted-functions memo's scope:
+// its strategy version and the guard key (the code guards and the analyzing
+// frontend).
+func (s AnalysisScope) Rooted() string {
+	if !s.completeGuards() {
+		return ""
+	}
+	return rootedFunctionsStrategy + "|" + s.guards()
 }
 
 // Facts is the dynamic-state fact memo's scope: the fact-strategy

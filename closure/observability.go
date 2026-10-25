@@ -188,11 +188,13 @@ const maxAttributedSubjects = subjectMaskBits
 
 // packageBatch groups one package's requested subjects for shared analysis.
 type packageBatch struct {
-	path        string
-	closureHash string
-	memoized    map[string]Observability
-	memoChecked bool
-	subjects    []Subject
+	path              string
+	closureHash       string
+	memoized          map[string]Observability
+	memoChecked       bool
+	rootedMemo        map[string]RootedFunctions
+	rootedMemoChecked bool
+	subjects          []Subject
 }
 
 // ComputeObservabilityBatch computes caller-selected per-subject observation
@@ -327,7 +329,10 @@ func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, resu
 	// that subject alone and never denies a sibling's analysis.
 	memoScope := h.scope.Proofs()
 	memoArmed := memoScope != "" && closureHash != ""
+	rootedScope := h.scope.Rooted()
+	rootedMemoArmed := rootedScope != "" && closureHash != ""
 	unrooted := map[string]Observability{}
+	unrootedRooted := map[string]RootedFunctions{}
 	rooted := group.subjects[:0:0]
 	for _, subject := range group.subjects {
 		if prog.Roots[subject.Symbol] == nil {
@@ -338,6 +343,7 @@ func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, resu
 			proof := Observability{Reason: reason}
 			results[subject] = proof
 			unrooted[subject.Symbol] = proof
+			unrootedRooted[subject.Symbol] = RootedFunctions{}
 			continue
 		}
 		rooted = append(rooted, subject)
@@ -347,6 +353,9 @@ func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, resu
 		if memoArmed {
 			storeMemo(memoScope, closureHash, unrooted)
 			h.persisted.proofs++
+		}
+		if rootedMemoArmed && len(unrootedRooted) > 0 {
+			storeRootedMemo(rootedScope, closureHash, unrootedRooted)
 		}
 		return nil
 	}
@@ -363,6 +372,9 @@ func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, resu
 		storeMemo(memoScope, closureHash, unrooted)
 		h.persisted.proofs++
 	}
+	if rootedMemoArmed && len(unrootedRooted) > 0 {
+		storeRootedMemo(rootedScope, closureHash, unrootedRooted)
+	}
 	slices := (len(group.subjects) + maxAttributedSubjects - 1) / maxAttributedSubjects
 	for start := 0; start < len(group.subjects); start += maxAttributedSubjects {
 		if err := h.ctx.Err(); err != nil {
@@ -376,10 +388,12 @@ func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, resu
 			return err
 		}
 		sliceProofs := make(map[string]Observability, len(batch))
+		sliceRooted := make(map[string]RootedFunctions, len(batch))
 		for i, subject := range batch {
 			if err := h.ctx.Err(); err != nil {
 				return fmt.Errorf("closure: analysis cancelled: %w", err)
 			}
+			sliceRooted[subject.Symbol] = rootedFunctionsFromReachability(reachable[i])
 			if reachable[i].unavailable != "" {
 				// The bisection isolated this subject's analysis
 				// failure: it refuses alone, fail-closed, and its
@@ -406,6 +420,9 @@ func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, resu
 		if memoArmed {
 			storeMemo(memoScope, closureHash, sliceProofs)
 			h.persisted.proofs++
+		}
+		if rootedMemoArmed {
+			storeRootedMemo(rootedScope, closureHash, sliceRooted)
 		}
 	}
 	return nil

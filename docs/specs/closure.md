@@ -1700,12 +1700,16 @@ preserve these distinct obligations:
   name and its contents; raw NUL bytes cannot encode a different inventory.
   An actually selected empty member set has its empty-sequence identity;
   failed listing or unreadable selected content is missing evidence, not an
-  empty selection. Digests are read from selected files on every construction,
-  never served from the listing memo. Identical content under another label
-  supplies only the same content identity, not a proof of behavior.
-- **inventory-memo** — Selection inventories may be memoized per complete scope
-  — record representation, explicit flags, pass snapshot identity and discovery
-  roots and rules — retaining the shared inventory and graph reconciliation.
+  empty selection. Digests are derived from the selected files whenever a
+  selection is listed or its digest memo misses, and may be served from a
+  stamp-gated digest memo while every recorded directory and entry stamp holds.
+  Identical content under another label supplies only the same content
+  identity, not a proof of behavior.
+- **inventory-memo** — Selection inventories and their selected-file digests
+  may be memoized per complete toolchain selection scope — record
+  representation, explicit flags, toolchain-relevant pass snapshot identity
+  (excluding module-local GOMOD and GOWORK paths) and discovery roots and rules
+  — retaining the shared inventory, graph reconciliation, and package digests.
   Changing discovery dependencies requires re-listing. A scope-bound integrity
   commitment rejects incomplete payloads; it does not authenticate a coherently
   replaced private payload and commitment. A record serves only while every

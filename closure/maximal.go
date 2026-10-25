@@ -108,7 +108,6 @@ func (h *Hasher) ComputeMaximalFactsBatch(subjects []Subject) (map[Subject]Maxim
 		if err := h.contextErr(); err != nil {
 			return nil, nil, err
 		}
-		delete(h.lists, pkgPath)
 	}
 	return results, sources, nil
 }

@@ -293,10 +293,9 @@ func (u *producingUnit) register(ctx context.Context, build BuildBinding, proces
 		// Even a source-supported or asserted-pure contributor can affect an
 		// observing sibling's environment. Preserve the entire process roster
 		// in outcome preparation and its closing proof obligations.
-		support, err = u.view.PrepareOutcomeSupport(preparing, frame, process.Identity)
+		var all map[Subject]Fingerprint
+		support, all, err = u.view.prepareOutcomeSupport(preparing, frame, process.Identity)
 		if err == nil {
-			var all map[Subject]Fingerprint
-			all, err = u.view.CaptureObservedBatch(preparing)
 			for subject := range observed {
 				fingerprints[subject] = all[subject]
 			}

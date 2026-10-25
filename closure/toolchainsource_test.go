@@ -830,3 +830,66 @@ func TestToolchainSourceMemoRelistsAMovedTree(t *testing.T) {
 		t.Fatalf("an edited selected file left the digest: %q, want %q", fourth.Packages["strings"], want)
 	}
 }
+
+func TestToolchainSourceScopeIgnoresModulePathsAndServesDigestMemo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns the go command")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	ctx := context.Background()
+	modA := t.TempDir()
+	modB := t.TempDir()
+	writeTree(t, modA, map[string]string{"go.mod": "module example.com/moda\n\ngo 1.26\n"})
+	writeTree(t, modB, map[string]string{"go.mod": "module example.com/modb\n\ngo 1.26\n"})
+	env, err := gotool.NormalizeEnv(os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapA, err := (gotool.Runner{}).TakeEnvSnapshot(ctx, modA, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapB, err := (gotool.Runner{}).TakeEnvSnapshot(ctx, modB, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopeA := toolchainSourceScope(snapA, nil, surfaceSeeds())
+	scopeB := toolchainSourceScope(snapB, nil, surfaceSeeds())
+	if scopeA != scopeB {
+		t.Fatalf("distinct modules under same toolchain produced different scopes:\nA: %s\nB: %s", scopeA, scopeB)
+	}
+	listings := 0
+	runner := gotool.Runner{Prepare: func(cmd *exec.Cmd) {
+		if len(cmd.Args) > 1 && cmd.Args[1] == "list" {
+			listings++
+		}
+	}}
+	first, err := toolchainSourceDigests(ctx, runner, modA, env, snapA, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listings != 1 {
+		t.Fatalf("cold listings = %d, want 1", listings)
+	}
+	second, err := toolchainSourceDigests(ctx, runner, modB, env, snapB, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listings != 1 {
+		t.Fatalf("warm cross-module listings = %d, want 1", listings)
+	}
+	if !reflect.DeepEqual(first, second) {
+		t.Fatal("warm cross-module digests differed from cold digests")
+	}
+	// An empty package digest in the memoized map is rejected by sourceDigestsFromMemo.
+	l := surfaceListing{
+		Version:  sourceDigestsVersion,
+		Packages: []listedPackage{{ImportPath: "strings", Audited: true}, {ImportPath: "archive/tar", Audited: false}},
+	}
+	if _, ok := sourceDigestsFromMemo(l, map[string]string{"strings": "", "archive/tar": "abc"}); ok {
+		t.Fatal("sourceDigestsFromMemo accepted empty digest for audited package")
+	}
+	if _, ok := sourceDigestsFromMemo(l, map[string]string{"strings": "abc", "archive/tar": ""}); ok {
+		t.Fatal("sourceDigestsFromMemo accepted empty digest for non-audited package")
+	}
+}

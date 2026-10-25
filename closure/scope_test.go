@@ -46,3 +46,30 @@ func TestAnalysisScopeRendersEachMemosAxes(t *testing.T) {
 		t.Errorf("the testing scan armed without guards: %q", strategiesOnly.TestingScan())
 	}
 }
+
+func TestAnalysisScopeRendersRootedMemoAxes(t *testing.T) {
+	scope := AnalysisScope{
+		ProofStrategy:    "rta@1",
+		FactStrategy:     "facts@2",
+		Toolchain:        "tc",
+		BuildConfig:      "bc",
+		Vouches:          []string{"a:x"},
+		toolchainContent: "content",
+		admissionPolicy:  "policy",
+	}
+	want := rootedFunctionsStrategy + "|tc|bc|" + AnalyzingFrontend() + "|content|policy"
+	if got := scope.Rooted(); got != want {
+		t.Fatalf("Rooted() = %q, want %q", got, want)
+	}
+	var zero AnalysisScope
+	if got := zero.Rooted(); got != "" {
+		t.Fatalf("zero.Rooted() = %q, want empty", got)
+	}
+	attested := scope
+	attested.SingleSubject = true
+	attested.PackageProcess = true
+	attested.Vouches = []string{"other:vouch"}
+	if attested.Rooted() != scope.Rooted() {
+		t.Fatalf("attestations/vouches changed Rooted(): %q vs %q", attested.Rooted(), scope.Rooted())
+	}
+}

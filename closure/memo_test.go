@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -402,5 +403,130 @@ func TestObservabilityMemoEntryWithoutTheRequestedSubjectServesNothing(t *testin
 	}
 	if proofs, _ := sibling.Persisted(); proofs != 1 {
 		t.Fatalf("the unserved subject persisted %d slices, want its own one", proofs)
+	}
+}
+
+func TestRootedFunctionsAndBinaryRootedFunctionsMemoServeAcrossPasses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves rooted functions")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := memoModule(t)
+	subjects := []Subject{{Package: "example.com/memo", Symbol: "Pure"}, {Package: "example.com/memo", Symbol: "TestPure"}}
+	scope := AnalysisScope{ProofStrategy: "p", Toolchain: "strategy@1|toolchain|build", BuildConfig: "build"}
+
+	cold, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cold.SetAnalysisScope(scope)
+	firstRooted, err := cold.ComputeRootedFunctions(cold.ctx, subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstBinary, err := cold.ComputeBinaryRootedFunctions(cold.ctx, []string{"example.com/memo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	warm, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warm.SetAnalysisScope(scope)
+	secondRooted, err := warm.ComputeRootedFunctions(warm.ctx, subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(firstRooted, secondRooted) {
+		t.Fatalf("warm rooted functions = %+v, want %+v", secondRooted, firstRooted)
+	}
+	if !warm.ServedSummary()["rooted functions"]["example.com/memo"] {
+		t.Fatalf("expected warm ComputeRootedFunctions to record serve: %v", warm.ServedSummary())
+	}
+	secondBinary, err := warm.ComputeBinaryRootedFunctions(warm.ctx, []string{"example.com/memo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(firstBinary, secondBinary) {
+		t.Fatalf("warm binary rooted functions = %+v, want %+v", secondBinary, firstBinary)
+	}
+	if !warm.ServedSummary()["binary rooted functions"]["example.com/memo"] {
+		t.Fatalf("expected warm ComputeBinaryRootedFunctions to record serve: %v", warm.ServedSummary())
+	}
+}
+
+func TestRootedFunctionsBatchEntriesDiscardStaleTestBinaryKeysAndHonorContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves rooted functions")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	dir := memoModule(t)
+	subjects := []Subject{{Package: "example.com/memo", Symbol: "Pure"}}
+	scope := AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"}
+
+	// Cold observability pass also warms the rooted-functions memo.
+	obsHasher, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	obsHasher.SetAnalysisScope(scope)
+	if _, err := obsHasher.ComputeObservabilityBatch(subjects); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stale pre-call keys and contributions on ComputeRootedFunctions are discarded
+	// via resetCallScope, so the entry warmed by ComputeObservabilityBatch hits.
+	rootedHasher, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootedHasher.SetAnalysisScope(scope)
+	rootedHasher.testBinaryKeys = map[string]string{"example.com/memo": "stale-key"}
+	rootedHasher.contribs = map[string]depContribution{"example.com/memo": {contribution: "src:example.com/memo=stale"}}
+	if _, err := rootedHasher.ComputeRootedFunctions(rootedHasher.ctx, subjects); err != nil {
+		t.Fatal(err)
+	}
+	if !rootedHasher.ServedSummary()["rooted functions"]["example.com/memo"] {
+		t.Fatalf("stale pre-call key defeated rooted-functions memo hit: %v", rootedHasher.ServedSummary())
+	}
+	if rootedHasher.testBinaryKeys["example.com/memo"] == "stale-key" {
+		t.Fatal("ComputeRootedFunctions retained stale testBinaryKeys")
+	}
+
+	// Populate binary rooted memo, then verify ComputeBinaryRootedFunctions also
+	// discards stale testBinaryKeys and restores h.ctx after a cancelled call.
+	if _, err := obsHasher.ComputeBinaryRootedFunctions(obsHasher.ctx, []string{"example.com/memo"}); err != nil {
+		t.Fatal(err)
+	}
+	binHasher, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binHasher.SetAnalysisScope(scope)
+	binHasher.testBinaryKeys = map[string]string{"example.com/memo": "stale-key"}
+	if _, err := binHasher.ComputeBinaryRootedFunctions(binHasher.ctx, []string{"example.com/memo"}); err != nil {
+		t.Fatal(err)
+	}
+	if !binHasher.ServedSummary()["binary rooted functions"]["example.com/memo"] {
+		t.Fatalf("stale pre-call key defeated binary-rooted-functions memo hit: %v", binHasher.ServedSummary())
+	}
+	if binHasher.testBinaryKeys["example.com/memo"] == "stale-key" {
+		t.Fatal("ComputeBinaryRootedFunctions retained stale testBinaryKeys")
+	}
+
+	cancelled, cancel := context.WithCancel(binHasher.ctx)
+	cancel()
+	if _, err := binHasher.ComputeRootedFunctions(cancelled, subjects); err == nil {
+		t.Fatal("expected cancelled context to fail ComputeRootedFunctions")
+	}
+	if binHasher.ctx.Err() != nil {
+		t.Fatal("ComputeRootedFunctions did not restore h.ctx after cancelled call")
+	}
+	if _, err := binHasher.ComputeBinaryRootedFunctions(cancelled, []string{"example.com/memo"}); err == nil {
+		t.Fatal("expected cancelled context to fail ComputeBinaryRootedFunctions")
+	}
+	if binHasher.ctx.Err() != nil {
+		t.Fatal("ComputeBinaryRootedFunctions did not restore h.ctx after cancelled call")
 	}
 }

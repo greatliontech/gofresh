@@ -15,6 +15,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/greatliontech/gofresh/closure/internal/cachefile"
 	"github.com/greatliontech/gofresh/closure/internal/listing"
@@ -145,9 +146,10 @@ type sourceDigests struct {
 // only while every stamp holds (stampsCurrent): a file edited, added,
 // removed, or renamed in any stamped directory — a patched GOROOT in
 // place, a distro rebuild, a developer's tree — re-lists, so the memo
-// never decides which bytes are compiled from a stale selection. The
-// DIGESTS are never memoized: the selected files are read and hashed
-// on every construction, so the content key is always the content.
+// never decides which bytes are compiled from a stale selection. While
+// the listing's integrity and stamps hold, its selected-file digests may
+// also be served from the companion digest memo keyed by the listing's
+// integrity commitment.
 type surfaceListing struct {
 	Version   int             `json:"version"`
 	Packages  []listedPackage `json:"packages"`
@@ -539,22 +541,111 @@ func digestListing(ctx context.Context, l surfaceListing) (sourceDigests, error)
 	return d, nil
 }
 
+type persistedSourceDigests struct {
+	All map[string]string `json:"all"`
+}
+
+var toolchainDigestsMemo sync.Map
+
+func sourceDigestsFromMemo(l surfaceListing, all map[string]string) (sourceDigests, bool) {
+	if len(all) == 0 || len(all) != len(l.Packages) {
+		return sourceDigests{}, false
+	}
+	d := sourceDigests{
+		Packages:  make(map[string]string),
+		inventory: make(map[string]listedPackage, len(l.Packages)),
+	}
+	for _, p := range l.Packages {
+		digest, ok := all[p.ImportPath]
+		if !ok || digest == "" {
+			return sourceDigests{}, false
+		}
+		p.digest = digest
+		d.inventory[p.ImportPath] = p
+		if p.Audited {
+			d.Packages[p.ImportPath] = digest
+		}
+	}
+	if len(d.Packages) == 0 {
+		return sourceDigests{}, false
+	}
+	data, _ := json.Marshal(all)
+	sum := sha256.Sum256(append([]byte("gofresh/toolchain-content@1\x00"), data...))
+	d.Content = hex.EncodeToString(sum[:])
+	return d, true
+}
+
+func loadToolchainDigests(scope string, l surfaceListing) (sourceDigests, bool) {
+	if l.Integrity == "" {
+		return sourceDigests{}, false
+	}
+	key := "digests-" + l.Integrity
+	recordPath, err := cachefile.Path(sourceDigestsDirName, scope, key)
+	if err == nil {
+		if v, ok := toolchainDigestsMemo.Load(recordPath); ok {
+			if _, statErr := os.Stat(recordPath); statErr == nil {
+				if d, ok := sourceDigestsFromMemo(l, v.(map[string]string)); ok {
+					return d, true
+				}
+			}
+		}
+	}
+	var cached persistedSourceDigests
+	if !cachefile.Load(sourceDigestsDirName, scope, key, &cached) {
+		return sourceDigests{}, false
+	}
+	d, ok := sourceDigestsFromMemo(l, cached.All)
+	if !ok {
+		return sourceDigests{}, false
+	}
+	if err == nil {
+		toolchainDigestsMemo.Store(recordPath, cached.All)
+	}
+	return d, true
+}
+
+func storeToolchainDigests(scope string, l surfaceListing, d sourceDigests) {
+	if l.Integrity == "" || len(d.inventory) == 0 {
+		return
+	}
+	all := make(map[string]string, len(d.inventory))
+	for pkg, lp := range d.inventory {
+		all[pkg] = lp.digest
+	}
+	key := "digests-" + l.Integrity
+	cachefile.Store(sourceDigestsDirName, scope, key, persistedSourceDigests{All: all})
+	if recordPath, err := cachefile.Path(sourceDigestsDirName, scope, key); err == nil {
+		toolchainDigestsMemo.Store(recordPath, all)
+	}
+}
+
+func toolchainSnapshotIdentity(snapshot *gotool.EnvSnapshot) string {
+	var b strings.Builder
+	for line := range strings.SplitSeq(snapshot.Identity(), "\n") {
+		if line == "" || strings.HasPrefix(line, "GOMOD=") || strings.HasPrefix(line, "GOWORK=") {
+			continue
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 // toolchainSourceScope keys the listing memo: the record version, the
-// explicit build flags verbatim, and the pass snapshot's identity —
-// every `go env` setting (GOROOT, GOVERSION, GOFLAGS, GOOS, GOARCH,
-// CGO_ENABLED, GOEXPERIMENT, GOFIPS140, …) as the go command reports
-// it — so two listings share a record exactly when the go command
-// would select the same files from the same tree; the go command's
-// own flag semantics (an explicit flag over GOFLAGS) are never
-// re-derived here. The identity carries the module-dependent settings
-// too (GOMOD, GOWORK), so records are per module of one toolchain: a
-// cost in cache space, never in soundness. The tree's contents are the
-// record's stamps, not the scope's. The surface seeds' digest is the
-// scope's last limb: the record lists the packages the rule derived
-// when it was written, so a rule whose seeds moved must miss it.
+// explicit build flags verbatim, and the pass snapshot's toolchain
+// identity — every `go env` setting (GOROOT, GOVERSION, GOFLAGS, GOOS,
+// GOARCH, CGO_ENABLED, GOEXPERIMENT, GOFIPS140, …) as the go command
+// reports it, excluding module-local GOMOD and GOWORK paths — so two
+// listings share a record exactly when the go command would select the
+// same files from the same tree; the go command's own flag semantics
+// (an explicit flag over GOFLAGS) are never re-derived here. The tree's
+// contents are the record's stamps, not the scope's. The surface seeds'
+// digest is the scope's last limb: the record lists the packages the
+// rule derived when it was written, so a rule whose seeds moved must
+// miss it.
 func toolchainSourceScope(snapshot *gotool.EnvSnapshot, buildFlags []string, seeds []string) string {
 	seedDigest := sha256.Sum256([]byte(strings.Join(seeds, "\n")))
-	return fmt.Sprintf("%d|%s|%s|%x", sourceDigestsVersion, strings.Join(buildFlags, "\x00"), snapshot.Identity(), seedDigest[:8])
+	return fmt.Sprintf("%d|%s|%s|%x", sourceDigestsVersion, strings.Join(buildFlags, "\x00"), toolchainSnapshotIdentity(snapshot), seedDigest[:8])
 }
 
 // toolchainSourceDigests lists the standard library under the effective
@@ -563,13 +654,15 @@ func toolchainSourceScope(snapshot *gotool.EnvSnapshot, buildFlags []string, see
 // command could not load is refused by the parser, named) — served
 // from the persistent listing memo under the selection's scope while
 // its stamps hold — and digests the complete inventory from the files
-// themselves, retaining the audited subset as a separate projection. A
+// themselves (or serves the companion digest memo while every stamp
+// holds), retaining the audited subset as a separate projection. A
 // listing failure or an unreadable file is an error: the
 // admission then refuses, naming it.
 func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir string, env []string, snapshot *gotool.EnvSnapshot, buildFlags []string) (sourceDigests, error) {
 	scope := toolchainSourceScope(snapshot, buildFlags, surfaceSeeds())
 	var l surfaceListing
-	if !(cachefile.Load(sourceDigestsDirName, scope, "listing", &l) && l.Version == sourceDigestsVersion && len(l.Packages) != 0 && len(l.Discovery) != 0 && l.Integrity == listingIntegrity(scope, l) && stampsCurrent(l)) {
+	warmListing := cachefile.Load(sourceDigestsDirName, scope, "listing", &l) && l.Version == sourceDigestsVersion && len(l.Packages) != 0 && len(l.Discovery) != 0 && l.Integrity == listingIntegrity(scope, l) && stampsCurrent(l)
+	if !warmListing {
 		args := append([]string{"-json", "-e", "-deps"}, buildFlags...)
 		args = append(args, "std")
 		out, err := runner.List(ctx, dir, env, args...)
@@ -615,8 +708,22 @@ func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir strin
 		if cacheableDiscovery(l) {
 			cachefile.Store(sourceDigestsDirName, scope, "listing", l)
 		}
+	} else if digestReadForTest == nil {
+		if err := ctx.Err(); err != nil {
+			return sourceDigests{}, err
+		}
+		if d, ok := loadToolchainDigests(scope, l); ok {
+			return d, nil
+		}
 	}
-	return digestListing(ctx, l)
+	d, err := digestListing(ctx, l)
+	if err != nil {
+		return sourceDigests{}, err
+	}
+	if cacheableDiscovery(l) {
+		storeToolchainDigests(scope, l, d)
+	}
+	return d, nil
 }
 
 func boolKeys(m map[string]string) map[string]bool {
