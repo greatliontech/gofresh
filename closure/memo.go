@@ -65,6 +65,12 @@ func PruneMemos(maxBytes int64) (MemoPruneReport, error) {
 	return cachefile.Prune(maxBytes)
 }
 
+// PreviewPruneMemos reports the MemoPruneReport that PruneMemos(maxBytes) would
+// produce without removing any files or directories.
+func PreviewPruneMemos(maxBytes int64) (MemoPruneReport, error) {
+	return cachefile.PreviewPrune(maxBytes)
+}
+
 // observabilityDirName is the observability memo's sibling store
 // directory under the shared cache-file mechanism.
 const observabilityDirName = "observability"

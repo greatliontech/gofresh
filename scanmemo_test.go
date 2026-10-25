@@ -476,9 +476,11 @@ func TestScanEntryRoundTripsEveryOutput(t *testing.T) {
 	scan := &subjectScan{
 		known: map[Subject]bool{s("A"): true, s("B"): true, s("C"): true}, pure: map[Subject]bool{s("A"): true},
 		openWorld: map[Subject]string{s("B"): "parameter f func()"}, external: map[Subject]bool{s("C"): true},
-		downgradeReason: map[Subject]string{s("B"): "reason"}, vouchDischarges: map[Subject]string{s("A"): "v"},
-		discharges: map[Subject]attestationDischarges{s("B"): {singleSubject: "att"}, s("C"): {packageProcess: "pp"}},
-		ambiguous:  map[Subject]string{s("C"): "declared twice"},
+		downgradeReason:  map[Subject]string{s("B"): "reason"},
+		downgradeCulprit: map[Subject]Subject{s("B"): {Package: "example.com/dep", Symbol: "Hooks"}},
+		vouchDischarges:  map[Subject]string{s("A"): "v"},
+		discharges:       map[Subject]attestationDischarges{s("B"): {singleSubject: "att"}, s("C"): {packageProcess: "pp"}},
+		ambiguous:        map[Subject]string{s("C"): "declared twice"},
 	}
 	raw, err := json.Marshal(entryOf(scan, pkg))
 	if err != nil {

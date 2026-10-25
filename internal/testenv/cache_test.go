@@ -15,23 +15,11 @@ import (
 func TestConfiguredCacheIsPreserved(t *testing.T) {
 	for _, configured := range []string{t.TempDir(), "off"} {
 		t.Run(configured, func(t *testing.T) {
-			cache, err := goBuildCache([]string{"GOCACHE=" + configured}, func() (string, error) {
-				t.Fatal("explicit cache caused a toolchain query")
-				return "", nil
-			})
+			cache, err := GoBuildCache(t.Context(), []string{"GOCACHE=" + configured})
 			if err != nil || cache != configured {
 				t.Fatalf("cache = %q, err = %v", cache, err)
 			}
 		})
-	}
-}
-
-func TestFailedCacheLookupDoesNotInventASelection(t *testing.T) {
-	for _, cause := range []error{nil, errors.New("toolchain unavailable")} {
-		cache, err := goBuildCache([]string{}, func() (string, error) { return "", cause })
-		if err == nil || err.Error() == "" || (cause != nil && !errors.Is(err, cause)) || cache != "" {
-			t.Fatalf("lookup %v: cache = %q, err = %v", cause, cache, err)
-		}
 	}
 }
 

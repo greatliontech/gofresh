@@ -1,11 +1,13 @@
 package gotool
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 )
 
 // The environment policy: every go invocation gofresh or a consumer
@@ -135,6 +137,55 @@ func LookupEnv(env []string, key string) (string, bool) {
 // EqualEnvKey reports whether two environment names identify the same variable on
 // the current platform.
 func EqualEnvKey(left, right string) bool { return equalKey(left, right) }
+
+// GoBuildCache resolves the effective Go build cache from an explicit
+// environment before a caller changes XDG_CACHE_HOME. Only Go determines the
+// default, including any GOENV configuration.
+func GoBuildCache(ctx context.Context, env []string) (string, error) {
+	normalized, err := NormalizeEnv(env)
+	if err != nil {
+		return "", err
+	}
+	return goBuildCache(normalized, func() (string, error) {
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		reader := NewEnvReader(Runner{Containment: &Containment{}}, "", normalized)
+		snapshot, err := reader.Snapshot(ctx)
+		if err != nil {
+			return "", err
+		}
+		return snapshot.Value("GOCACHE"), nil
+	})
+}
+
+// PreserveBuildCache returns a normalized environment with GOCACHE explicitly
+// pinned to the effective Go build cache resolved from env, so isolating
+// XDG_CACHE_HOME in hermetic tests does not cold-rebuild the standard library.
+func PreserveBuildCache(ctx context.Context, env []string) ([]string, error) {
+	normalized, err := NormalizeEnv(env)
+	if err != nil {
+		return nil, err
+	}
+	cache, err := GoBuildCache(ctx, normalized)
+	if err != nil {
+		return nil, err
+	}
+	return SetEnv(normalized, "GOCACHE", cache), nil
+}
+
+func goBuildCache(env []string, lookup func() (string, error)) (string, error) {
+	if cache, _ := LookupEnv(env, "GOCACHE"); cache != "" {
+		return cache, nil
+	}
+	cache, err := lookup()
+	if err != nil {
+		return "", fmt.Errorf("test environment: determine Go build cache: %w", err)
+	}
+	if cache == "" {
+		return "", fmt.Errorf("test environment: go env supplied no GOCACHE")
+	}
+	return cache, nil
+}
 
 // entryLess is the policy's one order: by key (case-folded on Windows,
 // as go resolves keys), then by the whole entry — NormalizeEnv sorts by

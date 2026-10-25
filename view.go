@@ -391,7 +391,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		if err != nil {
 			return observationFacts{}, err
 		}
-		inputs = append(inputs, "gofresh/build-description@1="+identity)
+		inputs = append(inputs, "gofresh/build-description@2="+identity)
 	}
 	// Explicit snapshots retain compilation facts only. A runtime-bound view
 	// adds its independently captured measurement guards at use and comparison.
@@ -496,17 +496,24 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 		// below (ambiguous identity, the external directive) are no
 		// degraded judgment and carry none (REQ-closure-refusal-channels).
 		if term := openWorld[subject]; term != "" {
-			maximal.openWorld = &subjectRefusal{closure.AttributeSelection("subject accepts caller-supplied dynamic behavior through its "+term+" (dischargeable by bounding that type away from dynamic carriers, or by "+closure.PurityResponsibility+")", hasher.SelectionAttribution())}
+			maximal.openWorld = &subjectRefusal{reason: closure.AttributeSelection("subject accepts caller-supplied dynamic behavior through its "+term+" (dischargeable by bounding that type away from dynamic carriers, or by "+closure.PurityResponsibility+")", hasher.SelectionAttribution())}
 		}
 		if reason := scan.downgradeReason[subject]; reason != "" {
 			// A culprit the budget left unjudged names the budget: the
 			// reason is the record's, read long after the pass, and the
 			// culprit alone would read as the program's own refusal
 			// (REQ-fresh-context).
+			var culprit Subject
+			if !cut[subject] {
+				culprit = scan.downgradeCulprit[subject]
+			}
 			if cut[subject] {
 				reason += " (reachability unjudged: " + budgetExhausted(e.analysisBudget) + ")"
 			}
-			maximal.sharedState = &subjectRefusal{closure.AttributeSelection(reason, hasher.SelectionAttribution())}
+			maximal.sharedState = &subjectRefusal{
+				reason:  closure.AttributeSelection(reason, hasher.SelectionAttribution()),
+				culprit: culprit,
+			}
 		}
 		if discharges := scan.vouchDischarges[subject]; discharges != "" {
 			observation.vouchDischarges[subject] = discharges
@@ -520,7 +527,7 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 			// closure stays the sound floor (it spans every declaring
 			// variant), but no evidence can say WHICH declaration it
 			// vouches for (REQ-purity-directive).
-			maximal.ambiguous = &subjectRefusal{"ambiguous subject identity: " + detail + "; rename one declaration to address either"}
+			maximal.ambiguous = &subjectRefusal{reason: "ambiguous subject identity: " + detail + "; rename one declaration to address either"}
 		}
 		if external[subject] {
 			// The author declared external state: unverifiable by

@@ -426,7 +426,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 		t.Fatalf("later check: %+v %v", verdict, err)
 	}
 	compilerChange := configuration
-	compilerChange.Environment = gotool.SetEnv(buildEnv, "FRESH_COMPILER_SETTING", "changed")
+	compilerChange.Environment = gotool.SetEnv(buildEnv, "CGO_CFLAGS_ALLOW", "-fplugin=changed")
 	compilerSession, err := NewSession(ctx, compilerChange, policy)
 	if err != nil {
 		t.Fatal(err)
@@ -437,7 +437,21 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	}
 	verdict, err = bindTestRuntime(t, compilerSnapshot, RuntimeDescription{Environment: runtimeEnv}).Check(ctx, subject, final.Fingerprint)
 	if err != nil || verdict.Status != Stale || verdict.Reason != "buildconfig" {
-		t.Fatalf("unprojected compiler environment ignored: %+v %v", verdict, err)
+		t.Fatalf("compiler environment change ignored: %+v %v", verdict, err)
+	}
+	ambientChange := configuration
+	ambientChange.Environment = gotool.SetEnv(gotool.SetEnv(buildEnv, "ANTIGRAVITY_SOURCE_METADATA", "step=99"), "TERM", "dumb")
+	ambientSession, err := NewSession(ctx, ambientChange, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ambientSnapshot, err := ambientSession.Snapshot(ctx, []Subject{subject}, Measurement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err = bindTestRuntime(t, ambientSnapshot, RuntimeDescription{Environment: runtimeEnv}).Check(ctx, subject, final.Fingerprint)
+	if err != nil || verdict.Status != Valid {
+		t.Fatalf("ambient shell variable falsified build guard: %+v %v", verdict, err)
 	}
 	changedRuntime := gotool.SetEnv(runtimeEnv, "FRESH_SESSION_VALUE", "changed")
 	verdict, err = bindTestRuntime(t, snapshot, RuntimeDescription{Environment: changedRuntime}).Check(ctx, subject, final.Fingerprint)

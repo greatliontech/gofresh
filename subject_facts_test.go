@@ -21,7 +21,10 @@ func testSubjectFacts(c closure.Closure) subjectFacts {
 		external: c.External,
 	}
 	if c.Unverifiable {
-		r := &subjectRefusal{c.Reason}
+		r := &subjectRefusal{
+			reason:  c.Reason,
+			culprit: Subject{Package: c.Culprit.Package, Symbol: c.Culprit.Symbol},
+		}
 		switch c.Refusal {
 		case closure.OpenWorldRefusal:
 			f.openWorld = r
@@ -40,9 +43,9 @@ func TestSubjectFactsHiddenObligations(t *testing.T) {
 	s := Subject{Package: "example.com/base", Symbol: "F"}
 	base := testSubjectFacts(closure.Closure{Hash: "source", Unverifiable: true, Reason: "effect"})
 	base.source.Effects = append(base.source.Effects, closure.Blocker{Kind: closure.BlockerEnvironment, Package: "os", Symbol: "Getenv"})
-	base.openWorld = &subjectRefusal{"open"}
-	base.sharedState = &subjectRefusal{"shared"}
-	base.ambiguous = &subjectRefusal{"ambiguous"}
+	base.openWorld = &subjectRefusal{reason: "open"}
+	base.sharedState = &subjectRefusal{reason: "shared"}
+	base.ambiguous = &subjectRefusal{reason: "ambiguous"}
 	base.external = true
 	view := &View{subjects: []Subject{s}, facts: &observationFacts{maximal: map[Subject]subjectFacts{s: base}}}
 	for _, tc := range []struct {
@@ -98,8 +101,8 @@ func TestSubjectFactsHiddenObligations(t *testing.T) {
 func TestSubjectFactsProjectionAndSiblingIsolation(t *testing.T) {
 	s := Subject{Package: "example.com/base", Symbol: "F"}
 	base := testSubjectFacts(closure.Closure{Hash: "source", Unverifiable: true, Reason: "effect"})
-	base.openWorld = &subjectRefusal{"open"}
-	base.sharedState = &subjectRefusal{"shared"}
+	base.openWorld = &subjectRefusal{reason: "open"}
+	base.sharedState = &subjectRefusal{reason: "shared"}
 	load := &closure.ViewLoad{}
 	parent := &View{subjects: []Subject{s}, facts: &observationFacts{
 		maximal: map[Subject]subjectFacts{s: base}, source: load,
@@ -120,7 +123,7 @@ func TestSubjectFactsProjectionAndSiblingIsolation(t *testing.T) {
 	// never replaces the first observation's selected-source inputs.
 	other := observationFacts{maximal: map[Subject]subjectFacts{s: base}}
 	b := other.maximal[s]
-	b.sharedState = &subjectRefusal{"cut"}
+	b.sharedState = &subjectRefusal{reason: "cut"}
 	b.openWorld = nil // deliberately different; takeCut has no authority over it
 	other.maximal[s] = b
 	child.facts.takeCut(other, s)

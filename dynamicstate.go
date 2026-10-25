@@ -676,6 +676,7 @@ type viewDynamicState struct {
 	// dynamic state — every subject of such a package is unverifiable —
 	// to one culprit description naming the owning package and variable.
 	downgraded map[string]string
+	culprits   map[string]Subject
 	// vouchDischarges maps each view package to the canonical sorted
 	// comma-joined caller-vouch identities that discharged would-be
 	// culprits reachable from it (REQ-vouch-recorded); absent when no
@@ -709,6 +710,7 @@ type viewDynamicState struct {
 // its own test-binary cone.
 type coneDynamicState struct {
 	downgraded            string
+	culprit               Subject
 	vouchDischarges       string
 	attestationDischarges string
 	rootCulprits          []dynCulprit
@@ -753,11 +755,13 @@ func dischargeUnreachableCulprits(ctx, analysisCtx context.Context, hasher *clos
 		if !proof.Complete {
 			continue
 		}
-		surviving, dischargedKeys := dischargeCulprits(proof, state, subject.Package)
+		surviving, culprit, dischargedKeys := dischargeCulprits(proof, state, subject.Package)
 		if surviving == "" {
 			delete(scan.downgradeReason, subject)
+			delete(scan.downgradeCulprit, subject)
 		} else {
 			scan.downgradeReason[subject] = sharedDynamicStatePrefix + surviving
+			scan.downgradeCulprit[subject] = culprit
 		}
 		// A load-bearing scoping — one that discharged a culprit for
 		// this subject — rides the subject's evidence with the
@@ -849,12 +853,14 @@ func dischargeBinaryUnreachableCulprits(ctx, analysisCtx context.Context, hasher
 		if !proof.Complete {
 			continue
 		}
-		surviving, dischargedKeys := dischargeCulprits(proof, state, path)
+		surviving, culprit, dischargedKeys := dischargeCulprits(proof, state, path)
 		for _, subject := range packageSubjects[path] {
 			if surviving == "" {
 				delete(scan.downgradeReason, subject)
+				delete(scan.downgradeCulprit, subject)
 			} else {
 				scan.downgradeReason[subject] = sharedDynamicStatePrefix + surviving
+				scan.downgradeCulprit[subject] = culprit
 			}
 			// A load-bearing judgment records the discharged variables
 			// on the subject's evidence — the partially-discharged case
@@ -879,21 +885,21 @@ func dischargeBinaryUnreachableCulprits(ctx, analysisCtx context.Context, hasher
 // Every culprit the inventory names has a site entry — the composition
 // records both together — and the zero value would discharge, so the
 // pairing is load-bearing (REQ-closure-shared-dynamic-state).
-func dischargeCulprits(proof closure.RootedFunctions, state *viewDynamicState, pkgPath string) (surviving string, discharged map[string]bool) {
+func dischargeCulprits(proof closure.RootedFunctions, state *viewDynamicState, pkgPath string) (surviving string, culpritSubj Subject, discharged map[string]bool) {
 	discharged = map[string]bool{}
 	for _, culprit := range state.rootCulprits[pkgPath] {
 		sites := state.culpritSites[pkgPath][culprit.key]
 		if sites.unattributed {
-			return culprit.reasonBody(), discharged
+			return culprit.reasonBody(), culprit.subject(), discharged
 		}
 		for fn := range sites.fns {
 			if proof.Fns[fn] {
-				return culprit.reasonBody(), discharged
+				return culprit.reasonBody(), culprit.subject(), discharged
 			}
 		}
 		discharged[culprit.key] = true
 	}
-	return "", discharged
+	return "", Subject{}, discharged
 }
 
 // joinDischargedKeys renders a discharged-variable set in the
@@ -1033,6 +1039,14 @@ func (c dynCulprit) reasonBody() string {
 	return c.pkgPath + ": " + c.key + c.verb.clause() + c.channel.clause(c.pkgPath, c.key)
 }
 
+func (c dynCulprit) subject() Subject {
+	imp, bare := c.pkgPath, c.key
+	if i := strings.LastIndexByte(c.key, '.'); i >= 0 {
+		imp, bare = c.key[:i], c.key[i+1:]
+	}
+	return Subject{Package: imp, Symbol: bare}
+}
+
 // culpritSiteSet is one culprit variable's marking-site inventory for
 // the per-subject reachability re-judgment: fns holds the attributed
 // plain-function sites ("path\x00name"); unattributed reports a mark
@@ -1080,7 +1094,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	if err != nil {
 		return nil, err
 	}
-	state := &viewDynamicState{downgraded: map[string]string{}, cones: map[string]map[string][]dynamicStateFact{}}
+	state := &viewDynamicState{downgraded: map[string]string{}, culprits: map[string]Subject{}, cones: map[string]map[string][]dynamicStateFact{}}
 	// Facts are gathered view-wide by listing — the loads are shared —
 	// and read only through a view package's own cone below.
 	factsByListing := map[string]dynamicStateFact{}
@@ -1267,6 +1281,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		cone := composeDynamicState(coneMeta, coneFacts, viewPackage, vouches, singleSubject, packageProcess)
 		if cone.downgraded != "" {
 			state.downgraded[viewPackage] = cone.downgraded
+			state.culprits[viewPackage] = cone.culprit
 		}
 		if cone.vouchDischarges != "" {
 			if state.vouchDischarges == nil {
@@ -1989,27 +2004,27 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 		classes[node.ImportPath] = node.Class
 		pkgPathOf[node.ImportPath] = node.PkgPath
 	}
-	var walk func(listing string, seen map[string]bool) string
-	walk = func(listing string, seen map[string]bool) string {
+	var walk func(listing string, seen map[string]bool) (string, Subject)
+	walk = func(listing string, seen map[string]bool) (string, Subject) {
 		if seen[listing] {
-			return ""
+			return "", Subject{}
 		}
 		seen[listing] = true
 		if classes[listing] == closure.StandardPackage {
-			return ""
+			return "", Subject{}
 		}
 		if culprits := pkgCulprits[pkgPathOf[listing]]; len(culprits) > 0 {
-			return culprits[0].reasonBody()
+			return culprits[0].reasonBody(), culprits[0].subject()
 		}
 		for _, imported := range imports[listing] {
 			if _, ok := pkgPathOf[imported]; !ok {
 				continue
 			}
-			if culprit := walk(imported, seen); culprit != "" {
-				return culprit
+			if culprit, subj := walk(imported, seen); culprit != "" {
+				return culprit, subj
 			}
 		}
-		return ""
+		return "", Subject{}
 	}
 	for _, node := range meta {
 		root := node.PkgPath
@@ -2021,8 +2036,9 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 		if root != viewPackage || state.downgraded != "" {
 			continue
 		}
-		if culprit := walk(node.ImportPath, map[string]bool{}); culprit != "" {
+		if culprit, subj := walk(node.ImportPath, map[string]bool{}); culprit != "" {
 			state.downgraded = culprit
+			state.culprit = subj
 		}
 	}
 	// The per-subject reachability inventory: for every downgraded view

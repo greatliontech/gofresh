@@ -190,3 +190,68 @@ func TestCeilingIsHalfTheHostsAvailableMemory(t *testing.T) {
 		t.Fatalf("Sample carries ceiling %d, want the installed %d", set.CeilingBytes, installedCeiling())
 	}
 }
+
+func TestHostMemoryAppliesCgroupV2Limits(t *testing.T) {
+	procDir := t.TempDir()
+	cgDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(procDir, "meminfo"), []byte("MemTotal:       16777216 kB\nMemAvailable:   12582912 kB\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(procDir, "self"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(procDir, "self", "cgroup"), []byte("0::/user.slice/container.scope\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	scopeDir := filepath.Join(cgDir, "user.slice", "container.scope")
+	if err := os.MkdirAll(scopeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	priorProc, priorCg := procRoot, cgroupRoot
+	procRoot, cgroupRoot = procDir, cgDir
+	t.Cleanup(func() { procRoot, cgroupRoot = priorProc, priorCg })
+
+	// "max" leaves the host reading uncapped.
+	if err := os.WriteFile(filepath.Join(scopeDir, "memory.max"), []byte("max\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := HostMemory(); !ok || got != (Memory{TotalBytes: 16 << 30, AvailableBytes: 12 << 30}) {
+		t.Fatalf("HostMemory(max) = %+v %v", got, ok)
+	}
+
+	// A 4 GiB limit with 1 GiB current usage caps TotalBytes at 4 GiB and AvailableBytes at 3 GiB.
+	if err := os.WriteFile(filepath.Join(scopeDir, "memory.max"), []byte("4294967296\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scopeDir, "memory.current"), []byte("1073741824\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := HostMemory(); !ok || got != (Memory{TotalBytes: 4 << 30, AvailableBytes: 3 << 30}) {
+		t.Fatalf("HostMemory(capped) = %+v %v, want 4GiB total / 3GiB available", got, ok)
+	}
+
+	// A tighter memory.high (2 GiB) than memory.max (4 GiB) clamps to 2 GiB total / 1 GiB available.
+	if err := os.WriteFile(filepath.Join(scopeDir, "memory.high"), []byte("2147483648\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := HostMemory(); !ok || got != (Memory{TotalBytes: 2 << 30, AvailableBytes: 1 << 30}) {
+		t.Fatalf("HostMemory(memory.high < memory.max) = %+v %v, want 2GiB total / 1GiB available", got, ok)
+	}
+
+	// When the leaf cgroup has "max" on both files, an ancestor / root cgroup limit still clamps.
+	if err := os.WriteFile(filepath.Join(scopeDir, "memory.max"), []byte("max\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scopeDir, "memory.high"), []byte("max\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cgDir, "memory.max"), []byte("8589934592\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cgDir, "memory.current"), []byte("2147483648\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := HostMemory(); !ok || got != (Memory{TotalBytes: 8 << 30, AvailableBytes: 6 << 30}) {
+		t.Fatalf("HostMemory(ancestor limit) = %+v %v, want 8GiB total / 6GiB available", got, ok)
+	}
+}

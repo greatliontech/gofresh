@@ -118,6 +118,38 @@ func TestPrunePreservesTempWritesAndReclaimsObsoleteClasses(t *testing.T) {
 	}
 }
 
+func TestPreviewPruneMatchesPruneWithoutMutatingStore(t *testing.T) {
+	root := t.TempDir()
+	SetRoot(root)
+	SetMaxBytes(-1)
+	t.Cleanup(func() {
+		SetMaxBytes(0)
+		SetRoot("")
+	})
+
+	Store("active-class", "scope-a", "k1", map[string]string{"v": "1"})
+	Store("active-class", "scope-a", "k2", map[string]string{"v": "2"})
+
+	preview, err := PreviewPrune(0)
+	if err != nil {
+		t.Fatalf("PreviewPrune(0) failed: %v", err)
+	}
+	if preview.RemovedEntries != 2 || preview.RemainingBytes != 0 || preview.ReclaimedBytes != preview.UsedBytes {
+		t.Fatalf("unexpected preview report: %+v", preview)
+	}
+	var got map[string]string
+	if !Load("active-class", "scope-a", "k1", &got) || !Load("active-class", "scope-a", "k2", &got) {
+		t.Fatal("PreviewPrune evicted entries")
+	}
+	actual, err := Prune(0)
+	if err != nil {
+		t.Fatalf("Prune(0) failed: %v", err)
+	}
+	if actual != preview {
+		t.Fatalf("Prune(0) = %+v, want preview %+v", actual, preview)
+	}
+}
+
 func TestPruneCountsSkippedEntriesAndContinues(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reads and removes anywhere")

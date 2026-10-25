@@ -7,7 +7,9 @@ agents and tools diagnosing a refusal must reach its full chain
 through one call, never by instrumenting the library.
 
 **REQ-explain-chain** (behavior): Given a view and a dynamic-state
-culprit — a package path and variable name a verdict's reason names —
+culprit — a package path and variable name exposed on a live check's
+`Verdict.Ground.Cause.Culprit` or extracted from a persisted diagnostic reason
+via `CulpritFromReason` —
 the explain surface MUST return the culprit's derivation chain: the
 culprit arm (mutation, writable escape, or environment audit), and
 per arm the sites that decided it. An environment-audit chain names,

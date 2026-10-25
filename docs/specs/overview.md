@@ -193,7 +193,10 @@ authorize rewriting them inside an existing seal.
 
 The cause identifies the deciding evidence or guard and distinguishes missing
 support, incompatible support and demonstrated drift where the deciding surface
-can establish that distinction. Its scope names the subject and result model.
+can establish that distinction; when a shared-dynamic-state refusal is decided
+(`SharedDynamicStateCause` with `Refused`), the cause also carries the deciding
+culprit's package path and variable name (`Culprit`), whereas an analysis-budget
+cut (`Unavailable`) leaves `Culprit` empty. Its scope names the subject and result model.
 The accepted-authority account records only facts that the judgment actually
 admits, with assertion attribution and used discharges retained; a recorded
 assertion is not automatically a currently accepted one. Short-circuit refusal
@@ -376,7 +379,9 @@ consumer's own program alike (the policy's preparation is exported over
 any program name, the program resolved as the parent's own lookup
 resolves it — a bare name through the parent's PATH, a name carrying a
 path separator against the command's directory — while the derived
-environment governs the child) — reading go's environment through one
+environment governs the child, and `GoBuildCache` / `PreserveBuildCache`
+resolve and pin the effective `GOCACHE` across `GOENV=off` or cache-home
+redirections) — reading go's environment through one
 pass-scoped reader whose
 one snapshot every same-pass key reads, resolving directories to one
 canonical coordinate with its degrading form; and a runner installed on
@@ -483,8 +488,12 @@ bytes, and over its live descendants (every process whose parent chain
 reaches it, a zombie or dead one excluded) their count, their summed
 resident bytes, the largest single descendant's own peak, and each
 direct child's subtree attributed whole to that child — in one walk of
-the process table; beside it the host's memory (its total and what it
-has available for new allocations) and the soft ceiling a consumer
+the process table (seeding direct children from `/proc/<pid>/task/<tid>/children`
+when the kernel exposes it and falling back to scanning `/proc` otherwise);
+beside it the host's memory (its total and what it
+has available for new allocations, clamped on Linux by the process's cgroup v2
+`memory.max` / `memory.high` and `memory.current` limits when present and
+tighter than `/proc/meminfo`) and the soft ceiling a consumer
 derives from the host's reading and installs as its runtime's memory
 limit: half of the room reading for the process's family — what
 the host has available plus the family's (the process and its

@@ -318,3 +318,38 @@ func TestReadingsComposeTheWalkTheHostAndTheCeiling(t *testing.T) {
 		t.Fatalf("Readings.Trees = %v, want %v", r.Trees, want)
 	}
 }
+
+func TestSampleAtUsesTaskChildrenWhenPresent(t *testing.T) {
+	root := procTree(t, map[int][4]int{
+		1:   {0, 'S', 1, 1},
+		100: {1, 'S', 75, 1004},
+		101: {1, 'S', 500, 500},
+		200: {100, 'S', 400, 505},
+		201: {100, 'S', 10, 12},
+		300: {201, 'R', 900, 950},
+	})
+	for pid, children := range map[int]string{
+		100: "200 201\n",
+		200: "",
+		201: "300\n",
+		300: "",
+	} {
+		pidStr := strconv.Itoa(pid)
+		taskDir := filepath.Join(root, pidStr, "task", pidStr)
+		if err := os.MkdirAll(taskDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(taskDir, "children"), []byte(children), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set, trees, ok := sampleAt(root, 100)
+	want := Set{ProcessBytes: 75 * 1024, ProcessHeldBytes: 75 * 1024, ProcessPeakBytes: 1004 * 1024, Descendants: 3, DescendantsBytes: (400 + 10 + 900) * 1024, DescendantsHeldBytes: (400 + 10 + 900) * 1024, DescendantPeakBytes: 950 * 1024, HeldKnown: true}
+	if !ok || set != want {
+		t.Fatalf("sampleAt(task children) = %+v %v, want %+v true", set, ok, want)
+	}
+	wantTrees := map[int]uint64{200: 400 * 1024, 201: (10 + 900) * 1024}
+	if !maps.Equal(trees, wantTrees) {
+		t.Fatalf("sampleAt(task children) trees = %v, want %v", trees, wantTrees)
+	}
+}

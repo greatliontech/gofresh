@@ -1,6 +1,8 @@
 package gotool
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -88,5 +90,32 @@ func TestUnsetEnvRemovesEveryEntryUnderTheKey(t *testing.T) {
 	back := UnsetEnv(set, "B")
 	if len(back) != 3 || back[0] != "A=1" || back[1] != "a=3" || back[2] != "C=4" {
 		t.Fatalf("set then unset = %v, want the environment less B", back)
+	}
+}
+
+func TestPreserveBuildCachePinsEffectiveCache(t *testing.T) {
+	for _, configured := range []string{t.TempDir(), "off"} {
+		cache, err := goBuildCache([]string{"GOCACHE=" + configured}, func() (string, error) {
+			t.Fatal("explicit cache caused a toolchain query")
+			return "", nil
+		})
+		if err != nil || cache != configured {
+			t.Fatalf("cache = %q, err = %v", cache, err)
+		}
+	}
+	for _, cause := range []error{nil, errors.New("toolchain unavailable")} {
+		cache, err := goBuildCache([]string{}, func() (string, error) { return "", cause })
+		if err == nil || err.Error() == "" || (cause != nil && !errors.Is(err, cause)) || cache != "" {
+			t.Fatalf("lookup %v: cache = %q, err = %v", cause, cache, err)
+		}
+	}
+	base := SetEnv(os.Environ(), "GOCACHE", "")
+	preserved, err := PreserveBuildCache(t.Context(), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, ok := LookupEnv(preserved, "GOCACHE")
+	if !ok || pinned == "" {
+		t.Fatalf("PreserveBuildCache did not pin GOCACHE: %v", preserved)
 	}
 }

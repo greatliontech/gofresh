@@ -168,10 +168,23 @@ func TestJudgmentDoesNotReadDiagnosticAuthority(t *testing.T) {
 			t.Fatalf("diagnostic denied observation: %+v", plain)
 		}
 		cl.Refusal = closure.SharedDynamicStateRefusal
+		cl.Culprit = closure.Subject{Package: "example.com/dep", Symbol: "Hooks"}
 		shared := decideAfterClosureObserved(fp, cl, fp.Guards, state, CodeResult, PurityAuthority{}, observed)
-		if shared.Status != Unverifiable || shared.Ground.Cause != (Cause{Kind: SharedDynamicStateCause, Condition: Refused}) || shared.Ground.Accepted.Observation.accepted() {
-			t.Fatalf("diagnostic lifted shared state: %+v", shared)
+		wantCause := Cause{
+			Kind:      SharedDynamicStateCause,
+			Condition: Refused,
+			Culprit:   Subject{Package: "example.com/dep", Symbol: "Hooks"},
 		}
+		if shared.Status != Unverifiable || shared.Ground.Cause != wantCause || shared.Ground.Accepted.Observation.accepted() {
+			t.Fatalf("diagnostic lifted shared state or altered culprit: %+v, want %+v", shared, wantCause)
+		}
+		v.facts.cut = map[Subject]bool{subject: true}
+		cutVerdict := v.judgmentFor(subject, shared)
+		if cutVerdict.Ground.Cause != (Cause{Kind: SharedDynamicStateCause, Condition: Unavailable}) {
+			t.Fatalf("budget cut retained unjudged culprit: %+v", cutVerdict.Ground.Cause)
+		}
+		v.facts.cut = nil
+		cl.Culprit = closure.Subject{}
 	}
 	cl.Refusal, cl.Reason = closure.DependenceRefusal, "same text"
 	byProof := decideAfterClosureObserved(fp, cl, fp.Guards, state, CodeResult, PurityAuthority{}, observed)

@@ -24,9 +24,26 @@ func explainView(t *testing.T, dir, pkgPath, varName string) Chain {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(context.Background(), []Subject{{Package: pkgPath, Symbol: "Count"}}, dir)
+	s := Subject{Package: pkgPath, Symbol: "Count"}
+	view, err := engine.NewView(context.Background(), []Subject{s}, dir)
 	if err != nil {
 		t.Fatal(err)
+	}
+	fp, err := view.Capture(context.Background(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := view.Check(context.Background(), fp, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Ground.Cause.Kind == SharedDynamicStateCause {
+		parsed, ok := CulpritFromReason(verdict.Reason)
+		if !ok || verdict.Ground.Cause.Culprit != parsed {
+			t.Fatalf("Verdict.Ground.Cause.Culprit = %+v, CulpritFromReason(%q) = (%+v, %v)", verdict.Ground.Cause.Culprit, verdict.Reason, parsed, ok)
+		}
+	} else if verdict.Ground.Cause.Culprit != (Subject{}) {
+		t.Fatalf("non-shared-state verdict carried culprit: %+v", verdict.Ground.Cause)
 	}
 	chain, err := view.ExplainDynamicState(context.Background(), pkgPath, varName)
 	if err != nil {
@@ -765,4 +782,54 @@ func Mutate() {
 		}
 	}
 }
+
+func TestCulpritFromReason(t *testing.T) {
+	for _, tc := range []struct {
+		reason string
+		want   Subject
+		ok     bool
+	}{
+		{
+			reason: "package graph shares mutated dynamic state: example.com/pkg/sub: example.com/pkg/sub.Hooks is mutated",
+			want:   Subject{Package: "example.com/pkg/sub", Symbol: "Hooks"},
+			ok:     true,
+		},
+		{
+			reason: "gopkg.in/yaml.v3: gopkg.in/yaml.v3.structMap escapes writable",
+			want:   Subject{Package: "gopkg.in/yaml.v3", Symbol: "structMap"},
+			ok:     true,
+		},
+		{
+			reason: "post-run freshness check: package graph shares mutated dynamic state: github.com/x/b: github.com/x/b.thresholds registers function values outside the environment-free audit",
+			want:   Subject{Package: "github.com/x/b", Symbol: "thresholds"},
+			ok:     true,
+		},
+		{
+			reason: "os.Getenv (environment variable read)",
+			ok:     false,
+		},
+		{
+			reason: "example.com/a: example.com/b.Hooks is mutated",
+			ok:     false,
+		},
+		{
+			reason: ": .NoPkg is mutated",
+			ok:     false,
+		},
+		{
+			reason: "example.com/pkg: example.com/pkg.123bad is mutated",
+			ok:     false,
+		},
+		{
+			reason: "package graph shares mutated dynamic state: example.com/pkg: example.com/pkg.Hooks is mutated (reachability unjudged: analysis budget 1ms exhausted)",
+			ok:     false,
+		},
+	} {
+		got, ok := CulpritFromReason(tc.reason)
+		if ok != tc.ok || got != tc.want {
+			t.Fatalf("CulpritFromReason(%q) = (%+v, %v), want (%+v, %v)", tc.reason, got, ok, tc.want, tc.ok)
+		}
+	}
+}
+
 

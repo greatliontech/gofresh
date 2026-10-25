@@ -109,6 +109,9 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 	}
 	t.Run("maximal and nested", func(t *testing.T) {
 		first := sibling(t, parent, cut)
+		if cl := first.facts.closure(cut); cl.Culprit != (closure.Subject{}) {
+			t.Fatalf("cut closure retained unjudged culprit: %+v", cl.Culprit)
+		}
 		fp, err := first.Capture(t.Context(), cut)
 		if err != nil {
 			t.Fatal(err)

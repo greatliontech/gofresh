@@ -1977,8 +1977,9 @@ key-mismatched entry recomputes silently; no entry is
 trusted beyond its complete dependencies and retained checked authority — key
 agreement alone cannot supply a missing derivation. Entries accumulate across
 closure versions under a shared byte retention bound (`DefaultMemoMaxBytes` =
-2 GiB across all memo classes, configurable via `SetMemoMaxBytes` and
-explicitly collectable via `PruneMemos`, which preserves in-flight `.cache-*`
+2 GiB across all memo classes, configurable via `SetMemoMaxBytes`,
+explicitly collectable via `PruneMemos`, and inspectable without mutation via
+`PreviewPruneMemos`, which preserves in-flight `.cache-*`
 writes, reclaims obsolete memo classes and abandoned keys alongside active
 ones, and reports used, reclaimed, and remaining bytes plus removed and
 skipped entry counts); eviction changes only cold recomputation cost, never

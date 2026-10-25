@@ -217,7 +217,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 // text of every field it persists (a downgrade reason is scan output, so
 // a change to its composition bumps the version); a bump recomputes
 // rather than serving an older entry's text or misreading its shape.
-const scanEntryVersion = 3
+const scanEntryVersion = 4
 
 // subjectScanEntry is one subject's scan outputs as persisted.
 type subjectScanEntry struct {
@@ -227,13 +227,14 @@ type subjectScanEntry struct {
 	// dynamic reach — and empty for a closed one: one field, so an open
 	// subject without its term is unrepresentable
 	// (REQ-closure-refusal-channels).
-	OpenWorld                string `json:"openWorld,omitempty"`
-	External                 bool   `json:"external,omitempty"`
-	DowngradeReason          string `json:"downgradeReason,omitempty"`
-	VouchDischarges          string `json:"vouchDischarges,omitempty"`
-	AttestationDischarges    string `json:"attestationDischarges,omitempty"`
-	PackageProcessDischarges string `json:"packageProcessDischarges,omitempty"`
-	Ambiguous                string `json:"ambiguous,omitempty"`
+	OpenWorld                string  `json:"openWorld,omitempty"`
+	External                 bool    `json:"external,omitempty"`
+	DowngradeReason          string  `json:"downgradeReason,omitempty"`
+	DowngradeCulprit         Subject `json:"downgradeCulprit,omitempty"`
+	VouchDischarges          string  `json:"vouchDischarges,omitempty"`
+	AttestationDischarges    string  `json:"attestationDischarges,omitempty"`
+	PackageProcessDischarges string  `json:"packageProcessDischarges,omitempty"`
+	Ambiguous                string  `json:"ambiguous,omitempty"`
 }
 
 // packageScanEntry is one view package's scan outputs as persisted: every
@@ -262,7 +263,8 @@ func entryOf(scan *subjectScan, pkgPath string) packageScanEntry {
 		d := scan.discharges[subject]
 		entry.Subjects[subject.Symbol] = subjectScanEntry{
 			Pure: scan.pure[subject], OpenWorld: scan.openWorld[subject], External: scan.external[subject],
-			DowngradeReason: scan.downgradeReason[subject], VouchDischarges: scan.vouchDischarges[subject],
+			DowngradeReason: scan.downgradeReason[subject], DowngradeCulprit: scan.downgradeCulprit[subject],
+			VouchDischarges: scan.vouchDischarges[subject],
 			AttestationDischarges: d.singleSubject, PackageProcessDischarges: d.packageProcess,
 			Ambiguous: scan.ambiguous[subject],
 		}
@@ -288,6 +290,9 @@ func mergeEntries(scan *subjectScan, served map[string]packageScanEntry) {
 			if e.DowngradeReason != "" {
 				scan.downgradeReason[subject] = e.DowngradeReason
 			}
+			if e.DowngradeCulprit != (Subject{}) {
+				scan.downgradeCulprit[subject] = e.DowngradeCulprit
+			}
 			if e.VouchDischarges != "" {
 				scan.vouchDischarges[subject] = e.VouchDischarges
 			}
@@ -308,7 +313,8 @@ func mergeEntries(scan *subjectScan, served map[string]packageScanEntry) {
 func scanFromEntries(served map[string]packageScanEntry) *subjectScan {
 	scan := &subjectScan{
 		pure: map[Subject]bool{}, known: map[Subject]bool{}, openWorld: map[Subject]string{}, external: map[Subject]bool{},
-		downgradeReason: map[Subject]string{}, vouchDischarges: map[Subject]string{}, discharges: map[Subject]attestationDischarges{},
+		downgradeReason: map[Subject]string{}, downgradeCulprit: map[Subject]Subject{},
+		vouchDischarges: map[Subject]string{}, discharges: map[Subject]attestationDischarges{},
 		ambiguous: map[Subject]string{},
 	}
 	mergeEntries(scan, served)
@@ -330,7 +336,8 @@ type subjectScan struct {
 	// downgradeReason maps each subject of a shared-dynamic-state
 	// downgraded package to the refusal reason naming the owning package
 	// and variable (REQ-closure-shared-dynamic-state-reason).
-	downgradeReason map[Subject]string
+	downgradeReason  map[Subject]string
+	downgradeCulprit map[Subject]Subject
 	// vouchDischarges maps each subject to the canonical sorted
 	// comma-joined caller-vouch identities that discharged would-be
 	// culprits reachable from its package (REQ-vouch-recorded).
@@ -356,14 +363,15 @@ func (s *subjectScan) directivePure(subject Subject) bool { return s.pure[subjec
 // directives (REQ-fresh-coherent-view, REQ-closure-shared-dynamic-state).
 func scanSubjectsFromLoaded(audited bool, pkgs []*packages.Package, state *viewDynamicState, pkgPaths ...string) (*subjectScan, error) {
 	scan := &subjectScan{
-		pure:            map[Subject]bool{},
-		known:           map[Subject]bool{},
-		openWorld:       map[Subject]string{},
-		external:        map[Subject]bool{},
-		downgradeReason: map[Subject]string{},
-		vouchDischarges: map[Subject]string{},
-		discharges:      map[Subject]attestationDischarges{},
-		ambiguous:       map[Subject]string{},
+		pure:             map[Subject]bool{},
+		known:            map[Subject]bool{},
+		openWorld:        map[Subject]string{},
+		external:         map[Subject]bool{},
+		downgradeReason:  map[Subject]string{},
+		downgradeCulprit: map[Subject]Subject{},
+		vouchDischarges:  map[Subject]string{},
+		discharges:       map[Subject]attestationDischarges{},
+		ambiguous:        map[Subject]string{},
 	}
 	pure, external, known, openWorld := scan.pure, scan.external, scan.known, scan.openWorld
 	requestedPackages := make(map[string]bool, len(pkgPaths))
@@ -540,6 +548,9 @@ func scanSubjectsFromLoaded(audited bool, pkgs []*packages.Package, state *viewD
 	for subject := range known {
 		if reason := state.downgraded[subject.Package]; reason != "" {
 			scan.downgradeReason[subject] = sharedDynamicStatePrefix + reason
+			if culprit := state.culprits[subject.Package]; culprit != (Subject{}) {
+				scan.downgradeCulprit[subject] = culprit
+			}
 		}
 		if discharges := state.vouchDischarges[subject.Package]; discharges != "" {
 			scan.vouchDischarges[subject] = discharges

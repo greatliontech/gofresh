@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -52,28 +53,9 @@ func sampleAt(root string, self int) (Set, map[int]uint64, bool) {
 	}
 	set := Set{ProcessBytes: own.rss, ProcessPeakBytes: own.peak, ProcessHeldBytes: own.held, HeldKnown: own.heldKnown}
 	trees := map[int]uint64{}
-	entries, err := os.ReadDir(root)
-	if err != nil {
+	children, useTaskTree, ok := initialChildren(root, self)
+	if !ok {
 		return Set{}, nil, false
-	}
-	// The live children of every parent, from one pass over the table.
-	children := map[int][]int{}
-	for _, entry := range entries {
-		pid, err := strconv.Atoi(entry.Name())
-		if err != nil || pid == self {
-			continue
-		}
-		line, err := os.ReadFile(filepath.Join(root, entry.Name(), "stat"))
-		if err != nil {
-			// Unreadable or gone: the table hides it, or it is
-			// leaving — no process to count.
-			continue
-		}
-		ppid, state, ok := parseStat(string(line))
-		if !ok || !live(state) {
-			continue
-		}
-		children[ppid] = append(children[ppid], pid)
 	}
 	// The descendants, breadth first; a process table has no cycles, and
 	// the seen set guards the walk against a pid reused mid-listing.
@@ -86,6 +68,9 @@ func sampleAt(root string, self int) (Set, map[int]uint64, bool) {
 	for len(queue) > 0 {
 		parent := queue[0]
 		queue = queue[1:]
+		if useTaskTree && parent != self {
+			children[parent] = readTaskChildren(root, parent)
+		}
 		for _, pid := range children[parent] {
 			if seen[pid] {
 				continue
@@ -123,6 +108,78 @@ func sampleAt(root string, self int) (Set, map[int]uint64, bool) {
 		}
 	}
 	return set, trees, true
+}
+
+// initialChildren returns the live children map starting at self. When
+// /proc/<self>/task is present, it walks /proc/<pid>/task/<tid>/children from
+// self instead of reading /proc/<pid>/stat for every process on the host;
+// synthetic fixtures without task directories fall back to scanning root.
+func initialChildren(root string, self int) (map[int][]int, bool, bool) {
+	selfStr := strconv.Itoa(self)
+	if _, err := os.Stat(filepath.Join(root, selfStr, "task", selfStr, "children")); err == nil {
+		f, err := os.Open(root)
+		if err != nil {
+			return nil, false, false
+		}
+		_, err = f.Readdirnames(1)
+		_ = f.Close()
+		if err != nil {
+			return nil, false, false
+		}
+		return map[int][]int{self: readTaskChildren(root, self)}, true, true
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, false, false
+	}
+	children := map[int][]int{}
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid == self {
+			continue
+		}
+		line, err := os.ReadFile(filepath.Join(root, entry.Name(), "stat"))
+		if err != nil {
+			continue
+		}
+		ppid, state, ok := parseStat(string(line))
+		if !ok || !live(state) {
+			continue
+		}
+		children[ppid] = append(children[ppid], pid)
+	}
+	return children, false, true
+}
+
+func readTaskChildren(root string, parent int) []int {
+	parentStr := strconv.Itoa(parent)
+	tids, err := os.ReadDir(filepath.Join(root, parentStr, "task"))
+	if err != nil {
+		return nil
+	}
+	var out []int
+	for _, tid := range tids {
+		data, err := os.ReadFile(filepath.Join(root, parentStr, "task", tid.Name(), "children"))
+		if err != nil {
+			continue
+		}
+		for tok := range strings.FieldsSeq(string(data)) {
+			pid, err := strconv.Atoi(tok)
+			if err != nil || pid == parent {
+				continue
+			}
+			line, err := os.ReadFile(filepath.Join(root, tok, "stat"))
+			if err != nil {
+				continue
+			}
+			ppid, state, ok := parseStat(string(line))
+			if !ok || ppid != parent || !live(state) {
+				continue
+			}
+			out = append(out, pid)
+		}
+	}
+	return out
 }
 
 // exited reports whether a /proc read failed because its process is

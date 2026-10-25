@@ -95,6 +95,12 @@ func SetMemoMaxBytes(maxBytes int64) { closure.SetMemoMaxBytes(maxBytes) }
 // retained bytes are at most maxBytes (0 or negative evicts all memo entries).
 func PruneMemos(maxBytes int64) (MemoPruneReport, error) { return closure.PruneMemos(maxBytes) }
 
+// PreviewPruneMemos reports the MemoPruneReport that PruneMemos(maxBytes) would
+// produce without removing any files or directories.
+func PreviewPruneMemos(maxBytes int64) (MemoPruneReport, error) {
+	return closure.PreviewPruneMemos(maxBytes)
+}
+
 // DynamicStateStrategy identifies the shared-dynamic-state fact derivation
 // whose per-package facts the persistent memo serves for version-pinned
 // packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps
@@ -1345,7 +1351,14 @@ func decideAfterClosureObserved(rec Fingerprint, cl closure.Closure, cur guard.G
 			case closure.AmbiguousSubjectRefusal:
 				cause = AmbiguousSubjectCause
 			}
-			return answer(refusal(Unverifiable, cause, Refused, reasonOr(cl.Reason, "external dependence")))
+			verdict := refusal(Unverifiable, cause, Refused, reasonOr(cl.Reason, "external dependence"))
+			if cause == SharedDynamicStateCause {
+				verdict.Ground.Cause.Culprit = Subject{
+					Package: cl.Culprit.Package,
+					Symbol:  cl.Culprit.Symbol,
+				}
+			}
+			return answer(verdict)
 		}
 	} else if cl.Unverifiable || (rec.RuntimeInputs != "" && rt.Unverifiable) {
 		accepted.Purity = pure

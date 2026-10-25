@@ -8,18 +8,79 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/buildflags"
 )
 
+// completeBuildGoEnvKeys are the resolved `go env -json` settings that determine
+// compilation output (beyond GOGCCFLAGS, which is normalized separately, and
+// GOWORK, whose on/off workspace mode is recorded without pinning the local
+// checkout path). Local checkout and cache paths (GOMOD, GOCACHE, GOTMPDIR,
+// GOPATH, GOMODCACHE, GOBIN, GOTOOLDIR, GOROOT, GOENV) are excluded so
+// relocating a checkout or isolating a cache does not falsify the build guard.
+var completeBuildGoEnvKeys = []string{
+	"AR",
+	"CC",
+	"CGO_CFLAGS",
+	"CGO_CPPFLAGS",
+	"CGO_CXXFLAGS",
+	"CGO_ENABLED",
+	"CGO_FFLAGS",
+	"CGO_LDFLAGS",
+	"CXX",
+	"FC",
+	"GCCGO",
+	"GO111MODULE",
+	"GO386",
+	"GOAMD64",
+	"GOARCH",
+	"GOARM",
+	"GOARM64",
+	"GODEBUG",
+	"GOEXPERIMENT",
+	"GOFIPS140",
+	"GOFLAGS",
+	"GOHOSTARCH",
+	"GOHOSTOS",
+	"GOMIPS",
+	"GOMIPS64",
+	"GOOS",
+	"GOPPC64",
+	"GORISCV64",
+	"GOVERSION",
+	"GOWASM",
+	"PKG_CONFIG",
+}
+
+// completeBuildOSEnvKeys are the process-environment variables outside `go env`
+// that affect cgo/pkg-config resolution and reproducible compilation output.
+var completeBuildOSEnvKeys = []string{
+	"CGO_CFLAGS_ALLOW",
+	"CGO_CFLAGS_DISALLOW",
+	"CGO_CPPFLAGS_ALLOW",
+	"CGO_CPPFLAGS_DISALLOW",
+	"CGO_CXXFLAGS_ALLOW",
+	"CGO_CXXFLAGS_DISALLOW",
+	"CGO_FFLAGS_ALLOW",
+	"CGO_FFLAGS_DISALLOW",
+	"CGO_LDFLAGS_ALLOW",
+	"CGO_LDFLAGS_DISALLOW",
+	"PKG_CONFIG_LIBDIR",
+	"PKG_CONFIG_PATH",
+	"PKG_CONFIG_SYSROOT_DIR",
+	"SOURCE_DATE_EPOCH",
+}
+
 // completeBuildEnvironment supplements the ordinary build guard's flag/input
-// framing with the complete compilation environment. Runtime variables are not
-// projected out: a compiler wrapper may consume any of them. Only the go
-// command's generated work-directory operand is normalized, under its documented
-// compiler prefix-mapping premise. The GOENV file remains a byte dependency.
+// framing with the build-determining compilation environment and resolved Go
+// settings. Ambient shell variables and local checkout or cache directory paths
+// are excluded so moving checkouts, isolating caches, or changing non-build
+// shell variables does not falsify the build guard. The go command's generated
+// work-directory operand is normalized under its documented compiler
+// prefix-mapping premise, and a declared GOENV file remains a content-byte
+// dependency.
 func completeBuildEnvironment(ctx context.Context, snapshot *gotool.EnvSnapshot, dir string, env []string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -39,12 +100,6 @@ func completeBuildEnvironment(ctx context.Context, snapshot *gotool.EnvSnapshot,
 	if err != nil {
 		return "", err
 	}
-	delete(values, "GOGCCFLAGS")
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
 	h := sha256.New()
 	write := func(s string) { fmt.Fprintf(h, "%d:", len(s)); _, _ = h.Write([]byte(s)) }
 	sequence := func(values []string) {
@@ -53,11 +108,26 @@ func completeBuildEnvironment(ctx context.Context, snapshot *gotool.EnvSnapshot,
 			write(value)
 		}
 	}
-	write("gofresh/build-environment@1")
-	sequence(env)
-	sequence(keys)
-	for _, key := range keys {
+	write("gofresh/build-environment@2")
+	fmt.Fprintf(h, "%d:", len(completeBuildOSEnvKeys))
+	for _, key := range completeBuildOSEnvKeys {
+		write(key)
+		if val, ok := gotool.LookupEnv(env, key); ok {
+			write("present")
+			write(val)
+		} else {
+			write("absent")
+		}
+	}
+	fmt.Fprintf(h, "%d:", len(completeBuildGoEnvKeys))
+	for _, key := range completeBuildGoEnvKeys {
+		write(key)
 		write(values[key])
+	}
+	if gowork := values["GOWORK"]; gowork != "" && gowork != "off" {
+		write("gowork=on")
+	} else {
+		write("gowork=off")
 	}
 	sequence(flags)
 	path := values["GOENV"]

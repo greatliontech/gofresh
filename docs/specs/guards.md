@@ -86,15 +86,25 @@ guard digest under this clause.
 build MUST retain its complete normalized compilation environment separately
 from the runtime environment of its retained artifact. The ordinary package
 driver is pinned and the command directory supplies PWD before that description
-is used by analysis or compilation. Equality of selected environment keys or of
-Go's reported settings alone does not license different compilation environments:
-a compiler wrapper can consume other variables. The explicit form's build guard
-includes all raw compilation-environment entries, every resolved Go setting,
-ordered executable flags and the explicitly present additional-input declaration,
-including a present-empty declaration. A declared GOENV file is additionally a
-raw-byte dependency; absent, present and disabled remain distinct. These mutable
+is used by analysis or compilation. The explicit form's build guard includes
+the build-determining compilation-environment variables (`CGO_*FLAGS_ALLOW`,
+`CGO_*FLAGS_DISALLOW`, `PKG_CONFIG_PATH`, `PKG_CONFIG_LIBDIR`,
+`PKG_CONFIG_SYSROOT_DIR`, `SOURCE_DATE_EPOCH`), the build-determining resolved
+Go settings (`GOOS`, `GOARCH`, `GOHOSTOS`, `GOHOSTARCH`, `GOVERSION`, `GO386`,
+`GOAMD64`, `GOARM`, `GOARM64`, `GOMIPS`, `GOMIPS64`, `GOPPC64`, `GORISCV64`,
+`GOWASM`, `GOEXPERIMENT`, `GOFIPS140`, `GOFLAGS`, `GODEBUG`, `GO111MODULE`,
+`GCCGO`, `CGO_ENABLED`, `CGO_CFLAGS`, `CGO_CPPFLAGS`, `CGO_CXXFLAGS`,
+`CGO_FFLAGS`, `CGO_LDFLAGS`, `CC`, `CXX`, `FC`, `AR`, `PKG_CONFIG`, and boolean
+`GOWORK` workspace mode), normalized `GOGCCFLAGS`, ordered executable flags and
+the explicitly present additional-input declaration, including a present-empty
+declaration. Ambient shell variables and local checkout or cache paths (`GOMOD`,
+`GOWORK` path, `GOCACHE`, `GOTMPDIR`, `GOPATH`, `GOMODCACHE`, `GOBIN`,
+`GOTOOLDIR`, `GOROOT`) are excluded so relocating a checkout, isolating caches,
+or changing non-build shell state does not falsify the build guard. A declared
+GOENV file is additionally a raw-byte content dependency; absent, present and
+disabled remain distinct without pinning the file's path. These mutable
 resolved inputs are re-observed at closing, not cached for the session's lifetime.
-The guard's additional domain is `gofresh/build-description@1`; its environment
+The guard's additional domain is `gofresh/build-description@2`; its environment
 identity uses SHA-256 over counted, byte-length-framed strings, preserving invalid
 UTF-8 and absent versus empty entries. The generated work-directory operand in
 Go's GOGCCFLAGS prefix-map argument alone is normalized: the recognized file/debug
@@ -103,8 +113,7 @@ prefix-map flag and destination `/tmp/go-build` remain, while its absolute
 Multiple mappings, malformed quoting or an unrecognized mapping refuse admission.
 Other compiler flags remain identity-bearing. This relies on the stated ordinary
 compiler/linker and toolchain-cache integrity premise, including honoring that
-prefix mapping; it does not assert that wrappers ignore arbitrary environment
-variables. Additional compiler-file inputs remain the executor's declared-input
+prefix mapping. Additional compiler-file inputs remain the executor's declared-input
 responsibility. Existing legacy construction accepts an omitted producer override
 or an exactly equal normalized producer environment; a distinct producer
 environment refuses with the explicit build/runtime migration remedy. A later

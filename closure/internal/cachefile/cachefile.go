@@ -208,7 +208,7 @@ func recordWriteAndEnforce(gofreshRoot, path string, size int64) {
 		knownBytes += size
 		return
 	}
-	_, _ = pruneDirLocked(gofreshRoot, limit, path)
+	_, _ = pruneDirLocked(gofreshRoot, limit, path, false)
 }
 
 // Prune evicts persistent memo entries under <storeRoot>/gofresh until the
@@ -225,7 +225,21 @@ func Prune(maxBytes int64) (PruneReport, error) {
 	target := max(maxBytes, 0)
 	pruneMu.Lock()
 	defer pruneMu.Unlock()
-	return pruneDirLocked(gofreshRoot, target, "")
+	return pruneDirLocked(gofreshRoot, target, "", false)
+}
+
+// PreviewPrune reports the PruneReport that Prune(maxBytes) would produce
+// without removing any files or directories.
+func PreviewPrune(maxBytes int64) (PruneReport, error) {
+	cache, err := storeRoot()
+	if err != nil {
+		return PruneReport{}, err
+	}
+	gofreshRoot := filepath.Join(cache, "gofresh")
+	target := max(maxBytes, 0)
+	pruneMu.Lock()
+	defer pruneMu.Unlock()
+	return pruneDirLocked(gofreshRoot, target, "", true)
 }
 
 type diskEntry struct {
@@ -235,13 +249,15 @@ type diskEntry struct {
 	seq     uint64
 }
 
-func pruneDirLocked(gofreshRoot string, targetBytes int64, preservePath string) (PruneReport, error) {
+func pruneDirLocked(gofreshRoot string, targetBytes int64, preservePath string, dryRun bool) (PruneReport, error) {
 	report := PruneReport{Root: gofreshRoot}
 	if _, err := os.Stat(gofreshRoot); err != nil {
 		if os.IsNotExist(err) {
-			knownRoot = gofreshRoot
-			knownBytes = 0
-			knownValid = true
+			if !dryRun {
+				knownRoot = gofreshRoot
+				knownBytes = 0
+				knownValid = true
+			}
 			return report, nil
 		}
 		return report, err
@@ -330,6 +346,12 @@ func pruneDirLocked(gofreshRoot string, targetBytes int64, preservePath string) 
 			if report.RemainingBytes <= targetBytes {
 				break
 			}
+			if dryRun {
+				report.RemovedEntries++
+				report.ReclaimedBytes += entry.size
+				report.RemainingBytes -= entry.size
+				continue
+			}
 			if err := os.Remove(entry.path); err != nil && !os.IsNotExist(err) {
 				report.SkippedEntries++
 				continue
@@ -341,11 +363,13 @@ func pruneDirLocked(gofreshRoot string, targetBytes int64, preservePath string) 
 			report.RemainingBytes -= entry.size
 		}
 	}
-	for i := len(dirs) - 1; i >= 0; i-- {
-		_ = os.Remove(dirs[i])
+	if !dryRun {
+		for i := len(dirs) - 1; i >= 0; i-- {
+			_ = os.Remove(dirs[i])
+		}
+		knownRoot = gofreshRoot
+		knownBytes = report.RemainingBytes
+		knownValid = true
 	}
-	knownRoot = gofreshRoot
-	knownBytes = report.RemainingBytes
-	knownValid = true
 	return report, nil
 }

@@ -16,7 +16,10 @@ type subjectFacts struct {
 
 // Presence carries the obligation; even an empty diagnostic cannot remove it.
 // A refusal is immutable after construction and may be shared with siblings.
-type subjectRefusal struct{ reason string }
+type subjectRefusal struct {
+	reason  string
+	culprit Subject
+}
 
 func sameRefusal(a, b *subjectRefusal) bool {
 	if a == nil || b == nil {
@@ -32,16 +35,19 @@ func sameRefusal(a, b *subjectRefusal) bool {
 func (f subjectFacts) closure() closure.Closure {
 	c := f.source.Closure()
 	if f.openWorld != nil {
-		c.Unverifiable, c.Refusal, c.Reason = true, closure.OpenWorldRefusal, f.openWorld.reason
+		c.Unverifiable, c.Refusal, c.Reason, c.Culprit = true, closure.OpenWorldRefusal, f.openWorld.reason, closure.Subject{}
 	}
 	if f.sharedState != nil {
-		c.Unverifiable, c.Refusal, c.Reason = true, closure.SharedDynamicStateRefusal, f.sharedState.reason
+		c.Unverifiable, c.Refusal, c.Reason, c.Culprit = true, closure.SharedDynamicStateRefusal, f.sharedState.reason, closure.Subject{
+			Package: f.sharedState.culprit.Package,
+			Symbol:  f.sharedState.culprit.Symbol,
+		}
 	}
 	if f.ambiguous != nil {
-		c.Unverifiable, c.Refusal, c.Reason = true, closure.AmbiguousSubjectRefusal, f.ambiguous.reason
+		c.Unverifiable, c.Refusal, c.Reason, c.Culprit = true, closure.AmbiguousSubjectRefusal, f.ambiguous.reason, closure.Subject{}
 	}
 	if f.external {
-		c.External, c.Unverifiable, c.Reason = true, true, "external directive"
+		c.External, c.Unverifiable, c.Reason, c.Culprit = true, true, "external directive", closure.Subject{}
 	}
 	return c
 }

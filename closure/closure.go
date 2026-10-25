@@ -57,6 +57,9 @@ type Closure struct {
 	// Refusal identifies a consumer-tier downgrade at its deciding arm. The
 	// zero value leaves the closure's ordinary dependence classification intact.
 	Refusal RefusalKind
+	// Culprit identifies the deciding package-level variable when Refusal is
+	// SharedDynamicStateRefusal.
+	Culprit Subject
 	// External marks a subject the author declared external-state via
 	// //gofresh:external: unverifiability by declaration, never suppressible
 	// by a purity assertion or observation evidence (REQ-external-precedence).

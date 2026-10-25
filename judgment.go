@@ -46,10 +46,13 @@ const (
 )
 
 // Cause is the first decisive native refusal, not an exhaustive inventory of
-// facts an early-returning check did not evaluate.
+// facts an early-returning check did not evaluate. When Kind is
+// SharedDynamicStateCause and Condition is Refused, Culprit names the package
+// and variable that decided the shared-dynamic-state refusal.
 type Cause struct {
 	Kind      CauseKind
 	Condition CauseCondition
+	Culprit   Subject
 }
 
 // ExecutionAssertions names the checking session's caller-declared process model.
@@ -187,6 +190,7 @@ func (v *View) judgmentFor(subject Subject, verdict Verdict) Verdict {
 	// surviving culprit affects this subject. It still blocks observation lift.
 	if verdict.Ground.Cause.Kind == SharedDynamicStateCause && v.facts.cut[subject] {
 		verdict.Ground.Cause.Condition = Unavailable
+		verdict.Ground.Cause.Culprit = Subject{}
 	}
 	if verdict.Ground.Accepted.GuardAgreement {
 		d := v.facts.discharges[subject]
