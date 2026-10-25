@@ -1,9 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-fresh-final-evidence-selection"
-reason: "The singleton and package-process units select admissible established evidence at their final boundary. Stipulator/Gomutant adoption remains incomplete; legacy consumer paths still select ordinary versus observed checking themselves. Those paths must migrate without synthesizing producing support or granting unlicensed assertion or applicability authority."
-content_hash: "5e3c48fde61ff5ef95425d89ad18b7d0a32ac143eed1f647f52b5da12d19f71a"
-source_hash: "3d648e3f6069f487ef1e211576a97596b64d0363dac83736dd9da9ef375cb403"
-lands { manual { condition: "The migrated final check chooses admissible established evidence under each consumer model, rejects missing producing obligations and unlicensed transformations, and preserves explicit analysis-cost policy, decisive-mismatch ordering and complete-inventory requests." contradicted: true } }
-excuses: GAP_EXCUSE_UNCOVERED

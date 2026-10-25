@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-inputs-bound-outcomes"
-reason: "Existing receipt/roster/environment attachment examples do not establish separate checked implementation coverage, delivery and outcome semantics. Current positive support still relies on admitted summaries."
-content_hash: "0eb4e0c6c72b6efd1868332bb77a28bbd7da0f7c7e31222041b0d99f18a6d6fd"
-source_hash: "3987f0cf90a9c6ee72da098968d72d3d29042aabf93cf61f3231aec16b522b98"
-lands { manual { condition: "tooling-redesign 5.1w.5: checked observation claims compose with actual contributing executions and complete binding evidence after the 5.1w.4 producing-span gate, with borrowed-support and lost-record negatives and consumer integration in 5.1w.6" contradicted: true } }

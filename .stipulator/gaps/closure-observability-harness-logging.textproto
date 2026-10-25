@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-closure-observability-harness-logging"
-reason: "Harness name predicates and declaration canaries do not establish checked logging behavior, callback accounting or delivery. Existing independent obligation: invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
+reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
 content_hash: "224ffcd0068ae0b5f09b2c18ea2456d1251ff2738e3b3d82fbf35b374de063bb"
 source_hash: "97de6f5b3c3d1aa785aba1a1e0c949d08c0125c4dd2dc48df3c1803ab16ed254"
-lands { manual { condition: "tooling-redesign 5.1w.5: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7 Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" contradicted: true } }
+lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

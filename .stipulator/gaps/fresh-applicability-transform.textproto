@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-fresh-applicability-transform"
-reason: "Cross-consumer applicability coverage remains at tooling-redesign 7.8. Local witnesses cover observed execution, persisted inert endpoints checked in a separate process, guard and support refusals, current-proof validation, refusal precedence, batch sharing and seal exclusion. Generated batching coverage preserves historical-record multiplicity and policy partitioning, not the full cross-consumer invariant. Record-only support remains a distinct 8.1 obligation."
+reason: "Invariant coverage is by example pins over module fixtures; a property witness or analyzer proof is pending"
 content_hash: "5ab8cc25070470f12a72faaadc50f614f2663d8929b988662786d7d9bf660cfb"
 source_hash: "0c3ca3aa688c69c7266784edeacb6f1eb49a7110aef6706d63489bc80d5cc782"
 lands { manual { condition: "The shared admission path and justified applicability transformations are verified without changing historical measurements or inventing producer evidence." } }

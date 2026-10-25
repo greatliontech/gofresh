@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-closure-observability-reflect-exclusion"
-reason: "Conservative reflection refusal examples survive, but positive immutable descriptor and invoke-nothing summaries lack the required selected implementation/native derivations. Existing independent obligation: invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
+reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
 content_hash: "f9a018cc55688294af4f4dc68898130773920f5bd8fed24ba931bba23008095b"
 source_hash: "4e987d17c86bbe8a40c856d7a61b94c1ec331252fa5e942fe42c4e84c2fc40bb"
-lands { manual { condition: "tooling-redesign 5.1w.3: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7 Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" contradicted: true } }
+lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

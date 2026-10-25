@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-closure-observability-audited-set"
-reason: "Value computation, time, formatting, URL, filepath and encoding positives still use package/symbol tables instead of checked generic selected-body derivations. Existing independent obligation: invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
+reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
 content_hash: "6b475375b2fc4dad89a26edacaf9f33254ceba75e80d06f78041a62da1fc035e"
 source_hash: "a21fe4add2463afd2d488524f803dcf15be059685bff847ab0a1926ddd8852b4"
-lands { manual { condition: "tooling-redesign 5.1w.2: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7 Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" contradicted: true } }
+lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

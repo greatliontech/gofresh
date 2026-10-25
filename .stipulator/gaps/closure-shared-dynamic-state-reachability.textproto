@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-closure-shared-dynamic-state-reachability"
-reason: "Existing source-owned scoping, cancellation and recording examples do not establish the checked implementation discharge channels now composed before reachability. Existing independent obligation: invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
+reason: "invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
 content_hash: "4cfe35ba5861debbb950f88ef44ed4fcc4c6868b9d55bb147cabf88320b3db2b"
 source_hash: "e6af55342d543d21523608e594f6d685a38d04d68ac37bb2c12e97531748bac6"
-lands { manual { condition: "tooling-redesign 5.1w.6: checked implementation discharges and independent execution assertions compose without widening their scope or losing recorded attribution Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" } }
+lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

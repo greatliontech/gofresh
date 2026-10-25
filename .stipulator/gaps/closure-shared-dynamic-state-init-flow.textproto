@@ -5,4 +5,4 @@ requirement_id: "REQ-closure-shared-dynamic-state-init-flow"
 reason: "Invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
 content_hash: "629a33dbbb268566020a15136d1a17d618b9be73c68ec48de17aee7f25f467b0"
 source_hash: "edac02a6e94db514b8dcb78e016f66de1b3094f9ceebf40362b247b670cd6424"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" contradicted: true } }
+lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

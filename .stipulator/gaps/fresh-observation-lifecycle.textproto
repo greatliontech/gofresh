@@ -5,5 +5,5 @@ requirement_id: "REQ-fresh-observation-lifecycle"
 reason: "The singleton and package-process units implement producing preparation and automatic final evidence selection. Remaining Stipulator/Gomutant producers still require migration, and complete invariant property coverage remains outstanding across those models and historical records."
 content_hash: "72ce6b8a7da738ba2d62445dc8771f06667aa789cca4c13d912a9b64007d891b"
 source_hash: "04734c02d8605ac5c1ac032151eb375217e8006258288bd006163a099719b627"
-lands { manual { condition: "A property witness or analyzer proof covers producing-time proof preparation, retained closing obligations, automatic admissible final checking, explicit assertion/transformation authorization and historical non-upgrade through the migrated unit boundary." contradicted: true } }
+lands { manual { condition: "A property witness or analyzer proof covers producing-time proof preparation, retained closing obligations, automatic admissible final checking, explicit assertion/transformation authorization and historical non-upgrade through the migrated unit boundary." } }
 excuses: GAP_EXCUSE_UNCOVERED

@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-fresh-progress"
-reason: "Existing unit/event/rendering examples remain; the obsolete selection-wide notice cannot witness new failed-premise claim diagnostics. Existing independent obligation: The diagnostic payload is excluded from memoized and hashed evidence by the implementation, but the clause still needs a witness discriminating memo stability from payload changes."
-content_hash: "c9aad95e588b447099ed9bc222660230372a3c4ccd0d269dbbdbd1b45d7a6c2d"
-source_hash: "ab3edb8475c9cf7c0ffb2672b8ae58b26b580eb12c633038e34f2dd43dc9f079"
-lands { manual { condition: "tooling-redesign 5.1w.6: claim-local structured refusal diagnostics project through progress without changing hashed authority, while existing operation, memo and cancellation reporting obligations remain Existing landing obligations also remain: tooling-redesign 9.3: a memo-stability witness establishes that diagnostic payload changes do not move memoized or hashed evidence" } }

@@ -13,6 +13,8 @@ import (
 // are warm-filesystem observations, not cold-storage throughput measurements.
 // Capture includes both agreeing observations and retains an owned byte image;
 // validation reopens the same coordinate against an existing immutable image.
+//
+//gofresh:pure
 func BenchmarkArtifact(b *testing.B) {
 	for _, size := range []int{4 << 20, 32 << 20} {
 		b.Run(fmt.Sprintf("bytes=%d", size), func(b *testing.B) {

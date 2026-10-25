@@ -5,4 +5,4 @@ requirement_id: "REQ-closure-shared-dynamic-state-registration-audit"
 reason: "Invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
 content_hash: "4920e7effdd05098a8f6fe5467b5823ec59d314030a62f09c60c20493a033679"
 source_hash: "f4b8571349440eed416a71a0ce52010360dccdd3a71f99149ea80bb24584141f"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" contradicted: true } }
+lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

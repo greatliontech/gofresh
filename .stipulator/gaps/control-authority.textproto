@@ -5,5 +5,5 @@ requirement_id: "REQ-control-authority"
 reason: "The control ledger specifies the admitted meanings and boundaries. Current consumers still contain duplicated choices, overflow/argument-identity risks and presentation-selected execution. Per-family positive/refusal regressions and migration of the affected execution paths are required before full coverage is claimed."
 content_hash: "63a72ef210080936816c1aa9dd4493abe9aa7887f67c9aaa7ae4e2107cb57caa"
 source_hash: "c0a0858c78e96ec5cbb74e47316200d522b303cd94ee4fac44c83210f32b1111"
-lands { manual { condition: "The four tools admit controls through their owning operation descriptions and bind the overflow, typed/raw argument, omitted/empty selection, actual producer environment, default-consuming build-input and observer-does-not-execute regressions across the affected faces." contradicted: true } }
+lands { manual { condition: "The four tools admit controls through their owning operation descriptions and bind the overflow, typed/raw argument, omitted/empty selection, actual producer environment, default-consuming build-input and observer-does-not-execute regressions across the affected faces." } }
 excuses: GAP_EXCUSE_UNCOVERED

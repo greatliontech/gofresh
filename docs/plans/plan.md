@@ -37,8 +37,10 @@ This is the single canonical plan for `gofresh` and its consumer ecosystem (`sti
 | `BenchmarkComputeObservabilityBatch-24` (time/op) | `6.04 s/op` | `3.89 s/op` | **-35.7%** |
 | `BenchmarkComputeObservabilityBatch-24` (bytes/op) | `2.70 GB/op` | `1.46 GB/op` | **-45.8%** |
 | `BenchmarkComputeObservabilityBatch-24` (allocs/op) | `34.86M allocs/op` | `21.09M allocs/op` | **-39.5%** |
-| `gofresh` warm `stipulator verify --no-test` | `11.1s` (verify `1.4s`) | `11.1s` (verify `1.4s`) | Verified |
-| `stipulator` warm `stipulator verify --no-test` | `1m06.4s` (verify `3.9s`) | `1m06.4s` (verify `3.9s`) | Verified |
+| `gofresh` warm `stipulator verify --no-test` | `11.1s` (verify `1.4s`) | `6.6s` (compile `2.7s`, discovery `2.6s`, verify `1.3s`) | **-40.5%** |
+| `stipulator` warm `stipulator verify --no-test` | `1m06.3s` (compile `54.6s`, verify `3.8s`) | `20.3s` (compile `13.7s`, discovery `6.4s`, verify `200ms`) | **-69.4% (3.27x)** |
+| `stipulator` cold `stipulator verify --no-test` | `2m44.1s` (compile `53.9s`, verify `50.8s`) | `1m51.3s` (compile `15.4s`, discovery `1m6.3s`, verify `29.6s`) | **-32.2%** |
+| `BenchmarkWarmGraphs-24` (`pew ab`) | `1.693 ms/op` | `295.1 µs/op` (`p=0.002 n=6`) | **-82.57% (5.74x)** |
 | `pew` warm `stipulator verify --no-test` | `3.6s` (verify `0s`) | `3.6s` (verify `0s`) | Verified |
 | `gomutant` warm `stipulator verify --no-test` | `4.3s` (verify `0s`) | `4.3s` (verify `0s`) | Verified |
 
@@ -128,13 +130,15 @@ This is the single canonical plan for `gofresh` and its consumer ecosystem (`sti
   - [x] Close the 3 gaps in `gomutant` (`REQ-core-attributed-kills`, `REQ-result-export`, `REQ-target-model`) with property witnesses / structural proofs and remove `.stipulator/gaps/*.textproto` (`6f8bd5d`).
   - [x] Close the 14 gaps in `stipulator` (`REQ-backend-surfaces`, `REQ-check-preparation`, `REQ-core-one-execution`, `REQ-core-proto-io`, `REQ-evidence-inspection`, `REQ-gap-list`, `REQ-gap-resolved-pruned`, `REQ-go-owned-processes`, `REQ-model-graph`, and the 5 retired `REQ-proto-*` requirements) and remove `.stipulator/gaps/*.textproto`.
   - [x] Add `pew` to `STIPULATOR_REPOS` in `scripts/fleet-sweep.sh`.
-- [ ] **Step B: Bootstrap `pew` Benchmark Suites & Baseline Stores Across All 4 Repositories**
-  - [ ] Curate `gofresh` hot-path benchmarks under a `benchmarks/` `pew` store (`pew run`, `pew status`).
-  - [ ] Add representative `Benchmark*` suites and `benchmarks/` `pew` stores to `stipulator`, `gomutant`, and `pew`.
-- [ ] **Step C: Profile & Optimize `stipulator` (and Ecosystem Hot Paths) Using `pew`**
-  - [ ] Profile `stipulator` discovery (`1m09s`) and verification (`50s`) bottlenecks using `pew profile` / `pprof`, optimize them, and verify wall-clock and allocation reductions with `pew ab`.
-- [ ] **Step D: Full Self-Hosted Verification & Tagged Release Train**
-  - [ ] Verify `stipulator`, `gomutant`, and `pew` across all 4 repositories and execute the tagged release train (`gofresh` -> `pew`, `stipulator`, `gomutant`).
+- [x] **Step B: Bootstrap `pew` Benchmark Suites & Baseline Stores Across All 4 Repositories**
+  - [x] Curate `gofresh` hot-path benchmarks under `benchmarks/` (`BenchmarkValidateFingerprint70KB`, `BenchmarkMaximalClosure`, `BenchmarkEffectScanBatchEquivalence`, `BenchmarkFixtureProgramIsolation`, `BenchmarkComputeObservabilityBatch`, `BenchmarkComputeRootedFunctions`, `BenchmarkNewEngineCold`).
+  - [x] Add representative `Benchmark*` suites and `benchmarks/` `pew` stores to `stipulator` (`BenchmarkCompile`, `BenchmarkDecodeRecord`, `BenchmarkSymbolPackageCandidates`, `BenchmarkWarmGraphs`), `gomutant` (`BenchmarkFindingsRoundTrip`, `BenchmarkDeclaredSymbols`), and `pew` (`BenchmarkCompare`, `BenchmarkParseStream`, `BenchmarkParseRecording`).
+- [x] **Step C: Profile & Optimize `stipulator` (and Ecosystem Hot Paths) Using `pew`**
+  - [x] Parallelize `selectionEndpoint.warmGraphs` across deduplicated owner packages (`runtime.GOMAXPROCS(0)`) with mutex-protected `sourceFiles.digest` and `endpoint.graphs`, and filter `publishSelection` closing certificate derivation to subjects with valid opening/closing captures (`internal/backends/golang/selectioncontext.go`, `sourcecertificate.go`, `served.go`, `runner.go`).
+  - [x] Prove speedups with `pew ab` (`BenchmarkWarmGraphs-24`: `1.693ms -> 295.1µs`, `-82.57%`, `p=0.002 n=6`) and `stipulator verify --no-test` (`warm: 1m06.3s -> 20.3s` (`3.27x`), `cold: 2m44.1s -> 1m51.3s` (`-32.2%`), `gofresh warm: 11.1s -> 6.6s` (`-40.5%`)).
+- [x] **Step D: Full Self-Hosted Verification & Tagged Release Train**
+  - [x] Restore unbound `Fuzz*` witnesses and retire 28 resolved `.stipulator/gaps/` records + strip obsolete `5.1w` / `tooling-redesign` references across `gofresh/.stipulator/gaps/`.
+  - [x] Verify `stipulator`, `gomutant`, and `pew` across all 4 repositories and execute the tagged release train (`gofresh` -> `pew`, `stipulator`, `gomutant`).
 
 ---
 

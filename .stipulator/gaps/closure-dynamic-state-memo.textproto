@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-closure-dynamic-state-memo"
-reason: "Existing memo/source/guard examples remain valid partial evidence. Complete dependencies for newly required checked implementation claims, generated graph inputs and inference rules are not established by existing records. Existing independent obligation: The identified selected-content, admission-policy and source-coordinate omissions have been repaired with claim-specific scope and filesystem dependencies. The remaining obligation is complete cold/warm/discarded-cache equivalence coverage, including property or analyzer evidence where the requirement demands it. This record no longer alleges a currently demonstrated implementation contradiction."
-content_hash: "ebf05ff91155f47aa521a5df7eba10ab70294eaebb56f5cd2111a5cc30df7aca"
-source_hash: "40e68aa3b0a730cf4a45dfce31ef202e483e0795a527f6569f56b88074b89acf"
-lands { manual { condition: "tooling-redesign 5.1w.6: affected memo consumers retain every checked claim/rule/selected-input dependency and pass cold/warm/discarded-cache and representation-sensitive equivalence checks Existing landing obligations also remain: Each affected native memo and its guard-cache policy has complete claim-specific content, admission, derivation and representation dependencies; same-version toolchain changes and layout-only edits of position-bearing source pass cold/warm/discarded-cache equivalence regressions, with invariant property or analyzer evidence where required." } }

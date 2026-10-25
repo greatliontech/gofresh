@@ -1794,3 +1794,13 @@ bindings {
   shape_hash: "e1c727f003df727578d8f90bdd8d7f37c8042ed2c971f033e36508bcff58ca86"
   clause_label: "maximal-identity"
 }
+
+bindings {
+  requirement_id: "REQ-closure-outcome-inventory"
+  content_hash: "177bcdd6c12be219789346858a9ff291e591ca6f809f0c16f80832d878ef7a7f"
+  source_hash: "73d3a517564693f69c354b67082ececfbda6a772f2a36ad9f4c5b789878058ba"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.FuzzOutcomeInventoryRejectsUnsupportedEffects"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6f4ff3afd5b66126df45469eda8db99a04c0a11db2a3fd1365f07f8382bbd84a"
+}

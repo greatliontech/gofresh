@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-inputs-outcome-method"
-reason: "Actual-environment and receipt bindings do not establish the method semantics independently of completion or checked native, initialization and exceptional-operation behavior."
-content_hash: "07d93699bb099aa8f2fc0bed09a0297187464e937742d50e4a35930949fe5227"
-source_hash: "625af9a6d366179ecf677f985490e83cc76eb4a15527c26bfb8b125c48f713c5"
-lands { manual { condition: "tooling-redesign 5.1w.5: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7" contradicted: true } }

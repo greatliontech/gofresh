@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-closure-observability-dispatch"
-reason: "Local operand-provenance examples survive, but harness/standard targets and wrapper delegation still need checked implementation premises. Existing independent obligation: invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
+reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
 content_hash: "42ad27d2200297ae642af0c7bb116da5635b303876c96ac17e8f2bb7fac88083"
 source_hash: "6bdc1dbf01755f178872974ed9149d985971a9b3a5b4c702524dc95ff934ca4b"
-lands { manual { condition: "tooling-redesign 5.1w.6: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7 Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" contradicted: true } }
+lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

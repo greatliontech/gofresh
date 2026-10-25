@@ -6,6 +6,8 @@ import "testing"
 // over a mixed fixture set — the per-target cost a consumer's capture batch
 // pays. Allocations are the tracked axis; the memo is disabled (no scope)
 // so the analysis itself is measured.
+//
+//gofresh:pure
 func BenchmarkComputeObservabilityBatch(b *testing.B) {
 	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
 	subjects := []Subject{

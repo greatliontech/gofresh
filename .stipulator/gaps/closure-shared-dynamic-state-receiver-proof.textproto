@@ -2,7 +2,7 @@
 # proto-message: stipulator.v1.Gap
 
 requirement_id: "REQ-closure-shared-dynamic-state-receiver-proof"
-reason: "Local interface-field examples do not establish checked synchronization or immutable result claims used by Once-filled and descriptor-dependent receiver proofs. Existing independent obligation: invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
+reason: "invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
 content_hash: "bcb90d9c62772bd929a426b519d444a3db85755934aaa996e8b0fed3c2f27694"
 source_hash: "2c18ba9bf035e029aa429d7506becfa8e00550b137ef29f7528e5dbd20fc3f0c"
-lands { manual { condition: "tooling-redesign 5.1w.6: the corresponding selected-implementation claims and conservative unsupported paths are checked with useful positive and adversarial cases, integrated across consumers in 5.1w.6 and obsolete approval mechanisms retired in 5.1w.7 Existing landing obligations also remain: a property witness or analyzer proof lands for this invariant" contradicted: true } }
+lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

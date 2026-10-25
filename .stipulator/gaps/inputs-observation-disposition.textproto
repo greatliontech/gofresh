@@ -5,4 +5,4 @@ requirement_id: "REQ-inputs-observation-disposition"
 reason: "Invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs for the complete observation-disposition invariant remain pending. Native v4 known movement is separately enforced as a non-waivable guard failure."
 content_hash: "3a36ef274e7375fca3e3c01124e7de3ce9526d598c7c67db9884905f7d1681b1"
 source_hash: "cd173682f255246035284ce09752f4a3f706560eba7aa0465357085279304453"
-lands { manual { condition: "tooling-redesign 9.3: a property witness or analyzer proof lands for the complete observation-disposition invariant without promoting partial evidence" } }
+lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

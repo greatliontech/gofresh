@@ -2378,3 +2378,13 @@ bindings {
   shape_hash: "efc6150fa01219a4fc4c9d1e8f5dac0c2608838adf512546ef195ebf916ce080"
   clause_label: "authority"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-outcome-method"
+  content_hash: "07d93699bb099aa8f2fc0bed09a0297187464e937742d50e4a35930949fe5227"
+  source_hash: "625af9a6d366179ecf677f985490e83cc76eb4a15527c26bfb8b125c48f713c5"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/closure.FuzzOutcomeInventoryRejectsUnsupportedEffects"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6f4ff3afd5b66126df45469eda8db99a04c0a11db2a3fd1365f07f8382bbd84a"
+}

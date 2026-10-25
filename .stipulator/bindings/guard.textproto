@@ -480,3 +480,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "979035528bd3ce37d93e135eab64bbd4bf310e295920983eef2430f8b2a67f61"
 }
+
+bindings {
+  requirement_id: "REQ-guard-cache"
+  content_hash: "88c4fe6caed57be7504f28bb735d38be533875e39b3903f8509f3bed5a82f329"
+  source_hash: "6206eabfe26a75c1b0dee81410c5fbc38d1ecc22ae75ce77293cbffba95f4246"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzDecideSound"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d85af92b5760a2b8a58f0772183b2231cc15829e2199fcb95336e16736bfb05f"
+}
