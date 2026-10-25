@@ -454,3 +454,92 @@ func (b *RuntimeBinding) CheckInertExtension(ctx context.Context, subject Subjec
 	}
 	return result.Extension.Fingerprint, result.Extension.Ledger, result.Verdict, nil
 }
+
+// CheckBatchWithLedgers checks a batch of candidates and, for any candidate
+// that fails with ReasonTestVariants and has a prior ledger in ledgers,
+// explicitly attempts an inert test-variant extension within the same checking
+// unit before closing. The returned slice has one entry per candidate in
+// request order, with Extension populated when an inert extension succeeded.
+func (b *RuntimeBinding) CheckBatchWithLedgers(ctx context.Context, candidates []Candidate, ledgers map[int]TestVariantLedger) ([]CheckedCandidate, error) {
+	if ctx == nil {
+		return nil, errors.New("gofresh: nil checking context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if b == nil || b.snapshot == nil || b.snapshot.view == nil {
+		return nil, errors.New("gofresh: uninitialized runtime binding")
+	}
+	if err := b.snapshot.view.prepareCandidates(candidates); err != nil {
+		return nil, err
+	}
+	var subjects []Subject
+	seen := make(map[Subject]bool, len(candidates))
+	for _, c := range candidates {
+		if !seen[c.Subject] {
+			seen[c.Subject] = true
+			subjects = append(subjects, c.Subject)
+		}
+	}
+	if len(subjects) == 0 {
+		subjects = slices.Clone(b.snapshot.view.subjects)
+	}
+	u, err := b.BeginCheck(subjects)
+	if err != nil {
+		return nil, err
+	}
+	defer u.Abort()
+	provisional, err := u.CheckBatch(ctx, candidates)
+	if err != nil {
+		return nil, err
+	}
+	var requests []InertRequest
+	var requestCandidate []int
+	for i, p := range provisional {
+		if p.Verdict.Status == Stale && p.Verdict.Reason == ReasonTestVariants {
+			if prior, ok := ledgers[i]; ok {
+				requests = append(requests, InertRequest{Index: i, PriorLedger: prior})
+				requestCandidate = append(requestCandidate, i)
+			}
+		}
+	}
+	if len(requests) > 0 {
+		if _, err := u.ExtendInertBatch(ctx, requests); err != nil {
+			return nil, err
+		}
+	}
+	closed, err := u.Close(ctx)
+	if err != nil {
+		return nil, err
+	}
+	results := append([]CheckedCandidate(nil), closed[:len(candidates)]...)
+	for k, candIdx := range requestCandidate {
+		ext := closed[len(candidates)+k]
+		if ext.Verdict.Status == Valid && ext.Extension != nil {
+			results[candIdx] = CheckedCandidate{
+				Index:     candIdx,
+				Subject:   candidates[candIdx].Subject,
+				Verdict:   ext.Verdict,
+				Extension: ext.Extension,
+			}
+		} else {
+			results[candIdx].Verdict = ext.Verdict
+		}
+	}
+	return results, nil
+}
+
+// CheckWithLedger checks a candidate and, when it fails with ReasonTestVariants
+// and prior is non-nil, explicitly attempts an inert test-variant extension
+// within the same checking unit before closing.
+func (b *RuntimeBinding) CheckWithLedger(ctx context.Context, subject Subject, recorded Fingerprint, prior *TestVariantLedger) (CheckedCandidate, error) {
+	var ledgers map[int]TestVariantLedger
+	if prior != nil {
+		ledgers = map[int]TestVariantLedger{0: *prior}
+	}
+	results, err := b.CheckBatchWithLedgers(ctx, []Candidate{{Subject: subject, Recorded: recorded}}, ledgers)
+	if err != nil {
+		return CheckedCandidate{}, err
+	}
+	return results[0], nil
+}

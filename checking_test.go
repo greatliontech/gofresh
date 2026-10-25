@@ -452,6 +452,58 @@ func TestCheckingUnitCandidatesAndLifecycle(t *testing.T) {
 			t.Fatalf("losing extension reused opening proof: %+v %v", got, err)
 		}
 	})
+	t.Run("CheckBatchWithLedgers and CheckWithLedger extend ReasonTestVariants in one unit", func(t *testing.T) {
+		candidates := []Candidate{{a, f.old[a]}, {b, f.current[b]}}
+		checked, err := f.binding.CheckBatchWithLedgers(t.Context(), candidates, map[int]TestVariantLedger{0: f.ledger})
+		if err != nil || len(checked) != 2 {
+			t.Fatalf("CheckBatchWithLedgers: %+v %v", checked, err)
+		}
+		if checked[0].Index != 0 || checked[0].Subject != a || checked[0].Verdict.Status != Valid || checked[0].Extension == nil {
+			t.Fatalf("candidate 0 not extended: %+v", checked[0])
+		}
+		if checked[1].Index != 1 || checked[1].Subject != b || checked[1].Verdict.Status != Valid || checked[1].Extension != nil {
+			t.Fatalf("candidate 1 unexpected extension: %+v", checked[1])
+		}
+		single, err := f.binding.CheckWithLedger(t.Context(), a, f.old[a], &f.ledger)
+		if err != nil || single.Verdict.Status != Valid || single.Extension == nil {
+			t.Fatalf("CheckWithLedger with prior ledger: %+v %v", single, err)
+		}
+		withoutLedger, err := f.binding.CheckWithLedger(t.Context(), a, f.old[a], nil)
+		if err != nil || withoutLedger.Verdict.Status != Stale || withoutLedger.Verdict.Reason != ReasonTestVariants || withoutLedger.Extension != nil {
+			t.Fatalf("CheckWithLedger without prior ledger: %+v %v", withoutLedger, err)
+		}
+		// Mixed batch where candidate 0 is inertly extended and candidate 1's prior ledger is non-inert (removed declaration).
+		nonInertLedger := f.ledger.Clone()
+		nonInertLedger.Declarations = append(nonInertLedger.Declarations, TestVariantDeclaration{
+			File: "observed_test.go", Package: "observed", Kind: "func", Name: "TestRead", Hash: "edited-hash", References: []string{"TestRead"},
+		})
+		mixed, err := f.binding.CheckBatchWithLedgers(t.Context(), []Candidate{{a, f.old[a]}, {b, f.old[b]}}, map[int]TestVariantLedger{
+			0: f.ledger,
+			1: nonInertLedger,
+		})
+		if err != nil || len(mixed) != 2 {
+			t.Fatalf("mixed CheckBatchWithLedgers: %+v %v", mixed, err)
+		}
+		if mixed[0].Verdict.Status != Valid || mixed[0].Extension == nil {
+			t.Fatalf("mixed candidate 0 should extend to Valid: %+v", mixed[0])
+		}
+		if mixed[1].Verdict.Status != Stale || mixed[1].Verdict.Reason != ReasonTestVariants || mixed[1].Extension != nil {
+			t.Fatalf("mixed candidate 1 should remain Stale/ReasonTestVariants: %+v", mixed[1])
+		}
+		// Atomic preparation precedence and nil-context refusal on CheckBatchWithLedgers.
+		if _, err := f.binding.CheckBatchWithLedgers(nil, candidates, nil); err == nil {
+			t.Fatal("nil context accepted by CheckBatchWithLedgers")
+		}
+		unknown := Subject{a.Package, "TestMissing"}
+		var batch *RecordedBatchError
+		if _, err := f.binding.CheckBatchWithLedgers(t.Context(), []Candidate{{unknown, Fingerprint{}}}, nil); !errors.As(err, &batch) || batch.Tier != RecordShapeRefusal {
+			t.Fatalf("CheckBatchWithLedgers shape-before-membership precedence = %v, want RecordShapeRefusal", err)
+		}
+		var unknownErr *UnknownSubjectsError
+		if _, err := f.binding.CheckBatchWithLedgers(t.Context(), []Candidate{{unknown, f.current[a]}}, nil); !errors.As(err, &unknownErr) || unknownErr.Scope != SelectedView {
+			t.Fatalf("CheckBatchWithLedgers unknown subject error = %v, want UnknownSubjectsError{Scope: SelectedView}", err)
+		}
+	})
 }
 
 func TestCheckingUnitCancellationAndAbort(t *testing.T) {

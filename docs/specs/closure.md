@@ -191,8 +191,8 @@ nothing else — and any change
 in that list is that governing entry's own movement, so a consumer walking
 the current ledger's references still observes every movement an unchanged
 declaration can textually repeat; the list is
-served for a consumer to attribute a delta to the declarations that can
-reach it — gofresh renders no reachability judgment, and directive entries
+served to attribute a delta to the declarations that can
+reach it, and directive entries
 carry no references; and the declaring file's package clause name, so a
 consumer can tell the two compartment packages' same-named declarations
 apart — a method's receiver type resolves within its own package only; the
@@ -282,8 +282,20 @@ initialization is guarded there. An embedded
 member's header movement defeats inertness fail-closed — whatever the file's
 name: test-only embedded bytes feed unchanged declarations that read them.
 Inertness is
-Go-semantics data — it claims the delta cannot change the behavior of any
-unchanged declaration and nothing more; what inertness licenses is the
+Go-semantics data — the universal delta check (`TestVariantDelta.Inert`) claims
+the delta cannot change the behavior of any unchanged declaration in the
+package, and the subject-scoped check (`InertForSubject` /
+`InertTestVariantLedgersForSubject`) claims the delta cannot change the
+behavior of a specific subject by computing the transitive syntactic reference
+cone of that subject across the prior ledger's declarations (including all
+`init`, `var`, `directive`, and `TestMain` declarations and any compartment
+declarations referenced by base files, propagating exported references from
+the `_test` package to the base package and matching methods by reachable
+receiver type) and requiring that no declaration in that cone changed or was
+removed, every added declaration is an inert kind whose name does not shadow
+any reachable or base-file reference, no embedded file header changed, and
+every file containing a reachable declaration retains its package and import
+bindings for all reachable references. What inertness licenses is the
 consumer's policy, never gofresh's.
 The consumer may select the explicit extension check to license reuse under
 this judgment. Ordinary checking never implicitly licenses a new delta; it

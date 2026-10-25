@@ -124,7 +124,7 @@ func (v *View) prepareInertExtension(recorded Fingerprint, prior TestVariantLedg
 	if err != nil {
 		return refuse(Verdict{}, err)
 	}
-	if !DiffTestVariantLedgers(prior, ledger).Inert() {
+	if !InertTestVariantLedgersForSubject(prior, ledger, subject.Symbol) {
 		return refuse(refusal(Stale, TestVariantsCause, Refused, ReasonTestVariants), nil)
 	}
 	return candidate, ledger, Verdict{}, nil

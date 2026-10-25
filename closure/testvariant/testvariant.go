@@ -6,8 +6,12 @@
 package testvariant
 
 import (
+	"go/ast"
+	"go/parser"
 	"reflect"
+	"slices"
 	"sort"
+	"strings"
 )
 
 // BindingStrategy identifies the complete syntax-derived binding evidence.
@@ -95,9 +99,8 @@ type TestVariantDeclaration struct {
 	// that list is the governing entry's own movement, so a consumer
 	// walking current references still observes every movement an
 	// unchanged declaration can textually repeat. It is
-	// served for a consumer to attribute a compartment delta to the
-	// declarations that can reach it; gofresh itself renders no
-	// reachability judgment. Directive entries carry none.
+	// served to attribute a compartment delta to the declarations that
+	// can reach it (InertForSubject). Directive entries carry none.
 	References []string
 }
 
@@ -130,7 +133,10 @@ type TestVariantFileBindings struct {
 
 // TestVariantImport is one file-scoped import binding. Name is the effective
 // local name (including "_" and "."), not the path's last component.
-type TestVariantImport struct{ Name, Path string }
+type TestVariantImport struct {
+	Name string
+	Path string
+}
 
 // TestVariantDelta is the classified difference between two compartment
 // ledgers — a recorded one and a current one. Added, Changed, and Removed are
@@ -199,6 +205,17 @@ type TestVariantHeaderChange struct {
 // whatever its name, a .go-named testdata fixture included: its bytes feed
 // unchanged declarations that read it, and its whole content is its header,
 // so a header move IS a content move.
+func inertAddedDeclaration(added TestVariantDeclaration) bool {
+	switch added.Kind {
+	case "const", "type":
+		return true
+	case "func":
+		return added.Name != "TestMain"
+	default: // method, init, var, directive, and anything unrecognized fail closed
+		return false
+	}
+}
+
 func (d TestVariantDelta) Inert() bool {
 	if !d.BindingsPreserved {
 		return false
@@ -207,19 +224,302 @@ func (d TestVariantDelta) Inert() bool {
 		return false
 	}
 	for _, added := range d.Added {
-		switch added.Kind {
-		case "const", "type":
-		case "func":
-			if added.Name == "TestMain" {
-				return false
-			}
-		default: // method, init, var, and anything unrecognized fail closed
+		if !inertAddedDeclaration(added) {
 			return false
 		}
 	}
 	for _, header := range d.HeaderChanges {
 		if header.Embedded {
 			return false
+		}
+	}
+	return true
+}
+
+type declarationIdentity struct {
+	file, pkg, kind, receiver, name string
+}
+
+func idOfDeclaration(d TestVariantDeclaration) declarationIdentity {
+	return declarationIdentity{d.File, d.Package, d.Kind, d.Receiver, d.Name}
+}
+
+func receiverTypeName(recv string) string {
+	if recv == "" {
+		return ""
+	}
+	expr, err := parser.ParseExpr(recv)
+	if err != nil {
+		return ""
+	}
+	for {
+		switch e := expr.(type) {
+		case *ast.ParenExpr:
+			expr = e.X
+		case *ast.StarExpr:
+			expr = e.X
+		case *ast.IndexExpr:
+			expr = e.X
+		case *ast.IndexListExpr:
+			expr = e.X
+		case *ast.Ident:
+			return e.Name
+		default:
+			return ""
+		}
+	}
+}
+
+// InertForSubject reports whether the delta from before to after is behavior-inert
+// for subjectSymbol (a top-level declaration name or "Type.Method" method
+// reference). When DiffTestVariantLedgers(before, after).Inert() holds, the
+// delta is inert for every unchanged declaration in the package and returns
+// true immediately. Otherwise, InertForSubject computes the transitive
+// syntactic reference cone of subjectSymbol across before.Declarations
+// (including all init, var, directive, and TestMain declarations and any
+// compartment declarations referenced by BaseFiles, propagating exported
+// references from "_test" to the base package and matching methods by reachable
+// receiver type) and reports true only when no declaration in that cone changed
+// or was removed, every added declaration is an inert kind (plain func other
+// than TestMain, const, or type) whose name does not shadow any reachable or
+// base-file reference, no embedded file header changed, and every file
+// containing a reachable declaration retains its package and import bindings
+// for all reachable references (REQ-closure-test-variant-inertness).
+func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool {
+	if subjectSymbol == "" || strings.HasPrefix(subjectSymbol, "init#") {
+		return false
+	}
+	recv, name, hasDot := strings.Cut(subjectSymbol, ".")
+	if !hasDot {
+		recv, name = "", subjectSymbol
+	}
+	if name == "" || (hasDot && recv == "") || strings.Contains(name, ".") {
+		return false
+	}
+	d := DiffTestVariantLedgers(before, after)
+	if d.Inert() {
+		return true
+	}
+	if before.BindingStrategy != BindingStrategy || after.BindingStrategy != BindingStrategy {
+		return false
+	}
+	if !reflect.DeepEqual(before.BaseFiles, after.BaseFiles) {
+		return false
+	}
+	oldFiles, ok := ledgerFileBindings(before)
+	if !ok {
+		return false
+	}
+	nowFiles, ok := ledgerFileBindings(after)
+	if !ok {
+		return false
+	}
+	for _, header := range d.HeaderChanges {
+		if header.Embedded {
+			return false
+		}
+	}
+	for _, added := range d.Added {
+		if !inertAddedDeclaration(added) {
+			return false
+		}
+	}
+
+	baseRefsByPkg := map[string]map[string]bool{}
+	for _, base := range before.BaseFiles {
+		if base.Bindings == nil {
+			continue
+		}
+		refs := baseRefsByPkg[base.Bindings.Package]
+		if refs == nil {
+			refs = map[string]bool{}
+			baseRefsByPkg[base.Bindings.Package] = refs
+		}
+		for _, ref := range base.Bindings.References {
+			refs[ref] = true
+		}
+	}
+
+	afterByKey := make(map[declarationIdentity][]TestVariantDeclaration, len(after.Declarations))
+	for _, decl := range after.Declarations {
+		key := idOfDeclaration(decl)
+		afterByKey[key] = append(afterByKey[key], decl)
+	}
+
+	matchesSubject := func(decl TestVariantDeclaration) bool {
+		if hasDot {
+			return decl.Kind == "method" && decl.Name == name && receiverTypeName(decl.Receiver) == recv
+		}
+		return decl.Kind != "method" && decl.Kind != "directive" && decl.Kind != "init" && decl.Name == name
+	}
+
+	reachableNamesByPkg := map[string]map[string]bool{}
+	reachableFileRefs := map[string]map[string]bool{}
+	reachableFiles := map[string]bool{}
+	reachableDecls := make([]bool, len(before.Declarations))
+	reachableIdentity := map[declarationIdentity]bool{}
+
+	addName := func(pkg, ref string) {
+		if ref == "" {
+			return
+		}
+		names := reachableNamesByPkg[pkg]
+		if names == nil {
+			names = map[string]bool{}
+			reachableNamesByPkg[pkg] = names
+		}
+		names[ref] = true
+		if basePkg, isExt := strings.CutSuffix(pkg, "_test"); isExt && ast.IsExported(ref) {
+			baseNames := reachableNamesByPkg[basePkg]
+			if baseNames == nil {
+				baseNames = map[string]bool{}
+				reachableNamesByPkg[basePkg] = baseNames
+			}
+			baseNames[ref] = true
+		}
+	}
+	addFileRef := func(file, ref string) {
+		if ref == "" {
+			return
+		}
+		refs := reachableFileRefs[file]
+		if refs == nil {
+			refs = map[string]bool{}
+			reachableFileRefs[file] = refs
+		}
+		refs[ref] = true
+	}
+	markDecl := func(i int) bool {
+		if reachableDecls[i] {
+			return false
+		}
+		reachableDecls[i] = true
+		decl := before.Declarations[i]
+		id := idOfDeclaration(decl)
+		reachableIdentity[id] = true
+		reachableFiles[decl.File] = true
+		if decl.Name != "" && decl.Name != "_" {
+			addName(decl.Package, decl.Name)
+		}
+		if decl.Kind == "method" {
+			if rt := receiverTypeName(decl.Receiver); rt != "" {
+				addName(decl.Package, rt)
+			}
+		}
+		for _, ref := range decl.References {
+			addName(decl.Package, ref)
+			addFileRef(decl.File, ref)
+		}
+		for _, afterDecl := range afterByKey[id] {
+			for _, ref := range afterDecl.References {
+				addName(decl.Package, ref)
+				addFileRef(decl.File, ref)
+			}
+		}
+		return true
+	}
+
+	rooted := false
+	for i, decl := range before.Declarations {
+		if matchesSubject(decl) {
+			rooted = true
+			markDecl(i)
+			continue
+		}
+		switch {
+		case decl.Kind == "init", decl.Kind == "var", decl.Kind == "directive", decl.Kind == "func" && decl.Name == "TestMain":
+			markDecl(i)
+		case decl.Kind == "method":
+			rt := receiverTypeName(decl.Receiver)
+			if rt == "" || baseRefsByPkg[decl.Package][rt] {
+				markDecl(i)
+			}
+		default:
+			if decl.Name != "_" && baseRefsByPkg[decl.Package][decl.Name] {
+				markDecl(i)
+			}
+		}
+	}
+	for _, base := range before.BaseFiles {
+		if base.Bindings == nil {
+			continue
+		}
+		if slices.Contains(base.Bindings.References, name) && (!hasDot || slices.Contains(base.Bindings.References, recv)) {
+			rooted = true
+			addName(base.Bindings.Package, name)
+			if hasDot {
+				addName(base.Bindings.Package, recv)
+			}
+		}
+	}
+	if !rooted {
+		return false
+	}
+
+	for {
+		progressed := false
+		for i, decl := range before.Declarations {
+			if reachableDecls[i] {
+				continue
+			}
+			if decl.Kind == "method" {
+				rt := receiverTypeName(decl.Receiver)
+				if rt == "" || reachableNamesByPkg[decl.Package][rt] {
+					progressed = markDecl(i) || progressed
+				}
+				continue
+			}
+			if decl.Name == "_" && decl.Kind != "const" {
+				continue
+			}
+			if reachableNamesByPkg[decl.Package][decl.Name] {
+				progressed = markDecl(i) || progressed
+			}
+		}
+		if !progressed {
+			break
+		}
+	}
+
+	for _, change := range d.Changed {
+		if reachableIdentity[idOfDeclaration(change.Before)] {
+			return false
+		}
+	}
+	for _, removed := range d.Removed {
+		if reachableIdentity[idOfDeclaration(removed)] {
+			return false
+		}
+	}
+	for _, added := range d.Added {
+		if added.Name == "_" {
+			if added.Kind == "const" && reachableNamesByPkg[added.Package]["_"] {
+				return false
+			}
+			continue
+		}
+		if reachableNamesByPkg[added.Package][added.Name] || baseRefsByPkg[added.Package][added.Name] {
+			return false
+		}
+		if ast.IsExported(added.Name) && reachableNamesByPkg[added.Package+"_test"][added.Name] {
+			return false
+		}
+	}
+
+	for file := range reachableFiles {
+		b, n := oldFiles[file], nowFiles[file]
+		if b == nil || n == nil || n.Package != b.Package {
+			return false
+		}
+		was, next := fileImportsMap(b), fileImportsMap(n)
+		refs := reachableFileRefs[file]
+		if len(refs) != 0 && was["."] != next["."] {
+			return false
+		}
+		for ref := range refs {
+			if was[ref] != next[ref] {
+				return false
+			}
 		}
 	}
 	return true
@@ -372,6 +672,45 @@ func cloneHeaders(headers []TestVariantFileHeader) []TestVariantFileHeader {
 	return result
 }
 
+func ledgerFileBindings(l TestVariantLedger) (map[string]*TestVariantFileBindings, bool) {
+	m := map[string]*TestVariantFileBindings{}
+	for _, group := range [][]TestVariantFileHeader{l.BaseFiles, l.FileHeaders} {
+		for _, h := range group {
+			if h.Bindings == nil && h.Embedded {
+				continue
+			}
+			if h.Bindings == nil {
+				return nil, false
+			}
+			for _, imp := range h.Bindings.Imports {
+				if imp.Name == "" {
+					return nil, false
+				}
+			}
+			if _, dup := m[h.File]; dup {
+				return nil, false
+			}
+			m[h.File] = h.Bindings
+		}
+	}
+	for _, declaration := range l.Declarations {
+		if b := m[declaration.File]; b == nil || b.Package != declaration.Package {
+			return nil, false
+		}
+	}
+	return m, true
+}
+
+func fileImportsMap(b *TestVariantFileBindings) map[string]string {
+	m := map[string]string{}
+	for _, i := range b.Imports {
+		if i.Name != "_" {
+			m[i.Name] += i.Path + "\x00"
+		}
+	}
+	return m
+}
+
 func bindingsPreserved(before, after TestVariantLedger, added []TestVariantDeclaration) bool {
 	if before.BindingStrategy != BindingStrategy || after.BindingStrategy != BindingStrategy {
 		return false
@@ -381,54 +720,20 @@ func bindingsPreserved(before, after TestVariantLedger, added []TestVariantDecla
 	if !reflect.DeepEqual(before.BaseFiles, after.BaseFiles) {
 		return false
 	}
-	files := func(l TestVariantLedger) (map[string]*TestVariantFileBindings, bool) {
-		m := map[string]*TestVariantFileBindings{}
-		for _, group := range [][]TestVariantFileHeader{l.BaseFiles, l.FileHeaders} {
-			for _, h := range group {
-				if h.Bindings == nil && h.Embedded {
-					continue
-				}
-				if h.Bindings == nil {
-					return nil, false
-				}
-				for _, imp := range h.Bindings.Imports {
-					if imp.Name == "" {
-						return nil, false
-					}
-				}
-				m[h.File] = h.Bindings
-			}
-		}
-		for _, declaration := range l.Declarations {
-			if b := m[declaration.File]; b == nil || b.Package != declaration.Package {
-				return nil, false
-			}
-		}
-		return m, true
-	}
-	old, ok := files(before)
+	old, ok := ledgerFileBindings(before)
 	if !ok {
 		return false
 	}
-	now, ok := files(after)
+	now, ok := ledgerFileBindings(after)
 	if !ok {
 		return false
-	}
-	imports := func(b *TestVariantFileBindings) map[string]string {
-		m := map[string]string{}
-		for _, i := range b.Imports {
-			if i.Name != "_" {
-				m[i.Name] += i.Path + "\x00"
-			}
-		}
-		return m
 	}
 	for file, b := range old {
 		n := now[file]
 		if n == nil || n.Package != b.Package {
 			return false
 		}
-		was, next := imports(b), imports(n)
+		was, next := fileImportsMap(b), fileImportsMap(n)
 		if len(b.References) != 0 && was["."] != next["."] {
 			return false
 		}

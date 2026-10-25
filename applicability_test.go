@@ -146,6 +146,32 @@ func TestInertExtensionRequiresEveryGuardAndRecognizedEvidence(t *testing.T) {
 			t.Fatal("producing constituents changed")
 		}
 	}
+
+	t.Run("sibling test edit or removal is inert for subject", func(t *testing.T) {
+		v, f, s, prior := applicabilityFixture(t)
+		prior.FileHeaders = []TestVariantFileHeader{{
+			File:     "p_test.go",
+			Hash:     "h1",
+			Bindings: &TestVariantFileBindings{Package: "p", References: []string{"BenchmarkEnv", "TestSibling", "helperSibling"}},
+		}}
+		prior.Declarations = []TestVariantDeclaration{
+			{File: "p_test.go", Package: "p", Kind: "func", Name: "BenchmarkEnv", Hash: "b1", References: []string{"BenchmarkEnv"}},
+			{File: "p_test.go", Package: "p", Kind: "func", Name: "TestSibling", Hash: "s1", References: []string{"TestSibling", "helperSibling"}},
+			{File: "p_test.go", Package: "p", Kind: "func", Name: "helperSibling", Hash: "hs1", References: []string{"helperSibling"}},
+		}
+		current := prior.Clone()
+		// Edit TestSibling and remove helperSibling while leaving BenchmarkEnv untouched.
+		current.Declarations = []TestVariantDeclaration{
+			{File: "p_test.go", Package: "p", Kind: "func", Name: "BenchmarkEnv", Hash: "b1", References: []string{"BenchmarkEnv"}},
+			{File: "p_test.go", Package: "p", Kind: "func", Name: "TestSibling", Hash: "s2", References: []string{"TestSibling"}},
+		}
+		current.FileHeaders[0].Bindings.References = []string{"BenchmarkEnv", "TestSibling"}
+		v.facts.testVariantLedgers[s.Package] = current
+		updated, gotLedger, verdict, err := v.CheckInertTestVariantExtension(context.Background(), f, prior, s)
+		if err != nil || verdict.Status != Valid || updated.EffectiveTestVariantClosure() != "B" || !reflect.DeepEqual(gotLedger, current) {
+			t.Fatalf("sibling test edit/removal should be inert for %v: verdict=%+v err=%v", s, verdict, err)
+		}
+	})
 }
 
 func TestInertExtensionPreservesSupportedExecutionAcrossRestarts(t *testing.T) {

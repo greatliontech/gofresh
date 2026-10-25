@@ -500,7 +500,10 @@ records MUST admit an independently closing transaction over a declared subject
 set and runtime binding. Different candidate variants for a subject can be
 judged within that transaction without lending evidence between candidates.
 Evidence selection is automatic under REQ-fresh-final-evidence-selection; an
-inert-compartment extension remains an explicit request. Answers before closing
+inert-compartment extension remains an explicit request (either issued on an open
+checking unit or requested for `ReasonTestVariants` refusals by supplying the
+candidates' prior ledgers to a batch or singleton check helper over a single
+checking unit). Answers before closing
 are provisional, including transformed endpoints and ledgers. Only successful
 closing grants final judgments or checked transformed evidence; failure,
 cancellation or abort grants none and ends the transaction. Closing validates

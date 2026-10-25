@@ -55,10 +55,17 @@ type (
 )
 
 // DiffTestVariantLedgers classifies the delta between a recorded and a current
-// compartment ledger; TestVariantDelta.Inert carries the one Go-semantics
-// judgment gofresh renders over it (REQ-closure-test-variant-inertness).
+// compartment ledger; TestVariantDelta.Inert carries the universal Go-semantics
+// judgment gofresh renders over it, and InertTestVariantLedgersForSubject
+// carries the subject-scoped reachability judgment (REQ-closure-test-variant-inertness).
 func DiffTestVariantLedgers(before, after TestVariantLedger) TestVariantDelta {
 	return testvariant.DiffTestVariantLedgers(before, after)
+}
+
+// InertTestVariantLedgersForSubject reports whether the compartment delta from
+// before to after is behavior-inert for subjectSymbol (REQ-closure-test-variant-inertness).
+func InertTestVariantLedgersForSubject(before, after TestVariantLedger, subjectSymbol string) bool {
+	return testvariant.InertForSubject(before, after, subjectSymbol)
 }
 
 // Subject names the symbol whose freshness is tracked — a package import path and a

@@ -502,3 +502,259 @@ func slicesContains(list []string, want string) bool {
 	}
 	return false
 }
+
+func parseMultiFileLedger(t *testing.T, baseFiles, testFiles map[string]string, imports map[string]string) testvariant.TestVariantLedger {
+	t.Helper()
+	var ledger testvariant.TestVariantLedger
+	ledger.BindingStrategy = testvariant.BindingStrategy
+	for name, src := range baseFiles {
+		_, header, err := parseTestVariantFile(name, []byte(src))
+		if err != nil {
+			t.Fatal(err)
+		}
+		header.Hash = ""
+		if header.Bindings != nil {
+			for i := range header.Bindings.Imports {
+				if header.Bindings.Imports[i].Name == "" {
+					header.Bindings.Imports[i].Name = imports[header.Bindings.Imports[i].Path]
+				}
+			}
+		}
+		ledger.BaseFiles = append(ledger.BaseFiles, header)
+	}
+	for name, src := range testFiles {
+		decls, header, err := parseTestVariantFile(name, []byte(src))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if header.Bindings != nil {
+			for i := range header.Bindings.Imports {
+				if header.Bindings.Imports[i].Name == "" {
+					header.Bindings.Imports[i].Name = imports[header.Bindings.Imports[i].Path]
+				}
+			}
+		}
+		ledger.Declarations = append(ledger.Declarations, decls...)
+		ledger.FileHeaders = append(ledger.FileHeaders, header)
+	}
+	sort.Slice(ledger.BaseFiles, func(i, j int) bool { return ledger.BaseFiles[i].File < ledger.BaseFiles[j].File })
+	sort.Slice(ledger.Declarations, func(i, j int) bool { return testvariant.LessDeclaration(ledger.Declarations[i], ledger.Declarations[j]) })
+	sort.Slice(ledger.FileHeaders, func(i, j int) bool { return ledger.FileHeaders[i].File < ledger.FileHeaders[j].File })
+	return ledger
+}
+
+func TestInertForSubjectAttributesReachableReferences(t *testing.T) {
+	imports := map[string]string{
+		"testing":       "testing",
+		"strings":       "strings",
+		"fmt":           "fmt",
+		"example.com/p": "p",
+	}
+	baseFiles := map[string]string{
+		"prod.go": "package p\n\nfunc ProdA() int { return 1 }\nfunc ProdB() int { return 2 }\n",
+	}
+	beforeTests := map[string]string{
+		"a_test.go": `package p
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
+
+type suiteA struct{ v int }
+func (s *suiteA) run() int { return helperA() }
+func helperA() int { return constA + ProdA() }
+const constA = 10
+
+type suiteB struct{ v int }
+func (s *suiteB) run() string { return helperB() }
+func helperB() string { return strings.TrimSpace("b") }
+
+func TestA(t *testing.T) {
+	var s suiteA
+	_ = fmt.Sprint(s.run())
+}
+
+func TestB(t *testing.T) {
+	var s suiteB
+	_ = s.run()
+}
+`,
+		"b_test.go": `package p_test
+import (
+	"testing"
+	"example.com/p"
+)
+
+func TestExt(t *testing.T) {
+	_ = p.ExportedHelper()
+}
+`,
+		"c_test.go": `package p
+func ExportedHelper() int { return 42 }
+func UnusedHelper() int { return 99 }
+`,
+	}
+	before := parseMultiFileLedger(t, baseFiles, beforeTests, imports)
+
+	// 1. Editing TestB, helperB, suiteB.run, and removing the "strings" import used only by helperB
+	// is inert for TestA, suiteA.run, TestExt, and ProdA, but NOT for TestB.
+	editedBTests := map[string]string{
+		"a_test.go": `package p
+import (
+	"fmt"
+	"testing"
+)
+
+type suiteA struct{ v int }
+func (s *suiteA) run() int { return helperA() }
+func helperA() int { return constA + ProdA() }
+const constA = 10
+
+func TestA(t *testing.T) {
+	var s suiteA
+	_ = fmt.Sprint(s.run())
+}
+`,
+		"b_test.go": beforeTests["b_test.go"],
+		"c_test.go": `package p
+func ExportedHelper() int { return 42 }
+func UnusedHelper() int { return 100 }
+`,
+	}
+	afterEditedB := parseMultiFileLedger(t, baseFiles, editedBTests, imports)
+	if testvariant.DiffTestVariantLedgers(before, afterEditedB).Inert() {
+		t.Fatal("universal Inert() should reject removed/changed sibling declarations")
+	}
+	for _, wantInert := range []string{"TestA", "suiteA.run", "TestExt", "ProdA"} {
+		if !testvariant.InertForSubject(before, afterEditedB, wantInert) {
+			t.Fatalf("InertForSubject(%q) = false after editing/removing unrelated TestB/UnusedHelper, want true", wantInert)
+		}
+	}
+	for _, wantStale := range []string{"TestB", "suiteB.run", "UnusedHelper", "NonExistent", "", "init#a_test.go#0"} {
+		if testvariant.InertForSubject(before, afterEditedB, wantStale) {
+			t.Fatalf("InertForSubject(%q) = true after editing/removing %q, want false", wantStale, wantStale)
+		}
+	}
+
+	// 2. Editing constA (transitively reached by TestA -> suiteA.run -> helperA -> constA)
+	// defeats inertness for TestA and suiteA.run, while leaving TestB and TestExt inert.
+	editedConstATests := map[string]string{
+		"a_test.go": `package p
+import (
+	"fmt"
+	"strings"
+	"testing"
+)
+
+type suiteA struct{ v int }
+func (s *suiteA) run() int { return helperA() }
+func helperA() int { return constA + ProdA() }
+const constA = 999
+
+type suiteB struct{ v int }
+func (s *suiteB) run() string { return helperB() }
+func helperB() string { return strings.TrimSpace("b") }
+
+func TestA(t *testing.T) {
+	var s suiteA
+	_ = fmt.Sprint(s.run())
+}
+
+func TestB(t *testing.T) {
+	var s suiteB
+	_ = s.run()
+}
+`,
+		"b_test.go": beforeTests["b_test.go"],
+		"c_test.go": beforeTests["c_test.go"],
+	}
+	afterConstA := parseMultiFileLedger(t, baseFiles, editedConstATests, imports)
+	if testvariant.InertForSubject(before, afterConstA, "TestA") || testvariant.InertForSubject(before, afterConstA, "suiteA.run") {
+		t.Fatal("editing transitively reachable constA reported inert for TestA / suiteA.run")
+	}
+	if !testvariant.InertForSubject(before, afterConstA, "TestB") || !testvariant.InertForSubject(before, afterConstA, "TestExt") {
+		t.Fatal("editing constA defeated inertness for unrelated TestB / TestExt")
+	}
+
+	// 3. Editing ExportedHelper in package p defeats inertness for TestExt in package p_test.
+	editedExportedTests := map[string]string{
+		"a_test.go": beforeTests["a_test.go"],
+		"b_test.go": beforeTests["b_test.go"],
+		"c_test.go": `package p
+func ExportedHelper() int { return 777 }
+func UnusedHelper() int { return 99 }
+`,
+	}
+	afterExported := parseMultiFileLedger(t, baseFiles, editedExportedTests, imports)
+	if testvariant.InertForSubject(before, afterExported, "TestExt") {
+		t.Fatal("editing ExportedHelper in package p reported inert for TestExt in package p_test")
+	}
+	if !testvariant.InertForSubject(before, afterExported, "TestA") {
+		t.Fatal("editing ExportedHelper defeated inertness for unrelated TestA")
+	}
+
+	// 4. Adding a declaration that shadows a reachable identifier or base-file identifier is rejected.
+	shadowTests := map[string]string{
+		"a_test.go": editedBTests["a_test.go"],
+		"b_test.go": beforeTests["b_test.go"],
+		"c_test.go": `package p
+func ExportedHelper() int { return 42 }
+func ProdB() int { return 0 }
+`,
+	}
+	afterShadow := parseMultiFileLedger(t, baseFiles, shadowTests, imports)
+	if testvariant.InertForSubject(before, afterShadow, "TestA") {
+		t.Fatal("adding declaration shadowing BaseFiles reference ProdB reported inert")
+	}
+
+	// 5. Replacing an intermediate const spec with a blank-named const governor (_ = 999)
+	// before an omitted-list const (c2) defeats inertness for TestConst (Finding 1).
+	constBeforeTests := map[string]string{
+		"a_test.go": `package p
+import "testing"
+
+const (
+	c0 = 10
+	c1
+	c2
+)
+
+func TestConst(t *testing.T) {
+	if c2 != 10 {
+		t.Fatal(c2)
+	}
+}
+func TestOther(t *testing.T) {}
+`,
+	}
+	constAfterTests := map[string]string{
+		"a_test.go": `package p
+import "testing"
+
+const (
+	c0 = 10
+	_ = 999
+	c2
+)
+
+func TestConst(t *testing.T) {
+	if c2 != 10 {
+		t.Fatal(c2)
+	}
+}
+func TestOther(t *testing.T) { _ = 1 }
+`,
+	}
+	constBefore := parseMultiFileLedger(t, baseFiles, constBeforeTests, imports)
+	constAfter := parseMultiFileLedger(t, baseFiles, constAfterTests, imports)
+	if testvariant.InertForSubject(constBefore, constAfter, "TestConst") {
+		t.Fatal("replacing intermediate const spec with blank-named governor _ = 999 reported inert for TestConst")
+	}
+	for _, bad := range []string{"", "init#a_test.go#0", ".Method", "Type."} {
+		if testvariant.InertForSubject(constBefore, constBefore, bad) {
+			t.Fatalf("InertForSubject(identical, %q) = true, want false", bad)
+		}
+	}
+}
+

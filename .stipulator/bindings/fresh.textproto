@@ -2253,8 +2253,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-checking-unit"
-  content_hash: "880aae6fc59418d5ba0c26f1f1a1f4a17f4bdac83772521619c5cdb98bfb5cbb"
-  source_hash: "fae9a16e7a912128d3e02768671068e87931d60aa9fc5996d6d138f6be844274"
+  content_hash: "db13d1b15cd1001345dde02abd4b5a00d774d8d6caea4ef5dcb49100913dd187"
+  source_hash: "8773c8fb67e92e3c8f1b5295b47015637dec7b6f4eb050561a89f99d458f9b33"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestCheckingUnitCandidatesAndLifecycle"
   role: BINDING_ROLE_TESTS
@@ -2293,8 +2293,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-fresh-checking-unit"
-  content_hash: "880aae6fc59418d5ba0c26f1f1a1f4a17f4bdac83772521619c5cdb98bfb5cbb"
-  source_hash: "fae9a16e7a912128d3e02768671068e87931d60aa9fc5996d6d138f6be844274"
+  content_hash: "db13d1b15cd1001345dde02abd4b5a00d774d8d6caea4ef5dcb49100913dd187"
+  source_hash: "8773c8fb67e92e3c8f1b5295b47015637dec7b6f4eb050561a89f99d458f9b33"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestCheckingUnitCancellationAndAbort"
   role: BINDING_ROLE_TESTS
