@@ -908,7 +908,7 @@ func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool)
 				return false
 			}
 			if idx.std {
-				if observableFileMethod(fn) {
+				if !fromRTA || observableFileMethod(fn) {
 					return false
 				}
 				if !isSourceOnlyStandardPackage(a.h.SelectionAudited(), idx.path) && !auditedStandardCallee(a.h.SelectionAudited(), idx.path, functionSymbolName(fn), fn) {
