@@ -120,11 +120,21 @@ This is the single canonical plan for `gofresh` and its consumer ecosystem (`sti
 
 ---
 
-## Post-`gofresh` Ecosystem Verification & Release Train
+## Post-`gofresh` Ecosystem Verification, Zero-Gap Closure, & `pew` Optimization Train
 
 - [x] Re-pin and run `stipulator verify --no-test` and `task check` on `gofresh`.
 - [x] Update `stipulator`, `gomutant`, and `pew` to the finalized `gofresh` commit, align `pew` guidance helpers (`guidance.PrintsDefault`, `Document.Served`, `Registration.LongHelp`), complete first-principles refactoring and retire all open issues across all 4 repositories (`gofresh`: 50 retired, `pew`: 11 retired, `stipulator`: 42 retired, `gomutant`: 53 retired), run `stipulator pin` and `stipulator verify --no-test` across all 4 repositories, and install updated binaries via `task install`.
-- [ ] Execute tagged release train (`gofresh` -> `pew`, `stipulator`, `gomutant`) when ready for downstream distribution.
+- [x] **Step A: Close All Remaining `.stipulator/gaps/` Records Across `gomutant` (3 gaps) and `stipulator` (14 gaps)**
+  - [x] Close the 3 gaps in `gomutant` (`REQ-core-attributed-kills`, `REQ-result-export`, `REQ-target-model`) with property witnesses / structural proofs and remove `.stipulator/gaps/*.textproto` (`6f8bd5d`).
+  - [x] Close the 14 gaps in `stipulator` (`REQ-backend-surfaces`, `REQ-check-preparation`, `REQ-core-one-execution`, `REQ-core-proto-io`, `REQ-evidence-inspection`, `REQ-gap-list`, `REQ-gap-resolved-pruned`, `REQ-go-owned-processes`, `REQ-model-graph`, and the 5 retired `REQ-proto-*` requirements) and remove `.stipulator/gaps/*.textproto`.
+  - [x] Add `pew` to `STIPULATOR_REPOS` in `scripts/fleet-sweep.sh`.
+- [ ] **Step B: Bootstrap `pew` Benchmark Suites & Baseline Stores Across All 4 Repositories**
+  - [ ] Curate `gofresh` hot-path benchmarks under a `benchmarks/` `pew` store (`pew run`, `pew status`).
+  - [ ] Add representative `Benchmark*` suites and `benchmarks/` `pew` stores to `stipulator`, `gomutant`, and `pew`.
+- [ ] **Step C: Profile & Optimize `stipulator` (and Ecosystem Hot Paths) Using `pew`**
+  - [ ] Profile `stipulator` discovery (`1m09s`) and verification (`50s`) bottlenecks using `pew profile` / `pprof`, optimize them, and verify wall-clock and allocation reductions with `pew ab`.
+- [ ] **Step D: Full Self-Hosted Verification & Tagged Release Train**
+  - [ ] Verify `stipulator`, `gomutant`, and `pew` across all 4 repositories and execute the tagged release train (`gofresh` -> `pew`, `stipulator`, `gomutant`).
 
 ---
 
@@ -140,3 +150,4 @@ These capabilities are intentionally not active work items; they trigger **only*
 6. **Non-`amd64` Assembly Fixture Bodies & Windows Job Object Containment (`CREATE_BREAKAWAY_FROM_JOB`)**: Triggers when non-`amd64` fixture execution or Windows native runner execution is selected on CI hosts.
 7. **Testlog Caller-Frame Provenance for `/` Opens**: Triggers only if the Go toolchain `runtime/internal/testlog` interface is extended to pass caller PCs alongside open/stat operations.
 8. **Remote Benchmark Execution & MCP Transport in `pew`**: Triggers only when a provisioned remote benchmark host or concrete driving-agent MCP workflow exists.
+9. **Protobuf Descriptor Backend in `stipulator` (`REQ-proto-inprocess`, `REQ-proto-symbol`, `REQ-proto-shape-hash`, `REQ-proto-provers`, `REQ-proto-no-option-linkage`)**: Triggers only if an external module imports `gen/stipulator/v1` or a non-Go consumer of `proto/stipulator/v1` requires descriptor-level wire proofs beyond Go witnesses and shape pins.

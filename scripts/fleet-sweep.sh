@@ -31,7 +31,7 @@ CORPUS_CONSUMERS=(gomutant stipulator pew)
 FINDINGS_REPOS=(tugboat gomutant gofresh stipulator pew pando pb protodb ocifs gmdb)
 # Repos with stipulator estates: check runs where bindings exist and
 # reports adoption-incomplete where only a manifest does.
-STIPULATOR_REPOS=(stipulator gofresh gomutant tugboat ocifs pando pb)
+STIPULATOR_REPOS=(stipulator gofresh gomutant pew tugboat ocifs pando pb)
 # Repos with pew stores; per-repo standing vouches below.
 PEW_REPOS=(tugboat protodb)
 
