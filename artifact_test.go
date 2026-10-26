@@ -694,3 +694,102 @@ func TestOther(t *testing.T) {}
 		})
 	}
 }
+
+func TestCompileTestBinaryAndExecuteHelpers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("compiles and executes a test binary through Snapshot and RuntimeBinding helpers")
+	}
+	ctx := t.Context()
+	dir := t.TempDir()
+	writeArtifactFixture(t, filepath.Join(dir, "go.mod"), []byte("module example.com/exechelper\n\ngo 1.27.0\n"))
+	writeArtifactFixture(t, filepath.Join(dir, "p_test.go"), []byte(`package exechelper
+import "testing"
+func TestHelper(t *testing.T) {}
+`))
+	subject := Subject{Package: "example.com/exechelper", Symbol: "TestHelper"}
+	runner := gotool.Runner{Containment: &gotool.Containment{}}
+	session, err := NewSession(ctx, BuildDescription{Directory: dir, Environment: os.Environ(), Flags: []string{"-trimpath"}, Inputs: []string{}}, SessionPolicy{Execution: SingleSubjectExecution, Runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := session.Snapshot(ctx, []Subject{subject}, CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	desc, err := snapshot.BuildDescription(subject.Package)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotArgs := desc.TestCompileArgs("/tmp/out.test", "-vet=off")
+	wantArgs := []string{"test", "-c", "-o", "/tmp/out.test", "-trimpath", "-vet=off", "example.com/exechelper"}
+	if !reflect.DeepEqual(gotArgs, wantArgs) {
+		t.Fatalf("TestCompileArgs = %v, want %v", gotArgs, wantArgs)
+	}
+	declOnly, err := snapshot.BindBuilt(subject.Package, "decl-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if declOnly.Package() != subject.Package || declOnly.Identity() != "decl-only" || declOnly.Path() != "" || declOnly.Digest() != "" || declOnly.Bytes() != nil {
+		t.Fatalf("declaration-only accessors = (%q, %q, %q, %q, %v)", declOnly.Package(), declOnly.Identity(), declOnly.Path(), declOnly.Digest(), declOnly.Bytes())
+	}
+	if err := declOnly.Validate(ctx); err == nil {
+		t.Fatal("declaration-only Validate succeeded")
+	}
+
+	binary := filepath.Join(t.TempDir(), "exechelper.test")
+	compiled, err := snapshot.CompileTestBinary(ctx, subject.Package, binary, "-vet=off")
+	if err != nil {
+		t.Fatalf("CompileTestBinary: %v", err)
+	}
+	if compiled.Package() != subject.Package || compiled.Path() != binary || !strings.HasPrefix(compiled.Digest(), "sha256:") || compiled.Identity() != compiled.Digest() {
+		t.Fatalf("compiled accessors = (%q, %q, %q, %q)", compiled.Package(), compiled.Path(), compiled.Digest(), compiled.Identity())
+	}
+	raw := compiled.Bytes()
+	if len(raw) == 0 {
+		t.Fatal("compiled Bytes returned empty")
+	}
+	raw[0] ^= 0xff
+	if err := compiled.Validate(ctx); err != nil {
+		t.Fatalf("mutating caller copy of Bytes corrupted binding: %v", err)
+	}
+	rebound, err := snapshot.BindArtifactByDigest(ctx, subject.Package, binary)
+	if err != nil {
+		t.Fatalf("BindArtifactByDigest: %v", err)
+	}
+	if rebound.Digest() != compiled.Digest() {
+		t.Fatalf("BindArtifactByDigest digest = %q, want %q", rebound.Digest(), compiled.Digest())
+	}
+
+	runtimeBinding := bindTestRuntime(t, snapshot, RuntimeDescription{})
+	capture := filepath.Join(t.TempDir(), "capture.log")
+	finalized, err := runtimeBinding.Execute(ctx, subject, compiled, ProcessDescription{Identity: "helper-run", Capture: capture}, func(ctx context.Context, c Contribution) (Terminal, error) {
+		cmd, err := runner.Program(ctx, c.Directory(), c.Environment(), compiled.Path(), "-test.run=^TestHelper$", "-test.testlogfile="+c.Capture())
+		if err != nil {
+			return Terminal{}, err
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return Terminal{}, fmt.Errorf("run binary: %w\n%s", err, out)
+		}
+		return Terminal{Kind: NormalCompletion}, nil
+	})
+	if err != nil {
+		t.Fatalf("RuntimeBinding.Execute: %v", err)
+	}
+	if finalized.Verdict.Status != Valid || finalized.Terminal.Kind != NormalCompletion {
+		t.Fatalf("finalized = %+v, want Valid NormalCompletion", finalized)
+	}
+
+	u, err := runtimeBinding.Begin(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runBoom := errors.New("callback boom")
+	if _, err := u.Execute(ctx, compiled, ProcessDescription{Identity: "boom-run"}, func(context.Context, Contribution) (Terminal, error) {
+		return Terminal{}, runBoom
+	}); !errors.Is(err, runBoom) {
+		t.Fatalf("u.Execute callback error = %v, want %v", err, runBoom)
+	}
+	if _, err := u.Close(ctx); !errors.Is(err, ErrUnitClosed) {
+		t.Fatalf("u.Close after failed Execute = %v, want ErrUnitClosed", err)
+	}
+}

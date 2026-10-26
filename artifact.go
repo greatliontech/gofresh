@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 )
 
 // ArtifactDescription identifies the retained package-test file the executor
@@ -67,6 +69,132 @@ func (s *Snapshot) BindArtifact(ctx context.Context, pkg string, description Art
 	}
 	binding.inspected = artifact
 	return binding, nil
+}
+
+// BindArtifactByDigest inspects the compiled package-test artifact at path,
+// derives its canonical "sha256:<hex>" identity from the inspected image, and
+// binds both to this snapshot.
+func (s *Snapshot) BindArtifactByDigest(ctx context.Context, pkg, path string) (binding BuildBinding, err error) {
+	if ctx == nil {
+		return BuildBinding{}, errors.New("gofresh: nil artifact context")
+	}
+	defer func() {
+		if cause := ctx.Err(); cause != nil {
+			binding, err = BuildBinding{}, cause
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return BuildBinding{}, err
+	}
+	if _, err := s.BuildDescription(pkg); err != nil {
+		return BuildBinding{}, err
+	}
+	if path == "" {
+		return BuildBinding{}, errors.New("gofresh: empty artifact path")
+	}
+	resolved, err := rebaseProcessPath(s.session.build.Directory, path)
+	if err != nil {
+		return BuildBinding{}, fmt.Errorf("gofresh: artifact path: %w", err)
+	}
+	artifact, err := readArtifact(ctx, resolved, nil)
+	if err != nil {
+		return BuildBinding{}, fmt.Errorf("gofresh: inspect artifact %q: %w", resolved, err)
+	}
+	if err := artifact.validate(ctx); err != nil {
+		return BuildBinding{}, err
+	}
+	identity := "sha256:" + hex.EncodeToString(artifact.digest[:])
+	binding, err = s.BindBuilt(pkg, identity)
+	if err != nil {
+		return BuildBinding{}, err
+	}
+	binding.inspected = artifact
+	return binding, nil
+}
+
+// CompileTestBinary compiles pkg's test binary to outputPath under the
+// snapshot's admitted build description and extraFlags, then inspects and binds
+// the resulting artifact by its SHA-256 digest.
+func (s *Snapshot) CompileTestBinary(ctx context.Context, pkg, outputPath string, extraFlags ...string) (binding BuildBinding, err error) {
+	if ctx == nil {
+		return BuildBinding{}, errors.New("gofresh: nil artifact context")
+	}
+	defer func() {
+		if cause := ctx.Err(); cause != nil {
+			binding, err = BuildBinding{}, cause
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return BuildBinding{}, err
+	}
+	desc, err := s.BuildDescription(pkg)
+	if err != nil {
+		return BuildBinding{}, err
+	}
+	if outputPath == "" {
+		return BuildBinding{}, errors.New("gofresh: empty artifact path")
+	}
+	resolved, err := rebaseProcessPath(desc.Directory, outputPath)
+	if err != nil {
+		return BuildBinding{}, fmt.Errorf("gofresh: artifact path: %w", err)
+	}
+	args := desc.TestCompileArgs(resolved, extraFlags...)
+	if _, err := s.session.engine.runner.Run(ctx, desc.Directory, desc.Environment, args...); err != nil {
+		return BuildBinding{}, fmt.Errorf("gofresh: compile test binary %q: %w", pkg, err)
+	}
+	return s.BindArtifactByDigest(ctx, pkg, resolved)
+}
+
+// Package returns the package import path bound to this artifact.
+func (b BuildBinding) Package() string {
+	return b.pkg
+}
+
+// Identity returns the executor-declared or digest-derived artifact identity.
+func (b BuildBinding) Identity() string {
+	return b.identity
+}
+
+// Path returns the resolved filesystem coordinate of an inspected artifact, or
+// the empty string for a declaration-only binding.
+func (b BuildBinding) Path() string {
+	if b.inspected == nil {
+		return ""
+	}
+	return b.inspected.path
+}
+
+// Digest returns the canonical "sha256:<hex>" digest of an inspected artifact,
+// or the empty string for a declaration-only binding.
+func (b BuildBinding) Digest() string {
+	if b.inspected == nil {
+		return ""
+	}
+	return "sha256:" + hex.EncodeToString(b.inspected.digest[:])
+}
+
+// Bytes returns a caller-owned copy of the inspected artifact's bytes, or nil
+// for a declaration-only binding.
+func (b BuildBinding) Bytes() []byte {
+	if b.inspected == nil {
+		return nil
+	}
+	return slices.Clone(b.inspected.bytes)
+}
+
+// Validate re-observes the inspected artifact at its execution coordinate and
+// verifies that its regular-file identity and complete bytes remain unchanged.
+func (b BuildBinding) Validate(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("gofresh: nil artifact context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if b.inspected == nil {
+		return errors.New("gofresh: build binding has no inspected artifact")
+	}
+	return b.inspected.validate(ctx)
 }
 
 // validate independently reopens the execution coordinate. Reading only a held

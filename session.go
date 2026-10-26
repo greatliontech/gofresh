@@ -27,6 +27,17 @@ type BuildDescription struct {
 	Inputs      []string
 }
 
+// TestCompileArgs returns the go command arguments to compile Package's test
+// binary to outputPath under Flags and any caller-supplied extraFlags.
+func (d BuildDescription) TestCompileArgs(outputPath string, extraFlags ...string) []string {
+	args := make([]string, 0, 4+len(d.Flags)+len(extraFlags)+1)
+	args = append(args, "test", "-c", "-o", outputPath)
+	args = append(args, d.Flags...)
+	args = append(args, extraFlags...)
+	args = append(args, d.Package)
+	return args
+}
+
 // RuntimeDescription is the complete environment of the built program. A nil
 // Environment inherits the session's build environment; a nonnil empty slice
 // describes an otherwise empty environment. Directory supplies PWD; omission

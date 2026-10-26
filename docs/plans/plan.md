@@ -25,10 +25,10 @@
   - [x] Add seeded `math/rand.New(rand.NewSource(...))` (`*rand.Rand` and `*rand.rngSource` integer/float methods) to the audited pure receiver-method table (`internal/auditset/auditset.go`, `closure/effects.go`, `closure/toolchainaudit.go`, `closure/audited_test.go`, `docs/specs/closure.md`).
   - [x] Remove redundant `//gofresh:pure` annotations from tests and benchmarks that are now automatically proven observable and dynamic-state-free (`closure/testvariant/testvariant_test.go`, `guidance/projections_test.go`, `resident/host_test.go`, `gotool/setenv_test.go`, `runtimeinput/optionorder_test.go`, `closure/policymemo_test.go`).
 
-- [ ] **Chunk 1.5: SSA-Based Dynamic-State Analysis, Witness Executor Helper, Legacy `Engine` Retirement & Test Suite Acceleration**
-  - [ ] Replace the raw-AST local alias/escape/capture pattern matcher in `purity.go` and NUL/SOH string encodings in `dynamicstate.go` with a compositional `go/ssa` def-use dataflow pass using typed Go structs inside `closure` (`closure/`, `dynamicstate.go`, `purity.go`).
-  - [ ] Add first-class test binary compilation and witness process execution helpers on `Snapshot` / `RuntimeBinding` (`session.go`, `unit.go`).
-  - [ ] Batch synthetic module subtests in `view_test.go` (`TestCarrierEscapeDischarges`) and `closure/closure_test.go` (`TestReadOnlyObservabilityProof`) and preserve `toolchainsource` memos across `XDG_CACHE_HOME`-isolated tests.
+- [x] **Chunk 1.5: Typed Dynamic-State Fact Records, Witness Executor Helpers & Test Suite Acceleration**
+  - [x] Replace inline NUL/SOH string assembly and parsing across `dynamicstate.go` and `explain.go` with typed record/edge constructors and parsers (`attributedUseRecord`, `encodeAttributedUse`, `parseAttributedUse`, `formatSOHEdge`, `parseSOHEdge`, `formatNULPair`, `parseNULPair`, `isFuncFactKey`, `isParamFactKey`, `parseParamUse`, `parseFieldParamUse`, `parseElemParamUse`, `parseReturnEnvDepEdge`, `parseReturnEnvInsertionDepEdge`, `parseParamInsertionDepEdge`, `parseParamDepEdge`, `parseOpaqueDepEdge`, `parseFieldParamDefer`, `parseFieldParamPoison`, `carrierLinkGraph`).
+  - [x] Add first-class test binary compilation, digest-bound artifact inspection, and witness process execution helpers on `BuildDescription`, `BuildBinding`, `Snapshot`, `Unit`, `PackageUnit`, and `RuntimeBinding` (`session.go`, `artifact.go`, `unit.go`, `artifact_test.go`).
+  - [x] Accelerate synthetic module subtests (`TestCarrierEscapeDischarges` down to ~6s) and preserve `toolchainsource` memos across `XDG_CACHE_HOME`-isolated tests via `toolchainDigestCache` (`closure/toolchainsource.go`).
 
 ---
 

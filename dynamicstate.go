@@ -313,7 +313,7 @@ func dynamicStateFactOf(audited bool, p *packages.Package, singleSubject bool) d
 	recordOpaqueDynamicVars(p, opaque, breaks, opaqueDeps)
 	for own, ownDeps := range opaqueDeps {
 		for dep := range ownDeps {
-			fact.OpaqueDeps = append(fact.OpaqueDeps, own+"\x01"+dep)
+			fact.OpaqueDeps = append(fact.OpaqueDeps, formatSOHEdge(own, dep))
 		}
 	}
 	sort.Strings(fact.OpaqueDeps)
@@ -323,7 +323,7 @@ func dynamicStateFactOf(audited bool, p *packages.Package, singleSubject bool) d
 	recordEnvCarryingRegistrations(audited, p, envCarrying, envCalls, fieldDefer, fieldPoison)
 	for varKey, entries := range fieldDefer {
 		for entry := range entries {
-			fact.FieldParamDefer = append(fact.FieldParamDefer, varKey+"\x01"+entry)
+			fact.FieldParamDefer = append(fact.FieldParamDefer, formatSOHEdge(varKey, entry))
 		}
 	}
 	sort.Strings(fact.FieldParamDefer)
@@ -332,20 +332,20 @@ func dynamicStateFactOf(audited bool, p *packages.Package, singleSubject bool) d
 			if entry == "" {
 				fact.FieldParamPoison = append(fact.FieldParamPoison, varKey)
 			} else {
-				fact.FieldParamPoison = append(fact.FieldParamPoison, varKey+"\x01"+entry)
+				fact.FieldParamPoison = append(fact.FieldParamPoison, formatSOHEdge(varKey, entry))
 			}
 		}
 	}
 	sort.Strings(fact.FieldParamPoison)
 	for varKey, wants := range fieldUses {
 		for want := range wants {
-			fact.FieldParamUses = append(fact.FieldParamUses, varKey+"\x01"+want)
+			fact.FieldParamUses = append(fact.FieldParamUses, formatSOHEdge(varKey, want))
 		}
 	}
 	sort.Strings(fact.FieldParamUses)
 	for argKey, wants := range elemUses {
 		for want := range wants {
-			fact.ElemParamUses = append(fact.ElemParamUses, argKey+"\x01"+want)
+			fact.ElemParamUses = append(fact.ElemParamUses, formatSOHEdge(argKey, want))
 		}
 	}
 	sort.Strings(fact.ElemParamUses)
@@ -375,38 +375,19 @@ func dynamicStateFactOf(audited bool, p *packages.Package, singleSubject bool) d
 	sort.Strings(fact.EnvCallable)
 	for varKey, callees := range envCalls {
 		for callee := range callees {
-			fact.EnvCallUses = append(fact.EnvCallUses, varKey+"\x01"+callee)
+			fact.EnvCallUses = append(fact.EnvCallUses, formatSOHEdge(varKey, callee))
 		}
 	}
 	sort.Strings(fact.EnvCallUses)
 	for _, use := range attributedUses {
-		class := "m"
-		if use.escape {
-			class = "e"
-		}
-		if use.literal {
-			// Literal-borne classes: sited on the enclosing named
-			// declaration for the reachability scopings, never
-			// init-discharged at composition
-			// (REQ-closure-shared-dynamic-state).
-			class = "lm"
-			if use.escape {
-				class = "le"
-			}
-			if use.method != "" {
-				class = "dl\x00" + use.method
-			}
-		} else if use.method != "" {
-			class = "d\x00" + use.method
-		}
-		fact.AttributedUses = append(fact.AttributedUses, use.fn+"\x00"+use.key+"\x00"+class)
+		fact.AttributedUses = append(fact.AttributedUses, encodeAttributedUse(use))
 	}
 	sort.Strings(fact.AttributedUses)
 	for callee, regions := range funcRefs {
 		for region := range regions {
 			// The callee key and a caller-key region each carry their
 			// own NUL, so the edge frames with a distinct separator.
-			fact.FuncRefs = append(fact.FuncRefs, callee+"\x01"+region)
+			fact.FuncRefs = append(fact.FuncRefs, formatSOHEdge(callee, region))
 		}
 	}
 	sort.Strings(fact.FuncRefs)
@@ -414,63 +395,63 @@ func dynamicStateFactOf(audited bool, p *packages.Package, singleSubject bool) d
 	retentionMethods := receiverRetentionFreeMethods(audited, p, readOnly)
 	for method := range readOnly {
 		if p.Types != nil {
-			fact.ReceiverReadOnly = append(fact.ReceiverReadOnly, p.Types.Path()+"\x00"+method)
+			fact.ReceiverReadOnly = append(fact.ReceiverReadOnly, formatNULPair(p.Types.Path(), method))
 		}
 	}
 	sort.Strings(fact.ReceiverReadOnly)
 	for method := range retentionMethods {
 		if p.Types != nil {
-			fact.ReceiverRetentionFree = append(fact.ReceiverRetentionFree, p.Types.Path()+"\x00"+method)
+			fact.ReceiverRetentionFree = append(fact.ReceiverRetentionFree, formatNULPair(p.Types.Path(), method))
 		}
 	}
 	sort.Strings(fact.ReceiverRetentionFree)
 	for varKey, methodKeys := range methodUses {
 		for methodKey := range methodKeys {
-			fact.MethodUses = append(fact.MethodUses, varKey+"\x00"+methodKey)
+			fact.MethodUses = append(fact.MethodUses, formatNULPair(varKey, methodKey))
 		}
 	}
 	sort.Strings(fact.MethodUses)
 	if p.Types != nil {
 		paramLeakFree, paramDeps, paramRetention, paramRetentionDeps := paramLeakFreeFunctions(audited, p, readOnly, retentionMethods)
 		for paramKey := range paramLeakFree {
-			fact.ParamLeakFree = append(fact.ParamLeakFree, p.Types.Path()+"\x00"+paramKey)
+			fact.ParamLeakFree = append(fact.ParamLeakFree, formatNULPair(p.Types.Path(), paramKey))
 		}
 		for paramKey, edges := range paramDeps {
-			ownKey := p.Types.Path() + "\x00" + paramKey
+			ownKey := formatNULPair(p.Types.Path(), paramKey)
 			for dep := range edges {
-				fact.ParamLeakFreeDeps = append(fact.ParamLeakFreeDeps, ownKey+"\x01"+dep)
+				fact.ParamLeakFreeDeps = append(fact.ParamLeakFreeDeps, formatSOHEdge(ownKey, dep))
 			}
 		}
 		sort.Strings(fact.ParamLeakFreeDeps)
 		for paramKey := range paramRetention {
-			fact.ParamRetentionFree = append(fact.ParamRetentionFree, p.Types.Path()+"\x00"+paramKey)
+			fact.ParamRetentionFree = append(fact.ParamRetentionFree, formatNULPair(p.Types.Path(), paramKey))
 		}
 		for paramKey, edges := range paramRetentionDeps {
-			ownKey := p.Types.Path() + "\x00" + paramKey
+			ownKey := formatNULPair(p.Types.Path(), paramKey)
 			for dep := range edges {
-				fact.ParamRetentionFreeDeps = append(fact.ParamRetentionFreeDeps, ownKey+"\x01"+dep)
+				fact.ParamRetentionFreeDeps = append(fact.ParamRetentionFreeDeps, formatSOHEdge(ownKey, dep))
 			}
 		}
 		sort.Strings(fact.ParamRetentionFree)
 		sort.Strings(fact.ParamRetentionFreeDeps)
 		envFree, envDeps, retFieldDefer, retFieldPoison, insFree, insDeps, callerInsDeps := returnEnvFreeFunctions(audited, p, paramLeakFree, readOnly)
 		for fnName := range envFree {
-			fnKey := p.Types.Path() + "\x00" + fnName
+			fnKey := formatNULPair(p.Types.Path(), fnName)
 			fact.ReturnEnvFree = append(fact.ReturnEnvFree, fnKey)
 			for callee := range envDeps[fnName] {
-				fact.ReturnEnvDeps = append(fact.ReturnEnvDeps, fnKey+"\x01"+callee)
+				fact.ReturnEnvDeps = append(fact.ReturnEnvDeps, formatSOHEdge(fnKey, callee))
 			}
 			for dep := range callerInsDeps[fnName] {
-				fact.ReturnEnvInsertionDeps = append(fact.ReturnEnvInsertionDeps, fnKey+"\x01"+dep)
+				fact.ReturnEnvInsertionDeps = append(fact.ReturnEnvInsertionDeps, formatSOHEdge(fnKey, dep))
 			}
 			for entry := range retFieldDefer[fnName] {
-				fact.ReturnFieldParamDefer = append(fact.ReturnFieldParamDefer, fnKey+"\x01"+entry)
+				fact.ReturnFieldParamDefer = append(fact.ReturnFieldParamDefer, formatSOHEdge(fnKey, entry))
 			}
 			for entry := range retFieldPoison[fnName] {
 				if entry == "" {
 					fact.ReturnFieldParamPoison = append(fact.ReturnFieldParamPoison, fnKey)
 				} else {
-					fact.ReturnFieldParamPoison = append(fact.ReturnFieldParamPoison, fnKey+"\x01"+entry)
+					fact.ReturnFieldParamPoison = append(fact.ReturnFieldParamPoison, formatSOHEdge(fnKey, entry))
 				}
 			}
 		}
@@ -480,10 +461,10 @@ func dynamicStateFactOf(audited bool, p *packages.Package, singleSubject bool) d
 		sort.Strings(fact.ReturnFieldParamDefer)
 		sort.Strings(fact.ReturnFieldParamPoison)
 		for paramKey := range insFree {
-			ownKey := p.Types.Path() + "\x00" + paramKey
+			ownKey := formatNULPair(p.Types.Path(), paramKey)
 			fact.ParamInsertionFree = append(fact.ParamInsertionFree, ownKey)
 			for dep := range insDeps[paramKey] {
-				fact.ParamInsertionDeps = append(fact.ParamInsertionDeps, ownKey+"\x01"+dep)
+				fact.ParamInsertionDeps = append(fact.ParamInsertionDeps, formatSOHEdge(ownKey, dep))
 			}
 		}
 		sort.Strings(fact.ParamInsertionFree)
@@ -492,25 +473,25 @@ func dynamicStateFactOf(audited bool, p *packages.Package, singleSubject bool) d
 	sort.Strings(fact.ParamLeakFree)
 	for varKey, paramKeys := range paramUses {
 		for paramKey := range paramKeys {
-			fact.ParamUses = append(fact.ParamUses, varKey+"\x00"+paramKey)
+			fact.ParamUses = append(fact.ParamUses, formatNULPair(varKey, paramKey))
 		}
 	}
 	sort.Strings(fact.ParamUses)
 	for varKey, paramKeys := range initParamUses {
 		for paramKey := range paramKeys {
-			fact.InitParamUses = append(fact.InitParamUses, varKey+"\x00"+paramKey)
+			fact.InitParamUses = append(fact.InitParamUses, formatNULPair(varKey, paramKey))
 		}
 	}
 	sort.Strings(fact.InitParamUses)
 	for varKey, methodKeys := range initMethodUses {
 		for methodKey := range methodKeys {
-			fact.InitMethodUses = append(fact.InitMethodUses, varKey+"\x00"+methodKey)
+			fact.InitMethodUses = append(fact.InitMethodUses, formatNULPair(varKey, methodKey))
 		}
 	}
 	sort.Strings(fact.InitMethodUses)
 	for keyA, others := range carrierLinks {
 		for keyB := range others {
-			fact.CarrierLinks = append(fact.CarrierLinks, keyA+"\x01"+keyB)
+			fact.CarrierLinks = append(fact.CarrierLinks, formatSOHEdge(keyA, keyB))
 		}
 	}
 	sort.Strings(fact.CarrierLinks)
@@ -1357,7 +1338,7 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, use := range fact.EnvCallUses {
-				varKey, callee, ok := strings.Cut(use, "\x01")
+				varKey, callee, ok := parseSOHEdge(use)
 				if !ok {
 					// A malformed entry cannot attribute its store - the
 					// fact carrying it is not trusted, fail-closed like
@@ -1381,7 +1362,7 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, use := range fact.MethodUses {
-				varKey, methodKey, ok := strings.Cut(use, "\x00")
+				varKey, methodKey, ok := parseNULPair(use)
 				if !ok {
 					// A malformed entry cannot attribute its use; the
 					// fact that carries it is not trusted - every key
@@ -1403,7 +1384,7 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 			// still retain its receiver
 			// (REQ-closure-shared-dynamic-state).
 			for _, use := range fact.InitMethodUses {
-				varKey, methodKey, ok := strings.Cut(use, "\x00")
+				varKey, methodKey, ok := parseNULPair(use)
 				if !ok {
 					for _, key := range fact.Declares {
 						mutated[key] = true
@@ -1425,15 +1406,15 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, use := range fact.ParamUses {
-				parts := strings.SplitN(use, "\x00", 2)
-				if len(parts) != 2 || strings.Count(parts[1], "\x00") != 2 {
+				varKey, paramKey, ok := parseParamUse(use)
+				if !ok {
 					for _, key := range fact.Declares {
 						mutated[key] = true
 					}
 					continue
 				}
-				if !paramLeakFree[parts[1]] {
-					escaped[parts[0]] = true
+				if !paramLeakFree[paramKey] {
+					escaped[varKey] = true
 				}
 			}
 			// An exempt-region use additionally discharges through the
@@ -1441,15 +1422,15 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 			// flow's own exempt store, only retention or a handout
 			// refuses (REQ-closure-shared-dynamic-state).
 			for _, use := range fact.InitParamUses {
-				parts := strings.SplitN(use, "\x00", 2)
-				if len(parts) != 2 || strings.Count(parts[1], "\x00") != 2 {
+				varKey, paramKey, ok := parseParamUse(use)
+				if !ok {
 					for _, key := range fact.Declares {
 						mutated[key] = true
 					}
 					continue
 				}
-				if !paramLeakFree[parts[1]] && !resolution.paramRetentionFree[parts[1]] {
-					escaped[parts[0]] = true
+				if !paramLeakFree[paramKey] && !resolution.paramRetentionFree[paramKey] {
+					escaped[varKey] = true
 				}
 			}
 		}
@@ -1465,34 +1446,27 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, use := range fact.FieldParamUses {
-				varKey, position, ok := strings.Cut(use, "\x01")
-				if !ok || !fieldPosition(position, 0) {
+				varKey, field, idx, ok := parseFieldParamUse(use)
+				if !ok {
 					for _, key := range fact.Declares {
 						mutated[key] = true
 					}
 					continue
 				}
-				field, idx, _ := strings.Cut(position, "\x00")
 				if ok, _ := resolution.fieldPopulationProves(varKey, field, idx); !ok {
 					escaped[varKey] = true
 				}
 			}
 			for _, use := range fact.ElemParamUses {
-				parts := strings.SplitN(use, "\x01", 3)
-				if len(parts) != 3 {
+				varKey, ownerKey, idx, ok := parseElemParamUse(use)
+				if !ok {
 					for _, key := range fact.Declares {
 						mutated[key] = true
 					}
 					continue
 				}
-				if n, err := strconv.Atoi(parts[2]); err != nil || n < 0 || strconv.Itoa(n) != parts[2] {
-					for _, key := range fact.Declares {
-						mutated[key] = true
-					}
-					continue
-				}
-				if ok, _ := resolution.fieldPopulationProves(parts[1], elemPositionField, parts[2]); !ok {
-					escaped[parts[0]] = true
+				if ok, _ := resolution.fieldPopulationProves(ownerKey, elemPositionField, idx); !ok {
+					escaped[varKey] = true
 				}
 			}
 		}
@@ -1506,7 +1480,7 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, edge := range fact.FuncRefs {
-				callee, region, ok := strings.Cut(edge, "\x01")
+				callee, region, ok := parseSOHEdge(edge)
 				if !ok {
 					continue
 				}
@@ -1622,9 +1596,9 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 	}
 	for _, facts := range allFacts {
 		for _, fact := range facts {
-			for _, use := range fact.AttributedUses {
-				parts := strings.Split(use, "\x00")
-				if len(parts) < 4 {
+			for _, raw := range fact.AttributedUses {
+				rec, ok := parseAttributedUse(raw)
+				if !ok {
 					// A malformed attribution cannot be judged - the
 					// fact carrying it is not trusted, fail-closed
 					// exactly as the malformed method-use arm.
@@ -1634,8 +1608,7 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 					}
 					continue
 				}
-				fn := parts[0] + "\x00" + parts[1]
-				key, class := parts[2], parts[3]
+				fn, key, class := rec.fn, rec.key, rec.class
 				if class == "e" {
 					// An escape never discharges by init flow: the alias
 					// outlives initialization, exactly as in an init body.
@@ -1659,7 +1632,7 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 					// unknowable — fail-closed
 					// (REQ-closure-shared-dynamic-state).
 					if class == "dl" {
-						if len(parts) >= 6 && readOnly[parts[4]+"\x00"+parts[5]] {
+						if rec.hasMethod && readOnly[rec.method] {
 							continue
 						}
 						mutated[key] = true
@@ -1668,7 +1641,7 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 					} else {
 						mutated[key] = true
 					}
-					_, encloserName, _ := strings.Cut(fn, "\x00")
+					_, encloserName, _ := parseNULPair(fn)
 					if initReachFn[fn] || strings.Contains(encloserName, ".") {
 						unattributedMark[key] = true
 					} else {
@@ -1680,8 +1653,8 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 					continue
 				}
 				switch {
-				case class == "d" && len(parts) >= 6:
-					if !readOnly[parts[4]+"\x00"+parts[5]] {
+				case class == "d" && rec.hasMethod:
+					if !readOnly[rec.method] {
 						mutated[key] = true
 						attributeSite(key, fn)
 					}
@@ -1697,28 +1670,11 @@ func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dyna
 	// environment marks cross every link symmetrically and transitively
 	// - a mark on either side refuses both
 	// (REQ-closure-shared-dynamic-state).
-	linkAdj := map[string]map[string]bool{}
-	for _, facts := range allFacts {
-		for _, fact := range facts {
-			for _, link := range fact.CarrierLinks {
-				a, b, ok := strings.Cut(link, "\x01")
-				if !ok || a == "" || b == "" {
-					for _, key := range fact.Declares {
-						mutated[key] = true
-					}
-					continue
-				}
-				if linkAdj[a] == nil {
-					linkAdj[a] = map[string]bool{}
-				}
-				if linkAdj[b] == nil {
-					linkAdj[b] = map[string]bool{}
-				}
-				linkAdj[a][b] = true
-				linkAdj[b][a] = true
-			}
+	linkAdj := carrierLinkGraph(allFacts, func(fact dynamicStateFact) {
+		for _, key := range fact.Declares {
+			mutated[key] = true
 		}
-	}
+	})
 	for changed := len(linkAdj) > 0; changed; {
 		changed = false
 		for a, others := range linkAdj {
@@ -2412,15 +2368,15 @@ func resolveEnvAudit(allFacts map[string][]dynamicStateFact, malformed func(fact
 	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, key := range fact.ReturnEnvFree {
-				if strings.Count(key, "\x00") != 1 {
+				if !isFuncFactKey(key) {
 					malformed(fact)
 					continue
 				}
 				e.declared[key] = true
 			}
 			for _, edge := range fact.ReturnEnvDeps {
-				fnKey, callee, ok := strings.Cut(edge, "\x01")
-				if !ok || strings.Count(fnKey, "\x00") != 1 || strings.Count(callee, "\x00") != 1 {
+				fnKey, callee, ok := parseReturnEnvDepEdge(edge)
+				if !ok {
 					// A dropped condition would resolve a proof with
 					// fewer obligations - malformed edges mark the fact,
 					// fail-closed like every sibling arm.
@@ -2430,23 +2386,23 @@ func resolveEnvAudit(allFacts map[string][]dynamicStateFact, malformed func(fact
 				addEdge(e.retDeps, fnKey, callee)
 			}
 			for _, edge := range fact.ReturnEnvInsertionDeps {
-				fnKey, dep, ok := strings.Cut(edge, "\x01")
-				if !ok || strings.Count(fnKey, "\x00") != 1 || strings.Count(dep, "\x00") < 1 || strings.Count(dep, "\x00") > 2 {
+				fnKey, dep, ok := parseReturnEnvInsertionDepEdge(edge)
+				if !ok {
 					malformed(fact)
 					continue
 				}
 				addEdge(e.retInsDeps, fnKey, dep)
 			}
 			for _, key := range fact.ParamInsertionFree {
-				if strings.Count(key, "\x00") != 2 {
+				if !isParamFactKey(key) {
 					malformed(fact)
 					continue
 				}
 				e.insDeclared[key] = true
 			}
 			for _, edge := range fact.ParamInsertionDeps {
-				paramKey, dep, ok := strings.Cut(edge, "\x01")
-				if !ok || strings.Count(paramKey, "\x00") != 2 || strings.Count(dep, "\x00") < 1 || strings.Count(dep, "\x00") > 2 {
+				paramKey, dep, ok := parseParamInsertionDepEdge(edge)
+				if !ok {
 					malformed(fact)
 					continue
 				}
@@ -2530,8 +2486,8 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 				r.paramLeakFree[key] = true
 			}
 			for _, edge := range fact.ParamLeakFreeDeps {
-				own, dep, ok := strings.Cut(edge, "\x01")
-				if !ok || strings.Count(own, "\x00") != 2 || strings.Count(dep, "\x00") != 2 {
+				own, dep, ok := parseParamDepEdge(edge)
+				if !ok {
 					malformed(fact)
 					continue
 				}
@@ -2544,8 +2500,8 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 				r.paramRetentionFree[key] = true
 			}
 			for _, edge := range fact.ParamRetentionFreeDeps {
-				own, dep, ok := strings.Cut(edge, "\x01")
-				if !ok || strings.Count(own, "\x00") != 2 || strings.Count(dep, "\x00") != 2 {
+				own, dep, ok := parseParamDepEdge(edge)
+				if !ok {
 					malformed(fact)
 					continue
 				}
@@ -2574,8 +2530,8 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 				r.notOpaque[key] = true
 			}
 			for _, edge := range fact.OpaqueDeps {
-				own, dep, ok := strings.Cut(edge, "\x01")
-				if !ok || own == "" || dep == "" || strings.Contains(own, "\x00") || strings.Contains(dep, "\x00") {
+				own, dep, ok := parseOpaqueDepEdge(edge)
+				if !ok {
 					malformed(fact)
 					continue
 				}
@@ -2672,49 +2628,39 @@ func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed fun
 	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, entry := range fact.FieldParamDefer {
-				parts := strings.SplitN(entry, "\x01", 3)
-				if len(parts) != 3 || !fieldPosition(parts[1], 0) || strings.Count(parts[2], "\x00") != 2 {
+				at, paramKey, ok := parseFieldParamDefer(entry, false)
+				if !ok {
 					malformed(fact)
 					continue
 				}
-				at := parts[0] + "\x01" + parts[1]
-				r.fieldDeferAt[at] = append(r.fieldDeferAt[at], parts[2])
+				r.fieldDeferAt[at] = append(r.fieldDeferAt[at], paramKey)
 			}
 			for _, entry := range fact.FieldParamPoison {
-				key, position, ok := strings.Cut(entry, "\x01")
-				if ok && !fieldPosition(position, -1) {
+				at, ok := parseFieldParamPoison(entry, false)
+				if !ok {
 					malformed(fact)
 					continue
 				}
-				if !ok {
-					r.fieldPoisonAt[key] = true
-				} else {
-					r.fieldPoisonAt[key+"\x01"+position] = true
-				}
+				r.fieldPoisonAt[at] = true
 			}
 			for _, entry := range fact.ReturnFieldParamDefer {
-				parts := strings.SplitN(entry, "\x01", 3)
-				if len(parts) != 3 || strings.Count(parts[0], "\x00") != 1 || !fieldPosition(parts[1], 0) || strings.Count(parts[2], "\x00") != 2 {
+				at, paramKey, ok := parseFieldParamDefer(entry, true)
+				if !ok {
 					malformed(fact)
 					continue
 				}
-				at := parts[0] + "\x01" + parts[1]
-				r.retDeferAt[at] = append(r.retDeferAt[at], parts[2])
+				r.retDeferAt[at] = append(r.retDeferAt[at], paramKey)
 			}
 			for _, entry := range fact.ReturnFieldParamPoison {
-				key, position, ok := strings.Cut(entry, "\x01")
-				if strings.Count(key, "\x00") != 1 || (ok && !fieldPosition(position, -1)) {
+				at, ok := parseFieldParamPoison(entry, true)
+				if !ok {
 					malformed(fact)
 					continue
 				}
-				if !ok {
-					r.retPoisonAt[key] = true
-				} else {
-					r.retPoisonAt[key+"\x01"+position] = true
-				}
+				r.retPoisonAt[at] = true
 			}
 			for _, use := range fact.EnvCallUses {
-				if varKey, callee, ok := strings.Cut(use, "\x01"); ok {
+				if varKey, callee, ok := parseSOHEdge(use); ok {
 					r.ctorsOf[varKey] = append(r.ctorsOf[varKey], callee)
 				}
 			}
@@ -2780,4 +2726,171 @@ func fieldPosition(part string, minIdx int) bool {
 	// recorded mark matches, and a defer-only population would then
 	// prove empty - fail-open through a corrupted fact.
 	return err == nil && n >= minIdx && strconv.Itoa(n) == idx
+}
+
+type attributedUseRecord struct {
+	fn        string
+	key       string
+	class     string
+	method    string
+	hasMethod bool
+}
+
+func encodeAttributedUse(use attributedUse) string {
+	class := "m"
+	if use.escape {
+		class = "e"
+	}
+	if use.literal {
+		// Literal-borne classes: sited on the enclosing named
+		// declaration for the reachability scopings, never
+		// init-discharged at composition
+		// (REQ-closure-shared-dynamic-state).
+		class = "lm"
+		if use.escape {
+			class = "le"
+		}
+		if use.method != "" {
+			class = "dl\x00" + use.method
+		}
+	} else if use.method != "" {
+		class = "d\x00" + use.method
+	}
+	return use.fn + "\x00" + use.key + "\x00" + class
+}
+
+func parseAttributedUse(raw string) (attributedUseRecord, bool) {
+	parts := strings.Split(raw, "\x00")
+	if len(parts) < 4 {
+		return attributedUseRecord{}, false
+	}
+	rec := attributedUseRecord{
+		fn:    parts[0] + "\x00" + parts[1],
+		key:   parts[2],
+		class: parts[3],
+	}
+	if len(parts) >= 6 {
+		rec.method = parts[4] + "\x00" + parts[5]
+		rec.hasMethod = true
+	}
+	return rec, true
+}
+
+func formatSOHEdge(left, right string) string {
+	return left + "\x01" + right
+}
+
+func parseSOHEdge(edge string) (left, right string, ok bool) {
+	return strings.Cut(edge, "\x01")
+}
+
+func formatNULPair(left, right string) string {
+	return left + "\x00" + right
+}
+
+func parseNULPair(raw string) (left, right string, ok bool) {
+	return strings.Cut(raw, "\x00")
+}
+
+func isFuncFactKey(key string) bool {
+	return strings.Count(key, "\x00") == 1
+}
+
+func isParamFactKey(key string) bool {
+	return strings.Count(key, "\x00") == 2
+}
+
+func parseParamUse(raw string) (varKey, paramKey string, ok bool) {
+	varKey, paramKey, ok = strings.Cut(raw, "\x00")
+	return varKey, paramKey, ok && isParamFactKey(paramKey)
+}
+
+func parseFieldParamUse(raw string) (varKey, field, idx string, ok bool) {
+	varKey, position, ok := strings.Cut(raw, "\x01")
+	if !ok || !fieldPosition(position, 0) {
+		return "", "", "", false
+	}
+	field, idx, _ = strings.Cut(position, "\x00")
+	return varKey, field, idx, true
+}
+
+func parseElemParamUse(raw string) (varKey, ownerKey, idx string, ok bool) {
+	parts := strings.SplitN(raw, "\x01", 3)
+	if len(parts) != 3 {
+		return "", "", "", false
+	}
+	if n, err := strconv.Atoi(parts[2]); err != nil || n < 0 || strconv.Itoa(n) != parts[2] {
+		return "", "", "", false
+	}
+	return parts[0], parts[1], parts[2], true
+}
+
+func parseReturnEnvDepEdge(edge string) (fnKey, callee string, ok bool) {
+	fnKey, callee, ok = strings.Cut(edge, "\x01")
+	return fnKey, callee, ok && isFuncFactKey(fnKey) && isFuncFactKey(callee)
+}
+
+func parseReturnEnvInsertionDepEdge(edge string) (fnKey, dep string, ok bool) {
+	fnKey, dep, ok = strings.Cut(edge, "\x01")
+	return fnKey, dep, ok && isFuncFactKey(fnKey) && (isFuncFactKey(dep) || isParamFactKey(dep))
+}
+
+func parseParamInsertionDepEdge(edge string) (paramKey, dep string, ok bool) {
+	paramKey, dep, ok = strings.Cut(edge, "\x01")
+	return paramKey, dep, ok && isParamFactKey(paramKey) && (isFuncFactKey(dep) || isParamFactKey(dep))
+}
+
+func parseParamDepEdge(edge string) (own, dep string, ok bool) {
+	own, dep, ok = strings.Cut(edge, "\x01")
+	return own, dep, ok && isParamFactKey(own) && isParamFactKey(dep)
+}
+
+func parseOpaqueDepEdge(edge string) (own, dep string, ok bool) {
+	own, dep, ok = strings.Cut(edge, "\x01")
+	return own, dep, ok && own != "" && dep != "" && !strings.Contains(own, "\x00") && !strings.Contains(dep, "\x00")
+}
+
+func parseFieldParamDefer(entry string, fnOwner bool) (at, paramKey string, ok bool) {
+	parts := strings.SplitN(entry, "\x01", 3)
+	if len(parts) != 3 || (fnOwner && !isFuncFactKey(parts[0])) || !fieldPosition(parts[1], 0) || !isParamFactKey(parts[2]) {
+		return "", "", false
+	}
+	return formatSOHEdge(parts[0], parts[1]), parts[2], true
+}
+
+func parseFieldParamPoison(entry string, fnOwner bool) (at string, ok bool) {
+	key, position, hasPos := strings.Cut(entry, "\x01")
+	if (fnOwner && !isFuncFactKey(key)) || (hasPos && !fieldPosition(position, -1)) {
+		return "", false
+	}
+	if !hasPos {
+		return key, true
+	}
+	return formatSOHEdge(key, position), true
+}
+
+func carrierLinkGraph(allFacts map[string][]dynamicStateFact, malformed func(dynamicStateFact)) map[string]map[string]bool {
+	linkAdj := map[string]map[string]bool{}
+	for _, facts := range allFacts {
+		for _, fact := range facts {
+			for _, link := range fact.CarrierLinks {
+				a, b, ok := parseSOHEdge(link)
+				if !ok || a == "" || b == "" {
+					if malformed != nil {
+						malformed(fact)
+					}
+					continue
+				}
+				if linkAdj[a] == nil {
+					linkAdj[a] = map[string]bool{}
+				}
+				if linkAdj[b] == nil {
+					linkAdj[b] = map[string]bool{}
+				}
+				linkAdj[a][b] = true
+				linkAdj[b][a] = true
+			}
+		}
+	}
+	return linkAdj
 }

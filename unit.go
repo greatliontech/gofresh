@@ -487,6 +487,76 @@ func (u *PackageUnit) Close(ctx context.Context) (FinalizedProcess, error) {
 	return u.transaction().close(ctx)
 }
 
+// Execute registers build and process on u, invokes run with the prepared
+// Contribution, submits the returned Terminal disposition when run succeeds,
+// and closes u. Any error aborts u before returning.
+func (u *Unit) Execute(ctx context.Context, build BuildBinding, process ProcessDescription, run func(context.Context, Contribution) (Terminal, error)) (Finalized, error) {
+	if u == nil {
+		return Finalized{}, errors.New("gofresh: uninitialized unit")
+	}
+	defer u.Abort()
+	if run == nil {
+		return Finalized{}, errors.New("gofresh: nil unit execution callback")
+	}
+	contrib, err := u.Register(ctx, build, process)
+	if err != nil {
+		return Finalized{}, err
+	}
+	terminal, runErr := run(ctx, contrib)
+	if runErr != nil {
+		return Finalized{}, runErr
+	}
+	if err := u.Submit(contrib, terminal); err != nil {
+		return Finalized{}, err
+	}
+	return u.Close(ctx)
+}
+
+// Execute registers build and process on u, invokes run with the prepared
+// Contribution, submits the returned Terminal disposition when run succeeds,
+// and closes u. Any error aborts u before returning.
+func (u *PackageUnit) Execute(ctx context.Context, build BuildBinding, process ProcessDescription, run func(context.Context, Contribution) (Terminal, error)) (FinalizedProcess, error) {
+	if u == nil {
+		return FinalizedProcess{}, errors.New("gofresh: uninitialized unit")
+	}
+	defer u.Abort()
+	if run == nil {
+		return FinalizedProcess{}, errors.New("gofresh: nil unit execution callback")
+	}
+	contrib, err := u.Register(ctx, build, process)
+	if err != nil {
+		return FinalizedProcess{}, err
+	}
+	terminal, runErr := run(ctx, contrib)
+	if runErr != nil {
+		return FinalizedProcess{}, runErr
+	}
+	if err := u.Submit(contrib, terminal); err != nil {
+		return FinalizedProcess{}, err
+	}
+	return u.Close(ctx)
+}
+
+// Execute begins a single-subject Unit under b, registers build and process,
+// invokes run, submits its Terminal disposition, and closes the unit.
+func (b *RuntimeBinding) Execute(ctx context.Context, subject Subject, build BuildBinding, process ProcessDescription, run func(context.Context, Contribution) (Terminal, error)) (Finalized, error) {
+	u, err := b.Begin(subject)
+	if err != nil {
+		return Finalized{}, err
+	}
+	return u.Execute(ctx, build, process, run)
+}
+
+// ExecutePackage begins a PackageUnit under b for subjects, registers build and
+// process, invokes run, submits its Terminal disposition, and closes the unit.
+func (b *RuntimeBinding) ExecutePackage(ctx context.Context, subjects []Subject, build BuildBinding, process ProcessDescription, run func(context.Context, Contribution) (Terminal, error)) (FinalizedProcess, error) {
+	u, err := b.BeginPackage(subjects)
+	if err != nil {
+		return FinalizedProcess{}, err
+	}
+	return u.Execute(ctx, build, process, run)
+}
+
 func (u *producingUnit) close(ctx context.Context) (result FinalizedProcess, err error) {
 	if u == nil || u.snapshot == nil {
 		return FinalizedProcess{}, errors.New("gofresh: uninitialized unit")

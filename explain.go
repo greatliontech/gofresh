@@ -237,25 +237,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	// composition (REQ-closure-shared-dynamic-state): a mark or deferral
 	// on any carrier in varKey's connected component decided varKey's
 	// refusal and belongs to its derivation chain (REQ-explain-chain).
-	linkAdj := map[string]map[string]bool{}
-	for _, fl := range facts {
-		for _, fact := range fl {
-			for _, pair := range fact.CarrierLinks {
-				a, b, ok := strings.Cut(pair, "\x01")
-				if !ok || a == "" || b == "" {
-					continue
-				}
-				if linkAdj[a] == nil {
-					linkAdj[a] = map[string]bool{}
-				}
-				if linkAdj[b] == nil {
-					linkAdj[b] = map[string]bool{}
-				}
-				linkAdj[a][b] = true
-				linkAdj[b][a] = true
-			}
-		}
-	}
+	linkAdj := carrierLinkGraph(facts, nil)
 	linkedKeys := map[string]bool{varKey: true}
 	for changed := len(linkAdj[varKey]) > 0; changed; {
 		changed = false
@@ -351,7 +333,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 			link.Callee = strings.ReplaceAll(obs.resolvent, "\x00", ".")
 			escapeLinks = append(escapeLinks, link)
 		case 'f':
-			field, idx, ok := strings.Cut(obs.resolvent, "\x00")
+			field, idx, ok := parseNULPair(obs.resolvent)
 			if !ok || !resolution.notOpaque[varKey] {
 				continue
 			}
@@ -366,7 +348,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 			}
 			escapeLinks = append(escapeLinks, link)
 		case 'e':
-			ownerKey, idx, ok := strings.Cut(obs.resolvent, "\x01")
+			ownerKey, idx, ok := parseSOHEdge(obs.resolvent)
 			if !ok || !resolution.notOpaque[varKey] {
 				continue
 			}
@@ -490,7 +472,7 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 	for fromPath, fl := range facts {
 		for _, f := range fl {
 			for _, use := range f.EnvCallUses {
-				key, callee, ok := strings.Cut(use, "\x01")
+				key, callee, ok := parseSOHEdge(use)
 				if ok && linkedKeys[key] && !ea.resolved[callee] {
 					callees = append(callees, rootedCallee{fromPath, callee})
 				}
@@ -518,7 +500,7 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 		}
 		visited[key] = true
 		pkgPath, name := renderSite(key)
-		insertionKey := strings.Count(key, "\x00") == 2
+		insertionKey := isParamFactKey(key)
 		declaredHere := ea.declared[key]
 		var depSets []map[string]bool
 		if insertionKey {
