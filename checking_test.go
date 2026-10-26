@@ -475,7 +475,7 @@ func TestCheckingUnitCandidatesAndLifecycle(t *testing.T) {
 		// Mixed batch where candidate 0 is inertly extended and candidate 1's prior ledger is non-inert (removed declaration).
 		nonInertLedger := f.ledger.Clone()
 		nonInertLedger.Declarations = append(nonInertLedger.Declarations, TestVariantDeclaration{
-			File: "observed_test.go", Package: "observed", Kind: "func", Name: "TestRead", Hash: "edited-hash", References: []string{"TestRead"},
+			File: "observed_test.go", Package: "observed", Kind: "func", Name: "TestOther", Hash: "edited-hash", References: []string{"TestOther"},
 		})
 		mixed, err := f.binding.CheckBatchWithLedgers(t.Context(), []Candidate{{a, f.old[a]}, {b, f.old[b]}}, map[int]TestVariantLedger{
 			0: f.ledger,
