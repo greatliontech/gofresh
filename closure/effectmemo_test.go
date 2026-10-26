@@ -350,9 +350,8 @@ func TestPinnedFallbackSelectsLexicographicLeast(t *testing.T) {
 // The persisted effect scan's strategy version is a golden: a bump is a
 // conscious change of every persisted effect memo's identity.
 //
-//gofresh:pure
 func TestEffectScanStrategyVersion(t *testing.T) {
-	if effectScanStrategy != "gofresh/effect-scan@21" {
-		t.Fatalf("effect-scan strategy = %q, want @21", effectScanStrategy)
+	if effectScanStrategy != "gofresh/effect-scan@22" {
+		t.Fatalf("effect-scan strategy = %q, want @22", effectScanStrategy)
 	}
 }

@@ -217,7 +217,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 // text of every field it persists (a downgrade reason is scan output, so
 // a change to its composition bumps the version); a bump recomputes
 // rather than serving an older entry's text or misreading its shape.
-const scanEntryVersion = 4
+const scanEntryVersion = 5
 
 // subjectScanEntry is one subject's scan outputs as persisted.
 type subjectScanEntry struct {
@@ -781,6 +781,1069 @@ func explainDeferralMark(p *packages.Package, kind byte, key, resolvent string, 
 	}
 }
 
+// bracketedSeamNodes identifies AST nodes in p that belong to lexically
+// bracketed save-and-restore or zero-reset seams in sequential functions
+// (no go statement, no .Parallel() call, and no escaping closure writing
+// the seam) or to an unexported sync/atomic.Pointer[T] hook variable whose
+// Store calls are serialized under a single unexported package-level
+// sync.Mutex with mu.Lock(), defer mu.Unlock(), and defer v.Store(nil)
+// executed in that order before any non-nil Store or early exit
+// (REQ-closure-shared-dynamic-state).
+func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
+	if p == nil || p.TypesInfo == nil {
+		return nil
+	}
+	exempt := map[ast.Node]bool{}
+	resolve := func(ident *ast.Ident) (types.Object, bool) {
+		if obj, ok := p.TypesInfo.Uses[ident]; ok && obj != nil {
+			return obj, true
+		}
+		if obj, ok := p.TypesInfo.Defs[ident]; ok && obj != nil {
+			return obj, true
+		}
+		return nil, false
+	}
+
+	addrTaken := map[*types.Var]bool{}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			if u, ok := n.(*ast.UnaryExpr); ok && u.Op == token.AND {
+				ast.Inspect(u.X, func(inner ast.Node) bool {
+					if id, ok := inner.(*ast.Ident); ok {
+						if obj, ok := resolve(id); ok {
+							if v, ok := obj.(*types.Var); ok && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() {
+								addrTaken[v] = true
+							}
+						}
+					}
+					return true
+				})
+			}
+			return true
+		})
+	}
+	uninitDecls := map[*types.Var]bool{}
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok || len(vs.Values) != 0 {
+					continue
+				}
+				for _, name := range vs.Names {
+					if v, ok := p.TypesInfo.Defs[name].(*types.Var); ok && v != nil && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() && !addrTaken[v] {
+						uninitDecls[v] = true
+					}
+				}
+			}
+		}
+	}
+	initHelpers := initOnlyReachableHelpers(p)
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Recv != nil || fd.Name == nil || fd.Body == nil {
+				continue
+			}
+			if fd.Name.Name != "init" && !initHelpers[fd.Name.Name] {
+				continue
+			}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.AssignStmt:
+					for _, lhs := range n.Lhs {
+						ast.Inspect(lhs, func(inner ast.Node) bool {
+							if id, ok := inner.(*ast.Ident); ok {
+								if obj, ok := resolve(id); ok {
+									if v, ok := obj.(*types.Var); ok {
+										delete(uninitDecls, v)
+									}
+								}
+							}
+							return true
+						})
+					}
+				case *ast.CallExpr:
+					if sel, ok := unparenExpr(n.Fun).(*ast.SelectorExpr); ok {
+						if id, ok := unparenExpr(sel.X).(*ast.Ident); ok {
+							if obj, ok := resolve(id); ok {
+								if v, ok := obj.(*types.Var); ok {
+									delete(uninitDecls, v)
+								}
+							}
+						}
+					}
+				}
+				return true
+			})
+		}
+	}
+
+	stmtMayExitBeforeRestore := func(stmt ast.Stmt) bool {
+		exits := false
+		ast.Inspect(stmt, func(n ast.Node) bool {
+			if exits || n == nil {
+				return false
+			}
+			switch n := n.(type) {
+			case *ast.FuncLit:
+				return false
+			case *ast.ReturnStmt, *ast.BranchStmt:
+				exits = true
+				return false
+			case *ast.CallExpr:
+				switch fun := unparenExpr(n.Fun).(type) {
+				case *ast.Ident:
+					if b, ok := p.TypesInfo.Uses[fun].(*types.Builtin); ok && b.Name() == "panic" {
+						exits = true
+						return false
+					}
+				case *ast.SelectorExpr:
+					switch fun.Sel.Name {
+					case "Fatal", "Fatalf", "Fatalln", "FailNow", "Skip", "Skipf", "SkipNow", "Panic", "Panicf", "Panicln", "Goexit", "Exit":
+						exits = true
+						return false
+					}
+				}
+			}
+			return true
+		})
+		return exits
+	}
+
+	// 1. Mutex-bracketed unexported sync/atomic.Pointer[T] hook variables.
+	isPkgNamedType := func(t types.Type, pkgPath, name string) bool {
+		named, ok := types.Unalias(t).(*types.Named)
+		return ok && named.Obj() != nil && named.Obj().Pkg() != nil &&
+			named.Obj().Pkg().Path() == pkgPath && named.Obj().Name() == name
+	}
+	atomicPtrCandidates := map[*types.Var]bool{}
+	mutexVars := map[*types.Var]bool{}
+	if p.Types != nil {
+		scope := p.Types.Scope()
+		for _, name := range scope.Names() {
+			v, ok := scope.Lookup(name).(*types.Var)
+			if !ok || v.Exported() || !uninitDecls[v] {
+				continue
+			}
+			if isPkgNamedType(v.Type(), "sync/atomic", "Pointer") {
+				atomicPtrCandidates[v] = true
+			} else if isPkgNamedType(v.Type(), "sync", "Mutex") {
+				mutexVars[v] = true
+			}
+		}
+	}
+	if len(atomicPtrCandidates) > 0 && len(mutexVars) > 0 {
+		validLoadStoreIdents := map[*ast.Ident]bool{}
+		selsByVar := map[*types.Var][]*ast.SelectorExpr{}
+		storesInFunc := map[*types.Var]map[*ast.FuncDecl]bool{}
+		invalidAtomic := map[*types.Var]bool{}
+		loadCalls := map[*types.Var]map[*ast.CallExpr]*ast.FuncDecl{}
+		for _, file := range p.Syntax {
+			for _, decl := range file.Decls {
+				fd, isFD := decl.(*ast.FuncDecl)
+				var walkDecl func(n ast.Node, inLitOrGo bool)
+				walkDecl = func(n ast.Node, inLitOrGo bool) {
+					if n == nil {
+						return
+					}
+					switch node := n.(type) {
+					case *ast.FuncLit, *ast.GoStmt:
+						inLitOrGo = true
+					case *ast.CallExpr:
+						if sel, ok := unparenExpr(node.Fun).(*ast.SelectorExpr); ok {
+							if ident, ok := unparenExpr(sel.X).(*ast.Ident); ok {
+								if v, ok := p.TypesInfo.Uses[ident].(*types.Var); ok && atomicPtrCandidates[v] {
+									if sel.Sel.Name == "Load" && len(node.Args) == 0 && isFD && fd.Body != nil {
+										validLoadStoreIdents[ident] = true
+										selsByVar[v] = append(selsByVar[v], sel)
+										if loadCalls[v] == nil {
+											loadCalls[v] = map[*ast.CallExpr]*ast.FuncDecl{}
+										}
+										loadCalls[v][node] = fd
+									} else if sel.Sel.Name == "Store" && len(node.Args) == 1 {
+										validLoadStoreIdents[ident] = true
+										selsByVar[v] = append(selsByVar[v], sel)
+										if isFD && fd.Body != nil && !inLitOrGo {
+											if storesInFunc[v] == nil {
+												storesInFunc[v] = map[*ast.FuncDecl]bool{}
+											}
+											storesInFunc[v][fd] = true
+										} else {
+											invalidAtomic[v] = true
+										}
+									}
+								}
+							}
+						}
+					}
+					ast.Inspect(n, func(child ast.Node) bool {
+						if child == nil || child == n {
+							return true
+						}
+						walkDecl(child, inLitOrGo)
+						return false
+					})
+				}
+				walkDecl(decl, false)
+			}
+		}
+		for _, file := range p.Syntax {
+			ast.Inspect(file, func(n ast.Node) bool {
+				ident, ok := n.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				if v, ok := p.TypesInfo.Uses[ident].(*types.Var); ok && atomicPtrCandidates[v] && !validLoadStoreIdents[ident] {
+					delete(atomicPtrCandidates, v)
+				}
+				return true
+			})
+		}
+		// Verify that every v.Load() result is used only for nil comparisons
+		// or field selections and never escapes (assigned to a package var,
+		// returned, or passed as an argument).
+		loadResultSafe := func(v *types.Var) bool {
+			for call, fd := range loadCalls[v] {
+				allowedCallContext := false
+				var boundLocal types.Object
+				ast.Inspect(fd.Body, func(n ast.Node) bool {
+					switch n := n.(type) {
+					case *ast.BinaryExpr:
+						if (n.Op == token.EQL || n.Op == token.NEQ) && (unparenExpr(n.X) == call || unparenExpr(n.Y) == call) {
+							allowedCallContext = true
+						}
+					case *ast.SelectorExpr:
+						if unparenExpr(n.X) == call {
+							allowedCallContext = true
+						}
+					case *ast.AssignStmt:
+						if len(n.Lhs) == 1 && len(n.Rhs) == 1 && unparenExpr(n.Rhs[0]) == call {
+							if id, ok := unparenExpr(n.Lhs[0]).(*ast.Ident); ok {
+								if obj, ok := resolve(id); ok {
+									if lv, ok := obj.(*types.Var); ok && lv.Pkg() != nil && lv.Parent() != lv.Pkg().Scope() {
+										allowedCallContext = true
+										boundLocal = obj
+									}
+								}
+							}
+						}
+					}
+					return true
+				})
+				if !allowedCallContext {
+					return false
+				}
+				if boundLocal != nil {
+					writes := 0
+					validIdentUses := map[*ast.Ident]bool{}
+					ast.Inspect(fd.Body, func(n ast.Node) bool {
+						switch n := n.(type) {
+						case *ast.AssignStmt:
+							for _, lhs := range n.Lhs {
+								ast.Inspect(lhs, func(inner ast.Node) bool {
+									if id, ok := inner.(*ast.Ident); ok && p.TypesInfo.Defs[id] == boundLocal {
+										writes++
+										validIdentUses[id] = true
+									} else if id, ok := inner.(*ast.Ident); ok && p.TypesInfo.Uses[id] == boundLocal {
+										writes++
+									}
+									return true
+								})
+							}
+						case *ast.BinaryExpr:
+							if n.Op == token.EQL || n.Op == token.NEQ {
+								for _, side := range []ast.Expr{n.X, n.Y} {
+									if id, ok := unparenExpr(side).(*ast.Ident); ok && p.TypesInfo.Uses[id] == boundLocal {
+										validIdentUses[id] = true
+									}
+								}
+							}
+						case *ast.SelectorExpr:
+							if id, ok := unparenExpr(n.X).(*ast.Ident); ok && p.TypesInfo.Uses[id] == boundLocal {
+								validIdentUses[id] = true
+							}
+						}
+						return true
+					})
+					if writes != 1 {
+						return false
+					}
+					allUsesValid := true
+					ast.Inspect(fd.Body, func(n ast.Node) bool {
+						if id, ok := n.(*ast.Ident); ok {
+							if (p.TypesInfo.Uses[id] == boundLocal || p.TypesInfo.Defs[id] == boundLocal) && !validIdentUses[id] {
+								allUsesValid = false
+								return false
+							}
+						}
+						return true
+					})
+					if !allUsesValid {
+						return false
+					}
+				}
+			}
+			return true
+		}
+		funcBracketsAtomic := func(fd *ast.FuncDecl, v *types.Var) (*types.Var, bool) {
+			if fd == nil || fd.Body == nil || (fd.Recv == nil && fd.Name != nil && fd.Name.Name == "init") {
+				return nil, false
+			}
+			nonSeq := false
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.GoStmt:
+					nonSeq = true
+					return false
+				case *ast.CallExpr:
+					if sel, ok := unparenExpr(n.Fun).(*ast.SelectorExpr); ok && sel.Sel.Name == "Parallel" && len(n.Args) == 0 {
+						nonSeq = true
+						return false
+					}
+				}
+				return true
+			})
+			if nonSeq {
+				return nil, false
+			}
+			lockIdx := -1
+			unlockIdx := -1
+			resetIdx := -1
+			var lockedMu *types.Var
+			validMutexCalls := map[*ast.CallExpr]bool{}
+			var resetCall *ast.CallExpr
+			for idx, stmt := range fd.Body.List {
+				switch s := stmt.(type) {
+				case *ast.ExprStmt:
+					if call, ok := s.X.(*ast.CallExpr); ok && len(call.Args) == 0 {
+						if sel, ok := unparenExpr(call.Fun).(*ast.SelectorExpr); ok && sel.Sel.Name == "Lock" {
+							if id, ok := unparenExpr(sel.X).(*ast.Ident); ok {
+								if mu, ok := p.TypesInfo.Uses[id].(*types.Var); ok && mutexVars[mu] {
+									if lockIdx >= 0 {
+										return nil, false
+									}
+									lockIdx = idx
+									lockedMu = mu
+									validMutexCalls[call] = true
+								}
+							}
+						}
+					}
+				case *ast.DeferStmt:
+					if sel, ok := unparenExpr(s.Call.Fun).(*ast.SelectorExpr); ok {
+						if id, ok := unparenExpr(sel.X).(*ast.Ident); ok {
+							if obj := p.TypesInfo.Uses[id]; obj != nil {
+								if lockedMu != nil && obj == lockedMu && sel.Sel.Name == "Unlock" && len(s.Call.Args) == 0 {
+									if unlockIdx >= 0 || idx <= lockIdx {
+										return nil, false
+									}
+									unlockIdx = idx
+									validMutexCalls[s.Call] = true
+								} else if obj == v && sel.Sel.Name == "Store" && len(s.Call.Args) == 1 {
+									argID, ok := unparenExpr(s.Call.Args[0]).(*ast.Ident)
+									if !ok {
+										return nil, false
+									}
+									if _, isNil := p.TypesInfo.Uses[argID].(*types.Nil); !isNil {
+										return nil, false
+									}
+									if resetIdx >= 0 || unlockIdx < 0 || idx <= unlockIdx {
+										return nil, false
+									}
+									resetIdx = idx
+									resetCall = s.Call
+								}
+							}
+						}
+					}
+				}
+			}
+			if lockedMu == nil || lockIdx < 0 || unlockIdx <= lockIdx || resetIdx <= unlockIdx {
+				return nil, false
+			}
+			for m := 0; m < resetIdx; m++ {
+				if stmtMayExitBeforeRestore(fd.Body.List[m]) {
+					return nil, false
+				}
+			}
+			// Ensure no other Lock/Unlock on any mutex in mutexVars, no other
+			// defer calling v.Store, and every non-defer v.Store is at idx > resetIdx.
+			validBody := true
+			for idx, stmt := range fd.Body.List {
+				ast.Inspect(stmt, func(n ast.Node) bool {
+					if !validBody || n == nil {
+						return false
+					}
+					if d, ok := n.(*ast.DeferStmt); ok && d.Call != resetCall {
+						ast.Inspect(d.Call, func(inner ast.Node) bool {
+							if id, ok := inner.(*ast.Ident); ok && p.TypesInfo.Uses[id] == v {
+								validBody = false
+								return false
+							}
+							return true
+						})
+					}
+					call, ok := n.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					sel, ok := unparenExpr(call.Fun).(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					id, ok := unparenExpr(sel.X).(*ast.Ident)
+					if !ok {
+						return true
+					}
+					obj := p.TypesInfo.Uses[id]
+					if mu, ok := obj.(*types.Var); ok && mutexVars[mu] && !validMutexCalls[call] {
+						validBody = false
+						return false
+					}
+					if obj == v && sel.Sel.Name == "Store" && call != resetCall {
+						if idx <= resetIdx {
+							validBody = false
+							return false
+						}
+					}
+					return true
+				})
+			}
+			if !validBody {
+				return nil, false
+			}
+			return lockedMu, true
+		}
+		for v := range atomicPtrCandidates {
+			if invalidAtomic[v] || len(storesInFunc[v]) == 0 || !loadResultSafe(v) {
+				continue
+			}
+			allBracketed := true
+			var sharedMu *types.Var
+			for fd := range storesInFunc[v] {
+				mu, ok := funcBracketsAtomic(fd, v)
+				if !ok || (sharedMu != nil && mu != sharedMu) {
+					allBracketed = false
+					break
+				}
+				sharedMu = mu
+			}
+			if allBracketed && sharedMu != nil {
+				for _, sel := range selsByVar[v] {
+					exempt[sel] = true
+				}
+			}
+		}
+	}
+
+	// 2. Lexically bracketed save-and-restore or zero-reset seams on
+	// non-alias-handing, non-mutable-reach package variables (and their fields).
+	candidateVar := func(obj types.Object) (*types.Var, bool) {
+		v, ok := obj.(*types.Var)
+		if !ok || v == nil || v.Pkg() == nil || v.Parent() != v.Pkg().Scope() || addrTaken[v] {
+			return nil, false
+		}
+		if typeHandsOutDynamicAlias(audited, v.Type(), make(map[types.Type]bool)) ||
+			typeHandsOutMutableReach(v.Type(), make(map[types.Type]bool)) {
+			return nil, false
+		}
+		return v, true
+	}
+	uninitVars := map[*types.Var]bool{}
+	for v := range uninitDecls {
+		if _, ok := candidateVar(v); ok {
+			uninitVars[v] = true
+		}
+	}
+	seamTarget := func(expr ast.Expr) (string, *types.Var, bool) {
+		expr = unparenExpr(expr)
+		switch e := expr.(type) {
+		case *ast.Ident:
+			obj, ok := resolve(e)
+			if !ok {
+				return "", nil, false
+			}
+			v, ok := candidateVar(obj)
+			if !ok {
+				return "", nil, false
+			}
+			return dynamicVarKey(v), v, true
+		case *ast.SelectorExpr:
+			baseID, ok := unparenExpr(e.X).(*ast.Ident)
+			if !ok {
+				return "", nil, false
+			}
+			obj, ok := resolve(baseID)
+			if !ok {
+				return "", nil, false
+			}
+			v, ok := candidateVar(obj)
+			if !ok {
+				return "", nil, false
+			}
+			field, ok := p.TypesInfo.Uses[e.Sel].(*types.Var)
+			if !ok || field == nil ||
+				typeHandsOutDynamicAlias(audited, field.Type(), make(map[types.Type]bool)) ||
+				typeHandsOutMutableReach(field.Type(), make(map[types.Type]bool)) {
+				return "", nil, false
+			}
+			return dynamicVarKey(v) + "." + field.Name(), v, true
+		default:
+			return "", nil, false
+		}
+	}
+	isZeroExpr := func(expr ast.Expr) bool {
+		expr = unparenExpr(expr)
+		switch e := expr.(type) {
+		case *ast.Ident:
+			switch p.TypesInfo.Uses[e].(type) {
+			case *types.Nil:
+				return true
+			case *types.Const:
+				return e.Name == "false"
+			}
+		case *ast.BasicLit:
+			return e.Value == "0" || e.Value == `""` || e.Value == "``"
+		case *ast.CompositeLit:
+			return len(e.Elts) == 0
+		}
+		return false
+	}
+
+	type saveRecord struct {
+		idx      int
+		localObj types.Object
+	}
+	type restoreRecord struct {
+		idx        int
+		lhs        ast.Expr
+		cbody      *ast.BlockStmt
+		savedLocal types.Object
+		zeroReset  bool
+	}
+
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Body == nil || (fd.Recv == nil && fd.Name != nil && fd.Name.Name == "init") {
+				continue
+			}
+			nonSequential := false
+			localWrites := map[types.Object]int{}
+			localAddr := map[types.Object]bool{}
+			localFuncLits := map[types.Object]*ast.FuncLit{}
+			recordTargetIdents := func(expr ast.Expr, target map[types.Object]int) {
+				if expr == nil {
+					return
+				}
+				ast.Inspect(expr, func(inner ast.Node) bool {
+					if id, ok := inner.(*ast.Ident); ok {
+						if obj, ok := resolve(id); ok {
+							if v, ok := obj.(*types.Var); ok && v.Pkg() != nil && v.Parent() != v.Pkg().Scope() {
+								target[obj]++
+							}
+						}
+					}
+					return true
+				})
+			}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				if nonSequential || n == nil {
+					return false
+				}
+				switch n := n.(type) {
+				case *ast.GoStmt:
+					nonSequential = true
+					return false
+				case *ast.CallExpr:
+					if sel, ok := unparenExpr(n.Fun).(*ast.SelectorExpr); ok && sel.Sel.Name == "Parallel" && len(n.Args) == 0 {
+						nonSequential = true
+						return false
+					}
+				case *ast.AssignStmt:
+					for i, lhs := range n.Lhs {
+						recordTargetIdents(lhs, localWrites)
+						if id, ok := unparenExpr(lhs).(*ast.Ident); ok {
+							if obj, ok := resolve(id); ok && i < len(n.Rhs) {
+								if lit, ok := unparenExpr(n.Rhs[i]).(*ast.FuncLit); ok {
+									localFuncLits[obj] = lit
+								}
+							}
+						}
+					}
+				case *ast.ValueSpec:
+					for i, name := range n.Names {
+						if obj := p.TypesInfo.Defs[name]; obj != nil {
+							localWrites[obj]++
+							if i < len(n.Values) {
+								if lit, ok := unparenExpr(n.Values[i]).(*ast.FuncLit); ok {
+									localFuncLits[obj] = lit
+								}
+							}
+						}
+					}
+				case *ast.IncDecStmt:
+					recordTargetIdents(n.X, localWrites)
+				case *ast.RangeStmt:
+					recordTargetIdents(n.Key, localWrites)
+					recordTargetIdents(n.Value, localWrites)
+				case *ast.UnaryExpr:
+					if n.Op == token.AND {
+						ast.Inspect(n.X, func(inner ast.Node) bool {
+							if id, ok := inner.(*ast.Ident); ok {
+								if obj, ok := resolve(id); ok {
+									localAddr[obj] = true
+								}
+							}
+							return true
+						})
+					}
+				}
+				return true
+			})
+			if nonSequential {
+				continue
+			}
+			immutableLocal := func(obj types.Object) bool {
+				if obj == nil || localWrites[obj] != 1 || localAddr[obj] {
+					return false
+				}
+				v, ok := obj.(*types.Var)
+				return ok && v.Pkg() != nil && v.Parent() != v.Pkg().Scope()
+			}
+			// Identify named result parameters and any seam targets written inside
+			// a closure that can escape via a return statement or named result.
+			namedResults := map[types.Object]bool{}
+			if fd.Type != nil && fd.Type.Results != nil {
+				for _, field := range fd.Type.Results.List {
+					for _, name := range field.Names {
+						if obj := p.TypesInfo.Defs[name]; obj != nil {
+							namedResults[obj] = true
+						}
+					}
+				}
+			}
+			returnedTargets := map[string]bool{}
+			markLitTargets := func(lit *ast.FuncLit) {
+				if lit == nil || lit.Body == nil {
+					return
+				}
+				ast.Inspect(lit.Body, func(inner ast.Node) bool {
+					if assign, ok := inner.(*ast.AssignStmt); ok {
+						for _, lhs := range assign.Lhs {
+							if key, _, ok := seamTarget(lhs); ok {
+								returnedTargets[key] = true
+							}
+						}
+					}
+					return true
+				})
+			}
+			markExprClosures := func(expr ast.Expr) {
+				if expr == nil {
+					return
+				}
+				ast.Inspect(expr, func(inner ast.Node) bool {
+					switch inner := inner.(type) {
+					case *ast.FuncLit:
+						markLitTargets(inner)
+						return false
+					case *ast.Ident:
+						if obj, ok := resolve(inner); ok && localFuncLits[obj] != nil {
+							markLitTargets(localFuncLits[obj])
+						}
+					}
+					return true
+				})
+			}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.ReturnStmt:
+					for _, res := range n.Results {
+						markExprClosures(res)
+					}
+				case *ast.AssignStmt:
+					for i, lhs := range n.Lhs {
+						if id, ok := unparenExpr(lhs).(*ast.Ident); ok {
+							if obj, ok := resolve(id); ok && namedResults[obj] && i < len(n.Rhs) {
+								markExprClosures(n.Rhs[i])
+							}
+						}
+					}
+				}
+				return true
+			})
+
+			// Disallow mixing whole-struct v and field v.f writes on the same
+			// base types.Var within fd.
+			wholeWrites := map[*types.Var]bool{}
+			fieldWrites := map[*types.Var]bool{}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				if assign, ok := n.(*ast.AssignStmt); ok {
+					for _, lhs := range assign.Lhs {
+						if key, baseVar, ok := seamTarget(lhs); ok {
+							if key == dynamicVarKey(baseVar) {
+								wholeWrites[baseVar] = true
+							} else {
+								fieldWrites[baseVar] = true
+							}
+						}
+					}
+				}
+				return true
+			})
+			mixedBaseVar := func(v *types.Var) bool {
+				return wholeWrites[v] && fieldWrites[v]
+			}
+
+			cleanupClosureBody := func(stmt ast.Stmt, allowCleanupCall bool) *ast.BlockStmt {
+				switch s := stmt.(type) {
+				case *ast.DeferStmt:
+					if lit, ok := unparenExpr(s.Call.Fun).(*ast.FuncLit); ok && len(s.Call.Args) == 0 {
+						return lit.Body
+					}
+					if id, ok := unparenExpr(s.Call.Fun).(*ast.Ident); ok && len(s.Call.Args) == 0 {
+						if obj, ok := resolve(id); ok && immutableLocal(obj) && localFuncLits[obj] != nil {
+							return localFuncLits[obj].Body
+						}
+					}
+				case *ast.ExprStmt:
+					if !allowCleanupCall {
+						return nil
+					}
+					call, ok := s.X.(*ast.CallExpr)
+					if !ok || len(call.Args) != 1 {
+						return nil
+					}
+					sel, ok := unparenExpr(call.Fun).(*ast.SelectorExpr)
+					if !ok || sel.Sel.Name != "Cleanup" {
+						return nil
+					}
+					if lit, ok := unparenExpr(call.Args[0]).(*ast.FuncLit); ok {
+						return lit.Body
+					}
+					if id, ok := unparenExpr(call.Args[0]).(*ast.Ident); ok {
+						if obj, ok := resolve(id); ok && immutableLocal(obj) && localFuncLits[obj] != nil {
+							return localFuncLits[obj].Body
+						}
+					}
+				}
+				return nil
+			}
+
+			// Collect callable bodies (fd.Body and any nested FuncLit.Body) so
+			// defer/Cleanup restores are only ever recognized at function or
+			// closure scope, never inside a nested if/for/{} block.
+			callableBodies := map[*ast.BlockStmt]bool{fd.Body: true}
+			var blocks []*ast.BlockStmt
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				switch n := n.(type) {
+				case *ast.FuncLit:
+					if n.Body != nil {
+						callableBodies[n.Body] = true
+					}
+				case *ast.BlockStmt:
+					blocks = append(blocks, n)
+				}
+				return true
+			})
+			for bi := len(blocks) - 1; bi >= 0; bi-- {
+				block := blocks[bi]
+				isCallableBody := callableBodies[block]
+				saves := map[string][]saveRecord{}
+				deferRestores := map[string][]restoreRecord{}
+				validRestoreLHS := map[ast.Expr]bool{}
+				for idx, stmt := range block.List {
+					if assign, ok := stmt.(*ast.AssignStmt); ok && len(assign.Lhs) == len(assign.Rhs) {
+						for i, lhs := range assign.Lhs {
+							id, ok := unparenExpr(lhs).(*ast.Ident)
+							if !ok {
+								continue
+							}
+							localObj, ok := resolve(id)
+							if !ok || !immutableLocal(localObj) {
+								continue
+							}
+							if key, baseVar, ok := seamTarget(assign.Rhs[i]); ok && !returnedTargets[key] && !mixedBaseVar(baseVar) {
+								saves[key] = append(saves[key], saveRecord{idx: idx, localObj: localObj})
+							}
+						}
+					} else if declStmt, ok := stmt.(*ast.DeclStmt); ok {
+						if gd, ok := declStmt.Decl.(*ast.GenDecl); ok && gd.Tok == token.VAR {
+							for _, spec := range gd.Specs {
+								vs, ok := spec.(*ast.ValueSpec)
+								if !ok || len(vs.Names) != len(vs.Values) {
+									continue
+								}
+								for i, name := range vs.Names {
+									localObj := p.TypesInfo.Defs[name]
+									if !immutableLocal(localObj) {
+										continue
+									}
+									if key, baseVar, ok := seamTarget(vs.Values[i]); ok && !returnedTargets[key] && !mixedBaseVar(baseVar) {
+										saves[key] = append(saves[key], saveRecord{idx: idx, localObj: localObj})
+									}
+								}
+							}
+						}
+					}
+					if isCallableBody {
+						if cbody := cleanupClosureBody(stmt, block == fd.Body); cbody != nil {
+							for _, cstmt := range cbody.List {
+								assign, ok := cstmt.(*ast.AssignStmt)
+								if !ok || len(assign.Lhs) != len(assign.Rhs) {
+									continue
+								}
+								for i, lhs := range assign.Lhs {
+									key, baseVar, ok := seamTarget(lhs)
+									if !ok || returnedTargets[key] || mixedBaseVar(baseVar) {
+										continue
+									}
+									rhs := unparenExpr(assign.Rhs[i])
+									if id, ok := rhs.(*ast.Ident); ok {
+										if obj, ok := resolve(id); ok {
+											for _, s := range saves[key] {
+												if s.localObj == obj && s.idx <= idx {
+													deferRestores[key] = append(deferRestores[key], restoreRecord{
+														idx:        idx,
+														lhs:        lhs,
+														cbody:      cbody,
+														savedLocal: obj,
+													})
+													validRestoreLHS[lhs] = true
+												}
+											}
+										}
+									}
+									if uninitVars[baseVar] && isZeroExpr(rhs) {
+										deferRestores[key] = append(deferRestores[key], restoreRecord{
+											idx:       idx,
+											lhs:       lhs,
+											cbody:     cbody,
+											zeroReset: true,
+										})
+										validRestoreLHS[lhs] = true
+									}
+								}
+							}
+						}
+					}
+				}
+
+				// Any write to a seam key inside a DeferStmt or a nested FuncLit
+				// that is not a valid restore LHS for this block, or any write
+				// in a nested block that was already exempted as an inner bracket,
+				// poisons the key in this outer block so nested brackets on the
+				// same key cannot be wrapped by an outer bracket.
+				poisonedKeys := map[string]bool{}
+				for _, stmt := range block.List {
+					ast.Inspect(stmt, func(n ast.Node) bool {
+						if n == nil {
+							return false
+						}
+						if assign, ok := n.(*ast.AssignStmt); ok {
+							for _, lhs := range assign.Lhs {
+								if exempt[lhs] {
+									if key, _, ok := seamTarget(lhs); ok {
+										poisonedKeys[key] = true
+									}
+								}
+							}
+						}
+						switch n := n.(type) {
+						case *ast.DeferStmt:
+							ast.Inspect(n.Call, func(inner ast.Node) bool {
+								if assign, ok := inner.(*ast.AssignStmt); ok {
+									for _, lhs := range assign.Lhs {
+										if !validRestoreLHS[lhs] {
+											if key, _, ok := seamTarget(lhs); ok {
+												poisonedKeys[key] = true
+											}
+										}
+									}
+								}
+								return true
+							})
+							return false
+						case *ast.FuncLit:
+							ast.Inspect(n.Body, func(inner ast.Node) bool {
+								if assign, ok := inner.(*ast.AssignStmt); ok {
+									for _, lhs := range assign.Lhs {
+										if !validRestoreLHS[lhs] {
+											if key, _, ok := seamTarget(lhs); ok {
+												poisonedKeys[key] = true
+											}
+										}
+									}
+								}
+								return true
+							})
+							return false
+						}
+						return true
+					})
+				}
+
+				type writeOccurrence struct {
+					idx int
+					lhs ast.Expr
+				}
+				writesByKey := map[string][]writeOccurrence{}
+				for idx, stmt := range block.List {
+					cbody := cleanupClosureBody(stmt, block == fd.Body)
+					ast.Inspect(stmt, func(n ast.Node) bool {
+						if n == nil || (cbody != nil && n == cbody) {
+							return false
+						}
+						if _, isLit := n.(*ast.FuncLit); isLit {
+							return false
+						}
+						assign, ok := n.(*ast.AssignStmt)
+						if !ok {
+							return true
+						}
+						for _, lhs := range assign.Lhs {
+							if exempt[lhs] {
+								continue
+							}
+							if key, _, ok := seamTarget(lhs); ok {
+								writesByKey[key] = append(writesByKey[key], writeOccurrence{idx: idx, lhs: lhs})
+							}
+						}
+						return true
+					})
+				}
+
+				for key, restores := range deferRestores {
+					if poisonedKeys[key] {
+						continue
+					}
+					// If multiple defer/Cleanup restores exist for key, all must
+					// agree on the same restoration target (same savedLocal or all zeroReset).
+					consistent := true
+					firstR := restores[0]
+					for _, r := range restores[1:] {
+						if r.zeroReset != firstR.zeroReset || r.savedLocal != firstR.savedLocal {
+							consistent = false
+							break
+						}
+					}
+					if !consistent {
+						continue
+					}
+					writes := writesByKey[key]
+					for _, r := range restores {
+						valid := true
+						if len(writes) > 0 {
+							firstIdx := writes[0].idx
+							if !r.zeroReset {
+								hasMatchingSave := false
+								for _, s := range saves[key] {
+									if s.localObj == r.savedLocal && s.idx <= firstIdx && s.idx <= r.idx {
+										hasMatchingSave = true
+										break
+									}
+								}
+								if !hasMatchingSave {
+									valid = false
+								}
+							}
+							if valid && firstIdx < r.idx {
+								for m := firstIdx; m < r.idx; m++ {
+									if stmtMayExitBeforeRestore(block.List[m]) {
+										valid = false
+										break
+									}
+								}
+							}
+						}
+						if valid {
+							for _, rAll := range restores {
+								exempt[rAll.lhs] = true
+							}
+							for _, w := range writes {
+								exempt[w.lhs] = true
+							}
+							delete(writesByKey, key)
+							break
+						}
+					}
+				}
+
+				// Inline save-and-restore spans in block.List for remaining writes.
+				for key, writes := range writesByKey {
+					if poisonedKeys[key] || len(deferRestores[key]) > 0 || len(saves[key]) == 0 || returnedTargets[key] {
+						continue
+					}
+					for _, s := range saves[key] {
+						restoreIdx := -1
+						var restoreLHS ast.Expr
+						for idx := s.idx + 1; idx < len(block.List); idx++ {
+							assign, ok := block.List[idx].(*ast.AssignStmt)
+							if !ok || len(assign.Lhs) != len(assign.Rhs) {
+								continue
+							}
+							for i, lhs := range assign.Lhs {
+								if k, _, ok := seamTarget(lhs); ok && k == key {
+									if id, ok := unparenExpr(assign.Rhs[i]).(*ast.Ident); ok {
+										if obj, ok := resolve(id); ok && obj == s.localObj {
+											restoreIdx = idx
+											restoreLHS = lhs
+											break
+										}
+									}
+								}
+							}
+							if restoreIdx >= 0 {
+								break
+							}
+						}
+						if restoreIdx < 0 {
+							continue
+						}
+						allInSpan := true
+						firstIdx := restoreIdx
+						for _, w := range writes {
+							if w.lhs == restoreLHS {
+								continue
+							}
+							if w.idx <= s.idx || w.idx >= restoreIdx {
+								allInSpan = false
+								break
+							}
+							if w.idx < firstIdx {
+								firstIdx = w.idx
+							}
+						}
+						if !allInSpan {
+							continue
+						}
+						for m := firstIdx; m < restoreIdx; m++ {
+							if stmtMayExitBeforeRestore(block.List[m]) {
+								allInSpan = false
+								break
+							}
+						}
+						if allInSpan {
+							exempt[restoreLHS] = true
+							for _, w := range writes {
+								exempt[w.lhs] = true
+							}
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+	return exempt
+}
+
 // recordDynamicGlobalUses classifies every package-level dynamic-capable
 // variable use in one package's syntax: mutated collects demonstrated
 // mutations (writes, growth/deletion, sends, address captures,
@@ -803,6 +1866,7 @@ func recordDynamicGlobalUses(audited bool, p *packages.Package, mutated, escaped
 		return
 	}
 	dataMemos := dataMemoVars(audited, p)
+	exemptSeamNodes := bracketedSeamNodes(audited, p)
 	dynamicPackageVar := func(obj types.Object) (*types.Var, bool) {
 		variable, ok := obj.(*types.Var)
 		if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
@@ -1561,6 +2625,13 @@ func recordDynamicGlobalUses(audited bool, p *packages.Package, mutated, escaped
 			switch n := n.(type) {
 			case *ast.AssignStmt:
 				for _, lhs := range n.Lhs {
+					if exemptSeamNodes[lhs] {
+						markRead(lhs)
+						if sel, ok := unparenExpr(lhs).(*ast.SelectorExpr); ok {
+							markRead(sel.X)
+						}
+						continue
+					}
 					markTargets(lhs)
 					// The written element's container is read-shaped on
 					// the left too: m[k] = v writes the entry through m,
@@ -1881,6 +2952,12 @@ func recordDynamicGlobalUses(audited bool, p *packages.Package, mutated, escaped
 									}
 								}
 							}
+						}
+						if calledSelectors[n] && exemptSeamNodes[n] {
+							if ident, ok := unparenExpr(n.X).(*ast.Ident); ok {
+								readContext[ident] = true
+							}
+							return true
 						}
 						if methodUses != nil && calledSelectors[n] && !interfaceReceiver(fn) && instantiatedResultsHandOutNothing(audited, selection.Type()) {
 							if ident, ok := n.X.(*ast.Ident); ok {
@@ -3094,6 +4171,7 @@ func recordEnvCarryingRegistrations(audited bool, p *packages.Package, envCarryi
 	if p == nil || p.TypesInfo == nil {
 		return
 	}
+	exemptSeamNodes := bracketedSeamNodes(audited, p)
 	resolve := func(ident *ast.Ident) (types.Object, bool) {
 		if obj, ok := p.TypesInfo.Uses[ident]; ok {
 			return obj, true
@@ -3480,10 +4558,16 @@ func recordEnvCarryingRegistrations(audited bool, p *packages.Package, envCarryi
 			case *ast.AssignStmt:
 				if len(n.Lhs) == len(n.Rhs) {
 					for i, lhs := range n.Lhs {
+						if exemptSeamNodes[lhs] {
+							continue
+						}
 						handleStore(lhs, n.Rhs[i], true)
 					}
 				} else if len(n.Rhs) == 1 {
 					for _, lhs := range n.Lhs {
+						if exemptSeamNodes[lhs] {
+							continue
+						}
 						handleStore(lhs, n.Rhs[0], true)
 					}
 				}

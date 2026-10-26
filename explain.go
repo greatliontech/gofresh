@@ -160,6 +160,7 @@ func (v *View) ExplainDynamicState(ctx context.Context, pkgPath, varName string)
 func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, varName string, singleSubject bool) (Chain, error) {
 	explainMu.Lock()
 	defer explainMu.Unlock()
+	defer explainHooks.Store(nil)
 
 	variants := map[string][]*packages.Package{}
 	var order []*packages.Package

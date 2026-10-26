@@ -104,7 +104,7 @@ func TestSelectedFilesCoversEveryBuildClass(t *testing.T) {
 // pulls, and the runtime a vendor fork hooks are keyed.
 func TestAuditedSurfaceDerivesTheDelegates(t *testing.T) {
 	tables := auditedSurfaceTables()
-	for _, must := range []string{"strings", "fmt", "sync", "sync/atomic", "testing", "reflect", "time", "net/url", "path/filepath", "flag", "os", "syscall", "encoding/json", "runtime"} {
+	for _, must := range []string{"strings", "fmt", "sync", "sync/atomic", "testing", "reflect", "time", "math/rand", "net/url", "path/filepath", "flag", "os", "syscall", "encoding/json", "runtime"} {
 		if !contains(tables, must) {
 			t.Errorf("the tables' surface lacks %s", must)
 		}

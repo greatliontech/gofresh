@@ -47,8 +47,6 @@ Start with run.
 // every default parenthetical goes by depth, the clause otherwise
 // verbatim; and the CLI coverage judgment refuses a default spelled
 // outside that one form.
-//
-//gofresh:pure
 func TestKnobUsageIsThePflagGrammar(t *testing.T) {
 	doc, err := Parse([]byte(projectionSource))
 	if err != nil {
@@ -195,8 +193,6 @@ func (n *fakeNode) Describe(text string) { n.desc = text }
 // knob by name; a property the document does not knob refuses by name,
 // the first in the walk's order; a nil root describes nothing, a nil
 // property still needs its knob; the visited names come back sorted.
-//
-//gofresh:pure
 func TestDescribeSchemaWalksEveryDepthAndRefusesAnUnknobbedProperty(t *testing.T) {
 	doc, err := Parse([]byte(projectionSource))
 	if err != nil {
@@ -262,8 +258,6 @@ func TestDescribeSchemaWalksEveryDepthAndRefusesAnUnknobbedProperty(t *testing.T
 // whole section, every knob on the surface with its clause and (on the
 // CLI) usage, and the prose pointer in the surface's own form — a
 // knobless verb with an empty knob list and the same pointer shape.
-//
-//gofresh:pure
 func TestRegistrationIsTheFaceNeutralProjection(t *testing.T) {
 	e := Embed("tool", []byte(projectionSource))
 	r, err := e.Registration("cli", "run")
@@ -332,8 +326,6 @@ func TestRegistrationIsTheFaceNeutralProjection(t *testing.T) {
 // TestMustRefusalsNameTheTool pins every construction-time refusal on
 // one wording, "<tool>: guidance: <cause>", the package prefix folded,
 // and a malformed document on the embedded form's own refusal.
-//
-//gofresh:pure
 func TestMustRefusalsNameTheTool(t *testing.T) {
 	e := Embed("tool", []byte(projectionSource))
 	refusal := func(f func()) (msg string) {
@@ -383,8 +375,6 @@ func TestMustRefusalsNameTheTool(t *testing.T) {
 // list omitting it) — the registration's fact a consumer hands
 // Coverage with no flag-library dependency here
 // (REQ-guidance-coverage).
-//
-//gofresh:pure
 func TestPrintsDefaultIsPflagsRuleAtEveryCliff(t *testing.T) {
 	zero := map[string][]string{
 		"bool": {"false", ""}, "boolfunc": {"false", ""},
@@ -426,8 +416,6 @@ func TestPrintsDefaultIsPflagsRuleAtEveryCliff(t *testing.T) {
 // the document does not carry named, defects in name order, an unknown
 // verb or surface the caller's error (REQ-guidance-coverage,
 // REQ-guidance-single-source).
-//
-//gofresh:pure
 func TestServedJudgmentComparesBytesWithTheProjection(t *testing.T) {
 	doc, err := Parse([]byte(projectionSource))
 	if err != nil {

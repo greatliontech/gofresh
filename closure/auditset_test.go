@@ -26,6 +26,16 @@ func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
 			t.Errorf("time method %s: want receiver-qualified admission with the bare name excluded", name)
 		}
 	}
+	for _, name := range []string{"Int", "Intn", "Int63", "Int63n", "Float64", "Perm", "Shuffle", "Read", "Seed"} {
+		if !auditset.RandMethod("Rand", name) || auditedStandardSymbol(true, "math/rand", name) {
+			t.Errorf("math/rand method %s: want receiver-qualified admission with the bare name excluded", name)
+		}
+	}
+	for _, name := range []string{"New", "NewSource", "Rand", "Source", "Source64"} {
+		if !auditedStandardSymbol(true, "math/rand", name) {
+			t.Errorf("math/rand symbol %s not admitted", name)
+		}
+	}
 	if auditset.TimeMethod("Time", "Local") || auditset.TimeMethod("Time", "Location") {
 		t.Error("(Time).Local or (Time).Location admitted — the ambient zone install and the pointer into package time's own state")
 	}

@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-observability-entropy"
 reason: "Invariant coverage is by example pins over module fixtures; a property witness or analyzer proof is pending"
-content_hash: "2cb537011badb5e433b2e0cf0d3a82f6661402596769f5d9442fe9393c4461d5"
-source_hash: "66781cfab88af398b97dfa83de394463d76b057f63f8c53071e8bc9f80f9fb73"
+content_hash: "f6053f059c8bf2dabb539f97114f102a8681d5b6e954c44a6414243ac1b42cd0"
+source_hash: "79d5a1473616d0e8663ca9aed597afaa3eaf09ce700218f6a2b1bf375bcf9df1"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

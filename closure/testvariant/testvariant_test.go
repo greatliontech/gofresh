@@ -9,8 +9,6 @@ import (
 // over file, kind, receiver, name — the order every persisted ledger
 // and every delta carries, so two ledgers of one compartment compare
 // declaration by declaration.
-//
-//gofresh:pure
 func TestLessDeclarationOrdersByFileKindReceiverName(t *testing.T) {
 	decl := func(file, kind, receiver, name string) TestVariantDeclaration {
 		return TestVariantDeclaration{File: file, Kind: kind, Receiver: receiver, Name: name}
@@ -36,7 +34,6 @@ func TestLessDeclarationOrdersByFileKindReceiverName(t *testing.T) {
 	}
 }
 
-//gofresh:pure
 func TestInertForSubjectCoversReachabilityAndGuardRails(t *testing.T) {
 	baseLedger := func() TestVariantLedger {
 		return TestVariantLedger{

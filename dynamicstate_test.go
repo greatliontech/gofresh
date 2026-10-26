@@ -7,6 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/importer"
+	"go/parser"
+	"go/token"
 	"go/types"
 	"os"
 	"os/exec"
@@ -2269,5 +2273,438 @@ func TestDischargeCutClassifiesByTheTwoContexts(t *testing.T) {
 	other := errors.New("closure: load failed")
 	if cut, err := dischargeCut(context.Background(), context.Background(), downgraded, other); cut != nil || err != other {
 		t.Fatalf("other failure: cut=%v err=%v, want the error itself", cut, err)
+	}
+}
+
+func TestBracketedSeamNodes(t *testing.T) {
+	deriveFact := func(t *testing.T, src string) dynamicStateFact {
+		t.Helper()
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "p.go", src, 0)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		info := &types.Info{
+			Types:      map[ast.Expr]types.TypeAndValue{},
+			Defs:       map[*ast.Ident]types.Object{},
+			Uses:       map[*ast.Ident]types.Object{},
+			Selections: map[*ast.SelectorExpr]*types.Selection{},
+		}
+		typesPkg, err := (&types.Config{Importer: importer.Default()}).Check("example.com/p", fset, []*ast.File{file}, info)
+		if err != nil {
+			t.Fatalf("typecheck: %v", err)
+		}
+		pkg := &packages.Package{
+			ID:        "example.com/p",
+			Name:      "p",
+			PkgPath:   "example.com/p",
+			Fset:      fset,
+			Syntax:    []*ast.File{file},
+			Types:     typesPkg,
+			TypesInfo: info,
+		}
+		return dynamicStateFactOf(true, pkg, false)
+	}
+
+	positiveCases := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "saved and restored via defer",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Exercise() int {
+	calls := 0
+	orig := probe
+	probe = func() int { calls++; return 2 }
+	defer func() { probe = orig }()
+	return probe() + calls
+}`,
+		},
+		{
+			name: "saved and restored via Cleanup with loop writes",
+			src: `package p
+type T struct{}
+func (*T) Cleanup(func()) {}
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func TestSeam(t *T) {
+	orig := probe
+	t.Cleanup(func() { probe = orig })
+	for i := 0; i < 3; i++ {
+		probe = func() int { return i }
+	}
+}`,
+		},
+		{
+			name: "saved and restored inline without early exit",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Exercise() int {
+	orig := probe
+	probe = func() int { return 2 }
+	got := probe()
+	probe = orig
+	return got
+}`,
+		},
+		{
+			name: "uninitialized struct hook reset to nil in defer and Cleanup",
+			src: `package p
+type T struct{}
+func (*T) Cleanup(func()) {}
+var hooks struct {
+	before func()
+	after  func()
+}
+func TestHooks(t *T) {
+	seen := 0
+	hooks.before = func() { seen++ }
+	defer func() { hooks.before = nil }()
+	hooks.after = func() { seen++ }
+	t.Cleanup(func() { hooks.after = nil })
+}`,
+		},
+		{
+			name: "mutex-bracketed atomic.Pointer hook",
+			src: `package p
+import (
+	"sync"
+	"sync/atomic"
+)
+type hookSet struct{ onEvent func() }
+var (
+	hookMu  sync.Mutex
+	hookPtr atomic.Pointer[hookSet]
+)
+func Emit() {
+	if h := hookPtr.Load(); h != nil && h.onEvent != nil {
+		h.onEvent()
+	}
+}
+func RunWithHooks() {
+	hookMu.Lock()
+	defer hookMu.Unlock()
+	defer hookPtr.Store(nil)
+	hookPtr.Store(&hookSet{onEvent: func() {}})
+	Emit()
+	hookPtr.Store(nil)
+}`,
+		},
+	}
+	for _, tc := range positiveCases {
+		t.Run("positive/"+tc.name, func(t *testing.T) {
+			fact := deriveFact(t, tc.src)
+			if len(fact.Mutates) != 0 || len(fact.Escapes) != 0 || len(fact.EnvCarrying) != 0 || len(fact.AttributedUses) != 0 {
+				t.Fatalf("bracketed seam marked dynamic state: Mutates=%v Escapes=%v EnvCarrying=%v AttributedUses=%v",
+					fact.Mutates, fact.Escapes, fact.EnvCarrying, fact.AttributedUses)
+			}
+		})
+	}
+
+	negativeCases := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "unbracketed write",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Exercise() {
+	probe = func() int { return 2 }
+}`,
+		},
+		{
+			name: "write before save",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Exercise() {
+	probe = func() int { return 2 }
+	orig := probe
+	defer func() { probe = orig }()
+}`,
+		},
+		{
+			name: "early exit between write and defer",
+			src: `package p
+type T struct{}
+func (*T) Fatal(...any) {}
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func TestSeam(t *T, bad bool) {
+	orig := probe
+	probe = func() int { return 2 }
+	if bad {
+		t.Fatal("abort before defer")
+	}
+	defer func() { probe = orig }()
+}`,
+		},
+		{
+			name: "mutated saved local",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Exercise() {
+	orig := probe
+	orig = func() int { return 3 }
+	probe = func() int { return 2 }
+	defer func() { probe = orig }()
+}`,
+		},
+		{
+			name: "nil reset on initialized variable",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Exercise() {
+	probe = func() int { return 2 }
+	defer func() { probe = nil }()
+}`,
+		},
+		{
+			name: "parallel test function",
+			src: `package p
+type T struct{}
+func (*T) Parallel() {}
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func TestParallel(t *T) {
+	t.Parallel()
+	orig := probe
+	probe = func() int { return 2 }
+	defer func() { probe = orig }()
+}`,
+		},
+		{
+			name: "goroutine spawn in function",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Exercise() {
+	orig := probe
+	probe = func() int { return 2 }
+	defer func() { probe = orig }()
+	go func() { _ = probe() }()
+}`,
+		},
+		{
+			name: "returned closure writes seam",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func MakeWriter() func() {
+	orig := probe
+	defer func() { probe = orig }()
+	return func() { probe = func() int { return 2 } }
+}`,
+		},
+		{
+			name: "atomic pointer without defer nil store",
+			src: `package p
+import (
+	"sync"
+	"sync/atomic"
+)
+type hookSet struct{ onEvent func() }
+var (
+	hookMu  sync.Mutex
+	hookPtr atomic.Pointer[hookSet]
+)
+func RunWithHooks() {
+	hookMu.Lock()
+	defer hookMu.Unlock()
+	hookPtr.Store(&hookSet{onEvent: func() {}})
+}`,
+		},
+		{
+			name: "nested closure called after inline restore",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Exercise() {
+	orig := probe
+	cl := func() { probe = func() int { return 2 } }
+	probe = orig
+	cl()
+}`,
+		},
+		{
+			name: "closure escaping via named return",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func MakeWriter() (fn func()) {
+	orig := probe
+	defer func() { probe = orig }()
+	fn = func() { probe = func() int { return 2 } }
+	return
+}`,
+		},
+		{
+			name: "closure escaping via composite return",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func MakeWriters() []func() {
+	orig := probe
+	defer func() { probe = orig }()
+	return []func(){func() { probe = func() int { return 2 } }}
+}`,
+		},
+		{
+			name: "LIFO defer inversion with conflicting second defer",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Exercise() {
+	orig := probe
+	defer func() { probe = func() int { return 9 } }()
+	defer func() { probe = orig }()
+	probe = func() int { return 2 }
+}`,
+		},
+		{
+			name: "nested block defer with outer inline restore",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Exercise(cond bool) {
+	orig := probe
+	if cond {
+		defer func() { probe = func() int { return 9 } }()
+	}
+	probe = orig
+}`,
+		},
+		{
+			name: "composite saved local field mutated before restore",
+			src: `package p
+func defaultProbe() int { return 1 }
+type cfg struct{ fn func() int }
+var state = cfg{fn: defaultProbe}
+func Exercise() {
+	orig := state
+	orig.fn = func() int { return 99 }
+	state = cfg{fn: func() int { return 2 }}
+	defer func() { state = orig }()
+}`,
+		},
+		{
+			name: "atomic pointer defer store before defer unlock",
+			src: `package p
+import (
+	"sync"
+	"sync/atomic"
+)
+type hookSet struct{ onEvent func() }
+var (
+	hookMu  sync.Mutex
+	hookPtr atomic.Pointer[hookSet]
+)
+func RunWithHooks() {
+	hookMu.Lock()
+	defer hookPtr.Store(nil)
+	defer hookMu.Unlock()
+	hookPtr.Store(&hookSet{onEvent: func() {}})
+}`,
+		},
+		{
+			name: "atomic pointer non-nil store before defer nil store",
+			src: `package p
+import (
+	"sync"
+	"sync/atomic"
+)
+type hookSet struct{ onEvent func() }
+var (
+	hookMu  sync.Mutex
+	hookPtr atomic.Pointer[hookSet]
+)
+func RunWithHooks() {
+	hookMu.Lock()
+	defer hookMu.Unlock()
+	hookPtr.Store(&hookSet{onEvent: func() {}})
+	defer hookPtr.Store(nil)
+}`,
+		},
+		{
+			name: "atomic pointer stored under different mutexes",
+			src: `package p
+import (
+	"sync"
+	"sync/atomic"
+)
+type hookSet struct{ onEvent func() }
+var (
+	hookMuA sync.Mutex
+	hookMuB sync.Mutex
+	hookPtr atomic.Pointer[hookSet]
+)
+func RunA() {
+	hookMuA.Lock()
+	defer hookMuA.Unlock()
+	defer hookPtr.Store(nil)
+	hookPtr.Store(&hookSet{onEvent: func() {}})
+}
+func RunB() {
+	hookMuB.Lock()
+	defer hookMuB.Unlock()
+	defer hookPtr.Store(nil)
+	hookPtr.Store(&hookSet{onEvent: func() {}})
+}`,
+		},
+		{
+			name: "atomic pointer store inside nested closure",
+			src: `package p
+import (
+	"sync"
+	"sync/atomic"
+)
+type hookSet struct{ onEvent func() }
+var (
+	hookMu  sync.Mutex
+	hookPtr atomic.Pointer[hookSet]
+)
+func MakeSetter() func() {
+	hookMu.Lock()
+	defer hookMu.Unlock()
+	defer hookPtr.Store(nil)
+	return func() {
+		hookPtr.Store(&hookSet{onEvent: func() {}})
+	}
+}`,
+		},
+		{
+			name: "inner Cleanup inside nested closure overwrites outer restore",
+			src: `package p
+type T struct{}
+func (*T) Cleanup(func()) {}
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func TestInnerCleanupOverwritesOuterRestore(t *T) {
+	orig1 := probe
+	probe = func() int { return 2 }
+	func() {
+		orig2 := probe
+		t.Cleanup(func() { probe = orig2 })
+		probe = func() int { return 3 }
+	}()
+	probe = orig1
+}`,
+		},
+	}
+	for _, tc := range negativeCases {
+		t.Run("negative/"+tc.name, func(t *testing.T) {
+			fact := deriveFact(t, tc.src)
+			if len(fact.Mutates) == 0 && len(fact.Escapes) == 0 && len(fact.EnvCarrying) == 0 && len(fact.AttributedUses) == 0 {
+				t.Fatalf("unbracketed/unsound seam was exempted: %+v", fact)
+			}
+		})
 	}
 }

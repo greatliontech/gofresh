@@ -14,8 +14,6 @@ import (
 // (REQ-fresh-resident-readings): MemTotal and MemAvailable in
 // kibibytes, both required; a malformed or missing line yields no
 // reading rather than a zero one.
-//
-//gofresh:pure
 func TestMeminfoParsesTheTwoHostLines(t *testing.T) {
 	cases := []struct {
 		name string

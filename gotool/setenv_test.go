@@ -12,8 +12,6 @@ import (
 // NormalizeEnv orders it: over a normalized environment the result is
 // what NormalizeEnv would return over the appended form — the setter
 // keeps the policy's order instead of appending out of it.
-//
-//gofresh:pure
 func TestSetEnvKeepsNormalizeEnvsOrder(t *testing.T) {
 	cases := [][]string{
 		{},

@@ -161,6 +161,7 @@ func TestAuditedValueConstructorAndComparatorAdmissions(t *testing.T) {
 
 import (
 	"math/big"
+	"math/rand"
 	"reflect"
 )
 
@@ -168,6 +169,11 @@ var answer = big.NewInt(42)
 
 func Equal() bool {
 	return reflect.DeepEqual(big.NewInt(42), answer)
+}
+
+func SeededRandLocal() string {
+	r := rand.New(rand.NewSource(7))
+	return new(big.Int).Rand(r, big.NewInt(int64(100+r.Intn(5)))).String()
 }
 
 func Ratio() *big.Rat {
@@ -216,11 +222,11 @@ import (
 	"math/rand"
 )
 
-// RandLocal draws entropy through math/rand's own constructor: the
-// ambient entry is the caller's, refused at the caller, never inside
-// the admitted package.
+// RandLocal draws entropy through math/rand's unseeded global generator:
+// the ambient entry is refused at the caller, never inside the admitted
+// seeded surface.
 func RandLocal() string {
-	return new(big.Int).Rand(rand.New(rand.NewSource(7)), big.NewInt(100)).String()
+	return new(big.Int).Rand(rand.New(rand.NewSource(rand.Int63())), big.NewInt(100)).String()
 }
 `)
 	writeFile(t, dir, "entropylocal/entropylocal_test.go", `package entropylocal
@@ -239,8 +245,8 @@ import (
 )
 
 // RandParam draws through a caller-supplied source: the subject's own
-// body reaches no ambient constructor; whoever constructs the source
-// carries the refusal.
+// body reaches no ambient constructor; whoever constructs an unseeded
+// source carries the refusal.
 func RandParam(r *rand.Rand) string {
 	return new(big.Int).Rand(r, big.NewInt(100)).String()
 }
@@ -253,7 +259,7 @@ import (
 )
 
 func TestRandParam(t *testing.T) {
-	_ = RandParam(rand.New(rand.NewSource(7)))
+	_ = RandParam(rand.New(rand.NewSource(rand.Int63())))
 }
 `)
 	writeFile(t, dir, "calendar/calendar.go", `package calendar
@@ -756,6 +762,7 @@ func TestDeref(t *testing.T) {
 	}
 	proofs, err := h.ComputeObservabilityBatch([]Subject{
 		{Package: "example.com/audited/values", Symbol: "Equal"},
+		{Package: "example.com/audited/values", Symbol: "SeededRandLocal"},
 		{Package: "example.com/audited/values", Symbol: "Ratio"},
 		{Package: "example.com/audited/values", Symbol: "Indirect"},
 		{Package: "example.com/audited/values", Symbol: "Arithmetic"},
@@ -790,6 +797,10 @@ func TestDeref(t *testing.T) {
 	equal := proofs[Subject{Package: "example.com/audited/values", Symbol: "Equal"}]
 	if !equal.Observable {
 		t.Fatalf("Equal = %+v, want the constructor/comparator subject observable", equal)
+	}
+	seededRand := proofs[Subject{Package: "example.com/audited/values", Symbol: "SeededRandLocal"}]
+	if !seededRand.Observable {
+		t.Fatalf("SeededRandLocal = %+v, want a deterministic constant-seeded local *rand.Rand observable", seededRand)
 	}
 	ratio := proofs[Subject{Package: "example.com/audited/values", Symbol: "Ratio"}]
 	if !ratio.Observable {

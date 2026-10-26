@@ -743,8 +743,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-mutation-shape"
-  content_hash: "ab4fbb755540d46dfff23aba76d1db45673124cf09e5e5786fb5f3bda51eb4e8"
-  source_hash: "6405b0584747486a05c8039264700c20a4a8044af829da346a0e0935d6a2f434"
+  content_hash: "ef990d7310964bd16365aaede1be1057872ad63a188e467928708883a88ae8bd"
+  source_hash: "ae90c81e9fdc304244723a80873ef644104803e8cecef36a9edc61c0262dc5ea"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestSharedDynamicStateFailClosedShapes"
   role: BINDING_ROLE_TESTS
@@ -753,8 +753,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-mutation-shape"
-  content_hash: "ab4fbb755540d46dfff23aba76d1db45673124cf09e5e5786fb5f3bda51eb4e8"
-  source_hash: "6405b0584747486a05c8039264700c20a4a8044af829da346a0e0935d6a2f434"
+  content_hash: "ef990d7310964bd16365aaede1be1057872ad63a188e467928708883a88ae8bd"
+  source_hash: "ae90c81e9fdc304244723a80873ef644104803e8cecef36a9edc61c0262dc5ea"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestSharedDynamicStateWritelessReadsDoNotDowngrade"
   role: BINDING_ROLE_TESTS

@@ -163,7 +163,6 @@ func TestPolicyMemoGeneratedHistories(t *testing.T) {
 	wg.Wait()
 }
 
-//gofresh:pure
 func BenchmarkAdmissionPolicy(b *testing.B) {
 	b.ReportAllocs()
 	var result string

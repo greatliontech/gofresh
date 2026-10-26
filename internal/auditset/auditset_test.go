@@ -61,6 +61,19 @@ func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
 	if !ReflectMethod("rtype", "Key") || ReflectMethod("MapIter", "Key") || ReflectMethod("Value", "Key") {
 		t.Fatal("reflect method predicate wrong")
 	}
+	if !slices.Equal(slices.Sorted(maps.Keys(randSymbols)), []string{"New", "NewSource", "Rand", "Source", "Source64"}) {
+		t.Fatalf("rand symbols = %v", slices.Sorted(maps.Keys(randSymbols)))
+	}
+	for _, names := range randMethods {
+		for _, name := range names {
+			if randSymbols[name] {
+				t.Errorf("rand method %s is also a bare-name symbol — top-level sampling functions read globalRand and must be excluded from randSymbols", name)
+			}
+		}
+	}
+	if !RandMethod("Rand", "Intn") || !RandMethod("Rand", "Float64") || !RandMethod("rngSource", "Int63") || RandMethod("Rand", "ExpFloat64") || RandMethod("Rand", "NormFloat64") || RandMethod("Zipf", "Uint64") {
+		t.Fatal("rand method predicate wrong")
+	}
 	if !slices.Equal(slices.Sorted(maps.Keys(fmtSymbols)), []string{"Append", "Appendf", "Appendln", "Errorf", "FormatString", "Sprint", "Sprintf", "Sprintln", "Stringer"}) {
 		t.Fatalf("fmt symbols = %v", slices.Sorted(maps.Keys(fmtSymbols)))
 	}

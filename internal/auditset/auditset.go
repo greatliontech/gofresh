@@ -33,7 +33,7 @@ func Identity() string {
 		return result
 	}
 	data, _ := json.Marshal([]any{purePackages, symbolTables, methods(syncMethods),
-		methods(poolMethods), methods(memoMethods), methods(timeMethods), methods(reflectMethods), reflectImmutableTypes})
+		methods(poolMethods), methods(memoMethods), methods(timeMethods), methods(reflectMethods), methods(randMethods), reflectImmutableTypes})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
@@ -277,6 +277,40 @@ var timeMethods = map[string][]string{
 	"Time": {"After", "Unix", "UnixMilli", "UnixMicro", "UTC", "AddDate"},
 }
 
+// randSymbols is the audited bare-name surface of package math/rand:
+// the explicit-seed source constructor NewSource, the local PRNG
+// constructor New, and the Rand, Source, and Source64 type names.
+// Top-level sampling functions (Int, Intn, Float64, Perm, Shuffle,
+// Read, Seed, etc.) share their names with (*Rand) methods and read
+// the process-wide unseeded global generator, so they are excluded from
+// the bare-name table and admitted only on a *Rand or *rngSource
+// receiver through randMethods. ExpFloat64, NormFloat64, and Zipf call
+// package math's transcendental functions and remain excluded. Audited
+// on go1.27.0-dst.14 (REQ-closure-observability-entropy).
+var randSymbols = map[string]bool{
+	"New": true, "NewSource": true,
+	"Rand": true, "Source": true, "Source64": true,
+}
+
+// randMethods is the audited receiver-qualified surface of package
+// math/rand: the integer and IEEE-754 float sampling methods on *Rand
+// and *rngSource whose implementations in math/rand/{rand,rng}.go use
+// pure integer arithmetic and float division over the receiver's own
+// state, never touching globalRand or package math's transcendental
+// operations (ExpFloat64 and NormFloat64 are excluded). Consulted by
+// the walk tiers alone (REQ-closure-observability-entropy).
+var randMethods = map[string][]string{
+	"Rand": {
+		"Float32", "Float64",
+		"Int", "Int31", "Int31n", "Int63", "Int63n", "Intn",
+		"Perm", "Read", "Seed", "Shuffle",
+		"Uint32", "Uint64",
+	},
+	"rngSource": {
+		"Int63", "Seed", "Uint64",
+	},
+}
+
 // urlSymbols is the audited surface of package net/url, matched by
 // bare name at every tier: escaping and unescaping, the Userinfo
 // constructors, and the value methods of URL, Values, Userinfo, and
@@ -398,6 +432,7 @@ var symbolTables = map[string]map[string]bool{
 	"path/filepath": filepathSymbols,
 	"net/url":       urlSymbols,
 	"flag":          flagSymbols,
+	"math/rand":     randSymbols,
 }
 
 // Symbol reports whether a standard package's symbol name is in its
@@ -452,6 +487,12 @@ func TimeMethod(receiver, method string) bool { return slices.Contains(timeMetho
 // audited receiver-qualified set.
 func ReflectMethod(receiver, method string) bool {
 	return slices.Contains(reflectMethods[receiver], method)
+}
+
+// RandMethod reports whether a math/rand receiver's method is in the
+// audited receiver-qualified set.
+func RandMethod(receiver, method string) bool {
+	return slices.Contains(randMethods[receiver], method)
 }
 
 // ReceiverMethod is the one receiver-unwrap ladder every

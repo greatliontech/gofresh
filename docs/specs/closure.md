@@ -432,7 +432,20 @@ type assertion — is mutation-equivalent, because the receiving code may write
 what it was handed. An address capture reaches the variable's own cell or a
 chain into it; taking the address of a composite literal captures the fresh
 object alone, its element references remaining escapes, while a capture
-nested inside the literal marks through its own shape.
+nested inside the literal marks through its own shape. A lexically bracketed
+save-and-restore or zero-reset write to a non-alias-handing, non-mutable-reach
+package variable (or field thereof, without mixing whole-struct and field
+writes on the same variable) whose address is never taken, inside a sequential
+function (no `go` statement, no `.Parallel()` call, no escaping closure writing
+the target, no unexempted nested-closure write, and no control-flow exit between
+the first write and the callable-scope `defer`/`Cleanup` or inline assignment
+that restores the single unmutated saved value or uninitialized zero value), or
+a non-escaping `Load` or top-level `Store` call on an uninitialized unexported
+`sync/atomic.Pointer[T]` variable whose address is never taken and whose every
+`Store` call is serialized under a single unexported package-level `sync.Mutex`
+with `Lock()`, `defer Unlock()`, and `defer Store(nil)` executed in that order
+before any non-nil `Store` or control-flow exit, restores the variable's state
+on exit and marks neither mutation nor environment registration.
 
 **REQ-closure-shared-dynamic-state-receiver-proof** (invariant): A direct method CALL on a statically-typed non-interface
 carrier MUST be judged by the method's own receiver-effect proof instead of
@@ -1527,6 +1540,14 @@ or reported Go release does not prove which source the implementation uses.
 Mutable exported globals, including Reader, io.EOF-shaped variables and
 flag.CommandLine, require their own state judgment; the registration claim in
 REQ-closure-observability-flag-registration is not a global-read exemption.
+Local `math/rand.Rand` generators constructed via `math/rand.New` and
+`math/rand.NewSource` and their integer and IEEE-754 float sampling methods
+(`Float32`, `Float64`, `Int`, `Int31`, `Int31n`, `Int63`, `Int63n`, `Intn`,
+`Perm`, `Read`, `Seed`, `Shuffle`, `Uint32`, `Uint64`) compute deterministically
+over the caller's seed and the receiver's own state; top-level package sampling
+functions (which read the unseeded global generator) and transcendental
+distributions (`ExpFloat64`, `NormFloat64`, `Zipf`, which reach package `math`)
+retain their refusal.
 
 **REQ-closure-observability-declaration-bindings** (invariant): A reference to a type or constant can be execution-free under language
 semantics once its declaration and use are resolved. It supplies no claim about

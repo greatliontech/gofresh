@@ -88,7 +88,7 @@ func auditedStandardMethod(audited bool, fn *ssa.Function) bool {
 	if !ok {
 		return false
 	}
-	return auditset.ReceiverMethod(f, "time", auditset.TimeMethod) || auditset.ReceiverMethod(f, "reflect", auditset.ReflectMethod)
+	return auditset.ReceiverMethod(f, "time", auditset.TimeMethod) || auditset.ReceiverMethod(f, "reflect", auditset.ReflectMethod) || auditset.ReceiverMethod(f, "math/rand", auditset.RandMethod)
 }
 
 // auditedStandardCallee is the walk tiers' whole standard admission
