@@ -10,3 +10,6 @@ require (
 )
 
 require golang.org/x/sync v0.23.0 // indirect
+
+retract v0.119.0 // Poisoned in proxy.golang.org by a deleted tag.
+
