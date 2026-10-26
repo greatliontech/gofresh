@@ -660,3 +660,55 @@ func bindTestRuntime(t *testing.T, snapshot *Snapshot, description RuntimeDescri
 	}
 	return binding
 }
+
+func TestSnapshotCaptureAndCaptureBatch(t *testing.T) {
+	ctx := t.Context()
+	var nilSnapshot *Snapshot
+	if _, err := nilSnapshot.Capture(ctx, Subject{}); err == nil {
+		t.Fatal("nil snapshot Capture succeeded")
+	}
+	if _, err := (&Snapshot{}).Capture(ctx, Subject{}); err == nil {
+		t.Fatal("zero snapshot Capture succeeded")
+	}
+	if _, err := nilSnapshot.CaptureBatch(ctx); err == nil {
+		t.Fatal("nil snapshot CaptureBatch succeeded")
+	}
+	if _, err := (&Snapshot{}).CaptureBatch(ctx); err == nil {
+		t.Fatal("zero snapshot CaptureBatch succeeded")
+	}
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod": "module example.com/cap\n\ngo 1.26\n",
+		"cap.go": "package cap\nfunc A() int { return 1 }\nfunc B() int { return 2 }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	session, err := NewSession(ctx, BuildDescription{
+		Directory:   dir,
+		Environment: gotool.SetEnv(os.Environ(), "GOWORK", "off"),
+		Inputs:      []string{},
+	}, SessionPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subA := Subject{Package: "example.com/cap", Symbol: "A"}
+	subB := Subject{Package: "example.com/cap", Symbol: "B"}
+	snapshot, err := session.Snapshot(ctx, []Subject{subA, subB}, CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fpA, err := snapshot.Capture(ctx, subA)
+	if err != nil || fpA.MaximalClosure == "" {
+		t.Fatalf("Capture(A): %+v, %v", fpA, err)
+	}
+	batch, err := snapshot.CaptureBatch(ctx)
+	if err != nil {
+		t.Fatalf("CaptureBatch: %v", err)
+	}
+	if len(batch) != 2 || batch[subA].MaximalClosure != fpA.MaximalClosure || batch[subB].MaximalClosure == "" {
+		t.Fatalf("CaptureBatch mismatch: %+v vs %+v", batch, fpA)
+	}
+}
+

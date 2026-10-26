@@ -415,6 +415,24 @@ func (s *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 	return s.view.ExplainDynamicState(ctx, pkgPath, varName)
 }
 
+// CaptureBatch returns the source-tier fingerprint projections for every
+// subject in the snapshot.
+func (s *Snapshot) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error) {
+	if s == nil || s.view == nil {
+		return nil, errors.New("gofresh: uninitialized snapshot")
+	}
+	return s.view.CaptureBatch(ctx)
+}
+
+// Capture returns the source-tier fingerprint projection for a single subject
+// in the snapshot.
+func (s *Snapshot) Capture(ctx context.Context, subject Subject) (Fingerprint, error) {
+	if s == nil || s.view == nil {
+		return Fingerprint{}, errors.New("gofresh: uninitialized snapshot")
+	}
+	return s.view.Capture(ctx, subject)
+}
+
 // CurrentFacts returns this binding's analysis-only fingerprint projection for
 // explanations. It carries neither an execution receipt nor runtime observation
 // or selected producing proof. It is not a newly produced result.
