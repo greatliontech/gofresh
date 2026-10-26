@@ -343,8 +343,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-explicit-build"
-  content_hash: "10a9ebe0b603dba05e2be98975d66e4ff74b8e467d52bfb9d50fafeeca11afa2"
-  source_hash: "390fca2e837e42aa5a0c49fe24db2dc0d93ea65d1eb080e3411b05fa75f67e9e"
+  content_hash: "07a7921c473bb7863edb79c665af97e4a1409dd241f12f6b5b0e89b5d547ef88"
+  source_hash: "3f35edc36e9809d0650190b4db8b8a293e81f1a4b25cb749b832a028c0fefeca"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestCompleteBuildDescriptionIdentity"
   role: BINDING_ROLE_TESTS
@@ -353,8 +353,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-explicit-build"
-  content_hash: "10a9ebe0b603dba05e2be98975d66e4ff74b8e467d52bfb9d50fafeeca11afa2"
-  source_hash: "390fca2e837e42aa5a0c49fe24db2dc0d93ea65d1eb080e3411b05fa75f67e9e"
+  content_hash: "07a7921c473bb7863edb79c665af97e4a1409dd241f12f6b5b0e89b5d547ef88"
+  source_hash: "3f35edc36e9809d0650190b4db8b8a293e81f1a4b25cb749b832a028c0fefeca"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestGeneratedCompilerFlagNormalization"
   role: BINDING_ROLE_TESTS
@@ -363,8 +363,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-explicit-build"
-  content_hash: "10a9ebe0b603dba05e2be98975d66e4ff74b8e467d52bfb9d50fafeeca11afa2"
-  source_hash: "390fca2e837e42aa5a0c49fe24db2dc0d93ea65d1eb080e3411b05fa75f67e9e"
+  content_hash: "07a7921c473bb7863edb79c665af97e4a1409dd241f12f6b5b0e89b5d547ef88"
+  source_hash: "3f35edc36e9809d0650190b4db8b8a293e81f1a4b25cb749b832a028c0fefeca"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestSessionSeparatesCompilationFromExecution"
   role: BINDING_ROLE_TESTS
@@ -373,8 +373,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-explicit-build"
-  content_hash: "10a9ebe0b603dba05e2be98975d66e4ff74b8e467d52bfb9d50fafeeca11afa2"
-  source_hash: "390fca2e837e42aa5a0c49fe24db2dc0d93ea65d1eb080e3411b05fa75f67e9e"
+  content_hash: "07a7921c473bb7863edb79c665af97e4a1409dd241f12f6b5b0e89b5d547ef88"
+  source_hash: "3f35edc36e9809d0650190b4db8b8a293e81f1a4b25cb749b832a028c0fefeca"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestProducerEnvConstructionRefusals"
   role: BINDING_ROLE_TESTS
