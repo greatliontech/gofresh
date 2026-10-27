@@ -26,7 +26,7 @@ func writeSupportedViewModule(t *testing.T) string {
 
 // supportedObservation is a checker fixture with actual engine-issued support.
 // The execution test below separately checks receipts from a real test binary.
-func supportedObservation(t *testing.T, view *View, root, dir, process, log string) runtimeinput.Observation {
+func supportedObservation(t *testing.T, view *Snapshot, root, dir, process, log string) runtimeinput.Observation {
 	t.Helper()
 	frame := runtimeinput.CaptureProducerFrame(context.Background(), root, dir, runtimeinput.FrameOptions{})
 	support, err := view.PrepareOutcomeSupport(context.Background(), frame, process)
@@ -59,11 +59,11 @@ func TestOutcomeSupportCannotCrossTestVariantChange(t *testing.T) {
 	ctx := context.Background()
 	dir := writeSupportedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, err := engine.NewView(ctx, []Subject{subject}, dir)
+	before, err := engine.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestOutcomeSupportCannotCrossTestVariantChange(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "observed_test.go"), []byte(newBody), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	after, err := engine.NewView(ctx, []Subject{subject}, dir)
+	after, err := engine.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,16 +101,16 @@ func TestOutcomePreparationRejectsInvalidAndEndedTransactions(t *testing.T) {
 	ctx := context.Background()
 	dir := writeSupportedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	frame := runtimeinput.CaptureProducerFrame(ctx, dir, dir, runtimeinput.FrameOptions{})
-	view, err := engine.NewView(ctx, []Subject{subject}, dir)
+	view, err := engine.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (&View{}).PrepareOutcomeSupport(ctx, frame, "worker"); err == nil || !strings.Contains(err.Error(), "contributing subjects") {
+	if _, err := (&Snapshot{engine: engine, facts: view.facts}).PrepareOutcomeSupport(ctx, frame, "worker"); err == nil || !strings.Contains(err.Error(), "contributing subjects") {
 		t.Fatalf("empty preparation: %v", err)
 	}
 	bad := frame
@@ -122,7 +122,7 @@ func TestOutcomePreparationRejectsInvalidAndEndedTransactions(t *testing.T) {
 		t.Fatal("invalid process identity accepted")
 	}
 	for _, cancelInstead := range []bool{false, true} {
-		view, err := engine.NewView(ctx, []Subject{subject}, dir)
+		view, err := engine.newView(ctx, []Subject{subject}, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -181,7 +181,7 @@ func TestFail(t *testing.T) { _, _ = os.LookupEnv("OUTCOME_VALUE"); t.Error("ord
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, output)
 	}
-	engine, err := New(WithDir(dir), WithEnv(env...))
+	engine, err := newEngine(withDir(dir), withEnv(env...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestFail(t *testing.T) { _, _ = os.LookupEnv("OUTCOME_VALUE"); t.Error("ord
 			t.Run(tc.symbol, func(t *testing.T) {
 				t.Parallel()
 				subject := Subject{Package: "example.com/outcomes", Symbol: tc.symbol}
-				view, err := engine.NewView(ctx, []Subject{subject}, dir)
+				view, err := engine.newView(ctx, []Subject{subject}, dir)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -248,7 +248,7 @@ func TestFail(t *testing.T) { _, _ = os.LookupEnv("OUTCOME_VALUE"); t.Error("ord
 				if err := json.Unmarshal(data, &stored); err != nil || stored != fp {
 					t.Fatalf("record roundtrip=%v", err)
 				}
-				current, err := engine.NewView(ctx, []Subject{subject}, dir)
+				current, err := engine.newView(ctx, []Subject{subject}, dir)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -294,7 +294,7 @@ func TestFail(t *testing.T) { _, _ = os.LookupEnv("OUTCOME_VALUE"); t.Error("ord
 				// Same package and environment are insufficient: the runtime evidence
 				// must include the exact subject's preparation identity.
 				other := Subject{Package: subject.Package, Symbol: "TestOther"}
-				otherView, err := engine.NewView(ctx, []Subject{other}, dir)
+				otherView, err := engine.newView(ctx, []Subject{other}, dir)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -324,11 +324,11 @@ func TestFail(t *testing.T) { _, _ = os.LookupEnv("OUTCOME_VALUE"); t.Error("ord
 					t.Fatalf("identity-only support=%+v %v", refused, err)
 				}
 				movedEnv := gotool.SetEnv(env, "OUTCOME_VALUE", "changed")
-				movedEngine, err := New(WithDir(dir), WithEnv(movedEnv...))
+				movedEngine, err := newEngine(withDir(dir), withEnv(movedEnv...))
 				if err != nil {
 					t.Fatal(err)
 				}
-				moved, err := movedEngine.NewView(ctx, []Subject{subject}, dir)
+				moved, err := movedEngine.newView(ctx, []Subject{subject}, dir)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -342,7 +342,7 @@ func TestFail(t *testing.T) { _, _ = os.LookupEnv("OUTCOME_VALUE"); t.Error("ord
 	// A process set containing an unsupported member cannot borrow support
 	// from an independently eligible member.
 	set := []Subject{{Package: "example.com/outcomes", Symbol: "TestEnv"}, {Package: "example.com/outcomes", Symbol: "TestFile"}}
-	view, err := engine.NewView(ctx, set, dir)
+	view, err := engine.newView(ctx, set, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

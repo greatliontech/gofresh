@@ -42,7 +42,7 @@ func TestSessionOwnsItsDescriptions(t *testing.T) {
 	if s.engine.runner.Containment.WaitDelay != time.Second {
 		t.Fatal("containment value borrowed")
 	}
-	projection := &Snapshot{session: s, view: &View{kind: CodeResult, packages: []string{"example.com/p"}}}
+	projection := &Snapshot{session: s, kind: CodeResult, packages: []string{"example.com/p"}}
 	runEnv := append(os.Environ(), "FRESH_RUNTIME_OWNED=original")
 	binding := bindTestRuntime(t, projection, RuntimeDescription{Environment: runEnv})
 	runEnv[len(runEnv)-1] = "FRESH_RUNTIME_OWNED=changed"

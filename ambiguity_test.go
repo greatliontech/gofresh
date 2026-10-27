@@ -72,7 +72,7 @@ func TestSharedTestHelperNameKeepsPackageMeasurable(t *testing.T) {
 	}
 	dir := writeSharedHelperFixture(t)
 	const pkg = "example.com/amb"
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestSharedTestHelperNameKeepsPackageMeasurable(t *testing.T) {
 		{Package: pkg, Symbol: "TestInternal"},
 		{Package: pkg, Symbol: "TestExternal"},
 	}
-	view, err := engine.NewView(context.Background(), subjects, dir)
+	view, err := engine.newView(context.Background(), subjects, dir)
 	if err != nil {
 		t.Fatalf("shared helper name made the package unmeasurable: %v", err)
 	}
@@ -106,12 +106,12 @@ func TestAmbiguousSubjectItselfIsRefusedCaptureAlone(t *testing.T) {
 	}
 	dir := writeSharedHelperFixture(t)
 	const pkg = "example.com/amb"
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	ambiguous := Subject{Package: pkg, Symbol: "mustHelper"}
-	view, err := engine.NewView(context.Background(), []Subject{ambiguous, {Package: pkg, Symbol: "Compute"}}, dir)
+	view, err := engine.newView(context.Background(), []Subject{ambiguous, {Package: pkg, Symbol: "Compute"}}, dir)
 	if err != nil {
 		t.Fatalf("ambiguous subject request failed view construction: %v", err)
 	}
@@ -159,12 +159,12 @@ func TestAmbiguousSubjectCallerAssertionConfersNothing(t *testing.T) {
 	}
 	dir := writeSharedHelperFixture(t)
 	const pkg = "example.com/amb"
-	engine, err := New(WithDir(dir), WithAssumePure(func(Subject) bool { return true }))
+	engine, err := newEngine(withDir(dir), withAssumePure(func(Subject) bool { return true }))
 	if err != nil {
 		t.Fatal(err)
 	}
 	ambiguous := Subject{Package: pkg, Symbol: "mustHelper"}
-	view, err := engine.NewView(context.Background(), []Subject{ambiguous}, dir)
+	view, err := engine.newView(context.Background(), []Subject{ambiguous}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,12 +195,12 @@ func TestAmbiguousSubjectDirectiveConfersNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	const pkg = "example.com/amb"
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	ambiguous := Subject{Package: pkg, Symbol: "mustHelper"}
-	view, err := engine.NewView(context.Background(), []Subject{ambiguous}, dir)
+	view, err := engine.newView(context.Background(), []Subject{ambiguous}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,12 +241,12 @@ func TestAmbiguousSubjectExternalDirectiveConfersNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	const pkg = "example.com/amb"
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	ambiguous := Subject{Package: pkg, Symbol: "mustHelper"}
-	view, err := engine.NewView(context.Background(), []Subject{ambiguous}, dir)
+	view, err := engine.newView(context.Background(), []Subject{ambiguous}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestAmbiguousSubjectExternalDirectiveConfersNothing(t *testing.T) {
 	}
 }
 
-func mustCapture(t *testing.T, view *View, subject Subject) Fingerprint {
+func mustCapture(t *testing.T, view *Snapshot, subject Subject) Fingerprint {
 	t.Helper()
 	fingerprint, err := view.Capture(context.Background(), subject)
 	if err != nil {

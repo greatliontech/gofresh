@@ -41,7 +41,7 @@ func TestEngineSpawnsThroughTheInstalledRunner(t *testing.T) {
 		defer mu.Unlock()
 		args = append(args, append([]string(nil), cmd.Args...))
 	}}
-	e, err := New(WithDir(dir), WithGoRunner(runner))
+	e, err := newEngine(withDir(dir), withGoRunner(runner))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestEngineSpawnsThroughTheInstalledRunner(t *testing.T) {
 	mu.Lock()
 	args = nil
 	mu.Unlock()
-	if _, err := e.Capture(context.Background(), Subject{Package: "example.com/m", Symbol: "TestF"}, dir); err != nil {
+	if _, err := e.capture(context.Background(), Subject{Package: "example.com/m", Symbol: "TestF"}, dir); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()

@@ -175,7 +175,7 @@ func TestEngineNeverInfersPurity(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	e, err := New()
+	e, err := newEngine()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -257,11 +257,11 @@ func TestEveryCaptureStampsTheClosureStrategy(t *testing.T) {
 	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := scanMemoModule(t)
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(context.Background(), scanMemoSubjects, dir)
+	view, err := engine.newView(context.Background(), scanMemoSubjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,10 +302,10 @@ func TestPropCommitIdentityAbsent(t *testing.T) {
 }
 
 func TestAssumePureInputShape(t *testing.T) {
-	typeOf := reflect.TypeOf(WithAssumePure)
+	typeOf := reflect.TypeOf(withAssumePure)
 	wantPredicate := reflect.TypeFor[func(Subject) bool]()
-	if typeOf.NumIn() != 1 || typeOf.In(0) != wantPredicate || typeOf.NumOut() != 1 || typeOf.Out(0) != reflect.TypeFor[Option]() {
-		t.Fatalf("WithAssumePure type = %s, want func(func(Subject) bool) Option", typeOf)
+	if typeOf.NumIn() != 1 || typeOf.In(0) != wantPredicate || typeOf.NumOut() != 1 || typeOf.Out(0) != reflect.TypeFor[option]() {
+		t.Fatalf("withAssumePure type = %s, want func(func(Subject) bool) option", typeOf)
 	}
 }
 
@@ -323,16 +323,16 @@ func TestCaptureCheckRoundTrip(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
-	e, err := New()
+	e, err := newEngine()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	subj := Subject{Package: methodPkg, Symbol: "Adder.Value"}
-	fp, err := e.Capture(context.Background(), subj, ".")
+	fp, err := e.capture(context.Background(), subj, ".")
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	v, err := e.Check(context.Background(), fp, subj, ".")
+	v, err := e.check(context.Background(), fp, subj, ".")
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestCaptureCheckRoundTrip(t *testing.T) {
 	// The same recorded fingerprint checked against a different subject (Adder.Ptr
 	// has a different closure) is stale on the closure guard.
 	other := Subject{Package: methodPkg, Symbol: "Adder.Ptr"}
-	v2, err := e.Check(context.Background(), fp, other, ".")
+	v2, err := e.check(context.Background(), fp, other, ".")
 	if err != nil {
 		t.Fatalf("Check other: %v", err)
 	}
@@ -354,7 +354,7 @@ func TestCaptureCheckRoundTrip(t *testing.T) {
 	bad := fp
 	bad.RuntimeInputs = "not a manifest"
 	bad.RuntimeDigest = "D"
-	v3, err := e.Check(context.Background(), bad, subj, ".")
+	v3, err := e.check(context.Background(), bad, subj, ".")
 	if err != nil {
 		t.Fatalf("Check malformed manifest: %v", err)
 	}
@@ -363,7 +363,7 @@ func TestCaptureCheckRoundTrip(t *testing.T) {
 	}
 }
 
-// TestBuildFlagsAffectVerdict pins that WithBuildFlags threads into the buildconfig
+// TestBuildFlagsAffectVerdict pins that withBuildFlags threads into the buildconfig
 // guard end to end: a fingerprint captured with no build flags is stale on
 // buildconfig when checked by an engine that used one, so a build-invocation change
 // is caught.
@@ -375,19 +375,19 @@ func TestBuildFlagsAffectVerdict(t *testing.T) {
 		t.Skip("go toolchain not available")
 	}
 	subj := Subject{Package: methodPkg, Symbol: "Adder.Value"}
-	plain, err := New()
+	plain, err := newEngine()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	fp, err := plain.Capture(context.Background(), subj, ".") // captured with no build inputs
+	fp, err := plain.capture(context.Background(), subj, ".") // captured with no build inputs
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	tagged, err := New(WithBuildFlags("-tags=integration"))
+	tagged, err := newEngine(withBuildFlags("-tags=integration"))
 	if err != nil {
 		t.Fatalf("New tagged: %v", err)
 	}
-	v, err := tagged.Check(context.Background(), fp, subj, ".")
+	v, err := tagged.check(context.Background(), fp, subj, ".")
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -400,7 +400,7 @@ func TestBuildInputsRejectFlags(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	if _, err := New(WithBuildInputs("-race")); err == nil || !strings.Contains(err.Error(), "WithBuildFlags") {
+	if _, err := newEngine(withBuildInputs("-race")); err == nil || !strings.Contains(err.Error(), "withBuildFlags") {
 		t.Fatalf("flag-shaped opaque input accepted: %v", err)
 	}
 }
@@ -410,7 +410,7 @@ func TestBuildFlagsRejectOverlay(t *testing.T) {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
 	flags := []string{"-overlay=overlay.json"}
-	if _, err := New(WithBuildFlags(flags...)); err == nil || !strings.Contains(err.Error(), "-overlay") {
+	if _, err := newEngine(withBuildFlags(flags...)); err == nil || !strings.Contains(err.Error(), "-overlay") {
 		t.Fatalf("engine accepted overlay: %v", err)
 	}
 	if _, err := ScanPureDirectives(t.TempDir(), os.Environ(), flags, "example.com/p"); err == nil || !strings.Contains(err.Error(), "-overlay") {
@@ -456,21 +456,21 @@ func TestBuildFlagsSelectSourceAndPurity(t *testing.T) {
 		t.Fatal("unselected default file conferred purity on the special build")
 	}
 
-	recorded, err := New(WithDir(tmp), WithBuildFlags(flags...))
+	recorded, err := newEngine(withDir(tmp), withBuildFlags(flags...))
 	if err != nil {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: pkg, Symbol: "Selected"}
-	fp, err := recorded.Capture(context.Background(), subject, tmp)
+	fp, err := recorded.capture(context.Background(), subject, tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
 	write("selected_special.go", "//go:build special\n\npackage tagged\n\nfunc Selected() int { return 3 }\n")
-	current, err := New(WithDir(tmp), WithBuildFlags(flags...))
+	current, err := newEngine(withDir(tmp), withBuildFlags(flags...))
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := current.Check(context.Background(), fp, subject, tmp)
+	verdict, err := current.check(context.Background(), fp, subject, tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,37 +491,37 @@ func TestAssumePureOverride(t *testing.T) {
 	}
 	subj := Subject{Package: "github.com/greatliontech/gofresh/closure/fixtures/harnessroot", Symbol: "BenchmarkProd"}
 
-	e, err := New()
+	e, err := newEngine()
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	fp, err := e.CaptureFor(context.Background(), subj, ".", Measurement)
+	fp, err := e.captureFor(context.Background(), subj, ".", Measurement)
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
-	if v, err := e.Check(context.Background(), fp, subj, "."); err != nil {
+	if v, err := e.check(context.Background(), fp, subj, "."); err != nil {
 		t.Fatalf("Check: %v", err)
 	} else if v.Status != Unverifiable {
 		t.Errorf("default: got %s, want unverifiable (closure reaches file I/O)", v.Status)
 	}
 
-	pure, err := New(WithAssumePure(func(s Subject) bool { return s == subj }))
+	pure, err := newEngine(withAssumePure(func(s Subject) bool { return s == subj }))
 	if err != nil {
 		t.Fatalf("New pure: %v", err)
 	}
-	pureFP, err := pure.CaptureFor(context.Background(), subj, ".", Measurement)
+	pureFP, err := pure.captureFor(context.Background(), subj, ".", Measurement)
 	if err != nil {
 		t.Fatalf("Capture pure: %v", err)
 	}
 	if pureFP.PurityAssertion != "caller assertion" {
 		t.Fatalf("purity assertion = %q, want attributable caller assertion", pureFP.PurityAssertion)
 	}
-	if v, err := pure.Check(context.Background(), fp, subj, "."); err != nil {
+	if v, err := pure.check(context.Background(), fp, subj, "."); err != nil {
 		t.Fatalf("Check unrecorded pure: %v", err)
 	} else if v.Status != Unverifiable {
 		t.Errorf("unrecorded assume-pure: got %s, want unverifiable", v.Status)
 	}
-	if v, err := pure.Check(context.Background(), pureFP, subj, "."); err != nil {
+	if v, err := pure.check(context.Background(), pureFP, subj, "."); err != nil {
 		t.Fatalf("Check pure: %v", err)
 	} else if v.Status != Valid {
 		t.Errorf("assume-pure: got %s (%s), want valid", v.Status, v.Reason)
@@ -549,16 +549,16 @@ func TestWithDirOutOfTree(t *testing.T) {
 	write("tiny.go", "package tiny\n\n//gofresh:pure\nfunc Add(a, b int) int { return a + b }\n")
 	write("tiny_test.go", "package tiny\n\nimport \"testing\"\n\n//gofresh:pure\nfunc TestAdd(t *testing.T) {\n\tif Add(1, 2) != 3 {\n\t\tt.Fatal(\"sum\")\n\t}\n}\n")
 
-	e, err := New(WithDir(tmp))
+	e, err := newEngine(withDir(tmp))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	subj := Subject{Package: "example.com/tiny", Symbol: "TestAdd"}
-	fp, err := e.Capture(context.Background(), subj, tmp)
+	fp, err := e.capture(context.Background(), subj, tmp)
 	if err != nil {
 		t.Fatalf("Capture out of tree: %v", err)
 	}
-	v, err := e.Check(context.Background(), fp, subj, tmp)
+	v, err := e.check(context.Background(), fp, subj, tmp)
 	if err != nil || v.Status != Valid {
 		t.Fatalf("round trip = %+v, %v", v, err)
 	}
@@ -580,7 +580,7 @@ func TestDefaultDirIsFrozenAtEngineConstruction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	engine, err := New()
+	engine, err := newEngine()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,11 +609,11 @@ func TestWithDirCoherence(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/x\n\ngo 1.26\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e, err := New(WithDir(dir))
+	e, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := e.Capture(context.Background(), Subject{Package: "example.com/x", Symbol: "F"}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "one tree per fingerprint") {
+	if _, err := e.capture(context.Background(), Subject{Package: "example.com/x", Symbol: "F"}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "one tree per fingerprint") {
 		t.Fatalf("incoherent dirs accepted: %v", err)
 	}
 }
@@ -622,7 +622,7 @@ func TestDefaultDirCoherence(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	e, err := New()
+	e, err := newEngine()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,7 +648,7 @@ func TestWithDirCoherenceResolvesSymlinks(t *testing.T) {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	engineDir := filepath.Join(base, "link") + string(os.PathSeparator) + ".."
-	e, err := New(WithDir(engineDir))
+	e, err := newEngine(withDir(engineDir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -681,18 +681,18 @@ func TestExternalDirectiveWithholdsReuse(t *testing.T) {
 
 	const pkg = "example.com/ext"
 	subj := Subject{Package: pkg, Symbol: "Reads"}
-	e, err := New(WithDir(tmp), WithAssumePure(func(Subject) bool { return true }))
+	e, err := newEngine(withDir(tmp), withAssumePure(func(Subject) bool { return true }))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fp, err := e.Capture(context.Background(), subj, tmp)
+	fp, err := e.capture(context.Background(), subj, tmp)
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
 	}
 	if fp.PurityAssertion != "" {
 		t.Fatalf("purity assertion on an external subject = %q, want none (REQ-external-precedence)", fp.PurityAssertion)
 	}
-	if v, err := e.Check(context.Background(), fp, subj, tmp); err != nil {
+	if v, err := e.check(context.Background(), fp, subj, tmp); err != nil {
 		t.Fatalf("Check: %v", err)
 	} else if v.Status != Unverifiable || v.Reason != "external directive" {
 		t.Fatalf("verdict = {%s %q}, want {unverifiable external directive}", v.Status, v.Reason)
@@ -700,11 +700,11 @@ func TestExternalDirectiveWithholdsReuse(t *testing.T) {
 
 	// A source change stales — externality withholds reuse, never guard info.
 	write("ext.go", "package ext\n\n//gofresh:external\nfunc Reads() int { return 2 }\n")
-	changed, err := New(WithDir(tmp))
+	changed, err := newEngine(withDir(tmp))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, err := changed.Check(context.Background(), fp, subj, tmp); err != nil {
+	if v, err := changed.check(context.Background(), fp, subj, tmp); err != nil {
 		t.Fatalf("Check changed: %v", err)
 	} else if v.Status != Stale || v.Reason != "closure" {
 		t.Fatalf("changed-source verdict = {%s %q}, want {stale closure}", v.Status, v.Reason)
@@ -728,11 +728,11 @@ func TestExternalDirectiveConflictRefused(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmp, "c.go"), []byte("package conflict\n\n//gofresh:pure\n//gofresh:external\nfunc Torn() int { return 1 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e, err := New(WithDir(tmp))
+	e, err := newEngine(withDir(tmp))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = e.Capture(context.Background(), Subject{Package: "example.com/conflict", Symbol: "Torn"}, tmp)
+	_, err = e.capture(context.Background(), Subject{Package: "example.com/conflict", Symbol: "Torn"}, tmp)
 	if err == nil || !strings.Contains(err.Error(), "gofresh:pure and //gofresh:external") {
 		t.Fatalf("Capture = %v, want the contradiction refusal", err)
 	}
@@ -776,7 +776,7 @@ func TestExternalDirectiveFixtureScan(t *testing.T) {
 		t.Skip("go toolchain not available")
 	}
 	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/externaldirective"
-	e, err := New()
+	e, err := newEngine()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -788,11 +788,11 @@ func TestExternalDirectiveFixtureScan(t *testing.T) {
 		"T.NotDeclared":   false,
 	} {
 		subj := Subject{Package: pkg, Symbol: symbol}
-		fp, err := e.Capture(context.Background(), subj, ".")
+		fp, err := e.capture(context.Background(), subj, ".")
 		if err != nil {
 			t.Fatalf("Capture %s: %v", symbol, err)
 		}
-		v, err := e.Check(context.Background(), fp, subj, ".")
+		v, err := e.check(context.Background(), fp, subj, ".")
 		if err != nil {
 			t.Fatalf("Check %s: %v", symbol, err)
 		}
@@ -831,14 +831,14 @@ func TestExternalDirectiveConflictScopedToScanSubjects(t *testing.T) {
 	write("dep/dep.go", "package dep\n\n//gofresh:pure\n//gofresh:external\nfunc Torn() int { return 1 }\n")
 	write("top.go", "package scoped\n\nimport \"example.com/scoped/dep\"\n\nfunc Uses() int { return dep.Torn() }\n")
 
-	e, err := New(WithDir(tmp))
+	e, err := newEngine(withDir(tmp))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.Capture(context.Background(), Subject{Package: "example.com/scoped", Symbol: "Uses"}, tmp); err != nil {
+	if _, err := e.capture(context.Background(), Subject{Package: "example.com/scoped", Symbol: "Uses"}, tmp); err != nil {
 		t.Fatalf("dependent capture refused by a dependency's conflict: %v", err)
 	}
-	_, err = e.Capture(context.Background(), Subject{Package: "example.com/scoped/dep", Symbol: "Torn"}, tmp)
+	_, err = e.capture(context.Background(), Subject{Package: "example.com/scoped/dep", Symbol: "Torn"}, tmp)
 	if err == nil || !strings.Contains(err.Error(), "gofresh:pure and //gofresh:external") {
 		t.Fatalf("conflicted package's own capture = %v, want the contradiction refusal", err)
 	}
@@ -847,12 +847,12 @@ func TestExternalDirectiveConflictScopedToScanSubjects(t *testing.T) {
 	// including one declared in another package and promoted through
 	// embedding, which only the method-set path can sight.
 	write("meth/meth.go", "package meth\n\ntype T struct{}\n\n//gofresh:pure\n//gofresh:external\nfunc (T) Torn() int { return 1 }\n")
-	_, err = e.Capture(context.Background(), Subject{Package: "example.com/scoped/meth", Symbol: "T.Torn"}, tmp)
+	_, err = e.capture(context.Background(), Subject{Package: "example.com/scoped/meth", Symbol: "T.Torn"}, tmp)
 	if err == nil || !strings.Contains(err.Error(), "gofresh:pure and //gofresh:external") {
 		t.Fatalf("conflicted method capture = %v, want the contradiction refusal", err)
 	}
 	write("embed/embed.go", "package embed\n\nimport \"example.com/scoped/meth\"\n\ntype W struct{ meth.T }\n")
-	_, err = e.Capture(context.Background(), Subject{Package: "example.com/scoped/embed", Symbol: "W.Torn"}, tmp)
+	_, err = e.capture(context.Background(), Subject{Package: "example.com/scoped/embed", Symbol: "W.Torn"}, tmp)
 	if err == nil || !strings.Contains(err.Error(), "gofresh:pure and //gofresh:external") {
 		t.Fatalf("promoted conflicted method capture = %v, want the contradiction refusal", err)
 	}

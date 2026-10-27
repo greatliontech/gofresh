@@ -23,7 +23,7 @@ import (
 func artifactScopeFixture(t *testing.T) (*Snapshot, string) {
 	t.Helper()
 	dir := t.TempDir()
-	return &Snapshot{session: &Session{build: BuildDescription{Directory: dir}}, view: &View{packages: []string{"example.com/artifact"}}}, dir
+	return &Snapshot{session: &Session{build: BuildDescription{Directory: dir}}, packages: []string{"example.com/artifact"}}, dir
 }
 
 func writeArtifactFixture(t *testing.T, path string, data []byte) {

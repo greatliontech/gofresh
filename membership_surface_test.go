@@ -35,11 +35,11 @@ func TestViewMembershipRefusalsRetainSelectionScope(t *testing.T) {
 	if declared, err := bindTestRuntime(t, all, RuntimeDescription{}).CurrentFacts(t.Context(), g); err != nil || declared.MaximalClosure == "" {
 		t.Fatalf("the excluded subject is not a real declaration: %v", err)
 	}
-	view, err := all.view.Sibling([]Subject{f})
+	selected, err := all.Sibling([]Subject{f})
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected := &Snapshot{session: session, view: view}
+	view := selected
 	bound := bindTestRuntime(t, selected, RuntimeDescription{})
 	view.beforePreciseAnalysis = func() { t.Fatal("membership refusal started proof work") }
 	observation, err := runtimeinput.Incomplete(dir, "unrelated-process", "no completion", os.Environ())

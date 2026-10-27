@@ -45,7 +45,7 @@ var scanMemoSubjects = []Subject{
 
 // scanOutputs captures a view's scan-derived facts for every subject: the
 // projection a served scan must reproduce exactly.
-func scanOutputs(t *testing.T, view *View, subjects []Subject) map[Subject]string {
+func scanOutputs(t *testing.T, view *Snapshot, subjects []Subject) map[Subject]string {
 	t.Helper()
 	out := map[Subject]string{}
 	for _, s := range subjects {
@@ -75,11 +75,11 @@ func TestScanMemoServesTheWholeScanWithoutATypedLoad(t *testing.T) {
 	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := scanMemoModule(t)
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cold, err := engine.NewView(context.Background(), scanMemoSubjects, dir)
+	cold, err := engine.newView(context.Background(), scanMemoSubjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,11 +91,11 @@ func TestScanMemoServesTheWholeScanWithoutATypedLoad(t *testing.T) {
 	viewTestHooks.typedLoad = func() { loads++ }
 	defer func() { viewTestHooks.typedLoad = nil }()
 	var events []Progress
-	warmEngine, err := New(WithDir(dir), WithProgress(func(p Progress) { events = append(events, p) }))
+	warmEngine, err := newEngine(withDir(dir), withProgress(func(p Progress) { events = append(events, p) }))
 	if err != nil {
 		t.Fatal(err)
 	}
-	warm, err := warmEngine.NewView(context.Background(), scanMemoSubjects, dir)
+	warm, err := warmEngine.newView(context.Background(), scanMemoSubjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,11 +147,11 @@ func TestScanMemoMissesOnVouchChangeAndCorruption(t *testing.T) {
 	cache := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cache)
 	dir := scanMemoModule(t)
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewView(context.Background(), scanMemoSubjects, dir); err != nil {
+	if _, err := engine.newView(context.Background(), scanMemoSubjects, dir); err != nil {
 		t.Fatal(err)
 	}
 	loads := 0
@@ -159,11 +159,11 @@ func TestScanMemoMissesOnVouchChangeAndCorruption(t *testing.T) {
 	defer func() { viewTestHooks.typedLoad = nil }()
 	// The option takes the canonical dotted identity (REQ-vouch-input);
 	// the file below spells the same vouch in its own grammar.
-	vouched, err := New(WithDir(dir), WithDynamicStateVouches("example.com/scanmemo/dep.Hooks"))
+	vouched, err := newEngine(withDir(dir), withDynamicStateVouches("example.com/scanmemo/dep.Hooks"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := vouched.NewView(context.Background(), scanMemoSubjects, dir); err != nil {
+	if _, err := vouched.newView(context.Background(), scanMemoSubjects, dir); err != nil {
 		t.Fatal(err)
 	}
 	if loads == 0 {
@@ -177,11 +177,11 @@ func TestScanMemoMissesOnVouchChangeAndCorruption(t *testing.T) {
 		t.Fatal(err)
 	}
 	loads = 0
-	fromFile, err := New(WithDir(dir))
+	fromFile, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fromFile.NewView(context.Background(), scanMemoSubjects, dir); err != nil {
+	if _, err := fromFile.newView(context.Background(), scanMemoSubjects, dir); err != nil {
 		t.Fatal(err)
 	}
 	if loads != 0 {
@@ -190,11 +190,11 @@ func TestScanMemoMissesOnVouchChangeAndCorruption(t *testing.T) {
 	if err := os.WriteFile(vouchPath, []byte("example.com/scanmemo/dep:Hooks\nexample.com/scanmemo/dep:Other\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := New(WithDir(dir))
+	changed, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := changed.NewView(context.Background(), scanMemoSubjects, dir); err != nil {
+	if _, err := changed.newView(context.Background(), scanMemoSubjects, dir); err != nil {
 		t.Fatal(err)
 	}
 	if loads == 0 {
@@ -214,7 +214,7 @@ func TestScanMemoMissesOnVouchChangeAndCorruption(t *testing.T) {
 		}
 	}
 	loads = 0
-	if _, err := engine.NewView(context.Background(), scanMemoSubjects, dir); err != nil {
+	if _, err := engine.newView(context.Background(), scanMemoSubjects, dir); err != nil {
 		t.Fatal(err)
 	}
 	if loads == 0 {
@@ -234,11 +234,11 @@ func TestScanMemoKeyTracksTheTestBinaryGraph(t *testing.T) {
 	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := scanMemoModule(t)
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewView(context.Background(), scanMemoSubjects, dir); err != nil {
+	if _, err := engine.newView(context.Background(), scanMemoSubjects, dir); err != nil {
 		t.Fatal(err)
 	}
 	loads := 0
@@ -261,7 +261,7 @@ func TestScanMemoKeyTracksTheTestBinaryGraph(t *testing.T) {
 				t.Fatal(err)
 			}
 			loads = 0
-			_, err = engine.NewView(context.Background(), scanMemoSubjects, dir)
+			_, err = engine.newView(context.Background(), scanMemoSubjects, dir)
 			if restoreErr := os.WriteFile(full, original, 0o644); restoreErr != nil {
 				t.Fatal(restoreErr)
 			}
@@ -289,7 +289,7 @@ func TestScanMemoKeyTracksTheTestBinaryGraph(t *testing.T) {
 			t.Fatal(err)
 		}
 		loads = 0
-		changedView, viewErr := engine.NewView(context.Background(), scanMemoSubjects, dir)
+		changedView, viewErr := engine.newView(context.Background(), scanMemoSubjects, dir)
 		if restoreErr := os.WriteFile(full, original, 0o644); restoreErr != nil {
 			t.Fatal(restoreErr)
 		}
@@ -299,7 +299,7 @@ func TestScanMemoKeyTracksTheTestBinaryGraph(t *testing.T) {
 		if loads == 0 {
 			t.Fatalf("a comment-only edit to %s served a spelling-sensitive scan", tc.path)
 		}
-		restoredView, err := engine.NewView(context.Background(), scanMemoSubjects, dir)
+		restoredView, err := engine.newView(context.Background(), scanMemoSubjects, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -343,13 +343,13 @@ var (
 	leakSubjects = []Subject{leakA, leakB}
 )
 
-func newLeakView(t *testing.T, dir string, subjects []Subject, opts ...Option) *View {
+func newLeakView(t *testing.T, dir string, subjects []Subject, opts ...option) *Snapshot {
 	t.Helper()
-	engine, err := New(append([]Option{WithDir(dir)}, opts...)...)
+	engine, err := newEngine(append([]option{withDir(dir)}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(context.Background(), subjects, dir)
+	view, err := engine.newView(context.Background(), subjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +389,7 @@ func TestScanMemoComposesEachPackageOverItsOwnGraph(t *testing.T) {
 	viewTestHooks.typedLoad = func() { loads++ }
 	defer func() { viewTestHooks.typedLoad = nil }()
 	var events []Progress
-	mixed := newLeakView(t, dir, leakSubjects, WithProgress(func(p Progress) { events = append(events, p) }))
+	mixed := newLeakView(t, dir, leakSubjects, withProgress(func(p Progress) { events = append(events, p) }))
 	// One typed load: b derives in the first pass beside the served a;
 	// the agreement pass then serves both from the store.
 	if loads != 1 {
@@ -418,11 +418,11 @@ func TestScanMemoRefusesAnEntryOfAnotherShape(t *testing.T) {
 	cache := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", cache)
 	dir := scanMemoModule(t)
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewView(context.Background(), scanMemoSubjects, dir); err != nil {
+	if _, err := engine.newView(context.Background(), scanMemoSubjects, dir); err != nil {
 		t.Fatal(err)
 	}
 	entries, _ := filepath.Glob(filepath.Join(cache, "gofresh", "scanfacts", "*.json"))
@@ -459,7 +459,7 @@ func TestScanMemoRefusesAnEntryOfAnotherShape(t *testing.T) {
 	loads := 0
 	viewTestHooks.typedLoad = func() { loads++ }
 	defer func() { viewTestHooks.typedLoad = nil }()
-	if _, err := engine.NewView(context.Background(), scanMemoSubjects, dir); err != nil {
+	if _, err := engine.newView(context.Background(), scanMemoSubjects, dir); err != nil {
 		t.Fatal(err)
 	}
 	if loads == 0 {
@@ -522,14 +522,14 @@ func TestScanMemoServesTheDischargedScan(t *testing.T) {
 		}
 	}
 	subjects := []Subject{{Package: "example.com/view", Symbol: "F"}, {Package: "example.com/view", Symbol: "Property"}}
-	cold := scanOutputs(t, newLeakView(t, dir, subjects, WithSingleSubjectExecution()), subjects)
+	cold := scanOutputs(t, newLeakView(t, dir, subjects, withSingleSubjectExecution()), subjects)
 	if !strings.Contains(cold[subjects[0]], "|verifiable|") || !strings.HasSuffix(cold[subjects[0]], "|example.com/view/gen.memo") {
 		t.Fatalf("the attestation did not discharge F's culprit on record: %s", cold[subjects[0]])
 	}
 	loads := 0
 	viewTestHooks.typedLoad = func() { loads++ }
 	defer func() { viewTestHooks.typedLoad = nil }()
-	warm := scanOutputs(t, newLeakView(t, dir, subjects, WithSingleSubjectExecution()), subjects)
+	warm := scanOutputs(t, newLeakView(t, dir, subjects, withSingleSubjectExecution()), subjects)
 	if loads != 0 {
 		t.Fatalf("the warm view paid %d typed loads", loads)
 	}

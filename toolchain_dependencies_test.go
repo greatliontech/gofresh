@@ -62,13 +62,13 @@ func TestToolchainContentBindsRecordedApplicability(t *testing.T) {
 				}
 			}
 			subject := Subject{Package: "example.com/stdlibdep", Symbol: "Value"}
-			newView := func() *View {
+			newView := func() *Snapshot {
 				t.Helper()
-				e, err := New(WithDir(dir))
+				e, err := newEngine(withDir(dir))
 				if err != nil {
 					t.Fatal(err)
 				}
-				v, err := e.NewView(ctx, []Subject{subject}, dir)
+				v, err := e.newView(ctx, []Subject{subject}, dir)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -83,13 +83,13 @@ func TestToolchainContentBindsRecordedApplicability(t *testing.T) {
 					t.Fatalf("actual value=%q want=%q error=%v", out, want, err)
 				}
 			}
-			capture := func(v *View) (Fingerprint, error) {
+			capture := func(v *Snapshot) (Fingerprint, error) {
 				if tc.observed {
 					return v.CaptureObserved(ctx, subject)
 				}
 				return v.Capture(ctx, subject)
 			}
-			check := func(v *View, f Fingerprint) (Verdict, error) {
+			check := func(v *Snapshot, f Fingerprint) (Verdict, error) {
 				if tc.observed {
 					return v.CheckObserved(ctx, f, subject)
 				}
@@ -232,11 +232,11 @@ func TestPolicyMismatchCannotLiftClosureRefusal(t *testing.T) {
 	}
 	dir := writeSupportedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView(t.Context(), []Subject{subject}, dir)
+	producer, err := engine.newView(t.Context(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestPolicyMismatchCannotLiftClosureRefusal(t *testing.T) {
 	if !compatibleObservationProof(recorded, subject) || !runtimeinput.HasOutcomeSupport(recorded.RuntimeInputs, outcomeSubject(recorded, subject)) {
 		t.Fatal("historical checker fixture lacks internally bound support")
 	}
-	current, err := engine.NewView(t.Context(), []Subject{subject}, dir)
+	current, err := engine.newView(t.Context(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -114,10 +114,7 @@ Multiple mappings, malformed quoting or an unrecognized mapping refuse admission
 Other compiler flags remain identity-bearing. This relies on the stated ordinary
 compiler/linker and toolchain-cache integrity premise, including honoring that
 prefix mapping. Additional compiler-file inputs remain the executor's declared-input
-responsibility. Existing legacy construction accepts an omitted producer override
-or an exactly equal normalized producer environment; a distinct producer
-environment refuses with the explicit build/runtime migration remedy. A later
-description or decoder cannot upgrade historical evidence into this guard domain.
+responsibility. A later description or decoder cannot upgrade historical evidence into this guard domain.
 
 **REQ-guard-buildconfig-failclosed** (behavior, refines REQ-guard-buildconfig): An
 observable build input the build-configuration guard cannot parse — a malformed

@@ -22,14 +22,14 @@ func TestObservedCaptureReusesConstructionSnapshot(t *testing.T) {
 	}
 	dir := writeObservedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var seen *gotool.EnvSnapshot
 	viewTestHooks.snapshot = func(s *gotool.EnvSnapshot) { seen = s }
 	t.Cleanup(func() { viewTestHooks.snapshot = nil })
-	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	view, err := engine.newView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,10 +72,10 @@ func TestObservedCaptureRefusesMidWindowOverlayBeforeAnyLoad(t *testing.T) {
 		}
 	}
 	env = append(env, "GOENV="+goenv)
-	engine, err := New(
-		WithDir(dir),
-		WithEnv(env...),
-		WithProgress(func(p Progress) {
+	engine, err := newEngine(
+		withDir(dir),
+		withEnv(env...),
+		withProgress(func(p Progress) {
 			mu.Lock()
 			phases = append(phases, p.Phase)
 			mu.Unlock()
@@ -84,7 +84,7 @@ func TestObservedCaptureRefusesMidWindowOverlayBeforeAnyLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	view, err := engine.newView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -86,11 +86,11 @@ func TestUnauditedSelectionAttributesTierRefusals(t *testing.T) {
 		}
 		return out
 	}
-	engine, err := New(WithDir(dir), WithBuildFlags("-tags=netgo"))
+	engine, err := newEngine(withDir(dir), withBuildFlags("-tags=netgo"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(context.Background(), subjects("Open", "Dial", "Declared", "Twice"), dir)
+	view, err := engine.newView(context.Background(), subjects("Open", "Dial", "Declared", "Twice"), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,16 +122,16 @@ func TestUnauditedSelectionAttributesTierRefusals(t *testing.T) {
 		t.Fatalf("ambiguous identity = %q, want no attribution", got)
 	}
 	for _, symbol := range []string{"Declared", "Twice", "Open"} {
-		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: symbol}, WithBuildFlags("-tags=netgo"))
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: symbol}, withBuildFlags("-tags=netgo"))
 		if verdict.Status != Unverifiable || (symbol == "Declared" && verdict.Reason != "external directive") || (symbol == "Open" && !strings.HasSuffix(verdict.Reason, axis)) {
 			t.Fatalf("%s verdict = %+v", symbol, verdict)
 		}
 	}
-	audited, err := New(WithDir(dir))
+	audited, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	plain, err := audited.NewView(context.Background(), subjects("Open", "Dial"), dir)
+	plain, err := audited.newView(context.Background(), subjects("Open", "Dial"), dir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -29,7 +29,7 @@ func TestConstructionCancellationPrecedesVouchObservation(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := NewContext(ctx, WithDir(dir), func(*Engine) { cancel() })
+		_, err := newEngineContext(ctx, withDir(dir), func(*engine) { cancel() })
 		done <- err
 	}()
 	deadline := time.NewTimer(5 * time.Second)
@@ -100,12 +100,12 @@ func TestConstructionContextOwnsTheEnvironmentQuery(t *testing.T) {
 				}
 			}
 			type result struct {
-				engine *Engine
+				engine *engine
 				err    error
 			}
 			done := make(chan result, 1)
 			go func() {
-				e, err := NewContext(ctx, WithDir(dir), WithGoRunner(runner))
+				e, err := newEngineContext(ctx, withDir(dir), withGoRunner(runner))
 				done <- result{e, err}
 			}()
 			// Releasing the shim also cleans up a background-context mutant:

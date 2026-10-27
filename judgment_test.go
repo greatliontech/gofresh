@@ -21,7 +21,7 @@ func testPurityAuthority(enabled bool) PurityAuthority {
 
 // This fixture supplies stored evidence under the native wire grammar. It tests
 // admission/checking, not the producer's independent execution-premise issuer.
-func judgmentFixture(t *testing.T) (*View, Subject, Fingerprint, runtimeinput.State) {
+func judgmentFixture(t *testing.T) (*Snapshot, Subject, Fingerprint, runtimeinput.State) {
 	t.Helper()
 	subject := Subject{Package: "example.com/judgment", Symbol: "F"}
 	fp := Fingerprint{
@@ -47,8 +47,8 @@ func judgmentFixture(t *testing.T) (*View, Subject, Fingerprint, runtimeinput.St
 	}
 	fp.RuntimeDigest = state.Digest
 	cl := closure.Closure{Hash: fp.MaximalClosure, TestVariants: fp.TestVariantClosure, ToolchainContent: fp.ToolchainContent, AdmissionPolicy: fp.AdmissionPolicy, Unverifiable: true, Reason: "diagnostic only"}
-	v := &View{
-		engine: &Engine{deferredCheckClose: true, executionModel: ExecutionAssertions{SingleSubject: true, PackageProcess: true}},
+	v := &Snapshot{
+		engine: &engine{deferredCheckClose: true, executionModel: ExecutionAssertions{SingleSubject: true, PackageProcess: true}},
 		kind:   CodeResult, subjects: []Subject{subject},
 		facts: &observationFacts{maximal: map[Subject]subjectFacts{subject: testSubjectFacts(cl)}, guards: fp.Guards,
 			purity: map[Subject]string{}, vouchDischarges: map[Subject]string{subject: "dependency.Current"},
@@ -61,47 +61,47 @@ func judgmentFixture(t *testing.T) (*View, Subject, Fingerprint, runtimeinput.St
 func TestJudgmentAuthorityAndScope(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
-		change   func(*View, Subject, *Fingerprint)
+		change   func(*Snapshot, Subject, *Fingerprint)
 		status   Status
 		cause    CauseKind
 		purity   PurityAuthority
 		observed bool
 	}{
 		{name: "observation conjunction", status: Valid, observed: true},
-		{name: "purity is independent of invalid proof", change: func(v *View, s Subject, f *Fingerprint) {
+		{name: "purity is independent of invalid proof", change: func(v *Snapshot, s Subject, f *Fingerprint) {
 			f.PurityAssertion = "caller assertion"
 			v.facts.purity[s] = "source directive"
 			f.ObservationProof.Evidence = "invalid"
 		}, status: Valid, purity: PurityAuthority{Recorded: CallerPurity, Current: SourcePurity}},
-		{name: "invalid proof", change: func(_ *View, _ Subject, f *Fingerprint) { f.ObservationProof.Evidence = "invalid" }, status: Unverifiable, cause: ClosureDependenceCause},
-		{name: "wrong proof subject", change: func(_ *View, _ Subject, f *Fingerprint) {
+		{name: "invalid proof", change: func(_ *Snapshot, _ Subject, f *Fingerprint) { f.ObservationProof.Evidence = "invalid" }, status: Unverifiable, cause: ClosureDependenceCause},
+		{name: "wrong proof subject", change: func(_ *Snapshot, _ Subject, f *Fingerprint) {
 			f.ObservationProof.Subject.Symbol = "G"
 			f.ObservationProof.Evidence = observationProofEvidence(*f)
 		}, status: Unverifiable, cause: ClosureDependenceCause},
-		{name: "missing completeness assertion", change: func(_ *View, _ Subject, f *Fingerprint) {
+		{name: "missing completeness assertion", change: func(_ *Snapshot, _ Subject, f *Fingerprint) {
 			f.ObservationAssertion = ""
 			f.ObservationProof.Evidence = observationProofEvidence(*f)
 		}, status: Unverifiable, cause: ClosureDependenceCause},
-		{name: "policy movement", change: func(v *View, s Subject, _ *Fingerprint) {
+		{name: "policy movement", change: func(v *Snapshot, s Subject, _ *Fingerprint) {
 			cl := v.facts.closure(s)
 			cl.AdmissionPolicy = "new"
 			v.facts.maximal[s] = testSubjectFacts(cl)
 		}, status: Unverifiable, cause: ClosureDependenceCause},
-		{name: "external dominates assertions", change: func(v *View, s Subject, f *Fingerprint) {
+		{name: "external dominates assertions", change: func(v *Snapshot, s Subject, f *Fingerprint) {
 			cl := v.facts.closure(s)
 			cl.External = true
 			v.facts.maximal[s] = testSubjectFacts(cl)
 			f.PurityAssertion = "caller assertion"
 			v.facts.purity[s] = "caller assertion"
 		}, status: Unverifiable, cause: ExternalDirectiveCause},
-		{name: "guard drift dominates external", change: func(v *View, s Subject, f *Fingerprint) {
+		{name: "guard drift dominates external", change: func(v *Snapshot, s Subject, f *Fingerprint) {
 			cl := v.facts.closure(s)
 			cl.External = true
 			v.facts.maximal[s] = testSubjectFacts(cl)
 			f.Guards.BuildConfig = "moved"
 		}, status: Stale, cause: BuildConfigCause},
-		{name: "source mismatch skips all authority", change: func(_ *View, _ Subject, f *Fingerprint) { f.MaximalClosure = "moved" }, status: Stale, cause: ClosureCause},
-		{name: "ordinary proof needs no observation", change: func(v *View, s Subject, f *Fingerprint) {
+		{name: "source mismatch skips all authority", change: func(_ *Snapshot, _ Subject, f *Fingerprint) { f.MaximalClosure = "moved" }, status: Stale, cause: ClosureCause},
+		{name: "ordinary proof needs no observation", change: func(v *Snapshot, s Subject, f *Fingerprint) {
 			cl := v.facts.closure(s)
 			cl.Unverifiable = false
 			v.facts.maximal[s] = testSubjectFacts(cl)

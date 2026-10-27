@@ -26,7 +26,8 @@ import (
 // (REQ-purity-directive). It is the durable, in-code form of a purity
 // assertion — written once and honored automatically by every consumer of
 // the engine. The returned predicate is for inspection; callers use
-// WithAssumePure only for additional caller-owned assertions. gofresh
+// SessionPolicy.AssumePure or SessionPolicy.PureSubjects only for additional
+// caller-owned assertions. gofresh
 // never infers purity from behavior (REQ-purity-responsibility).
 //
 // A symbol is named as the closure engine resolves it: a function by its
@@ -246,7 +247,7 @@ type packageScanEntry struct {
 
 // attestationDischarges holds the positive execution-model attestations'
 // load-bearing discharge sets for one subject: carried as one comparable value
-// across subjectScan, observationFacts, and View.Sibling so no attestation axis
+// across subjectScan, observationFacts, and Snapshot.Sibling so no attestation axis
 // can be omitted when copying or clearing subject facts.
 type attestationDischarges struct {
 	singleSubject  string

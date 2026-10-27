@@ -30,7 +30,7 @@ func TestSessionRuntimeDirectoryPreservesSymlinkParents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot := &Snapshot{session: session, view: &View{kind: CodeResult}}
+	snapshot := &Snapshot{session: session, kind: CodeResult}
 	binding := bindTestRuntime(t, snapshot, RuntimeDescription{Directory: "via/.."})
 	if binding.runtime.dir != destination {
 		t.Fatalf("runtime directory = %q, want filesystem parent %q", binding.runtime.dir, destination)

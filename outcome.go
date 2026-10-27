@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/greatliontech/gofresh/gotool"
@@ -18,12 +19,15 @@ import (
 // and excludes environment mutation. Unsupported inventories return a capability
 // carrying their refusal; they never turn process health into outcome evidence.
 // Preparation selects each subject's observation proof for producer validation.
-func (v *View) PrepareOutcomeSupport(ctx context.Context, frame runtimeinput.ProducerFrame, process string) (runtimeinput.OutcomeSupport, error) {
+func (v *Snapshot) PrepareOutcomeSupport(ctx context.Context, frame runtimeinput.ProducerFrame, process string) (runtimeinput.OutcomeSupport, error) {
+	if v == nil || v.facts == nil || v.engine == nil {
+		return runtimeinput.OutcomeSupport{}, errors.New("gofresh: uninitialized snapshot")
+	}
 	support, _, err := v.prepareOutcomeSupport(ctx, frame, process)
 	return support, err
 }
 
-func (v *View) prepareOutcomeSupport(ctx context.Context, frame runtimeinput.ProducerFrame, process string) (runtimeinput.OutcomeSupport, map[Subject]Fingerprint, error) {
+func (v *Snapshot) prepareOutcomeSupport(ctx context.Context, frame runtimeinput.ProducerFrame, process string) (runtimeinput.OutcomeSupport, map[Subject]Fingerprint, error) {
 	if len(v.subjects) == 0 {
 		return runtimeinput.OutcomeSupport{}, nil, fmt.Errorf("gofresh: outcome support needs contributing subjects")
 	}

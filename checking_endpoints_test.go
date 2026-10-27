@@ -8,7 +8,7 @@ import (
 
 // These test adapters expose individual kernel endpoints to drift/authority
 // tests without requiring their synthetic records to satisfy source admission.
-func (v *View) observeRuntimeInputs(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]runtimeinput.State, error) {
+func (v *Snapshot) observeRuntimeInputs(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]runtimeinput.State, error) {
 	candidates := orderedCandidates(recorded)
 	records := make([]recordCheck, len(candidates))
 	results := make([]recordResult, len(candidates))
@@ -27,7 +27,7 @@ func (v *View) observeRuntimeInputs(ctx context.Context, recorded map[Subject]Fi
 	return observed, nil
 }
 
-func (v *View) finishRuntimeObservation(ctx context.Context, recorded map[Subject]Fingerprint, before map[Subject]runtimeinput.State, verdicts map[Subject]Verdict) (map[Subject]Verdict, error) {
+func (v *Snapshot) finishRuntimeObservation(ctx context.Context, recorded map[Subject]Fingerprint, before map[Subject]runtimeinput.State, verdicts map[Subject]Verdict) (map[Subject]Verdict, error) {
 	after, err := v.observeRuntimeInputs(ctx, recorded)
 	if err != nil {
 		return nil, err

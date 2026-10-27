@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
 // A retained executable is built under the analyzed feature selection, even
@@ -588,9 +589,11 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if err != nil {
 		t.Fatal(err)
 	}
+	preview.engine.deferredCheckClose = true
 	previewPasses := 0
 	viewTestHooks.observe = func() { previewPasses++ }
 	_, _, previewVerdict, previewErr := preview.CheckObservedInertTestVariantExtension(ctx, final.Fingerprint, ledger, subject)
+	preview.engine.deferredCheckClose = false
 	viewTestHooks.observe = priorObserve
 	if previewErr != nil || previewVerdict.Status != Valid {
 		t.Fatalf("provisional control: %+v %v", previewVerdict, previewErr)
@@ -663,18 +666,51 @@ func bindTestRuntime(t *testing.T, snapshot *Snapshot, description RuntimeDescri
 
 func TestSnapshotCaptureAndCaptureBatch(t *testing.T) {
 	ctx := t.Context()
-	var nilSnapshot *Snapshot
-	if _, err := nilSnapshot.Capture(ctx, Subject{}); err == nil {
-		t.Fatal("nil snapshot Capture succeeded")
-	}
-	if _, err := (&Snapshot{}).Capture(ctx, Subject{}); err == nil {
-		t.Fatal("zero snapshot Capture succeeded")
-	}
-	if _, err := nilSnapshot.CaptureBatch(ctx); err == nil {
-		t.Fatal("nil snapshot CaptureBatch succeeded")
-	}
-	if _, err := (&Snapshot{}).CaptureBatch(ctx); err == nil {
-		t.Fatal("zero snapshot CaptureBatch succeeded")
+	for _, s := range []*Snapshot{nil, {}} {
+		for name, call := range map[string]func() error{
+			"Capture":          func() error { _, err := s.Capture(ctx, Subject{}); return err },
+			"CaptureBatch":     func() error { _, err := s.CaptureBatch(ctx); return err },
+			"CaptureObserved":  func() error { _, err := s.CaptureObserved(ctx, Subject{}); return err },
+			"CaptureObservedBatch": func() error {
+				_, err := s.CaptureObservedBatch(ctx)
+				return err
+			},
+			"AttachObservation": func() error {
+				_, err := s.AttachObservation(Subject{}, Fingerprint{}, runtimeinput.Observation{})
+				return err
+			},
+			"Check":              func() error { _, err := s.Check(ctx, Fingerprint{}, Subject{}); return err },
+			"CheckBatch":         func() error { _, err := s.CheckBatch(ctx, nil); return err },
+			"CheckObserved":      func() error { _, err := s.CheckObserved(ctx, Fingerprint{}, Subject{}); return err },
+			"CheckObservedBatch": func() error { _, err := s.CheckObservedBatch(ctx, nil); return err },
+			"Validate":           func() error { return s.Validate(ctx) },
+			"CheckInertTestVariantExtension": func() error {
+				_, _, _, err := s.CheckInertTestVariantExtension(ctx, Fingerprint{}, TestVariantLedger{}, Subject{})
+				return err
+			},
+			"CheckObservedInertTestVariantExtension": func() error {
+				_, _, _, err := s.CheckObservedInertTestVariantExtension(ctx, Fingerprint{}, TestVariantLedger{}, Subject{})
+				return err
+			},
+			"PrepareOutcomeSupport": func() error {
+				_, err := s.PrepareOutcomeSupport(ctx, runtimeinput.ProducerFrame{}, "worker")
+				return err
+			},
+			"SourceFilesFor":    func() error { _, err := s.SourceFilesFor(Subject{}); return err },
+			"TestVariantLedger": func() error { _, err := s.TestVariantLedger(Subject{}); return err },
+			"Sibling":           func() error { _, err := s.Sibling(nil); return err },
+			"ExplainDynamicState": func() error {
+				_, err := s.ExplainDynamicState(ctx, "pkg", "Var")
+				return err
+			},
+		} {
+			if err := call(); err == nil || err.Error() != "gofresh: uninitialized snapshot" {
+				t.Fatalf("%s on %#v = %v, want uninitialized snapshot error", name, s, err)
+			}
+		}
+		if files := s.SourceFiles(); files != nil {
+			t.Fatalf("SourceFiles on %#v = %v, want nil", s, files)
+		}
 	}
 	dir := t.TempDir()
 	for name, content := range map[string]string{
@@ -711,4 +747,62 @@ func TestSnapshotCaptureAndCaptureBatch(t *testing.T) {
 		t.Fatalf("CaptureBatch mismatch: %+v vs %+v", batch, fpA)
 	}
 }
+
+func TestSessionPolicyAssumePureAndSnapshotFor(t *testing.T) {
+	ctx := t.Context()
+	var nilSession *Session
+	if _, err := nilSession.SnapshotFor(ctx, nil, "", CodeResult); err == nil {
+		t.Fatal("nil session SnapshotFor succeeded")
+	}
+	dir := t.TempDir()
+	modDir := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(modDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"go.mod": "module example.com/sub\n\ngo 1.26\n",
+		"sub.go": "package sub\nimport \"os\"\nfunc Impure() string { return os.Getenv(\"X\") }\nfunc Other() int { return 1 }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(modDir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	impure := Subject{Package: "example.com/sub", Symbol: "Impure"}
+	other := Subject{Package: "example.com/sub", Symbol: "Other"}
+	session, err := NewSession(ctx, BuildDescription{
+		Directory:   modDir,
+		Environment: gotool.SetEnv(os.Environ(), "GOWORK", "off"),
+		Inputs:      []string{},
+	}, SessionPolicy{
+		AssumePure: func(s Subject) bool {
+			return s == impure
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.SnapshotFor(ctx, []Subject{impure}, dir, CodeResult); err == nil {
+		t.Fatal("mismatched moduleDir accepted by SnapshotFor")
+	}
+	snapshot, err := session.SnapshotFor(ctx, []Subject{impure, other}, modDir, CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling, err := snapshot.Sibling([]Subject{impure})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp, err := sibling.Capture(ctx, impure)
+	if err != nil {
+		t.Fatalf("Capture(impure): %v", err)
+	}
+	verdict, err := sibling.Check(ctx, fp, impure)
+	if err != nil || verdict.Status != Valid {
+		t.Fatalf("Check(impure) with AssumePure: %+v, %v", verdict, err)
+	}
+	if err := sibling.Validate(ctx); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
 

@@ -106,29 +106,21 @@ foreign variable's shared-dynamic-state downgrade for every subject reaching it.
 
 **REQ-vouch-input** (structural): gofresh MUST accept a dynamic-state vouch set as
 an input to freshness evaluation — canonical `<import path>.<Variable>` identities —
-so a consumer's committed configuration and a per-run flag reduce to the same engine
-input and gofresh itself never infers a vouch. A vouch names exactly one variable,
-never a package or a pattern. The set has two channels reducing to one input: the
-repository's reviewed standing set, the file `vouches` at the root the engine is
-opened at — the one file governing every subject that engine judges, which are
-the subjects at that root alone: a module-rooted engine reads that module's
-file, a workspace-rooted engine the workspace root's — one
+so a consumer's committed configuration and a per-run flag reduce to the same session
+policy input and gofresh itself never infers a vouch. A vouch names exactly one variable,
+never a package or a pattern. Session construction accepts the caller-resolved set
+directly without reading an additional repository vouch file, while gofresh exports the
+repository vouch file reader (`vouches` at the repository root — one
 `IMPORT-PATH:VARIABLE` per line, `#` comments and blank lines ignored, each line
 mapped to the canonical identity, an absent file the empty set, a malformed line
-refusing the engine naming the file and line (fail-closed: a vouch suppresses an
+refusing naming the file and line; fail-closed: a vouch suppresses an
 unverifiable verdict, so a set that cannot be read whole is never partly honored)
-— and the caller's per-run set, which extends the reviewed set and never removes
-from it (a caller reducing many reviewed spellings to that set parses each,
-deduplicates, and sorts the identities, one malformed spelling refusing the
-whole set — the one reduction gofresh exports so no consumer spells it); a
-consumer owning its own reviewed set declines the file and supplies
-the set whole, so one set has one home. The engine judges under the union and
-records it: a file vouch that discharges a culprit rides the subject's evidence
-exactly as a caller's does (REQ-vouch-recorded), so a consumer reading its
-records sees vouches its own set never named, and the file's refusal is never
-overridden by a caller's set — a malformed file refuses the engine whatever the
-caller supplied, since the caller's set extends the file's and cannot stand in
-for it.
+and the entry-set reducer (parsing each spelling, deduplicating, and sorting the
+identities, one malformed spelling refusing the whole set — the one reduction gofresh
+exports so no consumer spells it) so a consumer composing a repository's reviewed
+standing set with a per-run set supplies one resolved set to the session. The session
+judges under the supplied set and records it: a vouch that discharges a culprit rides
+the subject's evidence (REQ-vouch-recorded).
 
 **REQ-vouch-discharge** (behavior): A vouched variable MUST be exempt from the
 shared-dynamic-state downgrade

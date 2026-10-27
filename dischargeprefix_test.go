@@ -21,7 +21,7 @@ func TestCulpritDischargeRecordsTheSortedPrefix(t *testing.T) {
 	const prefix = "example.com/view.a,example.com/view.b,example.com/view.c,example.com/view.d,example.com/view.e"
 	t.Run("attested per-subject scoping", func(t *testing.T) {
 		dir := writeViewModule(t, "package view\n\n"+decls+"func F() int {\n\tmutF()\n\treturn len(a) + len(b) + len(c) + len(d) + len(e) + len(f) + len(g)\n}\n")
-		fingerprint, verdict := captureFingerprint(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, WithSingleSubjectExecution())
+		fingerprint, verdict := captureFingerprint(t, dir, Subject{Package: "example.com/view", Symbol: "F"}, withSingleSubjectExecution())
 		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.f is mutated") {
 			t.Fatalf("verdict = %+v, want the downgrade naming f — the rooted mutator", verdict)
 		}
@@ -36,7 +36,7 @@ func TestCulpritDischargeRecordsTheSortedPrefix(t *testing.T) {
 			"view_test.go": "package view\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tmutF()\n\tif F() < 0 {\n\t\tt.Fatal()\n\t}\n}\n",
 		}
 		dir := writeModuleTree(t, files)
-		fingerprint, verdict := captureFingerprint(t, dir, Subject{Package: "example.com/view", Symbol: "TestF"}, WithPackageProcessExecution())
+		fingerprint, verdict := captureFingerprint(t, dir, Subject{Package: "example.com/view", Symbol: "TestF"}, withPackageProcessExecution())
 		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view.f is mutated") {
 			t.Fatalf("verdict = %+v, want the downgrade naming f — the harness-rooted mutator", verdict)
 		}
@@ -48,13 +48,13 @@ func TestCulpritDischargeRecordsTheSortedPrefix(t *testing.T) {
 
 // captureFingerprint captures and checks one subject, returning the
 // fingerprint beside the verdict for evidence assertions.
-func captureFingerprint(t *testing.T, dir string, subject Subject, opts ...Option) (Fingerprint, Verdict) {
+func captureFingerprint(t *testing.T, dir string, subject Subject, opts ...option) (Fingerprint, Verdict) {
 	t.Helper()
-	engine, err := New(append([]Option{WithDir(dir)}, opts...)...)
+	engine, err := newEngine(append([]option{withDir(dir)}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	view, err := engine.newView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

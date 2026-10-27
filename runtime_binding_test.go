@@ -56,7 +56,7 @@ func TestRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	facts := snapshot.view.facts
+	facts := snapshot.facts
 	priorObserve, priorGuardDir := viewTestHooks.observe, viewTestHooks.guardDir
 	defer func() { viewTestHooks.observe, viewTestHooks.guardDir = priorObserve, priorGuardDir }()
 	passes := 0
@@ -181,7 +181,7 @@ func TestRuntime(t *testing.T) {
 	if _, err := u.Register(t.Context(), foreign, ProcessDescription{Identity: "borrowed"}); err == nil {
 		t.Fatal("equal artifact identity crossed snapshot generations")
 	}
-	if snapshot.view.facts != facts || facts.guards != records[0].Guards || session.engine.producerEnvSet {
+	if snapshot.facts != facts || facts.guards != records[0].Guards {
 		t.Fatal("a binding or later generation mutated shared compilation state")
 	}
 	if got, err := a.CurrentFacts(t.Context(), subjects[0]); err != nil || got.Guards != records[0].Guards || got.RuntimeInputs != "" {
@@ -210,7 +210,7 @@ func TestRuntimeBindingGuardAgreementAndClosing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if samples != 0 || snapshot.view.facts.guards.Machine != "" || snapshot.view.facts.guards.RuntimeConfig != "" {
+	if samples != 0 || snapshot.facts.guards.Machine != "" || snapshot.facts.guards.RuntimeConfig != "" {
 		t.Fatal("source/build generation captured runtime guards")
 	}
 	a := bindTestRuntime(t, snapshot, RuntimeDescription{Environment: []string{"GOGC=100"}})
@@ -282,7 +282,7 @@ func TestRuntimeBindingGuardAgreementAndClosing(t *testing.T) {
 
 func TestRuntimeBindingEnvironmentOwnership(t *testing.T) {
 	dir := t.TempDir()
-	snapshot := &Snapshot{session: &Session{build: BuildDescription{Directory: dir, Environment: []string{"INHERITED=yes", "PWD=wrong"}}}, view: &View{kind: CodeResult}}
+	snapshot := &Snapshot{session: &Session{build: BuildDescription{Directory: dir, Environment: []string{"INHERITED=yes", "PWD=wrong"}}}, kind: CodeResult}
 	for _, tc := range []struct {
 		env  []string
 		want []string

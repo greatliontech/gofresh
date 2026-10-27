@@ -29,11 +29,11 @@ func TestRepositoryVouchFileJoinsTheVouchSet(t *testing.T) {
 	processFactCache = sync.Map{}
 	ctx := context.Background()
 
-	warm, err := New(WithDir(dir))
+	warm, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := warm.NewView(ctx, []Subject{subject}, dir); err != nil {
+	if _, err := warm.newView(ctx, []Subject{subject}, dir); err != nil {
 		t.Fatal(err)
 	}
 	var hit bool
@@ -53,13 +53,13 @@ func TestRepositoryVouchFileJoinsTheVouchSet(t *testing.T) {
 	// judge returns the subject's recorded discharges and its reason: the
 	// fixture subject stays unverifiable for an unrelated reason, so the
 	// vouch's effect is read from the culprit's absence and the record.
-	judge := func(opts ...Option) (string, string) {
+	judge := func(opts ...option) (string, string) {
 		t.Helper()
-		e, err := New(append([]Option{WithDir(dir)}, opts...)...)
+		e, err := newEngine(append([]option{withDir(dir)}, opts...)...)
 		if err != nil {
 			t.Fatal(err)
 		}
-		view, err := e.NewView(ctx, []Subject{subject}, dir)
+		view, err := e.newView(ctx, []Subject{subject}, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -94,30 +94,30 @@ func TestRepositoryVouchFileJoinsTheVouchSet(t *testing.T) {
 	if rec, reason := judge(); rec != ghost || !strings.Contains(reason, shade) {
 		t.Fatalf("file naming one culprit: record %q, reason %q; want the other's downgrade", rec, reason)
 	}
-	if rec, reason := judge(WithDynamicStateVouches(shade)); rec != both || strings.Contains(reason, "shares mutated dynamic state") {
+	if rec, reason := judge(withDynamicStateVouches(shade)); rec != both || strings.Contains(reason, "shares mutated dynamic state") {
 		t.Fatalf("file ∪ option: record %q, reason %q; want both discharged", rec, reason)
 	}
 	// An option never removes: the file's vouch stands beside an inert one.
-	if rec, _ := judge(WithDynamicStateVouches("golang.org/x/sync/errgroup.Other", shade)); rec != both {
+	if rec, _ := judge(withDynamicStateVouches("golang.org/x/sync/errgroup.Other", shade)); rec != both {
 		t.Fatalf("file ∪ inert option: record %q, want the file's vouch still honored", rec)
 	}
 	// Declining the file leaves the downgrade to the option alone.
-	if rec, reason := judge(WithoutRepositoryVouches(), WithDynamicStateVouches(shade)); rec != shade || !strings.Contains(reason, ghost) {
+	if rec, reason := judge(withoutRepositoryVouches(), withDynamicStateVouches(shade)); rec != shade || !strings.Contains(reason, ghost) {
 		t.Fatalf("declined file: record %q, reason %q; want %s's downgrade back", rec, reason, ghost)
 	}
 	// A malformed line refuses the engine naming the file and line.
 	if err := os.WriteFile(vouchPath, []byte("# ok\ngolang.org/x/sync/errgroup:Ghost\ngolang.org/x/sync/errgroup.Shade\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := New(WithDir(dir)); err == nil || !strings.Contains(err.Error(), "vouches:3") || !strings.Contains(err.Error(), "not IMPORT-PATH:VARIABLE") {
+	if _, err := newEngine(withDir(dir)); err == nil || !strings.Contains(err.Error(), "vouches:3") || !strings.Contains(err.Error(), "not IMPORT-PATH:VARIABLE") {
 		t.Fatalf("malformed file: %v, want a refusal naming the file and line", err)
 	}
-	if _, err := New(WithDir(dir), WithoutRepositoryVouches()); err != nil {
+	if _, err := newEngine(withDir(dir), withoutRepositoryVouches()); err != nil {
 		t.Fatalf("declined malformed file: %v, want no read at all", err)
 	}
 	// A caller's set extends the file and never stands in for it: the
 	// malformed file still refuses beside a supplied set.
-	if _, err := New(WithDir(dir), WithDynamicStateVouches(shade)); err == nil || !strings.Contains(err.Error(), "vouches:3") {
+	if _, err := newEngine(withDir(dir), withDynamicStateVouches(shade)); err == nil || !strings.Contains(err.Error(), "vouches:3") {
 		t.Fatalf("malformed file beside a caller set: %v, want the file's refusal", err)
 	}
 	// A file that cannot be read whole refuses with nothing honored: a
@@ -129,7 +129,7 @@ func TestRepositoryVouchFileJoinsTheVouchSet(t *testing.T) {
 	if err := os.Mkdir(vouchPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := New(WithDir(dir)); err == nil || !strings.Contains(err.Error(), "vouch file") {
+	if _, err := newEngine(withDir(dir)); err == nil || !strings.Contains(err.Error(), "vouch file") {
 		t.Fatalf("directory at the vouch path: %v, want a refusal", err)
 	}
 	if err := os.Remove(vouchPath); err != nil {
@@ -138,7 +138,7 @@ func TestRepositoryVouchFileJoinsTheVouchSet(t *testing.T) {
 	if err := os.WriteFile(vouchPath, []byte("golang.org/x/sync/errgroup:Ghost\n#"+strings.Repeat("x", 70000)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := New(WithDir(dir)); err == nil || !strings.Contains(err.Error(), "vouch file") || !strings.Contains(err.Error(), "too long") {
+	if _, err := newEngine(withDir(dir)); err == nil || !strings.Contains(err.Error(), "vouch file") || !strings.Contains(err.Error(), "too long") {
 		t.Fatalf("oversized line after a good one: %v, want the whole file refused", err)
 	}
 	// The unreadable-file arm needs a caller the mode denies: root (and
@@ -152,7 +152,7 @@ func TestRepositoryVouchFileJoinsTheVouchSet(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = os.Chmod(vouchPath, 0o644) })
-		if _, err := New(WithDir(dir)); err == nil || !strings.Contains(err.Error(), "vouch file") {
+		if _, err := newEngine(withDir(dir)); err == nil || !strings.Contains(err.Error(), "vouch file") {
 			t.Fatalf("unreadable file: %v, want a refusal, never the empty set", err)
 		}
 	}

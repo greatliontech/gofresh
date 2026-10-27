@@ -27,13 +27,13 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 	}
 	write(source)
 	subjects := []Subject{{"example.com/observed", "TestRead"}, {"example.com/observed", "TestOther"}}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	newView := func() *View {
+	newView := func() *Snapshot {
 		t.Helper()
-		v, err := engine.NewView(ctx, subjects, dir)
+		v, err := engine.newView(ctx, subjects, dir)
 		if err != nil {
 			t.Fatal(err)
 		}

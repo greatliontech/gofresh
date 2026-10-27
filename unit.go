@@ -146,7 +146,7 @@ type producingUnit struct {
 	mu            sync.Mutex
 	phase         unitPhase
 	snapshot      *Snapshot
-	view          *View
+	view          *Snapshot
 	execution     *unitExecution
 	closingCancel context.CancelFunc
 	identityOnly  bool
@@ -647,7 +647,7 @@ func (u *producingUnit) close(ctx context.Context) (result FinalizedProcess, err
 		}
 		fingerprints[subject] = fp
 	}
-	verdicts, err := u.view.CheckObservedBatch(ctx, fingerprints)
+	verdicts, err := u.view.checkMap(ctx, fingerprints, true, true)
 	if err != nil {
 		return FinalizedProcess{}, err
 	}

@@ -28,8 +28,8 @@ func BenchmarkArtifact(b *testing.B) {
 			}
 			const pkg = "example.com/artifact"
 			snapshot := &Snapshot{
-				session: &Session{build: BuildDescription{Directory: filepath.Dir(path)}},
-				view:    &View{packages: []string{pkg}},
+				session:  &Session{build: BuildDescription{Directory: filepath.Dir(path)}},
+				packages: []string{pkg},
 			}
 			description := ArtifactDescription{Identity: "retained", Path: path}
 			ctx := context.Background()

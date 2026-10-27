@@ -65,13 +65,14 @@ const (
 // SessionPolicy carries the operation's accepted analysis and assertion policy.
 // Vouches is the complete, caller-resolved set of canonical import-path.Variable
 // identities, as returned by ParseVouchEntries; session construction
-// reads no additional repository vouch file. PureSubjects are explicit caller
-// assertions, distinct from selected source directives. Callback behavior remains
-// its author's responsibility; descriptions and sets are owned copies.
+// reads no additional repository vouch file. PureSubjects and AssumePure are
+// explicit caller assertions, distinct from selected source directives. Callback
+// behavior remains its author's responsibility; descriptions and sets are owned copies.
 type SessionPolicy struct {
 	EvidenceRoot   string
 	Vouches        []string
 	PureSubjects   []Subject
+	AssumePure     func(Subject) bool
 	Execution      ExecutionModel
 	AnalysisBudget time.Duration
 	Runner         gotool.Runner
@@ -82,7 +83,7 @@ type SessionPolicy struct {
 // policy. It executes no subject and stores no result. Source generations belong
 // to its snapshots, and producing obligations belong to their independent units.
 type Session struct {
-	engine *Engine
+	engine *engine
 	build  BuildDescription
 	roots  runtimeinput.Roots
 }
@@ -137,30 +138,32 @@ func NewSession(ctx context.Context, build BuildDescription, policy SessionPolic
 		}
 		pure[subject] = true
 	}
+	assumePure := policy.AssumePure
 	runner := policy.Runner
 	if runner.Containment != nil {
 		owned := *runner.Containment
 		runner.Containment = &owned
 	}
-	opts := []Option{
-		WithDir(buildDir), WithEnv(buildEnv...), WithBuildFlags(build.Flags...),
-		WithBuildInputs(build.Inputs...), WithEvidenceRoot(policy.EvidenceRoot),
-		WithoutRepositoryVouches(), WithDynamicStateVouches(vouches...),
-		WithAssumePure(func(subject Subject) bool { return pure[subject] }),
-		WithGoRunner(runner), WithProgress(policy.Progress), WithAnalysisBudget(policy.AnalysisBudget),
+	opts := []option{
+		withDir(buildDir), withEnv(buildEnv...), withBuildFlags(build.Flags...),
+		withBuildInputs(build.Inputs...), withEvidenceRoot(policy.EvidenceRoot),
+		withoutRepositoryVouches(), withDynamicStateVouches(vouches...),
+		withAssumePure(func(subject Subject) bool {
+			return pure[subject] || (assumePure != nil && assumePure(subject))
+		}),
+		withGoRunner(runner), withProgress(policy.Progress), withAnalysisBudget(policy.AnalysisBudget),
 	}
 	switch policy.Execution {
 	case PackageExecution:
-		opts = append(opts, WithPackageProcessExecution())
+		opts = append(opts, withPackageProcessExecution())
 	case SingleSubjectExecution:
-		opts = append(opts, WithSingleSubjectExecution())
+		opts = append(opts, withSingleSubjectExecution())
 	}
-	e, err := NewContext(ctx, opts...)
+	e, err := newEngineContext(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
 	e.completeBuild = true
-	e.deferredCheckClose = true
 	owned := BuildDescription{Directory: e.dir, Environment: slices.Clone(e.env), Flags: slices.Clone(e.buildFlags), Inputs: append([]string{}, e.buildInputs...)}
 	return &Session{engine: e, build: owned}, nil
 }
@@ -200,13 +203,6 @@ func rebaseProcessPath(directory, path string) (string, error) {
 		return "", errors.New("path must be absolute or relative to the execution directory")
 	}
 	return directory + string(filepath.Separator) + path, nil
-}
-
-// Snapshot owns one immutable coherent source/build generation. It exposes no
-// mutable legacy view: finishing a unit cannot seal the parent or a sibling.
-type Snapshot struct {
-	session *Session
-	view    *View
 }
 
 // RuntimeBinding owns an immutable process directory, complete environment and
@@ -249,7 +245,7 @@ func (s *Snapshot) BindRuntime(ctx context.Context, execution RuntimeDescription
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if s == nil || s.view == nil || s.session == nil {
+	if s == nil || s.session == nil || !validKind(s.kind) {
 		return nil, errors.New("gofresh: uninitialized snapshot")
 	}
 	dir, err := rebaseProcessPath(s.session.build.Directory, execution.Directory)
@@ -269,11 +265,11 @@ func (s *Snapshot) BindRuntime(ctx context.Context, execution RuntimeDescription
 		return nil, fmt.Errorf("gofresh: runtime environment: %w", err)
 	}
 	r := boundRuntime{dir: dir, env: env}
-	r.guards, err = r.observe(ctx, s.view.kind)
+	r.guards, err = r.observe(ctx, s.kind)
 	if err != nil {
 		return nil, err
 	}
-	second, err := r.observe(ctx, s.view.kind)
+	second, err := r.observe(ctx, s.kind)
 	if err != nil {
 		return nil, err
 	}
@@ -299,11 +295,11 @@ func (r *boundRuntime) observe(ctx context.Context, kind Kind) (guard.RuntimeGua
 
 // newView selects immutable source facts and the binding while giving the caller
 // a fresh transaction. No attachment, obligation or seal crosses this boundary.
-func (b *RuntimeBinding) newView(subjects []Subject) (*View, error) {
-	if b == nil || b.snapshot == nil || b.snapshot.view == nil {
+func (b *RuntimeBinding) newView(subjects []Subject) (*Snapshot, error) {
+	if b == nil || b.snapshot == nil || b.snapshot.facts == nil {
 		return nil, errors.New("gofresh: uninitialized runtime binding")
 	}
-	v, err := b.snapshot.view.Sibling(subjects)
+	v, err := b.snapshot.Sibling(subjects)
 	if err != nil {
 		return nil, err
 	}
@@ -317,18 +313,29 @@ func (s *Session) Snapshot(ctx context.Context, subjects []Subject, kind Kind) (
 	if s == nil || s.engine == nil {
 		return nil, errors.New("gofresh: uninitialized session")
 	}
-	v, err := s.engine.NewViewFor(ctx, subjects, s.build.Directory, kind)
+	return s.SnapshotFor(ctx, subjects, s.build.Directory, kind)
+}
+
+// SnapshotFor observes the requested subjects and moduleDir under the
+// session's admitted build with the guards applicable to kind. It captures no
+// measurement-side guards; BindRuntime admits those separately.
+func (s *Session) SnapshotFor(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*Snapshot, error) {
+	if s == nil || s.engine == nil {
+		return nil, errors.New("gofresh: uninitialized session")
+	}
+	v, err := s.engine.newViewFor(ctx, subjects, moduleDir, kind)
 	if err != nil {
 		return nil, err
 	}
-	return &Snapshot{session: s, view: v}, nil
+	v.session = s
+	return v, nil
 }
 
 // BuildDescription returns an owned copy for a package represented in the
 // snapshot. The executor protects these build dependencies through execution and
 // closing, and uses this description rather than rebuilding under runtime env.
 func (s *Snapshot) BuildDescription(pkg string) (BuildDescription, error) {
-	if s == nil || s.view == nil || !slices.Contains(s.view.packages, pkg) {
+	if s == nil || s.session == nil || !slices.Contains(s.packages, pkg) {
 		return BuildDescription{}, fmt.Errorf("gofresh: package %q is outside the snapshot", pkg)
 	}
 	b := s.session.build
@@ -380,59 +387,6 @@ func (b *RuntimeBinding) Check(ctx context.Context, subject Subject, recorded Fi
 	return checked[0].Verdict, nil
 }
 
-// SourceFiles returns the snapshot's caller-owned mutable source inventory for
-// exclusion, dirty-source attribution and publication checks.
-func (s *Snapshot) SourceFiles() []string {
-	if s == nil || s.view == nil {
-		return nil
-	}
-	return s.view.SourceFiles()
-}
-
-// SourceFilesFor returns the subject's caller-owned source inventory.
-func (s *Snapshot) SourceFilesFor(subject Subject) ([]string, error) {
-	if s == nil || s.view == nil {
-		return nil, errors.New("gofresh: uninitialized snapshot")
-	}
-	return s.view.SourceFilesFor(subject)
-}
-
-// TestVariantLedger returns the native ledger from the same immutable generation
-// as the subject's fingerprint, never a separate reread of the package.
-func (s *Snapshot) TestVariantLedger(subject Subject) (TestVariantLedger, error) {
-	if s == nil || s.view == nil {
-		return TestVariantLedger{}, errors.New("gofresh: uninitialized snapshot")
-	}
-	return s.view.TestVariantLedger(subject)
-}
-
-// ExplainDynamicState derives the refusal chain for a dynamic-state culprit
-// against the snapshot's package scope and configuration.
-func (s *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName string) (Chain, error) {
-	if s == nil || s.view == nil {
-		return Chain{}, errors.New("gofresh: uninitialized snapshot")
-	}
-	return s.view.ExplainDynamicState(ctx, pkgPath, varName)
-}
-
-// CaptureBatch returns the source-tier fingerprint projections for every
-// subject in the snapshot.
-func (s *Snapshot) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error) {
-	if s == nil || s.view == nil {
-		return nil, errors.New("gofresh: uninitialized snapshot")
-	}
-	return s.view.CaptureBatch(ctx)
-}
-
-// Capture returns the source-tier fingerprint projection for a single subject
-// in the snapshot.
-func (s *Snapshot) Capture(ctx context.Context, subject Subject) (Fingerprint, error) {
-	if s == nil || s.view == nil {
-		return Fingerprint{}, errors.New("gofresh: uninitialized snapshot")
-	}
-	return s.view.Capture(ctx, subject)
-}
-
 // CurrentFacts returns this binding's analysis-only fingerprint projection for
 // explanations. It carries neither an execution receipt nor runtime observation
 // or selected producing proof. It is not a newly produced result.
@@ -443,11 +397,11 @@ func (b *RuntimeBinding) CurrentFacts(ctx context.Context, subject Subject) (Fin
 	if err := ctx.Err(); err != nil {
 		return Fingerprint{}, err
 	}
-	if b == nil || b.snapshot == nil || b.snapshot.view == nil {
+	if b == nil || b.snapshot == nil || b.snapshot.facts == nil {
 		return Fingerprint{}, errors.New("gofresh: uninitialized runtime binding")
 	}
 	if err := requireSubjects([]Subject{subject}, func(s Subject) bool {
-		return slices.Contains(b.snapshot.view.subjects, s)
+		return slices.Contains(b.snapshot.subjects, s)
 	}, SelectedView); err != nil {
 		return Fingerprint{}, err
 	}
@@ -496,10 +450,10 @@ func (b *RuntimeBinding) CheckBatchWithLedgers(ctx context.Context, candidates [
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if b == nil || b.snapshot == nil || b.snapshot.view == nil {
+	if b == nil || b.snapshot == nil || b.snapshot.facts == nil {
 		return nil, errors.New("gofresh: uninitialized runtime binding")
 	}
-	if err := b.snapshot.view.prepareCandidates(candidates); err != nil {
+	if err := b.snapshot.prepareCandidates(candidates); err != nil {
 		return nil, err
 	}
 	var subjects []Subject
@@ -511,7 +465,7 @@ func (b *RuntimeBinding) CheckBatchWithLedgers(ctx context.Context, candidates [
 		}
 	}
 	if len(subjects) == 0 {
-		subjects = slices.Clone(b.snapshot.view.subjects)
+		subjects = slices.Clone(b.snapshot.subjects)
 	}
 	u, err := b.BeginCheck(subjects)
 	if err != nil {

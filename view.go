@@ -23,7 +23,7 @@ import (
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
-// ErrViewChanged reports that a producer View no longer describes the current
+// ErrViewChanged reports that a producer Snapshot no longer describes the current
 // source, build, guard, or purity state and its results must not be persisted.
 var ErrViewChanged = errors.New("gofresh: analysis view changed")
 
@@ -42,14 +42,15 @@ var ErrViewSealed = errors.New("gofresh: analysis view sealed by validation")
 // run's outcomes under unverifiable observation evidence.
 var ErrAnalysisUnavailable = errors.New("gofresh: observation analysis unavailable during validation")
 
-// View is one immutable observation of the source, build, guards, and purity
+// Snapshot is one immutable observation of the source, build, guards, and purity
 // behind a caller-supplied subject set. It can serve a current check batch or a
 // producer transaction. Analysis state never crosses view generations; within
 // one generation, Sibling derives subset views sharing this view's observation
 // while owning their producer transactions.
-type View struct {
+type Snapshot struct {
 	mu                   sync.RWMutex
-	engine               *Engine
+	session              *Session
+	engine               *engine
 	subjects             []Subject
 	requests             []closure.Subject
 	packages             []string
@@ -82,21 +83,17 @@ type View struct {
 	beforeOutcomeIssue func()
 }
 
-// NewView observes subjects and moduleDir as one code-result analysis view
+// newView observes subjects and moduleDir as one code-result analysis view
 // under the caller's context. Reachability and package loading are shared
 // across the requested set, but each subject retains its independent closure
 // semantics (REQ-closure-batch-equivalence).
-func (e *Engine) NewView(ctx context.Context, subjects []Subject, moduleDir string) (*View, error) {
-	return e.NewViewFor(ctx, subjects, moduleDir, CodeResult)
+func (e *engine) newView(ctx context.Context, subjects []Subject, moduleDir string) (*Snapshot, error) {
+	return e.newViewFor(ctx, subjects, moduleDir, CodeResult)
 }
 
-// NewViewFor observes one analysis view with the guards applicable to kind
+// newViewFor observes one analysis view with the guards applicable to kind
 // under the caller's context.
-func (e *Engine) NewViewFor(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*View, error) {
-	return e.newView(ctx, subjects, moduleDir, kind)
-}
-
-func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (view *View, opErr error) {
+func (e *engine) newViewFor(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (view *Snapshot, opErr error) {
 	ctx, done := e.beginOperation(ctx)
 	defer done(&opErr)
 	if ctx == nil {
@@ -200,7 +197,7 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 		return nil, err
 	}
 
-	v := &View{
+	v := &Snapshot{
 		engine:               e,
 		subjects:             unique,
 		requests:             requests,
@@ -217,9 +214,9 @@ func (e *Engine) newView(ctx context.Context, subjects []Subject, moduleDir stri
 
 // observationFacts is one generation's immutable observation: derived
 // by an observation pass (or assembled as a subject-scoped subset by
-// Sibling) and shared read-only by every View holding it. The struct
+// Sibling) and shared read-only by every Snapshot holding it. The struct
 // is mutex-free and setter-free, so read-only sharing is structural,
-// never conventional; the View keeps only transactional state (seal,
+// never conventional; the Snapshot keeps only transactional state (seal,
 // captured proofs, runtime attachments) beside it. Explicit snapshots retain only
 // source/build guards here; their immutable runtime binding supplies the rest.
 type observationFacts struct {
@@ -267,7 +264,7 @@ type observationFacts struct {
 
 // wireProgress routes a Hasher's step, unit, and diagnostic events to
 // the engine's progress callback as Progress values.
-func (e *Engine) wireProgress(hasher *closure.Hasher) {
+func (e *engine) wireProgress(hasher *closure.Hasher) {
 	hasher.OnProgress(func(phase, pkgPath string) {
 		e.progress(Progress{Phase: phase, Package: pkgPath})
 	})
@@ -295,7 +292,7 @@ type opAccountKey struct{}
 // finisher the operation defers: it emits the served summary (one event
 // per class) and, when the operation returns its caller's context error,
 // the kept-on-cancel report — once per operation, whatever its passes.
-func (e *Engine) beginOperation(ctx context.Context) (context.Context, func(*error)) {
+func (e *engine) beginOperation(ctx context.Context) (context.Context, func(*error)) {
 	if e.progress == nil || ctx == nil {
 		return ctx, func(*error) {}
 	}
@@ -342,7 +339,7 @@ func accountPass(ctx context.Context, hasher *closure.Hasher) {
 	}
 }
 
-func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (facts observationFacts, err error) {
+func (e *engine) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (facts observationFacts, err error) {
 	if viewTestHooks.observe != nil {
 		viewTestHooks.observe()
 	}
@@ -562,11 +559,14 @@ func (e *Engine) observeView(ctx context.Context, subjects []Subject, requests [
 	return observation, nil
 }
 
-// Capture returns subject's precomputed fingerprint from this View. Runtime-input
+// Capture returns subject's precomputed fingerprint from this Snapshot. Runtime-input
 // evidence belongs to the producing run and is attached by the caller afterward.
-func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error) {
+func (v *Snapshot) Capture(ctx context.Context, subject Subject) (Fingerprint, error) {
 	if ctx == nil {
 		return Fingerprint{}, errors.New("gofresh: nil analysis context")
+	}
+	if v == nil || v.facts == nil {
+		return Fingerprint{}, errors.New("gofresh: uninitialized snapshot")
 	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -581,7 +581,10 @@ func (v *View) Capture(ctx context.Context, subject Subject) (Fingerprint, error
 
 // SourceFiles returns the absolute mutable source paths whose bytes contribute
 // to this view's maximal closures. The returned slice is caller-owned.
-func (v *View) SourceFiles() []string {
+func (v *Snapshot) SourceFiles() []string {
+	if v == nil || v.facts == nil {
+		return nil
+	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	return append([]string(nil), v.facts.sourceFiles...)
@@ -589,7 +592,10 @@ func (v *View) SourceFiles() []string {
 
 // SourceFilesFor returns the caller-owned mutable source paths contributing to
 // subject's maximal closure in this view.
-func (v *View) SourceFilesFor(subject Subject) ([]string, error) {
+func (v *Snapshot) SourceFilesFor(subject Subject) ([]string, error) {
+	if v == nil || v.facts == nil {
+		return nil, errors.New("gofresh: uninitialized snapshot")
+	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	if err := v.requireMembers([]Subject{subject}); err != nil {
@@ -606,7 +612,10 @@ func (v *View) SourceFilesFor(subject Subject) ([]string, error) {
 // could straddle a later edit (REQ-closure-test-variant-ledger,
 // REQ-fresh-coherent-view). The returned value is caller-owned. A package with
 // no test files yields an empty ledger.
-func (v *View) TestVariantLedger(subject Subject) (TestVariantLedger, error) {
+func (v *Snapshot) TestVariantLedger(subject Subject) (TestVariantLedger, error) {
+	if v == nil || v.facts == nil {
+		return TestVariantLedger{}, errors.New("gofresh: uninitialized snapshot")
+	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	if err := v.requireMembers([]Subject{subject}); err != nil {
@@ -620,9 +629,12 @@ func (v *View) TestVariantLedger(subject Subject) (TestVariantLedger, error) {
 
 // CaptureBatch captures a fingerprint for every subject in the view,
 // sharing the view's batched analysis across the set.
-func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error) {
+func (v *Snapshot) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error) {
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil analysis context")
+	}
+	if v == nil || v.facts == nil {
+		return nil, errors.New("gofresh: uninitialized snapshot")
 	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
@@ -639,7 +651,7 @@ func (v *View) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, error
 
 // fingerprintLocked projects the view's immutable producing facts. Callers
 // hold the view lock; observed capture adds its independently derived proof.
-func (v *View) fingerprintLocked(subject Subject, cl closure.Closure) Fingerprint {
+func (v *Snapshot) fingerprintLocked(subject Subject, cl closure.Closure) Fingerprint {
 	d := v.facts.discharges[subject]
 	return Fingerprint{
 		MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants,
@@ -655,7 +667,10 @@ func (v *View) fingerprintLocked(subject Subject, cl closure.Closure) Fingerprin
 
 // CaptureObserved returns maximal closure evidence plus a caller-selected,
 // attributable observation proof for subject.
-func (v *View) CaptureObserved(ctx context.Context, subject Subject) (fp Fingerprint, opErr error) {
+func (v *Snapshot) CaptureObserved(ctx context.Context, subject Subject) (fp Fingerprint, opErr error) {
+	if v == nil || v.facts == nil || v.engine == nil {
+		return Fingerprint{}, errors.New("gofresh: uninitialized snapshot")
+	}
 	ctx, done := v.engine.beginOperation(ctx)
 	defer done(&opErr)
 	if err := v.requireMembers([]Subject{subject}); err != nil {
@@ -678,7 +693,10 @@ func (v *View) CaptureObserved(ctx context.Context, subject Subject) (fp Fingerp
 
 // CaptureObservedBatch captures observation proof evidence for every
 // subject, sharing one proof analysis across the set.
-func (v *View) CaptureObservedBatch(ctx context.Context) (fps map[Subject]Fingerprint, opErr error) {
+func (v *Snapshot) CaptureObservedBatch(ctx context.Context) (fps map[Subject]Fingerprint, opErr error) {
+	if v == nil || v.facts == nil || v.engine == nil {
+		return nil, errors.New("gofresh: uninitialized snapshot")
+	}
 	ctx, done := v.engine.beginOperation(ctx)
 	defer done(&opErr)
 	if err := v.ensureObservable(ctx, v.subjects); err != nil {
@@ -700,7 +718,7 @@ func (v *View) CaptureObservedBatch(ctx context.Context) (fps map[Subject]Finger
 	return result, nil
 }
 
-func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
+func (v *Snapshot) observedFingerprintLocked(subject Subject) Fingerprint {
 	disposition := v.observable[subject]
 	proof := ObservationProof{
 		Strategy:   ObservationRTA,
@@ -717,13 +735,16 @@ func (v *View) observedFingerprintLocked(subject Subject) Fingerprint {
 
 // AttachObservation binds sealed, process-backed runtime evidence to a captured
 // observation proof. The returned fingerprint is ready for producer validation.
-func (v *View) AttachObservation(subject Subject, fingerprint Fingerprint, observation runtimeinput.Observation) (Fingerprint, error) {
+func (v *Snapshot) AttachObservation(subject Subject, fingerprint Fingerprint, observation runtimeinput.Observation) (Fingerprint, error) {
+	if v == nil || v.facts == nil || v.engine == nil {
+		return Fingerprint{}, errors.New("gofresh: uninitialized snapshot")
+	}
 	return v.attachObservation(subject, fingerprint, observation, true)
 }
 
 // attachObservation checks the producing form the unit prepared. The ordinary
 // form carries identity-only evidence without synthesizing an observation proof.
-func (v *View) attachObservation(subject Subject, fingerprint Fingerprint, observation runtimeinput.Observation, observed bool) (Fingerprint, error) {
+func (v *Snapshot) attachObservation(subject Subject, fingerprint Fingerprint, observation runtimeinput.Observation, observed bool) (Fingerprint, error) {
 	state, err := runtimeinput.CompletedState(observation)
 	if err != nil {
 		return Fingerprint{}, err
@@ -733,7 +754,7 @@ func (v *View) attachObservation(subject Subject, fingerprint Fingerprint, obser
 
 // attachRuntimeState validates the exact prepared fingerprint even when no
 // observation was selected. Nil state supplies no runtime evidence or assertion.
-func (v *View) attachRuntimeState(subject Subject, fingerprint Fingerprint, state *runtimeinput.State, observed bool) (Fingerprint, error) {
+func (v *Snapshot) attachRuntimeState(subject Subject, fingerprint Fingerprint, state *runtimeinput.State, observed bool) (Fingerprint, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.sealed {
@@ -761,10 +782,10 @@ func (v *View) attachRuntimeState(subject Subject, fingerprint Fingerprint, stat
 	return fingerprint, nil
 }
 
-// Check compares recorded against subject's current facts under this View's
+// Check compares recorded against subject's current facts under this Snapshot's
 // result kind and the caller's context. Under a deferred-close engine the
-// verdict is provisional until the view validates (WithDeferredCheckClose).
-func (v *View) Check(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
+// verdict is provisional until the view validates (withDeferredCheckClose).
+func (v *Snapshot) Check(ctx context.Context, recorded Fingerprint, subject Subject) (Verdict, error) {
 	verdicts, err := v.CheckBatch(ctx, map[Subject]Fingerprint{subject: recorded})
 	if err != nil {
 		return Verdict{}, err
@@ -775,9 +796,12 @@ func (v *View) Check(ctx context.Context, recorded Fingerprint, subject Subject)
 // CheckBatch checks a caller-supplied recording set under the shared
 // evidence ladder (REQ-fresh-hierarchical-check). Under a deferred-close
 // engine the verdicts are provisional until the view validates
-// (WithDeferredCheckClose).
-func (v *View) CheckBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
-	return v.checkMap(ctx, recorded, false, v.engine != nil && v.engine.deferredCheckClose)
+// (withDeferredCheckClose).
+func (v *Snapshot) CheckBatch(ctx context.Context, recorded map[Subject]Fingerprint) (map[Subject]Verdict, error) {
+	if v == nil || v.facts == nil || v.engine == nil {
+		return nil, errors.New("gofresh: uninitialized snapshot")
+	}
+	return v.checkMap(ctx, recorded, false, v.engine.deferredCheckClose)
 }
 
 // CheckObserved explicitly checks a fingerprint under its recorded observation
@@ -788,8 +812,11 @@ func (v *View) CheckBatch(ctx context.Context, recorded map[Subject]Fingerprint)
 // semantics: a runtime input moving mid-check stales a record whose verdict is
 // not already stale, and demonstrated staleness is preferred over
 // unverifiability. Under a deferred-close engine the verdict is
-// provisional until the view validates (WithDeferredCheckClose).
-func (v *View) CheckObserved(ctx context.Context, recorded Fingerprint, subject Subject) (verdict Verdict, opErr error) {
+// provisional until the view validates (withDeferredCheckClose).
+func (v *Snapshot) CheckObserved(ctx context.Context, recorded Fingerprint, subject Subject) (verdict Verdict, opErr error) {
+	if v == nil || v.facts == nil || v.engine == nil {
+		return Verdict{}, errors.New("gofresh: uninitialized snapshot")
+	}
 	ctx, done := v.engine.beginOperation(ctx)
 	defer done(&opErr)
 	verdicts, err := v.CheckObservedBatch(ctx, map[Subject]Fingerprint{subject: recorded})
@@ -806,12 +833,15 @@ func (v *View) CheckObserved(ctx context.Context, recorded Fingerprint, subject 
 // the same view; an unavailable shared analysis degrades only the drifted
 // subjects, and caller cancellation returns the context error. Under a
 // deferred-close engine the verdicts are provisional until the view
-// validates (WithDeferredCheckClose).
-func (v *View) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fingerprint) (verdicts map[Subject]Verdict, opErr error) {
-	return v.checkMap(ctx, recorded, true, v.engine != nil && v.engine.deferredCheckClose)
+// validates (withDeferredCheckClose).
+func (v *Snapshot) CheckObservedBatch(ctx context.Context, recorded map[Subject]Fingerprint) (verdicts map[Subject]Verdict, opErr error) {
+	if v == nil || v.facts == nil || v.engine == nil {
+		return nil, errors.New("gofresh: uninitialized snapshot")
+	}
+	return v.checkMap(ctx, recorded, true, v.engine.deferredCheckClose)
 }
 
-func (v *View) purityMatches(recorded Fingerprint, subject Subject) PurityAuthority {
+func (v *Snapshot) purityMatches(recorded Fingerprint, subject Subject) PurityAuthority {
 	return PurityAuthority{Recorded: purityAttribution(recorded.PurityAssertion), Current: purityAttribution(v.facts.purity[subject])}
 }
 
@@ -819,7 +849,7 @@ func validPurityAssertion(assertion string) bool {
 	return purityAttribution(assertion) != NoPurity
 }
 
-func (v *View) currentRuntimeContext(ctx context.Context, recorded Fingerprint, shared map[string]runtimeinput.State) (runtimeinput.State, error) {
+func (v *Snapshot) currentRuntimeContext(ctx context.Context, recorded Fingerprint, shared map[string]runtimeinput.State) (runtimeinput.State, error) {
 	if err := ctx.Err(); err != nil {
 		return runtimeinput.State{}, err
 	}
@@ -849,13 +879,16 @@ func (v *View) currentRuntimeContext(ctx context.Context, recorded Fingerprint, 
 	return rt, nil
 }
 
-// Validate re-observes the View's complete subject set under the caller's
+// Validate re-observes the Snapshot's complete subject set under the caller's
 // context and reports ErrViewChanged when any source closure, guard, or purity
 // assertion moved. A producer calls it after execution before persisting
 // results (REQ-fresh-producer-view). Selected applicability checks are also
 // re-established, including their historical runtime evidence and any current
 // proof needed for an observation lift; they require no new process receipt.
-func (v *View) Validate(ctx context.Context) (opErr error) {
+func (v *Snapshot) Validate(ctx context.Context) (opErr error) {
+	if v == nil || v.facts == nil || v.engine == nil {
+		return errors.New("gofresh: uninitialized snapshot")
+	}
 	ctx, done := v.engine.beginOperation(ctx)
 	defer done(&opErr)
 	v.mu.Lock()
@@ -989,7 +1022,10 @@ func sortedUniqueUnion(groups [][]string) []string {
 // parent validates through attachment, exactly as the parent would.
 // Applicability checks for the subset are inherited as separate validation
 // obligations over historical records, never as producing attachments.
-func (v *View) Sibling(subjects []Subject) (*View, error) {
+func (v *Snapshot) Sibling(subjects []Subject) (*Snapshot, error) {
+	if v == nil || v.facts == nil {
+		return nil, errors.New("gofresh: uninitialized snapshot")
+	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	if len(subjects) == 0 {
@@ -1057,7 +1093,8 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 			applicabilityChecks = append(applicabilityChecks, check)
 		}
 	}
-	return &View{
+	return &Snapshot{
+		session:   v.session,
 		engine:    v.engine,
 		runtime:   v.runtime,
 		subjects:  unique,
@@ -1095,7 +1132,7 @@ func (v *View) Sibling(subjects []Subject) (*View, error) {
 // rest on a genuine agreement pair whose reads span capture time and
 // validation time, so they are record-grade without a second construction
 // pair (REQ-fresh-coherent-view's record/compare asymmetry).
-func (v *View) newSeededValidationView(ctx context.Context) (*View, error) {
+func (v *Snapshot) newSeededValidationView(ctx context.Context) (*Snapshot, error) {
 	observation, err := v.observe(ctx)
 	if err != nil {
 		return nil, err
@@ -1108,7 +1145,8 @@ func (v *View) newSeededValidationView(ctx context.Context) (*View, error) {
 	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	current := &View{
+	current := &Snapshot{
+		session:              v.session,
 		engine:               v.engine,
 		runtime:              v.runtime,
 		runtimeCurrent:       v.runtimeCurrent,
@@ -1127,7 +1165,7 @@ func (v *View) newSeededValidationView(ctx context.Context) (*View, error) {
 
 // validateObserved re-establishes every captured observation proof and
 // attached runtime state.
-func (v *View) validateObserved(ctx context.Context) error {
+func (v *Snapshot) validateObserved(ctx context.Context) error {
 	v.mu.Lock()
 	v.sealed = true
 	v.mu.Unlock()
@@ -1202,7 +1240,7 @@ func (v *View) validateObserved(ctx context.Context) error {
 	// The held cut-explained unavailability — the seeded view's
 	// re-observation or the closing pass — is reported last, after the
 	// closing runtime-input comparison, exactly as the proof's.
-	for _, held := range []*View{v, current} {
+	for _, held := range []*Snapshot{v, current} {
 		held.mu.RLock()
 		cut := held.cutUnavailable
 		held.mu.RUnlock()
@@ -1216,7 +1254,7 @@ func (v *View) validateObserved(ctx context.Context) error {
 // holdCutUnavailable keeps a comparison's cut-explained unavailability on
 // the view and reports nil for it, so the caller continues; every other
 // error is returned as is.
-func (v *View) holdCutUnavailable(err error) error {
+func (v *Snapshot) holdCutUnavailable(err error) error {
 	if err == nil || !errors.Is(err, ErrAnalysisUnavailable) {
 		return err
 	}
@@ -1362,7 +1400,7 @@ func describeObservability(o closure.Observability) string {
 
 // movedInputsForView attributes against the view's own environment, degrading
 // to no attribution on an engine-less view (the direct-construct test shape).
-func movedInputsForView(ctx context.Context, v *View, encoded string) ([]string, error) {
+func movedInputsForView(ctx context.Context, v *Snapshot, encoded string) ([]string, error) {
 	if v.engine == nil {
 		return nil, nil
 	}
@@ -1372,8 +1410,8 @@ func movedInputsForView(ctx context.Context, v *View, encoded string) ([]string,
 // runtimeCheck is the view's one runtime-input check: the injected seam
 // where a test set one, else its bound runtime or legacy engine environment, else — on
 // an engine-less view, the direct-construct test shape — the ambient
-// environment, exactly the engine's own default under New without WithEnv.
-func (v *View) runtimeCheck() func(context.Context, string, string) (runtimeinput.State, error) {
+// environment, exactly the engine's own default under newEngine without withEnv.
+func (v *Snapshot) runtimeCheck() func(context.Context, string, string) (runtimeinput.State, error) {
 	if v.runtimeCurrent != nil {
 		return v.runtimeCurrent
 	}
@@ -1399,7 +1437,7 @@ func observedGuardDir(dir string) string {
 // evidenceRoot is the root this view re-hashes runtime-input identities
 // under: the engine's declared evidence root, else the view's module
 // directory (an engine-less view has only the latter).
-func (v *View) evidenceRoot() string {
+func (v *Snapshot) evidenceRoot() string {
 	if v.engine == nil {
 		return v.moduleDir
 	}
@@ -1410,7 +1448,7 @@ func (v *View) evidenceRoot() string {
 // (REQ-inputs-path-identities attribution): the one-word reason stays for
 // undecodable or moverless manifests — an older recording regenerates either
 // way — and gains "(moved: …)" whenever attribution is derivable.
-func (v *View) withMovedInputs(ctx context.Context, verdict Verdict, recorded Fingerprint) Verdict {
+func (v *Snapshot) withMovedInputs(ctx context.Context, verdict Verdict, recorded Fingerprint) Verdict {
 	if verdict.Status != Stale || verdict.Ground.Cause.Kind != RuntimeInputsCause || recorded.RuntimeInputs == "" || v.engine == nil {
 		return verdict
 	}
@@ -1435,7 +1473,7 @@ func requireCompletedAttachments(attached map[Subject]runtimeinput.State, subjec
 	return nil
 }
 
-func (v *View) compareAttachedObservations(ctx context.Context, attached map[Subject]runtimeinput.State, subjects []Subject) error {
+func (v *Snapshot) compareAttachedObservations(ctx context.Context, attached map[Subject]runtimeinput.State, subjects []Subject) error {
 	// One evaluation per distinct encoded manifest per pass: the observed
 	// state is a function of (manifest, module, env) alone, so subjects
 	// sharing a manifest share it - the same amplification collapse the
@@ -1474,7 +1512,7 @@ func (v *View) compareAttachedObservations(ctx context.Context, attached map[Sub
 // close for every deferred interval (REQ-fresh-coherent-view's deferred
 // close) — and a window that read no runtime inputs has nothing to
 // close.
-func (v *View) closeCheckWindow(ctx context.Context, hasRuntimeInputs, deferClose bool) error {
+func (v *Snapshot) closeCheckWindow(ctx context.Context, hasRuntimeInputs, deferClose bool) error {
 	if hasRuntimeInputs && !deferClose {
 		return v.reobserveBase(ctx)
 	}
@@ -1487,7 +1525,7 @@ func (v *View) closeCheckWindow(ctx context.Context, hasRuntimeInputs, deferClos
 // side: any change persisting to an observation is caught, while a
 // mutation-and-restore interval between agreeing observations is not guaranteed
 // detectable under either shape (REQ-inputs-observation-coherence).
-func (v *View) reobserveBase(ctx context.Context) error {
+func (v *Snapshot) reobserveBase(ctx context.Context) error {
 	observation, err := v.observe(ctx)
 	if err != nil {
 		return err
@@ -1495,13 +1533,13 @@ func (v *View) reobserveBase(ctx context.Context) error {
 	return v.compareObservationContext(ctx, observation)
 }
 
-func (v *View) compareBaseContext(ctx context.Context, current *View) error {
+func (v *Snapshot) compareBaseContext(ctx context.Context, current *Snapshot) error {
 	return v.compareFactsContext(ctx, current.guards(), current.facts.sourceFiles, current.facts.maximal, current.facts.purity, current.facts.sourceFilesBySubject, current.facts.fileDigests, current.facts.cut)
 }
 
 // guards composes the immutable capture without putting execution-specific facts
 // in the shared source/build generation.
-func (v *View) guards() guard.Guards {
+func (v *Snapshot) guards() guard.Guards {
 	g := v.facts.guards
 	if v.runtime != nil {
 		g.Machine, g.RuntimeConfig = v.runtime.guards.Machine, v.runtime.guards.RuntimeConfig
@@ -1509,7 +1547,7 @@ func (v *View) guards() guard.Guards {
 	return g
 }
 
-func (v *View) evidenceEnv() []string {
+func (v *Snapshot) evidenceEnv() []string {
 	if v.runtime != nil {
 		return v.runtime.env
 	}
@@ -1520,7 +1558,7 @@ func (v *View) evidenceEnv() []string {
 // runtime windows and precise-analysis refinement. It observes compilation under
 // the engine and runtime guards under the view's immutable binding. The composed
 // result is comparison-only; it never replaces shared source facts.
-func (v *View) observe(ctx context.Context) (observationFacts, error) {
+func (v *Snapshot) observe(ctx context.Context) (observationFacts, error) {
 	facts, err := v.engine.observeView(ctx, v.subjects, v.requests, v.packages, v.moduleDir, v.kind)
 	if err != nil {
 		return observationFacts{}, err
@@ -1535,7 +1573,7 @@ func (v *View) observe(ctx context.Context) (observationFacts, error) {
 	return facts, nil
 }
 
-func (v *View) compareObservationContext(ctx context.Context, observation observationFacts) error {
+func (v *Snapshot) compareObservationContext(ctx context.Context, observation observationFacts) error {
 	return v.compareFactsContext(ctx, observation.guards, observation.sourceFiles, observation.maximal, observation.purity, observation.sourceFilesBySubject, observation.fileDigests, observation.cut)
 }
 
@@ -1583,7 +1621,7 @@ func reportBudgetCut(progress func(Progress), budget time.Duration, cut int, sta
 // a discharge delta cannot occur while every compared input holds
 // (construction's paired observations still compare discharges
 // directly, where no such immutability argument is available).
-func (v *View) compareFactsContext(ctx context.Context, guards guard.Guards, sourceFiles []string, maximal map[Subject]subjectFacts, purity map[Subject]string, sourceFilesBySubject map[Subject][]string, fileDigests map[string]string, cut map[Subject]bool) error {
+func (v *Snapshot) compareFactsContext(ctx context.Context, guards guard.Guards, sourceFiles []string, maximal map[Subject]subjectFacts, purity map[Subject]string, sourceFilesBySubject map[Subject][]string, fileDigests map[string]string, cut map[Subject]bool) error {
 	if ctx == nil {
 		return errors.New("gofresh: nil analysis context")
 	}
@@ -1664,7 +1702,7 @@ func subjectNames(subjects []Subject) string {
 // over one shared closure Hasher
 // (REQ-fresh-coherent-view attribution; equivalence per
 // REQ-closure-observability-batch-equivalence).
-func (v *View) ensureObservable(ctx context.Context, subjects []Subject) (err error) {
+func (v *Snapshot) ensureObservable(ctx context.Context, subjects []Subject) (err error) {
 	if ctx == nil {
 		return errors.New("gofresh: nil precise-analysis context")
 	}
@@ -1851,7 +1889,7 @@ func emitUnauditedToolchainNotice(once *sync.Once, notice string, emit func(deta
 // execution attestations — each changes what a derived fact records,
 // so attested and unattested sessions never serve each other's facts
 // (REQ-closure-dynamic-state-memo) — and the caller's vouch set.
-func (e *Engine) analysisScope(guards guard.Guards) closure.AnalysisScope {
+func (e *engine) analysisScope(guards guard.Guards) closure.AnalysisScope {
 	vouches := make([]string, 0, len(e.dynamicStateVouches))
 	for v := range e.dynamicStateVouches {
 		vouches = append(vouches, v)

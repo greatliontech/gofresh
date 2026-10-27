@@ -23,11 +23,11 @@ func TestUnknownSubjectRefusesBeforeTheMaximalFold(t *testing.T) {
 	folded := false
 	viewTestHooks.maximalBatch = func() { folded = true }
 	defer func() { viewTestHooks.maximalBatch = nil }()
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = engine.NewView(context.Background(), []Subject{{Package: "example.com/view", Symbol: "NoSuch"}}, dir)
+	_, err = engine.newView(context.Background(), []Subject{{Package: "example.com/view", Symbol: "NoSuch"}}, dir)
 	if err == nil || err.Error() != "gofresh: subject example.com/view.NoSuch not found in selected source" {
 		t.Fatalf("unknown subject = %v, want the not-found refusal in its one-subject wording", err)
 	}
@@ -37,7 +37,7 @@ func TestUnknownSubjectRefusesBeforeTheMaximalFold(t *testing.T) {
 	// The refusal names every unknown subject of the batch at once, each
 	// once in request order, beside the known ones it does not name —
 	// one narrowing step for the caller.
-	_, err = engine.NewView(context.Background(), []Subject{
+	_, err = engine.newView(context.Background(), []Subject{
 		{Package: "example.com/view", Symbol: "NoSuch"},
 		{Package: "example.com/view", Symbol: "F"},
 		{Package: "example.com/view", Symbol: "NoSuchEither"},
@@ -69,11 +69,11 @@ func TestModuleCacheViewPackageRefusesBeforeTheTypedLoad(t *testing.T) {
 	loaded := false
 	viewTestHooks.typedLoad = func() { loaded = true }
 	defer func() { viewTestHooks.typedLoad = nil }()
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = engine.NewView(context.Background(), []Subject{{Package: "golang.org/x/sync/errgroup", Symbol: "Group.Go"}}, dir)
+	_, err = engine.newView(context.Background(), []Subject{{Package: "golang.org/x/sync/errgroup", Symbol: "Group.Go"}}, dir)
 	if err == nil || !strings.Contains(err.Error(), "resolves into the module cache") {
 		t.Fatalf("module-cache view package = %v, want the module-cache refusal", err)
 	}
@@ -90,11 +90,11 @@ func TestMalformedRecordRefusesTheBatchBeforeAnyWindow(t *testing.T) {
 	}
 	dir := writeViewModule(t, preparationSource)
 	f, g := Subject{Package: "example.com/view", Symbol: "F"}, Subject{Package: "example.com/view", Symbol: "G"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(context.Background(), []Subject{f, g}, dir)
+	view, err := engine.newView(context.Background(), []Subject{f, g}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,11 +136,11 @@ func TestMissingAttachmentRefusesBeforeTheValidationObservation(t *testing.T) {
 	}
 	dir := writeObservedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	view, err := engine.newView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,11 +174,11 @@ func TestToolchainSelectionNoticeAnnouncedAtViewConstruction(t *testing.T) {
 	}
 	dir := writeViewModule(t, preparationSource)
 	var events []Progress
-	engine, err := New(WithDir(dir), WithProgress(func(p Progress) { events = append(events, p) }), WithBuildFlags("-tags=netgo"))
+	engine, err := newEngine(withDir(dir), withProgress(func(p Progress) { events = append(events, p) }), withBuildFlags("-tags=netgo"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewView(context.Background(), []Subject{{Package: "example.com/view", Symbol: "F"}}, dir); err != nil {
+	if _, err := engine.newView(context.Background(), []Subject{{Package: "example.com/view", Symbol: "F"}}, dir); err != nil {
 		t.Fatal(err)
 	}
 	notices, firstNotice, firstWork := 0, -1, -1

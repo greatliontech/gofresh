@@ -51,11 +51,11 @@ func TestViewObservationPassPerformsOneTypedLoad(t *testing.T) {
 		}
 	}
 
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewViewFor(context.Background(), []Subject{{Package: "example.com/oneload", Symbol: "F"}}, dir, CodeResult); err != nil {
+	if _, err := engine.newViewFor(context.Background(), []Subject{{Package: "example.com/oneload", Symbol: "F"}}, dir, CodeResult); err != nil {
 		t.Fatal(err)
 	}
 
@@ -69,7 +69,7 @@ func TestViewObservationPassPerformsOneTypedLoad(t *testing.T) {
 	if err := os.Remove(logPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewViewFor(context.Background(), []Subject{{Package: "example.com/oneload", Symbol: "F"}}, dir, CodeResult); err != nil {
+	if _, err := engine.newViewFor(context.Background(), []Subject{{Package: "example.com/oneload", Symbol: "F"}}, dir, CodeResult); err != nil {
 		t.Fatal(err)
 	}
 	if logged, err := os.ReadFile(logPath); !os.IsNotExist(err) {
@@ -113,7 +113,7 @@ func TestViewObservationPassBatchesToolchainProbes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestViewObservationPassBatchesToolchainProbes(t *testing.T) {
 	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := engine.NewViewFor(context.Background(), []Subject{{Package: "example.com/probes", Symbol: "F"}}, dir, CodeResult); err != nil {
+	if _, err := engine.newViewFor(context.Background(), []Subject{{Package: "example.com/probes", Symbol: "F"}}, dir, CodeResult); err != nil {
 		t.Fatal(err)
 	}
 	logged, err := os.ReadFile(logPath)

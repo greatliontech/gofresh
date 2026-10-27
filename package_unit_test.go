@@ -252,9 +252,8 @@ func TestPackageUnitRefusesIncompatibleScope(t *testing.T) {
 	a := Subject{Package: "example.com/a", Symbol: "TestA"}
 	b := Subject{Package: a.Package, Symbol: "TestB"}
 	c := Subject{Package: "example.com/c", Symbol: "TestC"}
-	engine := &Engine{executionModel: ExecutionAssertions{SingleSubject: true}}
-	view := &View{engine: engine, subjects: []Subject{a, b, c}, packages: []string{a.Package, c.Package}, facts: &observationFacts{}}
-	snapshot := &Snapshot{session: &Session{engine: engine}, view: view}
+	engine := &engine{executionModel: ExecutionAssertions{SingleSubject: true}}
+	snapshot := &Snapshot{session: &Session{engine: engine}, engine: engine, subjects: []Subject{a, b, c}, packages: []string{a.Package, c.Package}, facts: &observationFacts{}}
 	execution := &RuntimeBinding{snapshot: snapshot}
 	for _, selected := range [][]Subject{nil, {a, b}, {a, c}, {a, {Package: a.Package, Symbol: "unknown"}}} {
 		if u, err := execution.BeginPackage(selected); err == nil || u != nil {

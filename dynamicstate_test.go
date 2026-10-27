@@ -516,11 +516,11 @@ func TestVouchedFingerprintRecordsDischarge(t *testing.T) {
 	processFactCache = sync.Map{}
 	ctx := context.Background()
 
-	warm, err := New(WithDir(dir))
+	warm, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := warm.NewView(ctx, []Subject{subject}, dir); err != nil {
+	if _, err := warm.newView(ctx, []Subject{subject}, dir); err != nil {
 		t.Fatal(err)
 	}
 	var hit bool
@@ -538,11 +538,11 @@ func TestVouchedFingerprintRecordsDischarge(t *testing.T) {
 		t.Fatal("no errgroup fact in the process cache")
 	}
 
-	control, err := New(WithDir(dir))
+	control, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	controlView, err := control.NewView(ctx, []Subject{subject}, dir)
+	controlView, err := control.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -558,11 +558,11 @@ func TestVouchedFingerprintRecordsDischarge(t *testing.T) {
 		t.Fatalf("poisoned control verdict = %+v, want the downgrade naming %s", controlVerdict, ghost)
 	}
 
-	vouched, err := New(WithDir(dir), WithDynamicStateVouches(ghost))
+	vouched, err := newEngine(withDir(dir), withDynamicStateVouches(ghost))
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := vouched.NewView(ctx, []Subject{subject}, dir)
+	view, err := vouched.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -635,11 +635,11 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 	processFactCache = sync.Map{}
 	ctx := context.Background()
 
-	control, err := New(WithDir(dir))
+	control, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	controlView, err := control.NewView(ctx, []Subject{subject}, dir)
+	controlView, err := control.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -662,11 +662,11 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 		t.Fatalf("unattested evidence recorded %q, want nothing - the discharge is the engine's own verdict", controlFP.SingleSubjectDischarges)
 	}
 
-	attested, err := New(WithDir(dir), WithSingleSubjectExecution())
+	attested, err := newEngine(withDir(dir), withSingleSubjectExecution())
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := attested.NewView(ctx, []Subject{subject}, dir)
+	view, err := attested.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -702,11 +702,11 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 	if !hit {
 		t.Fatal("no unix fact in the process cache")
 	}
-	poisonedEngine, err := New(WithDir(dir))
+	poisonedEngine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	poisonedView, err := poisonedEngine.NewView(ctx, []Subject{subject}, dir)
+	poisonedView, err := poisonedEngine.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -721,11 +721,11 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 	if poisonedVerdict.Status != Unverifiable || !strings.Contains(poisonedVerdict.Reason, ghost+" is mutated") {
 		t.Fatalf("ghost verdict = %+v, want the downgrade naming %s - the discharge covers exactly the audited variable", poisonedVerdict, ghost)
 	}
-	attestedGhostEngine, err := New(WithDir(dir), WithSingleSubjectExecution())
+	attestedGhostEngine, err := newEngine(withDir(dir), withSingleSubjectExecution())
 	if err != nil {
 		t.Fatal(err)
 	}
-	attestedGhostView, err := attestedGhostEngine.NewView(ctx, []Subject{subject}, dir)
+	attestedGhostView, err := attestedGhostEngine.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -788,11 +788,11 @@ func TestAuditedMappingUnauditedVersionRefuses(t *testing.T) {
 	processFactCache = sync.Map{}
 	ctx := context.Background()
 	subject := Subject{Package: "example.com/mapped", Symbol: "Roundtrip"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(ctx, []Subject{subject}, dir)
+	view, err := engine.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -840,11 +840,11 @@ func TestAuditedMappingConfersNothingOnMutableLocalCheckout(t *testing.T) {
 	processFactCache = sync.Map{}
 	ctx := context.Background()
 	subject := Subject{Package: "example.com/mapped", Symbol: "Roundtrip"}
-	engine, err := New(WithDir(dir), WithSingleSubjectExecution())
+	engine, err := newEngine(withDir(dir), withSingleSubjectExecution())
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(ctx, []Subject{subject}, dir)
+	view, err := engine.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1313,11 +1313,11 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 	processFactCache = sync.Map{}
 	ctx := context.Background()
 
-	warm, err := New(WithDir(dir))
+	warm, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := warm.NewView(ctx, []Subject{subject}, dir); err != nil {
+	if _, err := warm.newView(ctx, []Subject{subject}, dir); err != nil {
 		t.Fatal(err)
 	}
 	var hit bool
@@ -1335,9 +1335,9 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 		t.Fatal("no semver fact in the process cache")
 	}
 
-	observe := func(e *Engine) (*View, Fingerprint) {
+	observe := func(e *engine) (*Snapshot, Fingerprint) {
 		t.Helper()
-		producer, err := e.NewView(ctx, []Subject{subject}, dir)
+		producer, err := e.newView(ctx, []Subject{subject}, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1363,7 +1363,7 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 
 	// Unvouched: the downgraded subject refuses on the observed surface
 	// of the same tree that captured it.
-	plain, err := New(WithDir(dir))
+	plain, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1378,7 +1378,7 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 
 	// Vouched capture serves observed; the withdrawn vouch resurfaces
 	// the culprit on the observed surface too.
-	vouched, err := New(WithDir(dir), WithDynamicStateVouches(ghost))
+	vouched, err := newEngine(withDir(dir), withDynamicStateVouches(ghost))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1393,11 +1393,11 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 	if served.Status != Valid {
 		t.Fatalf("vouched observed verdict = %+v, want valid", served)
 	}
-	withdrawn, err := New(WithDir(dir))
+	withdrawn, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err := withdrawn.NewView(ctx, []Subject{subject}, dir)
+	current, err := withdrawn.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1506,11 +1506,11 @@ func TestVouchWithdrawalRefusesObservedServe(t *testing.T) {
 	processFactCache = sync.Map{}
 	ctx := context.Background()
 
-	warm, err := New(WithDir(dir))
+	warm, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := warm.NewView(ctx, []Subject{subject}, dir); err != nil {
+	if _, err := warm.newView(ctx, []Subject{subject}, dir); err != nil {
 		t.Fatal(err)
 	}
 	var hit bool
@@ -1528,11 +1528,11 @@ func TestVouchWithdrawalRefusesObservedServe(t *testing.T) {
 		t.Fatal("no errgroup fact in the process cache")
 	}
 
-	vouched, err := New(WithDir(dir), WithDynamicStateVouches(ghost))
+	vouched, err := newEngine(withDir(dir), withDynamicStateVouches(ghost))
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := vouched.NewView(ctx, []Subject{subject}, dir)
+	producer, err := vouched.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1552,11 +1552,11 @@ func TestVouchWithdrawalRefusesObservedServe(t *testing.T) {
 		t.Fatalf("observed fingerprint discharge = %q, want %q", fingerprint.DynamicStateVouches, ghost)
 	}
 
-	withdrawn, err := New(WithDir(dir))
+	withdrawn, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err := withdrawn.NewView(ctx, []Subject{subject}, dir)
+	current, err := withdrawn.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

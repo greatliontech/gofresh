@@ -42,9 +42,9 @@ func (f Fingerprint) recognizedApplicability() bool {
 // effective compartment, core, listing/build configuration, toolchain and
 // derivation. Historical provenance is caller-trusted, not hash-authenticated.
 // Only Valid returns an updated fingerprint and independently owned ledger.
-// Producing constituents are never refreshed. WithDeferredCheckClose makes the
+// Producing constituents are never refreshed. withDeferredCheckClose makes the
 // returned judgment and pair provisional until this view successfully validates.
-func (v *View) CheckInertTestVariantExtension(ctx context.Context, recorded Fingerprint, prior TestVariantLedger, subject Subject) (Fingerprint, TestVariantLedger, Verdict, error) {
+func (v *Snapshot) CheckInertTestVariantExtension(ctx context.Context, recorded Fingerprint, prior TestVariantLedger, subject Subject) (Fingerprint, TestVariantLedger, Verdict, error) {
 	return v.checkInertTestVariantExtension(ctx, recorded, prior, subject, false)
 }
 
@@ -52,11 +52,14 @@ func (v *View) CheckInertTestVariantExtension(ctx context.Context, recorded Fing
 // under observed policy. Original producer support must qualify independently;
 // current analysis establishes applicability, never new historical support.
 // The return and deferred-close obligations are CheckInertTestVariantExtension's.
-func (v *View) CheckObservedInertTestVariantExtension(ctx context.Context, recorded Fingerprint, prior TestVariantLedger, subject Subject) (Fingerprint, TestVariantLedger, Verdict, error) {
+func (v *Snapshot) CheckObservedInertTestVariantExtension(ctx context.Context, recorded Fingerprint, prior TestVariantLedger, subject Subject) (Fingerprint, TestVariantLedger, Verdict, error) {
 	return v.checkInertTestVariantExtension(ctx, recorded, prior, subject, true)
 }
 
-func (v *View) checkInertTestVariantExtension(ctx context.Context, recorded Fingerprint, prior TestVariantLedger, subject Subject, observed bool) (Fingerprint, TestVariantLedger, Verdict, error) {
+func (v *Snapshot) checkInertTestVariantExtension(ctx context.Context, recorded Fingerprint, prior TestVariantLedger, subject Subject, observed bool) (Fingerprint, TestVariantLedger, Verdict, error) {
+	if v == nil || v.facts == nil || v.engine == nil {
+		return Fingerprint{}, TestVariantLedger{}, Verdict{}, errors.New("gofresh: uninitialized snapshot")
+	}
 	refuse := func(verdict Verdict, err error) (Fingerprint, TestVariantLedger, Verdict, error) {
 		if err == nil {
 			verdict = v.judgmentFor(subject, verdict)
@@ -95,7 +98,7 @@ func (v *View) checkInertTestVariantExtension(ctx context.Context, recorded Fing
 // no runtime inputs or proof and preserves every original producing constituent.
 // The caller has admitted shape, kind and membership for the entire batch first.
 // An empty verdict means the resulting endpoint still needs the checking kernel.
-func (v *View) prepareInertExtension(recorded Fingerprint, prior TestVariantLedger, subject Subject) (Fingerprint, TestVariantLedger, Verdict, error) {
+func (v *Snapshot) prepareInertExtension(recorded Fingerprint, prior TestVariantLedger, subject Subject) (Fingerprint, TestVariantLedger, Verdict, error) {
 	refuse := func(verdict Verdict, err error) (Fingerprint, TestVariantLedger, Verdict, error) {
 		return Fingerprint{}, TestVariantLedger{}, verdict, err
 	}
@@ -139,7 +142,7 @@ type applicabilityCheck struct {
 	observed bool
 }
 
-func (v *View) retainApplicabilityCheck(ctx context.Context, rec Fingerprint, subject Subject, observed bool) error {
+func (v *Snapshot) retainApplicabilityCheck(ctx context.Context, rec Fingerprint, subject Subject, observed bool) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.sealed {
@@ -155,14 +158,14 @@ func (v *View) retainApplicabilityCheck(ctx context.Context, rec Fingerprint, su
 	return nil
 }
 
-func (v *View) currentApplicabilityObservable(subject Subject) bool {
+func (v *Snapshot) currentApplicabilityObservable(subject Subject) bool {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	p := v.observable[subject]
 	return p.Observable && p.OutcomeMethod == outcome.Method
 }
 
-func (v *View) validateApplicabilityChecks(ctx context.Context) error {
+func (v *Snapshot) validateApplicabilityChecks(ctx context.Context) error {
 	// Validate has sealed registration before reading these obligations.
 	v.mu.RLock()
 	checks := append([]applicabilityCheck(nil), v.applicabilityChecks...)
@@ -187,7 +190,7 @@ func applicabilityRecords(checks []applicabilityCheck) []recordCheck {
 	return records
 }
 
-func (v *View) validateApplicabilityBatches(ctx context.Context, current *View, checks []applicabilityCheck) error {
+func (v *Snapshot) validateApplicabilityBatches(ctx context.Context, current *Snapshot, checks []applicabilityCheck) error {
 	var unavailable error
 	records := applicabilityRecords(checks)
 	results, err := current.checkRecords(ctx, records, true, false)
@@ -210,7 +213,7 @@ func (v *View) validateApplicabilityBatches(ctx context.Context, current *View, 
 	if err := deferValidationUnavailability(current.reobserveBase(ctx), &unavailable); err != nil {
 		return err
 	}
-	for _, view := range []*View{v, current} {
+	for _, view := range []*Snapshot{v, current} {
 		view.mu.RLock()
 		cut := view.cutUnavailable
 		view.mu.RUnlock()

@@ -10,8 +10,8 @@
 // tags through the canonical grammar (LanguageSeries, ParseGoVersion,
 // ReleaseTags).
 // A Runner's containment and hook reach the go commands a consumer
-// spawns through it and, installed on an engine (gofresh.WithGoRunner),
-// every go command that engine spawns itself; the package loader's
+// spawns through it and, installed on a session (gofresh.SessionPolicy.Runner),
+// every go command that session spawns itself; the package loader's
 // `go list` children carry the same environment (x/tools appends its
 // own PWD, the same derivation) and spawn through x/tools, outside any
 // hook.

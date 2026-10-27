@@ -36,11 +36,11 @@ func TestProgressReportsUnitsServedAndKept(t *testing.T) {
 	}
 	a, b := Subject{Package: "example.com/units/a", Symbol: "TestA"}, Subject{Package: "example.com/units/b", Symbol: "TestB"}
 	var events []Progress
-	engine, err := New(WithDir(dir), WithProgress(func(p Progress) { events = append(events, p) }))
+	engine, err := newEngine(withDir(dir), withProgress(func(p Progress) { events = append(events, p) }))
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(context.Background(), []Subject{a, b}, dir)
+	view, err := engine.newView(context.Background(), []Subject{a, b}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,11 +84,11 @@ func TestProgressReportsUnitsServedAndKept(t *testing.T) {
 		t.Fatal(err)
 	}
 	events = nil
-	warm, err := New(WithDir(dir), WithProgress(func(p Progress) { events = append(events, p) }))
+	warm, err := newEngine(withDir(dir), withProgress(func(p Progress) { events = append(events, p) }))
 	if err != nil {
 		t.Fatal(err)
 	}
-	warmView, err := warm.NewView(context.Background(), []Subject{a}, dir)
+	warmView, err := warm.newView(context.Background(), []Subject{a}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestProgressReportsUnitsServedAndKept(t *testing.T) {
 	viewTestHooks.beforeAnalysis = cancel
 	defer func() { viewTestHooks.beforeAnalysis = nil }()
 	events = nil
-	coldView, err := warm.NewView(context.Background(), []Subject{b}, dir)
+	coldView, err := warm.newView(context.Background(), []Subject{b}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestProgressReportsUnitsServedAndKept(t *testing.T) {
 	// A non-context failure reports no cancellation.
 	viewTestHooks.beforeAnalysis = nil
 	events = nil
-	if _, err := warm.NewView(context.Background(), []Subject{{Package: a.Package, Symbol: "NoSuch"}}, dir); err == nil {
+	if _, err := warm.newView(context.Background(), []Subject{{Package: a.Package, Symbol: "NoSuch"}}, dir); err == nil {
 		t.Fatal("unknown subject built a view")
 	}
 	for _, e := range events {
@@ -166,7 +166,7 @@ func TestOperationBoundaryReportsOncePerOperation(t *testing.T) {
 	}
 	dir := writeViewModule(t, preparationSource)
 	var events []Progress
-	engine, err := New(WithDir(dir), WithProgress(func(p Progress) { events = append(events, p) }))
+	engine, err := newEngine(withDir(dir), withProgress(func(p Progress) { events = append(events, p) }))
 	if err != nil {
 		t.Fatal(err)
 	}

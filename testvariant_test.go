@@ -42,11 +42,11 @@ func TestSiblingTestAdditionStalesAsTestVariants(t *testing.T) {
 		"partition_test.go": partitionTest,
 	})
 	subject := Subject{Package: "example.com/partition", Symbol: "F"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := engine.Capture(context.Background(), subject, dir)
+	fingerprint, err := engine.capture(context.Background(), subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,14 +56,14 @@ func TestSiblingTestAdditionStalesAsTestVariants(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "partition_test.go"), []byte(partitionTest+"\nfunc TestSibling(t *testing.T) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := engine.Check(context.Background(), fingerprint, subject, dir)
+	verdict, err := engine.check(context.Background(), fingerprint, subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if verdict.Status != Stale || verdict.Reason != "test variants" {
 		t.Fatalf("sibling test addition = %+v, want {stale \"test variants\"}", verdict)
 	}
-	observed, err := engine.CheckObserved(context.Background(), fingerprint, subject, dir)
+	observed, err := engine.checkObserved(context.Background(), fingerprint, subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,18 +85,18 @@ func TestTestFileSubjectBodyLivesInCompartment(t *testing.T) {
 		"partition_test.go": partitionTest,
 	})
 	subject := Subject{Package: "example.com/partition", Symbol: "TestF"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := engine.Capture(context.Background(), subject, dir)
+	fingerprint, err := engine.capture(context.Background(), subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "partition_test.go"), []byte("package partition\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) {\n\tif F() != 1 {\n\t\tt.Fatal(\"edited body\")\n\t}\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := engine.Check(context.Background(), fingerprint, subject, dir)
+	verdict, err := engine.check(context.Background(), fingerprint, subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,11 +118,11 @@ func TestPrePartitionRecordingFailsClosedAsTestVariants(t *testing.T) {
 		"main.go": "package notest\n\nfunc F() int { return 1 }\n",
 	})
 	subject := Subject{Package: "example.com/notest", Symbol: "F"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := engine.Capture(context.Background(), subject, dir)
+	fingerprint, err := engine.capture(context.Background(), subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestPrePartitionRecordingFailsClosedAsTestVariants(t *testing.T) {
 	}
 	prePartition := fingerprint
 	prePartition.TestVariantClosure = ""
-	verdict, err := engine.Check(context.Background(), prePartition, subject, dir)
+	verdict, err := engine.check(context.Background(), prePartition, subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestPrePartitionRecordingFailsClosedAsTestVariants(t *testing.T) {
 	}
 	// Both check surfaces share one evidence ladder: the observed surface
 	// fails a pre-partition recording closed identically.
-	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	view, err := engine.newView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestPrePartitionRecordingFailsClosedAsTestVariants(t *testing.T) {
 	if observed.Status != Stale || observed.Reason != "test variants" {
 		t.Fatalf("observed pre-partition recording = %+v, want fail-closed {stale \"test variants\"}", observed)
 	}
-	current, err := engine.Check(context.Background(), fingerprint, subject, dir)
+	current, err := engine.check(context.Background(), fingerprint, subject, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,11 +175,11 @@ func TestCompartmentDriftStalesWithoutPreciseAnalysis(t *testing.T) {
 		"partition_test.go": partitionTest,
 	})
 	subject := Subject{Package: "example.com/partition", Symbol: "F"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	producer, err := engine.newView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestCompartmentDriftStalesWithoutPreciseAnalysis(t *testing.T) {
 	}
 
 	// Both equal: the verdict is served with no precise analysis.
-	unchanged, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	unchanged, err := engine.newView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestCompartmentDriftStalesWithoutPreciseAnalysis(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "partition_test.go"), []byte(partitionTest+"\nfunc TestSibling(t *testing.T) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	drifted, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	drifted, err := engine.newView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,11 +244,11 @@ func TestMixedCoreAndCompartmentDriftStalesOnClosure(t *testing.T) {
 		"partition_test.go": partitionTest,
 	})
 	subject := Subject{Package: "example.com/partition", Symbol: "F"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	producer, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	producer, err := engine.newView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -264,7 +264,7 @@ func TestMixedCoreAndCompartmentDriftStalesOnClosure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "partition_test.go"), []byte(partitionTest+"\nfunc TestSibling(t *testing.T) {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	drifted, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	drifted, err := engine.newView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,11 +299,11 @@ func TestViewServesTestVariantLedgerFromItsSnapshot(t *testing.T) {
 		"partition_test.go": partitionTest,
 	})
 	subject := Subject{Package: "example.com/partition", Symbol: "F"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	view, err := engine.newView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +352,7 @@ func TestViewServesTestVariantLedgerFromItsSnapshot(t *testing.T) {
 	if !reflect.DeepEqual(captured, snapshot) {
 		t.Fatalf("view ledger moved with a post-construction edit:\n%+v\n%+v", captured, snapshot)
 	}
-	fresh, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	fresh, err := engine.newView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

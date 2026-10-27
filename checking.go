@@ -94,7 +94,7 @@ func validateCandidates(candidates []Candidate, kind Kind) error {
 	return nil
 }
 
-func (v *View) prepareCandidates(candidates []Candidate) error {
+func (v *Snapshot) prepareCandidates(candidates []Candidate) error {
 	if err := validateCandidates(candidates, v.kind); err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func (v *View) prepareCandidates(candidates []Candidate) error {
 
 // observeRecordInputs owns one endpoint cache, including normalized fail-closed
 // evaluation errors. No cache survives this call or crosses a runtime binding.
-func (v *View) observeRecordInputs(ctx context.Context, records []recordCheck, results []recordResult) ([]runtimeinput.State, error) {
+func (v *Snapshot) observeRecordInputs(ctx context.Context, records []recordCheck, results []recordResult) ([]runtimeinput.State, error) {
 	shared := map[string]runtimeinput.State{}
 	if v.engine != nil && v.engine.progress != nil {
 		for i, record := range records {
@@ -135,7 +135,7 @@ func (v *View) observeRecordInputs(ctx context.Context, records []recordCheck, r
 
 // runtimeMotion preserves demonstrated staleness even if an input returns to its
 // recorded value. A newly deciding refusal starts with no accepted authority.
-func (v *View) runtimeMotion(ctx context.Context, candidate Candidate, prior Verdict, before, after runtimeinput.State) Verdict {
+func (v *Snapshot) runtimeMotion(ctx context.Context, candidate Candidate, prior Verdict, before, after runtimeinput.State) Verdict {
 	if candidate.Recorded.RuntimeInputs == "" || before == after || prior.Status == Stale {
 		return prior
 	}
@@ -149,7 +149,7 @@ func (v *View) runtimeMotion(ctx context.Context, candidate Candidate, prior Ver
 // checkRecords is the one ordered checking kernel. Callers prepare the whole
 // batch before entering. Current proofs are subject-scoped; admission, runtime
 // spans, selected obligations and answers are always indexed by record.
-func (v *View) checkRecords(ctx context.Context, records []recordCheck, deferClose, retain bool) (results []recordResult, opErr error) {
+func (v *Snapshot) checkRecords(ctx context.Context, records []recordCheck, deferClose, retain bool) (results []recordResult, opErr error) {
 	ctx, done := v.engine.beginOperation(ctx)
 	defer done(&opErr)
 	if ctx == nil {
@@ -251,7 +251,7 @@ func (v *View) checkRecords(ctx context.Context, records []recordCheck, deferClo
 	return results, ctx.Err()
 }
 
-func (v *View) checkMap(ctx context.Context, recorded map[Subject]Fingerprint, observed, deferClose bool) (map[Subject]Verdict, error) {
+func (v *Snapshot) checkMap(ctx context.Context, recorded map[Subject]Fingerprint, observed, deferClose bool) (map[Subject]Verdict, error) {
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil checking context")
 	}
@@ -286,7 +286,7 @@ type CheckingUnit struct {
 	mu     sync.Mutex
 	gate   chan struct{}
 	phase  unitPhase
-	view   *View
+	view   *Snapshot
 	slots  []checkingSlot
 	busy   bool
 	cancel context.CancelFunc
@@ -542,7 +542,7 @@ func (u *CheckingUnit) close(ctx context.Context) ([]CheckedCandidate, error) {
 	if err := deferValidationUnavailability(current.reobserveBase(ctx), &unavailable); err != nil {
 		return nil, err
 	}
-	for _, view := range []*View{u.view, current} {
+	for _, view := range []*Snapshot{u.view, current} {
 		if err := deferValidationUnavailability(view.cutUnavailable, &unavailable); err != nil {
 			return nil, err
 		}

@@ -40,7 +40,7 @@ func TestApplicabilityBatchesPreserveRecordsAndPolicies(t *testing.T) {
 }
 
 type applicabilityValidationFixture struct {
-	engine     *Engine
+	engine     *engine
 	dir, input string
 	subjects   []Subject
 	recorded   map[Subject]Fingerprint
@@ -65,7 +65,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 		t.Fatal(err)
 	}
 	subjects := []Subject{{"example.com/observed", "TestRead"}, {"example.com/observed", "TestOther"}, {"example.com/observed", "PureA"}, {"example.com/observed", "PureB"}}
-	engine, err := New(WithDir(dir), WithAssumePure(func(s Subject) bool { return strings.HasPrefix(s.Symbol, "Pure") }))
+	engine, err := newEngine(withDir(dir), withAssumePure(func(s Subject) bool { return strings.HasPrefix(s.Symbol, "Pure") }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,16 +122,16 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 	return f
 }
 
-func (f applicabilityValidationFixture) view(t *testing.T) *View {
+func (f applicabilityValidationFixture) view(t *testing.T) *Snapshot {
 	t.Helper()
-	v, err := f.engine.NewView(context.Background(), f.subjects, f.dir)
+	v, err := f.engine.newView(context.Background(), f.subjects, f.dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return v
 }
 
-func (f applicabilityValidationFixture) extend(t *testing.T, v *View, subject Subject, record Fingerprint, observed bool) {
+func (f applicabilityValidationFixture) extend(t *testing.T, v *Snapshot, subject Subject, record Fingerprint, observed bool) {
 	t.Helper()
 	_, _, verdict, err := v.checkInertTestVariantExtension(context.Background(), record, f.ledger, subject, observed)
 	if err != nil || verdict.Status != Valid {

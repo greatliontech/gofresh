@@ -186,9 +186,9 @@ bindings {
   content_hash: "6bcd6f49d6daf81444aae333af9799749c103b12e2e6b731e81069c6c9598aa1"
   source_hash: "2c1995458ed32094140a280d928357586c52ff815eff3f4f1a67638e0c8226c9"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh.Engine.NewViewFor"
+  symbol: "github.com/greatliontech/gofresh.Session.SnapshotFor"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "abe89b7c28fe68ed88e3835510ed244bbd6420f7c3c7711fc5a953137d430929"
+  shape_hash: "1701e82a3b22f5b4c48bce7cf71c774509ef1e596952cb56f4ca1c130a30b620"
 }
 
 bindings {
@@ -343,8 +343,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-explicit-build"
-  content_hash: "07a7921c473bb7863edb79c665af97e4a1409dd241f12f6b5b0e89b5d547ef88"
-  source_hash: "3f35edc36e9809d0650190b4db8b8a293e81f1a4b25cb749b832a028c0fefeca"
+  content_hash: "bb0548e969657ca07684b13a15319e75a814f200bf9d73fc7d773aa822540457"
+  source_hash: "ae5cb8fef258d9d90debdcfbad6b9d134c7ee3c2c3b8a1ebcae2075ffdfdae4f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestCompleteBuildDescriptionIdentity"
   role: BINDING_ROLE_TESTS
@@ -353,8 +353,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-explicit-build"
-  content_hash: "07a7921c473bb7863edb79c665af97e4a1409dd241f12f6b5b0e89b5d547ef88"
-  source_hash: "3f35edc36e9809d0650190b4db8b8a293e81f1a4b25cb749b832a028c0fefeca"
+  content_hash: "bb0548e969657ca07684b13a15319e75a814f200bf9d73fc7d773aa822540457"
+  source_hash: "ae5cb8fef258d9d90debdcfbad6b9d134c7ee3c2c3b8a1ebcae2075ffdfdae4f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestGeneratedCompilerFlagNormalization"
   role: BINDING_ROLE_TESTS
@@ -363,22 +363,12 @@ bindings {
 
 bindings {
   requirement_id: "REQ-guard-explicit-build"
-  content_hash: "07a7921c473bb7863edb79c665af97e4a1409dd241f12f6b5b0e89b5d547ef88"
-  source_hash: "3f35edc36e9809d0650190b4db8b8a293e81f1a4b25cb749b832a028c0fefeca"
+  content_hash: "bb0548e969657ca07684b13a15319e75a814f200bf9d73fc7d773aa822540457"
+  source_hash: "ae5cb8fef258d9d90debdcfbad6b9d134c7ee3c2c3b8a1ebcae2075ffdfdae4f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestSessionSeparatesCompilationFromExecution"
   role: BINDING_ROLE_TESTS
   shape_hash: "c9b41c55cc874cb04e250dd1f40c49c1325bf23e19985d1eae8b2ca1fece4e4c"
-}
-
-bindings {
-  requirement_id: "REQ-guard-explicit-build"
-  content_hash: "07a7921c473bb7863edb79c665af97e4a1409dd241f12f6b5b0e89b5d547ef88"
-  source_hash: "3f35edc36e9809d0650190b4db8b8a293e81f1a4b25cb749b832a028c0fefeca"
-  backend: "go"
-  symbol: "github.com/greatliontech/gofresh.TestProducerEnvConstructionRefusals"
-  role: BINDING_ROLE_TESTS
-  shape_hash: "532d3c99abfd6a31c01b915285a37920b00affb3a1b9334ed188541a1dde2c07"
 }
 
 bindings {

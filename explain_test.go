@@ -20,12 +20,12 @@ import (
 // chain for the named culprit.
 func explainView(t *testing.T, dir, pkgPath, varName string) Chain {
 	t.Helper()
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := Subject{Package: pkgPath, Symbol: "Count"}
-	view, err := engine.NewView(context.Background(), []Subject{s}, dir)
+	view, err := engine.newView(context.Background(), []Subject{s}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,11 +190,11 @@ func TestExplainChains(t *testing.T) {
 			"user/user.go": "package user\n\nimport \"example.com/explain/reg\"\n\nfunc Install(h reg.Handler) { reg.Registry[\"x\"] = h }\n\nfunc F() int { return reg.Count() }\n",
 		}
 		dir := writeModuleTree(t, files)
-		engine, err := New(WithDir(dir))
+		engine, err := newEngine(withDir(dir))
 		if err != nil {
 			t.Fatal(err)
 		}
-		view, err := engine.NewView(context.Background(), []Subject{{Package: "example.com/explain/user", Symbol: "F"}}, dir)
+		view, err := engine.newView(context.Background(), []Subject{{Package: "example.com/explain/user", Symbol: "F"}}, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -251,11 +251,11 @@ func TestExplainChains(t *testing.T) {
 			"user/user.go": "package user\n\nimport \"example.com/explain/reg\"\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\nfunc init() {\n\tc := &counter{}\n\treg.Registry[\"k\"] = c.Next\n}\n\nfunc F() int { return reg.Count() }\n",
 		}
 		dir := writeModuleTree(t, files)
-		engine, err := New(WithDir(dir))
+		engine, err := newEngine(withDir(dir))
 		if err != nil {
 			t.Fatal(err)
 		}
-		view, err := engine.NewView(context.Background(), []Subject{{Package: "example.com/explain/user", Symbol: "F"}}, dir)
+		view, err := engine.newView(context.Background(), []Subject{{Package: "example.com/explain/user", Symbol: "F"}}, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -283,11 +283,11 @@ func TestExplainChains(t *testing.T) {
 			"user/user.go": "package user\n\nimport \"example.com/explain/reg\"\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\nfunc mk() reg.Handler {\n\tc := &counter{}\n\treturn c.Next\n}\n\nfunc init() {\n\treg.Registry[\"k\"] = mk()\n}\n\nfunc F() int { return reg.Count() }\n",
 		}
 		dir := writeModuleTree(t, files)
-		engine, err := New(WithDir(dir))
+		engine, err := newEngine(withDir(dir))
 		if err != nil {
 			t.Fatal(err)
 		}
-		view, err := engine.NewView(context.Background(), []Subject{{Package: "example.com/explain/user", Symbol: "F"}}, dir)
+		view, err := engine.newView(context.Background(), []Subject{{Package: "example.com/explain/user", Symbol: "F"}}, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -572,11 +572,11 @@ func TestChainHooksArmOnlyDuringExplain(t *testing.T) {
 	if explainHooks.Load() != nil {
 		t.Fatal("explain hooks armed at rest")
 	}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(context.Background(), []Subject{{Package: "example.com/explain/reg", Symbol: "Count"}}, dir)
+	view, err := engine.newView(context.Background(), []Subject{{Package: "example.com/explain/reg", Symbol: "Count"}}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,11 +646,11 @@ func TestExplainStraddlesALaterEdit(t *testing.T) {
 		"go.mod":     "module example.com/explain\n\ngo 1.26\n",
 		"reg/reg.go": before,
 	})
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(context.Background(), []Subject{{Package: "example.com/explain/reg", Symbol: "Count"}}, dir)
+	view, err := engine.newView(context.Background(), []Subject{{Package: "example.com/explain/reg", Symbol: "Count"}}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

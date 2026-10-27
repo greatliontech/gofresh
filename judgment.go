@@ -181,7 +181,7 @@ func admittedObservation(rec Fingerprint, subject Subject, cl closure.Closure) O
 	return ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: rec.ObservationProof.Strategy, OutcomeMethod: outcome.Method}
 }
 
-func (v *View) judgmentFor(subject Subject, verdict Verdict) Verdict {
+func (v *Snapshot) judgmentFor(subject Subject, verdict Verdict) Verdict {
 	verdict.Ground.Scope = JudgmentScope{Subject: subject, ResultKind: v.kind}
 	if v.engine != nil {
 		verdict.Ground.Scope.ExecutionModel = v.engine.executionModel

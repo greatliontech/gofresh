@@ -66,11 +66,11 @@ func TestRegistry(t *testing.T) {
 	})
 	ctx := context.Background()
 	first, second := Subject{Package: "example.com/initfix", Symbol: "init#a.go#0"}, Subject{Package: "example.com/initfix", Symbol: "init#a.go#1"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(ctx, []Subject{first, second}, dir)
+	view, err := engine.newView(ctx, []Subject{first, second}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,11 +99,11 @@ func Unwired(x int) int {
 	return x
 }
 `})
-	engine2, err := New(WithDir(dir))
+	engine2, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	view2, err := engine2.NewView(ctx, []Subject{first, second}, dir)
+	view2, err := engine2.newView(ctx, []Subject{first, second}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,11 +126,11 @@ func init() { wireA() }
 
 func init() { registry = append(registry, "second") }
 `})
-	engine3, err := New(WithDir(dir))
+	engine3, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	view3, err := engine3.NewView(ctx, []Subject{first, second}, dir)
+	view3, err := engine3.newView(ctx, []Subject{first, second}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,12 +161,12 @@ import "testing"
 func TestNothing(t *testing.T) {}
 `,
 	})
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	missing := Subject{Package: "example.com/initmiss", Symbol: "init#a.go#1"}
-	if _, err := engine.NewView(context.Background(), []Subject{missing}, dir); err == nil || !strings.Contains(err.Error(), "init#a.go#1") {
+	if _, err := engine.newView(context.Background(), []Subject{missing}, dir); err == nil || !strings.Contains(err.Error(), "init#a.go#1") {
 		t.Fatalf("unknown init ordinal view = %v, want a refusal naming the subject", err)
 	}
 }
@@ -198,11 +198,11 @@ func TestN(t *testing.T) {
 	writeInitFixture(t, dir, files)
 	ctx := context.Background()
 	subject := Subject{Package: "example.com/initstable", Symbol: "init#a.go#0"}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.NewView(ctx, []Subject{subject}, dir)
+	view, err := engine.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,14 +210,14 @@ func TestN(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeInitFixture(t, dir, map[string]string{"aa.go": "package initstable\n\nfunc init() { n += 2 }\n"})
-	engine2, err := New(WithDir(dir))
+	engine2, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The new file's own init starts at ordinal 0 - the counter is
 	// per-file, never package-wide.
 	added := Subject{Package: "example.com/initstable", Symbol: "init#aa.go#0"}
-	view2, err := engine2.NewView(ctx, []Subject{subject, added}, dir)
+	view2, err := engine2.newView(ctx, []Subject{subject, added}, dir)
 	if err != nil {
 		t.Fatalf("init subjects unresolvable after another file gained an init: %v", err)
 	}
@@ -263,12 +263,12 @@ func TestN(t *testing.T) {
 `,
 	})
 	ctx := context.Background()
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	real := Subject{Package: "example.com/initrecv", Symbol: "init#a.go#0"}
-	view, err := engine.NewView(ctx, []Subject{real}, dir)
+	view, err := engine.newView(ctx, []Subject{real}, dir)
 	if err != nil {
 		t.Fatalf("real init not addressable at ordinal 0: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestN(t *testing.T) {
 		t.Fatal(err)
 	}
 	skewed := Subject{Package: "example.com/initrecv", Symbol: "init#a.go#1"}
-	if _, err := engine.NewView(ctx, []Subject{skewed}, dir); err == nil {
+	if _, err := engine.newView(ctx, []Subject{skewed}, dir); err == nil {
 		t.Fatal("ordinal 1 resolved: the method skewed the init count")
 	}
 }

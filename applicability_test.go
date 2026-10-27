@@ -67,45 +67,45 @@ func TestInertApplicabilityRecordGrammar(t *testing.T) {
 	}
 }
 
-func applicabilityFixture(t *testing.T) (*View, Fingerprint, Subject, TestVariantLedger) {
+func applicabilityFixture(t *testing.T) (*Snapshot, Fingerprint, Subject, TestVariantLedger) {
 	t.Helper()
 	s := Subject{"example.com/p", "BenchmarkEnv"}
 	f := Fingerprint{MaximalClosure: "core", ToolchainContent: "stdlib", AdmissionPolicy: "audit", TestVariantClosure: "A", ClosureStrategy: ClosureStrategy, DynamicStateStrategy: DynamicStateStrategy, ResultKind: Measurement, Guards: guard.Guards{Toolchain: "go", BuildConfig: "build", Machine: "machine", RuntimeConfig: "runtime"}}
 	l := TestVariantLedger{BindingStrategy: testvariant.BindingStrategy}
-	v := &View{engine: &Engine{}, subjects: []Subject{s}, kind: Measurement, facts: &observationFacts{maximal: map[Subject]subjectFacts{s: testSubjectFacts(closure.Closure{Hash: "core", ToolchainContent: "stdlib", AdmissionPolicy: "audit", TestVariants: "B"})}, guards: f.Guards, testVariantLedgers: map[string]TestVariantLedger{s.Package: l}}, observable: map[Subject]closure.Observability{}}
+	v := &Snapshot{engine: &engine{}, subjects: []Subject{s}, kind: Measurement, facts: &observationFacts{maximal: map[Subject]subjectFacts{s: testSubjectFacts(closure.Closure{Hash: "core", ToolchainContent: "stdlib", AdmissionPolicy: "audit", TestVariants: "B"})}, guards: f.Guards, testVariantLedgers: map[string]TestVariantLedger{s.Package: l}}, observable: map[Subject]closure.Observability{}}
 	return v, f, s, l
 }
 
 func TestInertExtensionRequiresEveryGuardAndRecognizedEvidence(t *testing.T) {
-	for name, change := range map[string]func(*View, *Fingerprint, *TestVariantLedger){
-		"core":                      func(v *View, f *Fingerprint, l *TestVariantLedger) { f.MaximalClosure = "moved" },
-		"missing core":              func(v *View, f *Fingerprint, l *TestVariantLedger) { f.MaximalClosure = "" },
-		"missing compartment":       func(v *View, f *Fingerprint, l *TestVariantLedger) { f.TestVariantClosure = "" },
-		"closure derivation":        func(v *View, f *Fingerprint, l *TestVariantLedger) { f.ClosureStrategy = "old" },
-		"dynamic derivation":        func(v *View, f *Fingerprint, l *TestVariantLedger) { f.DynamicStateStrategy = "old" },
-		"toolchain":                 func(v *View, f *Fingerprint, l *TestVariantLedger) { f.Guards.Toolchain = "old" },
-		"toolchain content":         func(v *View, f *Fingerprint, l *TestVariantLedger) { f.ToolchainContent = "other" },
-		"missing toolchain content": func(v *View, f *Fingerprint, l *TestVariantLedger) { f.ToolchainContent = "" },
-		"build":                     func(v *View, f *Fingerprint, l *TestVariantLedger) { f.Guards.BuildConfig = "old" },
-		"machine":                   func(v *View, f *Fingerprint, l *TestVariantLedger) { f.Guards.Machine = "old" },
-		"runtime":                   func(v *View, f *Fingerprint, l *TestVariantLedger) { f.Guards.RuntimeConfig = "old" },
-		"missing runtime manifest":  func(v *View, f *Fingerprint, l *TestVariantLedger) { f.RuntimeDigest = "orphan" },
-		"unknown endpoint": func(v *View, f *Fingerprint, l *TestVariantLedger) {
+	for name, change := range map[string]func(*Snapshot, *Fingerprint, *TestVariantLedger){
+		"core":                      func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { f.MaximalClosure = "moved" },
+		"missing core":              func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { f.MaximalClosure = "" },
+		"missing compartment":       func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { f.TestVariantClosure = "" },
+		"closure derivation":        func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { f.ClosureStrategy = "old" },
+		"dynamic derivation":        func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { f.DynamicStateStrategy = "old" },
+		"toolchain":                 func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { f.Guards.Toolchain = "old" },
+		"toolchain content":         func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { f.ToolchainContent = "other" },
+		"missing toolchain content": func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { f.ToolchainContent = "" },
+		"build":                     func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { f.Guards.BuildConfig = "old" },
+		"machine":                   func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { f.Guards.Machine = "old" },
+		"runtime":                   func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { f.Guards.RuntimeConfig = "old" },
+		"missing runtime manifest":  func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { f.RuntimeDigest = "orphan" },
+		"unknown endpoint": func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) {
 			f.InertTestVariantApplicability = InertTestVariantApplicability{"future", "A"}
 		},
-		"missing binding evidence": func(v *View, f *Fingerprint, l *TestVariantLedger) { l.BindingStrategy = "" },
-		"unknown binding evidence": func(v *View, f *Fingerprint, l *TestVariantLedger) { l.BindingStrategy = "future" },
-		"removed declaration": func(v *View, f *Fingerprint, l *TestVariantLedger) {
+		"missing binding evidence": func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { l.BindingStrategy = "" },
+		"unknown binding evidence": func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) { l.BindingStrategy = "future" },
+		"removed declaration": func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) {
 			l.Declarations = []TestVariantDeclaration{{File: "p_test.go", Kind: "func", Name: "Removed", Hash: "h"}}
 		},
-		"external": func(v *View, f *Fingerprint, l *TestVariantLedger) {
+		"external": func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) {
 			for s := range v.facts.maximal {
 				c := v.facts.closure(s)
 				c.External = true
 				v.facts.maximal[s] = testSubjectFacts(c)
 			}
 		},
-		"unverifiable": func(v *View, f *Fingerprint, l *TestVariantLedger) {
+		"unverifiable": func(v *Snapshot, f *Fingerprint, l *TestVariantLedger) {
 			for s := range v.facts.maximal {
 				c := v.facts.closure(s)
 				c.Unverifiable = true
@@ -200,20 +200,20 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 	}
 	env = gotool.SetEnv(env, "OUTCOME_VALUE", "guarded")
 	s := Subject{"example.com/growth", "BenchmarkEnv"}
-	newViewIn := func(t *testing.T, selectedEnv []string, extra ...Option) *View {
+	newViewIn := func(t *testing.T, selectedEnv []string, extra ...option) *Snapshot {
 		t.Helper()
-		opts := append([]Option{WithDir(dir), WithEnv(selectedEnv...)}, extra...)
-		e, err := New(opts...)
+		opts := append([]option{withDir(dir), withEnv(selectedEnv...)}, extra...)
+		e, err := newEngine(opts...)
 		if err != nil {
 			t.Fatal(err)
 		}
-		v, err := e.NewViewFor(ctx, []Subject{s}, dir, Measurement)
+		v, err := e.newViewFor(ctx, []Subject{s}, dir, Measurement)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return v
 	}
-	newView := func(extra ...Option) *View {
+	newView := func(extra ...option) *Snapshot {
 		t.Helper()
 		return newViewIn(t, env, extra...)
 	}
@@ -352,7 +352,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 	// whose budgets change remain private; the damage cases share configuration
 	// only, retaining a fresh two-observation View for each case.
 	guardedEnv := append([]string(nil), env...)
-	damageEngine, err := New(WithDir(dir), WithEnv(guardedEnv...))
+	damageEngine, err := newEngine(withDir(dir), withEnv(guardedEnv...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +370,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 			pureRecord := fp
 			pureRecord.RuntimeInputs, pureRecord.RuntimeDigest = plain.Manifest, plain.Digest
 			pureRecord.PurityAssertion = "caller assertion"
-			pureView := newViewIn(t, guardedEnv, WithAssumePure(func(subject Subject) bool { return subject == s }))
+			pureView := newViewIn(t, guardedEnv, withAssumePure(func(subject Subject) bool { return subject == s }))
 			if updated, _, verdict, err := pureView.CheckObservedInertTestVariantExtension(ctx, pureRecord, ledger, s); err != nil || verdict.Status != Valid || updated.RuntimeInputs != plain.Manifest {
 				t.Fatalf("explicit purity demanded outcome support: %+v %v", verdict, err)
 			}
@@ -395,7 +395,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 				t.Parallel()
 				bad := fp
 				damage(&bad)
-				current, err := damageEngine.NewViewFor(ctx, []Subject{s}, dir, Measurement)
+				current, err := damageEngine.newViewFor(ctx, []Subject{s}, dir, Measurement)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -424,13 +424,13 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 		}
 		t.Run("current budget cut", func(t *testing.T) {
 			t.Parallel()
-			if verdict, err := newViewIn(t, guardedEnv, WithAnalysisBudget(time.Nanosecond)).CheckObserved(ctx, fp, s); err != nil || verdict.Status != Unverifiable {
+			if verdict, err := newViewIn(t, guardedEnv, withAnalysisBudget(time.Nanosecond)).CheckObserved(ctx, fp, s); err != nil || verdict.Status != Unverifiable {
 				t.Fatalf("budget-cut current applicability reused historical proof: %+v %v", verdict, err)
 			}
 		})
 		t.Run("deferred validation", func(t *testing.T) {
 			t.Parallel()
-			deferred := newViewIn(t, guardedEnv, WithDeferredCheckClose())
+			deferred := newViewIn(t, guardedEnv, withDeferredCheckClose())
 			if _, _, verdict, err := deferred.CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Valid {
 				t.Fatalf("deferred extension: %+v %v", verdict, err)
 			}
@@ -445,7 +445,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 		// Sibling producer transactions retain their selected applicability duties.
 		t.Run("sibling validation", func(t *testing.T) {
 			t.Parallel()
-			parent := newViewIn(t, guardedEnv, WithDeferredCheckClose())
+			parent := newViewIn(t, guardedEnv, withDeferredCheckClose())
 			if _, _, verdict, err := parent.CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Valid {
 				t.Fatalf("parent extension: %+v %v", verdict, err)
 			}
@@ -518,7 +518,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 		t.Fatalf("changed subject extended: %+v %v", verdict, err)
 	}
 	write("growth_test.go", source)
-	deferred := newView(WithDeferredCheckClose())
+	deferred := newView(withDeferredCheckClose())
 	if _, _, verdict, err := deferred.CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Valid {
 		t.Fatalf("deferred extension: %+v %v", verdict, err)
 	}
@@ -555,12 +555,12 @@ func TestApplicabilityCheckerReload(t *testing.T) {
 	if err := json.Unmarshal(data, &pair); err != nil {
 		t.Fatal(err)
 	}
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	view, err := engine.NewViewFor(ctx, []Subject{pair.Subject}, dir, pair.Fingerprint.ResultKind)
+	view, err := engine.newViewFor(ctx, []Subject{pair.Subject}, dir, pair.Fingerprint.ResultKind)
 	if err != nil {
 		t.Fatal(err)
 	}

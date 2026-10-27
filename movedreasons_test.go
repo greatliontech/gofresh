@@ -39,11 +39,11 @@ func TestStaleRuntimeInputsNamesTheMover(t *testing.T) {
 	write("data/fixture.txt", "v1")
 
 	subj := Subject{Package: "example.com/mover", Symbol: "F"}
-	e, err := New(WithDir(tmp))
+	e, err := newEngine(withDir(tmp))
 	if err != nil {
 		t.Fatal(err)
 	}
-	fp, err := e.Capture(context.Background(), subj, tmp)
+	fp, err := e.capture(context.Background(), subj, tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,14 +63,14 @@ func TestStaleRuntimeInputsNamesTheMover(t *testing.T) {
 	fp.RuntimeInputs = st.Manifest
 	fp.RuntimeDigest = st.Digest
 
-	if v, err := e.Check(context.Background(), fp, subj, tmp); err != nil {
+	if v, err := e.check(context.Background(), fp, subj, tmp); err != nil {
 		t.Fatal(err)
 	} else if v.Status != Valid {
 		t.Fatalf("unmoved input verdict = {%s %q}, want valid", v.Status, v.Reason)
 	}
 
 	write("data/fixture.txt", "v2")
-	v, err := e.Check(context.Background(), fp, subj, tmp)
+	v, err := e.check(context.Background(), fp, subj, tmp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestStaleRuntimeInputsNamesTheMover(t *testing.T) {
 	if v.Ground.Cause != (Cause{Kind: RuntimeInputsCause, Condition: Changed}) {
 		t.Fatalf("mover lost its semantic cause: %+v", v.Ground)
 	}
-	view := &View{engine: e, moduleDir: tmp}
+	view := &Snapshot{engine: e, moduleDir: tmp}
 	v.Reason = "different diagnostic wording"
 	decorated := view.withMovedInputs(t.Context(), v, fp)
 	if decorated.Ground != v.Ground || !strings.Contains(decorated.Reason, "moved: path data/fixture.txt") {

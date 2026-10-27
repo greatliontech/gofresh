@@ -47,7 +47,7 @@ func TestSubjectFactsHiddenObligations(t *testing.T) {
 	base.sharedState = &subjectRefusal{reason: "shared"}
 	base.ambiguous = &subjectRefusal{reason: "ambiguous"}
 	base.external = true
-	view := &View{subjects: []Subject{s}, facts: &observationFacts{maximal: map[Subject]subjectFacts{s: base}}}
+	view := &Snapshot{subjects: []Subject{s}, facts: &observationFacts{maximal: map[Subject]subjectFacts{s: base}}}
 	for _, tc := range []struct {
 		name   string
 		change func(*subjectFacts)
@@ -104,7 +104,7 @@ func TestSubjectFactsProjectionAndSiblingIsolation(t *testing.T) {
 	base.openWorld = &subjectRefusal{reason: "open"}
 	base.sharedState = &subjectRefusal{reason: "shared"}
 	load := &closure.ViewLoad{}
-	parent := &View{subjects: []Subject{s}, facts: &observationFacts{
+	parent := &Snapshot{subjects: []Subject{s}, facts: &observationFacts{
 		maximal: map[Subject]subjectFacts{s: base}, source: load,
 	}}
 	child, err := parent.Sibling([]Subject{s})
@@ -154,12 +154,12 @@ func Rebind() { Hook = func() {} }
 func F(callback func()) { callback(); Hook(); _ = os.Getenv("INPUT"); _, _ = net.Dial("tcp", "") }
 `,
 	})
-	e, err := New(WithDir(dir))
+	e, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := Subject{Package: "example.com/base", Symbol: "F"}
-	v, err := e.NewView(t.Context(), []Subject{s}, dir)
+	v, err := e.newView(t.Context(), []Subject{s}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

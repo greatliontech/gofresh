@@ -65,7 +65,7 @@ func requireSubjects(subjects []Subject, contains func(Subject) bool, scope Subj
 // requireMembers judges selection, not whether today's source declares a name.
 // The immutable closure inventory is the shared membership authority for every
 // projection, attachment and check over a constructed view.
-func (v *View) requireMembers(subjects []Subject) error {
+func (v *Snapshot) requireMembers(subjects []Subject) error {
 	return requireSubjects(subjects, func(s Subject) bool {
 		_, ok := v.facts.maximal[s]
 		return ok

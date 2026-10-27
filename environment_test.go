@@ -76,9 +76,9 @@ func environmentWith(values map[string]string) []string {
 	return env
 }
 
-func viewUsesSource(t *testing.T, engine *Engine, fixture workspaceEnvironmentFixture, want, notWant string) {
+func viewUsesSource(t *testing.T, engine *engine, fixture workspaceEnvironmentFixture, want, notWant string) {
 	t.Helper()
-	view, err := engine.NewView(context.Background(), []Subject{fixture.subject}, fixture.consumer)
+	view, err := engine.newView(context.Background(), []Subject{fixture.subject}, fixture.consumer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,11 +95,11 @@ func TestWithEnvSelectsWorkspaceSource(t *testing.T) {
 	fixture := writeWorkspaceEnvironmentFixture(t)
 	t.Setenv("GOWORK", fixture.goWork)
 
-	standalone, err := New(WithDir(fixture.consumer), WithEnv(environmentWith(map[string]string{"GOWORK": "off"})...))
+	standalone, err := newEngine(withDir(fixture.consumer), withEnv(environmentWith(map[string]string{"GOWORK": "off"})...))
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := New(WithDir(fixture.consumer), WithEnv(environmentWith(map[string]string{"GOWORK": fixture.goWork})...))
+	workspace, err := newEngine(withDir(fixture.consumer), withEnv(environmentWith(map[string]string{"GOWORK": fixture.goWork})...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,11 +112,11 @@ func TestEnginesWithDifferentEnvironmentsConstructViewsConcurrently(t *testing.T
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
 	fixture := writeWorkspaceEnvironmentFixture(t)
-	standalone, err := New(WithDir(fixture.consumer), WithEnv(environmentWith(map[string]string{"GOWORK": "off"})...))
+	standalone, err := newEngine(withDir(fixture.consumer), withEnv(environmentWith(map[string]string{"GOWORK": "off"})...))
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := New(WithDir(fixture.consumer), WithEnv(environmentWith(map[string]string{"GOWORK": fixture.goWork})...))
+	workspace, err := newEngine(withDir(fixture.consumer), withEnv(environmentWith(map[string]string{"GOWORK": fixture.goWork})...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,13 +126,13 @@ func TestEnginesWithDifferentEnvironmentsConstructViewsConcurrently(t *testing.T
 		err   error
 	}
 	results := make([]result, 2)
-	engines := []*Engine{standalone, workspace}
+	engines := []*engine{standalone, workspace}
 	var wait sync.WaitGroup
 	for i, engine := range engines {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			view, err := engine.NewView(context.Background(), []Subject{fixture.subject}, fixture.consumer)
+			view, err := engine.newView(context.Background(), []Subject{fixture.subject}, fixture.consumer)
 			results[i].err = err
 			if err == nil {
 				results[i].files = view.SourceFiles()
@@ -159,13 +159,13 @@ func TestWithEnvCopiesNormalizesAndRejectsAmbiguity(t *testing.T) {
 	}
 	fixture := writeWorkspaceEnvironmentFixture(t)
 	env := environmentWith(map[string]string{"GOWORK": "off"})
-	option := WithEnv(env...)
+	option := withEnv(env...)
 	for i := range env {
 		if strings.HasPrefix(env[i], "GOWORK=") {
 			env[i] = "GOWORK=" + fixture.goWork
 		}
 	}
-	engine, err := New(WithDir(fixture.consumer), option)
+	engine, err := newEngine(withDir(fixture.consumer), option)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestWithEnvCopiesNormalizesAndRejectsAmbiguity(t *testing.T) {
 
 	reversed := environmentWith(map[string]string{"GOWORK": "off"})
 	slices.Reverse(reversed)
-	other, err := New(WithDir(fixture.consumer), WithEnv(reversed...))
+	other, err := newEngine(withDir(fixture.consumer), withEnv(reversed...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,8 +193,8 @@ func TestWithEnvCopiesNormalizesAndRejectsAmbiguity(t *testing.T) {
 		{name: "external package driver", env: environmentWith(map[string]string{"GOPACKAGESDRIVER": "custom-driver"}), want: "GOPACKAGESDRIVER"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := New(WithEnv(test.env...)); err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("New(WithEnv(%q)) = %v, want %q error", test.env, err, test.want)
+			if _, err := newEngine(withEnv(test.env...)); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("newEngine(withEnv(%q)) = %v, want %q error", test.env, err, test.want)
 			}
 		})
 	}
@@ -207,12 +207,12 @@ func TestDefaultEnvironmentIsCapturedAtNew(t *testing.T) {
 	}
 	fixture := writeWorkspaceEnvironmentFixture(t)
 	t.Setenv("GOWORK", "off")
-	standalone, err := New(WithDir(fixture.consumer))
+	standalone, err := newEngine(withDir(fixture.consumer))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("GOWORK", fixture.goWork)
-	workspace, err := New(WithDir(fixture.consumer))
+	workspace, err := newEngine(withDir(fixture.consumer))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,11 +226,11 @@ func TestWithEnvDoesNotSelectGoLauncherFromSuppliedPath(t *testing.T) {
 	}
 	fixture := writeWorkspaceEnvironmentFixture(t)
 	env := environmentWith(map[string]string{"GOWORK": "off", "PATH": filepath.Join(t.TempDir(), "missing")})
-	engine, err := New(WithDir(fixture.consumer), WithEnv(env...))
+	engine, err := newEngine(withDir(fixture.consumer), withEnv(env...))
 	if err != nil {
 		t.Fatalf("host go launcher was not used: %v", err)
 	}
-	if _, err := engine.NewView(context.Background(), []Subject{fixture.subject}, fixture.consumer); err != nil {
+	if _, err := engine.newView(context.Background(), []Subject{fixture.subject}, fixture.consumer); err != nil {
 		t.Fatalf("view did not retain host go launcher: %v", err)
 	}
 }
@@ -252,12 +252,12 @@ func TestPackageDriverSafetyPinDoesNotChangeRuntimeEnvironment(t *testing.T) {
 			env = append(env, entry)
 		}
 	}
-	engine, err := New(WithDir(dir), WithEnv(env...))
+	engine, err := newEngine(withDir(dir), withEnv(env...))
 	if err != nil {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: "example.com/driverenv", Symbol: "F"}
-	view, err := engine.NewView(context.Background(), []Subject{subject}, dir)
+	view, err := engine.newView(context.Background(), []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

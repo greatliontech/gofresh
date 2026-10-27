@@ -2,6 +2,7 @@ package gofresh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -125,7 +126,10 @@ func CulpritFromReason(reason string) (Subject, bool) {
 // verdicts derive over - and re-runs the analysis with observation
 // hooks armed; a variable that is not a culprit yields an empty chain
 // and no error.
-func (v *View) ExplainDynamicState(ctx context.Context, pkgPath, varName string) (Chain, error) {
+func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName string) (Chain, error) {
+	if v == nil || v.engine == nil {
+		return Chain{}, errors.New("gofresh: uninitialized snapshot")
+	}
 	v.mu.RLock()
 	dir := v.moduleDir
 	env := v.engine.env

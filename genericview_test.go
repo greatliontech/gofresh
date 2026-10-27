@@ -47,13 +47,13 @@ func TestViewTierGenericOpennessMatchesConstraints(t *testing.T) {
 	}
 	dir := writeBoundedViewFixture(t)
 	const pkg = "example.com/boundedview"
-	engine, err := New(WithDir(dir))
+	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	bounded := Subject{Package: pkg, Symbol: "Sum"}
 	unbounded := Subject{Package: pkg, Symbol: "Value"}
-	view, err := engine.NewView(context.Background(), []Subject{bounded, unbounded}, dir)
+	view, err := engine.newView(context.Background(), []Subject{bounded, unbounded}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}

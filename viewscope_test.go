@@ -14,14 +14,14 @@ import (
 // REQ-closure-scan-memo).
 func TestAnalysisScopeWiresTheStrategyConstants(t *testing.T) {
 	guards := guard.Guards{Toolchain: "tc", BuildConfig: "bc"}
-	plain := (&Engine{}).analysisScope(guards)
+	plain := (&engine{}).analysisScope(guards)
 	if plain.ProofStrategy != ObservationRTA || plain.FactStrategy != DynamicStateStrategy || plain.Toolchain != "tc" || plain.BuildConfig != "bc" {
 		t.Fatalf("wrong caller-owned scope axes: %+v", plain)
 	}
 	if plain.Proofs() != "" || plain.Facts() != "" || plain.Scan() != "" || plain.TestingScan() != "" {
 		t.Fatal("reported guards without source dependencies armed a memo")
 	}
-	attested := (&Engine{executionModel: ExecutionAssertions{SingleSubject: true, PackageProcess: true}, dynamicStateVouches: map[string]bool{"example.com/dep:Hooks": true, "a.example/x:Y": true}}).analysisScope(guards)
+	attested := (&engine{executionModel: ExecutionAssertions{SingleSubject: true, PackageProcess: true}, dynamicStateVouches: map[string]bool{"example.com/dep:Hooks": true, "a.example/x:Y": true}}).analysisScope(guards)
 	slices.Sort(attested.Vouches)
 	if !attested.SingleSubject || !attested.PackageProcess || plain.SingleSubject || plain.PackageProcess || !slices.Equal(attested.Vouches, []string{"a.example/x:Y", "example.com/dep:Hooks"}) || len(plain.Vouches) != 0 {
 		t.Fatalf("assertion axes not preserved: plain=%+v attested=%+v", plain, attested)

@@ -4,7 +4,9 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/stipulator/stipulate/structural"
 )
 
@@ -62,9 +64,18 @@ func TestVariantLedgerTypesAreExportedData(t *testing.T) {
 }
 
 func TestPurityInputIsSubjectPredicate(t *testing.T) {
-	structural.FunctionSignature[func(func(Subject) bool) Option](t, WithAssumePure)
+	structural.ExportedData[SessionPolicy](t,
+		structural.FieldOf[string]("EvidenceRoot"),
+		structural.FieldOf[[]string]("Vouches"),
+		structural.FieldOf[[]Subject]("PureSubjects"),
+		structural.FieldOf[func(Subject) bool]("AssumePure"),
+		structural.FieldOf[ExecutionModel]("Execution"),
+		structural.FieldOf[time.Duration]("AnalysisBudget"),
+		structural.FieldOf[gotool.Runner]("Runner"),
+		structural.FieldOf[func(Progress)]("Progress"),
+	)
 }
 
 func TestViewCheckUsesConstructionKind(t *testing.T) {
-	structural.FunctionSignature[func(*View, context.Context, Fingerprint, Subject) (Verdict, error)](t, (*View).Check)
+	structural.FunctionSignature[func(*Snapshot, context.Context, Fingerprint, Subject) (Verdict, error)](t, (*Snapshot).Check)
 }

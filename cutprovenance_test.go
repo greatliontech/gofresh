@@ -62,13 +62,13 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 			t.Errorf("construction cut: injected=%d discharged=%d, want one each", injected, discharged)
 		}
 	})
-	engine, err := New(WithDir(dir), WithSingleSubjectExecution(), WithAnalysisBudget(budget))
+	engine, err := newEngine(withDir(dir), withSingleSubjectExecution(), withAnalysisBudget(budget))
 	if err != nil {
 		t.Fatal(err)
 	}
 	cut := Subject{Package: "example.com/cut", Symbol: "F"}
 	pure := Subject{Package: "example.com/cut/pure", Symbol: "F"}
-	parent, err := engine.NewView(context.Background(), []Subject{cut, pure}, dir)
+	parent, err := engine.newView(context.Background(), []Subject{cut, pure}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 	if err := parent.Validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) || errors.Is(err, ErrViewChanged) {
 		t.Fatalf("parent on unchanged tree: %v, want cut unavailability", err)
 	}
-	sibling := func(t *testing.T, from *View, subjects ...Subject) *View {
+	sibling := func(t *testing.T, from *Snapshot, subjects ...Subject) *Snapshot {
 		t.Helper()
 		before := passes
 		v, err := from.Sibling(subjects)
@@ -90,13 +90,13 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 		}
 		return v
 	}
-	assertCut := func(t *testing.T, v *View) {
+	assertCut := func(t *testing.T, v *Snapshot) {
 		t.Helper()
 		if err := v.Validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) || errors.Is(err, ErrViewChanged) {
 			t.Fatalf("sibling on unchanged tree: %v, want cut unavailability", err)
 		}
 	}
-	attach := func(t *testing.T, v *View, fp Fingerprint) {
+	attach := func(t *testing.T, v *Snapshot, fp Fingerprint) {
 		t.Helper()
 		observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir,
 			runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
@@ -193,7 +193,7 @@ func FuzzSiblingCutProjection(f *testing.F) {
 		if len(data) > 32 {
 			data = data[:32]
 		}
-		parent := &View{facts: &observationFacts{
+		parent := &Snapshot{facts: &observationFacts{
 			maximal: map[Subject]subjectFacts{},
 			cut:     map[Subject]bool{},
 		}}
