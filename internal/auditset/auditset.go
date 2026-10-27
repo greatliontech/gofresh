@@ -33,7 +33,8 @@ func Identity() string {
 		return result
 	}
 	data, _ := json.Marshal([]any{purePackages, symbolTables, methods(syncMethods),
-		methods(poolMethods), methods(memoMethods), methods(timeMethods), methods(reflectMethods), methods(randMethods), reflectImmutableTypes})
+		methods(poolMethods), methods(memoMethods), methods(timeMethods), methods(reflectMethods), methods(randMethods),
+		methods(standardSentinelGlobals), reflectImmutableTypes, constantImmutableTypes})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
@@ -155,6 +156,11 @@ var reflectMethods = map[string][]string{
 // object-closed store rule read one table, and a member must meet
 // both bars.
 var reflectImmutableTypes = map[string]bool{"Type": true}
+
+// constantImmutableTypes is the audited set of go/constant types whose
+// values are immutable once produced AND whose interface is sealed by
+// unexported methods (implementsValue).
+var constantImmutableTypes = map[string]bool{"Value": true}
 
 // fmtSymbols is the audited surface of package fmt: the Sprint and
 // Append families and Errorf — value-to-value formatting whose
@@ -426,6 +432,7 @@ var flagSymbols = func() map[string]bool {
 // is in exactly one, so the two consulting predicates can never
 // answer differently for one package (pinned by the package's test).
 var symbolTables = map[string]map[string]bool{
+	"context":       contextSymbols,
 	"fmt":           fmtSymbols,
 	"reflect":       reflectSymbols,
 	"time":          timeSymbols,
@@ -433,6 +440,34 @@ var symbolTables = map[string]map[string]bool{
 	"net/url":       urlSymbols,
 	"flag":          flagSymbols,
 	"math/rand":     randSymbols,
+}
+
+// contextSymbols is the audited surface of package context: the timerless
+// cancellation and value constructors, the Context and CancelFunc types and
+// read methods, and the Canceled / DeadlineExceeded sentinel errors.
+// WithDeadline, WithDeadlineCause, WithTimeout, WithTimeoutCause, and AfterFunc
+// are excluded because they read the clock, start runtime timers, or launch
+// goroutines.
+var contextSymbols = map[string]bool{
+	"Context": true, "CancelFunc": true, "CancelCauseFunc": true,
+	"Background": true, "TODO": true,
+	"WithCancel": true, "WithCancelCause": true, "WithValue": true, "WithoutCancel": true,
+	"Cause": true,
+	"Deadline": true, "Done": true, "Err": true, "Value": true, "String": true,
+	"Canceled": true, "DeadlineExceeded": true,
+}
+
+// standardSentinelGlobals lists exported standard-library globals whose
+// SSA referrers are verified unmutated outside their declaring package's init.
+var standardSentinelGlobals = map[string][]string{
+	"context": {"Canceled", "DeadlineExceeded"},
+	"io":      {"Discard"},
+}
+
+// StandardSentinelGlobal reports whether pkgPath.name is in the audited
+// standard sentinel global set.
+func StandardSentinelGlobal(pkgPath, name string) bool {
+	return slices.Contains(standardSentinelGlobals[pkgPath], name)
 }
 
 // Symbol reports whether a standard package's symbol name is in its
@@ -545,6 +580,10 @@ func SyncSurfaceName(name string) bool {
 // ReflectImmutable reports whether a reflect type is in the audited
 // immutable-type set.
 func ReflectImmutable(name string) bool { return reflectImmutableTypes[name] }
+
+// ConstantImmutable reports whether a go/constant type is in the audited
+// immutable-type set.
+func ConstantImmutable(name string) bool { return constantImmutableTypes[name] }
 
 // names is the union of a method set's receiver and method names.
 func names(set map[string][]string) []string {

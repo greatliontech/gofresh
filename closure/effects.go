@@ -92,10 +92,22 @@ func auditedStandardMethod(audited bool, fn *ssa.Function) bool {
 }
 
 // auditedStandardCallee is the walk tiers' whole standard admission
-// for one callee — the bare-name ladder or the receiver-qualified arm
-// — so no walk site can take one arm without the other.
+// for one callee — the bare-name ladder, the receiver-qualified arm,
+// or an anonymous closure parented under an audited standard symbol
+// (such as context.WithCancel's returned CancelFunc) — so no walk site
+// can take one arm without the other.
 func auditedStandardCallee(audited bool, pkgPath, name string, fn *ssa.Function) bool {
-	return auditedStandardSymbol(audited, pkgPath, name) || auditedStandardMethod(audited, fn)
+	if auditedStandardSymbol(audited, pkgPath, name) || auditedStandardMethod(audited, fn) {
+		return true
+	}
+	if fn != nil && fn.Object() == nil && fn.Parent() != nil {
+		top := fn.Parent()
+		for top.Parent() != nil {
+			top = top.Parent()
+		}
+		return auditedStandardSymbol(audited, pkgPath, functionSymbolName(top))
+	}
+	return false
 }
 
 // unauditedStandardEffect is the one spelling of the fallback every

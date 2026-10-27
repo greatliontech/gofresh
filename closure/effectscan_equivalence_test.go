@@ -206,7 +206,6 @@ func TestFileEffectScanMatchesReferenceOverRepository(t *testing.T) {
 	}
 }
 
-//gofresh:pure
 func BenchmarkMaximalFileEffects(b *testing.B) {
 	dir := b.TempDir()
 	var sb strings.Builder
@@ -231,8 +230,6 @@ func BenchmarkMaximalFileEffects(b *testing.B) {
 // machinery the production-function benchmark above cannot: every
 // function is a test with a propagation chain, so the fixed point and
 // the testing walks dominate.
-//
-//gofresh:pure
 func BenchmarkTestingHeavyFileEffects(b *testing.B) {
 	dir := b.TempDir()
 	var sb strings.Builder

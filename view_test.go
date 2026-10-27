@@ -10458,11 +10458,11 @@ func TestDotlessModuleFlagAndTestMainSoundness(t *testing.T) {
 		if fingerprint.ObservationProof.Observable {
 			t.Fatal("dotless test-main callback's write earned a proof - the callback vanished from the walk")
 		}
-		// Tier-discriminating: the WALK classified the callback's write
-		// (the package-scan backstop's conservative dotless refusal
-		// carries the "package scan:" wording instead and must not
-		// stand in for the walk here).
-		if reason := fingerprint.ObservationProof.Reason; !strings.Contains(reason, "startup effect:") || strings.Contains(reason, "package scan:") {
+		// Tier-discriminating: the test-main WALK classified the
+		// callback's write with the write's own reason (neither the
+		// package-scan backstop's "package scan:" wording nor a leaked
+		// initializer "startup effect:" may stand in for it).
+		if reason := fingerprint.ObservationProof.Reason; !strings.Contains(reason, "os.WriteFile") || strings.Contains(reason, "package scan:") || strings.Contains(reason, "startup effect:") {
 			t.Fatalf("refusal = %q, want the walk-tier classification of the callback's write", reason)
 		}
 	})

@@ -716,7 +716,7 @@ type coneDynamicState struct {
 func dischargeUnreachableCulprits(ctx, analysisCtx context.Context, hasher *closure.Hasher, state *viewDynamicState, scan *subjectScan) (cut map[Subject]bool, err error) {
 	var downgraded []Subject
 	for subject := range scan.known {
-		if scan.downgradeReason[subject] != "" && len(state.rootCulprits[subject.Package]) > 0 {
+		if culprits := state.rootCulprits[subject.Package]; scan.downgradeReason[subject] != "" && len(culprits) > 0 && !state.culpritSites[subject.Package][culprits[0].key].unattributed {
 			downgraded = append(downgraded, subject)
 		}
 	}
@@ -812,7 +812,7 @@ func dischargeBinaryUnreachableCulprits(ctx, analysisCtx context.Context, hasher
 	packageSubjects := map[string][]Subject{}
 	var downgraded []Subject
 	for subject := range scan.known {
-		if scan.downgradeReason[subject] != "" && len(state.rootCulprits[subject.Package]) > 0 {
+		if culprits := state.rootCulprits[subject.Package]; scan.downgradeReason[subject] != "" && len(culprits) > 0 && !state.culpritSites[subject.Package][culprits[0].key].unattributed {
 			packageSubjects[subject.Package] = append(packageSubjects[subject.Package], subject)
 			downgraded = append(downgraded, subject)
 		}

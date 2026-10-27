@@ -4196,25 +4196,33 @@ func recordEnvCarryingRegistrations(audited bool, p *packages.Package, envCarryi
 	// copy - to the carrier variables it may share backing with, so a
 	// store through the alias is a store into the carrier.
 	var localAliases map[types.Object][]*types.Var
-	// targetVars collects every dynamic-capable package variable a store
-	// target's subtree reaches - directly or through a local alias -
-	// over-approximate exactly as the mutation marking is; a spurious
-	// entry only keeps a carrier's conservative disposition.
-	targetVars := func(expr ast.Expr) []*types.Var {
+	collectCarrierVars := func(expr ast.Expr, aliases map[types.Object][]*types.Var, skipFuncLit bool) []*types.Var {
 		var vars []*types.Var
 		ast.Inspect(expr, func(n ast.Node) bool {
+			if skipFuncLit {
+				if _, isLit := n.(*ast.FuncLit); isLit {
+					return false
+				}
+			}
 			if ident, ok := n.(*ast.Ident); ok {
 				if obj, ok := resolve(ident); ok {
 					if variable, ok := carrierVar(obj); ok {
 						vars = append(vars, variable)
 					} else {
-						vars = append(vars, localAliases[obj]...)
+						vars = append(vars, aliases[obj]...)
 					}
 				}
 			}
 			return true
 		})
 		return vars
+	}
+	// targetVars collects every dynamic-capable package variable a store
+	// target's subtree reaches - directly or through a local alias -
+	// over-approximate exactly as the mutation marking is; a spurious
+	// entry only keeps a carrier's conservative disposition.
+	targetVars := func(expr ast.Expr) []*types.Var {
+		return collectCarrierVars(expr, localAliases, false)
 	}
 	unparen := func(expr ast.Expr) ast.Expr {
 		for {
@@ -4228,23 +4236,7 @@ func recordEnvCarryingRegistrations(audited bool, p *packages.Package, envCarryi
 	computeLocalAliases := func(body ast.Node) map[types.Object][]*types.Var {
 		aliased := map[types.Object][]*types.Var{}
 		sourceVars := func(expr ast.Expr) []*types.Var {
-			var vars []*types.Var
-			ast.Inspect(expr, func(n ast.Node) bool {
-				if _, isLit := n.(*ast.FuncLit); isLit {
-					return false
-				}
-				if ident, ok := n.(*ast.Ident); ok {
-					if obj, ok := resolve(ident); ok {
-						if variable, ok := carrierVar(obj); ok {
-							vars = append(vars, variable)
-						} else {
-							vars = append(vars, aliased[obj]...)
-						}
-					}
-				}
-				return true
-			})
-			return vars
+			return collectCarrierVars(expr, aliased, true)
 		}
 		bind := func(target ast.Expr, sources []*types.Var) bool {
 			if len(sources) == 0 {
@@ -7675,7 +7667,7 @@ func directCallSites(p *packages.Package) *callSiteIndex {
 					if fn, ok := info.Uses[ident].(*types.Func); ok && callable[fn] {
 						idx.calls[fn] = append(idx.calls[fn], n)
 						callFun[ident] = true
-						if n.Fun == ident {
+						if fun == ident {
 							bareCallFun[ident] = true
 							addBareRef(region, fn.Name())
 						}
@@ -9005,7 +8997,8 @@ func immutableRuntimeType(t types.Type) bool {
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
 		return false
 	}
-	return named.Obj().Pkg().Path() == "reflect" && auditset.ReflectImmutable(named.Obj().Name())
+	return named.Obj().Pkg().Path() == "reflect" && auditset.ReflectImmutable(named.Obj().Name()) ||
+		named.Obj().Pkg().Path() == "go/constant" && auditset.ConstantImmutable(named.Obj().Name())
 }
 
 // interfaceReceiver reports whether the method's receiver is an

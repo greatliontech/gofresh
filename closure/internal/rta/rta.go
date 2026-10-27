@@ -207,6 +207,10 @@ func (r *attributedRTA) visitFunc(f *ssa.Function, masks uint64) {
 				rands = rands[1:]
 			case *ssa.MakeInterface:
 				r.addRuntimeType(instr.X.Type(), masks, false)
+			case *ssa.MakeClosure:
+				if onlyDirectCallCallee(instr) {
+					rands = rands[1:]
+				}
 			}
 			for _, op := range rands {
 				if g, ok := (*op).(*ssa.Function); ok {
@@ -215,6 +219,37 @@ func (r *attributedRTA) visitFunc(f *ssa.Function, masks uint64) {
 			}
 		}
 	}
+}
+
+// onlyDirectCallCallee reports whether a closure creation is used exclusively
+// as the callee operand of direct call/go/defer instructions (where
+// StaticCallee resolves it directly) and never escapes as a first-class value.
+func onlyDirectCallCallee(mk *ssa.MakeClosure) bool {
+	if mk == nil {
+		return false
+	}
+	refs := mk.Referrers()
+	if refs == nil || len(*refs) == 0 {
+		return false
+	}
+	for _, ref := range *refs {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+		case ssa.CallInstruction:
+			c := r.Common()
+			if c == nil || c.IsInvoke() || c.Value != mk {
+				return false
+			}
+			for _, arg := range c.Args {
+				if arg == mk {
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Seeds carries per-subject facts established outside the walk — the
@@ -589,7 +624,7 @@ func attributedFingerprint(mset *types.MethodSet) uint64 {
 		if sig.TypeParams() != nil {
 			continue
 		}
-		sum := crc32.ChecksumIEEE(fmt.Appendf(space[:], "%s/%d/%d", method.Id(), sig.Params().Len(), sig.Results().Len()))
+		sum := crc32.ChecksumIEEE(fmt.Appendf(space[:0], "%s/%d/%d", method.Id(), sig.Params().Len(), sig.Results().Len()))
 		mask |= 1 << (sum % 64)
 	}
 	return mask

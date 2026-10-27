@@ -1910,11 +1910,10 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// refusal names whichever of M.Run's own effects ranks highest.
 		{fixture: "observablecallbackbad", subject: "TestConstructedMRun", reason: "reaches"},
 		{fixture: "subtestparallel", subject: "TestParallelChild", reason: "testing.Parallel"},
-		// The b.Run driver is admitted like t.Run, but a benchmark body
-		// stays startup-reachable through the harness's own benchmark
-		// driver - the pre-existing benchmark attribution shape, not the
-		// subtest driver, is what refuses here.
-		{fixture: "subtestbench", subject: "BenchmarkSubRead", reason: "startup effect"},
+		// The b.Run driver is admitted like t.Run, and the startup walk
+		// cuts non-testing dynamic collisions with (*testing.B).launch so
+		// benchmark callbacks stay attributed to subject flow.
+		{fixture: "subtestbench", subject: "BenchmarkSubRead", observable: true},
 		{fixture: "subtestbench", subject: "BenchmarkSubPure", observable: true},
 		{fixture: "fuzzsibling", subject: "FuzzDecode", reason: "testing.Fuzz"},
 		{fixture: "fuzzsibling", subject: "TestSiblingRead", observable: true},
@@ -3137,7 +3136,6 @@ func writeFile(t *testing.T, dir, name, content string) {
 	}
 }
 
-//gofresh:pure
 func BenchmarkHashFiles(b *testing.B) {
 	dir := b.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "x.go"), []byte("package p\nvar X = 1\n"), 0o644); err != nil {
@@ -3534,4 +3532,330 @@ func Outer() int {
 		t.Fatal("cached dependency anonymous closure was skipped by addFunction instead of scanning its SSA body")
 	}
 }
+
+func TestWalkCellReferrersStructAndArrayCells(t *testing.T) {
+	const src = `package p
+
+func UseStructCell() int {
+	var s struct {
+		fn    func() int
+		other any
+	}
+	s.fn = func() int { return 7 }
+	s.other = "unrelated"
+	return s.fn()
+}
+
+func UseArrayCell() int {
+	var a [1]func() int
+	a[0] = func() int { return 9 }
+	return a[0]()
+}
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "p.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := &types.Info{
+		Types:      map[ast.Expr]types.TypeAndValue{},
+		Defs:       map[*ast.Ident]types.Object{},
+		Uses:       map[*ast.Ident]types.Object{},
+		Selections: map[*ast.SelectorExpr]*types.Selection{},
+	}
+	typesPkg, err := (&types.Config{}).Check("example.com/p", fset, []*ast.File{file}, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ssaProg := ssa.NewProgram(fset, ssa.InstantiateGenerics)
+	ssaPkg := ssaProg.CreatePackage(typesPkg, []*ast.File{file}, info, true)
+	ssaPkg.Build()
+	fp := &freshParamAnalysis{selectionAudited: true}
+
+	for _, fnName := range []string{"UseStructCell", "UseArrayCell"} {
+		fn := ssaPkg.Func(fnName)
+		if fn == nil {
+			t.Fatalf("missing function %s", fnName)
+		}
+		var computedSite ssa.CallInstruction
+		for _, b := range fn.Blocks {
+			for _, instr := range b.Instrs {
+				site, ok := instr.(ssa.CallInstruction)
+				if ok && site.Common().StaticCallee() == nil {
+					computedSite = site
+				}
+			}
+		}
+		if computedSite == nil {
+			t.Fatalf("missing computed call in %s", fnName)
+		}
+		targets, ok := closedDynamicTargets(computedSite.Common().Value, fp)
+		if !ok || len(targets) != 1 {
+			t.Fatalf("%s closedDynamicTargets = (%v, %v), want 1 closed target", fnName, targets, ok)
+		}
+	}
+}
+
+func TestStandardSentinelGlobalsAndContextObservability(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
+	dir := t.TempDir()
+	writeFile := func(rel, content string) {
+		t.Helper()
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("go.mod", "module example.com/ctxdiscard\n\ngo 1.24\n")
+	writeFile("service_test.go", `package ctxdiscard
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"testing"
+)
+
+func runService(ctx context.Context, w io.Writer) error {
+	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return ctx.Err()
+	}
+	if _, err := fmt.Fprintln(w, "pkt"); err != nil {
+		return err
+	}
+	_, err := w.Write([]byte("ok"))
+	return err
+}
+
+func TestServiceWithCancelAndDiscard(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := runService(ctx, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func BenchmarkSubService(b *testing.B) {
+	b.Run("sub", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			if err := runService(context.TODO(), io.Discard); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+`)
+	h, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pkg = "example.com/ctxdiscard"
+	subjects := []Subject{
+		{Package: pkg, Symbol: "runService"},
+		{Package: pkg, Symbol: "TestServiceWithCancelAndDiscard"},
+		{Package: pkg, Symbol: "BenchmarkSubService"},
+	}
+	got, err := h.ComputeObservabilityBatch(subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range subjects {
+		obs := got[s]
+		if !obs.Observable {
+			t.Errorf("%s.%s Observable = false (Reason = %q), want true", s.Package, s.Symbol, obs.Reason)
+		}
+	}
+
+	// Mutating io.Discard in the program must invalidate the sentinel-global
+	// admission and fail closed.
+	writeFile("mutate_test.go", `package ctxdiscard
+
+import (
+	"io"
+	"os"
+	"testing"
+)
+
+type fileWriter struct{}
+
+func (fileWriter) Write(p []byte) (int, error) {
+	return len(p), os.WriteFile("out.txt", p, 0o600)
+}
+
+func TestMutatedDiscardRefused(t *testing.T) {
+	io.Discard = fileWriter{}
+	if err := runService(nil, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+}
+`)
+	hMut, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotMut, err := hMut.ComputeObservabilityBatch([]Subject{{Package: pkg, Symbol: "TestServiceWithCancelAndDiscard"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs := gotMut[Subject{Package: pkg, Symbol: "TestServiceWithCancelAndDiscard"}]; obs.Observable {
+		t.Fatalf("TestServiceWithCancelAndDiscard Observable = true when sibling mutates io.Discard, want false")
+	}
+}
+
+func TestStructReceiverEnumerationAndSha1Pacing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
+	dir := t.TempDir()
+	writeFile := func(rel, content string) {
+		t.Helper()
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("go.mod", "module example.com/operr\n\ngo 1.24\n")
+	writeFile("operr.go", `package operr
+
+import (
+	"context"
+	"crypto/sha1"
+	"crypto/sha256"
+	"fmt"
+)
+
+type CanceledError struct {
+	Subject   string
+	SignalErr error
+}
+
+func (e *CanceledError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	return "canceled: " + e.Subject
+}
+
+func (e *CanceledError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.SignalErr
+}
+
+type CallbackFailedError struct {
+	Callback string
+	Cause    error
+}
+
+func (e *CallbackFailedError) Error() string {
+	return fmt.Sprintf("callback %q failed: %v", e.Callback, e.Cause)
+}
+
+func CheckCancel(ctx context.Context, subject string) error {
+	if ctx == nil {
+		panic("nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return &CanceledError{Subject: subject, SignalErr: err}
+	}
+	return nil
+}
+
+func SumSHA1(data []byte) [20]byte {
+	h := sha1.New()
+	_, _ = h.Write(data)
+	var out [20]byte
+	copy(out[:], h.Sum(nil))
+	return out
+}
+
+func SumSHA256(data []byte) [32]byte {
+	h := sha256.New()
+	_, _ = h.Write(data)
+	var out [32]byte
+	copy(out[:], h.Sum(nil))
+	return out
+}
+`)
+	writeFile("operr_test.go", `package operr
+
+import (
+	"context"
+	"errors"
+	"testing"
+)
+
+func TestCheckCancelAndErrorMethods(t *testing.T) {
+	if err := CheckCancel(context.Background(), "op"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := CheckCancel(ctx, "op")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+	if err.Error() == "" {
+		t.Fatal("empty error string")
+	}
+	cbErr := &CallbackFailedError{Callback: "visit", Cause: errors.New("boom")}
+	if cbErr.Error() == "" {
+		t.Fatal("empty callback error string")
+	}
+	defer func() {
+		if r := recover(); r != "nil context" {
+			t.Fatalf("recover = %v, want nil context", r)
+		}
+	}()
+	_ = CheckCancel(nil, "op")
+}
+
+func BenchmarkSumSHA1(b *testing.B) {
+	payload := []byte("hello")
+	b.ReportAllocs()
+	b.SetBytes(int64(len(payload)))
+	for b.Loop() {
+		_ = SumSHA1(payload)
+		_ = SumSHA256(payload)
+	}
+}
+`)
+	h, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const pkg = "example.com/operr"
+	subjects := []Subject{
+		{Package: pkg, Symbol: "CanceledError.Error"},
+		{Package: pkg, Symbol: "CanceledError.Unwrap"},
+		{Package: pkg, Symbol: "CallbackFailedError.Error"},
+		{Package: pkg, Symbol: "CheckCancel"},
+		{Package: pkg, Symbol: "SumSHA1"},
+		{Package: pkg, Symbol: "SumSHA256"},
+		{Package: pkg, Symbol: "TestCheckCancelAndErrorMethods"},
+		{Package: pkg, Symbol: "BenchmarkSumSHA1"},
+	}
+	got, err := h.ComputeObservabilityBatch(subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range subjects {
+		obs := got[s]
+		if !obs.Observable {
+			t.Errorf("%s.%s Observable = false (Reason = %q), want true", s.Package, s.Symbol, obs.Reason)
+		}
+	}
+}
+
+
 

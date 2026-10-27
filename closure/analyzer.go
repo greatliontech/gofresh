@@ -527,8 +527,20 @@ func (a *tier2Analyzer) addFunction(fn *ssa.Function) {
 		// An anonymous function is its parent's content and its own
 		// body: a drained frame's nested closure executes whenever the
 		// frame's value is called, so its body is scanned here — the
-		// parent alone would leave its effects unseen.
-		a.addFunction(parent)
+		// parent alone would leave its effects unseen. A parent frame is
+		// enqueued only when RTA or startup flow reached it; an anonymous
+		// closure returned by a closed helper can execute after its
+		// parent returned without re-entering the parent's unreached body.
+		if a.rtaReach[parent] || initFlowFrame(parent) {
+			a.addFunction(parent)
+		} else if idx.cache {
+			if fn.Syntax() != nil {
+				a.markPackage(idx)
+				a.scanNodeRefs(idx, fn.Syntax())
+			} else {
+				a.addFunction(parent)
+			}
+		}
 		a.scanFunction(fn)
 	}
 }
@@ -676,7 +688,9 @@ func (a *tier2Analyzer) scanValue(callerIdx *pkgIndex, v ssa.Value) {
 			// xml.HTMLEntity) - exempting them would unsound the
 			// audited set.
 			if callerIdx != nil && !callerIdx.std && obj.Pkg() != nil && isStdImportPath(obj.Pkg().Path()) {
-				a.recordExternalEffect(symbolExternalEffect(externalEffectUnauditedStandard, obj.Pkg().Path(), obj.Name(), "reaches standard global "+obj.Pkg().Path()+"."+obj.Name()))
+				if !(a.h.SelectionAudited() && isUnmutatedStandardSentinelGlobalAny(x)) {
+					a.recordExternalEffect(symbolExternalEffect(externalEffectUnauditedStandard, obj.Pkg().Path(), obj.Name(), "reaches standard global "+obj.Pkg().Path()+"."+obj.Name()))
+				}
 			}
 			a.enqueueObject(obj)
 		}
@@ -911,7 +925,7 @@ func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool)
 				if !fromRTA || observableFileMethod(fn) {
 					return false
 				}
-				if !isSourceOnlyStandardPackage(a.h.SelectionAudited(), idx.path) && !auditedStandardCallee(a.h.SelectionAudited(), idx.path, functionSymbolName(fn), fn) {
+				if !isAuditedStandardOrDelegatePackage(a.h.SelectionAudited(), idx.path) && !auditedStandardCallee(a.h.SelectionAudited(), idx.path, functionSymbolName(fn), fn) {
 					return false
 				}
 				if _, classB := classBEffectForFunction(fn); classB {

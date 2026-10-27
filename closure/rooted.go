@@ -231,6 +231,9 @@ func (h *Hasher) rootedGroup(ctx context.Context, group *packageBatch, bp *batch
 			results[subject] = inv
 			computed[subject.Symbol] = inv
 		}
+		if memoScope := h.scope.Rooted(); memoScope != "" && group.closureHash != "" && len(computed) > 0 && ctx.Err() == nil {
+			storeRootedMemo(memoScope, group.closureHash, computed)
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("closure: analysis cancelled: %w", err)

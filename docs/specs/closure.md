@@ -499,7 +499,9 @@ generic receivers included, provided the call site's instantiated result types
 each hand out no mutable reach or have checked immutable-implementation claims
 (for reflect.Type this requires runtime-canonical descriptors never written
 after construction, and for reflect.TypeOf a separately checked pure-constructor
-claim at the effect classification tiers); a call to any unproven,
+claim at the effect classification tiers; for go/constant.Value this requires
+that every runtime implementation in go/constant is an unexported value or
+pointer type with no exported mutation surface); a call to any unproven,
 unresolvable, or interface-dispatched method, and any method VALUE bind, keeps
 the fail-closed mark.
 
@@ -1302,10 +1304,14 @@ where observability refuses exactly as for any
 open subject world. A non-generic function subject whose ordinary
 signature carries dynamic reach closes the same way a bounded generic
 does — by enumeration, never by signature shape alone (a
-receiver-bearing subject keeps its signature-shaped open world: a
-method's interface invocability leaves no reference the scan can see —
-a pointer-receiver invoke synthesizes no wrapper and takes no
-address): it analyzes closed
+receiver-bearing subject on a first-party named struct closes only when
+its non-receiver parameters supply no dynamic reach and either its
+receiver supplies no dynamic reach or every dynamic-reaching field it
+loads is populated exclusively by closed stores across the whole
+analyzed program with no unjudged whole-struct or reflective write; any
+other receiver-bearing subject keeps its signature-shaped open world, as
+a method's interface invocability leaves no reference the scan can see):
+it analyzes closed
 exactly when every reference to it in the whole analyzed program is a
 direct static call from a body the enumeration can judge and, at every
 such site, each argument in
@@ -1314,8 +1320,9 @@ a dynamic-reaching position closes in the calling function's own frame
 cross-boundary crossing — the caller's parameters, loads, and call
 results refuse, except a load from a closed cell: a local allocation whose
 every use, across the closures that capture it, is a store of a closed
-value, a load, or a closure creation binding it — the recursive local
-closure's own cell), in which case the sites' closed function values root
+value, a load, a field or index address over the cell whose referrers
+likewise satisfy the closed-cell rule, or a closure creation binding it —
+the recursive local closure's own cell), in which case the sites' closed function values root
 the reachability walk under the subject's provenance and their
 materialized concrete types enter the runtime-type walk, so everything
 the caller can actually hand the subject is analyzed view content whose
@@ -1532,6 +1539,18 @@ The following families state the properties such derivations must establish:
 - Encoding operations such as base32 and base64 must establish computation
   over supplied data; io-interface wrappers retain the effects of their
   concrete operands, and exported encoding variables require state analysis.
+- Deterministic context construction, value propagation, and cancellation
+  (`context.Background`, `context.TODO`, `context.WithCancel`,
+  `context.WithCancelCause`, `context.WithoutCancel`, `context.WithValue`,
+  `context.Cause`, the `Context` read methods `Deadline`, `Done`, `Err`,
+  `Value`, and the `Canceled` and `DeadlineExceeded` sentinel errors) must
+  establish process-local state over caller-supplied parent contexts, keys,
+  values, and causes alone, with wall-clock timer constructors (`WithDeadline`,
+  `WithTimeout`, and their `*Cause` variants) and asynchronous cancellation
+  callbacks (`AfterFunc`) retaining their refusals, and sentinel globals
+  (`io.Discard`, `context.Canceled`, `context.DeadlineExceeded`) admitted only
+  when no code in the analyzed program writes or takes their address outside
+  package initialization.
 
 **REQ-closure-observability-entropy** (invariant): Entropy operations, including crypto/rand's Read, Text, Prime and Int and
 unseeded math/rand sources, MUST retain their input classification unless a checked
@@ -1676,9 +1695,10 @@ writer-first print family (Fprint, Fprintf, Fprintln) MUST be
 Sprint-equivalent value computation only when checked formatting semantics hold
 and the writer
 operand provably pins every dynamic type it can carry to a sink with a checked
-in-memory-write claim — including `*bytes.Buffer` or `*strings.Builder` only
+in-memory-write or no-op discard claim — including `*bytes.Buffer`,
+`*strings.Builder`, or an unmutated `io.Discard` sentinel global only
 when the selected implementation proves that writes append to process memory
-and acquire nothing ambient — judged by a closed-value
+(or discard without effect) and acquire nothing ambient — judged by a closed-value
 walk under the dispatch admissions' discipline: the pinning MakeInterface's
 concrete type decides, subject-attributed parameter crossing included, and
 startup flow, carrying no subject attribution, closes locally constructed
@@ -1897,8 +1917,14 @@ every other target's body classifies its own effects into the subject
 exactly as reachable content always does),
 AND the dispatch operand's dynamic types are fully determined by
 the subject's own flow — the operand derives from local construction,
+from an unmutated standard-library sentinel global (`io.Discard`,
+`context.Canceled`, `context.DeadlineExceeded`) whose package initializer
+stores a carrier-free concrete value that no code in the analyzed program
+writes or takes the address of outside package initialization,
 from the return expressions of a static call to an audited
-standard-library function whose arguments carry no dynamic dispatch, or
+standard-library function or a reached non-recursive, non-variadic,
+non-dynamically-targeted in-module function whose dynamic-carrying arguments
+themselves close under the closed-value walk, or
 from a parameter whose function is not dynamically targeted, closes over
 nothing, is not variadic, and has at least one subject-attributed call
 site, every such site feeding a subject-closed value (zero enumerable

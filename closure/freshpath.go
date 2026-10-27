@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
+	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
+	"github.com/greatliontech/gofresh/internal/auditset"
 )
 
 func observableCallEffect(audited bool, effect externalEffect, call *ssa.CallCommon, site ssa.CallInstruction, fp *freshParamAnalysis) bool {
@@ -1101,7 +1103,7 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 		defer delete(seen, value)
 	}
 	r := walkDynamicValueUncached(value, collect, seen, done, fp)
-	if !collecting {
+	if !collecting && done != nil {
 		done[value] = r
 	}
 	return r
@@ -1224,6 +1226,27 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		if v.Op != token.MUL {
 			return false
 		}
+		if g, ok := v.X.(*ssa.Global); ok && fp != nil && fp.selectionAudited && isUnmutatedStandardSentinelGlobalAny(g) {
+			if !collecting {
+				return true
+			}
+			if collect.types != nil {
+				return sentinelGlobalConcreteTypes(g, collect.types)
+			}
+			return false
+		}
+		if fa, ok := v.X.(*ssa.FieldAddr); ok && fp != nil && fp.enumRoot != nil && len(fp.enumRoot.Params) > 0 && fa.X == fp.enumRoot.Params[0] {
+			stores := fp.enumFieldStores[fa.Field]
+			if len(stores) == 0 {
+				return false
+			}
+			for _, sv := range stores {
+				if !recurse(sv) {
+					return false
+				}
+			}
+			return true
+		}
 		cell := cellOf(v.X, map[ssa.Value]bool{})
 		if cell == nil {
 			return false
@@ -1235,41 +1258,183 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 			seen[cell] = true
 			defer delete(seen, cell)
 		}
-		return walkCellReferrers(cell, map[ssa.Value]bool{}, recurse)
+		return walkLoadCellReferrers(v.X, recurse)
 	default:
 		return false
 	}
 }
 
+func isUnmutatedStandardSentinelGlobalAny(g *ssa.Global) bool {
+	if g == nil || g.Pkg == nil || g.Pkg.Pkg == nil {
+		return false
+	}
+	pkgPath := g.Pkg.Pkg.Path()
+	if !auditset.StandardSentinelGlobal(pkgPath, g.Name()) {
+		return false
+	}
+	return isUnmutatedStandardSentinelGlobal(g, pkgPath, g.Name())
+}
+
+func isUnmutatedStandardSentinelGlobal(g *ssa.Global, wantPkg, wantName string) bool {
+	if g == nil || g.Pkg == nil || g.Pkg.Pkg == nil || g.Pkg.Prog == nil || g.Pkg.Pkg.Path() != wantPkg || g.Name() != wantName {
+		return false
+	}
+	var space [16]*ssa.Value
+	for fn := range ssautil.AllFunctions(g.Pkg.Prog) {
+		if fn == nil {
+			continue
+		}
+		for _, b := range fn.Blocks {
+			for _, instr := range b.Instrs {
+				mentions := false
+				for _, op := range instr.Operands(space[:0]) {
+					if op != nil && *op == g {
+						mentions = true
+						break
+					}
+				}
+				if !mentions {
+					continue
+				}
+				switch r := instr.(type) {
+				case *ssa.DebugRef:
+				case *ssa.UnOp:
+					if r.Op != token.MUL || r.X != g {
+						return false
+					}
+				case *ssa.Store:
+					if r.Addr != g || fn.Pkg != g.Pkg || !initFlowFrame(fn) {
+						return false
+					}
+				default:
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+func sentinelGlobalConcreteTypes(g *ssa.Global, out map[types.Type]bool) bool {
+	if g == nil || g.Pkg == nil {
+		return false
+	}
+	initFn := g.Pkg.Func("init")
+	if initFn == nil {
+		return false
+	}
+	found := false
+	for _, b := range initFn.Blocks {
+		for _, instr := range b.Instrs {
+			store, ok := instr.(*ssa.Store)
+			if !ok || store.Addr != g {
+				continue
+			}
+			if mi, ok := store.Val.(*ssa.MakeInterface); ok && mi.X != nil {
+				out[mi.X.Type()] = true
+				found = true
+			} else if call, ok := store.Val.(*ssa.Call); ok && call.Common() != nil {
+				if callee := call.Common().StaticCallee(); callee != nil {
+					for _, cb := range callee.Blocks {
+						for _, cinstr := range cb.Instrs {
+							if ret, ok := cinstr.(*ssa.Return); ok && len(ret.Results) == 1 {
+								if mi, ok := ret.Results[0].(*ssa.MakeInterface); ok && mi.X != nil {
+									out[mi.X.Type()] = true
+									found = true
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return found
+}
+
+func isAuditedStandardOrDelegatePackage(audited bool, pkgPath string) bool {
+	return isSourceOnlyStandardPackage(audited, pkgPath) || (audited && pureDelegatePackages[pkgPath])
+}
+
+func liveCalleeBlocks(fn *ssa.Function) []*ssa.BasicBlock {
+	if fn == nil || len(fn.Blocks) == 0 {
+		return nil
+	}
+	seen := make(map[*ssa.BasicBlock]bool, len(fn.Blocks))
+	queue := []*ssa.BasicBlock{fn.Blocks[0]}
+	seen[fn.Blocks[0]] = true
+	for i := 0; i < len(queue); i++ {
+		b := queue[i]
+		if len(b.Instrs) > 0 {
+			if ifInstr, ok := b.Instrs[len(b.Instrs)-1].(*ssa.If); ok && len(b.Succs) == 2 {
+				if c, ok := ifInstr.Cond.(*ssa.Const); ok && c.Value != nil && c.Value.Kind() == constant.Bool {
+					succ := b.Succs[1]
+					if constant.BoolVal(c.Value) {
+						succ = b.Succs[0]
+					}
+					if !seen[succ] {
+						seen[succ] = true
+						queue = append(queue, succ)
+					}
+					continue
+				}
+			}
+		}
+		for _, succ := range b.Succs {
+			if !seen[succ] {
+				seen[succ] = true
+				queue = append(queue, succ)
+			}
+		}
+	}
+	if fn.Recover != nil && !seen[fn.Recover] {
+		queue = append(queue, fn.Recover)
+	}
+	return queue
+}
+
 // staticCallResultDynamicValue steps through a static call's returned SSA
 // expressions when the callee belongs to the audited standard-library
-// surface and none of the call's arguments can carry dynamic dispatch
-// (functions or interfaces). This closes standard iterator constructors
-// (strings.SplitSeq) and pure constructors returning interfaces
-// (crypto/sha256.New, strings.NewReader, bytes.NewReader) without
-// stepping through arbitrary user calls (REQ-closure-observability-dispatch).
+// surface or is a reached in-module function whose body is already scanned
+// in the subject's reachability cone, and every dynamic-carrying argument is
+// itself closed under the walk. This closes standard iterator constructors
+// (strings.SplitSeq), pure constructors returning interfaces (crypto/sha256.New,
+// strings.NewReader, bytes.NewReader), timerless context constructors
+// (context.Background, context.WithCancel, context.WithValue,
+// context.WithoutCancel), and reached in-module iterator/constructor helpers
+// (REQ-closure-observability-dispatch).
 func staticCallResultDynamicValue(call *ssa.Call, tupleIndex int, collect *dynamicValueCollector, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
 	if fp == nil || !fp.selectionAudited || call == nil || call.Common() == nil || call.Common().IsInvoke() {
 		return false
 	}
-	if fp.functions != nil && !fp.functions[call.Parent()] && !fp.isStdFunc(call.Parent()) {
-		return false
-	}
 	callee := call.Common().StaticCallee()
-	if callee == nil || callee.Synthetic != "" || len(callee.Blocks) == 0 || len(callee.FreeVars) != 0 {
+	if callee == nil || (callee.Synthetic != "" && callee.Origin() == nil) || len(callee.Blocks) == 0 || len(callee.FreeVars) != 0 {
 		return false
 	}
 	pkgPath := funcPkgPath(callee)
-	if !fp.isStdFunc(callee) || (!isSourceOnlyStandardPackage(fp.selectionAudited, pkgPath) && !auditedStandardCallee(fp.selectionAudited, pkgPath, functionSymbolName(callee), callee)) {
+	if fp.isStdFunc(callee) {
+		if !isAuditedStandardOrDelegatePackage(fp.selectionAudited, pkgPath) && !auditedStandardCallee(fp.selectionAudited, pkgPath, functionSymbolName(callee), callee) {
+			return false
+		}
+	} else if !fp.functions[callee] || callee == fp.enumRoot || fp.dynamic[callee] || callee.Signature.Variadic() || propertyHarnessPath(pkgPath) || callee.Recover != nil {
 		return false
 	}
 	for _, arg := range call.Common().Args {
-		if arg == nil || typeMayCarryDynamic(fp.selectionAudited, arg.Type(), map[types.Type]bool{}) {
+		if arg == nil {
 			return false
+		}
+		if typeMayCarryDynamic(fp.selectionAudited, arg.Type(), map[types.Type]bool{}) {
+			argSeen, argDone := seen, done
+			if collect.collecting() {
+				argSeen, argDone = map[ssa.Value]bool{}, map[ssa.Value]bool{}
+			}
+			if !walkDynamicValue(arg, nil, argSeen, argDone, fp) {
+				return false
+			}
 		}
 	}
 	hasReturn := false
-	for _, block := range callee.Blocks {
+	for _, block := range liveCalleeBlocks(callee) {
 		for _, instr := range block.Instrs {
 			ret, ok := instr.(*ssa.Return)
 			if !ok {
@@ -1304,6 +1469,10 @@ func cellOf(addr ssa.Value, seen map[ssa.Value]bool) *ssa.Alloc {
 	switch a := addr.(type) {
 	case *ssa.Alloc:
 		return a
+	case *ssa.FieldAddr:
+		return cellOf(a.X, seen)
+	case *ssa.IndexAddr:
+		return cellOf(a.X, seen)
 	case *ssa.FreeVar:
 		if seen[a] {
 			return nil
@@ -1349,6 +1518,133 @@ func closureCreations(fn *ssa.Function) []*ssa.MakeClosure {
 	return creations
 }
 
+// walkLoadCellReferrers walks every referrer of the local cell backing loadAddr,
+// failing closed on any address escape or non-zero whole-struct overwrite when
+// loadAddr selects a specific field, and applying walkVal only to stores that
+// can populate loadAddr.
+func walkLoadCellReferrers(loadAddr ssa.Value, walkVal func(ssa.Value) bool) bool {
+	cell := cellOf(loadAddr, map[ssa.Value]bool{})
+	if cell == nil {
+		return false
+	}
+	if fa, ok := loadAddr.(*ssa.FieldAddr); ok {
+		if _, isFV := fa.X.(*ssa.FreeVar); fa.X == cell || isFV {
+			return walkCellFieldReferrers(cell, fa.Field, map[ssa.Value]bool{}, walkVal)
+		}
+	}
+	return walkCellReferrers(cell, map[ssa.Value]bool{}, walkVal)
+}
+
+func walkCellFieldReferrers(cell *ssa.Alloc, fieldIdx int, visited map[ssa.Value]bool, walkVal func(ssa.Value) bool) bool {
+	if visited[cell] {
+		return true
+	}
+	visited[cell] = true
+	refs := cell.Referrers()
+	if refs == nil {
+		return true
+	}
+	noEscapeOnly := func(ssa.Value) bool { return true }
+	for _, ref := range *refs {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+		case *ssa.Store:
+			if r.Addr != cell {
+				return false
+			}
+			c, isZero := r.Val.(*ssa.Const)
+			if !isZero || c.Value != nil {
+				return false
+			}
+		case *ssa.UnOp:
+			if r.Op != token.MUL || r.X != cell {
+				return false
+			}
+		case *ssa.FieldAddr:
+			if r.X != cell {
+				return false
+			}
+			cb := noEscapeOnly
+			if r.Field == fieldIdx {
+				cb = walkVal
+			}
+			if !walkCellReferrers(r, visited, cb) {
+				return false
+			}
+		case *ssa.MakeClosure:
+			fn, ok := r.Fn.(*ssa.Function)
+			if !ok {
+				return false
+			}
+			for i, b := range r.Bindings {
+				if b == cell {
+					if i >= len(fn.FreeVars) || !walkFreeVarFieldReferrers(fn.FreeVars[i], fieldIdx, visited, walkVal) {
+						return false
+					}
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func walkFreeVarFieldReferrers(fv *ssa.FreeVar, fieldIdx int, visited map[ssa.Value]bool, walkVal func(ssa.Value) bool) bool {
+	if visited[fv] {
+		return true
+	}
+	visited[fv] = true
+	refs := fv.Referrers()
+	if refs == nil {
+		return true
+	}
+	noEscapeOnly := func(ssa.Value) bool { return true }
+	for _, ref := range *refs {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+		case *ssa.Store:
+			if r.Addr != fv {
+				return false
+			}
+			c, isZero := r.Val.(*ssa.Const)
+			if !isZero || c.Value != nil {
+				return false
+			}
+		case *ssa.UnOp:
+			if r.Op != token.MUL || r.X != fv {
+				return false
+			}
+		case *ssa.FieldAddr:
+			if r.X != fv {
+				return false
+			}
+			cb := noEscapeOnly
+			if r.Field == fieldIdx {
+				cb = walkVal
+			}
+			if !walkCellReferrers(r, visited, cb) {
+				return false
+			}
+		case *ssa.MakeClosure:
+			fn, ok := r.Fn.(*ssa.Function)
+			if !ok {
+				return false
+			}
+			for i, b := range r.Bindings {
+				if b == fv {
+					if i >= len(fn.FreeVars) || !walkFreeVarFieldReferrers(fn.FreeVars[i], fieldIdx, visited, walkVal) {
+						return false
+					}
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // walkCellReferrers walks every referrer of a local cell (and of every free
 // variable a closure binds to it, recursively), applying walkVal to each
 // stored value and failing closed on any address escape.
@@ -1370,6 +1666,14 @@ func walkCellReferrers(alias ssa.Value, visited map[ssa.Value]bool, walkVal func
 			}
 		case *ssa.UnOp:
 			if r.Op != token.MUL || r.X != alias {
+				return false
+			}
+		case *ssa.FieldAddr:
+			if r.X != alias || !walkCellReferrers(r, visited, walkVal) {
+				return false
+			}
+		case *ssa.IndexAddr:
+			if r.X != alias || !walkCellReferrers(r, visited, walkVal) {
 				return false
 			}
 		case *ssa.MakeClosure:
@@ -1452,11 +1756,12 @@ func closedInvokeTargets(site ssa.CallInstruction, fp *freshParamAnalysis) (map[
 			return nil, false
 		}
 		if fp.isStdFunc(declFn) {
-			if len(sel.Index()) > 1 {
-				return nil, false
-			}
 			audited := fp != nil && fp.selectionAudited
 			if typeMayCarryDynamic(audited, ct, map[types.Type]bool{}) {
+				return nil, false
+			}
+			declPkg := funcPkgPath(declFn)
+			if !isAuditedStandardOrDelegatePackage(audited, declPkg) && !auditedStandardCallee(audited, declPkg, functionSymbolName(declFn), declFn) {
 				return nil, false
 			}
 		}
@@ -1622,6 +1927,22 @@ func inMemoryFormattedSinkUncached(value ssa.Value, seen, done map[ssa.Value]boo
 			}
 		}
 		return true
+	case *ssa.UnOp:
+		if v.Op != token.MUL {
+			return false
+		}
+		if g, ok := v.X.(*ssa.Global); ok && fp != nil && fp.selectionAudited && isUnmutatedStandardSentinelGlobal(g, "io", "Discard") {
+			return true
+		}
+		if cellOf(v.X, map[ssa.Value]bool{}) == nil {
+			return false
+		}
+		wrote := false
+		ok := walkLoadCellReferrers(v.X, func(val ssa.Value) bool {
+			wrote = true
+			return inMemoryFormattedSink(val, seen, done, fp)
+		})
+		return ok && wrote
 	default:
 		return false
 	}

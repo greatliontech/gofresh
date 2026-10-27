@@ -35,11 +35,13 @@ type freshParamAnalysis struct {
 	// closed-value walks cross the root's own parameters to these
 	// sites. They never join callers — the fresh-path capability
 	// fixpoint stays subject-internal.
-	enumRoot  *ssa.Function
-	enumSites []ssa.CallInstruction
+	enumRoot        *ssa.Function
+	enumSites       []ssa.CallInstruction
+	enumFieldStores map[int][]ssa.Value
 
-	argFresh map[freshParamKey]bool
-	usesOK   map[freshParamKey]bool
+	argFresh          map[freshParamKey]bool
+	usesOK            map[freshParamKey]bool
+	unmutatedSentinel map[*ssa.Global]bool
 	// propertyHarnessAudited carries the program-level audit verdict:
 	// the closed-value walk's harness arms consult it so no admission
 	// outlives the audit.
@@ -80,9 +82,10 @@ func newFreshParamAnalysis(audited bool, reach attributedReachability) *freshPar
 		usesOK:                 map[freshParamKey]bool{},
 		propertyHarnessAudited: reach.propertyHarnessAudited,
 	}
-	if len(reach.enumeratedRootSites) > 0 {
+	if len(reach.enumeratedRootSites) > 0 || len(reach.enumeratedFieldStores) > 0 {
 		fp.enumRoot = reach.subjectRoot
 		fp.enumSites = reach.enumeratedRootSites
+		fp.enumFieldStores = reach.enumeratedFieldStores
 	}
 	for fn := range reach.functions {
 		for _, block := range fn.Blocks {

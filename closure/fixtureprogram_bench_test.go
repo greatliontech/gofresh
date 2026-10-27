@@ -10,8 +10,6 @@ import (
 // Each iteration owns a new generation, each target a fresh SSA program. Neither
 // arm computes or serves proof memos. Typed-graph retention lasts one iteration;
 // allocation totals are not a measurement of its live or peak resident memory.
-//
-//gofresh:pure
 func BenchmarkFixturePreparation(b *testing.B) {
 	const base = "github.com/greatliontech/gofresh/closure/fixtures/"
 	paths := []string{base + "observable", base + "external", base + "initfile", base + "rootcollision/bench"}
