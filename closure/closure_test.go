@@ -3388,6 +3388,7 @@ func writeFile(t *testing.T, dir, name, content string) {
 	}
 }
 
+//gofresh:pure
 func BenchmarkHashFiles(b *testing.B) {
 	dir := b.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "x.go"), []byte("package p\nvar X = 1\n"), 0o644); err != nil {
