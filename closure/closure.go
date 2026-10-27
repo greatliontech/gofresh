@@ -19,6 +19,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"slices"
@@ -941,22 +944,21 @@ func cgoEscapingIncludeWith(p *listPkg, files []string, read func(string) (fileB
 			return "", fmt.Errorf("closure: read %s: %w", path, err)
 		}
 		content := fb.content
-		goFile := strings.EqualFold(filepath.Ext(rel), ".go")
 		text := string(content)
-		if goFile {
-			text = stripGoCgoCommentMarkers(text)
-			goFile = false
+		if strings.EqualFold(filepath.Ext(rel), ".go") {
+			preamble, err := goCgoPreamble(content)
+			if err != nil {
+				return "", fmt.Errorf("closure: parse %s: %w", path, err)
+			}
+			text = preamble
 		}
 		text = spliceCPreprocessorLines(text)
-		if cgoNativeFileHasRawString(rel, text) {
+		lines, hasRawString := stripCComments(text)
+		if hasRawString {
 			return "", fmt.Errorf("closure: unsupported cgo raw string in %s", path)
 		}
-		lines := strings.Split(text, "\n")
-		if !goFile {
-			lines = stripCBlockComments(lines)
-		}
 		for _, line := range lines {
-			include, quoted, ok := cgoIncludeDirective(line, goFile)
+			include, quoted, ok := cgoIncludeDirective(line)
 			if !ok {
 				continue
 			}
@@ -1002,7 +1004,7 @@ func cgoEscapingIncludeWith(p *listPkg, files []string, read func(string) (fileB
 					return realParent, nil
 				}
 				if _, err := os.Stat(resolved); err == nil {
-					if relResolved, err := filepath.Rel(p.Dir, resolved); err == nil && !isNativeIncludeSource(relResolved) {
+					if relResolved, err := filepath.Rel(p.Dir, resolved); err == nil && (!isNativeIncludeSource(relResolved) || strings.EqualFold(filepath.Ext(relResolved), ".go")) {
 						return "", fmt.Errorf("closure: unsupported cgo include source %s", include)
 					}
 					found = true
@@ -1026,17 +1028,50 @@ func spliceCPreprocessorLines(text string) string {
 	return strings.ReplaceAll(text, "\\\n", "")
 }
 
-func stripGoCgoCommentMarkers(text string) string {
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
-		line = strings.TrimSpace(strings.TrimPrefix(line, "//"))
-		line = strings.TrimSpace(strings.TrimPrefix(line, "/*"))
-		line = strings.TrimSpace(strings.TrimPrefix(line, "*"))
-		line = strings.TrimSpace(strings.TrimSuffix(line, "*/"))
-		lines[i] = line
+func goCgoPreamble(content []byte) (string, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", content, parser.ImportsOnly|parser.ParseComments)
+	if err != nil {
+		return "", err
 	}
-	return strings.Join(lines, "\n")
+	var b strings.Builder
+	for _, decl := range f.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.IMPORT {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			imp, ok := spec.(*ast.ImportSpec)
+			if !ok || imp.Path == nil || imp.Path.Value != `"C"` {
+				continue
+			}
+			if imp.Doc != nil {
+				appendCgoCommentGroup(&b, imp.Doc)
+			} else if len(gen.Specs) == 1 {
+				appendCgoCommentGroup(&b, gen.Doc)
+			}
+		}
+	}
+	return b.String(), nil
+}
+
+func appendCgoCommentGroup(b *strings.Builder, cg *ast.CommentGroup) {
+	if cg == nil {
+		return
+	}
+	for _, c := range cg.List {
+		text := c.Text
+		if after, ok := strings.CutPrefix(text, "//"); ok {
+			b.WriteString(after)
+			b.WriteByte('\n')
+			continue
+		}
+		if after, ok := strings.CutPrefix(text, "/*"); ok {
+			after = strings.TrimSuffix(after, "*/")
+			b.WriteString(after)
+		}
+	}
+	b.WriteByte('\n')
 }
 
 func isNativeIncludeSource(rel string) bool {
@@ -1048,19 +1083,46 @@ func isNativeIncludeSource(rel string) bool {
 	return true
 }
 
-func cgoNativeFileHasRawString(_ string, text string) bool {
-	return strings.Contains(text, "R\"")
+// cgoNativeFileHasRawString reports whether spliced C/C++/Objective-C source
+// opens a C++11 raw string literal (R"...", u8R"...", uR"...", UR"...", or
+// LR"..."). Raw string bodies can embed unescaped comment markers across lines
+// that would desynchronize stripCComments, so cgoEscapingInclude fails closed
+// when one is present (REQ-closure-coverage); comments, ordinary string
+// literals, and character literals are tracked first so R" inside comments or
+// at the closing quote of an ordinary string ending in R is not mistaken for a
+// raw-string opener.
+func cgoNativeFileHasRawString(text string) bool {
+	_, raw := stripCComments(text)
+	return raw
 }
 
-func cgoIncludeDirective(line string, goFile bool) (string, bool, bool) {
-	line = strings.TrimSpace(line)
-	if goFile {
-		line = strings.TrimSpace(strings.TrimPrefix(line, "//"))
-		line = strings.TrimSpace(strings.TrimPrefix(line, "/*"))
-		line = strings.TrimSpace(strings.TrimPrefix(line, "*"))
-		line = strings.TrimSpace(strings.TrimSuffix(line, "*/"))
+func hasRawStringPrefix(before string) bool {
+	for _, prefix := range []string{"u8R", "uR", "UR", "LR", "R"} {
+		if strings.HasSuffix(before, prefix) {
+			rest := before[:len(before)-len(prefix)]
+			return len(rest) == 0 || !isCIdentByte(rest[len(rest)-1])
+		}
 	}
-	line = strings.TrimSpace(stripCLineComments(line))
+	return false
+}
+
+func isCCharLiteralStart(before string) bool {
+	if len(before) == 0 || !isCIdentByte(before[len(before)-1]) {
+		return true
+	}
+	i := len(before) - 1
+	for i > 0 && (isCIdentByte(before[i-1]) || before[i-1] == '\'') {
+		i--
+	}
+	return before[i] < '0' || before[i] > '9'
+}
+
+func isCIdentByte(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '$'
+}
+
+func cgoIncludeDirective(line string) (string, bool, bool) {
+	line = strings.TrimSpace(line)
 	if !strings.HasPrefix(line, "#") {
 		return "", false, false
 	}
@@ -1087,53 +1149,8 @@ func cgoIncludeDirective(line string, goFile bool) (string, bool, bool) {
 	return line[:end], true, true
 }
 
-func stripCLineComments(line string) string {
-	var b strings.Builder
-	inString := false
-	escaped := false
-	for i := 0; i < len(line); {
-		if inString {
-			c := line[i]
-			b.WriteByte(c)
-			i++
-			if escaped {
-				escaped = false
-				continue
-			}
-			if c == '\\' {
-				escaped = true
-				continue
-			}
-			if c == '"' {
-				inString = false
-			}
-			continue
-		}
-		if line[i] == '"' {
-			inString = true
-			b.WriteByte(line[i])
-			i++
-			continue
-		}
-		if i+1 < len(line) && line[i:i+2] == "//" {
-			break
-		}
-		if i+1 < len(line) && line[i:i+2] == "/*" {
-			b.WriteByte(' ')
-			end := strings.Index(line[i+2:], "*/")
-			if end < 0 {
-				break
-			}
-			i += len("/*") + end + len("*/")
-			continue
-		}
-		b.WriteByte(line[i])
-		i++
-	}
-	return b.String()
-}
-
-func stripCBlockComments(lines []string) []string {
+func stripCComments(text string) ([]string, bool) {
+	lines := strings.Split(text, "\n")
 	inBlock := false
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
@@ -1173,16 +1190,22 @@ func stripCBlockComments(lines []string) []string {
 				continue
 			}
 			if c == '"' {
+				if hasRawStringPrefix(b.String()) {
+					return nil, true
+				}
 				inString = true
 				b.WriteByte(c)
 				i++
 				continue
 			}
-			if c == '\'' {
+			if c == '\'' && isCCharLiteralStart(b.String()) {
 				inChar = true
 				b.WriteByte(c)
 				i++
 				continue
+			}
+			if i+1 < len(line) && line[i:i+2] == "//" {
+				break
 			}
 			if i+1 < len(line) && line[i:i+2] == "/*" {
 				inBlock = true
@@ -1195,7 +1218,7 @@ func stripCBlockComments(lines []string) []string {
 		}
 		out = append(out, b.String())
 	}
-	return out
+	return out, false
 }
 
 func symlinkDirInPath(path, base string) string {

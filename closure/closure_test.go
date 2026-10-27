@@ -832,6 +832,258 @@ func TestContributionCgoHeaderRawStringFailsClosed(t *testing.T) {
 	}
 }
 
+func TestCgoNativeFileHasRawString(t *testing.T) {
+	allowed := []struct {
+		name string
+		text string
+	}{
+		{
+			name: "ordinary_string_ending_in_R",
+			text: `fprintf(stderr, "META_DOLLAR");`,
+		},
+		{
+			name: "single_char_R_string",
+			text: `#define STR_R "R"`,
+		},
+		{
+			name: "escaped_backslash_before_R",
+			text: `static const char *names[] = { "\\R", "OR", "XOR" };`,
+		},
+		{
+			name: "escaped_quotes_around_R_inside_string",
+			text: `const char *msg = "expected \"R\" token";`,
+		},
+		{
+			name: "block_and_line_comments_with_R_quote",
+			text: "/* See C++11 R\"(...)\" syntax or token \"OR\" */\n// returns \"ERR\" or R\"(x)\" on failure\nint ok = 1;\n",
+		},
+		{
+			name: "char_literal_R_and_escaped_quote",
+			text: "char c1 = 'R'; char c2 = '\"'; char c3 = '\\''; const char *s = \"ok\";\n",
+		},
+		{
+			name: "macro_name_ending_in_R_before_quote",
+			text: "#define STR_R\"value\"\n",
+		},
+		{
+			name: "digit_separator_before_ordinary_string_with_quote_and_R",
+			text: "int n = 1'000'000; int h = 0xFF'FF; const char *s = \"'R\";\n",
+		},
+		{
+			name: "prefixed_char_literals",
+			text: "char c1 = u8'\"'; const char *s1 = \"R\";\nchar16_t c2 = u'\"'; const char *s2 = \"R\";\nchar32_t c3 = U'\"'; const char *s3 = \"R\";\nwchar_t c4 = L'\"'; const char *s4 = \"R\";\n",
+		},
+		{
+			name: "keyword_before_char_literal",
+			text: "char f(void) { return'\"'; } const char *s = \"R\";\n",
+		},
+	}
+	for _, tc := range allowed {
+		if cgoNativeFileHasRawString(tc.text) {
+			t.Errorf("%s: cgoNativeFileHasRawString(%q) = true, want false", tc.name, tc.text)
+		}
+	}
+
+	raw := []struct {
+		name string
+		text string
+	}{
+		{
+			name: "plain_raw_string",
+			text: `const char *x = R"raw(/*)raw";`,
+		},
+		{
+			name: "u8R_raw_string",
+			text: `const char *x = u8R"raw(/*)raw";`,
+		},
+		{
+			name: "uR_raw_string",
+			text: `const char16_t *x = uR"raw(/*)raw";`,
+		},
+		{
+			name: "UR_raw_string",
+			text: `const char32_t *x = UR"raw(/*)raw";`,
+		},
+		{
+			name: "LR_raw_string",
+			text: `const wchar_t *x = LR"raw(/*)raw";`,
+		},
+		{
+			name: "raw_string_after_ordinary_string_on_same_line",
+			text: `const char *a = "META_DOLLAR"; const char *b = R"raw(/*)raw";`,
+		},
+		{
+			name: "raw_string_after_block_comment",
+			text: `/* comment */ const char *b = R"raw(/*)raw";`,
+		},
+		{
+			name: "raw_string_after_digit_separator",
+			text: `int n = 1'000; const char *b = R"raw(/*)raw";`,
+		},
+	}
+	for _, tc := range raw {
+		if !cgoNativeFileHasRawString(tc.text) {
+			t.Errorf("%s: cgoNativeFileHasRawString(%q) = false, want true", tc.name, tc.text)
+		}
+	}
+}
+
+func TestContributionCgoOrdinaryStringEndingInRAllowed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "cg.go", "package cgotest\n/*\n// C comment inside block preamble mentioning R\"(x)\" and \"OR\"\n#define PREAMBLE_BLOCK_R \"R\"\n*/\n// /* preamble comment mentioning \"OR\" and R\" */\n// #define PREAMBLE_R \"R\"\nimport \"C\"\n\nconst goRaw = `R\"raw(/*)raw\"`\n")
+	writeFile(t, dir, "local.h", "#define HDR_R \"META_ECLASS_XOR\"\n")
+	writeFile(t, dir, "bridge.c", `
+#include "local.h"
+/* Comment mentioning "OR" and R" inside a block comment */
+// Line comment mentioning "ERR" and R"raw(x)raw"
+#define STR_R "R"
+void bridge(void) {
+	const char *a = "META_DOLLAR";
+	const char *b = "\\R";
+	const char *escaped = "quoted \"R\" inside string";
+	char ch = 'R';
+	(void)a;
+	(void)b;
+	(void)escaped;
+	(void)ch;
+}
+`)
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
+	pkg := listPkg{
+		ImportPath: "example/cgotest",
+		Dir:        dir,
+		CgoFiles:   []string{"cg.go"},
+		CFiles:     []string{"bridge.c"},
+		HFiles:     []string{"local.h"},
+		Module:     &listMod{Main: true, Dir: dir},
+	}
+	if _, err := h.contribution(pkg); err != nil {
+		t.Fatalf("contribution error = %v, want nil for ordinary C strings and comments", err)
+	}
+}
+
+func TestContributionCgoLineCommentBlockStartDoesNotHideInclude(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, "pkg")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
+	writeFile(t, dir, "bridge.c", "// line comment with /* block opener\n#include \"../cfg.h\"\n// closing */ marker\nvoid bridge(void) {}\n")
+	writeFile(t, root, "cfg.h", "#define N 1\n")
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
+	pkg := listPkg{
+		ImportPath: "example/cgocallback",
+		Dir:        dir,
+		CgoFiles:   []string{"cg.go"},
+		CFiles:     []string{"bridge.c"},
+		Module:     &listMod{Main: true, Dir: root},
+	}
+	if _, err := h.contribution(pkg); err == nil || !strings.Contains(err.Error(), "cgo include escapes package dir") {
+		t.Fatalf("contribution error = %v, want cgo include escapes package dir", err)
+	}
+}
+
+func TestContributionCgoDigitSeparatorDoesNotHideInclude(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, "pkg")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
+	writeFile(t, dir, "bridge.cc", "int n = 1'000; const char *s = \"'/*\";\n#include \"../cfg.h\"\nconst char *t = \"*/\";\n")
+	writeFile(t, root, "cfg.h", "#define N 1\n")
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
+	pkg := listPkg{
+		ImportPath: "example/cgocallback",
+		Dir:        dir,
+		CgoFiles:   []string{"cg.go"},
+		CXXFiles:   []string{"bridge.cc"},
+		Module:     &listMod{Main: true, Dir: root},
+	}
+	if _, err := h.contribution(pkg); err == nil || !strings.Contains(err.Error(), "cgo include escapes package dir") {
+		t.Fatalf("contribution error = %v, want cgo include escapes package dir", err)
+	}
+}
+
+func TestContributionCgoGoPackageCommentDoesNotHidePreambleInclude(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
+	for _, tc := range []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "package_comment_before_single_import",
+			src:  "// /* package doc comment with unclosed block marker\npackage cgocallback\n\n// #include \"../cfg.h\"\nimport \"C\"\n",
+		},
+		{
+			name: "import_group_doc_before_c_spec_doc",
+			src:  "package cgocallback\n\n// /* import group doc with unclosed block marker\nimport (\n\t\"fmt\"\n\n\t// #include \"../cfg.h\"\n\t\"C\"\n)\nvar _ = fmt.Sprintf\n",
+		},
+		{
+			name: "adjacent_block_comments_in_preamble",
+			src:  "package cgocallback\n\n/*#include */ /*\"../cfg.h\"*/\nimport \"C\"\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, "pkg")
+			if err := os.Mkdir(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, dir, "cg.go", tc.src)
+			writeFile(t, root, "cfg.h", "#define N 1\n")
+			h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
+			pkg := listPkg{
+				ImportPath: "example/cgocallback",
+				Dir:        dir,
+				CgoFiles:   []string{"cg.go"},
+				Module:     &listMod{Main: true, Dir: root},
+			}
+			if _, err := h.contribution(pkg); err == nil || !strings.Contains(err.Error(), "cgo include escapes package dir") {
+				t.Fatalf("contribution error = %v, want cgo include escapes package dir", err)
+			}
+		})
+	}
+}
+
+func TestContributionCgoIncludeGoFileFailsClosed(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
+	root := t.TempDir()
+	dir := filepath.Join(root, "pkg")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "cg.go", "package cgocallback\nimport \"C\"\n")
+	writeFile(t, dir, "helper.go", "//go:build ignore\n\npackage cgocallback;\n#include \"../cfg.h\"\n")
+	writeFile(t, dir, "bridge.c", "#define package typedef int\n#include \"helper.go\"\nvoid bridge(void) {}\n")
+	writeFile(t, root, "cfg.h", "#define N 1\n")
+	h := &Hasher{modCache: filepath.FromSlash("/gomodcache"), ctx: context.Background()}
+	pkg := listPkg{
+		ImportPath: "example/cgocallback",
+		Dir:        dir,
+		CgoFiles:   []string{"cg.go"},
+		CFiles:     []string{"bridge.c"},
+		Module:     &listMod{Main: true, Dir: root},
+	}
+	if _, err := h.contribution(pkg); err == nil || !strings.Contains(err.Error(), "unsupported cgo include source") {
+		t.Fatalf("contribution error = %v, want unsupported cgo include source", err)
+	}
+}
+
 func TestContributionCgoObjectFileNotScannedAsIncludeSource(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")

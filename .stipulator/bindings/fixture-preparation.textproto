@@ -3,8 +3,8 @@
 
 bindings {
   requirement_id: "REQ-closure-analysis"
-  content_hash: "a05d61646e633fed10a0ed88256c3aa2c5f361d87d920ab992305c207ad075f7"
-  source_hash: "1343a758d5687ae648db9ca43d01ec0ee7db2369c4945736450fe76af4dea3a5"
+  content_hash: "67df182010273ecd0f5fafcf1ad0c94802ba486581174f1dc3def89b9eb21bd7"
+  source_hash: "f2770ac806d187a79977ca61f21a8f61ae816f9ce73558ff8ab2e13f84193087"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure/internal/program.Prepare"
   role: BINDING_ROLE_IMPLEMENTS
@@ -13,8 +13,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-analysis"
-  content_hash: "a05d61646e633fed10a0ed88256c3aa2c5f361d87d920ab992305c207ad075f7"
-  source_hash: "1343a758d5687ae648db9ca43d01ec0ee7db2369c4945736450fe76af4dea3a5"
+  content_hash: "67df182010273ecd0f5fafcf1ad0c94802ba486581174f1dc3def89b9eb21bd7"
+  source_hash: "f2770ac806d187a79977ca61f21a8f61ae816f9ce73558ff8ab2e13f84193087"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure/internal/program.Prepared.Build"
   role: BINDING_ROLE_IMPLEMENTS
@@ -23,8 +23,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-analysis"
-  content_hash: "a05d61646e633fed10a0ed88256c3aa2c5f361d87d920ab992305c207ad075f7"
-  source_hash: "1343a758d5687ae648db9ca43d01ec0ee7db2369c4945736450fe76af4dea3a5"
+  content_hash: "67df182010273ecd0f5fafcf1ad0c94802ba486581174f1dc3def89b9eb21bd7"
+  source_hash: "f2770ac806d187a79977ca61f21a8f61ae816f9ce73558ff8ab2e13f84193087"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure/internal/program.TestPreparedProgramsMatchIndependentLoads"
   role: BINDING_ROLE_TESTS
@@ -83,8 +83,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-analysis"
-  content_hash: "a05d61646e633fed10a0ed88256c3aa2c5f361d87d920ab992305c207ad075f7"
-  source_hash: "1343a758d5687ae648db9ca43d01ec0ee7db2369c4945736450fe76af4dea3a5"
+  content_hash: "67df182010273ecd0f5fafcf1ad0c94802ba486581174f1dc3def89b9eb21bd7"
+  source_hash: "f2770ac806d187a79977ca61f21a8f61ae816f9ce73558ff8ab2e13f84193087"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/closure/internal/program.TestPreparedGeneratedMainRequiresTargetVariants"
   role: BINDING_ROLE_TESTS

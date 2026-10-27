@@ -3,6 +3,6 @@
 
 requirement_id: "REQ-closure-shared-dynamic-state-receiver-proof"
 reason: "invariant coverage is by example pins over module fixtures; a property witness or analyzer proof over the carrier walks is pending"
-content_hash: "bcb90d9c62772bd929a426b519d444a3db85755934aaa996e8b0fed3c2f27694"
-source_hash: "2c18ba9bf035e029aa429d7506becfa8e00550b137ef29f7528e5dbd20fc3f0c"
+content_hash: "254376454a3214eba26e6511e98bdeefd5cb65e184dc65e5ce6958fb7afb76ab"
+source_hash: "9e3d5ac0d56556b707c0e6ce4d2776f94ad50bed8ef77a84cb4bb64ab5c4aa9c"
 lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }
