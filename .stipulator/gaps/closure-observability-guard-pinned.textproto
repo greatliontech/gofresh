@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-closure-observability-guard-pinned"
-reason: "Existing examples do not establish the invariant and the current accessor/root admission relies on the former version-pins-root premise. The dependency repair must guard a behavior-relevant root value and actual covered content, or refuse, while preserving the existing receiver, startup, dynamic-reference and mutation exclusions."
-content_hash: "614baf75452129da6e8ed0aa7177be46b71a0c734a55254bfa514a1cf520f3c0"
-source_hash: "e79242742b4240ac3ac61936bfc7acd7151ab958400bcf9d24286d4fea91e85f"
-lands { manual { condition: "A property witness or analyzer proof enforces the complete guarded-accessor rule, including changed root spelling and uncovered GOROOT data under an unchanged reported version and the retained startup/dynamic/mutation exclusions." } }

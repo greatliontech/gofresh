@@ -2388,3 +2388,53 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "6f4ff3afd5b66126df45469eda8db99a04c0a11db2a3fd1365f07f8382bbd84a"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-observable-read-set"
+  content_hash: "4c32a806fb7083010f961f85ed0c67b687fad75fc85cfde7e6539a1ce3922772"
+  source_hash: "87ed200b344a17b248e632e6d806671cc8e748c7d534fd56e31dc46eefe267fe"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.FuzzRuntimeObservationAndPathInvariants"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c6bca2248e56769e7dc5d718f35a90f90f64f8917006b5741c6915cb9048ba5a"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-observation-coherence"
+  content_hash: "8466dc518dc2a167fa1d650d16d218bcc5ce54e015188b4f395c98022e7b9b5e"
+  source_hash: "b2dd46fcac68ad6b88c8c9868d9d4a59608a875474fb79bdabd61c22b275fd1a"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.FuzzRuntimeObservationAndPathInvariants"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c6bca2248e56769e7dc5d718f35a90f90f64f8917006b5741c6915cb9048ba5a"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-observation-disposition"
+  content_hash: "3a36ef274e7375fca3e3c01124e7de3ce9526d598c7c67db9884905f7d1681b1"
+  source_hash: "cd173682f255246035284ce09752f4a3f706560eba7aa0465357085279304453"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.FuzzRuntimeObservationAndPathInvariants"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c6bca2248e56769e7dc5d718f35a90f90f64f8917006b5741c6915cb9048ba5a"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-path-congruence"
+  content_hash: "47ad951d3df392ca5153e91c107fdf9ab5fc9a2eb633fe385fb4f255fc084f48"
+  source_hash: "59923ecfef18e51879ed6e5f1b12f7963cb5f83c0d9269d29169fe493ac2300b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.FuzzRuntimeObservationAndPathInvariants"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c6bca2248e56769e7dc5d718f35a90f90f64f8917006b5741c6915cb9048ba5a"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-producer-premises"
+  content_hash: "4c095a23fd7aca769dd1d8ecf8048f56b067ab9d831b0e4eb98753e254b8b8aa"
+  source_hash: "4be39b682152ac6ba9f790fde52c1ab9cb46abf760ec99786d9edf42bd8f984e"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.FuzzRuntimeObservationAndPathInvariants"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c6bca2248e56769e7dc5d718f35a90f90f64f8917006b5741c6915cb9048ba5a"
+}

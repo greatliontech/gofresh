@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-inputs-observation-coherence"
-reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "8466dc518dc2a167fa1d650d16d218bcc5ce54e015188b4f395c98022e7b9b5e"
-source_hash: "b2dd46fcac68ad6b88c8c9868d9d4a59608a875474fb79bdabd61c22b275fd1a"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

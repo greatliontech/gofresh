@@ -1,9 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-fresh-observation-compatibility"
-reason: "Recorded proof admission now enforces the identified selected-content/admission and integrity dependencies. A property witness or analyzer proof covering the complete compatibility invariant, including historical unsupported evidence, membership, drift precedence and memo-only representation changes, remains outstanding."
-content_hash: "8b1ba9d1017d7105a7d690a68245d766eb2190b44a3af01e541aa27f273c6157"
-source_hash: "10080fca60acf5afe2b4b8ff8abff9006332a3a8f671650ae02c7f9c73063d6f"
-lands { manual { condition: "A property witness or analyzer proof covers the entire observation-compatibility invariant, including same-version selected-content/admission changes, unsupported historical dependencies, integrity and subject membership, source-drift precedence and memo-only representation changes." } }
-excuses: GAP_EXCUSE_UNCOVERED

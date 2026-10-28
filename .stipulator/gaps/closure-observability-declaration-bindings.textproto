@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-closure-observability-declaration-bindings"
-reason: "Invariant coverage is by example pins over module fixtures; a property witness or analyzer proof is pending"
-content_hash: "0cd64bb39c67ec7cfdd96599c5eb9d6892ddddbc0fcb5385e26952ed17c5f82e"
-source_hash: "e1331d5a2e29c2ff07294a2a5d3954909970a62cbf3bdb37f749bf5061a7ba1f"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

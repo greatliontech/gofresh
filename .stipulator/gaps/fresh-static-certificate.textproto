@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-fresh-static-certificate"
-reason: "Native dependency enforcement and Stipulator's all-selected-view resolution/classification certificate have landed. Full invariant evidence across source membership, precedence, classifier changes and certificate composition remains to be reconciled. No additional consumer certificate violation is established by this record."
-content_hash: "6c78bbf7890494a48ce607656d411a307bea0da74ddd85261c68f76ffe34c871"
-source_hash: "6d23f0b62aee28aced97361e5ec2b2be72b6120efe9ddbf61834250878a29504"
-lands { manual { condition: "property or analyzer evidence covers the complete static-certificate invariant, preserving all contributing source, configuration, precedence, classifier and native dependency identities without granting execution authority" } }

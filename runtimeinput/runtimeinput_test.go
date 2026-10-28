@@ -1381,3 +1381,184 @@ func FuzzMergeAlgebra(f *testing.F) {
 		}
 	})
 }
+
+func FuzzRuntimeObservationAndPathInvariants(f *testing.F) {
+	f.Add("KEY_A", "val1", "sub/data.txt", uint8(0))
+	f.Add("KEY_B", "val2", "../outside.txt", uint8(1))
+	f.Add("KEY_C", "", "a/../b/file.txt", uint8(2))
+	f.Add("KEY_D", "v=1", "dir/child.txt", uint8(3))
+
+	f.Fuzz(func(t *testing.T, rawKey, val, rawPath string, mode uint8) {
+		key := "FUZZ_" + strings.Map(func(r rune) rune {
+			if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+				return r
+			}
+			return '_'
+		}, rawKey)
+		if len(key) > 32 {
+			key = key[:32]
+		}
+		cleanVal := strings.Map(func(r rune) rune {
+			if r == 0 || r == '\n' || r == '\r' {
+				return '_'
+			}
+			return r
+		}, val)
+
+		cleanRel := "child_" + strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+				return r
+			}
+			return 'x'
+		}, rawPath)
+		if len(cleanRel) > 24 {
+			cleanRel = cleanRel[:24]
+		}
+
+		modDir := t.TempDir()
+		subDir := filepath.Join(modDir, "sub")
+		realChildDir := filepath.Join(subDir, cleanRel)
+		symlinkTargetDir := filepath.Join(modDir, "target_a", "target_b")
+		if err := os.MkdirAll(realChildDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(symlinkTargetDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		linkName := "link_" + cleanRel
+		if err := os.Symlink(symlinkTargetDir, filepath.Join(subDir, linkName)); err != nil {
+			t.Fatal(err)
+		}
+		targetFile := filepath.Join(subDir, "data.txt")
+		if err := os.WriteFile(targetFile, []byte(cleanVal), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		ambient := []string{key + "=" + cleanVal, "OTHER_VAR=constant"}
+
+		// 1. Observable read set, path congruence, & coherence across FromTestLog, Current, Merge, Adopt
+		// (REQ-inputs-observable-read-set, REQ-inputs-path-congruence, REQ-inputs-observation-coherence).
+		bracket, err := CaptureBracket(context.Background(), modDir, []string{"."})
+		if err != nil {
+			t.Fatalf("CaptureBracket: %v", err)
+		}
+		// A parent traversal across a real directory component resolves congruently to data.txt.
+		logText := "# test log\ngetenv " + key + "\nopen " + cleanRel + "/../data.txt\nstat data.txt\n"
+		obs1, err := fromTestLog(context.Background(), []byte(logText), modDir, subDir, ambient, WithCompletedProcess("w1"), WithBracket(bracket))
+		if err != nil {
+			t.Fatalf("fromTestLog valid log: %v", err)
+		}
+		if !obs1.State.OK || obs1.State.Unverifiable {
+			t.Fatalf("expected verifiable complete state for real-dir .. traversal, got %+v", obs1.State)
+		}
+		// A parent traversal across a symlink component (linkName/../data.txt) is refused as
+		// ambiguous parent traversal because lexical .. cancellation diverges from kernel resolution
+		// (REQ-inputs-path-congruence).
+		symlinkTraversalLog := "# test log\nopen " + linkName + "/../data.txt\n"
+		obsSymlink, err := fromTestLog(context.Background(), []byte(symlinkTraversalLog), modDir, subDir, ambient, WithCompletedProcess("w-sym"), WithBracket(bracket))
+		if err != nil {
+			t.Fatalf("fromTestLog symlink .. traversal: %v", err)
+		}
+		if !obsSymlink.State.OK || !obsSymlink.State.Unverifiable || !strings.Contains(obsSymlink.State.Reason, "ambiguous parent traversal") {
+			t.Fatalf("expected ambiguous parent traversal refusal on symlink/.. path, got %+v", obsSymlink.State)
+		}
+		curState, err := Current(context.Background(), obs1.Manifest, modDir, ambient)
+		if err != nil {
+			t.Fatalf("Current on matching ambient: %v", err)
+		}
+		if curState != obs1.State {
+			t.Fatalf("Current state %+v != fromTestLog state %+v", curState, obs1.State)
+		}
+		adopted, err := AdoptContext(context.Background(), obs1.Manifest, modDir, "w-adopted", ambient)
+		if err != nil {
+			t.Fatalf("AdoptContext on matching ambient: %v", err)
+		}
+		if adopted.State != obs1.State || adopted.Manifest != obs1.Manifest {
+			t.Fatalf("AdoptContext mismatch: %+v vs %+v", adopted, obs1)
+		}
+		merged, err := MergeContext(context.Background(), modDir, ambient, obs1, adopted)
+		if err != nil {
+			t.Fatalf("MergeContext on coherent observations: %v", err)
+		}
+		if merged.State != obs1.State {
+			t.Fatalf("idempotent MergeContext changed state: %+v vs %+v", merged.State, obs1.State)
+		}
+
+		// Mutating the observed env var shifts Current state while mutating an
+		// unobserved var leaves it invariant.
+		shiftedAmbient := []string{key + "=" + cleanVal + "_changed", "OTHER_VAR=constant"}
+		shiftedState, err := Current(context.Background(), obs1.Manifest, modDir, shiftedAmbient)
+		if err != nil {
+			t.Fatalf("Current on shifted ambient: %v", err)
+		}
+		if shiftedState == obs1.State {
+			t.Fatal("mutating observed env key did not shift state")
+		}
+		unobservedAmbient := []string{key + "=" + cleanVal, "OTHER_VAR=different"}
+		unobservedState, err := Current(context.Background(), obs1.Manifest, modDir, unobservedAmbient)
+		if err != nil || unobservedState != obs1.State {
+			t.Fatalf("unobserved env change shifted state: %+v vs %+v (err=%v)", unobservedState, obs1.State, err)
+		}
+
+		// Unverifiable operations (chdir or escaping .. or unknown op) record unsuppressible
+		// manifest unverifiability (REQ-inputs-observable-read-set, REQ-inputs-path-congruence).
+		var badOp string
+		switch mode % 3 {
+		case 0:
+			badOp = "chdir .\n"
+		case 1:
+			badOp = "open ../../outside.txt\n"
+		default:
+			badOp = "customop something\n"
+		}
+		unverObs, err := fromTestLog(context.Background(), []byte("# test log\n"+badOp), modDir, subDir, ambient, WithCompletedProcess("w2"), WithBracket(bracket))
+		if err != nil {
+			t.Fatalf("fromTestLog with unverifiable op: %v", err)
+		}
+		if !unverObs.State.OK || !unverObs.State.Unverifiable {
+			t.Fatalf("expected completed unverifiable state for %q, got %+v", badOp, unverObs.State)
+		}
+		mergedUnver, err := MergeContext(context.Background(), modDir, ambient, obs1, unverObs)
+		if err != nil {
+			t.Fatalf("MergeContext with unverifiable observation: %v", err)
+		}
+		if !mergedUnver.State.Unverifiable {
+			t.Fatalf("MergeContext suppressed unverifiability from %q: %+v", badOp, mergedUnver.State)
+		}
+
+		// 2. Observation disposition & ProducerFrame premises
+		// (REQ-inputs-observation-disposition, REQ-inputs-producer-premises).
+		inc, err := IncompleteContext(context.Background(), modDir, "w-inc", "truncated", ambient)
+		if err != nil {
+			t.Fatalf("IncompleteContext: %v", err)
+		}
+		if !inc.State.Unverifiable {
+			t.Fatal("Incomplete observation did not report Unverifiable")
+		}
+		if _, err := CompletedState( Observation{State: obs1.State}); err == nil {
+			t.Fatal("CompletedState accepted unsealed observation")
+		}
+		if st, err := CompletedState(obs1); err != nil || st != obs1.State {
+			t.Fatalf("CompletedState on complete observation = (%v, %v)", st, err)
+		}
+		if HasOutcomeSupport(obs1.Manifest, "example.com/pkg.TestA") {
+			t.Fatal("ambient-only observation claimed HasOutcomeSupport without outcome evidence")
+		}
+
+		frame := ProducerFrame{
+			Root:   modDir,
+			PkgDir: subDir,
+		}
+		receipt, err := frame.Completion("w1", ambient, "")
+		if err != nil {
+			t.Fatalf("ProducerFrame.Completion: %v", err)
+		}
+		if _, reason := frame.completionPremise(ProducerIngest{Identity: "w1", Env: ambient, Completion: receipt}); reason != "" {
+			t.Fatalf("completionPremise on matching frame = %q", reason)
+		}
+		if _, reason := frame.completionPremise(ProducerIngest{Identity: "w1", Env: shiftedAmbient, Completion: receipt}); reason == "" {
+			t.Fatal("completionPremise accepted receipt under shifted ambient")
+		}
+	})
+}
+

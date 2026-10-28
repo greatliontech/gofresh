@@ -120,3 +120,33 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "ae38815fce76987ad54740881ea66d04075d0ed33a697a9d82746327291fe841"
 }
+
+bindings {
+  requirement_id: "REQ-vouch-input"
+  content_hash: "5fe7297903897c2f24e6285d5227cfe52ba07d2a469f9dcc6c3463f116f7e6a6"
+  source_hash: "651623a0dde3764043ecfe89c3647644022bcfe63a9fa092a732f29d8dc4fc91"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestVouchInputShapes"
+  role: BINDING_ROLE_PROVES
+  shape_hash: "5409fc766913dc8e8c02dd443822ba6a2a624998cc735b99b7829eca77403449"
+}
+
+bindings {
+  requirement_id: "REQ-vouch-input"
+  content_hash: "5fe7297903897c2f24e6285d5227cfe52ba07d2a469f9dcc6c3463f116f7e6a6"
+  source_hash: "651623a0dde3764043ecfe89c3647644022bcfe63a9fa092a732f29d8dc4fc91"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestPurityInputIsSubjectPredicate"
+  role: BINDING_ROLE_PROVES
+  shape_hash: "44c43c6024fce16e2fdaadbee5fb3e8200ec1691c46d83b27bb8b4e890e08345"
+}
+
+bindings {
+  requirement_id: "REQ-vouch-input"
+  content_hash: "5fe7297903897c2f24e6285d5227cfe52ba07d2a469f9dcc6c3463f116f7e6a6"
+  source_hash: "651623a0dde3764043ecfe89c3647644022bcfe63a9fa092a732f29d8dc4fc91"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzControlAndSessionAuthority"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2c64fd7bfa6c552702bb5d93ca842442e26cb37603015b58dbdd8ba854ddd708"
+}

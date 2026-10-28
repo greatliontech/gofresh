@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -2302,6 +2303,7 @@ func TestBracketedSeamNodes(t *testing.T) {
 			Syntax:    []*ast.File{file},
 			Types:     typesPkg,
 			TypesInfo: info,
+			Module:    &packages.Module{Path: "example.com/p"},
 		}
 		return dynamicStateFactOf(true, pkg, false)
 	}
@@ -2708,3 +2710,336 @@ func TestInnerCleanupOverwritesOuterRestore(t *T) {
 		})
 	}
 }
+
+func FuzzSharedDynamicStateInvariants(f *testing.F) {
+	f.Add("V", "M", "H", true, false, false, uint8(0))
+	f.Add("Cache", "Read", "InitHelper", false, true, true, uint8(1))
+	f.Add("State", "Write", "Setup", true, true, false, uint8(2))
+	f.Add("Reg", "Lookup", "Build", false, false, false, uint8(3))
+	f.Add("Tbl", "Inspect", "Populate", true, true, true, uint8(4))
+
+	f.Fuzz(func(t *testing.T, rawVar, rawMethod, rawHelper string, hasProof, singleSubject, packageProcess bool, mode uint8) {
+		sanitizeIdent := func(s, fallback string) string {
+			out := strings.Map(func(r rune) rune {
+				if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+					return r
+				}
+				return -1
+			}, s)
+			if out == "" {
+				return fallback
+			}
+			if len(out) > 16 {
+				out = out[:16]
+			}
+			return strings.ToUpper(out[:1]) + out[1:]
+		}
+		varName := sanitizeIdent(rawVar, "V")
+		methodName := sanitizeIdent(rawMethod, "M")
+		helperName := sanitizeIdent(rawHelper, "H")
+		if methodName == varName {
+			methodName += "Method"
+		}
+		if helperName == varName || helperName == methodName {
+			helperName += "Helper"
+		}
+
+		// 1. In-memory AST/types fact derivation: carrier-free vs dynamic-capable types,
+		// atomic.Pointer[T] transparency, mutex-bracketed atomic.Pointer hook store,
+		// audited sync.Mutex/sync.Once discharges, opaque sentinel construction,
+		// SingleSubjectVars directive, and PoolDischarges under singleSubject
+		// (REQ-closure-shared-dynamic-state, REQ-closure-shared-dynamic-state-carrier-free,
+		// REQ-closure-shared-dynamic-state-atomic, REQ-closure-shared-dynamic-state-mutation-shape,
+		// REQ-closure-shared-dynamic-state-audited-discharges,
+		// REQ-closure-shared-dynamic-state-escape-narrowings,
+		// REQ-closure-shared-dynamic-state-directive, REQ-closure-shared-dynamic-state-pool).
+		src := fmt.Sprintf(`package p
+import (
+	"errors"
+	"sync"
+	"sync/atomic"
+)
+
+var ScalarInt = 42
+var AtomicInt atomic.Pointer[int]
+var PoolVar sync.Pool
+var ErrSentinel = errors.New("sentinel")
+
+type hookSet struct{ onEvent func() }
+var (
+	hookMu  sync.Mutex
+	hookOnce sync.Once
+	hookPtr atomic.Pointer[hookSet]
+)
+
+//gofresh:single-subject
+var %s []func()
+
+func UsePoolAndHooks() {
+	x := PoolVar.Get()
+	PoolVar.Put(x)
+	hookOnce.Do(func() {})
+	hookMu.Lock()
+	defer hookMu.Unlock()
+	defer hookPtr.Store(nil)
+	hookPtr.Store(&hookSet{onEvent: func() {}})
+	if h := hookPtr.Load(); h != nil && h.onEvent != nil {
+		h.onEvent()
+	}
+}
+`, varName)
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "p.go", src, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		info := &types.Info{
+			Types:      map[ast.Expr]types.TypeAndValue{},
+			Defs:       map[*ast.Ident]types.Object{},
+			Uses:       map[*ast.Ident]types.Object{},
+			Selections: map[*ast.SelectorExpr]*types.Selection{},
+		}
+		typesPkg, err := (&types.Config{Importer: importer.Default()}).Check("example.com/p", fset, []*ast.File{file}, info)
+		if err != nil {
+			t.Fatalf("typecheck: %v", err)
+		}
+		pkg := &packages.Package{
+			ID:        "example.com/p",
+			Name:      "p",
+			PkgPath:   "example.com/p",
+			Fset:      fset,
+			Syntax:    []*ast.File{file},
+			Types:     typesPkg,
+			TypesInfo: info,
+			Module:    &packages.Module{Path: "example.com/p"},
+		}
+		derived := dynamicStateFactOf(true, pkg, singleSubject)
+		varKey := "example.com/p." + varName
+		scalarKey := "example.com/p.ScalarInt"
+		atomicIntKey := "example.com/p.AtomicInt"
+		hookPtrKey := "example.com/p.hookPtr"
+		sentinelKey := "example.com/p.ErrSentinel"
+		poolKey := "example.com/p.PoolVar"
+		for _, d := range derived.Declares {
+			if d == scalarKey || d == atomicIntKey {
+				t.Fatalf("carrier-free variable %s declared as dynamic-capable", d)
+			}
+		}
+		if !slices.Contains(derived.Declares, hookPtrKey) {
+			t.Fatalf("expected dynamic-capable atomic.Pointer %s in Declares, got %v", hookPtrKey, derived.Declares)
+		}
+		if len(derived.Mutates) != 0 || len(derived.Escapes) != 0 || len(derived.EnvCarrying) != 0 {
+			t.Fatalf("mutex-bracketed hookPtr or sync.Once/Mutex marked dynamic state: %+v", derived)
+		}
+		for _, u := range derived.AttributedUses {
+			if strings.Contains(u, hookPtrKey) {
+				t.Fatalf("mutex-bracketed hookPtr recorded in AttributedUses: %q", u)
+			}
+		}
+		if !slices.Contains(derived.Opaque, sentinelKey) {
+			t.Fatalf("expected %s in Opaque, got %v", sentinelKey, derived.Opaque)
+		}
+		if !slices.Contains(derived.SingleSubjectVars, varKey) {
+			t.Fatalf("expected %s in SingleSubjectVars, got %v", varKey, derived.SingleSubjectVars)
+		}
+		if singleSubject {
+			if len(derived.PoolDischarges) != 1 || derived.PoolDischarges[0] != poolKey || len(derived.AttributedUses) != 0 {
+				t.Fatalf("expected PoolDischarges=[%s] and empty AttributedUses when singleSubject=true, got PoolDischarges=%v AttributedUses=%v", poolKey, derived.PoolDischarges, derived.AttributedUses)
+			}
+		} else {
+			if len(derived.PoolDischarges) != 0 || len(derived.AttributedUses) == 0 {
+				t.Fatalf("expected no PoolDischarges and PoolVar AttributedUses when singleSubject=false, got PoolDischarges=%v AttributedUses=%v", derived.PoolDischarges, derived.AttributedUses)
+			}
+		}
+
+		// 2. Composition invariants across deferred proofs, init-flow aliasing, opacity breaks,
+		// value-plane population joins, audited mapping/memoization pins, generated proto/gRPC
+		// two-leg discharges, and reachability culprit sites
+		// (REQ-closure-shared-dynamic-state-init-flow, REQ-closure-shared-dynamic-state-receiver-proof,
+		// REQ-closure-shared-dynamic-state-parameter-facts, REQ-closure-shared-dynamic-state-registration-audit,
+		// REQ-closure-shared-dynamic-state-leak-free, REQ-closure-shared-dynamic-state-init-aliasing,
+		// REQ-closure-shared-dynamic-state-mapping, REQ-closure-shared-dynamic-state-memo,
+		// REQ-closure-shared-dynamic-state-proto, REQ-closure-shared-dynamic-state-reachability).
+		meta := []closure.GraphPackage{
+			{
+				ImportPath: "example.com/p",
+				PkgPath:    "example.com/p",
+				Class:      closure.MutableLocalPackage,
+				Imports:    []string{"example.com/dep", "golang.org/x/sys/unix", "gopkg.in/yaml.v3", "google.golang.org/protobuf/runtime/protoimpl", "google.golang.org/grpc"},
+			},
+			{
+				ImportPath: "example.com/dep",
+				PkgPath:    "example.com/dep",
+				Class:      closure.PinnedPackage,
+				Pin:        "example.com/dep@v1.0.0",
+			},
+			{
+				ImportPath: "golang.org/x/sys/unix",
+				PkgPath:    "golang.org/x/sys/unix",
+				Class:      closure.PinnedPackage,
+				Pin:        "golang.org/x/sys@v0.48.0",
+			},
+			{
+				ImportPath: "gopkg.in/yaml.v3",
+				PkgPath:    "gopkg.in/yaml.v3",
+				Class:      closure.PinnedPackage,
+				Pin:        "gopkg.in/yaml.v3@v3.0.1",
+			},
+			{
+				ImportPath: "google.golang.org/protobuf/runtime/protoimpl",
+				PkgPath:    "google.golang.org/protobuf/runtime/protoimpl",
+				Class:      closure.PinnedPackage,
+				Pin:        "google.golang.org/protobuf@v1.36.11",
+			},
+			{
+				ImportPath: "google.golang.org/grpc",
+				PkgPath:    "google.golang.org/grpc",
+				Class:      closure.PinnedPackage,
+				Pin:        "google.golang.org/grpc@v1.82.1",
+			},
+		}
+
+		depVar := "example.com/dep." + varName
+		aliasVar := "example.com/dep.Alias" + varName
+		opaqueVar := "example.com/dep.Opaque" + varName
+		protoVar := "example.com/p.File_p_proto"
+		grpcVar := "example.com/p.Service_Desc"
+		methodKey := "example.com/dep\x00T\x00" + methodName
+		paramKey := "example.com/dep\x00" + helperName + "\x000"
+		paramDepKey := "example.com/dep\x00" + helperName + "Leaf\x000"
+		ctorKey := "example.com/dep\x00Make" + helperName
+		ctorDepKey := "example.com/dep\x00MakeLeaf" + helperName
+
+		var depFact dynamicStateFact
+		depFact.Declares = []string{depVar, aliasVar, opaqueVar}
+		depFact.Opaque = []string{opaqueVar}
+		depFact.Escapes = []string{opaqueVar}
+		depFact.CarrierLinks = []string{depVar + "\x01" + aliasVar}
+
+		switch mode % 5 {
+		case 0:
+			// Deferred method use vs ReceiverReadOnly proof (REQ-closure-shared-dynamic-state-receiver-proof).
+			depFact.MethodUses = []string{depVar + "\x00" + methodKey}
+			if hasProof {
+				depFact.ReceiverReadOnly = []string{methodKey}
+			}
+		case 1:
+			// Deferred call-argument use + conditional ParamLeakFreeDeps fixed point
+			// (REQ-closure-shared-dynamic-state-parameter-facts).
+			depFact.ParamUses = []string{depVar + "\x00" + paramKey}
+			depFact.ParamLeakFreeDeps = []string{paramKey + "\x01" + paramDepKey}
+			if hasProof {
+				depFact.ParamLeakFree = []string{paramDepKey}
+			}
+		case 2:
+			// Deferred constructor registration + ReturnEnvDeps & ReturnEnvInsertionDeps fixed point
+			// (REQ-closure-shared-dynamic-state-registration-audit, REQ-closure-shared-dynamic-state-parameter-facts).
+			depFact.EnvCallUses = []string{depVar + "\x01" + ctorKey}
+			depFact.ReturnEnvFree = []string{ctorKey}
+			depFact.ReturnEnvDeps = []string{ctorKey + "\x01" + ctorDepKey}
+			depFact.ReturnEnvInsertionDeps = []string{ctorKey + "\x01" + paramDepKey}
+			if hasProof {
+				depFact.ReturnEnvFree = []string{ctorKey, ctorDepKey}
+				depFact.ParamInsertionFree = []string{paramDepKey}
+			}
+		case 3:
+			// Init-flow method use vs ReceiverRetentionFree proof (ReceiverReadOnly does NOT substitute;
+			// REQ-closure-shared-dynamic-state-init-flow, REQ-closure-shared-dynamic-state-receiver-proof).
+			depFact.InitMethodUses = []string{depVar + "\x00" + methodKey}
+			if hasProof {
+				depFact.ReceiverRetentionFree = []string{methodKey}
+			} else {
+				depFact.ReceiverReadOnly = []string{methodKey}
+			}
+		default:
+			// Value-plane field-position argument deferral vs registered population proof
+			// (REQ-closure-shared-dynamic-state-leak-free).
+			depFact.FieldParamUses = []string{depVar + "\x01Fn\x000"}
+			depFact.FieldParamDefer = []string{depVar + "\x01Fn\x000\x01" + paramKey}
+			if hasProof {
+				depFact.ParamLeakFree = []string{paramKey}
+			}
+		}
+
+		allFacts := map[string][]dynamicStateFact{
+			"example.com/p": {
+				{
+					Declares:           []string{varKey, protoVar, grpcVar},
+					SingleSubjectVars:  []string{varKey},
+					GeneratedProtoVars: []string{protoVar},
+					GeneratedGrpcVars:  []string{grpcVar},
+					Mutates:            []string{varKey, protoVar, grpcVar},
+				},
+			},
+			"example.com/dep":          {depFact},
+			"golang.org/x/sys/unix":    {{Declares: []string{"golang.org/x/sys/unix.mapper"}, Mutates: []string{"golang.org/x/sys/unix.mapper"}}},
+			"gopkg.in/yaml.v3":         {{Declares: []string{"gopkg.in/yaml.v3.structMap"}, Mutates: []string{"gopkg.in/yaml.v3.structMap"}}},
+		}
+
+		if generatedProtoHeader("// Code generated by protoc-gen-go. DO NOT EDIT.") != "protoc-gen-go" ||
+			generatedProtoHeader("// Code generated by protoc-gen-go-grpc. DO NOT EDIT.") != "protoc-gen-go-grpc" ||
+			generatedProtoHeader("// Code generated by protoc-gen-gogo. DO NOT EDIT.") != "" {
+			t.Fatal("generatedProtoHeader misclassified protoc-gen-go / protoc-gen-go-grpc / protoc-gen-gogo")
+		}
+
+		// When singleSubject=true, varKey (SingleSubjectVars), protoVar (GeneratedProtoVars), and
+		// grpcVar (GeneratedGrpcVars) in example.com/p are discharged, and unix.mapper / yaml.structMap
+		// are discharged by auditedSourceListing; depVar depends on hasProof.
+		cone := composeDynamicState(meta, allFacts, "example.com/p", nil, singleSubject, packageProcess)
+		if !singleSubject {
+			if cone.downgraded == "" {
+				t.Fatal("expected downgrade when singleSubject=false and varKey is mutated without attestation")
+			}
+			if packageProcess && !strings.Contains(cone.downgraded, "backed by no single-subject attestation") {
+				t.Fatalf("expected packageProcess unbacked-directive channel in %q", cone.downgraded)
+			}
+			if !packageProcess && !strings.Contains(cone.downgraded, "//gofresh:single-subject directive on the declaration") {
+				t.Fatalf("expected standard directive channel in %q", cone.downgraded)
+			}
+		} else {
+			if hasProof && cone.downgraded != "" {
+				t.Fatalf("expected clean composition when proof holds and singleSubject=true, got downgrade=%q", cone.downgraded)
+			}
+			if !hasProof && cone.downgraded == "" {
+				t.Fatalf("expected downgrade when proof is absent (mode=%d)", mode%5)
+			}
+			// Breaking opacity on opaqueVar causes its escape to downgrade even when hasProof=true.
+			if hasProof {
+				brokenFact := depFact
+				brokenFact.OpacityBreaks = []string{opaqueVar}
+				allFacts["example.com/dep"] = []dynamicStateFact{brokenFact}
+				brokenCone := composeDynamicState(meta, allFacts, "example.com/p", nil, true, packageProcess)
+				if !strings.Contains(brokenCone.downgraded, opaqueVar+" escapes writable") {
+					t.Fatalf("expected opacity break on %s to surface escape culprit, got %q", opaqueVar, brokenCone.downgraded)
+				}
+			}
+		}
+
+		// Carrier link propagation: if depVar marks mutated/escaped/envCarrying, aliasVar shares the mark.
+		links := carrierLinkGraph(allFacts, func(dynamicStateFact) {})
+		if !links[depVar][aliasVar] || !links[aliasVar][depVar] {
+			t.Fatalf("carrierLinkGraph did not record symmetric link between %s and %s", depVar, aliasVar)
+		}
+
+		// Reachability dischargeCulprits stops at the first culprit whose site is reached or unattributed.
+		vds := &viewDynamicState{
+			rootCulprits: map[string][]dynCulprit{
+				"example.com/p": {{pkgPath: "example.com/dep", key: depVar}},
+			},
+			culpritSites: map[string]map[string]culpritSiteSet{
+				"example.com/p": {
+					depVar: {fns: map[string]bool{"example.com/p.Caller": true}},
+				},
+			},
+		}
+		surv, _, dis := dischargeCulprits(closure.RootedFunctions{Complete: true, Fns: map[string]bool{}}, vds, "example.com/p")
+		if surv != "" || !dis[depVar] {
+			t.Fatalf("unreachable culprit was not discharged: surv=%q dis=%v", surv, dis)
+		}
+		survReached, _, _ := dischargeCulprits(closure.RootedFunctions{Complete: true, Fns: map[string]bool{"example.com/p.Caller": true}}, vds, "example.com/p")
+		if survReached == "" {
+			t.Fatal("reachable culprit was erroneously discharged")
+		}
+	})
+}
+

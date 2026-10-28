@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-guard-view-lifetime"
-reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "92f3ee05eadb9a3909e640ec0660d688cb72b0bc7b5685073561eedf93e16618"
-source_hash: "06ba5c87312e00683556f11221ed9c6b1eaf2ce6dd1bf814328e1098ba8714a1"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

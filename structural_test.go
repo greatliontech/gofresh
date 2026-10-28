@@ -79,3 +79,10 @@ func TestPurityInputIsSubjectPredicate(t *testing.T) {
 func TestViewCheckUsesConstructionKind(t *testing.T) {
 	structural.FunctionSignature[func(*Snapshot, context.Context, Fingerprint, Subject) (Verdict, error)](t, (*Snapshot).Check)
 }
+
+func TestVouchInputShapes(t *testing.T) {
+	structural.FunctionSignature[func(string) (string, error)](t, ParseVouchEntry)
+	structural.FunctionSignature[func([]string) ([]string, error)](t, ParseVouchEntries)
+	structural.FunctionSignature[func(string) ([]string, error)](t, ReadVouchFile)
+}
+

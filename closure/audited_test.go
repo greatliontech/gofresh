@@ -1354,7 +1354,7 @@ func TestAuditedToolchainAdmitsTheDropFakes(t *testing.T) {
 // harnessSubtestDriverForTest builds a minimal SSA (*T).Run in a
 // package named and pathed "testing" — the smallest value the driver
 // predicate's shape checks accept.
-func harnessSubtestDriverForTest(t *testing.T) *ssa.Function {
+func harnessSubtestDriverForTest(t testing.TB) *ssa.Function {
 	t.Helper()
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "testing.go", `package testing
@@ -1834,3 +1834,207 @@ func TestBenchmarkPacingDeclarationInventory(t *testing.T) {
 		t.Errorf("testing declares field N on %v beyond the audited three — re-audit the field arm's receiver check", fieldN)
 	}
 }
+
+func FuzzObservabilityClassificationsAndAuditedSet(f *testing.F) {
+	f.Add("fmt", "Sprint", "//go:linkname a runtime.getAuxv\n", true, uint8(0))
+	f.Add("os", "Getenv", "//go:linkname a runtime.unapproved\n", false, uint8(1))
+	f.Add("reflect", "DeepEqual", "// normal comment\n", true, uint8(2))
+	f.Add("testing", "Fatal", "//go:noescape\n", true, uint8(3))
+	f.Add("crypto/rand", "Read", "", true, uint8(4))
+
+	driver := harnessSubtestDriverForTest(f)
+	atomicPkg := types.NewPackage("sync/atomic", "atomic")
+	tparam := types.NewTypeParam(types.NewTypeName(token.NoPos, atomicPkg, "T", nil), types.NewInterfaceType(nil, nil))
+	atomicGeneric := types.NewNamed(types.NewTypeName(token.NoPos, atomicPkg, "Pointer", nil), types.NewStruct(nil, nil), nil)
+	atomicGeneric.SetTypeParams([]*types.TypeParam{tparam})
+
+	f.Fuzz(func(t *testing.T, pkg, sym, commentLine string, audited bool, choice uint8) {
+		cleanSym := strings.Map(func(r rune) rune {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+				return r
+			}
+			return 'X'
+		}, sym)
+		if cleanSym == "" {
+			cleanSym = "Sym"
+		}
+
+		// 1. Guard-pinned standard-library admissions drop to false when !audited, and
+		// runtime.GOROOT is exempt from the package-scan blocker floor because Toolchain
+		// guard already pins GOROOT (REQ-closure-observability-guard-pinned,
+		// REQ-closure-observability-audited-set).
+		if classBPureStandard(false, pkg, sym) {
+			t.Fatalf("classBPureStandard admitted (%q, %q) when audited=false", pkg, sym)
+		}
+		if isSourceOnlyStandardPackage(false, pkg) {
+			t.Fatalf("isSourceOnlyStandardPackage admitted %q when audited=false", pkg)
+		}
+		if auditedStandardSymbol(false, pkg, sym) {
+			t.Fatalf("auditedStandardSymbol admitted (%q, %q) when audited=false", pkg, sym)
+		}
+		if auditedHarnessLogging(false, pkg, sym) {
+			t.Fatalf("auditedHarnessLogging admitted (%q, %q) when audited=false", pkg, sym)
+		}
+		if auditedHarnessPacing(false, pkg, sym) {
+			t.Fatalf("auditedHarnessPacing admitted (%q, %q) when audited=false", pkg, sym)
+		}
+		if fmtFprintFamily(false, pkg, sym) {
+			t.Fatalf("fmtFprintFamily admitted (%q, %q) when audited=false", pkg, sym)
+		}
+		if auditedLinknamesOnly(false, commentLine) && strings.Contains(commentLine, "//go:linkname") {
+			t.Fatalf("auditedLinknamesOnly admitted %q when audited=false", commentLine)
+		}
+		gorootEff := symbolExternalEffect(externalEffectUnauditedStandard, "runtime", "GOROOT", "reaches unaudited standard operation runtime.GOROOT")
+		gomaxEff := symbolExternalEffect(externalEffectUnauditedStandard, "runtime", "GOMAXPROCS", "reaches unaudited standard operation runtime.GOMAXPROCS")
+		if maximalObservabilityBlocker(audited, gorootEff) || !maximalObservabilityBlocker(audited, gomaxEff) {
+			t.Fatal("maximalObservabilityBlocker misclassified runtime.GOROOT vs runtime.GOMAXPROCS")
+		}
+
+		// 2. Disjointness of whole-package audited-pure set vs always-external and class-B tables
+		// (REQ-closure-observability-audited-set, REQ-closure-observability-analysis).
+		if isSourceOnlyStandardPackage(true, pkg) {
+			if isAlwaysExternalPackage(pkg) {
+				t.Fatalf("package %q is both source-only audited-pure and always-external", pkg)
+			}
+			if _, ok := classBEffect(pkg, sym); ok {
+				t.Fatalf("package %q is source-only audited-pure but has classBEffect for %q", pkg, sym)
+			}
+		}
+
+		// 3. Reflect exclusion, entropy, writer-sink, and harness logging/pacing/subtest-driver families
+		// (REQ-closure-observability-reflect-exclusion, REQ-closure-observability-entropy,
+		// REQ-closure-observability-writer-sink, REQ-closure-observability-harness-logging,
+		// REQ-closure-observability-benchmark-pacing, REQ-closure-observability-subtest-driver).
+		for _, forbiddenReflect := range []string{"ValueOf", "Value", "MakeFunc", "Call", "Method", "MethodByName", "Set", "Pointer", "UnsafePointer"} {
+			if classBPureStandard(audited, "reflect", forbiddenReflect) || auditedStandardSymbol(audited, "reflect", forbiddenReflect) {
+				t.Fatalf("reflect dispatch/value surface %q was admitted", forbiddenReflect)
+			}
+		}
+		if classBPureStandard(audited, "reflect", "DeepEqual") != audited || classBPureStandard(audited, "reflect", "TypeOf") != audited {
+			t.Fatalf("reflect DeepEqual/TypeOf admission did not track audited=%v", audited)
+		}
+		for _, entropyOp := range []string{"Read", "Text", "Int", "Prime"} {
+			eff, ok := classBEffect("crypto/rand", entropyOp)
+			if !ok || eff.kind != externalEffectNative || !strings.Contains(eff.reason, "(entropy)") || !maximalObservabilityBlocker(audited, eff) {
+				t.Fatalf("crypto/rand.%s classification = (%+v, %v), want blocking native entropy effect", entropyOp, eff, ok)
+			}
+		}
+		if isSourceOnlyStandardPackage(audited, "math/rand") || isSourceOnlyStandardPackage(audited, "math/rand/v2") {
+			t.Fatal("math/rand or math/rand/v2 admitted as source-only pure standard package")
+		}
+		fprintEff := symbolExternalEffect(externalEffectFormattedOutput, "fmt", "Fprintf", "reaches fmt.Fprintf")
+		if fmtFprintFamily(audited, "fmt", "Println") || fmtFprintFamily(audited, "fmt", "Fprintf") != audited || maximalObservabilityBlocker(audited, fprintEff) != !audited {
+			t.Fatalf("fmtFprintFamily / maximalObservabilityBlocker misclassified Println vs Fprintf under audited=%v", audited)
+		}
+		logOps := []string{"Fatal", "Fatalf", "Error", "Errorf", "Log", "Logf", "Skip", "Skipf", "SkipNow", "Fail", "FailNow"}
+		if auditedHarnessLogging(audited, "testing", logOps[int(choice)%len(logOps)]) != audited || auditedHarnessLogging(audited, "testing", "Verbose") {
+			t.Fatal("auditedHarnessLogging misclassified logging method vs Verbose")
+		}
+		paceOps := []string{"N", "Loop", "ResetTimer", "StartTimer", "StopTimer"}
+		if auditedHarnessPacing(audited, "testing", paceOps[int(choice)%len(paceOps)]) != audited || auditedHarnessPacing(audited, "testing", "Elapsed") {
+			t.Fatal("auditedHarnessPacing misclassified pacing vs Elapsed")
+		}
+		if auditedHarnessSubtestDriver(audited, driver) != audited {
+			t.Fatalf("auditedHarnessSubtestDriver(audited=%v) != %v", audited, audited)
+		}
+		runEff := symbolExternalEffect(externalEffectTestRuntime, "testing", "Run", "reaches testing.Run")
+		fuzzEff := symbolExternalEffect(externalEffectTestRuntime, "testing", "Fuzz", "reaches testing.Fuzz")
+		if maximalObservabilityBlocker(audited, runEff) || maximalObservabilityBlocker(audited, fuzzEff) {
+			t.Fatal("testing.Run or testing.Fuzz blocked at maximal package-scan floor")
+		}
+
+		// 4. Flag registration & TestMain epilogue exit & unsafe.Pointer narrowing
+		// (REQ-closure-observability-flag-registration, REQ-closure-observability-testmain-exit,
+		// REQ-closure-observability-unsafe).
+		if !flagRegistrationSymbol("flag", "String") || !flagRegistrationSymbol("flag", "BoolVar") || flagRegistrationSymbol("flag", "Parse") {
+			t.Fatal("flagRegistrationSymbol misclassified registration vs Parse")
+		}
+		flagRegScan, err := maximalFileEffectsContent(audited, "flag_test.go", []byte("package p\nimport \"flag\"\nvar f = flag.String(\"name\", \"v\", \"u\")\n"))
+		if err != nil || len(flagRegScan.effects) != 0 {
+			t.Fatalf("flag registration recorded file-scan effect: %+v, err=%v", flagRegScan.effects, err)
+		}
+		testMainExitSrc := "package p\nimport (\n\t\"os\"\n\t\"testing\"\n)\nfunc TestMain(m *testing.M) {\n\tos.Exit(m.Run())\n}\n"
+		tmScan, err := maximalFileEffectsContent(audited, "main_test.go", []byte(testMainExitSrc))
+		if err != nil {
+			t.Fatalf("maximalFileEffectsContent(TestMain): %v", err)
+		}
+		for _, eff := range tmScan.effects {
+			if eff.symbol == "Exit" || maximalObservabilityBlocker(audited, eff) {
+				t.Fatalf("os.Exit in TestMain(*testing.M) recorded blocking or Exit file-scan effect: %+v", tmScan.effects)
+			}
+		}
+		nonTestMainExitSrc := "package p\nimport \"os\"\nfunc Helper() {\n\tos.Exit(1)\n}\n"
+		nonTMScan, err := maximalFileEffectsContent(audited, "helper_test.go", []byte(nonTestMainExitSrc))
+		if err != nil || len(nonTMScan.effects) == 0 {
+			t.Fatalf("os.Exit outside TestMain was not flagged by file scan: %+v, err=%v", nonTMScan.effects, err)
+		}
+		unsafePtrEff := symbolExternalEffect(externalEffectUnauditedStandard, "unsafe", "Pointer", "reaches unsafe.Pointer")
+		unsafeSliceEff := symbolExternalEffect(externalEffectUnauditedStandard, "unsafe", "Slice", "reaches unsafe.Slice")
+		unsafeStringEff := symbolExternalEffect(externalEffectUnauditedStandard, "unsafe", "String", "reaches unsafe.String")
+		if maximalObservabilityBlocker(audited, unsafePtrEff) || !maximalObservabilityBlocker(audited, unsafeSliceEff) || !maximalObservabilityBlocker(audited, unsafeStringEff) {
+			t.Fatal("maximalObservabilityBlocker misclassified unsafe.Pointer narrowing vs unsafe.Slice/String")
+		}
+
+		// 5. Declaration bindings, property harness, dispatch open-world terms, and batch equivalence
+		// (REQ-closure-observability-declaration-bindings, REQ-closure-observability-property-harness,
+		// REQ-closure-observability-dispatch, REQ-closure-observability-batch-equivalence).
+		declBindSrc := "package p\nimport \"example.com/custom/v2\"\nfunc Call() { realpkg." + cleanSym + "() }\n"
+		if _, err := maximalFileEffectsContentWithNames(audited, "decl.go", []byte(declBindSrc), map[string]string{"example.com/custom/v2": "realpkg"}); err != nil {
+			t.Fatalf("maximalFileEffectsContentWithNames: %v", err)
+		}
+		collideSrc := "package p\nimport (\n\ta \"fmt\"\n\ta \"os\"\n)\n"
+		collideScan, err := maximalFileEffectsContentWithNames(audited, "collide.go", []byte(collideSrc), nil)
+		if err != nil || !strings.Contains(collideScan.preferred, "import name collision") {
+			t.Fatalf("colliding explicit import aliases did not fail closed: %+v, err=%v", collideScan, err)
+		}
+
+		if !propertyHarnessPath("pgregory.net/rapid") || propertyHarnessPath("testing") {
+			t.Fatal("propertyHarnessPath misclassified pgregory.net/rapid vs testing")
+		}
+		if !auditedPropertyHarnessModule("v1.3.0", false, false) || auditedPropertyHarnessModule("v0.0.1", false, false) || !auditedPropertyHarnessModule("v0.0.1", true, false) {
+			t.Fatal("auditedPropertyHarnessModule misclassified version/main/replace gates")
+		}
+		phFact := propertyHarnessFact()
+		if !phFact.observable || maximalObservabilityBlocker(audited, phFact) {
+			t.Fatalf("propertyHarnessFact = %+v, want observable non-blocker", phFact)
+		}
+
+		closedSig := types.NewSignatureType(nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, nil, "x", types.Typ[types.Int])), nil, false)
+		openSig := types.NewSignatureType(nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, nil, "fn", types.NewSignatureType(nil, nil, nil, nil, nil, false))), nil, false)
+		if term := SignatureOpenWorldTerm(audited, closedSig, nil, false, CarrierPolicyClosure); term != "" {
+			t.Fatalf("closed signature reported open-world term %q", term)
+		}
+		if term := SignatureOpenWorldTerm(audited, openSig, nil, false, CarrierPolicyClosure); !strings.Contains(term, "parameter fn") {
+			t.Fatalf("open signature term = %q, want parameter fn", term)
+		}
+		fileIOEff := symbolExternalEffect(externalEffectFileIO, "os", "Open", "reaches os.Open (file I/O)")
+		if !preferEffectReason(fileIOEff, gomaxEff) || !preferEffectReason(gomaxEff, phFact) {
+			t.Fatal("preferEffectReason violated cause-preference rank order")
+		}
+
+		subjA := Subject{Package: "example.com/p", Symbol: "A_" + cleanSym}
+		subjB := Subject{Package: "example.com/p", Symbol: "B_" + cleanSym}
+		if maximalSubjectHash(pkg, subjA) == maximalSubjectHash(pkg, subjB) {
+			t.Fatalf("maximalSubjectHash collided across distinct subjects %v and %v", subjA, subjB)
+		}
+		baseFacts := newMaximalFacts(MaximalIdentity{ToolchainContent: "tc", AdmissionPolicy: "ap"}, []externalEffect{gomaxEff, fileIOEff}, preferredEffectReason([]externalEffect{gomaxEff, fileIOEff}))
+		cloneA := baseFacts.Clone()
+		cloneB := baseFacts.Clone()
+		if cloneA.Closure() != cloneB.Closure() || !cloneA.Closure().Unverifiable {
+			t.Fatalf("cloned maximal facts diverged across batch subjects: %+v vs %+v", cloneA.Closure(), cloneB.Closure())
+		}
+
+		elemType := types.Type(types.Typ[types.Int])
+		if choice%2 == 1 {
+			elemType = types.Typ[types.String]
+		}
+		inst, err := types.Instantiate(nil, atomicGeneric, []types.Type{elemType}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if elem, ok := AuditedAtomicPointerElem(audited, inst.(*types.Named)); ok != audited || (ok && elem != elemType) {
+			t.Fatalf("AuditedAtomicPointerElem(%v) = (%v, %v)", audited, elem, ok)
+		}
+	})
+}
+

@@ -20,3 +20,53 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "02f6e10bd2196fc9e97379c78219d3a33ebc1f52d51d7a417729364f03548a96"
 }
+
+bindings {
+  requirement_id: "REQ-control-authority"
+  content_hash: "63a72ef210080936816c1aa9dd4493abe9aa7887f67c9aaa7ae4e2107cb57caa"
+  source_hash: "c0a0858c78e96ec5cbb74e47316200d522b303cd94ee4fac44c83210f32b1111"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzControlAndSessionAuthority"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2c64fd7bfa6c552702bb5d93ca842442e26cb37603015b58dbdd8ba854ddd708"
+}
+
+bindings {
+  requirement_id: "REQ-control-execution-description"
+  content_hash: "d9979299e6980a36b39ce9deafa62122fcc96b525154695f6362e36e43cef0f8"
+  source_hash: "4c3039657f728c4e6d9f33f3e31aedcf32acef05a0b42f8cb1c692d8198c9dad"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzControlAndSessionAuthority"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2c64fd7bfa6c552702bb5d93ca842442e26cb37603015b58dbdd8ba854ddd708"
+}
+
+bindings {
+  requirement_id: "REQ-control-project-isolation"
+  content_hash: "b4c25d17ff3a1c26059e72a5dfd0de9c71d19a2346285c6a4445dbd63d9bff9c"
+  source_hash: "0deec4828e0479e0c70b997f725202d052c2812b05f80ac010e8c9f8e919f75f"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzControlAndSessionAuthority"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2c64fd7bfa6c552702bb5d93ca842442e26cb37603015b58dbdd8ba854ddd708"
+}
+
+bindings {
+  requirement_id: "REQ-control-request-project"
+  content_hash: "103a450c17dd1b3307aedc135c70d22dbcbf2088ecb225829bf0ff69e4760b33"
+  source_hash: "ea10249e8a13b39e3e175a98800a6b51a49f0606525cc476e842643d01dd45d1"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzControlAndSessionAuthority"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2c64fd7bfa6c552702bb5d93ca842442e26cb37603015b58dbdd8ba854ddd708"
+}
+
+bindings {
+  requirement_id: "REQ-control-trust-source"
+  content_hash: "c9a46c945890f6eeb32fd9ee4c263d87d4dc11394afd4e1c204b1e0dc04bc254"
+  source_hash: "22c39e779ca61893ba627e326ee022bd74a990a56c2d086a62752a64b791072f"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzControlAndSessionAuthority"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2c64fd7bfa6c552702bb5d93ca842442e26cb37603015b58dbdd8ba854ddd708"
+}

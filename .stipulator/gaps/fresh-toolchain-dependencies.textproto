@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-fresh-toolchain-dependencies"
-reason: "Selected-content drift and evidence-binding examples survive, but approval-policy compatibility and @44 history do not establish new generic checked semantics."
-content_hash: "6f0ffe39acb12b44c821f7e8adf088688e89333724f3f93596bec03e56735c8c"
-source_hash: "e32c08e9e8d101b8f5a32d9dc225f18b22e04d75ef8ee88ca02b1ad6f1bb7fcc"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

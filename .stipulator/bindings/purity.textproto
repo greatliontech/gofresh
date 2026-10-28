@@ -172,3 +172,13 @@ bindings {
   shape_hash: "ed2d12aab779ed23d734e5b481eedd316543ce6694c757d615d7430732b5dcd5"
   clause_label: "externality"
 }
+
+bindings {
+  requirement_id: "REQ-purity-observation-separation"
+  content_hash: "ddca71fa1544e72fda034ccc88b4f4f27b26aa39872f13d741ffc39b033fc952"
+  source_hash: "e642ad7083f5644b76eb0090d5dd2da0d2e88e579fec795c921472b7d454a980"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzFreshnessVerdictAndObservationInvariants"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "4421e7cf34a1946007ff53dd4f586c429d879c15f6b0aaf49714645425d293bc"
+}

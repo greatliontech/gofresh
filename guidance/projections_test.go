@@ -459,3 +459,89 @@ func TestServedJudgmentComparesBytesWithTheProjection(t *testing.T) {
 		t.Fatalf("a knobless verb with nothing served: %v, %v", defects, err)
 	}
 }
+
+// FuzzGuidanceSingleSourceProjections is a property witness for
+// REQ-guidance-single-source: across generated knob clauses and drifted
+// served strings, every CLI and MCP registration, schema description, and
+// served-bytes check projects directly from the parsed document and refuses
+// any drifted literal or unknobbed schema property.
+func FuzzGuidanceSingleSourceProjections(f *testing.F) {
+	f.Add("candidates per symbol", "0", "stray", "drifted")
+	f.Add("timeout in seconds", "30s", "extra", "other")
+	f.Add("with `attest` enabled", "false", "unknown", "mismatch")
+	f.Fuzz(func(t *testing.T, prefix, defVal, unknobbed, drift string) {
+		sanitize := func(s, fallback string) string {
+			var b strings.Builder
+			for _, r := range s {
+				if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == ' ' || r == '-' || r == '_' {
+					b.WriteRune(r)
+				}
+			}
+			out := strings.TrimSpace(b.String())
+			if out == "" {
+				return fallback
+			}
+			return out
+		}
+		p := sanitize(prefix, "candidates per symbol")
+		d := sanitize(defVal, "0")
+		u := sanitize(unknobbed, "stray")
+		if u == "budget" || u == "budget-cli" || u == "edits" || u == "file" {
+			u = "unknobbed_" + u
+		}
+		clause := p + " (default " + d + ")"
+		src := strings.Replace(projectionSource, "candidates per symbol (default 0) (0 means exhaustive)", clause, 1)
+		e := Embed("tool", []byte(src))
+		doc, err := Parse([]byte(src))
+		if err != nil {
+			t.Fatalf("Parse failed: %v", err)
+		}
+		cliReg, err := e.Registration("cli", "run")
+		if err != nil {
+			t.Fatalf("cli Registration: %v", err)
+		}
+		mcpReg, err := e.Registration("mcp", "run_mcp")
+		if err != nil {
+			t.Fatalf("mcp Registration: %v", err)
+		}
+		k, err := doc.Knob("cli", "run", "budget-cli")
+		if err != nil {
+			t.Fatalf("Knob: %v", err)
+		}
+		if k.Clause() != clause || k.Usage() != p {
+			t.Fatalf("knob projections = (%q, %q), want (%q, %q)", k.Clause(), k.Usage(), clause, p)
+		}
+		if len(cliReg.Knobs) != 1 || cliReg.Knobs[0].Clause != k.Clause() || cliReg.Knobs[0].Usage != k.Usage() {
+			t.Fatalf("cli registration drifted from knob projection: %+v", cliReg.Knobs)
+		}
+		if len(mcpReg.Knobs) != 3 || mcpReg.Knobs[0].Clause != k.Clause() || mcpReg.Knobs[0].Usage != "" {
+			t.Fatalf("mcp registration drifted from knob projection: %+v", mcpReg.Knobs)
+		}
+		if defects, err := doc.Served("cli", "run", map[string]string{"budget-cli": k.Usage()}); err != nil || len(defects) != 0 {
+			t.Fatalf("exact cli usage rejected: %v %v", defects, err)
+		}
+		if defects, err := doc.Served("mcp", "run_mcp", map[string]string{"budget": k.Clause()}); err != nil || len(defects) != 0 {
+			t.Fatalf("exact mcp clause rejected: %v %v", defects, err)
+		}
+		drifted := drift
+		if drifted == k.Usage() || drifted == k.Clause() {
+			drifted += "!"
+		}
+		if defects, err := doc.Served("cli", "run", map[string]string{"budget-cli": drifted}); err != nil || len(defects) != 1 {
+			t.Fatalf("drifted cli literal not refused: %v %v", defects, err)
+		}
+		if defects, err := doc.Served("mcp", "run_mcp", map[string]string{"budget": drifted}); err != nil || len(defects) != 1 {
+			t.Fatalf("drifted mcp literal not refused: %v %v", defects, err)
+		}
+		budgetNode := &fakeNode{}
+		root := &fakeNode{props: map[string]*fakeNode{"budget": budgetNode}}
+		if _, err := doc.DescribeSchema("mcp", "run_mcp", root); err != nil || budgetNode.desc != k.Clause() {
+			t.Fatalf("DescribeSchema = %q, %v; want %q", budgetNode.desc, err, k.Clause())
+		}
+		badSchema := &fakeNode{props: map[string]*fakeNode{"budget": {}, u: {}}}
+		if _, err := doc.DescribeSchema("mcp", "run_mcp", badSchema); err == nil || !strings.Contains(err.Error(), u) {
+			t.Fatalf("DescribeSchema accepted unknobbed property %q: %v", u, err)
+		}
+	})
+}
+

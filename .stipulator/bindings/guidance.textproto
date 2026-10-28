@@ -210,3 +210,13 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "665a639fa8cfcea326756250f61e6f7fa71d4272af71c987fca6f35a548a11a1"
 }
+
+bindings {
+  requirement_id: "REQ-guidance-single-source"
+  content_hash: "459c9d2bf982101bc5bb0a86d568be4f7a5e7543837a75cbd3d253a266d93b48"
+  source_hash: "6bb3c297474768993547e89144f58edc167294ff524af8c5f72b092fe8baf0d5"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/guidance.FuzzGuidanceSingleSourceProjections"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "d07dabe14e190214cf5da115c385649e2e9eac5a16e5eee7b220010900462d6e"
+}

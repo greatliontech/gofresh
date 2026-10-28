@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-closure-blindspot"
-reason: "The file-scan linkname floor still recognizes approved target names instead of deriving claim-relevant selected target effects; existing cgo/assembly examples do not establish that new premise."
-content_hash: "b0e2340663270d4007ada3032eba17584f399cbc7dc7bda9aa5ce56352b58227"
-source_hash: "48e7c2730cd5fb0e4653341c16553a1408e0d699dff9eadcaefe0a6c5e34fe7c"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

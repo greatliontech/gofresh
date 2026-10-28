@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-closure-identity-strategy"
-reason: "the invariant's move-by-construction claim is the composition of per-derivation version constants; the example witness pins the composition and the fold discipline while a property witness or analyzer proof over derivation changes is pending"
-content_hash: "b1a4e0474c9b72bd287a4299637b1d48c030a5f9b4cc2088e30e1d4f1a8131ca"
-source_hash: "16a5572cd115f6fb58892bbb9c8c2a357f0b7d0ab36f3a02cea4a463ff7fa6de"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

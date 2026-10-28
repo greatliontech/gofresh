@@ -480,3 +480,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "d85af92b5760a2b8a58f0772183b2231cc15829e2199fcb95336e16736bfb05f"
 }
+
+bindings {
+  requirement_id: "REQ-guard-runtime-relevance"
+  content_hash: "d35f033577a313245955f8e0ef02e097bd3d8de4f9f3ba62e2756635c576b8ff"
+  source_hash: "a1d05b4b2a4e4cb8b334653ebc0b7e61777747f94d47cc342d24e7ca8c151c70"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzGuardRelevanceAndViewLifetime"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "23b582289ed36208069b8d2a231704f7395ed36538921c24d9c4bcbf94314381"
+}
+
+bindings {
+  requirement_id: "REQ-guard-view-lifetime"
+  content_hash: "92f3ee05eadb9a3909e640ec0660d688cb72b0bc7b5685073561eedf93e16618"
+  source_hash: "06ba5c87312e00683556f11221ed9c6b1eaf2ce6dd1bf814328e1098ba8714a1"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzGuardRelevanceAndViewLifetime"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "23b582289ed36208069b8d2a231704f7395ed36538921c24d9c4bcbf94314381"
+}

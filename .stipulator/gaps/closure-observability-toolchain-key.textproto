@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-closure-observability-toolchain-key"
-reason: "invariant coverage was withdrawn across the guard and observation redesigns; example pins anchor the behaviors while property witnesses or analyzer proofs are pending"
-content_hash: "c9797c9e64196df11e1d8fccf646ace33753a9abb7b21f2eace22352738b7523"
-source_hash: "28859a2abdfa260ab4572ff65516f7de428a11f974c07bcae71d01d65560d0b7"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

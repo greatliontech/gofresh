@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-closure-view-maximal"
-reason: "Existing tests establish core/compartment hash identity only. The new optional checked per-subject refinement needs independently accepted evidence for exact structured blockers without granting observation authority; concurrently authored code is not consented here. The isolated compiler-intrinsic regression demonstrated that nominal Go-source checking can miss CPU-feature-dependent implementation dispatch. Its runtime grant is cut off pending checked compiler-selected correspondence; the source proof alone grants none."
-content_hash: "2830ba1a4213aa9875874529d7810ecabe6667f6f3a6c6ee4ccfa1249cfb275e"
-source_hash: "b062925be9893922d671d13afe826d24f12411be25d4f3c94cdc2aab65eb76e5"
-lands { manual { condition: "a property witness or analyzer proof lands for this invariant" } }

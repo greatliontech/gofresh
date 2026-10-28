@@ -1,8 +1,0 @@
-# proto-file: proto/stipulator/v1/records.proto
-# proto-message: stipulator.v1.Gap
-
-requirement_id: "REQ-fresh-dependency-identities"
-reason: "Native memo and recorded-proof paths now carry selected-content/admission dependencies, and position-bearing memo keys include raw source identity. Complete invariant evidence across historical missing support, dependency changes and representation-only compatibility remains outstanding."
-content_hash: "3dca78d96d8b4c88637ba26f035e5420102cd04fab120cf613266945ca543c90"
-source_hash: "7105f8296ee41a751a49bc5d999206882e4578dd25d27c8635e483964c0d3eb6"
-lands { manual { condition: "Native memo and recorded-proof paths enforce all claim-specific source, selected-toolchain-content, admission and derivation dependencies; same-version content motion and layout-only changes to position-bearing payloads pass cold/warm/historical checks, and representation-only changes do not alter evidence authority." } }
