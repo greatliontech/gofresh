@@ -452,7 +452,7 @@ const ClosureStrategy = closure.IdentityStrategy
 // @44 binds selected standard-library content and admission policy into
 // proof integrity and outcome-subject identities; older evidence cannot
 // acquire the missing dependencies from current analysis.
-const ObservationRTA = "gofresh/observation-rta@51"
+const ObservationRTA = "gofresh/observation-rta@52"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

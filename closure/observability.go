@@ -442,7 +442,7 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 	// silently admit that callee.
 	subjectReach := reach
 	subjectReach.functions = subjectReach.subjectFunctions
-	subjectResult, err := h.tier2Reachable(base, subjectReach)
+	subjectResult, subjectObjects, err := h.tier2ReachableWithObjects(base, subjectReach)
 	if err != nil {
 		return Observability{}, err
 	}
@@ -515,6 +515,13 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 	maximalEffects, _, err := h.maximalExternalEffects(pkgPath)
 	if err != nil {
 		return Observability{}, err
+	}
+	if hasFilterableMaximalBlocker(h.SelectionAudited(), maximalEffects) {
+		reachedDecls := subjectReachedDeclKeys(base, reach, subjectObjects)
+		maximalEffects, err = h.subjectMaximalExternalEffects(base, pkgPath, reachedDecls)
+		if err != nil {
+			return Observability{}, err
+		}
 	}
 	for _, effect := range maximalEffects {
 		if maximalObservabilityBlocker(h.SelectionAudited(), effect) {
@@ -1524,3 +1531,35 @@ func flagBackedReadEffect(g *ssa.Global) externalEffect {
 // byte-equivalence (REQ-closure-observability-memo). The full
 // provenance rides the diagnostic channel at refusal time.
 const unsupportedShapeReason = "attributed reachability unavailable: unsupported analysis shape"
+
+// packageWideMaximalHazard reports whether effect is a package-wide
+// process-state or memory-safety hazard that blocks every subject in the
+// package even when it sits inside an unreachable function or method
+// declaration (REQ-closure-observability-unsafe).
+func packageWideMaximalHazard(effect externalEffect) bool {
+	if effect.packagePath == "unsafe" && effect.symbol != "Pointer" {
+		return true
+	}
+	if effect.packagePath == "os" && effect.symbol == "Exit" {
+		return true
+	}
+	if effect.packagePath == "testing" && (effect.symbol == "Setenv" || effect.symbol == "Chdir") {
+		return true
+	}
+	if effect.packagePath == "os" || effect.packagePath == "syscall" || strings.HasPrefix(effect.packagePath, "golang.org/x/sys/") {
+		switch effect.symbol {
+		case "Setenv", "Unsetenv", "Clearenv", "Chdir", "Fchdir":
+			return true
+		}
+	}
+	return false
+}
+
+func hasFilterableMaximalBlocker(audited bool, effects []externalEffect) bool {
+	for _, effect := range effects {
+		if maximalObservabilityBlocker(audited, effect) && !packageWideMaximalHazard(effect) {
+			return true
+		}
+	}
+	return false
+}

@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"go/types"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -23,6 +24,11 @@ type tier2Result struct {
 }
 
 func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachability) (tier2Result, error) {
+	res, _, err := h.tier2ReachableWithObjects(base, reachable)
+	return res, err
+}
+
+func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributedReachability) (tier2Result, map[types.Object]bool, error) {
 	a := base.analyzer()
 	a.rtaResolved = reachable.resolved
 	a.skipOriginScan = reachable.instantiatedOrigins
@@ -115,7 +121,7 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 					continue
 				}
 			}
-			if !ok && !callerIdx.std && !isSourceOnlyStandardPackage(h.SelectionAudited(), idx.path) {
+			if !ok && !callerIdx.std && !isAuditedStandardOrDelegatePackage(h.SelectionAudited(), idx.path) {
 				// The audited-pure admissions hold for an enumerated
 				// dynamic target exactly as for a static callee - the
 				// admission is a property of the operation, not of the
@@ -133,13 +139,13 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 	}
 	for fn := range reachable.functions {
 		if err := a.contextErr(); err != nil {
-			return tier2Result{}, err
+			return tier2Result{}, nil, err
 		}
 		a.rtaReach[fn] = true
 	}
 	for fn := range reachable.functions {
 		if err := a.contextErr(); err != nil {
-			return tier2Result{}, err
+			return tier2Result{}, nil, err
 		}
 		a.addFunction(fn)
 		if idx := a.idxForFunction(fn); idx != nil && idx.std {
@@ -147,28 +153,28 @@ func (h *Hasher) tier2Reachable(base *tier2Base, reachable attributedReachabilit
 		}
 		a.scanFunction(fn)
 		if err := a.contextErr(); err != nil {
-			return tier2Result{}, err
+			return tier2Result{}, nil, err
 		}
 	}
 	if err := a.drainObjects(); err != nil {
-		return tier2Result{}, err
+		return tier2Result{}, nil, err
 	}
 	for {
 		if err := a.contextErr(); err != nil {
-			return tier2Result{}, err
+			return tier2Result{}, nil, err
 		}
 		pkgCount := len(a.filePkgs)
 		if err := a.addReachedPackageFiles(); err != nil {
-			return tier2Result{}, err
+			return tier2Result{}, nil, err
 		}
 		if err := a.drainObjects(); err != nil {
-			return tier2Result{}, err
+			return tier2Result{}, nil, err
 		}
 		if len(a.filePkgs) == pkgCount {
 			break
 		}
 	}
-	return a.result(), nil
+	return a.result(), a.seenObjects, nil
 }
 
 type pkgIndex struct {
@@ -187,6 +193,7 @@ type pkgIndex struct {
 	wasmImport     bool
 	linknames      map[types.Object]string
 	linknameByName map[string]string
+	funcKeys       map[types.Object]funcDeclKey
 }
 
 // tier2Base is the immutable package/source index shared by every subject in
@@ -383,6 +390,7 @@ func (a *tier2Analyzer) buildIndex(p *packages.Package) *pkgIndex {
 		decls:          map[types.Object]ast.Node{},
 		linknames:      map[types.Object]string{},
 		linknameByName: map[string]string{},
+		funcKeys:       map[types.Object]funcDeclKey{},
 	}
 	if meta != nil {
 		idx.cache = meta.Module != nil && !meta.Module.Main && a.h.underCache(meta.Dir)
@@ -395,6 +403,16 @@ func (a *tier2Analyzer) buildIndex(p *packages.Package) *pkgIndex {
 	}
 
 	for _, f := range p.Syntax {
+		fileDir := filepath.Clean(p.Dir)
+		if p.Fset != nil {
+			if tf := p.Fset.File(f.Pos()); tf != nil && tf.Name() != "" {
+				fileDir = filepath.Clean(filepath.Dir(tf.Name()))
+			}
+		}
+		pkgClause := ""
+		if f.Name != nil {
+			pkgClause = f.Name.Name
+		}
 		for _, cg := range f.Comments {
 			for _, c := range cg.List {
 				if !strings.Contains(c.Text, "go:linkname") && !strings.Contains(c.Text, "go:wasmimport") {
@@ -420,6 +438,9 @@ func (a *tier2Analyzer) buildIndex(p *packages.Package) *pkgIndex {
 				}
 				if obj := p.TypesInfo.Defs[d.Name]; obj != nil {
 					idx.decls[obj] = d
+					if key, ok := funcDeclKeyForAST(fileDir, pkgClause, d); ok {
+						idx.funcKeys[obj] = key
+					}
 				}
 				for local, target := range linknamesFromDoc(d.Doc) {
 					if obj := p.Types.Scope().Lookup(local); obj != nil {
@@ -1756,4 +1777,89 @@ func isStdImportPath(path string) bool {
 
 func isBenchmarkHarnessPath(path string) bool {
 	return path == "testing" || strings.HasPrefix(path, "testing/")
+}
+
+// funcDeclKey uniquely identifies an ordinary top-level function or method
+// declaration across type-checked package variants and syntactic file scans.
+// Package-level init functions and user TestMain declarations are never
+// filtered by funcDeclKey.
+type funcDeclKey struct {
+	dir       string
+	pkgClause string
+	recv      string
+	name      string
+}
+
+func receiverBaseTypeName(expr ast.Expr) string {
+	for {
+		switch x := expr.(type) {
+		case *ast.ParenExpr:
+			expr = x.X
+		case *ast.StarExpr:
+			expr = x.X
+		case *ast.IndexExpr:
+			expr = x.X
+		case *ast.IndexListExpr:
+			expr = x.X
+		case *ast.Ident:
+			return x.Name
+		default:
+			return ""
+		}
+	}
+}
+
+func funcDeclKeyForAST(dir, pkgClause string, fn *ast.FuncDecl) (funcDeclKey, bool) {
+	if fn == nil || fn.Name == nil || fn.Name.Name == "" || fn.Name.Name == "init" {
+		return funcDeclKey{}, false
+	}
+	recv := ""
+	if fn.Recv != nil {
+		if len(fn.Recv.List) != 1 {
+			return funcDeclKey{}, false
+		}
+		recv = receiverBaseTypeName(fn.Recv.List[0].Type)
+		if recv == "" {
+			return funcDeclKey{}, false
+		}
+	}
+	return funcDeclKey{
+		dir:       filepath.Clean(dir),
+		pkgClause: pkgClause,
+		recv:      recv,
+		name:      fn.Name.Name,
+	}, true
+}
+
+func subjectReachedDeclKeys(base *tier2Base, reach attributedReachability, subjectObjects map[types.Object]bool) map[funcDeclKey]bool {
+	keys := make(map[funcDeclKey]bool, len(subjectObjects)+len(reach.functions)+len(reach.instantiatedOrigins))
+	addObj := func(obj types.Object) {
+		obj = originObject(obj)
+		if obj == nil || obj.Pkg() == nil {
+			return
+		}
+		if idx := base.idxByTypes[obj.Pkg()]; idx != nil {
+			if key, ok := idx.funcKeys[obj]; ok {
+				keys[key] = true
+			}
+		}
+	}
+	addFn := func(fn *ssa.Function) {
+		for cur := fn; cur != nil; cur = cur.Parent() {
+			if orig := cur.Origin(); orig != nil {
+				addObj(orig.Object())
+			}
+			addObj(cur.Object())
+		}
+	}
+	for obj := range subjectObjects {
+		addObj(obj)
+	}
+	for fn := range reach.functions {
+		addFn(fn)
+	}
+	for fn := range reach.instantiatedOrigins {
+		addFn(fn)
+	}
+	return keys
 }

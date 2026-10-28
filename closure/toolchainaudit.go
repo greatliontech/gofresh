@@ -21,7 +21,7 @@ import (
 // toolchainVerifierVersion versions the structural stdlib boundary verifier.
 // Bumping this invalidates cached package verification verdicts and moves
 // AdmissionPolicy.
-const toolchainVerifierVersion = "gofresh/toolchain-verifier@5"
+const toolchainVerifierVersion = "gofresh/toolchain-verifier@6"
 
 // verifiedPackageMemo caches structural verification verdicts per
 // verifiedPackageMemoKey in memory.
@@ -811,6 +811,7 @@ func isDirectCallNamed(expr ast.Expr, name string) bool {
 func verifyTestingPackageAST(selectedFiles []string, files []*ast.File) error {
 	var hasStartCall, hasWrappedStartCall, hasCheckedStopCall, hasDiscardedStopCall bool
 	var hasDstStreamWrite, dstStreamWriteReturnsError, hasWriteFromBubble, writeFromBubbleChecksErr bool
+	var hasValidContextMethod, hasInvalidContextMethod bool
 	for _, f := range files {
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
@@ -818,6 +819,12 @@ func verifyTestingPackageAST(selectedFiles []string, files []*ast.File) error {
 				continue
 			}
 			switch fn.Name.Name {
+			case "Context":
+				if verifyTestingContextDecl(fn) {
+					hasValidContextMethod = true
+				} else {
+					hasInvalidContextMethod = true
+				}
 			case "dstHostStreamWrite":
 				hasDstStreamWrite = true
 				if fn.Type.Results != nil && fn.Type.Results.NumFields() >= 2 {
@@ -876,6 +883,12 @@ func verifyTestingPackageAST(selectedFiles []string, files []*ast.File) error {
 	if !hasStartCall || !hasCheckedStopCall || hasDiscardedStopCall {
 		return fmt.Errorf("testing: missing or unchecked StartTestLog/StopTestLog calls")
 	}
+	if hasInvalidContextMethod {
+		return fmt.Errorf("testing: (*common).Context has unexpected shape")
+	}
+	if slices.Contains(selectedFiles, "testing.go") && slices.Contains(selectedFiles, "benchmark.go") && !hasValidContextMethod {
+		return fmt.Errorf("testing: missing (*common).Context")
+	}
 	if slices.Contains(selectedFiles, "dst_hostio.go") {
 		if !hasDstStreamWrite {
 			return fmt.Errorf("testing: dst_hostio.go missing dstHostStreamWrite")
@@ -888,6 +901,59 @@ func verifyTestingPackageAST(selectedFiles []string, files []*ast.File) error {
 		return fmt.Errorf("testing: dstHostStreamWrite drops test-log write errors")
 	}
 	return nil
+}
+
+func verifyTestingContextDecl(fn *ast.FuncDecl) bool {
+	if fn == nil || fn.Recv == nil || len(fn.Recv.List) != 1 || fn.Body == nil || len(fn.Body.List) != 2 {
+		return false
+	}
+	recvField := fn.Recv.List[0]
+	if len(recvField.Names) != 1 || recvField.Names[0].Name == "" {
+		return false
+	}
+	recvName := recvField.Names[0].Name
+	star, ok := recvField.Type.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	recvIdent, ok := star.X.(*ast.Ident)
+	if !ok || recvIdent.Name != "common" {
+		return false
+	}
+	if fn.Type.Params != nil && fn.Type.Params.NumFields() != 0 {
+		return false
+	}
+	if fn.Type.Results == nil || fn.Type.Results.NumFields() != 1 {
+		return false
+	}
+	exprStmt, ok := fn.Body.List[0].(*ast.ExprStmt)
+	if !ok {
+		return false
+	}
+	call, ok := exprStmt.X.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "checkFuzzFn" {
+		return false
+	}
+	if id, ok := sel.X.(*ast.Ident); !ok || id.Name != recvName {
+		return false
+	}
+	if lit, ok := call.Args[0].(*ast.BasicLit); !ok || lit.Kind != token.STRING || lit.Value != `"Context"` {
+		return false
+	}
+	retStmt, ok := fn.Body.List[1].(*ast.ReturnStmt)
+	if !ok || len(retStmt.Results) != 1 {
+		return false
+	}
+	retSel, ok := retStmt.Results[0].(*ast.SelectorExpr)
+	if !ok || retSel.Sel.Name != "ctx" {
+		return false
+	}
+	retRecv, ok := retSel.X.(*ast.Ident)
+	return ok && retRecv.Name == recvName
 }
 
 // selectionDegradation is one toolchain-source audit verdict: the axis

@@ -2153,7 +2153,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "initfmtsink", subject: "TestAfterInitFormat", observable: true},
 		{fixture: "initfmtvalue", subject: "TestAfterInitValueFormat", reason: "startup effect: reaches fmt.Fprintf"},
 		{fixture: "initfmthelper", subject: "TestAfterInitHelperFormat", reason: "startup effect: reaches fmt.Fprintf"},
-		{fixture: "observablebad", subject: "TestOpenStat", reason: "os.File"},
+		{fixture: "observablebad", subject: "TestOpenStat", reason: "os.Open"},
 		{fixture: "observablebad", subject: "TestReadDirInfo", reason: "interface invoke"},
 		{fixture: "observablecallbackbad", subject: "TestSubtestRead", observable: true},
 		{fixture: "observablecallbackbad", subject: "TestNestedSubtestRead", observable: true},
@@ -4106,6 +4106,185 @@ func BenchmarkSumSHA1(b *testing.B) {
 		obs := got[s]
 		if !obs.Observable {
 			t.Errorf("%s.%s Observable = false (Reason = %q), want true", s.Package, s.Symbol, obs.Reason)
+		}
+	}
+}
+
+func TestSubjectScopedMaximalScanAndTestingContext(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds whole-program SSA and proves observability")
+	}
+	dir := t.TempDir()
+	writeFile := func(rel, content string) {
+		t.Helper()
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("go.mod", "module example.com/scoped\n\ngo 1.26\n")
+	writeFile("clean/clean.go", `package clean
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"os/exec"
+)
+
+func PureWithContext(ctx context.Context, s string) (string, error) {
+	cctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if err := cctx.Err(); err != nil {
+		return "", err
+	}
+	return s + "!", nil
+}
+
+func UnreachedExec() error {
+	var buf bytes.Buffer
+	cmd := exec.Command("git", "status")
+	cmd.Stdout = &buf
+	if err := os.RemoveAll("/tmp/nonexistent-gofresh-test"); err != nil {
+		return err
+	}
+	return cmd.Run()
+}
+`)
+	writeFile("clean/clean_test.go", `package clean
+
+import "testing"
+
+func checkTBContext(tb testing.TB) {
+	if err := tb.Context().Err(); err != nil {
+		tb.Fatalf("unexpected context err: %v", err)
+	}
+}
+
+func TestPureWithContext(t *testing.T) {
+	got, err := PureWithContext(t.Context(), "hi")
+	if err != nil || got != "hi!" {
+		t.Fatalf("got (%q, %v)", got, err)
+	}
+	checkTBContext(t)
+}
+
+func BenchmarkPureWithContext(b *testing.B) {
+	for b.Loop() {
+		_, _ = PureWithContext(b.Context(), "bench")
+	}
+}
+
+func TestUnreachedIntegration(t *testing.T) {
+	_ = t.TempDir()
+	_ = UnreachedExec()
+}
+`)
+	writeFile("hazards/setenv.go", `package hazards
+
+import "os"
+
+func Pure() int { return 42 }
+
+func UnreachedSetenv() {
+	_ = os.Setenv("X", "1")
+}
+`)
+	writeFile("exitpkg/exitpkg.go", `package exitpkg
+
+import "os"
+
+func Pure() int { return 42 }
+
+func UnreachedExit() {
+	os.Exit(1)
+}
+`)
+	writeFile("genmethod/genmethod.go", `package genmethod
+
+import "math/rand/v2"
+
+type Runner interface {
+	run() int
+}
+
+type Box[T any] struct {
+	V T
+}
+
+func (b Box[T]) run() int {
+	return rand.IntN(10)
+}
+
+func MakeRunner() Runner {
+	return Box[int]{V: 1}
+}
+`)
+	writeFile("customtb/customtb_test.go", `package customtb
+
+import (
+	"context"
+	"testing"
+)
+
+type customCtx struct {
+	context.Context
+}
+
+type fakeTB struct {
+	testing.TB
+}
+
+func (fakeTB) Context() context.Context {
+	return customCtx{Context: context.Background()}
+}
+
+func TestCustomTBContextRefused(t *testing.T) {
+	var tb testing.TB = fakeTB{TB: t}
+	_ = tb.Context().Err()
+}
+`)
+	h, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjects := []Subject{
+		{Package: "example.com/scoped/clean", Symbol: "PureWithContext"},
+		{Package: "example.com/scoped/clean", Symbol: "TestPureWithContext"},
+		{Package: "example.com/scoped/clean", Symbol: "BenchmarkPureWithContext"},
+		{Package: "example.com/scoped/clean", Symbol: "UnreachedExec"},
+		{Package: "example.com/scoped/clean", Symbol: "TestUnreachedIntegration"},
+		{Package: "example.com/scoped/hazards", Symbol: "Pure"},
+		{Package: "example.com/scoped/exitpkg", Symbol: "Pure"},
+		{Package: "example.com/scoped/genmethod", Symbol: "MakeRunner"},
+		{Package: "example.com/scoped/customtb", Symbol: "TestCustomTBContextRefused"},
+	}
+	got, err := h.ComputeObservabilityBatch(subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sym := range []string{"PureWithContext", "TestPureWithContext", "BenchmarkPureWithContext"} {
+		s := Subject{Package: "example.com/scoped/clean", Symbol: sym}
+		if obs := got[s]; !obs.Observable {
+			t.Errorf("%s.%s Observable = false (Reason = %q), want true", s.Package, s.Symbol, obs.Reason)
+		}
+	}
+	for _, tc := range []struct {
+		pkg, sym, wantReason string
+	}{
+		{"example.com/scoped/clean", "UnreachedExec", "unsafe pointer reachable"},
+		{"example.com/scoped/clean", "TestUnreachedIntegration", "unsafe pointer reachable"},
+		{"example.com/scoped/hazards", "Pure", "package scan: reaches unaudited standard operation os.Setenv"},
+		{"example.com/scoped/exitpkg", "Pure", "package scan: reaches unaudited standard operation os.Exit"},
+		{"example.com/scoped/genmethod", "MakeRunner", "package scan: reaches unaudited standard operation math/rand/v2.IntN"},
+		{"example.com/scoped/customtb", "TestCustomTBContextRefused", "interface invoke outside RTA: example.com/scoped/customtb.TestCustomTBContextRefused dispatches context.Context.Err"},
+	} {
+		s := Subject{Package: tc.pkg, Symbol: tc.sym}
+		if obs := got[s]; obs.Observable || !strings.Contains(obs.Reason, tc.wantReason) {
+			t.Errorf("%s.%s = %+v, want Observable=false Reason containing %q", tc.pkg, tc.sym, obs, tc.wantReason)
 		}
 	}
 }

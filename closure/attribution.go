@@ -300,6 +300,14 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 			enumClosed[i] = enc
 		}
 	}
+	if audited && testMasks != 0 {
+		if ct := programCancelCtxType(prog.Prog); ct != nil {
+			if seeds == nil {
+				seeds = &rta.Seeds{}
+			}
+			seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: ct, Masks: testMasks})
+		}
+	}
 	res, err := rta.Analyze(ctx, roots, seeds)
 	if err != nil {
 		return nil, err
@@ -1215,7 +1223,16 @@ func collectClosedDynamicSeeds(value ssa.Value, enc *enumerationClosure, seen ma
 }
 
 func collectCallResultSeeds(call *ssa.Call, tupleIndex int, enc *enumerationClosure, seen map[ssa.Value]bool, fp *freshParamAnalysis) {
-	if fp == nil || !fp.selectionAudited || call == nil || call.Common() == nil || call.Common().IsInvoke() {
+	if fp == nil || !fp.selectionAudited || call == nil || call.Common() == nil {
+		return
+	}
+	if tupleIndex <= 0 && isHarnessContextCall(call, map[ssa.Value]bool{}, map[ssa.Value]bool{}, fp) {
+		if ct := harnessCancelCtxType(call); ct != nil {
+			enc.types = append(enc.types, ct)
+		}
+		return
+	}
+	if call.Common().IsInvoke() {
 		return
 	}
 	callee := call.Common().StaticCallee()

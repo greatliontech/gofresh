@@ -264,7 +264,7 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@51" {
+	if ObservationRTA != "gofresh/observation-rta@52" {
 		t.Fatalf("ObservationRTA = %q, want content- and policy-bound proof evidence", ObservationRTA)
 	}
 }
@@ -433,7 +433,7 @@ func TestBuildInputsRejectFlags(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	if _, err := newEngine(withBuildInputs("-race")); err == nil || !strings.Contains(err.Error(), "withBuildFlags") {
+	if _, err := newEngine(withBuildInputs("-race")); err == nil || !strings.Contains(err.Error(), "BuildFlags") {
 		t.Fatalf("flag-shaped opaque input accepted: %v", err)
 	}
 }

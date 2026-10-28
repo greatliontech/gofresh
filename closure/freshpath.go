@@ -1182,6 +1182,18 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 	case *ssa.Convert:
 		return recurse(v.X)
 	case *ssa.Call:
+		if isHarnessContextCall(v, seen, done, fp) {
+			if !collecting {
+				return true
+			}
+			if collect != nil && collect.types != nil {
+				if ct := harnessCancelCtxType(v); ct != nil {
+					collect.types[ct] = true
+					return true
+				}
+			}
+			return false
+		}
 		// A gate-passing static call into the property harness yields a
 		// closed value: the harness wraps exactly the closed callables
 		// the boundary gate judged (rapid.MakeCheck's returned callback
@@ -1757,12 +1769,14 @@ func closedInvokeTargets(site ssa.CallInstruction, fp *freshParamAnalysis) (map[
 		}
 		if fp.isStdFunc(declFn) {
 			audited := fp != nil && fp.selectionAudited
-			if typeMayCarryDynamic(audited, ct, map[types.Type]bool{}) {
-				return nil, false
-			}
-			declPkg := funcPkgPath(declFn)
-			if !isAuditedStandardOrDelegatePackage(audited, declPkg) && !auditedStandardCallee(audited, declPkg, functionSymbolName(declFn), declFn) {
-				return nil, false
+			if !isAuditedStandardContextInvoke(audited, ct, c.Method) {
+				if typeMayCarryDynamic(audited, ct, map[types.Type]bool{}) {
+					return nil, false
+				}
+				declPkg := funcPkgPath(declFn)
+				if !isAuditedStandardOrDelegatePackage(audited, declPkg) && !auditedStandardCallee(audited, declPkg, functionSymbolName(declFn), declFn) {
+					return nil, false
+				}
 			}
 		}
 		cmethod := prog.LookupMethod(ct, c.Method.Pkg(), c.Method.Name())
@@ -2001,4 +2015,94 @@ func wrapperReceiver(c *ssa.CallCommon, callee *ssa.Function) ssa.Value {
 		return c.Args[0]
 	}
 	return c.Value
+}
+
+func isHarnessContextCall(call *ssa.Call, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
+	if fp == nil || !fp.selectionAudited || call == nil || call.Common() == nil || call.Parent() == nil || call.Parent().Prog == nil {
+		return false
+	}
+	c := call.Common()
+	if c.IsInvoke() {
+		if c.Method == nil || c.Method.Name() != "Context" || c.Method.Pkg() == nil || c.Method.Pkg().Path() != "testing" {
+			return false
+		}
+		return closedHarnessContextReceiver(c.Value, call.Parent().Prog, fp)
+	}
+	callee := c.StaticCallee()
+	if callee == nil || funcPkgPath(callee) != "testing" || callee.Name() != "Context" {
+		return false
+	}
+	if syntheticInterfaceMethodWrapper(callee) {
+		recv := wrapperReceiver(c, callee)
+		return closedHarnessContextReceiver(recv, call.Parent().Prog, fp)
+	}
+	_, ok := harnessCalleeEffect(fp.selectionAudited, callee, false)
+	return ok
+}
+
+func closedHarnessContextReceiver(recv ssa.Value, prog *ssa.Program, fp *freshParamAnalysis) bool {
+	if recv == nil || prog == nil || fp == nil || !fp.selectionAudited {
+		return false
+	}
+	if !walkDynamicValue(recv, nil, map[ssa.Value]bool{}, map[ssa.Value]bool{}, fp) {
+		return false
+	}
+	cts := map[types.Type]bool{}
+	if !walkDynamicValue(recv, &dynamicValueCollector{types: cts}, map[ssa.Value]bool{}, nil, fp) || len(cts) == 0 {
+		return false
+	}
+	for ct := range cts {
+		cmethod := prog.LookupMethod(ct, nil, "Context")
+		if !harnessInvokeAdmitted(fp.selectionAudited, cmethod) {
+			return false
+		}
+	}
+	return true
+}
+
+func harnessCancelCtxType(call *ssa.Call) types.Type {
+	if call == nil || call.Parent() == nil || call.Parent().Prog == nil {
+		return nil
+	}
+	return programCancelCtxType(call.Parent().Prog)
+}
+
+func programCancelCtxType(prog *ssa.Program) types.Type {
+	if prog == nil {
+		return nil
+	}
+	for _, pkg := range prog.AllPackages() {
+		if pkg == nil || pkg.Pkg == nil || pkg.Pkg.Path() != "context" {
+			continue
+		}
+		if obj := pkg.Pkg.Scope().Lookup("cancelCtx"); obj != nil {
+			return types.NewPointer(obj.Type())
+		}
+	}
+	return nil
+}
+
+func isAuditedStandardContextInvoke(audited bool, ct types.Type, method *types.Func) bool {
+	if !audited || ct == nil || method == nil || method.Pkg() == nil || method.Pkg().Path() != "context" {
+		return false
+	}
+	switch method.Name() {
+	case "Deadline", "Done", "Err", "Value":
+	default:
+		return false
+	}
+	base := ct
+	if ptr, ok := types.Unalias(ct).(*types.Pointer); ok {
+		base = ptr.Elem()
+	}
+	named, ok := types.Unalias(base).(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "context" {
+		return false
+	}
+	switch named.Obj().Name() {
+	case "cancelCtx", "withoutCancelCtx", "valueCtx", "backgroundCtx", "todoCtx", "emptyCtx":
+		return true
+	default:
+		return false
+	}
 }

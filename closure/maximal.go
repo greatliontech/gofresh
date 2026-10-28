@@ -457,6 +457,10 @@ func maximalFileEffectsContent(audited bool, filename string, content []byte) (m
 // (when supplied by the package listing) to bind unnamed imports to their
 // actual declared package names before falling back to path derivation.
 func maximalFileEffectsContentWithNames(audited bool, filename string, content []byte, declaredNames map[string]string) (maximalEffectScan, error) {
+	return maximalFileEffectsContentWithNamesFiltered(audited, filename, content, declaredNames, nil)
+}
+
+func maximalFileEffectsContentWithNamesFiltered(audited bool, filename string, content []byte, declaredNames map[string]string, reachedDecls map[funcDeclKey]bool) (maximalEffectScan, error) {
 	text := string(content)
 	hasWasmImport := strings.Contains(text, "//go:wasmimport")
 	hasLinkname := strings.Contains(text, "//go:linkname") && !auditedLinknamesOnly(audited, text)
@@ -573,12 +577,43 @@ func maximalFileEffectsContentWithNames(audited bool, filename string, content [
 	inTestMain := func(node ast.Node) bool {
 		return testMainDecl != nil && node.Pos() >= testMainDecl.Pos() && node.End() <= testMainDecl.End()
 	}
+	var unreachedDecls []*ast.FuncDecl
+	if reachedDecls != nil {
+		dir := filepath.Clean(filepath.Dir(filename))
+		pkgClause := ""
+		if file.Name != nil {
+			pkgClause = file.Name.Name
+		}
+		for _, decl := range file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd == testMainDecl {
+				continue
+			}
+			if key, ok := funcDeclKeyForAST(dir, pkgClause, fd); ok && !reachedDecls[key] {
+				unreachedDecls = append(unreachedDecls, fd)
+			}
+		}
+	}
+	inUnreachedDecl := func(node ast.Node) bool {
+		for _, fd := range unreachedDecls {
+			if node.Pos() >= fd.Pos() && node.End() <= fd.End() {
+				return true
+			}
+		}
+		return false
+	}
+	addSelEffect := func(sel *ast.SelectorExpr, effect externalEffect) {
+		if inUnreachedDecl(sel) && !packageWideMaximalHazard(effect) {
+			return
+		}
+		scan.add(effect)
+	}
 	ast.Inspect(file, func(node ast.Node) bool {
 		if sel, ok := node.(*ast.SelectorExpr); ok {
 			if ident, ok := sel.X.(*ast.Ident); ok {
 				pkgPath := aliases[ident.Name]
 				if effect, ok := classBEffect(pkgPath, sel.Sel.Name); ok {
-					scan.add(effect)
+					addSelEffect(sel, effect)
 				} else if pkgPath == "os" && sel.Sel.Name == "Exit" && inTestMain(sel) {
 					// admitted test-main epilogue
 				} else if flagRegistrationSymbol(pkgPath, sel.Sel.Name) {
@@ -589,14 +624,14 @@ func maximalFileEffectsContentWithNames(audited bool, filename string, content [
 					// storage refuses on reference, an untraceable
 					// sink poisons the package
 					// (REQ-closure-observability-flag-registration).
-				} else if !auditedStandardSymbol(audited, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isStandardFallbackExempt(audited, pkgPath)) {
-					scan.add(unauditedStandardEffect(pkgPath, sel.Sel.Name))
+				} else if !auditedStandardSymbol(audited, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isStandardFallbackExempt(audited, impPkgPathOr(pkgPath))) {
+					addSelEffect(sel, unauditedStandardEffect(pkgPath, sel.Sel.Name))
 				}
 			}
 		}
 		return true
 	})
-	testingEffects, _ := testingMethodEffects(file, aliases)
+	testingEffects, _ := testingMethodEffectsFiltered(file, aliases, unreachedDecls)
 	for _, effect := range testingEffects {
 		scan.add(effect)
 	}
@@ -604,6 +639,162 @@ func maximalFileEffectsContentWithNames(audited bool, filename string, content [
 	if scan.preferred == "" && potentialExternal != "" {
 		scan.preferred = "reaches " + potentialExternal + " (potential external dependence)"
 	}
+	return scan, nil
+}
+
+func impPkgPathOr(pkgPath string) string { return pkgPath }
+
+// subjectMaximalExternalEffects returns the package scan filtered to
+// package-level/file-level constructs, reached function/method declarations,
+// and package-wide process-state hazards for a closed-world Tier-2 subject
+// (REQ-closure-observability-unsafe).
+func (h *Hasher) subjectMaximalExternalEffects(base *tier2Base, pkgPath string, reachedDecls map[funcDeclKey]bool) ([]externalEffect, error) {
+	pkgs, err := h.list(pkgPath)
+	if err != nil {
+		return nil, err
+	}
+	var effects []externalEffect
+	record := func(scan maximalEffectScan) {
+		for _, effect := range scan.effects {
+			effects = appendExternalEffect(effects, effect)
+		}
+	}
+	testingEffects, err := h.maximalTestingTypeEffectsFiltered(base, pkgPath, reachedDecls)
+	if err != nil {
+		return nil, err
+	}
+	record(testingEffects)
+	declaredNames := listedDeclaredNames(pkgs)
+	overridesKey := declaredOverridesKey(declaredNames)
+	for _, pkg := range pkgs {
+		if err := h.contextErr(); err != nil {
+			return nil, err
+		}
+		if pkg.Standard || pkg.Module == nil || pkg.IsGeneratedTestMainFor(pkgPath) {
+			continue
+		}
+		if propertyHarnessPath(pkg.ImportPath) &&
+			auditedPropertyHarnessModule(pkg.Module.Version, pkg.Module.Main,
+				pkg.Module.Replace != nil && pkg.Module.Replace.Version == "") {
+			record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact()}})
+			continue
+		}
+		if scan, ok, err := h.pinnedEffectScanWithNames(pkg, declaredNames, overridesKey); err != nil {
+			return nil, err
+		} else if ok && !hasFilterableMaximalBlocker(h.SelectionAudited(), scan.effects) {
+			record(scan)
+			continue
+		}
+		record(maximalPackageExternalEffects(&pkg))
+		files := append(append([]string(nil), pkg.GoFiles...), pkg.CgoFiles...)
+		for _, name := range files {
+			if err := h.contextErr(); err != nil {
+				return nil, err
+			}
+			fullPath := filepath.Join(pkg.Dir, name)
+			unfiltered, err := h.maximalFileEffectsCachedWithNames(pkg.ImportPath, fullPath, declaredNames, overridesKey)
+			if err != nil {
+				return nil, err
+			}
+			if !hasFilterableMaximalBlocker(h.SelectionAudited(), unfiltered.effects) {
+				record(unfiltered)
+				continue
+			}
+			var content []byte
+			if h.underCache(pkg.Dir) {
+				content, err = os.ReadFile(fullPath)
+			} else {
+				var fb fileBytes
+				fb, err = h.readFile(fullPath)
+				content = fb.content
+			}
+			if err != nil {
+				return nil, err
+			}
+			scan, err := maximalFileEffectsContentWithNamesFiltered(h.SelectionAudited(), fullPath, content, declaredNames, reachedDecls)
+			if err != nil {
+				return nil, err
+			}
+			record(scan)
+		}
+	}
+	return effects, nil
+}
+
+func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath string, reachedDecls map[funcDeclKey]bool) (maximalEffectScan, error) {
+	if cached, ok := h.maximalTesting[pkgPath]; ok && !hasFilterableMaximalBlocker(h.SelectionAudited(), cached.effects) {
+		return cached, nil
+	}
+	var loaded []*packages.Package
+	if base != nil && base.prog != nil {
+		loaded = base.prog.Pkgs
+	}
+	if len(loaded) == 0 {
+		loaded = h.viewLoadVariants(pkgPath)
+	}
+	if len(loaded) == 0 {
+		return h.maximalTestingTypeEffects(pkgPath)
+	}
+	var scan maximalEffectScan
+	for _, pkg := range loaded {
+		if pkg.PkgPath != pkgPath && pkg.ForTest != pkgPath {
+			continue
+		}
+		for _, packageErr := range pkg.Errors {
+			return maximalEffectScan{}, fmt.Errorf("closure: load %s: %s", pkgPath, packageErr)
+		}
+		for _, file := range pkg.Syntax {
+			fileDir := filepath.Clean(pkg.Dir)
+			if pkg.Fset != nil {
+				if tf := pkg.Fset.File(file.Pos()); tf != nil && tf.Name() != "" {
+					fileDir = filepath.Clean(filepath.Dir(tf.Name()))
+				}
+			}
+			pkgClause := ""
+			if file.Name != nil {
+				pkgClause = file.Name.Name
+			}
+			var unreachedDecls []*ast.FuncDecl
+			for _, decl := range file.Decls {
+				fd, ok := decl.(*ast.FuncDecl)
+				if !ok || fd.Name == nil || fd.Name.Name == "TestMain" {
+					continue
+				}
+				if key, ok := funcDeclKeyForAST(fileDir, pkgClause, fd); ok && !reachedDecls[key] {
+					unreachedDecls = append(unreachedDecls, fd)
+				}
+			}
+			inUnreachedDecl := func(node ast.Node) bool {
+				for _, fd := range unreachedDecls {
+					if node.Pos() >= fd.Pos() && node.End() <= fd.End() {
+						return true
+					}
+				}
+				return false
+			}
+			ast.Inspect(file, func(node ast.Node) bool {
+				selector, ok := node.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				var object types.Object
+				if selection := pkg.TypesInfo.Selections[selector]; selection != nil {
+					object = selection.Obj()
+				} else {
+					object = pkg.TypesInfo.Uses[selector.Sel]
+				}
+				if object == nil || object.Pkg() == nil || object.Pkg().Path() != "testing" {
+					return true
+				}
+				effect, ok := classBEffect("testing", object.Name())
+				if ok && (!inUnreachedDecl(selector) || packageWideMaximalHazard(effect)) {
+					scan.add(effect)
+				}
+				return true
+			})
+		}
+	}
+	scan.preferred = preferredEffectReason(scan.effects)
 	return scan, nil
 }
 
@@ -616,6 +807,10 @@ func maximalFileEffectsContentWithNames(audited bool, filename string, content [
 // state computed once; equivalence-pinned by
 // TestFileEffectScanMatchesTwoPassReference.
 func testingMethodEffects(file *ast.File, aliases map[string]string) ([]externalEffect, string) {
+	return testingMethodEffectsFiltered(file, aliases, nil)
+}
+
+func testingMethodEffectsFiltered(file *ast.File, aliases map[string]string, unreachedDecls []*ast.FuncDecl) ([]externalEffect, string) {
 	if file == nil {
 		return nil, ""
 	}
@@ -626,6 +821,13 @@ func testingMethodEffects(file *ast.File, aliases map[string]string) ([]external
 		function, ok := declaration.(*ast.FuncDecl)
 		if !ok || function.Type.Params == nil || function.Body == nil {
 			continue
+		}
+		unreached := slices.Contains(unreachedDecls, function)
+		addTestingEffect := func(effect externalEffect) {
+			if unreached && !packageWideMaximalHazard(effect) {
+				return
+			}
+			effects = appendExternalEffect(effects, effect)
 		}
 		receivers := map[string]bool{}
 		for _, field := range function.Type.Params.List {
@@ -697,25 +899,25 @@ func testingMethodEffects(file *ast.File, aliases map[string]string) ([]external
 					name, ok := identifierName(rhs)
 					if ok && receivers[name] && i < len(node.Lhs) {
 						if _, ok := node.Lhs[i].(*ast.Ident); !ok {
-							effects = appendExternalEffect(effects, escape)
+							addTestingEffect(escape)
 						}
 					}
 				}
 			case *ast.CallExpr:
 				for _, argument := range node.Args {
 					if name, ok := identifierName(argument); ok && receivers[name] {
-						effects = appendExternalEffect(effects, escape)
+						addTestingEffect(escape)
 					}
 				}
 			case *ast.ReturnStmt:
 				for _, result := range node.Results {
 					if name, ok := identifierName(result); ok && receivers[name] {
-						effects = appendExternalEffect(effects, escape)
+						addTestingEffect(escape)
 					}
 				}
 			case *ast.Ident:
 				if receivers[node.Name] && !testingIdentifierUseSupported(node, parents) {
-					effects = appendExternalEffect(effects, escape)
+					addTestingEffect(escape)
 				}
 			}
 			selector, ok := node.(*ast.SelectorExpr)
@@ -727,11 +929,11 @@ func testingMethodEffects(file *ast.File, aliases map[string]string) ([]external
 				return true
 			}
 			if effect, ok := classBEffect("testing", selector.Sel.Name); ok {
-				effects = appendExternalEffect(effects, effect)
+				addTestingEffect(effect)
 			}
 			return true
 		})
-		if reason == "" {
+		if reason == "" && !unreached {
 			var fnReason string
 			ast.Inspect(function.Body, func(node ast.Node) bool {
 				switch node := node.(type) {

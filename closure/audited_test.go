@@ -1765,8 +1765,8 @@ func TestBenchmarkPacingIsNotPurityEvidence(t *testing.T) {
 // The typed testing scan's memo serves the classification table, so
 // the strategy moves with it (REQ-closure-testing-scan-memo).
 func TestTestingScanStrategyVersion(t *testing.T) {
-	if testingScanStrategy != "gofresh/testing-scan@4" {
-		t.Fatalf("testing-scan strategy = %q, want @4 — the benchmark-pacing reads left the table", testingScanStrategy)
+	if testingScanStrategy != "gofresh/testing-scan@5" {
+		t.Fatalf("testing-scan strategy = %q, want @5 — the harness lifecycle Context read left the table", testingScanStrategy)
 	}
 }
 

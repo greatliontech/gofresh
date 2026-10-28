@@ -1478,20 +1478,30 @@ may reject opaque linkage, native code, process execution, dot imports, unsuppor
 standard-library access, or other unclassified external-capable syntax, but can never
 grant the proof on its own.
 
-**REQ-closure-observability-unsafe** (invariant): The unsafe reference class MUST be narrowed out
-of the package-scan backstop's blocking set for the observability proof
-(REQ-closure-observability-analysis): an in-scope `unsafe.Pointer` reference is
-diagnostic only, because the subject walk prices every attributed
-unsafe-typed value and a subject world the walk cannot close refuses
-independently — a subject reaching unsafe-typed state still refuses at
-its own tier, while a sibling declaration's unsafe (an
-operator-grammar fixture, a low-level helper file) no longer blocks a
-clean subject's proof; the package's other operations (unsafe.Slice,
-unsafe.String, and kin) keep the scan block, because their call sites
-carry no unsafe-typed value the walk can price and a fabricated slice
-or string is a testlog-invisible read. The SSA builder's internal iterator
-and deferred-call stack handles are lowering tokens, not source unsafe
-values; their source operands and callbacks remain independently judged.
+**REQ-closure-observability-unsafe** (invariant): For a subject whose reachability
+is closed, the package-scan backstop for the observability proof
+(REQ-closure-observability-analysis) MUST both scope ordinary function and method
+declarations to the declarations reached by the subject, package initialization
+(`init` and package-level variable initializers), and `TestMain` — while keeping
+package-level and file-level constructs (imports, directives, cgo, assembly,
+`init`, `TestMain`, top-level `var`/`const`/`type` declarations) and explicit
+package-wide process or memory hazards (`unsafe` operations other than
+`unsafe.Pointer`, `os.Exit` outside `TestMain`, and process-environment or
+working-directory mutations such as `Setenv`, `Unsetenv`, `Clearenv`, `Chdir`,
+and `Fchdir` on `testing`, `os`, `syscall`, or `golang.org/x/sys/`) blocking
+across the whole package — and narrow the unsafe reference class out of the
+package-scan backstop's blocking set: an in-scope
+`unsafe.Pointer` reference is diagnostic only, because the subject walk prices
+every attributed unsafe-typed value and a subject world the walk cannot close
+refuses independently — a subject reaching unsafe-typed state still refuses at
+its own tier, while a sibling declaration's unsafe (an operator-grammar fixture,
+a low-level helper file) no longer blocks a clean subject's proof; the package's
+other operations (unsafe.Slice, unsafe.String, and kin) keep the package-wide
+scan block, because their call sites carry no unsafe-typed value the walk can
+price and a fabricated slice or string is a testlog-invisible read. The SSA
+builder's internal iterator and deferred-call stack handles are lowering tokens,
+not source unsafe values; their source operands and callbacks remain
+independently judged.
 
 **REQ-closure-observability-audited-set** (invariant): A value-computation
 claim MUST establish that every ambient effect enters through an independently
@@ -1543,7 +1553,11 @@ The following families state the properties such derivations must establish:
   (`context.Background`, `context.TODO`, `context.WithCancel`,
   `context.WithCancelCause`, `context.WithoutCancel`, `context.WithValue`,
   `context.Cause`, the `Context` read methods `Deadline`, `Done`, `Err`,
-  `Value`, and the `Canceled` and `DeadlineExceeded` sentinel errors) must
+  `Value`, the `Canceled` and `DeadlineExceeded` sentinel errors, and the test
+  harness lifecycle context `(*testing.T).Context`, `(*testing.B).Context`,
+  `(*testing.F).Context`, and `testing.TB.Context` under a checked derivation
+  that `(*testing.common).Context` returns the harness's per-test cancellation
+  context without ambient clock or I/O acquisition) must
   establish process-local state over caller-supplied parent contexts, keys,
   values, and causes alone, with wall-clock timer constructors (`WithDeadline`,
   `WithTimeout`, and their `*Cause` variants) and asynchronous cancellation

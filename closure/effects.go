@@ -105,7 +105,8 @@ func auditedStandardCallee(audited bool, pkgPath, name string, fn *ssa.Function)
 		for top.Parent() != nil {
 			top = top.Parent()
 		}
-		return auditedStandardSymbol(audited, pkgPath, functionSymbolName(top))
+		topName := functionSymbolName(top)
+		return auditedStandardSymbol(audited, pkgPath, topName) || auditedStandardMethod(audited, top) || (audited && pkgPath == "context" && topName == "propagateCancel")
 	}
 	return false
 }
@@ -240,7 +241,7 @@ var classBTable, classBPackages = func() (map[string]map[string]classBEntry, map
 			pkgs:   []string{"testing"},
 			kind:   externalEffectTestRuntime,
 			suffix: " (test runtime configuration)",
-			names:  []string{"Short", "Verbose", "Testing", "CoverMode", "Coverage", "Deadline", "Parallel", "ArtifactDir", "Context"},
+			names:  []string{"Short", "Verbose", "Testing", "CoverMode", "Coverage", "Deadline", "Parallel", "ArtifactDir"},
 		},
 		{
 			pkgs:   []string{"testing"},
@@ -307,6 +308,7 @@ const (
 	harnessFamilyPacing
 	harnessFamilySubtestDriver
 	harnessFamilyFuzzDriver
+	harnessFamilyLifecycle
 )
 
 type harnessAdmission struct {
@@ -317,7 +319,7 @@ type harnessAdmission struct {
 	invokeAdmitted bool
 }
 
-// harnessAdmissions is the one table classifying the four testing-harness
+// harnessAdmissions is the one table classifying the testing-harness
 // families across static calls, enumerated dynamic targets, invoke admission,
 // body-scan cutting, and immutable-environment outcome eligibility
 // (REQ-closure-observability-analysis).
@@ -331,6 +333,13 @@ var harnessAdmissions = func() map[string]harnessAdmission {
 		"Fuzz": {
 			family:    harnessFamilyFuzzDriver,
 			receivers: []string{"F"},
+		},
+		"Context": {
+			family:         harnessFamilyLifecycle,
+			receivers:      []string{"T", "B", "F", "common"},
+			reasonSuffix:   " (test harness context)",
+			dynamicTarget:  true,
+			invokeAdmitted: true,
 		},
 	}
 	for _, name := range []string{"Fatal", "Fatalf", "Error", "Errorf", "Log", "Logf", "Skip", "Skipf", "SkipNow", "Fail", "FailNow"} {

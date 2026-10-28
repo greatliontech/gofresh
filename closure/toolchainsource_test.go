@@ -1244,8 +1244,8 @@ func FuzzToolchainKeyObligations(f *testing.F) {
 				t.Fatal(err)
 			}
 		}
-		osSrc := "package os\nimport \"internal/testlog\"\nfunc Getenv(k string) string { testlog.Getenv(k); return \"\" }\nfunc LookupEnv(k string) (string, bool) { testlog.Getenv(k); return \"\", false }\nfunc OpenFile(n string) { testlog.Open(n) }\nfunc openDir(n string) { testlog.Open(n) }\nfunc Stat(n string) { testlog.Stat(n) }\nfunc Lstat(n string) { testlog.Stat(n) }\nfunc Chdir(n string) { testlog.Logger(); testlog.Open(n); testlog.Chdir(n) }\n"
-		testingSrc := "package testing\ntype M struct{ d interface{ StartTestLog(any); StopTestLog() error } }\nfunc (m *M) Run() int { m.d.StartTestLog(nil); err := m.d.StopTestLog(); if err != nil { return 1 }; return 0 }\n"
+		osSrc := "package os\nimport \"internal/testlog\"\nfunc Getenv(k string) string { testlog.Getenv(k); return \"\" }\nfunc LookupEnv(k string) (string, bool) { testlog.Getenv(k); return \"\", false }\nfunc OpenFile(n string) { testlog.Open(n) }\nfunc openDir(n string) { testlog.Open(n) }\nfunc Stat(n string) { testlog.Open(n); testlog.Stat(n) }\nfunc Lstat(n string) { testlog.Stat(n) }\nfunc Chdir(n string) { testlog.Logger(); testlog.Open(n); testlog.Chdir(n) }\n"
+		testingSrc := "package testing\nimport \"context\"\ntype common struct{ ctx context.Context }\nfunc (c *common) checkFuzzFn(string) {}\nfunc (c *common) Context() context.Context { c.checkFuzzFn(\"Context\"); return c.ctx }\ntype M struct{ d interface{ StartTestLog(any); StopTestLog() error } }\nfunc (m *M) Run() int { m.d.StartTestLog(nil); err := m.d.StopTestLog(); if err != nil { return 1 }; return 0 }\n"
 		testdepsSrc := "package testdeps\nimport \"internal/testlog\"\nfunc StartTestLog(w any) { testlog.SetLogger(nil) }\nfunc StopTestLog() error { var w interface{ Flush() error }; return w.Flush() }\n"
 		if err := os.WriteFile(filepath.Join(osDir, "os.go"), []byte(osSrc), 0o644); err != nil {
 			t.Fatal(err)
@@ -1293,6 +1293,28 @@ func FuzzToolchainKeyObligations(f *testing.F) {
 		if deg := toolchainSourceDegradation("go1.test", intactSD, nil); !deg.audited() {
 			t.Fatalf("intact audited surface degraded: %+v", deg)
 		}
+		// Breaking (*common).Context in testing triggers degradation.
+		brokenTestingSrc := "package testing\nimport \"context\"\ntype common struct{ ctx context.Context }\nfunc (c *common) Context() context.Context { return context.Background() }\ntype M struct{ d interface{ StartTestLog(any); StopTestLog() error } }\nfunc (m *M) Run() int { m.d.StartTestLog(nil); err := m.d.StopTestLog(); if err != nil { return 1 }; return 0 }\n"
+		if err := os.WriteFile(filepath.Join(testingDir, "testing.go"), []byte(brokenTestingSrc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		brokenTestingDigest, err := digestFiles(ctx, testingDir, []string{"testing.go"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		verifiedPackageMemo.Delete(verifiedPackageMemoKey("testing", brokenTestingDigest))
+		pkgs["testing"] = brokenTestingDigest
+		inv["testing"] = listedPackage{ImportPath: "testing", Dir: testingDir, Files: []string{"testing.go"}, Audited: true, digest: brokenTestingDigest}
+		brokenTestingSD := sourceDigests{Packages: pkgs, inventory: inv, Policy: admissionPolicy()}
+		if deg := toolchainSourceDegradation("go1.test", brokenTestingSD, nil); deg.audited() || !strings.Contains(deg.axis, "testing") {
+			t.Fatalf("broken (*common).Context in testing did not trigger degradation: %+v", deg)
+		}
+		if err := os.WriteFile(filepath.Join(testingDir, "testing.go"), []byte(testingSrc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		pkgs["testing"] = testingDigest
+		inv["testing"] = listedPackage{ImportPath: "testing", Dir: testingDir, Files: []string{"testing.go"}, Audited: true, digest: testingDigest}
+
 		// Breaking a harness observation premise in testing/internal/testdeps triggers degradation.
 		brokenTestdepsSrc := "package testdeps\nimport \"internal/testlog\"\nfunc StartTestLog(w any) { testlog.SetLogger(nil) }\nfunc StopTestLog() {}\n"
 		if err := os.WriteFile(filepath.Join(testdepsDir, "testdeps.go"), []byte(brokenTestdepsSrc), 0o644); err != nil {
