@@ -4375,6 +4375,18 @@ func PromotedImpureRefused() int {
 	return it.Value()
 }
 
+type itemHolder struct {
+	Items []Item
+}
+
+func sumHolderItems(h *itemHolder) int {
+	total := 0
+	for _, it := range h.Items {
+		total += it.Value()
+	}
+	return total
+}
+
 func joinVariadic(items ...Item) int {
 	total := 0
 	for _, it := range items {
@@ -4425,9 +4437,14 @@ func PureExpandedSurface() int {
 	boundVal := base.Value
 
 	sliceItems := []Item{base, captured}
+	holder := &itemHolder{Items: []Item{base, captured}}
 	mapItems := map[string]Item{"k": base}
 
-	return readCaptured() + boundVal() + sliceItems[0].Value() + mapItems["k"].Value() + joinVariadic(base, captured)
+	return readCaptured() + boundVal() + sliceItems[0].Value() + sumHolderItems(holder) + mapItems["k"].Value() + joinVariadic(base, captured)
+}
+
+func EnvObservableNotEffectFree() string {
+	return os.Getenv("EXPANDED_SURFACE_ENV")
 }
 
 func ImpureFIPSCallback() []string {
@@ -4447,6 +4464,28 @@ func AtomicValueRefused() any {
 	v.Store(1)
 	return v.Load()
 }
+
+func AppendInPlaceOverwriteRefused() int {
+	s := make([]Item, 1, 2)
+	s[0] = concreteItem{v: 1}
+	_ = append(s[:0], impureItem{})
+	return s[0].Value()
+}
+
+func CloneSliceMutatedRefused() int {
+	base := []Item{concreteItem{v: 1}}
+	cloned := append([]Item(nil), base...)
+	cloned[0] = impureItem{}
+	return cloned[0].Value()
+}
+
+func CellSliceCopyOverwriteRefused() int {
+	var s []Item
+	keepInCell := func() int { return len(s) }
+	s = []Item{concreteItem{v: 1}}
+	copy(s, []Item{impureItem{}})
+	return s[0].Value() + keepInCell()
+}
 `)
 	h, err := newAt(dir)
 	if err != nil {
@@ -4454,19 +4493,26 @@ func AtomicValueRefused() any {
 	}
 	subjects := []Subject{
 		{Package: "example.com/expanded/surface", Symbol: "PureExpandedSurface"},
+		{Package: "example.com/expanded/surface", Symbol: "EnvObservableNotEffectFree"},
 		{Package: "example.com/expanded/surface", Symbol: "UseReachedType"},
 		{Package: "example.com/expanded/surface", Symbol: "UseReachedConst"},
 		{Package: "example.com/expanded/surface", Symbol: "PromotedImpureRefused"},
 		{Package: "example.com/expanded/surface", Symbol: "ImpureFIPSCallback"},
 		{Package: "example.com/expanded/surface", Symbol: "BareTimeUnix"},
 		{Package: "example.com/expanded/surface", Symbol: "AtomicValueRefused"},
+		{Package: "example.com/expanded/surface", Symbol: "AppendInPlaceOverwriteRefused"},
+		{Package: "example.com/expanded/surface", Symbol: "CloneSliceMutatedRefused"},
+		{Package: "example.com/expanded/surface", Symbol: "CellSliceCopyOverwriteRefused"},
 	}
 	got, err := h.ComputeObservabilityBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if obs := got[Subject{Package: "example.com/expanded/surface", Symbol: "PureExpandedSurface"}]; !obs.Observable {
-		t.Errorf("PureExpandedSurface Observable = false (Reason = %q), want true", obs.Reason)
+	if obs := got[Subject{Package: "example.com/expanded/surface", Symbol: "PureExpandedSurface"}]; !obs.Observable || !obs.EffectFree {
+		t.Errorf("PureExpandedSurface = %+v, want Observable=true EffectFree=true", obs)
+	}
+	if obs := got[Subject{Package: "example.com/expanded/surface", Symbol: "EnvObservableNotEffectFree"}]; !obs.Observable || obs.EffectFree {
+		t.Errorf("EnvObservableNotEffectFree = %+v, want Observable=true EffectFree=false", obs)
 	}
 	for _, tc := range []struct {
 		sym, wantReason string
@@ -4477,10 +4523,48 @@ func AtomicValueRefused() any {
 		{"ImpureFIPSCallback", "reaches os.Environ"},
 		{"BareTimeUnix", "package scan: reaches unaudited standard operation time.Unix"},
 		{"AtomicValueRefused", "package scan: reaches unaudited standard operation sync/atomic.Value"},
+		{"AppendInPlaceOverwriteRefused", "reaches os.Environ"},
+		{"CloneSliceMutatedRefused", "reaches os.Environ"},
+		{"CellSliceCopyOverwriteRefused", "reaches os.Environ"},
 	} {
 		s := Subject{Package: "example.com/expanded/surface", Symbol: tc.sym}
 		if obs := got[s]; obs.Observable || !strings.Contains(obs.Reason, tc.wantReason) {
 			t.Errorf("%s = %+v, want Observable=false Reason containing %q", tc.sym, obs, tc.wantReason)
+		}
+	}
+
+	writeFile("initunsafe/p.go", `package initunsafe
+import "unsafe"
+var x int
+func init() {
+	*(*int)(unsafe.Pointer(&x)) = 1
+}
+func ReadX() int { return x }
+`)
+	writeFile("initunsafe/p_test.go", `package initunsafe
+import (
+	"os"
+	"testing"
+	"unsafe"
+)
+var tm int
+func TestMain(m *testing.M) {
+	*(*int)(unsafe.Pointer(&tm)) = 2
+	os.Exit(m.Run())
+}
+func TestClean(t *testing.T) {}
+`)
+	gotUnsafe, err := h.ComputeObservabilityBatch([]Subject{
+		{Package: "example.com/expanded/initunsafe", Symbol: "ReadX"},
+		{Package: "example.com/expanded/initunsafe", Symbol: "TestClean"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sym := range []string{"ReadX", "TestClean"} {
+		obs := gotUnsafe[Subject{Package: "example.com/expanded/initunsafe", Symbol: sym}]
+		if obs.Observable || !strings.Contains(obs.Reason, "unsafe pointer reachable") {
+			t.Errorf("%s = %+v, want Observable=false with unsafe pointer reachable", sym, obs)
 		}
 	}
 }

@@ -369,3 +369,120 @@ func TestFail(t *testing.T) { _, _ = os.LookupEnv("OUTCOME_VALUE"); t.Error("ord
 		t.Fatalf("cancelled support=%v", err)
 	}
 }
+
+func TestStaticReachabilityAdmitsEffectFreeSubjectWithIdentityOnlyObservation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds source views and checks static-reachability outcome support")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	for name, content := range map[string]string{
+		"go.mod":  "module example.com/staticreach\n\ngo 1.26\n",
+		"fixture": "guarded bytes",
+		"subject.go": `package staticreach
+
+func PureAdd(a, b int) int {
+	return a + b
+}
+`,
+		"subject_test.go": `package staticreach
+
+import (
+	"os"
+	"testing"
+)
+
+func TestPure(t *testing.T) {
+	if PureAdd(1, 2) != 3 {
+		t.Fatal("wrong sum")
+	}
+}
+
+func TestEnv(t *testing.T) {
+	_ = os.Getenv("STATIC_REACH_ENV")
+}
+
+func TestFile(t *testing.T) {
+	_, _ = os.ReadFile("fixture")
+}
+`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env, err := gotool.EnvForCommand(os.Environ(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := newEngine(withDir(dir), withEnv(env...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pureAdd := Subject{Package: "example.com/staticreach", Symbol: "PureAdd"}
+	testPure := Subject{Package: "example.com/staticreach", Symbol: "TestPure"}
+	testEnv := Subject{Package: "example.com/staticreach", Symbol: "TestEnv"}
+	testFile := Subject{Package: "example.com/staticreach", Symbol: "TestFile"}
+	subjects := []Subject{pureAdd, testPure, testEnv, testFile}
+
+	view, err := engine.newView(ctx, subjects, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bracket, err := runtimeinput.CaptureBracket(ctx, dir, []string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identityObs, err := runtimeinput.FromTestLog([]byte("# test log\n"), dir, dir, env, runtimeinput.WithCompletedProcess("identity-only"), runtimeinput.WithBracket(bracket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := make(map[Subject]Fingerprint, len(subjects))
+	for _, s := range subjects {
+		fp, err := view.CaptureObserved(ctx, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fp, err = view.AttachObservation(s, fp, identityObs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored[s] = fp
+	}
+	if err := view.Validate(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	checkView, err := engine.newView(ctx, subjects, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []Subject{pureAdd, testPure} {
+		verdict, err := checkView.CheckObserved(ctx, stored[s], s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if verdict.Status != Valid {
+			t.Fatalf("%v status = %v (reason=%q), want Valid", s, verdict.Status, verdict.Reason)
+		}
+		if verdict.Ground.Accepted.Observation.OutcomeMethod != "gofresh/static-reachability@1" {
+			t.Fatalf("%v accepted observation = %+v, want OutcomeMethod=gofresh/static-reachability@1", s, verdict.Ground.Accepted.Observation)
+		}
+		// Downgrading the proof seal to the non-effect-free mode removes static-reachability authority.
+		downgraded := stored[s]
+		downgraded.ObservationProof.Evidence = observationProofEvidenceMode(downgraded, false)
+		refused, err := checkView.CheckObserved(ctx, downgraded, s)
+		if err != nil || refused.Status != Unverifiable {
+			t.Fatalf("%v with non-effect-free seal = %+v %v, want Unverifiable", s, refused, err)
+		}
+	}
+	for _, s := range []Subject{testEnv, testFile} {
+		verdict, err := checkView.CheckObserved(ctx, stored[s], s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if verdict.Status != Unverifiable {
+			t.Fatalf("%v status = %v, want Unverifiable under identity-only observation", s, verdict.Status)
+		}
+	}
+}

@@ -351,7 +351,7 @@ func TestPinnedFallbackSelectsLexicographicLeast(t *testing.T) {
 // conscious change of every persisted effect memo's identity.
 //
 func TestEffectScanStrategyVersion(t *testing.T) {
-	if effectScanStrategy != "gofresh/effect-scan@25" {
-		t.Fatalf("effect-scan strategy = %q, want @25", effectScanStrategy)
+	if effectScanStrategy != "gofresh/effect-scan@27" {
+		t.Fatalf("effect-scan strategy = %q, want @27", effectScanStrategy)
 	}
 }

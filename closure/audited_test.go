@@ -1783,8 +1783,8 @@ func TestBenchmarkPacingIsNotPurityEvidence(t *testing.T) {
 // The typed testing scan's memo serves the classification table, so
 // the strategy moves with it (REQ-closure-testing-scan-memo).
 func TestTestingScanStrategyVersion(t *testing.T) {
-	if testingScanStrategy != "gofresh/testing-scan@5" {
-		t.Fatalf("testing-scan strategy = %q, want @5 — the harness lifecycle Context read left the table", testingScanStrategy)
+	if testingScanStrategy != "gofresh/testing-scan@6" {
+		t.Fatalf("testing-scan strategy = %q, want @6 — the harness lifecycle Context read rejoined the table", testingScanStrategy)
 	}
 }
 
@@ -2054,5 +2054,1581 @@ func FuzzObservabilityClassificationsAndAuditedSet(f *testing.F) {
 			t.Fatalf("AuditedAtomicPointerElem(%v) = (%v, %v)", audited, elem, ok)
 		}
 	})
+}
+
+// Non-RTA scanned closures invoking audited standard-library interface methods,
+// nested closures appending to captured slice variables, mutually recursive
+// interface invokes across loop phis, variadic constructors returning interfaces,
+// and map/slice container propagation (slices.Clone, slices.SortFunc, map-of-slices,
+// and struct-field maps) all close under audited observability
+// (REQ-closure-observability-dispatch, REQ-closure-observability-audited-set).
+func TestObservabilityInterfaceContainerAndMutualInvokeClosure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/ifclosure\n\ngo 1.26\n")
+	writeFile(t, dir, "ifclosure.go", `package ifclosure
+
+import (
+	"cmp"
+	"context"
+	"slices"
+)
+
+type Source interface {
+	Name() string
+	Check(ctx context.Context) error
+}
+
+type memSource struct {
+	name string
+}
+
+func (m *memSource) Name() string { return m.name }
+
+func (m *memSource) Check(ctx context.Context) error {
+	checkCtx := func() error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return nil
+		}
+	}
+	return checkCtx()
+}
+
+type unionSource struct {
+	members []Source
+}
+
+func NewUnionSource(prefix string, members ...Source) Source {
+	return &unionSource{members: slices.Clone(members)}
+}
+
+func (u *unionSource) Name() string {
+	if len(u.members) == 0 {
+		return ""
+	}
+	return u.members[0].Name()
+}
+
+func (u *unionSource) Check(ctx context.Context) error {
+	for _, m := range u.members {
+		if err := m.Check(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type Tree interface {
+	Entry(name string) Entry
+	Entries() []Entry
+}
+
+type Entry interface {
+	Name() string
+	Tree() Tree
+}
+
+type memTree struct {
+	entries []Entry
+}
+
+type memEntry struct {
+	name string
+	sub  Tree
+}
+
+func (e *memEntry) Name() string { return e.name }
+func (e *memEntry) Tree() Tree   { return e.sub }
+
+func (t *memTree) Entry(name string) Entry {
+	for _, e := range t.entries {
+		if e.Name() == name {
+			return e
+		}
+	}
+	return nil
+}
+
+func (t *memTree) Entries() []Entry {
+	return slices.Clone(t.entries)
+}
+
+type BuildResult struct {
+	Root  Tree
+	Trees map[string]Tree
+}
+
+func BuildHierarchy(paths []string) BuildResult {
+	dirEntries := make(map[string][]Entry)
+	for _, p := range paths {
+		e := Entry(&memEntry{name: p, sub: &memTree{}})
+		dirEntries["root"] = append(dirEntries["root"], e)
+	}
+	entries := dirEntries["root"]
+	slices.SortFunc(entries, func(a, b Entry) int {
+		return cmp.Compare(a.Name(), b.Name())
+	})
+	root := Tree(&memTree{entries: entries})
+	trees := make(map[string]Tree)
+	trees[""] = root
+	for _, e := range root.Entries() {
+		trees[e.Name()] = e.Tree()
+	}
+	return BuildResult{Root: root, Trees: trees}
+}
+
+func WalkMutual(root Tree, parts []string) string {
+	cur := root
+	for _, p := range parts {
+		e := cur.Entry(p)
+		if e == nil {
+			return ""
+		}
+		cur = e.Tree()
+	}
+	for _, e := range cur.Entries() {
+		return e.Name()
+	}
+	return ""
+}
+`)
+	writeFile(t, dir, "ifclosure_test.go", `package ifclosure
+
+import (
+	"context"
+	"testing"
+)
+
+func TestAllPatterns(t *testing.T) {
+	ctx := context.Background()
+	var staged []Source
+	add := func(name string) Source {
+		s := Source(&memSource{name: name})
+		staged = append(staged, s)
+		return s
+	}
+	s1 := add("a")
+	s2 := add("b")
+	u := NewUnionSource("p", s1, s2)
+	for _, s := range staged {
+		if s.Name() == "" {
+			t.Fatal("empty")
+		}
+	}
+	if err := u.Check(ctx); err != nil {
+		t.Fatal(err)
+	}
+	res := BuildHierarchy([]string{"b", "a"})
+	_ = WalkMutual(res.Root, []string{"a"})
+	if sub := res.Trees["a"]; sub != nil {
+		_ = sub.Entries()
+	}
+}
+`)
+	h, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subj := Subject{Package: "example.com/ifclosure", Symbol: "TestAllPatterns"}
+	proofs, err := h.ComputeObservabilityBatch([]Subject{subj})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proof := proofs[subj]; !proof.Observable || proof.Reason != "" {
+		t.Fatalf("TestAllPatterns = %+v, want observable with empty reason", proof)
+	}
+
+	// Verify soundness of RTA seed collection for enumerated open-signature
+	// subjects (variadic constructor results & caller-populated helper maps)
+	// and backing-array alias tracking across slices.Compact.
+	if err := os.MkdirAll(filepath.Join(dir, "soundness"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "soundness/soundness.go", `package soundness
+
+import (
+	"os"
+	"slices"
+)
+
+type Op interface {
+	Run() string
+}
+
+type pureOp struct{ v string }
+
+func (p *pureOp) Run() string { return p.v }
+
+type envOp struct{}
+
+func (*envOp) Run() string { return os.Getenv("X") }
+
+type unionOp struct{ ops []Op }
+
+func NewUnionOp(tag string, ops ...Op) Op {
+	return &unionOp{ops: slices.Clone(ops)}
+}
+
+func (u *unionOp) Run() string {
+	for _, op := range u.ops {
+		return op.Run()
+	}
+	return ""
+}
+
+func makeOpMap() map[string]Op {
+	return make(map[string]Op)
+}
+
+func UseUnion(op Op) string {
+	return op.Run()
+}
+
+func UseLiteralUnion(op Op) string {
+	return op.Run()
+}
+
+func UseHolder(u *unionOp) string {
+	return u.Run()
+}
+
+func UseMap(m map[string]Op) string {
+	if op := m["k"]; op != nil {
+		return op.Run()
+	}
+	return ""
+}
+
+func Caller() string {
+	u := NewUnionOp("t", &envOp{})
+	m := makeOpMap()
+	m["k"] = &envOp{}
+	return UseUnion(u) + UseLiteralUnion(&unionOp{ops: []Op{&envOp{}}}) + UseHolder(&unionOp{ops: []Op{&envOp{}}}) + UseMap(m)
+}
+
+func UsePure() string {
+	op := Op(&pureOp{v: "clean"})
+	return op.Run()
+}
+`)
+	writeFile(t, dir, "soundness/soundness_test.go", `package soundness
+
+import (
+	"slices"
+	"testing"
+)
+
+func TestCompactAliasMutation(t *testing.T) {
+	s := make([]Op, 2)
+	p := Op(&pureOp{v: "ok"})
+	s[0] = p
+	s[1] = p
+	s2 := slices.Compact(s)
+	s2[0] = &envOp{}
+	_ = s[0].Run()
+}
+
+func TestBinarySearchFuncTargetMutation(t *testing.T) {
+	s := make([]Op, 1)
+	s[0] = &pureOp{v: "ok"}
+	slices.BinarySearchFunc([]int{1}, s, func(_ int, target []Op) int {
+		target[0] = &envOp{}
+		return 0
+	})
+	_ = s[0].Run()
+}
+`)
+	if err := os.MkdirAll(filepath.Join(dir, "soundness_open"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "soundness_open/open.go", `package soundness_open
+
+import "slices"
+
+type Op interface {
+	Run() string
+}
+
+type pureOp struct{}
+
+func (*pureOp) Run() string { return "ok" }
+
+var GlobalOp Op
+
+type globalHolderOp struct {
+	op Op
+}
+
+func (g *globalHolderOp) Run() string {
+	if g.op != nil {
+		return g.op.Run()
+	}
+	return ""
+}
+
+func UseOpenGlobal(op Op) string {
+	return op.Run()
+}
+
+func CallerOpen() string {
+	return UseOpenGlobal(&globalHolderOp{op: GlobalOp})
+}
+
+func UseFromUncalledCaller(op Op) string {
+	return op.Run()
+}
+
+func UncalledExportedCaller(ext Op) string {
+	return UseFromUncalledCaller(ext)
+}
+
+func UseSliceFromBinarySearch(ops []Op) string {
+	if len(ops) > 0 {
+		return ops[0].Run()
+	}
+	return ""
+}
+
+func CallerBinarySearch() string {
+	s := make([]Op, 1)
+	s[0] = &pureOp{}
+	slices.BinarySearchFunc([]int{1}, s, func(_ int, target []Op) int {
+		target[0] = GlobalOp
+		return 0
+	})
+	return UseSliceFromBinarySearch(s)
+}
+`)
+	h2, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pureSubj := Subject{Package: "example.com/ifclosure/soundness", Symbol: "UsePure"}
+	bsearchTestSubj := Subject{Package: "example.com/ifclosure/soundness", Symbol: "TestBinarySearchFuncTargetMutation"}
+	soundnessSubjects := []Subject{
+		{Package: "example.com/ifclosure/soundness", Symbol: "UseUnion"},
+		{Package: "example.com/ifclosure/soundness", Symbol: "UseLiteralUnion"},
+		{Package: "example.com/ifclosure/soundness", Symbol: "UseHolder"},
+		{Package: "example.com/ifclosure/soundness", Symbol: "UseMap"},
+		{Package: "example.com/ifclosure/soundness", Symbol: "TestCompactAliasMutation"},
+	}
+	openSubjects := []Subject{
+		{Package: "example.com/ifclosure/soundness_open", Symbol: "UseOpenGlobal"},
+		{Package: "example.com/ifclosure/soundness_open", Symbol: "UseFromUncalledCaller"},
+		{Package: "example.com/ifclosure/soundness_open", Symbol: "UseSliceFromBinarySearch"},
+	}
+	allSoundness := append(append([]Subject{pureSubj, bsearchTestSubj}, soundnessSubjects...), openSubjects...)
+	sProofs, err := h2.ComputeObservabilityBatch(allSoundness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sRooted, err := h2.ComputeRootedFunctions(context.Background(), allSoundness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasEnvOpRun := func(rf RootedFunctions) bool {
+		return rf.Complete && rf.Fns["example.com/ifclosure/soundness\x00envOp.Run"]
+	}
+	if p := sProofs[pureSubj]; !p.Observable || !p.EffectFree {
+		t.Fatalf("UsePure observability = %+v, want Observable && EffectFree", p)
+	}
+	if !sRooted[pureSubj].Complete || hasEnvOpRun(sRooted[pureSubj]) {
+		t.Fatalf("UsePure rooted functions = %+v, want Complete without envOp.Run", sRooted[pureSubj])
+	}
+	if p := sProofs[bsearchTestSubj]; p.Observable || p.EffectFree {
+		t.Errorf("TestBinarySearchFuncTargetMutation observability = %+v, want fail-closed (!Observable && !EffectFree)", p)
+	}
+	if !hasEnvOpRun(sRooted[bsearchTestSubj]) {
+		t.Errorf("TestBinarySearchFuncTargetMutation rooted functions = %+v, want Complete with envOp.Run included", sRooted[bsearchTestSubj])
+	}
+	for _, ss := range soundnessSubjects {
+		if p := sProofs[ss]; !p.Observable || p.EffectFree {
+			t.Errorf("%s observability = %+v, want Observable && !EffectFree (reaches os.Getenv)", ss.Symbol, p)
+		}
+		if !hasEnvOpRun(sRooted[ss]) {
+			t.Errorf("%s rooted functions = %+v, want Complete with envOp.Run included", ss.Symbol, sRooted[ss])
+		}
+	}
+	for _, os := range openSubjects {
+		if p := sProofs[os]; p.Observable || p.EffectFree || !(strings.Contains(p.Reason, "open subject world") || strings.Contains(p.Reason, "reachability is not closed")) {
+			t.Errorf("%s observability = %+v, want fail-closed open/unclosed refusal", os.Symbol, p)
+		}
+		if sRooted[os].Complete {
+			t.Errorf("%s rooted functions = %+v, want !Complete", os.Symbol, sRooted[os])
+		}
+	}
+
+	for _, pkgDir := range []string{
+		"ctxval", "helperextract_closed", "helperextract_open", "wholecopy", "uncalledstore",
+		"reflectset", "cleanupclosed", "cleanupunclosed", "reflectcall",
+		"stdlibinvoke", "namedsig_closed", "namedsig_open", "structbox_open", "addrtaken_open",
+	} {
+		if err := os.MkdirAll(filepath.Join(dir, pkgDir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, dir, "ctxval/ctxval_test.go", `package ctxval
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"testing"
+)
+
+type envStringer struct{}
+
+func (envStringer) String() string { return os.Getenv("CTX_VAL_ENV") }
+
+var GlobalStringer fmt.Stringer
+
+func TestContextValueSprintEnvStringer(t *testing.T) {
+	ctx := context.WithValue(t.Context(), "k", envStringer{})
+	_ = fmt.Sprint(ctx.Value("k"))
+}
+
+func TestContextValueOpenPayloadInvoke(t *testing.T) {
+	ctx := context.WithValue(t.Context(), "k", GlobalStringer)
+	if s, ok := ctx.Value("k").(fmt.Stringer); ok {
+		_ = s.String()
+	}
+}
+
+func TestContextCancelWithOpenValuePayload(t *testing.T) {
+	ctx := context.WithValue(t.Context(), "k", GlobalStringer)
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	<-cctx.Done()
+	_ = cctx.Err()
+}
+`)
+	writeFile(t, dir, "helperextract_closed/closed.go", `package helperextract_closed
+
+import "os"
+
+type Op interface {
+	Run() string
+}
+
+type envOp struct{}
+
+func (*envOp) Run() string { return os.Getenv("HELPER_EXTRACT_ENV") }
+
+type Holder struct {
+	Op Op
+}
+
+func extract(h *Holder) Op {
+	return h.Op
+}
+
+func UseHolderExtract(h *Holder) string {
+	return extract(h).Run()
+}
+
+func (h *Holder) RunViaExtract() string {
+	return extract(h).Run()
+}
+
+func ClosedExtractCaller() string {
+	h := &Holder{Op: &envOp{}}
+	return UseHolderExtract(h) + h.RunViaExtract()
+}
+`)
+	writeFile(t, dir, "helperextract_open/open.go", `package helperextract_open
+
+type Op interface {
+	Run() string
+}
+
+var GlobalOp Op
+
+type Holder struct {
+	Op Op
+}
+
+func extract(h *Holder) Op {
+	return h.Op
+}
+
+func UseHolderExtractOpen(h *Holder) string {
+	return extract(h).Run()
+}
+
+func (h *Holder) RunViaExtractOpen() string {
+	return extract(h).Run()
+}
+
+func OpenExtractCaller() string {
+	h := &Holder{Op: GlobalOp}
+	return UseHolderExtractOpen(h) + h.RunViaExtractOpen()
+}
+`)
+	writeFile(t, dir, "wholecopy/wholecopy.go", `package wholecopy
+
+type Op interface {
+	Run() string
+}
+
+type Holder struct {
+	Op Op
+}
+
+func UseWholeCopied(h *Holder) string {
+	if h.Op != nil {
+		return h.Op.Run()
+	}
+	return ""
+}
+
+func OverwriteFromParam(src Holder) string {
+	dst := &Holder{}
+	*dst = src
+	return UseWholeCopied(dst)
+}
+`)
+	writeFile(t, dir, "uncalledstore/uncalledstore.go", `package uncalledstore
+
+type Op interface {
+	Run() string
+}
+
+type pureOp struct{}
+
+func (*pureOp) Run() string { return "pure" }
+
+type Holder struct {
+	Op Op
+}
+
+func UseUncalledStored(h *Holder) string {
+	return h.Op.Run()
+}
+
+func (h *Holder) MethodTarget() string {
+	return h.Op.Run()
+}
+
+func ClosedSeedCaller() string {
+	h := &Holder{Op: &pureOp{}}
+	return UseUncalledStored(h) + h.MethodTarget()
+}
+
+func SetAndCall(op Op) string {
+	h := &Holder{Op: op}
+	return UseUncalledStored(h)
+}
+
+func UncalledMethodCaller(ext *Holder) string {
+	return ext.MethodTarget()
+}
+`)
+	writeFile(t, dir, "reflectset/reflectset.go", `package reflectset
+
+type Op interface {
+	Run() string
+}
+
+type pureOp struct{}
+
+func (*pureOp) Run() string { return "pure" }
+
+type Holder struct {
+	Op Op
+}
+
+func UseReflectMutated(h *Holder) string {
+	return h.Op.Run()
+}
+
+func (h *Holder) RunReflectMutated() string {
+	return h.Op.Run()
+}
+
+func NewPureHolder() *Holder {
+	return &Holder{Op: &pureOp{}}
+}
+`)
+	writeFile(t, dir, "reflectset/reflectset_test.go", `package reflectset_test
+
+import (
+	"reflect"
+	"testing"
+
+	"example.com/ifclosure/reflectset"
+)
+
+var GlobalOp reflectset.Op
+
+func TestMutateViaReflect(t *testing.T) {
+	h := reflectset.NewPureHolder()
+	reflect.ValueOf(h).Elem().FieldByName("Op").Set(reflect.ValueOf(GlobalOp))
+	_ = reflectset.UseReflectMutated(h)
+	_ = h.RunReflectMutated()
+}
+`)
+	writeFile(t, dir, "cleanupclosed/cleanup_test.go", `package cleanupclosed
+
+import (
+	"os"
+	"testing"
+)
+
+var sharedCounter int
+
+func mutateShared() {
+	sharedCounter++
+}
+
+func cleanupEnv() {
+	_ = os.Getenv("CLEANUP_CLOSED_ENV")
+}
+
+func fuzzHelper(data []byte) {
+	if len(data) > 0 {
+		sharedCounter += int(data[0])
+	}
+}
+
+func TestClosedCleanup(t *testing.T) {
+	t.Cleanup(mutateShared)
+}
+
+func TestClosedCleanupEnv(t *testing.T) {
+	t.Cleanup(cleanupEnv)
+}
+
+func FuzzClosedTarget(f *testing.F) {
+	f.Add([]byte("seed"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		fuzzHelper(data)
+	})
+}
+`)
+	writeFile(t, dir, "cleanupunclosed/cleanup_test.go", `package cleanupunclosed
+
+import "testing"
+
+var GlobalCleanupHook func()
+
+func TestUnclosedCleanup(t *testing.T) {
+	t.Cleanup(GlobalCleanupHook)
+}
+`)
+	writeFile(t, dir, "reflectcall/reflectcall_test.go", `package reflectcall
+
+import (
+	"reflect"
+	"testing"
+)
+
+type Mutator struct{}
+
+var mutated bool
+
+func (Mutator) Do() {
+	mutated = true
+}
+
+func TestReflectMethodCall(t *testing.T) {
+	reflect.ValueOf(Mutator{}).MethodByName("Do").Call(nil)
+}
+`)
+	writeFile(t, dir, "stdlibinvoke/stdlibinvoke_test.go", `package stdlibinvoke
+
+import (
+	"io"
+	"os"
+	"testing"
+)
+
+type pureReader struct{}
+
+func (pureReader) Read(p []byte) (int, error) { return 0, io.EOF }
+
+type evilReader struct{}
+
+func (evilReader) Read(p []byte) (int, error) {
+	_ = os.Getenv("STDLIB_INVOKE_ENV")
+	return 0, io.EOF
+}
+
+type sink struct{}
+
+func (*sink) Write(p []byte) (int, error) { return len(p), nil }
+
+func (*sink) ReadFrom(r io.Reader) (int64, error) {
+	var buf [8]byte
+	_, err := r.Read(buf[:])
+	return 0, err
+}
+
+func TestStdlibInvokeReadFrom(t *testing.T) {
+	s := &sink{}
+	_, _ = s.ReadFrom(pureReader{})
+	_, _ = io.Copy(s, evilReader{})
+}
+`)
+	writeFile(t, dir, "namedsig_closed/namedsig_test.go", `package namedsig_closed
+
+import (
+	"os"
+	"testing"
+)
+
+type Installer interface {
+	Install() string
+}
+
+type EnvInstaller func() string
+
+func (f EnvInstaller) Install() string { return f() }
+
+func pureFn() string { return "pure" }
+
+func envFn() string { return os.Getenv("NAMED_SIG_ENV") }
+
+func TestMixedNamedSig(t *testing.T) {
+	_ = EnvInstaller(pureFn).Install()
+	var r Installer = EnvInstaller(envFn)
+	_ = r.Install()
+}
+`)
+	writeFile(t, dir, "namedsig_open/namedsig_test.go", `package namedsig_open
+
+import "testing"
+
+type Installer interface {
+	Install() string
+}
+
+type OpenInstaller func() string
+
+func (f OpenInstaller) Install() string { return f() }
+
+type PtrInstaller func() string
+
+func (f PtrInstaller) Install() string { return f() }
+
+var (
+	GlobalInstaller OpenInstaller
+	GlobalFn        func() string
+)
+
+func pureFn() string { return "pure" }
+
+func TestOpenGlobalNamedSig(t *testing.T) {
+	_ = OpenInstaller(pureFn).Install()
+	var r Installer = GlobalInstaller
+	if r != nil {
+		_ = r.Install()
+	}
+}
+
+func overwritePtr(dst *PtrInstaller) {
+	*dst = PtrInstaller(GlobalFn)
+}
+
+func TestPointerMutatedNamedSig(t *testing.T) {
+	f := PtrInstaller(pureFn)
+	overwritePtr(&f)
+	_ = f.Install()
+}
+`)
+	writeFile(t, dir, "structbox_open/structbox_test.go", `package structbox_open
+
+import "testing"
+
+type Op interface {
+	Run() string
+}
+
+type pureOp struct{}
+
+func (*pureOp) Run() string { return "pure" }
+
+type Holder struct {
+	Op Op
+}
+
+type Saver interface {
+	Save(*Holder)
+}
+
+type Worker struct {
+	op Op
+}
+
+func (w *Worker) Run() string {
+	if w != nil && w.op != nil {
+		return w.op.Run()
+	}
+	return ""
+}
+
+func (w *Worker) Save(h *Holder) {
+	h.Op = w
+}
+
+var (
+	GlobalOpenWorker *Worker
+	GlobalOp         Op
+)
+
+func UseSavedHolder(h *Holder) string {
+	(&Worker{}).Save(h)
+	return h.Op.Run()
+}
+
+func TestStaticOnly(t *testing.T) {
+	h := &Holder{}
+	(&Worker{}).Save(h)
+	_ = h.Op.Run()
+}
+
+func TestBoxedOpen(t *testing.T) {
+	var s Saver = GlobalOpenWorker
+	h := &Holder{}
+	if s != nil {
+		s.Save(h)
+		_ = h.Op.Run()
+	}
+}
+
+type SliceOp []Op
+
+func (s SliceOp) Run() string {
+	if len(s) > 0 && s[0] != nil {
+		return s[0].Run()
+	}
+	return ""
+}
+
+func TestMixedSliceRecv(t *testing.T) {
+	_ = SliceOp{&pureOp{}}.Run()
+	var r Op = SliceOp{GlobalOp}
+	_ = r.Run()
+}
+`)
+	writeFile(t, dir, "addrtaken_open/addrtaken_test.go", `package addrtaken_open
+
+import "testing"
+
+type Op interface {
+	Run() string
+}
+
+type pureOp struct{}
+
+func (*pureOp) Run() string { return "pure" }
+
+type Holder struct {
+	Op Op
+}
+
+func SetHolder(h *Holder, op Op) {
+	h.Op = op
+}
+
+var (
+	GlobalSetter = SetHolder
+	GlobalOp     Op
+)
+
+func TestStaticCaller(t *testing.T) {
+	h := &Holder{}
+	SetHolder(h, &pureOp{})
+	_ = h.Op.Run()
+}
+
+func TestDynamicOpenCaller(t *testing.T) {
+	h := &Holder{}
+	if GlobalSetter != nil {
+		GlobalSetter(h, GlobalOp)
+		_ = h.Op.Run()
+	}
+}
+`)
+
+	h3, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctxSprintSubj := Subject{Package: "example.com/ifclosure/ctxval", Symbol: "TestContextValueSprintEnvStringer"}
+	ctxOpenSubj := Subject{Package: "example.com/ifclosure/ctxval", Symbol: "TestContextValueOpenPayloadInvoke"}
+	ctxCancelSubj := Subject{Package: "example.com/ifclosure/ctxval", Symbol: "TestContextCancelWithOpenValuePayload"}
+	extractFnClosed := Subject{Package: "example.com/ifclosure/helperextract_closed", Symbol: "UseHolderExtract"}
+	extractMethClosed := Subject{Package: "example.com/ifclosure/helperextract_closed", Symbol: "Holder.RunViaExtract"}
+	extractFnOpen := Subject{Package: "example.com/ifclosure/helperextract_open", Symbol: "UseHolderExtractOpen"}
+	extractMethOpen := Subject{Package: "example.com/ifclosure/helperextract_open", Symbol: "Holder.RunViaExtractOpen"}
+	wholeCopySubj := Subject{Package: "example.com/ifclosure/wholecopy", Symbol: "UseWholeCopied"}
+	uncalledFnSubj := Subject{Package: "example.com/ifclosure/uncalledstore", Symbol: "UseUncalledStored"}
+	uncalledMethSubj := Subject{Package: "example.com/ifclosure/uncalledstore", Symbol: "Holder.MethodTarget"}
+	reflectFnSubj := Subject{Package: "example.com/ifclosure/reflectset", Symbol: "UseReflectMutated"}
+	reflectMethSubj := Subject{Package: "example.com/ifclosure/reflectset", Symbol: "Holder.RunReflectMutated"}
+	closedCleanupSubj := Subject{Package: "example.com/ifclosure/cleanupclosed", Symbol: "TestClosedCleanup"}
+	closedCleanupEnvSubj := Subject{Package: "example.com/ifclosure/cleanupclosed", Symbol: "TestClosedCleanupEnv"}
+	closedFuzzSubj := Subject{Package: "example.com/ifclosure/cleanupclosed", Symbol: "FuzzClosedTarget"}
+	unclosedCleanupSubj := Subject{Package: "example.com/ifclosure/cleanupunclosed", Symbol: "TestUnclosedCleanup"}
+	reflectCallSubj := Subject{Package: "example.com/ifclosure/reflectcall", Symbol: "TestReflectMethodCall"}
+	stdlibInvokeSubj := Subject{Package: "example.com/ifclosure/stdlibinvoke", Symbol: "TestStdlibInvokeReadFrom"}
+	namedSigClosedSubj := Subject{Package: "example.com/ifclosure/namedsig_closed", Symbol: "TestMixedNamedSig"}
+	namedSigOpenGlobalSubj := Subject{Package: "example.com/ifclosure/namedsig_open", Symbol: "TestOpenGlobalNamedSig"}
+	namedSigPtrMutSubj := Subject{Package: "example.com/ifclosure/namedsig_open", Symbol: "TestPointerMutatedNamedSig"}
+	structBoxStaticSubj := Subject{Package: "example.com/ifclosure/structbox_open", Symbol: "TestStaticOnly"}
+	structBoxOpenSubj := Subject{Package: "example.com/ifclosure/structbox_open", Symbol: "TestBoxedOpen"}
+	structBoxUseSavedSubj := Subject{Package: "example.com/ifclosure/structbox_open", Symbol: "UseSavedHolder"}
+	sliceRecvSubj := Subject{Package: "example.com/ifclosure/structbox_open", Symbol: "TestMixedSliceRecv"}
+	addrTakenStaticSubj := Subject{Package: "example.com/ifclosure/addrtaken_open", Symbol: "TestStaticCaller"}
+	addrTakenDynamicSubj := Subject{Package: "example.com/ifclosure/addrtaken_open", Symbol: "TestDynamicOpenCaller"}
+
+	extraSubjects := []Subject{
+		ctxSprintSubj, ctxOpenSubj, ctxCancelSubj,
+		extractFnClosed, extractMethClosed,
+		extractFnOpen, extractMethOpen,
+		wholeCopySubj, uncalledFnSubj, uncalledMethSubj,
+		reflectFnSubj, reflectMethSubj,
+		closedCleanupSubj, closedCleanupEnvSubj, closedFuzzSubj, unclosedCleanupSubj, reflectCallSubj,
+		stdlibInvokeSubj, namedSigClosedSubj, namedSigOpenGlobalSubj, namedSigPtrMutSubj,
+		structBoxStaticSubj, structBoxOpenSubj, structBoxUseSavedSubj, sliceRecvSubj,
+		addrTakenStaticSubj, addrTakenDynamicSubj,
+	}
+	eProofs, err := h3.ComputeObservabilityBatch(extraSubjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := summaryCacheLen(); got != 0 {
+		t.Errorf("summaryCacheLen after ComputeObservabilityBatch = %d, want 0", got)
+	}
+	if got := mutatedGlobalsCacheLen(); got != 0 {
+		t.Errorf("mutatedGlobalsCacheLen after ComputeObservabilityBatch = %d, want 0", got)
+	}
+	eRooted, err := h3.ComputeRootedFunctions(context.Background(), extraSubjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := summaryCacheLen(); got != 0 {
+		t.Errorf("summaryCacheLen after ComputeRootedFunctions = %d, want 0", got)
+	}
+	if got := mutatedGlobalsCacheLen(); got != 0 {
+		t.Errorf("mutatedGlobalsCacheLen after ComputeRootedFunctions = %d, want 0", got)
+	}
+	binRooted, err := h3.ComputeBinaryRootedFunctions(context.Background(), []string{
+		"example.com/ifclosure/cleanupclosed",
+		"example.com/ifclosure/cleanupunclosed",
+		"example.com/ifclosure/reflectcall",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := summaryCacheLen(); got != 0 {
+		t.Errorf("summaryCacheLen after ComputeBinaryRootedFunctions = %d, want 0", got)
+	}
+	if got := mutatedGlobalsCacheLen(); got != 0 {
+		t.Errorf("mutatedGlobalsCacheLen after ComputeBinaryRootedFunctions = %d, want 0", got)
+	}
+
+	if p := eProofs[ctxSprintSubj]; !p.Observable || p.EffectFree {
+		t.Errorf("TestContextValueSprintEnvStringer observability = %+v, want Observable && !EffectFree", p)
+	}
+	if rf := eRooted[ctxSprintSubj]; !rf.Complete || !rf.Fns["example.com/ifclosure/ctxval\x00envStringer.String"] {
+		t.Errorf("TestContextValueSprintEnvStringer rooted = %+v, want Complete with envStringer.String", rf)
+	}
+	if p := eProofs[ctxOpenSubj]; p.Observable || p.EffectFree {
+		t.Errorf("TestContextValueOpenPayloadInvoke observability = %+v, want fail-closed", p)
+	}
+	if p := eProofs[ctxCancelSubj]; !p.Observable || !p.EffectFree {
+		t.Errorf("TestContextCancelWithOpenValuePayload observability = %+v, want Observable && EffectFree", p)
+	}
+
+	for _, cs := range []Subject{extractFnClosed, extractMethClosed} {
+		if p := eProofs[cs]; !p.Observable || p.EffectFree {
+			t.Errorf("%s observability = %+v, want Observable && !EffectFree", cs.Symbol, p)
+		}
+		if rf := eRooted[cs]; !rf.Complete || !rf.Fns["example.com/ifclosure/helperextract_closed\x00envOp.Run"] {
+			t.Errorf("%s rooted = %+v, want Complete with envOp.Run", cs.Symbol, rf)
+		}
+	}
+
+	for _, openSubj := range []Subject{
+		extractFnOpen, extractMethOpen,
+		wholeCopySubj, uncalledFnSubj, uncalledMethSubj,
+		reflectFnSubj, reflectMethSubj,
+		unclosedCleanupSubj,
+		structBoxUseSavedSubj,
+	} {
+		if p := eProofs[openSubj]; p.Observable || p.EffectFree {
+			t.Errorf("%s (%s) observability = %+v, want fail-closed", openSubj.Package, openSubj.Symbol, p)
+		}
+		if rf := eRooted[openSubj]; rf.Complete {
+			t.Errorf("%s (%s) rooted = %+v, want !Complete", openSubj.Package, openSubj.Symbol, rf)
+		}
+	}
+
+	for _, openTestSubj := range []Subject{
+		namedSigOpenGlobalSubj, namedSigPtrMutSubj,
+		structBoxStaticSubj, structBoxOpenSubj, sliceRecvSubj,
+		addrTakenStaticSubj, addrTakenDynamicSubj,
+	} {
+		if p := eProofs[openTestSubj]; p.Observable || p.EffectFree {
+			t.Errorf("%s (%s) observability = %+v, want fail-closed", openTestSubj.Package, openTestSubj.Symbol, p)
+		}
+	}
+
+	if p := eProofs[stdlibInvokeSubj]; p.EffectFree {
+		t.Errorf("TestStdlibInvokeReadFrom observability = %+v, want !EffectFree", p)
+	}
+	if rf := eRooted[stdlibInvokeSubj]; rf.Complete && !rf.Fns["example.com/ifclosure/stdlibinvoke\x00evilReader.Read"] {
+		t.Errorf("TestStdlibInvokeReadFrom rooted = %+v, want !Complete or evilReader.Read included", rf)
+	}
+
+	if p := eProofs[namedSigClosedSubj]; !p.Observable || p.EffectFree {
+		t.Errorf("TestMixedNamedSig observability = %+v, want Observable && !EffectFree", p)
+	}
+	if rf := eRooted[namedSigClosedSubj]; !rf.Complete || !rf.Fns["example.com/ifclosure/namedsig_closed\x00envFn"] {
+		t.Errorf("TestMixedNamedSig rooted = %+v, want Complete with envFn", rf)
+	}
+
+	for _, soloSubj := range []Subject{
+		structBoxStaticSubj, structBoxOpenSubj,
+		addrTakenStaticSubj, addrTakenDynamicSubj,
+	} {
+		hSolo, err := newAt(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		soloProofs, err := hSolo.ComputeObservabilityBatch([]Subject{soloSubj})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p := soloProofs[soloSubj]; p.Observable || p.EffectFree {
+			t.Errorf("solo %s (%s) observability = %+v, want fail-closed", soloSubj.Package, soloSubj.Symbol, p)
+		}
+	}
+
+	if p := eProofs[closedCleanupSubj]; !p.Observable || !p.EffectFree {
+		t.Errorf("TestClosedCleanup observability = %+v, want Observable && EffectFree", p)
+	}
+	if rf := eRooted[closedCleanupSubj]; !rf.Complete || !rf.Fns["example.com/ifclosure/cleanupclosed\x00mutateShared"] {
+		t.Errorf("TestClosedCleanup rooted = %+v, want Complete with mutateShared", rf)
+	}
+	if p := eProofs[closedCleanupEnvSubj]; p.Observable || p.EffectFree {
+		t.Errorf("TestClosedCleanupEnv observability = %+v, want !Observable && !EffectFree", p)
+	}
+	if rf := eRooted[closedCleanupEnvSubj]; !rf.Complete || !rf.Fns["example.com/ifclosure/cleanupclosed\x00cleanupEnv"] {
+		t.Errorf("TestClosedCleanupEnv rooted = %+v, want Complete with cleanupEnv", rf)
+	}
+	if p := eProofs[closedFuzzSubj]; p.Observable || p.EffectFree {
+		t.Errorf("FuzzClosedTarget observability = %+v, want !Observable && !EffectFree", p)
+	}
+	if rf := eRooted[closedFuzzSubj]; !rf.Complete || !rf.Fns["example.com/ifclosure/cleanupclosed\x00fuzzHelper"] {
+		t.Errorf("FuzzClosedTarget rooted = %+v, want Complete with fuzzHelper", rf)
+	}
+	if brf := binRooted["example.com/ifclosure/cleanupclosed"]; !brf.Complete ||
+		!brf.Fns["example.com/ifclosure/cleanupclosed\x00mutateShared"] ||
+		!brf.Fns["example.com/ifclosure/cleanupclosed\x00cleanupEnv"] ||
+		!brf.Fns["example.com/ifclosure/cleanupclosed\x00fuzzHelper"] {
+		t.Errorf("cleanupclosed binary rooted = %+v, want Complete with mutateShared, cleanupEnv, and fuzzHelper", brf)
+	}
+	if brf := binRooted["example.com/ifclosure/cleanupunclosed"]; brf.Complete {
+		t.Errorf("cleanupunclosed binary rooted = %+v, want !Complete", brf)
+	}
+	if rf := eRooted[reflectCallSubj]; rf.Complete {
+		t.Errorf("TestReflectMethodCall rooted = %+v, want !Complete", rf)
+	}
+	if brf := binRooted["example.com/ifclosure/reflectcall"]; brf.Complete {
+		t.Errorf("reflectcall binary rooted = %+v, want !Complete", brf)
+	}
+}
+
+func TestObservabilityDotlessModuleAndPromotedEmbedding(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs the engine over it")
+	}
+
+	// 1. Dotless user module ("module app"): user types, globals, signatures,
+	// and promoted wrappers must never be misclassified as standard library.
+	dotlessDir := t.TempDir()
+	writeFile(t, dotlessDir, "go.mod", "module app\n\ngo 1.26\n")
+	writeFile(t, dotlessDir, "app.go", `package app
+
+import "errors"
+
+type Op interface {
+	Run() string
+}
+
+type SliceOp []func() string
+
+func (s SliceOp) Run() string {
+	for _, fn := range s {
+		return fn()
+	}
+	return ""
+}
+
+var GlobalSlice SliceOp
+
+var ErrSentinel = errors.New("app sentinel")
+
+type PureEmbed struct{}
+
+func (PureEmbed) Pure() int { return 7 }
+
+type NamedOuter struct {
+	PureEmbed
+}
+
+type FuncBox struct {
+	Fn func() string
+}
+
+func (b FuncBox) Call() string {
+	if b.Fn != nil {
+		return b.Fn()
+	}
+	return ""
+}
+
+var GlobalFn func() string
+
+type NamedHook func() string
+
+func (h NamedHook) Run() string {
+	if h != nil {
+		return h()
+	}
+	return ""
+}
+
+var GlobalHook NamedHook
+`)
+	writeFile(t, dotlessDir, "app_test.go", `package app
+
+import (
+	"errors"
+	"os"
+	"testing"
+)
+
+func TestPlant(t *testing.T) {
+	GlobalSlice = append(GlobalSlice, func() string { return os.Getenv("DOTLESS_PLANTED") })
+	GlobalFn = func() string { return os.Getenv("DOTLESS_FN") }
+	GlobalHook = func() string { return os.Getenv("DOTLESS_HOOK") }
+}
+
+func TestDotlessOpenSliceOp(t *testing.T) {
+	var op Op = GlobalSlice
+	_ = op.Run()
+}
+
+func TestDotlessClosedSliceOp(t *testing.T) {
+	local := SliceOp{func() string { return os.Getenv("DOTLESS_CLOSED") }}
+	_ = local.Run()
+}
+
+func TestDotlessNamedPromotedPure(t *testing.T) {
+	var r interface{ Pure() int } = NamedOuter{}
+	if r.Pure() != 7 {
+		t.Fatal("unexpected")
+	}
+}
+
+func TestDotlessOpenBox(t *testing.T) {
+	b := FuncBox{Fn: GlobalFn}
+	_ = b.Call()
+}
+
+func TestDotlessOpenNamedHook(t *testing.T) {
+	var op Op = GlobalHook
+	_ = op.Run()
+}
+
+func TestDotlessSentinel(t *testing.T) {
+	if !errors.Is(ErrSentinel, ErrSentinel) {
+		t.Fatal("unexpected")
+	}
+}
+`)
+	if err := os.MkdirAll(filepath.Join(dotlessDir, "closedhook"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dotlessDir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dotlessDir, "pure"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dotlessDir, "sub/sub.go", `package sub
+
+func Add(a, b int) int {
+	return a + b
+}
+`)
+	writeFile(t, dotlessDir, "pure/pure.go", `package pure
+
+import "app/sub"
+
+func PureCrossSub(x int) int {
+	return sub.Add(x, 1)
+}
+`)
+	writeFile(t, dotlessDir, "pure/pure_test.go", `package pure
+
+import "testing"
+
+func TestDotlessMultiPkgPure(t *testing.T) {
+	if PureCrossSub(41) != 42 {
+		t.Fatal("unexpected")
+	}
+}
+`)
+	writeFile(t, dotlessDir, "closedhook/closedhook_test.go", `package closedhook
+
+import (
+	"os"
+	"testing"
+)
+
+type Op interface {
+	Run() string
+}
+
+type NamedHook func() string
+
+func (h NamedHook) Run() string {
+	return h()
+}
+
+func TestDotlessClosedNamedHook(t *testing.T) {
+	var op Op = NamedHook(func() string { return os.Getenv("DOTLESS_CLOSED_HOOK") })
+	_ = op.Run()
+}
+`)
+
+	hDotless, err := newAt(dotlessDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dotlessOpenSlice := Subject{Package: "app", Symbol: "TestDotlessOpenSliceOp"}
+	dotlessClosedSlice := Subject{Package: "app", Symbol: "TestDotlessClosedSliceOp"}
+	dotlessClosedHook := Subject{Package: "app/closedhook", Symbol: "TestDotlessClosedNamedHook"}
+	dotlessPromotedPure := Subject{Package: "app", Symbol: "TestDotlessNamedPromotedPure"}
+	dotlessOpenBox := Subject{Package: "app", Symbol: "TestDotlessOpenBox"}
+	dotlessOpenHook := Subject{Package: "app", Symbol: "TestDotlessOpenNamedHook"}
+	dotlessSentinel := Subject{Package: "app", Symbol: "TestDotlessSentinel"}
+	dotlessCrossProd := Subject{Package: "app/pure", Symbol: "PureCrossSub"}
+	dotlessCrossTest := Subject{Package: "app/pure", Symbol: "TestDotlessMultiPkgPure"}
+
+	dMaximal, _, err := hDotless.ComputeMaximalBatch([]Subject{dotlessCrossProd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := dMaximal[dotlessCrossProd]; m.Unverifiable || m.Hash == "" {
+		t.Errorf("dotless multi-pkg PureCrossSub maximal = %+v, want verifiable non-empty hash", m)
+	}
+
+	dProofs, err := hDotless.ComputeObservabilityBatch([]Subject{
+		dotlessOpenSlice, dotlessClosedSlice, dotlessClosedHook, dotlessPromotedPure,
+		dotlessOpenBox, dotlessOpenHook, dotlessSentinel,
+		dotlessCrossProd, dotlessCrossTest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []Subject{dotlessOpenSlice, dotlessOpenBox, dotlessOpenHook} {
+		if p := dProofs[s]; p.Observable || p.EffectFree {
+			t.Errorf("dotless %s observability = %+v, want fail-closed", s.Symbol, p)
+		}
+	}
+	for _, s := range []Subject{dotlessClosedSlice, dotlessClosedHook} {
+		if p := dProofs[s]; !p.Observable || p.EffectFree {
+			t.Errorf("dotless %s observability = %+v, want Observable && !EffectFree", s.Symbol, p)
+		}
+	}
+	for _, s := range []Subject{dotlessPromotedPure, dotlessSentinel, dotlessCrossProd, dotlessCrossTest} {
+		if p := dProofs[s]; !p.Observable || !p.EffectFree {
+			t.Errorf("dotless %s observability = %+v, want Observable && EffectFree", s.Symbol, p)
+		}
+	}
+
+	// 2. Pointer-embedded structs, embedded slice carriers, unnamed-struct
+	// promoted wrappers, and reflect-mutated function-field stores.
+	embedDir := t.TempDir()
+	for _, sub := range []string{"ptrworker", "embedslice", "unnamedwrap", "reflectfunc"} {
+		if err := os.MkdirAll(filepath.Join(embedDir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, embedDir, "go.mod", "module example.com/promotedembed\n\ngo 1.26\n")
+	writeFile(t, embedDir, "ptrworker/ptrworker.go", `package ptrworker
+
+import "os"
+
+type Op interface {
+	Run() string
+}
+
+type Holder struct {
+	Op Op
+}
+
+type Saver interface {
+	Save(h *Holder)
+}
+
+type Worker struct {
+	Fn func() string
+}
+
+func (w *Worker) Run() string {
+	if w.Fn != nil {
+		return w.Fn()
+	}
+	return ""
+}
+
+func (w *Worker) Save(h *Holder) {
+	h.Op = w
+}
+
+type OuterPtr struct {
+	*Worker
+}
+
+var GlobalOpenWorker *Worker
+
+func init() {
+	GlobalOpenWorker = &Worker{Fn: func() string { return os.Getenv("PTR_EMBED_WORKER") }}
+}
+
+func BoxOuter(s Saver, h *Holder) {
+	s.Save(h)
+}
+
+func UseSavedWorker(h *Holder) string {
+	return h.Op.Run()
+}
+`)
+	writeFile(t, embedDir, "ptrworker/ptrworker_test.go", `package ptrworker
+
+import "testing"
+
+func TestPromotedPtrWorkerBoxedOpen(t *testing.T) {
+	var h Holder
+	var s Saver = &OuterPtr{Worker: GlobalOpenWorker}
+	BoxOuter(s, &h)
+	_ = UseSavedWorker(&h)
+}
+`)
+	writeFile(t, embedDir, "embedslice/embedslice.go", `package embedslice
+
+import "os"
+
+type Op interface {
+	Run() string
+}
+
+type SliceOp []func() string
+
+func (s SliceOp) Run() string {
+	for _, fn := range s {
+		return fn()
+	}
+	return ""
+}
+
+type OuterSlice struct {
+	SliceOp
+}
+
+var GlobalSlice SliceOp
+
+func PlantSlice() {
+	GlobalSlice = append(GlobalSlice, func() string { return os.Getenv("EMBED_SLICE_ENV") })
+}
+`)
+	writeFile(t, embedDir, "embedslice/embedslice_test.go", `package embedslice
+
+import "testing"
+
+func TestPlant(t *testing.T) {
+	PlantSlice()
+}
+
+func TestEmbeddedSliceBoxed(t *testing.T) {
+	var op Op = &OuterSlice{SliceOp: GlobalSlice}
+	_ = op.Run()
+}
+
+func TestEmbeddedSliceMethodExpr(t *testing.T) {
+	_ = OuterSlice.Run(OuterSlice{SliceOp: GlobalSlice})
+}
+`)
+	writeFile(t, embedDir, "unnamedwrap/unnamedwrap.go", `package unnamedwrap
+
+import (
+	"io"
+	"time"
+)
+
+type LocReader interface {
+	Local() time.Time
+}
+
+type pureLoc struct{}
+
+func (pureLoc) Local() time.Time { return time.Time{} }
+
+type PureRunner interface {
+	RunPure() int
+}
+
+type PureEmbed struct{}
+
+func (PureEmbed) RunPure() int { return 42 }
+
+var GlobalReader io.Reader
+var GlobalErr error
+`)
+	writeFile(t, embedDir, "unnamedwrap/unnamedwrap_test.go", `package unnamedwrap
+
+import (
+	"io"
+	"testing"
+	"time"
+)
+
+func TestUnnamedTimeLocal(t *testing.T) {
+	var alt LocReader = pureLoc{}
+	_ = alt
+	var r LocReader = struct{ time.Time }{Time: time.Unix(0, 0).UTC()}
+	_ = r.Local()
+}
+
+func TestUnnamedIOReader(t *testing.T) {
+	var r io.Reader = struct{ io.Reader }{Reader: GlobalReader}
+	buf := make([]byte, 1)
+	_, _ = r.Read(buf)
+}
+
+func TestUnnamedUniverseError(t *testing.T) {
+	var e error = struct{ error }{error: GlobalErr}
+	_ = e.Error()
+}
+
+func TestUnnamedPureEmbed(t *testing.T) {
+	var r PureRunner = struct{ PureEmbed }{}
+	if r.RunPure() != 42 {
+		t.Fatal("unexpected")
+	}
+}
+`)
+	writeFile(t, embedDir, "reflectfunc/reflectfunc.go", `package reflectfunc
+
+import (
+	"os"
+	"reflect"
+)
+
+type Op interface {
+	Run() string
+}
+
+type Holder struct {
+	Op Op
+}
+
+type pureOp struct{}
+
+func (*pureOp) Run() string { return "ok" }
+
+type envOp struct{}
+
+func (*envOp) Run() string { return os.Getenv("REFLECT_FUNC_ENV") }
+
+type FuncBox struct {
+	F func(*Holder, Op)
+}
+
+func setHolder(h *Holder, op Op) {
+	h.Op = op
+}
+
+func UseReflectFuncField(h *Holder) string {
+	return h.Op.Run()
+}
+
+func PlantViaReflect() string {
+	var fb FuncBox
+	fb.F = setHolder
+	fb.F(&Holder{}, &pureOp{})
+	var h Holder
+	v := reflect.ValueOf(&fb).Elem().Field(0).Addr()
+	if ptr, ok := v.Interface().(*func(*Holder, Op)); ok && *ptr != nil {
+		(*ptr)(&h, &envOp{})
+	}
+	return UseReflectFuncField(&h)
+}
+`)
+	writeFile(t, embedDir, "reflectfunc/reflectfunc_test.go", `package reflectfunc
+
+import "testing"
+
+func TestPlantReflect(t *testing.T) {
+	_ = PlantViaReflect()
+}
+`)
+
+	hEmbed, err := newAt(embedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ptrWorkerTestSubj := Subject{Package: "example.com/promotedembed/ptrworker", Symbol: "TestPromotedPtrWorkerBoxedOpen"}
+	ptrWorkerProdSubj := Subject{Package: "example.com/promotedembed/ptrworker", Symbol: "UseSavedWorker"}
+	embedSliceBoxedSubj := Subject{Package: "example.com/promotedembed/embedslice", Symbol: "TestEmbeddedSliceBoxed"}
+	embedSliceExprSubj := Subject{Package: "example.com/promotedembed/embedslice", Symbol: "TestEmbeddedSliceMethodExpr"}
+	unnamedTimeSubj := Subject{Package: "example.com/promotedembed/unnamedwrap", Symbol: "TestUnnamedTimeLocal"}
+	unnamedReaderSubj := Subject{Package: "example.com/promotedembed/unnamedwrap", Symbol: "TestUnnamedIOReader"}
+	unnamedErrSubj := Subject{Package: "example.com/promotedembed/unnamedwrap", Symbol: "TestUnnamedUniverseError"}
+	unnamedPureSubj := Subject{Package: "example.com/promotedembed/unnamedwrap", Symbol: "TestUnnamedPureEmbed"}
+	reflectFuncSubj := Subject{Package: "example.com/promotedembed/reflectfunc", Symbol: "UseReflectFuncField"}
+
+	emProofs, err := hEmbed.ComputeObservabilityBatch([]Subject{
+		ptrWorkerTestSubj, ptrWorkerProdSubj,
+		embedSliceBoxedSubj, embedSliceExprSubj,
+		unnamedTimeSubj, unnamedReaderSubj, unnamedErrSubj, unnamedPureSubj,
+		reflectFuncSubj,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emRooted, err := hEmbed.ComputeRootedFunctions(context.Background(), []Subject{ptrWorkerProdSubj, reflectFuncSubj})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []Subject{
+		ptrWorkerTestSubj, ptrWorkerProdSubj,
+		embedSliceBoxedSubj, embedSliceExprSubj,
+		unnamedTimeSubj, unnamedReaderSubj, unnamedErrSubj,
+		reflectFuncSubj,
+	} {
+		if p := emProofs[s]; p.Observable || p.EffectFree {
+			t.Errorf("%s (%s) observability = %+v, want fail-closed", s.Package, s.Symbol, p)
+		}
+	}
+	for _, s := range []Subject{ptrWorkerProdSubj, reflectFuncSubj} {
+		if rf := emRooted[s]; rf.Complete {
+			t.Errorf("%s (%s) rooted = %+v, want !Complete", s.Package, s.Symbol, rf)
+		}
+	}
+	if p := emProofs[unnamedPureSubj]; !p.Observable || !p.EffectFree {
+		t.Errorf("TestUnnamedPureEmbed observability = %+v, want Observable && EffectFree", p)
+	}
 }
 

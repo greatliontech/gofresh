@@ -7,6 +7,9 @@ import "slices"
 // Method identifies the admitted immutable-environment derivation.
 const Method = "gofresh/immutable-environment@1"
 
+// StaticMethod identifies the static effect-free reachability derivation.
+const StaticMethod = "gofresh/static-reachability@1"
+
 // Span identifies one pre-execution frame. The nonzero size gives distinct
 // allocations distinct identities; copies of a frame retain the same span.
 type Span struct{ marker byte }

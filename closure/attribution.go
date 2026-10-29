@@ -29,6 +29,9 @@ type attributedReachability struct {
 	// provenance: the one startup flow that can dispatch a test-planted
 	// value (after m.Run), so the one whose unattributed invokes widen.
 	testMainFunctions     map[*ssa.Function]bool
+	cleanupFunctions      map[*ssa.Function]bool
+	rootedExtraFunctions  map[*ssa.Function]bool
+	rootedIncomplete      bool
 	resolved              map[ssa.CallInstruction]bool
 	dynamicTargets        map[ssa.CallInstruction]map[*ssa.Function]bool
 	startupDynamicTargets map[ssa.CallInstruction]map[*ssa.Function]bool
@@ -37,6 +40,7 @@ type attributedReachability struct {
 	// scan yields to theirs.
 	instantiatedOrigins map[*ssa.Function]bool
 	openWorld           bool
+	enumeratedRoot      bool
 	// enumeratedRootSites is the subject root's whole-view caller
 	// enumeration when its dynamic-carrying signature closed by it:
 	// the sites the closed-value walk crosses to when judging the
@@ -45,11 +49,13 @@ type attributedReachability struct {
 	enumeratedRootSites    []ssa.CallInstruction
 	enumeratedFieldStores  map[int][]ssa.Value
 	structFieldStores      map[structFieldKey][]ssa.Value
+	structWholeStores      map[*types.Named][]ssa.Value
 	structPoisoned         map[structFieldKey]bool
 	structReferencedByType map[*types.Named]bool
 	programSites           map[*ssa.Function][]ssa.CallInstruction
 	programValueRef        map[*ssa.Function]bool
 	programFunctions       map[*ssa.Function]bool
+	userPaths              map[string]bool
 	subjectRoot            *ssa.Function
 	summary                *callerReferenceSummary
 	// propertyHarnessAudited carries the program-level audit verdict for
@@ -281,13 +287,15 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 		}
 		openCandidates[root] = i
 	}
+	harnessAudited := propertyHarnessAuditedProg(prog)
+	userPaths := userModulePaths(prog.Pkgs)
 	var valueRefOutsideInit map[*ssa.Function]bool
 	var summary *callerReferenceSummary
 	if audited || len(openCandidates) > 0 {
 		if allFunctions == nil {
 			allFunctions = ssautil.AllFunctions(prog.Prog)
 		}
-		summary = enumerateCallerReferences(audited, nil, allFunctions)
+		summary = enumerateCallerReferences(audited, userPaths, allFunctions)
 		valueRefOutsideInit = summary.valueRefOutsideInit
 		var openRoots []*ssa.Function
 		for root := range openCandidates {
@@ -296,7 +304,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 		sort.Slice(openRoots, func(i, j int) bool { return openRoots[i].String() < openRoots[j].String() })
 		for _, root := range openRoots {
 			i := openCandidates[root]
-			enc, ok := subjectEnumerationClosure(audited, root, summary)
+			enc, ok := subjectEnumerationClosure(audited, userPaths, root, summary)
 			if !ok {
 				continue
 			}
@@ -321,9 +329,79 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 			seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: ct, Masks: testMasks})
 		}
 	}
-	res, err := rta.Analyze(ctx, roots, seeds)
-	if err != nil {
-		return nil, err
+	cleanupRoots := make([][]*ssa.Function, len(subjects))
+	fuzzRoots := make([][]*ssa.Function, len(subjects))
+	unclosedCleanup := make([]bool, len(subjects))
+	unclosedFuzz := make([]bool, len(subjects))
+	rootedCallbacks := make([]map[*ssa.Function]bool, len(subjects))
+	var res *rta.Result
+	var err error
+	for {
+		res, err = rta.Analyze(ctx, roots, seeds)
+		if err != nil {
+			return nil, err
+		}
+		addedAny := false
+		for i, subject := range subjects {
+			mask := uint64(1) << i
+			subjectRoot := prog.Roots[subject.Symbol]
+			if subjectRoot == nil {
+				continue
+			}
+			provRoots := []*ssa.Function{subjectRoot}
+			if len(instantiated[mask]) > 0 {
+				provRoots = provRoots[:0]
+				for fn := range allFunctions {
+					if fn != nil && fn != subjectRoot && fn.Origin() == subjectRoot {
+						provRoots = append(provRoots, fn)
+					}
+				}
+			}
+			if prog.TestMain != nil && subjectRunsThroughHarness(prog, subjectRoot) {
+				provRoots = append(provRoots, prog.TestMain)
+			}
+			provRoots = append(provRoots, cleanupRoots[i]...)
+			provRoots = append(provRoots, fuzzRoots[i]...)
+			prov, err := provenanceReachable(ctx, provRoots, mask, res, harnessAudited, userPaths, nil)
+			if err != nil {
+				return nil, err
+			}
+			enc, enumerated := enumClosed[i]
+			cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, userPaths, summary, subjectRoot, enumerated, enc, prov, mask, res)
+			unclosedCleanup[i] = unclosedCleanup[i] || unclosedCB
+			unclosedFuzz[i] = unclosedFuzz[i] || unclosedFB
+			for _, cb := range cbs {
+				if rootedCallbacks[i] == nil {
+					rootedCallbacks[i] = map[*ssa.Function]bool{}
+				}
+				if !rootedCallbacks[i][cb] {
+					rootedCallbacks[i][cb] = true
+					cleanupRoots[i] = append(cleanupRoots[i], cb)
+					roots[cb] |= mask
+					addedAny = true
+				}
+			}
+			for _, fb := range fbs {
+				if rootedCallbacks[i] == nil {
+					rootedCallbacks[i] = map[*ssa.Function]bool{}
+				}
+				if !rootedCallbacks[i][fb] {
+					rootedCallbacks[i][fb] = true
+					fuzzRoots[i] = append(fuzzRoots[i], fb)
+					roots[fb] |= mask
+					if len(fb.Params) > 0 && isHarnessPointerType(fb.Params[0].Type()) && paramHasMakeInterface(fb.Params[0], make(map[*ssa.Parameter]bool)) {
+						if seeds == nil {
+							seeds = &rta.Seeds{}
+						}
+						seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: fb.Params[0].Type(), Masks: mask})
+					}
+					addedAny = true
+				}
+			}
+		}
+		if !addedAny {
+			break
+		}
 	}
 	// Fold each parameterized origin into the result under its subject's
 	// mask: its declaration is the subject's own source — the subject's
@@ -335,17 +413,14 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 		}
 	}
 	reachable := make([]attributedReachability, len(subjects))
-	harnessAudited := propertyHarnessAuditedProg(prog)
-	userPaths := userModulePaths(prog.Pkgs)
 	initMaskRoots := make(map[*ssa.Function]uint64, len(initRoots))
 	for _, fn := range initRoots {
 		initMaskRoots[fn] |= allMasks
 	}
-	cleanupRoots := make([][]*ssa.Function, len(subjects))
-	unclosedCleanup := make([]bool, len(subjects))
 	for i := range reachable {
 		enc, enumerated := enumClosed[i]
 		var structFieldStores map[structFieldKey][]ssa.Value
+		var structWholeStores map[*types.Named][]ssa.Value
 		var structPoisoned map[structFieldKey]bool
 		var structReferencedByType map[*types.Named]bool
 		var programSites map[*ssa.Function][]ssa.CallInstruction
@@ -353,6 +428,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 		var programFunctions map[*ssa.Function]bool
 		if summary != nil {
 			structFieldStores = summary.structFieldStores
+			structWholeStores = summary.structWholeStores
 			structPoisoned = summary.structPoisoned
 			structReferencedByType = summary.structReferencedByType
 			programSites = summary.sites
@@ -365,15 +441,18 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 			dynamicTargets:         make(map[ssa.CallInstruction]map[*ssa.Function]bool),
 			startupDynamicTargets:  make(map[ssa.CallInstruction]map[*ssa.Function]bool),
 			instantiatedOrigins:    instantiated[uint64(1)<<i],
-			openWorld:              !enumerated && rootMayReceiveUnknownDynamic(audited, prog, prog.Roots[subjects[i].Symbol]),
+			openWorld:              (!enumerated && rootMayReceiveUnknownDynamic(audited, prog, prog.Roots[subjects[i].Symbol])) || unclosedCleanup[i],
+			enumeratedRoot:         enumerated,
 			enumeratedRootSites:    enc.sites,
 			enumeratedFieldStores:  enc.fieldStores,
 			structFieldStores:      structFieldStores,
+			structWholeStores:      structWholeStores,
 			structPoisoned:         structPoisoned,
 			structReferencedByType: structReferencedByType,
 			programSites:           programSites,
 			programValueRef:        programValueRef,
 			programFunctions:       programFunctions,
+			userPaths:              userPaths,
 			subjectRoot:            prog.Roots[subjects[i].Symbol],
 			summary:                summary,
 			propertyHarnessAudited: harnessAudited,
@@ -396,33 +475,8 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 				}
 			}
 		}
-		// The enumeration-target narrowing applies to the subject walk
-		// alone: an init-planted value outside the pinned enumerated
-		// set — a value whose every address-taking reference lies in
-		// initializer flow, whatever its shape: an init-parented
-		// anonymous closure, a synthetic method-value wrapper an
-		// initializer materializes (go1.27's encoding/json/v2 plants
-		// base32 bound methods this way in every test binary), a named
-		// function registered there — can never be a subject-closed
-		// operand's value (a shared-state load refuses operand-side),
-		// so RTA's matching-signature collision must not drag
-		// initializer content into the subject's scan. The startup walk
-		// keeps its own judgment of initializer content
-		// (REQ-closure-analysis's enumeration design).
-		// The drop applies only at function-value dispatch sites in
-		// user frames: interface dispatch resolves through runtime-type
-		// flow, not function values — the init-planted judgment is a
-		// value-provenance argument and claims nothing about it — and
-		// the operand-closed proof that anchors the narrowing runs only
-		// for non-standard callers (a std frame's computed dispatch
-		// never widens and never proves its operand), so invoke sites
-		// and std-frame sites keep the whole-mask drag - spurious,
-		// never unsound. The site's frame classifies by the load's
-		// module facts exactly as the walks do. A value referenced
-		// outside init flow anywhere in the program is kept even where
-		// this subject's mask carries only the init reference - the
-		// conservative direction, refusal over precision.
 		var dropCollided func(site ssa.CallInstruction, target *ssa.Function) bool
+		droppedAny := false
 		if enumerated {
 			pinned := enc.addrTaken
 			dropCollided = func(site ssa.CallInstruction, target *ssa.Function) bool {
@@ -433,24 +487,31 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 				if isStdImportPath(framePath) && !userPaths[framePath] {
 					return false
 				}
-				return !pinned[target] && !valueRefOutsideInit[target]
+				if !pinned[target] && !valueRefOutsideInit[target] {
+					droppedAny = true
+					return true
+				}
+				return false
 			}
 		}
 		reachable[i].subjectFunctions, err = provenanceReachable(ctx, subjectProvenance, mask, res, harnessAudited, userPaths, dropCollided)
 		if err != nil {
 			return nil, err
 		}
+		if droppedAny || len(fuzzRoots[i]) > 0 {
+			extraRoots := make([]*ssa.Function, 0, len(subjectProvenance)+len(fuzzRoots[i]))
+			extraRoots = append(extraRoots, subjectProvenance...)
+			extraRoots = append(extraRoots, fuzzRoots[i]...)
+			reachable[i].rootedExtraFunctions, err = provenanceReachable(ctx, extraRoots, mask, res, harnessAudited, userPaths, nil)
+			if err != nil {
+				return nil, err
+			}
+		}
 		if prog.TestMain != nil && subjectRunsThroughHarness(prog, subjectRoot) {
 			reachable[i].testMainFunctions, err = provenanceReachable(ctx, []*ssa.Function{prog.TestMain}, mask, res, harnessAudited, userPaths, nil)
 			if err != nil {
 				return nil, err
 			}
-		}
-		cbs, unclosed := collectTestingCleanupCallbacks(reachable[i].subjectFunctions, reachable[i].testMainFunctions, mask, res)
-		cleanupRoots[i] = cbs
-		unclosedCleanup[i] = unclosed
-		for _, cb := range cbs {
-			initMaskRoots[cb] |= mask
 		}
 		for fn, masks := range res.Reachable {
 			if masks&mask != 0 {
@@ -469,19 +530,6 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 			}
 			for target, masks := range targets {
 				if masks&mask != 0 && reachable[i].functions[target] {
-					// An enumeration-closed subject's dispatch operands
-					// pin their value set exactly - the enumerated
-					// caller arguments and subject-local constructions -
-					// yet RTA's mask carries every address-taken function
-					// of matching signature, and init-flow values are
-					// address-taken under every mask. An init-planted
-					// value outside the pinned set is that
-					// collision: dropping it removes the spurious
-					// initializer-content drag (a refusal class, never a
-					// false valid - a subject-closed operand can hold an
-					// init-planted value only through a shared-state
-					// load the closed-value walk refuses)
-					// (REQ-closure-analysis's enumeration design).
 					if dropCollided != nil && dropCollided(site, target) {
 						continue
 					}
@@ -505,13 +553,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 		if unclosedCleanup[i] {
 			startupRes = res
 		}
-		startupRoots := initRoots
-		if len(cleanupRoots[i]) > 0 {
-			startupRoots = make([]*ssa.Function, 0, len(initRoots)+len(cleanupRoots[i]))
-			startupRoots = append(startupRoots, initRoots...)
-			startupRoots = append(startupRoots, cleanupRoots[i]...)
-		}
-		reachable[i].startupFunctions, err = provenanceReachableStartup(ctx, startupRoots, mask, startupRes, harnessAudited, userPaths)
+		reachable[i].startupFunctions, err = provenanceReachableStartup(ctx, initRoots, mask, startupRes, harnessAudited, userPaths)
 		if err != nil {
 			return nil, err
 		}
@@ -531,6 +573,32 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 				}
 			}
 		}
+		if len(cleanupRoots[i]) > 0 {
+			reachable[i].cleanupFunctions, err = provenanceReachableStartup(ctx, cleanupRoots[i], mask, res, harnessAudited, userPaths)
+			if err != nil {
+				return nil, err
+			}
+			for fn := range reachable[i].cleanupFunctions {
+				reachable[i].startupFunctions[fn] = true
+			}
+			for site, targets := range res.Targets {
+				callee := site.Common().StaticCallee()
+				if !reachable[i].cleanupFunctions[site.Parent()] || callee != nil && funcPkgPath(callee) == "testing" {
+					continue
+				}
+				for target, masks := range targets {
+					if masks&mask != 0 && res.Reachable[target]&mask != 0 {
+						projected := reachable[i].startupDynamicTargets[site]
+						if projected == nil {
+							projected = make(map[*ssa.Function]bool)
+							reachable[i].startupDynamicTargets[site] = projected
+						}
+						projected[target] = true
+					}
+				}
+			}
+		}
+		reachable[i].rootedIncomplete = unclosedFuzz[i] || rootedProvenanceIncomplete(audited, userPaths, reachable[i].subjectFunctions, reachable[i].rootedExtraFunctions, reachable[i].testMainFunctions, reachable[i].cleanupFunctions)
 	}
 	return reachable, nil
 }
@@ -543,6 +611,8 @@ func binaryReachableUnion(ctx context.Context, audited bool, prog *program, subj
 		return RootedFunctions{Fns: map[string]bool{}, Complete: true}, nil
 	}
 	const unionMask uint64 = 1
+	harnessAudited := propertyHarnessAuditedProg(prog)
+	userPaths := userModulePaths(prog.Pkgs)
 	roots := make(map[*ssa.Function]uint64)
 	var subjectProvenance []*ssa.Function
 	includeTestMain := false
@@ -595,13 +665,14 @@ func binaryReachableUnion(ctx context.Context, audited bool, prog *program, subj
 		}
 	}
 	var seeds *rta.Seeds
-	if len(openCandidates) > 0 {
+	var summary *callerReferenceSummary
+	if audited || len(openCandidates) > 0 {
 		if allFunctions == nil {
 			allFunctions = ssautil.AllFunctions(prog.Prog)
 		}
-		summary := enumerateCallerReferences(audited, openCandidates, allFunctions)
+		summary = enumerateCallerReferences(audited, userPaths, allFunctions)
 		for root := range openCandidates {
-			enc, ok := subjectEnumerationClosure(audited, root, summary)
+			enc, ok := subjectEnumerationClosure(audited, userPaths, root, summary)
 			if !ok {
 				return RootedFunctions{}, nil
 			}
@@ -616,6 +687,14 @@ func binaryReachableUnion(ctx context.Context, audited bool, prog *program, subj
 			}
 		}
 	}
+	if audited && includeTestMain {
+		if ct := programCancelCtxType(prog.Prog); ct != nil {
+			if seeds == nil {
+				seeds = &rta.Seeds{}
+			}
+			seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: ct, Masks: unionMask})
+		}
+	}
 	if prog.TestMain != nil && includeTestMain {
 		roots[prog.TestMain] |= unionMask
 		subjectProvenance = append(subjectProvenance, prog.TestMain)
@@ -628,24 +707,63 @@ func binaryReachableUnion(ctx context.Context, audited bool, prog *program, subj
 			roots[init] |= unionMask
 		}
 	}
-	res, err := rta.Analyze(ctx, roots, seeds)
-	if err != nil {
-		if ctx.Err() != nil {
+	rootedCallbacks := map[*ssa.Function]bool{}
+	var res *rta.Result
+	var provenance map[*ssa.Function]bool
+	for {
+		var err error
+		res, err = rta.Analyze(ctx, roots, seeds)
+		if err != nil {
+			if ctx.Err() != nil {
+				return RootedFunctions{}, err
+			}
+			if shapeFailure(err) {
+				return RootedFunctions{}, nil
+			}
 			return RootedFunctions{}, err
 		}
-		if shapeFailure(err) {
+		for _, subject := range subjects {
+			if origin := prog.Roots[subject.Symbol]; parameterizedBody(origin) {
+				res.Reachable[origin] |= unionMask
+			}
+		}
+		provenance, err = provenanceReachable(ctx, subjectProvenance, unionMask, res, harnessAudited, userPaths, nil)
+		if err != nil {
+			return RootedFunctions{}, err
+		}
+		cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, userPaths, summary, nil, false, enumerationClosure{}, provenance, unionMask, res)
+		if unclosedCB || unclosedFB {
 			return RootedFunctions{}, nil
 		}
-		return RootedFunctions{}, err
-	}
-	for _, subject := range subjects {
-		if origin := prog.Roots[subject.Symbol]; parameterizedBody(origin) {
-			res.Reachable[origin] |= unionMask
+		addedAny := false
+		for _, cb := range cbs {
+			if !rootedCallbacks[cb] {
+				rootedCallbacks[cb] = true
+				roots[cb] |= unionMask
+				subjectProvenance = append(subjectProvenance, cb)
+				addedAny = true
+			}
+		}
+		for _, fb := range fbs {
+			if !rootedCallbacks[fb] {
+				rootedCallbacks[fb] = true
+				roots[fb] |= unionMask
+				subjectProvenance = append(subjectProvenance, fb)
+				if len(fb.Params) > 0 && isHarnessPointerType(fb.Params[0].Type()) && paramHasMakeInterface(fb.Params[0], make(map[*ssa.Parameter]bool)) {
+					if seeds == nil {
+						seeds = &rta.Seeds{}
+					}
+					seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: fb.Params[0].Type(), Masks: unionMask})
+				}
+				addedAny = true
+			}
+		}
+		if !addedAny {
+			break
 		}
 	}
-	provenance, err := provenanceReachable(ctx, subjectProvenance, unionMask, res, propertyHarnessAuditedProg(prog), userModulePaths(prog.Pkgs), nil)
-	if err != nil {
-		return RootedFunctions{}, err
+	if rootedProvenanceIncomplete(audited, userPaths, provenance) {
+		return RootedFunctions{}, nil
 	}
 	fns := make(map[string]bool, len(provenance))
 	for fn := range provenance {
@@ -754,7 +872,13 @@ type callerReferenceSummary struct {
 	structReferencedByType map[*types.Named]bool
 	structPoisoned         map[structFieldKey]bool
 	structFieldStores      map[structFieldKey][]ssa.Value
+	structWholeStores      map[*types.Named][]ssa.Value
+	structBoxedValues      map[*types.Named][]ssa.Value
+	structFieldReads       map[structFieldKey][]ssa.Value
+	namedSigSources        map[*types.Named][]ssa.Value
+	namedSigPoisoned       map[*types.Named]bool
 	allFunctions           map[*ssa.Function]bool
+	userPaths              map[string]bool
 
 	progClosedDone    map[ssa.Value]bool
 	enumClosedDone    map[ssa.Value]bool
@@ -769,6 +893,7 @@ type callerReferenceSummary struct {
 	enumInvokeTargets map[ssa.CallInstruction]map[*ssa.Function]bool
 	enumInvokeFailed  map[ssa.CallInstruction]bool
 	enumSeedsMemo     map[ssa.Value]dynamicSeedEntry
+	enumStructClosed  map[*types.Named]bool
 }
 
 func (s *callerReferenceSummary) isStructReferencedOutside(named *types.Named, root *ssa.Function) bool {
@@ -789,8 +914,64 @@ var (
 	summaryCache   map[summaryCacheKey]*callerReferenceSummary
 )
 
+func evictSummaryCache(prog *ssa.Program) {
+	if prog == nil {
+		return
+	}
+	summaryCacheMu.Lock()
+	delete(summaryCache, summaryCacheKey{prog: prog, audited: false})
+	delete(summaryCache, summaryCacheKey{prog: prog, audited: true})
+	summaryCacheMu.Unlock()
+}
+
+func summaryCacheLen() int {
+	summaryCacheMu.Lock()
+	defer summaryCacheMu.Unlock()
+	return len(summaryCache)
+}
+
 func isPromotedWrapper(fn *ssa.Function) bool {
 	return fn != nil && strings.HasPrefix(fn.Synthetic, "wrapper for ")
+}
+
+func isUnnamedStructPromotedWrapper(fn *ssa.Function) bool {
+	if !isPromotedWrapper(fn) || fn.Pkg != nil || fn.Signature == nil || fn.Signature.Recv() == nil {
+		return false
+	}
+	t := types.Unalias(fn.Signature.Recv().Type())
+	if ptr, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(ptr.Elem())
+	}
+	_, ok := t.(*types.Struct)
+	return ok
+}
+
+func unnamedWrapperDeclaringPkg(fn *ssa.Function) *types.Package {
+	if !isUnnamedStructPromotedWrapper(fn) {
+		return nil
+	}
+	t := types.Unalias(fn.Signature.Recv().Type())
+	if ptr, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(ptr.Elem())
+	}
+	st, ok := t.(*types.Struct)
+	if !ok {
+		return nil
+	}
+	for i := 0; i < st.NumFields(); i++ {
+		if pkg := st.Field(i).Pkg(); pkg != nil {
+			return pkg
+		}
+	}
+	return nil
+}
+
+func isAnalyzableUnnamedWrapper(fn *ssa.Function) bool {
+	return isUnnamedStructPromotedWrapper(fn) && len(fn.Blocks) > 0
+}
+
+func isStdPkgPath(userPaths map[string]bool, pkgPath string) bool {
+	return pkgPath != "" && !userPaths[pkgPath] && isStdImportPath(pkgPath)
 }
 
 func isBoundMethodWrapper(fn *ssa.Function) bool {
@@ -809,7 +990,7 @@ func isBoundMethodWrapper(fn *ssa.Function) bool {
 // registered there) — and feeds the enumeration-target narrowing.
 // Function order is sorted so site order, and every judgment derived
 // from it, is run-to-run stable.
-func enumerateCallerReferences(audited bool, _ map[*ssa.Function]bool, all map[*ssa.Function]bool) *callerReferenceSummary {
+func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[*ssa.Function]bool) *callerReferenceSummary {
 	var prog *ssa.Program
 	for fn := range all {
 		if fn != nil && fn.Prog != nil {
@@ -844,7 +1025,13 @@ func enumerateCallerReferences(audited bool, _ map[*ssa.Function]bool, all map[*
 		structReferencedByType: make(map[*types.Named]bool),
 		structPoisoned:         make(map[structFieldKey]bool),
 		structFieldStores:      make(map[structFieldKey][]ssa.Value),
+		structWholeStores:      make(map[*types.Named][]ssa.Value),
+		structBoxedValues:      make(map[*types.Named][]ssa.Value),
+		structFieldReads:       make(map[structFieldKey][]ssa.Value),
+		namedSigSources:        make(map[*types.Named][]ssa.Value),
+		namedSigPoisoned:       make(map[*types.Named]bool),
 		allFunctions:           all,
+		userPaths:              userPaths,
 		progClosedDone:         make(map[ssa.Value]bool),
 		enumClosedDone:         make(map[ssa.Value]bool),
 		progTypesMemo:          make(map[ssa.Value][]types.Type),
@@ -858,6 +1045,7 @@ func enumerateCallerReferences(audited bool, _ map[*ssa.Function]bool, all map[*
 		enumInvokeTargets:      make(map[ssa.CallInstruction]map[*ssa.Function]bool),
 		enumInvokeFailed:       make(map[ssa.CallInstruction]bool),
 		enumSeedsMemo:          make(map[ssa.Value]dynamicSeedEntry),
+		enumStructClosed:       make(map[*types.Named]bool),
 	}
 	recordStructRef := func(named *types.Named, fn *ssa.Function) {
 		summary.structReferencedByType[named] = true
@@ -867,24 +1055,39 @@ func enumerateCallerReferences(audited bool, _ map[*ssa.Function]bool, all map[*
 			summary.structRefMultiFn[named] = true
 		}
 	}
-	structFieldReads := make(map[structFieldKey][]ssa.Value)
+	namedSigReferenced := make(map[*types.Named]bool)
+	recordNamedSigRef := func(ns *types.Named) {
+		if ns != nil {
+			namedSigReferenced[ns] = true
+		}
+	}
+	structFieldReads := summary.structFieldReads
 	closureRefs := make(map[*ssa.Function][]*ssa.MakeClosure)
 	storeRefs := make(map[*ssa.Function][]*ssa.Store)
 	callArgRefs := make(map[*ssa.Function][]ssa.CallInstruction)
 	methodsByName := make(map[string][]*ssa.Function)
 	if audited {
 		for _, fn := range ordered {
-			if fn.Signature == nil || fn.Signature.Recv() == nil || (fn.Synthetic != "" && !isPromotedWrapper(fn) && !(audited && fn.Origin() != nil)) || parameterizedBody(fn) || len(fn.Params) <= 1 {
+			fnPkg := funcPkgPath(fn)
+			if isStdPkgPath(userPaths, fnPkg) {
 				continue
 			}
-			hasDynamicExtra := false
-			for _, param := range fn.Params[1:] {
-				if typeMayCarryDynamicTop(audited, param.Type()) && paramMaySupplyDynamic(audited, param) {
-					hasDynamicExtra = true
-					break
+			if fn.Signature == nil || fn.Signature.Recv() == nil || (fn.Synthetic != "" && !isPromotedWrapper(fn) && !(audited && fn.Origin() != nil)) || parameterizedBody(fn) || len(fn.Params) == 0 {
+				continue
+			}
+			hasDynamicParam := false
+			if recv := fn.Params[0]; recv != nil && derefNamedStruct(userPaths, recv.Type()) == nil && derefNamedSignature(userPaths, recv.Type()) == nil && typeMayCarryDynamicTop(audited, recv.Type()) {
+				hasDynamicParam = true
+			}
+			if !hasDynamicParam {
+				for _, param := range fn.Params[1:] {
+					if param != nil && typeMayCarryDynamicTop(audited, param.Type()) {
+						hasDynamicParam = true
+						break
+					}
 				}
 			}
-			if hasDynamicExtra {
+			if hasDynamicParam {
 				methodsByName[fn.Name()] = append(methodsByName[fn.Name()], fn)
 			}
 		}
@@ -904,6 +1107,73 @@ func enumerateCallerReferences(audited bool, _ map[*ssa.Function]bool, all map[*
 		}
 		summary.structPoisoned[structFieldKey{named: named, field: field}] = true
 	}
+	poisonContainedTypes := func(t types.Type, refFn *ssa.Function) {
+		walkTypeGraph(t, true, map[types.Type]bool{}, func(sub types.Type) bool {
+			if named := derefNamedStruct(userPaths, sub); named != nil {
+				if refFn != nil {
+					recordStructRef(named, refFn)
+				}
+				poisonStruct(named, -1)
+			} else if ns := derefNamedSignature(userPaths, sub); ns != nil {
+				recordNamedSigRef(ns)
+				summary.namedSigPoisoned[ns] = true
+			}
+			return true
+		})
+	}
+	poisonEmbeddedCarriers := func(recvOrBoxed types.Type, topNamed *types.Named, refFn *ssa.Function) {
+		if recvOrBoxed == nil {
+			return
+		}
+		baseT := types.Unalias(recvOrBoxed)
+		if ptr, ok := baseT.(*types.Pointer); ok {
+			baseT = types.Unalias(ptr.Elem())
+		}
+		st, ok := baseT.Underlying().(*types.Struct)
+		if !ok {
+			return
+		}
+		seenEmbed := make(map[*types.Struct]bool)
+		var walkEmbed func(*types.Struct)
+		walkEmbed = func(cur *types.Struct) {
+			if cur == nil || seenEmbed[cur] {
+				return
+			}
+			seenEmbed[cur] = true
+			for i := 0; i < cur.NumFields(); i++ {
+				fld := cur.Field(i)
+				if !fld.Embedded() {
+					continue
+				}
+				ft := fld.Type()
+				if inner := derefNamedStruct(userPaths, ft); inner != nil {
+					if refFn != nil {
+						recordStructRef(inner, refFn)
+					}
+					poisonStruct(inner, -1)
+				}
+				if ns := derefNamedSignature(userPaths, ft); ns != nil {
+					recordNamedSigRef(ns)
+					summary.namedSigPoisoned[ns] = true
+				}
+				ftElem := types.Unalias(ft)
+				if ptr, ok := ftElem.(*types.Pointer); ok {
+					ftElem = types.Unalias(ptr.Elem())
+				}
+				switch sub := ftElem.Underlying().(type) {
+				case *types.Struct:
+					walkEmbed(sub)
+				case *types.Interface:
+				default:
+					if topNamed != nil && typeMayCarryDynamicTop(audited, ftElem) {
+						poisonStruct(topNamed, -1)
+					}
+				}
+			}
+		}
+		walkEmbed(st)
+	}
+	sawReflectMutation := false
 	var space [16]*ssa.Value
 	for _, fn := range ordered {
 		// A body the enumeration cannot judge as a caller — a synthetic
@@ -914,12 +1184,40 @@ func enumerateCallerReferences(audited bool, _ map[*ssa.Function]bool, all map[*
 		// count as an enumerated site.
 		judgeable := (fn.Synthetic == "" || isPromotedWrapper(fn) || (audited && fn.Origin() != nil)) && !parameterizedBody(fn)
 		structJudgeable := fn.Synthetic == "" || isPromotedWrapper(fn) || (audited && fn.Origin() != nil)
+		fnPkg := funcPkgPath(fn)
+		nonStdFrame := !isStdPkgPath(userPaths, fnPkg)
 		initFrame := initFlowFrame(fn)
+		if audited {
+			hasRecv := fn.Signature != nil && fn.Signature.Recv() != nil
+			for pIdx, param := range fn.Params {
+				if param == nil || param.Type() == nil {
+					continue
+				}
+				if named := derefNamedStruct(userPaths, param.Type()); named != nil {
+					recordStructRef(named, fn)
+					if !structJudgeable {
+						poisonStruct(named, -1)
+					}
+				} else if namedSig := derefNamedSignature(userPaths, param.Type()); namedSig != nil {
+					recordNamedSigRef(namedSig)
+					if hasRecv && pIdx == 0 {
+						continue
+					}
+					if !structJudgeable {
+						summary.namedSigPoisoned[namedSig] = true
+					} else if _, isPtr := types.Unalias(param.Type()).(*types.Pointer); !isPtr {
+						summary.namedSigSources[namedSig] = append(summary.namedSigSources[namedSig], param)
+					} else {
+						summary.namedSigPoisoned[namedSig] = true
+					}
+				}
+			}
+		}
 		for _, b := range fn.Blocks {
 			for _, instr := range b.Instrs {
 				if audited {
 					if v, ok := instr.(ssa.Value); ok && v.Type() != nil {
-						if named := derefNamedStruct(v.Type()); named != nil {
+						if named := derefNamedStruct(userPaths, v.Type()); named != nil {
 							recordStructRef(named, fn)
 							poison := !structJudgeable
 							switch instr.(type) {
@@ -935,24 +1233,105 @@ func enumerateCallerReferences(audited bool, _ map[*ssa.Function]bool, all map[*
 							if poison {
 								poisonStruct(named, -1)
 							}
+						} else if namedSig := derefNamedSignature(userPaths, v.Type()); namedSig != nil {
+							recordNamedSigRef(namedSig)
+							if isPromotedWrapper(fn) && fn.Signature != nil && fn.Signature.Recv() != nil && derefNamedSignature(userPaths, fn.Signature.Recv().Type()) == namedSig {
+								// Synthetic pointer-method-table wrapper (*NamedSig).M:
+								// boxing *NamedSig via MakeInterface or referencing w
+								// directly poisons namedSig below; value MakeInterface
+								// already records the boxed NamedSig operand.
+							} else if !structJudgeable {
+								summary.namedSigPoisoned[namedSig] = true
+							} else if _, isPtr := types.Unalias(v.Type()).(*types.Pointer); !isPtr {
+								switch x := instr.(type) {
+								case *ssa.Phi:
+								case *ssa.ChangeType:
+									if x.X == nil {
+										summary.namedSigPoisoned[namedSig] = true
+									} else {
+										summary.namedSigSources[namedSig] = append(summary.namedSigSources[namedSig], x.X)
+									}
+								case *ssa.MakeClosure:
+									summary.namedSigSources[namedSig] = append(summary.namedSigSources[namedSig], v)
+								case *ssa.TypeAssert, *ssa.Extract, *ssa.Lookup, *ssa.Index, *ssa.Field, *ssa.UnOp:
+									summary.namedSigSources[namedSig] = append(summary.namedSigSources[namedSig], v)
+								case ssa.CallInstruction:
+									if site, ok := instr.(ssa.CallInstruction); ok && site.Common() != nil {
+										if callee := site.Common().StaticCallee(); callee != nil && len(callee.Blocks) == 0 {
+											summary.namedSigPoisoned[namedSig] = true
+										} else {
+											summary.namedSigSources[namedSig] = append(summary.namedSigSources[namedSig], v)
+										}
+									}
+								default:
+									summary.namedSigPoisoned[namedSig] = true
+								}
+							} else if v.Referrers() == nil {
+								summary.namedSigPoisoned[namedSig] = true
+							} else {
+								for _, ref := range *v.Referrers() {
+									switch r := ref.(type) {
+									case *ssa.DebugRef:
+									case *ssa.UnOp:
+										if r.Op != token.MUL || r.X != v {
+											summary.namedSigPoisoned[namedSig] = true
+										}
+									case *ssa.Store:
+										if r.Addr != v || r.Val == nil {
+											summary.namedSigPoisoned[namedSig] = true
+										} else if _, isInstr := r.Val.(ssa.Instruction); !isInstr {
+											summary.namedSigSources[namedSig] = append(summary.namedSigSources[namedSig], r.Val)
+										}
+									default:
+										summary.namedSigPoisoned[namedSig] = true
+									}
+								}
+							}
 						}
 					}
 					switch x := instr.(type) {
 					case *ssa.Convert:
 						if x.X != nil {
-							if named := derefNamedStruct(x.X.Type()); named != nil {
-								poisonStruct(named, -1)
-							}
+							poisonContainedTypes(x.X.Type(), fn)
+						}
+						if x.Type() != nil {
+							poisonContainedTypes(x.Type(), fn)
 						}
 					case *ssa.ChangeType:
 						if x.X != nil {
-							if named := derefNamedStruct(x.X.Type()); named != nil {
+							if named := derefNamedStruct(userPaths, x.X.Type()); named != nil {
 								poisonStruct(named, -1)
 							}
 						}
+					case *ssa.MakeInterface:
+						if x.X != nil && x.X.Type() != nil {
+							elemT := x.X.Type()
+							_, isPtr := types.Unalias(elemT).(*types.Pointer)
+							if ptr, ok := types.Unalias(elemT).(*types.Pointer); ok {
+								elemT = ptr.Elem()
+							}
+							if ns := derefNamedSignature(userPaths, x.X.Type()); ns != nil {
+								recordNamedSigRef(ns)
+								if !structJudgeable || isPtr {
+									summary.namedSigPoisoned[ns] = true
+								} else {
+									summary.namedSigSources[ns] = append(summary.namedSigSources[ns], x.X)
+								}
+							}
+							topNamed := derefNamedStruct(userPaths, x.X.Type())
+							for _, inner := range collectValueContainedUserStructs(userPaths, elemT) {
+								recordStructRef(inner, fn)
+								if structJudgeable && topNamed != nil && inner == topNamed {
+									summary.structBoxedValues[inner] = append(summary.structBoxedValues[inner], x.X)
+								} else {
+									poisonStruct(inner, -1)
+								}
+							}
+							poisonEmbeddedCarriers(x.X.Type(), topNamed, fn)
+						}
 					}
 					if f, ok := instr.(*ssa.Field); ok && f.X != nil {
-						if named := derefNamedStruct(f.X.Type()); named != nil {
+						if named := derefNamedStruct(userPaths, f.X.Type()); named != nil {
 							if !structJudgeable {
 								poisonStruct(named, f.Field)
 							} else {
@@ -962,7 +1341,7 @@ func enumerateCallerReferences(audited bool, _ map[*ssa.Function]bool, all map[*
 						}
 					}
 					if fa, ok := instr.(*ssa.FieldAddr); ok && fa.X != nil {
-						if named := derefNamedStruct(fa.X.Type()); named != nil {
+						if named := derefNamedStruct(userPaths, fa.X.Type()); named != nil {
 							recordStructRef(named, fn)
 							if !structJudgeable || fa.Referrers() == nil {
 								poisonStruct(named, fa.Field)
@@ -992,20 +1371,50 @@ func enumerateCallerReferences(audited bool, _ map[*ssa.Function]bool, all map[*
 						}
 					}
 					if st, ok := instr.(*ssa.Store); ok && st.Val != nil && st.Val.Type() != nil {
-						if named, ok := types.Unalias(st.Val.Type()).(*types.Named); ok && derefNamedStruct(named) != nil {
-							c, isConst := st.Val.(*ssa.Const)
-							isZero := isConst && c.Value == nil
-							_, isLoad := st.Val.(*ssa.UnOp)
-							_, isCall := st.Val.(*ssa.Call)
-							_, isExtract := st.Val.(*ssa.Extract)
-							_, isPhi := st.Val.(*ssa.Phi)
-							_, isParam := st.Val.(*ssa.Parameter)
-							_, isField := st.Val.(*ssa.Field)
-							_, isIndex := st.Val.(*ssa.Index)
-							_, isLookup := st.Val.(*ssa.Lookup)
-							_, isTypeAssert := st.Val.(*ssa.TypeAssert)
-							if !isZero && !isLoad && !isCall && !isExtract && !isPhi && !isParam && !isField && !isIndex && !isLookup && !isTypeAssert {
-								poisonStruct(named, -1)
+						c, isConst := st.Val.(*ssa.Const)
+						isZero := isConst && c.Value == nil
+						if !isZero {
+							var topNamed *types.Named
+							if _, isPtr := types.Unalias(st.Val.Type()).(*types.Pointer); !isPtr {
+								topNamed = derefNamedStruct(userPaths, st.Val.Type())
+							}
+							for _, inner := range collectValueContainedUserStructs(userPaths, st.Val.Type()) {
+								recordStructRef(inner, fn)
+								if structJudgeable && topNamed != nil && inner == topNamed {
+									summary.structWholeStores[inner] = append(summary.structWholeStores[inner], st.Val)
+								} else {
+									poisonStruct(inner, -1)
+								}
+							}
+						}
+					}
+					if nonStdFrame {
+						if site, ok := instr.(ssa.CallInstruction); ok && site.Common() != nil {
+							c := site.Common()
+							if c.IsInvoke() {
+								if c.Method != nil && c.Method.Pkg() != nil && c.Method.Pkg().Path() == "reflect" && isReflectMutationSymbol(c.Method.Name()) {
+									sawReflectMutation = true
+								}
+							} else if callee := c.StaticCallee(); callee != nil {
+								calleePkg := funcPkgPath(callee)
+								calleeSym := strings.TrimSuffix(strings.TrimSuffix(functionSymbolName(callee), "$bound"), "$thunk")
+								if calleePkg == "reflect" && isReflectMutationSymbol(calleeSym) {
+									sawReflectMutation = true
+								}
+								calleeNonStd := !isStdPkgPath(userPaths, calleePkg)
+								if (calleeNonStd && len(callee.Blocks) == 0 && callee.Synthetic == "" && !parameterizedBody(callee)) || isStdDeserializerCall(calleePkg, calleeSym) {
+									for _, arg := range c.Args {
+										if arg != nil {
+											poisonContainedTypes(arg.Type(), fn)
+										}
+									}
+									if val := site.Value(); val != nil {
+										poisonContainedTypes(val.Type(), fn)
+									}
+									for _, ta := range callee.TypeArgs() {
+										poisonContainedTypes(ta, fn)
+									}
+								}
 							}
 						}
 					}
@@ -1022,7 +1431,7 @@ func enumerateCallerReferences(audited bool, _ map[*ssa.Function]bool, all map[*
 								summary.directValueRef[callee] = true
 							}
 						}
-					} else if audited && site.Common().IsInvoke() && site.Common().Method != nil && !isStdImportPath(funcPkgPath(fn)) {
+					} else if audited && site.Common().IsInvoke() && site.Common().Method != nil {
 						mname := site.Common().Method.Name()
 						iface, _ := types.Unalias(site.Common().Value.Type()).Underlying().(*types.Interface)
 						if iface != nil {
@@ -1052,11 +1461,29 @@ func enumerateCallerReferences(audited bool, _ map[*ssa.Function]bool, all map[*
 				}
 				for _, op := range rands {
 					if audited && op != nil && *op != nil && (*op).Type() != nil {
-						if named := derefNamedStruct((*op).Type()); named != nil {
+						if named := derefNamedStruct(userPaths, (*op).Type()); named != nil {
 							recordStructRef(named, fn)
+						} else if g, isGlob := (*op).(*ssa.Global); isGlob {
+							if ns := derefNamedSignature(userPaths, g.Type()); ns != nil {
+								recordNamedSigRef(ns)
+								unopLoad := false
+								if u, ok := instr.(*ssa.UnOp); ok && u.Op == token.MUL && u.X == g {
+									unopLoad = true
+								}
+								storeAddr := false
+								if st, ok := instr.(*ssa.Store); ok && st.Addr == g && st.Val != g {
+									storeAddr = true
+								}
+								if !structJudgeable || (!unopLoad && !storeAddr) {
+									summary.namedSigPoisoned[ns] = true
+								}
+							}
 						}
 					}
 					if g, ok := (*op).(*ssa.Function); ok {
+						if audited && nonStdFrame && funcPkgPath(g) == "reflect" && isReflectMutationSymbol(strings.TrimSuffix(strings.TrimSuffix(functionSymbolName(g), "$bound"), "$thunk")) {
+							sawReflectMutation = true
+						}
 						summary.directValueRef[g] = true
 						if !initFrame {
 							summary.valueRefOutsideInit[g] = true
@@ -1085,11 +1512,39 @@ func enumerateCallerReferences(audited bool, _ map[*ssa.Function]bool, all map[*
 		}
 	}
 	if audited {
+		for _, w := range ordered {
+			if !isPromotedWrapper(w) || w.Signature == nil || w.Signature.Recv() == nil {
+				continue
+			}
+			hasDirectCall := false
+			for _, s := range summary.sites[w] {
+				if s != nil && s.Common() != nil && !s.Common().IsInvoke() {
+					hasDirectCall = true
+					break
+				}
+			}
+			if !hasDirectCall && !summary.valueRef[w] && !summary.directValueRef[w] {
+				continue
+			}
+			if ns := derefNamedSignature(userPaths, w.Signature.Recv().Type()); ns != nil {
+				summary.namedSigPoisoned[ns] = true
+			}
+			wTopNamed := derefNamedStruct(userPaths, w.Signature.Recv().Type())
+			poisonEmbeddedCarriers(w.Signature.Recv().Type(), wTopNamed, w)
+		}
+		if sawReflectMutation {
+			for named := range summary.structReferencedByType {
+				poisonStruct(named, -1)
+			}
+			for ns := range namedSigReferenced {
+				summary.namedSigPoisoned[ns] = true
+			}
+		}
 		var collectFuncValueCallSites func(val ssa.Value, seen map[ssa.Value]bool) ([]ssa.CallInstruction, bool)
 		var collectStoreTargetCallSites func(addr ssa.Value, seen map[ssa.Value]bool) ([]ssa.CallInstruction, bool)
 		collectStoreTargetCallSites = func(addr ssa.Value, seen map[ssa.Value]bool) ([]ssa.CallInstruction, bool) {
 			if fa, ok := addr.(*ssa.FieldAddr); ok && fa.X != nil {
-				if named := derefNamedStruct(fa.X.Type()); named != nil {
+				if named := derefNamedStruct(userPaths, fa.X.Type()); named != nil {
 					key := structFieldKey{named: named, field: fa.Field}
 					if summary.structPoisoned[key] {
 						return nil, false
@@ -1416,6 +1871,10 @@ func enumerateCallerReferences(audited bool, _ map[*ssa.Function]bool, all map[*
 	}
 	for key := range summary.structPoisoned {
 		delete(summary.structFieldStores, key)
+		if key.field < 0 {
+			delete(summary.structWholeStores, key.named)
+			delete(summary.structBoxedValues, key.named)
+		}
 	}
 	for fn, sites := range summary.sites {
 		summary.sites[fn] = dedupCallSites(sites)
@@ -1437,9 +1896,16 @@ func enumerateCallerReferences(audited bool, _ map[*ssa.Function]bool, all map[*
 // (or closed struct-receiver uses) with at least one reference in the
 // program, and every dynamic-reaching argument or receiver field position
 // closes in the caller's or constructor's own frame.
-func subjectEnumerationClosure(audited bool, root *ssa.Function, summary *callerReferenceSummary) (enumerationClosure, bool) {
+func subjectEnumerationClosure(audited bool, userPaths map[string]bool, root *ssa.Function, summary *callerReferenceSummary) (enumerationClosure, bool) {
 	sites := summary.sites[root]
 	valueRef := summary.directValueRef[root]
+	hasExternalSite := false
+	for _, site := range sites {
+		if site != nil && site.Parent() != root {
+			hasExternalSite = true
+			break
+		}
+	}
 	fp := &freshParamAnalysis{
 		selectionAudited:       audited,
 		enumOnly:               true,
@@ -1447,20 +1913,24 @@ func subjectEnumerationClosure(audited bool, root *ssa.Function, summary *caller
 		subjectRoot:            root,
 		enumSites:              sites,
 		summary:                summary,
+		userPaths:              userPaths,
 		structFieldStores:      summary.structFieldStores,
+		structWholeStores:      summary.structWholeStores,
 		structPoisoned:         summary.structPoisoned,
 		structReferencedByType: summary.structReferencedByType,
 		programSites:           summary.sites,
 		programValueRef:        summary.valueRef,
 		programFunctions:       summary.allFunctions,
-		isStd:                  func(fn *ssa.Function) bool { return isStdImportPath(funcPkgPath(fn)) },
-		closedDone:             map[ssa.Value]bool{},
-		typesMemo:              map[ssa.Value][]types.Type{},
-		typesFailed:            map[ssa.Value]bool{},
-		funcsMemo:              map[ssa.Value][]*ssa.Function{},
-		funcsFailed:            map[ssa.Value]bool{},
-		invokeTargets:          map[ssa.CallInstruction]map[*ssa.Function]bool{},
-		invokeFailed:           map[ssa.CallInstruction]bool{},
+		isStd: func(fn *ssa.Function) bool {
+			return isStdPkgPath(userPaths, funcPkgPath(fn))
+		},
+		closedDone:    map[ssa.Value]bool{},
+		typesMemo:     map[ssa.Value][]types.Type{},
+		typesFailed:   map[ssa.Value]bool{},
+		funcsMemo:     map[ssa.Value][]*ssa.Function{},
+		funcsFailed:   map[ssa.Value]bool{},
+		invokeTargets: map[ssa.CallInstruction]map[*ssa.Function]bool{},
+		invokeFailed:  map[ssa.CallInstruction]bool{},
 	}
 	if root.Signature != nil && root.Signature.Recv() != nil {
 		if !audited || valueRef || len(root.Blocks) == 0 || root.Synthetic != "" || parameterizedBody(root) || len(root.Params) == 0 {
@@ -1475,22 +1945,22 @@ func subjectEnumerationClosure(audited bool, root *ssa.Function, summary *caller
 		}
 		hasDynamicExtraParam := false
 		for _, param := range root.Params[1:] {
-			if typeMayCarryDynamicTop(audited, param.Type()) && paramMaySupplyDynamic(audited, param) {
+			if typeMayCarryDynamicTop(audited, param.Type()) && paramMaySupplyDynamic(audited, userPaths, param) {
 				if _, isSig := types.Unalias(param.Type()).Underlying().(*types.Signature); isSig {
 					return enumerationClosure{}, false
 				}
 				hasDynamicExtraParam = true
 			}
 		}
-		if hasDynamicExtraParam && len(sites) == 0 {
+		if hasDynamicExtraParam && !hasExternalSite {
 			return enumerationClosure{}, false
 		}
-		named := derefNamedStruct(root.Signature.Recv().Type())
-		recvMaySupply := paramMaySupplyDynamic(audited, root.Params[0])
+		named := derefNamedStruct(userPaths, root.Signature.Recv().Type())
+		recvMaySupply := paramMaySupplyDynamic(audited, userPaths, root.Params[0])
 		if recvMaySupply && named == nil {
 			return enumerationClosure{}, false
 		}
-		if len(sites) == 0 && (named == nil || !summary.isStructReferencedOutside(named, root)) {
+		if !hasExternalSite && (named == nil || !summary.isStructReferencedOutside(named, root)) {
 			return enumerationClosure{}, false
 		}
 		enc := enumerationClosure{
@@ -1508,7 +1978,7 @@ func subjectEnumerationClosure(audited bool, root *ssa.Function, summary *caller
 				}
 				for i := 1; i < len(root.Params); i++ {
 					param := root.Params[i]
-					if !typeMayCarryDynamicTop(audited, param.Type()) || !paramMaySupplyDynamic(audited, param) {
+					if !typeMayCarryDynamicTop(audited, param.Type()) || !paramMaySupplyDynamic(audited, userPaths, param) {
 						continue
 					}
 					argIdx := i + offset
@@ -1529,12 +1999,50 @@ func subjectEnumerationClosure(audited bool, root *ssa.Function, summary *caller
 			}
 			return enc, true
 		}
-		_, neededFields, ok := recvStructFieldTargets(audited, root)
+		if summary.structPoisoned[structFieldKey{named: named, field: -1}] {
+			return enumerationClosure{}, false
+		}
+		_, neededFields, ok := recvStructFieldTargets(audited, userPaths, root)
 		if !ok {
 			return enumerationClosure{}, false
 		}
+		fp.enumRecvNamed = named
+		for _, site := range sites {
+			if site.Common().IsInvoke() && len(summary.structBoxedValues[named]) > 0 {
+				continue
+			}
+			var recvArg ssa.Value
+			if site.Common().IsInvoke() {
+				recvArg = site.Common().Value
+			} else {
+				if len(site.Common().Args) == 0 {
+					return enumerationClosure{}, false
+				}
+				recvArg = site.Common().Args[0]
+			}
+			if !walkDynamicValue(recvArg, nil, make(map[ssa.Value]bool), nil, fp) {
+				return enumerationClosure{}, false
+			}
+		}
+		for _, bv := range summary.structBoxedValues[named] {
+			if !walkDynamicValue(bv, nil, make(map[ssa.Value]bool), nil, fp) {
+				return enumerationClosure{}, false
+			}
+		}
 		if paramHasMakeInterface(root.Params[0], make(map[*ssa.Parameter]bool)) {
 			enc.types = append(enc.types, root.Params[0].Type())
+		}
+		fieldSeedSeen := map[ssa.Value]bool{}
+		if wholeStores := summary.structWholeStores[named]; len(wholeStores) > 0 {
+			wholeFP := *fp
+			wholeFP.inProgramSites = true
+			wholeFP.inFieldStore = false
+			for _, wv := range wholeStores {
+				if !walkDynamicValue(wv, nil, make(map[ssa.Value]bool), nil, &wholeFP) {
+					return enumerationClosure{}, false
+				}
+				collectClosedDynamicSeeds(wv, &enc, fieldSeedSeen, &wholeFP)
+			}
 		}
 		var fieldIdxs []int
 		for idx := range neededFields {
@@ -1543,7 +2051,6 @@ func subjectEnumerationClosure(audited bool, root *ssa.Function, summary *caller
 		sort.Ints(fieldIdxs)
 		fieldFP := *fp
 		fieldFP.inFieldStore = true
-		fieldSeedSeen := map[ssa.Value]bool{}
 		for _, idx := range fieldIdxs {
 			key := structFieldKey{named: named, field: idx}
 			if summary.structPoisoned[key] {
@@ -1560,7 +2067,7 @@ func subjectEnumerationClosure(audited bool, root *ssa.Function, summary *caller
 		}
 		return enc, true
 	}
-	if valueRef || len(sites) == 0 {
+	if valueRef || !hasExternalSite {
 		return enumerationClosure{}, false
 	}
 	enc := enumerationClosure{sites: sites, addrTaken: map[*ssa.Function]bool{}}
@@ -1574,7 +2081,7 @@ func subjectEnumerationClosure(audited bool, root *ssa.Function, summary *caller
 			if !typeMayCarryDynamicTop(audited, param.Type()) {
 				continue
 			}
-			if audited && len(root.Blocks) > 0 && root.Synthetic == "" && !parameterizedBody(root) && !paramMaySupplyDynamic(audited, param) {
+			if audited && len(root.Blocks) > 0 && root.Synthetic == "" && !parameterizedBody(root) && !paramMaySupplyDynamic(audited, userPaths, param) {
 				continue
 			}
 			if !walkDynamicValue(args[i], nil, make(map[ssa.Value]bool), nil, fp) {
@@ -1586,7 +2093,7 @@ func subjectEnumerationClosure(audited bool, root *ssa.Function, summary *caller
 	return enc, true
 }
 
-func derefNamedStruct(t types.Type) *types.Named {
+func derefNamedStruct(userPaths map[string]bool, t types.Type) *types.Named {
 	if t == nil {
 		return nil
 	}
@@ -1594,7 +2101,7 @@ func derefNamedStruct(t types.Type) *types.Named {
 		t = ptr.Elem()
 	}
 	named, ok := types.Unalias(t).(*types.Named)
-	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || isStdImportPath(named.Obj().Pkg().Path()) {
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || isStdPkgPath(userPaths, named.Obj().Pkg().Path()) {
 		return nil
 	}
 	if _, ok := named.Underlying().(*types.Struct); !ok {
@@ -1603,11 +2110,31 @@ func derefNamedStruct(t types.Type) *types.Named {
 	return named
 }
 
-func paramMaySupplyDynamic(audited bool, param *ssa.Parameter) bool {
-	return paramMaySupplyDynamicSeen(audited, param, make(map[*ssa.Parameter]bool))
+func derefNamedSignature(userPaths map[string]bool, t types.Type) *types.Named {
+	if t == nil {
+		return nil
+	}
+	if ptr, ok := types.Unalias(t).(*types.Pointer); ok {
+		t = ptr.Elem()
+	}
+	named, ok := types.Unalias(t).(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || isStdPkgPath(userPaths, named.Obj().Pkg().Path()) {
+		return nil
+	}
+	if _, ok := named.Underlying().(*types.Signature); !ok {
+		return nil
+	}
+	return named
 }
 
-func paramMaySupplyDynamicSeen(audited bool, param *ssa.Parameter, seen map[*ssa.Parameter]bool) bool {
+func paramMaySupplyDynamic(audited bool, userPaths map[string]bool, param *ssa.Parameter) bool {
+	if param == nil {
+		return false
+	}
+	return paramMaySupplyDynamicSeen(audited, userPaths, param, param.Parent(), make(map[*ssa.Parameter]bool))
+}
+
+func paramMaySupplyDynamicSeen(audited bool, userPaths map[string]bool, param *ssa.Parameter, root *ssa.Function, seen map[*ssa.Parameter]bool) bool {
 	if param == nil {
 		return false
 	}
@@ -1627,35 +2154,35 @@ func paramMaySupplyDynamicSeen(audited bool, param *ssa.Parameter, seen map[*ssa
 				return true
 			}
 		case *ssa.FieldAddr:
-			if r.X != param || !carrierFreeFieldAddr(audited, r) {
+			if r.X != param || !carrierFreeFieldAddr(audited, r, root) {
 				return true
 			}
 		case *ssa.IndexAddr:
-			if r.X != param || !carrierFreeReadOnlyAddr(audited, r) {
+			if r.X != param || !carrierFreeReadOnlyAddr(audited, r, root) {
 				return true
 			}
 		case *ssa.UnOp:
-			if r.Op != token.MUL || r.X != param || !carrierFreeValueUses(audited, r) {
+			if r.Op != token.MUL || r.X != param || !carrierFreeValueUses(audited, r, root) {
 				return true
 			}
 		case *ssa.Field:
-			if r.X != param || !carrierFreeValueUses(audited, r) {
+			if r.X != param || !carrierFreeValueUses(audited, r, root) {
 				return true
 			}
 		case *ssa.Index:
-			if r.X != param || !carrierFreeValueUses(audited, r) {
+			if r.X != param || !carrierFreeValueUses(audited, r, root) {
 				return true
 			}
 		case *ssa.MakeInterface:
 			if r.X != param {
 				return true
 			}
-			named := derefNamedStruct(param.Type())
+			named := derefNamedStruct(userPaths, param.Type())
 			if named == nil || param.Parent() == nil || param.Parent().Prog == nil {
 				return true
 			}
 			needed := make(map[int]bool)
-			if !interfaceValueStructFieldTargets(audited, named, param.Type(), param.Parent().Prog, r, needed, seen, make(map[ssa.Value]bool)) || len(needed) > 0 {
+			if !interfaceValueStructFieldTargets(audited, userPaths, named, param.Type(), param.Parent().Prog, r, root, needed, seen, make(map[ssa.Value]bool)) || len(needed) > 0 {
 				return true
 			}
 		case ssa.CallInstruction:
@@ -1663,11 +2190,11 @@ func paramMaySupplyDynamicSeen(audited bool, param *ssa.Parameter, seen map[*ssa
 				return true
 			}
 			callee := r.Common().StaticCallee()
-			if callee == nil || len(callee.Blocks) == 0 || (callee.Synthetic != "" && !isPromotedWrapper(callee) && !(audited && callee.Origin() != nil)) || parameterizedBody(callee) || len(r.Common().Args) != len(callee.Params) {
+			if callee == nil || (root != nil && callee == root) || len(callee.Blocks) == 0 || (callee.Synthetic != "" && !isPromotedWrapper(callee) && !(audited && callee.Origin() != nil)) || parameterizedBody(callee) || len(r.Common().Args) != len(callee.Params) {
 				return true
 			}
 			for i, arg := range r.Common().Args {
-				if arg == param && paramMaySupplyDynamicSeen(audited, callee.Params[i], seen) {
+				if arg == param && paramMaySupplyDynamicSeen(audited, userPaths, callee.Params[i], root, seen) {
 					return true
 				}
 			}
@@ -1678,7 +2205,7 @@ func paramMaySupplyDynamicSeen(audited bool, param *ssa.Parameter, seen map[*ssa
 	return false
 }
 
-func carrierFreeFieldAddr(audited bool, fa *ssa.FieldAddr) bool {
+func carrierFreeFieldAddr(audited bool, fa *ssa.FieldAddr, root *ssa.Function) bool {
 	if fa == nil || fa.Type() == nil {
 		return false
 	}
@@ -1689,10 +2216,10 @@ func carrierFreeFieldAddr(audited bool, fa *ssa.FieldAddr) bool {
 	if !typeMayCarryDynamic(audited, ptr.Elem(), make(map[types.Type]bool)) {
 		return true
 	}
-	return carrierFreeReadOnlyAddr(audited, fa)
+	return carrierFreeReadOnlyAddr(audited, fa, root)
 }
 
-func carrierFreeReadOnlyAddr(audited bool, addr ssa.Value) bool {
+func carrierFreeReadOnlyAddr(audited bool, addr ssa.Value, root *ssa.Function) bool {
 	if addr == nil || addr.Type() == nil || addr.Referrers() == nil {
 		return false
 	}
@@ -1708,15 +2235,15 @@ func carrierFreeReadOnlyAddr(audited bool, addr ssa.Value) bool {
 			if r.Op != token.MUL || r.X != addr {
 				return false
 			}
-			if elemCarries && !carrierFreeValueUses(audited, r) {
+			if elemCarries && !carrierFreeValueUses(audited, r, root) {
 				return false
 			}
 		case *ssa.FieldAddr:
-			if r.X != addr || !carrierFreeFieldAddr(audited, r) {
+			if r.X != addr || !carrierFreeFieldAddr(audited, r, root) {
 				return false
 			}
 		case *ssa.IndexAddr:
-			if r.X != addr || !carrierFreeReadOnlyAddr(audited, r) {
+			if r.X != addr || !carrierFreeReadOnlyAddr(audited, r, root) {
 				return false
 			}
 		default:
@@ -1726,11 +2253,11 @@ func carrierFreeReadOnlyAddr(audited bool, addr ssa.Value) bool {
 	return true
 }
 
-func carrierFreeValueUses(audited bool, val ssa.Value) bool {
-	return carrierFreeValueUsesSeen(audited, val, make(map[ssa.Value]bool))
+func carrierFreeValueUses(audited bool, val ssa.Value, root *ssa.Function) bool {
+	return carrierFreeValueUsesSeen(audited, val, root, make(map[ssa.Value]bool))
 }
 
-func carrierFreeValueUsesSeen(audited bool, val ssa.Value, seen map[ssa.Value]bool) bool {
+func carrierFreeValueUsesSeen(audited bool, val ssa.Value, root *ssa.Function, seen map[ssa.Value]bool) bool {
 	if val == nil || val.Type() == nil {
 		return false
 	}
@@ -1747,25 +2274,29 @@ func carrierFreeValueUsesSeen(audited bool, val ssa.Value, seen map[ssa.Value]bo
 	}
 	for _, ref := range *refs {
 		switch r := ref.(type) {
-		case *ssa.DebugRef, *ssa.Return:
+		case *ssa.DebugRef:
+		case *ssa.Return:
+			if root == nil || r.Parent() != root {
+				return false
+			}
 		case *ssa.BinOp:
 			if r.Op != token.EQL && r.Op != token.NEQ {
 				return false
 			}
 		case *ssa.Field:
-			if r.X != val || !carrierFreeValueUsesSeen(audited, r, seen) {
+			if r.X != val || !carrierFreeValueUsesSeen(audited, r, root, seen) {
 				return false
 			}
 		case *ssa.Index:
-			if r.X != val || !carrierFreeValueUsesSeen(audited, r, seen) {
+			if r.X != val || !carrierFreeValueUsesSeen(audited, r, root, seen) {
 				return false
 			}
 		case *ssa.Phi:
-			if !carrierFreeValueUsesSeen(audited, r, seen) {
+			if !carrierFreeValueUsesSeen(audited, r, root, seen) {
 				return false
 			}
 		case *ssa.MakeInterface:
-			if !audited || r.X != val || !makeInterfaceOnlyReturned(r) {
+			if !audited || r.X != val || !makeInterfaceOnlyReturned(r, root) {
 				return false
 			}
 			if _, isIface := types.Unalias(val.Type()).Underlying().(*types.Interface); isIface {
@@ -1778,15 +2309,18 @@ func carrierFreeValueUsesSeen(audited bool, val ssa.Value, seen map[ssa.Value]bo
 	return true
 }
 
-func makeInterfaceOnlyReturned(mi *ssa.MakeInterface) bool {
-	if mi == nil || mi.Referrers() == nil {
+func makeInterfaceOnlyReturned(mi *ssa.MakeInterface, root *ssa.Function) bool {
+	if mi == nil || mi.Referrers() == nil || root == nil {
 		return false
 	}
 	sawReturn := false
 	for _, ref := range *mi.Referrers() {
-		switch ref.(type) {
+		switch r := ref.(type) {
 		case *ssa.DebugRef:
 		case *ssa.Return:
+			if r.Parent() != root {
+				return false
+			}
 			sawReturn = true
 		default:
 			return false
@@ -1795,29 +2329,29 @@ func makeInterfaceOnlyReturned(mi *ssa.MakeInterface) bool {
 	return sawReturn
 }
 
-func recvStructFieldTargets(audited bool, root *ssa.Function) (*types.Named, map[int]bool, bool) {
+func recvStructFieldTargets(audited bool, userPaths map[string]bool, root *ssa.Function) (*types.Named, map[int]bool, bool) {
 	if !audited || root == nil || root.Signature == nil || root.Signature.Recv() == nil || len(root.Blocks) == 0 || root.Synthetic != "" || parameterizedBody(root) || len(root.Params) == 0 {
 		return nil, nil, false
 	}
-	named := derefNamedStruct(root.Signature.Recv().Type())
+	named := derefNamedStruct(userPaths, root.Signature.Recv().Type())
 	if named == nil {
 		return nil, nil, false
 	}
 	needed := make(map[int]bool)
-	if !collectParamStructFieldTargets(audited, named, root.Params[0], needed, make(map[*ssa.Parameter]bool)) {
+	if !collectParamStructFieldTargets(audited, userPaths, named, root.Params[0], root, needed, make(map[*ssa.Parameter]bool)) {
 		return nil, nil, false
 	}
 	return named, needed, true
 }
 
-func collectParamStructFieldTargets(audited bool, named *types.Named, param *ssa.Parameter, needed map[int]bool, seen map[*ssa.Parameter]bool) bool {
+func collectParamStructFieldTargets(audited bool, userPaths map[string]bool, named *types.Named, param *ssa.Parameter, root *ssa.Function, needed map[int]bool, seen map[*ssa.Parameter]bool) bool {
 	if param == nil {
 		return false
 	}
-	return collectStructCarrierFieldTargets(audited, named, param, nil, needed, seen, make(map[ssa.Value]bool))
+	return collectStructCarrierFieldTargets(audited, userPaths, named, param, nil, root, needed, seen, make(map[ssa.Value]bool))
 }
 
-func collectStructCarrierFieldTargets(audited bool, named *types.Named, val ssa.Value, initStore *ssa.Store, needed map[int]bool, seen map[*ssa.Parameter]bool, valSeen map[ssa.Value]bool) bool {
+func collectStructCarrierFieldTargets(audited bool, userPaths map[string]bool, named *types.Named, val ssa.Value, initStore *ssa.Store, root *ssa.Function, needed map[int]bool, seen map[*ssa.Parameter]bool, valSeen map[ssa.Value]bool) bool {
 	if val == nil {
 		return false
 	}
@@ -1849,10 +2383,10 @@ func collectStructCarrierFieldTargets(audited bool, named *types.Named, val ssa.
 			}
 			if r.Val == val && r.Addr != val {
 				alloc, ok := r.Addr.(*ssa.Alloc)
-				if !ok || derefNamedStruct(alloc.Type()) != named {
+				if !ok || derefNamedStruct(userPaths, alloc.Type()) != named {
 					return false
 				}
-				if !collectStructCarrierFieldTargets(audited, named, alloc, r, needed, seen, valSeen) {
+				if !collectStructCarrierFieldTargets(audited, userPaths, named, alloc, r, root, needed, seen, valSeen) {
 					return false
 				}
 				continue
@@ -1865,8 +2399,8 @@ func collectStructCarrierFieldTargets(audited bool, named *types.Named, val ssa.
 			}
 			for i, b := range r.Bindings {
 				if b == val {
-					if derefNamedStruct(fn.FreeVars[i].Type()) != named ||
-						!collectStructCarrierFieldTargets(audited, named, fn.FreeVars[i], nil, needed, seen, valSeen) {
+					if derefNamedStruct(userPaths, fn.FreeVars[i].Type()) != named ||
+						!collectStructCarrierFieldTargets(audited, userPaths, named, fn.FreeVars[i], nil, root, needed, seen, valSeen) {
 						return false
 					}
 				}
@@ -1875,7 +2409,7 @@ func collectStructCarrierFieldTargets(audited bool, named *types.Named, val ssa.
 			if r.X != val {
 				return false
 			}
-			if carrierFreeValueUses(audited, r) {
+			if carrierFreeValueUses(audited, r, root) {
 				continue
 			}
 			needed[r.Field] = true
@@ -1890,14 +2424,14 @@ func collectStructCarrierFieldTargets(audited bool, named *types.Named, val ssa.
 					if ur.X != r {
 						return false
 					}
-					if carrierFreeValueUses(audited, ur) {
+					if carrierFreeValueUses(audited, ur, root) {
 						continue
 					}
 					needed[ur.Field] = true
 				case *ssa.Store:
 					if ur.Val == r && ur.Addr != r {
-						if alloc, ok := ur.Addr.(*ssa.Alloc); ok && derefNamedStruct(alloc.Type()) == named {
-							if !collectStructCarrierFieldTargets(audited, named, alloc, ur, needed, seen, valSeen) {
+						if alloc, ok := ur.Addr.(*ssa.Alloc); ok && derefNamedStruct(userPaths, alloc.Type()) == named {
+							if !collectStructCarrierFieldTargets(audited, userPaths, named, alloc, ur, root, needed, seen, valSeen) {
 								return false
 							}
 							continue
@@ -1912,7 +2446,7 @@ func collectStructCarrierFieldTargets(audited bool, named *types.Named, val ssa.
 			if r.X != val {
 				return false
 			}
-			if carrierFreeFieldAddr(audited, r) {
+			if carrierFreeFieldAddr(audited, r, root) {
 				continue
 			}
 			if r.Referrers() == nil {
@@ -1935,7 +2469,7 @@ func collectStructCarrierFieldTargets(audited bool, named *types.Named, val ssa.
 				return false
 			}
 			if val.Parent() != nil && val.Parent().Prog != nil &&
-				interfaceValueStructFieldTargets(audited, named, val.Type(), val.Parent().Prog, r, needed, seen, make(map[ssa.Value]bool)) {
+				interfaceValueStructFieldTargets(audited, userPaths, named, val.Type(), val.Parent().Prog, r, root, needed, seen, make(map[ssa.Value]bool)) {
 				continue
 			}
 			st, ok := named.Underlying().(*types.Struct)
@@ -1952,16 +2486,16 @@ func collectStructCarrierFieldTargets(audited bool, named *types.Named, val ssa.
 				return false
 			}
 			callee := r.Common().StaticCallee()
-			if callee == nil || len(callee.Blocks) == 0 || (callee.Synthetic != "" && !isPromotedWrapper(callee) && !(audited && callee.Origin() != nil)) || parameterizedBody(callee) || len(r.Common().Args) != len(callee.Params) {
+			if callee == nil || (root != nil && callee == root) || len(callee.Blocks) == 0 || (callee.Synthetic != "" && !isPromotedWrapper(callee) && !(audited && callee.Origin() != nil)) || parameterizedBody(callee) || len(r.Common().Args) != len(callee.Params) {
 				return false
 			}
 			for i, arg := range r.Common().Args {
 				if arg == val {
-					if derefNamedStruct(callee.Params[i].Type()) != named {
+					if derefNamedStruct(userPaths, callee.Params[i].Type()) != named {
 						return false
 					}
-					if paramMaySupplyDynamic(audited, callee.Params[i]) {
-						if !collectStructCarrierFieldTargets(audited, named, callee.Params[i], nil, needed, seen, valSeen) {
+					if paramMaySupplyDynamicSeen(audited, userPaths, callee.Params[i], root, make(map[*ssa.Parameter]bool)) {
+						if !collectStructCarrierFieldTargets(audited, userPaths, named, callee.Params[i], nil, root, needed, seen, valSeen) {
 							return false
 						}
 					}
@@ -2007,7 +2541,7 @@ func paramHasMakeInterface(param *ssa.Parameter, seen map[*ssa.Parameter]bool) b
 	return false
 }
 
-func interfaceValueStructFieldTargets(audited bool, named *types.Named, concreteType types.Type, prog *ssa.Program, val ssa.Value, needed map[int]bool, paramSeen map[*ssa.Parameter]bool, valSeen map[ssa.Value]bool) bool {
+func interfaceValueStructFieldTargets(audited bool, userPaths map[string]bool, named *types.Named, concreteType types.Type, prog *ssa.Program, val ssa.Value, root *ssa.Function, needed map[int]bool, paramSeen map[*ssa.Parameter]bool, valSeen map[ssa.Value]bool) bool {
 	if val == nil || prog == nil {
 		return false
 	}
@@ -2021,13 +2555,17 @@ func interfaceValueStructFieldTargets(audited bool, named *types.Named, concrete
 	}
 	for _, ref := range *refs {
 		switch r := ref.(type) {
-		case *ssa.DebugRef, *ssa.Return:
+		case *ssa.DebugRef:
+		case *ssa.Return:
+			if root == nil || r.Parent() != root {
+				return false
+			}
 		case *ssa.BinOp:
 			if r.Op != token.EQL && r.Op != token.NEQ {
 				return false
 			}
 		case *ssa.ChangeInterface:
-			if r.X != val || !interfaceValueStructFieldTargets(audited, named, concreteType, prog, r, needed, paramSeen, valSeen) {
+			if r.X != val || !interfaceValueStructFieldTargets(audited, userPaths, named, concreteType, prog, r, root, needed, paramSeen, valSeen) {
 				return false
 			}
 		case *ssa.TypeAssert:
@@ -2042,7 +2580,7 @@ func interfaceValueStructFieldTargets(audited bool, named *types.Named, concrete
 				continue
 			}
 			if !r.CommaOk {
-				if !interfaceValueStructFieldTargets(audited, named, concreteType, prog, r, needed, paramSeen, valSeen) {
+				if !interfaceValueStructFieldTargets(audited, userPaths, named, concreteType, prog, r, root, needed, paramSeen, valSeen) {
 					return false
 				}
 				continue
@@ -2057,7 +2595,7 @@ func interfaceValueStructFieldTargets(audited bool, named *types.Named, concrete
 					if ex.Tuple != r {
 						return false
 					}
-					if ex.Index == 0 && !interfaceValueStructFieldTargets(audited, named, concreteType, prog, ex, needed, paramSeen, valSeen) {
+					if ex.Index == 0 && !interfaceValueStructFieldTargets(audited, userPaths, named, concreteType, prog, ex, root, needed, paramSeen, valSeen) {
 						return false
 					}
 				default:
@@ -2071,7 +2609,7 @@ func interfaceValueStructFieldTargets(audited bool, named *types.Named, concrete
 			}
 			for i, b := range r.Bindings {
 				if b == val {
-					if i >= len(fn.FreeVars) || !interfaceValueStructFieldTargets(audited, named, concreteType, prog, fn.FreeVars[i], needed, paramSeen, valSeen) {
+					if i >= len(fn.FreeVars) || !interfaceValueStructFieldTargets(audited, userPaths, named, concreteType, prog, fn.FreeVars[i], root, needed, paramSeen, valSeen) {
 						return false
 					}
 				}
@@ -2090,22 +2628,22 @@ func interfaceValueStructFieldTargets(audited bool, named *types.Named, concrete
 					return false
 				}
 				cmethod := prog.LookupMethod(concreteType, r.Common().Method.Pkg(), r.Common().Method.Name())
-				if cmethod == nil || len(cmethod.Blocks) == 0 || len(cmethod.Params) == 0 {
+				if cmethod == nil || (root != nil && cmethod == root) || len(cmethod.Blocks) == 0 || len(cmethod.Params) == 0 {
 					return false
 				}
-				if paramMaySupplyDynamicSeen(audited, cmethod.Params[0], make(map[*ssa.Parameter]bool)) {
-					if !collectParamStructFieldTargets(audited, named, cmethod.Params[0], needed, paramSeen) {
+				if paramMaySupplyDynamicSeen(audited, userPaths, cmethod.Params[0], root, make(map[*ssa.Parameter]bool)) {
+					if !collectParamStructFieldTargets(audited, userPaths, named, cmethod.Params[0], root, needed, paramSeen) {
 						return false
 					}
 				}
 				continue
 			}
 			callee := r.Common().StaticCallee()
-			if callee == nil || len(callee.Blocks) == 0 || (callee.Synthetic != "" && !isPromotedWrapper(callee) && !(audited && callee.Origin() != nil)) || parameterizedBody(callee) || len(r.Common().Args) != len(callee.Params) {
+			if callee == nil || (root != nil && callee == root) || len(callee.Blocks) == 0 || (callee.Synthetic != "" && !isPromotedWrapper(callee) && !(audited && callee.Origin() != nil)) || parameterizedBody(callee) || len(r.Common().Args) != len(callee.Params) {
 				return false
 			}
 			for i, arg := range r.Common().Args {
-				if arg == val && !interfaceValueStructFieldTargets(audited, named, concreteType, prog, callee.Params[i], needed, paramSeen, valSeen) {
+				if arg == val && !interfaceValueStructFieldTargets(audited, userPaths, named, concreteType, prog, callee.Params[i], root, needed, paramSeen, valSeen) {
 					return false
 				}
 			}
@@ -2119,487 +2657,32 @@ func interfaceValueStructFieldTargets(audited bool, named *types.Named, concrete
 // collectClosedDynamicSeeds walks an already-closed argument value and
 // gathers what it can hand the subject: function values become dispatch
 // candidates, materialized concrete types enter the runtime-type walk.
-// The case set mirrors the closed-value walk that admitted the value;
-// bindings of ordinary closures are not collected — a free-variable
-// dispatch inside the body refuses per-site when the body is scanned.
+// It delegates to walkDynamicValue in seeds mode so closedness checking
+// and RTA seed collection share a single SSA shape ladder.
 func collectClosedDynamicSeeds(value ssa.Value, enc *enumerationClosure, seen map[ssa.Value]bool, fp *freshParamAnalysis) {
-	if value == nil {
+	if value == nil || enc == nil {
 		return
 	}
-	if value.Type() != nil && !typeMayCarryDynamicTop(fp != nil && fp.selectionAudited, value.Type()) {
-		return
+	if seen == nil {
+		seen = map[ssa.Value]bool{}
 	}
-	if fp == nil {
-		if seen[value] {
-			return
-		}
-		seen[value] = true
-		collectClosedDynamicSeedsUncached(value, enc, seen, nil)
-		return
+	typesMap := map[types.Type]bool{}
+	if enc.addrTaken == nil {
+		enc.addrTaken = map[*ssa.Function]bool{}
 	}
-	if fp.usedSubject != nil && value.Parent() != nil && (value.Parent() == fp.enumRoot || value.Parent() == fp.subjectRoot) {
-		*fp.usedSubject = true
+	collector := &dynamicValueCollector{
+		types: typesMap,
+		funcs: enc.addrTaken,
+		seeds: true,
 	}
-	outsideCallee := !inActiveCallee(value.Parent(), fp.calleeSeen)
-	inProgScope := outsideCallee && value.Parent() != fp.enumRoot && value.Parent() != fp.subjectRoot
-	if outsideCallee {
-		if inProgScope && fp.summary != nil {
-			if entry, ok := fp.summary.enumSeedsMemo[value]; ok {
-				enc.types = append(enc.types, entry.types...)
-				for _, fn := range entry.funcs {
-					enc.addrTaken[fn] = true
-				}
-				return
-			}
-		}
-		if fp.rootSeen != nil {
-			if fp.rootSeen[value] {
-				return
-			}
-			fp.rootSeen[value] = true
-			collectClosedDynamicSeedsUncached(value, enc, seen, fp)
-			return
-		}
-		if seen != nil && seen[value] {
-			return
-		}
-		usedSubject := value.Parent() != nil && (value.Parent() == fp.enumRoot || value.Parent() == fp.subjectRoot)
-		rootFP := *fp
-		rootFP.rootSeen = map[ssa.Value]bool{value: true}
-		rootFP.usedSubject = &usedSubject
-		subEnc := enumerationClosure{addrTaken: map[*ssa.Function]bool{}}
-		collectClosedDynamicSeedsUncached(value, &subEnc, seen, &rootFP)
-		if seen != nil {
-			seen[value] = true
-		}
-		if fp.usedSubject != nil && usedSubject {
-			*fp.usedSubject = true
-		}
-		var dedupTypes []types.Type
-		if len(subEnc.types) > 0 {
-			seenT := make(map[types.Type]bool, len(subEnc.types))
-			for _, t := range subEnc.types {
-				if !seenT[t] {
-					seenT[t] = true
-					dedupTypes = append(dedupTypes, t)
-				}
-			}
-		}
-		enc.types = append(enc.types, dedupTypes...)
-		for fn := range subEnc.addrTaken {
-			enc.addrTaken[fn] = true
-		}
-		if inProgScope && fp.summary != nil && !usedSubject {
-			var funcs []*ssa.Function
-			if len(subEnc.addrTaken) > 0 {
-				funcs = make([]*ssa.Function, 0, len(subEnc.addrTaken))
-				for fn := range subEnc.addrTaken {
-					funcs = append(funcs, fn)
-				}
-			}
-			fp.summary.enumSeedsMemo[value] = dynamicSeedEntry{
-				types: dedupTypes,
-				funcs: funcs,
-			}
-		}
-		return
-	}
-	if seen[value] {
-		return
-	}
-	seen[value] = true
-	collectClosedDynamicSeedsUncached(value, enc, seen, fp)
-}
-
-func collectClosedDynamicSeedsUncached(value ssa.Value, enc *enumerationClosure, seen map[ssa.Value]bool, fp *freshParamAnalysis) {
-	switch v := value.(type) {
-	case *ssa.Function:
-		enc.addrTaken[v] = true
-	case *ssa.MakeClosure:
-		if fn, ok := v.Fn.(*ssa.Function); ok {
-			if syntheticInterfaceMethodWrapper(fn) && fp != nil && fp.selectionAudited && len(v.Bindings) == 1 && v.Parent() != nil && v.Parent().Prog != nil {
-				collectClosedDynamicSeeds(v.Bindings[0], enc, seen, fp)
-				if method, ok := fn.Object().(*types.Func); ok && method != nil {
-					cts := map[types.Type]bool{}
-					subFP := *fp
-					subFP.rootSeen = nil
-					if walkDynamicValue(v.Bindings[0], &dynamicValueCollector{types: cts}, map[ssa.Value]bool{}, nil, &subFP) {
-						if targets, ok := resolveConcreteMethodTargets(v.Parent().Prog, v.Bindings[0].Type(), method, cts, fp); ok {
-							for t := range targets {
-								enc.addrTaken[t] = true
-							}
-							return
-						}
-					}
-				}
-			}
-			enc.addrTaken[fn] = true
-		}
-	case *ssa.MakeInterface:
-		enc.types = append(enc.types, v.X.Type())
-		if _, isFunc := types.Unalias(v.X.Type()).Underlying().(*types.Signature); isFunc {
-			collectClosedDynamicSeeds(v.X, enc, seen, fp)
-		}
-	case *ssa.ChangeInterface:
-		collectClosedDynamicSeeds(v.X, enc, seen, fp)
-	case *ssa.TypeAssert:
-		collectClosedDynamicSeeds(v.X, enc, seen, fp)
-	case *ssa.ChangeType:
-		collectClosedDynamicSeeds(v.X, enc, seen, fp)
-	case *ssa.Convert:
-		collectClosedDynamicSeeds(v.X, enc, seen, fp)
-	case *ssa.MakeSlice:
-		if fp != nil && fp.selectionAudited && sliceHasIndexedStore(v) {
-			walkMakeSliceIndexedStores(v, map[ssa.Value]bool{}, func(val ssa.Value) bool {
-				collectClosedDynamicSeeds(val, enc, seen, fp)
-				return true
-			})
-		}
-	case *ssa.MakeMap:
-		if fp != nil && fp.selectionAudited {
-			walkMakeMapValues(v, map[ssa.Value]bool{}, func(val ssa.Value) bool {
-				collectClosedDynamicSeeds(val, enc, seen, fp)
-				return true
-			})
-		}
-	case *ssa.Lookup:
-		if fp != nil && fp.selectionAudited && v.X != nil {
-			collectClosedDynamicSeeds(v.X, enc, seen, fp)
-		}
-	case *ssa.Slice:
-		if v.X != nil {
-			if _, isSlice := types.Unalias(v.X.Type()).Underlying().(*types.Slice); isSlice {
-				collectClosedDynamicSeeds(v.X, enc, seen, fp)
-			} else if alloc, ok := v.X.(*ssa.Alloc); ok && cellOf(alloc, map[ssa.Value]bool{}) != nil {
-				walkLoadCellReferrers(alloc, func(val ssa.Value) bool {
-					collectClosedDynamicSeeds(val, enc, seen, fp)
-					return true
-				})
-			}
-		}
-	case *ssa.Alloc:
-		if fp != nil && fp.selectionAudited && v.Type() != nil {
-			if v.Parent() != nil && fp.isStdFunc(v.Parent()) {
-				enc.types = append(enc.types, v.Type())
-			} else if named := derefNamedStruct(v.Type()); named != nil && !fp.structPoisoned[structFieldKey{named: named, field: -1}] {
-				enc.types = append(enc.types, v.Type())
-			}
-		}
-	case *ssa.Field:
-		if fp != nil && v.X != nil {
-			if named := derefNamedStruct(v.X.Type()); named != nil {
-				fieldFP := *fp
-				fieldFP.inFieldStore = true
-				fieldFP.callBindings = nil
-				fieldFP.calleeSeen = nil
-				fieldFP.calleeDepth = nil
-				for _, sv := range fp.structFieldStores[structFieldKey{named: named, field: v.Field}] {
-					collectClosedDynamicSeeds(sv, enc, seen, &fieldFP)
-				}
-			}
-		}
-	case *ssa.Call:
-		if b, ok := v.Common().Value.(*ssa.Builtin); ok && b.Name() == "append" {
-			for _, arg := range v.Common().Args {
-				collectClosedDynamicSeeds(arg, enc, seen, fp)
-			}
-			return
-		}
-		collectCallResultSeeds(v, -1, enc, seen, fp)
-	case *ssa.Extract:
-		if call, ok := v.Tuple.(*ssa.Call); ok {
-			collectCallResultSeeds(call, v.Index, enc, seen, fp)
-		} else {
-			collectClosedDynamicSeeds(v.Tuple, enc, seen, fp)
-		}
-	case *ssa.Phi:
-		for _, edge := range v.Edges {
-			collectClosedDynamicSeeds(edge, enc, seen, fp)
-		}
-	case *ssa.Parameter:
-		if fp != nil {
-			if bound, ok := fp.callBindings[v]; ok && bound != nil {
-				boundFP := fp
-				fn := v.Parent()
-				if fn != nil && fp.calleeSeen[fn] {
-					copied := *fp
-					calleeSeen := make(map[*ssa.Function]bool, len(fp.calleeSeen))
-					for k, val := range fp.calleeSeen {
-						if k != fn {
-							calleeSeen[k] = val
-						}
-					}
-					copied.calleeSeen = calleeSeen
-					calleeDepth := make(map[*ssa.Function]int, len(fp.calleeDepth))
-					for k, val := range fp.calleeDepth {
-						if k != fn {
-							calleeDepth[k] = val
-						}
-					}
-					copied.calleeDepth = calleeDepth
-					bindings := make(map[*ssa.Parameter]ssa.Value, len(fp.callBindings))
-					for k, val := range fp.callBindings {
-						if k.Parent() != fn {
-							bindings[k] = val
-						}
-					}
-					copied.callBindings = bindings
-					boundFP = &copied
-				}
-				collectClosedDynamicSeeds(bound, enc, seen, boundFP)
-				return
-			}
-		}
-		if args, usedProgramSites, ok := attributedParameterArgs(v, fp); ok {
-			argFP := fp
-			if usedProgramSites && fp != nil && (!fp.inProgramSites || len(fp.callBindings) > 0) {
-				copied := *fp
-				copied.inProgramSites = true
-				copied.callBindings = nil
-				copied.calleeSeen = nil
-				copied.calleeDepth = nil
-				argFP = &copied
-			}
-			for _, arg := range args {
-				collectClosedDynamicSeeds(arg, enc, seen, argFP)
-			}
-		}
-	case *ssa.FreeVar:
-		if bindings, usedProgramSites, ok := attributedFreeVarBindings(v, fp); ok {
-			bindFP := fp
-			fn := v.Parent()
-			if usedProgramSites && fp != nil && (!fp.inProgramSites || len(fp.callBindings) > 0) {
-				copied := *fp
-				copied.inProgramSites = true
-				copied.callBindings = nil
-				copied.calleeSeen = nil
-				copied.calleeDepth = nil
-				bindFP = &copied
-			} else if fp != nil && fn != nil && fp.calleeSeen[fn] {
-				copied := *fp
-				calleeSeen := make(map[*ssa.Function]bool, len(fp.calleeSeen))
-				for k, val := range fp.calleeSeen {
-					if k != fn {
-						calleeSeen[k] = val
-					}
-				}
-				copied.calleeSeen = calleeSeen
-				calleeDepth := make(map[*ssa.Function]int, len(fp.calleeDepth))
-				for k, val := range fp.calleeDepth {
-					if k != fn {
-						calleeDepth[k] = val
-					}
-				}
-				copied.calleeDepth = calleeDepth
-				cb := make(map[*ssa.Parameter]ssa.Value, len(fp.callBindings))
-				for k, val := range fp.callBindings {
-					if k.Parent() != fn {
-						cb[k] = val
-					}
-				}
-				copied.callBindings = cb
-				bindFP = &copied
-			}
-			for _, b := range bindings {
-				collectClosedDynamicSeeds(b, enc, seen, bindFP)
-			}
-		}
-	case *ssa.UnOp:
-		if v.Op == token.MUL {
-			if g, ok := v.X.(*ssa.Global); ok && fp != nil && fp.selectionAudited && (isUnmutatedStandardSentinelGlobalAny(g) || isUnmutatedSentinelGlobal(g)) {
-				cts := map[types.Type]bool{}
-				sentinelGlobalConcreteTypes(g, cts)
-				for ct := range cts {
-					enc.types = append(enc.types, ct)
-				}
-			} else if fa, ok := v.X.(*ssa.FieldAddr); ok && fp != nil {
-				fieldFP := *fp
-				fieldFP.inFieldStore = true
-				fieldFP.callBindings = nil
-				fieldFP.calleeSeen = nil
-				fieldFP.calleeDepth = nil
-				if fp.enumRoot != nil && len(fp.enumRoot.Params) > 0 && fa.X == fp.enumRoot.Params[0] && len(fp.enumFieldStores) > 0 {
-					for _, sv := range fp.enumFieldStores[fa.Field] {
-						collectClosedDynamicSeeds(sv, enc, seen, &fieldFP)
-					}
-				} else if fa.X != nil {
-					if named := derefNamedStruct(fa.X.Type()); named != nil {
-						for _, sv := range fp.structFieldStores[structFieldKey{named: named, field: fa.Field}] {
-							collectClosedDynamicSeeds(sv, enc, seen, &fieldFP)
-						}
-					}
-				}
-			} else if ia, ok := v.X.(*ssa.IndexAddr); ok && ia.X != nil {
-				if _, isSlice := types.Unalias(ia.X.Type()).Underlying().(*types.Slice); isSlice {
-					collectClosedDynamicSeeds(ia.X, enc, seen, fp)
-				} else if cellOf(v.X, map[ssa.Value]bool{}) != nil {
-					walkLoadCellReferrers(v.X, func(val ssa.Value) bool {
-						collectClosedDynamicSeeds(val, enc, seen, fp)
-						return true
-					})
-				}
-			} else if cellOf(v.X, map[ssa.Value]bool{}) != nil {
-				walkLoadCellReferrers(v.X, func(val ssa.Value) bool {
-					collectClosedDynamicSeeds(val, enc, seen, fp)
-					return true
-				})
-			}
+	walkDynamicValue(value, collector, seen, nil, fp)
+	if _, isConst := value.(*ssa.Const); !isConst && value.Type() != nil && fp != nil && fp.selectionAudited {
+		if named := derefNamedStruct(fp.userPkgPaths(), value.Type()); named != nil && typeMayCarryDynamicTop(fp.selectionAudited, named) {
+			collectUserStructSeeds(named, collector, fp)
 		}
 	}
-}
-
-func collectCallResultSeeds(call *ssa.Call, tupleIndex int, enc *enumerationClosure, seen map[ssa.Value]bool, fp *freshParamAnalysis) {
-	if fp == nil || !fp.selectionAudited || call == nil || call.Common() == nil {
-		return
-	}
-	if tupleIndex <= 0 && isHarnessContextCall(call, map[ssa.Value]bool{}, map[ssa.Value]bool{}, fp) {
-		if ct := harnessCancelCtxType(call); ct != nil {
-			enc.types = append(enc.types, ct)
-		}
-		return
-	}
-	if call.Common().IsInvoke() {
-		if fp.invokeSeen[call] {
-			if fp.lowlink != nil {
-				if d := fp.invokeDepth[call]; d > 0 && (*fp.lowlink == 0 || d < *fp.lowlink) {
-					*fp.lowlink = d
-				}
-			}
-			return
-		}
-		invokeFP := *fp
-		invokeSeen := make(map[ssa.CallInstruction]bool, len(fp.invokeSeen)+1)
-		for k, v := range fp.invokeSeen {
-			invokeSeen[k] = v
-		}
-		invokeSeen[call] = true
-		invokeFP.invokeSeen = invokeSeen
-		invokeDepth := make(map[ssa.CallInstruction]int, len(fp.invokeDepth)+1)
-		for k, v := range fp.invokeDepth {
-			invokeDepth[k] = v
-		}
-		depth := len(fp.stackDepth)
-		if depth == 0 {
-			depth = 1
-		}
-		invokeDepth[call] = depth
-		invokeFP.invokeDepth = invokeDepth
-		targets, ok := closedInvokeTargets(call, &invokeFP)
-		if !ok || len(targets) == 0 {
-			return
-		}
-		for _, arg := range call.Common().Args {
-			if arg == nil {
-				return
-			}
-			collectClosedDynamicSeeds(arg, enc, seen, &invokeFP)
-		}
-		var ordered []*ssa.Function
-		for callee := range targets {
-			ordered = append(ordered, callee)
-		}
-		sort.Slice(ordered, func(i, j int) bool { return ordered[i].String() < ordered[j].String() })
-		for _, callee := range ordered {
-			callArgs := append([]ssa.Value{call.Common().Value}, call.Common().Args...)
-			collectCalleeResultSeeds(callee, callArgs, tupleIndex, enc, seen, &invokeFP)
-		}
-		return
-	}
-	callee := call.Common().StaticCallee()
-	collectCalleeResultSeeds(callee, call.Common().Args, tupleIndex, enc, seen, fp)
-}
-
-func collectCalleeResultSeeds(callee *ssa.Function, callArgs []ssa.Value, tupleIndex int, enc *enumerationClosure, seen map[ssa.Value]bool, fp *freshParamAnalysis) {
-	if callee == nil || (callee.Synthetic != "" && callee.Origin() == nil && !isPromotedWrapper(callee) && !strings.HasPrefix(callee.Synthetic, "wrapper ")) || len(callee.Blocks) == 0 || !calleeFreeVarsClosed(callee, fp) {
-		return
-	}
-	if fp.calleeSeen[callee] {
-		if fp.lowlink != nil {
-			if d := fp.calleeDepth[callee]; d > 0 && (*fp.lowlink == 0 || d < *fp.lowlink) {
-				*fp.lowlink = d
-			}
-		}
-		return
-	}
-	if callee == fp.enumRoot || callee == fp.subjectRoot {
-		if fp.usedSubject != nil {
-			*fp.usedSubject = true
-		}
-	}
-	pkgPath := funcPkgPath(callee)
-	if fp.isStdFunc(callee) {
-		if !isAuditedStandardOrDelegatePackage(fp.selectionAudited, pkgPath) && !auditedStandardCallee(fp.selectionAudited, pkgPath, functionSymbolName(callee), callee) {
-			return
-		}
-	} else if (!fp.functions[callee] && !fp.programFunctions[callee]) || callee == fp.enumRoot || (callee.Signature.Variadic() && !fp.inFieldStore && !fp.inProgramSites) || propertyHarnessPath(pkgPath) {
-		return
-	}
-	if len(callArgs) != len(callee.Params) {
-		return
-	}
-	for i, arg := range callArgs {
-		if arg == nil {
-			return
-		}
-		if i < len(callee.Params) && !calleeParamMayAffectResult(fp.selectionAudited, callee, i) {
-			continue
-		}
-		if !fp.isStdFunc(callee) && derefNamedStruct(arg.Type()) != nil {
-			continue
-		}
-		collectClosedDynamicSeeds(arg, enc, seen, fp)
-	}
-	calleeFP := *fp
-	calleeSeen := make(map[*ssa.Function]bool, len(fp.calleeSeen)+1)
-	for k, v := range fp.calleeSeen {
-		calleeSeen[k] = v
-	}
-	calleeSeen[callee] = true
-	calleeFP.calleeSeen = calleeSeen
-	calleeDepth := make(map[*ssa.Function]int, len(fp.calleeDepth)+1)
-	for k, v := range fp.calleeDepth {
-		calleeDepth[k] = v
-	}
-	depth := len(fp.stackDepth)
-	if depth == 0 {
-		depth = 1
-	}
-	calleeDepth[callee] = depth
-	calleeFP.calleeDepth = calleeDepth
-	bindings := make(map[*ssa.Parameter]ssa.Value, len(fp.callBindings)+len(callee.Params))
-	for k, v := range fp.callBindings {
-		bindings[k] = v
-	}
-	for i, p := range callee.Params {
-		bindings[p] = callArgs[i]
-	}
-	calleeFP.callBindings = bindings
-	calleeSeenMap := make(map[ssa.Value]bool, len(seen))
-	for k, v := range seen {
-		if v && k != nil && k.Parent() != callee {
-			calleeSeenMap[k] = true
-		}
-	}
-	for _, block := range liveCalleeBlocks(callee) {
-		for _, instr := range block.Instrs {
-			ret, ok := instr.(*ssa.Return)
-			if !ok {
-				continue
-			}
-			var res ssa.Value
-			if tupleIndex < 0 {
-				if len(ret.Results) != 1 {
-					continue
-				}
-				res = ret.Results[0]
-			} else if tupleIndex < len(ret.Results) {
-				res = ret.Results[tupleIndex]
-			}
-			if block == callee.Recover && isSyntheticRecoverZeroConst(res) {
-				continue
-			}
-			collectClosedDynamicSeeds(res, enc, calleeSeenMap, &calleeFP)
-		}
+	for t := range typesMap {
+		enc.types = append(enc.types, t)
 	}
 }
 
@@ -2934,7 +3017,7 @@ func provenanceReachableStartup(ctx context.Context, roots []*ssa.Function, mask
 					}
 					targetPath := funcPkgPath(target)
 					targetHarness := targetPath == "testing" || harnessAudited && propertyHarnessPath(targetPath)
-					if !harnessFrame || targetHarness || userPaths[targetPath] || !isStdImportPath(targetPath) {
+					if !harnessFrame || targetHarness || !isStdPkgPath(userPaths, targetPath) {
 						if target.Parent() != nil && target.Synthetic == "" && !scanned[target.Parent()] && !isTestingCleanupCallback(target) {
 							pendingByParent[target.Parent()] = append(pendingByParent[target.Parent()], target)
 							continue
@@ -2948,82 +3031,448 @@ func provenanceReachableStartup(ctx context.Context, roots []*ssa.Function, mask
 	return reachable, nil
 }
 
-func collectTestingCleanupCallbacks(subjectFunctions, testMainFunctions map[*ssa.Function]bool, mask uint64, res *rta.Result) ([]*ssa.Function, bool) {
-	seen := make(map[*ssa.Function]bool)
-	var out []*ssa.Function
-	unclosed := false
-	scanSet := func(fns map[*ssa.Function]bool) {
-		for fn := range fns {
+func collectTestingHarnessCallbacks(audited bool, userPaths map[string]bool, summary *callerReferenceSummary, subjectRoot *ssa.Function, enumerated bool, enc enumerationClosure, prov map[*ssa.Function]bool, mask uint64, res *rta.Result) (cleanupOut []*ssa.Function, unclosedCleanup bool, fuzzOut []*ssa.Function, unclosedFuzz bool) {
+	seenCleanup := make(map[*ssa.Function]bool)
+	seenFuzz := make(map[*ssa.Function]bool)
+	var lazyFP *freshParamAnalysis
+	getFP := func() *freshParamAnalysis {
+		if lazyFP != nil {
+			return lazyFP
+		}
+		functions := make(map[*ssa.Function]bool, len(prov))
+		dynamicTargets := make(map[ssa.CallInstruction]map[*ssa.Function]bool)
+		if res != nil {
+			for fn, m := range res.Reachable {
+				if m&mask != 0 {
+					functions[fn] = true
+				}
+			}
+			for site, targets := range res.Targets {
+				if !functions[site.Parent()] {
+					continue
+				}
+				for t, m := range targets {
+					if m&mask != 0 && functions[t] {
+						proj := dynamicTargets[site]
+						if proj == nil {
+							proj = make(map[*ssa.Function]bool)
+							dynamicTargets[site] = proj
+						}
+						proj[t] = true
+					}
+				}
+			}
+		} else {
+			for fn := range prov {
+				functions[fn] = true
+			}
+		}
+		var reach attributedReachability
+		reach.functions = functions
+		reach.dynamicTargets = dynamicTargets
+		reach.subjectRoot = subjectRoot
+		reach.enumeratedRoot = enumerated
+		reach.enumeratedRootSites = enc.sites
+		reach.enumeratedFieldStores = enc.fieldStores
+		reach.userPaths = userPaths
+		if summary != nil {
+			reach.summary = summary
+			reach.structFieldStores = summary.structFieldStores
+			reach.structWholeStores = summary.structWholeStores
+			reach.structPoisoned = summary.structPoisoned
+			reach.structReferencedByType = summary.structReferencedByType
+			reach.programSites = summary.sites
+			reach.programValueRef = summary.valueRef
+			reach.programFunctions = summary.allFunctions
+		}
+		lazyFP = newFreshParamAnalysis(audited, reach, func(fn *ssa.Function) bool {
+			return isStdPkgPath(userPaths, funcPkgPath(fn))
+		})
+		return lazyFP
+	}
+	checkFuzzSig := func(fb *ssa.Function) bool {
+		if fb == nil {
+			return false
+		}
+		for idx, p := range fb.Params {
+			if p == nil {
+				continue
+			}
+			if idx == 0 && isHarnessPointerType(p.Type()) {
+				continue
+			}
+			if typeMayCarryDynamicTop(audited, p.Type()) {
+				return false
+			}
+		}
+		return true
+	}
+	addCallback := func(kind string, cb *ssa.Function) {
+		if cb == nil {
+			return
+		}
+		if kind == "Fuzz" {
+			if !checkFuzzSig(cb) {
+				unclosedFuzz = true
+				return
+			}
+			if !seenFuzz[cb] {
+				seenFuzz[cb] = true
+				fuzzOut = append(fuzzOut, cb)
+			}
+			return
+		}
+		if !seenCleanup[cb] {
+			seenCleanup[cb] = true
+			cleanupOut = append(cleanupOut, cb)
+		}
+	}
+	markUnclosed := func(kind string) {
+		if kind == "Fuzz" {
+			unclosedFuzz = true
+		} else {
+			unclosedCleanup = true
+		}
+	}
+	unwrapIface := func(v ssa.Value) ssa.Value {
+		for v != nil {
+			switch u := v.(type) {
+			case *ssa.MakeInterface:
+				v = u.X
+			case *ssa.ChangeInterface:
+				v = u.X
+			default:
+				return v
+			}
+		}
+		return nil
+	}
+	ordered := make([]*ssa.Function, 0, len(prov))
+	for fn := range prov {
+		if fn != nil {
+			ordered = append(ordered, fn)
+		}
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].String() < ordered[j].String() })
+	for _, fn := range ordered {
+		for _, b := range fn.Blocks {
+			for _, instr := range b.Instrs {
+				site, ok := instr.(ssa.CallInstruction)
+				if !ok {
+					continue
+				}
+				rawArg, kind := testingHarnessCallArg(site, mask, res)
+				if kind == "" {
+					continue
+				}
+				arg := unwrapIface(rawArg)
+				if arg == nil {
+					markUnclosed(kind)
+					continue
+				}
+				switch x := arg.(type) {
+				case *ssa.Function:
+					addCallback(kind, x)
+				case *ssa.MakeClosure:
+					cb, ok := x.Fn.(*ssa.Function)
+					if !ok || cb == nil {
+						markUnclosed(kind)
+						continue
+					}
+					if isBoundMethodWrapper(cb) && len(x.Bindings) > 0 && typeMayCarryDynamicTop(audited, x.Bindings[0].Type()) {
+						if !subjectClosedDynamicValue(x.Bindings[0], make(map[ssa.Value]bool), getFP()) {
+							markUnclosed(kind)
+							continue
+						}
+					}
+					addCallback(kind, cb)
+				default:
+					targets, closed := closedDynamicTargets(rawArg, getFP())
+					if !closed || len(targets) == 0 {
+						markUnclosed(kind)
+						continue
+					}
+					for cb := range targets {
+						addCallback(kind, cb)
+					}
+				}
+			}
+		}
+	}
+	sort.Slice(cleanupOut, func(i, j int) bool { return cleanupOut[i].String() < cleanupOut[j].String() })
+	sort.Slice(fuzzOut, func(i, j int) bool { return fuzzOut[i].String() < fuzzOut[j].String() })
+	return cleanupOut, unclosedCleanup, fuzzOut, unclosedFuzz
+}
+
+func testingHarnessCallArg(site ssa.CallInstruction, mask uint64, res *rta.Result) (ssa.Value, string) {
+	if site == nil || site.Common() == nil {
+		return nil, ""
+	}
+	c := site.Common()
+	if len(c.Args) == 0 {
+		return nil, ""
+	}
+	matchTarget := func(fn *ssa.Function) string {
+		if fn == nil || funcPkgPath(fn) != "testing" {
+			return ""
+		}
+		base := strings.TrimSuffix(strings.TrimSuffix(functionSymbolName(fn), "$bound"), "$thunk")
+		if base == "Cleanup" || base == "Fuzz" {
+			return base
+		}
+		return ""
+	}
+	if c.IsInvoke() && c.Method != nil && c.Method.Pkg() != nil && c.Method.Pkg().Path() == "testing" {
+		if c.Method.Name() == "Cleanup" || c.Method.Name() == "Fuzz" {
+			return c.Args[len(c.Args)-1], c.Method.Name()
+		}
+	}
+	if callee := c.StaticCallee(); callee != nil {
+		if kind := matchTarget(callee); kind != "" {
+			return c.Args[len(c.Args)-1], kind
+		}
+		return nil, ""
+	}
+	if res == nil {
+		return nil, ""
+	}
+	for target, tmask := range res.Targets[site] {
+		if tmask&mask != 0 {
+			if kind := matchTarget(target); kind != "" {
+				return c.Args[len(c.Args)-1], kind
+			}
+		}
+	}
+	return nil, ""
+}
+
+func rootedProvenanceIncomplete(audited bool, userPaths map[string]bool, sets ...map[*ssa.Function]bool) bool {
+	var space [16]*ssa.Value
+	for _, set := range sets {
+		for fn := range set {
 			if fn == nil {
 				continue
 			}
+			pkgPath := funcPkgPath(fn)
+			if isStdPkgPath(userPaths, pkgPath) {
+				continue
+			}
+			if len(fn.Blocks) == 0 {
+				if fn.Synthetic == "" && !parameterizedBody(fn) {
+					return true
+				}
+				continue
+			}
+			for _, p := range fn.Params {
+				if p != nil && nonStdTypeUsesUnsafePointer(audited, userPaths, p.Type()) {
+					return true
+				}
+			}
 			for _, b := range fn.Blocks {
 				for _, instr := range b.Instrs {
-					site, ok := instr.(ssa.CallInstruction)
-					if !ok {
-						continue
+					if v, ok := instr.(ssa.Value); ok && nonStdTypeUsesUnsafePointer(audited, userPaths, v.Type()) {
+						return true
 					}
-					arg, isCleanup := testingCleanupCallArg(site, mask, res)
-					if !isCleanup {
-						continue
-					}
-					switch x := arg.(type) {
-					case *ssa.Function:
-						if !seen[x] {
-							seen[x] = true
-							out = append(out, x)
-						}
-					case *ssa.MakeClosure:
-						if cb, ok := x.Fn.(*ssa.Function); ok && !seen[cb] {
-							seen[cb] = true
-							out = append(out, cb)
-						}
-					default:
-						targets, closed := closedDynamicTargets(arg, nil)
-						if !closed || len(targets) == 0 {
-							unclosed = true
+					for _, op := range instr.Operands(space[:0]) {
+						if op == nil || *op == nil {
 							continue
 						}
-						for cb := range targets {
-							if cb != nil && !seen[cb] {
-								seen[cb] = true
-								out = append(out, cb)
+						if nonStdTypeUsesUnsafePointer(audited, userPaths, (*op).Type()) {
+							return true
+						}
+						if g, ok := (*op).(*ssa.Function); ok {
+							gPkg := funcPkgPath(g)
+							gSym := strings.TrimSuffix(strings.TrimSuffix(functionSymbolName(g), "$bound"), "$thunk")
+							if isUnattributableRootedStdSymbol(gPkg, gSym) {
+								return true
 							}
+						}
+					}
+					site, ok := instr.(ssa.CallInstruction)
+					if !ok || site.Common() == nil {
+						continue
+					}
+					c := site.Common()
+					if c.IsInvoke() {
+						if c.Method != nil && c.Method.Pkg() != nil && isUnattributableRootedStdSymbol(c.Method.Pkg().Path(), c.Method.Name()) {
+							return true
+						}
+						continue
+					}
+					if b, ok := c.Value.(*ssa.Builtin); ok {
+						switch b.Name() {
+						case "Add", "Slice", "SliceData", "String", "StringData":
+							return true
+						}
+						continue
+					}
+					if callee := c.StaticCallee(); callee != nil {
+						cPkg := funcPkgPath(callee)
+						cSym := strings.TrimSuffix(strings.TrimSuffix(functionSymbolName(callee), "$bound"), "$thunk")
+						if isUnattributableRootedStdSymbol(cPkg, cSym) {
+							return true
+						}
+						if (userPaths[cPkg] || !isStdImportPath(cPkg)) && len(callee.Blocks) == 0 && callee.Synthetic == "" && !parameterizedBody(callee) {
+							return true
 						}
 					}
 				}
 			}
 		}
 	}
-	scanSet(subjectFunctions)
-	scanSet(testMainFunctions)
-	sort.Slice(out, func(i, j int) bool { return out[i].String() < out[j].String() })
-	return out, unclosed
+	return false
 }
 
-func testingCleanupCallArg(site ssa.CallInstruction, mask uint64, res *rta.Result) (ssa.Value, bool) {
-	if site == nil || site.Common() == nil {
-		return nil, false
+func isReflectMutationSymbol(name string) bool {
+	switch name {
+	case "Set", "SetZero", "SetInt", "SetUint", "SetFloat", "SetComplex", "SetBool",
+		"SetBytes", "SetString", "SetPointer", "SetMapIndex", "SetIterKey", "SetIterValue",
+		"SetLen", "SetCap", "Addr", "UnsafeAddr", "Pointer", "NewAt", "Copy",
+		"Append", "AppendSlice", "Grow", "Clear":
+		return true
+	default:
+		return false
 	}
-	c := site.Common()
-	if len(c.Args) == 0 {
-		return nil, false
+}
+
+func isStdDeserializerCall(pkgPath, sym string) bool {
+	switch pkgPath {
+	case "encoding/json", "encoding/json/v2", "encoding/json/jsontext",
+		"encoding/xml", "encoding/gob", "encoding/binary", "encoding/asn1":
+		return true
+	case "fmt":
+		return strings.HasPrefix(sym, "Scan") || strings.HasPrefix(sym, "Fscan") || strings.HasPrefix(sym, "Sscan")
+	default:
+		return false
 	}
-	if callee := c.StaticCallee(); callee != nil {
-		if funcPkgPath(callee) == "testing" && functionSymbolName(callee) == "Cleanup" {
-			return c.Args[len(c.Args)-1], true
+}
+
+func isUnattributableRootedStdSymbol(pkgPath, sym string) bool {
+	switch pkgPath {
+	case "plugin", "testing/quick", "text/template", "html/template", "net/rpc", "net/rpc/jsonrpc":
+		return true
+	case "reflect":
+		if isReflectMutationSymbol(sym) {
+			return true
 		}
-		return nil, false
-	}
-	if res == nil {
-		return nil, false
-	}
-	for target, tmask := range res.Targets[site] {
-		if tmask&mask != 0 && funcPkgPath(target) == "testing" && functionSymbolName(target) == "Cleanup" {
-			return c.Args[len(c.Args)-1], true
+		switch sym {
+		case "Call", "CallSlice", "MakeFunc", "MethodByName", "Method":
+			return true
 		}
 	}
-	return nil, false
+	return false
+}
+
+func nonStdTypeUsesUnsafePointer(audited bool, userPaths map[string]bool, t types.Type) bool {
+	seen := make(map[types.Type]bool)
+	var walk func(types.Type) bool
+	walk = func(cur types.Type) bool {
+		if cur == nil {
+			return false
+		}
+		cur = types.Unalias(cur)
+		if ssaOpaqueHandle(cur) || seen[cur] {
+			return false
+		}
+		seen[cur] = true
+		switch tt := cur.(type) {
+		case *types.Basic:
+			return tt.Kind() == types.UnsafePointer
+		case *types.Named:
+			obj := tt.Obj()
+			if obj != nil && obj.Pkg() != nil {
+				pkgPath := obj.Pkg().Path()
+				if pkgPath == "unsafe" && obj.Name() == "Pointer" {
+					return true
+				}
+				if elem, ok := AuditedAtomicPointerElem(audited, tt); ok {
+					return walk(elem)
+				}
+				if isStdImportPath(pkgPath) && !userPaths[pkgPath] {
+					for i := 0; i < tt.TypeArgs().Len(); i++ {
+						if walk(tt.TypeArgs().At(i)) {
+							return true
+						}
+					}
+					return false
+				}
+			}
+			for i := 0; i < tt.TypeArgs().Len(); i++ {
+				if walk(tt.TypeArgs().At(i)) {
+					return true
+				}
+			}
+			return walk(tt.Underlying())
+		case *types.Pointer:
+			return walk(tt.Elem())
+		case *types.Slice:
+			return walk(tt.Elem())
+		case *types.Array:
+			return walk(tt.Elem())
+		case *types.Chan:
+			return walk(tt.Elem())
+		case *types.Map:
+			return walk(tt.Key()) || walk(tt.Elem())
+		case *types.Signature:
+			for _, tuple := range []*types.Tuple{tt.Params(), tt.Results()} {
+				for i := 0; tuple != nil && i < tuple.Len(); i++ {
+					if walk(tuple.At(i).Type()) {
+						return true
+					}
+				}
+			}
+		case *types.Struct:
+			for i := 0; i < tt.NumFields(); i++ {
+				if walk(tt.Field(i).Type()) {
+					return true
+				}
+			}
+		case *types.Tuple:
+			for i := 0; i < tt.Len(); i++ {
+				if walk(tt.At(i).Type()) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return walk(t)
+}
+
+func collectValueContainedUserStructs(userPaths map[string]bool, t types.Type) []*types.Named {
+	var out []*types.Named
+	seen := make(map[types.Type]bool)
+	seenNamed := make(map[*types.Named]bool)
+	var walk func(types.Type)
+	walk = func(cur types.Type) {
+		if cur == nil {
+			return
+		}
+		cur = types.Unalias(cur)
+		if seen[cur] {
+			return
+		}
+		seen[cur] = true
+		switch tt := cur.(type) {
+		case *types.Named:
+			if _, isPtr := tt.Underlying().(*types.Pointer); isPtr {
+				return
+			}
+			if named := derefNamedStruct(userPaths, tt); named != nil && !seenNamed[named] {
+				seenNamed[named] = true
+				out = append(out, named)
+			}
+			walk(tt.Underlying())
+		case *types.Struct:
+			for i := 0; i < tt.NumFields(); i++ {
+				walk(tt.Field(i).Type())
+			}
+		case *types.Array:
+			walk(tt.Elem())
+		}
+	}
+	walk(t)
+	return out
 }
 
 func isTestingCleanupCallback(fn *ssa.Function) bool {
@@ -3136,7 +3585,7 @@ func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64
 					// classified standard here silently vanished from
 					// the startup and test-main walks - the
 					// dotless-module soundness family.
-					if !harnessFrame || targetHarness || userPaths[targetPath] || !isStdImportPath(targetPath) {
+					if !harnessFrame || targetHarness || !isStdPkgPath(userPaths, targetPath) {
 						queue = append(queue, target)
 					}
 				}

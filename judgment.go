@@ -175,10 +175,17 @@ func purityAttribution(assertion string) PurityAttribution {
 }
 
 func admittedObservation(rec Fingerprint, subject Subject, cl closure.Closure) ObservationAuthority {
-	if !compatibleObservationProof(rec, subject) || rec.AdmissionPolicy != cl.AdmissionPolicy || !rec.ObservationProof.Observable || !runtimeinput.HasOutcomeSupport(rec.RuntimeInputs, outcomeSubject(rec, subject)) {
+	compatible, effectFree := compatibleObservationProofMode(rec, subject)
+	if !compatible || rec.AdmissionPolicy != cl.AdmissionPolicy || !rec.ObservationProof.Observable {
 		return ObservationAuthority{}
 	}
-	return ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: rec.ObservationProof.Strategy, OutcomeMethod: outcome.Method}
+	if runtimeinput.HasOutcomeSupport(rec.RuntimeInputs, outcomeSubject(rec, subject)) {
+		return ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: rec.ObservationProof.Strategy, OutcomeMethod: outcome.Method}
+	}
+	if effectFree {
+		return ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: rec.ObservationProof.Strategy, OutcomeMethod: outcome.StaticMethod}
+	}
+	return ObservationAuthority{}
 }
 
 func (v *Snapshot) judgmentFor(subject Subject, verdict Verdict) Verdict {

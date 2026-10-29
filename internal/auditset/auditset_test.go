@@ -94,7 +94,7 @@ func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
 	if !Symbol("sync/atomic", "Int64") || !Symbol("sync/atomic", "LoadInt64") || Symbol("sync/atomic", "Value") || Symbol("sync/atomic", "Pointer") || Symbol("sync/atomic", "LoadPointer") || !AtomicMethod("Int64", "Add") || !AtomicMethod("Bool", "CompareAndSwap") || AtomicMethod("Value", "Load") || AtomicMethod("Pointer", "Load") {
 		t.Fatal("sync/atomic symbol or method predicate wrong")
 	}
-	if !StandardSentinelGlobal("io", "EOF") || !StandardSentinelGlobal("io/fs", "ErrNotExist") || !StandardSentinelGlobal("encoding/binary", "BigEndian") || StandardSentinelGlobal("io", "Discard") || StandardSentinelGlobal("os", "Stdout") {
+	if !StandardSentinelGlobal("io", "EOF") || !StandardSentinelGlobal("io/fs", "ErrNotExist") || !StandardSentinelGlobal("encoding/binary", "BigEndian") || !StandardSentinelGlobal("io", "Discard") || StandardSentinelGlobal("os", "Stdout") {
 		t.Fatal("standard sentinel global predicate wrong")
 	}
 	if !PoolMethod("Pool", "Get") || PoolMethod("Pool", "New") {

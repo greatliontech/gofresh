@@ -123,6 +123,14 @@ func (h *Hasher) loadCachedFrom(ctx context.Context, pkgPath string, bp *batchPr
 	return p, nil
 }
 
+func (h *Hasher) releaseProgram(pkgPath string) {
+	if p := h.progs[pkgPath]; p != nil {
+		evictSummaryCache(p.Prog)
+		evictMutatedGlobalsCache(p.Prog)
+		delete(h.progs, pkgPath)
+	}
+}
+
 // prepareBatch loads syntax and types once across a multi-package batch so each
 // package's subsequent Build constructs isolated SSA without re-parsing and
 // re-typechecking shared dependencies. Single-package batches and load-wide
@@ -177,6 +185,10 @@ type Observability struct {
 	// true. Execution completion and environment fidelity are separate
 	// producer premises; this field does not certify an execution.
 	OutcomeMethod string
+	// EffectFree reports that the subject's closed reachability (including
+	// startup and user test-main flow) reaches no external input operations
+	// beyond admitted harness protocol facts.
+	EffectFree bool
 }
 
 // ImmutableEnvironmentOutcomes identifies the derivation for an empty effect
@@ -341,7 +353,7 @@ func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, resu
 	// memoized so the isolation retry never repeats a failing load; a
 	// completed group's subjects retry through the full-group memo hit,
 	// so only a failed memo write makes a retry reload.
-	defer delete(h.progs, group.path)
+	defer h.releaseProgram(group.path)
 	// A symbol absent from the loaded program's roots is a subject-local
 	// fact — a production symbol can be unreachable as a root of its
 	// external-test binary — so it degrades to an unavailable proof for
@@ -590,7 +602,21 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 	if h.SelectionAudited() && h.snapshot != nil && h.snapshot.Value("GOOS") == "linux" {
 		method = immutableEnvironmentMethod(subjectResult.effects, testMainEffects)
 	}
-	return Observability{Observable: true, OutcomeMethod: method}, nil
+	effectFree := h.SelectionAudited() && hasNoExternalInputEffects(subjectResult.effects, testMainEffects)
+	return Observability{Observable: true, OutcomeMethod: method, EffectFree: effectFree}, nil
+}
+
+// hasNoExternalInputEffects reports whether the classified effect sets contain
+// only admitted testing-harness protocol facts and no external input operations.
+func hasNoExternalInputEffects(sets ...[]externalEffect) bool {
+	for _, effects := range sets {
+		for _, effect := range effects {
+			if !harnessOutcomeAdmitted(effect) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // immutableEnvironmentMethod consumes the complete classified effect sets,
@@ -624,15 +650,28 @@ func immutableEnvironmentMethod(sets ...[]externalEffect) string {
 // (REQ-closure-observability-analysis).
 func testMainObservedEffects(base *tier2Base, reachable attributedReachability) tier2Result {
 	analyzer := base.analyzer()
-	analyzer.fresh = newFreshParamAnalysis(base.h.SelectionAudited(), reachable)
-	analyzer.fresh.isStd = analyzer.isStdFunction
+	analyzer.fresh = newFreshParamAnalysis(base.h.SelectionAudited(), reachable, analyzer.isStdFunction)
+	var ops [16]*ssa.Value
 	for function := range reachable.functions {
 		idx := analyzer.idxForFunction(function)
-		if idx == nil || idx.std || idx.testMain {
+		if (idx == nil && !isAnalyzableUnnamedWrapper(function)) || (idx != nil && (idx.std || idx.testMain)) {
 			continue
 		}
 		for _, block := range function.Blocks {
 			for _, instruction := range block.Instrs {
+				if v, ok := instruction.(ssa.Value); ok {
+					analyzer.addValueType(idx, v)
+				}
+				for _, op := range instruction.Operands(ops[:0]) {
+					if op == nil || *op == nil {
+						continue
+					}
+					opIdx := analyzer.idxForFunction((*op).Parent())
+					if _, isConst := (*op).(*ssa.Const); isConst {
+						opIdx = idx
+					}
+					analyzer.addValueType(opIdx, *op)
+				}
 				// Test-main flow references registered storage after the
 				// implicit flag.Parse inside m.Run can have written it, so
 				// a flag-backed reference here is the covert channel's
@@ -645,7 +684,7 @@ func testMainObservedEffects(base *tier2Base, reachable attributedReachability) 
 				if !ok || site.Common() == nil {
 					continue
 				}
-				if !dispatchProvenanceClosed(site, &freshParamAnalysis{propertyHarnessAudited: reachable.propertyHarnessAudited, selectionAudited: base.h.SelectionAudited(), isStd: analyzer.isStdFunction}) {
+				if !dispatchProvenanceClosed(site, &freshParamAnalysis{propertyHarnessAudited: reachable.propertyHarnessAudited, selectionAudited: base.h.SelectionAudited(), userPaths: reachable.userPaths, summary: reachable.summary, isStd: analyzer.isStdFunction}) {
 					analyzer.requestWiden("test-main dispatch on unattributable state in " + function.String())
 				}
 				if callee := site.Common().StaticCallee(); callee != nil {
@@ -718,14 +757,28 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 	// (rapid.Deriv(rapid.Int())) is the same sanctioned crossing as in
 	// subject flow. Parameter crossing stays refused exactly as with a
 	// nil analysis (REQ-closure-observability-property-harness).
-	analyzer.fresh = &freshParamAnalysis{propertyHarnessAudited: reachable.propertyHarnessAudited, selectionAudited: analyzer.h.SelectionAudited(), isStd: analyzer.isStdFunction}
+	analyzer.fresh = &freshParamAnalysis{propertyHarnessAudited: reachable.propertyHarnessAudited, selectionAudited: analyzer.h.SelectionAudited(), userPaths: reachable.userPaths, summary: reachable.summary, isStd: analyzer.isStdFunction}
+	var ops [16]*ssa.Value
 	for function := range reachable.functions {
 		idx := analyzer.idxForFunction(function)
-		if idx == nil || idx.std || idx.testMain {
+		if (idx == nil && !isAnalyzableUnnamedWrapper(function)) || (idx != nil && (idx.std || idx.testMain)) {
 			continue
 		}
 		for _, block := range function.Blocks {
 			for _, instruction := range block.Instrs {
+				if v, ok := instruction.(ssa.Value); ok {
+					analyzer.addValueType(idx, v)
+				}
+				for _, op := range instruction.Operands(ops[:0]) {
+					if op == nil || *op == nil {
+						continue
+					}
+					opIdx := analyzer.idxForFunction((*op).Parent())
+					if _, isConst := (*op).(*ssa.Const); isConst {
+						opIdx = idx
+					}
+					analyzer.addValueType(opIdx, *op)
+				}
 				// Startup flow references registered storage too: outside
 				// the sanctioned write shapes, a startup reference is at
 				// best a read of the unparsed default and at worst an
@@ -740,6 +793,17 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 					continue
 				}
 				callee := site.Common().StaticCallee()
+				if reachable.cleanupFunctions[function] {
+					if !dispatchProvenanceClosed(site, analyzer.fresh) {
+						analyzer.requestWiden("cleanup dispatch on unattributable state in " + function.String())
+					}
+					if callee != nil && funcPkgPath(callee) == "reflect" {
+						switch functionSymbolName(callee) {
+						case "Call", "CallSlice", "MakeFunc", "MethodByName":
+							analyzer.requestWiden("reflect dispatch in cleanup flow")
+						}
+					}
+				}
 				if callee != nil {
 					recordDirectCallEffect(analyzer, callee, site)
 				}
@@ -764,11 +828,12 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 // effects (the one-site-classifier collapse).
 func dispatchProvenanceClosed(site ssa.CallInstruction, fp *freshParamAnalysis) bool {
 	c := site.Common()
+	siteFP := contextCancelMethodFP(site, fp)
 	if callee := c.StaticCallee(); callee != nil && syntheticInterfaceMethodWrapper(callee) {
 		receiver := wrapperReceiver(c, callee)
-		return receiver != nil && subjectClosedDynamicValue(receiver, make(map[ssa.Value]bool), fp)
+		return receiver != nil && subjectClosedDynamicValue(receiver, make(map[ssa.Value]bool), siteFP)
 	}
-	return subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), fp)
+	return subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), siteFP)
 }
 
 func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site ssa.CallInstruction) {
@@ -819,6 +884,10 @@ func nonStandardFunctions(base *tier2Base, functions map[*ssa.Function]bool) map
 			if !idx.std {
 				filtered[function] = true
 			}
+			continue
+		}
+		if isAnalyzableUnnamedWrapper(function) {
+			filtered[function] = true
 			continue
 		}
 		if !isStdImportPath(funcPkgPath(function)) {

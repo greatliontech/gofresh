@@ -106,6 +106,8 @@ func (f *fixturePrograms) acquire(pkgPath string) error {
 
 func (f *fixturePrograms) releaseProgram() {
 	if f.loaded != nil {
+		evictSummaryCache(f.loaded.Prog)
+		evictMutatedGlobalsCache(f.loaded.Prog)
 		delete(f.h.progs, f.loaded.PkgPath)
 		f.loaded = nil
 	}

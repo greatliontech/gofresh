@@ -33,15 +33,14 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 	a.rtaResolved = reachable.resolved
 	a.skipOriginScan = reachable.instantiatedOrigins
 	a.openWorld = reachable.openWorld
-	a.fresh = newFreshParamAnalysis(h.SelectionAudited(), reachable)
-	a.fresh.isStd = a.isStdFunction
+	a.fresh = newFreshParamAnalysis(h.SelectionAudited(), reachable, a.isStdFunction)
 	extraSubjectTargets := map[*ssa.Function]bool{}
 	for site, targets := range reachable.dynamicTargets {
 		if !reachable.functions[site.Parent()] {
 			continue
 		}
 		callerIdx := a.idxForFunction(site.Parent())
-		if callerIdx == nil || callerIdx.testMain {
+		if (callerIdx == nil && !isAnalyzableUnnamedWrapper(site.Parent())) || (callerIdx != nil && callerIdx.testMain) {
 			continue
 		}
 		// The enumeration's targets, narrowed to what the operand can
@@ -80,7 +79,7 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 					continue
 				}
 				idx := a.idxForFunction(target)
-				if idx == nil || idx.testMain {
+				if (idx == nil && !isAnalyzableUnnamedWrapper(target)) || (idx != nil && idx.testMain) {
 					admitted = false
 					break
 				}
@@ -94,6 +93,7 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 				}
 			}
 		}
+		callerStd := callerIdx != nil && callerIdx.std
 		for target := range targets {
 			if observableDirEntryCall(site) {
 				continue
@@ -127,7 +127,7 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 					continue
 				}
 			}
-			if !ok && !callerIdx.std && !isAuditedStandardOrDelegatePackage(h.SelectionAudited(), idx.path) {
+			if !ok && !callerStd && !isAuditedStandardOrDelegatePackage(h.SelectionAudited(), idx.path) {
 				// The audited-pure admissions hold for an enumerated
 				// dynamic target exactly as for a static callee - the
 				// admission is a property of the operation, not of the
@@ -163,6 +163,7 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 		}
 	}
 	for fn := range extraSubjectTargets {
+		a.rtaReach[fn] = true
 		if err := a.contextErr(); err != nil {
 			return tier2Result{}, nil, err
 		}
@@ -624,16 +625,17 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 		return
 	}
 	idx := a.idxForFunction(fn)
-	if idx == nil || idx.testMain {
+	if (idx == nil && !isAnalyzableUnnamedWrapper(fn)) || (idx != nil && idx.testMain) {
 		return
 	}
-	if a.propertyHarnessAudited(idx.path) {
+	if idx != nil && a.propertyHarnessAudited(idx.path) {
 		// Audited property-harness surface: bodies are never walked -
 		// the boundary gate at the call site is the whole judgment
 		// (REQ-closure-observability-property-harness).
 		return
 	}
-	if !idx.std {
+	isStd := idx != nil && idx.std
+	if idx != nil && !idx.std {
 		a.markFilePackage(idx)
 		if obj := fn.Object(); obj != nil {
 			if target := a.linknameTarget(idx, obj); target != "" {
@@ -649,21 +651,21 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 	}
 	a.scanned[fn] = true
 	classified, classifiedOK := classBEffectForFunction(fn)
-	suppressNestedFileIO := idx.std && classifiedOK && classified.kind == externalEffectFileIO
-	if !idx.std && idx.wasmImport {
+	suppressNestedFileIO := isStd && classifiedOK && classified.kind == externalEffectFileIO
+	if idx != nil && !idx.std && idx.wasmImport {
 		effect := opaqueExternalEffect(externalEffectLinkage, "reaches go:wasmimport")
 		effect.unrefinable = true
 		a.recordExternalEffect(effect)
 	}
-	if idx.cache && hasExternalCgoMeta(idx.meta) {
+	if idx != nil && idx.cache && hasExternalCgoMeta(idx.meta) {
 		effect := opaqueExternalEffect(externalEffectNative, "reaches cgo external library")
 		effect.unrefinable = true
 		a.recordExternalEffect(effect)
 	}
-	if idx.cache {
+	if idx != nil && idx.cache {
 		a.scanCacheFunctionRefs(idx, fn)
 	}
-	if idx.std && stdBodyCut(a.h.SelectionAudited(), fn, classified, classifiedOK) {
+	if isStd && stdBodyCut(a.h.SelectionAudited(), fn, classified, classifiedOK) {
 		return
 	}
 	var ops [16]*ssa.Value
@@ -682,7 +684,7 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 				a.scanValue(idx, *op)
 			}
 			fromRTA := a.rtaReach[fn]
-			if idx.std {
+			if isStd {
 				fromRTA = false
 			}
 			a.scanInstruction(idx, fn, instr, fromRTA, suppressNestedFileIO)
@@ -748,7 +750,15 @@ func (a *tier2Analyzer) scanValue(callerIdx *pkgIndex, v ssa.Value) {
 			// this arm flagging their exported mutable vars (io.EOF,
 			// xml.HTMLEntity) - exempting them would unsound the
 			// audited set.
-			if callerIdx != nil && !callerIdx.std && obj.Pkg() != nil && isStdImportPath(obj.Pkg().Path()) {
+			objStd := false
+			if obj.Pkg() != nil {
+				if objIdx := a.idxByTypes[obj.Pkg()]; objIdx != nil {
+					objStd = objIdx.std
+				} else {
+					objStd = isStdImportPath(obj.Pkg().Path())
+				}
+			}
+			if !(callerIdx != nil && callerIdx.std) && objStd {
 				if !(a.h.SelectionAudited() && isUnmutatedStandardSentinelGlobalAny(x)) {
 					a.recordExternalEffect(symbolExternalEffect(externalEffectUnauditedStandard, obj.Pkg().Path(), obj.Name(), "reaches standard global "+obj.Pkg().Path()+"."+obj.Name()))
 				}
@@ -893,7 +903,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 			a.recordExternalEffect(effect)
 		}
 	}
-	calleeStd := isStdImportPath(pkgPath)
+	calleeStd := a.isStdFunction(callee)
 	if !fromRTA || (!callerStd && calleeStd && !isBenchmarkHarnessPath(pkgPath)) {
 		a.scanFunction(callee)
 	}
@@ -1050,7 +1060,8 @@ func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool)
 		return false
 	}
 	c := site.Common()
-	if c == nil || !subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), a.fresh) {
+	siteFP := contextCancelMethodFP(site, a.fresh)
+	if c == nil || !subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), siteFP) {
 		return false
 	}
 	if fromRTA && a.subjectDeterminedInvokes[site] {
@@ -1059,18 +1070,24 @@ func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool)
 	var held map[*ssa.Function]bool
 	var ok bool
 	if c.IsInvoke() {
-		held, ok = closedInvokeTargets(site, a.fresh)
+		held, ok = closedInvokeTargets(site, siteFP)
 	} else if c.StaticCallee() == nil {
-		held, ok = closedDynamicTargets(c.Value, a.fresh)
+		held, ok = closedDynamicTargets(c.Value, siteFP)
 	}
 	if ok {
 		for fn := range held {
 			idx := a.idxForFunction(fn)
-			if idx == nil || idx.testMain || a.propertyHarnessAudited(idx.path) {
+			if idx == nil {
+				if !isAnalyzableUnnamedWrapper(fn) {
+					return false
+				}
+				continue
+			}
+			if idx.testMain || a.propertyHarnessAudited(idx.path) {
 				return false
 			}
 			if idx.std {
-				if (!fromRTA && (!c.IsInvoke() || !a.h.SelectionAudited())) || observableFileMethod(fn) {
+				if (!fromRTA && ((!c.IsInvoke() && fn.Parent() == nil) || !a.h.SelectionAudited())) || observableFileMethod(fn) {
 					return false
 				}
 				if !isAuditedStandardOrDelegatePackage(a.h.SelectionAudited(), idx.path) && !auditedStandardCallee(a.h.SelectionAudited(), idx.path, functionSymbolName(fn), fn) {
@@ -1087,6 +1104,9 @@ func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool)
 			}
 		}
 		for fn := range held {
+			if fromRTA {
+				a.rtaReach[fn] = true
+			}
 			a.addFunction(fn)
 			if idx := a.idxForFunction(fn); idx == nil || !idx.std {
 				a.scanFunction(fn)
@@ -1283,15 +1303,27 @@ func (a *tier2Analyzer) addLinknameTarget(target string) {
 		return
 	}
 	pkgPath, name := target[:lastDot], target[lastDot+1:]
-	effect, classified := classBEffect(pkgPath, name)
-	if !classified && isStdImportPath(pkgPath) {
+	obj := a.objByName[pkgPath+"."+name]
+	isStd := isStdImportPath(pkgPath)
+	if obj != nil && obj.Pkg() != nil {
+		if idx := a.idxByTypes[obj.Pkg()]; idx != nil {
+			isStd = idx.std
+		}
+	} else if m, ok := a.metaByPath[pkgPath]; ok {
+		isStd = m.Standard
+	}
+	var effect externalEffect
+	var classified bool
+	if isStd || !isStdImportPath(pkgPath) {
+		effect, classified = classBEffect(pkgPath, name)
+	}
+	if !classified && isStd {
 		effect = symbolExternalEffect(externalEffectLinkage, pkgPath, name, "reaches standard linkname target "+target)
 		classified = true
 	}
 	if classified {
 		a.recordExternalEffect(effect)
 	}
-	obj := a.objByName[pkgPath+"."+name]
 	if obj == nil {
 		a.requestWiden("unresolved go:linkname target " + target)
 		return
@@ -1386,8 +1418,13 @@ func ssaOpaqueHandle(t types.Type) bool {
 // scan site shares; std packages carry the toolchain guard instead.
 func (a *tier2Analyzer) addValueType(idx *pkgIndex, v ssa.Value) {
 	a.addType(v.Type())
-	if idx != nil && !idx.std && typeUsesUnsafePointer(v.Type()) && !isOSFileType(v.Type()) {
-		a.requestWiden("unsafe pointer reachable in " + idx.id)
+	unindexedWrapper := idx == nil && v.Parent() != nil && isAnalyzableUnnamedWrapper(v.Parent())
+	if (unindexedWrapper || (idx != nil && !idx.std)) && typeUsesUnsafePointer(v.Type()) && !isOSFileType(v.Type()) {
+		pkgID := "<synthetic>"
+		if idx != nil {
+			pkgID = idx.id
+		}
+		a.requestWiden("unsafe pointer reachable in " + pkgID)
 	}
 }
 
@@ -1624,6 +1661,12 @@ func functionSymbolName(fn *ssa.Function) string {
 	if obj := fn.Object(); obj != nil {
 		return obj.Name()
 	}
+	if origin := fn.Origin(); origin != nil {
+		if obj := origin.Object(); obj != nil {
+			return obj.Name()
+		}
+		return origin.Name()
+	}
 	return fn.Name()
 }
 
@@ -1736,6 +1779,9 @@ func (a *tier2Analyzer) isStdFunction(fn *ssa.Function) bool {
 	if idx := a.idxForFunction(fn); idx != nil {
 		return idx.std
 	}
+	if isUnnamedStructPromotedWrapper(fn) {
+		return false
+	}
 	return isStdImportPath(funcPkgPath(fn))
 }
 
@@ -1744,6 +1790,12 @@ func (b *tier2Base) idxForFunction(fn *ssa.Function) *pkgIndex {
 }
 
 func idxForFunctionIn(idxByTypes map[*types.Package]*pkgIndex, fn *ssa.Function) *pkgIndex {
+	if isUnnamedStructPromotedWrapper(fn) {
+		if pkg := unnamedWrapperDeclaringPkg(fn); pkg != nil {
+			return idxByTypes[pkg]
+		}
+		return nil
+	}
 	for f := fn; f != nil; f = f.Parent() {
 		if f.Pkg != nil && f.Pkg.Pkg != nil {
 			return idxByTypes[f.Pkg.Pkg]
@@ -1789,6 +1841,12 @@ func computedEdgeSuffix(c *ssa.CallCommon) string {
 }
 
 func funcPkgPath(fn *ssa.Function) string {
+	if isUnnamedStructPromotedWrapper(fn) {
+		if pkg := unnamedWrapperDeclaringPkg(fn); pkg != nil {
+			return pkg.Path()
+		}
+		return ""
+	}
 	for f := fn; f != nil; f = f.Parent() {
 		if f.Pkg != nil && f.Pkg.Pkg != nil {
 			return f.Pkg.Pkg.Path()

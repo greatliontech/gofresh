@@ -210,7 +210,7 @@ func (v *Snapshot) checkRecords(ctx context.Context, records []recordCheck, defe
 			continue
 		}
 		if selected[i] {
-			if v.currentApplicabilityObservable(record.Subject) {
+			if v.currentApplicabilityObservable(record.Subject, positives[i].OutcomeMethod) {
 				positives[i].CurrentApplicability = true
 			} else {
 				positives[i] = ObservationAuthority{}

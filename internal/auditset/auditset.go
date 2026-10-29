@@ -182,7 +182,7 @@ var fmtSymbols = map[string]bool{
 // The name unions the closure tiers' symbol predicates read, computed
 // once from the tables.
 var (
-	syncNames = names(syncMethods)
+	syncNames = namesWithSymbols(syncMethods, syncSymbols)
 	poolNames = names(poolMethods)
 	memoNames = names(memoMethods)
 )
@@ -632,8 +632,8 @@ func ReceiverMethod(fn *types.Func, pkgPath string, listed func(receiver, method
 	return listed(named.Obj().Name(), fn.Name())
 }
 
-// SyncName reports whether a sync symbol name — receiver or method —
-// belongs to the audited synchronization set.
+// SyncName reports whether a sync symbol name — receiver, method, constructor,
+// or interface — belongs to the audited synchronization set.
 func SyncName(name string) bool { return slices.Contains(syncNames, name) }
 
 // PoolName reports whether a sync symbol name — receiver or method —
@@ -651,7 +651,7 @@ func MemoName(name string) bool { return slices.Contains(memoNames, name) }
 // SyncSurfaceName reports whether a sync symbol name — receiver or method —
 // belongs to any of the audited sync sets (synchronization, pooling, or memo).
 func SyncSurfaceName(name string) bool {
-	return SyncName(name) || PoolName(name) || MemoName(name) || syncSymbols[name]
+	return SyncName(name) || PoolName(name) || MemoName(name)
 }
 
 // ReflectImmutable reports whether a reflect type is in the audited
@@ -664,10 +664,19 @@ func ConstantImmutable(name string) bool { return constantImmutableTypes[name] }
 
 // names is the union of a method set's receiver and method names.
 func names(set map[string][]string) []string {
+	return namesWithSymbols(set, nil)
+}
+
+// namesWithSymbols is the union of a method set's receiver and method names
+// with any bare symbol names in symbols.
+func namesWithSymbols(set map[string][]string, symbols map[string]bool) []string {
 	var out []string
 	for receiver, methods := range set {
 		out = append(out, receiver)
 		out = append(out, methods...)
+	}
+	for symbol := range symbols {
+		out = append(out, symbol)
 	}
 	slices.Sort(out)
 	return slices.Compact(out)

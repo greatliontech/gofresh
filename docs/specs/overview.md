@@ -224,7 +224,11 @@ outcome, population, suite-health and statistical claims.
 **REQ-fresh-observation-conjunction** (invariant): Closure-level external-input
 unverifiability MUST be suppressed by observation only when a recognized attributable
 observation-completeness assertion, compatible observability proof, completed runtime
-manifest, matching runtime digest, and every ordinary applicable guard all hold. The
+manifest, matching runtime digest, admitted outcome support — either runtime
+operation-outcome support (`gofresh/immutable-environment@1`) or static
+effect-free reachability (`gofresh/static-reachability@1`) bound into the proof
+when the subject's closed reachability reaches zero external input operations —
+and every ordinary applicable guard all hold. The
 proof suppresses only the closure effects it proves observable; any runtime-manifest
 unverifiability or other closure blind spot still prevents validity. Purity remains a
 separate, broader caller-responsible override.

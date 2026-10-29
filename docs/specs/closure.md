@@ -1443,7 +1443,16 @@ their user callbacks remain subject to the same complete effect judgment.
 Initialization effects, unclosed reachability, unavailable analysis, and every
 ordinary observability refusal preclude the derivation. Filesystem operations,
 fresh scratch operations and other admitted effects confer no support under this
-method. The inventory is a static prerequisite, not a process receipt or evidence
+method. When the observability proof succeeds under an audited toolchain
+selection and neither subject flow nor user test-main flow reaches any external
+input operation at all (only checked harness protocol facts such as harness
+logging, benchmark pacing, closed subtest execution, and the canonical test-main
+epilogue `os.Exit`), the observability disposition additionally records static
+effect-free reachability (`Observability.EffectFree`), bound into the proof's
+integrity evidence under the `gofresh/static-reachability@1` outcome method so
+that an identity-only completed observation with matching runtime-input guards
+is admitted without requiring runtime operation-outcome support.
+The inventory is a static prerequisite, not a process receipt or evidence
 that the analyzed subjects actually executed under the supplied environment;
 construction still owes those premises and the complete contributing-subject set.
 The derivation assumes the complete inherited environment is held unchanged for
@@ -1453,7 +1462,8 @@ and presence bits follow from that complete environment, with no additional
 unaccounted initialization, synchronization or native input. Neither Linux nor
 any other platform name establishes these semantics. A positive observation admission alone, an empty
 identity log, a purity assertion, or a missing cached inventory cannot supply
-the derivation. Warm and cold analysis report the same inventory, and its method
+the `gofresh/immutable-environment@1` derivation when external input effects are
+reachable. Warm and cold analysis report the same inventory, and its method
 identity participates in analysis compatibility.
 
 **REQ-closure-observability-cause-order** (invariant): Every reachable call and effect MUST be classified to the observability walk's
@@ -1560,8 +1570,13 @@ The following families state the properties such derivations must establish:
   Match and HasPrefix, must establish computation over operands and the selected
   platform alone. Working-directory and filesystem operations such as Abs,
   EvalSymlinks, Glob, Walk and WalkDir keep their own input obligations.
-- Encoding and cryptographic mode operations such as base32 and base64,
-  `encoding/binary`'s `BigEndian` and `LittleEndian` byte-order globals,
+- Encoding, hashing, container, and cryptographic mode operations such as
+  base32 and base64, `crypto/sha256`, `crypto/md5`, `hash/crc32`, `hash/fnv`,
+  `slices` (`Clone`, `Compact`, `Contains`, `Delete`, `Equal`, `Index`,
+  `Insert`, `IsSorted`, `Max`, `Min`, `Replace`, `Reverse`, `Sort`, and their
+  `*Func` variants), `maps` (`Clone`, `Copy`, `DeleteFunc`, `Equal`,
+  `EqualFunc`), `encoding/binary`'s `BigEndian` and `LittleEndian` byte-order
+  globals, `io.NopCloser`, `io.LimitReader`, `io.TeeReader`, and
   `io.MultiReader` / `io.MultiWriter` over closed operands,
   `crypto/fips140.WithoutEnforcement` (which sets a goroutine-local bypass flag
   around a caller-supplied callback whose body is walked and classified at the
@@ -1586,8 +1601,11 @@ The following families state the properties such derivations must establish:
   (`io.Discard`, `io.EOF`, `io.ErrClosedPipe`, `io.ErrNoProgress`,
   `io.ErrShortBuffer`, `io.ErrShortWrite`, `io.ErrUnexpectedEOF`,
   `fs.ErrInvalid`, `fs.ErrPermission`, `fs.ErrExist`, `fs.ErrNotExist`,
-  `fs.ErrClosed`, `fs.SkipAll`, `fs.SkipDir`, `binary.BigEndian`,
-  `binary.LittleEndian`, `context.Canceled`, `context.DeadlineExceeded`)
+  `fs.ErrClosed`, `fs.SkipAll`, `fs.SkipDir`, `os.ErrInvalid`,
+  `os.ErrPermission`, `os.ErrExist`, `os.ErrNotExist`, `os.ErrClosed`,
+  `os.ErrNoDeadline`, `os.ErrDeadlineExceeded`, `filepath.SkipAll`,
+  `filepath.SkipDir`, `binary.BigEndian`, `binary.LittleEndian`,
+  `context.Canceled`, `context.DeadlineExceeded`)
   admitted only when no code in the analyzed program writes or takes their
   address outside package initialization.
 
@@ -1957,7 +1975,9 @@ exactly as reachable content always does),
 AND the dispatch operand's dynamic types are fully determined by
 the subject's own flow — the operand derives from local construction
 (including local `*ssa.MakeSlice` allocations whose indexed element stores
-close under the walk and local `*ssa.MakeMap` allocations whose map-update
+close under the walk — even when stored into a struct field whose loads across
+the analyzed program only index or range over the slice without mutating or
+escaping its elements — and local `*ssa.MakeMap` allocations whose map-update
 values close under the walk and never escape to unanalyzed mutators),
 from an immutable closure-captured variable or bound method wrapper receiver
 (`*ssa.FreeVar` resolved through all `MakeClosure` bindings of the enclosing
@@ -1966,8 +1986,11 @@ from an unmutated standard-library sentinel global (`io.Discard`,
 `io.EOF`, `io.ErrClosedPipe`, `io.ErrNoProgress`, `io.ErrShortBuffer`,
 `io.ErrShortWrite`, `io.ErrUnexpectedEOF`, `fs.ErrInvalid`,
 `fs.ErrPermission`, `fs.ErrExist`, `fs.ErrNotExist`, `fs.ErrClosed`,
-`fs.SkipAll`, `fs.SkipDir`, `binary.BigEndian`, `binary.LittleEndian`,
-`context.Canceled`, `context.DeadlineExceeded`) whose package initializer
+`fs.SkipAll`, `fs.SkipDir`, `os.ErrInvalid`, `os.ErrPermission`,
+`os.ErrExist`, `os.ErrNotExist`, `os.ErrClosed`, `os.ErrNoDeadline`,
+`os.ErrDeadlineExceeded`, `filepath.SkipAll`, `filepath.SkipDir`,
+`binary.BigEndian`, `binary.LittleEndian`, `context.Canceled`,
+`context.DeadlineExceeded`) whose package initializer
 stores a carrier-free concrete value that no code in the analyzed program
 writes or takes the address of outside package initialization,
 from the return expressions of a static call to an audited

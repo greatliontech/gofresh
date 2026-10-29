@@ -43,8 +43,13 @@ func TestAttributedRTAEqualsIndependentRTA(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, subject := range subjects {
+		solo, err := attributedReachableSets(context.Background(), true, prog, []Subject{subject})
+		if err != nil {
+			t.Fatalf("solo attributedReachableSets(%s): %v", subject.Symbol, err)
+		}
+		assertSameReachable(t, subject.Symbol+" (batched vs solo)", got[i].functions, solo[0].functions)
 		want := independentReachableSet(t, prog, subject.Symbol)
-		assertSameReachable(t, subject.Symbol, got[i].functions, want)
+		assertSameReachable(t, subject.Symbol+" (attributed vs upstream)", got[i].functions, want)
 	}
 }
 
@@ -391,6 +396,16 @@ func independentReachableSet(t *testing.T, prog *program, symbol string) map[*ss
 	}
 	reachable := make(map[*ssa.Function]bool, len(result.Reachable))
 	for fn := range result.Reachable {
+		// Upstream x/tools rta records inaccessibility in result.RuntimeTypes
+		// (true means reached only via an inaccessible underlying/tuple step)
+		// yet still synthesizes exported promoted wrappers on that skipped
+		// unnamed struct; attributed RTA honors skip and omits those phantoms.
+		if isUnnamedStructPromotedWrapper(fn) {
+			recv := types.Unalias(fn.Signature.Recv().Type())
+			if inaccess, ok := result.RuntimeTypes.At(recv).(bool); ok && inaccess {
+				continue
+			}
+		}
 		reachable[fn] = true
 	}
 	return reachable

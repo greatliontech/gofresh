@@ -158,10 +158,13 @@ func (v *Snapshot) retainApplicabilityCheck(ctx context.Context, rec Fingerprint
 	return nil
 }
 
-func (v *Snapshot) currentApplicabilityObservable(subject Subject) bool {
+func (v *Snapshot) currentApplicabilityObservable(subject Subject, outcomeMethod string) bool {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	p := v.observable[subject]
+	if outcomeMethod == outcome.StaticMethod {
+		return p.Observable && p.EffectFree
+	}
 	return p.Observable && p.OutcomeMethod == outcome.Method
 }
 

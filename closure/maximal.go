@@ -162,7 +162,8 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 	}
 	record(testingEffects)
 	declaredNames := listedDeclaredNames(pkgs)
-	overridesKey := declaredOverridesKey(declaredNames)
+	nonStdPaths := listedNonStandardPaths(pkgs)
+	overridesKey := scanOverridesKey(declaredNames, nonStdPaths)
 	for _, pkg := range pkgs {
 		if err := h.contextErr(); err != nil {
 			return nil, "", err
@@ -184,7 +185,7 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 			record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact()}})
 			continue
 		}
-		if scan, ok, err := h.pinnedEffectScanWithNames(pkg, declaredNames, overridesKey); err != nil {
+		if scan, ok, err := h.pinnedEffectScanWithContext(pkg, declaredNames, nonStdPaths, overridesKey); err != nil {
 			return nil, "", err
 		} else if ok {
 			record(scan)
@@ -196,7 +197,7 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 			if err := h.contextErr(); err != nil {
 				return nil, "", err
 			}
-			scan, err := h.maximalFileEffectsCachedWithNames(pkg.ImportPath, filepath.Join(pkg.Dir, name), declaredNames, overridesKey)
+			scan, err := h.maximalFileEffectsCachedWithContext(pkg.ImportPath, filepath.Join(pkg.Dir, name), declaredNames, nonStdPaths, overridesKey)
 			if err != nil {
 				return nil, "", err
 			}
@@ -227,6 +228,10 @@ func (h *Hasher) maximalFileEffectsCached(pkgPath, path string) (maximalEffectSc
 }
 
 func (h *Hasher) maximalFileEffectsCachedWithNames(pkgPath, path string, declaredNames map[string]string, overridesKey string) (maximalEffectScan, error) {
+	return h.maximalFileEffectsCachedWithContext(pkgPath, path, declaredNames, nil, overridesKey)
+}
+
+func (h *Hasher) maximalFileEffectsCachedWithContext(pkgPath, path string, declaredNames map[string]string, nonStdPaths map[string]bool, overridesKey string) (maximalEffectScan, error) {
 	cacheKey := path + overridesKey
 	if scan, ok := h.maximalFiles[cacheKey]; ok {
 		return scan, nil
@@ -241,7 +246,7 @@ func (h *Hasher) maximalFileEffectsCachedWithNames(pkgPath, path string, declare
 		if err != nil {
 			return maximalEffectScan{}, err
 		}
-		scan, err := maximalFileEffectsContentWithNames(h.SelectionAudited(), path, content, declaredNames)
+		scan, err := maximalFileEffectsContentWithContextFiltered(h.SelectionAudited(), path, content, declaredNames, nonStdPaths, nil)
 		if err != nil {
 			return maximalEffectScan{}, err
 		}
@@ -263,7 +268,7 @@ func (h *Hasher) maximalFileEffectsCachedWithNames(pkgPath, path string, declare
 	if analysisTestHooks.fileParse != nil {
 		analysisTestHooks.fileParse(path)
 	}
-	scan, err := maximalFileEffectsContentWithNames(h.SelectionAudited(), path, fb.content, declaredNames)
+	scan, err := maximalFileEffectsContentWithContextFiltered(h.SelectionAudited(), path, fb.content, declaredNames, nonStdPaths, nil)
 	if err != nil {
 		return maximalEffectScan{}, err
 	}
@@ -461,6 +466,10 @@ func maximalFileEffectsContentWithNames(audited bool, filename string, content [
 }
 
 func maximalFileEffectsContentWithNamesFiltered(audited bool, filename string, content []byte, declaredNames map[string]string, reachedDecls map[funcDeclKey]bool) (maximalEffectScan, error) {
+	return maximalFileEffectsContentWithContextFiltered(audited, filename, content, declaredNames, nil, reachedDecls)
+}
+
+func maximalFileEffectsContentWithContextFiltered(audited bool, filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool, reachedDecls map[funcDeclKey]bool) (maximalEffectScan, error) {
 	text := string(content)
 	hasWasmImport := strings.Contains(text, "//go:wasmimport")
 	hasLinkname := strings.Contains(text, "//go:linkname") && !auditedLinknamesOnly(audited, text)
@@ -541,6 +550,9 @@ func maximalFileEffectsContentWithNamesFiltered(audited bool, filename string, c
 		scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, collision))
 	}
 	for _, imp := range imports {
+		if isStdImportPath(imp.pkgPath) && nonStdPaths[imp.pkgPath] {
+			continue
+		}
 		if imp.pkgPath == "testing" {
 			if imp.alias == "." {
 				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches testing (potential external dependence)"))
@@ -568,12 +580,21 @@ func maximalFileEffectsContentWithNamesFiltered(audited bool, filename string, c
 			}
 		}
 	}
+	stdAliases := aliases
+	if len(nonStdPaths) > 0 {
+		stdAliases = make(map[string]string, len(aliases))
+		for alias, pkgPath := range aliases {
+			if !(isStdImportPath(pkgPath) && nonStdPaths[pkgPath]) {
+				stdAliases[alias] = pkgPath
+			}
+		}
+	}
 	// The canonical test-main epilogue is harness protocol, not an
 	// unaudited operation: os.Exit inside the user TestMain(*testing.M)
 	// declaration is admitted exactly as the observed test-main walk
 	// admits it - it runs post-bracket and adds no input channel to any
 	// subject's execution (REQ-closure-observability-testmain-exit).
-	testMainDecl := userTestMainDecl(file, aliases)
+	testMainDecl := userTestMainDecl(file, stdAliases)
 	inTestMain := func(node ast.Node) bool {
 		return testMainDecl != nil && node.Pos() >= testMainDecl.Pos() && node.End() <= testMainDecl.End()
 	}
@@ -600,14 +621,17 @@ func maximalFileEffectsContentWithNamesFiltered(audited bool, filename string, c
 	ast.Inspect(file, func(node ast.Node) bool {
 		if audited {
 			if outerCall, ok := node.(*ast.CallExpr); ok {
-				if innerSel := chainedTimeUnixSelector(outerCall, aliases, reachedDecls != nil); innerSel != nil {
+				if innerSel := chainedTimeUnixSelector(outerCall, stdAliases, reachedDecls != nil); innerSel != nil {
 					allowedTimeUnixChained[innerSel] = true
 				}
 			}
 		}
 		if sel, ok := node.(*ast.SelectorExpr); ok {
 			if ident, ok := sel.X.(*ast.Ident); ok {
-				pkgPath := aliases[ident.Name]
+				pkgPath := stdAliases[ident.Name]
+				if pkgPath == "" {
+					return true
+				}
 				if allowedTimeUnixChained[sel] {
 					return true
 				}
@@ -630,7 +654,7 @@ func maximalFileEffectsContentWithNamesFiltered(audited bool, filename string, c
 		}
 		return true
 	})
-	testingEffects, _ := testingMethodEffectsFiltered(file, aliases, unreachedDecls)
+	testingEffects, _ := testingMethodEffectsFiltered(file, stdAliases, unreachedDecls)
 	for _, effect := range testingEffects {
 		scan.add(effect)
 	}
@@ -734,7 +758,8 @@ func (h *Hasher) subjectMaximalExternalEffects(base *tier2Base, pkgPath string, 
 	}
 	record(testingEffects)
 	declaredNames := listedDeclaredNames(pkgs)
-	overridesKey := declaredOverridesKey(declaredNames)
+	nonStdPaths := listedNonStandardPaths(pkgs)
+	overridesKey := scanOverridesKey(declaredNames, nonStdPaths)
 	for _, pkg := range pkgs {
 		if err := h.contextErr(); err != nil {
 			return nil, err
@@ -748,7 +773,7 @@ func (h *Hasher) subjectMaximalExternalEffects(base *tier2Base, pkgPath string, 
 			record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact()}})
 			continue
 		}
-		if scan, ok, err := h.pinnedEffectScanWithNames(pkg, declaredNames, overridesKey); err != nil {
+		if scan, ok, err := h.pinnedEffectScanWithContext(pkg, declaredNames, nonStdPaths, overridesKey); err != nil {
 			return nil, err
 		} else if ok && !hasFilterableMaximalBlocker(h.SelectionAudited(), scan.effects) {
 			record(scan)
@@ -761,7 +786,7 @@ func (h *Hasher) subjectMaximalExternalEffects(base *tier2Base, pkgPath string, 
 				return nil, err
 			}
 			fullPath := filepath.Join(pkg.Dir, name)
-			unfiltered, err := h.maximalFileEffectsCachedWithNames(pkg.ImportPath, fullPath, declaredNames, overridesKey)
+			unfiltered, err := h.maximalFileEffectsCachedWithContext(pkg.ImportPath, fullPath, declaredNames, nonStdPaths, overridesKey)
 			if err != nil {
 				return nil, err
 			}
@@ -780,7 +805,7 @@ func (h *Hasher) subjectMaximalExternalEffects(base *tier2Base, pkgPath string, 
 			if err != nil {
 				return nil, err
 			}
-			scan, err := maximalFileEffectsContentWithNamesFiltered(h.SelectionAudited(), fullPath, content, declaredNames, reachedDecls)
+			scan, err := maximalFileEffectsContentWithContextFiltered(h.SelectionAudited(), fullPath, content, declaredNames, nonStdPaths, reachedDecls)
 			if err != nil {
 				return nil, err
 			}
@@ -1318,8 +1343,31 @@ func listedDeclaredNames(pkgs []listPkg) map[string]string {
 	return names
 }
 
+func listedNonStandardPaths(pkgs []listPkg) map[string]bool {
+	if len(pkgs) == 0 {
+		return nil
+	}
+	var out map[string]bool
+	for _, p := range pkgs {
+		if p.Standard || p.Module == nil {
+			continue
+		}
+		if src := p.SourcePath(); src != "" && isStdImportPath(src) {
+			if out == nil {
+				out = make(map[string]bool)
+			}
+			out[src] = true
+		}
+	}
+	return out
+}
+
 func declaredOverridesKey(declaredNames map[string]string) string {
-	if len(declaredNames) == 0 {
+	return scanOverridesKey(declaredNames, nil)
+}
+
+func scanOverridesKey(declaredNames map[string]string, nonStdPaths map[string]bool) string {
+	if len(declaredNames) == 0 && len(nonStdPaths) == 0 {
 		return ""
 	}
 	var overrides []string
@@ -1329,6 +1377,11 @@ func declaredOverridesKey(declaredNames map[string]string) string {
 		}
 		if name != path.Base(pkgPath) || implicitImportName(pkgPath) != path.Base(pkgPath) {
 			overrides = append(overrides, pkgPath+"="+name)
+		}
+	}
+	for pkgPath := range nonStdPaths {
+		if isStdImportPath(pkgPath) {
+			overrides = append(overrides, "nonstd:"+pkgPath)
 		}
 	}
 	if len(overrides) == 0 {
@@ -1381,6 +1434,10 @@ func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) 
 }
 
 func (h *Hasher) pinnedEffectScanWithNames(pkg listPkg, declaredNames map[string]string, overridesKey string) (maximalEffectScan, bool, error) {
+	return h.pinnedEffectScanWithContext(pkg, declaredNames, nil, overridesKey)
+}
+
+func (h *Hasher) pinnedEffectScanWithContext(pkg listPkg, declaredNames map[string]string, nonStdPaths map[string]bool, overridesKey string) (maximalEffectScan, bool, error) {
 	if pkg.Module.Version == "" || !h.pinnedPackage(&pkg) || pkg.Module.Dir == "" {
 		return maximalEffectScan{}, false, nil
 	}
@@ -1418,7 +1475,7 @@ func (h *Hasher) pinnedEffectScanWithNames(pkg listPkg, declaredNames map[string
 		if err := h.contextErr(); err != nil {
 			return maximalEffectScan{}, false, err
 		}
-		scan, err := h.maximalFileEffectsCachedWithNames(pkg.ImportPath, filepath.Join(pkg.Dir, name), declaredNames, overridesKey)
+		scan, err := h.maximalFileEffectsCachedWithContext(pkg.ImportPath, filepath.Join(pkg.Dir, name), declaredNames, nonStdPaths, overridesKey)
 		if err != nil {
 			return maximalEffectScan{}, false, err
 		}

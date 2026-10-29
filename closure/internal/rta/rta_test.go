@@ -110,3 +110,62 @@ func RootB() *Node {
 		t.Fatalf("Reachable[(*Node).Step] = %#b, want %#b", got, wantMask)
 	}
 }
+
+func TestSkippedUnderlyingDoesNotSynthesizePhantomUnnamedWrapper(t *testing.T) {
+	const src = `package p
+
+type Item interface {
+	Value() int
+}
+
+type baseItem struct{}
+
+func (baseItem) Value() int { return 7 }
+
+type Promoted struct {
+	Item
+}
+
+func NamedOnly() int {
+	var it Item = Promoted{Item: baseItem{}}
+	return it.Value()
+}
+
+func NamedThenUnnamed() int {
+	var a Item = Promoted{Item: baseItem{}}
+	var b Item = struct{ Item }{Item: baseItem{}}
+	return a.Value() + b.Value()
+}
+`
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "p.go", src, 0)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	pkg := types.NewPackage("example.com/p", "p")
+	ssaPkg, _, err := ssautil.BuildPackage(&types.Config{Importer: importer.Default()}, fset, pkg, []*ast.File{f}, ssa.InstantiateGenerics)
+	if err != nil {
+		t.Fatalf("BuildPackage: %v", err)
+	}
+	prog := ssaPkg.Prog
+	namedOnly := ssaPkg.Func("NamedOnly")
+	namedThenUnnamed := ssaPkg.Func("NamedThenUnnamed")
+	promotedType := pkg.Scope().Lookup("Promoted").Type()
+	unnamedType := promotedType.Underlying()
+	namedWrapper := prog.LookupMethod(promotedType, pkg, "Value")
+	unnamedWrapper := prog.LookupMethod(unnamedType, pkg, "Value")
+
+	res, err := Analyze(context.Background(), map[*ssa.Function]uint64{
+		namedOnly:        1 << 0,
+		namedThenUnnamed: 1 << 1,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if got := res.Reachable[namedWrapper]; got != (1<<0 | 1<<1) {
+		t.Fatalf("Reachable[(Promoted).Value] = %#b, want %#b", got, 1<<0|1<<1)
+	}
+	if got := res.Reachable[unnamedWrapper]; got != (1 << 1) {
+		t.Fatalf("Reachable[(struct{ Item }).Value] = %#b, want %#b (only NamedThenUnnamed)", got, 1<<1)
+	}
+}

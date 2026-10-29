@@ -62,7 +62,7 @@ import (
 // because the fold is a refusal-only backstop consulted after the
 // walks — a shadow adds false resolutions and removes none of the
 // file's real ones, so no proof the walks refuse is ever granted.
-const effectScanStrategy = "gofresh/effect-scan@25"
+const effectScanStrategy = "gofresh/effect-scan@27"
 
 // effectScanScope is the memo's full scope: the strategy version, the
 // analyzing frontend, complete selected source and admission policy. A Boolean

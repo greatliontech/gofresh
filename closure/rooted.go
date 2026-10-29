@@ -19,7 +19,7 @@ import (
 // unnameable receiver yields no key — their marks are never attributed,
 // so no site can reference them.
 func rootedFunctionKey(fn *ssa.Function) string {
-	if fn == nil || fn.Object() == nil {
+	if fn == nil || fn.Object() == nil || isUnnamedStructPromotedWrapper(fn) {
 		return ""
 	}
 	name := functionSymbolName(fn)
@@ -170,11 +170,11 @@ func (h *Hasher) ComputeRootedFunctions(ctx context.Context, subjects []Subject)
 }
 
 func rootedFunctionsFromReachability(reach attributedReachability) RootedFunctions {
-	if reach.unavailable != "" || reach.openWorld {
+	if reach.unavailable != "" || reach.openWorld || reach.rootedIncomplete {
 		return RootedFunctions{}
 	}
-	fns := make(map[string]bool, len(reach.subjectFunctions)+len(reach.testMainFunctions))
-	for _, provenance := range []map[*ssa.Function]bool{reach.subjectFunctions, reach.testMainFunctions} {
+	fns := make(map[string]bool, len(reach.subjectFunctions)+len(reach.rootedExtraFunctions)+len(reach.testMainFunctions)+len(reach.cleanupFunctions))
+	for _, provenance := range []map[*ssa.Function]bool{reach.subjectFunctions, reach.rootedExtraFunctions, reach.testMainFunctions, reach.cleanupFunctions} {
 		for fn := range provenance {
 			if key := rootedFunctionKey(fn); key != "" {
 				fns[key] = true
@@ -198,7 +198,7 @@ func (h *Hasher) rootedGroup(ctx context.Context, group *packageBatch, bp *batch
 	if err != nil {
 		return err
 	}
-	defer delete(h.progs, group.path)
+	defer h.releaseProgram(group.path)
 	computed := make(map[string]RootedFunctions, len(group.subjects))
 	rooted := group.subjects[:0:0]
 	for _, subject := range group.subjects {
@@ -376,7 +376,7 @@ func (h *Hasher) binaryRootedPackage(ctx context.Context, path, closureHash stri
 	if err != nil {
 		return RootedFunctions{}, err
 	}
-	defer delete(h.progs, path)
+	defer h.releaseProgram(path)
 	persist := func(inv RootedFunctions) (RootedFunctions, error) {
 		if err := ctx.Err(); err != nil {
 			return RootedFunctions{}, fmt.Errorf("closure: analysis cancelled: %w", err)

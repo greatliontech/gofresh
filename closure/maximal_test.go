@@ -847,3 +847,85 @@ func TestEffectCauseRankSymbolFreeStrata(t *testing.T) {
 		t.Fatalf("unaudited symbol ranked %d, want the unaudited stratum", rank)
 	}
 }
+
+func TestListedNonStandardPathsPreservesDottedExternalClassifications(t *testing.T) {
+	mod := &listMod{Path: "golang.org/x/sys", Version: "v0.30.0"}
+	appMod := &listMod{Path: "app", Main: true}
+	nonStd := listedNonStandardPaths([]listPkg{
+		{ImportPath: "golang.org/x/sys/unix", Name: "unix", Module: mod},
+		{ImportPath: "app/sub", Name: "sub", Module: appMod},
+	})
+	if nonStd["golang.org/x/sys/unix"] {
+		t.Fatalf("listedNonStandardPaths included dotted external module: %+v", nonStd)
+	}
+	if !nonStd["app/sub"] {
+		t.Fatalf("listedNonStandardPaths missed dotless user package app/sub: %+v", nonStd)
+	}
+	src := []byte(`package p
+
+import (
+	"app/sub"
+	"golang.org/x/sys/unix"
+)
+
+func Reached() int {
+	return sub.Add(1, 2)
+}
+
+func UnreachedUnixMutate() {
+	_ = unix.Unlink("/tmp/x")
+}
+
+func UnreachedUnixHazard() {
+	_ = unix.Chdir("/tmp")
+}
+`)
+	// Even if a caller passes a map containing both dotted and dotless paths,
+	// dotted external modules keep their import candidates, class-B effects,
+	// and package-wide process-state hazards while dotless user packages are
+	// never misclassified as unaudited standard operations.
+	callerMap := map[string]bool{
+		"golang.org/x/sys/unix": true,
+		"app/sub":               true,
+	}
+	unfiltered, err := maximalFileEffectsContentWithContextFiltered(true, "/dir/p.go", src, nil, callerMap, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unfiltered.importCandidates) == 0 || !strings.Contains(unfiltered.importCandidates[0].reason, "golang.org/x/sys/unix") {
+		t.Fatalf("unfiltered importCandidates = %+v, want golang.org/x/sys/unix candidate", unfiltered.importCandidates)
+	}
+	sawUnlink, sawChdir := false, false
+	for _, eff := range unfiltered.effects {
+		if strings.Contains(eff.reason, "app/sub") {
+			t.Fatalf("dotless user package misclassified as standard effect: %+v", eff)
+		}
+		if eff.packagePath == "golang.org/x/sys/unix" && eff.symbol == "Unlink" {
+			sawUnlink = true
+		}
+		if eff.packagePath == "golang.org/x/sys/unix" && eff.symbol == "Chdir" {
+			sawChdir = true
+		}
+	}
+	if !sawUnlink || !sawChdir {
+		t.Fatalf("unfiltered effects = %+v, want both unix.Unlink and unix.Chdir", unfiltered.effects)
+	}
+
+	reached := map[funcDeclKey]bool{{dir: "/dir", pkgClause: "p", name: "Reached"}: true}
+	filtered, err := maximalFileEffectsContentWithContextFiltered(true, "/dir/p.go", src, nil, callerMap, reached)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sawChdirFiltered := false
+	for _, eff := range filtered.effects {
+		if eff.packagePath == "golang.org/x/sys/unix" && eff.symbol == "Unlink" {
+			t.Fatalf("unreached non-hazard unix.Unlink leaked into filtered scan: %+v", eff)
+		}
+		if eff.packagePath == "golang.org/x/sys/unix" && eff.symbol == "Chdir" {
+			sawChdirFiltered = true
+		}
+	}
+	if !sawChdirFiltered {
+		t.Fatalf("filtered effects = %+v, want package-wide unix.Chdir hazard preserved", filtered.effects)
+	}
+}

@@ -35,14 +35,19 @@ type freshParamAnalysis struct {
 	// closed-value walks cross the root's own parameters to these
 	// sites. They never join callers — the fresh-path capability
 	// fixpoint stays subject-internal.
-	enumRoot        *ssa.Function
-	enumSites       []ssa.CallInstruction
-	enumFieldStores map[int][]ssa.Value
-	enumOnly        bool
-	subjectRoot     *ssa.Function
-	summary         *callerReferenceSummary
+	enumRoot                  *ssa.Function
+	enumSites                 []ssa.CallInstruction
+	enumFieldStores           map[int][]ssa.Value
+	enumOnly                  bool
+	enumRecvNamed             *types.Named
+	enumStructVisiting        map[*types.Named]bool
+	ignoreContextValuePayload bool
+	subjectRoot               *ssa.Function
+	summary                   *callerReferenceSummary
+	userPaths                 map[string]bool
 
 	structFieldStores      map[structFieldKey][]ssa.Value
+	structWholeStores      map[*types.Named][]ssa.Value
 	structPoisoned         map[structFieldKey]bool
 	structReferencedByType map[*types.Named]bool
 	programSites           map[*ssa.Function][]ssa.CallInstruction
@@ -55,6 +60,7 @@ type freshParamAnalysis struct {
 	invokeDepth            map[ssa.CallInstruction]int
 	inFieldStore           bool
 	inProgramSites         bool
+	baseDepth              int
 	stackDepth             map[ssa.Value]int
 	lowlink                *int
 	hasLeaf                *bool
@@ -90,6 +96,19 @@ type freshParamAnalysis struct {
 	isStd func(*ssa.Function) bool
 }
 
+func (fp *freshParamAnalysis) userPkgPaths() map[string]bool {
+	if fp == nil {
+		return nil
+	}
+	if fp.userPaths != nil {
+		return fp.userPaths
+	}
+	if fp.summary != nil {
+		return fp.summary.userPaths
+	}
+	return nil
+}
+
 func (fp *freshParamAnalysis) isStdFunc(fn *ssa.Function) bool {
 	if fn == nil {
 		return false
@@ -97,7 +116,7 @@ func (fp *freshParamAnalysis) isStdFunc(fn *ssa.Function) bool {
 	if fp != nil && fp.isStd != nil {
 		return fp.isStd(fn)
 	}
-	return isStdImportPath(funcPkgPath(fn))
+	return isStdPkgPath(fp.userPkgPaths(), funcPkgPath(fn))
 }
 
 type freshParamKey struct {
@@ -105,7 +124,7 @@ type freshParamKey struct {
 	idx int
 }
 
-func newFreshParamAnalysis(audited bool, reach attributedReachability) *freshParamAnalysis {
+func newFreshParamAnalysis(audited bool, reach attributedReachability, isStd func(*ssa.Function) bool) *freshParamAnalysis {
 	fp := &freshParamAnalysis{
 		selectionAudited:       audited,
 		functions:              reach.functions,
@@ -113,7 +132,9 @@ func newFreshParamAnalysis(audited bool, reach attributedReachability) *freshPar
 		dynamic:                map[*ssa.Function]bool{},
 		subjectRoot:            reach.subjectRoot,
 		summary:                reach.summary,
+		userPaths:              reach.userPaths,
 		structFieldStores:      reach.structFieldStores,
+		structWholeStores:      reach.structWholeStores,
 		structPoisoned:         reach.structPoisoned,
 		structReferencedByType: reach.structReferencedByType,
 		programSites:           reach.programSites,
@@ -129,11 +150,15 @@ func newFreshParamAnalysis(audited bool, reach attributedReachability) *freshPar
 		invokeTargets:          map[ssa.CallInstruction]map[*ssa.Function]bool{},
 		invokeFailed:           map[ssa.CallInstruction]bool{},
 		propertyHarnessAudited: reach.propertyHarnessAudited,
+		isStd:                  isStd,
 	}
-	if len(reach.enumeratedRootSites) > 0 || len(reach.enumeratedFieldStores) > 0 {
+	if len(reach.enumeratedRootSites) > 0 || len(reach.enumeratedFieldStores) > 0 || reach.enumeratedRoot {
 		fp.enumRoot = reach.subjectRoot
 		fp.enumSites = reach.enumeratedRootSites
 		fp.enumFieldStores = reach.enumeratedFieldStores
+		if fp.enumRoot != nil && fp.enumRoot.Signature != nil && fp.enumRoot.Signature.Recv() != nil {
+			fp.enumRecvNamed = derefNamedStruct(fp.userPkgPaths(), fp.enumRoot.Signature.Recv().Type())
+		}
 	}
 	for fn := range reach.functions {
 		for _, block := range fn.Blocks {
@@ -318,7 +343,7 @@ func (fp *freshParamAnalysis) boundaryCrossingObservable(site ssa.CallInstructio
 		return false
 	}
 	callee := site.Common().StaticCallee()
-	if callee == nil || isStdImportPath(funcPkgPath(callee)) {
+	if callee == nil || fp.isStdFunc(callee) {
 		return false
 	}
 	found := false

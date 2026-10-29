@@ -48,7 +48,15 @@ composition MUST preserve the authority class, scope and prerequisites of
 each accepted claim. Observation identities alone do not establish that all
 inputs were observed; completion alone does not establish operation outcomes;
 a derived outcome inventory alone does not establish an execution; and an
-assertion remains an assertion even when its resulting guards match. Unknown,
+assertion remains an assertion even when its resulting guards match. When a
+subject's compatible observability proof establishes zero reachable external
+input operations across its closed reachability (`Observability.EffectFree`,
+bound into the proof's integrity evidence), an identity-only completed
+observation with matching runtime-input guards is admitted under the derived
+static-reachability outcome method (`gofresh/static-reachability@1`) without
+requiring runtime operation-outcome support (`gofresh/immutable-environment@1`),
+whereas any subject that reaches an external input operation requires
+established runtime operation-outcome support. Unknown,
 absent or incompatible support supplies no positive evidence. Hashes, seals,
 successful decoding, set union and current reconstruction establish none of
 the missing historical premises. Explicit purity keeps its specified override
