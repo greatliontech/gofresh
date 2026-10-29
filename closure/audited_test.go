@@ -1405,7 +1405,7 @@ func TestNetURLAndFilepathAdmissions(t *testing.T) {
 		}
 	}
 	dir := t.TempDir()
-	for _, sub := range []string{"urlhost", "urlvalues", "lexical", "absolute", "walking", "linking", "globbing", "walkfn", "badpattern", "viaglobal"} {
+	for _, sub := range []string{"urlhost", "urlvalues", "lexical", "absolute", "walking", "linking", "globbing", "walkfn", "badpattern", "viaglobal", "sentineleof", "mutatedeof"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -1470,12 +1470,28 @@ func Count(root string) int {
 `)
 	// The file fold admits a selector of a package admitted whole, so
 	// the walk's standard-global arm is the sole guard of such a
-	// package's exported variables — io.EOF's shape.
+	// package's exported variables outside the unmutated sentinel-global
+	// set — encoding/base64.StdEncoding's shape.
 	writeFile(t, dir, "viaglobal/viaglobal.go", `package viaglobal
+
+import "encoding/base64"
+
+func Ended() bool { return base64.StdEncoding != nil }
+`)
+	writeFile(t, dir, "sentineleof/sentineleof.go", `package sentineleof
 
 import "io"
 
 func Ended() bool { return io.EOF != nil }
+`)
+	writeFile(t, dir, "mutatedeof/mutatedeof.go", `package mutatedeof
+
+import "io"
+
+func Clobber() bool {
+	io.EOF = nil
+	return io.EOF != nil
+}
 `)
 	writeFile(t, dir, "badpattern/badpattern.go", `package badpattern
 
@@ -1538,7 +1554,9 @@ func Count(root string) int {
 		{"globbing", "Count", "package scan: reaches unaudited standard operation path/filepath.Glob"},
 		{"walkfn", "Count", "package scan: reaches unaudited standard operation path/filepath.Walk"},
 		{"badpattern", "Bad", "package scan: reaches unaudited standard operation path/filepath.ErrBadPattern"},
-		{"viaglobal", "Ended", "reaches standard global io.EOF"},
+		{"viaglobal", "Ended", "reaches standard global encoding/base64.StdEncoding"},
+		{"sentineleof", "Ended", ""},
+		{"mutatedeof", "Clobber", "reaches standard global io.EOF"},
 	}
 	subjects := make([]Subject, 0, len(cases))
 	for _, tc := range cases {

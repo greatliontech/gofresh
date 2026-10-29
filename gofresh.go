@@ -231,7 +231,7 @@ func PreviewPruneMemos(maxBytes int64) (MemoPruneReport, error) {
 // — holds no dynamic carrier and marks nothing: the data memo.
 // The current derivation uses the SSA builder's corrected generic receiver
 // instantiation and range-over-function control flow.
-const DynamicStateStrategy = "gofresh/dynamic-state@43"
+const DynamicStateStrategy = "gofresh/dynamic-state@44"
 
 // ClosureStrategy identifies the closure identity derivation — the
 // maximal closure's and the test-variant compartment's — as the
@@ -452,7 +452,7 @@ const ClosureStrategy = closure.IdentityStrategy
 // @44 binds selected standard-library content and admission policy into
 // proof integrity and outcome-subject identities; older evidence cannot
 // acquire the missing dependencies from current analysis.
-const ObservationRTA = "gofresh/observation-rta@52"
+const ObservationRTA = "gofresh/observation-rta@53"
 
 // ObservationProof is versioned per-subject evidence that every reachable external
 // effect is representable by the recognized completed observation stream.

@@ -11,7 +11,7 @@ import (
 // table each, so the two spellings cannot drift apart
 // (REQ-closure-shared-dynamic-state-audited-discharges).
 func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
-	for _, name := range []string{"Mutex", "RWMutex", "Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock", "Once", "Do"} {
+	for _, name := range []string{"Mutex", "RWMutex", "Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock", "Once", "Do", "Cond", "NewCond", "Locker", "Wait", "Signal", "Broadcast"} {
 		if !auditedStandardSymbol(true, "sync", name) || !auditset.SyncName(name) {
 			t.Errorf("sync name %s not admitted", name)
 		}

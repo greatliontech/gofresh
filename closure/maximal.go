@@ -577,26 +577,14 @@ func maximalFileEffectsContentWithNamesFiltered(audited bool, filename string, c
 	inTestMain := func(node ast.Node) bool {
 		return testMainDecl != nil && node.Pos() >= testMainDecl.Pos() && node.End() <= testMainDecl.End()
 	}
-	var unreachedDecls []*ast.FuncDecl
-	if reachedDecls != nil {
-		dir := filepath.Clean(filepath.Dir(filename))
-		pkgClause := ""
-		if file.Name != nil {
-			pkgClause = file.Name.Name
-		}
-		for _, decl := range file.Decls {
-			fd, ok := decl.(*ast.FuncDecl)
-			if !ok || fd == testMainDecl {
-				continue
-			}
-			if key, ok := funcDeclKeyForAST(dir, pkgClause, fd); ok && !reachedDecls[key] {
-				unreachedDecls = append(unreachedDecls, fd)
-			}
-		}
+	pkgClause := ""
+	if file.Name != nil {
+		pkgClause = file.Name.Name
 	}
+	unreachedDecls := unreachedASTDecls(filepath.Dir(filename), pkgClause, file, testMainDecl, reachedDecls)
 	inUnreachedDecl := func(node ast.Node) bool {
-		for _, fd := range unreachedDecls {
-			if node.Pos() >= fd.Pos() && node.End() <= fd.End() {
+		for _, d := range unreachedDecls {
+			if node.Pos() >= d.Pos() && node.End() <= d.End() {
 				return true
 			}
 		}
@@ -608,10 +596,21 @@ func maximalFileEffectsContentWithNamesFiltered(audited bool, filename string, c
 		}
 		scan.add(effect)
 	}
+	allowedTimeUnixChained := map[*ast.SelectorExpr]bool{}
 	ast.Inspect(file, func(node ast.Node) bool {
+		if audited {
+			if outerCall, ok := node.(*ast.CallExpr); ok {
+				if innerSel := chainedTimeUnixSelector(outerCall, aliases, reachedDecls != nil); innerSel != nil {
+					allowedTimeUnixChained[innerSel] = true
+				}
+			}
+		}
 		if sel, ok := node.(*ast.SelectorExpr); ok {
 			if ident, ok := sel.X.(*ast.Ident); ok {
 				pkgPath := aliases[ident.Name]
+				if allowedTimeUnixChained[sel] {
+					return true
+				}
 				if effect, ok := classBEffect(pkgPath, sel.Sel.Name); ok {
 					addSelEffect(sel, effect)
 				} else if pkgPath == "os" && sel.Sel.Name == "Exit" && inTestMain(sel) {
@@ -643,6 +642,76 @@ func maximalFileEffectsContentWithNamesFiltered(audited bool, filename string, c
 }
 
 func impPkgPathOr(pkgPath string) string { return pkgPath }
+
+func unwrapASTParen(expr ast.Expr) ast.Expr {
+	for {
+		p, ok := expr.(*ast.ParenExpr)
+		if !ok {
+			return expr
+		}
+		expr = p.X
+	}
+}
+
+func isASTTimeFixedZoneCall(expr ast.Expr, aliases map[string]string) bool {
+	call, ok := unwrapASTParen(expr).(*ast.CallExpr)
+	if !ok || len(call.Args) != 2 || call.Ellipsis.IsValid() {
+		return false
+	}
+	sel, ok := unwrapASTParen(call.Fun).(*ast.SelectorExpr)
+	if !ok || sel.Sel == nil || sel.Sel.Name != "FixedZone" {
+		return false
+	}
+	ident, ok := sel.X.(*ast.Ident)
+	return ok && aliases[ident.Name] == "time"
+}
+
+func chainedTimeUnixSelector(outerCall *ast.CallExpr, aliases map[string]string, hasSSAFlow bool) *ast.SelectorExpr {
+	if outerCall == nil || outerCall.Ellipsis.IsValid() {
+		return nil
+	}
+	outerSel, ok := unwrapASTParen(outerCall.Fun).(*ast.SelectorExpr)
+	if !ok || outerSel.Sel == nil {
+		return nil
+	}
+	switch outerSel.Sel.Name {
+	case "UTC":
+		if len(outerCall.Args) != 0 {
+			return nil
+		}
+	case "In":
+		if len(outerCall.Args) != 1 || (!hasSSAFlow && !isASTTimeFixedZoneCall(outerCall.Args[0], aliases)) {
+			return nil
+		}
+	default:
+		return nil
+	}
+	innerCall, ok := unwrapASTParen(outerSel.X).(*ast.CallExpr)
+	if !ok || innerCall.Ellipsis.IsValid() {
+		return nil
+	}
+	innerSel, ok := unwrapASTParen(innerCall.Fun).(*ast.SelectorExpr)
+	if !ok || innerSel.Sel == nil {
+		return nil
+	}
+	ident, ok := innerSel.X.(*ast.Ident)
+	if !ok || aliases[ident.Name] != "time" {
+		return nil
+	}
+	switch innerSel.Sel.Name {
+	case "Unix":
+		if len(innerCall.Args) != 2 {
+			return nil
+		}
+	case "UnixMilli", "UnixMicro":
+		if len(innerCall.Args) != 1 {
+			return nil
+		}
+	default:
+		return nil
+	}
+	return innerSel
+}
 
 // subjectMaximalExternalEffects returns the package scan filtered to
 // package-level/file-level constructs, reached function/method declarations,
@@ -754,19 +823,10 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 			if file.Name != nil {
 				pkgClause = file.Name.Name
 			}
-			var unreachedDecls []*ast.FuncDecl
-			for _, decl := range file.Decls {
-				fd, ok := decl.(*ast.FuncDecl)
-				if !ok || fd.Name == nil || fd.Name.Name == "TestMain" {
-					continue
-				}
-				if key, ok := funcDeclKeyForAST(fileDir, pkgClause, fd); ok && !reachedDecls[key] {
-					unreachedDecls = append(unreachedDecls, fd)
-				}
-			}
+			unreachedDecls := unreachedASTDecls(fileDir, pkgClause, file, nil, reachedDecls)
 			inUnreachedDecl := func(node ast.Node) bool {
-				for _, fd := range unreachedDecls {
-					if node.Pos() >= fd.Pos() && node.End() <= fd.End() {
+				for _, d := range unreachedDecls {
+					if node.Pos() >= d.Pos() && node.End() <= d.End() {
 						return true
 					}
 				}
@@ -810,7 +870,7 @@ func testingMethodEffects(file *ast.File, aliases map[string]string) ([]external
 	return testingMethodEffectsFiltered(file, aliases, nil)
 }
 
-func testingMethodEffectsFiltered(file *ast.File, aliases map[string]string, unreachedDecls []*ast.FuncDecl) ([]externalEffect, string) {
+func testingMethodEffectsFiltered(file *ast.File, aliases map[string]string, unreachedDecls []ast.Node) ([]externalEffect, string) {
 	if file == nil {
 		return nil, ""
 	}
@@ -822,7 +882,7 @@ func testingMethodEffectsFiltered(file *ast.File, aliases map[string]string, unr
 		if !ok || function.Type.Params == nil || function.Body == nil {
 			continue
 		}
-		unreached := slices.Contains(unreachedDecls, function)
+		unreached := slices.Contains(unreachedDecls, ast.Node(function))
 		addTestingEffect := func(effect externalEffect) {
 			if unreached && !packageWideMaximalHazard(effect) {
 				return

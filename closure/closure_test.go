@@ -4230,16 +4230,14 @@ import (
 	"testing"
 )
 
-type customCtx struct {
-	context.Context
-}
+var ambientCtx context.Context
 
 type fakeTB struct {
 	testing.TB
 }
 
 func (fakeTB) Context() context.Context {
-	return customCtx{Context: context.Background()}
+	return ambientCtx
 }
 
 func TestCustomTBContextRefused(t *testing.T) {
@@ -4288,6 +4286,205 @@ func TestCustomTBContextRefused(t *testing.T) {
 		}
 	}
 }
+
+func TestSubjectScopedTypeConstAndExpandedAuditedSurface(t *testing.T) {
+	dir := t.TempDir()
+	writeFile := func(rel, content string) {
+		t.Helper()
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("go.mod", "module example.com/expanded\n\ngo 1.24\n")
+	writeFile("surface/surface.go", `package surface
+
+import (
+	"bytes"
+	"crypto/fips140"
+	"encoding/binary"
+	"io"
+	"io/fs"
+	"math"
+	"math/rand"
+	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+type unusedZipfHolder struct {
+	z *rand.Zipf
+}
+
+const unusedFileMode = os.ModeDir
+
+type reachedZipfHolder struct {
+	z *rand.Zipf
+}
+
+const reachedFileMode = os.ModeDir
+
+func UseReachedType() int {
+	var h reachedZipfHolder
+	if h.z != nil {
+		return 1
+	}
+	return 0
+}
+
+func UseReachedConst() int {
+	return int(reachedFileMode)
+}
+
+type Item interface {
+	Value() int
+}
+
+type concreteItem struct {
+	v int
+}
+
+func (c concreteItem) Value() int { return c.v }
+
+type promotedItem struct {
+	Item
+	extra int
+}
+
+type impureItem struct{}
+
+func (impureItem) Value() int {
+	return len(os.Environ())
+}
+
+type badPromotedItem struct {
+	Item
+}
+
+func MakeBadPromoted() badPromotedItem {
+	return badPromotedItem{Item: impureItem{}}
+}
+
+func PromotedImpureRefused() int {
+	var it Item = badPromotedItem{Item: concreteItem{v: 1}}
+	return it.Value()
+}
+
+func joinVariadic(items ...Item) int {
+	total := 0
+	for _, it := range items {
+		total += it.Value()
+	}
+	return total
+}
+
+func PureExpandedSurface() int {
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], uint64(math.MaxInt32))
+	le := binary.LittleEndian.Uint64(buf[:])
+
+	var count atomic.Int64
+	count.Add(int64(le & 7))
+	var raw int32
+	atomic.AddInt32(&raw, 1)
+
+	var mu sync.Mutex
+	cond := sync.NewCond(&mu)
+	cond.Signal()
+	cond.Broadcast()
+
+	var fipsRes int
+	fips140.WithoutEnforcement(func() {
+		if fips140.Enforced() {
+			fipsRes = 1
+		}
+	})
+
+	mr := io.MultiReader(strings.NewReader("ab"), bytes.NewReader([]byte("cd")))
+	var out bytes.Buffer
+	mw := io.MultiWriter(&out, io.Discard)
+	_, err := io.Copy(mw, mr)
+	if err == io.EOF || err == fs.ErrNotExist {
+		fipsRes++
+	}
+
+	tsUTC := time.Unix(1700000000, 0).UTC().Unix()
+	loc := time.FixedZone("UTC+2", 7200)
+	tsFixed := time.UnixMilli(1700000000000).In(loc).Unix()
+
+	base := concreteItem{v: int(count.Load()) + int(raw) + fipsRes + out.Len() + int(tsUTC-tsFixed)}
+	var captured Item = promotedItem{Item: base, extra: 1}
+	readCaptured := func() int {
+		return captured.Value()
+	}
+	boundVal := base.Value
+
+	sliceItems := []Item{base, captured}
+	mapItems := map[string]Item{"k": base}
+
+	return readCaptured() + boundVal() + sliceItems[0].Value() + mapItems["k"].Value() + joinVariadic(base, captured)
+}
+
+func ImpureFIPSCallback() []string {
+	var s []string
+	fips140.WithoutEnforcement(func() {
+		s = os.Environ()
+	})
+	return s
+}
+
+func BareTimeUnix() time.Time {
+	return time.Unix(1700000000, 0)
+}
+
+func AtomicValueRefused() any {
+	var v atomic.Value
+	v.Store(1)
+	return v.Load()
+}
+`)
+	h, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjects := []Subject{
+		{Package: "example.com/expanded/surface", Symbol: "PureExpandedSurface"},
+		{Package: "example.com/expanded/surface", Symbol: "UseReachedType"},
+		{Package: "example.com/expanded/surface", Symbol: "UseReachedConst"},
+		{Package: "example.com/expanded/surface", Symbol: "PromotedImpureRefused"},
+		{Package: "example.com/expanded/surface", Symbol: "ImpureFIPSCallback"},
+		{Package: "example.com/expanded/surface", Symbol: "BareTimeUnix"},
+		{Package: "example.com/expanded/surface", Symbol: "AtomicValueRefused"},
+	}
+	got, err := h.ComputeObservabilityBatch(subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs := got[Subject{Package: "example.com/expanded/surface", Symbol: "PureExpandedSurface"}]; !obs.Observable {
+		t.Errorf("PureExpandedSurface Observable = false (Reason = %q), want true", obs.Reason)
+	}
+	for _, tc := range []struct {
+		sym, wantReason string
+	}{
+		{"UseReachedType", "package scan: reaches unaudited standard operation math/rand.Zipf"},
+		{"UseReachedConst", "package scan: reaches unaudited standard operation os.ModeDir"},
+		{"PromotedImpureRefused", "reaches os.Environ"},
+		{"ImpureFIPSCallback", "reaches os.Environ"},
+		{"BareTimeUnix", "package scan: reaches unaudited standard operation time.Unix"},
+		{"AtomicValueRefused", "package scan: reaches unaudited standard operation sync/atomic.Value"},
+	} {
+		s := Subject{Package: "example.com/expanded/surface", Symbol: tc.sym}
+		if obs := got[s]; obs.Observable || !strings.Contains(obs.Reason, tc.wantReason) {
+			t.Errorf("%s = %+v, want Observable=false Reason containing %q", tc.sym, obs, tc.wantReason)
+		}
+	}
+}
+
 
 
 

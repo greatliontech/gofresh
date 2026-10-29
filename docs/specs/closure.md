@@ -506,13 +506,18 @@ unresolvable, or interface-dispatched method, and any method VALUE bind, keeps
 the fail-closed mark.
 
 **REQ-closure-shared-dynamic-state-audited-discharges** (invariant): A synchronization discharge — sync.Mutex and
-sync.RWMutex with their lock operations, and sync.Once's Do (a done flag
+sync.RWMutex with their lock operations, sync.Cond, sync.NewCond, and sync.Locker with Cond's Wait, Signal, and Broadcast operations, and sync.Once's Do (a done flag
 under a mutex running the caller's own function once, program code judged
 where it is written), receiver-neutral and never
-process-external because lock state cannot change dispatch — MUST require a
+process-external because lock and condition-wait state cannot change dispatch — MUST require a
 checked derivation of those properties for the selected implementation,
 including its native leaves. The same claim applies identically at the effect
-classification tiers.
+classification tiers, alongside scalar `sync/atomic` types (`Bool`, `Int32`,
+`Int64`, `Uint32`, `Uint64`, `Uintptr`), their top-level scalar operations, and
+their scalar receiver methods (`Load`, `Store`, `Add`, `Swap`,
+`CompareAndSwap`, `And`, `Or`), which read and write process-memory scalars fed
+by the analyzed program alone while leaving `atomic.Value` and pointer-atomic
+operations to their own carrier rules.
 
 **REQ-closure-shared-dynamic-state-pool** (invariant): Pooling — `sync.Pool` with its `Get` and `Put`
 operations — MUST have two distinct claims at two tiers, each requiring its own
@@ -1480,27 +1485,28 @@ grant the proof on its own.
 
 **REQ-closure-observability-unsafe** (invariant): For a subject whose reachability
 is closed, the package-scan backstop for the observability proof
-(REQ-closure-observability-analysis) MUST both scope ordinary function and method
-declarations to the declarations reached by the subject, package initialization
-(`init` and package-level variable initializers), and `TestMain` — while keeping
-package-level and file-level constructs (imports, directives, cgo, assembly,
-`init`, `TestMain`, top-level `var`/`const`/`type` declarations) and explicit
-package-wide process or memory hazards (`unsafe` operations other than
-`unsafe.Pointer`, `os.Exit` outside `TestMain`, and process-environment or
-working-directory mutations such as `Setenv`, `Unsetenv`, `Clearenv`, `Chdir`,
-and `Fchdir` on `testing`, `os`, `syscall`, or `golang.org/x/sys/`) blocking
-across the whole package — and narrow the unsafe reference class out of the
-package-scan backstop's blocking set: an in-scope
-`unsafe.Pointer` reference is diagnostic only, because the subject walk prices
-every attributed unsafe-typed value and a subject world the walk cannot close
-refuses independently — a subject reaching unsafe-typed state still refuses at
-its own tier, while a sibling declaration's unsafe (an operator-grammar fixture,
-a low-level helper file) no longer blocks a clean subject's proof; the package's
-other operations (unsafe.Slice, unsafe.String, and kin) keep the package-wide
-scan block, because their call sites carry no unsafe-typed value the walk can
-price and a fabricated slice or string is a testlog-invisible read. The SSA
-builder's internal iterator and deferred-call stack handles are lowering tokens,
-not source unsafe values; their source operands and callbacks remain
+(REQ-closure-observability-analysis) MUST both scope ordinary function, method,
+`type`, and `const` declarations to the declarations and named `types.Object`s
+reached by the subject, package initialization (`init` and package-level
+variable initializers), and `TestMain` — while keeping package-level and
+file-level constructs (imports, directives, cgo, assembly, `init`, `TestMain`,
+and top-level `var` declarations) and explicit package-wide process or memory
+hazards (`unsafe` operations other than `unsafe.Pointer`, `os.Exit` outside
+`TestMain`, and process-environment or working-directory mutations such as
+`Setenv`, `Unsetenv`, `Clearenv`, `Chdir`, and `Fchdir` on `testing`, `os`,
+`syscall`, or `golang.org/x/sys/`) blocking across the whole package — and
+narrow the unsafe reference class out of the package-scan backstop's blocking
+set: an in-scope `unsafe.Pointer` reference is diagnostic only, because the
+subject walk prices every attributed unsafe-typed value and a subject world the
+walk cannot close refuses independently — a subject reaching unsafe-typed state
+still refuses at its own tier, while a sibling declaration's unsafe (an
+operator-grammar fixture, a low-level helper file) no longer blocks a clean
+subject's proof; the package's other operations (unsafe.Slice, unsafe.String,
+and kin) keep the package-wide scan block, because their call sites carry no
+unsafe-typed value the walk can price and a fabricated slice or string is a
+testlog-invisible read. The SSA builder's internal iterator and deferred-call
+stack handles and `sync.notifyList` runtime wait-queue cells are opaque runtime
+tokens, not source unsafe values; their source operands and callbacks remain
 independently judged.
 
 **REQ-closure-observability-audited-set** (invariant): A value-computation
@@ -1514,22 +1520,30 @@ The following families state the properties such derivations must establish:
 
 - Formatting, including fmt's Sprint family, computes from its operands;
   argument methods remain visible to reachability and independently classified.
-- Arithmetic such as math/big must establish result invariance across any
-  CPU-selected kernels, including relevant native implementations. Memoization
-  and scratch pooling must not introduce an observable input channel. Supplied
-  random sources retain their own input obligations. Any use of approximate
-  arithmetic, such as buffer sizing or iteration seeding, must be shown unable
-  to change the claimed result. A package name does not prove bit-identical
-  kernels or make a native leaf transparent.
+- Arithmetic such as math/big and compile-time constants in package `math`
+  (`MaxInt*`, `MinInt*`, `MaxUint*`, `MaxFloat*`, `SmallestNonzeroFloat*`, `Pi`,
+  `E`, `Phi`, `Sqrt*`, `Ln*`, `Log*`) must establish result invariance across
+  any CPU-selected kernels, including relevant native implementations, while
+  runtime floating-point and transcendental functions in package `math` retain
+  their refusal. Memoization and scratch pooling must not introduce an
+  observable input channel. Supplied random sources retain their own input
+  obligations. Any use of approximate arithmetic, such as buffer sizing or
+  iteration seeding, must be shown unable to change the claimed result. A
+  package name does not prove bit-identical kernels or make a native leaf
+  transparent.
 - Fixed-argument time computation, including Date, FixedZone, ParseDuration,
   calendar and clock-field accessors, zone views, rounding, formatting,
-  comparison and duration arithmetic, must establish dependence only on its
-  arguments and guarded implementation inputs. Clock reads, local-zone state,
-  zone-database loads and mutable exported globals retain their effects.
-  Method and package-function forms such as After, UTC, Unix, Location and
-  AddDate are judged by the selected declaration and receiver, not shared
-  spelling. A claim relying on time.UTC stability must cover every write or
-  escaping alias in the analyzed program, including harness and generated
+  comparison and duration arithmetic, and package-function `time.Unix`,
+  `time.UnixMilli`, and `time.UnixMicro` when immediately chained into `.UTC()`
+  or `.In(loc)` where `loc` is produced by `time.FixedZone` (stripping the
+  ambient `time.Local` zone before any zone decomposition can observe `$TZ` or
+  `/etc/localtime`), must establish dependence only on its arguments and
+  guarded implementation inputs. Clock reads, unstripped `time.Unix*` calls,
+  local-zone state, zone-database loads and mutable exported globals retain
+  their effects. Method and package-function forms such as After, UTC, Unix,
+  Location and AddDate are judged by the selected declaration and receiver, not
+  shared spelling. A claim relying on time.UTC stability must cover every write
+  or escaping alias in the analyzed program, including harness and generated
   code. A location accessor that hands out mutable package state cannot inherit
   a value-computation claim. A bound method wrapper needs a checked delegation
   argument as well as the target's claim.
@@ -1546,9 +1560,16 @@ The following families state the properties such derivations must establish:
   Match and HasPrefix, must establish computation over operands and the selected
   platform alone. Working-directory and filesystem operations such as Abs,
   EvalSymlinks, Glob, Walk and WalkDir keep their own input obligations.
-- Encoding operations such as base32 and base64 must establish computation
-  over supplied data; io-interface wrappers retain the effects of their
-  concrete operands, and exported encoding variables require state analysis.
+- Encoding and cryptographic mode operations such as base32 and base64,
+  `encoding/binary`'s `BigEndian` and `LittleEndian` byte-order globals,
+  `io.MultiReader` / `io.MultiWriter` over closed operands,
+  `crypto/fips140.WithoutEnforcement` (which sets a goroutine-local bypass flag
+  around a caller-supplied callback whose body is walked and classified at the
+  call site), and `crypto/fips140.Enforced` (which reads the immutable
+  startup-resolved FIPS enforcement bit) must establish computation over
+  supplied data and guarded build/runtime configuration alone; io-interface
+  wrappers retain the effects of their concrete operands, and exported encoding
+  variables require state analysis.
 - Deterministic context construction, value propagation, and cancellation
   (`context.Background`, `context.TODO`, `context.WithCancel`,
   `context.WithCancelCause`, `context.WithoutCancel`, `context.WithValue`,
@@ -1562,9 +1583,13 @@ The following families state the properties such derivations must establish:
   values, and causes alone, with wall-clock timer constructors (`WithDeadline`,
   `WithTimeout`, and their `*Cause` variants) and asynchronous cancellation
   callbacks (`AfterFunc`) retaining their refusals, and sentinel globals
-  (`io.Discard`, `context.Canceled`, `context.DeadlineExceeded`) admitted only
-  when no code in the analyzed program writes or takes their address outside
-  package initialization.
+  (`io.Discard`, `io.EOF`, `io.ErrClosedPipe`, `io.ErrNoProgress`,
+  `io.ErrShortBuffer`, `io.ErrShortWrite`, `io.ErrUnexpectedEOF`,
+  `fs.ErrInvalid`, `fs.ErrPermission`, `fs.ErrExist`, `fs.ErrNotExist`,
+  `fs.ErrClosed`, `fs.SkipAll`, `fs.SkipDir`, `binary.BigEndian`,
+  `binary.LittleEndian`, `context.Canceled`, `context.DeadlineExceeded`)
+  admitted only when no code in the analyzed program writes or takes their
+  address outside package initialization.
 
 **REQ-closure-observability-entropy** (invariant): Entropy operations, including crypto/rand's Read, Text, Prime and Int and
 unseeded math/rand sources, MUST retain their input classification unless a checked
@@ -1930,8 +1955,18 @@ claim or body analysis, and
 every other target's body classifies its own effects into the subject
 exactly as reachable content always does),
 AND the dispatch operand's dynamic types are fully determined by
-the subject's own flow — the operand derives from local construction,
+the subject's own flow — the operand derives from local construction
+(including local `*ssa.MakeSlice` allocations whose indexed element stores
+close under the walk and local `*ssa.MakeMap` allocations whose map-update
+values close under the walk and never escape to unanalyzed mutators),
+from an immutable closure-captured variable or bound method wrapper receiver
+(`*ssa.FreeVar` resolved through all `MakeClosure` bindings of the enclosing
+closure),
 from an unmutated standard-library sentinel global (`io.Discard`,
+`io.EOF`, `io.ErrClosedPipe`, `io.ErrNoProgress`, `io.ErrShortBuffer`,
+`io.ErrShortWrite`, `io.ErrUnexpectedEOF`, `fs.ErrInvalid`,
+`fs.ErrPermission`, `fs.ErrExist`, `fs.ErrNotExist`, `fs.ErrClosed`,
+`fs.SkipAll`, `fs.SkipDir`, `binary.BigEndian`, `binary.LittleEndian`,
 `context.Canceled`, `context.DeadlineExceeded`) whose package initializer
 stores a carrier-free concrete value that no code in the analyzed program
 writes or takes the address of outside package initialization,
@@ -1940,12 +1975,16 @@ standard-library function or a reached non-recursive, non-variadic,
 non-dynamically-targeted in-module function whose dynamic-carrying arguments
 themselves close under the closed-value walk, or
 from a parameter whose function is not dynamically targeted, closes over
-nothing, is not variadic, and has at least one subject-attributed call
+nothing, is not variadic (or, for non-function parameters under audited
+toolchain selection, whose variadic slice argument closes under the walk),
+and has at least one subject-attributed call
 site, every such site feeding a subject-closed value (zero enumerable
 callers is absence of provenance, refused, never a vacuous pass), with
 an interface invoke's target set narrowed to the concrete types its
 closed operand wraps when every resolved method has an analyzed or
-audited body — the
+audited body (including promoted interface method wrappers on concrete structs
+that embed an interface whose embedded field is populated exclusively by
+closed stores) — the
 crossing holding for every closed-world subject whatever its own enumeration
 state, an iterator's yield bound by the subject's range statement or call the
 canonical shape, and the subject-attributed sites being the subject's own

@@ -392,7 +392,7 @@ func verifyListedPackageWithIO(lp listedPackage) (verdictErr error, ioErr error)
 		}
 	}
 	if len(goFiles) == 0 {
-		if pureOrDelegate || lp.ImportPath == "os" || lp.ImportPath == "testing" || lp.ImportPath == "testing/internal/testdeps" || lp.ImportPath == "runtime" || lp.ImportPath == "sync" || lp.ImportPath == "reflect" || lp.ImportPath == "time" || lp.ImportPath == "math/rand" || lp.ImportPath == "context" {
+		if pureOrDelegate || lp.ImportPath == "os" || lp.ImportPath == "testing" || lp.ImportPath == "testing/internal/testdeps" || lp.ImportPath == "runtime" || lp.ImportPath == "sync" || lp.ImportPath == "reflect" || lp.ImportPath == "time" || lp.ImportPath == "math" || lp.ImportPath == "math/rand" || lp.ImportPath == "context" || lp.ImportPath == "crypto/fips140" {
 			return fmt.Errorf("%s: no selected Go files", lp.ImportPath), nil
 		}
 		return nil, nil
@@ -417,7 +417,7 @@ func verifyListedPackageWithIO(lp listedPackage) (verdictErr error, ioErr error)
 		parsed = append(parsed, file)
 	}
 	if lp.digest != "" {
-		curDigest, err := digestFiles(context.Background(), lp.Dir, lp.Files)
+		curDigest, err := digestFilesUntraced(context.Background(), lp.Dir, lp.Files)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", lp.ImportPath, err)
 		}

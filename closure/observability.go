@@ -15,6 +15,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
 
 	prog "github.com/greatliontech/gofresh/closure/internal/program"
+	"github.com/greatliontech/gofresh/closure/internal/rta"
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/outcome"
 )
@@ -25,9 +26,27 @@ import (
 // instantiation dispatches concretely). The RecvTypeParams arm is deliberate
 // redundancy: ssa.Function.TypeParams covers method origins today, and the
 // belt guards an upstream representation change - the generic-method row
-// pins the behavior either way.
+// pins the behavior either way. An instantiation carries its origin's
+// TypeParams alongside a non-empty TypeArgs slice; it is parameterized only
+// when an argument still mentions a type parameter.
 func parameterizedBody(fn *ssa.Function) bool {
-	return fn != nil && (fn.TypeParams().Len() > 0 || (fn.Signature != nil && fn.Signature.RecvTypeParams() != nil))
+	if fn == nil {
+		return false
+	}
+	generic := fn.TypeParams().Len() > 0 || (fn.Signature != nil && fn.Signature.RecvTypeParams() != nil)
+	if !generic {
+		return false
+	}
+	args := fn.TypeArgs()
+	if len(args) == 0 {
+		return true
+	}
+	for _, arg := range args {
+		if rta.ContainsTypeParam(arg, make(map[types.Type]bool)) {
+			return true
+		}
+	}
+	return false
 }
 
 // loadCached loads (once) and returns the whole-program SSA for pkgPath. Load
@@ -448,6 +467,9 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 	}
 	startupReach := reach
 	startupReach.functions = nonStandardFunctions(base, startupReach.startupFunctions)
+	if startupReach.startupDynamicTargets != nil {
+		startupReach.dynamicTargets = startupReach.startupDynamicTargets
+	}
 	startupResult := directExternalEffects(base, startupReach)
 	if startupResult.unverifiable {
 		reason := startupResult.reason
@@ -679,7 +701,7 @@ func recordTestMainCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, sit
 	// The shared ladder, the test-main tier's sixth former copy folded:
 	// its os.Exit epilogue admission stays above, and the observable
 	// flag is this tier's own consequence.
-	effect, classified := analyzer.classifyCalleeEffect(callee, pkgPath, name, site.Common(), false)
+	effect, classified := analyzer.classifyCalleeEffect(callee, pkgPath, name, site.Common(), site, false)
 	if classified {
 		effect.observable = observableCallEffect(analyzer.h.SelectionAudited(), effect, site.Common(), site, analyzer.fresh)
 		analyzer.recordExternalEffect(effect)
@@ -778,7 +800,7 @@ func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site 
 	// carries no subject-attributed parameter analysis, so the ladder's
 	// writer-sink leg closes only locally constructed writers - an init
 	// formatting into its own buffer is pure value computation.
-	effect, classified := analyzer.classifyCalleeEffect(callee, pkgPath, name, site.Common(), false)
+	effect, classified := analyzer.classifyCalleeEffect(callee, pkgPath, name, site.Common(), site, false)
 	if classified {
 		analyzer.recordExternalEffect(effect)
 	}

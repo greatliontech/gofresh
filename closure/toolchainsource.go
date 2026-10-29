@@ -386,7 +386,15 @@ func digestFiles(ctx context.Context, dir string, files []string) (string, error
 	return digestFilesBuffered(ctx, dir, files, make([]byte, 32*1024))
 }
 
+func digestFilesUntraced(ctx context.Context, dir string, files []string) (string, error) {
+	return digestFilesBufferedOpt(ctx, dir, files, make([]byte, 32*1024), false)
+}
+
 func digestFilesBuffered(ctx context.Context, dir string, files []string, buffer []byte) (string, error) {
+	return digestFilesBufferedOpt(ctx, dir, files, buffer, true)
+}
+
+func digestFilesBufferedOpt(ctx context.Context, dir string, files []string, buffer []byte, notifyHook bool) (string, error) {
 	h := sha256.New()
 	for _, name := range files {
 		// The check point: a cancelled traversal exits at the next file
@@ -394,7 +402,7 @@ func digestFilesBuffered(ctx context.Context, dir string, files []string, buffer
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		if digestReadForTest != nil {
+		if notifyHook && digestReadForTest != nil {
 			digestReadForTest(name)
 		}
 		file, err := os.Open(filepath.Join(dir, name))

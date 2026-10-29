@@ -38,6 +38,39 @@ type freshParamAnalysis struct {
 	enumRoot        *ssa.Function
 	enumSites       []ssa.CallInstruction
 	enumFieldStores map[int][]ssa.Value
+	enumOnly        bool
+	subjectRoot     *ssa.Function
+	summary         *callerReferenceSummary
+
+	structFieldStores      map[structFieldKey][]ssa.Value
+	structPoisoned         map[structFieldKey]bool
+	structReferencedByType map[*types.Named]bool
+	programSites           map[*ssa.Function][]ssa.CallInstruction
+	programValueRef        map[*ssa.Function]bool
+	programFunctions       map[*ssa.Function]bool
+	callBindings           map[*ssa.Parameter]ssa.Value
+	calleeSeen             map[*ssa.Function]bool
+	calleeDepth            map[*ssa.Function]int
+	invokeSeen             map[ssa.CallInstruction]bool
+	invokeDepth            map[ssa.CallInstruction]int
+	inFieldStore           bool
+	inProgramSites         bool
+	stackDepth             map[ssa.Value]int
+	lowlink                *int
+	hasLeaf                *bool
+	usedSubject            *bool
+	rootDone               map[ssa.Value]bool
+	rootLowlink            map[ssa.Value]int
+	rootHasLeaf            map[ssa.Value]bool
+	rootUsedSubject        map[ssa.Value]bool
+	rootSeen               map[ssa.Value]bool
+	closedDone             map[ssa.Value]bool
+	typesMemo              map[ssa.Value][]types.Type
+	typesFailed            map[ssa.Value]bool
+	funcsMemo              map[ssa.Value][]*ssa.Function
+	funcsFailed            map[ssa.Value]bool
+	invokeTargets          map[ssa.CallInstruction]map[*ssa.Function]bool
+	invokeFailed           map[ssa.CallInstruction]bool
 
 	argFresh          map[freshParamKey]bool
 	usesOK            map[freshParamKey]bool
@@ -78,8 +111,23 @@ func newFreshParamAnalysis(audited bool, reach attributedReachability) *freshPar
 		functions:              reach.functions,
 		callers:                map[*ssa.Function][]ssa.CallInstruction{},
 		dynamic:                map[*ssa.Function]bool{},
+		subjectRoot:            reach.subjectRoot,
+		summary:                reach.summary,
+		structFieldStores:      reach.structFieldStores,
+		structPoisoned:         reach.structPoisoned,
+		structReferencedByType: reach.structReferencedByType,
+		programSites:           reach.programSites,
+		programValueRef:        reach.programValueRef,
+		programFunctions:       reach.programFunctions,
 		argFresh:               map[freshParamKey]bool{},
 		usesOK:                 map[freshParamKey]bool{},
+		closedDone:             map[ssa.Value]bool{},
+		typesMemo:              map[ssa.Value][]types.Type{},
+		typesFailed:            map[ssa.Value]bool{},
+		funcsMemo:              map[ssa.Value][]*ssa.Function{},
+		funcsFailed:            map[ssa.Value]bool{},
+		invokeTargets:          map[ssa.CallInstruction]map[*ssa.Function]bool{},
+		invokeFailed:           map[ssa.CallInstruction]bool{},
 		propertyHarnessAudited: reach.propertyHarnessAudited,
 	}
 	if len(reach.enumeratedRootSites) > 0 || len(reach.enumeratedFieldStores) > 0 {
@@ -161,14 +209,30 @@ func (fp *freshParamAnalysis) resolve() {
 // itself, so the membership check is equivalent for the walks that
 // previously omitted it).
 func (fp *freshParamAnalysis) paramCrossingEligible(fn *ssa.Function) bool {
-	return fp != nil && fn != nil && fp.functions[fn] && !fp.dynamic[fn] && len(fn.FreeVars) == 0 && !fn.Signature.Variadic()
+	if fp == nil || fn == nil {
+		return false
+	}
+	if len(fn.FreeVars) != 0 {
+		if !fp.selectionAudited || fp.programSites == nil || fp.programValueRef[fn] {
+			return false
+		}
+	}
+	if fp.dynamic[fn] {
+		if fn != fp.enumRoot && (!fp.selectionAudited || fp.programSites == nil || fp.programValueRef[fn] || (fn.Signature == nil || (fn.Signature.Recv() == nil && len(fn.FreeVars) == 0 && len(fp.programSites[fn]) == 0))) {
+			return false
+		}
+	}
+	if fn.Signature.Variadic() && fn != fp.enumRoot && !fp.selectionAudited && !fp.inFieldStore && !fp.inProgramSites {
+		return false
+	}
+	return fp.functions[fn] || fp.programFunctions[fn] || fn == fp.enumRoot
 }
 
 // paramEligible refuses every shape the boundary extension cannot
-// carry: the shared crossing refusals plus out-of-range and non-string
-// parameters.
+// carry: the shared crossing refusals plus variadic, out-of-range, and
+// non-string parameters.
 func (fp *freshParamAnalysis) paramEligible(fn *ssa.Function, idx int) bool {
-	if !fp.paramCrossingEligible(fn) {
+	if !fp.paramCrossingEligible(fn) || fp.dynamic[fn] || len(fn.FreeVars) != 0 || fn.Signature.Variadic() {
 		return false
 	}
 	if idx < 0 || idx >= len(fn.Params) {

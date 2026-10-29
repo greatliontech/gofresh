@@ -88,7 +88,7 @@ func auditedStandardMethod(audited bool, fn *ssa.Function) bool {
 	if !ok {
 		return false
 	}
-	return auditset.ReceiverMethod(f, "time", auditset.TimeMethod) || auditset.ReceiverMethod(f, "reflect", auditset.ReflectMethod) || auditset.ReceiverMethod(f, "math/rand", auditset.RandMethod)
+	return auditset.ReceiverMethod(f, "time", auditset.TimeMethod) || auditset.ReceiverMethod(f, "reflect", auditset.ReflectMethod) || auditset.ReceiverMethod(f, "math/rand", auditset.RandMethod) || auditset.ReceiverMethod(f, "sync/atomic", auditset.AtomicMethod)
 }
 
 // auditedStandardCallee is the walk tiers' whole standard admission
@@ -99,6 +99,14 @@ func auditedStandardMethod(audited bool, fn *ssa.Function) bool {
 func auditedStandardCallee(audited bool, pkgPath, name string, fn *ssa.Function) bool {
 	if auditedStandardSymbol(audited, pkgPath, name) || auditedStandardMethod(audited, fn) {
 		return true
+	}
+	if audited && pkgPath == "context" && fn != nil && fn.Signature != nil && fn.Signature.Recv() != nil {
+		switch fn.Name() {
+		case "Deadline", "Done", "Err", "Value":
+			if isAuditedStandardContextRecvType(fn.Signature.Recv().Type()) {
+				return true
+			}
+		}
 	}
 	if fn != nil && fn.Object() == nil && fn.Parent() != nil {
 		top := fn.Parent()

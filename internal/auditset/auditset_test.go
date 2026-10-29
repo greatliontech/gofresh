@@ -21,7 +21,7 @@ func TestVersionListingAdmitsOnlyListedVersions(t *testing.T) {
 // The audited sets' exact contents — the goldens a source audit edits
 // (REQ-closure-shared-dynamic-state-audited-discharges).
 func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
-	if !slices.Equal(syncNames, []string{"Do", "Lock", "Mutex", "Once", "RLock", "RUnlock", "RWMutex", "TryLock", "TryRLock", "Unlock"}) {
+	if !slices.Equal(syncNames, []string{"Broadcast", "Cond", "Do", "Lock", "Locker", "Mutex", "NewCond", "Once", "RLock", "RUnlock", "RWMutex", "Signal", "TryLock", "TryRLock", "Unlock", "Wait"}) {
 		t.Fatalf("sync names = %v", syncNames)
 	}
 	if !slices.Equal(poolNames, []string{"Get", "Pool", "Put"}) {
@@ -77,13 +77,25 @@ func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
 	if !slices.Equal(slices.Sorted(maps.Keys(fmtSymbols)), []string{"Append", "Appendf", "Appendln", "Errorf", "FormatString", "Sprint", "Sprintf", "Sprintln", "Stringer"}) {
 		t.Fatalf("fmt symbols = %v", slices.Sorted(maps.Keys(fmtSymbols)))
 	}
+	if !slices.Equal(slices.Sorted(maps.Keys(fips140Symbols)), []string{"Enforced", "WithoutEnforcement"}) {
+		t.Fatalf("fips140 symbols = %v", slices.Sorted(maps.Keys(fips140Symbols)))
+	}
+	if !Symbol("math", "MaxUint32") || !Symbol("math", "MaxInt64") || Symbol("math", "Sin") || Symbol("math", "NaN") || !Symbol("crypto/fips140", "WithoutEnforcement") || !Symbol("crypto/fips140", "Enforced") || Symbol("crypto/fips140", "Enabled") {
+		t.Fatal("math or crypto/fips140 symbol predicate wrong")
+	}
 	for _, name := range []string{"Pointer", "UnsafePointer", "Ptr", "Interface", "Slice", "Key", "Method", "MethodByName", "Call", "CallSlice", "MakeFunc", "ValueOf", "New", "Zero", "Indirect", "Set", "SetInt", "Index", "Addr", "Convert", "Append", "Copy", "Swapper", "Select", "MakeSlice", "MakeMap", "MakeChan", "PointerTo", "SliceOf", "MapOf", "ArrayOf", "ChanOf", "FuncOf", "StructOf", "TypeFor", "Seq", "Seq2", "Bytes", "IsNil", "IsValid", "IsZero", "MapIndex", "MapRange", "Cap"} {
 		if reflectSymbols[name] {
 			t.Errorf("reflect %s admitted — the dispatch channel, a producer, an address, or the hand-out", name)
 		}
 	}
-	if !SyncMethod("RWMutex", "RLock") || SyncMethod("Mutex", "RLock") || !SyncMethod("Once", "Do") || SyncMethod("Once", "Lock") {
+	if !SyncMethod("RWMutex", "RLock") || SyncMethod("Mutex", "RLock") || !SyncMethod("Once", "Do") || SyncMethod("Once", "Lock") || !SyncMethod("Cond", "Wait") || !SyncMethod("Cond", "Signal") || !SyncMethod("Cond", "Broadcast") || SyncMethod("Cond", "Lock") {
 		t.Fatal("sync method predicate wrong")
+	}
+	if !Symbol("sync/atomic", "Int64") || !Symbol("sync/atomic", "LoadInt64") || Symbol("sync/atomic", "Value") || Symbol("sync/atomic", "Pointer") || Symbol("sync/atomic", "LoadPointer") || !AtomicMethod("Int64", "Add") || !AtomicMethod("Bool", "CompareAndSwap") || AtomicMethod("Value", "Load") || AtomicMethod("Pointer", "Load") {
+		t.Fatal("sync/atomic symbol or method predicate wrong")
+	}
+	if !StandardSentinelGlobal("io", "EOF") || !StandardSentinelGlobal("io/fs", "ErrNotExist") || !StandardSentinelGlobal("encoding/binary", "BigEndian") || StandardSentinelGlobal("io", "Discard") || StandardSentinelGlobal("os", "Stdout") {
+		t.Fatal("standard sentinel global predicate wrong")
 	}
 	if !PoolMethod("Pool", "Get") || PoolMethod("Pool", "New") {
 		t.Fatal("pool method predicate wrong")

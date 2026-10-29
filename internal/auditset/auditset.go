@@ -32,8 +32,8 @@ func Identity() string {
 		}
 		return result
 	}
-	data, _ := json.Marshal([]any{purePackages, symbolTables, methods(syncMethods),
-		methods(poolMethods), methods(memoMethods), methods(timeMethods), methods(reflectMethods), methods(randMethods),
+	data, _ := json.Marshal([]any{purePackages, symbolTables, methods(syncMethods), syncSymbols,
+		methods(poolMethods), methods(memoMethods), methods(timeMethods), methods(reflectMethods), methods(randMethods), methods(atomicMethods),
 		methods(standardSentinelGlobals), reflectImmutableTypes, constantImmutableTypes})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -58,9 +58,15 @@ func (l VersionListing) Listed(key, version string) bool {
 // cannot change dispatch. Grows only by source audit
 // (REQ-closure-shared-dynamic-state-audited-discharges).
 var syncMethods = map[string][]string{
+	"Cond":    {"Broadcast", "Signal", "Wait"},
 	"Mutex":   {"Lock", "Unlock", "TryLock"},
 	"RWMutex": {"Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock"},
 	"Once":    {"Do"},
+}
+
+var syncSymbols = map[string]bool{
+	"Locker":  true,
+	"NewCond": true,
 }
 
 // memoMethods is the audited memo set: sync.Map with its Load, Store,
@@ -221,7 +227,9 @@ func PurePackages() []string {
 // carries — sync's synchronization, pool and memo methods, reflect's
 // view surface, time's receiver-qualified names — sorted; the
 // toolchain-source audit's key walks it beside the symbol tables.
-func ReceiverPackages() []string { return []string{"reflect", "sync", "time"} }
+func ReceiverPackages() []string {
+	return []string{"math/rand", "reflect", "sync", "sync/atomic", "time"}
+}
 
 // timeSymbols is the audited surface of package time, matched by bare
 // name at every tier: fixed-argument construction and value
@@ -432,14 +440,75 @@ var flagSymbols = func() map[string]bool {
 // is in exactly one, so the two consulting predicates can never
 // answer differently for one package (pinned by the package's test).
 var symbolTables = map[string]map[string]bool{
-	"context":       contextSymbols,
-	"fmt":           fmtSymbols,
-	"reflect":       reflectSymbols,
-	"time":          timeSymbols,
-	"path/filepath": filepathSymbols,
-	"net/url":       urlSymbols,
-	"flag":          flagSymbols,
-	"math/rand":     randSymbols,
+	"context":        contextSymbols,
+	"crypto/fips140": fips140Symbols,
+	"fmt":            fmtSymbols,
+	"math":           mathSymbols,
+	"reflect":        reflectSymbols,
+	"sync/atomic":    atomicSymbols,
+	"time":           timeSymbols,
+	"path/filepath":  filepathSymbols,
+	"net/url":        urlSymbols,
+	"flag":           flagSymbols,
+	"math/rand":      randSymbols,
+}
+
+// atomicSymbols is the audited bare-name surface of package sync/atomic:
+// the scalar atomic types (Bool, Int32, Int64, Uint32, Uint64, Uintptr)
+// and the top-level scalar atomic operations. Pointer[T] and Value, and the
+// top-level Pointer operations (LoadPointer, StorePointer, SwapPointer,
+// CompareAndSwapPointer), are excluded from this table; scalar receiver
+// methods (Load, Store, Add, Swap, CompareAndSwap, And, Or) live in
+// atomicMethods so Value's methods of the same names remain excluded.
+var atomicSymbols = map[string]bool{
+	"Bool": true, "Int32": true, "Int64": true, "Uint32": true, "Uint64": true, "Uintptr": true,
+	"AddInt32": true, "AddInt64": true, "AddUint32": true, "AddUint64": true, "AddUintptr": true,
+	"AndInt32": true, "AndInt64": true, "AndUint32": true, "AndUint64": true, "AndUintptr": true,
+	"CompareAndSwapInt32": true, "CompareAndSwapInt64": true, "CompareAndSwapUint32": true, "CompareAndSwapUint64": true, "CompareAndSwapUintptr": true,
+	"LoadInt32": true, "LoadInt64": true, "LoadUint32": true, "LoadUint64": true, "LoadUintptr": true,
+	"OrInt32": true, "OrInt64": true, "OrUint32": true, "OrUint64": true, "OrUintptr": true,
+	"StoreInt32": true, "StoreInt64": true, "StoreUint32": true, "StoreUint64": true, "StoreUintptr": true,
+	"SwapInt32": true, "SwapInt64": true, "SwapUint32": true, "SwapUint64": true, "SwapUintptr": true,
+}
+
+// atomicMethods is the audited receiver-qualified method surface of package
+// sync/atomic on scalar atomic types.
+var atomicMethods = map[string][]string{
+	"Bool":    {"CompareAndSwap", "Load", "Store", "Swap"},
+	"Int32":   {"Add", "And", "CompareAndSwap", "Load", "Or", "Store", "Swap"},
+	"Int64":   {"Add", "And", "CompareAndSwap", "Load", "Or", "Store", "Swap"},
+	"Uint32":  {"Add", "And", "CompareAndSwap", "Load", "Or", "Store", "Swap"},
+	"Uint64":  {"Add", "And", "CompareAndSwap", "Load", "Or", "Store", "Swap"},
+	"Uintptr": {"Add", "And", "CompareAndSwap", "Load", "Or", "Store", "Swap"},
+}
+
+// mathSymbols is the audited compile-time constant surface of package math:
+// architectural integer limit constants and IEEE-754 floating-point constants.
+// All runtime floating-point and transcendental functions in package math
+// remain excluded (REQ-closure-observability-audited-set).
+var mathSymbols = map[string]bool{
+	"E": true, "Pi": true, "Phi": true,
+	"Sqrt2": true, "SqrtE": true, "SqrtPi": true, "SqrtPhi": true,
+	"Ln2": true, "Log2E": true, "Ln10": true, "Log10E": true,
+	"MaxFloat32": true, "SmallestNonzeroFloat32": true,
+	"MaxFloat64": true, "SmallestNonzeroFloat64": true,
+	"MaxInt": true, "MinInt": true,
+	"MaxInt8": true, "MinInt8": true,
+	"MaxInt16": true, "MinInt16": true,
+	"MaxInt32": true, "MinInt32": true,
+	"MaxInt64": true, "MinInt64": true,
+	"MaxUint": true, "MaxUint8": true, "MaxUint16": true, "MaxUint32": true, "MaxUint64": true,
+}
+
+// fips140Symbols is the audited surface of package crypto/fips140:
+// WithoutEnforcement, which sets a goroutine-local bypass flag around a
+// caller-supplied callback whose own body is walked and classified at its
+// call site, and Enforced, which reports the immutable startup-resolved
+// FIPS enforcement bit (REQ-closure-observability-audited-set). Enabled,
+// Version, and Enforce remain excluded.
+var fips140Symbols = map[string]bool{
+	"WithoutEnforcement": true,
+	"Enforced":           true,
 }
 
 // contextSymbols is the audited surface of package context: the timerless
@@ -460,8 +529,10 @@ var contextSymbols = map[string]bool{
 // standardSentinelGlobals lists exported standard-library globals whose
 // SSA referrers are verified unmutated outside their declaring package's init.
 var standardSentinelGlobals = map[string][]string{
-	"context": {"Canceled", "DeadlineExceeded"},
-	"io":      {"Discard"},
+	"context":         {"Canceled", "DeadlineExceeded"},
+	"encoding/binary": {"BigEndian", "LittleEndian"},
+	"io":              {"Discard", "EOF", "ErrClosedPipe", "ErrNoProgress", "ErrShortBuffer", "ErrShortWrite", "ErrUnexpectedEOF"},
+	"io/fs":           {"ErrClosed", "ErrExist", "ErrInvalid", "ErrNotExist", "ErrPermission", "SkipAll", "SkipDir"},
 }
 
 // StandardSentinelGlobal reports whether pkgPath.name is in the audited
@@ -530,6 +601,12 @@ func RandMethod(receiver, method string) bool {
 	return slices.Contains(randMethods[receiver], method)
 }
 
+// AtomicMethod reports whether a sync/atomic receiver's method is in the
+// audited receiver-qualified scalar atomic set.
+func AtomicMethod(receiver, method string) bool {
+	return slices.Contains(atomicMethods[receiver], method)
+}
+
 // ReceiverMethod is the one receiver-unwrap ladder every
 // receiver-qualified standard admission shares: a method declared in
 // the named standard package on a named receiver (pointer or value)
@@ -574,7 +651,7 @@ func MemoName(name string) bool { return slices.Contains(memoNames, name) }
 // SyncSurfaceName reports whether a sync symbol name — receiver or method —
 // belongs to any of the audited sync sets (synchronization, pooling, or memo).
 func SyncSurfaceName(name string) bool {
-	return SyncName(name) || PoolName(name) || MemoName(name)
+	return SyncName(name) || PoolName(name) || MemoName(name) || syncSymbols[name]
 }
 
 // ReflectImmutable reports whether a reflect type is in the audited

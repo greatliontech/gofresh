@@ -62,7 +62,7 @@ import (
 // because the fold is a refusal-only backstop consulted after the
 // walks — a shadow adds false resolutions and removes none of the
 // file's real ones, so no proof the walks refuse is ever granted.
-const effectScanStrategy = "gofresh/effect-scan@24"
+const effectScanStrategy = "gofresh/effect-scan@25"
 
 // effectScanScope is the memo's full scope: the strategy version, the
 // analyzing frontend, complete selected source and admission policy. A Boolean
@@ -86,7 +86,7 @@ func (h *Hasher) effectScanScope() string {
 // (REQ-closure-testing-scan-memo).
 // @4 stops classifying b.N and b.Loop: benchmark pacing records nothing
 // at the fold (ObservationRTA@32, effect-scan@16).
-const testingScanStrategy = "gofresh/testing-scan@5"
+const testingScanStrategy = "gofresh/testing-scan@6"
 
 // testingScanScope completes the typed scan's analysis identity outside
 // the source closure: its own strategy version plus the code guards —

@@ -35,6 +35,7 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 	a.openWorld = reachable.openWorld
 	a.fresh = newFreshParamAnalysis(h.SelectionAudited(), reachable)
 	a.fresh.isStd = a.isStdFunction
+	extraSubjectTargets := map[*ssa.Function]bool{}
 	for site, targets := range reachable.dynamicTargets {
 		if !reachable.functions[site.Parent()] {
 			continue
@@ -86,6 +87,11 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 			}
 			if admitted {
 				a.subjectDeterminedInvokes[site] = true
+				for target := range targets {
+					if !reachable.functions[target] && !harnessInvokeAdmitted(h.SelectionAudited(), target) {
+						extraSubjectTargets[target] = true
+					}
+				}
 			}
 		}
 		for target := range targets {
@@ -144,6 +150,19 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 		a.rtaReach[fn] = true
 	}
 	for fn := range reachable.functions {
+		if err := a.contextErr(); err != nil {
+			return tier2Result{}, nil, err
+		}
+		a.addFunction(fn)
+		if idx := a.idxForFunction(fn); idx != nil && idx.std {
+			continue
+		}
+		a.scanFunction(fn)
+		if err := a.contextErr(); err != nil {
+			return tier2Result{}, nil, err
+		}
+	}
+	for fn := range extraSubjectTargets {
 		if err := a.contextErr(); err != nil {
 			return tier2Result{}, nil, err
 		}
@@ -478,11 +497,32 @@ func (a *tier2Analyzer) buildIndex(p *packages.Package) *pkgIndex {
 						for _, name := range s.Names {
 							if obj := p.TypesInfo.Defs[name]; obj != nil {
 								idx.decls[obj] = node
+								if d.Tok == token.CONST && name.Name != "" && name.Name != "_" {
+									idx.funcKeys[obj] = funcDeclKey{
+										dir:       fileDir,
+										pkgClause: pkgClause,
+										name:      name.Name,
+									}
+								}
 							}
 						}
 					case *ast.TypeSpec:
 						if obj := p.TypesInfo.Defs[s.Name]; obj != nil {
 							addTypeDeclaration(idx, obj, s)
+							if s.Name != nil && s.Name.Name != "" && s.Name.Name != "_" {
+								key := funcDeclKey{
+									dir:       fileDir,
+									pkgClause: pkgClause,
+									name:      s.Name.Name,
+								}
+								idx.funcKeys[obj] = key
+								if iface, ok := obj.Type().Underlying().(*types.Interface); ok {
+									iface.Complete()
+									for i := 0; i < iface.NumExplicitMethods(); i++ {
+										idx.funcKeys[iface.ExplicitMethod(i)] = key
+									}
+								}
+							}
 						}
 					}
 				}
@@ -833,7 +873,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		a.recordExternalEffect(symbolExternalEffect(externalEffectFileIO, "os", "File."+name, "reaches os.File."+name+" on an unattributed file handle (file I/O)"))
 		return
 	}
-	effect, classified := a.classifyCalleeEffect(callee, pkgPath, name, c, callerStd)
+	effect, classified := a.classifyCalleeEffect(callee, pkgPath, name, c, site, callerStd)
 	if classified {
 		effect.observable = observableCallEffect(a.h.SelectionAudited(), effect, c, site, a.fresh)
 		if callerStd && (effect.kind == externalEffectFilesystemMutation || effect.kind == externalEffectPathMutation) {
@@ -873,7 +913,10 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 // dynamically reached Fprint's site arguments belong to the dynamic
 // signature, and only the fresh-analysis view in force decides which
 // writers close.
-func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name string, c *ssa.CallCommon, callerStd bool) (externalEffect, bool) {
+func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name string, c *ssa.CallCommon, site ssa.CallInstruction, callerStd bool) (externalEffect, bool) {
+	if timeUnixCallChainedToUTCOrFixedZone(a.h.SelectionAudited(), callee, pkgPath, name, c, site) {
+		return externalEffect{}, false
+	}
 	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := a.idxForFunction(callee)
 	if !classified && c.StaticCallee() == callee && flagProvenSetUse(a.flagProven, pkgPath, name, c) {
@@ -906,6 +949,90 @@ func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name
 		classified = false
 	}
 	return effect, classified
+}
+
+// timeUnixCallChainedToUTCOrFixedZone reports whether site is a direct call to
+// time.Unix, time.UnixMilli, or time.UnixMicro whose returned time.Time is
+// consumed exclusively as the receiver of a direct (time.Time).UTC() call or a
+// direct (time.Time).In(loc) call whose loc argument is constructed by
+// time.FixedZone. Although time.Unix constructs a Time tagged with time.Local,
+// neither Unix nor Time.UTC nor Time.In consults or initializes the local zone
+// descriptor (Time.abs only forces local-zone lookup when the receiver's
+// location remains Local), so immediate re-tagging into UTC or a fixed zone is
+// pure arithmetic (REQ-closure-observability-audited-set).
+func timeUnixCallChainedToUTCOrFixedZone(audited bool, callee *ssa.Function, pkgPath, name string, c *ssa.CallCommon, site ssa.CallInstruction) bool {
+	if !audited || pkgPath != "time" || (name != "Unix" && name != "UnixMilli" && name != "UnixMicro") {
+		return false
+	}
+	if c == nil || c.StaticCallee() != callee {
+		return false
+	}
+	callVal, ok := site.(*ssa.Call)
+	if !ok || callVal.Referrers() == nil {
+		return false
+	}
+	sawConsumer := false
+	for _, ref := range *callVal.Referrers() {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+			continue
+		case *ssa.Call:
+			rc := r.Common()
+			if rc == nil || rc.IsInvoke() || rc.Value == callVal || len(rc.Args) == 0 || rc.Args[0] != callVal {
+				return false
+			}
+			for _, arg := range rc.Args[1:] {
+				if arg == callVal {
+					return false
+				}
+			}
+			rCallee := rc.StaticCallee()
+			if rCallee == nil || funcPkgPath(rCallee) != "time" {
+				return false
+			}
+			switch rCallee.Name() {
+			case "UTC":
+				if len(rc.Args) != 1 {
+					return false
+				}
+				sawConsumer = true
+			case "In":
+				if len(rc.Args) != 2 || !locFromFixedZone(audited, rc.Args[1], make(map[ssa.Value]bool)) {
+					return false
+				}
+				sawConsumer = true
+			default:
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return sawConsumer
+}
+
+func locFromFixedZone(audited bool, v ssa.Value, seen map[ssa.Value]bool) bool {
+	if !audited || v == nil || seen[v] {
+		return false
+	}
+	seen[v] = true
+	switch val := v.(type) {
+	case *ssa.Call:
+		callee := val.Call.StaticCallee()
+		return callee != nil && funcPkgPath(callee) == "time" && functionSymbolName(callee) == "FixedZone"
+	case *ssa.Phi:
+		if len(val.Edges) == 0 {
+			return false
+		}
+		for _, edge := range val.Edges {
+			if !locFromFixedZone(audited, edge, seen) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 // dispatchAdmitted is the one predicate deciding whether a computed call
@@ -943,7 +1070,7 @@ func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool)
 				return false
 			}
 			if idx.std {
-				if !fromRTA || observableFileMethod(fn) {
+				if (!fromRTA && (!c.IsInvoke() || !a.h.SelectionAudited())) || observableFileMethod(fn) {
 					return false
 				}
 				if !isAuditedStandardOrDelegatePackage(a.h.SelectionAudited(), idx.path) && !auditedStandardCallee(a.h.SelectionAudited(), idx.path, functionSymbolName(fn), fn) {
@@ -1236,13 +1363,19 @@ func walkTypeGraph(t types.Type, typeArgs bool, seen map[types.Type]bool, visit 
 	walk(t)
 }
 
-// ssaOpaqueHandle recognizes only the builder's two internal tokens. The
-// synthetic package path cannot occur in a source import, and neither token
-// represents a source pointer operation. Their operands and callbacks remain
-// independently scanned. Unknown synthetic names retain the ordinary judgment.
+// ssaOpaqueHandle recognizes the builder's two internal tokens and the
+// standard library's sync.notifyList wait-queue handle inside sync.Cond.
+// None represents a user source pointer operation, and their operands and
+// callbacks remain independently scanned.
 func ssaOpaqueHandle(t types.Type) bool {
 	n, ok := t.(*types.Named)
-	if !ok || n.Obj().Pkg() == nil || n.Obj().Pkg().Path() != "$ssa" || n.Underlying() != types.Typ[types.UnsafePointer] {
+	if !ok || n.Obj().Pkg() == nil {
+		return false
+	}
+	if n.Obj().Pkg().Path() == "sync" && n.Obj().Name() == "notifyList" {
+		return true
+	}
+	if n.Obj().Pkg().Path() != "$ssa" || n.Underlying() != types.Typ[types.UnsafePointer] {
 		return false
 	}
 	return n.Obj().Name() == "rangeIter" || n.Obj().Name() == "deferStack"
@@ -1831,8 +1964,85 @@ func funcDeclKeyForAST(dir, pkgClause string, fn *ast.FuncDecl) (funcDeclKey, bo
 	}, true
 }
 
+func unreachedASTDecls(dir, pkgClause string, file *ast.File, testMainDecl *ast.FuncDecl, reachedDecls map[funcDeclKey]bool) []ast.Node {
+	if reachedDecls == nil || file == nil {
+		return nil
+	}
+	dir = filepath.Clean(dir)
+	var unreached []ast.Node
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			if d == testMainDecl || (d.Name != nil && d.Name.Name == "TestMain") {
+				continue
+			}
+			if key, ok := funcDeclKeyForAST(dir, pkgClause, d); ok && !reachedDecls[key] {
+				unreached = append(unreached, d)
+			}
+		case *ast.GenDecl:
+			switch d.Tok {
+			case token.TYPE:
+				for _, spec := range d.Specs {
+					ts, ok := spec.(*ast.TypeSpec)
+					if !ok || ts.Name == nil || ts.Name.Name == "" || ts.Name.Name == "_" {
+						continue
+					}
+					key := funcDeclKey{dir: dir, pkgClause: pkgClause, name: ts.Name.Name}
+					if !reachedDecls[key] {
+						unreached = append(unreached, ts)
+					}
+				}
+			case token.CONST:
+				hasNamed := false
+				anyReached := false
+				for _, spec := range d.Specs {
+					vs, ok := spec.(*ast.ValueSpec)
+					if !ok {
+						continue
+					}
+					for _, name := range vs.Names {
+						if name == nil || name.Name == "" {
+							continue
+						}
+						if name.Name == "_" {
+							anyReached = true
+							continue
+						}
+						hasNamed = true
+						key := funcDeclKey{dir: dir, pkgClause: pkgClause, name: name.Name}
+						if reachedDecls[key] {
+							anyReached = true
+						}
+					}
+				}
+				if hasNamed && !anyReached {
+					unreached = append(unreached, d)
+				}
+			}
+		}
+	}
+	return unreached
+}
+
 func subjectReachedDeclKeys(base *tier2Base, reach attributedReachability, subjectObjects map[types.Object]bool) map[funcDeclKey]bool {
-	keys := make(map[funcDeclKey]bool, len(subjectObjects)+len(reach.functions)+len(reach.instantiatedOrigins))
+	aux := base.analyzer()
+	for obj := range subjectObjects {
+		aux.seenObjects[obj] = true
+	}
+	for fn := range reach.startupFunctions {
+		aux.addFunction(fn)
+		if idx := aux.idxForFunction(fn); idx == nil || !idx.std {
+			aux.scanFunction(fn)
+		}
+	}
+	for fn := range reach.testMainFunctions {
+		aux.addFunction(fn)
+		if idx := aux.idxForFunction(fn); idx == nil || !idx.std {
+			aux.scanFunction(fn)
+		}
+	}
+	_ = aux.drainObjects()
+	keys := make(map[funcDeclKey]bool, len(aux.seenObjects)+len(reach.functions)+len(reach.instantiatedOrigins))
 	addObj := func(obj types.Object) {
 		obj = originObject(obj)
 		if obj == nil || obj.Pkg() == nil {
@@ -1852,10 +2062,16 @@ func subjectReachedDeclKeys(base *tier2Base, reach attributedReachability, subje
 			addObj(cur.Object())
 		}
 	}
-	for obj := range subjectObjects {
+	for obj := range aux.seenObjects {
 		addObj(obj)
 	}
-	for fn := range reach.functions {
+	for fn := range reach.subjectFunctions {
+		addFn(fn)
+	}
+	for fn := range reach.startupFunctions {
+		addFn(fn)
+	}
+	for fn := range reach.testMainFunctions {
 		addFn(fn)
 	}
 	for fn := range reach.instantiatedOrigins {

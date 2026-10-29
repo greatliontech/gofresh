@@ -49,6 +49,7 @@ type attributedRTA struct {
 	concreteTypes  typeutil.Map
 	interfaceTypes typeutil.Map
 	runtimeTypes   typeutil.Map // type -> subject mask
+	traversedTypes typeutil.Map // type -> subject mask
 	typeParamSeen  map[types.Type]bool
 }
 
@@ -367,6 +368,7 @@ func Analyze(ctx context.Context, roots map[*ssa.Function]uint64, seeds *Seeds) 
 	r.concreteTypes.SetHasher(hasher)
 	r.interfaceTypes.SetHasher(hasher)
 	r.runtimeTypes.SetHasher(hasher)
+	r.traversedTypes.SetHasher(hasher)
 
 	// Seeds precede root processing so a subject's first-visited dynamic
 	// site already sees its enumerated candidates and types; the visit
@@ -536,83 +538,94 @@ func ContainsTypeParam(t types.Type, seen map[types.Type]bool) bool {
 // upstream RTA's exported-method and recursive runtime-type behavior.
 func (r *attributedRTA) addRuntimeType(T types.Type, masks uint64, skip bool) {
 	T = types.Unalias(T)
-	previous, _ := r.runtimeTypes.At(T).(uint64)
-	delta := masks &^ previous
-	if delta == 0 {
+	var rtDelta uint64
+	if !skip {
+		previous, _ := r.runtimeTypes.At(T).(uint64)
+		rtDelta = masks &^ previous
+	}
+	prevTrav, _ := r.traversedTypes.At(T).(uint64)
+	travDelta := masks &^ prevTrav
+	if rtDelta == 0 && travDelta == 0 {
 		return
 	}
-	if previous == 0 {
+	if prevTrav == 0 {
 		clear(r.typeParamSeen)
 		if ContainsTypeParam(T, r.typeParamSeen) {
 			return
 		}
 	}
-	r.runtimeTypes.Set(T, previous|delta)
+	if rtDelta != 0 {
+		previous, _ := r.runtimeTypes.At(T).(uint64)
+		r.runtimeTypes.Set(T, previous|rtDelta)
 
-	mset := r.prog.MethodSets.MethodSet(T)
-	if _, ok := T.Underlying().(*types.Interface); !ok {
-		for i, n := 0, mset.Len(); i < n; i++ {
-			sel := mset.At(i)
-			if sel.Obj().Exported() && sel.Obj().Type().(*types.Signature).TypeParams() == nil {
-				r.addReachable(r.prog.MethodValue(sel), delta)
+		mset := r.prog.MethodSets.MethodSet(T)
+		if _, ok := T.Underlying().(*types.Interface); !ok {
+			for i, n := 0, mset.Len(); i < n; i++ {
+				sel := mset.At(i)
+				if sel.Obj().Exported() && sel.Obj().Type().(*types.Signature).TypeParams() == nil {
+					r.addReachable(r.prog.MethodValue(sel), rtDelta)
+				}
+			}
+
+			r.interfaces(T)
+			cinfo := r.concreteTypes.At(T).(*attributedConcreteTypeInfo)
+			cinfo.masks |= rtDelta
+			for _, I := range cinfo.implements {
+				sites, _ := r.invokeSites.At(I).(map[ssa.CallInstruction]uint64)
+				for site, siteMasks := range sites {
+					r.addInvokeEdge(site, T, rtDelta&siteMasks)
+				}
 			}
 		}
 
-		r.interfaces(T)
-		cinfo := r.concreteTypes.At(T).(*attributedConcreteTypeInfo)
-		cinfo.masks |= delta
-		for _, I := range cinfo.implements {
-			sites, _ := r.invokeSites.At(I).(map[ssa.CallInstruction]uint64)
-			for site, siteMasks := range sites {
-				r.addInvokeEdge(site, T, delta&siteMasks)
+		for method := range mset.Methods() {
+			sig := method.Type().(*types.Signature)
+			if sig.TypeParams() == nil {
+				r.addRuntimeType(sig.Params(), rtDelta, true)
+				r.addRuntimeType(sig.Results(), rtDelta, true)
 			}
 		}
 	}
-
-	for method := range mset.Methods() {
-		sig := method.Type().(*types.Signature)
-		if sig.TypeParams() == nil {
-			r.addRuntimeType(sig.Params(), delta, true)
-			r.addRuntimeType(sig.Results(), delta, true)
-		}
+	if travDelta == 0 {
+		return
 	}
+	r.traversedTypes.Set(T, prevTrav|travDelta)
 
 	switch t := T.(type) {
 	case *types.Alias:
 		panic("unreachable")
 	case *types.Basic, *types.Interface:
 	case *types.Pointer:
-		r.addRuntimeType(t.Elem(), delta, false)
+		r.addRuntimeType(t.Elem(), travDelta, false)
 	case *types.Slice:
-		r.addRuntimeType(t.Elem(), delta, false)
+		r.addRuntimeType(t.Elem(), travDelta, false)
 	case *types.Chan:
-		r.addRuntimeType(t.Elem(), delta, false)
+		r.addRuntimeType(t.Elem(), travDelta, false)
 	case *types.Map:
-		r.addRuntimeType(t.Key(), delta, false)
-		r.addRuntimeType(t.Elem(), delta, false)
+		r.addRuntimeType(t.Key(), travDelta, false)
+		r.addRuntimeType(t.Elem(), travDelta, false)
 	case *types.Signature:
 		if t.Recv() != nil {
 			panic(fmt.Sprintf("Signature %s has Recv %s", t, t.Recv()))
 		}
-		r.addRuntimeType(t.Params(), delta, true)
-		r.addRuntimeType(t.Results(), delta, true)
+		r.addRuntimeType(t.Params(), travDelta, true)
+		r.addRuntimeType(t.Results(), travDelta, true)
 	case *types.Named:
-		r.addRuntimeType(types.NewPointer(T), delta, false)
-		r.addRuntimeType(t.Underlying(), delta, true)
+		r.addRuntimeType(types.NewPointer(T), travDelta, false)
+		r.addRuntimeType(t.Underlying(), travDelta, true)
 	case *types.Array:
-		r.addRuntimeType(t.Elem(), delta, false)
+		r.addRuntimeType(t.Elem(), travDelta, false)
 	case *types.Struct:
 		for i, n := 0, t.NumFields(); i < n; i++ {
-			r.addRuntimeType(t.Field(i).Type(), delta, false)
+			r.addRuntimeType(t.Field(i).Type(), travDelta, false)
 		}
 	case *types.Tuple:
 		for i, n := 0, t.Len(); i < n; i++ {
-			r.addRuntimeType(t.At(i).Type(), delta, false)
+			r.addRuntimeType(t.At(i).Type(), travDelta, false)
 		}
 	default:
 		panic(T)
 	}
-	_ = skip // retained to mirror upstream's recursive accessibility traversal
 }
 
 func attributedFingerprint(mset *types.MethodSet) uint64 {
