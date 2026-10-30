@@ -70,4 +70,4 @@ jobs:
       race-job-minutes: 150
       race-shards: '[{"name":"r-t","run":"^Test[R-T]"},{"name":"abd-i","run":"^Test[ABD-I]"},{"name":"cj-n","run":"^Test[CJ-N]"},{"name":"o-q-u-z","run":"^Test[O-QU-Z0-9_]|^Example|^Fuzz"}]'
       records: true
-      stipulator-version: v0.66.1
+      stipulator-version: v0.75.1

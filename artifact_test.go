@@ -623,7 +623,10 @@ func TestOther(t *testing.T) {}
 			}
 		})
 	}
-	borrowedSnapshot := *snapshot
+	borrowedSnapshot, err := snapshot.Sibling([]Subject{subject, other})
+	if err != nil {
+		t.Fatal(err)
+	}
 	borrowed, err := borrowedSnapshot.BindArtifact(ctx, subject.Package, ArtifactDescription{Identity: bound.identity, Path: binary})
 	if err != nil {
 		t.Fatal(err)
