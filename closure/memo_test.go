@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/closure/internal/cachefile"
+	"github.com/greatliontech/gofresh/internal/cachefile"
 	"github.com/greatliontech/gofresh/closure/internal/compartment"
 )
 

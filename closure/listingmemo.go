@@ -13,7 +13,8 @@ import (
 
 	"golang.org/x/mod/modfile"
 
-	"github.com/greatliontech/gofresh/closure/internal/cachefile"
+	"github.com/greatliontech/gofresh/internal/buildflags"
+	"github.com/greatliontech/gofresh/internal/cachefile"
 )
 
 // The listing memo serves a package's `go list -json -deps -test` output
@@ -126,8 +127,12 @@ func (h *Hasher) listingScope() string {
 	if h.ToolchainContent() == "" {
 		return ""
 	}
-	for _, flag := range append(strings.Fields(h.snapshot.Value("GOFLAGS")), h.buildFlags...) {
-		name := strings.TrimLeft(strings.Trim(flag, `"'`), "-")
+	goFlags, err := buildflags.Fields(h.snapshot.Value("GOFLAGS"))
+	if err != nil {
+		return ""
+	}
+	for _, flag := range append(goFlags, h.buildFlags...) {
+		name := strings.TrimLeft(flag, "-")
 		if name == "modfile" || strings.HasPrefix(name, "modfile=") {
 			return ""
 		}

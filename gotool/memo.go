@@ -7,7 +7,7 @@ import (
 	"sync"
 )
 
-// MemoKey is the one key a judged-run memo files a directory and an
+// memoKey is the one key a judged-run memo files a directory and an
 // environment under: the directory's coordinate and the normalized
 // environment — less PWD when a directory is named, since the policy
 // derives PWD from it and the coordinate already collapses the
@@ -18,7 +18,7 @@ import (
 // one directory and two orderings of one environment key alike; any
 // other setting moves the key; a malformed environment is refused
 // rather than keyed raw.
-func MemoKey(dir string, env []string) (string, error) {
+func memoKey(dir string, env []string) (string, error) {
 	normalized, err := NormalizeEnv(env)
 	if err != nil {
 		return "", fmt.Errorf("gotool: memo key: %w", err)
@@ -34,7 +34,7 @@ func MemoKey(dir string, env []string) (string, error) {
 	return key.String(), nil
 }
 
-// RunMemo holds one value per MemoKey for one judged run — a
+// RunMemo holds one value per memoKey for one judged run — a
 // consumer's verb invocation, a server's per-request operation, never
 // a process: the span over which the caller holds the toolchain and
 // its environment still. The value is a holder that takes its own
@@ -51,7 +51,7 @@ type RunMemo[V any] struct {
 // Get answers the holder filed under (dir, env), making it on the
 // first ask.
 func (m *RunMemo[V]) Get(dir string, env []string, make func() V) (V, error) {
-	key, err := MemoKey(dir, env)
+	key, err := memoKey(dir, env)
 	if err != nil {
 		var zero V
 		return zero, err

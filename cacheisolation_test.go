@@ -5,14 +5,14 @@ import (
 	"os"
 	"testing"
 
-	"github.com/greatliontech/gofresh/internal/testenv"
+	"github.com/greatliontech/gofresh/gotool"
 )
 
 // Tests must never read or write the real user proof cache: the observability
 // memo (REQ-closure-observability-memo) keys under it, and shared state
 // would let one run's proofs leak into another's assertions.
 func TestMain(m *testing.M) {
-	cache, err := testenv.GoBuildCache(context.Background(), os.Environ())
+	cache, err := gotool.GoBuildCache(context.Background(), os.Environ())
 	if err != nil {
 		panic(err)
 	}

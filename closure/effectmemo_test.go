@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/greatliontech/gofresh/closure/internal/cachefile"
+	"github.com/greatliontech/gofresh/internal/cachefile"
 )
 
 func pinnedFixture(t *testing.T, h *Hasher) (listPkg, string) {

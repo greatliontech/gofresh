@@ -24,9 +24,9 @@ import (
 	"strings"
 )
 
-// Failer is the slice of testing.TB a pin needs, so a harness that is
+// failer is the slice of testing.TB a pin needs, so a harness that is
 // not the testing package can drive one.
-type Failer interface {
+type failer interface {
 	Helper()
 	Error(args ...any)
 	Fatal(args ...any)
@@ -38,9 +38,9 @@ type Failer interface {
 // the partition: no gate outside a Test/Fuzz body, every gate skipping,
 // no gate text inside a string literal, at least one gate, and a walk
 // that reached a test file in root itself and descended below it.
-func Pin(t Failer, root string) {
+func Pin(t failer, root string) {
 	t.Helper()
-	rep, err := Walk(root)
+	rep, err := walk(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,18 +63,18 @@ func Pin(t Failer, root string) {
 	}
 }
 
-// WalkReport is a checker pass over a walked tree with the walk's reach.
-type WalkReport struct {
-	Report
+// walkReport is a checker pass over a walked tree with the walk's reach.
+type walkReport struct {
+	report
 	// AtRoot and Descended record the walk's reach: a test file in the
 	// walked root itself, and one below it.
 	AtRoot, Descended bool
 }
 
-// Walk parses every test file under root (testdata and dot-directories
+// walk parses every test file under root (testdata and dot-directories
 // excluded) and checks them, recording whether the walk reached a test
 // file in root itself and whether it descended below it.
-func Walk(root string) (WalkReport, error) {
+func walk(root string) (walkReport, error) {
 	fset := token.NewFileSet()
 	files := map[string]*ast.File{}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -102,9 +102,9 @@ func Walk(root string) (WalkReport, error) {
 		return nil
 	})
 	if err != nil {
-		return WalkReport{}, err
+		return walkReport{}, err
 	}
-	rep := WalkReport{Report: Check(fset, files)}
+	rep := walkReport{report: check(fset, files)}
 	for path := range files {
 		if rel, err := filepath.Rel(root, path); err == nil {
 			if strings.Contains(rel, string(filepath.Separator)) {
@@ -117,8 +117,8 @@ func Walk(root string) (WalkReport, error) {
 	return rep, nil
 }
 
-// Report is one checker pass over parsed test files.
-type Report struct {
+// report is one checker pass over parsed test files.
+type report struct {
 	// Anywhere counts every gate statement in the files; InBodies counts
 	// the ones that are statements of a Test/Fuzz body (framework-entered
 	// closures included). Equal iff no gate sits in a helper or an
@@ -127,9 +127,9 @@ type Report struct {
 	Problems           []string
 }
 
-// Check applies the fast-tier gate rules to parsed test files.
-func Check(fset *token.FileSet, files map[string]*ast.File) Report {
-	var rep Report
+// check applies the fast-tier gate rules to parsed test files.
+func check(fset *token.FileSet, files map[string]*ast.File) report {
+	var rep report
 	// The gate shape, not the bare call: a fixture may legitimately
 	// exercise testing.Short() as analysis input. Composed so this
 	// file's own text never matches itself.

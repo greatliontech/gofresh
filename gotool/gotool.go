@@ -223,7 +223,7 @@ func (c Containment) grace() time.Duration {
 
 // Sampler is the one toolchain sampler a consumer holds for one
 // judged run (REQ-fresh-toolchain-skew's bound): SampleGoVersion
-// memoized by MemoKey through the one judged-run memo — the toolchain
+// memoized by memoKey through the one judged-run memo — the toolchain
 // does not change within one run — each key's holder taking its sample
 // under its own lock, so a failed sample is the run's answer for that
 // key like an answered one, a cancelled sample is never memoized (the
@@ -251,7 +251,7 @@ func (r *versionReader) sample(ctx context.Context) (string, error) {
 	})
 }
 
-// Sample is SampleGoVersion memoized by MemoKey for the sampler's
+// Sample is SampleGoVersion memoized by memoKey for the sampler's
 // lifetime.
 func (s *Sampler) Sample(ctx context.Context, dir string, env []string) (string, error) {
 	reader, err := s.memo.Get(dir, env, func() *versionReader {

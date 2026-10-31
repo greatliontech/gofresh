@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"runtime"
 	"sort"
@@ -170,13 +171,18 @@ func parseMemTotal(r io.Reader) (uint64, error) {
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
 		if rest, ok := strings.CutPrefix(sc.Text(), "MemTotal:"); ok {
-			if fields := strings.Fields(rest); len(fields) >= 1 {
-				kb, err := strconv.ParseUint(fields[0], 10, 64)
-				if err != nil {
-					return 0, fmt.Errorf("provenance: parse MemTotal: %w", err)
-				}
-				return kb * 1024, nil
+			fields := strings.Fields(rest)
+			if len(fields) != 2 || fields[1] != "kB" {
+				return 0, fmt.Errorf("provenance: MemTotal line requires value in kB")
 			}
+			kb, err := strconv.ParseUint(fields[0], 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("provenance: parse MemTotal: %w", err)
+			}
+			if kb == 0 || kb > math.MaxUint64/1024 {
+				return 0, fmt.Errorf("provenance: MemTotal value out of range")
+			}
+			return kb * 1024, nil
 		}
 	}
 	if err := sc.Err(); err != nil {

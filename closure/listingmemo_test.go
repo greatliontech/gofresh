@@ -428,4 +428,31 @@ func TestListingScopeCarriesTheRecordShape(t *testing.T) {
 	if !strings.Contains(h.listingScope(), "|"+listingShape+"|") {
 		t.Fatalf("scope %q does not carry the shape", h.listingScope())
 	}
+
+	// Quoted GOFLAGS containing "-modfile=..." as a substring of another flag's
+	// value must not disable listingScope, whereas a quoted "-modfile=..." flag
+	// or malformed quote in GOFLAGS must disable it.
+	dir := t.TempDir()
+	snapNonModfile := snapshotFor(t, dir, gotool.SetEnv(os.Environ(), "GOFLAGS", `"-ldflags=-X main.v=-modfile=alt.mod"`))
+	hNonModfile := &Hasher{snapshot: snapNonModfile, dir: "/x", source: sourceDigests{Content: "content", Policy: "policy"}}
+	if hNonModfile.listingScope() == "" {
+		t.Fatal("listingScope disabled by non-modfile quoted GOFLAGS")
+	}
+	snapQuotedModfile := snapshotFor(t, dir, gotool.SetEnv(os.Environ(), "GOFLAGS", `"-modfile=/tmp/with space/go.mod"`))
+	hQuotedModfile := &Hasher{snapshot: snapQuotedModfile, dir: "/x", source: sourceDigests{Content: "content", Policy: "policy"}}
+	if got := hQuotedModfile.listingScope(); got != "" {
+		t.Fatalf("listingScope under quoted -modfile = %q, want empty", got)
+	}
+
+	shimDir := t.TempDir()
+	shimPath := filepath.Join(shimDir, "go")
+	if err := os.WriteFile(shimPath, []byte("#!/bin/sh\nprintf '{\"GOVERSION\":\"go1.26.0\",\"GOFLAGS\":\"'\"'\"'-tags=unterminated\"}\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", shimDir)
+	snapMalformed := snapshotFor(t, dir, gotool.SetEnv(os.Environ(), "PATH", shimDir))
+	hMalformed := &Hasher{snapshot: snapMalformed, dir: "/x", source: sourceDigests{Content: "content", Policy: "policy"}}
+	if got := hMalformed.listingScope(); got != "" {
+		t.Fatalf("listingScope under malformed GOFLAGS = %q, want empty", got)
+	}
 }

@@ -14,7 +14,7 @@ import (
 func TestMemoKeyCoversTheCoordinateAndEnvironment(t *testing.T) {
 	key := func(dir string, env []string) string {
 		t.Helper()
-		k, err := MemoKey(dir, env)
+		k, err := memoKey(dir, env)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -54,7 +54,7 @@ func TestMemoKeyCoversTheCoordinateAndEnvironment(t *testing.T) {
 			t.Fatalf("%s did not move the key", extra)
 		}
 	}
-	if _, err := MemoKey(dir, []string{"A=1", "A=2"}); err == nil {
+	if _, err := memoKey(dir, []string{"A=1", "A=2"}); err == nil {
 		t.Fatal("a duplicated key was admitted")
 	}
 }

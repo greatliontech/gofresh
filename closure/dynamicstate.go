@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/greatliontech/gofresh/closure/internal/cachefile"
+	"github.com/greatliontech/gofresh/internal/cachefile"
 )
 
 // PackageClass is the mutability class of one graph package's source, the

@@ -25,8 +25,11 @@ func Validate(ctx context.Context, reader *gotool.EnvReader, explicit []string) 
 	if err != nil {
 		return fmt.Errorf("build flags: resolve GOFLAGS: %w", err)
 	}
-	for _, flag := range strings.Fields(goFlags) {
-		flag = strings.Trim(flag, `"'`)
+	parsedGoFlags, err := Fields(goFlags)
+	if err != nil {
+		return fmt.Errorf("build flags: parse GOFLAGS: %w", err)
+	}
+	for _, flag := range parsedGoFlags {
 		if isOverlayFlag(flag) {
 			return unsupportedOverlay(flag)
 		}

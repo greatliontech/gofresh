@@ -17,10 +17,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/greatliontech/gofresh/closure/internal/cachefile"
 	"github.com/greatliontech/gofresh/closure/internal/listing"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/cachefile"
 )
 
 // The toolchain-source audit is keyed by CONTENT: each audited surface

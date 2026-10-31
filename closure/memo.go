@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 
-	"github.com/greatliontech/gofresh/closure/internal/cachefile"
+	"github.com/greatliontech/gofresh/internal/cachefile"
 )
 
 // SetAnalysisScope arms every persistent closure memo that needs the

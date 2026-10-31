@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/closure/internal/digest"
-	"github.com/greatliontech/gofresh/internal/generatedmark"
+	"github.com/greatliontech/gofresh/internal/auditset"
 )
 
 // A compiled Go member contributes its CANONICAL FORM to the closure
@@ -50,7 +50,7 @@ func retainedComment(text string) bool {
 	if fields := strings.Fields(strings.TrimPrefix(text, "//")); len(fields) > 0 && fields[0] == "+build" {
 		return true
 	}
-	if generatedmark.IsMarker(text) {
+	if auditset.IsGeneratedMarker(text) {
 		return true
 	}
 	// A directive-shaped comment in either form: gofresh's analyzer

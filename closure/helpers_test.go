@@ -37,7 +37,7 @@ func cgoEnabled(t *testing.T) bool {
 
 func isolateProofCache(t *testing.T) {
 	t.Helper()
-	cache, err := testenv.GoBuildCache(context.Background(), os.Environ())
+	cache, err := gotool.GoBuildCache(context.Background(), os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}

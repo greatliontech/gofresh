@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"os"
 
-	"github.com/greatliontech/gofresh/closure/internal/cachefile"
+	"github.com/greatliontech/gofresh/internal/cachefile"
 	"github.com/greatliontech/gofresh/closure/internal/compartment"
 	"github.com/greatliontech/gofresh/closure/internal/digest"
 	"github.com/greatliontech/gofresh/closure/testvariant"

@@ -50,8 +50,8 @@ func TestCeilingIsHalfTheHostsAvailableMemory(t *testing.T) {
 	if got := ceiling(Memory{TotalBytes: 16 << 30, AvailableBytes: 6 << 30}, 0); got != 3<<30 {
 		t.Fatalf("Ceiling = %d, want half the available memory (%d)", got, int64(3<<30))
 	}
-	if got := ceiling(Memory{TotalBytes: 16 << 30, AvailableBytes: 600 << 20}, 0); got != CeilingFloor {
-		t.Fatalf("Ceiling under a short host = %d, want the floor %d", got, CeilingFloor)
+	if got := ceiling(Memory{TotalBytes: 16 << 30, AvailableBytes: 600 << 20}, 0); got != ceilingFloor {
+		t.Fatalf("Ceiling under a short host = %d, want the floor %d", got, ceilingFloor)
 	}
 	if got := ceiling(Memory{}, 6<<30); got != 0 {
 		t.Fatalf("Ceiling of no reading = %d, want 0", got)

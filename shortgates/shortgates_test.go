@@ -41,7 +41,7 @@ func TestCheckDetectsEachViolation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rep := Check(fset, map[string]*ast.File{"case_test.go": f})
+			rep := check(fset, map[string]*ast.File{"case_test.go": f})
 			if got := rep.Anywhere != rep.InBodies; got != tc.mismatch {
 				t.Errorf("mismatch = %t (anywhere %d, in bodies %d), want %t", got, rep.Anywhere, rep.InBodies, tc.mismatch)
 			}
@@ -79,7 +79,7 @@ func TestWalkScopesTheTreeAndReportsEachClass(t *testing.T) {
 		"sub/b_test.go":      "package sub\n\nimport \"testing\"\n\nfunc TestB(t *testing.T) {\n\t" + gate + "}\n",
 		"testdata/x_test.go": "package x\n\nimport \"testing\"\n\nfunc helper(t *testing.T) {\n\t" + gate + "}\n",
 	})
-	rep, err := Walk(clean)
+	rep, err := walk(clean)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,28 +90,28 @@ func TestWalkScopesTheTreeAndReportsEachClass(t *testing.T) {
 		"a_test.go":     "package p\n\nimport \"testing\"\n\nfunc helper(t *testing.T) {\n\t" + gate + "}\n\nfunc TestA(t *testing.T) { helper(t) }\n",
 		"sub/b_test.go": "package sub\n\nimport \"testing\"\n\nfunc TestB(t *testing.T) {\n\t" + gate + "}\n",
 	})
-	if rep, _ := Walk(helperTree); rep.Anywhere != 2 || rep.InBodies != 1 {
+	if rep, _ := walk(helperTree); rep.Anywhere != 2 || rep.InBodies != 1 {
 		t.Fatalf("helper gate: %+v", rep)
 	}
 	rootless := write(t, map[string]string{
 		"sub/b_test.go": "package sub\n\nimport \"testing\"\n\nfunc TestB(t *testing.T) {\n\t" + gate + "}\n",
 	})
-	if rep, _ := Walk(rootless); rep.AtRoot || !rep.Descended {
+	if rep, _ := walk(rootless); rep.AtRoot || !rep.Descended {
 		t.Fatalf("rootless tree: %+v", rep)
 	}
 	flat := write(t, map[string]string{
 		"a_test.go": "package p\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) {\n\t" + gate + "}\n",
 	})
-	if rep, _ := Walk(flat); !rep.AtRoot || rep.Descended {
+	if rep, _ := walk(flat); !rep.AtRoot || rep.Descended {
 		t.Fatalf("flat tree: %+v", rep)
 	}
 	unparsable := write(t, map[string]string{"a_test.go": "package p\n\nfunc {"})
-	if _, err := Walk(unparsable); err == nil {
+	if _, err := walk(unparsable); err == nil {
 		t.Fatal("an unparsable test file walked cleanly")
 	}
 }
 
-// recorder is a Failer that records what Pin reported: errors
+// recorder is a failer that records what Pin reported: errors
 // accumulate, a fatal stops the pin the way the testing package's would.
 type recorder struct {
 	errors []string

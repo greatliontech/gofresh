@@ -29,11 +29,11 @@ func (s SnapshotSampler) Sample(ctx context.Context, dir string, env []string) (
 	if s.Reader == nil {
 		return "", errors.New("gotool: snapshot sampler: no reader")
 	}
-	asked, err := MemoKey(dir, env)
+	asked, err := memoKey(dir, env)
 	if err != nil {
 		return "", err
 	}
-	own, err := MemoKey(s.Reader.Dir, s.Reader.Env)
+	own, err := memoKey(s.Reader.Dir, s.Reader.Env)
 	if err != nil {
 		return "", err
 	}

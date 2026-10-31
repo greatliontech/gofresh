@@ -58,6 +58,18 @@ func TestParseMemTotal(t *testing.T) {
 	if _, err := parseMemTotal(strings.NewReader("MemFree: 10 kB\n")); err == nil {
 		t.Error("expected error when MemTotal absent")
 	}
+	for _, invalid := range []string{
+		"MemTotal: 0 kB\n",
+		"MemTotal: 1024\n",
+		"MemTotal: 1024 MB\n",
+		"MemTotal: 1024 kB extra\n",
+		"MemTotal: 18014398509481984 kB\n",
+		"MemTotal: notanumber kB\n",
+	} {
+		if _, err := parseMemTotal(strings.NewReader(invalid)); err == nil {
+			t.Errorf("parseMemTotal(%q) succeeded, want error", invalid)
+		}
+	}
 }
 
 // LogicalCores is machine identity, never process affinity: under an

@@ -1,5 +1,23 @@
 // Package outcome carries the module-private capability issued by an analysis
 // view. Public producers can hold a capability but cannot construct its proof.
+//
+// Environment reads and filesystem reads differ in how their operation outcomes
+// are established:
+//   - When an execution is attested to have an immutable process environment
+//     (and static analysis proves no reachability to os.Setenv, os.Unsetenv, or
+//     os.Clearenv), the outcome of every os.Getenv / os.LookupEnv consultation
+//     is uniquely determined by the pre-execution environment snapshot bound in
+//     Binding. The view derives those environment outcomes directly from the
+//     bound snapshot without per-operation runtime logging.
+//   - Filesystem consultations (os.Open, os.Stat, os.Chdir, etc.), by contrast,
+//     depend on the mutable external filesystem and cannot be derived from a
+//     static process snapshot alone; they require per-operation -test.testlogfile
+//     records paired with a pre/post filesystem bracket.
+//
+// Span, Binding, and Support bind the pre-execution frame's coordinates
+// (process, environment digest, module root, and working directory) to the
+// static subject proofs prepared by the analysis view so that runtimeinput and
+// Session verify the exact same execution frame.
 package outcome
 
 import "slices"

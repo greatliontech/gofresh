@@ -103,11 +103,11 @@ const (
 // produced in — its environment the complete process environment of
 // the Go subprocesses and environment-backed guards (refused when
 // malformed or duplicated), its snapshot the pass's one `go env -json`
-// read the build-config digest takes byte for byte (a direct probe
-// would return the same bytes, so the digest cannot drift), and its
-// toolchain guard the same snapshot's GOVERSION with the host
-// platform (GOHOSTOS/GOHOSTARCH — `go version`'s own line), so a pass
-// pays one spawn for both code guards. The measurement guard's
+// read from which the build-config digest reads the parsed settings
+// (a direct probe would return the same values, so the digest cannot
+// drift), and its toolchain guard the same snapshot's GOVERSION with
+// the host platform (GOHOSTOS/GOHOSTARCH — `go version`'s own line),
+// so a pass pays one spawn for both code guards. The measurement guard's
 // runtime-config digest is computed from runtimeEnv — the environment
 // the measured processes actually run under, when it differs from the
 // analysis env (a caller injecting a GOMAXPROCS cap into the processes
@@ -157,8 +157,8 @@ func captureFor(ctx context.Context, reader *gotool.EnvReader, kind Kind, buildI
 		return Guards{}, fmt.Errorf("guard: invalid result kind %d", kind)
 	}
 	env := reader.Env
-	// Both code guards read the pass's one snapshot — the bytes a direct
-	// probe would return, so neither can drift and the pass pays one
+	// Both code guards read the pass's one snapshot — the parsed values a
+	// direct probe would return, so neither can drift and the pass pays one
 	// spawn: the toolchain guard is the snapshot's GOVERSION with the
 	// host platform, `go version`'s own line minus its prefix.
 	snapshot, err := reader.Snapshot(ctx)
@@ -169,10 +169,7 @@ func captureFor(ctx context.Context, reader *gotool.EnvReader, kind Kind, buildI
 	if err != nil {
 		return Guards{}, err
 	}
-	bc, err := buildConfigDigest(snapshot.JSON, env, buildInputs)
-	if err != nil {
-		return Guards{}, err
-	}
+	bc := buildConfigDigestFromValues(snapshot.Value, env, buildInputs)
 	guards := Guards{Toolchain: tc, BuildConfig: bc}
 	runtime, err := captureRuntimeFor(ctx, env, kind, machine, runtimeGuard)
 	if err != nil {
@@ -303,9 +300,13 @@ func buildConfigDigest(envJSON []byte, processEnv, buildInputs []string) (string
 	if err := json.Unmarshal(envJSON, &env); err != nil {
 		return "", fmt.Errorf("guard: parse go env: %w", err)
 	}
+	return buildConfigDigestFromValues(func(k string) string { return env[k] }, processEnv, buildInputs), nil
+}
+
+func buildConfigDigestFromValues(lookup func(string) string, processEnv, buildInputs []string) string {
 	vals := map[string]string{}
 	for _, k := range buildConfigGoEnvKeys {
-		vals[k] = env[k]
+		vals[k] = lookup(k)
 	}
 	for _, k := range buildConfigOSEnvKeys {
 		vals[k], _ = gotool.LookupEnv(processEnv, k)
@@ -324,7 +325,7 @@ func buildConfigDigest(envJSON []byte, processEnv, buildInputs []string) (string
 	for _, in := range buildInputs {
 		fmt.Fprintf(&b, "buildinput %d:%s\n", len(in), in)
 	}
-	return digest(b.String()), nil
+	return digest(b.String())
 }
 
 // runtimeConfigEnvKeys are the Go runtime-configuration environment variables the

@@ -16,9 +16,9 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/greatliontech/gofresh/closure/internal/cachefile"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/cachefile"
 )
 
 // toolchainVerifierVersion versions the structural stdlib boundary verifier.
@@ -129,15 +129,6 @@ func verifiedOffSurfaceMemoKeyWithPolicy(policy, importPath, digest, pkgIncludeS
 		key += "|inc:" + pkgIncludeSalt
 	}
 	return key
-}
-
-func loadVerifiedPackageMemo(m *sync.Map, memoKey string) (verifiedPackageVerdict, bool) {
-	v, ok := m.Load(memoKey)
-	if !ok {
-		return verifiedPackageVerdict{}, false
-	}
-	val, ok := v.(verifiedPackageVerdict)
-	return val, ok
 }
 
 // allowedPureSupportImports lists the non-pure standard-library packages that a
@@ -863,8 +854,8 @@ func verifyListedPackageMemoized(ctx context.Context, lp listedPackage, policy, 
 	}
 	scope := "verified-package|" + toolchainVerifierVersion + "|" + policy
 	if canMemo {
-		if verdict, ok := loadVerifiedPackageMemo(&verifiedPackageMemo, memoKey); ok {
-			return verdict, nil
+		if v, ok := verifiedPackageMemo.Load(memoKey); ok {
+			return v.(verifiedPackageVerdict), nil
 		}
 		var cached verifiedPackageVerdict
 		if cachefile.Load(sourceDigestsDirName, scope, cacheKey, &cached) {
@@ -910,8 +901,8 @@ func verifyPureDelegateMemoized(ctx context.Context, lp listedPackage, policy, p
 	}
 	scope := "verified-pure-delegate|" + toolchainVerifierVersion + "|" + policy
 	if canMemo {
-		if verdict, ok := loadVerifiedPackageMemo(&verifiedPureDelegateMemo, memoKey); ok {
-			return verdict, nil
+		if v, ok := verifiedPureDelegateMemo.Load(memoKey); ok {
+			return v.(verifiedPackageVerdict), nil
 		}
 		var cached verifiedPackageVerdict
 		if cachefile.Load(sourceDigestsDirName, scope, cacheKey, &cached) {

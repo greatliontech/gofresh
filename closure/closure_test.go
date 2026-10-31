@@ -1351,14 +1351,14 @@ func TestAnalysisRootsAnySubject(t *testing.T) {
 	// test-variant package, which compiles the package WITH its test files and so
 	// holds production and test symbols alike.
 	const withTests = "github.com/greatliontech/gofresh/gotool"
-	a, aReach, err := computeTier2ResultAndReach(h, withTests, "MemoKey")
+	a, aReach, err := computeTier2ResultAndReach(h, withTests, "Coordinate")
 	if err != nil {
-		t.Fatalf("analysis of production func MemoKey: %v", err)
+		t.Fatalf("analysis of production func Coordinate: %v", err)
 	}
 	if len(aReach) == 0 {
 		t.Fatal("empty reachability for a resolvable production subject")
 	}
-	if again, err := computeTier2Result(h, withTests, "MemoKey"); err != nil || !reflect.DeepEqual(again, a) {
+	if again, err := computeTier2Result(h, withTests, "Coordinate"); err != nil || !reflect.DeepEqual(again, a) {
 		t.Errorf("nondeterministic: %+v vs %+v (err %v)", again, a, err)
 	}
 	// The projection's total order is what makes the equality above — and

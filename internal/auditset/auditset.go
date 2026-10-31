@@ -32,9 +32,18 @@ func Identity() string {
 		}
 		return result
 	}
-	data, _ := json.Marshal([]any{purePackages, symbolTables, methods(syncMethods), syncSymbols,
-		methods(poolMethods), methods(memoMethods), methods(timeMethods), methods(reflectMethods), methods(randMethods), methods(atomicMethods),
-		methods(standardSentinelGlobals), reflectImmutableTypes, constantImmutableTypes})
+	receivers := make(map[string][]map[string][]string, len(receiverTables))
+	for pkgPath, tables := range receiverTables {
+		normalized := make([]map[string][]string, len(tables))
+		for i, table := range tables {
+			normalized[i] = methods(table)
+		}
+		receivers[pkgPath] = normalized
+	}
+	data, _ := json.Marshal([]any{
+		purePackages, symbolTables, flagSurface, receivers, syncSymbols,
+		methods(standardSentinelGlobals), reflectImmutableTypes, constantImmutableTypes,
+	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
@@ -222,12 +231,28 @@ func PurePackages() []string {
 	return keys
 }
 
+// receiverTables maps each standard package with receiver-qualified method
+// admissions to its method tables. ReceiverPackages and Identity both derive
+// from this map so adding a receiver table updates both automatically.
+var receiverTables = map[string][]map[string][]string{
+	"math/rand":   {randMethods},
+	"reflect":     {reflectMethods},
+	"sync":        {syncMethods, poolMethods, memoMethods},
+	"sync/atomic": {atomicMethods},
+	"time":        {timeMethods},
+}
+
 // ReceiverPackages lists the packages whose receiver tables this set
 // carries — sync's synchronization, pool and memo methods, reflect's
 // view surface, time's receiver-qualified names — sorted; the
 // toolchain-source audit's key walks it beside the symbol tables.
 func ReceiverPackages() []string {
-	return []string{"math/rand", "reflect", "sync", "sync/atomic", "time"}
+	keys := make([]string, 0, len(receiverTables))
+	for k := range receiverTables {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 // timeSymbols is the audited surface of package time, matched by bare
@@ -696,4 +721,15 @@ func BoundedToken(text, marker, bounds string) (rest string, ok bool) {
 		return rest, true
 	}
 	return "", false
+}
+
+// IsGeneratedMarker reports whether text is a Go generated-file marker line
+// (`^// Code generated .* DO NOT EDIT\.$` over the line's trimmed text, so a
+// trailing space cannot split gofresh's readers from its fold).
+func IsGeneratedMarker(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	return strings.HasPrefix(trimmed, "// Code generated ") &&
+		strings.HasSuffix(trimmed, " DO NOT EDIT.") &&
+		len(trimmed) >= len("// Code generated  DO NOT EDIT.") &&
+		!strings.ContainsAny(trimmed, "\r\n")
 }

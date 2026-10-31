@@ -36,10 +36,10 @@ func parseMeminfo(text string) (Memory, bool) {
 	return Memory{TotalBytes: m["MemTotal"], AvailableBytes: m["MemAvailable"]}, true
 }
 
-// CeilingFloor is the least ceiling derived: a consumer's own live set
+// ceilingFloor is the least ceiling derived: a consumer's own live set
 // legitimately reaches it (an engine's loads and views), and a ceiling
 // below the live set buys continuous collection and nothing else.
-const CeilingFloor = int64(1) << 30
+const ceilingFloor = int64(1) << 30
 
 // familyRoom is the room reading for a process's family: what the host
 // reports available plus the family's summed per-process held counters
@@ -57,7 +57,7 @@ func familyRoom(m Memory, family uint64) uint64 {
 }
 
 // ceiling is the rule: half of the family room reading —
-// floored at CeilingFloor, so the runtime collects against the ceiling
+// floored at ceilingFloor, so the runtime collects against the ceiling
 // instead of growing its slack toward twice the live set while child
 // processes run; 0 for a host without the reading (the zero Memory),
 // which installs no ceiling — a host with nothing available is a
@@ -68,7 +68,7 @@ func ceiling(m Memory, family uint64) int64 {
 	if m == (Memory{}) {
 		return 0
 	}
-	return max(int64(familyRoom(m, family)/2), CeilingFloor)
+	return max(int64(familyRoom(m, family)/2), ceilingFloor)
 }
 
 // childrenBudget is the complementary soft collection-target half: the
@@ -202,7 +202,7 @@ func (r Reading) held() uint64 { return r.Set.ProcessHeldBytes + r.Set.Descendan
 // Ceiling derives the soft memory ceiling of one of a consumer's own
 // processes from the reading: half of the room the host has for the
 // family (what it has available plus the family's held set), floored
-// at CeilingFloor. ok is false when the walk read no held set (a
+// at ceilingFloor. ok is false when the walk read no held set (a
 // kernel before 4.5 states none): nothing derives, and the consumer
 // keeps the limit in force. The ceiling is soft: the runtime exceeds a
 // limit it cannot meet rather than thrash, so it never kills and never

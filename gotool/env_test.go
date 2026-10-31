@@ -1,6 +1,7 @@
 package gotool
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -117,5 +118,15 @@ func TestPreserveBuildCachePinsEffectiveCache(t *testing.T) {
 	pinned, ok := LookupEnv(preserved, "GOCACHE")
 	if !ok || pinned == "" {
 		t.Fatalf("PreserveBuildCache did not pin GOCACHE: %v", preserved)
+	}
+	for _, env := range [][]string{{"GOCACHE=a", "GOCACHE=b"}, {"malformed"}} {
+		if _, err := GoBuildCache(t.Context(), env); err == nil {
+			t.Fatalf("GoBuildCache(%v) succeeded on invalid env", env)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := GoBuildCache(ctx, []string{"GOCACHE=", "GOENV=off"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("GoBuildCache(canceled) = %v, want context.Canceled", err)
 	}
 }

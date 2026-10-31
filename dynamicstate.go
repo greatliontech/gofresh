@@ -17,7 +17,6 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/generatedmark"
 )
 
 // dynamicStateFact is one package's contribution to the shared-dynamic-state
@@ -926,7 +925,7 @@ var auditedSourceListing = auditset.VersionListing{
 // shadow it. Grows only by source audit
 // (REQ-closure-shared-dynamic-state).
 func generatedProtoHeader(text string) string {
-	if !generatedmark.IsMarker(text) {
+	if !auditset.IsGeneratedMarker(text) {
 		return ""
 	}
 	for _, generator := range []string{"protoc-gen-go-grpc", "protoc-gen-go"} {

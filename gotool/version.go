@@ -51,12 +51,12 @@ func ParseGoVersion(v string) (major, minor int, ok bool) {
 	return major, minor, true
 }
 
-// ReleaseTagsBound is the most minors the release-tag ladder derives:
+// releaseTagsBound is the most minors the release-tag ladder derives:
 // a go1.N series past it answers nil rather than a ladder no toolchain
 // ever set — a GOVERSION spells the toolchain's VERSION file, so only
 // a crafted or corrupt one reaches it, and an unbounded ladder would
 // allocate without limit.
-const ReleaseTagsBound = 4096
+const releaseTagsBound = 4096
 
 // ReleaseTags derives the go/build release tags ("go1.1" … "go1.N") a
 // go1.N toolchain sets — go/build derives them from the toolchain's
@@ -64,12 +64,12 @@ const ReleaseTagsBound = 4096
 // a development build of go1.N sets go1.N as its release does; nil —
 // never an empty non-nil slice, which a caller branching on nil would
 // install as no tags — when v carries no series, its major is not 1,
-// or its minor passes ReleaseTagsBound, leaving a caller's own
+// or its minor passes releaseTagsBound, leaving a caller's own
 // defaults in place.
 func ReleaseTags(v string) []string {
 	// A failed parse answers major 0, which the major rule rejects.
 	major, minor, _ := ParseGoVersion(v)
-	if major != 1 || minor < 1 || minor > ReleaseTagsBound {
+	if major != 1 || minor < 1 || minor > releaseTagsBound {
 		return nil
 	}
 	tags := make([]string, 0, minor)
