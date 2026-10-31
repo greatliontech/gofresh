@@ -21,7 +21,7 @@ func TestSelectionsAdmitByContent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("lists the standard library under several selections")
 	}
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateProofCache(t)
 	dir := t.TempDir()
 	hasher := func(flags ...string) *Hasher {
 		t.Helper()
@@ -43,6 +43,8 @@ func TestSelectionsAdmitByContent(t *testing.T) {
 		{"race selection", []string{"-race"}, true},
 		{"a tag no audited file is constrained on", []string{"-tags=dup"}, false},
 		{"race with such a tag", []string{"-race", "-tags=dup"}, true},
+		{"netgo tag selection", []string{"-tags=netgo"}, false},
+		{"netcgo tag selection", []string{"-tags=netcgo"}, true},
 	} {
 		if tc.cgo && !cgo {
 			t.Logf("%s: skipped, cgo disabled", tc.name)
@@ -58,20 +60,36 @@ func TestSelectionsAdmitByContent(t *testing.T) {
 	if h := hasher("-tags"); h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "could not be read") {
 		t.Errorf("unclassifiable flags: audited=%v attribution %q", h.SelectionAudited(), h.SelectionAttribution())
 	}
-	// A tag that selects netgo resolver override files refuses naming net.
+	// A tag that selects a standard-library file violating structural contracts
+	// refuses naming the affected package, while an explicit -tags flag
+	// overrides GOFLAGS as the go command does.
 	snapshot, err := (gotool.Runner{}).TakeEnvSnapshot(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h := hasher("-tags=netgo"); h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "the audited surface of "+snapshot.Value("GOVERSION")+" moved in 1 keys: net") {
-		t.Errorf("netgo selection: audited=%v attribution %q, want net named as moved", h.SelectionAudited(), h.SelectionAttribution())
+	badRoot := unauditedTagGOROOT(t)
+	badEnv := func(extra ...string) []string {
+		args := append([]string{"GOROOT=" + badRoot, "GOTOOLCHAIN=local"}, extra...)
+		return environmentWith(args...)
 	}
-	if h, err := newAtEnv(context.Background(), dir, environmentWith("GOFLAGS=-tags=netgo"), "-tags=dup"); err != nil {
+	if h, err := newAtEnv(context.Background(), dir, badEnv()); err != nil {
 		t.Fatal(err)
 	} else if !h.SelectionAudited() {
-		t.Errorf("an explicit -tags=dup under GOFLAGS=-tags=netgo refused: %s", h.SelectionNotice())
+		t.Errorf("untouched GOROOT without badstd tag refused: %s", h.SelectionNotice())
 	}
-	if h := hasher("-tags=dup,netgo"); h.SelectionAudited() || !strings.HasSuffix(h.SelectionAttribution(), ": net") {
+	if h, err := newAtEnv(context.Background(), dir, badEnv(), "-tags=badstd"); err != nil {
+		t.Fatal(err)
+	} else if h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "the audited surface of "+snapshot.Value("GOVERSION")+" moved in 1 keys: strings") {
+		t.Errorf("badstd selection: audited=%v attribution %q, want strings named as moved", h.SelectionAudited(), h.SelectionAttribution())
+	}
+	if h, err := newAtEnv(context.Background(), dir, badEnv("GOFLAGS=-tags=badstd"), "-tags=dup"); err != nil {
+		t.Fatal(err)
+	} else if !h.SelectionAudited() {
+		t.Errorf("an explicit -tags=dup under GOFLAGS=-tags=badstd refused: %s", h.SelectionNotice())
+	}
+	if h, err := newAtEnv(context.Background(), dir, badEnv(), "-tags=dup,badstd"); err != nil {
+		t.Fatal(err)
+	} else if h.SelectionAudited() || !strings.HasSuffix(h.SelectionAttribution(), ": strings") {
 		t.Errorf("the explicit union served the override's record: audited=%v attribution %q", h.SelectionAudited(), h.SelectionAttribution())
 	}
 	// Cross-platform and cgo-off selections admit structurally without needing
@@ -107,7 +125,7 @@ func TestToolchainSourceDegradationNamesEveryAxis(t *testing.T) {
 		base.Packages[root] = digest
 		base.inventory[root] = listedPackage{ImportPath: root, Audited: true, digest: digest}
 		memoKey := verifiedPackageMemoKey(root, digest)
-		verifiedPackageMemo.Store(memoKey, true)
+		verifiedPackageMemo.Store(memoKey, verifiedPackageVerdict{OK: true})
 		t.Cleanup(func() { verifiedPackageMemo.Delete(memoKey) })
 	}
 	if d := toolchainSourceDegradation("go1.99.0", base, nil); !d.audited() || d.notice() != "" || d.axis != "" {
@@ -219,7 +237,7 @@ func TestUnlistedSurfaceRefusesObservability(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateProofCache(t)
 	fixture, err := filepath.Abs("fixtures/observable")
 	if err != nil {
 		t.Fatal(err)
@@ -240,7 +258,7 @@ func TestUnlistedSurfaceRefusesObservability(t *testing.T) {
 		t.Fatalf("fixture assumption moved: TestReadFile not observable under the listed toolchain: %+v", o)
 	}
 	memoKey := verifiedPackageMemoKey("strings", listed.source.Packages["strings"])
-	verifiedPackageMemo.Store(memoKey, false)
+	verifiedPackageMemo.Store(memoKey, verifiedPackageVerdict{OK: false})
 	t.Cleanup(func() { verifiedPackageMemo.Delete(memoKey) })
 	unlisted, err := newAt(fixture)
 	if err != nil {
@@ -268,7 +286,7 @@ func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateProofCache(t)
 	// The ambient environment carries GOENV, as a witness runner's does:
 	// the settings below are replaced, never appended, or the
 	// environment normalizer refuses the doubled key.

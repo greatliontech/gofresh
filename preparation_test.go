@@ -19,6 +19,7 @@ func TestUnknownSubjectRefusesBeforeTheMaximalFold(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
+	isolateProofCache(t)
 	dir := writeViewModule(t, preparationSource)
 	folded := false
 	viewTestHooks.maximalBatch = func() { folded = true }
@@ -88,6 +89,7 @@ func TestMalformedRecordRefusesTheBatchBeforeAnyWindow(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
+	isolateProofCache(t)
 	dir := writeViewModule(t, preparationSource)
 	f, g := Subject{Package: "example.com/view", Symbol: "F"}, Subject{Package: "example.com/view", Symbol: "G"}
 	engine, err := newEngine(withDir(dir))
@@ -163,18 +165,18 @@ func TestMissingAttachmentRefusesBeforeTheValidationObservation(t *testing.T) {
 // The toolchain-selection notice is announced at view construction —
 // where the Hasher resolved it, one go env read the engine's own
 // construction never pays — before any load, not first on the
-// precise-analysis path. The selection is netgo: it selects net's
-// netgo-constrained files, audited bytes no listed row carries, on
-// every toolchain the audit lists (a tag constraining no std file,
-// such as the godst hook tag on a stock toolchain, selects the same
-// files and is admitted by content — no notice).
+// precise-analysis path. The selection activates a tag-gated stdlib file
+// that violates structural verification (whereas a tag constraining no
+// unverified std file selects verified bytes and emits no notice).
 func TestToolchainSelectionNoticeAnnouncedAtViewConstruction(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
+	isolateProofCache(t)
 	dir := writeViewModule(t, preparationSource)
+	badEnv := unauditedTagEnv(t)
 	var events []Progress
-	engine, err := newEngine(withDir(dir), withProgress(func(p Progress) { events = append(events, p) }), withBuildFlags("-tags=netgo"))
+	engine, err := newEngine(withDir(dir), withEnv(badEnv...), withProgress(func(p Progress) { events = append(events, p) }), withBuildFlags("-tags=badstd"))
 	if err != nil {
 		t.Fatal(err)
 	}

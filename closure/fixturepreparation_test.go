@@ -31,7 +31,7 @@ func fixtureProgramEvidence(t *testing.T, dir string, p *program, symbol string)
 		t.Fatal(err)
 	}
 	subject := Subject{Package: p.PkgPath, Symbol: symbol}
-	rows, err := attributedReachableSets(h.ctx, h.SelectionAudited(), p, []Subject{subject})
+	rows, err := attributedReachableSets(h.ctx, h.SelectionAudited(), h.source.pureDelegates, p, []Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}

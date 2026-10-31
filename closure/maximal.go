@@ -1200,10 +1200,10 @@ func networkPackage(pkgPath string) bool {
 // isSourceOnlyStandardPackage is the deliberately small set whose public
 // operations cannot directly acquire process-external state. Unknown standard
 // packages fail closed to package-wide unverifiability; additions require a
-// source audit, not an API-name heuristic — and the whole set is keyed to the
-// listed toolchain source (toolchainaudit.go): the audit is a property of
-// specific standard-library source, so an unlisted surface keeps every
-// package's fail-closed classification until its delta is walked.
+// source audit, not an API-name heuristic — and the whole set is gated on the
+// verified toolchain source (toolchainaudit.go): the audit is a property of
+// verified standard-library source, so an unverified surface keeps every
+// package's fail-closed classification.
 func isSourceOnlyStandardPackage(audited bool, pkgPath string) bool {
 	if !audited {
 		return false
@@ -1232,7 +1232,7 @@ func isSourceOnlyStandardPackage(audited bool, pkgPath string) bool {
 	// every I/O-acquiring package
 	// (REQ-closure-observability-audited-set). The set itself is one table
 	// in internal/auditset beside the other audited sets.
-	return auditset.PurePackage(pkgPath) || (pureDelegatePackages[pkgPath] && (strings.HasPrefix(pkgPath, "internal/") || strings.Contains(pkgPath, "/internal/")))
+	return auditset.PurePackage(pkgPath)
 }
 
 // auditedLinknameTargets is the audited linkname-target set: standard

@@ -112,8 +112,8 @@ type Hasher struct {
 	// notice, and every refusal's attribution are its readings
 	// (REQ-closure-refusal-channels).
 	selection selectionDegradation
-	// source is the audited surface's digests the verdict was judged
-	// over — the row a listing host prints when unlisted.
+	// source holds the selected standard-library digests, inventory, and
+	// verified pure-delegate set the verdict was judged over.
 	source   sourceDigests
 	progs    map[string]*program  // by package import path
 	progErrs map[string]error     // memoized load failures, by package import path

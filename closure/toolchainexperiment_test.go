@@ -14,7 +14,7 @@ func TestAuditedExperimentRejectsUnverifiedSourceChanges(t *testing.T) {
 	if testing.Short() {
 		t.Skip("lists the standard library")
 	}
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateProofCache(t)
 	ctx := context.Background()
 	dir := t.TempDir()
 	snapshot, err := (gotool.Runner{}).TakeEnvSnapshot(ctx, dir, os.Environ())

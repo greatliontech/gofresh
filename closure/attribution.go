@@ -138,8 +138,8 @@ func shapeFailure(err error) bool {
 // one bisects until each offender degrades alone, its row carrying its
 // own batch's failure, while every sound sibling keeps its result
 // (REQ-closure-analysis). Other failure classes stay batch-wide.
-func attributedReachableSets(ctx context.Context, audited bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
-	res, err := analyzeAttributedBatch(ctx, audited, prog, subjects)
+func attributedReachableSets(ctx context.Context, audited bool, pureDelegates map[string]bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
+	res, err := analyzeAttributedBatch(ctx, audited, pureDelegates, prog, subjects)
 	if err == nil || ctx.Err() != nil || !shapeFailure(err) {
 		return res, err
 	}
@@ -150,7 +150,7 @@ func attributedReachableSets(ctx context.Context, audited bool, prog *program, s
 		}
 		return rows, nil
 	}
-	return splitAttributed(ctx, audited, prog, subjects, err)
+	return splitAttributed(ctx, audited, pureDelegates, prog, subjects, err)
 }
 
 // splitAttributed bisects a shape-failing batch whose provocation is
@@ -158,7 +158,7 @@ func attributedReachableSets(ctx context.Context, audited bool, prog *program, s
 // re-analyzing a half the caller already ran), a failing single
 // subject degrades with its own batch's error, and a non-shape
 // failure anywhere propagates batch-wide.
-func splitAttributed(ctx context.Context, audited bool, prog *program, subjects []Subject, batchErr error) ([]attributedReachability, error) {
+func splitAttributed(ctx context.Context, audited bool, pureDelegates map[string]bool, prog *program, subjects []Subject, batchErr error) ([]attributedReachability, error) {
 	if len(subjects) == 1 {
 		return []attributedReachability{{unavailable: batchErr.Error()}}, nil
 	}
@@ -167,14 +167,14 @@ func splitAttributed(ctx context.Context, audited bool, prog *program, subjects 
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		res, err := analyzeAttributedBatch(ctx, audited, prog, half)
+		res, err := analyzeAttributedBatch(ctx, audited, pureDelegates, prog, half)
 		if err == nil {
 			return res, nil
 		}
 		if !shapeFailure(err) {
 			return nil, err
 		}
-		return splitAttributed(ctx, audited, prog, half, err)
+		return splitAttributed(ctx, audited, pureDelegates, prog, half, err)
 	}
 	left, err := resolve(subjects[:mid])
 	if err != nil {
@@ -187,7 +187,7 @@ func splitAttributed(ctx context.Context, audited bool, prog *program, subjects 
 	return append(left, right...), nil
 }
 
-func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
+func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegates map[string]bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
 	roots := make(map[*ssa.Function]uint64)
 	allMasks := ^uint64(0)
 	if len(subjects) < subjectMaskBits {
@@ -304,7 +304,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 		sort.Slice(openRoots, func(i, j int) bool { return openRoots[i].String() < openRoots[j].String() })
 		for _, root := range openRoots {
 			i := openCandidates[root]
-			enc, ok := subjectEnumerationClosure(audited, userPaths, root, summary)
+			enc, ok := subjectEnumerationClosure(audited, pureDelegates, userPaths, root, summary)
 			if !ok {
 				continue
 			}
@@ -367,7 +367,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 				return nil, err
 			}
 			enc, enumerated := enumClosed[i]
-			cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, userPaths, summary, subjectRoot, enumerated, enc, prov, mask, res)
+			cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, pureDelegates, userPaths, summary, subjectRoot, enumerated, enc, prov, mask, res)
 			unclosedCleanup[i] = unclosedCleanup[i] || unclosedCB
 			unclosedFuzz[i] = unclosedFuzz[i] || unclosedFB
 			for _, cb := range cbs {
@@ -606,7 +606,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, prog *progra
 // binaryReachableUnion computes the binary-wide union of every harness root's
 // post-initialization attributed reach in a single all-roots RTA and provenance
 // walk (REQ-closure-shared-dynamic-state-reachability).
-func binaryReachableUnion(ctx context.Context, audited bool, prog *program, subjects []Subject) (RootedFunctions, error) {
+func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[string]bool, prog *program, subjects []Subject) (RootedFunctions, error) {
 	if len(subjects) == 0 {
 		return RootedFunctions{Fns: map[string]bool{}, Complete: true}, nil
 	}
@@ -672,7 +672,7 @@ func binaryReachableUnion(ctx context.Context, audited bool, prog *program, subj
 		}
 		summary = enumerateCallerReferences(audited, userPaths, allFunctions)
 		for root := range openCandidates {
-			enc, ok := subjectEnumerationClosure(audited, userPaths, root, summary)
+			enc, ok := subjectEnumerationClosure(audited, pureDelegates, userPaths, root, summary)
 			if !ok {
 				return RootedFunctions{}, nil
 			}
@@ -731,7 +731,7 @@ func binaryReachableUnion(ctx context.Context, audited bool, prog *program, subj
 		if err != nil {
 			return RootedFunctions{}, err
 		}
-		cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, userPaths, summary, nil, false, enumerationClosure{}, provenance, unionMask, res)
+		cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, pureDelegates, userPaths, summary, nil, false, enumerationClosure{}, provenance, unionMask, res)
 		if unclosedCB || unclosedFB {
 			return RootedFunctions{}, nil
 		}
@@ -1896,7 +1896,7 @@ func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[
 // (or closed struct-receiver uses) with at least one reference in the
 // program, and every dynamic-reaching argument or receiver field position
 // closes in the caller's or constructor's own frame.
-func subjectEnumerationClosure(audited bool, userPaths map[string]bool, root *ssa.Function, summary *callerReferenceSummary) (enumerationClosure, bool) {
+func subjectEnumerationClosure(audited bool, pureDelegates map[string]bool, userPaths map[string]bool, root *ssa.Function, summary *callerReferenceSummary) (enumerationClosure, bool) {
 	sites := summary.sites[root]
 	valueRef := summary.directValueRef[root]
 	hasExternalSite := false
@@ -1908,6 +1908,7 @@ func subjectEnumerationClosure(audited bool, userPaths map[string]bool, root *ss
 	}
 	fp := &freshParamAnalysis{
 		selectionAudited:       audited,
+		pureDelegates:          pureDelegates,
 		enumOnly:               true,
 		enumRoot:               root,
 		subjectRoot:            root,
@@ -3031,7 +3032,7 @@ func provenanceReachableStartup(ctx context.Context, roots []*ssa.Function, mask
 	return reachable, nil
 }
 
-func collectTestingHarnessCallbacks(audited bool, userPaths map[string]bool, summary *callerReferenceSummary, subjectRoot *ssa.Function, enumerated bool, enc enumerationClosure, prov map[*ssa.Function]bool, mask uint64, res *rta.Result) (cleanupOut []*ssa.Function, unclosedCleanup bool, fuzzOut []*ssa.Function, unclosedFuzz bool) {
+func collectTestingHarnessCallbacks(audited bool, pureDelegates map[string]bool, userPaths map[string]bool, summary *callerReferenceSummary, subjectRoot *ssa.Function, enumerated bool, enc enumerationClosure, prov map[*ssa.Function]bool, mask uint64, res *rta.Result) (cleanupOut []*ssa.Function, unclosedCleanup bool, fuzzOut []*ssa.Function, unclosedFuzz bool) {
 	seenCleanup := make(map[*ssa.Function]bool)
 	seenFuzz := make(map[*ssa.Function]bool)
 	var lazyFP *freshParamAnalysis
@@ -3085,7 +3086,7 @@ func collectTestingHarnessCallbacks(audited bool, userPaths map[string]bool, sum
 			reach.programValueRef = summary.valueRef
 			reach.programFunctions = summary.allFunctions
 		}
-		lazyFP = newFreshParamAnalysis(audited, reach, func(fn *ssa.Function) bool {
+		lazyFP = newFreshParamAnalysis(audited, pureDelegates, reach, func(fn *ssa.Function) bool {
 			return isStdPkgPath(userPaths, funcPkgPath(fn))
 		})
 		return lazyFP

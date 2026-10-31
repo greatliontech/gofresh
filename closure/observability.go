@@ -414,7 +414,7 @@ func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, resu
 		h.emitUnit("prove", group.path, start/maxAttributedSubjects+1, slices)
 		end := min(start+maxAttributedSubjects, len(group.subjects))
 		batch := group.subjects[start:end]
-		reachable, err := attributedReachableSets(h.ctx, h.SelectionAudited(), prog, batch)
+		reachable, err := attributedReachableSets(h.ctx, h.SelectionAudited(), h.source.pureDelegates, prog, batch)
 		if err != nil {
 			return err
 		}
@@ -650,7 +650,7 @@ func immutableEnvironmentMethod(sets ...[]externalEffect) string {
 // (REQ-closure-observability-analysis).
 func testMainObservedEffects(base *tier2Base, reachable attributedReachability) tier2Result {
 	analyzer := base.analyzer()
-	analyzer.fresh = newFreshParamAnalysis(base.h.SelectionAudited(), reachable, analyzer.isStdFunction)
+	analyzer.fresh = newFreshParamAnalysis(base.h.SelectionAudited(), base.h.source.pureDelegates, reachable, analyzer.isStdFunction)
 	var ops [16]*ssa.Value
 	for function := range reachable.functions {
 		idx := analyzer.idxForFunction(function)
@@ -684,7 +684,7 @@ func testMainObservedEffects(base *tier2Base, reachable attributedReachability) 
 				if !ok || site.Common() == nil {
 					continue
 				}
-				if !dispatchProvenanceClosed(site, &freshParamAnalysis{propertyHarnessAudited: reachable.propertyHarnessAudited, selectionAudited: base.h.SelectionAudited(), userPaths: reachable.userPaths, summary: reachable.summary, isStd: analyzer.isStdFunction}) {
+				if !dispatchProvenanceClosed(site, &freshParamAnalysis{propertyHarnessAudited: reachable.propertyHarnessAudited, selectionAudited: base.h.SelectionAudited(), pureDelegates: base.h.source.pureDelegates, userPaths: reachable.userPaths, summary: reachable.summary, isStd: analyzer.isStdFunction}) {
 					analyzer.requestWiden("test-main dispatch on unattributable state in " + function.String())
 				}
 				if callee := site.Common().StaticCallee(); callee != nil {
@@ -757,7 +757,7 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 	// (rapid.Deriv(rapid.Int())) is the same sanctioned crossing as in
 	// subject flow. Parameter crossing stays refused exactly as with a
 	// nil analysis (REQ-closure-observability-property-harness).
-	analyzer.fresh = &freshParamAnalysis{propertyHarnessAudited: reachable.propertyHarnessAudited, selectionAudited: analyzer.h.SelectionAudited(), userPaths: reachable.userPaths, summary: reachable.summary, isStd: analyzer.isStdFunction}
+	analyzer.fresh = &freshParamAnalysis{propertyHarnessAudited: reachable.propertyHarnessAudited, selectionAudited: analyzer.h.SelectionAudited(), pureDelegates: analyzer.h.source.pureDelegates, userPaths: reachable.userPaths, summary: reachable.summary, isStd: analyzer.isStdFunction}
 	var ops [16]*ssa.Value
 	for function := range reachable.functions {
 		idx := analyzer.idxForFunction(function)

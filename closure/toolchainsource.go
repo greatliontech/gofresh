@@ -25,15 +25,14 @@ import (
 
 // The toolchain-source audit is keyed by CONTENT: each audited surface
 // package's source, as the build selects it under the analysis'
-// effective selection from the GOROOT in use, digested; a row lists the
-// digests of one toolchain the admissions were audited over, and an
-// admission answers true exactly when one row's chain lists every
-// surface key's running digest (REQ-closure-observability-toolchain-key).
-// The version string is a label on a row, never the key: a rebuild of
-// identical source (an experiment selecting no different file, a vendor
-// flavor whose patches are tag-gated, a distro build, a point release
-// off the audited surface) admits by equality, and a patched surface
-// file moves its package's digest whatever the version says.
+// effective selection from the GOROOT in use, is digested and verified
+// structurally against gofresh's boundary contracts
+// (REQ-closure-observability-toolchain-key). The version string is diagnostic
+// context, never the key: a rebuild of identical source (an experiment
+// selecting no different file, a vendor flavor whose patches are tag-gated, a
+// distro build, a point release off the audited surface) shares the same
+// content digest, and a patched surface file moves its package's digest and
+// re-runs structural verification whatever the version says.
 
 // auditedSurfaceTables is the audited surface's own members: the union
 // of every toolchain-source admission table's packages — the
@@ -133,10 +132,11 @@ func sortedKeys(set map[string]bool) []string {
 // sourceDigests separates the audited projection from the complete selected
 // standard-library content and the admission policy governing this pass.
 type sourceDigests struct {
-	Packages  map[string]string
-	Content   string
-	Policy    string
-	inventory map[string]listedPackage
+	Packages      map[string]string
+	Content       string
+	Policy        string
+	inventory     map[string]listedPackage
+	pureDelegates map[string]bool
 }
 
 // surfaceListing is the memoized standard-library listing under one
@@ -196,7 +196,7 @@ type entryStamp struct {
 // served until its stamps move. The surface rule's SEEDS ride the
 // record's scope instead (toolchainSourceScope), so a seed edit keys
 // its own records with no bump.
-const sourceDigestsVersion = 4
+const sourceDigestsVersion = 5
 
 // surfaceSeeds are the audited surface's roots — every admission
 // table's packages (auditedSurfaceTables) and the link-time packages
@@ -258,6 +258,54 @@ func stampDirs(dir string, files []string) ([]dirStamp, error) {
 	return stamps, nil
 }
 
+func stdPackageGOROOT(dir, importPath string) (string, bool) {
+	if dir == "" || importPath == "" {
+		return "", false
+	}
+	cleanDir := filepath.Clean(dir)
+	suffix := string(filepath.Separator) + filepath.Join("src", filepath.FromSlash(importPath))
+	if !strings.HasSuffix(cleanDir, suffix) {
+		return "", false
+	}
+	goroot := strings.TrimSuffix(cleanDir, suffix)
+	if goroot == "" {
+		goroot = string(filepath.Separator)
+	}
+	return goroot, true
+}
+
+func pkgIncludeRelativeFiles(ctx context.Context, pkgIncludeDir string) ([]string, error) {
+	var out []string
+	var walk func(absDir, relPrefix string) error
+	walk = func(absDir, relPrefix string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(absDir)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			name := entry.Name()
+			if entry.IsDir() {
+				if err := walk(filepath.Join(absDir, name), relPrefix+name+"/"); err != nil {
+					return err
+				}
+				continue
+			}
+			out = append(out, relPrefix+name)
+		}
+		return nil
+	}
+	if err := walk(pkgIncludeDir, ""); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // stampsCurrent reports whether every listed package's directories
 // still carry exactly the entries they were listed over, each with its
 // recorded stamp; any difference, an unreadable directory included, is
@@ -267,10 +315,25 @@ func stampsCurrent(l surfaceListing) bool {
 	if !stampsTrusted || !cacheableDiscovery(l) {
 		return false
 	}
+	recorded := make(map[string]bool, len(l.Discovery))
 	for _, d := range l.Discovery {
 		stamps, err := stampEntries(d.Path)
 		if err != nil || !slices.Equal(stamps, d.Entries) {
 			return false
+		}
+		recorded[filepath.Clean(d.Path)] = true
+	}
+	for _, p := range l.Packages {
+		if goroot, ok := stdPackageGOROOT(p.Dir, p.ImportPath); ok {
+			pkgInclude := filepath.Join(goroot, "pkg", "include")
+			if _, err := os.Lstat(pkgInclude); err == nil {
+				if !recorded[filepath.Clean(pkgInclude)] {
+					return false
+				}
+			} else if !os.IsNotExist(err) {
+				return false
+			}
+			break
 		}
 	}
 	return true
@@ -386,38 +449,69 @@ func digestFiles(ctx context.Context, dir string, files []string) (string, error
 	return digestFilesBuffered(ctx, dir, files, make([]byte, 32*1024))
 }
 
-func digestFilesUntraced(ctx context.Context, dir string, files []string) (string, error) {
-	return digestFilesBufferedOpt(ctx, dir, files, make([]byte, 32*1024), false)
-}
-
 func digestFilesBuffered(ctx context.Context, dir string, files []string, buffer []byte) (string, error) {
 	return digestFilesBufferedOpt(ctx, dir, files, buffer, true)
 }
 
 func digestFilesBufferedOpt(ctx context.Context, dir string, files []string, buffer []byte, notifyHook bool) (string, error) {
+	return digestFilesWithExtraBufferedOpt(ctx, dir, files, "", nil, buffer, notifyHook)
+}
+
+func digestListedPackageUntraced(ctx context.Context, p listedPackage) (string, error) {
+	return digestListedPackageBufferedOpt(ctx, p, make([]byte, 32*1024), false)
+}
+
+func digestListedPackageBuffered(ctx context.Context, p listedPackage, buffer []byte) (string, error) {
+	return digestListedPackageBufferedOpt(ctx, p, buffer, true)
+}
+
+func digestListedPackageBufferedOpt(ctx context.Context, p listedPackage, buffer []byte, notifyHook bool) (string, error) {
+	if p.ImportPath == "runtime" {
+		if goroot, ok := stdPackageGOROOT(p.Dir, p.ImportPath); ok {
+			pkgIncludeDir := filepath.Join(goroot, "pkg", "include")
+			info, err := os.Stat(pkgIncludeDir)
+			if err != nil && !os.IsNotExist(err) {
+				return "", err
+			}
+			if err == nil {
+				if !info.IsDir() {
+					return "", fmt.Errorf("pkg/include: not a directory")
+				}
+				extra, err := pkgIncludeRelativeFiles(ctx, pkgIncludeDir)
+				if err != nil {
+					return "", err
+				}
+				return digestFilesWithExtraBufferedOpt(ctx, p.Dir, p.Files, pkgIncludeDir, extra, buffer, notifyHook)
+			}
+		}
+	}
+	return digestFilesBufferedOpt(ctx, p.Dir, p.Files, buffer, notifyHook)
+}
+
+func digestFilesWithExtraBufferedOpt(ctx context.Context, dir string, files []string, extraDir string, extraRelSlash []string, buffer []byte, notifyHook bool) (string, error) {
 	h := sha256.New()
-	for _, name := range files {
+	hashEntry := func(framedName, fullPath string) error {
 		// The check point: a cancelled traversal exits at the next file
 		// boundary, reading no further file.
 		if err := ctx.Err(); err != nil {
-			return "", err
+			return err
 		}
 		if notifyHook && digestReadForTest != nil {
-			digestReadForTest(name)
+			digestReadForTest(framedName)
 		}
-		file, err := os.Open(filepath.Join(dir, name))
+		file, err := os.Open(fullPath)
 		if err != nil {
-			return "", err
+			return err
 		}
 		info, err := file.Stat()
 		if err != nil {
 			file.Close()
-			return "", err
+			return err
 		}
 		var size [8]byte
-		binary.BigEndian.PutUint64(size[:], uint64(len(name)))
+		binary.BigEndian.PutUint64(size[:], uint64(len(framedName)))
 		h.Write(size[:])
-		h.Write([]byte(name))
+		h.Write([]byte(framedName))
 		binary.BigEndian.PutUint64(size[:], uint64(info.Size()))
 		h.Write(size[:])
 		// Reader-only wrapping keeps io.CopyBuffer on the pass-owned buffer
@@ -425,13 +519,24 @@ func digestFilesBufferedOpt(ctx context.Context, dir string, files []string, buf
 		written, readErr := io.CopyBuffer(h, struct{ io.Reader }{file}, buffer)
 		closeErr := file.Close()
 		if readErr != nil {
-			return "", readErr
+			return readErr
 		}
 		if closeErr != nil {
-			return "", closeErr
+			return closeErr
 		}
 		if written != info.Size() {
-			return "", fmt.Errorf("source size moved while reading %s", name)
+			return fmt.Errorf("source size moved while reading %s", framedName)
+		}
+		return nil
+	}
+	for _, name := range files {
+		if err := hashEntry(name, filepath.Join(dir, name)); err != nil {
+			return "", err
+		}
+	}
+	for _, rel := range extraRelSlash {
+		if err := hashEntry("../../pkg/include/"+rel, filepath.Join(extraDir, filepath.FromSlash(rel))); err != nil {
+			return "", err
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -497,10 +602,19 @@ func orderedStamps(dirs map[string]dirStamp) []dirStamp {
 // and checksum inputs outside src. Selected external package directories
 // cover their embed-discovery trees as well.
 func listingDiscoveryRoots(snapshot *gotool.EnvSnapshot, l surfaceListing) ([]string, error) {
-	src := filepath.Join(snapshot.Value("GOROOT"), "src")
+	goroot := snapshot.Value("GOROOT")
+	src := filepath.Join(goroot, "src")
 	set := map[string]bool{}
+	if goroot != "" {
+		pkgInclude := filepath.Join(goroot, "pkg", "include")
+		if _, err := os.Lstat(pkgInclude); err == nil {
+			set[pkgInclude] = true
+		} else if !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
 	if fips := snapshot.Value("GOFIPS140"); fips != "" && fips != "off" && fips != "latest" {
-		set[filepath.Join(snapshot.Value("GOROOT"), "lib", "fips140")] = true
+		set[filepath.Join(goroot, "lib", "fips140")] = true
 	}
 	for _, p := range l.Packages {
 		rel, err := filepath.Rel(src, p.Dir)
@@ -529,7 +643,7 @@ func digestListing(ctx context.Context, l surfaceListing) (sourceDigests, error)
 	all := map[string]string{}
 	buffer := make([]byte, 32*1024)
 	for _, p := range l.Packages {
-		digest, err := digestFilesBuffered(ctx, p.Dir, p.Files, buffer)
+		digest, err := digestListedPackageBuffered(ctx, p, buffer)
 		if err != nil {
 			return sourceDigests{}, fmt.Errorf("%s: %w", p.ImportPath, err)
 		}
@@ -759,8 +873,9 @@ func namedMoved(moved []string) string {
 	return text
 }
 
-// harnessPremisePackages hold the testing harness's test-log writer —
-// testing wraps the file the harness writes, testing/internal/testdeps
-// buffers the records and returns StopTestLog's flush error, which fails
-// the binary. Both are surface seeds.
-var harnessPremisePackages = []string{"testing", "testing/internal/testdeps"}
+// harnessPremisePackages hold the testing harness's test-log pipeline —
+// internal/testlog stores and dispatches the process logger, testing wraps
+// the file the harness writes, and testing/internal/testdeps buffers the
+// records and returns StopTestLog's flush error, which fails the binary.
+// All three are surface seeds.
+var harnessPremisePackages = []string{"internal/testlog", "testing", "testing/internal/testdeps"}

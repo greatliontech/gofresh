@@ -57,7 +57,7 @@ func TestObservabilityRefusalAttributesTheUnauditedSelection(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateProofCache(t)
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":  "module example.com/attributed\n\ngo 1.26\n",
@@ -68,19 +68,27 @@ func TestObservabilityRefusalAttributesTheUnauditedSelection(t *testing.T) {
 		}
 	}
 	subject := Subject{Package: "example.com/attributed", Symbol: "Read"}
-	// netgo selects net's netgo-constrained files — audited bytes no
-	// walk read — on every listed toolchain: the one unaudited selection
-	// every host reaches; the closest chain is the toolchain's base row
-	// under cgo and its cgo0 row without (net's netgo file is the one
-	// key off either; plugin's stub is a second key off the base).
-	axis := " (judged under an unaudited toolchain selection: the audited surface of " + runtime.Version() + " moved in 1 keys: net)"
+	probe, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stringsDigest := probe.source.Packages["strings"]
+	if stringsDigest == "" {
+		t.Fatal("missing strings digest on audited probe")
+	}
+	isolateProofCache(t)
+	stringsMemoKey := verifiedPackageMemoKey("strings", stringsDigest)
+	verifiedPackageMemo.Store(stringsMemoKey, verifiedPackageVerdict{OK: false})
+	t.Cleanup(func() { verifiedPackageMemo.Delete(stringsMemoKey) })
+
+	axis := " (judged under an unaudited toolchain selection: the audited surface of " + runtime.Version() + " moved in 1 keys: strings)"
 	var cold Observability
 	for pass, want := range []int{1, 0} {
-		h, err := newAt(dir, "-tags=netgo")
+		h, err := newAt(dir, "-tags=dup")
 		if err != nil {
 			t.Fatal(err)
 		}
-		h.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "t", BuildConfig: "netgo"})
+		h.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "t", BuildConfig: "badstd"})
 		loads := 0
 		h.OnProgress(func(phase, _ string) {
 			if phase == "load" || phase == "prove" {
@@ -96,7 +104,7 @@ func TestObservabilityRefusalAttributesTheUnauditedSelection(t *testing.T) {
 		}
 		proof := proofs[subject]
 		if proof.Observable || !strings.HasSuffix(proof.Reason, axis) || strings.Count(proof.Reason, "judged under") != 1 {
-			t.Fatalf("pass %d under netgo: %+v, want the refusal with the axis appended once", pass, proof)
+			t.Fatalf("pass %d under unaudited selection: %+v, want the refusal with the axis appended once", pass, proof)
 		}
 		if pass == 0 {
 			cold = proof
@@ -104,6 +112,7 @@ func TestObservabilityRefusalAttributesTheUnauditedSelection(t *testing.T) {
 			t.Fatalf("warm proof %+v differs from cold %+v", proof, cold)
 		}
 	}
+	verifiedPackageMemo.Delete(stringsMemoKey)
 	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)

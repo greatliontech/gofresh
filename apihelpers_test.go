@@ -7,6 +7,7 @@ import (
 
 	"github.com/greatliontech/gofresh/closure"
 	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -46,8 +47,7 @@ func riCurrentCtx(ctx context.Context, encoded, moduleDir string) (runtimeinput.
 
 // cgoEnabled reports the go command's resolved CGO_ENABLED — the
 // setting every listing obeys: without cgo the go command refuses a
-// race listing, and the closest chain to a netgo listing is the cgo0
-// row's rather than the base's.
+// race listing.
 func cgoEnabled(t *testing.T) bool {
 	t.Helper()
 	snapshot, err := (gotool.Runner{}).TakeEnvSnapshot(context.Background(), t.TempDir(), os.Environ())
@@ -55,4 +55,24 @@ func cgoEnabled(t *testing.T) bool {
 		t.Fatal(err)
 	}
 	return snapshot.Value("CGO_ENABLED") == "1"
+}
+
+func isolateProofCache(t *testing.T) {
+	t.Helper()
+	cache, err := testenv.GoBuildCache(context.Background(), os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOCACHE", cache)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+}
+
+// unauditedTagEnv constructs an isolated GOROOT copy of the host toolchain with
+// a tag-gated file in package strings (`//go:build badstd`) that declares an
+// unapproved single-argument push linkname, returning the normalized process
+// environment rooted at that GOROOT with GOCACHE preserved.
+func unauditedTagEnv(t *testing.T) []string {
+	t.Helper()
+	_, env := testenv.UnauditedTagGOROOTEnv(t, environmentWith(nil))
+	return env
 }

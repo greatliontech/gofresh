@@ -243,7 +243,7 @@ func (a *tier2Analyzer) localHarnessView() *freshParamAnalysis {
 	if a.fresh == nil || !a.fresh.propertyHarnessAudited {
 		return nil
 	}
-	return &freshParamAnalysis{propertyHarnessAudited: true, selectionAudited: a.h.SelectionAudited(), isStd: a.isStdFunction}
+	return &freshParamAnalysis{propertyHarnessAudited: true, selectionAudited: a.h.SelectionAudited(), pureDelegates: a.h.source.pureDelegates, isStd: a.isStdFunction}
 }
 
 // propertyHarnessClosedResult reports whether a call value is a
@@ -255,7 +255,7 @@ func (a *tier2Analyzer) localHarnessView() *freshParamAnalysis {
 func propertyHarnessClosedResult(call *ssa.Call, fp *freshParamAnalysis) bool {
 	// Audit-gated like every other arm: without the audited bit carried
 	// by the subject's own analysis, no third-party call result is ever
-	// closed - an unlisted release's exported functions could return
+	// closed - an unaudited release's exported functions could return
 	// callables from shared mutable state.
 	if fp == nil || !fp.propertyHarnessAudited {
 		return false

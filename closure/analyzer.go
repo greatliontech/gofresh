@@ -33,7 +33,7 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 	a.rtaResolved = reachable.resolved
 	a.skipOriginScan = reachable.instantiatedOrigins
 	a.openWorld = reachable.openWorld
-	a.fresh = newFreshParamAnalysis(h.SelectionAudited(), reachable, a.isStdFunction)
+	a.fresh = newFreshParamAnalysis(h.SelectionAudited(), h.source.pureDelegates, reachable, a.isStdFunction)
 	extraSubjectTargets := map[*ssa.Function]bool{}
 	for site, targets := range reachable.dynamicTargets {
 		if !reachable.functions[site.Parent()] {
@@ -127,7 +127,7 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 					continue
 				}
 			}
-			if !ok && !callerStd && !isAuditedStandardOrDelegatePackage(h.SelectionAudited(), idx.path) {
+			if !ok && !callerStd && !admitPureDelegateCall(h.SelectionAudited(), h.source.pureDelegates, idx.path, target, site, callerStd, a.fresh) {
 				// The audited-pure admissions hold for an enumerated
 				// dynamic target exactly as for a static callee - the
 				// admission is a property of the operation, not of the
@@ -938,7 +938,7 @@ func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name
 		// FlagSet provenance rule).
 		return externalEffect{}, false
 	}
-	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(a.h.SelectionAudited(), pkgPath) && !auditedStandardCallee(a.h.SelectionAudited(), pkgPath, name, callee) {
+	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(a.h.SelectionAudited(), pkgPath) && !admitPureDelegateCall(a.h.SelectionAudited(), a.h.source.pureDelegates, pkgPath, callee, site, callerStd, a.fresh) && !auditedStandardCallee(a.h.SelectionAudited(), pkgPath, name, callee) {
 		effect = unauditedStandardEffect(pkgPath, name)
 		classified = true
 	}
@@ -1090,7 +1090,8 @@ func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool)
 				if (!fromRTA && ((!c.IsInvoke() && fn.Parent() == nil) || !a.h.SelectionAudited())) || observableFileMethod(fn) {
 					return false
 				}
-				if !isAuditedStandardOrDelegatePackage(a.h.SelectionAudited(), idx.path) && !auditedStandardCallee(a.h.SelectionAudited(), idx.path, functionSymbolName(fn), fn) {
+				callerStd := site != nil && site.Parent() != nil && a.isStdFunction(site.Parent())
+				if !admitPureDelegateCall(a.h.SelectionAudited(), a.h.source.pureDelegates, idx.path, fn, site, callerStd, siteFP) && !auditedStandardCallee(a.h.SelectionAudited(), idx.path, functionSymbolName(fn), fn) {
 					return false
 				}
 				if _, classB := classBEffectForFunction(fn); classB {

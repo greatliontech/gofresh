@@ -1923,7 +1923,12 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		}
 		_, isFunc := types.Unalias(v.X.Type()).Underlying().(*types.Signature)
 		audited := fp != nil && fp.selectionAudited
-		carriesInner := !isFunc && audited && typeMayCarryDynamicTop(audited, v.X.Type()) && !isHarnessPointerType(v.X.Type()) && !(v.X.Parent() != nil && fp.isStdFunc(v.X.Parent())) && (fp.enumOnly || collect.isSeeds() || stdTypeMayDelegateDynamic(audited, fp.userPkgPaths(), v.X.Type()))
+		if !collect.isSeeds() && !(v.Parent() != nil && fp.isStdFunc(v.Parent())) {
+			if xPkg := unaliasedDerefNamedPkgPath(v.X.Type()); fp != nil && fp.isNonInternalPureDelegate(xPkg) && !isAuditedStdAliasValue(audited, v.X) {
+				return false
+			}
+		}
+		carriesInner := !isFunc && audited && typeMayCarryDynamicTop(audited, v.X.Type()) && !isHarnessPointerType(v.X.Type()) && !(v.X.Parent() != nil && fp.isStdFunc(v.X.Parent())) && (fp.enumOnly || collect.isSeeds() || fp.stdTypeMayDelegateDynamic(v.X.Type()))
 		if collect != nil && collect.types != nil {
 			collect.types[v.X.Type()] = true
 			if (isFunc && collect.funcs != nil) || (carriesInner && collect.isSeeds()) {
@@ -1944,7 +1949,7 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		// its receiver arrives at call sites the value walk cannot see.
 		// Direct static calls to a thunk judge the receiver argument at
 		// the site instead and never consult the value walk for it.
-		if !collect.isSeeds() && syntheticInterfaceMethodWrapper(v) && len(v.FreeVars) == 0 {
+		if !collect.isSeeds() && ((syntheticInterfaceMethodWrapper(v) && len(v.FreeVars) == 0) || (fp != nil && fp.isNonInternalPureDelegate(funcPkgPath(v)))) {
 			return false
 		}
 		if collect != nil {
@@ -1961,6 +1966,11 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		// the closure value is closed only through its bindings, whatever
 		// later carries it to a call site.
 		fn, ok := v.Fn.(*ssa.Function)
+		if !collect.isSeeds() && ok && strings.HasPrefix(fn.Synthetic, "bound ") && !(v.Parent() != nil && fp.isStdFunc(v.Parent())) && fp != nil && fp.isNonInternalPureDelegate(funcPkgPath(fn)) {
+			if len(v.Bindings) == 0 || !isAuditedStdAliasValue(fp.selectionAudited, v.Bindings[0]) {
+				return false
+			}
+		}
 		wrapFP := fp
 		if ok && syntheticInterfaceMethodWrapper(fn) {
 			if mObj, mOK := fn.Object().(*types.Func); mOK && isContextCancelMethod(mObj) {
@@ -2709,14 +2719,11 @@ func sentinelGlobalConcreteTypes(g *ssa.Global, out map[types.Type]bool) bool {
 	return found
 }
 
-func isAuditedStandardOrDelegatePackage(audited bool, pkgPath string) bool {
-	return isSourceOnlyStandardPackage(audited, pkgPath) || (audited && pureDelegatePackages[pkgPath])
-}
-
-func stdTypeMayDelegateDynamic(audited bool, userPaths map[string]bool, t types.Type) bool {
+func (fp *freshParamAnalysis) stdTypeMayDelegateDynamic(t types.Type) bool {
 	if t == nil {
 		return true
 	}
+	audited := fp != nil && fp.selectionAudited
 	base := types.Unalias(t)
 	if ptr, ok := base.(*types.Pointer); ok {
 		base = types.Unalias(ptr.Elem())
@@ -2732,10 +2739,10 @@ func stdTypeMayDelegateDynamic(audited bool, userPaths map[string]bool, t types.
 		return true
 	}
 	pkgPath := named.Obj().Pkg().Path()
-	if !isStdPkgPath(userPaths, pkgPath) {
+	if !isStdPkgPath(fp.userPkgPaths(), pkgPath) {
 		return true
 	}
-	if isAuditedStandardOrDelegatePackage(audited, pkgPath) {
+	if fp.isAuditedStandardOrDelegate(pkgPath) {
 		return true
 	}
 	switch pkgPath {
@@ -2879,7 +2886,20 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 	}
 	pkgPath := funcPkgPath(callee)
 	if fp.isStdFunc(callee) {
-		if (!collect.isSeeds() && pkgPath == "math/rand") || (!isAuditedStandardOrDelegatePackage(fp.selectionAudited, pkgPath) && !auditedStandardCallee(fp.selectionAudited, pkgPath, functionSymbolName(callee), callee)) {
+		var callerFn *ssa.Function
+		if call != nil {
+			callerFn = call.Parent()
+		}
+		callerStd := callerFn != nil && fp.isStdFunc(callerFn)
+		admittedStdOrDel := false
+		if fp != nil && fp.selectionAudited {
+			if collect.isSeeds() || (call != nil && call.Common() != nil && call.Common().IsInvoke()) {
+				admittedStdOrDel = fp.isAuditedStandardOrDelegate(pkgPath)
+			} else {
+				admittedStdOrDel = admitPureDelegateCall(fp.selectionAudited, fp.pureDelegates, pkgPath, callee, call, callerStd, fp)
+			}
+		}
+		if (!collect.isSeeds() && pkgPath == "math/rand") || (!admittedStdOrDel && !auditedStandardCallee(fp.selectionAudited, pkgPath, functionSymbolName(callee), callee)) {
 			return false
 		}
 	} else {
@@ -4550,7 +4570,7 @@ func resolveConcreteMethodTargetsSeen(prog *ssa.Program, recvType types.Type, me
 						return false
 					}
 					declPkg := funcPkgPath(declFn)
-					if !isAuditedStandardOrDelegatePackage(audited, declPkg) && !auditedStandardCallee(audited, declPkg, functionSymbolName(declFn), declFn) {
+					if !fp.isAuditedStandardOrDelegate(declPkg) && !auditedStandardCallee(audited, declPkg, functionSymbolName(declFn), declFn) {
 						return false
 					}
 				}

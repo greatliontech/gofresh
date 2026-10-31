@@ -30,12 +30,10 @@ concurrency:
 # runner is amd64 and the fixture corpus's assembly rows are amd64, so
 # the loop checks platforms, never architectures.
 #
-# go-version pins the stock release the toolchain audit lists
-# (closure/toolchainaudit.go's go1.27.1 chain row) — never `stable`, which
+# go-version pins the stock Go release CI gates on — never `stable`, which
 # would make a commit's releasability a function of Go's release
-# calendar; a point release that moves the audited bytes reds the
-# next-stable leg (next.yaml) first, and the listing lands before the
-# pin moves.
+# calendar; a point release whose stdlib changes violate a structural
+# boundary contract reds the next-stable leg (next.yaml) first.
 #
 # full-timeout bounds each plain test binary; the job budget also covers
 # setup, platform vet and the fast tier. An overrun needs attribution

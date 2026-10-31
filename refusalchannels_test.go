@@ -56,12 +56,9 @@ func TestUnauditedSelectionAttributesTierRefusals(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over fixtures")
 	}
-	// netgo selects net's netgo-constrained files — audited bytes no
-	// walk read — on every listed toolchain; the closest chain is the
-	// toolchain's base row under cgo and its cgo0 row without (net's
-	// netgo file is the one key off either; plugin's stub is a second
-	// key off the base).
-	axis := " (judged under an unaudited toolchain selection: the audited surface of " + runtime.Version() + " moved in 1 keys: net)"
+	isolateProofCache(t)
+	badEnv := unauditedTagEnv(t)
+	axis := " (judged under an unaudited toolchain selection: the audited surface of " + runtime.Version() + " moved in 1 keys: strings)"
 	dir := t.TempDir()
 	for name, content := range map[string]string{
 		"go.mod":           "module example.com/view\n\ngo 1.26\n",
@@ -86,7 +83,7 @@ func TestUnauditedSelectionAttributesTierRefusals(t *testing.T) {
 		}
 		return out
 	}
-	engine, err := newEngine(withDir(dir), withBuildFlags("-tags=netgo"))
+	engine, err := newEngine(withDir(dir), withEnv(badEnv...), withBuildFlags("-tags=badstd"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,12 +119,12 @@ func TestUnauditedSelectionAttributesTierRefusals(t *testing.T) {
 		t.Fatalf("ambiguous identity = %q, want no attribution", got)
 	}
 	for _, symbol := range []string{"Declared", "Twice", "Open"} {
-		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: symbol}, withBuildFlags("-tags=netgo"))
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/view", Symbol: symbol}, withEnv(badEnv...), withBuildFlags("-tags=badstd"))
 		if verdict.Status != Unverifiable || (symbol == "Declared" && verdict.Reason != "external directive") || (symbol == "Open" && !strings.HasSuffix(verdict.Reason, axis)) {
 			t.Fatalf("%s verdict = %+v", symbol, verdict)
 		}
 	}
-	audited, err := newEngine(withDir(dir))
+	audited, err := newEngine(withDir(dir), withEnv(badEnv...))
 	if err != nil {
 		t.Fatal(err)
 	}

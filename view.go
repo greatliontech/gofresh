@@ -1881,10 +1881,10 @@ func observationProofEvidenceMode(recorded Fingerprint, effectFree bool) string 
 	return hex.EncodeToString(sum[:])[:32]
 }
 
-// emitUnauditedToolchainNotice announces an unlisted toolchain ONCE
+// emitUnauditedToolchainNotice announces an unverified toolchain ONCE
 // PER ENGINE on the diagnostic channel: one line of each consumer
-// run's output points at the refusing axis - the surface keys that
-// moved off the closest listed row, or a surface that could not be
+// run's output points at the refusing axis - the surface packages that
+// failed structural verification, or a surface that could not be
 // read - without which the degradation surfaces only as a scatter of
 // ordinary fail-closed refusals, the exact discovery shape the content
 // keying was built to prevent. Per-engine (not per-process) so a long-lived

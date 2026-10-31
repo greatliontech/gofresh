@@ -122,9 +122,8 @@ var poolMethods = map[string][]string{
 // and so those two Kind constants and the deprecated Ptr), and the
 // hand-out (Interface, Slice). An admitted member hands out no pointer
 // into the package's own state: descriptors are sealed and never
-// written after construction. Audited on go1.27.0-dst.14; reflect
-// lies in no listed release's walked delta, so the one audit holds
-// under every listed selection (REQ-closure-observability-reflect-exclusion).
+// written after construction. The admission is gated on the structural
+// toolchain-source verification (REQ-closure-observability-reflect-exclusion).
 var reflectSymbols = map[string]bool{
 	// the runtime-type set
 	"Type": true, "TypeOf": true, "DeepEqual": true, "Elem": true,
@@ -283,9 +282,9 @@ var timeSymbols = map[string]bool{
 // standard-internal and reads the exported variable, which holds the
 // runtime's constant in every admitted program: only program code
 // spelling time.UTC can assign it, and that spelling refuses at the
-// fold in every compiled Go and cgo file of the closure. Audited on
-// go1.27.0-dst.14; time lies in no listed release's walked delta.
-// Consulted by the walk tiers alone — the fold sees no method call
+// fold in every compiled Go and cgo file of the closure. Gated on
+// structural toolchain-source verification and consulted by the walk
+// tiers alone — the fold sees no method call
 // (REQ-closure-observability-audited-set).
 var timeMethods = map[string][]string{
 	"Time": {"After", "Unix", "UnixMilli", "UnixMicro", "UTC", "AddDate"},
@@ -299,8 +298,8 @@ var timeMethods = map[string][]string{
 // the process-wide unseeded global generator, so they are excluded from
 // the bare-name table and admitted only on a *Rand or *rngSource
 // receiver through randMethods. ExpFloat64, NormFloat64, and Zipf call
-// package math's transcendental functions and remain excluded. Audited
-// on go1.27.0-dst.14 (REQ-closure-observability-entropy).
+// package math's transcendental functions and remain excluded
+// (REQ-closure-observability-entropy).
 var randSymbols = map[string]bool{
 	"New": true, "NewSource": true,
 	"Rand": true, "Source": true, "Source64": true,
@@ -339,8 +338,8 @@ var randMethods = map[string][]string{
 // The package's other reaches are net/netip's value parsing (its
 // unique-interning registry is value-deterministic; its math use is
 // a constant) and a push linkname of setPath (pure over its
-// receiver). No exported variables. Audited on go1.27.0-dst.14;
-// grows only by source audit (REQ-closure-observability-audited-set).
+// receiver). No exported variables; grows only by source audit
+// (REQ-closure-observability-audited-set).
 var urlSymbols = map[string]bool{
 	"QueryEscape": true, "QueryUnescape": true, "PathEscape": true, "PathUnescape": true,
 	"User": true, "UserPassword": true, "Username": true, "Password": true,
@@ -568,8 +567,8 @@ func SymbolPackages() []string {
 // Glob, Walk, WalkDir. The
 // exported error variables (ErrBadPattern, SkipDir, SkipAll) refuse as
 // standard globals whatever this table says. No admitted name is
-// shared with an ambient declaration. Audited on go1.27.0-dst.14;
-// grows only by source audit (REQ-closure-observability-audited-set).
+// shared with an ambient declaration; grows only by source audit
+// (REQ-closure-observability-audited-set).
 var filepathSymbols = map[string]bool{
 	"Clean": true, "IsLocal": true, "Localize": true, "ToSlash": true, "FromSlash": true,
 	"SplitList": true, "Split": true, "Join": true, "Ext": true, "IsAbs": true, "Rel": true,

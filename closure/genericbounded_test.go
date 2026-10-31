@@ -214,7 +214,7 @@ func TestBoundedGenericBatchEquivalence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reachable, err := attributedReachableSets(h.ctx, true, prog, []Subject{sum, unrelated})
+	reachable, err := attributedReachableSets(h.ctx, true, h.source.pureDelegates, prog, []Subject{sum, unrelated})
 	if err != nil {
 		t.Fatal(err)
 	}

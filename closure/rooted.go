@@ -217,7 +217,7 @@ func (h *Hasher) rootedGroup(ctx context.Context, group *packageBatch, bp *batch
 		}
 		end := min(start+maxAttributedSubjects, len(rooted))
 		batch := rooted[start:end]
-		reachable, err := attributedReachableSets(ctx, h.SelectionAudited(), prog, batch)
+		reachable, err := attributedReachableSets(ctx, h.SelectionAudited(), h.source.pureDelegates, prog, batch)
 		if err != nil {
 			return err
 		}
@@ -406,7 +406,7 @@ func (h *Hasher) binaryRootedPackage(ctx context.Context, path, closureHash stri
 	}
 	sort.Slice(subjects, func(i, j int) bool { return subjects[i].Symbol < subjects[j].Symbol })
 	h.emitUnit("prove", path, 1, 1)
-	inv, err := binaryReachableUnion(ctx, h.SelectionAudited(), prog, subjects)
+	inv, err := binaryReachableUnion(ctx, h.SelectionAudited(), h.source.pureDelegates, prog, subjects)
 	if err != nil {
 		return RootedFunctions{}, err
 	}

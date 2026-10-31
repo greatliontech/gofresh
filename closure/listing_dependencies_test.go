@@ -17,7 +17,7 @@ func TestListingMemoRejectsRetypedSource(t *testing.T) {
 	if testing.Short() {
 		t.Skip("lists a module across an entry retype")
 	}
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateProofCache(t)
 	dir := t.TempDir()
 	writeTree(t, dir, map[string]string{
 		"go.mod":    "module example.com/retype\n\ngo 1.27\n",
@@ -78,7 +78,7 @@ func TestToolchainListingTracksPreviouslyEmptyEmbedDirectories(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture")
 	}
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateProofCache(t)
 	root := t.TempDir()
 	writeTree(t, root, map[string]string{
 		"src/strings/p.go":                  "package strings\nimport \"embed\"\n//go:embed testdata\nvar files embed.FS\n",
@@ -192,12 +192,12 @@ func TestToolchainMemoRejectsIncompleteInventory(t *testing.T) {
 	if !stampsTrusted {
 		t.Skip("this platform never serves the listing memo")
 	}
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateProofCache(t)
 	dir := t.TempDir()
 	writeTree(t, dir, map[string]string{"go.mod": "module example.com/surface\n\ngo 1.27\n"})
 	env := listingEnv("", "off")
 	snapshot := snapshotFor(t, dir, env)
-	flags := []string{"-tags=netgo"}
+	flags := []string{"-tags=dup"}
 	listings := 0
 	runner := gotool.Runner{Prepare: func(cmd *exec.Cmd) {
 		if len(cmd.Args) > 1 && cmd.Args[1] == "list" {
@@ -213,8 +213,11 @@ func TestToolchainMemoRejectsIncompleteInventory(t *testing.T) {
 		return d
 	}
 	original := read()
+	stringsMemoKey := verifiedPackageMemoKey("strings", original.Packages["strings"])
+	verifiedPackageMemo.Store(stringsMemoKey, verifiedPackageVerdict{OK: false})
+	t.Cleanup(func() { verifiedPackageMemo.Delete(stringsMemoKey) })
 	if toolchainSourceDegradation(snapshot.Value("GOVERSION"), original, nil).audited() {
-		t.Fatal("netgo control unexpectedly admitted")
+		t.Fatal("unverified strings control unexpectedly admitted")
 	}
 	if again := read(); listings != 1 || !reflect.DeepEqual(again, original) {
 		t.Fatal("valid unchanged memo did not serve")

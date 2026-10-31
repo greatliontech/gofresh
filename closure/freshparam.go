@@ -1,8 +1,10 @@
 package closure
 
 import (
+	"go/token"
 	"go/types"
 	"sort"
+	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
@@ -90,10 +92,131 @@ type freshParamAnalysis struct {
 	// walk's audited-set arms consult it exactly as the harness arms
 	// consult propertyHarnessAudited.
 	selectionAudited bool
+	pureDelegates    map[string]bool
 	// isStd reports whether a function belongs to a standard-library
 	// package according to the program's listed metadata (falling back
 	// to the import-path heuristic when nil).
 	isStd func(*ssa.Function) bool
+}
+
+func (fp *freshParamAnalysis) isAuditedStandardOrDelegate(pkgPath string) bool {
+	if fp == nil || !fp.selectionAudited {
+		return false
+	}
+	return isSourceOnlyStandardPackage(true, pkgPath) || fp.pureDelegates[pkgPath]
+}
+
+func (fp *freshParamAnalysis) isNonInternalPureDelegate(pkgPath string) bool {
+	if fp == nil || !fp.selectionAudited || pkgPath == "" {
+		return false
+	}
+	return !isSourceOnlyStandardPackage(true, pkgPath) && !isInternalStdPackagePath(pkgPath) && fp.pureDelegates[pkgPath]
+}
+
+func unaliasedDerefNamedPkgPath(t types.Type) string {
+	if t == nil {
+		return ""
+	}
+	t = types.Unalias(t)
+	if ptr, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(ptr.Elem())
+	}
+	if named, ok := t.(*types.Named); ok && named.Obj() != nil && named.Obj().Pkg() != nil {
+		return named.Obj().Pkg().Path()
+	}
+	return ""
+}
+
+func isAuditedStdAliasCarrier(audited bool, t types.Type) bool {
+	if !audited || t == nil {
+		return false
+	}
+	derefed := false
+	for t != nil {
+		if alias, ok := t.(*types.Alias); ok {
+			obj := alias.Obj()
+			if obj != nil && obj.Exported() && obj.Pkg() != nil && isSourceOnlyStandardPackage(true, obj.Pkg().Path()) {
+				return true
+			}
+			t = alias.Rhs()
+			continue
+		}
+		if ptr, ok := t.(*types.Pointer); ok && !derefed {
+			derefed = true
+			t = ptr.Elem()
+			continue
+		}
+		return false
+	}
+	return false
+}
+
+func isAuditedStdAliasValue(audited bool, v ssa.Value) bool {
+	if !audited || v == nil {
+		return false
+	}
+	if isAuditedStdAliasCarrier(true, v.Type()) {
+		return true
+	}
+	if unop, ok := v.(*ssa.UnOp); ok && unop.Op == token.MUL && unop.X != nil {
+		return isAuditedStdAliasCarrier(true, unop.X.Type())
+	}
+	return false
+}
+
+func admitPureDelegateCall(audited bool, pureDelegates map[string]bool, pkgPath string, callee *ssa.Function, site ssa.CallInstruction, callerStd bool, fp *freshParamAnalysis) bool {
+	if !audited || pkgPath == "" {
+		return false
+	}
+	if isSourceOnlyStandardPackage(true, pkgPath) {
+		return true
+	}
+	if !pureDelegates[pkgPath] {
+		return false
+	}
+	if callerStd || isInternalStdPackagePath(pkgPath) {
+		return true
+	}
+	if site == nil || callee == nil {
+		return false
+	}
+	c := site.Common()
+	if c == nil {
+		return false
+	}
+	if c.IsInvoke() {
+		if fp == nil {
+			return false
+		}
+		siteFP := contextCancelMethodFP(site, fp)
+		if !subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), siteFP) {
+			return false
+		}
+		held, ok := closedInvokeTargets(site, siteFP)
+		return ok && held[callee]
+	}
+	if sc := c.StaticCallee(); sc != nil {
+		if sc != callee {
+			return false
+		}
+		if strings.HasPrefix(callee.Synthetic, "bound ") {
+			mc, ok := c.Value.(*ssa.MakeClosure)
+			return ok && len(mc.Bindings) > 0 && isAuditedStdAliasValue(audited, mc.Bindings[0])
+		}
+		if len(c.Args) > 0 && ((callee.Signature != nil && callee.Signature.Recv() != nil) || strings.HasPrefix(callee.Synthetic, "thunk ")) {
+			return isAuditedStdAliasValue(audited, c.Args[0])
+		}
+		return false
+	}
+	if fp == nil {
+		return false
+	}
+	siteFP := contextCancelMethodFP(site, fp)
+	if !subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), siteFP) {
+		return false
+	}
+	held, ok := closedDynamicTargets(c.Value, siteFP)
+	return ok && held[callee]
 }
 
 func (fp *freshParamAnalysis) userPkgPaths() map[string]bool {
@@ -124,9 +247,10 @@ type freshParamKey struct {
 	idx int
 }
 
-func newFreshParamAnalysis(audited bool, reach attributedReachability, isStd func(*ssa.Function) bool) *freshParamAnalysis {
+func newFreshParamAnalysis(audited bool, pureDelegates map[string]bool, reach attributedReachability, isStd func(*ssa.Function) bool) *freshParamAnalysis {
 	fp := &freshParamAnalysis{
 		selectionAudited:       audited,
+		pureDelegates:          pureDelegates,
 		functions:              reach.functions,
 		callers:                map[*ssa.Function][]ssa.CallInstruction{},
 		dynamic:                map[*ssa.Function]bool{},

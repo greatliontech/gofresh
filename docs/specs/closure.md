@@ -1825,9 +1825,10 @@ preserve these distinct obligations:
   replaced private payload and commitment. A record serves only while every
   listed directory, the GOROOT/src discovery tree under the go command's search
   rules, explicitly selected package directories outside that search, every
-  selected embed pattern's discovery tree, and snapshot-mode FIPS selection
-  inputs under GOROOT/lib/fips140 carry exactly their recorded entries and
-  kinds, sizes, modification times and change times. This includes FIPS aliases,
+  selected embed pattern's discovery tree, shared toolchain assembly headers
+  under GOROOT/pkg/include, and snapshot-mode FIPS selection inputs under
+  GOROOT/lib/fips140 carry exactly their recorded entries and kinds, sizes,
+  modification times and change times. This includes FIPS aliases,
   archives and verification inputs, empty directories and embed-member
   discovery. A platform without change times never serves this memo. A moved
   tree re-lists. A discovery inventory containing symlinks, or a discovery

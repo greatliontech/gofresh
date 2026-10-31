@@ -2401,7 +2401,7 @@ func TestSubjectProvenanceIncludesTestingCallbacks(t *testing.T) {
 		t.Fatal(err)
 	}
 	subject := Subject{Package: pkg, Symbol: "TestSubtestRead"}
-	reachable, err := attributedReachableSets(context.Background(), true, prog, []Subject{subject})
+	reachable, err := attributedReachableSets(context.Background(), true, h.source.pureDelegates, prog, []Subject{subject})
 	if err != nil {
 		t.Fatal(err)
 	}
