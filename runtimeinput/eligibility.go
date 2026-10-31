@@ -12,6 +12,81 @@ import (
 	"github.com/greatliontech/gofresh/gotool"
 )
 
+// pathClassifier holds the resolved root-classification state and per-ingest
+// memos shared by testlog ingestion (fromTestLog) and explicit-file preflight
+// (FileInputEligibility).
+type pathClassifier struct {
+	moduleDir      string
+	resolvedModule string
+	cfg            testLogConfig
+	guardRoots     []guardRootPair
+	ephemeralRoots [][2]string
+	ephemera       bracketEphemera
+	guardMemo      map[string]bool
+	scratchMemo    map[string]bool
+	ephemeraMemo   map[string]bool
+}
+
+func newPathClassifier(moduleDir string, cfg testLogConfig) (pathClassifier, error) {
+	// A module tree lying inside a declared ephemeral root does not
+	// surrender its identities: module-relative reads are content-bearing
+	// surface, never external temp machinery, so they keep their records
+	// and the temp admissions never fire on them — declaring the system
+	// temp directory stays sound for a repository checked out beneath it
+	// (REQ-inputs-ephemeral-root).
+	resolvedModule, err := filepath.EvalSymlinks(moduleDir)
+	if err != nil {
+		resolvedModule = moduleDir
+	}
+	ephemeralRoots, err := resolveEphemeralRoots(cfg.ephemeralRoots, moduleDir)
+	if err != nil {
+		return pathClassifier{}, err
+	}
+	return pathClassifier{
+		moduleDir:      moduleDir,
+		resolvedModule: resolvedModule,
+		cfg:            cfg,
+		guardRoots:     resolveGuardRoots(cfg.guardRoots),
+		ephemeralRoots: ephemeralRoots,
+		ephemera:       cfg.bracket.ephemera(cfg.scratchNamespaces),
+		guardMemo:      map[string]bool{},
+		scratchMemo:    map[string]bool{},
+		ephemeraMemo:   map[string]bool{},
+	}, nil
+}
+
+func (c *pathClassifier) moduleInterior(p string) bool {
+	return pathWithin(c.moduleDir, p) || pathWithin(c.resolvedModule, p)
+}
+
+func (c *pathClassifier) guardCovered(p string) bool {
+	return guardCovered(p, c.guardRoots, c.guardMemo)
+}
+
+func (c *pathClassifier) ephemeralRoot(p string) bool {
+	return !c.moduleInterior(p) && ephemeralRoot(p, c.ephemeralRoots)
+}
+
+func (c *pathClassifier) ephemeralScratch(p string) bool {
+	return !c.moduleInterior(p) && ephemeralScratch(p, c.ephemeralRoots, c.resolvedModule, c.scratchMemo)
+}
+
+func (c *pathClassifier) elidesUnambiguous(p string) bool {
+	return c.guardCovered(p) ||
+		c.ephemeralRoot(p) ||
+		c.ephemeralScratch(p) ||
+		c.ephemera.admits(p, c.ephemeraMemo) ||
+		nullSink(p)
+}
+
+func (c *pathClassifier) excludesRaw(p string) bool {
+	return c.cfg.excludesRaw(c.moduleDir, p)
+}
+
+func (c *pathClassifier) classify(p string) (pathID, string) {
+	return classifyPath(c.moduleDir, p)
+}
+
 // FileInputKind identifies how the producer treats an explicit file read.
 // UnknownFileInput is the zero value and grants no eligibility.
 type FileInputKind uint8
@@ -114,9 +189,13 @@ func FileInputEligibility(ctx context.Context, treeRoot, pkgDir, file string, in
 	if err != nil {
 		return FileEligibility{}, err
 	}
+	classifier, err := newPathClassifier(root, cfg)
+	if err != nil {
+		return FileEligibility{}, err
+	}
 	// An exclusion outranks every per-path refusal, including volatile and
 	// unavailable paths. These lexical decisions precede filesystem probes.
-	if cfg.excludesRaw(root, file) {
+	if classifier.excludesRaw(file) {
 		return FileEligibility{Kind: ElidedFileInput, Reason: "producer observation exclusion omits the file identity"}, nil
 	}
 	if volatileOSPath(file) {
@@ -139,21 +218,17 @@ func FileInputEligibility(ctx context.Context, treeRoot, pkgDir, file string, in
 	if !info.Mode().IsRegular() {
 		return refuse("exact input is not a regular file"), nil
 	}
-	if guardCovered(file, resolveGuardRoots(cfg.guardRoots), map[string]bool{}) {
+	if classifier.guardCovered(file) {
 		return FileEligibility{Kind: ElidedFileInput, Reason: "producer guard-covered admission omits the file identity"}, nil
 	}
-	id, reason := classifyPath(root, file)
+	id, reason := classifier.classify(file)
 	if reason != "" {
 		return refuse(reason), nil
 	}
 	if machineProjected(id) {
 		return FileEligibility{Kind: ProjectedFileInput, Reason: "producer stable-machine projection, not raw file bytes"}, nil
 	}
-	ephemeral, err := resolveEphemeralRoots(cfg.ephemeralRoots, root)
-	if err != nil {
-		return FileEligibility{}, err
-	}
-	if !contains(root, file) && ephemeralRoot(file, ephemeral) {
+	if classifier.ephemeralRoot(file) {
 		return FileEligibility{Kind: ElidedFileInput, Reason: "producer ephemeral-root admission omits the file identity"}, nil
 	}
 	// A still-existing regular file cannot satisfy absent-at-ingest scratch

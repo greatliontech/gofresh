@@ -142,7 +142,7 @@ func usableGuardRootOutside(root, treeRoot string) string {
 	}
 	for _, form := range []string{root, resolveOrSelf(root)} {
 		for _, tree := range []string{treeRoot, resolveOrSelf(treeRoot)} {
-			if contains(form, tree) || contains(tree, form) {
+			if pathWithin(form, tree) || pathWithin(tree, form) {
 				return ""
 			}
 		}
@@ -150,15 +150,15 @@ func usableGuardRootOutside(root, treeRoot string) string {
 	return root
 }
 
-// contains reports whether path equals dir or lies beneath it.
-func contains(dir, path string) bool {
-	if dir == path {
+// pathWithin reports whether target equals root or lies beneath it.
+func pathWithin(root, target string) bool {
+	if root == target {
 		return true
 	}
-	if dir == string(filepath.Separator) {
-		return filepath.IsAbs(path)
+	if root == string(filepath.Separator) {
+		return filepath.IsAbs(target)
 	}
-	return strings.HasPrefix(path, dir+string(filepath.Separator))
+	return strings.HasPrefix(target, root+string(filepath.Separator))
 }
 
 // usableGuardRoot returns root cleaned when it can serve as a guard
@@ -217,7 +217,7 @@ func usableTempRoot(root, treeRoot string) string {
 	// module-interior gate keeps in-tree reads observed under it.
 	for _, form := range []string{root, resolveOrSelf(root)} {
 		for _, tree := range []string{treeRoot, resolveOrSelf(treeRoot)} {
-			if contains(tree, form) {
+			if pathWithin(tree, form) {
 				return ""
 			}
 		}

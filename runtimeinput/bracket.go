@@ -10,13 +10,10 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/greatliontech/gofresh/guard"
-	"github.com/greatliontech/gofresh/internal/render"
 )
 
 // Bracket is an observation bracket (REQ-inputs-value-binding): a fingerprint
@@ -221,149 +218,6 @@ func (b Bracket) revalidate(ctx context.Context, moduleDir string) (unchanged, m
 	return true, false, "", nil
 }
 
-// bracketMoveAttribution names WHAT moved inside a refused root, best
-// effort: members added or removed since capture by set difference,
-// and — when membership held, so a content edit moved the digest — the
-// most recently modified members by refusal-time stat. A moved bracket
-// refusal without the file is unactionable when the writer is another
-// process in a parallel suite; the name is the lead the investigation
-// starts from. Attribution is advisory text on an already-decided
-// refusal: stat errors just drop the entry.
-func bracketMoveAttribution(moduleDir string, captured, now bracketRoot) string {
-	var added, removed []string
-	for rel := range now.members {
-		if !captured.members[rel] {
-			added = append(added, rel)
-		}
-	}
-	for rel := range captured.members {
-		if !now.members[rel] {
-			removed = append(removed, rel)
-		}
-	}
-	sort.Strings(added)
-	sort.Strings(removed)
-	var parts []string
-	if len(added) > 0 {
-		parts = append(parts, "added: "+render.CappedList(memberListNames(added)))
-	}
-	if len(removed) > 0 {
-		parts = append(parts, "removed: "+render.CappedList(memberListNames(removed)))
-	}
-	if len(parts) == 0 {
-		p, err := materializePath(moduleDir, captured.id)
-		if err == nil {
-			type touched struct {
-				rel string
-				mod time.Time
-			}
-			var recent []touched
-			for rel := range now.members {
-				// A directory's mtime moves whenever any direct child
-				// changes — the root and nested directories alike are
-				// pure noise as leads; the recency list names files.
-				if info, err := os.Stat(filepath.Join(p, filepath.FromSlash(rel))); err == nil && !info.IsDir() {
-					recent = append(recent, touched{rel: rel, mod: info.ModTime()})
-				}
-			}
-			sort.SliceStable(recent, func(i, j int) bool {
-				if !recent[i].mod.Equal(recent[j].mod) {
-					return recent[i].mod.After(recent[j].mod)
-				}
-				return recent[i].rel < recent[j].rel
-			})
-			var names []string
-			for _, t := range recent {
-				names = append(names, memberListName(t.rel)+" ("+t.mod.UTC().Format(time.RFC3339Nano)+")")
-			}
-			if len(names) > 0 {
-				parts = append(parts, "recently touched: "+render.CappedList(names))
-			}
-		}
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return " [" + strings.Join(parts, "; ") + "]"
-}
-
-// representableReasonName renders one member name safely for a
-// manifest reason: names are unconstrained filesystem bytes, and a
-// reason carrying framing bytes or invalid UTF-8 would fail manifest
-// validation — turning an attributable refusal into a hard error, the
-// wrong direction for advisory text — so an unrepresentable name
-// travels quoted. This is the reason-safety rule; memberListName is
-// the list-framing rule — two predicates by design, never one.
-func representableReasonName(name string) string {
-	if utf8.ValidString(name) && !strings.ContainsAny(name, "\x00\r\n") {
-		return name
-	}
-	return strconv.Quote(name)
-}
-
-// MovedBracketClause is the clause of the refusal a moved observation
-// bracket raises for the root named by its display path (a
-// module-relative slash path, or an absolute host path's own clean
-// spelling): the root travels under the members' quoting rule
-// (memberListName) — a root whose own name carries the list's framing
-// is a Go quoted string, which splitBracketAttribution's quoted-root
-// arm consumes whole, so the split never reads a root's segment as the
-// list — and a plain root travels bare. A consumer keying records on
-// the clause (RefusalClause) re-keys a stored clause through
-// CanonicalMovedBracketClause, never through this composer over the
-// stored root text — a quoted key would be quoted again
-// (REQ-inputs-refusal-attribution).
-func MovedBracketClause(root string) string {
-	return movedBracketClause + ": " + memberListName(root)
-}
-
-// CanonicalMovedBracketClause is the re-key a consumer applies to a
-// stored moved-bracket clause composed before roots were quoted: a
-// clause whose root text parses whole as a Go quoted literal of a name
-// this spelling quotes is already canonical and comes back unchanged
-// (the rule is idempotent); any other root text is composed afresh,
-// so a bare root carrying the list's framing re-keys to its quoted
-// spelling and a plain root stays. A clause not of the moved-bracket
-// form comes back unchanged. The one shape the text cannot resolve —
-// a bare root whose own name is a valid Go quoted literal of a
-// framing-bearing name — reads as canonical and is not re-keyed, so
-// its exemption stops matching the quoted spelling the producer now
-// emits: recorded, the text channel's residual class.
-func CanonicalMovedBracketClause(clause string) string {
-	root, found := strings.CutPrefix(clause, movedBracketClause+": ")
-	if !found {
-		return clause
-	}
-	if name, err := strconv.Unquote(root); err == nil && memberListName(name) == root {
-		return clause
-	}
-	return MovedBracketClause(root)
-}
-
-// memberListName renders one member of a moved-bracket attribution's
-// list: a representable name travels bare unless it carries the list's
-// own framing — a part separator "; ", a bracket, or a quote, which
-// would pair with a later quoted member's — so an unquoted member
-// never contains a byte the split reads, and every quoted one is a Go
-// quoted string the split consumes whole
-// (REQ-inputs-refusal-attribution). The moved-bracket root travels
-// under this rule too; representableReasonName is the separate
-// reason-safety rule.
-func memberListName(name string) string {
-	if !utf8.ValidString(name) || strings.ContainsAny(name, "\x00\r\n[]\"") || strings.Contains(name, "; ") {
-		return strconv.Quote(name)
-	}
-	return name
-}
-
-func memberListNames(names []string) []string {
-	out := make([]string, len(names))
-	for i, name := range names {
-		out[i] = memberListName(name)
-	}
-	return out
-}
-
 // bracketRootID normalizes one declared root to identity form: a
 // module-relative slash path or a clean absolute host path.
 func bracketRootID(root string) (pathID, error) {
@@ -403,7 +257,7 @@ func containsVolatileOSRoot(clean string) string {
 		return "is the filesystem root"
 	}
 	for _, volatile := range guard.VolatileOSRoots {
-		if underPath(volatile, clean) {
+		if pathWithin(clean, volatile) {
 			return "contains the volatile OS root " + volatile
 		}
 	}
@@ -772,125 +626,6 @@ func walkIdentity(root pathID, offset string) pathID {
 		return pathID{Kind: pathRel, Path: path.Join(root.Path, offset)}
 	}
 	return pathID{Kind: pathAbs, Path: filepath.Join(root.Path, filepath.FromSlash(offset))}
-}
-
-// bracketEphemera is the ingest-side scratch-namespace admission view: per
-// declared module-relative root, its lexical and resolved absolute bases
-// plus the capture membership, so the open/stat ladder can decide whether
-// an observed path existed before the run without re-walking anything.
-// Only reads inside a declared scratch namespace are candidates: the
-// testlog carries no outcomes, so an endpoint-absent path is otherwise
-// indistinguishable from an absence-probe whose appearance-pin must stay
-// recorded (REQ-inputs-scratch-namespace).
-type bracketEphemera struct {
-	roots      []ephemeraRoot
-	namespaces []scratchNamespace
-	exclusions []pathID
-}
-
-type ephemeraRoot struct {
-	id       pathID
-	lexBase  string
-	resolved string
-	members  map[string]bool
-}
-
-// ephemera builds the scratch-namespace admission view. A nil or
-// capture-unverifiable bracket admits nothing, exactly as it declares no
-// stat roots, and no declared namespace admits nothing; absolute roots
-// are outside the admission — a scratch namespace is declared
-// module-relative (REQ-inputs-scratch-namespace), so nothing under an
-// absolute root can match one, and its reads stay observed, the safe
-// direction.
-func (b *Bracket) ephemera(namespaces []scratchNamespace) bracketEphemera {
-	e := bracketEphemera{}
-	if b == nil || b.reason != "" || len(namespaces) == 0 {
-		return e
-	}
-	e.namespaces = namespaces
-	e.exclusions = b.exclusions
-	for _, root := range b.roots {
-		if root.id.Kind != pathRel {
-			continue
-		}
-		lexBase := filepath.Join(b.moduleDir, filepath.FromSlash(root.id.Path))
-		resolved, err := filepath.EvalSymlinks(lexBase)
-		if err != nil {
-			// An unresolvable root (absent, or broken along its chain)
-			// grants no admission: its reads stay observed.
-			continue
-		}
-		e.roots = append(e.roots, ephemeraRoot{id: root.id, lexBase: lexBase, resolved: resolved, members: root.members})
-	}
-	return e
-}
-
-// admits reports whether p is declared run scratch under a declared
-// bracket root: strictly inside a declared scratch namespace, absent from
-// the covering root's capture membership, and absent again at observation
-// ingest — with both endpoints proven, the declaration's only assertion is
-// that an absence-probe of a namespace-matching name is not a meaningful
-// input. Fail-closed on resolution exactly as the ephemeral-scratch
-// admission: the nearest existing ancestor must resolve under the root's
-// resolved base, so a traversal through an existing escaping link stays
-// observed. A path in the capture membership is never admitted — and a
-// pre-existing object the run consumed and removed also moves the root's
-// digest at revalidation, so the masquerade direction seals the whole
-// observation rather than binding. An identity under a bracket exclusion
-// is refused: its subtree is outside the fingerprint, so pre-run absence
-// is unknowable.
-func (e bracketEphemera) admits(p string, memo map[string]bool) bool {
-	if len(e.roots) == 0 {
-		return false
-	}
-	if v, ok := memo[p]; ok {
-		return v
-	}
-	res := func() bool {
-		for _, root := range e.roots {
-			offset, under := pathOffset(root.lexBase, p)
-			if !under {
-				offset, under = pathOffset(root.resolved, p)
-			}
-			if !under || offset == "." {
-				continue
-			}
-			id := walkIdentity(root.id, offset)
-			var matched scratchNamespace
-			inNamespace := false
-			for _, ns := range e.namespaces {
-				if ns.matches(id) {
-					matched, inNamespace = ns, true
-					break
-				}
-			}
-			if !inNamespace {
-				continue
-			}
-			if excludesIdentity(e.exclusions, id) {
-				continue
-			}
-			// The freshness proof anchors at the namespace's matching child:
-			// a legitimate scratch mint is freshly created, so its child is
-			// never in the capture listing. A pre-existing matching child —
-			// a data directory the pattern happens to name, or a symlink
-			// aliasing real state elsewhere (a bracket-excluded subtree
-			// included, where the bracket digest could not backstop the
-			// consumed-and-removed direction) — vetoes everything beneath
-			// it, not just its own identity.
-			if root.members[offset] || root.members[matched.childOffset(root.id, id)] {
-				return false
-			}
-			if _, err := os.Lstat(p); !os.IsNotExist(err) {
-				return false
-			}
-			resolved, ok := nearestExistingAncestorResolved(p)
-			return ok && underPath(resolved, root.resolved)
-		}
-		return false
-	}()
-	memo[p] = res
-	return res
 }
 
 // sealBracket pins every capture-derived field, so revalidation can refuse a

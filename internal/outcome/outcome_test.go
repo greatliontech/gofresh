@@ -3,14 +3,14 @@ package outcome
 import "testing"
 
 func TestSupportOwnsItsSubjectsAndRequiresPremises(t *testing.T) {
-	binding := Binding{Span: new(Span), Process: "worker", Environment: "environment"}
+	binding := Bind(new(Span), "worker", "environment", "", "")
 	for _, invalid := range []struct {
 		binding  Binding
 		subjects []string
 	}{
 		{Binding{}, []string{"subject"}},
-		{Binding{Process: "worker"}, []string{"subject"}},
-		{Binding{Span: new(Span)}, []string{"subject"}},
+		{Bind(nil, "worker", "", "", ""), []string{"subject"}},
+		{Bind(new(Span), "", "", "", ""), []string{"subject"}},
 		{binding, nil},
 	} {
 		prepared := Prepare(invalid.binding, invalid.subjects, "")

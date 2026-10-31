@@ -1269,25 +1269,51 @@ func TestManifestDecoderRejectsUnknownAndTrailingData(t *testing.T) {
 
 func TestNonUTF8ObservedPathIsUnverifiable(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
-	log := append([]byte("open "), 0xff)
-	log = append(log, '\n')
-	st, err := ambientFromTestLog(log, moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The refusal leads with its class — the state's reason is the
-	// clause — and the observation's attribution names the observation
-	// with the non-UTF-8 name quoted, so the attribution stays valid
-	// UTF-8 (REQ-inputs-refusal-attribution).
-	if !st.Unverifiable || st.Reason != "non-UTF-8 runtime input path" || !strings.HasPrefix(st.Attribution, `open "\xff" in `) {
-		t.Fatalf("state = %+v, want non-UTF-8 path unverifiable, the clause its reason, the observation attributed", st)
-	}
-	m, err := decode(st.Manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(m.Paths) != 0 {
-		t.Fatalf("manifest normalized invalid path into %+v", m.Paths)
+	for _, tc := range []struct {
+		name       string
+		log        []byte
+		wantReason string
+		wantPrefix string
+	}{
+		{
+			name:       "open-rel-non-utf8",
+			log:        []byte("open \xff\n"),
+			wantReason: "non-UTF-8 runtime input path",
+			wantPrefix: `open "\xff" in `,
+		},
+		{
+			name:       "stat-abs-non-utf8",
+			log:        []byte("stat /\xffbad\n"),
+			wantReason: "non-UTF-8 runtime input path",
+			wantPrefix: `stat "/\xffbad" in `,
+		},
+		{
+			name:       "stat-abs-nul-framing",
+			log:        []byte("stat /a\x00b\n"),
+			wantReason: "unrepresentable runtime input path",
+			wantPrefix: `stat "/a\x00b" in `,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, err := ambientFromTestLog(tc.log, moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The refusal leads with its class — the state's reason is the
+			// clause — and the observation's attribution names the observation
+			// with the non-UTF-8 or framing-byte name quoted, so the attribution
+			// stays valid UTF-8 (REQ-inputs-refusal-attribution).
+			if !st.Unverifiable || st.Reason != tc.wantReason || !strings.HasPrefix(st.Attribution, tc.wantPrefix) {
+				t.Fatalf("state = %+v, want reason=%q prefix=%q", st, tc.wantReason, tc.wantPrefix)
+			}
+			m, err := decode(st.Manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(m.Paths) != 0 {
+				t.Fatalf("manifest normalized invalid path into %+v", m.Paths)
+			}
+		})
 	}
 }
 
@@ -1469,19 +1495,19 @@ func FuzzRuntimeObservationAndPathInvariants(f *testing.F) {
 		if curState != obs1.State {
 			t.Fatalf("Current state %+v != fromTestLog state %+v", curState, obs1.State)
 		}
-		adopted, err := AdoptContext(context.Background(), obs1.Manifest, modDir, "w-adopted", ambient)
+		adopted, err := Adopt(obs1.Manifest, modDir, "w-adopted", ambient)
 		if err != nil {
-			t.Fatalf("AdoptContext on matching ambient: %v", err)
+			t.Fatalf("Adopt on matching ambient: %v", err)
 		}
 		if adopted.State != obs1.State || adopted.Manifest != obs1.Manifest {
-			t.Fatalf("AdoptContext mismatch: %+v vs %+v", adopted, obs1)
+			t.Fatalf("Adopt mismatch: %+v vs %+v", adopted, obs1)
 		}
-		merged, err := MergeContext(context.Background(), modDir, ambient, obs1, adopted)
+		merged, err := Merge(modDir, ambient, obs1, adopted)
 		if err != nil {
-			t.Fatalf("MergeContext on coherent observations: %v", err)
+			t.Fatalf("Merge on coherent observations: %v", err)
 		}
 		if merged.State != obs1.State {
-			t.Fatalf("idempotent MergeContext changed state: %+v vs %+v", merged.State, obs1.State)
+			t.Fatalf("idempotent Merge changed state: %+v vs %+v", merged.State, obs1.State)
 		}
 
 		// Mutating the observed env var shifts Current state while mutating an
@@ -1518,19 +1544,19 @@ func FuzzRuntimeObservationAndPathInvariants(f *testing.F) {
 		if !unverObs.State.OK || !unverObs.State.Unverifiable {
 			t.Fatalf("expected completed unverifiable state for %q, got %+v", badOp, unverObs.State)
 		}
-		mergedUnver, err := MergeContext(context.Background(), modDir, ambient, obs1, unverObs)
+		mergedUnver, err := Merge(modDir, ambient, obs1, unverObs)
 		if err != nil {
-			t.Fatalf("MergeContext with unverifiable observation: %v", err)
+			t.Fatalf("Merge with unverifiable observation: %v", err)
 		}
 		if !mergedUnver.State.Unverifiable {
-			t.Fatalf("MergeContext suppressed unverifiability from %q: %+v", badOp, mergedUnver.State)
+			t.Fatalf("Merge suppressed unverifiability from %q: %+v", badOp, mergedUnver.State)
 		}
 
 		// 2. Observation disposition & ProducerFrame premises
 		// (REQ-inputs-observation-disposition, REQ-inputs-producer-premises).
-		inc, err := IncompleteContext(context.Background(), modDir, "w-inc", "truncated", ambient)
+		inc, err := Incomplete(modDir, "w-inc", "truncated", ambient)
 		if err != nil {
-			t.Fatalf("IncompleteContext: %v", err)
+			t.Fatalf("Incomplete: %v", err)
 		}
 		if !inc.State.Unverifiable {
 			t.Fatal("Incomplete observation did not report Unverifiable")

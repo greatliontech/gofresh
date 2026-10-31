@@ -3,6 +3,8 @@ package runtimeinput
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +15,23 @@ import (
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/outcome"
 )
+
+// OutcomeBinding is an opaque execution-coordinate binding shared by a
+// frame's completion receipt and analysis-issued outcome support. Only
+// ProducerFrame.OutcomeBinding constructs a non-zero binding.
+type OutcomeBinding = outcome.Binding
+
+// OutcomeSupport is an opaque analysis-derived prerequisite for one execution.
+// Only the analysis view constructs support; the zero value grants none.
+type OutcomeSupport = outcome.Support
+
+// CompletionReceipt records the result owner's terminal harness judgment.
+// Normal completion includes ordinarily completed failing tests; it does not
+// establish operation outcomes. The zero value grants no completion premise.
+type CompletionReceipt struct {
+	binding OutcomeBinding
+	reason  string
+}
 
 // testlogHeader is the first line the testing runtime writes on opening
 // its -test.testlogfile capture; its presence proves the test binary
@@ -96,14 +115,6 @@ func CaptureProducerFrame(ctx context.Context, treeRoot, pkgDir string, opts Fra
 // entry check and the roots resolution.
 var producerTestHooks struct {
 	beforeRoots func()
-}
-
-// ScratchNamespace declares one in-module run-scratch namespace for the
-// ingest (REQ-inputs-scratch-namespace): a module-relative directory and
-// a single-component name pattern with os.MkdirTemp semantics.
-type ScratchNamespace struct {
-	Dir     string
-	Pattern string
 }
 
 // ProducerIngest carries one process's ingest inputs: the caller owns
@@ -223,11 +234,84 @@ func (f ProducerFrame) incomplete(ctx context.Context, in ProducerIngest, reason
 	if err := ctx.Err(); err != nil {
 		return Observation{}, "", err
 	}
-	observation, err := IncompleteContext(ctx, f.Root, in.Identity, reason, in.Env)
+	observation, err := incompleteContext(ctx, f.Root, in.Identity, reason, in.Env)
 	if err := ctx.Err(); err != nil {
 		return Observation{}, "", err
 	}
 	return observation, reason, err
+}
+
+// Completion records the caller's verified terminal disposition for this frame,
+// process and complete environment. Empty reason asserts normal completion and
+// a flushed capture; a nonempty reason records abnormal or incomplete execution.
+func (f ProducerFrame) Completion(process string, env []string, reason string) (CompletionReceipt, error) {
+	binding, err := f.OutcomeBinding(process, env)
+	if err != nil {
+		return CompletionReceipt{}, err
+	}
+	return CompletionReceipt{binding: binding, reason: reason}, nil
+}
+
+// OutcomeBinding exposes the execution-coordinate binding used by the analysis
+// view. Its value is not a support constructor; it supplies execution
+// coordinates only.
+func (f ProducerFrame) OutcomeBinding(process string, env []string) (OutcomeBinding, error) {
+	if err := validateProcess(process); err != nil {
+		return OutcomeBinding{}, err
+	}
+	normalized, err := normalizeEnvironment(env)
+	if err != nil {
+		return OutcomeBinding{}, err
+	}
+	// NormalizeEnv rejects NUL bytes, so this delimiter frames the original
+	// bytes injectively, including Linux environment values that are not UTF-8.
+	// JSON strings would replace those bytes and equate distinct executions.
+	digest := sha256.Sum256([]byte(strings.Join(normalized, "\x00")))
+	return outcome.Bind(f.span, process, hex.EncodeToString(digest[:]), f.Root, f.PkgDir), nil
+}
+
+// HasOutcomeSupport reports whether a canonical manifest retains support for
+// the exact recorded subject identity. Malformed and older records grant none.
+func HasOutcomeSupport(encoded, subject string) bool {
+	m, err := decode(encoded)
+	// Canonical decoding already requires a recognized method whenever the
+	// subject set is nonempty; membership is the remaining premise.
+	return err == nil && slices.Contains(m.Subjects, subject)
+}
+
+func (f ProducerFrame) completionPremise(in ProducerIngest) (OutcomeBinding, string) {
+	if in.Completion.binding == (OutcomeBinding{}) {
+		return OutcomeBinding{}, "process completion receipt unavailable"
+	}
+	binding, err := f.OutcomeBinding(in.Identity, in.Env)
+	if err != nil {
+		return OutcomeBinding{}, fmt.Sprintf("process binding invalid: %v", err)
+	}
+	if in.Completion.binding != binding {
+		return OutcomeBinding{}, "process completion receipt belongs to a different execution or environment"
+	}
+	if in.Completion.reason != "" {
+		return OutcomeBinding{}, in.Completion.reason
+	}
+	return binding, ""
+}
+
+func environmentLog(ctx context.Context, log []byte) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(string(log), "\n") {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		if line == "" || line == "# test log" {
+			continue
+		}
+		if !strings.HasPrefix(line, "getenv ") {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func readProducerLog(ctx context.Context, testlogPath string) ([]byte, string, error) {

@@ -21,7 +21,7 @@ func adoptTestState(t *testing.T, m manifest, moduleDir string, env []string) St
 	if err != nil {
 		t.Fatal(err)
 	}
-	state, err := currentWithNormalizedEnv(encoded, moduleDir, normalized)
+	state, err := currentWithNormalizedEnvContext(t.Context(), encoded, moduleDir, normalized)
 	if err != nil {
 		t.Fatal(err)
 	}

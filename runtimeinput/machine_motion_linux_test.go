@@ -90,9 +90,9 @@ func TestMachineBracketMovementSurvivesPostChangeManifest(t *testing.T) {
 	captured := machineMotionSamples(t, &old, nil)
 	b := testBracket(t, dir, roots...)
 	captured()
-	// Both manifest hashing passes are post-change. Only the explicit bracket
-	// retains a successful pre-change projection, under the other source root.
-	finalized := machineMotionSamples(t, &hotAdded, &hotAdded, nil, &hotAdded, &hotAdded, &hotAdded)
+	// Manifest hashing is single-pass (before revalidation). Only the explicit
+	// bracket retains a successful pre-change projection, under the other source root.
+	finalized := machineMotionSamples(t, &hotAdded, &hotAdded, nil, &hotAdded)
 	log := []byte("open " + strings.Join(roots, "\nopen ") + "\n")
 	observation, err := FromTestLog(log, dir, dir, nil, WithCompletedProcess("reader"), WithBracket(b))
 	if err != nil {

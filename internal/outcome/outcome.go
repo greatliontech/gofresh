@@ -35,11 +35,22 @@ type Span struct{ marker byte }
 // Binding joins the exact execution coordinates shared by its independent
 // completion and outcome premises. It is never persisted.
 type Binding struct {
-	Span        *Span
-	Process     string
-	Environment string
-	Root        string
-	Directory   string
+	span        *Span
+	process     string
+	environment string
+	root        string
+	directory   string
+}
+
+// Bind constructs an execution binding from its coordinates.
+func Bind(span *Span, process, environment, root, directory string) Binding {
+	return Binding{
+		span:        span,
+		process:     process,
+		environment: environment,
+		root:        root,
+		directory:   directory,
+	}
 }
 
 // Support is an opaque outcome derivation bound to a contributing execution.
@@ -53,7 +64,7 @@ type Support struct {
 // Prepare is used by the analysis view after judging every contributing
 // subject. A refusal retains its reason without inventing a supported subject.
 func Prepare(binding Binding, subjects []string, reason string) Support {
-	if binding.Span == nil || binding.Process == "" || len(subjects) == 0 {
+	if binding.span == nil || binding.process == "" || len(subjects) == 0 {
 		return Support{}
 	}
 	keys := slices.Clone(subjects)
@@ -67,7 +78,7 @@ func (s Support) Reason(binding Binding) string {
 		return s.reason
 	}
 	// Prepare is the only nonzero constructor and requires a nonempty set.
-	if s.binding.Span == nil {
+	if s.binding.span == nil {
 		return "operation-outcome support unavailable"
 	}
 	if s.binding != binding {
