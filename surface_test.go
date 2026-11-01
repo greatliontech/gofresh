@@ -3,15 +3,15 @@ package gofresh
 import (
 	"context"
 	"errors"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/trace"
-	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/stipulator/stipulate/structural"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -22,17 +22,14 @@ import (
 // Every exported analysis entry of the public packages names its
 // environment in its signature (REQ-closure-analysis: the analyzed tree
 // and build selection are explicit inputs, never implicit coupling): no
-// production source of runtimeinput, gotool, the internal packages, or the
-// root files outside session.go and view.go reads the ambient process
-// environment (os.Environ, Getenv, LookupEnv, ExpandEnv, and syscall's).
-// The ambient defaults are the root's own — newEngine without withEnv, and
-// an engine-less view's runtime-input check — and live in session.go and
-// view.go, outside this walk.
+// production source of the internal packages or the root files outside
+// session.go and view.go reads the ambient process environment (os.Environ,
+// Getenv, LookupEnv, ExpandEnv, and syscall's).
 //
 //gofresh:pure
 func TestPublicPackagesReadNoAmbientEnvironment(t *testing.T) {
-	roots := []string{"runtimeinput", "gotool", "internal"}
-	files := []string{"checking.go", "explain.go", "fingerprint.go", "judgment.go", "provenance.go", "unit.go", "vouchfile.go"}
+	roots := []string{"internal"}
+	files := []string{"checking.go", "explain.go", "fingerprint.go", "judgment.go", "provenance.go", "runtimeinputs.go", "unit.go", "vouchfile.go"}
 	for _, root := range roots {
 		if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -235,7 +232,7 @@ func TestPurityInputIsSubjectPredicate(t *testing.T) {
 		structural.FieldOf[func(Subject) bool]("AssumePure"),
 		structural.FieldOf[ExecutionModel]("Execution"),
 		structural.FieldOf[time.Duration]("AnalysisBudget"),
-		structural.FieldOf[gotool.Runner]("Runner"),
+		structural.FieldOf[func(*exec.Cmd)]("PrepareCommand"),
 		structural.FieldOf[func(Progress)]("Progress"),
 	)
 }
@@ -247,7 +244,6 @@ func TestViewCheckUsesConstructionKind(t *testing.T) {
 func TestVouchInputShapes(t *testing.T) {
 	structural.FunctionSignature[func(string) (string, error)](t, ParseVouchEntry)
 	structural.FunctionSignature[func([]string) ([]string, error)](t, ParseVouchEntries)
-	structural.FunctionSignature[func(string) ([]string, error)](t, ReadVouchFile)
 }
 
 func TestTraceDomainsAndTwoPassDiff(t *testing.T) {
@@ -386,5 +382,153 @@ func TestTraceNonInterference(t *testing.T) {
 	}
 	if plainObs.State != tracedObs.State {
 		t.Fatalf("runtime input State changed under tracing:\nplain:  %+v\ntraced: %+v", plainObs.State, tracedObs.State)
+	}
+}
+
+//gofresh:pure
+func TestExportedSurfaceInventory(t *testing.T) {
+	// 1. Verify github.com/greatliontech/gofresh is the sole public package:
+	// no non-root directory outside internal/ may contain .go source files.
+	if err := filepath.WalkDir(".", func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			name := d.Name()
+			if name == "internal" || name == "docs" || name == "testdata" || (len(name) > 1 && strings.HasPrefix(name, ".")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if filepath.Dir(path) != "." && strings.HasSuffix(path, ".go") {
+			t.Errorf("public subpackage Go file outside internal/: %s", path)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Verify no exported struct field or exported function/method signature in
+	// root gofresh spells an internal package selector directly in the AST.
+	internalPkgs := map[string]bool{
+		"auditset": true, "buildflags": true, "cachefile": true, "closure": true,
+		"dynstate": true, "gotool": true, "guard": true, "jsonrecord": true,
+		"outcome": true, "render": true, "runtimeinput": true, "testenv": true,
+		"testvariant": true, "trace": true,
+	}
+	fset := token.NewFileSet()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkTypeExpr := func(contextName string, expr ast.Expr) {
+		ast.Inspect(expr, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if id, ok := sel.X.(*ast.Ident); ok && internalPkgs[id.Name] {
+				t.Errorf("%s references internal package selector %s.%s in exported signature", contextName, id.Name, sel.Sel.Name)
+			}
+			return true
+		})
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, decl := range file.Decls {
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				if !d.Name.IsExported() {
+					continue
+				}
+				if d.Recv != nil && len(d.Recv.List) > 0 {
+					var recvIdent *ast.Ident
+					switch rt := d.Recv.List[0].Type.(type) {
+					case *ast.Ident:
+						recvIdent = rt
+					case *ast.StarExpr:
+						recvIdent, _ = rt.X.(*ast.Ident)
+					}
+					if recvIdent != nil && !recvIdent.IsExported() {
+						continue
+					}
+				}
+				if d.Type.Params != nil {
+					for _, p := range d.Type.Params.List {
+						checkTypeExpr(name+":"+d.Name.Name, p.Type)
+					}
+				}
+				if d.Type.Results != nil {
+					for _, r := range d.Type.Results.List {
+						checkTypeExpr(name+":"+d.Name.Name, r.Type)
+					}
+				}
+			case *ast.GenDecl:
+				for _, spec := range d.Specs {
+					ts, ok := spec.(*ast.TypeSpec)
+					if !ok || !ts.Name.IsExported() || ts.Assign.IsValid() {
+						continue
+					}
+					st, ok := ts.Type.(*ast.StructType)
+					if !ok || st.Fields == nil {
+						continue
+					}
+					for _, field := range st.Fields.List {
+						exportedField := len(field.Names) == 0
+						for _, fn := range field.Names {
+							if fn.IsExported() {
+								exportedField = true
+							}
+						}
+						if exportedField {
+							checkTypeExpr(name+":"+ts.Name.Name, field.Type)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Verify promoted type aliases do not expose any method whose signature
+	// references an unexported or internal-only type outside the promoted root aliases.
+	promotedPkgPaths := map[string]bool{
+		"":                                     true,
+		"github.com/greatliontech/gofresh":     true,
+		"github.com/greatliontech/gofresh/internal/runtimeinput": true,
+		"github.com/greatliontech/gofresh/internal/guard":        true,
+		"github.com/greatliontech/gofresh/internal/testvariant":  true,
+	}
+	for _, typ := range []reflect.Type{
+		reflect.TypeFor[*InputRoots](),
+		reflect.TypeFor[Observation](),
+		reflect.TypeFor[RuntimeState](),
+		reflect.TypeFor[Bracket](),
+		reflect.TypeFor[ScratchNamespace](),
+		reflect.TypeFor[Guards](),
+		reflect.TypeFor[TestVariantLedger](),
+	} {
+		for i := range typ.NumMethod() {
+			m := typ.Method(i)
+			mt := m.Type
+			for j := 1; j < mt.NumIn(); j++ {
+				inPkg := mt.In(j).PkgPath()
+				if strings.Contains(inPkg, "/internal/") && !promotedPkgPaths[inPkg] {
+					t.Errorf("%v.%s param %d leaks internal package %s (%v)", typ, m.Name, j, inPkg, mt.In(j))
+				}
+			}
+			for j := range mt.NumOut() {
+				outPkg := mt.Out(j).PkgPath()
+				if strings.Contains(outPkg, "/internal/") && !promotedPkgPaths[outPkg] {
+					t.Errorf("%v.%s result %d leaks internal package %s (%v)", typ, m.Name, j, outPkg, mt.Out(j))
+				}
+			}
+		}
 	}
 }

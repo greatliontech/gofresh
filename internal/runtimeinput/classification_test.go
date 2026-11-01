@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/outcome"
 )
@@ -1892,11 +1892,11 @@ func TestRefusalClauseSurvivesSeparatorsInNames(t *testing.T) {
 		t.Fatalf("representableReasonName(a\\x00b) = %q, want it quoted", got)
 	}
 	for _, c := range cases {
-		if got := RefusalClause(c.reason); got != c.clause {
-			t.Errorf("RefusalClause(%q) = %q, want %q", c.reason, got, c.clause)
+		if got := refusalClause(c.reason); got != c.clause {
+			t.Errorf("refusalClause(%q) = %q, want %q", c.reason, got, c.clause)
 		}
 	}
-	if got := RefusalAttribution("observation bracket moved: fixtures [added: a.txt; removed: b.txt]"); got != "added: a.txt; removed: b.txt" {
+	if got := refusalAttribution("observation bracket moved: fixtures [added: a.txt; removed: b.txt]"); got != "added: a.txt; removed: b.txt" {
 		t.Fatalf("the moved-bracket attribution = %q, want the member list without its brackets", got)
 	}
 	// The builder's attribution, pasted after a clause, round-trips
@@ -1907,29 +1907,23 @@ func TestRefusalClauseSurvivesSeparatorsInNames(t *testing.T) {
 	for _, op := range attributionOps {
 		attribution := operationAttribution(op, "/proc/a"+sep+"b", "/p"+sep+"kg")
 		reason := "volatile OS input: /proc/a" + sep + "b" + sep + attribution
-		if got := RefusalClause(reason); got != "volatile OS input: /proc/a"+sep+"b" {
+		if got := refusalClause(reason); got != "volatile OS input: /proc/a"+sep+"b" {
 			t.Fatalf("the %s attribution does not round-trip: %q -> %q", op, reason, got)
 		}
-		if got := RefusalAttribution(reason); got != attribution {
+		if got := refusalAttribution(reason); got != attribution {
 			t.Fatalf("the %s attribution's complement = %q, want %q", op, got, attribution)
 		}
 	}
 	// The resolved-target producer's shape round-trips the same way.
 	resolved := "external runtime input target: /w/pkg/l" + sep + "ink" + sep + resolvedTargetAttribution("pkg/l"+sep+"ink", "/srv"+sep+"x")
-	if RefusalClause(resolved) != "external runtime input target: /w/pkg/l"+sep+"ink" || RefusalAttribution(resolved) != resolvedTargetAttribution("pkg/l"+sep+"ink", "/srv"+sep+"x") {
-		t.Fatalf("the resolved-target attribution does not round-trip: %q -> %q / %q", resolved, RefusalClause(resolved), RefusalAttribution(resolved))
+	if refusalClause(resolved) != "external runtime input target: /w/pkg/l"+sep+"ink" || refusalAttribution(resolved) != resolvedTargetAttribution("pkg/l"+sep+"ink", "/srv"+sep+"x") {
+		t.Fatalf("the resolved-target attribution does not round-trip: %q -> %q / %q", resolved, refusalClause(resolved), refusalAttribution(resolved))
 	}
 	if got := operationAttribution("rename", "/", "/pkg"); got != "" {
 		t.Fatalf("an operation outside the vocabulary was attributed: %q", got)
 	}
 }
 
-// RefusalAttribution is RefusalClause's complement over the one split:
-// the well-formed suffix without its separator, "" where the reason
-// carries none (a malformed tail is no attribution), and the fake
-// tail on the text channel's one residual — an unattributed reason
-// whose refused path ends in the attribution's shape — exactly as its
-// clause is the truncated one (REQ-inputs-refusal-attribution).
 func TestRefusalAttributionIsTheClauseSplitsComplement(t *testing.T) {
 	sep := attributionSeparator
 	for _, c := range []struct{ reason, attribution string }{
@@ -1940,9 +1934,9 @@ func TestRefusalAttributionIsTheClauseSplitsComplement(t *testing.T) {
 		{`external directory input: /a` + sep + `b` + sep + `stat "/a" in "/w"`, `stat "/a" in "/w"`},
 		{`unhashable runtime input: /x` + sep + `open "a" in "b"`, `open "a" in "b"`},
 	} {
-		clause, attribution := RefusalClause(c.reason), RefusalAttribution(c.reason)
+		clause, attribution := refusalClause(c.reason), refusalAttribution(c.reason)
 		if attribution != c.attribution {
-			t.Errorf("RefusalAttribution(%q) = %q, want %q", c.reason, attribution, c.attribution)
+			t.Errorf("refusalAttribution(%q) = %q, want %q", c.reason, attribution, c.attribution)
 		}
 		if attribution == "" && clause != c.reason {
 			t.Errorf("an unattributed reason %q split its clause to %q", c.reason, clause)
@@ -2012,10 +2006,10 @@ func TestInModuleRefusedPathSpellsModuleRelative(t *testing.T) {
 		// The bracket's capture reaches the hashing pass first and
 		// wraps its refusal; the refused path is spelled relative there
 		// and the attribution names the recorded path and its target.
-		if clause := RefusalClause(state.Reason); !strings.HasSuffix(clause, "external directory input: escape") {
+		if clause := refusalClause(state.Reason); !strings.HasSuffix(clause, "external directory input: escape") {
 			t.Fatalf("checkout %d: the clause = %q, want the module-relative spelling", i, clause)
 		}
-		if attribution := RefusalAttribution(state.Reason); attribution != `recorded path "escape" resolves to `+strconv.Quote(outside)+` outside the tree` {
+		if attribution := refusalAttribution(state.Reason); attribution != `recorded path "escape" resolves to `+strconv.Quote(outside)+` outside the tree` {
 			t.Fatalf("checkout %d: the attribution = %q, want the recorded path and its target", i, attribution)
 		}
 		states[i] = state
@@ -2033,7 +2027,7 @@ func TestInModuleRefusedPathSpellsModuleRelative(t *testing.T) {
 		t.Fatal("the manifest carries no refusal")
 	}
 	for _, reason := range m.Unverifiable {
-		if strings.Contains(RefusalClause(reason), "/") {
+		if strings.Contains(refusalClause(reason), "/") {
 			t.Fatalf("a manifest clause spells an in-module path absolute: %q", reason)
 		}
 	}
@@ -2047,7 +2041,7 @@ func TestInModuleRefusedPathSpellsModuleRelative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if clause := RefusalClause(file.Reason); !strings.HasSuffix(clause, "external runtime input target: escapefile") {
+	if clause := refusalClause(file.Reason); !strings.HasSuffix(clause, "external runtime input target: escapefile") {
 		t.Fatalf("the file link's clause = %q, want the module-relative spelling", clause)
 	}
 }
@@ -2195,37 +2189,8 @@ func TestMovedBracketRootSpelledLikeAMemberList(t *testing.T) {
 			t.Fatalf("a pre-quoting reason whose root begins with a quoted literal split to %q / %q (%v), want refused whole", c, a, ok)
 		}
 	}
-	// The exported spelling is the composer's: a plain root bare, a
-	// framing-bearing one quoted — a consumer's re-key reads it.
-	if MovedBracketClause("fix") != "observation bracket moved: fix" || MovedBracketClause("fix [added: x]") != `observation bracket moved: "fix [added: x]"` {
-		t.Fatalf("MovedBracketClause spells %q / %q", MovedBracketClause("fix"), MovedBracketClause("fix [added: x]"))
-	}
-	// The re-key is idempotent: a pre-quoting bare key of a
-	// framing-bearing root re-keys to the quoted spelling; a canonical
-	// quoted key and a plain root's key come back unchanged, however
-	// often applied; a foreign clause is untouched; the recorded
-	// ambiguity — a bare root that is itself a quoted literal of a
-	// framing-bearing name — reads as canonical.
-	for _, tc := range []struct{ stored, want string }{
-		{"observation bracket moved: fix [added: x]", `observation bracket moved: "fix [added: x]"`},
-		{`observation bracket moved: "fix [added: x]"`, `observation bracket moved: "fix [added: x]"`},
-		{"observation bracket moved: fix", "observation bracket moved: fix"},
-		{"observation bracket moved: a; b", `observation bracket moved: "a; b"`},
-		{"observation bracket moved", "observation bracket moved"},
-		// A stored bare root literally named with quotes around a plain
-		// name is not canonical (the spelling would not quote `fix`), so
-		// it re-keys to the quoted spelling of its own quoted name.
-		{`observation bracket moved: "fix"`, `observation bracket moved: "\"fix\""`},
-		{"open /etc/passwd: outside the module", "open /etc/passwd: outside the module"},
-		// The recorded ambiguity: a legacy bare root literally named
-		// `"fix [added: x]"` is the same text as the canonical key of
-		// `fix [added: x]`, so it reads as canonical and is not re-keyed.
-		{`observation bracket moved: "fix [added: x]"`, `observation bracket moved: "fix [added: x]"`},
-	} {
-		got := CanonicalMovedBracketClause(tc.stored)
-		if got != tc.want || CanonicalMovedBracketClause(got) != got {
-			t.Fatalf("CanonicalMovedBracketClause(%q) = %q (again %q), want %q and a fixed point", tc.stored, got, CanonicalMovedBracketClause(got), tc.want)
-		}
+	if movedBracketClauseForRoot("fix") != "observation bracket moved: fix" || movedBracketClauseForRoot("fix [added: x]") != `observation bracket moved: "fix [added: x]"` {
+		t.Fatalf("movedBracketClauseForRoot spells %q / %q", movedBracketClauseForRoot("fix"), movedBracketClauseForRoot("fix [added: x]"))
 	}
 	// The sibling root's own clause, unquoted: a plain name travels bare.
 	bracket := testBracket(t, moduleDir, "fix")
@@ -3055,10 +3020,13 @@ func TestFileInputEligibilityExecution(t *testing.T) {
 	for _, mode := range []string{"query", "read"} {
 		childEnv := gotool.SetEnv(gotool.SetEnv(env, modeKey, mode), "GOFRESH_ELIGIBILITY_ROOT", root)
 		logPath := filepath.Join(t.TempDir(), "child.testlog")
-		cmd, err := (gotool.Runner{}).Program(t.Context(), pkg, childEnv, os.Args[0], "-test.run=^TestFileInputEligibilityExecution$", "-test.testlogfile="+logPath)
+		cmdEnv, err := gotool.EnvForCommand(childEnv, pkg)
 		if err != nil {
 			t.Fatal(err)
 		}
+		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestFileInputEligibilityExecution$", "-test.testlogfile="+logPath)
+		cmd.Dir = pkg
+		cmd.Env = cmdEnv
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%s child: %v\n%s", mode, err, output)
 		}
@@ -4782,7 +4750,7 @@ func TestRootsProbeServesTheSalvagedAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := gotool.Runner{Containment: &gotool.Containment{WaitDelay: 200 * time.Millisecond}}
+	runner := gotool.Runner{Prepare: func(c *exec.Cmd) { c.WaitDelay = 200 * time.Millisecond }}
 	pkgDir := t.TempDir()
 	roots, err := resolveRoots(context.Background(), nil, runner, pkgDir, pkgDir, env)
 	if err != nil || roots.toolchain == "" {

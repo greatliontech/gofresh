@@ -1,20 +1,10 @@
-// Package gotool is the fleet's go-command policy: it runs the go
-// command line tool under one complete normalized environment (env.go),
-// surfacing stderr on failure; prepares a command a consumer streams
-// itself (Command; Program over the consumer's own program) under one
-// process-boundary rule (Containment); samples the toolchain in the
-// target module's directory, memoized (Sampler);
+// Package gotool runs the go command line tool under one complete
+// normalized environment (env.go), surfacing stderr on failure;
 // reads go's environment once per pass (EnvReader); resolves a
 // directory to its one canonical coordinate (CanonicalDir, Coordinate);
 // and reads a toolchain version's language series, pair, and release
 // tags through the canonical grammar (LanguageSeries, ParseGoVersion,
 // ReleaseTags).
-// A Runner's containment and hook reach the go commands a consumer
-// spawns through it and, installed on a session (gofresh.SessionPolicy.Runner),
-// every go command that session spawns itself; the package loader's
-// `go list` children carry the same environment (x/tools appends its
-// own PWD, the same derivation) and spawn through x/tools, outside any
-// hook.
 package gotool
 
 import (
@@ -29,76 +19,36 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 )
 
-// Runner runs the go command line tool — and prepares a consumer's own
-// program the same way (Program) — under a caller-owned spawn policy.
-// Containment, when set, is the one process-boundary rule applied to
-// every command the runner prepares, under that command's own context;
-// Prepare, when set, sees the command after that, its Dir, Env, and
-// boundary already set (a resource policy of the consumer's own). The
-// zero Runner is the plain spawn. A runner reaches the go commands a
-// consumer spawns through it and, installed on an engine, the engine's
-// own.
+// Runner runs the go command line tool under a caller-supplied command
+// preparation hook. Prepare, when set, sees the command after Dir and
+// Env are configured.
 type Runner struct {
-	Containment *Containment
-	Prepare     func(*exec.Cmd)
+	Prepare func(*exec.Cmd)
 }
 
 // Command prepares `go <args>` under the policy without starting it:
-// Dir set, Env the complete derived environment, Prepare applied. A
-// consumer that streams the child's output to its own sinks, or applies
-// a resource policy of its own once the process exists, runs the
-// returned command itself; Run is the collected form. It is Program
-// over the go command.
+// Dir set, Env the complete derived environment, Prepare applied.
 func (r Runner) Command(ctx context.Context, dir string, env []string, args ...string) (*exec.Cmd, error) {
-	return r.Program(ctx, dir, env, "go", args...)
-}
-
-// Program prepares the program name with args under the policy without
-// starting it — the same policy Command applies to go: Dir set, Env the
-// complete derived environment (PWD derived from Dir when one is
-// given), the runner's containment when it carries one, Prepare last. It is the
-// consumer-command form of the go-command policy
-// (REQ-fresh-go-command-policy): a consumer's test binary, resolver
-// child, or pinned measurement runs under the one boundary rule
-// instead of a hand copy of it. The program resolves as os/exec
-// resolves it — a bare name through the parent process's own PATH
-// lookup, a name carrying a path separator against Dir; the derived
-// environment governs the child, never the lookup. A consumer that
-// sets SysProcAttr fields after construction merges into the one
-// Program set: the boundary's process group lives there. There is no
-// form of the boundary over a command prepared elsewhere — the sweep's
-// context and the command's must be one, which only construction makes
-// so: a separately passed context reads the wrong cause for Quit, a
-// command built without a context refuses to start, and a started
-// command is past containing.
-func (r Runner) Program(ctx context.Context, dir string, env []string, name string, args ...string) (*exec.Cmd, error) {
-	if name == "" {
-		return nil, errors.New("gotool: empty program name")
-	}
 	if env == nil {
 		// A nil environment would let the child inherit the ambient one;
 		// the caller names the environment it runs under (an empty
 		// non-nil slice is a deliberate empty environment).
-		return nil, fmt.Errorf("%s: nil environment", name)
+		return nil, errors.New("go: nil environment")
 	}
 	if ctx == nil {
-		return nil, fmt.Errorf("%s: nil context", name)
+		return nil, errors.New("go: nil context")
 	}
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = dir
 	commandEnv, err := EnvForCommand(env, dir)
 	if err != nil {
-		return nil, fmt.Errorf("%s: environment: %w", strings.Join(append([]string{name}, args...), " "), err)
+		return nil, fmt.Errorf("%s: environment: %w", strings.Join(append([]string{"go"}, args...), " "), err)
 	}
 	cmd.Env = commandEnv
-	if r.Containment != nil {
-		contain(ctx, cmd, *r.Containment)
-	}
 	if r.Prepare != nil {
 		r.Prepare(cmd)
 	}
@@ -109,14 +59,10 @@ func (r Runner) Program(ctx context.Context, dir string, env []string, name stri
 // the command's streams (a Prepare hook's own are replaced). When the
 // process itself exited cleanly but a descendant held its output pipe
 // past the command's WaitDelay, the output read so far is returned
-// BESIDE exec.ErrWaitDelay — the consumer decides whether that answer
-// serves (a toolchain sample does: a wrapper's housekeeping child is not
-// a failed sample) — never discarded behind the error. A failed
+// BESIDE exec.ErrWaitDelay — never discarded behind the error. A failed
 // command's refusal carries go's stderr bounded to its head and tail,
 // so a refusal text a consumer keys a record on never grows with a
-// tree's diagnostics. On Linux, a contained collected run also ends the
-// remaining process group after the bounded drain, even if the leader exited
-// before cancellation. Prepared commands run by consumers own that cleanup.
+// tree's diagnostics.
 func (r Runner) Run(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
 	cmd, err := r.Command(ctx, dir, env, args...)
 	if err != nil {
@@ -124,7 +70,7 @@ func (r Runner) Run(ctx context.Context, dir string, env []string, args ...strin
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err = runCollected(cmd, r.Containment != nil)
+	err = cmd.Run()
 	if err != nil {
 		if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
 			return stdout.Bytes(), fmt.Errorf("go %s: %w", strings.Join(args, " "), err)
@@ -140,24 +86,12 @@ func (r Runner) Run(ctx context.Context, dir string, env []string, args ...strin
 
 // ErrListingRefused is List's refusal of the wait-delay form: the
 // listing's output was not drained within the wait delay, and a listing
-// has no wholeness test. It is its own sentinel, never exec.ErrWaitDelay,
-// so Salvaged is false for a refused listing and no reader serves it.
+// has no wholeness test.
 var ErrListingRefused = errors.New("the listing was not drained within the wait delay (a descendant's hold or a stalled copier); a listing has no wholeness test and is refused")
 
 // List runs `go list <args>` under the policy and returns its stdout,
-// refusing the wait-delay form Run would serve. At the delay's expiry
-// exec closes the parent's read end and drops whatever the copier had
-// not yet read — unobserved in practice, since the copier drains a
-// pipe as fast as the process fills it, but nothing forbids a stalled
-// copier leaving a cleanly exited process's tail behind, and a
-// descendant sharing the pipe could write into it — and a listing has
-// no wholeness test to tell either apart from a clean answer (a cut at
-// a line or object boundary reads as a shorter, well-formed set; a
-// consumer's "names at least the package itself" is fail-open on a
-// missing dependency). So where Run serves the form and the structured
-// readers judge it by their own test, List refuses it defensively with
-// ErrListingRefused, the exec error's text carried
-// (REQ-fresh-go-command-policy). Every other failure is Run's.
+// refusing the wait-delay form Run would serve (REQ-fresh-go-command-policy).
+// Every other failure is Run's.
 func (r Runner) List(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
 	out, err := r.Run(ctx, dir, env, append([]string{"list"}, args...)...)
 	if errors.Is(err, exec.ErrWaitDelay) {
@@ -179,90 +113,6 @@ func boundedText(text []byte) string {
 	}
 	half := stderrBound / 2
 	return fmt.Sprintf("%s\n... %d bytes elided ...\n%s", text[:half], len(text)-2*half, text[len(text)-half:])
-}
-
-// Containment is the one process-boundary rule a Runner applies to
-// every command it prepares: the child runs in its own process group,
-// a cancellation sweeps the whole group (an already-empty group is the
-// process-done case, never an injected error over a finished command),
-// and WaitDelay bounds how long the reap waits on a descendant holding
-// the pipes — zero meaning DefaultWaitDelay, never an unbounded wait.
-// Quit, when set and true for the cancellation's cause (the command's
-// own context's), asks the group to quit first — a goroutine dump on an
-// expired envelope — and kills it after Grace (zero meaning
-// DefaultGrace, never a kill on the quit's heels); the reap is then
-// bounded by Grace plus WaitDelay, since exec's wait delay starts when
-// the cancellation returns. The platform arms live in contain_*.go.
-type Containment struct {
-	WaitDelay time.Duration
-	Quit      func(cause error) bool
-	Grace     time.Duration
-}
-
-// DefaultWaitDelay bounds the reap when a Containment names no delay;
-// DefaultGrace is the quit grace when a Containment names none — long
-// enough for a test binary to write its goroutine dump.
-const (
-	DefaultWaitDelay = time.Second
-	DefaultGrace     = 10 * time.Second
-)
-
-func (c Containment) waitDelay() time.Duration {
-	if c.WaitDelay <= 0 {
-		return DefaultWaitDelay
-	}
-	return c.WaitDelay
-}
-
-func (c Containment) grace() time.Duration {
-	if c.Grace <= 0 {
-		return DefaultGrace
-	}
-	return c.Grace
-}
-
-// Sampler is the one toolchain sampler a consumer holds for one
-// judged run (REQ-fresh-toolchain-skew's bound): SampleGoVersion
-// memoized by memoKey through the one judged-run memo — the toolchain
-// does not change within one run — each key's holder taking its sample
-// under its own lock, so a failed sample is the run's answer for that
-// key like an answered one, a cancelled sample is never memoized (the
-// cancellation answered, the next live ask sampling), concurrent asks
-// on one key wait on the first's spawn, and the salvage the wait-delay
-// form allows stands: the first line a cleanly exited process wrote is
-// the sample when it is a go version.
-type Sampler struct {
-	Runner Runner
-	memo   RunMemo[*versionReader]
-}
-
-// versionReader is one key's holder: the sample taken once, the one
-// holder discipline over `go env GOVERSION`.
-type versionReader struct {
-	runner Runner
-	dir    string
-	env    []string
-	once   once[string]
-}
-
-func (r *versionReader) sample(ctx context.Context) (string, error) {
-	return r.once.take(ctx, func(ctx context.Context) (string, error) {
-		return r.runner.SampleGoVersion(ctx, r.dir, r.env)
-	})
-}
-
-// Sample is SampleGoVersion memoized by memoKey for the sampler's
-// lifetime.
-func (s *Sampler) Sample(ctx context.Context, dir string, env []string) (string, error) {
-	reader, err := s.memo.Get(dir, env, func() *versionReader {
-		// A cancelled take leaves this holder available for a retry. Its
-		// configuration belongs to the original key, not the caller's slice.
-		return &versionReader{runner: s.Runner, dir: dir, env: slices.Clone(env)}
-	})
-	if err != nil {
-		return "", err
-	}
-	return reader.sample(ctx)
 }
 
 // EnvReader reads go's environment for one pass: the first key takes
@@ -389,11 +239,10 @@ func (s *EnvSnapshot) Value(key string) string {
 }
 
 // TakeEnvSnapshot performs the pass's one `go env -json` read under the
-// runner's spawn policy and the caller's complete environment — the
-// boundary-hook form a consumer whose spec owns every go child takes.
+// runner's spawn policy and the caller's complete environment.
 func (r Runner) TakeEnvSnapshot(ctx context.Context, dir string, env []string) (*EnvSnapshot, error) {
 	out, err := r.Run(ctx, dir, env, "env", "-json")
-	if err != nil && !Salvaged(ctx, err) {
+	if err != nil && !(errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil) {
 		return nil, err
 	}
 	values, parseErr := parseEnvDocument(out)
@@ -421,43 +270,6 @@ func parseEnvDocument(out []byte) (map[string]string, error) {
 		return nil, errors.New("gotool: parse go env -json: no values")
 	}
 	return values, nil
-}
-
-// Salvaged reports whether err is the wait-delay form Run answers
-// beside a cleanly exited process's output — what the copier had
-// drained when the delay expired, whole only by the reader's own test;
-// a descendant's hold or a stalled copier kept the pipe from EOF —
-// under a context that is still live: the one guard every structured
-// reader (the toolchain sample, the environment snapshot — from whose
-// keys a consumer's runtime-input ingest reads its roots) applies
-// before its own wholeness test of the answer.
-// List's refusal is not this form: it carries ErrListingRefused.
-func Salvaged(ctx context.Context, err error) bool {
-	return errors.Is(err, exec.ErrWaitDelay) && ctx.Err() == nil
-}
-
-// SampleGoVersion is the toolchain sample REQ-fresh-toolchain-skew
-// specifies: `go env GOVERSION` run IN THE TARGET MODULE'S DIRECTORY,
-// never the tool's own — under GOTOOLCHAIN=auto the go command re-execs
-// a per-module selected toolchain, so a version sampled elsewhere can
-// agree while the module's toolchain skews. The sample is the string a
-// consumer hands to ToolchainSkew.
-func (r Runner) SampleGoVersion(ctx context.Context, dir string, env []string) (string, error) {
-	out, err := r.Run(ctx, dir, env, "env", "GOVERSION")
-	if Salvaged(ctx, err) {
-		// The process answered and exited; a descendant held the pipe
-		// past the wait delay. The first line is the sample when it is
-		// a go version — a wrapper's housekeeping is not a failed
-		// sample.
-		answer, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
-		if strings.HasPrefix(answer, "go") {
-			return answer, nil
-		}
-	}
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 // Coordinate is the degrading form of CanonicalDir every consumer

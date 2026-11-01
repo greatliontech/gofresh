@@ -13,7 +13,7 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 // The tests' ambient forms: the process environment and a background

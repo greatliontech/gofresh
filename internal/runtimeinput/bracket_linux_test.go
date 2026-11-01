@@ -112,7 +112,7 @@ func TestMachineProjectionMovementSurvivesSourceAvailabilityShift(t *testing.T) 
 			if err != nil || moved != tc.moved || unchanged != tc.unchanged || (reason == "") != tc.unchanged {
 				t.Fatalf("projection comparison: unchanged=%t moved=%t reason=%q err=%v", unchanged, moved, reason, err)
 			}
-			if moved && RefusalClause(reason) != MovedBracketClause(roots[0]) {
+			if moved && refusalClause(reason) != movedBracketClauseForRoot(roots[0]) {
 				t.Fatalf("lost contributing-root attribution: %q", reason)
 			}
 		})
@@ -134,7 +134,7 @@ func TestMachineBracketMovementSurvivesPostChangeManifest(t *testing.T) {
 		t.Fatal(err)
 	}
 	finalized()
-	if !observation.BracketMoved || RefusalClause(observation.Reason) != MovedBracketClause(roots[0]) {
+	if !observation.BracketMoved || refusalClause(observation.Reason) != movedBracketClauseForRoot(roots[0]) {
 		t.Fatalf("known projection movement lost: %+v", observation.State)
 	}
 	currentMachineFacts = func() (guard.MachineFacts, error) { return hotAdded, nil }
@@ -192,7 +192,7 @@ func TestMachineProjectionKeepsRootScopeAndSeal(t *testing.T) {
 	}
 	_, moved, reason, err := excluded.revalidate(t.Context(), dir)
 	done()
-	if err != nil || !moved || RefusalClause(reason) != MovedBracketClause(roots[1]) {
+	if err != nil || !moved || refusalClause(reason) != movedBracketClauseForRoot(roots[1]) {
 		t.Fatalf("excluded root acquired attribution: moved=%t reason=%q err=%v", moved, reason, err)
 	}
 }
@@ -458,7 +458,7 @@ func TestUnhashableInModuleMembersSpellModuleRelative(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := RefusalClause(state.Reason); got != "observation bracket unverifiable: unhashable runtime directory entry: data/pipe" {
+		if got := refusalClause(state.Reason); got != "observation bracket unverifiable: unhashable runtime directory entry: data/pipe" {
 			t.Fatalf("checkout %d: the walked clause = %q", i, got)
 		}
 		if strings.Contains(state.Manifest, moduleDir) {
@@ -504,7 +504,7 @@ func TestUnhashableInModuleMembersSpellModuleRelative(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !current.Unverifiable || RefusalClause(current.Reason) != arm.clause {
+			if !current.Unverifiable || refusalClause(current.Reason) != arm.clause {
 				t.Fatalf("%s, checkout %d: the revalidated state = %+v, want the clause %q", arm.name, i, current, arm.clause)
 			}
 			if strings.Contains(current.Reason, moduleDir) {

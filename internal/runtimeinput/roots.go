@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 // The classification roots a producing run's reads classify under are
@@ -57,8 +57,7 @@ func (r resolvedRoots) ephemeralRoots(scratch, treeRoot string) []string {
 
 // Roots memoizes a producer's classification-root snapshots for one
 // judged run — the consumer's one verb invocation, a long-lived
-// server's per-request operation, never a process, the bound its
-// toolchain Sampler carries (REQ-inputs-observation-coherence: the
+// server's per-request operation, never a process (REQ-inputs-observation-coherence: the
 // caller holds the resolution's inputs still for exactly that span) —
 // keyed by gotool.MemoKey — the package directory's coordinate and the
 // normalized environment less PWD, which the facade has already
@@ -84,8 +83,8 @@ type Roots struct {
 }
 
 // reader answers the memoized pass reader for pkgDir under env —
-// filed under gotool.MemoKey in the one judged-run memo shape
-// (gotool.RunMemo) the toolchain sampler also instances — creating it
+// filed under gotool.MemoKey in the judged-run memo shape
+// (gotool.RunMemo) — creating it
 // on the first ask; a nil memo answers a fresh reader.
 func (r *Roots) reader(runner gotool.Runner, pkgDir string, env []string) (*gotool.EnvReader, error) {
 	if r == nil {

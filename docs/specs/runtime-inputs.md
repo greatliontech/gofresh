@@ -150,7 +150,7 @@ input mutation throughout each producing run and its observation finalization, a
 while merge or a current check observes inputs — the
 classification roots' resolution inputs and their consumer-held memo included (one
 judged run — the consumer's one verb invocation, a long-lived server's per-request
-operation — never a process, as the toolchain sampler's), as
+operation — never a process), as
 REQ-inputs-guard-covered states. Merge revalidates
 every completed child state against its one merge-time view before unioning their
 identities, rejecting children finalized under values that no longer agree; Gofresh
@@ -816,12 +816,12 @@ scratch disciplines no sound flow analysis can follow.
 explicit existing regular file MUST judge eligibility for raw-byte observation
 under these obligations:
 
-- **producing-context** — The query uses the producer facade's effective-root
+- **producing-context** — The query uses the session's and producer facade's effective-root
   resolution, exclusions and path-value classifications. It distinguishes
   raw-byte-eligible, recordless, projected and unverifiable paths; every non-raw
   result names its reason, and an absent result grants nothing. The caller supplies
   the same absolute evidence-root and process directories, complete process
-  environment with matching PWD, runner, operation-scoped roots memo, exclusions
+  environment with matching PWD, exclusions
   and minted scratch root as the actual producer. A build or analysis environment
   cannot substitute for a different process environment.
 - **classification** — The query preserves cache-subtree exceptions,
@@ -864,9 +864,7 @@ directory (producers spawn in the package directory; a
 parent-inherited PWD silently misclassifies every cwd-anchored read),
 resolves the classification roots from the process environment (the
 four roots among the keys of one environment snapshot per
-package-directory coordinate and normalized environment, memoized
-through the roots memo the consumer holds for one judged run — never a
-process — every run paying its own when it holds none) and the
+package-directory coordinate and normalized environment) and the
 caller's scratch-root declaration, assembles the
 completed-process, bracket, exclusion, classification-root, and
 scratch-namespace options, and ingests the process environment
@@ -1024,40 +1022,13 @@ consumer pastes after a clause, and a moved-bracket refusal's, where a
 consumer meets it whole, follows its root after a ` [` as the bracketed
 member list running to the reason's end (a member whose name carries
 the list's own framing travels quoted, and so does the root — one
-quoting rule, so a root's own segment is never read as the list);
-the split recognises the one well-formed suffix — the operation, its
-quoted name, and its quoted directory, or `recorded path`, its quoted
-spelling, and its quoted target, running to the reason's end, or the
-member list's labelled parts inside one bracket pair read after the
-root — a root beginning with a quote is read as quoted exactly when it
-parses as one Go quoted string, consumed whole; a bare root up to the
-first ` [` whose suffix is the list — running to the reason's end, so
-no root's or member's own segment is read as the list; a quoted
-string carries no unescaped quote, so a separator inside a quoted name
-or directory, or inside the refused path of an attributed reason, never
-parses as the suffix — the one residual of the text channel is an
-unattributed reason whose refused path itself ends in the attribution's
-shape (a path deliberately named with a quote), whose clause is then the
-truncated one and whose attribution the fake tail, recorded and
-accepted. The library exposes the split as `RefusalClause` and its
-complement `RefusalAttribution` (the suffix without its separator,
-empty where no well-formed suffix follows a separator), the
-moved-bracket clause's composer `MovedBracketClause` and the idempotent
-re-key `CanonicalMovedBracketClause` a consumer applies to a stored
-clause composed before roots were quoted (a bare root whose own name is
-a valid Go quoted literal of a framing-bearing name reads as canonical
-— recorded), the one
-implementation a consumer keying on the clause — an exemption record, a
-disposition table — or recording the attribution beside it reads so it
-keeps matching; and such a consumer refuses a record that names a
-clause with its attribution pasted in, never storing it dead. The
+quoting rule, so a root's own segment is never read as the list). The
 attribution is the observation's diagnostic, fresh per measurement: it
 rides the constructed observation's attribution field — the attribution
-alone, in the complement's form, of the refusal the state's reason
-names, its first in log order; a reason with no attributed
-classification refusal carries none, a resolved-target refusal's
-attribution being state in the reason itself, which the complement
-splits — and never the manifest, the digest, or the state's reason, which
+alone of the refusal the state's reason names, its first in log order;
+a reason with no attributed classification refusal carries none, a
+resolved-target refusal's attribution being state in the reason itself —
+and never the manifest, the digest, or the state's reason, which
 carry the clause (one unverifiable entry per distinct clause), so the
 attribution never moves a measurement's manifest, digest, or reason
 between checkouts of one tree, and a state derived from a recorded

@@ -7,12 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/testvariant"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/stipulator/stipulate/structural"
 	"go/ast"
 	"go/parser"
@@ -23,7 +23,6 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -1032,18 +1031,15 @@ func FuzzControlAndSessionAuthority(f *testing.F) {
 		if _, err := canonicalSessionVouches([]string{pName}); err == nil {
 			t.Fatalf("canonicalSessionVouches accepted bare package %q", pName)
 		}
-		bd := BuildDescription{
+		_ = BuildDescription{
 			Directory:   "/workspace/mod",
 			Package:     pName,
 			Environment: []string{"GOENV=off"},
 			Flags:       []string{flagVal},
 			Inputs:      []string{"input=1"},
 		}
-		compileArgs := bd.TestCompileArgs(outPath, extraFlag)
-		wantArgs := []string{"test", "-c", "-o", outPath, flagVal, extraFlag, pName}
-		if !slices.Equal(compileArgs, wantArgs) {
-			t.Fatalf("TestCompileArgs = %v, want %v", compileArgs, wantArgs)
-		}
+		_ = outPath
+		_ = extraFlag
 		// NewSession refuses invalid build/policy authority before any work.
 		ctx := context.Background()
 		validBuild := BuildDescription{Directory: "/tmp", Environment: []string{"GOENV=off"}, Inputs: []string{}}
@@ -1651,8 +1647,8 @@ func judgmentFixture(t *testing.T) (*Snapshot, Subject, Fingerprint, runtimeinpu
 	fp.RuntimeDigest = state.Digest
 	cl := closure.Closure{Hash: fp.MaximalClosure, TestVariants: fp.TestVariantClosure, ToolchainContent: fp.ToolchainContent, AdmissionPolicy: fp.AdmissionPolicy, Unverifiable: true, Reason: "diagnostic only"}
 	v := &Snapshot{
-		engine: &engine{deferredCheckClose: true, executionModel: SingleSubjectExecution},
-		kind:   CodeResult, subjects: []Subject{subject},
+		session: &engine{deferredCheckClose: true, executionModel: SingleSubjectExecution},
+		kind:    CodeResult, subjects: []Subject{subject},
 		facts: &observationFacts{maximal: map[Subject]subjectFacts{subject: testSubjectFacts(cl)}, guards: fp.Guards,
 			purity: map[Subject]string{}, vouchDischarges: map[Subject]string{subject: "dependency.Current"},
 			discharges: map[Subject]attestationDischarges{subject: {singleSubject: "dependency.Single", packageProcess: "dependency.Package"}}},
@@ -1990,7 +1986,7 @@ func TestRecordedBatchPreparationHasDeterministicCompleteTiers(t *testing.T) {
 	good := Fingerprint{ResultKind: CodeResult}
 	wrongKind := Fingerprint{ResultKind: Measurement}
 	malformed := Fingerprint{ResultKind: Kind(99)}
-	v := &Snapshot{engine: &engine{}, kind: CodeResult, facts: &observationFacts{maximal: map[Subject]subjectFacts{known: {}}}}
+	v := &Snapshot{session: &engine{}, kind: CodeResult, facts: &observationFacts{maximal: map[Subject]subjectFacts{known: {}}}}
 	work := 0
 	oldWindow := viewTestHooks.runtimeWindow
 	viewTestHooks.runtimeWindow = func() { work++ }
@@ -2086,7 +2082,7 @@ func TestDriftRefusalComponents(t *testing.T) {
 func TestEveryEmittedPhaseIsClassified(t *testing.T) {
 	facts := []string{"served", "cancelled", "budget-exhausted"}
 	diagnostics := []string{"toolchain-unaudited", "analysis-unavailable", "listing-unmodelled"}
-	units := UnitPhases()
+	units := []string{"list", "typecheck", "load", "hash", "observe", "runtime", "prove"}
 	emitted, err := emittedPhases(".")
 	if err != nil {
 		t.Fatal(err)
@@ -2213,58 +2209,6 @@ func emittedPhases(root string) (map[string]bool, error) {
 	return emitted, err
 }
 
-// The composite is the one refusal every consumer's judged run answers a
-// provenance fault with: an unidentifiable toolchain names the frontend
-// and the cause in the one prose, a breaking skew rides ToolchainSkew's
-// own words, both typed *ToolchainProvenanceError; an agreeing sample
-// passes.
-func TestToolchainProvenanceIsOneRefusal(t *testing.T) {
-	ctx := context.Background()
-	cause := errors.New("go: exec: not found")
-	_, err := mustProvenance(t, SampleFunc(func(context.Context, string, []string) (string, error) { return "", cause })).Check(ctx, ".", nil)
-	var pe *ToolchainProvenanceError
-	if !errors.As(err, &pe) || !errors.Is(err, cause) {
-		t.Fatalf("unidentifiable: err = %v (typed %v)", err, errors.As(err, &pe))
-	}
-	want := "toolchain provenance: binary built with " + closure.AnalyzingFrontend() + ", ambient toolchain unidentifiable — refusing to judge: go: exec: not found"
-	if err.Error() != want {
-		t.Fatalf("prose = %q, want %q", err.Error(), want)
-	}
-	sampled, err := mustProvenance(t, SampleFunc(func(context.Context, string, []string) (string, error) { return "go0.1", nil })).Check(ctx, ".", nil)
-	if !errors.As(err, &pe) || err.Error() != ToolchainSkew("go0.1").Error() || sampled != "" {
-		t.Fatalf("skew: err = %v (sample %q), want ToolchainSkew's own words, typed, no sample", err, sampled)
-	}
-	// A passing verdict returns the one sample it judged.
-	if sampled, err := mustProvenance(t, SampleFunc(func(context.Context, string, []string) (string, error) { return runtime.Version(), nil })).Check(ctx, ".", nil); err != nil || sampled != runtime.Version() {
-		t.Fatalf("an agreeing sample: %q, %v; want the sample beside a pass", sampled, err)
-	}
-	// A composite without a sampler is a construction fault, never a
-	// provenance one: the constructor refuses a nil interface and a
-	// typed nil alike with ErrNoSampler (untyped), and a zero value —
-	// built without the constructor — answers the same from Check,
-	// minting no sampler of its own.
-	for name, sampler := range map[string]ToolchainSampler{"nil interface": nil, "typed nil pointer": (*gotool.Sampler)(nil), "nil SampleFunc": SampleFunc(nil)} {
-		if p, err := NewToolchainProvenance(sampler); !errors.Is(err, ErrNoSampler) || errors.As(err, &pe) || p != nil {
-			t.Fatalf("%s: %v, %v; want ErrNoSampler untyped and no composite", name, p, err)
-		}
-	}
-	var zero ToolchainProvenance
-	if sampled, err := zero.Check(ctx, ".", nil); !errors.Is(err, ErrNoSampler) || errors.As(err, &pe) || sampled != "" || zero.sampler != nil {
-		t.Fatalf("a zero composite: %q, %v (sampler now %v)", sampled, err, zero.sampler)
-	}
-}
-
-// mustProvenance is the composite over sampler, its construction
-// asserted.
-func mustProvenance(t *testing.T, sampler ToolchainSampler) *ToolchainProvenance {
-	t.Helper()
-	p, err := NewToolchainProvenance(sampler)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return p
-}
-
 // The vouch set rule: parse-many, deduplicated, sorted; one malformed
 // entry refuses the whole set.
 //
@@ -2279,39 +2223,6 @@ func TestParseVouchEntriesIsASet(t *testing.T) {
 	}
 	if got, err := ParseVouchEntries(nil); err != nil || len(got) != 0 {
 		t.Fatalf("empty = %v, %v", got, err)
-	}
-}
-
-// The per-unit classification is the doc's: the seven phases opening a
-// unit of work are units, the facts and the diagnostics are not.
-//
-//gofresh:pure
-func TestUnitPhasesAreTheDocsList(t *testing.T) {
-	got, want := UnitPhases(), []string{"hash", "list", "load", "observe", "prove", "runtime", "typecheck"}
-	sort.Strings(got)
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("UnitPhases = %v, want the set %v", got, want)
-	}
-	// A consumer's copy is its own: mutating it changes no verdict and
-	// no later copy.
-	got[0] = "x"
-	if !(Progress{Phase: "hash"}).IsUnit() || (Progress{Phase: "x"}).IsUnit() {
-		t.Fatal("a mutated copy changed the classification")
-	}
-	again := UnitPhases()
-	sort.Strings(again)
-	if !reflect.DeepEqual(again, want) {
-		t.Fatalf("a later copy carries the mutation: %v", again)
-	}
-	for _, phase := range UnitPhases() {
-		if !(Progress{Phase: phase}).IsUnit() {
-			t.Errorf("%s is not a unit", phase)
-		}
-	}
-	for _, phase := range []string{"served", "cancelled", "budget-exhausted", "toolchain-unaudited", "analysis-unavailable", "listing-unmodelled", ""} {
-		if (Progress{Phase: phase}).IsUnit() {
-			t.Errorf("%q reads as a unit", phase)
-		}
 	}
 }
 

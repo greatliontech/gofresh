@@ -62,7 +62,7 @@ type Fingerprint struct {
 	InertTestVariantApplicability InertTestVariantApplicability
 	ObservationAssertion          string
 	ObservationProof              ObservationProof
-	Guards                        guard.Guards
+	Guards                        Guards
 	PurityAssertion               string // attributable assertion used to override unverifiability; empty means none
 	// DynamicStateVouches names the caller vouches that discharged
 	// shared-dynamic-state culprits reachable from this subject at capture:

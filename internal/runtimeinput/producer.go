@@ -12,7 +12,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/outcome"
 )
 
@@ -131,8 +131,7 @@ type ProducerIngest struct {
 	Runner gotool.Runner
 	// Roots is the consumer's classification-root memo, held for one
 	// judged run — the consumer's one verb invocation, a long-lived
-	// server's per-request operation, never a process — as its
-	// toolchain Sampler is: one probe per package directory coordinate
+	// server's per-request operation, never a process: one probe per package directory coordinate
 	// and environment across every run that judged run ingests. Nil
 	// resolves unmemoized — every run pays its probe.
 	Roots *Roots

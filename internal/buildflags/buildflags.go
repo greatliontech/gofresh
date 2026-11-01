@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 // Validate refuses flags whose selected source gofresh cannot represent,

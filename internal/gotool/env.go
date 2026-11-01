@@ -164,7 +164,7 @@ func GoBuildCache(ctx context.Context, env []string) (string, error) {
 	return goBuildCache(normalized, func() (string, error) {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		reader := NewEnvReader(Runner{Containment: &Containment{}}, "", normalized)
+		reader := NewEnvReader(Runner{}, "", normalized)
 		snapshot, err := reader.Snapshot(ctx)
 		if err != nil {
 			return "", err

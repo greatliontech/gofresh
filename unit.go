@@ -7,7 +7,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh/internal/runtimeinput"
 )
 
 // errUnitClosed reports admission, submission or closing after the unit started
@@ -35,7 +35,7 @@ type ProcessDescription struct {
 	BracketPaths      []string
 	ExcludedPaths     []string
 	ScratchRoot       string
-	ScratchNamespaces []runtimeinput.ScratchNamespace
+	ScratchNamespaces []ScratchNamespace
 }
 
 // TerminalKind is the executor's actual terminal harness disposition.
@@ -166,7 +166,7 @@ func (s *RuntimeBinding) begin(subjects []Subject, identityOnly bool) (*Unit, er
 	if len(v.packages) != 1 {
 		return nil, errors.New("gofresh: a producing execution must belong to one package")
 	}
-	if len(v.subjects) > 1 && v.engine.executionModel.singleSubject() {
+	if len(v.subjects) > 1 && v.session.executionModel.singleSubject() {
 		return nil, errors.New("gofresh: a multi-subject execution contradicts the single-subject assertion")
 	}
 	return &Unit{snapshot: s.snapshot, view: v, identityOnly: identityOnly}, nil
@@ -203,7 +203,7 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 			return Contribution{}, err
 		}
 	}
-	e := u.snapshot.session.engine
+	sess := u.snapshot.session
 	env := u.view.evidenceEnv()
 	// The frame owns the process/environment grammar. A zero frame performs
 	// that input validation without capturing anything or issuing support.
@@ -224,7 +224,7 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 	}
 	u.execution = x
 	u.mu.Unlock()
-	frame := runtimeinput.CaptureProducerFrame(preparing, e.evidenceRootFor(e.dir), dir, runtimeinput.FrameOptions{BracketPaths: process.BracketPaths, ExcludedPaths: process.ExcludedPaths})
+	frame := runtimeinput.CaptureProducerFrame(preparing, sess.evidenceRootFor(sess.dir), dir, runtimeinput.FrameOptions{BracketPaths: process.BracketPaths, ExcludedPaths: process.ExcludedPaths})
 	var support runtimeinput.OutcomeSupport
 	fingerprints, err := u.view.CaptureBatch(preparing)
 	observed := make(map[Subject]bool)
@@ -471,7 +471,7 @@ func (u *Unit) Close(ctx context.Context) (result Finalized, err error) {
 			return Finalized{}, err
 		}
 		s := u.snapshot.session
-		in := runtimeinput.ProducerIngest{Identity: x.process.Identity, Env: x.env, Runner: s.engine.runner, Roots: &s.roots, Completion: receipt, Outcome: x.support, ScratchRoot: x.process.ScratchRoot, ExcludedPaths: x.process.ExcludedPaths, ScratchNamespaces: x.process.ScratchNamespaces}
+		in := runtimeinput.ProducerIngest{Identity: x.process.Identity, Env: x.env, Runner: s.runner, Roots: &s.roots, Completion: receipt, Outcome: x.support, ScratchRoot: x.process.ScratchRoot, ExcludedPaths: x.process.ExcludedPaths, ScratchNamespaces: x.process.ScratchNamespaces}
 		var observationReason string
 		if x.outcomeReason == "" {
 			observation, observationReason, err = x.frame.Observe(ctx, x.process.Capture, in)
@@ -565,7 +565,7 @@ type ProcessAccount struct {
 	ObservationReason string
 	OutcomeReason     string
 	Attribution       string
-	Inputs            runtimeinput.State
+	Inputs            RuntimeState
 }
 
 // Account returns an owned copy of the unit's process account. The boolean is

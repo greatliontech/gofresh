@@ -25,14 +25,14 @@ Shared utilities evicted from `gofresh` are internalized into `internal/` of `pe
 5. **`github.com/greatliontech/gofresh/shapecorpus` — INTERNALIZE TO `internal/testenv`**:
    - Move `shapecorpus/` into `internal/testenv` in `gofresh` (used only by `internal/closure/algebra_test.go` and `stipulator`'s test suite).
 6. **`github.com/greatliontech/gofresh/gotool` — INTERNALIZE & EVICT PROCESS SUPERVISOR**:
-   - Move narrowed `gotool` into `gofresh/internal/gotool`, keeping only what `gofresh` uses internally (`go env -json` snapshot reading, `go list` / `LoadPackages`, `CanonicalDir`, `Coordinate`, environment normalization, and Go version parsing).
-   - Evict general child-process management (`Runner.Program`, `Containment` with `SIGQUIT` `Quit`/`Grace`, `RunMemo[V]`, `Sampler`, `SnapshotSampler`, `Salvaged`) from `gofresh` into `internal/gotool` of `pew`, `stipulator`, and `gomutant`.
+   - Move narrowed `gotool` into `gofresh/internal/gotool`, keeping only what `gofresh` uses internally (`go env -json` snapshot reading, `go list` / `LoadPackages`, `CanonicalDir`, `Coordinate`, `RunMemo`, environment normalization, and Go version parsing).
+   - Evict general child-process management (`Runner.Program`, `Containment` with `SIGQUIT` `Quit`/`Grace`, `Sampler`, `SnapshotSampler`, `Salvaged`) from `gofresh` into `internal/gotool` of `pew`, `stipulator`, and `gomutant`.
    - Delete cross-tool CLI/MCP control spec `docs/specs/controls.md` and `.stipulator/bindings/control.textproto`, and tombstone `REQ-control-*` in `.stipulator/tombstones.textproto` (done in Chunk B.1 along with the other retired cross-tool specs).
 7. **`github.com/greatliontech/gofresh/runtimeinput` — INTERNALIZE TO `internal/runtimeinput` & PROMOTE DOMAIN TYPES**:
    - Move `runtimeinput/` into `gofresh/internal/runtimeinput`.
    - Evict `gomutant`-only exemption-clause string helpers (`RefusalClause`, `RefusalAttribution`, `MovedBracketClause`, `CanonicalMovedBracketClause`) to `gomutant`.
-   - Unexport internal cross-package plumbing (`OutcomeBinding`, `OutcomeSupport`, `CompletionReceipt`, `HasOutcomeSupport`, `Roots`, `FileInputContext`, `FileEligibility`, `FileInputKind`, `ProducerFrame.Observe`, `ProducerFrame.Completion`, `ProducerFrame.OutcomeBinding`).
-   - Expose the clean runtime-observation domain surface directly on root `gofresh` (`ScratchNamespace`, `ValidateScratchNamespace`, `Observation`, `RuntimeState`, `CompletedObservationState`, `RuntimeDescription` / `DescribeRuntimeInputs`, `CurrentRuntimeInputs`, `MovedRuntimeInputs`, `RuntimeInputPaths`, `MergeObservations`, `AdoptObservation`, `IncompleteObservation`, `AbsoluteObservation`, `RelativeObservation`, `FromTestLog`, `CaptureBracket`, `CaptureProducerFrame`, and `(*Session).CheckFileInputEligibility`), so external consumers import **only** `github.com/greatliontech/gofresh`.
+   - Unexport internal cross-package plumbing (`OutcomeBinding`, `OutcomeSupport`, `CompletionReceipt`, `HasOutcomeSupport`, `FileInputContext`, `FileEligibility`, `FileInputKind`, `ProducerFrame.Observe`, `ProducerFrame.Completion`, `ProducerFrame.OutcomeBinding`).
+   - Expose the clean runtime-observation domain surface directly on root `gofresh` (`ScratchNamespace`, `ValidateScratchNamespace`, `Observation`, `RuntimeState`, `CompletedObservationState`, `RuntimeDescription` / `DescribeRuntimeInputs`, `CurrentRuntimeInputs`, `MovedRuntimeInputs`, `RuntimeInputPaths`, `MergeObservations`, `AdoptObservation`, `IncompleteRuntimeObservation`, `AbsoluteObservation`, `RelativeObservation`, `FromTestLog`, `CaptureBracket`, `CaptureProducerFrame`, `InputRoots`, and `(*Session).CheckFileInputEligibility`), so external consumers import **only** `github.com/greatliontech/gofresh`.
 
 ## 3. Root `gofresh` Surface Cleanup & `session.go` Legacy Layer Collapse
 
@@ -50,8 +50,7 @@ Shared utilities evicted from `gofresh` are internalized into `internal/` of `pe
    - Replace `SessionPolicy.Runner gotool.Runner` with `SessionPolicy.PrepareCommand func(*exec.Cmd)`.
    - Update `CaptureGuards` and `ResolveToolchainSelection` to accept `BuildDescription` (plus optional `PrepareCommand` or via `Session`) instead of `*gotool.EnvReader`.
 6. **Collapse Legacy Unexported `engine` & `option` Layer in `session.go`**:
-   - Collapse `type engine struct` and all 12 unexported functional `option` closures (`withoutRepositoryVouches`, `withDeferredCheckClose`, `!e.completeBuild`, `e.capture`, `e.check`, etc.) directly into `Session`.
-   - Migrate all remaining internal tests from `newEngine(...)` to `NewSession(...)`.
+   - Collapse `type engine struct` into `Session` in production `session.go`, eliminating the duplicate `Session` wrapper and moving the white-box test builder (`newEngine` / `option`) out of production `session.go` into `frontend_harness_test.go` (test-hook restructuring is scheduled in Chunk D.1).
 7. **Repository Root Hygiene**:
    - Delete the 449 KB `CLAUDE.md` historical session log and `.claude/` directory from the repository root.
 

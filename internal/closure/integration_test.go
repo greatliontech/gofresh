@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/cachefile"
 	progpkg "github.com/greatliontech/gofresh/internal/closure/internal/program"
 	"github.com/greatliontech/gofresh/internal/testenv"
@@ -70,7 +70,7 @@ func TestMaximalHashReal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/gotool"
+	const pkg = "github.com/greatliontech/gofresh/internal/gotool"
 	a, err := h.maximalHash(pkg)
 	if err != nil {
 		t.Fatalf("maximalHash: %v", err)
@@ -96,7 +96,7 @@ func TestListMemoizes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/gotool"
+	const pkg = "github.com/greatliontech/gofresh/internal/gotool"
 	first, err := h.list(pkg)
 	if err != nil {
 		t.Fatalf("list (first): %v", err)
@@ -3193,7 +3193,7 @@ func TestListingRefusesTheSalvagedAnswer(t *testing.T) {
 	}
 	t.Setenv("PATH", shim+string(os.PathListSeparator)+os.Getenv("PATH"))
 	dir := listingMemoModule(t)
-	runner := gotool.Runner{Containment: &gotool.Containment{WaitDelay: 300 * time.Millisecond}}
+	runner := gotool.Runner{Prepare: func(c *exec.Cmd) { c.WaitDelay = 300 * time.Millisecond }}
 	h, err := NewAt(context.Background(), gotool.NewEnvReader(runner, dir, os.Environ()))
 	if err != nil {
 		t.Fatalf("the reader's whole document did not serve: %v", err)
@@ -3202,7 +3202,7 @@ func TestListingRefusesTheSalvagedAnswer(t *testing.T) {
 	if !errors.Is(err, gotool.ErrListingRefused) {
 		t.Fatalf("the held listing was not refused as a listing: %v", err)
 	}
-	if errors.Is(err, exec.ErrWaitDelay) || gotool.Salvaged(context.Background(), err) {
+	if errors.Is(err, exec.ErrWaitDelay) {
 		t.Fatalf("the refused listing reads as a served salvage: %v", err)
 	}
 }

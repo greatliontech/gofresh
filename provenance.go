@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"go/version"
-	"reflect"
+	"os/exec"
 	"strings"
 
-	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/closure"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 // Tool provenance: a binary embedding this engine drives an ambient
@@ -28,14 +28,6 @@ import (
 // x/tools layers are a module pin of the embedding tool, not a
 // toolchain property — their language support is exercised by each
 // tool's language-shape canary suite, never inferable here.
-//
-// Sampling contract: ambient is gotool.SampleGoVersion's answer for
-// the target module's directory — the version of the `go` that will
-// actually serve the run's loads and test executions. The sampler
-// owns the directory rule (under GOTOOLCHAIN=auto, cmd/go re-execs a
-// per-module selected toolchain, so a version sampled elsewhere can
-// agree while the module's toolchain skews — exactly the state this
-// check exists to refuse); no caller spells it.
 
 // ToolchainSkew reports the breaking direction of a language-series
 // disagreement between the running binary's build toolchain and the
@@ -79,95 +71,20 @@ func majorOf(series string) string {
 	return major
 }
 
-// ToolchainProvenanceError is the one typed refusal a consumer's
-// judged run answers a toolchain-provenance fault with — an
-// unidentifiable ambient toolchain or a language-series skew — the
-// class its abort boundary tests for, wrapping the cause. A composite
-// built without a sampler is a construction fault (ErrNoSampler),
-// never this class.
+// ToolchainProvenanceError is the typed refusal returned when a session's
+// selected toolchain is unidentifiable or skews from the analyzing frontend
+// (REQ-fresh-toolchain-skew).
 type ToolchainProvenanceError struct{ Err error }
 
 func (e *ToolchainProvenanceError) Error() string { return e.Err.Error() }
 func (e *ToolchainProvenanceError) Unwrap() error { return e.Err }
 
-// ToolchainSampler answers the ambient toolchain's version for a
-// directory under an environment: gotool.Sampler is the memoized
-// sampler a consumer holds for its lifetime; a test injects a
-// SampleFunc.
-type ToolchainSampler interface {
-	Sample(ctx context.Context, dir string, env []string) (string, error)
-}
-
-// SampleFunc is a ToolchainSampler over one function.
-type SampleFunc func(ctx context.Context, dir string, env []string) (string, error)
-
-// Sample calls f.
-func (f SampleFunc) Sample(ctx context.Context, dir string, env []string) (string, error) {
-	return f(ctx, dir, env)
-}
-
-// ToolchainProvenance is the composite every consumer's judged run
-// performs before judging: the memoized sample in the target module's
-// directory under the consumer's runner, then the skew judgment, both
-// refusals typed. A composite is held for the lifetime its samples
-// should share — one judged run — and its sampler is the consumer's:
-// the memoized gotool.Sampler the consumer holds for that run, under
-// its own runner and policy, so one sample per
-// coordinate and environment is the consumer's one sample, never a
-// second memo the composite minted for itself. NewToolchainProvenance
-// is the one constructor; it refuses a nil sampler (a nil interface or
-// a typed nil) as a construction fault, and the zero value refuses
-// every Check the same way — neither is a provenance fault, so
-// neither is typed ToolchainProvenanceError.
-type ToolchainProvenance struct {
-	sampler ToolchainSampler
-}
-
-// ErrNoSampler is the construction fault of a composite built without
-// a sampler: a consumer holds one memoized sampler per judged run and
-// constructs its composite over it.
-var ErrNoSampler = errors.New("toolchain provenance: no sampler — a consumer holds one memoized sampler per judged run")
-
-// NewToolchainProvenance constructs the composite over the consumer's
-// sampler, refusing none: a nil interface, or a typed nil of any
-// nilable kind — a nil SampleFunc, the shape every consumer wraps its
-// sampler in, as much as a nil pointer.
-func NewToolchainProvenance(sampler ToolchainSampler) (*ToolchainProvenance, error) {
-	if sampler == nil {
-		return nil, ErrNoSampler
-	}
-	switch v := reflect.ValueOf(sampler); v.Kind() {
-	// reflect.ValueOf unwraps the interface, so an Interface kind is
-	// never seen here.
-	case reflect.Pointer, reflect.Func, reflect.Map, reflect.Chan, reflect.Slice, reflect.UnsafePointer:
-		if v.IsNil() {
-			return nil, ErrNoSampler
-		}
-	}
-	return &ToolchainProvenance{sampler: sampler}, nil
-}
-
-// Check samples the ambient toolchain for dir under env and refuses,
-// typed, an unidentifiable toolchain ("toolchain provenance: binary
-// built with <frontend>, ambient toolchain unidentifiable — refusing to
-// judge: <cause>") or a breaking skew (ToolchainSkew's own words); a
-// composite built without its constructor and holding no sampler
-// answers ErrNoSampler, untyped. The sample it judged is returned
-// beside a passing verdict, so a consumer
-// whose ladder reads it further (a build-events floor) reads the one
-// sample this check took.
-func (p *ToolchainProvenance) Check(ctx context.Context, dir string, env []string) (string, error) {
-	if p == nil || p.sampler == nil {
-		return "", ErrNoSampler
-	}
-	ambient, err := p.sampler.Sample(ctx, dir, env)
-	if err != nil {
-		return "", &ToolchainProvenanceError{Err: fmt.Errorf("toolchain provenance: binary built with %s, ambient toolchain unidentifiable — refusing to judge: %w", closure.AnalyzingFrontend(), err)}
-	}
+func checkSnapshotToolchainProvenance(snapshot *gotool.EnvSnapshot) error {
+	ambient := snapshot.Value("GOVERSION")
 	if err := ToolchainSkew(ambient); err != nil {
-		return "", &ToolchainProvenanceError{Err: err}
+		return &ToolchainProvenanceError{Err: err}
 	}
-	return ambient, nil
+	return nil
 }
 
 // ToolchainSelection summarizes the resolved toolchain content, admission
@@ -178,9 +95,47 @@ type ToolchainSelection struct {
 	SelectionNotice  string
 }
 
+func firstPrepare(prepare []func(*exec.Cmd)) func(*exec.Cmd) {
+	var active []func(*exec.Cmd)
+	for _, fn := range prepare {
+		if fn != nil {
+			active = append(active, fn)
+		}
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	if len(active) == 1 {
+		return active[0]
+	}
+	return func(cmd *exec.Cmd) {
+		for _, fn := range active {
+			fn(cmd)
+		}
+	}
+}
+
 // ResolveToolchainSelection resolves the toolchain content, admission policy,
-// and selection-audit notice for reader and buildFlags.
-func ResolveToolchainSelection(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) (ToolchainSelection, error) {
+// and selection-audit notice for build under an optional command-preparation hook.
+func ResolveToolchainSelection(ctx context.Context, build BuildDescription, prepare ...func(*exec.Cmd)) (ToolchainSelection, error) {
+	refreshTraceFromEnv()
+	if ctx == nil {
+		return ToolchainSelection{}, errors.New("gofresh: nil toolchain selection context")
+	}
+	if err := ctx.Err(); err != nil {
+		return ToolchainSelection{}, err
+	}
+	if build.Directory == "" {
+		return ToolchainSelection{}, errors.New("gofresh: toolchain selection requires a build directory")
+	}
+	if build.Environment == nil {
+		return ToolchainSelection{}, errors.New("gofresh: build environment must be explicitly provided")
+	}
+	reader := gotool.NewEnvReader(gotool.Runner{Prepare: firstPrepare(prepare)}, build.Directory, build.Environment)
+	return resolveToolchainSelection(ctx, reader, build.Flags...)
+}
+
+func resolveToolchainSelection(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) (ToolchainSelection, error) {
 	refreshTraceFromEnv()
 	if ctx == nil {
 		return ToolchainSelection{}, errors.New("gofresh: nil toolchain selection context")
@@ -205,8 +160,8 @@ func ResolveToolchainSelection(ctx context.Context, reader *gotool.EnvReader, bu
 // ToolchainSelection resolves the toolchain content, admission policy, and
 // selection-audit notice for the session's admitted build configuration.
 func (s *Session) ToolchainSelection(ctx context.Context) (ToolchainSelection, error) {
-	if s == nil || s.engine == nil {
+	if s == nil || s.dir == "" {
 		return ToolchainSelection{}, errors.New("gofresh: uninitialized session")
 	}
-	return ResolveToolchainSelection(ctx, s.engine.newPassReader(), s.build.Flags...)
+	return resolveToolchainSelection(ctx, s.newPassReader(), s.buildFlags...)
 }

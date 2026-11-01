@@ -5,15 +5,16 @@ package gofresh
 import (
 	"context"
 	"errors"
-	"github.com/greatliontech/gofresh/gotool"
+	"fmt"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 )
 
 // The directory is resolved by the filesystem after rebasing: via/.. names
@@ -32,7 +33,7 @@ func TestSessionRuntimeDirectoryPreservesSymlinkParents(t *testing.T) {
 	if err := os.Symlink(child, filepath.Join(build, "via")); err != nil {
 		t.Fatal(err)
 	}
-	session, err := NewSession(t.Context(), BuildDescription{Directory: build, Environment: os.Environ(), Inputs: []string{}}, SessionPolicy{Runner: hermeticEnvRunner()})
+	session, err := NewSession(t.Context(), BuildDescription{Directory: build, Environment: os.Environ(), Inputs: []string{}}, SessionPolicy{PrepareCommand: hermeticEnvRunner().Prepare})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,19 +52,17 @@ func TestSessionOwnsItsDescriptions(t *testing.T) {
 	build := BuildDescription{Directory: dir, Environment: append(os.Environ(), "FRESH_BUILD_OWNED=original"), Flags: []string{"-tags=owned"}, Inputs: []string{"profile:original"}}
 	pure := []Subject{{Package: "example.com/p", Symbol: "F"}}
 	vouches := []string{"example.com/dep.State"}
-	containment := &gotool.Containment{WaitDelay: time.Second}
-	policy := SessionPolicy{PureSubjects: pure, Vouches: vouches, Runner: gotool.Runner{Containment: containment, Prepare: func(cmd *exec.Cmd) {
+	policy := SessionPolicy{PureSubjects: pure, Vouches: vouches, PrepareCommand: func(cmd *exec.Cmd) {
 		build.Environment[len(build.Environment)-1] = "FRESH_BUILD_OWNED=changed"
 		build.Flags[0], build.Inputs[0] = "-tags=changed", "profile:changed"
 		pure[0].Symbol, vouches[0] = "G", "example.com/dep.Other"
-		containment.WaitDelay = 5 * time.Second
 		if len(cmd.Args) >= 3 && cmd.Args[1] == "env" && cmd.Args[2] == "-json" {
 			if sh, err := exec.LookPath("sh"); err == nil {
 				cmd.Path = sh
-				cmd.Args = []string{"sh", "-c", `printf '{"GOFLAGS":""}'`}
+				cmd.Args = []string{"sh", "-c", fmt.Sprintf(`printf '{"GOFLAGS":"","GOVERSION":%q,"GOGCCFLAGS":"-fPIC"}'`, runtime.Version())}
 			}
 		}
-	}}}
+	}}
 	s, err := NewSession(context.Background(), build, policy)
 	if err != nil {
 		t.Fatal(err)
@@ -74,14 +73,11 @@ func TestSessionOwnsItsDescriptions(t *testing.T) {
 	if !slices.Equal(s.build.Flags, []string{"-tags=owned"}) || !slices.Equal(s.build.Inputs, []string{"profile:original"}) {
 		t.Fatalf("build description borrowed flags/inputs: %q %q", s.build.Flags, s.build.Inputs)
 	}
-	if !s.engine.assumePure(Subject{Package: "example.com/p", Symbol: "F"}) || s.engine.assumePure(pure[0]) {
+	if !s.assumePure(Subject{Package: "example.com/p", Symbol: "F"}) || s.assumePure(pure[0]) {
 		t.Fatal("purity set borrowed")
 	}
-	if !s.engine.dynamicStateVouches["example.com/dep.State"] || s.engine.dynamicStateVouches["example.com/dep.Other"] {
+	if !s.dynamicStateVouches["example.com/dep.State"] || s.dynamicStateVouches["example.com/dep.Other"] {
 		t.Fatal("vouch set borrowed")
-	}
-	if s.engine.runner.Containment.WaitDelay != time.Second {
-		t.Fatal("containment value borrowed")
 	}
 	projection := &Snapshot{session: s, kind: CodeResult, packages: []string{"example.com/p"}}
 	runEnv := append(os.Environ(), "FRESH_RUNTIME_OWNED=original")
@@ -136,7 +132,7 @@ func TestPureUnitPartialRootMovement(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			cmd, err := f.runner.Program(t.Context(), c.Directory(), c.Environment(), f.binary, "-test.v", "-test.run=^TestReader$", "-test.testlogfile="+c.Capture())
+			cmd, err := testProgramCmd(t.Context(), c.Directory(), c.Environment(), f.binary, "-test.v", "-test.run=^TestReader$", "-test.testlogfile="+c.Capture())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -230,7 +226,7 @@ func TestPureUnitRetainsDirentTypeAcrossSearchDenial(t *testing.T) {
 		if err := os.Chmod(data, 0700); err != nil {
 			t.Fatal(err)
 		}
-		cmd, err := f.runner.Program(t.Context(), c.Directory(), c.Environment(), f.binary, "-test.v", "-test.run=^TestDirentReader$", "-test.testlogfile="+c.Capture())
+		cmd, err := testProgramCmd(t.Context(), c.Directory(), c.Environment(), f.binary, "-test.v", "-test.run=^TestDirentReader$", "-test.testlogfile="+c.Capture())
 		if err != nil {
 			t.Fatal(err)
 		}

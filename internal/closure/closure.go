@@ -29,7 +29,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
 	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
 	prog "github.com/greatliontech/gofresh/internal/closure/internal/program"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/buildflags"
 )
 

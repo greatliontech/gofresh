@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/outcome"
 )
 

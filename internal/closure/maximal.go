@@ -17,7 +17,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 // ComputeMaximalBatch returns the maximal sound closure for every subject. All

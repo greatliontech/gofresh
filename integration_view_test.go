@@ -8,11 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/testvariant"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -3792,7 +3792,7 @@ func TestToolchainContentBindsRecordedApplicability(t *testing.T) {
 				t.Fatalf("closing accepted changed selected source: %v", err)
 			}
 			if !tc.observed {
-				sel, err := ResolveToolchainSelection(ctx, gotool.NewEnvReader(gotool.Runner{}, dir, os.Environ()))
+				sel, err := ResolveToolchainSelection(ctx, BuildDescription{Directory: dir, Environment: os.Environ()})
 				if err != nil || sel.SelectionNotice != "" {
 					t.Fatalf("outside-audit control changed admission: %s %v", sel.SelectionNotice, err)
 				}
@@ -4821,7 +4821,7 @@ func TestRuntimeRevalidationUsesEvidenceRoot(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		view := &Snapshot{moduleDir: member, engine: e}
+		view := &Snapshot{moduleDir: member, session: e}
 		st, err := view.currentRuntimeContext(context.Background(), Fingerprint{RuntimeInputs: state.Manifest}, map[string]runtimeinput.State{})
 		if err != nil {
 			t.Fatal(err)
@@ -4908,7 +4908,7 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 		}
 		snapshot := &Snapshot{session: session, kind: CodeResult}
 		binding := bindTestRuntime(t, snapshot, RuntimeDescription{Environment: runtimeEnv})
-		view := &Snapshot{moduleDir: dir, engine: session.engine, runtime: &binding.runtime}
+		view := &Snapshot{moduleDir: dir, session: session, runtime: &binding.runtime}
 		st, err := view.currentRuntimeContext(context.Background(), Fingerprint{RuntimeInputs: state.Manifest}, map[string]runtimeinput.State{})
 		if err != nil {
 			t.Fatal(err)
@@ -7858,28 +7858,21 @@ func TestScanMemoMissesOnVouchChangeAndCorruption(t *testing.T) {
 	if loads == 0 {
 		t.Fatal("a changed vouch set served the unvouched scan")
 	}
-	// The repository's file feeds the same set: a file spelling the
-	// option's vouch serves the vouched scan, and a changed file misses —
-	// a persisted entry never serves a discharge under another set.
-	vouchPath := filepath.Join(dir, RepositoryVouchFile)
-	if err := os.WriteFile(vouchPath, []byte("example.com/scanmemo/dep:Hooks\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	// An engine with the same vouch set serves the vouched scan, and a
+	// changed vouch set misses — a persisted entry never serves a discharge
+	// under another set.
 	loads = 0
-	fromFile, err := newEngine(withDir(dir))
+	sameVouch, err := newEngine(withDir(dir), withDynamicStateVouches("example.com/scanmemo/dep.Hooks"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fromFile.newView(context.Background(), scanMemoSubjects, dir); err != nil {
+	if _, err := sameVouch.newView(context.Background(), scanMemoSubjects, dir); err != nil {
 		t.Fatal(err)
 	}
 	if loads != 0 {
-		t.Fatalf("the file's set equal to the option's recomputed (%d loads), want served", loads)
+		t.Fatalf("an equal vouch set recomputed (%d loads), want served", loads)
 	}
-	if err := os.WriteFile(vouchPath, []byte("example.com/scanmemo/dep:Hooks\nexample.com/scanmemo/dep:Other\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	changed, err := newEngine(withDir(dir))
+	changed, err := newEngine(withDir(dir), withDynamicStateVouches("example.com/scanmemo/dep.Hooks", "example.com/scanmemo/dep.Other"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -7887,10 +7880,7 @@ func TestScanMemoMissesOnVouchChangeAndCorruption(t *testing.T) {
 		t.Fatal(err)
 	}
 	if loads == 0 {
-		t.Fatal("a changed vouch file served the prior scan")
-	}
-	if err := os.Remove(vouchPath); err != nil {
-		t.Fatal(err)
+		t.Fatal("a changed vouch set served the prior scan")
 	}
 	// Corrupt every scan entry: the next view recomputes silently.
 	entries, _ := filepath.Glob(filepath.Join(cache, "gofresh", "scanfacts", "*.json"))
@@ -8705,7 +8695,7 @@ func TestStaleRuntimeInputsNamesTheMover(t *testing.T) {
 	if v.Ground.Cause != (Cause{Kind: RuntimeInputsCause, Condition: Changed}) {
 		t.Fatalf("mover lost its semantic cause: %+v", v.Ground)
 	}
-	view := &Snapshot{engine: e, moduleDir: tmp}
+	view := &Snapshot{session: e, moduleDir: tmp}
 	v.Reason = "different diagnostic wording"
 	decorated := view.withMovedInputs(t.Context(), v, fp)
 	if decorated.Ground != v.Ground || !strings.Contains(decorated.Reason, "moved: path data/fixture.txt") {
@@ -8719,16 +8709,16 @@ func TestStaleRuntimeInputsNamesTheMover(t *testing.T) {
 
 func TestResolveToolchainSelection(t *testing.T) {
 	dir := t.TempDir()
-	reader := gotool.NewEnvReader(gotool.Runner{}, dir, os.Environ())
-	if _, err := ResolveToolchainSelection(nil, reader); err == nil {
+	build := BuildDescription{Directory: dir, Environment: os.Environ()}
+	if _, err := ResolveToolchainSelection(nil, build); err == nil {
 		t.Fatal("nil context accepted by ResolveToolchainSelection")
 	}
-	if _, err := ResolveToolchainSelection(context.Background(), nil); err == nil {
-		t.Fatal("nil reader accepted by ResolveToolchainSelection")
+	if _, err := ResolveToolchainSelection(context.Background(), BuildDescription{Environment: os.Environ()}); err == nil {
+		t.Fatal("empty directory accepted by ResolveToolchainSelection")
 	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := ResolveToolchainSelection(cancelled, reader); err == nil {
+	if _, err := ResolveToolchainSelection(cancelled, build); err == nil {
 		t.Fatal("cancelled context accepted by ResolveToolchainSelection")
 	}
 	var nilSession *Session
@@ -8736,7 +8726,7 @@ func TestResolveToolchainSelection(t *testing.T) {
 		t.Fatal("nil session accepted by ToolchainSelection")
 	}
 	degradedEnv := environmentWith(map[string]string{"GOENV": "off", "GOFLAGS": "-tags"})
-	degraded, err := ResolveToolchainSelection(context.Background(), gotool.NewEnvReader(gotool.Runner{}, dir, degradedEnv))
+	degraded, err := ResolveToolchainSelection(context.Background(), BuildDescription{Directory: dir, Environment: degradedEnv})
 	if err != nil {
 		t.Fatalf("ResolveToolchainSelection degraded GOFLAGS: %v", err)
 	}
@@ -8746,7 +8736,7 @@ func TestResolveToolchainSelection(t *testing.T) {
 	if testing.Short() {
 		t.Skip("audits the host toolchain selection via go list")
 	}
-	sel, err := ResolveToolchainSelection(context.Background(), reader)
+	sel, err := ResolveToolchainSelection(context.Background(), build)
 	if err != nil {
 		t.Fatalf("ResolveToolchainSelection: %v", err)
 	}
@@ -8947,154 +8937,5 @@ func TestScanKeepsRecompiledDependencySubjectsUnderOwnPackage(t *testing.T) {
 	}
 	if pred(Subject{Package: "example.com/m/r", Symbol: "G"}) {
 		t.Errorf("r.G: pure=true, want false (a's directive must not leak to r's same-named symbol)")
-	}
-}
-
-// The repository's reviewed vouch file is one of the two channels of
-// the one vouch set: a file naming the culprit discharges it with no
-// option given, the option extends the file's set and never removes
-// from it, a consumer owning its own reviewed set declines the file,
-// and the recorded discharge is the union's load-bearing part
-// (REQ-vouch-input, REQ-vouch-recorded).
-func TestRepositoryVouchFileJoinsTheVouchSet(t *testing.T) {
-	if testing.Short() {
-		t.Skip("builds a module fixture and runs the engine over it")
-	}
-	viewTestHooks.scanMemoOff = true
-	t.Cleanup(func() { viewTestHooks.scanMemoOff = false })
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	dir := writePinnedDepModule(t)
-	const ghost = "golang.org/x/sync/errgroup.Ghost"
-	const shade = "golang.org/x/sync/errgroup.Shade"
-	subject := Subject{Package: "example.com/pinned", Symbol: "Run"}
-	processFactCache = sync.Map{}
-	ctx := context.Background()
-
-	warm, err := newEngine(withDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := warm.newView(ctx, []Subject{subject}, dir); err != nil {
-		t.Fatal(err)
-	}
-	var hit bool
-	processFactCache.Range(func(k, v any) bool {
-		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
-			fact := v.(dynamicStateFact)
-			fact.Declares = append(fact.Declares, ghost, shade)
-			fact.Mutates = append(fact.Mutates, ghost, shade)
-			processFactCache.Store(k, fact)
-			hit = true
-		}
-		return true
-	})
-	if !hit {
-		t.Fatal("no errgroup fact in the process cache")
-	}
-	// judge returns the subject's recorded discharges and its reason: the
-	// fixture subject stays unverifiable for an unrelated reason, so the
-	// vouch's effect is read from the culprit's absence and the record.
-	judge := func(opts ...option) (string, string) {
-		t.Helper()
-		e, err := newEngine(append([]option{withDir(dir)}, opts...)...)
-		if err != nil {
-			t.Fatal(err)
-		}
-		view, err := e.newView(ctx, []Subject{subject}, dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		fp, err := view.Capture(ctx, subject)
-		if err != nil {
-			t.Fatal(err)
-		}
-		v, err := view.Check(ctx, fp, subject)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return fp.DynamicStateVouches, v.Reason
-	}
-	both := ghost + "," + shade
-	vouchPath := filepath.Join(dir, RepositoryVouchFile)
-
-	// No file: the two culprits downgrade and nothing is recorded.
-	if rec, reason := judge(); rec != "" || !strings.Contains(reason, ghost) {
-		t.Fatalf("no file: record %q, reason %q; want the culprit named and no discharge", rec, reason)
-	}
-	// The file names both, with comments and blank lines around them.
-	if err := os.WriteFile(vouchPath, []byte("# reviewed 2026-09\n\ngolang.org/x/sync/errgroup:Ghost\n  golang.org/x/sync/errgroup:Shade  \n\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if rec, reason := judge(); rec != both || strings.Contains(reason, "shares mutated dynamic state") {
-		t.Fatalf("file naming the culprits: record %q, reason %q; want both discharged with no option given", rec, reason)
-	}
-	// The file names one; the option extends the set with the other.
-	if err := os.WriteFile(vouchPath, []byte("golang.org/x/sync/errgroup:Ghost\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if rec, reason := judge(); rec != ghost || !strings.Contains(reason, shade) {
-		t.Fatalf("file naming one culprit: record %q, reason %q; want the other's downgrade", rec, reason)
-	}
-	if rec, reason := judge(withDynamicStateVouches(shade)); rec != both || strings.Contains(reason, "shares mutated dynamic state") {
-		t.Fatalf("file ∪ option: record %q, reason %q; want both discharged", rec, reason)
-	}
-	// An option never removes: the file's vouch stands beside an inert one.
-	if rec, _ := judge(withDynamicStateVouches("golang.org/x/sync/errgroup.Other", shade)); rec != both {
-		t.Fatalf("file ∪ inert option: record %q, want the file's vouch still honored", rec)
-	}
-	// Declining the file leaves the downgrade to the option alone.
-	if rec, reason := judge(withoutRepositoryVouches(), withDynamicStateVouches(shade)); rec != shade || !strings.Contains(reason, ghost) {
-		t.Fatalf("declined file: record %q, reason %q; want %s's downgrade back", rec, reason, ghost)
-	}
-	// A malformed line refuses the engine naming the file and line.
-	if err := os.WriteFile(vouchPath, []byte("# ok\ngolang.org/x/sync/errgroup:Ghost\ngolang.org/x/sync/errgroup.Shade\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := newEngine(withDir(dir)); err == nil || !strings.Contains(err.Error(), "vouches:3") || !strings.Contains(err.Error(), "not IMPORT-PATH:VARIABLE") {
-		t.Fatalf("malformed file: %v, want a refusal naming the file and line", err)
-	}
-	if _, err := newEngine(withDir(dir), withoutRepositoryVouches()); err != nil {
-		t.Fatalf("declined malformed file: %v, want no read at all", err)
-	}
-	// A caller's set extends the file and never stands in for it: the
-	// malformed file still refuses beside a supplied set.
-	if _, err := newEngine(withDir(dir), withDynamicStateVouches(shade)); err == nil || !strings.Contains(err.Error(), "vouches:3") {
-		t.Fatalf("malformed file beside a caller set: %v, want the file's refusal", err)
-	}
-	// A file that cannot be read whole refuses with nothing honored: a
-	// directory at the path, and a line past the scanner's token size
-	// after lines already read.
-	if err := os.Remove(vouchPath); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(vouchPath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := newEngine(withDir(dir)); err == nil || !strings.Contains(err.Error(), "vouch file") {
-		t.Fatalf("directory at the vouch path: %v, want a refusal", err)
-	}
-	if err := os.Remove(vouchPath); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(vouchPath, []byte("golang.org/x/sync/errgroup:Ghost\n#"+strings.Repeat("x", 70000)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := newEngine(withDir(dir)); err == nil || !strings.Contains(err.Error(), "vouch file") || !strings.Contains(err.Error(), "too long") {
-		t.Fatalf("oversized line after a good one: %v, want the whole file refused", err)
-	}
-	// The unreadable-file arm needs a caller the mode denies: root (and
-	// the -1 a non-Unix host reports) reads a mode-000 file, so the arm
-	// runs only for an ordinary Unix user.
-	if uid := os.Getuid(); uid > 0 {
-		if err := os.WriteFile(vouchPath, []byte("golang.org/x/sync/errgroup:Ghost\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chmod(vouchPath, 0o000); err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(vouchPath, 0o644) })
-		if _, err := newEngine(withDir(dir)); err == nil || !strings.Contains(err.Error(), "vouch file") {
-			t.Fatalf("unreadable file: %v, want a refusal, never the empty set", err)
-		}
 	}
 }

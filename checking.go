@@ -10,7 +10,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/trace"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh/internal/runtimeinput"
 )
 
 // Candidate is one historical recording to judge. Repeated subjects and identical
@@ -107,10 +107,10 @@ func (v *Snapshot) prepareCandidates(candidates []Candidate) error {
 // evaluation errors. No cache survives this call or crosses a runtime binding.
 func (v *Snapshot) observeRecordInputs(ctx context.Context, records []recordCheck, results []recordResult) ([]runtimeinput.State, error) {
 	shared := map[string]runtimeinput.State{}
-	if v.engine != nil && v.engine.progress != nil {
+	if v.session != nil && v.session.progress != nil {
 		for i, record := range records {
 			if results[i].evaluated && record.Recorded.RuntimeInputs != "" {
-				v.engine.progress(Progress{Phase: "runtime"})
+				v.session.progress(Progress{Phase: "runtime"})
 				break
 			}
 		}
@@ -148,7 +148,7 @@ func (v *Snapshot) runtimeMotion(ctx context.Context, candidate Candidate, prior
 // batch before entering. Current proofs are subject-scoped; admission, runtime
 // spans, selected obligations and answers are always indexed by record.
 func (v *Snapshot) checkRecords(ctx context.Context, records []recordCheck, deferClose, retain bool) (results []recordResult, opErr error) {
-	ctx, done := v.engine.beginOperation(ctx)
+	ctx, done := v.session.beginOperation(ctx)
 	defer done(&opErr)
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil checking context")
@@ -492,7 +492,7 @@ func (u *CheckingUnit) Close(ctx context.Context) (checked []CheckedCandidate, o
 		}
 		return nil, ErrUnitIncomplete
 	}
-	ctx, done := u.view.engine.beginOperation(ctx)
+	ctx, done := u.view.session.beginOperation(ctx)
 	defer done(&opErr)
 	work, cancel := context.WithCancel(ctx)
 	u.cancel = cancel
@@ -635,7 +635,7 @@ func (b *RuntimeBinding) CheckBatchWithLedgers(ctx context.Context, candidates [
 // withDeferredCheckClose makes the returned judgment and pair provisional
 // until this view successfully validates.
 func (v *Snapshot) checkInertTestVariantExtension(ctx context.Context, recorded Fingerprint, prior TestVariantLedger, subject Subject, observed bool) (Fingerprint, TestVariantLedger, Verdict, error) {
-	if v == nil || v.facts == nil || v.engine == nil {
+	if v == nil || v.facts == nil || v.session == nil {
 		return Fingerprint{}, TestVariantLedger{}, Verdict{}, errors.New("gofresh: uninitialized snapshot")
 	}
 	refuse := func(verdict Verdict, err error) (Fingerprint, TestVariantLedger, Verdict, error) {

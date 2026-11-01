@@ -178,7 +178,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/guard.Capture"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "9113cc39b537fd2f26d60b706b8313a9e6ce2673886053bad0b187ad36875fc8"
+  shape_hash: "f68c7c5993c60187f74f231a31e01c46269d9ea28071ca573bf69ae6dcdf01e1"
 }
 
 bindings {
@@ -318,7 +318,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/buildflags.Validate"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "0119477911c679a6cb3c29a61a15617498599fc5340d4ace4f7ec97717520981"
+  shape_hash: "7c318404e77e967d8f67ffc4c4c7cfc564643615766a0c0da9feea68345e52de"
 }
 
 bindings {

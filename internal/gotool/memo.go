@@ -38,8 +38,7 @@ func memoKey(dir string, env []string) (string, error) {
 // consumer's verb invocation, a server's per-request operation, never
 // a process: the span over which the caller holds the toolchain and
 // its environment still. The value is a holder that takes its own
-// answer on first use under its own lock (a pass reader, a version
-// reader), so the memo's rules are the holder's: a failed answer is
+// answer on first use under its own lock (such as a pass reader), so the memo's rules are the holder's: a failed answer is
 // the holder's for the run, a cancellation is the caller's and never
 // stored, and concurrent asks on one key wait on the first's spawn.
 // The zero RunMemo is ready.

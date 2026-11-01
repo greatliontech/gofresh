@@ -8,11 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/testvariant"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,7 +31,7 @@ func applicabilityFixture(t *testing.T) (*Snapshot, Fingerprint, Subject, TestVa
 	s := Subject{"example.com/p", "BenchmarkEnv"}
 	f := Fingerprint{MaximalClosure: "core", ToolchainContent: "stdlib", AdmissionPolicy: "audit", TestVariantClosure: "A", ClosureStrategy: ClosureStrategy, DynamicStateStrategy: DynamicStateStrategy, ResultKind: Measurement, Guards: guard.Guards{Toolchain: "go", BuildConfig: "build", Machine: "machine", RuntimeConfig: "runtime"}}
 	l := TestVariantLedger{BindingStrategy: testvariant.BindingStrategy}
-	v := &Snapshot{engine: &engine{}, subjects: []Subject{s}, kind: Measurement, facts: &observationFacts{maximal: map[Subject]subjectFacts{s: testSubjectFacts(closure.Closure{Hash: "core", ToolchainContent: "stdlib", AdmissionPolicy: "audit", TestVariants: "B"})}, guards: f.Guards, testVariantLedgers: map[string]TestVariantLedger{s.Package: l}}, observable: map[Subject]closure.Observability{}}
+	v := &Snapshot{session: &engine{}, subjects: []Subject{s}, kind: Measurement, facts: &observationFacts{maximal: map[Subject]subjectFacts{s: testSubjectFacts(closure.Closure{Hash: "core", ToolchainContent: "stdlib", AdmissionPolicy: "audit", TestVariants: "B"})}, guards: f.Guards, testVariantLedgers: map[string]TestVariantLedger{s.Package: l}}, observable: map[Subject]closure.Observability{}}
 	return v, f, s, l
 }
 
@@ -298,7 +298,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 			if len(deferred.capturedObserved) != 0 || len(deferred.applicabilityChecks) == 0 {
 				t.Fatal("applicability either became producer evidence or lost its validation obligation")
 			}
-			deferred.engine.analysisBudget = time.Nanosecond
+			deferred.session.analysisBudget = time.Nanosecond
 			if err := deferred.Validate(ctx); !errors.Is(err, ErrAnalysisUnavailable) {
 				t.Fatalf("validation ignored current proof unavailability: %v", err)
 			}
@@ -317,7 +317,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 			if len(sibling.applicabilityChecks) == 0 {
 				t.Fatal("sibling dropped applicability obligations")
 			}
-			parent.engine.analysisBudget = time.Nanosecond
+			parent.session.analysisBudget = time.Nanosecond
 			if err := sibling.Validate(ctx); !errors.Is(err, ErrAnalysisUnavailable) {
 				t.Fatalf("sibling skipped proof validation: %v", err)
 			}
@@ -556,7 +556,7 @@ func TestCheckingUnitCandidatesAndLifecycle(t *testing.T) {
 			t.Fatal(err)
 		}
 		binary := filepath.Join(t.TempDir(), "package.test")
-		runner := gotool.Runner{Containment: &gotool.Containment{}}
+		runner := gotool.Runner{}
 		if output, err := runner.Run(t.Context(), build.Directory, build.Environment, "test", "-c", "-o", binary, build.Package); err != nil {
 			t.Fatalf("build: %v\n%s", err, output)
 		}
@@ -573,7 +573,7 @@ func TestCheckingUnitCandidatesAndLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cmd, err := runner.Program(t.Context(), process.Directory(), process.Environment(), binary, "-test.run=^TestRead$", "-test.testlogfile="+process.Capture())
+		cmd, err := testProgramCmd(t.Context(), process.Directory(), process.Environment(), binary, "-test.run=^TestRead$", "-test.testlogfile="+process.Capture())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -868,7 +868,7 @@ func TestCheckingUnitCandidatesAndLifecycle(t *testing.T) {
 		if _, err := u.CheckBatch(t.Context(), []Candidate{{a, f.current[a]}}); err != nil {
 			t.Fatal(err)
 		}
-		engine := f.binding.snapshot.session.engine
+		engine := f.binding.snapshot.session
 		prior := engine.analysisBudget
 		engine.analysisBudget = time.Nanosecond
 		defer func() { engine.analysisBudget = prior }()
@@ -1215,7 +1215,7 @@ func supportedObservation(t *testing.T, view *Snapshot, root, dir, process, log 
 	if err != nil {
 		t.Fatal(err)
 	}
-	env, err := gotool.EnvForCommand(view.engine.evidenceEnv(), dir)
+	env, err := gotool.EnvForCommand(view.session.evidenceEnv(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1292,7 +1292,7 @@ func TestOutcomePreparationRejectsInvalidAndEndedTransactions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := (&Snapshot{engine: engine, facts: view.facts}).prepareOutcomeSupport(ctx, frame, "worker"); err == nil || !strings.Contains(err.Error(), "contributing subjects") {
+	if _, _, err := (&Snapshot{session: engine, facts: view.facts}).prepareOutcomeSupport(ctx, frame, "worker"); err == nil || !strings.Contains(err.Error(), "contributing subjects") {
 		t.Fatalf("empty preparation: %v", err)
 	}
 	bad := frame
@@ -1703,8 +1703,8 @@ func TestCrash(t *testing.T) { _ = os.Getenv("PACKAGE_CRASH"); panic("abnormal t
 	file, pureFile := Subject{Package: pkg, Symbol: "TestFile"}, Subject{Package: pkg, Symbol: "TestPureFile"}
 	fail, crash := Subject{Package: pkg, Symbol: "TestFail"}, Subject{Package: pkg, Symbol: "TestCrash"}
 	env := gotool.SetEnv(gotool.SetEnv(os.Environ(), "PACKAGE_A", "a"), "PACKAGE_B", "b")
-	runner := gotool.Runner{Containment: &gotool.Containment{}}
-	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: env, Inputs: []string{}}, SessionPolicy{Execution: PackageExecution, PureSubjects: []Subject{pureFile}, Runner: runner})
+	runner := gotool.Runner{}
+	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: env, Inputs: []string{}}, SessionPolicy{Execution: PackageExecution, PureSubjects: []Subject{pureFile}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1756,7 +1756,7 @@ func TestCrash(t *testing.T) { _ = os.Getenv("PACKAGE_CRASH"); panic("abnormal t
 		for _, subject := range selected {
 			symbols = append(symbols, subject.Symbol)
 		}
-		cmd, err := runner.Program(t.Context(), process.Directory(), process.Environment(), binary,
+		cmd, err := testProgramCmd(t.Context(), process.Directory(), process.Environment(), binary,
 			"-test.v", "-test.run=^("+strings.Join(symbols, "|")+")$", "-test.testlogfile="+process.Capture())
 		if err != nil {
 			t.Fatal(err)
@@ -1910,8 +1910,8 @@ func TestProcessAccountPreservesFinalizedFacts(t *testing.T) {
 	dir := writeSupportedViewModule(t)
 	subject := Subject{Package: "example.com/observed", Symbol: "TestRead"}
 	env := gotool.SetEnv(os.Environ(), "OUTCOME_VALUE", "accounted")
-	runner := gotool.Runner{Containment: &gotool.Containment{}}
-	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: env, Inputs: []string{}}, SessionPolicy{Execution: PackageExecution, Runner: runner})
+	runner := gotool.Runner{}
+	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: env, Inputs: []string{}}, SessionPolicy{Execution: PackageExecution})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1957,7 +1957,7 @@ func TestProcessAccountPreservesFinalizedFacts(t *testing.T) {
 	}
 	run := func(t *testing.T, c Contribution) {
 		t.Helper()
-		cmd, err := runner.Program(t.Context(), c.Directory(), c.Environment(), binary, "-test.v", "-test.run=^TestRead$", "-test.testlogfile="+c.Capture())
+		cmd, err := testProgramCmd(t.Context(), c.Directory(), c.Environment(), binary, "-test.v", "-test.run=^TestRead$", "-test.testlogfile="+c.Capture())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2405,8 +2405,8 @@ func TestScalar(t *testing.T) { if !utf16.IsSurrogate(0xd800) { t.Fail() } }
 	pure := Subject{Package: pkg, Symbol: "TestPure"}
 	mutator := Subject{Package: pkg, Symbol: "TestMutator"}
 	external := Subject{Package: pkg, Symbol: "TestExternal"}
-	runner := gotool.Runner{Containment: &gotool.Containment{}}
-	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: gotool.SetEnv(os.Environ(), "SELECTION_INPUT", "original"), Inputs: []string{}}, SessionPolicy{Execution: PackageExecution, PureSubjects: []Subject{external}, Runner: runner})
+	runner := gotool.Runner{}
+	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: gotool.SetEnv(os.Environ(), "SELECTION_INPUT", "original"), Inputs: []string{}}, SessionPolicy{Execution: PackageExecution, PureSubjects: []Subject{external}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2469,7 +2469,7 @@ func TestScalar(t *testing.T) { if !utf16.IsSurrogate(0xd800) { t.Fail() } }
 		if capture {
 			args = append(args, "-test.testlogfile="+c.Capture())
 		}
-		cmd, err := runner.Program(t.Context(), c.Directory(), c.Environment(), binary, args...)
+		cmd, err := testProgramCmd(t.Context(), c.Directory(), c.Environment(), binary, args...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2622,8 +2622,8 @@ func TestRuntime(t *testing.T) {
 	}
 	buildEnv := gotool.SetEnv(gotool.SetEnv(os.Environ(), "GOENV", "off"), "BOUND_VALUE", "compiler-only")
 	runEnv := gotool.SetEnv(buildEnv, "BOUND_VALUE", "delivered")
-	runner := gotool.Runner{Containment: &gotool.Containment{}}
-	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: buildEnv, Inputs: []string{}}, SessionPolicy{Execution: PackageExecution, Runner: runner})
+	runner := gotool.Runner{}
+	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: buildEnv, Inputs: []string{}}, SessionPolicy{Execution: PackageExecution})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2693,7 +2693,7 @@ func TestRuntime(t *testing.T) {
 		if pwd, _ := gotool.LookupEnv(c.Environment(), "PWD"); pwd != c.Directory() {
 			t.Fatalf("process PWD=%q, directory=%q", pwd, c.Directory())
 		}
-		cmd, err := runner.Program(t.Context(), c.Directory(), c.Environment(), binaries[i], "-test.v", "-test.run=^TestRuntime$", "-test.testlogfile="+c.Capture())
+		cmd, err := testProgramCmd(t.Context(), c.Directory(), c.Environment(), binaries[i], "-test.v", "-test.run=^TestRuntime$", "-test.testlogfile="+c.Capture())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2945,8 +2945,8 @@ func TestSupported(t *testing.T) {
 	supported := Subject{Package: pkg, Symbol: "TestSupported"}
 	direntReader := Subject{Package: pkg, Symbol: "TestDirentReader"}
 	env := gotool.SetEnv(os.Environ(), "MOTION_CONTROL", "stable")
-	runner := gotool.Runner{Containment: &gotool.Containment{}}
-	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: env, Inputs: []string{}}, SessionPolicy{Execution: PackageExecution, PureSubjects: []Subject{reader, unknown, direntReader}, Runner: runner})
+	runner := gotool.Runner{}
+	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: env, Inputs: []string{}}, SessionPolicy{Execution: PackageExecution, PureSubjects: []Subject{reader, unknown, direntReader}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2977,7 +2977,7 @@ func TestRuntimeMovementRefusesPureProductionAndHistory(t *testing.T) {
 		t.Skip("builds and executes a retained test binary")
 	}
 	f := newRuntimeMotionFixture(t)
-	dir, binary, reader, unknown, supported, binding, artifact, runner := f.dir, f.binary, f.reader, f.unknown, f.supported, f.binding, f.artifact, f.runner
+	dir, binary, reader, unknown, supported, binding, artifact, _ := f.dir, f.binary, f.reader, f.unknown, f.supported, f.binding, f.artifact, f.runner
 	var stable Fingerprint
 	for _, tc := range []struct {
 		name    string
@@ -2999,7 +2999,7 @@ func TestRuntimeMovementRefusesPureProductionAndHistory(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			cmd, err := runner.Program(t.Context(), contribution.Directory(), contribution.Environment(), binary, "-test.v", "-test.run=^"+tc.subject.Symbol+"$", "-test.testlogfile="+contribution.Capture())
+			cmd, err := testProgramCmd(t.Context(), contribution.Directory(), contribution.Environment(), binary, "-test.v", "-test.run=^"+tc.subject.Symbol+"$", "-test.testlogfile="+contribution.Capture())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3153,7 +3153,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 		spawnMarker      string
 	}
 	var closingGate atomic.Pointer[queryGate]
-	runner := gotool.Runner{Containment: &gotool.Containment{}, Prepare: func(cmd *exec.Cmd) {
+	runner := gotool.Runner{Prepare: func(cmd *exec.Cmd) {
 		gate := closingGate.Load()
 		if gate != nil && strings.Join(cmd.Args[1:], " ") == "env -json" && gate.entered.CompareAndSwap(false, true) {
 			if gate.spawnMarker != "" {
@@ -3166,7 +3166,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 		}
 	}}
 	configuration := BuildDescription{Directory: dir, Environment: buildEnv, Inputs: []string{}}
-	policy := SessionPolicy{Execution: SingleSubjectExecution, Runner: runner}
+	policy := SessionPolicy{Execution: SingleSubjectExecution, PrepareCommand: runner.Prepare}
 	session, err := NewSession(ctx, configuration, policy)
 	if err != nil {
 		t.Fatal(err)
@@ -3222,7 +3222,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if _, err := missing.Register(ctx, bound, ProcessDescription{Identity: "late"}); !errors.Is(err, errUnitClosed) {
 		t.Fatalf("failed unit reopened: %v", err)
 	}
-	control, err := runner.Program(ctx, dir, runtimeEnv, binary, "-test.run=^TestValue$", "-test.v")
+	control, err := testProgramCmd(ctx, dir, runtimeEnv, binary, "-test.run=^TestValue$", "-test.v")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3259,7 +3259,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if value, _ := gotool.LookupEnv(contribution.Environment(), "GOAMD64"); value != "v2" {
 		t.Fatalf("runtime selected %q", value)
 	}
-	cmd, err := runner.Program(ctx, contribution.Directory(), contribution.Environment(), binary,
+	cmd, err := testProgramCmd(ctx, contribution.Directory(), contribution.Environment(), binary,
 		"-test.run=^$", "-test.bench=^BenchmarkValue$", "-test.benchtime=1x", "-test.count=1", "-test.testlogfile="+contribution.Capture())
 	if err != nil {
 		t.Fatal(err)
@@ -3345,7 +3345,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	}
 	checkerEnv := gotool.SetEnv(os.Environ(), "FRESH_SESSION_CHECK", recordPath)
 	checkerEnv = gotool.SetEnv(checkerEnv, "XDG_CACHE_HOME", t.TempDir())
-	checker, err := runner.Program(ctx, dir, checkerEnv, executable, "-test.run=^TestSessionCheckerProcess$", "-test.v")
+	checker, err := testProgramCmd(ctx, dir, checkerEnv, executable, "-test.run=^TestSessionCheckerProcess$", "-test.v")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3359,7 +3359,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if err != nil {
 		t.Fatalf("sibling preparation after closing: %v", err)
 	}
-	secondCmd, err := runner.Program(ctx, second.Directory(), second.Environment(), binary, "-test.run=^$", "-test.bench=^BenchmarkValue$", "-test.benchtime=1x", "-test.count=1", "-test.testlogfile="+second.Capture())
+	secondCmd, err := testProgramCmd(ctx, second.Directory(), second.Environment(), binary, "-test.run=^$", "-test.bench=^BenchmarkValue$", "-test.benchtime=1x", "-test.count=1", "-test.testlogfile="+second.Capture())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3380,7 +3380,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	abortCommand, err := runner.Program(ctx, abortProcess.Directory(), abortProcess.Environment(), binary, "-test.run=^$", "-test.bench=^BenchmarkValue$", "-test.benchtime=1x", "-test.count=1", "-test.testlogfile="+abortProcess.Capture())
+	abortCommand, err := testProgramCmd(ctx, abortProcess.Directory(), abortProcess.Environment(), binary, "-test.run=^$", "-test.bench=^BenchmarkValue$", "-test.benchtime=1x", "-test.count=1", "-test.testlogfile="+abortProcess.Capture())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3426,7 +3426,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 		t.Fatal(err)
 	}
 	profile := filepath.Join(t.TempDir(), "cpu.pprof")
-	profileCommand, err := runner.Program(ctx, diagnosticProcess.Directory(), diagnosticProcess.Environment(), binary, "-test.run=^$", "-test.bench=^BenchmarkValue$", "-test.benchtime=1x", "-test.count=1", "-test.cpuprofile="+profile, "-test.testlogfile="+diagnosticProcess.Capture())
+	profileCommand, err := testProgramCmd(ctx, diagnosticProcess.Directory(), diagnosticProcess.Environment(), binary, "-test.run=^$", "-test.bench=^BenchmarkValue$", "-test.benchtime=1x", "-test.count=1", "-test.cpuprofile="+profile, "-test.testlogfile="+diagnosticProcess.Capture())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3448,7 +3448,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	fileCommand, err := runner.Program(ctx, fileProcess.Directory(), fileProcess.Environment(), binary, "-test.run=^$", "-test.bench=^BenchmarkFile$", "-test.benchtime=1x", "-test.count=1", "-test.testlogfile="+fileProcess.Capture())
+	fileCommand, err := testProgramCmd(ctx, fileProcess.Directory(), fileProcess.Environment(), binary, "-test.run=^$", "-test.bench=^BenchmarkFile$", "-test.benchtime=1x", "-test.count=1", "-test.testlogfile="+fileProcess.Capture())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3559,7 +3559,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if out, err := runner.Run(ctx, buildV2.Directory, buildV2.Environment, args...); err != nil {
 		t.Fatalf("changed build: %v\n%s", err, out)
 	}
-	changedControl, err := runner.Program(ctx, dir, runtimeEnv, binaryV2, "-test.run=^TestValue$", "-test.v")
+	changedControl, err := testProgramCmd(ctx, dir, runtimeEnv, binaryV2, "-test.run=^TestValue$", "-test.v")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3624,7 +3624,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 		t.Fatal(err)
 	}
 	write("base.go", "//go:build !amd64.v2\n\npackage session\nfunc Value() int { return 9 }\n")
-	driftCommand, err := runner.Program(ctx, driftProcess.Directory(), driftProcess.Environment(), binary, "-test.run=^$", "-test.bench=^BenchmarkValue$", "-test.benchtime=1x", "-test.count=1", "-test.testlogfile="+driftProcess.Capture())
+	driftCommand, err := testProgramCmd(ctx, driftProcess.Directory(), driftProcess.Environment(), binary, "-test.run=^$", "-test.bench=^BenchmarkValue$", "-test.benchtime=1x", "-test.count=1", "-test.testlogfile="+driftProcess.Capture())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3670,11 +3670,11 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	preview.engine.deferredCheckClose = true
+	preview.session.deferredCheckClose = true
 	previewPasses := 0
 	viewTestHooks.observe = func() { previewPasses++ }
 	_, _, previewVerdict, previewErr := preview.checkInertTestVariantExtension(ctx, final.Fingerprint, ledger, subject, true)
-	preview.engine.deferredCheckClose = false
+	preview.session.deferredCheckClose = false
 	viewTestHooks.observe = priorObserve
 	if previewErr != nil || previewVerdict.Status != Valid {
 		t.Fatalf("provisional control: %+v %v", previewVerdict, previewErr)
@@ -3921,8 +3921,8 @@ func TestPWD(t *testing.T) { t.Log("actual-pwd=" + os.Getenv("PWD")) }
 	}
 	env := gotool.SetEnv(os.Environ(), "GOENV", "off")
 	build := BuildDescription{Directory: dir, Environment: env, Inputs: []string{}}
-	runner := gotool.Runner{Containment: &gotool.Containment{}}
-	policy := SessionPolicy{Runner: runner, Execution: SingleSubjectExecution}
+	runner := gotool.Runner{}
+	policy := SessionPolicy{Execution: SingleSubjectExecution}
 	subject := Subject{Package: "example.com/pwd", Symbol: "BenchmarkPWD"}
 	session, err := NewSession(ctx, build, policy)
 	if err != nil {
@@ -3944,7 +3944,7 @@ func TestPWD(t *testing.T) { t.Log("actual-pwd=" + os.Getenv("PWD")) }
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, cwd := range []string{a, b} {
-		cmd, err := runner.Program(ctx, cwd, env, bin, "-test.run=^TestPWD$", "-test.v")
+		cmd, err := testProgramCmd(ctx, cwd, env, bin, "-test.run=^TestPWD$", "-test.v")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3966,7 +3966,7 @@ func TestPWD(t *testing.T) { t.Log("actual-pwd=" + os.Getenv("PWD")) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd, err := runner.Program(ctx, c.Directory(), c.Environment(), bin, "-test.run=^$", "-test.bench=^BenchmarkPWD$", "-test.benchtime=1x", "-test.testlogfile="+c.Capture())
+	cmd, err := testProgramCmd(ctx, c.Directory(), c.Environment(), bin, "-test.run=^$", "-test.bench=^BenchmarkPWD$", "-test.benchtime=1x", "-test.testlogfile="+c.Capture())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4030,7 +4030,7 @@ func TestPWD(t *testing.T) { t.Log("actual-pwd=" + os.Getenv("PWD")) }
 				}
 				checkerEnv := gotool.SetEnv(os.Environ(), "FRESH_SESSION_CHECK", path)
 				checkerEnv = gotool.SetEnv(checkerEnv, "XDG_CACHE_HOME", t.TempDir())
-				checker, err := runner.Program(ctx, dir, checkerEnv, executable, "-test.run=^TestSessionCheckerProcess$", "-test.v")
+				checker, err := testProgramCmd(ctx, dir, checkerEnv, executable, "-test.run=^TestSessionCheckerProcess$", "-test.v")
 				if err != nil {
 					t.Fatal(err)
 				}

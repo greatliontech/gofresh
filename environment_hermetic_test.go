@@ -6,14 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"go/token"
 	"go/types"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -153,49 +152,6 @@ func TestGeneratedCompilerFlagNormalization(t *testing.T) {
 	}
 }
 
-// A vouch input must not be opened once configuration has cancelled the entry.
-// A FIFO makes an otherwise silent post-cancellation read observable without
-// claiming cancellation can interrupt a filesystem call that already started.
-func TestConstructionCancellationPrecedesVouchObservation(t *testing.T) {
-	dir := t.TempDir()
-	fifo := filepath.Join(dir, RepositoryVouchFile)
-	if err := syscall.Mkfifo(fifo, 0600); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		_, err := newEngineContext(ctx, withDir(dir), func(*engine) { cancel() })
-		done <- err
-	}()
-	deadline := time.NewTimer(5 * time.Second)
-	defer deadline.Stop()
-	tick := time.NewTicker(5 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		select {
-		case err := <-done:
-			if !errors.Is(err, context.Canceled) {
-				t.Fatalf("construction: %v", err)
-			}
-			return
-		case <-tick.C:
-			// A nonblocking writer succeeds only if construction opened the
-			// read end. Closing it releases that erroneous read as EOF.
-			fd, err := syscall.Open(fifo, syscall.O_WRONLY|syscall.O_NONBLOCK, 0600)
-			if err == nil {
-				_ = syscall.Close(fd)
-				t.Error("construction opened the vouch input after cancellation")
-			} else if !errors.Is(err, syscall.ENXIO) {
-				t.Fatal(err)
-			}
-		case <-deadline.C:
-			t.Fatal("cancelled construction did not end")
-		}
-	}
-}
-
 // Preparation cancellation reaches the actual query, including a cancellation
 // after command preparation but before spawn and one while the child runs.
 func TestConstructionContextOwnsTheEnvironmentQuery(t *testing.T) {
@@ -211,7 +167,7 @@ func TestConstructionContextOwnsTheEnvironmentQuery(t *testing.T) {
 			release := filepath.Join(dir, "release")
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			runner := gotool.Runner{Containment: &gotool.Containment{}, Prepare: func(cmd *exec.Cmd) {
+			runner := gotool.Runner{Prepare: func(cmd *exec.Cmd) {
 				if strings.Join(cmd.Args[1:], " ") != "env -json" {
 					t.Errorf("unexpected preparation query: %v", cmd.Args)
 				}
@@ -292,6 +248,28 @@ func TestConstructionContextOwnsTheEnvironmentQuery(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSessionChecksToolchainSkew(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shim := filepath.Join(bin, "go")
+	if err := os.WriteFile(shim, []byte("#!/bin/sh\necho '{\"GOVERSION\":\"go99.1.0\",\"GOCACHE\":\"/tmp\",\"GOMODCACHE\":\"/tmp\",\"GOROOT\":\"/tmp\",\"GOTMPDIR\":\"/tmp\"}'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	_, err := NewSession(context.Background(), BuildDescription{
+		Directory:   dir,
+		Environment: gotool.SetEnv(os.Environ(), "PWD", dir),
+		Inputs:      []string{},
+	}, SessionPolicy{})
+	var skew *ToolchainProvenanceError
+	if !errors.As(err, &skew) {
+		t.Fatalf("NewSession under skewed GOVERSION returned %v, want *ToolchainProvenanceError", err)
 	}
 }
 

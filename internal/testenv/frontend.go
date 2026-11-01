@@ -18,7 +18,7 @@ import (
 	"testing"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 var preloadedStdlibRoots = []string{

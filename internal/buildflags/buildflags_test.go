@@ -2,7 +2,7 @@ package buildflags
 
 import (
 	"context"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"os"
 	"path/filepath"
 	"strings"

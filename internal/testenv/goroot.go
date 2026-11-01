@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 var (

@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/dynstate"
 )
 
@@ -93,13 +93,13 @@ func CulpritFromReason(reason string) (Subject, bool) {
 // and no error.
 func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName string) (Chain, error) {
 	refreshTraceFromEnv()
-	if v == nil || v.engine == nil {
+	if v == nil || v.session == nil {
 		return Chain{}, errors.New("gofresh: uninitialized snapshot")
 	}
 	v.mu.RLock()
 	dir := v.moduleDir
-	env := v.engine.env
-	flags := v.engine.buildFlags
+	env := v.session.env
+	flags := v.session.buildFlags
 	patterns := append([]string(nil), v.packages...)
 	v.mu.RUnlock()
 	if len(patterns) == 0 {
@@ -115,11 +115,11 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 		}
 	}
 	varKey := pkgPath + "." + varName
-	sel, err := ResolveToolchainSelection(ctx, v.engine.newPassReader(), v.engine.buildFlags...)
+	sel, err := v.session.ToolchainSelection(ctx)
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: toolchain selection: %w", err)
 	}
-	return explainCulprit(sel.SelectionNotice == "", pkgs, pkgPath, varKey, varName, v.engine.executionModel.singleSubject())
+	return explainCulprit(sel.SelectionNotice == "", pkgs, pkgPath, varKey, varName, v.session.executionModel.singleSubject())
 }
 
 // explainCulprit re-derives every loaded package's fact with mark

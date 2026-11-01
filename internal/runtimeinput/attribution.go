@@ -14,19 +14,12 @@ import (
 )
 
 // attributionSeparator divides a refusal's clause from its attribution
-// (REQ-inputs-refusal-attribution). A refused path, a logged name, or a
-// working directory may itself contain the separator, so the split is
-// never "the last separator": RefusalClause is the one implementation
-// a consumer reads.
+// (REQ-inputs-refusal-attribution).
 const attributionSeparator = " — "
 
 // attributionOps is the one vocabulary of harness operations an
 // attribution names — the observation's attribution field carries
-// none for an operation outside it (fail-closed), and the
-// per-operation round-trip pin is what holds the parser and the
-// builder's three labels together (a switch cannot range): a consumer
-// that pastes a field's attribution after a clause's separator meets
-// the split it recognises.
+// none for an operation outside it (fail-closed).
 var attributionOps = []string{"open", "stat", "chdir"}
 
 // movedBracketClause heads the observation-bracket refusal's reason,
@@ -38,44 +31,16 @@ const movedBracketClause = "observation bracket moved"
 // and its capped list, the parts joined by "; " inside one bracket pair.
 var bracketAttributionLabels = []string{"added: ", "removed: ", "recently touched: "}
 
-// RefusalClause is the clause of a refusal reason — the text a consumer
-// keys on (an exemption record, a disposition table), before the
-// attribution a resolved-target reason carries, a moved-bracket reason
-// carries, or a consumer pastes after it
-// (REQ-inputs-refusal-attribution). The attribution is the one
-// well-formed suffix: from a separator, an operation and its quoted
-// name and quoted directory, or `recorded path`, its quoted spelling,
-// and its quoted target, running exactly to the reason's end; or, for
-// the moved-bracket reason alone, from " [" the bracketed member list
-// — a quoted string cannot carry an unescaped quote, so no separator
-// inside a quoted name or directory, or inside the refused path of an
-// attributed reason (the fake never runs to the end), parses that way.
-// A reason with no such suffix is its own clause; the one residual of
-// the text channel is an UNATTRIBUTED reason whose refused path itself
-// ends in the attribution's shape — a path deliberately named with a
-// quote — whose clause is then the truncated one (recorded, accepted:
-// REQ-inputs-refusal-attribution).
-func RefusalClause(reason string) string {
+func refusalClause(reason string) string {
 	clause, _ := splitAttribution(reason)
 	return clause
 }
 
-// RefusalAttribution is the attribution of a refusal reason — the one
-// well-formed suffix after the separator, without it — or "" for a
-// reason carrying none: the complement of RefusalClause over the same
-// split, so a consumer recording the attribution beside the clause
-// reads the one implementation; the text channel's one residual (an
-// unattributed reason whose refused path ends in the attribution's
-// shape) yields that fake tail, as its clause is the truncated one
-// (REQ-inputs-refusal-attribution).
-func RefusalAttribution(reason string) string {
+func refusalAttribution(reason string) string {
 	_, attribution := splitAttribution(reason)
 	return attribution
 }
 
-// splitAttribution is the one split RefusalClause and
-// RefusalAttribution read: the clause before the first separator whose
-// suffix is exactly one well-formed attribution, and that suffix.
 func splitAttribution(reason string) (clause, attribution string) {
 	if clause, attribution, ok := splitBracketAttribution(reason); ok {
 		return clause, attribution
@@ -93,9 +58,6 @@ func splitAttribution(reason string) (clause, attribution string) {
 	return reason, ""
 }
 
-// attributionWellFormed reports whether s is exactly one attribution:
-// `<op> <quoted> in <quoted>` for open, stat, and chdir, or
-// `recorded path <quoted> resolves to <quoted> outside the tree`.
 func attributionWellFormed(s string) bool {
 	if _, _, _, ok := parseOperationAttribution(s); ok {
 		return true
@@ -106,9 +68,6 @@ func attributionWellFormed(s string) bool {
 	return false
 }
 
-// bracketAttributionWellFormed reports whether s is exactly one
-// moved-bracket attribution: `[<part>(; <part>)*]` running to the end,
-// every part beginning with one of the labels.
 func bracketAttributionWellFormed(s string) bool {
 	inner, ok := strings.CutPrefix(s, "[")
 	if !ok {
@@ -132,10 +91,6 @@ func bracketAttributionWellFormed(s string) bool {
 	return true
 }
 
-// bracketAttributionParts splits a member list's inner text at its
-// part separators outside quoted members: a member carrying the list's
-// framing travels quoted (memberListName), so a "; " inside
-// a quoted name is the name's, never a separator.
 func bracketAttributionParts(inner string) []string {
 	var parts []string
 	start := 0
@@ -159,25 +114,10 @@ func bracketAttributionParts(inner string) []string {
 	return append(parts, inner[start:])
 }
 
-// splitBracketAttribution is the split for the moved-bracket reason:
-// the clause is the root — a quoted root (memberListName quoted it:
-// its own name carries the list's framing) consumed whole as one Go
-// quoted string, a bare root up to the first " [" whose suffix is one
-// well-formed member list — and the attribution the list without its
-// brackets (REQ-inputs-refusal-attribution). A root quote the arm
-// cannot parse as a Go quoted string falls through to the bare scan,
-// the member arm's own tolerance of a stray quote; a bare root composed
-// before roots were quoted that BEGINS with a valid quoted literal
-// followed by more name is refused whole — recorded, since falling
-// through there would let a quoted root followed by a malformed list
-// mis-split.
 func splitBracketAttribution(reason string) (clause, attribution string, ok bool) {
 	if !strings.HasPrefix(reason, movedBracketClause) {
 		return reason, "", false
 	}
-	// A quoted root (its own name carries the list's framing) is one
-	// Go quoted string after the clause's prefix: the split consumes it
-	// whole and reads the list after it, never a " [" inside it.
 	if rest, found := strings.CutPrefix(reason, movedBracketClause+": \""); found {
 		if root, list, quoted := quotedPrefixThen("\""+rest, " "); quoted {
 			if bracketAttributionWellFormed(list) {
@@ -215,8 +155,6 @@ func quotedPrefixThen(s, prefix string) (quoted, rest string, ok bool) {
 	return q, rest, true
 }
 
-// quotedThen reports whether s is a quoted string, then mid, then a
-// quoted string, then exactly tail.
 func quotedThen(s, mid, tail string) bool {
 	_, rest, ok := quotedPrefixThen(s, mid)
 	if !ok {
@@ -338,43 +276,8 @@ func representableReasonName(name string) string {
 	return strconv.Quote(name)
 }
 
-// MovedBracketClause is the clause of the refusal a moved observation
-// bracket raises for the root named by its display path (a
-// module-relative slash path, or an absolute host path's own clean
-// spelling): the root travels under the members' quoting rule
-// (memberListName) — a root whose own name carries the list's framing
-// is a Go quoted string, which splitBracketAttribution's quoted-root
-// arm consumes whole, so the split never reads a root's segment as the
-// list — and a plain root travels bare. A consumer keying records on
-// the clause (RefusalClause) re-keys a stored clause through
-// CanonicalMovedBracketClause, never through this composer over the
-// stored root text — a quoted key would be quoted again
-// (REQ-inputs-refusal-attribution).
-func MovedBracketClause(root string) string {
+func movedBracketClauseForRoot(root string) string {
 	return movedBracketClause + ": " + memberListName(root)
-}
-
-// CanonicalMovedBracketClause is the re-key a consumer applies to a
-// stored moved-bracket clause composed before roots were quoted: a
-// clause whose root text parses whole as a Go quoted literal of a name
-// this spelling quotes is already canonical and comes back unchanged
-// (the rule is idempotent); any other root text is composed afresh,
-// so a bare root carrying the list's framing re-keys to its quoted
-// spelling and a plain root stays. A clause not of the moved-bracket
-// form comes back unchanged. The one shape the text cannot resolve —
-// a bare root whose own name is a valid Go quoted literal of a
-// framing-bearing name — reads as canonical and is not re-keyed, so
-// its exemption stops matching the quoted spelling the producer now
-// emits: recorded, the text channel's residual class.
-func CanonicalMovedBracketClause(clause string) string {
-	root, found := strings.CutPrefix(clause, movedBracketClause+": ")
-	if !found {
-		return clause
-	}
-	if name, err := strconv.Unquote(root); err == nil && memberListName(name) == root {
-		return clause
-	}
-	return MovedBracketClause(root)
 }
 
 // memberListName renders one member of a moved-bracket attribution's

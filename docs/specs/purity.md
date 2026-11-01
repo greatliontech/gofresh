@@ -109,18 +109,15 @@ an input to freshness evaluation — canonical `<import path>.<Variable>` identi
 so a consumer's committed configuration and a per-run flag reduce to the same session
 policy input and gofresh itself never infers a vouch. A vouch names exactly one variable,
 never a package or a pattern. Session construction accepts the caller-resolved set
-directly without reading an additional repository vouch file, while gofresh exports the
-repository vouch file reader (`vouches` at the repository root — one
-`IMPORT-PATH:VARIABLE` per line, `#` comments and blank lines ignored, each line
-mapped to the canonical identity, an absent file the empty set, a malformed line
-refusing naming the file and line; fail-closed: a vouch suppresses an
-unverifiable verdict, so a set that cannot be read whole is never partly honored)
-and the entry-set reducer (parsing each spelling, deduplicating, and sorting the
-identities, one malformed spelling refusing the whole set — the one reduction gofresh
-exports so no consumer spells it) so a consumer composing a repository's reviewed
-standing set with a per-run set supplies one resolved set to the session. The session
-judges under the supplied set and records it: a vouch that discharges a culprit rides
-the subject's evidence (REQ-vouch-recorded).
+directly on `SessionPolicy.Vouches` without reading any repository vouch file, while
+gofresh exports the entry parser and entry-set reducer (`ParseVouchEntry` and
+`ParseVouchEntries` — parsing each `IMPORT-PATH:VARIABLE` or `<import path>.<Variable>`
+spelling, deduplicating, and sorting the identities, one malformed spelling refusing
+the whole set; fail-closed: a vouch suppresses an unverifiable verdict, so a set that
+cannot be parsed whole is never partly honored) so a consumer composing its configured
+vouches supplies one resolved set to the session. The session judges under the supplied
+set and records it: a vouch that discharges a culprit rides the subject's evidence
+(REQ-vouch-recorded).
 
 **REQ-vouch-discharge** (behavior): A vouched variable MUST be exempt from the
 shared-dynamic-state downgrade

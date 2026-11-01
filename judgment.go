@@ -4,7 +4,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/outcome"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh/internal/runtimeinput"
 )
 
 // CauseKind identifies the native fact that decided a refusal. Diagnostic text
@@ -183,8 +183,8 @@ func admittedObservation(rec Fingerprint, subject Subject, cl closure.Closure) O
 
 func (v *Snapshot) judgmentFor(subject Subject, verdict Verdict) Verdict {
 	verdict.Ground.Scope = JudgmentScope{Subject: subject, ResultKind: v.kind}
-	if v.engine != nil {
-		verdict.Ground.Scope.ExecutionModel = v.engine.executionModel
+	if v.session != nil {
+		verdict.Ground.Scope.ExecutionModel = v.session.executionModel
 	}
 	// A cut is the immutable pass's unavailability, not proof that the
 	// surviving culprit affects this subject. It still blocks observation lift.

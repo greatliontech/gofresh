@@ -1042,7 +1042,7 @@ func TestMovementManifestCanonicalWireAndDigest(t *testing.T) {
 		}
 	}
 	// Text alone is never semantic movement evidence, even when it looks exact.
-	text, err := Incomplete(t.TempDir(), "caller", MovedBracketClause("data"), nil)
+	text, err := Incomplete(t.TempDir(), "caller", movedBracketClauseForRoot("data"), nil)
 	if err != nil || text.BracketMoved {
 		t.Fatalf("diagnostic granted guard authority: %+v %v", text, err)
 	}
@@ -1355,7 +1355,7 @@ func TestOverlappingRootsShareComparableFacts(t *testing.T) {
 			if err != nil || observation.BracketMoved != (scenario == "appearance" || scenario == "captured contradiction") || !observation.Unverifiable {
 				t.Fatalf("%s: %+v %v", scenario, observation, err)
 			}
-			if observation.BracketMoved && RefusalClause(observation.Reason) != MovedBracketClause("data") {
+			if observation.BracketMoved && refusalClause(observation.Reason) != movedBracketClauseForRoot("data") {
 				t.Fatalf("lost deterministic contributing-root attribution: %q", observation.Reason)
 			}
 		})

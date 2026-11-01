@@ -22,7 +22,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 // Guards are the captured guard values for one result. Every field is a digest or

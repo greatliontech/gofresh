@@ -303,100 +303,37 @@ not its behavior-affecting dependencies: relevance is governed by
 REQ-guard-runtime-relevance, and missing required evidence is never agreement.
 
 **REQ-fresh-go-command-policy** (behavior): Every `go` command gofresh
-spawns itself MUST run through the go-command policy's runner: under one
+spawns itself MUST run through its internal go-command runner: under one
 complete normalized environment (deterministic order, duplicate keys
-refused, `PWD` derived from the command's directory, the ordinary loader
-pinned when one is named, the caller's own kept otherwise; one setter and one remover keeping that order), under the process-boundary rule
-its runner carries where the runner carries one — the plain runner
-carries none; a consumer's runner applies the one rule (the child in
-its own process group, a cancellation sweeping the group, an
-already-gone group the process-done case, a wait delay bounding the
-reap — a named delay, else the policy's default — and a quit grace on a
-cause the consumer names, the reap then bounded by the grace and the
-delay together) to every command it prepares, the go command and the
-consumer's own program alike (the policy's preparation is exported over
-any program name, the program resolved as the parent's own lookup
-resolves it — a bare name through the parent's PATH, a name carrying a
-path separator against the command's directory — while the derived
-environment governs the child, and `GoBuildCache` / `PreserveBuildCache`
-resolve and pin the effective `GOCACHE` across `GOENV=off` or cache-home
-redirections) — reading go's environment through one
-pass-scoped reader whose
-one snapshot every same-pass key reads, resolving directories to one
-canonical coordinate with its degrading form; and a runner installed on
-an engine by its option reaches every go command that engine spawns
-itself — the loader's `x/tools` children excepted, which carry the
-policy's environment and spawn outside any hook — while a consumer's
-runner reaches the commands that consumer spawns through it; and the
-policy's structured readers — the toolchain sample and the environment
-snapshot, from whose keys a consumer's runtime-input ingest reads its
-four classification roots, each required present — serve the answer a
-cleanly exited process wrote when the wait delay expired before its
-pipe reached EOF (a descendant's hold or a stalled copier) if it is
-whole by the reader's own test (a go version's first line; a document
-that parses to its keys) and the context is live — a caller's
-cancellation is never answered from that form — and refuse a torn
-answer naming the form; gofresh's own package listing (the runner's
-List), which has no wholeness test, refuses that form outright with a
-refusal distinguishable from a served salvage. The contained collected form on
-Linux (`GOOS=linux`) ends its remaining process group after the leader exits
-and the bounded pipe drain finishes, including normal and failed leader exits and cancellation
-during the drain. The leader's waitable identity is held until every group
-signal has finished, then reaped; a recycled numeric group is never signalled.
-The caller leaves these children exclusively waitable by the runner and does
-not configure automatic child reaping. Failure to establish the waitable
-identity disables further group signals and refuses the collected answer.
-Prepared commands run by consumers leave post-wait cleanup
-to those consumers; other platforms retain their cancellation and drain
-limits. A cleanup refusal supplies no salvageable answer.
+refused, `PWD` derived from the command's directory, `GOPACKAGESDRIVER=off`
+pinned when the ordinary loader is named, the caller's own kept otherwise;
+one setter and one remover keeping that order), applying any caller-supplied
+`PrepareCommand` hook to `go` commands spawned through the runner (the
+loader's `x/tools` children excepted, which carry the normalized
+environment and spawn outside any hook) while reading go's environment
+through one pass-scoped reader whose single `go env -json` snapshot every
+same-pass key reads, and resolving directories to one canonical coordinate
+with its degrading form.
 
-**REQ-fresh-toolchain-skew** (behavior): A consumer MUST refuse to judge
-records under a language-series disagreement between the analyzing
+**REQ-fresh-toolchain-skew** (behavior): A session MUST refuse to construct
+or judge records under a language-series disagreement between the analyzing
 binary's build toolchain and the ambient toolchain of the tree's module,
-sampled by `go env GOVERSION` in the target module's directory (never
-the tool's own working directory: under GOTOOLCHAIN=auto the selected
-toolchain is per module) — the sample gofresh's go-command policy
-performs for every consumer, so no consumer spells the sampling contract
-itself — the "goMAJOR.MINOR" series read through the canonical
-go/version grammar over the trimmed value cut at its first space
-(the current development-build spelling reads as its cycle's series;
-the legacy `devel …` spelling, a `go version` line, and whatever that
-grammar refuses answer no series), the one grammar gofresh's series
-judgment reads, exported for every consumer's build-events floor and
-release-tag derivation — memoized for a sampler's lifetime in the one
-judged-run memo shape a runtime-input ingest's roots also instance,
-keyed by the directory's coordinate and the normalized environment,
-less PWD when a directory is named (the coordinate collapses its
-spellings; with none named the command runs in the process's own
-directory, which the go command reads through PWD, so PWD stays in
-the key) — two spellings of one directory and two orderings of one
-environment one key; a malformed environment refused, never keyed raw
-— each key's holder taking its answer once — a failed sample
-memoized like an answered one, a cancelled sample never memoized,
-concurrent asks on one key waiting on the first's spawn, each under
-its own context (a waiter whose context ends leaves with its
-cancellation while the spawn runs on) — or answered
-from a pass reader's one snapshot by a consumer that holds it (the
-GOVERSION the snapshot carries, for the reader's own directory and
-environment alone, no second process) — the answer a
-cleanly exited process wrote kept when a descendant holds its pipe past
-the wait delay, and composed with this judgment into the one typed
-provenance refusal every consumer's judged run answers with — an
-unidentifiable ambient toolchain named with the frontend and the cause,
-a breaking skew in this clause's words; the composite is constructed
-over the consumer's own memoized sampler, and one built without a
-sampler refuses as a construction fault, never a provenance one.
+sampled from the `GOVERSION` key of the session's `go env -json` snapshot
+in the target module's directory (never the tool's own working directory:
+under `GOTOOLCHAIN=auto` the selected toolchain is per module) — the
+"goMAJOR.MINOR" series read through the canonical `go/version` grammar over
+the trimmed value cut at its first space (the current development-build
+spelling reads as its cycle's series; the legacy `devel …` spelling, a
+`go version` line, and whatever that grammar refuses answer no series),
+composed with this judgment into the typed `ToolchainProvenanceError` refusal
+naming an unidentifiable ambient toolchain or a breaking language-series skew.
 Within a major the refusal is directional — a frontend older than the
 ambient series refuses, since it predates the sources' language, while a
 newer frontend reads older language under the Go 1 compatibility
 promise; across majors both directions refuse; an unidentifiable version
 on either side refuses. This is the guard the closure identity's
 exclusion of the analyzing frontend rests on
-(REQ-closure-identity-strategy). Consumer obligation: a sampler lives
-one judged run — the consumer's one verb invocation, a long-lived
-server's per-request operation — never a process, since a toolchain
-replaced under a living memo would be judged by its predecessor's
-sample.
+(REQ-closure-identity-strategy).
 
 **REQ-fresh-commit-independent** (invariant): The validity predicate MUST depend
 only on the guards, never on the raw commit identity of the recording or of the
@@ -682,15 +619,9 @@ analysis's per-subject provenance, an exhausted analysis budget with the count
 of subjects it left unproven, a listing this build cannot model, what a cancelled
 operation persisted — delivers it on the event's own diagnostic field,
 never on the error channel and never on any memoized, hashed surface, so a
-consumer prints the diagnostics alone and a walk-order-dependent payload reaches
-the operator without entering an identity. The event renders its own diagnostic
-line — the phase, the package where the event names one, and the detail, a
-multi-line one folded onto the single line — and a consumer printing diagnostics
-without a rendering of its own prints that rendering, the sink it installs
-serializing its writes, so every tool's log spells an engine diagnostic one way.
-The per-unit phase set is exported beside the event, so a consumer's keep-alive
-names a stretch for exactly the units and never spells the set itself. Progress
-events are keep-alive facts about work, never verdict evidence.
+consumer receives the diagnostics on the `Progress` value and a
+walk-order-dependent payload reaches the caller without entering an identity.
+Progress events are keep-alive facts about work, never verdict evidence.
 
 **REQ-fresh-view-source-identities** (behavior): An analysis view MUST expose the
 exact mutable source-file identities whose bytes contribute to each subject's

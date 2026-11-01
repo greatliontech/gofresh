@@ -25,22 +25,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/buildflags"
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 	"github.com/greatliontech/gofresh/internal/trace"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh/internal/runtimeinput"
 )
 
 // Kind classifies a cached result for guard selection (REQ-fresh-guard-set): a
@@ -60,9 +60,10 @@ func refreshTraceFromEnv() {
 	trace.Refresh(os.Getenv(trace.EnvTrace), os.Getenv(trace.EnvTraceFile))
 }
 
-// CaptureGuards computes the environment guards applicable to kind in r's
-// directory under env as the complete runtime environment.
-func CaptureGuards(ctx context.Context, r *gotool.EnvReader, env []string, kind Kind, buildInputs ...string) (Guards, error) {
+// CaptureGuards computes the environment guards applicable to kind for build
+// under runtimeEnv as the complete runtime environment (a nil runtimeEnv
+// inherits build.Environment).
+func CaptureGuards(ctx context.Context, build BuildDescription, runtimeEnv []string, kind Kind, prepare ...func(*exec.Cmd)) (Guards, error) {
 	refreshTraceFromEnv()
 	if ctx == nil {
 		return Guards{}, errors.New("gofresh: nil guard capture context")
@@ -70,10 +71,21 @@ func CaptureGuards(ctx context.Context, r *gotool.EnvReader, env []string, kind 
 	if err := ctx.Err(); err != nil {
 		return Guards{}, err
 	}
-	if r == nil {
-		return Guards{}, errors.New("gofresh: nil environment reader")
+	if build.Directory == "" {
+		return Guards{}, errors.New("gofresh: empty guard capture directory")
 	}
-	return guard.Capture(ctx, r, env, kind, buildInputs...)
+	if runtimeEnv == nil {
+		runtimeEnv = build.Environment
+	}
+	reader := gotool.NewEnvReader(gotool.Runner{Prepare: firstPrepare(prepare)}, build.Directory, build.Environment)
+	inputs := make([]string, 0, len(build.Flags)+len(build.Inputs))
+	for _, flag := range build.Flags {
+		inputs = append(inputs, "flag="+flag)
+	}
+	for _, input := range build.Inputs {
+		inputs = append(inputs, "input="+input)
+	}
+	return guard.Capture(ctx, reader, runtimeEnv, kind, inputs...)
 }
 
 // TestVariantBindingStrategy versions the base-package binding derivation on
@@ -179,17 +191,6 @@ type BuildDescription struct {
 	Inputs      []string
 }
 
-// TestCompileArgs returns the go command arguments to compile Package's test
-// binary to outputPath under Flags and any caller-supplied extraFlags.
-func (d BuildDescription) TestCompileArgs(outputPath string, extraFlags ...string) []string {
-	args := make([]string, 0, 4+len(d.Flags)+len(extraFlags)+1)
-	args = append(args, "test", "-c", "-o", outputPath)
-	args = append(args, d.Flags...)
-	args = append(args, extraFlags...)
-	args = append(args, d.Package)
-	return args
-}
-
 // RuntimeDescription is the complete environment of the built program. A nil
 // Environment inherits the session's build environment; a nonnil empty slice
 // describes an otherwise empty environment. Directory supplies PWD; omission
@@ -230,17 +231,45 @@ type SessionPolicy struct {
 	AssumePure     func(Subject) bool
 	Execution      ExecutionModel
 	AnalysisBudget time.Duration
-	Runner         gotool.Runner
+	PrepareCommand func(*exec.Cmd)
 	Progress       func(Progress)
 }
 
 // Session owns one judged operation's immutable build configuration and
 // policy. It executes no subject and stores no result. Source generations belong
 // to its snapshots, and producing obligations belong to their independent units.
+// Source, guards, purity directives, and derived analysis state live in an
+// explicit Snapshot and never cross view generations (REQ-fresh-coherent-view);
+// within one generation, sibling views derived from a parent share its recorded
+// facts by contract.
 type Session struct {
-	engine *engine
-	build  BuildDescription
-	roots  runtimeinput.Roots
+	build           BuildDescription
+	roots           runtimeinput.Roots
+	unauditedNotice sync.Once
+	assumePure      func(Subject) bool
+	buildFlags      []string
+	buildInputs     []string
+	dir             string
+	env             []string
+	// evidenceRoot is the root a subject's runtime-input evidence is
+	// anchored at: relative identities are re-hashed under it. Empty
+	// means the module directory.
+	evidenceRoot   string
+	analysisBudget time.Duration
+	// runner spawns every go command the session runs itself; the zero
+	// value is the plain spawn.
+	runner             gotool.Runner
+	progress           func(Progress)
+	deferredCheckClose bool
+	// dynamicStateVouches is the caller's vouch set: canonical
+	// "<import path>.<Variable>" identities of version-pinned dependency
+	// variables the caller accepts as stable after initialization
+	// (REQ-vouch-input). Empty means no vouches.
+	dynamicStateVouches map[string]bool
+	// executionModel holds the caller's positive execution-model
+	// attestation; the zero value is GeneralExecution, which supplies no
+	// positive assertion.
+	executionModel ExecutionModel
 }
 
 // NewSession admits a complete compilation description and analysis policy.
@@ -275,7 +304,11 @@ func NewSession(ctx context.Context, build BuildDescription, policy SessionPolic
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	buildEnv, err := gotool.EnvForPackages(build.Environment)
+	normalized, err := gotool.NormalizeEnv(build.Environment)
+	if err != nil {
+		return nil, fmt.Errorf("gofresh: %w", err)
+	}
+	buildEnv, err := gotool.EnvForPackages(normalized)
 	if err != nil {
 		return nil, fmt.Errorf("gofresh: build environment: %w", err)
 	}
@@ -287,6 +320,13 @@ func NewSession(ctx context.Context, build BuildDescription, policy SessionPolic
 	if err != nil {
 		return nil, err
 	}
+	var vouchMap map[string]bool
+	if len(vouches) > 0 {
+		vouchMap = make(map[string]bool, len(vouches))
+		for _, v := range vouches {
+			vouchMap[v] = true
+		}
+	}
 	pure := make(map[Subject]bool, len(policy.PureSubjects))
 	for _, subject := range policy.PureSubjects {
 		if subject.Package == "" || subject.Symbol == "" {
@@ -295,38 +335,63 @@ func NewSession(ctx context.Context, build BuildDescription, policy SessionPolic
 		pure[subject] = true
 	}
 	assumePure := policy.AssumePure
-	runner := policy.Runner
-	if runner.Containment != nil {
-		owned := *runner.Containment
-		runner.Containment = &owned
+	var evidenceRoot string
+	if policy.EvidenceRoot != "" {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		evidenceRoot, err = gotool.CanonicalDir(policy.EvidenceRoot)
+		if err != nil {
+			return nil, fmt.Errorf("gofresh: resolve evidence root: %w", err)
+		}
+		if rel, err := filepath.Rel(evidenceRoot, buildDir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("gofresh: evidence root %s does not contain the module directory %s; relative identities recorded under it could not name the module's inputs", evidenceRoot, buildDir)
+		}
 	}
-	opts := []option{
-		withDir(buildDir), withEnv(buildEnv...), withBuildFlags(build.Flags...),
-		withBuildInputs(build.Inputs...), withEvidenceRoot(policy.EvidenceRoot),
-		withoutRepositoryVouches(), withDynamicStateVouches(vouches...),
-		withAssumePure(func(subject Subject) bool {
-			return pure[subject] || (assumePure != nil && assumePure(subject))
-		}),
-		withGoRunner(runner), withProgress(policy.Progress), withAnalysisBudget(policy.AnalysisBudget),
+	for _, input := range build.Inputs {
+		if strings.HasPrefix(strings.TrimSpace(input), "-") {
+			return nil, fmt.Errorf("gofresh: build flag %q passed as opaque input; use BuildFlags", input)
+		}
 	}
-	switch policy.Execution {
-	case PackageExecution:
-		opts = append(opts, withPackageProcessExecution())
-	case SingleSubjectExecution:
-		opts = append(opts, withSingleSubjectExecution())
+	flags := slices.Clone(build.Flags)
+	inputs := append([]string{}, build.Inputs...)
+	owned := BuildDescription{
+		Directory:   buildDir,
+		Environment: slices.Clone(buildEnv),
+		Flags:       slices.Clone(flags),
+		Inputs:      append([]string{}, inputs...),
 	}
-	e, err := newEngineContext(ctx, opts...)
+	s := &Session{
+		build:               owned,
+		assumePure:          func(subject Subject) bool { return pure[subject] || (assumePure != nil && assumePure(subject)) },
+		buildFlags:          flags,
+		buildInputs:         inputs,
+		dir:                 buildDir,
+		env:                 buildEnv,
+		evidenceRoot:        evidenceRoot,
+		analysisBudget:      policy.AnalysisBudget,
+		runner:              gotool.Runner{Prepare: policy.PrepareCommand},
+		progress:            policy.Progress,
+		dynamicStateVouches: vouchMap,
+		executionModel:      policy.Execution,
+	}
+	passReader := s.newPassReader()
+	snapshot, err := passReader.Snapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
-	e.completeBuild = true
-	owned := BuildDescription{Directory: e.dir, Environment: slices.Clone(e.env), Flags: slices.Clone(e.buildFlags), Inputs: append([]string{}, e.buildInputs...)}
-	trace.Emit(ctx, trace.DomainSession, "session_init", e.dir,
-		trace.String("dir", e.dir),
-		trace.Bool("complete_build", e.completeBuild),
+	if err := checkSnapshotToolchainProvenance(snapshot); err != nil {
+		return nil, err
+	}
+	if err := buildflags.Validate(ctx, passReader, s.buildFlags); err != nil {
+		return nil, err
+	}
+	trace.Emit(ctx, trace.DomainSession, "session_init", s.dir,
+		trace.String("dir", s.dir),
+		trace.Bool("complete_build", true),
 		trace.Int("execution_model", int(policy.Execution)),
 	)
-	return &Session{engine: e, build: owned}, nil
+	return s, nil
 }
 
 // canonicalSessionVouches validates the already-resolved identity form through
@@ -406,7 +471,7 @@ func (s *Snapshot) BindRuntime(ctx context.Context, execution RuntimeDescription
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if s == nil || s.session == nil || !validKind(s.kind) {
+	if s == nil || s.session == nil || s.session.build.Directory == "" || !validKind(s.kind) {
 		return nil, errors.New("gofresh: uninitialized snapshot")
 	}
 	dir, err := rebaseProcessPath(s.session.build.Directory, execution.Directory)
@@ -486,7 +551,7 @@ func (b *RuntimeBinding) newView(subjects []Subject) (*Snapshot, error) {
 // Snapshot observes the requested subjects under the session's admitted build.
 // It captures no measurement-side guards; BindRuntime admits those separately.
 func (s *Session) Snapshot(ctx context.Context, subjects []Subject, kind Kind) (*Snapshot, error) {
-	if s == nil || s.engine == nil {
+	if s == nil || s.dir == "" {
 		return nil, errors.New("gofresh: uninitialized session")
 	}
 	return s.SnapshotFor(ctx, subjects, s.build.Directory, kind)
@@ -496,22 +561,17 @@ func (s *Session) Snapshot(ctx context.Context, subjects []Subject, kind Kind) (
 // session's admitted build with the guards applicable to kind. It captures no
 // measurement-side guards; BindRuntime admits those separately.
 func (s *Session) SnapshotFor(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*Snapshot, error) {
-	if s == nil || s.engine == nil {
+	if s == nil || s.dir == "" {
 		return nil, errors.New("gofresh: uninitialized session")
 	}
-	v, err := s.engine.newViewFor(ctx, subjects, moduleDir, kind)
-	if err != nil {
-		return nil, err
-	}
-	v.session = s
-	return v, nil
+	return s.observeSnapshot(ctx, subjects, moduleDir, kind)
 }
 
 // BuildDescription returns an owned copy for a package represented in the
 // snapshot. The executor protects these build dependencies through execution and
 // closing, and uses this description rather than rebuilding under runtime env.
 func (s *Snapshot) BuildDescription(pkg string) (BuildDescription, error) {
-	if s == nil || s.session == nil || !slices.Contains(s.packages, pkg) {
+	if s == nil || s.session == nil || s.session.build.Directory == "" || !slices.Contains(s.packages, pkg) {
 		return BuildDescription{}, fmt.Errorf("gofresh: package %q is outside the snapshot", pkg)
 	}
 	b := s.session.build
@@ -586,49 +646,6 @@ func (b *RuntimeBinding) CurrentFacts(ctx context.Context, subject Subject) (Fin
 	return v.Capture(ctx, subject)
 }
 
-// engine is immutable analysis configuration. Source, guards, purity directives,
-// and derived analysis state live in an explicit Snapshot and never cross view
-// generations (REQ-fresh-coherent-view); within one generation, sibling views
-// derived from a parent share its recorded facts by contract.
-type engine struct {
-	// unauditedNotice gates this engine's one unlisted-toolchain
-	// announcement (view.go emitUnauditedToolchainNotice).
-	unauditedNotice sync.Once
-	assumePure      func(Subject) bool
-	buildFlags      []string
-	buildInputs     []string
-	dir             string
-	env             []string
-	envSet          bool
-	// completeBuild selects the explicit session build-description guard.
-	// Legacy construction has no complete additional-input declaration.
-	completeBuild bool
-	// evidenceRoot is the root a subject's runtime-input evidence is
-	// anchored at: relative identities are re-hashed under it. Empty
-	// means the module directory (withEvidenceRoot).
-	evidenceRoot   string
-	analysisBudget time.Duration
-	// runner spawns every go command the engine runs itself
-	// (withGoRunner); the zero value is the plain spawn.
-	runner             gotool.Runner
-	progress           func(Progress)
-	deferredCheckClose bool
-	// dynamicStateVouches is the caller's vouch set: canonical
-	// "<import path>.<Variable>" identities of version-pinned dependency
-	// variables the caller accepts as stable after initialization
-	// (REQ-vouch-input). Empty means no vouches.
-	dynamicStateVouches map[string]bool
-	// withoutRepositoryVouches declines the repository's reviewed vouch
-	// file at the engine's root (withoutRepositoryVouches): a consumer
-	// that owns its own reviewed set supplies it whole through the
-	// option instead of reading two homes.
-	withoutRepositoryVouches bool
-	// executionModel holds the caller's positive execution-model
-	// attestation (withSingleSubjectExecution, withPackageProcessExecution);
-	// the zero value is GeneralExecution, which supplies no positive assertion.
-	executionModel ExecutionModel
-}
-
 // viewTestHooks holds internal observation callbacks and explicitly named
 // test controls. Nil or zero disables them. Root tests run sequentially,
 // so package scope suffices.
@@ -681,42 +698,11 @@ var viewTestHooks struct {
 	factScope func(scope string)
 }
 
-// option configures an engine.
-type option func(*engine)
-
-// withBuildFlags supplies complete go-command flags used by the producing build,
-// such as -tags=integration, -race, or -pgo=profile. The flags select every source
-// load and are folded into the build-configuration guard, so the closure and guard
-// describe the same binary (REQ-guard-buildconfig).
-func withBuildFlags(flags ...string) option {
-	return func(e *engine) { e.buildFlags = append([]string(nil), flags...) }
-}
-
-// withGoRunner installs the runner every go command the engine spawns
-// itself runs through — each pass's environment snapshot (both code
-// guards read it), the closure's package listings — so a
-// consumer's process boundary and hook reach them
-// (REQ-fresh-go-command-policy). The package loader's `go list`
-// children spawn through x/tools, outside any runner; the runtime-input
-// roots probe is a producer's spawn, under the runner the consumer's
-// ProducerIngest names. Without the option the engine spawns plainly.
-func withGoRunner(r gotool.Runner) option {
-	return func(e *engine) { e.runner = r }
-}
-
-// newPassReader mints a pass's environment reader over the engine's
+// newPassReader mints a pass's environment reader over the session's
 // runner, directory, and analysis environment: one per pass, its
 // snapshot taken on the pass's first key.
-func (e *engine) newPassReader() *gotool.EnvReader {
-	return gotool.NewEnvReader(e.runner, e.dir, e.env)
-}
-
-// withBuildInputs supplies opaque build evidence that cannot itself configure a Go
-// source load, such as a PGO profile's content digest. It is folded into the
-// build-configuration guard (REQ-guard-buildconfig). Go-command flags belong in
-// withBuildFlags; presenting one here is refused when newEngine applies the options.
-func withBuildInputs(inputs ...string) option {
-	return func(e *engine) { e.buildInputs = append([]string(nil), inputs...) }
+func (s *Session) newPassReader() *gotool.EnvReader {
+	return gotool.NewEnvReader(s.runner, s.dir, s.env)
 }
 
 // Progress reports the start of one analysis step, or a fact about an
@@ -745,9 +731,7 @@ func withBuildInputs(inputs ...string) option {
 // Events are emitted before the step runs — except the facts about an
 // operation ("served", "cancelled", "budget-exhausted"), reported when
 // they are known — and carry no completion signal; they are keep-alive
-// facts about work, never verdict evidence (REQ-fresh-progress); a
-// consumer that prints Detail-bearing events prints only the
-// diagnostics.
+// facts about work, never verdict evidence (REQ-fresh-progress).
 type Progress struct {
 	Phase   string
 	Package string
@@ -763,435 +747,38 @@ type Progress struct {
 	Detail string
 }
 
-// unitPhases is the per-unit phase set: the phases reported before a
-// unit of analysis work runs. The other phases are facts about an
-// operation ("served", "cancelled", "budget-exhausted") or diagnostics
-// ("toolchain-unaudited", "analysis-unavailable", "listing-unmodelled"),
-// reported when known and naming no stretch.
-var unitPhases = []string{"list", "typecheck", "load", "hash", "observe", "runtime", "prove"}
-
-// UnitPhases returns the per-unit phase set — a consumer's keep-alive
-// names a stretch for exactly these (REQ-fresh-progress) — as its own
-// copy: the set is the contract, never a consumer's to reorder.
-func UnitPhases() []string {
-	return slices.Clone(unitPhases)
-}
-
-// IsUnit reports whether the event opens a unit of analysis work — a
-// member of UnitPhases — as opposed to a fact or a diagnostic.
-func (p Progress) IsUnit() bool {
-	return slices.Contains(unitPhases, p.Phase)
-}
-
-// withProgress supplies a callback invoked synchronously at the start of each
-// long-running analysis step. The callback must be fast, must not call back
-// into the engine, and must be safe for concurrent invocation — one engine can
-// serve concurrent operations. A panicking callback unwinds through the
-// operation that emitted the event.
-func withProgress(f func(Progress)) option {
-	return func(e *engine) { e.progress = f }
-}
-
-// Diagnostic renders a diagnostic-bearing event's one line — the phase,
-// the package where the event names one, and the detail, a multi-line
-// detail (a module file's parse errors are joined by newlines) folded
-// onto the line with "; " — and reports false for a keep-alive event,
-// which carries no message. A consumer printing diagnostics without a
-// rendering of its own prints this one, so such tools' logs spell an
-// engine diagnostic one way (REQ-fresh-progress).
-func (p Progress) Diagnostic() (string, bool) {
-	if p.Detail == "" {
-		return "", false
-	}
-	detail := strings.Join(strings.Split(strings.TrimRight(strings.ReplaceAll(p.Detail, "\r\n", "\n"), "\n"), "\n"), "; ")
-	if p.Package == "" {
-		return p.Phase + " — " + detail, true
-	}
-	return p.Phase + " " + p.Package + " — " + detail, true
-}
-
-// DiagnosticsTo is the progress sink that writes each diagnostic-bearing
-// event's rendering to w as one "gofresh: "-prefixed line and writes
-// nothing for a keep-alive event: a consumer's log channel for the
-// engine's diagnostics (REQ-fresh-progress). Writes through this sink
-// are serialized, so w need not be safe for the concurrent invocation
-// SessionPolicy.Progress's callback contract allows — consumers sharing one
-// writer share one sink, built beside the writer, not per engine. A
-// consumer that also acts on keep-alives composes its own callback,
-// taking the keep-alive branch from Diagnostic's false.
-func DiagnosticsTo(w io.Writer) func(Progress) {
-	var mu sync.Mutex
-	return func(p Progress) {
-		if line, ok := p.Diagnostic(); ok {
-			mu.Lock()
-			defer mu.Unlock()
-			fmt.Fprintf(w, "gofresh: %s\n", line)
-		}
-	}
-}
-
-// withAnalysisBudget bounds each precise-analysis phase — observability
-// proving, whether selected at capture or re-established at
-// validation, and the dynamic-state discharges' reachability analysis
-// in every observation pass — to d of wall clock. A
-// batched operation's shared analysis draws on one budget; each operation
-// derives a fresh one. An exhausted budget yields unavailable evidence for the
-// affected subjects — captures record the unavailable proof, validation
-// reports ErrAnalysisUnavailable — or leaves a culprit the discharge
-// could not judge standing (the subject keeps its refusal, its reason
-// naming the budget; the pass persists no scan facts of that package;
-// a difference between two observations that the cut alone explains
-// is the analysis's unavailability, never drift), and it never cancels
-// the operation itself, which remains governed solely by the caller's context
-// (REQ-fresh-context). Zero means unbounded.
-func withAnalysisBudget(d time.Duration) option {
-	return func(e *engine) { e.analysisBudget = d }
-}
-
-// withAssumePure supplies the caller's purity predicate: a subject for which it
-// returns true has all of its unverifiability suppressed (REQ-purity-input,
-// REQ-purity-override). Source directives are discovered inside each Snapshot from the
-// same selected source as closure analysis (REQ-purity-directive).
-func withAssumePure(pred func(Subject) bool) option {
-	return func(e *engine) {
-		if pred != nil {
-			e.assumePure = pred
-		}
-	}
-}
-
-// withDynamicStateVouches supplies the caller's dynamic-state vouch set:
-// each identity is the canonical "<import path>.<Variable>" of a
-// package-level variable in a version-pinned dependency that the caller
-// accepts as stable after initialization, at the caller's responsibility
-// (REQ-vouch-input). A vouched variable is exempt from the
-// shared-dynamic-state downgrade (REQ-vouch-discharge); the vouches that
-// actually discharged culprits reachable from a subject are recorded on
-// its fingerprint (REQ-vouch-recorded). A vouch naming a variable in
-// mutable-local source confers nothing — code the caller can edit is
-// fixed, not vouched (REQ-vouch-dependency-boundary).
-func withDynamicStateVouches(identities ...string) option {
-	return func(e *engine) {
-		if len(identities) == 0 {
-			return
-		}
-		if e.dynamicStateVouches == nil {
-			e.dynamicStateVouches = make(map[string]bool, len(identities))
-		}
-		for _, identity := range identities {
-			if identity != "" {
-				e.dynamicStateVouches[identity] = true
-			}
-		}
-	}
-}
-
-// withoutRepositoryVouches declines the repository's reviewed vouch
-// file (RepositoryVouchFile at the engine's root), which the engine
-// otherwise reads at construction in union with withDynamicStateVouches
-// — an option extends the reviewed set and never removes from it. A
-// consumer that owns its own reviewed standing set supplies it whole
-// through the option and declines the file, so one set has one home
-// (REQ-vouch-input).
-func withoutRepositoryVouches() option {
-	return func(e *engine) { e.withoutRepositoryVouches = true }
-}
-
-// withSingleSubjectExecution attests the caller's execution model: every
-// subject is measured in a process of its own, so no sibling subject's
-// execution precedes a subject in the same process. The attestation arms
-// the audited pooling set's shared-dynamic-state discharge — under it
-// every in-process sync.Pool Put site lies in the subject's own rooted
-// flow, so pool contents are a function of the analyzed source and the
-// subject alone (REQ-closure-shared-dynamic-state). Without the
-// attestation, sibling subjects sharing a process can communicate
-// through pool contents (a prior subject's Put plants a value a later
-// subject's Get dispatches on), so pool Get/Put on a package-level
-// carrier keeps the fail-closed shared-dynamic-state judgment. (The
-// audited mapping set — golang.org/x/sys/unix's mapper bookkeeping —
-// discharges on its own deepened audit in any execution model and
-// needs no attestation.) The
-// attestation is the caller's responsibility; it changes what the
-// derived dynamic-state facts record, so it is part of the persisted
-// fact identity and option-on and option-off sessions never serve each
-// other's facts.
-func withSingleSubjectExecution() option {
-	return func(e *engine) { e.executionModel = SingleSubjectExecution }
-}
-
-// withPackageProcessExecution attests the package-process execution
-// model: every process that runs a measured subject is the subject
-// package's OWN test binary — `go test` of that package, under any
-// subject schedule. Precisely: the model binds the processes whose
-// observations ATTRIBUTE to a measured subject — for a subject in
-// package P, the processes measuring it are P's own test binaries.
-// Other binaries may link and even execute P's code; their
-// observations attribute to their own subjects, measured under their
-// own packages' binaries, so they are outside this claim. Under it the shared-dynamic-state judgment gains
-// the binary-scoped reachability discharge: a sibling subject in the
-// process is itself one of the binary's harness roots, so a culprit no
-// harness root's post-initialization flow can reach is init-determined
-// for every subject of the binary (REQ-closure-shared-dynamic-state).
-// The attestation is weaker than the single-subject one — it bounds
-// WHICH binary runs, not how many subjects share it — and the
-// single-subject judgment takes precedence where both are set (each
-// is sound under its own model; neither dominates the other's
-// discharges). A package with no harness roots discharges vacuously —
-// nothing executes past initialization in its own test binary — so
-// setting the option for subjects actually measured through ANOTHER
-// package's binary is the caller's soundness bug, and its cost is
-// maximal. It is the
-// caller's responsibility, it is part of the persisted fact identity
-// (option-on and option-off sessions never serve each other's facts),
-// and its load-bearing discharges ride the evidence
-// (PackageProcessDischarges) exactly as the single-subject ones do. A
-// consumer that runs subjects through any OTHER binary — another
-// package's tests importing the subject's package — must not set it.
-func withPackageProcessExecution() option {
-	return func(e *engine) {
-		if e.executionModel != SingleSubjectExecution {
-			e.executionModel = PackageExecution
-		}
-	}
-}
-
-// withDeferredCheckClose defers each check's closing base observation —
-// the re-observation proving the tree stable across the check's
-// runtime-input reads — to the view's validation: the validation's one
-// comparison observation closes every deferred interval at once, and a
-// change persisting to it refuses there. Verdicts return provisional
-// under this option: the caller MUST consume them only under a later
-// successful validation of the same view — any validation outcome short
-// of success (refusal, a failed observation, unavailable analysis)
-// discards every served verdict — the producer-view discipline
-// (REQ-fresh-producer-view). The
-// change-and-restore residual widens from each check's own close to the
-// validation, carried by the caller's execution-span exclusion. For a
-// pipeline running many checks against one quiescent view, the deferral
-// collapses per-check base observations into validation's single
-// comparison observation (REQ-fresh-coherent-view's deferred close).
-func withDeferredCheckClose() option {
-	return func(e *engine) { e.deferredCheckClose = true }
-}
-
-// withDir roots the engine at dir: every package load and go invocation
-// resolves there, so a caller can fingerprint a tree it does not run inside.
-// The default is the process working directory captured when newEngine returns.
-func withDir(dir string) option {
-	return func(e *engine) { e.dir = dir }
-}
-
-// withEvidenceRoot anchors runtime-input evidence at dir: a subject's
-// recorded relative identities are re-hashed under dir instead of the
-// module directory, matching a producer that frames its observations at a
-// tree root above the module (a workspace member whose oracles read
-// root-module files declared as one surface for every member). dir must
-// contain the module directory — newEngine refuses otherwise, since a relative
-// identity recorded under a root that does not contain the module could
-// not name the module's own inputs. Unset, the module directory is the
-// root (REQ-inputs-evidence-root). Package loads, Go commands, closure
-// analysis, and guards stay at the module directory.
-func withEvidenceRoot(dir string) option {
-	return func(e *engine) { e.evidenceRoot = dir }
-}
-
 // evidenceRootFor is the root a view re-hashes runtime-input identities
 // under: the declared evidence root, else the view's module directory.
-func (e *engine) evidenceRootFor(moduleDir string) string {
-	if e.evidenceRoot != "" {
-		return e.evidenceRoot
+func (s *Session) evidenceRootFor(moduleDir string) string {
+	if s.evidenceRoot != "" {
+		return s.evidenceRoot
 	}
 	return moduleDir
 }
 
-// withEnv supplies the complete process environment used by every package load,
-// Go command, source analysis, and guard observation. It has exec.Cmd.Env
-// semantics rather than patch semantics. newEngine rejects malformed or duplicate
-// entries and owns a normalized copy; later caller mutation has no effect. A
-// caller attaching runtime-input evidence under this option uses runtimeinput's
-// Env-suffixed constructors with the same complete environment.
-func withEnv(env ...string) option {
-	owned := append([]string(nil), env...)
-	return func(e *engine) {
-		e.env = append([]string(nil), owned...)
-		e.envSet = true
-	}
-}
-
 // evidenceEnv is the environment runtime-input revalidation computes
 // values from when no RuntimeBinding is attached: the analysis environment.
-func (e *engine) evidenceEnv() []string {
-	return e.env
+func (s *Session) evidenceEnv() []string {
+	return s.env
 }
 
-// newEngine builds an engine without a caller cancellation bound. Operation owners
-// use newEngineContext so effective build-flag resolution shares their preparation
-// context.
-func newEngine(opts ...option) (*engine, error) {
-	return newEngineContext(context.Background(), opts...)
-}
-
-// newEngineContext builds an engine under ctx, including the go-environment query
-// that resolves effective build flags. Cancellation returns no engine. The
-// context belongs to construction alone; later operations supply their own.
-func newEngineContext(ctx context.Context, opts ...option) (eng *engine, err error) {
-	if ctx == nil {
-		return nil, errors.New("gofresh: nil construction context")
-	}
-	defer func() {
-		if cause := ctx.Err(); cause != nil {
-			eng, err = nil, cause
-		}
-	}()
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	e := &engine{assumePure: func(Subject) bool { return false }}
-	for _, o := range opts {
-		o(e)
-	}
-	if !e.envSet {
-		e.env = os.Environ()
-	}
-	normalized, err := gotool.NormalizeEnv(e.env)
-	if err != nil {
-		return nil, fmt.Errorf("gofresh: %w", err)
-	}
-	e.env = normalized
-	if _, err := gotool.EnvForPackages(e.env); err != nil {
-		return nil, fmt.Errorf("gofresh: %w", err)
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if e.dir == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, fmt.Errorf("gofresh: resolve working directory: %w", err)
-		}
-		e.dir = cwd
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-	}
-	root, err := gotool.CanonicalDir(e.dir)
-	if err != nil {
-		return nil, fmt.Errorf("gofresh: resolve engine tree: %w", err)
-	}
-	e.dir = root
-	// The repository's reviewed vouch set joins the caller's: the file at
-	// the root the engine is opened at — the root every view it judges
-	// shares (coherentDir) — read whole or refused, an absent file the
-	// empty set (REQ-vouch-input).
-	if !e.withoutRepositoryVouches {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		reviewed, err := ReadVouchFile(filepath.Join(e.dir, RepositoryVouchFile))
-		if err != nil {
-			return nil, fmt.Errorf("gofresh: %w", err)
-		}
-		withDynamicStateVouches(reviewed...)(e)
-	}
-	if e.evidenceRoot != "" {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		evidenceRoot, err := gotool.CanonicalDir(e.evidenceRoot)
-		if err != nil {
-			return nil, fmt.Errorf("gofresh: resolve evidence root: %w", err)
-		}
-		if rel, err := filepath.Rel(evidenceRoot, e.dir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return nil, fmt.Errorf("gofresh: evidence root %s does not contain the module directory %s; relative identities recorded under it could not name the module's inputs", evidenceRoot, e.dir)
-		}
-		e.evidenceRoot = evidenceRoot
-	}
-	for _, input := range e.buildInputs {
-		if strings.HasPrefix(strings.TrimSpace(input), "-") {
-			return nil, fmt.Errorf("gofresh: build flag %q passed as opaque input; use WithBuildFlags", input)
-		}
-	}
-	if err := buildflags.Validate(ctx, e.newPassReader(), e.buildFlags); err != nil {
-		return nil, err
-	}
-	return e, nil
-}
-
-// capture records the closure hash and code-result guard values for subject, whose code lives
-// under moduleDir (the dir `go` resolves the toolchain and build env in). Runtime
-// inputs are added by the caller from the run's completion-asserted testlog
-// (runtimeinput.FromTestLog), from an incomplete process
-// (runtimeinput.Incomplete), by re-admitting a persisted manifest union
-// (runtimeinput.Adopt), or by combining several process observations
-// (runtimeinput.Merge) under the environment supplied to
-// withEnv; revalidation recomputes under that same environment, so
-// ingesting under any other is the incoherent mixing the
-// runtime-inputs contract forbids — into the returned Fingerprint's
-// RuntimeInputs/RuntimeDigest fields. An observation-free run still attaches the
-// non-empty manifest those functions return.
-func (e *engine) capture(ctx context.Context, subject Subject, moduleDir string) (Fingerprint, error) {
-	view, err := e.newView(ctx, []Subject{subject}, moduleDir)
-	if err != nil {
-		return Fingerprint{}, err
-	}
-	return view.Capture(ctx, subject)
-}
-
-// captureFor records subject with the guards applicable to kind. Measurements must
-// use this method so machine and runtime-configuration evidence is captured.
-func (e *engine) captureFor(ctx context.Context, subject Subject, moduleDir string, kind Kind) (Fingerprint, error) {
-	view, err := e.newViewFor(ctx, []Subject{subject}, moduleDir, kind)
-	if err != nil {
-		return Fingerprint{}, err
-	}
-	return view.Capture(ctx, subject)
-}
-
-// check reports the freshness verdict for a recorded fingerprint against the current
-// tree under its recorded result kind. It recomputes the current closure and guards
-// (never reconstructing a historical build — REQ-guard-recompute) and, when the
-// recording carries a runtime-input manifest, re-hashes it, then decides.
-func (e *engine) check(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
-	if err := recorded.Validate(); err != nil {
-		return Verdict{}, err
-	}
-	view, err := e.newViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
-	if err != nil {
-		return Verdict{}, err
-	}
-	return view.Check(ctx, recorded, subject)
-}
-
-// checkObserved checks a caller-selected observation proof under ctx. It never
-// infers observation policy for ordinary check calls.
-func (e *engine) checkObserved(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
-	if err := recorded.Validate(); err != nil {
-		return Verdict{}, err
-	}
-	view, err := e.newViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
-	if err != nil {
-		return Verdict{}, err
-	}
-	return view.CheckObserved(ctx, recorded, subject)
-}
-
-func (e *engine) guardInputs() []string {
-	inputs := make([]string, 0, len(e.buildFlags)+len(e.buildInputs))
-	for _, flag := range e.buildFlags {
+func (s *Session) guardInputs() []string {
+	inputs := make([]string, 0, len(s.buildFlags)+len(s.buildInputs))
+	for _, flag := range s.buildFlags {
 		inputs = append(inputs, "flag="+flag)
 	}
-	for _, input := range e.buildInputs {
+	for _, input := range s.buildInputs {
 		inputs = append(inputs, "input="+input)
 	}
 	return inputs
 }
 
-// coherentDir refuses a guards dir that disagrees with the engine's tree
+// coherentDir refuses a guards dir that disagrees with the session's tree
 // root: the closure would come from one tree and the environment guards
 // from another — an incoherent fingerprint that could serve or stale on the
-// wrong tree's facts. Without withDir, the source root is the process cwd.
-func (e *engine) coherentDir(moduleDir string) error {
-	rootDir := e.dir
+// wrong tree's facts.
+func (s *Session) coherentDir(moduleDir string) error {
+	rootDir := s.dir
 	if rootDir == "" {
 		var err error
 		rootDir, err = os.Getwd()
@@ -1395,7 +982,7 @@ func normalizedGCCFlags(text string) ([]string, error) {
 // carrying their refusal; they never turn process health into outcome evidence.
 // Preparation selects each subject's observation proof for producer validation.
 func (v *Snapshot) prepareOutcomeSupport(ctx context.Context, frame runtimeinput.ProducerFrame, process string) (runtimeinput.OutcomeSupport, map[Subject]Fingerprint, error) {
-	if v == nil || v.facts == nil || v.engine == nil {
+	if v == nil || v.facts == nil || v.session == nil {
 		return runtimeinput.OutcomeSupport{}, nil, errors.New("gofresh: uninitialized snapshot")
 	}
 	if len(v.subjects) == 0 {

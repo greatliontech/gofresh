@@ -207,7 +207,7 @@ func (b Bracket) revalidate(ctx context.Context, moduleDir string) (unchanged, m
 	}
 	if i >= 0 {
 		root := b.roots[i]
-		return false, true, MovedBracketClause(root.id.displayPath()) + bracketMoveAttribution(b.moduleDir, root, current.roots[i]), nil
+		return false, true, movedBracketClauseForRoot(root.id.displayPath()) + bracketMoveAttribution(b.moduleDir, root, current.roots[i]), nil
 	}
 	if b.reason != "" {
 		return false, false, b.reason, nil

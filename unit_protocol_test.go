@@ -1,13 +1,12 @@
 package gofresh
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/greatliontech/gofresh/internal/closure"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -19,7 +18,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"testing/quick"
 	"time"
@@ -187,7 +185,7 @@ func TestInertExtensionHonorsSealAndCancellation(t *testing.T) {
 func TestInertExtensionCannotPublishAcrossConcurrentValidation(t *testing.T) {
 	for _, observed := range []bool{false, true} {
 		v, f, s, l := applicabilityFixture(t)
-		v.engine.deferredCheckClose = true
+		v.session.deferredCheckClose = true
 		f.RuntimeInputs, f.RuntimeDigest = "recorded input", "digest"
 		entered, release := make(chan struct{}), make(chan struct{})
 		first := true
@@ -224,7 +222,7 @@ func TestInertExtensionCannotPublishAcrossConcurrentValidation(t *testing.T) {
 func TestInertExtensionRechecksRuntimeAndProofEvidence(t *testing.T) {
 	for _, state := range []runtimeinput.State{{}, {OK: true, Digest: "moved"}, {OK: true, Digest: "digest", Unverifiable: true, Reason: "incomplete"}} {
 		v, f, s, l := applicabilityFixture(t)
-		v.engine.deferredCheckClose = true
+		v.session.deferredCheckClose = true
 		f.RuntimeInputs, f.RuntimeDigest = "recorded input", "digest"
 		v.runtimeCurrent = func(context.Context, string, string) (runtimeinput.State, error) { return state, nil }
 		if updated, _, verdict, err := v.checkInertTestVariantExtension(context.Background(), f, l, s, true); err != nil || verdict.Status == Valid || updated != (Fingerprint{}) {
@@ -233,7 +231,7 @@ func TestInertExtensionRechecksRuntimeAndProofEvidence(t *testing.T) {
 	}
 	// A manifest changes between the two observations even under deferred close.
 	v, f, s, l := applicabilityFixture(t)
-	v.engine.deferredCheckClose = true
+	v.session.deferredCheckClose = true
 	f.RuntimeInputs, f.RuntimeDigest = "recorded input", "digest"
 	calls := 0
 	v.runtimeCurrent = func(context.Context, string, string) (runtimeinput.State, error) {
@@ -255,7 +253,7 @@ func TestPackageUnitRefusesIncompatibleScope(t *testing.T) {
 	b := Subject{Package: a.Package, Symbol: "TestB"}
 	c := Subject{Package: "example.com/c", Symbol: "TestC"}
 	engine := &engine{executionModel: SingleSubjectExecution}
-	snapshot := &Snapshot{session: &Session{engine: engine}, engine: engine, subjects: []Subject{a, b, c}, packages: []string{a.Package, c.Package}, facts: &observationFacts{}}
+	snapshot := &Snapshot{session: engine, subjects: []Subject{a, b, c}, packages: []string{a.Package, c.Package}, facts: &observationFacts{}}
 	execution := &RuntimeBinding{snapshot: snapshot}
 	for _, selected := range [][]Subject{nil, {a, b}, {a, c}, {a, {Package: a.Package, Symbol: "unknown"}}} {
 		if u, err := execution.BeginPackage(selected); err == nil || u != nil {
@@ -622,73 +620,6 @@ func (v *Snapshot) finishRuntimeObservation(ctx context.Context, recorded map[Su
 	return verdicts, nil
 }
 
-// TestProgressDiagnosticRendersDetailBearingEventsOnly pins the one
-// diagnostic rendering: a detail-bearing event renders its phase, its
-// package where it names one, and its detail; a keep-alive event
-// renders nothing; and the diagnostics sink writes exactly the
-// renderings, one prefixed line each.
-func TestProgressDiagnosticRendersDetailBearingEventsOnly(t *testing.T) {
-	cases := []struct {
-		event Progress
-		line  string
-		ok    bool
-	}{
-		{Progress{Phase: "toolchain-unaudited", Detail: "selection \"race\" is unwalked"}, "toolchain-unaudited — selection \"race\" is unwalked", true},
-		{Progress{Phase: "analysis-unavailable", Package: "example.com/m/a", Detail: "provenance"}, "analysis-unavailable example.com/m/a — provenance", true},
-		{Progress{Phase: "listing-unmodelled", Package: "example.com/m/a", Detail: "go.mod:3: bad directive\ngo.mod:4: worse\n"}, "listing-unmodelled example.com/m/a — go.mod:3: bad directive; go.mod:4: worse", true},
-		{Progress{Phase: "cancelled", Detail: "kept two\r\nlost one"}, "cancelled — kept two; lost one", true},
-		{Progress{Phase: "load", Package: "example.com/m/a", Index: 1, Total: 2}, "", false},
-		{Progress{Phase: "served", Served: "effect scan", Index: 3}, "", false},
-	}
-	var out bytes.Buffer
-	sink := DiagnosticsTo(&out)
-	var want bytes.Buffer
-	for _, c := range cases {
-		line, ok := c.event.Diagnostic()
-		if line != c.line || ok != c.ok {
-			t.Errorf("Diagnostic(%+v) = %q, %v; want %q, %v", c.event, line, ok, c.line, c.ok)
-		}
-		sink(c.event)
-		if c.ok {
-			want.WriteString("gofresh: " + c.line + "\n")
-		}
-	}
-	if out.String() != want.String() {
-		t.Fatalf("sink wrote:\n%s\nwant:\n%s", out.String(), want.String())
-	}
-	// The sink serializes its writes: concurrent events over one buffer
-	// leave every line whole and every diagnostic present. Each burst
-	// starts on one barrier so the writers genuinely overlap, and the
-	// burst repeats so a lucky serialization cannot hide an unguarded
-	// write.
-	const burst, bursts = 256, 8
-	for round := 0; round < bursts; round++ {
-		var shared bytes.Buffer
-		concurrent := DiagnosticsTo(&shared)
-		start := make(chan struct{})
-		var wg sync.WaitGroup
-		for i := 0; i < burst; i++ {
-			wg.Add(1)
-			go func(i int) {
-				defer wg.Done()
-				<-start
-				concurrent(Progress{Phase: "toolchain-unaudited", Detail: strings.Repeat("x", 200) + " " + strconv.Itoa(i)})
-			}(i)
-		}
-		close(start)
-		wg.Wait()
-		lines := strings.Split(strings.TrimSuffix(shared.String(), "\n"), "\n")
-		if len(lines) != burst {
-			t.Fatalf("burst %d: concurrent sink wrote %d lines, want %d", round, len(lines), burst)
-		}
-		for _, l := range lines {
-			if !strings.HasPrefix(l, "gofresh: toolchain-unaudited — "+strings.Repeat("x", 200)+" ") {
-				t.Fatalf("burst %d: a concurrent line is torn: %q", round, l)
-			}
-		}
-	}
-}
-
 // TestKeptOnCancelDetailRendersItsCounts pins the kept-on-cancel
 // report's rendering: each count with its own noun, singular at one,
 // proofs before scans.
@@ -756,12 +687,12 @@ func TestBareSpawnWalkReadsTheThreeFreeFunctions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("a.go", "package a\n\nimport gt \"github.com/greatliontech/gofresh/gotool\"\n\nfunc f(r gt.Runner) {\n\tgt.Run(ctx, d, e)\n\tgt.TakeEnvSnapshot(ctx, d, e)\n\tgt.SampleGoVersion(ctx, d, e)\n\tgt.Runner{}.Run(ctx, d, e)\n\tr.Run(ctx, d, e)\n\tgt.NewEnvReader(r, d, e)\n\tother.Run(ctx)\n}\n")
-	write("b.go", "package a\n\nimport \"github.com/greatliontech/gofresh/gotool\"\n\nfunc g() { gotool.Run(ctx, d, e) }\n")
-	write("a_test.go", "package a\n\nimport \"github.com/greatliontech/gofresh/gotool\"\n\nfunc h() { gotool.Run(ctx, d, e) }\n")
-	write("fixtures/c.go", "package c\n\nimport \"github.com/greatliontech/gofresh/gotool\"\n\nfunc h() { gotool.Run(ctx, d, e) }\n")
-	write("gotool/g.go", "package gotool\n\nfunc h() { Run(ctx, d, e) }\n")
-	write("d.go", "package a\n\nimport . \"github.com/greatliontech/gofresh/gotool\"\n\nfunc k() { Run(ctx, d, e); other(ctx) }\n")
+	write("a.go", "package a\n\nimport gt \"github.com/greatliontech/gofresh/internal/gotool\"\n\nfunc f(r gt.Runner) {\n\tgt.Run(ctx, d, e)\n\tgt.TakeEnvSnapshot(ctx, d, e)\n\tgt.SampleGoVersion(ctx, d, e)\n\tgt.Runner{}.Run(ctx, d, e)\n\tr.Run(ctx, d, e)\n\tgt.NewEnvReader(r, d, e)\n\tother.Run(ctx)\n}\n")
+	write("b.go", "package a\n\nimport \"github.com/greatliontech/gofresh/internal/gotool\"\n\nfunc g() { gotool.Run(ctx, d, e) }\n")
+	write("a_test.go", "package a\n\nimport \"github.com/greatliontech/gofresh/internal/gotool\"\n\nfunc h() { gotool.Run(ctx, d, e) }\n")
+	write("fixtures/c.go", "package c\n\nimport \"github.com/greatliontech/gofresh/internal/gotool\"\n\nfunc h() { gotool.Run(ctx, d, e) }\n")
+	write("internal/gotool/g.go", "package gotool\n\nfunc h() { Run(ctx, d, e) }\n")
+	write("d.go", "package a\n\nimport . \"github.com/greatliontech/gofresh/internal/gotool\"\n\nfunc k() { Run(ctx, d, e); other(ctx) }\n")
 	got, err := bareSpawnSites(dir, []string{"Run", "TakeEnvSnapshot", "SampleGoVersion"})
 	if err != nil {
 		t.Fatal(err)
@@ -779,7 +710,7 @@ func TestBareSpawnWalkReadsTheThreeFreeFunctions(t *testing.T) {
 func freeSpawnFunctions(t *testing.T) []string {
 	t.Helper()
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, "gotool", func(fi os.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
+	pkgs, err := parser.ParseDir(fset, filepath.Join("internal", "gotool"), func(fi os.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -815,14 +746,14 @@ func freeSpawnFunctions(t *testing.T) []string {
 func bareSpawnSites(root string, free []string) ([]string, error) {
 	var sites []string
 	fset := token.NewFileSet()
-	const gotoolPath = "github.com/greatliontech/gofresh/gotool"
+	const gotoolPath = "github.com/greatliontech/gofresh/internal/gotool"
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		rel, _ := filepath.Rel(root, path)
 		if d.IsDir() {
-			if name := d.Name(); path != root && (strings.HasPrefix(name, ".") || name == "testdata" || name == "fixtures" || rel == "gotool") {
+			if name := d.Name(); path != root && (strings.HasPrefix(name, ".") || name == "testdata" || name == "fixtures" || rel == "gotool" || rel == filepath.Join("internal", "gotool")) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -896,7 +827,7 @@ func barePackageLoadSites(root string) ([]string, error) {
 		}
 		rel, _ := filepath.Rel(root, path)
 		if d.IsDir() {
-			if name := d.Name(); path != root && (strings.HasPrefix(name, ".") || name == "testdata" || name == "fixtures" || rel == "gotool") {
+			if name := d.Name(); path != root && (strings.HasPrefix(name, ".") || name == "testdata" || name == "fixtures" || rel == "gotool" || rel == filepath.Join("internal", "gotool")) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -945,18 +876,6 @@ func barePackageLoadSites(root string) ([]string, error) {
 		return nil
 	})
 	return sites, err
-}
-
-func TestBuildDescriptionTestCompileArgs(t *testing.T) {
-	b := BuildDescription{
-		Package: "example.com/pkg",
-		Flags:   []string{"-tags=integration", "-race"},
-	}
-	got := b.TestCompileArgs("/tmp/pkg.test", "-v")
-	want := []string{"test", "-c", "-o", "/tmp/pkg.test", "-tags=integration", "-race", "-v", "example.com/pkg"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("TestCompileArgs = %v, want %v", got, want)
-	}
 }
 
 // The protocol model tests arbitrary submission/abort/cancelled-close sequences.

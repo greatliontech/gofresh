@@ -22,7 +22,7 @@ import (
 	"sync"
 
 	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/cachefile"
 	"github.com/greatliontech/gofresh/internal/trace"

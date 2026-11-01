@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 func TestOverlayGOROOTUnlinksHardlinkedSourceBeforeWrite(t *testing.T) {

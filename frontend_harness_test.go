@@ -3,13 +3,8 @@ package gofresh
 import (
 	"context"
 	"encoding/json"
-	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/internal/closure"
-	"github.com/greatliontech/gofresh/internal/guard"
-	"github.com/greatliontech/gofresh/internal/testenv"
-	"github.com/greatliontech/gofresh/internal/testvariant"
-	"github.com/greatliontech/gofresh/runtimeinput"
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -19,7 +14,219 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/buildflags"
+	"github.com/greatliontech/gofresh/internal/closure"
+	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/guard"
+	"github.com/greatliontech/gofresh/internal/runtimeinput"
+	"github.com/greatliontech/gofresh/internal/testenv"
+	"github.com/greatliontech/gofresh/internal/testvariant"
 )
+
+type engine = Session
+
+type option func(*Session)
+
+func withBuildFlags(flags ...string) option {
+	return func(e *Session) { e.buildFlags = append([]string(nil), flags...) }
+}
+
+func withGoRunner(r gotool.Runner) option {
+	return func(e *Session) { e.runner = r }
+}
+
+func withBuildInputs(inputs ...string) option {
+	return func(e *Session) { e.buildInputs = append([]string(nil), inputs...) }
+}
+
+func withProgress(f func(Progress)) option {
+	return func(e *Session) { e.progress = f }
+}
+
+func withAnalysisBudget(d time.Duration) option {
+	return func(e *Session) { e.analysisBudget = d }
+}
+
+func withAssumePure(pred func(Subject) bool) option {
+	return func(e *Session) {
+		if pred != nil {
+			e.assumePure = pred
+		}
+	}
+}
+
+func withDynamicStateVouches(identities ...string) option {
+	return func(e *Session) {
+		if len(identities) == 0 {
+			return
+		}
+		if e.dynamicStateVouches == nil {
+			e.dynamicStateVouches = make(map[string]bool, len(identities))
+		}
+		for _, identity := range identities {
+			if identity != "" {
+				e.dynamicStateVouches[identity] = true
+			}
+		}
+	}
+}
+
+func withSingleSubjectExecution() option {
+	return func(e *Session) { e.executionModel = SingleSubjectExecution }
+}
+
+func withPackageProcessExecution() option {
+	return func(e *Session) {
+		if e.executionModel != SingleSubjectExecution {
+			e.executionModel = PackageExecution
+		}
+	}
+}
+
+func withDeferredCheckClose() option {
+	return func(e *Session) { e.deferredCheckClose = true }
+}
+
+func withDir(dir string) option {
+	return func(e *Session) { e.dir = dir }
+}
+
+func withEvidenceRoot(dir string) option {
+	return func(e *Session) { e.evidenceRoot = dir }
+}
+
+func withEnv(env ...string) option {
+	owned := make([]string, len(env))
+	copy(owned, env)
+	return func(e *Session) {
+		e.env = make([]string, len(owned))
+		copy(e.env, owned)
+	}
+}
+
+func newEngine(opts ...option) (*Session, error) {
+	return newEngineContext(context.Background(), opts...)
+}
+
+func newEngineContext(ctx context.Context, opts ...option) (eng *Session, err error) {
+	if ctx == nil {
+		return nil, errors.New("gofresh: nil construction context")
+	}
+	defer func() {
+		if cause := ctx.Err(); cause != nil {
+			eng, err = nil, cause
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	e := &Session{assumePure: func(Subject) bool { return false }}
+	for _, o := range opts {
+		if o != nil {
+			o(e)
+		}
+	}
+	if e.env == nil {
+		e.env = os.Environ()
+	}
+	normalized, err := gotool.NormalizeEnv(e.env)
+	if err != nil {
+		return nil, fmt.Errorf("gofresh: %w", err)
+	}
+	e.env = normalized
+	if _, err := gotool.EnvForPackages(e.env); err != nil {
+		return nil, fmt.Errorf("gofresh: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if e.dir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("gofresh: resolve working directory: %w", err)
+		}
+		e.dir = cwd
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	root, err := gotool.CanonicalDir(e.dir)
+	if err != nil {
+		return nil, fmt.Errorf("gofresh: resolve engine tree: %w", err)
+	}
+	e.dir = root
+	if e.evidenceRoot != "" {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		evidenceRoot, err := gotool.CanonicalDir(e.evidenceRoot)
+		if err != nil {
+			return nil, fmt.Errorf("gofresh: resolve evidence root: %w", err)
+		}
+		if rel, err := filepath.Rel(evidenceRoot, e.dir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("gofresh: evidence root %s does not contain the module directory %s; relative identities recorded under it could not name the module's inputs", evidenceRoot, e.dir)
+		}
+		e.evidenceRoot = evidenceRoot
+	}
+	for _, input := range e.buildInputs {
+		if strings.HasPrefix(strings.TrimSpace(input), "-") {
+			return nil, fmt.Errorf("gofresh: build flag %q passed as opaque input; use WithBuildFlags", input)
+		}
+	}
+	if err := buildflags.Validate(ctx, e.newPassReader(), e.buildFlags); err != nil {
+		return nil, err
+	}
+	return e, nil
+}
+
+func (e *Session) newView(ctx context.Context, subjects []Subject, moduleDir string) (*Snapshot, error) {
+	return e.observeSnapshot(ctx, subjects, moduleDir, CodeResult)
+}
+
+func (e *Session) newViewFor(ctx context.Context, subjects []Subject, moduleDir string, kind Kind) (*Snapshot, error) {
+	return e.observeSnapshot(ctx, subjects, moduleDir, kind)
+}
+
+func (e *Session) capture(ctx context.Context, subject Subject, moduleDir string) (Fingerprint, error) {
+	view, err := e.newView(ctx, []Subject{subject}, moduleDir)
+	if err != nil {
+		return Fingerprint{}, err
+	}
+	return view.Capture(ctx, subject)
+}
+
+func (e *Session) captureFor(ctx context.Context, subject Subject, moduleDir string, kind Kind) (Fingerprint, error) {
+	view, err := e.newViewFor(ctx, []Subject{subject}, moduleDir, kind)
+	if err != nil {
+		return Fingerprint{}, err
+	}
+	return view.Capture(ctx, subject)
+}
+
+func (e *Session) check(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
+	if err := recorded.Validate(); err != nil {
+		return Verdict{}, err
+	}
+	view, err := e.newViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
+	if err != nil {
+		return Verdict{}, err
+	}
+	return view.Check(ctx, recorded, subject)
+}
+
+func (e *Session) checkObserved(ctx context.Context, recorded Fingerprint, subject Subject, moduleDir string) (Verdict, error) {
+	if err := recorded.Validate(); err != nil {
+		return Verdict{}, err
+	}
+	view, err := e.newViewFor(ctx, []Subject{subject}, moduleDir, recorded.ResultKind)
+	if err != nil {
+		return Verdict{}, err
+	}
+	return view.CheckObserved(ctx, recorded, subject)
+}
 
 func hermeticEnvRunner() gotool.Runner {
 	return gotool.Runner{
@@ -27,11 +234,28 @@ func hermeticEnvRunner() gotool.Runner {
 			if len(cmd.Args) >= 3 && cmd.Args[1] == "env" && cmd.Args[2] == "-json" {
 				if sh, err := exec.LookPath("sh"); err == nil {
 					cmd.Path = sh
-					cmd.Args = []string{"sh", "-c", `printf '{"GOFLAGS":""}'`}
+					cmd.Args = []string{"sh", "-c", fmt.Sprintf(`printf '{"GOFLAGS":"","GOVERSION":%q,"GOGCCFLAGS":"-fPIC"}'`, runtime.Version())}
 				}
 			}
 		},
 	}
+}
+
+func testProgramCmd(ctx context.Context, dir string, env []string, binary string, args ...string) (*exec.Cmd, error) {
+	if ctx == nil {
+		return nil, errors.New("gofresh: nil program context")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	normalized, err := gotool.EnvForCommand(env, dir)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Dir = dir
+	cmd.Env = normalized
+	return cmd, nil
 }
 
 // The tests' ambient forms of the public entries: the process
@@ -311,10 +535,7 @@ func inMemorySnapshotForSubject(dir string, subject Subject, opts ...option) (*S
 			o(e)
 		}
 	}
-	if e.envSet || len(e.buildFlags) > 0 || len(e.buildInputs) > 0 || e.analysisBudget > 0 || e.progress != nil {
-		return nil, nil, false
-	}
-	if _, err := os.Stat(filepath.Join(dir, RepositoryVouchFile)); err == nil {
+	if e.env != nil || len(e.buildFlags) > 0 || len(e.buildInputs) > 0 || e.analysisBudget > 0 || e.progress != nil {
 		return nil, nil, false
 	}
 	pkgs, _, ok := parseAndTypecheckModuleDir(dir, subject.Package)
@@ -414,7 +635,7 @@ func inMemorySnapshotForSubject(dir string, subject Subject, opts ...option) (*S
 		}
 	}
 	v := &Snapshot{
-		engine:    e,
+		session:   e,
 		subjects:  []Subject{subject},
 		packages:  []string{subject.Package},
 		moduleDir: dir,
