@@ -26,6 +26,9 @@ import (
 // appending.
 func SetEnv(env []string, key, value string) []string {
 	out := UnsetEnv(env, key)
+	if IsTraceEnvKey(key) {
+		return out
+	}
 	entry := key + "=" + value
 	i := sort.Search(len(out), func(i int) bool { return entryLess(entry, out[i]) })
 	out = append(out, "")
@@ -74,9 +77,11 @@ func EnvForCommand(env []string, dir string) ([]string, error) {
 
 // NormalizeEnv returns a deterministic owned copy of env. Entries must use the
 // exec.Cmd key=value form, and duplicate keys are refused rather than resolved
-// by platform-dependent first- or last-entry behavior.
+// by platform-dependent first- or last-entry behavior. Diagnostic tracing
+// variables (GOFRESH_TRACE and GOFRESH_TRACE_FILE) are validated and then
+// stripped so enabling tracing never alters any normalized environment or digest.
 func NormalizeEnv(env []string) ([]string, error) {
-	normalized := make([]string, len(env))
+	normalized := make([]string, 0, len(env))
 	seen := make(map[string]bool, len(env))
 	for i, entry := range env {
 		if strings.IndexByte(entry, 0) >= 0 {
@@ -94,10 +99,20 @@ func NormalizeEnv(env []string) ([]string, error) {
 			return nil, fmt.Errorf("environment contains duplicate key %q", key)
 		}
 		seen[identity] = true
-		normalized[i] = entry
+		if IsTraceEnvKey(key) {
+			continue
+		}
+		normalized = append(normalized, entry)
 	}
 	sort.Slice(normalized, func(i, j int) bool { return entryLess(normalized[i], normalized[j]) })
 	return normalized, nil
+}
+
+// IsTraceEnvKey reports whether key names a gofresh diagnostic tracing
+// environment variable (GOFRESH_TRACE or GOFRESH_TRACE_FILE) excluded from
+// normalized environments and runtime-input dependency recording.
+func IsTraceEnvKey(key string) bool {
+	return equalKey(key, "GOFRESH_TRACE") || equalKey(key, "GOFRESH_TRACE_FILE")
 }
 
 // EnvForPackages returns a normalized environment that cannot delegate source

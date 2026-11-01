@@ -5654,3 +5654,20 @@ func TestBracketNeverWeakensDisposition(t *testing.T) {
 		t.Fatalf("excluded-subtree stat lost its metadata seal: %+v", exObs.State)
 	}
 }
+
+func TestFromTestLogIgnoresTraceEnvVars(t *testing.T) {
+	moduleDir := bindingModule(t)
+	bracket := testBracket(t, moduleDir)
+	env := []string{"FOO=bar", "GOFRESH_TRACE=all", "GOFRESH_TRACE_FILE=/tmp/trace.log"}
+	plainObs, err := FromTestLog([]byte("# test log\ngetenv FOO\n"), moduleDir, moduleDir, env, WithCompletedProcess("worker"), WithBracket(bracket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracedObs, err := FromTestLog([]byte("# test log\ngetenv FOO\ngetenv GOFRESH_TRACE\ngetenv GOFRESH_TRACE_FILE\n"), moduleDir, moduleDir, env, WithCompletedProcess("worker"), WithBracket(bracket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plainObs.State != tracedObs.State {
+		t.Fatalf("trace getenv altered runtime input state:\nplain:  %+v\ntraced: %+v", plainObs.State, tracedObs.State)
+	}
+}

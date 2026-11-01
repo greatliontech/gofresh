@@ -18,6 +18,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure/internal/rta"
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/outcome"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // parameterizedBody reports whether fn's body is generic (uninstantiated):
@@ -370,6 +371,23 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		for subject, proof := range results {
 			proof.Reason = AttributeSelection(proof.Reason, axis)
 			results[subject] = proof
+		}
+	}
+	if trace.AnyEnabled() {
+		for _, subject := range subjects {
+			proof, ok := results[subject]
+			if !ok {
+				continue
+			}
+			target := subject.Package + "." + subject.Symbol
+			if trace.Enabled(h.ctx, trace.DomainClosure, target) {
+				trace.Emit(h.ctx, trace.DomainClosure, "observability", target,
+					trace.Bool("observable", proof.Observable),
+					trace.Bool("effect_free", proof.EffectFree),
+					trace.String("outcome_method", proof.OutcomeMethod),
+					trace.String("reason", proof.Reason),
+				)
+			}
 		}
 	}
 	return results, nil

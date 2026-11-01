@@ -1325,22 +1325,119 @@ func discoverRuntimeInactiveGates(files []*ast.File, goSrcs []string, nonGoIdent
 		}
 	}
 
-	verifiedStateMutators := map[string][]string{}
-	verifiedStateIsBool := map[string]bool{}
+	activeStateCands := map[string]atomicStateCand{}
+	allowedIdentsByState := map[string]map[*ast.Ident]bool{}
+	mutatorSetByState := map[string]map[string]bool{}
 	for sName, cand := range stateCands {
 		if pkgDeclCounts[sName] != 1 || anyLinknameLocal[sName] || aliasedRuntimeSym[sName] || nonGoIdents[sName] {
 			continue
 		}
-		allowedIdents := map[*ast.Ident]bool{cand.declIdent: true}
-		mutatorSet := map[string]bool{}
+		activeStateCands[sName] = cand
+		allowedIdentsByState[sName] = map[*ast.Ident]bool{cand.declIdent: true}
+		mutatorSetByState[sName] = map[string]bool{}
+	}
+
+	verifiedStateMutators := map[string][]string{}
+	verifiedStateIsBool := map[string]bool{}
+	if len(activeStateCands) > 0 {
+		nonSelPropIdents := map[string][]*ast.Ident{}
+		var collectNonSel func(n ast.Node) bool
+		collectNonSel = func(n ast.Node) bool {
+			if n == nil {
+				return false
+			}
+			switch node := n.(type) {
+			case *ast.SelectorExpr:
+				ast.Inspect(node.X, collectNonSel)
+				return false
+			case *ast.Ident:
+				nonSelPropIdents[node.Name] = append(nonSelPropIdents[node.Name], node)
+				return false
+			default:
+				return true
+			}
+		}
 		for _, f := range files {
+			ast.Inspect(f, collectNonSel)
 			for _, decl := range f.Decls {
 				fn, ok := decl.(*ast.FuncDecl)
 				if !ok || fn.Body == nil {
 					continue
 				}
-				if funcShadowsAnyIdent(fn, map[string]bool{sName: true, "false": true}) {
-					continue
+				var shadowed map[string]bool
+				shadows := func(name string) bool {
+					if shadowed == nil {
+						shadowed = map[string]bool{}
+						if r := recvVarName(fn); r != "" {
+							shadowed[r] = true
+						}
+						if fn.Type != nil {
+							for _, fl := range []*ast.FieldList{fn.Type.TypeParams, fn.Type.Params, fn.Type.Results} {
+								if fl == nil {
+									continue
+								}
+								for _, fld := range fl.List {
+									for _, id := range fld.Names {
+										shadowed[id.Name] = true
+									}
+								}
+							}
+						}
+						ast.Inspect(fn.Body, func(n ast.Node) bool {
+							if n == nil {
+								return false
+							}
+							switch node := n.(type) {
+							case *ast.ValueSpec:
+								for _, id := range node.Names {
+									shadowed[id.Name] = true
+								}
+							case *ast.TypeSpec:
+								if node.Name != nil {
+									shadowed[node.Name.Name] = true
+								}
+								if node.TypeParams != nil {
+									for _, fld := range node.TypeParams.List {
+										for _, id := range fld.Names {
+											shadowed[id.Name] = true
+										}
+									}
+								}
+							case *ast.FuncLit:
+								if node.Type != nil {
+									for _, fl := range []*ast.FieldList{node.Type.Params, node.Type.Results} {
+										if fl == nil {
+											continue
+										}
+										for _, fld := range fl.List {
+											for _, id := range fld.Names {
+												shadowed[id.Name] = true
+											}
+										}
+									}
+								}
+							case *ast.AssignStmt:
+								if node.Tok == token.DEFINE {
+									for _, lhs := range node.Lhs {
+										if id, ok := unwrapParens(lhs).(*ast.Ident); ok {
+											shadowed[id.Name] = true
+										}
+									}
+								}
+							case *ast.RangeStmt:
+								if node.Tok == token.DEFINE {
+									if id, ok := unwrapParens(node.Key).(*ast.Ident); ok {
+										shadowed[id.Name] = true
+									}
+									if id, ok := unwrapParens(node.Value).(*ast.Ident); ok {
+										shadowed[id.Name] = true
+									}
+								}
+							}
+							return true
+						})
+					}
+					return shadowed[name]
 				}
 				ast.Inspect(fn.Body, func(n ast.Node) bool {
 					call, isCall := n.(*ast.CallExpr)
@@ -1352,58 +1449,75 @@ func discoverRuntimeInactiveGates(files []*ast.File, goSrcs []string, nonGoIdent
 						return true
 					}
 					baseID, okID := unwrapParens(sel.X).(*ast.Ident)
-					if !okID || baseID.Name != sName {
+					if !okID {
+						return true
+					}
+					cand, isCand := activeStateCands[baseID.Name]
+					if !isCand || shadows(baseID.Name) || shadows("false") {
 						return true
 					}
 					switch {
 					case sel.Sel.Name == "Load" && len(call.Args) == 0:
-						allowedIdents[baseID] = true
+						allowedIdentsByState[baseID.Name][baseID] = true
 					case sel.Sel.Name == "Store" && len(call.Args) == 1:
 						isZero := (!cand.isBool && isZeroIntLit(call.Args[0]))
 						if cand.isBool {
 							_, isZero = isIdentNamed(call.Args[0], "false")
 						}
 						if isZero {
-							allowedIdents[baseID] = true
+							allowedIdentsByState[baseID.Name][baseID] = true
 						} else if fn.Recv == nil && fn.Name != nil && !ast.IsExported(fn.Name.Name) && fn.Name.Name != "init" {
-							allowedIdents[baseID] = true
-							mutatorSet[fn.Name.Name] = true
+							allowedIdentsByState[baseID.Name][baseID] = true
+							mutatorSetByState[baseID.Name][fn.Name.Name] = true
 						}
 					}
 					return true
 				})
 			}
 		}
-		if !allNonSelPropIdentsIn(files, sName, allowedIdents) {
-			continue
-		}
-		mutatorsValid := true
-		mutTargets := make([]string, 0, len(mutatorSet)+1)
-		mutTargets = append(mutTargets, "runtime."+sName)
-		for mName := range mutatorSet {
-			mFn := topFuncs[mName]
-			if mFn == nil || pkgDeclCounts[mName] != 1 || ast.IsExported(mName) || aliasedRuntimeSym[mName] || nonGoIdents[mName] {
-				mutatorsValid = false
-				break
+
+		allAllowed := func(name string, allowed map[*ast.Ident]bool) bool {
+			for _, id := range nonSelPropIdents[name] {
+				if !allowed[id] {
+					return false
+				}
 			}
-			for _, t := range twoArgTargets[mName] {
-				if t != "runtime."+mName {
+			return true
+		}
+
+		for sName, cand := range activeStateCands {
+			if !allAllowed(sName, allowedIdentsByState[sName]) {
+				continue
+			}
+			mutatorSet := mutatorSetByState[sName]
+			mutatorsValid := true
+			mutTargets := make([]string, 0, len(mutatorSet)+1)
+			mutTargets = append(mutTargets, "runtime."+sName)
+			for mName := range mutatorSet {
+				mFn := topFuncs[mName]
+				if mFn == nil || pkgDeclCounts[mName] != 1 || ast.IsExported(mName) || aliasedRuntimeSym[mName] || nonGoIdents[mName] {
 					mutatorsValid = false
 					break
 				}
+				for _, t := range twoArgTargets[mName] {
+					if t != "runtime."+mName {
+						mutatorsValid = false
+						break
+					}
+				}
+				if !mutatorsValid || !allAllowed(mName, map[*ast.Ident]bool{mFn.Name: true}) {
+					mutatorsValid = false
+					break
+				}
+				mutTargets = append(mutTargets, "runtime."+mName)
 			}
-			if !mutatorsValid || !allNonSelPropIdentsIn(files, mName, map[*ast.Ident]bool{mFn.Name: true}) {
-				mutatorsValid = false
-				break
+			if !mutatorsValid {
+				continue
 			}
-			mutTargets = append(mutTargets, "runtime."+mName)
+			slices.Sort(mutTargets)
+			verifiedStateMutators[sName] = mutTargets
+			verifiedStateIsBool[sName] = cand.isBool
 		}
-		if !mutatorsValid {
-			continue
-		}
-		slices.Sort(mutTargets)
-		verifiedStateMutators[sName] = mutTargets
-		verifiedStateIsBool[sName] = cand.isBool
 	}
 
 	provenGates := map[string][]string{}

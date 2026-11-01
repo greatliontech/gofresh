@@ -311,3 +311,27 @@ func TestVersionGrammarIsOneAcrossTheForms(t *testing.T) {
 		t.Fatalf("ReleaseTags(go1.3) = %v", ReleaseTags("go1.3"))
 	}
 }
+
+func TestNormalizeEnvStripsTraceVarsAndValidatesDuplicates(t *testing.T) {
+	base, err := NormalizeEnv([]string{"PATH=/bin", "HOME=/tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withTrace, err := NormalizeEnv([]string{"PATH=/bin", "GOFRESH_TRACE=all", "GOFRESH_TRACE_FILE=/tmp/trace.jsonl", "HOME=/tmp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(base, withTrace) {
+		t.Fatalf("NormalizeEnv with trace vars = %v, want %v", withTrace, base)
+	}
+	setTrace := SetEnv(base, "GOFRESH_TRACE", "toolchain")
+	if !reflect.DeepEqual(setTrace, base) {
+		t.Fatalf("SetEnv(GOFRESH_TRACE) = %v, want %v", setTrace, base)
+	}
+	if _, err := NormalizeEnv([]string{"GOFRESH_TRACE=all", "GOFRESH_TRACE=view"}); err == nil {
+		t.Fatal("duplicate GOFRESH_TRACE should still be refused")
+	}
+	if _, err := NormalizeEnv([]string{"GOFRESH_TRACE=all\x00bad"}); err == nil {
+		t.Fatal("NUL in GOFRESH_TRACE should still be refused")
+	}
+}

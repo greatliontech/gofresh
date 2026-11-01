@@ -9,6 +9,7 @@ import (
 
 	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/outcome"
+	"github.com/greatliontech/gofresh/internal/trace"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -242,6 +243,17 @@ func (v *Snapshot) checkRecords(ctx context.Context, records []recordCheck, defe
 		if retain && result.selected {
 			if err := v.retainApplicabilityCheck(ctx, record.Recorded, record.Subject, true); err != nil {
 				return nil, err
+			}
+		}
+		if trace.AnyEnabled() {
+			target := record.Subject.Package + "." + record.Subject.Symbol
+			if trace.Enabled(ctx, trace.DomainSession, target) {
+				trace.Emit(ctx, trace.DomainSession, "check_verdict", target,
+					trace.String("status", string(result.verdict.Status)),
+					trace.Int("cause", int(result.verdict.Ground.Cause.Kind)),
+					trace.Int("condition", int(result.verdict.Ground.Cause.Condition)),
+					trace.String("reason", result.verdict.Reason),
+				)
 			}
 		}
 	}

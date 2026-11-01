@@ -841,6 +841,21 @@ view, so a producer can prove whether the selected bytes behind each result are
 reproducible from caller-owned provenance without reimplementing closure file
 selection.
 
+**REQ-fresh-trace** (behavior): gofresh MUST support structured operational
+diagnostic tracing across the `toolchain`, `closure`, `view`, and `session`
+domains when activated by `GOFRESH_TRACE` (comma-separated domain tokens or
+`all`/`1`/`*`, with optional `<domain>:<substring>` target filtering) or a
+context-attached diagnostic sink, writing atomic newline-terminated records to
+`os.Stderr` by default or to `GOFRESH_TRACE_FILE` (JSON Lines when the path ends
+in `.jsonl` or `.json`, single-line key-value text otherwise), while executing a
+single atomic load with zero allocations on the disabled fast path.
+
+**REQ-fresh-trace-non-interference** (invariant): Enabling `GOFRESH_TRACE` or
+`GOFRESH_TRACE_FILE` MUST NEVER alter any normalized subprocess environment,
+build or runtime guard, closure digest, memo scope key, or recorded
+runtime-input dependency: `NormalizeEnv` validates and strips both variables
+from normalized environments, and testlog `getenv` ingestion ignores them.
+
 ## Composition
 
 A caller's record is rarely about a single subject. A mutation kill-sheet is keyed

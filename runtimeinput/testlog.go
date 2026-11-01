@@ -359,6 +359,9 @@ func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, 
 				addUnverifiable(&m, unverifiableSeen, "unrepresentable environment name")
 				continue
 			}
+			if gotool.IsTraceEnvKey(name) {
+				continue
+			}
 			if gotool.EqualEnvKey(name, "PWD") && !pwdTruthful {
 				addUnverifiable(&m, unverifiableSeen, "process-local environment input: PWD")
 				continue

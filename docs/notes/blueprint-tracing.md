@@ -21,8 +21,9 @@
 
 - `trace.Enabled(ctx, domain, target)` and `trace.Emit(ctx, domain, name, target, fields...)` check a single process-wide `atomic.Int32` active-sink counter (`activeCount.Load() <= 0`) on the fast path.
 - When tracing is off (no ambient `GOFRESH_TRACE` and no active `WithSink` context), `trace.Enabled` is a single atomic load returning `false` with zero allocations and zero `ctx.Value` walks.
-- `trace.RefreshFromEnv()` is invoked at package `init()` and at top-level `gofresh` entry points (`NewSession`, `beginOperation`, `ResolveToolchainSelection`, `CaptureGuards`, `ExplainDynamicState`) so `t.Setenv("GOFRESH_TRACE", ...)` in tests takes effect immediately (including when set after `NewSession` before `Snapshot` / `Check` / `Validate`) without polling `os.Getenv` on hot paths.
-- Context sinks registered via `WithFilteredSink` decrement `activeCount` via `sync.OnceFunc` wired to both `context.AfterFunc` (when `ctx.Done() != nil`) and `runtime.AddCleanup` so `activeCount` returns to `0` as soon as the context finishes or becomes unreachable.
+- `internal/trace` has zero `func init()` functions and zero package-level dynamic carriers (`func`, `interface`, `*os.File`, `chan`, or `atomic.Value`), using only `activeCount atomic.Int32`, `envMu sync.Mutex`, and `envCfg atomic.Pointer[envConfig]` (where `envConfig` holds pure value fields).
+- `trace.RefreshFromEnv()` is invoked at top-level `gofresh` entry points (`NewSession`, `beginOperation`, `ResolveToolchainSelection`, `CaptureGuards`, `ExplainDynamicState`) so `t.Setenv("GOFRESH_TRACE", ...)` in tests takes effect immediately (including when set after `NewSession` before `Snapshot` / `Check` / `Validate`) without polling `os.Getenv` on hot paths.
+- Context sinks registered via `WithFilteredSink` decrement `activeCount` via `counted atomic.Bool` (`CompareAndSwap(true, false)`) on `ctxSinkNode.decrement`, wired to both `context.AfterFunc` (when `ctx.Done() != nil`) and synchronous `isActive()` checks on `ctx.Err() != nil` so `activeCount` returns to `0` as soon as the context finishes.
 
 ## 4. Structured Domains & High-Signal Events
 
@@ -33,14 +34,14 @@
    - `package_verdict_error` / `package_io_error`: any stdlib package failing structural contract verification (`verdictErr`) or source reading (`ioErr`), naming the package and error.
    - `selection_resolved`: final `audited` boolean, `content_digest`, `policy_digest`, `pure_delegates` count, `failed_packages`, and `degradation` notice.
 2. **`closure` (`trace.DomainClosure`)**:
-   - `subject_closure`: per-subject `Closure` digest, `test_variant` compartment digest, `effects`, `unverifiable`, `refusal`, `culprit`, and the **causal witness** (`diagnostic` / call-graph edge / `dynstate` token) when non-pure or degraded.
-   - `observability`: per-subject observability proof result (`observable`, `reason`, `target`).
+   - `subject_closure`: per-subject `Closure` digest (`hash`), `test_variants` compartment digest, `unverifiable`, `refusal`, `culprit`, and `reason` (the causal witness / call-graph edge / `dynstate` token when non-pure or degraded).
+   - `observability`: per-subject observability proof result (`observable`, `effect_free`, `outcome_method`, `reason`, `target`).
 3. **`view` (`trace.DomainView`)**:
-   - `pass_summary`: summary of each `observeView` pass (`dir`, `subjects`, `source_files`, `cut_subjects`, `guards_toolchain`, `guards_buildconfig`).
+   - `pass_summary`: summary of each `observeView` pass (`target=<moduleDir>`, `subjects`, `source_files`, `cut_subjects`, `guards_toolchain`, `guards_buildconfig`).
    - `two_pass_diff`: emitted whenever `compareObservations` detects divergence between pass 1 (`base`) and pass 2 (`current`), naming the **exact first diverging field** (`diff_field`, `subject`, `first_value`, `second_value`).
 4. **`session` (`trace.DomainSession`)**:
-   - `session_init`: `dir`, `module_dir`, `goversion`, `toolchain_skew`, `complete_build`.
-   - `check_verdict`: per-candidate check decision (`target=<pkg.Symbol>`, `status`, `cause`, `subkind`, `reason`, and when runtime inputs moved, `moved_inputs`).
+   - `session_init`: `dir`, `complete_build`, `execution_model`.
+   - `check_verdict`: per-candidate check decision (`target=<pkg.Symbol>`, `status`, `cause`, `condition`, `reason` including moved runtime-input attribution).
 
 ## 5. Wire Formats
 

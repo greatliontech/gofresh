@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/greatliontech/gofresh/internal/closure"
-	"github.com/greatliontech/gofresh/gotool"
 	"go/version"
 	"reflect"
 	"strings"
+
+	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/closure"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // Tool provenance: a binary embedding this engine drives an ambient
@@ -180,6 +182,7 @@ type ToolchainSelection struct {
 // ResolveToolchainSelection resolves the toolchain content, admission policy,
 // and selection-audit notice for reader and buildFlags.
 func ResolveToolchainSelection(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) (ToolchainSelection, error) {
+	trace.RefreshFromEnv()
 	if ctx == nil {
 		return ToolchainSelection{}, errors.New("gofresh: nil toolchain selection context")
 	}

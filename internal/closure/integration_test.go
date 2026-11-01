@@ -17,6 +17,7 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -786,24 +787,6 @@ func TestDstSelectionIsJudgedByContentNeverByTag(t *testing.T) {
 		}
 	}
 
-	_, overlayEnv := testenv.OverlayGOROOTEnv(t, environmentWith(), map[string]string{
-		"src/strings/gofresh_dst_unapproved.go": "//go:build dst\n\npackage strings\n\nimport _ \"unsafe\"\n\n//go:linkname gofreshDstUnapproved\nfunc gofreshDstUnapproved() {}\n",
-	})
-	plainOverlay, err := newAtEnv(ctx, ".", overlayEnv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !plainOverlay.SelectionAudited() {
-		t.Fatalf("plain selection over dst-overlaid GOROOT refused: %s", plainOverlay.SelectionNotice())
-	}
-	dstOverlay, err := newAtEnv(ctx, ".", overlayEnv, "-tags", "dst")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dstOverlay.SelectionAudited() || !strings.Contains(dstOverlay.SelectionAttribution(), "moved in 1 keys: strings") {
-		t.Fatalf("dst selection with unapproved strings file: audited=%v attribution=%q", dstOverlay.SelectionAudited(), dstOverlay.SelectionAttribution())
-	}
-
 	snap, err := (gotool.Runner{}).TakeEnvSnapshot(ctx, ".", environmentWith())
 	if err != nil {
 		t.Fatal(err)
@@ -927,19 +910,66 @@ func gofreshTryGetwd() (string, bool, error) {
 	return "/sim", true, nil
 }
 `
-	_, simValidEnv := testenv.OverlayGOROOTEnv(t, environmentWith(), map[string]string{
-		"src/runtime/gofresh_sim_overlay.go": simRuntimeClean,
-		"src/os/gofresh_sim_off.go":          simOSOff,
-		"src/os/gofresh_sim_on.go":           simOSOn,
-		"src/os/getwd.go":                    hookedGetwd,
-		"src/os/file_posix.go":               hookedFilePosix,
+	simGOROOT, simValidEnv := testenv.OverlayGOROOTEnv(t, environmentWith(), map[string]string{
+		"src/strings/gofresh_dst_unapproved.go": "//go:build dst\n\npackage strings\n\nimport _ \"unsafe\"\n\n//go:linkname gofreshDstUnapproved\nfunc gofreshDstUnapproved() {}\n",
+		"src/runtime/gofresh_sim_overlay.go":    simRuntimeClean,
+		"src/os/gofresh_sim_off.go":             simOSOff,
+		"src/os/gofresh_sim_on.go":              simOSOn,
+		"src/os/getwd.go":                       hookedGetwd,
+		"src/os/file_posix.go":                  hookedFilePosix,
+		"src/image/color/gofresh_sim_trigger.go": "//go:build simoverlay\n\npackage color\n\nimport _ \"unsafe\"\n\n//go:linkname gofreshPullEnable runtime.gofreshSimEnable\nfunc gofreshPullEnable()\n\nfunc ActivateSim() { gofreshPullEnable() }\n",
 	})
+	withSimFiles := func(extra map[string]string, fn func([]string)) {
+		t.Helper()
+		type savedEntry struct {
+			path string
+			data []byte
+		}
+		var saved []savedEntry
+		var created []string
+		for rel, content := range extra {
+			target := filepath.Join(simGOROOT, filepath.FromSlash(rel))
+			if prev, err := os.ReadFile(target); err == nil {
+				saved = append(saved, savedEntry{path: target, data: prev})
+				if err := os.Remove(target); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				created = append(created, target)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		defer func() {
+			for _, target := range created {
+				_ = os.Remove(target)
+			}
+			for _, s := range saved {
+				_ = os.Remove(s.path)
+				if err := os.WriteFile(s.path, s.data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}()
+		fn(simValidEnv)
+	}
 	simPlain, err := newAtEnv(ctx, ".", simValidEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !simPlain.SelectionAudited() {
-		t.Fatalf("plain selection over inactive-gate GOROOT refused: %s", simPlain.SelectionNotice())
+		t.Fatalf("plain selection over overlaid GOROOT refused: %s", simPlain.SelectionNotice())
+	}
+	dstOverlay, err := newAtEnv(ctx, ".", simValidEnv, "-tags", "dst")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dstOverlay.SelectionAudited() || !strings.Contains(dstOverlay.SelectionAttribution(), "moved in 1 keys: strings") {
+		t.Fatalf("dst selection with unapproved strings file: audited=%v attribution=%q", dstOverlay.SelectionAudited(), dstOverlay.SelectionAttribution())
 	}
 	simActive, err := newAtEnv(ctx, ".", simValidEnv, "-tags", "simoverlay")
 	if err != nil {
@@ -949,54 +979,140 @@ func gofreshTryGetwd() (string, bool, error) {
 		t.Fatalf("simoverlay selection with verified inactive runtime gate and state table refused: %s", simActive.SelectionNotice())
 	}
 
-	// Negative 1: runtime calls the gate mutator directly.
-	_, simMutCalledEnv := testenv.OverlayGOROOTEnv(t, environmentWith(), map[string]string{
-		"src/runtime/gofresh_sim_overlay.go": simRuntimeClean + "\nfunc gofreshBootActivate() { gofreshSimEnable() }\n",
-		"src/os/gofresh_sim_off.go":          simOSOff,
-		"src/os/gofresh_sim_on.go":           simOSOn,
-		"src/os/getwd.go":                    hookedGetwd,
-		"src/os/file_posix.go":               hookedFilePosix,
+	// Off-surface non-startup exported function pulling runtime.gofreshSimEnable via //go:linkname:
+	// the toolchain selection remains audited because startup cannot flip the gate, a sibling subject
+	// in the same test binary linking image/color remains observable (including over os.Getenv),
+	// and any subject calling that off-surface function is refused at both tiers.
+	modDir := t.TempDir()
+	writeTree(t, modDir, map[string]string{
+		"go.mod": "module example.com/offsurface\n\ngo 1.24\n",
+		"sub_test.go": `package offsurface
+
+import (
+	"image/color"
+	"os"
+	"strings"
+	"testing"
+)
+
+func TestCallsOffSurfaceTrigger(t *testing.T) {
+	color.ActivateSim()
+}
+
+func TestCleanOffSurfaceSibling(t *testing.T) {
+	_ = os.Getenv("GOFRESH_OFFSURFACE_CLEAN")
+	if strings.TrimSpace(" ok ") != "ok" {
+		t.Fatal("unexpected trim result")
+	}
+}
+`,
 	})
-	simMutCalled, err := newAtEnv(ctx, ".", simMutCalledEnv, "-tags", "simoverlay")
+	modView, err := newAtEnv(ctx, modDir, simValidEnv, "-tags", "simoverlay")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if simMutCalled.SelectionAudited() || !strings.Contains(simMutCalled.SelectionAttribution(), "os") {
-		t.Fatalf("simoverlay with called runtime mutator: audited=%v attribution=%q", simMutCalled.SelectionAudited(), simMutCalled.SelectionAttribution())
+	if !modView.SelectionAudited() {
+		t.Fatalf("off-surface non-startup trigger unexpectedly invalidated selection: %s", modView.SelectionNotice())
+	}
+	trigSubj := Subject{Package: "example.com/offsurface", Symbol: "TestCallsOffSurfaceTrigger"}
+	cleanSubj := Subject{Package: "example.com/offsurface", Symbol: "TestCleanOffSurfaceSibling"}
+	obs, err := modView.ComputeObservabilityBatch([]Subject{trigSubj, cleanSubj})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs[trigSubj].Observable {
+		t.Fatalf("subject calling off-surface gate activator admitted as observable: %+v", obs[trigSubj])
+	}
+	t2Trig, _, err := computeTier2ResultAndReach(modView, trigSubj.Package, trigSubj.Symbol)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !t2Trig.unverifiable {
+		t.Fatalf("tier2 admitted subject calling off-surface gate activator: %+v", t2Trig)
+	}
+	if !obs[cleanSubj].Observable {
+		t.Fatalf("clean sibling subject in off-surface test refused: %+v", obs[cleanSubj])
+	}
+
+	goversion := snap.Value("GOVERSION")
+	evalSimNegative := func(name string, extra map[string]string) selectionDegradation {
+		t.Helper()
+		var deg selectionDegradation
+		withSimFiles(extra, func(_ []string) {
+			d := sourceDigests{
+				Content:   simActive.source.Content,
+				Policy:    simActive.source.Policy,
+				Packages:  maps.Clone(simActive.source.Packages),
+				inventory: maps.Clone(simActive.source.inventory),
+			}
+			touchedPkgs := map[string]bool{}
+			for rel := range extra {
+				clean := filepath.ToSlash(filepath.Clean(rel))
+				switch {
+				case strings.HasPrefix(clean, "pkg/include/"):
+					touchedPkgs["runtime"] = true
+				case strings.HasPrefix(clean, "src/"):
+					pkgPath := path.Dir(strings.TrimPrefix(clean, "src/"))
+					touchedPkgs[pkgPath] = true
+				}
+			}
+			buf := make([]byte, 32*1024)
+			for pkgPath := range touchedPkgs {
+				lp, ok := d.inventory[pkgPath]
+				if !ok {
+					t.Fatalf("%s: package %s not in std inventory", name, pkgPath)
+				}
+				files := slices.Clone(lp.Files)
+				for rel := range extra {
+					clean := filepath.ToSlash(filepath.Clean(rel))
+					if strings.HasPrefix(clean, "src/"+pkgPath+"/") {
+						base := path.Base(clean)
+						if !strings.Contains( clean[len("src/"+pkgPath+"/"):], "/") && !slices.Contains(files, base) {
+							files = append(files, base)
+						}
+					}
+				}
+				slices.Sort(files)
+				lp.Files = files
+				digest, err := digestListedPackageBuffered(ctx, lp, buf)
+				if err != nil {
+					t.Fatalf("%s: digest %s: %v", name, pkgPath, err)
+				}
+				lp.digest = digest
+				d.inventory[pkgPath] = lp
+				if lp.Audited {
+					d.Packages[pkgPath] = digest
+				}
+			}
+			var err error
+			deg, err = toolchainSourceDegradationContext(ctx, goversion, d, nil)
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+		})
+		return deg
+	}
+
+	// Negative 1: runtime calls the gate mutator directly.
+	if deg := evalSimNegative("called runtime mutator", map[string]string{
+		"src/runtime/gofresh_sim_overlay.go": simRuntimeClean + "\nfunc gofreshBootActivate() { gofreshSimEnable() }\n",
+	}); deg.audited() || !strings.Contains(deg.axis, "os") {
+		t.Fatalf("simoverlay with called runtime mutator: audited=%v attribution=%q", deg.audited(), deg.axis)
 	}
 
 	// Negative 2: another audited surface package pulls the runtime gate mutator via //go:linkname.
-	_, simMutPulledEnv := testenv.OverlayGOROOTEnv(t, environmentWith(), map[string]string{
-		"src/runtime/gofresh_sim_overlay.go":  simRuntimeClean,
-		"src/os/gofresh_sim_off.go":           simOSOff,
-		"src/os/gofresh_sim_on.go":            simOSOn,
-		"src/os/getwd.go":                     hookedGetwd,
-		"src/os/file_posix.go":                hookedFilePosix,
+	if deg := evalSimNegative("linkname-pulled runtime mutator", map[string]string{
 		"src/testing/gofresh_pull_mutator.go": "//go:build simoverlay\n\npackage testing\n\nimport _ \"unsafe\"\n\n//go:linkname gofreshPullEnable runtime.gofreshSimEnable\nfunc gofreshPullEnable()\n",
-	})
-	simMutPulled, err := newAtEnv(ctx, ".", simMutPulledEnv, "-tags", "simoverlay")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if simMutPulled.SelectionAudited() || !strings.Contains(simMutPulled.SelectionAttribution(), "os") {
-		t.Fatalf("simoverlay with linkname-pulled runtime mutator: audited=%v attribution=%q", simMutPulled.SelectionAudited(), simMutPulled.SelectionAttribution())
+	}); deg.audited() || !strings.Contains(deg.axis, "os") {
+		t.Fatalf("simoverlay with linkname-pulled runtime mutator: audited=%v attribution=%q", deg.audited(), deg.axis)
 	}
 
 	// Negative 3: state-table register is reachable without the inactive runtime gate.
 	simUngatedTable := strings.Replace(simOSOn, "\tif !gofreshOSGate() {\n\t\treturn\n\t}\n", "", 1) + "\nfunc GofreshReachableRegister() { gofreshRegisterSim(nil) }\n"
-	_, simUngatedEnv := testenv.OverlayGOROOTEnv(t, environmentWith(), map[string]string{
-		"src/runtime/gofresh_sim_overlay.go": simRuntimeClean,
-		"src/os/gofresh_sim_off.go":          simOSOff,
-		"src/os/gofresh_sim_on.go":           simUngatedTable,
-		"src/os/getwd.go":                    hookedGetwd,
-		"src/os/file_posix.go":               hookedFilePosix,
-	})
-	simUngated, err := newAtEnv(ctx, ".", simUngatedEnv, "-tags", "simoverlay")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if simUngated.SelectionAudited() || !strings.Contains(simUngated.SelectionAttribution(), "os") {
-		t.Fatalf("simoverlay with ungated state-table register: audited=%v attribution=%q", simUngated.SelectionAudited(), simUngated.SelectionAttribution())
+	if deg := evalSimNegative("ungated state-table register", map[string]string{
+		"src/os/gofresh_sim_on.go": simUngatedTable,
+	}); deg.audited() || !strings.Contains(deg.axis, "os") {
+		t.Fatalf("simoverlay with ungated state-table register: audited=%v attribution=%q", deg.audited(), deg.axis)
 	}
 
 	// Negative 4: genuinely off-surface std package (image/color) activates runtime gate at startup,
@@ -1007,45 +1123,26 @@ func gofreshTryGetwd() (string, bool, error) {
 	}
 	// Positive controls for Negative 4: benign runtime assembly and benign off-surface cgo C file
 	// must keep the selection audited so the negative cases below cannot pass from go list errors.
-	{
-		_, benignAsmEnv := testenv.OverlayGOROOTEnv(t, environmentWith(), map[string]string{
-			"src/runtime/gofresh_sim_overlay.go":       simRuntimeClean,
-			"src/os/gofresh_sim_off.go":                simOSOff,
-			"src/os/gofresh_sim_on.go":                 simOSOn,
-			"src/os/getwd.go":                          hookedGetwd,
-			"src/os/file_posix.go":                     hookedFilePosix,
-			"pkg/include/gofresh_bridge.h":             "#define NOOP_ASM RET\n",
-			"src/runtime/gofresh_bridge_benign.s":      "//go:build simoverlay\n\n#include \"gofresh_bridge.h\"\nTEXT ·gofreshRuntimeAsmNoop(SB),$0-0\n\tNOOP_ASM\n",
-			"src/image/color/gofresh_bridge_enable.go": "//go:build simoverlay\n\npackage color\n\nimport _ \"unsafe\"\n\n//go:linkname simEnable runtime.gofreshSimEnable\nfunc simEnable()\n\nfunc gofreshBridgeEnable() { simEnable() }\n",
-		})
-		benignAsmH, err := newAtEnv(ctx, ".", benignAsmEnv, "-tags", "simoverlay")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !benignAsmH.SelectionAudited() {
-			t.Fatalf("benign runtime assembly + non-startup off-surface pull refused: %s", benignAsmH.SelectionNotice())
-		}
+	benignFiles := map[string]string{
+		"pkg/include/gofresh_bridge.h":             "#define NOOP_ASM RET\n",
+		"src/runtime/gofresh_bridge_benign.s":      "//go:build simoverlay\n\n#include \"gofresh_bridge.h\"\nTEXT ·gofreshRuntimeAsmNoop(SB),$0-0\n\tNOOP_ASM\n",
+		"src/image/color/gofresh_bridge_enable.go": "//go:build simoverlay\n\npackage color\n\nimport _ \"unsafe\"\n\n//go:linkname simEnable runtime.gofreshSimEnable\nfunc simEnable()\n\nfunc gofreshBridgeEnable() { simEnable() }\n",
 	}
 	if cgo {
-		_, benignCgoEnv := testenv.OverlayGOROOTEnv(t, environmentWith(), map[string]string{
-			"src/runtime/gofresh_sim_overlay.go":  simRuntimeClean,
-			"src/os/gofresh_sim_off.go":           simOSOff,
-			"src/os/gofresh_sim_on.go":            simOSOn,
-			"src/os/getwd.go":                     hookedGetwd,
-			"src/os/file_posix.go":                hookedFilePosix,
-			"src/image/color/gofresh_sim_cgo.go":  "//go:build simoverlay\n\npackage color\n\nimport \"C\"\n",
-			"src/image/color/gofresh_sim_ext.c":   "//go:build simoverlay\n\nvoid gofreshBenignC(void) {}\n",
-			"src/runtime/cgo/gofresh_bridge.h":    "#define BENIGN_STR(x) #x\n",
-			"src/runtime/cgo/gofresh_bridge_ok.c": "//go:build simoverlay\n\n#include \"gofresh_bridge.h\"\nconst char *gofreshBenignRuntimeCgo(void) { return BENIGN_STR(ok); }\n",
-		})
-		benignCgoH, err := newAtEnv(ctx, ".", benignCgoEnv, "-tags", "simoverlay")
+		benignFiles["src/image/color/gofresh_sim_cgo.go"] = "//go:build simoverlay\n\npackage color\n\nimport \"C\"\n"
+		benignFiles["src/image/color/gofresh_sim_ext.c"] = "//go:build simoverlay\n\nvoid gofreshBenignC(void) {}\n"
+		benignFiles["src/runtime/cgo/gofresh_bridge.h"] = "#define BENIGN_STR(x) #x\n"
+		benignFiles["src/runtime/cgo/gofresh_bridge_ok.c"] = "//go:build simoverlay\n\n#include \"gofresh_bridge.h\"\nconst char *gofreshBenignRuntimeCgo(void) { return BENIGN_STR(ok); }\n"
+	}
+	withSimFiles(benignFiles, func(benignEnv []string) {
+		benignH, err := newAtEnv(ctx, ".", benignEnv, "-tags", "simoverlay")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !benignCgoH.SelectionAudited() {
-			t.Fatalf("benign off-surface cgo C file refused: %s", benignCgoH.SelectionNotice())
+		if !benignH.SelectionAudited() {
+			t.Fatalf("benign runtime assembly / off-surface cgo C file refused: %s", benignH.SelectionNotice())
 		}
-	}
+	})
 
 	for _, tc := range []struct {
 		name    string
@@ -1172,87 +1269,10 @@ func gofreshTryGetwd() (string, bool, error) {
 		if tc.cgoOnly && !cgo {
 			continue
 		}
-		files := map[string]string{
-			"src/runtime/gofresh_sim_overlay.go": simRuntimeClean,
-			"src/os/gofresh_sim_off.go":          simOSOff,
-			"src/os/gofresh_sim_on.go":           simOSOn,
-			"src/os/getwd.go":                    hookedGetwd,
-			"src/os/file_posix.go":               hookedFilePosix,
+		deg := evalSimNegative(tc.name, tc.files)
+		if deg.audited() || !strings.Contains(deg.axis, "os") {
+			t.Fatalf("%s: audited=%v attribution=%q", tc.name, deg.audited(), deg.axis)
 		}
-		for k, v := range tc.files {
-			files[k] = v
-		}
-		_, env := testenv.OverlayGOROOTEnv(t, environmentWith(), files)
-		h, err := newAtEnv(ctx, ".", env, "-tags", "simoverlay")
-		if err != nil {
-			t.Fatalf("%s: %v", tc.name, err)
-		}
-		if h.SelectionAudited() || !strings.Contains(h.SelectionAttribution(), "os") {
-			t.Fatalf("%s: audited=%v attribution=%q", tc.name, h.SelectionAudited(), h.SelectionAttribution())
-		}
-	}
-
-	// Off-surface non-startup exported function pulling runtime.gofreshSimEnable via //go:linkname:
-	// the toolchain selection remains audited because startup cannot flip the gate, a sibling subject
-	// in the same test binary linking image/color remains observable (including over os.Getenv),
-	// and any subject calling that off-surface function is refused at both tiers.
-	_, simOffSurfFnEnv := testenv.OverlayGOROOTEnv(t, environmentWith(), map[string]string{
-		"src/runtime/gofresh_sim_overlay.go":     simRuntimeClean,
-		"src/os/gofresh_sim_off.go":              simOSOff,
-		"src/os/gofresh_sim_on.go":               simOSOn,
-		"src/os/getwd.go":                        hookedGetwd,
-		"src/os/file_posix.go":                   hookedFilePosix,
-		"src/image/color/gofresh_sim_trigger.go": "//go:build simoverlay\n\npackage color\n\nimport _ \"unsafe\"\n\n//go:linkname gofreshPullEnable runtime.gofreshSimEnable\nfunc gofreshPullEnable()\n\nfunc ActivateSim() { gofreshPullEnable() }\n",
-	})
-	modDir := t.TempDir()
-	writeTree(t, modDir, map[string]string{
-		"go.mod": "module example.com/offsurface\n\ngo 1.24\n",
-		"sub_test.go": `package offsurface
-
-import (
-	"image/color"
-	"os"
-	"strings"
-	"testing"
-)
-
-func TestCallsOffSurfaceTrigger(t *testing.T) {
-	color.ActivateSim()
-}
-
-func TestCleanOffSurfaceSibling(t *testing.T) {
-	_ = os.Getenv("GOFRESH_OFFSURFACE_CLEAN")
-	if strings.TrimSpace(" ok ") != "ok" {
-		t.Fatal("unexpected trim result")
-	}
-}
-`,
-	})
-	modView, err := newAtEnv(ctx, modDir, simOffSurfFnEnv, "-tags", "simoverlay")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !modView.SelectionAudited() {
-		t.Fatalf("off-surface non-startup trigger unexpectedly invalidated selection: %s", modView.SelectionNotice())
-	}
-	trigSubj := Subject{Package: "example.com/offsurface", Symbol: "TestCallsOffSurfaceTrigger"}
-	cleanSubj := Subject{Package: "example.com/offsurface", Symbol: "TestCleanOffSurfaceSibling"}
-	obs, err := modView.ComputeObservabilityBatch([]Subject{trigSubj, cleanSubj})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if obs[trigSubj].Observable {
-		t.Fatalf("subject calling off-surface gate activator admitted as observable: %+v", obs[trigSubj])
-	}
-	t2Trig, _, err := computeTier2ResultAndReach(modView, trigSubj.Package, trigSubj.Symbol)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !t2Trig.unverifiable {
-		t.Fatalf("tier2 admitted subject calling off-surface gate activator: %+v", t2Trig)
-	}
-	if !obs[cleanSubj].Observable {
-		t.Fatalf("clean sibling subject in off-surface test refused: %+v", obs[cleanSubj])
 	}
 }
 

@@ -3104,3 +3104,103 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "098a9441a0bd19d14280497bb21c60f3e88f55f2f8bbea029c0551c4df79cbaa"
 }
+
+bindings {
+  requirement_id: "REQ-fresh-trace"
+  content_hash: "d55788f98f01c2bc744e4b464e1088b6ba8e0903e08203ae03fe81baca79a5b7"
+  source_hash: "83b3ad79d25ce614e9e2fd802cf1b10347c8920f7f9914a457ae684169ac5d94"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/trace.Emit"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "66dba6297718ec71aaedca674c5f1a6656a5c894e827fec3e139bcefbb2aaf21"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-trace"
+  content_hash: "d55788f98f01c2bc744e4b464e1088b6ba8e0903e08203ae03fe81baca79a5b7"
+  source_hash: "83b3ad79d25ce614e9e2fd802cf1b10347c8920f7f9914a457ae684169ac5d94"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/trace.TestDisabledFastPathZeroAllocs"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "532491a1354ce8f0043bc071ec5e4253b5ef2b98fc8f6710513496b2d6e913ed"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-trace"
+  content_hash: "d55788f98f01c2bc744e4b464e1088b6ba8e0903e08203ae03fe81baca79a5b7"
+  source_hash: "83b3ad79d25ce614e9e2fd802cf1b10347c8920f7f9914a457ae684169ac5d94"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/trace.TestFilterGrammarAndContextSinks"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "fa98ff8dc51ee002101e6e9012da6961abfee9c38643dff499d7e57b8716a95e"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-trace"
+  content_hash: "d55788f98f01c2bc744e4b464e1088b6ba8e0903e08203ae03fe81baca79a5b7"
+  source_hash: "83b3ad79d25ce614e9e2fd802cf1b10347c8920f7f9914a457ae684169ac5d94"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/trace.TestFormatTextAndJSONL"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9ed487e3686c57c41c78666caa5b5db7502b6305dee39a8650dafed28a67c658"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-trace"
+  content_hash: "d55788f98f01c2bc744e4b464e1088b6ba8e0903e08203ae03fe81baca79a5b7"
+  source_hash: "83b3ad79d25ce614e9e2fd802cf1b10347c8920f7f9914a457ae684169ac5d94"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/trace.TestEnvFileAndConcurrentEmission"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7892c86e00b333e0a9547976d797d5d5015adf4075b28a8933e5ebac671be7ab"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-trace"
+  content_hash: "d55788f98f01c2bc744e4b464e1088b6ba8e0903e08203ae03fe81baca79a5b7"
+  source_hash: "83b3ad79d25ce614e9e2fd802cf1b10347c8920f7f9914a457ae684169ac5d94"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestTraceDomainsAndTwoPassDiff"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2fe1c16a9efaad236df50f5c7eaeae9fa8e733a8290f289669a4b743701f0d88"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-trace-non-interference"
+  content_hash: "432098a3af09130ab47dc457b0441414f200eef68fe54c0513d3e9b26845e756"
+  source_hash: "5996bd6488939568736f0d96682aa4905fc0ec0b7ed854ab0d82512dbfdd5f67"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/gotool.NormalizeEnv"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "e8bb4e3415c773243ecc2582107af9a72582316f52cfd8a7f6542ca9f0243926"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-trace-non-interference"
+  content_hash: "432098a3af09130ab47dc457b0441414f200eef68fe54c0513d3e9b26845e756"
+  source_hash: "5996bd6488939568736f0d96682aa4905fc0ec0b7ed854ab0d82512dbfdd5f67"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/gotool.TestNormalizeEnvStripsTraceVarsAndValidatesDuplicates"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2db0a9a2bae1192f7e5a6824c606988bbd39855c8232ff56d92b1ff4e60be654"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-trace-non-interference"
+  content_hash: "432098a3af09130ab47dc457b0441414f200eef68fe54c0513d3e9b26845e756"
+  source_hash: "5996bd6488939568736f0d96682aa4905fc0ec0b7ed854ab0d82512dbfdd5f67"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/runtimeinput.TestFromTestLogIgnoresTraceEnvVars"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cf283f7015523b14be5d4068de0a9df336e033838e11b1c97c9bdc46098493fa"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-trace-non-interference"
+  content_hash: "432098a3af09130ab47dc457b0441414f200eef68fe54c0513d3e9b26845e756"
+  source_hash: "5996bd6488939568736f0d96682aa4905fc0ec0b7ed854ab0d82512dbfdd5f67"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestTraceNonInterference"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1a1fc258131b75eae30414ab7f6771b4993fef372698627d8523a53e984edbcf"
+}

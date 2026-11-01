@@ -8,6 +8,14 @@
 // package closure so multi-subject checks avoid per-subject whole-program
 // analysis; whole-program reachability runs only for the caller-selected
 // observability proof.
+//
+// Setting GOFRESH_TRACE (for example GOFRESH_TRACE=all, GOFRESH_TRACE=toolchain,view,
+// or GOFRESH_TRACE=closure:BenchmarkFoo) enables structured operational diagnostic
+// tracing across the toolchain, closure, view, and session subsystems without
+// altering any normalized environment, guard, closure digest, memo key, or
+// recorded runtime-input dependency. Events write to os.Stderr by default or to
+// the path named by GOFRESH_TRACE_FILE (JSON Lines when ending in .jsonl or .json,
+// single-line key-value text otherwise).
 package gofresh
 
 import (
@@ -31,6 +39,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/testvariant"
+	"github.com/greatliontech/gofresh/internal/trace"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -50,6 +59,7 @@ type Guards = guard.Guards
 // CaptureGuards computes the environment guards applicable to kind in r's
 // directory under env as the complete runtime environment.
 func CaptureGuards(ctx context.Context, r *gotool.EnvReader, env []string, kind Kind, buildInputs ...string) (Guards, error) {
+	trace.RefreshFromEnv()
 	if ctx == nil {
 		return Guards{}, errors.New("gofresh: nil guard capture context")
 	}
@@ -233,6 +243,7 @@ type Session struct {
 // Snapshots observe source/build generations; BindRuntime separately admits the
 // environment of executions using a retained artifact. Construction honors ctx.
 func NewSession(ctx context.Context, build BuildDescription, policy SessionPolicy) (session *Session, err error) {
+	trace.RefreshFromEnv()
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil session context")
 	}
@@ -306,6 +317,11 @@ func NewSession(ctx context.Context, build BuildDescription, policy SessionPolic
 	}
 	e.completeBuild = true
 	owned := BuildDescription{Directory: e.dir, Environment: slices.Clone(e.env), Flags: slices.Clone(e.buildFlags), Inputs: append([]string{}, e.buildInputs...)}
+	trace.Emit(ctx, trace.DomainSession, "session_init", e.dir,
+		trace.String("dir", e.dir),
+		trace.Bool("complete_build", e.completeBuild),
+		trace.Int("execution_model", int(policy.Execution)),
+	)
 	return &Session{engine: e, build: owned}, nil
 }
 

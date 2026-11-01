@@ -2,10 +2,10 @@
 
 ## Phase A: First-Class Tracing (`internal/trace`)
 
-- [ ] **Chunk A.1: Implement `internal/trace` & Wire Structured Events Across `toolchain`, `closure`, `view`, and `session`**
-  - [ ] Implement `internal/trace` (`GOFRESH_TRACE`, `GOFRESH_TRACE_FILE`, `WithSink`, `WithFilteredSink`, `Recorder`, `Enabled` single-atomic-load fast path, `RefreshFromEnv`, line-oriented text and JSONL formatters, and `domain:substring` target filtering) per [`docs/notes/blueprint-tracing.md`](file:///home/nikolas/repos/github.com/greatliontech/gofresh/docs/notes/blueprint-tracing.md).
-  - [ ] Enforce the trace non-interference invariant by stripping `GOFRESH_TRACE` and `GOFRESH_TRACE_FILE` in `NormalizeEnv` and ignoring them in `runtimeinput` testlog `getenv` ingestion.
-  - [ ] Wire `toolchain`, `closure`, `view` (including exact `two_pass_diff` field reporting in `compareObservations`), and `session` trace events, add `REQ-fresh-trace` and `REQ-fresh-trace-non-interference` to `docs/specs/overview.md` and `.stipulator/bindings/fresh.textproto`, document `GOFRESH_TRACE` and `GOFRESH_TRACE_FILE` on package `gofresh`, and add comprehensive unit and concurrency tests in `internal/trace/trace_test.go`.
+- [x] **Chunk A.1: Implement `internal/trace` & Wire Structured Events Across `toolchain`, `closure`, `view`, and `session`**
+  - [x] Implement `internal/trace` (`GOFRESH_TRACE`, `GOFRESH_TRACE_FILE`, `WithSink`, `WithFilteredSink`, `Recorder`, `Enabled` single-atomic-load fast path, `RefreshFromEnv`, line-oriented text and JSONL formatters, and `domain:substring` target filtering) per [`docs/notes/blueprint-tracing.md`](file:///home/nikolas/repos/github.com/greatliontech/gofresh/docs/notes/blueprint-tracing.md).
+  - [x] Enforce the trace non-interference invariant by stripping `GOFRESH_TRACE` and `GOFRESH_TRACE_FILE` in `NormalizeEnv` and ignoring them in `runtimeinput` testlog `getenv` ingestion.
+  - [x] Wire `toolchain`, `closure`, `view` (including exact `two_pass_diff` field reporting in `compareObservations`), and `session` trace events, add `REQ-fresh-trace` and `REQ-fresh-trace-non-interference` to `docs/specs/overview.md` and `.stipulator/bindings/fresh.textproto`, document `GOFRESH_TRACE` and `GOFRESH_TRACE_FILE` on package `gofresh`, and add comprehensive unit and concurrency tests in `internal/trace/trace_test.go`.
 
 ## Phase B: Public Surface & Tool-Leakage Eviction
 
@@ -42,5 +42,5 @@
 ## Phase D: Performance & Optimization Audit & Close-Out
 
 - [ ] **Chunk D.1: Subsystem Performance & Optimization Audit, Implementation, Benchmark Verification & Plan Close-Out**
-  - [ ] Audit hot paths across `internal/closure`, `internal/dynstate`, `internal/runtimeinput`, and root `gofresh` using `internal/trace` counters and benchmarks under `mlock quiet`.
+  - [ ] Audit hot paths across `internal/closure`, `internal/dynstate`, `internal/runtimeinput`, and root `gofresh` using `internal/trace` counters and benchmarks under `mlock quiet`, including restructuring package-level test-hook culprits (`walkEntryForTest`, `digestReadForTest`, `analysisTestHooks`, `analyzeAttributedBatch`, `probePackageScope`, etc.) in `internal/closure` and `gofresh` so `PackageExecution` incurs zero `SharedDynamicStateCause` fallbacks to per-test `soloSubjects` subprocesses in `stipulator`.
   - [ ] Implement verified optimizations without weakening any Phase C invariant, run full test and Stipulator verification gates across all 4 repositories, and retire `docs/notes/blueprint-*.md` and `docs/plans/plan.md`.

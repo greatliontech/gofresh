@@ -27,6 +27,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/render"
 	"github.com/greatliontech/gofresh/internal/testvariant"
+	"github.com/greatliontech/gofresh/internal/trace"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -237,6 +238,7 @@ type opAccountKey struct{}
 // per class) and, when the operation returns its caller's context error,
 // the kept-on-cancel report — once per operation, whatever its passes.
 func (e *engine) beginOperation(ctx context.Context) (context.Context, func(*error)) {
+	trace.RefreshFromEnv()
 	if e.progress == nil || ctx == nil {
 		return ctx, func(*error) {}
 	}
@@ -498,6 +500,36 @@ func (e *engine) observeView(ctx context.Context, subjects []Subject, requests [
 			observation.purity[subject] = "caller assertion"
 		case directive:
 			observation.purity[subject] = "source directive"
+		}
+	}
+	if trace.AnyEnabled() {
+		for _, subject := range subjects {
+			target := subject.Package + "." + subject.Symbol
+			if !trace.Enabled(ctx, trace.DomainClosure, target) {
+				continue
+			}
+			c := observation.maximal[subject].closure()
+			culpritStr := ""
+			if c.Culprit.Package != "" || c.Culprit.Symbol != "" {
+				culpritStr = c.Culprit.Package + "." + c.Culprit.Symbol
+			}
+			trace.Emit(ctx, trace.DomainClosure, "subject_closure", target,
+				trace.String("hash", c.Hash),
+				trace.String("test_variants", c.TestVariants),
+				trace.Bool("unverifiable", c.Unverifiable),
+				trace.Int("refusal", int(c.Refusal)),
+				trace.String("culprit", culpritStr),
+				trace.String("reason", c.Reason),
+			)
+		}
+		if trace.Enabled(ctx, trace.DomainView, moduleDir) {
+			trace.Emit(ctx, trace.DomainView, "pass_summary", moduleDir,
+				trace.Int("subjects", len(subjects)),
+				trace.Int("source_files", len(observation.sourceFiles)),
+				trace.Int("cut_subjects", len(observation.cut)),
+				trace.String("guards_toolchain", observation.guards.Toolchain),
+				trace.String("guards_buildconfig", observation.guards.BuildConfig),
+			)
 		}
 	}
 	return observation, nil
@@ -1599,6 +1631,13 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if trace.Enabled(ctx, trace.DomainView, "") {
+			trace.Emit(ctx, trace.DomainView, "two_pass_diff", "",
+				trace.String("diff_field", "guards"),
+				trace.String("first_value", fmt.Sprintf("%+v", baseGuards)),
+				trace.String("second_value", fmt.Sprintf("%+v", current.guards)),
+			)
+		}
 		return fmt.Errorf("%w: guards%s (%s)", ErrViewChanged, during, differingGuard(current.guards, baseGuards))
 	}
 	if err := ctx.Err(); err != nil {
@@ -1607,6 +1646,13 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 	if !construction && !slices.Equal(current.sourceFiles, base.sourceFiles) {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if trace.Enabled(ctx, trace.DomainView, "") {
+			trace.Emit(ctx, trace.DomainView, "two_pass_diff", "",
+				trace.String("diff_field", "source_files"),
+				trace.Strings("first_value", base.sourceFiles),
+				trace.Strings("second_value", current.sourceFiles),
+			)
 		}
 		return fmt.Errorf("%w: maximal source identities%s", ErrViewChanged, movedIdentitySuffix(base.sourceFiles, current.sourceFiles, base.fileDigests, current.fileDigests))
 	}
@@ -1618,6 +1664,17 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 		if !construction && !slices.Equal(current.sourceFilesBySubject[subject], base.sourceFilesBySubject[subject]) {
 			if err := ctx.Err(); err != nil {
 				return err
+			}
+			if trace.AnyEnabled() {
+				target := subject.Package + "." + subject.Symbol
+				if trace.Enabled(ctx, trace.DomainView, target) {
+					trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
+						trace.String("diff_field", "subject_source_files"),
+						trace.String("subject", target),
+						trace.Strings("first_value", base.sourceFilesBySubject[subject]),
+						trace.Strings("second_value", current.sourceFilesBySubject[subject]),
+					)
+				}
 			}
 			return fmt.Errorf("%w: maximal source identities for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject], base.fileDigests, current.fileDigests))
 		}
@@ -1632,6 +1689,18 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			if trace.AnyEnabled() {
+				target := subject.Package + "." + subject.Symbol
+				if trace.Enabled(ctx, trace.DomainView, target) {
+					diffField, firstVal, secondVal := diffSubjectFacts(base.maximal[subject], current.maximal[subject], cutHere)
+					trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
+						trace.String("diff_field", diffField),
+						trace.String("subject", target),
+						trace.String("first_value", firstVal),
+						trace.String("second_value", secondVal),
+					)
+				}
+			}
 			return fmt.Errorf("%w: closure for %s.%s%s%s", ErrViewChanged, subject.Package, subject.Symbol, during, movedIdentitySuffix(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject], base.fileDigests, current.fileDigests))
 		}
 		if !construction && cutHere && !current.maximal[subject].equal(base.maximal[subject], false) {
@@ -1641,6 +1710,17 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			if trace.AnyEnabled() {
+				target := subject.Package + "." + subject.Symbol
+				if trace.Enabled(ctx, trace.DomainView, target) {
+					trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
+						trace.String("diff_field", "purity"),
+						trace.String("subject", target),
+						trace.String("first_value", base.purity[subject]),
+						trace.String("second_value", current.purity[subject]),
+					)
+				}
+			}
 			return fmt.Errorf("%w: purity for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, during)
 		}
 		if construction {
@@ -1648,17 +1728,50 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 				if err := ctx.Err(); err != nil {
 					return err
 				}
+				if trace.AnyEnabled() {
+					target := subject.Package + "." + subject.Symbol
+					if trace.Enabled(ctx, trace.DomainView, target) {
+						trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
+							trace.String("diff_field", "vouch_discharges"),
+							trace.String("subject", target),
+							trace.String("first_value", base.vouchDischarges[subject]),
+							trace.String("second_value", current.vouchDischarges[subject]),
+						)
+					}
+				}
 				return fmt.Errorf("%w: vouch discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 			}
 			if !cutHere && base.discharges[subject].singleSubject != current.discharges[subject].singleSubject {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
+				if trace.AnyEnabled() {
+					target := subject.Package + "." + subject.Symbol
+					if trace.Enabled(ctx, trace.DomainView, target) {
+						trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
+							trace.String("diff_field", "single_subject_discharges"),
+							trace.String("subject", target),
+							trace.String("first_value", base.discharges[subject].singleSubject),
+							trace.String("second_value", current.discharges[subject].singleSubject),
+						)
+					}
+				}
 				return fmt.Errorf("%w: single-subject attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 			}
 			if !cutHere && base.discharges[subject].packageProcess != current.discharges[subject].packageProcess {
 				if err := ctx.Err(); err != nil {
 					return err
+				}
+				if trace.AnyEnabled() {
+					target := subject.Package + "." + subject.Symbol
+					if trace.Enabled(ctx, trace.DomainView, target) {
+						trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
+							trace.String("diff_field", "package_process_discharges"),
+							trace.String("subject", target),
+							trace.String("first_value", base.discharges[subject].packageProcess),
+							trace.String("second_value", current.discharges[subject].packageProcess),
+						)
+					}
 				}
 				return fmt.Errorf("%w: package-process attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 			}
@@ -1669,6 +1782,17 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 				if err := ctx.Err(); err != nil {
 					return err
 				}
+				if trace.AnyEnabled() {
+					target := subject.Package + "." + subject.Symbol
+					if trace.Enabled(ctx, trace.DomainView, target) {
+						trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
+							trace.String("diff_field", "subject_source_files"),
+							trace.String("subject", target),
+							trace.Strings("first_value", base.sourceFilesBySubject[subject]),
+							trace.Strings("second_value", current.sourceFilesBySubject[subject]),
+						)
+					}
+				}
 				return fmt.Errorf("%w: maximal source identities for %s.%s during construction%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject], base.fileDigests, current.fileDigests))
 			}
 		}
@@ -1676,6 +1800,13 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 	if construction && !slices.Equal(base.sourceFiles, current.sourceFiles) {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if trace.Enabled(ctx, trace.DomainView, "") {
+			trace.Emit(ctx, trace.DomainView, "two_pass_diff", "",
+				trace.String("diff_field", "source_files"),
+				trace.Strings("first_value", base.sourceFiles),
+				trace.Strings("second_value", current.sourceFiles),
+			)
 		}
 		// The construction race is the one refusal with no reproduction
 		// path afterward, so naming here matters most.
@@ -2112,6 +2243,52 @@ func (f subjectFacts) equal(other subjectFacts, cut bool) bool {
 	return f.source.Equal(other.source) && sameRefusal(f.openWorld, other.openWorld) &&
 		(cut || sameRefusal(f.sharedState, other.sharedState)) &&
 		sameRefusal(f.ambiguous, other.ambiguous) && f.external == other.external
+}
+
+func diffSubjectFacts(first, second subjectFacts, cut bool) (diffField, firstVal, secondVal string) {
+	if !first.source.Equal(second.source) {
+		c1 := first.source.Closure()
+		c2 := second.source.Closure()
+		switch {
+		case c1.Hash != c2.Hash:
+			return "closure_hash", c1.Hash, c2.Hash
+		case c1.TestVariants != c2.TestVariants:
+			return "closure_test_variants", c1.TestVariants, c2.TestVariants
+		case c1.ToolchainContent != c2.ToolchainContent:
+			return "closure_toolchain_content", c1.ToolchainContent, c2.ToolchainContent
+		case c1.AdmissionPolicy != c2.AdmissionPolicy:
+			return "closure_admission_policy", c1.AdmissionPolicy, c2.AdmissionPolicy
+		case c1.Unverifiable != c2.Unverifiable:
+			return "closure_unverifiable", strconv.FormatBool(c1.Unverifiable), strconv.FormatBool(c2.Unverifiable)
+		case c1.Reason != c2.Reason:
+			return "closure_reason", c1.Reason, c2.Reason
+		default:
+			return "closure_effects", fmt.Sprintf("%+v", first.source), fmt.Sprintf("%+v", second.source)
+		}
+	}
+	if !sameRefusal(first.openWorld, second.openWorld) {
+		return "open_world", formatRefusal(first.openWorld), formatRefusal(second.openWorld)
+	}
+	if !cut && !sameRefusal(first.sharedState, second.sharedState) {
+		return "shared_state", formatRefusal(first.sharedState), formatRefusal(second.sharedState)
+	}
+	if !sameRefusal(first.ambiguous, second.ambiguous) {
+		return "ambiguous", formatRefusal(first.ambiguous), formatRefusal(second.ambiguous)
+	}
+	if first.external != second.external {
+		return "external", strconv.FormatBool(first.external), strconv.FormatBool(second.external)
+	}
+	return "closure", fmt.Sprintf("%+v", first), fmt.Sprintf("%+v", second)
+}
+
+func formatRefusal(r *subjectRefusal) string {
+	if r == nil {
+		return ""
+	}
+	if r.culprit.Package != "" || r.culprit.Symbol != "" {
+		return r.culprit.Package + "." + r.culprit.Symbol + ": " + r.reason
+	}
+	return r.reason
 }
 
 func (f *observationFacts) closure(subject Subject) closure.Closure {

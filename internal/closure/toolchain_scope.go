@@ -254,34 +254,26 @@ func allNonSelPropIdentsInSet[V any](files []*ast.File, names map[string]V, allo
 		return true
 	}
 	ok := true
-	var walk func(n ast.Node)
-	walk = func(n ast.Node) {
+	var inspect func(n ast.Node) bool
+	inspect = func(n ast.Node) bool {
 		if !ok || n == nil {
-			return
+			return false
 		}
-		if sel, isSel := n.(*ast.SelectorExpr); isSel {
-			walk(sel.X)
-			return
-		}
-		if id, isID := n.(*ast.Ident); isID {
-			if _, match := names[id.Name]; match && !allowed[id] {
+		switch node := n.(type) {
+		case *ast.SelectorExpr:
+			ast.Inspect(node.X, inspect)
+			return false
+		case *ast.Ident:
+			if _, match := names[node.Name]; match && !allowed[node] {
 				ok = false
 			}
-			return
-		}
-		ast.Inspect(n, func(ch ast.Node) bool {
-			if !ok {
-				return false
-			}
-			if ch == n {
-				return true
-			}
-			walk(ch)
 			return false
-		})
+		default:
+			return true
+		}
 	}
 	for _, f := range files {
-		walk(f)
+		ast.Inspect(f, inspect)
 		if !ok {
 			return false
 		}
@@ -294,71 +286,65 @@ func filterNonSelPropIdentsInSet(files []*ast.File, allowedByName map[string]map
 	if len(allowedByName) == 0 {
 		return leaked
 	}
-	var walk func(n ast.Node)
-	walk = func(n ast.Node) {
+	var inspect func(n ast.Node) bool
+	inspect = func(n ast.Node) bool {
 		if n == nil {
-			return
-		}
-		if sel, isSel := n.(*ast.SelectorExpr); isSel {
-			walk(sel.X)
-			return
-		}
-		if id, isID := n.(*ast.Ident); isID {
-			if allowed, match := allowedByName[id.Name]; match && !allowed[id] {
-				leaked[id.Name] = true
-			}
-			return
-		}
-		ast.Inspect(n, func(ch ast.Node) bool {
-			if ch == n {
-				return true
-			}
-			walk(ch)
 			return false
-		})
+		}
+		switch node := n.(type) {
+		case *ast.SelectorExpr:
+			ast.Inspect(node.X, inspect)
+			return false
+		case *ast.Ident:
+			if allowed, match := allowedByName[node.Name]; match && !allowed[node] {
+				leaked[node.Name] = true
+			}
+			return false
+		default:
+			return true
+		}
 	}
 	for _, f := range files {
-		walk(f)
+		ast.Inspect(f, inspect)
 	}
 	return leaked
 }
 
 func walkNonSelectorPropIdents(root ast.Node, fn func(*ast.Ident)) {
-	var walk func(n ast.Node)
-	walk = func(n ast.Node) {
+	var inspect func(n ast.Node) bool
+	inspect = func(n ast.Node) bool {
 		if n == nil {
-			return
+			return false
 		}
 		switch node := n.(type) {
 		case *ast.SelectorExpr:
-			walk(node.X)
+			ast.Inspect(node.X, inspect)
+			return false
 		case *ast.KeyValueExpr:
-			walk(node.Value)
+			ast.Inspect(node.Value, inspect)
+			return false
 		case *ast.StructType:
 			if node.Fields != nil {
 				for _, field := range node.Fields.List {
-					walk(field.Type)
+					ast.Inspect(field.Type, inspect)
 				}
 			}
+			return false
 		case *ast.InterfaceType:
 			if node.Methods != nil {
 				for _, field := range node.Methods.List {
-					walk(field.Type)
+					ast.Inspect(field.Type, inspect)
 				}
 			}
+			return false
 		case *ast.Ident:
 			fn(node)
+			return false
 		default:
-			ast.Inspect(node, func(ch ast.Node) bool {
-				if ch == node {
-					return true
-				}
-				walk(ch)
-				return false
-			})
+			return true
 		}
 	}
-	walk(root)
+	ast.Inspect(root, inspect)
 }
 
 func allNonSelectorPropIdentsIn(files []*ast.File, allowedByName map[string]map[*ast.Ident]bool) bool {

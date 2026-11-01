@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/trace"
+	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/gofresh/shortgates"
 	"github.com/greatliontech/stipulator/stipulate/structural"
 	"go/ast"
@@ -247,4 +249,143 @@ func TestVouchInputShapes(t *testing.T) {
 	structural.FunctionSignature[func(string) (string, error)](t, ParseVouchEntry)
 	structural.FunctionSignature[func([]string) ([]string, error)](t, ParseVouchEntries)
 	structural.FunctionSignature[func(string) ([]string, error)](t, ReadVouchFile)
+}
+
+func TestTraceDomainsAndTwoPassDiff(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/traced\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte("package traced\n\nfunc Add(a, b int) int { return a + b }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := trace.NewRecorder()
+	ctx := trace.WithSink(t.Context(), rec)
+
+	session, err := NewSession(ctx, BuildDescription{
+		Directory:   dir,
+		Environment: os.Environ(),
+		Inputs:      []string{},
+	}, SessionPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subj := Subject{Package: "example.com/traced", Symbol: "Add"}
+	snap, err := session.Snapshot(ctx, []Subject{subj}, CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fps, err := snap.CaptureBatch(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := snap.Check(ctx, fps[subj], subj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Valid {
+		t.Fatalf("Check status = %s, want valid", verdict.Status)
+	}
+
+	if len(rec.ByName("session_init")) == 0 {
+		t.Fatal("missing session_init trace event")
+	}
+	if len(rec.ByName("subject_closure")) == 0 {
+		t.Fatal("missing subject_closure trace event")
+	}
+	if len(rec.ByName("pass_summary")) == 0 {
+		t.Fatal("missing pass_summary trace event")
+	}
+	if len(rec.ByName("check_verdict")) == 0 {
+		t.Fatal("missing check_verdict trace event")
+	}
+
+	// Mutate p.go and verify compareObservations emits two_pass_diff naming closure_hash.
+	rec.Reset()
+	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte("package traced\n\nfunc Add(a, b int) int { return a + b + 1 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := snap.Validate(ctx); !errors.Is(err, ErrViewChanged) {
+		t.Fatalf("Validate after source edit = %v, want ErrViewChanged", err)
+	}
+	diffs := rec.ByName("two_pass_diff")
+	if len(diffs) == 0 {
+		t.Fatal("expected two_pass_diff trace event on ErrViewChanged")
+	}
+	if got := diffs[0].StringField("diff_field"); got != "closure_hash" {
+		t.Fatalf("two_pass_diff diff_field = %q, want closure_hash", got)
+	}
+}
+
+func TestTraceNonInterference(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/noninterf\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte("package noninterf\n\nfunc Mul(a, b int) int { return a * b }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	subj := Subject{Package: "example.com/noninterf", Symbol: "Mul"}
+
+	runCapture := func(traced bool) (Fingerprint, BuildDescription, runtimeinput.Observation) {
+		env := os.Environ()
+		sess, err := NewSession(t.Context(), BuildDescription{
+			Directory:   dir,
+			Environment: env,
+			Inputs:      []string{},
+		}, SessionPolicy{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		snap, err := sess.Snapshot(t.Context(), []Subject{subj}, CodeResult)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bd, err := snap.BuildDescription(subj.Package)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fps, err := snap.CaptureBatch(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		bracket, err := runtimeinput.CaptureBracket(t.Context(), dir, []string{"."})
+		if err != nil {
+			t.Fatal(err)
+		}
+		log := "# test log\ngetenv HOME\n"
+		if traced {
+			log += "getenv GOFRESH_TRACE\ngetenv GOFRESH_TRACE_FILE\n"
+		}
+		obs, err := runtimeinput.FromTestLog([]byte(log), dir, dir, env, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(bracket))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fps[subj], bd, obs
+	}
+
+	t.Setenv(trace.EnvTrace, "")
+	t.Setenv(trace.EnvTraceFile, "")
+	plainFP, plainBD, plainObs := runCapture(false)
+
+	traceFile := filepath.Join(t.TempDir(), "trace.jsonl")
+	t.Setenv(trace.EnvTrace, "all")
+	t.Setenv(trace.EnvTraceFile, traceFile)
+	t.Cleanup(func() {
+		os.Unsetenv(trace.EnvTrace)
+		os.Unsetenv(trace.EnvTraceFile)
+		trace.RefreshFromEnv()
+	})
+	tracedFP, tracedBD, tracedObs := runCapture(true)
+
+	if plainFP != tracedFP {
+		t.Fatalf("fingerprint changed under tracing:\nplain:  %+v\ntraced: %+v", plainFP, tracedFP)
+	}
+	if !reflect.DeepEqual(plainBD, tracedBD) {
+		t.Fatalf("BuildDescription changed under tracing:\nplain:  %+v\ntraced: %+v", plainBD, tracedBD)
+	}
+	if plainObs.State != tracedObs.State {
+		t.Fatalf("runtime input State changed under tracing:\nplain:  %+v\ntraced: %+v", plainObs.State, tracedObs.State)
+	}
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/cachefile"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // The toolchain-source audit is keyed by CONTENT: each audited surface
@@ -316,13 +317,36 @@ func pkgIncludeRelativeFiles(ctx context.Context, pkgIncludeDir string) ([]strin
 // stale, and a platform whose stamps carry no change time is never
 // current.
 func stampsCurrent(l surfaceListing) bool {
-	if !stampsTrusted || !cacheableDiscovery(l) {
+	return stampsCurrentContext(context.Background(), l)
+}
+
+func stampsCurrentContext(ctx context.Context, l surfaceListing) bool {
+	if !stampsTrusted {
+		trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", "",
+			trace.String("reason", "stamps_untrusted"),
+		)
+		return false
+	}
+	if !cacheableDiscovery(l) {
+		trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", "",
+			trace.String("reason", "uncacheable_discovery"),
+		)
 		return false
 	}
 	recorded := make(map[string]bool, len(l.Discovery))
 	for _, d := range l.Discovery {
 		stamps, err := stampEntries(d.Path)
-		if err != nil || !slices.Equal(stamps, d.Entries) {
+		if err != nil {
+			trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", d.Path,
+				trace.String("reason", "read_error"),
+				trace.Err(err),
+			)
+			return false
+		}
+		if !slices.Equal(stamps, d.Entries) {
+			if trace.Enabled(ctx, trace.DomainToolchain, d.Path) {
+				emitEntryStampMismatch(ctx, d.Path, d.Entries, stamps)
+			}
 			return false
 		}
 		recorded[filepath.Clean(d.Path)] = true
@@ -332,15 +356,57 @@ func stampsCurrent(l surfaceListing) bool {
 			pkgInclude := filepath.Join(goroot, "pkg", "include")
 			if _, err := os.Lstat(pkgInclude); err == nil {
 				if !recorded[filepath.Clean(pkgInclude)] {
+					trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", pkgInclude,
+						trace.String("reason", "missing_pkg_include_stamp"),
+					)
 					return false
 				}
 			} else if !os.IsNotExist(err) {
+				trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", pkgInclude,
+					trace.String("reason", "pkg_include_stat_error"),
+					trace.Err(err),
+				)
 				return false
 			}
 			break
 		}
 	}
 	return true
+}
+
+func emitEntryStampMismatch(ctx context.Context, dirPath string, recorded, current []entryStamp) {
+	n := min(len(recorded), len(current))
+	for i := range n {
+		if recorded[i] == current[i] {
+			continue
+		}
+		if recorded[i].Name == current[i].Name {
+			trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", dirPath,
+				trace.String("entry", recorded[i].Name),
+				trace.String("reason", "entry_stamp_changed"),
+				trace.Int64("recorded_size", recorded[i].Size),
+				trace.Int64("current_size", current[i].Size),
+				trace.Int64("recorded_mtime", recorded[i].ModTime),
+				trace.Int64("current_mtime", current[i].ModTime),
+				trace.Int64("recorded_ctime", recorded[i].ChangeTime),
+				trace.Int64("current_ctime", current[i].ChangeTime),
+				trace.Uint32("recorded_mode", uint32(recorded[i].Type)),
+				trace.Uint32("current_mode", uint32(current[i].Type)),
+			)
+			return
+		}
+		trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", dirPath,
+			trace.String("entry", recorded[i].Name),
+			trace.String("current_entry", current[i].Name),
+			trace.String("reason", "entry_set_changed"),
+		)
+		return
+	}
+	trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", dirPath,
+		trace.String("reason", "entry_count_changed"),
+		trace.Int("recorded_count", len(recorded)),
+		trace.Int("current_count", len(current)),
+	)
 }
 
 // A symlink can select source through an unstamped target without changing
@@ -642,9 +708,19 @@ func verifyReadPackageDigest(ctx context.Context, p listedPackage, cache map[str
 			if !stampMatches {
 				currentBytes, err := os.ReadFile(rf.fullPath)
 				if err != nil {
+					trace.Emit(ctx, trace.DomainToolchain, "stamp_fallback", p.ImportPath,
+						trace.String("file", framedName),
+						trace.Bool("content_equal", false),
+						trace.Err(err),
+					)
 					return false, err
 				}
-				if !bytes.Equal(currentBytes, rf.data) {
+				eq := bytes.Equal(currentBytes, rf.data)
+				trace.Emit(ctx, trace.DomainToolchain, "stamp_fallback", p.ImportPath,
+					trace.String("file", framedName),
+					trace.Bool("content_equal", eq),
+				)
+				if !eq {
 					return false, nil
 				}
 			}
@@ -938,7 +1014,18 @@ func toolchainSourceScope(snapshot *gotool.EnvSnapshot, buildFlags []string, see
 func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir string, env []string, snapshot *gotool.EnvSnapshot, buildFlags []string) (sourceDigests, error) {
 	scope := toolchainSourceScope(snapshot, buildFlags, surfaceSeeds())
 	var l surfaceListing
-	warmListing := cachefile.Load(sourceDigestsDirName, scope, "listing", &l) && l.Version == sourceDigestsVersion && len(l.Packages) != 0 && len(l.Discovery) != 0 && l.Integrity == listingIntegrity(scope, l) && stampsCurrent(l)
+	warmListing := cachefile.Load(sourceDigestsDirName, scope, "listing", &l) && l.Version == sourceDigestsVersion && len(l.Packages) != 0 && len(l.Discovery) != 0 && l.Integrity == listingIntegrity(scope, l) && stampsCurrentContext(ctx, l)
+	if trace.AnyEnabled() {
+		goroot := snapshot.Value("GOROOT")
+		if trace.Enabled(ctx, trace.DomainToolchain, goroot) {
+			trace.Emit(ctx, trace.DomainToolchain, "scope_resolved", goroot,
+				trace.String("goversion", snapshot.Value("GOVERSION")),
+				trace.Strings("build_flags", buildFlags),
+				trace.String("scope", scope),
+				trace.Bool("warm_listing", warmListing),
+			)
+		}
+	}
 	if !warmListing {
 		args := append([]string{"-json", "-e", "-deps"}, buildFlags...)
 		args = append(args, "std")
@@ -1240,6 +1327,34 @@ func verifyToolchainSurfaceWithIO(ctx context.Context, d sourceDigests) (failed 
 	return failed, ioErr, ctxErr
 }
 
+func pkgIncludeDigestForSurface(ctx context.Context, d sourceDigests) (string, error) {
+	rtLP, ok := d.inventory["runtime"]
+	if !ok {
+		return "", nil
+	}
+	goroot, ok := stdPackageGOROOT(rtLP.Dir, rtLP.ImportPath)
+	if !ok {
+		return rtLP.digest, nil
+	}
+	pkgIncludeDir := filepath.Join(goroot, "pkg", "include")
+	info, err := os.Stat(pkgIncludeDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "none", nil
+		}
+		return "", fmt.Errorf("pkg/include: %w", err)
+	}
+	if !info.IsDir() {
+		return "non-dir", nil
+	}
+	rels, err := pkgIncludeRelativeFiles(ctx, pkgIncludeDir)
+	if err != nil {
+		return "", fmt.Errorf("pkg/include: %w", err)
+	}
+	var buf [32 * 1024]byte
+	return digestFilesWithExtraBuffered(ctx, pkgIncludeDir, nil, pkgIncludeDir, rels, buf[:])
+}
+
 func verifyToolchainSurfaceAndDelegatesWithIO(ctx context.Context, d sourceDigests) (failed []string, pureDelegates map[string]bool, ioErr error, ctxErr error) {
 	if len(d.Packages) == 0 {
 		var missing []string
@@ -1269,9 +1384,12 @@ func verifyToolchainSurfaceAndDelegatesWithIO(ctx context.Context, d sourceDiges
 	if policy == "" {
 		policy = admissionPolicy()
 	}
-	pkgIncludeSalt := ""
-	if rtLP, ok := d.inventory["runtime"]; ok {
-		pkgIncludeSalt = rtLP.digest
+	pkgIncludeSalt, incErr := pkgIncludeDigestForSurface(ctx, d)
+	if incErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, nil, ctxErr
+		}
+		return nil, nil, incErr, nil
 	}
 	rootDelegates := map[string][]string{}
 	surfaceVerdicts := map[string]verifiedPackageVerdict{}
@@ -1526,9 +1644,15 @@ func verifyListedPackageMemoized(ctx context.Context, lp listedPackage, policy, 
 		func(ctx context.Context, lp listedPackage, salt string) (verifiedPackageVerdict, error) {
 			verdict, verdictErr, ioErr := verifyListedPackageWithIOAndSalt(ctx, lp, salt)
 			if ioErr != nil {
+				trace.Emit(ctx, trace.DomainToolchain, "package_io_error", lp.ImportPath,
+					trace.Err(ioErr),
+				)
 				return verifiedPackageVerdict{}, ioErr
 			}
 			if verdictErr != nil {
+				trace.Emit(ctx, trace.DomainToolchain, "package_verdict_error", lp.ImportPath,
+					trace.Err(verdictErr),
+				)
 				return verifiedPackageVerdict{OK: false}, nil
 			}
 			verdict.OK = true
@@ -1546,9 +1670,17 @@ func verifyPureDelegateMemoized(ctx context.Context, lp listedPackage, policy, p
 		func(ctx context.Context, lp listedPackage, salt string) (verifiedPackageVerdict, error) {
 			verdict, verdictErr, ioErr := verifyPureCandidateWithIOAndSalt(ctx, lp, salt)
 			if ioErr != nil {
+				trace.Emit(ctx, trace.DomainToolchain, "package_io_error", lp.ImportPath,
+					trace.String("tier", "pure_delegate"),
+					trace.Err(ioErr),
+				)
 				return verifiedPackageVerdict{}, ioErr
 			}
 			if verdictErr != nil {
+				trace.Emit(ctx, trace.DomainToolchain, "package_verdict_error", lp.ImportPath,
+					trace.String("tier", "pure_delegate"),
+					trace.Err(verdictErr),
+				)
 				return verifiedPackageVerdict{OK: false}, nil
 			}
 			verdict.OK = true
@@ -2068,29 +2200,34 @@ func toolchainSourceDegradationContext(ctx context.Context, version string, d so
 }
 
 func toolchainSourceDegradationAndDelegatesContext(ctx context.Context, version string, d sourceDigests, listErr error) (selectionDegradation, map[string]bool, error) {
+	deg, pureDelegates, _, err := toolchainSourceDegradationDetailsContext(ctx, version, d, listErr)
+	return deg, pureDelegates, err
+}
+
+func toolchainSourceDegradationDetailsContext(ctx context.Context, version string, d sourceDigests, listErr error) (selectionDegradation, map[string]bool, []string, error) {
 	if listErr != nil {
 		return selectionDegradation{
 			fmt.Sprintf("the audited surface of %s could not be read: %v", version, listErr),
 			"; the admission needs the toolchain's standard-library source listed and readable",
-		}, nil, nil
+		}, nil, nil, nil
 	}
 	failed, pureDelegates, ioErr, ctxErr := verifyToolchainSurfaceAndDelegatesWithIO(ctx, d)
 	if ctxErr != nil {
-		return selectionDegradation{}, nil, ctxErr
+		return selectionDegradation{}, nil, nil, ctxErr
 	}
 	if ioErr != nil {
 		return selectionDegradation{
 			fmt.Sprintf("the audited surface of %s could not be read: %v", version, ioErr),
 			"; the admission needs the toolchain's standard-library source listed and readable",
-		}, nil, nil
+		}, nil, nil, nil
 	}
 	if len(failed) == 0 {
-		return selectionDegradation{}, pureDelegates, nil
+		return selectionDegradation{}, pureDelegates, nil, nil
 	}
 	return selectionDegradation{
 		fmt.Sprintf("the audited surface of %s moved in %d keys: %s", version, len(failed), namedMoved(failed)),
 		"; the admission needs every audited standard-library package to satisfy the structural source contracts",
-	}, nil, nil
+	}, nil, failed, nil
 }
 
 // resolveSelection derives a pass's toolchain-source verdict through
@@ -2125,12 +2262,23 @@ func resolveSelection(ctx context.Context, reader *gotool.EnvReader, buildFlags 
 	if ctx.Err() != nil {
 		return selectionDegradation{}, sourceDigests{}, ctx.Err()
 	}
-	deg, pureDelegates, err := toolchainSourceDegradationAndDelegatesContext(ctx, snapshot.Value("GOVERSION"), d, listErr)
+	goversion := snapshot.Value("GOVERSION")
+	deg, pureDelegates, failedPkgs, err := toolchainSourceDegradationDetailsContext(ctx, goversion, d, listErr)
 	if err != nil {
 		return selectionDegradation{}, sourceDigests{}, err
 	}
 	if deg.audited() {
 		d.pureDelegates = pureDelegates
+	}
+	if trace.Enabled(ctx, trace.DomainToolchain, goversion) {
+		trace.Emit(ctx, trace.DomainToolchain, "selection_resolved", goversion,
+			trace.Bool("audited", deg.audited()),
+			trace.String("content_digest", d.Content),
+			trace.String("policy_digest", d.Policy),
+			trace.Int("pure_delegates", len(d.pureDelegates)),
+			trace.Strings("failed_packages", failedPkgs),
+			trace.String("degradation", deg.notice()),
+		)
 	}
 	return deg, d, nil
 }
