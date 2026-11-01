@@ -62,10 +62,10 @@
 
 ## Phase 4: Pillar 3 — Coherent Testing Framework & Suite Consolidation
 
-- [ ] **Chunk 4.1: Tier 0 & Tier 1 In-Memory Harnesses and `closure/fixtures/*` Elimination**
-  - [ ] Build the shared Tier 1 in-memory compiler frontend and SSA harness (`parseAndTypecheckDAG` and `buildInMemorySSA` backed by a process-wide cached stdlib `types.Importer` and `sync.OnceValues` stdlib SSA cache) plus shared Tier 0 helpers (`testenv.AssertAllFieldsPopulated[T]`).
-  - [ ] Inline 108 single-purpose `closure/fixtures/*` snippet directories into Tier 1 table suites, delete the orphaned fixture `embedfixture`, move the 2 root-only fixtures (`externaldirective`, `puredirective`) into root `testdata/`, move the remaining 16 multi-package/cgo/embed/asm fixtures into `internal/closure/testdata/`, and remove `closure/fixtures/` so `go list ./...` contains 0 accidental fixture packages.
-  - [ ] Build the shared Tier 3 amortization helpers (`sharedGOROOTOverlayOnce`, `compileSharedTestBinaryOnce`, and package-wide `prepareFixtureSuitesOnce`).
+- [x] **Chunk 4.1: Tier 0 & Tier 1 In-Memory Harnesses and `closure/fixtures/*` Elimination**
+  - [x] Build the shared Tier 1 in-memory compiler frontend and SSA harness (`parseAndTypecheckDAG` and `buildInMemorySSA` backed by a process-wide cached stdlib `types.Importer` and `sync.OnceValues` stdlib SSA cache) plus shared Tier 0 helpers (`testenv.AssertAllFieldsPopulated[T]`).
+  - [x] Inline 108 single-purpose `closure/fixtures/*` snippet directories into Tier 1 table suites, delete the orphaned fixture `embedfixture`, move the 2 root-only fixtures (`externaldirective`, `puredirective`) into root `testdata/`, move the remaining 16 multi-package/cgo/embed/asm fixtures into `internal/closure/testdata/`, and remove `closure/fixtures/` so `go list ./...` contains 0 accidental fixture packages.
+  - [x] Build the shared Tier 3 amortization helpers (`sharedGOROOTOverlayOnce`, `compileSharedTestBinaryOnce`, and package-wide `prepareFixtureSuitesOnce`).
 
 - [ ] **Chunk 4.2: Root `gofresh` Test Suite Consolidation (74 Files -> 14 Tiered Files)**
   - [ ] Convert the 296 static-analysis subtests in `view_test.go` (including `TestCarrierEscapeDischarges`), `datamemo_test.go` (15), `fieldstore_test.go` (23), `oncefill_test.go` (33), `explain_test.go`, `initsubject_test.go`, `recvname_test.go`, `genericview_test.go`, and `dynamicstate_test.go` from subprocess `packages.Load` runs into Tier 0 (`dynamicstate_algebra_test.go`, `verdict_algebra_test.go`) and Tier 1 (`dynamicstate_scan_test.go`, `observability_scan_test.go`).

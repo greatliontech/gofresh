@@ -55,7 +55,7 @@ func TestComputeMaximalBatchWithSourcesIncludesWidenedPackageFiles(t *testing.T)
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/opaqueasm"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/opaqueasm"
 	subject := Subject{Package: pkg, Symbol: "BenchmarkOpaqueASM"}
 	h, err := newAt("..")
 	if err != nil {
@@ -65,7 +65,7 @@ func TestComputeMaximalBatchWithSourcesIncludesWidenedPackageFiles(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := filepath.Abs(filepath.Join("fixtures", "opaqueasm", "defs.inc"))
+	want, err := filepath.Abs(filepath.Join("testdata", "opaqueasm", "defs.inc"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -703,7 +703,7 @@ func TestComputeMaximalBatchHonorsCancellationDuringTraversal(t *testing.T) {
 	}
 	h.ctx = &cancelAfterContext{Context: context.Background(), remaining: 1}
 	_, _, err = h.ComputeMaximalBatch([]Subject{{
-		Package: "github.com/greatliontech/gofresh/internal/closure/fixtures/direct",
+		Package: "github.com/greatliontech/gofresh/internal/closure/testdata/direct",
 		Symbol:  "BenchmarkDirect",
 	}})
 	if err == nil {

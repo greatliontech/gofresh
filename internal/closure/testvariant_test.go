@@ -459,7 +459,7 @@ func TestWidenedCoreKeepsTestFilesUndiscriminated(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"asm_amd64.s", "defs.inc", "opaqueasm.go", "opaqueasm_test.go"} {
-		content, err := os.ReadFile(filepath.Join("fixtures", "opaqueasm", name))
+		content, err := os.ReadFile(filepath.Join("testdata", "opaqueasm", name))
 		if err != nil {
 			t.Fatal(err)
 		}

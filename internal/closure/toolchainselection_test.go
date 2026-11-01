@@ -238,7 +238,7 @@ func TestUnlistedSurfaceRefusesObservability(t *testing.T) {
 		t.Skip("runs the engine over the fixture corpus")
 	}
 	isolateProofCache(t)
-	fixture, err := filepath.Abs("fixtures/observable")
+	fixture, err := filepath.Abs("testdata/observable")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestUnlistedSurfaceRefusesObservability(t *testing.T) {
 	if !listed.SelectionAudited() {
 		t.Skipf("running toolchain unlisted (the canary covers it): %s", listed.SelectionNotice())
 	}
-	subject := Subject{Package: "github.com/greatliontech/gofresh/internal/closure/fixtures/observable", Symbol: "TestReadFile"}
+	subject := Subject{Package: "github.com/greatliontech/gofresh/internal/closure/testdata/observable", Symbol: "TestReadFile"}
 	listedObs, err := listed.ComputeObservabilityBatch([]Subject{subject})
 	if err != nil {
 		t.Fatal(err)

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/testenv"
 )
 
 // Tests must never read or write the real user proof cache: the observability
@@ -25,6 +26,7 @@ func TestMain(m *testing.M) {
 	}
 	os.Setenv("XDG_CACHE_HOME", tmp)
 	code := m.Run()
+	testenv.CleanupShared()
 	os.RemoveAll(tmp)
 	os.Exit(code)
 }

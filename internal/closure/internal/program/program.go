@@ -205,6 +205,12 @@ func load(ctx context.Context, dir string, env, flags, paths []string) ([]*packa
 	)
 }
 
+// FromPackages builds whole-program SSA for one package's test binary directly
+// from pre-constructed or pre-loaded root packages.
+func FromPackages(ctx context.Context, pkgPath string, roots []*packages.Package) (*Program, error) {
+	return build(ctx, pkgPath, roots)
+}
+
 // build builds whole-program SSA for one package's test binary from its
 // root packages (generics instantiated, so RTA traverses real edges through std
 // and dispatches generic instantiations concretely). A load error is fatal — a

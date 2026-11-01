@@ -13,7 +13,7 @@ import (
 //
 //gofresh:pure
 func BenchmarkFixturePreparation(b *testing.B) {
-	const base = "github.com/greatliontech/gofresh/internal/closure/fixtures/"
+	const base = "github.com/greatliontech/gofresh/internal/closure/testdata/"
 	paths := []string{base + "observable", base + "external", base + "initfile", base + "rootcollision/bench"}
 	h, err := newAt("")
 	if err != nil {

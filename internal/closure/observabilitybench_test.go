@@ -9,7 +9,7 @@ import "testing"
 //
 //gofresh:pure
 func BenchmarkComputeObservabilityBatch(b *testing.B) {
-	const base = "github.com/greatliontech/gofresh/internal/closure/fixtures/"
+	const base = "github.com/greatliontech/gofresh/internal/closure/testdata/"
 	subjects := []Subject{
 		{Package: base + "observable", Symbol: "TestReadFile"},
 		{Package: base + "observable", Symbol: "TestGetenv"},

@@ -763,6 +763,8 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 	var loaded []*packages.Package
 	if base != nil && base.prog != nil {
 		loaded = base.prog.Pkgs
+	} else if prog := h.progs[pkgPath]; prog != nil {
+		loaded = prog.Pkgs
 	}
 	if len(loaded) == 0 {
 		loaded = h.viewLoadVariants(pkgPath)

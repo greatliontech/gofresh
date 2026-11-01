@@ -16,7 +16,7 @@ import (
 	arta "github.com/greatliontech/gofresh/internal/closure/internal/rta"
 )
 
-const batchIsolationPackage = "github.com/greatliontech/gofresh/internal/closure/fixtures/batchisolation"
+const batchIsolationPackage = "github.com/greatliontech/gofresh/internal/closure/testdata/batchisolation"
 
 func TestAttributedRTAEqualsIndependentRTA(t *testing.T) {
 	if testing.Short() {
@@ -26,6 +26,7 @@ func TestAttributedRTAEqualsIndependentRTA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	supplyRegisteredFixtures(t, h, batchIsolationPackage)
 	prog, err := h.loadCached(batchIsolationPackage)
 	if err != nil {
 		t.Fatal(err)
@@ -61,6 +62,7 @@ func TestAttributedRTADynamicFactsRemainIsolated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	supplyRegisteredFixtures(t, h, batchIsolationPackage)
 	prog, err := h.loadCached(batchIsolationPackage)
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +141,7 @@ func TestTier2WidensInitializedMutableGlobalDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := computeTier2Result(h, "github.com/greatliontech/gofresh/internal/closure/fixtures/globalcallback", "F")
+	result, err := computeTier2Result(h, "github.com/greatliontech/gofresh/internal/closure/testdata/globalcallback", "F")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,6 +158,7 @@ func TestAttributedRTARootMasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	supplyRegisteredFixtures(t, h, batchIsolationPackage)
 	prog, err := h.loadCached(batchIsolationPackage)
 	if err != nil {
 		t.Fatal(err)
@@ -193,6 +196,7 @@ func TestAttributedRTAHonorsCancellationDuringTraversal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	supplyRegisteredFixtures(t, h, batchIsolationPackage)
 	prog, err := h.loadCached(batchIsolationPackage)
 	if err != nil {
 		t.Fatal(err)
@@ -212,6 +216,7 @@ func TestTier2ProjectionHonorsCancellationDuringTraversal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	supplyRegisteredFixtures(t, h, batchIsolationPackage)
 	prog, err := h.loadCached(batchIsolationPackage)
 	if err != nil {
 		t.Fatal(err)

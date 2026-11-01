@@ -2,28 +2,68 @@ package testenv
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/greatliontech/gofresh/gotool"
 )
 
+var (
+	hostGOROOTMu sync.Mutex
+	hostGOROOT   string
+)
+
+func resolveOrigGOROOT(t testing.TB, env []string) string {
+	t.Helper()
+	var runner gotool.Runner
+	for i := len(env) - 1; i >= 0; i-- {
+		if val, ok := strings.CutPrefix(env[i], "GOROOT="); ok {
+			if strings.TrimSpace(val) != "" {
+				snapshot, err := runner.TakeEnvSnapshot(context.Background(), t.TempDir(), env)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return snapshot.Value("GOROOT")
+			}
+			break
+		}
+	}
+	hostGOROOTMu.Lock()
+	defer hostGOROOTMu.Unlock()
+	if hostGOROOT != "" {
+		return hostGOROOT
+	}
+	snapshot, err := runner.TakeEnvSnapshot(context.Background(), t.TempDir(), env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostGOROOT = snapshot.Value("GOROOT")
+	return hostGOROOT
+}
+
 // OverlayGOROOT constructs an isolated GOROOT copy of the host toolchain with
 // the specified GOROOT-relative overlay files written on top.
 func OverlayGOROOT(t testing.TB, env []string, overlays map[string]string) string {
 	t.Helper()
-	snapshot, err := (gotool.Runner{}).TakeEnvSnapshot(context.Background(), t.TempDir(), env)
-	if err != nil {
-		t.Fatal(err)
-	}
-	origRoot := snapshot.Value("GOROOT")
+	origRoot := resolveOrigGOROOT(t, env)
 	tmp, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	dstRoot := filepath.Join(tmp, "goroot")
+	buildGOROOTOverlayAt(t, origRoot, dstRoot, overlays)
+	return dstRoot
+}
+
+func buildGOROOTOverlayAt(t testing.TB, origRoot, dstRoot string, overlays map[string]string) {
+	t.Helper()
 	if err := os.MkdirAll(dstRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +174,83 @@ func OverlayGOROOT(t testing.TB, env []string, overlays map[string]string) strin
 			t.Fatal(err)
 		}
 	}
+}
+
+var (
+	sharedOverlaysMu   sync.Mutex
+	sharedOverlayRoots = map[string]string{}
+	sharedOverlayDirs  []string
+)
+
+func overlayCacheKey(key, origRoot string, overlays map[string]string) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%s\x00%s\x00", key, origRoot)
+	keys := make([]string, 0, len(overlays))
+	for k := range overlays {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		fmt.Fprintf(h, "%s\x00%d:%s\x00", k, len(overlays[k]), overlays[k])
+	}
+	return hex.EncodeToString(h.Sum(nil)[:16])
+}
+
+// SharedGOROOTOverlay constructs or reuses a process-wide read-only GOROOT
+// overlay keyed by (key, origRoot, overlays). Callers that mutate the returned
+// GOROOT after construction must use OverlayGOROOT instead.
+func SharedGOROOTOverlay(t testing.TB, key string, env []string, overlays map[string]string) string {
+	t.Helper()
+	origRoot := resolveOrigGOROOT(t, env)
+	cacheKey := overlayCacheKey(key, origRoot, overlays)
+	sharedOverlaysMu.Lock()
+	defer sharedOverlaysMu.Unlock()
+	if existing, ok := sharedOverlayRoots[cacheKey]; ok {
+		if _, err := os.Stat(existing); err == nil {
+			return existing
+		}
+	}
+	rawTmp, err := os.MkdirTemp("", "gofresh-shared-goroot-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedOverlayDirs = append(sharedOverlayDirs, rawTmp)
+	tmp, err := filepath.EvalSymlinks(rawTmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstRoot := filepath.Join(tmp, "goroot")
+	buildGOROOTOverlayAt(t, origRoot, dstRoot, overlays)
+	sharedOverlayRoots[cacheKey] = dstRoot
 	return dstRoot
+}
+
+// SharedGOROOTOverlayEnv constructs or reuses a process-wide read-only GOROOT
+// overlay and returns a normalized environment rooted at that GOROOT with
+// GOCACHE explicitly pinned.
+func SharedGOROOTOverlayEnv(t testing.TB, key string, baseEnv []string, overlays map[string]string) (string, []string) {
+	t.Helper()
+	dstRoot := SharedGOROOTOverlay(t, key, baseEnv, overlays)
+	preserved, err := gotool.PreserveBuildCache(context.Background(), baseEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preserved = gotool.SetEnv(preserved, "GOROOT", dstRoot)
+	preserved = gotool.SetEnv(preserved, "GOTOOLCHAIN", "local")
+	return dstRoot, preserved
+}
+
+// CleanupShared removes all process-wide shared GOROOT overlays and temporary
+// test artifacts created during the test binary run.
+func CleanupShared() {
+	sharedOverlaysMu.Lock()
+	dirs := sharedOverlayDirs
+	sharedOverlayDirs = nil
+	clear(sharedOverlayRoots)
+	sharedOverlaysMu.Unlock()
+	for _, dir := range dirs {
+		_ = os.RemoveAll(dir)
+	}
 }
 
 // OverlayGOROOTEnv constructs an isolated GOROOT overlay and returns a
@@ -153,22 +269,22 @@ func OverlayGOROOTEnv(t testing.TB, baseEnv []string, overlays map[string]string
 
 const unauditedBadStdSource = "//go:build badstd\n\npackage strings\n\nimport _ \"unsafe\"\n\n//go:linkname gofreshUnapproved\nfunc gofreshUnapproved() {}\n"
 
-// UnauditedTagGOROOT constructs an isolated GOROOT copy of the host toolchain
-// with a tag-gated file in package strings (`//go:build badstd`) that declares
-// an unapproved single-argument push linkname.
+// UnauditedTagGOROOT constructs or reuses a read-only GOROOT copy of the host
+// toolchain with a tag-gated file in package strings (`//go:build badstd`) that
+// declares an unapproved single-argument push linkname.
 func UnauditedTagGOROOT(t testing.TB, env []string) string {
 	t.Helper()
-	return OverlayGOROOT(t, env, map[string]string{
+	return SharedGOROOTOverlay(t, "badstd", env, map[string]string{
 		"src/strings/gofresh_badstd.go": unauditedBadStdSource,
 	})
 }
 
-// UnauditedTagGOROOTEnv constructs an isolated GOROOT copy with the `badstd`
-// overlay and returns a normalized environment rooted at that GOROOT with
-// GOCACHE explicitly pinned.
+// UnauditedTagGOROOTEnv constructs or reuses a read-only GOROOT copy with the
+// `badstd` overlay and returns a normalized environment rooted at that GOROOT
+// with GOCACHE explicitly pinned.
 func UnauditedTagGOROOTEnv(t testing.TB, baseEnv []string) (string, []string) {
 	t.Helper()
-	return OverlayGOROOTEnv(t, baseEnv, map[string]string{
+	return SharedGOROOTOverlayEnv(t, "badstd", baseEnv, map[string]string{
 		"src/strings/gofresh_badstd.go": unauditedBadStdSource,
 	})
 }

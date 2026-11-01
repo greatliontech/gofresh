@@ -11,10 +11,10 @@ func TestObservabilityBatchReleasesPrograms(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	const base = "github.com/greatliontech/gofresh/internal/closure/fixtures/"
+	const base = "github.com/greatliontech/gofresh/internal/closure/testdata/"
 	subjects := []Subject{
 		{Package: base + "observable", Symbol: "TestReadFile"},
-		{Package: base + "observablestat", Symbol: "TestStat"},
+		{Package: base + "observablebad", Symbol: "TestOpenStat"},
 	}
 	h, err := newAt("")
 	if err != nil {
@@ -43,7 +43,7 @@ func TestObservabilityBatchReleasesProgramOnUnrootedGroup(t *testing.T) {
 	if testing.Short() {
 		t.Skip("runs the engine over the fixture corpus")
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/observable"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/observable"
 	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)

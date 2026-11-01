@@ -68,7 +68,15 @@ func (f *fixturePrograms) acquire(pkgPath string) error {
 		if len(f.roster) > 0 && !f.attempted {
 			f.attempted = true
 			f.typedLoads++
-			f.prepared, f.prepareErr = f.prepare(f.h.ctx, f.h.dir, f.h.packageEnv, f.h.buildFlags, f.roster...)
+			var diskRoster []string
+			for _, r := range f.roster {
+				if _, ok := inMemoryFixtureRegistry[r]; !ok {
+					diskRoster = append(diskRoster, r)
+				}
+			}
+			if len(diskRoster) > 0 {
+				f.prepared, f.prepareErr = f.prepare(f.h.ctx, f.h.dir, f.h.packageEnv, f.h.buildFlags, diskRoster...)
+			}
 		}
 		// Cancellation never licenses an independent fallback, including a
 		// context error returned by a preparation whose context is still live.
@@ -84,7 +92,12 @@ func (f *fixturePrograms) acquire(pkgPath string) error {
 		var p *program
 		var err error
 		f.ssaBuilds++
-		if f.prepared != nil {
+		if inMemProg, metas, ok, inMemErr := loadRegisteredInMemoryFixture(f.h.ctx, pkgPath); ok {
+			p, err = inMemProg, inMemErr
+			if err == nil {
+				f.h.lists[pkgPath] = metas
+			}
+		} else if f.prepared != nil {
 			p, err = f.prepared.Build(f.h.ctx, pkgPath)
 		} else {
 			// Only a load-wide operational preparation failure reaches this
@@ -109,6 +122,9 @@ func (f *fixturePrograms) releaseProgram() {
 		evictSummaryCache(f.loaded.Prog)
 		evictMutatedGlobalsCache(f.loaded.Prog)
 		delete(f.h.progs, f.loaded.PkgPath)
+		if _, ok := inMemoryFixtureRegistry[f.loaded.PkgPath]; ok {
+			delete(f.h.lists, f.loaded.PkgPath)
+		}
 		f.loaded = nil
 	}
 }

@@ -342,7 +342,7 @@ func TestAssumePureInputShape(t *testing.T) {
 	}
 }
 
-const methodPkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/methodsubject"
+const methodPkg = "github.com/greatliontech/gofresh/internal/closure/testdata/methodsubject"
 
 // TestCaptureCheckRoundTrip pins the happy path end to end: a fingerprint captured
 // for a pure subject is Valid when checked against the same tree, and the same
@@ -522,7 +522,7 @@ func TestAssumePureOverride(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
-	subj := Subject{Package: "github.com/greatliontech/gofresh/internal/closure/fixtures/harnessroot", Symbol: "BenchmarkProd"}
+	subj := Subject{Package: "github.com/greatliontech/gofresh/internal/closure/testdata/harnessroot", Symbol: "BenchmarkProd"}
 
 	e, err := newEngine()
 	if err != nil {
@@ -808,7 +808,7 @@ func TestExternalDirectiveFixtureScan(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/externaldirective"
+	const pkg = "github.com/greatliontech/gofresh/testdata/externaldirective"
 	e, err := newEngine()
 	if err != nil {
 		t.Fatal(err)

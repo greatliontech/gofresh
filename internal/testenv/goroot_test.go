@@ -53,3 +53,52 @@ func TestOverlayGOROOTUnlinksHardlinkedSourceBeforeWrite(t *testing.T) {
 		t.Fatal("OverlayGOROOT mutated hardlinked host GOROOT file in place")
 	}
 }
+
+func TestSharedGOROOTOverlayReusesDirectoryAndCleanupRemovesIt(t *testing.T) {
+	env := os.Environ()
+	overlays := map[string]string{
+		"src/strings/gofresh_shared_probe.go": "//go:build sharedprobe\n\npackage strings\n",
+	}
+	first := SharedGOROOTOverlay(t, "probe", env, overlays)
+	second := SharedGOROOTOverlay(t, "probe", env, overlays)
+	if first != second {
+		t.Fatalf("SharedGOROOTOverlay returned distinct paths %q and %q for identical key", first, second)
+	}
+	if _, err := os.Stat(filepath.Join(first, "src", "strings", "gofresh_shared_probe.go")); err != nil {
+		t.Fatalf("expected overlaid file in shared GOROOT: %v", err)
+	}
+	CleanupShared()
+	if _, err := os.Stat(first); !os.IsNotExist(err) {
+		t.Fatalf("expected CleanupShared to remove %q, got err=%v", first, err)
+	}
+}
+
+func TestAssertAllFieldsPopulatedAndParseAndTypecheckDAG(t *testing.T) {
+	t.Parallel()
+	type sample struct {
+		Name  string
+		Count int
+		Skip  string
+	}
+	AssertAllFieldsPopulated(t, sample{Name: "ok", Count: 1}, "Skip")
+	AssertAllFieldsPopulated(t, &sample{Name: "ok", Count: 1}, "Skip")
+
+	pkgs := ParseAndTypecheckDAG(t, t.TempDir(), map[string]map[string]string{
+		"example.com/dep": {
+			"dep.go": "package dep\nfunc Value() int { return 42 }\n",
+		},
+		"example.com/app": {
+			"app.go":      "package app\nimport \"example.com/dep\"\nfunc Answer() int { return dep.Value() }\n",
+			"app_test.go": "package app\nimport \"testing\"\nfunc TestAnswer(t *testing.T) { _ = Answer() }\n",
+			"ext_test.go": "package app_test\nimport (\n\t\"testing\"\n\t\"example.com/app\"\n)\nfunc TestExt(t *testing.T) { _ = app.Answer() }\n",
+		},
+	})
+	if len(pkgs) != 3 {
+		t.Fatalf("len(pkgs) = %d, want 3 (dep, app, app_test)", len(pkgs))
+	}
+	for _, p := range pkgs {
+		if p.Dir == "" {
+			t.Fatalf("pkg %s has empty Dir", p.ID)
+		}
+	}
+}

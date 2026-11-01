@@ -125,15 +125,15 @@ func TestFixturePreparationPreservesIndependentEvidence(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compares independent whole-program analyses")
 	}
-	const base = "github.com/greatliontech/gofresh/internal/closure/fixtures/"
+	const base = "github.com/greatliontech/gofresh/internal/closure/testdata/"
 	cases := []struct {
 		path, symbol string
 		observable   bool
 	}{
 		{base + "observable", "TestReadFile", true},
 		{base + "initfile", "TestInitFile", false},
-		{base + "harnessmainwrite", "TestProd", false},
-		{base + "dyncaller", "RunCheck", true},
+		{base + "observablemutation", "TestRemove", false},
+		{base + "harnessroot", "BenchmarkProd", true},
 	}
 	h, err := newAt("")
 	if err != nil {

@@ -22,12 +22,29 @@ import (
 // would grow peak memory with the table instead of the largest single
 // test binary.
 func computeTier2ResultAndReach(h *Hasher, pkgPath, symbol string) (tier2Result, map[string]bool, error) {
+	_, retainList := h.lists[pkgPath]
+	if _, ok := h.progs[pkgPath]; ok {
+		retainList = true
+	}
+	defer func() {
+		if !retainList {
+			delete(h.lists, pkgPath)
+		}
+	}()
 	prog := h.progs[pkgPath]
 	if prog == nil {
-		var err error
-		prog, err = progpkg.Load(h.ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
-		if err != nil {
-			return tier2Result{}, nil, err
+		if inMemProg, metas, ok, err := loadRegisteredInMemoryFixture(h.ctx, pkgPath); ok {
+			if err != nil {
+				return tier2Result{}, nil, err
+			}
+			prog = inMemProg
+			h.lists[pkgPath] = metas
+		} else {
+			var err error
+			prog, err = progpkg.Load(h.ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
+			if err != nil {
+				return tier2Result{}, nil, err
+			}
 		}
 	}
 	if prog.Roots[symbol] == nil {
@@ -36,16 +53,10 @@ func computeTier2ResultAndReach(h *Hasher, pkgPath, symbol string) (tier2Result,
 		}
 		return tier2Result{}, nil, fmt.Errorf("closure: subject %s not found in %s", symbol, pkgPath)
 	}
-	_, retainList := h.lists[pkgPath]
 	metas, err := h.list(pkgPath)
 	if err != nil {
 		return tier2Result{}, nil, err
 	}
-	defer func() {
-		if !retainList {
-			delete(h.lists, pkgPath)
-		}
-	}()
 	reachable, err := attributedReachableSets(h.ctx, true, h.source.pureDelegates, prog, []Subject{{Package: pkgPath, Symbol: symbol}})
 	if err != nil {
 		return tier2Result{}, nil, err

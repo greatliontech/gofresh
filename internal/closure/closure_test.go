@@ -1369,7 +1369,7 @@ func TestAnalysisRootsAnySubject(t *testing.T) {
 
 	// (b) A function in a package with NO test files: resolved via the plain-package
 	// fallback (no ForTest variant exists).
-	const noTests = "github.com/greatliontech/gofresh/internal/closure/fixtures/rootcollision/dep"
+	const noTests = "github.com/greatliontech/gofresh/internal/closure/testdata/rootcollision/dep"
 	_, bReach, err := computeTier2ResultAndReach(h, noTests, "BenchmarkSame")
 	if err != nil {
 		t.Fatalf("analysis of func in a no-test package: %v", err)
@@ -1493,7 +1493,7 @@ func TestMethodSubjectsRootAtSpecificMethod(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/methodsubject"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/methodsubject"
 
 	fixtures := newFixturePrograms(t, h)
 	fixtures.supply(t, pkg)
@@ -1532,7 +1532,7 @@ func TestGenericMethodSubjectsRootPerMethod(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/genericmethod"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/genericmethod"
 	fixtures := newFixturePrograms(t, h)
 	fixtures.supply(t, pkg)
 	_, getReach, err := computeTier2ResultAndReach(h, pkg, "Box.Get") // value receiver on Box[T]
@@ -1567,7 +1567,7 @@ func TestTestMainRootedOnlyForTestSubjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/harnessroot"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/harnessroot"
 
 	fixtures := newFixturePrograms(t, h)
 	fixtures.supply(t, pkg)
@@ -1602,8 +1602,8 @@ func TestClosureIncludesInitRegisteredSideEffectPackage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const benchPkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/initregistry/bench"
-	const codecPkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/initregistry/codec"
+	const benchPkg = "github.com/greatliontech/gofresh/internal/closure/testdata/initregistry/bench"
+	const codecPkg = "github.com/greatliontech/gofresh/internal/closure/testdata/initregistry/codec"
 
 	_, reach, err := computeTier2ResultAndReach(h, benchPkg, "BenchmarkDecode")
 	if err != nil {
@@ -1628,7 +1628,7 @@ func TestReachIncludesTestMainRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/testmainroot"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/testmainroot"
 	_, reach, err := computeTier2ResultAndReach(h, pkg, "BenchmarkTestMainRoot")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
@@ -1646,7 +1646,7 @@ func TestAnalysisReachStaysSubjectPrecise(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/direct"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/direct"
 	tr, reach, err := computeTier2ResultAndReach(h, pkg, "BenchmarkDirect")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
@@ -1687,7 +1687,7 @@ func TestExternalTestBenchmarkRoots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/externalbench"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/externalbench"
 	_, reach, err := computeTier2ResultAndReach(h, pkg, "BenchmarkExternal")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
@@ -1770,7 +1770,7 @@ func TestStdWrapperClassBUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/stdwrapper"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/stdwrapper"
 	tr, err := computeTier2Result(h, pkg, "BenchmarkTemplateParseFiles")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
@@ -1788,7 +1788,7 @@ func TestStdCallbackMethodStaysReached(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/stdcallback"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/stdcallback"
 	_, reach, err := computeTier2ResultAndReach(h, pkg, "BenchmarkSortCallback")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
@@ -1815,7 +1815,7 @@ func TestAnalysisReachesUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const base = "github.com/greatliontech/gofresh/internal/closure/fixtures/"
+	const base = "github.com/greatliontech/gofresh/internal/closure/testdata/"
 	// retainedEffect pins a classified fact that must survive among the
 	// subject's effects when a higher-ranked diagnostic is preferred: the
 	// unix fixtures reach golang.org/x/sys/unix, whose non-toolchain assembly
@@ -1897,7 +1897,7 @@ func TestTier2RetainsEveryReachedExternalEffect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/mixedexternal"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/mixedexternal"
 	result, err := computeTier2Result(h, pkg, "BenchmarkMixedExternal")
 	if err != nil {
 		t.Fatal(err)
@@ -1924,7 +1924,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const base = "github.com/greatliontech/gofresh/internal/closure/fixtures/"
+	const base = "github.com/greatliontech/gofresh/internal/closure/testdata/"
 	cases := []struct {
 		fixture, subject string
 		observable       bool
@@ -1952,7 +1952,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "harnesstb", subject: "TestHelperTBTwice", observable: true},
 		// The open-world refusal names the dispatch edge: the enclosing
 		// function and the interface method the unresolved invoke calls.
-		{fixture: "harnesstb", subject: "TestHelperTBRecursive", reason: "interface invoke outside RTA: github.com/greatliontech/gofresh/internal/closure/fixtures/harnesstb.mustBaselineDeep dispatches testing.TB.Fatal"},
+		{fixture: "harnesstb", subject: "TestHelperTBRecursive", reason: "interface invoke outside RTA: github.com/greatliontech/gofresh/internal/closure/testdata/harnesstb.mustBaselineDeep dispatches testing.TB.Fatal"},
 		{fixture: "harnesstbenv", subject: "TestHelperTBSetenv", reason: "package scan: reaches testing.Setenv (process or path mutation)"},
 		// The subject-determined dispatch admission classifies the
 		// enumerated targets instead of widening; the wrapper type's
@@ -2105,10 +2105,10 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "dyncaller", subject: "RunEffect", reason: "os.WriteFile"},
 		// A computed call names the value it calls where that value has
 		// a stable identity - here the escaped parameter.
-		{fixture: "dyncaller", subject: "RunEscaped", reason: "computed function call in github.com/greatliontech/gofresh/internal/closure/fixtures/dyncaller.RunEscaped calling parameter check"},
+		{fixture: "dyncaller", subject: "RunEscaped", reason: "computed function call in github.com/greatliontech/gofresh/internal/closure/testdata/dyncaller.RunEscaped calling parameter check"},
 		// A computed call through a package-level function variable
 		// names the variable it dispatches.
-		{fixture: "dyncaller", subject: "RunViaVar", reason: "computed function call in github.com/greatliontech/gofresh/internal/closure/fixtures/dyncaller.RunViaVar calling github.com/greatliontech/gofresh/internal/closure/fixtures/dyncaller.hook"},
+		{fixture: "dyncaller", subject: "RunViaVar", reason: "computed function call in github.com/greatliontech/gofresh/internal/closure/testdata/dyncaller.RunViaVar calling github.com/greatliontech/gofresh/internal/closure/testdata/dyncaller.hook"},
 		// The subject-determined dispatch admission: a helper-interior
 		// invoke whose operand derives wholly from subject flow and
 		// whose enumerated targets are analyzed content stops widening -
@@ -2116,7 +2116,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// shared mutable state keeps the refusal.
 		{fixture: "depdispatch", subject: "RunLocalDispatch", observable: true},
 		{fixture: "depdispatch", subject: "RunEffectDispatch", reason: "os.WriteFile"},
-		{fixture: "depdispatch", subject: "RunSharedDispatch", reason: "interface invoke outside RTA: github.com/greatliontech/gofresh/internal/closure/fixtures/depdispatch.measureVia dispatches github.com/greatliontech/gofresh/internal/closure/fixtures/depdispatch.sizer.size"},
+		{fixture: "depdispatch", subject: "RunSharedDispatch", reason: "interface invoke outside RTA: github.com/greatliontech/gofresh/internal/closure/testdata/depdispatch.measureVia dispatches github.com/greatliontech/gofresh/internal/closure/testdata/depdispatch.sizer.size"},
 		// The enumeration-target narrowing: an init-parented closure of
 		// matching signature stays out of an enumeration-closed
 		// subject's target set, so the initializer's read no longer
@@ -2136,7 +2136,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		// so the whole-mask drag stays and the latent write refuses at
 		// the subject tier.
 		{fixture: "dyninitstdframe", subject: "RunSort", reason: "os.WriteFile", absent: "startup effect:"},
-		{fixture: "depdispatch", subject: "RunNilDispatch", reason: "interface invoke outside RTA: github.com/greatliontech/gofresh/internal/closure/fixtures/depdispatch.dispatchNever dispatches github.com/greatliontech/gofresh/internal/closure/fixtures/depdispatch.never.nope"},
+		{fixture: "depdispatch", subject: "RunNilDispatch", reason: "interface invoke outside RTA: github.com/greatliontech/gofresh/internal/closure/testdata/depdispatch.dispatchNever dispatches github.com/greatliontech/gofresh/internal/closure/testdata/depdispatch.never.nope"},
 		{fixture: "dyncaller", subject: "RunUncalled", reason: "computed function call"},
 		{fixture: "dyncaller", subject: "RunMixed", reason: "computed function call"},
 		{fixture: "dyncaller", subject: "RunDead", reason: "open subject world"},
@@ -2245,7 +2245,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "flagregalias", subject: "TestProd", reason: "startup effect: references flag-registered state"},
 		// A dependency's untraceable sink blocks this package's
 		// subjects too - the poison spans the test binary.
-		{fixture: "flagregdep", subject: "TestProd", reason: "untraceable sink in github.com/greatliontech/gofresh/internal/closure/fixtures/flagregescape"},
+		{fixture: "flagregdep", subject: "TestProd", reason: "untraceable sink in github.com/greatliontech/gofresh/internal/closure/testdata/flagregescape"},
 		// The benchmark-bearing sibling proves observable: b.Loop is
 		// benchmark pacing, an admitted harness fact the fold ignores
 		// (REQ-closure-observability-benchmark-pacing) — the deliberate
@@ -2254,24 +2254,31 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "mixedexternal", subject: "BenchmarkMixedExternal", reason: "subject reachability"},
 	}
 	var roster []string
+	byFixture := map[string][]Subject{}
 	for _, tc := range cases {
-		roster = append(roster, base+tc.fixture)
+		pkg := base + tc.fixture
+		roster = append(roster, pkg)
+		byFixture[tc.fixture] = append(byFixture[tc.fixture], Subject{Package: pkg, Symbol: tc.subject})
 	}
 	fixtures := newFixturePrograms(t, h, roster...)
-	transitions, previous := 0, ""
+	proofs := map[Subject]Observability{}
+	computed := map[string]bool{}
+	transitions := 0
 	for _, tc := range cases {
 		t.Run(tc.fixture+"/"+tc.subject, func(t *testing.T) {
-			if previous != tc.fixture {
+			pkg := base + tc.fixture
+			if !computed[tc.fixture] {
+				computed[tc.fixture] = true
 				transitions++
-				previous = tc.fixture
+				fixtures.supply(t, pkg)
+				res, err := h.ComputeObservabilityBatch(byFixture[tc.fixture])
+				if err != nil {
+					t.Fatal(err)
+				}
+				maps.Copy(proofs, res)
 			}
-			subject := Subject{Package: base + tc.fixture, Symbol: tc.subject}
-			fixtures.supply(t, subject.Package)
-			results, err := h.ComputeObservabilityBatch([]Subject{subject})
-			if err != nil {
-				t.Fatal(err)
-			}
-			got := results[subject]
+			subject := Subject{Package: pkg, Symbol: tc.subject}
+			got := proofs[subject]
 			if got.Observable != tc.observable || tc.reason != "" && !strings.Contains(got.Reason, tc.reason) || tc.observable && got.Reason != "" {
 				t.Fatalf("observability = %+v, want observable=%v reason containing %q", got, tc.observable, tc.reason)
 			}
@@ -2296,9 +2303,10 @@ func TestFlagRegistrationFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const base = "github.com/greatliontech/gofresh/internal/closure/fixtures/"
+	const base = "github.com/greatliontech/gofresh/internal/closure/testdata/"
 	facts := func(t *testing.T, pkgPath string) (map[string]bool, map[string]string) {
 		t.Helper()
+		supplyRegisteredFixtures(t, h, pkgPath)
 		prog, err := h.loadCached(pkgPath)
 		if err != nil {
 			t.Fatal(err)
@@ -2370,7 +2378,7 @@ func TestOpenFileFlagsUseSelectedGOOS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/observablefresh"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/observablefresh"
 	subjects := []Subject{
 		{Package: pkg, Symbol: "TestTempDirOpenFile"},
 		{Package: pkg, Symbol: "TestOpenFileUnknownFlags"},
@@ -2395,7 +2403,8 @@ func TestSubjectProvenanceIncludesTestingCallbacks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/observablecallbackbad"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/observablecallbackbad"
+	supplyRegisteredFixtures(t, h, pkg)
 	prog, err := h.loadCached(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -2425,7 +2434,7 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 	// concurrency escapes, mutation and process effects — with several subjects
 	// sharing one package so shared reachability masks and package effect scans
 	// are genuinely exercised (REQ-closure-observability-batch-equivalence).
-	const base = "github.com/greatliontech/gofresh/internal/closure/fixtures/"
+	const base = "github.com/greatliontech/gofresh/internal/closure/testdata/"
 	subjects := []Subject{
 		{Package: base + "observable", Symbol: "TestReadFile"},
 		{Package: base + "observable", Symbol: "TestReadDir"},
@@ -2451,10 +2460,15 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 		{Package: base + "harnessmain", Symbol: "TestPlant"},
 		{Package: base + "harnesslog", Symbol: "TestReadFileFatal"},
 	}
+	var subjectPkgs []string
+	for _, s := range subjects {
+		subjectPkgs = append(subjectPkgs, s.Package)
+	}
 	batchHasher, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
 	}
+	supplyRegisteredFixtures(t, batchHasher, subjectPkgs...)
 	batch, err := batchHasher.ComputeObservabilityBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
@@ -2470,6 +2484,7 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				supplyRegisteredFixtures(t, independentHasher, subject.Package)
 				independent, err := independentHasher.ComputeObservabilityBatch([]Subject{subject})
 				if err != nil {
 					t.Fatal(err)
@@ -2507,6 +2522,7 @@ func TestObservabilityBatchMatchesIndependentAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	supplyRegisteredFixtures(t, sharedHasher, subjectPkgs...)
 	if _, _, err := sharedHasher.ComputeMaximalBatch(subjects); err != nil {
 		t.Fatal(err)
 	}
@@ -2534,7 +2550,7 @@ func TestProvenanceReachabilityHonorsCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/observable"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/observable"
 	prog, err := h.loadCached(pkg)
 	if err != nil {
 		t.Fatal(err)
@@ -2567,7 +2583,7 @@ func TestTier2ReflectWidens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/reflectfixture"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/reflectfixture"
 	tr, err := computeTier2Result(h, pkg, "BenchmarkReflect")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
@@ -2585,7 +2601,7 @@ func TestTier2GenericInterfaceEscapeAnalyzesMethodBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/genericescape"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/genericescape"
 	tr, err := computeTier2Result(h, pkg, "BenchmarkGenericEscape")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
@@ -2610,7 +2626,7 @@ func TestTier2ConstGroupAnalyzesWithoutWiden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/constgroup"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/constgroup"
 	tr, err := computeTier2Result(h, pkg, "BenchmarkConstGroup")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
@@ -2634,7 +2650,7 @@ func TestNonToolchainAssemblyWidensAndBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/asmcall"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/asmcall"
 	tr, err := computeTier2Result(h, pkg, "BenchmarkASMCall")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
@@ -3064,7 +3080,7 @@ func TestImportBindingAnalyzesWithoutWiden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/importbinding"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/importbinding"
 	tr, err := computeTier2Result(h, pkg, "BenchmarkImportBinding")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
@@ -3082,7 +3098,7 @@ func TestTier2ASMTargetInterfaceInvokeWidens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/asminvoke"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/asminvoke"
 	tr, err := computeTier2Result(h, pkg, "BenchmarkASMInvoke")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
@@ -3100,7 +3116,7 @@ func TestTier2GenericPostRTAInvokeWidens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/genericpostrta"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/genericpostrta"
 	tr, err := computeTier2Result(h, pkg, "BenchmarkGenericPostRTA")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
@@ -3118,7 +3134,7 @@ func TestTier2ReflectReferenceScansClassB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/reflectexternal"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/reflectexternal"
 	tr, err := computeTier2Result(h, pkg, "BenchmarkReflectExternal")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
@@ -3256,7 +3272,7 @@ func TestLinknameLocalTargetResolvesWithoutWiden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/linknamelocal/bench"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/linknamelocal/bench"
 	tr, err := computeTier2Result(h, pkg, "BenchmarkLinknameLocal")
 	if err != nil {
 		t.Fatalf("analysis: %v", err)
@@ -3338,7 +3354,7 @@ func TestBenchmarkRootScopedToTargetPackage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/rootcollision/bench"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/rootcollision/bench"
 	prog, err := h.loadCached(pkg)
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -3415,7 +3431,7 @@ func TestRootedFunctionsUnderAnEndedContextMemoizeNoLoadFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/observable"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/observable"
 	ended, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := h.ComputeRootedFunctions(ended, []Subject{{Package: pkg, Symbol: "TestReadFile"}}); !errors.Is(err, context.Canceled) {
@@ -3473,19 +3489,19 @@ func TestRootedFunctionsReleaseEachGroupsProgram(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const first = "github.com/greatliontech/gofresh/internal/closure/fixtures/observable"
-	const second = "github.com/greatliontech/gofresh/internal/closure/fixtures/observableconcurrent"
+	const first = "github.com/greatliontech/gofresh/internal/closure/testdata/observable"
+	const second = "github.com/greatliontech/gofresh/internal/closure/testdata/observablebad"
 	var retainedAtSecondLoad int
 	h.OnProgress(func(phase, pkgPath string) {
 		if phase == "load" && pkgPath == second {
 			retainedAtSecondLoad = len(h.progs)
 		}
 	})
-	rooted, err := h.ComputeRootedFunctions(h.ctx, []Subject{{Package: first, Symbol: "TestReadFile"}, {Package: second, Symbol: "TestConcurrentFileRead"}})
+	rooted, err := h.ComputeRootedFunctions(h.ctx, []Subject{{Package: first, Symbol: "TestReadFile"}, {Package: second, Symbol: "TestOpenStat"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !rooted[Subject{Package: first, Symbol: "TestReadFile"}].Complete || !rooted[Subject{Package: second, Symbol: "TestConcurrentFileRead"}].Complete {
+	if !rooted[Subject{Package: first, Symbol: "TestReadFile"}].Complete || !rooted[Subject{Package: second, Symbol: "TestOpenStat"}].Complete {
 		t.Fatalf("inventories incomplete: %+v", rooted)
 	}
 	if retainedAtSecondLoad != 0 {
@@ -3508,7 +3524,7 @@ func TestBinaryRootedFunctionsReleaseThePackagesProgram(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const ambiguous = "github.com/greatliontech/gofresh/internal/closure/fixtures/ambiguousroot"
+	const ambiguous = "github.com/greatliontech/gofresh/internal/closure/testdata/ambiguousroot"
 	inventories, err := h.ComputeBinaryRootedFunctions(h.ctx, []string{ambiguous})
 	if err != nil {
 		t.Fatal(err)

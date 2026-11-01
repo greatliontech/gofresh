@@ -1041,7 +1041,7 @@ func TestHarnessLoggingIsNotPurityEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixtures := newFixturePrograms(t, h)
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/harnesslog"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/harnesslog"
 	fixtures.supply(t, pkg)
 	result, err := computeTier2Result(h, pkg, "TestLogOnly")
 	if err != nil {
@@ -1079,8 +1079,8 @@ func TestHarnessLoggingIsNotPurityEvidence(t *testing.T) {
 	// A weakest-rank sibling (the ambient clock's unaudited-standard read)
 	// must also win: the harness fact is strictly weakest, never a tie it
 	// can take lexicographically.
-	fixtures.supply(t, "github.com/greatliontech/gofresh/internal/closure/fixtures/harnessclock")
-	sibling, err := computeTier2Result(h, "github.com/greatliontech/gofresh/internal/closure/fixtures/harnessclock", "TestLogAmbientClock")
+	fixtures.supply(t, "github.com/greatliontech/gofresh/internal/closure/testdata/harnessclock")
+	sibling, err := computeTier2Result(h, "github.com/greatliontech/gofresh/internal/closure/testdata/harnessclock", "TestLogAmbientClock")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1723,7 +1723,7 @@ func TestBenchmarkPacingIsNotPurityEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixtures := newFixturePrograms(t, h)
-	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/benchpacing"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/testdata/benchpacing"
 	fixtures.supply(t, pkg)
 	result, err := computeTier2Result(h, pkg, "BenchmarkLoopOnly")
 	if err != nil {
