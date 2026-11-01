@@ -40,6 +40,11 @@ func TestContributionCgoCallbackHashesPackageFiles(t *testing.T) {
 	}
 }
 
+func cgoNativeFileHasRawString(text string) bool {
+	_, raw := stripCComments(text)
+	return raw
+}
+
 func TestCgoNativeFileHasRawString(t *testing.T) {
 	allowed := []struct {
 		name string

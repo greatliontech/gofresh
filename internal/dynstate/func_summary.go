@@ -2916,7 +2916,7 @@ func classifyRegistrantFlow(audited bool, p *packages.Package, expr ast.Expr, em
 			return
 		}
 	case *ast.FuncLit:
-		classifyLiteralRegistrant(audited, p, elemPositionField, e, emit)
+		classifyLiteralRegistrant(audited, p, ElemPositionField, e, emit)
 		return
 	case *ast.BasicLit:
 		return
@@ -2934,7 +2934,7 @@ func classifyRegistrantFlow(audited bool, p *packages.Package, expr ast.Expr, em
 		if obj, ok := identUseOrDef(p, e); ok {
 			switch obj.(type) {
 			case *types.Func:
-				classifyFieldRegistrantValue(audited, p, elemPositionField, e, emit)
+				classifyFieldRegistrantValue(audited, p, ElemPositionField, e, emit)
 				return
 			case *types.Nil:
 				return
@@ -2943,13 +2943,13 @@ func classifyRegistrantFlow(audited bool, p *packages.Package, expr ast.Expr, em
 	case *ast.SelectorExpr:
 		if obj, ok := p.TypesInfo.Uses[e.Sel]; ok {
 			if _, isFunc := obj.(*types.Func); isFunc {
-				classifyFieldRegistrantValue(audited, p, elemPositionField, e, emit)
+				classifyFieldRegistrantValue(audited, p, ElemPositionField, e, emit)
 				return
 			}
 		}
 	case *ast.IndexExpr, *ast.IndexListExpr:
 		if fn, _ := plainCalleeFunc(p, e); fn != nil {
-			classifyFieldRegistrantValue(audited, p, elemPositionField, e, emit)
+			classifyFieldRegistrantValue(audited, p, ElemPositionField, e, emit)
 			return
 		}
 	}
@@ -4670,7 +4670,7 @@ func recordReturnFieldRegistrants(
 			}
 		case *ast.FuncLit:
 			if !funPositions[n] {
-				classifyLiteralRegistrant(audited, p, elemPositionField, n, emit)
+				classifyLiteralRegistrant(audited, p, ElemPositionField, n, emit)
 			}
 		case *ast.CallExpr:
 			if tv, ok := p.TypesInfo.Types[n.Fun]; ok && tv.IsType() {
@@ -4685,18 +4685,18 @@ func recordReturnFieldRegistrants(
 				break
 			}
 			if typeCarriesSignature(p.TypesInfo.TypeOf(n)) {
-				emit(fieldRegMark{class: 'p', field: elemPositionField, idx: -1})
+				emit(fieldRegMark{class: 'p', field: ElemPositionField, idx: -1})
 			}
 		case *ast.SelectorExpr:
 			if funPositions[n] || writePositions[n] {
 				break
 			}
 			if _, isFunc := p.TypesInfo.Uses[n.Sel].(*types.Func); isFunc {
-				classifyFieldRegistrantValue(audited, p, elemPositionField, n, emit)
+				classifyFieldRegistrantValue(audited, p, ElemPositionField, n, emit)
 				break
 			}
 			if typeCarriesSignature(p.TypesInfo.TypeOf(n)) {
-				emit(fieldRegMark{class: 'p', field: elemPositionField, idx: -1})
+				emit(fieldRegMark{class: 'p', field: ElemPositionField, idx: -1})
 			}
 		case *ast.IndexExpr, *ast.IndexListExpr:
 			expr := n.(ast.Expr)
@@ -4704,18 +4704,18 @@ func recordReturnFieldRegistrants(
 				break
 			}
 			if fn, _ := plainCalleeFunc(p, expr); fn != nil {
-				classifyFieldRegistrantValue(audited, p, elemPositionField, expr, emit)
+				classifyFieldRegistrantValue(audited, p, ElemPositionField, expr, emit)
 				break
 			}
 			if typeCarriesSignature(p.TypesInfo.TypeOf(expr)) {
-				emit(fieldRegMark{class: 'p', field: elemPositionField, idx: -1})
+				emit(fieldRegMark{class: 'p', field: ElemPositionField, idx: -1})
 			}
 		case *ast.Ident:
 			if funPositions[n] {
 				break
 			}
 			if _, isFunc := p.TypesInfo.Uses[n].(*types.Func); isFunc {
-				classifyFieldRegistrantValue(audited, p, elemPositionField, n, emit)
+				classifyFieldRegistrantValue(audited, p, ElemPositionField, n, emit)
 				break
 			}
 			if v, ok := p.TypesInfo.Uses[n].(*types.Var); ok && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() && typeCarriesSignature(v.Type()) {

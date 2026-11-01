@@ -292,6 +292,8 @@ func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool
 	recv, name, hasDot := strings.Cut(subjectSymbol, ".")
 	if !hasDot {
 		recv, name = "", subjectSymbol
+	} else {
+		recv = receiverTypeName(recv)
 	}
 	if name == "" || (hasDot && recv == "") || strings.Contains(name, ".") {
 		return false
@@ -302,6 +304,16 @@ func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool
 	}
 	if before.BindingStrategy != BindingStrategy || after.BindingStrategy != BindingStrategy {
 		return false
+	}
+	for _, decl := range before.Declarations {
+		if decl.Kind == "directive" {
+			return false
+		}
+	}
+	for _, decl := range after.Declarations {
+		if decl.Kind == "directive" {
+			return false
+		}
 	}
 	if !reflect.DeepEqual(before.BaseFiles, after.BaseFiles) {
 		return false
@@ -742,7 +754,13 @@ func bindingsPreserved(before, after TestVariantLedger, added []TestVariantDecla
 				return false
 			}
 			for _, a := range added {
-				if a.Name != "_" && a.Package == b.Package && a.Name == ref {
+				if a.Name == "_" {
+					if a.Kind == "const" && a.Package == b.Package && ref == "_" {
+						return false
+					}
+					continue
+				}
+				if a.Name == ref && (a.Package == b.Package || (ast.IsExported(a.Name) && a.Package+"_test" == b.Package)) {
 					return false
 				}
 			}

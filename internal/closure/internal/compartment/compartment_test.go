@@ -709,7 +709,7 @@ func ProdB() int { return 0 }
 	}
 
 	// 5. Replacing an intermediate const spec with a blank-named const governor (_ = 999)
-	// before an omitted-list const (c2) defeats inertness for TestConst (Finding 1).
+	// before an omitted-list const (c2) defeats inertness for TestConst.
 	constBeforeTests := map[string]string{
 		"a_test.go": `package p
 import "testing"

@@ -23,11 +23,14 @@ func NodeDeclarationKey(pkg *packages.Package, node ast.Node) string {
 			return fmt.Sprintf("%s:%d", position.Filename, position.Offset)
 		}
 	}
-	return fmt.Sprintf("%s:%d", pkg.PkgPath, node.Pos())
-}
-
-func nodeDeclarationKey(pkg *packages.Package, node ast.Node) string {
-	return NodeDeclarationKey(pkg, node)
+	var pkgPath string
+	if pkg != nil {
+		pkgPath = pkg.PkgPath
+	}
+	if node == nil {
+		return fmt.Sprintf("%s:0", pkgPath)
+	}
+	return fmt.Sprintf("%s:%d", pkgPath, node.Pos())
 }
 
 func ObjectDeclarationKey(pkg *packages.Package, obj types.Object) string {
@@ -58,10 +61,6 @@ func HasDirective(doc *ast.CommentGroup, directive string) bool {
 		}
 	}
 	return false
-}
-
-func hasDirective(doc *ast.CommentGroup, directive string) bool {
-	return HasDirective(doc, directive)
 }
 
 // MethodDirectives resolves a promoted method's purity and externality
@@ -108,16 +107,22 @@ func WalkLoadedSubjects(audited, computeOpenWorld bool, pkgs []*packages.Package
 	}
 	var scanErr error
 	for _, p := range pkgs {
+		if p == nil {
+			continue
+		}
 		pkgPath := p.PkgPath
 		if p.ForTest != "" && (p.PkgPath == p.ForTest || p.PkgPath == p.ForTest+"_test") {
 			pkgPath = p.ForTest
 		}
 		if requestedPackages[pkgPath] {
 			for _, f := range p.Syntax {
+				if f == nil {
+					continue
+				}
 				initOrdinal := 0
 				for _, decl := range f.Decls {
 					fd, ok := decl.(*ast.FuncDecl)
-					if !ok {
+					if !ok || fd.Name == nil {
 						continue
 					}
 					sym := fd.Name.Name
@@ -139,9 +144,11 @@ func WalkLoadedSubjects(audited, computeOpenWorld bool, pkgs []*packages.Package
 						scanErr = fmt.Errorf("gofresh: %s carries both //gofresh:pure and //gofresh:external", declKey)
 					}
 					var term string
-					if computeOpenWorld {
+					if computeOpenWorld && p.TypesInfo != nil && p.TypesInfo.Defs != nil {
 						if fn, ok := p.TypesInfo.Defs[fd.Name].(*types.Func); ok {
-							term = OpenWorldTerm(audited, fn.Type().(*types.Signature))
+							if sig, ok := fn.Type().(*types.Signature); ok {
+								term = OpenWorldTerm(audited, sig)
+							}
 						}
 					}
 					visit(ScannedSymbol{

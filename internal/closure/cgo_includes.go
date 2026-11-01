@@ -124,6 +124,7 @@ func cgoEscapingIncludeWith(p *listPkg, files []string, read func(string) (fileB
 	if p == nil || p.Dir == "" {
 		return "", nil
 	}
+	realPkgDir := resolveReal(p.Dir)
 	includeDirs := cgoIncludeSearchDirs(p)
 	for _, rel := range files {
 		if !isNativeIncludeSource(rel) {
@@ -163,9 +164,11 @@ func cgoEscapingIncludeWith(p *listPkg, files []string, read func(string) (fileB
 					return "", fmt.Errorf("closure: unresolved cgo include %s", include)
 				}
 				include = strings.TrimSpace(include[1 : len(include)-1])
-				if include == "" {
-					return "", fmt.Errorf("closure: empty cgo include directive")
-				}
+			} else {
+				include = strings.TrimSpace(include)
+			}
+			if include == "" {
+				return "", fmt.Errorf("closure: empty cgo include directive")
 			}
 			if include == "_cgo_export.h" {
 				continue
@@ -191,10 +194,13 @@ func cgoEscapingIncludeWith(p *listPkg, files []string, read func(string) (fileB
 					return resolved, nil
 				}
 				parent := filepath.Dir(resolved)
-				if realParent, err := filepath.EvalSymlinks(parent); err == nil && !pathWithin(realParent, p.Dir) {
+				if realParent, err := filepath.EvalSymlinks(parent); err == nil && !pathWithin(realParent, realPkgDir) {
 					return realParent, nil
 				}
 				if _, err := os.Stat(resolved); err == nil {
+					if realResolved, err := filepath.EvalSymlinks(resolved); err == nil && !pathWithin(realResolved, realPkgDir) {
+						return realResolved, nil
+					}
 					if relResolved, err := filepath.Rel(p.Dir, resolved); err == nil && (!isNativeIncludeSource(relResolved) || strings.EqualFold(filepath.Ext(relResolved), ".go")) {
 						return "", fmt.Errorf("closure: unsupported cgo include source %s", include)
 					}
@@ -274,19 +280,6 @@ func isNativeIncludeSource(rel string) bool {
 	return true
 }
 
-// cgoNativeFileHasRawString reports whether spliced C/C++/Objective-C source
-// opens a C++11 raw string literal (R"...", u8R"...", uR"...", UR"...", or
-// LR"..."). Raw string bodies can embed unescaped comment markers across lines
-// that would desynchronize stripCComments, so cgoEscapingInclude fails closed
-// when one is present (REQ-closure-coverage); comments, ordinary string
-// literals, and character literals are tracked first so R" inside comments or
-// at the closing quote of an ordinary string ending in R is not mistaken for a
-// raw-string opener.
-func cgoNativeFileHasRawString(text string) bool {
-	_, raw := stripCComments(text)
-	return raw
-}
-
 func hasRawStringPrefix(before string) bool {
 	for _, prefix := range []string{"u8R", "uR", "UR", "LR", "R"} {
 		if strings.HasSuffix(before, prefix) {
@@ -325,6 +318,13 @@ func cgoIncludeDirective(line string) (string, bool, bool) {
 	} else {
 		return "", false, false
 	}
+	if strings.HasPrefix(line, "<") {
+		end := strings.IndexByte(line, '>')
+		if end < 0 {
+			return line, false, true
+		}
+		return line[:end+1], false, true
+	}
 	if !strings.HasPrefix(line, "\"") {
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
@@ -332,12 +332,11 @@ func cgoIncludeDirective(line string) (string, bool, bool) {
 		}
 		return fields[0], false, true
 	}
-	line = strings.TrimPrefix(line, "\"")
-	end := strings.IndexByte(line, '"')
+	end := strings.IndexByte(line[1:], '"')
 	if end < 0 {
-		return "", false, false
+		return line, false, true
 	}
-	return line[:end], true, true
+	return line[1 : 1+end], true, true
 }
 
 func stripCComments(text string) ([]string, bool) {
@@ -414,15 +413,26 @@ func stripCComments(text string) ([]string, bool) {
 
 func symlinkDirInPath(path, base string) string {
 	path = filepath.FromSlash(path)
+	var current string
+	var rest string
 	if !filepath.IsAbs(path) {
-		path = filepath.Clean(base) + string(filepath.Separator) + path
+		current = resolveReal(filepath.Clean(base))
+		rest = path
+	} else if base != "" && pathWithin(path, base) {
+		rel, err := filepath.Rel(base, path)
+		if err == nil {
+			current = resolveReal(filepath.Clean(base))
+			rest = rel
+		}
 	}
-	volume := filepath.VolumeName(path)
-	rest := path[len(volume):]
-	current := volume
-	if strings.HasPrefix(rest, string(filepath.Separator)) {
-		current += string(filepath.Separator)
-		rest = strings.TrimLeft(rest, string(filepath.Separator))
+	if current == "" {
+		volume := filepath.VolumeName(path)
+		rest = path[len(volume):]
+		current = volume
+		if strings.HasPrefix(rest, string(filepath.Separator)) {
+			current += string(filepath.Separator)
+			rest = strings.TrimLeft(rest, string(filepath.Separator))
+		}
 	}
 	for _, part := range strings.Split(rest, string(filepath.Separator)) {
 		if part == "" || part == "." {

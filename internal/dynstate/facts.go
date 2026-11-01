@@ -58,8 +58,6 @@ type GraphPackage struct {
 // element registrations and dispatch uses share the field-population solver.
 const ElemPositionField = "\x02"
 
-const elemPositionField = ElemPositionField
-
 // FuncKey identifies a function or method ("Recv.Method") by declaring package
 // path and local name.
 type FuncKey struct {
@@ -929,7 +927,7 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	if p.Types != nil && p.Module != nil {
 		scope := p.Types.Scope()
 		for _, name := range scope.Names() {
-			if variable, ok := scope.Lookup(name).(*types.Var); ok && typeMayCarryUnknownDynamic(audited, variable.Type()) {
+			if variable, ok := scope.Lookup(name).(*types.Var); ok && TypeMayCarryUnknownDynamic(audited, variable.Type()) {
 				fact.Declares = append(fact.Declares, dynamicVarKey(variable))
 			}
 		}
@@ -960,7 +958,7 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 						if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
 							continue
 						}
-						if !typeMayCarryUnknownDynamic(audited, variable.Type()) {
+						if !TypeMayCarryUnknownDynamic(audited, variable.Type()) {
 							continue
 						}
 						fact.SingleSubjectVars = append(fact.SingleSubjectVars, dynamicVarKey(variable))
@@ -1003,7 +1001,7 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 						if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
 							continue
 						}
-						if !typeMayCarryUnknownDynamic(audited, variable.Type()) {
+						if !TypeMayCarryUnknownDynamic(audited, variable.Type()) {
 							continue
 						}
 						if generator == "protoc-gen-go-grpc" {

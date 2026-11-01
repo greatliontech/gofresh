@@ -76,10 +76,6 @@ func OpenWorldTerm(audited bool, sig *types.Signature) string {
 	return SignatureOpenWorldTerm(audited, sig, nil, true, CarrierPolicyConsumer)
 }
 
-func openWorldTerm(audited bool, sig *types.Signature) string {
-	return OpenWorldTerm(audited, sig)
-}
-
 func packageNameQualifier(pkg *types.Package) string {
 	if pkg == nil {
 		return ""
@@ -199,10 +195,6 @@ func TypeMayCarryUnknownDynamic(audited bool, t types.Type) bool {
 	return WalkDynamicCarrier(audited, t, make(map[types.Type]bool), CarrierPolicyConsumer)
 }
 
-func typeMayCarryUnknownDynamic(audited bool, t types.Type) bool {
-	return WalkDynamicCarrier(audited, t, make(map[types.Type]bool), CarrierPolicyConsumer)
-}
-
 func typeMayCarryDynamic(audited bool, t types.Type, seen map[types.Type]bool) bool {
 	return WalkDynamicCarrier(audited, t, seen, CarrierPolicyClosure)
 }
@@ -214,10 +206,6 @@ func typeMayCarryDynamic(audited bool, t types.Type, seen map[types.Type]bool) b
 // and by-value composites of them are copies — reading them cannot
 // reach the shared cell (REQ-closure-shared-dynamic-state).
 func TypeHandsOutDynamicAlias(audited bool, t types.Type) bool {
-	return WalkDynamicCarrier(audited, t, make(map[types.Type]bool), CarrierPolicyAlias)
-}
-
-func typeHandsOutDynamicAlias(audited bool, t types.Type) bool {
 	return WalkDynamicCarrier(audited, t, make(map[types.Type]bool), CarrierPolicyAlias)
 }
 
@@ -475,7 +463,7 @@ func instantiatedResultsHandOutNothing(audited bool, t types.Type) bool {
 	results := sig.Results()
 	for i := 0; results != nil && i < results.Len(); i++ {
 		rt := results.At(i).Type()
-		if auditedImmutableType(audited, rt) {
+		if AuditedImmutableType(audited, rt) {
 			continue
 		}
 		if typeHandsOutMutableReach(rt) || typeCarriesSignature(rt) {
@@ -495,10 +483,6 @@ func AuditedImmutableType(audited bool, t types.Type) bool {
 		return false
 	}
 	return immutableRuntimeType(t)
-}
-
-func auditedImmutableType(audited bool, t types.Type) bool {
-	return AuditedImmutableType(audited, t)
 }
 
 // immutableRuntimeType is the one spelling of the audited-immutable
@@ -574,18 +558,10 @@ func AuditedSynchronization(audited bool, fn *types.Func) bool {
 	return audited && auditset.ReceiverMethod(fn, "sync", auditset.SyncMethod)
 }
 
-func auditedSynchronization(audited bool, fn *types.Func) bool {
-	return AuditedSynchronization(audited, fn)
-}
-
 // AuditedPooling reports whether the method is in the audited pooling
 // set: sync.Pool's Get and Put (REQ-closure-shared-dynamic-state).
 func AuditedPooling(audited bool, fn *types.Func) bool {
 	return audited && auditset.ReceiverMethod(fn, "sync", auditset.PoolMethod)
-}
-
-func auditedPooling(audited bool, fn *types.Func) bool {
-	return AuditedPooling(audited, fn)
 }
 
 // dataMemoMethod reports whether the method is sync.Map's Load, Store,
@@ -626,10 +602,6 @@ func RecvTypeName(fd *ast.FuncDecl) string {
 			return ""
 		}
 	}
-}
-
-func recvTypeName(fd *ast.FuncDecl) string {
-	return RecvTypeName(fd)
 }
 
 // recvTypeNameOf resolves the receiver type name of a selection's

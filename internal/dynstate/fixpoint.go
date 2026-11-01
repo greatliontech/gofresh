@@ -1,12 +1,17 @@
 package dynstate
 
 import (
+	"slices"
 	"sort"
 	"strings"
 )
 
 func (k FuncKey) SiteKey() string {
 	return k.Pkg + "\x00" + k.Name
+}
+
+func validFactKey(k string) bool {
+	return k != "" && !strings.Contains(k, "\x00")
 }
 
 // solveLeastFixedPoint computes the least fixed point of set over deps: any
@@ -114,6 +119,8 @@ func ResolveEnvAudit(allFacts map[string][]Fact, malformed func(fact Fact)) *Env
 	if malformed == nil {
 		malformed = func(Fact) {}
 	}
+	poisonedFunc := map[FuncKey]bool{}
+	poisonedParam := map[ParamKey]bool{}
 	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, key := range fact.ReturnEnvFree {
@@ -126,6 +133,9 @@ func ResolveEnvAudit(allFacts map[string][]Fact, malformed func(fact Fact)) *Env
 			for _, edge := range fact.ReturnEnvDeps {
 				if !edge.Valid() {
 					malformed(fact)
+					if edge.Func.Valid() {
+						poisonedFunc[edge.Func] = true
+					}
 					continue
 				}
 				if e.RetDeps[edge.Func] == nil {
@@ -136,6 +146,9 @@ func ResolveEnvAudit(allFacts map[string][]Fact, malformed func(fact Fact)) *Env
 			for _, edge := range fact.ReturnEnvInsertionDeps {
 				if !edge.Valid() {
 					malformed(fact)
+					if edge.Func.Valid() {
+						poisonedFunc[edge.Func] = true
+					}
 					continue
 				}
 				if e.RetInsDeps[edge.Func] == nil {
@@ -153,6 +166,9 @@ func ResolveEnvAudit(allFacts map[string][]Fact, malformed func(fact Fact)) *Env
 			for _, edge := range fact.ParamInsertionDeps {
 				if !edge.Valid() {
 					malformed(fact)
+					if edge.Param.Valid() {
+						poisonedParam[edge.Param] = true
+					}
 					continue
 				}
 				if e.InsDeps[edge.Param] == nil {
@@ -161,6 +177,12 @@ func ResolveEnvAudit(allFacts map[string][]Fact, malformed func(fact Fact)) *Env
 				e.InsDeps[edge.Param][edge.Dep] = true
 			}
 		}
+	}
+	for fnKey := range poisonedFunc {
+		delete(e.Declared, fnKey)
+	}
+	for paramKey := range poisonedParam {
+		delete(e.InsDeclared, paramKey)
 	}
 	for changed := true; changed; {
 		changed = false
@@ -233,6 +255,8 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 	opaqueDeps := map[string]map[string]bool{}
 	paramDeps := map[ParamKey]map[ParamKey]bool{}
 	retentionDeps := map[ParamKey]map[ParamKey]bool{}
+	poisonedLeakParam := map[ParamKey]bool{}
+	poisonedRetParam := map[ParamKey]bool{}
 	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, key := range fact.ParamLeakFree {
@@ -245,6 +269,9 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			for _, edge := range fact.ParamLeakFreeDeps {
 				if !edge.Valid() {
 					malformed(fact)
+					if edge.Own.Valid() {
+						poisonedLeakParam[edge.Own] = true
+					}
 					continue
 				}
 				if paramDeps[edge.Own] == nil {
@@ -262,6 +289,9 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			for _, edge := range fact.ParamRetentionFreeDeps {
 				if !edge.Valid() {
 					malformed(fact)
+					if edge.Own.Valid() {
+						poisonedRetParam[edge.Own] = true
+					}
 					continue
 				}
 				if retentionDeps[edge.Own] == nil {
@@ -299,6 +329,9 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			for _, edge := range fact.OpaqueDeps {
 				if !edge.Valid() {
 					malformed(fact)
+					if validFactKey(edge.Own) {
+						r.NotOpaque[edge.Own] = true
+					}
 					continue
 				}
 				if opaqueDeps[edge.Own] == nil {
@@ -307,6 +340,14 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 				opaqueDeps[edge.Own][edge.Dep] = true
 			}
 		}
+	}
+	for paramKey := range poisonedLeakParam {
+		delete(r.ParamLeakFree, paramKey)
+		delete(paramDeps, paramKey)
+	}
+	for paramKey := range poisonedRetParam {
+		delete(r.ParamRetentionFree, paramKey)
+		delete(retentionDeps, paramKey)
 	}
 
 	solveLeastFixedPoint(r.ParamLeakFree, paramDeps, func(dep ParamKey) bool {
@@ -328,6 +369,9 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			for _, entry := range fact.FieldParamDefer {
 				if !entry.Valid() {
 					malformed(fact)
+					if validFactKey(entry.Pos.Owner) {
+						r.FieldPoisonAt[FieldParamPoison{Owner: entry.Pos.Owner}] = true
+					}
 					continue
 				}
 				r.FieldDeferAt[entry.Pos] = append(r.FieldDeferAt[entry.Pos], entry.Param)
@@ -335,6 +379,9 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			for _, entry := range fact.FieldParamPoison {
 				if !entry.Valid() {
 					malformed(fact)
+					if validFactKey(entry.Owner) {
+						r.FieldPoisonAt[FieldParamPoison{Owner: entry.Owner}] = true
+					}
 					continue
 				}
 				r.FieldPoisonAt[entry] = true
@@ -342,6 +389,9 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			for _, entry := range fact.ReturnFieldParamDefer {
 				if !entry.Valid() {
 					malformed(fact)
+					if entry.Pos.Func.Valid() {
+						r.RetPoisonAt[ReturnFieldParamPoison{Func: entry.Pos.Func}] = true
+					}
 					continue
 				}
 				r.RetDeferAt[entry.Pos] = append(r.RetDeferAt[entry.Pos], entry.Param)
@@ -349,6 +399,9 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			for _, entry := range fact.ReturnFieldParamPoison {
 				if !entry.Valid() {
 					malformed(fact)
+					if entry.Func.Valid() {
+						r.RetPoisonAt[ReturnFieldParamPoison{Func: entry.Func}] = true
+					}
 					continue
 				}
 				r.RetPoisonAt[entry] = true
@@ -356,11 +409,26 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			for _, use := range fact.EnvCallUses {
 				if !use.Valid() {
 					malformed(fact)
+					if validFactKey(use.Key) {
+						r.FieldPoisonAt[FieldParamPoison{Owner: use.Key}] = true
+					}
 					continue
 				}
 				r.CtorsOf[use.Key] = append(r.CtorsOf[use.Key], use.Callee)
 			}
 		}
+	}
+	for pos, params := range r.FieldDeferAt {
+		slices.SortFunc(params, ParamKey.Compare)
+		r.FieldDeferAt[pos] = slices.Compact(params)
+	}
+	for pos, params := range r.RetDeferAt {
+		slices.SortFunc(params, ParamKey.Compare)
+		r.RetDeferAt[pos] = slices.Compact(params)
+	}
+	for key, ctors := range r.CtorsOf {
+		slices.SortFunc(ctors, FuncKey.Compare)
+		r.CtorsOf[key] = slices.Compact(ctors)
 	}
 	return r
 }
@@ -382,7 +450,11 @@ func (r *DeferralResolution) FieldPopulationProves(varKey, field string, idx int
 		}
 	}
 	seen := map[FuncKey]bool{}
-	stack := append([]FuncKey(nil), r.CtorsOf[varKey]...)
+	ctors := r.CtorsOf[varKey]
+	stack := make([]FuncKey, len(ctors))
+	for i := range ctors {
+		stack[len(ctors)-1-i] = ctors[i]
+	}
 	for len(stack) > 0 {
 		fnKey := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
@@ -403,8 +475,15 @@ func (r *DeferralResolution) FieldPopulationProves(varKey, field string, idx int
 				return false, paramKey
 			}
 		}
-		for dep := range r.EnvFreeDeps[fnKey] {
-			stack = append(stack, dep)
+		if deps := r.EnvFreeDeps[fnKey]; len(deps) > 0 {
+			sortedDeps := make([]FuncKey, 0, len(deps))
+			for dep := range deps {
+				sortedDeps = append(sortedDeps, dep)
+			}
+			slices.SortFunc(sortedDeps, FuncKey.Compare)
+			for i := len(sortedDeps) - 1; i >= 0; i-- {
+				stack = append(stack, sortedDeps[i])
+			}
 		}
 	}
 	return true, ParamKey{}
@@ -445,6 +524,7 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 	mutated := map[string]bool{}
 	escaped := map[string]bool{}
 	envCarrying := map[string]bool{}
+	unattributedMark := map[string]bool{}
 	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, key := range fact.Mutates {
@@ -461,6 +541,7 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 	markDeclaresMutated := func(fact Fact) {
 		for _, key := range fact.Declares {
 			mutated[key] = true
+			unattributedMark[key] = true
 		}
 	}
 	resolution := NewDeferralResolution(allFacts, markDeclaresMutated)
@@ -469,8 +550,14 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 		for _, fact := range facts {
 			for _, use := range fact.EnvCallUses {
 				if !use.Valid() {
+					markDeclaresMutated(fact)
 					for _, key := range fact.Declares {
 						envCarrying[key] = true
+					}
+					if validFactKey(use.Key) {
+						envCarrying[use.Key] = true
+						mutated[use.Key] = true
+						unattributedMark[use.Key] = true
 					}
 					continue
 				}
@@ -486,6 +573,10 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 			for _, use := range fact.MethodUses {
 				if !use.Valid() {
 					markDeclaresMutated(fact)
+					if validFactKey(use.Key) {
+						mutated[use.Key] = true
+						unattributedMark[use.Key] = true
+					}
 					continue
 				}
 				if !readOnly[use.Method] {
@@ -495,6 +586,10 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 			for _, use := range fact.InitMethodUses {
 				if !use.Valid() {
 					markDeclaresMutated(fact)
+					if validFactKey(use.Key) {
+						escaped[use.Key] = true
+						unattributedMark[use.Key] = true
+					}
 					continue
 				}
 				if !resolution.ReceiverRetention[use.Method] {
@@ -509,6 +604,10 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 			for _, use := range fact.ParamUses {
 				if !use.Valid() {
 					markDeclaresMutated(fact)
+					if validFactKey(use.Key) {
+						escaped[use.Key] = true
+						unattributedMark[use.Key] = true
+					}
 					continue
 				}
 				if !paramLeakFree[use.Param] {
@@ -518,6 +617,10 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 			for _, use := range fact.InitParamUses {
 				if !use.Valid() {
 					markDeclaresMutated(fact)
+					if validFactKey(use.Key) {
+						escaped[use.Key] = true
+						unattributedMark[use.Key] = true
+					}
 					continue
 				}
 				if !paramLeakFree[use.Param] && !resolution.ParamRetentionFree[use.Param] {
@@ -531,6 +634,10 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 			for _, use := range fact.FieldParamUses {
 				if !use.Valid(0) {
 					markDeclaresMutated(fact)
+					if validFactKey(use.Owner) {
+						escaped[use.Owner] = true
+						unattributedMark[use.Owner] = true
+					}
 					continue
 				}
 				if ok, _ := resolution.FieldPopulationProves(use.Owner, use.Field, use.Index); !ok {
@@ -540,6 +647,10 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 			for _, use := range fact.ElemParamUses {
 				if !use.Valid() {
 					markDeclaresMutated(fact)
+					if validFactKey(use.Key) {
+						escaped[use.Key] = true
+						unattributedMark[use.Key] = true
+					}
 					continue
 				}
 				if ok, _ := resolution.FieldPopulationProves(use.Owner, ElemPositionField, use.Index); !ok {
@@ -553,6 +664,13 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 		for _, fact := range facts {
 			for _, edge := range fact.FuncRefs {
 				if !edge.Valid() {
+					markDeclaresMutated(fact)
+					if edge.Callee.Valid() {
+						if refRegions[edge.Callee] == nil {
+							refRegions[edge.Callee] = map[RefRegion]bool{}
+						}
+						refRegions[edge.Callee][RefRegion{Kind: RegionProg}] = true
+					}
 					continue
 				}
 				if refRegions[edge.Callee] == nil {
@@ -577,7 +695,6 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 		return (region.Kind == RegionFunc || region.Kind == RegionLitFunc) && initReachFn[region.Caller]
 	})
 
-	unattributedMark := map[string]bool{}
 	for key := range mutated {
 		unattributedMark[key] = true
 	}
@@ -608,9 +725,10 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 		for _, fact := range facts {
 			for _, use := range fact.AttributedUses {
 				if !use.Valid() {
-					for _, key := range fact.Declares {
-						mutated[key] = true
-						unattributedMark[key] = true
+					markDeclaresMutated(fact)
+					if validFactKey(use.Key) {
+						mutated[use.Key] = true
+						unattributedMark[use.Key] = true
 					}
 					continue
 				}
@@ -653,7 +771,21 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 			}
 		}
 	}
-	linkAdj := CarrierLinkGraph(allFacts, markDeclaresMutated)
+	linkAdj := CarrierLinkGraph(allFacts, func(fact Fact) {
+		markDeclaresMutated(fact)
+		for _, link := range fact.CarrierLinks {
+			if !link.Valid() {
+				if validFactKey(link.From) {
+					mutated[link.From] = true
+					unattributedMark[link.From] = true
+				}
+				if validFactKey(link.To) {
+					mutated[link.To] = true
+					unattributedMark[link.To] = true
+				}
+			}
+		}
+	})
 	for changed := len(linkAdj) > 0; changed; {
 		changed = false
 		for a, others := range linkAdj {

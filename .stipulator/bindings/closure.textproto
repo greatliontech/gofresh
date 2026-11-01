@@ -2362,3 +2362,125 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "e872709d57f5a502a9f8b1db0ed7daa240904ea7173107d7e0749ea0d096a2a4"
 }
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-reachability"
+  content_hash: "4cfe35ba5861debbb950f88ef44ed4fcc4c6868b9d55bb147cabf88320b3db2b"
+  source_hash: "e6af55342d543d21523608e594f6d685a38d04d68ac37bb2c12e97531748bac6"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestFixedPointMonotonicityIdempotenceAndPermutationInvariance"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3f6610e4501c2a6ae0e19206f7866806dc26faaad1d3cbf1b0c98dab405d7cf9"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-receiver-proof"
+  content_hash: "254376454a3214eba26e6511e98bdeefd5cb65e184dc65e5ce6958fb7afb76ab"
+  source_hash: "9e3d5ac0d56556b707c0e6ce4d2776f94ad50bed8ef77a84cb4bb64ab5c4aa9c"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestFieldPopulationProvesPoisonsDeferralsAndCyclicCtors"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "2b31f300d6e0b1de7b7ca24eb7a277d5b979ed8f2f645c25e3731619dea2f38e"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-memo"
+  content_hash: "bc970d813f2cf51e2d30f20642974729dd688b195d4c539557d0c659f48e4e5d"
+  source_hash: "c4efe89c99dc645a638a6736df460e346c9f787459db142ee664ce4c51542509"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestMalformedFactEntriesFailClosedInCompose"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3018039fa57860659bab41a1b8ee988e5fae7b8317da53e2b7b5f8fdda51e951"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-carrier-free"
+  content_hash: "1367a66ec09b8ddae386fe5ff1f646a5e060243765331117ee725fc285e5274f"
+  source_hash: "aff031c327b7b5c3b6809e9d42a0246e4358ced786b1b804b463b1dd175c7bc3"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestCarrierWalkPoliciesRecursiveTypesAndDirectives"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ffcca6a3548ac0e7f1720d792aead0a4a159e5cab5eb7d6ac99dacc60c8735a6"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-directive"
+  content_hash: "08c02b20e1e47407c4299ad97070997b34b8caea9c785ff60b071c7985f8d75d"
+  source_hash: "30d441fe0f35922557f6ab4a421df7e7057da4ee252af57ebfd4542f03a5b653"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestCarrierWalkPoliciesRecursiveTypesAndDirectives"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "ffcca6a3548ac0e7f1720d792aead0a4a159e5cab5eb7d6ac99dacc60c8735a6"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state"
+  content_hash: "7b76ec3da85d0a0ad60af098922eb8b4cd53f401db130960957c24f9f05369ff"
+  source_hash: "b020ecd9491ce71f4e277ddcaedfe4468919605d027a3964ed874d82b3cecdfb"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate.FuzzComposeAndDeferralResolutionInvariants"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "333ed4570c1b7cde5ec1753e0c34db0da9ebe739885d858e228b071f23aa8795"
+}
+
+bindings {
+  requirement_id: "REQ-closure-test-variant-inertness"
+  content_hash: "1dc7bd3637a81884a98dfa4491acb2eff512ec39a0f6c4c647b7efc358f13cd4"
+  source_hash: "75e33d4587dda107cff74039c0199edd722c7d0557296ed50f2ba649390b5744"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/testvariant.TestInertForSubjectCoversReachabilityAndGuardRails"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "8dc596df3b75993acb771f198e8b62e976d487d7b614f2f21479f85e8232141e"
+}
+
+bindings {
+  requirement_id: "REQ-closure-test-variant-ledger"
+  content_hash: "545624fecfe3e2f2a0d7edff892ae0d3148f26b6974cbd1d31f35e095977ccb1"
+  source_hash: "70fa6292dd9a1bea61d78f04a98862586dc86acb81cf4faa3954222a8918c64d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/testvariant.TestDiffTestVariantLedgersDuplicatePairingPackageRehomingAndClone"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "c7b92cf345a81ec0783136cd094d0b70aa3d96b47ab15f5483d8e02f533991e9"
+}
+
+bindings {
+  requirement_id: "REQ-closure-test-variant-inertness"
+  content_hash: "1dc7bd3637a81884a98dfa4491acb2eff512ec39a0f6c4c647b7efc358f13cd4"
+  source_hash: "75e33d4587dda107cff74039c0199edd722c7d0557296ed50f2ba649390b5744"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/closure.TestInertForSubjectClosureSoundnessBridge"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9f4ab4d4aea47bc27aad6ce6757d933e892f89fe6f82c12327be126a1f0ed904"
+}
+
+bindings {
+  requirement_id: "REQ-closure-test-variant-inertness"
+  content_hash: "1dc7bd3637a81884a98dfa4491acb2eff512ec39a0f6c4c647b7efc358f13cd4"
+  source_hash: "75e33d4587dda107cff74039c0199edd722c7d0557296ed50f2ba649390b5744"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/closure.FuzzInertForSubjectClosureSoundnessBridge"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "f6dd98dee739f3c2032b09b30ec10d0430244f7f4acdc4aeb46eaf89027f5baf"
+}
+
+bindings {
+  requirement_id: "REQ-closure-blindspot"
+  content_hash: "b0e2340663270d4007ada3032eba17584f399cbc7dc7bda9aa5ce56352b58227"
+  source_hash: "48e7c2730cd5fb0e4653341c16553a1408e0d699dff9eadcaefe0a6c5e34fe7c"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/closure.TestCPreprocessorEdgeMatrix"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "bdb9cc8c0bd2d1c7e90eca0e3ae28aac4cee6129d7de86ab55e355229c8d927a"
+  clause_label: "widened"
+}
+
+bindings {
+  requirement_id: "REQ-closure-blindspot"
+  content_hash: "b0e2340663270d4007ada3032eba17584f399cbc7dc7bda9aa5ce56352b58227"
+  source_hash: "48e7c2730cd5fb0e4653341c16553a1408e0d699dff9eadcaefe0a6c5e34fe7c"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/closure.FuzzCPreprocessor"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "df195de8689c291217dd7ca7cd95c1487cc4d4549bc591cf268cc41d0e10376c"
+  clause_label: "resolved"
+}
