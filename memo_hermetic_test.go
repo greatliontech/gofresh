@@ -1,13 +1,17 @@
 package gofresh
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/testenv"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -15,6 +19,29 @@ import (
 	"unicode"
 	"unicode/utf8"
 )
+
+// Tests must never read or write the real user proof cache: the observability
+// memo (REQ-closure-observability-memo) keys under it, and shared state
+// would let one run's proofs leak into another's assertions.
+func TestMain(m *testing.M) {
+	cache, err := gotool.GoBuildCache(context.Background(), os.Environ())
+	if err != nil {
+		panic(err)
+	}
+	if err := os.Setenv("GOCACHE", cache); err != nil {
+		panic(err)
+	}
+	tmp, err := os.MkdirTemp("", "gofresh-cache-*")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("XDG_CACHE_HOME", tmp)
+	code := m.Run()
+	cleanupSharedTestBinaries()
+	testenv.CleanupShared()
+	os.RemoveAll(tmp)
+	os.Exit(code)
+}
 
 // raceShard is one entry of the gate's race-shard list: the job's name
 // and the `-run` regex selecting its tests.
@@ -345,5 +372,137 @@ func TestTestFunctionsWalkMirrorsGoTest(t *testing.T) {
 	want := []string{"a:ExampleOne", "a:FuzzOne", "a:Test", "a:Test1", "a:TestOne", "a:Test_two", "b/deep:TestDeep", "b/deep:TestMain", "c:TestDot"}
 	if strings.Join(names, " ") != strings.Join(want, " ") {
 		t.Fatalf("the walk found %v, want %v", names, want)
+	}
+}
+
+// scanMemoModule writes a two-package module whose view package imports
+// a sibling and whose subject carries a purity directive, a dynamic mark,
+// and an external mark — every scan output class the memo persists.
+func scanMemoModule(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":            "module example.com/scanmemo\n\ngo 1.26\n",
+		"dep/dep.go":        "package dep\n\nvar Hooks = map[string]func(){}\n\nfunc Bump() { Hooks[\"x\"] = func() {} }\n\nfunc Add(a, b int) int { return a + b }\n",
+		"view/view.go":      "package view\n\nimport \"example.com/scanmemo/dep\"\n\n//gofresh:pure\nfunc Pure(x int) int { return dep.Add(x, 1) }\n\nfunc Mutating() { dep.Bump() }\n\n//gofresh:external\nfunc External() int { return 0 }\n",
+		"view/view_test.go": "package view\n\nimport \"testing\"\n\nfunc TestPure(t *testing.T) {\n\tif Pure(1) != 2 {\n\t\tt.Fatal()\n\t}\n}\n",
+		"other/other.go":    "package other\n\nfunc Unrelated() int { return 3 }\n",
+	}
+	for path, content := range files {
+		full := filepath.Join(dir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+var scanMemoSubjects = []Subject{
+	{Package: "example.com/scanmemo/view", Symbol: "Pure"},
+	{Package: "example.com/scanmemo/view", Symbol: "Mutating"},
+	{Package: "example.com/scanmemo/view", Symbol: "External"},
+	{Package: "example.com/scanmemo/view", Symbol: "TestPure"},
+}
+
+// scanOutputs captures a view's scan-derived facts for every subject: the
+// projection a served scan must reproduce exactly.
+func scanOutputs(t *testing.T, view *Snapshot, subjects []Subject) map[Subject]string {
+	t.Helper()
+	out := map[Subject]string{}
+	for _, s := range subjects {
+		fp, err := view.Capture(context.Background(), s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := view.facts.discharges[s]
+		out[s] = fp.MaximalClosure + "|" + fp.PurityAssertion + "|" + boolWord(view.facts.closure(s).Unverifiable) + "|" + view.facts.closure(s).Reason + "|" + view.facts.vouchDischarges[s] + "|" + d.packageProcess + "|" + d.singleSubject
+	}
+	return out
+}
+
+func boolWord(b bool) string {
+	if b {
+		return "unverifiable"
+	}
+	return "verifiable"
+}
+
+// leakModule writes a four-package module in which package d owns a
+// function-valued variable, a reads it, c rebinds it, and b reaches c:
+// a's test binary never links the mutation, b's does.
+func leakModule(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod":      "module example.com/leak\n\ngo 1.26\n",
+		"a/a.go":      "package a\n\nimport \"example.com/leak/d\"\n\nfunc F() { d.Run() }\n",
+		"b/b.go":      "package b\n\nimport \"example.com/leak/c\"\n\nfunc G(f func()) { c.Rebind(f) }\n",
+		"c/c.go":      "package c\n\nimport \"example.com/leak/d\"\n\nfunc Rebind(f func()) { d.Callback = f }\n",
+		"d/d.go":      "package d\n\nvar Callback = func() {}\n\nfunc Run() { Callback() }\n",
+		"a/a_test.go": "package a\n\nimport \"testing\"\n\nfunc TestF(t *testing.T) { F() }\n",
+	}
+	for path, content := range files {
+		full := filepath.Join(dir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+var (
+	leakA        = Subject{Package: "example.com/leak/a", Symbol: "F"}
+	leakB        = Subject{Package: "example.com/leak/b", Symbol: "G"}
+	leakSubjects = []Subject{leakA, leakB}
+)
+
+func newLeakView(t *testing.T, dir string, subjects []Subject, opts ...option) *Snapshot {
+	t.Helper()
+	engine, err := newEngine(append([]option{withDir(dir)}, opts...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := engine.newView(context.Background(), subjects, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return view
+}
+
+// Every scan output class survives the entry's persisted form: a scan
+// projected to entries, marshalled, unmarshalled, and rebuilt is the
+// same scan (REQ-closure-scan-memo).
+func TestScanEntryRoundTripsEveryOutput(t *testing.T) {
+	pkg := "example.com/p"
+	s := func(sym string) Subject { return Subject{Package: pkg, Symbol: sym} }
+	scan := &subjectScan{
+		known: map[Subject]bool{s("A"): true, s("B"): true, s("C"): true}, pure: map[Subject]bool{s("A"): true},
+		openWorld: map[Subject]string{s("B"): "parameter f func()"}, external: map[Subject]bool{s("C"): true},
+		downgradeReason:  map[Subject]string{s("B"): "reason"},
+		downgradeCulprit: map[Subject]Subject{s("B"): {Package: "example.com/dep", Symbol: "Hooks"}},
+		vouchDischarges:  map[Subject]string{s("A"): "v"},
+		discharges:       map[Subject]attestationDischarges{s("B"): {singleSubject: "att"}, s("C"): {packageProcess: "pp"}},
+		ambiguous:        map[Subject]string{s("C"): "declared twice"},
+	}
+	raw, err := json.Marshal(entryOf(scan, pkg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry packageScanEntry
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		t.Fatal(err)
+	}
+	if entry.Version != scanEntryVersion {
+		t.Fatalf("version %d, want %d", entry.Version, scanEntryVersion)
+	}
+	got := scanFromEntries(map[string]packageScanEntry{pkg: entry})
+	if !reflect.DeepEqual(got, scan) {
+		t.Fatalf("round trip lost an output:\n got %+v\nwant %+v", got, scan)
 	}
 }

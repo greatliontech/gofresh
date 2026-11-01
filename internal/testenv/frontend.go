@@ -214,11 +214,19 @@ func ParseAndTypecheckDAG(t testing.TB, virtualDir string, filesByPkg map[string
 	if virtualDir == "" {
 		virtualDir = t.TempDir()
 	}
-	pkgs, err := parseAndTypecheckDAG(nil, virtualDir, filesByPkg, false)
+	pkgs, err := parseAndTypecheckDAG(nil, virtualDir, nil, filesByPkg, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return pkgs
+}
+
+// ParseAndTypecheckInPlace parses and type-checks an on-disk module directory
+// whose files have already been read into filesByPkg and whose per-package
+// directories are recorded in pkgDirs, without writing files or invoking any
+// `go` subprocess.
+func ParseAndTypecheckInPlace(moduleDir string, pkgDirs map[string]string, filesByPkg map[string]map[string]string) ([]*packages.Package, error) {
+	return parseAndTypecheckDAG(nil, moduleDir, pkgDirs, filesByPkg, false)
 }
 
 // ParseAndTypecheckDAGWithStdlib parses and type-checks a multi-package DAG of
@@ -230,7 +238,7 @@ func ParseAndTypecheckDAGWithStdlib(t testing.TB, env []string, virtualDir strin
 	if virtualDir == "" {
 		virtualDir = t.TempDir()
 	}
-	pkgs, err := parseAndTypecheckDAG(env, virtualDir, filesByPkg, true)
+	pkgs, err := parseAndTypecheckDAG(env, virtualDir, nil, filesByPkg, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +260,7 @@ func ParseAndTypecheckDAGWithStdlibErr(env []string, virtualDir string, filesByP
 		sharedOverlaysMu.Unlock()
 		virtualDir = tmp
 	}
-	pkgs, err := parseAndTypecheckDAG(env, virtualDir, filesByPkg, true)
+	pkgs, err := parseAndTypecheckDAG(env, virtualDir, nil, filesByPkg, true)
 	if err != nil {
 		return nil, "", err
 	}
@@ -272,7 +280,7 @@ type parsedPkgUnit struct {
 	imports   []string
 }
 
-func parseAndTypecheckDAG(env []string, virtualDir string, filesByPkg map[string]map[string]string, linkStdlib bool) ([]*packages.Package, error) {
+func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]string, filesByPkg map[string]map[string]string, linkStdlib bool) ([]*packages.Package, error) {
 	var fset *token.FileSet
 	var stdCache *stdlibCache
 	if linkStdlib {
@@ -305,9 +313,12 @@ func parseAndTypecheckDAG(env []string, virtualDir string, filesByPkg map[string
 	for _, pkgPath := range rawPkgPaths {
 		fileMap := filesByPkg[pkgPath]
 		basePath := strings.TrimSuffix(pkgPath, "_test")
-		pkgDir := filepath.Join(virtualDir, filepath.FromSlash(basePath))
-		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
-			return nil, fmt.Errorf("MkdirAll(%s): %w", pkgDir, err)
+		pkgDir := pkgDirs[basePath]
+		if pkgDir == "" {
+			pkgDir = filepath.Join(virtualDir, filepath.FromSlash(basePath))
+			if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+				return nil, fmt.Errorf("MkdirAll(%s): %w", pkgDir, err)
+			}
 		}
 		names := make([]string, 0, len(fileMap))
 		for name := range fileMap {
@@ -324,11 +335,13 @@ func parseAndTypecheckDAG(env []string, virtualDir string, filesByPkg map[string
 		for _, name := range names {
 			src := fileMap[name]
 			fullPath := filepath.Join(pkgDir, name)
-			if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
-				return nil, fmt.Errorf("MkdirAll(%s): %w", filepath.Dir(fullPath), err)
-			}
-			if err := os.WriteFile(fullPath, []byte(src), 0o644); err != nil {
-				return nil, fmt.Errorf("WriteFile(%s): %w", fullPath, err)
+			if pkgDirs == nil {
+				if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+					return nil, fmt.Errorf("MkdirAll(%s): %w", filepath.Dir(fullPath), err)
+				}
+				if err := os.WriteFile(fullPath, []byte(src), 0o644); err != nil {
+					return nil, fmt.Errorf("WriteFile(%s): %w", fullPath, err)
+				}
 			}
 			if !strings.HasSuffix(name, ".go") {
 				continue
@@ -515,6 +528,11 @@ func parseAndTypecheckDAG(env []string, virtualDir string, filesByPkg map[string
 			TypesSizes:      types.SizesFor("gc", runtime.GOARCH),
 			Fset:            fset,
 			Imports:         importsMap,
+			Module: &packages.Module{
+				Path: u.basePath,
+				Main: true,
+				Dir:  virtualDir,
+			},
 		}
 		builtByPath[u.pkgPath] = pkg
 		result = append(result, pkg)

@@ -9,7 +9,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
+	progpkg "github.com/greatliontech/gofresh/internal/closure/internal/program"
 )
 
 // rootedFunctionKey names one reachable function in the attributed
@@ -328,4 +330,61 @@ func (h *Hasher) binaryRootedPackage(ctx context.Context, path, closureHash stri
 		return RootedFunctions{}, err
 	}
 	return persist(inv)
+}
+
+// InMemoryRootedFunctions derives per-subject rooted-flow inventories in memory
+// from pre-loaded or in-memory *packages.Package nodes without invoking any go
+// subprocess.
+func InMemoryRootedFunctions(ctx context.Context, audited bool, pkgs []*packages.Package, pkgMain string, subjects []Subject) (map[Subject]RootedFunctions, error) {
+	prog, err := progpkg.FromPackages(ctx, pkgMain, pkgs)
+	if err != nil {
+		return nil, err
+	}
+	results := make(map[Subject]RootedFunctions, len(subjects))
+	var rooted []Subject
+	for _, subject := range subjects {
+		if prog.Roots[subject.Symbol] == nil {
+			results[subject] = RootedFunctions{}
+			continue
+		}
+		rooted = append(rooted, subject)
+	}
+	if len(rooted) == 0 {
+		return results, nil
+	}
+	reachable, err := attributedReachableSets(ctx, audited, nil, prog, rooted)
+	if err != nil {
+		return nil, err
+	}
+	for i, subject := range rooted {
+		results[subject] = rootedFunctionsFromReachability(reachable[i])
+	}
+	return results, nil
+}
+
+// InMemoryBinaryRootedFunctions derives a package's binary rooted-flow inventory
+// in memory from pre-loaded or in-memory *packages.Package nodes without invoking
+// any go subprocess.
+func InMemoryBinaryRootedFunctions(ctx context.Context, audited bool, pkgs []*packages.Package, pkgMain string) (RootedFunctions, error) {
+	prog, err := progpkg.FromPackages(ctx, pkgMain, pkgs)
+	if err != nil {
+		return RootedFunctions{}, err
+	}
+	for name := range prog.Ambiguous {
+		if harnessRootName(name) {
+			return RootedFunctions{}, nil
+		}
+	}
+	var subjects []Subject
+	for name := range prog.Roots {
+		if strings.ContainsAny(name, ".#") || !harnessRootName(name) {
+			continue
+		}
+		subjects = append(subjects, Subject{Package: pkgMain, Symbol: name})
+	}
+	if len(subjects) == 0 {
+		return RootedFunctions{Fns: map[string]bool{}, Complete: true}, nil
+	}
+	sort.Slice(subjects, func(i, j int) bool { return subjects[i].Symbol < subjects[j].Symbol })
+	return binaryReachableUnion(ctx, audited, nil, prog, subjects)
 }

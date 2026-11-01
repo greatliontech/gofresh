@@ -1,15 +1,47 @@
+//go:build unix
+
 package gofresh
 
 import (
 	"context"
+	"github.com/greatliontech/gofresh/gotool"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
-
-	"github.com/greatliontech/gofresh/gotool"
 )
+
+// The directory is resolved by the filesystem after rebasing: via/.. names
+// the link target's parent, not the build directory. The expected directory is
+// independently constructed, never obtained from the resolver under test.
+func TestSessionRuntimeDirectoryPreservesSymlinkParents(t *testing.T) {
+	build, destination := t.TempDir(), t.TempDir()
+	destination, err := filepath.EvalSymlinks(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := filepath.Join(destination, "child")
+	if err := os.Mkdir(child, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(child, filepath.Join(build, "via")); err != nil {
+		t.Fatal(err)
+	}
+	session, err := NewSession(t.Context(), BuildDescription{Directory: build, Environment: os.Environ(), Inputs: []string{}}, SessionPolicy{Runner: hermeticEnvRunner()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := &Snapshot{session: session, kind: CodeResult}
+	binding := bindTestRuntime(t, snapshot, RuntimeDescription{Directory: "via/.."})
+	if binding.runtime.dir != destination {
+		t.Fatalf("runtime directory = %q, want filesystem parent %q", binding.runtime.dir, destination)
+	}
+	if pwd, _ := gotool.LookupEnv(binding.runtime.env, "PWD"); pwd != destination {
+		t.Fatalf("runtime PWD = %q, want %q", pwd, destination)
+	}
+}
 
 func TestSessionOwnsItsDescriptions(t *testing.T) {
 	dir := t.TempDir()
@@ -17,11 +49,17 @@ func TestSessionOwnsItsDescriptions(t *testing.T) {
 	pure := []Subject{{Package: "example.com/p", Symbol: "F"}}
 	vouches := []string{"example.com/dep.State"}
 	containment := &gotool.Containment{WaitDelay: time.Second}
-	policy := SessionPolicy{PureSubjects: pure, Vouches: vouches, Runner: gotool.Runner{Containment: containment, Prepare: func(*exec.Cmd) {
+	policy := SessionPolicy{PureSubjects: pure, Vouches: vouches, Runner: gotool.Runner{Containment: containment, Prepare: func(cmd *exec.Cmd) {
 		build.Environment[len(build.Environment)-1] = "FRESH_BUILD_OWNED=changed"
 		build.Flags[0], build.Inputs[0] = "-tags=changed", "profile:changed"
 		pure[0].Symbol, vouches[0] = "G", "example.com/dep.Other"
 		containment.WaitDelay = 5 * time.Second
+		if len(cmd.Args) >= 3 && cmd.Args[1] == "env" && cmd.Args[2] == "-json" {
+			if sh, err := exec.LookPath("sh"); err == nil {
+				cmd.Path = sh
+				cmd.Args = []string{"sh", "-c", `printf '{"GOFLAGS":""}'`}
+			}
+		}
 	}}}
 	s, err := NewSession(context.Background(), build, policy)
 	if err != nil {

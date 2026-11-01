@@ -1938,7 +1938,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestToolVersionModule"
   role: BINDING_ROLE_TESTS
-  shape_hash: "5dfdcf2b60549585266d2a4f44292f3876377699e71a1c2d70854cff218aa678"
+  shape_hash: "f7e181ba9040f687ded169158e877bb10a4bad4280c5f525947d5867a12a84d8"
 }
 
 bindings {
