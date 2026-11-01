@@ -634,7 +634,7 @@ func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T
 	t.Setenv("GOENV", "warm")
 	dir := t.TempDir()
 	env := environmentWith("GOENV=off", "GOFLAGS=-tags", "GOEXPERIMENT=")
-	notice, err := ToolchainSelectionNoticeResolved(context.Background(), gotool.NewEnvReader(gotool.Runner{}, dir, env), nil)
+	_, _, notice, err := ResolveToolchainSelection(context.Background(), gotool.NewEnvReader(gotool.Runner{}, dir, env), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -645,11 +645,11 @@ func TestToolchainSelectionNoticeResolvedContextReadsTheEnvironment(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	notice, err = ToolchainSelectionNoticeResolved(context.Background(), gotool.PrimedEnvReader(gotool.Runner{}, dir, env, snapshot), nil)
+	_, _, notice, err = ResolveToolchainSelection(context.Background(), gotool.PrimedEnvReader(gotool.Runner{}, dir, env, snapshot), nil)
 	if err != nil || !strings.Contains(notice, "-tags (from $GOFLAGS)") {
 		t.Fatalf("snapshot-resolved notice lost the GOFLAGS selection: %v %q", err, notice)
 	}
-	clean, err := ToolchainSelectionNoticeResolved(context.Background(), gotool.NewEnvReader(gotool.Runner{}, dir, environmentWith("GOENV=off", "GOFLAGS=", "GOEXPERIMENT=")), nil)
+	_, _, clean, err := ResolveToolchainSelection(context.Background(), gotool.NewEnvReader(gotool.Runner{}, dir, environmentWith("GOENV=off", "GOFLAGS=", "GOEXPERIMENT=")), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -734,7 +734,7 @@ func TestFinalDigestReadCannotCompleteACancelledConstruction(t *testing.T) {
 		}
 		var err error
 		if notice {
-			_, err = ToolchainSelectionNoticeResolved(ctx, gotool.NewEnvReader(gotool.Runner{}, ".", env), nil)
+			_, _, _, err = ResolveToolchainSelection(ctx, gotool.NewEnvReader(gotool.Runner{}, ".", env), nil)
 		} else {
 			_, err = newAtEnv(ctx, ".", env)
 		}

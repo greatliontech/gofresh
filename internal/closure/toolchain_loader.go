@@ -2134,21 +2134,17 @@ func isInternalStdPackagePath(pkgPath string) bool {
 	return pkgPath == "internal" || strings.HasPrefix(pkgPath, "internal/") || strings.HasSuffix(pkgPath, "/internal") || strings.Contains(pkgPath, "/internal/")
 }
 
-// ToolchainSelectionNoticeResolved answers the toolchain-source audit
-// notice for a pass's selection — the explicit build flags under the
-// environment the reader resolves, the surface read from its GOROOT —
-// so a consumer can state the verdict at the tier where the selection
-// was authored without re-deriving the key; empty exactly when the
-// selection is admitted.
-func ToolchainSelectionNoticeResolved(ctx context.Context, reader *gotool.EnvReader, buildFlags []string) (string, error) {
+// ResolveToolchainSelection resolves the toolchain content digest, admission
+// policy digest, and toolchain-source audit notice for reader and buildFlags.
+func ResolveToolchainSelection(ctx context.Context, reader *gotool.EnvReader, buildFlags []string) (content, policy, notice string, err error) {
 	if reader == nil {
-		return "", fmt.Errorf("closure: nil environment reader")
+		return "", "", "", fmt.Errorf("closure: nil environment reader")
 	}
-	verdict, _, err := resolveSelection(ctx, reader, buildFlags)
+	verdict, source, err := resolveSelection(ctx, reader, buildFlags)
 	if err != nil {
-		return "", err
+		return "", "", "", err
 	}
-	return verdict.notice(), nil
+	return source.Content, source.Policy, verdict.notice(), nil
 }
 
 // SelectionAudited reports this Hasher's toolchain-source audit verdict

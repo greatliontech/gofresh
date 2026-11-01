@@ -3807,9 +3807,9 @@ func TestToolchainContentBindsRecordedApplicability(t *testing.T) {
 				t.Fatalf("closing accepted changed selected source: %v", err)
 			}
 			if !tc.observed {
-				notice, err := closure.ToolchainSelectionNoticeResolved(ctx, gotool.NewEnvReader(gotool.Runner{}, dir, os.Environ()), nil)
-				if err != nil || notice != "" {
-					t.Fatalf("outside-audit control changed admission: %s %v", notice, err)
+				sel, err := ResolveToolchainSelection(ctx, gotool.NewEnvReader(gotool.Runner{}, dir, os.Environ()))
+				if err != nil || sel.SelectionNotice != "" {
+					t.Fatalf("outside-audit control changed admission: %s %v", sel.SelectionNotice, err)
 				}
 			}
 			var warm Fingerprint
@@ -8749,6 +8749,14 @@ func TestResolveToolchainSelection(t *testing.T) {
 	var nilSession *Session
 	if _, err := nilSession.ToolchainSelection(context.Background()); err == nil {
 		t.Fatal("nil session accepted by ToolchainSelection")
+	}
+	degradedEnv := environmentWith(map[string]string{"GOENV": "off", "GOFLAGS": "-tags"})
+	degraded, err := ResolveToolchainSelection(context.Background(), gotool.NewEnvReader(gotool.Runner{}, dir, degradedEnv))
+	if err != nil {
+		t.Fatalf("ResolveToolchainSelection degraded GOFLAGS: %v", err)
+	}
+	if degraded.ToolchainContent != "" || degraded.AdmissionPolicy == "" || !strings.Contains(degraded.SelectionNotice, "-tags (from $GOFLAGS)") {
+		t.Fatalf("ResolveToolchainSelection degraded GOFLAGS = %+v", degraded)
 	}
 	if testing.Short() {
 		t.Skip("audits the host toolchain selection via go list")

@@ -189,14 +189,14 @@ func ResolveToolchainSelection(ctx context.Context, reader *gotool.EnvReader, bu
 	if reader == nil {
 		return ToolchainSelection{}, errors.New("gofresh: nil environment reader")
 	}
-	h, err := closure.NewAt(ctx, reader, buildFlags...)
+	content, policy, notice, err := closure.ResolveToolchainSelection(ctx, reader, buildFlags)
 	if err != nil {
 		return ToolchainSelection{}, err
 	}
 	return ToolchainSelection{
-		ToolchainContent: h.ToolchainContent(),
-		AdmissionPolicy:  h.AdmissionPolicy(),
-		SelectionNotice:  h.SelectionNotice(),
+		ToolchainContent: content,
+		AdmissionPolicy:  policy,
+		SelectionNotice:  notice,
 	}, nil
 }
 

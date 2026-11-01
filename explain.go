@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/dynstate"
 )
@@ -115,11 +114,11 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 		}
 	}
 	varKey := pkgPath + "." + varName
-	notice, err := closure.ToolchainSelectionNoticeResolved(ctx, v.engine.newPassReader(), v.engine.buildFlags)
+	sel, err := ResolveToolchainSelection(ctx, v.engine.newPassReader(), v.engine.buildFlags...)
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: toolchain selection: %w", err)
 	}
-	return explainCulprit(notice == "", pkgs, pkgPath, varKey, varName, v.engine.executionModel.singleSubject())
+	return explainCulprit(sel.SelectionNotice == "", pkgs, pkgPath, varKey, varName, v.engine.executionModel.singleSubject())
 }
 
 // explainCulprit re-derives every loaded package's fact with mark
