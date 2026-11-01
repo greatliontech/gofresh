@@ -259,7 +259,7 @@ type ctxSinkNode struct {
 	fs      filteredSink
 	parent  *ctxSinkNode
 	done    <-chan struct{}
-	counted atomic.Bool
+	counted *atomic.Bool
 }
 
 func (n *ctxSinkNode) decrement() {
@@ -300,12 +300,6 @@ var (
 	envMu  sync.Mutex
 	envCfg atomic.Pointer[envConfig]
 )
-
-// RefreshFromEnv synchronizes the ambient environment trace sink with the
-// current values of GOFRESH_TRACE and GOFRESH_TRACE_FILE.
-func RefreshFromEnv() {
-	Refresh(os.Getenv(EnvTrace), os.Getenv(EnvTraceFile))
-}
 
 // Refresh synchronizes the ambient environment trace sink with explicit
 // GOFRESH_TRACE and GOFRESH_TRACE_FILE values.
@@ -403,12 +397,14 @@ func WithFilteredSink(ctx context.Context, spec string, sink Sink) context.Conte
 	if existing, ok := ctx.Value(ctxKey{}).(*ctxSinkNode); ok {
 		parent = existing
 	}
+	counted := new(atomic.Bool)
+	counted.Store(true)
 	node := &ctxSinkNode{
-		fs:     filteredSink{f: f, sink: sink},
-		parent: parent,
-		done:   ctx.Done(),
+		fs:      filteredSink{f: f, sink: sink},
+		parent:  parent,
+		done:    ctx.Done(),
+		counted: counted,
 	}
-	node.counted.Store(true)
 	activeCount.Add(1)
 	if ctx.Done() != nil {
 		context.AfterFunc(ctx, node.decrement)
@@ -417,7 +413,7 @@ func WithFilteredSink(ctx context.Context, spec string, sink Sink) context.Conte
 		if c.CompareAndSwap(true, false) {
 			activeCount.Add(-1)
 		}
-	}, &node.counted)
+	}, counted)
 	return context.WithValue(ctx, ctxKey{}, node)
 }
 

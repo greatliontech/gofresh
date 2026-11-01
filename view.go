@@ -238,7 +238,7 @@ type opAccountKey struct{}
 // per class) and, when the operation returns its caller's context error,
 // the kept-on-cancel report — once per operation, whatever its passes.
 func (e *engine) beginOperation(ctx context.Context) (context.Context, func(*error)) {
-	trace.RefreshFromEnv()
+	refreshTraceFromEnv()
 	if e.progress == nil || ctx == nil {
 		return ctx, func(*error) {}
 	}

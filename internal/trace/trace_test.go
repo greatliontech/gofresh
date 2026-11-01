@@ -14,6 +14,10 @@ import (
 	"time"
 )
 
+func RefreshFromEnv() {
+	Refresh(os.Getenv(EnvTrace), os.Getenv(EnvTraceFile))
+}
+
 type panicOnFormatError struct{}
 
 func (panicOnFormatError) Error() string {

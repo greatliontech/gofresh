@@ -898,9 +898,58 @@ type persistedSourceDigests struct {
 	All map[string]string `json:"all"`
 }
 
-var toolchainDigestsMemo sync.Map
+var (
+	toolchainListingMemo sync.Map
+	toolchainDigestsMemo sync.Map
+)
+
+type memoizedListing struct {
+	rawSum  [32]byte
+	listing surfaceListing
+}
+
+type memoizedDigests struct {
+	rawSum  [32]byte
+	all     map[string]string
+	content string
+}
+
+func loadToolchainListing(scope string) (surfaceListing, bool) {
+	listingPath, err := cachefile.Path(sourceDigestsDirName, scope, "listing")
+	var rawSum [32]byte
+	haveRaw := false
+	if err == nil {
+		if raw, readErr := os.ReadFile(listingPath); readErr == nil {
+			rawSum = sha256.Sum256(raw)
+			haveRaw = true
+			if v, ok := toolchainListingMemo.Load(listingPath); ok {
+				if entry := v.(memoizedListing); entry.rawSum == rawSum {
+					return entry.listing, true
+				}
+			}
+		}
+	}
+	var l surfaceListing
+	if !cachefile.Load(sourceDigestsDirName, scope, "listing", &l) {
+		return surfaceListing{}, false
+	}
+	if l.Version != sourceDigestsVersion || len(l.Packages) == 0 || len(l.Discovery) == 0 || l.Integrity != listingIntegrity(scope, l) {
+		return surfaceListing{}, false
+	}
+	if haveRaw {
+		toolchainListingMemo.Store(listingPath, memoizedListing{
+			rawSum:  rawSum,
+			listing: l,
+		})
+	}
+	return l, true
+}
 
 func sourceDigestsFromMemo(l surfaceListing, all map[string]string) (sourceDigests, bool) {
+	return sourceDigestsFromMemoWithContent(l, all, "")
+}
+
+func sourceDigestsFromMemoWithContent(l surfaceListing, all map[string]string, precomputedContent string) (sourceDigests, bool) {
 	if len(all) == 0 || len(all) != len(l.Packages) {
 		return sourceDigests{}, false
 	}
@@ -922,6 +971,10 @@ func sourceDigestsFromMemo(l surfaceListing, all map[string]string) (sourceDiges
 	if len(d.Packages) == 0 {
 		return sourceDigests{}, false
 	}
+	if precomputedContent != "" {
+		d.Content = precomputedContent
+		return d, true
+	}
 	data, _ := json.Marshal(all)
 	sum := sha256.Sum256(append([]byte("gofresh/toolchain-content@1\x00"), data...))
 	d.Content = hex.EncodeToString(sum[:])
@@ -934,11 +987,17 @@ func loadToolchainDigests(scope string, l surfaceListing) (sourceDigests, bool) 
 	}
 	key := "digests-" + l.Integrity
 	recordPath, err := cachefile.Path(sourceDigestsDirName, scope, key)
+	var rawSum [32]byte
+	haveRaw := false
 	if err == nil {
-		if v, ok := toolchainDigestsMemo.Load(recordPath); ok {
-			if _, statErr := os.Stat(recordPath); statErr == nil {
-				if d, ok := sourceDigestsFromMemo(l, v.(map[string]string)); ok {
-					return d, true
+		if raw, readErr := os.ReadFile(recordPath); readErr == nil {
+			rawSum = sha256.Sum256(raw)
+			haveRaw = true
+			if v, ok := toolchainDigestsMemo.Load(recordPath); ok {
+				if entry := v.(memoizedDigests); entry.rawSum == rawSum {
+					if d, ok := sourceDigestsFromMemoWithContent(l, entry.all, entry.content); ok {
+						return d, true
+					}
 				}
 			}
 		}
@@ -951,8 +1010,12 @@ func loadToolchainDigests(scope string, l surfaceListing) (sourceDigests, bool) 
 	if !ok {
 		return sourceDigests{}, false
 	}
-	if err == nil {
-		toolchainDigestsMemo.Store(recordPath, cached.All)
+	if haveRaw {
+		toolchainDigestsMemo.Store(recordPath, memoizedDigests{
+			rawSum:  rawSum,
+			all:     cached.All,
+			content: d.Content,
+		})
 	}
 	return d, true
 }
@@ -968,7 +1031,13 @@ func storeToolchainDigests(scope string, l surfaceListing, d sourceDigests) {
 	key := "digests-" + l.Integrity
 	cachefile.Store(sourceDigestsDirName, scope, key, persistedSourceDigests{All: all})
 	if recordPath, err := cachefile.Path(sourceDigestsDirName, scope, key); err == nil {
-		toolchainDigestsMemo.Store(recordPath, all)
+		if raw, readErr := os.ReadFile(recordPath); readErr == nil {
+			toolchainDigestsMemo.Store(recordPath, memoizedDigests{
+				rawSum:  sha256.Sum256(raw),
+				all:     all,
+				content: d.Content,
+			})
+		}
 	}
 }
 
@@ -1013,8 +1082,8 @@ func toolchainSourceScope(snapshot *gotool.EnvSnapshot, buildFlags []string, see
 // admission then refuses, naming it.
 func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir string, env []string, snapshot *gotool.EnvSnapshot, buildFlags []string) (sourceDigests, error) {
 	scope := toolchainSourceScope(snapshot, buildFlags, surfaceSeeds())
-	var l surfaceListing
-	warmListing := cachefile.Load(sourceDigestsDirName, scope, "listing", &l) && l.Version == sourceDigestsVersion && len(l.Packages) != 0 && len(l.Discovery) != 0 && l.Integrity == listingIntegrity(scope, l) && stampsCurrentContext(ctx, l)
+	l, loadedListing := loadToolchainListing(scope)
+	warmListing := loadedListing && stampsCurrentContext(ctx, l)
 	if trace.AnyEnabled() {
 		goroot := snapshot.Value("GOROOT")
 		if trace.Enabled(ctx, trace.DomainToolchain, goroot) {
@@ -1071,6 +1140,14 @@ func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir strin
 		l.Integrity = listingIntegrity(scope, l)
 		if cacheableDiscovery(l) {
 			cachefile.Store(sourceDigestsDirName, scope, "listing", l)
+			if listingPath, err := cachefile.Path(sourceDigestsDirName, scope, "listing"); err == nil {
+				if raw, readErr := os.ReadFile(listingPath); readErr == nil {
+					toolchainListingMemo.Store(listingPath, memoizedListing{
+						rawSum:  sha256.Sum256(raw),
+						listing: l,
+					})
+				}
+			}
 		}
 	} else if digestReadForTest == nil {
 		if err := ctx.Err(); err != nil {

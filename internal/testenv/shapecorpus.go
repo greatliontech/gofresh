@@ -1,26 +1,11 @@
-// Package shapecorpus is the fleet's shared language-shape canary
-// corpus: the shapes every tool's frontend must parse and judge, in
-// one exported home so the four consumers' canaries cannot drift
-// (a per-repo copy went asymmetric within one chunk). Each tool
-// wraps the corpus with its own harness — analysis, candidate
-// generation, symbol resolution, measurement capture — and runs it
-// under the CI matrix's next-rc leg, so a new Go release's shape
-// breakage fails as a named canary instead of a field session.
-// Additions ride the language: a new release's parse-sensitive
-// construct joins here once, and every tool's canary carries it.
-//
-// Content drift between consumers is unrepresentable; version lag is
-// not — a consumer pinned to an older gofresh release runs an older
-// corpus until its next bump, and a new entry protects no tool until
-// every consumer has bumped past it.
-package shapecorpus
+package testenv
 
-// Entry is one language shape: a self-contained package source with
+// ShapeEntry is one language shape: a self-contained package source with
 // a plain Subject() function (every harness's default anchor), the
 // shape-carrying symbol for harnesses that must touch the shape
 // itself (resolution, hashing), and the benchmark spelling for
 // measurement harnesses.
-type Entry struct {
+type ShapeEntry struct {
 	// Name labels the shape; harnesses use it as the subtest name.
 	Name string
 	// Source is the package body, package name "shape".
@@ -43,9 +28,9 @@ type Entry struct {
 	SubjectReason string
 }
 
-// Entries returns the corpus in a stable order.
-func Entries() []Entry {
-	return []Entry{
+// ShapeEntries returns the language-shape canary corpus in a stable order.
+func ShapeEntries() []ShapeEntry {
+	return []ShapeEntry{
 		{
 			Name: "generic method with pointer receiver",
 			Source: `package shape
@@ -251,7 +236,7 @@ const corpusModFile = "module example.com/shape\n\ngo 1.27\n"
 // testing.B's runtime-configuration reads (b.Loop, b.N) flag the
 // package scan, which would poison every observability disposition
 // the corpus pins.
-func (e Entry) TestFiles() map[string]string {
+func (e ShapeEntry) TestFiles() map[string]string {
 	return map[string]string{
 		"go.mod":   corpusModFile,
 		"shape.go": e.Source,
@@ -266,7 +251,7 @@ func TestSubject(t *testing.T) { _ = Subject() }
 
 // BenchFiles returns the fixture layout for measurement harnesses:
 // the same source with a BenchmarkSubject anchor.
-func (e Entry) BenchFiles() map[string]string {
+func (e ShapeEntry) BenchFiles() map[string]string {
 	return map[string]string{
 		"go.mod":   corpusModFile,
 		"shape.go": e.Source,

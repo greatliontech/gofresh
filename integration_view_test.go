@@ -2069,21 +2069,6 @@ func TestPurityScanUsesSuppliedEnvironment(t *testing.T) {
 	}
 }
 
-// TestToolVersionModule keeps the independently published metadata module in
-// the repository's plain and CI test inventory. The module has no dependencies
-// and its own tests directly exercise the formatter's metadata cases.
-func TestToolVersionModule(t *testing.T) {
-	if testing.Short() {
-		t.Skip("spawns a go test subprocess over the standalone toolversion module")
-	}
-	cmd := exec.CommandContext(t.Context(), "go", "test", "-count=1", "./...")
-	cmd.Dir = "toolversion"
-	cmd.Env = gotool.SetEnv(os.Environ(), "GOWORK", "off")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("toolversion module: %v\n%s", err, out)
-	}
-}
-
 // writeSharedHelperFixture is the field shape: one directory whose
 // in-package test file (package amb) and external test package (package
 // amb_test) both declare mustHelper — legal Go, two distinct packages in

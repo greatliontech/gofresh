@@ -56,10 +56,14 @@ const (
 // Guards holds the environment guard digests for a fingerprint.
 type Guards = guard.Guards
 
+func refreshTraceFromEnv() {
+	trace.Refresh(os.Getenv(trace.EnvTrace), os.Getenv(trace.EnvTraceFile))
+}
+
 // CaptureGuards computes the environment guards applicable to kind in r's
 // directory under env as the complete runtime environment.
 func CaptureGuards(ctx context.Context, r *gotool.EnvReader, env []string, kind Kind, buildInputs ...string) (Guards, error) {
-	trace.RefreshFromEnv()
+	refreshTraceFromEnv()
 	if ctx == nil {
 		return Guards{}, errors.New("gofresh: nil guard capture context")
 	}
@@ -243,7 +247,7 @@ type Session struct {
 // Snapshots observe source/build generations; BindRuntime separately admits the
 // environment of executions using a retained artifact. Construction honors ctx.
 func NewSession(ctx context.Context, build BuildDescription, policy SessionPolicy) (session *Session, err error) {
-	trace.RefreshFromEnv()
+	refreshTraceFromEnv()
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil session context")
 	}

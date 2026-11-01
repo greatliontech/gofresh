@@ -1,4 +1,4 @@
-package shortgates
+package testenv
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ import (
 // it must admit and each shape it must refuse, so a neutered arm fails
 // here rather than passing silently over a tree that happens to be
 // clean.
-func TestCheckDetectsEachViolation(t *testing.T) {
+func TestCheckShortGatesDetectsEachViolation(t *testing.T) {
 	const gate = "if testing." + "Short() {\n\t\tt.Skip(\"x\")\n\t}\n"
 	cases := []struct {
 		name     string
@@ -41,7 +41,7 @@ func TestCheckDetectsEachViolation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rep := check(fset, map[string]*ast.File{"case_test.go": f})
+			rep := checkShortGates(fset, map[string]*ast.File{"case_test.go": f})
 			if got := rep.Anywhere != rep.InBodies; got != tc.mismatch {
 				t.Errorf("mismatch = %t (anywhere %d, in bodies %d), want %t", got, rep.Anywhere, rep.InBodies, tc.mismatch)
 			}
@@ -56,9 +56,9 @@ func TestCheckDetectsEachViolation(t *testing.T) {
 	}
 }
 
-// Walk scopes the tree — testdata skipped, root and descent recorded —
+// walkShortGates scopes the tree — testdata skipped, root and descent recorded —
 // and each violation class shows in the report it returns.
-func TestWalkScopesTheTreeAndReportsEachClass(t *testing.T) {
+func TestWalkShortGatesScopesTheTreeAndReportsEachClass(t *testing.T) {
 	const gate = "if testing." + "Short() {\n\t\tt.Skip(\"x\")\n\t}\n"
 	write := func(t *testing.T, files map[string]string) string {
 		t.Helper()
@@ -79,7 +79,7 @@ func TestWalkScopesTheTreeAndReportsEachClass(t *testing.T) {
 		"sub/b_test.go":      "package sub\n\nimport \"testing\"\n\nfunc TestB(t *testing.T) {\n\t" + gate + "}\n",
 		"testdata/x_test.go": "package x\n\nimport \"testing\"\n\nfunc helper(t *testing.T) {\n\t" + gate + "}\n",
 	})
-	rep, err := walk(clean)
+	rep, err := walkShortGates(clean)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,47 +90,47 @@ func TestWalkScopesTheTreeAndReportsEachClass(t *testing.T) {
 		"a_test.go":     "package p\n\nimport \"testing\"\n\nfunc helper(t *testing.T) {\n\t" + gate + "}\n\nfunc TestA(t *testing.T) { helper(t) }\n",
 		"sub/b_test.go": "package sub\n\nimport \"testing\"\n\nfunc TestB(t *testing.T) {\n\t" + gate + "}\n",
 	})
-	if rep, _ := walk(helperTree); rep.Anywhere != 2 || rep.InBodies != 1 {
+	if rep, _ := walkShortGates(helperTree); rep.Anywhere != 2 || rep.InBodies != 1 {
 		t.Fatalf("helper gate: %+v", rep)
 	}
 	rootless := write(t, map[string]string{
 		"sub/b_test.go": "package sub\n\nimport \"testing\"\n\nfunc TestB(t *testing.T) {\n\t" + gate + "}\n",
 	})
-	if rep, _ := walk(rootless); rep.AtRoot || !rep.Descended {
+	if rep, _ := walkShortGates(rootless); rep.AtRoot || !rep.Descended {
 		t.Fatalf("rootless tree: %+v", rep)
 	}
 	flat := write(t, map[string]string{
 		"a_test.go": "package p\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) {\n\t" + gate + "}\n",
 	})
-	if rep, _ := walk(flat); !rep.AtRoot || rep.Descended {
+	if rep, _ := walkShortGates(flat); !rep.AtRoot || rep.Descended {
 		t.Fatalf("flat tree: %+v", rep)
 	}
 	unparsable := write(t, map[string]string{"a_test.go": "package p\n\nfunc {"})
-	if _, err := walk(unparsable); err == nil {
+	if _, err := walkShortGates(unparsable); err == nil {
 		t.Fatal("an unparsable test file walked cleanly")
 	}
 }
 
-// recorder is a failer that records what Pin reported: errors
+// shortGateRecorder is a failer that records what PinShortGates reported: errors
 // accumulate, a fatal stops the pin the way the testing package's would.
-type recorder struct {
+type shortGateRecorder struct {
 	errors []string
 	fatal  string
 }
 
 type fatalStop struct{}
 
-func (r *recorder) Helper()           {}
-func (r *recorder) Error(args ...any) { r.errors = append(r.errors, fmt.Sprint(args...)) }
-func (r *recorder) Fatal(args ...any) { r.fatal = fmt.Sprint(args...); panic(fatalStop{}) }
-func (r *recorder) Fatalf(format string, args ...any) {
+func (r *shortGateRecorder) Helper()           {}
+func (r *shortGateRecorder) Error(args ...any) { r.errors = append(r.errors, fmt.Sprint(args...)) }
+func (r *shortGateRecorder) Fatal(args ...any) { r.fatal = fmt.Sprint(args...); panic(fatalStop{}) }
+func (r *shortGateRecorder) Fatalf(format string, args ...any) {
 	r.fatal = fmt.Sprintf(format, args...)
 	panic(fatalStop{})
 }
 
-// pin runs Pin against root with a recorder and returns it.
-func pin(root string) *recorder {
-	r := &recorder{}
+// pinShortGates runs PinShortGates against root with a recorder and returns it.
+func pinShortGates(root string) *shortGateRecorder {
+	r := &shortGateRecorder{}
 	func() {
 		defer func() {
 			if v := recover(); v != nil {
@@ -139,15 +139,15 @@ func pin(root string) *recorder {
 				}
 			}
 		}()
-		Pin(r, root)
+		PinShortGates(r, root)
 	}()
 	return r
 }
 
-// Pin's every arm fires on the tree that violates it and none on a
+// PinShortGates's every arm fires on the tree that violates it and none on a
 // clean tree: the walk error, the per-gate problems, the root and
 // descent reach, the helper mismatch, and the gate-free tree.
-func TestPinFailsEachArm(t *testing.T) {
+func TestPinShortGatesFailsEachArm(t *testing.T) {
 	const gate = "if testing." + "Short() {\n\t\tt.Skip(\"x\")\n\t}\n"
 	write := func(t *testing.T, files map[string]string) string {
 		t.Helper()
@@ -167,7 +167,7 @@ func TestPinFailsEachArm(t *testing.T) {
 		return "package p\n\nimport \"testing\"\n\nfunc TestA(t *testing.T) {\n\t" + body + "}\n"
 	}
 	sub := "package sub\n\nimport \"testing\"\n\nfunc TestB(t *testing.T) {\n\t" + gate + "}\n"
-	clean := pin(write(t, map[string]string{"a_test.go": test(gate), "sub/b_test.go": sub}))
+	clean := pinShortGates(write(t, map[string]string{"a_test.go": test(gate), "sub/b_test.go": sub}))
 	if clean.fatal != "" || len(clean.errors) != 0 {
 		t.Fatalf("clean tree failed: fatal %q, errors %v", clean.fatal, clean.errors)
 	}
@@ -183,7 +183,7 @@ func TestPinFailsEachArm(t *testing.T) {
 		"gate in a helper":         {map[string]string{"a_test.go": "package p\n\nimport \"testing\"\n\nfunc helper(t *testing.T) {\n\t" + gate + "}\n\nfunc TestA(t *testing.T) { helper(t) }\n", "sub/b_test.go": sub}, "sits in a helper", 0},
 		"no gates":                 {map[string]string{"a_test.go": test(""), "sub/b_test.go": "package sub\n\nimport \"testing\"\n\nfunc TestB(t *testing.T) {}\n"}, "no gates found", 0},
 	} {
-		r := pin(write(t, tc.files))
+		r := pinShortGates(write(t, tc.files))
 		if !strings.Contains(r.fatal, tc.fatal) || len(r.errors) != tc.errors {
 			t.Errorf("%s: fatal %q (want %q), errors %v (want %d)", name, r.fatal, tc.fatal, r.errors, tc.errors)
 		}

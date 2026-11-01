@@ -2,6 +2,17 @@
 # proto-message: stipulator.v1.Tombstones
 
 retired: "REQ-closure-refinement-policy"
+retired: "REQ-control-authority"
+retired: "REQ-control-execution-description"
+retired: "REQ-control-project-isolation"
+retired: "REQ-control-request-project"
+retired: "REQ-control-trust-source"
 retired: "REQ-fresh-inspected-artifact"
 retired: "REQ-fresh-refinement-disposition"
 retired: "REQ-fresh-refinement-failclosed"
+retired: "REQ-fresh-resident-readings"
+retired: "REQ-fresh-tool-version"
+retired: "REQ-guidance-coverage"
+retired: "REQ-guidance-format"
+retired: "REQ-guidance-render"
+retired: "REQ-guidance-single-source"

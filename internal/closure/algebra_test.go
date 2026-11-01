@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
 	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
+	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/testvariant"
-	"github.com/greatliontech/gofresh/shapecorpus"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -191,15 +191,15 @@ func TestBindingResolutionPreservesSharedParseMemo(t *testing.T) {
 	}
 }
 
-// TestLanguageShapeCanaries runs the fleet's shared shape corpus
-// (shapecorpus) through this frontend — load, precise analysis,
+// TestLanguageShapeCanaries runs the language-shape canary corpus
+// (testenv.ShapeEntries) through this frontend — load, precise analysis,
 // observability — pinning each entry's DISPOSITION, not merely the
 // absence of one failure string: a probe showed the
 // any-disposition tolerance green over an unjudged shape, so a
 // release flipping a disposition in either direction is a red canary
 // here. Runs under the CI matrix's next-rc leg like every test.
 func TestLanguageShapeCanaries(t *testing.T) {
-	for _, entry := range shapecorpus.Entries() {
+	for _, entry := range testenv.ShapeEntries() {
 		t.Run(entry.Name, func(t *testing.T) {
 			dir := t.TempDir()
 			for file, content := range entry.TestFiles() {

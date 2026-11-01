@@ -1,16 +1,4 @@
-// Package shortgates pins a repository's fast-tier partition: every
-// `if testing.Short()` gate in its test files is a skipping statement of
-// a Test or Fuzz function body — at its head, or after the cheap controls
-// it deliberately runs first — never in a helper the full tier could not
-// see through, never inside a closure the test may not invoke (a t.Run
-// subtest or f.Fuzz body counts as a body; any other closure does not),
-// and never inside a fixture source string, where it would change what
-// the full tier analyzes. One repository's pin is one call; the checker's
-// own arms are pinned here over synthetic sources, since a probe through
-// the build overlay never reaches a file the pin reads from disk. A
-// literal assembled by concatenation would evade the string arm, which
-// guards against the mechanical pass, not deliberate evasion.
-package shortgates
+package testenv
 
 import (
 	"fmt"
@@ -33,14 +21,14 @@ type failer interface {
 	Fatalf(format string, args ...any)
 }
 
-// Pin fails t unless every test file under root (testdata and
+// PinShortGates fails t unless every test file under root (testdata and
 // dot-directories excluded, so a new package cannot escape it) keeps
 // the partition: no gate outside a Test/Fuzz body, every gate skipping,
 // no gate text inside a string literal, at least one gate, and a walk
 // that reached a test file in root itself and descended below it.
-func Pin(t failer, root string) {
+func PinShortGates(t failer, root string) {
 	t.Helper()
-	rep, err := walk(root)
+	rep, err := walkShortGates(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,16 +53,16 @@ func Pin(t failer, root string) {
 
 // walkReport is a checker pass over a walked tree with the walk's reach.
 type walkReport struct {
-	report
+	shortGateReport
 	// AtRoot and Descended record the walk's reach: a test file in the
 	// walked root itself, and one below it.
 	AtRoot, Descended bool
 }
 
-// walk parses every test file under root (testdata and dot-directories
+// walkShortGates parses every test file under root (testdata and dot-directories
 // excluded) and checks them, recording whether the walk reached a test
 // file in root itself and whether it descended below it.
-func walk(root string) (walkReport, error) {
+func walkShortGates(root string) (walkReport, error) {
 	fset := token.NewFileSet()
 	files := map[string]*ast.File{}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -104,7 +92,7 @@ func walk(root string) (walkReport, error) {
 	if err != nil {
 		return walkReport{}, err
 	}
-	rep := walkReport{report: check(fset, files)}
+	rep := walkReport{shortGateReport: checkShortGates(fset, files)}
 	for path := range files {
 		if rel, err := filepath.Rel(root, path); err == nil {
 			if strings.Contains(rel, string(filepath.Separator)) {
@@ -117,8 +105,8 @@ func walk(root string) (walkReport, error) {
 	return rep, nil
 }
 
-// report is one checker pass over parsed test files.
-type report struct {
+// shortGateReport is one checker pass over parsed test files.
+type shortGateReport struct {
 	// Anywhere counts every gate statement in the files; InBodies counts
 	// the ones that are statements of a Test/Fuzz body (framework-entered
 	// closures included). Equal iff no gate sits in a helper or an
@@ -127,9 +115,9 @@ type report struct {
 	Problems           []string
 }
 
-// check applies the fast-tier gate rules to parsed test files.
-func check(fset *token.FileSet, files map[string]*ast.File) report {
-	var rep report
+// checkShortGates applies the fast-tier gate rules to parsed test files.
+func checkShortGates(fset *token.FileSet, files map[string]*ast.File) shortGateReport {
+	var rep shortGateReport
 	// The gate shape, not the bare call: a fixture may legitimately
 	// exercise testing.Short() as analysis input. Composed so this
 	// file's own text never matches itself.
@@ -165,7 +153,7 @@ func check(fset *token.FileSet, files map[string]*ast.File) report {
 				}
 				if st, ok := n.(ast.Stmt); ok && isShortGate(st) {
 					rep.InBodies++
-					if !skips(st.(*ast.IfStmt)) {
+					if !skipsShortGate(st.(*ast.IfStmt)) {
 						rep.Problems = append(rep.Problems, fmt.Sprintf("%s: a gate that does not skip", fset.Position(st.Pos())))
 					}
 				}
@@ -217,8 +205,8 @@ func isShortGate(s ast.Stmt) bool {
 	return ok && pkg.Name == "testing"
 }
 
-// skips reports whether the gate's body is exactly one Skip/Skipf call.
-func skips(ifs *ast.IfStmt) bool {
+// skipsShortGate reports whether the gate's body is exactly one Skip/Skipf call.
+func skipsShortGate(ifs *ast.IfStmt) bool {
 	if len(ifs.Body.List) != 1 {
 		return false
 	}

@@ -996,9 +996,7 @@ func TestWithDirCoherenceResolvesSymlinks(t *testing.T) {
 	}
 }
 
-// FuzzControlAndSessionAuthority is a property witness for REQ-control-authority,
-// REQ-control-execution-description, REQ-control-project-isolation,
-// REQ-control-request-project, REQ-control-trust-source, and REQ-vouch-input.
+// FuzzControlAndSessionAuthority is a property witness for REQ-vouch-input.
 func FuzzControlAndSessionAuthority(f *testing.F) {
 	f.Add("example.com/pkg", "Hook", "sub/dir", "-tags=fast", "out.test", "-v")
 	f.Add("example.com/v2/sub", "State", "nested", "-race", "bin.test", "-count=1")

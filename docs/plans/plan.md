@@ -9,10 +9,10 @@
 
 ## Phase B: Public Surface & Tool-Leakage Eviction
 
-- [ ] **Chunk B.1: Evict Non-Freshness Subpackages (`guidance`, `resident`, `toolversion`, `shortgates`, `shapecorpus`) & Cross-Tool Specs**
-  - [ ] Delete `guidance/`, `resident/`, and `toolversion/` (including `toolversion/go.mod`), and move `shortgates/` and `shapecorpus/` into `internal/testenv` per [`docs/notes/blueprint-surface-eviction.md`](file:///home/nikolas/repos/github.com/greatliontech/gofresh/docs/notes/blueprint-surface-eviction.md).
-  - [ ] Delete `docs/specs/guidance.md`, `docs/specs/controls.md`, `.stipulator/bindings/guidance.textproto`, and `.stipulator/bindings/control.textproto`, remove the shared-substrate preamble, `REQ-fresh-resident-readings`, `REQ-fresh-tool-version`, and `guidance.md`/`controls.md` references from `docs/specs/overview.md` and `.stipulator/bindings/fresh.textproto`, and record the retired requirements in `.stipulator/tombstones.textproto`.
-  - [ ] Delete `CLAUDE.md` and `.claude/` from the repository root.
+- [x] **Chunk B.1: Evict Non-Freshness Subpackages (`guidance`, `resident`, `toolversion`, `shortgates`, `shapecorpus`) & Cross-Tool Specs**
+  - [x] Delete `guidance/`, `resident/`, and `toolversion/` (including `toolversion/go.mod`), and move `shortgates/` and `shapecorpus/` into `internal/testenv` per [`docs/notes/blueprint-surface-eviction.md`](file:///home/nikolas/repos/github.com/greatliontech/gofresh/docs/notes/blueprint-surface-eviction.md).
+  - [x] Delete `docs/specs/guidance.md`, `docs/specs/controls.md`, `.stipulator/bindings/guidance.textproto`, and `.stipulator/bindings/control.textproto`, remove the shared-substrate preamble, `REQ-fresh-resident-readings`, `REQ-fresh-tool-version`, and `guidance.md`/`controls.md` references from `docs/specs/overview.md` and `.stipulator/bindings/fresh.textproto`, and record the retired requirements in `.stipulator/tombstones.textproto`.
+  - [x] Delete `CLAUDE.md` and `.claude/` from the repository root.
 
 - [ ] **Chunk B.2: Internalize `gotool` & `runtimeinput` and Collapse Legacy `engine`/`option` Layer in Root `gofresh`**
   - [ ] Move narrowed `gotool` to `internal/gotool` (evicting `Runner.Program`, `Containment`, `RunMemo`, `Sampler`, `SnapshotSampler`, `Salvaged`) and replace `SessionPolicy.Runner`, `CaptureGuards`, and `ResolveToolchainSelection` `gotool` parameters with `SessionPolicy.PrepareCommand func(*exec.Cmd)` and `BuildDescription`.

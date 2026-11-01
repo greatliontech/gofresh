@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"github.com/greatliontech/gofresh/gotool"
+	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/trace"
 	"github.com/greatliontech/gofresh/runtimeinput"
-	"github.com/greatliontech/gofresh/shortgates"
 	"github.com/greatliontech/stipulator/stipulate/structural"
 	"go/ast"
 	"go/parser"
@@ -169,10 +169,9 @@ func TestConstructionContextKeepsCancellationAttribution(t *testing.T) {
 // The fast tier's gates are inert under a plain `go test`: every gate in
 // the repository's test files is a skipping statement of a Test or Fuzz
 // body, never in a helper, an uninvoked closure, or a fixture string
-// (github.com/greatliontech/gofresh/shortgates states the rules and pins
-// its own arms).
+// (internal/testenv.PinShortGates states the rules and pins its own arms).
 func TestShortGatesLiveInTestBodiesAndSkip(t *testing.T) {
-	shortgates.Pin(t, ".")
+	testenv.PinShortGates(t, ".")
 }
 
 func TestVariantLedgerTypesAreExportedData(t *testing.T) {
@@ -375,7 +374,7 @@ func TestTraceNonInterference(t *testing.T) {
 	t.Cleanup(func() {
 		os.Unsetenv(trace.EnvTrace)
 		os.Unsetenv(trace.EnvTraceFile)
-		trace.RefreshFromEnv()
+		refreshTraceFromEnv()
 	})
 	tracedFP, tracedBD, tracedObs := runCapture(true)
 

@@ -14,7 +14,6 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/dynstate"
-	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // The explain surface turns a refusal into its derivation chain
@@ -93,7 +92,7 @@ func CulpritFromReason(reason string) (Subject, bool) {
 // hooks armed; a variable that is not a culprit yields an empty chain
 // and no error.
 func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName string) (Chain, error) {
-	trace.RefreshFromEnv()
+	refreshTraceFromEnv()
 	if v == nil || v.engine == nil {
 		return Chain{}, errors.New("gofresh: uninitialized snapshot")
 	}
