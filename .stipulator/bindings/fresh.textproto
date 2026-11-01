@@ -2816,6 +2816,26 @@ bindings {
 }
 
 bindings {
+  requirement_id: "REQ-fresh-trace"
+  content_hash: "d55788f98f01c2bc744e4b464e1088b6ba8e0903e08203ae03fe81baca79a5b7"
+  source_hash: "83b3ad79d25ce614e9e2fd802cf1b10347c8920f7f9914a457ae684169ac5d94"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestTraceCausalWitnessesAcrossDomains"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "55ce248b3510ba9192a1dc65e0a5cdf369df4af954259fbbc428b3f9b6e59a6e"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-trace"
+  content_hash: "d55788f98f01c2bc744e4b464e1088b6ba8e0903e08203ae03fe81baca79a5b7"
+  source_hash: "83b3ad79d25ce614e9e2fd802cf1b10347c8920f7f9914a457ae684169ac5d94"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/testenv.TestTraceGateEnforcesZeroUnintendedDegradationAndCausalWitnesses"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "770768624323888fb7403d50631ea10b88c2a423e0f1b7eac54f898f8f1a5f2e"
+}
+
+bindings {
   requirement_id: "REQ-fresh-trace-non-interference"
   content_hash: "432098a3af09130ab47dc457b0441414f200eef68fe54c0513d3e9b26845e756"
   source_hash: "5996bd6488939568736f0d96682aa4905fc0ec0b7ed854ab0d82512dbfdd5f67"
@@ -2853,4 +2873,14 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestTraceNonInterference"
   role: BINDING_ROLE_TESTS
   shape_hash: "1a1fc258131b75eae30414ab7f6771b4993fef372698627d8523a53e984edbcf"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-trace-non-interference"
+  content_hash: "432098a3af09130ab47dc457b0441414f200eef68fe54c0513d3e9b26845e756"
+  source_hash: "5996bd6488939568736f0d96682aa4905fc0ec0b7ed854ab0d82512dbfdd5f67"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.FuzzUniversalTraceNonInterference"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cf14863675d81ffe7539396156c5155fc7c18f3bdf847516046d0ff79425bdcf"
 }

@@ -19,15 +19,11 @@
   - [x] Move `runtimeinput` to `internal/runtimeinput`, evict `gomutant`-only exemption-clause helpers (`RefusalClause`, `RefusalAttribution`, `MovedBracketClause`, `CanonicalMovedBracketClause`), unexport internal outcome-support/roots plumbing, and expose the clean runtime-observation domain surface (including `CompletedObservationState` and `IncompleteRuntimeObservation`) on root `gofresh` so `github.com/greatliontech/gofresh` is the sole public package.
   - [x] Evict `RepositoryVouchFile`, `ReadVouchFile`, `BuildDescription.TestCompileArgs`, `DiagnosticsTo`, `Progress.Diagnostic`, `UnitPhases`, `Progress.IsUnit`, `ToolchainProvenance`, `ToolchainSampler`, `SampleFunc`, and `ErrNoSampler`; enforce `ToolchainSkew` automatically in `NewSession`; collapse `type engine struct` into `Session` in production `session.go` and isolate the white-box test builder (`newEngine` / `option`) in `frontend_harness_test.go`; and amend `REQ-fresh-go-command-policy`, `REQ-fresh-toolchain-skew`, `REQ-fresh-progress` (`docs/specs/overview.md`), `REQ-vouch-input` (`docs/specs/purity.md`), `REQ-inputs-identity-facade`, `REQ-inputs-completed-observation`, `REQ-inputs-file-eligibility`, `REQ-inputs-producer-facade`, and `REQ-inputs-refusal-attribution` (`docs/specs/runtime-inputs.md`) along with `.stipulator/bindings/{fresh,vouch,inputs,guard,purity}.textproto`.
 
-- [ ] **Chunk B.3: Align Downstream Tools (`pew`, `stipulator`, `gomutant`) & File Shared-Utility Consolidation Issue**
-  - [ ] Internalize evicted CLI/MCP/process utilities (`guidance`, `resident`, `toolversion`, `gotool` process supervisor, and `gomutant`'s exemption-clause helpers) into `internal/` of `../pew`, `../stipulator`, and `../gomutant` (Option 1A) and migrate all 3 tools to the single-package `gofresh` release.
-  - [ ] File a tracked issue in `../pew`, `../stipulator`, and `../gomutant` recording the shared CLI/MCP/process utility duplication so Option 1B (shared tool-support library extraction) is evaluated when auditing those tools.
-
 ## Phase C: Per-Subsystem Deep Correctness Audit & Exhaustive Case/Edge Coverage
 
-- [ ] **Chunk C.1: Trace-Backed Test Harness, Causal-Witness Assertions & Universal Non-Interference Property Suite**
-  - [ ] Integrate `trace.WithSink` (`*trace.Recorder`) into `internal/testenv` and `Session` test helpers to enforce the zero-unintended-degradation gate (`package_verdict_error`, `package_io_error`, `degradation`, `two_pass_diff`) per [`docs/notes/blueprint-correctness-and-coverage.md`](file:///home/nikolas/repos/github.com/greatliontech/gofresh/docs/notes/blueprint-correctness-and-coverage.md).
-  - [ ] Pin exact structured causal witnesses across toolchain, closure, view, and session refusal/impurity tests, and add the universal trace non-interference property/fuzz suite.
+- [x] **Chunk C.1: Trace-Backed Test Harness, Causal-Witness Assertions & Universal Non-Interference Property Suite**
+  - [x] Integrate `trace.WithSink` (`*trace.Recorder`) into `internal/testenv` and `Session` test helpers to enforce the zero-unintended-degradation gate (`package_verdict_error`, `package_io_error`, `degradation`, `two_pass_diff`) per [`docs/notes/blueprint-correctness-and-coverage.md`](file:///home/nikolas/repos/github.com/greatliontech/gofresh/docs/notes/blueprint-correctness-and-coverage.md).
+  - [x] Pin exact structured causal witnesses across toolchain, closure, view, and session refusal/impurity tests, and add the universal trace non-interference property/fuzz suite.
 
 - [ ] **Chunk C.2: Deep Correctness Audit & Direct Exhaustive Unit/Property/Fuzz Suites for `internal/dynstate`, `internal/testvariant`, and C Preprocessor / Cgo Scanner**
   - [ ] Perform a line-by-line correctness audit of `internal/dynstate`, fix any discovered defects, and add `internal/dynstate/dynstate_test.go` covering fixed-point solvers (`DeferralResolution`, `EnvAuditResolution`), mutual recursion/diamond field-poisoning graphs, `directives.go`, and `typecarrier.go`.
@@ -39,8 +35,12 @@
   - [ ] Add the multi-feature composition matrix (generics + RTA interface/method-value dispatch + stdlib delegates + `//gofresh:vouch` + `//go:linkname` + 3-way `p` / `p` test / `p_test` compartments) with trace-witness assertions.
   - [ ] Add the deterministic two-pass (`newViewFor`) field-perturbation & metadata-vs-content TOCTOU suite, bracket/`ScratchNamespace` escape suite, and `go.work` / symlinked `$PWD` / repo-under-`$TMPDIR` / corrupted-cache resilience suite.
 
-## Phase D: Performance & Optimization Audit & Close-Out
+## Phase D: Performance & Optimization Audit, Downstream Alignment & Close-Out
 
-- [ ] **Chunk D.1: Subsystem Performance & Optimization Audit, Implementation, Benchmark Verification & Plan Close-Out**
+- [ ] **Chunk D.1: Subsystem Performance & Optimization Audit, Implementation & Benchmark Verification**
   - [ ] Audit hot paths across `internal/closure`, `internal/dynstate`, `internal/runtimeinput`, and root `gofresh` using `internal/trace` counters and benchmarks under `mlock quiet`, including restructuring package-level test-hook culprits (`walkEntryForTest`, `digestReadForTest`, `analysisTestHooks`, `analyzeAttributedBatch`, `probePackageScope`, etc.) in `internal/closure` and `gofresh` so `PackageExecution` incurs zero `SharedDynamicStateCause` fallbacks to per-test `soloSubjects` subprocesses in `stipulator`.
-  - [ ] Implement verified optimizations without weakening any Phase C invariant, run full test and Stipulator verification gates across all 4 repositories, and retire `docs/notes/blueprint-*.md` and `docs/plans/plan.md`.
+  - [ ] Implement verified optimizations without weakening any Phase C invariant, and run full test and Stipulator verification gates in `gofresh`.
+
+- [ ] **Chunk B.3: Align Downstream Tools (`pew`, `stipulator`, `gomutant`), File Shared-Utility Consolidation Issue & Plan Close-Out**
+  - [ ] Push `gofresh` (after user confirmation) to mint a single release tag containing Phase A–D, internalize evicted CLI/MCP/process utilities (`guidance`, `resident`, `toolversion`, `gotool` process supervisor, and `gomutant`'s exemption-clause helpers) into `internal/` of `../pew`, `../stipulator`, and `../gomutant` (Option 1A), and migrate all 3 tools to the new `gofresh` release.
+  - [ ] File a tracked issue in `../pew`, `../stipulator`, and `../gomutant` recording the shared CLI/MCP/process utility duplication so Option 1B (shared tool-support library extraction) is evaluated when auditing those tools, then retire `docs/notes/blueprint-*.md` and `docs/plans/plan.md`.

@@ -24,6 +24,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/testvariant"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 type engine = Session
@@ -1029,24 +1030,45 @@ func writeModuleTree(t *testing.T, files map[string]string) string {
 	return dir
 }
 
+func newTracedSession(t testing.TB, build BuildDescription, policy SessionPolicy, gateOpts ...testenv.TraceGateOption) (*Session, context.Context, *trace.Recorder) {
+	t.Helper()
+	ctx, rec := testenv.WithTraceGate(t, t.Context(), gateOpts...)
+	sess, err := NewSession(ctx, build, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sess, ctx, rec
+}
+
 func captureCheckFP(t *testing.T, dir string, subject Subject, opts ...option) (Fingerprint, Verdict) {
 	t.Helper()
 	if fp, verdict, ok := inMemoryCaptureCheck(t, dir, subject, opts...); ok {
 		return fp, verdict
 	}
-	engine, err := newEngine(append([]option{withDir(dir)}, opts...)...)
+	var probe Session
+	for _, o := range opts {
+		if o != nil {
+			o(&probe)
+		}
+	}
+	var gateOpts []testenv.TraceGateOption
+	if probe.env != nil || len(probe.buildFlags) > 0 {
+		gateOpts = append(gateOpts, testenv.AllowToolchainDegradation(), testenv.AllowToolchainVerdictError())
+	}
+	ctx, _ := testenv.WithTraceGate(t, t.Context(), gateOpts...)
+	engine, err := newEngineContext(ctx, append([]option{withDir(dir)}, opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := engine.newView(context.Background(), []Subject{subject}, dir)
+	view, err := engine.newView(ctx, []Subject{subject}, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.Capture(context.Background(), subject)
+	fingerprint, err := view.Capture(ctx, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	verdict, err := view.Check(context.Background(), fingerprint, subject)
+	verdict, err := view.Check(ctx, fingerprint, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1124,7 +1146,8 @@ func environmentWith(values map[string]string) []string {
 
 func viewUsesSource(t *testing.T, engine *engine, fixture workspaceEnvironmentFixture, want, notWant string) {
 	t.Helper()
-	view, err := engine.newView(context.Background(), []Subject{fixture.subject}, fixture.consumer)
+	ctx, _ := testenv.WithTraceGate(t, t.Context())
+	view, err := engine.newView(ctx, []Subject{fixture.subject}, fixture.consumer)
 	if err != nil {
 		t.Fatal(err)
 	}
