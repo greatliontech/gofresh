@@ -1147,6 +1147,8 @@ func Getwd() (dir string, err error) {
 		"duplicate test.testlogfile flag":       {"var testlog = flag.String(\"test.testlogfile\", \"\", \"\")", "var testlog = flag.String(\"test.testlogfile\", \"\", \"\")\nvar testlog2 = flag.String(\"test.testlogfile\", \"\", \"\")"},
 		"runTests mimicking runExample os.Exit": {"\treturn true\n}", "\tif _, err := os.OpenFile(\"x\", 0, 0); err != nil {\n\t\tos.Exit(1)\n\t}\n\treturn true\n}"},
 		"tRunner calling os.Exit(1)":            {"func runTests(", "func tRunner() { os.Exit(1) }\nfunc runTests("},
+		"B.Loop calling os.Exit(1)":             {"func runTests(", "type B struct{}\nfunc (b *B) Loop() bool { os.Exit(1); return false }\nfunc runTests("},
+		"B.loopSlow calling os.Exit(1)":         {"func runTests(", "type B struct{}\nfunc (b *B) loopSlow() bool { os.Exit(1); return false }\nfunc runTests("},
 		"init calling os.Exit(1)":               {"func MainStart(", "func init() { os.Exit(1) }\nfunc MainStart("},
 		"extra &M{} outside MainStart":          {"func MainStart(", "func rogueM(d testDeps) *M { return &M{deps: d} }\nfunc MainStart("},
 		"new(M) allocation":                     {"func MainStart(", "func allocM() *M { return new(M) }\nfunc MainStart("},
@@ -1387,28 +1389,48 @@ func Getwd() (dir string, err error) {
 
 	// A package whose on-disk bytes drift from lp.digest during verification
 	// reports a read degradation rather than "moved in N keys" and never caches
-	// the stale verdict under lp.digest.
-	toctouPkg := writePkg("strings", map[string]string{
-		"strings.go": "package strings\nfunc Clone(s string) string { return s }\n",
-	})
-	origDigest, err := digestFiles(t.Context(), toctouPkg.Dir, toctouPkg.Files)
-	if err != nil {
-		t.Fatal(err)
-	}
-	toctouPkg.digest = origDigest
-	if err := os.WriteFile(filepath.Join(toctouPkg.Dir, "strings.go"), []byte("package strings\nimport \"os\"\nvar _ = os.Getenv(\"X\")\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	toctouSurface := sourceDigests{
-		Packages:  map[string]string{"strings": origDigest},
-		inventory: map[string]listedPackage{"strings": toctouPkg},
-	}
-	deg := toolchainSourceDegradation("go1.test", toctouSurface, nil)
-	if deg.audited() || !strings.Contains(deg.axis, "could not be read") {
-		t.Fatalf("TOCTOU degradation = %+v, want could not be read", deg)
-	}
-	if _, cached := verifiedPackageMemo.Load(verifiedPackageMemoKey("strings", origDigest)); cached {
-		t.Fatal("TOCTOU verification failure poisoned verifiedPackageMemo")
+	// the stale verdict under lp.digest (both pure and non-pure verifier paths).
+	for _, tc := range []struct {
+		importPath string
+		file       string
+		origSrc    string
+		driftedSrc string
+	}{
+		{
+			importPath: "strings",
+			file:       "strings.go",
+			origSrc:    "package strings\nfunc Clone(s string) string { return s }\n",
+			driftedSrc: "package strings\nimport \"os\"\nvar _ = os.Getenv(\"X\")\n",
+		},
+		{
+			importPath: "internal/testlog",
+			file:       "testlog.go",
+			origSrc:    "package testlog\n",
+			driftedSrc: "package testlog\nvar _ = 1\n",
+		},
+	} {
+		toctouPkg := writePkg(tc.importPath, map[string]string{
+			tc.file: tc.origSrc,
+		})
+		origDigest, err := digestFiles(t.Context(), toctouPkg.Dir, toctouPkg.Files)
+		if err != nil {
+			t.Fatal(err)
+		}
+		toctouPkg.digest = origDigest
+		if err := os.WriteFile(filepath.Join(toctouPkg.Dir, tc.file), []byte(tc.driftedSrc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		toctouSurface := sourceDigests{
+			Packages:  map[string]string{tc.importPath: origDigest},
+			inventory: map[string]listedPackage{tc.importPath: toctouPkg},
+		}
+		deg := toolchainSourceDegradation("go1.test", toctouSurface, nil)
+		if deg.audited() || !strings.Contains(deg.axis, "could not be read") {
+			t.Fatalf("%s TOCTOU degradation = %+v, want could not be read", tc.importPath, deg)
+		}
+		if _, cached := verifiedPackageMemo.Load(verifiedPackageMemoKey(tc.importPath, origDigest)); cached {
+			t.Fatalf("%s TOCTOU verification failure poisoned verifiedPackageMemo", tc.importPath)
+		}
 	}
 }
 
