@@ -81,92 +81,9 @@ func (h *Hasher) ComputeRootedFunctions(ctx context.Context, subjects []Subject)
 	prevCtx := h.ctx
 	h.ctx = ctx
 	defer func() { h.ctx = prevCtx }()
-	results := make(map[Subject]RootedFunctions, len(subjects))
-	byPackage := map[string]*packageBatch{}
-	var groups []*packageBatch
-	seen := map[Subject]bool{}
-	for _, subject := range subjects {
-		if seen[subject] {
-			continue
-		}
-		seen[subject] = true
-		group := byPackage[subject.Package]
-		if group == nil {
-			group = &packageBatch{path: subject.Package}
-			byPackage[subject.Package] = group
-			groups = append(groups, group)
-		}
-		group.subjects = append(group.subjects, subject)
-	}
-	resolveGroupMemo := func(group *packageBatch) {
-		if !group.rootedMemoChecked && ctx.Err() == nil {
-			group.rootedMemoChecked = true
-			group.closureHash, group.rootedMemo = h.rootedGroupMemo(group.path)
-		}
-	}
-	currentIdx := 0
-	bp := &batchPreparer{
-		h: h,
-		candidates: func() []string {
-			var uncached []string
-			for _, g := range groups[currentIdx:] {
-				if ctx.Err() != nil {
-					break
-				}
-				if _, ok := h.progs[g.path]; ok {
-					continue
-				}
-				if _, failed := h.progErrs[g.path]; failed {
-					continue
-				}
-				resolveGroupMemo(g)
-				allMemoized := len(g.rootedMemo) > 0
-				if allMemoized {
-					for _, s := range g.subjects {
-						if _, ok := g.rootedMemo[s.Symbol]; !ok {
-							allMemoized = false
-							break
-						}
-					}
-				}
-				if !allMemoized {
-					uncached = append(uncached, g.path)
-				}
-			}
-			return uncached
-		},
-	}
-	for i, group := range groups {
-		currentIdx = i
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
-		}
-		resolveGroupMemo(group)
-		if len(group.rootedMemo) > 0 {
-			remaining := group.subjects[:0:0]
-			for _, subject := range group.subjects {
-				if inv, ok := group.rootedMemo[subject.Symbol]; ok {
-					results[subject] = inv
-					continue
-				}
-				remaining = append(remaining, subject)
-			}
-			if len(remaining) < len(group.subjects) {
-				h.Served("rooted functions", group.path)
-			}
-			group.subjects = remaining
-			if len(group.subjects) == 0 {
-				continue
-			}
-		}
-		if err := h.rootedGroup(ctx, group, bp, results); err != nil {
-			return nil, err
-		}
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
-	}
-	return results, nil
+	return runSubjectBatch(h, ctx, subjects, "rooted functions", h.rootedGroupMemo, func(group *packageBatch, bp *batchPreparer, results map[Subject]RootedFunctions) error {
+		return h.rootedGroup(ctx, group, bp, results)
+	})
 }
 
 func rootedFunctionsFromReachability(reach attributedReachability) RootedFunctions {

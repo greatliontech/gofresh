@@ -6,7 +6,6 @@ import (
 	"go/types"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"unsafe"
@@ -15,6 +14,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
 	"github.com/greatliontech/gofresh/closure/internal/rta"
+	"github.com/greatliontech/gofresh/internal/dynstate"
 )
 
 type attributedReachability struct {
@@ -1906,40 +1906,14 @@ func subjectEnumerationClosure(audited bool, pureDelegates map[string]bool, user
 			break
 		}
 	}
-	fp := &freshParamAnalysis{
-		selectionAudited:       audited,
-		pureDelegates:          pureDelegates,
-		enumOnly:               true,
-		enumRoot:               root,
-		subjectRoot:            root,
-		enumSites:              sites,
-		summary:                summary,
-		userPaths:              userPaths,
-		structFieldStores:      summary.structFieldStores,
-		structWholeStores:      summary.structWholeStores,
-		structPoisoned:         summary.structPoisoned,
-		structReferencedByType: summary.structReferencedByType,
-		programSites:           summary.sites,
-		programValueRef:        summary.valueRef,
-		programFunctions:       summary.allFunctions,
-		isStd: func(fn *ssa.Function) bool {
-			return isStdPkgPath(userPaths, funcPkgPath(fn))
-		},
-		closedDone:    map[ssa.Value]bool{},
-		typesMemo:     map[ssa.Value][]types.Type{},
-		typesFailed:   map[ssa.Value]bool{},
-		funcsMemo:     map[ssa.Value][]*ssa.Function{},
-		funcsFailed:   map[ssa.Value]bool{},
-		invokeTargets: map[ssa.CallInstruction]map[*ssa.Function]bool{},
-		invokeFailed:  map[ssa.CallInstruction]bool{},
-	}
+	fp := newEnumFreshParamAnalysis(audited, pureDelegates, userPaths, root, sites, summary)
 	if root.Signature != nil && root.Signature.Recv() != nil {
 		if !audited || valueRef || len(root.Blocks) == 0 || root.Synthetic != "" || parameterizedBody(root) || len(root.Params) == 0 {
 			return enumerationClosure{}, false
 		}
 		for _, list := range []*types.TypeParamList{root.TypeParams(), root.Signature.TypeParams(), root.Signature.RecvTypeParams()} {
 			for i := 0; list != nil && i < list.Len(); i++ {
-				if !TypeParamBoundsAwayFromDynamic(audited, list.At(i)) {
+				if !typeParamBoundsAwayFromDynamic(audited, list.At(i)) {
 					return enumerationClosure{}, false
 				}
 			}
@@ -2695,184 +2669,31 @@ func rootMayReceiveUnknownDynamic(audited bool, prog *program, root *ssa.Functio
 	if root.Signature.TypeParams() == nil {
 		extraTypeParams = root.TypeParams()
 	}
-	return SignatureOpenWorldTerm(audited, root.Signature, extraTypeParams, subjectRunsThroughHarness(prog, root), CarrierPolicyClosure) != ""
+	return signatureOpenWorldTerm(audited, root.Signature, extraTypeParams, subjectRunsThroughHarness(prog, root), carrierPolicyClosure) != ""
 }
 
-// SignatureOpenWorldTerm names the first term of a signature that confers
-// openness on its subject — a type parameter whose constraint does not bound
-// its type set away from dynamic carriers, or a receiver or parameter whose
-// type carries dynamic reach under policy — and returns "" for a closed
-// signature (REQ-closure-analysis, REQ-closure-refusal-channels).
-func SignatureOpenWorldTerm(audited bool, sig *types.Signature, extraTypeParams *types.TypeParamList, allowHarnessSignature bool, policy CarrierWalkPolicy) string {
-	if sig == nil {
-		return "unresolved signature"
-	}
-	for _, list := range []*types.TypeParamList{extraTypeParams, sig.TypeParams(), sig.RecvTypeParams()} {
-		for i := 0; list != nil && i < list.Len(); i++ {
-			if param := list.At(i); !TypeParamBoundsAwayFromDynamic(audited, param) {
-				return "type parameter " + param.Obj().Name() + " constrained by " + types.TypeString(param.Constraint(), packageNameQualifier)
-			}
-		}
-	}
-	if allowHarnessSignature && isHarnessSubjectSignature(sig) {
-		return ""
-	}
-	// One fresh map per parameter: sharing across parameters would let
-	// one walk's marks short-circuit another's (a constraint interface
-	// marked by a bounding evaluation reading clean as a later value
-	// type); within one parameter's evaluation the map is shared - the
-	// cycle guard for recursive constraints.
-	if recv := sig.Recv(); recv != nil && WalkDynamicCarrier(audited, recv.Type(), make(map[types.Type]bool), policy) {
-		return "receiver " + types.TypeString(recv.Type(), packageNameQualifier)
-	}
-	params := sig.Params()
-	for i := 0; params != nil && i < params.Len(); i++ {
-		param := params.At(i)
-		if WalkDynamicCarrier(audited, param.Type(), make(map[types.Type]bool), policy) {
-			name := param.Name()
-			if name == "" || name == "_" {
-				name = "#" + strconv.Itoa(i+1)
-			}
-			return "parameter " + name + " " + types.TypeString(param.Type(), packageNameQualifier)
-		}
-	}
-	return ""
-}
-
-func packageNameQualifier(pkg *types.Package) string {
-	if pkg == nil {
-		return ""
-	}
-	return pkg.Name()
-}
-
-func isHarnessSubjectSignature(sig *types.Signature) bool {
-	if sig == nil || sig.Recv() != nil || sig.Params().Len() != 1 {
-		return false
-	}
-	pointer, ok := sig.Params().At(0).Type().(*types.Pointer)
-	if !ok {
-		return false
-	}
-	named, ok := pointer.Elem().(*types.Named)
-	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "testing" {
-		return false
-	}
-	switch named.Obj().Name() {
-	case "T", "B", "F", "M":
-		return true
-	default:
-		return false
-	}
-}
-
-// AuditedAtomicPointerElem reports whether t is the toolchain's
-// sync/atomic.Pointer[T] instantiation, yielding T: under the audited
-// atomic transparency the carrier walks see the type as *T — its
-// internal unsafe pointer is an implementation cell the zero-width *T
-// field and the whole method set type-pin to *T, never an unsafe
-// channel (REQ-closure-shared-dynamic-state). The audit covers exactly
-// the toolchain's type: a defined wrapper inherits no methods and its
-// cell is reached only through an address conversion the ordinary
-// escape rules already mark, so it keeps the fail-closed judgment and
-// never matches here (its Obj is not sync/atomic's). One helper for
-// every carrier walk, so the tiers cannot diverge on this rule
-// (REQ-closure-analysis's one-answer arm).
-func AuditedAtomicPointerElem(audited bool, t *types.Named) (types.Type, bool) {
-	if !audited {
-		return nil, false
-	}
-	obj := t.Obj()
-	if obj == nil || obj.Pkg() == nil ||
-		obj.Pkg().Path() != "sync/atomic" || obj.Name() != "Pointer" ||
-		t.TypeArgs() == nil || t.TypeArgs().Len() != 1 {
-		return nil, false
-	}
-	return t.TypeArgs().At(0), true
-}
-
-// CarrierWalkPolicy parameterizes WalkDynamicCarrier across the three carrier
-// walk surfaces:
-//   - CarrierPolicyClosure: the closure tier's carries-dynamic walk
-//     (typeMayCarryDynamic), sharing seen into TypeParam constraint bounds.
-//   - CarrierPolicyConsumer: the consumer tier's carries-dynamic walk
-//     (typeMayCarryUnknownDynamic), entering TypeParam constraint bounds with
-//     a fresh seen map.
-//   - CarrierPolicyAlias: the consumer tier's alias-handing walk
-//     (typeHandsOutDynamicAlias), where Signature is not an alias, TypeParam
-//     recurses into t.Constraint() with seen, and reference-header elements
-//     delegate to CarrierPolicyConsumer with a fresh seen map.
-type CarrierWalkPolicy uint8
+type carrierWalkPolicy = dynstate.CarrierWalkPolicy
 
 const (
-	CarrierPolicyClosure CarrierWalkPolicy = iota
-	CarrierPolicyConsumer
-	CarrierPolicyAlias
+	carrierPolicyClosure  = dynstate.CarrierPolicyClosure
+	carrierPolicyConsumer = dynstate.CarrierPolicyConsumer
+	carrierPolicyAlias    = dynstate.CarrierPolicyAlias
 )
 
-// WalkDynamicCarrier is the one structural carrier walk shared by the closure
-// and consumer tiers (REQ-closure-analysis, REQ-closure-shared-dynamic-state).
-func WalkDynamicCarrier(audited bool, t types.Type, seen map[types.Type]bool, policy CarrierWalkPolicy) bool {
-	if t == nil || seen[t] {
-		return false
-	}
-	seen[t] = true
-	aliasMode := policy == CarrierPolicyAlias
-	refElem := func(elem types.Type) bool {
-		if aliasMode {
-			return WalkDynamicCarrier(audited, elem, make(map[types.Type]bool), CarrierPolicyConsumer)
-		}
-		return WalkDynamicCarrier(audited, elem, seen, policy)
-	}
-	switch t := types.Unalias(t).(type) {
-	case *types.Basic:
-		return t.Kind() == types.UnsafePointer
-	case *types.Interface:
-		return true
-	case *types.Signature:
-		return !aliasMode
-	case *types.TypeParam:
-		switch policy {
-		case CarrierPolicyClosure:
-			return !constraintBoundsAwayFromDynamic(audited, t.Constraint(), seen)
-		case CarrierPolicyConsumer:
-			return !TypeParamBoundsAwayFromDynamic(audited, t)
-		case CarrierPolicyAlias:
-			return WalkDynamicCarrier(audited, t.Constraint(), seen, policy)
-		}
-	case *types.Named:
-		if elem, ok := AuditedAtomicPointerElem(audited, t); ok {
-			return refElem(elem)
-		}
-		return WalkDynamicCarrier(audited, t.Underlying(), seen, policy)
-	case *types.Pointer:
-		return refElem(t.Elem())
-	case *types.Slice:
-		return refElem(t.Elem())
-	case *types.Chan:
-		return refElem(t.Elem())
-	case *types.Map:
-		return refElem(t.Key()) || refElem(t.Elem())
-	case *types.Array:
-		return WalkDynamicCarrier(audited, t.Elem(), seen, policy)
-	case *types.Struct:
-		for i := 0; i < t.NumFields(); i++ {
-			if WalkDynamicCarrier(audited, t.Field(i).Type(), seen, policy) {
-				return true
-			}
-		}
-	case *types.Tuple:
-		for i := 0; i < t.Len(); i++ {
-			if WalkDynamicCarrier(audited, t.At(i).Type(), seen, policy) {
-				return true
-			}
-		}
-	}
-	return false
+func signatureOpenWorldTerm(audited bool, sig *types.Signature, extraTypeParams *types.TypeParamList, allowHarnessSignature bool, policy carrierWalkPolicy) string {
+	return dynstate.SignatureOpenWorldTerm(audited, sig, extraTypeParams, allowHarnessSignature, policy)
+}
+
+func auditedAtomicPointerElem(audited bool, t *types.Named) (types.Type, bool) {
+	return dynstate.AuditedAtomicPointerElem(audited, t)
+}
+
+func walkDynamicCarrier(audited bool, t types.Type, seen map[types.Type]bool, policy carrierWalkPolicy) bool {
+	return dynstate.WalkDynamicCarrier(audited, t, seen, policy)
 }
 
 func typeMayCarryDynamic(audited bool, t types.Type, seen map[types.Type]bool) bool {
-	return WalkDynamicCarrier(audited, t, seen, CarrierPolicyClosure)
+	return walkDynamicCarrier(audited, t, seen, carrierPolicyClosure)
 }
 
 func typeMayCarryDynamicTop(audited bool, t types.Type) bool {
@@ -2885,81 +2706,11 @@ func typeMayCarryDynamicTop(audited bool, t types.Type) bool {
 	case *types.Interface, *types.Signature:
 		return true
 	}
-	return WalkDynamicCarrier(audited, t, make(map[types.Type]bool), CarrierPolicyClosure)
+	return walkDynamicCarrier(audited, t, make(map[types.Type]bool), carrierPolicyClosure)
 }
 
-// TypeParamBoundsAwayFromDynamic reports whether one type parameter's
-// constraint provably bounds its type set away from dynamic carriers -
-// the openness question a parameterized subject asks per parameter,
-// shared with the view tier so both tiers give one answer
-// (REQ-closure-analysis's parameterized-subject arm).
-func TypeParamBoundsAwayFromDynamic(audited bool, tp *types.TypeParam) bool {
-	if tp == nil {
-		return false
-	}
-	return constraintBoundsAwayFromDynamic(audited, tp.Constraint(), make(map[types.Type]bool))
-}
-
-// constraintBoundsAwayFromDynamic reports whether a type parameter's
-// constraint provably bounds its type set away from dynamic carriers: the
-// complete interface is methodless (a constraint method is a dispatch
-// surface this analysis does not narrow), and at least one embedded
-// element bounds the set - a union or specific type whose every term is
-// free of interface, function, channel, and unsafe reach, or an embedded
-// interface that itself bounds. Intersection semantics make one clean
-// bounded element sufficient: the type set is the intersection of every
-// element's set, so a dirty sibling only shrinks a clean bound, never
-// widens it. `any` and `comparable` embed nothing and bound nothing.
-func constraintBoundsAwayFromDynamic(audited bool, constraint types.Type, seen map[types.Type]bool) bool {
-	iface, ok := types.Unalias(constraint).Underlying().(*types.Interface)
-	if !ok {
-		return false
-	}
-	return interfaceBoundsAwayFromDynamic(audited, iface, seen)
-}
-
-func interfaceBoundsAwayFromDynamic(audited bool, iface *types.Interface, seen map[types.Type]bool) bool {
-	if iface == nil || iface.NumMethods() > 0 {
-		return false
-	}
-	if seen[iface] {
-		return false
-	}
-	seen[iface] = true
-	bounded := false
-	for i := 0; i < iface.NumEmbeddeds(); i++ {
-		switch e := types.Unalias(iface.EmbeddedType(i)).(type) {
-		case *types.Union:
-			clean := true
-			for j := 0; j < e.Len(); j++ {
-				// A tilde term (~T) admits every type whose underlying
-				// is T's underlying: structurally identical carriers, so
-				// the structural walk of the term type answers for the
-				// whole approximation set. Extra methods on a defined
-				// type in that set are unreachable through a methodless
-				// constraint.
-				if typeMayCarryDynamic(audited, e.Term(j).Type(), seen) {
-					clean = false
-					break
-				}
-			}
-			if clean {
-				bounded = true
-			}
-		default:
-			if under, ok := types.Unalias(e).Underlying().(*types.Interface); ok {
-				if interfaceBoundsAwayFromDynamic(audited, under, seen) {
-					bounded = true
-				}
-				continue
-			}
-			// A single specific-type element (interface{ int }).
-			if !typeMayCarryDynamic(audited, e, seen) {
-				bounded = true
-			}
-		}
-	}
-	return bounded
+func typeParamBoundsAwayFromDynamic(audited bool, tp *types.TypeParam) bool {
+	return dynstate.TypeParamBoundsAwayFromDynamic(audited, tp)
 }
 
 func isGeneratedTestMainPackage(prog *program, pkg *ssa.Package) bool {
@@ -2967,69 +2718,7 @@ func isGeneratedTestMainPackage(prog *program, pkg *ssa.Package) bool {
 }
 
 func provenanceReachableStartup(ctx context.Context, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool) (map[*ssa.Function]bool, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	reachable := make(map[*ssa.Function]bool)
-	scanned := make(map[*ssa.Function]bool)
-	pendingByParent := make(map[*ssa.Function][]*ssa.Function)
-	queue := append([]*ssa.Function(nil), roots...)
-	for len(queue) != 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		fn := queue[0]
-		queue = queue[1:]
-		if fn == nil || scanned[fn] || result.Reachable[fn]&mask == 0 {
-			continue
-		}
-		scanned[fn] = true
-		if pending := pendingByParent[fn]; len(pending) > 0 {
-			delete(pendingByParent, fn)
-			queue = append(queue, pending...)
-		}
-		harnessFrame := funcPkgPath(fn) == "testing" || harnessAudited && propertyHarnessPath(funcPkgPath(fn))
-		if !harnessFrame {
-			reachable[fn] = true
-		}
-		for _, block := range fn.Blocks {
-			for _, instruction := range block.Instrs {
-				site, ok := instruction.(ssa.CallInstruction)
-				if !ok || site.Common() == nil {
-					continue
-				}
-				callee := site.Common().StaticCallee()
-				if isTestingMRun(callee) {
-					continue
-				}
-				if callee != nil {
-					calleePath := funcPkgPath(callee)
-					calleeHarness := calleePath == "testing" || harnessAudited && propertyHarnessPath(calleePath)
-					if !harnessFrame || calleeHarness {
-						queue = append(queue, callee)
-					}
-					if calleeHarness && !harnessFrame {
-						continue
-					}
-				}
-				for target, targetMask := range result.Targets[site] {
-					if targetMask&mask == 0 || isTestingMRun(target) || isTestingBLaunch(target) {
-						continue
-					}
-					targetPath := funcPkgPath(target)
-					targetHarness := targetPath == "testing" || harnessAudited && propertyHarnessPath(targetPath)
-					if !harnessFrame || targetHarness || !isStdPkgPath(userPaths, targetPath) {
-						if target.Parent() != nil && target.Synthetic == "" && !scanned[target.Parent()] && !isTestingCleanupCallback(target) {
-							pendingByParent[target.Parent()] = append(pendingByParent[target.Parent()], target)
-							continue
-						}
-						queue = append(queue, target)
-					}
-				}
-			}
-		}
-	}
-	return reachable, nil
+	return provenanceBFS(ctx, roots, mask, result, harnessAudited, userPaths, true, nil)
 }
 
 func collectTestingHarnessCallbacks(audited bool, pureDelegates map[string]bool, userPaths map[string]bool, summary *callerReferenceSummary, subjectRoot *ssa.Function, enumerated bool, enc enumerationClosure, prov map[*ssa.Function]bool, mask uint64, res *rta.Result) (cleanupOut []*ssa.Function, unclosedCleanup bool, fuzzOut []*ssa.Function, unclosedFuzz bool) {
@@ -3386,7 +3075,7 @@ func nonStdTypeUsesUnsafePointer(audited bool, userPaths map[string]bool, t type
 				if pkgPath == "unsafe" && obj.Name() == "Pointer" {
 					return true
 				}
-				if elem, ok := AuditedAtomicPointerElem(audited, tt); ok {
+				if elem, ok := auditedAtomicPointerElem(audited, tt); ok {
 					return walk(elem)
 				}
 				if isStdImportPath(pkgPath) && !userPaths[pkgPath] {
@@ -3523,15 +3212,20 @@ func isTestingCleanupCall(site ssa.CallInstruction, arg ssa.Value) bool {
 	return callee != nil && funcPkgPath(callee) == "testing" && functionSymbolName(callee) == "Cleanup"
 }
 
-// tier2Reachable analyzes one attributed reachability set: effects,
-// widen, and verdict, with the cross-boundary fresh-path analysis always
-// in force (only the observability walk consults effect.observable).
 func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool) (map[*ssa.Function]bool, error) {
+	return provenanceBFS(ctx, roots, mask, result, harnessAudited, userPaths, false, dropTarget)
+}
+
+func provenanceBFS(ctx context.Context, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, deferUnscannedClosures bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool) (map[*ssa.Function]bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	reachable := make(map[*ssa.Function]bool)
 	scanned := make(map[*ssa.Function]bool)
+	var pendingByParent map[*ssa.Function][]*ssa.Function
+	if deferUnscannedClosures {
+		pendingByParent = make(map[*ssa.Function][]*ssa.Function)
+	}
 	queue := append([]*ssa.Function(nil), roots...)
 	for len(queue) != 0 {
 		if err := ctx.Err(); err != nil {
@@ -3543,6 +3237,12 @@ func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64
 			continue
 		}
 		scanned[fn] = true
+		if deferUnscannedClosures {
+			if pending := pendingByParent[fn]; len(pending) > 0 {
+				delete(pendingByParent, fn)
+				queue = append(queue, pending...)
+			}
+		}
 		// A harness frame - the standard testing package or an audited
 		// property harness - is never subject content; its dispatch
 		// targets still traverse, so the caller-supplied callbacks it
@@ -3587,6 +3287,10 @@ func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64
 					// the startup and test-main walks - the
 					// dotless-module soundness family.
 					if !harnessFrame || targetHarness || !isStdPkgPath(userPaths, targetPath) {
+						if deferUnscannedClosures && target.Parent() != nil && target.Synthetic == "" && !scanned[target.Parent()] && !isTestingCleanupCallback(target) {
+							pendingByParent[target.Parent()] = append(pendingByParent[target.Parent()], target)
+							continue
+						}
 						queue = append(queue, target)
 					}
 				}

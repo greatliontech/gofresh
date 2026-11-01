@@ -3571,15 +3571,15 @@ type FnChan chan func()
 		typ := pkg.Scope().Lookup(tc.name).Type()
 		for _, p := range []struct {
 			name   string
-			policy CarrierWalkPolicy
+			policy carrierWalkPolicy
 			want   bool
 		}{
-			{"Closure", CarrierPolicyClosure, tc.wantClosure},
-			{"Consumer", CarrierPolicyConsumer, tc.wantConsumer},
-			{"Alias", CarrierPolicyAlias, tc.wantAlias},
+			{"Closure", carrierPolicyClosure, tc.wantClosure},
+			{"Consumer", carrierPolicyConsumer, tc.wantConsumer},
+			{"Alias", carrierPolicyAlias, tc.wantAlias},
 		} {
-			if got := WalkDynamicCarrier(true, typ, make(map[types.Type]bool), p.policy); got != p.want {
-				t.Errorf("WalkDynamicCarrier(%s, %s) = %v, want %v", tc.name, p.name, got, p.want)
+			if got := walkDynamicCarrier(true, typ, make(map[types.Type]bool), p.policy); got != p.want {
+				t.Errorf("walkDynamicCarrier(%s, %s) = %v, want %v", tc.name, p.name, got, p.want)
 			}
 		}
 	}
@@ -3653,7 +3653,7 @@ func UseOpen(i I) int {
 	ssaProg := ssa.NewProgram(fset, ssa.InstantiateGenerics)
 	ssaPkg := ssaProg.CreatePackage(typesPkg, []*ast.File{file}, info, true)
 	ssaPkg.Build()
-	fp := &freshParamAnalysis{selectionAudited: true}
+	fp := newBitOnlyFreshParamAnalysis(false, true, nil, nil, nil, nil)
 
 	firstCallSite := func(fnName string, invoke bool) ssa.CallInstruction {
 		fn := ssaPkg.Func(fnName)
@@ -3719,10 +3719,7 @@ func UseOpen(i I) int {
 
 	// Non-standard package calls (when isStd returns false) must NOT be
 	// traversed by staticCallResultDynamicValue.
-	userFP := &freshParamAnalysis{
-		selectionAudited: true,
-		isStd:            func(*ssa.Function) bool { return false },
-	}
+	userFP := newBitOnlyFreshParamAnalysis(false, true, nil, nil, nil, func(*ssa.Function) bool { return false })
 	if targets, ok := closedInvokeTargets(firstCallSite("UseStaticHelper", true), userFP); ok {
 		t.Fatalf("non-std UseStaticHelper closedInvokeTargets = (%v, true), want false", targets)
 	}
@@ -3823,7 +3820,7 @@ func UseArrayCell() int {
 	ssaProg := ssa.NewProgram(fset, ssa.InstantiateGenerics)
 	ssaPkg := ssaProg.CreatePackage(typesPkg, []*ast.File{file}, info, true)
 	ssaPkg.Build()
-	fp := &freshParamAnalysis{selectionAudited: true}
+	fp := newBitOnlyFreshParamAnalysis(false, true, nil, nil, nil, nil)
 
 	for _, fnName := range []string{"UseStructCell", "UseArrayCell"} {
 		fn := ssaPkg.Func(fnName)
@@ -4565,6 +4562,23 @@ func TestClean(t *testing.T) {}
 		obs := gotUnsafe[Subject{Package: "example.com/expanded/initunsafe", Symbol: sym}]
 		if obs.Observable || !strings.Contains(obs.Reason, "unsafe pointer reachable") {
 			t.Errorf("%s = %+v, want Observable=false with unsafe pointer reachable", sym, obs)
+		}
+	}
+
+	rootSep := string(filepath.Separator)
+	if !pathWithin(filepath.Join(rootSep, "tmp", "cfg.h"), rootSep) || !pathWithin(rootSep, rootSep) {
+		t.Fatal("pathWithin must accept paths under the filesystem root")
+	}
+	for _, src := range []string{
+		"package p\nimport \"testing\"\nfunc TestMain[T any](m *testing.M) {}\n",
+		"package p\nimport \"testing\"\nfunc TestMain(m *testing.M) int { return 0 }\n",
+	} {
+		parsed, err := parser.ParseFile(token.NewFileSet(), "p_test.go", src, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := userTestMainDecl(parsed, map[string]string{"testing": "testing"}); got != nil {
+			t.Fatalf("userTestMainDecl(%q) = %v, want nil", src, got)
 		}
 	}
 }

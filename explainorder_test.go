@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate"
 )
 
 // The chain's link order is the derivation's own: the registration
@@ -170,7 +171,7 @@ func TestExplainEnvAuditOutsideScopeEndsAtEdges(t *testing.T) {
 	facts := map[string][]dynamicStateFact{
 		"example.com/reg": {{
 			EnvCarrying: []string{culprit},
-			EnvCallUses: []string{culprit + "\x01example.com/dep\x00Make"},
+			EnvCallUses: []dynstate.EnvCallUse{{Key: culprit, Callee: dynstate.FuncKey{Pkg: "example.com/dep", Name: "Make"}}},
 		}},
 	}
 	edges, refusedFn, refusedPath := envAuditTrail(map[string][]*packages.Package{}, facts, map[string]bool{culprit: true}, "Registry")
@@ -195,17 +196,23 @@ func TestExplainEnvAuditInsertionChain(t *testing.T) {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
 	const culprit = "example.com/reg.Registry"
+	genFn := dynstate.FuncKey{Pkg: "example.com/reg", Name: "Gen"}
+	sinkParam := dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "example.com/dep", Name: "Sink"}, Index: 0}
+	fillParam := dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "example.com/dep", Name: "Fill"}, Index: 1}
 	facts := map[string][]dynamicStateFact{
 		"example.com/reg": {{
-			EnvCarrying:            []string{culprit},
-			EnvCallUses:            []string{culprit + "\x01example.com/reg\x00Gen"},
-			ReturnEnvFree:          []string{"example.com/reg\x00Gen"},
-			ReturnEnvInsertionDeps: []string{"example.com/reg\x00Gen\x01example.com/dep\x00Sink\x000", "example.com/reg\x00Gen\x01example.com/dep\x00Fill\x001"},
+			EnvCarrying:   []string{culprit},
+			EnvCallUses:   []dynstate.EnvCallUse{{Key: culprit, Callee: genFn}},
+			ReturnEnvFree: []dynstate.FuncKey{genFn},
+			ReturnEnvInsertionDeps: []dynstate.FuncInsertionDepEdge{
+				{Func: genFn, Dep: dynstate.ParamAuditTarget(sinkParam)},
+				{Func: genFn, Dep: dynstate.ParamAuditTarget(fillParam)},
+			},
 		}},
 		"example.com/dep": {{
 			// Fill's parameter resolves; Sink's is undeclared - only
 			// Sink may contribute an edge and the refusal site.
-			ParamInsertionFree: []string{"example.com/dep\x00Fill\x001"},
+			ParamInsertionFree: []dynstate.ParamKey{fillParam},
 		}},
 	}
 	edges, refusedFn, refusedPath := envAuditTrail(map[string][]*packages.Package{"example.com/dep": {{}}}, facts, map[string]bool{culprit: true}, "Registry")

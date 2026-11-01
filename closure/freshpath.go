@@ -69,12 +69,12 @@ func observableCallEffect(audited bool, effect externalEffect, call *ssa.CallCom
 		if !pathFresh && (!ordinaryOpenFileFlagsObservable(flags) || !observableIdentityArgument(effect, call)) {
 			return false
 		}
-		if pathFresh && !freshOpenFileTargetObservable(flags, call.Args[0], site) {
+		if pathFresh && !guardedWriteCreatedBefore(call.Args[0], site) {
 			return false
 		}
 		return observableOpenResult(site) && observableTupleError(site)
 	case "ReadFile":
-		return observableIdentityArgument(effect, call) || guardPinnedPathArgument(call) || len(call.Args) != 0 && freshPathValue(call.Args[0], make(map[ssa.Value]bool), fp, nil) && freshReadableTargetObservable(call.Args[0], site)
+		return observableIdentityArgument(effect, call) || guardPinnedPathArgument(call) || len(call.Args) != 0 && freshPathValue(call.Args[0], make(map[ssa.Value]bool), fp, nil) && guardedWriteCreatedBefore(call.Args[0], site)
 	case "ReadDir":
 		return (observableIdentityArgument(effect, call) || guardPinnedPathArgument(call)) && observableReadDirResult(site)
 	case "WriteFile":
@@ -146,16 +146,21 @@ func guardPinnedPathValue(value ssa.Value, seen map[ssa.Value]bool) bool {
 	if pkgPath != "path/filepath" || name != "Join" {
 		return false
 	}
+	args, ok := joinedSafePathArgs(call)
+	return ok && guardPinnedPathValue(args[0], seen)
+}
+
+func joinedSafePathArgs(call *ssa.Call) ([]ssa.Value, bool) {
 	args, ok := fixedVariadicArgs(call)
-	if !ok || len(args) < 2 || !guardPinnedPathValue(args[0], seen) {
-		return false
+	if !ok || len(args) < 2 {
+		return nil, false
 	}
 	for _, arg := range args[1:] {
 		if !safeFreshPathComponent(arg) {
-			return false
+			return nil, false
 		}
 	}
-	return true
+	return args, true
 }
 
 // observablePinnedPathResult admits a filepath.Join whose result is a
@@ -204,16 +209,8 @@ func freshPathValue(value ssa.Value, seen map[ssa.Value]bool, fp *freshParamAnal
 		if pkgPath != "path/filepath" || name != "Join" {
 			return false
 		}
-		args, ok := fixedVariadicArgs(value)
-		if !ok || len(args) < 2 || !freshPathValue(args[0], seen, fp, inProgress) {
-			return false
-		}
-		for _, arg := range args[1:] {
-			if !safeFreshPathComponent(arg) {
-				return false
-			}
-		}
-		return true
+		args, ok := joinedSafePathArgs(value)
+		return ok && freshPathValue(args[0], seen, fp, inProgress)
 	default:
 		return false
 	}
@@ -272,14 +269,14 @@ func observableFreshPathConsumer(site ssa.CallInstruction, pathValue ssa.Value, 
 	}
 	switch name {
 	case "ReadFile":
-		return freshReadableTargetObservable(pathValue, site)
+		return guardedWriteCreatedBefore(pathValue, site)
 	case "WriteFile":
 		return len(call.Args) >= 2 && guardedWriteBytes(call.Args[1], make(map[ssa.Value]bool)) && observableErrorResult(site)
 	case "Remove", "RemoveAll":
 		return observableErrorResult(site)
 	case "OpenFile":
 		flags, known := openFileFlags(call)
-		return known && recognizedOpenFileFlags(call.StaticCallee(), flags) && freshOpenFileTargetObservable(flags, pathValue, site) && observableOpenResult(site) && observableTupleError(site)
+		return known && recognizedOpenFileFlags(call.StaticCallee(), flags) && guardedWriteCreatedBefore(pathValue, site) && observableOpenResult(site) && observableTupleError(site)
 	default:
 		return false
 	}
@@ -435,14 +432,6 @@ func guardedWriteCreatedBefore(pathValue ssa.Value, site ssa.CallInstruction) bo
 		}
 	}
 	return false
-}
-
-func freshOpenFileTargetObservable(_ int64, pathValue ssa.Value, site ssa.CallInstruction) bool {
-	return guardedWriteCreatedBefore(pathValue, site)
-}
-
-func freshReadableTargetObservable(pathValue ssa.Value, site ssa.CallInstruction) bool {
-	return guardedWriteCreatedBefore(pathValue, site)
 }
 
 func noMutationBeforeFreshUse(pathValue ssa.Value, creator *ssa.Call, use ssa.CallInstruction) bool {
@@ -689,7 +678,7 @@ func cloneValueSet(values map[ssa.Value]bool) map[ssa.Value]bool {
 	return clone
 }
 
-func fileValueFromAdmittedOpen(value ssa.Value, seen map[ssa.Value]bool) bool {
+func walkExtractedFileCall(value ssa.Value, seen map[ssa.Value]bool, cloneSeenOnPhi bool, matchCall func(ssa.CallInstruction) bool) bool {
 	if value == nil || seen[value] {
 		return false
 	}
@@ -703,6 +692,32 @@ func fileValueFromAdmittedOpen(value ssa.Value, seen map[ssa.Value]bool) bool {
 		if !ok || call.Common() == nil || call.Common().StaticCallee() == nil {
 			return false
 		}
+		return matchCall(call)
+	case *ssa.Phi:
+		if len(value.Edges) == 0 {
+			return false
+		}
+		for _, edge := range value.Edges {
+			edgeSeen := seen
+			if cloneSeenOnPhi {
+				edgeSeen = cloneValueSet(seen)
+			}
+			if !walkExtractedFileCall(edge, edgeSeen, cloneSeenOnPhi, matchCall) {
+				return false
+			}
+		}
+		return true
+	case *ssa.ChangeType:
+		return walkExtractedFileCall(value.X, seen, cloneSeenOnPhi, matchCall)
+	case *ssa.Convert:
+		return walkExtractedFileCall(value.X, seen, cloneSeenOnPhi, matchCall)
+	default:
+		return false
+	}
+}
+
+func fileValueFromAdmittedOpen(value ssa.Value, seen map[ssa.Value]bool) bool {
+	return walkExtractedFileCall(value, seen, false, func(call ssa.CallInstruction) bool {
 		effect, classified := classBEffect(funcPkgPath(call.Common().StaticCallee()), call.Common().StaticCallee().Name())
 		if !classified || effect.packagePath != "os" {
 			return false
@@ -716,27 +731,11 @@ func fileValueFromAdmittedOpen(value ssa.Value, seen map[ssa.Value]bool) bool {
 				return false
 			}
 			pathFresh := freshPathValue(call.Common().Args[0], make(map[ssa.Value]bool), nil, nil)
-			return pathFresh && freshOpenFileTargetObservable(flags, call.Common().Args[0], call) || ordinaryOpenFileFlagsObservable(flags) && observableIdentityArgument(effect, call.Common())
+			return pathFresh && guardedWriteCreatedBefore(call.Common().Args[0], call) || ordinaryOpenFileFlagsObservable(flags) && observableIdentityArgument(effect, call.Common())
 		default:
 			return false
 		}
-	case *ssa.Phi:
-		if len(value.Edges) == 0 {
-			return false
-		}
-		for _, edge := range value.Edges {
-			if !fileValueFromAdmittedOpen(edge, seen) {
-				return false
-			}
-		}
-		return true
-	case *ssa.ChangeType:
-		return fileValueFromAdmittedOpen(value.X, seen)
-	case *ssa.Convert:
-		return fileValueFromAdmittedOpen(value.X, seen)
-	default:
-		return false
-	}
+	})
 }
 
 func observableOpenResult(site ssa.CallInstruction) bool {
@@ -988,37 +987,13 @@ func observableFileValue(value ssa.Value, seen map[ssa.Value]bool) bool {
 }
 
 func fileValueFromFreshOpenFile(value ssa.Value, seen map[ssa.Value]bool) bool {
-	if value == nil || seen[value] {
-		return false
-	}
-	seen[value] = true
-	switch value := value.(type) {
-	case *ssa.Extract:
-		if value.Index != 0 {
-			return false
-		}
-		call, ok := value.Tuple.(ssa.CallInstruction)
-		if !ok || call.Common() == nil || call.Common().StaticCallee() == nil || funcPkgPath(call.Common().StaticCallee()) != "os" || call.Common().StaticCallee().Name() != "OpenFile" || len(call.Common().Args) == 0 {
+	return walkExtractedFileCall(value, seen, true, func(call ssa.CallInstruction) bool {
+		callee := call.Common().StaticCallee()
+		if funcPkgPath(callee) != "os" || callee.Name() != "OpenFile" || len(call.Common().Args) == 0 {
 			return false
 		}
 		return freshPathValue(call.Common().Args[0], make(map[ssa.Value]bool), nil, nil)
-	case *ssa.Phi:
-		if len(value.Edges) == 0 {
-			return false
-		}
-		for _, edge := range value.Edges {
-			if !fileValueFromFreshOpenFile(edge, cloneValueSet(seen)) {
-				return false
-			}
-		}
-		return true
-	case *ssa.ChangeType:
-		return fileValueFromFreshOpenFile(value.X, seen)
-	case *ssa.Convert:
-		return fileValueFromFreshOpenFile(value.X, seen)
-	default:
-		return false
-	}
+	})
 }
 
 func observableFileMethod(fn *ssa.Function) bool {
@@ -1072,15 +1047,7 @@ func resetWalkState(fp *freshParamAnalysis) *freshParamAnalysis {
 		return fp
 	}
 	copied := *fp
-	copied.stackDepth = nil
-	copied.lowlink = nil
-	copied.hasLeaf = nil
-	copied.usedSubject = nil
-	copied.rootDone = nil
-	copied.rootLowlink = nil
-	copied.rootHasLeaf = nil
-	copied.rootUsedSubject = nil
-	copied.rootSeen = nil
+	copied.walkFrame = walkFrame{}
 	return &copied
 }
 
@@ -1104,6 +1071,7 @@ type dynamicValueCollector struct {
 	funcs          map[*ssa.Function]bool
 	types          map[types.Type]bool
 	seeds          bool
+	sinkOnly       bool
 	visitedStructs map[*types.Named]bool
 }
 
@@ -1115,14 +1083,34 @@ func (c *dynamicValueCollector) isSeeds() bool {
 	return c != nil && c.seeds
 }
 
+func (c *dynamicValueCollector) isSink() bool {
+	return c != nil && c.sinkOnly
+}
+
 // walkDynamicValue is the single SSA shape ladder serving the
 // closed-value judgment (collect == nil, with a gray seen set and done memo),
 // the function-target collector (collect.funcs != nil), the concrete
-// interface-type collector (collect.types != nil), and the combined RTA
-// seed collector (collect.seeds == true).
+// interface-type collector (collect.types != nil), the combined RTA
+// seed collector (collect.seeds == true), and the in-memory formatted
+// sink judgment (collect.sinkOnly == true).
 func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
 	if value == nil {
 		return false
+	}
+	if collect.isSink() {
+		if r, ok := done[value]; ok {
+			return r
+		}
+		if seen[value] {
+			return false
+		}
+		seen[value] = true
+		defer delete(seen, value)
+		r := walkDynamicValueUncached(value, collect, seen, done, fp)
+		if done != nil {
+			done[value] = r
+		}
+		return r
 	}
 	if collect.isSeeds() {
 		if value.Type() != nil && !typeMayCarryDynamicTop(fp != nil && fp.selectionAudited, value.Type()) {
@@ -1582,32 +1570,8 @@ func enumUserStructClosed(named *types.Named, fp *freshParamAnalysis) bool {
 	for _, wv := range fp.structWholeStores[named] {
 		var lowlink int
 		var hasLeaf, storeUsedSubject bool
-		wholeFP := *resetWalkState(fp)
-		wholeFP.inProgramSites = true
-		wholeFP.inFieldStore = false
-		wholeFP.callBindings = nil
-		wholeFP.calleeSeen = nil
-		wholeFP.calleeDepth = nil
-		wholeFP.invokeSeen = nil
-		wholeFP.invokeDepth = nil
-		wholeFP.baseDepth = 0
-		wholeFP.enumStructVisiting = visiting
-		wholeFP.stackDepth = map[ssa.Value]int{}
-		wholeFP.lowlink = &lowlink
-		wholeFP.hasLeaf = &hasLeaf
-		wholeFP.usedSubject = &storeUsedSubject
-		wholeFP.rootDone = map[ssa.Value]bool{}
-		wholeFP.rootLowlink = map[ssa.Value]int{}
-		wholeFP.rootHasLeaf = map[ssa.Value]bool{}
-		wholeFP.rootUsedSubject = map[ssa.Value]bool{}
-		wholeFP.closedDone = map[ssa.Value]bool{}
-		wholeFP.typesMemo = map[ssa.Value][]types.Type{}
-		wholeFP.typesFailed = map[ssa.Value]bool{}
-		wholeFP.funcsMemo = map[ssa.Value][]*ssa.Function{}
-		wholeFP.funcsFailed = map[ssa.Value]bool{}
-		wholeFP.invokeTargets = map[ssa.CallInstruction]map[*ssa.Function]bool{}
-		wholeFP.invokeFailed = map[ssa.CallInstruction]bool{}
-		ok := walkDynamicValue(wv, nil, map[ssa.Value]bool{}, wholeFP.rootDone, &wholeFP)
+		wholeFP := fp.newStructStoreWalkFP(true, false, visiting, &lowlink, &hasLeaf, &storeUsedSubject)
+		ok := walkDynamicValue(wv, nil, map[ssa.Value]bool{}, wholeFP.rootDone, wholeFP)
 		if storeUsedSubject {
 			usedSubject = true
 		}
@@ -1657,31 +1621,8 @@ func enumUserStructClosed(named *types.Named, fp *freshParamAnalysis) bool {
 		for _, sv := range fp.structFieldStores[key] {
 			var lowlink int
 			var hasLeaf, storeUsedSubject bool
-			fieldFP := *resetWalkState(fp)
-			fieldFP.inFieldStore = true
-			fieldFP.callBindings = nil
-			fieldFP.calleeSeen = nil
-			fieldFP.calleeDepth = nil
-			fieldFP.invokeSeen = nil
-			fieldFP.invokeDepth = nil
-			fieldFP.baseDepth = 0
-			fieldFP.enumStructVisiting = visiting
-			fieldFP.stackDepth = map[ssa.Value]int{}
-			fieldFP.lowlink = &lowlink
-			fieldFP.hasLeaf = &hasLeaf
-			fieldFP.usedSubject = &storeUsedSubject
-			fieldFP.rootDone = map[ssa.Value]bool{}
-			fieldFP.rootLowlink = map[ssa.Value]int{}
-			fieldFP.rootHasLeaf = map[ssa.Value]bool{}
-			fieldFP.rootUsedSubject = map[ssa.Value]bool{}
-			fieldFP.closedDone = map[ssa.Value]bool{}
-			fieldFP.typesMemo = map[ssa.Value][]types.Type{}
-			fieldFP.typesFailed = map[ssa.Value]bool{}
-			fieldFP.funcsMemo = map[ssa.Value][]*ssa.Function{}
-			fieldFP.funcsFailed = map[ssa.Value]bool{}
-			fieldFP.invokeTargets = map[ssa.CallInstruction]map[*ssa.Function]bool{}
-			fieldFP.invokeFailed = map[ssa.CallInstruction]bool{}
-			ok := walkDynamicValue(sv, nil, map[ssa.Value]bool{}, fieldFP.rootDone, &fieldFP)
+			fieldFP := fp.newStructStoreWalkFP(fp.inProgramSites, true, visiting, &lowlink, &hasLeaf, &storeUsedSubject)
+			ok := walkDynamicValue(sv, nil, map[ssa.Value]bool{}, fieldFP.rootDone, fieldFP)
 			if storeUsedSubject {
 				usedSubject = true
 			}
@@ -1721,25 +1662,12 @@ func collectUserStructSeeds(named *types.Named, collect *dynamicValueCollector, 
 	}
 	collect.visitedStructs[named] = true
 	wholeFP := *fp
-	wholeFP.inProgramSites = true
-	wholeFP.inFieldStore = false
-	wholeFP.callBindings = nil
-	wholeFP.calleeSeen = nil
-	wholeFP.calleeDepth = nil
-	wholeFP.invokeSeen = nil
-	wholeFP.invokeDepth = nil
-	wholeFP.baseDepth = 0
+	wholeFP.calleeFrame = calleeFrame{inProgramSites: true}
 	for _, wv := range fp.structWholeStores[named] {
 		walkDynamicValue(wv, collect, map[ssa.Value]bool{}, nil, &wholeFP)
 	}
 	fieldFP := *fp
-	fieldFP.inFieldStore = true
-	fieldFP.callBindings = nil
-	fieldFP.calleeSeen = nil
-	fieldFP.calleeDepth = nil
-	fieldFP.invokeSeen = nil
-	fieldFP.invokeDepth = nil
-	fieldFP.baseDepth = 0
+	fieldFP.calleeFrame = calleeFrame{inProgramSites: fp.inProgramSites, inFieldStore: true}
 	for f := 0; f < st.NumFields(); f++ {
 		fType := st.Field(f).Type()
 		if !typeMayCarryDynamicTop(fp.selectionAudited, fType) {
@@ -1828,7 +1756,7 @@ func isHarnessPointerType(t types.Type) bool {
 
 func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
 	collecting := collect.collecting()
-	if value != nil && value.Type() != nil {
+	if !collect.isSink() && value != nil && value.Type() != nil {
 		audited := fp != nil && fp.selectionAudited
 		if !typeMayCarryDynamicTop(audited, value.Type()) {
 			if !collecting {
@@ -1858,12 +1786,18 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		}
 		return !collecting || collect.isSeeds()
 	case *ssa.Const:
+		if collect.isSink() {
+			return false
+		}
 		if !collecting || v.Value == nil {
 			markDynamicLeaf(fp)
 			return true
 		}
 		return collect.isSeeds()
 	case *ssa.MakeSlice:
+		if collect.isSink() {
+			return false
+		}
 		if collect.isSeeds() {
 			if fp != nil && fp.selectionAudited {
 				walkMakeSliceIndexedStoresWithFP(v, map[ssa.Value]bool{}, fp, func(val ssa.Value) bool {
@@ -1891,7 +1825,7 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		}
 		return true
 	case *ssa.MakeMap:
-		if fp == nil || !fp.selectionAudited {
+		if collect.isSink() || fp == nil || !fp.selectionAudited {
 			return collect.isSeeds()
 		}
 		if !walkMakeMapValuesWithFP(v, map[ssa.Value]bool{}, fp, func(val ssa.Value) bool {
@@ -1904,11 +1838,14 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		}
 		return true
 	case *ssa.Lookup:
-		if fp == nil || !fp.selectionAudited || v.X == nil {
+		if collect.isSink() || fp == nil || !fp.selectionAudited || v.X == nil {
 			return collect.isSeeds()
 		}
 		return recurse(v.X)
 	case *ssa.MakeInterface:
+		if collect.isSink() {
+			return v.X != nil && auditedInMemorySinkType(v.X.Type())
+		}
 		// An interface value pins its dynamic type at this instruction —
 		// closed for dispatch enumeration. A FUNCTION laundered through an
 		// interface is different: an interface is never invoked as a
@@ -1945,6 +1882,9 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		markDynamicLeaf(fp)
 		return true
 	case *ssa.Function:
+		if collect.isSink() {
+			return false
+		}
 		// A synthetic interface-method thunk as a VALUE is never closed:
 		// its receiver arrives at call sites the value walk cannot see.
 		// Direct static calls to a thunk judge the receiver argument at
@@ -2063,6 +2003,9 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 	case *ssa.Convert:
 		return recurse(v.X)
 	case *ssa.Slice:
+		if collect.isSink() {
+			return false
+		}
 		if v.X != nil {
 			if _, isSlice := types.Unalias(v.X.Type()).Underlying().(*types.Slice); isSlice {
 				return recurse(v.X)
@@ -2102,7 +2045,7 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		}
 		return collect.isSeeds()
 	case *ssa.Alloc:
-		if fp != nil && fp.selectionAudited && v.Type() != nil {
+		if !collect.isSink() && fp != nil && fp.selectionAudited && v.Type() != nil {
 			stdAlloc := v.Parent() != nil && fp.isStdFunc(v.Parent())
 			var userNamed *types.Named
 			if !stdAlloc {
@@ -2133,73 +2076,16 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		}
 		return collect.isSeeds()
 	case *ssa.Field:
-		if fp != nil && (fp.selectionAudited || collect.isSeeds()) && v.X != nil {
-			if named := derefNamedStruct(fp.userPkgPaths(), v.X.Type()); named != nil {
-				fieldFP := *fp
-				fieldFP.inFieldStore = true
-				fieldFP.callBindings = nil
-				fieldFP.calleeSeen = nil
-				fieldFP.calleeDepth = nil
-				fieldDone := done
-				if fp.rootDone != nil {
-					fieldDone = fp.rootDone
-				}
-				if fp.enumRoot != nil && len(fp.enumRoot.Params) > 0 && v.X == fp.enumRoot.Params[0] && len(fp.enumFieldStores) > 0 {
-					if !userStructWholeStoresClosed(named, collect, seen, fieldDone, &fieldFP) && !collect.isSeeds() {
-						return false
-					}
-					stores, ok := fp.enumFieldStores[v.Field]
-					if ok && len(stores) == 0 {
-						if !collecting {
-							markDynamicLeaf(fp)
-						}
-						return true
-					}
-					for _, sv := range stores {
-						if !walkDynamicValue(sv, collect, seen, fieldDone, &fieldFP) && !collect.isSeeds() {
-							return false
-						}
-					}
-					return true
-				}
-				key := structFieldKey{named: named, field: v.Field}
-				if !collect.isSeeds() && (fp.structPoisoned[key] || !fp.structReferencedByType[named]) {
-					return false
-				}
-				if !collecting {
-					savedLeaf := false
-					if fp.hasLeaf != nil {
-						savedLeaf = *fp.hasLeaf
-					}
-					if !walkDynamicValue(v.X, nil, seen, done, fp) {
-						return false
-					}
-					if fp.hasLeaf != nil {
-						*fp.hasLeaf = savedLeaf
-					}
-				} else if collect.isSeeds() {
-					recurse(v.X)
-				}
-				if !userStructWholeStoresClosed(named, collect, seen, fieldDone, &fieldFP) && !collect.isSeeds() {
-					return false
-				}
-				stores := fp.structFieldStores[key]
-				if len(stores) == 0 {
-					if !collecting {
-						markDynamicLeaf(fp)
-					}
-					return true
-				}
-				for _, sv := range stores {
-					if !walkDynamicValue(sv, collect, seen, fieldDone, &fieldFP) && !collect.isSeeds() {
-						return false
-					}
-				}
-				return true
+		if !collect.isSink() {
+			if closed, handled := walkUserStructFieldDynamicValue(v.X, v.Field, collect, seen, done, fp); handled {
+				return closed
 			}
 		}
 		return collect.isSeeds()
 	case *ssa.Call:
+		if collect.isSink() {
+			return false
+		}
 		if b, ok := v.Common().Value.(*ssa.Builtin); ok && b.Name() == "append" {
 			for _, arg := range v.Common().Args {
 				if !recurse(arg) && !collect.isSeeds() {
@@ -2256,45 +2142,20 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		}
 		return true
 	case *ssa.Extract:
-		if call, ok := v.Tuple.(*ssa.Call); ok {
-			if !collecting && propertyHarnessClosedResult(call, fp) {
-				markDynamicLeaf(fp)
-				return true
+		if !collect.isSink() {
+			if call, ok := v.Tuple.(*ssa.Call); ok {
+				if !collecting && propertyHarnessClosedResult(call, fp) {
+					markDynamicLeaf(fp)
+					return true
+				}
+				return staticCallResultDynamicValue(call, v.Index, collect, seen, done, fp) || collect.isSeeds()
 			}
-			return staticCallResultDynamicValue(call, v.Index, collect, seen, done, fp) || collect.isSeeds()
 		}
 		return recurse(v.Tuple)
 	case *ssa.Parameter:
-		if fp != nil {
+		if !collect.isSink() && fp != nil {
 			if bound, ok := fp.callBindings[v]; ok && bound != nil {
-				boundFP := fp
-				fn := v.Parent()
-				if fn != nil && fp.calleeSeen[fn] {
-					copied := *fp
-					calleeSeen := make(map[*ssa.Function]bool, len(fp.calleeSeen))
-					for k, val := range fp.calleeSeen {
-						if k != fn {
-							calleeSeen[k] = val
-						}
-					}
-					copied.calleeSeen = calleeSeen
-					calleeDepth := make(map[*ssa.Function]int, len(fp.calleeDepth))
-					for k, val := range fp.calleeDepth {
-						if k != fn {
-							calleeDepth[k] = val
-						}
-					}
-					copied.calleeDepth = calleeDepth
-					bindings := make(map[*ssa.Parameter]ssa.Value, len(fp.callBindings))
-					for k, val := range fp.callBindings {
-						if k.Parent() != fn {
-							bindings[k] = val
-						}
-					}
-					copied.callBindings = bindings
-					boundFP = &copied
-				}
-				return walkDynamicValue(bound, collect, seen, done, boundFP)
+				return walkDynamicValue(bound, collect, seen, done, fp.withoutCallee(v.Parent()))
 			}
 			if fp.enumRecvNamed != nil && fp.enumRoot != nil && len(fp.enumRoot.Params) > 0 && v == fp.enumRoot.Params[0] {
 				if !collecting {
@@ -2310,7 +2171,7 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		}
 		args, usedProgramSites, ok := attributedParameterArgs(v, fp)
 		if !ok {
-			if fp != nil && fp.selectionAudited && !fp.enumOnly && fp.enumRoot == nil && (fp.inProgramSites || fp.inFieldStore) {
+			if !collect.isSink() && fp != nil && fp.selectionAudited && !fp.enumOnly && fp.enumRoot == nil && (fp.inProgramSites || fp.inFieldStore) {
 				fn := v.Parent()
 				if fn != nil && fn != fp.enumRoot && fn != fp.subjectRoot && !fp.functions[fn] && !fp.dynamic[fn] && len(fp.callers[fn]) == 0 && !fp.programValueRef[fn] && len(fp.programSites[fn]) == 0 && !initFlowFrame(fn) {
 					if fp.usedSubject != nil {
@@ -2322,20 +2183,9 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 			}
 			return collect.isSeeds()
 		}
-		argFP := fp
-		argDone := done
-		if usedProgramSites && fp != nil {
-			if !fp.inProgramSites || len(fp.callBindings) > 0 {
-				copied := *fp
-				copied.inProgramSites = true
-				copied.callBindings = nil
-				copied.calleeSeen = nil
-				copied.calleeDepth = nil
-				argFP = &copied
-			}
-			if fp.rootDone != nil {
-				argDone = fp.rootDone
-			}
+		argFP, argDone := fp, done
+		if usedProgramSites {
+			argFP, argDone = fp.withProgramSites(done)
 		}
 		for _, arg := range args {
 			if !walkDynamicValue(arg, collect, seen, argDone, argFP) && !collect.isSeeds() {
@@ -2344,49 +2194,18 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		}
 		return true
 	case *ssa.FreeVar:
+		if collect.isSink() {
+			return false
+		}
 		bindings, usedProgramSites, ok := attributedFreeVarBindings(v, fp)
 		if !ok {
 			return collect.isSeeds()
 		}
-		bindFP := fp
-		bindDone := done
-		fn := v.Parent()
-		if usedProgramSites && fp != nil {
-			if !fp.inProgramSites || len(fp.callBindings) > 0 {
-				copied := *fp
-				copied.inProgramSites = true
-				copied.callBindings = nil
-				copied.calleeSeen = nil
-				copied.calleeDepth = nil
-				bindFP = &copied
-			}
-			if fp.rootDone != nil {
-				bindDone = fp.rootDone
-			}
-		} else if fp != nil && fn != nil && fp.calleeSeen[fn] {
-			copied := *fp
-			calleeSeen := make(map[*ssa.Function]bool, len(fp.calleeSeen))
-			for k, val := range fp.calleeSeen {
-				if k != fn {
-					calleeSeen[k] = val
-				}
-			}
-			copied.calleeSeen = calleeSeen
-			calleeDepth := make(map[*ssa.Function]int, len(fp.calleeDepth))
-			for k, val := range fp.calleeDepth {
-				if k != fn {
-					calleeDepth[k] = val
-				}
-			}
-			copied.calleeDepth = calleeDepth
-			cb := make(map[*ssa.Parameter]ssa.Value, len(fp.callBindings))
-			for k, val := range fp.callBindings {
-				if k.Parent() != fn {
-					cb[k] = val
-				}
-			}
-			copied.callBindings = cb
-			bindFP = &copied
+		bindFP, bindDone := fp, done
+		if usedProgramSites {
+			bindFP, bindDone = fp.withProgramSites(done)
+		} else {
+			bindFP = fp.withoutCallee(v.Parent())
 		}
 		for _, b := range bindings {
 			if !walkDynamicValue(b, collect, seen, bindDone, bindFP) && !collect.isSeeds() {
@@ -2401,6 +2220,20 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		if v.Op != token.MUL {
 			return collect.isSeeds()
 		}
+		if collect.isSink() {
+			if g, ok := v.X.(*ssa.Global); ok && fp != nil && fp.selectionAudited && isUnmutatedStandardSentinelGlobal(g, "io", "Discard") {
+				return true
+			}
+			if cellOf(v.X, map[ssa.Value]bool{}) == nil {
+				return false
+			}
+			wrote := false
+			ok := walkLoadCellReferrers(v.X, func(val ssa.Value) bool {
+				wrote = true
+				return recurse(val)
+			})
+			return ok && wrote
+		}
 		if g, ok := v.X.(*ssa.Global); ok && fp != nil && fp.selectionAudited && (isUnmutatedStandardSentinelGlobalAny(g) || isUnmutatedSentinelGlobal(fp.userPkgPaths(), g)) {
 			if !collecting {
 				markDynamicLeaf(fp)
@@ -2412,70 +2245,8 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 			return collect.isSeeds()
 		}
 		if fa, ok := v.X.(*ssa.FieldAddr); ok && fp != nil {
-			fieldFP := *fp
-			fieldFP.inFieldStore = true
-			fieldFP.callBindings = nil
-			fieldFP.calleeSeen = nil
-			fieldFP.calleeDepth = nil
-			fieldDone := done
-			if fp.rootDone != nil {
-				fieldDone = fp.rootDone
-			}
-			if fp.enumRoot != nil && len(fp.enumRoot.Params) > 0 && fa.X == fp.enumRoot.Params[0] && len(fp.enumFieldStores) > 0 {
-				if named := derefNamedStruct(fp.userPkgPaths(), fa.X.Type()); named != nil && !userStructWholeStoresClosed(named, collect, seen, fieldDone, &fieldFP) && !collect.isSeeds() {
-					return false
-				}
-				stores, ok := fp.enumFieldStores[fa.Field]
-				if ok && len(stores) == 0 {
-					if !collecting {
-						markDynamicLeaf(fp)
-					}
-					return true
-				}
-				for _, sv := range stores {
-					if !walkDynamicValue(sv, collect, seen, fieldDone, &fieldFP) && !collect.isSeeds() {
-						return false
-					}
-				}
-				return true
-			}
-			if (fp.selectionAudited || collect.isSeeds()) && fa.X != nil {
-				if named := derefNamedStruct(fp.userPkgPaths(), fa.X.Type()); named != nil {
-					key := structFieldKey{named: named, field: fa.Field}
-					if !collect.isSeeds() && (fp.structPoisoned[key] || !fp.structReferencedByType[named]) {
-						return false
-					}
-					if !collecting {
-						savedLeaf := false
-						if fp.hasLeaf != nil {
-							savedLeaf = *fp.hasLeaf
-						}
-						if !walkDynamicValue(fa.X, nil, seen, done, fp) {
-							return false
-						}
-						if fp.hasLeaf != nil {
-							*fp.hasLeaf = savedLeaf
-						}
-					} else if collect.isSeeds() {
-						recurse(fa.X)
-					}
-					if !userStructWholeStoresClosed(named, collect, seen, fieldDone, &fieldFP) && !collect.isSeeds() {
-						return false
-					}
-					stores := fp.structFieldStores[key]
-					if len(stores) == 0 {
-						if !collecting {
-							markDynamicLeaf(fp)
-						}
-						return true
-					}
-					for _, sv := range stores {
-						if !walkDynamicValue(sv, collect, seen, fieldDone, &fieldFP) && !collect.isSeeds() {
-							return false
-						}
-					}
-					return true
-				}
+			if closed, handled := walkUserStructFieldDynamicValue(fa.X, fa.Field, collect, seen, done, fp); handled {
+				return closed
 			}
 		}
 		if ia, ok := v.X.(*ssa.IndexAddr); ok && ia.X != nil {
@@ -2546,6 +2317,81 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 	default:
 		return collect.isSeeds()
 	}
+}
+
+func walkUserStructFieldDynamicValue(base ssa.Value, fieldIdx int, collect *dynamicValueCollector, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) (closed, handled bool) {
+	if fp == nil || base == nil {
+		return false, false
+	}
+	collecting := collect.collecting()
+	fieldFP := *fp
+	fieldFP.inFieldStore = true
+	fieldFP.callBindings = nil
+	fieldFP.calleeSeen = nil
+	fieldFP.calleeDepth = nil
+	fieldDone := done
+	if fp.rootDone != nil {
+		fieldDone = fp.rootDone
+	}
+	if fp.enumRoot != nil && len(fp.enumRoot.Params) > 0 && base == fp.enumRoot.Params[0] && len(fp.enumFieldStores) > 0 {
+		if named := derefNamedStruct(fp.userPkgPaths(), base.Type()); named != nil && !userStructWholeStoresClosed(named, collect, seen, fieldDone, &fieldFP) && !collect.isSeeds() {
+			return false, true
+		}
+		stores, ok := fp.enumFieldStores[fieldIdx]
+		if ok && len(stores) == 0 {
+			if !collecting {
+				markDynamicLeaf(fp)
+			}
+			return true, true
+		}
+		for _, sv := range stores {
+			if !walkDynamicValue(sv, collect, seen, fieldDone, &fieldFP) && !collect.isSeeds() {
+				return false, true
+			}
+		}
+		return true, true
+	}
+	if !fp.selectionAudited && !collect.isSeeds() {
+		return false, false
+	}
+	named := derefNamedStruct(fp.userPkgPaths(), base.Type())
+	if named == nil {
+		return false, false
+	}
+	key := structFieldKey{named: named, field: fieldIdx}
+	if !collect.isSeeds() && (fp.structPoisoned[key] || !fp.structReferencedByType[named]) {
+		return false, true
+	}
+	if !collecting {
+		savedLeaf := false
+		if fp.hasLeaf != nil {
+			savedLeaf = *fp.hasLeaf
+		}
+		if !walkDynamicValue(base, nil, seen, done, fp) {
+			return false, true
+		}
+		if fp.hasLeaf != nil {
+			*fp.hasLeaf = savedLeaf
+		}
+	} else if collect.isSeeds() {
+		walkDynamicValue(base, collect, seen, done, fp)
+	}
+	if !userStructWholeStoresClosed(named, collect, seen, fieldDone, &fieldFP) && !collect.isSeeds() {
+		return false, true
+	}
+	stores := fp.structFieldStores[key]
+	if len(stores) == 0 {
+		if !collecting {
+			markDynamicLeaf(fp)
+		}
+		return true, true
+	}
+	for _, sv := range stores {
+		if !walkDynamicValue(sv, collect, seen, fieldDone, &fieldFP) && !collect.isSeeds() {
+			return false, true
+		}
+	}
+	return true, true
 }
 
 func isUnmutatedSentinelGlobal(userPaths map[string]bool, g *ssa.Global) bool {
@@ -2732,7 +2578,7 @@ func (fp *freshParamAnalysis) stdTypeMayDelegateDynamic(t types.Type) bool {
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
 		return true
 	}
-	if _, ok := AuditedAtomicPointerElem(audited, named); ok {
+	if _, ok := auditedAtomicPointerElem(audited, named); ok {
 		return true
 	}
 	if _, isStruct := named.Underlying().(*types.Struct); !isStruct {
@@ -3051,24 +2897,20 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 				return false
 			}
 			if res != nil && res.Type() != nil {
+				var walkContainer func(ssa.Value, map[ssa.Value]bool, *freshParamAnalysis, func(ssa.Value) bool) bool
 				if _, isSlice := types.Unalias(res.Type()).Underlying().(*types.Slice); isSlice {
-					retIdx := tupleIndex
-					if retIdx < 0 {
-						retIdx = 0
-					}
-					if !walkCallResultSliceStoresWithFP(call, retIdx, len(ret.Results), map[ssa.Value]bool{}, fp, func(val ssa.Value) bool {
-						return fp != nil && fp.selectionAudited && (walkDynamicValue(val, collect, seen, done, fp) || collect.isSeeds())
-					}) && !collect.isSeeds() {
-						return false
-					}
+					walkContainer = walkMakeSliceIndexedStoresWithFP
 				} else if _, isMap := types.Unalias(res.Type()).Underlying().(*types.Map); isMap {
+					walkContainer = walkMakeMapValuesWithFP
+				}
+				if walkContainer != nil {
 					retIdx := tupleIndex
 					if retIdx < 0 {
 						retIdx = 0
 					}
-					if !walkCallResultMapValuesWithFP(call, retIdx, len(ret.Results), map[ssa.Value]bool{}, fp, func(val ssa.Value) bool {
+					if !walkCallResultContainerWithFP(call, retIdx, len(ret.Results), map[ssa.Value]bool{}, fp, func(val ssa.Value) bool {
 						return fp != nil && fp.selectionAudited && (walkDynamicValue(val, collect, seen, done, fp) || collect.isSeeds())
-					}) && !collect.isSeeds() {
+					}, walkContainer) && !collect.isSeeds() {
 						return false
 					}
 				}
@@ -3078,13 +2920,13 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 	return hasReturn || collect.isSeeds()
 }
 
-func walkCallResultSliceStoresWithFP(site ssa.CallInstruction, retIdx, numResults int, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool) bool {
+func walkCallResultContainerWithFP(site ssa.CallInstruction, retIdx, numResults int, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool, walkContainer func(ssa.Value, map[ssa.Value]bool, *freshParamAnalysis, func(ssa.Value) bool) bool) bool {
 	callVal, ok := site.(ssa.Value)
 	if !ok || callVal == nil {
 		return true
 	}
 	if numResults <= 1 {
-		return walkMakeSliceIndexedStoresWithFP(callVal, visited, fp, walkVal)
+		return walkContainer(callVal, visited, fp, walkVal)
 	}
 	if callVal.Referrers() == nil {
 		return true
@@ -3096,35 +2938,7 @@ func walkCallResultSliceStoresWithFP(site ssa.CallInstruction, retIdx, numResult
 			if r.Tuple != callVal {
 				return false
 			}
-			if r.Index == retIdx && !walkMakeSliceIndexedStoresWithFP(r, visited, fp, walkVal) {
-				return false
-			}
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-func walkCallResultMapValuesWithFP(site ssa.CallInstruction, retIdx, numResults int, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool) bool {
-	callVal, ok := site.(ssa.Value)
-	if !ok || callVal == nil {
-		return true
-	}
-	if numResults <= 1 {
-		return walkMakeMapValuesWithFP(callVal, visited, fp, walkVal)
-	}
-	if callVal.Referrers() == nil {
-		return true
-	}
-	for _, ref := range *callVal.Referrers() {
-		switch r := ref.(type) {
-		case *ssa.DebugRef:
-		case *ssa.Extract:
-			if r.Tuple != callVal {
-				return false
-			}
-			if r.Index == retIdx && !walkMakeMapValuesWithFP(r, visited, fp, walkVal) {
+			if r.Index == retIdx && !walkContainer(r, visited, fp, walkVal) {
 				return false
 			}
 		default:
@@ -3406,18 +3220,18 @@ func walkLoadCellReferrersWithFP(loadAddr ssa.Value, fp *freshParamAnalysis, wal
 	}
 	if fa, ok := loadAddr.(*ssa.FieldAddr); ok {
 		if _, isFV := fa.X.(*ssa.FreeVar); fa.X == cell || isFV {
-			return walkCellFieldReferrersWithFP(cell, fa.Field, map[ssa.Value]bool{}, fp, walkVal)
+			return walkValueFieldReferrersWithFP(cell, fa.Field, map[ssa.Value]bool{}, fp, walkVal)
 		}
 	}
 	return walkCellReferrersWithFP(cell, map[ssa.Value]bool{}, fp, walkVal)
 }
 
-func walkCellFieldReferrersWithFP(cell *ssa.Alloc, fieldIdx int, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool) bool {
-	if visited[cell] {
+func walkValueFieldReferrersWithFP(target ssa.Value, fieldIdx int, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool) bool {
+	if visited[target] {
 		return true
 	}
-	visited[cell] = true
-	refs := cell.Referrers()
+	visited[target] = true
+	refs := target.Referrers()
 	if refs == nil {
 		return true
 	}
@@ -3426,7 +3240,7 @@ func walkCellFieldReferrersWithFP(cell *ssa.Alloc, fieldIdx int, visited map[ssa
 		switch r := ref.(type) {
 		case *ssa.DebugRef:
 		case *ssa.Store:
-			if r.Addr != cell {
+			if r.Addr != target {
 				return false
 			}
 			c, isZero := r.Val.(*ssa.Const)
@@ -3434,11 +3248,11 @@ func walkCellFieldReferrersWithFP(cell *ssa.Alloc, fieldIdx int, visited map[ssa
 				return false
 			}
 		case *ssa.UnOp:
-			if r.Op != token.MUL || r.X != cell {
+			if r.Op != token.MUL || r.X != target {
 				return false
 			}
 		case *ssa.FieldAddr:
-			if r.X != cell {
+			if r.X != target {
 				return false
 			}
 			cb := noEscapeOnly
@@ -3454,63 +3268,8 @@ func walkCellFieldReferrersWithFP(cell *ssa.Alloc, fieldIdx int, visited map[ssa
 				return false
 			}
 			for i, b := range r.Bindings {
-				if b == cell {
-					if i >= len(fn.FreeVars) || !walkFreeVarFieldReferrersWithFP(fn.FreeVars[i], fieldIdx, visited, fp, walkVal) {
-						return false
-					}
-				}
-			}
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-func walkFreeVarFieldReferrersWithFP(fv *ssa.FreeVar, fieldIdx int, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool) bool {
-	if visited[fv] {
-		return true
-	}
-	visited[fv] = true
-	refs := fv.Referrers()
-	if refs == nil {
-		return true
-	}
-	noEscapeOnly := func(ssa.Value) bool { return true }
-	for _, ref := range *refs {
-		switch r := ref.(type) {
-		case *ssa.DebugRef:
-		case *ssa.Store:
-			if r.Addr != fv {
-				return false
-			}
-			c, isZero := r.Val.(*ssa.Const)
-			if !isZero || c.Value != nil {
-				return false
-			}
-		case *ssa.UnOp:
-			if r.Op != token.MUL || r.X != fv {
-				return false
-			}
-		case *ssa.FieldAddr:
-			if r.X != fv {
-				return false
-			}
-			cb := noEscapeOnly
-			if r.Field == fieldIdx {
-				cb = walkVal
-			}
-			if !walkCellReferrersWithFP(r, visited, fp, cb) {
-				return false
-			}
-		case *ssa.MakeClosure:
-			fn, ok := r.Fn.(*ssa.Function)
-			if !ok {
-				return false
-			}
-			for i, b := range r.Bindings {
-				if b == fv {
-					if i >= len(fn.FreeVars) || !walkFreeVarFieldReferrersWithFP(fn.FreeVars[i], fieldIdx, visited, fp, walkVal) {
+				if b == target {
+					if i >= len(fn.FreeVars) || !walkValueFieldReferrersWithFP(fn.FreeVars[i], fieldIdx, visited, fp, walkVal) {
 						return false
 					}
 				}
@@ -3647,57 +3406,15 @@ func walkMakeSliceIndexedStoresWithFP(s ssa.Value, visited map[ssa.Value]bool, f
 				return false
 			}
 		case *ssa.Return:
-			if fp == nil || !fp.selectionAudited || r.Parent() == nil {
+			if !walkContainerReturnReferrer(s, r, visited, fp, walkVal, walkMakeSliceIndexedStoresWithFP) {
 				return false
-			}
-			fn := r.Parent()
-			if !fp.calleeSeen[fn] {
-				if fp.programValueRef[fn] || len(fp.programSites[fn]) == 0 {
-					return false
-				}
-				for retIdx, res := range r.Results {
-					if res != s {
-						continue
-					}
-					for _, site := range fp.programSites[fn] {
-						if !walkCallResultSliceStoresWithFP(site, retIdx, len(r.Results), visited, fp, walkVal) {
-							return false
-						}
-					}
-				}
 			}
 		case *ssa.MapUpdate:
 			if r.Value != s || r.Map == s || fp == nil || !fp.selectionAudited || !walkMapSliceReadsWithFP(r.Map, visited, fp, walkVal) {
 				return false
 			}
 		case *ssa.Store:
-			if r.Val != s || r.Addr == s || fp == nil || !fp.selectionAudited {
-				return false
-			}
-			switch addr := r.Addr.(type) {
-			case *ssa.Alloc, *ssa.FreeVar:
-				cell := cellOf(addr, map[ssa.Value]bool{})
-				if cell == nil || !walkSliceCellLoadsWithFP(cell, visited, fp, walkVal) {
-					return false
-				}
-			case *ssa.FieldAddr:
-				if addr.X == nil || fp.summary == nil {
-					return false
-				}
-				named := derefNamedStruct(fp.userPkgPaths(), addr.X.Type())
-				if named == nil {
-					return false
-				}
-				key := structFieldKey{named: named, field: addr.Field}
-				if fp.structPoisoned[key] || !fp.structReferencedByType[named] {
-					return false
-				}
-				for _, rd := range fp.summary.structFieldReads[key] {
-					if !walkMakeSliceIndexedStoresWithFP(rd, visited, fp, walkVal) {
-						return false
-					}
-				}
-			default:
+			if !walkContainerStoreReferrer(s, r, visited, fp, walkVal, walkMakeSliceIndexedStoresWithFP) {
 				return false
 			}
 		case *ssa.MakeInterface:
@@ -3809,7 +3526,61 @@ func isAuditedSlicesCallForSlice(name string, args []ssa.Value, s ssa.Value) (ad
 	return true, aliasesReturn
 }
 
-func walkSliceCellLoadsWithFP(alias ssa.Value, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool) bool {
+func walkContainerReturnReferrer(container ssa.Value, r *ssa.Return, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool, walkContainer func(ssa.Value, map[ssa.Value]bool, *freshParamAnalysis, func(ssa.Value) bool) bool) bool {
+	if fp == nil || !fp.selectionAudited || r.Parent() == nil {
+		return false
+	}
+	fn := r.Parent()
+	if !fp.calleeSeen[fn] {
+		if fp.programValueRef[fn] || len(fp.programSites[fn]) == 0 {
+			return false
+		}
+		for retIdx, res := range r.Results {
+			if res != container {
+				continue
+			}
+			for _, site := range fp.programSites[fn] {
+				if !walkCallResultContainerWithFP(site, retIdx, len(r.Results), visited, fp, walkVal, walkContainer) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+func walkContainerStoreReferrer(container ssa.Value, r *ssa.Store, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool, walkContainer func(ssa.Value, map[ssa.Value]bool, *freshParamAnalysis, func(ssa.Value) bool) bool) bool {
+	if r.Val != container || r.Addr == container || fp == nil || !fp.selectionAudited {
+		return false
+	}
+	switch addr := r.Addr.(type) {
+	case *ssa.Alloc, *ssa.FreeVar:
+		cell := cellOf(addr, map[ssa.Value]bool{})
+		return cell != nil && walkContainerCellLoadsWithFP(cell, visited, fp, walkVal, walkContainer)
+	case *ssa.FieldAddr:
+		if addr.X == nil || fp.summary == nil {
+			return false
+		}
+		named := derefNamedStruct(fp.userPkgPaths(), addr.X.Type())
+		if named == nil {
+			return false
+		}
+		key := structFieldKey{named: named, field: addr.Field}
+		if fp.structPoisoned[key] || !fp.structReferencedByType[named] {
+			return false
+		}
+		for _, rd := range fp.summary.structFieldReads[key] {
+			if !walkContainer(rd, visited, fp, walkVal) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func walkContainerCellLoadsWithFP(alias ssa.Value, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool, walkContainer func(ssa.Value, map[ssa.Value]bool, *freshParamAnalysis, func(ssa.Value) bool) bool) bool {
 	if alias == nil {
 		return false
 	}
@@ -3829,7 +3600,7 @@ func walkSliceCellLoadsWithFP(alias ssa.Value, visited map[ssa.Value]bool, fp *f
 				return false
 			}
 		case *ssa.UnOp:
-			if r.Op != token.MUL || r.X != alias || !walkMakeSliceIndexedStoresWithFP(r, visited, fp, walkVal) {
+			if r.Op != token.MUL || r.X != alias || !walkContainer(r, visited, fp, walkVal) {
 				return false
 			}
 		case *ssa.MakeClosure:
@@ -3839,7 +3610,7 @@ func walkSliceCellLoadsWithFP(alias ssa.Value, visited map[ssa.Value]bool, fp *f
 			}
 			for i, binding := range r.Bindings {
 				if binding == alias {
-					if i >= len(fn.FreeVars) || !walkSliceCellLoadsWithFP(fn.FreeVars[i], visited, fp, walkVal) {
+					if i >= len(fn.FreeVars) || !walkContainerCellLoadsWithFP(fn.FreeVars[i], visited, fp, walkVal, walkContainer) {
 						return false
 					}
 				}
@@ -3849,6 +3620,47 @@ func walkSliceCellLoadsWithFP(alias ssa.Value, visited map[ssa.Value]bool, fp *f
 		}
 	}
 	return true
+}
+
+func walkMapForwardReferrer(m ssa.Value, ref ssa.Instruction, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool, walkMap func(ssa.Value, map[ssa.Value]bool, *freshParamAnalysis, func(ssa.Value) bool) bool) bool {
+	switch r := ref.(type) {
+	case *ssa.Phi:
+		return walkMap(r, visited, fp, walkVal)
+	case *ssa.Store:
+		return walkContainerStoreReferrer(m, r, visited, fp, walkVal, walkMap)
+	case ssa.CallInstruction:
+		if _, isGo := r.(*ssa.Go); isGo || r.Common() == nil {
+			return false
+		}
+		if b, ok := r.Common().Value.(*ssa.Builtin); ok {
+			return b.Name() == "len" || b.Name() == "delete" || b.Name() == "clear"
+		}
+		callee := r.Common().StaticCallee()
+		if r.Common().IsInvoke() || callee == nil || len(callee.Blocks) == 0 || len(r.Common().Args) != len(callee.Params) {
+			return false
+		}
+		for i, arg := range r.Common().Args {
+			if arg == m && !walkMap(callee.Params[i], visited, fp, walkVal) {
+				return false
+			}
+		}
+		return true
+	case *ssa.MakeClosure:
+		fn, ok := r.Fn.(*ssa.Function)
+		if !ok {
+			return false
+		}
+		for i, binding := range r.Bindings {
+			if binding == m {
+				if i >= len(fn.FreeVars) || !walkMap(fn.FreeVars[i], visited, fp, walkVal) {
+					return false
+				}
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }
 
 func makeInterfaceOnlyVarargsLogged(mi *ssa.MakeInterface, audited bool) bool {
@@ -3910,10 +3722,6 @@ func makeInterfaceOnlyVarargsLogged(mi *ssa.MakeInterface, audited bool) bool {
 	return true
 }
 
-func walkMakeMapValues(m ssa.Value, visited map[ssa.Value]bool, walkVal func(ssa.Value) bool) bool {
-	return walkMakeMapValuesWithFP(m, visited, nil, walkVal)
-}
-
 func walkMakeMapValuesWithFP(m ssa.Value, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool) bool {
 	if m == nil {
 		return false
@@ -3937,139 +3745,18 @@ func walkMakeMapValuesWithFP(m ssa.Value, visited map[ssa.Value]bool, fp *freshP
 			if r.X != m {
 				return false
 			}
-		case *ssa.Phi:
-			if !walkMakeMapValuesWithFP(r, visited, fp, walkVal) {
-				return false
-			}
 		case *ssa.Return:
-			if fp == nil || !fp.selectionAudited || r.Parent() == nil {
-				return false
-			}
-			fn := r.Parent()
-			if !fp.calleeSeen[fn] {
-				if fp.programValueRef[fn] || len(fp.programSites[fn]) == 0 {
-					return false
-				}
-				for retIdx, res := range r.Results {
-					if res != m {
-						continue
-					}
-					for _, site := range fp.programSites[fn] {
-						if !walkCallResultMapValuesWithFP(site, retIdx, len(r.Results), visited, fp, walkVal) {
-							return false
-						}
-					}
-				}
-			}
-		case *ssa.Store:
-			if r.Val != m || r.Addr == m || fp == nil || !fp.selectionAudited {
-				return false
-			}
-			switch addr := r.Addr.(type) {
-			case *ssa.Alloc, *ssa.FreeVar:
-				cell := cellOf(addr, map[ssa.Value]bool{})
-				if cell == nil || !walkMapCellLoadsWithFP(cell, visited, fp, walkVal) {
-					return false
-				}
-			case *ssa.FieldAddr:
-				if addr.X == nil || fp.summary == nil {
-					return false
-				}
-				named := derefNamedStruct(fp.userPkgPaths(), addr.X.Type())
-				if named == nil {
-					return false
-				}
-				key := structFieldKey{named: named, field: addr.Field}
-				if fp.structPoisoned[key] || !fp.structReferencedByType[named] {
-					return false
-				}
-				for _, rd := range fp.summary.structFieldReads[key] {
-					if !walkMakeMapValuesWithFP(rd, visited, fp, walkVal) {
-						return false
-					}
-				}
-			default:
+			if !walkContainerReturnReferrer(m, r, visited, fp, walkVal, walkMakeMapValuesWithFP) {
 				return false
 			}
 		case *ssa.MapUpdate:
 			if r.Map != m || !walkVal(r.Value) {
 				return false
 			}
-		case ssa.CallInstruction:
-			if _, isGo := r.(*ssa.Go); isGo || r.Common() == nil {
-				return false
-			}
-			if b, ok := r.Common().Value.(*ssa.Builtin); ok {
-				if b.Name() != "len" && b.Name() != "delete" && b.Name() != "clear" {
-					return false
-				}
-				continue
-			}
-			callee := r.Common().StaticCallee()
-			if r.Common().IsInvoke() || callee == nil || len(callee.Blocks) == 0 || len(r.Common().Args) != len(callee.Params) {
-				return false
-			}
-			for i, arg := range r.Common().Args {
-				if arg == m && !walkMakeMapValuesWithFP(callee.Params[i], visited, fp, walkVal) {
-					return false
-				}
-			}
-		case *ssa.MakeClosure:
-			fn, ok := r.Fn.(*ssa.Function)
-			if !ok {
-				return false
-			}
-			for i, binding := range r.Bindings {
-				if binding == m {
-					if i >= len(fn.FreeVars) || !walkMakeMapValuesWithFP(fn.FreeVars[i], visited, fp, walkVal) {
-						return false
-					}
-				}
-			}
 		default:
-			return false
-		}
-	}
-	return true
-}
-
-func walkMapCellLoadsWithFP(alias ssa.Value, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool) bool {
-	if alias == nil {
-		return false
-	}
-	if visited[alias] {
-		return true
-	}
-	visited[alias] = true
-	refs := alias.Referrers()
-	if refs == nil {
-		return true
-	}
-	for _, ref := range *refs {
-		switch r := ref.(type) {
-		case *ssa.DebugRef:
-		case *ssa.Store:
-			if r.Addr != alias {
+			if !walkMapForwardReferrer(m, r, visited, fp, walkVal, walkMakeMapValuesWithFP) {
 				return false
 			}
-		case *ssa.UnOp:
-			if r.Op != token.MUL || r.X != alias || !walkMakeMapValuesWithFP(r, visited, fp, walkVal) {
-				return false
-			}
-		case *ssa.MakeClosure:
-			fn, ok := r.Fn.(*ssa.Function)
-			if !ok {
-				return false
-			}
-			for i, binding := range r.Bindings {
-				if binding == alias {
-					if i >= len(fn.FreeVars) || !walkMapCellLoadsWithFP(fn.FreeVars[i], visited, fp, walkVal) {
-						return false
-					}
-				}
-			}
-		default:
-			return false
 		}
 	}
 	return true
@@ -4153,115 +3840,10 @@ func walkMapSliceReadsWithFP(m ssa.Value, visited map[ssa.Value]bool, fp *freshP
 					}
 				}
 			}
-		case *ssa.Phi:
-			if !walkMapSliceReadsWithFP(r, visited, fp, walkVal) {
-				return false
-			}
-		case *ssa.Store:
-			if r.Val != m || r.Addr == m || fp == nil || !fp.selectionAudited {
-				return false
-			}
-			switch addr := r.Addr.(type) {
-			case *ssa.Alloc, *ssa.FreeVar:
-				cell := cellOf(addr, map[ssa.Value]bool{})
-				if cell == nil || !walkMapSliceCellLoadsWithFP(cell, visited, fp, walkVal) {
-					return false
-				}
-			case *ssa.FieldAddr:
-				if addr.X == nil || fp.summary == nil {
-					return false
-				}
-				named := derefNamedStruct(fp.userPkgPaths(), addr.X.Type())
-				if named == nil {
-					return false
-				}
-				key := structFieldKey{named: named, field: addr.Field}
-				if fp.structPoisoned[key] || !fp.structReferencedByType[named] {
-					return false
-				}
-				for _, rd := range fp.summary.structFieldReads[key] {
-					if !walkMapSliceReadsWithFP(rd, visited, fp, walkVal) {
-						return false
-					}
-				}
-			default:
-				return false
-			}
-		case ssa.CallInstruction:
-			if _, isGo := r.(*ssa.Go); isGo || r.Common() == nil {
-				return false
-			}
-			if b, ok := r.Common().Value.(*ssa.Builtin); ok {
-				if b.Name() != "len" && b.Name() != "delete" && b.Name() != "clear" {
-					return false
-				}
-				continue
-			}
-			callee := r.Common().StaticCallee()
-			if r.Common().IsInvoke() || callee == nil || len(callee.Blocks) == 0 || len(r.Common().Args) != len(callee.Params) {
-				return false
-			}
-			for i, arg := range r.Common().Args {
-				if arg == m && !walkMapSliceReadsWithFP(callee.Params[i], visited, fp, walkVal) {
-					return false
-				}
-			}
-		case *ssa.MakeClosure:
-			fn, ok := r.Fn.(*ssa.Function)
-			if !ok {
-				return false
-			}
-			for i, binding := range r.Bindings {
-				if binding == m {
-					if i >= len(fn.FreeVars) || !walkMapSliceReadsWithFP(fn.FreeVars[i], visited, fp, walkVal) {
-						return false
-					}
-				}
-			}
 		default:
-			return false
-		}
-	}
-	return true
-}
-
-func walkMapSliceCellLoadsWithFP(alias ssa.Value, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool) bool {
-	if alias == nil {
-		return false
-	}
-	if visited[alias] {
-		return true
-	}
-	visited[alias] = true
-	refs := alias.Referrers()
-	if refs == nil {
-		return true
-	}
-	for _, ref := range *refs {
-		switch r := ref.(type) {
-		case *ssa.DebugRef:
-		case *ssa.Store:
-			if r.Addr != alias {
+			if !walkMapForwardReferrer(m, r, visited, fp, walkVal, walkMapSliceReadsWithFP) {
 				return false
 			}
-		case *ssa.UnOp:
-			if r.Op != token.MUL || r.X != alias || !walkMapSliceReadsWithFP(r, visited, fp, walkVal) {
-				return false
-			}
-		case *ssa.MakeClosure:
-			fn, ok := r.Fn.(*ssa.Function)
-			if !ok {
-				return false
-			}
-			for i, binding := range r.Bindings {
-				if binding == alias {
-					if i >= len(fn.FreeVars) || !walkMapSliceCellLoadsWithFP(fn.FreeVars[i], visited, fp, walkVal) {
-						return false
-					}
-				}
-			}
-		default:
-			return false
 		}
 	}
 	return true
@@ -4879,82 +4461,7 @@ func attributedFreeVarBindings(fv *ssa.FreeVar, fp *freshParamAnalysis) ([]ssa.V
 // values — fails closed, and a parameter crosses only through the
 // attributed-caller discipline the dispatch walks share.
 func inMemoryFormattedSink(value ssa.Value, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
-	if value == nil {
-		return false
-	}
-	if r, ok := done[value]; ok {
-		return r
-	}
-	if seen[value] {
-		return false
-	}
-	seen[value] = true
-	defer delete(seen, value)
-	r := inMemoryFormattedSinkUncached(value, seen, done, fp)
-	done[value] = r
-	return r
-}
-
-func inMemoryFormattedSinkUncached(value ssa.Value, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
-	switch v := value.(type) {
-	case *ssa.MakeInterface:
-		return auditedInMemorySinkType(v.X.Type())
-	case *ssa.ChangeInterface:
-		return inMemoryFormattedSink(v.X, seen, done, fp)
-	case *ssa.TypeAssert:
-		return inMemoryFormattedSink(v.X, seen, done, fp)
-	case *ssa.ChangeType:
-		return inMemoryFormattedSink(v.X, seen, done, fp)
-	case *ssa.Convert:
-		return inMemoryFormattedSink(v.X, seen, done, fp)
-	case *ssa.Phi:
-		if len(v.Edges) == 0 {
-			return false
-		}
-		for _, edge := range v.Edges {
-			if !inMemoryFormattedSink(edge, seen, done, fp) {
-				return false
-			}
-		}
-		return true
-	case *ssa.Extract:
-		return inMemoryFormattedSink(v.Tuple, seen, done, fp)
-	case *ssa.Parameter:
-		args, usedProgramSites, ok := attributedParameterArgs(v, fp)
-		if !ok {
-			return false
-		}
-		argFP := fp
-		if usedProgramSites && fp != nil && !fp.inProgramSites {
-			copied := *fp
-			copied.inProgramSites = true
-			argFP = &copied
-		}
-		for _, arg := range args {
-			if !inMemoryFormattedSink(arg, seen, done, argFP) {
-				return false
-			}
-		}
-		return true
-	case *ssa.UnOp:
-		if v.Op != token.MUL {
-			return false
-		}
-		if g, ok := v.X.(*ssa.Global); ok && fp != nil && fp.selectionAudited && isUnmutatedStandardSentinelGlobal(g, "io", "Discard") {
-			return true
-		}
-		if cellOf(v.X, map[ssa.Value]bool{}) == nil {
-			return false
-		}
-		wrote := false
-		ok := walkLoadCellReferrers(v.X, func(val ssa.Value) bool {
-			wrote = true
-			return inMemoryFormattedSink(val, seen, done, fp)
-		})
-		return ok && wrote
-	default:
-		return false
-	}
+	return walkDynamicValue(value, &dynamicValueCollector{sinkOnly: true}, seen, done, fp)
 }
 
 // auditedInMemorySinkType admits exactly the two standard sinks whose

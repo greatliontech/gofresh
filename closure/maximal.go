@@ -313,83 +313,7 @@ func preferredEffectReason(effects []externalEffect) string {
 }
 
 func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, error) {
-	if scan, ok := h.maximalTesting[pkgPath]; ok {
-		return scan, nil
-	}
-	// The persistent memo serves before any type-environment load: the
-	// scan is a pure function of (scope, package test-binary closure), so
-	// a hit under the complete key is byte-equivalent to recomputation
-	// (REQ-closure-testing-scan-memo). A hash-derivation failure disables
-	// the memo for the package — fail-open to recomputation.
-	scope := h.testingScanScope()
-	key := ""
-	if scope != "" {
-		if k, err := h.testBinaryClosureKey(pkgPath); err == nil {
-			key = k
-			if scan, ok := loadEffectScan(testingScanDirName, scope, key); ok {
-				h.Served("testing scan", pkgPath)
-				h.maximalTesting[pkgPath] = scan
-				return scan, nil
-			}
-		}
-	}
-	loaded := h.viewLoadVariants(pkgPath)
-	if loaded == nil {
-		if analysisTestHooks.testingTypeOwnLoad != nil {
-			analysisTestHooks.testingTypeOwnLoad(pkgPath)
-		}
-		h.emitUnit("typecheck", pkgPath, 0, 1)
-		var err error
-		loaded, err = gotool.LoadPackages(
-			h.ctx,
-			packages.NeedName|packages.NeedFiles|packages.NeedCompiledGoFiles|packages.NeedSyntax|packages.NeedTypes|packages.NeedTypesInfo|packages.NeedImports|packages.NeedForTest,
-			h.dir,
-			h.packageEnv,
-			h.buildFlags,
-			pkgPath,
-		)
-		if err != nil {
-			return maximalEffectScan{}, err
-		}
-	}
-	var scan maximalEffectScan
-	for _, pkg := range loaded {
-		if pkg.PkgPath != pkgPath && pkg.ForTest != pkgPath {
-			continue
-		}
-		for _, packageErr := range pkg.Errors {
-			return maximalEffectScan{}, fmt.Errorf("closure: load %s: %s", pkgPath, packageErr)
-		}
-		for _, file := range pkg.Syntax {
-			ast.Inspect(file, func(node ast.Node) bool {
-				selector, ok := node.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				var object types.Object
-				if selection := pkg.TypesInfo.Selections[selector]; selection != nil {
-					object = selection.Obj()
-				} else {
-					object = pkg.TypesInfo.Uses[selector.Sel]
-				}
-				if object == nil || object.Pkg() == nil || object.Pkg().Path() != "testing" {
-					return true
-				}
-				effect, ok := classBEffect("testing", object.Name())
-				if ok {
-					scan.add(effect)
-				}
-				return true
-			})
-		}
-	}
-	scan.preferred = preferredEffectReason(scan.effects)
-	if key != "" {
-		storeEffectScan(testingScanDirName, scope, key, scan)
-		h.persisted.scans++
-	}
-	h.maximalTesting[pkgPath] = scan
-	return scan, nil
+	return h.maximalTestingTypeEffectsFiltered(nil, pkgPath, nil)
 }
 
 // viewLoadVariants selects, from the shared view load, the packages a private
@@ -647,15 +571,14 @@ func maximalFileEffectsContentWithContextFiltered(audited bool, filename string,
 					// storage refuses on reference, an untraceable
 					// sink poisons the package
 					// (REQ-closure-observability-flag-registration).
-				} else if !auditedStandardSymbol(audited, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isStandardFallbackExempt(audited, impPkgPathOr(pkgPath))) {
+				} else if !auditedStandardSymbol(audited, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isStandardFallbackExempt(audited, pkgPath)) {
 					addSelEffect(sel, unauditedStandardEffect(pkgPath, sel.Sel.Name))
 				}
 			}
 		}
 		return true
 	})
-	testingEffects, _ := testingMethodEffectsFiltered(file, stdAliases, unreachedDecls)
-	for _, effect := range testingEffects {
+	for _, effect := range testingMethodEffectsFiltered(file, stdAliases, unreachedDecls) {
 		scan.add(effect)
 	}
 	scan.preferred = preferredEffectReason(append(append([]externalEffect(nil), scan.effects...), scan.importCandidates...))
@@ -664,8 +587,6 @@ func maximalFileEffectsContentWithContextFiltered(audited bool, filename string,
 	}
 	return scan, nil
 }
-
-func impPkgPathOr(pkgPath string) string { return pkgPath }
 
 func unwrapASTParen(expr ast.Expr) ast.Expr {
 	for {
@@ -816,8 +737,28 @@ func (h *Hasher) subjectMaximalExternalEffects(base *tier2Base, pkgPath string, 
 }
 
 func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath string, reachedDecls map[funcDeclKey]bool) (maximalEffectScan, error) {
-	if cached, ok := h.maximalTesting[pkgPath]; ok && !hasFilterableMaximalBlocker(h.SelectionAudited(), cached.effects) {
+	if cached, ok := h.maximalTesting[pkgPath]; ok && (reachedDecls == nil || !hasFilterableMaximalBlocker(h.SelectionAudited(), cached.effects)) {
 		return cached, nil
+	}
+	scope := ""
+	key := ""
+	if reachedDecls == nil {
+		// The persistent memo serves before any type-environment load: the
+		// scan is a pure function of (scope, package test-binary closure), so
+		// a hit under the complete key is byte-equivalent to recomputation
+		// (REQ-closure-testing-scan-memo). A hash-derivation failure disables
+		// the memo for the package — fail-open to recomputation.
+		scope = h.testingScanScope()
+		if scope != "" {
+			if k, err := h.testBinaryClosureKey(pkgPath); err == nil {
+				key = k
+				if scan, ok := loadEffectScan(testingScanDirName, scope, key); ok {
+					h.Served("testing scan", pkgPath)
+					h.maximalTesting[pkgPath] = scan
+					return scan, nil
+				}
+			}
+		}
 	}
 	var loaded []*packages.Package
 	if base != nil && base.prog != nil {
@@ -827,7 +768,22 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 		loaded = h.viewLoadVariants(pkgPath)
 	}
 	if len(loaded) == 0 {
-		return h.maximalTestingTypeEffects(pkgPath)
+		if analysisTestHooks.testingTypeOwnLoad != nil {
+			analysisTestHooks.testingTypeOwnLoad(pkgPath)
+		}
+		h.emitUnit("typecheck", pkgPath, 0, 1)
+		var err error
+		loaded, err = gotool.LoadPackages(
+			h.ctx,
+			packages.NeedName|packages.NeedFiles|packages.NeedCompiledGoFiles|packages.NeedSyntax|packages.NeedTypes|packages.NeedTypesInfo|packages.NeedImports|packages.NeedForTest,
+			h.dir,
+			h.packageEnv,
+			h.buildFlags,
+			pkgPath,
+		)
+		if err != nil {
+			return maximalEffectScan{}, err
+		}
 	}
 	var scan maximalEffectScan
 	for _, pkg := range loaded {
@@ -838,17 +794,20 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 			return maximalEffectScan{}, fmt.Errorf("closure: load %s: %s", pkgPath, packageErr)
 		}
 		for _, file := range pkg.Syntax {
-			fileDir := filepath.Clean(pkg.Dir)
-			if pkg.Fset != nil {
-				if tf := pkg.Fset.File(file.Pos()); tf != nil && tf.Name() != "" {
-					fileDir = filepath.Clean(filepath.Dir(tf.Name()))
+			var unreachedDecls []ast.Node
+			if reachedDecls != nil {
+				fileDir := filepath.Clean(pkg.Dir)
+				if pkg.Fset != nil {
+					if tf := pkg.Fset.File(file.Pos()); tf != nil && tf.Name() != "" {
+						fileDir = filepath.Clean(filepath.Dir(tf.Name()))
+					}
 				}
+				pkgClause := ""
+				if file.Name != nil {
+					pkgClause = file.Name.Name
+				}
+				unreachedDecls = unreachedASTDecls(fileDir, pkgClause, file, nil, reachedDecls)
 			}
-			pkgClause := ""
-			if file.Name != nil {
-				pkgClause = file.Name.Name
-			}
-			unreachedDecls := unreachedASTDecls(fileDir, pkgClause, file, nil, reachedDecls)
 			inUnreachedDecl := func(node ast.Node) bool {
 				for _, d := range unreachedDecls {
 					if node.Pos() >= d.Pos() && node.End() <= d.End() {
@@ -880,27 +839,22 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 		}
 	}
 	scan.preferred = preferredEffectReason(scan.effects)
+	if reachedDecls == nil {
+		if key != "" {
+			storeEffectScan(testingScanDirName, scope, key, scan)
+			h.persisted.scans++
+		}
+		h.maximalTesting[pkgPath] = scan
+	}
 	return scan, nil
 }
 
-// testingMethodEffects returns the file's testing-runtime effects and its
-// testing reason: the first function with a non-empty final reason in
-// declaration order,
-// where a function's reason is the last assignment its walker makes (an
-// escape, or a tracked receiver selector's classification — possibly
-// empty). Both walker closures run over per-function receiver and parent
-// state computed once; equivalence-pinned by
-// TestFileEffectScanMatchesTwoPassReference.
-func testingMethodEffects(file *ast.File, aliases map[string]string) ([]externalEffect, string) {
-	return testingMethodEffectsFiltered(file, aliases, nil)
-}
-
-func testingMethodEffectsFiltered(file *ast.File, aliases map[string]string, unreachedDecls []ast.Node) ([]externalEffect, string) {
+// testingMethodEffectsFiltered returns the file's testing-runtime effects.
+func testingMethodEffectsFiltered(file *ast.File, aliases map[string]string, unreachedDecls []ast.Node) []externalEffect {
 	if file == nil {
-		return nil, ""
+		return nil
 	}
 	handleTypes := testingHandleTypeNames(file, aliases)
-	reason := ""
 	var effects []externalEffect
 	for _, declaration := range file.Decls {
 		function, ok := declaration.(*ast.FuncDecl)
@@ -1018,58 +972,8 @@ func testingMethodEffectsFiltered(file *ast.File, aliases map[string]string, unr
 			}
 			return true
 		})
-		if reason == "" && !unreached {
-			var fnReason string
-			ast.Inspect(function.Body, func(node ast.Node) bool {
-				switch node := node.(type) {
-				case *ast.AssignStmt:
-					for i, rhs := range node.Rhs {
-						name, ok := identifierName(rhs)
-						if !ok || !receivers[name] || i >= len(node.Lhs) {
-							continue
-						}
-						if _, ok := node.Lhs[i].(*ast.Ident); !ok {
-							fnReason = "testing runtime value escapes analyzable receiver"
-							return false
-						}
-					}
-				case *ast.CallExpr:
-					for _, argument := range node.Args {
-						if name, ok := identifierName(argument); ok && receivers[name] {
-							fnReason = "testing runtime value escapes analyzable receiver"
-							return false
-						}
-					}
-				case *ast.ReturnStmt:
-					for _, result := range node.Results {
-						if name, ok := identifierName(result); ok && receivers[name] {
-							fnReason = "testing runtime value escapes analyzable receiver"
-							return false
-						}
-					}
-				case *ast.Ident:
-					if receivers[node.Name] && !testingIdentifierUseSupported(node, parents) {
-						fnReason = "testing runtime value escapes analyzable receiver"
-						return false
-					}
-				}
-				selector, ok := node.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				receiver, ok := selector.X.(*ast.Ident)
-				if !ok || !receivers[receiver.Name] {
-					return true
-				}
-				fnReason = classBReason("testing", selector.Sel.Name)
-				return fnReason == ""
-			})
-			if fnReason != "" {
-				reason = fnReason
-			}
-		}
 	}
-	return effects, reason
+	return effects
 }
 
 func testingIdentifierUseSupported(identifier *ast.Ident, parents map[ast.Node]ast.Node) bool {
@@ -1093,7 +997,7 @@ func testingIdentifierUseSupported(identifier *ast.Ident, parents map[ast.Node]a
 			if lhs == node {
 				return true
 			}
-			if i < len(parent.Rhs) && unwrapParen(parent.Rhs[i]) == identifier {
+			if i < len(parent.Rhs) && unwrapASTParen(parent.Rhs[i]) == identifier {
 				_, ok := lhs.(*ast.Ident)
 				return ok
 			}
@@ -1105,7 +1009,7 @@ func testingIdentifierUseSupported(identifier *ast.Ident, parents map[ast.Node]a
 			}
 		}
 		for i, value := range parent.Values {
-			if unwrapParen(value) == identifier {
+			if unwrapASTParen(value) == identifier {
 				return i < len(parent.Names)
 			}
 		}
@@ -1113,18 +1017,8 @@ func testingIdentifierUseSupported(identifier *ast.Ident, parents map[ast.Node]a
 	return false
 }
 
-func unwrapParen(expression ast.Expr) ast.Expr {
-	for {
-		parenthesized, ok := expression.(*ast.ParenExpr)
-		if !ok {
-			return expression
-		}
-		expression = parenthesized.X
-	}
-}
-
 func identifierName(expression ast.Expr) (string, bool) {
-	expression = unwrapParen(expression)
+	expression = unwrapASTParen(expression)
 	identifier, ok := expression.(*ast.Ident)
 	if !ok {
 		return "", false
@@ -1444,20 +1338,6 @@ func (h *Hasher) pinnedEffectScanWithContext(pkg listPkg, declaredNames map[stri
 	pin := h.modulePin(pkg.Module)
 	key := effectScanKey(pin+overridesKey, pkg.ImportPath, pkg.GoFiles, pkg.CgoFiles)
 	composite := maximalPackageExternalEffects(&pkg)
-	// A backed scan's preferred is ignored by the package selection
-	// (the union argmax re-derives it); only an effect-less scan's
-	// import fallback folds, lexicographic least.
-	fold := func(scan maximalEffectScan) {
-		for _, effect := range scan.effects {
-			composite.add(effect)
-		}
-		for _, candidate := range scan.importCandidates {
-			composite.importCandidates = appendExternalEffect(composite.importCandidates, candidate)
-		}
-		if len(scan.effects) == 0 && len(scan.importCandidates) == 0 && scan.preferred != "" && (composite.preferred == "" || scan.preferred < composite.preferred) {
-			composite.preferred = scan.preferred
-		}
-	}
 	deriveComposite := func() {
 		if selected := preferredEffectReason(append(append([]externalEffect(nil), composite.effects...), composite.importCandidates...)); selected != "" {
 			composite.preferred = selected
@@ -1465,7 +1345,7 @@ func (h *Hasher) pinnedEffectScanWithContext(pkg listPkg, declaredNames map[stri
 	}
 	if stored, ok := loadEffectScan(effectScanDirName, h.effectScanScope(), key); ok {
 		h.Served("effect scan", pkg.ImportPath)
-		fold(stored)
+		composite.merge(stored)
 		deriveComposite()
 		return composite, true, nil
 	}
@@ -1479,22 +1359,14 @@ func (h *Hasher) pinnedEffectScanWithContext(pkg listPkg, declaredNames map[stri
 		if err != nil {
 			return maximalEffectScan{}, false, err
 		}
-		for _, effect := range scan.effects {
-			fileFold.add(effect)
-		}
-		for _, candidate := range scan.importCandidates {
-			fileFold.importCandidates = appendExternalEffect(fileFold.importCandidates, candidate)
-		}
-		if len(scan.effects) == 0 && len(scan.importCandidates) == 0 && scan.preferred != "" && (fileFold.preferred == "" || scan.preferred < fileFold.preferred) {
-			fileFold.preferred = scan.preferred
-		}
+		fileFold.merge(scan)
 	}
 	if selected := preferredEffectReason(append(append([]externalEffect(nil), fileFold.effects...), fileFold.importCandidates...)); selected != "" {
 		fileFold.preferred = selected
 	}
 	storeEffectScan(effectScanDirName, h.effectScanScope(), key, fileFold)
 	h.persisted.scans++
-	fold(fileFold)
+	composite.merge(fileFold)
 	deriveComposite()
 	return composite, true, nil
 }
@@ -1507,7 +1379,7 @@ func (h *Hasher) pinnedEffectScanWithContext(pkg listPkg, declaredNames map[stri
 func userTestMainDecl(file *ast.File, aliases map[string]string) *ast.FuncDecl {
 	for _, decl := range file.Decls {
 		fd, ok := decl.(*ast.FuncDecl)
-		if !ok || fd.Recv != nil || fd.Name == nil || fd.Name.Name != "TestMain" || fd.Type == nil || fd.Type.Params == nil {
+		if !ok || fd.Recv != nil || fd.Name == nil || fd.Name.Name != "TestMain" || fd.Type == nil || fd.Type.TypeParams != nil || fd.Type.Params == nil || fd.Type.Results != nil {
 			continue
 		}
 		if len(fd.Type.Params.List) != 1 || len(fd.Type.Params.List[0].Names) > 1 {

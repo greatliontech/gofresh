@@ -219,25 +219,20 @@ const maxAttributedSubjects = subjectMaskBits
 
 // packageBatch groups one package's requested subjects for shared analysis.
 type packageBatch struct {
-	path              string
-	closureHash       string
-	memoized          map[string]Observability
-	memoChecked       bool
-	rootedMemo        map[string]RootedFunctions
-	rootedMemoChecked bool
-	subjects          []Subject
+	path        string
+	closureHash string
+	subjects    []Subject
 }
 
-// ComputeObservabilityBatch computes caller-selected per-subject observation
-// proofs, sharing the loaded program, attributed reachability masks, and
-// package effect scans across each package's subjects. Every disposition
-// equals independent per-subject analysis
-// (REQ-closure-observability-batch-equivalence).
-func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Observability, error) {
-	// One call observes one tree generation; a later call re-observes.
-	h.resetCallScope()
-	defer func() { h.contents = nil }()
-	results := make(map[Subject]Observability, len(subjects))
+func runSubjectBatch[V any](
+	h *Hasher,
+	ctx context.Context,
+	subjects []Subject,
+	servedKind string,
+	loadMemo func(pkgPath string) (string, map[string]V),
+	runGroup func(group *packageBatch, bp *batchPreparer, results map[Subject]V) error,
+) (map[Subject]V, error) {
+	results := make(map[Subject]V, len(subjects))
 	byPackage := map[string]*packageBatch{}
 	var groups []*packageBatch
 	seen := map[Subject]bool{}
@@ -254,11 +249,16 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		}
 		group.subjects = append(group.subjects, subject)
 	}
-	resolveGroupMemo := func(group *packageBatch) {
-		if !group.memoChecked {
-			group.memoChecked = true
-			group.closureHash, group.memoized = h.groupMemo(group.path)
+	memoByGroup := make(map[*packageBatch]map[string]V, len(groups))
+	memoChecked := make(map[*packageBatch]bool, len(groups))
+	resolveGroupMemo := func(group *packageBatch) map[string]V {
+		if !memoChecked[group] && ctx.Err() == nil {
+			memoChecked[group] = true
+			var m map[string]V
+			group.closureHash, m = loadMemo(group.path)
+			memoByGroup[group] = m
 		}
+		return memoByGroup[group]
 	}
 	currentIdx := 0
 	bp := &batchPreparer{
@@ -266,17 +266,20 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 		candidates: func() []string {
 			var uncached []string
 			for _, g := range groups[currentIdx:] {
+				if ctx.Err() != nil {
+					break
+				}
 				if _, ok := h.progs[g.path]; ok {
 					continue
 				}
 				if _, failed := h.progErrs[g.path]; failed {
 					continue
 				}
-				resolveGroupMemo(g)
-				allMemoized := len(g.memoized) > 0
+				memo := resolveGroupMemo(g)
+				allMemoized := len(memo) > 0
 				if allMemoized {
 					for _, s := range g.subjects {
-						if _, ok := g.memoized[s.Symbol]; !ok {
+						if _, ok := memo[s.Symbol]; !ok {
 							allMemoized = false
 							break
 						}
@@ -291,40 +294,49 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 	}
 	for i, group := range groups {
 		currentIdx = i
-		if err := h.ctx.Err(); err != nil {
+		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
 		}
-		// Memoized proofs serve before any program load: the proof is a
-		// pure function of (scope, package test-binary closure), so a hit
-		// under the complete key is byte-equivalent to recomputation
-		// (REQ-closure-observability-memo). A full-group hit skips the
-		// SSA build entirely.
-		resolveGroupMemo(group)
-		if len(group.memoized) > 0 {
+		memo := resolveGroupMemo(group)
+		if len(memo) > 0 {
 			remaining := group.subjects[:0:0]
 			for _, subject := range group.subjects {
-				if proof, ok := group.memoized[subject.Symbol]; ok {
-					results[subject] = proof
+				if val, ok := memo[subject.Symbol]; ok {
+					results[subject] = val
 					continue
 				}
 				remaining = append(remaining, subject)
 			}
-			// Served only when the entry held a requested subject: an
-			// entry holding other subjects of the package served nothing.
 			if len(remaining) < len(group.subjects) {
-				h.Served("observability proof", group.path)
+				h.Served(servedKind, group.path)
 			}
 			group.subjects = remaining
 			if len(group.subjects) == 0 {
 				continue
 			}
 		}
-		if err := h.observabilityGroup(group, bp, results); err != nil {
+		if err := runGroup(group, bp, results); err != nil {
 			return nil, err
 		}
 	}
-	if err := h.ctx.Err(); err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+	}
+	return results, nil
+}
+
+// ComputeObservabilityBatch computes caller-selected per-subject observation
+// proofs, sharing the loaded program, attributed reachability masks, and
+// package effect scans across each package's subjects. Every disposition
+// equals independent per-subject analysis
+// (REQ-closure-observability-batch-equivalence).
+func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Observability, error) {
+	// One call observes one tree generation; a later call re-observes.
+	h.resetCallScope()
+	defer func() { h.contents = nil }()
+	results, err := runSubjectBatch(h, h.ctx, subjects, "observability proof", h.groupMemo, h.observabilityGroup)
+	if err != nil {
+		return nil, err
 	}
 	// Every refusal attributes the selection it was judged under at
 	// the batch's return — past every memo read and write, so the
@@ -684,7 +696,7 @@ func testMainObservedEffects(base *tier2Base, reachable attributedReachability) 
 				if !ok || site.Common() == nil {
 					continue
 				}
-				if !dispatchProvenanceClosed(site, &freshParamAnalysis{propertyHarnessAudited: reachable.propertyHarnessAudited, selectionAudited: base.h.SelectionAudited(), pureDelegates: base.h.source.pureDelegates, userPaths: reachable.userPaths, summary: reachable.summary, isStd: analyzer.isStdFunction}) {
+				if !dispatchProvenanceClosed(site, newBitOnlyFreshParamAnalysis(reachable.propertyHarnessAudited, base.h.SelectionAudited(), base.h.source.pureDelegates, reachable.userPaths, reachable.summary, analyzer.isStdFunction)) {
 					analyzer.requestWiden("test-main dispatch on unattributable state in " + function.String())
 				}
 				if callee := site.Common().StaticCallee(); callee != nil {
@@ -757,7 +769,7 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 	// (rapid.Deriv(rapid.Int())) is the same sanctioned crossing as in
 	// subject flow. Parameter crossing stays refused exactly as with a
 	// nil analysis (REQ-closure-observability-property-harness).
-	analyzer.fresh = &freshParamAnalysis{propertyHarnessAudited: reachable.propertyHarnessAudited, selectionAudited: analyzer.h.SelectionAudited(), pureDelegates: analyzer.h.source.pureDelegates, userPaths: reachable.userPaths, summary: reachable.summary, isStd: analyzer.isStdFunction}
+	analyzer.fresh = newBitOnlyFreshParamAnalysis(reachable.propertyHarnessAudited, analyzer.h.SelectionAudited(), analyzer.h.source.pureDelegates, reachable.userPaths, reachable.summary, analyzer.isStdFunction)
 	var ops [16]*ssa.Value
 	for function := range reachable.functions {
 		idx := analyzer.idxForFunction(function)

@@ -236,7 +236,9 @@ func PreviewPruneMemos(maxBytes int64) (MemoPruneReport, error) {
 // enumeration-dropped targets for single-subject completeness, and fail
 // closed on unclosed cleanup/fuzz callbacks, reflection invocation,
 // bodyless non-standard callees, and unsafe pointers in post-init flow.
-const DynamicStateStrategy = "gofresh/dynamic-state@48"
+// @49: typed comparable dynamic-state fact records and generic instantiation
+// origin normalization across named-callee resolution.
+const DynamicStateStrategy = "gofresh/dynamic-state@49"
 
 // ClosureStrategy identifies the closure identity derivation — the
 // maximal closure's and the test-variant compartment's — as the

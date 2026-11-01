@@ -103,10 +103,8 @@ func capturePolicyInputs() policyInputs {
 	}
 }
 
-var sourcePolicyMemo policyMemo
-
 func admissionPolicy() string {
-	return sourcePolicyMemo.value(capturePolicyInputs())
+	return capturePolicyInputs().derive()
 }
 
 func (in policyInputs) derive() string {

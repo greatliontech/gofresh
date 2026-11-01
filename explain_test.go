@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate"
 )
 
 // explainView builds a view over the module tree and returns the
@@ -569,7 +570,7 @@ func TestChainHooksArmOnlyDuringExplain(t *testing.T) {
 		"reg/reg.go": "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc gen() map[string]handler {\n\tc := &counter{}\n\treturn map[string]handler{\"k\": c.Next}\n}\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
 	}
 	dir := writeModuleTree(t, files)
-	if explainHooks.Load() != nil {
+	if dynstate.ExplainHooks.Load() != nil {
 		t.Fatal("explain hooks armed at rest")
 	}
 	engine, err := newEngine(withDir(dir))
@@ -580,13 +581,13 @@ func TestChainHooksArmOnlyDuringExplain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if explainHooks.Load() != nil {
+	if dynstate.ExplainHooks.Load() != nil {
 		t.Fatal("normal view derivation armed the explain hooks - chain work belongs to the explain re-derivation alone")
 	}
 	if _, err := view.ExplainDynamicState(context.Background(), "example.com/explain/reg", "Registry"); err != nil {
 		t.Fatal(err)
 	}
-	if explainHooks.Load() != nil {
+	if dynstate.ExplainHooks.Load() != nil {
 		t.Fatal("the explain re-derivation left its hooks armed")
 	}
 }
@@ -739,13 +740,15 @@ func Mutate() {
 	}
 	fact := dynamicStateFactOf(true, pkg, false)
 	for _, link := range fact.CarrierLinks {
-		if strings.Contains(link, "FileDesc") && strings.Contains(link, "msgTypes") {
-			t.Fatalf("call result out := Builder{Table: msgTypes}.Build() falsely linked FileDesc to msgTypes: %q", link)
+		if (strings.Contains(link.From, "FileDesc") || strings.Contains(link.To, "FileDesc")) &&
+			(strings.Contains(link.From, "msgTypes") || strings.Contains(link.To, "msgTypes")) {
+			t.Fatalf("call result out := Builder{Table: msgTypes}.Build() falsely linked FileDesc to msgTypes: %+v", link)
 		}
 	}
 	sawAliasLink := false
 	for _, link := range fact.CarrierLinks {
-		if strings.Contains(link, "Aliased") && strings.Contains(link, "backing") {
+		if (strings.Contains(link.From, "Aliased") && strings.Contains(link.To, "backing")) ||
+			(strings.Contains(link.From, "backing") && strings.Contains(link.To, "Aliased")) {
 			sawAliasLink = true
 		}
 	}
@@ -756,9 +759,9 @@ func Mutate() {
 	// Verify envAuditTrail follows linkedKeys across CarrierLinks.
 	linkedFacts := map[string][]dynamicStateFact{
 		"example.com/p": {{
-			CarrierLinks: []string{"example.com/p.Aliased\x01example.com/p.backing"},
+			CarrierLinks: []dynstate.CarrierLink{{From: "example.com/p.Aliased", To: "example.com/p.backing"}},
 			EnvCarrying:  []string{"example.com/p.backing"},
-			EnvCallUses:  []string{"example.com/p.backing\x01example.com/dep\x00Make"},
+			EnvCallUses:  []dynstate.EnvCallUse{{Key: "example.com/p.backing", Callee: dynstate.FuncKey{Pkg: "example.com/dep", Name: "Make"}}},
 		}},
 	}
 	edges, refusedFn, refusedPath := envAuditTrail(

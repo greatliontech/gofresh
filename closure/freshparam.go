@@ -23,7 +23,39 @@ import (
 // (REQ-closure-observability-batch-equivalence), and the fixpoint
 // evaluates eagerly in a deterministic order so cycle refusals never
 // depend on map iteration.
-type freshParamAnalysis struct {
+// ssaProgramIndex holds the program-wide SSA reference summary, user package
+// set, and audit configuration shared across all subject queries on one SSA
+// program.
+type ssaProgramIndex struct {
+	summary                *callerReferenceSummary
+	userPaths              map[string]bool
+	structFieldStores      map[structFieldKey][]ssa.Value
+	structWholeStores      map[*types.Named][]ssa.Value
+	structPoisoned         map[structFieldKey]bool
+	structReferencedByType map[*types.Named]bool
+	programSites           map[*ssa.Function][]ssa.CallInstruction
+	programValueRef        map[*ssa.Function]bool
+	programFunctions       map[*ssa.Function]bool
+	unmutatedSentinel      map[*ssa.Global]bool
+	// propertyHarnessAudited carries the program-level audit verdict:
+	// the closed-value walk's harness arms consult it so no admission
+	// outlives the audit.
+	propertyHarnessAudited bool
+	// selectionAudited is the analysis' toolchain-source audit verdict
+	// (the Hasher's, resolved at construction): the closed-value
+	// walk's audited-set arms consult it exactly as the harness arms
+	// consult propertyHarnessAudited.
+	selectionAudited bool
+	pureDelegates    map[string]bool
+	// isStd reports whether a function belongs to a standard-library
+	// package according to the program's listed metadata (falling back
+	// to the import-path heuristic when nil).
+	isStd func(*ssa.Function) bool
+}
+
+// subjectQuery holds the per-subject reachability, caller enumeration, and
+// per-subject memo tables.
+type subjectQuery struct {
 	functions map[*ssa.Function]bool
 	// callers lists the attributed static call sites per callee; only
 	// sites inside reachable functions participate.
@@ -45,58 +77,51 @@ type freshParamAnalysis struct {
 	enumStructVisiting        map[*types.Named]bool
 	ignoreContextValuePayload bool
 	subjectRoot               *ssa.Function
-	summary                   *callerReferenceSummary
-	userPaths                 map[string]bool
 
-	structFieldStores      map[structFieldKey][]ssa.Value
-	structWholeStores      map[*types.Named][]ssa.Value
-	structPoisoned         map[structFieldKey]bool
-	structReferencedByType map[*types.Named]bool
-	programSites           map[*ssa.Function][]ssa.CallInstruction
-	programValueRef        map[*ssa.Function]bool
-	programFunctions       map[*ssa.Function]bool
-	callBindings           map[*ssa.Parameter]ssa.Value
-	calleeSeen             map[*ssa.Function]bool
-	calleeDepth            map[*ssa.Function]int
-	invokeSeen             map[ssa.CallInstruction]bool
-	invokeDepth            map[ssa.CallInstruction]int
-	inFieldStore           bool
-	inProgramSites         bool
-	baseDepth              int
-	stackDepth             map[ssa.Value]int
-	lowlink                *int
-	hasLeaf                *bool
-	usedSubject            *bool
-	rootDone               map[ssa.Value]bool
-	rootLowlink            map[ssa.Value]int
-	rootHasLeaf            map[ssa.Value]bool
-	rootUsedSubject        map[ssa.Value]bool
-	rootSeen               map[ssa.Value]bool
-	closedDone             map[ssa.Value]bool
-	typesMemo              map[ssa.Value][]types.Type
-	typesFailed            map[ssa.Value]bool
-	funcsMemo              map[ssa.Value][]*ssa.Function
-	funcsFailed            map[ssa.Value]bool
-	invokeTargets          map[ssa.CallInstruction]map[*ssa.Function]bool
-	invokeFailed           map[ssa.CallInstruction]bool
+	closedDone    map[ssa.Value]bool
+	typesMemo     map[ssa.Value][]types.Type
+	typesFailed   map[ssa.Value]bool
+	funcsMemo     map[ssa.Value][]*ssa.Function
+	funcsFailed   map[ssa.Value]bool
+	invokeTargets map[ssa.CallInstruction]map[*ssa.Function]bool
+	invokeFailed  map[ssa.CallInstruction]bool
 
-	argFresh          map[freshParamKey]bool
-	usesOK            map[freshParamKey]bool
-	unmutatedSentinel map[*ssa.Global]bool
-	// propertyHarnessAudited carries the program-level audit verdict:
-	// the closed-value walk's harness arms consult it so no admission
-	// outlives the audit.
-	propertyHarnessAudited bool
-	// selectionAudited is the analysis' toolchain-source audit verdict
-	// (the Hasher's, resolved at construction): the closed-value
-	// walk's audited-set arms consult it exactly as the harness arms
-	// consult propertyHarnessAudited.
-	selectionAudited bool
-	pureDelegates    map[string]bool
-	// isStd reports whether a function belongs to a standard-library
-	// package according to the program's listed metadata (falling back
-	// to the import-path heuristic when nil).
-	isStd func(*ssa.Function) bool
+	argFresh map[freshParamKey]bool
+	usesOK   map[freshParamKey]bool
+}
+
+// calleeFrame tracks active call-site parameter bindings and recursion guards
+// during interprocedural value walks.
+type calleeFrame struct {
+	callBindings   map[*ssa.Parameter]ssa.Value
+	calleeSeen     map[*ssa.Function]bool
+	calleeDepth    map[*ssa.Function]int
+	invokeSeen     map[ssa.CallInstruction]bool
+	invokeDepth    map[ssa.CallInstruction]int
+	inFieldStore   bool
+	inProgramSites bool
+	baseDepth      int
+}
+
+// walkFrame holds ephemeral per-traversal Tarjan SCC and cycle-detection state
+// for walkDynamicValue.
+type walkFrame struct {
+	stackDepth      map[ssa.Value]int
+	lowlink         *int
+	hasLeaf         *bool
+	usedSubject     *bool
+	rootDone        map[ssa.Value]bool
+	rootLowlink     map[ssa.Value]int
+	rootHasLeaf     map[ssa.Value]bool
+	rootUsedSubject map[ssa.Value]bool
+	rootSeen        map[ssa.Value]bool
+}
+
+type freshParamAnalysis struct {
+	ssaProgramIndex
+	subjectQuery
+	calleeFrame
+	walkFrame
 }
 
 func (fp *freshParamAnalysis) isAuditedStandardOrDelegate(pkgPath string) bool {
@@ -247,34 +272,161 @@ type freshParamKey struct {
 	idx int
 }
 
+func newBitOnlyFreshParamAnalysis(propertyHarnessAudited, selectionAudited bool, pureDelegates map[string]bool, userPaths map[string]bool, summary *callerReferenceSummary, isStd func(*ssa.Function) bool) *freshParamAnalysis {
+	return &freshParamAnalysis{
+		ssaProgramIndex: ssaProgramIndex{
+			propertyHarnessAudited: propertyHarnessAudited,
+			selectionAudited:       selectionAudited,
+			pureDelegates:          pureDelegates,
+			userPaths:              userPaths,
+			summary:                summary,
+			isStd:                  isStd,
+		},
+	}
+}
+
+func newEnumFreshParamAnalysis(audited bool, pureDelegates map[string]bool, userPaths map[string]bool, root *ssa.Function, sites []ssa.CallInstruction, summary *callerReferenceSummary) *freshParamAnalysis {
+	return &freshParamAnalysis{
+		ssaProgramIndex: ssaProgramIndex{
+			selectionAudited:       audited,
+			pureDelegates:          pureDelegates,
+			summary:                summary,
+			userPaths:              userPaths,
+			structFieldStores:      summary.structFieldStores,
+			structWholeStores:      summary.structWholeStores,
+			structPoisoned:         summary.structPoisoned,
+			structReferencedByType: summary.structReferencedByType,
+			programSites:           summary.sites,
+			programValueRef:        summary.valueRef,
+			programFunctions:       summary.allFunctions,
+			isStd: func(fn *ssa.Function) bool {
+				return isStdPkgPath(userPaths, funcPkgPath(fn))
+			},
+		},
+		subjectQuery: subjectQuery{
+			enumOnly:      true,
+			enumRoot:      root,
+			subjectRoot:   root,
+			enumSites:     sites,
+			closedDone:    map[ssa.Value]bool{},
+			typesMemo:     map[ssa.Value][]types.Type{},
+			typesFailed:   map[ssa.Value]bool{},
+			funcsMemo:     map[ssa.Value][]*ssa.Function{},
+			funcsFailed:   map[ssa.Value]bool{},
+			invokeTargets: map[ssa.CallInstruction]map[*ssa.Function]bool{},
+			invokeFailed:  map[ssa.CallInstruction]bool{},
+		},
+	}
+}
+
+func (fp *freshParamAnalysis) withoutCallee(fn *ssa.Function) *freshParamAnalysis {
+	if fp == nil || fn == nil || !fp.calleeSeen[fn] {
+		return fp
+	}
+	copied := *fp
+	calleeSeen := make(map[*ssa.Function]bool, len(fp.calleeSeen))
+	for k, val := range fp.calleeSeen {
+		if k != fn {
+			calleeSeen[k] = val
+		}
+	}
+	copied.calleeSeen = calleeSeen
+	calleeDepth := make(map[*ssa.Function]int, len(fp.calleeDepth))
+	for k, val := range fp.calleeDepth {
+		if k != fn {
+			calleeDepth[k] = val
+		}
+	}
+	copied.calleeDepth = calleeDepth
+	bindings := make(map[*ssa.Parameter]ssa.Value, len(fp.callBindings))
+	for k, val := range fp.callBindings {
+		if k.Parent() != fn {
+			bindings[k] = val
+		}
+	}
+	copied.callBindings = bindings
+	return &copied
+}
+
+func (fp *freshParamAnalysis) withProgramSites(done map[ssa.Value]bool) (*freshParamAnalysis, map[ssa.Value]bool) {
+	if fp == nil {
+		return nil, done
+	}
+	outFP := fp
+	if !fp.inProgramSites || len(fp.callBindings) > 0 {
+		copied := *fp
+		copied.inProgramSites = true
+		copied.callBindings = nil
+		copied.calleeSeen = nil
+		copied.calleeDepth = nil
+		outFP = &copied
+	}
+	outDone := done
+	if fp.rootDone != nil {
+		outDone = fp.rootDone
+	}
+	return outFP, outDone
+}
+
+func (fp *freshParamAnalysis) newStructStoreWalkFP(inProgramSites, inFieldStore bool, visiting map[*types.Named]bool, lowlink *int, hasLeaf, usedSubject *bool) *freshParamAnalysis {
+	sub := *fp
+	sub.calleeFrame = calleeFrame{
+		inProgramSites: inProgramSites,
+		inFieldStore:   inFieldStore,
+	}
+	sub.enumStructVisiting = visiting
+	sub.closedDone = map[ssa.Value]bool{}
+	sub.typesMemo = map[ssa.Value][]types.Type{}
+	sub.typesFailed = map[ssa.Value]bool{}
+	sub.funcsMemo = map[ssa.Value][]*ssa.Function{}
+	sub.funcsFailed = map[ssa.Value]bool{}
+	sub.invokeTargets = map[ssa.CallInstruction]map[*ssa.Function]bool{}
+	sub.invokeFailed = map[ssa.CallInstruction]bool{}
+	sub.walkFrame = walkFrame{
+		stackDepth:      map[ssa.Value]int{},
+		lowlink:         lowlink,
+		hasLeaf:         hasLeaf,
+		usedSubject:     usedSubject,
+		rootDone:        map[ssa.Value]bool{},
+		rootLowlink:     map[ssa.Value]int{},
+		rootHasLeaf:     map[ssa.Value]bool{},
+		rootUsedSubject: map[ssa.Value]bool{},
+	}
+	return &sub
+}
+
 func newFreshParamAnalysis(audited bool, pureDelegates map[string]bool, reach attributedReachability, isStd func(*ssa.Function) bool) *freshParamAnalysis {
 	fp := &freshParamAnalysis{
-		selectionAudited:       audited,
-		pureDelegates:          pureDelegates,
-		functions:              reach.functions,
-		callers:                map[*ssa.Function][]ssa.CallInstruction{},
-		dynamic:                map[*ssa.Function]bool{},
-		subjectRoot:            reach.subjectRoot,
-		summary:                reach.summary,
-		userPaths:              reach.userPaths,
-		structFieldStores:      reach.structFieldStores,
-		structWholeStores:      reach.structWholeStores,
-		structPoisoned:         reach.structPoisoned,
-		structReferencedByType: reach.structReferencedByType,
-		programSites:           reach.programSites,
-		programValueRef:        reach.programValueRef,
-		programFunctions:       reach.programFunctions,
-		argFresh:               map[freshParamKey]bool{},
-		usesOK:                 map[freshParamKey]bool{},
-		closedDone:             map[ssa.Value]bool{},
-		typesMemo:              map[ssa.Value][]types.Type{},
-		typesFailed:            map[ssa.Value]bool{},
-		funcsMemo:              map[ssa.Value][]*ssa.Function{},
-		funcsFailed:            map[ssa.Value]bool{},
-		invokeTargets:          map[ssa.CallInstruction]map[*ssa.Function]bool{},
-		invokeFailed:           map[ssa.CallInstruction]bool{},
-		propertyHarnessAudited: reach.propertyHarnessAudited,
-		isStd:                  isStd,
+		ssaProgramIndex: ssaProgramIndex{
+			selectionAudited:       audited,
+			pureDelegates:          pureDelegates,
+			summary:                reach.summary,
+			userPaths:              reach.userPaths,
+			structFieldStores:      reach.structFieldStores,
+			structWholeStores:      reach.structWholeStores,
+			structPoisoned:         reach.structPoisoned,
+			structReferencedByType: reach.structReferencedByType,
+			programSites:           reach.programSites,
+			programValueRef:        reach.programValueRef,
+			programFunctions:       reach.programFunctions,
+			propertyHarnessAudited: reach.propertyHarnessAudited,
+			isStd:                  isStd,
+		},
+		subjectQuery: subjectQuery{
+			functions:     reach.functions,
+			callers:       map[*ssa.Function][]ssa.CallInstruction{},
+			dynamic:       map[*ssa.Function]bool{},
+			subjectRoot:   reach.subjectRoot,
+			argFresh:      map[freshParamKey]bool{},
+			usesOK:        map[freshParamKey]bool{},
+			closedDone:    map[ssa.Value]bool{},
+			typesMemo:     map[ssa.Value][]types.Type{},
+			typesFailed:   map[ssa.Value]bool{},
+			funcsMemo:     map[ssa.Value][]*ssa.Function{},
+			funcsFailed:   map[ssa.Value]bool{},
+			invokeTargets: map[ssa.CallInstruction]map[*ssa.Function]bool{},
+			invokeFailed:  map[ssa.CallInstruction]bool{},
+		},
 	}
 	if len(reach.enumeratedRootSites) > 0 || len(reach.enumeratedFieldStores) > 0 || reach.enumeratedRoot {
 		fp.enumRoot = reach.subjectRoot

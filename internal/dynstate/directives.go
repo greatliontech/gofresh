@@ -1,0 +1,199 @@
+package dynstate
+
+import (
+	"fmt"
+	"go/ast"
+	"go/types"
+	"path/filepath"
+
+	"github.com/greatliontech/go-x-tools/go/packages"
+)
+
+// NodeDeclarationKey and ObjectDeclarationKey derive the identity the
+// ambiguous-subject refusal compares: one declaration must yield one key no
+// matter which build variant sights it. Under Tests: true the same source
+// package is visited once per variant with distinct pkg.IDs ("p" and
+// "p [p.test]"), so no key may incorporate the sighting variant's identity —
+// a variant-dependent key manufactures ambiguity for a single declaration and
+// fails the whole package.
+func NodeDeclarationKey(pkg *packages.Package, node ast.Node) string {
+	if pkg != nil && pkg.Fset != nil && node != nil {
+		position := pkg.Fset.PositionFor(node.Pos(), false)
+		if position.Filename != "" {
+			return fmt.Sprintf("%s:%d", position.Filename, position.Offset)
+		}
+	}
+	return fmt.Sprintf("%s:%d", pkg.PkgPath, node.Pos())
+}
+
+func nodeDeclarationKey(pkg *packages.Package, node ast.Node) string {
+	return NodeDeclarationKey(pkg, node)
+}
+
+func ObjectDeclarationKey(pkg *packages.Package, obj types.Object) string {
+	if pkg != nil && pkg.Fset != nil && obj != nil {
+		position := pkg.Fset.PositionFor(obj.Pos(), false)
+		if position.Filename != "" {
+			return fmt.Sprintf("%s:%d", position.Filename, position.Offset)
+		}
+	}
+	if obj != nil && obj.Pkg() != nil {
+		return obj.Pkg().Path() + "." + obj.Name()
+	}
+	// Position-less and package-less means a universe declaration — the
+	// canonical case is error's Error method promoted through embedding.
+	return fmt.Sprintf("universe:%v", obj)
+}
+
+// HasDirective reports whether a doc comment group carries the named gofresh
+// directive — a comment line whose text is exactly the directive, the Go
+// directive form with no leading space.
+func HasDirective(doc *ast.CommentGroup, directive string) bool {
+	if doc == nil {
+		return false
+	}
+	for _, c := range doc.List {
+		if c.Text == directive {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDirective(doc *ast.CommentGroup, directive string) bool {
+	return HasDirective(doc, directive)
+}
+
+// MethodDirectives resolves a promoted method's purity and externality
+// directives from its declaring package's fact inside the view package's
+// own cone — the declaration keys, empty when absent.
+func MethodDirectives(cones map[string]map[string][]Fact, viewPackage string, m *types.Func) (pureKey, externalKey string) {
+	if cones == nil || m == nil || m.Pkg() == nil {
+		return "", ""
+	}
+	recvName := methodRecvNamedTypeName(m)
+	if recvName == "" {
+		return "", ""
+	}
+	key := recvName + "." + m.Name()
+	for _, fact := range cones[viewPackage][m.Pkg().Path()] {
+		if pureKey == "" {
+			pureKey = fact.PureMethods[key]
+		}
+		if externalKey == "" {
+			externalKey = fact.ExternalMethods[key]
+		}
+	}
+	return pureKey, externalKey
+}
+
+// ScannedSymbol is one symbol sighting emitted by WalkLoadedSubjects.
+type ScannedSymbol struct {
+	Package     string
+	Symbol      string
+	Declaration string
+	Pure        bool
+	External    bool
+	OpenWorld   string
+}
+
+// WalkLoadedSubjects enumerates every function and promoted method subject
+// across pkgs for the requested pkgPaths, checking directive conflicts and
+// computing open-world signature terms when computeOpenWorld is true
+// (REQ-fresh-coherent-view, REQ-purity-directive, REQ-external-precedence).
+func WalkLoadedSubjects(audited, computeOpenWorld bool, pkgs []*packages.Package, cones map[string]map[string][]Fact, pkgPaths []string, visit func(ScannedSymbol)) error {
+	requestedPackages := make(map[string]bool, len(pkgPaths))
+	for _, pkgPath := range pkgPaths {
+		requestedPackages[pkgPath] = true
+	}
+	var scanErr error
+	for _, p := range pkgs {
+		pkgPath := p.PkgPath
+		if p.ForTest != "" && (p.PkgPath == p.ForTest || p.PkgPath == p.ForTest+"_test") {
+			pkgPath = p.ForTest
+		}
+		if requestedPackages[pkgPath] {
+			for _, f := range p.Syntax {
+				initOrdinal := 0
+				for _, decl := range f.Decls {
+					fd, ok := decl.(*ast.FuncDecl)
+					if !ok {
+						continue
+					}
+					sym := fd.Name.Name
+					if recv := RecvTypeName(fd); recv != "" {
+						sym = recv + "." + sym
+					} else if fd.Recv != nil {
+						continue
+					} else if sym == "init" {
+						if p.Fset == nil {
+							continue
+						}
+						sym = fmt.Sprintf("init#%s#%d", filepath.Base(p.Fset.PositionFor(f.Pos(), false).Filename), initOrdinal)
+						initOrdinal++
+					}
+					declKey := NodeDeclarationKey(p, fd.Name)
+					isPure := HasDirective(fd.Doc, "//gofresh:pure")
+					isExternal := HasDirective(fd.Doc, "//gofresh:external")
+					if isPure && isExternal && scanErr == nil {
+						scanErr = fmt.Errorf("gofresh: %s carries both //gofresh:pure and //gofresh:external", declKey)
+					}
+					var term string
+					if computeOpenWorld {
+						if fn, ok := p.TypesInfo.Defs[fd.Name].(*types.Func); ok {
+							term = OpenWorldTerm(audited, fn.Type().(*types.Signature))
+						}
+					}
+					visit(ScannedSymbol{
+						Package:     pkgPath,
+						Symbol:      sym,
+						Declaration: declKey,
+						Pure:        isPure,
+						External:    isExternal,
+						OpenWorld:   term,
+					})
+				}
+			}
+		}
+		if p.Types == nil || !requestedPackages[pkgPath] {
+			continue
+		}
+		scope := p.Types.Scope()
+		for _, name := range scope.Names() {
+			typeName, ok := scope.Lookup(name).(*types.TypeName)
+			if !ok {
+				continue
+			}
+			for _, methods := range []*types.MethodSet{
+				types.NewMethodSet(types.NewPointer(typeName.Type())),
+				types.NewMethodSet(typeName.Type()),
+			} {
+				for i := 0; i < methods.Len(); i++ {
+					method, ok := methods.At(i).Obj().(*types.Func)
+					if !ok {
+						continue
+					}
+					var term string
+					if computeOpenWorld {
+						if sig, ok := method.Type().(*types.Signature); ok {
+							term = OpenWorldTerm(audited, sig)
+						}
+					}
+					pureKey, externalKey := MethodDirectives(cones, pkgPath, method)
+					if pureKey != "" && externalKey != "" && scanErr == nil {
+						scanErr = fmt.Errorf("gofresh: %s carries both //gofresh:pure and //gofresh:external", pureKey)
+					}
+					visit(ScannedSymbol{
+						Package:     pkgPath,
+						Symbol:      name + "." + method.Name(),
+						Declaration: ObjectDeclarationKey(p, method),
+						Pure:        pureKey != "",
+						External:    externalKey != "",
+						OpenWorld:   term,
+					})
+				}
+			}
+		}
+	}
+	return scanErr
+}

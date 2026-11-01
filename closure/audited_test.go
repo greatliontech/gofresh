@@ -1320,8 +1320,8 @@ func TestUnauditedToolchainDropsAdmissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := AuditedAtomicPointerElem(false, inst.(*types.Named)); ok {
-		t.Error("AuditedAtomicPointerElem admits sync/atomic.Pointer on an unaudited toolchain")
+	if _, ok := auditedAtomicPointerElem(false, inst.(*types.Named)); ok {
+		t.Error("auditedAtomicPointerElem admits sync/atomic.Pointer on an unaudited toolchain")
 	}
 	if driver := harnessSubtestDriverForTest(t); auditedHarnessSubtestDriver(false, driver) {
 		t.Error("auditedHarnessSubtestDriver admits (*T).Run on an unaudited toolchain")
@@ -1343,7 +1343,7 @@ func TestAuditedToolchainAdmitsTheDropFakes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := AuditedAtomicPointerElem(true, inst.(*types.Named)); !ok {
+	if _, ok := auditedAtomicPointerElem(true, inst.(*types.Named)); !ok {
 		t.Error("the instantiated atomic.Pointer fake is not admitted on the audited toolchain")
 	}
 	if !auditedHarnessSubtestDriver(true, harnessSubtestDriverForTest(t)) {
@@ -2019,10 +2019,10 @@ func FuzzObservabilityClassificationsAndAuditedSet(f *testing.F) {
 
 		closedSig := types.NewSignatureType(nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, nil, "x", types.Typ[types.Int])), nil, false)
 		openSig := types.NewSignatureType(nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, nil, "fn", types.NewSignatureType(nil, nil, nil, nil, nil, false))), nil, false)
-		if term := SignatureOpenWorldTerm(audited, closedSig, nil, false, CarrierPolicyClosure); term != "" {
+		if term := signatureOpenWorldTerm(audited, closedSig, nil, false, carrierPolicyClosure); term != "" {
 			t.Fatalf("closed signature reported open-world term %q", term)
 		}
-		if term := SignatureOpenWorldTerm(audited, openSig, nil, false, CarrierPolicyClosure); !strings.Contains(term, "parameter fn") {
+		if term := signatureOpenWorldTerm(audited, openSig, nil, false, carrierPolicyClosure); !strings.Contains(term, "parameter fn") {
 			t.Fatalf("open signature term = %q, want parameter fn", term)
 		}
 		fileIOEff := symbolExternalEffect(externalEffectFileIO, "os", "Open", "reaches os.Open (file I/O)")
@@ -2050,8 +2050,8 @@ func FuzzObservabilityClassificationsAndAuditedSet(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if elem, ok := AuditedAtomicPointerElem(audited, inst.(*types.Named)); ok != audited || (ok && elem != elemType) {
-			t.Fatalf("AuditedAtomicPointerElem(%v) = (%v, %v)", audited, elem, ok)
+		if elem, ok := auditedAtomicPointerElem(audited, inst.(*types.Named)); ok != audited || (ok && elem != elemType) {
+			t.Fatalf("auditedAtomicPointerElem(%v) = (%v, %v)", audited, elem, ok)
 		}
 	})
 }

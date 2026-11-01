@@ -61,6 +61,18 @@ func (s *maximalEffectScan) add(effect externalEffect) {
 	s.effects = appendExternalEffect(s.effects, effect)
 }
 
+func (s *maximalEffectScan) merge(other maximalEffectScan) {
+	for _, effect := range other.effects {
+		s.add(effect)
+	}
+	for _, candidate := range other.importCandidates {
+		s.importCandidates = appendExternalEffect(s.importCandidates, candidate)
+	}
+	if len(other.effects) == 0 && len(other.importCandidates) == 0 && other.preferred != "" && (s.preferred == "" || other.preferred < s.preferred) {
+		s.preferred = other.preferred
+	}
+}
+
 func opaqueExternalEffect(kind externalEffectKind, reason string) externalEffect {
 	return externalEffect{kind: kind, detail: reason, reason: reason + ambientDischargeChannel(kind)}
 }

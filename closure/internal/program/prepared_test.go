@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"go/format"
+	"go/token"
 	"go/types"
 	"maps"
 	"os"
@@ -215,6 +216,18 @@ func TestPreparedProgramsMatchIndependentLoads(t *testing.T) {
 	}
 	if p, err := prepared.Build(t.Context(), preparedModule+"unregistered"); err == nil || p != nil {
 		t.Fatal("unregistered path accepted")
+	}
+	fset := token.NewFileSet()
+	tf := fset.AddFile("p_test.go", -1, 100)
+	pos := tf.Pos(10)
+	testingPkg := types.NewPackage("testing", "testing")
+	testingM := types.NewTypeName(pos, testingPkg, "M", nil)
+	types.NewNamed(testingM, types.NewStruct(nil, nil), nil)
+	tparam := types.NewTypeParam(types.NewTypeName(pos, nil, "T", nil), types.Universe.Lookup("any").Type())
+	genericSig := types.NewSignatureType(nil, nil, []*types.TypeParam{tparam}, types.NewTuple(types.NewVar(pos, nil, "m", types.NewPointer(testingM.Type()))), nil, false)
+	genericTestMain := types.NewFunc(pos, types.NewPackage("example.com/p", "p"), "TestMain", genericSig)
+	if isTestMainHarness(&packages.Package{Fset: fset}, genericTestMain) {
+		t.Fatal("generic TestMain[T any](*testing.M) accepted as test harness")
 	}
 }
 

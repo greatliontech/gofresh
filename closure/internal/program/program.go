@@ -395,7 +395,7 @@ func isTestMainHarness(pkg *packages.Package, function *types.Func) bool {
 		return false
 	}
 	signature, ok := function.Type().(*types.Signature)
-	if !ok || signature.Recv() != nil || signature.Params().Len() != 1 || signature.Results().Len() != 0 || signature.Variadic() {
+	if !ok || signature.Recv() != nil || signature.TypeParams().Len() != 0 || signature.Params().Len() != 1 || signature.Results().Len() != 0 || signature.Variadic() {
 		return false
 	}
 	if filename := pkg.Fset.PositionFor(function.Pos(), false).Filename; !strings.HasSuffix(filename, "_test.go") {
