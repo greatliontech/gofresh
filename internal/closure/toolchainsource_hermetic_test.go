@@ -2604,3 +2604,55 @@ func TestAssemblyVerifierPreprocessorAndContinuationRejections(t *testing.T) {
 		t.Fatalf("runtime.gofreshSimActiveAsm remained proven inactive despite asm ·a##b local macro call to gofreshSimEnableAsm: %v", rtVerdict.InactiveRuntimeGates)
 	}
 }
+
+func TestVerifyReadPackageDigestMetadataVersusContentDrift(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "p.go")
+	origContent := "package p\nfunc F() int { return 1 }\n"
+	if err := os.WriteFile(filePath, []byte(origContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lp := listedPackage{
+		ImportPath: "strings",
+		Dir:        dir,
+		Files:      []string{"p.go"},
+		Audited:    true,
+	}
+	wantDigest, err := digestFiles(t.Context(), dir, lp.Files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lp.digest = wantDigest
+
+	cache := map[string]trackedFileRead{}
+	if _, err := readPackageFileTracked(dir, "p.go", cache); err != nil {
+		t.Fatal(err)
+	}
+	// Mutate inode metadata (mtime/ctime via Chtimes) without changing file bytes:
+	// verifyReadPackageDigest must fall back to verifying on-disk bytes and succeed.
+	future := time.Now().Add(10 * time.Second)
+	if err := os.Chtimes(filePath, future, future); err != nil {
+		t.Fatal(err)
+	}
+	gotDigest, err := verifyReadPackageDigest(t.Context(), lp, cache)
+	if err != nil {
+		t.Fatalf("verifyReadPackageDigest after metadata-only change returned error: %v", err)
+	}
+	if gotDigest != wantDigest {
+		t.Fatalf("verifyReadPackageDigest after metadata-only change = %q, want %q", gotDigest, wantDigest)
+	}
+
+	// Mutate actual file content on disk after readPackageFileTracked:
+	// verifyReadPackageDigest must detect the byte mismatch and return an empty digest.
+	if err := os.WriteFile(filePath, []byte("package p\nfunc F() int { return 2 }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	movedDigest, err := verifyReadPackageDigest(t.Context(), lp, cache)
+	if err != nil {
+		t.Fatalf("verifyReadPackageDigest after content change returned error: %v", err)
+	}
+	if movedDigest != "" {
+		t.Fatalf("verifyReadPackageDigest after content change = %q, want empty digest", movedDigest)
+	}
+}

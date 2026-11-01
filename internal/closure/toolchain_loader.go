@@ -624,10 +624,8 @@ func verifyReadPackageDigest(ctx context.Context, p listedPackage, cache map[str
 			return false, err
 		}
 		if rf, ok := cache[framedName]; ok {
-			if stampsTrusted {
-				if !rf.hasStamp {
-					return false, nil
-				}
+			stampMatches := false
+			if stampsTrusted && rf.hasStamp {
 				info, err := os.Lstat(rf.fullPath)
 				if err != nil {
 					return false, err
@@ -639,7 +637,14 @@ func verifyReadPackageDigest(ctx context.Context, p listedPackage, cache map[str
 					ModTime:    info.ModTime().UnixNano(),
 					ChangeTime: changeTime(info),
 				}
-				if postStamp != rf.preStamp {
+				stampMatches = postStamp == rf.preStamp
+			}
+			if !stampMatches {
+				currentBytes, err := os.ReadFile(rf.fullPath)
+				if err != nil {
+					return false, err
+				}
+				if !bytes.Equal(currentBytes, rf.data) {
 					return false, nil
 				}
 			}

@@ -67,7 +67,7 @@ func buildGOROOTOverlayAt(t testing.TB, origRoot, dstRoot string, overlays map[s
 	if err := os.MkdirAll(dstRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	copyTree := func(srcDir, dstDir string, allowHardlink bool, skip func(rel string, d os.DirEntry) (skipDir, skipFile bool)) {
+	copyTree := func(srcDir, dstDir string, skip func(rel string, d os.DirEntry) (skipDir, skipFile bool)) {
 		if err := filepath.WalkDir(srcDir, func(path string, d os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
@@ -91,11 +91,6 @@ func buildGOROOTOverlayAt(t testing.TB, origRoot, dstRoot string, overlays map[s
 			}
 			if d.Type()&os.ModeSymlink != 0 {
 				return nil
-			}
-			if allowHardlink {
-				if err := os.Link(path, dst); err == nil {
-					return nil
-				}
 			}
 			data, err := os.ReadFile(path)
 			if err != nil {
@@ -121,7 +116,7 @@ func buildGOROOTOverlayAt(t testing.TB, origRoot, dstRoot string, overlays map[s
 	if origBin := filepath.Join(origRoot, "bin"); func() bool { _, err := os.Stat(origBin); return err == nil }() {
 		dstBin := filepath.Join(dstRoot, "bin")
 		if err := os.Symlink(origBin, dstBin); err != nil {
-			copyTree(origBin, dstBin, true, nil)
+			copyTree(origBin, dstBin, nil)
 		}
 	}
 	if origPkg := filepath.Join(origRoot, "pkg"); func() bool { _, err := os.Stat(origPkg); return err == nil }() {
@@ -137,18 +132,18 @@ func buildGOROOTOverlayAt(t testing.TB, origRoot, dstRoot string, overlays map[s
 			src := filepath.Join(origPkg, entry.Name())
 			dst := filepath.Join(dstPkg, entry.Name())
 			if entry.Name() == "include" && entry.IsDir() {
-				copyTree(src, dst, false, nil)
+				copyTree(src, dst, nil)
 				continue
 			}
 			if err := os.Symlink(src, dst); err != nil {
-				copyTree(src, dst, true, nil)
+				copyTree(src, dst, nil)
 			}
 		}
 	}
 	if origLib := filepath.Join(origRoot, "lib"); func() bool { _, err := os.Stat(origLib); return err == nil }() {
-		copyTree(origLib, filepath.Join(dstRoot, "lib"), true, nil)
+		copyTree(origLib, filepath.Join(dstRoot, "lib"), nil)
 	}
-	copyTree(filepath.Join(origRoot, "src"), filepath.Join(dstRoot, "src"), true, func(rel string, d os.DirEntry) (bool, bool) {
+	copyTree(filepath.Join(origRoot, "src"), filepath.Join(dstRoot, "src"), func(rel string, d os.DirEntry) (bool, bool) {
 		slash := filepath.ToSlash(rel)
 		if d.IsDir() && (slash == "cmd" || d.Name() == "testdata") {
 			return true, false

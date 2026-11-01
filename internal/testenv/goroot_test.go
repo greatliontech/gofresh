@@ -34,6 +34,35 @@ func TestOverlayGOROOTUnlinksHardlinkedSourceBeforeWrite(t *testing.T) {
 	if os.SameFile(hostTextflag, overlayTextflag) {
 		t.Fatal("OverlayGOROOT hardlinked pkg/include/textflag.h to host GOROOT")
 	}
+	hostStrings, err := os.Stat(filepath.Join(hostGOROOT, "src", "strings", "strings.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	overlayStrings, err := os.Stat(filepath.Join(firstOverlay, "src", "strings", "strings.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(hostStrings, overlayStrings) {
+		t.Fatal("OverlayGOROOT hardlinked src/strings/strings.go to host GOROOT")
+	}
+
+	// Verify same-filesystem overlay construction (both under t.TempDir()) also
+	// copies regular files rather than hardlinking inodes when EXDEV cannot mask os.Link.
+	sameFSOverlay := OverlayGOROOT(t, gotool.SetEnv(env, "GOROOT", firstOverlay), nil)
+	sameFSTextflag, err := os.Stat(filepath.Join(sameFSOverlay, "pkg", "include", "textflag.h"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(overlayTextflag, sameFSTextflag) {
+		t.Fatal("same-filesystem OverlayGOROOT hardlinked pkg/include/textflag.h")
+	}
+	sameFSStrings, err := os.Stat(filepath.Join(sameFSOverlay, "src", "strings", "strings.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(overlayStrings, sameFSStrings) {
+		t.Fatal("same-filesystem OverlayGOROOT hardlinked src/strings/strings.go")
+	}
 
 	overlaid := OverlayGOROOT(t, env, map[string]string{
 		"src/strings/strings.go": "package strings\n// overlaid\n",
