@@ -12,8 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -294,81 +292,6 @@ func TestConstructionContextOwnsTheEnvironmentQuery(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-type workspaceEnvironmentFixture struct {
-	consumer       string
-	workspaceFile  string
-	standaloneFile string
-	goWork         string
-	subject        Subject
-}
-
-func writeWorkspaceEnvironmentFixture(t *testing.T) workspaceEnvironmentFixture {
-	t.Helper()
-	root := t.TempDir()
-	consumer := filepath.Join(root, "consumer")
-	standalone := filepath.Join(root, "standalone")
-	workspace := filepath.Join(root, "workspace")
-	for _, dir := range []string{consumer, standalone, workspace} {
-		if err := os.Mkdir(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write := func(path, content string) {
-		t.Helper()
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write(filepath.Join(consumer, "go.mod"), "module example.com/consumer\n\ngo 1.26.4\n\nrequire example.com/selected v0.0.0\nreplace example.com/selected => ../standalone\n")
-	write(filepath.Join(consumer, "consumer.go"), "package consumer\n\nimport \"example.com/selected\"\n\nfunc Use() string { return selected.Source() }\n")
-	write(filepath.Join(standalone, "go.mod"), "module example.com/selected\n\ngo 1.26.4\n")
-	standaloneFile := filepath.Join(standalone, "selected.go")
-	write(standaloneFile, "package selected\n\nfunc Source() string { return \"standalone\" }\n")
-	write(filepath.Join(workspace, "go.mod"), "module example.com/selected\n\ngo 1.26.4\n")
-	workspaceFile := filepath.Join(workspace, "selected.go")
-	write(workspaceFile, "package selected\n\nfunc Source() string { return \"workspace\" }\n")
-	goWork := filepath.Join(root, "go.work")
-	write(goWork, "go 1.26.4\n\nuse (\n\t./consumer\n\t./workspace\n)\n")
-	return workspaceEnvironmentFixture{
-		consumer:       consumer,
-		workspaceFile:  workspaceFile,
-		standaloneFile: standaloneFile,
-		goWork:         goWork,
-		subject:        Subject{Package: "example.com/consumer", Symbol: "Use"},
-	}
-}
-
-func environmentWith(values map[string]string) []string {
-	env := append([]string(nil), os.Environ()...)
-	for key, value := range values {
-		filtered := env[:0]
-		for _, entry := range env {
-			name, _, _ := strings.Cut(entry, "=")
-			same := name == key
-			if runtime.GOOS == "windows" {
-				same = strings.EqualFold(name, key)
-			}
-			if !same {
-				filtered = append(filtered, entry)
-			}
-		}
-		env = append(filtered, key+"="+value)
-	}
-	return env
-}
-
-func viewUsesSource(t *testing.T, engine *engine, fixture workspaceEnvironmentFixture, want, notWant string) {
-	t.Helper()
-	view, err := engine.newView(context.Background(), []Subject{fixture.subject}, fixture.consumer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	files := view.SourceFiles()
-	if !slices.Contains(files, want) || slices.Contains(files, notWant) {
-		t.Fatalf("selected source files = %v, want %s and not %s", files, want, notWant)
 	}
 }
 
