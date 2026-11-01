@@ -80,7 +80,7 @@ func TestProgressReportsUnitsServedAndKept(t *testing.T) {
 	// A cold precise analysis loads and proves; the same view's second
 	// engine over the same tree serves the proof from the memo and says
 	// so instead of loading.
-	if _, err := view.CaptureObserved(context.Background(), a); err != nil {
+	if _, err := view.captureObserved(context.Background(), a); err != nil {
 		t.Fatal(err)
 	}
 	events = nil
@@ -93,7 +93,7 @@ func TestProgressReportsUnitsServedAndKept(t *testing.T) {
 		t.Fatal(err)
 	}
 	events = nil
-	if _, err := warmView.CaptureObserved(context.Background(), a); err != nil {
+	if _, err := warmView.captureObserved(context.Background(), a); err != nil {
 		t.Fatal(err)
 	}
 	served, proved, detailed := 0, false, 0
@@ -128,7 +128,7 @@ func TestProgressReportsUnitsServedAndKept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := coldView.CaptureObserved(cancelled, b); err == nil {
+	if _, err := coldView.captureObserved(cancelled, b); err == nil {
 		t.Fatal("cancelled capture succeeded")
 	}
 	var reported []string

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/gotool"
 	"go/version"
 	"reflect"
@@ -167,4 +167,44 @@ func (p *ToolchainProvenance) Check(ctx context.Context, dir string, env []strin
 		return "", &ToolchainProvenanceError{Err: err}
 	}
 	return ambient, nil
+}
+
+// ToolchainSelection summarizes the resolved toolchain content, admission
+// policy, and any selection-audit degradation notice for a build configuration.
+type ToolchainSelection struct {
+	ToolchainContent string
+	AdmissionPolicy  string
+	SelectionNotice  string
+}
+
+// ResolveToolchainSelection resolves the toolchain content, admission policy,
+// and selection-audit notice for reader and buildFlags.
+func ResolveToolchainSelection(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) (ToolchainSelection, error) {
+	if ctx == nil {
+		return ToolchainSelection{}, errors.New("gofresh: nil toolchain selection context")
+	}
+	if err := ctx.Err(); err != nil {
+		return ToolchainSelection{}, err
+	}
+	if reader == nil {
+		return ToolchainSelection{}, errors.New("gofresh: nil environment reader")
+	}
+	h, err := closure.NewAt(ctx, reader, buildFlags...)
+	if err != nil {
+		return ToolchainSelection{}, err
+	}
+	return ToolchainSelection{
+		ToolchainContent: h.ToolchainContent(),
+		AdmissionPolicy:  h.AdmissionPolicy(),
+		SelectionNotice:  h.SelectionNotice(),
+	}, nil
+}
+
+// ToolchainSelection resolves the toolchain content, admission policy, and
+// selection-audit notice for the session's admitted build configuration.
+func (s *Session) ToolchainSelection(ctx context.Context) (ToolchainSelection, error) {
+	if s == nil || s.engine == nil {
+		return ToolchainSelection{}, errors.New("gofresh: uninitialized session")
+	}
+	return ResolveToolchainSelection(ctx, s.engine.newPassReader(), s.build.Flags...)
 }

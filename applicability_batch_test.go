@@ -61,7 +61,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 	write(source + "\nfunc TestArithmetic(t *testing.T) { if 2+2 != 4 { t.Fatal(\"arithmetic\") } }\n")
 	extending := newView()
 	for _, subject := range subjects {
-		updated, _, verdict, err := extending.CheckObservedInertTestVariantExtension(ctx, proofs[subject], ledger, subject)
+		updated, _, verdict, err := extending.checkInertTestVariantExtension(ctx, proofs[subject], ledger, subject, true)
 		if err != nil || verdict.Status != Valid {
 			t.Fatalf("extension: %+v %v", verdict, err)
 		}

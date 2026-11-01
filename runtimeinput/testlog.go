@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/outcome"
 )
 

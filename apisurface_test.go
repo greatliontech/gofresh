@@ -13,17 +13,17 @@ import (
 // Every exported analysis entry of the public packages names its
 // environment in its signature (REQ-closure-analysis: the analyzed tree
 // and build selection are explicit inputs, never implicit coupling): no
-// production source of guard, runtimeinput, closure, gotool, the
-// internal packages, or the root's directive scanner reads the ambient
-// process environment (os.Environ, Getenv, LookupEnv, ExpandEnv, and
-// syscall's). The ambient defaults are the root's own — New without
-// WithEnv, and an engine-less view's runtime-input check — and live in
-// gofresh.go and view.go, outside this walk.
+// production source of runtimeinput, gotool, the internal packages, or the
+// root files outside session.go and view.go reads the ambient process
+// environment (os.Environ, Getenv, LookupEnv, ExpandEnv, and syscall's).
+// The ambient defaults are the root's own — newEngine without withEnv, and
+// an engine-less view's runtime-input check — and live in session.go and
+// view.go, outside this walk.
 //
 //gofresh:pure
 func TestPublicPackagesReadNoAmbientEnvironment(t *testing.T) {
-	roots := []string{"guard", "runtimeinput", "closure", "gotool", "internal"}
-	files := []string{"purity.go"}
+	roots := []string{"runtimeinput", "gotool", "internal"}
+	files := []string{"checking.go", "explain.go", "fingerprint.go", "judgment.go", "provenance.go", "unit.go", "vouchfile.go"}
 	for _, root := range roots {
 		if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {

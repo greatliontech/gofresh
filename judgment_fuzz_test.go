@@ -3,8 +3,8 @@ package gofresh
 import (
 	"testing"
 
-	"github.com/greatliontech/gofresh/closure"
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/closure"
+	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )

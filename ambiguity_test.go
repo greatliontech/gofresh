@@ -86,7 +86,7 @@ func TestSharedTestHelperNameKeepsPackageMeasurable(t *testing.T) {
 		t.Fatalf("shared helper name made the package unmeasurable: %v", err)
 	}
 	for _, subject := range subjects {
-		fingerprint, err := view.CaptureObserved(context.Background(), subject)
+		fingerprint, err := view.captureObserved(context.Background(), subject)
 		if err != nil {
 			t.Fatalf("capture %s: %v", subject.Symbol, err)
 		}
@@ -115,7 +115,7 @@ func TestAmbiguousSubjectItselfIsRefusedCaptureAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ambiguous subject request failed view construction: %v", err)
 	}
-	fingerprint, err := view.CaptureObserved(context.Background(), ambiguous)
+	fingerprint, err := view.captureObserved(context.Background(), ambiguous)
 	if err != nil {
 		t.Fatalf("capture: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestAmbiguousSubjectItselfIsRefusedCaptureAlone(t *testing.T) {
 	if fingerprint.PurityAssertion != "" {
 		t.Fatalf("collapsed identity carries a purity attribution: %q", fingerprint.PurityAssertion)
 	}
-	sibling, err := view.CaptureObserved(context.Background(), Subject{Package: pkg, Symbol: "Compute"})
+	sibling, err := view.captureObserved(context.Background(), Subject{Package: pkg, Symbol: "Compute"})
 	if err != nil {
 		t.Fatal(err)
 	}

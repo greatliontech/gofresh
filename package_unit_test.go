@@ -73,7 +73,7 @@ func TestCrash(t *testing.T) { _ = os.Getenv("PACKAGE_CRASH"); panic("abnormal t
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := func(t *testing.T, selected []Subject, exit int, terminal Terminal) (*PackageUnit, Contribution) {
+	start := func(t *testing.T, selected []Subject, exit int, terminal Terminal) (*Unit, Contribution) {
 		t.Helper()
 		requested := append([]Subject(nil), selected...)
 		requested = append(requested, selected[0])
@@ -121,7 +121,7 @@ func TestCrash(t *testing.T) { _ = os.Getenv("PACKAGE_CRASH"); panic("abnormal t
 		}
 		return u, process
 	}
-	var completed FinalizedProcess
+	var completed Finalized
 	for _, missing := range []string{"contributor", "terminal", "never started"} {
 		t.Run(missing, func(t *testing.T) {
 			u, err := execution.BeginPackage([]Subject{a, b})
@@ -141,7 +141,7 @@ func TestCrash(t *testing.T) { _ = os.Getenv("PACKAGE_CRASH"); panic("abnormal t
 				}
 			}
 			result, err := u.Close(t.Context())
-			if err == nil || !reflect.DeepEqual(result, FinalizedProcess{}) {
+			if err == nil || !reflect.DeepEqual(result, Finalized{}) {
 				t.Fatalf("missing producing premise supplied executed evidence: %+v %v", result, err)
 			}
 			if missing != "never started" && !errors.Is(err, ErrUnitIncomplete) {
@@ -199,7 +199,7 @@ func TestCrash(t *testing.T) { _ = os.Getenv("PACKAGE_CRASH"); panic("abnormal t
 				}
 				completed = result
 			}
-			if _, err := u.Close(t.Context()); !errors.Is(err, ErrUnitClosed) {
+			if _, err := u.Close(t.Context()); !errors.Is(err, errUnitClosed) {
 				t.Fatalf("closed execution reopened: %v", err)
 			}
 		})
@@ -220,7 +220,7 @@ func TestCrash(t *testing.T) { _ = os.Getenv("PACKAGE_CRASH"); panic("abnormal t
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		result, err := u.Close(ctx)
-		if !errors.Is(err, context.Canceled) || !reflect.DeepEqual(result, FinalizedProcess{}) {
+		if !errors.Is(err, context.Canceled) || !reflect.DeepEqual(result, Finalized{}) {
 			t.Fatalf("cancelled closing exposed evidence: %+v %v", result, err)
 		}
 		if len(completed.Subjects) != 2 || completed.Subjects[0].Verdict.Status != Valid {
@@ -240,7 +240,7 @@ func TestCrash(t *testing.T) { _ = os.Getenv("PACKAGE_CRASH"); panic("abnormal t
 			}
 		})
 		result, err := u.Close(t.Context())
-		if !errors.Is(err, ErrViewChanged) || !reflect.DeepEqual(result, FinalizedProcess{}) {
+		if !errors.Is(err, ErrViewChanged) || !reflect.DeepEqual(result, Finalized{}) {
 			t.Fatalf("drift exposed a subject prefix: %+v %v", result, err)
 		}
 	})
@@ -252,7 +252,7 @@ func TestPackageUnitRefusesIncompatibleScope(t *testing.T) {
 	a := Subject{Package: "example.com/a", Symbol: "TestA"}
 	b := Subject{Package: a.Package, Symbol: "TestB"}
 	c := Subject{Package: "example.com/c", Symbol: "TestC"}
-	engine := &engine{executionModel: ExecutionAssertions{SingleSubject: true}}
+	engine := &engine{executionModel: SingleSubjectExecution}
 	snapshot := &Snapshot{session: &Session{engine: engine}, engine: engine, subjects: []Subject{a, b, c}, packages: []string{a.Package, c.Package}, facts: &observationFacts{}}
 	execution := &RuntimeBinding{snapshot: snapshot}
 	for _, selected := range [][]Subject{nil, {a, b}, {a, c}, {a, {Package: a.Package, Symbol: "unknown"}}} {
@@ -261,12 +261,12 @@ func TestPackageUnitRefusesIncompatibleScope(t *testing.T) {
 		}
 	}
 	u, err := execution.BeginPackage([]Subject{a, a})
-	if err != nil || !slices.Equal(u.producing.view.subjects, []Subject{a}) {
+	if err != nil || !slices.Equal(u.view.subjects, []Subject{a}) {
 		t.Fatalf("singleton package scope refused: %v", err)
 	}
-	engine.executionModel.SingleSubject = false
+	engine.executionModel = PackageExecution
 	u, err = execution.BeginPackage([]Subject{b, a, b})
-	if err != nil || !slices.Equal(u.producing.view.subjects, []Subject{b, a}) {
+	if err != nil || !slices.Equal(u.view.subjects, []Subject{b, a}) {
 		t.Fatalf("package scope or order lost: %v", err)
 	}
 	if _, err := execution.BeginPackage([]Subject{a, c}); err == nil {

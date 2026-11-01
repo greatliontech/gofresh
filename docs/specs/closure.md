@@ -284,8 +284,7 @@ name: test-only embedded bytes feed unchanged declarations that read them.
 Inertness is
 Go-semantics data — the universal delta check (`TestVariantDelta.Inert`) claims
 the delta cannot change the behavior of any unchanged declaration in the
-package, and the subject-scoped check (`InertForSubject` /
-`InertTestVariantLedgersForSubject`) claims the delta cannot change the
+package, and the subject-scoped check (`InertForSubject`) claims the delta cannot change the
 behavior of a specific subject by computing the transitive syntactic reference
 cone of that subject across the prior ledger's declarations (including all
 `init`, `var`, `directive`, and `TestMain` declarations and any compartment
@@ -2117,7 +2116,7 @@ key-mismatched entry recomputes silently; no entry is
 trusted beyond its complete dependencies and retained checked authority — key
 agreement alone cannot supply a missing derivation. Entries accumulate across
 closure versions under a shared byte retention bound (`DefaultMemoMaxBytes` =
-2 GiB across all memo classes, configurable via `SetMemoMaxBytes`,
+2 GiB across all memo classes,
 explicitly collectable via `PruneMemos`, and inspectable without mutation via
 `PreviewPruneMemos`, which preserves in-flight `.cache-*`
 writes, reclaims obsolete memo classes and abandoned keys alongside active

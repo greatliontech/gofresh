@@ -48,7 +48,7 @@ func TestViewMembershipRefusalsRetainSelectionScope(t *testing.T) {
 	}
 	for name, call := range map[string]func() error{
 		"capture":          func() error { _, err := view.Capture(t.Context(), g); return err },
-		"observed capture": func() error { _, err := view.CaptureObserved(t.Context(), g); return err },
+		"observed capture": func() error { _, err := view.captureObserved(t.Context(), g); return err },
 		"source files":     func() error { _, err := view.SourceFilesFor(g); return err },
 		"ledger":           func() error { _, err := view.TestVariantLedger(g); return err },
 		"attachment":       func() error { _, err := view.AttachObservation(g, Fingerprint{}, observation); return err },

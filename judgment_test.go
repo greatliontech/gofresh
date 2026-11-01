@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/greatliontech/gofresh/closure"
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/closure"
+	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
@@ -48,7 +48,7 @@ func judgmentFixture(t *testing.T) (*Snapshot, Subject, Fingerprint, runtimeinpu
 	fp.RuntimeDigest = state.Digest
 	cl := closure.Closure{Hash: fp.MaximalClosure, TestVariants: fp.TestVariantClosure, ToolchainContent: fp.ToolchainContent, AdmissionPolicy: fp.AdmissionPolicy, Unverifiable: true, Reason: "diagnostic only"}
 	v := &Snapshot{
-		engine: &engine{deferredCheckClose: true, executionModel: ExecutionAssertions{SingleSubject: true, PackageProcess: true}},
+		engine: &engine{deferredCheckClose: true, executionModel: SingleSubjectExecution},
 		kind:   CodeResult, subjects: []Subject{subject},
 		facts: &observationFacts{maximal: map[Subject]subjectFacts{subject: testSubjectFacts(cl)}, guards: fp.Guards,
 			purity: map[Subject]string{}, vouchDischarges: map[Subject]string{subject: "dependency.Current"},
@@ -127,7 +127,7 @@ func TestJudgmentAuthorityAndScope(t *testing.T) {
 			if got.Status != tc.status || got.Ground.Cause.Kind != tc.cause {
 				t.Fatalf("judgment = %+v", got)
 			}
-			wantScope := JudgmentScope{Subject: subject, ResultKind: CodeResult, ExecutionModel: ExecutionAssertions{SingleSubject: true, PackageProcess: true}}
+			wantScope := JudgmentScope{Subject: subject, ResultKind: CodeResult, ExecutionModel: SingleSubjectExecution}
 			if got.Ground.Scope != wantScope {
 				t.Fatalf("scope = %+v, want %+v", got.Ground.Scope, wantScope)
 			}

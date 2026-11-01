@@ -43,8 +43,8 @@ func TestProcessAccountIsOwnedDataWithoutProducingCapability(t *testing.T) {
 	}
 	inspect(reflect.TypeFor[ProcessAccount]())
 	for _, account := range []func() (ProcessAccount, bool){
-		(*Unit)(nil).Account, (*PackageUnit)(nil).Account,
-		(&Unit{}).Account, (&PackageUnit{}).Account,
+		(*Unit)(nil).Account,
+		(&Unit{}).Account,
 	} {
 		if got, ok := account(); ok || got != (ProcessAccount{}) {
 			t.Fatalf("uninitialized unit invented an execution: %+v %t", got, ok)
@@ -86,7 +86,7 @@ func TestProcessAccountPreservesFinalizedFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	register := func(t *testing.T) (*PackageUnit, Contribution) {
+	register := func(t *testing.T) (*Unit, Contribution) {
 		t.Helper()
 		u, err := binding.BeginPackage([]Subject{subject})
 		if err != nil {
@@ -141,7 +141,7 @@ func TestProcessAccountPreservesFinalizedFacts(t *testing.T) {
 		}
 		return state, reason, observation.Attribution
 	}
-	var closed *PackageUnit
+	var closed *Unit
 	var closedAccount ProcessAccount
 	t.Run("successful account owns canonical data", func(t *testing.T) {
 		u, c := register(t)
@@ -202,7 +202,7 @@ func TestProcessAccountPreservesFinalizedFacts(t *testing.T) {
 				u.Abort()
 			}
 			result, err := u.Close(ctx)
-			if err == nil || !reflect.DeepEqual(result, FinalizedProcess{}) {
+			if err == nil || !reflect.DeepEqual(result, Finalized{}) {
 				t.Fatalf("unfinalized execution returned evidence: %+v %v", result, err)
 			}
 			if ending == "cancelled" && !errors.Is(err, context.Canceled) {
@@ -291,7 +291,7 @@ func TestProcessAccountPreservesFinalizedFacts(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			type closing struct {
-				result FinalizedProcess
+				result Finalized
 				err    error
 			}
 			done := make(chan closing, 1)
@@ -308,14 +308,14 @@ func TestProcessAccountPreservesFinalizedFacts(t *testing.T) {
 				t.Errorf("facts unavailable during closing: %+v", before)
 			}
 			u.Abort()
-			wantErr := ErrUnitAborted
+			wantErr := errUnitAborted
 			if cancelled {
 				cancel()
 				wantErr = context.Canceled
 			}
 			release()
 			got := <-done
-			if !errors.Is(got.err, wantErr) || !reflect.DeepEqual(got.result, FinalizedProcess{}) {
+			if !errors.Is(got.err, wantErr) || !reflect.DeepEqual(got.result, Finalized{}) {
 				t.Fatalf("aborted close published evidence or lost cause: %+v %v", got.result, got.err)
 			}
 			if err := os.Remove(c.Capture()); err != nil {
@@ -352,7 +352,7 @@ func TestProcessAccountPreservesFinalizedFacts(t *testing.T) {
 				account, abort, submit = u.Account, u.Abort, u.Submit
 				closeUnit = func() (bool, error) {
 					result, err := u.Close(t.Context())
-					return result == (Finalized{}), err
+					return reflect.DeepEqual(result, Finalized{}), err
 				}
 			} else {
 				u, contribution := register(t)
@@ -360,7 +360,7 @@ func TestProcessAccountPreservesFinalizedFacts(t *testing.T) {
 				account, abort, submit = u.Account, u.Abort, u.Submit
 				closeUnit = func() (bool, error) {
 					result, err := u.Close(t.Context())
-					return reflect.DeepEqual(result, FinalizedProcess{}), err
+					return reflect.DeepEqual(result, Finalized{}), err
 				}
 			}
 			run(t, c)
@@ -444,7 +444,7 @@ func TestProcessAccountDuringRegistration(t *testing.T) {
 			entered, resume := make(chan struct{}), make(chan struct{})
 			release := sync.OnceFunc(func() { close(resume) })
 			defer release()
-			u.producing.view.beforeOutcomeIssue = func() { close(entered); <-resume }
+			u.view.beforeOutcomeIssue = func() { close(entered); <-resume }
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			type registered struct {
@@ -520,13 +520,13 @@ func TestProcessAccountRetainsObservationComputedBeforeAbort(t *testing.T) {
 		t.Fatal(err)
 	}
 	terminal := Terminal{Kind: AbnormalCompletion, Reason: reason}
-	u := &PackageUnit{producing: &producingUnit{
+	u := &Unit{
 		phase: unitClosing, snapshot: &Snapshot{},
 		execution: &unitExecution{process: ProcessDescription{Identity: "terminated-process"},
 			artifact: "retained-artifact", ready: true, terminal: terminal, cancel: func() {}},
-	}}
+	}
 	u.Abort()
-	if err := u.producing.recordObservation(observation, reason); err != nil {
+	if err := u.recordObservation(observation, reason); err != nil {
 		t.Fatal(err)
 	}
 	account, ok := u.Account()
@@ -534,7 +534,7 @@ func TestProcessAccountRetainsObservationComputedBeforeAbort(t *testing.T) {
 		t.Fatalf("abort suppressed already-computed facts: %+v", account)
 	}
 	result, err := u.Close(t.Context())
-	if !errors.Is(err, ErrUnitClosed) || !reflect.DeepEqual(result, FinalizedProcess{}) {
+	if !errors.Is(err, errUnitClosed) || !reflect.DeepEqual(result, Finalized{}) {
 		t.Fatalf("retaining computed facts reopened the aborted unit: %+v %v", result, err)
 	}
 }

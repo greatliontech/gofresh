@@ -2,7 +2,7 @@ package gofresh
 
 import (
 	"context"
-	"github.com/greatliontech/gofresh/closure/testvariant"
+	"github.com/greatliontech/gofresh/internal/testvariant"
 	"os"
 	"os/exec"
 	"path/filepath"

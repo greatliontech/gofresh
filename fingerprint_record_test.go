@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/guard"
 )
 
 // fullFingerprint is a code-result fingerprint with every scalar optional

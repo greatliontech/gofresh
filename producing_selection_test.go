@@ -89,32 +89,32 @@ func TestScalar(t *testing.T) { if !utf16.IsSurrogate(0xd800) { t.Fail() } }
 	if output, err := runner.Run(t.Context(), build.Directory, build.Environment, args...); err != nil {
 		t.Fatalf("build: %v\n%s", err, output)
 	}
-	bound, err := snapshot.BindArtifact(t.Context(), pkg, ArtifactDescription{Identity: "retained", Path: binary})
+	bound, err := snapshot.BindBuilt(pkg, "retained")
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := func(t *testing.T, subjects []Subject, capture, singleton bool) *producingUnit {
+	start := func(t *testing.T, subjects []Subject, capture, singleton bool) *Unit {
 		t.Helper()
-		var u *producingUnit
+		var u *Unit
 		if singleton {
 			unit, err := runtime.Begin(subjects[0])
 			if err != nil {
 				t.Fatal(err)
 			}
-			u = unit.producing
+			u = unit
 		} else {
 			unit, err := runtime.BeginPackage(subjects)
 			if err != nil {
 				t.Fatal(err)
 			}
-			u = unit.producing
+			u = unit
 		}
-		t.Cleanup(u.abort)
+		t.Cleanup(u.Abort)
 		process := ProcessDescription{Identity: t.Name()}
 		if capture {
 			process.Capture = filepath.Join(t.TempDir(), "capture")
 		}
-		c, err := u.register(t.Context(), bound, process)
+		c, err := u.Register(t.Context(), bound, process)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -136,7 +136,7 @@ func TestScalar(t *testing.T) { if !utf16.IsSurrogate(0xd800) { t.Fail() } }
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("execution: %v\n%s", err, output)
 		}
-		if err := u.submit(c, Terminal{Kind: NormalCompletion}); err != nil {
+		if err := u.Submit(c, Terminal{Kind: NormalCompletion}); err != nil {
 			t.Fatal(err)
 		}
 		return u
@@ -171,7 +171,7 @@ func TestScalar(t *testing.T) { if !utf16.IsSurrogate(0xd800) { t.Fail() } }
 			if len(tc.observed) != 0 && len(u.view.capturedObserved) != len(tc.subjects) {
 				t.Fatal("process-wide preparation omitted a runnable contributor")
 			}
-			result, err := u.close(t.Context())
+			result, err := u.Close(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -214,7 +214,7 @@ func TestScalar(t *testing.T) { if !utf16.IsSurrogate(0xd800) { t.Fail() } }
 					t.Fatalf("independent check: %+v %v", verdict, err)
 				}
 			}
-			if _, err := u.close(t.Context()); !errors.Is(err, ErrUnitClosed) {
+			if _, err := u.Close(t.Context()); !errors.Is(err, errUnitClosed) {
 				t.Fatalf("closed unit reopened: %v", err)
 			}
 		})
@@ -230,7 +230,7 @@ func TestScalar(t *testing.T) { if !utf16.IsSurrogate(0xd800) { t.Fail() } }
 		}
 		first := start(t, []Subject{plain}, false, true)
 		second := start(t, mixed, true, false)
-		if _, err := second.close(t.Context()); err != nil {
+		if _, err := second.Close(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 		if len(first.view.capturedObserved) != 0 || len(first.execution.observed) != 0 {
@@ -239,12 +239,12 @@ func TestScalar(t *testing.T) { if !utf16.IsSurrogate(0xd800) { t.Fail() } }
 		fp := first.execution.fingerprints[plain]
 		fp.PurityAssertion = "caller assertion"
 		first.execution.fingerprints[plain] = fp
-		result, err := first.close(t.Context())
-		if err == nil || !reflect.DeepEqual(result, FinalizedProcess{}) {
+		result, err := first.Close(t.Context())
+		if err == nil || !reflect.DeepEqual(result, Finalized{}) {
 			t.Fatalf("capture-free corruption escaped: %+v %v", result, err)
 		}
 		retry := start(t, []Subject{plain}, false, true)
-		result, err = retry.close(t.Context())
+		result, err = retry.Close(t.Context())
 		if err != nil || result.Subjects[0].Verdict.Status != Valid || result.Subjects[0].Fingerprint.ObservationAssertion != "" {
 			t.Fatalf("retry borrowed failed obligations: %+v %v", result, err)
 		}

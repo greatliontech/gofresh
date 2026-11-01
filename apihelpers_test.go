@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/runtimeinput"
@@ -30,11 +30,11 @@ func closureNewAtEnv(ctx context.Context, dir string, env []string, buildFlags .
 }
 
 func scanPureDirectives(pkgPaths ...string) (func(Subject) bool, error) {
-	return ScanPureDirectives("", os.Environ(), nil, pkgPaths...)
+	return scanPureDirectivesAt("", os.Environ(), nil, pkgPaths...)
 }
 
 func scanPureDirectivesIn(dir string, pkgPaths ...string) (func(Subject) bool, error) {
-	return ScanPureDirectives(dir, os.Environ(), nil, pkgPaths...)
+	return scanPureDirectivesAt(dir, os.Environ(), nil, pkgPaths...)
 }
 
 func closureLoadViewPackagesEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*closure.ViewLoad, error) {

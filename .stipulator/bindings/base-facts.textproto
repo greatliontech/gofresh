@@ -46,9 +46,9 @@ bindings {
   content_hash: "2830ba1a4213aa9875874529d7810ecabe6667f6f3a6c6ee4ccfa1249cfb275e"
   source_hash: "b062925be9893922d671d13afe826d24f12411be25d4f3c94cdc2aab65eb76e5"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/closure.TestComputeMaximalFactsBatchPreservesCompleteScanAndProjection"
+  symbol: "github.com/greatliontech/gofresh/internal/closure.TestComputeMaximalFactsBatchPreservesCompleteScanAndProjection"
   role: BINDING_ROLE_TESTS
-  shape_hash: "5d82761b5678b4d8b5d243abe6f2e8ba7bc1300789315d2bc848d64e124865a0"
+  shape_hash: "d4931417afade791119e9fd08b6f07eda9753be7111ff4a50994c5da9c9c2a8d"
   clause_label: "maximal-identity"
 }
 
@@ -57,9 +57,9 @@ bindings {
   content_hash: "14e5b0c385c14150694869b4cc51e5712bce6023051cff24cba86e18a7bd3d97"
   source_hash: "6d9185a1e67655db4453679f0b4c60273615579e9f6e47b27203606f540e1b59"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/closure.TestMaximalFactsOwnTheirInputsAndProjections"
+  symbol: "github.com/greatliontech/gofresh/internal/closure.TestMaximalFactsOwnTheirInputsAndProjections"
   role: BINDING_ROLE_TESTS
-  shape_hash: "fee1d242fd12854eb8bcd21d2c51dfaf748365c275240092098e951c57a04f28"
+  shape_hash: "aff7334b2f936960bc865c416e8416c80a8ee75b65513e103aca60553ce444de"
 }
 
 bindings {
@@ -67,9 +67,9 @@ bindings {
   content_hash: "2421425af262da6a7b65763d35c959b8d405971da1be018a797ce40904e21c95"
   source_hash: "b61e5471f23253c3a2b8511b0ad8321a2e019f29c6c8359882f10e3db451212f"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/closure.TestMaximalFactsRetainHiddenBlockers"
+  symbol: "github.com/greatliontech/gofresh/internal/closure.TestMaximalFactsRetainHiddenBlockers"
   role: BINDING_ROLE_TESTS
-  shape_hash: "b859c44b2bc3fe3bc46aefece1230dc11dc91d49d5f1a2627015b37792701e02"
+  shape_hash: "9ce548a924a47f53ea62130b547aab4b94830f9f408e9cd28280da3c616393dc"
 }
 
 bindings {
@@ -77,7 +77,7 @@ bindings {
   content_hash: "2ec34b1b5d9dfa90b796b555dd94d2fc01662f829be4755cdf9c221b95d2d4ad"
   source_hash: "918fc44cbcc3bf90e394247c7c6bcdbd7ebf7445354281a5073c1228599ead8c"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/closure.TestComputeMaximalFactsBatchCancellationReturnsNoFacts"
+  symbol: "github.com/greatliontech/gofresh/internal/closure.TestComputeMaximalFactsBatchCancellationReturnsNoFacts"
   role: BINDING_ROLE_TESTS
-  shape_hash: "f48b7f2c0c822d58e5edc0cb235b5d5cdfea47297a63b9b5dc404abf557bb069"
+  shape_hash: "dd26026ae4ad601dc653c0c31e72cdd771582dc67366b09043b0ebf66461cd17"
 }

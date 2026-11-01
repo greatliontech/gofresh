@@ -29,7 +29,7 @@ func writeSupportedViewModule(t *testing.T) string {
 func supportedObservation(t *testing.T, view *Snapshot, root, dir, process, log string) runtimeinput.Observation {
 	t.Helper()
 	frame := runtimeinput.CaptureProducerFrame(context.Background(), root, dir, runtimeinput.FrameOptions{})
-	support, err := view.PrepareOutcomeSupport(context.Background(), frame, process)
+	support, _, err := view.prepareOutcomeSupport(context.Background(), frame, process)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestOutcomeSupportCannotCrossTestVariantChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	old, err := before.CaptureObserved(ctx, subject)
+	old, err := before.captureObserved(ctx, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestOutcomeSupportCannotCrossTestVariantChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fresh, err := after.CaptureObserved(ctx, subject)
+	fresh, err := after.captureObserved(ctx, subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,15 +110,15 @@ func TestOutcomePreparationRejectsInvalidAndEndedTransactions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (&Snapshot{engine: engine, facts: view.facts}).PrepareOutcomeSupport(ctx, frame, "worker"); err == nil || !strings.Contains(err.Error(), "contributing subjects") {
+	if _, _, err := (&Snapshot{engine: engine, facts: view.facts}).prepareOutcomeSupport(ctx, frame, "worker"); err == nil || !strings.Contains(err.Error(), "contributing subjects") {
 		t.Fatalf("empty preparation: %v", err)
 	}
 	bad := frame
 	bad.PkgDir = "bad\x00directory"
-	if _, err := view.PrepareOutcomeSupport(ctx, bad, "worker"); err == nil {
+	if _, _, err := view.prepareOutcomeSupport(ctx, bad, "worker"); err == nil {
 		t.Fatal("invalid environment coordinate accepted")
 	}
-	if _, err := view.PrepareOutcomeSupport(ctx, frame, ""); err == nil {
+	if _, _, err := view.prepareOutcomeSupport(ctx, frame, ""); err == nil {
 		t.Fatal("invalid process identity accepted")
 	}
 	for _, cancelInstead := range []bool{false, true} {
@@ -136,9 +136,9 @@ func TestOutcomePreparationRejectsInvalidAndEndedTransactions(t *testing.T) {
 				t.Error("validation accepted missing attachment")
 			}
 		}
-		support, err := view.PrepareOutcomeSupport(callCtx, frame, "worker")
+		support, _, err := view.prepareOutcomeSupport(callCtx, frame, "worker")
 		cancel()
-		want := ErrViewSealed
+		want := errViewSealed
 		if cancelInstead {
 			want = context.Canceled
 		}
@@ -203,11 +203,11 @@ func TestFail(t *testing.T) { _, _ = os.LookupEnv("OUTCOME_VALUE"); t.Error("ord
 					t.Fatal(err)
 				}
 				frame := runtimeinput.CaptureProducerFrame(ctx, dir, dir, runtimeinput.FrameOptions{})
-				support, err := view.PrepareOutcomeSupport(ctx, frame, "execution")
+				support, _, err := view.prepareOutcomeSupport(ctx, frame, "execution")
 				if err != nil {
 					t.Fatal(err)
 				}
-				fp, err := view.CaptureObserved(ctx, subject)
+				fp, err := view.captureObserved(ctx, subject)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -298,7 +298,7 @@ func TestFail(t *testing.T) { _, _ = os.LookupEnv("OUTCOME_VALUE"); t.Error("ord
 				if err != nil {
 					t.Fatal(err)
 				}
-				otherFP, err := otherView.CaptureObserved(ctx, other)
+				otherFP, err := otherView.captureObserved(ctx, other)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -347,7 +347,7 @@ func TestFail(t *testing.T) { _, _ = os.LookupEnv("OUTCOME_VALUE"); t.Error("ord
 		t.Fatal(err)
 	}
 	frame := runtimeinput.CaptureProducerFrame(ctx, dir, dir, runtimeinput.FrameOptions{})
-	support, err := view.PrepareOutcomeSupport(ctx, frame, "mixed")
+	support, _, err := view.prepareOutcomeSupport(ctx, frame, "mixed")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func TestFail(t *testing.T) { _, _ = os.LookupEnv("OUTCOME_VALUE"); t.Error("ord
 	}
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	if _, err := view.PrepareOutcomeSupport(cancelled, frame, "cancelled"); !errors.Is(err, context.Canceled) {
+	if _, _, err := view.prepareOutcomeSupport(cancelled, frame, "cancelled"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled support=%v", err)
 	}
 }
@@ -439,7 +439,7 @@ func TestFile(t *testing.T) {
 	}
 	stored := make(map[Subject]Fingerprint, len(subjects))
 	for _, s := range subjects {
-		fp, err := view.CaptureObserved(ctx, s)
+		fp, err := view.captureObserved(ctx, s)
 		if err != nil {
 			t.Fatal(err)
 		}

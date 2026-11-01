@@ -139,7 +139,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if _, err := missing.Close(ctx); !errors.Is(err, ErrUnitIncomplete) {
 		t.Fatalf("empty unit closed: %v", err)
 	}
-	if _, err := missing.Register(ctx, bound, ProcessDescription{Identity: "late"}); !errors.Is(err, ErrUnitClosed) {
+	if _, err := missing.Register(ctx, bound, ProcessDescription{Identity: "late"}); !errors.Is(err, errUnitClosed) {
 		t.Fatalf("failed unit reopened: %v", err)
 	}
 	control, err := runner.Program(ctx, dir, runtimeEnv, binary, "-test.run=^TestValue$", "-test.v")
@@ -218,7 +218,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	secondPending := false
 	select {
 	case err := <-secondClose:
-		if !errors.Is(err, ErrUnitClosed) {
+		if !errors.Is(err, errUnitClosed) {
 			t.Fatalf("concurrent close: %v", err)
 		}
 	case <-time.After(2 * time.Second):
@@ -247,7 +247,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if final.Verdict.Status != Valid || final.Observation != SupportedObservation || final.Terminal.Kind != NormalCompletion || final.ObservationReason != "" || final.OutcomeReason != "" {
 		t.Fatalf("closed evidence: verdict=%+v observation=%q outcome=%q", final.Verdict, final.ObservationReason, final.OutcomeReason)
 	}
-	if _, err := unit.Close(ctx); !errors.Is(err, ErrUnitClosed) {
+	if _, err := unit.Close(ctx); !errors.Is(err, errUnitClosed) {
 		t.Fatalf("closed unit reopened: %v", err)
 	}
 	record := sessionCheckRecord{Build: configuration, Runtime: RuntimeDescription{Environment: runtimeEnv}, Subject: subject, Fingerprint: final.Fingerprint}
@@ -272,7 +272,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if out, err := checker.CombinedOutput(); err != nil || !strings.Contains(string(out), "record valid in fresh process") {
 		t.Fatalf("restart check: %v\n%s", err, out)
 	}
-	if err := unit.Submit(contribution, Terminal{Kind: NormalCompletion}); !errors.Is(err, ErrUnitClosed) {
+	if err := unit.Submit(contribution, Terminal{Kind: NormalCompletion}); !errors.Is(err, errUnitClosed) {
 		t.Fatalf("late submission: %v", err)
 	}
 	second, err := sibling.Register(ctx, bound, ProcessDescription{Identity: "independent-process", Capture: filepath.Join(t.TempDir(), "testlog")})
@@ -328,7 +328,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	closingGate.Store(nil)
 	select {
 	case result := <-abortResult:
-		if !errors.Is(result.err, ErrUnitAborted) || result.value.Fingerprint.MaximalClosure != "" {
+		if !errors.Is(result.err, errUnitAborted) || result.value.Fingerprint.MaximalClosure != "" {
 			t.Fatalf("aborted close returned final evidence: %+v %v", result.value.Verdict, result.err)
 		}
 	case <-time.After(10 * time.Second):
@@ -510,7 +510,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	resumePreparation := sync.OnceFunc(func() { close(resume) })
 	defer resumePreparation()
 	defer pending.Abort()
-	pending.producing.view.beforeOutcomeIssue = func() { close(prepared); <-resume }
+	pending.view.beforeOutcomeIssue = func() { close(prepared); <-resume }
 	registered := make(chan error, 1)
 	go func() {
 		_, err := pending.Register(ctx, bound, ProcessDescription{Identity: "unfinished-preparation"})
@@ -529,7 +529,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	resumePreparation()
 	select {
 	case err := <-registered:
-		if !errors.Is(err, ErrUnitClosed) {
+		if !errors.Is(err, errUnitClosed) {
 			t.Fatalf("late preparation admitted: %v", err)
 		}
 	case <-time.After(10 * time.Second):
@@ -576,10 +576,11 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if verdict, err := extension.Check(ctx, subject, final.Fingerprint); err != nil || verdict.Status != Stale {
 		t.Fatalf("ordinary checking silently extended applicability: %+v %v", verdict, err)
 	}
-	extended, paired, verdict, err := extension.CheckInertExtension(ctx, subject, final.Fingerprint, ledger)
-	if err != nil || verdict.Status != Valid {
-		t.Fatalf("licensed extension: %+v %v", verdict, err)
+	checked, err := extension.CheckBatchWithLedgers(ctx, []Candidate{{subject, final.Fingerprint}}, map[int]TestVariantLedger{0: ledger})
+	if err != nil || len(checked) != 1 || checked[0].Verdict.Status != Valid || checked[0].Extension == nil {
+		t.Fatalf("licensed extension: %+v %v", checked, err)
 	}
+	extended, paired := checked[0].Extension.Fingerprint, checked[0].Extension.Ledger
 	if extended.TestVariantClosure != final.Fingerprint.TestVariantClosure || extended.ObservationProof != final.Fingerprint.ObservationProof || extended.RuntimeInputs != final.Fingerprint.RuntimeInputs || len(paired.Declarations) <= len(ledger.Declarations) {
 		t.Fatal("extension lost producing evidence or returned the wrong companion ledger")
 	}
@@ -592,7 +593,7 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	preview.engine.deferredCheckClose = true
 	previewPasses := 0
 	viewTestHooks.observe = func() { previewPasses++ }
-	_, _, previewVerdict, previewErr := preview.CheckObservedInertTestVariantExtension(ctx, final.Fingerprint, ledger, subject)
+	_, _, previewVerdict, previewErr := preview.checkInertTestVariantExtension(ctx, final.Fingerprint, ledger, subject, true)
 	preview.engine.deferredCheckClose = false
 	viewTestHooks.observe = priorObserve
 	if previewErr != nil || previewVerdict.Status != Valid {
@@ -605,9 +606,9 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 			write("base.go", "//go:build !amd64.v2\n\npackage session\nfunc Value() int { return 77 }\n")
 		}
 	}
-	rejected, rejectedLedger, _, closingErr := extension.CheckInertExtension(ctx, subject, final.Fingerprint, ledger)
+	rejected, closingErr := extension.CheckBatchWithLedgers(ctx, []Candidate{{subject, final.Fingerprint}}, map[int]TestVariantLedger{0: ledger})
 	viewTestHooks.observe = priorObserve
-	if !errors.Is(closingErr, ErrViewChanged) || rejected.MaximalClosure != "" || len(rejectedLedger.Declarations) != 0 {
+	if !errors.Is(closingErr, ErrViewChanged) || len(rejected) != 0 {
 		t.Fatalf("extension returned provisional evidence without closing: passes=%d preview=%d error=%v", passes, previewPasses, closingErr)
 	}
 }
@@ -668,9 +669,9 @@ func TestSnapshotCaptureAndCaptureBatch(t *testing.T) {
 	ctx := t.Context()
 	for _, s := range []*Snapshot{nil, {}} {
 		for name, call := range map[string]func() error{
-			"Capture":          func() error { _, err := s.Capture(ctx, Subject{}); return err },
-			"CaptureBatch":     func() error { _, err := s.CaptureBatch(ctx); return err },
-			"CaptureObserved":  func() error { _, err := s.CaptureObserved(ctx, Subject{}); return err },
+			"Capture":         func() error { _, err := s.Capture(ctx, Subject{}); return err },
+			"CaptureBatch":    func() error { _, err := s.CaptureBatch(ctx); return err },
+			"captureObserved": func() error { _, err := s.captureObserved(ctx, Subject{}); return err },
 			"CaptureObservedBatch": func() error {
 				_, err := s.CaptureObservedBatch(ctx)
 				return err
@@ -684,16 +685,12 @@ func TestSnapshotCaptureAndCaptureBatch(t *testing.T) {
 			"CheckObserved":      func() error { _, err := s.CheckObserved(ctx, Fingerprint{}, Subject{}); return err },
 			"CheckObservedBatch": func() error { _, err := s.CheckObservedBatch(ctx, nil); return err },
 			"Validate":           func() error { return s.Validate(ctx) },
-			"CheckInertTestVariantExtension": func() error {
-				_, _, _, err := s.CheckInertTestVariantExtension(ctx, Fingerprint{}, TestVariantLedger{}, Subject{})
+			"checkInertTestVariantExtension": func() error {
+				_, _, _, err := s.checkInertTestVariantExtension(ctx, Fingerprint{}, TestVariantLedger{}, Subject{}, false)
 				return err
 			},
-			"CheckObservedInertTestVariantExtension": func() error {
-				_, _, _, err := s.CheckObservedInertTestVariantExtension(ctx, Fingerprint{}, TestVariantLedger{}, Subject{})
-				return err
-			},
-			"PrepareOutcomeSupport": func() error {
-				_, err := s.PrepareOutcomeSupport(ctx, runtimeinput.ProducerFrame{}, "worker")
+			"prepareOutcomeSupport": func() error {
+				_, _, err := s.prepareOutcomeSupport(ctx, runtimeinput.ProducerFrame{}, "worker")
 				return err
 			},
 			"SourceFilesFor":    func() error { _, err := s.SourceFilesFor(Subject{}); return err },

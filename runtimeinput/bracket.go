@@ -13,7 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/guard"
 )
 
 // Bracket is an observation bracket (REQ-inputs-value-binding): a fingerprint

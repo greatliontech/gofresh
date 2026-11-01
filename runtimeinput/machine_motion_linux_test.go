@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/guard"
 )
 
 func machineMotionFacts() (guard.MachineFacts, guard.MachineFacts) {

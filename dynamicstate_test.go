@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/dynstate"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
@@ -1343,7 +1343,7 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fingerprint, err := producer.CaptureObserved(ctx, subject)
+		fingerprint, err := producer.captureObserved(ctx, subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1538,7 +1538,7 @@ func TestVouchWithdrawalRefusesObservedServe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.CaptureObserved(ctx, subject)
+	fingerprint, err := producer.captureObserved(ctx, subject)
 	if err != nil {
 		t.Fatal(err)
 	}

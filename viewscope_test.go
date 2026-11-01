@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/guard"
 )
 
 // The engine supplies the strategy, guard and assertion axes; the constructed
@@ -21,10 +21,11 @@ func TestAnalysisScopeWiresTheStrategyConstants(t *testing.T) {
 	if plain.Proofs() != "" || plain.Facts() != "" || plain.Scan() != "" || plain.TestingScan() != "" {
 		t.Fatal("reported guards without source dependencies armed a memo")
 	}
-	attested := (&engine{executionModel: ExecutionAssertions{SingleSubject: true, PackageProcess: true}, dynamicStateVouches: map[string]bool{"example.com/dep:Hooks": true, "a.example/x:Y": true}}).analysisScope(guards)
+	attested := (&engine{executionModel: SingleSubjectExecution, dynamicStateVouches: map[string]bool{"example.com/dep:Hooks": true, "a.example/x:Y": true}}).analysisScope(guards)
+	pkgAttested := (&engine{executionModel: PackageExecution}).analysisScope(guards)
 	slices.Sort(attested.Vouches)
-	if !attested.SingleSubject || !attested.PackageProcess || plain.SingleSubject || plain.PackageProcess || !slices.Equal(attested.Vouches, []string{"a.example/x:Y", "example.com/dep:Hooks"}) || len(plain.Vouches) != 0 {
-		t.Fatalf("assertion axes not preserved: plain=%+v attested=%+v", plain, attested)
+	if !attested.SingleSubject || attested.PackageProcess || pkgAttested.SingleSubject || !pkgAttested.PackageProcess || plain.SingleSubject || plain.PackageProcess || !slices.Equal(attested.Vouches, []string{"a.example/x:Y", "example.com/dep:Hooks"}) || len(plain.Vouches) != 0 {
+		t.Fatalf("assertion axes not preserved: plain=%+v attested=%+v pkgAttested=%+v", plain, attested, pkgAttested)
 	}
 	if attested.ProofStrategy != plain.ProofStrategy || attested.FactStrategy != plain.FactStrategy || attested.Toolchain != plain.Toolchain || attested.BuildConfig != plain.BuildConfig {
 		t.Fatal("assertions moved an unrelated scope axis")

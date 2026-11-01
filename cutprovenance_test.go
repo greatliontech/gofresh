@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -131,7 +131,7 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 	for _, inherited := range []bool{false, true} {
 		t.Run(fmt.Sprintf("observed inherited=%t", inherited), func(t *testing.T) {
 			v := sibling(t, parent, cut)
-			fp, err := v.CaptureObserved(context.Background(), cut)
+			fp, err := v.captureObserved(context.Background(), cut)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -154,7 +154,7 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 	})
 	t.Run("runtime movement", func(t *testing.T) {
 		v := sibling(t, parent, cut)
-		fp, err := v.CaptureObserved(context.Background(), cut)
+		fp, err := v.captureObserved(context.Background(), cut)
 		if err != nil {
 			t.Fatal(err)
 		}

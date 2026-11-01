@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 )
@@ -640,30 +639,27 @@ type ExplainHookSet struct {
 	Refusal  func(p *packages.Package, fn string, e ast.Expr, clause string)
 }
 
-// ExplainHooks is nil outside an explain re-derivation (REQ-explain-passive).
-var ExplainHooks atomic.Pointer[ExplainHookSet]
-
-func explainMark(p *packages.Package, kind, key string, at token.Pos) {
-	if h := ExplainHooks.Load(); h != nil && h.Site != nil {
-		h.Site(p, kind, key, at)
+func explainMark(hooks *ExplainHookSet, p *packages.Package, kind, key string, at token.Pos) {
+	if hooks != nil && hooks.Site != nil {
+		hooks.Site(p, kind, key, at)
 	}
 }
 
-func explainDeferralMark(p *packages.Package, kind byte, key string, resolvent DeferralResolvent, at token.Pos) {
-	if h := ExplainHooks.Load(); h != nil && h.Deferral != nil {
-		h.Deferral(p, kind, key, resolvent, at)
+func explainDeferralMark(hooks *ExplainHookSet, p *packages.Package, kind byte, key string, resolvent DeferralResolvent, at token.Pos) {
+	if hooks != nil && hooks.Deferral != nil {
+		hooks.Deferral(p, kind, key, resolvent, at)
 	}
 }
 
-func explainStoreMark(p *packages.Package, key string, at token.Pos) {
-	if h := ExplainHooks.Load(); h != nil && h.Store != nil {
-		h.Store(p, key, at)
+func explainStoreMark(hooks *ExplainHookSet, p *packages.Package, key string, at token.Pos) {
+	if hooks != nil && hooks.Store != nil {
+		hooks.Store(p, key, at)
 	}
 }
 
-func explainRefusalMark(p *packages.Package, fn string, e ast.Expr, clause string) {
-	if h := ExplainHooks.Load(); h != nil && h.Refusal != nil {
-		h.Refusal(p, fn, e, clause)
+func explainRefusalMark(hooks *ExplainHookSet, p *packages.Package, fn string, e ast.Expr, clause string) {
+	if hooks != nil && hooks.Refusal != nil {
+		hooks.Refusal(p, fn, e, clause)
 	}
 }
 
@@ -710,6 +706,12 @@ func recordPackageMethodDirectives(p *packages.Package, fact *Fact) {
 // FactOf derives one package's dynamic-state fact from its syntax and type
 // information.
 func FactOf(audited bool, p *packages.Package, singleSubject bool) Fact {
+	return FactOfWithHooks(audited, p, singleSubject, nil)
+}
+
+// FactOfWithHooks derives one package's dynamic-state fact with optional
+// explain observation hooks armed.
+func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hooks *ExplainHookSet) Fact {
 	var fact Fact
 	if p == nil {
 		return fact
@@ -729,7 +731,7 @@ func FactOf(audited bool, p *packages.Package, singleSubject bool) Fact {
 	if singleSubject {
 		poolDischarged = map[string]bool{}
 	}
-	recordDynamicGlobalUses(audited, p, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses, singleSubject, poolDischarged)
+	recordDynamicGlobalUses(audited, p, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses, singleSubject, poolDischarged, hooks)
 	for key := range poolDischarged {
 		fact.PoolDischarges = append(fact.PoolDischarges, key)
 	}
@@ -750,7 +752,7 @@ func FactOf(audited bool, p *packages.Package, singleSubject bool) Fact {
 	envCalls := map[string]map[FuncKey]bool{}
 	fieldDefer := map[FieldPosKey]map[ParamKey]bool{}
 	fieldPoison := map[string]map[FieldParamPoison]bool{}
-	recordEnvCarryingRegistrations(audited, p, envCarrying, envCalls, fieldDefer, fieldPoison)
+	recordEnvCarryingRegistrations(audited, p, envCarrying, envCalls, fieldDefer, fieldPoison, hooks)
 	for pos, params := range fieldDefer {
 		for param := range params {
 			fact.FieldParamDefer = append(fact.FieldParamDefer, FieldParamDefer{Pos: pos, Param: param})
@@ -852,7 +854,7 @@ func FactOf(audited bool, p *packages.Package, singleSubject bool) Fact {
 			}
 		}
 		slices.SortFunc(fact.ParamRetentionFreeDeps, ParamDepEdge.Compare)
-		envFree, envDeps, retFieldDefer, retFieldPoison, insFree, insDeps, callerInsDeps := returnEnvFreeFunctions(audited, p, paramLeakFree, readOnly)
+		envFree, envDeps, retFieldDefer, retFieldPoison, insFree, insDeps, callerInsDeps := returnEnvFreeFunctions(audited, p, paramLeakFree, readOnly, hooks)
 		pkgPath := p.Types.Path()
 		for fnName := range envFree {
 			fnKey := FuncKey{Pkg: pkgPath, Name: fnName}

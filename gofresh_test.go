@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/closure"
-	"github.com/greatliontech/gofresh/closure/testvariant"
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/closure"
+	"github.com/greatliontech/gofresh/internal/testvariant"
+	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/runtimeinput"
 	"github.com/greatliontech/stipulator/stipulate/structural"
@@ -342,7 +342,7 @@ func TestAssumePureInputShape(t *testing.T) {
 	}
 }
 
-const methodPkg = "github.com/greatliontech/gofresh/closure/fixtures/methodsubject"
+const methodPkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/methodsubject"
 
 // TestCaptureCheckRoundTrip pins the happy path end to end: a fingerprint captured
 // for a pure subject is Valid when checked against the same tree, and the same
@@ -446,7 +446,7 @@ func TestBuildFlagsRejectOverlay(t *testing.T) {
 	if _, err := newEngine(withBuildFlags(flags...)); err == nil || !strings.Contains(err.Error(), "-overlay") {
 		t.Fatalf("engine accepted overlay: %v", err)
 	}
-	if _, err := ScanPureDirectives(t.TempDir(), os.Environ(), flags, "example.com/p"); err == nil || !strings.Contains(err.Error(), "-overlay") {
+	if _, err := scanPureDirectivesAt(t.TempDir(), os.Environ(), flags, "example.com/p"); err == nil || !strings.Contains(err.Error(), "-overlay") {
 		t.Fatalf("purity scanner accepted overlay: %v", err)
 	}
 }
@@ -481,7 +481,7 @@ func TestBuildFlagsSelectSourceAndPurity(t *testing.T) {
 	if !defaultPure(Subject{Package: pkg, Symbol: "Selected"}) {
 		t.Fatal("default build did not find its purity directive")
 	}
-	specialPure, err := ScanPureDirectives(tmp, os.Environ(), flags, pkg)
+	specialPure, err := scanPureDirectivesAt(tmp, os.Environ(), flags, pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +522,7 @@ func TestAssumePureOverride(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
-	subj := Subject{Package: "github.com/greatliontech/gofresh/closure/fixtures/harnessroot", Symbol: "BenchmarkProd"}
+	subj := Subject{Package: "github.com/greatliontech/gofresh/internal/closure/fixtures/harnessroot", Symbol: "BenchmarkProd"}
 
 	e, err := newEngine()
 	if err != nil {
@@ -808,7 +808,7 @@ func TestExternalDirectiveFixtureScan(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
 	}
-	const pkg = "github.com/greatliontech/gofresh/closure/fixtures/externaldirective"
+	const pkg = "github.com/greatliontech/gofresh/internal/closure/fixtures/externaldirective"
 	e, err := newEngine()
 	if err != nil {
 		t.Fatal(err)
@@ -1434,26 +1434,26 @@ func FuzzPreparationAndUnitCoherence(f *testing.F) {
 		}
 
 		// Unit bindings & foreign handle refusal (REQ-fresh-unit-bindings).
-		u1 := &producingUnit{snapshot: view, view: view}
-		u2 := &producingUnit{snapshot: view, view: view}
-		if _, err := u1.register(context.Background(), BuildBinding{snapshot: &Snapshot{}, pkg: pkg, identity: "id"}, ProcessDescription{Identity: "p"}); err == nil {
-			t.Fatal("register accepted BuildBinding from foreign snapshot")
+		u1 := &Unit{snapshot: view, view: view}
+		u2 := &Unit{snapshot: view, view: view}
+		if _, err := u1.Register(context.Background(), BuildBinding{snapshot: &Snapshot{}, pkg: pkg, identity: "id"}, ProcessDescription{Identity: "p"}); err == nil {
+			t.Fatal("Register accepted BuildBinding from foreign snapshot")
 		}
-		if _, err := u1.register(context.Background(), BuildBinding{snapshot: view, pkg: pkg + "_other", identity: "id"}, ProcessDescription{Identity: "p"}); err == nil {
-			t.Fatal("register accepted BuildBinding from foreign package")
+		if _, err := u1.Register(context.Background(), BuildBinding{snapshot: view, pkg: pkg + "_other", identity: "id"}, ProcessDescription{Identity: "p"}); err == nil {
+			t.Fatal("Register accepted BuildBinding from foreign package")
 		}
 		exec := &unitExecution{ready: true}
 		u1.execution = exec
 		foreignContrib := Contribution{unit: u2, execution: exec}
-		if err := u1.submit(foreignContrib, Terminal{Kind: NormalCompletion}); err == nil {
-			t.Fatal("submit accepted foreign unit's contribution")
+		if err := u1.Submit(foreignContrib, Terminal{Kind: NormalCompletion}); err == nil {
+			t.Fatal("Submit accepted foreign unit's contribution")
 		}
 		ownContrib := Contribution{unit: u1, execution: exec}
-		if err := u1.submit(ownContrib, Terminal{Kind: NormalCompletion, Reason: "unexpected"}); err == nil {
-			t.Fatal("submit accepted NormalCompletion with non-empty reason")
+		if err := u1.Submit(ownContrib, Terminal{Kind: NormalCompletion, Reason: "unexpected"}); err == nil {
+			t.Fatal("Submit accepted NormalCompletion with non-empty reason")
 		}
-		if err := u1.submit(ownContrib, Terminal{Kind: AbnormalCompletion, Reason: ""}); err == nil {
-			t.Fatal("submit accepted AbnormalCompletion with empty reason")
+		if err := u1.Submit(ownContrib, Terminal{Kind: AbnormalCompletion, Reason: ""}); err == nil {
+			t.Fatal("Submit accepted AbnormalCompletion with empty reason")
 		}
 
 		// Runtime motion & hold-still exclusion (REQ-fresh-coherent-view, REQ-fresh-unit-exclusion).

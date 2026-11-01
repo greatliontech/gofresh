@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/guard"
 )
 
 // completedFromLog builds a completed observation over dir with the bracket

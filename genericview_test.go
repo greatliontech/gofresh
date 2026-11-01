@@ -57,7 +57,7 @@ func TestViewTierGenericOpennessMatchesConstraints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	boundedPrint, err := view.CaptureObserved(context.Background(), bounded)
+	boundedPrint, err := view.captureObserved(context.Background(), bounded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestViewTierGenericOpennessMatchesConstraints(t *testing.T) {
 	if verdict.Status != Valid {
 		t.Fatalf("bounded generic verdict = %+v, want valid", verdict)
 	}
-	unboundedPrint, err := view.CaptureObserved(context.Background(), unbounded)
+	unboundedPrint, err := view.captureObserved(context.Background(), unbounded)
 	if err != nil {
 		t.Fatal(err)
 	}

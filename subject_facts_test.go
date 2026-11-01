@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/internal/closure"
 )
 
 // testSubjectFacts builds synthetic base observations for verdict-ladder tests.

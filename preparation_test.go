@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/internal/closure"
 )
 
 const preparationSource = "package view\n\nfunc F() int { return 1 }\n\nfunc G() int { return 2 }\n"
@@ -146,7 +146,7 @@ func TestMissingAttachmentRefusesBeforeTheValidationObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := view.CaptureObserved(context.Background(), subject); err != nil {
+	if _, err := view.captureObserved(context.Background(), subject); err != nil {
 		t.Fatal(err)
 	}
 	observed := 0

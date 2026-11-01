@@ -10,18 +10,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/internal/dynstate"
 )
-
-// explainMu serializes explain re-derivations - the observation hooks
-// are package scope, and explain traffic is interactive diagnosis,
-// never a throughput path.
-var explainMu sync.Mutex
 
 // The explain surface turns a refusal into its derivation chain
 // (docs/specs/explain.md). Chains are re-derived on demand against
@@ -125,7 +119,7 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: toolchain selection: %w", err)
 	}
-	return explainCulprit(notice == "", pkgs, pkgPath, varKey, varName, v.engine.executionModel.SingleSubject)
+	return explainCulprit(notice == "", pkgs, pkgPath, varKey, varName, v.engine.executionModel.singleSubject())
 }
 
 // explainCulprit re-derives every loaded package's fact with mark
@@ -134,10 +128,6 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 // environment-audit dependency edges to the first locally refused
 // proof.
 func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, varName string, singleSubject bool) (Chain, error) {
-	explainMu.Lock()
-	defer explainMu.Unlock()
-	defer dynstate.ExplainHooks.Store(nil)
-
 	variants := map[string][]*packages.Package{}
 	var order []*packages.Package
 	packages.Visit(roots, func(p *packages.Package) bool {
@@ -149,7 +139,6 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		return true
 	}, nil)
 
-	var mu sync.Mutex
 	type siteObservation struct {
 		key  string
 		link ChainLink
@@ -164,9 +153,9 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		resolvent dynstate.DeferralResolvent
 		link      ChainLink
 	}
-	var sites []siteObservation
-	var stores []storeObservation
-	var deferrals []deferralObservation
+	var allSites []siteObservation
+	var allStores []storeObservation
+	var allDeferrals []deferralObservation
 	pos := func(p *packages.Package, at token.Pos) string {
 		if !at.IsValid() {
 			return ""
@@ -174,33 +163,21 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		position := p.Fset.Position(at)
 		return fmt.Sprintf("%s:%d", position.Filename, position.Line)
 	}
-	dynstate.ExplainHooks.Store(&dynstate.ExplainHookSet{
+	hooks := &dynstate.ExplainHookSet{
 		Site: func(p *packages.Package, kind, key string, at token.Pos) {
-			mu.Lock()
-			defer mu.Unlock()
-			sites = append(sites, siteObservation{key: key, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Clause: kind, Pos: pos(p, at)}})
+			allSites = append(allSites, siteObservation{key: key, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Clause: kind, Pos: pos(p, at)}})
 		},
 		Store: func(p *packages.Package, key string, at token.Pos) {
-			mu.Lock()
-			defer mu.Unlock()
-			stores = append(stores, storeObservation{key: key, link: ChainLink{Kind: "store", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)}})
+			allStores = append(allStores, storeObservation{key: key, link: ChainLink{Kind: "store", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)}})
 		},
 		Deferral: func(p *packages.Package, kind byte, key string, resolvent dynstate.DeferralResolvent, at token.Pos) {
-			mu.Lock()
-			defer mu.Unlock()
-			deferrals = append(deferrals, deferralObservation{key: key, kind: kind, resolvent: resolvent, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)}})
+			allDeferrals = append(allDeferrals, deferralObservation{key: key, kind: kind, resolvent: resolvent, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)}})
 		},
-	})
+	}
 	facts := map[string][]dynamicStateFact{}
 	for _, p := range order {
-		facts[p.PkgPath] = append(facts[p.PkgPath], dynamicStateFactOf(audited, p, singleSubject))
+		facts[p.PkgPath] = append(facts[p.PkgPath], dynstate.FactOfWithHooks(audited, p, singleSubject, hooks))
 	}
-	dynstate.ExplainHooks.Store(nil)
-	mu.Lock()
-	allSites := append([]siteObservation(nil), sites...)
-	allStores := append([]storeObservation(nil), stores...)
-	allDeferrals := append([]deferralObservation(nil), deferrals...)
-	mu.Unlock()
 
 	linkAdj := carrierLinkGraph(facts, nil)
 	linkedKeys := map[string]bool{varKey: true}
@@ -335,24 +312,18 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	protect := len(links)
 	if refusedFn != "" && refusedPath != "" {
 		var refusals []ChainLink
-		dynstate.ExplainHooks.Store(&dynstate.ExplainHookSet{
+		refusalHooks := &dynstate.ExplainHookSet{
 			Refusal: func(p *packages.Package, fn string, e ast.Expr, clause string) {
 				if fn != refusedFn || p.PkgPath != refusedPath {
 					return
 				}
-				mu.Lock()
-				defer mu.Unlock()
 				refusals = append(refusals, ChainLink{Kind: "refusal", Package: p.PkgPath, Symbol: fn, Clause: clause, Pos: pos(p, e.Pos())})
 			},
-		})
-		for _, vp := range variants[refusedPath] {
-			dynamicStateFactOf(audited, vp, singleSubject)
 		}
-		dynstate.ExplainHooks.Store(nil)
-		mu.Lock()
-		collected := dedupeLinks(append([]ChainLink(nil), refusals...))
-		mu.Unlock()
-		links = append(links, collected...)
+		for _, vp := range variants[refusedPath] {
+			dynstate.FactOfWithHooks(audited, vp, singleSubject, refusalHooks)
+		}
+		links = append(links, dedupeLinks(refusals)...)
 	}
 	if protect >= len(links) {
 		protect = len(links) - 1

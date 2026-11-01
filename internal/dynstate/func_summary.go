@@ -1315,6 +1315,7 @@ func recordDynamicGlobalUses(
 	attributed *[]AttributedUse,
 	singleSubject bool,
 	poolDischarged map[string]bool,
+	hooks *ExplainHookSet,
 ) {
 	if p == nil || p.TypesInfo == nil {
 		return
@@ -1352,11 +1353,11 @@ func recordDynamicGlobalUses(
 			}
 			if obj, ok := resolve(ident); ok {
 				if variable, ok := dynamicPackageVar(obj); ok {
-					explainMark(p, "mutation", dynamicVarKey(variable), ident.Pos())
+					explainMark(hooks, p, "mutation", dynamicVarKey(variable), ident.Pos())
 					mutated[dynamicVarKey(variable)] = true
 				} else {
 					for key := range aliasedLocals[obj] {
-						explainMark(p, "mutation", key, ident.Pos())
+						explainMark(hooks, p, "mutation", key, ident.Pos())
 						mutated[key] = true
 					}
 				}
@@ -1491,11 +1492,11 @@ func recordDynamicGlobalUses(
 						if ident, ok := inner.(*ast.Ident); ok {
 							if obj, ok := resolve(ident); ok {
 								if variable, ok := dynamicPackageVar(obj); ok {
-									explainMark(p, "escape", dynamicVarKey(variable), ident.Pos())
+									explainMark(hooks, p, "escape", dynamicVarKey(variable), ident.Pos())
 									escaped[dynamicVarKey(variable)] = true
 								} else {
 									for key := range aliased[obj] {
-										explainMark(p, "escape", key, ident.Pos())
+										explainMark(hooks, p, "escape", key, ident.Pos())
 										escaped[key] = true
 									}
 								}
@@ -1749,7 +1750,7 @@ func recordDynamicGlobalUses(
 			}
 			paramKey := ParamKey{Func: FuncKey{Pkg: pkgPath, Name: fn.Name()}, Index: idx}
 			sink[key][paramKey] = true
-			explainDeferralMark(p, kind, key, DeferralResolvent{Param: paramKey}, target.Pos())
+			explainDeferralMark(hooks, p, kind, key, DeferralResolvent{Param: paramKey}, target.Pos())
 			if onDeferred != nil {
 				onDeferred(target)
 			}
@@ -1812,12 +1813,12 @@ func recordDynamicGlobalUses(
 				if obj, ok := resolve(ident); ok {
 					if variable, ok := dynamicPackageVar(obj); ok {
 						if TypeHandsOutDynamicAlias(audited, variable.Type()) {
-							explainMark(p, "escape", dynamicVarKey(variable), ident.Pos())
+							explainMark(hooks, p, "escape", dynamicVarKey(variable), ident.Pos())
 							escaped[dynamicVarKey(variable)] = true
 						}
 					} else {
 						for key := range aliasedLocals[obj] {
-							explainMark(p, "escape", key, ident.Pos())
+							explainMark(hooks, p, "escape", key, ident.Pos())
 							escaped[key] = true
 						}
 					}
@@ -1870,7 +1871,7 @@ func recordDynamicGlobalUses(
 										}
 										factKey := methodFactKey(fn)
 										initMethodUses[key][factKey] = true
-										explainDeferralMark(p, 'n', key, DeferralResolvent{Method: factKey}, sel.Pos())
+										explainDeferralMark(hooks, p, 'n', key, DeferralResolvent{Method: factKey}, sel.Pos())
 										deferred = true
 									}
 								}
@@ -2011,14 +2012,14 @@ func recordDynamicGlobalUses(
 										}
 										for want := range wants {
 											paramUses[key][want] = true
-											explainDeferralMark(p, 'p', key, DeferralResolvent{Param: want}, n.X.Pos())
+											explainDeferralMark(hooks, p, 'p', key, DeferralResolvent{Param: want}, n.X.Pos())
 										}
 										if len(methodWants) > 0 && methodUses[key] == nil {
 											methodUses[key] = map[FuncKey]bool{}
 										}
 										for want := range methodWants {
 											methodUses[key][want] = true
-											explainDeferralMark(p, 'm', key, DeferralResolvent{Method: want}, n.X.Pos())
+											explainDeferralMark(hooks, p, 'm', key, DeferralResolvent{Method: want}, n.X.Pos())
 										}
 										if len(fieldWants) > 0 && fieldUses[key] == nil {
 											fieldUses[key] = map[FieldPosKey]bool{}
@@ -2026,7 +2027,7 @@ func recordDynamicGlobalUses(
 										for want := range fieldWants {
 											pos := FieldPosKey{Owner: key, Field: want.Field, Index: want.Index}
 											fieldUses[key][pos] = true
-											explainDeferralMark(p, 'f', key, DeferralResolvent{FieldPos: pos}, n.X.Pos())
+											explainDeferralMark(hooks, p, 'f', key, DeferralResolvent{FieldPos: pos}, n.X.Pos())
 										}
 										if len(elemWants) > 0 && elemUses[key] == nil {
 											elemUses[key] = map[ElemParamUse]bool{}
@@ -2034,7 +2035,7 @@ func recordDynamicGlobalUses(
 										for want := range elemWants {
 											eu := ElemParamUse{Key: key, Owner: want.Owner, Index: want.Index}
 											elemUses[key][eu] = true
-											explainDeferralMark(p, 'e', key, DeferralResolvent{ElemUse: eu}, n.X.Pos())
+											explainDeferralMark(hooks, p, 'e', key, DeferralResolvent{ElemUse: eu}, n.X.Pos())
 										}
 									}
 									if returned {
@@ -2127,7 +2128,7 @@ func recordDynamicGlobalUses(
 												elemUses[argKey] = map[ElemParamUse]bool{}
 											}
 											elemUses[argKey][want] = true
-											explainDeferralMark(p, 'e', argKey, DeferralResolvent{ElemUse: want}, arg.Pos())
+											explainDeferralMark(hooks, p, 'e', argKey, DeferralResolvent{ElemUse: want}, arg.Pos())
 											readContext[ident] = true
 										}
 									}
@@ -2172,7 +2173,7 @@ func recordDynamicGlobalUses(
 										}
 										factKey := methodFactKey(fn)
 										methodUses[key][factKey] = true
-										explainDeferralMark(p, 'm', key, DeferralResolvent{Method: factKey}, n.Pos())
+										explainDeferralMark(hooks, p, 'm', key, DeferralResolvent{Method: factKey}, n.Pos())
 										readContext[ident] = true
 										return true
 									}
@@ -2192,11 +2193,11 @@ func recordDynamicGlobalUses(
 				}
 				if obj, ok := resolve(n); ok {
 					if variable, ok := dynamicPackageVar(obj); ok && TypeHandsOutDynamicAlias(audited, variable.Type()) {
-						explainMark(p, "escape", dynamicVarKey(variable), n.Pos())
+						explainMark(hooks, p, "escape", dynamicVarKey(variable), n.Pos())
 						escaped[dynamicVarKey(variable)] = true
 					} else {
 						for key := range aliasedLocals[obj] {
-							explainMark(p, "escape", key, n.Pos())
+							explainMark(hooks, p, "escape", key, n.Pos())
 							escaped[key] = true
 						}
 					}
@@ -2624,7 +2625,7 @@ func recordDynamicGlobalUses(
 								paramUses[key] = map[ParamKey]bool{}
 							}
 							paramUses[key][want] = true
-							explainDeferralMark(p, 'p', key, DeferralResolvent{Param: want}, call.Pos())
+							explainDeferralMark(hooks, p, 'p', key, DeferralResolvent{Param: want}, call.Pos())
 						}
 					}
 					for want := range siteMethodWants {
@@ -2633,7 +2634,7 @@ func recordDynamicGlobalUses(
 								methodUses[key] = map[FuncKey]bool{}
 							}
 							methodUses[key][want] = true
-							explainDeferralMark(p, 'm', key, DeferralResolvent{Method: want}, call.Pos())
+							explainDeferralMark(hooks, p, 'm', key, DeferralResolvent{Method: want}, call.Pos())
 						}
 					}
 					for want := range siteFieldWants {
@@ -2643,7 +2644,7 @@ func recordDynamicGlobalUses(
 							}
 							pos := FieldPosKey{Owner: key, Field: want.Field, Index: want.Index}
 							fieldUses[key][pos] = true
-							explainDeferralMark(p, 'f', key, DeferralResolvent{FieldPos: pos}, call.Pos())
+							explainDeferralMark(hooks, p, 'f', key, DeferralResolvent{FieldPos: pos}, call.Pos())
 						}
 					}
 					for want := range siteElemWants {
@@ -2653,7 +2654,7 @@ func recordDynamicGlobalUses(
 							}
 							eu := ElemParamUse{Key: key, Owner: want.Owner, Index: want.Index}
 							elemUses[key][eu] = true
-							explainDeferralMark(p, 'e', key, DeferralResolvent{ElemUse: eu}, call.Pos())
+							explainDeferralMark(hooks, p, 'e', key, DeferralResolvent{ElemUse: eu}, call.Pos())
 						}
 					}
 					if siteReturned {
@@ -2741,7 +2742,7 @@ func recordDynamicGlobalUses(
 						*attributed = append(*attributed, AttributedUse{Func: pending.attrFn, Key: key, Escape: true})
 					}
 				} else {
-					explainMark(p, "escape", key, token.NoPos)
+					explainMark(hooks, p, "escape", key, token.NoPos)
 					escaped[key] = true
 				}
 			}
@@ -3106,6 +3107,7 @@ func recordEnvCarryingRegistrations(
 	envCalls map[string]map[FuncKey]bool,
 	fieldDefer map[FieldPosKey]map[ParamKey]bool,
 	fieldPoison map[string]map[FieldParamPoison]bool,
+	hooks *ExplainHookSet,
 ) {
 	if p == nil || p.TypesInfo == nil {
 		return
@@ -3325,7 +3327,7 @@ func recordEnvCarryingRegistrations(
 		}
 		if poison {
 			for _, variable := range targets {
-				explainStoreMark(p, dynamicVarKey(variable), poisonAt)
+				explainStoreMark(hooks, p, dynamicVarKey(variable), poisonAt)
 				envCarrying[dynamicVarKey(variable)] = true
 			}
 		} else if envCalls != nil {
@@ -3469,6 +3471,7 @@ func returnEnvFreeFunctions(
 	p *packages.Package,
 	paramLeakFree map[ParamKey]bool,
 	readOnly map[string]bool,
+	hooks *ExplainHookSet,
 ) (
 	map[string]bool,
 	map[string]map[FuncKey]bool,
@@ -4500,7 +4503,7 @@ func returnEnvFreeFunctions(
 					insDeps[key] = collected
 				}
 			}
-			if h := ExplainHooks.Load(); h != nil && h.Refusal != nil {
+			if hooks != nil && hooks.Refusal != nil {
 				inner := free
 				free = func(e ast.Expr) bool {
 					r := inner(e)
@@ -4529,7 +4532,7 @@ func returnEnvFreeFunctions(
 						case *ast.SelectorExpr, *ast.IndexExpr, *ast.SliceExpr:
 							clause = "an unadmitted derivation shape"
 						}
-						explainRefusalMark(p, fd.Name.Name, e, clause)
+						explainRefusalMark(hooks, p, fd.Name.Name, e, clause)
 					}
 					return r
 				}

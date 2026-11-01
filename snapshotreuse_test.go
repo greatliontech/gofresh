@@ -36,7 +36,7 @@ func TestObservedCaptureReusesConstructionSnapshot(t *testing.T) {
 	if view.facts.snapshot == nil {
 		t.Fatal("view retained no construction snapshot")
 	}
-	if _, err := view.CaptureObserved(context.Background(), subject); err != nil {
+	if _, err := view.captureObserved(context.Background(), subject); err != nil {
 		t.Fatal(err)
 	}
 	if seen != view.facts.snapshot {
@@ -94,7 +94,7 @@ func TestObservedCaptureRefusesMidWindowOverlayBeforeAnyLoad(t *testing.T) {
 	if err := os.WriteFile(goenv, []byte("GOFLAGS=-overlay=/absent.json\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err = view.CaptureObserved(context.Background(), subject)
+	_, err = view.captureObserved(context.Background(), subject)
 	if err == nil || !strings.Contains(err.Error(), "overlay") {
 		t.Fatalf("mid-window overlay capture = %v, want the build-flag overlay refusal", err)
 	}

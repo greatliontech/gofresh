@@ -166,7 +166,7 @@ func TestRuntimeMovementRefusesPureProductionAndHistory(t *testing.T) {
 			if !errors.As(closeErr, &span) || span.Cause() != (Cause{Kind: RuntimeInputsCause, Condition: Changed}) || len(final.Subjects) != 0 || !account.Inputs.BracketMoved {
 				t.Fatalf("motion was not a structured closing refusal: %+v %+v %v", final, account, closeErr)
 			}
-			if _, err := u.Close(t.Context()); !errors.Is(err, ErrUnitClosed) {
+			if _, err := u.Close(t.Context()); !errors.Is(err, errUnitClosed) {
 				t.Fatalf("failed close reopened: %v", err)
 			}
 			// A stored v4 failure stays stale both before and after restoration.

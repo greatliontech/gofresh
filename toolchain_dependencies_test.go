@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
@@ -85,7 +85,7 @@ func TestToolchainContentBindsRecordedApplicability(t *testing.T) {
 			}
 			capture := func(v *Snapshot) (Fingerprint, error) {
 				if tc.observed {
-					return v.CaptureObserved(ctx, subject)
+					return v.captureObserved(ctx, subject)
 				}
 				return v.Capture(ctx, subject)
 			}
@@ -240,7 +240,7 @@ func TestPolicyMismatchCannotLiftClosureRefusal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	control, err := producer.CaptureObserved(t.Context(), subject)
+	control, err := producer.captureObserved(t.Context(), subject)
 	if err != nil || !control.ObservationProof.Observable {
 		t.Fatalf("control: %+v %v", control, err)
 	}
@@ -252,7 +252,7 @@ func TestPolicyMismatchCannotLiftClosureRefusal(t *testing.T) {
 	}
 	cl.AdmissionPolicy = "historical-" + cl.AdmissionPolicy
 	producer.facts.maximal[subject] = testSubjectFacts(cl)
-	recorded, err := producer.CaptureObserved(t.Context(), subject)
+	recorded, err := producer.captureObserved(t.Context(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}

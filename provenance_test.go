@@ -1,7 +1,9 @@
 package gofresh
 
 import (
+	"context"
 	"github.com/greatliontech/gofresh/gotool"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -96,5 +98,32 @@ func TestToolchainSkewLabelsTheBinarySide(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ambient toolchain "+ambient+" (language "+gotool.LanguageSeries(ambient)+")") {
 		t.Fatalf("skew message %q does not annotate the ambient %q with its own series", err.Error(), ambient)
+	}
+}
+
+func TestResolveToolchainSelection(t *testing.T) {
+	dir := t.TempDir()
+	reader := gotool.NewEnvReader(gotool.Runner{}, dir, os.Environ())
+	if _, err := ResolveToolchainSelection(nil, reader); err == nil {
+		t.Fatal("nil context accepted by ResolveToolchainSelection")
+	}
+	if _, err := ResolveToolchainSelection(context.Background(), nil); err == nil {
+		t.Fatal("nil reader accepted by ResolveToolchainSelection")
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := ResolveToolchainSelection(cancelled, reader); err == nil {
+		t.Fatal("cancelled context accepted by ResolveToolchainSelection")
+	}
+	var nilSession *Session
+	if _, err := nilSession.ToolchainSelection(context.Background()); err == nil {
+		t.Fatal("nil session accepted by ToolchainSelection")
+	}
+	sel, err := ResolveToolchainSelection(context.Background(), reader)
+	if err != nil {
+		t.Fatalf("ResolveToolchainSelection: %v", err)
+	}
+	if sel.ToolchainContent == "" || sel.AdmissionPolicy == "" {
+		t.Fatalf("ResolveToolchainSelection returned empty digests: %+v", sel)
 	}
 }

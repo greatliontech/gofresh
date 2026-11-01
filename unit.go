@@ -10,17 +10,17 @@ import (
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
-// ErrUnitClosed reports admission, submission or closing after the unit started
+// errUnitClosed reports admission, submission or closing after the unit started
 // its terminal closing transition. A retry needs another unit.
-var ErrUnitClosed = errors.New("gofresh: unit is closing or ended")
+var errUnitClosed = errors.New("gofresh: unit is closing or ended")
 
 // ErrUnitIncomplete reports a missing contributor or terminal disposition. A
 // missing log never supplies that disposition on the executor's behalf.
 var ErrUnitIncomplete = errors.New("gofresh: unit has incomplete contributing executions")
 
-// ErrUnitAborted reports an abort that won before closing committed its final
+// errUnitAborted reports an abort that won before closing committed its final
 // state. It grants no final evidence, even if some closing work completed.
-var ErrUnitAborted = errors.New("gofresh: unit aborted before closing completed")
+var errUnitAborted = errors.New("gofresh: unit aborted before closing completed")
 
 // ProcessDescription names the execution before it starts. Capture is the
 // executor-owned test-log path; the executor keeps it exclusively assigned to
@@ -62,7 +62,7 @@ type Terminal struct {
 // Contribution is a unit-owned execution binding. Its zero value and a handle
 // from another unit cannot settle this unit's obligation.
 type Contribution struct {
-	unit      *producingUnit
+	unit      *Unit
 	execution *unitExecution
 }
 
@@ -112,7 +112,6 @@ const (
 type unitExecution struct {
 	process       ProcessDescription
 	artifact      string
-	inspected     *inspectedArtifact
 	env           []string
 	frame         runtimeinput.ProducerFrame
 	support       runtimeinput.OutcomeSupport
@@ -125,24 +124,11 @@ type unitExecution struct {
 	cancel        context.CancelFunc
 }
 
-// Unit owns one subject's single contributing package-test process and its
-// producing/closing obligations. A second contributor is refused, not silently
-// dropped. Independent units share only their snapshot's immutable source facts.
+// Unit owns one contributing package-test process (for a single subject or an
+// explicit subject roster from one package) and its producing/closing
+// obligations. A second contributor is refused, not silently dropped.
+// Independent units share only their snapshot's immutable source facts.
 type Unit struct {
-	producing *producingUnit
-}
-
-// PackageUnit owns one package-test process over its complete selected subject
-// set. Its subjects share that process's observation, not another attempt's
-// evidence. Isolation retries use separate units; publication grouping remains
-// the result owner's responsibility.
-type PackageUnit struct {
-	producing *producingUnit
-}
-
-// producingUnit is the single lifecycle for singleton and package executions.
-// The immutable subject set is also the complete roster for process-wide proofs.
-type producingUnit struct {
 	mu            sync.Mutex
 	phase         unitPhase
 	snapshot      *Snapshot
@@ -154,37 +140,25 @@ type producingUnit struct {
 
 // Begin creates an independently closing unit under this runtime binding.
 func (s *RuntimeBinding) Begin(subject Subject) (*Unit, error) {
-	u, err := s.begin([]Subject{subject}, false)
-	if err != nil {
-		return nil, err
-	}
-	return &Unit{producing: u}, nil
+	return s.begin([]Subject{subject}, false)
 }
 
 // BeginIdentity selects identity-only input evidence for a diagnostic execution,
 // such as an instrumented profile. It deliberately prepares no outcome support;
 // ordinary completion cannot promote the resulting evidence to supported form.
 func (s *RuntimeBinding) BeginIdentity(subject Subject) (*Unit, error) {
-	u, err := s.begin([]Subject{subject}, true)
-	if err != nil {
-		return nil, err
-	}
-	return &Unit{producing: u}, nil
+	return s.begin([]Subject{subject}, true)
 }
 
 // BeginPackage creates an independently closing execution for a nonempty set
 // of subjects from one package. Duplicates collapse in first-request order.
 // Every executed subject, including subjects without a cacheable result, belongs
 // in this set. A single-subject execution assertion refuses a larger set.
-func (s *RuntimeBinding) BeginPackage(subjects []Subject) (*PackageUnit, error) {
-	u, err := s.begin(subjects, false)
-	if err != nil {
-		return nil, err
-	}
-	return &PackageUnit{producing: u}, nil
+func (s *RuntimeBinding) BeginPackage(subjects []Subject) (*Unit, error) {
+	return s.begin(subjects, false)
 }
 
-func (s *RuntimeBinding) begin(subjects []Subject, identityOnly bool) (*producingUnit, error) {
+func (s *RuntimeBinding) begin(subjects []Subject, identityOnly bool) (*Unit, error) {
 	v, err := s.newView(subjects)
 	if err != nil {
 		return nil, err
@@ -192,41 +166,16 @@ func (s *RuntimeBinding) begin(subjects []Subject, identityOnly bool) (*producin
 	if len(v.packages) != 1 {
 		return nil, errors.New("gofresh: a producing execution must belong to one package")
 	}
-	if len(v.subjects) > 1 && v.engine.executionModel.SingleSubject {
+	if len(v.subjects) > 1 && v.engine.executionModel.singleSubject() {
 		return nil, errors.New("gofresh: a multi-subject execution contradicts the single-subject assertion")
 	}
-	return &producingUnit{snapshot: s.snapshot, view: v, identityOnly: identityOnly}, nil
+	return &Unit{snapshot: s.snapshot, view: v, identityOnly: identityOnly}, nil
 }
 
 // Register prepares the complete producing obligation before execution. Build
 // must belong to the same snapshot and package. Expensive preparation holds no
 // unit mutex: concurrent close freezes the roster and cancels that preparation.
 func (u *Unit) Register(ctx context.Context, build BuildBinding, process ProcessDescription) (Contribution, error) {
-	return u.transaction().register(ctx, build, process)
-}
-
-// Register prepares all subject obligations before the package process starts.
-// One process has one frame and one exclusive capture; a second registration is
-// refused. The returned subject set is owned and cannot change preparation.
-func (u *PackageUnit) Register(ctx context.Context, build BuildBinding, process ProcessDescription) (Contribution, error) {
-	return u.transaction().register(ctx, build, process)
-}
-
-func (u *Unit) transaction() *producingUnit {
-	if u == nil {
-		return nil
-	}
-	return u.producing
-}
-
-func (u *PackageUnit) transaction() *producingUnit {
-	if u == nil {
-		return nil
-	}
-	return u.producing
-}
-
-func (u *producingUnit) register(ctx context.Context, build BuildBinding, process ProcessDescription) (Contribution, error) {
 	if ctx == nil {
 		return Contribution{}, errors.New("gofresh: nil registration context")
 	}
@@ -263,11 +212,11 @@ func (u *producingUnit) register(ctx context.Context, build BuildBinding, proces
 	}
 	preparing, cancel := context.WithCancel(ctx)
 	defer cancel()
-	x := &unitExecution{process: process, artifact: build.identity, inspected: build.inspected, env: env, cancel: cancel}
+	x := &unitExecution{process: process, artifact: build.identity, env: env, cancel: cancel}
 	u.mu.Lock()
 	if u.phase != unitOpen {
 		u.mu.Unlock()
-		return Contribution{}, ErrUnitClosed
+		return Contribution{}, errUnitClosed
 	}
 	if u.execution != nil {
 		u.mu.Unlock()
@@ -301,9 +250,6 @@ func (u *producingUnit) register(ctx context.Context, build BuildBinding, proces
 			}
 		}
 	}
-	if err == nil {
-		err = x.inspected.validate(preparing)
-	}
 	if preparing.Err() != nil {
 		err = preparing.Err()
 	}
@@ -318,7 +264,7 @@ func (u *producingUnit) register(ctx context.Context, build BuildBinding, proces
 		return Contribution{}, cause
 	}
 	if u.phase != unitOpen {
-		return Contribution{}, ErrUnitClosed
+		return Contribution{}, errUnitClosed
 	}
 	if err != nil {
 		u.phase = unitFailed
@@ -343,24 +289,13 @@ func (u *producingUnit) register(ctx context.Context, build BuildBinding, proces
 // Submit supplies the registered execution's one terminal disposition. No log,
 // frame, environment or support can be substituted at this boundary.
 func (u *Unit) Submit(c Contribution, terminal Terminal) error {
-	return u.transaction().submit(c, terminal)
-}
-
-// Submit settles this package process with its actual harness disposition.
-// An ordinary failing test can complete normally; result success remains the
-// consumer's judgment. A handle from another attempt is always refused.
-func (u *PackageUnit) Submit(c Contribution, terminal Terminal) error {
-	return u.transaction().submit(c, terminal)
-}
-
-func (u *producingUnit) submit(c Contribution, terminal Terminal) error {
 	if u == nil || u.snapshot == nil {
 		return errors.New("gofresh: uninitialized unit")
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if u.phase != unitOpen {
-		return ErrUnitClosed
+		return errUnitClosed
 	}
 	if c.unit != u || c.execution == nil || c.execution != u.execution || !c.execution.ready {
 		return errors.New("gofresh: contribution belongs to another unit or is unprepared")
@@ -380,16 +315,6 @@ func (u *producingUnit) submit(c Contribution, terminal Terminal) error {
 // final evidence. The executor still owns stopping/reaping its process and
 // disposing of its capture. Already closed evidence and other units are untouched.
 func (u *Unit) Abort() {
-	u.transaction().abort()
-}
-
-// Abort ends this unpublished package execution and cancels library-owned work.
-// It does not stop the executor's process or alter an independently closed unit.
-func (u *PackageUnit) Abort() {
-	u.transaction().abort()
-}
-
-func (u *producingUnit) abort() {
 	if u == nil {
 		return
 	}
@@ -406,20 +331,6 @@ func (u *producingUnit) abort() {
 	}
 }
 
-// Finalized is the native evidence and judgment after successful unit closing.
-// A successful close is not a claim of successful samples or durable publication.
-// ObservationReason and OutcomeReason retain the distinct incomplete-capture
-// and unsupported-outcome accounts; Attribution is diagnostic, never identity.
-type Finalized struct {
-	Fingerprint       Fingerprint
-	Verdict           Verdict
-	Terminal          Terminal
-	Observation       ObservationDisposition
-	ObservationReason string
-	OutcomeReason     string
-	Attribution       string
-}
-
 // FinalizedSubject is one subject's native evidence and closed judgment. It
 // retains the process-wide observation because the test log does not attribute
 // individual reads to subjects.
@@ -429,15 +340,20 @@ type FinalizedSubject struct {
 	Verdict     Verdict
 }
 
-// FinalizedProcess is a closed package execution, not a suite-health result or
-// a durable publication. Process and Artifact retain executor-declared identity;
-// Terminal is the executor's harness assertion. Subjects is in first-request
-// order and owned by the caller. Observation describes the shared capture's
-// authority, independently of each subject's verdict or purity assertion.
-type FinalizedProcess struct {
+// Finalized is the native evidence and judgment after successful unit closing.
+// A successful close is not a claim of successful samples or durable publication.
+// Process and Artifact retain executor-declared identity; Terminal is the
+// executor's harness assertion. Subjects is in first-request order and owned by
+// the caller; Fingerprint and Verdict hold the first subject's projection for
+// single-subject callers. ObservationReason and OutcomeReason retain the
+// distinct incomplete-capture and unsupported-outcome accounts; Attribution is
+// diagnostic, never identity.
+type Finalized struct {
 	Process           string
 	Artifact          string
 	Subjects          []FinalizedSubject
+	Fingerprint       Fingerprint
+	Verdict           Verdict
 	Terminal          Terminal
 	Observation       ObservationDisposition
 	ObservationReason string
@@ -462,30 +378,6 @@ const (
 	// IncompleteObservation names missing or incomplete capture/completion.
 	IncompleteObservation
 )
-
-// Close fixes the contributor roster immediately and returns evidence only after
-// finalization and closing validation succeed. Cancellation or any failure ends
-// the unit; retrying requires another unit. Publication belongs to the consumer,
-// which keeps the source/runtime exclusion until that separate boundary ends.
-func (u *Unit) Close(ctx context.Context) (Finalized, error) {
-	result, err := u.transaction().close(ctx)
-	if err != nil {
-		return Finalized{}, err
-	}
-	subject := result.Subjects[0]
-	return Finalized{Fingerprint: subject.Fingerprint, Verdict: subject.Verdict,
-		Terminal: result.Terminal, Observation: result.Observation,
-		ObservationReason: result.ObservationReason, OutcomeReason: result.OutcomeReason,
-		Attribution: result.Attribution}, nil
-}
-
-// Close fixes this execution's roster and finalizes its one capture for all
-// declared subjects. It exposes no subject result until the whole execution's
-// closing validation succeeds. A failed or cancelled close is terminal; a
-// separately prepared retry cannot repair this process's producing evidence.
-func (u *PackageUnit) Close(ctx context.Context) (FinalizedProcess, error) {
-	return u.transaction().close(ctx)
-}
 
 // Execute registers build and process on u, invokes run with the prepared
 // Contribution, submits the returned Terminal disposition when run succeeds,
@@ -512,59 +404,18 @@ func (u *Unit) Execute(ctx context.Context, build BuildBinding, process ProcessD
 	return u.Close(ctx)
 }
 
-// Execute registers build and process on u, invokes run with the prepared
-// Contribution, submits the returned Terminal disposition when run succeeds,
-// and closes u. Any error aborts u before returning.
-func (u *PackageUnit) Execute(ctx context.Context, build BuildBinding, process ProcessDescription, run func(context.Context, Contribution) (Terminal, error)) (FinalizedProcess, error) {
-	if u == nil {
-		return FinalizedProcess{}, errors.New("gofresh: uninitialized unit")
-	}
-	defer u.Abort()
-	if run == nil {
-		return FinalizedProcess{}, errors.New("gofresh: nil unit execution callback")
-	}
-	contrib, err := u.Register(ctx, build, process)
-	if err != nil {
-		return FinalizedProcess{}, err
-	}
-	terminal, runErr := run(ctx, contrib)
-	if runErr != nil {
-		return FinalizedProcess{}, runErr
-	}
-	if err := u.Submit(contrib, terminal); err != nil {
-		return FinalizedProcess{}, err
-	}
-	return u.Close(ctx)
-}
-
-// Execute begins a single-subject Unit under b, registers build and process,
-// invokes run, submits its Terminal disposition, and closes the unit.
-func (b *RuntimeBinding) Execute(ctx context.Context, subject Subject, build BuildBinding, process ProcessDescription, run func(context.Context, Contribution) (Terminal, error)) (Finalized, error) {
-	u, err := b.Begin(subject)
-	if err != nil {
-		return Finalized{}, err
-	}
-	return u.Execute(ctx, build, process, run)
-}
-
-// ExecutePackage begins a PackageUnit under b for subjects, registers build and
-// process, invokes run, submits its Terminal disposition, and closes the unit.
-func (b *RuntimeBinding) ExecutePackage(ctx context.Context, subjects []Subject, build BuildBinding, process ProcessDescription, run func(context.Context, Contribution) (Terminal, error)) (FinalizedProcess, error) {
-	u, err := b.BeginPackage(subjects)
-	if err != nil {
-		return FinalizedProcess{}, err
-	}
-	return u.Execute(ctx, build, process, run)
-}
-
-func (u *producingUnit) close(ctx context.Context) (result FinalizedProcess, err error) {
+// Close fixes the contributor roster immediately and returns evidence only after
+// finalization and closing validation succeed. Cancellation or any failure ends
+// the unit; retrying requires another unit. Publication belongs to the consumer,
+// which keeps the source/runtime exclusion until that separate boundary ends.
+func (u *Unit) Close(ctx context.Context) (result Finalized, err error) {
 	if u == nil || u.snapshot == nil {
-		return FinalizedProcess{}, errors.New("gofresh: uninitialized unit")
+		return Finalized{}, errors.New("gofresh: uninitialized unit")
 	}
 	u.mu.Lock()
 	if u.phase != unitOpen {
 		u.mu.Unlock()
-		return FinalizedProcess{}, ErrUnitClosed
+		return Finalized{}, errUnitClosed
 	}
 	u.phase = unitClosing
 	parent := ctx
@@ -586,10 +437,10 @@ func (u *producingUnit) close(ctx context.Context) (result FinalizedProcess, err
 		if parent != nil && parent.Err() != nil {
 			err = parent.Err()
 		} else if u.phase == unitAborted {
-			err = ErrUnitAborted
+			err = errUnitAborted
 		}
 		if err != nil {
-			result = FinalizedProcess{}
+			result = Finalized{}
 			if u.phase != unitAborted {
 				u.phase = unitFailed
 			}
@@ -598,16 +449,16 @@ func (u *producingUnit) close(ctx context.Context) (result FinalizedProcess, err
 		}
 	}()
 	if ctx == nil {
-		return FinalizedProcess{}, errors.New("gofresh: nil closing context")
+		return Finalized{}, errors.New("gofresh: nil closing context")
 	}
 	if err := ctx.Err(); err != nil {
-		return FinalizedProcess{}, err
+		return Finalized{}, err
 	}
 	if x == nil || !x.ready || x.terminal.Kind == 0 {
-		return FinalizedProcess{}, ErrUnitIncomplete
+		return Finalized{}, ErrUnitIncomplete
 	}
 	if x.terminal.Kind == NeverStarted {
-		return FinalizedProcess{}, fmt.Errorf("gofresh: execution %q never started: %s", x.process.Identity, x.terminal.Reason)
+		return Finalized{}, fmt.Errorf("gofresh: execution %q never started: %s", x.process.Identity, x.terminal.Reason)
 	}
 	var observation runtimeinput.Observation
 	var inputs *runtimeinput.State
@@ -617,7 +468,7 @@ func (u *producingUnit) close(ctx context.Context) (result FinalizedProcess, err
 	if len(x.observed) != 0 || u.identityOnly || x.process.Capture != "" || x.terminal.Kind != NormalCompletion {
 		receipt, err := x.frame.Completion(x.process.Identity, x.env, x.terminal.Reason)
 		if err != nil {
-			return FinalizedProcess{}, err
+			return Finalized{}, err
 		}
 		s := u.snapshot.session
 		in := runtimeinput.ProducerIngest{Identity: x.process.Identity, Env: x.env, Runner: s.engine.runner, Roots: &s.roots, Completion: receipt, Outcome: x.support, ScratchRoot: x.process.ScratchRoot, ExcludedPaths: x.process.ExcludedPaths, ScratchNamespaces: x.process.ScratchNamespaces}
@@ -628,14 +479,14 @@ func (u *producingUnit) close(ctx context.Context) (result FinalizedProcess, err
 			observation, observationReason, err = x.frame.ObserveInputs(ctx, x.process.Capture, in)
 		}
 		if err != nil {
-			return FinalizedProcess{}, err
+			return Finalized{}, err
 		}
 		if err := u.recordObservation(observation, observationReason); err != nil {
-			return FinalizedProcess{}, err
+			return Finalized{}, err
 		}
 		state, err := runtimeinput.CompletedState(observation)
 		if err != nil {
-			return FinalizedProcess{}, err
+			return Finalized{}, err
 		}
 		inputs = &state
 	}
@@ -643,35 +494,145 @@ func (u *producingUnit) close(ctx context.Context) (result FinalizedProcess, err
 	for _, subject := range u.view.subjects {
 		fp, err := u.view.attachRuntimeState(subject, x.fingerprints[subject], inputs, x.observed[subject])
 		if err != nil {
-			return FinalizedProcess{}, err
+			return Finalized{}, err
 		}
 		fingerprints[subject] = fp
 	}
 	verdicts, err := u.view.checkMap(ctx, fingerprints, true, true)
 	if err != nil {
-		return FinalizedProcess{}, err
+		return Finalized{}, err
 	}
 	validationErr := u.view.Validate(ctx)
 	if validationErr != nil && !errors.Is(validationErr, ErrAnalysisUnavailable) {
-		return FinalizedProcess{}, validationErr
+		return Finalized{}, validationErr
 	}
 	// Source/view drift retains its established precedence. A missing optional
 	// proof cannot obscure demonstrated runtime movement or authorize reuse.
 	if observation.BracketMoved {
-		return FinalizedProcess{}, &RuntimeInputSpanError{Reason: observation.Reason}
+		return Finalized{}, &RuntimeInputSpanError{Reason: observation.Reason}
 	}
 	if validationErr != nil {
-		return FinalizedProcess{}, validationErr
-	}
-	if err := x.inspected.validate(ctx); err != nil {
-		return FinalizedProcess{}, err
+		return Finalized{}, validationErr
 	}
 	account, _ := u.account()
-	result = FinalizedProcess{Process: account.Process, Artifact: account.Artifact,
+	result = Finalized{Process: account.Process, Artifact: account.Artifact,
 		Terminal: account.Terminal, Observation: account.Observation, ObservationReason: account.ObservationReason,
 		OutcomeReason: account.OutcomeReason, Attribution: account.Attribution}
 	for _, subject := range u.view.subjects {
 		result.Subjects = append(result.Subjects, FinalizedSubject{Subject: subject, Fingerprint: fingerprints[subject], Verdict: verdicts[subject]})
 	}
+	if len(result.Subjects) > 0 {
+		result.Fingerprint = result.Subjects[0].Fingerprint
+		result.Verdict = result.Subjects[0].Verdict
+	}
 	return result, nil
+}
+
+// RuntimeInputSpanError refuses producing close after finalization established
+// runtime-input movement. The unit's Account retains the observation and terminal
+// facts, but no reusable evidence escapes. Purity cannot discharge this failure.
+type RuntimeInputSpanError struct {
+	Reason string
+}
+
+func (e *RuntimeInputSpanError) Error() string {
+	return "gofresh: runtime-input producing span changed: " + e.Reason
+}
+
+// Cause identifies the demonstrated guard failure independently of diagnostics.
+func (e *RuntimeInputSpanError) Cause() Cause {
+	return Cause{Kind: RuntimeInputsCause, Condition: Changed}
+}
+
+// ProcessAccount reports declared execution facts and observations already
+// finalized by a unit, including when closing refuses. It is not a reusable
+// result, successful closing judgment or durable-publication receipt. It carries
+// no transferable producing capability.
+//
+// Prepared reports successful registration; a reserved but failed or unfinished
+// registration remains unprepared. Terminal.Kind is zero until submission.
+// UnknownObservation and zero Inputs mean finalization has established no
+// observation facts. Otherwise Inputs is the canonical CompletedState projection
+// of the finalized observation, including explicitly incomplete evidence. Its OK
+// describes only the input guard, never the success of unit closing. A supported
+// observation describes the admitted capture method, not later validation.
+type ProcessAccount struct {
+	Process           string
+	Artifact          string
+	Prepared          bool
+	Terminal          Terminal
+	Observation       ObservationDisposition
+	ObservationReason string
+	OutcomeReason     string
+	Attribution       string
+	Inputs            runtimeinput.State
+}
+
+// Account returns an owned copy of the unit's process account. The boolean is
+// false until an execution is reserved. Reading performs no I/O and continues no
+// work, including after cancellation or abort. It is safe during registration,
+// submission and closing; only facts established at the time of the read appear.
+func (u *Unit) Account() (ProcessAccount, bool) {
+	return u.account()
+}
+
+// finalizedProcessObservation holds only the facts that cannot be recovered from
+// registration and submission. It never retains a sealed producing observation.
+type finalizedProcessObservation struct {
+	inputs      runtimeinput.State
+	reason      string
+	attribution string
+}
+
+func (u *Unit) account() (ProcessAccount, bool) {
+	if u == nil {
+		return ProcessAccount{}, false
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	x := u.execution
+	if x == nil {
+		return ProcessAccount{}, false
+	}
+	disposition := UnknownObservation
+	// CompletedState always supplies a canonical manifest, including for
+	// incomplete observations. Its absence means finalization established none.
+	if x.observation.inputs.Manifest != "" {
+		disposition = SupportedObservation
+		if x.observation.reason != "" {
+			disposition = IncompleteObservation
+		} else {
+			if len(x.observed) == 0 {
+				disposition = IdentityObservation
+			}
+			for subject := range x.observed {
+				// Attachment adds only runtime inputs and their digest; neither
+				// is part of the prepared outcome-subject identity.
+				if !runtimeinput.HasOutcomeSupport(x.observation.inputs.Manifest, outcomeSubject(x.fingerprints[subject], subject)) {
+					disposition = IdentityObservation
+					break
+				}
+			}
+		}
+	}
+	return ProcessAccount{
+		Process: x.process.Identity, Artifact: x.artifact, Prepared: x.ready,
+		Terminal: x.terminal, Observation: disposition,
+		ObservationReason: x.observation.reason, OutcomeReason: x.outcomeReason,
+		Attribution: x.observation.attribution, Inputs: x.observation.inputs,
+	}, true
+}
+
+// recordObservation retains finalized facts before attachment or closing checks
+// can refuse. Abort may already have won: retaining observed facts gives no
+// closing authority and does not continue observation work.
+func (u *Unit) recordObservation(observation runtimeinput.Observation, reason string) error {
+	state, err := runtimeinput.CompletedState(observation)
+	if err != nil {
+		return err
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.execution.observation = finalizedProcessObservation{inputs: state, reason: reason, attribution: observation.Attribution}
+	return nil
 }

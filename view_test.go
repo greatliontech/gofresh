@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/closure"
+	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/gotool"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
@@ -114,14 +114,14 @@ func TestExternal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	fingerprint, err := producer.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fingerprint.ObservationProof.Observable || !strings.Contains(fingerprint.ObservationProof.Reason, "observation analysis unavailable") {
 		t.Fatalf("observation proof = %+v, want unavailable disposition", fingerprint.ObservationProof)
 	}
-	oracleFingerprint, err := producer.CaptureObserved(context.Background(), oracle)
+	oracleFingerprint, err := producer.captureObserved(context.Background(), oracle)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestObservedRecordingStalesOnMaximalDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	fingerprint, err := producer.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestCheckObservedPropagatesCancellationMidCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	fingerprint, err := producer.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestObservedProofAdmitsParentTraversalIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	fingerprint, err := producer.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestObservedFingerprintLiftsOnlyExplicitCompletedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	fingerprint, err := producer.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func TestValidateBracketsProofAnalysisWithRuntimeObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	fingerprint, err := producer.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1344,7 +1344,7 @@ func TestResolvedStandardInterfaceTargetIsClassified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.CaptureObserved(context.Background(), subject)
+	fingerprint, err := view.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1367,7 +1367,7 @@ func TestUnauditedStandardOperationIsUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.CaptureObserved(context.Background(), subject)
+	fingerprint, err := view.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1401,7 +1401,7 @@ func TestExternalCallbackFromStandardLibraryIsClassified(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.CaptureObserved(context.Background(), subject)
+	fingerprint, err := view.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1505,7 +1505,7 @@ func TestStandardGlobalStateIsUnverifiable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.CaptureObserved(context.Background(), subject)
+	fingerprint, err := view.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1607,7 +1607,7 @@ func TestBenchmarkIterationCountIsHarnessPacing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.CaptureObserved(context.Background(), subject)
+	fingerprint, err := view.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1644,7 +1644,7 @@ func TestNonStandardAssemblyBlocksObservationProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.CaptureObserved(context.Background(), subject)
+	fingerprint, err := view.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1674,7 +1674,7 @@ func TestSystemObjectRemainsOpaque(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.CaptureObserved(context.Background(), subject)
+	fingerprint, err := view.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1704,7 +1704,7 @@ func TestExternalStandardLinknameTargetBlocksObservationProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.CaptureObserved(context.Background(), subject)
+	fingerprint, err := view.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1729,7 +1729,7 @@ func TestProductionFunctionNamedTestMainIsAnalyzable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.CaptureObserved(context.Background(), subject)
+	fingerprint, err := view.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatalf("production TestMain was not analyzable: %v", err)
 	}
@@ -1755,7 +1755,7 @@ func TestProductionTestMainSignatureIsNotHarnessSetup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.CaptureObserved(context.Background(), subject)
+	fingerprint, err := view.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1966,7 +1966,7 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fp, err := v.CaptureObserved(context.Background(), sub)
+		fp, err := v.captureObserved(context.Background(), sub)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2322,7 +2322,7 @@ func TestDeferredCheckCloseCollapsesBaseObservationsIntoValidation(t *testing.T)
 	}
 	observedRecorded := map[Subject]Fingerprint{}
 	for _, subject := range []Subject{f, g} {
-		fingerprint, err := obsProducer.CaptureObserved(context.Background(), subject)
+		fingerprint, err := obsProducer.captureObserved(context.Background(), subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2553,7 +2553,7 @@ func TestObservedCaptureHonorsCancelledContext(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := view.CaptureObserved(ctx, subject); !errors.Is(err, context.Canceled) {
+	if _, err := view.captureObserved(ctx, subject); !errors.Is(err, context.Canceled) {
 		t.Fatalf("CaptureObserved under cancelled context = %v, want context.Canceled", err)
 	}
 }
@@ -2596,7 +2596,7 @@ func TestContextAwareViewConstructionHonorsCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	comparisonCtx := &cancelAfterChecks{Context: context.Background(), after: 2}
-	if err := view.compareBaseContext(comparisonCtx, current); !errors.Is(err, context.Canceled) {
+	if err := view.compareObservationContext(comparisonCtx, *current.facts); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled base comparison = %v, want context.Canceled", err)
 	}
 	runtimeFingerprint := fingerprint
@@ -2631,7 +2631,7 @@ func TestContextAwareViewConstructionHonorsCancellation(t *testing.T) {
 	if err := view.Validate(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled view validation = %v, want context.Canceled", err)
 	}
-	if _, err := view.Capture(context.Background(), subject); !errors.Is(err, ErrViewSealed) {
+	if _, err := view.Capture(context.Background(), subject); !errors.Is(err, errViewSealed) {
 		t.Fatalf("capture after cancelled validation = %v, want ErrViewSealed", err)
 	}
 }
@@ -2653,7 +2653,7 @@ func TestObservedCaptureRejectsDriftSinceViewConstruction(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte("package view\n\nfunc F() int { return 2 }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := view.CaptureObserved(context.Background(), subject); !errors.Is(err, ErrViewChanged) {
+	if _, err := view.captureObserved(context.Background(), subject); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("CaptureObserved after drift = %v, want ErrViewChanged", err)
 	}
 }
@@ -2681,7 +2681,7 @@ func TestObservedCaptureRejectsGuardDriftSinceViewConstruction(t *testing.T) {
 	if err := os.WriteFile(goenv, []byte("GOFLAGS=-tags=second\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := view.CaptureObserved(context.Background(), subject); !errors.Is(err, ErrViewChanged) {
+	if _, err := view.captureObserved(context.Background(), subject); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("CaptureObserved after guard drift = %v, want ErrViewChanged", err)
 	}
 }
@@ -2705,7 +2705,7 @@ func TestCancelledObservedCaptureDoesNotWaitForViewLock(t *testing.T) {
 	view.mu.Lock()
 	done := make(chan error, 1)
 	go func() {
-		_, err := view.CaptureObserved(ctx, subject)
+		_, err := view.captureObserved(ctx, subject)
 		done <- err
 	}()
 	select {
@@ -2735,14 +2735,14 @@ func TestObservedCaptureDoesNotPublishAfterCancellationWhileWaitingForLock(t *te
 		t.Fatal(err)
 	}
 	// Warm the proof analysis so the second capture reaches the lock wait.
-	if _, err := view.CaptureObserved(context.Background(), subject); err != nil {
+	if _, err := view.captureObserved(context.Background(), subject); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	view.mu.Lock()
 	done := make(chan error, 1)
 	go func() {
-		_, err := view.CaptureObserved(ctx, subject)
+		_, err := view.captureObserved(ctx, subject)
 		done <- err
 	}()
 	time.Sleep(20 * time.Millisecond)
@@ -2779,7 +2779,7 @@ func TestValidateReobservesPurityAfterAnalysis(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.CaptureObserved(context.Background(), subject)
+	fingerprint, err := view.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2812,7 +2812,7 @@ func TestValidationSealsViewAgainstLaterCapture(t *testing.T) {
 	if err := view.Validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := view.Capture(context.Background(), subject); !errors.Is(err, ErrViewSealed) {
+	if _, err := view.Capture(context.Background(), subject); !errors.Is(err, errViewSealed) {
 		t.Fatalf("capture after validation = %v, want ErrViewSealed", err)
 	}
 	observedView, err := engine.newView(context.Background(), []Subject{subject}, dir)
@@ -2822,7 +2822,7 @@ func TestValidationSealsViewAgainstLaterCapture(t *testing.T) {
 	if err := observedView.Validate(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := observedView.CaptureObserved(context.Background(), subject); !errors.Is(err, ErrViewSealed) {
+	if _, err := observedView.captureObserved(context.Background(), subject); !errors.Is(err, errViewSealed) {
 		t.Fatalf("observed capture after validation = %v, want ErrViewSealed", err)
 	}
 }
@@ -2852,7 +2852,7 @@ func TestValidationSealsConcurrentObservedPublication(t *testing.T) {
 		<-release
 	}
 	go func() {
-		_, err := view.CaptureObserved(context.Background(), subject)
+		_, err := view.captureObserved(context.Background(), subject)
 		done <- err
 	}()
 	select {
@@ -2864,7 +2864,7 @@ func TestValidationSealsConcurrentObservedPublication(t *testing.T) {
 		t.Fatal(err)
 	}
 	close(release)
-	if err := <-done; !errors.Is(err, ErrViewSealed) {
+	if err := <-done; !errors.Is(err, errViewSealed) {
 		t.Fatalf("concurrent capture after validation = %v, want ErrViewSealed", err)
 	}
 }
@@ -2892,7 +2892,7 @@ func TestObservedCaptureIsConcurrentSafe(t *testing.T) {
 		go func() {
 			defer workers.Done()
 			<-start
-			fingerprint, err := view.CaptureObserved(context.Background(), subject)
+			fingerprint, err := view.captureObserved(context.Background(), subject)
 			results <- fingerprint
 			errs <- err
 		}()
@@ -2935,7 +2935,7 @@ func TestObservationProofBindsSubjectIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	fingerprint, err := producer.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3003,7 +3003,7 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 	}
 	captured := map[Subject]Fingerprint{}
 	for _, subject := range subjects {
-		fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+		fingerprint, err := producer.captureObserved(context.Background(), subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3163,7 +3163,7 @@ func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+			fingerprint, err := producer.captureObserved(context.Background(), subject)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3269,7 +3269,7 @@ func TestAnalysisBudgetExhaustionYieldsUnavailableEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := single.CaptureObserved(context.Background(), subjects[0]); err != nil {
+	if _, err := single.captureObserved(context.Background(), subjects[0]); err != nil {
 		t.Fatal(err)
 	}
 	// Each pass reports its cut once, with the count it left unproven —
@@ -3384,7 +3384,7 @@ func attachedProducer(t *testing.T, opts ...option) (eng *engine, producer *Snap
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err = producer.CaptureObserved(context.Background(), subject)
+	fingerprint, err = producer.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3476,7 +3476,7 @@ func TestProgressReportsAnalysisPhases(t *testing.T) {
 		t.Fatal(err)
 	}
 	events = nil
-	recorded, err := producer.CaptureObserved(context.Background(), subject)
+	recorded, err := producer.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3636,14 +3636,14 @@ func TestMemoStoreKnobIsVerdictInvariant(t *testing.T) {
 		return verdict.Status
 	}
 	restore := func(t *testing.T) {
-		t.Cleanup(func() { SetMemoRoot("") })
+		t.Cleanup(func() { setMemoRoot("") })
 	}
 	base := verdictUnder(t, func(t *testing.T) { restore(t) })
 
 	redirected := t.TempDir()
 	got := verdictUnder(t, func(t *testing.T) {
 		restore(t)
-		SetMemoRoot(redirected)
+		setMemoRoot(redirected)
 	})
 	if got != base {
 		t.Fatalf("redirected store changed the verdict: %v vs %v", got, base)
@@ -3659,13 +3659,13 @@ func TestMemoStoreKnobContainsPersistentWrites(t *testing.T) {
 	}
 	forbidden := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", forbidden)
-	t.Cleanup(func() { SetMemoRoot("") })
+	t.Cleanup(func() { setMemoRoot("") })
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
 	const scope = DynamicStateStrategy + "|knob-containment|cfg"
 
 	redirected := t.TempDir()
-	SetMemoRoot(redirected)
+	setMemoRoot(redirected)
 	processFactCache = sync.Map{}
 	first := runScan(t, scope, dir, pkg)
 	if !first.known[Subject{Package: pkg, Symbol: "Run"}] {
@@ -9939,7 +9939,7 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+	fingerprint, err := producer.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -9963,7 +9963,7 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint2, err := producer2.CaptureObserved(context.Background(), subject)
+	fingerprint2, err := producer2.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -10081,7 +10081,7 @@ func TestSiblingSharesObservationAndIsolatesTransactions(t *testing.T) {
 		t.Fatalf("sibling derivation from a sealed parent: %v", err)
 	}
 	observations = 0
-	if _, err := sealedSibling.CaptureObserved(context.Background(), aF); err != nil {
+	if _, err := sealedSibling.captureObserved(context.Background(), aF); err != nil {
 		t.Fatalf("observed capture over a subject the parent never captured: %v", err)
 	}
 	if observations == 0 {
@@ -10347,7 +10347,7 @@ func TestDotlessModuleKeepsStartupRefusals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fingerprint, err := view.CaptureObserved(context.Background(), subject)
+	fingerprint, err := view.captureObserved(context.Background(), subject)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -10387,7 +10387,7 @@ func TestDotlessModuleFlagAndTestMainSoundness(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fingerprint, err := view.CaptureObserved(context.Background(), subject)
+		fingerprint, err := view.captureObserved(context.Background(), subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -10421,7 +10421,7 @@ func TestDotlessModuleFlagAndTestMainSoundness(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fingerprint, err := view.CaptureObserved(context.Background(), subject)
+		fingerprint, err := view.captureObserved(context.Background(), subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -10478,7 +10478,7 @@ func TestValidateSharesManifestEvaluationAcrossSubjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, subject := range subjects {
-		fingerprint, err := producer.CaptureObserved(context.Background(), subject)
+		fingerprint, err := producer.captureObserved(context.Background(), subject)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -11147,7 +11147,7 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 		// then reports that unavailability after every other check.
 		_, _, _, view, _ := straddle(t, 1)
 		subject := Subject{Package: "example.com/view", Symbol: "F"}
-		fingerprint, err := view.CaptureObserved(context.Background(), subject)
+		fingerprint, err := view.captureObserved(context.Background(), subject)
 		if err != nil {
 			t.Fatalf("CaptureObserved after a cut construction = %v, want the capture to keep the view's fail-closed facts", err)
 		}
@@ -11179,7 +11179,7 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 		// behind every other check.
 		_, _, _, view, _ := straddle(t, 4)
 		subject := Subject{Package: "example.com/view", Symbol: "F"}
-		fingerprint, err := view.CaptureObserved(context.Background(), subject)
+		fingerprint, err := view.captureObserved(context.Background(), subject)
 		if err != nil {
 			t.Fatal(err)
 		}

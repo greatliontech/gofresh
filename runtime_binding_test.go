@@ -12,7 +12,7 @@ import (
 	"testing/quick"
 
 	"github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -241,7 +241,7 @@ func TestRuntimeBindingGuardAgreementAndClosing(t *testing.T) {
 	if err != nil || seed.runtime != v.runtime || seed.guards() != fp.Guards {
 		t.Fatalf("seeded validation lost its runtime binding: %v", err)
 	}
-	if _, err := v.CaptureObserved(t.Context(), subject); err != nil {
+	if _, err := v.captureObserved(t.Context(), subject); err != nil {
 		t.Fatalf("observability refinement used different guards: %v", err)
 	}
 	machine = "machine-b"
@@ -261,7 +261,7 @@ func TestRuntimeBindingGuardAgreementAndClosing(t *testing.T) {
 	if err := sibling.reobserveBase(t.Context()); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("sibling comparison forgot old machine: %v", err)
 	}
-	if _, err := sibling.CaptureObserved(t.Context(), subject); !errors.Is(err, ErrViewChanged) {
+	if _, err := sibling.captureObserved(t.Context(), subject); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("refinement failed to close its runtime guards: %v", err)
 	}
 	// Binding refusal leaves all previously admitted bindings intact.

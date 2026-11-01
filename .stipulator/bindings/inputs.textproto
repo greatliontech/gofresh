@@ -166,9 +166,9 @@ bindings {
   content_hash: "fca9059eafa1ceffcb1f29d14cb8f2b4f4a42c15961bfbe07457352a94ce8875"
   source_hash: "3410ccbb5f14bda7b7fc2277c9dff1937f130a6593136e0c1fe036797348d0b7"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/closure.observableCallEffect"
+  symbol: "github.com/greatliontech/gofresh/internal/closure.observableCallEffect"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "7e86f5b2b050f48a1738cac67f2786055b825d836914ba6cdf80d67fac28241f"
+  shape_hash: "d71e370fde53647ab46c5fc7f3562af3379c182ee3365d2ac7caa80a4267c576"
 }
 
 bindings {
@@ -176,9 +176,9 @@ bindings {
   content_hash: "fca9059eafa1ceffcb1f29d14cb8f2b4f4a42c15961bfbe07457352a94ce8875"
   source_hash: "3410ccbb5f14bda7b7fc2277c9dff1937f130a6593136e0c1fe036797348d0b7"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/closure.TestReadOnlyObservabilityProof"
+  symbol: "github.com/greatliontech/gofresh/internal/closure.TestReadOnlyObservabilityProof"
   role: BINDING_ROLE_TESTS
-  shape_hash: "5969b2b844d559f9d4ab50568864f76fb9ac2db19f6957d804fb9b5f9b6e530e"
+  shape_hash: "b35bd812c6c6b4b37d464e1787ff4da665dbb7661dccc60d7fffb5fe2571a908"
 }
 
 bindings {
@@ -416,9 +416,9 @@ bindings {
   content_hash: "a6e2deefbe77ec67e4e3160cef5185f7a165abb8fec5f05f194cf2fe980b2727"
   source_hash: "60bf4b92e9f2b6c5e26d3ee4545bc12e6a20dbb1cf6d5157398394ad94f1159e"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/guard.CurrentMachineFacts"
+  symbol: "github.com/greatliontech/gofresh/internal/guard.CurrentMachineFacts"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "070e58e47c532c80316fba6066da3ac963bc8c624e74f494447a537e9e32e815"
+  shape_hash: "8463642ed9add7a1e24c94c11ec56246c358ea52ca194e42e4bd5acf7a852862"
 }
 
 bindings {
@@ -2384,9 +2384,9 @@ bindings {
   content_hash: "07d93699bb099aa8f2fc0bed09a0297187464e937742d50e4a35930949fe5227"
   source_hash: "625af9a6d366179ecf677f985490e83cc76eb4a15527c26bfb8b125c48f713c5"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/closure.FuzzOutcomeInventoryRejectsUnsupportedEffects"
+  symbol: "github.com/greatliontech/gofresh/internal/closure.FuzzOutcomeInventoryRejectsUnsupportedEffects"
   role: BINDING_ROLE_TESTS
-  shape_hash: "6f4ff3afd5b66126df45469eda8db99a04c0a11db2a3fd1365f07f8382bbd84a"
+  shape_hash: "b401889db98c0df7ba9b22cc9fb5c46200268f7acd1e7761cad301c1e9162183"
 }
 
 bindings {

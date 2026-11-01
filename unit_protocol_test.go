@@ -4,8 +4,21 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 )
+
+func TestBuildDescriptionTestCompileArgs(t *testing.T) {
+	b := BuildDescription{
+		Package: "example.com/pkg",
+		Flags:   []string{"-tags=integration", "-race"},
+	}
+	got := b.TestCompileArgs("/tmp/pkg.test", "-v")
+	want := []string{"test", "-c", "-o", "/tmp/pkg.test", "-tags=integration", "-race", "-v", "example.com/pkg"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("TestCompileArgs = %v, want %v", got, want)
+	}
+}
 
 // The protocol model tests arbitrary submission/abort/cancelled-close sequences.
 // It supplies a prepared slot directly: real preparation, normal closing and
@@ -15,24 +28,16 @@ func FuzzUnitTerminalProtocol(f *testing.F) {
 		f.Add(input)
 	}
 	f.Fuzz(func(t *testing.T, input []byte) {
-		u := &Unit{producing: &producingUnit{snapshot: &Snapshot{}}}
-		pkg := &PackageUnit{producing: u.producing}
+		u := &Unit{snapshot: &Snapshot{}}
 		submit, abort := u.Submit, u.Abort
 		closeUnit := func(ctx context.Context) (bool, error) {
 			result, err := u.Close(ctx)
 			return reflect.DeepEqual(result, Finalized{}), err
 		}
-		if len(input) > 0 && input[0]%2 == 1 {
-			submit, abort = pkg.Submit, pkg.Abort
-			closeUnit = func(ctx context.Context) (bool, error) {
-				result, err := pkg.Close(ctx)
-				return reflect.DeepEqual(result, FinalizedProcess{}), err
-			}
-		}
 		x := &unitExecution{ready: true, cancel: func() {}}
-		u.producing.execution = x
-		own := Contribution{unit: u.producing, execution: x}
-		other := Contribution{unit: &producingUnit{}, execution: x}
+		u.execution = x
+		own := Contribution{unit: u, execution: x}
+		other := Contribution{unit: &Unit{}, execution: x}
 		cases := []struct {
 			terminal Terminal
 			valid    bool
@@ -71,7 +76,7 @@ func FuzzUnitTerminalProtocol(f *testing.F) {
 				empty, err := closeUnit(ctx)
 				want := error(context.Canceled)
 				if ended {
-					want = ErrUnitClosed
+					want = errUnitClosed
 				}
 				if !errors.Is(err, want) || !empty {
 					t.Fatalf("step %d: cancelled close returned evidence or wrong cause: %v (want %v)", i, err, want)

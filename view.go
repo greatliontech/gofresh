@@ -1,11 +1,15 @@
 package gofresh
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/types"
 	"maps"
 	"os"
 	"slices"
@@ -15,11 +19,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/greatliontech/gofresh/closure"
-	"github.com/greatliontech/gofresh/closure/testvariant"
+	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/cachefile"
+	"github.com/greatliontech/gofresh/internal/closure"
+	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/render"
+	"github.com/greatliontech/gofresh/internal/testvariant"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -27,8 +34,8 @@ import (
 // source, build, guard, or purity state and its results must not be persisted.
 var ErrViewChanged = errors.New("gofresh: analysis view changed")
 
-// ErrViewSealed reports a capture attempted after producer validation started.
-var ErrViewSealed = errors.New("gofresh: analysis view sealed by validation")
+// errViewSealed reports a capture attempted after producer validation started.
+var errViewSealed = errors.New("gofresh: analysis view sealed by validation")
 
 // ErrAnalysisUnavailable reports that producer validation could not
 // re-establish a captured observation proof because the current analysis was
@@ -130,70 +137,7 @@ func (e *engine) newViewFor(ctx context.Context, subjects []Subject, moduleDir s
 	if err != nil {
 		return nil, err
 	}
-	if first.guards != second.guards {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("%w: guards during construction (%s)", ErrViewChanged, differingGuard(first.guards, second.guards))
-	}
-	for _, subject := range unique {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		// A budget cut in either pass is the pass's fact, never the
-		// tree's: the fields the discharge shapes are compared only
-		// between uncut passes, and the view takes the cut pass's
-		// fail-closed shape for the subject (REQ-fresh-context).
-		cut := first.cut[subject] || second.cut[subject]
-		if !first.maximal[subject].equal(second.maximal[subject], cut) {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			return nil, fmt.Errorf("%w: closure for %s.%s during construction%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(first.sourceFilesBySubject[subject], second.sourceFilesBySubject[subject], first.fileDigests, second.fileDigests))
-		}
-		if first.purity[subject] != second.purity[subject] {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			return nil, fmt.Errorf("%w: purity for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
-		}
-		if first.vouchDischarges[subject] != second.vouchDischarges[subject] {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			return nil, fmt.Errorf("%w: vouch discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
-		}
-		if !cut && first.discharges[subject].singleSubject != second.discharges[subject].singleSubject {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			return nil, fmt.Errorf("%w: single-subject attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
-		}
-		if !cut && first.discharges[subject].packageProcess != second.discharges[subject].packageProcess {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			return nil, fmt.Errorf("%w: package-process attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
-		}
-		if second.cut[subject] && !first.cut[subject] {
-			first.takeCut(second, subject)
-		}
-		if !slices.Equal(first.sourceFilesBySubject[subject], second.sourceFilesBySubject[subject]) {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			return nil, fmt.Errorf("%w: maximal source identities for %s.%s during construction%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(first.sourceFilesBySubject[subject], second.sourceFilesBySubject[subject], first.fileDigests, second.fileDigests))
-		}
-	}
-	if !slices.Equal(first.sourceFiles, second.sourceFiles) {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		// The construction race is the one refusal with no reproduction
-		// path afterward, so naming here matters most.
-		return nil, fmt.Errorf("%w: maximal source identities during construction%s", ErrViewChanged, movedIdentitySuffix(first.sourceFiles, second.sourceFiles, first.fileDigests, second.fileDigests))
-	}
-	if err := ctx.Err(); err != nil {
+	if err := compareObservations(ctx, unique, &first, first.guards, second, true); err != nil {
 		return nil, err
 	}
 
@@ -571,7 +515,7 @@ func (v *Snapshot) Capture(ctx context.Context, subject Subject) (Fingerprint, e
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	if v.sealed {
-		return Fingerprint{}, ErrViewSealed
+		return Fingerprint{}, errViewSealed
 	}
 	if err := v.requireMembers([]Subject{subject}); err != nil {
 		return Fingerprint{}, err
@@ -639,7 +583,7 @@ func (v *Snapshot) CaptureBatch(ctx context.Context) (map[Subject]Fingerprint, e
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	if v.sealed {
-		return nil, ErrViewSealed
+		return nil, errViewSealed
 	}
 	result := make(map[Subject]Fingerprint, len(v.subjects))
 	for _, subject := range v.subjects {
@@ -665,9 +609,9 @@ func (v *Snapshot) fingerprintLocked(subject Subject, cl closure.Closure) Finger
 	}
 }
 
-// CaptureObserved returns maximal closure evidence plus a caller-selected,
+// captureObserved returns maximal closure evidence plus a caller-selected,
 // attributable observation proof for subject.
-func (v *Snapshot) CaptureObserved(ctx context.Context, subject Subject) (fp Fingerprint, opErr error) {
+func (v *Snapshot) captureObserved(ctx context.Context, subject Subject) (fp Fingerprint, opErr error) {
 	if v == nil || v.facts == nil || v.engine == nil {
 		return Fingerprint{}, errors.New("gofresh: uninitialized snapshot")
 	}
@@ -685,7 +629,7 @@ func (v *Snapshot) CaptureObserved(ctx context.Context, subject Subject) (fp Fin
 		return Fingerprint{}, fmt.Errorf("gofresh: observation proof cancelled: %w", err)
 	}
 	if v.sealed {
-		return Fingerprint{}, ErrViewSealed
+		return Fingerprint{}, errViewSealed
 	}
 	v.capturedObserved[subject] = true
 	return v.observedFingerprintLocked(subject), nil
@@ -708,7 +652,7 @@ func (v *Snapshot) CaptureObservedBatch(ctx context.Context) (fps map[Subject]Fi
 		return nil, fmt.Errorf("gofresh: observation proof cancelled: %w", err)
 	}
 	if v.sealed {
-		return nil, ErrViewSealed
+		return nil, errViewSealed
 	}
 	result := make(map[Subject]Fingerprint, len(v.subjects))
 	for _, subject := range v.subjects {
@@ -758,7 +702,7 @@ func (v *Snapshot) attachRuntimeState(subject Subject, fingerprint Fingerprint, 
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.sealed {
-		return Fingerprint{}, ErrViewSealed
+		return Fingerprint{}, errViewSealed
 	}
 	if err := v.requireMembers([]Subject{subject}); err != nil {
 		return Fingerprint{}, err
@@ -843,10 +787,6 @@ func (v *Snapshot) CheckObservedBatch(ctx context.Context, recorded map[Subject]
 
 func (v *Snapshot) purityMatches(recorded Fingerprint, subject Subject) PurityAuthority {
 	return PurityAuthority{Recorded: purityAttribution(recorded.PurityAssertion), Current: purityAttribution(v.facts.purity[subject])}
-}
-
-func validPurityAssertion(assertion string) bool {
-	return purityAttribution(assertion) != NoPurity
 }
 
 func (v *Snapshot) currentRuntimeContext(ctx context.Context, recorded Fingerprint, shared map[string]runtimeinput.State) (runtimeinput.State, error) {
@@ -1240,15 +1180,41 @@ func (v *Snapshot) validateObserved(ctx context.Context) error {
 	// The held cut-explained unavailability — the seeded view's
 	// re-observation or the closing pass — is reported last, after the
 	// closing runtime-input comparison, exactly as the proof's.
+	return v.resolveValidationUnavailable(ctx, current, unavailable)
+}
+
+// Unavailability is a verdict only after all other validation obligations have
+// closed. A concrete fault or cancellation always outranks a held cut.
+func deferValidationUnavailability(err error, unavailable *error) error {
+	if errors.Is(err, ErrAnalysisUnavailable) {
+		if *unavailable == nil {
+			*unavailable = err
+		}
+		return nil
+	}
+	return err
+}
+
+func (v *Snapshot) resolveValidationUnavailable(ctx context.Context, current *Snapshot, unavailable error) error {
 	for _, held := range []*Snapshot{v, current} {
 		held.mu.RLock()
 		cut := held.cutUnavailable
 		held.mu.RUnlock()
-		if unavailable == nil && cut != nil {
-			unavailable = cut
+		if err := deferValidationUnavailability(cut, &unavailable); err != nil {
+			return err
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return unavailable
+}
+
+func (v *Snapshot) closeValidationReobservation(ctx context.Context, current *Snapshot, unavailable error) error {
+	if err := deferValidationUnavailability(current.reobserveBase(ctx), &unavailable); err != nil {
+		return err
+	}
+	return v.resolveValidationUnavailable(ctx, current, unavailable)
 }
 
 // holdCutUnavailable keeps a comparison's cut-explained unavailability on
@@ -1533,10 +1499,6 @@ func (v *Snapshot) reobserveBase(ctx context.Context) error {
 	return v.compareObservationContext(ctx, observation)
 }
 
-func (v *Snapshot) compareBaseContext(ctx context.Context, current *Snapshot) error {
-	return v.compareFactsContext(ctx, current.guards(), current.facts.sourceFiles, current.facts.maximal, current.facts.purity, current.facts.sourceFilesBySubject, current.facts.fileDigests, current.facts.cut)
-}
-
 // guards composes the immutable capture without putting execution-specific facts
 // in the shared source/build generation.
 func (v *Snapshot) guards() guard.Guards {
@@ -1574,7 +1536,7 @@ func (v *Snapshot) observe(ctx context.Context) (observationFacts, error) {
 }
 
 func (v *Snapshot) compareObservationContext(ctx context.Context, observation observationFacts) error {
-	return v.compareFactsContext(ctx, observation.guards, observation.sourceFiles, observation.maximal, observation.purity, observation.sourceFilesBySubject, observation.fileDigests, observation.cut)
+	return compareObservations(ctx, v.subjects, v.facts, v.guards(), observation, false)
 }
 
 // takeCut adopts the other observation's fail-closed shape for a subject
@@ -1614,66 +1576,110 @@ func reportBudgetCut(progress func(Progress), budget time.Duration, cut int, sta
 	progress(Progress{Phase: "budget-exhausted", Detail: budgetExhausted(budget) + ": " + countNoun(cut, "subject") + " " + state})
 }
 
-// compareFactsContext deliberately omits the vouch-discharge map: the
-// discharges derive from version-pinned packages' facts under the
-// engine's fixed vouch set, and pinned source cannot move without the
-// guard and closure movement the other comparisons already refuse, so
-// a discharge delta cannot occur while every compared input holds
-// (construction's paired observations still compare discharges
-// directly, where no such immutability argument is available).
-func (v *Snapshot) compareFactsContext(ctx context.Context, guards guard.Guards, sourceFiles []string, maximal map[Subject]subjectFacts, purity map[Subject]string, sourceFilesBySubject map[Subject][]string, fileDigests map[string]string, cut map[Subject]bool) error {
+// compareObservations compares two observation passes for either paired view
+// construction (construction == true) or post-construction drift validation
+// (construction == false). Post-construction comparison deliberately omits the
+// vouch-discharge map: those discharges derive from version-pinned packages'
+// facts under the engine's fixed vouch set, and pinned source cannot move
+// without the guard and closure movement the other comparisons already refuse
+// (construction's paired observations still compare discharges directly, where
+// no such immutability argument is available).
+func compareObservations(ctx context.Context, subjects []Subject, base *observationFacts, baseGuards guard.Guards, current observationFacts, construction bool) error {
 	if ctx == nil {
 		return errors.New("gofresh: nil analysis context")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if guards != v.guards() {
+	during := ""
+	if construction {
+		during = " during construction"
+	}
+	if current.guards != baseGuards {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		return fmt.Errorf("%w: guards (%s)", ErrViewChanged, differingGuard(guards, v.guards()))
+		return fmt.Errorf("%w: guards%s (%s)", ErrViewChanged, during, differingGuard(current.guards, baseGuards))
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !slices.Equal(sourceFiles, v.facts.sourceFiles) {
+	if !construction && !slices.Equal(current.sourceFiles, base.sourceFiles) {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		return fmt.Errorf("%w: maximal source identities%s", ErrViewChanged, movedIdentitySuffix(v.facts.sourceFiles, sourceFiles, v.facts.fileDigests, fileDigests))
+		return fmt.Errorf("%w: maximal source identities%s", ErrViewChanged, movedIdentitySuffix(base.sourceFiles, current.sourceFiles, base.fileDigests, current.fileDigests))
 	}
 	var unjudged []Subject
-	for _, subject := range v.subjects {
+	for _, subject := range subjects {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !slices.Equal(sourceFilesBySubject[subject], v.facts.sourceFilesBySubject[subject]) {
+		if !construction && !slices.Equal(current.sourceFilesBySubject[subject], base.sourceFilesBySubject[subject]) {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return fmt.Errorf("%w: maximal source identities for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(v.facts.sourceFilesBySubject[subject], sourceFilesBySubject[subject], v.facts.fileDigests, fileDigests))
+			return fmt.Errorf("%w: maximal source identities for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject], base.fileDigests, current.fileDigests))
 		}
-		// A subject the budget cut in either observation compares with
-		// the discharge-shaped fields cleared; a difference those fields
-		// alone carry is the analysis's unavailability, reported after
-		// every other comparison held (REQ-fresh-context).
-		cutHere := cut[subject] || v.facts.cut[subject]
-		if !maximal[subject].equal(v.facts.maximal[subject], cutHere) {
+		// A budget cut in either observation compares with the
+		// discharge-shaped fields cleared; during construction the view
+		// adopts the cut pass's fail-closed shape, while post-construction
+		// comparison reports a difference those fields alone carry as
+		// analysis unavailability after every other comparison holds
+		// (REQ-fresh-context).
+		cutHere := current.cut[subject] || base.cut[subject]
+		if !current.maximal[subject].equal(base.maximal[subject], cutHere) {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return fmt.Errorf("%w: closure for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(v.facts.sourceFilesBySubject[subject], sourceFilesBySubject[subject], v.facts.fileDigests, fileDigests))
+			return fmt.Errorf("%w: closure for %s.%s%s%s", ErrViewChanged, subject.Package, subject.Symbol, during, movedIdentitySuffix(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject], base.fileDigests, current.fileDigests))
 		}
-		if cutHere && !maximal[subject].equal(v.facts.maximal[subject], false) {
+		if !construction && cutHere && !current.maximal[subject].equal(base.maximal[subject], false) {
 			unjudged = append(unjudged, subject)
 		}
-		if purity[subject] != v.facts.purity[subject] {
+		if current.purity[subject] != base.purity[subject] {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return fmt.Errorf("%w: purity for %s.%s", ErrViewChanged, subject.Package, subject.Symbol)
+			return fmt.Errorf("%w: purity for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, during)
 		}
+		if construction {
+			if base.vouchDischarges[subject] != current.vouchDischarges[subject] {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return fmt.Errorf("%w: vouch discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
+			}
+			if !cutHere && base.discharges[subject].singleSubject != current.discharges[subject].singleSubject {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return fmt.Errorf("%w: single-subject attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
+			}
+			if !cutHere && base.discharges[subject].packageProcess != current.discharges[subject].packageProcess {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return fmt.Errorf("%w: package-process attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
+			}
+			if current.cut[subject] && !base.cut[subject] {
+				base.takeCut(current, subject)
+			}
+			if !slices.Equal(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject]) {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				return fmt.Errorf("%w: maximal source identities for %s.%s during construction%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject], base.fileDigests, current.fileDigests))
+			}
+		}
+	}
+	if construction && !slices.Equal(base.sourceFiles, current.sourceFiles) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// The construction race is the one refusal with no reproduction
+		// path afterward, so naming here matters most.
+		return fmt.Errorf("%w: maximal source identities during construction%s", ErrViewChanged, movedIdentitySuffix(base.sourceFiles, current.sourceFiles, base.fileDigests, current.fileDigests))
 	}
 	if len(unjudged) > 0 {
 		if err := ctx.Err(); err != nil {
@@ -1832,7 +1838,7 @@ func (v *Snapshot) ensureObservable(ctx context.Context, subjects []Subject) (er
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.sealed {
-		return ErrViewSealed
+		return errViewSealed
 	}
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("gofresh: precise analysis cancelled: %w", err)
@@ -1916,7 +1922,1198 @@ func (e *engine) analysisScope(guards guard.Guards) closure.AnalysisScope {
 	return closure.AnalysisScope{
 		ProofStrategy: ObservationRTA, FactStrategy: DynamicStateStrategy,
 		Toolchain: guards.Toolchain, BuildConfig: guards.BuildConfig,
-		SingleSubject: e.executionModel.SingleSubject, PackageProcess: e.executionModel.PackageProcess,
+		SingleSubject: e.executionModel.singleSubject(), PackageProcess: e.executionModel.packageProcess(),
 		Vouches: vouches,
 	}
+}
+
+// SubjectScope states what a membership refusal tested. A declaration outside
+// a selected view can still exist in source; these refusals do not conflate it
+// with a missing declaration.
+type SubjectScope uint8
+
+const (
+	SelectedSource SubjectScope = iota
+	SelectedView
+	ParentView
+)
+
+// UnknownSubjectsError names every missing member once, in request order (or
+// package/symbol lexical order for map-backed requests). SelectedSource means
+// declarations were absent from the source scan, including a formerly held
+// subject disappearing during re-observation. Other scopes concern selection
+// alone and make no assertion about source existence.
+type UnknownSubjectsError struct {
+	Subjects []Subject
+	Scope    SubjectScope
+}
+
+func (e *UnknownSubjectsError) Error() string {
+	noun := "subjects"
+	if len(e.Subjects) == 1 {
+		noun = "subject"
+	}
+	names := make([]string, 0, len(e.Subjects))
+	for _, s := range e.Subjects {
+		names = append(names, s.Package+"."+s.Symbol)
+	}
+	where := "not found in selected source"
+	switch e.Scope {
+	case SelectedView:
+		where = "not in this analysis view"
+	case ParentView:
+		where = "not in the parent view"
+	}
+	return fmt.Sprintf("gofresh: %s %s %s", noun, strings.Join(names, ", "), where)
+}
+
+func requireSubjects(subjects []Subject, contains func(Subject) bool, scope SubjectScope) error {
+	seen := make(map[Subject]bool, len(subjects))
+	var unknown []Subject
+	for _, subject := range subjects {
+		if !seen[subject] && !contains(subject) {
+			unknown = append(unknown, subject)
+		}
+		seen[subject] = true
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	return &UnknownSubjectsError{Subjects: unknown, Scope: scope}
+}
+
+// requireMembers judges selection, not whether today's source declares a name.
+// The immutable closure inventory is the shared membership authority for every
+// projection, attachment and check over a constructed view.
+func (v *Snapshot) requireMembers(subjects []Subject) error {
+	return requireSubjects(subjects, func(s Subject) bool {
+		_, ok := v.facts.maximal[s]
+		return ok
+	}, SelectedView)
+}
+
+func orderedRecordedSubjects(recorded map[Subject]Fingerprint) []Subject {
+	ordered := make([]Subject, 0, len(recorded))
+	for subject := range recorded {
+		ordered = append(ordered, subject)
+	}
+	slices.SortFunc(ordered, func(a, b Subject) int {
+		if order := cmp.Compare(a.Package, b.Package); order != 0 {
+			return order
+		}
+		return cmp.Compare(a.Symbol, b.Symbol)
+	})
+	return ordered
+}
+
+// RecordedRefusalKind identifies the preparation tier refusing a record batch.
+type RecordedRefusalKind uint8
+
+const (
+	RecordShapeRefusal RecordedRefusalKind = iota + 1
+	RecordKindRefusal
+)
+
+// RecordedFailure attributes one record's preparation failure. Shape refusals
+// carry the fingerprint validator's error; kind refusals carry the recorded kind.
+type RecordedFailure struct {
+	Subject Subject
+	Shape   error
+	Kind    Kind
+}
+
+// RecordedBatchError reports every failure in the first refusing preparation
+// tier, in request order (package/symbol order for map-backed APIs). All shape failures precede every view-kind
+// mismatch; every kind mismatch precedes membership. No partial verdict exists.
+type RecordedBatchError struct {
+	Tier     RecordedRefusalKind
+	ViewKind Kind
+	Failures []RecordedFailure
+}
+
+func (e *RecordedBatchError) Error() string {
+	parts := make([]string, 0, len(e.Failures))
+	for _, failure := range e.Failures {
+		if e.Tier == RecordShapeRefusal {
+			parts = append(parts, fmt.Sprintf("%s.%s: %v", failure.Subject.Package, failure.Subject.Symbol, failure.Shape))
+		} else {
+			parts = append(parts, fmt.Sprintf("gofresh: recorded result kind %d for %s.%s does not match view kind %d", failure.Kind, failure.Subject.Package, failure.Subject.Symbol, e.ViewKind))
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+// Unwrap exposes the original fingerprint shape errors without making their
+// diagnostic wording the batch's refusal classification.
+func (e *RecordedBatchError) Unwrap() []error {
+	var errors []error
+	for _, failure := range e.Failures {
+		if failure.Shape != nil {
+			errors = append(errors, failure.Shape)
+		}
+	}
+	return errors
+}
+
+// subjectFacts separates immutable maximal inputs from consumer-tier obligations.
+// The obligations are independent: selecting one diagnostic must not erase the
+// others. They describe the construction's conservative analysis, never a later
+// producing unit's or historical candidate's admission.
+type subjectFacts struct {
+	source      closure.MaximalFacts
+	openWorld   *subjectRefusal
+	sharedState *subjectRefusal
+	ambiguous   *subjectRefusal
+	external    bool
+}
+
+// Presence carries the obligation; even an empty diagnostic cannot remove it.
+// A refusal is immutable after construction and may be shared with siblings.
+type subjectRefusal struct {
+	reason  string
+	culprit Subject
+}
+
+func sameRefusal(a, b *subjectRefusal) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// closure is the ordinary verdict ladder's projection. A caller may refine its
+// local decision using separately admitted evidence, but cannot write it back to
+// these facts. The source inventory and every consumer-tier obligation survive
+// even when a higher-priority diagnostic is selected here.
+func (f subjectFacts) closure() closure.Closure {
+	c := f.source.Closure()
+	if f.openWorld != nil {
+		c.Unverifiable, c.Refusal, c.Reason, c.Culprit = true, closure.OpenWorldRefusal, f.openWorld.reason, closure.Subject{}
+	}
+	if f.sharedState != nil {
+		c.Unverifiable, c.Refusal, c.Reason, c.Culprit = true, closure.SharedDynamicStateRefusal, f.sharedState.reason, closure.Subject{
+			Package: f.sharedState.culprit.Package,
+			Symbol:  f.sharedState.culprit.Symbol,
+		}
+	}
+	if f.ambiguous != nil {
+		c.Unverifiable, c.Refusal, c.Reason, c.Culprit = true, closure.AmbiguousSubjectRefusal, f.ambiguous.reason, closure.Subject{}
+	}
+	if f.external {
+		c.External, c.Unverifiable, c.Reason, c.Culprit = true, true, "external directive", closure.Subject{}
+	}
+	return c
+}
+
+// equal compares base observations, not evidence-dependent decisions. A budget
+// cut can change only the shared-state discharge; all other obligations must
+// still agree, including ones hidden by the selected diagnostic.
+func (f subjectFacts) equal(other subjectFacts, cut bool) bool {
+	return f.source.Equal(other.source) && sameRefusal(f.openWorld, other.openWorld) &&
+		(cut || sameRefusal(f.sharedState, other.sharedState)) &&
+		sameRefusal(f.ambiguous, other.ambiguous) && f.external == other.external
+}
+
+func (f *observationFacts) closure(subject Subject) closure.Closure {
+	return f.maximal[subject].closure()
+}
+
+// scanPureDirectivesAt loads pkgPaths from dir ("" = the current directory)
+// under env as the complete process environment and buildFlags as the
+// build selection, and returns a purity predicate marking every symbol
+// whose declaration carries a //gofresh:pure directive
+// (REQ-purity-directive).
+func scanPureDirectivesAt(dir string, env, buildFlags []string, pkgPaths ...string) (func(Subject) bool, error) {
+	scan, err := scanSubjectsInWithBuildFlagsEnv(context.Background(), dir, env, buildFlags, pkgPaths...)
+	if err != nil {
+		return nil, err
+	}
+	return scan.directivePure, nil
+}
+
+// sharedDynamicStatePrefix opens every shared-dynamic-state downgrade
+// diagnostic. The verdict uses the closure's typed refusal origin, never this
+// spelling, to keep shared state outside the observation lift.
+const sharedDynamicStatePrefix = "package graph shares mutated dynamic state: "
+
+// scanFactsDirName is the view scan memo's sibling store directory:
+// one entry per (scope, package scan key) holding the package's scan
+// outputs (REQ-closure-scan-memo).
+const scanFactsDirName = "scanfacts"
+
+func loadScanFacts(scope, key string, payload any) bool {
+	if scope == "" || key == "" {
+		return false
+	}
+	return cachefile.Load(scanFactsDirName, scope, key, payload)
+}
+
+func storeScanFacts(scope, key string, payload any) {
+	if scope == "" || key == "" {
+		return
+	}
+	cachefile.Store(scanFactsDirName, scope, key, payload)
+}
+
+func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*subjectScan, error) {
+	// A directive scan takes no engine: its own pass over the plain
+	// runner, loading only the requested packages and extracting only
+	// method directives without running FactOf or Compose.
+	hasher, err := closure.NewAt(ctx, gotool.NewEnvReader(gotool.Runner{}, dir, env), buildFlags...)
+	if err != nil {
+		return nil, err
+	}
+	load, err := closure.LoadViewPackages(ctx, hasher.PassReader(), buildFlags, pkgPaths...)
+	if err != nil {
+		return nil, err
+	}
+	byPkg := map[string][]dynamicStateFact{}
+	for _, pkg := range load.Packages() {
+		if pkg.Name == "main" && strings.HasSuffix(pkg.PkgPath, ".test") {
+			continue
+		}
+		for _, loadErr := range pkg.Errors {
+			return nil, fmt.Errorf("gofresh: directive scan: load %s: %s", pkg.PkgPath, loadErr)
+		}
+		byPkg[pkg.PkgPath] = append(byPkg[pkg.PkgPath], dynstate.MethodDirectivesFactOf(pkg))
+	}
+	missingPromoted := map[string]bool{}
+	for _, pkg := range load.Packages() {
+		if pkg.Types == nil {
+			continue
+		}
+		scope := pkg.Types.Scope()
+		for _, name := range scope.Names() {
+			typeName, ok := scope.Lookup(name).(*types.TypeName)
+			if !ok {
+				continue
+			}
+			for _, methods := range []*types.MethodSet{
+				types.NewMethodSet(types.NewPointer(typeName.Type())),
+				types.NewMethodSet(typeName.Type()),
+			} {
+				for i := 0; i < methods.Len(); i++ {
+					method, ok := methods.At(i).Obj().(*types.Func)
+					if !ok || method.Pkg() == nil {
+						continue
+					}
+					depPath := method.Pkg().Path()
+					first, _, _ := strings.Cut(depPath, "/")
+					if len(byPkg[depPath]) == 0 && strings.Contains(first, ".") {
+						missingPromoted[depPath] = true
+					}
+				}
+			}
+		}
+	}
+	if len(missingPromoted) > 0 {
+		depPatterns := make([]string, 0, len(missingPromoted))
+		for depPath := range missingPromoted {
+			depPatterns = append(depPatterns, depPath)
+		}
+		sort.Strings(depPatterns)
+		depLoad, err := closure.LoadViewPackages(ctx, hasher.PassReader(), buildFlags, depPatterns...)
+		if err != nil {
+			return nil, err
+		}
+		for _, pkg := range depLoad.Packages() {
+			if pkg.ForTest != "" || pkg.Name == "main" {
+				continue
+			}
+			byPkg[pkg.PkgPath] = append(byPkg[pkg.PkgPath], dynstate.MethodDirectivesFactOf(pkg))
+		}
+	}
+	cones := make(map[string]map[string][]dynamicStateFact, len(pkgPaths))
+	for _, pkgPath := range pkgPaths {
+		cones[pkgPath] = byPkg
+	}
+	state := &viewDynamicState{cones: cones}
+	return scanSubjectsFromLoadedWith(hasher.SelectionAudited(), false, load.Packages(), state, pkgPaths...)
+}
+
+// scanViewSubjects performs one observation pass's whole subject scan: the
+// metadata graph names every node and its mutability class, one typed load
+// covers the view packages' variants and every mutable-local graph package,
+// the dynamic-state derivation serves version-pinned facts from the memo, and
+// the subject walk reads that one load (REQ-fresh-coherent-view). The typed
+// load is installed on the hasher for the pass's sibling consumers. An empty
+// factScope disables fact persistence, never the derivation. budget bounds
+// the reachability discharges' precise analysis (zero: unbounded); a pass
+// the budget cuts leaves every culprit standing and persists no scan facts
+// of a package it cut — cut is the set of subjects it left undischarged
+// (REQ-fresh-context, REQ-closure-shared-dynamic-state-reachability).
+func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
+	scope = hasher.SetAnalysisScope(scope)
+	// The scope is the one source of the attestations and the vouches:
+	// what keys a memo is what the derivation applies.
+	factScope := scope.Facts()
+	singleSubject, packageProcess := scope.SingleSubject, scope.PackageProcess
+	vouches := make(map[string]bool, len(scope.Vouches))
+	for _, v := range scope.Vouches {
+		vouches[v] = true
+	}
+	// The scan memo: a view package whose scan the persistent store
+	// already holds under this scope and its current package scan key
+	// serves its subjects' outputs whole and takes no part in the typed
+	// load, the derivation, or the discharges below — every output is a
+	// pure function of the package's typed test-binary program, which
+	// the key pins byte for byte (REQ-closure-scan-memo). A key that
+	// cannot derive, or an entry that cannot load, recomputes.
+	scanScope := scope.Scan()
+	if viewTestHooks.scanMemoOff {
+		scanScope = ""
+	}
+	served := map[string]packageScanEntry{}
+	keys := map[string]string{}
+	var misses []string
+	for _, pkgPath := range pkgPaths {
+		key, err := hasher.PackageScanKey(pkgPath)
+		if err == nil {
+			keys[pkgPath] = key
+			var entry packageScanEntry
+			if loadScanFacts(scanScope, key, &entry) && entry.Version == scanEntryVersion {
+				served[pkgPath] = entry
+				hasher.Served("scan", pkgPath)
+				continue
+			}
+		}
+		misses = append(misses, pkgPath)
+	}
+	if len(misses) == 0 {
+		return scanFromEntries(served), nil, nil, nil
+	}
+	// Every listing, load, and derivation below reads the misses' graph
+	// alone; a served package's cone costs the pass nothing.
+	pkgPaths = misses
+	meta, err := hasher.GraphMetadata(pkgPaths...)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	requested := make(map[string]bool, len(pkgPaths))
+	for _, pkgPath := range pkgPaths {
+		requested[pkgPath] = true
+	}
+	// A test variant of a module-cache-resident view package: the view
+	// packages are the only test-expanded ones, and a subject package
+	// inside the read-only cache has no runnable tests to vouch for it —
+	// refused from the listing, before the typed load below is paid, and
+	// named rather than surfaced as a coverage gap. A pinned view package
+	// with no test files carries no variant and derives through the
+	// pinned-fact path as before.
+	for _, node := range meta {
+		if node.Class == closure.PinnedPackage && node.ForTest != "" && requested[node.ForTest] && (node.PkgPath == node.ForTest || node.PkgPath == node.ForTest+"_test") {
+			return nil, nil, nil, fmt.Errorf("gofresh: view package %s resolves into the module cache; module-cache-resident subjects are unsupported", node.ForTest)
+		}
+	}
+	patterns := append([]string(nil), pkgPaths...)
+	seenPattern := make(map[string]bool, len(pkgPaths))
+	for _, pkgPath := range pkgPaths {
+		seenPattern[pkgPath] = true
+	}
+	for _, node := range meta {
+		// Plain mutable-local graph packages load as patterns; test
+		// variants of the view packages load through the view patterns, and
+		// an intermediate recompilation ("r [a.test]") is scanned from its
+		// own compilation via the dependency-expanded fallback load in
+		// deriveViewDynamicState — a plain stand-in would miss variant-only
+		// resolution and need not even compile.
+		if node.Class != closure.MutableLocalPackage || node.TestMain || node.ForTest != "" || seenPattern[node.PkgPath] {
+			continue
+		}
+		seenPattern[node.PkgPath] = true
+		patterns = append(patterns, node.PkgPath)
+	}
+	if viewTestHooks.typedLoad != nil {
+		viewTestHooks.typedLoad()
+	}
+	hasher.Unit("typecheck", "", 0, len(patterns))
+	load, err := closure.LoadViewPackages(ctx, hasher.PassReader(), buildFlags, patterns...)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	hasher.UseViewLoad(load)
+	state, err := deriveViewDynamicState(ctx, hasher, factScope, buildFlags, load, pkgPaths, vouches, singleSubject, scope.PackageProcess)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	scan, err := scanSubjectsFromLoaded(hasher.SelectionAudited(), load.Packages(), state, pkgPaths...)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	// The discharges' reachability analysis is precise analysis under
+	// the caller's budget: bounded here alone — the listing, the typed
+	// load, the derivation, and the closure fold stay under the
+	// operation's own context (REQ-fresh-context).
+	analysisCtx, cancelBudget := analysisBound(ctx, budget)
+	defer cancelBudget()
+	var cut map[Subject]bool
+	if viewTestHooks.beforeDischarge != nil {
+		viewTestHooks.beforeDischarge()
+	}
+	if singleSubject {
+		// The attestation-gated reachability scoping: per downgraded
+		// subject, a culprit whose every marking site is provably
+		// outside the subject's rooted flow discharges — no proof, no
+		// discharge (REQ-closure-shared-dynamic-state).
+		if cut, err = dischargeUnreachableCulprits(ctx, analysisCtx, hasher, state, scan); err != nil {
+			return nil, nil, nil, err
+		}
+	} else if packageProcess {
+		// The package-process attestation's binary-scoped reachability
+		// judgment: every measured process is the subject package's own
+		// test binary, so sibling subjects are themselves harness roots
+		// of the analyzed binary, and a culprit no harness root's
+		// post-init flow can reach is init-determined for every subject
+		// of the binary — no proof, no discharge
+		// (REQ-closure-shared-dynamic-state).
+		if cut, err = dischargeBinaryUnreachableCulprits(ctx, analysisCtx, hasher, state, scan); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	// Persist each missed package's outputs now that the discharges have
+	// finished shaping them, then fold the served packages' in. A package
+	// the budget cut persists nothing: its undischarged shape is the
+	// budget's, not the program's, and the next pass derives it cold;
+	// the other missed packages' facts are the program's and persist.
+	cutPackages := map[string]bool{}
+	for subject := range cut {
+		cutPackages[subject.Package] = true
+	}
+	for _, pkgPath := range pkgPaths {
+		if key := keys[pkgPath]; key != "" && !cutPackages[pkgPath] {
+			storeScanFacts(scanScope, key, entryOf(scan, pkgPath))
+		}
+	}
+	mergeEntries(scan, served)
+	return scan, load, cut, nil
+}
+
+// scanEntryVersion versions the persisted scan entry — its shape and the
+// text of every field it persists (a downgrade reason is scan output, so
+// a change to its composition bumps the version); a bump recomputes
+// rather than serving an older entry's text or misreading its shape.
+const scanEntryVersion = 5
+
+// subjectScanEntry is one subject's scan outputs as persisted.
+type subjectScanEntry struct {
+	Pure bool `json:"pure,omitempty"`
+	// OpenWorld is the conferring term of an open-world subject — the
+	// type parameter, receiver, or parameter whose type carries
+	// dynamic reach — and empty for a closed one: one field, so an open
+	// subject without its term is unrepresentable
+	// (REQ-closure-refusal-channels).
+	OpenWorld                string  `json:"openWorld,omitempty"`
+	External                 bool    `json:"external,omitempty"`
+	DowngradeReason          string  `json:"downgradeReason,omitempty"`
+	DowngradeCulprit         Subject `json:"downgradeCulprit,omitempty"`
+	VouchDischarges          string  `json:"vouchDischarges,omitempty"`
+	AttestationDischarges    string  `json:"attestationDischarges,omitempty"`
+	PackageProcessDischarges string  `json:"packageProcessDischarges,omitempty"`
+	Ambiguous                string  `json:"ambiguous,omitempty"`
+}
+
+// packageScanEntry is one view package's scan outputs as persisted: every
+// subject the scan knew in the package, by symbol.
+type packageScanEntry struct {
+	Version  int                         `json:"version"`
+	Subjects map[string]subjectScanEntry `json:"subjects"`
+}
+
+// attestationDischarges holds the positive execution-model attestations'
+// load-bearing discharge sets for one subject: carried as one comparable value
+// across subjectScan, observationFacts, and Snapshot.Sibling so no attestation axis
+// can be omitted when copying or clearing subject facts.
+type attestationDischarges struct {
+	singleSubject  string
+	packageProcess string
+}
+
+// entryOf projects the scan's outputs for one package into its entry.
+func entryOf(scan *subjectScan, pkgPath string) packageScanEntry {
+	entry := packageScanEntry{Version: scanEntryVersion, Subjects: map[string]subjectScanEntry{}}
+	for subject := range scan.known {
+		if subject.Package != pkgPath {
+			continue
+		}
+		d := scan.discharges[subject]
+		entry.Subjects[subject.Symbol] = subjectScanEntry{
+			Pure: scan.pure[subject], OpenWorld: scan.openWorld[subject], External: scan.external[subject],
+			DowngradeReason: scan.downgradeReason[subject], DowngradeCulprit: scan.downgradeCulprit[subject],
+			VouchDischarges: scan.vouchDischarges[subject],
+			AttestationDischarges: d.singleSubject, PackageProcessDischarges: d.packageProcess,
+			Ambiguous: scan.ambiguous[subject],
+		}
+	}
+	return entry
+}
+
+// mergeEntries folds served packages' entries into a scan.
+func mergeEntries(scan *subjectScan, served map[string]packageScanEntry) {
+	for pkgPath, entry := range served {
+		for symbol, e := range entry.Subjects {
+			subject := Subject{Package: pkgPath, Symbol: symbol}
+			scan.known[subject] = true
+			if e.Pure {
+				scan.pure[subject] = true
+			}
+			if e.OpenWorld != "" {
+				scan.openWorld[subject] = e.OpenWorld
+			}
+			if e.External {
+				scan.external[subject] = true
+			}
+			if e.DowngradeReason != "" {
+				scan.downgradeReason[subject] = e.DowngradeReason
+			}
+			if e.DowngradeCulprit != (Subject{}) {
+				scan.downgradeCulprit[subject] = e.DowngradeCulprit
+			}
+			if e.VouchDischarges != "" {
+				scan.vouchDischarges[subject] = e.VouchDischarges
+			}
+			if e.AttestationDischarges != "" || e.PackageProcessDischarges != "" {
+				scan.discharges[subject] = attestationDischarges{
+					singleSubject:  e.AttestationDischarges,
+					packageProcess: e.PackageProcessDischarges,
+				}
+			}
+			if e.Ambiguous != "" {
+				scan.ambiguous[subject] = e.Ambiguous
+			}
+		}
+	}
+}
+
+// scanFromEntries builds a scan entirely from served entries.
+func scanFromEntries(served map[string]packageScanEntry) *subjectScan {
+	scan := &subjectScan{
+		pure: map[Subject]bool{}, known: map[Subject]bool{}, openWorld: map[Subject]string{}, external: map[Subject]bool{},
+		downgradeReason: map[Subject]string{}, downgradeCulprit: map[Subject]Subject{},
+		vouchDischarges: map[Subject]string{}, discharges: map[Subject]attestationDischarges{},
+		ambiguous: map[Subject]string{},
+	}
+	mergeEntries(scan, served)
+	return scan
+}
+
+// subjectScan is one observation pass's subject-walk result: enumeration,
+// directive purity, per-subject dynamic-signature marks, and the subjects
+// whose identity collapsed distinct declarations.
+type subjectScan struct {
+	pure  map[Subject]bool
+	known map[Subject]bool
+	// openWorld maps each open-world subject to the term conferring its
+	// openness (REQ-closure-analysis's openness rule), the refusal's
+	// named identity; a closed subject is absent
+	// (REQ-closure-refusal-channels).
+	openWorld map[Subject]string
+	external  map[Subject]bool
+	// downgradeReason maps each subject of a shared-dynamic-state
+	// downgraded package to the refusal reason naming the owning package
+	// and variable (REQ-closure-shared-dynamic-state-reason).
+	downgradeReason  map[Subject]string
+	downgradeCulprit map[Subject]Subject
+	// vouchDischarges maps each subject to the canonical sorted
+	// comma-joined caller-vouch identities that discharged would-be
+	// culprits reachable from its package (REQ-vouch-recorded).
+	vouchDischarges map[Subject]string
+	// discharges maps each subject to the positive execution-model
+	// attestations' load-bearing discharge sets (single-subject and
+	// package-process) reachable from its package (REQ-vouch-recorded).
+	discharges map[Subject]attestationDischarges
+	// ambiguous holds, per subject whose identity is declared more than
+	// once across the package and its test variants, the message naming
+	// both declarations. Capture is refused for exactly these subjects —
+	// no directive or assertion can be attributed to one declaration —
+	// while sibling subjects scan normally (REQ-purity-directive).
+	ambiguous map[Subject]string
+}
+
+func (s *subjectScan) directivePure(subject Subject) bool { return s.pure[subject] }
+
+// scanSubjectsFromLoaded derives the subject walk — subject enumeration,
+// directives, per-subject dynamic-signature marks — from an observation
+// pass's already-loaded packages, applying the pass's dynamic-state
+// derivation for the shared-dynamic-state downgrade and promoted-method
+// directives (REQ-fresh-coherent-view, REQ-closure-shared-dynamic-state).
+func scanSubjectsFromLoaded(audited bool, pkgs []*packages.Package, state *viewDynamicState, pkgPaths ...string) (*subjectScan, error) {
+	return scanSubjectsFromLoadedWith(audited, true, pkgs, state, pkgPaths...)
+}
+
+func scanSubjectsFromLoadedWith(audited, computeOpenWorld bool, pkgs []*packages.Package, state *viewDynamicState, pkgPaths ...string) (*subjectScan, error) {
+	scan := &subjectScan{
+		pure:             map[Subject]bool{},
+		known:            map[Subject]bool{},
+		openWorld:        map[Subject]string{},
+		external:         map[Subject]bool{},
+		downgradeReason:  map[Subject]string{},
+		downgradeCulprit: map[Subject]Subject{},
+		vouchDischarges:  map[Subject]string{},
+		discharges:       map[Subject]attestationDischarges{},
+		ambiguous:        map[Subject]string{},
+	}
+	var cones map[string]map[string][]dynamicStateFact
+	if state != nil {
+		cones = state.cones
+	}
+	declarations := map[Subject]string{}
+	err := dynstate.WalkLoadedSubjects(audited, computeOpenWorld, pkgs, cones, pkgPaths, func(s dynstate.ScannedSymbol) {
+		subject := Subject{Package: s.Package, Symbol: s.Symbol}
+		if previous := declarations[subject]; previous != "" && previous != s.Declaration {
+			scan.ambiguous[subject] = fmt.Sprintf("declared at both %s and %s", previous, s.Declaration)
+		} else {
+			declarations[subject] = s.Declaration
+			scan.known[subject] = true
+		}
+		if s.Pure {
+			scan.pure[subject] = true
+		}
+		if s.External {
+			scan.external[subject] = true
+		}
+		if s.OpenWorld != "" {
+			scan.openWorld[subject] = s.OpenWorld
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	for subject := range scan.ambiguous {
+		delete(scan.pure, subject)
+		delete(scan.external, subject)
+	}
+	if state != nil {
+		for subject := range scan.known {
+			if reason := state.downgraded[subject.Package]; reason != "" {
+				scan.downgradeReason[subject] = sharedDynamicStatePrefix + reason
+				if culprit := state.culprits[subject.Package]; culprit != (Subject{}) {
+					scan.downgradeCulprit[subject] = culprit
+				}
+			}
+			if discharges := state.vouchDischarges[subject.Package]; discharges != "" {
+				scan.vouchDischarges[subject] = discharges
+			}
+			if attested := state.attestationDischarges[subject.Package]; attested != "" {
+				scan.discharges[subject] = attestationDischarges{singleSubject: attested}
+			}
+		}
+	}
+	return scan, nil
+}
+
+func openWorldTerm(audited bool, sig *types.Signature) string {
+	return dynstate.OpenWorldTerm(audited, sig)
+}
+
+func typeMayCarryUnknownDynamic(audited bool, t types.Type, seen map[types.Type]bool) bool {
+	return dynstate.WalkDynamicCarrier(audited, t, seen, dynstate.CarrierPolicyConsumer)
+}
+
+func nodeDeclarationKey(pkg *packages.Package, node ast.Node) string {
+	return dynstate.NodeDeclarationKey(pkg, node)
+}
+
+func objectDeclarationKey(pkg *packages.Package, obj types.Object) string {
+	return dynstate.ObjectDeclarationKey(pkg, obj)
+}
+
+func hasDirective(doc *ast.CommentGroup, directive string) bool {
+	return dynstate.HasDirective(doc, directive)
+}
+
+func recvTypeName(fd *ast.FuncDecl) string {
+	return dynstate.RecvTypeName(fd)
+}
+
+func auditedSynchronization(audited bool, fn *types.Func) bool {
+	return dynstate.AuditedSynchronization(audited, fn)
+}
+
+func auditedPooling(audited bool, fn *types.Func) bool {
+	return dynstate.AuditedPooling(audited, fn)
+}
+
+func auditedImmutableType(audited bool, t types.Type) bool {
+	return dynstate.AuditedImmutableType(audited, t)
+}
+
+// dynamicStateFact is one package's contribution to the shared-dynamic-state
+// downgrade (REQ-closure-shared-dynamic-state) plus its method-directive
+// declarations: everything the analysis needs from the package's syntax, so a
+// version-pinned package's syntax never loads twice per key.
+type dynamicStateFact = dynstate.Fact
+
+// dynamicStateFactOf derives one typed package's fact. Pure function of the
+// package's selected syntax and type environment plus the caller-attested
+// single-subject-process execution model — the attestation changes what the
+// fact records (the audited pooling set's discharge), so it is part of every
+// fact-cache identity the fact is stored under
+// (REQ-closure-dynamic-state-memo).
+func dynamicStateFactOf(audited bool, p *packages.Package, singleSubject bool) dynamicStateFact {
+	return dynstate.FactOf(audited, p, singleSubject)
+}
+
+const dynamicStateDirName = "dynamicstate"
+
+func loadDynamicStateFacts(scope, bucket string) map[string]json.RawMessage {
+	if scope == "" {
+		return nil
+	}
+	var facts map[string]json.RawMessage
+	if !cachefile.Load(dynamicStateDirName, scope, bucket, &facts) {
+		return nil
+	}
+	return facts
+}
+
+func storeDynamicStateFacts(scope, bucket string, facts map[string]json.RawMessage) {
+	if scope == "" {
+		return
+	}
+	cachefile.Merge(dynamicStateDirName, scope, bucket, facts)
+}
+
+// processFactCache serves version-pinned package facts within one process.
+// Keyed by (scope, bucket, package path) — the same complete identity the
+// persistent memo trusts, so a hit is sound wherever the persistent entry
+// would be.
+var processFactCache sync.Map
+
+// viewDynamicState is the per-pass dynamic-state derivation over one view's
+// metadata graph: fresh facts for every mutable-local node from the pass's
+// own typed load, memoized facts for version-pinned modules (persistent under
+// factScope, in-process always), standard-library nodes skipped — inert by
+// construction: their declaration side is excluded and toolchain source
+// cannot reach module variables (imports are acyclic).
+type viewDynamicState struct {
+	cones                 map[string]map[string][]dynamicStateFact
+	downgraded            map[string]string
+	culprits              map[string]Subject
+	vouchDischarges       map[string]string
+	attestationDischarges map[string]string
+	rootCulprits          map[string][]dynCulprit
+	culpritSites          map[string]map[string]culpritSiteSet
+}
+
+// coneDynamicState is one view package's composed dynamic-state judgment over
+// its own test-binary cone.
+type coneDynamicState struct {
+	downgraded            string
+	culprit               Subject
+	vouchDischarges       string
+	attestationDischarges string
+	rootCulprits          []dynCulprit
+	culpritSites          map[string]culpritSiteSet
+}
+
+// dischargeUnreachableCulprits applies the single-subject reachability
+// scoping of the shared-dynamic-state judgment (REQ-closure-shared-dynamic-state).
+func dischargeUnreachableCulprits(ctx, analysisCtx context.Context, hasher *closure.Hasher, state *viewDynamicState, scan *subjectScan) (cut map[Subject]bool, err error) {
+	var downgraded []Subject
+	for subject := range scan.known {
+		if culprits := state.rootCulprits[subject.Package]; scan.downgradeReason[subject] != "" && len(culprits) > 0 && !state.culpritSites[subject.Package][culprits[0].key].unattributed {
+			downgraded = append(downgraded, subject)
+		}
+	}
+	if len(downgraded) == 0 {
+		return nil, nil
+	}
+	requests := make([]closure.Subject, len(downgraded))
+	for i, subject := range downgraded {
+		requests[i] = closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
+	}
+	rooted, err := hasher.ComputeRootedFunctions(analysisCtx, requests)
+	if err != nil {
+		return dischargeCut(ctx, analysisCtx, downgraded, err)
+	}
+	for i, subject := range downgraded {
+		proof := rooted[requests[i]]
+		if !proof.Complete {
+			continue
+		}
+		surviving, culprit, dischargedKeys := dischargeCulprits(proof, state, subject.Package)
+		if surviving == "" {
+			delete(scan.downgradeReason, subject)
+			delete(scan.downgradeCulprit, subject)
+		} else {
+			scan.downgradeReason[subject] = sharedDynamicStatePrefix + surviving
+			scan.downgradeCulprit[subject] = culprit
+		}
+		if len(dischargedKeys) > 0 {
+			d := scan.discharges[subject]
+			for _, key := range strings.Split(d.singleSubject, ",") {
+				if key != "" {
+					dischargedKeys[key] = true
+				}
+			}
+			d.singleSubject = joinDischargedKeys(dischargedKeys)
+			scan.discharges[subject] = d
+		}
+	}
+	return nil, nil
+}
+
+// dischargeCut classifies a reachability analysis's failure
+// (REQ-fresh-context, REQ-closure-shared-dynamic-state-reachability).
+func dischargeCut(ctx, analysisCtx context.Context, downgraded []Subject, err error) (map[Subject]bool, error) {
+	if ctx.Err() != nil {
+		return nil, fmt.Errorf("gofresh: dynamic-state discharge cancelled: %w", ctx.Err())
+	}
+	if analysisCtx.Err() != nil {
+		cut := make(map[Subject]bool, len(downgraded))
+		for _, subject := range downgraded {
+			cut[subject] = true
+		}
+		return cut, nil
+	}
+	return nil, err
+}
+
+// dischargeBinaryUnreachableCulprits applies the BINARY-scoped
+// reachability judgment of the shared-dynamic-state invariant
+// (REQ-closure-shared-dynamic-state).
+func dischargeBinaryUnreachableCulprits(ctx, analysisCtx context.Context, hasher *closure.Hasher, state *viewDynamicState, scan *subjectScan) (cut map[Subject]bool, err error) {
+	packageSubjects := map[string][]Subject{}
+	var downgraded []Subject
+	for subject := range scan.known {
+		if culprits := state.rootCulprits[subject.Package]; scan.downgradeReason[subject] != "" && len(culprits) > 0 && !state.culpritSites[subject.Package][culprits[0].key].unattributed {
+			packageSubjects[subject.Package] = append(packageSubjects[subject.Package], subject)
+			downgraded = append(downgraded, subject)
+		}
+	}
+	if len(packageSubjects) == 0 {
+		return nil, nil
+	}
+	paths := make([]string, 0, len(packageSubjects))
+	for path := range packageSubjects {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	inventories, err := hasher.ComputeBinaryRootedFunctions(analysisCtx, paths)
+	if err != nil {
+		return dischargeCut(ctx, analysisCtx, downgraded, err)
+	}
+	for _, path := range paths {
+		proof := inventories[path]
+		if !proof.Complete {
+			continue
+		}
+		surviving, culprit, dischargedKeys := dischargeCulprits(proof, state, path)
+		for _, subject := range packageSubjects[path] {
+			if surviving == "" {
+				delete(scan.downgradeReason, subject)
+				delete(scan.downgradeCulprit, subject)
+			} else {
+				scan.downgradeReason[subject] = sharedDynamicStatePrefix + surviving
+				scan.downgradeCulprit[subject] = culprit
+			}
+			if len(dischargedKeys) > 0 {
+				d := scan.discharges[subject]
+				d.packageProcess = joinDischargedKeys(dischargedKeys)
+				scan.discharges[subject] = d
+			}
+		}
+	}
+	return nil, nil
+}
+
+// dischargeCulprits walks one package's root culprits against a
+// complete rooted-flow inventory (REQ-closure-shared-dynamic-state).
+func dischargeCulprits(proof closure.RootedFunctions, state *viewDynamicState, pkgPath string) (surviving string, culpritSubj Subject, discharged map[string]bool) {
+	discharged = map[string]bool{}
+	for _, culprit := range state.rootCulprits[pkgPath] {
+		sites := state.culpritSites[pkgPath][culprit.key]
+		if sites.unattributed {
+			return culprit.reasonBody(), culprit.subject(), discharged
+		}
+		for fn := range sites.fns {
+			if proof.Fns[fn] {
+				return culprit.reasonBody(), culprit.subject(), discharged
+			}
+		}
+		discharged[culprit.key] = true
+	}
+	return "", Subject{}, discharged
+}
+
+func joinDischargedKeys(discharged map[string]bool) string {
+	keys := make([]string, 0, len(discharged))
+	for key := range discharged {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ",")
+}
+
+var auditedSourceListing = dynstate.AuditedSourceListing
+
+func generatedProtoHeader(text string) string {
+	return dynstate.GeneratedProtoHeader(text)
+}
+
+type culpritVerb = dynstate.CulpritVerb
+type culpritChannel = dynstate.CulpritChannel
+
+type dynCulprit struct {
+	pkgPath string
+	key     string
+	verb    culpritVerb
+	channel culpritChannel
+}
+
+func (c dynCulprit) reasonBody() string {
+	return (dynstate.Culprit{PkgPath: c.pkgPath, Key: c.key, Verb: c.verb, Channel: c.channel}).ReasonBody()
+}
+
+func (c dynCulprit) subject() Subject {
+	pkg, sym := (dynstate.Culprit{PkgPath: c.pkgPath, Key: c.key, Verb: c.verb, Channel: c.channel}).SubjectParts()
+	return Subject{Package: pkg, Symbol: sym}
+}
+
+type culpritSiteSet struct {
+	fns          map[string]bool
+	unattributed bool
+}
+
+func (s *viewDynamicState) methodDirectives(viewPackage string, m *types.Func) (pureKey, externalKey string) {
+	if s == nil {
+		return "", ""
+	}
+	return dynstate.MethodDirectives(s.cones, viewPackage, m)
+}
+
+func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factScope string, buildFlags []string, load *closure.ViewLoad, viewPackages []string, vouches map[string]bool, singleSubject, packageProcess bool) (*viewDynamicState, error) {
+	meta, err := hasher.GraphMetadata(viewPackages...)
+	if err != nil {
+		return nil, err
+	}
+	state := &viewDynamicState{downgraded: map[string]string{}, culprits: map[string]Subject{}, cones: map[string]map[string][]dynamicStateFact{}}
+	factsByListing := map[string]dynamicStateFact{}
+	record := func(listing, _ string, fact dynamicStateFact) {
+		factsByListing[listing] = fact
+	}
+
+	nodesByListing := make(map[string]closure.GraphPackage, len(meta))
+	for _, node := range meta {
+		nodesByListing[node.ImportPath] = node
+	}
+	matched := map[string]bool{}
+	for _, pkg := range load.Packages() {
+		listing := pkg.PkgPath
+		if pkg.ForTest != "" {
+			listing = pkg.PkgPath + " [" + pkg.ForTest + ".test]"
+		}
+		node, ok := nodesByListing[listing]
+		if !ok || node.Class != closure.MutableLocalPackage || node.TestMain {
+			continue
+		}
+		matched[listing] = true
+		record(listing, pkg.PkgPath, dynamicStateFactOf(hasher.SelectionAudited(), pkg, singleSubject))
+	}
+	var testedWithIntermediates []string
+	seenTested := map[string]bool{}
+	for _, node := range meta {
+		if node.Class == closure.StandardPackage || matched[node.ImportPath] || node.TestMain || node.ForTest == "" {
+			continue
+		}
+		if node.PkgPath == node.ForTest || node.PkgPath == node.ForTest+"_test" {
+			continue
+		}
+		if !seenTested[node.ForTest] {
+			seenTested[node.ForTest] = true
+			testedWithIntermediates = append(testedWithIntermediates, node.ForTest)
+		}
+	}
+	if len(testedWithIntermediates) > 0 {
+		sort.Strings(testedWithIntermediates)
+		hasher.Unit("typecheck", "", 0, len(testedWithIntermediates))
+		graphLoad, err := closure.LoadViewGraph(ctx, hasher.PassReader(), buildFlags, testedWithIntermediates...)
+		if err != nil {
+			return nil, err
+		}
+		packages.Visit(graphLoad.Packages(), nil, func(pkg *packages.Package) {
+			if pkg.ForTest == "" {
+				return
+			}
+			listing := pkg.PkgPath + " [" + pkg.ForTest + ".test]"
+			node, ok := nodesByListing[listing]
+			if !ok || node.Class == closure.StandardPackage || matched[listing] {
+				return
+			}
+			matched[listing] = true
+			record(listing, pkg.PkgPath, dynamicStateFactOf(hasher.SelectionAudited(), pkg, singleSubject))
+		})
+	}
+	for _, node := range meta {
+		if node.TestMain || node.Class == closure.StandardPackage || matched[node.ImportPath] {
+			continue
+		}
+		if node.Class == closure.PinnedPackage && node.ForTest == "" {
+			continue
+		}
+		return nil, fmt.Errorf("gofresh: dynamic-state scan did not cover package %s", node.ImportPath)
+	}
+
+	buckets, unkeyable := pinnedBuckets(meta)
+	var missing []closure.GraphPackage
+	persisted := map[string]map[string]json.RawMessage{}
+	for _, node := range meta {
+		if node.Class != closure.PinnedPackage || node.ForTest != "" || node.TestMain {
+			continue
+		}
+		if factScope == "" || unkeyable[node.Pin] {
+			missing = append(missing, node)
+			continue
+		}
+		bucket := buckets[node.Pin]
+		cacheKey := factScope + "\x00" + bucket + "\x00" + node.PkgPath
+		if cached, ok := processFactCache.Load(cacheKey); ok {
+			record(node.ImportPath, node.PkgPath, cached.(dynamicStateFact))
+			continue
+		}
+		if persisted[bucket] == nil {
+			if facts := loadDynamicStateFacts(factScope, bucket); facts != nil {
+				persisted[bucket] = facts
+			} else {
+				persisted[bucket] = map[string]json.RawMessage{}
+			}
+		}
+		if raw, ok := persisted[bucket][node.PkgPath]; ok {
+			var fact dynamicStateFact
+			if json.Unmarshal(raw, &fact) == nil {
+				hasher.Served("dynamic-state facts", node.PkgPath)
+				processFactCache.Store(cacheKey, fact)
+				record(node.ImportPath, node.PkgPath, fact)
+				continue
+			}
+		}
+		missing = append(missing, node)
+	}
+	if len(missing) > 0 {
+		patterns := make([]string, 0, len(missing))
+		for _, node := range missing {
+			patterns = append(patterns, node.PkgPath)
+		}
+		sort.Strings(patterns)
+		if viewTestHooks.dynamicStateMissLoad != nil {
+			viewTestHooks.dynamicStateMissLoad(patterns)
+		}
+		hasher.Unit("typecheck", "", 0, len(patterns))
+		missLoad, err := closure.LoadViewPackages(ctx, hasher.PassReader(), buildFlags, patterns...)
+		if err != nil {
+			return nil, err
+		}
+		derived := map[string]dynamicStateFact{}
+		for _, pkg := range missLoad.Packages() {
+			if pkg.ForTest != "" || pkg.Name == "main" {
+				continue
+			}
+			for _, loadErr := range pkg.Errors {
+				return nil, fmt.Errorf("gofresh: dynamic-state scan: load %s: %s", pkg.PkgPath, loadErr)
+			}
+			derived[pkg.PkgPath] = dynamicStateFactOf(hasher.SelectionAudited(), pkg, singleSubject)
+		}
+		store := map[string]map[string]json.RawMessage{}
+		for _, node := range missing {
+			fact, ok := derived[node.PkgPath]
+			if !ok {
+				return nil, fmt.Errorf("gofresh: dynamic-state scan did not load pinned package %s", node.PkgPath)
+			}
+			record(node.ImportPath, node.PkgPath, fact)
+			if factScope == "" || unkeyable[node.Pin] {
+				continue
+			}
+			bucket := buckets[node.Pin]
+			processFactCache.Store(factScope+"\x00"+bucket+"\x00"+node.PkgPath, fact)
+			if raw, err := json.Marshal(fact); err == nil {
+				if store[bucket] == nil {
+					store[bucket] = map[string]json.RawMessage{}
+				}
+				store[bucket][node.PkgPath] = raw
+			}
+		}
+		for bucket, facts := range store {
+			storeDynamicStateFacts(factScope, bucket, facts)
+		}
+	}
+
+	for _, viewPackage := range viewPackages {
+		coneMeta, coneFacts := dynamicStateCone(meta, nodesByListing, factsByListing, viewPackage)
+		state.cones[viewPackage] = coneFacts
+		cone := composeDynamicState(coneMeta, coneFacts, viewPackage, vouches, singleSubject, packageProcess)
+		if cone.downgraded != "" {
+			state.downgraded[viewPackage] = cone.downgraded
+			state.culprits[viewPackage] = cone.culprit
+		}
+		if cone.vouchDischarges != "" {
+			if state.vouchDischarges == nil {
+				state.vouchDischarges = map[string]string{}
+			}
+			state.vouchDischarges[viewPackage] = cone.vouchDischarges
+		}
+		if cone.attestationDischarges != "" {
+			if state.attestationDischarges == nil {
+				state.attestationDischarges = map[string]string{}
+			}
+			state.attestationDischarges[viewPackage] = cone.attestationDischarges
+		}
+		if len(cone.rootCulprits) > 0 {
+			if state.rootCulprits == nil {
+				state.rootCulprits = map[string][]dynCulprit{}
+				state.culpritSites = map[string]map[string]culpritSiteSet{}
+			}
+			state.rootCulprits[viewPackage] = cone.rootCulprits
+			state.culpritSites[viewPackage] = cone.culpritSites
+		}
+	}
+	return state, nil
+}
+
+func composeDynamicState(meta []closure.GraphPackage, allFacts map[string][]dynamicStateFact, viewPackage string, vouches map[string]bool, singleSubject, packageProcess bool) coneDynamicState {
+	composed := dynstate.Compose(meta, allFacts, viewPackage, vouches, singleSubject, packageProcess)
+	out := coneDynamicState{
+		downgraded:            composed.Downgraded,
+		culprit:               Subject{Package: composed.CulpritPkg, Symbol: composed.CulpritSym},
+		vouchDischarges:       composed.VouchDischarges,
+		attestationDischarges: composed.AttestationDischarges,
+	}
+	if len(composed.RootCulprits) > 0 {
+		out.rootCulprits = make([]dynCulprit, len(composed.RootCulprits))
+		for i, c := range composed.RootCulprits {
+			out.rootCulprits[i] = dynCulprit{
+				pkgPath: c.PkgPath,
+				key:     c.Key,
+				verb:    c.Verb,
+				channel: c.Channel,
+			}
+		}
+		out.culpritSites = make(map[string]culpritSiteSet, len(composed.CulpritSites))
+		for k, s := range composed.CulpritSites {
+			out.culpritSites[k] = culpritSiteSet{
+				fns:          s.Fns,
+				unattributed: s.Unattributed,
+			}
+		}
+	}
+	return out
+}
+
+func dynamicStateCone(meta []closure.GraphPackage, byListing map[string]closure.GraphPackage, factsByListing map[string]dynamicStateFact, viewPackage string) ([]closure.GraphPackage, map[string][]dynamicStateFact) {
+	return dynstate.Cone(meta, byListing, factsByListing, viewPackage)
+}
+
+func pinnedBuckets(meta []closure.GraphPackage) (buckets map[string]string, unkeyable map[string]bool) {
+	return dynstate.PinnedBuckets(meta)
+}
+
+func newDeferralResolution(allFacts map[string][]dynamicStateFact, malformed func(fact dynamicStateFact)) *dynstate.DeferralResolution {
+	return dynstate.NewDeferralResolution(allFacts, malformed)
+}
+
+func resolveEnvAudit(allFacts map[string][]dynamicStateFact, malformed func(fact dynamicStateFact)) *dynstate.EnvAuditResolution {
+	return dynstate.ResolveEnvAudit(allFacts, malformed)
+}
+
+func carrierLinkGraph(allFacts map[string][]dynamicStateFact, malformed func(fact dynamicStateFact)) map[string]map[string]bool {
+	return dynstate.CarrierLinkGraph(allFacts, malformed)
 }

@@ -186,10 +186,10 @@ func TestCheckingUnitCandidatesAndLifecycle(t *testing.T) {
 			t.Fatal("consumer winner indices changed")
 		}
 		u.Abort()
-		if _, err := u.CheckBatch(t.Context(), []Candidate{{a, f.current[a]}}); !errors.Is(err, ErrUnitClosed) {
+		if _, err := u.CheckBatch(t.Context(), []Candidate{{a, f.current[a]}}); !errors.Is(err, errUnitClosed) {
 			t.Fatalf("closed unit reopened: %v", err)
 		}
-		if _, err := u.Close(t.Context()); !errors.Is(err, ErrUnitClosed) {
+		if _, err := u.Close(t.Context()); !errors.Is(err, errUnitClosed) {
 			t.Fatalf("closed unit reclosed: %v", err)
 		}
 	})
@@ -452,7 +452,7 @@ func TestCheckingUnitCandidatesAndLifecycle(t *testing.T) {
 			t.Fatalf("losing extension reused opening proof: %+v %v", got, err)
 		}
 	})
-	t.Run("CheckBatchWithLedgers and CheckWithLedger extend ReasonTestVariants in one unit", func(t *testing.T) {
+	t.Run("CheckBatchWithLedgers extends ReasonTestVariants in one unit", func(t *testing.T) {
 		candidates := []Candidate{{a, f.old[a]}, {b, f.current[b]}}
 		checked, err := f.binding.CheckBatchWithLedgers(t.Context(), candidates, map[int]TestVariantLedger{0: f.ledger})
 		if err != nil || len(checked) != 2 {
@@ -463,14 +463,6 @@ func TestCheckingUnitCandidatesAndLifecycle(t *testing.T) {
 		}
 		if checked[1].Index != 1 || checked[1].Subject != b || checked[1].Verdict.Status != Valid || checked[1].Extension != nil {
 			t.Fatalf("candidate 1 unexpected extension: %+v", checked[1])
-		}
-		single, err := f.binding.CheckWithLedger(t.Context(), a, f.old[a], &f.ledger)
-		if err != nil || single.Verdict.Status != Valid || single.Extension == nil {
-			t.Fatalf("CheckWithLedger with prior ledger: %+v %v", single, err)
-		}
-		withoutLedger, err := f.binding.CheckWithLedger(t.Context(), a, f.old[a], nil)
-		if err != nil || withoutLedger.Verdict.Status != Stale || withoutLedger.Verdict.Reason != ReasonTestVariants || withoutLedger.Extension != nil {
-			t.Fatalf("CheckWithLedger without prior ledger: %+v %v", withoutLedger, err)
 		}
 		// Mixed batch where candidate 0 is inertly extended and candidate 1's prior ledger is non-inert (removed declaration).
 		nonInertLedger := f.ledger.Clone()
@@ -487,8 +479,25 @@ func TestCheckingUnitCandidatesAndLifecycle(t *testing.T) {
 		if mixed[0].Verdict.Status != Valid || mixed[0].Extension == nil {
 			t.Fatalf("mixed candidate 0 should extend to Valid: %+v", mixed[0])
 		}
-		if mixed[1].Verdict.Status != Stale || mixed[1].Verdict.Reason != ReasonTestVariants || mixed[1].Extension != nil {
-			t.Fatalf("mixed candidate 1 should remain Stale/ReasonTestVariants: %+v", mixed[1])
+		if mixed[1].Verdict.Status != Stale || mixed[1].Verdict.Reason != ReasonTestVariants || mixed[1].Verdict.Ground.Cause != (Cause{Kind: TestVariantsCause, Condition: Changed}) || mixed[1].Extension != nil {
+			t.Fatalf("mixed candidate 1 should remain Stale/ReasonTestVariants (Condition: Changed): %+v", mixed[1])
+		}
+		// When the compartment delta is inert for candidate 1, but a downstream tier (e.g. runtime digest)
+		// fails after compartment substitution, the unextended candidate retains its TestVariants (Changed) verdict.
+		driftedRuntime := f.old[b]
+		driftedRuntime.RuntimeDigest = "0000000000000000000000000000000000000000000000000000000000000000"
+		downstreamFailed, err := f.binding.CheckBatchWithLedgers(t.Context(), []Candidate{{a, f.old[a]}, {b, driftedRuntime}}, map[int]TestVariantLedger{
+			0: f.ledger,
+			1: f.ledger,
+		})
+		if err != nil || len(downstreamFailed) != 2 {
+			t.Fatalf("downstreamFailed CheckBatchWithLedgers: %+v %v", downstreamFailed, err)
+		}
+		if downstreamFailed[0].Verdict.Status != Valid || downstreamFailed[0].Extension == nil {
+			t.Fatalf("downstreamFailed candidate 0 should extend to Valid: %+v", downstreamFailed[0])
+		}
+		if downstreamFailed[1].Verdict.Status != Stale || downstreamFailed[1].Verdict.Reason != ReasonTestVariants || downstreamFailed[1].Verdict.Ground.Cause != (Cause{Kind: TestVariantsCause, Condition: Changed}) || downstreamFailed[1].Extension != nil {
+			t.Fatalf("downstreamFailed candidate 1 should remain unextended Stale/ReasonTestVariants (Condition: Changed): %+v", downstreamFailed[1])
 		}
 		// Atomic preparation precedence and nil-context refusal on CheckBatchWithLedgers.
 		if _, err := f.binding.CheckBatchWithLedgers(nil, candidates, nil); err == nil {
@@ -578,7 +587,7 @@ func TestCheckingUnitCancellationAndAbort(t *testing.T) {
 			}
 			u.Abort()
 			close(release)
-			want := ErrUnitAborted
+			want := errUnitAborted
 			if callerCancel {
 				want = context.Canceled
 			}
@@ -591,7 +600,7 @@ func TestCheckingUnitCancellationAndAbort(t *testing.T) {
 				t.Fatal("cancelled work did not finish")
 			}
 			cancel()
-			if got, err := u.Close(t.Context()); !errors.Is(err, ErrUnitClosed) || got != nil {
+			if got, err := u.Close(t.Context()); !errors.Is(err, errUnitClosed) || got != nil {
 				t.Fatalf("ended unit reopened: %+v %v", got, err)
 			}
 		}
@@ -612,7 +621,7 @@ func TestCheckingUnitCancellationAndAbort(t *testing.T) {
 			return runtimeinput.State{OK: true, Manifest: "held", Digest: "same"}, ctx.Err()
 		}
 		type answer struct {
-			rows []ProvisionalCheck
+			rows []CheckedCandidate
 			err  error
 		}
 		first, second := make(chan answer, 1), make(chan answer, 1)
@@ -697,7 +706,7 @@ func TestCheckingUnitCancellationAndAbort(t *testing.T) {
 		resume()
 		select {
 		case err := <-done:
-			if !errors.Is(err, ErrUnitClosed) {
+			if !errors.Is(err, errUnitClosed) {
 				t.Fatalf("late append: %v", err)
 			}
 		case <-time.After(20 * time.Second):
@@ -720,7 +729,7 @@ func TestCheckingUnitCancellationAndAbort(t *testing.T) {
 		if rows, err := u.CheckBatch(t.Context(), []Candidate{{subject, fp}, {subject, fp}}); !errors.Is(err, context.Canceled) || rows != nil || calls != 1 {
 			t.Fatalf("runtime cancellation became an answer: %+v calls=%d err=%v", rows, calls, err)
 		}
-		if rows, err := u.Close(t.Context()); !errors.Is(err, ErrUnitClosed) || rows != nil {
+		if rows, err := u.Close(t.Context()); !errors.Is(err, errUnitClosed) || rows != nil {
 			t.Fatalf("operational failure left the unit open: %+v %v", rows, err)
 		}
 	})
@@ -734,7 +743,7 @@ func TestCheckingUnitCancellationAndAbort(t *testing.T) {
 		if rows, err := u.Close(ctx); !errors.Is(err, context.Canceled) || rows != nil {
 			t.Fatalf("cancelled close: %+v %v", rows, err)
 		}
-		if _, err := u.CheckBatch(t.Context(), nil); !errors.Is(err, ErrUnitClosed) {
+		if _, err := u.CheckBatch(t.Context(), nil); !errors.Is(err, errUnitClosed) {
 			t.Fatalf("cancelled close reopened: %v", err)
 		}
 	})

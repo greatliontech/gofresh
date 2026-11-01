@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 
+	"github.com/greatliontech/gofresh/internal/guard"
+	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -25,22 +28,16 @@ type InertRequest struct {
 }
 
 // CheckedExtension carries an applicability endpoint and its companion ledger.
-// In a ProvisionalCheck it is provisional too; only successful Close grants use.
+// During a round it is provisional; only successful Close grants use.
 type CheckedExtension struct {
 	Fingerprint Fingerprint
 	Ledger      TestVariantLedger
 }
 
-// ProvisionalCheck is an advisory answer before closing. Neither its verdict nor
-// its optional extension grants permission to reuse or publish evidence.
-type ProvisionalCheck struct {
-	Index     int
-	Subject   Subject
-	Verdict   Verdict
-	Extension *CheckedExtension
-}
-
-// CheckedCandidate is a final judgment after the entire checking unit closes.
+// CheckedCandidate is one candidate judgment in a CheckingUnit. Returned from
+// CheckBatch or ExtendInertBatch before Close, it is an advisory provisional
+// answer that grants no permission to reuse or publish evidence; returned from
+// Close, it is the final judgment after the entire checking unit closes.
 // Index is the zero-based operation slot, in append order across all rounds.
 // Extension is present only for a valid explicitly requested transformation.
 type CheckedCandidate struct {
@@ -311,7 +308,7 @@ func (b *RuntimeBinding) BeginCheck(subjects []Subject) (*CheckingUnit, error) {
 
 // CheckBatch appends one ordinary slot per candidate, including duplicates. The
 // returned indices remain stable through later rounds and explicit extensions.
-func (u *CheckingUnit) CheckBatch(ctx context.Context, candidates []Candidate) ([]ProvisionalCheck, error) {
+func (u *CheckingUnit) CheckBatch(ctx context.Context, candidates []Candidate) ([]CheckedCandidate, error) {
 	owned := append([]Candidate(nil), candidates...)
 	return u.round(ctx, func() ([]checkingSlot, error) {
 		if err := u.view.prepareCandidates(owned); err != nil {
@@ -327,7 +324,7 @@ func (u *CheckingUnit) CheckBatch(ctx context.Context, candidates []Candidate) (
 
 // ExtendInertBatch appends separately licensed operations; it never replaces the
 // referenced slot's historical judgment. All indices are admitted before work.
-func (u *CheckingUnit) ExtendInertBatch(ctx context.Context, requests []InertRequest) ([]ProvisionalCheck, error) {
+func (u *CheckingUnit) ExtendInertBatch(ctx context.Context, requests []InertRequest) ([]CheckedCandidate, error) {
 	owned := make([]InertRequest, len(requests))
 	for i, request := range requests {
 		owned[i] = InertRequest{request.Index, request.PriorLedger.Clone()}
@@ -354,7 +351,7 @@ func (u *CheckingUnit) ExtendInertBatch(ctx context.Context, requests []InertReq
 	})
 }
 
-func (u *CheckingUnit) round(ctx context.Context, prepare func() ([]checkingSlot, error)) ([]ProvisionalCheck, error) {
+func (u *CheckingUnit) round(ctx context.Context, prepare func() ([]checkingSlot, error)) ([]CheckedCandidate, error) {
 	if ctx == nil {
 		return nil, errors.New("gofresh: nil checking context")
 	}
@@ -377,7 +374,7 @@ func (u *CheckingUnit) round(ctx context.Context, prepare func() ([]checkingSlot
 	}
 	if u.phase != unitOpen {
 		u.mu.Unlock()
-		return nil, ErrUnitClosed
+		return nil, errUnitClosed
 	}
 	slots, err := prepare()
 	if cause := ctx.Err(); cause != nil {
@@ -403,15 +400,14 @@ func (u *CheckingUnit) round(ctx context.Context, prepare func() ([]checkingSlot
 	if err = u.finishWork(ctx, err); err != nil {
 		return nil, err
 	}
-	provisional := make([]ProvisionalCheck, len(slots))
+	checked := make([]CheckedCandidate, len(slots))
 	for i := range slots {
 		slots[i].result = results[i]
 		index := len(u.slots)
 		u.slots = append(u.slots, slots[i])
-		checked := slots[i].checked(index)
-		provisional[i] = ProvisionalCheck{checked.Index, checked.Subject, checked.Verdict, checked.Extension}
+		checked[i] = slots[i].checked(index)
 	}
-	return provisional, nil
+	return checked, nil
 }
 
 // finishWork is called under mu at a round's commit boundary. Caller
@@ -422,10 +418,10 @@ func (u *CheckingUnit) finishWork(ctx context.Context, err error) error {
 		return cause
 	}
 	if u.phase == unitAborted {
-		return ErrUnitAborted
+		return errUnitAborted
 	}
 	if u.phase != unitOpen && u.phase != unitClosing {
-		return ErrUnitClosed
+		return errUnitClosed
 	}
 	if err != nil {
 		u.phase = unitFailed
@@ -467,7 +463,7 @@ func (u *CheckingUnit) Close(ctx context.Context) (checked []CheckedCandidate, o
 	u.mu.Lock()
 	if u.phase != unitOpen {
 		u.mu.Unlock()
-		return nil, ErrUnitClosed
+		return nil, errUnitClosed
 	}
 	u.phase = unitClosing
 	if ctx == nil || ctx.Err() != nil || u.busy {
@@ -539,19 +535,249 @@ func (u *CheckingUnit) close(ctx context.Context) ([]CheckedCandidate, error) {
 		slot.result = result
 		checked[i] = slot.checked(i)
 	}
-	if err := deferValidationUnavailability(current.reobserveBase(ctx), &unavailable); err != nil {
+	if err := u.view.closeValidationReobservation(ctx, current, unavailable); err != nil {
 		return nil, err
 	}
-	for _, view := range []*Snapshot{u.view, current} {
-		if err := deferValidationUnavailability(view.cutUnavailable, &unavailable); err != nil {
-			return nil, err
-		}
+	return checked, nil
+}
+
+// CheckBatchWithLedgers checks a batch of candidates and, for any candidate
+// that fails with ReasonTestVariants and has a prior ledger in ledgers,
+// explicitly attempts an inert test-variant extension within the same checking
+// unit before closing. The returned slice has one entry per candidate in
+// request order, with Extension populated when an inert extension succeeded.
+func (b *RuntimeBinding) CheckBatchWithLedgers(ctx context.Context, candidates []Candidate, ledgers map[int]TestVariantLedger) ([]CheckedCandidate, error) {
+	if ctx == nil {
+		return nil, errors.New("gofresh: nil checking context")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if unavailable != nil {
-		return nil, unavailable
+	if b == nil || b.snapshot == nil || b.snapshot.facts == nil {
+		return nil, errors.New("gofresh: uninitialized runtime binding")
 	}
-	return checked, nil
+	if err := b.snapshot.prepareCandidates(candidates); err != nil {
+		return nil, err
+	}
+	var subjects []Subject
+	seen := make(map[Subject]bool, len(candidates))
+	for _, c := range candidates {
+		if !seen[c.Subject] {
+			seen[c.Subject] = true
+			subjects = append(subjects, c.Subject)
+		}
+	}
+	if len(subjects) == 0 {
+		subjects = slices.Clone(b.snapshot.subjects)
+	}
+	u, err := b.BeginCheck(subjects)
+	if err != nil {
+		return nil, err
+	}
+	defer u.Abort()
+	provisional, err := u.CheckBatch(ctx, candidates)
+	if err != nil {
+		return nil, err
+	}
+	var requests []InertRequest
+	var requestCandidate []int
+	for i, p := range provisional {
+		if p.Verdict.Status == Stale && p.Verdict.Reason == ReasonTestVariants {
+			if prior, ok := ledgers[i]; ok {
+				requests = append(requests, InertRequest{Index: i, PriorLedger: prior})
+				requestCandidate = append(requestCandidate, i)
+			}
+		}
+	}
+	if len(requests) > 0 {
+		if _, err := u.ExtendInertBatch(ctx, requests); err != nil {
+			return nil, err
+		}
+	}
+	closed, err := u.Close(ctx)
+	if err != nil {
+		return nil, err
+	}
+	results := append([]CheckedCandidate(nil), closed[:len(candidates)]...)
+	for k, candIdx := range requestCandidate {
+		ext := closed[len(candidates)+k]
+		if ext.Verdict.Status == Valid && ext.Extension != nil {
+			results[candIdx] = CheckedCandidate{
+				Index:     candIdx,
+				Subject:   candidates[candIdx].Subject,
+				Verdict:   ext.Verdict,
+				Extension: ext.Extension,
+			}
+		}
+	}
+	return results, nil
+}
+
+// checkInertTestVariantExtension explicitly licenses an inert delta from prior
+// to this view's ledger, then checks every remaining guard under ordinary or
+// observed policy. The caller vouches that prior is the complete ledger paired
+// with recorded's effective compartment, core, listing/build configuration,
+// toolchain and derivation. Historical provenance is caller-trusted, not
+// hash-authenticated. Only Valid returns an updated fingerprint and
+// independently owned ledger. Producing constituents are never refreshed.
+// withDeferredCheckClose makes the returned judgment and pair provisional
+// until this view successfully validates.
+func (v *Snapshot) checkInertTestVariantExtension(ctx context.Context, recorded Fingerprint, prior TestVariantLedger, subject Subject, observed bool) (Fingerprint, TestVariantLedger, Verdict, error) {
+	if v == nil || v.facts == nil || v.engine == nil {
+		return Fingerprint{}, TestVariantLedger{}, Verdict{}, errors.New("gofresh: uninitialized snapshot")
+	}
+	refuse := func(verdict Verdict, err error) (Fingerprint, TestVariantLedger, Verdict, error) {
+		if err == nil {
+			verdict = v.judgmentFor(subject, verdict)
+		}
+		return Fingerprint{}, TestVariantLedger{}, verdict, err
+	}
+	if ctx == nil {
+		return refuse(Verdict{}, errors.New("gofresh: nil analysis context"))
+	}
+	if err := ctx.Err(); err != nil {
+		return refuse(Verdict{}, err)
+	}
+	if err := v.prepareCandidates([]Candidate{{subject, recorded}}); err != nil {
+		return refuse(Verdict{}, err)
+	}
+	candidate, ledger, rejected, err := v.prepareInertExtension(recorded, prior, subject)
+	if err != nil || rejected.Status != "" {
+		return refuse(rejected, err)
+	}
+	var verdict Verdict
+	if observed {
+		verdict, err = v.CheckObserved(ctx, candidate, subject)
+	} else {
+		verdict, err = v.Check(ctx, candidate, subject)
+	}
+	if err != nil || verdict.Status != Valid {
+		return refuse(verdict, err)
+	}
+	if err := v.retainApplicabilityCheck(ctx, candidate, subject, observed); err != nil {
+		return refuse(Verdict{}, err)
+	}
+	return candidate, ledger, verdict, nil
+}
+
+// prepareInertExtension licenses only the compartment substitution. It observes
+// no runtime inputs or proof and preserves every original producing constituent.
+// The caller has admitted shape, kind and membership for the entire batch first.
+// An empty verdict means the resulting endpoint still needs the checking kernel.
+func (v *Snapshot) prepareInertExtension(recorded Fingerprint, prior TestVariantLedger, subject Subject) (Fingerprint, TestVariantLedger, Verdict, error) {
+	refuse := func(verdict Verdict, err error) (Fingerprint, TestVariantLedger, Verdict, error) {
+		return Fingerprint{}, TestVariantLedger{}, verdict, err
+	}
+	cl := v.facts.closure(subject)
+	if !recorded.recognizedApplicability() || recorded.EffectiveTestVariantClosure() == "" {
+		condition := Missing
+		if !recorded.recognizedApplicability() {
+			condition = Unsupported
+		}
+		return refuse(refusal(Stale, TestVariantsCause, condition, ReasonTestVariants), nil)
+	}
+	if recorded.ClosureStrategy != ClosureStrategy {
+		return refuse(closureStrategyVerdict(recorded), nil)
+	}
+	// The only waived comparison is the effective compartment. Core and
+	// derivations still use the shared ladder, before any ledger judgment.
+	candidate := recorded
+	candidate.InertTestVariantApplicability = InertTestVariantApplicability{InertTestVariantExtension, cl.TestVariants}
+	if verdict, failed := recordedEvidenceVerdict(candidate, cl); failed {
+		return refuse(verdict, nil)
+	}
+	if mismatch := guard.CompareFacts(recorded.Guards, v.guards(), v.kind); mismatch.Axis != guard.NoAxis {
+		return refuse(guardVerdict(mismatch), nil)
+	}
+	ledger, err := v.TestVariantLedger(subject)
+	if err != nil {
+		return refuse(Verdict{}, err)
+	}
+	if !inertTestVariantLedgersForSubject(prior, ledger, subject.Symbol) {
+		return refuse(refusal(Stale, TestVariantsCause, Refused, ReasonTestVariants), nil)
+	}
+	return candidate, ledger, Verdict{}, nil
+}
+
+// Applicability obligations are checks of historical evidence, never producer
+// attachments. Keeping them separate prevents validation from treating a reuse
+// check as a newly completed execution or requiring a new process receipt.
+type applicabilityCheck struct {
+	recorded Fingerprint
+	subject  Subject
+	observed bool
+}
+
+func (v *Snapshot) retainApplicabilityCheck(ctx context.Context, rec Fingerprint, subject Subject, observed bool) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.sealed {
+		return errViewSealed
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	check := applicabilityCheck{rec, subject, observed}
+	if !slices.Contains(v.applicabilityChecks, check) {
+		v.applicabilityChecks = append(v.applicabilityChecks, check)
+	}
+	return nil
+}
+
+func (v *Snapshot) currentApplicabilityObservable(subject Subject, outcomeMethod string) bool {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	p := v.observable[subject]
+	if outcomeMethod == outcome.StaticMethod {
+		return p.Observable && p.EffectFree
+	}
+	return p.Observable && p.OutcomeMethod == outcome.Method
+}
+
+func (v *Snapshot) validateApplicabilityChecks(ctx context.Context) error {
+	// Validate has sealed registration before reading these obligations.
+	v.mu.RLock()
+	checks := append([]applicabilityCheck(nil), v.applicabilityChecks...)
+	v.mu.RUnlock()
+	if len(checks) == 0 {
+		return nil
+	}
+	current, err := v.newSeededValidationView(ctx)
+	if err != nil {
+		return err
+	}
+	return v.validateApplicabilityBatches(ctx, current, checks)
+}
+
+// applicabilityRecords preserves every historical variant and its policy in one
+// ordered batch, sharing endpoint observations across subjects and policies.
+func applicabilityRecords(checks []applicabilityCheck) []recordCheck {
+	records := make([]recordCheck, len(checks))
+	for i, check := range checks {
+		records[i] = recordCheck{Candidate: Candidate{check.subject, check.recorded}, observed: check.observed}
+	}
+	return records
+}
+
+func (v *Snapshot) validateApplicabilityBatches(ctx context.Context, current *Snapshot, checks []applicabilityCheck) error {
+	var unavailable error
+	records := applicabilityRecords(checks)
+	results, err := current.checkRecords(ctx, records, true, false)
+	if err := deferValidationUnavailability(err, &unavailable); err != nil {
+		return err
+	}
+	for i, result := range results {
+		if result.verdict.Status == Valid {
+			continue
+		}
+		if result.verdict.Status == Unverifiable && result.unavailable != nil {
+			if unavailable == nil {
+				unavailable = result.unavailable
+			}
+			continue
+		}
+		subject := checks[i].subject
+		return fmt.Errorf("%w: applicability for %s.%s: %s", ErrViewChanged, subject.Package, subject.Symbol, result.verdict.Reason)
+	}
+	return v.closeValidationReobservation(ctx, current, unavailable)
 }

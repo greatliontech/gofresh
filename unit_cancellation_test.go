@@ -32,7 +32,7 @@ func TestUnitRegistrationCancellationRetainsCallerCause(t *testing.T) {
 		for _, ending := range []string{"close", "abort"} {
 			for _, cancellation := range []string{"live caller", "cancelled caller"} {
 				t.Run(form+"/"+ending+"/"+cancellation, func(t *testing.T) {
-					var transaction *producingUnit
+					var transaction *Unit
 					var register func(context.Context, BuildBinding, ProcessDescription) (Contribution, error)
 					var end func()
 					if form == "singleton" {
@@ -40,13 +40,13 @@ func TestUnitRegistrationCancellationRetainsCallerCause(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
-						transaction, register = u.producing, u.Register
+						transaction, register = u, u.Register
 						t.Cleanup(u.Abort)
 						end = u.Abort
 						if ending == "close" {
 							end = func() {
 								result, err := u.Close(t.Context())
-								if !errors.Is(err, ErrUnitIncomplete) || result != (Finalized{}) {
+								if !errors.Is(err, ErrUnitIncomplete) || len(result.Subjects) != 0 || result.Process != "" {
 									t.Fatalf("pending singleton closed: %+v %v", result, err)
 								}
 							}
@@ -56,7 +56,7 @@ func TestUnitRegistrationCancellationRetainsCallerCause(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
-						transaction, register = u.producing, u.Register
+						transaction, register = u, u.Register
 						t.Cleanup(u.Abort)
 						end = u.Abort
 						if ending == "close" {
@@ -90,7 +90,7 @@ func TestUnitRegistrationCancellationRetainsCallerCause(t *testing.T) {
 					case <-time.After(30 * time.Second):
 						t.Fatal("preparation did not reach pause")
 					}
-					want := ErrUnitClosed
+					want := errUnitClosed
 					if cancellation == "cancelled caller" {
 						cancel()
 						want = context.Canceled

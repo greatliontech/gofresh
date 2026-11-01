@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/greatliontech/gofresh/closure"
-	"github.com/greatliontech/gofresh/closure/testvariant"
+	"github.com/greatliontech/gofresh/internal/closure"
+	"github.com/greatliontech/gofresh/internal/testvariant"
 	"github.com/greatliontech/gofresh/gotool"
-	"github.com/greatliontech/gofresh/guard"
+	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/runtimeinput"
 )
 
@@ -134,7 +134,7 @@ func TestInertExtensionRequiresEveryGuardAndRecognizedEvidence(t *testing.T) {
 			v.facts.purity = map[Subject]string{s: "caller assertion"}
 			f.PurityAssertion = "caller assertion"
 		}
-		updated, _, verdict, err := v.CheckInertTestVariantExtension(context.Background(), f, l, s)
+		updated, _, verdict, err := v.checkInertTestVariantExtension(context.Background(), f, l, s, false)
 		if err != nil || verdict.Status != Valid {
 			t.Fatalf("independently valid ordinary case needs no outcome support: %+v %v", verdict, err)
 		}
@@ -167,7 +167,7 @@ func TestInertExtensionRequiresEveryGuardAndRecognizedEvidence(t *testing.T) {
 		}
 		current.FileHeaders[0].Bindings.References = []string{"BenchmarkEnv", "TestSibling"}
 		v.facts.testVariantLedgers[s.Package] = current
-		updated, gotLedger, verdict, err := v.CheckInertTestVariantExtension(context.Background(), f, prior, s)
+		updated, gotLedger, verdict, err := v.checkInertTestVariantExtension(context.Background(), f, prior, s, false)
 		if err != nil || verdict.Status != Valid || updated.EffectiveTestVariantClosure() != "B" || !reflect.DeepEqual(gotLedger, current) {
 			t.Fatalf("sibling test edit/removal should be inert for %v: verdict=%+v err=%v", s, verdict, err)
 		}
@@ -222,11 +222,11 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 		t.Fatal("sibling did not establish maximal ClassB dependence")
 	}
 	frame := runtimeinput.CaptureProducerFrame(ctx, dir, dir, runtimeinput.FrameOptions{})
-	support, err := producer.PrepareOutcomeSupport(ctx, frame, "benchmark")
+	support, _, err := producer.prepareOutcomeSupport(ctx, frame, "benchmark")
 	if err != nil {
 		t.Fatal(err)
 	}
-	fp, err := producer.CaptureObserved(ctx, s)
+	fp, err := producer.captureObserved(ctx, s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,10 +285,10 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 		if verdict, err := current.CheckObserved(ctx, fp, s); err != nil || verdict.Status != Stale || verdict.Reason != ReasonTestVariants {
 			t.Fatalf("implicit extension: %+v %v", verdict, err)
 		}
-		if u, l, verdict, err := current.CheckInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Unverifiable || u != (Fingerprint{}) || !reflect.DeepEqual(l, TestVariantLedger{}) {
+		if u, l, verdict, err := current.checkInertTestVariantExtension(ctx, fp, ledger, s, false); err != nil || verdict.Status != Unverifiable || u != (Fingerprint{}) || !reflect.DeepEqual(l, TestVariantLedger{}) {
 			t.Fatalf("ordinary unexpectedly lifted: %+v %v", verdict, err)
 		}
-		updated, next, verdict, err := current.CheckObservedInertTestVariantExtension(ctx, fp, ledger, s)
+		updated, next, verdict, err := current.checkInertTestVariantExtension(ctx, fp, ledger, s, true)
 		if err != nil || verdict.Status != Valid {
 			t.Fatalf("supported inert extension: %+v %v", verdict, err)
 		}
@@ -371,7 +371,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 			pureRecord.RuntimeInputs, pureRecord.RuntimeDigest = plain.Manifest, plain.Digest
 			pureRecord.PurityAssertion = "caller assertion"
 			pureView := newViewIn(t, guardedEnv, withAssumePure(func(subject Subject) bool { return subject == s }))
-			if updated, _, verdict, err := pureView.CheckObservedInertTestVariantExtension(ctx, pureRecord, ledger, s); err != nil || verdict.Status != Valid || updated.RuntimeInputs != plain.Manifest {
+			if updated, _, verdict, err := pureView.checkInertTestVariantExtension(ctx, pureRecord, ledger, s, true); err != nil || verdict.Status != Valid || updated.RuntimeInputs != plain.Manifest {
 				t.Fatalf("explicit purity demanded outcome support: %+v %v", verdict, err)
 			}
 			if len(pureView.observable) != 0 {
@@ -399,7 +399,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 				if err != nil {
 					t.Fatal(err)
 				}
-				if updated, _, verdict, err := current.CheckObservedInertTestVariantExtension(ctx, bad, ledger, s); err != nil || verdict.Status != Unverifiable || updated != (Fingerprint{}) {
+				if updated, _, verdict, err := current.checkInertTestVariantExtension(ctx, bad, ledger, s, true); err != nil || verdict.Status != Unverifiable || updated != (Fingerprint{}) {
 					t.Fatalf("%s supplied historical evidence: %+v %v", name, verdict, err)
 				}
 			})
@@ -407,7 +407,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 		t.Run("environment drift", func(t *testing.T) {
 			t.Parallel()
 			movedEnv := gotool.SetEnv(guardedEnv, "OUTCOME_VALUE", "moved")
-			if updated, _, verdict, err := newViewIn(t, movedEnv).CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Stale || updated != (Fingerprint{}) {
+			if updated, _, verdict, err := newViewIn(t, movedEnv).checkInertTestVariantExtension(ctx, fp, ledger, s, true); err != nil || verdict.Status != Stale || updated != (Fingerprint{}) {
 				t.Fatalf("environment drift: %+v %v", verdict, err)
 			}
 		})
@@ -431,7 +431,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 		t.Run("deferred validation", func(t *testing.T) {
 			t.Parallel()
 			deferred := newViewIn(t, guardedEnv, withDeferredCheckClose())
-			if _, _, verdict, err := deferred.CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Valid {
+			if _, _, verdict, err := deferred.checkInertTestVariantExtension(ctx, fp, ledger, s, true); err != nil || verdict.Status != Valid {
 				t.Fatalf("deferred extension: %+v %v", verdict, err)
 			}
 			if len(deferred.capturedObserved) != 0 || len(deferred.applicabilityChecks) == 0 {
@@ -446,7 +446,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 		t.Run("sibling validation", func(t *testing.T) {
 			t.Parallel()
 			parent := newViewIn(t, guardedEnv, withDeferredCheckClose())
-			if _, _, verdict, err := parent.CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Valid {
+			if _, _, verdict, err := parent.checkInertTestVariantExtension(ctx, fp, ledger, s, true); err != nil || verdict.Status != Valid {
 				t.Fatalf("parent extension: %+v %v", verdict, err)
 			}
 			sibling, err := parent.Sibling([]Subject{s})
@@ -483,7 +483,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 			}()
 			go func() {
 				defer close(done)
-				updated, ledger, _, err := concurrent.CheckObservedInertTestVariantExtension(workerCtx, fp, ledger, s)
+				updated, ledger, _, err := concurrent.checkInertTestVariantExtension(workerCtx, fp, ledger, s, true)
 				if updated != (Fingerprint{}) || !reflect.DeepEqual(ledger, TestVariantLedger{}) {
 					resultErr = errors.New("published during concurrent validation")
 					return
@@ -508,18 +508,18 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 			case <-time.After(30 * time.Second):
 				t.Fatal("applicability did not finish after release")
 			}
-			if !errors.Is(resultErr, ErrViewSealed) {
+			if !errors.Is(resultErr, errViewSealed) {
 				t.Fatalf("analysis publication crossed seal: %v", resultErr)
 			}
 		})
 	})
 	write("growth_test.go", strings.Replace(source, "_ = os.Getenv(\"OUTCOME_VALUE\")", "_, _ = os.LookupEnv(\"OUTCOME_VALUE\")", 1))
-	if updated, _, verdict, err := newView().CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Stale || updated != (Fingerprint{}) {
+	if updated, _, verdict, err := newView().checkInertTestVariantExtension(ctx, fp, ledger, s, true); err != nil || verdict.Status != Stale || updated != (Fingerprint{}) {
 		t.Fatalf("changed subject extended: %+v %v", verdict, err)
 	}
 	write("growth_test.go", source)
 	deferred := newView(withDeferredCheckClose())
-	if _, _, verdict, err := deferred.CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Valid {
+	if _, _, verdict, err := deferred.checkInertTestVariantExtension(ctx, fp, ledger, s, true); err != nil || verdict.Status != Valid {
 		t.Fatalf("deferred extension: %+v %v", verdict, err)
 	}
 	// New initialization is not inert even though the producing benchmark remains.
@@ -527,7 +527,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 	if err := deferred.Validate(ctx); !errors.Is(err, ErrViewChanged) {
 		t.Fatalf("deferred close missed source drift: %v", err)
 	}
-	if updated, _, verdict, err := newView().CheckObservedInertTestVariantExtension(ctx, fp, ledger, s); err != nil || verdict.Status != Stale || updated != (Fingerprint{}) {
+	if updated, _, verdict, err := newView().checkInertTestVariantExtension(ctx, fp, ledger, s, true); err != nil || verdict.Status != Stale || updated != (Fingerprint{}) {
 		t.Fatalf("blocker accepted: %+v %v", verdict, err)
 	}
 }
@@ -586,13 +586,13 @@ func TestApplicabilityCheckerReload(t *testing.T) {
 func TestInertExtensionHonorsSealAndCancellation(t *testing.T) {
 	v, f, s, l := applicabilityFixture(t)
 	v.sealed = true
-	if fp, _, _, err := v.CheckInertTestVariantExtension(context.Background(), f, l, s); !errors.Is(err, ErrViewSealed) || fp != (Fingerprint{}) {
+	if fp, _, _, err := v.checkInertTestVariantExtension(context.Background(), f, l, s, false); !errors.Is(err, errViewSealed) || fp != (Fingerprint{}) {
 		t.Fatalf("sealed publication: %v", err)
 	}
 	v.sealed = false
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if fp, _, _, err := v.CheckInertTestVariantExtension(ctx, f, l, s); !errors.Is(err, context.Canceled) || fp != (Fingerprint{}) {
+	if fp, _, _, err := v.checkInertTestVariantExtension(ctx, f, l, s, false); !errors.Is(err, context.Canceled) || fp != (Fingerprint{}) {
 		t.Fatalf("cancelled publication: %v", err)
 	}
 }
@@ -628,7 +628,7 @@ func TestInertExtensionCannotPublishAcrossConcurrentValidation(t *testing.T) {
 			t.Fatalf("validation did not seal: %v", err)
 		}
 		close(release)
-		if err := <-done; !errors.Is(err, ErrViewSealed) {
+		if err := <-done; !errors.Is(err, errViewSealed) {
 			t.Fatalf("extension crossed validation: %v", err)
 		}
 	}
@@ -640,7 +640,7 @@ func TestInertExtensionRechecksRuntimeAndProofEvidence(t *testing.T) {
 		v.engine.deferredCheckClose = true
 		f.RuntimeInputs, f.RuntimeDigest = "recorded input", "digest"
 		v.runtimeCurrent = func(context.Context, string, string) (runtimeinput.State, error) { return state, nil }
-		if updated, _, verdict, err := v.CheckObservedInertTestVariantExtension(context.Background(), f, l, s); err != nil || verdict.Status == Valid || updated != (Fingerprint{}) {
+		if updated, _, verdict, err := v.checkInertTestVariantExtension(context.Background(), f, l, s, true); err != nil || verdict.Status == Valid || updated != (Fingerprint{}) {
 			t.Fatalf("runtime refusal: %+v %v", verdict, err)
 		}
 	}
@@ -656,7 +656,7 @@ func TestInertExtensionRechecksRuntimeAndProofEvidence(t *testing.T) {
 		}
 		return runtimeinput.State{OK: true, Digest: "moved"}, nil
 	}
-	if updated, _, verdict, err := v.CheckInertTestVariantExtension(context.Background(), f, l, s); err != nil || verdict.Status != Stale || updated != (Fingerprint{}) {
+	if updated, _, verdict, err := v.checkInertTestVariantExtension(context.Background(), f, l, s, false); err != nil || verdict.Status != Stale || updated != (Fingerprint{}) {
 		t.Fatalf("moving input served: %+v %v", verdict, err)
 	}
 }

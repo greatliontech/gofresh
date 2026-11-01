@@ -105,7 +105,7 @@ func TestReadsFile(t *testing.T) { _, _ = os.ReadFile("fixture") }
 		t.Fatal(err)
 	}
 	fileProducer := f.view(t)
-	fileRecord, err := fileProducer.CaptureObserved(ctx, subjects[2])
+	fileRecord, err := fileProducer.captureObserved(ctx, subjects[2])
 	if err != nil {
 		t.Fatal(err)
 	}

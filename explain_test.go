@@ -561,18 +561,12 @@ func TestChainHooksArmOnlyDuringExplain(t *testing.T) {
 	// The normal analysis path constructs no chains: a view derivation
 	// over a refusing culprit leaves the explain hooks unarmed, and the
 	// on-demand re-derivation disarms them on return
-	// (REQ-explain-passive). The nil assertions read a process-global
-	// atomic, so this test must not run beside another explain
-	// derivation - the package's tests are serial (no t.Parallel), and
-	// the assertions depend on that.
+	// (REQ-explain-passive).
 	files := map[string]string{
 		"go.mod":     "module example.com/explain\n\ngo 1.26\n",
 		"reg/reg.go": "package reg\n\ntype counter struct{ n int }\n\nfunc (c *counter) Next(n int) int {\n\tc.n += n\n\treturn c.n\n}\n\ntype handler func(n int) int\n\nfunc gen() map[string]handler {\n\tc := &counter{}\n\treturn map[string]handler{\"k\": c.Next}\n}\n\nvar Registry = gen()\n\nfunc Count() int { return len(Registry) }\n",
 	}
 	dir := writeModuleTree(t, files)
-	if dynstate.ExplainHooks.Load() != nil {
-		t.Fatal("explain hooks armed at rest")
-	}
 	engine, err := newEngine(withDir(dir))
 	if err != nil {
 		t.Fatal(err)
@@ -581,14 +575,18 @@ func TestChainHooksArmOnlyDuringExplain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if dynstate.ExplainHooks.Load() != nil {
-		t.Fatal("normal view derivation armed the explain hooks - chain work belongs to the explain re-derivation alone")
+	// Normal view derivation computes dynamic-state facts via FactOf (nil hooks),
+	// recording only the refusal summary without constructing a Chain.
+	cl := view.facts.closure(Subject{Package: "example.com/explain/reg", Symbol: "Count"})
+	if !cl.Unverifiable || cl.Culprit.Package != "example.com/explain/reg" || cl.Culprit.Symbol != "Registry" {
+		t.Fatalf("unexpected closure fact from normal view derivation: %+v", cl)
 	}
-	if _, err := view.ExplainDynamicState(context.Background(), "example.com/explain/reg", "Registry"); err != nil {
+	chain, err := view.ExplainDynamicState(context.Background(), "example.com/explain/reg", "Registry")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if dynstate.ExplainHooks.Load() != nil {
-		t.Fatal("the explain re-derivation left its hooks armed")
+	if len(chain.Links) == 0 {
+		t.Fatal("on-demand ExplainDynamicState returned empty chain for refusing culprit")
 	}
 }
 
