@@ -882,8 +882,6 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 	var loaded []*packages.Package
 	if base != nil && base.prog != nil {
 		loaded = base.prog.Pkgs
-	} else if prog := h.progs[pkgPath]; prog != nil {
-		loaded = prog.Pkgs
 	}
 	if len(loaded) == 0 {
 		loaded = h.viewLoadVariants(pkgPath)
@@ -893,6 +891,16 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 			analysisTestHooks.testingTypeOwnLoad(pkgPath)
 		}
 		h.emitUnit("typecheck", pkgPath, 0, 1)
+		if prog := h.progs[pkgPath]; prog != nil {
+			loaded = prog.Pkgs
+		}
+		if len(loaded) == 0 && analysisTestHooks.testingPackagesOnMiss != nil {
+			if p := analysisTestHooks.testingPackagesOnMiss(h, pkgPath); p != nil {
+				loaded = p.Pkgs
+			}
+		}
+	}
+	if len(loaded) == 0 {
 		var err error
 		loaded, err = gotool.LoadPackages(
 			h.ctx,

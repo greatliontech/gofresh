@@ -133,14 +133,47 @@ func getStdlibCache(baseEnv []string) (*stdlibCache, error) {
 	}
 	var fset *token.FileSet
 	byPath := make(map[string]*packages.Package, 256)
+	isHeaderOnlyStdPkg := func(path string) bool {
+		if strings.Contains(path, ".") {
+			return false
+		}
+		switch path {
+		case "slices", "maps", "cmp", "sync", "io", "context", "testing", "fmt", "errors", "strings", "bytes",
+			"reflect", "path/filepath", "crypto/sha1", "crypto/sha256", "crypto/internal/fips140/sha256",
+			"text/template", "sort":
+			return false
+		default:
+			return true
+		}
+	}
 	packages.Visit(roots, nil, func(p *packages.Package) {
 		if fset == nil && p.Fset != nil {
 			fset = p.Fset
 		}
 		if p.PkgPath != "" && p.ForTest == "" && !strings.HasSuffix(p.PkgPath, ".test") && !strings.HasSuffix(p.PkgPath, "_test") && !strings.Contains(p.ID, " [") {
-			byPath[p.PkgPath] = p
+			if isHeaderOnlyStdPkg(p.PkgPath) {
+				byPath[p.PkgPath] = &packages.Package{
+					ID:      p.ID,
+					Name:    p.Name,
+					PkgPath: p.PkgPath,
+					Types:   p.Types,
+					Fset:    p.Fset,
+				}
+			} else {
+				byPath[p.PkgPath] = p
+			}
 		}
 	})
+	for _, p := range byPath {
+		if len(p.Imports) == 0 {
+			continue
+		}
+		for impPath := range p.Imports {
+			if replacement, ok := byPath[impPath]; ok {
+				p.Imports[impPath] = replacement
+			}
+		}
+	}
 	if byPath["unsafe"] == nil {
 		byPath["unsafe"] = &packages.Package{
 			ID:      "unsafe",
@@ -156,7 +189,7 @@ func getStdlibCache(baseEnv []string) (*stdlibCache, error) {
 
 // CachedStdlibPackageErr returns the pre-loaded *packages.Package for a
 // standard library package (or golang.org/x/sys/unix) from the process-wide
-// Tier 1 cache.
+// in-memory cache.
 func CachedStdlibPackageErr(env []string, pkgPath string) (*packages.Package, error) {
 	cache, err := getStdlibCache(env)
 	if err != nil {
@@ -166,7 +199,7 @@ func CachedStdlibPackageErr(env []string, pkgPath string) (*packages.Package, er
 }
 
 // CachedStdlibPackage returns the pre-loaded *packages.Package for a standard
-// library package (or golang.org/x/sys/unix) from the process-wide Tier 1 cache.
+// library package (or golang.org/x/sys/unix) from the process-wide in-memory cache.
 func CachedStdlibPackage(t testing.TB, env []string, pkgPath string) *packages.Package {
 	t.Helper()
 	pkg, err := CachedStdlibPackageErr(env, pkgPath)
@@ -227,6 +260,13 @@ func ParseAndTypecheckDAG(t testing.TB, virtualDir string, filesByPkg map[string
 // `go` subprocess.
 func ParseAndTypecheckInPlace(moduleDir string, pkgDirs map[string]string, filesByPkg map[string]map[string]string) ([]*packages.Package, error) {
 	return parseAndTypecheckDAG(nil, moduleDir, pkgDirs, filesByPkg, false)
+}
+
+// ParseAndTypecheckInPlaceWithStdlib parses and type-checks an on-disk module
+// directory in place linked against the process-wide cached standard library
+// *packages.Package graph, without writing files or invoking any `go` subprocess.
+func ParseAndTypecheckInPlaceWithStdlib(env []string, moduleDir string, pkgDirs map[string]string, filesByPkg map[string]map[string]string) ([]*packages.Package, error) {
+	return parseAndTypecheckDAG(env, moduleDir, pkgDirs, filesByPkg, true)
 }
 
 // ParseAndTypecheckDAGWithStdlib parses and type-checks a multi-package DAG of
@@ -343,7 +383,7 @@ func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]st
 					return nil, fmt.Errorf("WriteFile(%s): %w", fullPath, err)
 				}
 			}
-			if !strings.HasSuffix(name, ".go") {
+			if !strings.HasSuffix(name, ".go") || strings.Contains(name, "/") {
 				continue
 			}
 			af, err := parser.ParseFile(fset, fullPath, src, parser.ParseComments)
@@ -396,7 +436,7 @@ func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]st
 			return u, nil
 		}
 		if len(primaryFiles) > 0 {
-			u, err := buildUnit(pkgPath, primaryFiles, len(extTestFiles) > 0)
+			u, err := buildUnit(pkgPath, primaryFiles, pkgDirs == nil && len(extTestFiles) > 0)
 			if err != nil {
 				return nil, err
 			}
@@ -411,12 +451,14 @@ func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]st
 		}
 	}
 
-	// Ensure sibling package knows about explicitly keyed pkgPath+"_test".
-	for _, uPath := range unitPaths {
-		if strings.HasSuffix(uPath, "_test") {
-			base := strings.TrimSuffix(uPath, "_test")
-			if primary, ok := unitsByPath[base]; ok {
-				primary.forTest = base
+	if pkgDirs == nil {
+		// Ensure sibling package knows about explicitly keyed pkgPath+"_test".
+		for _, uPath := range unitPaths {
+			if strings.HasSuffix(uPath, "_test") {
+				base := strings.TrimSuffix(uPath, "_test")
+				if primary, ok := unitsByPath[base]; ok {
+					primary.forTest = base
+				}
 			}
 		}
 	}

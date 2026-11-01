@@ -80,7 +80,7 @@ without a version is explicitly local, never inspected for an inferred release.
 Metadata containing whitespace or output framing is quoted so it cannot create
 another line. Consumers prepend their own tool name and may state separately
 labelled format capabilities; neither a format number nor the current checkout
-is the executable version. Enforced by TestToolVersionModule.
+is the executable version.
 
 ## Vocabulary
 
@@ -413,20 +413,7 @@ not configure automatic child reaping. Failure to establish the waitable
 identity disables further group signals and refuses the collected answer.
 Prepared commands run by consumers leave post-wait cleanup
 to those consumers; other platforms retain their cancellation and drain
-limits. A cleanup refusal supplies no salvageable answer. Enforced by
-`TestEngineSpawnsThroughTheInstalledRunner`,
-`TestEngineSpawnSitesReadARunner`,
-`TestTakeEnvSnapshotServesTheSalvagedAnswer`,
-`TestRootsProbeServesTheSalvagedAnswer`,
-`TestSalvagedRefusesUnderACancelledContext`,
-`TestProgramPreparesAConsumerCommandUnderThePolicy`,
-`TestProgramQuitsTheConsumersGroupOnTheNamedCause`,
-`TestCollectedRunSweepsAfterTheLeaderExits`,
-`TestCollectedRunHoldsIdentityThroughCancellationAndSweep`,
-`TestCollectedCleanupRefusalCannotAuthorizeSalvage`,
-`TestCollectedDrainAndOwnershipFailure`,
-`TestListRefusesTheSalvagedAnswer`, and
-`TestListingRefusesTheSalvagedAnswer`.
+limits. A cleanup refusal supplies no salvageable answer.
 
 **REQ-fresh-toolchain-skew** (behavior): A consumer MUST refuse to judge
 records under a language-series disagreement between the analyzing
@@ -464,15 +451,6 @@ unidentifiable ambient toolchain named with the frontend and the cause,
 a breaking skew in this clause's words; the composite is constructed
 over the consumer's own memoized sampler, and one built without a
 sampler refuses as a construction fault, never a provenance one.
-Enforced by `TestSampleGoVersionRunsInTheModuleDirectory`,
-`TestSamplerMemoizesAFailedSample`,
-`TestMemoKeyCoversTheCoordinateAndEnvironment`,
-`TestRunMemoHoldsOneHolderPerKey`,
-`TestSamplerSerializesConcurrentAsksOnOneKey`,
-`TestSamplerWaiterLeavesWithItsOwnCancellation`,
-`TestSamplerReleasesTheHolderAfterAPanickingTake`,
-`TestSnapshotSamplerAnswersItsReadersPassWithoutASpawn`, and
-`TestToolchainProvenanceIsOneRefusal`.
 Within a major the refusal is directional — a frontend older than the
 ambient series refuses, since it predates the sources' language, while a
 newer frontend reads older language under the Go 1 compatibility
@@ -615,8 +593,7 @@ invalid record is never written, and the ladder is exposed as data for a caller
 assembling a fingerprint another way. A refused record decodes to nothing.
 Observation evidence a decoded proof carries that the check finds inconsistent
 confers no proof (REQ-fresh-observation-data) but is not a decoding refusal — a
-stored record stays readable. Enforced by TestFingerprintRecordIsTheFleetForm,
-TestFingerprintRecordRoundTrips, TestFingerprintRecordRefusals.
+stored record stays readable.
 
 The optional `inertTestVariantApplicability` is a nested object with required
 non-empty string fields `strategy` and `testVariantClosure`, in that order.

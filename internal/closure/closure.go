@@ -591,6 +591,13 @@ var analysisTestHooks struct {
 	// observable.
 	canonicalParse func(dir string)
 	variantParse   func(name string)
+	// listOnMiss, loadProgramOnMiss, and testingPackagesOnMiss allow the
+	// in-memory test harness to satisfy a Hasher's listing, SSA program, or
+	// testing-type scan load on demand without spawning `go list` or
+	// `packages.Load` subprocesses.
+	listOnMiss            func(h *Hasher, pkgPath string) ([]listPkg, bool)
+	loadProgramOnMiss     func(ctx context.Context, h *Hasher, pkgPath string) (*program, bool, error)
+	testingPackagesOnMiss func(h *Hasher, pkgPath string) *program
 }
 
 // resetCallScope arms the per-batch-call memos: one call observes one
@@ -919,6 +926,13 @@ func (h *Hasher) listUnvalidated(pkgPath string) ([]listPkg, error) {
 		return pkgs, nil
 	}
 	h.emitProgress("list", pkgPath)
+	if analysisTestHooks.listOnMiss != nil {
+		if pkgs, ok := analysisTestHooks.listOnMiss(h, pkgPath); ok {
+			h.lists[pkgPath] = pkgs
+			h.storeListing(pkgPath, pkgs)
+			return pkgs, nil
+		}
+	}
 	args := []string{"-json", "-deps", "-test"}
 	args = append(args, h.buildFlags...)
 	args = append(args, pkgPath)

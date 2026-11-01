@@ -2,11 +2,16 @@ package runtimeinput
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -792,5 +797,717 @@ func TestBracketMoveAttributionNamesTheMove(t *testing.T) {
 	}
 	if !strings.Contains(reason, `"c\nd.go"`) {
 		t.Fatalf("unrepresentable filename not quoted into the lead: %q", reason)
+	}
+}
+
+// A stat of a module-interior identity under a module-root bracket
+// (root ".") is metadata-spanned exactly as under any narrower root:
+// the whole-module fingerprint covers it, so the stat records its
+// revalidatable identity instead of sealing "stat metadata input" -
+// while a stat under a bracket exclusion keeps sealing, its subtree
+// being outside the fingerprint (REQ-inputs-bracket-coverage).
+func TestModuleRootBracketCoversInteriorStats(t *testing.T) {
+	moduleDir, packageDir := testDirs(t)
+	if err := os.WriteFile(filepath.Join(packageDir, "config.yaml"), []byte("cfg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bracket := testBracket(t, moduleDir)
+	st, err := ambientFromTestLog([]byte("# test log\nstat config.yaml\n"), moduleDir, packageDir,
+		WithCompletedProcess("worker"), WithBracket(bracket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Unverifiable {
+		t.Fatalf("module-root bracket left an interior stat sealed: %s", st.Reason)
+	}
+	m, err := decode(st.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Paths) != 1 || m.Paths[0].Path != "pkg/config.yaml" {
+		t.Fatalf("paths = %+v, want the stat's identity recorded", m.Paths)
+	}
+	// The entry digest binds the observed metadata: a later chmod moves
+	// the recorded state toward recomputation, never silent reuse.
+	if err := os.Chmod(filepath.Join(packageDir, "config.yaml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	current, err := ambientCurrent(st.Manifest, moduleDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Digest == st.Digest {
+		t.Fatal("metadata movement did not move the bound digest")
+	}
+
+	if err := os.MkdirAll(filepath.Join(moduleDir, "toolstate"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	excluded, err := CaptureBracket(context.Background(), moduleDir, []string{"."},
+		WithBracketExcludedPaths("toolstate"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err = ambientFromTestLog([]byte("# test log\nstat "+filepath.Join(moduleDir, "toolstate", "cache")+"\n"), moduleDir, packageDir,
+		WithCompletedProcess("worker"), WithBracket(excluded))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Unverifiable {
+		t.Fatal("a stat under a bracket exclusion escaped its metadata seal")
+	}
+	// The exclusion is checked before the roots in the stat cover: the
+	// excluded identity carries the METADATA seal specifically, not
+	// merely the coverage seal - a "." arm ordered above the exclusion
+	// loop would drop it.
+	sealed, err := decode(st.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, reason := range sealed.Unverifiable {
+		if reason == "stat metadata input: toolstate/cache" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("unverifiable reasons %v carry no metadata seal for the excluded stat", sealed.Unverifiable)
+	}
+}
+
+func TestBracketMovementSurvivesComposition(t *testing.T) {
+	dir := bindingModule(t)
+	b := testBracket(t, dir, "data")
+	file := filepath.Join(dir, "data", "fixture.txt")
+	if err := os.WriteFile(file, []byte("after consumption"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := FromTestLog([]byte("open data/fixture.txt\n"), dir, dir, nil, WithCompletedProcess("reader"), WithBracket(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMoved := func(t *testing.T, observation Observation, err error) Observation {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err := CompletedState(observation)
+		if err != nil || !state.BracketMoved || !strings.Contains(state.Reason, "observation bracket moved: data") {
+			t.Fatalf("lost movement: %+v %v", state, err)
+		}
+		current, err := Current(t.Context(), state.Manifest, dir, nil)
+		if err != nil || current != state {
+			t.Fatalf("recheck: %+v %v", current, err)
+		}
+		return observation
+	}
+	assertMoved(t, moved, nil)
+	abs, err := Absolute(moved, dir, nil)
+	abs = assertMoved(t, abs, err)
+	rel, err := Relative(abs, dir, nil)
+	rel = assertMoved(t, rel, err)
+	if rel.State != moved.State {
+		t.Fatal("identity roundtrip changed evidence")
+	}
+	adopted, err := Adopt(moved.Manifest, dir, "adoption", nil)
+	assertMoved(t, adopted, err)
+	empty, err := Merge(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	incomplete, err := Incomplete(dir, "interrupted", "unknown sibling", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, inputs := range [][]Observation{{moved, empty}, {empty, moved}, {incomplete, moved}, {moved, incomplete}, {moved, moved}} {
+		merged, err := Merge(dir, nil, inputs...)
+		assertMoved(t, merged, err)
+	}
+	tampered := moved
+	tampered.BracketMoved = false
+	if _, err := CompletedState(tampered); err == nil {
+		t.Fatal("unsealed movement override accepted")
+	}
+	// Restoration after the failure was observed cannot erase producing history.
+	if err := os.WriteFile(file, []byte("recorded"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	current, err := Current(t.Context(), moved.Manifest, dir, nil)
+	if err != nil || !current.BracketMoved {
+		t.Fatalf("restored value erased movement: %+v %v", current, err)
+	}
+	if _, err := Adopt(moved.Manifest, dir, "restored", nil); err == nil {
+		t.Fatal("adoption accepted changed values")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if state, err := Current(ctx, moved.Manifest, dir, nil); !errors.Is(err, context.Canceled) || state != (State{}) {
+		t.Fatalf("cancelled check supplied evidence: %+v %v", state, err)
+	}
+}
+
+func TestBracketUnknownDoesNotMaskComparableMovement(t *testing.T) {
+	for _, lateUnknown := range []bool{false, true} {
+		for _, move := range []bool{false, true} {
+			dir := bindingModule(t)
+			external := filepath.Join(t.TempDir(), "external")
+			if err := os.WriteFile(external, []byte("external"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			unknown := filepath.Join(dir, "a-unknown")
+			if lateUnknown {
+				if err := os.WriteFile(unknown, []byte("before"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Symlink(external, unknown); err != nil {
+				t.Fatal(err)
+			}
+			b := testBracket(t, dir, "a-unknown", "data")
+			if lateUnknown {
+				if err := os.Remove(unknown); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(external, unknown); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if move {
+				if err := os.WriteFile(filepath.Join(dir, "data", "fixture.txt"), []byte("changed"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			observation, err := FromTestLog([]byte("open data/fixture.txt\n"), dir, dir, nil, WithCompletedProcess("reader"), WithBracket(b))
+			// Replacing a regular root with an external symlink is known
+			// namespace movement, even though its new content is unhashable.
+			if err != nil || !observation.Unverifiable || observation.BracketMoved != (move || lateUnknown) {
+				t.Fatalf("lateUnknown=%t move=%t: %+v %v", lateUnknown, move, observation, err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			if _, _, _, err := b.revalidate(ctx, dir); !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancelled unknown bracket: %v", err)
+			}
+		}
+	}
+}
+
+func TestBracketMovementIncludesObjectTransitions(t *testing.T) {
+	for _, transition := range []string{"appearance", "disappearance", "retype"} {
+		t.Run(transition, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, "input")
+			if transition != "appearance" {
+				if err := os.WriteFile(p, []byte("before"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			b := testBracket(t, dir, "input")
+			if transition != "appearance" {
+				if err := os.Remove(p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if transition == "appearance" {
+				if err := os.WriteFile(p, []byte("after"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			} else if transition == "retype" {
+				if err := os.Mkdir(p, 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			observation, err := FromTestLog([]byte("open input\n"), dir, dir, nil, WithCompletedProcess("reader"), WithBracket(b))
+			if err != nil || !observation.BracketMoved {
+				t.Fatalf("lost %s: %+v %v", transition, observation, err)
+			}
+		})
+	}
+}
+
+func TestMovementManifestCanonicalWireAndDigest(t *testing.T) {
+	const raw = `{"v":4,"bracketMoved":true,"unverifiable":["diagnostic"]}`
+	encoded := base64.RawURLEncoding.EncodeToString([]byte(raw))
+	state, err := Current(t.Context(), encoded, t.TempDir(), nil)
+	sum := sha256.Sum256([]byte("version 4\nbracket-moved\nunverifiable diagnostic\n"))
+	if err != nil || !state.BracketMoved || state.Manifest != encoded || state.Digest != hex.EncodeToString(sum[:])[:32] {
+		t.Fatalf("wire/digest disagreement: %+v %v", state, err)
+	}
+	for _, invalid := range []string{
+		`{"v":4,"bracketMoved":false}`, `{"v":4,"bracketMoved":null}`,
+		`{"v":4,"bracketMoved":true,"bracketMoved":true}`,
+		`{"v":4,"unverifiable":["diagnostic"],"bracketMoved":true}`,
+	} {
+		if _, err := decode(base64.RawURLEncoding.EncodeToString([]byte(invalid))); err == nil {
+			t.Fatalf("accepted %s", invalid)
+		}
+	}
+	// Text alone is never semantic movement evidence, even when it looks exact.
+	text, err := Incomplete(t.TempDir(), "caller", MovedBracketClause("data"), nil)
+	if err != nil || text.BracketMoved {
+		t.Fatalf("diagnostic granted guard authority: %+v %v", text, err)
+	}
+}
+
+type namespaceAvailabilityCase struct {
+	alias, directAtCapture, beforePresent, afterPresent, excludeParent bool
+}
+
+// The listing and direct lookup fail independently, without modifying modes or
+// inventing returned metadata. All successful namespace reads are real reads.
+func checkNamespaceAvailability(t *testing.T, tc namespaceAvailabilityCase) {
+	t.Helper()
+	dir := t.TempDir()
+	parent := filepath.Join(dir, "data")
+	if err := os.Mkdir(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	physical := filepath.Join(parent, "p")
+	logical := physical
+	root := "data/p"
+	if tc.alias {
+		if err := os.Symlink("data", filepath.Join(dir, "alias")); err != nil {
+			t.Fatal(err)
+		}
+		logical, root = filepath.Join(dir, "alias", "p"), "alias/p"
+	}
+	if tc.beforePresent {
+		if err := os.WriteFile(physical, []byte("consumed"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	walk, stat, lstat := walkRuntimeDirectory, statRuntimePath, lstatRuntimePath
+	t.Cleanup(func() { walkRuntimeDirectory, statRuntimePath, lstatRuntimePath = walk, stat, lstat })
+	current := false
+	directAvailable := func() bool { return current != tc.directAtCapture }
+	walkRuntimeDirectory = func(path string, visit fs.WalkDirFunc) error {
+		if path == parent && directAvailable() {
+			return partialRuntimeWalk(path, nil, visit)
+		}
+		return walk(path, visit)
+	}
+	statRuntimePath = func(path string) (os.FileInfo, error) {
+		if !directAvailable() && (path == physical || path == logical) {
+			return nil, &os.PathError{Op: "stat", Path: path, Err: fs.ErrPermission}
+		}
+		return stat(path)
+	}
+	lstatRuntimePath = func(path string) (os.FileInfo, error) {
+		if !directAvailable() && (path == physical || path == logical) {
+			return nil, &os.PathError{Op: "lstat", Path: path, Err: fs.ErrPermission}
+		}
+		return lstat(path)
+	}
+	var opts []BracketOption
+	if tc.excludeParent {
+		opts = append(opts, WithBracketExcludedPaths("data/p"))
+		if !tc.alias {
+			root = physical
+		} // retain the independent child's scope
+	}
+	b, err := CaptureBracket(t.Context(), dir, []string{"data", root}, opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumed, readErr := os.ReadFile(logical)
+	if tc.beforePresent {
+		if readErr != nil || string(consumed) != "consumed" {
+			t.Fatalf("producing read: %q %v", consumed, readErr)
+		}
+	} else if !os.IsNotExist(readErr) {
+		t.Fatalf("producing absence read: %v", readErr)
+	}
+	if tc.beforePresent != tc.afterPresent {
+		if tc.afterPresent {
+			err = os.WriteFile(physical, []byte("consumed"), 0600)
+		} else {
+			err = os.Remove(physical)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	current = true
+	observation, err := FromTestLog([]byte("open "+logical+"\n"), dir, dir, nil, WithCompletedProcess("reader"), WithBracket(b))
+	wantMoved := tc.beforePresent != tc.afterPresent && !tc.excludeParent
+	if err != nil || !observation.Unverifiable || observation.BracketMoved != wantMoved {
+		t.Fatalf("known namespace evidence lost or invented: %+v %v", observation.State, err)
+	}
+	if err := b.checkSealed(); err != nil {
+		t.Fatal("comparison changed captured provenance", err)
+	}
+}
+
+func TestNamespacePresenceMeetsCompleteListingAbsence(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		for _, control := range []string{"changed", "same present", "same absent", "excluded"} {
+			t.Run(fmt.Sprintf("reverse=%t/%s", reverse, control), func(t *testing.T) {
+				tc := namespaceAvailabilityCase{directAtCapture: !reverse, beforePresent: !reverse, afterPresent: reverse, excludeParent: control == "excluded"}
+				if control == "same present" {
+					tc.beforePresent, tc.afterPresent = true, true
+				}
+				if control == "same absent" {
+					tc.beforePresent, tc.afterPresent = false, false
+				}
+				checkNamespaceAvailability(t, tc)
+			})
+		}
+	}
+}
+
+func TestResolvedFinalAbsenceSurvivesAvailabilityShift(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		for _, control := range []string{"changed", "same present", "same absent", "excluded"} {
+			t.Run(fmt.Sprintf("reverse=%t/%s", reverse, control), func(t *testing.T) {
+				tc := namespaceAvailabilityCase{alias: true, directAtCapture: !reverse, beforePresent: reverse, afterPresent: !reverse, excludeParent: control == "excluded"}
+				if control == "same present" {
+					tc.beforePresent, tc.afterPresent = true, true
+				}
+				if control == "same absent" {
+					tc.beforePresent, tc.afterPresent = false, false
+				}
+				checkNamespaceAvailability(t, tc)
+			})
+		}
+	}
+}
+
+func TestResolvedAbsenceRequiresTheFinalComponent(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real")
+	if err := os.Mkdir(real, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("real", filepath.Join(dir, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	parent, child := filepath.Join(real, "parent"), filepath.Join(real, "parent", "p")
+	b := testBracket(t, dir, "alias/parent/p")
+	if b.roots[0].facts.knows(parent, namespaceFact) || b.roots[0].facts.knows(child, namespaceFact) {
+		t.Fatal("missing intermediate invented resolved namespace absence")
+	}
+	if err := os.Mkdir(parent, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if unchanged, moved, reason, err := b.revalidate(t.Context(), dir); err != nil || !unchanged || moved {
+		t.Fatalf("ancestor appearance moved the still-absent root: %t %t %q %v", unchanged, moved, reason, err)
+	}
+	final := testBracket(t, dir, "alias/parent/p")
+	if !final.roots[0].facts.knows(child, namespaceFact) {
+		t.Fatal("observed final absence lost resolved identity")
+	}
+	copy := final
+	copy.roots = append([]bracketRoot(nil), final.roots...)
+	copy.roots[0].facts = clonePathFacts(final.roots[0].facts)
+	delete(copy.roots[0].facts.values, pathFact{child, namespaceFact})
+	if err := copy.checkSealed(); err == nil {
+		t.Fatal("resolved absence provenance not sealed")
+	}
+}
+
+func TestNamespaceExistenceComparisonIsSymmetric(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "p")
+	for _, reverse := range []bool{false, true} {
+		for _, kind := range []pathFactKind{namespaceFact, followedStatFact} {
+			missing, named := newPathFacts(), newPathFacts()
+			missing.put(p, kind, "missing")
+			named.listing(dir, ".", []string{"p"}, false)
+			before := []bracketRoot{{id: pathID{Kind: pathAbs, Path: dir}, facts: missing}}
+			after := []bracketRoot{{id: before[0].id, facts: named}}
+			if reverse {
+				before, after = after, before
+			}
+			root, err := movedBracketRoot(t.Context(), before, after, nil)
+			if err != nil || (root >= 0) != (kind == namespaceFact) {
+				t.Fatalf("reverse=%t kind=%d mixed existence meanings: root=%d err=%v", reverse, kind, root, err)
+			}
+		}
+	}
+}
+
+func TestMissingAncestorAppearanceDoesNotInventResolutionDrift(t *testing.T) {
+	for _, asLink := range []bool{false, true} {
+		t.Run(fmt.Sprintf("link=%t", asLink), func(t *testing.T) {
+			dir := t.TempDir()
+			real, other := filepath.Join(dir, "real"), filepath.Join(dir, "other")
+			if err := os.Mkdir(real, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(other, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("real", filepath.Join(dir, "alias")); err != nil {
+				t.Fatal(err)
+			}
+			b := testBracket(t, dir, "alias/parent/p")
+			parent := filepath.Join(real, "parent")
+			var err error
+			if asLink {
+				err = os.Symlink(other, parent)
+			} else {
+				err = os.Mkdir(parent, 0700)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := os.Lstat(filepath.Join(dir, "alias", "parent", "p")); !os.IsNotExist(err) {
+				t.Fatalf("declared child is not still absent: %v", err)
+			}
+			if unchanged, moved, reason, err := b.revalidate(t.Context(), dir); err != nil || !unchanged || moved {
+				t.Fatalf("unestablished resolution became drift: unchanged=%t moved=%t reason=%q err=%v", unchanged, moved, reason, err)
+			}
+		})
+	}
+}
+
+// partialRuntimeWalk exposes actual entries beside a narrow injected readdir
+// error. No metadata or entry type is fabricated, and directory modes stay put.
+func partialRuntimeWalk(root string, names []string, visit fs.WalkDirFunc) error {
+	info, err := os.Lstat(root)
+	if err != nil {
+		return err
+	}
+	entry := fs.FileInfoToDirEntry(info)
+	if err := visit(root, entry, nil); err != nil {
+		return err
+	}
+	if err := visit(root, entry, &os.PathError{Op: "readdir", Path: root, Err: fs.ErrPermission}); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		for _, name := range names {
+			if entry.Name() == name {
+				if err := visit(filepath.Join(root, name), entry, nil); err != nil && err != fs.SkipDir {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func TestOverlappingRootsShareComparableFacts(t *testing.T) {
+	for _, scenario := range []string{"appearance", "knowledge shifts", "excluded parent", "captured contradiction"} {
+		t.Run(scenario, func(t *testing.T) {
+			dir := t.TempDir()
+			data, p := filepath.Join(dir, "data"), filepath.Join(dir, "data", "p")
+			if err := os.Mkdir(data, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "knowledge shifts" || scenario == "captured contradiction" {
+				if err := os.WriteFile(p, []byte("stable"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			walk, stat, lstat := walkRuntimeDirectory, statRuntimePath, lstatRuntimePath
+			t.Cleanup(func() { walkRuntimeDirectory, statRuntimePath, lstatRuntimePath = walk, stat, lstat })
+			current := false
+			walkRuntimeDirectory = func(root string, visit fs.WalkDirFunc) error {
+				if root == data {
+					if !current && scenario == "captured contradiction" {
+						if err := walk(root, visit); err != nil {
+							return err
+						}
+						return os.Remove(p)
+					}
+					if !current || scenario == "captured contradiction" {
+						return partialRuntimeWalk(root, nil, visit)
+					}
+				}
+				return walk(root, visit)
+			}
+			statRuntimePath = func(path string) (os.FileInfo, error) {
+				if current && path == p {
+					return nil, &os.PathError{Op: "stat", Path: path, Err: fs.ErrPermission}
+				}
+				return stat(path)
+			}
+			lstatRuntimePath = func(path string) (os.FileInfo, error) {
+				if current && path == p {
+					return nil, &os.PathError{Op: "lstat", Path: path, Err: fs.ErrPermission}
+				}
+				return lstat(path)
+			}
+			roots := []string{"data", "data/p"}
+			var opts []BracketOption
+			if scenario == "excluded parent" {
+				roots[1] = p
+				opts = append(opts, WithBracketExcludedPaths("data/p"))
+			}
+			b, err := CaptureBracket(t.Context(), dir, roots, opts...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario != "knowledge shifts" && scenario != "captured contradiction" {
+				if _, err := os.ReadFile(p); !os.IsNotExist(err) {
+					t.Fatalf("producing absence read: %v", err)
+				}
+				if err := os.WriteFile(p, []byte("appeared"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			current = true
+			observation, err := FromTestLog([]byte("open data/p\n"), dir, dir, nil, WithCompletedProcess("reader"), WithBracket(b))
+			if err != nil || observation.BracketMoved != (scenario == "appearance" || scenario == "captured contradiction") || !observation.Unverifiable {
+				t.Fatalf("%s: %+v %v", scenario, observation, err)
+			}
+			if observation.BracketMoved && RefusalClause(observation.Reason) != MovedBracketClause("data") {
+				t.Fatalf("lost deterministic contributing-root attribution: %q", observation.Reason)
+			}
+		})
+	}
+}
+
+func TestPartialListingRetainsPositiveMembership(t *testing.T) {
+	original := walkRuntimeDirectory
+	t.Cleanup(func() { walkRuntimeDirectory = original })
+	for _, reverse := range []bool{false, true} {
+		for _, changed := range []bool{false, true} {
+			dir := t.TempDir()
+			data := filepath.Join(dir, "data")
+			if err := os.Mkdir(data, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(data, "kept"), []byte("stable"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			newPath := filepath.Join(data, "new")
+			if !changed || reverse {
+				if err := os.WriteFile(newPath, []byte("new"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			walk := walkRuntimeDirectory
+			partial := reverse
+			walkRuntimeDirectory = func(root string, visit fs.WalkDirFunc) error {
+				if root == data && partial {
+					return partialRuntimeWalk(root, []string{"new"}, visit)
+				}
+				return walk(root, visit)
+			}
+			b := testBracket(t, dir, "data")
+			if changed {
+				if reverse {
+					if err := os.Remove(newPath); err != nil {
+						t.Fatal(err)
+					}
+				} else if err := os.WriteFile(newPath, []byte("new"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			partial = !reverse
+			_, moved, reason, err := b.revalidate(t.Context(), dir)
+			walkRuntimeDirectory = walk
+			if err != nil || moved != changed || reason == "" {
+				t.Fatalf("reverse=%t changed=%t: moved=%t reason=%q err=%v", reverse, changed, moved, reason, err)
+			}
+		}
+	}
+}
+
+func TestCrossRootMembershipKeepsExclusionScope(t *testing.T) {
+	dir := t.TempDir()
+	data := filepath.Join(dir, "data")
+	if err := os.Mkdir(data, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"kept", "excluded"} {
+		if err := os.WriteFile(filepath.Join(data, name), []byte(name), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	walk := walkRuntimeDirectory
+	t.Cleanup(func() { walkRuntimeDirectory = walk })
+	calls := 0
+	walkRuntimeDirectory = func(root string, visit fs.WalkDirFunc) error {
+		calls++
+		// Absolute roots sort before relative roots. The absolute root's
+		// partial listing sees a name deliberately omitted by the relative one.
+		if calls%2 == 1 {
+			return partialRuntimeWalk(root, []string{"excluded"}, visit)
+		}
+		return walk(root, visit)
+	}
+	b, err := CaptureBracket(t.Context(), dir, []string{data, "data"}, WithBracketExcludedPaths("data/excluded"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, moved, _, err := b.revalidate(t.Context(), dir); err != nil || moved {
+		t.Fatalf("excluded name became known absence: moved=%t err=%v", moved, err)
+	}
+}
+
+func clonePathFacts(f *pathFacts) *pathFacts {
+	if f == nil {
+		return nil
+	}
+	copy := newPathFacts()
+	for key, values := range f.values {
+		copy.values[key] = slices.Clone(values)
+	}
+	for directory, listings := range f.listings {
+		for _, listing := range listings {
+			copy.listing(directory, listing.offset, listing.names, listing.complete)
+		}
+	}
+	return copy
+}
+
+func TestFactAccountRetainsContradictionsCanonically(t *testing.T) {
+	left, right := newPathFacts(), newPathFacts()
+	for _, value := range []string{"type 0", "missing", "type 0"} {
+		left.put("p", namespaceFact, value)
+	}
+	for _, value := range []string{"missing", "type 0"} {
+		right.put("p", namespaceFact, value)
+	}
+	left.listing("d", ".", []string{"b", "a", "a"}, false)
+	right.listing("d", ".", []string{"a", "b"}, false)
+	hash := func(f *pathFacts) string { h := sha256.New(); f.seal(h); return string(h.Sum(nil)) }
+	if hash(left) != hash(right) {
+		t.Fatal("set order or duplication changed canonical facts")
+	}
+	before := []bracketRoot{{id: pathID{Kind: pathRel, Path: "p"}, facts: left}}
+	after := []bracketRoot{{id: before[0].id, facts: newPathFacts()}}
+	if root, err := movedBracketRoot(t.Context(), before, after, nil); err != nil || root != 0 {
+		t.Fatalf("last write erased known contradiction: root=%d err=%v", root, err)
+	}
+	// Same-value overlap and knowledge loss carry no contradiction.
+	clean := newPathFacts()
+	clean.put("p", namespaceFact, "type 0")
+	before[0].facts = clean
+	if root, err := movedBracketRoot(t.Context(), before, after, nil); err != nil || root != -1 {
+		t.Fatalf("knowledge loss became movement: root=%d err=%v", root, err)
+	}
+}
+
+func TestBracketSealBindsMembershipKnowledgeAndScope(t *testing.T) {
+	dir := bindingModule(t)
+	b := testBracket(t, dir, "data")
+	for directory := range b.roots[0].facts.listings {
+		for _, field := range []string{"availability", "names", "scope"} {
+			copy := b
+			copy.roots = append([]bracketRoot(nil), b.roots...)
+			copy.roots[0].facts = clonePathFacts(b.roots[0].facts)
+			rows := copy.roots[0].facts.listings[directory]
+			switch field {
+			case "availability":
+				rows[0].complete = !rows[0].complete
+			case "names":
+				rows[0].names = append(rows[0].names, "fabricated")
+			case "scope":
+				rows[0].offset = "different"
+			}
+			if err := copy.checkSealed(); err == nil {
+				t.Fatalf("membership %s tampering accepted", field)
+			}
+		}
+	}
+	if err := b.checkSealed(); err != nil {
+		t.Fatal("test copies changed original capture", err)
 	}
 }

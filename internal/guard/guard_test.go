@@ -4,13 +4,34 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/greatliontech/gofresh/gotool"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"testing/quick"
+
+	"github.com/greatliontech/gofresh/gotool"
 )
+
+// The tests' ambient forms: the process environment and a background
+// context, spelled once here — the public entry names both.
+func ambientCapture(moduleDir string, kind Kind, buildInputs ...string) (Guards, error) {
+	return captureUnderSnapshot(context.Background(), moduleDir, os.Environ(), kind, nil, buildInputs...)
+}
+
+func captureUnder(ctx context.Context, moduleDir string, env []string, kind Kind, buildInputs ...string) (Guards, error) {
+	return captureUnderSnapshot(ctx, moduleDir, env, kind, nil, buildInputs...)
+}
+
+// captureUnderSnapshot is the one reader-building form the two above
+// reduce to: a plain runner's reader over dir and env, primed with the
+// snapshot when one is given.
+func captureUnderSnapshot(ctx context.Context, moduleDir string, env []string, kind Kind, snapshot *gotool.EnvSnapshot, buildInputs ...string) (Guards, error) {
+	return Capture(ctx, gotool.PrimedEnvReader(gotool.Runner{}, moduleDir, env, snapshot), env, kind, buildInputs...)
+}
 
 func TestCaptureNonEmpty(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
@@ -115,6 +136,46 @@ func TestCompareCompleteness(t *testing.T) {
 	// valid (REQ-guard-completeness).
 	if got := Compare(Guards{}, Guards{}, CodeResult); got != "toolchain" {
 		t.Errorf("all-empty guards: got %q, want a mismatch — an unevaluable guard is not proof", got)
+	}
+}
+
+func TestCompareFactsRetainsAxisAndMissingEvidence(t *testing.T) {
+	base := Guards{Toolchain: "t", BuildConfig: "b", Machine: "m", RuntimeConfig: "r"}
+	for _, tc := range []struct {
+		axis Axis
+		set  func(*Guards, string)
+	}{
+		{ToolchainAxis, func(g *Guards, s string) { g.Toolchain = s }},
+		{BuildConfigAxis, func(g *Guards, s string) { g.BuildConfig = s }},
+		{MachineAxis, func(g *Guards, s string) { g.Machine = s }},
+		{RuntimeConfigAxis, func(g *Guards, s string) { g.RuntimeConfig = s }},
+	} {
+		for _, value := range []string{"", "changed"} {
+			for _, producing := range []bool{true, false} {
+				rec, cur := base, base
+				if producing {
+					tc.set(&rec, value)
+				} else {
+					tc.set(&cur, value)
+				}
+				got := CompareFacts(rec, cur, Measurement)
+				want := Mismatch{Axis: tc.axis, Missing: value == ""}
+				if got != want || Compare(rec, cur, Measurement) != tc.axis.String() {
+					t.Fatalf("comparison = %+v, want %+v", got, want)
+				}
+				if tc.axis == MachineAxis || tc.axis == RuntimeConfigAxis {
+					if got := CompareFacts(rec, cur, CodeResult); got != (Mismatch{}) {
+						t.Fatalf("code judgment read measurement guard: %+v", got)
+					}
+				}
+			}
+		}
+	}
+	if got := CompareFacts(base, base, Kind(99)); got != (Mismatch{Axis: KindAxis}) {
+		t.Fatalf("unsupported kind = %+v", got)
+	}
+	if got := CompareFacts(Guards{}, base, Measurement); got != (Mismatch{Axis: ToolchainAxis, Missing: true}) {
+		t.Fatalf("first missing guard = %+v", got)
 	}
 }
 
@@ -286,6 +347,95 @@ func TestRuntimeConfigSensitive(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigSeparatesEmbeddedEnvironmentEntries(t *testing.T) {
+	// Moving a key-shaped suffix between these values preserves the old
+	// delimiter-only encoding but changes the runtime's effective GOGC.
+	first := []string{"GOGC=200\nGODEBUG=x", "GODEBUG=y"}
+	second := []string{"GOGC=200", "GODEBUG=x\nGODEBUG=y"}
+	if runtimeConfig(first) == runtimeConfig(second) {
+		t.Fatal("distinct runtime configurations share a guard")
+	}
+	for _, env := range [][]string{nil, first, second} {
+		var legacy strings.Builder
+		for _, key := range runtimeConfigEnvKeys {
+			value := ""
+			for _, entry := range env {
+				if strings.HasPrefix(entry, key+"=") {
+					value = strings.TrimPrefix(entry, key+"=")
+				}
+			}
+			fmt.Fprintf(&legacy, "%s=%s\n", key, value)
+		}
+		if runtimeConfig(env) == digest(legacy.String()) {
+			t.Fatal("historical delimiter-only guard retained reuse eligibility")
+		}
+	}
+}
+
+func TestRuntimeConfigValueBoundaries(t *testing.T) {
+	// Quantify the delimiter-shifting collision family rather than checking
+	// just one pair. Environment values exclude NUL, but may contain newlines.
+	property := func(a, b, c string) bool {
+		if strings.ContainsRune(a+b+c, 0) {
+			return true
+		}
+		first := []string{"GOGC=" + a + "\nGODEBUG=" + b, "GODEBUG=" + c}
+		second := []string{"GOGC=" + a, "GODEBUG=" + b + "\nGODEBUG=" + c}
+		return runtimeConfig(first) != runtimeConfig(second)
+	}
+	if err := quick.Check(property, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCaptureRuntimeAdmission(t *testing.T) {
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		env  []string
+		kind Kind
+	}{
+		{"nil context", nil, nil, CodeResult},
+		{"cancelled context", cancelled, nil, CodeResult},
+		{"missing kind", t.Context(), nil, invalidKind},
+		{"unknown kind", t.Context(), nil, Kind(99)},
+		{"duplicate environment", t.Context(), []string{"A=1", "A=2"}, CodeResult},
+		{"malformed environment", t.Context(), []string{"A"}, Measurement},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := CaptureRuntime(tc.ctx, tc.env, tc.kind)
+			if err == nil || got != (RuntimeGuards{}) {
+				t.Fatalf("invalid runtime capture admitted: %+v %v", got, err)
+			}
+			if tc.ctx == cancelled && !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancellation lost: %v", err)
+			}
+		})
+	}
+	if got, err := CaptureRuntime(t.Context(), []string{}, CodeResult); err != nil || got != (RuntimeGuards{}) {
+		t.Fatalf("code capture required measurement facts: %+v %v", got, err)
+	}
+}
+
+func TestRuntimeCaptureCancellationOutranksMachineAnswer(t *testing.T) {
+	for _, machineError := range []error{nil, errors.New("probe refused")} {
+		ctx, cancel := context.WithCancel(t.Context())
+		got, err := captureRuntimeFor(ctx, nil, Measurement, func() (MachineFacts, error) {
+			cancel()
+			return MachineFacts{CPUModel: "captured"}, machineError
+		}, func([]string) string {
+			t.Fatal("cancelled machine capture continued into runtime capture")
+			return ""
+		})
+		cancel()
+		if !errors.Is(err, context.Canceled) || got != (RuntimeGuards{}) {
+			t.Fatalf("cancelled machine capture returned an answer: %+v %v", got, err)
+		}
+	}
+}
+
 func TestCaptureUsesSuppliedEnvironmentForGuards(t *testing.T) {
 	replace := func(env []string, key, value string) []string {
 		prefix := key + "="
@@ -378,6 +528,130 @@ func TestCaptureDigestsRuntimeConfigFromTheRuntimeEnvironment(t *testing.T) {
 	}
 	if analysisOnly.RuntimeConfig != base.RuntimeConfig {
 		t.Error("an analysis-env GOGC change moved the runtime-config guard, which reads runtimeEnv")
+	}
+}
+
+// Capture refuses a nil reader and a malformed environment before any
+// probe, and digests under the normalized environment.
+func TestCaptureRefusesANilReaderAndAMalformedEnvironment(t *testing.T) {
+	ctx := context.Background()
+	if _, err := Capture(ctx, nil, os.Environ(), CodeResult); err == nil || !strings.Contains(err.Error(), "nil environment reader") {
+		t.Fatalf("Capture(nil) = %v", err)
+	}
+	// An out-of-range kind refuses before any spawn.
+	spawned := false
+	silent := gotool.NewEnvReader(gotool.Runner{Prepare: func(*exec.Cmd) { spawned = true }}, t.TempDir(), os.Environ())
+	if _, err := Capture(ctx, silent, os.Environ(), Kind(7)); err == nil || !strings.Contains(err.Error(), "invalid result kind") || spawned {
+		t.Fatalf("an invalid kind: err = %v, spawned = %v; want the refusal with no spawn", err, spawned)
+	}
+	dup := append(append([]string(nil), os.Environ()...), "GOFLAGS=a", "GOFLAGS=b")
+	if _, err := Capture(ctx, gotool.NewEnvReader(gotool.Runner{}, t.TempDir(), dup), os.Environ(), CodeResult); err == nil || !strings.Contains(err.Error(), "guard:") {
+		t.Fatalf("a duplicated key captured: %v", err)
+	}
+}
+
+// A capture through an unprimed reader takes the pass's one snapshot
+// through THAT reader, so the caller's later keys read it: one `go env
+// -json` for the pass, whichever side asks first.
+func TestCapturePrimesTheCallersReader(t *testing.T) {
+	ctx := context.Background()
+	snapshots := 0
+	r := gotool.NewEnvReader(gotool.Runner{Prepare: func(cmd *exec.Cmd) {
+		if len(cmd.Args) > 2 && cmd.Args[1] == "env" && cmd.Args[2] == "-json" {
+			snapshots++
+		}
+	}}, t.TempDir(), os.Environ())
+	if _, err := Capture(ctx, r, os.Environ(), CodeResult); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Value(ctx, "GOFLAGS"); err != nil {
+		t.Fatal(err)
+	}
+	if snapshots != 1 {
+		t.Fatalf("%d snapshots for one pass, want 1 (the capture primed the caller's reader)", snapshots)
+	}
+}
+
+// The toolchain guard read from the pass's snapshot is byte-identical
+// to the `go version` line minus its prefix — the former live probe's
+// value — on the running toolchain, under a target platform in the
+// environment too (the host keys, never GOOS/GOARCH), so no recorded
+// guard moves and the pass pays one spawn for both code guards
+// (REQ-guard-toolchain).
+func TestToolchainGuardIsGoVersionsOwnForm(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not available")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	env := os.Environ()
+	out, err := gotool.Runner{}.Run(ctx, dir, env, "version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := strings.TrimPrefix(strings.TrimSpace(string(out)), "go version ")
+	reader := gotool.NewEnvReader(gotool.Runner{}, dir, env)
+	snapshot, err := reader.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := toolchainOf(snapshot); err != nil || got != live {
+		t.Fatalf("toolchain guard %q (%v), `go version` says %q", got, err, live)
+	}
+	// A target platform in the environment is the build-configuration
+	// guard's business: `go version` still prints the host platform,
+	// and so must the derived guard — the host keys, never GOOS/GOARCH.
+	cross := gotool.SetEnv(gotool.SetEnv(env, "GOOS", "windows"), "GOARCH", "arm64")
+	out, err = gotool.Runner{}.Run(ctx, dir, cross, "version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if crossLive := strings.TrimPrefix(strings.TrimSpace(string(out)), "go version "); crossLive != live {
+		t.Fatalf("`go version` moved under a target platform: %q vs %q", crossLive, live)
+	}
+	crossSnapshot, err := gotool.NewEnvReader(gotool.Runner{}, dir, cross).Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := toolchainOf(crossSnapshot); err != nil || got != live {
+		t.Fatalf("toolchain guard %q (%v) under GOOS=windows GOARCH=arm64, want the host's %q", got, err, live)
+	}
+	// The capture reads the same value, and pays the reader's one
+	// snapshot for it: no `go version` spawn beside the `go env -json`.
+	spawns := 0
+	counted := gotool.NewEnvReader(gotool.Runner{Prepare: func(c *exec.Cmd) { spawns++ }}, dir, env)
+	g, err := Capture(ctx, counted, env, CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Toolchain != live {
+		t.Fatalf("captured toolchain guard %q, want %q", g.Toolchain, live)
+	}
+	if spawns != 1 {
+		t.Fatalf("the capture paid %d go spawns for its code guards, want the one snapshot", spawns)
+	}
+	// A document that answers no version, or no host platform (a shim,
+	// a toolchain before GOVERSION existed), is no identity: the capture
+	// refuses naming the missing key, never a non-empty guard over an
+	// empty part. The program resolves through the parent's PATH
+	// (Program's rule), so the shim goes there; these arms are the
+	// test's last.
+	shim := t.TempDir()
+	t.Setenv("PATH", shim+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for _, missing := range []string{"GOVERSION", "GOHOSTOS", "GOHOSTARCH"} {
+		document := map[string]string{"GOFLAGS": "", "GOVERSION": "go1.99.0", "GOHOSTOS": "linux", "GOHOSTARCH": "amd64"}
+		delete(document, missing)
+		body, err := json.Marshal(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(shim, "go"), []byte("#!/bin/sh\necho '"+string(body)+"'\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		shimmed := gotool.NewEnvReader(gotool.Runner{}, dir, os.Environ())
+		if g, err := Capture(ctx, shimmed, os.Environ(), CodeResult); err == nil || !strings.Contains(err.Error(), "no "+missing) {
+			t.Fatalf("a document without %s captured %+v, %v; want a refusal naming it", missing, g, err)
+		}
 	}
 }
 

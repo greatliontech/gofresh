@@ -96,12 +96,35 @@ func (h *Hasher) loadCachedContext(ctx context.Context, pkgPath string) (*progra
 
 func (h *Hasher) loadCachedFrom(ctx context.Context, pkgPath string, bp *batchPreparer) (*program, error) {
 	if p, ok := h.progs[pkgPath]; ok {
+		if p != nil && p.Prog == nil && len(p.Pkgs) > 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			built, err := prog.FromPackages(ctx, pkgPath, p.Pkgs)
+			if err != nil {
+				return nil, err
+			}
+			h.progs[pkgPath] = built
+			return built, nil
+		}
 		return p, nil
 	}
 	if err, ok := h.progErrs[pkgPath]; ok {
 		return nil, err
 	}
 	h.emitProgress("load", pkgPath)
+	if analysisTestHooks.loadProgramOnMiss != nil {
+		if p, ok, err := analysisTestHooks.loadProgramOnMiss(ctx, h, pkgPath); ok {
+			if err != nil {
+				if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+					h.progErrs[pkgPath] = err
+				}
+				return nil, err
+			}
+			h.progs[pkgPath] = p
+			return p, nil
+		}
+	}
 	prepared, err := bp.prepare(ctx)
 	if err != nil {
 		return nil, err
