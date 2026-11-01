@@ -137,10 +137,12 @@ func getStdlibCache(baseEnv []string) (*stdlibCache, error) {
 		if strings.Contains(path, ".") {
 			return false
 		}
+		if strings.HasPrefix(path, "encoding/json") || strings.HasPrefix(path, "crypto/") {
+			return false
+		}
 		switch path {
 		case "slices", "maps", "cmp", "sync", "io", "context", "testing", "fmt", "errors", "strings", "bytes",
-			"reflect", "path/filepath", "crypto/sha1", "crypto/sha256", "crypto/internal/fips140/sha256",
-			"text/template", "sort":
+			"reflect", "path/filepath", "crypto", "text/template", "sort":
 			return false
 		default:
 			return true
