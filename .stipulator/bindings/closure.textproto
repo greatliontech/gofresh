@@ -2484,3 +2484,23 @@ bindings {
   shape_hash: "df195de8689c291217dd7ca7cd95c1487cc4d4549bc591cf268cc41d0e10376c"
   clause_label: "resolved"
 }
+
+bindings {
+  requirement_id: "REQ-closure-analysis"
+  content_hash: "67df182010273ecd0f5fafcf1ad0c94802ba486581174f1dc3def89b9eb21bd7"
+  source_hash: "f2770ac806d187a79977ca61f21a8f61ae816f9ce73558ff8ab2e13f84193087"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/closure.TestWalkTypeGraphTupleAndMultiReturnBodylessPoisoning"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1d914d042523d3673eb8c15f0bddcd65ce6ca5145e7267a11e5de540c26d87d7"
+}
+
+bindings {
+  requirement_id: "REQ-closure-observability-cause-order"
+  content_hash: "f54ec2fb1574473db0f678bf6ab81255101a382685b315a93a795bdff4de4ab4"
+  source_hash: "72e854a7f43ac520ec9b092a06973fc0d3f20a897864924320c6be3efbd3a76d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/closure.FuzzPreferredReasonTotalAndRankMaximal"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "5ad7afd9e2f016dd96a3c41180278bd542239555b13b7be8ec5a61d03d52b0cf"
+}

@@ -6673,3 +6673,74 @@ func TestClean(t *testing.T) {}
 		}
 	}
 }
+
+// walkTypeGraph must descend into *types.Tuple so multi-return SSA call
+// values (whose Value().Type() is *types.Tuple) have all element types
+// visited by poisonContainedTypes, addType, and typeUsesUnsafePointer.
+func TestWalkTypeGraphTupleAndMultiReturnBodylessPoisoning(t *testing.T) {
+	pkg := types.NewPackage("example.com/tuplepkg", "tuplepkg")
+	namedObj := types.NewTypeName(token.NoPos, pkg, "Carrier", nil)
+	sig := types.NewSignatureType(nil, nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, pkg, "", types.Typ[types.Int])), false)
+	st := types.NewStruct([]*types.Var{types.NewField(token.NoPos, pkg, "fn", sig, false)}, nil)
+	named := types.NewNamed(namedObj, st, nil)
+	tuple := types.NewTuple(
+		types.NewVar(token.NoPos, pkg, "c", named),
+		types.NewVar(token.NoPos, pkg, "p", types.Typ[types.UnsafePointer]),
+	)
+	visitedNamed := false
+	walkTypeGraph(tuple, true, map[types.Type]bool{}, func(t types.Type) bool {
+		if t == named {
+			visitedNamed = true
+		}
+		return true
+	})
+	if !visitedNamed {
+		t.Fatal("walkTypeGraph did not visit *types.Named inside *types.Tuple")
+	}
+	if !typeUsesUnsafePointer(tuple) {
+		t.Fatal("typeUsesUnsafePointer(*types.Tuple with unsafe.Pointer) = false, want true")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/multireturn\n\ngo 1.24\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	src := `package multireturn
+
+import "os"
+
+type Carrier struct {
+	fn func() int
+}
+
+// Bodyless multi-return declaration: its SSA call value has type *types.Tuple.
+func makeCarrier() (Carrier, error)
+
+func impureTarget() int {
+	return len(os.Environ())
+}
+
+// keepAddressTaken ensures impureTarget is in the RTA address-taken pool for func() int.
+var Sink = impureTarget
+
+func UseMultiReturnBodyless() int {
+	c, _ := makeCarrier()
+	return c.fn()
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subj := Subject{Package: "example.com/multireturn", Symbol: "UseMultiReturnBodyless"}
+	got, err := h.ComputeObservabilityBatch([]Subject{subj})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs := got[subj]; obs.Observable {
+		t.Fatalf("UseMultiReturnBodyless = %+v, want Observable=false (Carrier struct returned in tuple from bodyless call must be poisoned)", obs)
+	}
+}

@@ -2767,24 +2767,12 @@ func scanSubjectsFromLoadedWith(audited, computeOpenWorld bool, pkgs []*packages
 	return scan, nil
 }
 
-func openWorldTerm(audited bool, sig *types.Signature) string {
-	return dynstate.OpenWorldTerm(audited, sig)
-}
-
-func typeMayCarryUnknownDynamic(audited bool, t types.Type, seen map[types.Type]bool) bool {
-	return dynstate.WalkDynamicCarrier(audited, t, seen, dynstate.CarrierPolicyConsumer)
-}
-
 func nodeDeclarationKey(pkg *packages.Package, node ast.Node) string {
 	return dynstate.NodeDeclarationKey(pkg, node)
 }
 
 func objectDeclarationKey(pkg *packages.Package, obj types.Object) string {
 	return dynstate.ObjectDeclarationKey(pkg, obj)
-}
-
-func hasDirective(doc *ast.CommentGroup, directive string) bool {
-	return dynstate.HasDirective(doc, directive)
 }
 
 func recvTypeName(fd *ast.FuncDecl) string {
@@ -3010,8 +2998,6 @@ func joinDischargedKeys(discharged map[string]bool) string {
 	sort.Strings(keys)
 	return strings.Join(keys, ",")
 }
-
-var auditedSourceListing = dynstate.AuditedSourceListing
 
 func generatedProtoHeader(text string) string {
 	return dynstate.GeneratedProtoHeader(text)

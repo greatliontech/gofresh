@@ -2438,3 +2438,23 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "fd4ff3689b5e3f8c237d4a92dd92e7ae1e9554bdfc06cb3da414eeb34343689f"
 }
+
+bindings {
+  requirement_id: "REQ-inputs-bracket-coverage"
+  content_hash: "37eda40f200ae8f05d1110e7bb9a79427cb76b336d7aab626e7140e03be0f11d"
+  source_hash: "9a66551df0998a456d0e8a470d1124b4732fa9ff85cfe0a5381d7f5e39fae1a8"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/runtimeinput.TestExistenceBoundNotBypassedByOpenOrFullStat"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b46aa0bf27fdddbac0854878746b8ec07999dcc00e1005e86bb857bf4c137646"
+}
+
+bindings {
+  requirement_id: "REQ-inputs-path-congruence"
+  content_hash: "47ad951d3df392ca5153e91c107fdf9ab5fc9a2eb633fe385fb4f255fc084f48"
+  source_hash: "59923ecfef18e51879ed6e5f1b12f7963cb5f83c0d9269d29169fe493ac2300b"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/runtimeinput.TestScratchNamespaceBoundaryAndSymlinkEscapes"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "92321c0579005e03ad56b12f438091f49640609e32a0cbaa7fd40f728177bcf2"
+}

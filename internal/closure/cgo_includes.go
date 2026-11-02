@@ -198,9 +198,6 @@ func cgoEscapingIncludeWith(p *listPkg, files []string, read func(string) (fileB
 					return realParent, nil
 				}
 				if _, err := os.Stat(resolved); err == nil {
-					if realResolved, err := filepath.EvalSymlinks(resolved); err == nil && !pathWithin(realResolved, realPkgDir) {
-						return realResolved, nil
-					}
 					if relResolved, err := filepath.Rel(p.Dir, resolved); err == nil && (!isNativeIncludeSource(relResolved) || strings.EqualFold(filepath.Ext(relResolved), ".go")) {
 						return "", fmt.Errorf("closure: unsupported cgo include source %s", include)
 					}

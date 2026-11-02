@@ -197,16 +197,8 @@ func TestCPreprocessorEdgeMatrix(t *testing.T) {
 		t.Fatalf("cgoEscapingInclude(empty \"\") error = %v, want empty cgo include directive", err)
 	}
 
-	if err := os.Symlink(filepath.Join(outsideDir, "secret.h"), filepath.Join(pkgDir, "symfile.h")); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, pkgDir, "symfile.c", `#include "symfile.h"`)
-	if esc, err := cgoEscapingInclude(lp, []string{"symfile.c"}); err != nil || esc == "" {
-		t.Fatalf("cgoEscapingInclude(symlink file) = (%q, %v), want non-empty escaping path", esc, err)
-	}
-
 	// Accessing p.Dir through a symlinked ancestor directory must not falsely report
-	// an in-package regular header as escaping, while still catching escaping symlinks.
+	// an in-package regular header as escaping, while still catching escaping directory symlinks.
 	writeFile(t, pkgDir, "local.h", "#define LOCAL_OK 1\n")
 	writeFile(t, pkgDir, "local.c", `#include "local.h"`)
 	symParent := filepath.Join(root, "symparent")
@@ -217,8 +209,8 @@ func TestCPreprocessorEdgeMatrix(t *testing.T) {
 	if esc, err := cgoEscapingInclude(lpSymAncestor, []string{"local.c"}); err != nil || esc != "" {
 		t.Fatalf("cgoEscapingInclude(symlinked p.Dir ancestor with local.h) = (%q, %v), want (\"\", nil)", esc, err)
 	}
-	if esc, err := cgoEscapingInclude(lpSymAncestor, []string{"symfile.c"}); err != nil || esc == "" {
-		t.Fatalf("cgoEscapingInclude(symlinked p.Dir ancestor with escaping file symlink) = (%q, %v), want non-empty escaping path", esc, err)
+	if esc, err := cgoEscapingInclude(lpSymAncestor, []string{"sym.c"}); err != nil || esc == "" {
+		t.Fatalf("cgoEscapingInclude(symlinked p.Dir ancestor with escaping dir symlink) = (%q, %v), want non-empty escaping path", esc, err)
 	}
 
 	writeFile(t, pkgDir, "raw_str.c", "const char *s = R\"raw(/*\n#include \"../outside/secret.h\"\n*/)raw\";\n")

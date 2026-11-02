@@ -1391,6 +1391,10 @@ func walkTypeGraph(t types.Type, typeArgs bool, seen map[types.Type]bool, visit 
 			for i := 0; i < tt.NumFields(); i++ {
 				walk(tt.Field(i).Type())
 			}
+		case *types.Tuple:
+			for i := 0; i < tt.Len(); i++ {
+				walk(tt.At(i).Type())
+			}
 		}
 	}
 	walk(t)
@@ -1420,13 +1424,26 @@ func ssaOpaqueHandle(t types.Type) bool {
 func (a *tier2Analyzer) addValueType(idx *pkgIndex, v ssa.Value) {
 	a.addType(v.Type())
 	unindexedWrapper := idx == nil && v.Parent() != nil && isAnalyzableUnnamedWrapper(v.Parent())
-	if (unindexedWrapper || (idx != nil && !idx.std)) && typeUsesUnsafePointer(v.Type()) && !isOSFileType(v.Type()) {
+	if (unindexedWrapper || (idx != nil && !idx.std)) && valueTypeUsesUnsafePointer(v.Type()) {
 		pkgID := "<synthetic>"
 		if idx != nil {
 			pkgID = idx.id
 		}
 		a.requestWiden("unsafe pointer reachable in " + pkgID)
 	}
+}
+
+func valueTypeUsesUnsafePointer(t types.Type) bool {
+	if tuple, ok := types.Unalias(t).(*types.Tuple); ok {
+		for i := 0; i < tuple.Len(); i++ {
+			elem := tuple.At(i).Type()
+			if typeUsesUnsafePointer(elem) && !isOSFileType(elem) {
+				return true
+			}
+		}
+		return false
+	}
+	return typeUsesUnsafePointer(t) && !isOSFileType(t)
 }
 
 // addType enqueues every named type the walked structure carries. The

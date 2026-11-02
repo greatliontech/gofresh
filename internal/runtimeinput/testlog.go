@@ -318,6 +318,7 @@ func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, 
 	}
 	traversalMemo := map[string]bool{}
 	existenceBound := map[pathID]bool{}
+	nonExistenceBound := map[pathID]bool{}
 	bracketStatRoots := declaredBracketStatRoots(cfg.bracket)
 	cwd := packageDir
 	cwdChanged := false
@@ -391,6 +392,8 @@ func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, 
 				continue
 			}
 			m.Paths = upsertPath(m.Paths, pathIndex, pathInput{pathID: id})
+			nonExistenceBound[id] = true
+			delete(existenceBound, id)
 			if ambiguousParent {
 				addUnverifiable(&m, unverifiableSeen, "ambiguous parent traversal: "+id.displayPath())
 			}
@@ -421,7 +424,9 @@ func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, 
 					if info, statErr := classifyProbe(p); statErr == nil && info.IsDir() || os.IsNotExist(statErr) {
 						id := pathID{Kind: pathAbs, Path: filepath.Clean(p)}
 						m.Paths = upsertPath(m.Paths, pathIndex, pathInput{pathID: id})
-						existenceBound[id] = true
+						if !nonExistenceBound[id] {
+							existenceBound[id] = true
+						}
 						continue
 					}
 				}
@@ -433,6 +438,8 @@ func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, 
 				continue
 			}
 			m.Paths = upsertPath(m.Paths, pathIndex, pathInput{pathID: id})
+			nonExistenceBound[id] = true
+			delete(existenceBound, id)
 			// The stat observed the full object state, so this entry's
 			// digest is metadata-bound from here on even if an earlier
 			// open recorded it content-bound

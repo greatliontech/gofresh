@@ -2884,3 +2884,33 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "cf14863675d81ffe7539396156c5155fc7c18f3bdf847516046d0ff79425bdcf"
 }
+
+bindings {
+  requirement_id: "REQ-fresh-coherent-view"
+  content_hash: "14e5b0c385c14150694869b4cc51e5712bce6023051cff24cba86e18a7bd3d97"
+  source_hash: "6d9185a1e67655db4453679f0b4c60273615579e9f6e47b27203606f540e1b59"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestMultiFeatureCompositionMatrix"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "3ddd163fbfcf9c30c4c732bac094c257ccc9eb754170fc029aed66b543b49efc"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-coherent-view"
+  content_hash: "14e5b0c385c14150694869b4cc51e5712bce6023051cff24cba86e18a7bd3d97"
+  source_hash: "6d9185a1e67655db4453679f0b4c60273615579e9f6e47b27203606f540e1b59"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestTwoPassCompareObservationsFieldPerturbationAndTOCTOU"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7bf53229081fe64c18bd9ae7f007aa05151134d9325c1e15cef1e95fda775433"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-coherent-view"
+  content_hash: "14e5b0c385c14150694869b4cc51e5712bce6023051cff24cba86e18a7bd3d97"
+  source_hash: "6d9185a1e67655db4453679f0b4c60273615579e9f6e47b27203606f540e1b59"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestWorkspaceSymlinkedPWDAndCorruptedCacheResilience"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "82714d6fe20892e5e862dcd8f3d16b9238b99767245c4ea59a78a8d61dee6391"
+}

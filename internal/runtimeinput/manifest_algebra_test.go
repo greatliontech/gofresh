@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -1367,4 +1368,215 @@ func TestValidateScratchNamespaceMatchesOptionValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+// An external identity that is both opened and statted (in either order)
+// when absent at ingest must NOT inherit the absent-stat bracket-coverage
+// exemption: open observes content (or an ephemeral external file created,
+// opened, and removed before ingest), so only a pure stat of an absent
+// external path or external directory is existence-bound
+// (REQ-inputs-absent-stat, REQ-inputs-bracket-coverage).
+func TestExistenceBoundNotBypassedByOpenOrFullStat(t *testing.T) {
+	moduleDir, packageDir := testDirs(t)
+	bracket := testBracket(t, moduleDir)
+	absentExt := filepath.Join(t.TempDir(), "ephemeral-external.txt")
+
+	for _, tc := range []struct {
+		name string
+		log  string
+		want bool // want unverifiable
+	}{
+		{
+			name: "stat_only_absent_external_is_existence_bound",
+			log:  "stat " + absentExt + "\n",
+			want: false,
+		},
+		{
+			name: "stat_then_open_absent_external_requires_bracket_coverage",
+			log:  "stat " + absentExt + "\nopen " + absentExt + "\n",
+			want: true,
+		},
+		{
+			name: "open_then_stat_absent_external_requires_bracket_coverage",
+			log:  "open " + absentExt + "\nstat " + absentExt + "\n",
+			want: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, err := ambientFromTestLog([]byte(tc.log), moduleDir, packageDir,
+				WithCompletedProcess("worker"), WithBracket(bracket))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st.Unverifiable != tc.want {
+				t.Fatalf("Unverifiable = %v (reason %q), want %v", st.Unverifiable, st.Reason, tc.want)
+			}
+			if tc.want && !strings.Contains(st.Reason, "runtime input not covered by observation bracket: "+absentExt) {
+				t.Fatalf("Reason = %q, want uncovered bracket refusal for %s", st.Reason, absentExt)
+			}
+		})
+	}
+}
+
+// Boundary escapes for Bracket and ScratchNamespace:
+// 1. A ScratchNamespace whose declared Dir is a symlink to a bracket-excluded
+//    directory inside the bracket root must not admit consumed-and-removed files.
+// 2. A bracket root that was absent at capture time (no directory walk) must
+//    not admit scratch reads if created during the run.
+// 3. Prefix-colliding sibling directories (scratch vs scratch2) must not admit
+//    reads under the sibling.
+// 4. Hardlink mutation of a tracked file through a temporary scratch hardlink
+//    that is removed before ingest is caught by bracket revalidation.
+// 5. Filenames containing attribution framing characters (quotes, semicolons,
+//    brackets) preserve clean clause/attribution splitting.
+func TestScratchNamespaceBoundaryAndSymlinkEscapes(t *testing.T) {
+	t.Run("symlinked_namespace_dir_to_excluded_subtree_stays_observed", func(t *testing.T) {
+		moduleDir, packageDir := testDirs(t)
+		excl := filepath.Join(packageDir, "excl")
+		if err := os.MkdirAll(filepath.Join(excl, "bench-1"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		secretFile := filepath.Join(excl, "bench-1", "data.txt")
+		if err := os.WriteFile(secretFile, []byte("secret"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("excl", filepath.Join(packageDir, "sub")); err != nil {
+			t.Fatal(err)
+		}
+		bracket, err := ambientCaptureBracket(moduleDir, []string{"."}, WithBracketExcludedPaths("pkg/excl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Consume and remove the file in the excluded subtree during the run.
+		if err := os.RemoveAll(filepath.Join(excl, "bench-1")); err != nil {
+			t.Fatal(err)
+		}
+		st, err := ambientFromTestLog([]byte("open sub/bench-1/data.txt\n"), moduleDir, packageDir,
+			WithCompletedProcess("worker"), WithBracket(bracket),
+			WithScratchNamespace("pkg/sub", "bench-*"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := decode(st.Manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(m.Paths) != 1 || m.Paths[0].Path != "pkg/sub/bench-1/data.txt" {
+			t.Fatalf("paths = %+v, want symlinked namespace dir read recorded", m.Paths)
+		}
+		if !st.Unverifiable {
+			t.Fatalf("state = %+v, want unverifiable for excluded target alias", st)
+		}
+	})
+
+	t.Run("absent_at_capture_bracket_root_admits_no_scratch", func(t *testing.T) {
+		moduleDir, packageDir := testDirs(t)
+		bracket, err := ambientCaptureBracket(moduleDir, []string{"pkg/later"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		laterDir := filepath.Join(packageDir, "later")
+		if err := os.MkdirAll(laterDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		st, err := ambientFromTestLog([]byte("open later/bench-1/gone.txt\n"), moduleDir, packageDir,
+			WithCompletedProcess("worker"), WithBracket(bracket),
+			WithScratchNamespace("pkg/later", "bench-*"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := decode(st.Manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(m.Paths) != 1 || m.Paths[0].Path != "pkg/later/bench-1/gone.txt" {
+			t.Fatalf("paths = %+v, want read under absent-at-capture root recorded", m.Paths)
+		}
+		if !st.Unverifiable || !st.BracketMoved {
+			t.Fatalf("state = %+v, want BracketMoved=true and Unverifiable=true", st)
+		}
+	})
+
+	t.Run("prefix_collision_scratch_vs_scratch2", func(t *testing.T) {
+		moduleDir, packageDir := testDirs(t)
+		for _, sub := range []string{"scratch", "scratch2"} {
+			if err := os.MkdirAll(filepath.Join(packageDir, sub), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		bracket := testBracket(t, moduleDir)
+		st, err := ambientFromTestLog([]byte("open scratch2/run-1/gone.txt\n"), moduleDir, packageDir,
+			WithCompletedProcess("worker"), WithBracket(bracket),
+			WithScratchNamespace("pkg/scratch", "run-*"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := decode(st.Manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(m.Paths) != 1 || m.Paths[0].Path != "pkg/scratch2/run-1/gone.txt" {
+			t.Fatalf("paths = %+v, want prefix-colliding scratch2 read recorded", m.Paths)
+		}
+	})
+
+	t.Run("hardlink_in_scratch_mutating_tracked_file_moves_bracket", func(t *testing.T) {
+		moduleDir, packageDir := testDirs(t)
+		tracked := filepath.Join(packageDir, "tracked.txt")
+		if err := os.WriteFile(tracked, []byte("original"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		bracket := testBracket(t, moduleDir)
+		scratchDir := filepath.Join(packageDir, "bench-hl")
+		if err := os.MkdirAll(scratchDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		hardlink := filepath.Join(scratchDir, "alias.txt")
+		if err := os.Link(tracked, hardlink); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(hardlink, []byte("mutated-via-hardlink"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.RemoveAll(scratchDir); err != nil {
+			t.Fatal(err)
+		}
+		st, err := ambientFromTestLog([]byte("open bench-hl/alias.txt\n"), moduleDir, packageDir,
+			WithCompletedProcess("worker"), WithBracket(bracket),
+			WithScratchNamespace("pkg", "bench-*"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !st.Unverifiable || !st.BracketMoved || !strings.Contains(st.Reason, "observation bracket moved") {
+			t.Fatalf("state = %+v, want hardlink mutation of tracked file to move bracket", st)
+		}
+	})
+
+	t.Run("attribution_framing_characters_in_filenames", func(t *testing.T) {
+		moduleDir, packageDir := testDirs(t)
+		weirdName := `file; "quoted" [brackets].txt`
+		weirdPath := filepath.Join(packageDir, weirdName)
+		if err := os.WriteFile(weirdPath, []byte("v1"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		bracket := testBracket(t, moduleDir)
+		if err := os.WriteFile(weirdPath, []byte("v2"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		obs, err := FromTestLog([]byte("open "+weirdName+"\n"), moduleDir, packageDir, nil,
+			WithCompletedProcess("worker"), WithBracket(bracket))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !obs.State.BracketMoved || !obs.State.Unverifiable {
+			t.Fatalf("obs.State = %+v, want BracketMoved and Unverifiable", obs.State)
+		}
+		if strings.Contains(obs.State.Reason, attributionSeparator) {
+			t.Fatalf("obs.State.Reason = %q leaked attribution separator", obs.State.Reason)
+		}
+		wantQuoted := strconv.Quote("pkg/" + weirdName)
+		if !strings.Contains(obs.Attribution, wantQuoted) {
+			t.Fatalf("obs.Attribution = %q, want moved member %s", obs.Attribution, wantQuoted)
+		}
+	})
 }

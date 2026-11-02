@@ -30,10 +30,10 @@
   - [x] Perform a line-by-line correctness audit of `internal/testvariant`, fix any discovered defects, and expand `internal/testvariant/testvariant_test.go` with an exhaustive AST edge matrix and the `InertForSubject(before, after, subj) == true` $\implies$ `Closure(before, subj) == Closure(after, subj)` soundness property/fuzz bridge.
   - [x] Perform a line-by-line correctness audit of `internal/closure/toolchain_cpreprocessor.go` and `cgo_includes.go`, fix any discovered defects, and add `internal/closure/cpreprocessor_test.go` (`FuzzCPreprocessor` and deterministic preprocessor/macro/include/cgo boundary matrix).
 
-- [ ] **Chunk C.3: Deep Correctness Audit & Multi-Feature Composition, Two-Pass/Bracket TOCTOU Fault-Injection, and Workspace/Symlink/Cache Resilience Suites**
-  - [ ] Perform a line-by-line correctness audit of `internal/closure` (AST/SSA/RTA/observability/toolchain verifier), `internal/runtimeinput`, and root `Session`/`Snapshot`/`Unit`/`CheckingUnit`/`Explain`, fixing any discovered defects.
-  - [ ] Add the multi-feature composition matrix (generics + RTA interface/method-value dispatch + stdlib delegates + `//gofresh:vouch` + `//go:linkname` + 3-way `p` / `p` test / `p_test` compartments) with trace-witness assertions.
-  - [ ] Add the deterministic two-pass (`newViewFor`) field-perturbation & metadata-vs-content TOCTOU suite, bracket/`ScratchNamespace` escape suite, and `go.work` / symlinked `$PWD` / repo-under-`$TMPDIR` / corrupted-cache resilience suite.
+- [x] **Chunk C.3: Deep Correctness Audit & Multi-Feature Composition, Two-Pass/Bracket TOCTOU Fault-Injection, and Workspace/Symlink/Cache Resilience Suites**
+  - [x] Perform a line-by-line correctness audit of `internal/closure` (AST/SSA/RTA/observability/toolchain verifier), `internal/runtimeinput`, and root `Session`/`Snapshot`/`Unit`/`CheckingUnit`/`Explain`, fixing any discovered defects.
+  - [x] Add the multi-feature composition matrix (generics + RTA interface/method-value dispatch + stdlib delegates + `//gofresh:vouch` + `//go:linkname` + 3-way `p` / `p` test / `p_test` compartments) with trace-witness assertions.
+  - [x] Add the deterministic two-pass (`newViewFor`) field-perturbation & metadata-vs-content TOCTOU suite, bracket/`ScratchNamespace` escape suite, and `go.work` / symlinked `$PWD` / repo-under-`$TMPDIR` / corrupted-cache resilience suite.
 
 ## Phase D: Performance & Optimization Audit, Downstream Alignment & Close-Out
 

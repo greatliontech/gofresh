@@ -225,7 +225,7 @@ func (b *Bracket) ephemera(namespaces []scratchNamespace) bracketEphemera {
 	e.namespaces = namespaces
 	e.exclusions = b.exclusions
 	for _, root := range b.roots {
-		if root.id.Kind != pathRel {
+		if root.id.Kind != pathRel || len(root.members) == 0 {
 			continue
 		}
 		lexBase := filepath.Join(b.moduleDir, filepath.FromSlash(root.id.Path))
@@ -296,11 +296,12 @@ func (e bracketEphemera) admits(p string, memo map[string]bool) bool {
 			if root.members[offset] || root.members[matched.childOffset(root.id, id)] {
 				return false
 			}
-			if _, err := os.Lstat(p); !os.IsNotExist(err) {
+			targetP := filepath.Join(root.resolved, filepath.FromSlash(offset))
+			if _, err := os.Lstat(targetP); !os.IsNotExist(err) {
 				return false
 			}
-			resolved, ok := nearestExistingAncestorResolved(p)
-			return ok && pathWithin(root.resolved, resolved)
+			anc, resolved, ok := nearestExistingAncestor(targetP)
+			return ok && resolved == anc && pathWithin(root.resolved, resolved)
 		}
 		return false
 	}()
@@ -420,20 +421,25 @@ func ephemeralScratch(p string, roots [][2]string, resolvedModule string, memo m
 // runtime read escaped and refuses; only a truly absent ancestor
 // ascends. Shared by the ephemeral-scratch and scratch-namespace
 // admissions so both keep identical fail-closed resolution.
-func nearestExistingAncestorResolved(p string) (string, bool) {
-	anc := filepath.Dir(p)
+func nearestExistingAncestor(p string) (anc, resolved string, ok bool) {
+	anc = filepath.Dir(p)
 	for {
 		resolved, err := filepath.EvalSymlinks(anc)
 		if err == nil {
-			return resolved, true
+			return anc, resolved, true
 		}
 		if _, lerr := os.Lstat(anc); !os.IsNotExist(lerr) {
-			return "", false
+			return "", "", false
 		}
 		parent := filepath.Dir(anc)
 		if parent == anc {
-			return "", false
+			return "", "", false
 		}
 		anc = parent
 	}
+}
+
+func nearestExistingAncestorResolved(p string) (string, bool) {
+	_, resolved, ok := nearestExistingAncestor(p)
+	return resolved, ok
 }
