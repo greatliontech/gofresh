@@ -434,6 +434,21 @@ func (r *boundRuntime) observe(ctx context.Context, kind Kind) (guard.RuntimeGua
 	return guards, nil
 }
 
+// ProducerSnapshot selects a nonempty subset of this binding's source snapshot
+// for a caller-managed producer transaction. It observes no new source or build
+// facts and uses this binding's runtime environment and guards. Subjects outside
+// the source snapshot are refused; duplicates collapse in first-request order.
+// Captured source observability proofs and their validation obligations survive
+// selection, but attachments and closing state do not. Capture any missing proof
+// before execution, attach the execution's observation afterward, and successfully
+// Validate before publishing its fingerprints. The caller owns execution scope,
+// completion and dependency protection throughout that span. This operation
+// supplies no built-artifact declaration, execution receipt or outcome support;
+// identity-only observations retain their original authority.
+func (b *RuntimeBinding) ProducerSnapshot(subjects []Subject) (*Snapshot, error) {
+	return b.newView(subjects)
+}
+
 // newView selects immutable source facts and the binding while giving the caller
 // a fresh transaction. No attachment, obligation or seal crosses this boundary.
 func (b *RuntimeBinding) newView(subjects []Subject) (*Snapshot, error) {

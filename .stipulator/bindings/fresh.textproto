@@ -3074,3 +3074,33 @@ bindings {
   role: BINDING_ROLE_TESTS
   shape_hash: "4ef4869683af257da8bd2a7f3da179fa86d3b42e193de726b4f61cf6ae494e69"
 }
+
+bindings {
+  requirement_id: "REQ-fresh-runtime-producer"
+  content_hash: "d56442ffb98c0d664c4d6637d761771a6b64f91a3faca9f995f3be8c9cf99e7a"
+  source_hash: "8a2703922fdc8a1e86458b7dc8370b4c995200134a68b05f9ead52349f3b2015"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.RuntimeBinding.ProducerSnapshot"
+  role: BINDING_ROLE_IMPLEMENTS
+  shape_hash: "2aa1e7cd6cbaece560cf1335263acd2777d895ae78c965b1a2c0e38013468a80"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-runtime-producer"
+  content_hash: "d56442ffb98c0d664c4d6637d761771a6b64f91a3faca9f995f3be8c9cf99e7a"
+  source_hash: "8a2703922fdc8a1e86458b7dc8370b4c995200134a68b05f9ead52349f3b2015"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestProducerSnapshotRuntimePartitions"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "cfec9a2cc8fbd05b9ab2533e51c22020ab6d9add91a0f8d206c7490f2e383b92"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-runtime-producer"
+  content_hash: "d56442ffb98c0d664c4d6637d761771a6b64f91a3faca9f995f3be8c9cf99e7a"
+  source_hash: "8a2703922fdc8a1e86458b7dc8370b4c995200134a68b05f9ead52349f3b2015"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestProducerSnapshotRejectsUninitializedBinding"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "098a9441a0bd19d14280497bb21c60f3e88f55f2f8bbea029c0551c4df79cbaa"
+}

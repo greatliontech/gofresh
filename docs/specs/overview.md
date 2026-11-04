@@ -734,6 +734,19 @@ sibling derivation: it retains the source/build generation but establishes its
 own applicable runtime-side guard observation. Neither operation transfers
 attachments, selected execution support or a closing seal between transactions.
 
+**REQ-fresh-runtime-producer** (behavior, refines REQ-fresh-producer-view): The
+caller-managed producer form MUST select a nonempty subject subset under a
+runtime binding without re-observing source/build facts. It retains source-derived
+observability proofs and their pre-execution provenance and validation obligations,
+but uses the selected binding's runtime environment and guards. It refuses subjects
+outside the source snapshot and owns independent attachment and closing state,
+including when the source transaction has already closed. Selection supplies no
+build declaration, execution receipt or outcome support; identity-only observations
+cannot acquire supported authority through this form. The caller still owns the
+complete contributing execution scope and the producing exclusion span. The
+explicit built-artifact unit form separately owns registration and finalization
+under REQ-fresh-built-unit.
+
 **REQ-fresh-context** (behavior): Context-bound engine preparation,
 analysis-view construction, checking —
 maximal and observed alike — and producer validation MUST honor caller
