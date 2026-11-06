@@ -126,3 +126,22 @@ All 6 hunks in `docs/specs/closure.md` belong to **(A)** (5 pure C.4 hunks + 1 `
    - **Fix:** Verify `info.Uses[x] == types.Universe.Lookup(x.Name)` in `ifCondRequiresNonZeroGlobalTyped`, and pass `idx.pkg.TypesInfo` from `deadZeroGlobalIfBodies` when available (checking `pkg.Types.Scope().Lookup(x.Name) == nil` alongside AST local shadowing otherwise).
 
 
+---
+
+## 6. Architectural Alignment: Zero Third-Party `VersionListing` Allowlists (2026-11-06)
+
+- **User Diagnosis & Alignment:** `gofresh` analyzes arbitrary user subject repositories and their transitive dependencies, not just our own tools. Hardcoding third-party module paths and semver lists (`VersionListing`) inside `gofresh` (such as `golang.org/x/sys` accumulating 9 versions in `typecarrier.go`, `rapid@v1.3.0` in `propertyharness.go`, and the draft `auditedAssemblyListing` for `cpuid/v2@v2.3.0` and `sha1cd@v0.6.0` in `auditset.go`) is unscalable whack-a-mole and non-viable.
+- **Agreed Resolution:**
+  1. **Chunk C.4 — Module/Version-Independent Mechanical Per-`TEXT` `.s` Verification:**
+     - Evict `auditedAssemblyListing` (`AuditedAssemblyModule`) from `internal/auditset` and evict hardcoded `"github.com/klauspost/cpuid/v2"` string checks from `internal/closure/analyzer.go`.
+     - Verify non-toolchain Plan 9 `.s` and `.h` assembly mechanically on disk **per `TEXT ·fn(SB)` function** across *any* package (first-party, `vendor/`, or `GOMODCACHE`, any module, any version — all `.s`/`.h` files are already hashed into the source closure):
+       - Require every `GLOBL` in the package's `.s` files to carry `RODATA`, zero stores to `(SB)` globals, zero cross-package `pkg·sym(SB)` references, zero unverified `CALL`/`JMP` targets outside local labels/verified intra-package `TEXT` symbols, and carrier-free Go stub signatures (`interface`, `func`, `unsafe.Pointer`, `chan` refused).
+       - Decode per-`TEXT` instructions and raw `BYTE`/`WORD`/`LONG`/`QUAD` sequences directly:
+         - Pure ALU/SIMD/memory-local functions (e.g. `sha1cd`, `xxhash`, `blake3`, `x/crypto`, user `.s` kernels) pass with zero effects.
+         - Static CPU-feature queries (`CPUID` when leaf-1 `EBX[31:24]` and leaf-`0xb`/`0x1f` `EDX` per-core APIC ID bits are not extracted by Go callers, x86 `XGETBV` `BYTE $0x0f;$0x01;$0xd0`, ARM64 `MRS` `WORD` encodings of static ID registers `MIDR_EL1` / `ID_AA64PFR*` / `ID_AA64ISAR*` and SVE `ADDVL`/`ADDPL`, Darwin `#ifdef GOOS_darwin` read-only commpage capability bits) pass under the existing guard split (matching Go stdlib `internal/cpu`).
+         - Hardware counters, RNGs, syscalls, traps, per-core APIC ID reads (`CPUID(1)` `EBX >> 24`), and unrecognized raw `BYTE`/`WORD`/`LONG`/`QUAD` opcodes (such as `BYTE $0x0f;$0x01;$0xf9` = `RDTSCP`) mechanically classify the `TEXT` symbol as `externalEffectNative` (`RTCounter`, `Ia32TscAux`, and `LogicalCPU` are refused automatically with zero package-name checks).
+       - Verify pull-form `//go:linkname` variables targeting audited read-only runtime startup constants (`internal/cpu.HWCap`) are write-free and address-free across their declaring package.
+     - Note: Defect **S1** (`DynamicStateStrategy` `@49` $\rightarrow$ `@50` + `func_summary.go` pure-`Load` `atomic.Pointer[T]`) moves cleanly to **Chunk D.1** alongside the test-hook culprit eliminations that consume it, keeping Chunk C.4 strictly scoped to closure/observability/assembly/parameter-closure.
+  2. **Chunk D.2 — Delete `VersionListing` Completely:**
+     - Added explicit **Chunk D.2** in `docs/plans/plan.md` (immediately after Chunk D.1, before the Chunk B.3 release) to replace the remaining two legacy `VersionListing`s (`AuditedSourceListing` in `internal/dynstate/typecarrier.go` and `auditedPropertyHarnessListing` in `internal/closure/propertyharness.go`) with structural source checks and delete `auditset.VersionListing` altogether.
+  3. **Standing Rule Persisted:** Created root `AGENTS.md` (always-active workspace rule without frontmatter) codifying compaction defense, frequent `docs/notes/` updates & commits, 5-repo ownership, `godst`/vanilla toolchain invariance, and the ban on third-party module/version allowlists.
