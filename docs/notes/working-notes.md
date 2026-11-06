@@ -145,3 +145,17 @@ All 6 hunks in `docs/specs/closure.md` belong to **(A)** (5 pure C.4 hunks + 1 `
   2. **Chunk D.2 — Delete `VersionListing` Completely:**
      - Added explicit **Chunk D.2** in `docs/plans/plan.md` (immediately after Chunk D.1, before the Chunk B.3 release) to replace the remaining two legacy `VersionListing`s (`AuditedSourceListing` in `internal/dynstate/typecarrier.go` and `auditedPropertyHarnessListing` in `internal/closure/propertyharness.go`) with structural source checks and delete `auditset.VersionListing` altogether.
   3. **Standing Rule Persisted:** Created root `AGENTS.md` (always-active workspace rule without frontmatter) codifying compaction defense, frequent `docs/notes/` updates & commits, 5-repo ownership, `godst`/vanilla toolchain invariance, and the ban on third-party module/version allowlists.
+
+---
+
+## 7. Chunk C.4 Implementation & Integration Catches (2026-11-06)
+
+1. **`observability.go:loadCachedFrom` Lazy `prog.FromPackages` Materialization:**
+   - Restored the `p.Prog == nil && len(p.Pkgs) > 0` `program.FromPackages(ctx, pkgPath, p.Pkgs)` branch in `loadCachedFrom` (`observability.go:102-112`) so white-box test frontends (`primeHasherFromDir`) materialize SSA on demand when `Program` was not pre-built.
+2. **Go 1.22+ `for i := range uint32(N)` Induction Loops in `phiBoundedLoopUpperBound` (`asmverify.go`):**
+   - Auditing all 47 `cpuid`/`cpuidex` call sites in `cpuid/v2@v2.4.0` confirmed 46 use constant leaves (with per-core leaves `0x01`, `0x0b`, `0x8000001e` masking out APIC ID bits everywhere except `LogicalCPU()`, which extracts `ebx >> 24` and is mechanically rejected) and 1 (`brandName()` at `cpuid.go:994`) uses `for i := range uint32(3)` (`0x80000002 + i`).
+   - `go/ssa/builder.go:rangeInt` lowers `for i := range uint32(N)` with the induction `*ssa.Phi` in `rangeint.body` rather than `rangeint.loop`, where `predStep` computes `incr = phi + 1` and ends in `if incr < N` branching back to `rangeint.body`. Extended `phiBoundedLoopUpperBound` (`asmverify.go`) to recognize both classic header-phi loops and `rangeInt` body-phi loops (requiring `hi <= 0x7fffffff` to forbid signed/unsigned wraparound).
+3. **Blank `import _ "unsafe"` vs. `effectScanStrategy` (`maximal.go` & `effectmemo.go`):**
+   - Files using `//go:linkname` without naming `unsafe.Pointer` (such as `os_unsafe_linux_arm64.go` in `cpuid/v2`) write `import _ "unsafe"`. Because `"unsafe"` is a compiler pseudo-package with no runtime `init()` function and `//go:linkname` directives are classified independently, exempted `imp.alias == "_" && imp.pkgPath == "unsafe"` in `maximal.go` (retaining the block on `import . "unsafe"`) and bumped `effectScanStrategy` to `"gofresh/effect-scan@28"` (covering both this scan change and the `runtime.GOOS`/`GOARCH` & `strconv.ErrRange`/`ErrSyntax` additions in `internal/auditset`).
+4. **Mutable First-Party Verified `.s` + `.h` Packages vs. `hasCgoCallbackBlindspot` (`analyzer.go`):**
+   - `closure.go` hashes every file in a mutable assembly-bearing package directory (`p.Dir`) byte-for-byte into `MaximalClosure` (covering both `.s` and `.h`), while `analyzer.go:1599` previously checked `hasCgoCallbackBlindspot(idx.meta)` (which treats `len(HFiles) > 0` as potential native source) without excluding `a.verifiedPackageAssembly(idx.meta)`. Guarded `analyzer.go:1599` with `&& !a.verifiedPackageAssembly(idx.meta)` and populated `HFiles` in `frontend_harness_test.go` (`buildInMemorySSAFromFiles` and `primeHasherFromDir`).
