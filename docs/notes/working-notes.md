@@ -59,3 +59,42 @@ Inspection of `.stipulator/policy.textproto`, `.github/workflows/ci.yaml`, and `
    - Internalize evicted CLI/MCP/process helpers (`guidance`, `resident`, `toolversion`, `gotool` supervisor, and `gomutant` exemption-clause splitters) into `internal/` of `pew`, `stipulator`, and `gomutant` (Option 1A) + file tracked consolidation issues for Option 1B evaluation.
    - Fix `gomutant` Finding 3 (`REQ-result-hygiene` / `MergeWholeFindings` pruning deleted symbols on whole-package `--package` runs) AND `gomutant` `docs/issues/schema-single-function-compile-and-overlay-reuse.md` ($O(L)$ top-level mutant helper functions instead of 540k-line inline switch, shared `(dir, schemaKey)` overlay directory across `testPkg` oracles, runtime-input merge / `PWD` working-tree protection).
    - Verify with local `replace` directives first; push `gofresh` so CI/Release mints the release tag automatically, bump `go.mod` across `pew`, `stipulator`, and `gomutant`, retire completed plan/blueprints/issues, and verify all repositories clean and green.
+
+---
+
+## 5. Working-Tree Diff Audit Results (`73` Modified + `3` Untracked Files)
+
+### 5.1 Non-Core-C.4 Files Classification (`ffafc6d3`)
+
+1. **(A) Keep in Chunk C.4:**
+   - `session.go` (`const ObservationRTA = "gofresh/observation-rta@58"`, bumped from `@57`) & `verdict_algebra_test.go` golden check.
+   - `internal/closure/propertyharness.go` (`fp.prog = a.prog` in `localHarnessView()` so `freshParamAnalysis` sees `MutatedGlobals` / `errors.New` globals).
+   - `internal/closure/internal/program/program.go` (`AllFunctions`, `OrderedFunctions`, `MutatedGlobals`, `Summaries` fields on `program.Program`, replacing package-level `sync.Map`s).
+   - `composition_toctou_test.go` (`TestObservedReuseAcrossStartupZeroGlobalAndInterfaceCarriers`, L819–982).
+   - `docs/specs/closure.md` (all C.4 hunks; L446–454 `atomic.Pointer` belongs to **(B)**) + `.stipulator/bindings/{closure,fixture-preparation}.textproto` (excluding **(B)**/`(D)` test bindings).
+
+2. **(B) Keep for Chunk D.1 — Clean Package-Level Test-Hook / `SharedDynamicStateCause` Culprit Elimination:**
+   - `docs/specs/closure.md` L446–454 + `internal/dynstate/func_summary.go` (`audited &&` gate fix on `atomicPtrCandidates` + `len(storesInFunc[v]) == 0` pure-`Load` support on production compartments) + `internal/dynstate/dynstate_test.go`.
+   - `aaa_module_surface_test.go` L461–611 (`TestModulePackagesHaveNoSharedDynamicStateUnderPackageExecution` enforcing zero `SharedDynamicStateCause` culprits across all 18 packages' prod, in-package test, and external test compartments under `PackageExecution`).
+   - Root `gofresh` (`session.go`, `view.go`, `checking.go`, `frontend_harness_test.go`, `surface_test.go`, `unit_protocol_test.go`, `verdict_algebra_test.go`, `dynamicstate_scan_test.go`): `withViewTestHooks` / `withSessionTestHooks`, carrier-free `factMemo` replacing `sync.Map`, `t.Cleanup(RefreshFromEnv)` removing `os.Unsetenv` blocker.
+   - `internal/closure` (`closure.go`, `canonical.go`, `filememo.go`, `toolchain_loader.go`, `frontend_harness_test.go`): `withClosureTestHooks`, `Hasher` miss fields, carrier-free `syncMemo[V]` / `rawEnvelopeMemo[V]` replacing `sync.Map`, removing `sync.OnceValue` function-carrier globals in test harness.
+   - `internal/guard/machine_linux{,_test}.go`: `gatherFactsFrom(readSource)` replacing mutable `var readFactSource`.
+   - `internal/runtimeinput` (`hash.go`, `producer.go`, `testlog.go`, `bracket*_test.go`, `classification_test.go`, `manifest_algebra_test.go`, `producer_test.go`): `withRuntimeTestHooks` + removing `t.Chdir` package-wide blockers.
+   - `internal/testenv/frontend.go` & `goroot_test.go`: carrier-free `stdlibMetaCache` (`gcexportdata` bytes) + per-call `newLocalExportImporter()` replacing mutable `*packages.Package` / `types.Importer` globals (without the +450-line **(D)** `StdlibMaterializer` sprawl).
+   - `internal/trace/trace_test.go`: `t.Cleanup(RefreshFromEnv)` before `t.Setenv` removing `os.Unsetenv`.
+
+3. **(C) Keep for Chunk D.1 — Clean, High-Leverage, Low-Complexity Bugfixes & Optimizations:**
+   - `internal/gotool/gotool.go` (+17 lines): `parser.SkipObjectResolution` and conditional `parser.ParseComments` (only when file bytes contain `"go:"`, `"gofresh:"`, or `"protoc-gen-go"`).
+   - `internal/closure/internal/program/program.go` (+45 lines): bounded concurrent `ssaPackage.Build()` after `ssautil.AllPackages`, largest-package-first.
+   - `internal/closure/toolchain_contracts.go` (+26/-14 lines): inverted selector waitlists in `collectOffSurfaceStartupRuntimePulls`.
+   - `internal/closure/toolchain_audit_io.go` (+62/-53 lines): pre-indexed Rule 3 call-site table outside the fixed-point loop in `discoverOSInactiveState`.
+   - `internal/closure/toolchain_cpreprocessor.go` (+146/-30 lines): `bytes.Index` fix (eliminating quadratic slice-to-string heap copy per loop iteration) and zero-alloc fast paths.
+   - `internal/closure/toolchain_loader.go` (`stampEntries` via open-dir `f.Readdir(-1)` + `dirEntriesMatch`, +70 lines) + `TestDirEntriesMatch`.
+   - `internal/runtimeinput/producer{,_test}.go` (+14 lines: `EvalSymlinks` on testlog path & symlinked self binary under outer testlog) + `classification_test.go` / `inputs.textproto` fuzz binding.
+
+4. **(D) Discard / Evict — Speculative Cache & Test-Mutilation Sprawl from 20-Hour Loop:**
+   - **Evict `+1,665`-line `StdCache` / `HeadersOnly` custom `go/packages` replacement** (`program.go` L56–1913, `prepared_test.go`, `viewload.go`, `explain.go` header shortcut) and the **7 test-only `inMemory*` fields added onto production `closure.Hasher`**.
+   - **Evict cross-`XDG_CACHE_HOME` cache write-backs** in `toolchain_loader.go` (`toolchainListingByScopeMemo` / `toolchainDigestsByIntegrityMemo` that polluted empty `XDG_CACHE_HOME` dirs and broke hermeticity, requiring `isolateEmptyProofCache` workarounds).
+   - **Evict `TestMain` pre-seeding, `aaa_module_surface_test.go` test-relocation hack (L1–459), fuzz-seed deletions (`trace_witness_test.go`, `toolchainsource_hermetic_test.go`), and test-fixture weakenings** (stripping `"testing"` imports / merging distinct integration tests across `integration_view_test.go`, `integration_execution_test.go`, `internal/closure/integration_test.go`, `composition_toctou_test.go`).
+   - *Note on `rawmemo.go` + `view.go`'s `scanFactsDecodeMemo`:* duplicated in two packages in the dirty tree; evaluate under `mlock quiet` benchmarks in Chunk D.1 whether a single clean helper in `internal/cachefile` earns its keep or is unnecessary once policy core-starvation is fixed.
+
