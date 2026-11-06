@@ -159,3 +159,39 @@ All 6 hunks in `docs/specs/closure.md` belong to **(A)** (5 pure C.4 hunks + 1 `
    - Files using `//go:linkname` without naming `unsafe.Pointer` (such as `os_unsafe_linux_arm64.go` in `cpuid/v2`) write `import _ "unsafe"`. Because `"unsafe"` is a compiler pseudo-package with no runtime `init()` function and `//go:linkname` directives are classified independently, exempted `imp.alias == "_" && imp.pkgPath == "unsafe"` in `maximal.go` (retaining the block on `import . "unsafe"`) and bumped `effectScanStrategy` to `"gofresh/effect-scan@28"` (covering both this scan change and the `runtime.GOOS`/`GOARCH` & `strconv.ErrRange`/`ErrSyntax` additions in `internal/auditset`).
 4. **Mutable First-Party Verified `.s` + `.h` Packages vs. `hasCgoCallbackBlindspot` (`analyzer.go`):**
    - `closure.go` hashes every file in a mutable assembly-bearing package directory (`p.Dir`) byte-for-byte into `MaximalClosure` (covering both `.s` and `.h`), while `analyzer.go:1599` previously checked `hasCgoCallbackBlindspot(idx.meta)` (which treats `len(HFiles) > 0` as potential native source) without excluding `a.verifiedPackageAssembly(idx.meta)`. Guarded `analyzer.go:1599` with `&& !a.verifiedPackageAssembly(idx.meta)` and populated `HFiles` in `frontend_harness_test.go` (`buildInMemorySSAFromFiles` and `primeHasherFromDir`).
+
+
+---
+
+## 8. Chunk C.4 Adversarial Review Round 1 & Mutation Probe Dispositions (2026-11-07)
+
+### 8.1 `gomutant ephemeral` Probe Catches
+- **Probes 1–3 (`CPUID` APIC ID shift mask, `HWCap` `BasicKind` check, raw `BYTE` `RDTSCP` opcode):** All **KILLED** on first run.
+- **Probe 4 (`startupOnlyDecls` positive allowlist in `maximal.go`) & Probe 5 (`!poisoned[g]` user sentinel init#N guard in `freshpath.go`):** Initially **SURVIVED** because `startupunreached` used `os.Setenv` (already a `packageWideMaximalHazard`) and `sentinelmut` exercised whole-program RTA (`ReadSentinel()`) rather than caller-enumerated `FormatMutSentinel(err error)`. Tightened `startupwidenedshared` (`WidenedMutate` closed subject asserting `"package scan:"` refusal prefix) and added `FormatMutSentinel` in `audited_scan_test.go` — both Probes 4 and 5 **KILLED**.
+- **Probes 6–7 (`asmFlagsIncludeRODATA` disjoint `+` carry check and `addIdentityChoicesForOptionalMacros` branching):** Both **KILLED**.
+
+### 8.2 Adversarial Review Round 1 (`0ce01db8-18fe-441d-b38a-5ce88c2017de`) — 12 Findings (All `confirmed` / `introduced` / `fixed`)
+1. **Finding 1 [HIGH — Conditional `#define` / `#undef` & `st == line` drop in `asmverify.go`]:**
+   - Fixed by collecting conditional (`condDepth > 0`) and `#undef`'d macros (`collectOptionalNonStdAsmMacros`), appending identity choices (`cppMacroDef{body: m}`) in `addIdentityChoicesForOptionalMacros` so `stepCPPPass` branches both expanded and unexpanded forms, switching `parseSingleNonStdAsmFile` to `expandCPPStatesWithBudget` `terminals` (avoiding intermediate unexpanded macro states while retaining identity terminal branches), enforcing `choiceCur == nextBlock` across conditional macro choices, rejecting `#define`/`#undef` of reserved assembly directives/mnemonics/registers (`isReservedNonStdAsmMacroName`), enforcing `isValidAsmMnemonic(uop)` (rejecting unexpanded function-like macro invocations), and enforcing balanced `#if*`/`#endif` (`condDepth == 0` at EOF).
+2. **Finding 2-A & 2-B [HIGH — Bodyless `.s` targets in `testMainObservedEffects` / `directExternalEffects` / stdlib callbacks & `TEXT ·init(SB)`]:**
+   - Extracted `(*tier2Analyzer).scanBodylessNonStdFunction` (`analyzer.go`), invoked it in `testMainObservedEffects` and `directExternalEffects` (including dynamic targets called from skipped `idx.std` frames such as `sync.Once.Do`), and rejected `init` / `init·*` / `init.*` in `parseAsmGloblRODATA` and `parseAsmTextHeader`.
+3. **Finding 3 [HIGH — Token-splitting `asmFlagsIncludeRODATA` accepting `-`, carry `+`, `<<`]:**
+   - Replaced with strict fail-closed expression evaluation admitting only `|` and disjoint-bit `+` (`(acc&rhs) == 0`) over `RODATA` (`8`), `NOPTR` (`16`), `DUPOK` (`1`), and integer literals within `1|8|16`, requiring `(mask&8) != 0 && (mask&^(1|8|16)) == 0`.
+4. **Finding 4 [HIGH — `ComputeRootedFunctions` / `rootedProvenanceIncomplete` marking verified pure `.s` stubs incomplete]:**
+   - Added `isVerifiedPureRootedAsmStub(audited, prog, fn)` (`attribution.go`), populated `verifiedAsm` on `nonSSAGlobalHazardsSummary` (`observability.go`), and populated `OtherFiles` in `internal/testenv/frontend.go` (`parseAndTypecheckDAG`) so white-box and production packages match `go/packages`.
+5. **Finding 5 [MEDIUM — Non-deterministic single-entry `b.idxByTypes` map iteration for `typeScope`]:**
+   - Changed `verifiedPackageAssembly` (`asmverify.go`) and `nonSSAGlobalHazardsSummary` (`observability.go`) to collect all `typeScopes []*types.Package` matching `pkg.SourcePath()` / `pkg.ImportPath` / `pkg.Dir` and check all scopes in `parseAsmGloblRODATA` (failing closed if `len(pkg.GoFiles) > 0 && len(typeScopes) == 0`).
+6. **Finding 6 [MEDIUM — `deadZeroGlobalIfBodies` requiring `len(startupOnlyDecls) > 0` for `func init()`]:**
+   - Changed `isInitDecl` arm in `deadZeroGlobalIfBodies` (`maximal.go:792`) to `isStartupOnlyDecl = hasStartup`, and added `token.LOR` (`&&` conjunction) to `ifCondRequiresNonZeroGlobalWith` (`maximal.go:1017`).
+7. **Finding 7 [MEDIUM — ARM64 exclusive/LSE store & atomic RMW mnemonics in `isAsmReadModifyWriteMnemonic`]:**
+   - Added `STXR*`, `STLXR*`, `STXP*`, `STLXP*`, `CAS*`, `LDSMAX*`, `LDSMIN*`, `LDUMAX*`, `LDUMIN*`, `STADD*`, `STCLR*`, `STEOR*`, `STSET*`, `STSMAX*`, `STSMIN*`, `STUMAX*`, `STUMIN*` to `isAsmReadModifyWriteMnemonic`.
+8. **Finding 8-A & 8-B [LOW — Duplicate conflicting `//go:linkname`, `//go:linknamestd`, `/*go:linkname*/`, and freestanding linknames]:**
+   - Handled `go:linknamestd`, `/*go:linkname ...*/`, `"<conflict>"` sentinel on duplicate conflicting directives, and freestanding file-level `idx.linknameByName` lookup in `analyzer.go`, `asmverify.go`, and `observability.go`.
+9. **Finding 9 [LOW — Defined boolean types (`type customBool bool`) in `liveBlocks`]:**
+   - Added `isBooleanSSAType` (checking underlying `types.IsBoolean`) AND boolean `*ssa.ChangeType` / `*ssa.Convert` propagation (`unwrapBoolSSAConv`, `valOf`, and `switch x := instr.(type)`) in `liveBlocks` (`observability.go`).
+10. **Finding 10 [LOW — Spec wording in `REQ-closure-shared-dynamic-state-init-flow`]:**
+    - Clarified `docs/specs/closure.md` (`REQ-closure-shared-dynamic-state-init-flow`) to distinguish cgo and unverified assembly packages (downgraded whole) from mechanically verified assembly, and re-pinned `.stipulator/bindings/closure.textproto`.
+11. **Finding 11 [LOW — Shared `Summaries` / `MutatedGlobals` map race in `loadRegisteredInMemoryFixture`]:**
+    - Zeroed `cloned.Summaries = nil` and `cloned.MutatedGlobals = nil` in `loadRegisteredInMemoryFixture` (`frontend_harness_test.go`).
+12. **Finding 12 [NIT — Regression tests for Round-1 edge cases]:**
+    - Added subcases covering all Round-1 findings in `TestVerifyNonStdAssemblyMechanicalInvariants` and `TestObservabilityStartupPruningAssemblyAndOpenWorldClosures` (`audited_scan_test.go`).
