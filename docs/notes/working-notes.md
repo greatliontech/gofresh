@@ -3,7 +3,8 @@
 ## 1. User Alignment & Session Rules (2026-11-06)
 
 - **Selected Recovery Path (Option 1):** Audit and split the uncommitted `+14,235 / -6,052` working tree (`73` modified files + `3` untracked) back into disciplined, commit-sized chunks rather than converging the entangled C.4 + D.1 blob in place.
-- **Full 5-Repo Ownership:** Full authority and ownership over both specs and code across the 5 repositories in this stack (`gofresh`, `stipulator`, `gomutant`, `pew`, and `godst` / `go-x-tools`), updating, deleting, or adding specs, policies, and code as needed from first principles.
+- **Full 5-Repo Ownership:** Full authority and ownership over both specs and code across the **5 repositories**: `go-x-tools`, `gofresh`, `gomutant`, `stipulator`, and `pew` (`godst` is explicitly outside repository scope).
+- **Toolchain Invariance Requirement:** All 5 repositories must work identically under both `godst` (custom Go builds, e.g. `go1.27.2-dst.15`) and vanilla / system-installed Go toolchains — never hardcoding assumptions to one flavor or version string.
 - **Compaction Defense:** Persist and commit findings, hypotheses, audit results, review dispositions, and user decisions frequently in `docs/notes/working-notes.md` so zero reasoning is lost across context compactions.
 - **Lossless Working-Tree Checkpoint:** Full patch (`working-tree.patch`) and byte-for-byte file tree saved at `/home/nikolas/.gemini/antigravity-cli/brain/50b146c5-9ee0-44e7-8117-b53693375665/scratch/wt-checkpoint-20261106/`.
 
