@@ -8,11 +8,68 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
 func isASCIIIdentByte(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_'
+}
+
+// scanIdentToken scans an identifier starting at s[pos]. When asmIdentMode is
+// false, standard C/ASCII identifier rules apply ([A-Za-z_][A-Za-z0-9_]*).
+// When asmIdentMode is true, cmd/asm's tokenizer rules apply
+// (cmd/asm/internal/lex/tokenizer.go:isIdentRune), treating UTF-8 middle-dot
+// '·' (U+00B7), division-slash '∕' (U+2215), and Unicode letters/digits as
+// part of a single identifier token so #define Evil Safe never rewrites ·Evil.
+func scanIdentToken(s string, pos int, asmIdentMode bool) (int, bool) {
+	if pos >= len(s) {
+		return pos, false
+	}
+	if !asmIdentMode {
+		if !isASCIIIdentByte(s[pos]) || (s[pos] >= '0' && s[pos] <= '9') {
+			return pos, false
+		}
+		end := pos + 1
+		for end < len(s) && isASCIIIdentByte(s[end]) {
+			end++
+		}
+		return end, true
+	}
+	w, ok := nextAsmIdentRune(s, pos, true)
+	if !ok {
+		return pos, false
+	}
+	end := pos + w
+	for end < len(s) {
+		nw, nok := nextAsmIdentRune(s, end, false)
+		if !nok {
+			break
+		}
+		end += nw
+	}
+	return end, true
+}
+
+func nextAsmIdentRune(s string, pos int, first bool) (int, bool) {
+	if pos >= len(s) {
+		return 0, false
+	}
+	b := s[pos]
+	if b < 0x80 {
+		if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '_' || (!first && b >= '0' && b <= '9') {
+			return 1, true
+		}
+		return 0, false
+	}
+	r, width := utf8.DecodeRuneInString(s[pos:])
+	if r == utf8.RuneError && width == 1 {
+		return 0, false
+	}
+	if r == '\u00B7' || r == '\u2215' || unicode.IsLetter(r) || (!first && unicode.IsDigit(r)) {
+		return width, true
+	}
+	return 0, false
 }
 
 func collectAllASCIIIdents(raw []byte, out map[string]bool) {
@@ -549,6 +606,10 @@ func isPasteAdjacentInBody(body string, start, end int) bool {
 }
 
 func macroNormalParams(def cppMacroDef) map[string]bool {
+	return macroNormalParamsMode(def, false)
+}
+
+func macroNormalParamsMode(def cppMacroDef, asmIdentMode bool) map[string]bool {
 	normal := map[string]bool{}
 	body := def.body
 	for i := 0; i < len(body); {
@@ -573,19 +634,14 @@ func macroNormalParams(def cppMacroDef) map[string]bool {
 			for k < len(body) && (body[k] == ' ' || body[k] == '\t') {
 				k++
 			}
-			if k < len(body) && isASCIIIdentByte(body[k]) && (body[k] < '0' || body[k] > '9') {
-				for k < len(body) && isASCIIIdentByte(body[k]) {
-					k++
-				}
-				i = k
+			if end, ok := scanIdentToken(body, k, asmIdentMode); ok {
+				i = end
 				continue
 			}
 		}
-		if isASCIIIdentByte(body[i]) && (body[i] < '0' || body[i] > '9') {
+		if end, ok := scanIdentToken(body, i, asmIdentMode); ok {
 			start := i
-			for i < len(body) && isASCIIIdentByte(body[i]) {
-				i++
-			}
+			i = end
 			if !isPasteAdjacentInBody(body, start, i) {
 				normal[body[start:i]] = true
 			}
@@ -597,6 +653,10 @@ func macroNormalParams(def cppMacroDef) map[string]bool {
 }
 
 func bodyMacroRefs(def cppMacroDef, defs map[string][]cppMacroDef) []string {
+	return bodyMacroRefsMode(def, defs, false)
+}
+
+func bodyMacroRefsMode(def cppMacroDef, defs map[string][]cppMacroDef, asmIdentMode bool) []string {
 	paramSet := make(map[string]bool, len(def.params)+2)
 	for _, p := range def.params {
 		paramSet[p] = true
@@ -626,12 +686,9 @@ func bodyMacroRefs(def cppMacroDef, defs map[string][]cppMacroDef) []string {
 				}
 				continue
 			}
-			if isASCIIIdentByte(scanBody[i]) && (scanBody[i] < '0' || scanBody[i] > '9') {
-				start := i
-				for i < len(scanBody) && isASCIIIdentByte(scanBody[i]) {
-					i++
-				}
-				tok := scanBody[start:i]
+			if end, ok := scanIdentToken(scanBody, i, asmIdentMode); ok {
+				tok := scanBody[i:end]
+				i = end
 				if !paramSet[tok] && len(defs[tok]) > 0 && !slices.Contains(refs, tok) {
 					refs = append(refs, tok)
 				}
@@ -644,7 +701,11 @@ func bodyMacroRefs(def cppMacroDef, defs map[string][]cppMacroDef) []string {
 }
 
 func defReachesMacro(target string, startDef cppMacroDef, defs map[string][]cppMacroDef) bool {
-	queue := bodyMacroRefs(startDef, defs)
+	return defReachesMacroMode(target, startDef, defs, false)
+}
+
+func defReachesMacroMode(target string, startDef cppMacroDef, defs map[string][]cppMacroDef, asmIdentMode bool) bool {
+	queue := bodyMacroRefsMode(startDef, defs, asmIdentMode)
 	visited := map[string]bool{}
 	for len(queue) > 0 {
 		m := queue[0]
@@ -657,7 +718,7 @@ func defReachesMacro(target string, startDef cppMacroDef, defs map[string][]cppM
 		}
 		visited[m] = true
 		for _, d := range defs[m] {
-			for _, next := range bodyMacroRefs(d, defs) {
+			for _, next := range bodyMacroRefsMode(d, defs, asmIdentMode) {
 				if next == target {
 					return true
 				}
@@ -671,6 +732,10 @@ func defReachesMacro(target string, startDef cppMacroDef, defs map[string][]cppM
 }
 
 func substituteCPPMacroBody(def cppMacroDef, rawArgs, expArgs []string) string {
+	return substituteCPPMacroBodyMode(def, rawArgs, expArgs, false)
+}
+
+func substituteCPPMacroBodyMode(def cppMacroDef, rawArgs, expArgs []string, asmIdentMode bool) string {
 	if !def.hasParams {
 		return collapseTokenPasteOps(def.body)
 	}
@@ -732,11 +797,7 @@ func substituteCPPMacroBody(def cppMacroDef, rawArgs, expArgs []string) string {
 			for k < len(body) && (body[k] == ' ' || body[k] == '\t') {
 				k++
 			}
-			if k < len(body) && isASCIIIdentByte(body[k]) && (body[k] < '0' || body[k] > '9') {
-				mEnd := k
-				for mEnd < len(body) && isASCIIIdentByte(body[mEnd]) {
-					mEnd++
-				}
+			if mEnd, ok := scanIdentToken(body, k, asmIdentMode); ok {
 				if rep, ok := rawMap[body[k:mEnd]]; ok {
 					b.WriteString(cppStringizeArg(rep))
 					i = mEnd
@@ -744,11 +805,9 @@ func substituteCPPMacroBody(def cppMacroDef, rawArgs, expArgs []string) string {
 				}
 			}
 		}
-		if isASCIIIdentByte(body[i]) && (body[i] < '0' || body[i] > '9') {
+		if end, ok := scanIdentToken(body, i, asmIdentMode); ok {
 			start := i
-			for i < len(body) && isASCIIIdentByte(body[i]) {
-				i++
-			}
+			i = end
 			tok := body[start:i]
 			if rawRep, ok := rawMap[tok]; ok {
 				if isPasteAdjacentInBody(body, start, i) {
@@ -768,6 +827,10 @@ func substituteCPPMacroBody(def cppMacroDef, rawArgs, expArgs []string) string {
 }
 
 func stepCPPPass(cur cppWorkItem, defs map[string][]cppMacroDef, budget *cppExpandBudget) ([]cppWorkItem, bool) {
+	return stepCPPPassMode(cur, defs, budget, false)
+}
+
+func stepCPPPassMode(cur cppWorkItem, defs map[string][]cppMacroDef, budget *cppExpandBudget, asmIdentMode bool) ([]cppWorkItem, bool) {
 	s := cur.text
 	var prefix strings.Builder
 	expandedAny := false
@@ -804,11 +867,9 @@ func stepCPPPass(cur cppWorkItem, defs map[string][]cppMacroDef, budget *cppExpa
 			}
 			continue
 		}
-		if isASCIIIdentByte(s[i]) && (s[i] < '0' || s[i] > '9') {
+		if end, ok := scanIdentToken(s, i, asmIdentMode); ok {
 			start := i
-			for i < len(s) && isASCIIIdentByte(s[i]) {
-				i++
-			}
+			i = end
 			tok := s[start:i]
 			dList := defs[tok]
 			hasMultiDefs := len(dList) > 1
@@ -839,7 +900,7 @@ func stepCPPPass(cur cppWorkItem, defs map[string][]cppMacroDef, budget *cppExpa
 					choices = append(choices, candChoice{
 						rep:        collapseTokenPasteOps(d.body),
 						nextEnd:    i,
-						addBlock:   defReachesMacro(tok, d, defs),
+						addBlock:   defReachesMacroMode(tok, d, defs, asmIdentMode),
 						bindChoice: hasMultiDefs,
 						choiceIdx:  dIdx,
 					})
@@ -849,7 +910,7 @@ func stepCPPPass(cur cppWorkItem, defs map[string][]cppMacroDef, budget *cppExpa
 					hasNonApplicableFuncDef = true
 					continue
 				}
-				normal := macroNormalParams(d)
+				normal := macroNormalParamsMode(d, asmIdentMode)
 				argChoices := make([][]string, len(rawArgs))
 				for k, rawArg := range rawArgs {
 					isNormal := false
@@ -863,7 +924,7 @@ func stepCPPPass(cur cppWorkItem, defs map[string][]cppMacroDef, budget *cppExpa
 							budget.overflow = true
 							return nil, false
 						}
-						_, terms := expandCPPStatesWithBudget(rawArg, defs, cur.blocked, cur.chosen, cur.depth+1, budget)
+						_, terms := expandCPPStatesWithBudgetMode(rawArg, defs, cur.blocked, cur.chosen, cur.depth+1, budget, asmIdentMode)
 						if budget.overflow {
 							return nil, false
 						}
@@ -889,10 +950,10 @@ func stepCPPPass(cur cppWorkItem, defs map[string][]cppMacroDef, budget *cppExpa
 					}
 					tuples = nextTuples
 				}
-				addBlk := defReachesMacro(tok, d, defs)
+				addBlk := defReachesMacroMode(tok, d, defs, asmIdentMode)
 				for _, expArgs := range tuples {
 					choices = append(choices, candChoice{
-						rep:        substituteCPPMacroBody(d, rawArgs, expArgs),
+						rep:        substituteCPPMacroBodyMode(d, rawArgs, expArgs, asmIdentMode),
 						nextEnd:    afterClose,
 						addBlock:   addBlk,
 						bindChoice: hasMultiDefs,
@@ -984,6 +1045,14 @@ func stepCPPPass(cur cppWorkItem, defs map[string][]cppMacroDef, budget *cppExpa
 }
 
 func expandCPPStatesWithBudget(line string, defs map[string][]cppMacroDef, blocked, chosen string, startDepth int, budget *cppExpandBudget) (allStates []string, terminals []string) {
+	return expandCPPStatesWithBudgetMode(line, defs, blocked, chosen, startDepth, budget, false)
+}
+
+func expandAsmCPPStatesWithBudget(line string, defs map[string][]cppMacroDef, blocked, chosen string, startDepth int, budget *cppExpandBudget) (allStates []string, terminals []string) {
+	return expandCPPStatesWithBudgetMode(line, defs, blocked, chosen, startDepth, budget, true)
+}
+
+func expandCPPStatesWithBudgetMode(line string, defs map[string][]cppMacroDef, blocked, chosen string, startDepth int, budget *cppExpandBudget, asmIdentMode bool) (allStates []string, terminals []string) {
 	if len(line) > maxNonGoLogicalLineBytes {
 		budget.overflow = true
 		return nil, nil
@@ -1001,7 +1070,7 @@ func expandCPPStatesWithBudget(line string, defs map[string][]cppMacroDef, block
 			allSet[cur.text] = true
 			allStates = append(allStates, cur.text)
 		}
-		children, expanded := stepCPPPass(cur, defs, budget)
+		children, expanded := stepCPPPassMode(cur, defs, budget, asmIdentMode)
 		if budget.overflow {
 			return nil, nil
 		}
@@ -1334,6 +1403,14 @@ func unquotedParenBalance(s string) int {
 }
 
 func trailingFuncMacroIdent(s string, defs map[string][]cppMacroDef) bool {
+	return trailingFuncMacroIdentMode(s, defs, false)
+}
+
+func trailingAsmFuncMacroIdent(s string, defs map[string][]cppMacroDef) bool {
+	return trailingFuncMacroIdentMode(s, defs, true)
+}
+
+func trailingFuncMacroIdentMode(s string, defs map[string][]cppMacroDef, asmIdentMode bool) bool {
 	if len(defs) == 0 {
 		return false
 	}
@@ -1347,6 +1424,12 @@ func trailingFuncMacroIdent(s string, defs map[string][]cppMacroDef) bool {
 	}
 	if start == end || (s[start] >= '0' && s[start] <= '9') {
 		return false
+	}
+	if asmIdentMode && start > 0 {
+		r, _ := utf8.DecodeLastRuneInString(s[:start])
+		if r == '\u00B7' || r == '\u2215' || unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return false
+		}
 	}
 	for _, d := range defs[s[start:end]] {
 		if d.hasParams {

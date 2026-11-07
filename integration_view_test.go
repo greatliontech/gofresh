@@ -8428,34 +8428,65 @@ func TestBenchmarkIterationCountIsHarnessPacing(t *testing.T) {
 	}
 }
 
-// Non-standard assembly is opaque to the observation proof: the package is
-// never scanned — even a body of resolved instructions refuses — so
-// runtime-dependent instructions can never slip through unaudited.
+// Impure or unverified non-standard assembly blocks the observation proof:
+// a leaf body executing a hardware counter (`RDTSC`) refuses with the symbol's
+// decoded native effect on supported ISAs (or the conservative non-toolchain
+// assembly floor elsewhere), while a non-leaf `CALL`-bearing `.s` file widens
+// and refuses naming the non-toolchain assembly.
 func TestNonStandardAssemblyBlocksObservationProof(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	dir := writeViewModule(t, "package view\n\nfunc F()\n")
-	assembly := "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRDTSC\n\tRET\n"
-	if err := os.WriteFile(filepath.Join(dir, "view.s"), []byte(assembly), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	engine, err := newEngine(withDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	view, err := engine.newView(context.Background(), []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fingerprint, err := view.captureObserved(context.Background(), subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fingerprint.ObservationProof.Observable || !strings.Contains(fingerprint.ObservationProof.Reason, "non-toolchain assembly") {
-		t.Fatalf("non-standard assembly proof = %+v, want refused naming the non-toolchain assembly", fingerprint.ObservationProof)
-	}
+	t.Run("impure-leaf", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\nfunc F()\n")
+		assembly := "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRDTSC\n\tRET\n"
+		if err := os.WriteFile(filepath.Join(dir, "view.s"), []byte(assembly), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		engine, err := newEngine(withDir(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		subject := Subject{Package: "example.com/view", Symbol: "F"}
+		view, err := engine.newView(context.Background(), []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.captureObserved(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantSubstr := "non-toolchain assembly"
+		if runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64" {
+			wantSubstr = "reaches example.com/view.F (hardware counter, entropy, or system assembly instruction)"
+		}
+		if fingerprint.ObservationProof.Observable || !strings.Contains(fingerprint.ObservationProof.Reason, wantSubstr) {
+			t.Fatalf("impure leaf assembly proof = %+v, want refused containing %q", fingerprint.ObservationProof, wantSubstr)
+		}
+	})
+	t.Run("unverified-call", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\nfunc Helper()\nfunc F()\n")
+		assembly := "#include \"textflag.h\"\nTEXT ·Helper(SB), NOSPLIT, $0-0\n\tRET\nTEXT ·F(SB), NOSPLIT, $0-0\n\tCALL ·Helper(SB)\n\tRET\n"
+		if err := os.WriteFile(filepath.Join(dir, "view.s"), []byte(assembly), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		engine, err := newEngine(withDir(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		subject := Subject{Package: "example.com/view", Symbol: "F"}
+		view, err := engine.newView(context.Background(), []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.captureObserved(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fingerprint.ObservationProof.Observable || !strings.Contains(fingerprint.ObservationProof.Reason, "non-toolchain assembly") {
+			t.Fatalf("unverified call assembly proof = %+v, want refused naming the non-toolchain assembly", fingerprint.ObservationProof)
+		}
+	})
 }
 
 // An opaque system object is permanently unauditable: the subject

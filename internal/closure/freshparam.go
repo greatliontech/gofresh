@@ -27,6 +27,7 @@ import (
 // set, and audit configuration shared across all subject queries on one SSA
 // program.
 type ssaProgramIndex struct {
+	prog                   *program
 	summary                *callerReferenceSummary
 	userPaths              map[string]bool
 	structFieldStores      map[structFieldKey][]ssa.Value
@@ -74,6 +75,7 @@ type subjectQuery struct {
 	enumFieldStores           map[int][]ssa.Value
 	enumOnly                  bool
 	enumRecvNamed             *types.Named
+	baseCarrierNamed          *types.Named
 	enumStructVisiting        map[*types.Named]bool
 	ignoreContextValuePayload bool
 	subjectRoot               *ssa.Function
@@ -273,8 +275,13 @@ type freshParamKey struct {
 }
 
 func newBitOnlyFreshParamAnalysis(propertyHarnessAudited, selectionAudited bool, pureDelegates map[string]bool, userPaths map[string]bool, summary *callerReferenceSummary, isStd func(*ssa.Function) bool) *freshParamAnalysis {
+	var p *program
+	if summary != nil {
+		p = summary.prog
+	}
 	return &freshParamAnalysis{
 		ssaProgramIndex: ssaProgramIndex{
+			prog:                   p,
 			propertyHarnessAudited: propertyHarnessAudited,
 			selectionAudited:       selectionAudited,
 			pureDelegates:          pureDelegates,
@@ -288,6 +295,7 @@ func newBitOnlyFreshParamAnalysis(propertyHarnessAudited, selectionAudited bool,
 func newEnumFreshParamAnalysis(audited bool, pureDelegates map[string]bool, userPaths map[string]bool, root *ssa.Function, sites []ssa.CallInstruction, summary *callerReferenceSummary) *freshParamAnalysis {
 	return &freshParamAnalysis{
 		ssaProgramIndex: ssaProgramIndex{
+			prog:                   summary.prog,
 			selectionAudited:       audited,
 			pureDelegates:          pureDelegates,
 			summary:                summary,
@@ -353,9 +361,10 @@ func (fp *freshParamAnalysis) withProgramSites(done map[ssa.Value]bool) (*freshP
 		return nil, done
 	}
 	outFP := fp
-	if !fp.inProgramSites || len(fp.callBindings) > 0 {
+	if !fp.inProgramSites || fp.inFieldStore || len(fp.callBindings) > 0 {
 		copied := *fp
 		copied.inProgramSites = true
+		copied.inFieldStore = false
 		copied.callBindings = nil
 		copied.calleeSeen = nil
 		copied.calleeDepth = nil
@@ -368,12 +377,9 @@ func (fp *freshParamAnalysis) withProgramSites(done map[ssa.Value]bool) (*freshP
 	return outFP, outDone
 }
 
-func (fp *freshParamAnalysis) newStructStoreWalkFP(inProgramSites, inFieldStore bool, visiting map[*types.Named]bool, lowlink *int, hasLeaf, usedSubject *bool) *freshParamAnalysis {
+func (fp *freshParamAnalysis) newStructVisitingScopeFP(visiting map[*types.Named]bool) *freshParamAnalysis {
 	sub := *fp
-	sub.calleeFrame = calleeFrame{
-		inProgramSites: inProgramSites,
-		inFieldStore:   inFieldStore,
-	}
+	sub.baseCarrierNamed = nil
 	sub.enumStructVisiting = visiting
 	sub.closedDone = map[ssa.Value]bool{}
 	sub.typesMemo = map[ssa.Value][]types.Type{}
@@ -382,6 +388,26 @@ func (fp *freshParamAnalysis) newStructStoreWalkFP(inProgramSites, inFieldStore 
 	sub.funcsFailed = map[ssa.Value]bool{}
 	sub.invokeTargets = map[ssa.CallInstruction]map[*ssa.Function]bool{}
 	sub.invokeFailed = map[ssa.CallInstruction]bool{}
+	return &sub
+}
+
+func (fp *freshParamAnalysis) newStructStoreWalkFP(inProgramSites, inFieldStore bool, visiting map[*types.Named]bool, lowlink *int, hasLeaf, usedSubject *bool) *freshParamAnalysis {
+	sub := *fp
+	sub.calleeFrame = calleeFrame{
+		inProgramSites: inProgramSites,
+		inFieldStore:   inFieldStore,
+	}
+	sub.baseCarrierNamed = nil
+	sub.enumStructVisiting = visiting
+	if sub.closedDone == nil {
+		sub.closedDone = map[ssa.Value]bool{}
+		sub.typesMemo = map[ssa.Value][]types.Type{}
+		sub.typesFailed = map[ssa.Value]bool{}
+		sub.funcsMemo = map[ssa.Value][]*ssa.Function{}
+		sub.funcsFailed = map[ssa.Value]bool{}
+		sub.invokeTargets = map[ssa.CallInstruction]map[*ssa.Function]bool{}
+		sub.invokeFailed = map[ssa.CallInstruction]bool{}
+	}
 	sub.walkFrame = walkFrame{
 		stackDepth:      map[ssa.Value]int{},
 		lowlink:         lowlink,
@@ -398,6 +424,7 @@ func (fp *freshParamAnalysis) newStructStoreWalkFP(inProgramSites, inFieldStore 
 func newFreshParamAnalysis(audited bool, pureDelegates map[string]bool, reach attributedReachability, isStd func(*ssa.Function) bool) *freshParamAnalysis {
 	fp := &freshParamAnalysis{
 		ssaProgramIndex: ssaProgramIndex{
+			prog:                   reach.prog,
 			selectionAudited:       audited,
 			pureDelegates:          pureDelegates,
 			summary:                reach.summary,

@@ -327,11 +327,44 @@ proven, it widens. At the file-scan floor, a two-argument pull-form
 Dropping the opaque-linkage effect requires a checked derivation that resolves
 the selected target and accounts for every claim-relevant effect through it;
 all other effect classifications remain. This obligation applies equally to
-`runtime.getAuxv`, `runtime.vgetrandom`, `syscall.prlimit`, and any other target.
+`runtime.getAuxv`, `runtime.vgetrandom`, `syscall.prlimit`, `internal/cpu.HWCap`
+(admitted at the Tier-2 observability refinement while retaining the conservative
+file-scan floor when bound via a type-matched `uint` two-argument pull-form
+scalar package-variable directive, provided the bound variable and every
+non-standard peer bound to the same target in the program carry no initializer,
+no stores, and no address escapes across syntax and SSA and reside in packages
+free of external cgo, non-header native source, and unverified assembly), and
+any other target.
 A one-argument form, unparsable directive or unsupported target retains the
 opaque floor. An assembly-bearing mutable-local package contributes its whole
 directory to the hash, and reached non-toolchain assembly widens the subject
-and blocks its observability proof. Selected toolchain assembly participates
+and blocks its observability proof unless the selection targets `amd64` or
+`arm64`, the owning package has no external cgo
+or non-header native source, and each reached `TEXT` entrypoint (or every `TEXT`
+entrypoint in the package when the subject scan is widened) passes mechanical
+source verification across the package's `.s` and `.h` files under the selected
+architecture's ISA rules: 3-operand `RODATA`-only
+`GLOBL` definitions, zero stores or cross-package references to `(SB)` globals
+(with intra-package `(SB)` references restricted to verified `RODATA` `GLOBL`s),
+zero `TLS`, segment/system-register, or goroutine-register accesses (including
+entry `R14` reads before a full-width overwrite on `amd64`), leaf-only `ABI0`
+control flow with operandless `RET` and branches restricted to local labels or
+branch-target PC-relative offsets on plain
+non-method function stubs with carrier-free and `uintptr`-free Go signatures,
+and architecture-partitioned instruction/opcode classification admitting pure
+register/stack/memory-argument computation and static CPU-feature queries
+(`amd64` canonical straight-line `CPUID` leaf wrappers loading a `uint32` leaf
+and zero or `uint32` subleaf into `(AX, CX)` and storing unmodified
+`(AX, BX, CX, DX)` into four `uint32` results when call-site leaf values are
+statically bounded and leaf-1 `EBX[31:24]`, leaf-`0x0b`/`0x1f`/`0x80000026` `EDX`,
+and leaf-`0x8000001e` per-core APIC/unit topology fields are unused or masked out,
+`amd64` `XGETBV`, `arm64` static feature/ID `MRS`/`MOVD` system-register reads and
+SVE vector-length `WORD` encodings, and Darwin commpage capability bits) under
+the CPU-feature guard split while classifying direct `CPUID` subject roots,
+non-canonical or unmasked `CPUID` uses, hardware counters, RNGs, syscalls, traps,
+transactional or control/system-register operations, per-core APIC ID reads, and
+unrecognized raw opcode emissions as opaque native effects.
+Selected toolchain assembly participates
 in implementation dependence identity; hashing it is not a semantic proof.
 Any claim reaching an unsupported opaque leaf refuses under
 REQ-closure-observability-toolchain-key, including a leaf behind an otherwise analyzed trampoline.
@@ -1197,9 +1230,10 @@ declares — fail-closed like every malformed-fact arm. A qualified in-package
 helper's stores stay audited for object-closure exactly as an `init` body's
 are. Function bodies nested in package-level declarations,
 in `init` bodies, or in qualified helpers are program code, not initialization;
-non-Go writes need no rule here — packages built with cgo or
+non-Go writes need no rule here — packages built with cgo or unverified
 assembly sources are already downgraded whole by the native-code and linkage
-blind-spot dispositions. The toolchain-generated test-main package's registration
+blind-spot dispositions, while mechanically verified assembly is barred from
+referencing Go variables or accepting dynamic-carrier types. The toolchain-generated test-main package's registration
 tables may be excluded from this mutation judgment only under a checked
 scaffolding claim that they introduce no relevant mutation or dispatch channel
 beyond the declared harness model. Their implementation dependencies remain
@@ -1273,7 +1307,12 @@ dispatches concretely, initializer roots included so a concrete type registered 
 when the subject never names the registering package, the test main rooted for a test
 subject so setup it runs before the subject (state a production subject never sees)
 is in the closure; a narrower root or edge set is taken only when proven to preserve
-the same startup and global-flow coverage. The runtime-type walk skips any
+the same startup and global-flow coverage (specifically, dead conditional branches
+and short-circuit `&&`/`||` merges guarded by compile-time boolean constants or by
+non-zero checks of non-escaped, non-linknamed, cgo- and unverified-assembly-free
+zero-valued package globals proven unmutated across synchronous startup flow — or
+across the whole analyzed program for asynchronous or callback startup frames —
+are pruned from startup reachability and effect attribution). The runtime-type walk skips any
 type mentioning a type parameter wholesale: such a type denotes no
 runtime type — only fully concrete instantiations exist at runtime, and
 they enter the walk through their own instantiation and interface sites
@@ -1309,7 +1348,11 @@ open subject world. A non-generic function subject whose ordinary
 signature carries dynamic reach closes the same way a bounded generic
 does — by enumeration, never by signature shape alone (a
 receiver-bearing subject on a first-party named struct closes only when
-its non-receiver parameters supply no dynamic reach and either its
+its non-receiver parameters supply no dynamic reach — parameters whose body uses
+are confined to carrier-free operations such as `==`/`!=` equality comparisons
+supply none, and an audited cancellation-only `context.Context` parameter whose
+body uses are confined to `Done`/`Err` supplies none when every caller across
+the analyzed program passes a closed timerless `context.Context` — and either its
 receiver supplies no dynamic reach or every dynamic-reaching field it
 loads is populated exclusively by closed stores across the whole
 analyzed program with no unjudged whole-struct or reflective write; any
@@ -1317,9 +1360,11 @@ other receiver-bearing subject keeps its signature-shaped open world, as
 a method's interface invocability leaves no reference the scan can see):
 it analyzes closed
 exactly when every reference to it in the whole analyzed program is a
-direct static call from a body the enumeration can judge and, at every
+direct static call from a body the enumeration can judge (concrete generic
+instantiations included; uninstantiated parameterized origins excluded) and, at every
 such site, each argument in
-a dynamic-reaching position closes in the calling function's own frame
+a dynamic-reaching position whose parameter supplies dynamic reach in the body
+closes in the calling function's own frame
 (locally constructed values under the closed-value walk with no
 cross-boundary crossing — the caller's parameters, loads, and call
 results refuse, except a load from a closed cell: a local allocation whose
@@ -1503,7 +1548,9 @@ and top-level `var` declarations) and explicit package-wide process or memory
 hazards (`unsafe` operations other than `unsafe.Pointer`, `os.Exit` outside
 `TestMain`, and process-environment or working-directory mutations such as
 `Setenv`, `Unsetenv`, `Clearenv`, `Chdir`, and `Fchdir` on `testing`, `os`,
-`syscall`, or `golang.org/x/sys/`) blocking across the whole package — and
+`syscall`, or `golang.org/x/sys/`) blocking across the whole package (excluding
+`if` bodies inside synchronous-startup-only declarations guarded by non-zero
+checks of verified unmutated zero-valued package globals) — and
 narrow the unsafe reference class out of the package-scan backstop's blocking
 set: an in-scope `unsafe.Pointer` reference is diagnostic only, because the
 subject walk prices every attributed unsafe-typed value and a subject world the
@@ -1579,8 +1626,9 @@ The following families state the properties such derivations must establish:
   `io.MultiReader` / `io.MultiWriter` over closed operands,
   `crypto/fips140.WithoutEnforcement` (which sets a goroutine-local bypass flag
   around a caller-supplied callback whose body is walked and classified at the
-  call site), and `crypto/fips140.Enforced` (which reads the immutable
-  startup-resolved FIPS enforcement bit) must establish computation over
+  call site), `crypto/fips140.Enforced` (which reads the immutable
+  startup-resolved FIPS enforcement bit), and `runtime.GOOS` and
+  `runtime.GOARCH` compile-time platform constants must establish computation over
   supplied data and guarded build/runtime configuration alone; io-interface
   wrappers retain the effects of their concrete operands, and exported encoding
   variables require state analysis.
@@ -1603,10 +1651,14 @@ The following families state the properties such derivations must establish:
   `fs.ErrClosed`, `fs.SkipAll`, `fs.SkipDir`, `os.ErrInvalid`,
   `os.ErrPermission`, `os.ErrExist`, `os.ErrNotExist`, `os.ErrClosed`,
   `os.ErrNoDeadline`, `os.ErrDeadlineExceeded`, `filepath.SkipAll`,
-  `filepath.SkipDir`, `binary.BigEndian`, `binary.LittleEndian`,
-  `context.Canceled`, `context.DeadlineExceeded`)
-  admitted only when no code in the analyzed program writes or takes their
-  address outside package initialization.
+  `filepath.SkipDir`, `strconv.ErrRange`, `strconv.ErrSyntax`,
+  `binary.BigEndian`, `binary.LittleEndian`, `context.Canceled`, and
+  `context.DeadlineExceeded` admitted only when no code in the analyzed program
+  writes or takes their address outside package initialization, plus non-standard
+  `error` package variables in cgo-, unverified-assembly-, and linkname-free
+  packages admitted only when initialized by a single static `errors.New` store
+  in synthetic package variable initialization with no other writes — `func
+  init()` bodies included — or address-taking across the analyzed program).
 
 **REQ-closure-observability-entropy** (invariant): Entropy operations, including crypto/rand's Read, Text, Prime and Int and
 unseeded math/rand sources, MUST retain their input classification unless a checked

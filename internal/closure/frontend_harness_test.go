@@ -136,6 +136,7 @@ func buildInMemorySSAFromFiles(ctx context.Context, virtualDir, pkgMain string, 
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	prog.GOARCH = runtime.GOARCH
 
 	mod := &listMod{
 		Path: "example.com",
@@ -174,7 +175,7 @@ func buildInMemorySSAFromFiles(ctx context.Context, virtualDir, pkgMain string, 
 		}
 		slices.Sort(availableRaw)
 
-		var allGo, baseGo, testOnlyGo, sFiles, sysoFiles, baseEmbed, allEmbed []string
+		var allGo, baseGo, testOnlyGo, hFiles, sFiles, sysoFiles, baseEmbed, allEmbed []string
 		for _, full := range p.CompiledGoFiles {
 			base := filepath.Base(full)
 			allGo = append(allGo, base)
@@ -186,6 +187,8 @@ func buildInMemorySSAFromFiles(ctx context.Context, virtualDir, pkgMain string, 
 		}
 		for _, name := range availableRaw {
 			switch {
+			case strings.HasSuffix(name, ".h"):
+				hFiles = append(hFiles, name)
 			case strings.HasSuffix(name, ".s"):
 				sFiles = append(sFiles, name)
 			case strings.HasSuffix(name, ".syso"):
@@ -252,6 +255,7 @@ func buildInMemorySSAFromFiles(ctx context.Context, virtualDir, pkgMain string, 
 			Name:       p.Name,
 			Dir:        pkgDir,
 			GoFiles:    baseGo,
+			HFiles:     hFiles,
 			SFiles:     sFiles,
 			SysoFiles:  sysoFiles,
 			EmbedFiles: baseEmbed,
@@ -264,6 +268,7 @@ func buildInMemorySSAFromFiles(ctx context.Context, virtualDir, pkgMain string, 
 				Name:       p.Name,
 				Dir:        pkgDir,
 				GoFiles:    allGo,
+				HFiles:     hFiles,
 				SFiles:     sFiles,
 				SysoFiles:  sysoFiles,
 				EmbedFiles: allEmbed,
@@ -332,6 +337,10 @@ func loadRegisteredInMemoryFixture(ctx context.Context, pkgPath string) (*progpk
 	if cached, found := registeredFixtureCache[pkgPath]; found {
 		cloned := *cached.prog
 		cloned.PkgScopeProbe = nil
+		cloned.Summaries = nil
+		cloned.MutatedGlobals = nil
+		cloned.GOARCH = runtime.GOARCH
+		cloned.ReadSource = nil
 		return &cloned, cached.metas, true, nil
 	}
 	prog, metas, _, err := buildInMemorySSAFromFiles(ctx, "", pkgPath, filesByPkg)
@@ -341,6 +350,10 @@ func loadRegisteredInMemoryFixture(ctx context.Context, pkgPath string) (*progpk
 	registeredFixtureCache[pkgPath] = cachedRegisteredFixture{prog: prog, metas: metas}
 	cloned := *prog
 	cloned.PkgScopeProbe = nil
+	cloned.Summaries = nil
+	cloned.MutatedGlobals = nil
+	cloned.GOARCH = runtime.GOARCH
+	cloned.ReadSource = nil
 	return &cloned, metas, true, nil
 }
 
@@ -370,6 +383,7 @@ type scannedDirPkg struct {
 	baseGo         []string
 	testGo         []string
 	xtestGo        []string
+	hFiles         []string
 	sFiles         []string
 	sysoFiles      []string
 	baseEmbed      []string
@@ -531,6 +545,10 @@ func primeHasherFromDir(t testing.TB, h *Hasher, dir string) {
 			}
 			name := e.Name()
 			switch {
+			case strings.HasSuffix(name, ".h"):
+				if ok, _ := bctx.MatchFile(pkgDir, name); ok {
+					sp.hFiles = append(sp.hFiles, name)
+				}
 			case strings.HasSuffix(name, ".s"):
 				if ok, _ := bctx.MatchFile(pkgDir, name); ok {
 					sp.sFiles = append(sp.sFiles, name)
@@ -599,6 +617,7 @@ func primeHasherFromDir(t testing.TB, h *Hasher, dir string) {
 		sp.baseGo = uniqueSortedStrings(sp.baseGo)
 		sp.testGo = uniqueSortedStrings(sp.testGo)
 		sp.xtestGo = uniqueSortedStrings(sp.xtestGo)
+		sp.hFiles = uniqueSortedStrings(sp.hFiles)
 		sp.sFiles = uniqueSortedStrings(sp.sFiles)
 		sp.sysoFiles = uniqueSortedStrings(sp.sysoFiles)
 		sp.baseEmbed = uniqueSortedStrings(sp.baseEmbed)
@@ -687,8 +706,11 @@ func primeHasherFromDir(t testing.TB, h *Hasher, dir string) {
 			addStdImports(sp.baseImports)
 			if p != targetPkg {
 				// Dependency node: only production files are compiled.
-				prodMap := make(map[string]string, len(sp.baseGo)+len(sp.sFiles)+len(sp.sysoFiles))
+				prodMap := make(map[string]string, len(sp.baseGo)+len(sp.hFiles)+len(sp.sFiles)+len(sp.sysoFiles))
 				for _, f := range sp.baseGo {
+					prodMap[f] = sp.allFilesInDir[f]
+				}
+				for _, f := range sp.hFiles {
 					prodMap[f] = sp.allFilesInDir[f]
 				}
 				for _, f := range sp.sFiles {
@@ -703,6 +725,7 @@ func primeHasherFromDir(t testing.TB, h *Hasher, dir string) {
 					Name:       sp.pkgName,
 					Dir:        sp.pkgDir,
 					GoFiles:    sp.baseGo,
+					HFiles:     sp.hFiles,
 					SFiles:     sp.sFiles,
 					SysoFiles:  sp.sysoFiles,
 					EmbedFiles: sp.baseEmbed,
@@ -713,7 +736,7 @@ func primeHasherFromDir(t testing.TB, h *Hasher, dir string) {
 			}
 			addStdImports(sp.testImports)
 			addStdImports(sp.xtestImports)
-			matchedMap := make(map[string]string, len(sp.baseGo)+len(sp.testGo)+len(sp.xtestGo)+len(sp.sFiles)+len(sp.sysoFiles))
+			matchedMap := make(map[string]string, len(sp.baseGo)+len(sp.testGo)+len(sp.xtestGo)+len(sp.hFiles)+len(sp.sFiles)+len(sp.sysoFiles))
 			for _, f := range sp.baseGo {
 				matchedMap[f] = sp.allFilesInDir[f]
 			}
@@ -721,6 +744,9 @@ func primeHasherFromDir(t testing.TB, h *Hasher, dir string) {
 				matchedMap[f] = sp.allFilesInDir[f]
 			}
 			for _, f := range sp.xtestGo {
+				matchedMap[f] = sp.allFilesInDir[f]
+			}
+			for _, f := range sp.hFiles {
 				matchedMap[f] = sp.allFilesInDir[f]
 			}
 			for _, f := range sp.sFiles {
@@ -735,6 +761,7 @@ func primeHasherFromDir(t testing.TB, h *Hasher, dir string) {
 				Name:       sp.pkgName,
 				Dir:        sp.pkgDir,
 				GoFiles:    sp.baseGo,
+				HFiles:     sp.hFiles,
 				SFiles:     sp.sFiles,
 				SysoFiles:  sp.sysoFiles,
 				EmbedFiles: sp.baseEmbed,
@@ -747,6 +774,7 @@ func primeHasherFromDir(t testing.TB, h *Hasher, dir string) {
 					Name:       sp.pkgName,
 					Dir:        sp.pkgDir,
 					GoFiles:    uniqueSortedStrings(append(append([]string(nil), sp.baseGo...), sp.testGo...)),
+					HFiles:     sp.hFiles,
 					SFiles:     sp.sFiles,
 					SysoFiles:  sp.sysoFiles,
 					EmbedFiles: uniqueSortedStrings(append(append([]string(nil), sp.baseEmbed...), sp.testEmbed...)),
@@ -1218,8 +1246,6 @@ func (f *fixturePrograms) acquire(pkgPath string) error {
 
 func (f *fixturePrograms) releaseProgram() {
 	if f.loaded != nil {
-		evictSummaryCache(f.loaded.Prog)
-		evictMutatedGlobalsCache(f.loaded.Prog)
 		delete(f.h.progs, f.loaded.PkgPath)
 		if _, ok := inMemoryFixtureRegistry[f.loaded.PkgPath]; ok {
 			delete(f.h.lists, f.loaded.PkgPath)

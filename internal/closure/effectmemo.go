@@ -62,7 +62,12 @@ import (
 // because the fold is a refusal-only backstop consulted after the
 // walks — a shadow adds false resolutions and removes none of the
 // file's real ones, so no proof the walks refuse is ever granted.
-const effectScanStrategy = "gofresh/effect-scan@27"
+// @28 admits runtime.GOOS, runtime.GOARCH, strconv.ErrRange, and
+// strconv.ErrSyntax into the audited symbol set and exempts blank
+// `import _ "unsafe"` (a compiler pseudo-package with no init function,
+// whose //go:linkname directives are classified independently; dot-imports
+// remain blocked).
+const effectScanStrategy = "gofresh/effect-scan@28"
 
 // effectScanScope is the memo's full scope: the strategy version, the
 // analyzing frontend, complete selected source and admission policy. A Boolean

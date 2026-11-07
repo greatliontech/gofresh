@@ -454,6 +454,30 @@ func (h *Hasher) viewLoadVariants(pkgPath string) []*packages.Package {
 	return variants
 }
 
+func (h *Hasher) tier2PackageExternalEffects(base *tier2Base, pkg *listPkg, subjectFiltered bool) maximalEffectScan {
+	scan := maximalPackageExternalEffects(pkg)
+	if base != nil {
+		asmAdmitted := false
+		if subjectFiltered {
+			_, asmAdmitted = base.verifiedPackageAssembly(pkg)
+		} else {
+			asmAdmitted = base.verifiedPackageAssemblyMaximalPure(pkg)
+		}
+		if asmAdmitted {
+			filtered := scan.effects[:0]
+			for _, e := range scan.effects {
+				if e.detail == "reaches non-standard assembly" || e.detail == "reaches cgo or native source" {
+					continue
+				}
+				filtered = append(filtered, e)
+			}
+			scan.effects = filtered
+			scan.preferred = preferredEffectReason(scan.effects)
+		}
+	}
+	return scan
+}
+
 func maximalPackageExternalEffects(pkg *listPkg) maximalEffectScan {
 	var scan maximalEffectScan
 	if hasExternalCgoMeta(pkg) {
@@ -513,9 +537,13 @@ func maximalFileEffectsContentWithNamesFiltered(audited bool, filename string, c
 }
 
 func maximalFileEffectsContentWithContextFiltered(audited bool, filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool, reachedDecls map[funcDeclKey]bool) (maximalEffectScan, error) {
+	return maximalFileEffectsContentWithZeroGlobals(audited, filename, content, declaredNames, nonStdPaths, reachedDecls, nil, "", nil, nil, nil, nil)
+}
+
+func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, filePkgPath string, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed, verifiedLinknameLocals map[string]bool) (maximalEffectScan, error) {
 	text := string(content)
 	hasWasmImport := strings.Contains(text, "//go:wasmimport")
-	hasLinkname := strings.Contains(text, "//go:linkname") && !auditedLinknamesOnly(audited, text)
+	hasLinkname := strings.Contains(text, "//go:linkname") && !auditedLinknamesWithLocals(audited, text, verifiedLinknameLocals)
 	// The walks read identifiers by name and imports from file.Imports;
 	// object resolution is unused, so skipping it saves its allocations.
 	file, err := parser.ParseFile(token.NewFileSet(), filename, content, parser.SkipObjectResolution)
@@ -612,10 +640,14 @@ func maximalFileEffectsContentWithContextFiltered(audited bool, filename string,
 		if imp.alias == "." && packageHasClassifiedExternalAPI(imp.pkgPath) && potentialExternal == "" {
 			potentialExternal = imp.pkgPath
 		}
-		if potentialExternal == "" && isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(audited, imp.pkgPath) {
+		if potentialExternal == "" && !(imp.alias == "_" && imp.pkgPath == "unsafe") && isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(audited, imp.pkgPath) {
 			potentialExternal = imp.pkgPath
 		}
-		if imp.alias == "." || imp.alias == "_" {
+		// Blank-importing the compiler pseudo-package "unsafe" (required for
+		// //go:linkname directives, which are classified independently above)
+		// executes no package init and introduces no unqualified identifiers;
+		// dot-importing "unsafe" remains blocked.
+		if imp.alias == "." || (imp.alias == "_" && imp.pkgPath != "unsafe") {
 			if isAlwaysExternalPackage(imp.pkgPath) {
 				scan.add(trueExternalEffect(imp.pkgPath))
 			} else if packageHasClassifiedExternalAPI(imp.pkgPath) || isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(audited, imp.pkgPath) {
@@ -654,14 +686,26 @@ func maximalFileEffectsContentWithContextFiltered(audited bool, filename string,
 		}
 		return false
 	}
+	deadInBinaryBody, deadForSubjectBody := deadZeroGlobalIfBodies(file, filepath.Dir(filename), pkgClause, filePkgPath, testMainDecl, startupOnlyDecls, startupZeroGlobalDecls, wholeZeroGlobalDecls, declaredNames, pkgScopeShadowed)
+	inDeadForSubjectBody := func(node ast.Node) bool {
+		for blk := range deadForSubjectBody {
+			if node.Pos() >= blk.Pos() && node.End() <= blk.End() {
+				return true
+			}
+		}
+		return false
+	}
 	addSelEffect := func(sel *ast.SelectorExpr, effect externalEffect) {
-		if inUnreachedDecl(sel) && !packageWideMaximalHazard(effect) {
+		if (inUnreachedDecl(sel) || inDeadForSubjectBody(sel)) && !packageWideMaximalHazard(effect) {
 			return
 		}
 		scan.add(effect)
 	}
 	allowedTimeUnixChained := map[*ast.SelectorExpr]bool{}
 	ast.Inspect(file, func(node ast.Node) bool {
+		if blk, ok := node.(*ast.BlockStmt); ok && deadInBinaryBody[blk] {
+			return false
+		}
 		if audited {
 			if outerCall, ok := node.(*ast.CallExpr); ok {
 				if innerSel := chainedTimeUnixSelector(outerCall, stdAliases, reachedDecls != nil); innerSel != nil {
@@ -697,7 +741,17 @@ func maximalFileEffectsContentWithContextFiltered(audited bool, filename string,
 		}
 		return true
 	})
-	for _, effect := range testingMethodEffectsFiltered(file, stdAliases, unreachedDecls) {
+	var testingSkipped map[*ast.BlockStmt]bool
+	if len(deadInBinaryBody) > 0 || len(deadForSubjectBody) > 0 {
+		testingSkipped = make(map[*ast.BlockStmt]bool, len(deadInBinaryBody)+len(deadForSubjectBody))
+		for blk := range deadInBinaryBody {
+			testingSkipped[blk] = true
+		}
+		for blk := range deadForSubjectBody {
+			testingSkipped[blk] = true
+		}
+	}
+	for _, effect := range testingMethodEffectsFilteredWithSkipped(file, stdAliases, unreachedDecls, testingSkipped) {
 		scan.add(effect)
 	}
 	scan.preferred = preferredEffectReason(append(append([]externalEffect(nil), scan.effects...), scan.importCandidates...))
@@ -705,6 +759,270 @@ func maximalFileEffectsContentWithContextFiltered(audited bool, filename string,
 		scan.preferred = "reaches " + potentialExternal + " (potential external dependence)"
 	}
 	return scan, nil
+}
+
+func hasPkgZeroGlobals(zeroGlobalDecls map[pkgVarKey]bool, pkgPath string) bool {
+	if len(zeroGlobalDecls) == 0 || pkgPath == "" {
+		return false
+	}
+	for k := range zeroGlobalDecls {
+		if k.pkgPath == pkgPath {
+			return true
+		}
+	}
+	return false
+}
+
+func deadZeroGlobalIfBodies(file *ast.File, dir, pkgClause, pkgPath string, testMainDecl *ast.FuncDecl, startupOnlyDecls map[funcDeclKey]bool, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, declaredNames map[string]string, pkgScopeShadowed map[string]bool) (deadInBinary, deadForSubject map[*ast.BlockStmt]bool) {
+	hasStartup := hasPkgZeroGlobals(startupZeroGlobalDecls, pkgPath)
+	hasWhole := hasPkgZeroGlobals(wholeZeroGlobalDecls, pkgPath)
+	if file == nil || pkgPath == "" || (!hasStartup && !hasWhole) {
+		return nil, nil
+	}
+	dir = filepath.Clean(dir)
+	importNames := fileImportNames(file, declaredNames)
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil || fn == testMainDecl || (fn.Name != nil && fn.Name.Name == "TestMain") {
+			continue
+		}
+		isInitDecl := fn.Recv == nil && fn.Name != nil && fn.Name.Name == "init"
+		isStartupOnlyDecl := false
+		if isInitDecl {
+			isStartupOnlyDecl = hasStartup
+		} else if key, ok := funcDeclKeyForAST(dir, pkgClause, fn); ok && startupOnlyDecls[key] {
+			isStartupOnlyDecl = true
+		}
+		if !hasWhole && !isStartupOnlyDecl {
+			continue
+		}
+		shadowed := mergeShadowedNames(pkgScopeShadowed, importNames, funcLocalDeclaredNames(fn))
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if _, isFuncLit := n.(*ast.FuncLit); isFuncLit {
+				return false
+			}
+			ifStmt, ok := n.(*ast.IfStmt)
+			if !ok || ifStmt.Init != nil || ifStmt.Body == nil {
+				return true
+			}
+			if (hasWhole && ifCondRequiresNonZeroGlobal(ifStmt.Cond, pkgPath, shadowed, wholeZeroGlobalDecls)) ||
+				(isInitDecl && isStartupOnlyDecl && hasStartup && ifCondRequiresNonZeroGlobal(ifStmt.Cond, pkgPath, shadowed, startupZeroGlobalDecls)) {
+				if deadInBinary == nil {
+					deadInBinary = make(map[*ast.BlockStmt]bool)
+				}
+				deadInBinary[ifStmt.Body] = true
+			} else if isStartupOnlyDecl && hasStartup && ifCondRequiresNonZeroGlobal(ifStmt.Cond, pkgPath, shadowed, startupZeroGlobalDecls) {
+				if deadForSubject == nil {
+					deadForSubject = make(map[*ast.BlockStmt]bool)
+				}
+				deadForSubject[ifStmt.Body] = true
+			}
+			return true
+		})
+	}
+	return deadInBinary, deadForSubject
+}
+
+func fileImportNames(file *ast.File, declaredNames map[string]string) map[string]bool {
+	if file == nil || len(file.Imports) == 0 {
+		return nil
+	}
+	var out map[string]bool
+	for _, spec := range file.Imports {
+		if spec == nil {
+			continue
+		}
+		name := ""
+		if spec.Name != nil {
+			name = spec.Name.Name
+		} else if spec.Path != nil {
+			if pkgPath, err := strconv.Unquote(spec.Path.Value); err == nil {
+				if declared := declaredNames[pkgPath]; declared != "" {
+					name = declared
+				} else {
+					name = implicitImportName(pkgPath)
+				}
+			}
+		}
+		if name != "" && name != "_" && name != "." {
+			if out == nil {
+				out = make(map[string]bool, len(file.Imports))
+			}
+			out[name] = true
+		}
+	}
+	return out
+}
+
+func mergeShadowedNames(maps ...map[string]bool) map[string]bool {
+	total := 0
+	for _, m := range maps {
+		total += len(m)
+	}
+	if total == 0 {
+		return nil
+	}
+	out := make(map[string]bool, total)
+	for _, m := range maps {
+		for k, v := range m {
+			if v {
+				out[k] = true
+			}
+		}
+	}
+	return out
+}
+
+func funcLocalDeclaredNames(fn *ast.FuncDecl) map[string]bool {
+	var names map[string]bool
+	add := func(ident *ast.Ident) {
+		if ident == nil || ident.Name == "" || ident.Name == "_" {
+			return
+		}
+		if names == nil {
+			names = make(map[string]bool)
+		}
+		names[ident.Name] = true
+	}
+	addFieldList := func(fl *ast.FieldList) {
+		if fl == nil {
+			return
+		}
+		for _, f := range fl.List {
+			for _, id := range f.Names {
+				add(id)
+			}
+		}
+	}
+	addFieldList(fn.Recv)
+	if fn.Type != nil {
+		addFieldList(fn.Type.TypeParams)
+		addFieldList(fn.Type.Params)
+		addFieldList(fn.Type.Results)
+	}
+	if fn.Body != nil {
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.ValueSpec:
+				for _, id := range x.Names {
+					add(id)
+				}
+			case *ast.TypeSpec:
+				add(x.Name)
+			case *ast.AssignStmt:
+				if x.Tok == token.DEFINE {
+					for _, lhs := range x.Lhs {
+						if id, ok := lhs.(*ast.Ident); ok {
+							add(id)
+						}
+					}
+				}
+			case *ast.RangeStmt:
+				if x.Tok == token.DEFINE {
+					if id, ok := x.Key.(*ast.Ident); ok {
+						add(id)
+					}
+					if id, ok := x.Value.(*ast.Ident); ok {
+						add(id)
+					}
+				}
+			case *ast.FuncLit:
+				if x.Type != nil {
+					addFieldList(x.Type.TypeParams)
+					addFieldList(x.Type.Params)
+					addFieldList(x.Type.Results)
+				}
+			}
+			return true
+		})
+	}
+	return names
+}
+
+func ifCondRequiresNonZeroGlobal(expr ast.Expr, pkgPath string, shadowed map[string]bool, zeroGlobalDecls map[pkgVarKey]bool) bool {
+	if expr == nil || pkgPath == "" || len(zeroGlobalDecls) == 0 {
+		return false
+	}
+	return ifCondRequiresNonZeroGlobalWith(
+		expr,
+		func(id *ast.Ident) bool {
+			return id != nil && (id.Name == "nil" || id.Name == "false") && !shadowed[id.Name]
+		},
+		func(id *ast.Ident) bool {
+			if id == nil || id.Name == "" || shadowed[id.Name] {
+				return false
+			}
+			return zeroGlobalDecls[pkgVarKey{pkgPath: pkgPath, name: id.Name}]
+		},
+	)
+}
+
+func ifCondRequiresNonZeroGlobalTyped(expr ast.Expr, info *types.Info, zeroGlobalDecls map[pkgVarKey]bool) bool {
+	if expr == nil || info == nil || len(zeroGlobalDecls) == 0 {
+		return false
+	}
+	return ifCondRequiresNonZeroGlobalWith(
+		expr,
+		func(id *ast.Ident) bool {
+			if id == nil || (id.Name != "nil" && id.Name != "false") {
+				return false
+			}
+			u := types.Universe.Lookup(id.Name)
+			return u != nil && info.Uses[id] == u
+		},
+		func(id *ast.Ident) bool {
+			if id == nil || id.Name == "" {
+				return false
+			}
+			v, ok := info.Uses[id].(*types.Var)
+			if !ok || v == nil || v.IsField() || v.Pkg() == nil || v.Parent() != v.Pkg().Scope() {
+				return false
+			}
+			return zeroGlobalDecls[pkgVarKey{pkgPath: v.Pkg().Path(), name: v.Name()}]
+		},
+	)
+}
+
+func ifCondRequiresNonZeroGlobalWith(expr ast.Expr, isUniverseZeroIdent, isZeroGlobalIdent func(*ast.Ident) bool) bool {
+	isZeroIdentExpr := func(e ast.Expr) bool {
+		id, ok := unwrapASTParen(e).(*ast.Ident)
+		return ok && isZeroGlobalIdent(id)
+	}
+	isZeroLiteralExpr := func(e ast.Expr) bool {
+		switch x := unwrapASTParen(e).(type) {
+		case *ast.Ident:
+			return isUniverseZeroIdent != nil && isUniverseZeroIdent(x)
+		case *ast.BasicLit:
+			switch x.Kind {
+			case token.INT, token.FLOAT, token.IMAG:
+				v, err := strconv.ParseFloat(x.Value, 64)
+				return err == nil && v == 0
+			case token.STRING:
+				s, err := strconv.Unquote(x.Value)
+				return err == nil && s == ""
+			}
+		}
+		return false
+	}
+	switch x := unwrapASTParen(expr).(type) {
+	case *ast.Ident:
+		return isZeroIdentExpr(x)
+	case *ast.StarExpr:
+		return isZeroIdentExpr(x.X)
+	case *ast.BinaryExpr:
+		switch x.Op {
+		case token.LAND:
+			return ifCondRequiresNonZeroGlobalWith(x.X, isUniverseZeroIdent, isZeroGlobalIdent) ||
+				ifCondRequiresNonZeroGlobalWith(x.Y, isUniverseZeroIdent, isZeroGlobalIdent)
+		case token.LOR:
+			return ifCondRequiresNonZeroGlobalWith(x.X, isUniverseZeroIdent, isZeroGlobalIdent) &&
+				ifCondRequiresNonZeroGlobalWith(x.Y, isUniverseZeroIdent, isZeroGlobalIdent)
+		case token.NEQ:
+			return (isZeroIdentExpr(x.X) && isZeroLiteralExpr(x.Y)) ||
+				(isZeroIdentExpr(x.Y) && isZeroLiteralExpr(x.X))
+		}
+	}
+	return false
 }
 
 func unwrapASTParen(expr ast.Expr) ast.Expr {
@@ -782,6 +1100,31 @@ func chainedTimeUnixSelector(outerCall *ast.CallExpr, aliases map[string]string,
 // and package-wide process-state hazards for a closed-world Tier-2 subject
 // (REQ-closure-observability-unsafe).
 func (h *Hasher) subjectMaximalExternalEffects(base *tier2Base, pkgPath string, reachedDecls map[funcDeclKey]bool) ([]externalEffect, error) {
+	return h.subjectMaximalExternalEffectsWithZeroGlobals(base, pkgPath, reachedDecls, nil, nil, nil)
+}
+
+func pkgScopeShadowedUniverseZeroNames(base *tier2Base, pkgPath string) map[string]bool {
+	if base == nil || pkgPath == "" {
+		return nil
+	}
+	var out map[string]bool
+	for tp, idx := range base.idxByTypes {
+		if tp == nil || idx == nil || idx.path != pkgPath || tp.Scope() == nil {
+			continue
+		}
+		for _, kw := range []string{"nil", "false"} {
+			if tp.Scope().Lookup(kw) != nil {
+				if out == nil {
+					out = make(map[string]bool, 2)
+				}
+				out[kw] = true
+			}
+		}
+	}
+	return out
+}
+
+func (h *Hasher) subjectMaximalExternalEffectsWithZeroGlobals(base *tier2Base, pkgPath string, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool) ([]externalEffect, error) {
 	pkgs, err := h.list(pkgPath)
 	if err != nil {
 		return nil, err
@@ -813,13 +1156,17 @@ func (h *Hasher) subjectMaximalExternalEffects(base *tier2Base, pkgPath string, 
 			record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact()}})
 			continue
 		}
+		srcPath := pkg.SourcePath()
+		pkgHasZeroGlobals := hasPkgZeroGlobals(startupZeroGlobalDecls, srcPath) || hasPkgZeroGlobals(wholeZeroGlobalDecls, srcPath)
 		if scan, ok, err := h.pinnedEffectScanWithContext(pkg, declaredNames, nonStdPaths, overridesKey); err != nil {
 			return nil, err
-		} else if ok && !hasFilterableMaximalBlocker(h.SelectionAudited(), scan.effects) {
+		} else if ok && !hasFilterableMaximalBlocker(h.SelectionAudited(), scan.effects) && !(pkgHasZeroGlobals && hasAnyMaximalBlocker(h.SelectionAudited(), scan.effects)) {
 			record(scan)
 			continue
 		}
-		record(maximalPackageExternalEffects(&pkg))
+		record(h.tier2PackageExternalEffects(base, &pkg, reachedDecls != nil))
+		pkgScopeShadowed := pkgScopeShadowedUniverseZeroNames(base, srcPath)
+		verifiedLinknameLocals := base.verifiedReadOnlyLinknameLocals(srcPath)
 		files := append(append([]string(nil), pkg.GoFiles...), pkg.CgoFiles...)
 		for _, name := range files {
 			if err := h.contextErr(); err != nil {
@@ -830,7 +1177,7 @@ func (h *Hasher) subjectMaximalExternalEffects(base *tier2Base, pkgPath string, 
 			if err != nil {
 				return nil, err
 			}
-			if !hasFilterableMaximalBlocker(h.SelectionAudited(), unfiltered.effects) {
+			if !hasFilterableMaximalBlocker(h.SelectionAudited(), unfiltered.effects) && !(pkgHasZeroGlobals && hasAnyMaximalBlocker(h.SelectionAudited(), unfiltered.effects)) {
 				record(unfiltered)
 				continue
 			}
@@ -845,7 +1192,7 @@ func (h *Hasher) subjectMaximalExternalEffects(base *tier2Base, pkgPath string, 
 			if err != nil {
 				return nil, err
 			}
-			scan, err := maximalFileEffectsContentWithContextFiltered(h.SelectionAudited(), fullPath, content, declaredNames, nonStdPaths, reachedDecls)
+			scan, err := maximalFileEffectsContentWithZeroGlobals(h.SelectionAudited(), fullPath, content, declaredNames, nonStdPaths, reachedDecls, startupOnlyDecls, srcPath, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals)
 			if err != nil {
 				return nil, err
 			}
@@ -980,6 +1327,10 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 
 // testingMethodEffectsFiltered returns the file's testing-runtime effects.
 func testingMethodEffectsFiltered(file *ast.File, aliases map[string]string, unreachedDecls []ast.Node) []externalEffect {
+	return testingMethodEffectsFilteredWithSkipped(file, aliases, unreachedDecls, nil)
+}
+
+func testingMethodEffectsFilteredWithSkipped(file *ast.File, aliases map[string]string, unreachedDecls []ast.Node, skippedBody map[*ast.BlockStmt]bool) []externalEffect {
 	if file == nil {
 		return nil
 	}
@@ -1014,6 +1365,9 @@ func testingMethodEffectsFiltered(file *ast.File, aliases map[string]string, unr
 		type propagation struct{ from, to string }
 		var edges []propagation
 		ast.Inspect(function.Body, func(node ast.Node) bool {
+			if blk, ok := node.(*ast.BlockStmt); ok && skippedBody[blk] {
+				return false
+			}
 			if specification, ok := node.(*ast.ValueSpec); ok {
 				for i, value := range specification.Values {
 					if name, ok := identifierName(value); ok && i < len(specification.Names) {
@@ -1061,6 +1415,9 @@ func testingMethodEffectsFiltered(file *ast.File, aliases map[string]string, unr
 		})
 		escape := opaqueExternalEffect(externalEffectTestRuntime, "testing runtime value escapes analyzable receiver")
 		ast.Inspect(function.Body, func(node ast.Node) bool {
+			if blk, ok := node.(*ast.BlockStmt); ok && skippedBody[blk] {
+				return false
+			}
 			switch node := node.(type) {
 			case *ast.AssignStmt:
 				for i, rhs := range node.Rhs {
@@ -1277,20 +1634,11 @@ var auditedLinknameTargets = map[string]bool{
 	"syscall.prlimit":    true,
 }
 
-// auditedLinknamesOnly reports whether every //go:linkname and
-// //go:linknamestd directive in the file is the two-argument pull form
-// naming an audited target: any one-argument form (an export marker
-// whose counterpart lives in assembly or another package), any
-// unparsable directive, and any unaudited target keeps the
-// opaque-linkage floor, fail-closed. The two spellings share one
-// grammar and one policy (go1.27's std-sanctioned variant changes who
-// may declare the link, not what it links); the directive name is
-// matched as a whole field, never as a prefix — a prefix match would
-// read "//go:linknamestd target" as a two-argument "//go:linkname"
-// pull with local name "std", letting a one-argument export marker
-// whose bare name collides with an audited target impersonate an
-// audited pull, the fail-open direction.
 func auditedLinknamesOnly(audited bool, text string) bool {
+	return auditedLinknamesWithLocals(audited, text, nil)
+}
+
+func auditedLinknamesWithLocals(audited bool, text string, verifiedLocals map[string]bool) bool {
 	rest := text
 	for {
 		i := strings.Index(rest, "//go:linkname")
@@ -1323,7 +1671,11 @@ func auditedLinknamesOnly(audited bool, text string) bool {
 			return false
 		}
 		fields := strings.Fields(line)
-		if len(fields) != 3 || !auditedLinknameTargets[fields[2]] {
+		if len(fields) != 3 {
+			return false
+		}
+		_, isROVarTarget := auditedReadOnlyVarLinknameTargets[fields[2]]
+		if !auditedLinknameTargets[fields[2]] && !(len(verifiedLocals) > 0 && verifiedLocals[fields[1]] && isROVarTarget) {
 			return false
 		}
 	}

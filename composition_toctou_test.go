@@ -794,3 +794,165 @@ func TestReadFixture(t *testing.T) {
 		}
 	})
 }
+
+func TestObservedReuseAcrossStartupZeroGlobalAndInterfaceCarriers(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	write := func(rel, content string) {
+		t.Helper()
+		full := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("go.mod", "module example.com/obsreuse\n\ngo 1.26\n")
+	write("object/object.go", `package object
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"strconv"
+)
+
+var displayFeats *bool
+
+func init() {
+	if displayFeats != nil && *displayFeats {
+		fmt.Println("features")
+		os.Exit(1)
+	}
+}
+
+var ErrCancelled = errors.New("cancelled")
+
+type CancelledError struct {
+	Op string
+}
+
+func (e *CancelledError) Error() string {
+	return "cancelled: " + e.Op
+}
+
+func (e *CancelledError) Is(target error) bool {
+	return target == ErrCancelled || target == strconv.ErrRange
+}
+
+func AsciiLowerByte(b byte) byte {
+	if b >= 'A' && b <= 'Z' {
+		return b + ('a' - 'A')
+	}
+	return b
+}
+
+func ReadWithCancel(ctx context.Context, data []byte) ([]byte, error) {
+	select {
+	case <-ctx.Done():
+		return nil, &CancelledError{Op: "read"}
+	default:
+		out := make([]byte, len(data))
+		for i, b := range data {
+			out[i] = AsciiLowerByte(b)
+		}
+		return out, nil
+	}
+}
+`)
+	write("object/object_test.go", `package object
+
+import (
+	"context"
+	"errors"
+	"testing"
+)
+
+func TestObservedTargets(t *testing.T) {
+	got, err := ReadWithCancel(t.Context(), []byte("AbC"))
+	if err != nil || string(got) != "abc" {
+		t.Fatalf("ReadWithCancel = %q, %v", got, err)
+	}
+	cctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = ReadWithCancel(cctx, []byte("X"))
+	if !errors.Is(err, ErrCancelled) {
+		t.Fatalf("errors.Is(%v, ErrCancelled) = false, want true", err)
+	}
+}
+`)
+
+	env := os.Environ()
+	sess1, ctx1, _ := newTracedSession(t, BuildDescription{
+		Directory:   dir,
+		Environment: env,
+		Inputs:      []string{},
+	}, SessionPolicy{})
+
+	const pkg = "example.com/obsreuse/object"
+	subjects := []Subject{
+		{Package: pkg, Symbol: "AsciiLowerByte"},
+		{Package: pkg, Symbol: "CancelledError.Is"},
+		{Package: pkg, Symbol: "ReadWithCancel"},
+		{Package: pkg, Symbol: "TestObservedTargets"},
+	}
+
+	snap1, err := sess1.Snapshot(ctx1, subjects, CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captured, err := snap1.CaptureObservedBatch(ctx1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bracket, err := CaptureBracket(ctx1, dir, []string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs, err := FromTestLog([]byte("# test log\n"), dir, dir, env,
+		WithCompletedProcess("worker"), WithBracket(bracket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	attached := make(map[Subject]Fingerprint, len(subjects))
+	for _, s := range subjects {
+		fp := captured[s]
+		if !fp.ObservationProof.Observable {
+			t.Fatalf("%s.%s ObservationProof = %+v, want Observable", s.Package, s.Symbol, fp.ObservationProof)
+		}
+		sib, err := snap1.Sibling([]Subject{s})
+		if err != nil {
+			t.Fatal(err)
+		}
+		afp, err := sib.AttachObservation(s, fp, obs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sib.Validate(ctx1); err != nil {
+			t.Fatalf("%s.%s Validate failed: %v", s.Package, s.Symbol, err)
+		}
+		attached[s] = afp
+	}
+
+	sess2, ctx2, _ := newTracedSession(t, BuildDescription{
+		Directory:   dir,
+		Environment: env,
+		Inputs:      []string{},
+	}, SessionPolicy{})
+	snap2, err := sess2.Snapshot(ctx2, subjects, CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdicts, err := snap2.CheckObservedBatch(ctx2, attached)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range subjects {
+		if v := verdicts[s]; v.Status != Valid {
+			t.Errorf("%s.%s CheckObservedBatch verdict = %+v, want Valid", s.Package, s.Symbol, v)
+		}
+	}
+}

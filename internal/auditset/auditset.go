@@ -469,12 +469,22 @@ var symbolTables = map[string]map[string]bool{
 	"fmt":            fmtSymbols,
 	"math":           mathSymbols,
 	"reflect":        reflectSymbols,
+	"runtime":        runtimeSymbols,
 	"sync/atomic":    atomicSymbols,
 	"time":           timeSymbols,
 	"path/filepath":  filepathSymbols,
 	"net/url":        urlSymbols,
 	"flag":           flagSymbols,
 	"math/rand":      randSymbols,
+}
+
+// runtimeSymbols is the audited compile-time constant surface of package
+// runtime: GOOS and GOARCH are compile-time string constants pinned by the
+// build guard. All runtime functions and mutable state in package runtime
+// remain excluded (REQ-closure-observability-audited-set).
+var runtimeSymbols = map[string]bool{
+	"GOARCH": true,
+	"GOOS":   true,
 }
 
 // atomicSymbols is the audited bare-name surface of package sync/atomic:
@@ -557,6 +567,7 @@ var standardSentinelGlobals = map[string][]string{
 	"encoding/binary": {"BigEndian", "LittleEndian"},
 	"io":              {"Discard", "EOF", "ErrClosedPipe", "ErrNoProgress", "ErrShortBuffer", "ErrShortWrite", "ErrUnexpectedEOF"},
 	"io/fs":           {"ErrClosed", "ErrExist", "ErrInvalid", "ErrNotExist", "ErrPermission", "SkipAll", "SkipDir"},
+	"strconv":         {"ErrRange", "ErrSyntax"},
 }
 
 // StandardSentinelGlobal reports whether pkgPath.name is in the audited

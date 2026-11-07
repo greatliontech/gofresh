@@ -310,16 +310,26 @@ func ParseAndTypecheckDAGWithStdlibErr(env []string, virtualDir string, filesByP
 }
 
 type parsedPkgUnit struct {
-	pkgPath   string
-	basePath  string
-	forTest   string
-	pkgDir    string
-	pkgName   string
-	filenames []string
-	fullPaths []string
-	goFiles   []string
-	syntax    []*ast.File
-	imports   []string
+	pkgPath    string
+	basePath   string
+	forTest    string
+	pkgDir     string
+	pkgName    string
+	filenames  []string
+	fullPaths  []string
+	goFiles    []string
+	otherFiles []string
+	syntax     []*ast.File
+	imports    []string
+}
+
+func isPackageOtherFileExt(ext string) bool {
+	switch strings.ToLower(ext) {
+	case ".c", ".cc", ".cpp", ".cxx", ".m", ".mm", ".h", ".hh", ".hpp", ".hxx", ".f", ".for", ".f90", ".s", ".swig", ".swigcxx", ".syso":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]string, filesByPkg map[string]map[string]string, linkStdlib bool) ([]*packages.Package, error) {
@@ -374,6 +384,7 @@ func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]st
 			astFile  *ast.File
 		}
 		var primaryFiles, extTestFiles []parsedFile
+		var otherFiles []string
 		for _, name := range names {
 			src := fileMap[name]
 			fullPath := filepath.Join(pkgDir, name)
@@ -385,7 +396,13 @@ func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]st
 					return nil, fmt.Errorf("WriteFile(%s): %w", fullPath, err)
 				}
 			}
-			if !strings.HasSuffix(name, ".go") || strings.Contains(name, "/") {
+			if strings.Contains(name, "/") {
+				continue
+			}
+			if !strings.HasSuffix(name, ".go") {
+				if isPackageOtherFileExt(filepath.Ext(name)) {
+					otherFiles = append(otherFiles, fullPath)
+				}
 				continue
 			}
 			af, err := parser.ParseFile(fset, fullPath, src, parser.ParseComments)
@@ -434,6 +451,9 @@ func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]st
 			slices.Sort(u.imports)
 			if hasTestFile {
 				u.forTest = basePath
+			}
+			if !strings.HasSuffix(uPath, "_test") {
+				u.otherFiles = otherFiles
 			}
 			return u, nil
 		}
@@ -566,6 +586,7 @@ func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]st
 			ForTest:         u.forTest,
 			GoFiles:         u.goFiles,
 			CompiledGoFiles: u.fullPaths,
+			OtherFiles:      u.otherFiles,
 			Syntax:          u.syntax,
 			Types:           tpkg,
 			TypesInfo:       info,

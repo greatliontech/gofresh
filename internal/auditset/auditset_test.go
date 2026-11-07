@@ -80,8 +80,8 @@ func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
 	if !slices.Equal(slices.Sorted(maps.Keys(fips140Symbols)), []string{"Enforced", "WithoutEnforcement"}) {
 		t.Fatalf("fips140 symbols = %v", slices.Sorted(maps.Keys(fips140Symbols)))
 	}
-	if !Symbol("math", "MaxUint32") || !Symbol("math", "MaxInt64") || Symbol("math", "Sin") || Symbol("math", "NaN") || !Symbol("crypto/fips140", "WithoutEnforcement") || !Symbol("crypto/fips140", "Enforced") || Symbol("crypto/fips140", "Enabled") {
-		t.Fatal("math or crypto/fips140 symbol predicate wrong")
+	if !Symbol("math", "MaxUint32") || !Symbol("math", "MaxInt64") || Symbol("math", "Sin") || Symbol("math", "NaN") || !Symbol("crypto/fips140", "WithoutEnforcement") || !Symbol("crypto/fips140", "Enforced") || Symbol("crypto/fips140", "Enabled") || !Symbol("runtime", "GOARCH") || !Symbol("runtime", "GOOS") || Symbol("runtime", "NumCPU") {
+		t.Fatal("math, crypto/fips140, or runtime symbol predicate wrong")
 	}
 	for _, name := range []string{"Pointer", "UnsafePointer", "Ptr", "Interface", "Slice", "Key", "Method", "MethodByName", "Call", "CallSlice", "MakeFunc", "ValueOf", "New", "Zero", "Indirect", "Set", "SetInt", "Index", "Addr", "Convert", "Append", "Copy", "Swapper", "Select", "MakeSlice", "MakeMap", "MakeChan", "PointerTo", "SliceOf", "MapOf", "ArrayOf", "ChanOf", "FuncOf", "StructOf", "TypeFor", "Seq", "Seq2", "Bytes", "IsNil", "IsValid", "IsZero", "MapIndex", "MapRange", "Cap"} {
 		if reflectSymbols[name] {
@@ -94,7 +94,7 @@ func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
 	if !Symbol("sync/atomic", "Int64") || !Symbol("sync/atomic", "LoadInt64") || Symbol("sync/atomic", "Value") || Symbol("sync/atomic", "Pointer") || Symbol("sync/atomic", "LoadPointer") || !AtomicMethod("Int64", "Add") || !AtomicMethod("Bool", "CompareAndSwap") || AtomicMethod("Value", "Load") || AtomicMethod("Pointer", "Load") {
 		t.Fatal("sync/atomic symbol or method predicate wrong")
 	}
-	if !StandardSentinelGlobal("io", "EOF") || !StandardSentinelGlobal("io/fs", "ErrNotExist") || !StandardSentinelGlobal("encoding/binary", "BigEndian") || !StandardSentinelGlobal("io", "Discard") || StandardSentinelGlobal("os", "Stdout") {
+	if !StandardSentinelGlobal("io", "EOF") || !StandardSentinelGlobal("io/fs", "ErrNotExist") || !StandardSentinelGlobal("encoding/binary", "BigEndian") || !StandardSentinelGlobal("io", "Discard") || !StandardSentinelGlobal("strconv", "ErrRange") || !StandardSentinelGlobal("strconv", "ErrSyntax") || StandardSentinelGlobal("os", "Stdout") {
 		t.Fatal("standard sentinel global predicate wrong")
 	}
 	if !PoolMethod("Pool", "Get") || PoolMethod("Pool", "New") {

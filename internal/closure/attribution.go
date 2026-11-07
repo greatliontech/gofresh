@@ -4,10 +4,10 @@ import (
 	"context"
 	"go/token"
 	"go/types"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"unsafe"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
@@ -25,6 +25,10 @@ type attributedReachability struct {
 	functions        map[*ssa.Function]bool
 	subjectFunctions map[*ssa.Function]bool
 	startupFunctions map[*ssa.Function]bool
+	// baseStartup marks a subject whose startupFunctions and
+	// startupDynamicTargets equal the program's unmodified init-only
+	// startup reachability (no cleanup roots and no unclosed cleanup).
+	baseStartup bool
 	// testMainFunctions is the user-TestMain-flow slice of the startup
 	// provenance: the one startup flow that can dispatch a test-planted
 	// value (after m.Run), so the one whose unattributed invokes widen.
@@ -57,6 +61,7 @@ type attributedReachability struct {
 	programFunctions       map[*ssa.Function]bool
 	userPaths              map[string]bool
 	subjectRoot            *ssa.Function
+	prog                   *program
 	summary                *callerReferenceSummary
 	// propertyHarnessAudited carries the program-level audit verdict for
 	// the property harness into the per-subject walks: the closed-value
@@ -77,11 +82,10 @@ var analyzeAttributedBatch = attributedReachableSetsOnce
 // through the harness (the worker roots TestMain under testMasks, so
 // a batch of production subjects never walks it; probing it anyway
 // once classified a harness-borne subject-scoped shape as
-// package-scoped and darkened every sound sibling - the chunk-132
-// review's round-3 M2). A provocation in the shared roots explains
-// every subject's failure directly; a subject-scoped shape can never
-// satisfy the probe. A non-nil result is the package-scoped failure,
-// correctly attributed to every subject. Results memoize per
+// package-scoped and darkened every sound sibling). A provocation in the
+// shared roots explains every subject's failure directly; a subject-scoped
+// shape can never satisfy the probe. A non-nil result is the package-scoped
+// failure, correctly attributed to every subject. Results memoize per
 // (program, harness inclusion): the shared roots are batch-invariant.
 var probePackageScope = func(ctx context.Context, prog *program, subjects []Subject) error {
 	includeHarness := false
@@ -214,7 +218,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 			roots[root] |= mask
 		case !rootMayReceiveUnknownDynamic(audited, prog, root):
 			if allFunctions == nil {
-				allFunctions = ssautil.AllFunctions(prog.Prog)
+				allFunctions = progAllFunctions(prog)
 			}
 			for fn := range allFunctions {
 				if fn != nil && fn != root && fn.Origin() == root {
@@ -292,10 +296,8 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 	var valueRefOutsideInit map[*ssa.Function]bool
 	var summary *callerReferenceSummary
 	if audited || len(openCandidates) > 0 {
-		if allFunctions == nil {
-			allFunctions = ssautil.AllFunctions(prog.Prog)
-		}
-		summary = enumerateCallerReferences(audited, userPaths, allFunctions)
+		summary = enumerateCallerReferencesForProgram(prog, audited, pureDelegates, userPaths, allFunctions)
+		allFunctions = summary.allFunctions
 		valueRefOutsideInit = summary.valueRefOutsideInit
 		var openRoots []*ssa.Function
 		for root := range openCandidates {
@@ -413,10 +415,6 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 		}
 	}
 	reachable := make([]attributedReachability, len(subjects))
-	initMaskRoots := make(map[*ssa.Function]uint64, len(initRoots))
-	for _, fn := range initRoots {
-		initMaskRoots[fn] |= allMasks
-	}
 	for i := range reachable {
 		enc, enumerated := enumClosed[i]
 		var structFieldStores map[structFieldKey][]ssa.Value
@@ -439,7 +437,6 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 			functions:              make(map[*ssa.Function]bool, len(res.Reachable)),
 			resolved:               make(map[ssa.CallInstruction]bool, len(res.Resolved)),
 			dynamicTargets:         make(map[ssa.CallInstruction]map[*ssa.Function]bool),
-			startupDynamicTargets:  make(map[ssa.CallInstruction]map[*ssa.Function]bool),
 			instantiatedOrigins:    instantiated[uint64(1)<<i],
 			openWorld:              (!enumerated && rootMayReceiveUnknownDynamic(audited, prog, prog.Roots[subjects[i].Symbol])) || unclosedCleanup[i],
 			enumeratedRoot:         enumerated,
@@ -454,6 +451,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 			programFunctions:       programFunctions,
 			userPaths:              userPaths,
 			subjectRoot:            prog.Roots[subjects[i].Symbol],
+			prog:                   prog,
 			summary:                summary,
 			propertyHarnessAudited: harnessAudited,
 		}
@@ -543,38 +541,44 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 			}
 		}
 	}
-	initRes, err := rta.Analyze(ctx, initMaskRoots, nil)
+	baseStartup, err := cachedBaseStartupReachability(ctx, audited, prog, initRoots, harnessAudited, userPaths)
 	if err != nil {
 		return nil, err
 	}
 	for i := range reachable {
 		mask := uint64(1) << i
-		startupRes := initRes
-		if unclosedCleanup[i] {
-			startupRes = res
-		}
-		reachable[i].startupFunctions, err = provenanceReachableStartup(ctx, initRoots, mask, startupRes, harnessAudited, userPaths)
-		if err != nil {
-			return nil, err
-		}
-		for site, targets := range startupRes.Targets {
-			callee := site.Common().StaticCallee()
-			if startupRes.Reachable[site.Parent()]&mask == 0 || callee != nil && funcPkgPath(callee) == "testing" {
-				continue
+		if !unclosedCleanup[i] && len(cleanupRoots[i]) == 0 {
+			reachable[i].baseStartup = true
+			reachable[i].startupFunctions = baseStartup.startupFunctions
+			reachable[i].startupDynamicTargets = baseStartup.startupDynamicTargets
+		} else if !unclosedCleanup[i] {
+			reachable[i].startupFunctions = maps.Clone(baseStartup.startupFunctions)
+			reachable[i].startupDynamicTargets = cloneDynamicTargetMap(baseStartup.startupDynamicTargets)
+		} else {
+			reachable[i].startupDynamicTargets = make(map[ssa.CallInstruction]map[*ssa.Function]bool)
+			reachable[i].startupFunctions, err = provenanceReachableStartup(ctx, audited, prog, initRoots, mask, res, harnessAudited, userPaths)
+			if err != nil {
+				return nil, err
 			}
-			for target, masks := range targets {
-				if masks&mask != 0 && startupRes.Reachable[target]&mask != 0 {
-					projected := reachable[i].startupDynamicTargets[site]
-					if projected == nil {
-						projected = make(map[*ssa.Function]bool)
-						reachable[i].startupDynamicTargets[site] = projected
+			for site, targets := range res.Targets {
+				callee := site.Common().StaticCallee()
+				if res.Reachable[site.Parent()]&mask == 0 || callee != nil && funcPkgPath(callee) == "testing" {
+					continue
+				}
+				for target, masks := range targets {
+					if masks&mask != 0 && res.Reachable[target]&mask != 0 {
+						projected := reachable[i].startupDynamicTargets[site]
+						if projected == nil {
+							projected = make(map[*ssa.Function]bool)
+							reachable[i].startupDynamicTargets[site] = projected
+						}
+						projected[target] = true
 					}
-					projected[target] = true
 				}
 			}
 		}
 		if len(cleanupRoots[i]) > 0 {
-			reachable[i].cleanupFunctions, err = provenanceReachableStartup(ctx, cleanupRoots[i], mask, res, harnessAudited, userPaths)
+			reachable[i].cleanupFunctions, err = provenanceReachableStartup(ctx, audited, prog, cleanupRoots[i], mask, res, harnessAudited, userPaths)
 			if err != nil {
 				return nil, err
 			}
@@ -598,9 +602,80 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 				}
 			}
 		}
-		reachable[i].rootedIncomplete = unclosedFuzz[i] || rootedProvenanceIncomplete(audited, userPaths, reachable[i].subjectFunctions, reachable[i].rootedExtraFunctions, reachable[i].testMainFunctions, reachable[i].cleanupFunctions)
+		reachable[i].rootedIncomplete = unclosedFuzz[i] || rootedProvenanceIncomplete(audited, prog, userPaths, reachable[i].subjectFunctions, reachable[i].rootedExtraFunctions, reachable[i].testMainFunctions, reachable[i].cleanupFunctions)
 	}
 	return reachable, nil
+}
+
+type baseStartupReachSummary struct {
+	startupFunctions      map[*ssa.Function]bool
+	startupDynamicTargets map[ssa.CallInstruction]map[*ssa.Function]bool
+}
+
+func cloneDynamicTargetMap(src map[ssa.CallInstruction]map[*ssa.Function]bool) map[ssa.CallInstruction]map[*ssa.Function]bool {
+	out := make(map[ssa.CallInstruction]map[*ssa.Function]bool, len(src))
+	for site, targets := range src {
+		out[site] = maps.Clone(targets)
+	}
+	return out
+}
+
+func cachedBaseStartupReachability(ctx context.Context, audited bool, prog *program, initRoots []*ssa.Function, harnessAudited bool, userPaths map[string]bool) (*baseStartupReachSummary, error) {
+	cacheKey := "baseStartupReach:0:0"
+	switch {
+	case audited && harnessAudited:
+		cacheKey = "baseStartupReach:1:1"
+	case audited:
+		cacheKey = "baseStartupReach:1:0"
+	case harnessAudited:
+		cacheKey = "baseStartupReach:0:1"
+	}
+	if prog != nil {
+		if cached, ok := prog.Summaries[cacheKey].(*baseStartupReachSummary); ok && cached != nil {
+			return cached, nil
+		}
+	}
+	const startupMask uint64 = 1
+	initMaskRoots := make(map[*ssa.Function]uint64, len(initRoots))
+	for _, fn := range initRoots {
+		initMaskRoots[fn] = startupMask
+	}
+	initRes, err := rta.Analyze(ctx, initMaskRoots, nil)
+	if err != nil {
+		return nil, err
+	}
+	startupFns, err := provenanceReachableStartup(ctx, audited, prog, initRoots, startupMask, initRes, harnessAudited, userPaths)
+	if err != nil {
+		return nil, err
+	}
+	startupTargets := make(map[ssa.CallInstruction]map[*ssa.Function]bool)
+	for site, targets := range initRes.Targets {
+		callee := site.Common().StaticCallee()
+		if initRes.Reachable[site.Parent()]&startupMask == 0 || callee != nil && funcPkgPath(callee) == "testing" {
+			continue
+		}
+		for target, masks := range targets {
+			if masks&startupMask != 0 && initRes.Reachable[target]&startupMask != 0 {
+				projected := startupTargets[site]
+				if projected == nil {
+					projected = make(map[*ssa.Function]bool)
+					startupTargets[site] = projected
+				}
+				projected[target] = true
+			}
+		}
+	}
+	summary := &baseStartupReachSummary{
+		startupFunctions:      startupFns,
+		startupDynamicTargets: startupTargets,
+	}
+	if prog != nil && ctx.Err() == nil {
+		if prog.Summaries == nil {
+			prog.Summaries = make(map[string]any, 4)
+		}
+		prog.Summaries[cacheKey] = summary
+	}
+	return summary, nil
 }
 
 // binaryReachableUnion computes the binary-wide union of every harness root's
@@ -632,7 +707,7 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 			}
 		case !rootMayReceiveUnknownDynamic(audited, prog, root):
 			if allFunctions == nil {
-				allFunctions = ssautil.AllFunctions(prog.Prog)
+				allFunctions = progAllFunctions(prog)
 			}
 			instantiatedAny := false
 			for fn := range allFunctions {
@@ -667,10 +742,8 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 	var seeds *rta.Seeds
 	var summary *callerReferenceSummary
 	if audited || len(openCandidates) > 0 {
-		if allFunctions == nil {
-			allFunctions = ssautil.AllFunctions(prog.Prog)
-		}
-		summary = enumerateCallerReferences(audited, userPaths, allFunctions)
+		summary = enumerateCallerReferencesForProgram(prog, audited, pureDelegates, userPaths, allFunctions)
+		allFunctions = summary.allFunctions
 		for root := range openCandidates {
 			enc, ok := subjectEnumerationClosure(audited, pureDelegates, userPaths, root, summary)
 			if !ok {
@@ -762,7 +835,7 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 			break
 		}
 	}
-	if rootedProvenanceIncomplete(audited, userPaths, provenance) {
+	if rootedProvenanceIncomplete(audited, prog, userPaths, provenance) {
 		return RootedFunctions{}, nil
 	}
 	fns := make(map[string]bool, len(provenance))
@@ -894,6 +967,7 @@ type callerReferenceSummary struct {
 	enumInvokeFailed  map[ssa.CallInstruction]bool
 	enumSeedsMemo     map[ssa.Value]dynamicSeedEntry
 	enumStructClosed  map[*types.Named]bool
+	prog              *program
 }
 
 func (s *callerReferenceSummary) isStructReferencedOutside(named *types.Named, root *ssa.Function) bool {
@@ -904,30 +978,121 @@ func (s *callerReferenceSummary) isStructReferencedOutside(named *types.Named, r
 	return ok && (first != root || s.structRefMultiFn[named])
 }
 
-type summaryCacheKey struct {
-	prog    *ssa.Program
-	audited bool
-}
-
-var (
-	summaryCacheMu sync.Mutex
-	summaryCache   map[summaryCacheKey]*callerReferenceSummary
-)
-
-func evictSummaryCache(prog *ssa.Program) {
-	if prog == nil {
-		return
+func summaryCacheKeyFor(audited bool, pureDelegates map[string]bool) string {
+	prefix := "0"
+	if audited {
+		prefix = "1"
 	}
-	summaryCacheMu.Lock()
-	delete(summaryCache, summaryCacheKey{prog: prog, audited: false})
-	delete(summaryCache, summaryCacheKey{prog: prog, audited: true})
-	summaryCacheMu.Unlock()
+	if len(pureDelegates) == 0 {
+		return prefix
+	}
+	keys := make([]string, 0, len(pureDelegates))
+	for k, ok := range pureDelegates {
+		if ok {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return prefix
+	}
+	slices.Sort(keys)
+	return prefix + ":" + strings.Join(keys, ",")
 }
 
-func summaryCacheLen() int {
-	summaryCacheMu.Lock()
-	defer summaryCacheMu.Unlock()
-	return len(summaryCache)
+func lessSSAFunctionOrder(a, b *ssa.Function) bool {
+	if a == b {
+		return false
+	}
+	if a.Name() != b.Name() {
+		return a.Name() < b.Name()
+	}
+	pa, pb := funcPkgPath(a), funcPkgPath(b)
+	if pa != pb {
+		return pa < pb
+	}
+	if a.Pos() != b.Pos() {
+		return a.Pos() < b.Pos()
+	}
+	return a.String() < b.String()
+}
+
+func progAllFunctions(p *program) map[*ssa.Function]bool {
+	if p == nil || p.Prog == nil {
+		return nil
+	}
+	if p.AllFunctions != nil {
+		return p.AllFunctions
+	}
+	p.AllFunctions = ssautil.AllFunctions(p.Prog)
+	return p.AllFunctions
+}
+
+type orderedFuncKey struct {
+	fn      *ssa.Function
+	name    string
+	pkgPath string
+	pos     token.Pos
+}
+
+func progOrderedFunctions(p *program) []*ssa.Function {
+	if p == nil || p.Prog == nil {
+		return nil
+	}
+	if p.OrderedFunctions != nil {
+		return p.OrderedFunctions
+	}
+	p.OrderedFunctions = orderedFunctionsForProgram(progAllFunctions(p))
+	return p.OrderedFunctions
+}
+
+func orderedFunctionsForProgram(all map[*ssa.Function]bool) []*ssa.Function {
+	keys := make([]orderedFuncKey, 0, len(all))
+	for fn := range all {
+		if fn != nil {
+			keys = append(keys, orderedFuncKey{
+				fn:      fn,
+				name:    fn.Name(),
+				pkgPath: funcPkgPath(fn),
+				pos:     fn.Pos(),
+			})
+		}
+	}
+	slices.SortFunc(keys, func(a, b orderedFuncKey) int {
+		if a.fn == b.fn {
+			return 0
+		}
+		if a.name != b.name {
+			if a.name < b.name {
+				return -1
+			}
+			return 1
+		}
+		if a.pkgPath != b.pkgPath {
+			if a.pkgPath < b.pkgPath {
+				return -1
+			}
+			return 1
+		}
+		if a.pos != b.pos {
+			if a.pos < b.pos {
+				return -1
+			}
+			return 1
+		}
+		sa, sb := a.fn.String(), b.fn.String()
+		if sa < sb {
+			return -1
+		}
+		if sa > sb {
+			return 1
+		}
+		return 0
+	})
+	ordered := make([]*ssa.Function, len(keys))
+	for i := range keys {
+		ordered[i] = keys[i].fn
+	}
+	return ordered
 }
 
 func isPromotedWrapper(fn *ssa.Function) bool {
@@ -990,36 +1155,48 @@ func isBoundMethodWrapper(fn *ssa.Function) bool {
 // registered there) — and feeds the enumeration-target narrowing.
 // Function order is sorted so site order, and every judgment derived
 // from it, is run-to-run stable.
-func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[*ssa.Function]bool) *callerReferenceSummary {
-	var prog *ssa.Program
-	for fn := range all {
-		if fn != nil && fn.Prog != nil {
-			prog = fn.Prog
-			break
-		}
-	}
+func enumerateCallerReferencesForProgram(prog *program, audited bool, pureDelegates map[string]bool, userPaths map[string]bool, all map[*ssa.Function]bool) *callerReferenceSummary {
+	key := summaryCacheKeyFor(audited, pureDelegates)
+	var ordered []*ssa.Function
 	if prog != nil {
-		summaryCacheMu.Lock()
-		if cached, ok := summaryCache[summaryCacheKey{prog: prog, audited: audited}]; ok {
-			summaryCacheMu.Unlock()
+		if cached, ok := prog.Summaries[key].(*callerReferenceSummary); ok && cached != nil {
 			return cached
 		}
-		summaryCacheMu.Unlock()
-	}
-	ordered := make([]*ssa.Function, 0, len(all))
-	for fn := range all {
-		if fn != nil {
-			ordered = append(ordered, fn)
+		if all == nil {
+			all = progAllFunctions(prog)
+		}
+		if len(all) == len(progAllFunctions(prog)) {
+			ordered = progOrderedFunctions(prog)
 		}
 	}
-	sort.Slice(ordered, func(i, j int) bool { return ordered[i].String() < ordered[j].String() })
+	res := enumerateCallerReferencesWithOrdered(audited, userPaths, all, ordered)
+	res.prog = prog
+	if prog != nil {
+		if prog.Summaries == nil {
+			prog.Summaries = make(map[string]any, 2)
+		}
+		prog.Summaries[key] = res
+	}
+	return res
+}
+
+func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[*ssa.Function]bool) *callerReferenceSummary {
+	return enumerateCallerReferencesWithOrdered(audited, userPaths, all, nil)
+}
+
+func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]bool, all map[*ssa.Function]bool, ordered []*ssa.Function) *callerReferenceSummary {
+	if ordered == nil {
+		ordered = orderedFunctionsForProgram(all)
+	}
+	largeCap := max(len(ordered)/4, 16)
+	smallCap := max(len(ordered)/16, 16)
 	summary := callerReferenceSummary{
-		sites:                  make(map[*ssa.Function][]ssa.CallInstruction),
-		valueRef:               make(map[*ssa.Function]bool),
-		directValueRef:         make(map[*ssa.Function]bool),
-		valueRefOutsideInit:    make(map[*ssa.Function]bool),
+		sites:                  make(map[*ssa.Function][]ssa.CallInstruction, largeCap),
+		valueRef:               make(map[*ssa.Function]bool, smallCap),
+		directValueRef:         make(map[*ssa.Function]bool, smallCap),
+		valueRefOutsideInit:    make(map[*ssa.Function]bool, smallCap),
 		closureRefs:            make(map[*ssa.Function][]*ssa.MakeClosure),
-		nonClosureRef:          make(map[*ssa.Function]bool),
+		nonClosureRef:          make(map[*ssa.Function]bool, largeCap),
 		structRefFirstFn:       make(map[*types.Named]*ssa.Function),
 		structRefMultiFn:       make(map[*types.Named]bool),
 		structReferencedByType: make(map[*types.Named]bool),
@@ -1066,8 +1243,12 @@ func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[
 	storeRefs := make(map[*ssa.Function][]*ssa.Store)
 	callArgRefs := make(map[*ssa.Function][]ssa.CallInstruction)
 	methodsByName := make(map[string][]*ssa.Function)
+	instantiatedOrigins := make(map[*ssa.Function]bool)
 	if audited {
 		for _, fn := range ordered {
+			if orig := fn.Origin(); orig != nil && !parameterizedBody(fn) {
+				instantiatedOrigins[orig] = true
+			}
 			fnPkg := funcPkgPath(fn)
 			if isStdPkgPath(userPaths, fnPkg) {
 				continue
@@ -1173,21 +1354,48 @@ func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[
 		}
 		walkEmbed(st)
 	}
+	type candIfaceKey struct {
+		cand  *ssa.Function
+		iface *types.Interface
+	}
+	var implMemo map[candIfaceKey]bool
 	sawReflectMutation := false
 	var space [16]*ssa.Value
 	for _, fn := range ordered {
+		if audited && parameterizedBody(fn) {
+			orig := fn
+			if fn.Origin() != nil {
+				orig = fn.Origin()
+			}
+			if instantiatedOrigins[orig] {
+				continue
+			}
+		}
 		// A body the enumeration cannot judge as a caller — a synthetic
 		// function (other than a promoted-method forwarding wrapper) or a
 		// parameterized origin (open over type parameters) — makes any
 		// call it holds a refusing reference, exactly like a value
 		// capture: its arguments are never judged, so they must never
 		// count as an enumerated site.
-		judgeable := (fn.Synthetic == "" || isPromotedWrapper(fn) || (audited && fn.Origin() != nil)) && !parameterizedBody(fn)
-		structJudgeable := fn.Synthetic == "" || isPromotedWrapper(fn) || (audited && fn.Origin() != nil)
+		fnIsPromotedWrapper := isPromotedWrapper(fn)
+		fnIsBoundWrapper := isBoundMethodWrapper(fn)
+		fnRecordCallSite := !fnIsPromotedWrapper && !(audited && fnIsBoundWrapper)
+		fnRecordInvokeSite := !fnIsPromotedWrapper && !fnIsBoundWrapper
+		judgeable := (fn.Synthetic == "" || fnIsPromotedWrapper || (audited && fn.Origin() != nil)) && !parameterizedBody(fn)
+		structJudgeable := fn.Synthetic == "" || fnIsPromotedWrapper || (audited && fn.Origin() != nil)
 		fnPkg := funcPkgPath(fn)
 		nonStdFrame := !isStdPkgPath(userPaths, fnPkg)
+		hasUserTypes := nonStdFrame
+		if !hasUserTypes {
+			for cur := fn; cur != nil; cur = cur.Parent() {
+				if len(cur.TypeArgs()) > 0 {
+					hasUserTypes = true
+					break
+				}
+			}
+		}
 		initFrame := initFlowFrame(fn)
-		if audited {
+		if audited && hasUserTypes {
 			hasRecv := fn.Signature != nil && fn.Signature.Recv() != nil
 			for pIdx, param := range fn.Params {
 				if param == nil || param.Type() == nil {
@@ -1215,7 +1423,7 @@ func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[
 		}
 		for _, b := range fn.Blocks {
 			for _, instr := range b.Instrs {
-				if audited {
+				if audited && hasUserTypes {
 					if v, ok := instr.(ssa.Value); ok && v.Type() != nil {
 						if named := derefNamedStruct(userPaths, v.Type()); named != nil {
 							recordStructRef(named, fn)
@@ -1321,8 +1529,10 @@ func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[
 							topNamed := derefNamedStruct(userPaths, x.X.Type())
 							for _, inner := range collectValueContainedUserStructs(userPaths, elemT) {
 								recordStructRef(inner, fn)
-								if structJudgeable && topNamed != nil && inner == topNamed {
-									summary.structBoxedValues[inner] = append(summary.structBoxedValues[inner], x.X)
+								if structJudgeable && topNamed != nil {
+									if inner == topNamed {
+										summary.structBoxedValues[inner] = append(summary.structBoxedValues[inner], x.X)
+									}
 								} else {
 									poisonStruct(inner, -1)
 								}
@@ -1343,6 +1553,10 @@ func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[
 					if fa, ok := instr.(*ssa.FieldAddr); ok && fa.X != nil {
 						if named := derefNamedStruct(userPaths, fa.X.Type()); named != nil {
 							recordStructRef(named, fn)
+							innerNamed := derefNamedStruct(userPaths, fa.Type())
+							if innerNamed != nil {
+								recordStructRef(innerNamed, fn)
+							}
 							if !structJudgeable || fa.Referrers() == nil {
 								poisonStruct(named, fa.Field)
 							} else {
@@ -1363,6 +1577,27 @@ func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[
 											key := structFieldKey{named: named, field: fa.Field}
 											summary.structFieldStores[key] = append(summary.structFieldStores[key], r.Val)
 										}
+									case *ssa.FieldAddr:
+										if innerNamed == nil || r.X != fa {
+											poisonStruct(named, fa.Field)
+										}
+									case ssa.CallInstruction:
+										_, isGo := r.(*ssa.Go)
+										okCall := false
+										if !isGo && innerNamed != nil && r.Common() != nil && !r.Common().IsInvoke() {
+											if callee := r.Common().StaticCallee(); callee != nil && len(callee.Blocks) > 0 && (callee.Synthetic == "" || isPromotedWrapper(callee) || (audited && callee.Origin() != nil)) && !parameterizedBody(callee) && len(r.Common().Args) == len(callee.Params) {
+												okCall = true
+												for i, arg := range r.Common().Args {
+													if arg == fa && derefNamedStruct(userPaths, callee.Params[i].Type()) != innerNamed {
+														okCall = false
+														break
+													}
+												}
+											}
+										}
+										if !okCall {
+											poisonStruct(named, fa.Field)
+										}
 									default:
 										poisonStruct(named, fa.Field)
 									}
@@ -1380,8 +1615,10 @@ func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[
 							}
 							for _, inner := range collectValueContainedUserStructs(userPaths, st.Val.Type()) {
 								recordStructRef(inner, fn)
-								if structJudgeable && topNamed != nil && inner == topNamed {
-									summary.structWholeStores[inner] = append(summary.structWholeStores[inner], st.Val)
+								if structJudgeable && topNamed != nil {
+									if inner == topNamed {
+										summary.structWholeStores[inner] = append(summary.structWholeStores[inner], st.Val)
+									}
 								} else {
 									poisonStruct(inner, -1)
 								}
@@ -1423,7 +1660,7 @@ func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[
 				if site, ok := instr.(ssa.CallInstruction); ok && site.Common() != nil {
 					if callee := site.Common().StaticCallee(); callee != nil {
 						summary.nonClosureRef[callee] = true
-						if !isPromotedWrapper(fn) && !(audited && isBoundMethodWrapper(fn)) {
+						if fnRecordCallSite {
 							if judgeable {
 								summary.sites[callee] = append(summary.sites[callee], site)
 							} else {
@@ -1431,17 +1668,25 @@ func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[
 								summary.directValueRef[callee] = true
 							}
 						}
-					} else if audited && site.Common().IsInvoke() && site.Common().Method != nil {
-						mname := site.Common().Method.Name()
-						iface, _ := types.Unalias(site.Common().Value.Type()).Underlying().(*types.Interface)
-						if iface != nil {
-							for _, cand := range methodsByName[mname] {
-								if cand == fn {
-									continue
-								}
-								recvType := cand.Signature.Recv().Type()
-								if types.Implements(recvType, iface) || types.Implements(types.NewPointer(recvType), iface) {
-									if !isPromotedWrapper(fn) && !isBoundMethodWrapper(fn) {
+					} else if audited && len(methodsByName) > 0 && site.Common().IsInvoke() && site.Common().Method != nil {
+						if cands := methodsByName[site.Common().Method.Name()]; len(cands) > 0 {
+							iface, _ := types.Unalias(site.Common().Value.Type()).Underlying().(*types.Interface)
+							if iface != nil {
+								for _, cand := range cands {
+									if cand == fn {
+										continue
+									}
+									key := candIfaceKey{cand: cand, iface: iface}
+									impl, cached := implMemo[key]
+									if !cached {
+										recvType := cand.Signature.Recv().Type()
+										impl = types.Implements(recvType, iface) || types.Implements(types.NewPointer(recvType), iface)
+										if implMemo == nil {
+											implMemo = make(map[candIfaceKey]bool, 16)
+										}
+										implMemo[key] = impl
+									}
+									if impl && fnRecordInvokeSite {
 										if judgeable {
 											summary.sites[cand] = append(summary.sites[cand], site)
 										} else {
@@ -1460,7 +1705,7 @@ func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[
 					}
 				}
 				for _, op := range rands {
-					if audited && op != nil && *op != nil && (*op).Type() != nil {
+					if audited && hasUserTypes && op != nil && *op != nil && (*op).Type() != nil {
 						if named := derefNamedStruct(userPaths, (*op).Type()); named != nil {
 							recordStructRef(named, fn)
 						} else if g, isGlob := (*op).(*ssa.Global); isGlob {
@@ -1488,7 +1733,7 @@ func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[
 						if !initFrame {
 							summary.valueRefOutsideInit[g] = true
 						}
-						if audited && judgeable && !isPromotedWrapper(fn) {
+						if audited && judgeable && !fnIsPromotedWrapper {
 							if mc, ok := instr.(*ssa.MakeClosure); ok && mc.Fn == g && !slices.Contains(mc.Bindings, ssa.Value(g)) {
 								closureRefs[g] = append(closureRefs[g], mc)
 								summary.closureRefs[g] = closureRefs[g]
@@ -1632,6 +1877,15 @@ func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[
 						return nil, false
 					}
 				case *ssa.Phi:
+					sub, ok := collectFuncValueCallSites(r, seen)
+					if !ok {
+						return nil, false
+					}
+					sites = append(sites, sub...)
+				case *ssa.ChangeType:
+					if r.X != val {
+						return nil, false
+					}
 					sub, ok := collectFuncValueCallSites(r, seen)
 					if !ok {
 						return nil, false
@@ -1879,16 +2133,7 @@ func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[
 	for fn, sites := range summary.sites {
 		summary.sites[fn] = dedupCallSites(sites)
 	}
-	res := &summary
-	if prog != nil {
-		summaryCacheMu.Lock()
-		if summaryCache == nil || len(summaryCache) >= 8 {
-			summaryCache = make(map[summaryCacheKey]*callerReferenceSummary, 8)
-		}
-		summaryCache[summaryCacheKey{prog: prog, audited: audited}] = res
-		summaryCacheMu.Unlock()
-	}
-	return res
+	return &summary
 }
 
 // subjectEnumerationClosure judges one open-signature root against its
@@ -2011,7 +2256,7 @@ func subjectEnumerationClosure(audited bool, pureDelegates map[string]bool, user
 		if wholeStores := summary.structWholeStores[named]; len(wholeStores) > 0 {
 			wholeFP := *fp
 			wholeFP.inProgramSites = true
-			wholeFP.inFieldStore = false
+			wholeFP.inFieldStore = true
 			for _, wv := range wholeStores {
 				if !walkDynamicValue(wv, nil, make(map[ssa.Value]bool), nil, &wholeFP) {
 					return enumerationClosure{}, false
@@ -2026,10 +2271,33 @@ func subjectEnumerationClosure(audited bool, pureDelegates map[string]bool, user
 		sort.Ints(fieldIdxs)
 		fieldFP := *fp
 		fieldFP.inFieldStore = true
+		st, _ := named.Underlying().(*types.Struct)
 		for _, idx := range fieldIdxs {
 			key := structFieldKey{named: named, field: idx}
 			if summary.structPoisoned[key] {
 				return enumerationClosure{}, false
+			}
+			if st != nil && idx >= 0 && idx < st.NumFields() {
+				fType := st.Field(idx).Type()
+				if _, isPtr := types.Unalias(fType).(*types.Pointer); !isPtr {
+					if innerNamed := derefNamedStruct(userPaths, fType); innerNamed != nil && typeMayCarryDynamicTop(audited, innerNamed) {
+						if !enumUserStructClosed(innerNamed, &fieldFP) {
+							return enumerationClosure{}, false
+						}
+						typesMap := map[types.Type]bool{}
+						if enc.addrTaken == nil {
+							enc.addrTaken = map[*ssa.Function]bool{}
+						}
+						collectUserStructSeeds(innerNamed, &dynamicValueCollector{
+							types: typesMap,
+							funcs: enc.addrTaken,
+							seeds: true,
+						}, &fieldFP)
+						for t := range typesMap {
+							enc.types = append(enc.types, t)
+						}
+					}
+				}
 			}
 			stores := summary.structFieldStores[key]
 			for _, val := range stores {
@@ -2427,18 +2695,34 @@ func collectStructCarrierFieldTargets(audited bool, userPaths map[string]bool, n
 			if r.Referrers() == nil {
 				return false
 			}
+			hasLoad := false
+			allDerefOrStore := true
 			for _, fref := range *r.Referrers() {
 				switch fr := fref.(type) {
 				case *ssa.DebugRef:
 				case *ssa.UnOp:
 					if fr.Op != token.MUL || fr.X != r {
-						return false
+						allDerefOrStore = false
+					} else {
+						hasLoad = true
+					}
+				case *ssa.Store:
+					if fr.Addr != r || fr.Val == r {
+						allDerefOrStore = false
 					}
 				default:
-					return false
+					allDerefOrStore = false
 				}
 			}
-			needed[r.Field] = true
+			if !allDerefOrStore {
+				innerNamed := derefNamedStruct(userPaths, r.Type())
+				if innerNamed == nil || !collectStructCarrierFieldTargets(audited, userPaths, innerNamed, r, nil, root, make(map[int]bool), seen, valSeen) {
+					return false
+				}
+				needed[r.Field] = true
+			} else if hasLoad {
+				needed[r.Field] = true
+			}
 		case *ssa.MakeInterface:
 			if r.X != val {
 				return false
@@ -2717,8 +3001,8 @@ func isGeneratedTestMainPackage(prog *program, pkg *ssa.Package) bool {
 	return prog != nil && pkg != nil && pkg.Pkg != nil && pkg.Pkg.Name() == "main" && pkg.Pkg.Path() == prog.PkgPath+".test"
 }
 
-func provenanceReachableStartup(ctx context.Context, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool) (map[*ssa.Function]bool, error) {
-	return provenanceBFS(ctx, roots, mask, result, harnessAudited, userPaths, true, nil)
+func provenanceReachableStartup(ctx context.Context, audited bool, prog *program, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool) (map[*ssa.Function]bool, error) {
+	return provenanceBFS(ctx, audited, prog, roots, mask, result, harnessAudited, userPaths, true, nil)
 }
 
 func collectTestingHarnessCallbacks(audited bool, pureDelegates map[string]bool, userPaths map[string]bool, summary *callerReferenceSummary, subjectRoot *ssa.Function, enumerated bool, enc enumerationClosure, prov map[*ssa.Function]bool, mask uint64, res *rta.Result) (cleanupOut []*ssa.Function, unclosedCleanup bool, fuzzOut []*ssa.Function, unclosedFuzz bool) {
@@ -2766,6 +3050,7 @@ func collectTestingHarnessCallbacks(audited bool, pureDelegates map[string]bool,
 		reach.enumeratedFieldStores = enc.fieldStores
 		reach.userPaths = userPaths
 		if summary != nil {
+			reach.prog = summary.prog
 			reach.summary = summary
 			reach.structFieldStores = summary.structFieldStores
 			reach.structWholeStores = summary.structWholeStores
@@ -2843,7 +3128,7 @@ func collectTestingHarnessCallbacks(audited bool, pureDelegates map[string]bool,
 			ordered = append(ordered, fn)
 		}
 	}
-	sort.Slice(ordered, func(i, j int) bool { return ordered[i].String() < ordered[j].String() })
+	sort.Slice(ordered, func(i, j int) bool { return lessSSAFunctionOrder(ordered[i], ordered[j]) })
 	for _, fn := range ordered {
 		for _, b := range fn.Blocks {
 			for _, instr := range b.Instrs {
@@ -2936,7 +3221,30 @@ func testingHarnessCallArg(site ssa.CallInstruction, mask uint64, res *rta.Resul
 	return nil, ""
 }
 
-func rootedProvenanceIncomplete(audited bool, userPaths map[string]bool, sets ...map[*ssa.Function]bool) bool {
+func isVerifiedPureRootedAsmStub(audited bool, prog *program, fn *ssa.Function) bool {
+	if !audited || prog == nil || fn == nil || len(fn.Blocks) != 0 || fn.Synthetic != "" || parameterizedBody(fn) {
+		return false
+	}
+	if fn.Signature == nil || fn.Signature.Recv() != nil || fn.Pkg == nil || fn.Pkg.Pkg == nil {
+		return false
+	}
+	if !asmSignatureCarrierFree(fn.Signature) {
+		return false
+	}
+	pkgPath := fn.Pkg.Pkg.Path()
+	hazards := nonSSAGlobalHazardsSummary(audited, prog)
+	if hazards == nil || hazards.blockedPkgs[pkgPath] || hazards.linknamedVars[pkgVarKey{pkgPath: pkgPath, name: fn.Name()}] {
+		return false
+	}
+	vp := hazards.verifiedAsm[pkgPath]
+	if vp == nil || !vp.ok {
+		return false
+	}
+	sum, ok := vp.funcs[fn.Name()]
+	return ok && sum.impureKind == ""
+}
+
+func rootedProvenanceIncomplete(audited bool, prog *program, userPaths map[string]bool, sets ...map[*ssa.Function]bool) bool {
 	var space [16]*ssa.Value
 	for _, set := range sets {
 		for fn := range set {
@@ -2948,7 +3256,7 @@ func rootedProvenanceIncomplete(audited bool, userPaths map[string]bool, sets ..
 				continue
 			}
 			if len(fn.Blocks) == 0 {
-				if fn.Synthetic == "" && !parameterizedBody(fn) {
+				if fn.Synthetic == "" && !parameterizedBody(fn) && !isVerifiedPureRootedAsmStub(audited, prog, fn) {
 					return true
 				}
 				continue
@@ -3002,7 +3310,7 @@ func rootedProvenanceIncomplete(audited bool, userPaths map[string]bool, sets ..
 						if isUnattributableRootedStdSymbol(cPkg, cSym) {
 							return true
 						}
-						if (userPaths[cPkg] || !isStdImportPath(cPkg)) && len(callee.Blocks) == 0 && callee.Synthetic == "" && !parameterizedBody(callee) {
+						if (userPaths[cPkg] || !isStdImportPath(cPkg)) && len(callee.Blocks) == 0 && callee.Synthetic == "" && !parameterizedBody(callee) && !isVerifiedPureRootedAsmStub(audited, prog, callee) {
 							return true
 						}
 					}
@@ -3213,10 +3521,10 @@ func isTestingCleanupCall(site ssa.CallInstruction, arg ssa.Value) bool {
 }
 
 func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool) (map[*ssa.Function]bool, error) {
-	return provenanceBFS(ctx, roots, mask, result, harnessAudited, userPaths, false, dropTarget)
+	return provenanceBFS(ctx, false, nil, roots, mask, result, harnessAudited, userPaths, false, dropTarget)
 }
 
-func provenanceBFS(ctx context.Context, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, deferUnscannedClosures bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool) (map[*ssa.Function]bool, error) {
+func provenanceBFS(ctx context.Context, audited bool, prog *program, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, deferUnscannedClosures bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool) (map[*ssa.Function]bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -3227,6 +3535,15 @@ func provenanceBFS(ctx context.Context, roots []*ssa.Function, mask uint64, resu
 		pendingByParent = make(map[*ssa.Function][]*ssa.Function)
 	}
 	queue := append([]*ssa.Function(nil), roots...)
+	var syncZeroGlobals, wholeZeroGlobals map[*ssa.Global]bool
+	var asyncStartup map[*ssa.Function]bool
+	var wholeComputed bool
+	if deferUnscannedClosures && len(roots) > 0 && initFlowFrame(roots[0]) {
+		syncZeroGlobals = rtaUnmutatedZeroGlobals(audited, prog, result, mask, userPaths)
+		if len(syncZeroGlobals) > 0 {
+			asyncStartup = computeRTAAsyncStartupFunctions(result, mask)
+		}
+	}
 	for len(queue) != 0 {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -3251,7 +3568,17 @@ func provenanceBFS(ctx context.Context, roots []*ssa.Function, mask uint64, resu
 		if !harnessFrame {
 			reachable[fn] = true
 		}
-		for _, block := range fn.Blocks {
+		fnZeroGlobals := syncZeroGlobals
+		if len(syncZeroGlobals) > 0 && asyncStartup[fn] {
+			if !wholeComputed {
+				wholeComputed = true
+				if prog != nil {
+					wholeZeroGlobals = unmutatedZeroGlobalsForFunctions(audited, prog, userPaths, progAllFunctions(prog))
+				}
+			}
+			fnZeroGlobals = wholeZeroGlobals
+		}
+		for _, block := range liveBlocks(fn, fnZeroGlobals) {
 			for _, instruction := range block.Instrs {
 				site, ok := instruction.(ssa.CallInstruction)
 				if !ok || site.Common() == nil {

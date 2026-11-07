@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"strconv"
 
 	"github.com/greatliontech/gofresh/internal/auditset"
 )
@@ -21,11 +22,12 @@ func (h *Hasher) ToolchainContent() string { return h.source.Content }
 func (h *Hasher) AdmissionPolicy() string { return h.source.Policy }
 
 type policyInputs struct {
-	verifier  string
-	audit     string
-	packages  map[string]bool
-	linknames map[string]bool
-	seeds     []string
+	verifier    string
+	asmVerifier string
+	audit       string
+	packages    map[string]bool
+	linknames   map[string]bool
+	seeds       []string
 }
 
 // capturePolicyInputs owns every input before keying or deriving a policy.
@@ -94,12 +96,16 @@ func capturePolicyInputs() policyInputs {
 	for k, v := range allowedPureAsmCrossPkgSymbols {
 		linknames["pure-asm-sym:"+k] = v
 	}
+	for k, v := range auditedReadOnlyVarLinknameTargets {
+		linknames["tier2-ro-var-link:"+k+"="+strconv.Itoa(int(v))] = true
+	}
 	return policyInputs{
-		verifier:  toolchainVerifierVersion,
-		audit:     auditset.Identity(),
-		packages:  packages,
-		linknames: linknames,
-		seeds:     surfaceSeeds(),
+		verifier:    toolchainVerifierVersion,
+		asmVerifier: nonStdAsmVerifierVersion,
+		audit:       auditset.Identity(),
+		packages:    packages,
+		linknames:   linknames,
+		seeds:       surfaceSeeds(),
 	}
 }
 
@@ -111,7 +117,7 @@ func (in policyInputs) derive() string {
 	seeds := slices.Clone(in.seeds)
 	sort.Strings(seeds)
 	seeds = slices.Compact(seeds)
-	data, _ := json.Marshal([]any{"gofresh/toolchain-policy@2", in.verifier, in.audit,
+	data, _ := json.Marshal([]any{"gofresh/toolchain-policy@2", in.verifier, in.asmVerifier, in.audit,
 		in.packages, in.linknames, seeds})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])

@@ -37,7 +37,18 @@ type Program struct {
 	// per harness inclusion: the shared roots are batch-invariant, so
 	// one probe per program (and per harness arm) serves every failing
 	// batch.
-	PkgScopeProbe map[bool]error
+	PkgScopeProbe    map[bool]error
+	AllFunctions     map[*ssa.Function]bool
+	OrderedFunctions []*ssa.Function
+	MutatedGlobals   map[*ssa.Global]bool
+	Summaries        map[string]any
+	// GOARCH names the effective target architecture under which this program
+	// was selected and analyzed; empty fails closed on ISA-dependent checks.
+	GOARCH string
+	// ReadSource, when non-nil, reads non-Go source members (such as .s and .h
+	// assembly files) from the owning pass's content snapshot so in-pass
+	// summaries consume the same file bytes folded into the closure hash.
+	ReadSource func(dir, fullPath string) ([]byte, error)
 }
 
 // Load builds pkgPath's test-binary Program.
@@ -393,7 +404,7 @@ func build(ctx context.Context, pkgPath string, roots []*packages.Package) (*Pro
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return &Program{PkgPath: pkgPath, Prog: prog, Pkgs: all, Roots: funcRoots, Ambiguous: ambiguousRoots, TestMain: testMain}, nil
+	return &Program{PkgPath: pkgPath, Prog: prog, Pkgs: all, Roots: funcRoots, Ambiguous: ambiguousRoots, TestMain: testMain, Summaries: map[string]any{}}, nil
 }
 
 func isTestMainHarness(pkg *packages.Package, function *types.Func) bool {

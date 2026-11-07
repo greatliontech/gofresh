@@ -73,6 +73,11 @@ func auditedSurfaceTables() []string {
 			set[target[:i]] = true
 		}
 	}
+	for target := range auditedReadOnlyVarLinknameTargets {
+		if i := strings.LastIndexByte(target, '.'); i > 0 {
+			set[target[:i]] = true
+		}
+	}
 	return sortedKeys(set)
 }
 

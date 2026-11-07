@@ -398,6 +398,21 @@ func (h *Hasher) PassReader() *gotool.EnvReader {
 	return gotool.PrimedEnvReader(h.runner, h.dir, h.env, h.snapshot)
 }
 
+func (h *Hasher) effectiveGOARCH() string {
+	if h == nil {
+		return ""
+	}
+	if h.snapshot != nil {
+		if arch := strings.TrimSpace(h.snapshot.Value("GOARCH")); arch != "" {
+			return arch
+		}
+	}
+	if arch, ok := gotool.LookupEnv(h.env, "GOARCH"); ok && strings.TrimSpace(arch) != "" {
+		return strings.TrimSpace(arch)
+	}
+	return runtime.GOARCH
+}
+
 // FileDigest returns the truncated content digest of one absolute source
 // path exactly as this Hasher's own reads — the closure fold's, or the
 // listing memo's verification of the same tree — computed it, so a
@@ -612,6 +627,13 @@ func (h *Hasher) resetCallScope() {
 	// is armed here and dropped when the call returns (the batch entries
 	// defer it), so no later entry can fold bytes an earlier call saw.
 	h.contents = map[string]fileBytes{}
+	// Clear per-program summaries on any retained SSA programs so subsequent
+	// batch calls re-verify non-Go .s/.h members against this call's contents.
+	for _, p := range h.progs {
+		if p != nil {
+			p.Summaries = nil
+		}
+	}
 }
 
 // modulePin is the version-pin identity every persistent memo and
@@ -714,11 +736,11 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 		}
 	}
 	if len(p.SFiles) > 0 {
-		// Non-toolchain assembly is never analyzed: the package contributes
-		// its whole directory, so every .s file and anything it includes
-		// from the package tree moves the hash (REQ-closure-blindspot's
-		// downgrade arm; the subject is unverifiable regardless via the
-		// package's non-standard-assembly effect).
+		// The maximal tier leaves non-toolchain assembly unanalyzed and folds
+		// the package's whole directory into the hash so every .s file and any
+		// local header it includes from the package tree moves the closure
+		// identity (covering both REQ-closure-blindspot's downgrade floor and
+		// Tier-2 mechanical per-TEXT assembly verification).
 		var err error
 		files, err = allPackageFiles(h.contextErr, p.Dir)
 		if err != nil {

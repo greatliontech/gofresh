@@ -1414,10 +1414,10 @@ func referenceMaximalFileReason(filename string) (string, error) {
 		if alias == "." && packageHasClassifiedExternalAPI(pkgPath) && potentialExternal == "" {
 			potentialExternal = pkgPath
 		}
-		if potentialExternal == "" && isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath) {
+		if potentialExternal == "" && !(alias == "_" && pkgPath == "unsafe") && isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath) {
 			potentialExternal = pkgPath
 		}
-		if (alias == "." || alias == "_") && (packageHasClassifiedExternalAPI(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) && unauditedReason == "" {
+		if (alias == "." || (alias == "_" && pkgPath != "unsafe")) && (packageHasClassifiedExternalAPI(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) && unauditedReason == "" {
 			unauditedReason = "reaches " + pkgPath + " (potential external dependence)"
 		}
 	}
@@ -1580,7 +1580,7 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 		if isAlwaysExternalPackage(pkgPath) && alias != "." && alias != "_" {
 			scan.importCandidates = append(scan.importCandidates, trueExternalEffect(pkgPath))
 		}
-		if alias == "." || alias == "_" {
+		if alias == "." || (alias == "_" && pkgPath != "unsafe") {
 			if isAlwaysExternalPackage(pkgPath) {
 				scan.add(trueExternalEffect(pkgPath))
 			} else if packageHasClassifiedExternalAPI(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath) {

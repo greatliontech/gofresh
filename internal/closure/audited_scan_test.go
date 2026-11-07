@@ -2,6 +2,7 @@ package closure
 
 import (
 	"context"
+	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
 	"github.com/greatliontech/gofresh/internal/auditset"
@@ -12,6 +13,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -21,6 +23,7 @@ import (
 // table each, so the two spellings cannot drift apart
 // (REQ-closure-shared-dynamic-state-audited-discharges).
 func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"Mutex", "RWMutex", "Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock", "Once", "Do", "Cond", "NewCond", "Locker", "Wait", "Signal", "Broadcast"} {
 		if !auditedStandardSymbol(true, "sync", name) || !auditset.SyncName(name) {
 			t.Errorf("sync name %s not admitted", name)
@@ -87,6 +90,7 @@ func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
 // reachability) - stay blocked
 // (REQ-closure-observability-audited-set).
 func TestAuditedPureWideningAndExclusions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for _, sub := range []string{"pure", "flagged", "mirrored"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
@@ -208,6 +212,7 @@ func TestRegistered(t *testing.T) {
 // their classifications
 // (REQ-closure-observability-audited-set).
 func TestAuditedValueConstructorAndComparatorAdmissions(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for _, sub := range []string{"values", "entropylocal", "entropyparam", "calendar", "stamp", "clock", "mirror", "span", "timer", "parsed", "unixzone", "elem", "elemname", "elemvalue", "shared", "localmethod", "poison", "poisoned", "boundmethod", "views", "lookup", "kindptr", "fieldfunc", "fieldeffect", "fieldconst"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
@@ -981,6 +986,7 @@ func TestDeref(t *testing.T) {
 // execution-free references in, every ambient or reflective neighbor
 // out (REQ-closure-observability-audited-set).
 func TestAuditedPureStandardBounds(t *testing.T) {
+	t.Parallel()
 	// math/big is a member of the audited-pure package set, admitted
 	// whole there and not operation by operation here.
 	if !isSourceOnlyStandardPackage(true, "math/big") || isSourceOnlyStandardPackage(false, "math/big") {
@@ -1071,6 +1077,7 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 // structural operations stay outside it
 // (REQ-closure-observability-harness-logging).
 func TestAuditedHarnessLoggingBounds(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"Fatal", "Fatalf", "Error", "Errorf", "Log", "Logf", "Skip", "Skipf", "SkipNow", "Fail", "FailNow"} {
 		if !auditedHarnessLogging(true, "testing", name) {
 			t.Errorf("auditedHarnessLogging(true, testing, %s) = false, want audited", name)
@@ -1091,6 +1098,7 @@ func TestAuditedHarnessLoggingBounds(t *testing.T) {
 // projection: the admission is observation evidence, never purity
 // evidence.
 func TestHarnessLoggingIsNotPurityEvidence(t *testing.T) {
+	t.Parallel()
 	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
@@ -1150,6 +1158,7 @@ func TestHarnessLoggingIsNotPurityEvidence(t *testing.T) {
 // declarations, so a drifting toolchain fails here instead of silently
 // widening the admission (REQ-closure-observability-harness-logging).
 func TestHarnessLoggingDeclarationInventory(t *testing.T) {
+	t.Parallel()
 	// Source mode is load-bearing: export data materializes only the
 	// exported surface, and the admission must refuse an audited-name
 	// method on an unexported body-local type too.
@@ -1203,6 +1212,7 @@ func TestHarnessLoggingDeclarationInventory(t *testing.T) {
 // A drifting toolchain fails here instead of silently widening
 // (REQ-closure-observability-subtest-driver).
 func TestHarnessSubtestDriverDeclarationInventory(t *testing.T) {
+	t.Parallel()
 	testingPkg := testenv.CachedStdlibPackage(t, os.Environ(), "testing")
 	if testingPkg == nil || testingPkg.Types == nil {
 		t.Fatal("loaded nil testing package or types")
@@ -1261,6 +1271,7 @@ func TestHarnessSubtestDriverDeclarationInventory(t *testing.T) {
 // mixed files keep the fail-closed floor
 // (REQ-closure-blindspot's resolved disposition at the file-scan floor).
 func TestAuditedLinknameFloorBounds(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		text string
 		want bool
@@ -1304,6 +1315,7 @@ func TestAuditedLinknameFloorBounds(t *testing.T) {
 // classification: the direction that makes an unaudited stdlib refuse
 // instead of silently inheriting a stale proof.
 func TestUnauditedToolchainDropsAdmissions(t *testing.T) {
+	t.Parallel()
 	if classBPureStandard(false, "fmt", "Sprint") {
 		t.Error("classBPureStandard admits fmt.Sprint on an unaudited toolchain")
 	}
@@ -1348,6 +1360,7 @@ func TestUnauditedToolchainDropsAdmissions(t *testing.T) {
 // admitted on the audited toolchain; this companion pins that half so
 // the drop assertions cannot rot into always-false trivia.
 func TestAuditedToolchainAdmitsTheDropFakes(t *testing.T) {
+	t.Parallel()
 	if !auditedLinknamesOnly(true, "//go:linkname a runtime.getAuxv\n") {
 		t.Error("the audited-pull linkname line is not admitted on the audited toolchain")
 	}
@@ -1406,6 +1419,7 @@ func (t *T) Run(name string, f func(*T)) bool { return true }
 // filesystem reaches and its error variables refuse naming themselves
 // (REQ-closure-observability-audited-set).
 func TestNetURLAndFilepathAdmissions(t *testing.T) {
+	t.Parallel()
 	if isSourceOnlyStandardPackage(true, "net/url") || isAlwaysExternalPackage("net/url") || !isAlwaysExternalPackage("net/http") || !isAlwaysExternalPackage("net") {
 		t.Fatal("net/url membership: want by symbol only, outside the always-external net tree, the tree itself unchanged")
 	}
@@ -1595,6 +1609,7 @@ func Count(root string) int {
 // prove observable, while every other benchmark surface keeps its
 // class (REQ-closure-observability-benchmark-pacing).
 func TestBenchmarkPacingIsHarnessProtocol(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"N", "Loop", "ResetTimer", "StartTimer", "StopTimer"} {
 		if !auditedHarnessPacing(true, "testing", name) || auditedHarnessPacing(false, "testing", name) {
 			t.Errorf("testing.%s: want pacing on an audited toolchain only", name)
@@ -1725,6 +1740,7 @@ func BenchmarkResultField(b *testing.B) {
 // effect keeps the causal reason
 // (REQ-closure-observability-benchmark-pacing).
 func TestBenchmarkPacingIsNotPurityEvidence(t *testing.T) {
+	t.Parallel()
 	h, err := newAt("")
 	if err != nil {
 		t.Fatal(err)
@@ -1790,6 +1806,7 @@ func TestBenchmarkPacingIsNotPurityEvidence(t *testing.T) {
 // The typed testing scan's memo serves the classification table, so
 // the strategy moves with it (REQ-closure-testing-scan-memo).
 func TestTestingScanStrategyVersion(t *testing.T) {
+	t.Parallel()
 	if testingScanStrategy != "gofresh/testing-scan@6" {
 		t.Fatalf("testing-scan strategy = %q, want @6 — the harness lifecycle Context read rejoined the table", testingScanStrategy)
 	}
@@ -1802,6 +1819,7 @@ func TestTestingScanStrategyVersion(t *testing.T) {
 // none as a package-level function. A drifting toolchain fails here
 // instead of silently widening (REQ-closure-observability-benchmark-pacing).
 func TestBenchmarkPacingDeclarationInventory(t *testing.T) {
+	t.Parallel()
 	testingPkg := testenv.CachedStdlibPackage(t, os.Environ(), "testing")
 	if testingPkg == nil || testingPkg.Types == nil || len(testingPkg.Syntax) == 0 {
 		t.Fatal("loaded testing package without types or syntax")
@@ -1860,6 +1878,7 @@ func TestBenchmarkPacingDeclarationInventory(t *testing.T) {
 // and struct-field maps) all close under audited observability
 // (REQ-closure-observability-dispatch, REQ-closure-observability-audited-set).
 func TestObservabilityInterfaceContainerAndMutualInvokeClosure(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	writeFile(t, dir, "go.mod", "module example.com/ifclosure\n\ngo 1.26\n")
 	writeFile(t, dir, "ifclosure.go", `package ifclosure
@@ -2796,21 +2815,9 @@ func TestDynamicOpenCaller(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := summaryCacheLen(); got != 0 {
-		t.Errorf("summaryCacheLen after ComputeObservabilityBatch = %d, want 0", got)
-	}
-	if got := mutatedGlobalsCacheLen(); got != 0 {
-		t.Errorf("mutatedGlobalsCacheLen after ComputeObservabilityBatch = %d, want 0", got)
-	}
 	eRooted, err := h3.ComputeRootedFunctions(context.Background(), extraSubjects)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if got := summaryCacheLen(); got != 0 {
-		t.Errorf("summaryCacheLen after ComputeRootedFunctions = %d, want 0", got)
-	}
-	if got := mutatedGlobalsCacheLen(); got != 0 {
-		t.Errorf("mutatedGlobalsCacheLen after ComputeRootedFunctions = %d, want 0", got)
 	}
 	binRooted, err := h3.ComputeBinaryRootedFunctions(context.Background(), []string{
 		"example.com/ifclosure/cleanupclosed",
@@ -2819,12 +2826,6 @@ func TestDynamicOpenCaller(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if got := summaryCacheLen(); got != 0 {
-		t.Errorf("summaryCacheLen after ComputeBinaryRootedFunctions = %d, want 0", got)
-	}
-	if got := mutatedGlobalsCacheLen(); got != 0 {
-		t.Errorf("mutatedGlobalsCacheLen after ComputeBinaryRootedFunctions = %d, want 0", got)
 	}
 
 	if p := eProofs[ctxSprintSubj]; !p.Observable || p.EffectFree {
@@ -2941,6 +2942,7 @@ func TestDynamicOpenCaller(t *testing.T) {
 }
 
 func TestObservabilityDotlessModuleAndPromotedEmbedding(t *testing.T) {
+	t.Parallel()
 
 	// 1. Dotless user module ("module app"): user types, globals, signatures,
 	// and promoted wrappers must never be misclassified as standard library.
@@ -3422,3 +3424,2088 @@ func TestPlantReflect(t *testing.T) {
 		t.Errorf("TestUnnamedPureEmbed observability = %+v, want Observable && EffectFree", p)
 	}
 }
+
+func TestObservabilityStartupPruningAssemblyAndOpenWorldClosures(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	for _, sub := range []string{
+		"startupprune",
+		"startupmutated",
+		"startupasync",
+		"startuplinkname",
+		"startupshadow",
+		"startupunreached",
+		"startupfuzz",
+		"startupshadowfalse",
+		"openworld",
+		"ctxtimer",
+		"sentinelmut",
+		"sentinellinkname",
+		"iowrap",
+		"iowrapmut",
+		"iowrapmr",
+		"ctxmut",
+		"customsimd",
+		"mixedasmwiden",
+		"hwprobe",
+		"hwcapok",
+		"hwcapmut",
+		"hwcapbadtype",
+		"hwcapconflict",
+		"initasmonce",
+		"asmtestcollide",
+		"startupinitnohelper",
+		"startupwidenedshared",
+	} {
+		if err := os.MkdirAll(filepath.Join(root, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, root, "go.mod", "module example.com/startupopen\n\ngo 1.26\n")
+
+	// 1. Unmutated zero-global dead-branch pruning (including *bool flag pointer
+	// pattern) and runtime.GOARCH/GOOS constant-branch pruning in package init.
+	writeFile(t, root, "startupprune/startupprune.go", `package startupprune
+
+import (
+	"fmt"
+	"os"
+	"runtime"
+)
+
+var (
+	deadHook     func()
+	deadToggle   bool
+	displayFeats *bool
+)
+
+func init() {
+	if deadHook != nil {
+		deadHook()
+		_ = os.Getenv("DEAD_HOOK_ENV")
+	}
+	if deadToggle {
+		_ = os.Getenv("DEAD_TOGGLE_ENV")
+	}
+	if displayFeats != nil && *displayFeats {
+		fmt.Println("features")
+		os.Exit(1)
+	}
+	if runtime.GOARCH == "wasm" || runtime.GOOS == "plan9" {
+		_ = os.Getenv("DEAD_ARCH_ENV")
+	}
+}
+
+func Add(a, b int) int {
+	return a + b
+}
+`)
+	writeFile(t, root, "startupprune/startupprune_test.go", `package startupprune
+
+import "testing"
+
+func TestAdd(t *testing.T) {
+	if Add(2, 3) != 5 {
+		t.Fatal("unexpected sum")
+	}
+}
+`)
+
+	// Negative control A: when the package global is mutated in init, its
+	// branch is live and must refuse fail-closed on the startup effect.
+	writeFile(t, root, "startupmutated/startupmutated.go", `package startupmutated
+
+import "os"
+
+var liveToggle bool
+
+func init() {
+	liveToggle = true
+	if liveToggle {
+		_ = os.Getenv("LIVE_TOGGLE_ENV")
+	}
+}
+
+func Sub(a, b int) int {
+	return a - b
+}
+`)
+	writeFile(t, root, "startupmutated/startupmutated_test.go", `package startupmutated
+
+import "testing"
+
+func TestSub(t *testing.T) {
+	if Sub(5, 3) != 2 {
+		t.Fatal("unexpected diff")
+	}
+}
+`)
+
+	// Negative control B: an async goroutine spawned in init() executes
+	// concurrently with post-init functions and can observe post-init global
+	// writes, so it must NOT prune based on sync-init-only unmutated globals.
+	writeFile(t, root, "startupasync/startupasync.go", `package startupasync
+
+import "os"
+
+var postInitToggle bool
+
+func init() {
+	go func() {
+		if postInitToggle {
+			_ = os.Getenv("ASYNC_STARTUP_ENV")
+		}
+	}()
+}
+
+func EnableToggle() {
+	postInitToggle = true
+}
+
+func Mul(a, b int) int {
+	return a * b
+}
+`)
+	writeFile(t, root, "startupasync/startupasync_test.go", `package startupasync
+
+import "testing"
+
+func TestMul(t *testing.T) {
+	EnableToggle()
+	if Mul(3, 4) != 12 {
+		t.Fatal("unexpected product")
+	}
+}
+`)
+
+	// Negative control C: a //go:linkname global alias cannot be proven
+	// unmutated by SSA stores on the local *ssa.Global alone and must refuse.
+	writeFile(t, root, "startuplinkname/startuplinkname.go", `package startuplinkname
+
+import (
+	"os"
+	_ "unsafe"
+)
+
+//go:linkname linkedToggle example.com/startupopen/startuplinkname.aliasToggle
+var linkedToggle bool
+
+var aliasToggle = true
+
+func init() {
+	if linkedToggle {
+		_ = os.Getenv("LINKNAME_STARTUP_ENV")
+	}
+}
+
+func Ident(x int) int {
+	if aliasToggle {
+		return x
+	}
+	return 0
+}
+`)
+	writeFile(t, root, "startuplinkname/startuplinkname_test.go", `package startuplinkname
+
+import "testing"
+
+func TestIdent(t *testing.T) {
+	if Ident(7) != 7 {
+		t.Fatal("unexpected value")
+	}
+}
+`)
+
+	// Negative control D: a local parameter shadowing an unmutated zero global
+	// must never be pruned as if it were the zero global.
+	writeFile(t, root, "startupshadow/startupshadow.go", `package startupshadow
+
+import "os"
+
+var shadowToggle bool
+
+func shadowHelper(shadowToggle bool) {
+	if shadowToggle {
+		_ = os.Getenv("SHADOW_STARTUP_ENV")
+	}
+}
+
+func init() {
+	shadowHelper(true)
+}
+
+func Neg(x int) int {
+	return -x
+}
+`)
+	writeFile(t, root, "startupshadow/startupshadow_test.go", `package startupshadow
+
+import "testing"
+
+func TestNeg(t *testing.T) {
+	if Neg(4) != -4 {
+		t.Fatal("unexpected neg")
+	}
+}
+`)
+
+	// 2. Open-world subject enumeration:
+	// - Carrier-free equality-only error parameter: both direct call
+	//   (CustomErr.Is) and indirect errors.Is-only dispatch (IndirectErr.Is
+	//   with zero direct .Is static call sites), plus strconv.ErrRange /
+	//   strconv.ErrSyntax sentinel comparisons.
+	// - Audited context.Context cancellation checks (ctx.Done(), ctx.Err())
+	//   under context.Background, t.Context, and context.WithCancel.
+	// - Generic helper with concrete instantiations calling an open-world function.
+	// - Bound interface method value converted to a named function type (*ssa.ChangeType).
+	// - Audited io.NopCloser wrapping strings.NewReader.
+	writeFile(t, root, "openworld/openworld.go", `package openworld
+
+import (
+	"context"
+	"errors"
+	"io"
+	"strconv"
+)
+
+var ErrCustom = errors.New("custom error")
+
+type CustomErr struct {
+	Code int
+}
+
+func (e *CustomErr) Error() string {
+	return "custom"
+}
+
+func (e *CustomErr) Is(target error) bool {
+	return target == ErrCustom || target == strconv.ErrRange || target == strconv.ErrSyntax
+}
+
+type IndirectErr struct {
+	Op string
+}
+
+func (e *IndirectErr) Error() string {
+	return e.Op
+}
+
+func (e *IndirectErr) Is(target error) bool {
+	return target == ErrCustom
+}
+
+func CheckCancelOnly(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
+
+type Runner interface {
+	Run() int
+}
+
+type ConstRunner struct {
+	V int
+}
+
+func (r ConstRunner) Run() int {
+	return r.V
+}
+
+type HookFn func() int
+
+func CallHook(fn HookFn) int {
+	return fn()
+}
+
+func DispatchBoundConverted(r Runner) int {
+	var h HookFn = r.Run
+	return CallHook(h)
+}
+
+func ApplyGeneric[T ~int](v T) int {
+	return OpenTarget(func(y int) int { return int(v) + y })
+}
+
+func OpenTarget(f func(int) int) int {
+	return f(7)
+}
+
+func ReadNopCloser(rc io.ReadCloser) (int, error) {
+	var buf [4]byte
+	n, _ := rc.Read(buf[:])
+	return n, rc.Close()
+}
+`)
+	writeFile(t, root, "openworld/openworld_test.go", `package openworld
+
+import (
+	"context"
+	"errors"
+	"io"
+	"strconv"
+	"strings"
+	"testing"
+)
+
+func TestOpenWorldAdmissions(t *testing.T) {
+	ce := &CustomErr{Code: 1}
+	if !ce.Is(ErrCustom) || !ce.Is(strconv.ErrRange) {
+		t.Fatal("expected Is match")
+	}
+	var ie error = &IndirectErr{Op: "read"}
+	if !errors.Is(ie, ErrCustom) {
+		t.Fatal("expected errors.Is match")
+	}
+	if err := CheckCancelOnly(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := CheckCancelOnly(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	cctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := CheckCancelOnly(cctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
+	}
+	if DispatchBoundConverted(ConstRunner{V: 11}) != 11 {
+		t.Fatal("unexpected bound converted result")
+	}
+	if res := ApplyGeneric[int](3); res != 10 {
+		t.Fatal("unexpected generic result")
+	}
+	n, err := ReadNopCloser(io.NopCloser(strings.NewReader("abcd")))
+	if err != nil || n != 4 {
+		t.Fatalf("ReadNopCloser = %d, %v", n, err)
+	}
+}
+`)
+
+	// Negative control for unenumerated context caller: when a caller obtains
+	// its parent context from an unclosed slice of functions and wraps it in
+	// context.WithTimeout, the callee must refuse fail-closed.
+	writeFile(t, root, "ctxtimer/ctxtimer.go", `package ctxtimer
+
+import (
+	"context"
+	"time"
+)
+
+func CheckWithTimerInProgram(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
+
+func PassDynamicCtx(fns []func() context.Context) error {
+	ctx, cancel := context.WithTimeout(fns[0](), time.Millisecond)
+	defer cancel()
+	return CheckWithTimerInProgram(ctx)
+}
+`)
+	writeFile(t, root, "ctxtimer/ctxtimer_test.go", `package ctxtimer
+
+import (
+	"context"
+	"testing"
+)
+
+func TestTimerContextRefuses(t *testing.T) {
+	_ = PassDynamicCtx([]func() context.Context{context.Background})
+}
+`)
+
+	// Negative control E: unreached sibling function mutating a zero global and
+	// calling os.Setenv inside if flag must NOT have its if body pruned as a
+	// startup-only declaration, preserving package-wide process-hazard refusal.
+	writeFile(t, root, "startupunreached/startupunreached.go", `package startupunreached
+
+import "os"
+
+var unreachedFlag bool
+
+func EnableAndPollute() {
+	unreachedFlag = true
+	if unreachedFlag {
+		_ = os.Setenv("POLLUTE_ENV", "1")
+	}
+}
+
+func PureId(x int) int {
+	return x
+}
+`)
+
+	// Negative control F: a helper shared between init() and an f.Fuzz callback
+	// executes post-startup and must not prune branches on a fuzz-mutated global.
+	writeFile(t, root, "startupfuzz/startupfuzz.go", `package startupfuzz
+`)
+	writeFile(t, root, "startupfuzz/startupfuzz_test.go", `package startupfuzz
+
+import (
+	"os"
+	"testing"
+)
+
+var fuzzToggle bool
+
+func sharedHelper() {
+	if fuzzToggle {
+		_ = os.Getenv("FUZZ_STARTUP_ENV")
+	}
+}
+
+func init() {
+	sharedHelper()
+}
+
+func FuzzSharedHelper(f *testing.F) {
+	f.Add(1)
+	f.Fuzz(func(t *testing.T, x int) {
+		if x > 0 {
+			fuzzToggle = true
+		}
+		sharedHelper()
+	})
+}
+`)
+
+	// Negative control G: parameter shadowing universe identifier "false" must
+	// not be treated as boolean literal false when checking if zeroFlag != false.
+	writeFile(t, root, "startupshadowfalse/startupshadowfalse.go", `package startupshadowfalse
+
+import "os"
+
+var zeroFlag bool
+
+func checkShadow(false bool) {
+	if zeroFlag != false {
+		_ = os.Getenv("SHADOW_FALSE_ENV")
+	}
+}
+
+func init() {
+	checkShadow(true)
+}
+
+func Double(x int) int {
+	return x * 2
+}
+`)
+
+	// Sentinel & io/context wrapper controls:
+	// - First-party errors.New global overwritten in func init() (init#1) must not
+	//   narrow to *errors.errorString.
+	writeFile(t, root, "sentinelmut/sentinelmut.go", `package sentinelmut
+
+import (
+	"errors"
+	"os"
+)
+
+var ErrMut = errors.New("initial")
+
+type evilSentinel struct{}
+
+func (evilSentinel) Error() string {
+	return os.Getenv("EVIL_SENTINEL_ENV")
+}
+
+func init() {
+	ErrMut = evilSentinel{}
+}
+
+func ReadSentinel() string {
+	return ErrMut.Error()
+}
+
+func FormatMutSentinel(err error) string {
+	return err.Error()
+}
+
+func CallFormatMutSentinel() string {
+	return FormatMutSentinel(ErrMut)
+}
+`)
+
+	// - First-party errors.New global with //go:linkname hazard must refuse.
+	writeFile(t, root, "sentinellinkname/sentinellinkname.go", `package sentinellinkname
+
+import (
+	"errors"
+	_ "unsafe"
+)
+
+//go:linkname ErrLinked example.com/startupopen/sentinellinkname.errAlias
+var ErrLinked = errors.New("linked")
+
+var errAlias error
+
+func ReadLinkedSentinel() string {
+	return ErrLinked.Error()
+}
+`)
+
+	// - io.LimitReader over a nil-error reader synthesizes io.EOF; unmutated
+	//   io.EOF collects *errors.errorString cleanly.
+	writeFile(t, root, "iowrap/iowrap.go", `package iowrap
+
+import "io"
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	return 0, nil
+}
+
+func ReadLimitedEOF() string {
+	r := io.LimitReader(zeroReader{}, 0)
+	var buf [4]byte
+	_, err := r.Read(buf[:])
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+`)
+
+	// - Mutated io.EOF refuses io.LimitReader error narrowing.
+	writeFile(t, root, "iowrapmut/iowrapmut.go", `package iowrapmut
+
+import (
+	"io"
+	"os"
+)
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	return 0, nil
+}
+
+type evilIOErr struct{}
+
+func (evilIOErr) Error() string {
+	return os.Getenv("EVIL_IO_EOF_ENV")
+}
+
+func PoisonEOF() {
+	io.EOF = evilIOErr{}
+}
+
+func ReadLimitedMutatedEOF() string {
+	r := io.LimitReader(zeroReader{}, 0)
+	var buf [4]byte
+	_, err := r.Read(buf[:])
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+`)
+
+	// - io.MultiReader.WriteTo(w) invokes w.Write even when wrapped readers lack
+	//   WriteTo; must not skip (*io.multiReader).WriteTo as a pure reader wrapper.
+	writeFile(t, root, "iowrapmr/iowrapmr.go", `package iowrapmr
+
+import (
+	"io"
+	"os"
+)
+
+type oneByteReader struct{}
+
+func (oneByteReader) Read(p []byte) (int, error) {
+	if len(p) > 0 {
+		p[0] = 'x'
+		return 1, nil
+	}
+	return 0, io.EOF
+}
+
+type evilErr struct{}
+
+func (evilErr) Error() string {
+	return os.Getenv("EVIL_MR_WRITETO_ENV")
+}
+
+type evilWriter struct{}
+
+func (evilWriter) Write(p []byte) (int, error) {
+	return 0, evilErr{}
+}
+
+func MultiReaderWriteToErr() string {
+	wt := io.MultiReader(oneByteReader{}).(io.WriterTo)
+	_, err := wt.WriteTo(evilWriter{})
+	if err != nil {
+		return err.Error()
+	}
+	return ""
+}
+`)
+
+	// - Mutated context.Canceled refuses ctx.Err() sentinel narrowing.
+	writeFile(t, root, "ctxmut/ctxmut.go", `package ctxmut
+
+import (
+	"context"
+	"os"
+)
+
+type evilCtxErr struct{}
+
+func (evilCtxErr) Error() string {
+	return os.Getenv("EVIL_CTX_CANCELED_ENV")
+}
+
+func PoisonCanceled() {
+	context.Canceled = evilCtxErr{}
+}
+
+func ReadMutatedCanceledErr() string {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx.Err().Error()
+}
+`)
+
+	// 3. Module/version-independent mechanical per-TEXT .s verification under
+	// arbitrary package paths (example.com/startupopen/customsimd and hwprobe),
+	// plus verified read-only pull //go:linkname on internal/cpu.HWCap.
+	writeFile(t, root, "customsimd/a.h", "#include \"b.h\"\n")
+	writeFile(t, root, "customsimd/b.h", "#define ADD_STEP(dst, src) \\\n\tADDL src, dst\n")
+	writeFile(t, root, "customsimd/customsimd_amd64.go", `//go:build amd64
+
+package customsimd
+
+func PureKernel(x uint32) uint32
+func ReadCounter() uint64
+
+func UsePureKernel(x uint32) uint32 {
+	return PureKernel(x)
+}
+
+func UseReadCounter() uint64 {
+	return ReadCounter()
+}
+`)
+	writeFile(t, root, "customsimd/tables_amd64.s", `#include "textflag.h"
+
+DATA ·sharedTable+0(SB)/4, $0x12345678
+GLOBL ·sharedTable(SB), RODATA, $4
+`)
+	writeFile(t, root, "customsimd/customsimd_amd64.s", `#include "textflag.h"
+#include "a.h"
+
+DATA localConst<>+0(SB)/4, $7
+GLOBL localConst<>(SB), RODATA, $4
+
+TEXT ·PureKernel(SB), NOSPLIT, $0-12
+	MOVL x+0(FP), AX
+	MOVL ·sharedTable+0(SB), BX
+	ADD_STEP(AX, BX)
+	ADDL localConst<>+0(SB), AX
+	MOVL AX, ret+8(FP)
+	RET
+
+TEXT ·ReadCounter(SB), NOSPLIT, $0-8
+	BYTE $0x0f; BYTE $0x01; BYTE $0xf9
+	MOVQ AX, ret+0(FP)
+	RET
+`)
+	writeFile(t, root, "customsimd/customsimd_arm64.go", `//go:build arm64
+
+package customsimd
+
+func PureKernel(x uint32) uint32
+func ReadCounter() uint64
+
+func UsePureKernel(x uint32) uint32 {
+	return PureKernel(x)
+}
+
+func UseReadCounter() uint64 {
+	return ReadCounter()
+}
+`)
+	writeFile(t, root, "customsimd/tables_arm64.s", `#include "textflag.h"
+
+DATA ·sharedTable+0(SB)/4, $0x12345678
+GLOBL ·sharedTable(SB), RODATA, $4
+`)
+	writeFile(t, root, "customsimd/customsimd_arm64.s", `#include "textflag.h"
+
+DATA localConst<>+0(SB)/4, $7
+GLOBL localConst<>(SB), RODATA, $4
+
+TEXT ·PureKernel(SB), NOSPLIT, $0-12
+	MOVWU x+0(FP), R0
+	MOVWU ·sharedTable+0(SB), R1
+	ADDW R1, R0, R0
+	MOVWU localConst<>+0(SB), R2
+	ADDW R2, R0, R0
+	MOVWU R0, ret+8(FP)
+	RET
+
+TEXT ·ReadCounter(SB), NOSPLIT, $0-8
+	WORD $0xd53be040
+	MOVD R0, ret+0(FP)
+	RET
+`)
+	writeFile(t, root, "customsimd/customsimd_other.go", `//go:build !amd64 && !arm64
+
+package customsimd
+
+import "os"
+
+func UsePureKernel(x uint32) uint32 {
+	return x + 0x12345678 + 7
+}
+
+func UseReadCounter() uint64 {
+	_ = os.Getenv("COUNTER_FALLBACK")
+	return 0
+}
+`)
+
+	// Widened scan importing a mixed pure/impure .s package must refuse because
+	// verifiedPackageAssemblyMaximalPure rejects packages with impure TEXT symbols.
+	writeFile(t, root, "mixedasmwiden/mixedasmwiden.go", `package mixedasmwiden
+
+import (
+	"reflect"
+
+	"example.com/startupopen/customsimd"
+)
+
+type box struct{}
+
+func (box) M() uint32 { return customsimd.UsePureKernel(1) }
+
+var dynMethod = "M"
+
+func WidenedWithMixedAsm() int {
+	v := reflect.ValueOf(box{}).MethodByName(dynMethod)
+	return int(v.Call(nil)[0].Uint())
+}
+`)
+
+	// Static CPU-feature queries (both in init() via a package function variable
+	// and range-over-int brand loop, and directly at subject time) vs per-core
+	// APIC ID reads under an arbitrary package path (zero package-name allowlist).
+	writeFile(t, root, "hwprobe/hwprobe_amd64.go", `//go:build amd64
+
+package hwprobe
+
+func asmCpuid(op uint32) (eax, ebx, ecx, edx uint32)
+func asmXgetbv(index uint32) (eax, edx uint32)
+
+var (
+	cpuidFn      func(op uint32) (eax, ebx, ecx, edx uint32)
+	initFeatures uint32
+)
+
+func init() {
+	cpuidFn = asmCpuid
+	_, ebx, _, _ := cpuidFn(1)
+	logicalCount := (ebx >> 16) & 0xff
+	var brand uint32
+	for i := range uint32(3) {
+		a, b, c, d := cpuidFn(0x80000002 + i)
+		brand ^= a ^ b ^ c ^ d
+	}
+	initFeatures = logicalCount ^ brand
+}
+
+func ProbeStaticFeatures() uint32 {
+	_, ebx, ecx, edx := asmCpuid(1)
+	maskedEBX := ebx & 0x00ffffff
+	xlo, xhi := asmXgetbv(0)
+	return initFeatures ^ maskedEBX ^ ecx ^ edx ^ xlo ^ xhi
+}
+
+func ProbeLogicalCoreID() uint32 {
+	_, ebx, _, _ := asmCpuid(1)
+	return ebx >> 24
+}
+`)
+	writeFile(t, root, "hwprobe/hwprobe_amd64.s", `#include "textflag.h"
+
+TEXT ·asmCpuid(SB), NOSPLIT, $0-24
+	XORQ CX, CX
+	MOVL op+0(FP), AX
+	CPUID
+	MOVL AX, eax+8(FP)
+	MOVL BX, ebx+12(FP)
+	MOVL CX, ecx+16(FP)
+	MOVL DX, edx+20(FP)
+	RET
+
+TEXT ·asmXgetbv(SB), NOSPLIT, $0-16
+	MOVL index+0(FP), CX
+	BYTE $0x0f; BYTE $0x01; BYTE $0xd0
+	MOVL AX, eax+8(FP)
+	MOVL DX, edx+12(FP)
+	RET
+`)
+	writeFile(t, root, "hwprobe/hwprobe_arm64.go", `//go:build arm64
+
+package hwprobe
+
+func getInstAttr() uint64
+func getMpidr() uint64
+
+func ProbeStaticFeatures() uint32 {
+	return uint32(getInstAttr())
+}
+
+func ProbeLogicalCoreID() uint32 {
+	return uint32(getMpidr())
+}
+`)
+	writeFile(t, root, "hwprobe/hwprobe_arm64.s", `#include "textflag.h"
+
+TEXT ·getInstAttr(SB), NOSPLIT, $0-8
+	WORD $0xd5380600
+	MOVD R0, ret+0(FP)
+	RET
+
+TEXT ·getMpidr(SB), NOSPLIT, $0-8
+	WORD $0xd53800a0
+	MOVD R0, ret+0(FP)
+	RET
+`)
+	writeFile(t, root, "hwprobe/hwprobe_other.go", `//go:build !amd64 && !arm64
+
+package hwprobe
+
+import "os"
+
+func ProbeStaticFeatures() uint32 {
+	return 1
+}
+
+func ProbeLogicalCoreID() uint32 {
+	_ = os.Getenv("APIC_FALLBACK")
+	return 0
+}
+`)
+
+	// Verified read-only pull //go:linkname on internal/cpu.HWCap (including
+	// freestanding file-level directive separated by a blank line) vs mutated,
+	// bad-type, and conflicting-target negative controls.
+	writeFile(t, root, "hwcapok/hwcapok.go", `package hwcapok
+
+import _ "unsafe"
+
+//go:linkname hwcap internal/cpu.HWCap
+
+var hwcap uint
+
+func ReadHWCapMask() bool {
+	return (hwcap & 1) != 0
+}
+`)
+	writeFile(t, root, "hwcapmut/hwcapmut.go", `package hwcapmut
+
+import _ "unsafe"
+
+//go:linkname hwcap internal/cpu.HWCap
+var hwcap uint
+
+func badGeneric[T any]() {
+	hwcap = 1
+}
+
+func ReadMutatedHWCap() bool {
+	return (hwcap & 1) != 0
+}
+`)
+	writeFile(t, root, "hwcapbadtype/hwcapbadtype.go", `package hwcapbadtype
+
+import _ "unsafe"
+
+//go:linkname hwcap internal/cpu.HWCap
+var hwcap string
+
+func ReadStringHWCap() int {
+	return len(hwcap)
+}
+`)
+	writeFile(t, root, "hwcapconflict/hwcapconflict.go", `package hwcapconflict
+
+import _ "unsafe"
+
+//go:linkname hwcap internal/cpu.HWCap
+//go:linkname hwcap runtime.buildVersion
+var hwcap uint
+
+func ReadConflictHWCap() bool {
+	return (hwcap & 1) != 0
+}
+`)
+
+	// Impure assembly reached from init() through stdlib sync.Once.Do while the
+	// subject itself is pure Go must be refused.
+	writeFile(t, root, "initasmonce/initasmonce.go", `package initasmonce
+
+import "sync"
+
+var once sync.Once
+
+func rdtscInit()
+
+func init() {
+	once.Do(rdtscInit)
+}
+
+func PureGoSubject() int {
+	return 42
+}
+`)
+	writeFile(t, root, "initasmonce/initasmonce_amd64.s", `//go:build amd64
+
+#include "textflag.h"
+
+TEXT ·rdtscInit(SB), NOSPLIT, $0-0
+	BYTE $0x0f; BYTE $0x01; BYTE $0xf9
+	RET
+`)
+	writeFile(t, root, "initasmonce/initasmonce_arm64.s", `//go:build arm64
+
+#include "textflag.h"
+
+TEXT ·rdtscInit(SB), NOSPLIT, $0-0
+	WORD $0xd53800a0
+	RET
+`)
+
+	// Assembly GLOBL colliding with an in-package _test.go variable must fail
+	// closed deterministically across compartments.
+	writeFile(t, root, "asmtestcollide/asmtestcollide.go", `package asmtestcollide
+
+func LoadLut() uint64
+
+func UseCollide() uint64 {
+	return LoadLut()
+}
+`)
+	writeFile(t, root, "asmtestcollide/asmtestcollide_test.go", `package asmtestcollide
+
+import "testing"
+
+var testTable uint64
+
+func TestCollide(t *testing.T) {
+	testTable = 7
+	_ = UseCollide()
+}
+`)
+	writeFile(t, root, "asmtestcollide/asmtestcollide_amd64.s", `//go:build amd64
+
+#include "textflag.h"
+
+DATA ·testTable+0(SB)/8, $1
+GLOBL ·testTable(SB), RODATA, $8
+
+TEXT ·LoadLut(SB), NOSPLIT, $0-8
+	MOVQ ·testTable+0(SB), AX
+	MOVQ AX, ret+0(FP)
+	RET
+`)
+	writeFile(t, root, "asmtestcollide/asmtestcollide_arm64.s", `//go:build arm64
+
+#include "textflag.h"
+
+DATA ·testTable+0(SB)/8, $1
+GLOBL ·testTable(SB), RODATA, $8
+
+TEXT ·LoadLut(SB), NOSPLIT, $0-8
+	MOVD ·testTable+0(SB), R0
+	MOVD R0, ret+0(FP)
+	RET
+`)
+
+	// Dead startup if branch directly inside func init() with no named startup
+	// helper functions (plus a defined boolean type) must prune os.Exit(1).
+	writeFile(t, root, "startupinitnohelper/startupinitnohelper.go", `package startupinitnohelper
+
+import "os"
+
+type customBool bool
+
+var (
+	initDebugFlag customBool
+	initDebugHook func()
+)
+
+func init() {
+	if initDebugHook != nil || initDebugFlag {
+		os.Exit(1)
+	}
+}
+
+func EnableLater() {
+	initDebugFlag = true
+	initDebugHook = func() {}
+}
+
+func PureNoHelper(x int) int {
+	return x + 1
+}
+`)
+
+	// Closed subject mutating a startup-zero global and calling a helper shared
+	// with init() must NOT prune the helper's if body in the Tier-1 package scan.
+	writeFile(t, root, "startupwidenedshared/startupwidenedshared.go", `package startupwidenedshared
+
+import "runtime"
+
+var sharedZero bool
+
+func sharedHelper() {
+	if sharedZero {
+		runtime.GOMAXPROCS(0)
+	}
+}
+
+func init() {
+	sharedHelper()
+}
+
+func WidenedMutate() {
+	sharedZero = true
+	sharedHelper()
+}
+`)
+
+	// Detached file-scope //go:linkname (separated from var decl by blank line)
+	// must disqualify zero-global startup pruning via idx.linknameByName.
+	writeFile(t, root, "startupdetachedlink/startupdetachedlink.go", `package startupdetachedlink
+
+import (
+	"os"
+	_ "unsafe"
+)
+
+//go:linkname detachedZero example.com/other.detachedZero
+
+var detachedZero bool
+
+func init() {
+	if detachedZero {
+		os.Exit(1)
+	}
+}
+
+func ReadDetached(x int) int {
+	return x + 1
+}
+`)
+
+	// Non-canonical CPUID assembly wrapper (hardcoding leaf 1 and shifting EBX>>24
+	// into the EAX return slot while Go passes leaf 0) must be rejected fail-closed.
+	writeFile(t, root, "badcpuid/badcpuid_amd64.go", `//go:build amd64
+
+package badcpuid
+
+func sneakyCpuid(op uint32) (eax, ebx, ecx, edx uint32)
+
+func ProbeSneaky() uint32 {
+	eax, _, _, _ := sneakyCpuid(0)
+	return eax
+}
+`)
+	writeFile(t, root, "badcpuid/badcpuid_amd64.s", `//go:build amd64
+
+#include "textflag.h"
+
+TEXT ·sneakyCpuid(SB), NOSPLIT, $0-24
+	MOVL $1, AX
+	XORQ CX, CX
+	CPUID
+	SHRL $24, BX
+	MOVL BX, eax+8(FP)
+	MOVL $0, ebx+12(FP)
+	MOVL $0, ecx+16(FP)
+	MOVL $0, edx+20(FP)
+	RET
+`)
+	writeFile(t, root, "badcpuid/badcpuid_other.go", `//go:build !amd64
+
+package badcpuid
+
+import "os"
+
+func ProbeSneaky() uint32 {
+	return uint32(os.Getpid())
+}
+`)
+
+	// Assembly-backed method with receiver (`TEXT ·Box·AsmMethod(SB)`)
+	// must fail closed rather than bypassing receiver/symbol verification.
+	writeFile(t, root, "asmmethod/asmmethod_asm.go", `//go:build amd64 || arm64
+
+package asmmethod
+
+type Box struct{ X int }
+
+func (b Box) AsmMethod() int
+
+func CallAsmMethod(x int) int {
+	return Box{X: x}.AsmMethod()
+}
+`)
+	writeFile(t, root, "asmmethod/asmmethod_amd64.s", `//go:build amd64
+
+#include "textflag.h"
+
+TEXT ·Box·AsmMethod(SB), NOSPLIT, $0-16
+	MOVQ $0, ret+8(FP)
+	RET
+`)
+	writeFile(t, root, "asmmethod/asmmethod_arm64.s", `//go:build arm64
+
+#include "textflag.h"
+
+TEXT ·Box·AsmMethod(SB), NOSPLIT, $0-16
+	MOVD $0, ret+8(FP)
+	RET
+`)
+	writeFile(t, root, "asmmethod/asmmethod_other.go", `//go:build !amd64 && !arm64
+
+package asmmethod
+
+import "os"
+
+func CallAsmMethod(x int) int {
+	return os.Getpid() + x
+}
+`)
+
+	h, err := newAt(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addSubj := Subject{Package: "example.com/startupopen/startupprune", Symbol: "Add"}
+	testAddSubj := Subject{Package: "example.com/startupopen/startupprune", Symbol: "TestAdd"}
+	subSubj := Subject{Package: "example.com/startupopen/startupmutated", Symbol: "Sub"}
+	mulSubj := Subject{Package: "example.com/startupopen/startupasync", Symbol: "Mul"}
+	linknameSubj := Subject{Package: "example.com/startupopen/startuplinkname", Symbol: "Ident"}
+	shadowSubj := Subject{Package: "example.com/startupopen/startupshadow", Symbol: "Neg"}
+	isSubj := Subject{Package: "example.com/startupopen/openworld", Symbol: "CustomErr.Is"}
+	indirectIsSubj := Subject{Package: "example.com/startupopen/openworld", Symbol: "IndirectErr.Is"}
+	cancelSubj := Subject{Package: "example.com/startupopen/openworld", Symbol: "CheckCancelOnly"}
+	boundSubj := Subject{Package: "example.com/startupopen/openworld", Symbol: "DispatchBoundConverted"}
+	openTargetSubj := Subject{Package: "example.com/startupopen/openworld", Symbol: "OpenTarget"}
+	nopCloserSubj := Subject{Package: "example.com/startupopen/openworld", Symbol: "ReadNopCloser"}
+	testOpenSubj := Subject{Package: "example.com/startupopen/openworld", Symbol: "TestOpenWorldAdmissions"}
+	timerCtxSubj := Subject{Package: "example.com/startupopen/ctxtimer", Symbol: "CheckWithTimerInProgram"}
+	unreachedSubj := Subject{Package: "example.com/startupopen/startupunreached", Symbol: "PureId"}
+	fuzzStartupSubj := Subject{Package: "example.com/startupopen/startupfuzz", Symbol: "FuzzSharedHelper"}
+	shadowFalseSubj := Subject{Package: "example.com/startupopen/startupshadowfalse", Symbol: "Double"}
+	sentinelMutSubj := Subject{Package: "example.com/startupopen/sentinelmut", Symbol: "ReadSentinel"}
+	formatMutSentinelSubj := Subject{Package: "example.com/startupopen/sentinelmut", Symbol: "FormatMutSentinel"}
+	sentinelLinkSubj := Subject{Package: "example.com/startupopen/sentinellinkname", Symbol: "ReadLinkedSentinel"}
+	ioWrapOKSubj := Subject{Package: "example.com/startupopen/iowrap", Symbol: "ReadLimitedEOF"}
+	ioWrapMutSubj := Subject{Package: "example.com/startupopen/iowrapmut", Symbol: "ReadLimitedMutatedEOF"}
+	ioWrapMRSubj := Subject{Package: "example.com/startupopen/iowrapmr", Symbol: "MultiReaderWriteToErr"}
+	ctxMutSubj := Subject{Package: "example.com/startupopen/ctxmut", Symbol: "ReadMutatedCanceledErr"}
+	pureSimdSubj := Subject{Package: "example.com/startupopen/customsimd", Symbol: "UsePureKernel"}
+	counterSimdSubj := Subject{Package: "example.com/startupopen/customsimd", Symbol: "UseReadCounter"}
+	widenedMixedAsmSubj := Subject{Package: "example.com/startupopen/mixedasmwiden", Symbol: "WidenedWithMixedAsm"}
+	staticFeatSubj := Subject{Package: "example.com/startupopen/hwprobe", Symbol: "ProbeStaticFeatures"}
+	logicalCoreSubj := Subject{Package: "example.com/startupopen/hwprobe", Symbol: "ProbeLogicalCoreID"}
+	hwcapOKSubj := Subject{Package: "example.com/startupopen/hwcapok", Symbol: "ReadHWCapMask"}
+	hwcapMutSubj := Subject{Package: "example.com/startupopen/hwcapmut", Symbol: "ReadMutatedHWCap"}
+	hwcapBadTypeSubj := Subject{Package: "example.com/startupopen/hwcapbadtype", Symbol: "ReadStringHWCap"}
+	hwcapConflictSubj := Subject{Package: "example.com/startupopen/hwcapconflict", Symbol: "ReadConflictHWCap"}
+	initAsmOnceSubj := Subject{Package: "example.com/startupopen/initasmonce", Symbol: "PureGoSubject"}
+	asmTestCollideSubj := Subject{Package: "example.com/startupopen/asmtestcollide", Symbol: "UseCollide"}
+	initNoHelperSubj := Subject{Package: "example.com/startupopen/startupinitnohelper", Symbol: "PureNoHelper"}
+	widenedSharedSubj := Subject{Package: "example.com/startupopen/startupwidenedshared", Symbol: "WidenedMutate"}
+	detachedLinkSubj := Subject{Package: "example.com/startupopen/startupdetachedlink", Symbol: "ReadDetached"}
+	badCpuidSubj := Subject{Package: "example.com/startupopen/badcpuid", Symbol: "ProbeSneaky"}
+	asmMethodSubj := Subject{Package: "example.com/startupopen/asmmethod", Symbol: "CallAsmMethod"}
+
+	proofs, err := h.ComputeObservabilityBatch([]Subject{
+		addSubj, testAddSubj,
+		subSubj, mulSubj, linknameSubj, shadowSubj,
+		unreachedSubj, fuzzStartupSubj, shadowFalseSubj,
+		isSubj, indirectIsSubj, cancelSubj, boundSubj, openTargetSubj, nopCloserSubj, testOpenSubj,
+		timerCtxSubj,
+		sentinelMutSubj, formatMutSentinelSubj, sentinelLinkSubj,
+		ioWrapOKSubj, ioWrapMutSubj, ioWrapMRSubj, ctxMutSubj,
+		pureSimdSubj, counterSimdSubj, widenedMixedAsmSubj,
+		staticFeatSubj, logicalCoreSubj,
+		hwcapOKSubj, hwcapMutSubj, hwcapBadTypeSubj, hwcapConflictSubj,
+		initAsmOnceSubj, asmTestCollideSubj, initNoHelperSubj, widenedSharedSubj,
+		detachedLinkSubj, badCpuidSubj, asmMethodSubj,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []Subject{
+		addSubj, testAddSubj,
+		initNoHelperSubj,
+		isSubj, indirectIsSubj, cancelSubj, boundSubj, openTargetSubj, nopCloserSubj, testOpenSubj,
+		ioWrapOKSubj,
+		pureSimdSubj,
+		staticFeatSubj,
+		hwcapOKSubj,
+	} {
+		if p := proofs[s]; !p.Observable || !p.EffectFree {
+			t.Errorf("%s (%s) observability = %+v, want Observable && EffectFree", s.Package, s.Symbol, p)
+		}
+	}
+	for _, s := range []Subject{
+		subSubj, mulSubj, linknameSubj, shadowSubj,
+		unreachedSubj, fuzzStartupSubj, shadowFalseSubj, widenedSharedSubj,
+		timerCtxSubj,
+		formatMutSentinelSubj, sentinelLinkSubj,
+		counterSimdSubj, widenedMixedAsmSubj,
+		logicalCoreSubj,
+		hwcapMutSubj, hwcapBadTypeSubj, hwcapConflictSubj,
+		initAsmOnceSubj, asmTestCollideSubj,
+		detachedLinkSubj, badCpuidSubj, asmMethodSubj,
+	} {
+		if p := proofs[s]; p.Observable || p.EffectFree {
+			t.Errorf("%s (%s) observability = %+v, want fail-closed (!Observable && !EffectFree)", s.Package, s.Symbol, p)
+		}
+	}
+	for _, s := range []Subject{
+		sentinelMutSubj, ioWrapMutSubj, ioWrapMRSubj, ctxMutSubj,
+	} {
+		if p := proofs[s]; p.EffectFree {
+			t.Errorf("%s (%s) observability = %+v, want !EffectFree on mutated/evil error target", s.Package, s.Symbol, p)
+		}
+	}
+	if p := proofs[widenedSharedSubj]; !strings.HasPrefix(p.Reason, "package scan:") {
+		t.Errorf("%s (%s) reason = %q, want Tier-1 package scan backstop refusal", widenedSharedSubj.Package, widenedSharedSubj.Symbol, p.Reason)
+	}
+
+	if runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64" {
+		simdRooted, err := h.ComputeRootedFunctions(context.Background(), []Subject{pureSimdSubj, counterSimdSubj, asmMethodSubj})
+		if err != nil {
+			t.Fatalf("ComputeRootedFunctions on customsimd: %v", err)
+		}
+		if !simdRooted[pureSimdSubj].Complete {
+			t.Errorf("ComputeRootedFunctions(%v) = %+v, want Complete=true for verified pure .s leaf", pureSimdSubj, simdRooted[pureSimdSubj])
+		}
+		if simdRooted[counterSimdSubj].Complete {
+			t.Errorf("ComputeRootedFunctions(%v) = %+v, want Complete=false for unverified raw-opcode .s leaf", counterSimdSubj, simdRooted[counterSimdSubj])
+		}
+		if simdRooted[asmMethodSubj].Complete {
+			t.Errorf("ComputeRootedFunctions(%v) = %+v, want Complete=false for rejected assembly method", asmMethodSubj, simdRooted[asmMethodSubj])
+		}
+	}
+}
+
+func TestVerifyNonStdAssemblyMechanicalInvariants(t *testing.T) {
+	t.Parallel()
+
+	readMem := func(files map[string]string) func(string) ([]byte, error) {
+		return func(full string) ([]byte, error) {
+			content, ok := files[filepath.Base(full)]
+			if !ok {
+				return nil, os.ErrNotExist
+			}
+			return []byte(content), nil
+		}
+	}
+
+	// 1. Multi-file RODATA ·sym sharing, file-local <>sym isolation, constant
+	// arithmetic +0+4(SB) offsets, ·g(SB) RODATA symbol (not g register),
+	// cross-header #include, and R14 overwrite before read on amd64.
+	validAmd64Files := map[string]string{
+		"a.h": "#include \"b.h\"\n",
+		"b.h": "#define MIX_PAIR(a, b) \\\n\tXORL b, a; \\\n\tADDL $1, a\n",
+		"tables.s": `#include "textflag.h"
+DATA ·sharedLUT+0(SB)/4, $0xdeadbeef
+DATA ·sharedLUT+0+4(SB)/4, $0xcafebabe
+GLOBL ·sharedLUT(SB), RODATA, $8
+DATA ·g+0(SB)/8, $0x0102030405060708
+GLOBL ·g(SB), RODATA, $8
+`,
+		"kernel.s": `#include "textflag.h"
+#include "a.h"
+
+DATA fileLUT<>+0(SB)/4, $0x11223344
+GLOBL fileLUT<>(SB), RODATA, $4
+
+TEXT ·PureSIMD(SB), NOSPLIT, $0-16
+	MOVL x+0(FP), AX
+	CMPL AX, $0
+	JEQ zero_r14
+	MOVQ ·g+0(SB), R14
+	JMP done_r14
+zero_r14:
+	XORL R14, R14
+done_r14:
+	ANDL $0, AX
+	MOVL ·sharedLUT+0+4(SB)(AX*4), BX
+	MOVL fileLUT<>+0(SB)(AX*4), CX
+	ADDL R14, BX
+	MIX_PAIR(BX, CX)
+	MOVL BX, ret+8(FP)
+	RET
+
+TEXT ·StaticXgetbv(SB), NOSPLIT, $0-16
+	MOVL idx+0(FP), CX
+	BYTE $0x0f; BYTE $0x01; BYTE $0xd0
+	MOVL AX, eax+8(FP)
+	MOVL DX, edx+12(FP)
+	RET
+
+TEXT ·ImpureRdtscp(SB), NOSPLIT, $0-8
+	BYTE $0x0f; BYTE $0x01; BYTE $0xf9
+	MOVQ AX, ret+0(FP)
+	RET
+
+TEXT ·ImpureControlReg(SB), NOSPLIT, $0-4
+	LDMXCSR csr+0(FP)
+	RET
+
+TEXT ·ImpureWordOnAmd64(SB), NOSPLIT, $0-0
+	WORD $0xd5380000
+	RET
+`,
+	}
+	vpAmd64, ok := verifyNonStdAssemblyFiles(
+		"amd64",
+		"example.com/any-pkg/simd",
+		"/virtual/pkg",
+		[]string{"tables.s", "kernel.s"},
+		[]string{"a.h", "b.h"},
+		nil,
+		readMem(validAmd64Files),
+	)
+	if !ok || vpAmd64 == nil {
+		t.Fatalf("verifyNonStdAssemblyFiles(amd64) on valid multi-file package failed")
+	}
+	for _, pureName := range []string{"PureSIMD", "StaticXgetbv"} {
+		sum, found := vpAmd64.funcs[pureName]
+		if !found || sum.impureKind != "" || sum.cpuidArgs != 0 {
+			t.Errorf("amd64 %s summary = %+v (found=%v), want pure non-cpuid summary", pureName, sum, found)
+		}
+	}
+	for _, impureName := range []string{"ImpureRdtscp", "ImpureControlReg", "ImpureWordOnAmd64"} {
+		sum, found := vpAmd64.funcs[impureName]
+		if !found || sum.impureKind == "" {
+			t.Errorf("amd64 %s summary = %+v (found=%v), want non-empty impureKind", impureName, sum, found)
+		}
+	}
+
+	validArm64Files := map[string]string{
+		"feat.s": `#include "textflag.h"
+TEXT ·StaticArm64Features(SB), NOSPLIT, $0-24
+	WORD $0xd5380000
+	WORD $0xd5380600
+	WORD $0xd2800002
+	WORD $0x04225022
+	WORD $0x04635023
+	WORD $0xd37df042
+	LSL $1, R2, R2
+	MOVD R0, a+0(FP)
+	MOVD R2, b+8(FP)
+	MOVD R3, c+16(FP)
+	RET
+
+TEXT ·ImpureArm64Mpidr(SB), NOSPLIT, $0-8
+	WORD $0xd53800a0
+	MOVD R0, ret+0(FP)
+	RET
+
+TEXT ·ImpureByteOnArm64(SB), NOSPLIT, $0-0
+	BYTE $0x0f; BYTE $0x01; BYTE $0xd0
+	RET
+
+TEXT ·ImpureDwordOnArm64(SB), NOSPLIT, $0-0
+	DWORD $0xd503201fd53be020
+	RET
+`,
+	}
+	vpArm64, okArm := verifyNonStdAssemblyFiles(
+		"arm64",
+		"example.com/any/armpkg",
+		"/virtual/armpkg",
+		[]string{"feat.s"},
+		nil,
+		nil,
+		readMem(validArm64Files),
+	)
+	if !okArm || vpArm64 == nil {
+		t.Fatalf("verifyNonStdAssemblyFiles(arm64) failed")
+	}
+	if sum := vpArm64.funcs["StaticArm64Features"]; sum.impureKind != "" || sum.cpuidArgs != 0 {
+		t.Errorf("arm64 StaticArm64Features summary = %+v, want pure", sum)
+	}
+	for _, impureName := range []string{"ImpureArm64Mpidr", "ImpureByteOnArm64", "ImpureDwordOnArm64"} {
+		if sum := vpArm64.funcs[impureName]; sum.impureKind == "" {
+			t.Errorf("arm64 %s summary = %+v, want non-empty impureKind", impureName, sum)
+		}
+	}
+
+	// Unsupported GOARCH values must fail closed unconditionally.
+	for _, unsupportedArch := range []string{"", "386", "arm", "riscv64", "ppc64le", "s390x", "wasm"} {
+		if _, okArch := verifyNonStdAssemblyFiles(
+			unsupportedArch,
+			"example.com/arch",
+			"/virtual/arch",
+			[]string{"f.s"},
+			nil,
+			nil,
+			readMem(map[string]string{"f.s": "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"}),
+		); okArch {
+			t.Errorf("verifyNonStdAssemblyFiles(%q) = true, want fail-closed false", unsupportedArch)
+		}
+	}
+
+	// Uppercase G(...) macro and lowercase frame-slot labels (g+0(FP), fs+8(FP))
+	// remain admitted while bare g / FS registers are rejected.
+	if vpUpperG, okUpperG := verifyNonStdAssemblyFiles(
+		"amd64",
+		"example.com/upperg",
+		"/virtual/upperg",
+		[]string{"gslot.s"},
+		nil,
+		nil,
+		readMem(map[string]string{"gslot.s": "#include \"textflag.h\"\n#define G(a, b) XORQ b, a\nTEXT ·SlotG(SB), NOSPLIT, $0-24\n\tMOVQ g+0(FP), AX\n\tMOVQ fs+8(FP), BX\n\tG(AX, BX)\n\tMOVQ AX, ret+16(FP)\n\tRET\n"}),
+	); !okUpperG || vpUpperG == nil || vpUpperG.funcs["SlotG"].impureKind != "" {
+		t.Errorf("verifyNonStdAssemblyFiles rejected valid G macro / g+0(FP) stack slot: ok=%v vp=%+v", okUpperG, vpUpperG)
+	}
+
+	// Canonical 1-arg and 2-arg amd64 ABI0 CPUID wrappers vs non-canonical CPUID shapes
+	// (including 32-bit +4(FP) return layout and conditional #ifdef inside CPUID TEXT).
+	cpuidAsm := `#include "textflag.h"
+TEXT ·Cpuid1_386Layout(SB), NOSPLIT, $0-20
+	MOVL op+0(FP), AX
+	XORL CX, CX
+	CPUID
+	MOVL AX, eax+4(FP)
+	MOVL BX, ebx+8(FP)
+	MOVL CX, ecx+12(FP)
+	MOVL DX, edx+16(FP)
+	RET
+
+TEXT ·Cpuid1_Amd64(SB), NOSPLIT, $0-24
+	MOVL op+0(FP), AX
+	XORQ CX, CX
+	CPUID
+	MOVL AX, eax+8(FP)
+	MOVL BX, ebx+12(FP)
+	MOVL CX, ecx+16(FP)
+	MOVL DX, edx+20(FP)
+	RET
+
+TEXT ·Cpuid2_Amd64(SB), NOSPLIT, $0-24
+	MOVL op+0(FP), AX
+	MOVL op2+4(FP), CX
+	CPUID
+	MOVL AX, eax+8(FP)
+	MOVL BX, ebx+12(FP)
+	MOVL CX, ecx+16(FP)
+	MOVL DX, edx+20(FP)
+	RET
+
+TEXT ·BadIfdefCpuid(SB), NOSPLIT, $0-24
+	MOVL op+0(FP), AX
+	XORQ CX, CX
+#ifdef NEVER_SET
+	MOVL $1, AX
+#endif
+	CPUID
+	MOVL AX, eax+8(FP)
+	MOVL BX, ebx+12(FP)
+	MOVL CX, ecx+16(FP)
+	MOVL DX, edx+20(FP)
+	RET
+
+TEXT ·BadHardcodedLeaf(SB), NOSPLIT, $0-24
+	MOVL $1, AX
+	XORQ CX, CX
+	CPUID
+	MOVL AX, eax+8(FP)
+	MOVL BX, ebx+12(FP)
+	MOVL CX, ecx+16(FP)
+	MOVL DX, edx+20(FP)
+	RET
+
+TEXT ·BadShiftedEBX(SB), NOSPLIT, $0-24
+	MOVL op+0(FP), AX
+	XORQ CX, CX
+	CPUID
+	SHRL $24, BX
+	MOVL AX, eax+8(FP)
+	MOVL BX, ebx+12(FP)
+	MOVL CX, ecx+16(FP)
+	MOVL DX, edx+20(FP)
+	RET
+
+TEXT ·BadPermutedSlots(SB), NOSPLIT, $0-24
+	MOVL op+0(FP), AX
+	XORQ CX, CX
+	CPUID
+	MOVL BX, eax+8(FP)
+	MOVL AX, ebx+12(FP)
+	MOVL CX, ecx+16(FP)
+	MOVL DX, edx+20(FP)
+	RET
+`
+	vpCPUID, okCPUID := verifyNonStdAssemblyFiles(
+		"amd64",
+		"example.com/cpuid",
+		"/virtual/cpuid",
+		[]string{"cpuid.s"},
+		nil,
+		nil,
+		readMem(map[string]string{"cpuid.s": cpuidAsm}),
+	)
+	if !okCPUID || vpCPUID == nil {
+		t.Fatalf("verifyNonStdAssemblyFiles(cpuidAsm) failed")
+	}
+	for fn, wantArgs := range map[string]int{"Cpuid1_Amd64": 1, "Cpuid2_Amd64": 2} {
+		if sum := vpCPUID.funcs[fn]; sum.cpuidArgs != wantArgs || sum.impureKind != "" {
+			t.Errorf("%s summary = %+v, want cpuidArgs=%d impureKind=\"\"", fn, sum, wantArgs)
+		}
+	}
+	for _, badFn := range []string{"Cpuid1_386Layout", "BadIfdefCpuid", "BadHardcodedLeaf", "BadShiftedEBX", "BadPermutedSlots"} {
+		if sum := vpCPUID.funcs[badFn]; sum.cpuidArgs != 0 || sum.impureKind == "" {
+			t.Errorf("%s summary = %+v, want cpuidArgs=0 and non-empty impureKind", badFn, sum)
+		}
+	}
+	u32 := types.Typ[types.Uint32]
+	sig1 := types.NewSignatureType(nil, nil, nil,
+		types.NewTuple(types.NewVar(token.NoPos, nil, "op", u32)),
+		types.NewTuple(types.NewVar(token.NoPos, nil, "", u32), types.NewVar(token.NoPos, nil, "", u32), types.NewVar(token.NoPos, nil, "", u32), types.NewVar(token.NoPos, nil, "", u32)),
+		false)
+	sig2 := types.NewSignatureType(nil, nil, nil,
+		types.NewTuple(types.NewVar(token.NoPos, nil, "op", u32), types.NewVar(token.NoPos, nil, "sub", u32)),
+		types.NewTuple(types.NewVar(token.NoPos, nil, "", u32), types.NewVar(token.NoPos, nil, "", u32), types.NewVar(token.NoPos, nil, "", u32), types.NewVar(token.NoPos, nil, "", u32)),
+		false)
+	if !isCanonicalCPUIDSignature(sig1, 1) || isCanonicalCPUIDSignature(sig1, 2) || !isCanonicalCPUIDSignature(sig2, 2) || isCanonicalCPUIDSignature(sig2, 1) {
+		t.Errorf("isCanonicalCPUIDSignature arity mismatch admitted or valid signature rejected")
+	}
+
+	// 2. Package-level rejections across amd64 and arm64.
+	type rejectCase struct {
+		arch string
+		body string
+	}
+	for caseName, rc := range map[string]rejectCase{
+		"writable-globl":        {"amd64", "#include \"textflag.h\"\nGLOBL ·writable(SB), NOPTR, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"two-op-bss-globl":      {"amd64", "#include \"textflag.h\"\nGLOBL ·bss(SB), $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"zero-size-globl":       {"amd64", "#include \"textflag.h\"\nGLOBL ·empty(SB), RODATA, $0\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"globl-sub-flag":        {"amd64", "#include \"textflag.h\"\nGLOBL ·counter(SB), RODATA - 8, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"globl-carry-flag":      {"amd64", "#include \"textflag.h\"\nGLOBL ·counter(SB), RODATA + RODATA, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"globl-shift-tlsbss":    {"amd64", "#include \"textflag.h\"\nGLOBL ·tls(SB), RODATA | (1 << 8), $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"reserved-define":       {"amd64", "#include \"textflag.h\"\n#ifdef NEVER\n#define WORD CMPQ AX,\n#endif\nTEXT ·F(SB), NOSPLIT, $0-0\n\tWORD $0x050f\n\tRET\n"},
+		"reserved-rdpid":        {"amd64", "#include \"textflag.h\"\n#define RDPID NOP\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"reserved-cntvct":       {"arm64", "#include \"textflag.h\"\n#define CNTVCT_EL0 MIDR_EL1\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"reserved-g":            {"arm64", "#include \"textflag.h\"\n#define g R0\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"reserved-init-macro":   {"amd64", "#include \"textflag.h\"\n#define init Helper\nTEXT ·init(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"reserved-undef":        {"amd64", "#include \"textflag.h\"\n#undef WORD\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"middledot-macro-alias": {"amd64", "#include \"textflag.h\"\n#define EvilVar SafeLut\nGLOBL ·SafeLut(SB), RODATA, $8\nTEXT ·F(SB), NOSPLIT, $0-8\n\tMOVQ ·EvilVar(SB), AX\n\tMOVQ AX, ret+0(FP)\n\tRET\n"},
+		"asm-init-fn":           {"amd64", "#include \"textflag.h\"\nTEXT ·init(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"asm-method-text":       {"amd64", "#include \"textflag.h\"\nTEXT ·Box·M(SB), NOSPLIT, $0-8\n\tRET\n"},
+		"abiinternal-text":      {"amd64", "#include \"textflag.h\"\nTEXT ·F<ABIInternal>(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"nested-ifdef-text":     {"amd64", "#include \"textflag.h\"\nTEXT ·Pure(SB), NOSPLIT, $0-0\n\tRET\n#ifdef NEVER\nTEXT ·Unused(SB), NOSPLIT, $0-0\n\tRET\n#endif\n"},
+		"ifdef-text-spill":      {"amd64", "#include \"textflag.h\"\n#ifdef MAYBE\nTEXT ·CondFn(SB), NOSPLIT, $0-0\n\tRET\n#endif\n\tRDTSC\n\tRET\n"},
+		"sb-store":              {"amd64", "#include \"textflag.h\"\nGLOBL ·ro(SB), RODATA, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ AX, ·ro(SB)\n\tRET\n"},
+		"sb-neg-offset":         {"amd64", "#include \"textflag.h\"\nGLOBL ·ro(SB), RODATA, $8\nTEXT ·F(SB), NOSPLIT, $0-8\n\tMOVQ ·ro-8(SB), AX\n\tRET\n"},
+		"sb-wrap-offset":        {"amd64", "#include \"textflag.h\"\nGLOBL ·ro(SB), RODATA, $8\nTEXT ·F(SB), NOSPLIT, $0-8\n\tMOVQ ·ro+0xfffffffffffffff8(SB), AX\n\tRET\n"},
+		"sb-spaced-store":       {"amd64", "#include \"textflag.h\"\nGLOBL ·ro(SB), RODATA, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ AX, ·ro( SB )\n\tRET\n"},
+		"sb-data-spaced":        {"amd64", "#include \"textflag.h\"\nGLOBL ·ro(SB), RODATA, $8\nDATA ·ro+0( SB )/8, $1\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"sb-rmw":                {"amd64", "#include \"textflag.h\"\nGLOBL ·ro(SB), RODATA, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tXCHGQ AX, ·ro(SB)\n\tRET\n"},
+		"sb-arm64-stxr":         {"arm64", "#include \"textflag.h\"\nGLOBL ·ro(SB), RODATA, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tSTXR R0, ·ro(SB), R1\n\tRET\n"},
+		"sb-arm64-casd":         {"arm64", "#include \"textflag.h\"\nGLOBL ·ro(SB), RODATA, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tCASD R0, ·ro(SB), R1\n\tRET\n"},
+		"sb-arm64-ldord":        {"arm64", "#include \"textflag.h\"\nGLOBL ·ro(SB), RODATA, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tLDORD R0, ·ro(SB), R1\n\tRET\n"},
+		"unverified-sb":         {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n\tMOVQ ·goVar(SB), AX\n\tMOVQ AX, ret+0(FP)\n\tRET\n"},
+		"cross-pkg-sb":          {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n\tMOVQ runtime·goarm64(SB), AX\n\tMOVQ AX, ret+0(FP)\n\tRET\n"},
+		"call-instr":            {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tCALL ·G(SB)\n\tRET\n"},
+		"reg-label-spoof":       {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\nAX:\n\tJMP AX\n"},
+		"tls-access":            {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ (TLS), AX\n\tRET\n"},
+		"tls-spaced":            {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ 0( TLS ), AX\n\tRET\n"},
+		"tls-bare":              {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ TLS, AX\n\tRET\n"},
+		"tls-scaled":            {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ 0(AX)(TLS*1), BX\n\tRET\n"},
+		"arm64-g-reg":           {"arm64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVD 16(g), R0\n\tRET\n"},
+		"arm64-r28-reg":         {"arm64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVD R28, R0\n\tRET\n"},
+		"arm64-r18-reg":         {"arm64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVD R18, R0\n\tRET\n"},
+		"arm64-param-r28":       {"arm64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVD R(28), R0\n\tRET\n"},
+		"arm64-spr-reg":         {"arm64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVD SPR(21307), R0\n\tRET\n"},
+		"amd64-gs-seg":          {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ 0(GS), AX\n\tRET\n"},
+		"amd64-fs-seg":          {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ FS, AX\n\tRET\n"},
+		"amd64-cr3-reg":         {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ CR3, AX\n\tRET\n"},
+		"amd64-dr0-reg":         {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ DR0, AX\n\tRET\n"},
+		"amd64-mrs-wrong-isa":   {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMRS MIDR_EL1, R8\n\tRET\n"},
+		"arm64-cpuid-wrong-isa": {"arm64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tCPUID\n\tRET\n"},
+		"amd64-r14-entry-read":  {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n\tMOVQ (R14), AX\n\tMOVQ AX, ret+0(FP)\n\tRET\n"},
+		"amd64-r14-partial":     {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n\tMOVW $0, R14W\n\tMOVQ R14, ret+0(FP)\n\tRET\n"},
+		"amd64-r14-cmov":        {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n\tCMOVQEQ CX, R14\n\tMOVQ R14, ret+0(FP)\n\tRET\n"},
+		"amd64-r14-branch-skip": {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-16\n\tCMPQ x+0(FP), $0\n\tJEQ skip\n\tMOVQ $0, R14\nskip:\n\tMOVQ R14, ret+8(FP)\n\tRET\n"},
+		"amd64-r14-ifdef-skip":  {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n#ifdef MAYBE\n\tMOVQ $0, R14\n#endif\n\tMOVQ R14, ret+0(FP)\n\tRET\n"},
+		"amd64-r14-masked-vmov": {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n\tVMOVQ X0, K1, R14\n\tMOVQ R14, ret+0(FP)\n\tRET\n"},
+		"arm64-tpidr-tls":       {"arm64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n\tMOVD TPIDR_EL0, R0\n\tMOVD R0, ret+0(FP)\n\tRET\n"},
+		"arm64-scxtnum-tls":     {"arm64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n\tMOVD SCXTNUM_EL0, R0\n\tMOVD R0, ret+0(FP)\n\tRET\n"},
+		"colon-operand-pair":    {"arm64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n\tMOVD R0:CNTVCT_EL0\n\tMOVD R0, ret+0(FP)\n\tRET\n"},
+		"colon-globl":           {"amd64", "#include \"textflag.h\"\nGLOBL ·ro(SB), $8:RODATA\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"ret-reg-tailjump":      {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET AX\n"},
+		"ret-sb-tailcall":       {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET ·G(SB)\n"},
+		"arm64-retaa":           {"arm64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRETAA\n"},
+		"duffcopy-call":         {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tDUFFCOPY $0\n\tRET\n"},
+		"duffzero-call":         {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tDUFFZERO $0\n\tRET\n"},
+		"arm64-adr-pcrel":       {"arm64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n\tADR 0(PC), R0\n\tMOVD R0, ret+0(FP)\n\tRET\n"},
+		"arm64-adrp-pcrel":      {"arm64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n\tADRP 4096(PC), R0\n\tMOVD R0, ret+0(FP)\n\tRET\n"},
+		"amd64-leaq-pc":         {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n\tLEAQ 0(PC), AX\n\tMOVQ AX, ret+0(FP)\n\tRET\n"},
+		"amd64-movq-pc":         {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n\tMOVQ 0x1000(PC), AX\n\tMOVQ AX, ret+0(FP)\n\tRET\n"},
+		"arm64-cbz-pc-operand":  {"arm64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\nloop:\n\tCBZ PC, loop\n\tRET\n"},
+		"amd64-spb-label-spoof": {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\nSPB:\n\tJMP SPB\n"},
+		"arm64-pn0-label-spoof": {"arm64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\nPN0:\n\tB PN0\n"},
+		"reserved-fpcr-macro":   {"arm64", "#include \"textflag.h\"\n#define FPCR R0\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
+		"unclosed-quote-imm":    {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ $\"unclosed, AX\n\tRET\n"},
+	} {
+		if _, ok := verifyNonStdAssemblyFiles(
+			rc.arch,
+			"example.com/reject",
+			"/virtual/reject",
+			[]string{"bad.s"},
+			nil,
+			nil,
+			readMem(map[string]string{"bad.s": rc.body}),
+		); ok {
+			t.Errorf("case %s (%s): verifyNonStdAssemblyFiles = true, want false", caseName, rc.arch)
+		}
+	}
+
+	// Exhaustive #ifdef / #else R14 overwrite on both arms must pass on amd64.
+	if vpIfElseR14, okIfElseR14 := verifyNonStdAssemblyFiles(
+		"amd64",
+		"example.com/r14ifelse",
+		"/virtual/r14ifelse",
+		[]string{"ok.s"},
+		nil,
+		nil,
+		readMem(map[string]string{"ok.s": "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n#ifdef MAYBE\n\tMOVQ $1, R14\n#else\n\tXORL R14, R14\n#endif\n\tMOVQ R14, ret+0(FP)\n\tRET\n"}),
+	); !okIfElseR14 || vpIfElseR14 == nil || vpIfElseR14.funcs["F"].impureKind != "" {
+		t.Errorf("verifyNonStdAssemblyFiles rejected exhaustive #ifdef/#else R14 kill: ok=%v vp=%+v", okIfElseR14, vpIfElseR14)
+	}
+
+	// Quoted character and string literals containing commas, semicolons,
+	// parentheses, pseudo-register substrings, and middle-dot runes in DATA
+	// initializers and TEXT immediate operands must parse as single literals
+	// without false rejection, while unclosed quotes fail closed.
+	quotedAsm := `#include "textflag.h"
+GLOBL ·lut(SB), RODATA, $8
+DATA ·lut+0(SB)/8, $"a,b;(·)"
+TEXT ·QuotePure(SB), NOSPLIT, $0-8
+	MOVQ $';', R14; CMPQ R14, $'·'
+	CMPB ·lut(SB), $','
+	CMPQ R14, $"x(SB)"
+	CMPQ R14, $"y(TLS)"
+	MOVQ R14, ret+0(FP)
+	RET
+`
+	if vpQuote, okQuote := verifyNonStdAssemblyFiles(
+		"amd64",
+		"example.com/quoteasm",
+		"/virtual/quoteasm",
+		[]string{"q.s"},
+		nil,
+		nil,
+		readMem(map[string]string{"q.s": quotedAsm}),
+	); !okQuote || vpQuote == nil || vpQuote.funcs["QuotePure"].impureKind != "" {
+		t.Errorf("verifyNonStdAssemblyFiles rejected quoted DATA/immediate literals: ok=%v vp=%+v", okQuote, vpQuote)
+	}
+	if !hasUnquotedColon(`$"unclosed`) || !hasUnquotedColon(`$'x`) {
+		t.Errorf("hasUnquotedColon failed open on unclosed quote")
+	}
+	if _, okHybrid := verifyNonStdAssemblyFiles(
+		"amd64",
+		"example.com/quoteasm",
+		"/virtual/quoteasm",
+		[]string{"bad.s"},
+		nil,
+		nil,
+		readMem(map[string]string{"bad.s": "#include \"textflag.h\"\nGLOBL ·lut(SB), RODATA, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ $\"x\"·lut(SB), AX\n\tRET\n"}),
+	); okHybrid {
+		t.Errorf("verifyNonStdAssemblyFiles admitted malformed quoted-prefix (SB) operand")
+	}
+
+	// Width-suffixed system/RNG/TSX/FPU mnemonics and conditional
+	// or split BYTE sequences must classify as impure per TEXT symbol.
+	impureAmd64Asm := `#include "textflag.h"
+TEXT ·RdrandQ(SB), NOSPLIT, $0-0
+	RDRANDQ AX
+	RET
+TEXT ·RdseedL(SB), NOSPLIT, $0-0
+	RDSEEDL AX
+	RET
+TEXT ·WrfsbaseQ(SB), NOSPLIT, $0-0
+	WRFSBASEQ AX
+	RET
+TEXT ·RdpmcOp(SB), NOSPLIT, $0-0
+	RDPMC
+	RET
+TEXT ·TsxOp(SB), NOSPLIT, $0-0
+	XTEST
+	RET
+TEXT ·StdFlag(SB), NOSPLIT, $0-0
+	STD
+	RET
+TEXT ·FxrstorOp(SB), NOSPLIT, $0-0
+	FXRSTOR 0(SP)
+	RET
+TEXT ·SmswOp(SB), NOSPLIT, $0-0
+	SMSWQ AX
+	RET
+TEXT ·LslAmd64(SB), NOSPLIT, $0-0
+	LSLQ AX, BX
+	RET
+TEXT ·PopfqOp(SB), NOSPLIT, $0-0
+	POPFQ
+	RET
+TEXT ·PushfqOp(SB), NOSPLIT, $0-0
+	PUSHFQ
+	RET
+TEXT ·LfsqOp(SB), NOSPLIT, $0-0
+	LFSQ 0(SP), AX
+	RET
+TEXT ·GetcallerpcOp(SB), NOSPLIT, $0-0
+	GETCALLERPC AX
+	RET
+TEXT ·UndefOp(SB), NOSPLIT, $0-0
+	UNDEF
+	RET
+TEXT ·CondByte(SB), NOSPLIT, $0-0
+#ifdef MAYBE
+	BYTE $0x0f; BYTE $0x01; BYTE $0xd0
+#endif
+	RET
+TEXT ·SplitByte(SB), NOSPLIT, $0-0
+	BYTE $0x0f; BYTE $0x01
+#ifdef NEVER
+#endif
+	BYTE $0xd0
+	RET
+`
+	if vpImp, okImp := verifyNonStdAssemblyFiles(
+		"amd64",
+		"example.com/impureops",
+		"/virtual/impureops",
+		[]string{"imp.s"},
+		nil,
+		nil,
+		readMem(map[string]string{"imp.s": impureAmd64Asm}),
+	); !okImp || vpImp == nil {
+		t.Fatalf("verifyNonStdAssemblyFiles(impureAmd64Asm) = %v, want ok=true with impure summaries", okImp)
+	} else {
+		for _, fn := range []string{"RdrandQ", "RdseedL", "WrfsbaseQ", "RdpmcOp", "TsxOp", "StdFlag", "FxrstorOp", "SmswOp", "LslAmd64", "PopfqOp", "PushfqOp", "LfsqOp", "GetcallerpcOp", "UndefOp", "CondByte", "SplitByte"} {
+			if sum := vpImp.funcs[fn]; sum.impureKind == "" {
+				t.Errorf("amd64 %s summary = %+v, want non-empty impureKind", fn, sum)
+			}
+		}
+	}
+
+	impureArm64Asm := `#include "textflag.h"
+TEXT ·MovdMidrPure(SB), NOSPLIT, $0-8
+	PCALIGNMAX $32, $16
+	MOVD MIDR_EL1, R0
+	MOVD R0, ret+0(FP)
+	RET
+TEXT ·SyslOp(SB), NOSPLIT, $0-0
+	SYSL $0, R0
+	RET
+TEXT ·SvcEqOp(SB), NOSPLIT, $0-0
+	SVC.EQ $0
+	RET
+TEXT ·MovdPmccntr(SB), NOSPLIT, $0-8
+	MOVD PMCCNTR_EL0, R0
+	MOVD R0, ret+0(FP)
+	RET
+TEXT ·MovdWriteFpcr(SB), NOSPLIT, $0-0
+	MOVD R0, FPCR
+	RET
+TEXT ·MovdPstateDit(SB), NOSPLIT, $0-0
+	MOVD $1, DIT
+	RET
+TEXT ·MovdMidrBadDst(SB), NOSPLIT, $0-0
+	MOVD MIDR_EL1, RSP
+	RET
+TEXT ·WordClobberR18(SB), NOSPLIT, $0-0
+	WORD $0xd2800012
+	RET
+TEXT ·WordReadR28(SB), NOSPLIT, $0-0
+	WORD $0xd340ff80
+	RET
+`
+	if vpImpArm, okImpArm := verifyNonStdAssemblyFiles(
+		"arm64",
+		"example.com/impurearm",
+		"/virtual/impurearm",
+		[]string{"imp.s"},
+		nil,
+		nil,
+		readMem(map[string]string{"imp.s": impureArm64Asm}),
+	); !okImpArm || vpImpArm == nil {
+		t.Fatalf("verifyNonStdAssemblyFiles(impureArm64Asm) = %v, want ok=true", okImpArm)
+	} else {
+		if sum := vpImpArm.funcs["MovdMidrPure"]; sum.impureKind != "" || sum.cpuidArgs != 0 {
+			t.Errorf("arm64 MovdMidrPure summary = %+v, want pure", sum)
+		}
+		for _, fn := range []string{"SyslOp", "SvcEqOp", "MovdPmccntr", "MovdWriteFpcr", "MovdPstateDit", "MovdMidrBadDst", "WordClobberR18", "WordReadR28"} {
+			if sum := vpImpArm.funcs[fn]; sum.impureKind == "" {
+				t.Errorf("arm64 %s summary = %+v, want non-empty impureKind", fn, sum)
+			}
+		}
+	}
+
+	// Uppercase .S extension (GAS C-preprocessed assembly) must be rejected.
+	if _, okUpperS := verifyNonStdAssemblyFiles(
+		"amd64",
+		"example.com/uppers",
+		"/virtual/uppers",
+		[]string{"bad.S"},
+		nil,
+		nil,
+		readMem(map[string]string{"bad.S": "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"}),
+	); okUpperS {
+		t.Errorf("verifyNonStdAssemblyFiles admitted uppercase .S assembly file")
+	}
+	if isAsm, _, isOther := classifyOtherNativeExt(".S"); isAsm || !isOther {
+		t.Errorf("classifyOtherNativeExt(\".S\") = (isAsm=%v, isOther=%v), want (false, true)", isAsm, isOther)
+	}
+
+	// Cyclic #include between local headers must fail closed cleanly.
+	if _, okCycle := verifyNonStdAssemblyFiles(
+		"amd64",
+		"example.com/cycle",
+		"/virtual/cycle",
+		[]string{"c.s"},
+		[]string{"c1.h", "c2.h"},
+		nil,
+		readMem(map[string]string{
+			"c1.h": "#include \"c2.h\"\n",
+			"c2.h": "#include \"c1.h\"\n",
+			"c.s":  "#include \"textflag.h\"\n#include \"c1.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n",
+		}),
+	); okCycle {
+		t.Errorf("verifyNonStdAssemblyFiles admitted cyclic #include")
+	}
+
+	// Conditional #define, conditional #undef, trailing #define after TEXT, and
+	// un-#include'd .h files in hFiles must NOT rewrite earlier/un-included sites.
+	condMacroAsm := `#include "textflag.h"
+#ifdef NEVER_DEFINED
+#define OPT_REG MIDR_EL1
+#endif
+#define SAFE_REG MIDR_EL1
+#ifdef MAYBE_UNDEF
+#undef SAFE_REG
+#endif
+TEXT ·CondSneak(SB), NOSPLIT, $0-8
+	MRS OPT_REG, R0
+	MOVD R0, ret+0(FP)
+	RET
+TEXT ·UndefSneak(SB), NOSPLIT, $0-8
+	MRS SAFE_REG, R0
+	MOVD R0, ret+0(FP)
+	RET
+TEXT ·TrailingSneak(SB), NOSPLIT, $0-8
+	MRS LATE_REG, R0
+	MOVD R0, ret+0(FP)
+	RET
+#define LATE_REG MIDR_EL1
+`
+	if vpCond, okCond := verifyNonStdAssemblyFiles(
+		"arm64",
+		"example.com/cond",
+		"/virtual/cond",
+		[]string{"cond.s"},
+		[]string{"unused.h"},
+		nil,
+		readMem(map[string]string{
+			"unused.h": "#define OPT_REG MIDR_EL1\n#define LATE_REG MIDR_EL1\n",
+			"cond.s":   condMacroAsm,
+		}),
+	); !okCond || vpCond == nil {
+		t.Fatalf("verifyNonStdAssemblyFiles(condMacroAsm) = %v, want ok=true with impure summaries", okCond)
+	} else {
+		for _, fn := range []string{"CondSneak", "UndefSneak", "TrailingSneak"} {
+			if sum := vpCond.funcs[fn]; sum.impureKind == "" {
+				t.Errorf("%s summary = %+v, want non-empty impureKind", fn, sum)
+			}
+		}
+	}
+	if _, okFuncMacro := verifyNonStdAssemblyFiles(
+		"amd64",
+		"example.com/condfn",
+		"/virtual/condfn",
+		[]string{"condfn.s"},
+		nil,
+		nil,
+		readMem(map[string]string{"condfn.s": "#include \"textflag.h\"\n#ifdef NEVER_DEFINED\n#define MAYBE_SAFE(x) MOVQ $0, AX\n#endif\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMAYBE_SAFE(WORD $0x050f)\n\tRET\n"}),
+	); okFuncMacro {
+		t.Errorf("verifyNonStdAssemblyFiles admitted unexpanded function-like macro invocation")
+	}
+
+	// Multi-compartment typeScopes: a GLOBL colliding with a Go variable in the
+	// test scope must be rejected even when absent from the base scope.
+	basePkg := types.NewPackage("example.com/sc", "sc")
+	testPkg := types.NewPackage("example.com/sc", "sc")
+	testPkg.Scope().Insert(types.NewVar(token.NoPos, testPkg, "testLut", types.Typ[types.Int]))
+	if _, ok := verifyNonStdAssemblyFiles(
+		"amd64",
+		"example.com/sc",
+		"/virtual/sc",
+		[]string{"lut.s"},
+		nil,
+		[]*types.Package{basePkg, testPkg},
+		readMem(map[string]string{"lut.s": "#include \"textflag.h\"\nGLOBL ·testLut(SB), RODATA, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"}),
+	); ok {
+		t.Errorf("verifyNonStdAssemblyFiles admitted GLOBL colliding with test-compartment Go variable")
+	}
+
+	// 3. Go stub signature safety: methods, carrier types, and uintptr are rejected
+	// while basic scalars, slices, arrays, pointers, and carrier-free structs pass.
+	i32 := types.Typ[types.Uint32]
+	uptr := types.Typ[types.Uintptr]
+	up := types.Typ[types.UnsafePointer]
+	fnSig := types.NewSignatureType(nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, nil, "x", i32)), types.NewTuple(types.NewVar(token.NoPos, nil, "", types.NewSlice(i32))), false)
+	if !asmSignatureCarrierFree(fnSig) {
+		t.Errorf("asmSignatureCarrierFree rejected scalar/slice signature")
+	}
+	methodSig := types.NewSignatureType(types.NewVar(token.NoPos, nil, "recv", i32), nil, nil, nil, nil, false)
+	if asmSignatureCarrierFree(methodSig) {
+		t.Errorf("asmSignatureCarrierFree admitted method signature with receiver")
+	}
+	for badKind, badType := range map[string]types.Type{
+		"uintptr":        uptr,
+		"unsafe.Pointer": up,
+		"interface":      types.Universe.Lookup("error").Type(),
+		"func":           types.NewSignatureType(nil, nil, nil, nil, nil, false),
+		"chan":           types.NewChan(types.SendRecv, i32),
+		"map":            types.NewMap(i32, i32),
+	} {
+		badSig := types.NewSignatureType(nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, nil, "x", badType)), nil, false)
+		if asmSignatureCarrierFree(badSig) {
+			t.Errorf("asmSignatureCarrierFree admitted %s parameter", badKind)
+		}
+	}
+
+	// 4. Unaudited toolchain gate & Program.Summaries memoization:
+	// nonSSAGlobalHazards must block .s packages when audited == false or GOARCH == "".
+	pureAsmDir := t.TempDir()
+	writeFile(t, pureAsmDir, "pure.s", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n")
+	if runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64" {
+		fset := token.NewFileSet()
+		af, err := parser.ParseFile(fset, filepath.Join(pureAsmDir, "pure.go"), "package p\nfunc F()\n", parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pureTypesPkg := types.NewPackage("example.com/pureasm", "p")
+		fakePkg := &packages.Package{
+			PkgPath:    "example.com/pureasm",
+			Dir:        pureAsmDir,
+			GoFiles:    []string{filepath.Join(pureAsmDir, "pure.go")},
+			OtherFiles: []string{filepath.Join(pureAsmDir, "pure.s")},
+			Syntax:     []*ast.File{af},
+			Types:      pureTypesPkg,
+		}
+		fakeProg := &program{
+			GOARCH:    runtime.GOARCH,
+			Pkgs:      []*packages.Package{fakePkg},
+			Summaries: map[string]any{},
+		}
+		blockedUnaud, _ := nonSSAGlobalHazards(false, fakeProg)
+		if !blockedUnaud["example.com/pureasm"] {
+			t.Errorf("nonSSAGlobalHazards(audited=false) did not block .s package")
+		}
+		blockedAud, _ := nonSSAGlobalHazards(true, fakeProg)
+		if blockedAud["example.com/pureasm"] {
+			t.Errorf("nonSSAGlobalHazards(audited=true) blocked verified pure .s package")
+		}
+		noArchProg := &program{
+			GOARCH:    "",
+			Pkgs:      []*packages.Package{fakePkg},
+			Summaries: map[string]any{},
+		}
+		blockedNoArch, _ := nonSSAGlobalHazards(true, noArchProg)
+		if !blockedNoArch["example.com/pureasm"] {
+			t.Errorf("nonSSAGlobalHazards(GOARCH=\"\") did not fail closed")
+		}
+
+		// p.ReadSource snapshot must take precedence over disk files so
+		// concurrent disk edits cannot diverge from the pass's hashed content.
+		snapProg := &program{
+			GOARCH:    runtime.GOARCH,
+			Pkgs:      []*packages.Package{fakePkg},
+			Summaries: map[string]any{},
+			ReadSource: func(_, _ string) ([]byte, error) {
+				return []byte("#include \"textflag.h\"\nGLOBL ·mut(SB), NOPTR, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"), nil
+			},
+		}
+		blockedSnap, _ := nonSSAGlobalHazards(true, snapProg)
+		if !blockedSnap["example.com/pureasm"] {
+			t.Errorf("nonSSAGlobalHazards(audited=true) ignored p.ReadSource snapshot")
+		}
+
+		// Dotless user modules (`module mymod` -> PkgPath "mymod" with non-nil
+		// Module) must NOT be skipped as standard-library packages: pure verified
+		// .s populates verifiedAsm["mymod"], while linkname/native hazards populate
+		// blockedPkgs["mymod"] and linknamedVars.
+		dotlessTypesPkg := types.NewPackage("mymod", "mymod")
+		dotlessGoFile, err := parser.ParseFile(fset, filepath.Join(pureAsmDir, "dotless.go"), "package mymod\nimport _ \"unsafe\"\n//go:linkname hooked other.sym\nvar hooked bool\nfunc F()\n", parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dotlessPkg := &packages.Package{
+			PkgPath:    "mymod",
+			Module:     &packages.Module{Path: "mymod"},
+			Dir:        pureAsmDir,
+			GoFiles:    []string{filepath.Join(pureAsmDir, "dotless.go")},
+			OtherFiles: []string{filepath.Join(pureAsmDir, "pure.s")},
+			Syntax:     []*ast.File{dotlessGoFile},
+			Types:      dotlessTypesPkg,
+		}
+		dotlessPureProg := &program{
+			GOARCH:    runtime.GOARCH,
+			Pkgs:      []*packages.Package{dotlessPkg},
+			Summaries: map[string]any{},
+		}
+		dotlessHaz := nonSSAGlobalHazardsSummary(true, dotlessPureProg)
+		if dotlessHaz.blockedPkgs["mymod"] {
+			t.Errorf("dotless user module with verified pure .s was blocked")
+		}
+		if dotlessHaz.verifiedAsm["mymod"] == nil || !dotlessHaz.verifiedAsm["mymod"].ok {
+			t.Errorf("dotless user module verifiedAsm[\"mymod\"] = %+v, want verified", dotlessHaz.verifiedAsm["mymod"])
+		}
+		if !dotlessHaz.linknamedVars[pkgVarKey{pkgPath: "mymod", name: "hooked"}] {
+			t.Errorf("dotless user module //go:linkname variable was skipped by nonSSAGlobalHazardsSummary")
+		}
+		dotlessImpureProg := &program{
+			GOARCH:    runtime.GOARCH,
+			Pkgs:      []*packages.Package{dotlessPkg},
+			Summaries: map[string]any{},
+			ReadSource: func(_, _ string) ([]byte, error) {
+				return []byte("#include \"textflag.h\"\nGLOBL ·mut(SB), NOPTR, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"), nil
+			},
+		}
+		if blockedDotless, _ := nonSSAGlobalHazards(true, dotlessImpureProg); !blockedDotless["mymod"] {
+			t.Errorf("dotless user module with writable .s GLOBL was not blocked")
+		}
+	}
+
+	// 5. pkgFreeOfUnverifiedNativeWriteHazard fails closed without panic when idx.meta == nil.
+	emptyBase := &tier2Base{idxByTypes: map[*types.Package]*pkgIndex{}}
+	if emptyBase.pkgFreeOfUnverifiedNativeWriteHazard(&pkgIndex{meta: nil}) {
+		t.Errorf("pkgFreeOfUnverifiedNativeWriteHazard admitted non-std pkgIndex with nil meta")
+	}
+}
+

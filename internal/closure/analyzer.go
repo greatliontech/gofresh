@@ -34,6 +34,12 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 	a.skipOriginScan = reachable.instantiatedOrigins
 	a.openWorld = reachable.openWorld
 	a.fresh = newFreshParamAnalysis(h.SelectionAudited(), h.source.pureDelegates, reachable, a.isStdFunction)
+	if reachable.subjectRoot != nil {
+		a.subjectRoots = map[*ssa.Function]bool{reachable.subjectRoot: true}
+	}
+	a.startupOnly = syncStartupOnlyFunctions(reachable)
+	a.zeroGlobals = startupZeroGlobalsForReach(base, reachable)
+	a.zeroGlobalDecls = zeroGlobalDeclKeys(a.zeroGlobals)
 	extraSubjectTargets := map[*ssa.Function]bool{}
 	for site, targets := range reachable.dynamicTargets {
 		if !reachable.functions[site.Parent()] {
@@ -118,6 +124,11 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 				continue
 			}
 			if !idx.std {
+				if len(target.Blocks) == 0 && idx.meta != nil && len(idx.meta.SFiles) > 0 {
+					if effect, asmClassified := a.classifyVerifiedAsmCallee(target, idx, site.Common(), site); asmClassified {
+						a.recordExternalEffect(effect)
+					}
+				}
 				continue
 			}
 			effect, ok := classBEffectForFunction(target)
@@ -245,10 +256,18 @@ type tier2Base struct {
 	// a set mark and poison nothing, and its Parse and registrations are
 	// admitted in the flow that proves them
 	// (REQ-closure-observability-flag-registration's FlagSet provenance rule).
-	flagProven map[ssa.Value]flagSetKind
+	flagProven             map[ssa.Value]flagSetKind
+	baseStartupResultDone  [2]bool
+	baseStartupResult      [2]tier2Result
+	baseStartupZeroDone    bool
+	baseStartupZeroGlobals map[*ssa.Global]bool
+	wholeZeroDone          bool
+	wholeZeroGlobals       map[*ssa.Global]bool
+	verifiedAsm            map[string]*verifiedAsmPackage
 }
 
 type tier2Analyzer struct {
+	base       *tier2Base
 	h          *Hasher
 	buildFlags []string
 	prog       *program
@@ -287,10 +306,14 @@ type tier2Analyzer struct {
 	// fresh carries the subject's cross-boundary fresh-path analysis;
 	// nil outside per-subject reachability walks (maximal tier,
 	// startup effects), where the intraprocedural grammar alone applies.
-	fresh     *freshParamAnalysis
-	openWorld bool
-	scanned   map[*ssa.Function]bool
-	effects   []externalEffect
+	fresh           *freshParamAnalysis
+	subjectRoots    map[*ssa.Function]bool
+	startupOnly     map[*ssa.Function]bool
+	zeroGlobals     map[*ssa.Global]bool
+	zeroGlobalDecls map[pkgVarKey]bool
+	openWorld       bool
+	scanned         map[*ssa.Function]bool
+	effects         []externalEffect
 
 	widen        bool
 	widenReason  string
@@ -299,6 +322,7 @@ type tier2Analyzer struct {
 }
 
 func newTier2Base(h *Hasher, prog *program, metas []listPkg) *tier2Base {
+	h.bindProgramReader(prog)
 	a := &tier2Analyzer{
 		h:                h,
 		buildFlags:       append([]string(nil), h.buildFlags...),
@@ -353,6 +377,7 @@ func newTier2Base(h *Hasher, prog *program, metas []listPkg) *tier2Base {
 func (b *tier2Base) analyzer() *tier2Analyzer {
 	flagBacked, _ := b.flagRegistrationFacts()
 	return &tier2Analyzer{
+		base:                     b,
 		flagProven:               b.flagProven,
 		h:                        b.h,
 		buildFlags:               b.buildFlags,
@@ -442,8 +467,12 @@ func (a *tier2Analyzer) buildIndex(p *packages.Package) *pkgIndex {
 				text = strings.TrimSpace(strings.TrimPrefix(text, "/*"))
 				text = strings.TrimSpace(strings.TrimSuffix(text, "*/"))
 				fields := strings.Fields(text)
-				if len(fields) >= 3 && fields[0] == "go:linkname" {
-					idx.linknameByName[fields[1]] = fields[2]
+				if len(fields) >= 3 && (fields[0] == "go:linkname" || fields[0] == "go:linknamestd") {
+					if prev := idx.linknameByName[fields[1]]; prev != "" && prev != fields[2] {
+						idx.linknameByName[fields[1]] = "<conflict>"
+					} else {
+						idx.linknameByName[fields[1]] = fields[2]
+					}
 				}
 				if strings.HasPrefix(text, "go:wasmimport") {
 					idx.wasmImport = true
@@ -598,7 +627,7 @@ func (a *tier2Analyzer) addFunction(fn *ssa.Function) {
 		} else if idx.cache {
 			if fn.Syntax() != nil {
 				a.markPackage(idx)
-				a.scanNodeRefs(idx, fn.Syntax())
+				a.scanNodeRefs(idx, fn.Syntax(), a.startupOnly[fn])
 			} else {
 				a.addFunction(parent)
 			}
@@ -613,10 +642,10 @@ func (a *tier2Analyzer) addStartupPackage(idx *pkgIndex) {
 	}
 	a.markPackage(idx)
 	for _, n := range idx.vars {
-		a.scanNodeRefs(idx, n)
+		a.scanNodeRefs(idx, n, true)
 	}
 	for _, n := range idx.inits {
-		a.scanNodeRefs(idx, n)
+		a.scanNodeRefs(idx, n, true)
 	}
 }
 
@@ -635,16 +664,19 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 		return
 	}
 	isStd := idx != nil && idx.std
+	if len(fn.Blocks) == 0 {
+		a.scanBodylessNonStdFunction(fn, idx, a.subjectRoots[fn])
+		return
+	}
 	if idx != nil && !idx.std {
 		a.markFilePackage(idx)
 		if obj := fn.Object(); obj != nil {
 			if target := a.linknameTarget(idx, obj); target != "" {
-				a.addLinknameTarget(target)
+				if !(a.base != nil && a.base.isVerifiedReadOnlyLinknameVar(idx, obj, target)) {
+					a.addLinknameTarget(target)
+				}
 			}
 		}
-	}
-	if len(fn.Blocks) == 0 {
-		return
 	}
 	if a.scanned[fn] {
 		return
@@ -668,8 +700,12 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 	if isStd && stdBodyCut(a.h.SelectionAudited(), fn, classified, classifiedOK) {
 		return
 	}
+	var fnZeroGlobals map[*ssa.Global]bool
+	if a.startupOnly[fn] {
+		fnZeroGlobals = a.zeroGlobals
+	}
 	var ops [16]*ssa.Value
-	for _, block := range fn.Blocks {
+	for _, block := range liveBlocks(fn, fnZeroGlobals) {
 		if a.contextErr() != nil {
 			return
 		}
@@ -713,6 +749,7 @@ func (a *tier2Analyzer) scanCacheFunctionRefs(idx *pkgIndex, fn *ssa.Function) {
 	if idx == nil || fn == nil {
 		return
 	}
+	startupOnly := a.startupOnly[fn]
 	if origin := fn.Origin(); origin != nil {
 		fn = origin
 	}
@@ -720,10 +757,10 @@ func (a *tier2Analyzer) scanCacheFunctionRefs(idx *pkgIndex, fn *ssa.Function) {
 	if obj == nil {
 		if fn.Synthetic == "package initializer" || fn.Name() == "init" {
 			for _, n := range idx.vars {
-				a.scanNodeRefs(idx, n)
+				a.scanNodeRefs(idx, n, startupOnly)
 			}
 			for _, n := range idx.inits {
-				a.scanNodeRefs(idx, n)
+				a.scanNodeRefs(idx, n, startupOnly)
 			}
 		}
 		return
@@ -734,7 +771,7 @@ func (a *tier2Analyzer) scanCacheFunctionRefs(idx *pkgIndex, fn *ssa.Function) {
 		a.requestWiden("missing cache function declaration for " + obj.String())
 		return
 	}
-	a.scanNodeRefs(idx, node)
+	a.scanNodeRefs(idx, node, startupOnly)
 }
 
 func (a *tier2Analyzer) scanValue(callerIdx *pkgIndex, v ssa.Value) {
@@ -759,7 +796,7 @@ func (a *tier2Analyzer) scanValue(callerIdx *pkgIndex, v ssa.Value) {
 				}
 			}
 			if !(callerIdx != nil && callerIdx.std) && objStd {
-				if !(a.h.SelectionAudited() && isUnmutatedStandardSentinelGlobalAny(x)) {
+				if !(a.h.SelectionAudited() && isUnmutatedStandardSentinelGlobalAny(a.prog, x)) {
 					a.recordExternalEffect(symbolExternalEffect(externalEffectUnauditedStandard, obj.Pkg().Path(), obj.Name(), "reaches standard global "+obj.Pkg().Path()+"."+obj.Name()))
 				}
 			}
@@ -785,7 +822,11 @@ func (a *tier2Analyzer) scanInstruction(idx *pkgIndex, caller *ssa.Function, ins
 	// escaping into the flow can only be read or laundered, so the
 	// operand reference itself refuses
 	// (REQ-closure-observability-flag-registration).
-	recordFlagBackedReferences(a.flagBacked, a.recordExternalEffect, instr)
+	var fnZeroGlobals map[*ssa.Global]bool
+	if a.startupOnly[caller] {
+		fnZeroGlobals = a.zeroGlobals
+	}
+	recordFlagBackedReferences(a.flagBacked, fnZeroGlobals, a.recordExternalEffect, instr)
 	switch x := instr.(type) {
 	case ssa.CallInstruction:
 		a.scanCall(idx, caller, x, fromRTA, suppressNestedFileIO)
@@ -929,6 +970,9 @@ func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name
 	}
 	effect, classified := classBEffect(pkgPath, name)
 	calleeIdx := a.idxForFunction(callee)
+	if !classified && calleeIdx != nil && !calleeIdx.std && len(callee.Blocks) == 0 && calleeIdx.meta != nil && len(calleeIdx.meta.SFiles) > 0 {
+		effect, classified = a.classifyVerifiedAsmCallee(callee, calleeIdx, c, site)
+	}
 	if !classified && c.StaticCallee() == callee && flagProvenSetUse(a.flagProven, pkgPath, name, c) {
 		// Parse and registration on a set the program itself closes:
 		// the parsed values are the program's own literals, the
@@ -1101,7 +1145,12 @@ func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool)
 					return false
 				}
 			} else if len(fn.Blocks) == 0 {
-				return false
+				if idx.meta == nil || len(idx.meta.SFiles) == 0 {
+					return false
+				}
+				if _, asmOK := a.verifiedPackageAssemblyFunc(idx.meta, fn); !asmOK {
+					return false
+				}
 			}
 		}
 		for fn := range held {
@@ -1110,6 +1159,11 @@ func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool)
 			}
 			a.addFunction(fn)
 			if idx := a.idxForFunction(fn); idx == nil || !idx.std {
+				if idx != nil && len(fn.Blocks) == 0 && idx.meta != nil && len(idx.meta.SFiles) > 0 {
+					if effect, asmClassified := a.classifyVerifiedAsmCallee(fn, idx, c, site); asmClassified {
+						a.recordExternalEffect(effect)
+					}
+				}
 				a.scanFunction(fn)
 			}
 		}
@@ -1214,7 +1268,9 @@ func (a *tier2Analyzer) addObject(obj types.Object) {
 	}
 	if !idx.std {
 		if target := a.linknameTarget(idx, obj); target != "" {
-			a.addLinknameTarget(target)
+			if !(a.base != nil && a.base.isVerifiedReadOnlyLinknameVar(idx, obj, target)) {
+				a.addLinknameTarget(target)
+			}
 		}
 	}
 	if idx.std || idx.testMain {
@@ -1224,17 +1280,20 @@ func (a *tier2Analyzer) addObject(obj types.Object) {
 		return
 	}
 	node := idx.decls[originObject(obj)]
+	var ssaFn *ssa.Function
+	if fn, ok := obj.(*types.Func); ok && a.prog != nil && a.prog.Prog != nil {
+		ssaFn = a.prog.Prog.FuncValue(fn)
+	}
+	startupOnly := ssaFn != nil && a.startupOnly[ssaFn]
 	if idx.cache {
 		a.addType(obj.Type())
 		if node != nil {
-			a.scanNodeRefs(idx, node)
+			a.scanNodeRefs(idx, node, startupOnly)
 		} else if _, ok := obj.(*types.Func); !ok {
 			a.requestWiden("missing declaration for " + obj.String())
 		}
-		if fn, ok := obj.(*types.Func); ok {
-			if ssaFn := a.prog.Prog.FuncValue(fn); ssaFn != nil {
-				a.scanFunction(ssaFn)
-			}
+		if ssaFn != nil {
+			a.scanFunction(ssaFn)
 		}
 		return
 	}
@@ -1256,11 +1315,9 @@ func (a *tier2Analyzer) addObject(obj types.Object) {
 	}
 	a.markPackage(idx)
 	a.addType(obj.Type())
-	a.scanNodeRefs(idx, node)
-	if fn, ok := obj.(*types.Func); ok {
-		if ssaFn := a.prog.Prog.FuncValue(fn); ssaFn != nil {
-			a.scanFunction(ssaFn)
-		}
+	a.scanNodeRefs(idx, node, startupOnly)
+	if ssaFn != nil {
+		a.scanFunction(ssaFn)
 	}
 }
 
@@ -1287,14 +1344,40 @@ func (a *tier2Analyzer) addReverseLinknameTargets(obj types.Object) {
 	}
 }
 
+func (a *tier2Analyzer) scanBodylessNonStdFunction(fn *ssa.Function, idx *pkgIndex, isSubjectRoot bool) {
+	if a == nil || fn == nil || len(fn.Blocks) != 0 || idx == nil || idx.std {
+		return
+	}
+	a.markFilePackage(idx)
+	hasLinkname := false
+	if obj := fn.Object(); obj != nil {
+		if target := a.linknameTarget(idx, obj); target != "" {
+			hasLinkname = true
+			if !(a.base != nil && a.base.isVerifiedReadOnlyLinknameVar(idx, obj, target)) {
+				a.addLinknameTarget(target)
+			}
+		}
+	}
+	if idx.meta != nil && len(idx.meta.SFiles) > 0 {
+		a.scanVerifiedAsmBodylessFunction(fn, idx, isSubjectRoot)
+	} else if !hasLinkname {
+		a.requestWiden("bodyless non-standard function in " + idx.id)
+	}
+}
+
 func (a *tier2Analyzer) linknameTarget(idx *pkgIndex, obj types.Object) string {
 	if idx == nil || obj == nil {
 		return ""
 	}
-	if target := idx.linknames[obj]; target != "" {
-		return target
+	docTarget := idx.linknames[obj]
+	fileTarget := idx.linknameByName[obj.Name()]
+	if docTarget != "" && fileTarget != "" && docTarget != fileTarget {
+		return "<conflict>"
 	}
-	return idx.linknameByName[obj.Name()]
+	if docTarget != "" {
+		return docTarget
+	}
+	return fileTarget
 }
 
 func (a *tier2Analyzer) addLinknameTarget(target string) {
@@ -1460,11 +1543,29 @@ func (a *tier2Analyzer) addType(t types.Type) {
 	})
 }
 
-func (a *tier2Analyzer) scanNodeRefs(idx *pkgIndex, node ast.Node) {
+func (a *tier2Analyzer) scanNodeRefs(idx *pkgIndex, node ast.Node, startupOnly bool) {
 	if idx == nil || node == nil || idx.pkg.TypesInfo == nil {
 		return
 	}
+	var skippedBody map[*ast.BlockStmt]bool
+	if startupOnly && len(a.zeroGlobalDecls) > 0 {
+		ast.Inspect(node, func(n ast.Node) bool {
+			if _, isFuncLit := n.(*ast.FuncLit); isFuncLit {
+				return false
+			}
+			if ifStmt, ok := n.(*ast.IfStmt); ok && ifStmt.Init == nil && ifStmt.Body != nil && ifCondRequiresNonZeroGlobalTyped(ifStmt.Cond, idx.pkg.TypesInfo, a.zeroGlobalDecls) {
+				if skippedBody == nil {
+					skippedBody = make(map[*ast.BlockStmt]bool)
+				}
+				skippedBody[ifStmt.Body] = true
+			}
+			return true
+		})
+	}
 	ast.Inspect(node, func(n ast.Node) bool {
+		if blk, ok := n.(*ast.BlockStmt); ok && skippedBody[blk] {
+			return false
+		}
 		switch x := n.(type) {
 		case *ast.Ident:
 			if obj := idx.pkg.TypesInfo.Uses[x]; obj != nil {
@@ -1518,7 +1619,7 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 			a.recordExternalEffect(effect)
 		}
 		if idx.mutable {
-			if hasCgoCallbackBlindspot(idx.meta) {
+			if hasCgoCallbackBlindspot(idx.meta) && !a.verifiedPackageAssembly(idx.meta) {
 				modCache := ""
 				if a.h != nil {
 					modCache = a.h.modCache
@@ -1541,7 +1642,7 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 				a.requestWiden("cgo callback source in " + idx.id)
 			}
 		}
-		if len(idx.meta.SFiles) == 0 {
+		if len(idx.meta.SFiles) == 0 || a.verifiedPackageAssembly(idx.meta) {
 			continue
 		}
 		// Assembly is never an analysis surface (REQ-closure-blindspot):
@@ -1897,12 +1998,18 @@ func linknamesFromDoc(doc *ast.CommentGroup) map[string]string {
 			continue
 		}
 		text := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
+		text = strings.TrimSpace(strings.TrimPrefix(text, "/*"))
+		text = strings.TrimSpace(strings.TrimSuffix(text, "*/"))
 		fields := strings.Fields(text)
-		if len(fields) >= 3 && fields[0] == "go:linkname" {
+		if len(fields) >= 3 && (fields[0] == "go:linkname" || fields[0] == "go:linknamestd") {
 			if out == nil {
 				out = map[string]string{}
 			}
-			out[fields[1]] = fields[2]
+			if prev := out[fields[1]]; prev != "" && prev != fields[2] {
+				out[fields[1]] = "<conflict>"
+			} else {
+				out[fields[1]] = fields[2]
+			}
 		}
 	}
 	return out
@@ -1958,12 +2065,12 @@ func hasExternalCgoMeta(p *listPkg) bool {
 	return p != nil && (hasExternalCgo(p.CgoLDFLAGS) || len(p.CgoPkgConfig) > 0)
 }
 
-func hasCgoCallbackBlindspot(p *listPkg) bool {
+func hasNonHeaderNativeSource(p *listPkg) bool {
 	if p == nil {
 		return false
 	}
 	for _, files := range [][]string{
-		p.CgoFiles, p.CFiles, p.CXXFiles, p.MFiles, p.HFiles, p.FFiles,
+		p.CgoFiles, p.CFiles, p.CXXFiles, p.MFiles, p.FFiles,
 		p.SwigFiles, p.SwigCXXFiles, p.SysoFiles,
 	} {
 		if len(files) > 0 {
@@ -1971,6 +2078,10 @@ func hasCgoCallbackBlindspot(p *listPkg) bool {
 		}
 	}
 	return false
+}
+
+func hasCgoCallbackBlindspot(p *listPkg) bool {
+	return hasNonHeaderNativeSource(p) || (p != nil && len(p.HFiles) > 0)
 }
 
 func isStdImportPath(path string) bool {
@@ -2101,7 +2212,15 @@ func unreachedASTDecls(dir, pkgClause string, file *ast.File, testMainDecl *ast.
 }
 
 func subjectReachedDeclKeys(base *tier2Base, reach attributedReachability, subjectObjects map[types.Object]bool) map[funcDeclKey]bool {
+	reached, _ := subjectReachedAndStartupOnlyDeclKeys(base, reach, subjectObjects, nil)
+	return reached
+}
+
+func subjectReachedAndStartupOnlyDeclKeys(base *tier2Base, reach attributedReachability, subjectObjects map[types.Object]bool, zeroGlobals map[*ssa.Global]bool) (map[funcDeclKey]bool, map[funcDeclKey]bool) {
 	aux := base.analyzer()
+	aux.startupOnly = syncStartupOnlyFunctions(reach)
+	aux.zeroGlobals = zeroGlobals
+	aux.zeroGlobalDecls = zeroGlobalDeclKeys(zeroGlobals)
 	for obj := range subjectObjects {
 		aux.seenObjects[obj] = true
 	}
@@ -2119,39 +2238,79 @@ func subjectReachedDeclKeys(base *tier2Base, reach attributedReachability, subje
 	}
 	_ = aux.drainObjects()
 	keys := make(map[funcDeclKey]bool, len(aux.seenObjects)+len(reach.functions)+len(reach.instantiatedOrigins))
-	addObj := func(obj types.Object) {
+	candidateStartupKeys := make(map[funcDeclKey]bool, len(aux.startupOnly))
+	nonStartupKeys := make(map[funcDeclKey]bool, len(subjectObjects)+len(reach.subjectFunctions)+len(reach.testMainFunctions)+len(reach.cleanupFunctions)+len(reach.rootedExtraFunctions))
+	addObjTo := func(dst map[funcDeclKey]bool, obj types.Object) {
 		obj = originObject(obj)
 		if obj == nil || obj.Pkg() == nil {
 			return
 		}
 		if idx := base.idxByTypes[obj.Pkg()]; idx != nil {
 			if key, ok := idx.funcKeys[obj]; ok {
-				keys[key] = true
+				dst[key] = true
 			}
 		}
 	}
-	addFn := func(fn *ssa.Function) {
+	addFnSelfTo := func(dst map[funcDeclKey]bool, fn *ssa.Function) {
+		if fn == nil {
+			return
+		}
+		if orig := fn.Origin(); orig != nil {
+			addObjTo(dst, orig.Object())
+		}
+		addObjTo(dst, fn.Object())
+	}
+	addFnTo := func(dst map[funcDeclKey]bool, fn *ssa.Function) {
 		for cur := fn; cur != nil; cur = cur.Parent() {
-			if orig := cur.Origin(); orig != nil {
-				addObj(orig.Object())
-			}
-			addObj(cur.Object())
+			addFnSelfTo(dst, cur)
 		}
 	}
 	for obj := range aux.seenObjects {
-		addObj(obj)
+		addObjTo(keys, obj)
+	}
+	for obj := range subjectObjects {
+		addObjTo(nonStartupKeys, obj)
+	}
+	for fn := range reach.functions {
+		addFnTo(keys, fn)
+		if !aux.startupOnly[fn] {
+			addFnTo(nonStartupKeys, fn)
+		}
 	}
 	for fn := range reach.subjectFunctions {
-		addFn(fn)
+		addFnTo(keys, fn)
+		addFnTo(nonStartupKeys, fn)
 	}
 	for fn := range reach.startupFunctions {
-		addFn(fn)
+		addFnTo(keys, fn)
+		if aux.startupOnly[fn] {
+			addFnSelfTo(candidateStartupKeys, fn)
+		} else {
+			addFnTo(nonStartupKeys, fn)
+		}
+	}
+	for fn := range reach.cleanupFunctions {
+		addFnTo(nonStartupKeys, fn)
 	}
 	for fn := range reach.testMainFunctions {
-		addFn(fn)
+		addFnTo(keys, fn)
+		addFnTo(nonStartupKeys, fn)
+	}
+	for fn := range reach.rootedExtraFunctions {
+		addFnTo(keys, fn)
+		addFnTo(nonStartupKeys, fn)
 	}
 	for fn := range reach.instantiatedOrigins {
-		addFn(fn)
+		addFnTo(keys, fn)
 	}
-	return keys
+	var startupOnlyKeys map[funcDeclKey]bool
+	for key := range candidateStartupKeys {
+		if !nonStartupKeys[key] {
+			if startupOnlyKeys == nil {
+				startupOnlyKeys = make(map[funcDeclKey]bool, len(candidateStartupKeys))
+			}
+			startupOnlyKeys[key] = true
+		}
+	}
+	return keys, startupOnlyKeys
 }

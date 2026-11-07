@@ -243,7 +243,9 @@ func (a *tier2Analyzer) localHarnessView() *freshParamAnalysis {
 	if a.fresh == nil || !a.fresh.propertyHarnessAudited {
 		return nil
 	}
-	return newBitOnlyFreshParamAnalysis(true, a.h.SelectionAudited(), a.h.source.pureDelegates, nil, nil, a.isStdFunction)
+	fp := newBitOnlyFreshParamAnalysis(true, a.h.SelectionAudited(), a.h.source.pureDelegates, nil, nil, a.isStdFunction)
+	fp.prog = a.prog
+	return fp
 }
 
 // propertyHarnessClosedResult reports whether a call value is a

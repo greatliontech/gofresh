@@ -872,7 +872,7 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@57" {
+	if ObservationRTA != "gofresh/observation-rta@58" {
 		t.Fatalf("ObservationRTA = %q, want content- and policy-bound proof evidence", ObservationRTA)
 	}
 }
