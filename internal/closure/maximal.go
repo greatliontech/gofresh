@@ -384,9 +384,7 @@ func (h *Hasher) maximalFileEffectsCachedWithContext(pkgPath, path string, decla
 		h.maximalFiles[cacheKey] = scan
 		return scan, nil
 	}
-	if analysisTestHooks.fileParse != nil {
-		analysisTestHooks.fileParse(path)
-	}
+	emitFileParseHook(path)
 	scan, err := maximalFileEffectsContentWithContextFiltered(h.SelectionAudited(), path, fb.content, declaredNames, nonStdPaths, nil)
 	if err != nil {
 		return maximalEffectScan{}, err
@@ -1234,15 +1232,13 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 		loaded = h.viewLoadVariants(pkgPath)
 	}
 	if len(loaded) == 0 {
-		if analysisTestHooks.testingTypeOwnLoad != nil {
-			analysisTestHooks.testingTypeOwnLoad(pkgPath)
-		}
+		emitTestingTypeOwnLoadHook(pkgPath)
 		h.emitUnit("typecheck", pkgPath, 0, 1)
 		if prog := h.progs[pkgPath]; prog != nil {
 			loaded = prog.Pkgs
 		}
-		if len(loaded) == 0 && analysisTestHooks.testingPackagesOnMiss != nil {
-			if p := analysisTestHooks.testingPackagesOnMiss(h, pkgPath); p != nil {
+		if len(loaded) == 0 && h.testingPackagesOnMiss != nil {
+			if p := h.testingPackagesOnMiss(h, pkgPath); p != nil {
 				loaded = p.Pkgs
 			}
 		}

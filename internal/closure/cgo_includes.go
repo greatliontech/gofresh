@@ -236,7 +236,7 @@ func goCgoPreamble(content []byte) (string, error) {
 		}
 		for _, spec := range gen.Specs {
 			imp, ok := spec.(*ast.ImportSpec)
-			if !ok || imp.Path == nil || imp.Path.Value != `"C"` {
+			if !ok || imp.Path == nil || !isCgoImportLit(imp.Path.Value) {
 				continue
 			}
 			if imp.Doc != nil {

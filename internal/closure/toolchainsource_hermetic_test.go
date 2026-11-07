@@ -179,6 +179,7 @@ func TestToolchainSourceDegradationNamesEveryAxis(t *testing.T) {
 		Packages:  map[string]string{},
 		inventory: map[string]listedPackage{},
 	}
+	seededOK := map[string]bool{}
 	for _, root := range auditedSurfaceTables() {
 		first, _, _ := strings.Cut(root, "/")
 		if strings.Contains(first, ".") {
@@ -187,55 +188,62 @@ func TestToolchainSourceDegradationNamesEveryAxis(t *testing.T) {
 		digest := "digest-" + root
 		base.Packages[root] = digest
 		base.inventory[root] = listedPackage{ImportPath: root, Audited: true, digest: digest}
-		memoKey := verifiedPackageMemoKey(root, digest)
-		verifiedPackageMemo.Store(memoKey, verifiedPackageVerdict{OK: true})
-		t.Cleanup(func() { verifiedPackageMemo.Delete(memoKey) })
+		seededOK[verifiedPackageMemoKey(root, digest)] = true
 	}
-	if d := toolchainSourceDegradation("go1.99.0", base, nil); !d.audited() || d.notice() != "" || d.axis != "" {
-		t.Fatalf("every package verified, yet %+v", d)
-	}
-
-	unverifiedBytes := sourceDigests{
-		Packages:  map[string]string{},
-		inventory: map[string]listedPackage{},
-	}
-	for k, v := range base.Packages {
-		unverifiedBytes.Packages[k] = v
-		unverifiedBytes.inventory[k] = base.inventory[k]
-	}
-	unverifiedBytes.Packages["bytes"] = "corrupt-digest"
-
-	for _, tc := range []struct {
-		name    string
-		d       sourceDigests
-		listErr error
-		axis    string
-		remedy  string
-	}{
-		{"unreadable surface (an unclassifiable flag set included)", sourceDigests{}, errors.New("listing the standard library: boom"), "could not be read: listing the standard library: boom", "listed and readable"},
-		{"one package failed verification", unverifiedBytes, nil, "moved in 1 keys: bytes", "structural source contracts"},
-	} {
-		d := toolchainSourceDegradation("go1.99.0", tc.d, tc.listErr)
-		if d.audited() || !strings.Contains(d.axis, tc.axis) || !strings.Contains(d.remedy, tc.remedy) {
-			t.Errorf("%s: degradation %+v, want axis %q and remedy %q", tc.name, d, tc.axis, tc.remedy)
+	withClosureTestHooks(analysisTestHookSet{
+		packageVerdictOverride: func(memoKey string) (verifiedPackageVerdict, bool) {
+			if seededOK[memoKey] {
+				return verifiedPackageVerdict{OK: true}, true
+			}
+			return verifiedPackageVerdict{}, false
+		},
+	}, func() {
+		if d := toolchainSourceDegradation("go1.99.0", base, nil); !d.audited() || d.notice() != "" || d.axis != "" {
+			t.Fatalf("every package verified, yet %+v", d)
 		}
-		if notice := d.notice(); !strings.HasPrefix(notice, "toolchain-selection audit: "+d.axis+" — ") || !strings.HasSuffix(notice, d.remedy) {
-			t.Errorf("%s: notice %q is not axis+consequence+remedy", tc.name, notice)
+
+		unverifiedBytes := sourceDigests{
+			Packages:  map[string]string{},
+			inventory: map[string]listedPackage{},
 		}
-		requireBareAxis(t, tc.name, d.notice(), d.axis)
-	}
-	// Many failed keys: bounded to 8 and the rest counted.
-	many := sourceDigests{
-		Packages:  map[string]string{},
-		inventory: map[string]listedPackage{},
-	}
-	for _, p := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"} {
-		many.Packages[p] = "x"
-	}
-	d := toolchainSourceDegradation("go1.99.0", many, nil)
-	if !strings.Contains(d.axis, "moved in ") || !strings.Contains(d.axis, "a, b, c, d, e, f, g, h (+") {
-		t.Fatalf("bounded naming: %q", d.axis)
-	}
+		for k, v := range base.Packages {
+			unverifiedBytes.Packages[k] = v
+			unverifiedBytes.inventory[k] = base.inventory[k]
+		}
+		unverifiedBytes.Packages["bytes"] = "corrupt-digest"
+
+		for _, tc := range []struct {
+			name    string
+			d       sourceDigests
+			listErr error
+			axis    string
+			remedy  string
+		}{
+			{"unreadable surface (an unclassifiable flag set included)", sourceDigests{}, errors.New("listing the standard library: boom"), "could not be read: listing the standard library: boom", "listed and readable"},
+			{"one package failed verification", unverifiedBytes, nil, "moved in 1 keys: bytes", "structural source contracts"},
+		} {
+			d := toolchainSourceDegradation("go1.99.0", tc.d, tc.listErr)
+			if d.audited() || !strings.Contains(d.axis, tc.axis) || !strings.Contains(d.remedy, tc.remedy) {
+				t.Errorf("%s: degradation %+v, want axis %q and remedy %q", tc.name, d, tc.axis, tc.remedy)
+			}
+			if notice := d.notice(); !strings.HasPrefix(notice, "toolchain-selection audit: "+d.axis+" — ") || !strings.HasSuffix(notice, d.remedy) {
+				t.Errorf("%s: notice %q is not axis+consequence+remedy", tc.name, notice)
+			}
+			requireBareAxis(t, tc.name, d.notice(), d.axis)
+		}
+		// Many failed keys: bounded to 8 and the rest counted.
+		many := sourceDigests{
+			Packages:  map[string]string{},
+			inventory: map[string]listedPackage{},
+		}
+		for _, p := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"} {
+			many.Packages[p] = "x"
+		}
+		d := toolchainSourceDegradation("go1.99.0", many, nil)
+		if !strings.Contains(d.axis, "moved in ") || !strings.Contains(d.axis, "a, b, c, d, e, f, g, h (+") {
+			t.Fatalf("bounded naming: %q", d.axis)
+		}
+	})
 }
 
 // Equal admission Booleans cannot alias different source or policy inputs, and
@@ -312,17 +320,26 @@ func TestUnlistedSurfaceRefusesObservability(t *testing.T) {
 		t.Fatalf("fixture assumption moved: TestReadFile not observable under the listed toolchain: %+v", o)
 	}
 	memoKey := verifiedPackageMemoKey("strings", listed.source.Packages["strings"])
-	verifiedPackageMemo.Store(memoKey, verifiedPackageVerdict{OK: false})
-	t.Cleanup(func() { verifiedPackageMemo.Delete(memoKey) })
-	unlisted := newInMemoryHasher(t)
-	supplyRegisteredFixtures(t, unlisted, subject.Package)
-	if unlisted.SelectionAudited() || !strings.Contains(unlisted.SelectionAttribution(), "moved in") {
-		t.Fatalf("an unverified surface admitted: %v %q", unlisted.SelectionAudited(), unlisted.SelectionAttribution())
-	}
-	unlistedObs, err := unlisted.ComputeObservabilityBatch([]Subject{subject})
-	if err != nil {
-		t.Fatal(err)
-	}
+	var unlisted *Hasher
+	var unlistedObs map[Subject]Observability
+	withClosureTestHooks(analysisTestHookSet{
+		packageVerdictOverride: func(key string) (verifiedPackageVerdict, bool) {
+			if key == memoKey {
+				return verifiedPackageVerdict{OK: false}, true
+			}
+			return verifiedPackageVerdict{}, false
+		},
+	}, func() {
+		unlisted = newInMemoryHasher(t)
+		supplyRegisteredFixtures(t, unlisted, subject.Package)
+		if unlisted.SelectionAudited() || !strings.Contains(unlisted.SelectionAttribution(), "moved in") {
+			t.Fatalf("an unverified surface admitted: %v %q", unlisted.SelectionAudited(), unlisted.SelectionAttribution())
+		}
+		unlistedObs, err = unlisted.ComputeObservabilityBatch([]Subject{subject})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
 	if o := unlistedObs[subject]; o.Observable {
 		t.Fatalf("the unlisted analysis kept the observability proof — the verdict never reached the admission sites: %+v", o)
 	}
@@ -369,22 +386,24 @@ func TestPackageFileWalkEndsAtTheNextEntry(t *testing.T) {
 	h := &Hasher{ctx: ctx}
 	const stopAt = 2
 	seen := 0
-	prior := walkEntryForTest
-	walkEntryForTest = func(path string) {
-		seen++
-		if seen == stopAt {
-			cancel()
-		}
-	}
-	t.Cleanup(func() { walkEntryForTest = prior })
-	files, err := allPackageFiles(h.contextErr, dir)
+	var files []string
+	var err error
+	withClosureTestHooks(analysisTestHookSet{
+		walkEntry: func(path string) {
+			seen++
+			if seen == stopAt {
+				cancel()
+			}
+		},
+	}, func() {
+		files, err = allPackageFiles(h.contextErr, dir)
+	})
 	if !errors.Is(err, context.Canceled) || len(files) != 0 {
 		t.Fatalf("a walk cancelled at entry %d answered %v with %d files, want the cancellation and nothing listed", stopAt, err, len(files))
 	}
 	if seen != stopAt {
 		t.Fatalf("the walk visited %d entries with the cancellation at entry %d, want exactly that many: the next entry's check ends it", seen, stopAt)
 	}
-	walkEntryForTest = prior
 	cancelled, cancelNow := context.WithCancel(context.Background())
 	cancelNow()
 	if files, err := allPackageFiles((&Hasher{ctx: cancelled}).contextErr, dir); !errors.Is(err, context.Canceled) || len(files) != 0 {
@@ -666,7 +685,6 @@ func TestSurfaceListingServesOnlyOverItsStamps(t *testing.T) {
 // directive contracts over standard-library packages without hardcoded release
 // digest tables.
 func TestVerifyToolchainSurfaceEnforcesStructuralContracts(t *testing.T) {
-	t.Parallel()
 	writePkg := func(importPath string, files map[string]string) listedPackage {
 		t.Helper()
 		dir := t.TempDir()
@@ -714,6 +732,13 @@ func TestVerifyToolchainSurfaceEnforcesStructuralContracts(t *testing.T) {
 		lp.Audited = true
 		return lp
 	}
+	seededOK := map[string]bool{}
+	seedOverride := func(memoKey string) (verifiedPackageVerdict, bool) {
+		if seededOK[memoKey] {
+			return verifiedPackageVerdict{OK: true}, true
+		}
+		return verifiedPackageVerdict{}, false
+	}
 	seedPreverifiedSurface := func(overrides ...listedPackage) sourceDigests {
 		sd := sourceDigests{
 			Packages:  map[string]string{},
@@ -727,9 +752,7 @@ func TestVerifyToolchainSurfaceEnforcesStructuralContracts(t *testing.T) {
 			d := "seed-ok-" + root
 			sd.Packages[root] = d
 			sd.inventory[root] = listedPackage{ImportPath: root, Audited: true, digest: d}
-			mk := verifiedPackageMemoKey(root, d)
-			verifiedPackageMemo.Store(mk, verifiedPackageVerdict{OK: true})
-			t.Cleanup(func() { verifiedPackageMemo.Delete(mk) })
+			seededOK[verifiedPackageMemoKey(root, d)] = true
 		}
 		for _, ov := range overrides {
 			sd.inventory[ov.ImportPath] = ov
@@ -743,38 +766,40 @@ func TestVerifyToolchainSurfaceEnforcesStructuralContracts(t *testing.T) {
 	stringsImpPoll := digestLP(writePkg("strings", map[string]string{
 		"strings.go": "package strings\nimport \"internal/poll\"\nvar _ = poll.ErrNetClosing\n",
 	}))
-	if failed := verifyToolchainSurface(seedPreverifiedSurface(stringsImpPoll)); !slices.Contains(failed, "strings") {
-		t.Fatalf("pure package importing uninventoried internal/poll: failed=%v, want strings", failed)
-	}
-	pollWithSyscall := digestLP(writePkg("internal/poll", map[string]string{
-		"poll.go": "package poll\nimport \"syscall\"\nvar ErrNetClosing = syscall.EINVAL\n",
-	}))
-	if failed := verifyToolchainSurface(seedPreverifiedSurface(stringsImpPoll, pollWithSyscall)); !slices.Contains(failed, "internal/poll") {
-		t.Fatalf("pure package importing syscall-backed internal/poll: failed=%v, want internal/poll", failed)
-	}
+	withClosureTestHooks(analysisTestHookSet{packageVerdictOverride: seedOverride}, func() {
+		if failed := verifyToolchainSurface(seedPreverifiedSurface(stringsImpPoll)); !slices.Contains(failed, "strings") {
+			t.Fatalf("pure package importing uninventoried internal/poll: failed=%v, want strings", failed)
+		}
+		pollWithSyscall := digestLP(writePkg("internal/poll", map[string]string{
+			"poll.go": "package poll\nimport \"syscall\"\nvar ErrNetClosing = syscall.EINVAL\n",
+		}))
+		if failed := verifyToolchainSurface(seedPreverifiedSurface(stringsImpPoll, pollWithSyscall)); !slices.Contains(failed, "internal/poll") {
+			t.Fatalf("pure package importing syscall-backed internal/poll: failed=%v, want internal/poll", failed)
+		}
 
-	customLeafPure := digestLP(writePkg("internal/customleaf", map[string]string{
-		"leaf.go":  "package customleaf\nfunc Add(a, b int) int { return a + b }\n",
-		"leaf_s.s": "// SYSCALL in comment only\nTEXT ·AddAsm(SB),$0-24\n\tRET\n",
-	}))
-	customMidPure := digestLP(writePkg("internal/custommid", map[string]string{
-		"mid.go": "package custommid\nimport \"internal/customleaf\"\nfunc Twice(x int) int { return customleaf.Add(x, x) }\n",
-	}))
-	stringsImpCustom := digestLP(writePkg("strings", map[string]string{
-		"strings.go": "package strings\nimport \"internal/custommid\"\nfunc Double(x int) int { return custommid.Twice(x) }\n",
-	}))
-	_, pureDelSet, ioErr, ctxErr := verifyToolchainSurfaceAndDelegatesWithIO(t.Context(), seedPreverifiedSurface(stringsImpCustom, customMidPure, customLeafPure))
-	if ioErr != nil || ctxErr != nil || !pureDelSet["internal/custommid"] || !pureDelSet["internal/customleaf"] {
-		t.Fatalf("transitive pure delegates refused or incomplete: delegates=%v ioErr=%v ctxErr=%v", pureDelSet, ioErr, ctxErr)
-	}
+		customLeafPure := digestLP(writePkg("internal/customleaf", map[string]string{
+			"leaf.go":  "package customleaf\nfunc Add(a, b int) int { return a + b }\n",
+			"leaf_s.s": "// SYSCALL in comment only\nTEXT ·AddAsm(SB),$0-24\n\tRET\n",
+		}))
+		customMidPure := digestLP(writePkg("internal/custommid", map[string]string{
+			"mid.go": "package custommid\nimport \"internal/customleaf\"\nfunc Twice(x int) int { return customleaf.Add(x, x) }\n",
+		}))
+		stringsImpCustom := digestLP(writePkg("strings", map[string]string{
+			"strings.go": "package strings\nimport \"internal/custommid\"\nfunc Double(x int) int { return custommid.Twice(x) }\n",
+		}))
+		_, pureDelSet, ioErr, ctxErr := verifyToolchainSurfaceAndDelegatesWithIO(t.Context(), seedPreverifiedSurface(stringsImpCustom, customMidPure, customLeafPure))
+		if ioErr != nil || ctxErr != nil || !pureDelSet["internal/custommid"] || !pureDelSet["internal/customleaf"] {
+			t.Fatalf("transitive pure delegates refused or incomplete: delegates=%v ioErr=%v ctxErr=%v", pureDelSet, ioErr, ctxErr)
+		}
 
-	customLeafRawSyscall := digestLP(writePkg("internal/customleaf", map[string]string{
-		"leaf.go":  "package customleaf\nfunc Trap()\n",
-		"leaf_s.s": "TEXT ·Trap(SB),$0-0\n\tSYSCALL\n\tRET\n",
-	}))
-	if failed := verifyToolchainSurface(seedPreverifiedSurface(stringsImpCustom, customMidPure, customLeafRawSyscall)); !slices.Contains(failed, "internal/customleaf") {
-		t.Fatalf("transitive delegate with raw SYSCALL assembly admitted: failed=%v", failed)
-	}
+		customLeafRawSyscall := digestLP(writePkg("internal/customleaf", map[string]string{
+			"leaf.go":  "package customleaf\nfunc Trap()\n",
+			"leaf_s.s": "TEXT ·Trap(SB),$0-0\n\tSYSCALL\n\tRET\n",
+		}))
+		if failed := verifyToolchainSurface(seedPreverifiedSurface(stringsImpCustom, customMidPure, customLeafRawSyscall)); !slices.Contains(failed, "internal/customleaf") {
+			t.Fatalf("transitive delegate with raw SYSCALL assembly admitted: failed=%v", failed)
+		}
+	})
 
 	customLeafInt80 := writePkg("internal/customleaf", map[string]string{
 		"leaf.go":  "package customleaf\nfunc Trap386()\n",
@@ -1656,9 +1681,11 @@ func Getwd() (dir string, err error) {
 
 	cctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := verifyToolchainSurfaceContext(cctx, seedPreverifiedSurface(validPure)); err == nil {
-		t.Fatal("verifyToolchainSurfaceContext ignored cancelled context")
-	}
+	withClosureTestHooks(analysisTestHookSet{packageVerdictOverride: seedOverride}, func() {
+		if _, err := verifyToolchainSurfaceContext(cctx, seedPreverifiedSurface(validPure)); err == nil {
+			t.Fatal("verifyToolchainSurfaceContext ignored cancelled context")
+		}
+	})
 
 	if got := namedMoved([]string{"a", "b"}); got != "a, b" {
 		t.Fatalf("namedMoved = %q", got)
@@ -1899,6 +1926,7 @@ func FuzzToolchainKeyObligations(f *testing.F) {
 
 	basePackages := map[string]string{}
 	baseInventory := map[string]listedPackage{}
+	preverifiedOK := map[string]bool{}
 	for _, root := range auditedSurfaceTables() {
 		first, _, _ := strings.Cut(root, "/")
 		if strings.Contains(first, ".") {
@@ -1907,7 +1935,7 @@ func FuzzToolchainKeyObligations(f *testing.F) {
 		d := "preverified-" + root
 		basePackages[root] = d
 		baseInventory[root] = listedPackage{ImportPath: root, Audited: true, digest: d}
-		verifiedPackageMemo.Store(verifiedPackageMemoKey(root, d), verifiedPackageVerdict{OK: true})
+		preverifiedOK[verifiedPackageMemoKey(root, d)] = true
 	}
 
 	f.Fuzz(func(t *testing.T, pkgChoice, body, extraName string, cancelCtx bool) {
@@ -2115,12 +2143,6 @@ func FuzzToolchainKeyObligations(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		verifiedPackageMemo.Delete(verifiedPackageMemoKey("internal/testlog", testlogDigest))
-		verifiedPackageMemo.Delete(verifiedPackageMemoKey("bufio", bufioDigest))
-		verifiedPackageMemo.Delete(verifiedPackageMemoKey("os", osDigest))
-		verifiedPackageMemo.Delete(verifiedPackageMemoKey("testing", testingDigest))
-		verifiedPackageMemo.Delete(verifiedPackageMemoKey("testing/internal/testdeps", testdepsDigest))
-
 		pkgs := make(map[string]string, len(basePackages))
 		inv := make(map[string]listedPackage, len(baseInventory))
 		for k, v := range basePackages {
@@ -2132,9 +2154,6 @@ func FuzzToolchainKeyObligations(f *testing.F) {
 		// Intact surface (including live-verified internal/testlog, bufio, os, testing, and testing/internal/testdeps) passes verification.
 		pkgs[pkgName] = d2
 		inv[pkgName] = listedPackage{ImportPath: pkgName, Dir: dir, Files: sel, Audited: true, digest: d2}
-		t.Cleanup(func() {
-			verifiedPackageMemo.Delete(verifiedPackageMemoKey(pkgName, d2))
-		})
 		pkgs["internal/testlog"] = testlogDigest
 		inv["internal/testlog"] = listedPackage{ImportPath: "internal/testlog", Dir: testlogDir, Files: []string{"testlog.go"}, Audited: true, digest: testlogDigest}
 		pkgs["bufio"] = bufioDigest
@@ -2145,56 +2164,63 @@ func FuzzToolchainKeyObligations(f *testing.F) {
 		inv["testing"] = listedPackage{ImportPath: "testing", Dir: testingDir, Files: []string{"testing.go"}, Audited: true, digest: testingDigest}
 		pkgs["testing/internal/testdeps"] = testdepsDigest
 		inv["testing/internal/testdeps"] = listedPackage{ImportPath: "testing/internal/testdeps", Dir: testdepsDir, Files: []string{"testdeps.go"}, Audited: true, digest: testdepsDigest}
-		intactSD := sourceDigests{Packages: pkgs, inventory: inv, Policy: admissionPolicy()}
-		if deg := toolchainSourceDegradation("go1.test", intactSD, nil); !deg.audited() {
-			t.Fatalf("intact audited surface degraded: %+v", deg)
-		}
-		// Breaking (*common).Context in testing triggers degradation.
-		brokenTestingSrc := mustMutateFixture(t, syntheticTestingInlineSrc, "c.checkFuzzFn(\"Context\"); return c.ctx", "return context.Background()")
-		if err := os.WriteFile(filepath.Join(testingDir, "testing.go"), []byte(brokenTestingSrc), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		brokenTestingDigest, err := digestFiles(ctx, testingDir, []string{"testing.go"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		verifiedPackageMemo.Delete(verifiedPackageMemoKey("testing", brokenTestingDigest))
-		pkgs["testing"] = brokenTestingDigest
-		inv["testing"] = listedPackage{ImportPath: "testing", Dir: testingDir, Files: []string{"testing.go"}, Audited: true, digest: brokenTestingDigest}
-		brokenTestingSD := sourceDigests{Packages: pkgs, inventory: inv, Policy: admissionPolicy()}
-		if deg := toolchainSourceDegradation("go1.test", brokenTestingSD, nil); deg.audited() || !strings.Contains(deg.axis, "testing") {
-			t.Fatalf("broken (*common).Context in testing did not trigger degradation: %+v", deg)
-		}
-		if err := os.WriteFile(filepath.Join(testingDir, "testing.go"), []byte(syntheticTestingInlineSrc), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		pkgs["testing"] = testingDigest
-		inv["testing"] = listedPackage{ImportPath: "testing", Dir: testingDir, Files: []string{"testing.go"}, Audited: true, digest: testingDigest}
+		withClosureTestHooks(analysisTestHookSet{
+			packageVerdictOverride: func(memoKey string) (verifiedPackageVerdict, bool) {
+				if preverifiedOK[memoKey] {
+					return verifiedPackageVerdict{OK: true}, true
+				}
+				return verifiedPackageVerdict{}, false
+			},
+		}, func() {
+			intactSD := sourceDigests{Packages: pkgs, inventory: inv, Policy: admissionPolicy()}
+			if deg := toolchainSourceDegradation("go1.test", intactSD, nil); !deg.audited() {
+				t.Fatalf("intact audited surface degraded: %+v", deg)
+			}
+			// Breaking (*common).Context in testing triggers degradation.
+			brokenTestingSrc := mustMutateFixture(t, syntheticTestingInlineSrc, "c.checkFuzzFn(\"Context\"); return c.ctx", "return context.Background()")
+			if err := os.WriteFile(filepath.Join(testingDir, "testing.go"), []byte(brokenTestingSrc), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			brokenTestingDigest, err := digestFiles(ctx, testingDir, []string{"testing.go"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			pkgs["testing"] = brokenTestingDigest
+			inv["testing"] = listedPackage{ImportPath: "testing", Dir: testingDir, Files: []string{"testing.go"}, Audited: true, digest: brokenTestingDigest}
+			brokenTestingSD := sourceDigests{Packages: pkgs, inventory: inv, Policy: admissionPolicy()}
+			if deg := toolchainSourceDegradation("go1.test", brokenTestingSD, nil); deg.audited() || !strings.Contains(deg.axis, "testing") {
+				t.Fatalf("broken (*common).Context in testing did not trigger degradation: %+v", deg)
+			}
+			if err := os.WriteFile(filepath.Join(testingDir, "testing.go"), []byte(syntheticTestingInlineSrc), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			pkgs["testing"] = testingDigest
+			inv["testing"] = listedPackage{ImportPath: "testing", Dir: testingDir, Files: []string{"testing.go"}, Audited: true, digest: testingDigest}
 
-		// Breaking a harness observation premise in testing/internal/testdeps triggers degradation.
-		brokenTestdepsSrc := mustMutateFixture(t, syntheticTestdepsSrc, "err := log.w.Flush()\n\tlog.w = nil\n\treturn err", "log.w = nil\n\treturn nil")
-		if err := os.WriteFile(filepath.Join(testdepsDir, "testdeps.go"), []byte(brokenTestdepsSrc), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		brokenTestdepsDigest, err := digestFiles(ctx, testdepsDir, []string{"testdeps.go"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		verifiedPackageMemo.Delete(verifiedPackageMemoKey("testing/internal/testdeps", brokenTestdepsDigest))
-		pkgs["testing/internal/testdeps"] = brokenTestdepsDigest
-		inv["testing/internal/testdeps"] = listedPackage{ImportPath: "testing/internal/testdeps", Dir: testdepsDir, Files: []string{"testdeps.go"}, Audited: true, digest: brokenTestdepsDigest}
-		brokenPremiseSD := sourceDigests{Packages: pkgs, inventory: inv, Policy: admissionPolicy()}
-		if deg := toolchainSourceDegradation("go1.test", brokenPremiseSD, nil); deg.audited() || !strings.Contains(deg.axis, "testing/internal/testdeps") {
-			t.Fatalf("broken observation premise in testing/internal/testdeps did not trigger degradation: %+v", deg)
-		}
-		// Restore intact testing/internal/testdeps and verify drifted digest in pkgName triggers degradation.
-		pkgs["testing/internal/testdeps"] = testdepsDigest
-		inv["testing/internal/testdeps"] = listedPackage{ImportPath: "testing/internal/testdeps", Dir: testdepsDir, Files: []string{"testdeps.go"}, Audited: true, digest: testdepsDigest}
-		pkgs[pkgName] = d1
-		driftedSD := sourceDigests{Packages: pkgs, inventory: inv, Policy: admissionPolicy()}
-		if deg := toolchainSourceDegradation("go1.test", driftedSD, nil); deg.audited() || !strings.Contains(deg.axis, pkgName) {
-			t.Fatalf("moved audited package digest did not trigger degradation naming %s: %+v", pkgName, deg)
-		}
+			// Breaking a harness observation premise in testing/internal/testdeps triggers degradation.
+			brokenTestdepsSrc := mustMutateFixture(t, syntheticTestdepsSrc, "err := log.w.Flush()\n\tlog.w = nil\n\treturn err", "log.w = nil\n\treturn nil")
+			if err := os.WriteFile(filepath.Join(testdepsDir, "testdeps.go"), []byte(brokenTestdepsSrc), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			brokenTestdepsDigest, err := digestFiles(ctx, testdepsDir, []string{"testdeps.go"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			pkgs["testing/internal/testdeps"] = brokenTestdepsDigest
+			inv["testing/internal/testdeps"] = listedPackage{ImportPath: "testing/internal/testdeps", Dir: testdepsDir, Files: []string{"testdeps.go"}, Audited: true, digest: brokenTestdepsDigest}
+			brokenPremiseSD := sourceDigests{Packages: pkgs, inventory: inv, Policy: admissionPolicy()}
+			if deg := toolchainSourceDegradation("go1.test", brokenPremiseSD, nil); deg.audited() || !strings.Contains(deg.axis, "testing/internal/testdeps") {
+				t.Fatalf("broken observation premise in testing/internal/testdeps did not trigger degradation: %+v", deg)
+			}
+			// Restore intact testing/internal/testdeps and verify drifted digest in pkgName triggers degradation.
+			pkgs["testing/internal/testdeps"] = testdepsDigest
+			inv["testing/internal/testdeps"] = listedPackage{ImportPath: "testing/internal/testdeps", Dir: testdepsDir, Files: []string{"testdeps.go"}, Audited: true, digest: testdepsDigest}
+			pkgs[pkgName] = d1
+			driftedSD := sourceDigests{Packages: pkgs, inventory: inv, Policy: admissionPolicy()}
+			if deg := toolchainSourceDegradation("go1.test", driftedSD, nil); deg.audited() || !strings.Contains(deg.axis, pkgName) {
+				t.Fatalf("moved audited package digest did not trigger degradation naming %s: %+v", pkgName, deg)
+			}
+		})
 	})
 }
 
@@ -2654,5 +2680,80 @@ func TestVerifyReadPackageDigestMetadataVersusContentDrift(t *testing.T) {
 	}
 	if movedDigest != "" {
 		t.Fatalf("verifyReadPackageDigest after content change = %q, want empty digest", movedDigest)
+	}
+}
+
+func TestDirEntriesMatch(t *testing.T) {
+	emptyDir := t.TempDir()
+	ok, err := dirEntriesMatch(emptyDir, nil)
+	if err != nil || !ok {
+		t.Fatalf("empty dir against nil stamp = (%v, %v), want (true, nil)", ok, err)
+	}
+
+	dir := t.TempDir()
+	fileA := filepath.Join(dir, "a.go")
+	fileB := filepath.Join(dir, "b.go")
+	if err := os.WriteFile(fileA, []byte("package p\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fileB, []byte("package p\nfunc F() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	want, err := stampEntries(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := dirEntriesMatch(dir, nil); err != nil || ok {
+		t.Fatalf("non-empty dir against nil stamp = (%v, %v), want (false, nil)", ok, err)
+	}
+	ok, err = dirEntriesMatch(dir, want)
+	if err != nil || !ok {
+		t.Fatalf("unchanged dirEntriesMatch = (%v, %v), want (true, nil)", ok, err)
+	}
+	for _, field := range []struct {
+		name   string
+		mutate func(*entryStamp)
+	}{
+		{name: "Name", mutate: func(e *entryStamp) { e.Name += ".x" }},
+		{name: "Type", mutate: func(e *entryStamp) { e.Type ^= os.ModeDir }},
+		{name: "Size", mutate: func(e *entryStamp) { e.Size++ }},
+		{name: "ModTime", mutate: func(e *entryStamp) { e.ModTime++ }},
+		{name: "ChangeTime", mutate: func(e *entryStamp) { e.ChangeTime++ }},
+	} {
+		perturbed := slices.Clone(want)
+		field.mutate(&perturbed[0])
+		if ok, err := dirEntriesMatch(dir, perturbed); err != nil || ok {
+			t.Fatalf("%s-perturbed stamp matched: ok=%v err=%v", field.name, ok, err)
+		}
+	}
+
+	// Count mismatch (extra entry).
+	if ok, err := dirEntriesMatch(dir, want[:1]); err != nil || ok {
+		t.Fatalf("truncated want entries matched: ok=%v err=%v", ok, err)
+	}
+
+	// File size/mtime mutation invalidates match.
+	if err := os.WriteFile(fileA, []byte("package p\nvar X = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := dirEntriesMatch(dir, want); err != nil || ok {
+		t.Fatalf("size-mutated file matched stale stamp: ok=%v err=%v", ok, err)
+	}
+
+	// Mode mutation against freshly stamped entries invalidates match.
+	want2, err := stampEntries(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(fileA, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := dirEntriesMatch(dir, want2); err != nil || ok {
+		t.Fatalf("mode-mutated file matched stale stamp: ok=%v err=%v", ok, err)
+	}
+
+	// Missing directory returns an error.
+	if _, err := dirEntriesMatch(filepath.Join(dir, "nonexistent"), want2); err == nil {
+		t.Fatal("missing directory returned nil error")
 	}
 }

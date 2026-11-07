@@ -863,11 +863,6 @@ func congruentTraversal(cwd, name string) bool {
 	return true
 }
 
-// congruenceProbe is the traversal verifier's filesystem probe, a seam so
-// tests can assert which paths it touches; production uses Lstat — the
-// final component must be judged as itself, never through a link.
-var congruenceProbe = os.Lstat
-
 // pathComponents splits a volume-stripped path into its components with the
 // exact separator predicate the traversal gate uses — one splitter for the
 // gate and the verifier, so the fast path can never disagree with the walk.
@@ -906,11 +901,6 @@ func classifyPath(moduleDir, p string) (pathID, string) {
 	}
 	return pathID{Kind: pathAbs, Path: filepath.Clean(p)}, ""
 }
-
-// classifyProbe is the classification-time filesystem probe, a seam so
-// tests can assert the no-probe property of volatile-OS paths
-// (REQ-inputs-volatile-os-roots): production code never replaces it.
-var classifyProbe = os.Stat
 
 // volatileOSPath reports whether p lies under a kernel-synthesized
 // volatile filesystem root without being an allowlisted machine-fact

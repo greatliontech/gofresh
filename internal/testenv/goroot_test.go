@@ -2,6 +2,7 @@ package testenv
 
 import (
 	"context"
+	"go/types"
 	"os"
 	"path/filepath"
 	"testing"
@@ -129,5 +130,50 @@ func TestAssertAllFieldsPopulatedAndParseAndTypecheckDAG(t *testing.T) {
 		if p.Dir == "" {
 			t.Fatalf("pkg %s has empty Dir", p.ID)
 		}
+	}
+}
+
+func TestParseAndTypecheckDAGWithStdlibIsolatesArchSizes(t *testing.T) {
+	t.Parallel()
+	baseEnv := gotool.SetEnv(os.Environ(), "GOOS", "linux")
+	files := map[string]map[string]string{
+		"example.com/arch": {
+			"arch.go": "package arch\nimport (\n\t\"strconv\"\n\t\"unsafe\"\n)\nconst WordBytes = int(unsafe.Sizeof(int(0)))\nconst StdIntBits = strconv.IntSize\n",
+		},
+	}
+	pkgs64 := ParseAndTypecheckDAGWithStdlib(t, gotool.SetEnv(baseEnv, "GOARCH", "amd64"), t.TempDir(), files)
+	pkgs32 := ParseAndTypecheckDAGWithStdlib(t, gotool.SetEnv(baseEnv, "GOARCH", "386"), t.TempDir(), files)
+	if len(pkgs64) != 1 || len(pkgs32) != 1 {
+		t.Fatalf("pkg counts = (%d, %d), want (1, 1)", len(pkgs64), len(pkgs32))
+	}
+	if got := pkgs64[0].TypesSizes.Sizeof(types.Typ[types.Int]); got != 8 {
+		t.Fatalf("amd64 sizeof(int) = %d, want 8", got)
+	}
+	if got := pkgs32[0].TypesSizes.Sizeof(types.Typ[types.Int]); got != 4 {
+		t.Fatalf("386 sizeof(int) = %d, want 4", got)
+	}
+	c64 := pkgs64[0].Types.Scope().Lookup("WordBytes").(*types.Const).Val().ExactString()
+	c32 := pkgs32[0].Types.Scope().Lookup("WordBytes").(*types.Const).Val().ExactString()
+	if c64 != "8" || c32 != "4" {
+		t.Fatalf("WordBytes = (amd64=%s, 386=%s), want (8, 4)", c64, c32)
+	}
+	b64 := pkgs64[0].Types.Scope().Lookup("StdIntBits").(*types.Const).Val().ExactString()
+	b32 := pkgs32[0].Types.Scope().Lookup("StdIntBits").(*types.Const).Val().ExactString()
+	if b64 != "64" || b32 != "32" {
+		t.Fatalf("StdIntBits = (amd64=%s, 386=%s), want (64, 32)", b64, b32)
+	}
+	if got := envLastValue([]string{"GOARCH=amd64", "GOARCH=386"}, "GOARCH"); got != "386" {
+		t.Fatalf("envLastValue = %q, want 386", got)
+	}
+	normA, err := gotool.NormalizeEnv(gotool.SetEnv(baseEnv, "GOARCH", "amd64"))
+	if err != nil {
+		t.Fatalf("NormalizeEnv(amd64): %v", err)
+	}
+	normB, err := gotool.NormalizeEnv(gotool.SetEnv(baseEnv, "GOARCH", "386"))
+	if err != nil {
+		t.Fatalf("NormalizeEnv(386): %v", err)
+	}
+	if stdlibEnvCacheKey(normA) == stdlibEnvCacheKey(normB) {
+		t.Fatal("stdlibEnvCacheKey collided across distinct GOARCH values")
 	}
 }

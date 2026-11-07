@@ -219,9 +219,7 @@ func (m variantParseMemo) Parsed(name, digest string) ([]testvariant.TestVariant
 }
 
 func (m variantParseMemo) Record(name, digest string, declarations []testvariant.TestVariantDeclaration, header testvariant.TestVariantFileHeader) {
-	if analysisTestHooks.variantParse != nil {
-		analysisTestHooks.variantParse(name)
-	}
+	emitVariantParseHook(name)
 	if m.h.fileMemo == nil {
 		return
 	}

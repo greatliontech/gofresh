@@ -126,27 +126,25 @@ func TestLogicalCoresIgnoreProcessAffinity(t *testing.T) {
 // kernel change, silently vacating the one fact the file carries
 // (REQ-guard-machine; the runtime-input projection digest inherits it).
 func TestGatherFactsFailsLoudOnUnreadableKernelRelease(t *testing.T) {
-	prev := readFactSource
-	readFactSource = func(path string) ([]byte, error) {
+	readUnreadable := func(path string) ([]byte, error) {
 		if path == "/proc/sys/kernel/osrelease" {
 			return nil, fmt.Errorf("injected unreadable osrelease")
 		}
-		return prev(path)
+		return os.ReadFile(path)
 	}
-	defer func() { readFactSource = prev }()
-	if _, err := gatherFacts(); err == nil || !strings.Contains(err.Error(), "osrelease") {
+	if _, err := gatherFactsFrom(readUnreadable); err == nil || !strings.Contains(err.Error(), "osrelease") {
 		t.Fatalf("gather error = %v, want the unreadable kernel-release source surfaced", err)
 	}
 
 	// Empty CONTENT fails identically: two hosts (or one host across a
 	// kernel change) must never share an empty-version fingerprint.
-	readFactSource = func(path string) ([]byte, error) {
+	readEmpty := func(path string) ([]byte, error) {
 		if path == "/proc/sys/kernel/osrelease" {
 			return []byte("\n"), nil
 		}
-		return prev(path)
+		return os.ReadFile(path)
 	}
-	if _, err := gatherFacts(); err == nil || !strings.Contains(err.Error(), "empty kernel release") {
+	if _, err := gatherFactsFrom(readEmpty); err == nil || !strings.Contains(err.Error(), "empty kernel release") {
 		t.Fatalf("gather error = %v, want empty kernel content refused", err)
 	}
 }
@@ -157,13 +155,11 @@ func TestGatherFactsFailsLoudOnUnreadableKernelRelease(t *testing.T) {
 // prevent) fails here instead of stalling every machine-fact witness.
 func TestGathererReadsExactlyTheSourceList(t *testing.T) {
 	var requested []string
-	prev := readFactSource
-	readFactSource = func(path string) ([]byte, error) {
+	readRecording := func(path string) ([]byte, error) {
 		requested = append(requested, path)
-		return prev(path)
+		return os.ReadFile(path)
 	}
-	defer func() { readFactSource = prev }()
-	if _, err := gatherFacts(); err != nil {
+	if _, err := gatherFactsFrom(readRecording); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(requested, MachineFactSources) {

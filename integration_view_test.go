@@ -166,46 +166,47 @@ func TestUnscopedFactsNeverUseTheProcessCache(t *testing.T) {
 	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
-	processFactCache = sync.Map{}
-	t.Cleanup(func() { processFactCache = sync.Map{} })
-	old := viewTestHooks.dynamicStateMissLoad
+	processFactCache.Reset()
+	t.Cleanup(func() { processFactCache.Reset() })
 	loads := 0
-	viewTestHooks.dynamicStateMissLoad = func([]string) { loads++ }
-	t.Cleanup(func() { viewTestHooks.dynamicStateMissLoad = old })
 	const pkg = "example.com/pinned"
-	clean := runScan(t, "complete", dir, pkg)
-	if loads != 1 {
-		t.Fatalf("cold loads=%d", loads)
-	}
-	if warm := runScan(t, "complete", dir, pkg); loads != 1 || !reflect.DeepEqual(warm, clean) {
-		t.Fatal("complete scope did not serve")
-	}
-	var key string
-	var poison dynamicStateFact
-	processFactCache.Range(func(k, v any) bool {
-		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
-			key = k.(string)[strings.IndexByte(k.(string), 0):]
-			poison = v.(dynamicStateFact)
-			poison.Declares = append(poison.Declares, "golang.org/x/sync/errgroup.Ghost")
-			poison.Mutates = append(poison.Mutates, "golang.org/x/sync/errgroup.Ghost")
+	withViewTestHooks(viewTestHookSet{
+		dynamicStateMissLoad: func([]string) { loads++ },
+	}, func() {
+		clean := runScan(t, "complete", dir, pkg)
+		if loads != 1 {
+			t.Fatalf("cold loads=%d", loads)
 		}
-		return true
+		if warm := runScan(t, "complete", dir, pkg); loads != 1 || !reflect.DeepEqual(warm, clean) {
+			t.Fatal("complete scope did not serve")
+		}
+		var key string
+		var poison dynamicStateFact
+		processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+			if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
+				key = k[strings.IndexByte(k, 0):]
+				poison = fact
+				poison.Declares = append(poison.Declares, "golang.org/x/sync/errgroup.Ghost")
+				poison.Mutates = append(poison.Mutates, "golang.org/x/sync/errgroup.Ghost")
+			}
+			return true
+		})
+		if key == "" {
+			t.Fatal("no pinned fact control")
+		}
+		processFactCache.Reset()
+		processFactCache.Store(key, poison)
+		for i := 0; i < 2; i++ {
+			got := runScan(t, "", dir, pkg)
+			if loads != 2+i || !reflect.DeepEqual(got, clean) {
+				t.Errorf("unscoped scan served cached facts: loads=%d result=%+v", loads, got)
+			}
+			stored, ok := processFactCache.Load(key)
+			if !ok || !reflect.DeepEqual(stored, poison) {
+				t.Error("unscoped scan wrote process facts")
+			}
+		}
 	})
-	if key == "" {
-		t.Fatal("no pinned fact control")
-	}
-	processFactCache = sync.Map{}
-	processFactCache.Store(key, poison)
-	for i := 0; i < 2; i++ {
-		got := runScan(t, "", dir, pkg)
-		if loads != 2+i || !reflect.DeepEqual(got, clean) {
-			t.Errorf("unscoped scan served cached facts: loads=%d result=%+v", loads, got)
-		}
-		stored, ok := processFactCache.Load(key)
-		if !ok || !reflect.DeepEqual(stored, poison) {
-			t.Error("unscoped scan wrote process facts")
-		}
-	}
 }
 
 // Version-pinned package facts load once, then serve from the in-process
@@ -221,49 +222,50 @@ func TestDynamicStateFactsServePinnedPackagesWithoutLoading(t *testing.T) {
 	const pkg = "example.com/pinned"
 
 	var missLoads [][]string
-	viewTestHooks.dynamicStateMissLoad = func(patterns []string) {
-		missLoads = append(missLoads, append([]string(nil), patterns...))
-	}
-	defer func() { viewTestHooks.dynamicStateMissLoad = nil }()
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
+	withViewTestHooks(viewTestHookSet{
+		dynamicStateMissLoad: func(patterns []string) {
+			missLoads = append(missLoads, append([]string(nil), patterns...))
+		},
+	}, func() {
+		const scope = DynamicStateStrategy + "|test-toolchain|test-buildconfig"
+		first := runScan(t, scope, dir, pkg)
+		if len(missLoads) != 1 {
+			t.Fatalf("cold scan performed %d pinned fact loads, want exactly 1", len(missLoads))
+		}
+		if !strings.Contains(strings.Join(missLoads[0], " "), "golang.org/x/sync/errgroup") {
+			t.Fatalf("pinned fact load did not cover errgroup: %v", missLoads[0])
+		}
+		if !first.known[Subject{Package: pkg, Symbol: "Run"}] {
+			t.Fatal("scan lost the subject")
+		}
 
-	const scope = DynamicStateStrategy + "|test-toolchain|test-buildconfig"
-	first := runScan(t, scope, dir, pkg)
-	if len(missLoads) != 1 {
-		t.Fatalf("cold scan performed %d pinned fact loads, want exactly 1", len(missLoads))
-	}
-	if !strings.Contains(strings.Join(missLoads[0], " "), "golang.org/x/sync/errgroup") {
-		t.Fatalf("pinned fact load did not cover errgroup: %v", missLoads[0])
-	}
-	if !first.known[Subject{Package: pkg, Symbol: "Run"}] {
-		t.Fatal("scan lost the subject")
-	}
+		second := runScan(t, scope, dir, pkg)
+		if len(missLoads) != 1 {
+			t.Fatalf("in-process warm scan re-loaded pinned facts: %d loads", len(missLoads))
+		}
+		if !reflect.DeepEqual(first, second) {
+			t.Fatalf("in-process fact serve is not scan-equivalent:\n first %+v\n second %+v", first, second)
+		}
 
-	second := runScan(t, scope, dir, pkg)
-	if len(missLoads) != 1 {
-		t.Fatalf("in-process warm scan re-loaded pinned facts: %d loads", len(missLoads))
-	}
-	if !reflect.DeepEqual(first, second) {
-		t.Fatalf("in-process fact serve is not scan-equivalent:\n first %+v\n second %+v", first, second)
-	}
+		processFactCache.Reset()
+		third := runScan(t, scope, dir, pkg)
+		if len(missLoads) != 1 {
+			t.Fatalf("persistent warm scan re-loaded pinned facts: %d loads", len(missLoads))
+		}
+		if !reflect.DeepEqual(first, third) {
+			t.Fatalf("persistent fact serve is not scan-equivalent:\n first %+v\n third %+v", first, third)
+		}
 
-	processFactCache = sync.Map{}
-	third := runScan(t, scope, dir, pkg)
-	if len(missLoads) != 1 {
-		t.Fatalf("persistent warm scan re-loaded pinned facts: %d loads", len(missLoads))
-	}
-	if !reflect.DeepEqual(first, third) {
-		t.Fatalf("persistent fact serve is not scan-equivalent:\n first %+v\n third %+v", first, third)
-	}
-
-	processFactCache = sync.Map{}
-	moved := runScan(t, DynamicStateStrategy+"|other-toolchain|test-buildconfig", dir, pkg)
-	if len(missLoads) != 2 {
-		t.Fatalf("scope change served stale facts: %d loads, want 2", len(missLoads))
-	}
-	if !reflect.DeepEqual(first, moved) {
-		t.Fatalf("recomputation under a moved scope is not scan-equivalent:\n first %+v\n moved %+v", first, moved)
-	}
+		processFactCache.Reset()
+		moved := runScan(t, DynamicStateStrategy+"|other-toolchain|test-buildconfig", dir, pkg)
+		if len(missLoads) != 2 {
+			t.Fatalf("scope change served stale facts: %d loads, want 2", len(missLoads))
+		}
+		if !reflect.DeepEqual(first, moved) {
+			t.Fatalf("recomputation under a moved scope is not scan-equivalent:\n first %+v\n moved %+v", first, moved)
+		}
+	})
 }
 
 // The engine option threads the vouch to capture: a vouched pinned
@@ -275,82 +277,81 @@ func TestVouchedFingerprintRecordsDischarge(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	// Poisons the in-process fact cache between two views: the scan memo
-	// would serve the first view's outputs whole (a production key never
-	// holds a moved fact), so the derivation is exercised directly.
-	viewTestHooks.scanMemoOff = true
-	t.Cleanup(func() { viewTestHooks.scanMemoOff = false })
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
 	const ghost = "golang.org/x/sync/errgroup.Ghost"
 	subject := Subject{Package: "example.com/pinned", Symbol: "Run"}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	ctx := context.Background()
 
-	warm, err := newEngine(withDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := warm.newView(ctx, []Subject{subject}, dir); err != nil {
-		t.Fatal(err)
-	}
-	var hit bool
-	processFactCache.Range(func(k, v any) bool {
-		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
-			fact := v.(dynamicStateFact)
-			fact.Declares = append(fact.Declares, ghost)
-			fact.Mutates = append(fact.Mutates, ghost)
-			processFactCache.Store(k, fact)
-			hit = true
+	// Poisons the in-process fact cache between two views: the scan memo
+	// would serve the first view's outputs whole (a production key never
+	// holds a moved fact), so the derivation is exercised directly.
+	withViewTestHooks(viewTestHookSet{scanMemoOff: true}, func() {
+		warm, err := newEngine(withDir(dir))
+		if err != nil {
+			t.Fatal(err)
 		}
-		return true
+		if _, err := warm.newView(ctx, []Subject{subject}, dir); err != nil {
+			t.Fatal(err)
+		}
+		var hit bool
+		processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+			if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
+				fact.Declares = append(fact.Declares, ghost)
+				fact.Mutates = append(fact.Mutates, ghost)
+				processFactCache.Store(k, fact)
+				hit = true
+			}
+			return true
+		})
+		if !hit {
+			t.Fatal("no errgroup fact in the process cache")
+		}
+
+		control, err := newEngine(withDir(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		controlView, err := control.newView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		controlFP, err := controlView.Capture(ctx, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		controlVerdict, err := controlView.Check(ctx, controlFP, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if controlVerdict.Status != Unverifiable || !strings.Contains(controlVerdict.Reason, ghost) {
+			t.Fatalf("poisoned control verdict = %+v, want the downgrade naming %s", controlVerdict, ghost)
+		}
+
+		vouched, err := newEngine(withDir(dir), withDynamicStateVouches(ghost))
+		if err != nil {
+			t.Fatal(err)
+		}
+		view, err := vouched.newView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.Capture(ctx, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fingerprint.DynamicStateVouches != ghost {
+			t.Fatalf("fingerprint discharge = %q, want %q", fingerprint.DynamicStateVouches, ghost)
+		}
+		verdict, err := view.Check(ctx, fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(verdict.Reason, "shares mutated dynamic state") {
+			t.Fatalf("vouched verdict still downgraded: %+v", verdict)
+		}
 	})
-	if !hit {
-		t.Fatal("no errgroup fact in the process cache")
-	}
-
-	control, err := newEngine(withDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	controlView, err := control.newView(ctx, []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	controlFP, err := controlView.Capture(ctx, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	controlVerdict, err := controlView.Check(ctx, controlFP, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if controlVerdict.Status != Unverifiable || !strings.Contains(controlVerdict.Reason, ghost) {
-		t.Fatalf("poisoned control verdict = %+v, want the downgrade naming %s", controlVerdict, ghost)
-	}
-
-	vouched, err := newEngine(withDir(dir), withDynamicStateVouches(ghost))
-	if err != nil {
-		t.Fatal(err)
-	}
-	view, err := vouched.newView(ctx, []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fingerprint, err := view.Capture(ctx, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fingerprint.DynamicStateVouches != ghost {
-		t.Fatalf("fingerprint discharge = %q, want %q", fingerprint.DynamicStateVouches, ghost)
-	}
-	verdict, err := view.Check(ctx, fingerprint, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(verdict.Reason, "shares mutated dynamic state") {
-		t.Fatalf("vouched verdict still downgraded: %+v", verdict)
-	}
 }
 
 // The audited mapping set discharges WITHOUT any execution attestation
@@ -365,123 +366,122 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	// Poisons the in-process fact cache between two views: the scan memo
-	// would serve the first view's outputs whole (a production key never
-	// holds a moved fact), so the derivation is exercised directly.
-	viewTestHooks.scanMemoOff = true
-	t.Cleanup(func() { viewTestHooks.scanMemoOff = false })
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeMappedDepModule(t)
 	const mapper = "golang.org/x/sys/unix.mapper"
 	subject := Subject{Package: "example.com/mapped", Symbol: "Roundtrip"}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	ctx := context.Background()
 
-	control, err := newEngine(withDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	controlView, err := control.newView(ctx, []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	controlFP, err := controlView.Capture(ctx, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	controlVerdict, err := controlView.Check(ctx, controlFP, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The fixture's closure still reaches the mapping syscalls' external
-	// effects (their observability classification is untouched by the
-	// discharge), so the ONLY residual is that class — pinned by
-	// equality so a second downgrade can never hide behind it.
-	if controlVerdict.Status != Unverifiable || controlVerdict.Reason != "reaches golang.org/x/sys/unix (external system call) (dischargeable by restructuring the subject away from the reach, or by the //gofresh:pure directive on the subject's declaration or the caller's purity assertion)" {
-		t.Fatalf("unattested verdict = %+v, want exactly the untouched observability class - the mapping discharge needs no attestation; a mapper-naming reason likely means the parent go.mod pins an x/sys version outside the audited set: audit the new source and extend auditedMappingOut's switch", controlVerdict)
-	}
-	if controlFP.SingleSubjectDischarges != "" {
-		t.Fatalf("unattested evidence recorded %q, want nothing - the discharge is the engine's own verdict", controlFP.SingleSubjectDischarges)
-	}
-
-	attested, err := newEngine(withDir(dir), withSingleSubjectExecution())
-	if err != nil {
-		t.Fatal(err)
-	}
-	view, err := attested.newView(ctx, []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fingerprint, err := view.Capture(ctx, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fingerprint.SingleSubjectDischarges != "" {
-		t.Fatalf("attested evidence recorded %q, want nothing - the mapping discharge is not an attestation", fingerprint.SingleSubjectDischarges)
-	}
-	verdict, err := view.Check(ctx, fingerprint, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(verdict.Reason, "shares mutated dynamic state") {
-		t.Fatalf("attested verdict downgraded: %+v", verdict)
-	}
-
-	// A ghost variable of the same module keeps its own judgment in the
-	// unattested mode: the discharge names exactly the audited variable.
-	const ghost = "golang.org/x/sys/unix.Ghost"
-	var hit bool
-	processFactCache.Range(func(k, v any) bool {
-		if strings.HasSuffix(k.(string), "\x00golang.org/x/sys/unix") {
-			fact := v.(dynamicStateFact)
-			fact.Declares = append(fact.Declares, ghost)
-			fact.Mutates = append(fact.Mutates, ghost)
-			processFactCache.Store(k, fact)
-			hit = true
+	// Poisons the in-process fact cache between two views: the scan memo
+	// would serve the first view's outputs whole (a production key never
+	// holds a moved fact), so the derivation is exercised directly.
+	withViewTestHooks(viewTestHookSet{scanMemoOff: true}, func() {
+		control, err := newEngine(withDir(dir))
+		if err != nil {
+			t.Fatal(err)
 		}
-		return true
+		controlView, err := control.newView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		controlFP, err := controlView.Capture(ctx, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		controlVerdict, err := controlView.Check(ctx, controlFP, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The fixture's closure still reaches the mapping syscalls' external
+		// effects (their observability classification is untouched by the
+		// discharge), so the ONLY residual is that class — pinned by
+		// equality so a second downgrade can never hide behind it.
+		if controlVerdict.Status != Unverifiable || controlVerdict.Reason != "reaches golang.org/x/sys/unix (external system call) (dischargeable by restructuring the subject away from the reach, or by the //gofresh:pure directive on the subject's declaration or the caller's purity assertion)" {
+			t.Fatalf("unattested verdict = %+v, want exactly the untouched observability class - the mapping discharge needs no attestation; a mapper-naming reason likely means the parent go.mod pins an x/sys version outside the audited set: audit the new source and extend auditedMappingOut's switch", controlVerdict)
+		}
+		if controlFP.SingleSubjectDischarges != "" {
+			t.Fatalf("unattested evidence recorded %q, want nothing - the discharge is the engine's own verdict", controlFP.SingleSubjectDischarges)
+		}
+
+		attested, err := newEngine(withDir(dir), withSingleSubjectExecution())
+		if err != nil {
+			t.Fatal(err)
+		}
+		view, err := attested.newView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.Capture(ctx, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fingerprint.SingleSubjectDischarges != "" {
+			t.Fatalf("attested evidence recorded %q, want nothing - the mapping discharge is not an attestation", fingerprint.SingleSubjectDischarges)
+		}
+		verdict, err := view.Check(ctx, fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(verdict.Reason, "shares mutated dynamic state") {
+			t.Fatalf("attested verdict downgraded: %+v", verdict)
+		}
+
+		// A ghost variable of the same module keeps its own judgment in the
+		// unattested mode: the discharge names exactly the audited variable.
+		const ghost = "golang.org/x/sys/unix.Ghost"
+		var hit bool
+		processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+			if strings.HasSuffix(k, "\x00golang.org/x/sys/unix") {
+				fact.Declares = append(fact.Declares, ghost)
+				fact.Mutates = append(fact.Mutates, ghost)
+				processFactCache.Store(k, fact)
+				hit = true
+			}
+			return true
+		})
+		if !hit {
+			t.Fatal("no unix fact in the process cache")
+		}
+		poisonedEngine, err := newEngine(withDir(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		poisonedView, err := poisonedEngine.newView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		poisonedFP, err := poisonedView.Capture(ctx, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		poisonedVerdict, err := poisonedView.Check(ctx, poisonedFP, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if poisonedVerdict.Status != Unverifiable || !strings.Contains(poisonedVerdict.Reason, ghost+" is mutated") {
+			t.Fatalf("ghost verdict = %+v, want the downgrade naming %s - the discharge covers exactly the audited variable", poisonedVerdict, ghost)
+		}
+		attestedGhostEngine, err := newEngine(withDir(dir), withSingleSubjectExecution())
+		if err != nil {
+			t.Fatal(err)
+		}
+		attestedGhostView, err := attestedGhostEngine.newView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		attestedGhostFP, err := attestedGhostView.Capture(ctx, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		attestedGhostVerdict, err := attestedGhostView.Check(ctx, attestedGhostFP, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if attestedGhostVerdict.Status != Unverifiable || !strings.Contains(attestedGhostVerdict.Reason, ghost+" is mutated") {
+			t.Fatalf("attested ghost verdict = %+v, want the downgrade naming %s - the attestation arms no ghost discharge", attestedGhostVerdict, ghost)
+		}
 	})
-	if !hit {
-		t.Fatal("no unix fact in the process cache")
-	}
-	poisonedEngine, err := newEngine(withDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	poisonedView, err := poisonedEngine.newView(ctx, []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	poisonedFP, err := poisonedView.Capture(ctx, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	poisonedVerdict, err := poisonedView.Check(ctx, poisonedFP, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if poisonedVerdict.Status != Unverifiable || !strings.Contains(poisonedVerdict.Reason, ghost+" is mutated") {
-		t.Fatalf("ghost verdict = %+v, want the downgrade naming %s - the discharge covers exactly the audited variable", poisonedVerdict, ghost)
-	}
-	attestedGhostEngine, err := newEngine(withDir(dir), withSingleSubjectExecution())
-	if err != nil {
-		t.Fatal(err)
-	}
-	attestedGhostView, err := attestedGhostEngine.newView(ctx, []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	attestedGhostFP, err := attestedGhostView.Capture(ctx, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	attestedGhostVerdict, err := attestedGhostView.Check(ctx, attestedGhostFP, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if attestedGhostVerdict.Status != Unverifiable || !strings.Contains(attestedGhostVerdict.Reason, ghost+" is mutated") {
-		t.Fatalf("attested ghost verdict = %+v, want the downgrade naming %s - the attestation arms no ghost discharge", attestedGhostVerdict, ghost)
-	}
 }
 
 // The mapping audit is a property of the audited versions' source: an
@@ -527,7 +527,7 @@ func TestAuditedMappingUnauditedVersionRefuses(t *testing.T) {
 	if out, err := tidy.CombinedOutput(); err != nil {
 		t.Fatalf("go mod tidy: %v\n%s", err, out)
 	}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	ctx := context.Background()
 	subject := Subject{Package: "example.com/mapped", Symbol: "Roundtrip"}
 	engine, err := newEngine(withDir(dir))
@@ -579,7 +579,7 @@ func TestAuditedMappingConfersNothingOnMutableLocalCheckout(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	ctx := context.Background()
 	subject := Subject{Package: "example.com/mapped", Symbol: "Roundtrip"}
 	engine, err := newEngine(withDir(dir), withSingleSubjectExecution())
@@ -666,13 +666,13 @@ func TestAuditedMemoizationDischargeIsAttestationFree(t *testing.T) {
 	}
 	subject := Subject{Package: "example.com/memohost", Symbol: "Use"}
 
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	clean := runScan(t, DynamicStateStrategy+"|memo-clean|cfg", host(t, "v3.0.1"), "example.com/memohost")
 	if reason := clean.downgradeReason[subject]; reason != "" {
 		t.Fatalf("unattested structMap-shaped cache downgraded the subject: %q - the memoization discharge needs no attestation", reason)
 	}
 
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	ghosted := runScan(t, DynamicStateStrategy+"|memo-ghost|cfg", host(t, "v3.0.2"), "example.com/memohost")
 	if reason := ghosted.downgradeReason[subject]; !strings.Contains(reason, "gopkg.in/yaml.v3.Ghost is mutated") {
 		t.Fatalf("ghost verdict reason = %q, want the downgrade naming Ghost - the discharge covers exactly the audited variable", reason)
@@ -681,7 +681,7 @@ func TestAuditedMemoizationDischargeIsAttestationFree(t *testing.T) {
 	// The audit is a property of the audited versions' source: an
 	// unaudited version with the identical shape refuses fail-closed
 	// until its source is audited.
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	unaudited := runScan(t, DynamicStateStrategy+"|memo-unaudited|cfg", host(t, "v3.0.3"), "example.com/memohost")
 	if reason := unaudited.downgradeReason[subject]; !strings.Contains(reason, "gopkg.in/yaml.v3.structMap is mutated") {
 		t.Fatalf("unaudited-version reason = %q, want the downgrade naming structMap - no version inherits the audit", reason)
@@ -713,7 +713,7 @@ func TestAuditedMemoizationConfersNothingOnMutableLocalCheckout(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	scan := runScan(t, DynamicStateStrategy+"|memo-local|cfg", dir, "example.com/memohost")
 	subject := Subject{Package: "example.com/memohost", Symbol: "Use"}
 	if reason := scan.downgradeReason[subject]; !strings.Contains(reason, "gopkg.in/yaml.v3.structMap is mutated") {
@@ -774,7 +774,7 @@ func TestSingleSubjectDirectiveConfersNothingOnDependency(t *testing.T) {
 		t.Fatalf("go mod tidy: %v\n%s", err, out)
 	}
 
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	hasher, err := closureNewAtEnv(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
@@ -803,110 +803,109 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 	// Poisons the in-process fact cache between two views: the scan memo
 	// would serve the first view's outputs whole (a production key never
 	// holds a moved fact), so the derivation is exercised directly.
-	viewTestHooks.scanMemoOff = true
-	t.Cleanup(func() { viewTestHooks.scanMemoOff = false })
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writeSemverDepModule(t)
 	const ghost = "golang.org/x/mod/semver.Ghost"
 	subject := Subject{Package: "example.com/semverdep", Symbol: "TestValid"}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	ctx := context.Background()
 
-	warm, err := newEngine(withDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := warm.newView(ctx, []Subject{subject}, dir); err != nil {
-		t.Fatal(err)
-	}
-	var hit bool
-	processFactCache.Range(func(k, v any) bool {
-		if strings.HasSuffix(k.(string), "\x00golang.org/x/mod/semver") {
-			fact := v.(dynamicStateFact)
-			fact.Declares = append(fact.Declares, ghost)
-			fact.Mutates = append(fact.Mutates, ghost)
-			processFactCache.Store(k, fact)
-			hit = true
+	withViewTestHooks(viewTestHookSet{scanMemoOff: true}, func() {
+		warm, err := newEngine(withDir(dir))
+		if err != nil {
+			t.Fatal(err)
 		}
-		return true
+		if _, err := warm.newView(ctx, []Subject{subject}, dir); err != nil {
+			t.Fatal(err)
+		}
+		var hit bool
+		processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+			if strings.HasSuffix(k, "\x00golang.org/x/mod/semver") {
+				fact.Declares = append(fact.Declares, ghost)
+				fact.Mutates = append(fact.Mutates, ghost)
+				processFactCache.Store(k, fact)
+				hit = true
+			}
+			return true
+		})
+		if !hit {
+			t.Fatal("no semver fact in the process cache")
+		}
+
+		observe := func(e *engine) (*Snapshot, Fingerprint) {
+			t.Helper()
+			producer, err := e.newView(ctx, []Subject{subject}, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fingerprint, err := producer.captureObserved(ctx, subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The fixture must be genuinely observable, or the test refuses
+			// through the ordinary path and never exercises the bypass.
+			if !fingerprint.ObservationProof.Observable {
+				t.Fatalf("fixture not observable: %+v", fingerprint.ObservationProof)
+			}
+			observation, err := riFromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("semver test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return producer, fingerprint
+		}
+
+		// Unvouched: the downgraded subject refuses on the observed surface
+		// of the same tree that captured it.
+		plain, err := newEngine(withDir(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		plainView, plainFP := observe(plain)
+		verdict, err := plainView.CheckObserved(ctx, plainFP, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, ghost) {
+			t.Fatalf("unvouched observed verdict = %+v, want unverifiable naming %s", verdict, ghost)
+		}
+
+		// Vouched capture serves observed; the withdrawn vouch resurfaces
+		// the culprit on the observed surface too.
+		vouched, err := newEngine(withDir(dir), withDynamicStateVouches(ghost))
+		if err != nil {
+			t.Fatal(err)
+		}
+		vouchedView, fingerprint := observe(vouched)
+		if fingerprint.DynamicStateVouches != ghost {
+			t.Fatalf("observed fingerprint discharge = %q, want %q", fingerprint.DynamicStateVouches, ghost)
+		}
+		served, err := vouchedView.CheckObserved(ctx, fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if served.Status != Valid {
+			t.Fatalf("vouched observed verdict = %+v, want valid", served)
+		}
+		withdrawn, err := newEngine(withDir(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		current, err := withdrawn.newView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, err = current.CheckObserved(ctx, fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, ghost) {
+			t.Fatalf("withdrawn-vouch observed verdict = %+v, want unverifiable naming %s", verdict, ghost)
+		}
 	})
-	if !hit {
-		t.Fatal("no semver fact in the process cache")
-	}
-
-	observe := func(e *engine) (*Snapshot, Fingerprint) {
-		t.Helper()
-		producer, err := e.newView(ctx, []Subject{subject}, dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		fingerprint, err := producer.captureObserved(ctx, subject)
-		if err != nil {
-			t.Fatal(err)
-		}
-		// The fixture must be genuinely observable, or the test refuses
-		// through the ordinary path and never exercises the bypass.
-		if !fingerprint.ObservationProof.Observable {
-			t.Fatalf("fixture not observable: %+v", fingerprint.ObservationProof)
-		}
-		observation, err := riFromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("semver test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return producer, fingerprint
-	}
-
-	// Unvouched: the downgraded subject refuses on the observed surface
-	// of the same tree that captured it.
-	plain, err := newEngine(withDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	plainView, plainFP := observe(plain)
-	verdict, err := plainView.CheckObserved(ctx, plainFP, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, ghost) {
-		t.Fatalf("unvouched observed verdict = %+v, want unverifiable naming %s", verdict, ghost)
-	}
-
-	// Vouched capture serves observed; the withdrawn vouch resurfaces
-	// the culprit on the observed surface too.
-	vouched, err := newEngine(withDir(dir), withDynamicStateVouches(ghost))
-	if err != nil {
-		t.Fatal(err)
-	}
-	vouchedView, fingerprint := observe(vouched)
-	if fingerprint.DynamicStateVouches != ghost {
-		t.Fatalf("observed fingerprint discharge = %q, want %q", fingerprint.DynamicStateVouches, ghost)
-	}
-	served, err := vouchedView.CheckObserved(ctx, fingerprint, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if served.Status != Valid {
-		t.Fatalf("vouched observed verdict = %+v, want valid", served)
-	}
-	withdrawn, err := newEngine(withDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	current, err := withdrawn.newView(ctx, []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verdict, err = current.CheckObserved(ctx, fingerprint, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, ghost) {
-		t.Fatalf("withdrawn-vouch observed verdict = %+v, want unverifiable naming %s", verdict, ghost)
-	}
 }
 
 // Two pinned packages whose facts declare the same vouched key (the
@@ -950,7 +949,7 @@ func TestVouchDischargeRecordsPerOwningPackage(t *testing.T) {
 		t.Fatalf("go mod tidy: %v\n%s", err, out)
 	}
 	const shared = "example.com/shared.Ghost"
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	const scope = DynamicStateStrategy + "|two-deps-toolchain|cfg"
 	pkgs := []string{"example.com/twodeps/a", "example.com/twodeps/b"}
 	subjectA := Subject{Package: pkgs[0], Symbol: "Valid"}
@@ -961,13 +960,11 @@ func TestVouchDischargeRecordsPerOwningPackage(t *testing.T) {
 		t.Fatalf("baseline downgraded: %q", r)
 	}
 	var poisoned int
-	processFactCache.Range(func(k, v any) bool {
-		key := k.(string)
+	processFactCache.Range(func(key string, fact dynamicStateFact) bool {
 		if strings.HasSuffix(key, "\x00golang.org/x/mod/semver") || strings.HasSuffix(key, "\x00golang.org/x/sync/errgroup") {
-			fact := v.(dynamicStateFact)
 			fact.Declares = append(fact.Declares, shared)
 			fact.Mutates = append(fact.Mutates, shared)
-			processFactCache.Store(k, fact)
+			processFactCache.Store(key, fact)
 			poisoned++
 		}
 		return true
@@ -996,76 +993,75 @@ func TestVouchWithdrawalRefusesObservedServe(t *testing.T) {
 	// Poisons the in-process fact cache between two views: the scan memo
 	// would serve the first view's outputs whole (a production key never
 	// holds a moved fact), so the derivation is exercised directly.
-	viewTestHooks.scanMemoOff = true
-	t.Cleanup(func() { viewTestHooks.scanMemoOff = false })
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := writePinnedDepModule(t)
 	const ghost = "golang.org/x/sync/errgroup.Ghost"
 	subject := Subject{Package: "example.com/pinned", Symbol: "TestRun"}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	ctx := context.Background()
 
-	warm, err := newEngine(withDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := warm.newView(ctx, []Subject{subject}, dir); err != nil {
-		t.Fatal(err)
-	}
-	var hit bool
-	processFactCache.Range(func(k, v any) bool {
-		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
-			fact := v.(dynamicStateFact)
-			fact.Declares = append(fact.Declares, ghost)
-			fact.Mutates = append(fact.Mutates, ghost)
-			processFactCache.Store(k, fact)
-			hit = true
+	withViewTestHooks(viewTestHookSet{scanMemoOff: true}, func() {
+		warm, err := newEngine(withDir(dir))
+		if err != nil {
+			t.Fatal(err)
 		}
-		return true
+		if _, err := warm.newView(ctx, []Subject{subject}, dir); err != nil {
+			t.Fatal(err)
+		}
+		var hit bool
+		processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+			if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
+				fact.Declares = append(fact.Declares, ghost)
+				fact.Mutates = append(fact.Mutates, ghost)
+				processFactCache.Store(k, fact)
+				hit = true
+			}
+			return true
+		})
+		if !hit {
+			t.Fatal("no errgroup fact in the process cache")
+		}
+
+		vouched, err := newEngine(withDir(dir), withDynamicStateVouches(ghost))
+		if err != nil {
+			t.Fatal(err)
+		}
+		producer, err := vouched.newView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := producer.captureObserved(ctx, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observation, err := riFromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("pinned test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fingerprint.DynamicStateVouches != ghost {
+			t.Fatalf("observed fingerprint discharge = %q, want %q", fingerprint.DynamicStateVouches, ghost)
+		}
+
+		withdrawn, err := newEngine(withDir(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		current, err := withdrawn.newView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, err := current.CheckObserved(ctx, fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, ghost) {
+			t.Fatalf("withdrawn-vouch observed verdict = %+v, want unverifiable naming %s", verdict, ghost)
+		}
 	})
-	if !hit {
-		t.Fatal("no errgroup fact in the process cache")
-	}
-
-	vouched, err := newEngine(withDir(dir), withDynamicStateVouches(ghost))
-	if err != nil {
-		t.Fatal(err)
-	}
-	producer, err := vouched.newView(ctx, []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fingerprint, err := producer.captureObserved(ctx, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	observation, err := riFromTestLog(nil, dir, dir, runtimeinput.WithCompletedProcess("pinned test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	fingerprint, err = producer.AttachObservation(subject, fingerprint, observation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fingerprint.DynamicStateVouches != ghost {
-		t.Fatalf("observed fingerprint discharge = %q, want %q", fingerprint.DynamicStateVouches, ghost)
-	}
-
-	withdrawn, err := newEngine(withDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	current, err := withdrawn.newView(ctx, []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verdict, err := current.CheckObserved(ctx, fingerprint, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, ghost) {
-		t.Fatalf("withdrawn-vouch observed verdict = %+v, want unverifiable naming %s", verdict, ghost)
-	}
 }
 
 // Mutable-local facts derive fresh on every scan: an edit introducing a
@@ -1732,7 +1728,7 @@ func TestGeneratedProtoClusterDischarges(t *testing.T) {
 		if out, err := tidy.CombinedOutput(); err != nil {
 			t.Fatalf("go mod tidy: %v\n%s", err, out)
 		}
-		processFactCache = sync.Map{}
+		processFactCache.Reset()
 		subject := Subject{Package: "example.com/view", Symbol: symbol}
 		engine, err := newEngine(append([]option{withDir(dir)}, opts...)...)
 		if err != nil {
@@ -1790,7 +1786,7 @@ func TestGeneratedProtoClusterDischarges(t *testing.T) {
 	if out, err := tidy.CombinedOutput(); err != nil {
 		t.Fatalf("go mod tidy: %v\n%s", err, out)
 	}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	grpcSubject := Subject{Package: "example.com/view", Symbol: "F"}
 	grpcEngine, err := newEngine(withDir(grpcDir), withSingleSubjectExecution())
 	if err != nil {
@@ -2348,150 +2344,148 @@ func TestSiblingPreservesBudgetCutProvenance(t *testing.T) {
 	passes := 0
 	injected, discharged := 0, 0
 	pending := false
-	viewTestHooks.observe = func() { passes++ }
-	viewTestHooks.analysisBound = func(ctx context.Context, requested time.Duration) (context.Context, context.CancelFunc) {
-		if requested != budget {
-			t.Fatalf("analysis budget = %s, want %s", requested, budget)
-		}
-		if passes == 1 && injected == 0 {
-			injected++
-			pending = true
-			return context.WithDeadline(ctx, time.Now().Add(-time.Second))
-		}
-		return context.WithTimeout(ctx, requested)
-	}
-	viewTestHooks.beforeDischarge = func() {
-		if pending {
-			if passes != 1 {
-				t.Fatalf("expired construction reached discharge in pass %d", passes)
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { passes++ },
+		analysisBound: func(ctx context.Context, requested time.Duration) (context.Context, context.CancelFunc) {
+			if requested != budget {
+				t.Fatalf("analysis budget = %s, want %s", requested, budget)
 			}
-			discharged++
-			pending = false
-		}
-	}
-	t.Cleanup(func() {
-		viewTestHooks.observe = nil
-		viewTestHooks.analysisBound = nil
-		viewTestHooks.beforeDischarge = nil
-		if injected != 1 || discharged != 1 {
-			t.Errorf("construction cut: injected=%d discharged=%d, want one each", injected, discharged)
-		}
-	})
-	engine, err := newEngine(withDir(dir), withSingleSubjectExecution(), withAnalysisBudget(budget))
-	if err != nil {
-		t.Fatal(err)
-	}
-	cut := Subject{Package: "example.com/cut", Symbol: "F"}
-	pure := Subject{Package: "example.com/cut/pure", Symbol: "F"}
-	parent, err := engine.newView(context.Background(), []Subject{cut, pure}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if passes != 2 || !parent.facts.cut[cut] || parent.facts.cut[pure] {
-		t.Fatalf("construction premise: passes=%d cut=%v", passes, parent.facts.cut)
-	}
-	if err := parent.Validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) || errors.Is(err, ErrViewChanged) {
-		t.Fatalf("parent on unchanged tree: %v, want cut unavailability", err)
-	}
-	sibling := func(t *testing.T, from *Snapshot, subjects ...Subject) *Snapshot {
-		t.Helper()
-		before := passes
-		v, err := from.Sibling(subjects)
+			if passes == 1 && injected == 0 {
+				injected++
+				pending = true
+				return context.WithDeadline(ctx, time.Now().Add(-time.Second))
+			}
+			return context.WithTimeout(ctx, requested)
+		},
+		beforeDischarge: func() {
+			if pending {
+				if passes != 1 {
+					t.Fatalf("expired construction reached discharge in pass %d", passes)
+				}
+				discharged++
+				pending = false
+			}
+		},
+	}, func() {
+		engine, err := newEngine(withDir(dir), withSingleSubjectExecution(), withAnalysisBudget(budget))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if passes != before {
-			t.Fatal("subset selection performed an observation")
-		}
-		return v
-	}
-	assertCut := func(t *testing.T, v *Snapshot) {
-		t.Helper()
-		if err := v.Validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) || errors.Is(err, ErrViewChanged) {
-			t.Fatalf("sibling on unchanged tree: %v, want cut unavailability", err)
-		}
-	}
-	attach := func(t *testing.T, v *Snapshot, fp Fingerprint) {
-		t.Helper()
-		observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir,
-			runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+		cut := Subject{Package: "example.com/cut", Symbol: "F"}
+		pure := Subject{Package: "example.com/cut/pure", Symbol: "F"}
+		parent, err := engine.newView(context.Background(), []Subject{cut, pure}, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := v.AttachObservation(cut, fp, observation); err != nil {
-			t.Fatal(err)
+		if passes != 2 || !parent.facts.cut[cut] || parent.facts.cut[pure] {
+			t.Fatalf("construction premise: passes=%d cut=%v", passes, parent.facts.cut)
 		}
-	}
-	t.Run("maximal and nested", func(t *testing.T) {
-		first := sibling(t, parent, cut)
-		if cl := first.facts.closure(cut); cl.Culprit != (closure.Subject{}) {
-			t.Fatalf("cut closure retained unjudged culprit: %+v", cl.Culprit)
+		if err := parent.Validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) || errors.Is(err, ErrViewChanged) {
+			t.Fatalf("parent on unchanged tree: %v, want cut unavailability", err)
 		}
-		fp, err := first.Capture(t.Context(), cut)
-		if err != nil {
-			t.Fatal(err)
+		sibling := func(t *testing.T, from *Snapshot, subjects ...Subject) *Snapshot {
+			t.Helper()
+			before := passes
+			v, err := from.Sibling(subjects)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if passes != before {
+				t.Fatal("subset selection performed an observation")
+			}
+			return v
 		}
-		verdict, err := first.Check(t.Context(), fp, cut)
-		if err != nil || verdict.Status != Unverifiable || verdict.Ground.Cause != (Cause{Kind: SharedDynamicStateCause, Condition: Unavailable}) {
-			t.Fatalf("cut was reported as established dependence: %+v %v", verdict, err)
+		assertCut := func(t *testing.T, v *Snapshot) {
+			t.Helper()
+			if err := v.Validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) || errors.Is(err, ErrViewChanged) {
+				t.Fatalf("sibling on unchanged tree: %v, want cut unavailability", err)
+			}
 		}
-		assertCut(t, first)
-		assertCut(t, sibling(t, first, cut))
-	})
-	t.Run("unaffected subset", func(t *testing.T) {
-		if err := sibling(t, parent, pure).Validate(context.Background()); err != nil {
-			t.Fatalf("uncut subject borrowed another subject's cut: %v", err)
+		attach := func(t *testing.T, v *Snapshot, fp Fingerprint) {
+			t.Helper()
+			observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir,
+				runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := v.AttachObservation(cut, fp, observation); err != nil {
+				t.Fatal(err)
+			}
 		}
-	})
-	for _, inherited := range []bool{false, true} {
-		t.Run(fmt.Sprintf("observed inherited=%t", inherited), func(t *testing.T) {
+		t.Run("maximal and nested", func(t *testing.T) {
+			first := sibling(t, parent, cut)
+			if cl := first.facts.closure(cut); cl.Culprit != (closure.Subject{}) {
+				t.Fatalf("cut closure retained unjudged culprit: %+v", cl.Culprit)
+			}
+			fp, err := first.Capture(t.Context(), cut)
+			if err != nil {
+				t.Fatal(err)
+			}
+			verdict, err := first.Check(t.Context(), fp, cut)
+			if err != nil || verdict.Status != Unverifiable || verdict.Ground.Cause != (Cause{Kind: SharedDynamicStateCause, Condition: Unavailable}) {
+				t.Fatalf("cut was reported as established dependence: %+v %v", verdict, err)
+			}
+			assertCut(t, first)
+			assertCut(t, sibling(t, first, cut))
+		})
+		t.Run("unaffected subset", func(t *testing.T) {
+			if err := sibling(t, parent, pure).Validate(context.Background()); err != nil {
+				t.Fatalf("uncut subject borrowed another subject's cut: %v", err)
+			}
+		})
+		for _, inherited := range []bool{false, true} {
+			t.Run(fmt.Sprintf("observed inherited=%t", inherited), func(t *testing.T) {
+				v := sibling(t, parent, cut)
+				fp, err := v.captureObserved(context.Background(), cut)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if fp.SingleSubjectDischarges != "" {
+					t.Fatal("cut capture gained a discharge")
+				}
+				if inherited {
+					v = sibling(t, v, cut)
+				}
+				attach(t, v, fp)
+				assertCut(t, v)
+			})
+		}
+		t.Run("cancellation", func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			if err := sibling(t, parent, cut).Validate(ctx); !errors.Is(err, context.Canceled) {
+				t.Fatalf("cancelled sibling: %v", err)
+			}
+		})
+		t.Run("runtime movement", func(t *testing.T) {
 			v := sibling(t, parent, cut)
 			fp, err := v.captureObserved(context.Background(), cut)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if fp.SingleSubjectDischarges != "" {
-				t.Fatal("cut capture gained a discharge")
-			}
-			if inherited {
-				v = sibling(t, v, cut)
-			}
 			attach(t, v, fp)
-			assertCut(t, v)
+			if err := os.WriteFile(filepath.Join(dir, "fixture"), []byte("moved"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			err = v.Validate(context.Background())
+			if !errors.Is(err, ErrViewChanged) || !strings.Contains(err.Error(), "runtime inputs") || errors.Is(err, ErrAnalysisUnavailable) {
+				t.Fatalf("runtime drift behind a cut: %v", err)
+			}
 		})
+		t.Run("source movement", func(t *testing.T) {
+			v := sibling(t, parent, cut)
+			if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte(strings.Replace(source, "return gen.Size()", "return gen.Size() + 1", 1)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			err := v.Validate(context.Background())
+			if !errors.Is(err, ErrViewChanged) || errors.Is(err, ErrAnalysisUnavailable) {
+				t.Fatalf("source drift behind a cut: %v", err)
+			}
+		})
+	})
+	if injected != 1 || discharged != 1 {
+		t.Errorf("construction cut: injected=%d discharged=%d, want one each", injected, discharged)
 	}
-	t.Run("cancellation", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		if err := sibling(t, parent, cut).Validate(ctx); !errors.Is(err, context.Canceled) {
-			t.Fatalf("cancelled sibling: %v", err)
-		}
-	})
-	t.Run("runtime movement", func(t *testing.T) {
-		v := sibling(t, parent, cut)
-		fp, err := v.captureObserved(context.Background(), cut)
-		if err != nil {
-			t.Fatal(err)
-		}
-		attach(t, v, fp)
-		if err := os.WriteFile(filepath.Join(dir, "fixture"), []byte("moved"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		err = v.Validate(context.Background())
-		if !errors.Is(err, ErrViewChanged) || !strings.Contains(err.Error(), "runtime inputs") || errors.Is(err, ErrAnalysisUnavailable) {
-			t.Fatalf("runtime drift behind a cut: %v", err)
-		}
-	})
-	t.Run("source movement", func(t *testing.T) {
-		v := sibling(t, parent, cut)
-		if err := os.WriteFile(filepath.Join(dir, "view.go"), []byte(strings.Replace(source, "return gen.Size()", "return gen.Size() + 1", 1)), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		err := v.Validate(context.Background())
-		if !errors.Is(err, ErrViewChanged) || errors.Is(err, ErrAnalysisUnavailable) {
-			t.Fatalf("source drift behind a cut: %v", err)
-		}
-	})
 }
 
 // writeFileProxyModule publishes a module version into a file:// GOPROXY
@@ -2588,7 +2582,7 @@ func TestPinnedFactsWithMutableLocalTypeEnvironmentDeriveFreshEachPass(t *testin
 	const pkg = "example.com/hostmod"
 	const scope = DynamicStateStrategy + "|proxy-host|cfg"
 	subject := Subject{Package: pkg, Symbol: "Use"}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 
 	before := runScan(t, scope, dir, pkg)
 	if before.downgradeReason[subject] != "" {
@@ -3119,42 +3113,44 @@ func TestUnknownSubjectRefusesBeforeTheMaximalFold(t *testing.T) {
 	isolateProofCache(t)
 	dir := writeViewModule(t, preparationSource)
 	folded := false
-	viewTestHooks.maximalBatch = func() { folded = true }
-	defer func() { viewTestHooks.maximalBatch = nil }()
-	engine, err := newEngine(withDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = engine.newView(context.Background(), []Subject{{Package: "example.com/view", Symbol: "NoSuch"}}, dir)
-	if err == nil || err.Error() != "gofresh: subject example.com/view.NoSuch not found in selected source" {
-		t.Fatalf("unknown subject = %v, want the not-found refusal in its one-subject wording", err)
-	}
-	if folded {
-		t.Fatal("the maximal fold ran before the unknown subject refused")
-	}
-	// The refusal names every unknown subject of the batch at once, each
-	// once in request order, beside the known ones it does not name —
-	// one narrowing step for the caller.
-	_, err = engine.newView(context.Background(), []Subject{
-		{Package: "example.com/view", Symbol: "NoSuch"},
-		{Package: "example.com/view", Symbol: "F"},
-		{Package: "example.com/view", Symbol: "NoSuchEither"},
-		{Package: "example.com/view", Symbol: "NoSuch"},
-	}, dir)
-	var unknown *UnknownSubjectsError
-	if !errors.As(err, &unknown) {
-		t.Fatalf("batch with two unknown subjects = %v, want the typed refusal", err)
-	}
-	want := []Subject{{Package: "example.com/view", Symbol: "NoSuch"}, {Package: "example.com/view", Symbol: "NoSuchEither"}}
-	if !reflect.DeepEqual(unknown.Subjects, want) {
-		t.Fatalf("unknown subjects = %v, want %v", unknown.Subjects, want)
-	}
-	if !strings.Contains(err.Error(), "NoSuch, ") || !strings.Contains(err.Error(), "NoSuchEither") {
-		t.Fatalf("refusal %q does not name every unknown subject", err)
-	}
-	if folded {
-		t.Fatal("the maximal fold ran before the unknown subjects refused")
-	}
+	withViewTestHooks(viewTestHookSet{
+		maximalBatch: func() { folded = true },
+	}, func() {
+		engine, err := newEngine(withDir(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = engine.newView(context.Background(), []Subject{{Package: "example.com/view", Symbol: "NoSuch"}}, dir)
+		if err == nil || err.Error() != "gofresh: subject example.com/view.NoSuch not found in selected source" {
+			t.Fatalf("unknown subject = %v, want the not-found refusal in its one-subject wording", err)
+		}
+		if folded {
+			t.Fatal("the maximal fold ran before the unknown subject refused")
+		}
+		// The refusal names every unknown subject of the batch at once, each
+		// once in request order, beside the known ones it does not name —
+		// one narrowing step for the caller.
+		_, err = engine.newView(context.Background(), []Subject{
+			{Package: "example.com/view", Symbol: "NoSuch"},
+			{Package: "example.com/view", Symbol: "F"},
+			{Package: "example.com/view", Symbol: "NoSuchEither"},
+			{Package: "example.com/view", Symbol: "NoSuch"},
+		}, dir)
+		var unknown *UnknownSubjectsError
+		if !errors.As(err, &unknown) {
+			t.Fatalf("batch with two unknown subjects = %v, want the typed refusal", err)
+		}
+		want := []Subject{{Package: "example.com/view", Symbol: "NoSuch"}, {Package: "example.com/view", Symbol: "NoSuchEither"}}
+		if !reflect.DeepEqual(unknown.Subjects, want) {
+			t.Fatalf("unknown subjects = %v, want %v", unknown.Subjects, want)
+		}
+		if !strings.Contains(err.Error(), "NoSuch, ") || !strings.Contains(err.Error(), "NoSuchEither") {
+			t.Fatalf("refusal %q does not name every unknown subject", err)
+		}
+		if folded {
+			t.Fatal("the maximal fold ran before the unknown subjects refused")
+		}
+	})
 }
 
 // A view package that resolves into the module cache refuses from the
@@ -3165,19 +3161,21 @@ func TestModuleCacheViewPackageRefusesBeforeTheTypedLoad(t *testing.T) {
 	}
 	dir := writePinnedDepModule(t)
 	loaded := false
-	viewTestHooks.typedLoad = func() { loaded = true }
-	defer func() { viewTestHooks.typedLoad = nil }()
-	engine, err := newEngine(withDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = engine.newView(context.Background(), []Subject{{Package: "golang.org/x/sync/errgroup", Symbol: "Group.Go"}}, dir)
-	if err == nil || !strings.Contains(err.Error(), "resolves into the module cache") {
-		t.Fatalf("module-cache view package = %v, want the module-cache refusal", err)
-	}
-	if loaded {
-		t.Fatal("the typed load ran before the module-cache refusal")
-	}
+	withViewTestHooks(viewTestHookSet{
+		typedLoad: func() { loaded = true },
+	}, func() {
+		engine, err := newEngine(withDir(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = engine.newView(context.Background(), []Subject{{Package: "golang.org/x/sync/errgroup", Symbol: "Group.Go"}}, dir)
+		if err == nil || !strings.Contains(err.Error(), "resolves into the module cache") {
+			t.Fatalf("module-cache view package = %v, want the module-cache refusal", err)
+		}
+		if loaded {
+			t.Fatal("the typed load ran before the module-cache refusal")
+		}
+	})
 }
 
 // A batch with one malformed record refuses whole before any verdict is
@@ -3204,24 +3202,26 @@ func TestMalformedRecordRefusesTheBatchBeforeAnyWindow(t *testing.T) {
 	bad := good
 	bad.ResultKind = Kind(99)
 	opened := 0
-	viewTestHooks.runtimeWindow = func() { opened++ }
-	defer func() { viewTestHooks.runtimeWindow = nil }()
-	for name, check := range map[string]func(map[Subject]Fingerprint) (map[Subject]Verdict, error){
-		"CheckBatch": func(r map[Subject]Fingerprint) (map[Subject]Verdict, error) {
-			return view.CheckBatch(context.Background(), r)
-		},
-		"CheckObservedBatch": func(r map[Subject]Fingerprint) (map[Subject]Verdict, error) {
-			return view.CheckObservedBatch(context.Background(), r)
-		},
-	} {
-		verdicts, err := check(map[Subject]Fingerprint{f: good, g: bad})
-		if err == nil || !strings.Contains(err.Error(), "invalid recorded result kind") {
-			t.Fatalf("%s with a malformed record = %v %v, want the kind refusal", name, verdicts, err)
+	withViewTestHooks(viewTestHookSet{
+		runtimeWindow: func() { opened++ },
+	}, func() {
+		for name, check := range map[string]func(map[Subject]Fingerprint) (map[Subject]Verdict, error){
+			"CheckBatch": func(r map[Subject]Fingerprint) (map[Subject]Verdict, error) {
+				return view.CheckBatch(context.Background(), r)
+			},
+			"CheckObservedBatch": func(r map[Subject]Fingerprint) (map[Subject]Verdict, error) {
+				return view.CheckObservedBatch(context.Background(), r)
+			},
+		} {
+			verdicts, err := check(map[Subject]Fingerprint{f: good, g: bad})
+			if err == nil || !strings.Contains(err.Error(), "invalid recorded result kind") {
+				t.Fatalf("%s with a malformed record = %v %v, want the kind refusal", name, verdicts, err)
+			}
+			if verdicts != nil {
+				t.Fatalf("%s decided verdicts beside the refusal: %v", name, verdicts)
+			}
 		}
-		if verdicts != nil {
-			t.Fatalf("%s decided verdicts beside the refusal: %v", name, verdicts)
-		}
-	}
+	})
 	if opened != 0 {
 		t.Fatalf("%d runtime-input windows opened for refused batches", opened)
 	}
@@ -3247,9 +3247,11 @@ func TestMissingAttachmentRefusesBeforeTheValidationObservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	observed := 0
-	viewTestHooks.observe = func() { observed++ }
-	defer func() { viewTestHooks.observe = nil }()
-	err = view.Validate(context.Background())
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { observed++ },
+	}, func() {
+		err = view.Validate(context.Background())
+	})
 	if err == nil || !strings.Contains(err.Error(), "no attached completed observation") {
 		t.Fatalf("validation without an attachment = %v, want the attachment refusal", err)
 	}
@@ -4849,8 +4851,6 @@ func TestRuntimeRevalidationUsesEvidenceRoot(t *testing.T) {
 	// module-rooted engine's, field for field.
 	subject := Subject{Package: "example.com/member", Symbol: "F"}
 	var guardDirs []string
-	viewTestHooks.guardDir = func(dir string) { guardDirs = append(guardDirs, dir) }
-	defer func() { viewTestHooks.guardDir = nil }()
 	capture := func(opts ...option) Fingerprint {
 		t.Helper()
 		e, err := newEngine(append([]option{withDir(member), withEnv(os.Environ()...)}, opts...)...)
@@ -4863,9 +4863,14 @@ func TestRuntimeRevalidationUsesEvidenceRoot(t *testing.T) {
 		}
 		return fp
 	}
-	plain := capture()
-	guardDirs = nil
-	rooted := capture(withEvidenceRoot(root))
+	var plain, rooted Fingerprint
+	withViewTestHooks(viewTestHookSet{
+		guardDir: func(dir string) { guardDirs = append(guardDirs, dir) },
+	}, func() {
+		plain = capture()
+		guardDirs = nil
+		rooted = capture(withEvidenceRoot(root))
+	})
 	if plain != rooted {
 		t.Fatalf("the evidence root moved the captured fingerprint:\n plain  %+v\n rooted %+v", plain, rooted)
 	}
@@ -5195,20 +5200,23 @@ func TestDeferredCheckCloseCollapsesBaseObservationsIntoValidation(t *testing.T)
 	// base observation and the deferred check pays none; both serve the
 	// same valid verdicts.
 	observations := 0
-	viewTestHooks.observe = func() { observations++ }
-	t.Cleanup(func() { viewTestHooks.observe = nil })
-	defaultVerdicts, err := defaultView.CheckBatch(context.Background(), recorded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defaultPasses := observations
-	observations = 0
-	deferredVerdicts, err := deferredView.CheckBatch(context.Background(), recorded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	deferredPasses := observations
-	viewTestHooks.observe = nil
+	var defaultVerdicts, deferredVerdicts map[Subject]Verdict
+	var defaultPasses, deferredPasses int
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { observations++ },
+	}, func() {
+		defaultVerdicts, err = defaultView.CheckBatch(context.Background(), recorded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defaultPasses = observations
+		observations = 0
+		deferredVerdicts, err = deferredView.CheckBatch(context.Background(), recorded)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deferredPasses = observations
+	})
 	if defaultPasses != 1 || deferredPasses != 0 {
 		t.Fatalf("closing base observations: default = %d, deferred = %d; want 1 and 0", defaultPasses, deferredPasses)
 	}
@@ -5234,18 +5242,21 @@ func TestDeferredCheckCloseCollapsesBaseObservationsIntoValidation(t *testing.T)
 		fingerprint.RuntimeDigest = state.Digest
 		observedRecorded[subject] = fingerprint
 	}
-	observations = 0
-	viewTestHooks.observe = func() { observations++ }
-	if _, err := defaultView.CheckObservedBatch(context.Background(), observedRecorded); err != nil {
-		t.Fatal(err)
-	}
-	defaultObservedPasses := observations
-	observations = 0
-	if _, err := deferredView.CheckObservedBatch(context.Background(), observedRecorded); err != nil {
-		t.Fatal(err)
-	}
-	deferredObservedPasses := observations
-	viewTestHooks.observe = nil
+	var defaultObservedPasses, deferredObservedPasses int
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { observations++ },
+	}, func() {
+		observations = 0
+		if _, err := defaultView.CheckObservedBatch(context.Background(), observedRecorded); err != nil {
+			t.Fatal(err)
+		}
+		defaultObservedPasses = observations
+		observations = 0
+		if _, err := deferredView.CheckObservedBatch(context.Background(), observedRecorded); err != nil {
+			t.Fatal(err)
+		}
+		deferredObservedPasses = observations
+	})
 	if defaultObservedPasses != 1 || deferredObservedPasses != 0 {
 		t.Fatalf("observed closing base observations: default = %d, deferred = %d; want 1 and 0", defaultObservedPasses, deferredObservedPasses)
 	}
@@ -5254,11 +5265,13 @@ func TestDeferredCheckCloseCollapsesBaseObservationsIntoValidation(t *testing.T)
 	// succeeds with a single comparison observation, so the provisional
 	// verdicts of both check classes stand at the cost of one pass.
 	observations = 0
-	viewTestHooks.observe = func() { observations++ }
-	if err := deferredView.Validate(context.Background()); err != nil {
-		t.Fatalf("deferred close on an unchanged tree: %v", err)
-	}
-	viewTestHooks.observe = nil
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { observations++ },
+	}, func() {
+		if err := deferredView.Validate(context.Background()); err != nil {
+			t.Fatalf("deferred close on an unchanged tree: %v", err)
+		}
+	})
 	if observations != 1 {
 		t.Fatalf("the deferred close cost %d observations, want 1 — validation's one comparison observation closes every deferred interval", observations)
 	}
@@ -5949,93 +5962,96 @@ func TestCheckObservedBatchMatchesSingleChecks(t *testing.T) {
 	rounds = append(rounds, map[Subject]Fingerprint{aF: guardDrift, bRead: tampered, bH: maximalOnly})
 
 	observations := 0
-	viewTestHooks.observe = func() { observations++ }
-	t.Cleanup(func() { viewTestHooks.observe = nil })
-	for i, recorded := range rounds {
-		singles := map[Subject]Verdict{}
-		for subject, fingerprint := range recorded {
-			verdict, err := singleView.CheckObserved(context.Background(), fingerprint, subject)
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { observations++ },
+	}, func() {
+		for i, recorded := range rounds {
+			singles := map[Subject]Verdict{}
+			for subject, fingerprint := range recorded {
+				verdict, err := singleView.CheckObserved(context.Background(), fingerprint, subject)
+				if err != nil {
+					t.Fatal(err)
+				}
+				singles[subject] = verdict
+			}
+			observations = 0
+			batch, err := batchView.CheckObservedBatch(context.Background(), recorded)
 			if err != nil {
 				t.Fatal(err)
 			}
-			singles[subject] = verdict
-		}
-		observations = 0
-		batch, err := batchView.CheckObservedBatch(context.Background(), recorded)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for subject := range recorded {
-			if batch[subject] != singles[subject] {
-				t.Fatalf("round %d: batch verdict for %s.%s = %+v, single = %+v", i, subject.Package, subject.Symbol, batch[subject], singles[subject])
+			for subject := range recorded {
+				if batch[subject] != singles[subject] {
+					t.Fatalf("round %d: batch verdict for %s.%s = %+v, single = %+v", i, subject.Package, subject.Symbol, batch[subject], singles[subject])
+				}
+			}
+			if i == 0 {
+				// The first round genuinely exercises every disposition class:
+				// the verifiable subject answers valid, the unverifiable subject
+				// is served valid through its observation lift, and the sibling
+				// without lift evidence answers unverifiable.
+				if singles[aF].Status != Valid {
+					t.Fatalf("verifiable subject = %+v, want valid", singles[aF])
+				}
+				if singles[bRead].Status != Valid {
+					t.Fatalf("lift-served observed subject = %+v, want valid", singles[bRead])
+				}
+				if singles[bH].Status != Unverifiable {
+					t.Fatalf("liftless unverifiable subject = %+v, want unverifiable", singles[bH])
+				}
+				if observations != 1 {
+					t.Fatalf("batched observed check performed %d observations, want 1", observations)
+				}
+			}
+			if i == 1 {
+				if singles[bRead].Status != Unverifiable {
+					t.Fatalf("tampered lift-bearing record = %+v, want unverifiable", singles[bRead])
+				}
+				if singles[aF].Status != Stale || singles[aF].Reason != "buildconfig" {
+					t.Fatalf("guard-drifted record = %+v, want stale buildconfig", singles[aF])
+				}
 			}
 		}
-		if i == 0 {
-			// The first round genuinely exercises every disposition class:
-			// the verifiable subject answers valid, the unverifiable subject
-			// is served valid through its observation lift, and the sibling
-			// without lift evidence answers unverifiable.
-			if singles[aF].Status != Valid {
-				t.Fatalf("verifiable subject = %+v, want valid", singles[aF])
-			}
-			if singles[bRead].Status != Valid {
-				t.Fatalf("lift-served observed subject = %+v, want valid", singles[bRead])
-			}
-			if singles[bH].Status != Unverifiable {
-				t.Fatalf("liftless unverifiable subject = %+v, want unverifiable", singles[bH])
-			}
-			if observations != 1 {
-				t.Fatalf("batched observed check performed %d observations, want 1", observations)
-			}
-		}
-		if i == 1 {
-			if singles[bRead].Status != Unverifiable {
-				t.Fatalf("tampered lift-bearing record = %+v, want unverifiable", singles[bRead])
-			}
-			if singles[aF].Status != Stale || singles[aF].Reason != "buildconfig" {
-				t.Fatalf("guard-drifted record = %+v, want stale buildconfig", singles[aF])
-			}
-		}
-	}
+	})
 
 	// An all-unchanged manifest-less batch answers without observations or
 	// precise analysis, and a cancelled caller context aborts the batch.
-	viewTestHooks.observe = nil
 	quietView, err := engine.newView(context.Background(), subjects, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	observations = 0
 	analyses := 0
-	viewTestHooks.observe = func() { observations++ }
-	t.Cleanup(func() { viewTestHooks.observe = nil })
-	quietView.beforePreciseAnalysis = func() { analyses++ }
-	quiet, err := quietView.CheckObservedBatch(context.Background(), map[Subject]Fingerprint{aF: captured[aF]})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if quiet[aF].Status != Valid || observations != 0 || analyses != 0 {
-		t.Fatalf("all-unchanged batch = %+v with %d observations and %d analyses, want valid with none", quiet[aF], observations, analyses)
-	}
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := quietView.CheckObservedBatch(cancelled, map[Subject]Fingerprint{aF: captured[aF]}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled observed batch = %v, want context.Canceled", err)
-	}
-	// Evidence-only staleness — even with a runtime manifest attached — is
-	// decided without opening the observation window.
-	earlyStale := captured[bRead]
-	earlyStale.MaximalClosure = ""
-	earlyStale.RuntimeInputs = state.Manifest
-	earlyStale.RuntimeDigest = state.Digest
-	observations = 0
-	early, err := quietView.CheckObservedBatch(context.Background(), map[Subject]Fingerprint{bRead: earlyStale})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := early[bRead]; got.Status != Stale || got.Reason != "closure" || observations != 0 {
-		t.Fatalf("early-stale record = %+v with %d observations, want stale closure with none", got, observations)
-	}
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { observations++ },
+	}, func() {
+		quietView.beforePreciseAnalysis = func() { analyses++ }
+		quiet, err := quietView.CheckObservedBatch(context.Background(), map[Subject]Fingerprint{aF: captured[aF]})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if quiet[aF].Status != Valid || observations != 0 || analyses != 0 {
+			t.Fatalf("all-unchanged batch = %+v with %d observations and %d analyses, want valid with none", quiet[aF], observations, analyses)
+		}
+		cancelled, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := quietView.CheckObservedBatch(cancelled, map[Subject]Fingerprint{aF: captured[aF]}); !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancelled observed batch = %v, want context.Canceled", err)
+		}
+		// Evidence-only staleness — even with a runtime manifest attached — is
+		// decided without opening the observation window.
+		earlyStale := captured[bRead]
+		earlyStale.MaximalClosure = ""
+		earlyStale.RuntimeInputs = state.Manifest
+		earlyStale.RuntimeDigest = state.Digest
+		observations = 0
+		early, err := quietView.CheckObservedBatch(context.Background(), map[Subject]Fingerprint{bRead: earlyStale})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := early[bRead]; got.Status != Stale || got.Reason != "closure" || observations != 0 {
+			t.Fatalf("early-stale record = %+v with %d observations, want stale closure with none", got, observations)
+		}
+	})
 }
 
 func TestCheckObservedBatchMarksMovingRuntimeInputStale(t *testing.T) {
@@ -6217,13 +6233,16 @@ func TestValidationReportsUnavailabilityAfterTheClosingCompare(t *testing.T) {
 	}
 	// The fixture moves once the proof pass has begun — after the opening
 	// runtime-input comparison passed, before the closing one runs.
-	viewTestHooks.beforeAnalysis = func() {
-		if err := os.WriteFile(fixture, []byte("moved"), 0o644); err != nil {
-			t.Error(err)
-		}
-	}
-	defer func() { viewTestHooks.beforeAnalysis = nil }()
-	err := producer.Validate(context.Background())
+	var err error
+	withViewTestHooks(viewTestHookSet{
+		beforeAnalysis: func() {
+			if err := os.WriteFile(fixture, []byte("moved"), 0o644); err != nil {
+				t.Error(err)
+			}
+		},
+	}, func() {
+		err = producer.Validate(context.Background())
+	})
 	if err == nil || errors.Is(err, ErrAnalysisUnavailable) {
 		t.Fatalf("validation with a moved runtime input under a cut proof pass = %v, want the move reported, never the unavailability", err)
 	}
@@ -6458,31 +6477,33 @@ func TestDriftBracketsObserveOncePerSide(t *testing.T) {
 	// reads only at close: one fresh observation, with drift across the
 	// window still refusing there.
 	observations := 0
-	viewTestHooks.observe = func() { observations++ }
-	t.Cleanup(func() { viewTestHooks.observe = nil })
-	if _, err := current.Check(context.Background(), fingerprint, subject); err != nil {
-		t.Fatal(err)
-	}
-	if observations != 1 {
-		t.Fatalf("runtime-input check performed %d observations, want 1", observations)
-	}
-	// The observability analysis uses one close-only bracket: it opens on
-	// the view's agreed facts and reads exactly once, at close.
-	observations = 0
-	if err := current.ensureObservable(context.Background(), []Subject{subject}); err != nil {
-		t.Fatal(err)
-	}
-	if observations != 1 {
-		t.Fatalf("proof analysis performed %d observations, want 1", observations)
-	}
-	// An already-computed proof re-observes nothing.
-	observations = 0
-	if err := current.ensureObservable(context.Background(), []Subject{subject}); err != nil {
-		t.Fatal(err)
-	}
-	if observations != 0 {
-		t.Fatalf("cached proof analysis performed %d observations, want 0", observations)
-	}
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { observations++ },
+	}, func() {
+		if _, err := current.Check(context.Background(), fingerprint, subject); err != nil {
+			t.Fatal(err)
+		}
+		if observations != 1 {
+			t.Fatalf("runtime-input check performed %d observations, want 1", observations)
+		}
+		// The observability analysis uses one close-only bracket: it opens on
+		// the view's agreed facts and reads exactly once, at close.
+		observations = 0
+		if err := current.ensureObservable(context.Background(), []Subject{subject}); err != nil {
+			t.Fatal(err)
+		}
+		if observations != 1 {
+			t.Fatalf("proof analysis performed %d observations, want 1", observations)
+		}
+		// An already-computed proof re-observes nothing.
+		observations = 0
+		if err := current.ensureObservable(context.Background(), []Subject{subject}); err != nil {
+			t.Fatal(err)
+		}
+		if observations != 0 {
+			t.Fatalf("cached proof analysis performed %d observations, want 0", observations)
+		}
+	})
 }
 
 // One knob redirects every persistent memo class, and no knob position
@@ -6547,7 +6568,7 @@ func TestMemoStoreKnobContainsPersistentWrites(t *testing.T) {
 
 	redirected := t.TempDir()
 	setMemoRoot(redirected)
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	first := runScan(t, scope, dir, pkg)
 	if !first.known[Subject{Package: pkg, Symbol: "Run"}] {
 		t.Fatal("scan lost the subject")
@@ -6582,12 +6603,13 @@ func TestValidateMaximalReadsOnceAndStillRefusesDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	observations := 0
-	viewTestHooks.observe = func() { observations++ }
-	t.Cleanup(func() { viewTestHooks.observe = nil })
-	if err := view.Validate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	viewTestHooks.observe = nil
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { observations++ },
+	}, func() {
+		if err := view.Validate(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	})
 	if observations != 1 {
 		t.Fatalf("maximal validation performed %d observation passes, want exactly 1", observations)
 	}
@@ -6628,27 +6650,28 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 		t.Fatal(err)
 	}
 	observations := 0
-	viewTestHooks.observe = func() { observations++ }
-	t.Cleanup(func() { viewTestHooks.observe = nil })
-	producer, err := engine.newView(context.Background(), []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fingerprint, err := producer.captureObserved(context.Background(), subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("observed test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := producer.AttachObservation(subject, fingerprint, observation); err != nil {
-		t.Fatal(err)
-	}
-	if err := producer.Validate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	viewTestHooks.observe = nil
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { observations++ },
+	}, func() {
+		producer, err := engine.newView(context.Background(), []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := producer.captureObserved(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("observed test"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := producer.AttachObservation(subject, fingerprint, observation); err != nil {
+			t.Fatal(err)
+		}
+		if err := producer.Validate(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	})
 	if observations != 5 {
 		t.Fatalf("observed producer lifecycle performed %d observation passes, want 5 (2 construction + 1 capture bracket + 1 seeded read + 1 validation bracket)", observations)
 	}
@@ -6673,12 +6696,13 @@ func TestObservedProducerLifecyclePassEconomy(t *testing.T) {
 		t.Fatal(err)
 	}
 	observations = 0
-	viewTestHooks.observe = func() { observations++ }
-	t.Cleanup(func() { viewTestHooks.observe = nil })
-	if err := producer2.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
-		t.Fatalf("seeded validation missed capture-to-validate drift: %v", err)
-	}
-	viewTestHooks.observe = nil
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { observations++ },
+	}, func() {
+		if err := producer2.Validate(context.Background()); !errors.Is(err, ErrViewChanged) {
+			t.Fatalf("seeded validation missed capture-to-validate drift: %v", err)
+		}
+	})
 	// The seeded read itself refuses - one observation, no analysis
 	// bracket: the seed comparison is what makes the seeded facts
 	// record-grade before any validation-time analysis spends work on
@@ -6729,59 +6753,62 @@ func TestSiblingSharesObservationAndIsolatesTransactions(t *testing.T) {
 	}
 
 	observations := 0
-	viewTestHooks.observe = func() { observations++ }
-	t.Cleanup(func() { viewTestHooks.observe = nil })
-	siblingOne, err := parent.Sibling([]Subject{aF})
-	if err != nil {
-		t.Fatal(err)
-	}
-	siblingTwo, err := parent.Sibling([]Subject{aF, bG})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if observations != 0 {
-		t.Fatalf("sibling derivation performed %d observations, want 0 — every served fact must be the parent's", observations)
-	}
-	if _, err := parent.Sibling([]Subject{{Package: "example.com/sibling/a", Symbol: "Absent"}}); err == nil {
-		t.Fatal("sibling over a subject outside the parent view derived, want refusal")
-	}
-	oneF, err := siblingOne.Capture(context.Background(), aF)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if oneF != parentF {
-		t.Fatalf("sibling fingerprint = %+v, parent = %+v — shared observation must serve identical evidence", oneF, parentF)
-	}
+	var siblingOne, siblingTwo *Snapshot
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { observations++ },
+	}, func() {
+		siblingOne, err = parent.Sibling([]Subject{aF})
+		if err != nil {
+			t.Fatal(err)
+		}
+		siblingTwo, err = parent.Sibling([]Subject{aF, bG})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if observations != 0 {
+			t.Fatalf("sibling derivation performed %d observations, want 0 — every served fact must be the parent's", observations)
+		}
+		if _, err := parent.Sibling([]Subject{{Package: "example.com/sibling/a", Symbol: "Absent"}}); err == nil {
+			t.Fatal("sibling over a subject outside the parent view derived, want refusal")
+		}
+		oneF, err := siblingOne.Capture(context.Background(), aF)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if oneF != parentF {
+			t.Fatalf("sibling fingerprint = %+v, parent = %+v — shared observation must serve identical evidence", oneF, parentF)
+		}
 
-	// The parent's validation seals only the parent's transaction.
-	if err := parent.Validate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := parent.Capture(context.Background(), aF); err == nil {
-		t.Fatal("parent capture after validation succeeded, want the seal")
-	}
-	if _, err := siblingOne.Capture(context.Background(), aF); err != nil {
-		t.Fatalf("sibling capture after the parent's validation: %v", err)
-	}
-	if err := siblingOne.Validate(context.Background()); err != nil {
-		t.Fatalf("sibling validation after the parent's: %v", err)
-	}
-	// A sealed parent still derives: the facts are construction-time and
-	// the sibling's own validation is its drift gate. This parent never
-	// captured an observed proof, so the derived sibling's observed
-	// capture computes one fresh rather than serving an absent
-	// inherited proof.
-	sealedSibling, err := parent.Sibling([]Subject{aF})
-	if err != nil {
-		t.Fatalf("sibling derivation from a sealed parent: %v", err)
-	}
-	observations = 0
-	if _, err := sealedSibling.captureObserved(context.Background(), aF); err != nil {
-		t.Fatalf("observed capture over a subject the parent never captured: %v", err)
-	}
-	if observations == 0 {
-		t.Fatal("proof-less observed capture completed without observing, want a fresh proof computation")
-	}
+		// The parent's validation seals only the parent's transaction.
+		if err := parent.Validate(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := parent.Capture(context.Background(), aF); err == nil {
+			t.Fatal("parent capture after validation succeeded, want the seal")
+		}
+		if _, err := siblingOne.Capture(context.Background(), aF); err != nil {
+			t.Fatalf("sibling capture after the parent's validation: %v", err)
+		}
+		if err := siblingOne.Validate(context.Background()); err != nil {
+			t.Fatalf("sibling validation after the parent's: %v", err)
+		}
+		// A sealed parent still derives: the facts are construction-time and
+		// the sibling's own validation is its drift gate. This parent never
+		// captured an observed proof, so the derived sibling's observed
+		// capture computes one fresh rather than serving an absent
+		// inherited proof.
+		sealedSibling, err := parent.Sibling([]Subject{aF})
+		if err != nil {
+			t.Fatalf("sibling derivation from a sealed parent: %v", err)
+		}
+		observations = 0
+		if _, err := sealedSibling.captureObserved(context.Background(), aF); err != nil {
+			t.Fatalf("observed capture over a subject the parent never captured: %v", err)
+		}
+		if observations == 0 {
+			t.Fatal("proof-less observed capture completed without observing, want a fresh proof computation")
+		}
+	})
 	// A sibling sealed by its own validation never seals the family, and
 	// a single-subject sibling's validation compares against the SUBSET's
 	// source union — the parent's wider union would refuse an unchanged
@@ -7193,15 +7220,17 @@ func TestExecutionModelMarkersSplitTheFactScope(t *testing.T) {
 	capture := func(opts ...option) string {
 		t.Helper()
 		var scope string
-		viewTestHooks.factScope = func(s string) { scope = s }
-		defer func() { viewTestHooks.factScope = nil }()
-		engine, err := newEngine(append([]option{withDir(dir)}, opts...)...)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := engine.newView(context.Background(), []Subject{subject}, dir); err != nil {
-			t.Fatal(err)
-		}
+		withViewTestHooks(viewTestHookSet{
+			factScope: func(s string) { scope = s },
+		}, func() {
+			engine, err := newEngine(append([]option{withDir(dir)}, opts...)...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := engine.newView(context.Background(), []Subject{subject}, dir); err != nil {
+				t.Fatal(err)
+			}
+		})
 		if scope == "" {
 			t.Fatal("the view derived no fact scope")
 		}
@@ -7358,45 +7387,47 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 		defer mu.Unlock()
 		return fingerprint, verdict, cuts
 	}
-	loads := 0
-	viewTestHooks.typedLoad = func() { loads++ }
-	defer func() { viewTestHooks.typedLoad = nil }()
 	t.Run("single-subject discharge", func(t *testing.T) {
-		dir := writeModuleTree(t, map[string]string{
-			"go.mod":     "module example.com/view\n\ngo 1.26\n",
-			"gen/gen.go": "package gen\n\nvar memo = map[string]func(){}\n\nfunc Compile(name string) { memo[name] = func() {} }\n\nfunc Size() int { return len(memo) }\n",
-			"view.go":    "package view\n\nimport \"example.com/view/gen\"\n\nfunc F() int { return gen.Size() }\n\nfunc Property() { gen.Compile(\"k\") }\n",
+		loads := 0
+		withViewTestHooks(viewTestHookSet{
+			typedLoad: func() { loads++ },
+		}, func() {
+			dir := writeModuleTree(t, map[string]string{
+				"go.mod":     "module example.com/view\n\ngo 1.26\n",
+				"gen/gen.go": "package gen\n\nvar memo = map[string]func(){}\n\nfunc Compile(name string) { memo[name] = func() {} }\n\nfunc Size() int { return len(memo) }\n",
+				"view.go":    "package view\n\nimport \"example.com/view/gen\"\n\nfunc F() int { return gen.Size() }\n\nfunc Property() { gen.Compile(\"k\") }\n",
+			})
+			subject := Subject{Package: "example.com/view", Symbol: "F"}
+			fingerprint, verdict, cuts := capture(t, dir, subject, withSingleSubjectExecution(), withAnalysisBudget(time.Nanosecond))
+			if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/gen.memo is mutated") || !strings.Contains(verdict.Reason, "(reachability unjudged: analysis budget 1ns exhausted)") {
+				t.Fatalf("verdict under a cut budget = %+v, want the downgrade naming gen.memo AND the budget — a cut discharges nothing and the record says why", verdict)
+			}
+			if fingerprint.SingleSubjectDischarges != "" {
+				t.Fatalf("a cut pass recorded a discharge: %q", fingerprint.SingleSubjectDischarges)
+			}
+			// The pass judges every downgraded subject of the scanned
+			// package (F and Property both carry gen.memo), and the view's
+			// construction pair is two observation passes — one event
+			// each, never one per subject.
+			if want := []string{"analysis budget 1ns exhausted: 2 subjects undischarged", "analysis budget 1ns exhausted: 2 subjects undischarged"}; !slices.Equal(cuts, want) {
+				t.Fatalf("budget-exhausted events = %q, want %q (once per pass, with the pass's count)", cuts, want)
+			}
+			// The cut persisted no scan facts: the unbounded pass pays its
+			// typed load and discharges; the pass after it is served.
+			loads = 0
+			fingerprint, verdict, cuts = capture(t, dir, subject, withSingleSubjectExecution())
+			if verdict.Status != Valid || fingerprint.SingleSubjectDischarges != "example.com/view/gen.memo" || len(cuts) != 0 {
+				t.Fatalf("the unbounded pass after a cut = %+v / %q / %q, want the discharge", verdict, fingerprint.SingleSubjectDischarges, cuts)
+			}
+			if loads == 0 {
+				t.Fatal("the unbounded pass paid no typed load — the cut pass persisted its undischarged scan")
+			}
+			loads = 0
+			capture(t, dir, subject, withSingleSubjectExecution())
+			if loads != 0 {
+				t.Fatalf("the pass after a complete derivation paid %d typed loads — the derivation did not persist", loads)
+			}
 		})
-		subject := Subject{Package: "example.com/view", Symbol: "F"}
-		fingerprint, verdict, cuts := capture(t, dir, subject, withSingleSubjectExecution(), withAnalysisBudget(time.Nanosecond))
-		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/view/gen.memo is mutated") || !strings.Contains(verdict.Reason, "(reachability unjudged: analysis budget 1ns exhausted)") {
-			t.Fatalf("verdict under a cut budget = %+v, want the downgrade naming gen.memo AND the budget — a cut discharges nothing and the record says why", verdict)
-		}
-		if fingerprint.SingleSubjectDischarges != "" {
-			t.Fatalf("a cut pass recorded a discharge: %q", fingerprint.SingleSubjectDischarges)
-		}
-		// The pass judges every downgraded subject of the scanned
-		// package (F and Property both carry gen.memo), and the view's
-		// construction pair is two observation passes — one event
-		// each, never one per subject.
-		if want := []string{"analysis budget 1ns exhausted: 2 subjects undischarged", "analysis budget 1ns exhausted: 2 subjects undischarged"}; !slices.Equal(cuts, want) {
-			t.Fatalf("budget-exhausted events = %q, want %q (once per pass, with the pass's count)", cuts, want)
-		}
-		// The cut persisted no scan facts: the unbounded pass pays its
-		// typed load and discharges; the pass after it is served.
-		loads = 0
-		fingerprint, verdict, cuts = capture(t, dir, subject, withSingleSubjectExecution())
-		if verdict.Status != Valid || fingerprint.SingleSubjectDischarges != "example.com/view/gen.memo" || len(cuts) != 0 {
-			t.Fatalf("the unbounded pass after a cut = %+v / %q / %q, want the discharge", verdict, fingerprint.SingleSubjectDischarges, cuts)
-		}
-		if loads == 0 {
-			t.Fatal("the unbounded pass paid no typed load — the cut pass persisted its undischarged scan")
-		}
-		loads = 0
-		capture(t, dir, subject, withSingleSubjectExecution())
-		if loads != 0 {
-			t.Fatalf("the pass after a complete derivation paid %d typed loads — the derivation did not persist", loads)
-		}
 	})
 	t.Run("an operation cancelled at the discharge is never a budget cut", func(t *testing.T) {
 		dir := writeModuleTree(t, map[string]string{
@@ -7410,23 +7441,25 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 		t.Setenv("XDG_CACHE_HOME", t.TempDir())
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		viewTestHooks.beforeDischarge = cancel
-		defer func() { viewTestHooks.beforeDischarge = nil }()
 		var mu sync.Mutex
 		var cuts []string
-		engine, err := newEngine(withDir(dir), withSingleSubjectExecution(), withAnalysisBudget(time.Minute), withProgress(func(p Progress) {
-			if p.Phase == "budget-exhausted" {
-				mu.Lock()
-				defer mu.Unlock()
-				cuts = append(cuts, p.Detail)
+		withViewTestHooks(viewTestHookSet{
+			beforeDischarge: cancel,
+		}, func() {
+			engine, err := newEngine(withDir(dir), withSingleSubjectExecution(), withAnalysisBudget(time.Minute), withProgress(func(p Progress) {
+				if p.Phase == "budget-exhausted" {
+					mu.Lock()
+					defer mu.Unlock()
+					cuts = append(cuts, p.Detail)
+				}
+			}))
+			if err != nil {
+				t.Fatal(err)
 			}
-		}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := engine.newView(ctx, []Subject{{Package: "example.com/view", Symbol: "F"}}, dir); !errors.Is(err, context.Canceled) {
-			t.Fatalf("a view construction cancelled at the discharge = %v, want the operation's cancellation", err)
-		}
+			if _, err := engine.newView(ctx, []Subject{{Package: "example.com/view", Symbol: "F"}}, dir); !errors.Is(err, context.Canceled) {
+				t.Fatalf("a view construction cancelled at the discharge = %v, want the operation's cancellation", err)
+			}
+		})
 		mu.Lock()
 		defer mu.Unlock()
 		if len(cuts) != 0 {
@@ -7443,17 +7476,10 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 	// is given a fresh cache home at its observation — the cache-loss
 	// shape, the one route to a cut re-observation of an unchanged tree.
 	const straddleBudget = 10 * time.Second
-	straddle := func(t *testing.T, cutPass int) (Fingerprint, Verdict, []string, *Snapshot, *engine) {
+	withStraddle := func(t *testing.T, cutPass int, fn func(Fingerprint, Verdict, []string, *Snapshot)) {
 		t.Helper()
 		t.Setenv("XDG_CACHE_HOME", t.TempDir())
 		observations := 0
-		viewTestHooks.observe = func() {
-			observations++
-			if observations == cutPass && cutPass > 1 {
-				t.Setenv("XDG_CACHE_HOME", t.TempDir())
-			}
-		}
-		t.Cleanup(func() { viewTestHooks.observe = nil })
 		dir := writeModuleTree(t, map[string]string{
 			"go.mod":     "module example.com/view\n\ngo 1.26\n",
 			"gen/gen.go": "package gen\n\nvar memo = map[string]func(){}\n\nfunc Compile(name string) { memo[name] = func() {} }\n\nfunc Size() int { return len(memo) }\n",
@@ -7463,71 +7489,78 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 		// hit runs no discharge, and the proof has its own analysis boundary.
 		injected, discharged := 0, 0
 		pending := false
-		viewTestHooks.analysisBound = func(ctx context.Context, budget time.Duration) (context.Context, context.CancelFunc) {
-			if budget != straddleBudget {
-				t.Fatalf("analysis budget = %s, want %s", budget, straddleBudget)
-			}
-			if observations == cutPass && injected == 0 {
-				injected++
-				pending = true
-				return context.WithDeadline(ctx, time.Now().Add(-time.Second))
-			}
-			return context.WithTimeout(ctx, budget)
-		}
-		viewTestHooks.beforeDischarge = func() {
-			if pending {
-				if observations != cutPass {
-					t.Fatalf("expired pass %d reached discharge in pass %d", cutPass, observations)
+		withViewTestHooks(viewTestHookSet{
+			observe: func() {
+				observations++
+				if observations == cutPass && cutPass > 1 {
+					t.Setenv("XDG_CACHE_HOME", t.TempDir())
 				}
-				discharged++
-				pending = false
+			},
+			analysisBound: func(ctx context.Context, budget time.Duration) (context.Context, context.CancelFunc) {
+				if budget != straddleBudget {
+					t.Fatalf("analysis budget = %s, want %s", budget, straddleBudget)
+				}
+				if observations == cutPass && injected == 0 {
+					injected++
+					pending = true
+					return context.WithDeadline(ctx, time.Now().Add(-time.Second))
+				}
+				return context.WithTimeout(ctx, budget)
+			},
+			beforeDischarge: func() {
+				if pending {
+					if observations != cutPass {
+						t.Fatalf("expired pass %d reached discharge in pass %d", cutPass, observations)
+					}
+					discharged++
+					pending = false
+				}
+			},
+		}, func() {
+			var mu sync.Mutex
+			var cuts []string
+			engine, err := newEngine(withDir(dir), withSingleSubjectExecution(), withAnalysisBudget(straddleBudget), withProgress(func(p Progress) {
+				if p.Phase == "budget-exhausted" {
+					mu.Lock()
+					defer mu.Unlock()
+					cuts = append(cuts, p.Detail)
+				}
+			}))
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-		t.Cleanup(func() {
-			viewTestHooks.analysisBound = nil
-			viewTestHooks.beforeDischarge = nil
-			if injected != 1 || discharged != 1 {
-				t.Errorf("target pass %d: injected=%d discharged=%d, want one each", cutPass, injected, discharged)
+			subject := Subject{Package: "example.com/view", Symbol: "F"}
+			view, err := engine.newView(context.Background(), []Subject{subject}, dir)
+			if err != nil {
+				t.Fatalf("a construction pair with pass %d cut refused: %v — a cut is the pass's fact, never the tree's", cutPass, err)
 			}
+			fingerprint, err := view.Capture(context.Background(), subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			verdict, err := view.Check(context.Background(), fingerprint, subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mu.Lock()
+			copiedCuts := append([]string(nil), cuts...)
+			mu.Unlock()
+			fn(fingerprint, verdict, copiedCuts, view)
 		})
-		var mu sync.Mutex
-		var cuts []string
-		engine, err := newEngine(withDir(dir), withSingleSubjectExecution(), withAnalysisBudget(straddleBudget), withProgress(func(p Progress) {
-			if p.Phase == "budget-exhausted" {
-				mu.Lock()
-				defer mu.Unlock()
-				cuts = append(cuts, p.Detail)
-			}
-		}))
-		if err != nil {
-			t.Fatal(err)
+		if injected != 1 || discharged != 1 {
+			t.Errorf("target pass %d: injected=%d discharged=%d, want one each", cutPass, injected, discharged)
 		}
-		subject := Subject{Package: "example.com/view", Symbol: "F"}
-		view, err := engine.newView(context.Background(), []Subject{subject}, dir)
-		if err != nil {
-			t.Fatalf("a construction pair with pass %d cut refused: %v — a cut is the pass's fact, never the tree's", cutPass, err)
-		}
-		fingerprint, err := view.Capture(context.Background(), subject)
-		if err != nil {
-			t.Fatal(err)
-		}
-		verdict, err := view.Check(context.Background(), fingerprint, subject)
-		if err != nil {
-			t.Fatal(err)
-		}
-		mu.Lock()
-		defer mu.Unlock()
-		return fingerprint, verdict, append([]string(nil), cuts...), view, engine
 	}
 	for _, cutPass := range []int{1, 2} {
 		t.Run(fmt.Sprintf("construction pair with pass %d cut builds fail-closed", cutPass), func(t *testing.T) {
-			fingerprint, verdict, cuts, _, _ := straddle(t, cutPass)
-			if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "gen.memo is mutated") || !strings.Contains(verdict.Reason, "(reachability unjudged: analysis budget 10s exhausted)") || fingerprint.SingleSubjectDischarges != "" {
-				t.Fatalf("pass %d cut: verdict %+v, discharges %q — want the cut pass's fail-closed shape naming the budget", cutPass, verdict, fingerprint.SingleSubjectDischarges)
-			}
-			if want := []string{"analysis budget 10s exhausted: 2 subjects undischarged"}; !slices.Equal(cuts, want) {
-				t.Fatalf("pass %d cut: events %q, want %q (the cut pass alone reports)", cutPass, cuts, want)
-			}
+			withStraddle(t, cutPass, func(fingerprint Fingerprint, verdict Verdict, cuts []string, _ *Snapshot) {
+				if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "gen.memo is mutated") || !strings.Contains(verdict.Reason, "(reachability unjudged: analysis budget 10s exhausted)") || fingerprint.SingleSubjectDischarges != "" {
+					t.Fatalf("pass %d cut: verdict %+v, discharges %q — want the cut pass's fail-closed shape naming the budget", cutPass, verdict, fingerprint.SingleSubjectDischarges)
+				}
+				if want := []string{"analysis budget 10s exhausted: 2 subjects undischarged"}; !slices.Equal(cuts, want) {
+					t.Fatalf("pass %d cut: events %q, want %q (the cut pass alone reports)", cutPass, cuts, want)
+				}
+			})
 		})
 	}
 	t.Run("a capture after a cut construction keeps the fail-closed facts; its validation reports the cut last", func(t *testing.T) {
@@ -7536,31 +7569,32 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 		// closing pass is served discharged — a difference the cut alone
 		// explains — and the capture SUCCEEDS; the observed validation
 		// then reports that unavailability after every other check.
-		_, _, _, view, _ := straddle(t, 1)
-		subject := Subject{Package: "example.com/view", Symbol: "F"}
-		fingerprint, err := view.captureObserved(context.Background(), subject)
-		if err != nil {
-			t.Fatalf("CaptureObserved after a cut construction = %v, want the capture to keep the view's fail-closed facts", err)
-		}
-		if verdict, err := view.Check(context.Background(), fingerprint, subject); err != nil || verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "(reachability unjudged: analysis budget 10s exhausted)") {
-			t.Fatalf("the captured record's verdict = %+v (%v), want the cut's fail-closed refusal naming the budget", verdict, err)
-		}
-		// A stable attached observation: the observed validation runs
-		// every other check (all holding) and then reports the cut.
-		dir := view.moduleDir
-		if err := os.WriteFile(filepath.Join(dir, "fixture"), []byte("stable"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := view.AttachObservation(subject, fingerprint, observation); err != nil {
-			t.Fatal(err)
-		}
-		if err := view.Validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) {
-			t.Fatalf("validation after a cut construction = %v, want ErrAnalysisUnavailable (held, reported last)", err)
-		}
+		withStraddle(t, 1, func(_ Fingerprint, _ Verdict, _ []string, view *Snapshot) {
+			subject := Subject{Package: "example.com/view", Symbol: "F"}
+			fingerprint, err := view.captureObserved(context.Background(), subject)
+			if err != nil {
+				t.Fatalf("CaptureObserved after a cut construction = %v, want the capture to keep the view's fail-closed facts", err)
+			}
+			if verdict, err := view.Check(context.Background(), fingerprint, subject); err != nil || verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "(reachability unjudged: analysis budget 10s exhausted)") {
+				t.Fatalf("the captured record's verdict = %+v (%v), want the cut's fail-closed refusal naming the budget", verdict, err)
+			}
+			// A stable attached observation: the observed validation runs
+			// every other check (all holding) and then reports the cut.
+			dir := view.moduleDir
+			if err := os.WriteFile(filepath.Join(dir, "fixture"), []byte("stable"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := view.AttachObservation(subject, fingerprint, observation); err != nil {
+				t.Fatal(err)
+			}
+			if err := view.Validate(context.Background()); !errors.Is(err, ErrAnalysisUnavailable) {
+				t.Fatalf("validation after a cut construction = %v, want ErrAnalysisUnavailable (held, reported last)", err)
+			}
+		})
 	})
 	t.Run("a moved runtime input outranks a cut re-observation", func(t *testing.T) {
 		// Passes 1 and 2 build the view uncut, the capture's closing pass
@@ -7568,40 +7602,42 @@ func TestAnalysisBudgetCutLeavesTheCulpritStanding(t *testing.T) {
 		// validation's re-observation (observation 4) is cut. The moved
 		// input is drift and is reported — the cut's unavailability waits
 		// behind every other check.
-		_, _, _, view, _ := straddle(t, 4)
-		subject := Subject{Package: "example.com/view", Symbol: "F"}
-		fingerprint, err := view.captureObserved(context.Background(), subject)
-		if err != nil {
-			t.Fatal(err)
-		}
-		dir := view.moduleDir
-		fixture := filepath.Join(dir, "fixture")
-		if err := os.WriteFile(fixture, []byte("before"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := view.AttachObservation(subject, fingerprint, observation); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(fixture, []byte("after"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		err = view.Validate(context.Background())
-		if !errors.Is(err, ErrViewChanged) || errors.Is(err, ErrAnalysisUnavailable) {
-			t.Fatalf("validation with a moved input and a cut re-observation = %v, want the moved input reported as drift, the cut held behind it", err)
-		}
+		withStraddle(t, 4, func(_ Fingerprint, _ Verdict, _ []string, view *Snapshot) {
+			subject := Subject{Package: "example.com/view", Symbol: "F"}
+			fingerprint, err := view.captureObserved(context.Background(), subject)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := view.moduleDir
+			fixture := filepath.Join(dir, "fixture")
+			if err := os.WriteFile(fixture, []byte("before"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			observation, err := riFromTestLog([]byte("open fixture\n"), dir, dir, runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(testObservationBracket(t, dir)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := view.AttachObservation(subject, fingerprint, observation); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(fixture, []byte("after"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			err = view.Validate(context.Background())
+			if !errors.Is(err, ErrViewChanged) || errors.Is(err, ErrAnalysisUnavailable) {
+				t.Fatalf("validation with a moved input and a cut re-observation = %v, want the moved input reported as drift, the cut held behind it", err)
+			}
+		})
 	})
 	t.Run("a validation cut alone reports unavailability, never drift", func(t *testing.T) {
 		// Passes 1 and 2 build the view uncut (discharged); the third
 		// pass — the validation's re-observation — is cut.
-		_, _, _, view, _ := straddle(t, 3)
-		err := view.Validate(context.Background())
-		if !errors.Is(err, ErrAnalysisUnavailable) || !strings.Contains(err.Error(), "example.com/view.F") {
-			t.Fatalf("validation under a cut re-observation = %v, want ErrAnalysisUnavailable naming the subject", err)
-		}
+		withStraddle(t, 3, func(_ Fingerprint, _ Verdict, _ []string, view *Snapshot) {
+			err := view.Validate(context.Background())
+			if !errors.Is(err, ErrAnalysisUnavailable) || !strings.Contains(err.Error(), "example.com/view.F") {
+				t.Fatalf("validation under a cut re-observation = %v, want ErrAnalysisUnavailable naming the subject", err)
+			}
+		})
 	})
 	t.Run("package-process discharge", func(t *testing.T) {
 		dir := writeModuleTree(t, map[string]string{
@@ -7777,17 +7813,20 @@ func TestScanMemoServesTheWholeScanWithoutATypedLoad(t *testing.T) {
 		t.Fatal("cold construction discarded its shared typed inputs")
 	}
 	loads := 0
-	viewTestHooks.typedLoad = func() { loads++ }
-	defer func() { viewTestHooks.typedLoad = nil }()
 	var events []Progress
-	warmEngine, err := newEngine(withDir(dir), withProgress(func(p Progress) { events = append(events, p) }))
-	if err != nil {
-		t.Fatal(err)
-	}
-	warm, err := warmEngine.newView(context.Background(), scanMemoSubjects, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	var warm *Snapshot
+	withViewTestHooks(viewTestHookSet{
+		typedLoad: func() { loads++ },
+	}, func() {
+		warmEngine, err := newEngine(withDir(dir), withProgress(func(p Progress) { events = append(events, p) }))
+		if err != nil {
+			t.Fatal(err)
+		}
+		warm, err = warmEngine.newView(context.Background(), scanMemoSubjects, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
 	if loads != 0 {
 		t.Fatalf("the warm view paid %d typed loads", loads)
 	}
@@ -7844,61 +7883,63 @@ func TestScanMemoMissesOnVouchChangeAndCorruption(t *testing.T) {
 		t.Fatal(err)
 	}
 	loads := 0
-	viewTestHooks.typedLoad = func() { loads++ }
-	defer func() { viewTestHooks.typedLoad = nil }()
-	// The option takes the canonical dotted identity (REQ-vouch-input);
-	// the file below spells the same vouch in its own grammar.
-	vouched, err := newEngine(withDir(dir), withDynamicStateVouches("example.com/scanmemo/dep.Hooks"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := vouched.newView(context.Background(), scanMemoSubjects, dir); err != nil {
-		t.Fatal(err)
-	}
-	if loads == 0 {
-		t.Fatal("a changed vouch set served the unvouched scan")
-	}
-	// An engine with the same vouch set serves the vouched scan, and a
-	// changed vouch set misses — a persisted entry never serves a discharge
-	// under another set.
-	loads = 0
-	sameVouch, err := newEngine(withDir(dir), withDynamicStateVouches("example.com/scanmemo/dep.Hooks"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sameVouch.newView(context.Background(), scanMemoSubjects, dir); err != nil {
-		t.Fatal(err)
-	}
-	if loads != 0 {
-		t.Fatalf("an equal vouch set recomputed (%d loads), want served", loads)
-	}
-	changed, err := newEngine(withDir(dir), withDynamicStateVouches("example.com/scanmemo/dep.Hooks", "example.com/scanmemo/dep.Other"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := changed.newView(context.Background(), scanMemoSubjects, dir); err != nil {
-		t.Fatal(err)
-	}
-	if loads == 0 {
-		t.Fatal("a changed vouch set served the prior scan")
-	}
-	// Corrupt every scan entry: the next view recomputes silently.
-	entries, _ := filepath.Glob(filepath.Join(cache, "gofresh", "scanfacts", "*.json"))
-	if len(entries) == 0 {
-		t.Fatal("no scan entries persisted")
-	}
-	for _, e := range entries {
-		if err := os.WriteFile(e, []byte("{not json"), 0o644); err != nil {
+	withViewTestHooks(viewTestHookSet{
+		typedLoad: func() { loads++ },
+	}, func() {
+		// The option takes the canonical dotted identity (REQ-vouch-input);
+		// the file below spells the same vouch in its own grammar.
+		vouched, err := newEngine(withDir(dir), withDynamicStateVouches("example.com/scanmemo/dep.Hooks"))
+		if err != nil {
 			t.Fatal(err)
 		}
-	}
-	loads = 0
-	if _, err := engine.newView(context.Background(), scanMemoSubjects, dir); err != nil {
-		t.Fatal(err)
-	}
-	if loads == 0 {
-		t.Fatal("a corrupt entry served")
-	}
+		if _, err := vouched.newView(context.Background(), scanMemoSubjects, dir); err != nil {
+			t.Fatal(err)
+		}
+		if loads == 0 {
+			t.Fatal("a changed vouch set served the unvouched scan")
+		}
+		// An engine with the same vouch set serves the vouched scan, and a
+		// changed vouch set misses — a persisted entry never serves a discharge
+		// under another set.
+		loads = 0
+		sameVouch, err := newEngine(withDir(dir), withDynamicStateVouches("example.com/scanmemo/dep.Hooks"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sameVouch.newView(context.Background(), scanMemoSubjects, dir); err != nil {
+			t.Fatal(err)
+		}
+		if loads != 0 {
+			t.Fatalf("an equal vouch set recomputed (%d loads), want served", loads)
+		}
+		changed, err := newEngine(withDir(dir), withDynamicStateVouches("example.com/scanmemo/dep.Hooks", "example.com/scanmemo/dep.Other"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := changed.newView(context.Background(), scanMemoSubjects, dir); err != nil {
+			t.Fatal(err)
+		}
+		if loads == 0 {
+			t.Fatal("a changed vouch set served the prior scan")
+		}
+		// Corrupt every scan entry: the next view recomputes silently.
+		entries, _ := filepath.Glob(filepath.Join(cache, "gofresh", "scanfacts", "*.json"))
+		if len(entries) == 0 {
+			t.Fatal("no scan entries persisted")
+		}
+		for _, e := range entries {
+			if err := os.WriteFile(e, []byte("{not json"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		loads = 0
+		if _, err := engine.newView(context.Background(), scanMemoSubjects, dir); err != nil {
+			t.Fatal(err)
+		}
+		if loads == 0 {
+			t.Fatal("a corrupt entry served")
+		}
+	})
 }
 
 // The key moves under any source edit inside the view package's
@@ -7921,73 +7962,75 @@ func TestScanMemoKeyTracksTheTestBinaryGraph(t *testing.T) {
 		t.Fatal(err)
 	}
 	loads := 0
-	viewTestHooks.typedLoad = func() { loads++ }
-	defer func() { viewTestHooks.typedLoad = nil }()
-	for _, tc := range []struct {
-		path   string
-		inside bool
-	}{
-		{"dep/dep.go", true}, {"view/view.go", true}, {"view/view_test.go", true}, {"other/other.go", false},
-	} {
-		for _, name := range []string{"a", "second"} {
+	withViewTestHooks(viewTestHookSet{
+		typedLoad: func() { loads++ },
+	}, func() {
+		for _, tc := range []struct {
+			path   string
+			inside bool
+		}{
+			{"dep/dep.go", true}, {"view/view.go", true}, {"view/view_test.go", true}, {"other/other.go", false},
+		} {
+			for _, name := range []string{"a", "second"} {
+				full := filepath.Join(dir, filepath.FromSlash(tc.path))
+				original, err := os.ReadFile(full)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// A source edit: a new declaration, never a comment.
+				if err := os.WriteFile(full, append(append([]byte(nil), original...), []byte("\nvar _ = \""+name+"\"\n")...), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				loads = 0
+				_, err = engine.newView(context.Background(), scanMemoSubjects, dir)
+				if restoreErr := os.WriteFile(full, original, 0o644); restoreErr != nil {
+					t.Fatal(restoreErr)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if tc.inside && loads == 0 {
+					t.Fatalf("an edit to %s (inside the graph) served the stale scan", tc.path)
+				}
+				if !tc.inside && loads != 0 {
+					t.Fatalf("an edit to %s (outside the graph) missed the scan memo", tc.path)
+				}
+			}
+			// Core equivalence ignores ordinary comments, but position-bearing
+			// scan payloads have an additional raw-source dependency.
+			if !tc.inside || strings.HasSuffix(tc.path, "_test.go") {
+				continue
+			}
 			full := filepath.Join(dir, filepath.FromSlash(tc.path))
 			original, err := os.ReadFile(full)
 			if err != nil {
 				t.Fatal(err)
 			}
-			// A source edit: a new declaration, never a comment.
-			if err := os.WriteFile(full, append(append([]byte(nil), original...), []byte("\nvar _ = \""+name+"\"\n")...), 0o644); err != nil {
+			if err := os.WriteFile(full, append(append([]byte(nil), original...), []byte("\n// a comment\n")...), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			loads = 0
-			_, err = engine.newView(context.Background(), scanMemoSubjects, dir)
+			changedView, viewErr := engine.newView(context.Background(), scanMemoSubjects, dir)
 			if restoreErr := os.WriteFile(full, original, 0o644); restoreErr != nil {
 				t.Fatal(restoreErr)
 			}
+			if viewErr != nil {
+				t.Fatal(viewErr)
+			}
+			if loads == 0 {
+				t.Fatalf("a comment-only edit to %s served a spelling-sensitive scan", tc.path)
+			}
+			restoredView, err := engine.newView(context.Background(), scanMemoSubjects, dir)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if tc.inside && loads == 0 {
-				t.Fatalf("an edit to %s (inside the graph) served the stale scan", tc.path)
-			}
-			if !tc.inside && loads != 0 {
-				t.Fatalf("an edit to %s (outside the graph) missed the scan memo", tc.path)
-			}
-		}
-		// Core equivalence ignores ordinary comments, but position-bearing
-		// scan payloads have an additional raw-source dependency.
-		if !tc.inside || strings.HasSuffix(tc.path, "_test.go") {
-			continue
-		}
-		full := filepath.Join(dir, filepath.FromSlash(tc.path))
-		original, err := os.ReadFile(full)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, append(append([]byte(nil), original...), []byte("\n// a comment\n")...), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		loads = 0
-		changedView, viewErr := engine.newView(context.Background(), scanMemoSubjects, dir)
-		if restoreErr := os.WriteFile(full, original, 0o644); restoreErr != nil {
-			t.Fatal(restoreErr)
-		}
-		if viewErr != nil {
-			t.Fatal(viewErr)
-		}
-		if loads == 0 {
-			t.Fatalf("a comment-only edit to %s served a spelling-sensitive scan", tc.path)
-		}
-		restoredView, err := engine.newView(context.Background(), scanMemoSubjects, dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, subject := range scanMemoSubjects {
-			if changedView.facts.closure(subject).Hash != restoredView.facts.closure(subject).Hash {
-				t.Fatal("comment edit moved public core equivalence")
+			for _, subject := range scanMemoSubjects {
+				if changedView.facts.closure(subject).Hash != restoredView.facts.closure(subject).Hash {
+					t.Fatal("comment edit moved public core equivalence")
+				}
 			}
 		}
-	}
+	})
 }
 
 // The shared-dynamic-state judgment is per package graph: a view batching
@@ -8020,10 +8063,13 @@ func TestScanMemoComposesEachPackageOverItsOwnGraph(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	newLeakView(t, dir, leakSubjects[:1])
 	loads := 0
-	viewTestHooks.typedLoad = func() { loads++ }
-	defer func() { viewTestHooks.typedLoad = nil }()
 	var events []Progress
-	mixed := newLeakView(t, dir, leakSubjects, withProgress(func(p Progress) { events = append(events, p) }))
+	var mixed *Snapshot
+	withViewTestHooks(viewTestHookSet{
+		typedLoad: func() { loads++ },
+	}, func() {
+		mixed = newLeakView(t, dir, leakSubjects, withProgress(func(p Progress) { events = append(events, p) }))
+	})
 	// One typed load: b derives in the first pass beside the served a;
 	// the agreement pass then serves both from the store.
 	if loads != 1 {
@@ -8091,11 +8137,13 @@ func TestScanMemoRefusesAnEntryOfAnotherShape(t *testing.T) {
 		}
 	}
 	loads := 0
-	viewTestHooks.typedLoad = func() { loads++ }
-	defer func() { viewTestHooks.typedLoad = nil }()
-	if _, err := engine.newView(context.Background(), scanMemoSubjects, dir); err != nil {
-		t.Fatal(err)
-	}
+	withViewTestHooks(viewTestHookSet{
+		typedLoad: func() { loads++ },
+	}, func() {
+		if _, err := engine.newView(context.Background(), scanMemoSubjects, dir); err != nil {
+			t.Fatal(err)
+		}
+	})
 	if loads == 0 {
 		t.Fatal("an entry of another version served")
 	}
@@ -8129,9 +8177,12 @@ func TestScanMemoServesTheDischargedScan(t *testing.T) {
 		t.Fatalf("the attestation did not discharge F's culprit on record: %s", cold[subjects[0]])
 	}
 	loads := 0
-	viewTestHooks.typedLoad = func() { loads++ }
-	defer func() { viewTestHooks.typedLoad = nil }()
-	warm := scanOutputs(t, newLeakView(t, dir, subjects, withSingleSubjectExecution()), subjects)
+	var warm map[Subject]string
+	withViewTestHooks(viewTestHookSet{
+		typedLoad: func() { loads++ },
+	}, func() {
+		warm = scanOutputs(t, newLeakView(t, dir, subjects, withSingleSubjectExecution()), subjects)
+	})
 	if loads != 0 {
 		t.Fatalf("the warm view paid %d typed loads", loads)
 	}
@@ -8156,21 +8207,23 @@ func TestObservedCaptureReusesConstructionSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	var seen *gotool.EnvSnapshot
-	viewTestHooks.snapshot = func(s *gotool.EnvSnapshot) { seen = s }
-	t.Cleanup(func() { viewTestHooks.snapshot = nil })
-	view, err := engine.newView(context.Background(), []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if view.facts.snapshot == nil {
-		t.Fatal("view retained no construction snapshot")
-	}
-	if _, err := view.captureObserved(context.Background(), subject); err != nil {
-		t.Fatal(err)
-	}
-	if seen != view.facts.snapshot {
-		t.Fatalf("bracket snapshot = %p, want the construction snapshot %p", seen, view.facts.snapshot)
-	}
+	withViewTestHooks(viewTestHookSet{
+		snapshot: func(s *gotool.EnvSnapshot) { seen = s },
+	}, func() {
+		view, err := engine.newView(context.Background(), []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if view.facts.snapshot == nil {
+			t.Fatal("view retained no construction snapshot")
+		}
+		if _, err := view.captureObserved(context.Background(), subject); err != nil {
+			t.Fatal(err)
+		}
+		if seen != view.facts.snapshot {
+			t.Fatalf("bracket snapshot = %p, want the construction snapshot %p", seen, view.facts.snapshot)
+		}
+	})
 }
 
 // TestObservedCaptureRefusesMidWindowOverlayBeforeAnyLoad pins the

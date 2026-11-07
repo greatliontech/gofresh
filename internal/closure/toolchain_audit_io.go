@@ -6704,6 +6704,60 @@ func discoverOSInactiveState(files []*ast.File, osRuntimePullMap map[string]stri
 		return out
 	}
 
+	type rule3CallSite struct {
+		caller *ast.FuncDecl
+		call   *ast.CallExpr
+	}
+	rule3CandFuncs := map[string]*ast.FuncDecl{}
+	for fnName, fn := range topFuncs {
+		if ast.IsExported(fnName) || pkgDeclCounts[fnName] != 1 || osAnyLinknameLocals[fnName] || fn.Body == nil {
+			continue
+		}
+		shadowedByImport := false
+		for _, f := range files {
+			if fileImportNames[f][fnName] {
+				shadowedByImport = true
+				break
+			}
+		}
+		if !shadowedByImport {
+			rule3CandFuncs[fnName] = fn
+		}
+	}
+	rule3CallSites := map[string][]rule3CallSite{}
+	rule3AllowedIdents := map[string]map[*ast.Ident]bool{}
+	for fnName, fn := range rule3CandFuncs {
+		rule3AllowedIdents[fnName] = map[*ast.Ident]bool{fn.Name: true}
+	}
+	if len(rule3CandFuncs) > 0 {
+		for _, f := range files {
+			for _, decl := range f.Decls {
+				caller, okF := decl.(*ast.FuncDecl)
+				if !okF || caller.Body == nil {
+					continue
+				}
+				ast.Inspect(caller.Body, func(n ast.Node) bool {
+					call, okC := n.(*ast.CallExpr)
+					if !okC {
+						return true
+					}
+					cID, okID := unwrapParens(call.Fun).(*ast.Ident)
+					if !okID || rule3CandFuncs[cID.Name] == nil {
+						return true
+					}
+					rule3CallSites[cID.Name] = append(rule3CallSites[cID.Name], rule3CallSite{caller: caller, call: call})
+					rule3AllowedIdents[cID.Name][cID] = true
+					return true
+				})
+			}
+		}
+		leakedRule3 := filterNonSelPropIdentsInSet(files, rule3AllowedIdents)
+		for fnName := range leakedRule3 {
+			delete(rule3CandFuncs, fnName)
+			delete(rule3CallSites, fnName)
+		}
+	}
+
 	// Greatest fixpoint over activeTables: keep only tables whose mutator call sites are all gated/unreachable.
 	var finalNilAcc, finalFalsePreds map[string]depPair
 	var finalTableGates map[string]map[string]bool
@@ -7040,63 +7094,28 @@ func discoverOSInactiveState(files []*ast.File, osRuntimePullMap map[string]stri
 		// Seed/iterate Rule 3: unexported non-linknamed top-level funcs called exclusively from deadIfDeps or unreachableFuncs.
 		for {
 			uChanged := false
-			for fnName, fn := range topFuncs {
-				if _, already := unreachableFuncs[fnName]; already || ast.IsExported(fnName) || pkgDeclCounts[fnName] != 1 || osAnyLinknameLocals[fnName] || fn.Body == nil {
+			for fnName := range rule3CandFuncs {
+				if _, already := unreachableFuncs[fnName]; already {
 					continue
 				}
-				allowedCallFunIdents := map[*ast.Ident]bool{fn.Name: true}
 				agg := depPair{gates: map[string]bool{}, tabs: map[string]bool{}}
 				allCovered := true
-				for _, f := range files {
-					if fileImportNames[f][fnName] {
-						allCovered = false
-						break
-					}
-					for _, decl := range f.Decls {
-						caller, okF := decl.(*ast.FuncDecl)
-						if !okF || caller.Body == nil {
+				for _, site := range rule3CallSites[fnName] {
+					caller := site.caller
+					if caller.Recv == nil {
+						if callerUnreach, isCallerUnreach := unreachableFuncs[caller.Name.Name]; isCallerUnreach && !nodeContainsCall(seedRule1Head[caller.Name.Name], site.call) {
+							mergeDep(&agg, callerUnreach)
 							continue
 						}
-						callerUnreach, isCallerUnreach := unreachableFuncs[caller.Name.Name]
-						callerHead := seedRule1Head[caller.Name.Name]
-						if caller.Recv != nil {
-							isCallerUnreach = false
-							callerHead = nil
-						}
-						ast.Inspect(caller.Body, func(n ast.Node) bool {
-							if !allCovered || n == nil {
-								return false
-							}
-							call, okC := n.(*ast.CallExpr)
-							if !okC {
-								return true
-							}
-							cID, okID := unwrapParens(call.Fun).(*ast.Ident)
-							if !okID || cID.Name != fnName {
-								return true
-							}
-							if isCallerUnreach && !nodeContainsCall(callerHead, call) {
-								allowedCallFunIdents[cID] = true
-								mergeDep(&agg, callerUnreach)
-								return true
-							}
-							if dDead, okD := nodeDeadDep(caller, call); okD {
-								allowedCallFunIdents[cID] = true
-								mergeDep(&agg, dDead)
-								return true
-							}
-							allCovered = false
-							return false
-						})
-						if !allCovered {
-							break
-						}
 					}
-					if !allCovered {
-						break
+					if dDead, okD := nodeDeadDep(caller, site.call); okD {
+						mergeDep(&agg, dDead)
+						continue
 					}
+					allCovered = false
+					break
 				}
-				if allCovered && allNonSelPropIdentsIn(files, fnName, allowedCallFunIdents) {
+				if allCovered {
 					unreachableFuncs[fnName] = agg
 					uChanged = true
 				}

@@ -175,9 +175,7 @@ func (v *Snapshot) checkRecords(ctx context.Context, records []recordCheck, defe
 			positives[i] = admittedObservation(record.Recorded, record.Subject, cl)
 		}
 	}
-	if viewTestHooks.runtimeWindow != nil {
-		viewTestHooks.runtimeWindow()
-	}
+	emitRuntimeWindowViewHook()
 	before, err := v.observeRecordInputs(ctx, records, results)
 	if err != nil {
 		return nil, err

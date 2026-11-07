@@ -111,12 +111,6 @@ func CaptureProducerFrame(ctx context.Context, treeRoot, pkgDir string, opts Fra
 	return ProducerFrame{Root: root, PkgDir: resolvedPkgDir, PkgRel: filepath.ToSlash(rel), bracket: &bracket, span: new(outcome.Span)}
 }
 
-// producerTestHooks lets tests land a cancellation between the facade's
-// entry check and the roots resolution.
-var producerTestHooks struct {
-	beforeRoots func()
-}
-
 // ProducerIngest carries one process's ingest inputs: the caller owns
 // the identity, the process env verbatim (a rebuilt env loses fidelity
 // the classification depends on - PWD included), its own
@@ -320,7 +314,13 @@ func readProducerLog(ctx context.Context, testlogPath string) ([]byte, string, e
 	if testlogPath == "" {
 		return nil, "testlog capture unavailable: no capture file was attached to the process", nil
 	}
-	file, err := os.Open(testlogPath)
+	openPath := testlogPath
+	if filepath.IsAbs(testlogPath) {
+		if resolved, err := filepath.EvalSymlinks(testlogPath); err == nil {
+			openPath = resolved
+		}
+	}
+	file, err := os.Open(openPath)
 	if file != nil {
 		defer file.Close()
 	}
@@ -390,9 +390,7 @@ func (f ProducerFrame) captureBytes(ctx context.Context, log []byte, in Producer
 	if reason := producerPWDProblem(f.PkgDir, normalized); reason != "" {
 		return incomplete(reason)
 	}
-	if producerTestHooks.beforeRoots != nil {
-		producerTestHooks.beforeRoots()
-	}
+	fireProducerBeforeRoots()
 	roots, err := resolveRoots(ctx, in.Roots, in.Runner, f.Root, f.PkgDir, normalized)
 	if err != nil {
 		if ctx.Err() != nil {

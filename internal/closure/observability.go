@@ -135,8 +135,8 @@ func (h *Hasher) loadCachedFrom(ctx context.Context, pkgPath string, bp *batchPr
 		return nil, err
 	}
 	h.emitProgress("load", pkgPath)
-	if analysisTestHooks.loadProgramOnMiss != nil {
-		if p, ok, err := analysisTestHooks.loadProgramOnMiss(ctx, h, pkgPath); ok {
+	if h.loadProgramOnMiss != nil {
+		if p, ok, err := h.loadProgramOnMiss(ctx, h, pkgPath); ok {
 			if err != nil {
 				if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 					h.progErrs[pkgPath] = err

@@ -465,19 +465,32 @@ what it was handed. An address capture reaches the variable's own cell or a
 chain into it; taking the address of a composite literal captures the fresh
 object alone, its element references remaining escapes, while a capture
 nested inside the literal marks through its own shape. A lexically bracketed
-save-and-restore or zero-reset write to a non-alias-handing, non-mutable-reach
-package variable (or field thereof, without mixing whole-struct and field
-writes on the same variable) whose address is never taken, inside a sequential
-function (no `go` statement, no `.Parallel()` call, no escaping closure writing
-the target, no unexempted nested-closure write, and no control-flow exit between
-the first write and the callable-scope `defer`/`Cleanup` or inline assignment
-that restores the single unmutated saved value or uninitialized zero value), or
-a non-escaping `Load` or top-level `Store` call on an uninitialized unexported
-`sync/atomic.Pointer[T]` variable whose address is never taken and whose every
-`Store` call is serialized under a single unexported package-level `sync.Mutex`
-with `Lock()`, `defer Unlock()`, and `defer Store(nil)` executed in that order
-before any non-nil `Store` or control-flow exit, restores the variable's state
-on exit and marks neither mutation nor environment registration.
+save-and-restore or zero-reset write to a same-package non-alias-handing,
+non-mutable-reach package variable (or field thereof, without mixing
+whole-struct and field writes on the same variable) whose address is never
+taken directly or via an implicit pointer-receiver method selection, inside a
+sequential plain package function (not a method, no `go` statement, no callable
+`.Parallel` reference or concrete/composite/parameter-supplied `.Parallel`
+carrier, no escaping closure writing the target, no unexempted nested-closure
+write, neither escaping as a function value nor reachable in the program graph
+from init flow, a method, a `go` statement, or a `.Parallel`-bearing scope, and
+no control-flow exit either between the first write and the callable-scope
+`defer` / `testing` `Cleanup` / inline restore or inside the restore closure
+prior to the restore assignment) that either restores the single unmutated saved
+value or resets an unexported uninitialized otherwise-unwritten package variable
+to its zero value — with `testing` `Cleanup` restores restricted to unmutated
+concrete `*testing.T`, `*testing.B`, or `*testing.F` handles in `*_test.go`
+whose provenance flows solely from uncalled top-level test, benchmark, or fuzz
+runner entries through synchronous sub-runners and sequential unexported or
+local helpers without mixing `defer`/inline and `Cleanup` restores along a call
+path — or, under an audited toolchain, a non-escaping `Load` or top-level
+`Store` call on an uninitialized unexported same-package
+`sync/atomic.Pointer[T]` variable whose address is never taken and whose `Store`
+calls, if any, reside in such sequential plain package functions and are
+serialized under a single unexported package-level `sync.Mutex` with `Lock()`,
+`defer Unlock()`, and `defer Store(nil)` executed in that order before any
+non-nil `Store` or control-flow exit, restores the variable's state on exit and
+marks neither mutation nor environment registration.
 
 **REQ-closure-shared-dynamic-state-receiver-proof** (invariant): A direct method CALL on a statically-typed non-interface
 carrier MUST be judged by the method's own receiver-effect proof instead of

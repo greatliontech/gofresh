@@ -425,15 +425,11 @@ func splitLines(s string) []string {
 func TestCommentOnlyEditKeepsTheMaximalClosure(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := fileMemoModule(t)
-	var derived []string
-	analysisTestHooks.canonicalParse = func(d string) { derived = append(derived, filepath.Base(d)) }
-	defer func() { analysisTestHooks.canonicalParse = nil }()
-	before, _, _ := foldOnce(t, dir, true)
+	before, _, _, derived := foldOnceWithCanonical(t, dir, true)
 	if len(derived) == 0 {
 		t.Fatal("the cold pass derived no canonical digest")
 	}
-	derived = nil
-	if _, _, _ = foldOnce(t, dir, true); len(derived) != 0 {
+	if _, _, _, derived = foldOnceWithCanonical(t, dir, true); len(derived) != 0 {
 		t.Fatalf("a byte-equal warm pass derived %d canonical digest(s), want the memo to serve", len(derived))
 	}
 	helper := filepath.Join(dir, "helper.go")
@@ -442,8 +438,7 @@ func TestCommentOnlyEditKeepsTheMaximalClosure(t *testing.T) {
 	if err := os.WriteFile(helper, []byte("package fm\n\n\n// helper is documented now.\nfunc   helper() int { /* one */ return 1 } // trailing\n\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	derived = nil
-	after, _, _ := foldOnce(t, dir, true)
+	after, _, _, derived := foldOnceWithCanonical(t, dir, true)
 	if len(derived) == 0 {
 		t.Fatal("a byte-moved member derived no canonical digest")
 	}
@@ -1500,41 +1495,47 @@ func TestObservabilityRefusalAttributesTheUnauditedSelection(t *testing.T) {
 	}
 	isolateProofCache(t)
 	stringsMemoKey := verifiedPackageMemoKey("strings", stringsDigest)
-	verifiedPackageMemo.Store(stringsMemoKey, verifiedPackageVerdict{OK: false})
-	t.Cleanup(func() { verifiedPackageMemo.Delete(stringsMemoKey) })
 
 	axis := " (judged under an unaudited toolchain selection: the audited surface of " + runtime.Version() + " moved in 1 keys: strings)"
-	var cold Observability
-	for pass, want := range []int{1, 0} {
-		h, err := newAt(dir, "-tags=dup")
-		if err != nil {
-			t.Fatal(err)
-		}
-		h.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "t", BuildConfig: "badstd"})
-		loads := 0
-		h.OnProgress(func(phase, _ string) {
-			if phase == "load" || phase == "prove" {
-				loads++
+	withClosureTestHooks(analysisTestHookSet{
+		packageVerdictOverride: func(memoKey string) (verifiedPackageVerdict, bool) {
+			if memoKey == stringsMemoKey {
+				return verifiedPackageVerdict{OK: false}, true
 			}
-		})
-		proofs, err := h.ComputeObservabilityBatch([]Subject{subject})
-		if err != nil {
-			t.Fatal(err)
+			return verifiedPackageVerdict{}, false
+		},
+	}, func() {
+		var cold Observability
+		for pass, want := range []int{1, 0} {
+			h, err := newAt(dir, "-tags=dup")
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "t", BuildConfig: "badstd"})
+			loads := 0
+			h.OnProgress(func(phase, _ string) {
+				if phase == "load" || phase == "prove" {
+					loads++
+				}
+			})
+			proofs, err := h.ComputeObservabilityBatch([]Subject{subject})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (loads == 0) != (want == 0) {
+				t.Fatalf("pass %d emitted %d load/prove events, want %s", pass, loads, map[int]string{1: "a cold derivation", 0: "a memo serve"}[want])
+			}
+			proof := proofs[subject]
+			if proof.Observable || !strings.HasSuffix(proof.Reason, axis) || strings.Count(proof.Reason, "judged under") != 1 {
+				t.Fatalf("pass %d under unaudited selection: %+v, want the refusal with the axis appended once", pass, proof)
+			}
+			if pass == 0 {
+				cold = proof
+			} else if proof != cold {
+				t.Fatalf("warm proof %+v differs from cold %+v", proof, cold)
+			}
 		}
-		if (loads == 0) != (want == 0) {
-			t.Fatalf("pass %d emitted %d load/prove events, want %s", pass, loads, map[int]string{1: "a cold derivation", 0: "a memo serve"}[want])
-		}
-		proof := proofs[subject]
-		if proof.Observable || !strings.HasSuffix(proof.Reason, axis) || strings.Count(proof.Reason, "judged under") != 1 {
-			t.Fatalf("pass %d under unaudited selection: %+v, want the refusal with the axis appended once", pass, proof)
-		}
-		if pass == 0 {
-			cold = proof
-		} else if proof != cold {
-			t.Fatalf("warm proof %+v differs from cold %+v", proof, cold)
-		}
-	}
-	verifiedPackageMemo.Delete(stringsMemoKey)
+	})
 	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)

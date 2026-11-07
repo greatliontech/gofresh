@@ -516,6 +516,177 @@ func CarrierLinkGraph(allFacts map[string][]Fact, malformed func(Fact)) map[stri
 	return linkAdj
 }
 
+// BlockedExportedSeams resolves which exported mutating seam functions across
+// allFacts are reachable from non-sequential function uses (go statements,
+// .Parallel-bearing scopes including cross-package .Parallel helpers,
+// init/method/var-initializer calls, or escaped function values) across
+// call edges, returning varKey -> blocked exported seam functions.
+func BlockedExportedSeams(allFacts map[string][]Fact, malformed func(Fact)) map[string]map[FuncKey]bool {
+	blocked := map[string]map[FuncKey]bool{}
+	recordBlocked := func(key string, fn FuncKey) {
+		if blocked[key] == nil {
+			blocked[key] = map[FuncKey]bool{}
+		}
+		blocked[key][fn] = true
+	}
+	hasMalformed := false
+	validExportedSeams := 0
+	for _, facts := range allFacts {
+		for _, fact := range facts {
+			for _, es := range fact.ExportedSeams {
+				if !es.Valid() {
+					hasMalformed = true
+					if malformed != nil {
+						malformed(fact)
+					}
+					continue
+				}
+				validExportedSeams++
+			}
+			for _, fn := range fact.NonSeqFuncUses {
+				if !fn.Valid() {
+					hasMalformed = true
+					if malformed != nil {
+						malformed(fact)
+					}
+				}
+			}
+			for _, edge := range fact.SeqFuncEdges {
+				if !edge.Valid() {
+					hasMalformed = true
+					if malformed != nil {
+						malformed(fact)
+					}
+				}
+			}
+			for _, fn := range fact.ParallelFuncs {
+				if !fn.Valid() {
+					hasMalformed = true
+					if malformed != nil {
+						malformed(fact)
+					}
+				}
+			}
+			for _, edge := range fact.ParallelEdges {
+				if !edge.Valid() {
+					hasMalformed = true
+					if malformed != nil {
+						malformed(fact)
+					}
+				}
+			}
+		}
+	}
+	if hasMalformed {
+		for _, facts := range allFacts {
+			for _, fact := range facts {
+				for _, es := range fact.ExportedSeams {
+					if validFactKey(es.Key) {
+						recordBlocked(es.Key, FuncKey{})
+					}
+				}
+			}
+		}
+		return blocked
+	}
+	if validExportedSeams == 0 {
+		return blocked
+	}
+
+	parallelReached := map[FuncKey]bool{}
+	nonSeqReached := map[FuncKey]bool{}
+	seqAdj := map[FuncKey]map[FuncKey]bool{}
+	revSeqAdj := map[FuncKey]map[FuncKey]bool{}
+	revParAdj := map[FuncKey]map[FuncKey]bool{}
+	addRevPar := func(caller, callee FuncKey) {
+		if revParAdj[callee] == nil {
+			revParAdj[callee] = map[FuncKey]bool{}
+		}
+		revParAdj[callee][caller] = true
+	}
+	for _, facts := range allFacts {
+		for _, fact := range facts {
+			for _, fn := range fact.ParallelFuncs {
+				if fn.Valid() {
+					parallelReached[fn] = true
+				}
+			}
+			for _, fn := range fact.NonSeqFuncUses {
+				if fn.Valid() {
+					nonSeqReached[fn] = true
+				}
+			}
+			for _, edge := range fact.SeqFuncEdges {
+				if !edge.Valid() {
+					continue
+				}
+				if seqAdj[edge.Func] == nil {
+					seqAdj[edge.Func] = map[FuncKey]bool{}
+				}
+				seqAdj[edge.Func][edge.Callee] = true
+				if revSeqAdj[edge.Callee] == nil {
+					revSeqAdj[edge.Callee] = map[FuncKey]bool{}
+				}
+				revSeqAdj[edge.Callee][edge.Func] = true
+				addRevPar(edge.Func, edge.Callee)
+			}
+			for _, edge := range fact.ParallelEdges {
+				if !edge.Valid() {
+					continue
+				}
+				addRevPar(edge.Func, edge.Callee)
+			}
+		}
+	}
+	if len(parallelReached) > 0 && len(revParAdj) > 0 {
+		queue := make([]FuncKey, 0, len(parallelReached))
+		for fn := range parallelReached {
+			queue = append(queue, fn)
+		}
+		for len(queue) > 0 {
+			cur := queue[len(queue)-1]
+			queue = queue[:len(queue)-1]
+			for caller := range revParAdj[cur] {
+				if !parallelReached[caller] {
+					parallelReached[caller] = true
+					queue = append(queue, caller)
+				}
+			}
+		}
+	}
+	for fn := range parallelReached {
+		if fn.Pkg != "*" && !strings.Contains(fn.Name, "#") {
+			nonSeqReached[fn] = true
+		}
+	}
+	if len(nonSeqReached) > 0 && len(seqAdj) > 0 {
+		queue := make([]FuncKey, 0, len(nonSeqReached))
+		for fn := range nonSeqReached {
+			queue = append(queue, fn)
+		}
+		for len(queue) > 0 {
+			cur := queue[len(queue)-1]
+			queue = queue[:len(queue)-1]
+			for callee := range seqAdj[cur] {
+				if !nonSeqReached[callee] {
+					nonSeqReached[callee] = true
+					queue = append(queue, callee)
+				}
+			}
+		}
+	}
+	for _, facts := range allFacts {
+		for _, fact := range facts {
+			for _, es := range fact.ExportedSeams {
+				if es.Valid() && (nonSeqReached[es.Func] || (es.RunnerOnly && len(revSeqAdj[es.Func]) > 0)) {
+					recordBlocked(es.Key, es.Func)
+				}
+			}
+		}
+	}
+	return blocked
+}
+
 // Compose runs the shared-dynamic-state judgment for one view package over the
 // facts of that package's own test-binary graph (REQ-closure-shared-dynamic-state,
 // REQ-closure-scan-memo).
@@ -768,6 +939,16 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 					mutated[key] = true
 					attributeSite(key, fn)
 				}
+			}
+		}
+	}
+	for key, fns := range BlockedExportedSeams(allFacts, markDeclaresMutated) {
+		mutated[key] = true
+		for fn := range fns {
+			if !fn.Valid() || initReachFn[fn] || strings.Contains(fn.Name, ".") {
+				unattributedMark[key] = true
+			} else {
+				attributeSite(key, fn)
 			}
 		}
 	}

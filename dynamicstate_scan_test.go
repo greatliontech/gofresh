@@ -16,7 +16,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 )
 
@@ -84,7 +83,7 @@ func writePinnedDepModule(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	pinnedTemplateDirs.Store(dir, true)
+	markPinnedTemplateDir(dir)
 	return dir
 }
 
@@ -131,8 +130,6 @@ func runScanVouched(t *testing.T, scope, dir string, vouches map[string]bool, pk
 	}
 	// These scans pin the derivation over a poisoned in-process fact
 	// cache; the scan memo would serve the first scan's outputs whole.
-	viewTestHooks.scanMemoOff = true
-	t.Cleanup(func() { viewTestHooks.scanMemoOff = false })
 	hasher, err := closureNewAtEnv(context.Background(), dir, os.Environ())
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +139,7 @@ func runScanVouched(t *testing.T, scope, dir string, vouches map[string]bool, pk
 		analysis.Vouches = append(analysis.Vouches, v)
 	}
 	analysis = hasher.SetAnalysisScope(analysis)
-	scan, _, _, err := scanViewSubjects(context.Background(), hasher, analysis, nil, 0, pkgPaths...)
+	scan, _, _, err := scanViewSubjectsWithMemo(context.Background(), hasher, analysis, nil, 0, false, pkgPaths...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +163,7 @@ func TestVouchDischargesPinnedCulprit(t *testing.T) {
 	const pkg = "example.com/pinned"
 	const ghost = "golang.org/x/sync/errgroup.Ghost"
 	subject := Subject{Package: pkg, Symbol: "Run"}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	const scope = DynamicStateStrategy + "|vouch-toolchain|cfg"
 
 	clean := runScan(t, scope, dir, pkg)
@@ -174,9 +171,8 @@ func TestVouchDischargesPinnedCulprit(t *testing.T) {
 		t.Fatalf("baseline already downgraded: %q", reason)
 	}
 	var hit bool
-	processFactCache.Range(func(k, v any) bool {
-		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
-			fact := v.(dynamicStateFact)
+	processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+		if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 			fact.Declares = append(fact.Declares, ghost)
 			fact.Mutates = append(fact.Mutates, ghost)
 			processFactCache.Store(k, fact)
@@ -234,9 +230,8 @@ func TestVouchDischargesPinnedCulprit(t *testing.T) {
 	const shade = "golang.org/x/sync/errgroup.Shade"
 	const wraith = "golang.org/x/sync/errgroup.Wraith"
 	const spectre = "golang.org/x/sync/errgroup.Spectre"
-	processFactCache.Range(func(k, v any) bool {
-		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
-			fact := v.(dynamicStateFact)
+	processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+		if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 			fact.Declares = append(fact.Declares, shade, wraith, spectre)
 			fact.Escapes = append(fact.Escapes, shade, spectre)
 			fact.EnvCarrying = append(fact.EnvCarrying, wraith, spectre)
@@ -289,9 +284,8 @@ func TestVouchDischargesPinnedCulprit(t *testing.T) {
 	// vouched key declared AFTER the opener included.
 	const alpha = "golang.org/x/sync/errgroup.Alpha"
 	const zeta = "golang.org/x/sync/errgroup.Zeta"
-	processFactCache.Range(func(k, v any) bool {
-		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
-			fact := v.(dynamicStateFact)
+	processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+		if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 			fact.Declares = append(fact.Declares, alpha, zeta)
 			fact.Mutates = append(fact.Mutates, alpha, zeta)
 			processFactCache.Store(k, fact)
@@ -348,7 +342,7 @@ func TestAtomicPointerDataOnlyPointeeNeverACulprit(t *testing.T) {
 		"go.mod":     "module example.com/acct\n\ngo 1.26\n",
 		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype registry struct {\n\tlive map[string]bool\n}\n\nvar acct atomic.Pointer[registry]\n\nfunc Track(k string) {\n\tif r := acct.Load(); r != nil {\n\t\tr.live[k] = true\n\t}\n}\n\nfunc Enable() func() {\n\tacct.Store(&registry{live: map[string]bool{}})\n\treturn func() { acct.Store(nil) }\n}\n",
 	})
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	scan := runScan(t, "", dir, "example.com/acct/reg")
 	subject := Subject{Package: "example.com/acct/reg", Symbol: "Track"}
 	if reason := scan.downgradeReason[subject]; reason != "" {
@@ -366,7 +360,7 @@ func TestAtomicPointerDynamicPointeeKeepsEveryMark(t *testing.T) {
 		"go.mod":     "module example.com/hooks\n\ngo 1.26\n",
 		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype hookSet struct {\n\tfire func()\n}\n\nvar hooks atomic.Pointer[hookSet]\n\nfunc Fire() {\n\tif h := hooks.Load(); h != nil {\n\t\th.fire()\n\t}\n}\n\nfunc Arm(f func()) {\n\thooks.Store(&hookSet{fire: f})\n}\n",
 	})
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	scan := runScan(t, "", dir, "example.com/hooks/reg")
 	subject := Subject{Package: "example.com/hooks/reg", Symbol: "Fire"}
 	if reason := scan.downgradeReason[subject]; !strings.Contains(reason, "example.com/hooks/reg.hooks is mutated") {
@@ -388,7 +382,7 @@ func TestAtomicTransparencyThroughAlias(t *testing.T) {
 		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype registry struct {\n\tlive map[string]bool\n}\n\ntype P = atomic.Pointer[registry]\n\nvar acct P\n\nfunc Track(k string) {\n\tif r := acct.Load(); r != nil {\n\t\tr.live[k] = true\n\t}\n}\n\nfunc Enable() {\n\tacct.Store(&registry{live: map[string]bool{}})\n}\n",
 		"dyn/dyn.go": "package dyn\n\nimport \"sync/atomic\"\n\ntype hookSet struct {\n\tfire func()\n}\n\ntype Q = atomic.Pointer[hookSet]\n\nvar hooks Q\n\nfunc Fire() {\n\tif h := hooks.Load(); h != nil {\n\t\th.fire()\n\t}\n}\n\nfunc Arm(f func()) {\n\thooks.Store(&hookSet{fire: f})\n}\n",
 	})
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	scan := runScan(t, "", dir, "example.com/aliased/reg", "example.com/aliased/dyn")
 	subject := Subject{Package: "example.com/aliased/reg", Symbol: "Track"}
 	if reason := scan.downgradeReason[subject]; reason != "" {
@@ -411,7 +405,7 @@ func TestAtomicTransparencyStopsAtDefinedWrappers(t *testing.T) {
 		"go.mod":     "module example.com/wrapped\n\ngo 1.26\n",
 		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype registry struct {\n\tlive map[string]bool\n}\n\ntype P atomic.Pointer[registry]\n\nvar acct P\n\nfunc Cell() *P {\n\treturn &acct\n}\n",
 	})
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	scan := runScan(t, "", dir, "example.com/wrapped/reg")
 	subject := Subject{Package: "example.com/wrapped/reg", Symbol: "Cell"}
 	if reason := scan.downgradeReason[subject]; !strings.Contains(reason, "example.com/wrapped/reg.acct") {
@@ -429,7 +423,7 @@ func TestAtomicPointerParameterOpennessFollowsPointee(t *testing.T) {
 		"go.mod":     "module example.com/params\n\ngo 1.26\n",
 		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype registry struct {\n\tlive map[string]bool\n}\n\ntype hooks struct {\n\tfire func()\n}\n\nfunc Data(p *atomic.Pointer[registry]) int {\n\tif p.Load() != nil {\n\t\treturn 1\n\t}\n\treturn 0\n}\n\nfunc Bounded[T interface{ atomic.Pointer[registry] }](p *T) int {\n\tif p != nil {\n\t\treturn 1\n\t}\n\treturn 0\n}\n\nfunc Dyn(p *atomic.Pointer[hooks]) int {\n\tif p.Load() != nil {\n\t\treturn 1\n\t}\n\treturn 0\n}\n",
 	})
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	scan := runScan(t, "", dir, "example.com/params/reg")
 	if term := scan.openWorld[Subject{Package: "example.com/params/reg", Symbol: "Data"}]; term != "" {
 		t.Fatalf("a data-only atomic.Pointer parameter opened the subject through %q", term)
@@ -452,7 +446,7 @@ func TestAtomicFieldBesideHookStaysByValue(t *testing.T) {
 		"go.mod":     "module example.com/beside\n\ngo 1.26\n",
 		"reg/reg.go": "package reg\n\nimport \"sync/atomic\"\n\ntype config struct {\n\tn int\n}\n\ntype box struct {\n\tcfg  atomic.Pointer[config]\n\thook func()\n}\n\nvar state box\n\nfunc Read() {\n\tif f := state.hook; f != nil {\n\t\tf()\n\t}\n}\n",
 	})
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	scan := runScan(t, "", dir, "example.com/beside/reg")
 	subject := Subject{Package: "example.com/beside/reg", Symbol: "Read"}
 	if reason := scan.downgradeReason[subject]; reason != "" {
@@ -471,7 +465,7 @@ func TestAtomicTransparencyCoversOnlyTheToolchainPointer(t *testing.T) {
 		"go.mod":     "module example.com/homebrew\n\ngo 1.26\n",
 		"reg/reg.go": "package reg\n\nimport \"unsafe\"\n\ntype Pointer[T any] struct {\n\tp unsafe.Pointer\n}\n\ntype registry struct {\n\tlive map[string]bool\n}\n\nvar acct Pointer[registry]\n\nfunc Track() {\n\tacct.p = nil\n}\n",
 	})
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	scan := runScan(t, "", dir, "example.com/homebrew/reg")
 	subject := Subject{Package: "example.com/homebrew/reg", Symbol: "Track"}
 	if reason := scan.downgradeReason[subject]; !strings.Contains(reason, "example.com/homebrew/reg.acct is mutated") {
@@ -519,7 +513,7 @@ func TestMalformedAttributedUseMarksEveryDeclaredKey(t *testing.T) {
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
 	subject := Subject{Package: pkg, Symbol: "Run"}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	const scope = DynamicStateStrategy + "|malformed-attribution-toolchain|cfg"
 
 	clean := runScan(t, scope, dir, pkg)
@@ -529,9 +523,8 @@ func TestMalformedAttributedUseMarksEveryDeclaredKey(t *testing.T) {
 
 	poison := func(mutate func(*dynamicStateFact)) {
 		var hit bool
-		processFactCache.Range(func(k, v any) bool {
-			if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
-				fact := v.(dynamicStateFact)
+		processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+			if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 				mutate(&fact)
 				processFactCache.Store(k, fact)
 				hit = true
@@ -616,7 +609,7 @@ func TestCarrierLinkCrossesMutationMarks(t *testing.T) {
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
 	subject := Subject{Package: pkg, Symbol: "Run"}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	const scope = DynamicStateStrategy + "|carrier-link-toolchain|cfg"
 
 	clean := runScan(t, scope, dir, pkg)
@@ -625,9 +618,8 @@ func TestCarrierLinkCrossesMutationMarks(t *testing.T) {
 	}
 
 	var hit bool
-	processFactCache.Range(func(k, v any) bool {
-		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
-			fact := v.(dynamicStateFact)
+	processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+		if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 			// The origin is declared; the mutation lands on an
 			// undeclared aliasing key - without the link no culprit
 			// exists, with it the mark crosses to the origin.
@@ -656,7 +648,7 @@ func TestCarrierLinkCrossesEscapeMarks(t *testing.T) {
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
 	subject := Subject{Package: pkg, Symbol: "Run"}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	const scope = DynamicStateStrategy + "|carrier-link-escape-toolchain|cfg"
 
 	clean := runScan(t, scope, dir, pkg)
@@ -665,9 +657,8 @@ func TestCarrierLinkCrossesEscapeMarks(t *testing.T) {
 	}
 
 	var hit bool
-	processFactCache.Range(func(k, v any) bool {
-		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
-			fact := v.(dynamicStateFact)
+	processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+		if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 			fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
 			fact.Escapes = append(fact.Escapes, "golang.org/x/sync/errgroup.ghostAlias")
 			fact.CarrierLinks = append(fact.CarrierLinks, dynstate.CarrierLink{From: "golang.org/x/sync/errgroup.ghostAlias", To: "golang.org/x/sync/errgroup.Ghost"})
@@ -693,7 +684,7 @@ func TestMalformedCarrierLinkMarksEveryDeclaredKey(t *testing.T) {
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
 	subject := Subject{Package: pkg, Symbol: "Run"}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	const scope = DynamicStateStrategy + "|malformed-link-toolchain|cfg"
 
 	clean := runScan(t, scope, dir, pkg)
@@ -702,9 +693,8 @@ func TestMalformedCarrierLinkMarksEveryDeclaredKey(t *testing.T) {
 	}
 
 	var hit bool
-	processFactCache.Range(func(k, v any) bool {
-		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
-			fact := v.(dynamicStateFact)
+	processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+		if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 			fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
 			// Missing To key - the link lost one of its keys.
 			fact.CarrierLinks = append(fact.CarrierLinks, dynstate.CarrierLink{From: "golang.org/x/sync/errgroup.Ghost"})
@@ -730,7 +720,7 @@ func TestMalformedParamUseMarksEveryDeclaredKey(t *testing.T) {
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
 	subject := Subject{Package: pkg, Symbol: "Run"}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	const scope = DynamicStateStrategy + "|malformed-param-toolchain|cfg"
 
 	clean := runScan(t, scope, dir, pkg)
@@ -739,9 +729,8 @@ func TestMalformedParamUseMarksEveryDeclaredKey(t *testing.T) {
 	}
 
 	var hit bool
-	processFactCache.Range(func(k, v any) bool {
-		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
-			fact := v.(dynamicStateFact)
+	processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+		if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 			fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
 			// Callee parameter key missing function name.
 			fact.ParamUses = append(fact.ParamUses, dynstate.VarParamUse{Key: "golang.org/x/sync/errgroup.Ghost", Param: dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "bad"}}})
@@ -767,7 +756,7 @@ func TestMalformedFieldParamUseMarksEveryDeclaredKey(t *testing.T) {
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
 	subject := Subject{Package: pkg, Symbol: "Run"}
-	processFactCache = sync.Map{}
+	processFactCache.Reset()
 	const scope = DynamicStateStrategy + "|malformed-fieldparam-toolchain|cfg"
 
 	clean := runScan(t, scope, dir, pkg)
@@ -776,9 +765,8 @@ func TestMalformedFieldParamUseMarksEveryDeclaredKey(t *testing.T) {
 	}
 
 	var hit bool
-	processFactCache.Range(func(k, v any) bool {
-		if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
-			fact := v.(dynamicStateFact)
+	processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+		if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 			fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
 			// Invalid negative index in FieldParamUses.
 			fact.FieldParamUses = append(fact.FieldParamUses, dynstate.FieldPosKey{Owner: "golang.org/x/sync/errgroup.Ghost", Field: "bad", Index: -1})
@@ -876,7 +864,7 @@ func TestMalformedFieldPopulationRecordsMarkEveryDeclaredKey(t *testing.T) {
 			dir := writePinnedDepModule(t)
 			const pkg = "example.com/pinned"
 			subject := Subject{Package: pkg, Symbol: "Run"}
-			processFactCache = sync.Map{}
+			processFactCache.Reset()
 			scope := DynamicStateStrategy + "|malformed-fieldpop-" + tc.name + "|cfg"
 
 			clean := runScan(t, scope, dir, pkg)
@@ -885,9 +873,8 @@ func TestMalformedFieldPopulationRecordsMarkEveryDeclaredKey(t *testing.T) {
 			}
 
 			var hit bool
-			processFactCache.Range(func(k, v any) bool {
-				if strings.HasSuffix(k.(string), "\x00golang.org/x/sync/errgroup") {
-					fact := v.(dynamicStateFact)
+			processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+				if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 					fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
 					tc.poison(&fact)
 					processFactCache.Store(k, fact)
@@ -954,15 +941,16 @@ func TestPinnedBucketsExcludeModulesReachingMutableLocalSource(t *testing.T) {
 }
 
 func TestBracketedSeamNodes(t *testing.T) {
-	deriveFact := func(t *testing.T, src string) dynamicStateFact {
+	deriveFactFile := func(t *testing.T, audited bool, filename, src string) dynamicStateFact {
 		t.Helper()
 		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, "p.go", src, 0)
+		file, err := parser.ParseFile(fset, filename, src, 0)
 		if err != nil {
 			t.Fatalf("parse: %v", err)
 		}
 		info := &types.Info{
 			Types:      map[ast.Expr]types.TypeAndValue{},
+			Instances:  map[*ast.Ident]types.Instance{},
 			Defs:       map[*ast.Ident]types.Object{},
 			Uses:       map[*ast.Ident]types.Object{},
 			Selections: map[*ast.SelectorExpr]*types.Selection{},
@@ -981,7 +969,15 @@ func TestBracketedSeamNodes(t *testing.T) {
 			TypesInfo: info,
 			Module:    &packages.Module{Path: "example.com/p"},
 		}
-		return dynamicStateFactOf(true, pkg, false)
+		return dynamicStateFactOf(audited, pkg, false)
+	}
+	deriveFactWithAudit := func(t *testing.T, audited bool, src string) dynamicStateFact {
+		t.Helper()
+		return deriveFactFile(t, audited, "p_test.go", src)
+	}
+	deriveFact := func(t *testing.T, src string) dynamicStateFact {
+		t.Helper()
+		return deriveFactWithAudit(t, true, src)
 	}
 
 	positiveCases := []struct {
@@ -1004,11 +1000,10 @@ func Exercise() int {
 		{
 			name: "saved and restored via Cleanup with loop writes",
 			src: `package p
-type T struct{}
-func (*T) Cleanup(func()) {}
+import "testing"
 func defaultProbe() int { return 1 }
 var probe = defaultProbe
-func TestSeam(t *T) {
+func TestSeam(t *testing.T) {
 	orig := probe
 	t.Cleanup(func() { probe = orig })
 	for i := 0; i < 3; i++ {
@@ -1032,13 +1027,12 @@ func Exercise() int {
 		{
 			name: "uninitialized struct hook reset to nil in defer and Cleanup",
 			src: `package p
-type T struct{}
-func (*T) Cleanup(func()) {}
+import "testing"
 var hooks struct {
 	before func()
 	after  func()
 }
-func TestHooks(t *T) {
+func TestHooks(t *testing.T) {
 	seen := 0
 	hooks.before = func() { seen++ }
 	defer func() { hooks.before = nil }()
@@ -1070,6 +1064,56 @@ func RunWithHooks() {
 	hookPtr.Store(&hookSet{onEvent: func() {}})
 	Emit()
 	hookPtr.Store(nil)
+}`,
+		},
+		{
+			name: "pure-load uninitialized atomic.Pointer hook without in-package Store",
+			src: `package p
+import "sync/atomic"
+type hookSet struct{ onEvent func() }
+var hookPtr atomic.Pointer[hookSet]
+func Emit() {
+	if h := hookPtr.Load(); h != nil && h.onEvent != nil {
+		h.onEvent()
+	}
+}`,
+		},
+		{
+			name: "unexported test helper and t.Run subtest Cleanup on live testing.T",
+			src: `package p
+import "testing"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func swapProbe(t *testing.T, fn func() int) {
+	orig := probe
+	probe = fn
+	t.Cleanup(func() { probe = orig })
+}
+func TestCaller(t *testing.T) {
+	swapProbe(t, func() int { return 2 })
+	t.Run("sub", func(subT *testing.T) {
+		swapProbe(subT, func() int { return 3 })
+		orig := probe
+		probe = func() int { return 4 }
+		subT.Cleanup(func() { probe = orig })
+	})
+	localSwap := func(ht *testing.T) {
+		orig := probe
+		probe = func() int { return 5 }
+		ht.Cleanup(func() { probe = orig })
+	}
+	localSwap(t)
+}`,
+		},
+		{
+			name: "fault-injection closure containing panic assigned before defer restore",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Exercise() {
+	orig := probe
+	probe = func() int { panic("injected fault") }
+	defer func() { probe = orig }()
 }`,
 		},
 	}
@@ -1361,11 +1405,10 @@ func MakeSetter() func() {
 		{
 			name: "inner Cleanup inside nested closure overwrites outer restore",
 			src: `package p
-type T struct{}
-func (*T) Cleanup(func()) {}
+import "testing"
 func defaultProbe() int { return 1 }
 var probe = defaultProbe
-func TestInnerCleanupOverwritesOuterRestore(t *T) {
+func TestInnerCleanupOverwritesOuterRestore(t *testing.T) {
 	orig1 := probe
 	probe = func() int { return 2 }
 	func() {
@@ -1374,6 +1417,361 @@ func TestInnerCleanupOverwritesOuterRestore(t *T) {
 		probe = func() int { return 3 }
 	}()
 	probe = orig1
+}`,
+		},
+		{
+			name: "non-testing Cleanup method does not discharge write",
+			src: `package p
+type fakeCleaner struct{}
+func (*fakeCleaner) Cleanup(func()) {}
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Exercise(c *fakeCleaner) {
+	orig := probe
+	c.Cleanup(func() { probe = orig })
+	probe = func() int { return 2 }
+}`,
+		},
+		{
+			name: "locally bracketed write inside testing.B.RunParallel closure",
+			src: `package p
+import "testing"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func BenchmarkRace(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			orig := probe
+			defer func() { probe = orig }()
+			probe = func() int { return 2 }
+		}
+	})
+}`,
+		},
+		{
+			name: "locally bracketed inline write inside time.AfterFunc closure",
+			src: `package p
+import "time"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Schedule() {
+	time.AfterFunc(time.Millisecond, func() {
+		orig := probe
+		probe = func() int { return 2 }
+		probe = orig
+	})
+}`,
+		},
+		{
+			name: "pure-load atomic.Pointer hook with escaping Load result",
+			src: `package p
+import "sync/atomic"
+type hookSet struct{ onEvent func() }
+var hookPtr atomic.Pointer[hookSet]
+func Leak() *hookSet {
+	return hookPtr.Load()
+}`,
+		},
+		{
+			name: "pure-load atomic.Pointer hook populated in init",
+			src: `package p
+import "sync/atomic"
+type hookSet struct{ onEvent func() }
+var hookPtr atomic.Pointer[hookSet]
+func init() {
+	hookPtr.Store(&hookSet{onEvent: func() {}})
+}
+func Emit() {
+	if h := hookPtr.Load(); h != nil && h.onEvent != nil {
+		h.onEvent()
+	}
+}`,
+		},
+		{
+			name: "pure-load exported atomic.Pointer hook",
+			src: `package p
+import "sync/atomic"
+type HookSet struct{ OnEvent func() }
+var HookPtr atomic.Pointer[HookSet]
+func Emit() {
+	if h := HookPtr.Load(); h != nil && h.OnEvent != nil {
+		h.OnEvent()
+	}
+}`,
+		},
+		{
+			name: "throwaway zero-value testing.T Cleanup never executes",
+			src: `package p
+import "testing"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Mutate() {
+	var fake testing.T
+	orig := probe
+	probe = func() int { return 2 }
+	fake.Cleanup(func() { probe = orig })
+}`,
+		},
+		{
+			name: "inline composite literal testing.T Cleanup never executes",
+			src: `package p
+import "testing"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Mutate() {
+	orig := probe
+	probe = func() int { return 2 }
+	(&testing.T{}).Cleanup(func() { probe = orig })
+}`,
+		},
+		{
+			name: "testing.TB interface parameter admits custom noop implementation",
+			src: `package p
+import "testing"
+type noopTB struct{ testing.TB }
+func (noopTB) Cleanup(func()) {}
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func swapTB(tb testing.TB) {
+	orig := probe
+	probe = func() int { return 2 }
+	tb.Cleanup(func() { probe = orig })
+}
+func TestNoopTB(t *testing.T) {
+	_ = t
+	swapTB(noopTB{})
+}`,
+		},
+		{
+			name: "exported non-runner function taking testing.T rejected",
+			src: `package p
+import "testing"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func ExportedSwap(t *testing.T) {
+	orig := probe
+	probe = func() int { return 2 }
+	t.Cleanup(func() { probe = orig })
+}`,
+		},
+		{
+			name: "uncalled helper taking testing.T rejected",
+			src: `package p
+import "testing"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func unusedSwap(t *testing.T) {
+	orig := probe
+	probe = func() int { return 2 }
+	t.Cleanup(func() { probe = orig })
+}`,
+		},
+		{
+			name: "Test function invoked directly with synthetic testing.T rejected",
+			src: `package p
+import "testing"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func TestSeam(t *testing.T) {
+	orig := probe
+	probe = func() int { return 2 }
+	t.Cleanup(func() { probe = orig })
+}
+func TestCaller(t *testing.T) {
+	_ = t
+	TestSeam(&testing.T{})
+}`,
+		},
+		{
+			name: "dereference overwrite of testing.T invalidates Cleanup provenance",
+			src: `package p
+import "testing"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func TestClobberT(t *testing.T) {
+	orig := probe
+	probe = func() int { return 2 }
+	t.Cleanup(func() { probe = orig })
+	*t = testing.T{}
+}`,
+		},
+		{
+			name: "outer testing.T captured inside nested IIFE Cleanup",
+			src: `package p
+import "testing"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func TestOuterCapture(t *testing.T) {
+	func() {
+		orig := probe
+		probe = func() int { return 2 }
+		t.Cleanup(func() { probe = orig })
+	}()
+}`,
+		},
+		{
+			name: "outer testing.T passed to helper inside t.Run subtest",
+			src: `package p
+import "testing"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func swapProbe(t *testing.T, fn func() int) {
+	orig := probe
+	probe = fn
+	t.Cleanup(func() { probe = orig })
+}
+func TestSubMismatch(t *testing.T) {
+	t.Run("sub", func(subT *testing.T) {
+		_ = subT
+		swapProbe(t, func() int { return 2 })
+	})
+}`,
+		},
+		{
+			name: "LIFO conflict between defer restore and helper Cleanup restore",
+			src: `package p
+import "testing"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func swapProbe(t *testing.T, fn func() int) {
+	orig := probe
+	probe = fn
+	t.Cleanup(func() { probe = orig })
+}
+func TestMixedLIFO(t *testing.T) {
+	orig := probe
+	probe = func() int { return 2 }
+	defer func() { probe = orig }()
+	swapProbe(t, func() int { return 3 })
+}`,
+		},
+		{
+			name: "LIFO conflict between zero-reset defer and helper Cleanup restore",
+			src: `package p
+import "testing"
+var probe func() int
+func swapProbe(t *testing.T, fn func() int) {
+	orig := probe
+	probe = fn
+	t.Cleanup(func() { probe = orig })
+}
+func TestMixedZeroResetLIFO(t *testing.T) {
+	probe = func() int { return 2 }
+	defer func() { probe = nil }()
+	swapProbe(t, func() int { return 3 })
+}`,
+		},
+		{
+			name: "LIFO conflict between inline restore and helper Cleanup restore",
+			src: `package p
+import "testing"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func swapProbe(t *testing.T, fn func() int) {
+	orig := probe
+	probe = fn
+	t.Cleanup(func() { probe = orig })
+}
+func TestInlinePlusCleanup(t *testing.T) {
+	orig := probe
+	probe = func() int { return 2 }
+	swapProbe(t, func() int { return 3 })
+	probe = orig
+}`,
+		},
+		{
+			name: "exported uninitialized variable cannot use zero-reset",
+			src: `package p
+var Probe func() int
+func Exercise() {
+	Probe = func() int { return 2 }
+	defer func() { Probe = nil }()
+}`,
+		},
+		{
+			name: "blank-identifier package initializer writing var invalidates zero-reset",
+			src: `package p
+var hook func() int
+var _ = func() int {
+	hook = func() int { return 1 }
+	return 0
+}()
+func Exercise() {
+	hook = func() int { return 2 }
+	defer func() { hook = nil }()
+}`,
+		},
+		{
+			name: "non-exempt helper write invalidates zero-reset",
+			src: `package p
+var hook func() int
+func SetupDefault() {
+	hook = func() int { return 1 }
+}
+func Exercise() {
+	hook = func() int { return 2 }
+	defer func() { hook = nil }()
+}`,
+		},
+		{
+			name: "implicit pointer-receiver method call on scalar struct seam",
+			src: `package p
+type holder struct{ fn func() int }
+func (h *holder) Clear() { h.fn = nil }
+var state holder
+func Exercise() {
+	orig := state
+	state = holder{fn: func() int { return 2 }}
+	defer func() { state = orig }()
+	state.Clear()
+}`,
+		},
+		{
+			name: "early return inside defer closure before restore assignment",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Exercise(skip bool) {
+	orig := probe
+	probe = func() int { return 2 }
+	defer func() {
+		if skip {
+			return
+		}
+		probe = orig
+	}()
+}`,
+		},
+		{
+			name: "early return inside Cleanup closure before restore assignment",
+			src: `package p
+import "testing"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func TestEarlyReturnCleanup(t *testing.T) {
+	skip := true
+	orig := probe
+	probe = func() int { return 2 }
+	t.Cleanup(func() {
+		if skip {
+			return
+		}
+		probe = orig
+	})
+}`,
+		},
+		{
+			name: "synchronous IIFE panic inside defer closure before restore assignment",
+			src: `package p
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func Exercise() {
+	orig := probe
+	probe = func() int { return 2 }
+	defer func() {
+		func() { panic("abort before restore") }()
+		probe = orig
+	}()
 }`,
 		},
 	}
@@ -1385,6 +1783,42 @@ func TestInnerCleanupOverwritesOuterRestore(t *T) {
 			}
 		})
 	}
+
+	// Unaudited sync/atomic must fail closed even when syntax matches the
+	// mutex-bracketed or pure-Load seam shape (REQ-closure-shared-dynamic-state-atomic).
+	for _, name := range []string{
+		"mutex-bracketed atomic.Pointer hook",
+		"pure-load uninitialized atomic.Pointer hook without in-package Store",
+	} {
+		var src string
+		for _, tc := range positiveCases {
+			if tc.name == name {
+				src = tc.src
+				break
+			}
+		}
+		t.Run("unaudited/"+name, func(t *testing.T) {
+			fact := deriveFactWithAudit(t, false, src)
+			if len(fact.Mutates) == 0 && len(fact.Escapes) == 0 && len(fact.EnvCarrying) == 0 && len(fact.AttributedUses) == 0 {
+				t.Fatalf("unaudited atomic.Pointer seam was exempted despite audited=false: %+v", fact)
+			}
+		})
+	}
+
+	t.Run("non_test_file/TestSeam in production file rejected", func(t *testing.T) {
+		fact := deriveFactFile(t, true, "p.go", `package p
+import "testing"
+func defaultProbe() int { return 1 }
+var probe = defaultProbe
+func TestSeam(t *testing.T) {
+	orig := probe
+	t.Cleanup(func() { probe = orig })
+	probe = func() int { return 2 }
+}`)
+		if len(fact.Mutates) == 0 && len(fact.Escapes) == 0 && len(fact.EnvCarrying) == 0 && len(fact.AttributedUses) == 0 {
+			t.Fatalf("TestSeam Cleanup in non-_test.go file was exempted: %+v", fact)
+		}
+	})
 }
 
 // explainView builds a view over the module tree and returns the
@@ -8499,4 +8933,188 @@ func TestCrossPackageInitOnlyRegistration(t *testing.T) {
 			t.Fatalf("verdict = %+v, want the downgrade naming reg.Hooks", verdict)
 		}
 	})
+}
+
+func TestExplainBlockedExportedSeamCrossPackageCaller(t *testing.T) {
+	t.Parallel()
+	baseTree := func(callerTestSrc string) map[string]string {
+		return map[string]string{
+			"go.mod": "module example.com/xseam\n\ngo 1.26\n",
+			"seam/seam.go": `package seam
+
+var probe func() int
+
+func WithProbe(fn func() int, body func()) {
+	orig := probe
+	defer func() { probe = orig }()
+	probe = fn
+	body()
+}
+
+func Value() int {
+	if probe != nil {
+		return probe()
+	}
+	return 1
+}
+`,
+			"app/app.go":      "package app\n\nimport \"example.com/xseam/seam\"\n\nfunc Run() int { return seam.Value() }\n",
+			"app/app_test.go": callerTestSrc,
+		}
+	}
+
+	seqDir := writeModuleTree(t, baseTree(`package app_test
+
+import (
+	"testing"
+	"example.com/xseam/app"
+	"example.com/xseam/seam"
+)
+
+func TestClean(t *testing.T) {
+	if got := app.Run(); got != 1 {
+		t.Fatalf("got %d", got)
+	}
+}
+
+func TestSequentialSeam(t *testing.T) {
+	seam.WithProbe(func() int { return 9 }, func() {
+		_ = app.Run()
+	})
+}
+`))
+	if verdict := captureCheck(t, seqDir, Subject{Package: "example.com/xseam/app", Symbol: "TestClean"}, withPackageProcessExecution()); verdict.Status != Valid {
+		t.Fatalf("sequential cross-package seam verdict = %+v, want Valid", verdict)
+	}
+
+	parDir := writeModuleTree(t, baseTree(`package app_test
+
+import (
+	"testing"
+	"example.com/xseam/app"
+	"example.com/xseam/seam"
+)
+
+func TestClean(t *testing.T) {
+	if got := app.Run(); got != 1 {
+		t.Fatalf("got %d", got)
+	}
+}
+
+func TestParallelSeam(t *testing.T) {
+	t.Parallel()
+	seam.WithProbe(func() int { return 9 }, func() {
+		_ = app.Run()
+	})
+}
+`))
+	verdict := captureCheck(t, parDir, Subject{Package: "example.com/xseam/app", Symbol: "TestClean"}, withPackageProcessExecution())
+	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "example.com/xseam/seam.probe is mutated") {
+		t.Fatalf("parallel cross-package seam verdict = %+v, want downgrade naming example.com/xseam/seam.probe", verdict)
+	}
+	chain := explainViewForSubject(t, parDir, Subject{Package: "example.com/xseam/app", Symbol: "TestClean"}, "example.com/xseam/seam", "probe")
+	if chain.Arm != "mutation" || len(chain.Links) == 0 {
+		t.Fatalf("ExplainDynamicState(seam.probe) = %+v, want non-empty mutation chain", chain)
+	}
+
+	// Cross-package .Parallel() helper (testutil.EnterParallel) tainting both an exported seam
+	// and an unexported intra-package seam under PackageExecution + ExplainDynamicState.
+	helperTree := baseTree(`package app_test
+
+import (
+	"testing"
+	"example.com/xseam/app"
+	"example.com/xseam/seam"
+	"example.com/xseam/testutil"
+)
+
+func TestClean(t *testing.T) {
+	if got := app.Run(); got != 1 {
+		t.Fatalf("got %d", got)
+	}
+}
+
+func TestViaCrossPkgParallelHelper(t *testing.T) {
+	testutil.EnterParallel(t)
+	seam.WithProbe(func() int { return 9 }, func() {
+		_ = app.Run()
+	})
+}
+`)
+	helperTree["testutil/testutil.go"] = "package testutil\n\nimport \"testing\"\n\nfunc EnterParallel(t *testing.T) { t.Parallel() }\n"
+	helperTree["app/internal_seam_test.go"] = `package app
+
+import (
+	"testing"
+	"example.com/xseam/testutil"
+)
+
+var localHook func() int
+
+func withLocalHook(fn func() int, body func()) {
+	orig := localHook
+	defer func() { localHook = orig }()
+	localHook = fn
+	body()
+}
+
+func TestUnexportedViaCrossPkgParallel(t *testing.T) {
+	testutil.EnterParallel(t)
+	withLocalHook(func() int { return 4 }, func() {})
+}
+`
+	helperDir := writeModuleTree(t, helperTree)
+	helperVerdict := captureCheck(t, helperDir, Subject{Package: "example.com/xseam/app", Symbol: "TestClean"}, withPackageProcessExecution())
+	if helperVerdict.Status != Unverifiable {
+		t.Fatalf("cross-package .Parallel helper verdict = %+v, want Unverifiable", helperVerdict)
+	}
+	for _, wantSym := range []struct {
+		pkg string
+		sym string
+	}{
+		{pkg: "example.com/xseam/seam", sym: "probe"},
+		{pkg: "example.com/xseam/app", sym: "localHook"},
+	} {
+		c := explainViewForSubject(t, helperDir, Subject{Package: "example.com/xseam/app", Symbol: "TestClean"}, wantSym.pkg, wantSym.sym)
+		if c.Arm != "mutation" || len(c.Links) == 0 {
+			t.Fatalf("ExplainDynamicState(%s.%s) = %+v, want non-empty mutation chain", wantSym.pkg, wantSym.sym, c)
+		}
+	}
+
+	// Stdlib maps.Copy populating a package-level map with a .Parallel() helper
+	// taints callers reading that map under real go/packages stdlib loading.
+	mapsCopyTree := baseTree(`package app_test
+
+import (
+	"maps"
+	"testing"
+	"example.com/xseam/app"
+	"example.com/xseam/seam"
+	"example.com/xseam/testutil"
+)
+
+func init() {
+	cp := maps.Copy[map[string]func(*testing.T), map[string]func(*testing.T)]
+	cp(testutil.HookMap, map[string]func(*testing.T){"k": testutil.EnterParallel})
+}
+
+func TestClean(t *testing.T) {
+	if got := app.Run(); got != 1 {
+		t.Fatalf("got %d", got)
+	}
+}
+
+func TestViaStdlibMapsCopy(t *testing.T) {
+	testutil.RunHookMap(t)
+	seam.WithProbe(func() int { return 9 }, func() {
+		_ = app.Run()
+	})
+}
+`)
+	mapsCopyTree["testutil/testutil.go"] = "package testutil\n\nimport \"testing\"\n\nvar enterMap = map[string]func(*testing.T){}\nvar HookMap = enterMap\n\nfunc EnterParallel(t *testing.T) { t.Parallel() }\nfunc RunHookMap(t *testing.T) { enterMap[\"k\"](t) }\n"
+	mapsCopyDir := writeModuleTree(t, mapsCopyTree)
+	mapsCopyVerdict := captureCheck(t, mapsCopyDir, Subject{Package: "example.com/xseam/app", Symbol: "TestClean"}, withPackageProcessExecution())
+	if mapsCopyVerdict.Status != Unverifiable || !strings.Contains(mapsCopyVerdict.Reason, "example.com/xseam/seam.probe is mutated") {
+		t.Fatalf("stdlib maps.Copy .Parallel verdict = %+v, want Unverifiable naming example.com/xseam/seam.probe", mapsCopyVerdict)
+	}
 }

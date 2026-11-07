@@ -732,45 +732,45 @@ func TestCheckingUnitCandidatesAndLifecycle(t *testing.T) {
 		if _, err := u.CheckBatch(t.Context(), []Candidate{{a, f.current[a]}}); err != nil {
 			t.Fatal(err)
 		}
-		priorHook := viewTestHooks.runtimeWindow
-		viewTestHooks.runtimeWindow = func() { t.Fatal("invalid input opened a runtime window") }
-		defer func() { viewTestHooks.runtimeWindow = priorHook }()
-		wrongKind := f.current[a]
-		wrongKind.ResultKind = Measurement
-		unknown := Subject{a.Package, "Unknown"}
-		requests := []Candidate{{a, f.current[a]}, {a, Fingerprint{}}, {unknown, wrongKind}, {b, Fingerprint{}}}
-		if got, err := u.CheckBatch(t.Context(), requests); got != nil {
-			t.Fatal("partial shape answer escaped")
-		} else {
-			var batch *RecordedBatchError
-			if !errors.As(err, &batch) || batch.Tier != RecordShapeRefusal || len(batch.Failures) != 2 {
-				t.Fatalf("whole shape tier: %v", err)
+		withViewTestHooks(viewTestHookSet{
+			runtimeWindow: func() { t.Fatal("invalid input opened a runtime window") },
+		}, func() {
+			wrongKind := f.current[a]
+			wrongKind.ResultKind = Measurement
+			unknown := Subject{a.Package, "Unknown"}
+			requests := []Candidate{{a, f.current[a]}, {a, Fingerprint{}}, {unknown, wrongKind}, {b, Fingerprint{}}}
+			if got, err := u.CheckBatch(t.Context(), requests); got != nil {
+				t.Fatal("partial shape answer escaped")
+			} else {
+				var batch *RecordedBatchError
+				if !errors.As(err, &batch) || batch.Tier != RecordShapeRefusal || len(batch.Failures) != 2 {
+					t.Fatalf("whole shape tier: %v", err)
+				}
 			}
-		}
-		if _, err := u.CheckBatch(t.Context(), []Candidate{{unknown, wrongKind}, {b, wrongKind}}); err == nil {
-			t.Fatal("kind mismatch accepted")
-		} else {
-			var batch *RecordedBatchError
-			if !errors.As(err, &batch) || batch.Tier != RecordKindRefusal || len(batch.Failures) != 2 {
-				t.Fatalf("whole kind tier: %v", err)
+			if _, err := u.CheckBatch(t.Context(), []Candidate{{unknown, wrongKind}, {b, wrongKind}}); err == nil {
+				t.Fatal("kind mismatch accepted")
+			} else {
+				var batch *RecordedBatchError
+				if !errors.As(err, &batch) || batch.Tier != RecordKindRefusal || len(batch.Failures) != 2 {
+					t.Fatalf("whole kind tier: %v", err)
+				}
 			}
-		}
-		other := Subject{a.Package, "OtherUnknown"}
-		if _, err := u.CheckBatch(t.Context(), []Candidate{{unknown, f.current[a]}, {other, f.current[a]}, {unknown, f.current[a]}}); err == nil {
-			t.Fatal("unknown subjects accepted")
-		} else {
-			var missing *UnknownSubjectsError
-			if !errors.As(err, &missing) || !slices.Equal(missing.Subjects, []Subject{unknown, other}) {
-				t.Fatalf("whole membership tier: %v", err)
+			other := Subject{a.Package, "OtherUnknown"}
+			if _, err := u.CheckBatch(t.Context(), []Candidate{{unknown, f.current[a]}, {other, f.current[a]}, {unknown, f.current[a]}}); err == nil {
+				t.Fatal("unknown subjects accepted")
+			} else {
+				var missing *UnknownSubjectsError
+				if !errors.As(err, &missing) || !slices.Equal(missing.Subjects, []Subject{unknown, other}) {
+					t.Fatalf("whole membership tier: %v", err)
+				}
 			}
-		}
-		if _, err := u.ExtendInertBatch(t.Context(), []InertRequest{{0, f.ledger}, {9, f.ledger}}); err == nil {
-			t.Fatal("foreign index accepted")
-		}
-		if len(u.slots) != 1 || u.phase != unitOpen {
-			t.Fatal("input refusal appended slots or ended the unit")
-		}
-		viewTestHooks.runtimeWindow = priorHook
+			if _, err := u.ExtendInertBatch(t.Context(), []InertRequest{{0, f.ledger}, {9, f.ledger}}); err == nil {
+				t.Fatal("foreign index accepted")
+			}
+			if len(u.slots) != 1 || u.phase != unitOpen {
+				t.Fatal("input refusal appended slots or ended the unit")
+			}
+		})
 		if got, err := u.CheckBatch(t.Context(), []Candidate{{b, f.current[b]}}); err != nil || got[0].Index != 1 {
 			t.Fatalf("input refusal prevented later admission: %+v %v", got, err)
 		}
@@ -873,10 +873,14 @@ func TestCheckingUnitCandidatesAndLifecycle(t *testing.T) {
 		engine.analysisBudget = time.Nanosecond
 		defer func() { engine.analysisBudget = prior }()
 		analyses := 0
-		priorAnalysis := viewTestHooks.beforeAnalysis
-		viewTestHooks.beforeAnalysis = func() { analyses++ }
-		defer func() { viewTestHooks.beforeAnalysis = priorAnalysis }()
-		if got, err := u.Close(t.Context()); !errors.Is(err, ErrAnalysisUnavailable) || got != nil || analyses != 1 {
+		var got []CheckedCandidate
+		var err error
+		withViewTestHooks(viewTestHookSet{
+			beforeAnalysis: func() { analyses++ },
+		}, func() {
+			got, err = u.Close(t.Context())
+		})
+		if !errors.Is(err, ErrAnalysisUnavailable) || got != nil || analyses != 1 {
 			t.Fatalf("losing extension reused opening proof: %+v %v", got, err)
 		}
 	})
@@ -2131,47 +2135,48 @@ func TestProcessAccountPreservesFinalizedFacts(t *testing.T) {
 			want, _, _ := completed(t, c)
 			entered, resume := make(chan struct{}), make(chan struct{})
 			release := sync.OnceFunc(func() { close(resume) })
-			defer release()
-			prior := viewTestHooks.observe
-			defer func() { viewTestHooks.observe = prior }()
 			pause := sync.OnceFunc(func() { close(entered); <-resume })
-			viewTestHooks.observe = pause
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			type closing struct {
-				result Finalized
-				err    error
-			}
-			done := make(chan closing, 1)
-			go func() { result, err := u.Close(ctx); done <- closing{result, err} }()
-			select {
-			case <-entered:
-			case got := <-done:
-				t.Fatalf("close missed post-observation barrier: %v", got.err)
-			case <-time.After(30 * time.Second):
-				t.Fatal("close did not reach post-observation barrier")
-			}
-			before, ok := u.Account()
-			if !ok || before.Inputs != want || before.Observation != SupportedObservation {
-				t.Errorf("facts unavailable during closing: %+v", before)
-			}
-			u.Abort()
-			wantErr := errUnitAborted
-			if cancelled {
-				cancel()
-				wantErr = context.Canceled
-			}
-			release()
-			got := <-done
-			if !errors.Is(got.err, wantErr) || !reflect.DeepEqual(got.result, Finalized{}) {
-				t.Fatalf("aborted close published evidence or lost cause: %+v %v", got.result, got.err)
-			}
-			if err := os.Remove(c.Capture()); err != nil {
-				t.Fatal(err)
-			}
-			if account, _ := u.Account(); account != before {
-				t.Fatalf("abort or report read changed finalized facts: %+v", account)
-			}
+			withViewTestHooks(viewTestHookSet{
+				observe: pause,
+			}, func() {
+				defer release()
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				type closing struct {
+					result Finalized
+					err    error
+				}
+				done := make(chan closing, 1)
+				go func() { result, err := u.Close(ctx); done <- closing{result, err} }()
+				select {
+				case <-entered:
+				case got := <-done:
+					t.Fatalf("close missed post-observation barrier: %v", got.err)
+				case <-time.After(30 * time.Second):
+					t.Fatal("close did not reach post-observation barrier")
+				}
+				before, ok := u.Account()
+				if !ok || before.Inputs != want || before.Observation != SupportedObservation {
+					t.Errorf("facts unavailable during closing: %+v", before)
+				}
+				u.Abort()
+				wantErr := errUnitAborted
+				if cancelled {
+					cancel()
+					wantErr = context.Canceled
+				}
+				release()
+				got := <-done
+				if !errors.Is(got.err, wantErr) || !reflect.DeepEqual(got.result, Finalized{}) {
+					t.Fatalf("aborted close published evidence or lost cause: %+v %v", got.result, got.err)
+				}
+				if err := os.Remove(c.Capture()); err != nil {
+					t.Fatal(err)
+				}
+				if account, _ := u.Account(); account != before {
+					t.Fatalf("abort or report read changed finalized facts: %+v", account)
+				}
+			})
 		})
 	}
 	for _, singleton := range []bool{false, true} {
@@ -2632,136 +2637,137 @@ func TestRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	facts := snapshot.facts
-	priorObserve, priorGuardDir := viewTestHooks.observe, viewTestHooks.guardDir
-	defer func() { viewTestHooks.observe, viewTestHooks.guardDir = priorObserve, priorGuardDir }()
 	passes := 0
-	viewTestHooks.observe = func() { passes++ }
-	viewTestHooks.guardDir = func(got string) {
-		if got != dir {
-			t.Errorf("source/build observation moved to runtime directory %q", got)
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { passes++ },
+		guardDir: func(got string) {
+			if got != dir {
+				t.Errorf("source/build observation moved to runtime directory %q", got)
+			}
+		},
+	}, func() {
+		a := bindTestRuntime(t, snapshot, RuntimeDescription{Directory: "a", Environment: runEnv})
+		b := bindTestRuntime(t, snapshot, RuntimeDescription{Directory: "b", Environment: runEnv})
+		if passes != 0 || a.Snapshot() != snapshot || b.Snapshot() != snapshot {
+			t.Fatal("runtime binding observed or replaced the source/build generation")
 		}
-	}
-	a := bindTestRuntime(t, snapshot, RuntimeDescription{Directory: "a", Environment: runEnv})
-	b := bindTestRuntime(t, snapshot, RuntimeDescription{Directory: "b", Environment: runEnv})
-	if passes != 0 || a.Snapshot() != snapshot || b.Snapshot() != snapshot {
-		t.Fatal("runtime binding observed or replaced the source/build generation")
-	}
-	bindings := []*RuntimeBinding{a, b}
-	failed, err := a.BeginPackage([]Subject{subjects[0]})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result, err := failed.Close(t.Context()); !errors.Is(err, ErrUnitIncomplete) || len(result.Subjects) != 0 {
-		t.Fatalf("incomplete sibling exposed evidence: %+v %v", result, err)
-	}
-	cancelled, err := b.BeginPackage([]Subject{subjects[1]})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if result, err := cancelled.Close(ctx); !errors.Is(err, context.Canceled) || len(result.Subjects) != 0 {
-		t.Fatalf("cancelled sibling exposed evidence: %+v %v", result, err)
-	}
-	artifacts := make([]BuildBinding, len(subjects))
-	binaries := make([]string, len(subjects))
-	for i, subject := range subjects {
-		build, err := snapshot.BuildDescription(subject.Package)
+		bindings := []*RuntimeBinding{a, b}
+		failed, err := a.BeginPackage([]Subject{subjects[0]})
 		if err != nil {
 			t.Fatal(err)
 		}
-		binaries[i] = filepath.Join(t.TempDir(), "package.test")
-		if out, err := runner.Run(t.Context(), build.Directory, build.Environment, "test", "-c", "-o", binaries[i], build.Package); err != nil {
-			t.Fatalf("build: %v\n%s", err, out)
+		if result, err := failed.Close(t.Context()); !errors.Is(err, ErrUnitIncomplete) || len(result.Subjects) != 0 {
+			t.Fatalf("incomplete sibling exposed evidence: %+v %v", result, err)
 		}
-		artifacts[i], err = snapshot.BindBuilt(subject.Package, subject.Package+"-retained")
+		cancelled, err := b.BeginPackage([]Subject{subjects[1]})
 		if err != nil {
 			t.Fatal(err)
 		}
-	}
-	run := func(binding *RuntimeBinding, i int) Fingerprint {
-		t.Helper()
-		u, err := binding.BeginPackage([]Subject{subjects[i]})
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if result, err := cancelled.Close(ctx); !errors.Is(err, context.Canceled) || len(result.Subjects) != 0 {
+			t.Fatalf("cancelled sibling exposed evidence: %+v %v", result, err)
+		}
+		artifacts := make([]BuildBinding, len(subjects))
+		binaries := make([]string, len(subjects))
+		for i, subject := range subjects {
+			build, err := snapshot.BuildDescription(subject.Package)
+			if err != nil {
+				t.Fatal(err)
+			}
+			binaries[i] = filepath.Join(t.TempDir(), "package.test")
+			if out, err := runner.Run(t.Context(), build.Directory, build.Environment, "test", "-c", "-o", binaries[i], build.Package); err != nil {
+				t.Fatalf("build: %v\n%s", err, out)
+			}
+			artifacts[i], err = snapshot.BindBuilt(subject.Package, subject.Package+"-retained")
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		run := func(binding *RuntimeBinding, i int) Fingerprint {
+			t.Helper()
+			u, err := binding.BeginPackage([]Subject{subjects[i]})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer u.Abort()
+			c, err := u.Register(t.Context(), artifacts[i], ProcessDescription{Identity: "actual-process", Capture: filepath.Join(t.TempDir(), "capture")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pwd, _ := gotool.LookupEnv(c.Environment(), "PWD"); pwd != c.Directory() {
+				t.Fatalf("process PWD=%q, directory=%q", pwd, c.Directory())
+			}
+			cmd, err := testProgramCmd(t.Context(), c.Directory(), c.Environment(), binaries[i], "-test.v", "-test.run=^TestRuntime$", "-test.testlogfile="+c.Capture())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "actual-pwd="+c.Directory()) {
+				t.Fatalf("actual process: %v\n%s", err, out)
+			}
+			if err := u.Submit(c, Terminal{Kind: NormalCompletion}); err != nil {
+				t.Fatal(err)
+			}
+			result, err := u.Close(t.Context())
+			if err != nil || result.Observation != SupportedObservation || len(result.Subjects) != 1 || result.Subjects[0].Verdict.Status != Valid {
+				t.Fatalf("bound closing: %+v %v", result, err)
+			}
+			fp := result.Subjects[0].Fingerprint
+			inputs, err := runtimeinput.Describe(fp.RuntimeInputs, dir)
+			if err != nil || !slices.Contains(inputs.EnvNames, "PWD") || !slices.Contains(inputs.EnvNames, "BOUND_VALUE") {
+				t.Fatalf("honest runtime inventory: %+v %v", inputs, err)
+			}
+			if fp.Guards.Machine != "" || fp.Guards.RuntimeConfig != "" {
+				t.Fatal("code record acquired measurement guards")
+			}
+			return fp
+		}
+		records := []Fingerprint{run(a, 0), run(b, 1)}
+		for i, binding := range bindings {
+			if verdict, err := binding.Check(t.Context(), subjects[i], records[i]); err != nil || verdict.Status != Valid {
+				t.Fatalf("same binding check: %+v %v", verdict, err)
+			}
+			if verdict, err := bindings[1-i].Check(t.Context(), subjects[i], records[i]); err != nil || verdict.Status != Stale || !strings.Contains(verdict.Reason, "PWD") {
+				t.Fatalf("cross-PWD check: %+v %v", verdict, err)
+			}
+		}
+		// A new binding can execute the very same retained artifact. It cannot
+		// overwrite either an old binding or the record already produced under it.
+		before := passes
+		rebound := bindTestRuntime(t, snapshot, RuntimeDescription{Directory: "b", Environment: gotool.SetEnv(runEnv, "UNREAD_RUNTIME_VALUE", "other")})
+		if passes != before {
+			t.Fatal("rebinding loaded source")
+		}
+		recordB := run(rebound, 0)
+		if recordB.Guards != records[0].Guards || recordB.RuntimeDigest == records[0].RuntimeDigest {
+			t.Fatal("runtime rebinding changed build guards or hid observed PWD motion")
+		}
+		if verdict, err := a.Check(t.Context(), subjects[0], records[0]); err != nil || verdict.Status != Valid {
+			t.Fatalf("new binding mutated old binding: %+v %v", verdict, err)
+		}
+		later, err := session.Snapshot(t.Context(), subjects, CodeResult)
+		if err != nil {
+			t.Fatal(err)
+		}
+		foreign, err := later.BindBuilt(subjects[0].Package, artifacts[0].identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u, err := a.BeginIdentity(subjects[0])
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer u.Abort()
-		c, err := u.Register(t.Context(), artifacts[i], ProcessDescription{Identity: "actual-process", Capture: filepath.Join(t.TempDir(), "capture")})
-		if err != nil {
-			t.Fatal(err)
+		if _, err := u.Register(t.Context(), foreign, ProcessDescription{Identity: "borrowed"}); err == nil {
+			t.Fatal("equal artifact identity crossed snapshot generations")
 		}
-		if pwd, _ := gotool.LookupEnv(c.Environment(), "PWD"); pwd != c.Directory() {
-			t.Fatalf("process PWD=%q, directory=%q", pwd, c.Directory())
+		if snapshot.facts != facts || facts.guards != records[0].Guards {
+			t.Fatal("a binding or later generation mutated shared compilation state")
 		}
-		cmd, err := testProgramCmd(t.Context(), c.Directory(), c.Environment(), binaries[i], "-test.v", "-test.run=^TestRuntime$", "-test.testlogfile="+c.Capture())
-		if err != nil {
-			t.Fatal(err)
+		if got, err := a.CurrentFacts(t.Context(), subjects[0]); err != nil || got.Guards != records[0].Guards || got.RuntimeInputs != "" {
+			t.Fatalf("later generation changed an old binding's immutable facts: %+v %v", got.Guards, err)
 		}
-		if out, err := cmd.CombinedOutput(); err != nil || !strings.Contains(string(out), "actual-pwd="+c.Directory()) {
-			t.Fatalf("actual process: %v\n%s", err, out)
-		}
-		if err := u.Submit(c, Terminal{Kind: NormalCompletion}); err != nil {
-			t.Fatal(err)
-		}
-		result, err := u.Close(t.Context())
-		if err != nil || result.Observation != SupportedObservation || len(result.Subjects) != 1 || result.Subjects[0].Verdict.Status != Valid {
-			t.Fatalf("bound closing: %+v %v", result, err)
-		}
-		fp := result.Subjects[0].Fingerprint
-		inputs, err := runtimeinput.Describe(fp.RuntimeInputs, dir)
-		if err != nil || !slices.Contains(inputs.EnvNames, "PWD") || !slices.Contains(inputs.EnvNames, "BOUND_VALUE") {
-			t.Fatalf("honest runtime inventory: %+v %v", inputs, err)
-		}
-		if fp.Guards.Machine != "" || fp.Guards.RuntimeConfig != "" {
-			t.Fatal("code record acquired measurement guards")
-		}
-		return fp
-	}
-	records := []Fingerprint{run(a, 0), run(b, 1)}
-	for i, binding := range bindings {
-		if verdict, err := binding.Check(t.Context(), subjects[i], records[i]); err != nil || verdict.Status != Valid {
-			t.Fatalf("same binding check: %+v %v", verdict, err)
-		}
-		if verdict, err := bindings[1-i].Check(t.Context(), subjects[i], records[i]); err != nil || verdict.Status != Stale || !strings.Contains(verdict.Reason, "PWD") {
-			t.Fatalf("cross-PWD check: %+v %v", verdict, err)
-		}
-	}
-	// A new binding can execute the very same retained artifact. It cannot
-	// overwrite either an old binding or the record already produced under it.
-	before := passes
-	rebound := bindTestRuntime(t, snapshot, RuntimeDescription{Directory: "b", Environment: gotool.SetEnv(runEnv, "UNREAD_RUNTIME_VALUE", "other")})
-	if passes != before {
-		t.Fatal("rebinding loaded source")
-	}
-	recordB := run(rebound, 0)
-	if recordB.Guards != records[0].Guards || recordB.RuntimeDigest == records[0].RuntimeDigest {
-		t.Fatal("runtime rebinding changed build guards or hid observed PWD motion")
-	}
-	if verdict, err := a.Check(t.Context(), subjects[0], records[0]); err != nil || verdict.Status != Valid {
-		t.Fatalf("new binding mutated old binding: %+v %v", verdict, err)
-	}
-	later, err := session.Snapshot(t.Context(), subjects, CodeResult)
-	if err != nil {
-		t.Fatal(err)
-	}
-	foreign, err := later.BindBuilt(subjects[0].Package, artifacts[0].identity)
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, err := a.BeginIdentity(subjects[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer u.Abort()
-	if _, err := u.Register(t.Context(), foreign, ProcessDescription{Identity: "borrowed"}); err == nil {
-		t.Fatal("equal artifact identity crossed snapshot generations")
-	}
-	if snapshot.facts != facts || facts.guards != records[0].Guards {
-		t.Fatal("a binding or later generation mutated shared compilation state")
-	}
-	if got, err := a.CurrentFacts(t.Context(), subjects[0]); err != nil || got.Guards != records[0].Guards || got.RuntimeInputs != "" {
-		t.Fatalf("later generation changed an old binding's immutable facts: %+v %v", got.Guards, err)
-	}
+	})
 }
 
 func TestRuntimeBindingGuardAgreementAndClosing(t *testing.T) {
@@ -2777,82 +2783,84 @@ func TestRuntimeBindingGuardAgreementAndClosing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prior := viewTestHooks.runtimeGuards
-	defer func() { viewTestHooks.runtimeGuards = prior }()
 	samples, machine := 0, "machine-a"
-	viewTestHooks.runtimeGuards = func(g *guard.RuntimeGuards) { samples++; g.Machine = machine }
-	snapshot, err := session.Snapshot(t.Context(), []Subject{subject}, Measurement)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if samples != 0 || snapshot.facts.guards.Machine != "" || snapshot.facts.guards.RuntimeConfig != "" {
-		t.Fatal("source/build generation captured runtime guards")
-	}
-	a := bindTestRuntime(t, snapshot, RuntimeDescription{Environment: []string{"GOGC=100"}})
-	if samples != 2 {
-		t.Fatalf("recording-time runtime samples=%d, want agreement pair", samples)
-	}
-	fp, err := a.CurrentFacts(t.Context(), subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b := bindTestRuntime(t, snapshot, RuntimeDescription{Environment: []string{"GOGC=200"}})
-	other, err := b.CurrentFacts(t.Context(), subject)
-	if err != nil || other.Guards.BuildConfig != fp.Guards.BuildConfig || other.Guards.RuntimeConfig == fp.Guards.RuntimeConfig {
-		t.Fatalf("runtime configuration did not separate from compilation: %+v %v", other.Guards, err)
-	}
-	if got, err := b.Check(t.Context(), subject, fp); err != nil || got.Status != Stale || got.Reason != "runtimeconfig" {
-		t.Fatalf("runtime-only drift: %+v %v", got, err)
-	}
-	v, err := a.newView([]Subject{subject})
-	if err != nil {
-		t.Fatal(err)
-	}
-	sibling, err := v.Sibling([]Subject{subject})
-	if err != nil || sibling.runtime != v.runtime || sibling.guards() != fp.Guards {
-		t.Fatalf("sibling lost its immutable runtime binding: %v", err)
-	}
-	seed, err := v.newSeededValidationView(t.Context())
-	if err != nil || seed.runtime != v.runtime || seed.guards() != fp.Guards {
-		t.Fatalf("seeded validation lost its runtime binding: %v", err)
-	}
-	if _, err := v.captureObserved(t.Context(), subject); err != nil {
-		t.Fatalf("observability refinement used different guards: %v", err)
-	}
-	machine = "machine-b"
-	c := bindTestRuntime(t, snapshot, RuntimeDescription{Environment: []string{"GOGC=100"}})
-	if c.runtime.guards.Machine != machine || a.runtime.guards.Machine != "machine-a" {
-		t.Fatal("new binding did not capture its own immutable machine observation")
-	}
-	if got, err := c.Check(t.Context(), subject, fp); err != nil || got.Status != Stale || got.Reason != "machine" {
-		t.Fatalf("fresh binding ignored machine change: %+v %v", got, err)
-	}
-	if got, err := a.Check(t.Context(), subject, fp); !errors.Is(err, ErrViewChanged) || got != (Verdict{}) {
-		t.Fatalf("old binding published before closing runtime drift: %+v %v", got, err)
-	}
-	if _, err := seed.newSeededValidationView(t.Context()); !errors.Is(err, ErrViewChanged) {
-		t.Fatalf("seeded validation forgot old machine: %v", err)
-	}
-	if err := sibling.reobserveBase(t.Context()); !errors.Is(err, ErrViewChanged) {
-		t.Fatalf("sibling comparison forgot old machine: %v", err)
-	}
-	if _, err := sibling.captureObserved(t.Context(), subject); !errors.Is(err, ErrViewChanged) {
-		t.Fatalf("refinement failed to close its runtime guards: %v", err)
-	}
-	// Binding refusal leaves all previously admitted bindings intact.
-	viewTestHooks.runtimeGuards = func(g *guard.RuntimeGuards) { samples++; g.Machine = string(rune('a' + samples)) }
-	if got, err := snapshot.BindRuntime(t.Context(), RuntimeDescription{}); !errors.Is(err, ErrViewChanged) || got != nil {
-		t.Fatalf("torn machine binding admitted: nonnil=%t error=%v", got != nil, err)
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	viewTestHooks.runtimeGuards = func(*guard.RuntimeGuards) { cancel() }
-	if got, err := snapshot.BindRuntime(ctx, RuntimeDescription{}); !errors.Is(err, context.Canceled) || got != nil {
-		t.Fatalf("cancelled runtime binding admitted: nonnil=%t error=%v", got != nil, err)
-	}
-	viewTestHooks.runtimeGuards = func(g *guard.RuntimeGuards) { g.Machine = "machine-a" }
-	if got, err := a.Check(t.Context(), subject, fp); err != nil || got.Status != Valid {
-		t.Fatalf("refused bindings damaged old binding: %+v %v", got, err)
-	}
+	onRuntimeGuards := func(g *guard.RuntimeGuards) { samples++; g.Machine = machine }
+	withViewTestHooks(viewTestHookSet{
+		runtimeGuards: func(g *guard.RuntimeGuards) { onRuntimeGuards(g) },
+	}, func() {
+		snapshot, err := session.Snapshot(t.Context(), []Subject{subject}, Measurement)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if samples != 0 || snapshot.facts.guards.Machine != "" || snapshot.facts.guards.RuntimeConfig != "" {
+			t.Fatal("source/build generation captured runtime guards")
+		}
+		a := bindTestRuntime(t, snapshot, RuntimeDescription{Environment: []string{"GOGC=100"}})
+		if samples != 2 {
+			t.Fatalf("recording-time runtime samples=%d, want agreement pair", samples)
+		}
+		fp, err := a.CurrentFacts(t.Context(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b := bindTestRuntime(t, snapshot, RuntimeDescription{Environment: []string{"GOGC=200"}})
+		other, err := b.CurrentFacts(t.Context(), subject)
+		if err != nil || other.Guards.BuildConfig != fp.Guards.BuildConfig || other.Guards.RuntimeConfig == fp.Guards.RuntimeConfig {
+			t.Fatalf("runtime configuration did not separate from compilation: %+v %v", other.Guards, err)
+		}
+		if got, err := b.Check(t.Context(), subject, fp); err != nil || got.Status != Stale || got.Reason != "runtimeconfig" {
+			t.Fatalf("runtime-only drift: %+v %v", got, err)
+		}
+		v, err := a.newView([]Subject{subject})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sibling, err := v.Sibling([]Subject{subject})
+		if err != nil || sibling.runtime != v.runtime || sibling.guards() != fp.Guards {
+			t.Fatalf("sibling lost its immutable runtime binding: %v", err)
+		}
+		seed, err := v.newSeededValidationView(t.Context())
+		if err != nil || seed.runtime != v.runtime || seed.guards() != fp.Guards {
+			t.Fatalf("seeded validation lost its runtime binding: %v", err)
+		}
+		if _, err := v.captureObserved(t.Context(), subject); err != nil {
+			t.Fatalf("observability refinement used different guards: %v", err)
+		}
+		machine = "machine-b"
+		c := bindTestRuntime(t, snapshot, RuntimeDescription{Environment: []string{"GOGC=100"}})
+		if c.runtime.guards.Machine != machine || a.runtime.guards.Machine != "machine-a" {
+			t.Fatal("new binding did not capture its own immutable machine observation")
+		}
+		if got, err := c.Check(t.Context(), subject, fp); err != nil || got.Status != Stale || got.Reason != "machine" {
+			t.Fatalf("fresh binding ignored machine change: %+v %v", got, err)
+		}
+		if got, err := a.Check(t.Context(), subject, fp); !errors.Is(err, ErrViewChanged) || got != (Verdict{}) {
+			t.Fatalf("old binding published before closing runtime drift: %+v %v", got, err)
+		}
+		if _, err := seed.newSeededValidationView(t.Context()); !errors.Is(err, ErrViewChanged) {
+			t.Fatalf("seeded validation forgot old machine: %v", err)
+		}
+		if err := sibling.reobserveBase(t.Context()); !errors.Is(err, ErrViewChanged) {
+			t.Fatalf("sibling comparison forgot old machine: %v", err)
+		}
+		if _, err := sibling.captureObserved(t.Context(), subject); !errors.Is(err, ErrViewChanged) {
+			t.Fatalf("refinement failed to close its runtime guards: %v", err)
+		}
+		// Binding refusal leaves all previously admitted bindings intact.
+		onRuntimeGuards = func(g *guard.RuntimeGuards) { samples++; g.Machine = string(rune('a' + samples)) }
+		if got, err := snapshot.BindRuntime(t.Context(), RuntimeDescription{}); !errors.Is(err, ErrViewChanged) || got != nil {
+			t.Fatalf("torn machine binding admitted: nonnil=%t error=%v", got != nil, err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		onRuntimeGuards = func(*guard.RuntimeGuards) { cancel() }
+		if got, err := snapshot.BindRuntime(ctx, RuntimeDescription{}); !errors.Is(err, context.Canceled) || got != nil {
+			t.Fatalf("cancelled runtime binding admitted: nonnil=%t error=%v", got != nil, err)
+		}
+		onRuntimeGuards = func(g *guard.RuntimeGuards) { g.Machine = "machine-a" }
+		if got, err := a.Check(t.Context(), subject, fp); err != nil || got.Status != Valid {
+			t.Fatalf("refused bindings damaged old binding: %+v %v", got, err)
+		}
+	})
 }
 
 func TestSnapshotAndCodeBindingNeedNoMachineSupport(t *testing.T) {
@@ -3458,11 +3466,13 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	if err := fileUnit.Submit(fileProcess, Terminal{Kind: NormalCompletion}); err != nil {
 		t.Fatal(err)
 	}
-	priorObserve := viewTestHooks.observe
-	viewTestHooks.observe = func() { write("input", "after") }
-	t.Cleanup(func() { viewTestHooks.observe = priorObserve })
-	fileResult, fileErr := fileUnit.Close(ctx)
-	viewTestHooks.observe = priorObserve
+	var fileResult Finalized
+	var fileErr error
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { write("input", "after") },
+	}, func() {
+		fileResult, fileErr = fileUnit.Close(ctx)
+	})
 	if !errors.Is(fileErr, ErrViewChanged) || fileResult.Fingerprint.MaximalClosure != "" {
 		t.Fatalf("identity-only closing missed runtime motion during source validation: %+v %v", fileResult.Verdict, fileErr)
 	}
@@ -3672,22 +3682,30 @@ func TestValue(t *testing.T) { t.Logf("selected=%d", Value()) }
 	}
 	preview.session.deferredCheckClose = true
 	previewPasses := 0
-	viewTestHooks.observe = func() { previewPasses++ }
-	_, _, previewVerdict, previewErr := preview.checkInertTestVariantExtension(ctx, final.Fingerprint, ledger, subject, true)
+	var previewVerdict Verdict
+	var previewErr error
+	withViewTestHooks(viewTestHookSet{
+		observe: func() { previewPasses++ },
+	}, func() {
+		_, _, previewVerdict, previewErr = preview.checkInertTestVariantExtension(ctx, final.Fingerprint, ledger, subject, true)
+	})
 	preview.session.deferredCheckClose = false
-	viewTestHooks.observe = priorObserve
 	if previewErr != nil || previewVerdict.Status != Valid {
 		t.Fatalf("provisional control: %+v %v", previewVerdict, previewErr)
 	}
 	passes := 0
-	viewTestHooks.observe = func() {
-		passes++
-		if passes == previewPasses+1 {
-			write("base.go", "//go:build !amd64.v2\n\npackage session\nfunc Value() int { return 77 }\n")
-		}
-	}
-	rejected, closingErr := extension.CheckBatchWithLedgers(ctx, []Candidate{{subject, final.Fingerprint}}, map[int]TestVariantLedger{0: ledger})
-	viewTestHooks.observe = priorObserve
+	var rejected []CheckedCandidate
+	var closingErr error
+	withViewTestHooks(viewTestHookSet{
+		observe: func() {
+			passes++
+			if passes == previewPasses+1 {
+				write("base.go", "//go:build !amd64.v2\n\npackage session\nfunc Value() int { return 77 }\n")
+			}
+		},
+	}, func() {
+		rejected, closingErr = extension.CheckBatchWithLedgers(ctx, []Candidate{{subject, final.Fingerprint}}, map[int]TestVariantLedger{0: ledger})
+	})
 	if !errors.Is(closingErr, ErrViewChanged) || len(rejected) != 0 {
 		t.Fatalf("extension returned provisional evidence without closing: passes=%d preview=%d error=%v", passes, previewPasses, closingErr)
 	}
@@ -4202,14 +4220,17 @@ func TestApplicabilityValidationDefersUnavailableUntilAllObligationsClose(t *tes
 				t.Fatalf("unchanged cut: %v", err)
 			}
 			analyses := 0
-			viewTestHooks.beforeAnalysis = func() {
-				analyses++
-				if err := os.WriteFile(f.input, []byte("moved"), 0600); err != nil {
-					t.Error(err)
-				}
-			}
-			t.Cleanup(func() { viewTestHooks.beforeAnalysis = nil })
-			err := v.Validate(ctx)
+			var err error
+			withViewTestHooks(viewTestHookSet{
+				beforeAnalysis: func() {
+					analyses++
+					if err := os.WriteFile(f.input, []byte("moved"), 0600); err != nil {
+						t.Error(err)
+					}
+				},
+			}, func() {
+				err = v.Validate(ctx)
+			})
 			if analyses != 1 || !errors.Is(err, ErrViewChanged) || errors.Is(err, ErrAnalysisUnavailable) || !strings.Contains(err.Error(), "PureA") {
 				t.Fatalf("later runtime drift masked by A's cut (%d analyses): %v", analyses, err)
 			}
@@ -4239,13 +4260,15 @@ func TestProducerUnavailabilityDoesNotSkipRetainedApplicability(t *testing.T) {
 	if err := v.Validate(ctx); !errors.Is(err, ErrAnalysisUnavailable) {
 		t.Fatalf("unchanged mixed cut: %v", err)
 	}
-	viewTestHooks.beforeAnalysis = func() {
-		if err := os.WriteFile(f.input, []byte("moved"), 0600); err != nil {
-			t.Error(err)
-		}
-	}
-	defer func() { viewTestHooks.beforeAnalysis = nil }()
-	err = v.Validate(ctx)
+	withViewTestHooks(viewTestHookSet{
+		beforeAnalysis: func() {
+			if err := os.WriteFile(f.input, []byte("moved"), 0600); err != nil {
+				t.Error(err)
+			}
+		},
+	}, func() {
+		err = v.Validate(ctx)
+	})
 	if !errors.Is(err, ErrViewChanged) || errors.Is(err, ErrAnalysisUnavailable) || !strings.Contains(err.Error(), "PureA") {
 		t.Fatalf("producer cut hid historical runtime drift: %v", err)
 	}
@@ -4295,17 +4318,19 @@ func TestApplicabilityValidationSharesCompatibleBatches(t *testing.T) {
 		f.extend(t, v, subject, f.recorded[subject], i < 2)
 	}
 	analyses, windows, runtimePhases := 0, 0, 0
-	viewTestHooks.beforeAnalysis = func() { analyses++ }
-	viewTestHooks.runtimeWindow = func() { windows++ }
 	f.engine.progress = func(p Progress) {
 		if p.Phase == "runtime" {
 			runtimePhases++
 		}
 	}
-	defer func() { viewTestHooks.beforeAnalysis = nil; viewTestHooks.runtimeWindow = nil }()
-	if err := v.Validate(context.Background()); err != nil {
-		t.Fatal(err)
-	}
+	withViewTestHooks(viewTestHookSet{
+		beforeAnalysis: func() { analyses++ },
+		runtimeWindow:  func() { windows++ },
+	}, func() {
+		if err := v.Validate(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	})
 	if analyses != 1 || windows != 1 || runtimePhases != 2 {
 		t.Fatalf("validation sharing: analyses=%d windows=%d runtime phases=%d; want 1,1,2", analyses, windows, runtimePhases)
 	}
@@ -4473,16 +4498,18 @@ func TestProgressReportsUnitsServedAndKept(t *testing.T) {
 	// An operation cancelled mid-analysis reports what the pass
 	// persisted before the cancellation.
 	cancelled, cancel := context.WithCancel(context.Background())
-	viewTestHooks.beforeAnalysis = cancel
-	defer func() { viewTestHooks.beforeAnalysis = nil }()
 	events = nil
-	coldView, err := warm.newView(context.Background(), []Subject{b}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := coldView.captureObserved(cancelled, b); err == nil {
-		t.Fatal("cancelled capture succeeded")
-	}
+	withViewTestHooks(viewTestHookSet{
+		beforeAnalysis: cancel,
+	}, func() {
+		coldView, err := warm.newView(context.Background(), []Subject{b}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := coldView.captureObserved(cancelled, b); err == nil {
+			t.Fatal("cancelled capture succeeded")
+		}
+	})
 	var reported []string
 	for _, e := range events {
 		if e.Phase == "cancelled" {
@@ -4496,7 +4523,6 @@ func TestProgressReportsUnitsServedAndKept(t *testing.T) {
 	}
 
 	// A non-context failure reports no cancellation.
-	viewTestHooks.beforeAnalysis = nil
 	events = nil
 	if _, err := warm.newView(context.Background(), []Subject{{Package: a.Package, Symbol: "NoSuch"}}, dir); err == nil {
 		t.Fatal("unknown subject built a view")

@@ -547,6 +547,12 @@ var fileMemoSubjects = []Subject{{Package: "example.com/fm", Symbol: "P"}, {Pack
 // the compartment members it derived.
 func foldOnce(t *testing.T, dir string, memo bool) (map[Subject]Closure, []string, []string) {
 	t.Helper()
+	got, parsed, derived, _ := foldOnceWithCanonical(t, dir, memo)
+	return got, parsed, derived
+}
+
+func foldOnceWithCanonical(t *testing.T, dir string, memo bool) (map[Subject]Closure, []string, []string, []string) {
+	t.Helper()
 	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -554,11 +560,17 @@ func foldOnce(t *testing.T, dir string, memo bool) (map[Subject]Closure, []strin
 	if !memo {
 		h.fileMemo = nil
 	}
-	var parsed, derived []string
-	analysisTestHooks.fileParse = func(path string) { parsed = append(parsed, filepath.Base(path)) }
-	analysisTestHooks.variantParse = func(name string) { derived = append(derived, name) }
-	defer func() { analysisTestHooks.fileParse, analysisTestHooks.variantParse = nil, nil }()
-	got, _, err := h.ComputeMaximalBatch(fileMemoSubjects)
+	var (
+		parsed, derived, canonical []string
+		got                        map[Subject]Closure
+	)
+	withClosureTestHooks(analysisTestHookSet{
+		fileParse:      func(path string) { parsed = append(parsed, filepath.Base(path)) },
+		variantParse:   func(name string) { derived = append(derived, name) },
+		canonicalParse: func(d string) { canonical = append(canonical, filepath.Base(d)) },
+	}, func() {
+		got, _, err = h.ComputeMaximalBatch(fileMemoSubjects)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -568,7 +580,7 @@ func foldOnce(t *testing.T, dir string, memo bool) (map[Subject]Closure, []strin
 	if memo && len(parsed) == 0 && !summary["file scan"]["example.com/fm"] {
 		t.Fatal("no file scan parsed and none served")
 	}
-	return got, parsed, derived
+	return got, parsed, derived, canonical
 }
 
 // A warm pass parses nothing: every file's effect scan and every
@@ -698,18 +710,20 @@ func TestCompartmentParsesServeOnTheScanKeyPath(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := fileMemoModule(t)
 	var derived []string
-	analysisTestHooks.variantParse = func(name string) { derived = append(derived, name) }
-	defer func() { analysisTestHooks.variantParse = nil }()
 	keys := make([]string, 2)
-	for i := range keys {
-		h, err := newAt(dir)
-		if err != nil {
-			t.Fatal(err)
+	withClosureTestHooks(analysisTestHookSet{
+		variantParse: func(name string) { derived = append(derived, name) },
+	}, func() {
+		for i := range keys {
+			h, err := newAt(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if keys[i], err = h.PackageScanKey("example.com/fm"); err != nil {
+				t.Fatal(err)
+			}
 		}
-		if keys[i], err = h.PackageScanKey("example.com/fm"); err != nil {
-			t.Fatal(err)
-		}
-	}
+	})
 	if keys[0] != keys[1] {
 		t.Fatalf("scan keys differ over an unchanged tree: %s vs %s", keys[0], keys[1])
 	}
@@ -823,27 +837,29 @@ func TestFileScanGatesModuleCacheFilesAndPendingSiblings(t *testing.T) {
 	}
 	h := &Hasher{selectionResolved: true, source: sourceDigests{Content: "content", Policy: "policy"}, modCache: cacheRoot, maximalFiles: map[string]maximalEffectScan{}, fileMemo: newFileMemos(), contents: map[string]fileBytes{}}
 	var parsed []string
-	analysisTestHooks.fileParse = func(path string) { parsed = append(parsed, filepath.Base(path)) }
-	defer func() { analysisTestHooks.fileParse = nil }()
-	want, err := maximalFileEffects(true, pinned)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := h.maximalFileEffectsCached("example.com/dep", pinned)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("pinned scan = %+v, want %+v", got, want)
-	}
-	if _, cached := h.contents[pinned]; cached || len(h.fileMemo.scans.pending) != 0 {
-		t.Fatalf("a module-cache file entered the content cache (%t) or the per-file memo (%d dirs pending)", cached, len(h.fileMemo.scans.pending))
-	}
-	for _, path := range []string{first, second} {
-		if got, err := h.maximalFileEffectsCached("example.com/local", path); err != nil || !reflect.DeepEqual(got, want) {
-			t.Fatalf("%s: scan = %+v (err %v), want %+v", path, got, err, want)
+	withClosureTestHooks(analysisTestHookSet{
+		fileParse: func(path string) { parsed = append(parsed, filepath.Base(path)) },
+	}, func() {
+		want, err := maximalFileEffects(true, pinned)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
+		got, err := h.maximalFileEffectsCached("example.com/dep", pinned)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("pinned scan = %+v, want %+v", got, want)
+		}
+		if _, cached := h.contents[pinned]; cached || len(h.fileMemo.scans.pending) != 0 {
+			t.Fatalf("a module-cache file entered the content cache (%t) or the per-file memo (%d dirs pending)", cached, len(h.fileMemo.scans.pending))
+		}
+		for _, path := range []string{first, second} {
+			if got, err := h.maximalFileEffectsCached("example.com/local", path); err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("%s: scan = %+v (err %v), want %+v", path, got, err, want)
+			}
+		}
+	})
 	if _, cached := h.contents[first]; !cached || len(h.fileMemo.scans.pending[localDir]) != 1 {
 		t.Fatalf("the mutable-local files did not enter the content cache (%t) and one pending entry (%d)", cached, len(h.fileMemo.scans.pending[localDir]))
 	}
@@ -1374,15 +1390,15 @@ func TestPure(t *testing.T) {
 	return dir
 }
 
-// countTestingScanLoads observes the typed scan's own program load; a
+// withTestingScanLoadCount observes the typed scan's own program load; a
 // memo hit must never reach it.
-func countTestingScanLoads(t *testing.T) *int {
-	t.Helper()
+func withTestingScanLoadCount(fn func(loads *int)) {
 	loads := 0
-	prev := analysisTestHooks.testingTypeOwnLoad
-	analysisTestHooks.testingTypeOwnLoad = func(string) { loads++ }
-	t.Cleanup(func() { analysisTestHooks.testingTypeOwnLoad = prev })
-	return &loads
+	withClosureTestHooks(analysisTestHookSet{
+		testingTypeOwnLoad: func(string) { loads++ },
+	}, func() {
+		fn(&loads)
+	})
 }
 
 // TestTestingScanMemoServesWithoutTypeLoad pins the memo's core property
@@ -1397,132 +1413,132 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, dir, "plain/plain.go", "package plain\n\nfunc P() int { return 0 }\n")
-	loads := countTestingScanLoads(t)
+	withTestingScanLoadCount(func(loads *int) {
+		first, err := newAt(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		first.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
+		derived, err := first.maximalTestingTypeEffects("example.com/tscan")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if *loads != 1 {
+			t.Fatalf("derivation loads = %d, want 1", *loads)
+		}
+		if len(derived.effects) == 0 || derived.preferred == "" {
+			t.Fatalf("derived scan carries no testing facts: %+v", derived)
+		}
 
-	first, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	first.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
-	derived, err := first.maximalTestingTypeEffects("example.com/tscan")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if *loads != 1 {
-		t.Fatalf("derivation loads = %d, want 1", *loads)
-	}
-	if len(derived.effects) == 0 || derived.preferred == "" {
-		t.Fatalf("derived scan carries no testing facts: %+v", derived)
-	}
+		second, err := newAt(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		second.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
+		served, err := second.maximalTestingTypeEffects("example.com/tscan")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if *loads != 1 {
+			t.Fatalf("memo hit loaded the type environment: loads = %d", *loads)
+		}
+		if !reflect.DeepEqual(served, derived) {
+			t.Fatalf("served scan diverged:\n got %+v\nwant %+v", served, derived)
+		}
 
-	second, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
-	served, err := second.maximalTestingTypeEffects("example.com/tscan")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if *loads != 1 {
-		t.Fatalf("memo hit loaded the type environment: loads = %d", *loads)
-	}
-	if !reflect.DeepEqual(served, derived) {
-		t.Fatalf("served scan diverged:\n got %+v\nwant %+v", served, derived)
-	}
+		// Without a caller-supplied scope the memo is disabled: the scan
+		// loads even though a matching entry exists under some scope.
+		bare, err := newAt(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bareScan, err := bare.maximalTestingTypeEffects("example.com/tscan")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if *loads != 2 {
+			t.Fatalf("scope-less scan loads = %d, want 2", *loads)
+		}
+		if !reflect.DeepEqual(bareScan, derived) {
+			t.Fatalf("scope-less scan diverged:\n got %+v\nwant %+v", bareScan, derived)
+		}
 
-	// Without a caller-supplied scope the memo is disabled: the scan
-	// loads even though a matching entry exists under some scope.
-	bare, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bareScan, err := bare.maximalTestingTypeEffects("example.com/tscan")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if *loads != 2 {
-		t.Fatalf("scope-less scan loads = %d, want 2", *loads)
-	}
-	if !reflect.DeepEqual(bareScan, derived) {
-		t.Fatalf("scope-less scan diverged:\n got %+v\nwant %+v", bareScan, derived)
-	}
+		// An effect-free scan round-trips as a hit: the recorded absence of
+		// testing effects serves without a load.
+		third, err := newAt(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		third.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
+		emptyDerived, err := third.maximalTestingTypeEffects("example.com/tscan/plain")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if *loads != 3 {
+			t.Fatalf("effect-free derivation loads = %d, want 3", *loads)
+		}
+		if len(emptyDerived.effects) != 0 || emptyDerived.preferred != "" {
+			t.Fatalf("plain package scan carries facts: %+v", emptyDerived)
+		}
+		fourth, err := newAt(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fourth.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
+		emptyServed, err := fourth.maximalTestingTypeEffects("example.com/tscan/plain")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if *loads != 3 {
+			t.Fatalf("effect-free memo hit loaded the type environment: loads = %d", *loads)
+		}
+		if !reflect.DeepEqual(emptyServed, emptyDerived) {
+			t.Fatalf("effect-free served scan diverged:\n got %+v\nwant %+v", emptyServed, emptyDerived)
+		}
 
-	// An effect-free scan round-trips as a hit: the recorded absence of
-	// testing effects serves without a load.
-	third, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	third.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
-	emptyDerived, err := third.maximalTestingTypeEffects("example.com/tscan/plain")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if *loads != 3 {
-		t.Fatalf("effect-free derivation loads = %d, want 3", *loads)
-	}
-	if len(emptyDerived.effects) != 0 || emptyDerived.preferred != "" {
-		t.Fatalf("plain package scan carries facts: %+v", emptyDerived)
-	}
-	fourth, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fourth.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
-	emptyServed, err := fourth.maximalTestingTypeEffects("example.com/tscan/plain")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if *loads != 3 {
-		t.Fatalf("effect-free memo hit loaded the type environment: loads = %d", *loads)
-	}
-	if !reflect.DeepEqual(emptyServed, emptyDerived) {
-		t.Fatalf("effect-free served scan diverged:\n got %+v\nwant %+v", emptyServed, emptyDerived)
-	}
-
-	// A key-derivation failure disables the memo for the package —
-	// fail-open to recomputation: the scan still derives, serves nothing
-	// from the memo, and persists nothing. The poisoned session list
-	// cache fails the closure hash while the scan's own load stays
-	// healthy — a single-sided failure.
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	memoDir := filepath.Join(cache, "gofresh", testingScanDirName)
-	before, err := os.ReadDir(memoDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	broken, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	broken.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
-	broken.lists["example.com/tscan"] = []listPkg{{
-		ImportPath: "example.com/tscan",
-		Dir:        filepath.Join(dir, "missing"),
-		GoFiles:    []string{"gone.go"},
-		Module:     &listMod{Path: "example.com/tscan", Main: true, Dir: dir},
-	}}
-	brokenScan, err := broken.maximalTestingTypeEffects("example.com/tscan")
-	if err != nil {
-		t.Fatalf("fail-open derivation errored: %v", err)
-	}
-	if *loads != 4 {
-		t.Fatalf("fail-open scan loads = %d, want 4 (a failed key must not serve)", *loads)
-	}
-	if !reflect.DeepEqual(brokenScan, derived) {
-		t.Fatalf("fail-open scan diverged:\n got %+v\nwant %+v", brokenScan, derived)
-	}
-	after, err := os.ReadDir(memoDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(after) != len(before) {
-		t.Fatalf("a failed key derivation persisted an entry: %d -> %d files", len(before), len(after))
-	}
+		// A key-derivation failure disables the memo for the package —
+		// fail-open to recomputation: the scan still derives, serves nothing
+		// from the memo, and persists nothing. The poisoned session list
+		// cache fails the closure hash while the scan's own load stays
+		// healthy — a single-sided failure.
+		cache, err := os.UserCacheDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		memoDir := filepath.Join(cache, "gofresh", testingScanDirName)
+		before, err := os.ReadDir(memoDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		broken, err := newAt(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		broken.SetAnalysisScope(AnalysisScope{ProofStrategy: "strategy@1", Toolchain: "toolchain", BuildConfig: "build"})
+		broken.lists["example.com/tscan"] = []listPkg{{
+			ImportPath: "example.com/tscan",
+			Dir:        filepath.Join(dir, "missing"),
+			GoFiles:    []string{"gone.go"},
+			Module:     &listMod{Path: "example.com/tscan", Main: true, Dir: dir},
+		}}
+		brokenScan, err := broken.maximalTestingTypeEffects("example.com/tscan")
+		if err != nil {
+			t.Fatalf("fail-open derivation errored: %v", err)
+		}
+		if *loads != 4 {
+			t.Fatalf("fail-open scan loads = %d, want 4 (a failed key must not serve)", *loads)
+		}
+		if !reflect.DeepEqual(brokenScan, derived) {
+			t.Fatalf("fail-open scan diverged:\n got %+v\nwant %+v", brokenScan, derived)
+		}
+		after, err := os.ReadDir(memoDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(after) != len(before) {
+			t.Fatalf("a failed key derivation persisted an entry: %d -> %d files", len(before), len(after))
+		}
+	})
 }
 
 // TestTestingScanMemoMissesOnScopeAndSourceChange pins the key's
@@ -1533,83 +1549,83 @@ func TestTestingScanMemoServesWithoutTypeLoad(t *testing.T) {
 func TestTestingScanMemoMissesOnScopeAndSourceChange(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	dir := testingScanModule(t)
-	loads := countTestingScanLoads(t)
-
-	first, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	first.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
-	before, err := first.maximalTestingTypeEffects("example.com/tscan")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if *loads != 1 {
-		t.Fatalf("derivation loads = %d, want 1", *loads)
-	}
-
-	otherScope, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	otherScope.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-b", BuildConfig: "build"})
-	if _, err := otherScope.maximalTestingTypeEffects("example.com/tscan"); err != nil {
-		t.Fatal(err)
-	}
-	if *loads != 2 {
-		t.Fatal("a different scope served from the memo")
-	}
-
-	// A test-only edit moves the key and the scan alike.
-	testSrc, err := os.ReadFile(filepath.Join(dir, "scan_test.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "scan_test.go"), append(testSrc, []byte("\nfunc TestExtra(t *testing.T) { t.Setenv(\"K\", \"V\") }\n")...), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	moved, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	moved.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
-	after, err := moved.maximalTestingTypeEffects("example.com/tscan")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if *loads != 3 {
-		t.Fatal("a test-only source change served from the memo")
-	}
-	if !hasEffectReason(after.effects, "reaches testing.Setenv (process or path mutation)") {
-		t.Fatalf("post-edit scan misses the new testing effect: %+v", after)
-	}
-	if reflect.DeepEqual(after, before) {
-		t.Fatal("post-edit scan equals the pre-edit scan")
-	}
-
-	// Corrupt entries recompute silently.
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		t.Fatal(err)
-	}
-	entries, err := os.ReadDir(filepath.Join(cache, "gofresh", testingScanDirName))
-	if err != nil || len(entries) == 0 {
-		t.Fatalf("memo entries = %v, err %v", entries, err)
-	}
-	for _, entry := range entries {
-		if err := os.WriteFile(filepath.Join(cache, "gofresh", testingScanDirName, entry.Name()), []byte("corrupt"), 0o644); err != nil {
+	withTestingScanLoadCount(func(loads *int) {
+		first, err := newAt(dir)
+		if err != nil {
 			t.Fatal(err)
 		}
-	}
-	recomputed, err := newAt(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recomputed.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
-	if _, err := recomputed.maximalTestingTypeEffects("example.com/tscan"); err != nil {
-		t.Fatal(err)
-	}
-	if *loads != 4 {
-		t.Fatal("a corrupt entry served")
-	}
+		first.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
+		before, err := first.maximalTestingTypeEffects("example.com/tscan")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if *loads != 1 {
+			t.Fatalf("derivation loads = %d, want 1", *loads)
+		}
+
+		otherScope, err := newAt(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		otherScope.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-b", BuildConfig: "build"})
+		if _, err := otherScope.maximalTestingTypeEffects("example.com/tscan"); err != nil {
+			t.Fatal(err)
+		}
+		if *loads != 2 {
+			t.Fatal("a different scope served from the memo")
+		}
+
+		// A test-only edit moves the key and the scan alike.
+		testSrc, err := os.ReadFile(filepath.Join(dir, "scan_test.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "scan_test.go"), append(testSrc, []byte("\nfunc TestExtra(t *testing.T) { t.Setenv(\"K\", \"V\") }\n")...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		moved, err := newAt(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		moved.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
+		after, err := moved.maximalTestingTypeEffects("example.com/tscan")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if *loads != 3 {
+			t.Fatal("a test-only source change served from the memo")
+		}
+		if !hasEffectReason(after.effects, "reaches testing.Setenv (process or path mutation)") {
+			t.Fatalf("post-edit scan misses the new testing effect: %+v", after)
+		}
+		if reflect.DeepEqual(after, before) {
+			t.Fatal("post-edit scan equals the pre-edit scan")
+		}
+
+		// Corrupt entries recompute silently.
+		cache, err := os.UserCacheDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries, err := os.ReadDir(filepath.Join(cache, "gofresh", testingScanDirName))
+		if err != nil || len(entries) == 0 {
+			t.Fatalf("memo entries = %v, err %v", entries, err)
+		}
+		for _, entry := range entries {
+			if err := os.WriteFile(filepath.Join(cache, "gofresh", testingScanDirName, entry.Name()), []byte("corrupt"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		recomputed, err := newAt(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		recomputed.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
+		if _, err := recomputed.maximalTestingTypeEffects("example.com/tscan"); err != nil {
+			t.Fatal(err)
+		}
+		if *loads != 4 {
+			t.Fatal("a corrupt entry served")
+		}
+	})
 }

@@ -608,3 +608,49 @@ func FuzzCPreprocessor(f *testing.F) {
 		_ = scanPreprocessedNonGoSymbolRefs("example.com/pkg", []string{src}, []string{src}, rtOut, extOut, idOut)
 	})
 }
+
+//gofresh:pure
+func TestRawAndEscapedCgoImportPreambleDetectionAndCanonicalDigest(t *testing.T) {
+	for _, spell := range []struct {
+		name string
+		imp  string
+	}{
+		{"raw_single", "import `C`"},
+		{"raw_grouped", "import (\n\t`C`\n)"},
+		{"hex_escaped", `import "\x43"`},
+		{"octal_escaped", `import "\103"`},
+	} {
+		t.Run(spell.name, func(t *testing.T) {
+			srcA := "package p\n\n// #define CGO_FLAG 1\n// #include \"local.h\"\n" + spell.imp + "\n\nfunc F() int { return 1 }\n"
+			srcB := "package p\n\n// #define CGO_FLAG 2\n// #include \"local.h\"\n" + spell.imp + "\n\nfunc F() int { return 1 }\n"
+
+			if !sourceMayImportC(srcA) {
+				t.Fatalf("sourceMayImportC(%s) = false, want true", spell.name)
+			}
+			preamble, err := goCgoPreamble([]byte(srcA))
+			if err != nil {
+				t.Fatalf("goCgoPreamble(%s): %v", spell.name, err)
+			}
+			if !strings.Contains(preamble, "#define CGO_FLAG 1") || !strings.Contains(preamble, `#include "local.h"`) {
+				t.Fatalf("goCgoPreamble(%s) = %q, missing preamble directives", spell.name, preamble)
+			}
+			fset := token.NewFileSet()
+			f, err := parser.ParseFile(fset, "p.go", srcA, parser.ParseComments)
+			if err != nil {
+				t.Fatalf("ParseFile(%s): %v", spell.name, err)
+			}
+			extracted := strings.Join(extractFileCgoPreambles(f), "\n")
+			if !strings.Contains(extracted, "#define CGO_FLAG 1") {
+				t.Fatalf("extractFileCgoPreambles(%s) = %q, missing #define CGO_FLAG 1", spell.name, extracted)
+			}
+			digA, okA := canonicalDigest([]byte(srcA))
+			digB, okB := canonicalDigest([]byte(srcB))
+			if !okA || !okB {
+				t.Fatalf("canonicalDigest(%s) ok = (%v, %v), want (true, true)", spell.name, okA, okB)
+			}
+			if digA == digB {
+				t.Fatalf("canonicalDigest(%s) did not change when cgo preamble changed: %s", spell.name, digA)
+			}
+		})
+	}
+}

@@ -6,7 +6,10 @@ import (
 	"go/types"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/auditset"
@@ -242,19 +245,5000 @@ type pendingReturnDisposition struct {
 	attrFn FuncKey
 }
 
-// bracketedSeamNodes identifies AST nodes in p that belong to lexically
-// bracketed save-and-restore or zero-reset seams in sequential functions
-// (no go statement, no .Parallel() call, and no escaping closure writing
-// the seam) or to an unexported sync/atomic.Pointer[T] hook variable whose
-// Store calls are serialized under a single unexported package-level
-// sync.Mutex with mu.Lock(), defer mu.Unlock(), and defer v.Store(nil)
-// executed in that order before any non-nil Store or early exit
-// (REQ-closure-shared-dynamic-state).
-func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
-	if p == nil || p.TypesInfo == nil {
+type seamCallGraph struct {
+	declPlainFuncs map[*types.Func]*ast.FuncDecl
+	blocked        map[*types.Func]bool
+	nonSeqLits     map[*ast.FuncLit]bool
+	intraEdges     map[*types.Func]map[*types.Func]bool
+	nonSeqFuncUses []FuncKey
+	seqFuncEdges   []FuncDepEdge
+	parallelFuncs  []FuncKey
+	parallelEdges  []FuncDepEdge
+}
+
+func callableFactKey(fn *types.Func) (FuncKey, bool) {
+	if fn == nil || fn.Pkg() == nil {
+		return FuncKey{}, false
+	}
+	fn = fn.Origin()
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok || sig == nil {
+		return FuncKey{}, false
+	}
+	if sig.Recv() == nil {
+		fk := FuncKey{Pkg: fn.Pkg().Path(), Name: fn.Name()}
+		return fk, fk.Valid()
+	}
+	if methodRecvNamedTypeName(fn) == "" {
+		return FuncKey{}, false
+	}
+	fk := methodFactKey(fn)
+	return fk, fk.Valid()
+}
+
+func isParallelSelector(info *types.Info, sel *ast.SelectorExpr) bool {
+	if sel == nil || sel.Sel == nil || sel.Sel.Name != "Parallel" {
+		return false
+	}
+	if info == nil {
+		return true
+	}
+	obj := info.Uses[sel.Sel]
+	if obj == nil {
+		return true
+	}
+	switch obj := obj.(type) {
+	case *types.Func:
+		return true
+	case *types.Const, *types.TypeName, *types.PkgName:
+		return false
+	case *types.Var:
+		if obj.Type() == nil {
+			return true
+		}
+		basic, isBasic := types.Unalias(obj.Type()).Underlying().(*types.Basic)
+		if isBasic && basic.Kind() != types.Invalid {
+			return false
+		}
+		return true
+	default:
+		return true
+	}
+}
+
+func testingSyncMethodName(info *types.Info, call *ast.CallExpr) string {
+	if info == nil || call == nil || call.Ellipsis.IsValid() {
+		return ""
+	}
+	sel, ok := unparenExpr(call.Fun).(*ast.SelectorExpr)
+	if !ok {
+		return ""
+	}
+	if selInfo, ok := info.Selections[sel]; !ok || selInfo.Kind() != types.MethodVal {
+		return ""
+	}
+	fn, ok := info.Uses[sel.Sel].(*types.Func)
+	if !ok || fn == nil || fn.Pkg() == nil || fn.Pkg().Path() != "testing" {
+		return ""
+	}
+	return fn.Name()
+}
+
+func bodyHasSyncHazard(info *types.Info, body *ast.BlockStmt, checkGo bool) bool {
+	if body == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		if found || n == nil {
+			return false
+		}
+		switch n := n.(type) {
+		case *ast.GoStmt:
+			if checkGo {
+				found = true
+				return false
+			}
+		case *ast.SelectorExpr:
+			if isParallelSelector(info, n) {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
+}
+
+func bodyHasParallelSelector(info *types.Info, body *ast.BlockStmt) bool {
+	return bodyHasSyncHazard(info, body, false)
+}
+
+func bodyHasGoOrParallel(info *types.Info, body *ast.BlockStmt) bool {
+	return bodyHasSyncHazard(info, body, true)
+}
+
+func extractTargetVar(info *types.Info, expr ast.Expr) *types.Var {
+	if info == nil || expr == nil {
 		return nil
 	}
+	for expr != nil {
+		switch e := expr.(type) {
+		case *ast.ParenExpr:
+			expr = e.X
+		case *ast.StarExpr:
+			expr = e.X
+		case *ast.IndexExpr:
+			expr = e.X
+		case *ast.IndexListExpr:
+			expr = e.X
+		case *ast.SliceExpr:
+			expr = e.X
+		case *ast.TypeAssertExpr:
+			expr = e.X
+		case *ast.UnaryExpr:
+			if e.Op == token.ARROW {
+				expr = e.X
+			} else {
+				return nil
+			}
+		case *ast.SelectorExpr:
+			if v, ok := info.Uses[e.Sel].(*types.Var); ok && v != nil && !v.IsField() {
+				return v
+			}
+			expr = e.X
+		case *ast.Ident:
+			if v, ok := identDefOrUse(info, e).(*types.Var); ok && v != nil && !v.IsField() {
+				return v
+			}
+			return nil
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+func sigParamIndexForArg(sig *types.Signature, argIdx int, isEllipsis bool) (int, bool) {
+	if sig == nil || sig.Params() == nil || argIdx < 0 {
+		return 0, false
+	}
+	nParams := sig.Params().Len()
+	if nParams == 0 {
+		return 0, false
+	}
+	if sig.Variadic() {
+		last := nParams - 1
+		if isEllipsis {
+			if argIdx > last {
+				return 0, false
+			}
+			return argIdx, true
+		}
+		if argIdx >= last {
+			return last, true
+		}
+		return argIdx, true
+	}
+	if isEllipsis || argIdx >= nParams {
+		return 0, false
+	}
+	return argIdx, true
+}
+
+func concreteTestingHandleKind(t types.Type) string {
+	if t == nil {
+		return ""
+	}
+	ptr, ok := types.Unalias(t).(*types.Pointer)
+	if !ok || ptr == nil {
+		return ""
+	}
+	named, ok := types.Unalias(ptr.Elem()).(*types.Named)
+	if !ok || named == nil || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "testing" {
+		return ""
+	}
+	switch named.Obj().Name() {
+	case "T", "B", "F":
+		return named.Obj().Name()
+	default:
+		return ""
+	}
+}
+
+func isGoTestRunnerName(name, prefix string) bool {
+	if !strings.HasPrefix(name, prefix) {
+		return false
+	}
+	if len(name) == len(prefix) {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(name[len(prefix):])
+	return !unicode.IsLower(r)
+}
+
+type parParamKey struct {
+	fn  *types.Func
+	idx int
+}
+
+type ifaceSlotKey struct {
+	name string
+	idx  int
+}
+
+// analyzeSeamCallGraph identifies plain package functions in p that must not
+// discharge mutating seams because they either escape as function values or are
+// transitively reachable from init flow, a method, a package-level initializer,
+// a `go` statement, or a `.Parallel`-bearing scope, and summarizes cross-package
+// non-sequential plain-function uses, sequential call edges, and upward
+// `.Parallel()` dataflow edges for Compose.
+func analyzeSeamCallGraph(p *packages.Package) seamCallGraph {
+	var out seamCallGraph
+	if p == nil || p.TypesInfo == nil || (p.Name == "main" && strings.HasSuffix(p.PkgPath, ".test")) {
+		return out
+	}
+	stdPaths := map[string]bool{}
+	if len(p.Imports) > 0 {
+		importsTestingMemo := map[*packages.Package]bool{}
+		var pkgImportsTesting func(*packages.Package) bool
+		pkgImportsTesting = func(imp *packages.Package) bool {
+			if imp == nil {
+				return false
+			}
+			if v, ok := importsTestingMemo[imp]; ok {
+				return v
+			}
+			importsTestingMemo[imp] = false
+			for _, dep := range imp.Imports {
+				if dep == nil {
+					continue
+				}
+				if dep.PkgPath == "testing" || pkgImportsTesting(dep) {
+					importsTestingMemo[imp] = true
+					return true
+				}
+			}
+			return false
+		}
+		visitedImp := map[*packages.Package]bool{}
+		var collectStd func(map[string]*packages.Package)
+		collectStd = func(m map[string]*packages.Package) {
+			for _, imp := range m {
+				if imp == nil || visitedImp[imp] {
+					continue
+				}
+				visitedImp[imp] = true
+				if imp.Module == nil && imp.PkgPath != "" && !pkgImportsTesting(imp) {
+					stdPaths[imp.PkgPath] = true
+				}
+				if len(imp.Imports) > 0 {
+					collectStd(imp.Imports)
+				}
+			}
+		}
+		collectStd(p.Imports)
+	}
+	isStdPkg := func(pkg *types.Package) bool {
+		return pkg == nil || stdPaths[pkg.Path()]
+	}
+	isStdCallee := func(callee *types.Func) bool {
+		return callee == nil || isStdPkg(callee.Pkg())
+	}
+
+	allDeclFuncs := map[*types.Func]*ast.FuncDecl{}
+	declFuncs := map[*types.Func]*ast.FuncDecl{}
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			fd, ok := decl.(*ast.FuncDecl)
+			if !ok || fd.Name == nil || fd.Name.Name == "init" || fd.Name.Name == "_" || fd.Body == nil {
+				continue
+			}
+			fn, ok := p.TypesInfo.Defs[fd.Name].(*types.Func)
+			if !ok || fn == nil {
+				continue
+			}
+			fn = fn.Origin()
+			allDeclFuncs[fn] = fd
+			if fd.Recv == nil {
+				declFuncs[fn] = fd
+			}
+		}
+	}
+	out.declPlainFuncs = declFuncs
+
+	directNamedMethodsCache := map[*types.Named][]*types.Func{}
+	directNamedMethods := func(named *types.Named) []*types.Func {
+		if named == nil || named.Obj() == nil || named.Obj().Pkg() == nil {
+			return nil
+		}
+		if cached, ok := directNamedMethodsCache[named]; ok {
+			return cached
+		}
+		switch named.Underlying().(type) {
+		case *types.Interface, *types.TypeParam:
+			directNamedMethodsCache[named] = nil
+			return nil
+		}
+		seen := map[*types.Func]bool{}
+		var methods []*types.Func
+		addMethod := func(m *types.Func) {
+			if m == nil || m.Pkg() == nil {
+				return
+			}
+			m = m.Origin()
+			if m.Name() == "Parallel" || seen[m] {
+				return
+			}
+			seen[m] = true
+			methods = append(methods, m)
+		}
+		for _, ms := range []*types.MethodSet{
+			types.NewMethodSet(types.NewPointer(named)),
+			types.NewMethodSet(named),
+		} {
+			for i := 0; i < ms.Len(); i++ {
+				if m, ok := ms.At(i).Obj().(*types.Func); ok {
+					addMethod(m)
+				}
+			}
+		}
+		for i := 0; i < named.NumMethods(); i++ {
+			addMethod(named.Method(i))
+		}
+		directNamedMethodsCache[named] = methods
+		return methods
+	}
+
+	typeMethodsCache := map[types.Type][]*types.Func{}
+	collectTypeMethods := func(root types.Type) []*types.Func {
+		if root == nil {
+			return nil
+		}
+		if cached, ok := typeMethodsCache[root]; ok {
+			return cached
+		}
+		visited := map[types.Type]bool{}
+		seen := map[*types.Func]bool{}
+		var methods []*types.Func
+		addMethods := func(ms []*types.Func) {
+			for _, m := range ms {
+				if !seen[m] {
+					seen[m] = true
+					methods = append(methods, m)
+				}
+			}
+		}
+		var walk func(t types.Type)
+		walk = func(t types.Type) {
+			if t == nil || visited[t] {
+				return
+			}
+			visited[t] = true
+			switch u := t.(type) {
+			case *types.Basic:
+				return
+			case *types.Alias:
+				if targs := u.TypeArgs(); targs != nil {
+					for i := 0; i < targs.Len(); i++ {
+						walk(targs.At(i))
+					}
+				}
+				walk(types.Unalias(u))
+			case *types.Named:
+				if targs := u.TypeArgs(); targs != nil {
+					for i := 0; i < targs.Len(); i++ {
+						walk(targs.At(i))
+					}
+				}
+				if u.Obj() != nil && u.Obj().Pkg() != nil && u.Obj().Pkg() != p.Types && isStdPkg(u.Obj().Pkg()) {
+					return
+				}
+				addMethods(directNamedMethods(u))
+				walk(u.Underlying())
+			case *types.Pointer:
+				walk(u.Elem())
+			case *types.Slice:
+				walk(u.Elem())
+			case *types.Array:
+				walk(u.Elem())
+			case *types.Chan:
+				walk(u.Elem())
+			case *types.Map:
+				walk(u.Key())
+				walk(u.Elem())
+			case *types.Struct:
+				for i := 0; i < u.NumFields(); i++ {
+					walk(u.Field(i).Type())
+				}
+			case *types.Tuple:
+				for i := 0; i < u.Len(); i++ {
+					walk(u.At(i).Type())
+				}
+			case *types.Signature:
+				if u.Recv() != nil {
+					walk(u.Recv().Type())
+				}
+				walk(u.Params())
+				walk(u.Results())
+			case *types.Interface:
+				for i := 0; i < u.NumExplicitMethods(); i++ {
+					walk(u.ExplicitMethod(i).Type())
+				}
+				for i := 0; i < u.NumEmbeddeds(); i++ {
+					walk(u.EmbeddedType(i))
+				}
+			case *types.TypeParam:
+				walk(u.Constraint())
+			case *types.Union:
+				for i := 0; i < u.Len(); i++ {
+					if term := u.Term(i); term != nil {
+						walk(term.Type())
+					}
+				}
+			}
+		}
+		walk(root)
+		typeMethodsCache[root] = methods
+		return methods
+	}
+
+	mayCarryParCache := map[types.Type]bool{}
+	typeMayCarryParallel := func(root types.Type) bool {
+		if root == nil {
+			return false
+		}
+		if cached, ok := mayCarryParCache[root]; ok {
+			return cached
+		}
+		if concreteTestingHandleKind(root) != "" {
+			mayCarryParCache[root] = false
+			return false
+		}
+		visited := map[types.Type]bool{}
+		var walk func(t types.Type) bool
+		walk = func(t types.Type) bool {
+			if t == nil || visited[t] {
+				return false
+			}
+			if concreteTestingHandleKind(t) != "" {
+				return false
+			}
+			visited[t] = true
+			switch u := t.(type) {
+			case *types.Basic:
+				return u.Kind() == types.UnsafePointer
+			case *types.Signature, *types.Interface, *types.TypeParam:
+				return true
+			case *types.Alias:
+				if targs := u.TypeArgs(); targs != nil {
+					for i := 0; i < targs.Len(); i++ {
+						if walk(targs.At(i)) {
+							return true
+						}
+					}
+				}
+				return walk(types.Unalias(u))
+			case *types.Named:
+				if targs := u.TypeArgs(); targs != nil {
+					for i := 0; i < targs.Len(); i++ {
+						if walk(targs.At(i)) {
+							return true
+						}
+					}
+				}
+				return walk(u.Underlying())
+			case *types.Pointer:
+				return walk(u.Elem())
+			case *types.Slice:
+				return walk(u.Elem())
+			case *types.Array:
+				return walk(u.Elem())
+			case *types.Chan:
+				return walk(u.Elem())
+			case *types.Map:
+				return walk(u.Key()) || walk(u.Elem())
+			case *types.Struct:
+				for i := 0; i < u.NumFields(); i++ {
+					if walk(u.Field(i).Type()) {
+						return true
+					}
+				}
+				return false
+			case *types.Tuple:
+				for i := 0; i < u.Len(); i++ {
+					if walk(u.At(i).Type()) {
+						return true
+					}
+				}
+				return false
+			case *types.Union:
+				for i := 0; i < u.Len(); i++ {
+					if term := u.Term(i); term != nil && walk(term.Type()) {
+						return true
+					}
+				}
+				return false
+			}
+			return false
+		}
+		res := walk(root)
+		mayCarryParCache[root] = res
+		return res
+	}
+
+	typeParamsCache := map[types.Type][]*types.TypeParam{}
+	collectTypeParams := func(root types.Type) []*types.TypeParam {
+		if root == nil {
+			return nil
+		}
+		if cached, ok := typeParamsCache[root]; ok {
+			return cached
+		}
+		visited := map[types.Type]bool{}
+		seen := map[*types.TypeParam]bool{}
+		var tps []*types.TypeParam
+		var walk func(t types.Type)
+		walk = func(t types.Type) {
+			if t == nil || visited[t] {
+				return
+			}
+			visited[t] = true
+			switch u := t.(type) {
+			case *types.Basic:
+				return
+			case *types.TypeParam:
+				if !seen[u] {
+					seen[u] = true
+					tps = append(tps, u)
+				}
+				walk(u.Constraint())
+			case *types.Alias:
+				if targs := u.TypeArgs(); targs != nil {
+					for i := 0; i < targs.Len(); i++ {
+						walk(targs.At(i))
+					}
+				}
+				walk(types.Unalias(u))
+			case *types.Named:
+				if targs := u.TypeArgs(); targs != nil {
+					for i := 0; i < targs.Len(); i++ {
+						walk(targs.At(i))
+					}
+				}
+				if u.Obj() != nil && u.Obj().Pkg() != nil && u.Obj().Pkg() != p.Types && isStdPkg(u.Obj().Pkg()) {
+					return
+				}
+				walk(u.Underlying())
+			case *types.Pointer:
+				walk(u.Elem())
+			case *types.Slice:
+				walk(u.Elem())
+			case *types.Array:
+				walk(u.Elem())
+			case *types.Chan:
+				walk(u.Elem())
+			case *types.Map:
+				walk(u.Key())
+				walk(u.Elem())
+			case *types.Struct:
+				for i := 0; i < u.NumFields(); i++ {
+					walk(u.Field(i).Type())
+				}
+			case *types.Tuple:
+				for i := 0; i < u.Len(); i++ {
+					walk(u.At(i).Type())
+				}
+			case *types.Signature:
+				if u.Recv() != nil {
+					walk(u.Recv().Type())
+				}
+				walk(u.Params())
+				walk(u.Results())
+			case *types.Interface:
+				for i := 0; i < u.NumExplicitMethods(); i++ {
+					walk(u.ExplicitMethod(i).Type())
+				}
+				for i := 0; i < u.NumEmbeddeds(); i++ {
+					walk(u.EmbeddedType(i))
+				}
+			case *types.Union:
+				for i := 0; i < u.Len(); i++ {
+					if term := u.Term(i); term != nil {
+						walk(term.Type())
+					}
+				}
+			}
+		}
+		walk(root)
+		typeParamsCache[root] = tps
+		return tps
+	}
+
+	forEachCallableSignature := func(root types.Type, visit func(*types.Signature)) {
+		if root == nil {
+			return
+		}
+		if sig, ok := types.Unalias(root).Underlying().(*types.Signature); ok {
+			if sig != nil {
+				visit(sig)
+			}
+			return
+		}
+		var visited map[types.Type]bool
+		var walk func(t types.Type)
+		walk = func(t types.Type) {
+			if t == nil || visited[t] {
+				return
+			}
+			switch u := t.(type) {
+			case *types.Alias:
+				if visited == nil {
+					visited = map[types.Type]bool{}
+				}
+				visited[t] = true
+				walk(types.Unalias(u))
+			case *types.Named:
+				if visited == nil {
+					visited = map[types.Type]bool{}
+				}
+				visited[t] = true
+				walk(u.Underlying())
+			case *types.TypeParam:
+				if visited == nil {
+					visited = map[types.Type]bool{}
+				}
+				visited[t] = true
+				walk(u.Constraint())
+			case *types.Interface:
+				if u.NumEmbeddeds() == 0 {
+					return
+				}
+				if visited == nil {
+					visited = map[types.Type]bool{}
+				}
+				visited[t] = true
+				for i := 0; i < u.NumEmbeddeds(); i++ {
+					walk(u.EmbeddedType(i))
+				}
+			case *types.Union:
+				if visited == nil {
+					visited = map[types.Type]bool{}
+				}
+				visited[t] = true
+				for i := 0; i < u.Len(); i++ {
+					if term := u.Term(i); term != nil {
+						walk(term.Type())
+					}
+				}
+			case *types.Signature:
+				visit(u)
+			}
+		}
+		walk(root)
+	}
+
+	mayCarryAliasCache := map[types.Type]bool{}
+	typeMayCarryMutableAlias := func(root types.Type) bool {
+		if root == nil {
+			return false
+		}
+		if cached, ok := mayCarryAliasCache[root]; ok {
+			return cached
+		}
+		if !typeMayCarryParallel(root) {
+			mayCarryAliasCache[root] = false
+			return false
+		}
+		visited := map[types.Type]bool{}
+		var walk func(t types.Type) bool
+		walk = func(t types.Type) bool {
+			if t == nil || visited[t] || concreteTestingHandleKind(t) != "" {
+				return false
+			}
+			visited[t] = true
+			switch u := t.(type) {
+			case *types.Basic:
+				return u.Kind() == types.UnsafePointer
+			case *types.Signature:
+				if u.Results() != nil {
+					for i := 0; i < u.Results().Len(); i++ {
+						if walk(u.Results().At(i).Type()) {
+							return true
+						}
+					}
+				}
+				if u.Params() != nil {
+					for i := 0; i < u.Params().Len(); i++ {
+						matched := false
+						forEachCallableSignature(u.Params().At(i).Type(), func(cbSig *types.Signature) {
+							if matched || cbSig.Params() == nil {
+								return
+							}
+							for j := 0; j < cbSig.Params().Len(); j++ {
+								if walk(cbSig.Params().At(j).Type()) {
+									matched = true
+									return
+								}
+							}
+						})
+						if matched {
+							return true
+						}
+					}
+				}
+				return false
+			case *types.Pointer, *types.Map, *types.Slice, *types.Chan, *types.Interface, *types.TypeParam:
+				return true
+			case *types.Alias:
+				if targs := u.TypeArgs(); targs != nil {
+					for i := 0; i < targs.Len(); i++ {
+						if walk(targs.At(i)) {
+							return true
+						}
+					}
+				}
+				return walk(types.Unalias(u))
+			case *types.Named:
+				if targs := u.TypeArgs(); targs != nil {
+					for i := 0; i < targs.Len(); i++ {
+						if walk(targs.At(i)) {
+							return true
+						}
+					}
+				}
+				return walk(u.Underlying())
+			case *types.Array:
+				return walk(u.Elem())
+			case *types.Struct:
+				for i := 0; i < u.NumFields(); i++ {
+					if walk(u.Field(i).Type()) {
+						return true
+					}
+				}
+				return false
+			case *types.Tuple:
+				for i := 0; i < u.Len(); i++ {
+					if walk(u.At(i).Type()) {
+						return true
+					}
+				}
+				return false
+			case *types.Union:
+				for i := 0; i < u.Len(); i++ {
+					if term := u.Term(i); term != nil && walk(term.Type()) {
+						return true
+					}
+				}
+				return false
+			}
+			return false
+		}
+		res := walk(root)
+		mayCarryAliasCache[root] = res
+		return res
+	}
+
+	funcMayReturnMutableAlias := func(sig *types.Signature) bool {
+		if sig == nil || sig.Results() == nil {
+			return false
+		}
+		for i := 0; i < sig.Results().Len(); i++ {
+			if typeMayCarryMutableAlias(sig.Results().At(i).Type()) {
+				return true
+			}
+		}
+		return false
+	}
+
+	stdParamWriteCache := map[types.Type]bool{}
+	stdParamMayAcceptCarrierWrite := func(root types.Type) bool {
+		if root == nil {
+			return false
+		}
+		if cached, ok := stdParamWriteCache[root]; ok {
+			return cached
+		}
+		visited := map[types.Type]bool{}
+		var walk func(t types.Type) bool
+		walk = func(t types.Type) bool {
+			if t == nil || visited[t] || concreteTestingHandleKind(t) != "" {
+				return false
+			}
+			visited[t] = true
+			switch u := t.(type) {
+			case *types.Basic:
+				return u.Kind() == types.UnsafePointer
+			case *types.Signature:
+				if u.Results() != nil {
+					for i := 0; i < u.Results().Len(); i++ {
+						if walk(u.Results().At(i).Type()) {
+							return true
+						}
+					}
+				}
+				if u.Params() != nil {
+					for i := 0; i < u.Params().Len(); i++ {
+						matched := false
+						forEachCallableSignature(u.Params().At(i).Type(), func(cbSig *types.Signature) {
+							if matched || cbSig.Params() == nil {
+								return
+							}
+							for j := 0; j < cbSig.Params().Len(); j++ {
+								if walk(cbSig.Params().At(j).Type()) {
+									matched = true
+									return
+								}
+							}
+						})
+						if matched {
+							return true
+						}
+					}
+				}
+				return false
+			case *types.Pointer, *types.Map, *types.Slice, *types.Chan:
+				return true
+			case *types.TypeParam:
+				return walk(u.Constraint())
+			case *types.Interface:
+				for i := 0; i < u.NumEmbeddeds(); i++ {
+					if walk(u.EmbeddedType(i)) {
+						return true
+					}
+				}
+				for i := 0; i < u.NumExplicitMethods(); i++ {
+					if mSig, ok := u.ExplicitMethod(i).Type().(*types.Signature); ok && mSig != nil && mSig.Params() != nil {
+						for j := 0; j < mSig.Params().Len(); j++ {
+							if typeMayCarryParallel(mSig.Params().At(j).Type()) {
+								return true
+							}
+						}
+					}
+				}
+				return false
+			case *types.Alias:
+				if targs := u.TypeArgs(); targs != nil {
+					for i := 0; i < targs.Len(); i++ {
+						if walk(targs.At(i)) {
+							return true
+						}
+					}
+				}
+				return walk(types.Unalias(u))
+			case *types.Named:
+				if obj := u.Obj(); obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == "context" && obj.Name() == "Context" {
+					return false
+				}
+				if targs := u.TypeArgs(); targs != nil {
+					for i := 0; i < targs.Len(); i++ {
+						if walk(targs.At(i)) {
+							return true
+						}
+					}
+				}
+				return walk(u.Underlying())
+			case *types.Array:
+				return walk(u.Elem())
+			case *types.Struct:
+				for i := 0; i < u.NumFields(); i++ {
+					if walk(u.Field(i).Type()) {
+						return true
+					}
+				}
+				return false
+			case *types.Tuple:
+				for i := 0; i < u.Len(); i++ {
+					if walk(u.At(i).Type()) {
+						return true
+					}
+				}
+				return false
+			case *types.Union:
+				for i := 0; i < u.Len(); i++ {
+					if term := u.Term(i); term != nil && walk(term.Type()) {
+						return true
+					}
+				}
+				return false
+			}
+			return false
+		}
+		res := walk(root)
+		stdParamWriteCache[root] = res
+		return res
+	}
+
+	isInterfaceMethodSelection := func(selInfo *types.Selection, fn *types.Func) bool {
+		if selInfo != nil && types.IsInterface(selInfo.Recv()) {
+			return true
+		}
+		if fn != nil {
+			if sig, ok := fn.Type().(*types.Signature); ok && sig != nil && sig.Recv() != nil && types.IsInterface(sig.Recv().Type()) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Track which declared functions/methods, closures, and cross-package
+	// callables are referenced as non-callee values so indirect function-value
+	// calls flow to them via compact signature-arity hubs.
+	anyDirectCalleeIdent := map[*ast.Ident]bool{}
+	directCallFuncLits := map[*ast.FuncLit]bool{}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if tv, isType := p.TypesInfo.Types[call.Fun]; isType && tv.IsType() {
+				return true
+			}
+			if lit, ok := ast.Unparen(call.Fun).(*ast.FuncLit); ok {
+				directCallFuncLits[lit] = true
+				return true
+			}
+			switch fun := unwrapCallee(call.Fun).(type) {
+			case *ast.Ident:
+				anyDirectCalleeIdent[fun] = true
+			case *ast.SelectorExpr:
+				anyDirectCalleeIdent[fun.Sel] = true
+			}
+			return true
+		})
+	}
+	type stdValueFunc struct {
+		origSig *types.Signature
+		instSig *types.Signature
+	}
+	valueTakenDeclFuncs := map[*types.Func]bool{}
+	valueTakenCrossSigs := map[FuncKey]*types.Signature{}
+	seenStdValueFuncs := map[stdValueFunc]bool{}
+	var valueTakenStdFuncs []stdValueFunc
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			id, ok := n.(*ast.Ident)
+			if !ok || anyDirectCalleeIdent[id] {
+				return true
+			}
+			useFn, ok := p.TypesInfo.Uses[id].(*types.Func)
+			if !ok || useFn == nil || useFn.Pkg() == nil {
+				return true
+			}
+			fn := useFn.Origin()
+			if allDeclFuncs[fn] != nil {
+				if sig, ok := fn.Type().(*types.Signature); ok && sig != nil && sig.Recv() == nil {
+					valueTakenDeclFuncs[fn] = true
+				}
+			} else if (p.Types == nil || fn.Pkg() != p.Types) && !isStdCallee(fn) {
+				if sig, ok := fn.Type().(*types.Signature); ok && sig != nil && sig.Recv() == nil {
+					if fk, ok := callableFactKey(fn); ok {
+						valueTakenCrossSigs[fk] = sig
+					}
+				}
+			} else if isStdCallee(fn) {
+				if origSig, ok := fn.Type().(*types.Signature); ok && origSig != nil && origSig.Recv() == nil {
+					var instSig *types.Signature
+					if inst, hasInst := p.TypesInfo.Instances[id]; hasInst && inst.Type != nil {
+						instSig, _ = inst.Type.Underlying().(*types.Signature)
+					}
+					if instSig == nil {
+						instSig, _ = useFn.Type().Underlying().(*types.Signature)
+					}
+					if instSig != nil {
+						sv := stdValueFunc{origSig: origSig, instSig: instSig}
+						if !seenStdValueFuncs[sv] {
+							seenStdValueFuncs[sv] = true
+							valueTakenStdFuncs = append(valueTakenStdFuncs, sv)
+						}
+					}
+				}
+			}
+			return true
+		})
+	}
+
+	// Compact integer-indexed parallel-reachability graph (0..N-1).
+	var adj [][]int
+	var reachesPar []bool
+	var rootKeys []FuncKey
+	adjLarge := map[int]map[int]bool{}
+
+	newNode := func() int {
+		id := len(adj)
+		adj = append(adj, nil)
+		reachesPar = append(reachesPar, false)
+		rootKeys = append(rootKeys, FuncKey{})
+		return id
+	}
+
+	addParEdge := func(from, to int) {
+		if from < 0 || to < 0 || from == to {
+			return
+		}
+		row := adj[from]
+		if large := adjLarge[from]; large != nil {
+			if large[to] {
+				return
+			}
+			large[to] = true
+			adj[from] = append(row, to)
+			return
+		}
+		for _, existing := range row {
+			if existing == to {
+				return
+			}
+		}
+		if len(row) == 32 {
+			m := make(map[int]bool, 64)
+			for _, existing := range row {
+				m[existing] = true
+			}
+			m[to] = true
+			adjLarge[from] = m
+		}
+		adj[from] = append(row, to)
+	}
+
+	typeParamObjIDs := map[*types.TypeParam]int{}
+	typeParamIDs := map[parParamKey]int{}
+	typeParamID := func(fn *types.Func, idx int) int {
+		if fn == nil || idx < 0 {
+			return -1
+		}
+		fn = fn.Origin()
+		sig, ok := fn.Type().(*types.Signature)
+		if !ok || sig == nil || sig.TypeParams() == nil || idx >= sig.TypeParams().Len() {
+			return -1
+		}
+		pk := parParamKey{fn: fn, idx: idx}
+		if id, ok := typeParamIDs[pk]; ok {
+			return id
+		}
+		id := newNode()
+		typeParamIDs[pk] = id
+		typeParamObjIDs[sig.TypeParams().At(idx)] = id
+		if fn.Exported() {
+			if baseKey, ok := callableFactKey(fn); ok {
+				fk := FuncKey{Pkg: baseKey.Pkg, Name: baseKey.Name + "#tp#" + strconv.Itoa(idx)}
+				if fk.Valid() {
+					rootKeys[id] = fk
+				}
+			}
+		}
+		return id
+	}
+
+	recvTypeParamIDs := map[parParamKey]int{}
+	recvTypeParamID := func(fn *types.Func, idx int) int {
+		if fn == nil || idx < 0 {
+			return -1
+		}
+		fn = fn.Origin()
+		sig, ok := fn.Type().(*types.Signature)
+		if !ok || sig == nil || sig.RecvTypeParams() == nil || idx >= sig.RecvTypeParams().Len() {
+			return -1
+		}
+		pk := parParamKey{fn: fn, idx: idx}
+		if id, ok := recvTypeParamIDs[pk]; ok {
+			return id
+		}
+		id := newNode()
+		recvTypeParamIDs[pk] = id
+		typeParamObjIDs[sig.RecvTypeParams().At(idx)] = id
+		if fn.Exported() {
+			if baseKey, ok := callableFactKey(fn); ok {
+				fk := FuncKey{Pkg: baseKey.Pkg, Name: baseKey.Name + "#rtp#" + strconv.Itoa(idx)}
+				if fk.Valid() {
+					rootKeys[id] = fk
+				}
+			}
+		}
+		return id
+	}
+
+	for fn := range allDeclFuncs {
+		sig, ok := fn.Type().(*types.Signature)
+		if !ok || sig == nil {
+			continue
+		}
+		if sig.TypeParams() != nil {
+			for i := 0; i < sig.TypeParams().Len(); i++ {
+				_ = typeParamID(fn, i)
+			}
+		}
+		if sig.RecvTypeParams() != nil {
+			for i := 0; i < sig.RecvTypeParams().Len(); i++ {
+				_ = recvTypeParamID(fn, i)
+			}
+		}
+	}
+
+	wireTypeParamsOfType := func(ownerID int, t types.Type) {
+		if ownerID < 0 || t == nil || len(typeParamObjIDs) == 0 {
+			return
+		}
+		for _, tp := range collectTypeParams(t) {
+			if tpID, ok := typeParamObjIDs[tp]; ok {
+				addParEdge(ownerID, tpID)
+			}
+		}
+	}
+
+	execIDs := map[*types.Func]int{}
+	execFuncID := func(fn *types.Func) int {
+		if fn == nil {
+			return -1
+		}
+		fn = fn.Origin()
+		if id, ok := execIDs[fn]; ok {
+			return id
+		}
+		id := newNode()
+		execIDs[fn] = id
+		if fn.Exported() || (p.Name == "main" && declFuncs[fn] != nil && fn.Name() == "main") {
+			if fk, ok := callableFactKey(fn); ok {
+				rootKeys[id] = fk
+			}
+		}
+		return id
+	}
+
+	varIDs := map[*types.Var]int{}
+	bindVarID := func(v *types.Var) int {
+		if v == nil || !typeMayCarryParallel(v.Type()) {
+			return -1
+		}
+		if id, ok := varIDs[v]; ok {
+			return id
+		}
+		id := newNode()
+		varIDs[v] = id
+		wireTypeParamsOfType(id, v.Type())
+		if p.Types != nil && v.Parent() == p.Types.Scope() && v.Exported() && v.Name() != "_" {
+			fk := FuncKey{Pkg: p.Types.Path(), Name: v.Name()}
+			if fk.Valid() {
+				rootKeys[id] = fk
+			}
+		}
+		return id
+	}
+
+	varWriteThroughIDs := map[*types.Var]int{}
+	varWriteThroughID := func(v *types.Var) int {
+		if v == nil || v.IsField() || v.Name() == "_" || p.Types == nil || v.Pkg() != p.Types || !typeMayCarryMutableAlias(v.Type()) {
+			return -1
+		}
+		if id, ok := varWriteThroughIDs[v]; ok {
+			return id
+		}
+		id := newNode()
+		varWriteThroughIDs[v] = id
+		addParEdge(bindVarID(v), id)
+		if v.Parent() == p.Types.Scope() && v.Exported() {
+			fk := FuncKey{Pkg: p.Types.Path(), Name: v.Name() + "#w"}
+			if fk.Valid() {
+				rootKeys[id] = fk
+			}
+		}
+		return id
+	}
+
+	returnIDs := map[*types.Func]int{}
+	returnID := func(fn *types.Func) int {
+		if fn == nil {
+			return -1
+		}
+		fn = fn.Origin()
+		if id, ok := returnIDs[fn]; ok {
+			return id
+		}
+		id := newNode()
+		returnIDs[fn] = id
+		return id
+	}
+
+	returnWriteIDs := map[*types.Func]int{}
+	returnWriteID := func(fn *types.Func) int {
+		if fn == nil {
+			return -1
+		}
+		fn = fn.Origin()
+		sig, ok := fn.Type().(*types.Signature)
+		if !ok || !funcMayReturnMutableAlias(sig) {
+			return -1
+		}
+		if id, ok := returnWriteIDs[fn]; ok {
+			return id
+		}
+		id := newNode()
+		returnWriteIDs[fn] = id
+		if fn.Exported() {
+			if baseKey, ok := callableFactKey(fn); ok {
+				fk := FuncKey{Pkg: baseKey.Pkg, Name: baseKey.Name + "#rw"}
+				if fk.Valid() {
+					rootKeys[id] = fk
+				}
+			}
+		}
+		return id
+	}
+
+	litReturnWriteIDs := map[*ast.FuncLit]int{}
+	litReturnWriteID := func(lit *ast.FuncLit) int {
+		if lit == nil {
+			return -1
+		}
+		if id, ok := litReturnWriteIDs[lit]; ok {
+			return id
+		}
+		tv, ok := p.TypesInfo.Types[lit]
+		if !ok || tv.Type == nil {
+			return -1
+		}
+		sig, ok := tv.Type.Underlying().(*types.Signature)
+		if !ok || !funcMayReturnMutableAlias(sig) {
+			return -1
+		}
+		id := newNode()
+		litReturnWriteIDs[lit] = id
+		return id
+	}
+
+	recvIDs := map[*types.Func]int{}
+	recvID := func(fn *types.Func) int {
+		if fn == nil {
+			return -1
+		}
+		fn = fn.Origin()
+		sig, ok := fn.Type().(*types.Signature)
+		if !ok || sig == nil || sig.Recv() == nil || !typeMayCarryParallel(sig.Recv().Type()) {
+			return -1
+		}
+		if id, ok := recvIDs[fn]; ok {
+			return id
+		}
+		id := newNode()
+		recvIDs[fn] = id
+		if fn.Exported() {
+			if baseKey, ok := callableFactKey(fn); ok {
+				fk := FuncKey{Pkg: baseKey.Pkg, Name: baseKey.Name + "#recv"}
+				if fk.Valid() {
+					rootKeys[id] = fk
+				}
+			}
+		}
+		return id
+	}
+
+	recvWriteIDs := map[*types.Func]int{}
+	recvWriteID := func(fn *types.Func) int {
+		if fn == nil {
+			return -1
+		}
+		fn = fn.Origin()
+		sig, ok := fn.Type().(*types.Signature)
+		if !ok || sig == nil || sig.Recv() == nil || !typeMayCarryMutableAlias(sig.Recv().Type()) {
+			return -1
+		}
+		if id, ok := recvWriteIDs[fn]; ok {
+			return id
+		}
+		id := newNode()
+		recvWriteIDs[fn] = id
+		if fn.Exported() {
+			if baseKey, ok := callableFactKey(fn); ok {
+				fk := FuncKey{Pkg: baseKey.Pkg, Name: baseKey.Name + "#wrecv"}
+				if fk.Valid() {
+					rootKeys[id] = fk
+				}
+			}
+		}
+		return id
+	}
+
+	paramIDs := map[parParamKey]int{}
+	paramID := func(fn *types.Func, idx int) int {
+		if fn == nil || idx < 0 {
+			return -1
+		}
+		fn = fn.Origin()
+		sig, ok := fn.Type().(*types.Signature)
+		if !ok || sig == nil || sig.Params() == nil || idx >= sig.Params().Len() || !typeMayCarryParallel(sig.Params().At(idx).Type()) {
+			return -1
+		}
+		pk := parParamKey{fn: fn, idx: idx}
+		if id, ok := paramIDs[pk]; ok {
+			return id
+		}
+		id := newNode()
+		paramIDs[pk] = id
+		if fn.Exported() {
+			if baseKey, ok := callableFactKey(fn); ok {
+				fk := FuncKey{Pkg: baseKey.Pkg, Name: baseKey.Name + "#" + strconv.Itoa(idx)}
+				if fk.Valid() {
+					rootKeys[id] = fk
+				}
+			}
+		}
+		return id
+	}
+
+	paramWriteIDs := map[parParamKey]int{}
+	paramWriteID := func(fn *types.Func, idx int) int {
+		if fn == nil || idx < 0 {
+			return -1
+		}
+		fn = fn.Origin()
+		sig, ok := fn.Type().(*types.Signature)
+		if !ok || sig == nil || sig.Params() == nil || idx >= sig.Params().Len() || !typeMayCarryMutableAlias(sig.Params().At(idx).Type()) {
+			return -1
+		}
+		pk := parParamKey{fn: fn, idx: idx}
+		if id, ok := paramWriteIDs[pk]; ok {
+			return id
+		}
+		id := newNode()
+		paramWriteIDs[pk] = id
+		if fn.Exported() {
+			if baseKey, ok := callableFactKey(fn); ok {
+				fk := FuncKey{Pkg: baseKey.Pkg, Name: baseKey.Name + "#w#" + strconv.Itoa(idx)}
+				if fk.Valid() {
+					rootKeys[id] = fk
+				}
+			}
+		}
+		return id
+	}
+
+	crossIDs := map[FuncKey]int{}
+	crossID := func(fk FuncKey) int {
+		if !fk.Valid() {
+			return -1
+		}
+		if id, ok := crossIDs[fk]; ok {
+			return id
+		}
+		id := newNode()
+		crossIDs[fk] = id
+		rootKeys[id] = fk
+		return id
+	}
+
+	dynHubID := func(sig *types.Signature, idx int) int {
+		if sig == nil || sig.Params() == nil || idx < 0 {
+			return -1
+		}
+		nRes := 0
+		if sig.Results() != nil {
+			nRes = sig.Results().Len()
+		}
+		return crossID(FuncKey{
+			Pkg:  "*",
+			Name: "#dyn#" + strconv.Itoa(sig.Params().Len()) + ":" + strconv.Itoa(nRes) + "#" + strconv.Itoa(idx),
+		})
+	}
+
+	dynHubWriteID := func(sig *types.Signature, idx int) int {
+		if sig == nil || sig.Params() == nil || idx < 0 {
+			return -1
+		}
+		nRes := 0
+		if sig.Results() != nil {
+			nRes = sig.Results().Len()
+		}
+		return crossID(FuncKey{
+			Pkg:  "*",
+			Name: "#dynw#" + strconv.Itoa(sig.Params().Len()) + ":" + strconv.Itoa(nRes) + "#" + strconv.Itoa(idx),
+		})
+	}
+
+	dynReturnWriteID := func(sig *types.Signature) int {
+		if !funcMayReturnMutableAlias(sig) {
+			return -1
+		}
+		nParams := 0
+		if sig.Params() != nil {
+			nParams = sig.Params().Len()
+		}
+		return crossID(FuncKey{
+			Pkg:  "*",
+			Name: "#dynrw#" + strconv.Itoa(nParams) + ":" + strconv.Itoa(sig.Results().Len()),
+		})
+	}
+
+	unexpIfaceRecvHubs := map[string]int{}
+	ifaceRecvID := func(methodName string) int {
+		if methodName == "" {
+			return -1
+		}
+		if ast.IsExported(methodName) {
+			return crossID(FuncKey{Pkg: "*", Name: methodName + "#recv"})
+		}
+		if id, ok := unexpIfaceRecvHubs[methodName]; ok {
+			return id
+		}
+		id := newNode()
+		unexpIfaceRecvHubs[methodName] = id
+		return id
+	}
+
+	unexpIfaceRecvWriteHubs := map[string]int{}
+	ifaceRecvWriteID := func(methodName string) int {
+		if methodName == "" {
+			return -1
+		}
+		if ast.IsExported(methodName) {
+			return crossID(FuncKey{Pkg: "*", Name: methodName + "#wrecv"})
+		}
+		if id, ok := unexpIfaceRecvWriteHubs[methodName]; ok {
+			return id
+		}
+		id := newNode()
+		unexpIfaceRecvWriteHubs[methodName] = id
+		return id
+	}
+
+	unexpIfaceHubs := map[ifaceSlotKey]int{}
+	ifaceHubID := func(methodName string, idx int) int {
+		if methodName == "" || idx < 0 {
+			return -1
+		}
+		if ast.IsExported(methodName) {
+			return crossID(FuncKey{Pkg: "*", Name: methodName + "#" + strconv.Itoa(idx)})
+		}
+		sk := ifaceSlotKey{name: methodName, idx: idx}
+		if id, ok := unexpIfaceHubs[sk]; ok {
+			return id
+		}
+		id := newNode()
+		unexpIfaceHubs[sk] = id
+		return id
+	}
+
+	unexpIfaceWriteHubs := map[ifaceSlotKey]int{}
+	ifaceHubWriteID := func(methodName string, idx int) int {
+		if methodName == "" || idx < 0 {
+			return -1
+		}
+		if ast.IsExported(methodName) {
+			return crossID(FuncKey{Pkg: "*", Name: methodName + "#w#" + strconv.Itoa(idx)})
+		}
+		sk := ifaceSlotKey{name: methodName, idx: idx}
+		if id, ok := unexpIfaceWriteHubs[sk]; ok {
+			return id
+		}
+		id := newNode()
+		unexpIfaceWriteHubs[sk] = id
+		return id
+	}
+
+	unexpIfaceReturnWriteHubs := map[string]int{}
+	ifaceReturnWriteID := func(methodName string, sig *types.Signature) int {
+		if methodName == "" || !funcMayReturnMutableAlias(sig) {
+			return -1
+		}
+		if ast.IsExported(methodName) {
+			return crossID(FuncKey{Pkg: "*", Name: methodName + "#rw"})
+		}
+		if id, ok := unexpIfaceReturnWriteHubs[methodName]; ok {
+			return id
+		}
+		id := newNode()
+		unexpIfaceReturnWriteHubs[methodName] = id
+		return id
+	}
+
+	isSamePkgNonFieldVar := func(obj types.Object) (*types.Var, bool) {
+		v, ok := obj.(*types.Var)
+		if !ok || v == nil || v.IsField() || v.Name() == "_" || p.Types == nil || v.Pkg() != p.Types {
+			return nil, false
+		}
+		return v, true
+	}
+
+	targetVarID := func(v *types.Var) int {
+		if v == nil || v.IsField() || v.Pkg() == nil || v.Name() == "_" || !typeMayCarryParallel(v.Type()) {
+			return -1
+		}
+		if p.Types != nil && v.Pkg() == p.Types {
+			return bindVarID(v)
+		}
+		if (p.Types == nil || v.Pkg() != p.Types) && v.Parent() == v.Pkg().Scope() && !isStdPkg(v.Pkg()) {
+			return crossID(FuncKey{Pkg: v.Pkg().Path(), Name: v.Name()})
+		}
+		return -1
+	}
+
+	targetVarWriteThroughID := func(v *types.Var) int {
+		if v == nil || v.IsField() || v.Pkg() == nil || v.Name() == "_" || !typeMayCarryMutableAlias(v.Type()) {
+			return -1
+		}
+		if p.Types != nil && v.Pkg() == p.Types {
+			return varWriteThroughID(v)
+		}
+		if (p.Types == nil || v.Pkg() != p.Types) && v.Parent() == v.Pkg().Scope() && !isStdPkg(v.Pkg()) {
+			return crossID(FuncKey{Pkg: v.Pkg().Path(), Name: v.Name() + "#w"})
+		}
+		return -1
+	}
+
+	isBareVarExpr := func(expr ast.Expr) bool {
+		if expr == nil {
+			return false
+		}
+		switch e := ast.Unparen(expr).(type) {
+		case *ast.Ident:
+			if e.Name == "_" {
+				return true
+			}
+			v, ok := identDefOrUse(p.TypesInfo, e).(*types.Var)
+			return ok && v != nil && !v.IsField()
+		case *ast.SelectorExpr:
+			if p.TypesInfo.Selections[e] != nil {
+				return false
+			}
+			v, ok := p.TypesInfo.Uses[e.Sel].(*types.Var)
+			return ok && v != nil && !v.IsField()
+		default:
+			return false
+		}
+	}
+
+	recordMethodTarget := func(ownerID int, m *types.Func) {
+		if ownerID < 0 || m == nil || m.Pkg() == nil {
+			return
+		}
+		m = m.Origin()
+		if allDeclFuncs[m] != nil {
+			addParEdge(ownerID, execFuncID(m))
+		} else if (p.Types == nil || m.Pkg() != p.Types) && !isStdCallee(m) {
+			if fk, ok := callableFactKey(m); ok {
+				addParEdge(ownerID, crossID(fk))
+			}
+		}
+	}
+
+	typeHubs := map[types.Type]int{}
+	typeHubID := func(t types.Type) int {
+		if t == nil {
+			return -1
+		}
+		if h, ok := typeHubs[t]; ok {
+			return h
+		}
+		ms := collectTypeMethods(t)
+		if len(ms) == 0 {
+			typeHubs[t] = -1
+			return -1
+		}
+		h := newNode()
+		typeHubs[t] = h
+		for _, m := range ms {
+			recordMethodTarget(h, m)
+		}
+		return h
+	}
+
+	wireTypeArg := func(slotID int, targ types.Type) {
+		if slotID < 0 || targ == nil {
+			return
+		}
+		addParEdge(slotID, typeHubID(targ))
+		wireTypeParamsOfType(slotID, targ)
+	}
+
+	recordObjOnNode := func(ownerID int, obj types.Object, execOnlyPkgVars bool) {
+		if ownerID < 0 || obj == nil {
+			return
+		}
+		addParEdge(ownerID, typeHubID(obj.Type()))
+		switch target := obj.(type) {
+		case *types.Func:
+			recordMethodTarget(ownerID, target)
+		case *types.Var:
+			if target.IsField() || target.Pkg() == nil || target.Name() == "_" {
+				return
+			}
+			if _, ok := isSamePkgNonFieldVar(target); ok {
+				// Function execution only reads package-scope variables; binding
+				// and parameter nodes also flow through local/parameter variables
+				// so multi-hop setters propagate without tainting shared
+				// sequential callback helpers like runSubtest(t, body).
+				if !execOnlyPkgVars || target.Parent() == p.Types.Scope() {
+					addParEdge(ownerID, bindVarID(target))
+				}
+			} else if (p.Types == nil || target.Pkg() != p.Types) && target.Parent() == target.Pkg().Scope() && !isStdPkg(target.Pkg()) {
+				addParEdge(ownerID, crossID(FuncKey{Pkg: target.Pkg().Path(), Name: target.Name()}))
+			}
+		}
+	}
+
+	resolveConcreteDeclCallee := func(call *ast.CallExpr) (*types.Func, *ast.Ident) {
+		if tv, isType := p.TypesInfo.Types[call.Fun]; isType && tv.IsType() {
+			return nil, nil
+		}
+		switch fun := unwrapCallee(call.Fun).(type) {
+		case *ast.Ident:
+			if fn, ok := p.TypesInfo.Uses[fun].(*types.Func); ok && fn != nil {
+				fn = fn.Origin()
+				if allDeclFuncs[fn] != nil {
+					return fn, fun
+				}
+			}
+		case *ast.SelectorExpr:
+			if selInfo, isSel := p.TypesInfo.Selections[fun]; isSel && selInfo != nil {
+				if selInfo.Kind() == types.MethodVal || selInfo.Kind() == types.MethodExpr {
+					fn, _ := selInfo.Obj().(*types.Func)
+					var origFn *types.Func
+					if fn != nil {
+						origFn = fn.Origin()
+					}
+					if origFn != nil && !isInterfaceMethodSelection(selInfo, origFn) && allDeclFuncs[origFn] != nil {
+						return origFn, fun.Sel
+					}
+				}
+			} else if fn, ok := p.TypesInfo.Uses[fun.Sel].(*types.Func); ok && fn != nil {
+				fn = fn.Origin()
+				if allDeclFuncs[fn] != nil {
+					return fn, fun.Sel
+				}
+			}
+		}
+		return nil, nil
+	}
+
+	subtreeIDs := map[ast.Node]int{}
+	var astSubtreeID func(ast.Node) int
+	astSubtreeID = func(n ast.Node) int {
+		if n == nil {
+			return -1
+		}
+		if id, ok := subtreeIDs[n]; ok {
+			return id
+		}
+		id := newNode()
+		subtreeIDs[n] = id
+		if expr, isExpr := n.(ast.Expr); isExpr {
+			if tv, ok := p.TypesInfo.Types[expr]; ok && tv.Type != nil {
+				addParEdge(id, typeHubID(tv.Type))
+				wireTypeParamsOfType(id, tv.Type)
+			}
+		}
+		switch node := n.(type) {
+		case *ast.FuncLit:
+			ast.Inspect(node, func(litNode ast.Node) bool {
+				if litNode == nil {
+					return false
+				}
+				if litNode != node {
+					if expr, isExpr := litNode.(ast.Expr); isExpr {
+						if tv, ok := p.TypesInfo.Types[expr]; ok && tv.Type != nil {
+							addParEdge(id, typeHubID(tv.Type))
+							wireTypeParamsOfType(id, tv.Type)
+						}
+					}
+				}
+				switch ln := litNode.(type) {
+				case *ast.CaseClause:
+					if impObj := p.TypesInfo.Implicits[ln]; impObj != nil {
+						addParEdge(id, typeHubID(impObj.Type()))
+						wireTypeParamsOfType(id, impObj.Type())
+					}
+				case *ast.SelectorExpr:
+					if isParallelSelector(p.TypesInfo, ln) {
+						reachesPar[id] = true
+					}
+				case *ast.Ident:
+					if inst, ok := p.TypesInfo.Instances[ln]; ok {
+						addParEdge(id, typeHubID(inst.Type))
+						wireTypeParamsOfType(id, inst.Type)
+						if inst.TypeArgs != nil {
+							for i := 0; i < inst.TypeArgs.Len(); i++ {
+								addParEdge(id, typeHubID(inst.TypeArgs.At(i)))
+								wireTypeParamsOfType(id, inst.TypeArgs.At(i))
+							}
+						}
+					}
+					if defObj := p.TypesInfo.Defs[ln]; defObj != nil {
+						addParEdge(id, typeHubID(defObj.Type()))
+						wireTypeParamsOfType(id, defObj.Type())
+					}
+					if useObj := p.TypesInfo.Uses[ln]; useObj != nil {
+						if fnObj, isFn := useObj.(*types.Func); isFn && anyDirectCalleeIdent[ln] {
+							addParEdge(id, typeHubID(fnObj.Type()))
+							if !isStdCallee(fnObj) {
+								recordMethodTarget(id, fnObj)
+							}
+						} else {
+							recordObjOnNode(id, useObj, false)
+						}
+					}
+				}
+				return true
+			})
+			return id
+		case *ast.CallExpr:
+			if tv, isType := p.TypesInfo.Types[node.Fun]; !isType || !tv.IsType() {
+				var resType types.Type
+				if tvCall, ok := p.TypesInfo.Types[node]; ok {
+					resType = tvCall.Type
+				}
+				if !typeMayCarryParallel(resType) {
+					return id
+				}
+				if declFn, funIdent := resolveConcreteDeclCallee(node); declFn != nil {
+					addParEdge(id, returnID(declFn))
+					if funIdent != nil {
+						if inst, ok := p.TypesInfo.Instances[funIdent]; ok {
+							addParEdge(id, typeHubID(inst.Type))
+							wireTypeParamsOfType(id, inst.Type)
+							if inst.TypeArgs != nil {
+								for i := 0; i < inst.TypeArgs.Len(); i++ {
+									addParEdge(id, typeHubID(inst.TypeArgs.At(i)))
+									wireTypeParamsOfType(id, inst.TypeArgs.At(i))
+								}
+							}
+						}
+					}
+					return id
+				}
+			}
+		case *ast.CaseClause:
+			if impObj := p.TypesInfo.Implicits[node]; impObj != nil {
+				addParEdge(id, typeHubID(impObj.Type()))
+				wireTypeParamsOfType(id, impObj.Type())
+			}
+		case *ast.SelectorExpr:
+			if isParallelSelector(p.TypesInfo, node) {
+				reachesPar[id] = true
+			}
+		case *ast.Ident:
+			if inst, ok := p.TypesInfo.Instances[node]; ok {
+				addParEdge(id, typeHubID(inst.Type))
+				wireTypeParamsOfType(id, inst.Type)
+				if inst.TypeArgs != nil {
+					for i := 0; i < inst.TypeArgs.Len(); i++ {
+						addParEdge(id, typeHubID(inst.TypeArgs.At(i)))
+						wireTypeParamsOfType(id, inst.TypeArgs.At(i))
+					}
+				}
+			}
+			if defObj := p.TypesInfo.Defs[node]; defObj != nil {
+				addParEdge(id, typeHubID(defObj.Type()))
+				wireTypeParamsOfType(id, defObj.Type())
+			}
+			if useObj := p.TypesInfo.Uses[node]; useObj != nil {
+				if fnObj, isFn := useObj.(*types.Func); isFn && anyDirectCalleeIdent[node] {
+					addParEdge(id, typeHubID(fnObj.Type()))
+					if !isStdCallee(fnObj) {
+						recordMethodTarget(id, fnObj)
+					}
+				} else {
+					recordObjOnNode(id, useObj, false)
+				}
+			}
+		}
+		ast.Inspect(n, func(child ast.Node) bool {
+			if child == nil || child == n {
+				return true
+			}
+			addParEdge(id, astSubtreeID(child))
+			return false
+		})
+		return id
+	}
+
+	bindSubtree := func(ownerID int, sub ast.Node) {
+		if ownerID < 0 || sub == nil {
+			return
+		}
+		addParEdge(ownerID, astSubtreeID(sub))
+	}
+
+	scanExecSubtree := func(execID int, root ast.Node) {
+		if execID < 0 || root == nil {
+			return
+		}
+		ast.Inspect(root, func(n ast.Node) bool {
+			if n == nil {
+				return false
+			}
+			if expr, isExpr := n.(ast.Expr); isExpr {
+				if tv, ok := p.TypesInfo.Types[expr]; ok && tv.Type != nil {
+					addParEdge(execID, typeHubID(tv.Type))
+				}
+			}
+			switch node := n.(type) {
+			case *ast.CaseClause:
+				if impObj := p.TypesInfo.Implicits[node]; impObj != nil {
+					addParEdge(execID, typeHubID(impObj.Type()))
+				}
+			case *ast.SelectorExpr:
+				if isParallelSelector(p.TypesInfo, node) {
+					reachesPar[execID] = true
+				}
+			case *ast.Ident:
+				if inst, ok := p.TypesInfo.Instances[node]; ok {
+					addParEdge(execID, typeHubID(inst.Type))
+					if inst.TypeArgs != nil {
+						for i := 0; i < inst.TypeArgs.Len(); i++ {
+							addParEdge(execID, typeHubID(inst.TypeArgs.At(i)))
+						}
+					}
+				}
+				if defObj := p.TypesInfo.Defs[node]; defObj != nil {
+					addParEdge(execID, typeHubID(defObj.Type()))
+				}
+				if useObj := p.TypesInfo.Uses[node]; useObj != nil {
+					recordObjOnNode(execID, useObj, true)
+				}
+			}
+			return true
+		})
+	}
+
+	// exprWriteThroughTargets returns the parGraph node IDs whose aliased
+	// storage is mutated if a caller writes through expr (*expr = rhs,
+	// expr[k] = rhs, expr <- rhs, copy(expr, rhs), expr.Mutate(rhs)).
+	exprWTMemo := map[ast.Expr][]int{}
+	var exprWriteThroughTargets func(ast.Expr) []int
+	var methodRecvWriteTargets func(ast.Expr, bool, *types.Signature) []int
+	exprWriteThroughTargets = func(expr ast.Expr) []int {
+		if expr == nil {
+			return nil
+		}
+		if cached, ok := exprWTMemo[expr]; ok {
+			return cached
+		}
+		var outTargets []int
+		appendTarget := func(id int) {
+			if id < 0 {
+				return
+			}
+			for _, ex := range outTargets {
+				if ex == id {
+					return
+				}
+			}
+			outTargets = append(outTargets, id)
+		}
+		appendTargets := func(ids []int) {
+			for _, id := range ids {
+				appendTarget(id)
+			}
+		}
+		appendConcreteFuncReturnWriteTarget := func(fn *types.Func) {
+			if fn == nil || fn.Pkg() == nil {
+				return
+			}
+			origFn := fn.Origin()
+			if allDeclFuncs[origFn] != nil {
+				appendTarget(returnWriteID(origFn))
+				return
+			}
+			if (p.Types == nil || origFn.Pkg() != p.Types) && !isStdCallee(origFn) {
+				origSig, _ := origFn.Type().(*types.Signature)
+				if funcMayReturnMutableAlias(origSig) {
+					if fk, ok := callableFactKey(origFn); ok {
+						appendTarget(crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#rw"}))
+					}
+				}
+			}
+		}
+		appendYieldCallbackWriteHubs := func(root types.Type) {
+			var visited map[types.Type]bool
+			var walk func(t types.Type)
+			walk = func(t types.Type) {
+				if t == nil {
+					return
+				}
+				switch u := t.(type) {
+				case *types.Alias, *types.Named, *types.Tuple, *types.TypeParam, *types.Union, *types.Signature:
+				case *types.Interface:
+					if u.NumEmbeddeds() == 0 {
+						return
+					}
+				default:
+					return
+				}
+				if visited[t] {
+					return
+				}
+				if visited == nil {
+					visited = map[types.Type]bool{}
+				}
+				visited[t] = true
+				switch u := t.(type) {
+				case *types.Alias:
+					walk(types.Unalias(u))
+				case *types.Named:
+					walk(u.Underlying())
+				case *types.Tuple:
+					for i := 0; i < u.Len(); i++ {
+						walk(u.At(i).Type())
+					}
+				case *types.TypeParam:
+					walk(u.Constraint())
+				case *types.Interface:
+					for i := 0; i < u.NumEmbeddeds(); i++ {
+						walk(u.EmbeddedType(i))
+					}
+				case *types.Union:
+					for i := 0; i < u.Len(); i++ {
+						if term := u.Term(i); term != nil {
+							walk(term.Type())
+						}
+					}
+				case *types.Signature:
+					if u.Results() != nil {
+						for i := 0; i < u.Results().Len(); i++ {
+							walk(u.Results().At(i).Type())
+						}
+					}
+					if u.Params() != nil {
+						for i := 0; i < u.Params().Len(); i++ {
+							pType := u.Params().At(i).Type()
+							forEachCallableSignature(pType, func(cu *types.Signature) {
+								if cu.Params() != nil {
+									for k := 0; k < cu.Params().Len(); k++ {
+										if typeMayCarryMutableAlias(cu.Params().At(k).Type()) {
+											appendTarget(dynHubWriteID(cu, k))
+										}
+									}
+								}
+							})
+							walk(pType)
+						}
+					}
+				}
+			}
+			walk(root)
+		}
+		switch e := expr.(type) {
+		case *ast.ParenExpr:
+			appendTargets(exprWriteThroughTargets(e.X))
+		case *ast.StarExpr:
+			appendTargets(exprWriteThroughTargets(e.X))
+		case *ast.IndexExpr:
+			appendTargets(exprWriteThroughTargets(e.X))
+		case *ast.IndexListExpr:
+			appendTargets(exprWriteThroughTargets(e.X))
+		case *ast.SliceExpr:
+			appendTargets(exprWriteThroughTargets(e.X))
+		case *ast.TypeAssertExpr:
+			appendTargets(exprWriteThroughTargets(e.X))
+		case *ast.UnaryExpr:
+			switch e.Op {
+			case token.AND:
+				appendTarget(targetVarID(extractTargetVar(p.TypesInfo, e.X)))
+				appendTargets(exprWriteThroughTargets(e.X))
+			case token.ARROW:
+				appendTargets(exprWriteThroughTargets(e.X))
+			}
+		case *ast.Ident:
+			switch obj := identDefOrUse(p.TypesInfo, e).(type) {
+			case *types.Var:
+				appendTarget(targetVarWriteThroughID(obj))
+			case *types.Func:
+				appendConcreteFuncReturnWriteTarget(obj)
+			}
+		case *ast.SelectorExpr:
+			if selInfo := p.TypesInfo.Selections[e]; selInfo == nil {
+				switch obj := p.TypesInfo.Uses[e.Sel].(type) {
+				case *types.Var:
+					appendTarget(targetVarWriteThroughID(obj))
+				case *types.Func:
+					appendConcreteFuncReturnWriteTarget(obj)
+				}
+			} else {
+				switch selInfo.Kind() {
+				case types.MethodVal, types.MethodExpr:
+					fn, _ := selInfo.Obj().(*types.Func)
+					var origFn *types.Func
+					var origSig *types.Signature
+					if fn != nil {
+						origFn = fn.Origin()
+						origSig, _ = origFn.Type().(*types.Signature)
+					}
+					isIface := isInterfaceMethodSelection(selInfo, origFn)
+					if isIface {
+						if origFn != nil {
+							appendTarget(ifaceReturnWriteID(origFn.Name(), origSig))
+						}
+					} else {
+						appendConcreteFuncReturnWriteTarget(origFn)
+					}
+					if selInfo.Kind() == types.MethodVal {
+						appendTargets(methodRecvWriteTargets(e.X, isIface, origSig))
+					}
+				default:
+					appendTargets(exprWriteThroughTargets(e.X))
+				}
+			}
+		case *ast.FuncLit:
+			appendTarget(litReturnWriteID(e))
+		case *ast.CompositeLit:
+			for _, elt := range e.Elts {
+				appendTargets(exprWriteThroughTargets(elt))
+			}
+		case *ast.KeyValueExpr:
+			appendTargets(exprWriteThroughTargets(e.Key))
+			appendTargets(exprWriteThroughTargets(e.Value))
+		case *ast.CallExpr:
+			if tvFun, isType := p.TypesInfo.Types[e.Fun]; isType && tvFun.IsType() {
+				if len(e.Args) == 1 {
+					appendTargets(exprWriteThroughTargets(e.Args[0]))
+				}
+				break
+			}
+			tvCall, ok := p.TypesInfo.Types[e]
+			if !ok || !typeMayCarryMutableAlias(tvCall.Type) {
+				break
+			}
+			if lit, ok := ast.Unparen(e.Fun).(*ast.FuncLit); ok {
+				appendTarget(litReturnWriteID(lit))
+				break
+			}
+			appendBuiltinWriteThrough := func(b *types.Builtin) {
+				if b == nil {
+					return
+				}
+				switch b.Name() {
+				case "append", "Slice", "SliceData", "Add":
+					if len(e.Args) >= 1 {
+						appendTargets(exprWriteThroughTargets(e.Args[0]))
+					}
+				case "new":
+					if len(e.Args) == 1 {
+						if tvArg, ok := p.TypesInfo.Types[e.Args[0]]; !ok || !tvArg.IsType() {
+							appendTargets(exprWriteThroughTargets(e.Args[0]))
+						}
+					}
+				}
+			}
+			switch fun := unwrapCallee(e.Fun).(type) {
+			case *ast.Ident:
+				if b, isBuiltin := p.TypesInfo.Uses[fun].(*types.Builtin); isBuiltin {
+					appendBuiltinWriteThrough(b)
+					break
+				}
+				if fn, ok := p.TypesInfo.Uses[fun].(*types.Func); ok && fn != nil {
+					if isStdCallee(fn.Origin()) {
+						for _, arg := range e.Args {
+							appendTargets(exprWriteThroughTargets(arg))
+						}
+					} else {
+						appendConcreteFuncReturnWriteTarget(fn)
+					}
+				} else if tv, ok := p.TypesInfo.Types[e.Fun]; ok && tv.Type != nil {
+					forEachCallableSignature(tv.Type, func(sig *types.Signature) {
+						appendTarget(dynReturnWriteID(sig))
+						appendTargets(exprWriteThroughTargets(e.Fun))
+					})
+				}
+			case *ast.SelectorExpr:
+				if selInfo, isSel := p.TypesInfo.Selections[fun]; isSel && selInfo != nil {
+					switch selInfo.Kind() {
+					case types.MethodVal, types.MethodExpr:
+						fn, _ := selInfo.Obj().(*types.Func)
+						var origFn *types.Func
+						var origSig *types.Signature
+						if fn != nil {
+							origFn = fn.Origin()
+							origSig, _ = origFn.Type().(*types.Signature)
+						}
+						if isInterfaceMethodSelection(selInfo, origFn) {
+							if origFn != nil {
+								appendTarget(ifaceReturnWriteID(origFn.Name(), origSig))
+							}
+							if selInfo.Kind() == types.MethodVal {
+								appendTargets(methodRecvWriteTargets(fun.X, true, origSig))
+							} else if len(e.Args) >= 1 {
+								appendTargets(methodRecvWriteTargets(e.Args[0], true, origSig))
+							}
+						} else if origFn != nil {
+							if isStdCallee(origFn) {
+								if selInfo.Kind() == types.MethodVal {
+									appendTargets(methodRecvWriteTargets(fun.X, false, origSig))
+								}
+								for _, arg := range e.Args {
+									appendTargets(exprWriteThroughTargets(arg))
+								}
+							} else {
+								appendConcreteFuncReturnWriteTarget(origFn)
+							}
+						}
+					case types.FieldVal:
+						if tv, ok := p.TypesInfo.Types[e.Fun]; ok && tv.Type != nil {
+							forEachCallableSignature(tv.Type, func(sig *types.Signature) {
+								appendTarget(dynReturnWriteID(sig))
+								appendTargets(exprWriteThroughTargets(e.Fun))
+							})
+						}
+					}
+				} else if b, isBuiltin := p.TypesInfo.Uses[fun.Sel].(*types.Builtin); isBuiltin {
+					appendBuiltinWriteThrough(b)
+				} else if fn, ok := p.TypesInfo.Uses[fun.Sel].(*types.Func); ok && fn != nil {
+					if isStdCallee(fn.Origin()) {
+						for _, arg := range e.Args {
+							appendTargets(exprWriteThroughTargets(arg))
+						}
+					} else {
+						appendConcreteFuncReturnWriteTarget(fn)
+					}
+				} else if tv, ok := p.TypesInfo.Types[e.Fun]; ok && tv.Type != nil {
+					forEachCallableSignature(tv.Type, func(sig *types.Signature) {
+						appendTarget(dynReturnWriteID(sig))
+						appendTargets(exprWriteThroughTargets(e.Fun))
+					})
+				}
+			default:
+				if tv, ok := p.TypesInfo.Types[e.Fun]; ok && tv.Type != nil {
+					forEachCallableSignature(tv.Type, func(sig *types.Signature) {
+						appendTarget(dynReturnWriteID(sig))
+						appendTargets(exprWriteThroughTargets(e.Fun))
+					})
+				}
+			}
+		}
+		if tv, ok := p.TypesInfo.Types[expr]; ok && tv.Type != nil && !tv.IsType() {
+			appendYieldCallbackWriteHubs(tv.Type)
+		}
+		exprWTMemo[expr] = outTargets
+		return outTargets
+	}
+
+	methodRecvWriteTargets = func(recvExpr ast.Expr, isIface bool, origSig *types.Signature) []int {
+		if recvExpr == nil {
+			return nil
+		}
+		var outTargets []int
+		appendTarget := func(id int) {
+			if id < 0 {
+				return
+			}
+			for _, ex := range outTargets {
+				if ex == id {
+					return
+				}
+			}
+			outTargets = append(outTargets, id)
+		}
+		for _, wt := range exprWriteThroughTargets(recvExpr) {
+			appendTarget(wt)
+		}
+		recvIsPtr := false
+		if origSig != nil && origSig.Recv() != nil && origSig.Recv().Type() != nil {
+			_, recvIsPtr = types.Unalias(origSig.Recv().Type()).(*types.Pointer)
+		}
+		if isIface || recvIsPtr {
+			appendTarget(targetVarID(extractTargetVar(p.TypesInfo, recvExpr)))
+		}
+		return outTargets
+	}
+
+	// Wire generic function and generic-receiver type instantiations across p.
+	for ident, inst := range p.TypesInfo.Instances {
+		if inst.TypeArgs == nil {
+			continue
+		}
+		useFn, ok := p.TypesInfo.Uses[ident].(*types.Func)
+		if !ok || useFn == nil {
+			continue
+		}
+		origFn := useFn.Origin()
+		origSig, ok := origFn.Type().(*types.Signature)
+		if !ok || origSig == nil || origSig.Recv() != nil || origSig.TypeParams() == nil {
+			continue
+		}
+		nTP := min(inst.TypeArgs.Len(), origSig.TypeParams().Len())
+		if allDeclFuncs[origFn] != nil {
+			for i := range nTP {
+				wireTypeArg(typeParamID(origFn, i), inst.TypeArgs.At(i))
+			}
+		} else if (p.Types == nil || origFn.Pkg() != p.Types) && !isStdCallee(origFn) {
+			if baseKey, ok := callableFactKey(origFn); ok {
+				for i := range nTP {
+					tpKey := FuncKey{Pkg: baseKey.Pkg, Name: baseKey.Name + "#tp#" + strconv.Itoa(i)}
+					wireTypeArg(crossID(tpKey), inst.TypeArgs.At(i))
+				}
+			}
+		}
+	}
+
+	seenInstTypes := map[types.Type]bool{}
+	var wireInstantiatedNamedTypes func(types.Type)
+	wireInstantiatedNamedTypes = func(t types.Type) {
+		if t == nil || seenInstTypes[t] {
+			return
+		}
+		seenInstTypes[t] = true
+		switch u := t.(type) {
+		case *types.Basic:
+			return
+		case *types.Alias:
+			if targs := u.TypeArgs(); targs != nil {
+				for i := 0; i < targs.Len(); i++ {
+					wireInstantiatedNamedTypes(targs.At(i))
+				}
+			}
+			wireInstantiatedNamedTypes(types.Unalias(u))
+		case *types.Named:
+			targs := u.TypeArgs()
+			if targs != nil {
+				for i := 0; i < targs.Len(); i++ {
+					wireInstantiatedNamedTypes(targs.At(i))
+				}
+			}
+			origNamed := u.Origin()
+			if targs != nil && targs.Len() > 0 && origNamed != nil && origNamed.Obj() != nil && origNamed.Obj().Pkg() != nil &&
+				(origNamed.Obj().Pkg() == p.Types || !isStdPkg(origNamed.Obj().Pkg())) {
+				for mi := 0; mi < origNamed.NumMethods(); mi++ {
+					m := origNamed.Method(mi)
+					if m == nil || m.Pkg() == nil {
+						continue
+					}
+					m = m.Origin()
+					mSig, ok := m.Type().(*types.Signature)
+					if !ok || mSig == nil || mSig.RecvTypeParams() == nil {
+						continue
+					}
+					nRTP := min(targs.Len(), mSig.RecvTypeParams().Len())
+					if allDeclFuncs[m] != nil {
+						for ti := range nRTP {
+							wireTypeArg(recvTypeParamID(m, ti), targs.At(ti))
+						}
+					} else if (p.Types == nil || m.Pkg() != p.Types) && !isStdCallee(m) {
+						if baseKey, ok := callableFactKey(m); ok {
+							for ti := range nRTP {
+								rtpKey := FuncKey{Pkg: baseKey.Pkg, Name: baseKey.Name + "#rtp#" + strconv.Itoa(ti)}
+								wireTypeArg(crossID(rtpKey), targs.At(ti))
+							}
+						}
+					}
+				}
+			}
+			if origNamed != nil && origNamed.Obj() != nil && origNamed.Obj().Pkg() != nil && origNamed.Obj().Pkg() != p.Types && isStdPkg(origNamed.Obj().Pkg()) {
+				return
+			}
+			wireInstantiatedNamedTypes(u.Underlying())
+		case *types.Pointer:
+			wireInstantiatedNamedTypes(u.Elem())
+		case *types.Slice:
+			wireInstantiatedNamedTypes(u.Elem())
+		case *types.Array:
+			wireInstantiatedNamedTypes(u.Elem())
+		case *types.Chan:
+			wireInstantiatedNamedTypes(u.Elem())
+		case *types.Map:
+			wireInstantiatedNamedTypes(u.Key())
+			wireInstantiatedNamedTypes(u.Elem())
+		case *types.Struct:
+			for i := 0; i < u.NumFields(); i++ {
+				wireInstantiatedNamedTypes(u.Field(i).Type())
+			}
+		case *types.Tuple:
+			for i := 0; i < u.Len(); i++ {
+				wireInstantiatedNamedTypes(u.At(i).Type())
+			}
+		case *types.Signature:
+			if u.Recv() != nil {
+				wireInstantiatedNamedTypes(u.Recv().Type())
+			}
+			wireInstantiatedNamedTypes(u.Params())
+			wireInstantiatedNamedTypes(u.Results())
+		case *types.Interface:
+			for i := 0; i < u.NumExplicitMethods(); i++ {
+				wireInstantiatedNamedTypes(u.ExplicitMethod(i).Type())
+			}
+			for i := 0; i < u.NumEmbeddeds(); i++ {
+				wireInstantiatedNamedTypes(u.EmbeddedType(i))
+			}
+		case *types.TypeParam:
+			wireInstantiatedNamedTypes(u.Constraint())
+		case *types.Union:
+			for i := 0; i < u.Len(); i++ {
+				if term := u.Term(i); term != nil {
+					wireInstantiatedNamedTypes(term.Type())
+				}
+			}
+		}
+	}
+	for _, tv := range p.TypesInfo.Types {
+		wireInstantiatedNamedTypes(tv.Type)
+	}
+	for _, obj := range p.TypesInfo.Defs {
+		if obj != nil {
+			wireInstantiatedNamedTypes(obj.Type())
+		}
+	}
+	for _, obj := range p.TypesInfo.Uses {
+		if obj != nil {
+			wireInstantiatedNamedTypes(obj.Type())
+		}
+	}
+	for _, inst := range p.TypesInfo.Instances {
+		wireInstantiatedNamedTypes(inst.Type)
+		if inst.TypeArgs != nil {
+			for i := 0; i < inst.TypeArgs.Len(); i++ {
+				wireInstantiatedNamedTypes(inst.TypeArgs.At(i))
+			}
+		}
+	}
+	for _, obj := range p.TypesInfo.Implicits {
+		if obj != nil {
+			wireInstantiatedNamedTypes(obj.Type())
+		}
+	}
+
+	wireReturnBody := func(rID, rwID int, body *ast.BlockStmt) {
+		if body == nil || (rID < 0 && rwID < 0) {
+			return
+		}
+		var walkRet func(ast.Node)
+		walkRet = func(n ast.Node) {
+			if n == nil {
+				return
+			}
+			switch node := n.(type) {
+			case *ast.FuncLit:
+				return
+			case *ast.ReturnStmt:
+				for _, resExpr := range node.Results {
+					if rID >= 0 {
+						bindSubtree(rID, resExpr)
+					}
+					if rwID >= 0 {
+						for _, wt := range exprWriteThroughTargets(resExpr) {
+							addParEdge(wt, rwID)
+						}
+					}
+				}
+				return
+			}
+			ast.Inspect(n, func(child ast.Node) bool {
+				if child == nil || child == n {
+					return true
+				}
+				walkRet(child)
+				return false
+			})
+		}
+		walkRet(body)
+	}
+
+	// Wire each declared function/method's receiver, parameter variables, and
+	// results to recvID, paramID, paramWriteID, returnID, returnWriteID,
+	// interface hubs, and (when value-taken) indirect dynamic hubs.
+	for fn, fd := range allDeclFuncs {
+		_ = execFuncID(fn)
+		sig, ok := fn.Type().(*types.Signature)
+		if !ok || sig == nil {
+			continue
+		}
+		if fd.Recv != nil {
+			for _, field := range fd.Recv.List {
+				for _, name := range field.Names {
+					if v, ok := isSamePkgNonFieldVar(p.TypesInfo.Defs[name]); ok {
+						addParEdge(bindVarID(v), recvID(fn))
+						if rwRecv := recvWriteID(fn); rwRecv >= 0 {
+							varWriteThroughIDs[v] = rwRecv
+							addParEdge(bindVarID(v), rwRecv)
+						}
+					}
+				}
+			}
+		}
+		if fd.Type != nil && fd.Type.Params != nil {
+			pIdx := 0
+			for _, field := range fd.Type.Params.List {
+				if len(field.Names) == 0 {
+					pIdx++
+					continue
+				}
+				for _, name := range field.Names {
+					if v, ok := isSamePkgNonFieldVar(p.TypesInfo.Defs[name]); ok {
+						addParEdge(bindVarID(v), paramID(fn, pIdx))
+						if pwID := paramWriteID(fn, pIdx); pwID >= 0 {
+							varWriteThroughIDs[v] = pwID
+							addParEdge(bindVarID(v), pwID)
+						}
+					}
+					pIdx++
+				}
+			}
+		}
+		rID := returnID(fn)
+		rwID := returnWriteID(fn)
+		if fd.Type != nil && fd.Type.Results != nil {
+			for _, field := range fd.Type.Results.List {
+				for _, name := range field.Names {
+					if v, ok := isSamePkgNonFieldVar(p.TypesInfo.Defs[name]); ok {
+						addParEdge(rID, bindVarID(v))
+						if rwID >= 0 {
+							addParEdge(varWriteThroughID(v), rwID)
+						}
+					}
+				}
+			}
+		}
+		wireReturnBody(rID, rwID, fd.Body)
+		if sig.Recv() != nil {
+			addParEdge(recvID(fn), ifaceRecvID(fn.Name()))
+			addParEdge(ifaceRecvWriteID(fn.Name()), recvWriteID(fn))
+			addParEdge(rwID, ifaceReturnWriteID(fn.Name(), sig))
+		}
+		if valueTakenDeclFuncs[fn] {
+			addParEdge(rwID, dynReturnWriteID(sig))
+		}
+		if sig.Params() != nil {
+			for i := 0; i < sig.Params().Len(); i++ {
+				pID := paramID(fn, i)
+				if pID < 0 {
+					continue
+				}
+				pwID := paramWriteID(fn, i)
+				if sig.Recv() != nil {
+					addParEdge(pID, ifaceHubID(fn.Name(), i))
+					addParEdge(ifaceHubWriteID(fn.Name(), i), pwID)
+				}
+				if valueTakenDeclFuncs[fn] {
+					addParEdge(pID, dynHubID(sig, i))
+					addParEdge(dynHubWriteID(sig, i), pwID)
+				}
+			}
+		}
+	}
+	for fk, sig := range valueTakenCrossSigs {
+		if funcMayReturnMutableAlias(sig) {
+			addParEdge(crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#rw"}), dynReturnWriteID(sig))
+		}
+		if sig.Params() == nil {
+			continue
+		}
+		for i := 0; i < sig.Params().Len(); i++ {
+			if !typeMayCarryParallel(sig.Params().At(i).Type()) {
+				continue
+			}
+			crossParam := crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#" + strconv.Itoa(i)})
+			addParEdge(crossParam, dynHubID(sig, i))
+			if typeMayCarryMutableAlias(sig.Params().At(i).Type()) {
+				crossParamWrite := crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#w#" + strconv.Itoa(i)})
+				addParEdge(dynHubWriteID(sig, i), crossParamWrite)
+			}
+		}
+	}
+	wireStdValueDynamicHubs := func(origSig, instSig *types.Signature, paramShift int, extraAliasSources []int, recvExpr ast.Expr) {
+		if instSig == nil {
+			return
+		}
+		nInst := 0
+		if instSig.Params() != nil {
+			nInst = instSig.Params().Len()
+		}
+		if drw := dynReturnWriteID(instSig); drw >= 0 {
+			for _, rwt := range extraAliasSources {
+				addParEdge(rwt, drw)
+			}
+			for i := range nInst {
+				if typeMayCarryMutableAlias(instSig.Params().At(i).Type()) {
+					addParEdge(dynHubWriteID(instSig, i), drw)
+				}
+			}
+		}
+		if origSig == nil || origSig.Params() == nil {
+			return
+		}
+		for i := paramShift; i < nInst; i++ {
+			instParamType := instSig.Params().At(i).Type()
+			forEachCallableSignature(instParamType, func(cbSig *types.Signature) {
+				if cbSig.Params() == nil {
+					return
+				}
+				for k := 0; k < cbSig.Params().Len(); k++ {
+					cbParamType := cbSig.Params().At(k).Type()
+					if !typeMayCarryParallel(cbParamType) {
+						continue
+					}
+					for j := range nInst {
+						if j == i {
+							continue
+						}
+						jType := instSig.Params().At(j).Type()
+						if typeMayCarryParallel(jType) {
+							addParEdge(dynHubID(cbSig, k), dynHubID(instSig, j))
+						}
+						if typeMayCarryMutableAlias(cbParamType) && typeMayCarryMutableAlias(jType) {
+							addParEdge(dynHubWriteID(instSig, j), dynHubWriteID(cbSig, k))
+						}
+					}
+				}
+			})
+			origIdx := i - paramShift
+			if origIdx < 0 || origIdx >= origSig.Params().Len() {
+				continue
+			}
+			origParamType := origSig.Params().At(origIdx).Type()
+			if origSig.Variadic() && origIdx == origSig.Params().Len()-1 {
+				if sl, ok := origParamType.(*types.Slice); ok {
+					origParamType = sl.Elem()
+				}
+			}
+			if !stdParamMayAcceptCarrierWrite(origParamType) || !typeMayCarryMutableAlias(instParamType) {
+				continue
+			}
+			dhw := dynHubWriteID(instSig, i)
+			if recvExpr != nil {
+				bindSubtree(dhw, recvExpr)
+			}
+			for j := range nInst {
+				if j == i {
+					continue
+				}
+				if typeMayCarryParallel(instSig.Params().At(j).Type()) {
+					addParEdge(dhw, dynHubID(instSig, j))
+				}
+			}
+		}
+	}
+	for _, sv := range valueTakenStdFuncs {
+		wireStdValueDynamicHubs(sv.origSig, sv.instSig, 0, nil, nil)
+	}
+	if p.Types != nil {
+		scope := p.Types.Scope()
+		for _, name := range scope.Names() {
+			if v, ok := scope.Lookup(name).(*types.Var); ok && v != nil && !v.IsField() && v.Exported() && v.Name() != "_" {
+				_ = bindVarID(v)
+				_ = varWriteThroughID(v)
+			}
+		}
+	}
+
+	// Wire closures (*ast.FuncLit) and non-callee MethodVal / MethodExpr
+	// selections across p.Syntax to signature-arity and interface hubs.
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			switch node := n.(type) {
+			case *ast.FuncLit:
+				tv, ok := p.TypesInfo.Types[node]
+				if !ok || tv.Type == nil {
+					return true
+				}
+				sig, ok := tv.Type.Underlying().(*types.Signature)
+				if !ok || sig == nil {
+					return true
+				}
+				lrwID := litReturnWriteID(node)
+				if node.Type != nil && node.Type.Results != nil && lrwID >= 0 {
+					for _, field := range node.Type.Results.List {
+						for _, name := range field.Names {
+							if v, ok := isSamePkgNonFieldVar(p.TypesInfo.Defs[name]); ok {
+								addParEdge(varWriteThroughID(v), lrwID)
+							}
+						}
+					}
+				}
+				wireReturnBody(-1, lrwID, node.Body)
+				isIIFE := directCallFuncLits[node]
+				if !isIIFE && lrwID >= 0 {
+					addParEdge(lrwID, dynReturnWriteID(sig))
+				}
+				if node.Type != nil && node.Type.Params != nil {
+					pIdx := 0
+					for _, field := range node.Type.Params.List {
+						if len(field.Names) == 0 {
+							pIdx++
+							continue
+						}
+						for _, name := range field.Names {
+							if v, ok := isSamePkgNonFieldVar(p.TypesInfo.Defs[name]); ok {
+								_ = varWriteThroughID(v)
+								if !isIIFE {
+									addParEdge(bindVarID(v), dynHubID(sig, pIdx))
+									addParEdge(dynHubWriteID(sig, pIdx), varWriteThroughID(v))
+								}
+							}
+							pIdx++
+						}
+					}
+				}
+			case *ast.SelectorExpr:
+				if anyDirectCalleeIdent[node.Sel] {
+					return true
+				}
+				selInfo, isSel := p.TypesInfo.Selections[node]
+				if !isSel || selInfo == nil {
+					return true
+				}
+				fn, _ := selInfo.Obj().(*types.Func)
+				var origFn *types.Func
+				var origSig *types.Signature
+				if fn != nil {
+					origFn = fn.Origin()
+					origSig, _ = origFn.Type().(*types.Signature)
+				}
+				isIface := isInterfaceMethodSelection(selInfo, origFn)
+				switch selInfo.Kind() {
+				case types.MethodVal:
+					boundSig, _ := selInfo.Type().Underlying().(*types.Signature)
+					if boundSig == nil {
+						return true
+					}
+					recvWTs := methodRecvWriteTargets(node.X, isIface, origSig)
+					if boundSig.Params() != nil {
+						for i := 0; i < boundSig.Params().Len(); i++ {
+							if typeMayCarryParallel(boundSig.Params().At(i).Type()) {
+								dh := dynHubID(boundSig, i)
+								for _, rwt := range recvWTs {
+									addParEdge(rwt, dh)
+								}
+							}
+						}
+					}
+					if isIface {
+						if origFn != nil {
+							bindSubtree(ifaceRecvID(origFn.Name()), node.X)
+							irw := ifaceRecvWriteID(origFn.Name())
+							for _, rwt := range recvWTs {
+								addParEdge(rwt, irw)
+							}
+							if boundSig.Params() != nil {
+								for i := 0; i < boundSig.Params().Len(); i++ {
+									if typeMayCarryParallel(boundSig.Params().At(i).Type()) {
+										addParEdge(ifaceHubID(origFn.Name(), i), dynHubID(boundSig, i))
+										addParEdge(dynHubWriteID(boundSig, i), ifaceHubWriteID(origFn.Name(), i))
+									}
+								}
+							}
+							drw := dynReturnWriteID(boundSig)
+							addParEdge(ifaceReturnWriteID(origFn.Name(), boundSig), drw)
+							for _, rwt := range recvWTs {
+								addParEdge(rwt, drw)
+							}
+						}
+					} else if origFn != nil {
+						if allDeclFuncs[origFn] != nil {
+							bindSubtree(recvID(origFn), node.X)
+							rwRecv := recvWriteID(origFn)
+							for _, rwt := range recvWTs {
+								addParEdge(rwt, rwRecv)
+							}
+							if boundSig.Params() != nil {
+								for i := 0; i < boundSig.Params().Len(); i++ {
+									addParEdge(paramID(origFn, i), dynHubID(boundSig, i))
+									addParEdge(dynHubWriteID(boundSig, i), paramWriteID(origFn, i))
+								}
+							}
+							addParEdge(returnWriteID(origFn), dynReturnWriteID(boundSig))
+						} else if (p.Types == nil || origFn.Pkg() != p.Types) && !isStdCallee(origFn) {
+							if fk, ok := callableFactKey(origFn); ok {
+								if origSig != nil && origSig.Recv() != nil && typeMayCarryParallel(origSig.Recv().Type()) {
+									bindSubtree(crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#recv"}), node.X)
+								}
+								if origSig != nil && origSig.Recv() != nil && typeMayCarryMutableAlias(origSig.Recv().Type()) {
+									crw := crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#wrecv"})
+									for _, rwt := range recvWTs {
+										addParEdge(rwt, crw)
+									}
+								}
+								if boundSig.Params() != nil {
+									for i := 0; i < boundSig.Params().Len(); i++ {
+										if typeMayCarryParallel(boundSig.Params().At(i).Type()) {
+											addParEdge(crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#" + strconv.Itoa(i)}), dynHubID(boundSig, i))
+											if typeMayCarryMutableAlias(boundSig.Params().At(i).Type()) {
+												addParEdge(dynHubWriteID(boundSig, i), crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#w#" + strconv.Itoa(i)}))
+											}
+										}
+									}
+								}
+								if funcMayReturnMutableAlias(boundSig) {
+									addParEdge(crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#rw"}), dynReturnWriteID(boundSig))
+								}
+							}
+						} else if isStdCallee(origFn) {
+							wireStdValueDynamicHubs(origSig, boundSig, 0, recvWTs, node.X)
+						}
+					}
+				case types.MethodExpr:
+					exprSig, _ := selInfo.Type().Underlying().(*types.Signature)
+					if exprSig == nil || exprSig.Params() == nil || exprSig.Params().Len() < 1 {
+						return true
+					}
+					recvSlot := dynHubID(exprSig, 0)
+					recvSlotWrite := dynHubWriteID(exprSig, 0)
+					for i := 0; i+1 < exprSig.Params().Len(); i++ {
+						if typeMayCarryParallel(exprSig.Params().At(i+1).Type()) {
+							addParEdge(recvSlotWrite, dynHubID(exprSig, i+1))
+						}
+					}
+					if isIface {
+						if origFn != nil {
+							addParEdge(ifaceRecvID(origFn.Name()), recvSlot)
+							addParEdge(recvSlotWrite, ifaceRecvWriteID(origFn.Name()))
+							for i := 0; i+1 < exprSig.Params().Len(); i++ {
+								if typeMayCarryParallel(exprSig.Params().At(i+1).Type()) {
+									addParEdge(ifaceHubID(origFn.Name(), i), dynHubID(exprSig, i+1))
+									addParEdge(dynHubWriteID(exprSig, i+1), ifaceHubWriteID(origFn.Name(), i))
+								}
+							}
+							drw := dynReturnWriteID(exprSig)
+							addParEdge(ifaceReturnWriteID(origFn.Name(), origSig), drw)
+							addParEdge(recvSlotWrite, drw)
+						}
+					} else if origFn != nil {
+						if allDeclFuncs[origFn] != nil {
+							addParEdge(recvID(origFn), recvSlot)
+							addParEdge(recvSlotWrite, recvWriteID(origFn))
+							for i := 0; i+1 < exprSig.Params().Len(); i++ {
+								addParEdge(paramID(origFn, i), dynHubID(exprSig, i+1))
+								addParEdge(dynHubWriteID(exprSig, i+1), paramWriteID(origFn, i))
+							}
+							addParEdge(returnWriteID(origFn), dynReturnWriteID(exprSig))
+						} else if (p.Types == nil || origFn.Pkg() != p.Types) && !isStdCallee(origFn) {
+							if fk, ok := callableFactKey(origFn); ok {
+								if typeMayCarryParallel(exprSig.Params().At(0).Type()) {
+									addParEdge(crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#recv"}), recvSlot)
+								}
+								if typeMayCarryMutableAlias(exprSig.Params().At(0).Type()) {
+									addParEdge(recvSlotWrite, crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#wrecv"}))
+								}
+								for i := 0; i+1 < exprSig.Params().Len(); i++ {
+									if typeMayCarryParallel(exprSig.Params().At(i+1).Type()) {
+										addParEdge(crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#" + strconv.Itoa(i)}), dynHubID(exprSig, i+1))
+										if typeMayCarryMutableAlias(exprSig.Params().At(i+1).Type()) {
+											addParEdge(dynHubWriteID(exprSig, i+1), crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#w#" + strconv.Itoa(i)}))
+										}
+									}
+								}
+								if funcMayReturnMutableAlias(exprSig) {
+									addParEdge(crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#rw"}), dynReturnWriteID(exprSig))
+								}
+							}
+						} else if isStdCallee(origFn) {
+							wireStdValueDynamicHubs(origSig, exprSig, 1, []int{recvSlotWrite}, nil)
+						}
+					}
+				}
+			}
+			return true
+		})
+	}
+
+	linkArgWriteBack := func(arg ast.Expr, calleeWriteID int) {
+		if calleeWriteID < 0 || arg == nil {
+			return
+		}
+		for _, wt := range exprWriteThroughTargets(arg) {
+			addParEdge(wt, calleeWriteID)
+		}
+	}
+
+	callbackSigWithCarrierParam := func(arg ast.Expr) *types.Signature {
+		if arg == nil {
+			return nil
+		}
+		tv, ok := p.TypesInfo.Types[arg]
+		if !ok || tv.Type == nil || tv.IsType() {
+			return nil
+		}
+		var found *types.Signature
+		forEachCallableSignature(tv.Type, func(cbSig *types.Signature) {
+			if found != nil || cbSig.Params() == nil || cbSig.Params().Len() == 0 {
+				return
+			}
+			for k := 0; k < cbSig.Params().Len(); k++ {
+				if typeMayCarryParallel(cbSig.Params().At(k).Type()) {
+					found = cbSig
+					return
+				}
+			}
+		})
+		return found
+	}
+
+	wireCallbackArgFromSources := func(cbArg ast.Expr, cbSig *types.Signature, srcExprs []ast.Expr, srcWTs []int) {
+		if cbArg == nil || cbSig == nil || cbSig.Params() == nil {
+			return
+		}
+		var carrierSrcs []ast.Expr
+		for _, src := range srcExprs {
+			if src == nil || src == cbArg {
+				continue
+			}
+			var st types.Type
+			if stv, ok := p.TypesInfo.Types[src]; ok {
+				st = stv.Type
+			}
+			if st == nil || typeMayCarryParallel(st) {
+				carrierSrcs = append(carrierSrcs, src)
+			}
+		}
+		if len(carrierSrcs) == 0 && len(srcWTs) == 0 {
+			return
+		}
+		wireSlot := func(readID, writeID int, paramType types.Type) {
+			if readID >= 0 && typeMayCarryParallel(paramType) {
+				for _, src := range carrierSrcs {
+					bindSubtree(readID, src)
+				}
+			}
+			if writeID >= 0 && typeMayCarryMutableAlias(paramType) {
+				for _, swt := range srcWTs {
+					addParEdge(swt, writeID)
+				}
+			}
+		}
+		wireDynFallback := func() {
+			for k := 0; k < cbSig.Params().Len(); k++ {
+				pType := cbSig.Params().At(k).Type()
+				wireSlot(dynHubID(cbSig, k), dynHubWriteID(cbSig, k), pType)
+			}
+		}
+		wireFuncTarget := func(fn *types.Func) {
+			if fn == nil || fn.Pkg() == nil {
+				wireDynFallback()
+				return
+			}
+			fn = fn.Origin()
+			if allDeclFuncs[fn] != nil {
+				for k := 0; k < cbSig.Params().Len(); k++ {
+					wireSlot(paramID(fn, k), paramWriteID(fn, k), cbSig.Params().At(k).Type())
+				}
+				return
+			}
+			if (p.Types == nil || fn.Pkg() != p.Types) && !isStdCallee(fn) {
+				if fk, ok := callableFactKey(fn); ok {
+					for k := 0; k < cbSig.Params().Len(); k++ {
+						pType := cbSig.Params().At(k).Type()
+						readHub := -1
+						if typeMayCarryParallel(pType) {
+							readHub = crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#" + strconv.Itoa(k)})
+						}
+						writeHub := -1
+						if typeMayCarryMutableAlias(pType) {
+							writeHub = crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#w#" + strconv.Itoa(k)})
+						}
+						wireSlot(readHub, writeHub, pType)
+					}
+					return
+				}
+			}
+			wireDynFallback()
+		}
+		if lit, ok := ast.Unparen(cbArg).(*ast.FuncLit); ok {
+			if lit.Type != nil && lit.Type.Params != nil {
+				pIdx := 0
+				for _, field := range lit.Type.Params.List {
+					if len(field.Names) == 0 {
+						pIdx++
+						continue
+					}
+					for _, name := range field.Names {
+						if pIdx < cbSig.Params().Len() {
+							if v, ok := isSamePkgNonFieldVar(p.TypesInfo.Defs[name]); ok {
+								wireSlot(bindVarID(v), varWriteThroughID(v), cbSig.Params().At(pIdx).Type())
+							}
+						}
+						pIdx++
+					}
+				}
+			}
+			return
+		}
+		switch cb := unwrapCallee(cbArg).(type) {
+		case *ast.Ident:
+			if fn, ok := p.TypesInfo.Uses[cb].(*types.Func); ok && fn != nil {
+				wireFuncTarget(fn)
+				return
+			}
+		case *ast.SelectorExpr:
+			if selInfo, isSel := p.TypesInfo.Selections[cb]; isSel && selInfo != nil {
+				fn, _ := selInfo.Obj().(*types.Func)
+				var origFn *types.Func
+				var origSig *types.Signature
+				if fn != nil {
+					origFn = fn.Origin()
+					origSig, _ = origFn.Type().(*types.Signature)
+				}
+				isIface := isInterfaceMethodSelection(selInfo, origFn)
+				switch selInfo.Kind() {
+				case types.MethodVal:
+					for _, rwt := range methodRecvWriteTargets(cb.X, isIface, origSig) {
+						for _, src := range carrierSrcs {
+							bindSubtree(rwt, src)
+						}
+						for _, swt := range srcWTs {
+							addParEdge(swt, rwt)
+						}
+					}
+					if isIface && origFn != nil {
+						for k := 0; k < cbSig.Params().Len(); k++ {
+							pType := cbSig.Params().At(k).Type()
+							wireSlot(ifaceHubID(origFn.Name(), k), ifaceHubWriteID(origFn.Name(), k), pType)
+						}
+						return
+					}
+					if origFn != nil {
+						wireFuncTarget(origFn)
+						return
+					}
+				case types.MethodExpr:
+					if cbSig.Params().Len() >= 1 && origFn != nil {
+						recvType := cbSig.Params().At(0).Type()
+						if isIface {
+							wireSlot(ifaceRecvID(origFn.Name()), ifaceRecvWriteID(origFn.Name()), recvType)
+							for k := 1; k < cbSig.Params().Len(); k++ {
+								pType := cbSig.Params().At(k).Type()
+								wireSlot(ifaceHubID(origFn.Name(), k-1), ifaceHubWriteID(origFn.Name(), k-1), pType)
+							}
+							return
+						}
+						if allDeclFuncs[origFn] != nil {
+							wireSlot(recvID(origFn), recvWriteID(origFn), recvType)
+							for k := 1; k < cbSig.Params().Len(); k++ {
+								wireSlot(paramID(origFn, k-1), paramWriteID(origFn, k-1), cbSig.Params().At(k).Type())
+							}
+							return
+						}
+						if (p.Types == nil || origFn.Pkg() != p.Types) && !isStdCallee(origFn) {
+							if fk, ok := callableFactKey(origFn); ok {
+								recvRead := -1
+								if typeMayCarryParallel(recvType) {
+									recvRead = crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#recv"})
+								}
+								recvWrite := -1
+								if typeMayCarryMutableAlias(recvType) {
+									recvWrite = crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#wrecv"})
+								}
+								wireSlot(recvRead, recvWrite, recvType)
+								for k := 1; k < cbSig.Params().Len(); k++ {
+									pType := cbSig.Params().At(k).Type()
+									readHub := -1
+									if typeMayCarryParallel(pType) {
+										readHub = crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#" + strconv.Itoa(k-1)})
+									}
+									writeHub := -1
+									if typeMayCarryMutableAlias(pType) {
+										writeHub = crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#w#" + strconv.Itoa(k-1)})
+									}
+									wireSlot(readHub, writeHub, pType)
+								}
+								return
+							}
+						}
+					}
+				}
+			} else if fn, ok := p.TypesInfo.Uses[cb.Sel].(*types.Func); ok && fn != nil {
+				wireFuncTarget(fn)
+				return
+			}
+		}
+		wireDynFallback()
+	}
+
+	wireCallSiteCallbacks := func(args []ast.Expr, extraSrcExprs []ast.Expr, extraWTs []int, lazyExtraWTExpr ast.Expr) {
+		for argIdx, arg := range args {
+			cbSig := callbackSigWithCarrierParam(arg)
+			if cbSig == nil {
+				continue
+			}
+			srcs := make([]ast.Expr, 0, len(extraSrcExprs)+len(args))
+			srcs = append(srcs, extraSrcExprs...)
+			wts := make([]int, 0, len(extraWTs)+len(args))
+			wts = append(wts, extraWTs...)
+			if lazyExtraWTExpr != nil {
+				wts = append(wts, exprWriteThroughTargets(lazyExtraWTExpr)...)
+			}
+			for j, other := range args {
+				if j == argIdx || other == nil {
+					continue
+				}
+				srcs = append(srcs, other)
+				wts = append(wts, exprWriteThroughTargets(other)...)
+			}
+			wireCallbackArgFromSources(arg, cbSig, srcs, wts)
+		}
+	}
+
+	wireDynamicCallArgs := func(sig *types.Signature, args []ast.Expr, isEllipsis bool, funExpr ast.Expr) {
+		if sig == nil || sig.Params() == nil {
+			return
+		}
+		for argIdx, arg := range args {
+			if pIdx, ok := sigParamIndexForArg(sig, argIdx, isEllipsis); ok && typeMayCarryParallel(sig.Params().At(pIdx).Type()) {
+				bindSubtree(dynHubID(sig, pIdx), arg)
+				if typeMayCarryMutableAlias(sig.Params().At(pIdx).Type()) {
+					linkArgWriteBack(arg, dynHubWriteID(sig, pIdx))
+				}
+			}
+		}
+		var extraSrcs []ast.Expr
+		if funExpr != nil {
+			extraSrcs = []ast.Expr{funExpr}
+		}
+		wireCallSiteCallbacks(args, extraSrcs, nil, funExpr)
+	}
+
+	wireInterfaceCallArgs := func(methodName string, sig *types.Signature, args []ast.Expr, isEllipsis bool, recvExpr ast.Expr, recvWTs []int) {
+		if methodName == "" || sig == nil || sig.Params() == nil {
+			return
+		}
+		for argIdx, arg := range args {
+			if pIdx, ok := sigParamIndexForArg(sig, argIdx, isEllipsis); ok && typeMayCarryParallel(sig.Params().At(pIdx).Type()) {
+				bindSubtree(ifaceHubID(methodName, pIdx), arg)
+				if typeMayCarryMutableAlias(sig.Params().At(pIdx).Type()) {
+					linkArgWriteBack(arg, ifaceHubWriteID(methodName, pIdx))
+				}
+			}
+		}
+		var extraSrcs []ast.Expr
+		if recvExpr != nil {
+			extraSrcs = []ast.Expr{recvExpr}
+		}
+		wireCallSiteCallbacks(args, extraSrcs, recvWTs, nil)
+	}
+
+	wireConcreteFuncArgs := func(callee *types.Func, args []ast.Expr, isEllipsis bool) {
+		if callee == nil || callee.Pkg() == nil {
+			return
+		}
+		callee = callee.Origin()
+		sig, ok := callee.Type().(*types.Signature)
+		if !ok || sig == nil || sig.Params() == nil {
+			return
+		}
+		if allDeclFuncs[callee] != nil {
+			for argIdx, arg := range args {
+				if pIdx, ok := sigParamIndexForArg(sig, argIdx, isEllipsis); ok {
+					bindSubtree(paramID(callee, pIdx), arg)
+					linkArgWriteBack(arg, paramWriteID(callee, pIdx))
+				}
+			}
+			return
+		}
+		if (p.Types == nil || callee.Pkg() != p.Types) && !isStdCallee(callee) {
+			baseKey, ok := callableFactKey(callee)
+			if !ok {
+				return
+			}
+			for argIdx, arg := range args {
+				if pIdx, ok := sigParamIndexForArg(sig, argIdx, isEllipsis); ok && typeMayCarryParallel(sig.Params().At(pIdx).Type()) {
+					paramKey := FuncKey{Pkg: baseKey.Pkg, Name: baseKey.Name + "#" + strconv.Itoa(pIdx)}
+					bindSubtree(crossID(paramKey), arg)
+					if typeMayCarryMutableAlias(sig.Params().At(pIdx).Type()) {
+						paramWriteKey := FuncKey{Pkg: baseKey.Pkg, Name: baseKey.Name + "#w#" + strconv.Itoa(pIdx)}
+						linkArgWriteBack(arg, crossID(paramWriteKey))
+					}
+				}
+			}
+			return
+		}
+		if isStdCallee(callee) && len(args) >= 2 {
+			wireCallSiteCallbacks(args, nil, nil, nil)
+			for argIdx, arg := range args {
+				pIdx, ok := sigParamIndexForArg(sig, argIdx, isEllipsis)
+				if !ok {
+					continue
+				}
+				paramType := sig.Params().At(pIdx).Type()
+				if sig.Variadic() && pIdx == sig.Params().Len()-1 && !isEllipsis {
+					if sl, ok := paramType.(*types.Slice); ok {
+						paramType = sl.Elem()
+					}
+				}
+				if !stdParamMayAcceptCarrierWrite(paramType) {
+					continue
+				}
+				wts := exprWriteThroughTargets(arg)
+				if len(wts) == 0 {
+					continue
+				}
+				for j, other := range args {
+					if j == argIdx {
+						continue
+					}
+					var otherType types.Type
+					if tv, ok := p.TypesInfo.Types[other]; ok {
+						otherType = tv.Type
+					}
+					if otherType == nil || typeMayCarryParallel(otherType) {
+						for _, wt := range wts {
+							bindSubtree(wt, other)
+						}
+						for _, rwt := range exprWriteThroughTargets(other) {
+							for _, wt := range wts {
+								addParEdge(rwt, wt)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	addrTargetsMemo := map[ast.Node][]int{}
+	var addrTargets func(ast.Node) []int
+	addrTargets = func(n ast.Node) []int {
+		if n == nil {
+			return nil
+		}
+		if cached, ok := addrTargetsMemo[n]; ok {
+			return cached
+		}
+		var outTargets []int
+		if u, ok := n.(*ast.UnaryExpr); ok && u.Op == token.AND {
+			if tID := targetVarID(extractTargetVar(p.TypesInfo, u.X)); tID >= 0 {
+				outTargets = append(outTargets, tID)
+			}
+			outTargets = append(outTargets, exprWriteThroughTargets(u.X)...)
+		}
+		ast.Inspect(n, func(child ast.Node) bool {
+			if child == nil || child == n {
+				return true
+			}
+			if sub := addrTargets(child); len(sub) > 0 {
+				outTargets = append(outTargets, sub...)
+			}
+			return false
+		})
+		addrTargetsMemo[n] = outTargets
+		return outTargets
+	}
+
+	wireNonBareWrite := func(lhs, rhs ast.Expr) {
+		rhsWTs := exprWriteThroughTargets(rhs)
+		if tID := targetVarID(extractTargetVar(p.TypesInfo, lhs)); tID >= 0 {
+			bindSubtree(tID, rhs)
+			for _, rwt := range rhsWTs {
+				addParEdge(rwt, tID)
+			}
+		}
+		for _, wt := range exprWriteThroughTargets(lhs) {
+			bindSubtree(wt, rhs)
+			for _, rwt := range rhsWTs {
+				addParEdge(rwt, wt)
+			}
+		}
+	}
+
+	isBuiltinCall := func(n ast.Node, name string) (*ast.CallExpr, bool) {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return nil, false
+		}
+		ident, ok := unwrapCallee(call.Fun).(*ast.Ident)
+		if !ok || ident.Name != name {
+			return nil, false
+		}
+		_, isBuiltin := p.TypesInfo.Uses[ident].(*types.Builtin)
+		return call, isBuiltin
+	}
+
+	expandCallArgs := func(args []ast.Expr, isEllipsis bool) []ast.Expr {
+		if len(args) != 1 || isEllipsis {
+			return args
+		}
+		tv, ok := p.TypesInfo.Types[args[0]]
+		if !ok || tv.Type == nil {
+			return args
+		}
+		tup, ok := tv.Type.(*types.Tuple)
+		if !ok || tup.Len() <= 1 {
+			return args
+		}
+		expanded := make([]ast.Expr, tup.Len())
+		for i := range expanded {
+			expanded[i] = args[0]
+		}
+		return expanded
+	}
+
+	wireStdMethodArgWritesFromRecv := func(origFn *types.Func, args []ast.Expr, isEllipsis bool, recvExpr ast.Expr, recvWTs []int) {
+		if origFn == nil || !isStdCallee(origFn) || len(args) == 0 || recvExpr == nil {
+			return
+		}
+		sig, ok := origFn.Origin().Type().(*types.Signature)
+		if !ok || sig == nil || sig.Params() == nil {
+			return
+		}
+		var recvType types.Type
+		if tv, ok := p.TypesInfo.Types[recvExpr]; ok {
+			recvType = tv.Type
+		}
+		recvMayCarry := recvType == nil || typeMayCarryParallel(recvType)
+		var recvSrcs []ast.Expr
+		if recvMayCarry {
+			recvSrcs = []ast.Expr{recvExpr}
+		}
+		wireCallSiteCallbacks(args, recvSrcs, recvWTs, nil)
+		if !recvMayCarry {
+			return
+		}
+		for argIdx, arg := range args {
+			pIdx, ok := sigParamIndexForArg(sig, argIdx, isEllipsis)
+			if !ok {
+				continue
+			}
+			paramType := sig.Params().At(pIdx).Type()
+			if sig.Variadic() && pIdx == sig.Params().Len()-1 && !isEllipsis {
+				if sl, ok := paramType.(*types.Slice); ok {
+					paramType = sl.Elem()
+				}
+			}
+			if !stdParamMayAcceptCarrierWrite(paramType) {
+				continue
+			}
+			for _, wt := range exprWriteThroughTargets(arg) {
+				bindSubtree(wt, recvExpr)
+				for _, rwt := range recvWTs {
+					addParEdge(rwt, wt)
+				}
+			}
+		}
+	}
+
+	seedVarWrites := func(root ast.Node) {
+		if root == nil {
+			return
+		}
+		ast.Inspect(root, func(n ast.Node) bool {
+			if n == nil {
+				return false
+			}
+			if vs, ok := n.(*ast.ValueSpec); ok && vs.Type != nil {
+				for _, name := range vs.Names {
+					if tID := targetVarID(extractTargetVar(p.TypesInfo, name)); tID >= 0 {
+						bindSubtree(tID, vs.Type)
+					}
+				}
+			}
+			_, isCopy := isBuiltinCall(n, "copy")
+			eachLocalBinding(p.TypesInfo, n, func(lhs, rhs ast.Expr) {
+				if isBareVarExpr(lhs) && !isCopy {
+					lhsVar := extractTargetVar(p.TypesInfo, lhs)
+					if lhsID := targetVarID(lhsVar); lhsID >= 0 {
+						bindSubtree(lhsID, rhs)
+					}
+					if lhsWT := targetVarWriteThroughID(lhsVar); lhsWT >= 0 {
+						for _, rwt := range exprWriteThroughTargets(rhs) {
+							addParEdge(rwt, lhsWT)
+						}
+					}
+					return
+				}
+				wireNonBareWrite(lhs, rhs)
+			})
+			switch node := n.(type) {
+			case *ast.TypeSwitchStmt:
+				if assign, ok := node.Assign.(*ast.AssignStmt); ok && len(assign.Rhs) == 1 && node.Body != nil {
+					if ta, ok := ast.Unparen(assign.Rhs[0]).(*ast.TypeAssertExpr); ok && ta.X != nil {
+						rhsWTs := exprWriteThroughTargets(ta.X)
+						for _, stmt := range node.Body.List {
+							cc, ok := stmt.(*ast.CaseClause)
+							if !ok {
+								continue
+							}
+							impVar, ok := isSamePkgNonFieldVar(p.TypesInfo.Implicits[cc])
+							if !ok {
+								continue
+							}
+							if impID := bindVarID(impVar); impID >= 0 {
+								bindSubtree(impID, ta.X)
+							}
+							if impWT := varWriteThroughID(impVar); impWT >= 0 {
+								for _, rwt := range rhsWTs {
+									addParEdge(rwt, impWT)
+								}
+							}
+						}
+					}
+				}
+			case *ast.RangeStmt:
+				if node.X != nil {
+					if tv, ok := p.TypesInfo.Types[node.X]; ok && tv.Type != nil {
+						forEachCallableSignature(tv.Type, func(seqSig *types.Signature) {
+							if seqSig.Params() == nil || seqSig.Params().Len() != 1 {
+								return
+							}
+							forEachCallableSignature(seqSig.Params().At(0).Type(), func(yieldSig *types.Signature) {
+								if yieldSig.Params() == nil {
+									return
+								}
+								for slotIdx, bindExpr := range []ast.Expr{node.Key, node.Value} {
+									if bindExpr == nil || slotIdx >= yieldSig.Params().Len() {
+										continue
+									}
+									yhID := dynHubID(yieldSig, slotIdx)
+									yhwID := dynHubWriteID(yieldSig, slotIdx)
+									mayAlias := typeMayCarryMutableAlias(yieldSig.Params().At(slotIdx).Type())
+									if isBareVarExpr(bindExpr) {
+										kvVar := extractTargetVar(p.TypesInfo, bindExpr)
+										addParEdge(targetVarID(kvVar), yhID)
+										if mayAlias {
+											addParEdge(yhwID, targetVarWriteThroughID(kvVar))
+										}
+									} else {
+										tID := targetVarID(extractTargetVar(p.TypesInfo, bindExpr))
+										addParEdge(tID, yhID)
+										if mayAlias {
+											addParEdge(yhwID, tID)
+										}
+										for _, wt := range exprWriteThroughTargets(bindExpr) {
+											addParEdge(wt, yhID)
+											if mayAlias {
+												addParEdge(yhwID, wt)
+											}
+										}
+									}
+								}
+							})
+						})
+					}
+				}
+			case *ast.SendStmt:
+				wireNonBareWrite(node.Chan, node.Value)
+			case *ast.CallExpr:
+				if tv, isType := p.TypesInfo.Types[node.Fun]; isType && tv.IsType() {
+					return true
+				}
+				isEllipsis := node.Ellipsis.IsValid()
+				callArgs := expandCallArgs(node.Args, isEllipsis)
+				if copyCall, isCp := isBuiltinCall(node, "copy"); isCp {
+					if len(copyCall.Args) == 1 && len(callArgs) == 2 {
+						wireNonBareWrite(callArgs[0], callArgs[1])
+					}
+					return true
+				}
+				if _, isApp := isBuiltinCall(node, "append"); isApp {
+					if len(callArgs) >= 2 {
+						for _, elem := range callArgs[1:] {
+							wireNonBareWrite(callArgs[0], elem)
+						}
+					}
+					return true
+				}
+				// Address-taken expressions (&v) in Fun or Args can be written by the callee from sibling inputs.
+				allCallInputsID := -1
+				ensureAllCallInputs := func() int {
+					if allCallInputsID < 0 {
+						allCallInputsID = newNode()
+						bindSubtree(allCallInputsID, node.Fun)
+						for _, other := range node.Args {
+							bindSubtree(allCallInputsID, other)
+						}
+					}
+					return allCallInputsID
+				}
+				if funTargets := addrTargets(node.Fun); len(funTargets) > 0 {
+					inID := ensureAllCallInputs()
+					for _, tID := range funTargets {
+						addParEdge(tID, inID)
+					}
+				}
+				for _, arg := range node.Args {
+					targets := addrTargets(arg)
+					if len(targets) == 0 {
+						continue
+					}
+					inID := ensureAllCallInputs()
+					for _, tID := range targets {
+						addParEdge(tID, inID)
+					}
+				}
+				switch fun := unwrapCallee(node.Fun).(type) {
+				case *ast.Ident:
+					if fn, ok := p.TypesInfo.Uses[fun].(*types.Func); ok && fn != nil {
+						wireConcreteFuncArgs(fn, callArgs, isEllipsis)
+					} else if tv, ok := p.TypesInfo.Types[node.Fun]; ok && tv.Type != nil {
+						forEachCallableSignature(tv.Type, func(sig *types.Signature) {
+							wireDynamicCallArgs(sig, callArgs, isEllipsis, node.Fun)
+						})
+					}
+				case *ast.SelectorExpr:
+					if selInfo, isSel := p.TypesInfo.Selections[fun]; isSel && selInfo != nil {
+						switch selInfo.Kind() {
+						case types.MethodVal:
+							fn, _ := selInfo.Obj().(*types.Func)
+							var origFn *types.Func
+							var origSig *types.Signature
+							if fn != nil {
+								origFn = fn.Origin()
+								origSig, _ = origFn.Type().(*types.Signature)
+							}
+							isIface := isInterfaceMethodSelection(selInfo, origFn)
+							recvWTs := methodRecvWriteTargets(fun.X, isIface, origSig)
+							for _, arg := range callArgs {
+								for _, rwt := range recvWTs {
+									bindSubtree(rwt, arg)
+									for _, awt := range exprWriteThroughTargets(arg) {
+										addParEdge(awt, rwt)
+									}
+								}
+							}
+							sig, _ := selInfo.Type().Underlying().(*types.Signature)
+							if isIface {
+								if origFn != nil {
+									bindSubtree(ifaceRecvID(origFn.Name()), fun.X)
+									irw := ifaceRecvWriteID(origFn.Name())
+									for _, rwt := range recvWTs {
+										addParEdge(rwt, irw)
+									}
+									wireInterfaceCallArgs(origFn.Name(), sig, callArgs, isEllipsis, fun.X, recvWTs)
+								}
+							} else if origFn != nil {
+								if allDeclFuncs[origFn] != nil {
+									bindSubtree(recvID(origFn), fun.X)
+									rwRecv := recvWriteID(origFn)
+									for _, rwt := range recvWTs {
+										addParEdge(rwt, rwRecv)
+									}
+								} else if (p.Types == nil || origFn.Pkg() != p.Types) && !isStdCallee(origFn) {
+									if fk, ok := callableFactKey(origFn); ok {
+										if origSig != nil && origSig.Recv() != nil && typeMayCarryParallel(origSig.Recv().Type()) {
+											bindSubtree(crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#recv"}), fun.X)
+										}
+										if origSig != nil && origSig.Recv() != nil && typeMayCarryMutableAlias(origSig.Recv().Type()) {
+											crw := crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#wrecv"})
+											for _, rwt := range recvWTs {
+												addParEdge(rwt, crw)
+											}
+										}
+									}
+								} else if isStdCallee(origFn) {
+									wireStdMethodArgWritesFromRecv(origFn, callArgs, isEllipsis, fun.X, recvWTs)
+								}
+								wireConcreteFuncArgs(origFn, callArgs, isEllipsis)
+							}
+						case types.MethodExpr:
+							if len(callArgs) >= 1 {
+								fn, _ := selInfo.Obj().(*types.Func)
+								var origFn *types.Func
+								var origSig *types.Signature
+								if fn != nil {
+									origFn = fn.Origin()
+									origSig, _ = origFn.Type().(*types.Signature)
+								}
+								isIface := isInterfaceMethodSelection(selInfo, origFn)
+								recvWTs := methodRecvWriteTargets(callArgs[0], isIface, origSig)
+								for _, arg := range callArgs[1:] {
+									for _, rwt := range recvWTs {
+										bindSubtree(rwt, arg)
+										for _, awt := range exprWriteThroughTargets(arg) {
+											addParEdge(awt, rwt)
+										}
+									}
+								}
+								if origFn != nil {
+									if isIface {
+										bindSubtree(ifaceRecvID(origFn.Name()), callArgs[0])
+										irw := ifaceRecvWriteID(origFn.Name())
+										for _, rwt := range recvWTs {
+											addParEdge(rwt, irw)
+										}
+										wireInterfaceCallArgs(origFn.Name(), origSig, callArgs[1:], isEllipsis, callArgs[0], recvWTs)
+									} else {
+										if allDeclFuncs[origFn] != nil {
+											bindSubtree(recvID(origFn), callArgs[0])
+											rwRecv := recvWriteID(origFn)
+											for _, rwt := range recvWTs {
+												addParEdge(rwt, rwRecv)
+											}
+										} else if (p.Types == nil || origFn.Pkg() != p.Types) && !isStdCallee(origFn) {
+											if fk, ok := callableFactKey(origFn); ok {
+												if origSig != nil && origSig.Recv() != nil && typeMayCarryParallel(origSig.Recv().Type()) {
+													bindSubtree(crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#recv"}), callArgs[0])
+												}
+												if origSig != nil && origSig.Recv() != nil && typeMayCarryMutableAlias(origSig.Recv().Type()) {
+													crw := crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#wrecv"})
+													for _, rwt := range recvWTs {
+														addParEdge(rwt, crw)
+													}
+												}
+											}
+										} else if isStdCallee(origFn) {
+											wireStdMethodArgWritesFromRecv(origFn, callArgs[1:], isEllipsis, callArgs[0], recvWTs)
+										}
+										wireConcreteFuncArgs(origFn, callArgs[1:], isEllipsis)
+									}
+								}
+							}
+						case types.FieldVal:
+							if tv, ok := p.TypesInfo.Types[node.Fun]; ok && tv.Type != nil {
+								forEachCallableSignature(tv.Type, func(sig *types.Signature) {
+									wireDynamicCallArgs(sig, callArgs, isEllipsis, node.Fun)
+								})
+							}
+						}
+					} else if fn, ok := p.TypesInfo.Uses[fun.Sel].(*types.Func); ok && fn != nil {
+						wireConcreteFuncArgs(fn, callArgs, isEllipsis)
+					} else if tv, ok := p.TypesInfo.Types[node.Fun]; ok && tv.Type != nil {
+						forEachCallableSignature(tv.Type, func(sig *types.Signature) {
+							wireDynamicCallArgs(sig, callArgs, isEllipsis, node.Fun)
+						})
+					}
+				case *ast.FuncLit:
+					if fun.Type != nil && fun.Type.Params != nil {
+						if tv, ok := p.TypesInfo.Types[fun]; ok && tv.Type != nil {
+							if sig, ok := tv.Type.Underlying().(*types.Signature); ok {
+								var paramVars []*types.Var
+								for _, field := range fun.Type.Params.List {
+									if len(field.Names) == 0 {
+										paramVars = append(paramVars, nil)
+										continue
+									}
+									for _, name := range field.Names {
+										v, _ := isSamePkgNonFieldVar(p.TypesInfo.Defs[name])
+										paramVars = append(paramVars, v)
+									}
+								}
+								for argIdx, arg := range callArgs {
+									if pIdx, ok := sigParamIndexForArg(sig, argIdx, isEllipsis); ok && pIdx < len(paramVars) && paramVars[pIdx] != nil {
+										bindSubtree(bindVarID(paramVars[pIdx]), arg)
+										linkArgWriteBack(arg, varWriteThroughID(paramVars[pIdx]))
+									}
+								}
+							}
+						}
+					}
+				default:
+					if tv, ok := p.TypesInfo.Types[node.Fun]; ok && tv.Type != nil {
+						forEachCallableSignature(tv.Type, func(sig *types.Signature) {
+							wireDynamicCallArgs(sig, callArgs, isEllipsis, node.Fun)
+						})
+					}
+				}
+			}
+			return true
+		})
+	}
+
+	for _, file := range p.Syntax {
+		for _, decl := range file.Decls {
+			switch d := decl.(type) {
+			case *ast.GenDecl:
+				seedVarWrites(d)
+			case *ast.FuncDecl:
+				if d.Body != nil {
+					seedVarWrites(d.Body)
+				}
+			}
+		}
+	}
+	for fn, fd := range allDeclFuncs {
+		eID := execFuncID(fn)
+		if fd.Recv != nil {
+			scanExecSubtree(eID, fd.Recv)
+		}
+		if fd.Type != nil {
+			scanExecSubtree(eID, fd.Type)
+		}
+		scanExecSubtree(eID, fd.Body)
+	}
+
+	revPar := make([][]int, len(adj))
+	for u, row := range adj {
+		for _, v := range row {
+			revPar[v] = append(revPar[v], u)
+		}
+	}
+	var parQueue []int
+	for id, par := range reachesPar {
+		if par {
+			parQueue = append(parQueue, id)
+		}
+	}
+	for len(parQueue) > 0 {
+		cur := parQueue[len(parQueue)-1]
+		parQueue = parQueue[:len(parQueue)-1]
+		for _, prev := range revPar[cur] {
+			if !reachesPar[prev] {
+				reachesPar[prev] = true
+				parQueue = append(parQueue, prev)
+			}
+		}
+	}
+
+	parallelFuncSet := map[FuncKey]bool{}
+	for id, fk := range rootKeys {
+		if fk.Valid() && reachesPar[id] {
+			parallelFuncSet[fk] = true
+		}
+	}
+	for fk := range parallelFuncSet {
+		out.parallelFuncs = append(out.parallelFuncs, fk)
+	}
+	slices.SortFunc(out.parallelFuncs, FuncKey.Compare)
+
+	canReachRoot := make([]bool, len(adj))
+	var rootQueue []int
+	for id, fk := range rootKeys {
+		if fk.Valid() {
+			canReachRoot[id] = true
+			rootQueue = append(rootQueue, id)
+		}
+	}
+	for len(rootQueue) > 0 {
+		cur := rootQueue[len(rootQueue)-1]
+		rootQueue = rootQueue[:len(rootQueue)-1]
+		for _, prev := range revPar[cur] {
+			if !canReachRoot[prev] {
+				canReachRoot[prev] = true
+				rootQueue = append(rootQueue, prev)
+			}
+		}
+	}
+
+	seenParEdge := map[FuncDepEdge]bool{}
+	seenStamp := make([]uint32, len(adj))
+	var epoch uint32
+	var dfsStack []int
+	for rootID, rootKey := range rootKeys {
+		if !rootKey.Valid() || reachesPar[rootID] || len(adj[rootID]) == 0 {
+			continue
+		}
+		epoch++
+		seenStamp[rootID] = epoch
+		dfsStack = append(dfsStack[:0], rootID)
+		for len(dfsStack) > 0 {
+			cur := dfsStack[len(dfsStack)-1]
+			dfsStack = dfsStack[:len(dfsStack)-1]
+			if cur != rootID && rootKeys[cur].Valid() {
+				if rootKeys[cur] != rootKey {
+					edge := FuncDepEdge{Func: rootKey, Callee: rootKeys[cur]}
+					if !seenParEdge[edge] {
+						seenParEdge[edge] = true
+						out.parallelEdges = append(out.parallelEdges, edge)
+					}
+				}
+				continue
+			}
+			for _, next := range adj[cur] {
+				if seenStamp[next] != epoch && canReachRoot[next] {
+					seenStamp[next] = epoch
+					dfsStack = append(dfsStack, next)
+				}
+			}
+		}
+	}
+	slices.SortFunc(out.parallelEdges, FuncDepEdge.Compare)
+
+	directCalleeIdents := map[*ast.Ident]bool{}
+	for _, fd := range declFuncs {
+		goCalls := map[*ast.CallExpr]bool{}
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			if gs, ok := n.(*ast.GoStmt); ok && gs.Call != nil {
+				goCalls[gs.Call] = true
+			}
+			return true
+		})
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || goCalls[call] {
+				return true
+			}
+			if callee, _ := plainCalleeFunc(p, call.Fun); callee != nil {
+				switch fun := unwrapCallee(call.Fun).(type) {
+				case *ast.Ident:
+					directCalleeIdents[fun] = true
+				case *ast.SelectorExpr:
+					directCalleeIdents[fun.Sel] = true
+				}
+			}
+			return true
+		})
+	}
+
+	blocked := map[*types.Func]bool{}
+	nonSeqUses := map[FuncKey]bool{}
+	recordNonSeqCallee := func(fn *types.Func) {
+		if fn == nil || fn.Pkg() == nil {
+			return
+		}
+		fn = fn.Origin()
+		if declFuncs[fn] != nil {
+			blocked[fn] = true
+			if fn.Exported() {
+				nonSeqUses[FuncKey{Pkg: fn.Pkg().Path(), Name: fn.Name()}] = true
+			}
+			return
+		}
+		if (p.Types == nil || fn.Pkg() != p.Types) && !isStdCallee(fn) {
+			nonSeqUses[FuncKey{Pkg: fn.Pkg().Path(), Name: fn.Name()}] = true
+		}
+	}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			id, ok := n.(*ast.Ident)
+			if !ok || directCalleeIdents[id] {
+				return true
+			}
+			fn, ok := p.TypesInfo.Uses[id].(*types.Func)
+			if !ok || fn == nil || fn.Pkg() == nil {
+				return true
+			}
+			fn = fn.Origin()
+			sig, ok := fn.Type().(*types.Signature)
+			if !ok || sig == nil || sig.Recv() != nil {
+				return true
+			}
+			recordNonSeqCallee(fn)
+			return true
+		})
+	}
+	out.blocked = blocked
+	if len(declFuncs) == 0 {
+		for k := range nonSeqUses {
+			out.nonSeqFuncUses = append(out.nonSeqFuncUses, k)
+		}
+		slices.SortFunc(out.nonSeqFuncUses, FuncKey.Compare)
+		return out
+	}
+
+	resolvePkgFunc := func(expr ast.Expr) *types.Func {
+		fn, _ := plainCalleeFunc(p, expr)
+		if fn == nil || declFuncs[fn] == nil {
+			return nil
+		}
+		return fn
+	}
+
+	paramIndexForArg := func(callee *types.Func, argIdx int, isEllipsis bool) (int, bool) {
+		sig, ok := callee.Type().(*types.Signature)
+		if !ok || sig == nil {
+			return 0, false
+		}
+		return sigParamIndexForArg(sig, argIdx, isEllipsis)
+	}
+
+	isTestingSyncCallbackArg := func(call *ast.CallExpr, argIdx int) bool {
+		switch testingSyncMethodName(p.TypesInfo, call) {
+		case "Run":
+			return len(call.Args) == 2 && argIdx == 1
+		case "Cleanup", "Fuzz":
+			return len(call.Args) == 1 && argIdx == 0
+		}
+		return false
+	}
+
+	litCallsParallelHelper := func(lit *ast.FuncLit) bool {
+		if lit == nil {
+			return false
+		}
+		found := false
+		checkType := func(t types.Type) {
+			if found || t == nil {
+				return
+			}
+			if h := typeHubID(t); h >= 0 && reachesPar[h] {
+				found = true
+				return
+			}
+			if len(typeParamObjIDs) > 0 {
+				for _, tp := range collectTypeParams(t) {
+					if tpID, ok := typeParamObjIDs[tp]; ok && reachesPar[tpID] {
+						found = true
+						return
+					}
+				}
+			}
+		}
+		ast.Inspect(lit, func(n ast.Node) bool {
+			if found || n == nil {
+				return false
+			}
+			if expr, isExpr := n.(ast.Expr); isExpr {
+				if tv, ok := p.TypesInfo.Types[expr]; ok && tv.Type != nil {
+					checkType(tv.Type)
+				}
+			}
+			if cc, isCC := n.(*ast.CaseClause); isCC {
+				if impObj := p.TypesInfo.Implicits[cc]; impObj != nil {
+					checkType(impObj.Type())
+				}
+			}
+			if id, ok := n.(*ast.Ident); ok {
+				if inst, ok := p.TypesInfo.Instances[id]; ok {
+					checkType(inst.Type)
+					if inst.TypeArgs != nil {
+						for i := 0; i < inst.TypeArgs.Len(); i++ {
+							checkType(inst.TypeArgs.At(i))
+						}
+					}
+				}
+				if defObj := p.TypesInfo.Defs[id]; defObj != nil {
+					checkType(defObj.Type())
+				}
+				switch obj := p.TypesInfo.Uses[id].(type) {
+				case *types.Func:
+					if obj != nil {
+						checkType(obj.Type())
+						fn := obj.Origin()
+						if eID, ok := execIDs[fn]; ok && reachesPar[eID] {
+							found = true
+							return false
+						}
+						if (p.Types == nil || fn.Pkg() != p.Types) && !isStdCallee(fn) {
+							if fk, ok := callableFactKey(fn); ok {
+								if cID, ok := crossIDs[fk]; ok && reachesPar[cID] {
+									found = true
+									return false
+								}
+							}
+						}
+					}
+				case *types.Var:
+					if obj != nil {
+						checkType(obj.Type())
+						if v, ok := isSamePkgNonFieldVar(obj); ok {
+							if vID, ok := varIDs[v]; ok && reachesPar[vID] {
+								found = true
+								return false
+							}
+						} else if (p.Types == nil || obj.Pkg() != p.Types) && obj.Pkg() != nil && obj.Parent() == obj.Pkg().Scope() && !isStdPkg(obj.Pkg()) {
+							fk := FuncKey{Pkg: obj.Pkg().Path(), Name: obj.Name()}
+							if cID, ok := crossIDs[fk]; ok && reachesPar[cID] {
+								found = true
+								return false
+							}
+						}
+					}
+				case *types.TypeName:
+					if obj != nil {
+						checkType(obj.Type())
+					}
+				}
+			}
+			return !found
+		})
+		return found
+	}
+
+	type callArgRef struct {
+		call   *ast.CallExpr
+		argIdx int
+	}
+	type pkgArgRef struct {
+		callee   *types.Func
+		paramIdx int
+	}
+	type identOcc struct {
+		id            *ast.Ident
+		inGo          bool
+		enclosingLits []*ast.FuncLit
+	}
+	type litInfo struct {
+		lit           *ast.FuncLit
+		inGo          bool
+		enclosingLits []*ast.FuncLit
+		directCall    bool
+		testingSync   bool
+		pkgCallArg    *pkgArgRef
+		boundLocal    types.Object
+	}
+	type fnScopeInfo struct {
+		fd              *ast.FuncDecl
+		paramIdxByObj   map[types.Object]int
+		paramIdents     map[int][]identOcc
+		localLits       map[types.Object][]*ast.FuncLit
+		localReadIdents map[types.Object][]identOcc
+		lits            []*litInfo
+		directCallIdent map[*ast.Ident]bool
+		callArgIdent    map[*ast.Ident]callArgRef
+	}
+
+	nonSeqParam := map[*types.Func]map[int]bool{}
+	markNonSeqParam := func(fn *types.Func, pIdx int) bool {
+		if nonSeqParam[fn] == nil {
+			nonSeqParam[fn] = map[int]bool{}
+		}
+		if nonSeqParam[fn][pIdx] {
+			return false
+		}
+		nonSeqParam[fn][pIdx] = true
+		return true
+	}
+	nonSeqLit := map[*ast.FuncLit]bool{}
+	nonSeqLocal := map[types.Object]bool{}
+
+	scopes := map[*types.Func]*fnScopeInfo{}
+	for fn, fd := range declFuncs {
+		fnReachesPar := reachesPar[execFuncID(fn)]
+		info := &fnScopeInfo{
+			fd:              fd,
+			paramIdxByObj:   map[types.Object]int{},
+			paramIdents:     map[int][]identOcc{},
+			localLits:       map[types.Object][]*ast.FuncLit{},
+			localReadIdents: map[types.Object][]identOcc{},
+			directCallIdent: map[*ast.Ident]bool{},
+			callArgIdent:    map[*ast.Ident]callArgRef{},
+		}
+		sigVars := map[types.Object]bool{}
+		recordFieldListVars := func(fl *ast.FieldList) {
+			if fl == nil {
+				return
+			}
+			for _, field := range fl.List {
+				for _, name := range field.Names {
+					if obj := p.TypesInfo.Defs[name]; obj != nil {
+						sigVars[obj] = true
+					}
+				}
+			}
+		}
+		if fd.Type != nil {
+			recordFieldListVars(fd.Type.Params)
+			recordFieldListVars(fd.Type.Results)
+		}
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			if lit, ok := n.(*ast.FuncLit); ok && lit.Type != nil {
+				recordFieldListVars(lit.Type.Params)
+				recordFieldListVars(lit.Type.Results)
+			}
+			return true
+		})
+		if fd.Type != nil && fd.Type.Params != nil {
+			idx := 0
+			for _, field := range fd.Type.Params.List {
+				if len(field.Names) == 0 {
+					if fnReachesPar {
+						markNonSeqParam(fn, idx)
+					}
+					idx++
+					continue
+				}
+				for _, name := range field.Names {
+					if obj := p.TypesInfo.Defs[name]; obj != nil {
+						info.paramIdxByObj[obj] = idx
+					}
+					if fnReachesPar {
+						markNonSeqParam(fn, idx)
+					}
+					idx++
+				}
+			}
+		}
+
+		isLocalVar := func(obj types.Object) bool {
+			v, ok := obj.(*types.Var)
+			if !ok || v == nil || v.IsField() || p.Types == nil || v.Pkg() != p.Types || v.Parent() == p.Types.Scope() {
+				return false
+			}
+			return !sigVars[v]
+		}
+
+		goCalls := map[*ast.CallExpr]bool{}
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			if gs, ok := n.(*ast.GoStmt); ok && gs.Call != nil {
+				goCalls[gs.Call] = true
+			}
+			return true
+		})
+
+		litDirectCall := map[*ast.FuncLit]bool{}
+		litTestingSync := map[*ast.FuncLit]bool{}
+		litPkgCallArg := map[*ast.FuncLit]*pkgArgRef{}
+		litBoundLocal := map[*ast.FuncLit]types.Object{}
+		validWriteIdent := map[*ast.Ident]bool{}
+
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			switch node := n.(type) {
+			case *ast.CallExpr:
+				if goCalls[node] {
+					return true
+				}
+				switch fun := unparenExpr(node.Fun).(type) {
+				case *ast.Ident:
+					info.directCallIdent[fun] = true
+				case *ast.FuncLit:
+					litDirectCall[fun] = true
+				}
+				callee := resolvePkgFunc(node.Fun)
+				for argIdx, arg := range node.Args {
+					switch a := unparenExpr(arg).(type) {
+					case *ast.Ident:
+						info.callArgIdent[a] = callArgRef{call: node, argIdx: argIdx}
+					case *ast.FuncLit:
+						if isTestingSyncCallbackArg(node, argIdx) {
+							litTestingSync[a] = true
+						}
+						if callee != nil {
+							if pIdx, ok := paramIndexForArg(callee, argIdx, node.Ellipsis.IsValid()); ok {
+								litPkgCallArg[a] = &pkgArgRef{callee: callee, paramIdx: pIdx}
+							}
+						}
+					}
+				}
+			case *ast.ValueSpec:
+				if len(node.Values) == 0 {
+					for _, name := range node.Names {
+						if obj := p.TypesInfo.Defs[name]; isLocalVar(obj) {
+							validWriteIdent[name] = true
+						}
+					}
+				} else if len(node.Names) == len(node.Values) {
+					for i, name := range node.Names {
+						obj := p.TypesInfo.Defs[name]
+						if !isLocalVar(obj) {
+							continue
+						}
+						if lit, ok := unparenExpr(node.Values[i]).(*ast.FuncLit); ok && litBoundLocal[lit] == nil {
+							validWriteIdent[name] = true
+							info.localLits[obj] = append(info.localLits[obj], lit)
+							litBoundLocal[lit] = obj
+						} else if rhsID, ok := unparenExpr(node.Values[i]).(*ast.Ident); ok {
+							if _, isNil := p.TypesInfo.Uses[rhsID].(*types.Nil); isNil {
+								validWriteIdent[name] = true
+							} else {
+								nonSeqLocal[obj] = true
+							}
+						} else {
+							nonSeqLocal[obj] = true
+						}
+					}
+				}
+			case *ast.AssignStmt:
+				if (node.Tok == token.DEFINE || node.Tok == token.ASSIGN) && len(node.Lhs) == len(node.Rhs) {
+					for i, lhs := range node.Lhs {
+						id, ok := unparenExpr(lhs).(*ast.Ident)
+						if !ok {
+							continue
+						}
+						obj := identDefOrUse(p.TypesInfo, id)
+						if !isLocalVar(obj) {
+							continue
+						}
+						if lit, ok := unparenExpr(node.Rhs[i]).(*ast.FuncLit); ok && litBoundLocal[lit] == nil {
+							validWriteIdent[id] = true
+							info.localLits[obj] = append(info.localLits[obj], lit)
+							litBoundLocal[lit] = obj
+						} else if rhsID, ok := unparenExpr(node.Rhs[i]).(*ast.Ident); ok {
+							if _, isNil := p.TypesInfo.Uses[rhsID].(*types.Nil); isNil {
+								validWriteIdent[id] = true
+							} else {
+								nonSeqLocal[obj] = true
+							}
+						} else {
+							nonSeqLocal[obj] = true
+						}
+					}
+				}
+			}
+			return true
+		})
+
+		var litStack []*ast.FuncLit
+		goDepth := 0
+		var walkCtx func(ast.Node)
+		walkCtx = func(n ast.Node) {
+			if n == nil {
+				return
+			}
+			switch node := n.(type) {
+			case *ast.GoStmt:
+				goDepth++
+				if node.Call != nil {
+					walkCtx(node.Call)
+				}
+				goDepth--
+				return
+			case *ast.FuncLit:
+				li := &litInfo{
+					lit:           node,
+					inGo:          goDepth > 0,
+					enclosingLits: slices.Clone(litStack),
+					directCall:    litDirectCall[node],
+					testingSync:   litTestingSync[node],
+					pkgCallArg:    litPkgCallArg[node],
+					boundLocal:    litBoundLocal[node],
+				}
+				if bodyHasParallelSelector(p.TypesInfo, node.Body) || litCallsParallelHelper(node) {
+					nonSeqLit[node] = true
+				}
+				info.lits = append(info.lits, li)
+				if node.Type != nil {
+					walkCtx(node.Type)
+				}
+				litStack = append(litStack, node)
+				if node.Body != nil {
+					walkCtx(node.Body)
+				}
+				litStack = litStack[:len(litStack)-1]
+				return
+			case *ast.Ident:
+				obj := identDefOrUse(p.TypesInfo, node)
+				if pIdx, isParam := info.paramIdxByObj[obj]; isParam {
+					info.paramIdents[pIdx] = append(info.paramIdents[pIdx], identOcc{
+						id:            node,
+						inGo:          goDepth > 0,
+						enclosingLits: slices.Clone(litStack),
+					})
+				} else if isLocalVar(obj) && !validWriteIdent[node] {
+					info.localReadIdents[obj] = append(info.localReadIdents[obj], identOcc{
+						id:            node,
+						inGo:          goDepth > 0,
+						enclosingLits: slices.Clone(litStack),
+					})
+				}
+				return
+			}
+			ast.Inspect(n, func(child ast.Node) bool {
+				if child == nil || child == n {
+					return true
+				}
+				walkCtx(child)
+				return false
+			})
+		}
+		walkCtx(fd.Body)
+		scopes[fn] = info
+	}
+
+	occIsSequential := func(info *fnScopeInfo, occ identOcc) bool {
+		if occ.inGo {
+			return false
+		}
+		for _, enc := range occ.enclosingLits {
+			if nonSeqLit[enc] {
+				return false
+			}
+		}
+		if info.directCallIdent[occ.id] {
+			return true
+		}
+		ref, ok := info.callArgIdent[occ.id]
+		if !ok {
+			return false
+		}
+		if isTestingSyncCallbackArg(ref.call, ref.argIdx) {
+			return true
+		}
+		callee := resolvePkgFunc(ref.call.Fun)
+		if callee == nil {
+			return false
+		}
+		pIdx, ok := paramIndexForArg(callee, ref.argIdx, ref.call.Ellipsis.IsValid())
+		if !ok {
+			return false
+		}
+		return !nonSeqParam[callee][pIdx]
+	}
+
+	for changed := true; changed; {
+		changed = false
+		for fn, info := range scopes {
+			for _, li := range info.lits {
+				if nonSeqLit[li.lit] {
+					continue
+				}
+				enclosingBad := li.inGo
+				if !enclosingBad {
+					for _, enc := range li.enclosingLits {
+						if nonSeqLit[enc] {
+							enclosingBad = true
+							break
+						}
+					}
+				}
+				seqAttached := li.directCall || li.testingSync ||
+					(li.pkgCallArg != nil && !nonSeqParam[li.pkgCallArg.callee][li.pkgCallArg.paramIdx]) ||
+					(li.boundLocal != nil && !nonSeqLocal[li.boundLocal])
+				if enclosingBad || !seqAttached {
+					nonSeqLit[li.lit] = true
+					changed = true
+				}
+			}
+			for localObj := range info.localLits {
+				if nonSeqLocal[localObj] {
+					continue
+				}
+				for _, occ := range info.localReadIdents[localObj] {
+					if !occIsSequential(info, occ) {
+						nonSeqLocal[localObj] = true
+						changed = true
+						break
+					}
+				}
+			}
+			for pIdx, occs := range info.paramIdents {
+				if nonSeqParam[fn][pIdx] {
+					continue
+				}
+				for _, occ := range occs {
+					if !occIsSequential(info, occ) {
+						if markNonSeqParam(fn, pIdx) {
+							changed = true
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	edges := map[*types.Func]map[*types.Func]bool{}
+	addEdge := func(from, to *types.Func) {
+		if from == nil || to == nil {
+			return
+		}
+		if edges[from] == nil {
+			edges[from] = map[*types.Func]bool{}
+		}
+		edges[from][to] = true
+	}
+	crossEdges := map[*types.Func]map[FuncKey]bool{}
+	addCrossEdge := func(from *types.Func, to FuncKey) {
+		if from == nil || !to.Valid() {
+			return
+		}
+		if crossEdges[from] == nil {
+			crossEdges[from] = map[FuncKey]bool{}
+		}
+		crossEdges[from][to] = true
+	}
+
+	for callerFn, info := range scopes {
+		fd := info.fd
+		seedSubtree := func(root ast.Node) {
+			visitedLits := map[*ast.FuncLit]bool{}
+			var mark func(ast.Node)
+			mark = func(sub ast.Node) {
+				if sub == nil {
+					return
+				}
+				ast.Inspect(sub, func(n ast.Node) bool {
+					switch node := n.(type) {
+					case *ast.CallExpr:
+						if callee, _ := plainCalleeFunc(p, node.Fun); callee != nil {
+							recordNonSeqCallee(callee)
+						}
+					case *ast.Ident:
+						for _, lit := range info.localLits[p.TypesInfo.Uses[node]] {
+							if !visitedLits[lit] {
+								visitedLits[lit] = true
+								mark(lit.Body)
+							}
+						}
+					}
+					return true
+				})
+			}
+			mark(root)
+		}
+
+		if reachesPar[execFuncID(callerFn)] {
+			blocked[callerFn] = true
+			seedSubtree(fd.Body)
+		}
+
+		for _, li := range info.lits {
+			if nonSeqLit[li.lit] {
+				seedSubtree(li.lit.Body)
+			}
+		}
+
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			switch node := n.(type) {
+			case *ast.GoStmt:
+				seedSubtree(node)
+			case *ast.CallExpr:
+				callee, calleePkg := plainCalleeFunc(p, node.Fun)
+				if callee == nil {
+					return true
+				}
+				if declFuncs[callee] != nil {
+					addEdge(callerFn, callee)
+					if sp := nonSeqParam[callee]; len(sp) > 0 {
+						for argIdx, arg := range node.Args {
+							if pIdx, ok := paramIndexForArg(callee, argIdx, node.Ellipsis.IsValid()); ok && sp[pIdx] {
+								seedSubtree(arg)
+							}
+						}
+					}
+				} else if (p.Types == nil || callee.Pkg() != p.Types) && !isStdCallee(callee) {
+					addCrossEdge(callerFn, FuncKey{Pkg: calleePkg, Name: callee.Name()})
+				}
+			}
+			return true
+		})
+	}
+
+	queue := make([]*types.Func, 0, len(blocked))
+	for fn := range blocked {
+		queue = append(queue, fn)
+	}
+	for len(queue) > 0 {
+		cur := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		for callee := range edges[cur] {
+			if !blocked[callee] {
+				blocked[callee] = true
+				queue = append(queue, callee)
+			}
+		}
+	}
+	for fn := range blocked {
+		if fn.Pkg() != nil && fn.Exported() {
+			nonSeqUses[FuncKey{Pkg: fn.Pkg().Path(), Name: fn.Name()}] = true
+		}
+		for crossCallee := range crossEdges[fn] {
+			nonSeqUses[crossCallee] = true
+		}
+	}
+
+	if p.Types != nil {
+		isSeqRoot := func(fn *types.Func) bool {
+			return fn != nil && declFuncs[fn] != nil &&
+				(fn.Exported() || (p.Name == "main" && fn.Name() == "main"))
+		}
+		seenSeqEdge := map[FuncDepEdge]bool{}
+		recordSeqEdge := func(from, to FuncKey) {
+			if !from.Valid() || !to.Valid() || from == to {
+				return
+			}
+			edge := FuncDepEdge{Func: from, Callee: to}
+			if !seenSeqEdge[edge] {
+				seenSeqEdge[edge] = true
+				out.seqFuncEdges = append(out.seqFuncEdges, edge)
+			}
+		}
+		for rootFn := range declFuncs {
+			if !isSeqRoot(rootFn) {
+				continue
+			}
+			rootKey := FuncKey{Pkg: p.Types.Path(), Name: rootFn.Name()}
+			visited := map[*types.Func]bool{rootFn: true}
+			stack := []*types.Func{rootFn}
+			for len(stack) > 0 {
+				cur := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				if cur != rootFn && isSeqRoot(cur) {
+					recordSeqEdge(rootKey, FuncKey{Pkg: p.Types.Path(), Name: cur.Name()})
+					continue
+				}
+				for crossCallee := range crossEdges[cur] {
+					recordSeqEdge(rootKey, crossCallee)
+				}
+				for next := range edges[cur] {
+					if !visited[next] {
+						visited[next] = true
+						stack = append(stack, next)
+					}
+				}
+			}
+		}
+		slices.SortFunc(out.seqFuncEdges, FuncDepEdge.Compare)
+	}
+
+	for k := range nonSeqUses {
+		out.nonSeqFuncUses = append(out.nonSeqFuncUses, k)
+	}
+	slices.SortFunc(out.nonSeqFuncUses, FuncKey.Compare)
+	out.nonSeqLits = nonSeqLit
+	out.intraEdges = edges
+	return out
+}
+
+type seamAnalysisResult struct {
+	exempt         map[ast.Node]bool
+	exportedSeams  []ExportedSeam
+	nonSeqFuncUses []FuncKey
+	seqFuncEdges   []FuncDepEdge
+	parallelFuncs  []FuncKey
+	parallelEdges  []FuncDepEdge
+}
+
+// bracketedSeamNodes returns the AST nodes in p exempted as sequential
+// bracketed seams (REQ-closure-shared-dynamic-state).
+func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
+	return analyzeBracketedSeams(audited, p, nil).exempt
+}
+
+func pkgMutatesTestingStruct(p *packages.Package) bool {
+	if p == nil || p.TypesInfo == nil {
+		return false
+	}
+	checkLHS := func(expr ast.Expr) bool {
+		if expr == nil {
+			return false
+		}
+		switch e := unparenExpr(expr).(type) {
+		case *ast.StarExpr:
+			if tv, ok := p.TypesInfo.Types[e.X]; ok && concreteTestingHandleKind(tv.Type) != "" {
+				return true
+			}
+		case *ast.SelectorExpr:
+			if tv, ok := p.TypesInfo.Types[e.X]; ok && tv.Type != nil {
+				if concreteTestingHandleKind(tv.Type) != "" || concreteTestingHandleKind(types.NewPointer(tv.Type)) != "" {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for _, file := range p.Syntax {
+		mutated := false
+		ast.Inspect(file, func(n ast.Node) bool {
+			if mutated || n == nil {
+				return false
+			}
+			switch node := n.(type) {
+			case *ast.AssignStmt:
+				for _, lhs := range node.Lhs {
+					if checkLHS(lhs) {
+						mutated = true
+						return false
+					}
+				}
+			case *ast.IncDecStmt:
+				if checkLHS(node.X) {
+					mutated = true
+					return false
+				}
+			case *ast.RangeStmt:
+				if checkLHS(node.Key) || checkLHS(node.Value) {
+					mutated = true
+					return false
+				}
+			}
+			return true
+		})
+		if mutated {
+			return true
+		}
+	}
+	return false
+}
+
+// computeLiveTestingHandles computes, for each callable block (fd.Body or
+// sequential FuncLit.Body) in *_test.go files of p, the set of own concrete
+// *testing.T/*testing.B/*testing.F parameter variables proven to originate
+// solely from uncalled Go test/benchmark/fuzz runner entries.
+func computeLiveTestingHandles(p *packages.Package, graph seamCallGraph) map[*ast.BlockStmt]map[*types.Var]bool {
+	if p == nil || p.TypesInfo == nil || p.Fset == nil || pkgMutatesTestingStruct(p) {
+		return nil
+	}
+	useCount := map[*types.Func]int{}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok {
+				if fn, ok := p.TypesInfo.Uses[id].(*types.Func); ok && fn != nil {
+					useCount[fn.Origin()]++
+				}
+			}
+			return true
+		})
+	}
+
+	isTestFileDecl := func(fd *ast.FuncDecl) bool {
+		if fd == nil || !fd.Pos().IsValid() {
+			return false
+		}
+		return strings.HasSuffix(p.Fset.Position(fd.Pos()).Filename, "_test.go")
+	}
+
+	type helperCallSite struct {
+		callerBody *ast.BlockStmt
+		call       *ast.CallExpr
+	}
+	type subRunnerEdge struct {
+		parentBody *ast.BlockStmt
+		recvID     *ast.Ident
+		lit        *ast.FuncLit
+		param0     *types.Var
+	}
+	type localCallEdge struct {
+		lit        *ast.FuncLit
+		params     []*types.Var
+		callerBody []*ast.BlockStmt
+		calls      []*ast.CallExpr
+	}
+
+	liveInBody := map[*ast.BlockStmt]map[*types.Var]bool{}
+	markLive := func(body *ast.BlockStmt, v *types.Var) bool {
+		if body == nil || v == nil {
+			return false
+		}
+		if liveInBody[body] == nil {
+			liveInBody[body] = map[*types.Var]bool{}
+		}
+		if liveInBody[body][v] {
+			return false
+		}
+		liveInBody[body][v] = true
+		return true
+	}
+
+	fnParams := map[*types.Func][]*types.Var{}
+	fnBody := map[*types.Func]*ast.BlockStmt{}
+	mutatedOrAddrVar := map[*types.Var]bool{}
+	helperSites := map[*types.Func][]helperCallSite{}
+	var subEdges []subRunnerEdge
+	var localEdges []localCallEdge
+
+	extractFieldListParamVars := func(fl *ast.FieldList) []*types.Var {
+		if fl == nil {
+			return nil
+		}
+		var out []*types.Var
+		for _, field := range fl.List {
+			if len(field.Names) == 0 {
+				out = append(out, nil)
+				continue
+			}
+			for _, name := range field.Names {
+				v, _ := p.TypesInfo.Defs[name].(*types.Var)
+				out = append(out, v)
+			}
+		}
+		return out
+	}
+
+	for fn, fd := range graph.declPlainFuncs {
+		if !isTestFileDecl(fd) || graph.blocked[fn] || fd.Body == nil || bodyHasGoOrParallel(p.TypesInfo, fd.Body) {
+			continue
+		}
+		sig, ok := fn.Type().(*types.Signature)
+		if !ok || sig == nil {
+			continue
+		}
+		params := extractFieldListParamVars(fd.Type.Params)
+		fnParams[fn] = params
+		fnBody[fn] = fd.Body
+
+		// Record writes and address-takes of local/parameter variables inside fd.Body.
+		localWrites := map[types.Object]int{}
+		localFuncLit := map[types.Object]*ast.FuncLit{}
+		localReadCalls := map[types.Object][]*ast.CallExpr{}
+		localReadBodies := map[types.Object][]*ast.BlockStmt{}
+		localReadCount := map[types.Object]int{}
+		validWriteIdent := map[*ast.Ident]bool{}
+
+		recordVarWrite := func(expr ast.Expr) {
+			if expr == nil {
+				return
+			}
+			ast.Inspect(expr, func(inner ast.Node) bool {
+				if id, ok := inner.(*ast.Ident); ok {
+					if obj := identDefOrUse(p.TypesInfo, id); obj != nil {
+						localWrites[obj]++
+						if v, ok := obj.(*types.Var); ok && v != nil {
+							mutatedOrAddrVar[v] = true
+						}
+					}
+				}
+				return true
+			})
+		}
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			if n == nil {
+				return false
+			}
+			switch node := n.(type) {
+			case *ast.AssignStmt:
+				for i, lhs := range node.Lhs {
+					recordVarWrite(lhs)
+					if id, ok := unparenExpr(lhs).(*ast.Ident); ok && i < len(node.Rhs) {
+						if obj := identDefOrUse(p.TypesInfo, id); obj != nil {
+							if lit, ok := unparenExpr(node.Rhs[i]).(*ast.FuncLit); ok && !graph.nonSeqLits[lit] {
+								validWriteIdent[id] = true
+								localFuncLit[obj] = lit
+							}
+						}
+					}
+				}
+			case *ast.ValueSpec:
+				for i, name := range node.Names {
+					if obj := p.TypesInfo.Defs[name]; obj != nil {
+						localWrites[obj]++
+						if v, ok := obj.(*types.Var); ok && v != nil {
+							mutatedOrAddrVar[v] = true
+						}
+						if i < len(node.Values) {
+							if lit, ok := unparenExpr(node.Values[i]).(*ast.FuncLit); ok && !graph.nonSeqLits[lit] {
+								validWriteIdent[name] = true
+								localFuncLit[obj] = lit
+							}
+						}
+					}
+				}
+			case *ast.IncDecStmt:
+				recordVarWrite(node.X)
+			case *ast.RangeStmt:
+				recordVarWrite(node.Key)
+				recordVarWrite(node.Value)
+			case *ast.UnaryExpr:
+				if node.Op == token.AND {
+					ast.Inspect(node.X, func(inner ast.Node) bool {
+						if id, ok := inner.(*ast.Ident); ok {
+							if v, ok := identDefOrUse(p.TypesInfo, id).(*types.Var); ok && v != nil {
+								mutatedOrAddrVar[v] = true
+							}
+						}
+						return true
+					})
+				}
+			}
+			return true
+		})
+
+		immutableLitForObj := func(obj types.Object) *ast.FuncLit {
+			v, ok := obj.(*types.Var)
+			if !ok || v == nil || localWrites[obj] != 1 {
+				return nil
+			}
+			// Must not have &v taken; note mutatedOrAddrVar[v] is set on the single write,
+			// so check explicit address-takes separately below.
+			return localFuncLit[obj]
+		}
+		addrTakenLocal := map[types.Object]bool{}
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			if u, ok := n.(*ast.UnaryExpr); ok && u.Op == token.AND {
+				ast.Inspect(u.X, func(inner ast.Node) bool {
+					if id, ok := inner.(*ast.Ident); ok {
+						if obj := identDefOrUse(p.TypesInfo, id); obj != nil {
+							addrTakenLocal[obj] = true
+						}
+					}
+					return true
+				})
+			}
+			return true
+		})
+
+		subCallbackArgIdent := map[*ast.Ident]bool{}
+		directLocalCallIdent := map[*ast.Ident]bool{}
+		var walkSeq func(n ast.Node, curBody *ast.BlockStmt)
+		walkSeq = func(n ast.Node, curBody *ast.BlockStmt) {
+			if n == nil {
+				return
+			}
+			switch node := n.(type) {
+			case *ast.GoStmt:
+				return
+			case *ast.FuncLit:
+				if graph.nonSeqLits[node] {
+					return
+				}
+				if node.Body != nil {
+					walkSeq(node.Body, node.Body)
+				}
+				return
+			case *ast.CallExpr:
+				if !node.Ellipsis.IsValid() {
+					// 1. Direct plain package helper call.
+					if callee, _ := plainCalleeFunc(p, node.Fun); callee != nil && graph.declPlainFuncs[callee] != nil && !callee.Exported() {
+						helperSites[callee] = append(helperSites[callee], helperCallSite{
+							callerBody: curBody,
+							call:       node,
+						})
+					}
+					// 2. Synchronous t.Run / b.Run / f.Fuzz sub-runner call.
+					syncName := testingSyncMethodName(p.TypesInfo, node)
+					if (syncName == "Run" && len(node.Args) == 2) || (syncName == "Fuzz" && len(node.Args) == 1) {
+						cbIdx := 0
+						if syncName == "Run" {
+							cbIdx = 1
+						}
+						if sel, ok := unparenExpr(node.Fun).(*ast.SelectorExpr); ok {
+							if recvID, ok := unparenExpr(sel.X).(*ast.Ident); ok {
+								var cbLit *ast.FuncLit
+								switch cb := unparenExpr(node.Args[cbIdx]).(type) {
+								case *ast.FuncLit:
+									if !graph.nonSeqLits[cb] {
+										cbLit = cb
+									}
+								case *ast.Ident:
+									if obj := p.TypesInfo.Uses[cb]; obj != nil && !addrTakenLocal[obj] {
+										if lit := immutableLitForObj(obj); lit != nil {
+											cbLit = lit
+											subCallbackArgIdent[cb] = true
+										}
+									}
+								}
+								if cbLit != nil && cbLit.Type != nil && cbLit.Body != nil {
+									litParams := extractFieldListParamVars(cbLit.Type.Params)
+									if len(litParams) >= 1 && litParams[0] != nil {
+										subEdges = append(subEdges, subRunnerEdge{
+											parentBody: curBody,
+											recvID:     recvID,
+											lit:        cbLit,
+											param0:     litParams[0],
+										})
+									}
+								}
+							}
+						}
+					}
+					// 3. Direct IIFE or local FuncLit variable call.
+					switch fun := unparenExpr(node.Fun).(type) {
+					case *ast.FuncLit:
+						if !graph.nonSeqLits[fun] && fun.Type != nil && fun.Body != nil {
+							localEdges = append(localEdges, localCallEdge{
+								lit:        fun,
+								params:     extractFieldListParamVars(fun.Type.Params),
+								callerBody: []*ast.BlockStmt{curBody},
+								calls:      []*ast.CallExpr{node},
+							})
+						}
+					case *ast.Ident:
+						if obj := p.TypesInfo.Uses[fun]; obj != nil && !addrTakenLocal[obj] && immutableLitForObj(obj) != nil {
+							directLocalCallIdent[fun] = true
+							localReadCalls[obj] = append(localReadCalls[obj], node)
+							localReadBodies[obj] = append(localReadBodies[obj], curBody)
+						}
+					}
+				}
+			case *ast.Ident:
+				if !validWriteIdent[node] {
+					if obj := p.TypesInfo.Uses[node]; obj != nil && localFuncLit[obj] != nil {
+						localReadCount[obj]++
+					}
+				}
+			}
+			ast.Inspect(n, func(child ast.Node) bool {
+				if child == nil || child == n {
+					return true
+				}
+				walkSeq(child, curBody)
+				return false
+			})
+		}
+		walkSeq(fd.Body, fd.Body)
+
+		// Filter subEdges whose bound local had any extra read beyond the sub-runner arg.
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			id, ok := n.(*ast.Ident)
+			if !ok || validWriteIdent[id] {
+				return true
+			}
+			if obj := p.TypesInfo.Uses[id]; obj != nil && localFuncLit[obj] != nil {
+				if subCallbackArgIdent[id] && localReadCount[obj] != 1 {
+					// Invalidate any subEdge using this lit.
+					badLit := localFuncLit[obj]
+					for i := range subEdges {
+						if subEdges[i].lit == badLit {
+							subEdges[i].param0 = nil
+						}
+					}
+				}
+			}
+			return true
+		})
+
+		for obj, lit := range localFuncLit {
+			if addrTakenLocal[obj] || localWrites[obj] != 1 || lit == nil || lit.Type == nil || lit.Body == nil {
+				continue
+			}
+			calls := localReadCalls[obj]
+			if len(calls) == 0 || len(calls) != localReadCount[obj] {
+				continue
+			}
+			localEdges = append(localEdges, localCallEdge{
+				lit:        lit,
+				params:     extractFieldListParamVars(lit.Type.Params),
+				callerBody: localReadBodies[obj],
+				calls:      calls,
+			})
+		}
+
+		// Base case: uncalled Go test / benchmark / fuzz runner root in *_test.go.
+		if useCount[fn] == 0 && !sig.Variadic() && sig.Params().Len() == 1 && sig.Results().Len() == 0 && len(params) == 1 && params[0] != nil && !mutatedOrAddrVar[params[0]] {
+			kind := concreteTestingHandleKind(params[0].Type())
+			name := fn.Name()
+			isRunner := (name != "TestMain" && isGoTestRunnerName(name, "Test") && kind == "T") ||
+				(isGoTestRunnerName(name, "Benchmark") && kind == "B") ||
+				(isGoTestRunnerName(name, "Fuzz") && kind == "F")
+			if isRunner {
+				markLive(fd.Body, params[0])
+			}
+		}
+	}
+
+	argIsLiveInBody := func(body *ast.BlockStmt, expr ast.Expr) bool {
+		if body == nil || expr == nil {
+			return false
+		}
+		id, ok := unparenExpr(expr).(*ast.Ident)
+		if !ok {
+			return false
+		}
+		v, ok := p.TypesInfo.Uses[id].(*types.Var)
+		return ok && v != nil && liveInBody[body][v]
+	}
+
+	for changed := true; changed; {
+		changed = false
+		// 1. Synchronous sub-runner callbacks (t.Run / b.Run / f.Fuzz).
+		for _, se := range subEdges {
+			if se.param0 == nil || mutatedOrAddrVar[se.param0] || concreteTestingHandleKind(se.param0.Type()) == "" {
+				continue
+			}
+			if argIsLiveInBody(se.parentBody, se.recvID) {
+				if markLive(se.lit.Body, se.param0) {
+					changed = true
+				}
+			}
+		}
+		// 2. Direct local closure helpers / IIFEs.
+		for _, le := range localEdges {
+			if le.lit == nil || le.lit.Body == nil || len(le.calls) == 0 {
+				continue
+			}
+			tv, ok := p.TypesInfo.Types[le.lit]
+			if !ok || tv.Type == nil {
+				continue
+			}
+			sig, ok := tv.Type.Underlying().(*types.Signature)
+			if !ok || sig == nil || sig.Variadic() {
+				continue
+			}
+			for pIdx, pv := range le.params {
+				if pv == nil || mutatedOrAddrVar[pv] || concreteTestingHandleKind(pv.Type()) == "" {
+					continue
+				}
+				allLive := true
+				for ci, call := range le.calls {
+					if len(call.Args) != sig.Params().Len() || pIdx >= len(call.Args) || !argIsLiveInBody(le.callerBody[ci], call.Args[pIdx]) {
+						allLive = false
+						break
+					}
+				}
+				if allLive && markLive(le.lit.Body, pv) {
+					changed = true
+				}
+			}
+		}
+		// 3. Unexported sequential *_test.go helper functions whose every intra-package
+		// reference is a direct sequential call passing a live handle.
+		for callee, sites := range helperSites {
+			if len(sites) == 0 || len(sites) != useCount[callee] {
+				continue
+			}
+			sig, ok := callee.Type().(*types.Signature)
+			if !ok || sig == nil || sig.Variadic() {
+				continue
+			}
+			body := fnBody[callee]
+			params := fnParams[callee]
+			if body == nil {
+				continue
+			}
+			for pIdx, pv := range params {
+				if pv == nil || mutatedOrAddrVar[pv] || concreteTestingHandleKind(pv.Type()) == "" {
+					continue
+				}
+				allLive := true
+				for _, site := range sites {
+					if len(site.call.Args) != sig.Params().Len() || pIdx >= len(site.call.Args) || !argIsLiveInBody(site.callerBody, site.call.Args[pIdx]) {
+						allLive = false
+						break
+					}
+				}
+				if allLive && markLive(body, pv) {
+					changed = true
+				}
+			}
+		}
+	}
+	return liveInBody
+}
+
+// analyzeBracketedSeams identifies AST nodes in p that belong to lexically
+// bracketed save-and-restore or zero-reset seams in sequential plain package
+// functions (not methods, no go statement, no .Parallel reference, no escaping
+// closure writing the seam, and neither escaping as a function value nor
+// reachable in the package graph from init flow, a method, a go statement, or
+// a .Parallel-bearing scope) or, under an audited toolchain, to an unexported
+// uninitialized sync/atomic.Pointer[T] hook variable whose Store calls, if
+// any, are serialized in such sequential plain functions under a single
+// unexported package-level sync.Mutex with mu.Lock(), defer mu.Unlock(), and
+// defer v.Store(nil) executed in that order before any non-nil Store or early
+// exit, and summarizes exported mutating seams and cross-package function edges
+// for Compose (REQ-closure-shared-dynamic-state).
+func analyzeBracketedSeams(audited bool, p *packages.Package, hooks *ExplainHookSet) seamAnalysisResult {
+	var res seamAnalysisResult
+	if p == nil || p.TypesInfo == nil {
+		return res
+	}
 	exempt := map[ast.Node]bool{}
+	res.exempt = exempt
+	graph := analyzeSeamCallGraph(p)
+	res.nonSeqFuncUses = graph.nonSeqFuncUses
+	res.seqFuncEdges = graph.seqFuncEdges
+	res.parallelFuncs = graph.parallelFuncs
+	res.parallelEdges = graph.parallelEdges
+	liveHandles := computeLiveTestingHandles(p, graph)
+
+	isBlockedSeamDecl := func(fd *ast.FuncDecl) bool {
+		if fd == nil || fd.Name == nil || len(graph.blocked) == 0 {
+			return false
+		}
+		fn, ok := p.TypesInfo.Defs[fd.Name].(*types.Func)
+		return ok && fn != nil && graph.blocked[fn.Origin()]
+	}
+	var revIntra map[*types.Func][]*types.Func
+	type exportedSeamKey struct {
+		fn  FuncKey
+		key string
+	}
+	exportedSeamIdx := map[exportedSeamKey]int{}
+	type exportedSeamMarkKey struct {
+		fn  FuncKey
+		key string
+		pos token.Pos
+	}
+	seenExportedMark := map[exportedSeamMarkKey]bool{}
+	recordMutatingSeam := func(fd *ast.FuncDecl, baseVar *types.Var, writePos token.Pos, viaCleanup bool) {
+		if fd == nil || fd.Name == nil || baseVar == nil || p.Types == nil || !TypeMayCarryUnknownDynamic(audited, baseVar.Type()) {
+			return
+		}
+		fn, ok := p.TypesInfo.Defs[fd.Name].(*types.Func)
+		if !ok || fn == nil {
+			return
+		}
+		fn = fn.Origin()
+		if graph.blocked[fn] {
+			return
+		}
+		if revIntra == nil {
+			revIntra = map[*types.Func][]*types.Func{}
+			for caller, callees := range graph.intraEdges {
+				for callee := range callees {
+					revIntra[callee] = append(revIntra[callee], caller)
+				}
+			}
+		}
+		var exportedCallers []*types.Func
+		visited := map[*types.Func]bool{fn: true}
+		stack := []*types.Func{fn}
+		for len(stack) > 0 {
+			cur := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if graph.blocked[cur] {
+				continue
+			}
+			if cur.Exported() || (p.Name == "main" && cur.Name() == "main") {
+				exportedCallers = append(exportedCallers, cur)
+			}
+			for _, caller := range revIntra[cur] {
+				if !visited[caller] {
+					visited[caller] = true
+					stack = append(stack, caller)
+				}
+			}
+		}
+		if len(exportedCallers) == 0 {
+			return
+		}
+		slices.SortFunc(exportedCallers, func(a, b *types.Func) int {
+			return strings.Compare(a.Name(), b.Name())
+		})
+		varKey := dynamicVarKey(baseVar)
+		for _, cur := range exportedCallers {
+			expKey := FuncKey{Pkg: p.Types.Path(), Name: cur.Name()}
+			esk := exportedSeamKey{fn: expKey, key: varKey}
+			if idx, exists := exportedSeamIdx[esk]; exists {
+				if viaCleanup {
+					res.exportedSeams[idx].RunnerOnly = true
+				}
+			} else {
+				exportedSeamIdx[esk] = len(res.exportedSeams)
+				res.exportedSeams = append(res.exportedSeams, ExportedSeam{
+					Func:       expKey,
+					Key:        varKey,
+					RunnerOnly: viaCleanup,
+				})
+			}
+			mk := exportedSeamMarkKey{fn: expKey, key: varKey, pos: writePos}
+			if !seenExportedMark[mk] {
+				seenExportedMark[mk] = true
+				explainExportedSeamMark(hooks, p, expKey, varKey, writePos)
+			}
+		}
+	}
 	resolve := func(ident *ast.Ident) (types.Object, bool) {
 		if obj, ok := p.TypesInfo.Uses[ident]; ok && obj != nil {
 			return obj, true
@@ -266,19 +5250,35 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 	}
 
 	addrTaken := map[*types.Var]bool{}
+	ptrMethodOnVar := map[*types.Var]bool{}
 	for _, file := range p.Syntax {
 		ast.Inspect(file, func(n ast.Node) bool {
-			if u, ok := n.(*ast.UnaryExpr); ok && u.Op == token.AND {
-				ast.Inspect(u.X, func(inner ast.Node) bool {
-					if id, ok := inner.(*ast.Ident); ok {
-						if obj, ok := resolve(id); ok {
-							if v, ok := obj.(*types.Var); ok && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() {
-								addrTaken[v] = true
+			switch node := n.(type) {
+			case *ast.UnaryExpr:
+				if node.Op == token.AND {
+					ast.Inspect(node.X, func(inner ast.Node) bool {
+						if id, ok := inner.(*ast.Ident); ok {
+							if obj, ok := resolve(id); ok {
+								if v, ok := obj.(*types.Var); ok && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() {
+									addrTaken[v] = true
+								}
+							}
+						}
+						return true
+					})
+				}
+			case *ast.SelectorExpr:
+				if selInfo, ok := p.TypesInfo.Selections[node]; ok && selInfo != nil && selInfo.Kind() == types.MethodVal {
+					if fn, ok := selInfo.Obj().(*types.Func); ok && fn != nil {
+						if sig, ok := fn.Type().(*types.Signature); ok && sig != nil && sig.Recv() != nil {
+							if _, isPtr := types.Unalias(sig.Recv().Type()).(*types.Pointer); isPtr {
+								if v := extractTargetVar(p.TypesInfo, node.X); v != nil && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() {
+									ptrMethodOnVar[v] = true
+								}
 							}
 						}
 					}
-					return true
-				})
+				}
 			}
 			return true
 		})
@@ -296,7 +5296,7 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 					continue
 				}
 				for _, name := range vs.Names {
-					if v, ok := p.TypesInfo.Defs[name].(*types.Var); ok && v != nil && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() && !addrTaken[v] {
+					if v, ok := p.TypesInfo.Defs[name].(*types.Var); ok && v != nil && !v.Exported() && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() && !addrTaken[v] {
 						uninitDecls[v] = true
 					}
 				}
@@ -344,7 +5344,87 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 		}
 	}
 
+	isAbortCall := func(call *ast.CallExpr) bool {
+		switch fun := unparenExpr(call.Fun).(type) {
+		case *ast.Ident:
+			if b, ok := p.TypesInfo.Uses[fun].(*types.Builtin); ok && b.Name() == "panic" {
+				return true
+			}
+		case *ast.SelectorExpr:
+			switch fun.Sel.Name {
+			case "Fatal", "Fatalf", "Fatalln", "FailNow", "Skip", "Skipf", "SkipNow", "Panic", "Panicf", "Panicln", "Goexit", "Exit":
+				return true
+			}
+		}
+		return false
+	}
+
+	var iifeBodyMayAbort func(body *ast.BlockStmt) bool
+	iifeBodyMayAbort = func(body *ast.BlockStmt) bool {
+		if body == nil {
+			return false
+		}
+		deferredOrGo := map[*ast.CallExpr]bool{}
+		ast.Inspect(body, func(n ast.Node) bool {
+			switch s := n.(type) {
+			case *ast.FuncLit:
+				return false
+			case *ast.DeferStmt:
+				if s.Call != nil {
+					deferredOrGo[s.Call] = true
+				}
+			case *ast.GoStmt:
+				if s.Call != nil {
+					deferredOrGo[s.Call] = true
+				}
+			}
+			return true
+		})
+		aborts := false
+		ast.Inspect(body, func(n ast.Node) bool {
+			if aborts || n == nil {
+				return false
+			}
+			switch node := n.(type) {
+			case *ast.FuncLit:
+				return false
+			case *ast.CallExpr:
+				if isAbortCall(node) {
+					aborts = true
+					return false
+				}
+				if !deferredOrGo[node] {
+					if lit, ok := unparenExpr(node.Fun).(*ast.FuncLit); ok && iifeBodyMayAbort(lit.Body) {
+						aborts = true
+						return false
+					}
+				}
+			}
+			return true
+		})
+		return aborts
+	}
+
 	stmtMayExitBeforeRestore := func(stmt ast.Stmt) bool {
+		if stmt == nil {
+			return false
+		}
+		deferredOrGo := map[*ast.CallExpr]bool{}
+		ast.Inspect(stmt, func(n ast.Node) bool {
+			switch s := n.(type) {
+			case *ast.FuncLit:
+				return false
+			case *ast.DeferStmt:
+				if s.Call != nil {
+					deferredOrGo[s.Call] = true
+				}
+			case *ast.GoStmt:
+				if s.Call != nil {
+					deferredOrGo[s.Call] = true
+				}
+			}
+			return true
+		})
 		exits := false
 		ast.Inspect(stmt, func(n ast.Node) bool {
 			if exits || n == nil {
@@ -357,15 +5437,12 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 				exits = true
 				return false
 			case *ast.CallExpr:
-				switch fun := unparenExpr(n.Fun).(type) {
-				case *ast.Ident:
-					if b, ok := p.TypesInfo.Uses[fun].(*types.Builtin); ok && b.Name() == "panic" {
-						exits = true
-						return false
-					}
-				case *ast.SelectorExpr:
-					switch fun.Sel.Name {
-					case "Fatal", "Fatalf", "Fatalln", "FailNow", "Skip", "Skipf", "SkipNow", "Panic", "Panicf", "Panicln", "Goexit", "Exit":
+				if isAbortCall(n) {
+					exits = true
+					return false
+				}
+				if !deferredOrGo[n] {
+					if lit, ok := unparenExpr(n.Fun).(*ast.FuncLit); ok && iifeBodyMayAbort(lit.Body) {
 						exits = true
 						return false
 					}
@@ -398,10 +5475,11 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 			}
 		}
 	}
-	if len(atomicPtrCandidates) > 0 && len(mutexVars) > 0 {
+	if audited && len(atomicPtrCandidates) > 0 {
 		validLoadStoreIdents := map[*ast.Ident]bool{}
 		selsByVar := map[*types.Var][]*ast.SelectorExpr{}
 		storesInFunc := map[*types.Var]map[*ast.FuncDecl]bool{}
+		storePosInFunc := map[*types.Var]map[*ast.FuncDecl]token.Pos{}
 		invalidAtomic := map[*types.Var]bool{}
 		loadCalls := map[*types.Var]map[*ast.CallExpr]*ast.FuncDecl{}
 		for _, file := range p.Syntax {
@@ -432,8 +5510,12 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 										if isFD && fd.Body != nil && !inLitOrGo {
 											if storesInFunc[v] == nil {
 												storesInFunc[v] = map[*ast.FuncDecl]bool{}
+												storePosInFunc[v] = map[*ast.FuncDecl]token.Pos{}
 											}
 											storesInFunc[v][fd] = true
+											if !storePosInFunc[v][fd].IsValid() {
+												storePosInFunc[v][fd] = node.Pos()
+											}
 										} else {
 											invalidAtomic[v] = true
 										}
@@ -549,24 +5631,7 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 			return true
 		}
 		funcBracketsAtomic := func(fd *ast.FuncDecl, v *types.Var) (*types.Var, bool) {
-			if fd == nil || fd.Body == nil || (fd.Recv == nil && fd.Name != nil && fd.Name.Name == "init") {
-				return nil, false
-			}
-			nonSeq := false
-			ast.Inspect(fd.Body, func(n ast.Node) bool {
-				switch n := n.(type) {
-				case *ast.GoStmt:
-					nonSeq = true
-					return false
-				case *ast.CallExpr:
-					if sel, ok := unparenExpr(n.Fun).(*ast.SelectorExpr); ok && sel.Sel.Name == "Parallel" && len(n.Args) == 0 {
-						nonSeq = true
-						return false
-					}
-				}
-				return true
-			})
-			if nonSeq {
+			if fd == nil || fd.Recv != nil || fd.Body == nil || isBlockedSeamDecl(fd) || fd.Name == nil || fd.Name.Name == "init" || fd.Name.Name == "_" || bodyHasGoOrParallel(p.TypesInfo, fd.Body) {
 				return nil, false
 			}
 			lockIdx := -1
@@ -675,8 +5740,21 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 			}
 			return lockedMu, true
 		}
+		var sortedAtomicVars []*types.Var
 		for v := range atomicPtrCandidates {
-			if invalidAtomic[v] || len(storesInFunc[v]) == 0 || !loadResultSafe(v) {
+			sortedAtomicVars = append(sortedAtomicVars, v)
+		}
+		slices.SortFunc(sortedAtomicVars, func(a, b *types.Var) int {
+			return strings.Compare(a.Name(), b.Name())
+		})
+		for _, v := range sortedAtomicVars {
+			if invalidAtomic[v] || !loadResultSafe(v) {
+				continue
+			}
+			if len(storesInFunc[v]) == 0 {
+				for _, sel := range selsByVar[v] {
+					exempt[sel] = true
+				}
 				continue
 			}
 			allBracketed := true
@@ -693,6 +5771,22 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 				for _, sel := range selsByVar[v] {
 					exempt[sel] = true
 				}
+				var storeDecls []*ast.FuncDecl
+				for fd := range storesInFunc[v] {
+					storeDecls = append(storeDecls, fd)
+				}
+				slices.SortFunc(storeDecls, func(a, b *ast.FuncDecl) int {
+					if a.Pos() < b.Pos() {
+						return -1
+					}
+					if a.Pos() > b.Pos() {
+						return 1
+					}
+					return 0
+				})
+				for _, fd := range storeDecls {
+					recordMutatingSeam(fd, v, storePosInFunc[v][fd], false)
+				}
 			}
 		}
 	}
@@ -701,7 +5795,7 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 	// non-alias-handing, non-mutable-reach package variables (and their fields).
 	candidateVar := func(obj types.Object) (*types.Var, bool) {
 		v, ok := obj.(*types.Var)
-		if !ok || v == nil || v.Pkg() == nil || v.Parent() != v.Pkg().Scope() || addrTaken[v] {
+		if !ok || v == nil || p.Types == nil || v.Pkg() != p.Types || v.Parent() != v.Pkg().Scope() || addrTaken[v] || ptrMethodOnVar[v] {
 			return nil, false
 		}
 		if TypeHandsOutDynamicAlias(audited, v.Type()) ||
@@ -716,6 +5810,7 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 			uninitVars[v] = true
 		}
 	}
+	baseVarByKey := map[string]*types.Var{}
 	seamTarget := func(expr ast.Expr) (string, *types.Var, bool) {
 		expr = unparenExpr(expr)
 		switch e := expr.(type) {
@@ -728,7 +5823,9 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 			if !ok {
 				return "", nil, false
 			}
-			return dynamicVarKey(v), v, true
+			k := dynamicVarKey(v)
+			baseVarByKey[k] = v
+			return k, v, true
 		case *ast.SelectorExpr:
 			baseID, ok := unparenExpr(e.X).(*ast.Ident)
 			if !ok {
@@ -748,7 +5845,9 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 				typeHandsOutMutableReach(field.Type()) {
 				return "", nil, false
 			}
-			return dynamicVarKey(v) + "." + field.Name(), v, true
+			k := dynamicVarKey(v) + "." + field.Name()
+			baseVarByKey[k] = v
+			return k, v, true
 		default:
 			return "", nil, false
 		}
@@ -781,15 +5880,30 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 		cbody      *ast.BlockStmt
 		savedLocal types.Object
 		zeroReset  bool
+		viaCleanup bool
 	}
+	type grantedSeamExemption struct {
+		fd         *ast.FuncDecl
+		fn         *types.Func
+		baseVar    *types.Var
+		key        string
+		writePos   token.Pos
+		nodes      []ast.Node
+		viaCleanup bool
+		zeroReset  bool
+	}
+	var granted []grantedSeamExemption
 
 	for _, file := range p.Syntax {
 		for _, decl := range file.Decls {
 			fd, ok := decl.(*ast.FuncDecl)
-			if !ok || fd.Body == nil || (fd.Recv == nil && fd.Name != nil && fd.Name.Name == "init") {
+			if !ok || fd.Recv != nil || fd.Body == nil || isBlockedSeamDecl(fd) || fd.Name == nil || fd.Name.Name == "init" || fd.Name.Name == "_" || bodyHasGoOrParallel(p.TypesInfo, fd.Body) {
 				continue
 			}
-			nonSequential := false
+			var declFn *types.Func
+			if fn, ok := p.TypesInfo.Defs[fd.Name].(*types.Func); ok && fn != nil {
+				declFn = fn.Origin()
+			}
 			localWrites := map[types.Object]int{}
 			localAddr := map[types.Object]bool{}
 			localFuncLits := map[types.Object]*ast.FuncLit{}
@@ -809,18 +5923,10 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 				})
 			}
 			ast.Inspect(fd.Body, func(n ast.Node) bool {
-				if nonSequential || n == nil {
+				if n == nil {
 					return false
 				}
 				switch n := n.(type) {
-				case *ast.GoStmt:
-					nonSequential = true
-					return false
-				case *ast.CallExpr:
-					if sel, ok := unparenExpr(n.Fun).(*ast.SelectorExpr); ok && sel.Sel.Name == "Parallel" && len(n.Args) == 0 {
-						nonSequential = true
-						return false
-					}
 				case *ast.AssignStmt:
 					for i, lhs := range n.Lhs {
 						recordTargetIdents(lhs, localWrites)
@@ -862,9 +5968,6 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 				}
 				return true
 			})
-			if nonSequential {
-				continue
-			}
 			immutableLocal := func(obj types.Object) bool {
 				if obj == nil || localWrites[obj] != 1 || localAddr[obj] {
 					return false
@@ -917,6 +6020,11 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 			}
 			ast.Inspect(fd.Body, func(n ast.Node) bool {
 				switch n := n.(type) {
+				case *ast.FuncLit:
+					if graph.nonSeqLits[n] {
+						markLitTargets(n)
+						return false
+					}
 				case *ast.ReturnStmt:
 					for _, res := range n.Results {
 						markExprClosures(res)
@@ -953,39 +6061,47 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 				return wholeWrites[v] && fieldWrites[v]
 			}
 
-			cleanupClosureBody := func(stmt ast.Stmt, allowCleanupCall bool) *ast.BlockStmt {
+			cleanupClosureBody := func(stmt ast.Stmt, block *ast.BlockStmt) (*ast.BlockStmt, bool) {
 				switch s := stmt.(type) {
 				case *ast.DeferStmt:
-					if lit, ok := unparenExpr(s.Call.Fun).(*ast.FuncLit); ok && len(s.Call.Args) == 0 {
-						return lit.Body
+					if lit, ok := unparenExpr(s.Call.Fun).(*ast.FuncLit); ok && len(s.Call.Args) == 0 && !graph.nonSeqLits[lit] {
+						return lit.Body, false
 					}
 					if id, ok := unparenExpr(s.Call.Fun).(*ast.Ident); ok && len(s.Call.Args) == 0 {
-						if obj, ok := resolve(id); ok && immutableLocal(obj) && localFuncLits[obj] != nil {
-							return localFuncLits[obj].Body
+						if obj, ok := resolve(id); ok && immutableLocal(obj) && localFuncLits[obj] != nil && !graph.nonSeqLits[localFuncLits[obj]] {
+							return localFuncLits[obj].Body, false
 						}
 					}
 				case *ast.ExprStmt:
-					if !allowCleanupCall {
-						return nil
+					if liveHandles == nil {
+						return nil, false
 					}
 					call, ok := s.X.(*ast.CallExpr)
-					if !ok || len(call.Args) != 1 {
-						return nil
+					if !ok || len(call.Args) != 1 || testingSyncMethodName(p.TypesInfo, call) != "Cleanup" {
+						return nil, false
 					}
 					sel, ok := unparenExpr(call.Fun).(*ast.SelectorExpr)
-					if !ok || sel.Sel.Name != "Cleanup" {
-						return nil
+					if !ok {
+						return nil, false
 					}
-					if lit, ok := unparenExpr(call.Args[0]).(*ast.FuncLit); ok {
-						return lit.Body
+					recvID, ok := unparenExpr(sel.X).(*ast.Ident)
+					if !ok {
+						return nil, false
+					}
+					recvVar, ok := p.TypesInfo.Uses[recvID].(*types.Var)
+					if !ok || recvVar == nil || !liveHandles[block][recvVar] {
+						return nil, false
+					}
+					if lit, ok := unparenExpr(call.Args[0]).(*ast.FuncLit); ok && !graph.nonSeqLits[lit] {
+						return lit.Body, true
 					}
 					if id, ok := unparenExpr(call.Args[0]).(*ast.Ident); ok {
-						if obj, ok := resolve(id); ok && immutableLocal(obj) && localFuncLits[obj] != nil {
-							return localFuncLits[obj].Body
+						if obj, ok := resolve(id); ok && immutableLocal(obj) && localFuncLits[obj] != nil && !graph.nonSeqLits[localFuncLits[obj]] {
+							return localFuncLits[obj].Body, true
 						}
 					}
 				}
-				return nil
+				return nil, false
 			}
 
 			callableBodies := map[*ast.BlockStmt]bool{fd.Body: true}
@@ -993,6 +6109,9 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 			ast.Inspect(fd.Body, func(n ast.Node) bool {
 				switch n := n.(type) {
 				case *ast.FuncLit:
+					if graph.nonSeqLits[n] {
+						return false
+					}
 					if n.Body != nil {
 						callableBodies[n.Body] = true
 					}
@@ -1042,8 +6161,11 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 						}
 					}
 					if isCallableBody {
-						if cbody := cleanupClosureBody(stmt, block == fd.Body); cbody != nil {
+						if cbody, viaCleanup := cleanupClosureBody(stmt, block); cbody != nil {
 							for _, cstmt := range cbody.List {
+								if stmtMayExitBeforeRestore(cstmt) {
+									break
+								}
 								assign, ok := cstmt.(*ast.AssignStmt)
 								if !ok || len(assign.Lhs) != len(assign.Rhs) {
 									continue
@@ -1063,6 +6185,7 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 														lhs:        lhs,
 														cbody:      cbody,
 														savedLocal: obj,
+														viaCleanup: viaCleanup,
 													})
 													validRestoreLHS[lhs] = true
 												}
@@ -1071,10 +6194,11 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 									}
 									if uninitVars[baseVar] && isZeroExpr(rhs) {
 										deferRestores[key] = append(deferRestores[key], restoreRecord{
-											idx:       idx,
-											lhs:       lhs,
-											cbody:     cbody,
-											zeroReset: true,
+											idx:        idx,
+											lhs:        lhs,
+											cbody:      cbody,
+											zeroReset:  true,
+											viaCleanup: viaCleanup,
 										})
 										validRestoreLHS[lhs] = true
 									}
@@ -1139,7 +6263,10 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 				}
 				writesByKey := map[string][]writeOccurrence{}
 				for idx, stmt := range block.List {
-					cbody := cleanupClosureBody(stmt, block == fd.Body)
+					var cbody *ast.BlockStmt
+					if isCallableBody {
+						cbody, _ = cleanupClosureBody(stmt, block)
+					}
 					ast.Inspect(stmt, func(n ast.Node) bool {
 						if n == nil || (cbody != nil && n == cbody) {
 							return false
@@ -1163,14 +6290,20 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 					})
 				}
 
-				for key, restores := range deferRestores {
+				var deferKeys []string
+				for key := range deferRestores {
+					deferKeys = append(deferKeys, key)
+				}
+				sort.Strings(deferKeys)
+				for _, key := range deferKeys {
+					restores := deferRestores[key]
 					if poisonedKeys[key] {
 						continue
 					}
 					consistent := true
 					firstR := restores[0]
 					for _, r := range restores[1:] {
-						if r.zeroReset != firstR.zeroReset || r.savedLocal != firstR.savedLocal {
+						if r.zeroReset != firstR.zeroReset || r.savedLocal != firstR.savedLocal || r.viaCleanup != firstR.viaCleanup {
 							consistent = false
 							break
 						}
@@ -1205,19 +6338,42 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 							}
 						}
 						if valid {
+							var gNodes []ast.Node
 							for _, rAll := range restores {
 								exempt[rAll.lhs] = true
+								gNodes = append(gNodes, rAll.lhs)
 							}
 							for _, w := range writes {
 								exempt[w.lhs] = true
+								gNodes = append(gNodes, w.lhs)
 							}
+							writePos := r.lhs.Pos()
+							if len(writes) > 0 {
+								writePos = writes[0].lhs.Pos()
+							}
+							granted = append(granted, grantedSeamExemption{
+								fd:         fd,
+								fn:         declFn,
+								baseVar:    baseVarByKey[key],
+								key:        key,
+								writePos:   writePos,
+								nodes:      gNodes,
+								viaCleanup: r.viaCleanup,
+								zeroReset:  r.zeroReset,
+							})
 							delete(writesByKey, key)
 							break
 						}
 					}
 				}
 
-				for key, writes := range writesByKey {
+				var inlineKeys []string
+				for key := range writesByKey {
+					inlineKeys = append(inlineKeys, key)
+				}
+				sort.Strings(inlineKeys)
+				for _, key := range inlineKeys {
+					writes := writesByKey[key]
 					if poisonedKeys[key] || len(deferRestores[key]) > 0 || len(saves[key]) == 0 || returnedTargets[key] {
 						continue
 					}
@@ -1271,10 +6427,29 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 							}
 						}
 						if allInSpan {
+							gNodes := []ast.Node{restoreLHS}
 							exempt[restoreLHS] = true
 							for _, w := range writes {
 								exempt[w.lhs] = true
+								if w.lhs != restoreLHS {
+									gNodes = append(gNodes, w.lhs)
+								}
 							}
+							writePos := restoreLHS.Pos()
+							for _, w := range writes {
+								if w.lhs != restoreLHS {
+									writePos = w.lhs.Pos()
+									break
+								}
+							}
+							granted = append(granted, grantedSeamExemption{
+								fd:       fd,
+								fn:       declFn,
+								baseVar:  baseVarByKey[key],
+								key:      key,
+								writePos: writePos,
+								nodes:    gNodes,
+							})
 							break
 						}
 					}
@@ -1282,7 +6457,154 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 			}
 		}
 	}
-	return exempt
+
+	if len(granted) > 0 {
+		reachMemo := map[*types.Func]map[*types.Func]bool{}
+		canReachIntra := func(from, to *types.Func) bool {
+			if from == nil || to == nil {
+				return false
+			}
+			if from == to {
+				return true
+			}
+			if m, ok := reachMemo[from]; ok {
+				return m[to]
+			}
+			visited := map[*types.Func]bool{from: true}
+			stack := []*types.Func{from}
+			for len(stack) > 0 {
+				cur := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				for next := range graph.intraEdges[cur] {
+					if !visited[next] {
+						visited[next] = true
+						stack = append(stack, next)
+					}
+				}
+			}
+			reachMemo[from] = visited
+			return visited[to]
+		}
+		overlapsKey := func(a, b grantedSeamExemption) bool {
+			if a.baseVar == nil || a.baseVar != b.baseVar {
+				return false
+			}
+			if a.key == b.key {
+				return true
+			}
+			whole := dynamicVarKey(a.baseVar)
+			return a.key == whole || b.key == whole
+		}
+
+		revoked := make([]bool, len(granted))
+		revokeIdx := func(i int) bool {
+			if revoked[i] {
+				return false
+			}
+			revoked[i] = true
+			for _, n := range granted[i].nodes {
+				delete(exempt, n)
+			}
+			return true
+		}
+
+		// Revoke LIFO-conflicting defer/inline + Cleanup exemptions along 0+ intraEdges.
+		var toRevoke []int
+		for i, g1 := range granted {
+			if g1.viaCleanup {
+				continue
+			}
+			for j, g2 := range granted {
+				if !g2.viaCleanup || !overlapsKey(g1, g2) {
+					continue
+				}
+				if canReachIntra(g1.fn, g2.fn) {
+					toRevoke = append(toRevoke, i, j)
+				}
+			}
+		}
+		for _, idx := range toRevoke {
+			revokeIdx(idx)
+		}
+
+		// Monotonically revoke zeroReset exemptions on any variable that has a
+		// non-exempt write anywhere in p.Syntax.
+		for changed := true; changed; {
+			changed = false
+			zeroResetVars := map[*types.Var]bool{}
+			for i, g := range granted {
+				if !revoked[i] && g.zeroReset && g.baseVar != nil {
+					zeroResetVars[g.baseVar] = true
+				}
+			}
+			if len(zeroResetVars) == 0 {
+				break
+			}
+			dirtyZeroVars := map[*types.Var]bool{}
+			for _, file := range p.Syntax {
+				ast.Inspect(file, func(n ast.Node) bool {
+					if n == nil {
+						return false
+					}
+					switch node := n.(type) {
+					case *ast.ValueSpec:
+						if len(node.Values) > 0 {
+							for _, name := range node.Names {
+								if v := extractTargetVar(p.TypesInfo, name); zeroResetVars[v] {
+									dirtyZeroVars[v] = true
+								}
+							}
+						}
+					case *ast.AssignStmt:
+						for _, lhs := range node.Lhs {
+							if !exempt[lhs] {
+								if v := extractTargetVar(p.TypesInfo, lhs); zeroResetVars[v] {
+									dirtyZeroVars[v] = true
+								}
+							}
+						}
+					case *ast.IncDecStmt:
+						if !exempt[node.X] {
+							if v := extractTargetVar(p.TypesInfo, node.X); zeroResetVars[v] {
+								dirtyZeroVars[v] = true
+							}
+						}
+					case *ast.RangeStmt:
+						for _, expr := range []ast.Expr{node.Key, node.Value} {
+							if expr != nil && !exempt[expr] {
+								if v := extractTargetVar(p.TypesInfo, expr); zeroResetVars[v] {
+									dirtyZeroVars[v] = true
+								}
+							}
+						}
+					case *ast.SendStmt:
+						if v := extractTargetVar(p.TypesInfo, node.Chan); zeroResetVars[v] {
+							dirtyZeroVars[v] = true
+						}
+					}
+					return true
+				})
+			}
+			if len(dirtyZeroVars) > 0 {
+				for i, g := range granted {
+					if !revoked[i] && g.zeroReset && dirtyZeroVars[g.baseVar] {
+						if revokeIdx(i) {
+							changed = true
+						}
+					}
+				}
+			}
+		}
+
+		for i, g := range granted {
+			if !revoked[i] {
+				recordMutatingSeam(g.fd, g.baseVar, g.writePos, g.viaCleanup)
+			}
+		}
+	}
+
+	slices.SortFunc(res.exportedSeams, ExportedSeam.Compare)
+	return res
 }
 
 // recordDynamicGlobalUses classifies every package-level dynamic-capable
@@ -1305,6 +6627,7 @@ func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
 func recordDynamicGlobalUses(
 	audited bool,
 	p *packages.Package,
+	exemptSeamNodes map[ast.Node]bool,
 	mutated, escaped, initOnly map[string]bool,
 	methodUses map[string]map[FuncKey]bool,
 	paramUses, initParamUses map[string]map[ParamKey]bool,
@@ -1321,7 +6644,6 @@ func recordDynamicGlobalUses(
 		return
 	}
 	dataMemos := dataMemoVars(audited, p)
-	exemptSeamNodes := bracketedSeamNodes(audited, p)
 	dynamicPackageVar := func(obj types.Object) (*types.Var, bool) {
 		variable, ok := obj.(*types.Var)
 		if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
@@ -3103,6 +8425,7 @@ func classifyLiteralRegistrant(audited bool, p *packages.Package, field string, 
 func recordEnvCarryingRegistrations(
 	audited bool,
 	p *packages.Package,
+	exemptSeamNodes map[ast.Node]bool,
 	envCarrying map[string]bool,
 	envCalls map[string]map[FuncKey]bool,
 	fieldDefer map[FieldPosKey]map[ParamKey]bool,
@@ -3112,7 +8435,6 @@ func recordEnvCarryingRegistrations(
 	if p == nil || p.TypesInfo == nil {
 		return
 	}
-	exemptSeamNodes := bracketedSeamNodes(audited, p)
 	resolve := func(ident *ast.Ident) (types.Object, bool) {
 		if obj, ok := p.TypesInfo.Uses[ident]; ok {
 			return obj, true

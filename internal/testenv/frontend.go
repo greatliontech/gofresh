@@ -1,6 +1,7 @@
 package testenv
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"go/ast"
@@ -17,6 +18,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/greatliontech/go-x-tools/go/gcexportdata"
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/gotool"
 )
@@ -95,34 +97,126 @@ var preloadedStdlibRoots = []string{
 	"unsafe",
 }
 
-type stdlibCache struct {
-	fset   *token.FileSet
-	byPath map[string]*packages.Package
+type stdlibSourceFile struct {
+	path    string
+	content string
+}
+
+type stdlibPkgMeta struct {
+	id            string
+	name          string
+	pkgPath       string
+	goFiles       []string
+	compiledPaths []string
+	compiledFiles []stdlibSourceFile
+	imports       []string
+}
+
+type stdlibMetaCache struct {
+	byPath      map[string]stdlibPkgMeta
+	topoOrder   []string
+	goarch      string
+	exportMu    sync.RWMutex
+	exportBytes map[string][]byte
+}
+
+func (c *stdlibMetaCache) typesSizes() types.Sizes {
+	if c != nil && c.goarch != "" {
+		if sz := types.SizesFor("gc", c.goarch); sz != nil {
+			return sz
+		}
+	}
+	return types.SizesFor("gc", runtime.GOARCH)
+}
+
+func envLastValue(env []string, key string) string {
+	val := ""
+	for _, kv := range env {
+		if name, after, ok := strings.Cut(kv, "="); ok && gotool.EqualEnvKey(name, key) {
+			val = after
+		}
+	}
+	return val
+}
+
+func effectiveGOARCH(env []string) string {
+	if arch := envLastValue(env, "GOARCH"); arch != "" {
+		return arch
+	}
+	return runtime.GOARCH
+}
+
+func effectiveTypesSizes(env []string) types.Sizes {
+	if sz := types.SizesFor("gc", effectiveGOARCH(env)); sz != nil {
+		return sz
+	}
+	return types.SizesFor("gc", runtime.GOARCH)
+}
+
+func stdlibEnvCacheKey(normalizedEnv []string) string {
+	var b strings.Builder
+	for _, key := range []string{
+		"PATH",
+		"GOROOT",
+		"GOTOOLCHAIN",
+		"GOOS",
+		"GOARCH",
+		"CGO_ENABLED",
+		"GOEXPERIMENT",
+		"GOFLAGS",
+		"GOAMD64",
+		"GOARM",
+		"GOARM64",
+	} {
+		val, _ := gotool.LookupEnv(normalizedEnv, key)
+		b.WriteString(key)
+		b.WriteByte('=')
+		b.WriteString(val)
+		b.WriteByte('\x00')
+	}
+	return b.String()
 }
 
 var (
-	cachedStdlibMu  sync.Mutex
-	cachedStdlibVal *stdlibCache
+	cachedStdlibMu    sync.Mutex
+	cachedStdlibByEnv = map[string]*stdlibMetaCache{}
 )
 
-func getStdlibCache(baseEnv []string) (*stdlibCache, error) {
+func isFullCandidateStdPkg(path string) bool {
+	if strings.Contains(path, ".") {
+		return true
+	}
+	if strings.HasPrefix(path, "encoding/json") || strings.HasPrefix(path, "crypto/") {
+		return true
+	}
+	switch path {
+	case "slices", "maps", "cmp", "sync", "sync/atomic", "io", "context", "testing", "fmt", "errors", "strings", "bytes",
+		"reflect", "path/filepath", "crypto", "text/template", "sort":
+		return true
+	default:
+		return false
+	}
+}
+
+func getStdlibMetaCache(baseEnv []string) (*stdlibMetaCache, error) {
+	env, err := gotool.PreserveBuildCache(context.Background(), baseEnv)
+	if err != nil {
+		return nil, err
+	}
+	cacheKey := stdlibEnvCacheKey(env)
 	cachedStdlibMu.Lock()
 	defer cachedStdlibMu.Unlock()
-	if cachedStdlibVal != nil {
-		return cachedStdlibVal, nil
+	if cached, ok := cachedStdlibByEnv[cacheKey]; ok && cached != nil {
+		return cached, nil
 	}
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		return nil, fmt.Errorf("testenv: runtime.Caller failed")
 	}
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
-	env, err := gotool.PreserveBuildCache(context.Background(), baseEnv)
-	if err != nil {
-		return nil, err
-	}
 	roots, err := gotool.LoadPackages(
 		context.Background(),
-		packages.LoadAllSyntax|packages.NeedModule|packages.NeedForTest,
+		packages.NeedName|packages.NeedFiles|packages.NeedCompiledGoFiles|packages.NeedImports|packages.NeedDeps|packages.NeedModule|packages.NeedForTest,
 		repoRoot,
 		env,
 		nil,
@@ -131,77 +225,487 @@ func getStdlibCache(baseEnv []string) (*stdlibCache, error) {
 	if err != nil {
 		return nil, err
 	}
-	var fset *token.FileSet
-	byPath := make(map[string]*packages.Package, 256)
-	isHeaderOnlyStdPkg := func(path string) bool {
-		if strings.Contains(path, ".") {
-			return false
-		}
-		if strings.HasPrefix(path, "encoding/json") || strings.HasPrefix(path, "crypto/") {
-			return false
-		}
-		switch path {
-		case "slices", "maps", "cmp", "sync", "io", "context", "testing", "fmt", "errors", "strings", "bytes",
-			"reflect", "path/filepath", "crypto", "text/template", "sort":
-			return false
-		default:
-			return true
-		}
-	}
+	byPath := make(map[string]stdlibPkgMeta, 256)
+	var visitErr error
 	packages.Visit(roots, nil, func(p *packages.Package) {
-		if fset == nil && p.Fset != nil {
-			fset = p.Fset
+		if visitErr != nil || p.PkgPath == "" || p.ForTest != "" || strings.HasSuffix(p.PkgPath, ".test") || strings.HasSuffix(p.PkgPath, "_test") || strings.Contains(p.ID, " [") {
+			return
 		}
-		if p.PkgPath != "" && p.ForTest == "" && !strings.HasSuffix(p.PkgPath, ".test") && !strings.HasSuffix(p.PkgPath, "_test") && !strings.Contains(p.ID, " [") {
-			if isHeaderOnlyStdPkg(p.PkgPath) {
-				byPath[p.PkgPath] = &packages.Package{
-					ID:      p.ID,
-					Name:    p.Name,
-					PkgPath: p.PkgPath,
-					Types:   p.Types,
-					Fset:    p.Fset,
+		var imps []string
+		for impPath := range p.Imports {
+			imps = append(imps, impPath)
+		}
+		slices.Sort(imps)
+		var compiled []stdlibSourceFile
+		if isFullCandidateStdPkg(p.PkgPath) {
+			compiled = make([]stdlibSourceFile, 0, len(p.CompiledGoFiles))
+			for _, fpath := range p.CompiledGoFiles {
+				raw, rerr := os.ReadFile(fpath)
+				if rerr != nil {
+					visitErr = fmt.Errorf("ReadFile(%s): %w", fpath, rerr)
+					return
 				}
-			} else {
-				byPath[p.PkgPath] = p
+				compiled = append(compiled, stdlibSourceFile{path: fpath, content: string(raw)})
 			}
+		}
+		byPath[p.PkgPath] = stdlibPkgMeta{
+			id:            p.ID,
+			name:          p.Name,
+			pkgPath:       p.PkgPath,
+			goFiles:       slices.Clone(p.GoFiles),
+			compiledPaths: slices.Clone(p.CompiledGoFiles),
+			compiledFiles: compiled,
+			imports:       imps,
 		}
 	})
-	for _, p := range byPath {
-		if len(p.Imports) == 0 {
+	if visitErr != nil {
+		return nil, visitErr
+	}
+	if _, ok := byPath["unsafe"]; !ok {
+		byPath["unsafe"] = stdlibPkgMeta{
+			id:      "unsafe",
+			name:    "unsafe",
+			pkgPath: "unsafe",
+		}
+	}
+	allPaths := make([]string, 0, len(byPath))
+	for p := range byPath {
+		allPaths = append(allPaths, p)
+	}
+	slices.Sort(allPaths)
+	visited := make(map[string]bool, len(byPath))
+	var topo []string
+	var walk func(string)
+	walk = func(p string) {
+		if visited[p] {
+			return
+		}
+		visited[p] = true
+		meta, ok := byPath[p]
+		if !ok {
+			return
+		}
+		for _, imp := range meta.imports {
+			walk(imp)
+		}
+		topo = append(topo, p)
+	}
+	for _, p := range allPaths {
+		walk(p)
+	}
+	entry := &stdlibMetaCache{
+		byPath:      byPath,
+		topoOrder:   topo,
+		goarch:      effectiveGOARCH(env),
+		exportBytes: map[string][]byte{},
+	}
+	cachedStdlibByEnv[cacheKey] = entry
+	return entry, nil
+}
+
+func (c *stdlibMetaCache) ensureExportBytes(path string) ([]byte, bool) {
+	if path == "unsafe" {
+		return nil, false
+	}
+	c.exportMu.RLock()
+	cached, seen := c.exportBytes[path]
+	c.exportMu.RUnlock()
+	if seen {
+		return cached, len(cached) > 0
+	}
+	meta, ok := c.byPath[path]
+	if !ok || meta.name == "" || meta.name == "main" || len(meta.compiledPaths) == 0 {
+		c.exportMu.Lock()
+		if existing, okE := c.exportBytes[path]; okE {
+			c.exportMu.Unlock()
+			return existing, len(existing) > 0
+		}
+		c.exportBytes[path] = nil
+		c.exportMu.Unlock()
+		return nil, false
+	}
+	depBytes := make(map[string][]byte, len(meta.imports))
+	for _, imp := range meta.imports {
+		if imp == "unsafe" {
 			continue
 		}
-		for impPath := range p.Imports {
-			if replacement, ok := byPath[impPath]; ok {
-				p.Imports[impPath] = replacement
+		b, okB := c.ensureExportBytes(imp)
+		if !okB {
+			c.exportMu.Lock()
+			if existing, okE := c.exportBytes[path]; okE {
+				c.exportMu.Unlock()
+				return existing, len(existing) > 0
+			}
+			c.exportBytes[path] = nil
+			c.exportMu.Unlock()
+			return nil, false
+		}
+		depBytes[imp] = b
+	}
+	c.exportMu.RLock()
+	cached, seen = c.exportBytes[path]
+	c.exportMu.RUnlock()
+	if seen {
+		return cached, len(cached) > 0
+	}
+
+	missFset := token.NewFileSet()
+	var files []*ast.File
+	if len(meta.compiledFiles) == len(meta.compiledPaths) && len(meta.compiledFiles) > 0 {
+		files = make([]*ast.File, 0, len(meta.compiledFiles))
+		for _, sf := range meta.compiledFiles {
+			af, err := parser.ParseFile(missFset, sf.path, sf.content, parser.AllErrors|parser.SkipObjectResolution)
+			if err != nil || af == nil {
+				files = nil
+				break
+			}
+			files = append(files, af)
+		}
+	} else {
+		files = make([]*ast.File, 0, len(meta.compiledPaths))
+		for _, fpath := range meta.compiledPaths {
+			src, err := os.ReadFile(fpath)
+			if err != nil {
+				files = nil
+				break
+			}
+			af, err := parser.ParseFile(missFset, fpath, src, parser.AllErrors|parser.SkipObjectResolution)
+			if err != nil || af == nil {
+				files = nil
+				break
+			}
+			files = append(files, af)
+		}
+	}
+	var built []byte
+	if len(files) > 0 {
+		missTypes := map[string]*types.Package{"unsafe": types.Unsafe}
+		importDep := func(impPath string) (*types.Package, error) {
+			if tp, okT := missTypes[impPath]; okT && tp.Complete() {
+				return tp, nil
+			}
+			b, okB := depBytes[impPath]
+			if !okB {
+				var okEnsure bool
+				b, okEnsure = c.ensureExportBytes(impPath)
+				if !okEnsure {
+					return nil, fmt.Errorf("missing export data for %s", impPath)
+				}
+			}
+			return gcexportdata.Read(bytes.NewReader(b), missFset, missTypes, impPath)
+		}
+		tpkg := types.NewPackage(meta.pkgPath, meta.name)
+		hadErr := false
+		conf := &types.Config{
+			Importer:         mapImporterFunc(importDep),
+			IgnoreFuncBodies: true,
+			Sizes:            c.typesSizes(),
+			Error:            func(error) { hadErr = true },
+		}
+		if err := types.NewChecker(conf, missFset, tpkg, nil).Files(files); err == nil && !hadErr && tpkg.Complete() {
+			var buf bytes.Buffer
+			if err := gcexportdata.Write(&buf, missFset, tpkg); err == nil && buf.Len() > 0 {
+				built = bytes.Clone(buf.Bytes())
 			}
 		}
 	}
-	if byPath["unsafe"] == nil {
-		byPath["unsafe"] = &packages.Package{
+	c.exportMu.Lock()
+	if existing, okE := c.exportBytes[path]; okE {
+		c.exportMu.Unlock()
+		return existing, len(existing) > 0
+	}
+	c.exportBytes[path] = built
+	c.exportMu.Unlock()
+	return built, len(built) > 0
+}
+
+func (c *stdlibMetaCache) activeStdlibForImports(userImports map[string]bool) map[string]bool {
+	reachable := make(map[string]bool, len(userImports)*4)
+	var visit func(string)
+	visit = func(p string) {
+		if reachable[p] {
+			return
+		}
+		reachable[p] = true
+		if meta, ok := c.byPath[p]; ok {
+			for _, imp := range meta.imports {
+				visit(imp)
+			}
+		}
+	}
+	for imp := range userImports {
+		visit(imp)
+	}
+
+	active := map[string]bool{
+		"slices": true,
+		"maps":   true,
+		"cmp":    true,
+		"sync":   true,
+	}
+	hasCrypto := userImports["crypto"] || userImports["hash"]
+	hasJSON := false
+	for imp := range userImports {
+		if strings.HasPrefix(imp, "crypto/") {
+			hasCrypto = true
+		}
+		if strings.HasPrefix(imp, "encoding/json") {
+			hasJSON = true
+		}
+		switch imp {
+		case "testing", "testing/quick", "testing/fstest", "testing/iotest":
+			active["testing"] = true
+			active["context"] = true
+			active["sync/atomic"] = true
+		case "fmt", "log":
+			active["fmt"] = true
+			active["io"] = true
+			active["bytes"] = true
+			active["strings"] = true
+			active["errors"] = true
+		case "strings":
+			active["strings"] = true
+			active["io"] = true
+		case "bytes":
+			active["bytes"] = true
+			active["io"] = true
+		case "io", "io/fs", "bufio":
+			active["io"] = true
+			active["errors"] = true
+		case "errors":
+			active["errors"] = true
+		case "context":
+			active["context"] = true
+			active["errors"] = true
+		case "sort":
+			active["sort"] = true
+		case "reflect":
+			active["reflect"] = true
+		case "path/filepath":
+			active["path/filepath"] = true
+		case "text/template", "html/template":
+			active["text/template"] = true
+			active["fmt"] = true
+			active["io"] = true
+			active["reflect"] = true
+			active["strings"] = true
+			active["bytes"] = true
+		}
+	}
+	if hasCrypto {
+		active["crypto"] = true
+		for p := range reachable {
+			if strings.HasPrefix(p, "crypto/") {
+				active[p] = true
+			}
+		}
+	}
+	if hasJSON {
+		active["bytes"] = true
+		active["strings"] = true
+		active["io"] = true
+		active["errors"] = true
+		for p := range reachable {
+			if strings.HasPrefix(p, "encoding/json") {
+				active[p] = true
+			}
+		}
+	}
+	for p := range reachable {
+		if strings.Contains(p, ".") {
+			active[p] = true
+		}
+	}
+	for p := range active {
+		if !reachable[p] {
+			delete(active, p)
+		}
+	}
+	return active
+}
+
+func (c *stdlibMetaCache) materialize(fset *token.FileSet, typesByPath map[string]*types.Package, active map[string]bool, fallback types.Importer) (map[string]*packages.Package, map[string]*packages.Package, error) {
+	typesByPath["unsafe"] = types.Unsafe
+	headerByPath := map[string]*packages.Package{
+		"unsafe": {
 			ID:      "unsafe",
 			Name:    "unsafe",
 			PkgPath: "unsafe",
 			Types:   types.Unsafe,
 			Fset:    fset,
+		},
+	}
+	fullByPath := make(map[string]*packages.Package, len(active))
+
+	var importPkg func(path string) (*types.Package, error)
+	importPkg = func(path string) (*types.Package, error) {
+		if tp, ok := typesByPath[path]; ok && tp.Complete() {
+			return tp, nil
+		}
+		if meta, ok := c.byPath[path]; ok {
+			if expBytes, okExp := c.ensureExportBytes(path); okExp {
+				tp, err := gcexportdata.Read(bytes.NewReader(expBytes), fset, typesByPath, path)
+				if err != nil {
+					return nil, err
+				}
+				headerByPath[path] = &packages.Package{
+					ID:      meta.id,
+					Name:    meta.name,
+					PkgPath: meta.pkgPath,
+					GoFiles: meta.goFiles,
+					Types:   tp,
+					Fset:    fset,
+				}
+				return tp, nil
+			}
+		}
+		tp, err := fallback.Import(path)
+		if err != nil {
+			return nil, err
+		}
+		typesByPath[path] = tp
+		headerByPath[path] = &packages.Package{
+			ID:      path,
+			Name:    tp.Name(),
+			PkgPath: path,
+			Types:   tp,
+			Fset:    fset,
+		}
+		return tp, nil
+	}
+
+	stdSizes := c.typesSizes()
+	for _, p := range c.topoOrder {
+		if !active[p] {
+			continue
+		}
+		meta, ok := c.byPath[p]
+		if !ok || len(meta.compiledFiles) == 0 {
+			continue
+		}
+		syntax := make([]*ast.File, 0, len(meta.compiledFiles))
+		compiledPaths := make([]string, 0, len(meta.compiledFiles))
+		for _, sf := range meta.compiledFiles {
+			parseMode := parser.SkipObjectResolution
+			if gotool.StringNeedsCommentParse(sf.content) {
+				parseMode |= parser.ParseComments
+			}
+			af, err := parser.ParseFile(fset, sf.path, sf.content, parseMode)
+			if err != nil {
+				return nil, nil, fmt.Errorf("parse stdlib %s (%s): %w", p, sf.path, err)
+			}
+			syntax = append(syntax, af)
+			compiledPaths = append(compiledPaths, sf.path)
+		}
+		info := &types.Info{
+			Types:        make(map[ast.Expr]types.TypeAndValue),
+			Defs:         make(map[*ast.Ident]types.Object),
+			Uses:         make(map[*ast.Ident]types.Object),
+			Implicits:    make(map[ast.Node]types.Object),
+			Instances:    make(map[*ast.Ident]types.Instance),
+			Scopes:       make(map[ast.Node]*types.Scope),
+			Selections:   make(map[*ast.SelectorExpr]*types.Selection),
+			FileVersions: make(map[*ast.File]string),
+		}
+		tpkg := types.NewPackage(meta.pkgPath, meta.name)
+		conf := &types.Config{Importer: mapImporterFunc(importPkg), Sizes: stdSizes}
+		if err := types.NewChecker(conf, fset, tpkg, info).Files(syntax); err != nil {
+			return nil, nil, fmt.Errorf("typecheck stdlib %s: %w", p, err)
+		}
+		typesByPath[p] = tpkg
+		pkg := &packages.Package{
+			ID:              meta.id,
+			Name:            meta.name,
+			PkgPath:         meta.pkgPath,
+			GoFiles:         meta.goFiles,
+			CompiledGoFiles: compiledPaths,
+			Syntax:          syntax,
+			Types:           tpkg,
+			TypesInfo:       info,
+			TypesSizes:      stdSizes,
+			Fset:            fset,
+		}
+		fullByPath[p] = pkg
+		headerByPath[p] = &packages.Package{
+			ID:      meta.id,
+			Name:    meta.name,
+			PkgPath: meta.pkgPath,
+			GoFiles: meta.goFiles,
+			Types:   tpkg,
+			Fset:    fset,
 		}
 	}
-	cachedStdlibVal = &stdlibCache{fset: fset, byPath: byPath}
-	return cachedStdlibVal, nil
+
+	for p, full := range fullByPath {
+		meta := c.byPath[p]
+		if len(meta.imports) == 0 {
+			continue
+		}
+		imps := make(map[string]*packages.Package, len(meta.imports))
+		for _, impPath := range meta.imports {
+			if ac, ok := fullByPath[impPath]; ok {
+				imps[impPath] = ac
+			} else if hdr, ok := headerByPath[impPath]; ok {
+				imps[impPath] = hdr
+			} else if tp, err := importPkg(impPath); err == nil {
+				imps[impPath] = &packages.Package{
+					ID:      impPath,
+					Name:    tp.Name(),
+					PkgPath: impPath,
+					Types:   tp,
+					Fset:    fset,
+				}
+			}
+		}
+		full.Imports = imps
+	}
+	return fullByPath, headerByPath, nil
 }
 
-// CachedStdlibPackageErr returns the pre-loaded *packages.Package for a
-// standard library package (or golang.org/x/sys/unix) from the process-wide
-// in-memory cache.
+// CachedStdlibPackageErr returns a *packages.Package for a standard library
+// package (or golang.org/x/sys/unix) materialized from the carrier-free
+// metadata cache.
 func CachedStdlibPackageErr(env []string, pkgPath string) (*packages.Package, error) {
-	cache, err := getStdlibCache(env)
+	cache, err := getStdlibMetaCache(env)
 	if err != nil {
 		return nil, err
 	}
-	return cache.byPath[pkgPath], nil
+	meta, ok := cache.byPath[pkgPath]
+	if !ok {
+		return nil, nil
+	}
+	fset := token.NewFileSet()
+	typesByPath := make(map[string]*types.Package)
+	fallback := newLocalExportImporter()
+	if len(meta.compiledFiles) > 0 {
+		full, _, err := cache.materialize(fset, typesByPath, map[string]bool{pkgPath: true}, fallback)
+		if err != nil {
+			return nil, err
+		}
+		return full[pkgPath], nil
+	}
+	var tp *types.Package
+	if pkgPath == "unsafe" {
+		tp = types.Unsafe
+	} else if expBytes, okExp := cache.ensureExportBytes(pkgPath); okExp {
+		tp, err = gcexportdata.Read(bytes.NewReader(expBytes), fset, typesByPath, pkgPath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &packages.Package{
+		ID:      meta.id,
+		Name:    meta.name,
+		PkgPath: meta.pkgPath,
+		GoFiles: meta.goFiles,
+		Types:   tp,
+		Fset:    fset,
+	}, nil
 }
 
-// CachedStdlibPackage returns the pre-loaded *packages.Package for a standard
-// library package (or golang.org/x/sys/unix) from the process-wide in-memory cache.
+// CachedStdlibPackage returns a *packages.Package for a standard library
+// package (or golang.org/x/sys/unix) materialized from the carrier-free
+// metadata cache.
 func CachedStdlibPackage(t testing.TB, env []string, pkgPath string) *packages.Package {
 	t.Helper()
 	pkg, err := CachedStdlibPackageErr(env, pkgPath)
@@ -211,27 +715,23 @@ func CachedStdlibPackage(t testing.TB, env []string, pkgPath string) *packages.P
 	return pkg
 }
 
-var (
-	defaultImporterMu    sync.Mutex
-	defaultImporterCache = map[string]*types.Package{}
-	baseDefaultImporter  = importer.Default()
-)
-
-func cachedExportImporter(path string) (*types.Package, error) {
-	if path == "unsafe" {
-		return types.Unsafe, nil
-	}
-	defaultImporterMu.Lock()
-	defer defaultImporterMu.Unlock()
-	if pkg, ok := defaultImporterCache[path]; ok {
+func newLocalExportImporter() types.Importer {
+	base := importer.Default()
+	cache := map[string]*types.Package{}
+	return mapImporterFunc(func(path string) (*types.Package, error) {
+		if path == "unsafe" {
+			return types.Unsafe, nil
+		}
+		if pkg, ok := cache[path]; ok {
+			return pkg, nil
+		}
+		pkg, err := base.Import(path)
+		if err != nil {
+			return nil, err
+		}
+		cache[path] = pkg
 		return pkg, nil
-	}
-	pkg, err := baseDefaultImporter.Import(path)
-	if err != nil {
-		return nil, err
-	}
-	defaultImporterCache[path] = pkg
-	return pkg, nil
+	})
 }
 
 type mapImporterFunc func(path string) (*types.Package, error)
@@ -333,18 +833,15 @@ func isPackageOtherFileExt(ext string) bool {
 }
 
 func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]string, filesByPkg map[string]map[string]string, linkStdlib bool) ([]*packages.Package, error) {
-	var fset *token.FileSet
-	var stdCache *stdlibCache
+	var stdCache *stdlibMetaCache
 	if linkStdlib {
 		var err error
-		stdCache, err = getStdlibCache(env)
+		stdCache, err = getStdlibMetaCache(env)
 		if err != nil {
-			return nil, fmt.Errorf("getStdlibCache: %w", err)
+			return nil, fmt.Errorf("getStdlibMetaCache: %w", err)
 		}
-		fset = stdCache.fset
-	} else {
-		fset = token.NewFileSet()
 	}
+	fset := token.NewFileSet()
 
 	rawPkgPaths := make([]string, 0, len(filesByPkg))
 	for pkgPath := range filesByPkg {
@@ -517,20 +1014,71 @@ func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]st
 	}
 
 	builtByPath := make(map[string]*packages.Package, len(ordered))
-	typesByPath := make(map[string]*types.Package, len(ordered))
-
-	imp := mapImporterFunc(func(path string) (*types.Package, error) {
-		if tp, ok := typesByPath[path]; ok {
-			return tp, nil
-		}
-		if linkStdlib {
-			if sp, ok := stdCache.byPath[path]; ok && sp.Types != nil {
-				return sp.Types, nil
+	typesByPath := make(map[string]*types.Package, len(ordered)+64)
+	typesByPath["unsafe"] = types.Unsafe
+	fallbackImp := newLocalExportImporter()
+	var dagStdPkgs map[string]*packages.Package
+	var dagStdHeaders map[string]*packages.Package
+	if linkStdlib {
+		userImports := make(map[string]bool)
+		for _, u := range ordered {
+			for _, impPath := range u.imports {
+				userImports[impPath] = true
 			}
 		}
-		return cachedExportImporter(path)
+		active := stdCache.activeStdlibForImports(userImports)
+		var err error
+		dagStdPkgs, dagStdHeaders, err = stdCache.materialize(fset, typesByPath, active, fallbackImp)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		dagStdHeaders = map[string]*packages.Package{
+			"unsafe": {
+				ID:      "unsafe",
+				Name:    "unsafe",
+				PkgPath: "unsafe",
+				Types:   types.Unsafe,
+				Fset:    fset,
+			},
+		}
+	}
+
+	imp := mapImporterFunc(func(path string) (*types.Package, error) {
+		if tp, ok := typesByPath[path]; ok && tp.Complete() {
+			return tp, nil
+		}
+		if stdCache != nil {
+			if meta, ok := stdCache.byPath[path]; ok {
+				if expBytes, okExp := stdCache.ensureExportBytes(path); okExp {
+					tp, err := gcexportdata.Read(bytes.NewReader(expBytes), fset, typesByPath, path)
+					if err != nil {
+						return nil, err
+					}
+					dagStdHeaders[path] = &packages.Package{
+						ID:      meta.id,
+						Name:    meta.name,
+						PkgPath: meta.pkgPath,
+						GoFiles: meta.goFiles,
+						Types:   tp,
+						Fset:    fset,
+					}
+					return tp, nil
+				}
+			}
+		}
+		tp, err := fallbackImp.Import(path)
+		if err != nil {
+			return nil, err
+		}
+		typesByPath[path] = tp
+		return tp, nil
 	})
 
+	dagSizes := effectiveTypesSizes(env)
+	if stdCache != nil {
+		dagSizes = stdCache.typesSizes()
+	}
 	result := make([]*packages.Package, 0, len(ordered))
 	for _, u := range ordered {
 		info := &types.Info{
@@ -546,6 +1094,7 @@ func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]st
 		tpkg := types.NewPackage(u.pkgPath, u.pkgName)
 		conf := &types.Config{
 			Importer: imp,
+			Sizes:    dagSizes,
 		}
 		if err := types.NewChecker(conf, fset, tpkg, info).Files(u.syntax); err != nil {
 			return nil, fmt.Errorf("typecheck %s: %w", u.pkgPath, err)
@@ -562,13 +1111,19 @@ func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]st
 				importsMap[impPath] = dep
 				continue
 			}
-			if linkStdlib {
-				if sp, ok := stdCache.byPath[impPath]; ok {
+			if sp, ok := dagStdPkgs[impPath]; ok {
+				importsMap[impPath] = sp
+				continue
+			}
+			if sp, ok := dagStdHeaders[impPath]; ok {
+				importsMap[impPath] = sp
+				continue
+			}
+			if tp, err := imp.Import(impPath); err == nil {
+				if sp, ok := dagStdHeaders[impPath]; ok {
 					importsMap[impPath] = sp
 					continue
 				}
-			}
-			if tp, err := imp.Import(impPath); err == nil {
 				importsMap[impPath] = &packages.Package{
 					ID:      impPath,
 					Name:    tp.Name(),
@@ -590,7 +1145,7 @@ func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]st
 			Syntax:          u.syntax,
 			Types:           tpkg,
 			TypesInfo:       info,
-			TypesSizes:      types.SizesFor("gc", runtime.GOARCH),
+			TypesSizes:      dagSizes,
 			Fset:            fset,
 			Imports:         importsMap,
 			Module: &packages.Module{

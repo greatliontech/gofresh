@@ -55,7 +55,19 @@ func parseAndTypecheckDAG(t testing.TB, virtualDir string, filesByPkg map[string
 	return testenv.ParseAndTypecheckDAG(t, virtualDir, filesByPkg)
 }
 
-var cachedUnixListPkgOnce = sync.OnceValue(func() *listPkg {
+var (
+	cachedUnixListPkgMu   sync.Mutex
+	cachedUnixListPkgVal  *listPkg
+	cachedUnixListPkgDone bool
+)
+
+func cachedUnixListPkgOnce() *listPkg {
+	cachedUnixListPkgMu.Lock()
+	defer cachedUnixListPkgMu.Unlock()
+	if cachedUnixListPkgDone {
+		return cachedUnixListPkgVal
+	}
+	cachedUnixListPkgDone = true
 	uPkg, err := testenv.CachedStdlibPackageErr(os.Environ(), "golang.org/x/sys/unix")
 	if err != nil || uPkg == nil || len(uPkg.GoFiles) == 0 {
 		return nil
@@ -77,7 +89,7 @@ var cachedUnixListPkgOnce = sync.OnceValue(func() *listPkg {
 	if _, after, ok := strings.Cut(filepath.Base(modDir), "@"); ok {
 		modVersion = after
 	}
-	return &listPkg{
+	cachedUnixListPkgVal = &listPkg{
 		ImportPath: "golang.org/x/sys/unix",
 		Name:       "unix",
 		Dir:        dir,
@@ -90,7 +102,8 @@ var cachedUnixListPkgOnce = sync.OnceValue(func() *listPkg {
 			Main:    false,
 		},
 	}
-})
+	return cachedUnixListPkgVal
+}
 
 func extractEmbedMatches(af *ast.File, available []string) []string {
 	var patterns []string
@@ -317,12 +330,17 @@ type cachedRegisteredFixture struct {
 	metas []listPkg
 }
 
-var (
-	registeredFixtureMu    sync.Mutex
-	registeredFixtureCache = map[string]cachedRegisteredFixture{}
-)
+func cloneRegisteredFixtureProgram(src *progpkg.Program) *progpkg.Program {
+	cloned := *src
+	cloned.PkgScopeProbe = nil
+	cloned.Summaries = nil
+	cloned.MutatedGlobals = nil
+	cloned.GOARCH = runtime.GOARCH
+	cloned.ReadSource = nil
+	return &cloned
+}
 
-func loadRegisteredInMemoryFixture(ctx context.Context, pkgPath string) (*progpkg.Program, []listPkg, bool, error) {
+func loadRegisteredInMemoryFixture(ctx context.Context, cache map[string]cachedRegisteredFixture, pkgPath string) (*progpkg.Program, []listPkg, bool, error) {
 	filesByPkg, ok := inMemoryFixtureRegistry[pkgPath]
 	if !ok {
 		return nil, nil, false, nil
@@ -332,29 +350,19 @@ func loadRegisteredInMemoryFixture(ctx context.Context, pkgPath string) (*progpk
 			return nil, nil, true, err
 		}
 	}
-	registeredFixtureMu.Lock()
-	defer registeredFixtureMu.Unlock()
-	if cached, found := registeredFixtureCache[pkgPath]; found {
-		cloned := *cached.prog
-		cloned.PkgScopeProbe = nil
-		cloned.Summaries = nil
-		cloned.MutatedGlobals = nil
-		cloned.GOARCH = runtime.GOARCH
-		cloned.ReadSource = nil
-		return &cloned, cached.metas, true, nil
+	if cache != nil {
+		if cached, found := cache[pkgPath]; found {
+			return cloneRegisteredFixtureProgram(cached.prog), cached.metas, true, nil
+		}
 	}
 	prog, metas, _, err := buildInMemorySSAFromFiles(ctx, "", pkgPath, filesByPkg)
 	if err != nil {
 		return nil, nil, true, err
 	}
-	registeredFixtureCache[pkgPath] = cachedRegisteredFixture{prog: prog, metas: metas}
-	cloned := *prog
-	cloned.PkgScopeProbe = nil
-	cloned.Summaries = nil
-	cloned.MutatedGlobals = nil
-	cloned.GOARCH = runtime.GOARCH
-	cloned.ReadSource = nil
-	return &cloned, metas, true, nil
+	if cache != nil {
+		cache[pkgPath] = cachedRegisteredFixture{prog: prog, metas: metas}
+	}
+	return cloneRegisteredFixtureProgram(prog), metas, true, nil
 }
 
 func supplyRegisteredFixtures(t testing.TB, h *Hasher, pkgPaths ...string) {
@@ -365,7 +373,7 @@ func supplyRegisteredFixtures(t testing.TB, h *Hasher, pkgPaths ...string) {
 			continue
 		}
 		seen[pkgPath] = true
-		prog, metas, ok, err := loadRegisteredInMemoryFixture(h.ctx, pkgPath)
+		prog, metas, ok, err := loadRegisteredInMemoryFixture(h.ctx, nil, pkgPath)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -411,7 +419,19 @@ func primeHasherFromDir(t testing.TB, h *Hasher, dir string) {
 	if t != nil {
 		t.Helper()
 	}
-	if dir == "" {
+	var st *inMemoryHasherState
+	if h != nil && h.listOnMiss != nil {
+		st = newInMemoryHasherState()
+		bindInMemoryHasherState(h, st)
+	}
+	primeHasherIntoState(t, h, dir, st)
+}
+
+func primeHasherIntoState(t testing.TB, h *Hasher, dir string, st *inMemoryHasherState) {
+	if t != nil {
+		t.Helper()
+	}
+	if h == nil || dir == "" {
 		return
 	}
 	gomodBytes, err := os.ReadFile(filepath.Join(dir, "go.mod"))
@@ -799,102 +819,69 @@ func primeHasherFromDir(t testing.TB, h *Hasher, dir string) {
 		h.lists[targetPkg] = metas
 		if pkgs, perr := testenv.ParseAndTypecheckInPlaceWithStdlib(os.Environ(), dir, targetPkgDirs, targetFilesByPkg); perr == nil {
 			h.progs[targetPkg] = &program{PkgPath: targetPkg, Pkgs: pkgs}
-			primedHasherMu.Lock()
-			if primedHasherPkgs[h] == nil {
-				primedHasherPkgs[h] = map[string][]*packages.Package{}
+			if st != nil {
+				st.pkgs[targetPkg] = pkgs
+				st.lists[targetPkg] = metas
 			}
-			if primedHasherLists[h] == nil {
-				primedHasherLists[h] = map[string][]listPkg{}
-			}
-			primedHasherPkgs[h][targetPkg] = pkgs
-			primedHasherLists[h][targetPkg] = metas
-			primedHasherMu.Unlock()
 		}
 	}
 }
 
-var (
-	primedHasherMu    sync.Mutex
-	primedHasherPkgs  = map[*Hasher]map[string][]*packages.Package{}
-	primedHasherLists = map[*Hasher]map[string][]listPkg{}
-	eligibleHashers   = map[*Hasher]bool{}
-)
-
-func markHasherEligible(h *Hasher) {
-	if h == nil {
-		return
-	}
-	primedHasherMu.Lock()
-	eligibleHashers[h] = true
-	primedHasherMu.Unlock()
+type inMemoryHasherState struct {
+	pkgs     map[string][]*packages.Package
+	lists    map[string][]listPkg
+	fixtures map[string]cachedRegisteredFixture
 }
 
-func unprimeHasher(h *Hasher) {
-	if h == nil {
-		return
+func newInMemoryHasherState() *inMemoryHasherState {
+	return &inMemoryHasherState{
+		pkgs:     map[string][]*packages.Package{},
+		lists:    map[string][]listPkg{},
+		fixtures: map[string]cachedRegisteredFixture{},
 	}
-	primedHasherMu.Lock()
-	delete(primedHasherPkgs, h)
-	delete(primedHasherLists, h)
-	delete(eligibleHashers, h)
-	primedHasherMu.Unlock()
 }
 
-func lookupPrimedHasherPkg(h *Hasher, pkgPath string) ([]*packages.Package, []listPkg, bool) {
-	if h == nil {
+func (st *inMemoryHasherState) lookupPrimedPkg(h *Hasher, pkgPath string) ([]*packages.Package, []listPkg, bool) {
+	if st == nil || h == nil {
 		return nil, nil, false
 	}
-	primedHasherMu.Lock()
-	defer primedHasherMu.Unlock()
-	pkgs := primedHasherPkgs[h][pkgPath]
-	metas := primedHasherLists[h][pkgPath]
+	pkgs := st.pkgs[pkgPath]
+	metas := st.lists[pkgPath]
 	if len(metas) == 0 && h.lists != nil {
 		metas = h.lists[pkgPath]
 	}
 	return pkgs, metas, len(pkgs) > 0
 }
 
-func init() {
-	analysisTestHooks.listOnMiss = func(h *Hasher, pkgPath string) ([]listPkg, bool) {
+func bindInMemoryHasherState(h *Hasher, st *inMemoryHasherState) {
+	h.listOnMiss = func(h *Hasher, pkgPath string) ([]listPkg, bool) {
 		if h == nil || h.runner.Prepare != nil || len(h.buildFlags) > 0 {
 			return nil, false
 		}
 		if h.ctx != nil && h.ctx.Err() != nil {
 			return nil, false
 		}
-		primedHasherMu.Lock()
-		eligible := eligibleHashers[h]
-		primedHasherMu.Unlock()
-		if !eligible {
-			return nil, false
-		}
 		if h.dir == "" {
-			if _, metas, ok, err := loadRegisteredInMemoryFixture(h.ctx, pkgPath); ok && err == nil {
+			if _, metas, ok, err := loadRegisteredInMemoryFixture(h.ctx, st.fixtures, pkgPath); ok && err == nil {
 				return metas, true
 			}
 			return nil, false
 		}
-		primeHasherFromDir(nil, h, h.dir)
+		primeHasherIntoState(nil, h, h.dir, st)
 		if metas, ok := h.lists[pkgPath]; ok {
 			return metas, true
 		}
 		return nil, false
 	}
-	analysisTestHooks.loadProgramOnMiss = func(ctx context.Context, h *Hasher, pkgPath string) (*program, bool, error) {
+	h.loadProgramOnMiss = func(ctx context.Context, h *Hasher, pkgPath string) (*program, bool, error) {
 		if h == nil || h.runner.Prepare != nil || len(h.buildFlags) > 0 {
 			return nil, false, nil
 		}
 		if ctx != nil && ctx.Err() != nil {
 			return nil, false, nil
 		}
-		primedHasherMu.Lock()
-		eligible := eligibleHashers[h]
-		primedHasherMu.Unlock()
-		if !eligible {
-			return nil, false, nil
-		}
 		if h.dir == "" {
-			if inMemProg, metas, ok, err := loadRegisteredInMemoryFixture(ctx, pkgPath); ok {
+			if inMemProg, metas, ok, err := loadRegisteredInMemoryFixture(ctx, st.fixtures, pkgPath); ok {
 				if err == nil && h.lists[pkgPath] == nil {
 					h.lists[pkgPath] = metas
 				}
@@ -902,10 +889,10 @@ func init() {
 			}
 			return nil, false, nil
 		}
-		pkgs, metas, ok := lookupPrimedHasherPkg(h, pkgPath)
+		pkgs, metas, ok := st.lookupPrimedPkg(h, pkgPath)
 		if !ok {
-			primeHasherFromDir(nil, h, h.dir)
-			pkgs, metas, ok = lookupPrimedHasherPkg(h, pkgPath)
+			primeHasherIntoState(nil, h, h.dir, st)
+			pkgs, metas, ok = st.lookupPrimedPkg(h, pkgPath)
 		}
 		if !ok || len(pkgs) == 0 {
 			return nil, false, nil
@@ -916,29 +903,23 @@ func init() {
 		}
 		return built, true, err
 	}
-	analysisTestHooks.testingPackagesOnMiss = func(h *Hasher, pkgPath string) *program {
+	h.testingPackagesOnMiss = func(h *Hasher, pkgPath string) *program {
 		if h == nil || h.runner.Prepare != nil || len(h.buildFlags) > 0 {
 			return nil
 		}
 		if h.ctx != nil && h.ctx.Err() != nil {
 			return nil
 		}
-		primedHasherMu.Lock()
-		eligible := eligibleHashers[h]
-		primedHasherMu.Unlock()
-		if !eligible {
-			return nil
-		}
 		if h.dir == "" {
-			if inMemProg, _, ok, err := loadRegisteredInMemoryFixture(h.ctx, pkgPath); ok && err == nil {
+			if inMemProg, _, ok, err := loadRegisteredInMemoryFixture(h.ctx, st.fixtures, pkgPath); ok && err == nil {
 				return inMemProg
 			}
 			return nil
 		}
-		pkgs, _, ok := lookupPrimedHasherPkg(h, pkgPath)
+		pkgs, _, ok := st.lookupPrimedPkg(h, pkgPath)
 		if !ok {
-			primeHasherFromDir(nil, h, h.dir)
-			pkgs, _, ok = lookupPrimedHasherPkg(h, pkgPath)
+			primeHasherIntoState(nil, h, h.dir, st)
+			pkgs, _, ok = st.lookupPrimedPkg(h, pkgPath)
 		}
 		if ok {
 			return &program{PkgPath: pkgPath, Pkgs: pkgs}
@@ -947,14 +928,45 @@ func init() {
 	}
 }
 
-var cachedHostSnapshotOnce = sync.OnceValues(func() (*gotool.EnvSnapshot, error) {
+func markHasherEligible(h *Hasher) {
+	if h == nil {
+		return
+	}
+	bindInMemoryHasherState(h, newInMemoryHasherState())
+}
+
+func unprimeHasher(h *Hasher) {
+	if h == nil {
+		return
+	}
+	h.listOnMiss = nil
+	h.loadProgramOnMiss = nil
+	h.testingPackagesOnMiss = nil
+}
+
+var (
+	cachedHostSnapshotMu  sync.Mutex
+	cachedHostSnapshotVal *gotool.EnvSnapshot
+)
+
+func cachedHostSnapshotOnce() (*gotool.EnvSnapshot, error) {
+	cachedHostSnapshotMu.Lock()
+	defer cachedHostSnapshotMu.Unlock()
+	if cachedHostSnapshotVal != nil {
+		return cachedHostSnapshotVal, nil
+	}
 	dir, err := os.MkdirTemp("", "gofresh-closure-env-*")
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(dir)
-	return (gotool.Runner{}).TakeEnvSnapshot(context.Background(), dir, os.Environ())
-})
+	snap, err := (gotool.Runner{}).TakeEnvSnapshot(context.Background(), dir, os.Environ())
+	if err != nil {
+		return nil, err
+	}
+	cachedHostSnapshotVal = snap
+	return snap, nil
+}
 
 func newInMemoryHasher(t testing.TB, buildFlags ...string) *Hasher {
 	t.Helper()
@@ -1075,22 +1087,22 @@ func computeTier2ResultAndReach(h *Hasher, pkgPath, symbol string) (tier2Result,
 		h.progs[pkgPath] = built
 	}
 	if prog == nil {
-		if inMemProg, metas, ok, err := loadRegisteredInMemoryFixture(h.ctx, pkgPath); ok {
+		if inMemProg, metas, ok, err := loadRegisteredInMemoryFixture(h.ctx, nil, pkgPath); ok {
 			if err != nil {
 				return tier2Result{}, nil, err
 			}
 			prog = inMemProg
 			h.lists[pkgPath] = metas
-		} else if pkgs, metas, ok := lookupPrimedHasherPkg(h, pkgPath); ok && len(pkgs) > 0 {
-			built, err := progpkg.FromPackages(h.ctx, pkgPath, pkgs)
-			if err != nil {
-				return tier2Result{}, nil, err
+		} else if h.loadProgramOnMiss != nil {
+			built, handled, err := h.loadProgramOnMiss(h.ctx, h, pkgPath)
+			if handled {
+				if err != nil {
+					return tier2Result{}, nil, err
+				}
+				prog = built
 			}
-			prog = built
-			if len(metas) > 0 && h.lists[pkgPath] == nil {
-				h.lists[pkgPath] = metas
-			}
-		} else {
+		}
+		if prog == nil {
 			var err error
 			prog, err = progpkg.Load(h.ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
 			if err != nil {
@@ -1139,8 +1151,9 @@ func computeTier2Result(h *Hasher, pkgPath, symbol string) (tier2Result, error) 
 // independent-load tests do not use this helper. The owner and its callers are
 // sequential, including lazy type/SSA method construction.
 type fixturePrograms struct {
-	h      *Hasher
-	loaded *program
+	h        *Hasher
+	loaded   *program
+	fixtures map[string]cachedRegisteredFixture
 	// An explicit immutable roster opts into one typed generation. Preparation
 	// is lazy: a table whose subtests are all filtered out loads nothing.
 	roster                []string
@@ -1153,7 +1166,11 @@ type fixturePrograms struct {
 
 func newFixturePrograms(t *testing.T, h *Hasher, roster ...string) *fixturePrograms {
 	t.Helper()
-	f := &fixturePrograms{h: h, prepare: progpkg.Prepare}
+	f := &fixturePrograms{
+		h:        h,
+		fixtures: map[string]cachedRegisteredFixture{},
+		prepare:  progpkg.Prepare,
+	}
 	for _, path := range roster {
 		if !slices.Contains(f.roster, path) {
 			f.roster = append(f.roster, path)
@@ -1191,7 +1208,10 @@ func (f *fixturePrograms) acquire(pkgPath string) error {
 				if _, ok := inMemoryFixtureRegistry[r]; ok {
 					continue
 				}
-				if _, _, ok := lookupPrimedHasherPkg(f.h, r); ok {
+				if existing := f.h.progs[r]; existing != nil && (existing.Prog != nil || len(existing.Pkgs) > 0) {
+					continue
+				}
+				if f.h.testingPackagesOnMiss != nil && f.h.testingPackagesOnMiss(f.h, r) != nil {
 					continue
 				}
 				diskRoster = append(diskRoster, r)
@@ -1213,24 +1233,32 @@ func (f *fixturePrograms) acquire(pkgPath string) error {
 		// later cases retain their opportunity to load and assert independently.
 		var p *program
 		var err error
+		handled := false
 		f.ssaBuilds++
-		if inMemProg, metas, ok, inMemErr := loadRegisteredInMemoryFixture(f.h.ctx, pkgPath); ok {
+		if inMemProg, metas, ok, inMemErr := loadRegisteredInMemoryFixture(f.h.ctx, f.fixtures, pkgPath); ok {
+			handled = true
 			p, err = inMemProg, inMemErr
 			if err == nil {
 				f.h.lists[pkgPath] = metas
 			}
-		} else if pkgs, metas, ok := lookupPrimedHasherPkg(f.h, pkgPath); ok && len(pkgs) > 0 && f.prepareErr == nil {
-			p, err = progpkg.FromPackages(f.h.ctx, pkgPath, pkgs)
-			if err == nil && len(metas) > 0 && f.h.lists[pkgPath] == nil {
-				f.h.lists[pkgPath] = metas
+		} else if existing := f.h.progs[pkgPath]; existing != nil && len(existing.Pkgs) > 0 && existing.Prog == nil && f.prepareErr == nil {
+			handled = true
+			p, err = progpkg.FromPackages(f.h.ctx, pkgPath, existing.Pkgs)
+		} else if f.prepareErr == nil && f.h.loadProgramOnMiss != nil {
+			if built, ok, loadErr := f.h.loadProgramOnMiss(f.h.ctx, f.h, pkgPath); ok {
+				handled = true
+				p, err = built, loadErr
 			}
-		} else if f.prepared != nil {
-			p, err = f.prepared.Build(f.h.ctx, pkgPath)
-		} else {
-			// Only a load-wide operational preparation failure reaches this
-			// fallback. Per-root selection/load errors remain Build errors.
-			f.typedLoads++
-			p, err = progpkg.Load(f.h.ctx, f.h.dir, f.h.packageEnv, f.h.buildFlags, pkgPath)
+		}
+		if !handled {
+			if f.prepared != nil {
+				p, err = f.prepared.Build(f.h.ctx, pkgPath)
+			} else {
+				// Only a load-wide operational preparation failure reaches this
+				// fallback. Per-root selection/load errors remain Build errors.
+				f.typedLoads++
+				p, err = progpkg.Load(f.h.ctx, f.h.dir, f.h.packageEnv, f.h.buildFlags, pkgPath)
+			}
 		}
 		if err != nil {
 			return err
@@ -1256,6 +1284,7 @@ func (f *fixturePrograms) releaseProgram() {
 
 func (f *fixturePrograms) release() {
 	f.releaseProgram()
+	f.fixtures = nil
 	f.prepared = nil
 	f.roster = nil
 	f.prepareErr = nil
@@ -2066,7 +2095,7 @@ func TestMemoScopesKeyOnTheOneFrontendSpelling(t *testing.T) {
 	if strings.Contains(IdentityStrategy, frontend) {
 		t.Fatalf("the identity strategy %q composes the analyzing frontend", IdentityStrategy)
 	}
-	if want := "gofresh/closure@1 gofresh/canonical-member@2 gofresh/variant-parse@2"; IdentityStrategy != want {
+	if want := "gofresh/closure@1 gofresh/canonical-member@3 gofresh/variant-parse@2"; IdentityStrategy != want {
 		t.Fatalf("the identity strategy is %q, want the composed %q — a derivation moved, or a bump was reverted; update the golden consciously", IdentityStrategy, want)
 	}
 	allowed := map[string]bool{"AnalyzingFrontend": true, "resolveSelection": true, "toolchainSourceScope": true, "NewAt": true}

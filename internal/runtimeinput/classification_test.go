@@ -787,15 +787,18 @@ func TestTraversalVerificationFailuresStaySealed(t *testing.T) {
 // crossing a volatile OS root seals without the verifier reading it.
 func TestVolatileTraversalRefusesWithoutProbing(t *testing.T) {
 	moduleDir, packageDir := testDirs(t)
-	orig := congruenceProbe
-	congruenceProbe = func(p string) (os.FileInfo, error) {
-		if volatileOSPath(p) {
-			t.Errorf("congruence verifier probed a volatile OS path: %s", p)
-		}
-		return orig(p)
-	}
-	t.Cleanup(func() { congruenceProbe = orig })
-	st, err := ambientFromTestLog([]byte("open /proc/self/../environ\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	var st Observation
+	var err error
+	withRuntimeTestHooks(runtimeTestHookSet{
+		congruenceStat: func(p string) (os.FileInfo, error) {
+			if volatileOSPath(p) {
+				t.Errorf("congruence verifier probed a volatile OS path: %s", p)
+			}
+			return os.Lstat(p)
+		},
+	}, func() {
+		st, err = ambientFromTestLog([]byte("open /proc/self/../environ\n"), moduleDir, packageDir, WithCompletedProcess("worker"), WithBracket(testBracket(t, moduleDir)))
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1560,7 +1563,29 @@ func FuzzRuntimeObservationAndPathInvariants(f *testing.F) {
 			t.Fatalf("Merge suppressed unverifiability from %q: %+v", badOp, mergedUnver.State)
 		}
 
-		// 2. Observation disposition & ProducerFrame premises
+		// 2. Path coverage, unknown binding, and manifest-representable attribution
+		// (REQ-inputs-value-binding: path-coverage, unknown-binding, attribution).
+		outTarget := filepath.Join(symlinkTargetDir, "out.txt")
+		if err := os.WriteFile(outTarget, []byte("ext"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		subBracket, err := CaptureBracket(context.Background(), modDir, []string{"sub"})
+		if err != nil {
+			t.Fatalf("CaptureBracket(sub): %v", err)
+		}
+		escapeLog := "# test log\nopen " + linkName + "/out.txt\n"
+		obsEscape, err := fromTestLog(context.Background(), []byte(escapeLog), modDir, subDir, ambient, WithCompletedProcess("w-esc"), WithBracket(subBracket))
+		if err != nil {
+			t.Fatalf("fromTestLog symlink escape: %v", err)
+		}
+		if !obsEscape.State.OK || !obsEscape.State.Unverifiable || !strings.Contains(obsEscape.State.Reason, "not covered by observation bracket") {
+			t.Fatalf("expected uncovered bracket refusal for symlink escaping sub root, got %+v", obsEscape.State)
+		}
+		if _, err := Describe(obsEscape.Manifest, modDir); err != nil {
+			t.Fatalf("Describe on attributed refusal manifest failed: %v", err)
+		}
+
+		// 3. Observation disposition & ProducerFrame premises
 		// (REQ-inputs-observation-disposition, REQ-inputs-producer-premises).
 		inc, err := Incomplete(modDir, "w-inc", "truncated", ambient)
 		if err != nil {
@@ -2806,14 +2831,22 @@ func TestFileInputEligibilityRefusesProjectedAndUnsupported(t *testing.T) {
 		if err != nil || q.Kind != ProjectedFileInput || q.Reason == "" {
 			t.Fatalf("machine projection: %+v %v", q, err)
 		}
-		probe := classifyProbe
-		classifyProbe = func(p string) (os.FileInfo, error) { t.Fatalf("volatile path probed: %s", p); return nil, nil }
-		t.Cleanup(func() { classifyProbe = probe })
-		q, err = FileInputEligibility(t.Context(), root, pkg, "/proc/self/status", FileInputContext{Env: env})
-		if err != nil || q.Kind != UnverifiableFileInput || q.Reason == "" {
-			t.Fatalf("volatile: %+v %v", q, err)
-		}
 	}
+	withRuntimeTestHooks(runtimeTestHookSet{
+		classifyStat: func(p string) (os.FileInfo, error) {
+			if runtime.GOOS == "linux" {
+				t.Fatalf("volatile path probed: %s", p)
+			}
+			return os.Stat(p)
+		},
+	}, func() {
+		if runtime.GOOS == "linux" {
+			q, err := FileInputEligibility(t.Context(), root, pkg, "/proc/self/status", FileInputContext{Env: env})
+			if err != nil || q.Kind != UnverifiableFileInput || q.Reason == "" {
+				t.Fatalf("volatile: %+v %v", q, err)
+			}
+		}
+	})
 }
 
 func TestFileInputEligibilityExclusionPrecedence(t *testing.T) {
@@ -2926,15 +2959,18 @@ func TestFileInputEligibilityCancellation(t *testing.T) {
 	}
 	for _, path := range paths {
 		ctx, cancel := context.WithCancel(t.Context())
-		probe := classifyProbe
 		called := false
-		classifyProbe = func(p string) (os.FileInfo, error) {
-			called = true
-			cancel()
-			return probe(p)
-		}
-		q, err := FileInputEligibility(ctx, root, pkg, path, FileInputContext{Env: env})
-		classifyProbe = probe
+		var q FileEligibility
+		var err error
+		withRuntimeTestHooks(runtimeTestHookSet{
+			classifyStat: func(p string) (os.FileInfo, error) {
+				called = true
+				cancel()
+				return os.Stat(p)
+			},
+		}, func() {
+			q, err = FileInputEligibility(ctx, root, pkg, path, FileInputContext{Env: env})
+		})
 		cancel()
 		if !called || !errors.Is(err, context.Canceled) || q != (FileEligibility{}) {
 			t.Fatalf("cancelled after probe of %s: %+v %v", path, q, err)
@@ -3016,6 +3052,10 @@ func TestFileInputEligibilityExecution(t *testing.T) {
 	if err != nil || len(m.Paths) != 0 || len(m.Env) != 0 {
 		t.Fatalf("preflight fabricated identities: %+v %v", m, err)
 	}
+	selfBin := filepath.Join(t.TempDir(), "self.test")
+	if err := os.Symlink(os.Args[0], selfBin); err != nil {
+		t.Fatal(err)
+	}
 	var observed Observation
 	for _, mode := range []string{"query", "read"} {
 		childEnv := gotool.SetEnv(gotool.SetEnv(env, modeKey, mode), "GOFRESH_ELIGIBILITY_ROOT", root)
@@ -3024,7 +3064,7 @@ func TestFileInputEligibilityExecution(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestFileInputEligibilityExecution$", "-test.testlogfile="+logPath)
+		cmd := exec.CommandContext(t.Context(), selfBin, "-test.run=^TestFileInputEligibilityExecution$", "-test.testlogfile="+logPath)
 		cmd.Dir = pkg
 		cmd.Env = cmdEnv
 		if output, err := cmd.CombinedOutput(); err != nil {
@@ -3732,12 +3772,14 @@ func TestMachineFactArmsAndContrast(t *testing.T) {
 	dir := t.TempDir()
 
 	// Ungatherable: the injected failure surfaces as unverifiable.
-	prev := currentMachineFacts
-	currentMachineFacts = func() (guard.MachineFacts, error) {
-		return guard.MachineFacts{}, errors.New("injected gather failure")
-	}
-	obs := completedFromLog(t, dir, "open /proc/cpuinfo\n")
-	currentMachineFacts = prev
+	var obs Observation
+	withRuntimeTestHooks(runtimeTestHookSet{
+		machineFacts: func() (guard.MachineFacts, error) {
+			return guard.MachineFacts{}, errors.New("injected gather failure")
+		},
+	}, func() {
+		obs = completedFromLog(t, dir, "open /proc/cpuinfo\n")
+	})
 	st, err := CompletedState(obs)
 	if err != nil {
 		t.Fatal(err)
@@ -3747,21 +3789,26 @@ func TestMachineFactArmsAndContrast(t *testing.T) {
 	}
 
 	// Movement: two distinct projections produce two distinct digests.
-	sealDigest := func(facts guard.MachineFacts) string {
-		prev := currentMachineFacts
-		currentMachineFacts = func() (guard.MachineFacts, error) { return facts, nil }
-		defer func() { currentMachineFacts = prev }()
-		obs := completedFromLog(t, dir, "open /proc/cpuinfo\n")
-		st, err := CompletedState(obs)
-		if err != nil {
-			t.Fatal(err)
+	var injectedFacts guard.MachineFacts
+	var sameDigest bool
+	withRuntimeTestHooks(runtimeTestHookSet{
+		machineFacts: func() (guard.MachineFacts, error) { return injectedFacts, nil },
+	}, func() {
+		sealDigest := func(facts guard.MachineFacts) string {
+			injectedFacts = facts
+			obs := completedFromLog(t, dir, "open /proc/cpuinfo\n")
+			st, err := CompletedState(obs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return st.Digest
 		}
-		return st.Digest
-	}
-	small := guard.MachineFacts{CPUModel: "m", PhysicalCores: 2, LogicalCores: 4, TotalRAMBytes: 1, OS: "linux", KernelVersion: "k"}
-	big := small
-	big.LogicalCores = 32
-	if sealDigest(small) == sealDigest(big) {
+		small := guard.MachineFacts{CPUModel: "m", PhysicalCores: 2, LogicalCores: 4, TotalRAMBytes: 1, OS: "linux", KernelVersion: "k"}
+		big := small
+		big.LogicalCores = 32
+		sameDigest = sealDigest(small) == sealDigest(big)
+	})
+	if sameDigest {
 		t.Fatal("a changed projection did not move the digest")
 	}
 
@@ -3793,76 +3840,77 @@ func TestVolatileOSPathsClassifyLexically(t *testing.T) {
 	// Any classification-time probe of a volatile-OS path is itself a
 	// volatile read in an observing parent's evidence: count them.
 	var probed []string
-	orig := classifyProbe
-	classifyProbe = func(p string) (os.FileInfo, error) {
-		if volatileOSPath(p) {
-			probed = append(probed, p)
-		}
-		return orig(p)
-	}
-	t.Cleanup(func() { classifyProbe = orig })
-	for _, log := range []string{
-		"open /proc/stat\n",
-		"stat /proc/stat\n",
-		"open /proc/definitely-not-a-real-entry-xyz\n",
-		"stat /sys/kernel/anything\n",
-	} {
-		obs := completedFromLog(t, dir, log)
-		st, err := CompletedState(obs)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !st.Unverifiable || !strings.Contains(st.Reason, "volatile OS input: ") {
-			t.Fatalf("%q: unverifiable=%v reason=%q, want the lexical volatile-OS refusal", log, st.Unverifiable, st.Reason)
-		}
-		if strings.Contains(st.Reason, "stat metadata input") || strings.Contains(st.Reason, "external directory") {
-			t.Fatalf("%q: probe-routed classification leaked: %q", log, st.Reason)
-		}
-		// No recorded identity, never digested: the refusal is the whole
-		// disposition.
-		desc, err := Describe(st.Manifest, dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, dp := range desc.Paths {
-			if strings.Contains(dp, "/proc") || strings.Contains(dp, "/sys") {
-				t.Fatalf("%q: volatile-OS identity recorded: %s", log, dp)
+	withRuntimeTestHooks(runtimeTestHookSet{
+		classifyStat: func(p string) (os.FileInfo, error) {
+			if volatileOSPath(p) {
+				probed = append(probed, p)
+			}
+			return os.Stat(p)
+		},
+	}, func() {
+		for _, log := range []string{
+			"open /proc/stat\n",
+			"stat /proc/stat\n",
+			"open /proc/definitely-not-a-real-entry-xyz\n",
+			"stat /sys/kernel/anything\n",
+		} {
+			obs := completedFromLog(t, dir, log)
+			st, err := CompletedState(obs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !st.Unverifiable || !strings.Contains(st.Reason, "volatile OS input: ") {
+				t.Fatalf("%q: unverifiable=%v reason=%q, want the lexical volatile-OS refusal", log, st.Unverifiable, st.Reason)
+			}
+			if strings.Contains(st.Reason, "stat metadata input") || strings.Contains(st.Reason, "external directory") {
+				t.Fatalf("%q: probe-routed classification leaked: %q", log, st.Reason)
+			}
+			// No recorded identity, never digested: the refusal is the whole
+			// disposition.
+			desc, err := Describe(st.Manifest, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, dp := range desc.Paths {
+				if strings.Contains(dp, "/proc") || strings.Contains(dp, "/sys") {
+					t.Fatalf("%q: volatile-OS identity recorded: %s", log, dp)
+				}
 			}
 		}
-	}
 
-	// An ephemeral temp root under a volatile OS root refuses at
-	// declaration: it would vacate volatile reads recordless while the
-	// scratch walk probed them.
-	leg, err := ambientCaptureBracket(dir, []string{"data"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ambientFromTestLog([]byte("open /proc/stat\n"), dir, dir, WithCompletedProcess("package-test-binary:guard"), WithBracket(leg), withEphemeralTempRoot("/proc/scratch")); err == nil || !strings.Contains(err.Error(), "volatile OS root") {
-		t.Fatalf("ephemeral root under /proc accepted: %v", err)
-	}
+		// An ephemeral temp root under a volatile OS root refuses at
+		// declaration: it would vacate volatile reads recordless while the
+		// scratch walk probed them.
+		leg, err := ambientCaptureBracket(dir, []string{"data"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := ambientFromTestLog([]byte("open /proc/stat\n"), dir, dir, WithCompletedProcess("package-test-binary:guard"), WithBracket(leg), withEphemeralTempRoot("/proc/scratch")); err == nil || !strings.Contains(err.Error(), "volatile OS root") {
+			t.Fatalf("ephemeral root under /proc accepted: %v", err)
+		}
 
-	// A guard root under a volatile OS root is skipped like an
-	// unresolvable declaration: the read stays refused as volatile,
-	// never admitted recordless through the declared root.
-	obsGuard := completedFromLog(t, dir, "open /proc/stat\n", withToolchainRoot("/proc"))
-	stGuard, err := CompletedState(obsGuard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !stGuard.Unverifiable || !strings.Contains(stGuard.Reason, "volatile OS input: /proc/stat") {
-		t.Fatalf("guard root under /proc admitted a volatile read: unverifiable=%v reason=%q", stGuard.Unverifiable, stGuard.Reason)
-	}
+		// A guard root under a volatile OS root is skipped like an
+		// unresolvable declaration: the read stays refused as volatile,
+		// never admitted recordless through the declared root.
+		obsGuard := completedFromLog(t, dir, "open /proc/stat\n", withToolchainRoot("/proc"))
+		stGuard, err := CompletedState(obsGuard)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !stGuard.Unverifiable || !strings.Contains(stGuard.Reason, "volatile OS input: /proc/stat") {
+			t.Fatalf("guard root under /proc admitted a volatile read: unverifiable=%v reason=%q", stGuard.Unverifiable, stGuard.Reason)
+		}
 
-	if len(probed) != 0 {
-		t.Fatalf("classification probed volatile-OS paths: %v", probed)
-	}
+		if len(probed) != 0 {
+			t.Fatalf("classification probed volatile-OS paths: %v", probed)
+		}
 
-	// A declared bracket root under a volatile OS root fails loud at
-	// declaration: its fingerprint could only ever move.
-	if _, err := ambientCaptureBracket(dir, []string{"/proc/stat"}); err == nil || !strings.Contains(err.Error(), "volatile OS root") {
-		t.Fatalf("bracket root under /proc accepted: %v", err)
-	}
+		// A declared bracket root under a volatile OS root fails loud at
+		// declaration: its fingerprint could only ever move.
+		if _, err := ambientCaptureBracket(dir, []string{"/proc/stat"}); err == nil || !strings.Contains(err.Error(), "volatile OS root") {
+			t.Fatalf("bracket root under /proc accepted: %v", err)
+		}
+	})
 }
 
 // The contentless sink device records nothing — reads see EOF, writes

@@ -153,7 +153,13 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		resolvent dynstate.DeferralResolvent
 		link      ChainLink
 	}
+	type exportedSeamObservation struct {
+		key  string
+		fn   dynstate.FuncKey
+		link ChainLink
+	}
 	var allSites []siteObservation
+	var allExportedSeams []exportedSeamObservation
 	var allStores []storeObservation
 	var allDeferrals []deferralObservation
 	pos := func(p *packages.Package, at token.Pos) string {
@@ -167,6 +173,13 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		Site: func(p *packages.Package, kind, key string, at token.Pos) {
 			allSites = append(allSites, siteObservation{key: key, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Clause: kind, Pos: pos(p, at)}})
 		},
+		ExportedSeamSite: func(p *packages.Package, fn dynstate.FuncKey, key string, at token.Pos) {
+			allExportedSeams = append(allExportedSeams, exportedSeamObservation{
+				key:  key,
+				fn:   fn,
+				link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Clause: "mutation", Pos: pos(p, at)},
+			})
+		},
 		Store: func(p *packages.Package, key string, at token.Pos) {
 			allStores = append(allStores, storeObservation{key: key, link: ChainLink{Kind: "store", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)}})
 		},
@@ -177,6 +190,12 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	facts := map[string][]dynamicStateFact{}
 	for _, p := range order {
 		facts[p.PkgPath] = append(facts[p.PkgPath], dynstate.FactOfWithHooks(audited, p, singleSubject, hooks))
+	}
+	blockedSeams := dynstate.BlockedExportedSeams(facts, nil)
+	for _, obs := range allExportedSeams {
+		if blockedSeams[obs.key][obs.fn] {
+			allSites = append(allSites, siteObservation{key: obs.key, link: obs.link})
+		}
 	}
 
 	linkAdj := carrierLinkGraph(facts, nil)

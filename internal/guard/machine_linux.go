@@ -35,6 +35,10 @@ var MachineFactSources = []string{cpuinfoPath, meminfoPath, osreleasePath}
 var VolatileOSRoots = []string{"/proc", "/sys"}
 
 func gatherFacts() (MachineFacts, error) {
+	return gatherFactsFrom(os.ReadFile)
+}
+
+func gatherFactsFrom(readSource func(string) ([]byte, error)) (MachineFacts, error) {
 	// The gatherer's ONLY filesystem access iterates MachineFactSources
 	// itself, so an unlisted read is unrepresentable here and the
 	// runtime-input allowlist can never lag the gatherer's actual opens
@@ -42,7 +46,7 @@ func gatherFacts() (MachineFacts, error) {
 	// pure over the gathered bytes.
 	contents := make(map[string][]byte, len(MachineFactSources))
 	for _, src := range MachineFactSources {
-		b, err := readFactSource(src)
+		b, err := readSource(src)
 		if err != nil {
 			return MachineFacts{}, fmt.Errorf("provenance: %w", err)
 		}
@@ -50,10 +54,6 @@ func gatherFacts() (MachineFacts, error) {
 	}
 	return factsFromSources(contents)
 }
-
-// readFactSource is a variable so unreadable-source arms are testable;
-// production always reads the kernel's own files.
-var readFactSource = os.ReadFile
 
 // factsFromSources derives the projection from the gathered source
 // bytes alone: no filesystem access.

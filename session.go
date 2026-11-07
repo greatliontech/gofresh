@@ -31,6 +31,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/greatliontech/gofresh/internal/gotool"
@@ -155,7 +156,7 @@ func PreviewPruneMemos(maxBytes int64) (MemoPruneReport, error) {
 // whose per-package facts the persistent memo serves for version-pinned
 // packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps
 // this version like any other strategy change.
-const DynamicStateStrategy = "gofresh/dynamic-state@49"
+const DynamicStateStrategy = "gofresh/dynamic-state@59"
 
 // ClosureStrategy identifies the closure identity derivation — the
 // maximal closure's and the test-variant compartment's — as the
@@ -510,9 +511,7 @@ func (r *boundRuntime) observe(ctx context.Context, kind Kind) (guard.RuntimeGua
 	if err != nil {
 		return guard.RuntimeGuards{}, err
 	}
-	if viewTestHooks.runtimeGuards != nil {
-		viewTestHooks.runtimeGuards(&guards)
-	}
+	emitRuntimeGuardsViewHook(&guards)
 	if err := ctx.Err(); err != nil {
 		return guard.RuntimeGuards{}, err
 	}
@@ -646,10 +645,9 @@ func (b *RuntimeBinding) CurrentFacts(ctx context.Context, subject Subject) (Fin
 	return v.Capture(ctx, subject)
 }
 
-// viewTestHooks holds internal observation callbacks and explicitly named
-// test controls. Nil or zero disables them. Root tests run sequentially,
-// so package scope suffices.
-var viewTestHooks struct {
+// viewTestHookSet holds internal observation callbacks and explicitly named
+// test controls. Nil or zero disables them.
+type viewTestHookSet struct {
 	// observe observes every source/guard/purity observation pass — tests
 	// pin how many observations an operation performs.
 	observe func()
@@ -696,6 +694,117 @@ var viewTestHooks struct {
 	// pin the execution-model markers that keep option-on and
 	// option-off sessions from serving each other's facts.
 	factScope func(scope string)
+}
+
+var (
+	viewTestHooksMu sync.Mutex
+	viewTestHooks   atomic.Pointer[viewTestHookSet]
+)
+
+func withViewTestHooks(hooks viewTestHookSet, fn func()) {
+	viewTestHooksMu.Lock()
+	defer viewTestHooksMu.Unlock()
+	defer viewTestHooks.Store(nil)
+	viewTestHooks.Store(&hooks)
+	fn()
+}
+
+func hasAnyViewTestHook() bool {
+	h := viewTestHooks.Load()
+	if h == nil {
+		return false
+	}
+	return h.observe != nil || h.runtimeGuards != nil ||
+		h.snapshot != nil || h.dynamicStateMissLoad != nil ||
+		h.guardDir != nil || h.typedLoad != nil ||
+		h.runtimeWindow != nil || h.maximalBatch != nil ||
+		h.beforeAnalysis != nil || h.beforeDischarge != nil ||
+		h.analysisBound != nil || h.scanMemoOff ||
+		h.factScope != nil
+}
+
+func hasScanOverrideViewTestHook() bool {
+	h := viewTestHooks.Load()
+	return h != nil && (h.dynamicStateMissLoad != nil || h.typedLoad != nil)
+}
+
+func emitObserveViewHook() {
+	if h := viewTestHooks.Load(); h != nil && h.observe != nil {
+		h.observe()
+	}
+}
+
+func emitRuntimeGuardsViewHook(g *guard.RuntimeGuards) {
+	if h := viewTestHooks.Load(); h != nil && h.runtimeGuards != nil {
+		h.runtimeGuards(g)
+	}
+}
+
+func emitSnapshotViewHook(s *gotool.EnvSnapshot) {
+	if h := viewTestHooks.Load(); h != nil && h.snapshot != nil {
+		h.snapshot(s)
+	}
+}
+
+func emitDynamicStateMissLoadViewHook(patterns []string) {
+	if h := viewTestHooks.Load(); h != nil && h.dynamicStateMissLoad != nil {
+		h.dynamicStateMissLoad(patterns)
+	}
+}
+
+func emitGuardDirViewHook(dir string) {
+	if h := viewTestHooks.Load(); h != nil && h.guardDir != nil {
+		h.guardDir(dir)
+	}
+}
+
+func emitTypedLoadViewHook() {
+	if h := viewTestHooks.Load(); h != nil && h.typedLoad != nil {
+		h.typedLoad()
+	}
+}
+
+func emitRuntimeWindowViewHook() {
+	if h := viewTestHooks.Load(); h != nil && h.runtimeWindow != nil {
+		h.runtimeWindow()
+	}
+}
+
+func emitMaximalBatchViewHook() {
+	if h := viewTestHooks.Load(); h != nil && h.maximalBatch != nil {
+		h.maximalBatch()
+	}
+}
+
+func emitBeforeAnalysisViewHook() {
+	if h := viewTestHooks.Load(); h != nil && h.beforeAnalysis != nil {
+		h.beforeAnalysis()
+	}
+}
+
+func emitBeforeDischargeViewHook() {
+	if h := viewTestHooks.Load(); h != nil && h.beforeDischarge != nil {
+		h.beforeDischarge()
+	}
+}
+
+func runAnalysisBoundViewHook(ctx context.Context, budget time.Duration) (context.Context, context.CancelFunc, bool) {
+	if h := viewTestHooks.Load(); h != nil && h.analysisBound != nil {
+		boundCtx, cancel := h.analysisBound(ctx, budget)
+		return boundCtx, cancel, true
+	}
+	return nil, nil, false
+}
+
+func isScanMemoOffViewHook() bool {
+	h := viewTestHooks.Load()
+	return h != nil && h.scanMemoOff
+}
+
+func emitFactScopeViewHook(scope string) {
+	if h := viewTestHooks.Load(); h != nil && h.factScope != nil {
+		h.factScope(scope)
+	}
 }
 
 // newPassReader mints a pass's environment reader over the session's

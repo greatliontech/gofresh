@@ -199,37 +199,38 @@ func TestAliasRootListingAvailabilityDoesNotMixStatIdentities(t *testing.T) {
 	if err := os.Symlink(".", alias); err != nil {
 		t.Fatal(err)
 	}
-	original := walkRuntimeDirectory
-	t.Cleanup(func() { walkRuntimeDirectory = original })
 	denied := false
-	walkRuntimeDirectory = func(root string, visit fs.WalkDirFunc) error {
-		if root != dir || !denied {
-			return original(root, visit)
-		}
-		// filepath.WalkDir visits the root before attempting its listing, then
-		// visits it again with the read error. Only that read is unavailable;
-		// all actual namespace and followed-object stat observations stay live.
-		info, err := os.Lstat(root)
-		if err != nil {
-			return err
-		}
-		entry := fs.FileInfoToDirEntry(info)
-		if err := visit(root, entry, nil); err != nil {
-			return err
-		}
-		return visit(root, entry, &os.PathError{Op: "readdir", Path: root, Err: fs.ErrPermission})
-	}
-	for _, before := range []bool{false, true} {
-		for _, after := range []bool{false, true} {
-			denied = before
-			b := testBracket(t, dir, "alias")
-			denied = after
-			unchanged, moved, reason, err := b.revalidate(t.Context(), dir)
-			if err != nil || moved || unchanged != (!before && !after) || (reason != "") != (before || after) {
-				t.Fatalf("listing unavailable %t -> %t changed stat meaning: unchanged=%t moved=%t reason=%q err=%v", before, after, unchanged, moved, reason, err)
+	withRuntimeTestHooks(runtimeTestHookSet{
+		walkDirectory: func(root string, visit fs.WalkDirFunc) error {
+			if root != dir || !denied {
+				return filepath.WalkDir(root, visit)
+			}
+			// filepath.WalkDir visits the root before attempting its listing, then
+			// visits it again with the read error. Only that read is unavailable;
+			// all actual namespace and followed-object stat observations stay live.
+			info, err := os.Lstat(root)
+			if err != nil {
+				return err
+			}
+			entry := fs.FileInfoToDirEntry(info)
+			if err := visit(root, entry, nil); err != nil {
+				return err
+			}
+			return visit(root, entry, &os.PathError{Op: "readdir", Path: root, Err: fs.ErrPermission})
+		},
+	}, func() {
+		for _, before := range []bool{false, true} {
+			for _, after := range []bool{false, true} {
+				denied = before
+				b := testBracket(t, dir, "alias")
+				denied = after
+				unchanged, moved, reason, err := b.revalidate(t.Context(), dir)
+				if err != nil || moved || unchanged != (!before && !after) || (reason != "") != (before || after) {
+					t.Fatalf("listing unavailable %t -> %t changed stat meaning: unchanged=%t moved=%t reason=%q err=%v", before, after, unchanged, moved, reason, err)
+				}
 			}
 		}
-	}
+	})
 }
 
 // TestMovedInputsNamesTheMover pins the attribution behind a digest mismatch
@@ -766,34 +767,35 @@ func TestScratchNamespaceMatchesPathRejectsMalformed(t *testing.T) {
 // identically with existing, absent and symlinked physical names. Only ingest
 // may consult those objects to establish admission.
 func TestScratchNamespaceMatchesPathDoesNotResolve(t *testing.T) {
-	prior := producerTestHooks.beforeRoots
-	producerTestHooks.beforeRoots = func() { t.Fatal("pure matching reached classification-root resolution") }
-	t.Cleanup(func() { producerTestHooks.beforeRoots = prior })
-	root := t.TempDir()
-	t.Chdir(root)
-	n := ScratchNamespace{Dir: ".", Pattern: "scratch-*"}
-	check := func(t *testing.T) {
-		t.Helper()
-		if got, err := n.MatchesPath("scratch-child/deep"); err != nil || !got {
-			t.Fatalf("syntactic match depends on physical state: %t, %v", got, err)
-		}
-		if got, err := n.MatchesPath(filepath.Join(root, "scratch-child", "deep")); err != nil || got {
-			t.Fatalf("absolute path acquired a relative identity: %t, %v", got, err)
-		}
-	}
-	check(t)
-	if err := os.Mkdir("scratch-child", 0o700); err != nil {
-		t.Fatal(err)
-	}
-	check(t)
-	if err := os.Remove("scratch-child"); err != nil {
-		t.Fatal(err)
-	}
-	t.Run("symlink", func(t *testing.T) {
-		if err := os.Symlink(filepath.Join(root, "absent"), "scratch-child"); err != nil {
-			t.Skipf("symlink unavailable: %v", err)
+	withRuntimeTestHooks(runtimeTestHookSet{
+		beforeRoots: func() { t.Fatal("pure matching reached classification-root resolution") },
+	}, func() {
+		root := t.TempDir()
+		t.Chdir(root)
+		n := ScratchNamespace{Dir: ".", Pattern: "scratch-*"}
+		check := func(t *testing.T) {
+			t.Helper()
+			if got, err := n.MatchesPath("scratch-child/deep"); err != nil || !got {
+				t.Fatalf("syntactic match depends on physical state: %t, %v", got, err)
+			}
+			if got, err := n.MatchesPath(filepath.Join(root, "scratch-child", "deep")); err != nil || got {
+				t.Fatalf("absolute path acquired a relative identity: %t, %v", got, err)
+			}
 		}
 		check(t)
+		if err := os.Mkdir("scratch-child", 0o700); err != nil {
+			t.Fatal(err)
+		}
+		check(t)
+		if err := os.Remove("scratch-child"); err != nil {
+			t.Fatal(err)
+		}
+		t.Run("symlink", func(t *testing.T) {
+			if err := os.Symlink(filepath.Join(root, "absent"), "scratch-child"); err != nil {
+				t.Skipf("symlink unavailable: %v", err)
+			}
+			check(t)
+		})
 	})
 }
 

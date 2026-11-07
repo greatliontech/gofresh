@@ -3,6 +3,9 @@ package gofresh
 import (
 	"context"
 	"errors"
+	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/trace"
@@ -14,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -530,5 +534,198 @@ func TestExportedSurfaceInventory(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestModulePackagesHaveNoSharedDynamicStateUnderPackageExecution(t *testing.T) {
+	if testing.Short() {
+		t.Skip("scans module packages under PackageExecution")
+	}
+	const modulePath = "github.com/greatliontech/gofresh"
+	ctx := t.Context()
+	loaded, err := gotool.LoadPackages(
+		ctx,
+		packages.NeedName|packages.NeedFiles|packages.NeedCompiledGoFiles|packages.NeedSyntax|packages.NeedForTest|packages.NeedModule,
+		".",
+		os.Environ(),
+		nil,
+		"./...",
+	)
+	if err != nil {
+		t.Fatalf("LoadPackages(./...): %v", err)
+	}
+
+	type pkgReps struct {
+		prodSym         string
+		prodFallbackSym string
+		inPkgTestSym    string
+		inPkgFallback   string
+		extTestSym      string
+		extFallback     string
+	}
+	repsByPkg := map[string]*pkgReps{}
+	activePkgs := map[string]bool{}
+	for _, p := range loaded {
+		if p == nil || (p.Name == "main" && strings.HasSuffix(p.PkgPath, ".test")) {
+			continue
+		}
+		if len(p.Errors) > 0 {
+			t.Fatalf("load error in %s: %v", p.ID, p.Errors[0])
+		}
+		basePkg := p.PkgPath
+		if p.ForTest != "" {
+			basePkg = p.ForTest
+		}
+		if basePkg != modulePath && !strings.HasPrefix(basePkg, modulePath+"/") {
+			continue
+		}
+		if len(p.CompiledGoFiles) > 0 {
+			activePkgs[basePkg] = true
+		}
+		rep := repsByPkg[basePkg]
+		if rep == nil {
+			rep = &pkgReps{}
+			repsByPkg[basePkg] = rep
+		}
+		isExtTestPkg := strings.HasSuffix(p.PkgPath, "_test")
+		for _, file := range p.Syntax {
+			if file == nil || p.Fset == nil {
+				continue
+			}
+			tf := p.Fset.File(file.Pos())
+			if tf == nil {
+				continue
+			}
+			isTestFile := strings.HasSuffix(tf.Name(), "_test.go")
+			for _, decl := range file.Decls {
+				fn, ok := decl.(*ast.FuncDecl)
+				if !ok || fn.Name == nil || fn.Name.Name == "init" || fn.Name.Name == "TestMain" || fn.Name.Name == "_" {
+					continue
+				}
+				if dynstate.HasDirective(fn.Doc, "//gofresh:external") {
+					continue
+				}
+				sym := fn.Name.Name
+				if fn.Recv != nil {
+					recv := dynstate.RecvTypeName(fn)
+					if recv == "" {
+						continue
+					}
+					sym = recv + "." + fn.Name.Name
+				}
+				if isTestFile {
+					isRunnerTarget := fn.Recv == nil && (isTestName(fn.Name.Name, "Test") ||
+						isTestName(fn.Name.Name, "Benchmark") ||
+						isTestName(fn.Name.Name, "Fuzz") ||
+						isTestName(fn.Name.Name, "Example"))
+					if isExtTestPkg {
+						if isRunnerTarget && rep.extTestSym == "" {
+							rep.extTestSym = sym
+						} else if rep.extFallback == "" {
+							rep.extFallback = sym
+						}
+					} else {
+						if isRunnerTarget && rep.inPkgTestSym == "" {
+							rep.inPkgTestSym = sym
+						} else if rep.inPkgFallback == "" {
+							rep.inPkgFallback = sym
+						}
+					}
+				} else {
+					if fn.Recv == nil && rep.prodSym == "" {
+						rep.prodSym = sym
+					} else if rep.prodFallbackSym == "" {
+						rep.prodFallbackSym = sym
+					}
+				}
+			}
+		}
+	}
+
+	pkgPaths := make([]string, 0, len(activePkgs))
+	for pkgPath := range activePkgs {
+		pkgPaths = append(pkgPaths, pkgPath)
+	}
+	slices.Sort(pkgPaths)
+	if len(pkgPaths) == 0 {
+		t.Fatal("LoadPackages(./...) discovered zero active module packages")
+	}
+	var subjects []Subject
+	for _, pkgPath := range pkgPaths {
+		rep := repsByPkg[pkgPath]
+		prod := rep.prodSym
+		if prod == "" {
+			prod = rep.prodFallbackSym
+		}
+		inPkg := rep.inPkgTestSym
+		if inPkg == "" {
+			inPkg = rep.inPkgFallback
+		}
+		ext := rep.extTestSym
+		if ext == "" {
+			ext = rep.extFallback
+		}
+		added := 0
+		for _, sym := range []string{prod, inPkg, ext} {
+			if sym != "" {
+				subjects = append(subjects, Subject{Package: pkgPath, Symbol: sym})
+				added++
+			}
+		}
+		if added == 0 {
+			t.Fatalf("active module package %s yielded zero Subject representatives", pkgPath)
+		}
+	}
+
+	session, err := NewSession(ctx, BuildDescription{
+		Directory:   ".",
+		Environment: os.Environ(),
+		Inputs:      []string{},
+	}, SessionPolicy{
+		Execution: PackageExecution,
+		Vouches: []string{
+			"github.com/greatliontech/go-x-tools/internal/gcimporter.exportMap",
+			"github.com/greatliontech/go-x-tools/go/ast/edge.fieldInfos",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	snap, err := session.Snapshot(ctx, subjects, CodeResult)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	for _, s := range subjects {
+		if st := snap.facts.maximal[s].sharedState; st != nil {
+			t.Errorf("undischarged shared dynamic state on %s.%s: culprit=%s.%s reason=%s",
+				s.Package, s.Symbol, st.culprit.Package, st.culprit.Symbol, st.reason)
+		}
+	}
+	fps, err := snap.CaptureBatch(ctx)
+	if err != nil {
+		t.Fatalf("CaptureBatch: %v", err)
+	}
+	binding, err := snap.BindRuntime(ctx, RuntimeDescription{Directory: "."})
+	if err != nil {
+		t.Fatalf("BindRuntime: %v", err)
+	}
+	cands := make([]Candidate, 0, len(subjects))
+	for _, s := range subjects {
+		cands = append(cands, Candidate{Subject: s, Recorded: fps[s]})
+	}
+	verdicts, err := binding.CheckBatchWithLedgers(ctx, cands, nil)
+	if err != nil {
+		t.Fatalf("CheckBatchWithLedgers: %v", err)
+	}
+	seenCulprits := map[Subject]string{}
+	for _, v := range verdicts {
+		if v.Verdict.Ground.Cause.Kind == SharedDynamicStateCause {
+			if _, ok := seenCulprits[v.Verdict.Ground.Cause.Culprit]; !ok {
+				seenCulprits[v.Verdict.Ground.Cause.Culprit] = v.Subject.Package + "." + v.Subject.Symbol + ": " + v.Verdict.Reason
+			}
+		}
+	}
+	for culprit, sample := range seenCulprits {
+		t.Errorf("SharedDynamicStateCause culprit %s.%s (e.g. %s)", culprit.Package, culprit.Symbol, sample)
 	}
 }

@@ -1058,8 +1058,6 @@ func TestAttributedRTASkipsTypeParameterShapes(t *testing.T) {
 // sound siblings); and non-shape failures stay batch-wide
 // (REQ-closure-analysis).
 func TestAttributedBisectionIsolatesUnsupportedShapes(t *testing.T) {
-	savedWorker, savedProbe := analyzeAttributedBatch, probePackageScope
-	defer func() { analyzeAttributedBatch, probePackageScope = savedWorker, savedProbe }()
 	shapeErr := func(sym string) error {
 		return fmt.Errorf("closure: attributed reachability: unsupported analysis shape: T (visiting p.%s)", sym)
 	}
@@ -1080,7 +1078,7 @@ func TestAttributedBisectionIsolatesUnsupportedShapes(t *testing.T) {
 			return sound(subjects), nil
 		}
 	}
-	probePackageScope = func(ctx context.Context, prog *program, subjects []Subject) error { return nil }
+	noopProbe := func(ctx context.Context, prog *program, subjects []Subject) error { return nil }
 
 	bad1 := Subject{Package: "p", Symbol: "Bad1"}
 	bad2 := Subject{Package: "p", Symbol: "Bad2"}
@@ -1092,73 +1090,87 @@ func TestAttributedBisectionIsolatesUnsupportedShapes(t *testing.T) {
 	}
 
 	// One offender isolates alone.
-	analyzeAttributedBatch = poisonWorker(map[Subject]bool{bad1: true})
-	rows, err := attributedReachableSets(context.Background(), true, nil, nil, subjects)
-	if err != nil || len(rows) != len(subjects) {
-		t.Fatalf("single-offender isolation: rows=%d err=%v", len(rows), err)
-	}
-	for i, s := range subjects {
-		if (s == bad1) != (rows[i].unavailable != "") {
-			t.Fatalf("single-offender row %d (%v) misdispositioned: %+v", i, s, rows[i])
+	withClosureTestHooks(analysisTestHookSet{
+		analyzeBatch:  poisonWorker(map[Subject]bool{bad1: true}),
+		probePkgScope: noopProbe,
+	}, func() {
+		rows, err := attributedReachableSets(context.Background(), true, nil, nil, subjects)
+		if err != nil || len(rows) != len(subjects) {
+			t.Fatalf("single-offender isolation: rows=%d err=%v", len(rows), err)
 		}
-	}
+		for i, s := range subjects {
+			if (s == bad1) != (rows[i].unavailable != "") {
+				t.Fatalf("single-offender row %d (%v) misdispositioned: %+v", i, s, rows[i])
+			}
+		}
+	})
 
 	// Two offenders on opposite halves isolate individually - the
 	// sound siblings keep their evidence.
-	analyzeAttributedBatch = poisonWorker(map[Subject]bool{bad1: true, bad2: true})
-	rows, err = attributedReachableSets(context.Background(), true, nil, nil, subjects)
-	if err != nil || len(rows) != len(subjects) {
-		t.Fatalf("two-offender isolation: rows=%d err=%v", len(rows), err)
-	}
-	for i, s := range subjects {
-		offender := s == bad1 || s == bad2
-		if offender != (rows[i].unavailable != "") {
-			t.Fatalf("two-offender row %d (%v) misdispositioned: %+v", i, s, rows[i])
+	withClosureTestHooks(analysisTestHookSet{
+		analyzeBatch:  poisonWorker(map[Subject]bool{bad1: true, bad2: true}),
+		probePkgScope: noopProbe,
+	}, func() {
+		rows, err := attributedReachableSets(context.Background(), true, nil, nil, subjects)
+		if err != nil || len(rows) != len(subjects) {
+			t.Fatalf("two-offender isolation: rows=%d err=%v", len(rows), err)
 		}
-		// Equality against the offender's own single-subject batch
-		// error pins the real guarantee - each row carries the error
-		// of the analysis whose only subject was this one. (Real
-		// provenance names the VISITED function, not the subject; the
-		// fake's symbol-bearing message is its own convention, and
-		// the memoized reason substitutes a fixed constant anyway -
-		// field attribution rides the diagnostic channel's
-		// symbol-prefixed detail.)
-		if offender && rows[i].unavailable != shapeErr(s.Symbol).Error() {
-			t.Fatalf("offender %v carries a sibling's failure: %q", s, rows[i].unavailable)
+		for i, s := range subjects {
+			offender := s == bad1 || s == bad2
+			if offender != (rows[i].unavailable != "") {
+				t.Fatalf("two-offender row %d (%v) misdispositioned: %+v", i, s, rows[i])
+			}
+			// Equality against the offender's own single-subject batch
+			// error pins the real guarantee - each row carries the error
+			// of the analysis whose only subject was this one. (Real
+			// provenance names the VISITED function, not the subject; the
+			// fake's symbol-bearing message is its own convention, and
+			// the memoized reason substitutes a fixed constant anyway -
+			// field attribution rides the diagnostic channel's
+			// symbol-prefixed detail.)
+			if offender && rows[i].unavailable != shapeErr(s.Symbol).Error() {
+				t.Fatalf("offender %v carries a sibling's failure: %q", s, rows[i].unavailable)
+			}
 		}
-	}
+	})
 
 	// A package-scoped provocation degrades everything at ONE worker
 	// run, each row carrying the probe's own error.
 	calls := 0
-	analyzeAttributedBatch = func(ctx context.Context, audited bool, pureDelegates map[string]bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
-		calls++
-		return nil, shapeErr("init")
-	}
-	probePackageScope = func(ctx context.Context, prog *program, subjects []Subject) error {
-		return fmt.Errorf("closure: attributed reachability: unsupported analysis shape: T (visiting p.init)")
-	}
-	rows, err = attributedReachableSets(context.Background(), true, nil, nil, subjects)
-	if err != nil {
-		t.Fatalf("package-scoped failure surfaced batch-wide: %v", err)
-	}
-	for i := range rows {
-		if !strings.Contains(rows[i].unavailable, "p.init") {
-			t.Fatalf("row %d does not carry the package-scoped provenance: %+v", i, rows[i])
+	withClosureTestHooks(analysisTestHookSet{
+		analyzeBatch: func(ctx context.Context, audited bool, pureDelegates map[string]bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
+			calls++
+			return nil, shapeErr("init")
+		},
+		probePkgScope: func(ctx context.Context, prog *program, subjects []Subject) error {
+			return fmt.Errorf("closure: attributed reachability: unsupported analysis shape: T (visiting p.init)")
+		},
+	}, func() {
+		rows, err := attributedReachableSets(context.Background(), true, nil, nil, subjects)
+		if err != nil {
+			t.Fatalf("package-scoped failure surfaced batch-wide: %v", err)
 		}
-	}
-	if calls != 1 {
-		t.Fatalf("package-scoped failure ran %d worker calls, want 1 (the probe decides)", calls)
-	}
+		for i := range rows {
+			if !strings.Contains(rows[i].unavailable, "p.init") {
+				t.Fatalf("row %d does not carry the package-scoped provenance: %+v", i, rows[i])
+			}
+		}
+		if calls != 1 {
+			t.Fatalf("package-scoped failure ran %d worker calls, want 1 (the probe decides)", calls)
+		}
+	})
 
 	// A non-shape failure keeps the batch-wide error.
-	probePackageScope = func(ctx context.Context, prog *program, subjects []Subject) error { return nil }
-	analyzeAttributedBatch = func(ctx context.Context, audited bool, pureDelegates map[string]bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
-		return nil, fmt.Errorf("closure: analysis cancelled: context deadline exceeded")
-	}
-	if _, err := attributedReachableSets(context.Background(), true, nil, nil, subjects); err == nil {
-		t.Fatal("a non-shape failure was swallowed by the bisection")
-	}
+	withClosureTestHooks(analysisTestHookSet{
+		analyzeBatch: func(ctx context.Context, audited bool, pureDelegates map[string]bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
+			return nil, fmt.Errorf("closure: analysis cancelled: context deadline exceeded")
+		},
+		probePkgScope: noopProbe,
+	}, func() {
+		if _, err := attributedReachableSets(context.Background(), true, nil, nil, subjects); err == nil {
+			t.Fatal("a non-shape failure was swallowed by the bisection")
+		}
+	})
 }
 
 func writeGenericFixture(t *testing.T, body string) string {

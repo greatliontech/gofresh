@@ -2,21 +2,55 @@
 # proto-message: stipulator.v1.TestPolicy
 
 invocations {
-  name: "race"
+  name: "race:core"
+  timeout {
+    seconds: 1800
+  }
+  go {
+    packages: "."
+    packages: "./internal/closure"
+    race: true
+    # 20m governs the per-binary cap of the 2-package core witness run (giving
+    # each heavy binary half the host cores), and the 1800s invocation budget
+    # above bounds the core witness suite on a loaded host.
+    args: "-test.timeout=20m"
+    bracket_paths: "/bin/sh"
+    bracket_paths: "/usr/bin/sh"
+    bracket_paths: "/usr/bin/git"
+    bracket_paths: "/usr/bin/taskset"
+    bracket_paths: "internal"
+    assume_pure: true
+  }
+}
+
+invocations {
+  name: "race:leaf"
   timeout {
     seconds: 300
   }
   go {
-    packages: "./..."
+    packages: "./internal/auditset"
+    packages: "./internal/buildflags"
+    packages: "./internal/cachefile"
+    packages: "./internal/closure/internal/..."
+    packages: "./internal/dynstate"
+    packages: "./internal/gotool"
+    packages: "./internal/guard"
+    packages: "./internal/jsonrecord"
+    packages: "./internal/outcome"
+    packages: "./internal/render"
+    packages: "./internal/runtimeinput"
+    packages: "./internal/testenv"
+    packages: "./internal/testvariant"
+    packages: "./internal/trace"
     race: true
-    # 5m governs the per-binary cap of the width-capped witness run, and the
-    # 300s invocation budget above bounds the whole witness suite.
+    # 5m governs the per-binary cap of the 18 leaf internal packages, and the
+    # 300s invocation budget above bounds the leaf witness suite.
     args: "-test.timeout=5m"
     bracket_paths: "/bin/sh"
     bracket_paths: "/usr/bin/sh"
     bracket_paths: "/usr/bin/git"
     bracket_paths: "/usr/bin/taskset"
-    bracket_paths: "runtimeinput"
     bracket_paths: "internal"
     assume_pure: true
   }

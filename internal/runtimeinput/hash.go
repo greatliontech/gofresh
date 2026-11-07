@@ -10,6 +10,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 
 	"github.com/greatliontech/gofresh/internal/guard"
 )
@@ -37,18 +39,82 @@ var machineFactIdentities = func() map[string]bool {
 // admission and hashing; the projection's source census stays with its owner.
 func machineProjected(id pathID) bool { return id.Kind == pathAbs && machineFactIdentities[id.Path] }
 
-// currentMachineFacts is the projection source, a variable so the
-// ungatherable arm is testable; production always points at the guard.
-var currentMachineFacts = guard.CurrentMachineFacts
+type runtimeTestHookSet struct {
+	machineFacts   func() (guard.MachineFacts, error)
+	statPath       func(string) (os.FileInfo, error)
+	lstatPath      func(string) (os.FileInfo, error)
+	walkDirectory  func(string, fs.WalkDirFunc) error
+	beforeRoots    func()
+	congruenceStat func(string) (os.FileInfo, error)
+	classifyStat   func(string) (os.FileInfo, error)
+}
 
-// These root-lookup seams let tests vary lookup availability independently of
-// directory-entry observations, without changing the objects' metadata.
-var statRuntimePath = os.Stat
-var lstatRuntimePath = os.Lstat
+var (
+	runtimeTestHooksMu sync.Mutex
+	runtimeTestHooks   atomic.Pointer[runtimeTestHookSet]
+)
 
-// walkRuntimeDirectory uses the standard filesystem walk. The variable permits
-// tests to isolate a listing failure without changing observed object metadata.
-var walkRuntimeDirectory = filepath.WalkDir
+// currentMachineFacts is the projection source, consulting runtimeTestHooks so
+// the ungatherable arm is testable while production calls the guard directly.
+func currentMachineFacts() (guard.MachineFacts, error) {
+	if h := runtimeTestHooks.Load(); h != nil && h.machineFacts != nil {
+		return h.machineFacts()
+	}
+	return guard.CurrentMachineFacts()
+}
+
+// statRuntimePath and lstatRuntimePath let tests vary lookup availability
+// independently of directory-entry observations without changing metadata.
+func statRuntimePath(p string) (os.FileInfo, error) {
+	if h := runtimeTestHooks.Load(); h != nil && h.statPath != nil {
+		return h.statPath(p)
+	}
+	return os.Stat(p)
+}
+
+func lstatRuntimePath(p string) (os.FileInfo, error) {
+	if h := runtimeTestHooks.Load(); h != nil && h.lstatPath != nil {
+		return h.lstatPath(p)
+	}
+	return os.Lstat(p)
+}
+
+// walkRuntimeDirectory uses the standard filesystem walk unless a test hook
+// isolates a listing failure without changing observed object metadata.
+func walkRuntimeDirectory(root string, visit fs.WalkDirFunc) error {
+	if h := runtimeTestHooks.Load(); h != nil && h.walkDirectory != nil {
+		return h.walkDirectory(root, visit)
+	}
+	return filepath.WalkDir(root, visit)
+}
+
+// fireProducerBeforeRoots lets tests land a cancellation between the facade's
+// entry check and classification-root resolution.
+func fireProducerBeforeRoots() {
+	if h := runtimeTestHooks.Load(); h != nil && h.beforeRoots != nil {
+		h.beforeRoots()
+	}
+}
+
+// congruenceProbe is the traversal verifier's filesystem probe, a seam so
+// tests can assert which paths it touches; production uses Lstat — the
+// final component must be judged as itself, never through a link.
+func congruenceProbe(p string) (os.FileInfo, error) {
+	if h := runtimeTestHooks.Load(); h != nil && h.congruenceStat != nil {
+		return h.congruenceStat(p)
+	}
+	return os.Lstat(p)
+}
+
+// classifyProbe is the classification-time filesystem probe, a seam so
+// tests can assert the no-probe property of volatile-OS paths
+// (REQ-inputs-volatile-os-roots): production code calls os.Stat.
+func classifyProbe(p string) (os.FileInfo, error) {
+	if h := runtimeTestHooks.Load(); h != nil && h.classifyStat != nil {
+		return h.classifyStat(p)
+	}
+	return os.Stat(p)
+}
 
 // hashPath writes the digest stream for one path identity. A non-nil skip
 // filters directory-walk entries by their slash-form path relative to the walk

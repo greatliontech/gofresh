@@ -1,6 +1,7 @@
 package closure
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -88,15 +89,17 @@ func collectAllASCIIIdents(raw []byte, out map[string]bool) {
 }
 
 func collectRawBytesRuntimeSymbolRefs(raw []byte, out map[string]bool) {
-	for _, prefix := range []string{"runtime.", "runtime\xc2\xb7"} {
-		pb := []byte(prefix)
+	if out == nil || !bytes.Contains(raw, []byte("runtime")) {
+		return
+	}
+	for _, prefix := range [][]byte{[]byte("runtime."), []byte("runtime\xc2\xb7")} {
 		idx := 0
 		for idx < len(raw) {
-			pos := strings.Index(string(raw[idx:]), prefix)
+			pos := bytes.Index(raw[idx:], prefix)
 			if pos < 0 {
 				break
 			}
-			start := idx + pos + len(pb)
+			start := idx + pos + len(prefix)
 			end := start
 			for end < len(raw) && isASCIIIdentByte(raw[end]) {
 				end++
@@ -110,7 +113,27 @@ func collectRawBytesRuntimeSymbolRefs(raw []byte, out map[string]bool) {
 }
 
 func collectTextRuntimeSymbolRefs(text string, out map[string]bool) {
-	collectRawBytesRuntimeSymbolRefs([]byte(text), out)
+	if out == nil || !strings.Contains(text, "runtime") {
+		return
+	}
+	for _, prefix := range []string{"runtime.", "runtime\xc2\xb7"} {
+		idx := 0
+		for idx < len(text) {
+			pos := strings.Index(text[idx:], prefix)
+			if pos < 0 {
+				break
+			}
+			start := idx + pos + len(prefix)
+			end := start
+			for end < len(text) && isASCIIIdentByte(text[end]) {
+				end++
+			}
+			if end > start {
+				out["runtime."+text[start:end]] = true
+			}
+			idx = max(start, idx+pos+1)
+		}
+	}
 }
 
 func extractCgoPreamble(doc *ast.CommentGroup) string {
@@ -130,6 +153,23 @@ func extractCgoPreamble(doc *ast.CommentGroup) string {
 	return b.String()
 }
 
+func isCgoImportLit(lit string) bool {
+	if lit == `"C"` || lit == "`C`" {
+		return true
+	}
+	if len(lit) < 3 || (lit[0] != '"' && lit[0] != '`') {
+		return false
+	}
+	unquoted, err := strconv.Unquote(lit)
+	return err == nil && unquoted == "C"
+}
+
+func sourceMayImportC(text string) bool {
+	return strings.Contains(text, `"C"`) ||
+		strings.Contains(text, "`C`") ||
+		(strings.Contains(text, "import") && strings.IndexByte(text, '\\') >= 0)
+}
+
 func extractFileCgoPreambles(file *ast.File) []string {
 	if file == nil {
 		return nil
@@ -142,7 +182,7 @@ func extractFileCgoPreambles(file *ast.File) []string {
 		}
 		for _, spec := range gd.Specs {
 			imp, ok := spec.(*ast.ImportSpec)
-			if !ok || imp.Path == nil || imp.Path.Value != `"C"` {
+			if !ok || imp.Path == nil || !isCgoImportLit(imp.Path.Value) {
 				continue
 			}
 			cg := imp.Doc
@@ -354,6 +394,9 @@ func writeNormalizedCStringByte(b *strings.Builder, ch byte) {
 }
 
 func normalizeCStringLiterals(s string, allowNewlineConcat bool) string {
+	if strings.IndexByte(s, '"') < 0 {
+		return s
+	}
 	var b strings.Builder
 	b.Grow(len(s))
 	for i := 0; i < len(s); {
@@ -1101,7 +1144,50 @@ func expandCPPStatesWithBudgetMode(line string, defs map[string][]cppMacroDef, b
 	return allStates, terminals
 }
 
+func lineHasExpandableMacro(s string, defs map[string][]cppMacroDef) bool {
+	if len(defs) == 0 {
+		return false
+	}
+	for i := 0; i < len(s); {
+		if s[i] == '"' || s[i] == '\'' {
+			q := s[i]
+			i++
+			for i < len(s) {
+				if s[i] == '\\' && i+1 < len(s) {
+					i += 2
+					continue
+				}
+				if s[i] == q {
+					i++
+					break
+				}
+				i++
+			}
+			continue
+		}
+		if isASCIIIdentByte(s[i]) && (s[i] < '0' || s[i] > '9') {
+			start := i
+			for i < len(s) && isASCIIIdentByte(s[i]) {
+				i++
+			}
+			tok := s[start:i]
+			if dList := defs[tok]; len(dList) > 0 && !(len(dList) == 1 && !dList[0].hasParams && dList[0].body == tok) {
+				return true
+			}
+			continue
+		}
+		i++
+	}
+	return false
+}
+
 func expandCPPLineAllChoices(line string, defs map[string][]cppMacroDef) (allStates []string, primary string, overflow bool) {
+	if len(line) > maxNonGoLogicalLineBytes {
+		return nil, "", true
+	}
+	if !lineHasExpandableMacro(line, defs) {
+		return []string{line}, line, false
+	}
 	budget := &cppExpandBudget{statesLeft: maxCPPExpandedStatesPerLine}
 	all, terms := expandCPPStatesWithBudget(line, defs, "", "", 0, budget)
 	if budget.overflow {
@@ -1115,6 +1201,9 @@ func expandCPPLineAllChoices(line string, defs map[string][]cppMacroDef) (allSta
 }
 
 func collapseAsmMiddleDotAndSlashSpaces(s string) string {
+	if !strings.Contains(s, "∕") && !strings.Contains(s, "·") && strings.IndexByte(s, '/') < 0 {
+		return s
+	}
 	s = strings.ReplaceAll(s, "∕", "/")
 	for _, sep := range []string{"·", "/"} {
 		for {
@@ -1187,18 +1276,50 @@ func collectRuntimeIdentsAndMachO(data []byte, identOut map[string]bool) {
 	if identOut == nil || len(data) == 0 {
 		return
 	}
-	tmp := map[string]bool{}
-	collectAllASCIIIdents(data, tmp)
-	for id := range tmp {
+	for i := 0; i < len(data); {
+		if !isASCIIIdentByte(data[i]) {
+			i++
+			continue
+		}
+		start := i
+		for i < len(data) && isASCIIIdentByte(data[i]) {
+			i++
+		}
+		id := string(data[start:i])
 		identOut[id] = true
-		if trimmed := strings.TrimLeft(id, "_"); trimmed != "" && (trimmed[0] < '0' || trimmed[0] > '9') {
-			identOut[trimmed] = true
+		if id[0] == '_' {
+			if trimmed := strings.TrimLeft(id, "_"); trimmed != "" && (trimmed[0] < '0' || trimmed[0] > '9') {
+				identOut[trimmed] = true
+			}
+		}
+	}
+}
+
+func collectRuntimeIdentsAndMachOString(s string, identOut map[string]bool) {
+	if identOut == nil || len(s) == 0 {
+		return
+	}
+	for i := 0; i < len(s); {
+		if !isASCIIIdentByte(s[i]) {
+			i++
+			continue
+		}
+		start := i
+		for i < len(s) && isASCIIIdentByte(s[i]) {
+			i++
+		}
+		id := s[start:i]
+		identOut[id] = true
+		if id[0] == '_' {
+			if trimmed := strings.TrimLeft(id, "_"); trimmed != "" && (trimmed[0] < '0' || trimmed[0] > '9') {
+				identOut[trimmed] = true
+			}
 		}
 	}
 }
 
 func collectCStringSymbolRefs(s, selfPkg string, runtimeOut, externalOut, identOut map[string]bool) {
-	if runtimeOut == nil && externalOut == nil && identOut == nil {
+	if (runtimeOut == nil && externalOut == nil && identOut == nil) || strings.IndexByte(s, '"') < 0 {
 		return
 	}
 	recordTarget := func(pkgPrefix, sym string) {
@@ -1253,9 +1374,9 @@ func collectCStringSymbolRefs(s, selfPkg string, runtimeOut, externalOut, identO
 		}
 		body := lit.String()
 		if identOut != nil {
-			collectRuntimeIdentsAndMachO([]byte(body), identOut)
+			collectRuntimeIdentsAndMachOString(body, identOut)
 			if unescBody := unescapeObjabiToken(body); unescBody != body {
-				collectRuntimeIdentsAndMachO([]byte(unescBody), identOut)
+				collectRuntimeIdentsAndMachOString(unescBody, identOut)
 			}
 		}
 		for j := 0; j < len(body); {
@@ -1321,26 +1442,34 @@ func collectCStringSymbolRefs(s, selfPkg string, runtimeOut, externalOut, identO
 }
 
 func extractExpandedLineSymbols(text, selfPkg string, runtimeOut, externalOut, identOut map[string]bool) {
-	candidates := []string{text}
+	candidates := [2]string{text}
+	numCandidates := 1
 	if cNorm := normalizeCStringLiterals(text, true); cNorm != text {
-		candidates = append(candidates, cNorm)
+		candidates[1] = cNorm
+		numCandidates = 2
 	}
-	for _, cand := range candidates {
+	for cIdx := 0; cIdx < numCandidates; cIdx++ {
+		cand := candidates[cIdx]
 		if identOut != nil {
-			collectRuntimeIdentsAndMachO([]byte(cand), identOut)
+			collectRuntimeIdentsAndMachOString(cand, identOut)
 		}
 		if runtimeOut != nil {
-			collectRawBytesRuntimeSymbolRefs([]byte(cand), runtimeOut)
+			collectTextRuntimeSymbolRefs(cand, runtimeOut)
 		}
 		collectCStringSymbolRefs(cand, selfPkg, runtimeOut, externalOut, identOut)
 		norm := collapseAsmMiddleDotAndSlashSpaces(cand)
-		if identOut != nil {
-			collectRuntimeIdentsAndMachO([]byte(norm), identOut)
+		if norm != cand {
+			if identOut != nil {
+				collectRuntimeIdentsAndMachOString(norm, identOut)
+			}
+			if runtimeOut != nil {
+				collectTextRuntimeSymbolRefs(norm, runtimeOut)
+			}
+			collectCStringSymbolRefs(norm, selfPkg, runtimeOut, externalOut, identOut)
 		}
-		if runtimeOut != nil {
-			collectRawBytesRuntimeSymbolRefs([]byte(norm), runtimeOut)
+		if !strings.Contains(norm, "·") {
+			continue
 		}
-		collectCStringSymbolRefs(norm, selfPkg, runtimeOut, externalOut, identOut)
 		runes := []rune(norm)
 		for i := 0; i < len(runes); {
 			if !isAsmWordRune(runes[i]) {
@@ -1510,15 +1639,28 @@ func buildLogicalNonGoScanLines(cleaned string, defs map[string][]cppMacroDef) (
 }
 
 func scanPreprocessedNonGoSymbolRefs(selfPkg string, includeHeaders, pkgTexts []string, runtimeOut, externalOut, identOut map[string]bool) bool {
-	for _, joinSpace := range []bool{false, true} {
-		defs := map[string][]cppMacroDef{}
-		for _, hdr := range includeHeaders {
-			collectCPPMacrosFromText(stripAssemblyComments(hdr, true, joinSpace), defs)
+	var prevStrippedHdrs []string
+	var prevCleanedTexts []string
+	for passIdx, joinSpace := range []bool{false, true} {
+		strippedHdrs := make([]string, len(includeHeaders))
+		for idx, hdr := range includeHeaders {
+			strippedHdrs[idx] = stripAssemblyComments(hdr, true, joinSpace)
 		}
 		cleanedTexts := make([]string, len(pkgTexts))
 		for idx, txt := range pkgTexts {
-			cleaned := stripAssemblyComments(txt, true, joinSpace)
-			cleanedTexts[idx] = cleaned
+			cleanedTexts[idx] = stripAssemblyComments(txt, true, joinSpace)
+		}
+		if passIdx > 0 && slices.Equal(strippedHdrs, prevStrippedHdrs) && slices.Equal(cleanedTexts, prevCleanedTexts) {
+			continue
+		}
+		prevStrippedHdrs = strippedHdrs
+		prevCleanedTexts = cleanedTexts
+
+		defs := map[string][]cppMacroDef{}
+		for _, stripped := range strippedHdrs {
+			collectCPPMacrosFromText(stripped, defs)
+		}
+		for _, cleaned := range cleanedTexts {
 			collectCPPMacrosFromText(cleaned, defs)
 		}
 		for _, cleaned := range cleanedTexts {

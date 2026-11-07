@@ -526,7 +526,7 @@ func verifyOffSurfacePackageWithIO(ctx context.Context, lp listedPackage, pkgInc
 			linkDirectives = append(linkDirectives, twoArgLink{localSym: localSym, target: target})
 		})
 		mode := parser.Mode(0)
-		if strings.Contains(text, `"C"`) {
+		if sourceMayImportC(text) {
 			mode = parser.ParseComments
 		}
 		file, err := parser.ParseFile(fset, name, src, mode)
@@ -1016,11 +1016,17 @@ func collectOffSurfaceStartupRuntimePulls(ctx context.Context, d sourceDigests, 
 		pkg  string
 		decl string
 	}
+	type pkgSel struct {
+		pkg string
+		sel string
+	}
 	visited := map[workItem]bool{}
 	var queue []workItem
 	pkgReachedTypes := map[string]map[string]bool{}
 	pkgReachedSels := map[string]map[string]bool{}
 	globalExportedSels := map[string]bool{}
+	pendingByPkgSel := map[pkgSel][]string{}
+	pendingByExportedSel := map[string][]workItem{}
 
 	enqueue := func(pkg, decl string) {
 		if pkg == "" || decl == "" {
@@ -1047,22 +1053,19 @@ func collectOffSurfaceStartupRuntimePulls(ctx context.Context, d sourceDigests, 
 			}
 			if !pkgReachedSels[pkg][sel] {
 				pkgReachedSels[pkg][sel] = true
-				for tName := range pkgReachedTypes[pkg] {
-					if slices.Contains(offVerdicts[pkg].MethodsByType[tName], sel) {
-						enqueue(pkg, "method:"+tName+"."+sel)
-					}
+				ps := pkgSel{pkg: pkg, sel: sel}
+				for _, mDecl := range pendingByPkgSel[ps] {
+					enqueue(pkg, mDecl)
 				}
+				delete(pendingByPkgSel, ps)
 			}
 		}
 		if ast.IsExported(sel) && !globalExportedSels[sel] {
 			globalExportedSels[sel] = true
-			for oPkg, tMap := range pkgReachedTypes {
-				for tName := range tMap {
-					if slices.Contains(offVerdicts[oPkg].MethodsByType[tName], sel) {
-						enqueue(oPkg, "method:"+tName+"."+sel)
-					}
-				}
+			for _, wi := range pendingByExportedSel[sel] {
+				enqueue(wi.pkg, wi.decl)
 			}
+			delete(pendingByExportedSel, sel)
 		}
 	}
 
@@ -1147,10 +1150,19 @@ func collectOffSurfaceStartupRuntimePulls(ctx context.Context, d sourceDigests, 
 			if pkgReachedTypes[item.pkg] == nil {
 				pkgReachedTypes[item.pkg] = map[string]bool{}
 			}
-			pkgReachedTypes[item.pkg][item.decl] = true
-			for _, m := range methods {
-				if pkgReachedSels[item.pkg][m] || (ast.IsExported(m) && globalExportedSels[m]) {
-					enqueue(item.pkg, "method:"+item.decl+"."+m)
+			if !pkgReachedTypes[item.pkg][item.decl] {
+				pkgReachedTypes[item.pkg][item.decl] = true
+				for _, m := range methods {
+					mDecl := "method:" + item.decl + "." + m
+					if pkgReachedSels[item.pkg][m] || (ast.IsExported(m) && globalExportedSels[m]) {
+						enqueue(item.pkg, mDecl)
+						continue
+					}
+					ps := pkgSel{pkg: item.pkg, sel: m}
+					pendingByPkgSel[ps] = append(pendingByPkgSel[ps], mDecl)
+					if ast.IsExported(m) {
+						pendingByExportedSel[m] = append(pendingByExportedSel[m], workItem{pkg: item.pkg, decl: mDecl})
+					}
 				}
 			}
 		}

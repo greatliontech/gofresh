@@ -400,11 +400,11 @@ func TestProducerFacadeReportsCancellationAsTheCallersError(t *testing.T) {
 		t.Fatalf("observe = reason %q, err %v; want the context error", reason, err)
 	}
 	ctx, cancel = context.WithCancel(context.Background())
-	producerTestHooks.beforeRoots = cancel
-	defer func() { producerTestHooks.beforeRoots = nil }()
 	// An environment the memo has never seen, so the resolution spawns
 	// under the cancelled context.
-	_, reason, err = captureGuards(frame, ctx, writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: producerEnv(pkgDir, "GOFLAGS=-tags=cancelled")})
+	withRuntimeTestHooks(runtimeTestHookSet{beforeRoots: cancel}, func() {
+		_, reason, err = captureGuards(frame, ctx, writeTestlog(t, ""), ProducerIngest{Identity: "worker", Env: producerEnv(pkgDir, "GOFLAGS=-tags=cancelled")})
+	})
 	if err == nil || reason != "" {
 		t.Fatalf("mid-observation cancellation: reason %q, err %v; want the context error", reason, err)
 	}
@@ -515,8 +515,13 @@ func TestIncompleteCaptureSkipsAmbientRootLookupWhenCancelled(t *testing.T) {
 		}
 		return
 	}
-	path := filepath.Join(t.TempDir(), "capture.log")
-	cmd := exec.Command(os.Args[0], "-test.run=^TestIncompleteCaptureSkipsAmbientRootLookupWhenCancelled$", "-test.testlogfile="+path)
+	tmp := t.TempDir()
+	selfBin := filepath.Join(tmp, "self.test")
+	if err := os.Symlink(os.Args[0], selfBin); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(tmp, "capture.log")
+	cmd := exec.Command(selfBin, "-test.run=^TestIncompleteCaptureSkipsAmbientRootLookupWhenCancelled$", "-test.testlogfile="+path)
 	cmd.Env = append(os.Environ(), "GOFRESH_CAPTURE_CANCEL_CHILD=1")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("cancelled capture child: %v\n%s", err, output)

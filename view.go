@@ -279,9 +279,7 @@ func accountPass(ctx context.Context, hasher *closure.Hasher) {
 }
 
 func (s *Session) observeView(ctx context.Context, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind) (facts observationFacts, err error) {
-	if viewTestHooks.observe != nil {
-		viewTestHooks.observe()
-	}
+	emitObserveViewHook()
 	var hasher *closure.Hasher
 	defer func() { accountPass(ctx, hasher) }()
 	if s.progress != nil {
@@ -353,9 +351,7 @@ func (s *Session) observeView(ctx context.Context, subjects []Subject, requests 
 	// (REQ-closure-observability-memo, REQ-closure-testing-scan-memo,
 	// REQ-closure-dynamic-state-memo, REQ-closure-scan-memo).
 	scope := hasher.SetAnalysisScope(s.analysisScope(guards))
-	if viewTestHooks.factScope != nil {
-		viewTestHooks.factScope(scope.Facts())
-	}
+	emitFactScopeViewHook(scope.Facts())
 	scan, source, cut, err := scanViewSubjects(ctx, hasher, scope, s.buildFlags, s.analysisBudget, packages...)
 	if err != nil {
 		return observationFacts{}, err
@@ -372,9 +368,7 @@ func (s *Session) observeView(ctx context.Context, subjects []Subject, requests 
 	if err := requireSubjects(subjects, func(s Subject) bool { return known[s] }, SelectedSource); err != nil {
 		return observationFacts{}, err
 	}
-	if viewTestHooks.maximalBatch != nil {
-		viewTestHooks.maximalBatch()
-	}
+	emitMaximalBatchViewHook()
 	computed, sources, err := hasher.ComputeMaximalFactsBatch(requests)
 	if err != nil {
 		return observationFacts{}, err
@@ -1415,9 +1409,7 @@ func (v *Snapshot) runtimeCheck() func(context.Context, string, string) (runtime
 // the pass reader's, where its one snapshot was taken — passed through
 // the test hook that pins it to the module directory.
 func observedGuardDir(dir string) string {
-	if viewTestHooks.guardDir != nil {
-		viewTestHooks.guardDir(dir)
-	}
+	emitGuardDirViewHook(dir)
 	return dir
 }
 
@@ -1581,8 +1573,8 @@ func analysisBound(ctx context.Context, budget time.Duration) (context.Context, 
 	if budget <= 0 {
 		return ctx, func() {}
 	}
-	if viewTestHooks.analysisBound != nil {
-		return viewTestHooks.analysisBound(ctx, budget)
+	if boundCtx, cancel, ok := runAnalysisBoundViewHook(ctx, budget); ok {
+		return boundCtx, cancel
 	}
 	return context.WithTimeout(ctx, budget)
 }
@@ -1861,13 +1853,9 @@ func (v *Snapshot) ensureObservable(ctx context.Context, subjects []Subject) (er
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("gofresh: precise analysis cancelled: %w", err)
 	}
-	if viewTestHooks.snapshot != nil {
-		viewTestHooks.snapshot(v.facts.snapshot)
-	}
+	emitSnapshotViewHook(v.facts.snapshot)
 	hasher, err = closure.NewBracketAt(ctx, v.facts.reader, v.session.buildFlags...)
-	if viewTestHooks.beforeAnalysis != nil {
-		viewTestHooks.beforeAnalysis()
-	}
+	emitBeforeAnalysisViewHook()
 	if err != nil {
 		return err
 	}
@@ -2409,6 +2397,10 @@ func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, build
 // of a package it cut — cut is the set of subjects it left undischarged
 // (REQ-fresh-context, REQ-closure-shared-dynamic-state-reachability).
 func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
+	return scanViewSubjectsWithMemo(ctx, hasher, scope, buildFlags, budget, true, pkgPaths...)
+}
+
+func scanViewSubjectsWithMemo(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, useScanMemo bool, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
 	scope = hasher.SetAnalysisScope(scope)
 	// The scope is the one source of the attestations and the vouches:
 	// what keys a memo is what the derivation applies.
@@ -2426,7 +2418,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 	// the key pins byte for byte (REQ-closure-scan-memo). A key that
 	// cannot derive, or an entry that cannot load, recomputes.
 	scanScope := scope.Scan()
-	if viewTestHooks.scanMemoOff {
+	if !useScanMemo || isScanMemoOffViewHook() {
 		scanScope = ""
 	}
 	served := map[string]packageScanEntry{}
@@ -2489,9 +2481,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 		seenPattern[node.PkgPath] = true
 		patterns = append(patterns, node.PkgPath)
 	}
-	if viewTestHooks.typedLoad != nil {
-		viewTestHooks.typedLoad()
-	}
+	emitTypedLoadViewHook()
 	hasher.Unit("typecheck", "", 0, len(patterns))
 	load, err := closure.LoadViewPackages(ctx, hasher.PassReader(), buildFlags, patterns...)
 	if err != nil {
@@ -2513,9 +2503,7 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 	analysisCtx, cancelBudget := analysisBound(ctx, budget)
 	defer cancelBudget()
 	var cut map[Subject]bool
-	if viewTestHooks.beforeDischarge != nil {
-		viewTestHooks.beforeDischarge()
-	}
+	emitBeforeDischargeViewHook()
 	if singleSubject {
 		// The attestation-gated reachability scoping: per downgraded
 		// subject, a culprit whose every marking site is provably
@@ -2831,7 +2819,7 @@ func storeDynamicStateFacts(scope, bucket string, facts map[string]json.RawMessa
 // Keyed by (scope, bucket, package path) — the same complete identity the
 // persistent memo trusts, so a hit is sound wherever the persistent entry
 // would be.
-var processFactCache sync.Map
+var processFactCache cachefile.SyncMemo[dynamicStateFact]
 
 // viewDynamicState is the per-pass dynamic-state derivation over one view's
 // metadata graph: fresh facts for every mutable-local node from the pass's
@@ -3120,7 +3108,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		bucket := buckets[node.Pin]
 		cacheKey := factScope + "\x00" + bucket + "\x00" + node.PkgPath
 		if cached, ok := processFactCache.Load(cacheKey); ok {
-			record(node.ImportPath, node.PkgPath, cached.(dynamicStateFact))
+			record(node.ImportPath, node.PkgPath, cached)
 			continue
 		}
 		if persisted[bucket] == nil {
@@ -3147,9 +3135,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			patterns = append(patterns, node.PkgPath)
 		}
 		sort.Strings(patterns)
-		if viewTestHooks.dynamicStateMissLoad != nil {
-			viewTestHooks.dynamicStateMissLoad(patterns)
-		}
+		emitDynamicStateMissLoadViewHook(patterns)
 		hasher.Unit("typecheck", "", 0, len(patterns))
 		missLoad, err := closure.LoadViewPackages(ctx, hasher.PassReader(), buildFlags, patterns...)
 		if err != nil {

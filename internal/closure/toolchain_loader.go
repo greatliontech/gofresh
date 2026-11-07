@@ -13,18 +13,21 @@ import (
 	"go/parser"
 	"go/token"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
-	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
-	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/cachefile"
+	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -165,6 +168,7 @@ type surfaceListing struct {
 	Packages  []listedPackage `json:"packages"`
 	Discovery []dirStamp      `json:"discovery"`
 	Integrity string          `json:"integrity"`
+	plan      *discoveryPlan
 }
 
 type listedPackage struct {
@@ -232,21 +236,68 @@ func selectedFiles(p listing.Package) []string {
 	return slices.Compact(files)
 }
 
-// stampEntries stamps every entry of dir in name order.
+// stampEntries stamps every entry of dir in name order, using an open
+// directory handle so Unix platforms stat entries via fstatat on the open
+// descriptor instead of re-walking the directory path per entry.
 func stampEntries(dir string) ([]entryStamp, error) {
-	entries, err := os.ReadDir(dir)
+	f, err := os.Open(dir)
 	if err != nil {
 		return nil, err
 	}
-	stamps := make([]entryStamp, 0, len(entries))
-	for _, entry := range entries {
-		info, err := os.Lstat(filepath.Join(dir, entry.Name()))
-		if err != nil {
-			return nil, err
+	defer f.Close()
+	infos, err := f.Readdir(-1)
+	if err != nil {
+		return nil, err
+	}
+	slices.SortFunc(infos, func(a, b os.FileInfo) int {
+		return strings.Compare(a.Name(), b.Name())
+	})
+	stamps := make([]entryStamp, len(infos))
+	for i, info := range infos {
+		stamps[i] = entryStamp{
+			Name:       info.Name(),
+			Type:       info.Mode().Type(),
+			Size:       info.Size(),
+			ModTime:    info.ModTime().UnixNano(),
+			ChangeTime: changeTime(info),
 		}
-		stamps = append(stamps, entryStamp{Name: entry.Name(), Type: info.Mode().Type(), Size: info.Size(), ModTime: info.ModTime().UnixNano(), ChangeTime: changeTime(info)})
 	}
 	return stamps, nil
+}
+
+func dirEntriesMatch(dir string, recorded []entryStamp) (bool, error) {
+	f, err := os.Open(dir)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	if len(recorded) == 0 {
+		names, err := f.Readdirnames(1)
+		if errors.Is(err, io.EOF) {
+			return len(names) == 0, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	infos, err := f.Readdir(-1)
+	if err != nil {
+		return false, err
+	}
+	if len(infos) != len(recorded) {
+		return false, nil
+	}
+	slices.SortFunc(infos, func(a, b os.FileInfo) int {
+		return strings.Compare(a.Name(), b.Name())
+	})
+	for i, info := range infos {
+		rec := recorded[i]
+		if info.Name() != rec.Name || info.Mode().Type() != rec.Type || info.Size() != rec.Size || info.ModTime().UnixNano() != rec.ModTime || changeTime(info) != rec.ChangeTime {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // stampDirs stamps the package directory and every subdirectory a
@@ -325,6 +376,63 @@ func stampsCurrent(l surfaceListing) bool {
 	return stampsCurrentContext(context.Background(), l)
 }
 
+func hasNonSymlinkDirEntry(entries []entryStamp, name string) bool {
+	i, found := slices.BinarySearchFunc(entries, name, func(e entryStamp, target string) int {
+		return strings.Compare(e.Name, target)
+	})
+	return found && entries[i].Type.IsDir() && entries[i].Type&os.ModeSymlink == 0
+}
+
+type discoveryRootCheck struct {
+	idx   int
+	clean string
+}
+
+type discoveryPlan struct {
+	hasSymlinkEntry    bool
+	rootChecks         []discoveryRootCheck
+	pending            []int
+	hasPkgInclude      bool
+	pkgInclude         string
+	pkgIncludeRecorded bool
+}
+
+func buildDiscoveryPlan(l surfaceListing) *discoveryPlan {
+	p := &discoveryPlan{}
+	for _, d := range l.Discovery {
+		for _, entry := range d.Entries {
+			if entry.Type&os.ModeSymlink != 0 {
+				p.hasSymlinkEntry = true
+				return p
+			}
+		}
+	}
+	recorded := make(map[string][]entryStamp, len(l.Discovery))
+	for i, d := range l.Discovery {
+		clean := filepath.Clean(d.Path)
+		parent := filepath.Dir(clean)
+		if parentEntries, ok := recorded[parent]; ok && parent != clean && hasNonSymlinkDirEntry(parentEntries, filepath.Base(clean)) {
+			// Parent directory's recorded entries include filepath.Base(clean) as a
+			// non-symlink directory; once parent's live entries match, this child
+			// path is inductively non-symlink as well.
+			recorded[clean] = d.Entries
+			p.pending = append(p.pending, i)
+			continue
+		}
+		p.rootChecks = append(p.rootChecks, discoveryRootCheck{idx: i, clean: clean})
+		recorded[clean] = d.Entries
+	}
+	for _, pkg := range l.Packages {
+		if goroot, ok := stdPackageGOROOT(pkg.Dir, pkg.ImportPath); ok {
+			p.hasPkgInclude = true
+			p.pkgInclude = filepath.Join(goroot, "pkg", "include")
+			_, p.pkgIncludeRecorded = recorded[filepath.Clean(p.pkgInclude)]
+			break
+		}
+	}
+	return p
+}
+
 func stampsCurrentContext(ctx context.Context, l surfaceListing) bool {
 	if !stampsTrusted {
 		trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", "",
@@ -332,15 +440,26 @@ func stampsCurrentContext(ctx context.Context, l surfaceListing) bool {
 		)
 		return false
 	}
-	if !cacheableDiscovery(l) {
+	plan := l.plan
+	if plan == nil {
+		plan = buildDiscoveryPlan(l)
+	}
+	if plan.hasSymlinkEntry {
 		trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", "",
 			trace.String("reason", "uncacheable_discovery"),
 		)
 		return false
 	}
-	recorded := make(map[string]bool, len(l.Discovery))
-	for _, d := range l.Discovery {
-		stamps, err := stampEntries(d.Path)
+	for _, rc := range plan.rootChecks {
+		d := l.Discovery[rc.idx]
+		resolved, err := filepath.EvalSymlinks(d.Path)
+		if err != nil || resolved != rc.clean {
+			trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", "",
+				trace.String("reason", "uncacheable_discovery"),
+			)
+			return false
+		}
+		matched, err := dirEntriesMatch(d.Path, d.Entries)
 		if err != nil {
 			trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", d.Path,
 				trace.String("reason", "read_error"),
@@ -348,32 +467,113 @@ func stampsCurrentContext(ctx context.Context, l surfaceListing) bool {
 			)
 			return false
 		}
-		if !slices.Equal(stamps, d.Entries) {
+		if !matched {
 			if trace.Enabled(ctx, trace.DomainToolchain, d.Path) {
-				emitEntryStampMismatch(ctx, d.Path, d.Entries, stamps)
+				if stamps, sErr := stampEntries(d.Path); sErr == nil {
+					emitEntryStampMismatch(ctx, d.Path, d.Entries, stamps)
+				}
 			}
 			return false
 		}
-		recorded[filepath.Clean(d.Path)] = true
 	}
-	for _, p := range l.Packages {
-		if goroot, ok := stdPackageGOROOT(p.Dir, p.ImportPath); ok {
-			pkgInclude := filepath.Join(goroot, "pkg", "include")
-			if _, err := os.Lstat(pkgInclude); err == nil {
-				if !recorded[filepath.Clean(pkgInclude)] {
-					trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", pkgInclude,
-						trace.String("reason", "missing_pkg_include_stamp"),
-					)
-					return false
-				}
-			} else if !os.IsNotExist(err) {
-				trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", pkgInclude,
-					trace.String("reason", "pkg_include_stat_error"),
+	pending := plan.pending
+	workers := min(8, runtime.GOMAXPROCS(0), len(pending))
+	if len(pending) <= 4 || workers <= 1 {
+		for _, idx := range pending {
+			d := l.Discovery[idx]
+			matched, err := dirEntriesMatch(d.Path, d.Entries)
+			if err != nil {
+				trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", d.Path,
+					trace.String("reason", "read_error"),
 					trace.Err(err),
 				)
 				return false
 			}
-			break
+			if !matched {
+				if trace.Enabled(ctx, trace.DomainToolchain, d.Path) {
+					if stamps, sErr := stampEntries(d.Path); sErr == nil {
+						emitEntryStampMismatch(ctx, d.Path, d.Entries, stamps)
+					}
+				}
+				return false
+			}
+		}
+	} else {
+		type matchOutcome struct {
+			done    bool
+			matched bool
+			err     error
+		}
+		outcomes := make([]matchOutcome, len(pending))
+		var cursor atomic.Int64
+		var stopAt atomic.Int64
+		stopAt.Store(int64(len(pending)))
+		var wg sync.WaitGroup
+		wg.Add(workers)
+		for range workers {
+			go func() {
+				defer wg.Done()
+				for {
+					pos := cursor.Add(1) - 1
+					if pos >= stopAt.Load() {
+						return
+					}
+					d := l.Discovery[pending[pos]]
+					matched, err := dirEntriesMatch(d.Path, d.Entries)
+					outcomes[pos] = matchOutcome{done: true, matched: matched, err: err}
+					if err != nil || !matched {
+						for {
+							cur := stopAt.Load()
+							if pos >= cur || stopAt.CompareAndSwap(cur, pos) {
+								break
+							}
+						}
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		for pos, idx := range pending {
+			out := outcomes[pos]
+			if !out.done {
+				d := l.Discovery[idx]
+				matched, err := dirEntriesMatch(d.Path, d.Entries)
+				out = matchOutcome{done: true, matched: matched, err: err}
+			}
+			if out.err != nil {
+				d := l.Discovery[idx]
+				trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", d.Path,
+					trace.String("reason", "read_error"),
+					trace.Err(out.err),
+				)
+				return false
+			}
+			if !out.matched {
+				d := l.Discovery[idx]
+				if trace.Enabled(ctx, trace.DomainToolchain, d.Path) {
+					if stamps, sErr := stampEntries(d.Path); sErr == nil {
+						emitEntryStampMismatch(ctx, d.Path, d.Entries, stamps)
+					}
+				}
+				return false
+			}
+		}
+	}
+	if plan.hasPkgInclude {
+		pkgInclude := plan.pkgInclude
+		if _, err := os.Lstat(pkgInclude); err == nil {
+			if !plan.pkgIncludeRecorded {
+				trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", pkgInclude,
+					trace.String("reason", "missing_pkg_include_stamp"),
+				)
+				return false
+			}
+		} else if !os.IsNotExist(err) {
+			trace.Emit(ctx, trace.DomainToolchain, "listing_stamp_mismatch", pkgInclude,
+				trace.String("reason", "pkg_include_stat_error"),
+				trace.Err(err),
+			)
+			return false
 		}
 	}
 	return true
@@ -418,16 +618,28 @@ func emitEntryStampMismatch(ctx context.Context, dirPath string, recorded, curre
 // the link itself. These trees still analyze, but re-list on every construction
 // until their followed-target dependency model is represented explicitly.
 func cacheableDiscovery(l surfaceListing) bool {
+	canonicalDirs := make(map[string]bool, len(l.Discovery))
 	for _, d := range l.Discovery {
-		resolved, err := filepath.EvalSymlinks(d.Path)
-		if err != nil || resolved != filepath.Clean(d.Path) {
-			return false
-		}
 		for _, entry := range d.Entries {
 			if entry.Type&os.ModeSymlink != 0 {
 				return false
 			}
 		}
+		clean := filepath.Clean(d.Path)
+		parent := filepath.Dir(clean)
+		if parent != clean && canonicalDirs[parent] {
+			info, err := os.Lstat(clean)
+			if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+				return false
+			}
+			canonicalDirs[clean] = true
+			continue
+		}
+		resolved, err := filepath.EvalSymlinks(d.Path)
+		if err != nil || resolved != clean {
+			return false
+		}
+		canonicalDirs[clean] = true
 	}
 	return true
 }
@@ -454,17 +666,27 @@ func stampDiscovery(ctx context.Context, root string) ([]dirStamp, error) {
 // Package discovery follows cmd/go's std-pattern directory exclusions.
 // Explicitly selected package and embed roots are observed separately.
 func stampDiscoveryTree(ctx context.Context, root string, packagesOnly bool) ([]dirStamp, error) {
+	return stampDiscoveryTreeWithExisting(ctx, root, packagesOnly, nil)
+}
+
+func stampDiscoveryTreeWithExisting(ctx context.Context, root string, packagesOnly bool, existing map[string]dirStamp) ([]dirStamp, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	// WalkDir does not descend into a root symlink. Retain that root's
 	// observation anyway so cache eligibility can reject its indirection.
-	entries, err := stampEntries(root)
-	if err != nil {
-		return nil, err
+	var rootStamp dirStamp
+	if d, ok := existing[root]; ok {
+		rootStamp = d
+	} else {
+		entries, err := stampEntries(root)
+		if err != nil {
+			return nil, err
+		}
+		rootStamp = dirStamp{Path: root, Entries: entries}
 	}
-	dirs := []dirStamp{{Path: root, Entries: entries}}
-	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+	dirs := []dirStamp{rootStamp}
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -481,6 +703,10 @@ func stampDiscoveryTree(ctx context.Context, root string, packagesOnly bool) ([]
 			}
 		}
 		if !entry.IsDir() {
+			return nil
+		}
+		if d, ok := existing[path]; ok {
+			dirs = append(dirs, d)
 			return nil
 		}
 		entries, err := stampEntries(path)
@@ -505,10 +731,6 @@ func excludedStandardDirectory(relative string) bool {
 	}
 	return false
 }
-
-// digestReadForTest, when set, sees every file the digest traversal is
-// about to read — the seam a cancellation pin cancels from.
-var digestReadForTest func(name string)
 
 // digestFiles digests the named files of dir in name order: each
 // contributes an unsigned big-endian 64-bit name length, the name bytes,
@@ -579,9 +801,7 @@ func digestFilesWithExtraBuffered(ctx context.Context, dir string, files []strin
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if digestReadForTest != nil {
-			digestReadForTest(framedName)
-		}
+		emitDigestReadHook(framedName)
 		file, err := os.Open(fullPath)
 		if err != nil {
 			return err
@@ -904,8 +1124,8 @@ type persistedSourceDigests struct {
 }
 
 var (
-	toolchainListingMemo sync.Map
-	toolchainDigestsMemo sync.Map
+	toolchainListingMemo cachefile.SyncMemo[memoizedListing]
+	toolchainDigestsMemo cachefile.SyncMemo[memoizedDigests]
 )
 
 type memoizedListing struct {
@@ -927,8 +1147,8 @@ func loadToolchainListing(scope string) (surfaceListing, bool) {
 		if raw, readErr := os.ReadFile(listingPath); readErr == nil {
 			rawSum = sha256.Sum256(raw)
 			haveRaw = true
-			if v, ok := toolchainListingMemo.Load(listingPath); ok {
-				if entry := v.(memoizedListing); entry.rawSum == rawSum {
+			if entry, ok := toolchainListingMemo.Load(listingPath); ok {
+				if entry.rawSum == rawSum {
 					return entry.listing, true
 				}
 			}
@@ -941,6 +1161,7 @@ func loadToolchainListing(scope string) (surfaceListing, bool) {
 	if l.Version != sourceDigestsVersion || len(l.Packages) == 0 || len(l.Discovery) == 0 || l.Integrity != listingIntegrity(scope, l) {
 		return surfaceListing{}, false
 	}
+	l.plan = buildDiscoveryPlan(l)
 	if haveRaw {
 		toolchainListingMemo.Store(listingPath, memoizedListing{
 			rawSum:  rawSum,
@@ -998,8 +1219,8 @@ func loadToolchainDigests(scope string, l surfaceListing) (sourceDigests, bool) 
 		if raw, readErr := os.ReadFile(recordPath); readErr == nil {
 			rawSum = sha256.Sum256(raw)
 			haveRaw = true
-			if v, ok := toolchainDigestsMemo.Load(recordPath); ok {
-				if entry := v.(memoizedDigests); entry.rawSum == rawSum {
+			if entry, ok := toolchainDigestsMemo.Load(recordPath); ok {
+				if entry.rawSum == rawSum {
 					if d, ok := sourceDigestsFromMemoWithContent(l, entry.all, entry.content); ok {
 						return d, true
 					}
@@ -1100,6 +1321,7 @@ func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir strin
 			)
 		}
 	}
+	cacheable := warmListing
 	if !warmListing {
 		args := append([]string{"-json", "-e", "-deps"}, buildFlags...)
 		args = append(args, "std")
@@ -1121,7 +1343,7 @@ func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir strin
 		for _, d := range l.Discovery {
 			directories[d.Path] = d
 		}
-		stamps, err := stampDiscoveryTree(ctx, filepath.Join(snapshot.Value("GOROOT"), "src"), true)
+		stamps, err := stampDiscoveryTreeWithExisting(ctx, filepath.Join(snapshot.Value("GOROOT"), "src"), true, directories)
 		if err != nil {
 			return sourceDigests{}, err
 		}
@@ -1133,7 +1355,7 @@ func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir strin
 			return sourceDigests{}, err
 		}
 		for _, root := range roots {
-			stamps, err := stampDiscovery(ctx, root)
+			stamps, err := stampDiscoveryTreeWithExisting(ctx, root, false, directories)
 			if err != nil {
 				return sourceDigests{}, err
 			}
@@ -1143,7 +1365,9 @@ func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir strin
 		}
 		l.Discovery = orderedStamps(directories)
 		l.Integrity = listingIntegrity(scope, l)
-		if cacheableDiscovery(l) {
+		l.plan = buildDiscoveryPlan(l)
+		cacheable = cacheableDiscovery(l)
+		if cacheable {
 			cachefile.Store(sourceDigestsDirName, scope, "listing", l)
 			if listingPath, err := cachefile.Path(sourceDigestsDirName, scope, "listing"); err == nil {
 				if raw, readErr := os.ReadFile(listingPath); readErr == nil {
@@ -1154,7 +1378,7 @@ func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir strin
 				}
 			}
 		}
-	} else if digestReadForTest == nil {
+	} else if !hasDigestReadTestHook() {
 		if err := ctx.Err(); err != nil {
 			return sourceDigests{}, err
 		}
@@ -1166,7 +1390,7 @@ func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir strin
 	if err != nil {
 		return sourceDigests{}, err
 	}
-	if cacheableDiscovery(l) {
+	if cacheable {
 		storeToolchainDigests(scope, l, d)
 	}
 	return d, nil
@@ -1207,7 +1431,7 @@ var harnessPremisePackages = []string{"internal/testlog", "testing", "testing/in
 // toolchainVerifierVersion versions the structural stdlib boundary verifier.
 // Bumping this invalidates cached package verification verdicts and moves
 // AdmissionPolicy.
-const toolchainVerifierVersion = "gofresh/toolchain-verifier@17"
+const toolchainVerifierVersion = "gofresh/toolchain-verifier@18"
 
 type verifiedPackageVerdict struct {
 	OK                           bool                `json:"ok"`
@@ -1250,19 +1474,19 @@ type offSurfaceVerdict struct {
 
 // verifiedPackageMemo caches structural verification verdicts per
 // verifiedPackageMemoKey in memory.
-var verifiedPackageMemo sync.Map
+var verifiedPackageMemo cachefile.SyncMemo[verifiedPackageVerdict]
 
 // verifiedPureDelegateMemo caches pure-delegate verification verdicts per
 // verifiedPureDelegateMemoKeyWithPolicy in memory.
-var verifiedPureDelegateMemo sync.Map
+var verifiedPureDelegateMemo cachefile.SyncMemo[verifiedPackageVerdict]
 
 // verifiedOffSurfaceMemo caches off-surface runtime-pull/startup graphs per
 // verifiedOffSurfaceMemoKeyWithPolicy in memory.
-var verifiedOffSurfaceMemo sync.Map
+var verifiedOffSurfaceMemo cachefile.SyncMemo[offSurfaceVerdict]
 
 // pkgIncludeHeaderCache caches GOROOT/pkg/include header contents keyed by
 // goroot+"|"+pkgIncludeSalt when pkgIncludeSalt is non-empty.
-var pkgIncludeHeaderCache sync.Map
+var pkgIncludeHeaderCache cachefile.SyncMemo[[]string]
 
 func listedPackageNeedsPkgIncludeSalt(lp listedPackage) bool {
 	if lp.ImportPath == "runtime" {
@@ -1338,7 +1562,7 @@ func loadPkgIncludeHeadersForPackage(ctx context.Context, lp listedPackage, pkgI
 	if pkgIncludeSalt != "" {
 		cacheKey = goroot + "|" + pkgIncludeSalt
 		if v, okC := pkgIncludeHeaderCache.Load(cacheKey); okC {
-			return v.([]string), nil, nil
+			return v, nil, nil
 		}
 	}
 	pkgIncludeDir := filepath.Join(goroot, "pkg", "include")
@@ -1409,6 +1633,50 @@ func verifyToolchainSurfaceWithIO(ctx context.Context, d sourceDigests) (failed 
 	return failed, ioErr, ctxErr
 }
 
+var (
+	pkgIncludeDigestCache    cachefile.SyncMemo[string]
+	verifiedSurfaceMemo      cachefile.SyncMemo[memoizedSurfaceVerdict]
+	toolchainSurfaceVerifyMu sync.Mutex
+)
+
+type memoizedSurfaceVerdict struct {
+	failed        []string
+	pureDelegates map[string]bool
+}
+
+func surfaceVerificationMemoKey(d sourceDigests, policy, pkgIncludeSalt string, keys []string) string {
+	h := sha256.New()
+	_, _ = h.Write([]byte(toolchainVerifierVersion))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(policy))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(pkgIncludeSalt))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(d.Content))
+	_, _ = h.Write([]byte{0})
+	for _, k := range keys {
+		_, _ = h.Write([]byte(k))
+		_, _ = h.Write([]byte{'='})
+		_, _ = h.Write([]byte(d.Packages[k]))
+		_, _ = h.Write([]byte{0})
+	}
+	invKeys := make([]string, 0, len(d.inventory))
+	for k := range d.inventory {
+		invKeys = append(invKeys, k)
+	}
+	slices.Sort(invKeys)
+	for _, k := range invKeys {
+		lp := d.inventory[k]
+		_, _ = h.Write([]byte(k))
+		_, _ = h.Write([]byte{'|'})
+		_, _ = h.Write([]byte(lp.Dir))
+		_, _ = h.Write([]byte{'|'})
+		_, _ = h.Write([]byte(lp.digest))
+		_, _ = h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 func pkgIncludeDigestForSurface(ctx context.Context, d sourceDigests) (string, error) {
 	rtLP, ok := d.inventory["runtime"]
 	if !ok {
@@ -1418,10 +1686,20 @@ func pkgIncludeDigestForSurface(ctx context.Context, d sourceDigests) (string, e
 	if !ok {
 		return rtLP.digest, nil
 	}
+	cacheKey := ""
+	if d.Content != "" && rtLP.digest != "" && !hasDigestReadTestHook() && ctx.Err() == nil {
+		cacheKey = rtLP.Dir + "|" + rtLP.digest
+		if v, ok := pkgIncludeDigestCache.Load(cacheKey); ok {
+			return v, nil
+		}
+	}
 	pkgIncludeDir := filepath.Join(goroot, "pkg", "include")
 	info, err := os.Stat(pkgIncludeDir)
 	if err != nil {
 		if os.IsNotExist(err) {
+			if cacheKey != "" {
+				pkgIncludeDigestCache.Store(cacheKey, "none")
+			}
 			return "none", nil
 		}
 		return "", fmt.Errorf("pkg/include: %w", err)
@@ -1434,7 +1712,11 @@ func pkgIncludeDigestForSurface(ctx context.Context, d sourceDigests) (string, e
 		return "", fmt.Errorf("pkg/include: %w", err)
 	}
 	var buf [32 * 1024]byte
-	return digestFilesWithExtraBuffered(ctx, pkgIncludeDir, nil, pkgIncludeDir, rels, buf[:])
+	res, err := digestFilesWithExtraBuffered(ctx, pkgIncludeDir, nil, pkgIncludeDir, rels, buf[:])
+	if err == nil && cacheKey != "" {
+		pkgIncludeDigestCache.Store(cacheKey, res)
+	}
+	return res, err
 }
 
 func verifyToolchainSurfaceAndDelegatesWithIO(ctx context.Context, d sourceDigests) (failed []string, pureDelegates map[string]bool, ioErr error, ctxErr error) {
@@ -1473,32 +1755,117 @@ func verifyToolchainSurfaceAndDelegatesWithIO(ctx context.Context, d sourceDiges
 		}
 		return nil, nil, incErr, nil
 	}
-	rootDelegates := map[string][]string{}
-	surfaceVerdicts := map[string]verifiedPackageVerdict{}
-	for _, pkg := range keys {
+	surfaceKey := ""
+	if d.Content != "" && !hasPackageVerdictOverrideHook() && !hasDigestReadTestHook() && ctx.Err() == nil {
+		surfaceKey = surfaceVerificationMemoKey(d, policy, pkgIncludeSalt, keys)
+		if cached, ok := verifiedSurfaceMemo.Load(surfaceKey); ok {
+			return slices.Clone(cached.failed), maps.Clone(cached.pureDelegates), nil, nil
+		}
+		toolchainSurfaceVerifyMu.Lock()
+		defer toolchainSurfaceVerifyMu.Unlock()
 		if err := ctx.Err(); err != nil {
 			return nil, nil, nil, err
 		}
-		wantDigest := d.Packages[pkg]
-		lp, ok := d.inventory[pkg]
-		if !ok || wantDigest == "" || lp.digest == "" || lp.digest != wantDigest {
-			failedSet[pkg] = true
-			continue
+		if cached, ok := verifiedSurfaceMemo.Load(surfaceKey); ok {
+			return slices.Clone(cached.failed), maps.Clone(cached.pureDelegates), nil, nil
 		}
-		verdict, err := verifyListedPackageMemoized(ctx, lp, policy, pkgIncludeSalt)
-		if err != nil {
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return nil, nil, nil, ctxErr
+	}
+	rootDelegates := map[string][]string{}
+	surfaceVerdicts := map[string]verifiedPackageVerdict{}
+	workers := 1
+	if surfaceKey != "" {
+		workers = min(len(keys), max(1, runtime.GOMAXPROCS(0)))
+	}
+	if workers <= 1 {
+		for _, pkg := range keys {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, nil, err
 			}
-			return nil, nil, err, nil
+			wantDigest := d.Packages[pkg]
+			lp, ok := d.inventory[pkg]
+			if !ok || wantDigest == "" || lp.digest == "" || lp.digest != wantDigest {
+				failedSet[pkg] = true
+				continue
+			}
+			verdict, err := verifyListedPackageMemoized(ctx, lp, policy, pkgIncludeSalt)
+			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return nil, nil, nil, ctxErr
+				}
+				return nil, nil, err, nil
+			}
+			if !verdict.OK {
+				failedSet[pkg] = true
+				continue
+			}
+			surfaceVerdicts[pkg] = verdict
+			if (auditset.PurePackage(pkg) || pkg == "path/filepath") && len(verdict.Delegates) > 0 {
+				rootDelegates[pkg] = verdict.Delegates
+			}
 		}
-		if !verdict.OK {
-			failedSet[pkg] = true
-			continue
+	} else {
+		type pkgVerifyOutcome struct {
+			verdict verifiedPackageVerdict
+			missing bool
+			ioErr   error
+			ctxErr  error
 		}
-		surfaceVerdicts[pkg] = verdict
-		if (auditset.PurePackage(pkg) || pkg == "path/filepath") && len(verdict.Delegates) > 0 {
-			rootDelegates[pkg] = verdict.Delegates
+		outcomes := make([]pkgVerifyOutcome, len(keys))
+		var next atomic.Int32
+		var wg sync.WaitGroup
+		wg.Add(workers)
+		for range workers {
+			go func() {
+				defer wg.Done()
+				for {
+					idx := int(next.Add(1) - 1)
+					if idx >= len(keys) {
+						return
+					}
+					if err := ctx.Err(); err != nil {
+						outcomes[idx] = pkgVerifyOutcome{ctxErr: err}
+						return
+					}
+					pkg := keys[idx]
+					wantDigest := d.Packages[pkg]
+					lp, ok := d.inventory[pkg]
+					if !ok || wantDigest == "" || lp.digest == "" || lp.digest != wantDigest {
+						outcomes[idx] = pkgVerifyOutcome{missing: true}
+						continue
+					}
+					verdict, err := verifyListedPackageMemoized(ctx, lp, policy, pkgIncludeSalt)
+					if err != nil {
+						if ctxErr := ctx.Err(); ctxErr != nil {
+							outcomes[idx] = pkgVerifyOutcome{ctxErr: ctxErr}
+							return
+						}
+						outcomes[idx] = pkgVerifyOutcome{ioErr: err}
+						continue
+					}
+					outcomes[idx] = pkgVerifyOutcome{verdict: verdict}
+				}
+			}()
+		}
+		wg.Wait()
+		if err := ctx.Err(); err != nil {
+			return nil, nil, nil, err
+		}
+		for i, pkg := range keys {
+			out := outcomes[i]
+			if out.ctxErr != nil {
+				return nil, nil, nil, out.ctxErr
+			}
+			if out.ioErr != nil {
+				return nil, nil, out.ioErr, nil
+			}
+			if out.missing || !out.verdict.OK {
+				failedSet[pkg] = true
+				continue
+			}
+			surfaceVerdicts[pkg] = out.verdict
+			if (auditset.PurePackage(pkg) || pkg == "path/filepath") && len(out.verdict.Delegates) > 0 {
+				rootDelegates[pkg] = out.verdict.Delegates
+			}
 		}
 	}
 
@@ -1661,18 +2028,29 @@ func verifyToolchainSurfaceAndDelegatesWithIO(ctx context.Context, d sourceDiges
 	}
 
 	if len(failedSet) == 0 {
+		if surfaceKey != "" {
+			verifiedSurfaceMemo.Store(surfaceKey, memoizedSurfaceVerdict{
+				pureDelegates: maps.Clone(pureDelegates),
+			})
+		}
 		return nil, pureDelegates, nil, nil
 	}
-	return sortedKeys(failedSet), nil, nil, nil
+	failed = sortedKeys(failedSet)
+	if surfaceKey != "" {
+		verifiedSurfaceMemo.Store(surfaceKey, memoizedSurfaceVerdict{
+			failed: slices.Clone(failed),
+		})
+	}
+	return failed, nil, nil, nil
 }
 
 func memoizePackageVerdict[V any](
 	ctx context.Context,
+	memo *cachefile.SyncMemo[V],
 	lp listedPackage,
 	policy, pkgIncludeSalt string,
 	scopePrefix string,
 	memoKeyFn func(policy, importPath, digest, salt string) string,
-	memMap *sync.Map,
 	compute func(context.Context, listedPackage, string) (V, error),
 ) (V, error) {
 	var zero V
@@ -1695,12 +2073,12 @@ func memoizePackageVerdict[V any](
 	}
 	scope := scopePrefix + "|" + toolchainVerifierVersion + "|" + policy
 	if canMemo {
-		if v, ok := memMap.Load(memoKey); ok {
-			return v.(V), nil
+		if v, ok := memo.Load(memoKey); ok {
+			return v, nil
 		}
 		var cached V
 		if cachefile.Load(sourceDigestsDirName, scope, cacheKey, &cached) {
-			memMap.Store(memoKey, cached)
+			memo.Store(memoKey, cached)
 			return cached, nil
 		}
 	}
@@ -1709,7 +2087,7 @@ func memoizePackageVerdict[V any](
 		return zero, ioErr
 	}
 	if canMemo {
-		memMap.Store(memoKey, verdict)
+		memo.Store(memoKey, verdict)
 		if lp.digest != "" {
 			cachefile.Store(sourceDigestsDirName, scope, cacheKey, verdict)
 		}
@@ -1718,11 +2096,19 @@ func memoizePackageVerdict[V any](
 }
 
 func verifyListedPackageMemoized(ctx context.Context, lp listedPackage, policy, pkgIncludeSalt string) (verifiedPackageVerdict, error) {
+	if hasPackageVerdictOverrideHook() {
+		salt := ""
+		if listedPackageNeedsPkgIncludeSalt(lp) {
+			salt = pkgIncludeSalt
+		}
+		if v, ok := lookupPackageVerdictOverrideHook(verifiedPackageMemoKeyWithPolicy(policy, lp.ImportPath, lp.digest, salt)); ok {
+			return v, nil
+		}
+	}
 	return memoizePackageVerdict(
-		ctx, lp, policy, pkgIncludeSalt,
+		ctx, &verifiedPackageMemo, lp, policy, pkgIncludeSalt,
 		"verified-package",
 		verifiedPackageMemoKeyWithPolicy,
-		&verifiedPackageMemo,
 		func(ctx context.Context, lp listedPackage, salt string) (verifiedPackageVerdict, error) {
 			verdict, verdictErr, ioErr := verifyListedPackageWithIOAndSalt(ctx, lp, salt)
 			if ioErr != nil {
@@ -1745,10 +2131,9 @@ func verifyListedPackageMemoized(ctx context.Context, lp listedPackage, policy, 
 
 func verifyPureDelegateMemoized(ctx context.Context, lp listedPackage, policy, pkgIncludeSalt string) (verifiedPackageVerdict, error) {
 	return memoizePackageVerdict(
-		ctx, lp, policy, pkgIncludeSalt,
+		ctx, &verifiedPureDelegateMemo, lp, policy, pkgIncludeSalt,
 		"verified-pure-delegate",
 		verifiedPureDelegateMemoKeyWithPolicy,
-		&verifiedPureDelegateMemo,
 		func(ctx context.Context, lp listedPackage, salt string) (verifiedPackageVerdict, error) {
 			verdict, verdictErr, ioErr := verifyPureCandidateWithIOAndSalt(ctx, lp, salt)
 			if ioErr != nil {
@@ -1773,10 +2158,9 @@ func verifyPureDelegateMemoized(ctx context.Context, lp listedPackage, policy, p
 
 func verifyOffSurfacePackageMemoized(ctx context.Context, lp listedPackage, policy, pkgIncludeSalt string) (offSurfaceVerdict, error) {
 	return memoizePackageVerdict(
-		ctx, lp, policy, pkgIncludeSalt,
+		ctx, &verifiedOffSurfaceMemo, lp, policy, pkgIncludeSalt,
 		"verified-offsurface",
 		verifiedOffSurfaceMemoKeyWithPolicy,
-		&verifiedOffSurfaceMemo,
 		verifyOffSurfacePackageWithIO,
 	)
 }
@@ -2002,15 +2386,12 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 				if ext == ".syso" {
 					collectRuntimeIdentsAndMachO(raw, runtimeNonGoIdents)
 				} else {
-					for _, joinSpace := range []bool{false, true} {
-						stripped := stripAssemblyComments(string(raw), true, joinSpace)
-						collectRuntimeIdentsAndMachO([]byte(stripped), runtimeNonGoIdents)
-						collectRuntimeIdentsAndMachO([]byte(collapseTokenPasteOps(normalizeCStringLiterals(stripped, true))), runtimeNonGoIdents)
-					}
+					text := string(raw)
+					collectStrippedAsmRuntimeIdents(text, runtimeNonGoIdents)
 					if ext == ".h" {
-						runtimeIncludeHdrs = append(runtimeIncludeHdrs, string(raw))
+						runtimeIncludeHdrs = append(runtimeIncludeHdrs, text)
 					}
-					runtimeNonGoTexts = append(runtimeNonGoTexts, string(raw))
+					runtimeNonGoTexts = append(runtimeNonGoTexts, text)
 				}
 			} else {
 				if ext == ".syso" {
@@ -2063,16 +2444,13 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 		if err != nil {
 			return verifiedPackageVerdict{}, nil, fmt.Errorf("%s/%s: %w", lp.ImportPath, name, err)
 		}
-		if err := verifyAssemblyFile("", lp.ImportPath+"/"+name, string(src), nil); err != nil {
+		text := string(src)
+		if err := verifyAssemblyFile("", lp.ImportPath+"/"+name, text, nil); err != nil {
 			return verifiedPackageVerdict{}, err, nil
 		}
-		for _, joinSpace := range []bool{false, true} {
-			stripped := stripAssemblyComments(string(src), true, joinSpace)
-			collectRuntimeIdentsAndMachO([]byte(stripped), runtimeNonGoIdents)
-			collectRuntimeIdentsAndMachO([]byte(collapseTokenPasteOps(normalizeCStringLiterals(stripped, true))), runtimeNonGoIdents)
-		}
+		collectStrippedAsmRuntimeIdents(text, runtimeNonGoIdents)
 		if lp.ImportPath == "runtime" {
-			runtimeIncludeHdrs = append(runtimeIncludeHdrs, string(src))
+			runtimeIncludeHdrs = append(runtimeIncludeHdrs, text)
 		}
 	}
 	if lp.ImportPath == "runtime" {
@@ -2106,15 +2484,12 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 					if err != nil {
 						return verifiedPackageVerdict{}, nil, fmt.Errorf("pkg/include/%s: %w", rel, err)
 					}
-					if err := verifyAssemblyFile("", "pkg/include/"+rel, string(src), nil); err != nil {
+					text := string(src)
+					if err := verifyAssemblyFile("", "pkg/include/"+rel, text, nil); err != nil {
 						return verifiedPackageVerdict{}, err, nil
 					}
-					for _, joinSpace := range []bool{false, true} {
-						stripped := stripAssemblyComments(string(src), true, joinSpace)
-						collectRuntimeIdentsAndMachO([]byte(stripped), runtimeNonGoIdents)
-						collectRuntimeIdentsAndMachO([]byte(collapseTokenPasteOps(normalizeCStringLiterals(stripped, true))), runtimeNonGoIdents)
-					}
-					runtimeIncludeHdrs = append(runtimeIncludeHdrs, string(src))
+					collectStrippedAsmRuntimeIdents(text, runtimeNonGoIdents)
+					runtimeIncludeHdrs = append(runtimeIncludeHdrs, text)
 				}
 			}
 		}
@@ -2149,7 +2524,7 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 			}
 		}
 		mode := parser.Mode(0)
-		if strings.Contains(text, `"C"`) {
+		if sourceMayImportC(text) {
 			mode = parser.ParseComments
 		}
 		file, err := parser.ParseFile(fset, name, src, mode)
@@ -2410,6 +2785,21 @@ func (h *Hasher) SelectionNotice() string {
 // (REQ-closure-refusal-channels); empty when audited.
 func (h *Hasher) SelectionAttribution() string {
 	return h.verdict().axis
+}
+
+func collectStrippedAsmRuntimeIdents(src string, out map[string]bool) {
+	var prevStripped string
+	for passIdx, joinSpace := range []bool{false, true} {
+		stripped := stripAssemblyComments(src, true, joinSpace)
+		if passIdx > 0 && stripped == prevStripped {
+			continue
+		}
+		prevStripped = stripped
+		collectRuntimeIdentsAndMachOString(stripped, out)
+		if collapsed := collapseTokenPasteOps(normalizeCStringLiterals(stripped, true)); collapsed != stripped {
+			collectRuntimeIdentsAndMachOString(collapsed, out)
+		}
+	}
 }
 
 // AttributeSelection appends the selection's attribution to a tier

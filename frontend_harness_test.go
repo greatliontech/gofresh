@@ -521,13 +521,7 @@ func buildInMemoryViewDynamicState(pkgs []*packages.Package, viewPackages []stri
 }
 
 func inMemorySnapshotForSubject(dir string, subject Subject, opts ...option) (*Snapshot, []*packages.Package, bool) {
-	if viewTestHooks.observe != nil || viewTestHooks.runtimeGuards != nil ||
-		viewTestHooks.snapshot != nil || viewTestHooks.dynamicStateMissLoad != nil ||
-		viewTestHooks.guardDir != nil || viewTestHooks.typedLoad != nil ||
-		viewTestHooks.runtimeWindow != nil || viewTestHooks.maximalBatch != nil ||
-		viewTestHooks.beforeAnalysis != nil || viewTestHooks.beforeDischarge != nil ||
-		viewTestHooks.analysisBound != nil || viewTestHooks.scanMemoOff ||
-		viewTestHooks.factScope != nil {
+	if hasAnyViewTestHook() {
 		return nil, nil, false
 	}
 	e := &engine{assumePure: func(Subject) bool { return false }, dir: dir}
@@ -706,7 +700,6 @@ type pinnedDepTemplate struct {
 	files            map[string]string
 	meta             []closure.GraphPackage
 	byListing        map[string]closure.GraphPackage
-	pkgs             []*packages.Package
 	localFacts       map[string]dynamicStateFact
 	errgroupBucket   string
 	errgroupBaseFact dynamicStateFact
@@ -715,8 +708,22 @@ type pinnedDepTemplate struct {
 var (
 	pinnedDepTemplateMu  sync.Mutex
 	pinnedDepTemplateVal *pinnedDepTemplate
-	pinnedTemplateDirs   sync.Map
+	pinnedTemplateDirsMu sync.RWMutex
+	pinnedTemplateDirs   = map[string]bool{}
 )
+
+func markPinnedTemplateDir(dir string) {
+	pinnedTemplateDirsMu.Lock()
+	pinnedTemplateDirs[dir] = true
+	pinnedTemplateDirsMu.Unlock()
+}
+
+func isPinnedTemplateDir(dir string) bool {
+	pinnedTemplateDirsMu.RLock()
+	ok := pinnedTemplateDirs[dir]
+	pinnedTemplateDirsMu.RUnlock()
+	return ok
+}
 
 func getPinnedDepTemplate(t testing.TB) *pinnedDepTemplate {
 	t.Helper()
@@ -803,7 +810,6 @@ func getPinnedDepTemplate(t testing.TB) *pinnedDepTemplate {
 	}
 	localFacts := map[string]dynamicStateFact{}
 	var egFact dynamicStateFact
-	var localPkgs []*packages.Package
 	for _, pkg := range dagPkgs {
 		if pkg.PkgPath == "golang.org/x/sync/errgroup" {
 			pkg.Module = &packages.Module{Path: "golang.org/x/sync", Version: version}
@@ -811,7 +817,6 @@ func getPinnedDepTemplate(t testing.TB) *pinnedDepTemplate {
 			continue
 		}
 		if pkg.PkgPath == "example.com/pinned" {
-			localPkgs = append(localPkgs, pkg)
 			localFacts["example.com/pinned"] = dynamicStateFactOf(true, pkg, false)
 		}
 	}
@@ -824,7 +829,6 @@ func getPinnedDepTemplate(t testing.TB) *pinnedDepTemplate {
 		files:            files,
 		meta:             meta,
 		byListing:        byListing,
-		pkgs:             localPkgs,
 		localFacts:       localFacts,
 		errgroupBucket:   egBucket,
 		errgroupBaseFact: egFact,
@@ -863,17 +867,17 @@ func pinnedDirUnmodified(dir string, expected map[string]string) bool {
 }
 
 func inMemoryRunScanVouched(scope, dir string, vouches map[string]bool, pkgPaths ...string) (*subjectScan, map[string]dynamicStateFact, bool) {
-	if viewTestHooks.dynamicStateMissLoad != nil || viewTestHooks.typedLoad != nil {
+	if hasScanOverrideViewTestHook() {
 		return nil, nil, false
 	}
-	if _, isPinned := pinnedTemplateDirs.Load(dir); isPinned && len(pkgPaths) == 1 && pkgPaths[0] == "example.com/pinned" && pinnedDepTemplateVal != nil && pinnedDirUnmodified(dir, pinnedDepTemplateVal.files) {
+	if isPinnedTemplateDir(dir) && len(pkgPaths) == 1 && pkgPaths[0] == "example.com/pinned" && pinnedDepTemplateVal != nil && pinnedDirUnmodified(dir, pinnedDepTemplateVal.files) {
 		tmpl := pinnedDepTemplateVal
 		factScope := scope
 		cacheKey := factScope + "\x00" + tmpl.errgroupBucket + "\x00golang.org/x/sync/errgroup"
 		egFact := cloneDynamicStateFact(tmpl.errgroupBaseFact)
 		if factScope != "" {
 			if cached, ok := processFactCache.Load(cacheKey); ok {
-				egFact = cloneDynamicStateFact(cached.(dynamicStateFact))
+				egFact = cloneDynamicStateFact(cached)
 			} else {
 				if persisted := loadDynamicStateFacts(factScope, tmpl.errgroupBucket); persisted != nil {
 					if raw, ok := persisted["golang.org/x/sync/errgroup"]; ok {
@@ -908,7 +912,26 @@ func inMemoryRunScanVouched(scope, dir string, vouches map[string]bool, pkgPaths
 		if cone.attestationDischarges != "" {
 			state.attestationDischarges = map[string]string{"example.com/pinned": cone.attestationDischarges}
 		}
-		scan, err := scanSubjectsFromLoaded(true, tmpl.pkgs, state, "example.com/pinned")
+		pkgs, err := testenv.ParseAndTypecheckInPlace(
+			dir,
+			map[string]string{
+				"example.com/pinned":         dir,
+				"golang.org/x/sync/errgroup": dir,
+			},
+			map[string]map[string]string{
+				"golang.org/x/sync/errgroup": {
+					"errgroup.go": "package errgroup\n\ntype Group struct{}\n\nfunc (g *Group) Go(f func() error) { _ = f() }\nfunc (g *Group) Wait() error { return nil }\n",
+				},
+				"example.com/pinned": {
+					"lib.go":      tmpl.files["lib.go"],
+					"lib_test.go": tmpl.files["lib_test.go"],
+				},
+			},
+		)
+		if err != nil || len(pkgs) == 0 {
+			return nil, nil, false
+		}
+		scan, err := scanSubjectsFromLoaded(true, pkgs, state, "example.com/pinned")
 		if err != nil {
 			return nil, nil, false
 		}

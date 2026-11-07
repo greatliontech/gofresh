@@ -225,14 +225,13 @@ func TestEnvFileAndConcurrentEmission(t *testing.T) {
 	textPath := filepath.Join(tmp, "trace.log")
 	jsonlPath := filepath.Join(tmp, "trace.jsonl")
 
+	// Register RefreshFromEnv before t.Setenv so LIFO cleanup restores the
+	// environment first and then refreshes the in-memory trace state without
+	// calling os.Unsetenv directly.
+	t.Cleanup(RefreshFromEnv)
 	t.Setenv(EnvTrace, "toolchain,session")
 	t.Setenv(EnvTraceFile, textPath)
 	RefreshFromEnv()
-	t.Cleanup(func() {
-		os.Unsetenv(EnvTrace)
-		os.Unsetenv(EnvTraceFile)
-		RefreshFromEnv()
-	})
 
 	const workers = 8
 	const perWorker = 25

@@ -574,6 +574,38 @@ func (e ParamInsertionDepEdge) Compare(o ParamInsertionDepEdge) int {
 	return e.Dep.Compare(o.Dep)
 }
 
+// ExportedSeam records an exported plain package function whose body (directly
+// or through intra-package helpers) discharges a mutating bracketed seam on
+// package variable Key, so composition can reject the discharge if any
+// importing package invokes Func non-sequentially, captures it as a value, or
+// (when RunnerOnly is set for a testing.Cleanup runner entry) references or
+// calls Func from outside the test runner.
+type ExportedSeam struct {
+	Func       FuncKey `json:"func"`
+	Key        string  `json:"key"`
+	RunnerOnly bool    `json:"runnerOnly,omitempty"`
+}
+
+func (s ExportedSeam) Valid() bool {
+	return s.Func.Valid() && s.Key != "" && !strings.Contains(s.Key, "\x00")
+}
+
+func (s ExportedSeam) Compare(o ExportedSeam) int {
+	if c := s.Func.Compare(o.Func); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(s.Key, o.Key); c != 0 {
+		return c
+	}
+	if s.RunnerOnly != o.RunnerOnly {
+		if !s.RunnerOnly {
+			return -1
+		}
+		return 1
+	}
+	return 0
+}
+
 // Fact is the per-package summary the shared-dynamic-state derivation extracts
 // from one typed package and memoizes for version-pinned modules
 // (REQ-closure-dynamic-state-memo).
@@ -581,6 +613,11 @@ type Fact struct {
 	Declares               []string                 `json:"declares,omitempty"`
 	Mutates                []string                 `json:"mutates,omitempty"`
 	Escapes                []string                 `json:"escapes,omitempty"`
+	ExportedSeams          []ExportedSeam           `json:"exportedSeams,omitempty"`
+	NonSeqFuncUses         []FuncKey                `json:"nonSeqFuncUses,omitempty"`
+	SeqFuncEdges           []FuncDepEdge            `json:"seqFuncEdges,omitempty"`
+	ParallelFuncs          []FuncKey                `json:"parallelFuncs,omitempty"`
+	ParallelEdges          []FuncDepEdge            `json:"parallelEdges,omitempty"`
 	ReceiverReadOnly       []FuncKey                `json:"receiverReadOnly,omitempty"`
 	ReceiverRetentionFree  []FuncKey                `json:"receiverRetentionFree,omitempty"`
 	MethodUses             []VarMethodUse           `json:"methodUses,omitempty"`
@@ -631,15 +668,22 @@ type DeferralResolvent struct {
 // ExplainHookSet carries the observation callbacks one explain re-derivation
 // arms.
 type ExplainHookSet struct {
-	Site     func(p *packages.Package, kind, key string, pos token.Pos)
-	Store    func(p *packages.Package, key string, pos token.Pos)
-	Deferral func(p *packages.Package, kind byte, key string, resolvent DeferralResolvent, at token.Pos)
-	Refusal  func(p *packages.Package, fn string, e ast.Expr, clause string)
+	Site             func(p *packages.Package, kind, key string, pos token.Pos)
+	ExportedSeamSite func(p *packages.Package, fn FuncKey, key string, pos token.Pos)
+	Store            func(p *packages.Package, key string, pos token.Pos)
+	Deferral         func(p *packages.Package, kind byte, key string, resolvent DeferralResolvent, at token.Pos)
+	Refusal          func(p *packages.Package, fn string, e ast.Expr, clause string)
 }
 
 func explainMark(hooks *ExplainHookSet, p *packages.Package, kind, key string, at token.Pos) {
 	if hooks != nil && hooks.Site != nil {
 		hooks.Site(p, kind, key, at)
+	}
+}
+
+func explainExportedSeamMark(hooks *ExplainHookSet, p *packages.Package, fn FuncKey, key string, at token.Pos) {
+	if hooks != nil && hooks.ExportedSeamSite != nil {
+		hooks.ExportedSeamSite(p, fn, key, at)
 	}
 }
 
@@ -729,7 +773,13 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	if singleSubject {
 		poolDischarged = map[string]bool{}
 	}
-	recordDynamicGlobalUses(audited, p, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses, singleSubject, poolDischarged, hooks)
+	seams := analyzeBracketedSeams(audited, p, hooks)
+	fact.ExportedSeams = seams.exportedSeams
+	fact.NonSeqFuncUses = seams.nonSeqFuncUses
+	fact.SeqFuncEdges = seams.seqFuncEdges
+	fact.ParallelFuncs = seams.parallelFuncs
+	fact.ParallelEdges = seams.parallelEdges
+	recordDynamicGlobalUses(audited, p, seams.exempt, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses, singleSubject, poolDischarged, hooks)
 	for key := range poolDischarged {
 		fact.PoolDischarges = append(fact.PoolDischarges, key)
 	}
@@ -750,7 +800,7 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	envCalls := map[string]map[FuncKey]bool{}
 	fieldDefer := map[FieldPosKey]map[ParamKey]bool{}
 	fieldPoison := map[string]map[FieldParamPoison]bool{}
-	recordEnvCarryingRegistrations(audited, p, envCarrying, envCalls, fieldDefer, fieldPoison, hooks)
+	recordEnvCarryingRegistrations(audited, p, seams.exempt, envCarrying, envCalls, fieldDefer, fieldPoison, hooks)
 	for pos, params := range fieldDefer {
 		for param := range params {
 			fact.FieldParamDefer = append(fact.FieldParamDefer, FieldParamDefer{Pos: pos, Param: param})

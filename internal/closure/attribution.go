@@ -69,25 +69,16 @@ type attributedReachability struct {
 	propertyHarnessAudited bool
 }
 
-// attributedReachableSets runs package-local RTA once and projects its masks
-// back into the reachable set expected by the existing per-subject analyzer.
-// analyzeAttributedBatch is the swappable batch worker - a var so the
-// isolation behavior is testable without a shape that defeats the
-// analysis (the walk guard removes the known one).
-var analyzeAttributedBatch = attributedReachableSetsOnce
-
-// probePackageScope is the swappable package-scope discriminator: it
+// defaultProbePackageScope is the package-scope discriminator: it
 // analyzes the roots every sub-batch SHARES - the package inits, and
 // the harness main only when some subject in the batch actually runs
 // through the harness (the worker roots TestMain under testMasks, so
-// a batch of production subjects never walks it; probing it anyway
-// once classified a harness-borne subject-scoped shape as
-// package-scoped and darkened every sound sibling). A provocation in the
+// a batch of production subjects never walks it). A provocation in the
 // shared roots explains every subject's failure directly; a subject-scoped
 // shape can never satisfy the probe. A non-nil result is the package-scoped
 // failure, correctly attributed to every subject. Results memoize per
 // (program, harness inclusion): the shared roots are batch-invariant.
-var probePackageScope = func(ctx context.Context, prog *program, subjects []Subject) error {
+func defaultProbePackageScope(ctx context.Context, prog *program, subjects []Subject) error {
 	includeHarness := false
 	if prog.TestMain != nil {
 		for _, subject := range subjects {
@@ -143,11 +134,11 @@ func shapeFailure(err error) bool {
 // own batch's failure, while every sound sibling keeps its result
 // (REQ-closure-analysis). Other failure classes stay batch-wide.
 func attributedReachableSets(ctx context.Context, audited bool, pureDelegates map[string]bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
-	res, err := analyzeAttributedBatch(ctx, audited, pureDelegates, prog, subjects)
+	res, err := runAnalyzeAttributedBatch(ctx, audited, pureDelegates, prog, subjects)
 	if err == nil || ctx.Err() != nil || !shapeFailure(err) {
 		return res, err
 	}
-	if pkgErr := probePackageScope(ctx, prog, subjects); pkgErr != nil {
+	if pkgErr := runProbePackageScope(ctx, prog, subjects); pkgErr != nil {
 		rows := make([]attributedReachability, len(subjects))
 		for i := range rows {
 			rows[i] = attributedReachability{unavailable: pkgErr.Error()}
@@ -171,7 +162,7 @@ func splitAttributed(ctx context.Context, audited bool, pureDelegates map[string
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		res, err := analyzeAttributedBatch(ctx, audited, pureDelegates, prog, half)
+		res, err := runAnalyzeAttributedBatch(ctx, audited, pureDelegates, prog, half)
 		if err == nil {
 			return res, nil
 		}

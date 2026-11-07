@@ -8,8 +8,11 @@ import (
 	"go/ast"
 	"go/types"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
@@ -251,13 +254,52 @@ func build(ctx context.Context, pkgPath string, roots []*packages.Package) (*Pro
 	prog, _ := ssautil.AllPackages(roots, ssa.InstantiateGenerics)
 	ssaPackages := prog.AllPackages()
 	sort.Slice(ssaPackages, func(i, j int) bool {
+		if li, lj := len(ssaPackages[i].Members), len(ssaPackages[j].Members); li != lj {
+			return li > lj
+		}
 		return ssaPackages[i].Pkg.Path() < ssaPackages[j].Pkg.Path()
 	})
-	for _, ssaPackage := range ssaPackages {
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("closure: analysis cancelled during SSA construction: %w", err)
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("closure: analysis cancelled during SSA construction: %w", err)
+	}
+	workers := min(len(ssaPackages), max(1, runtime.GOMAXPROCS(0)))
+	if workers <= 1 {
+		for _, ssaPackage := range ssaPackages {
+			if err := ctx.Err(); err != nil {
+				return nil, fmt.Errorf("closure: analysis cancelled during SSA construction: %w", err)
+			}
+			ssaPackage.Build()
 		}
-		ssaPackage.Build()
+	} else {
+		var next atomic.Int32
+		var cancelMu sync.Mutex
+		var cancelErr error
+		var wg sync.WaitGroup
+		wg.Add(workers)
+		for range workers {
+			go func() {
+				defer wg.Done()
+				for {
+					if err := ctx.Err(); err != nil {
+						cancelMu.Lock()
+						if cancelErr == nil {
+							cancelErr = err
+						}
+						cancelMu.Unlock()
+						return
+					}
+					idx := int(next.Add(1) - 1)
+					if idx >= len(ssaPackages) {
+						return
+					}
+					ssaPackages[idx].Build()
+				}
+			}()
+		}
+		wg.Wait()
+		if cancelErr != nil {
+			return nil, fmt.Errorf("closure: analysis cancelled during SSA construction: %w", cancelErr)
+		}
 	}
 
 	// Index every top-level function as a candidate root, keyed by name, so any

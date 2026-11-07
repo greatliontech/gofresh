@@ -25,12 +25,14 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 
+	"github.com/greatliontech/gofresh/internal/buildflags"
 	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
 	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
 	prog "github.com/greatliontech/gofresh/internal/closure/internal/program"
 	"github.com/greatliontech/gofresh/internal/gotool"
-	"github.com/greatliontech/gofresh/internal/buildflags"
 )
 
 // program aliases the internal loader's type so every analysis site keeps
@@ -104,10 +106,11 @@ const (
 // Hasher computes closure hashes. New resolves GOMODCACHE once for the
 // cache-vs-mutable classification; loaded whole-program SSA is cached per package
 // (the dominant cost, REQ-closure-analysis) so repeated per-benchmark Compute calls amortize it.
-// A Hasher is single-goroutine by contract: nothing on the analysis
-// path spawns goroutines, and every unsynchronized map it carries -
-// progs, progErrs, memo state, and each program's PkgScopeProbe -
-// leans on that invariant.
+// A Hasher is single-goroutine by contract: every unsynchronized map and
+// callback it carries — progs, progErrs, memo state, and each program's
+// PkgScopeProbe — is read and mutated exclusively on the caller's goroutine
+// (bounded I/O helpers such as directory-stamp checks touch no Hasher state
+// from worker goroutines).
 type Hasher struct {
 	// dir roots every package load and go invocation; "" = the process
 	// working directory. The analyzed tree is an explicit input.
@@ -182,6 +185,13 @@ type Hasher struct {
 	// testing-type effect scan reads it instead of performing its own load
 	// (REQ-fresh-coherent-view: one load per pass, no same-pass mixture).
 	viewLoad *ViewLoad
+	// listOnMiss, loadProgramOnMiss, and testingPackagesOnMiss allow the
+	// in-memory test harness to satisfy this Hasher's listing, SSA program, or
+	// testing-type scan load on demand without spawning `go list` or
+	// `packages.Load` subprocesses.
+	listOnMiss            func(h *Hasher, pkgPath string) ([]listPkg, bool)
+	loadProgramOnMiss     func(ctx context.Context, h *Hasher, pkgPath string) (*program, bool, error)
+	testingPackagesOnMiss func(h *Hasher, pkgPath string) *program
 }
 
 // UseViewLoad supplies the observation pass's shared typed load. The caller
@@ -590,9 +600,10 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 	return contribs, sourceFiles, nil
 }
 
-// analysisTestHooks is the package's one test-observation surface: each
-// field observes a load the tests prove skipped or taken; nil disables.
-var analysisTestHooks struct {
+// analysisTestHookSet is the package's one test-observation surface: each
+// field observes a load the tests prove skipped or taken, or overrides a
+// standard-library verification verdict for negative-control tests; nil disables.
+type analysisTestHookSet struct {
 	// testingTypeOwnLoad observes the typed testing-effect scan's private
 	// fallback load, so tests pin that a shared view load or a memo hit is
 	// actually consumed instead.
@@ -606,13 +617,94 @@ var analysisTestHooks struct {
 	// observable.
 	canonicalParse func(dir string)
 	variantParse   func(name string)
-	// listOnMiss, loadProgramOnMiss, and testingPackagesOnMiss allow the
-	// in-memory test harness to satisfy a Hasher's listing, SSA program, or
-	// testing-type scan load on demand without spawning `go list` or
-	// `packages.Load` subprocesses.
-	listOnMiss            func(h *Hasher, pkgPath string) ([]listPkg, bool)
-	loadProgramOnMiss     func(ctx context.Context, h *Hasher, pkgPath string) (*program, bool, error)
-	testingPackagesOnMiss func(h *Hasher, pkgPath string) *program
+	// packageVerdictOverride lets hermetic tests override or seed a
+	// verified-package verdict for a specific memo key without mutating
+	// verifiedPackageMemo directly.
+	packageVerdictOverride func(memoKey string) (verifiedPackageVerdict, bool)
+	walkEntry              func(path string)
+	digestRead             func(name string)
+	analyzeBatch           func(ctx context.Context, audited bool, pureDelegates map[string]bool, prog *program, subjects []Subject) ([]attributedReachability, error)
+	probePkgScope          func(ctx context.Context, prog *program, subjects []Subject) error
+}
+
+var (
+	closureTestHooksMu sync.Mutex
+	closureTestHooks   atomic.Pointer[analysisTestHookSet]
+)
+
+func withClosureTestHooks(hooks analysisTestHookSet, fn func()) {
+	closureTestHooksMu.Lock()
+	defer closureTestHooksMu.Unlock()
+	defer closureTestHooks.Store(nil)
+	closureTestHooks.Store(&hooks)
+	fn()
+}
+
+func emitTestingTypeOwnLoadHook(pkgPath string) {
+	if h := closureTestHooks.Load(); h != nil && h.testingTypeOwnLoad != nil {
+		h.testingTypeOwnLoad(pkgPath)
+	}
+}
+
+func emitFileParseHook(path string) {
+	if h := closureTestHooks.Load(); h != nil && h.fileParse != nil {
+		h.fileParse(path)
+	}
+}
+
+func emitCanonicalParseHook(dir string) {
+	if h := closureTestHooks.Load(); h != nil && h.canonicalParse != nil {
+		h.canonicalParse(dir)
+	}
+}
+
+func emitVariantParseHook(name string) {
+	if h := closureTestHooks.Load(); h != nil && h.variantParse != nil {
+		h.variantParse(name)
+	}
+}
+
+func hasPackageVerdictOverrideHook() bool {
+	h := closureTestHooks.Load()
+	return h != nil && h.packageVerdictOverride != nil
+}
+
+func lookupPackageVerdictOverrideHook(memoKey string) (verifiedPackageVerdict, bool) {
+	if h := closureTestHooks.Load(); h != nil && h.packageVerdictOverride != nil {
+		return h.packageVerdictOverride(memoKey)
+	}
+	return verifiedPackageVerdict{}, false
+}
+
+func emitWalkEntryHook(path string) {
+	if h := closureTestHooks.Load(); h != nil && h.walkEntry != nil {
+		h.walkEntry(path)
+	}
+}
+
+func hasDigestReadTestHook() bool {
+	h := closureTestHooks.Load()
+	return h != nil && h.digestRead != nil
+}
+
+func emitDigestReadHook(name string) {
+	if h := closureTestHooks.Load(); h != nil && h.digestRead != nil {
+		h.digestRead(name)
+	}
+}
+
+func runAnalyzeAttributedBatch(ctx context.Context, audited bool, pureDelegates map[string]bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
+	if h := closureTestHooks.Load(); h != nil && h.analyzeBatch != nil {
+		return h.analyzeBatch(ctx, audited, pureDelegates, prog, subjects)
+	}
+	return attributedReachableSetsOnce(ctx, audited, pureDelegates, prog, subjects)
+}
+
+func runProbePackageScope(ctx context.Context, prog *program, subjects []Subject) error {
+	if h := closureTestHooks.Load(); h != nil && h.probePkgScope != nil {
+		return h.probePkgScope(ctx, prog, subjects)
+	}
+	return defaultProbePackageScope(ctx, prog, subjects)
 }
 
 // resetCallScope arms the per-batch-call memos: one call observes one
@@ -822,10 +914,6 @@ func memberKinds(p listPkg) (compiled, embedded, canonical map[string]bool) {
 	return compiled, embedded, canonical
 }
 
-// walkEntryForTest, when set, sees every entry the package-file walk
-// visits after its check — the seam a cancellation pin cancels from.
-var walkEntryForTest func(path string)
-
 func allPackageFiles(check func() error, dir string) ([]string, error) {
 	var files []string
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -838,9 +926,7 @@ func allPackageFiles(check func() error, dir string) ([]string, error) {
 		if err := check(); err != nil {
 			return err
 		}
-		if walkEntryForTest != nil {
-			walkEntryForTest(path)
-		}
+		emitWalkEntryHook(path)
 		if d.IsDir() {
 			return nil
 		}
@@ -948,8 +1034,8 @@ func (h *Hasher) listUnvalidated(pkgPath string) ([]listPkg, error) {
 		return pkgs, nil
 	}
 	h.emitProgress("list", pkgPath)
-	if analysisTestHooks.listOnMiss != nil {
-		if pkgs, ok := analysisTestHooks.listOnMiss(h, pkgPath); ok {
+	if h.listOnMiss != nil {
+		if pkgs, ok := h.listOnMiss(h, pkgPath); ok {
 			h.lists[pkgPath] = pkgs
 			h.storeListing(pkgPath, pkgs)
 			return pkgs, nil

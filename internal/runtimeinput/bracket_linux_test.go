@@ -64,12 +64,10 @@ func machineMotionRoots(t *testing.T) []string {
 	return roots[:2]
 }
 
-func machineMotionSamples(t *testing.T, samples ...*guard.MachineFacts) func() {
+func makeMachineMotionSampler(t *testing.T, samples ...*guard.MachineFacts) (func() (guard.MachineFacts, error), func()) {
 	t.Helper()
-	previous := currentMachineFacts
-	t.Cleanup(func() { currentMachineFacts = previous })
 	count := 0
-	currentMachineFacts = func() (guard.MachineFacts, error) {
+	fn := func() (guard.MachineFacts, error) {
 		if count >= len(samples) {
 			t.Fatal("unexpected extra machine gather")
 		}
@@ -80,12 +78,13 @@ func machineMotionSamples(t *testing.T, samples ...*guard.MachineFacts) func() {
 		}
 		return *sample, nil
 	}
-	return func() {
+	done := func() {
 		t.Helper()
 		if count != len(samples) {
 			t.Fatalf("gathers = %d, want %d", count, len(samples))
 		}
 	}
+	return fn, done
 }
 
 func TestMachineProjectionMovementSurvivesSourceAvailabilityShift(t *testing.T) {
@@ -105,9 +104,14 @@ func TestMachineProjectionMovementSurvivesSourceAvailabilityShift(t *testing.T) 
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir, roots := t.TempDir(), machineMotionRoots(t)
-			done := machineMotionSamples(t, tc.before[0], tc.before[1], tc.after[0], tc.after[1])
-			b := testBracket(t, dir, roots...)
-			unchanged, moved, reason, err := b.revalidate(t.Context(), dir)
+			sampler, done := makeMachineMotionSampler(t, tc.before[0], tc.before[1], tc.after[0], tc.after[1])
+			var unchanged, moved bool
+			var reason string
+			var err error
+			withRuntimeTestHooks(runtimeTestHookSet{machineFacts: sampler}, func() {
+				b := testBracket(t, dir, roots...)
+				unchanged, moved, reason, err = b.revalidate(t.Context(), dir)
+			})
 			done()
 			if err != nil || moved != tc.moved || unchanged != tc.unchanged || (reason == "") != tc.unchanged {
 				t.Fatalf("projection comparison: unchanged=%t moved=%t reason=%q err=%v", unchanged, moved, reason, err)
@@ -122,14 +126,21 @@ func TestMachineProjectionMovementSurvivesSourceAvailabilityShift(t *testing.T) 
 func TestMachineBracketMovementSurvivesPostChangeManifest(t *testing.T) {
 	dir, roots := t.TempDir(), machineMotionRoots(t)
 	old, hotAdded := machineMotionFacts()
-	captured := machineMotionSamples(t, &old, nil)
-	b := testBracket(t, dir, roots...)
+	capSampler, captured := makeMachineMotionSampler(t, &old, nil)
+	var b Bracket
+	withRuntimeTestHooks(runtimeTestHookSet{machineFacts: capSampler}, func() {
+		b = testBracket(t, dir, roots...)
+	})
 	captured()
 	// Manifest hashing is single-pass (before revalidation). Only the explicit
 	// bracket retains a successful pre-change projection, under the other source root.
-	finalized := machineMotionSamples(t, &hotAdded, &hotAdded, nil, &hotAdded)
+	finSampler, finalized := makeMachineMotionSampler(t, &hotAdded, &hotAdded, nil, &hotAdded)
 	log := []byte("open " + strings.Join(roots, "\nopen ") + "\n")
-	observation, err := FromTestLog(log, dir, dir, nil, WithCompletedProcess("reader"), WithBracket(b))
+	var observation Observation
+	var err error
+	withRuntimeTestHooks(runtimeTestHookSet{machineFacts: finSampler}, func() {
+		observation, err = FromTestLog(log, dir, dir, nil, WithCompletedProcess("reader"), WithBracket(b))
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,8 +148,12 @@ func TestMachineBracketMovementSurvivesPostChangeManifest(t *testing.T) {
 	if !observation.BracketMoved || refusalClause(observation.Reason) != movedBracketClauseForRoot(roots[0]) {
 		t.Fatalf("known projection movement lost: %+v", observation.State)
 	}
-	currentMachineFacts = func() (guard.MachineFacts, error) { return hotAdded, nil }
-	current, err := Current(t.Context(), observation.Manifest, dir, nil)
+	var current State
+	withRuntimeTestHooks(runtimeTestHookSet{
+		machineFacts: func() (guard.MachineFacts, error) { return hotAdded, nil },
+	}, func() {
+		current, err = Current(t.Context(), observation.Manifest, dir, nil)
+	})
 	if err != nil || current != observation.State {
 		t.Fatalf("later agreement repaired producing movement: %+v %v", current, err)
 	}
@@ -160,8 +175,11 @@ func TestMachineBracketMovementSurvivesPostChangeManifest(t *testing.T) {
 func TestMachineProjectionKeepsRootScopeAndSeal(t *testing.T) {
 	dir, roots := t.TempDir(), machineMotionRoots(t)
 	old, hotAdded := machineMotionFacts()
-	done := machineMotionSamples(t, &old, nil)
-	b := testBracket(t, dir, roots...)
+	sampler1, done := makeMachineMotionSampler(t, &old, nil)
+	var b Bracket
+	withRuntimeTestHooks(runtimeTestHookSet{machineFacts: sampler1}, func() {
+		b = testBracket(t, dir, roots...)
+	})
 	done()
 	if err := b.checkSealed(); err != nil {
 		t.Fatal(err)
@@ -185,12 +203,17 @@ func TestMachineProjectionKeepsRootScopeAndSeal(t *testing.T) {
 	}
 	// Excluding one root removes its sample, not fields from the whole
 	// projection another contributing root observes. Only B gathers here.
-	done = machineMotionSamples(t, &old, &hotAdded)
-	excluded, err := CaptureBracket(t.Context(), dir, roots, WithBracketExcludedPaths(roots[0]))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, moved, reason, err := excluded.revalidate(t.Context(), dir)
+	sampler2, done := makeMachineMotionSampler(t, &old, &hotAdded)
+	var moved bool
+	var reason string
+	var err error
+	withRuntimeTestHooks(runtimeTestHookSet{machineFacts: sampler2}, func() {
+		excluded, capErr := CaptureBracket(t.Context(), dir, roots, WithBracketExcludedPaths(roots[0]))
+		if capErr != nil {
+			t.Fatal(capErr)
+		}
+		_, moved, reason, err = excluded.revalidate(t.Context(), dir)
+	})
 	done()
 	if err != nil || !moved || refusalClause(reason) != movedBracketClauseForRoot(roots[1]) {
 		t.Fatalf("excluded root acquired attribution: moved=%t reason=%q err=%v", moved, reason, err)

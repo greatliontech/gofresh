@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -372,4 +373,50 @@ func pruneDirLocked(gofreshRoot string, targetBytes int64, preservePath string, 
 		knownValid = true
 	}
 	return report, nil
+}
+
+// SyncMemo is a concurrency-safe, dynamic-carrier-free in-process string-keyed
+// memo table (unlike sync.Map, whose internal any storage is typed as a dynamic
+// carrier).
+type SyncMemo[V any] struct {
+	mu      sync.RWMutex
+	entries map[string]V
+}
+
+// Load returns the value stored for key, if present.
+func (m *SyncMemo[V]) Load(key string) (V, bool) {
+	m.mu.RLock()
+	v, ok := m.entries[key]
+	m.mu.RUnlock()
+	return v, ok
+}
+
+// Store records val under key.
+func (m *SyncMemo[V]) Store(key string, val V) {
+	m.mu.Lock()
+	if m.entries == nil {
+		m.entries = make(map[string]V)
+	}
+	m.entries[key] = val
+	m.mu.Unlock()
+}
+
+// Reset clears all memoized entries.
+func (m *SyncMemo[V]) Reset() {
+	m.mu.Lock()
+	m.entries = nil
+	m.mu.Unlock()
+}
+
+// Range calls fn sequentially for a snapshot of the memo's entries until fn
+// returns false.
+func (m *SyncMemo[V]) Range(fn func(key string, val V) bool) {
+	m.mu.RLock()
+	snap := maps.Clone(m.entries)
+	m.mu.RUnlock()
+	for k, v := range snap {
+		if !fn(k, v) {
+			return
+		}
+	}
 }

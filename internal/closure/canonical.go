@@ -27,7 +27,7 @@ import (
 // move a member's canonical digest bumps it, so persisted digests from
 // the prior form refuse instead of serving — and IdentityStrategy
 // (closure.go) moves with it.
-const canonicalStrategy = "gofresh/canonical-member@2"
+const canonicalStrategy = "gofresh/canonical-member@3"
 
 // canonicalDirName is the canonical-digest memo's store directory.
 const canonicalDirName = "canonical"
@@ -222,18 +222,37 @@ func next(items []tokenItem, i int) tokenItem {
 }
 
 // cgoPreamble reports whether the comment at index i is C code: a
-// comment immediately preceding `import "C"` (comments between it and
-// the import included), or preceding the "C" path inside an import
-// group.
+// comment immediately preceding `import "C"` or single-spec `import ("C")`
+// (comments between it and the import included), or preceding the "C" path
+// inside an import group.
 func cgoPreamble(items []tokenItem, i int, inImportGroup bool) bool {
 	k := nextIndex(items, i)
 	if k >= len(items) {
 		return false
 	}
-	if items[k].tok == token.IMPORT && k+1 < len(items) && items[k+1].tok == token.STRING && items[k+1].lit == `"C"` {
-		return true
+	if items[k].tok == token.IMPORT {
+		m := nextIndex(items, k)
+		if m >= len(items) {
+			return false
+		}
+		if items[m].tok == token.STRING && isCgoImportLit(items[m].lit) {
+			return true
+		}
+		if items[m].tok == token.LPAREN {
+			s := nextIndex(items, m)
+			if s < len(items) && items[s].tok == token.STRING && isCgoImportLit(items[s].lit) {
+				end := nextIndex(items, s)
+				if end < len(items) && items[end].tok == token.SEMICOLON {
+					end = nextIndex(items, end)
+				}
+				if end < len(items) && items[end].tok == token.RPAREN {
+					return true
+				}
+			}
+		}
+		return false
 	}
-	return inImportGroup && items[k].tok == token.STRING && items[k].lit == `"C"`
+	return inImportGroup && items[k].tok == token.STRING && isCgoImportLit(items[k].lit)
 }
 
 // canonicalFileDigest serves one compiled Go member's canonical digest
@@ -247,9 +266,7 @@ func (h *Hasher) canonicalFileDigest(dir, byteDigest string, content []byte) str
 			return canon
 		}
 	}
-	if analysisTestHooks.canonicalParse != nil {
-		analysisTestHooks.canonicalParse(dir)
-	}
+	emitCanonicalParseHook(dir)
 	canon, ok := canonicalDigest(content)
 	if !ok {
 		canon = byteDigest

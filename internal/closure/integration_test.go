@@ -467,60 +467,67 @@ func TestToolchainMemoRejectsIncompleteInventory(t *testing.T) {
 	}
 	original := read()
 	stringsMemoKey := verifiedPackageMemoKey("strings", original.Packages["strings"])
-	verifiedPackageMemo.Store(stringsMemoKey, verifiedPackageVerdict{OK: false})
-	t.Cleanup(func() { verifiedPackageMemo.Delete(stringsMemoKey) })
-	if toolchainSourceDegradation(snapshot.Value("GOVERSION"), original, nil).audited() {
-		t.Fatal("unverified strings control unexpectedly admitted")
-	}
-	if again := read(); listings != 1 || !reflect.DeepEqual(again, original) {
-		t.Fatal("valid unchanged memo did not serve")
-	}
-	scope := toolchainSourceScope(snapshot, flags, surfaceSeeds())
-	path, err := cachefile.Path(sourceDigestsDirName, scope, "listing")
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, corrupt := range map[string]func(*surfaceListing){
-		"empty":              func(l *surfaceListing) { l.Packages = nil },
-		"missing package":    func(l *surfaceListing) { l.Packages = l.Packages[1:] },
-		"missing files":      func(l *surfaceListing) { l.Packages[0].Files = nil },
-		"missing stamps":     func(l *surfaceListing) { l.Discovery[0].Entries = nil },
-		"missing discovery":  func(l *surfaceListing) { l.Discovery = nil },
-		"missing commitment": func(l *surfaceListing) { l.Integrity = "" },
-		"admission label":    func(l *surfaceListing) { l.Packages[0].Audited = !l.Packages[0].Audited },
-	} {
-		t.Run(name, func(t *testing.T) {
-			var envelope cachefile.Envelope
-			if err := json.Unmarshal(data, &envelope); err != nil {
-				t.Fatal(err)
+	withClosureTestHooks(analysisTestHookSet{
+		packageVerdictOverride: func(memoKey string) (verifiedPackageVerdict, bool) {
+			if memoKey == stringsMemoKey {
+				return verifiedPackageVerdict{OK: false}, true
 			}
-			var listing surfaceListing
-			if err := json.Unmarshal(envelope.Payload, &listing); err != nil {
-				t.Fatal(err)
-			}
-			corrupt(&listing)
-			envelope.Payload, err = json.Marshal(listing)
-			if err != nil {
-				t.Fatal(err)
-			}
-			broken, err := json.Marshal(envelope)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path, broken, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			before := listings
-			got := read()
-			if listings != before+1 || !reflect.DeepEqual(got, original) || toolchainSourceDegradation(snapshot.Value("GOVERSION"), got, nil).audited() {
-				t.Fatal("incomplete inventory served or changed admission")
-			}
-		})
-	}
+			return verifiedPackageVerdict{}, false
+		},
+	}, func() {
+		if toolchainSourceDegradation(snapshot.Value("GOVERSION"), original, nil).audited() {
+			t.Fatal("unverified strings control unexpectedly admitted")
+		}
+		if again := read(); listings != 1 || !reflect.DeepEqual(again, original) {
+			t.Fatal("valid unchanged memo did not serve")
+		}
+		scope := toolchainSourceScope(snapshot, flags, surfaceSeeds())
+		path, err := cachefile.Path(sourceDigestsDirName, scope, "listing")
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name, corrupt := range map[string]func(*surfaceListing){
+			"empty":              func(l *surfaceListing) { l.Packages = nil },
+			"missing package":    func(l *surfaceListing) { l.Packages = l.Packages[1:] },
+			"missing files":      func(l *surfaceListing) { l.Packages[0].Files = nil },
+			"missing stamps":     func(l *surfaceListing) { l.Discovery[0].Entries = nil },
+			"missing discovery":  func(l *surfaceListing) { l.Discovery = nil },
+			"missing commitment": func(l *surfaceListing) { l.Integrity = "" },
+			"admission label":    func(l *surfaceListing) { l.Packages[0].Audited = !l.Packages[0].Audited },
+		} {
+			t.Run(name, func(t *testing.T) {
+				var envelope cachefile.Envelope
+				if err := json.Unmarshal(data, &envelope); err != nil {
+					t.Fatal(err)
+				}
+				var listing surfaceListing
+				if err := json.Unmarshal(envelope.Payload, &listing); err != nil {
+					t.Fatal(err)
+				}
+				corrupt(&listing)
+				envelope.Payload, err = json.Marshal(listing)
+				if err != nil {
+					t.Fatal(err)
+				}
+				broken, err := json.Marshal(envelope)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, broken, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				before := listings
+				got := read()
+				if listings != before+1 || !reflect.DeepEqual(got, original) || toolchainSourceDegradation(snapshot.Value("GOVERSION"), got, nil).audited() {
+					t.Fatal("incomplete inventory served or changed admission")
+				}
+			})
+		}
+	})
 }
 
 // Every selection the structural content verifier admits or refuses on the
@@ -679,15 +686,17 @@ func TestDigestTraversalEndsAtTheNextFileBoundary(t *testing.T) {
 	defer cancel()
 	const stopAt = 3
 	reads := 0
-	prior := digestReadForTest
-	digestReadForTest = func(name string) {
-		reads++
-		if reads == stopAt {
-			cancel()
-		}
-	}
-	t.Cleanup(func() { digestReadForTest = prior })
-	_, err := newAtEnv(ctx, ".", environmentWith())
+	var err error
+	withClosureTestHooks(analysisTestHookSet{
+		digestRead: func(name string) {
+			reads++
+			if reads == stopAt {
+				cancel()
+			}
+		},
+	}, func() {
+		_, err = newAtEnv(ctx, ".", environmentWith())
+	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("a construction cancelled mid-digest answered %v, want the cancellation", err)
 	}
@@ -714,12 +723,13 @@ func TestFinalDigestReadCannotCompleteACancelledConstruction(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	env := environmentWith()
 	reads := 0
-	prior := digestReadForTest
-	t.Cleanup(func() { digestReadForTest = prior })
-	digestReadForTest = func(string) { reads++ }
-	if _, err := newAtEnv(t.Context(), ".", env); err != nil {
-		t.Fatal(err)
-	}
+	withClosureTestHooks(analysisTestHookSet{
+		digestRead: func(string) { reads++ },
+	}, func() {
+		if _, err := newAtEnv(t.Context(), ".", env); err != nil {
+			t.Fatal(err)
+		}
+	})
 	last := reads
 	if last == 0 {
 		t.Fatal("no selected file was read")
@@ -727,18 +737,21 @@ func TestFinalDigestReadCannotCompleteACancelledConstruction(t *testing.T) {
 	for _, notice := range []bool{false, true} {
 		ctx, cancel := context.WithCancel(t.Context())
 		reads = 0
-		digestReadForTest = func(string) {
-			reads++
-			if reads == last {
-				cancel()
-			}
-		}
 		var err error
-		if notice {
-			_, _, _, err = ResolveToolchainSelection(ctx, gotool.NewEnvReader(gotool.Runner{}, ".", env), nil)
-		} else {
-			_, err = newAtEnv(ctx, ".", env)
-		}
+		withClosureTestHooks(analysisTestHookSet{
+			digestRead: func(string) {
+				reads++
+				if reads == last {
+					cancel()
+				}
+			},
+		}, func() {
+			if notice {
+				_, _, _, err = ResolveToolchainSelection(ctx, gotool.NewEnvReader(gotool.Runner{}, ".", env), nil)
+			} else {
+				_, err = newAtEnv(ctx, ".", env)
+			}
+		})
 		cancel()
 		if reads != last || !errors.Is(err, context.Canceled) {
 			t.Fatalf("notice=%t final-read cancellation: reads=%d/%d error=%v", notice, reads, last, err)
@@ -2993,9 +3006,12 @@ func TestViewLoadSubstitutesForTestingTypeScanLoad(t *testing.T) {
 	}
 	shared.UseViewLoad(load)
 	var privateLoads []string
-	analysisTestHooks.testingTypeOwnLoad = func(pkgPath string) { privateLoads = append(privateLoads, pkgPath) }
-	defer func() { analysisTestHooks.testingTypeOwnLoad = nil }()
-	got, _, err := shared.ComputeMaximalBatch(subjects)
+	var got map[Subject]Closure
+	withClosureTestHooks(analysisTestHookSet{
+		testingTypeOwnLoad: func(pkgPath string) { privateLoads = append(privateLoads, pkgPath) },
+	}, func() {
+		got, _, err = shared.ComputeMaximalBatch(subjects)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3049,8 +3065,6 @@ func TestViewLoadMissFallsBackToPrivateTestingTypeLoad(t *testing.T) {
 	}
 	h.UseViewLoad(load)
 	var privateLoads []string
-	analysisTestHooks.testingTypeOwnLoad = func(pkgPath string) { privateLoads = append(privateLoads, pkgPath) }
-	defer func() { analysisTestHooks.testingTypeOwnLoad = nil }()
 	// The private load is a typed load like any other: it reports a
 	// typecheck unit naming the package, so an operator sees the cost.
 	var units []string
@@ -3059,7 +3073,12 @@ func TestViewLoadMissFallsBackToPrivateTestingTypeLoad(t *testing.T) {
 			units = append(units, fmt.Sprintf("%s:%d/%d", pkgPath, index, total))
 		}
 	})
-	got, _, err := h.ComputeMaximalBatch(subjects)
+	var got map[Subject]Closure
+	withClosureTestHooks(analysisTestHookSet{
+		testingTypeOwnLoad: func(pkgPath string) { privateLoads = append(privateLoads, pkgPath) },
+	}, func() {
+		got, _, err = h.ComputeMaximalBatch(subjects)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

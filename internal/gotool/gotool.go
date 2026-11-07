@@ -13,6 +13,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -310,6 +313,28 @@ func CanonicalDir(dir string) (string, error) {
 	return filepath.EvalSymlinks(raw)
 }
 
+// BytesNeedCommentParse reports whether src may contain directive or generator
+// comments (//go:, //gofresh:, protoc-gen-go) or a Cgo import ("C", `C`, or an
+// escaped import path) whose preamble comments affect Go semantics.
+func BytesNeedCommentParse(src []byte) bool {
+	return bytes.Contains(src, []byte("go:")) ||
+		bytes.Contains(src, []byte("gofresh:")) ||
+		bytes.Contains(src, []byte("protoc-gen-go")) ||
+		bytes.Contains(src, []byte(`"C"`)) ||
+		bytes.Contains(src, []byte("`C`")) ||
+		(bytes.Contains(src, []byte("import")) && bytes.IndexByte(src, '\\') >= 0)
+}
+
+// StringNeedsCommentParse is the string counterpart of BytesNeedCommentParse.
+func StringNeedsCommentParse(src string) bool {
+	return strings.Contains(src, "go:") ||
+		strings.Contains(src, "gofresh:") ||
+		strings.Contains(src, "protoc-gen-go") ||
+		strings.Contains(src, `"C"`) ||
+		strings.Contains(src, "`C`") ||
+		(strings.Contains(src, "import") && strings.IndexByte(src, '\\') >= 0)
+}
+
 // LoadPackages loads patterns through x/tools/go/packages under the
 // policy's package-loader environment (EnvForPackages, with GOPACKAGESDRIVER
 // pinned off and a non-nil Config.Env guaranteed so x/tools never falls
@@ -339,6 +364,20 @@ func LoadPackages(ctx context.Context, mode packages.LoadMode, dir string, env, 
 		Dir:        dir,
 		Env:        packageEnv,
 		BuildFlags: slices.Clone(buildFlags),
+		ParseFile: func(fset *token.FileSet, filename string, src []byte) (*ast.File, error) {
+			if src == nil {
+				var err error
+				src, err = os.ReadFile(filename)
+				if err != nil {
+					return nil, err
+				}
+			}
+			parseMode := parser.AllErrors | parser.SkipObjectResolution
+			if BytesNeedCommentParse(src) {
+				parseMode |= parser.ParseComments
+			}
+			return parser.ParseFile(fset, filename, src, parseMode)
+		},
 	}
 	patterns = slices.Clone(patterns)
 	if err := ctx.Err(); err != nil {
