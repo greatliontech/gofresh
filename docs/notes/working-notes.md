@@ -266,3 +266,22 @@ All 6 hunks in `docs/specs/closure.md` belong to **(A)** (5 pure C.4 hunks + 1 `
 - **Chunk C.4 Close-Out Consolidation Scan:**
   - Verified zero duplicate mechanisms or vestigial scaffolding in `internal/closure` and `internal/auditset` (`pkgFreeOfUnverifiedNativeWriteHazard`, `verifyNonStdAssemblyMemo`, and `scanIdentToken` `*Mode` helpers consolidated in Rounds 2–3; retirement of the remaining two legacy `VersionListing` tables in `typecarrier.go` and `propertyharness.go` is scheduled in **Chunk D.2**).
   - Verified zero leaked planning labels, finding IDs, or `TODO`/`FIXME` markers across `internal/`, `docs/specs/`, `*.go`, and `.stipulator/`.
+
+---
+
+## 9. Chunk D.1 Design, Soundness Audit & Implementation Log (2026-11-07)
+
+### 9.1 Pre-Implementation Hunk Audit & Soundness Catches (`e7304794`)
+1. **Stipulator Multi-Invocation Topology (`.stipulator/policy.textproto`):**
+   - Verified in `../stipulator/internal/backends/golang/{execute,derive,policy}.go`:
+     - `executePolicy` runs policy invocations **sequentially** (`execute.go:1864`), while `freezeWitnessAllocation` computes `n.SpawnBound = min(max(1, processors/2), max(1, len(selectedPackages)))` and `GOMAXPROCS = processors / n.SpawnBound` **per invocation** (`execute.go:290, 1216-1246`).
+     - Overlapping packages across invocations mark `prev.ambiguous = true` (`derive.go:818`), so invocations must partition `gofresh`'s 20 packages **disjointly** in strictly ascending canonical invocation-name byte order (`policy.go:55`).
+     - Splitting into `name: "race:core"` (`packages: "."` and `packages: "./internal/closure"`, giving each heavy binary `GOMAXPROCS = processors/2`, e.g. `16` cores on a 32-core host instead of `2`) and `name: "race:leaf"` (the remaining 18 `./internal/...` packages) eliminates core starvation completely while sharing the same `groupIdentity` coordinate (`derive.go:647`) and removing the vestigial pre-B.2 `bracket_paths: "runtimeinput"` entry (already covered by `"internal"`).
+2. **Clean `(B)` Test-Hook Removals Without `(D)` Contamination:**
+   - **Zero `inMemory*` fields on `closure.Hasher`:** Add only the 3 clean miss callbacks (`listOnMiss`, `loadProgramOnMiss`, `testingPackagesOnMiss`) on `Hasher`, capturing a test-only `*inMemoryHasherState` struct inside closures in `internal/closure/frontend_harness_test.go`.
+   - **Unlisted `(B)` culprit in `internal/closure/attribution.go`:** Fold `var analyzeAttributedBatch` and `var probePackageScope` (`attribution.go:77, 90`) into `analysisTestHookSet` (`runAnalyzeAttributedBatch` / `runProbePackageScope`).
+   - **Root `gofresh` simplification:** `Session.testHooks` / `checking.go` context plumbing in the checkpoint existed solely for `(D)`'s `t.Parallel()` rewrites; without `(D)`'s `t.Parallel()`, `viewTestHooksMu` + `viewTestHooks atomic.Pointer[viewTestHookSet]` + `withViewTestHooks` handles all root test hooks (including mandatory `(B)` call-site migrations in `integration_execution_test.go` and `integration_view_test.go` while keeping all test fixtures, `t.Chdir` calls, and `checking.go` intact).
+   - **Preserve `//gofresh:pure` & `t.Chdir` tests:** Never add `t.Parallel()` to `//gofresh:pure` tests (`reaches testing.Parallel`), and preserve `t.Chdir` in `integration_execution_test.go`, `verdict_algebra_test.go`, `classification_test.go`, and `manifest_algebra_test.go`.
+   - **Module-wide invariant witness:** Add `TestModulePackagesHaveNoSharedDynamicStateUnderPackageExecution` cleanly to `surface_test.go` (without creating an `aaa_*.go` filename hack).
+3. **Adjacent Soundness Fix in `internal/dynstate/func_summary.go` (`DynamicStateStrategy` `@49` $\rightarrow$ `@50`):**
+   - Alongside gating `atomicPtrCandidates` on `audited == true` and admitting pure-`Load` (`len(storesInFunc[v]) == 0`) unexported uninitialized `sync/atomic.Pointer[T]` variables, fix an adjacent gap in `bracketedSeamNodes`: reject any mutating seam helper (`funcBracketsAtomic` or save-and-restore) that is transitively called within the package from a function containing `*ast.GoStmt` or `.Parallel()` (or passed as a function value rather than called directly), since a parallel test calling `with*TestHooks` only downgrades itself (`reaches testing.Parallel`) while sequential siblings in the same `PackageExecution` binary could otherwise race with its non-nil `Store`.
