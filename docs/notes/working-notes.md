@@ -254,3 +254,15 @@ All 6 hunks in `docs/specs/closure.md` belong to **(A)** (5 pure C.4 hunks + 1 `
      - Stripped all `[R*]` / `(A*)` review labels from test comments while retaining standalone technical rationale.
   4. **`[R5-4]` [NIT — `adjacent` / `fixed`: Stale comment in `contributionAndFilesFor` (`closure.go:738-743`)]:**
      - Updated comment to explain whole-directory hashing for both the maximal downgrade floor and Tier-2 mechanical `.s` verification.
+
+### 8.7 Adversarial Review Rounds 6 & 7 (`0ce01db8-18fe-441d-b38a-5ce88c2017de`) — Converged (`ZERO FINDINGS`)
+- **Round 6 (`[R6-1]`, `LOW`, `introduced` / `fixed`):**
+  - `splitAsmStatements` (`asmverify.go:1413-1442`) now skips `'...'` and `"..."` literals (with `\` escapes) before splitting on `;`.
+  - `verifyAsmTextInstruction` (`asmverify.go:2204-2207, 2265-2294`) now evaluates `stripAsmQuotedLiterals` before checking `(TLS)` on `rest` and `(SB)` / `'·'` on `opnd`, and rejects any `(SB)` operand mixing quote characters (`strings.ContainsAny(opnd, "\"'")`).
+  - `hasUnquotedColon` (`asmverify.go:1952-1976`) now fails closed (`if i >= len(s) { return true }`) on unclosed quotes, matching the rest of the assembly token scanner family.
+  - Bumped `nonStdAsmVerifierVersion` (`"gofresh/nonstd-asm-verifier@4"`) and `verifiedNonStdAsmMemoSummaryKey` (`"gofresh/verified-nonstd-asm@4"`), expanded `quotedAsm` in `audited_scan_test.go`, and killed independent `gomutant ephemeral` probes `20.1`–`20.3`.
+- **Round 7 (`0ce01db8-18fe-441d-b38a-5ce88c2017de`):**
+  - Converged with **`ZERO FINDINGS`** across the entire Chunk C.4 diff (`28` modified files + `internal/closure/asmverify.go`).
+- **Chunk C.4 Close-Out Consolidation Scan:**
+  - Verified zero duplicate mechanisms or vestigial scaffolding in `internal/closure` and `internal/auditset` (`pkgFreeOfUnverifiedNativeWriteHazard`, `verifyNonStdAssemblyMemo`, and `scanIdentToken` `*Mode` helpers consolidated in Rounds 2–3; retirement of the remaining two legacy `VersionListing` tables in `typecarrier.go` and `propertyharness.go` is scheduled in **Chunk D.2**).
+  - Verified zero leaked planning labels, finding IDs, or `TODO`/`FIXME` markers across `internal/`, `docs/specs/`, `*.go`, and `.stipulator/`.
