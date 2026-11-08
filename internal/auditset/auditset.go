@@ -1,13 +1,9 @@
-// Package auditset holds the one shape every source-audited admission
-// answers from — a listing consulted by a lookup that refuses whatever
-// it does not name — and the audited sets whose contents two tiers
-// read: the closure tiers by symbol name, the purity tier by receiver
-// and method. One table per set, so the two tiers cannot drift apart
-// one arm at a time, and one listing shape per version domain, so
-// "listed or refused" is written once (the audit-key consolidation).
-// The sets are package-private and read through predicates: an
-// audited set grows only by source audit — by editing this file —
-// never by a write at runtime.
+// Package auditset holds the audited standard-library symbol, receiver, and
+// sentinel sets whose contents two tiers read: the closure tiers by symbol
+// name, the purity tier by receiver and method. One table per set keeps the
+// tiers aligned so they cannot drift apart one arm at a time. The sets are
+// package-private and read through predicates: an audited set grows only by
+// source audit — by editing this file — never by a write at runtime.
 package auditset
 
 import (
@@ -46,18 +42,6 @@ func Identity() string {
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
-}
-
-// VersionListing is a source audit's record: each key (a toolchain
-// release, a module variable, a harness package) names the versions
-// whose source the audit walked. Nothing outside the listing is ever
-// admitted — a version later or earlier than the listed ones refuses
-// fail-closed until its source is audited.
-type VersionListing map[string][]string
-
-// Listed reports whether the key's listing names the version.
-func (l VersionListing) Listed(key, version string) bool {
-	return slices.Contains(l[key], version)
 }
 
 // syncMethods is the audited synchronization set: sync's mutex
@@ -719,10 +703,9 @@ func namesWithSymbols(set map[string][]string, symbols map[string]bool) []string
 
 // BoundedToken reports whether text begins with marker as a whole token
 // — marker followed by end of text or by one of the bound bytes — and
-// returns the remainder after the marker. A directive or generator name
+// returns the remainder after the marker. A directive or token prefix
 // matched this way can never be shadowed by a longer name sharing its
-// prefix; each caller names the bounds its grammar allows (space or
-// tab for a directive, space, tab, or a period for a generator header).
+// prefix; each caller names the delimiter bytes its grammar allows.
 func BoundedToken(text, marker, bounds string) (rest string, ok bool) {
 	if !strings.HasPrefix(text, marker) {
 		return "", false
@@ -734,9 +717,9 @@ func BoundedToken(text, marker, bounds string) (rest string, ok bool) {
 	return "", false
 }
 
-// IsGeneratedMarker reports whether text is a Go generated-file marker line
-// (`^// Code generated .* DO NOT EDIT\.$` over the line's trimmed text, so a
-// trailing space cannot split gofresh's readers from its fold).
+// IsGeneratedMarker reports whether text is a standard Go generated-file marker
+// line (`^// Code generated .* DO NOT EDIT\.$` over the line's trimmed text),
+// retained in the canonical member token form.
 func IsGeneratedMarker(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	return strings.HasPrefix(trimmed, "// Code generated ") &&

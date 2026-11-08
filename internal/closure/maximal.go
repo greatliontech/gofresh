@@ -290,17 +290,16 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 		if pkg.Standard || pkg.Module == nil || pkg.IsGeneratedTestMainFor(pkgPath) {
 			continue
 		}
-		if propertyHarnessPath(pkg.ImportPath) &&
-			auditedPropertyHarnessModule(pkg.Module.Version, pkg.Module.Main,
-				pkg.Module.Replace != nil && pkg.Module.Replace.Version == "") {
+		if h.propertyHarnessAuditedListPkg(pkgPath, &pkg) {
 			// Audited property-harness surface: its files carry the
 			// harness's own clock, filesystem, and flag protocol, all
-			// covered by the package audit - the scan backstop exempts
-			// them exactly as it exempts the standard library's. The
-			// recorded fact keeps the package unverifiable-by-hash: the
-			// audit admits observation, never purity - a property run's
-			// outcome rides the harness's log-surfaced configuration,
-			// not the sources alone (REQ-closure-observability-property-harness).
+			// covered by the mechanical package verification - the scan
+			// backstop exempts them exactly as it exempts the standard
+			// library's. The recorded fact keeps the package
+			// unverifiable-by-hash: the verification admits observation,
+			// never purity - a property run's outcome rides the
+			// harness's log-surfaced configuration, not the sources alone
+			// (REQ-closure-observability-property-harness).
 			record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact()}})
 			continue
 		}
@@ -1149,8 +1148,9 @@ func (h *Hasher) subjectMaximalExternalEffectsWithZeroGlobals(base *tier2Base, p
 			continue
 		}
 		if propertyHarnessPath(pkg.ImportPath) &&
-			auditedPropertyHarnessModule(pkg.Module.Version, pkg.Module.Main,
-				pkg.Module.Replace != nil && pkg.Module.Replace.Version == "") {
+			!listPkgHasNativeOrEmbed(&pkg) &&
+			base != nil &&
+			propertyHarnessAuditedProg(h.SelectionAudited(), base.prog) {
 			record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact()}})
 			continue
 		}

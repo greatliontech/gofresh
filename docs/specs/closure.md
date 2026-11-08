@@ -1503,7 +1503,8 @@ fresh scratch operations and other admitted effects confer no support under this
 method. When the observability proof succeeds under an audited toolchain
 selection and neither subject flow nor user test-main flow reaches any external
 input operation at all (only checked harness protocol facts such as harness
-logging, benchmark pacing, closed subtest execution, and the canonical test-main
+logging, benchmark pacing, closed subtest execution, checked property-harness
+execution, and the canonical test-main
 epilogue `os.Exit`), the observability disposition additionally records static
 effect-free reachability (`Observability.EffectFree`), bound into the proof's
 integrity evidence under the `gofresh/static-reachability@1` outcome method so
@@ -1971,15 +1972,24 @@ prove the driver body, callback completion or observation delivery.
 harness, including `pgregory.net/rapid`, MUST be summarized at a walk or
 package-scan boundary only under a checked derivation that everything ambient
 in the summarized behavior is
-the harness's own protocol (the run configuration it reads and the
-clock it paces by surface in its harness-log summary line on every
-outcome, its failure artifacts are output-only reproduction files, and
-its value generation is process-local PRNG state seeded by that same
-log-surfaced configuration), and the property callback is subject
+the harness's own protocol (the run configuration it reads is a caller-owned
+harness run condition like benchmark pacing, the clock it paces by drives only
+its harness-log summary and shrink budget, its failure artifacts are failfile
+replay inputs under `testdata/rapid` or the configured failfile flag and
+failure-reproduction outputs, and its value generation is process-local PRNG
+state seeded by its harness configuration or per-run entropy), and the property callback is subject
 flow, walked and classified at its own sites through the harness's
 dispatch. Version pins and local-source identity identify the implementation,
 not its protocol semantics. Unsupported harness or subordinate toolchain
-behavior retains its ordinary classification. The checked claim is sound only paired with a
+behavior retains its ordinary classification. Exported functions or methods
+returning a generator type parameter (rather than a generator, handle, error,
+or void) must either require a harness execution handle parameter (`*T` or
+`TB`), be a pure single-argument identity function, or be `(*Generator[V]).Example(seed ...int) V`
+whose body deterministically overrides the base entropy seed whenever `len(seed) > 0`;
+calling `Example` without a statically non-empty explicit seed slice draws
+unlogged per-call entropy outside a `testing.TB`-logged property run and
+classifies as non-observable randomness across subject, test-main, and startup
+flows. The checked claim is sound only paired with a
 boundary gate on every flow that can call into the harness — subject,
 test-main, and startup alike: each dynamic-carrying argument of a
 statically dispatched harness call must be judged closed, where the judgment
@@ -1989,21 +1999,24 @@ and the standard harness's `T`/`B`/`TB` — constructed only by their
 harness behind unexported fields and handed per-invocation; a handle
 loaded from shared state is a sibling invocation's value and refuses
 like any other load), a gate-passing harness call result (the wrapped
-callback and generator values, closed for dispatch judgment wherever
+callback and generator values — excluding unseeded `Example` calls — closed for dispatch judgment wherever
 they later cross a gate), and a locally built variadic slice of
 judged elements; every other value — a load from shared mutable
 state, a generator laundered through an ordinary parameter whose
 callers pass unjudged values — widens the subject world. Harness-
 owned TYPES confer no admission by themselves: a gated call's closure
 is per-subject provenance, never a per-program fact a sibling's flow
-could have supplied. A named harness function reached as a dynamic
-target keeps the conservative refusal — no static site exists to gate
-the crossing — while an anonymous harness function (the wrapped
-callback MakeCheck returns) is admitted as a subject-flow dynamic
-target: it exists only because a gated harness call in some analyzed
-flow created it, which is exactly why every flow carries the gate;
-the test-main and startup arms stay stricter and refuse every
-dynamically reached harness target. Importing the property harness
+could have supplied. A named harness function reached via a computed
+function-value call keeps the conservative refusal — no static site
+exists to gate the crossing — whereas in subject flow an anonymous
+harness function (the wrapped callback MakeCheck returns) is admitted,
+and a named harness method (other than `Example`) reached via interface invoke is admitted
+only when every dynamic-carrying invoke argument passes the boundary
+gate and every non-harness interface boxing of a type mentioning the
+receiver's origin across the subject's RTA-reachable functions occurs
+in subject flow over a gate-passing receiver or variadic slice; the
+test-main and startup arms stay stricter and refuse every dynamically
+reached harness target. Importing the property harness
 keeps the package unverifiable at the closure tier — the checked protocol claim admits
 observation, never purity: a property run's outcome rides the
 harness's log-surfaced run configuration, not the sources alone, so
@@ -2398,7 +2411,7 @@ the block form — the analyzer reads a linkname out of either), cgo's
 (vet's build-tag check fails the build when it disagrees with the
 `//go:build` line), the cgo preamble (every comment
 immediately preceding `import "C"`, or the `"C"` path inside an import group),
-and the generated-file marker under the one reading gofresh's discharges use;
+and the standard Go generated-file marker (`// Code generated … DO NOT EDIT.`);
 `//line` directives are not retained, they remap positions. Whitespace,
 layout, and every other comment reach the binary only as source positions,
 which this judgment rules diagnostics, not behavior (as the compartment

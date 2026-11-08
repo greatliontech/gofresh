@@ -14,6 +14,14 @@ func validFactKey(k string) bool {
 	return k != "" && !strings.Contains(k, "\x00")
 }
 
+func validQualifiedVarKey(k string) bool {
+	if strings.Contains(k, "\x00") {
+		return false
+	}
+	dot := strings.LastIndexByte(k, '.')
+	return dot > 0 && dot < len(k)-1
+}
+
 // solveLeastFixedPoint computes the least fixed point of set over deps: any
 // key in deps whose every edge target satisfies satisfied is added to set
 // until convergence.
@@ -709,10 +717,12 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 			}
 		}
 	}
+	malformedFactVars := map[string]bool{}
 	markDeclaresMutated := func(fact Fact) {
 		for _, key := range fact.Declares {
 			mutated[key] = true
 			unattributedMark[key] = true
+			malformedFactVars[key] = true
 		}
 	}
 	resolution := NewDeferralResolution(allFacts, markDeclaresMutated)
@@ -991,13 +1001,562 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 	}
 	notOpaque := resolution.NotOpaque
 	pinnedPkg := map[string]bool{}
-	pinOf := map[string]string{}
+	mutableLocalPkg := map[string]bool{}
 	for _, node := range meta {
-		if node.Class == PinnedPackage {
+		switch node.Class {
+		case PinnedPackage:
 			pinnedPkg[node.PkgPath] = true
-			pinOf[node.PkgPath] = node.Pin
+		case MutableLocalPackage:
+			mutableLocalPkg[node.PkgPath] = true
 		}
 	}
+
+	// Validate all structural discharge and struct-mutation slices, marking any
+	// malformed fact fail-closed so neither its declared variables nor its
+	// positive role/discharge claims can discharge culprits.
+	isFactDischargeMalformed := func(fact Fact) bool {
+		bad := false
+		for _, key := range fact.MappingDischarges {
+			if !validQualifiedVarKey(key) {
+				bad = true
+			}
+		}
+		for _, key := range fact.MemoDischarges {
+			if !validQualifiedVarKey(key) {
+				bad = true
+			}
+		}
+		for _, c := range fact.ProtoClusters {
+			if !c.Valid() {
+				bad = true
+			}
+		}
+		for _, a := range fact.ProtoExtAliases {
+			if !a.Valid() {
+				bad = true
+			}
+		}
+		for _, rt := range fact.ProtoRuntimeTypes {
+			if !rt.Valid() {
+				bad = true
+			}
+		}
+		for _, gv := range fact.GrpcServiceVars {
+			if !gv.Valid() {
+				bad = true
+			}
+		}
+		for _, tr := range fact.MutatedStructTypes {
+			if !tr.Valid() {
+				bad = true
+			}
+		}
+		for _, cm := range fact.ConditionalStructMutations {
+			if !cm.Valid() {
+				bad = true
+			}
+		}
+		if !fact.NoPostInitCarrierWrites && len(fact.CarrierImportCalls) > 0 {
+			bad = true
+		}
+		for _, dep := range fact.CarrierImportCalls {
+			if !validNonEmptyPkgKey(dep) {
+				bad = true
+			}
+		}
+		for _, m := range fact.NonMutatingMethods {
+			if !m.Valid() {
+				bad = true
+			}
+		}
+		for _, key := range fact.DirectVarWrites {
+			if !validQualifiedVarKey(key) {
+				bad = true
+			}
+		}
+		return bad
+	}
+	pkgHasMalformedFact := map[string]bool{}
+	mutatedStructs := map[TypeRef]bool{}
+	directVarWritten := map[string]bool{}
+	anyMalformedMutatedStruct := false
+	anyMalformedDirectVarWrite := false
+	for pkgPath, pkgFacts := range allFacts {
+		for _, fact := range pkgFacts {
+			if isFactDischargeMalformed(fact) {
+				pkgHasMalformedFact[pkgPath] = true
+				for _, sibling := range pkgFacts {
+					markDeclaresMutated(sibling)
+				}
+			}
+			for _, tr := range fact.MutatedStructTypes {
+				if tr.Valid() {
+					mutatedStructs[tr] = true
+				} else {
+					anyMalformedMutatedStruct = true
+				}
+			}
+			for _, cm := range fact.ConditionalStructMutations {
+				if !cm.Valid() {
+					anyMalformedMutatedStruct = true
+				}
+			}
+			if !fact.NoPostInitCarrierWrites && len(fact.CarrierImportCalls) > 0 {
+				anyMalformedMutatedStruct = true
+			}
+			for _, dep := range fact.CarrierImportCalls {
+				if !validNonEmptyPkgKey(dep) {
+					anyMalformedMutatedStruct = true
+				}
+			}
+			for _, m := range fact.NonMutatingMethods {
+				if !m.Valid() || m.Pkg != pkgPath {
+					anyMalformedMutatedStruct = true
+				}
+			}
+			for _, key := range fact.DirectVarWrites {
+				if validQualifiedVarKey(key) {
+					directVarWritten[key] = true
+				} else {
+					anyMalformedDirectVarWrite = true
+				}
+			}
+		}
+	}
+
+	pkgCannotRetainCarrier := map[string]bool{}
+	for pkgPath, pkgFacts := range allFacts {
+		if len(pkgFacts) == 0 || pkgHasMalformedFact[pkgPath] {
+			continue
+		}
+		allOK := true
+		for _, fact := range pkgFacts {
+			if !fact.NoPostInitCarrierWrites {
+				allOK = false
+				break
+			}
+		}
+		if allOK {
+			pkgCannotRetainCarrier[pkgPath] = true
+		}
+	}
+	for {
+		changed := false
+		for pkgPath := range pkgCannotRetainCarrier {
+			drop := false
+			for _, fact := range allFacts[pkgPath] {
+				for _, dep := range fact.CarrierImportCalls {
+					if !pkgCannotRetainCarrier[dep] {
+						drop = true
+						break
+					}
+				}
+				if drop {
+					break
+				}
+			}
+			if drop {
+				delete(pkgCannotRetainCarrier, pkgPath)
+				changed = true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	nonMutatingMethods := map[FuncKey]bool{}
+	if !anyMalformedMutatedStruct {
+		for pkgPath, pkgFacts := range allFacts {
+			if len(pkgFacts) == 0 || pkgHasMalformedFact[pkgPath] {
+				continue
+			}
+			var common map[FuncKey]bool
+			for fi, fact := range pkgFacts {
+				cur := make(map[FuncKey]bool, len(fact.NonMutatingMethods))
+				for _, m := range fact.NonMutatingMethods {
+					if m.Pkg == pkgPath {
+						cur[m] = true
+					}
+				}
+				if fi == 0 {
+					common = cur
+					continue
+				}
+				for m := range common {
+					if !cur[m] {
+						delete(common, m)
+					}
+				}
+			}
+			for m := range common {
+				nonMutatingMethods[m] = true
+			}
+		}
+	}
+	// Precompute candidate ProtoRoleDescBuilder GuardTypes per package (intersected
+	// across package variants) so RequireDescBuilderGuard conditional struct
+	// mutations evaluate monotonically during the mutatedStructs least fixed point.
+	type descBuilderCandidate struct {
+		builderType TypeRef
+		guardTypes  map[TypeRef]bool
+	}
+	descBuilderCandidates := map[string][]descBuilderCandidate{}
+	if !anyMalformedMutatedStruct {
+		for pkgPath, pkgFacts := range allFacts {
+			if len(pkgFacts) == 0 || pkgHasMalformedFact[pkgPath] {
+				continue
+			}
+			var common map[TypeRef]map[TypeRef]bool
+			for fi, fact := range pkgFacts {
+				cur := map[TypeRef]map[TypeRef]bool{}
+				for _, rt := range fact.ProtoRuntimeTypes {
+					if rt.Type.Pkg != pkgPath || rt.Role != ProtoRoleDescBuilder {
+						continue
+					}
+					gt := make(map[TypeRef]bool, len(rt.GuardTypes))
+					for _, g := range rt.GuardTypes {
+						gt[g] = true
+					}
+					cur[rt.Type] = gt
+				}
+				if fi == 0 {
+					common = cur
+					continue
+				}
+				for bType, prevGT := range common {
+					nextGT, ok := cur[bType]
+					if !ok {
+						delete(common, bType)
+						continue
+					}
+					for g := range nextGT {
+						prevGT[g] = true
+					}
+				}
+			}
+			for bType, gt := range common {
+				descBuilderCandidates[pkgPath] = append(descBuilderCandidates[pkgPath], descBuilderCandidate{
+					builderType: bType,
+					guardTypes:  gt,
+				})
+			}
+		}
+	}
+	hasValidDescBuilderCovering := func(guardStruct TypeRef) bool {
+		for _, cand := range descBuilderCandidates[guardStruct.Pkg] {
+			if guardStruct != cand.builderType && !cand.guardTypes[guardStruct] {
+				continue
+			}
+			clean := true
+			for g := range cand.guardTypes {
+				if mutatedStructs[g] {
+					clean = false
+					break
+				}
+			}
+			if clean {
+				return true
+			}
+		}
+		return false
+	}
+	for {
+		changed := false
+		for _, pkgFacts := range allFacts {
+			for _, fact := range pkgFacts {
+				for _, cm := range fact.ConditionalStructMutations {
+					if !cm.Valid() || mutatedStructs[cm.Struct] {
+						continue
+					}
+					triggered := false
+					if cm.GuardPkg != "" && !pkgCannotRetainCarrier[cm.GuardPkg] {
+						triggered = true
+					}
+					if !triggered && !cm.GuardStruct.IsZero() && !cm.RequireDescBuilderGuard && mutatedStructs[cm.GuardStruct] {
+						triggered = true
+					}
+					if !triggered && cm.RequireDescBuilderGuard && !hasValidDescBuilderCovering(cm.GuardStruct) {
+						triggered = true
+					}
+					if !triggered && !cm.RequireNonMutatingMethod.IsZero() && !nonMutatingMethods[cm.RequireNonMutatingMethod] {
+						triggered = true
+					}
+					if triggered {
+						mutatedStructs[cm.Struct] = true
+						changed = true
+					}
+				}
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+
+	intersectDeclaredVarSet := func(extract func(pkgPath string, fact Fact) map[string]bool) map[string]bool {
+		out := map[string]bool{}
+		for pkgPath, pkgFacts := range allFacts {
+			if pkgHasMalformedFact[pkgPath] {
+				continue
+			}
+			perKey := map[string]bool{}
+			for _, fact := range pkgFacts {
+				present := extract(pkgPath, fact)
+				for _, key := range fact.Declares {
+					if covered, seen := perKey[key]; seen {
+						perKey[key] = covered && present[key]
+					} else {
+						perKey[key] = present[key]
+					}
+				}
+			}
+			for key, covered := range perKey {
+				if covered && !malformedFactVars[key] {
+					out[key] = true
+				}
+			}
+		}
+		return out
+	}
+
+	mappingDischargedVars := intersectDeclaredVarSet(func(_ string, fact Fact) map[string]bool {
+		if anyMalformedDirectVarWrite {
+			return nil
+		}
+		m := make(map[string]bool, len(fact.MappingDischarges))
+		for _, key := range fact.MappingDischarges {
+			if !directVarWritten[key] {
+				m[key] = true
+			}
+		}
+		return m
+	})
+	memoDischargedVars := intersectDeclaredVarSet(func(_ string, fact Fact) map[string]bool {
+		if anyMalformedDirectVarWrite {
+			return nil
+		}
+		m := make(map[string]bool, len(fact.MemoDischarges))
+		for _, key := range fact.MemoDischarges {
+			if !directVarWritten[key] {
+				m[key] = true
+			}
+		}
+		return m
+	})
+
+	type rtRoleKey struct {
+		Type TypeRef
+		Role string
+	}
+	type rtRoleInfo struct {
+		SubBuilder     TypeRef
+		InitHelper     FuncKey
+		AllowedHelpers map[FuncKey]bool
+		GuardTypes     map[TypeRef]bool
+	}
+	verifiedRoles := map[rtRoleKey]rtRoleInfo{}
+	for pkgPath, pkgFacts := range allFacts {
+		if len(pkgFacts) == 0 || pkgHasMalformedFact[pkgPath] {
+			continue
+		}
+		var common map[rtRoleKey]rtRoleInfo
+		for fi, fact := range pkgFacts {
+			cur := map[rtRoleKey]rtRoleInfo{}
+			for _, rt := range fact.ProtoRuntimeTypes {
+				if rt.Type.Pkg != pkgPath {
+					continue
+				}
+				ah := make(map[FuncKey]bool, len(rt.AllowedHelpers))
+				for _, h := range rt.AllowedHelpers {
+					ah[h] = true
+				}
+				gt := make(map[TypeRef]bool, len(rt.GuardTypes))
+				for _, g := range rt.GuardTypes {
+					gt[g] = true
+				}
+				cur[rtRoleKey{Type: rt.Type, Role: rt.Role}] = rtRoleInfo{
+					SubBuilder:     rt.SubBuilder,
+					InitHelper:     rt.InitHelper,
+					AllowedHelpers: ah,
+					GuardTypes:     gt,
+				}
+			}
+			if fi == 0 {
+				common = cur
+				continue
+			}
+			for k, prev := range common {
+				next, ok := cur[k]
+				if !ok || prev.InitHelper != next.InitHelper || prev.SubBuilder != next.SubBuilder {
+					delete(common, k)
+					continue
+				}
+				for h := range prev.AllowedHelpers {
+					if !next.AllowedHelpers[h] {
+						delete(prev.AllowedHelpers, h)
+					}
+				}
+				for g := range next.GuardTypes {
+					prev.GuardTypes[g] = true
+				}
+			}
+		}
+		for k, info := range common {
+			if anyMalformedMutatedStruct {
+				continue
+			}
+			if k.Role != ProtoRoleBuilder && k.Role != ProtoRoleDescBuilder && mutatedStructs[k.Type] {
+				continue
+			}
+			guardMutated := false
+			for g := range info.GuardTypes {
+				if mutatedStructs[g] {
+					guardMutated = true
+					break
+				}
+			}
+			if guardMutated {
+				continue
+			}
+			verifiedRoles[k] = info
+		}
+	}
+	for k, info := range verifiedRoles {
+		if k.Role == ProtoRoleBuilder && !info.SubBuilder.IsZero() {
+			if _, ok := verifiedRoles[rtRoleKey{Type: info.SubBuilder, Role: ProtoRoleDescBuilder}]; !ok {
+				delete(verifiedRoles, k)
+			}
+		}
+	}
+
+	builderAllowedHelperByPkg := map[string]map[FuncKey]bool{}
+	for k, info := range verifiedRoles {
+		if k.Role == ProtoRoleBuilder && len(info.AllowedHelpers) > 0 {
+			if builderAllowedHelperByPkg[k.Type.Pkg] == nil {
+				builderAllowedHelperByPkg[k.Type.Pkg] = map[FuncKey]bool{}
+			}
+			for h := range info.AllowedHelpers {
+				builderAllowedHelperByPkg[k.Type.Pkg][h] = true
+			}
+		}
+	}
+	nonBuilderReferencedFn := map[FuncKey]bool{}
+	for pkgPath, pkgFacts := range allFacts {
+		for _, fact := range pkgFacts {
+			for _, edge := range fact.FuncRefs {
+				if edge.Callee.Valid() && !builderAllowedHelperByPkg[pkgPath][edge.Callee] {
+					nonBuilderReferencedFn[edge.Callee] = true
+				}
+			}
+		}
+	}
+	for k, info := range verifiedRoles {
+		if k.Role == ProtoRoleExtension && !info.InitHelper.IsZero() && nonBuilderReferencedFn[info.InitHelper] {
+			delete(verifiedRoles, k)
+		}
+	}
+	hasVerifiedRole := func(t TypeRef, role string) bool {
+		_, ok := verifiedRoles[rtRoleKey{Type: t, Role: role}]
+		return ok
+	}
+
+	protoVerifiedVars := intersectDeclaredVarSet(func(pkgPath string, fact Fact) map[string]bool {
+		if anyMalformedDirectVarWrite {
+			return nil
+		}
+		m := map[string]bool{}
+		for _, c := range fact.ProtoClusters {
+			if c.InitFn.Pkg != pkgPath || refRegions[c.InitFn] == nil || !initOnlyFn[c.InitFn] {
+				continue
+			}
+			if !hasVerifiedRole(c.BuilderType, ProtoRoleBuilder) {
+				continue
+			}
+			if !c.EnumType.IsZero() && !hasVerifiedRole(c.EnumType, ProtoRoleEnum) {
+				continue
+			}
+			if !c.MsgType.IsZero() && !hasVerifiedRole(c.MsgType, ProtoRoleMessage) {
+				continue
+			}
+			if !c.ExtType.IsZero() && !hasVerifiedRole(c.ExtType, ProtoRoleExtension) {
+				continue
+			}
+			for _, key := range c.Vars {
+				if !directVarWritten[key] {
+					m[key] = true
+				}
+			}
+		}
+		return m
+	})
+
+	extAliasTargets := map[string]string{}
+	if !anyMalformedDirectVarWrite {
+		for pkgPath, pkgFacts := range allFacts {
+			if pkgHasMalformedFact[pkgPath] {
+				continue
+			}
+			perKeyTarget := map[string]string{}
+			perKeyValid := map[string]bool{}
+			for _, fact := range pkgFacts {
+				byKey := make(map[string]string, len(fact.ProtoExtAliases))
+				for _, a := range fact.ProtoExtAliases {
+					byKey[a.Key] = a.Target
+				}
+				for _, key := range fact.Declares {
+					target, ok := byKey[key]
+					if prevValid, seen := perKeyValid[key]; seen {
+						if !prevValid || !ok || perKeyTarget[key] != target {
+							perKeyValid[key] = false
+						}
+					} else if ok {
+						perKeyValid[key] = true
+						perKeyTarget[key] = target
+					} else {
+						perKeyValid[key] = false
+					}
+				}
+			}
+			for key, ok := range perKeyValid {
+				if ok && !malformedFactVars[key] && !directVarWritten[key] {
+					extAliasTargets[key] = perKeyTarget[key]
+				}
+			}
+		}
+	}
+	for changed := len(extAliasTargets) > 0; changed; {
+		changed = false
+		for key, target := range extAliasTargets {
+			if !protoVerifiedVars[key] && protoVerifiedVars[target] {
+				protoVerifiedVars[key] = true
+				changed = true
+			}
+		}
+	}
+
+	grpcVerifiedVars := intersectDeclaredVarSet(func(_ string, fact Fact) map[string]bool {
+		if anyMalformedMutatedStruct || anyMalformedDirectVarWrite {
+			return nil
+		}
+		m := make(map[string]bool, len(fact.GrpcServiceVars))
+		for _, gv := range fact.GrpcServiceVars {
+			if mutatedStructs[gv.SvcDesc] {
+				continue
+			}
+			if !gv.MethodDesc.IsZero() && mutatedStructs[gv.MethodDesc] {
+				continue
+			}
+			if !gv.StreamDesc.IsZero() && mutatedStructs[gv.StreamDesc] {
+				continue
+			}
+			if directVarWritten[gv.Key] {
+				continue
+			}
+			m[gv.Key] = true
+		}
+		return m
+	})
+
 	vouchDischarged := map[string][]string{}
 	dischargedSeen := map[string]bool{}
 	vouchedOut := func(pkgPath, key string) bool {
@@ -1012,38 +1571,18 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 	}
 	attestedDischarged := map[string][]string{}
 	auditedSourceOut := func(pkgPath, key string) bool {
-		return pinnedPkg[pkgPath] && AuditedSourceListing.Listed(pkgPath+"\x00"+key, pinOf[pkgPath])
+		return (pinnedPkg[pkgPath] || mutableLocalPkg[pkgPath]) && !malformedFactVars[key] &&
+			(mappingDischargedVars[key] || memoDischargedVars[key])
 	}
-	directiveCovered := map[string]bool{}
-	for _, pkgFacts := range allFacts {
-		perKey := map[string]bool{}
-		for _, fact := range pkgFacts {
-			directed := make(map[string]bool, len(fact.SingleSubjectVars))
-			for _, key := range fact.SingleSubjectVars {
-				directed[key] = true
-			}
-			for _, key := range fact.Declares {
-				if covered, seen := perKey[key]; seen {
-					perKey[key] = covered && directed[key]
-				} else {
-					perKey[key] = directed[key]
-				}
-			}
+	directiveCovered := intersectDeclaredVarSet(func(_ string, fact Fact) map[string]bool {
+		directed := make(map[string]bool, len(fact.SingleSubjectVars))
+		for _, key := range fact.SingleSubjectVars {
+			directed[key] = true
 		}
-		for key, covered := range perKey {
-			if covered {
-				directiveCovered[key] = true
-			}
-		}
-	}
-	mutableLocalPkg := map[string]bool{}
-	for _, node := range meta {
-		if node.Class == MutableLocalPackage {
-			mutableLocalPkg[node.PkgPath] = true
-		}
-	}
+		return directed
+	})
 	directiveDischargedOut := func(pkgPath, key string) bool {
-		if !singleSubject || !mutableLocalPkg[pkgPath] || !directiveCovered[key] {
+		if !singleSubject || !mutableLocalPkg[pkgPath] || !directiveCovered[key] || malformedFactVars[key] {
 			return false
 		}
 		if seen := "directive\x00" + pkgPath + "\x00" + key; !dischargedSeen[seen] {
@@ -1052,43 +1591,11 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 		}
 		return true
 	}
-	generatedProtoVars := map[string]bool{}
-	for _, pkgFacts := range allFacts {
-		for _, fact := range pkgFacts {
-			for _, key := range fact.GeneratedProtoVars {
-				generatedProtoVars[key] = true
-			}
-		}
-	}
-	protoRuntimeAudited := false
-	grpcRuntimeAudited := false
-	for _, pin := range pinOf {
-		if strings.HasPrefix(pin, "google.golang.org/protobuf@") {
-			switch strings.TrimPrefix(pin, "google.golang.org/protobuf@") {
-			case "v1.36.11":
-				protoRuntimeAudited = true
-			}
-		}
-		if strings.HasPrefix(pin, "google.golang.org/grpc@") {
-			switch strings.TrimPrefix(pin, "google.golang.org/grpc@") {
-			case "v1.82.1":
-				grpcRuntimeAudited = true
-			}
-		}
-	}
-	generatedGrpcVars := map[string]bool{}
-	for _, pkgFacts := range allFacts {
-		for _, fact := range pkgFacts {
-			for _, key := range fact.GeneratedGrpcVars {
-				generatedGrpcVars[key] = true
-			}
-		}
-	}
-	generatedProtoOut := func(pkgPath, key string) bool {
-		if !singleSubject {
+	protoGrpcDischargedOut := func(pkgPath, key string) bool {
+		if !singleSubject || (!pinnedPkg[pkgPath] && !mutableLocalPkg[pkgPath]) || malformedFactVars[key] {
 			return false
 		}
-		if !(protoRuntimeAudited && generatedProtoVars[key]) && !(grpcRuntimeAudited && generatedGrpcVars[key]) {
+		if !protoVerifiedVars[key] && !grpcVerifiedVars[key] {
 			return false
 		}
 		if seen := "proto\x00" + pkgPath + "\x00" + key; !dischargedSeen[seen] {
@@ -1134,21 +1641,21 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 	for _, pkgPath := range pkgPaths {
 		for _, fact := range allFacts[pkgPath] {
 			for _, key := range fact.Declares {
-				if mutated[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
+				if mutated[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !protoGrpcDischargedOut(pkgPath, key) {
 					recordCulprit(pkgPath, key, CulpritMutated)
 				}
 			}
 		}
 		for _, fact := range allFacts[pkgPath] {
 			for _, key := range fact.Declares {
-				if escaped[key] && notOpaque[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
+				if escaped[key] && notOpaque[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !protoGrpcDischargedOut(pkgPath, key) {
 					recordCulprit(pkgPath, key, CulpritEscapes)
 				}
 			}
 		}
 		for _, fact := range allFacts[pkgPath] {
 			for _, key := range fact.Declares {
-				if envCarrying[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !generatedProtoOut(pkgPath, key) {
+				if envCarrying[key] && !vouchedOut(pkgPath, key) && !auditedSourceOut(pkgPath, key) && !directiveDischargedOut(pkgPath, key) && !protoGrpcDischargedOut(pkgPath, key) {
 					recordCulprit(pkgPath, key, CulpritEnvCarrying)
 				}
 			}

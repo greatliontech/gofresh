@@ -2563,8 +2563,22 @@ func FuzzMaximalEffectsMonotonicity(f *testing.F) {
 		if !propertyHarnessPath("pgregory.net/rapid") || propertyHarnessPath("testing") {
 			t.Fatal("propertyHarnessPath misclassified pgregory.net/rapid vs testing")
 		}
-		if !auditedPropertyHarnessModule("v1.3.0", false, false) || auditedPropertyHarnessModule("v0.0.1", false, false) || !auditedPropertyHarnessModule("v0.0.1", true, false) {
-			t.Fatal("auditedPropertyHarnessModule misclassified version/main/replace gates")
+		if verifyPropertyHarnessPackage(false, nil) || verifyPropertyHarnessPackage(true, nil) {
+			t.Fatal("verifyPropertyHarnessPackage accepted nil package")
+		}
+		rapidPkg := types.NewPackage("pgregory.net/rapid", "rapid")
+		closedT := types.NewNamed(
+			types.NewTypeName(token.NoPos, rapidPkg, "T", nil),
+			types.NewStruct([]*types.Var{types.NewField(token.NoPos, rapidPkg, "seed", types.Typ[types.Uint64], false)}, nil),
+			nil,
+		)
+		openT := types.NewNamed(
+			types.NewTypeName(token.NoPos, rapidPkg, "T", nil),
+			types.NewStruct([]*types.Var{types.NewField(token.NoPos, rapidPkg, "Seed", types.Typ[types.Uint64], false)}, nil),
+			nil,
+		)
+		if !propertyHarnessHandleType(types.NewPointer(closedT)) || propertyHarnessHandleType(types.NewPointer(openT)) {
+			t.Fatal("propertyHarnessHandleType misclassified unexported-field vs exported-field rapid.T")
 		}
 		phFact := propertyHarnessFact()
 		if !phFact.observable || maximalObservabilityBlocker(audited, phFact) {

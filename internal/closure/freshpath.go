@@ -1918,9 +1918,10 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 			return false
 		}
 		// A synthetic interface-method thunk as a VALUE is never closed:
-		// its receiver arrives at call sites the value walk cannot see.
-		// Direct static calls to a thunk judge the receiver argument at
-		// the site instead and never consult the value walk for it.
+		// its receiver arrives as the call's first argument at sites the
+		// value walk cannot see, and the thunk's toolchain-attributed body
+		// is unscanned. Direct static calls judge the receiver at the site
+		// instead and never consult the value walk for the static callee.
 		if !collect.isSeeds() && ((syntheticInterfaceMethodWrapper(v) && len(v.FreeVars) == 0) || (fp != nil && fp.isNonInternalPureDelegate(funcPkgPath(v)))) {
 			return false
 		}
@@ -1936,7 +1937,9 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		// A synthetic interface-method bound wrapper performs the real
 		// dispatch on its captured receiver inside a body no walk scans:
 		// the closure value is closed only through its bindings, whatever
-		// later carries it to a call site.
+		// later carries it to a call site. Bound wrappers on audited
+		// property-harness methods likewise close only when their captured
+		// receiver bindings pass the harness boundary gate.
 		fn, ok := v.Fn.(*ssa.Function)
 		if !collect.isSeeds() && ok && strings.HasPrefix(fn.Synthetic, "bound ") && !(v.Parent() != nil && fp.isStdFunc(v.Parent())) && fp != nil && fp.isNonInternalPureDelegate(funcPkgPath(fn)) {
 			if len(v.Bindings) == 0 || !isAuditedStdAliasValue(fp.selectionAudited, v.Bindings[0]) {
@@ -1953,6 +1956,18 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 			if ok && syntheticInterfaceMethodWrapper(fn) {
 				for _, binding := range v.Bindings {
 					if !walkDynamicValue(binding, nil, seen, done, wrapFP) {
+						return false
+					}
+				}
+			} else if ok && propertyHarnessPath(funcPkgPath(fn)) {
+				if wrapFP == nil || !wrapFP.propertyHarnessAudited {
+					return false
+				}
+				for _, binding := range v.Bindings {
+					if binding == nil || !typeMayCarryDynamic(wrapFP.selectionAudited, binding.Type(), map[types.Type]bool{}) {
+						continue
+					}
+					if !propertyHarnessClosedValue(binding, wrapFP) {
 						return false
 					}
 				}
@@ -2885,7 +2900,14 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 		callerStd := callerFn != nil && fp.isStdFunc(callerFn)
 		admittedStdOrDel := false
 		if fp != nil && fp.selectionAudited {
-			if collect.isSeeds() || (call != nil && call.Common() != nil && (call.Common().IsInvoke() || call.Common().StaticCallee() == nil)) {
+			if callerStd && call != nil && call.Common() != nil && call.Common().StaticCallee() == callee {
+				_, hasClassB := classBEffectForFunction(callee)
+				_, hasHarness := harnessCalleeEffect(fp.selectionAudited, callee, false)
+				symName := functionSymbolName(callee)
+				admittedStdOrDel = !hasClassB && !hasHarness && pkgPath != "reflect" && pkgPath != "unsafe" &&
+					!osOpenFileMayMutate(callee, pkgPath, symName, call.Common()) &&
+					!syscallOpenMayCreate(pkgPath, symName, call.Common())
+			} else if collect.isSeeds() || (call != nil && call.Common() != nil && (call.Common().IsInvoke() || call.Common().StaticCallee() == nil)) {
 				admittedStdOrDel = fp.isAuditedStandardOrDelegate(pkgPath)
 			} else {
 				admittedStdOrDel = admitPureDelegateCall(fp.selectionAudited, fp.pureDelegates, pkgPath, callee, call, callerStd, fp)

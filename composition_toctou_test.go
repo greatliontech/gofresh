@@ -576,6 +576,7 @@ func TestWorkspaceSymlinkedPWDAndCorruptedCacheResilience(t *testing.T) {
 
 		modADir := filepath.Join(wsDir, "modA")
 		env := gotool.SetEnv(os.Environ(), "PWD", modADir)
+		env = gotool.SetEnv(env, "GOWORK", "")
 		subj := Subject{Package: "example.com/modA", Symbol: "CallB"}
 
 		sess, ctx, _ := newTracedSession(t, BuildDescription{

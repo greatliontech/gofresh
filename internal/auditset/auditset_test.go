@@ -8,16 +8,6 @@ import (
 	"testing"
 )
 
-func TestVersionListingAdmitsOnlyListedVersions(t *testing.T) {
-	l := VersionListing{"k": {"v1", "v2"}}
-	if !l.Listed("k", "v1") || !l.Listed("k", "v2") {
-		t.Fatal("listed versions refused")
-	}
-	if l.Listed("k", "v3") || l.Listed("other", "v1") || l.Listed("k", "") {
-		t.Fatal("an unlisted version or key admitted")
-	}
-}
-
 // The audited sets' exact contents — the goldens a source audit edits
 // (REQ-closure-shared-dynamic-state-audited-discharges).
 func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {

@@ -559,6 +559,8 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 		}
 		if !base.baseStartupResultDone[slot] {
 			startupReach := reach
+			startupReach.enumeratedTypes = nil
+			startupReach.initBoxedTypes = nil
 			startupReach.functions = nonStandardFunctions(base, startupReach.startupFunctions)
 			if startupReach.startupDynamicTargets != nil {
 				startupReach.dynamicTargets = startupReach.startupDynamicTargets
@@ -569,6 +571,8 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 		startupResult = base.baseStartupResult[slot]
 	} else {
 		startupReach := reach
+		startupReach.enumeratedTypes = nil
+		startupReach.initBoxedTypes = nil
 		startupReach.functions = nonStandardFunctions(base, startupReach.startupFunctions)
 		if startupReach.startupDynamicTargets != nil {
 			startupReach.dynamicTargets = startupReach.startupDynamicTargets
@@ -848,6 +852,8 @@ func recordTestMainCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, sit
 			analyzer.requestWiden("property harness reached as a dynamic target in test-main flow")
 		} else if !propertyHarnessClosedArgs(site.Common(), analyzer.fresh) {
 			analyzer.requestWiden("property-harness argument is not locally closed in test-main flow")
+		} else if isPropertyHarnessExampleCallee(callee) && !harnessExampleHasExplicitSeed(site.Common()) {
+			analyzer.recordExternalEffect(propertyHarnessUnseededExampleEffect())
 		}
 		return
 	}
@@ -984,9 +990,17 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 func dispatchProvenanceClosed(site ssa.CallInstruction, fp *freshParamAnalysis) bool {
 	c := site.Common()
 	siteFP := contextCancelMethodFP(site, fp)
-	if callee := c.StaticCallee(); callee != nil && syntheticInterfaceMethodWrapper(callee) {
-		receiver := wrapperReceiver(c, callee)
-		return receiver != nil && subjectClosedDynamicValue(receiver, make(map[ssa.Value]bool), siteFP)
+	if callee := c.StaticCallee(); callee != nil {
+		if syntheticInterfaceMethodWrapper(callee) {
+			receiver := wrapperReceiver(c, callee)
+			return receiver != nil && subjectClosedDynamicValue(receiver, make(map[ssa.Value]bool), siteFP)
+		}
+		if propertyHarnessPath(funcPkgPath(callee)) {
+			return propertyHarnessClosedArgs(c, siteFP)
+		}
+		if _, isFunc := c.Value.(*ssa.Function); isFunc {
+			return true
+		}
 	}
 	return subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), siteFP)
 }
@@ -1012,6 +1026,8 @@ func recordDirectCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site 
 			analyzer.requestWiden("property harness reached as a dynamic target in startup flow")
 		} else if !propertyHarnessClosedArgs(site.Common(), analyzer.fresh) {
 			analyzer.requestWiden("property-harness argument is not locally closed in startup flow")
+		} else if isPropertyHarnessExampleCallee(callee) && !harnessExampleHasExplicitSeed(site.Common()) {
+			analyzer.recordExternalEffect(propertyHarnessUnseededExampleEffect())
 		}
 		return
 	}

@@ -313,13 +313,12 @@ func CanonicalDir(dir string) (string, error) {
 	return filepath.EvalSymlinks(raw)
 }
 
-// BytesNeedCommentParse reports whether src may contain directive or generator
-// comments (//go:, //gofresh:, protoc-gen-go) or a Cgo import ("C", `C`, or an
-// escaped import path) whose preamble comments affect Go semantics.
+// BytesNeedCommentParse reports whether src may contain directive comments
+// (//go:, //gofresh:) or a Cgo import ("C", `C`, or an escaped import path)
+// whose preamble comments affect Go semantics.
 func BytesNeedCommentParse(src []byte) bool {
 	return bytes.Contains(src, []byte("go:")) ||
 		bytes.Contains(src, []byte("gofresh:")) ||
-		bytes.Contains(src, []byte("protoc-gen-go")) ||
 		bytes.Contains(src, []byte(`"C"`)) ||
 		bytes.Contains(src, []byte("`C`")) ||
 		(bytes.Contains(src, []byte("import")) && bytes.IndexByte(src, '\\') >= 0)
@@ -329,7 +328,6 @@ func BytesNeedCommentParse(src []byte) bool {
 func StringNeedsCommentParse(src string) bool {
 	return strings.Contains(src, "go:") ||
 		strings.Contains(src, "gofresh:") ||
-		strings.Contains(src, "protoc-gen-go") ||
 		strings.Contains(src, `"C"`) ||
 		strings.Contains(src, "`C`") ||
 		(strings.Contains(src, "import") && strings.IndexByte(src, '\\') >= 0)

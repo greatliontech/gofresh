@@ -34,6 +34,8 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 	a.skipOriginScan = reachable.instantiatedOrigins
 	a.openWorld = reachable.openWorld
 	a.fresh = newFreshParamAnalysis(h.SelectionAudited(), h.source.pureDelegates, reachable, a.isStdFunction)
+	a.enumeratedTypes = reachable.enumeratedTypes
+	a.initBoxedTypes = reachable.initBoxedTypes
 	if reachable.subjectRoot != nil {
 		a.subjectRoots = map[*ssa.Function]bool{reachable.subjectRoot: true}
 	}
@@ -108,17 +110,19 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 			if idx == nil {
 				continue
 			}
-			// A NAMED harness function reached as a dynamic target keeps
-			// the conservative refusal: its body is unscanned and no
+			// A harness function reached via a computed function-value call
+			// keeps the conservative refusal: its body is unscanned and no
 			// static call site exists to gate the crossing arguments. An
-			// anonymous harness function - the wrapped callback
-			// MakeCheck returns - exists only because a gated harness
-			// call in some analyzed flow created it: every flow that can
-			// call into the harness carries the boundary gate, so its
-			// bindings are already judged
+			// anonymous harness function (MakeCheck's wrapped callback) exists
+			// only because a gated harness call in some analyzed flow created
+			// it, and a named harness method reached via interface invoke is
+			// admitted only when every dynamic-carrying invoke argument passes
+			// the boundary gate and every non-harness interface boxing of its
+			// receiver type origin across the subject's RTA-reachable functions
+			// occurs in subject flow over a gate-passing value
 			// (REQ-closure-observability-property-harness).
 			if a.propertyHarnessAudited(idx.path) {
-				if target.Parent() == nil {
+				if target.Parent() == nil && !a.admitPropertyHarnessInvokeTarget(reachable, site, target) {
 					a.requestWiden("property harness reached as a dynamic target in " + site.Parent().String())
 				}
 				continue
@@ -306,19 +310,183 @@ type tier2Analyzer struct {
 	// fresh carries the subject's cross-boundary fresh-path analysis;
 	// nil outside per-subject reachability walks (maximal tier,
 	// startup effects), where the intraprocedural grammar alone applies.
-	fresh           *freshParamAnalysis
-	subjectRoots    map[*ssa.Function]bool
-	startupOnly     map[*ssa.Function]bool
-	zeroGlobals     map[*ssa.Global]bool
-	zeroGlobalDecls map[pkgVarKey]bool
-	openWorld       bool
-	scanned         map[*ssa.Function]bool
-	effects         []externalEffect
+	fresh                *freshParamAnalysis
+	enumeratedTypes      []types.Type
+	initBoxedTypes       []types.Type
+	harnessRecvBoxClosed map[*types.Named]bool
+	subjectRoots         map[*ssa.Function]bool
+	startupOnly          map[*ssa.Function]bool
+	zeroGlobals          map[*ssa.Global]bool
+	zeroGlobalDecls      map[pkgVarKey]bool
+	openWorld            bool
+	scanned              map[*ssa.Function]bool
+	effects              []externalEffect
 
 	widen        bool
 	widenReason  string
 	unverifiable bool
 	selected     externalEffect
+}
+
+func (a *tier2Analyzer) admitPropertyHarnessInvokeTarget(reachable attributedReachability, site ssa.CallInstruction, target *ssa.Function) bool {
+	if a == nil || site == nil || site.Common() == nil || !site.Common().IsInvoke() || target == nil || target.Signature == nil || target.Signature.Recv() == nil {
+		return false
+	}
+	if isPropertyHarnessExampleCallee(target) {
+		return false
+	}
+	recvNamed := namedOriginDeref(target.Signature.Recv().Type())
+	if recvNamed == nil || recvNamed.Obj() == nil || recvNamed.Obj().Pkg() == nil || !a.propertyHarnessAudited(recvNamed.Obj().Pkg().Path()) {
+		return false
+	}
+	if !propertyHarnessClosedArgs(site.Common(), a.fresh) {
+		return false
+	}
+	return a.propertyHarnessReceiverBoxesClosed(reachable, recvNamed)
+}
+
+func (a *tier2Analyzer) propertyHarnessReceiverBoxesClosed(reachable attributedReachability, recvOrigin *types.Named) bool {
+	if recvOrigin == nil {
+		return false
+	}
+	if a.harnessRecvBoxClosed != nil {
+		if ok, cached := a.harnessRecvBoxClosed[recvOrigin]; cached {
+			return ok
+		}
+	} else {
+		a.harnessRecvBoxClosed = make(map[*types.Named]bool, 4)
+	}
+	for _, t := range reachable.enumeratedTypes {
+		if typeContainsNamedOrigin(t, recvOrigin) {
+			a.harnessRecvBoxClosed[recvOrigin] = false
+			return false
+		}
+	}
+	rtaFns := reachable.rtaFunctions
+	if rtaFns == nil {
+		rtaFns = reachable.functions
+	}
+	for fn := range rtaFns {
+		if fn == nil || len(fn.Blocks) == 0 {
+			continue
+		}
+		if a.propertyHarnessAudited(funcPkgPath(fn)) {
+			continue
+		}
+		for _, block := range fn.Blocks {
+			for _, instr := range block.Instrs {
+				mi, ok := instr.(*ssa.MakeInterface)
+				if !ok || mi.X == nil || !typeContainsNamedOrigin(mi.X.Type(), recvOrigin) {
+					continue
+				}
+				if !reachable.functions[fn] {
+					a.harnessRecvBoxClosed[recvOrigin] = false
+					return false
+				}
+				xt := types.Unalias(mi.X.Type())
+				if namedOriginDeref(xt) == recvOrigin {
+					if !propertyHarnessClosedValue(mi.X, a.fresh) {
+						a.harnessRecvBoxClosed[recvOrigin] = false
+						return false
+					}
+					continue
+				}
+				if sl, isSlice := xt.(*types.Slice); isSlice && namedOriginDeref(sl.Elem()) == recvOrigin {
+					if !harnessVariadicClosed(mi.X, a.fresh) {
+						a.harnessRecvBoxClosed[recvOrigin] = false
+						return false
+					}
+					continue
+				}
+				a.harnessRecvBoxClosed[recvOrigin] = false
+				return false
+			}
+		}
+	}
+	a.harnessRecvBoxClosed[recvOrigin] = true
+	return true
+}
+
+func namedOriginDeref(t types.Type) *types.Named {
+	if t == nil {
+		return nil
+	}
+	t = types.Unalias(t)
+	if ptr, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(ptr.Elem())
+	}
+	if named, ok := t.(*types.Named); ok && named != nil {
+		return named.Origin()
+	}
+	return nil
+}
+
+func typeContainsNamedOrigin(t types.Type, origin *types.Named) bool {
+	if t == nil || origin == nil {
+		return false
+	}
+	seen := make(map[types.Type]bool)
+	var walk func(types.Type) bool
+	walk = func(cur types.Type) bool {
+		if cur == nil {
+			return false
+		}
+		cur = types.Unalias(cur)
+		if seen[cur] {
+			return false
+		}
+		seen[cur] = true
+		switch tt := cur.(type) {
+		case *types.Named:
+			if tt.Origin() == origin {
+				return true
+			}
+			for i := 0; i < tt.TypeArgs().Len(); i++ {
+				if walk(tt.TypeArgs().At(i)) {
+					return true
+				}
+			}
+			return walk(tt.Underlying())
+		case *types.Pointer:
+			return walk(tt.Elem())
+		case *types.Slice:
+			return walk(tt.Elem())
+		case *types.Array:
+			return walk(tt.Elem())
+		case *types.Map:
+			return walk(tt.Key()) || walk(tt.Elem())
+		case *types.Chan:
+			return walk(tt.Elem())
+		case *types.Struct:
+			for i := 0; i < tt.NumFields(); i++ {
+				if walk(tt.Field(i).Type()) {
+					return true
+				}
+			}
+		case *types.Signature:
+			for _, tuple := range []*types.Tuple{tt.Params(), tt.Results()} {
+				for i := 0; tuple != nil && i < tuple.Len(); i++ {
+					if walk(tuple.At(i).Type()) {
+						return true
+					}
+				}
+			}
+		case *types.Interface:
+			for i := 0; i < tt.NumMethods(); i++ {
+				if walk(tt.Method(i).Type()) {
+					return true
+				}
+			}
+		case *types.Tuple:
+			for i := 0; i < tt.Len(); i++ {
+				if walk(tt.At(i).Type()) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return walk(t)
 }
 
 func newTier2Base(h *Hasher, prog *program, metas []listPkg) *tier2Base {
@@ -396,10 +564,6 @@ func (b *tier2Base) analyzer() *tier2Analyzer {
 		subjectDeterminedInvokes: map[ssa.CallInstruction]bool{},
 		scanned:                  map[*ssa.Function]bool{},
 	}
-}
-
-func newTier2Analyzer(h *Hasher, prog *program, metas []listPkg) *tier2Analyzer {
-	return newTier2Base(h, prog, metas).analyzer()
 }
 
 func (a *tier2Analyzer) addReverseLinkname(target string, obj types.Object) {
@@ -611,7 +775,17 @@ func (a *tier2Analyzer) addFunction(fn *ssa.Function) {
 		return
 	}
 	if obj := fn.Object(); obj != nil {
-		a.enqueueObject(obj)
+		if obj.Pkg() != nil {
+			a.enqueueObject(obj)
+			return
+		}
+		if fn.Signature != nil {
+			if recv := fn.Signature.Recv(); recv != nil {
+				a.addType(recv.Type())
+			} else if strings.HasPrefix(fn.Synthetic, "thunk for ") && fn.Signature.Params().Len() > 0 {
+				a.addType(fn.Signature.Params().At(0).Type())
+			}
+		}
 		return
 	}
 	if parent := fn.Parent(); parent != nil {
@@ -765,6 +939,16 @@ func (a *tier2Analyzer) scanCacheFunctionRefs(idx *pkgIndex, fn *ssa.Function) {
 		}
 		return
 	}
+	if obj.Pkg() == nil && fn.Synthetic != "" {
+		if fn.Signature != nil {
+			if recv := fn.Signature.Recv(); recv != nil {
+				a.addType(recv.Type())
+			} else if strings.HasPrefix(fn.Synthetic, "thunk for ") && fn.Signature.Params().Len() > 0 {
+				a.addType(fn.Signature.Params().At(0).Type())
+			}
+		}
+		return
+	}
 	obj = originObject(obj)
 	node := idx.decls[obj]
 	if node == nil {
@@ -906,14 +1090,32 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		return
 	}
 	if !callerStd && a.propertyHarnessAudited(pkgPath) {
+		if isPropertyHarnessExampleCallee(callee) && !harnessExampleHasExplicitSeed(c) {
+			a.recordExternalEffect(propertyHarnessUnseededExampleEffect())
+		}
 		// The property-harness boundary gate: harness bodies are never
-		// scanned, so every dynamic-carrying argument must be judged
-		// here - judged callables become subject flow through the
-		// harness's own dispatch; a judged call passes silently
-		// exactly as the exempted standard harness does
+		// scanned, so every dynamic-carrying argument and bound-closure
+		// capture must be judged here - judged callables become subject
+		// flow through the harness's own dispatch; a judged call passes
+		// silently exactly as the exempted standard harness does
 		// (REQ-closure-observability-property-harness).
 		if !propertyHarnessClosedArgs(c, a.fresh) {
 			a.requestWiden("property-harness argument is not locally closed in " + caller.String())
+		}
+		if mc, ok := c.Value.(*ssa.MakeClosure); ok {
+			for _, b := range mc.Bindings {
+				if b != nil {
+					a.addHarnessArgMethodSets(b.Type())
+				}
+			}
+		}
+		for _, arg := range c.Args {
+			if arg != nil {
+				a.addHarnessArgMethodSets(arg.Type())
+			}
+		}
+		for _, ta := range callee.TypeArgs() {
+			a.addHarnessArgMethodSets(ta)
 		}
 		return
 	}
@@ -1197,6 +1399,114 @@ func (a *tier2Analyzer) addInterfaceMethodSet(t types.Type) {
 	}
 }
 
+func (a *tier2Analyzer) addHarnessArgMethodSets(t types.Type) {
+	isStdOrHarnessPkg := func(pkg *types.Package) bool {
+		if pkg == nil {
+			return false
+		}
+		if idx := a.idxByTypes[pkg]; idx != nil {
+			return idx.std || a.propertyHarnessAudited(idx.path)
+		}
+		return isStdImportPath(pkg.Path()) || a.propertyHarnessAudited(pkg.Path())
+	}
+	enqueueNamedMethods := func(named *types.Named) {
+		if named == nil || named.Obj() == nil || named.Obj().Pkg() == nil || isStdOrHarnessPkg(named.Obj().Pkg()) {
+			return
+		}
+		for _, mt := range []types.Type{named, types.NewPointer(named)} {
+			set := types.NewMethodSet(mt)
+			for i := 0; i < set.Len(); i++ {
+				if fn, ok := set.At(i).Obj().(*types.Func); ok {
+					a.enqueueObject(fn)
+				}
+			}
+		}
+	}
+	var ifaces []*types.Interface
+	seenArg := map[types.Type]bool{}
+	var collectArgTypes func(types.Type)
+	collectArgTypes = func(cur types.Type) {
+		if cur == nil {
+			return
+		}
+		cur = types.Unalias(cur)
+		if ssaOpaqueHandle(cur) || seenArg[cur] {
+			return
+		}
+		seenArg[cur] = true
+		switch tt := cur.(type) {
+		case *types.Named:
+			for i := 0; i < tt.TypeArgs().Len(); i++ {
+				collectArgTypes(tt.TypeArgs().At(i))
+			}
+			if iface, isIf := tt.Underlying().(*types.Interface); isIf {
+				ifaces = append(ifaces, iface)
+				return
+			}
+			if tt.Obj() != nil && isStdOrHarnessPkg(tt.Obj().Pkg()) {
+				return
+			}
+			enqueueNamedMethods(tt)
+			collectArgTypes(tt.Underlying())
+		case *types.Interface:
+			ifaces = append(ifaces, tt)
+		case *types.Pointer:
+			collectArgTypes(tt.Elem())
+		case *types.Slice:
+			collectArgTypes(tt.Elem())
+		case *types.Array:
+			collectArgTypes(tt.Elem())
+		case *types.Chan:
+			collectArgTypes(tt.Elem())
+		case *types.Map:
+			collectArgTypes(tt.Key())
+			collectArgTypes(tt.Elem())
+		case *types.Signature:
+			for _, tuple := range []*types.Tuple{tt.Params(), tt.Results()} {
+				for i := 0; tuple != nil && i < tuple.Len(); i++ {
+					collectArgTypes(tuple.At(i).Type())
+				}
+			}
+		case *types.Struct:
+			for i := 0; i < tt.NumFields(); i++ {
+				collectArgTypes(tt.Field(i).Type())
+			}
+		case *types.Tuple:
+			for i := 0; i < tt.Len(); i++ {
+				collectArgTypes(tt.At(i).Type())
+			}
+		}
+	}
+	collectArgTypes(t)
+	if len(ifaces) == 0 || (len(a.enumeratedTypes) == 0 && len(a.initBoxedTypes) == 0) {
+		return
+	}
+	seenCand := map[types.Type]bool{}
+	walkCandidates := func(cands []types.Type) {
+		for _, ct := range cands {
+			walkTypeGraph(ct, true, seenCand, func(cur types.Type) bool {
+				named, ok := cur.(*types.Named)
+				if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+					return true
+				}
+				if _, isIf := named.Underlying().(*types.Interface); isIf {
+					return true
+				}
+				ptrType := types.NewPointer(named)
+				for _, iface := range ifaces {
+					if types.Implements(named, iface) || types.Implements(ptrType, iface) {
+						enqueueNamedMethods(named)
+						break
+					}
+				}
+				return true
+			})
+		}
+	}
+	walkCandidates(a.enumeratedTypes)
+	walkCandidates(a.initBoxedTypes)
+}
+
 func (a *tier2Analyzer) hasNonStdNamedType(t types.Type) bool {
 	found := false
 	walkTypeGraph(t, false, map[types.Type]bool{}, func(t types.Type) bool {
@@ -1209,11 +1519,11 @@ func (a *tier2Analyzer) hasNonStdNamedType(t types.Type) bool {
 			return true
 		}
 		if idx := a.idxByTypes[obj.Pkg()]; idx != nil {
-			if !idx.std {
+			if !idx.std && !a.propertyHarnessAudited(idx.path) {
 				found = true
 				return false
 			}
-		} else if !isStdImportPath(obj.Pkg().Path()) {
+		} else if !isStdImportPath(obj.Pkg().Path()) && !a.propertyHarnessAudited(obj.Pkg().Path()) {
 			found = true
 			return false
 		}
@@ -1273,7 +1583,7 @@ func (a *tier2Analyzer) addObject(obj types.Object) {
 			}
 		}
 	}
-	if idx.std || idx.testMain {
+	if idx.std || idx.testMain || a.propertyHarnessAudited(idx.path) {
 		return
 	}
 	if !isPackageLevelObject(obj) {
@@ -1507,7 +1817,7 @@ func ssaOpaqueHandle(t types.Type) bool {
 func (a *tier2Analyzer) addValueType(idx *pkgIndex, v ssa.Value) {
 	a.addType(v.Type())
 	unindexedWrapper := idx == nil && v.Parent() != nil && isAnalyzableUnnamedWrapper(v.Parent())
-	if (unindexedWrapper || (idx != nil && !idx.std)) && valueTypeUsesUnsafePointer(v.Type()) {
+	if (unindexedWrapper || (idx != nil && !idx.std)) && a.valueTypeUsesUnsafePointer(v.Type()) {
 		pkgID := "<synthetic>"
 		if idx != nil {
 			pkgID = idx.id
@@ -1516,17 +1826,95 @@ func (a *tier2Analyzer) addValueType(idx *pkgIndex, v ssa.Value) {
 	}
 }
 
-func valueTypeUsesUnsafePointer(t types.Type) bool {
+func (a *tier2Analyzer) valueTypeUsesUnsafePointer(t types.Type) bool {
 	if tuple, ok := types.Unalias(t).(*types.Tuple); ok {
 		for i := 0; i < tuple.Len(); i++ {
 			elem := tuple.At(i).Type()
-			if typeUsesUnsafePointer(elem) && !isOSFileType(elem) {
+			if a.typeUsesUnsafePointer(elem) && !isOSFileType(elem) {
 				return true
 			}
 		}
 		return false
 	}
-	return typeUsesUnsafePointer(t) && !isOSFileType(t)
+	return a.typeUsesUnsafePointer(t) && !isOSFileType(t)
+}
+
+func (a *tier2Analyzer) isOpaquePropertyHarnessStruct(n *types.Named) bool {
+	if a == nil || n == nil || n.Obj() == nil || n.Obj().Pkg() == nil {
+		return false
+	}
+	if !a.propertyHarnessAudited(n.Obj().Pkg().Path()) {
+		return false
+	}
+	st, ok := n.Underlying().(*types.Struct)
+	return ok && structHasNoExportedFields(st)
+}
+
+func (a *tier2Analyzer) typeUsesUnsafePointer(t types.Type) bool {
+	if a == nil {
+		return typeUsesUnsafePointer(t)
+	}
+	seen := make(map[types.Type]bool)
+	var walk func(types.Type) bool
+	walk = func(cur types.Type) bool {
+		if cur == nil {
+			return false
+		}
+		cur = types.Unalias(cur)
+		if ssaOpaqueHandle(cur) || seen[cur] {
+			return false
+		}
+		seen[cur] = true
+		switch tt := cur.(type) {
+		case *types.Basic:
+			return tt.Kind() == types.UnsafePointer
+		case *types.Named:
+			if obj := tt.Obj(); obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == "unsafe" && obj.Name() == "Pointer" {
+				return true
+			}
+			if a.isOpaquePropertyHarnessStruct(tt) {
+				for i := 0; i < tt.TypeArgs().Len(); i++ {
+					if walk(tt.TypeArgs().At(i)) {
+						return true
+					}
+				}
+				return false
+			}
+			return walk(tt.Underlying())
+		case *types.Pointer:
+			return walk(tt.Elem())
+		case *types.Slice:
+			return walk(tt.Elem())
+		case *types.Array:
+			return walk(tt.Elem())
+		case *types.Map:
+			return walk(tt.Key()) || walk(tt.Elem())
+		case *types.Chan:
+			return walk(tt.Elem())
+		case *types.Signature:
+			for _, tuple := range []*types.Tuple{tt.Params(), tt.Results()} {
+				for i := 0; tuple != nil && i < tuple.Len(); i++ {
+					if walk(tuple.At(i).Type()) {
+						return true
+					}
+				}
+			}
+		case *types.Struct:
+			for i := 0; i < tt.NumFields(); i++ {
+				if walk(tt.Field(i).Type()) {
+					return true
+				}
+			}
+		case *types.Tuple:
+			for i := 0; i < tt.Len(); i++ {
+				if walk(tt.At(i).Type()) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return walk(t)
 }
 
 // addType enqueues every named type the walked structure carries. The
@@ -1908,20 +2296,66 @@ func (b *tier2Base) idxForFunction(fn *ssa.Function) *pkgIndex {
 	return idxForFunctionIn(b.idxByTypes, fn)
 }
 
-func idxForFunctionIn(idxByTypes map[*types.Package]*pkgIndex, fn *ssa.Function) *pkgIndex {
-	if isUnnamedStructPromotedWrapper(fn) {
-		if pkg := unnamedWrapperDeclaringPkg(fn); pkg != nil {
-			return idxByTypes[pkg]
-		}
+func typeDeclaringPkg(t types.Type) *types.Package {
+	if t == nil {
 		return nil
+	}
+	t = types.Unalias(t)
+	if ptr, ok := t.(*types.Pointer); ok {
+		t = types.Unalias(ptr.Elem())
+	}
+	switch x := t.(type) {
+	case *types.Named:
+		if x.Obj() != nil {
+			return x.Obj().Pkg()
+		}
+	case *types.Struct:
+		for i := 0; i < x.NumFields(); i++ {
+			if pkg := x.Field(i).Pkg(); pkg != nil {
+				return pkg
+			}
+		}
+	}
+	return nil
+}
+
+func funcDeclaringPkg(fn *ssa.Function) *types.Package {
+	if isUnnamedStructPromotedWrapper(fn) {
+		return unnamedWrapperDeclaringPkg(fn)
 	}
 	for f := fn; f != nil; f = f.Parent() {
 		if f.Pkg != nil && f.Pkg.Pkg != nil {
-			return idxByTypes[f.Pkg.Pkg]
+			return f.Pkg.Pkg
 		}
 		if obj := f.Object(); obj != nil && obj.Pkg() != nil {
-			return idxByTypes[obj.Pkg()]
+			return obj.Pkg()
 		}
+		if orig := f.Origin(); orig != nil {
+			if orig.Pkg != nil && orig.Pkg.Pkg != nil {
+				return orig.Pkg.Pkg
+			}
+			if obj := orig.Object(); obj != nil && obj.Pkg() != nil {
+				return obj.Pkg()
+			}
+		}
+		if f.Signature != nil {
+			if recv := f.Signature.Recv(); recv != nil {
+				if pkg := typeDeclaringPkg(recv.Type()); pkg != nil {
+					return pkg
+				}
+			} else if strings.HasPrefix(f.Synthetic, "thunk for ") && f.Signature.Params().Len() > 0 {
+				if pkg := typeDeclaringPkg(f.Signature.Params().At(0).Type()); pkg != nil {
+					return pkg
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func idxForFunctionIn(idxByTypes map[*types.Package]*pkgIndex, fn *ssa.Function) *pkgIndex {
+	if pkg := funcDeclaringPkg(fn); pkg != nil {
+		return idxByTypes[pkg]
 	}
 	return nil
 }
@@ -1960,19 +2394,8 @@ func computedEdgeSuffix(c *ssa.CallCommon) string {
 }
 
 func funcPkgPath(fn *ssa.Function) string {
-	if isUnnamedStructPromotedWrapper(fn) {
-		if pkg := unnamedWrapperDeclaringPkg(fn); pkg != nil {
-			return pkg.Path()
-		}
-		return ""
-	}
-	for f := fn; f != nil; f = f.Parent() {
-		if f.Pkg != nil && f.Pkg.Pkg != nil {
-			return f.Pkg.Pkg.Path()
-		}
-		if obj := f.Object(); obj != nil && obj.Pkg() != nil {
-			return obj.Pkg().Path()
-		}
+	if pkg := funcDeclaringPkg(fn); pkg != nil {
+		return pkg.Path()
 	}
 	return ""
 }
@@ -2218,6 +2641,12 @@ func subjectReachedDeclKeys(base *tier2Base, reach attributedReachability, subje
 
 func subjectReachedAndStartupOnlyDeclKeys(base *tier2Base, reach attributedReachability, subjectObjects map[types.Object]bool, zeroGlobals map[*ssa.Global]bool) (map[funcDeclKey]bool, map[funcDeclKey]bool) {
 	aux := base.analyzer()
+	aux.rtaResolved = reach.resolved
+	aux.skipOriginScan = reach.instantiatedOrigins
+	aux.openWorld = reach.openWorld
+	aux.fresh = newFreshParamAnalysis(base.h.SelectionAudited(), base.h.source.pureDelegates, reach, aux.isStdFunction)
+	aux.enumeratedTypes = reach.enumeratedTypes
+	aux.initBoxedTypes = reach.initBoxedTypes
 	aux.startupOnly = syncStartupOnlyFunctions(reach)
 	aux.zeroGlobals = zeroGlobals
 	aux.zeroGlobalDecls = zeroGlobalDeclKeys(zeroGlobals)

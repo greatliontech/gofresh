@@ -65,6 +65,10 @@ type FuncKey struct {
 	Name string `json:"name"`
 }
 
+func (k FuncKey) IsZero() bool {
+	return k.Pkg == "" && k.Name == ""
+}
+
 func (k FuncKey) Valid() bool {
 	return k.Pkg != "" && k.Name != "" && !strings.Contains(k.Pkg, "\x00") && !strings.Contains(k.Name, "\x00")
 }
@@ -606,54 +610,130 @@ func (s ExportedSeam) Compare(o ExportedSeam) int {
 	return 0
 }
 
+// ConditionalStructMutation records that Struct must be treated as mutated if
+// GuardPkg can retain pointer/interface carriers after init, if GuardStruct is
+// itself mutated in the composed cone, if RequireDescBuilderGuard is set and
+// GuardStruct is not covered by a verified ProtoRoleDescBuilder in its
+// declaring package, or if RequireNonMutatingMethod is set and that method is
+// not proven non-mutating across all variants of its declaring package.
+type ConditionalStructMutation struct {
+	Struct                   TypeRef `json:"struct"`
+	GuardPkg                 string  `json:"guardPkg,omitempty"`
+	GuardStruct              TypeRef `json:"guardStruct,omitempty"`
+	RequireDescBuilderGuard  bool    `json:"requireDescBuilderGuard,omitempty"`
+	RequireNonMutatingMethod FuncKey `json:"requireNonMutatingMethod,omitempty"`
+}
+
+func validNonEmptyPkgKey(pkg string) bool {
+	return pkg != "" && !strings.ContainsRune(pkg, 0) && !strings.ContainsAny(pkg, " \t\r\n")
+}
+
+func (c ConditionalStructMutation) Valid() bool {
+	if !c.Struct.Valid() {
+		return false
+	}
+	if c.RequireDescBuilderGuard && c.GuardStruct.IsZero() {
+		return false
+	}
+	modes := 0
+	if c.GuardPkg != "" {
+		if !validNonEmptyPkgKey(c.GuardPkg) {
+			return false
+		}
+		modes++
+	}
+	if !c.GuardStruct.IsZero() {
+		if !c.GuardStruct.Valid() {
+			return false
+		}
+		modes++
+	}
+	if !c.RequireNonMutatingMethod.IsZero() {
+		if !c.RequireNonMutatingMethod.Valid() {
+			return false
+		}
+		modes++
+	}
+	return modes == 1
+}
+
+func (c ConditionalStructMutation) Compare(o ConditionalStructMutation) int {
+	if d := cmp.Compare(c.Struct.key(), o.Struct.key()); d != 0 {
+		return d
+	}
+	if d := cmp.Compare(c.GuardPkg, o.GuardPkg); d != 0 {
+		return d
+	}
+	if d := cmp.Compare(c.GuardStruct.key(), o.GuardStruct.key()); d != 0 {
+		return d
+	}
+	if c.RequireDescBuilderGuard != o.RequireDescBuilderGuard {
+		if !c.RequireDescBuilderGuard {
+			return -1
+		}
+		return 1
+	}
+	return c.RequireNonMutatingMethod.Compare(o.RequireNonMutatingMethod)
+}
+
 // Fact is the per-package summary the shared-dynamic-state derivation extracts
 // from one typed package and memoizes for version-pinned modules
 // (REQ-closure-dynamic-state-memo).
 type Fact struct {
-	Declares               []string                 `json:"declares,omitempty"`
-	Mutates                []string                 `json:"mutates,omitempty"`
-	Escapes                []string                 `json:"escapes,omitempty"`
-	ExportedSeams          []ExportedSeam           `json:"exportedSeams,omitempty"`
-	NonSeqFuncUses         []FuncKey                `json:"nonSeqFuncUses,omitempty"`
-	SeqFuncEdges           []FuncDepEdge            `json:"seqFuncEdges,omitempty"`
-	ParallelFuncs          []FuncKey                `json:"parallelFuncs,omitempty"`
-	ParallelEdges          []FuncDepEdge            `json:"parallelEdges,omitempty"`
-	ReceiverReadOnly       []FuncKey                `json:"receiverReadOnly,omitempty"`
-	ReceiverRetentionFree  []FuncKey                `json:"receiverRetentionFree,omitempty"`
-	MethodUses             []VarMethodUse           `json:"methodUses,omitempty"`
-	InitMethodUses         []VarMethodUse           `json:"initMethodUses,omitempty"`
-	ParamLeakFree          []ParamKey               `json:"paramLeakFree,omitempty"`
-	ParamLeakFreeDeps      []ParamDepEdge           `json:"paramLeakFreeDeps,omitempty"`
-	ParamRetentionFree     []ParamKey               `json:"paramRetentionFree,omitempty"`
-	ParamRetentionFreeDeps []ParamDepEdge           `json:"paramRetentionFreeDeps,omitempty"`
-	ParamUses              []VarParamUse            `json:"paramUses,omitempty"`
-	InitParamUses          []VarParamUse            `json:"initParamUses,omitempty"`
-	FieldParamUses         []FieldPosKey            `json:"fieldParamUses,omitempty"`
-	ElemParamUses          []ElemParamUse           `json:"elemParamUses,omitempty"`
-	FieldParamDefer        []FieldParamDefer        `json:"fieldParamDefer,omitempty"`
-	FieldParamPoison       []FieldParamPoison       `json:"fieldParamPoison,omitempty"`
-	ReturnFieldParamDefer  []ReturnFieldParamDefer  `json:"returnFieldParamDefer,omitempty"`
-	ReturnFieldParamPoison []ReturnFieldParamPoison `json:"returnFieldParamPoison,omitempty"`
-	AttributedUses         []AttributedUse          `json:"attributedUses,omitempty"`
-	FuncRefs               []FuncRef                `json:"funcRefs,omitempty"`
-	Opaque                 []string                 `json:"opaque,omitempty"`
-	OpacityBreaks          []string                 `json:"opacityBreaks,omitempty"`
-	OpaqueDeps             []OpaqueDep              `json:"opaqueDeps,omitempty"`
-	CarrierLinks           []CarrierLink            `json:"carrierLinks,omitempty"`
-	EnvCarrying            []string                 `json:"envCarrying,omitempty"`
-	EnvCallable            []string                 `json:"envCallable,omitempty"`
-	EnvCallUses            []EnvCallUse             `json:"envCallUses,omitempty"`
-	ReturnEnvFree          []FuncKey                `json:"returnEnvFree,omitempty"`
-	ReturnEnvDeps          []FuncDepEdge            `json:"returnEnvDeps,omitempty"`
-	ParamInsertionFree     []ParamKey               `json:"paramInsertionFree,omitempty"`
-	ReturnEnvInsertionDeps []FuncInsertionDepEdge   `json:"returnEnvInsertionDeps,omitempty"`
-	ParamInsertionDeps     []ParamInsertionDepEdge  `json:"paramInsertionDeps,omitempty"`
-	PureMethods            map[string]string        `json:"pureMethods,omitempty"`
-	ExternalMethods        map[string]string        `json:"externalMethods,omitempty"`
-	PoolDischarges         []string                 `json:"poolDischarges,omitempty"`
-	SingleSubjectVars      []string                 `json:"singleSubjectVars,omitempty"`
-	GeneratedProtoVars     []string                 `json:"generatedProtoVars,omitempty"`
-	GeneratedGrpcVars      []string                 `json:"generatedGrpcVars,omitempty"`
+	Declares                   []string                    `json:"declares,omitempty"`
+	Mutates                    []string                    `json:"mutates,omitempty"`
+	Escapes                    []string                    `json:"escapes,omitempty"`
+	ExportedSeams              []ExportedSeam              `json:"exportedSeams,omitempty"`
+	NonSeqFuncUses             []FuncKey                   `json:"nonSeqFuncUses,omitempty"`
+	SeqFuncEdges               []FuncDepEdge               `json:"seqFuncEdges,omitempty"`
+	ParallelFuncs              []FuncKey                   `json:"parallelFuncs,omitempty"`
+	ParallelEdges              []FuncDepEdge               `json:"parallelEdges,omitempty"`
+	ReceiverReadOnly           []FuncKey                   `json:"receiverReadOnly,omitempty"`
+	ReceiverRetentionFree      []FuncKey                   `json:"receiverRetentionFree,omitempty"`
+	NonMutatingMethods         []FuncKey                   `json:"nonMutatingMethods,omitempty"`
+	MethodUses                 []VarMethodUse              `json:"methodUses,omitempty"`
+	InitMethodUses             []VarMethodUse              `json:"initMethodUses,omitempty"`
+	ParamLeakFree              []ParamKey                  `json:"paramLeakFree,omitempty"`
+	ParamLeakFreeDeps          []ParamDepEdge              `json:"paramLeakFreeDeps,omitempty"`
+	ParamRetentionFree         []ParamKey                  `json:"paramRetentionFree,omitempty"`
+	ParamRetentionFreeDeps     []ParamDepEdge              `json:"paramRetentionFreeDeps,omitempty"`
+	ParamUses                  []VarParamUse               `json:"paramUses,omitempty"`
+	InitParamUses              []VarParamUse               `json:"initParamUses,omitempty"`
+	FieldParamUses             []FieldPosKey               `json:"fieldParamUses,omitempty"`
+	ElemParamUses              []ElemParamUse              `json:"elemParamUses,omitempty"`
+	FieldParamDefer            []FieldParamDefer           `json:"fieldParamDefer,omitempty"`
+	FieldParamPoison           []FieldParamPoison          `json:"fieldParamPoison,omitempty"`
+	ReturnFieldParamDefer      []ReturnFieldParamDefer     `json:"returnFieldParamDefer,omitempty"`
+	ReturnFieldParamPoison     []ReturnFieldParamPoison    `json:"returnFieldParamPoison,omitempty"`
+	AttributedUses             []AttributedUse             `json:"attributedUses,omitempty"`
+	FuncRefs                   []FuncRef                   `json:"funcRefs,omitempty"`
+	Opaque                     []string                    `json:"opaque,omitempty"`
+	OpacityBreaks              []string                    `json:"opacityBreaks,omitempty"`
+	OpaqueDeps                 []OpaqueDep                 `json:"opaqueDeps,omitempty"`
+	CarrierLinks               []CarrierLink               `json:"carrierLinks,omitempty"`
+	EnvCarrying                []string                    `json:"envCarrying,omitempty"`
+	EnvCallable                []string                    `json:"envCallable,omitempty"`
+	EnvCallUses                []EnvCallUse                `json:"envCallUses,omitempty"`
+	ReturnEnvFree              []FuncKey                   `json:"returnEnvFree,omitempty"`
+	ReturnEnvDeps              []FuncDepEdge               `json:"returnEnvDeps,omitempty"`
+	ParamInsertionFree         []ParamKey                  `json:"paramInsertionFree,omitempty"`
+	ReturnEnvInsertionDeps     []FuncInsertionDepEdge      `json:"returnEnvInsertionDeps,omitempty"`
+	ParamInsertionDeps         []ParamInsertionDepEdge     `json:"paramInsertionDeps,omitempty"`
+	PureMethods                map[string]string           `json:"pureMethods,omitempty"`
+	ExternalMethods            map[string]string           `json:"externalMethods,omitempty"`
+	PoolDischarges             []string                    `json:"poolDischarges,omitempty"`
+	SingleSubjectVars          []string                    `json:"singleSubjectVars,omitempty"`
+	MappingDischarges          []string                    `json:"mappingDischarges,omitempty"`
+	MemoDischarges             []string                    `json:"memoDischarges,omitempty"`
+	ProtoClusters              []ProtoClusterFact          `json:"protoClusters,omitempty"`
+	ProtoExtAliases            []ProtoExtAlias             `json:"protoExtAliases,omitempty"`
+	ProtoRuntimeTypes          []ProtoRuntimeTypeFact      `json:"protoRuntimeTypes,omitempty"`
+	GrpcServiceVars            []GrpcServiceVarFact        `json:"grpcServiceVars,omitempty"`
+	MutatedStructTypes         []TypeRef                   `json:"mutatedStructTypes,omitempty"`
+	ConditionalStructMutations []ConditionalStructMutation `json:"conditionalStructMutations,omitempty"`
+	NoPostInitCarrierWrites    bool                        `json:"noPostInitCarrierWrites,omitempty"`
+	CarrierImportCalls         []string                    `json:"carrierImportCalls,omitempty"`
+	DirectVarWrites            []string                    `json:"directVarWrites,omitempty"`
 }
 
 // DeferralResolvent carries the typed resolvent of an explain deferral
@@ -984,6 +1064,11 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 		sort.Strings(fact.Declares)
 	}
 	recordPackageMethodDirectives(p, &fact)
+	var idx *pkgSyntaxIndex
+	if p.Types != nil && p.TypesInfo != nil && len(p.Syntax) > 0 {
+		idx = buildPkgSyntaxIndex(p)
+		fact.DirectVarWrites = collectDirectCrossPkgVarWrites(audited, p, idx)
+	}
 	if p.Types != nil && p.Module != nil {
 		for _, file := range p.Syntax {
 			for _, decl := range file.Decls {
@@ -1017,54 +1102,20 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 			}
 		}
 		sort.Strings(fact.SingleSubjectVars)
-		for _, file := range p.Syntax {
-			generator := ""
-			for _, group := range file.Comments {
-				if file.Package.IsValid() && group.Pos() >= file.Package {
-					break
-				}
-				for _, comment := range group.List {
-					if g := GeneratedProtoHeader(comment.Text); g != "" {
-						generator = g
-						break
-					}
-				}
-				if generator != "" {
-					break
-				}
-			}
-			if generator == "" {
-				continue
-			}
-			for _, decl := range file.Decls {
-				gd, ok := decl.(*ast.GenDecl)
-				if !ok || gd.Tok != token.VAR {
-					continue
-				}
-				for _, spec := range gd.Specs {
-					vs, ok := spec.(*ast.ValueSpec)
-					if !ok {
-						continue
-					}
-					for _, name := range vs.Names {
-						variable, ok := p.TypesInfo.Defs[name].(*types.Var)
-						if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
-							continue
-						}
-						if !TypeMayCarryUnknownDynamic(audited, variable.Type()) {
-							continue
-						}
-						if generator == "protoc-gen-go-grpc" {
-							fact.GeneratedGrpcVars = append(fact.GeneratedGrpcVars, dynamicVarKey(variable))
-						} else {
-							fact.GeneratedProtoVars = append(fact.GeneratedProtoVars, dynamicVarKey(variable))
-						}
-					}
-				}
-			}
+		if idx != nil {
+			fact.MappingDischarges = deriveMappingDischarges(audited, p, idx)
+			fact.MemoDischarges = deriveMemoDischarges(audited, p, idx)
+			fact.ProtoClusters, fact.ProtoExtAliases, fact.ProtoRuntimeTypes, fact.GrpcServiceVars, fact.MutatedStructTypes, fact.ConditionalStructMutations =
+				deriveProtoAndStructFacts(audited, p, idx, initOnly, mutated)
+			fact.NonMutatingMethods = deriveNonMutatingMethods(audited, p, idx)
+			fact.NoPostInitCarrierWrites, fact.CarrierImportCalls =
+				deriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
 		}
-		sort.Strings(fact.GeneratedProtoVars)
-		sort.Strings(fact.GeneratedGrpcVars)
+	} else if idx != nil {
+		fact.MutatedStructTypes, fact.ConditionalStructMutations = collectMutatedStructTypes(p, idx, nil, nil, nil)
+		fact.NonMutatingMethods = deriveNonMutatingMethods(audited, p, idx)
+		fact.NoPostInitCarrierWrites, fact.CarrierImportCalls =
+			deriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
 	}
 	return fact
 }

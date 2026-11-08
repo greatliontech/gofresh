@@ -36,8 +36,8 @@ const canonicalDirName = "canonical"
 // a directive-shaped comment (`//go:…`, `//gofresh:…`, any tool's
 // `//<name>:…`), a cgo `//export`, a legacy `+build` constraint in any
 // spelling go/build reads (vet's buildtag check fails the build when
-// it disagrees with the `//go:build` line), or the generated-file
-// marker. A `//line file:N`
+// it disagrees with the `//go:build` line), or the standard Go
+// generated-file marker (`// Code generated … DO NOT EDIT.`). A `//line file:N`
 // directive is not directive-shaped (its name is followed by a space,
 // never a colon) and so falls out by the grammar: it remaps positions,
 // which the form does not carry.

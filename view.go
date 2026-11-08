@@ -2987,10 +2987,6 @@ func joinDischargedKeys(discharged map[string]bool) string {
 	return strings.Join(keys, ",")
 }
 
-func generatedProtoHeader(text string) string {
-	return dynstate.GeneratedProtoHeader(text)
-}
-
 type culpritVerb = dynstate.CulpritVerb
 type culpritChannel = dynstate.CulpritChannel
 

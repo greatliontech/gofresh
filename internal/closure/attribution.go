@@ -23,6 +23,7 @@ type attributedReachability struct {
 	// every consumer) while its batch siblings keep theirs.
 	unavailable      string
 	functions        map[*ssa.Function]bool
+	rtaFunctions     map[*ssa.Function]bool
 	subjectFunctions map[*ssa.Function]bool
 	startupFunctions map[*ssa.Function]bool
 	// baseStartup marks a subject whose startupFunctions and
@@ -51,6 +52,8 @@ type attributedReachability struct {
 	// root's own parameters. Nil for every other subject; subjectRoot
 	// names the function the sites call.
 	enumeratedRootSites    []ssa.CallInstruction
+	enumeratedTypes        []types.Type
+	initBoxedTypes         []types.Type
 	enumeratedFieldStores  map[int][]ssa.Value
 	structFieldStores      map[structFieldKey][]ssa.Value
 	structWholeStores      map[*types.Named][]ssa.Value
@@ -251,18 +254,13 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 	if prog.TestMain != nil {
 		roots[prog.TestMain] |= testMasks
 	}
+	harnessAudited := propertyHarnessAuditedProg(audited, prog)
+	userPaths := userModulePaths(prog.Pkgs)
 	// The init-root set is subject-independent; only the test-main prepend
 	// varies by harness. One derivation serves the RTA roots and every
-	// subject's startup provenance.
-	initRoots := make([]*ssa.Function, 0, len(prog.Prog.AllPackages()))
-	for _, p := range prog.Prog.AllPackages() {
-		if isGeneratedTestMainPackage(prog, p) {
-			continue
-		}
-		if init := p.Func("init"); init != nil {
-			initRoots = append(initRoots, init)
-		}
-	}
+	// subject's startup provenance, isolating stdlib packages imported
+	// exclusively by a verified property harness onto the harness-stdlib plane.
+	initRoots, harnessStdInitRoots := partitionHarnessInitRoots(prog, harnessAudited, userPaths)
 	for _, init := range initRoots {
 		roots[init] |= allMasks
 	}
@@ -274,6 +272,9 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 	// else keeps the open world.
 	enumClosed := map[int]enumerationClosure{}
 	var seeds *rta.Seeds
+	if harnessAudited {
+		seeds = newHarnessRTASeeds(userPaths, harnessStdInitRoots, allMasks)
+	}
 	openCandidates := map[*ssa.Function]int{}
 	for i, subject := range subjects {
 		root := prog.Roots[subject.Symbol]
@@ -282,8 +283,6 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 		}
 		openCandidates[root] = i
 	}
-	harnessAudited := propertyHarnessAuditedProg(prog)
-	userPaths := userModulePaths(prog.Pkgs)
 	var valueRefOutsideInit map[*ssa.Function]bool
 	var summary *callerReferenceSummary
 	if audited || len(openCandidates) > 0 {
@@ -304,6 +303,8 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 			mask := uint64(1) << i
 			if seeds == nil {
 				seeds = &rta.Seeds{AddrTaken: map[*ssa.Function]uint64{}}
+			} else if seeds.AddrTaken == nil {
+				seeds.AddrTaken = map[*ssa.Function]uint64{}
 			}
 			for fn := range enc.addrTaken {
 				seeds.AddrTaken[fn] |= mask
@@ -314,13 +315,21 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 			enumClosed[i] = enc
 		}
 	}
-	if audited && testMasks != 0 {
+	cancelCtxMasks := testMasks
+	if harnessAudited {
+		cancelCtxMasks = allMasks
+	}
+	if audited && cancelCtxMasks != 0 {
 		if ct := programCancelCtxType(prog.Prog); ct != nil {
 			if seeds == nil {
 				seeds = &rta.Seeds{}
 			}
-			seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: ct, Masks: testMasks})
+			seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: ct, Masks: cancelCtxMasks})
 		}
+	}
+	baseStartup, err := cachedBaseStartupReachability(ctx, audited, prog, initRoots, harnessStdInitRoots, harnessAudited, userPaths)
+	if err != nil {
+		return nil, err
 	}
 	cleanupRoots := make([][]*ssa.Function, len(subjects))
 	fuzzRoots := make([][]*ssa.Function, len(subjects))
@@ -328,7 +337,6 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 	unclosedFuzz := make([]bool, len(subjects))
 	rootedCallbacks := make([]map[*ssa.Function]bool, len(subjects))
 	var res *rta.Result
-	var err error
 	for {
 		res, err = rta.Analyze(ctx, roots, seeds)
 		if err != nil {
@@ -355,12 +363,12 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 			}
 			provRoots = append(provRoots, cleanupRoots[i]...)
 			provRoots = append(provRoots, fuzzRoots[i]...)
-			prov, err := provenanceReachable(ctx, provRoots, mask, res, harnessAudited, userPaths, nil)
+			enc, enumerated := enumClosed[i]
+			prov, _, err := provenanceReachableWithCandidates(ctx, prog, provRoots, mask, res, harnessAudited, userPaths, nil, enc.types, baseStartup.initBoxedTypes)
 			if err != nil {
 				return nil, err
 			}
-			enc, enumerated := enumClosed[i]
-			cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, pureDelegates, userPaths, summary, subjectRoot, enumerated, enc, prov, mask, res)
+			cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, harnessAudited, pureDelegates, userPaths, summary, subjectRoot, enumerated, enc, prov, mask, res)
 			unclosedCleanup[i] = unclosedCleanup[i] || unclosedCB
 			unclosedFuzz[i] = unclosedFuzz[i] || unclosedFB
 			for _, cb := range cbs {
@@ -424,14 +432,17 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 			programValueRef = summary.valueRef
 			programFunctions = summary.allFunctions
 		}
+		rtaFns := make(map[*ssa.Function]bool, len(res.Reachable))
 		reachable[i] = attributedReachability{
-			functions:              make(map[*ssa.Function]bool, len(res.Reachable)),
+			functions:              rtaFns,
+			rtaFunctions:           rtaFns,
 			resolved:               make(map[ssa.CallInstruction]bool, len(res.Resolved)),
 			dynamicTargets:         make(map[ssa.CallInstruction]map[*ssa.Function]bool),
 			instantiatedOrigins:    instantiated[uint64(1)<<i],
 			openWorld:              (!enumerated && rootMayReceiveUnknownDynamic(audited, prog, prog.Roots[subjects[i].Symbol])) || unclosedCleanup[i],
 			enumeratedRoot:         enumerated,
 			enumeratedRootSites:    enc.sites,
+			enumeratedTypes:        enc.types,
 			enumeratedFieldStores:  enc.fieldStores,
 			structFieldStores:      structFieldStores,
 			structWholeStores:      structWholeStores,
@@ -483,23 +494,35 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 				return false
 			}
 		}
-		reachable[i].subjectFunctions, err = provenanceReachable(ctx, subjectProvenance, mask, res, harnessAudited, userPaths, dropCollided)
+		var usedInitBoxed bool
+		reachable[i].subjectFunctions, usedInitBoxed, err = provenanceReachableWithCandidates(ctx, prog, subjectProvenance, mask, res, harnessAudited, userPaths, dropCollided, enc.types, baseStartup.initBoxedTypes)
 		if err != nil {
 			return nil, err
+		}
+		if usedInitBoxed {
+			reachable[i].initBoxedTypes = baseStartup.initBoxedTypes
 		}
 		if droppedAny || len(fuzzRoots[i]) > 0 {
 			extraRoots := make([]*ssa.Function, 0, len(subjectProvenance)+len(fuzzRoots[i]))
 			extraRoots = append(extraRoots, subjectProvenance...)
 			extraRoots = append(extraRoots, fuzzRoots[i]...)
-			reachable[i].rootedExtraFunctions, err = provenanceReachable(ctx, extraRoots, mask, res, harnessAudited, userPaths, nil)
+			var extraUsedInitBoxed bool
+			reachable[i].rootedExtraFunctions, extraUsedInitBoxed, err = provenanceReachableWithCandidates(ctx, prog, extraRoots, mask, res, harnessAudited, userPaths, nil, enc.types, baseStartup.initBoxedTypes)
 			if err != nil {
 				return nil, err
 			}
+			if extraUsedInitBoxed {
+				reachable[i].initBoxedTypes = baseStartup.initBoxedTypes
+			}
 		}
 		if prog.TestMain != nil && subjectRunsThroughHarness(prog, subjectRoot) {
-			reachable[i].testMainFunctions, err = provenanceReachable(ctx, []*ssa.Function{prog.TestMain}, mask, res, harnessAudited, userPaths, nil)
+			var tmUsedInitBoxed bool
+			reachable[i].testMainFunctions, tmUsedInitBoxed, err = provenanceReachableWithCandidates(ctx, prog, []*ssa.Function{prog.TestMain}, mask, res, harnessAudited, userPaths, nil, nil, baseStartup.initBoxedTypes)
 			if err != nil {
 				return nil, err
+			}
+			if tmUsedInitBoxed {
+				reachable[i].initBoxedTypes = baseStartup.initBoxedTypes
 			}
 		}
 		for fn, masks := range res.Reachable {
@@ -531,10 +554,6 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 				}
 			}
 		}
-	}
-	baseStartup, err := cachedBaseStartupReachability(ctx, audited, prog, initRoots, harnessAudited, userPaths)
-	if err != nil {
-		return nil, err
 	}
 	for i := range reachable {
 		mask := uint64(1) << i
@@ -593,7 +612,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 				}
 			}
 		}
-		reachable[i].rootedIncomplete = unclosedFuzz[i] || rootedProvenanceIncomplete(audited, prog, userPaths, reachable[i].subjectFunctions, reachable[i].rootedExtraFunctions, reachable[i].testMainFunctions, reachable[i].cleanupFunctions)
+		reachable[i].rootedIncomplete = unclosedFuzz[i] || rootedProvenanceIncomplete(audited, harnessAudited, prog, userPaths, reachable[i].subjectFunctions, reachable[i].rootedExtraFunctions, reachable[i].testMainFunctions, reachable[i].cleanupFunctions)
 	}
 	return reachable, nil
 }
@@ -601,6 +620,8 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 type baseStartupReachSummary struct {
 	startupFunctions      map[*ssa.Function]bool
 	startupDynamicTargets map[ssa.CallInstruction]map[*ssa.Function]bool
+	initBoxedTypes        []types.Type
+	userTouchedStdGlobals map[*ssa.Global]bool
 }
 
 func cloneDynamicTargetMap(src map[ssa.CallInstruction]map[*ssa.Function]bool) map[ssa.CallInstruction]map[*ssa.Function]bool {
@@ -611,7 +632,7 @@ func cloneDynamicTargetMap(src map[ssa.CallInstruction]map[*ssa.Function]bool) m
 	return out
 }
 
-func cachedBaseStartupReachability(ctx context.Context, audited bool, prog *program, initRoots []*ssa.Function, harnessAudited bool, userPaths map[string]bool) (*baseStartupReachSummary, error) {
+func cachedBaseStartupReachability(ctx context.Context, audited bool, prog *program, initRoots, harnessStdInitRoots []*ssa.Function, harnessAudited bool, userPaths map[string]bool) (*baseStartupReachSummary, error) {
 	cacheKey := "baseStartupReach:0:0"
 	switch {
 	case audited && harnessAudited:
@@ -631,7 +652,11 @@ func cachedBaseStartupReachability(ctx context.Context, audited bool, prog *prog
 	for _, fn := range initRoots {
 		initMaskRoots[fn] = startupMask
 	}
-	initRes, err := rta.Analyze(ctx, initMaskRoots, nil)
+	var initSeeds *rta.Seeds
+	if harnessAudited {
+		initSeeds = newHarnessRTASeeds(userPaths, harnessStdInitRoots, startupMask)
+	}
+	initRes, err := rta.Analyze(ctx, initMaskRoots, initSeeds)
 	if err != nil {
 		return nil, err
 	}
@@ -656,9 +681,68 @@ func cachedBaseStartupReachability(ctx context.Context, audited bool, prog *prog
 			}
 		}
 	}
+	var initBoxedTypes []types.Type
+	var userTouchedStdGlobals map[*ssa.Global]bool
+	if harnessAudited {
+		orderedStartup := make([]*ssa.Function, 0, len(startupFns))
+		for fn := range startupFns {
+			if fn != nil {
+				orderedStartup = append(orderedStartup, fn)
+			}
+		}
+		sort.Slice(orderedStartup, func(i, j int) bool { return lessSSAFunctionOrder(orderedStartup[i], orderedStartup[j]) })
+		seenBoxed := map[types.Type]bool{}
+		for _, fn := range orderedStartup {
+			fp := funcPkgPath(fn)
+			if isStdPkgPath(userPaths, fp) || fp == "testing" || propertyHarnessPath(fp) {
+				continue
+			}
+			for _, b := range fn.Blocks {
+				for _, instr := range b.Instrs {
+					if mi, isMI := instr.(*ssa.MakeInterface); isMI && mi.X != nil && mi.X.Type() != nil {
+						xt := mi.X.Type()
+						if !seenBoxed[xt] {
+							seenBoxed[xt] = true
+							initBoxedTypes = append(initBoxedTypes, xt)
+						}
+					}
+				}
+			}
+		}
+		if len(initBoxedTypes) > 0 {
+			var opsBuf [8]*ssa.Value
+			for _, fn := range orderedStartup {
+				fp := funcPkgPath(fn)
+				isOwnInit := initFlowFrame(fn)
+				for _, b := range fn.Blocks {
+					for _, instr := range b.Instrs {
+						for _, op := range instr.Operands(opsBuf[:0]) {
+							if op == nil {
+								continue
+							}
+							g, ok := (*op).(*ssa.Global)
+							if !ok || g == nil || g.Pkg == nil || g.Pkg.Pkg == nil {
+								continue
+							}
+							gPkg := g.Pkg.Pkg.Path()
+							if !isStdPkgPath(userPaths, gPkg) || (isOwnInit && fp == gPkg) {
+								continue
+							}
+							if userTouchedStdGlobals == nil {
+								userTouchedStdGlobals = make(map[*ssa.Global]bool)
+							}
+							userTouchedStdGlobals[g] = true
+						}
+					}
+				}
+			}
+		}
+	}
 	summary := &baseStartupReachSummary{
 		startupFunctions:      startupFns,
 		startupDynamicTargets: startupTargets,
+		initBoxedTypes:        initBoxedTypes,
+		userTouchedStdGlobals: userTouchedStdGlobals,
 	}
 	if prog != nil && ctx.Err() == nil {
 		if prog.Summaries == nil {
@@ -669,6 +753,91 @@ func cachedBaseStartupReachability(ctx context.Context, audited bool, prog *prog
 	return summary, nil
 }
 
+func partitionHarnessInitRoots(prog *program, harnessAudited bool, userPaths map[string]bool) (initRoots, harnessStdInitRoots []*ssa.Function) {
+	if prog == nil || prog.Prog == nil {
+		return nil, nil
+	}
+	var nonHarnessReachable map[*types.Package]bool
+	if harnessAudited {
+		nonHarnessReachable = make(map[*types.Package]bool)
+		if len(prog.Pkgs) > 0 {
+			var nonHarnessRoots []*packages.Package
+			for _, pkg := range prog.Pkgs {
+				if pkg == nil || propertyHarnessPath(pkg.PkgPath) {
+					continue
+				}
+				if pkg.Module != nil || !isStdPkgPath(userPaths, pkg.PkgPath) || pkg.PkgPath == prog.PkgPath || pkg.PkgPath == prog.PkgPath+"_test" || pkg.ForTest == prog.PkgPath || (pkg.Name == "main" && pkg.PkgPath == prog.PkgPath+".test") {
+					nonHarnessRoots = append(nonHarnessRoots, pkg)
+				}
+			}
+			packages.Visit(nonHarnessRoots, func(pkg *packages.Package) bool {
+				if pkg == nil || propertyHarnessPath(pkg.PkgPath) {
+					return false
+				}
+				if pkg.Types != nil {
+					nonHarnessReachable[pkg.Types] = true
+				}
+				return true
+			}, nil)
+		} else {
+			var queue []*types.Package
+			enqueue := func(tp *types.Package) {
+				if tp == nil || nonHarnessReachable[tp] || propertyHarnessPath(tp.Path()) {
+					return
+				}
+				nonHarnessReachable[tp] = true
+				queue = append(queue, tp)
+			}
+			for _, sp := range prog.Prog.AllPackages() {
+				if sp == nil || sp.Pkg == nil {
+					continue
+				}
+				p := sp.Pkg.Path()
+				if isGeneratedTestMainPackage(prog, sp) || p == prog.PkgPath || p == prog.PkgPath+"_test" || (!propertyHarnessPath(p) && !isStdPkgPath(userPaths, p)) {
+					enqueue(sp.Pkg)
+				}
+			}
+			for len(queue) > 0 {
+				cur := queue[0]
+				queue = queue[1:]
+				for _, imp := range cur.Imports() {
+					enqueue(imp)
+				}
+			}
+		}
+	}
+	for _, p := range prog.Prog.AllPackages() {
+		if isGeneratedTestMainPackage(prog, p) {
+			continue
+		}
+		init := p.Func("init")
+		if init == nil {
+			continue
+		}
+		if harnessAudited && p.Pkg != nil && !propertyHarnessPath(p.Pkg.Path()) && !nonHarnessReachable[p.Pkg] {
+			harnessStdInitRoots = append(harnessStdInitRoots, init)
+			continue
+		}
+		initRoots = append(initRoots, init)
+	}
+	return initRoots, harnessStdInitRoots
+}
+
+func newHarnessRTASeeds(userPaths map[string]bool, harnessStdInitRoots []*ssa.Function, masks uint64) *rta.Seeds {
+	var stdRoots map[*ssa.Function]uint64
+	if len(harnessStdInitRoots) > 0 && masks != 0 {
+		stdRoots = make(map[*ssa.Function]uint64, len(harnessStdInitRoots))
+		for _, fn := range harnessStdInitRoots {
+			stdRoots[fn] |= masks
+		}
+	}
+	return &rta.Seeds{
+		HarnessPkg:      propertyHarnessModulePath,
+		UserPkgs:        userPaths,
+		HarnessStdRoots: stdRoots,
+	}
+}
+
 // binaryReachableUnion computes the binary-wide union of every harness root's
 // post-initialization attributed reach in a single all-roots RTA and provenance
 // walk (REQ-closure-shared-dynamic-state-reachability).
@@ -677,7 +846,7 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 		return RootedFunctions{Fns: map[string]bool{}, Complete: true}, nil
 	}
 	const unionMask uint64 = 1
-	harnessAudited := propertyHarnessAuditedProg(prog)
+	harnessAudited := propertyHarnessAuditedProg(audited, prog)
 	userPaths := userModulePaths(prog.Pkgs)
 	roots := make(map[*ssa.Function]uint64)
 	var subjectProvenance []*ssa.Function
@@ -730,8 +899,13 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 			includeTestMain = true
 		}
 	}
+	initRoots, harnessStdInitRoots := partitionHarnessInitRoots(prog, harnessAudited, userPaths)
 	var seeds *rta.Seeds
+	if harnessAudited {
+		seeds = newHarnessRTASeeds(userPaths, harnessStdInitRoots, unionMask)
+	}
 	var summary *callerReferenceSummary
+	var enumCandidateTypes []types.Type
 	if audited || len(openCandidates) > 0 {
 		summary = enumerateCallerReferencesForProgram(prog, audited, pureDelegates, userPaths, allFunctions)
 		allFunctions = summary.allFunctions
@@ -742,16 +916,19 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 			}
 			if seeds == nil {
 				seeds = &rta.Seeds{AddrTaken: map[*ssa.Function]uint64{}}
+			} else if seeds.AddrTaken == nil {
+				seeds.AddrTaken = map[*ssa.Function]uint64{}
 			}
 			for fn := range enc.addrTaken {
 				seeds.AddrTaken[fn] |= unionMask
 			}
 			for _, t := range enc.types {
 				seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: t, Masks: unionMask})
+				enumCandidateTypes = append(enumCandidateTypes, t)
 			}
 		}
 	}
-	if audited && includeTestMain {
+	if audited && (includeTestMain || harnessAudited) {
 		if ct := programCancelCtxType(prog.Prog); ct != nil {
 			if seeds == nil {
 				seeds = &rta.Seeds{}
@@ -763,13 +940,16 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 		roots[prog.TestMain] |= unionMask
 		subjectProvenance = append(subjectProvenance, prog.TestMain)
 	}
-	for _, p := range prog.Prog.AllPackages() {
-		if isGeneratedTestMainPackage(prog, p) {
-			continue
+	for _, init := range initRoots {
+		roots[init] |= unionMask
+	}
+	var initBoxedTypes []types.Type
+	if harnessAudited {
+		baseStartup, err := cachedBaseStartupReachability(ctx, audited, prog, initRoots, harnessStdInitRoots, harnessAudited, userPaths)
+		if err != nil {
+			return RootedFunctions{}, err
 		}
-		if init := p.Func("init"); init != nil {
-			roots[init] |= unionMask
-		}
+		initBoxedTypes = baseStartup.initBoxedTypes
 	}
 	rootedCallbacks := map[*ssa.Function]bool{}
 	var res *rta.Result
@@ -791,11 +971,11 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 				res.Reachable[origin] |= unionMask
 			}
 		}
-		provenance, err = provenanceReachable(ctx, subjectProvenance, unionMask, res, harnessAudited, userPaths, nil)
+		provenance, _, err = provenanceReachableWithCandidates(ctx, prog, subjectProvenance, unionMask, res, harnessAudited, userPaths, nil, enumCandidateTypes, initBoxedTypes)
 		if err != nil {
 			return RootedFunctions{}, err
 		}
-		cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, pureDelegates, userPaths, summary, nil, false, enumerationClosure{}, provenance, unionMask, res)
+		cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, harnessAudited, pureDelegates, userPaths, summary, nil, false, enumerationClosure{}, provenance, unionMask, res)
 		if unclosedCB || unclosedFB {
 			return RootedFunctions{}, nil
 		}
@@ -826,7 +1006,7 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 			break
 		}
 	}
-	if rootedProvenanceIncomplete(audited, prog, userPaths, provenance) {
+	if rootedProvenanceIncomplete(audited, harnessAudited, prog, userPaths, provenance) {
 		return RootedFunctions{}, nil
 	}
 	fns := make(map[string]bool, len(provenance))
@@ -2996,7 +3176,7 @@ func provenanceReachableStartup(ctx context.Context, audited bool, prog *program
 	return provenanceBFS(ctx, audited, prog, roots, mask, result, harnessAudited, userPaths, true, nil)
 }
 
-func collectTestingHarnessCallbacks(audited bool, pureDelegates map[string]bool, userPaths map[string]bool, summary *callerReferenceSummary, subjectRoot *ssa.Function, enumerated bool, enc enumerationClosure, prov map[*ssa.Function]bool, mask uint64, res *rta.Result) (cleanupOut []*ssa.Function, unclosedCleanup bool, fuzzOut []*ssa.Function, unclosedFuzz bool) {
+func collectTestingHarnessCallbacks(audited, harnessAudited bool, pureDelegates map[string]bool, userPaths map[string]bool, summary *callerReferenceSummary, subjectRoot *ssa.Function, enumerated bool, enc enumerationClosure, prov map[*ssa.Function]bool, mask uint64, res *rta.Result) (cleanupOut []*ssa.Function, unclosedCleanup bool, fuzzOut []*ssa.Function, unclosedFuzz bool) {
 	seenCleanup := make(map[*ssa.Function]bool)
 	seenFuzz := make(map[*ssa.Function]bool)
 	var lazyFP *freshParamAnalysis
@@ -3039,6 +3219,7 @@ func collectTestingHarnessCallbacks(audited bool, pureDelegates map[string]bool,
 		reach.enumeratedRoot = enumerated
 		reach.enumeratedRootSites = enc.sites
 		reach.enumeratedFieldStores = enc.fieldStores
+		reach.propertyHarnessAudited = harnessAudited
 		reach.userPaths = userPaths
 		if summary != nil {
 			reach.prog = summary.prog
@@ -3073,8 +3254,19 @@ func collectTestingHarnessCallbacks(audited bool, pureDelegates map[string]bool,
 		}
 		return true
 	}
+	markUnclosed := func(kind string) {
+		if kind == "Fuzz" {
+			unclosedFuzz = true
+		} else {
+			unclosedCleanup = true
+		}
+	}
 	addCallback := func(kind string, cb *ssa.Function) {
 		if cb == nil {
+			return
+		}
+		if cb.Parent() == nil && propertyHarnessPath(funcPkgPath(cb)) {
+			markUnclosed(kind)
 			return
 		}
 		if kind == "Fuzz" {
@@ -3091,13 +3283,6 @@ func collectTestingHarnessCallbacks(audited bool, pureDelegates map[string]bool,
 		if !seenCleanup[cb] {
 			seenCleanup[cb] = true
 			cleanupOut = append(cleanupOut, cb)
-		}
-	}
-	markUnclosed := func(kind string) {
-		if kind == "Fuzz" {
-			unclosedFuzz = true
-		} else {
-			unclosedCleanup = true
 		}
 	}
 	unwrapIface := func(v ssa.Value) ssa.Value {
@@ -3235,7 +3420,7 @@ func isVerifiedPureRootedAsmStub(audited bool, prog *program, fn *ssa.Function) 
 	return ok && sum.impureKind == ""
 }
 
-func rootedProvenanceIncomplete(audited bool, prog *program, userPaths map[string]bool, sets ...map[*ssa.Function]bool) bool {
+func rootedProvenanceIncomplete(audited, harnessAudited bool, prog *program, userPaths map[string]bool, sets ...map[*ssa.Function]bool) bool {
 	var space [16]*ssa.Value
 	for _, set := range sets {
 		for fn := range set {
@@ -3253,20 +3438,20 @@ func rootedProvenanceIncomplete(audited bool, prog *program, userPaths map[strin
 				continue
 			}
 			for _, p := range fn.Params {
-				if p != nil && nonStdTypeUsesUnsafePointer(audited, userPaths, p.Type()) {
+				if p != nil && nonStdTypeUsesUnsafePointer(audited, harnessAudited, userPaths, p.Type()) {
 					return true
 				}
 			}
 			for _, b := range fn.Blocks {
 				for _, instr := range b.Instrs {
-					if v, ok := instr.(ssa.Value); ok && nonStdTypeUsesUnsafePointer(audited, userPaths, v.Type()) {
+					if v, ok := instr.(ssa.Value); ok && nonStdTypeUsesUnsafePointer(audited, harnessAudited, userPaths, v.Type()) {
 						return true
 					}
 					for _, op := range instr.Operands(space[:0]) {
 						if op == nil || *op == nil {
 							continue
 						}
-						if nonStdTypeUsesUnsafePointer(audited, userPaths, (*op).Type()) {
+						if nonStdTypeUsesUnsafePointer(audited, harnessAudited, userPaths, (*op).Type()) {
 							return true
 						}
 						if g, ok := (*op).(*ssa.Function); ok {
@@ -3352,7 +3537,15 @@ func isUnattributableRootedStdSymbol(pkgPath, sym string) bool {
 	return false
 }
 
-func nonStdTypeUsesUnsafePointer(audited bool, userPaths map[string]bool, t types.Type) bool {
+func isOpaqueStructNamed(n *types.Named) bool {
+	if n == nil {
+		return false
+	}
+	st, ok := n.Underlying().(*types.Struct)
+	return ok && structHasNoExportedFields(st)
+}
+
+func nonStdTypeUsesUnsafePointer(audited, harnessAudited bool, userPaths map[string]bool, t types.Type) bool {
 	seen := make(map[types.Type]bool)
 	var walk func(types.Type) bool
 	walk = func(cur types.Type) bool {
@@ -3377,7 +3570,8 @@ func nonStdTypeUsesUnsafePointer(audited bool, userPaths map[string]bool, t type
 				if elem, ok := auditedAtomicPointerElem(audited, tt); ok {
 					return walk(elem)
 				}
-				if isStdImportPath(pkgPath) && !userPaths[pkgPath] {
+				if (isStdImportPath(pkgPath) && !userPaths[pkgPath]) ||
+					(harnessAudited && propertyHarnessPath(pkgPath) && isOpaqueStructNamed(tt)) {
 					for i := 0; i < tt.TypeArgs().Len(); i++ {
 						if walk(tt.TypeArgs().At(i)) {
 							return true
@@ -3512,12 +3706,81 @@ func isTestingCleanupCall(site ssa.CallInstruction, arg ssa.Value) bool {
 }
 
 func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool) (map[*ssa.Function]bool, error) {
-	return provenanceBFS(ctx, false, nil, roots, mask, result, harnessAudited, userPaths, false, dropTarget)
+	reach, _, err := provenanceBFSWithCandidates(ctx, false, nil, roots, mask, result, harnessAudited, userPaths, false, dropTarget, nil, nil)
+	return reach, err
+}
+
+func provenanceReachableWithCandidates(ctx context.Context, prog *program, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool, candidateTypes, initBoxedTypes []types.Type) (map[*ssa.Function]bool, bool, error) {
+	return provenanceBFSWithCandidates(ctx, false, prog, roots, mask, result, harnessAudited, userPaths, false, dropTarget, candidateTypes, initBoxedTypes)
 }
 
 func provenanceBFS(ctx context.Context, audited bool, prog *program, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, deferUnscannedClosures bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool) (map[*ssa.Function]bool, error) {
+	reach, _, err := provenanceBFSWithCandidates(ctx, audited, prog, roots, mask, result, harnessAudited, userPaths, deferUnscannedClosures, dropTarget, nil, nil)
+	return reach, err
+}
+
+func lookupCachedBaseStartup(prog *program) *baseStartupReachSummary {
+	if prog == nil || prog.Summaries == nil {
+		return nil
+	}
+	if s, ok := prog.Summaries["baseStartupReach:1:1"].(*baseStartupReachSummary); ok && s != nil {
+		return s
+	}
+	if s, ok := prog.Summaries["baseStartupReach:0:1"].(*baseStartupReachSummary); ok && s != nil {
+		return s
+	}
+	return nil
+}
+
+func hasStartupAncestor(fn *ssa.Function, startupFns map[*ssa.Function]bool) bool {
+	if fn == nil || fn.Parent() == nil {
+		return false
+	}
+	if initFlowFrame(fn) {
+		return true
+	}
+	if len(startupFns) == 0 {
+		return false
+	}
+	for p := fn.Parent(); p != nil; p = p.Parent() {
+		if startupFns[p] {
+			return true
+		}
+	}
+	return false
+}
+
+func typeCanCarryAnyInitBoxed(t types.Type, initBoxed []types.Type) bool {
+	if t == nil || len(initBoxed) == 0 {
+		return false
+	}
+	found := false
+	walkTypeGraph(t, true, map[types.Type]bool{}, func(cur types.Type) bool {
+		iface, ok := cur.(*types.Interface)
+		if !ok {
+			return true
+		}
+		if rta.ContainsTypeParam(iface, map[types.Type]bool{}) {
+			found = true
+			return false
+		}
+		for _, bt := range initBoxed {
+			if bt == nil {
+				continue
+			}
+			if rta.ContainsTypeParam(bt, map[types.Type]bool{}) || types.Implements(bt, iface) {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
+}
+
+func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *program, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, deferUnscannedClosures bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool, candidateTypes, initBoxedTypes []types.Type) (map[*ssa.Function]bool, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	reachable := make(map[*ssa.Function]bool)
 	scanned := make(map[*ssa.Function]bool)
@@ -3526,6 +3789,15 @@ func provenanceBFS(ctx context.Context, audited bool, prog *program, roots []*ss
 		pendingByParent = make(map[*ssa.Function][]*ssa.Function)
 	}
 	queue := append([]*ssa.Function(nil), roots...)
+	var rootSSAProg *ssa.Program
+	if prog != nil {
+		rootSSAProg = prog.Prog
+	}
+	for _, r := range roots {
+		if rootSSAProg == nil && r != nil {
+			rootSSAProg = r.Prog
+		}
+	}
 	var syncZeroGlobals, wholeZeroGlobals map[*ssa.Global]bool
 	var asyncStartup map[*ssa.Function]bool
 	var wholeComputed bool
@@ -3535,9 +3807,101 @@ func provenanceBFS(ctx context.Context, audited bool, prog *program, roots []*ss
 			asyncStartup = computeRTAAsyncStartupFunctions(result, mask)
 		}
 	}
+	var sawHarnessCall bool
+	var dispatchedTargets map[*ssa.Function]bool
+	var harnessCandidateTargets map[*ssa.Function]bool
+	var seenCandidateTypes map[types.Type]bool
+	var pendingCandidateTypes []types.Type
+	enqueueDispatchedMethodsOfType := func(ssaProg *ssa.Program, rootType types.Type) {
+		if ssaProg == nil || rootType == nil || len(dispatchedTargets) == 0 {
+			return
+		}
+		walkTypeGraph(rootType, true, seenCandidateTypes, func(cur types.Type) bool {
+			named, ok := cur.(*types.Named)
+			if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+				return true
+			}
+			pkgPath := named.Obj().Pkg().Path()
+			if isStdPkgPath(userPaths, pkgPath) || pkgPath == "testing" || (harnessAudited && propertyHarnessPath(pkgPath)) {
+				return true
+			}
+			for _, mt := range []types.Type{named, types.NewPointer(named)} {
+				mset := ssaProg.MethodSets.MethodSet(mt)
+				for i, n := 0, mset.Len(); i < n; i++ {
+					sel := mset.At(i)
+					if sel.Obj() == nil {
+						continue
+					}
+					if cm := ssaProg.MethodValue(sel); cm != nil && dispatchedTargets[cm] {
+						if harnessCandidateTargets == nil {
+							harnessCandidateTargets = make(map[*ssa.Function]bool)
+						}
+						harnessCandidateTargets[cm] = true
+						queue = append(queue, cm)
+					}
+				}
+			}
+			return true
+		})
+	}
+	noteHarnessCandidateType := func(ssaProg *ssa.Program, t types.Type) {
+		if result == nil || t == nil {
+			return
+		}
+		if !sawHarnessCall {
+			pendingCandidateTypes = append(pendingCandidateTypes, t)
+			return
+		}
+		enqueueDispatchedMethodsOfType(ssaProg, t)
+	}
+	activateHarnessDispatchedMethods := func(ssaProg *ssa.Program) {
+		if sawHarnessCall || result == nil {
+			return
+		}
+		sawHarnessCall = true
+		dispatchedTargets = make(map[*ssa.Function]bool)
+		for _, targets := range result.Targets {
+			for target, targetMask := range targets {
+				if targetMask&mask != 0 && !isTestingMRun(target) && !isTestingBLaunch(target) {
+					dispatchedTargets[target] = true
+				}
+			}
+		}
+		for _, targets := range result.HarnessStdTargets {
+			for target, targetMask := range targets {
+				if targetMask&mask != 0 && !isTestingMRun(target) && !isTestingBLaunch(target) {
+					dispatchedTargets[target] = true
+				}
+			}
+		}
+		seenCandidateTypes = make(map[types.Type]bool)
+		for _, pt := range pendingCandidateTypes {
+			enqueueDispatchedMethodsOfType(ssaProg, pt)
+		}
+		pendingCandidateTypes = nil
+	}
+	for _, ct := range candidateTypes {
+		noteHarnessCandidateType(rootSSAProg, ct)
+	}
+	var usedInitBoxed bool
+	var baseStartup *baseStartupReachSummary
+	var checkedGlobalCarrier map[*ssa.Global]bool
+	if len(initBoxedTypes) > 0 {
+		baseStartup = lookupCachedBaseStartup(prog)
+	}
+	seedInitBoxedTypes := func(ssaProg *ssa.Program) {
+		if usedInitBoxed {
+			return
+		}
+		usedInitBoxed = true
+		for _, bt := range initBoxedTypes {
+			noteHarnessCandidateType(ssaProg, bt)
+		}
+	}
+	var opsBuf [8]*ssa.Value
 	for len(queue) != 0 {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		fn := queue[0]
 		queue = queue[1:]
@@ -3558,6 +3922,15 @@ func provenanceBFS(ctx context.Context, audited bool, prog *program, roots []*ss
 		harnessFrame := funcPkgPath(fn) == "testing" || harnessAudited && propertyHarnessPath(funcPkgPath(fn))
 		if !harnessFrame {
 			reachable[fn] = true
+			if !usedInitBoxed && len(initBoxedTypes) > 0 && len(fn.FreeVars) > 0 &&
+				(baseStartup == nil || hasStartupAncestor(fn, baseStartup.startupFunctions)) {
+				for _, fv := range fn.FreeVars {
+					if fv != nil && typeCanCarryAnyInitBoxed(fv.Type(), initBoxedTypes) {
+						seedInitBoxedTypes(fn.Prog)
+						break
+					}
+				}
+			}
 		}
 		fnZeroGlobals := syncZeroGlobals
 		if len(syncZeroGlobals) > 0 && asyncStartup[fn] {
@@ -3571,6 +3944,41 @@ func provenanceBFS(ctx context.Context, audited bool, prog *program, roots []*ss
 		}
 		for _, block := range liveBlocks(fn, fnZeroGlobals) {
 			for _, instruction := range block.Instrs {
+				if !harnessFrame {
+					if !usedInitBoxed && len(initBoxedTypes) > 0 {
+						for _, op := range instruction.Operands(opsBuf[:0]) {
+							if op == nil {
+								continue
+							}
+							g, ok := (*op).(*ssa.Global)
+							if !ok || g == nil || checkedGlobalCarrier[g] {
+								continue
+							}
+							if checkedGlobalCarrier == nil {
+								checkedGlobalCarrier = make(map[*ssa.Global]bool)
+							}
+							checkedGlobalCarrier[g] = true
+							var gPkg string
+							if g.Pkg != nil && g.Pkg.Pkg != nil {
+								gPkg = g.Pkg.Pkg.Path()
+							}
+							if gPkg == "testing" || (harnessAudited && propertyHarnessPath(gPkg)) {
+								continue
+							}
+							if isStdPkgPath(userPaths, gPkg) && baseStartup != nil && !baseStartup.userTouchedStdGlobals[g] {
+								continue
+							}
+							if typeCanCarryAnyInitBoxed(g.Type(), initBoxedTypes) {
+								seedInitBoxedTypes(fn.Prog)
+								break
+							}
+						}
+					}
+					if mi, isMI := instruction.(*ssa.MakeInterface); isMI && mi.X != nil {
+						noteHarnessCandidateType(fn.Prog, mi.X.Type())
+						continue
+					}
+				}
 				site, ok := instruction.(ssa.CallInstruction)
 				if !ok || site.Common() == nil {
 					continue
@@ -3585,37 +3993,59 @@ func provenanceBFS(ctx context.Context, audited bool, prog *program, roots []*ss
 					if !harnessFrame || calleeHarness {
 						queue = append(queue, callee)
 					}
-					if calleeHarness && !harnessFrame {
+					if calleeHarness && !harnessFrame && !initFlowFrame(callee) {
+						activateHarnessDispatchedMethods(fn.Prog)
+						if mc, ok := site.Common().Value.(*ssa.MakeClosure); ok {
+							for _, b := range mc.Bindings {
+								if b != nil {
+									noteHarnessCandidateType(fn.Prog, b.Type())
+								}
+							}
+						}
+						for _, arg := range site.Common().Args {
+							if arg != nil {
+								noteHarnessCandidateType(fn.Prog, arg.Type())
+							}
+						}
+						for _, ta := range callee.TypeArgs() {
+							noteHarnessCandidateType(fn.Prog, ta)
+						}
 						continue
 					}
 				}
-				for target, targetMask := range result.Targets[site] {
-					if targetMask&mask == 0 || isTestingMRun(target) || isTestingBLaunch(target) {
-						continue
-					}
-					if dropTarget != nil && dropTarget(site, target) {
-						continue
-					}
-					targetPath := funcPkgPath(target)
-					targetHarness := targetPath == "testing" || harnessAudited && propertyHarnessPath(targetPath)
-					// User callbacks dispatched from harness frames stay
-					// in the walk by the load's module facts, never by
-					// path shape: a dotless user module's callback
-					// classified standard here silently vanished from
-					// the startup and test-main walks - the
-					// dotless-module soundness family.
-					if !harnessFrame || targetHarness || !isStdPkgPath(userPaths, targetPath) {
-						if deferUnscannedClosures && target.Parent() != nil && target.Synthetic == "" && !scanned[target.Parent()] && !isTestingCleanupCallback(target) {
-							pendingByParent[target.Parent()] = append(pendingByParent[target.Parent()], target)
+				enqueueSiteTargets := func(targets map[*ssa.Function]uint64) {
+					for target, targetMask := range targets {
+						if targetMask&mask == 0 || isTestingMRun(target) || isTestingBLaunch(target) {
 							continue
 						}
-						queue = append(queue, target)
+						if dropTarget != nil && !harnessCandidateTargets[target] && dropTarget(site, target) {
+							continue
+						}
+						targetPath := funcPkgPath(target)
+						targetHarness := targetPath == "testing" || harnessAudited && propertyHarnessPath(targetPath)
+						// User callbacks dispatched from harness frames stay
+						// in the walk by the load's module facts, never by
+						// path shape: a dotless user module's callback
+						// classified standard here silently vanished from
+						// the startup and test-main walks - the
+						// dotless-module soundness family.
+						if !harnessFrame || targetHarness || !isStdPkgPath(userPaths, targetPath) {
+							if deferUnscannedClosures && target.Parent() != nil && target.Synthetic == "" && !scanned[target.Parent()] && !isTestingCleanupCallback(target) {
+								pendingByParent[target.Parent()] = append(pendingByParent[target.Parent()], target)
+								continue
+							}
+							queue = append(queue, target)
+						}
 					}
+				}
+				enqueueSiteTargets(result.Targets[site])
+				if harnessFrame && !initFlowFrame(fn) && len(result.HarnessStdTargets) > 0 {
+					enqueueSiteTargets(result.HarnessStdTargets[site])
 				}
 			}
 		}
 	}
-	return reachable, nil
+	return reachable, usedInitBoxed, nil
 }
 
 // userModulePaths collects every loaded package path the module graph

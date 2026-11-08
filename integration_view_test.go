@@ -398,7 +398,7 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 		// discharge), so the ONLY residual is that class — pinned by
 		// equality so a second downgrade can never hide behind it.
 		if controlVerdict.Status != Unverifiable || controlVerdict.Reason != "reaches golang.org/x/sys/unix (external system call) (dischargeable by restructuring the subject away from the reach, or by the //gofresh:pure directive on the subject's declaration or the caller's purity assertion)" {
-			t.Fatalf("unattested verdict = %+v, want exactly the untouched observability class - the mapping discharge needs no attestation; a mapper-naming reason likely means the parent go.mod pins an x/sys version outside the audited set: audit the new source and extend auditedMappingOut's switch", controlVerdict)
+			t.Fatalf("unattested verdict = %+v, want exactly the untouched observability class - the mapping discharge needs no attestation; a mapper-naming reason means golang.org/x/sys/unix failed mechanical mapping verification in internal/dynstate", controlVerdict)
 		}
 		if controlFP.SingleSubjectDischarges != "" {
 			t.Fatalf("unattested evidence recorded %q, want nothing - the discharge is the engine's own verdict", controlFP.SingleSubjectDischarges)
@@ -484,15 +484,16 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 	})
 }
 
-// The mapping audit is a property of the audited versions' source: an
-// unaudited pinned version carrying the identical mapper shape refuses
-// fail-closed until its source is audited — exactly the memoization
-// set's rule (REQ-closure-shared-dynamic-state).
+// The mapping discharge is a mechanical structural proof over selected
+// source rather than a version allowlist: a pure-Go fake at any version
+// refuses fail-closed naming mapper, whereas a kernel-syscall + sync.Mutex
+// + unsafe.Slice bookkeeping structure at an arbitrary uncurated version
+// discharges attestation-free (REQ-closure-shared-dynamic-state-mapping).
 func TestAuditedMappingUnauditedVersionRefuses(t *testing.T) {
 	if testing.Short() {
 		t.Skip("populates a module cache and runs the engine over a temporary module")
 	}
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateProofCache(t)
 	modCache, err := os.MkdirTemp("", "gofresh-modcache-*")
 	if err != nil {
 		t.Fatal(err)
@@ -505,118 +506,145 @@ func TestAuditedMappingUnauditedVersionRefuses(t *testing.T) {
 		os.RemoveAll(modCache)
 	})
 	proxy := t.TempDir()
-	mapperSource := "package unix\n\ntype mmapper struct {\n\tactive map[*byte][]byte\n\tmmap   func(length int) ([]byte, error)\n\tmunmap func(b []byte) error\n}\n\nvar mapper = &mmapper{\n\tactive: map[*byte][]byte{},\n\tmmap:   func(length int) ([]byte, error) { return make([]byte, length), nil },\n\tmunmap: func(b []byte) error { return nil },\n}\n\nfunc (m *mmapper) Mmap(length int) ([]byte, error) {\n\tb, err := m.mmap(length)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tm.active[&b[0]] = b\n\treturn b, nil\n}\n\nfunc (m *mmapper) Munmap(b []byte) error {\n\tdelete(m.active, &b[0])\n\treturn m.munmap(b)\n}\n\nfunc Mmap(length int) ([]byte, error) { return mapper.Mmap(length) }\n\nfunc Munmap(b []byte) error { return mapper.Munmap(b) }\n"
+	fakeMapperSource := "package unix\n\ntype mmapper struct {\n\tactive map[*byte][]byte\n\tmmap   func(length int) ([]byte, error)\n\tmunmap func(b []byte) error\n}\n\nvar mapper = &mmapper{\n\tactive: map[*byte][]byte{},\n\tmmap:   func(length int) ([]byte, error) { return make([]byte, length), nil },\n\tmunmap: func(b []byte) error { return nil },\n}\n\nfunc (m *mmapper) Mmap(length int) ([]byte, error) {\n\tb, err := m.mmap(length)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tm.active[&b[0]] = b\n\treturn b, nil\n}\n\nfunc (m *mmapper) Munmap(b []byte) error {\n\tdelete(m.active, &b[0])\n\treturn m.munmap(b)\n}\n\nfunc Mmap(length int) ([]byte, error) { return mapper.Mmap(length) }\n\nfunc Munmap(b []byte) error { return mapper.Munmap(b) }\n"
+	cleanMapperSource := "package unix\n\nimport (\n\t\"sync\"\n\t\"syscall\"\n\t\"unsafe\"\n)\n\ntype mmapper struct {\n\tsync.Mutex\n\tactive map[*byte][]byte\n\tmmap   func(addr, length uintptr, prot, flags, fd int, offset int64) (uintptr, error)\n\tmunmap func(addr uintptr, length uintptr) error\n}\n\nvar mapper = &mmapper{\n\tactive: make(map[*byte][]byte),\n\tmmap:   mmapSyscall,\n\tmunmap: munmapSyscall,\n}\n\nfunc mmapSyscall(addr, length uintptr, prot, flags, fd int, offset int64) (uintptr, error) {\n\tr0, _, e1 := syscall.Syscall6(9, addr, length, uintptr(prot), uintptr(flags), uintptr(fd), uintptr(offset))\n\tif e1 != 0 {\n\t\treturn 0, e1\n\t}\n\treturn r0, nil\n}\n\nfunc munmapSyscall(addr uintptr, length uintptr) error {\n\t_, _, e1 := syscall.Syscall(11, addr, length, 0)\n\tif e1 != 0 {\n\t\treturn e1\n\t}\n\treturn nil\n}\n\nfunc (m *mmapper) Mmap(fd int, offset int64, length int, prot int, flags int) ([]byte, error) {\n\tif length <= 0 {\n\t\treturn nil, syscall.EINVAL\n\t}\n\taddr, err := m.mmap(0, uintptr(length), prot, flags, fd, offset)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tb := unsafe.Slice((*byte)(unsafe.Pointer(addr)), length)\n\tp := &b[cap(b)-1]\n\tm.Lock()\n\tdefer m.Unlock()\n\tm.active[p] = b\n\treturn b, nil\n}\n\nfunc (m *mmapper) Munmap(data []byte) error {\n\tif len(data) == 0 || len(data) != cap(data) {\n\t\treturn syscall.EINVAL\n\t}\n\tp := &data[cap(data)-1]\n\tm.Lock()\n\tdefer m.Unlock()\n\tb := m.active[p]\n\tif b == nil || &b[0] != &data[0] {\n\t\treturn syscall.EINVAL\n\t}\n\tif err := m.munmap(uintptr(unsafe.Pointer(&b[0])), uintptr(len(b))); err != nil {\n\t\treturn err\n\t}\n\tdelete(m.active, p)\n\treturn nil\n}\n\nfunc Mmap(length int) ([]byte, error) { return mapper.Mmap(-1, 0, length, 0, 0) }\n\nfunc Munmap(b []byte) error { return mapper.Munmap(b) }\n"
 	writeFileProxyModule(t, proxy, "golang.org/x/sys", "v0.999.0", map[string]string{
 		"go.mod":       "module golang.org/x/sys\n\ngo 1.26\n",
-		"unix/mmap.go": mapperSource,
+		"unix/mmap.go": fakeMapperSource,
+	})
+	writeFileProxyModule(t, proxy, "golang.org/x/sys", "v0.999.1", map[string]string{
+		"go.mod":       "module golang.org/x/sys\n\ngo 1.26\n",
+		"unix/mmap.go": cleanMapperSource,
 	})
 	t.Setenv("GOPROXY", "file://"+proxy)
 	t.Setenv("GOSUMDB", "off")
-	dir := t.TempDir()
-	for name, content := range map[string]string{
-		"go.mod": "module example.com/mapped\n\ngo 1.26\n\nrequire golang.org/x/sys v0.999.0\n",
-		"lib.go": "package mapped\n\nimport \"golang.org/x/sys/unix\"\n\nfunc Roundtrip() error {\n\tb, err := unix.Mmap(4096)\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn unix.Munmap(b)\n}\n",
-	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+
+	checkVersion := func(t *testing.T, ver string) Verdict {
+		t.Helper()
+		dir := t.TempDir()
+		for name, content := range map[string]string{
+			"go.mod": "module example.com/mapped\n\ngo 1.26\n\nrequire golang.org/x/sys " + ver + "\n",
+			"lib.go": "package mapped\n\nimport \"golang.org/x/sys/unix\"\n\nfunc Roundtrip() error {\n\tb, err := unix.Mmap(4096)\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn unix.Munmap(b)\n}\n",
+		} {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		tidy := exec.Command("go", "mod", "tidy")
+		tidy.Dir = dir
+		tidy.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+		if out, err := tidy.CombinedOutput(); err != nil {
+			t.Fatalf("go mod tidy: %v\n%s", err, out)
+		}
+		processFactCache.Reset()
+		ctx := context.Background()
+		subject := Subject{Package: "example.com/mapped", Symbol: "Roundtrip"}
+		engine, err := newEngine(withDir(dir))
+		if err != nil {
 			t.Fatal(err)
 		}
+		view, err := engine.newView(ctx, []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.Capture(ctx, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, err := view.Check(ctx, fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return verdict
 	}
-	tidy := exec.Command("go", "mod", "tidy")
-	tidy.Dir = dir
-	tidy.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
-	if out, err := tidy.CombinedOutput(); err != nil {
-		t.Fatalf("go mod tidy: %v\n%s", err, out)
-	}
-	processFactCache.Reset()
-	ctx := context.Background()
-	subject := Subject{Package: "example.com/mapped", Symbol: "Roundtrip"}
-	engine, err := newEngine(withDir(dir))
-	if err != nil {
-		t.Fatal(err)
-	}
-	view, err := engine.newView(ctx, []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fingerprint, err := view.Capture(ctx, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verdict, err := view.Check(ctx, fingerprint, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
+
+	verdict := checkVersion(t, "v0.999.0")
 	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "golang.org/x/sys/unix.mapper is mutated") {
-		t.Fatalf("unaudited-version verdict = %+v, want the downgrade naming the mapper - no version inherits the audit", verdict)
+		t.Fatalf("pure-Go fake mapper verdict = %+v, want the downgrade naming the mapper", verdict)
+	}
+
+	cleanVerdict := checkVersion(t, "v0.999.1")
+	if cleanVerdict.Status != Unverifiable || strings.Contains(cleanVerdict.Reason, "mapper") || !strings.Contains(cleanVerdict.Reason, "external system call") {
+		t.Fatalf("structurally verified v0.999.1 verdict = %+v, want mapper discharged leaving only external system call", cleanVerdict)
 	}
 }
 
-// The audited mapping set confers nothing on a mutable-local checkout:
-// the discharge crosses exactly the version-pinned dependency line, so
-// a replace-directed golang.org/x/sys keeps the mapper downgrade under
-// the attestation and records no discharge — code the caller can edit
-// is fixed, not audited (REQ-closure-shared-dynamic-state, the
-// vouch-dependency-boundary discipline). The local stub carries the
-// audited shape (a bookkeeping map plus function fields, written
-// through a pointer-receiver mapping call) at the audited import path.
+// A mutable-local replace checkout carrying a pure-Go fake mapper refuses
+// fail-closed naming mapper and records no single-subject discharge, whereas a
+// structurally verified syscall-backed local checkout discharges mapper
+// attestation-free (REQ-closure-shared-dynamic-state-mapping).
 func TestAuditedMappingConfersNothingOnMutableLocalCheckout(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	dir := t.TempDir()
-	for name, content := range map[string]string{
-		"go.mod":                 "module example.com/mapped\n\ngo 1.26\n\nrequire golang.org/x/sys v0.0.0\n\nreplace golang.org/x/sys => ./local-sys\n",
-		"lib.go":                 "package mapped\n\nimport \"golang.org/x/sys/unix\"\n\nfunc Roundtrip() error {\n\tb, err := unix.Mmap(4096)\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn unix.Munmap(b)\n}\n",
-		"local-sys/go.mod":       "module golang.org/x/sys\n\ngo 1.26\n",
-		"local-sys/unix/mmap.go": "package unix\n\nimport \"errors\"\n\ntype mmapper struct {\n\tactive map[*byte][]byte\n\tmmap   func(length int) ([]byte, error)\n\tmunmap func(b []byte) error\n}\n\nvar mapper = &mmapper{\n\tactive: map[*byte][]byte{},\n\tmmap:   rawMmap,\n\tmunmap: rawMunmap,\n}\n\nfunc rawMmap(length int) ([]byte, error) { return make([]byte, length), nil }\n\nfunc rawMunmap(b []byte) error { return nil }\n\nfunc (m *mmapper) Mmap(length int) ([]byte, error) {\n\tb, err := m.mmap(length)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tm.active[&b[0]] = b\n\treturn b, nil\n}\n\nfunc (m *mmapper) Munmap(b []byte) error {\n\tif len(b) == 0 {\n\t\treturn errors.New(\"empty\")\n\t}\n\tdelete(m.active, &b[0])\n\treturn m.munmap(b)\n}\n\nfunc Mmap(length int) ([]byte, error) { return mapper.Mmap(length) }\n\nfunc Munmap(b []byte) error { return mapper.Munmap(b) }\n",
-	} {
-		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	isolateProofCache(t)
+	checkLocal := func(t *testing.T, mmapSrc string) (Fingerprint, Verdict) {
+		t.Helper()
+		dir := t.TempDir()
+		for name, content := range map[string]string{
+			"go.mod":                 "module example.com/mapped\n\ngo 1.26\n\nrequire golang.org/x/sys v0.0.0\n\nreplace golang.org/x/sys => ./local-sys\n",
+			"lib.go":                 "package mapped\n\nimport \"golang.org/x/sys/unix\"\n\nfunc Roundtrip() error {\n\tb, err := unix.Mmap(4096)\n\tif err != nil {\n\t\treturn err\n\t}\n\treturn unix.Munmap(b)\n}\n",
+			"local-sys/go.mod":       "module golang.org/x/sys\n\ngo 1.26\n",
+			"local-sys/unix/mmap.go": mmapSrc,
+		} {
+			path := filepath.Join(dir, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		processFactCache.Reset()
+		ctx := context.Background()
+		subject := Subject{Package: "example.com/mapped", Symbol: "Roundtrip"}
+		engine, err := newEngine(withDir(dir), withSingleSubjectExecution())
+		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		view, err := engine.newView(ctx, []Subject{subject}, dir)
+		if err != nil {
 			t.Fatal(err)
 		}
+		fingerprint, err := view.Capture(ctx, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		verdict, err := view.Check(ctx, fingerprint, subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fingerprint, verdict
 	}
-	processFactCache.Reset()
-	ctx := context.Background()
-	subject := Subject{Package: "example.com/mapped", Symbol: "Roundtrip"}
-	engine, err := newEngine(withDir(dir), withSingleSubjectExecution())
-	if err != nil {
-		t.Fatal(err)
-	}
-	view, err := engine.newView(ctx, []Subject{subject}, dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fingerprint, err := view.Capture(ctx, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verdict, err := view.Check(ctx, fingerprint, subject)
-	if err != nil {
-		t.Fatal(err)
-	}
+
+	fakeLocalSrc := "package unix\n\nimport \"errors\"\n\ntype mmapper struct {\n\tactive map[*byte][]byte\n\tmmap   func(length int) ([]byte, error)\n\tmunmap func(b []byte) error\n}\n\nvar mapper = &mmapper{\n\tactive: map[*byte][]byte{},\n\tmmap:   rawMmap,\n\tmunmap: rawMunmap,\n}\n\nfunc rawMmap(length int) ([]byte, error) { return make([]byte, length), nil }\n\nfunc rawMunmap(b []byte) error { return nil }\n\nfunc (m *mmapper) Mmap(length int) ([]byte, error) {\n\tb, err := m.mmap(length)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tm.active[&b[0]] = b\n\treturn b, nil\n}\n\nfunc (m *mmapper) Munmap(b []byte) error {\n\tif len(b) == 0 {\n\t\treturn errors.New(\"empty\")\n\t}\n\tdelete(m.active, &b[0])\n\treturn m.munmap(b)\n}\n\nfunc Mmap(length int) ([]byte, error) { return mapper.Mmap(length) }\n\nfunc Munmap(b []byte) error { return mapper.Munmap(b) }\n"
+	fingerprint, verdict := checkLocal(t, fakeLocalSrc)
 	if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "golang.org/x/sys/unix.mapper is mutated") {
-		t.Fatalf("mutable-local checkout verdict = %+v, want the downgrade naming the mapper - the discharge crosses only the version-pinned line", verdict)
+		t.Fatalf("pure-Go mutable-local checkout verdict = %+v, want the downgrade naming the mapper", verdict)
 	}
 	if fingerprint.SingleSubjectDischarges != "" {
 		t.Fatalf("mutable-local checkout recorded a discharge: %q", fingerprint.SingleSubjectDischarges)
 	}
+
+	cleanLocalSrc := "package unix\n\nimport (\n\t\"sync\"\n\t\"syscall\"\n\t\"unsafe\"\n)\n\ntype mmapper struct {\n\tsync.Mutex\n\tactive map[*byte][]byte\n\tmmap   func(addr, length uintptr, prot, flags, fd int, offset int64) (uintptr, error)\n\tmunmap func(addr uintptr, length uintptr) error\n}\n\nvar mapper = &mmapper{\n\tactive: make(map[*byte][]byte),\n\tmmap:   mmapSyscall,\n\tmunmap: munmapSyscall,\n}\n\nfunc mmapSyscall(addr, length uintptr, prot, flags, fd int, offset int64) (uintptr, error) {\n\tr0, _, e1 := syscall.Syscall6(9, addr, length, uintptr(prot), uintptr(flags), uintptr(fd), uintptr(offset))\n\tif e1 != 0 {\n\t\treturn 0, e1\n\t}\n\treturn r0, nil\n}\n\nfunc munmapSyscall(addr uintptr, length uintptr) error {\n\t_, _, e1 := syscall.Syscall(11, addr, length, 0)\n\tif e1 != 0 {\n\t\treturn e1\n\t}\n\treturn nil\n}\n\nfunc (m *mmapper) Mmap(fd int, offset int64, length int, prot int, flags int) ([]byte, error) {\n\tif length <= 0 {\n\t\treturn nil, syscall.EINVAL\n\t}\n\taddr, err := m.mmap(0, uintptr(length), prot, flags, fd, offset)\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\tb := unsafe.Slice((*byte)(unsafe.Pointer(addr)), length)\n\tp := &b[cap(b)-1]\n\tm.Lock()\n\tdefer m.Unlock()\n\tm.active[p] = b\n\treturn b, nil\n}\n\nfunc (m *mmapper) Munmap(data []byte) error {\n\tif len(data) == 0 || len(data) != cap(data) {\n\t\treturn syscall.EINVAL\n\t}\n\tp := &data[cap(data)-1]\n\tm.Lock()\n\tdefer m.Unlock()\n\tb := m.active[p]\n\tif b == nil || &b[0] != &data[0] {\n\t\treturn syscall.EINVAL\n\t}\n\tif err := m.munmap(uintptr(unsafe.Pointer(&b[0])), uintptr(len(b))); err != nil {\n\t\treturn err\n\t}\n\tdelete(m.active, p)\n\treturn nil\n}\n\nfunc Mmap(length int) ([]byte, error) { return mapper.Mmap(-1, 0, length, 0, 0) }\n\nfunc Munmap(b []byte) error { return mapper.Munmap(b) }\n"
+	cleanFP, cleanVerdict := checkLocal(t, cleanLocalSrc)
+	if strings.Contains(cleanVerdict.Reason, "mapper") {
+		t.Fatalf("structurally verified local checkout downgraded mapper: %+v", cleanVerdict)
+	}
+	if cleanFP.SingleSubjectDischarges != "" {
+		t.Fatalf("clean local checkout recorded attestation discharge %q, want empty", cleanFP.SingleSubjectDischarges)
+	}
 }
 
-// The audited memoization set: the structMap-shaped cache of the
-// version-pinned gopkg.in/yaml.v3 discharges WITHOUT any execution
-// attestation (content-invariant derivation — its values are never
-// subject-planted), while a ghost variable of the same module keeps its
-// own judgment — the discharge covers exactly the audited variable
-// (REQ-closure-shared-dynamic-state).
+// Structural reflect.Type memoization caches discharge WITHOUT any execution
+// attestation across any version when mechanically verified, while ghost
+// variables and structural violations (such as post-store entry mutation)
+// refuse fail-closed (REQ-closure-shared-dynamic-state-memo).
 func TestAuditedMemoizationDischargeIsAttestationFree(t *testing.T) {
 	if testing.Short() {
 		t.Skip("populates a module cache and runs the engine over a temporary module")
 	}
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateProofCache(t)
 	modCache, err := os.MkdirTemp("", "gofresh-modcache-*")
 	if err != nil {
 		t.Fatal(err)
@@ -630,6 +658,7 @@ func TestAuditedMemoizationDischargeIsAttestationFree(t *testing.T) {
 	})
 	proxy := t.TempDir()
 	memoSource := "package yaml\n\nimport (\n\t\"reflect\"\n\t\"sync\"\n)\n\ntype structInfo struct{ n int }\n\nvar structMap = make(map[reflect.Type]*structInfo)\nvar fieldMapMutex sync.RWMutex\n\nfunc FieldCount(st reflect.Type) int {\n\tfieldMapMutex.RLock()\n\tsinfo, found := structMap[st]\n\tfieldMapMutex.RUnlock()\n\tif found {\n\t\treturn sinfo.n\n\t}\n\tsinfo = &structInfo{n: st.NumField()}\n\tfieldMapMutex.Lock()\n\tstructMap[st] = sinfo\n\tfieldMapMutex.Unlock()\n\treturn sinfo.n\n}\n"
+	mutatedPostStoreMemo := strings.Replace(memoSource, "if found {\n\t\treturn sinfo.n\n\t}", "if found {\n\t\tsinfo.n++\n\t\treturn sinfo.n\n\t}", 1)
 	writeFileProxyModule(t, proxy, "gopkg.in/yaml.v3", "v3.0.1", map[string]string{
 		"go.mod":  "module gopkg.in/yaml.v3\n\ngo 1.26\n",
 		"yaml.go": memoSource,
@@ -639,6 +668,10 @@ func TestAuditedMemoizationDischargeIsAttestationFree(t *testing.T) {
 		"yaml.go": memoSource + "\nvar Ghost = map[string]func(){}\n\nfunc ArmGhost() { Ghost[\"k\"] = func() {} }\n",
 	})
 	writeFileProxyModule(t, proxy, "gopkg.in/yaml.v3", "v3.0.3", map[string]string{
+		"go.mod":  "module gopkg.in/yaml.v3\n\ngo 1.26\n",
+		"yaml.go": mutatedPostStoreMemo,
+	})
+	writeFileProxyModule(t, proxy, "gopkg.in/yaml.v3", "v3.99.0", map[string]string{
 		"go.mod":  "module gopkg.in/yaml.v3\n\ngo 1.26\n",
 		"yaml.go": memoSource,
 	})
@@ -673,60 +706,70 @@ func TestAuditedMemoizationDischargeIsAttestationFree(t *testing.T) {
 	}
 
 	processFactCache.Reset()
-	ghosted := runScan(t, DynamicStateStrategy+"|memo-ghost|cfg", host(t, "v3.0.2"), "example.com/memohost")
-	if reason := ghosted.downgradeReason[subject]; !strings.Contains(reason, "gopkg.in/yaml.v3.Ghost is mutated") {
-		t.Fatalf("ghost verdict reason = %q, want the downgrade naming Ghost - the discharge covers exactly the audited variable", reason)
+	cleanFuture := runScan(t, DynamicStateStrategy+"|memo-future|cfg", host(t, "v3.99.0"), "example.com/memohost")
+	if reason := cleanFuture.downgradeReason[subject]; reason != "" {
+		t.Fatalf("clean v3.99.0 memo cache downgraded the subject: %q - mechanical verification requires no version allowlist", reason)
 	}
 
-	// The audit is a property of the audited versions' source: an
-	// unaudited version with the identical shape refuses fail-closed
-	// until its source is audited.
 	processFactCache.Reset()
-	unaudited := runScan(t, DynamicStateStrategy+"|memo-unaudited|cfg", host(t, "v3.0.3"), "example.com/memohost")
-	if reason := unaudited.downgradeReason[subject]; !strings.Contains(reason, "gopkg.in/yaml.v3.structMap is mutated") {
-		t.Fatalf("unaudited-version reason = %q, want the downgrade naming structMap - no version inherits the audit", reason)
+	ghosted := runScan(t, DynamicStateStrategy+"|memo-ghost|cfg", host(t, "v3.0.2"), "example.com/memohost")
+	if reason := ghosted.downgradeReason[subject]; !strings.Contains(reason, "gopkg.in/yaml.v3.Ghost is mutated") {
+		t.Fatalf("ghost verdict reason = %q, want the downgrade naming Ghost - the discharge covers exactly the verified variable", reason)
+	}
+
+	processFactCache.Reset()
+	violated := runScan(t, DynamicStateStrategy+"|memo-violated|cfg", host(t, "v3.0.3"), "example.com/memohost")
+	if reason := violated.downgradeReason[subject]; !strings.Contains(reason, "gopkg.in/yaml.v3.structMap is mutated") {
+		t.Fatalf("post-store-mutating memo reason = %q, want the downgrade naming structMap", reason)
 	}
 }
 
-// The audited memoization set confers nothing on a mutable-local
-// checkout: the audit holds for the version-pinned source alone, so a
-// replace-directed gopkg.in/yaml.v3 keeps the structMap downgrade —
-// code the caller can edit is fixed, not audited
-// (REQ-closure-shared-dynamic-state).
+// A mutable-local replace checkout violating structural memoization invariants
+// refuses naming structMap with the local directive-and-restructure reason
+// channel (never caller vouch), whereas a structurally clean local checkout
+// discharges attestation-free (REQ-closure-shared-dynamic-state-memo,
+// REQ-closure-shared-dynamic-state-reason).
 func TestAuditedMemoizationConfersNothingOnMutableLocalCheckout(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	dir := t.TempDir()
-	for name, content := range map[string]string{
-		"go.mod":             "module example.com/memohost\n\ngo 1.26\n\nrequire gopkg.in/yaml.v3 v3.0.0\n\nreplace gopkg.in/yaml.v3 => ./local-yaml\n",
-		"lib.go":             "package memohost\n\nimport (\n\t\"reflect\"\n\n\tyaml \"gopkg.in/yaml.v3\"\n)\n\ntype rec struct{ A, B int }\n\nfunc Use() int { return yaml.FieldCount(reflect.TypeOf(rec{})) }\n",
-		"local-yaml/go.mod":  "module gopkg.in/yaml.v3\n\ngo 1.26\n",
-		"local-yaml/yaml.go": "package yaml\n\nimport (\n\t\"reflect\"\n\t\"sync\"\n)\n\ntype structInfo struct{ n int }\n\nvar structMap = make(map[reflect.Type]*structInfo)\nvar fieldMapMutex sync.RWMutex\n\nfunc FieldCount(st reflect.Type) int {\n\tfieldMapMutex.RLock()\n\tsinfo, found := structMap[st]\n\tfieldMapMutex.RUnlock()\n\tif found {\n\t\treturn sinfo.n\n\t}\n\tsinfo = &structInfo{n: st.NumField()}\n\tfieldMapMutex.Lock()\n\tstructMap[st] = sinfo\n\tfieldMapMutex.Unlock()\n\treturn sinfo.n\n}\n",
-	} {
-		path := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatal(err)
+	isolateProofCache(t)
+	runLocalYaml := func(t *testing.T, tag, yamlSrc string) scanResult {
+		t.Helper()
+		dir := t.TempDir()
+		for name, content := range map[string]string{
+			"go.mod":             "module example.com/memohost\n\ngo 1.26\n\nrequire gopkg.in/yaml.v3 v3.0.0\n\nreplace gopkg.in/yaml.v3 => ./local-yaml\n",
+			"lib.go":             "package memohost\n\nimport (\n\t\"reflect\"\n\n\tyaml \"gopkg.in/yaml.v3\"\n)\n\ntype rec struct{ A, B int }\n\nfunc Use() int { return yaml.FieldCount(reflect.TypeOf(rec{})) }\n",
+			"local-yaml/go.mod":  "module gopkg.in/yaml.v3\n\ngo 1.26\n",
+			"local-yaml/yaml.go": yamlSrc,
+		} {
+			path := filepath.Join(dir, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		processFactCache.Reset()
+		return runScan(t, DynamicStateStrategy+"|memo-local-"+tag+"|cfg", dir, "example.com/memohost")
 	}
-	processFactCache.Reset()
-	scan := runScan(t, DynamicStateStrategy+"|memo-local|cfg", dir, "example.com/memohost")
+
 	subject := Subject{Package: "example.com/memohost", Symbol: "Use"}
+	violatedSrc := "package yaml\n\nimport (\n\t\"reflect\"\n\t\"sync\"\n)\n\ntype structInfo struct{ n int }\n\nvar structMap = make(map[reflect.Type]*structInfo)\nvar fieldMapMutex sync.RWMutex\n\nfunc FieldCount(st reflect.Type) int {\n\tfieldMapMutex.RLock()\n\tsinfo, found := structMap[st]\n\tfieldMapMutex.RUnlock()\n\tif found {\n\t\tsinfo.n++\n\t\treturn sinfo.n\n\t}\n\tsinfo = &structInfo{n: st.NumField()}\n\tfieldMapMutex.Lock()\n\tstructMap[st] = sinfo\n\tfieldMapMutex.Unlock()\n\treturn sinfo.n\n}\n"
+	scan := runLocalYaml(t, "violated", violatedSrc)
 	if reason := scan.downgradeReason[subject]; !strings.Contains(reason, "gopkg.in/yaml.v3.structMap is mutated") {
-		t.Fatalf("mutable-local checkout reason = %q, want the downgrade naming structMap - the audit covers only the version-pinned line", reason)
+		t.Fatalf("violated mutable-local checkout reason = %q, want the downgrade naming structMap", reason)
 	}
-	// The reason contract at the boundary's other side: a
-	// mutable-local culprit names the restructure and the
-	// single-subject directive — and NEVER the vouch, whose boundary
-	// is exactly the inverse (code the caller can edit is fixed, not
-	// vouched) (REQ-closure-shared-dynamic-state-reason).
 	if reason := scan.downgradeReason[subject]; !strings.Contains(reason, "//gofresh:single-subject") ||
 		!strings.Contains(reason, "restructuring") || strings.Contains(reason, "caller vouch") {
 		t.Fatalf("mutable-local checkout reason = %q, want the directive-and-restructure channel and no vouch spelling", reason)
+	}
+
+	cleanSrc := "package yaml\n\nimport (\n\t\"reflect\"\n\t\"sync\"\n)\n\ntype structInfo struct{ n int }\n\nvar structMap = make(map[reflect.Type]*structInfo)\nvar fieldMapMutex sync.RWMutex\n\nfunc FieldCount(st reflect.Type) int {\n\tfieldMapMutex.RLock()\n\tsinfo, found := structMap[st]\n\tfieldMapMutex.RUnlock()\n\tif found {\n\t\treturn sinfo.n\n\t}\n\tsinfo = &structInfo{n: st.NumField()}\n\tfieldMapMutex.Lock()\n\tstructMap[st] = sinfo\n\tfieldMapMutex.Unlock()\n\treturn sinfo.n\n}\n"
+	cleanScan := runLocalYaml(t, "clean", cleanSrc)
+	if reason := cleanScan.downgradeReason[subject]; reason != "" {
+		t.Fatalf("structurally clean local checkout downgraded: %q", reason)
 	}
 }
 
@@ -1677,15 +1720,18 @@ func TestSingleSubjectDirectiveDischarges(t *testing.T) {
 // protoc-gen-go generated file discharge under the single-subject
 // attestation with the audited pinned protobuf runtime (header +
 // attestation, the directive's two-leg model), the discharge on
-// evidence; without the attestation, with an unaudited runtime
-// version, under a sibling generator's header (protoc-gen-gogo — an
-// unaudited runtime), and for hand-written sibling variables, every
-// mark stands (REQ-closure-shared-dynamic-state, REQ-vouch-recorded).
+// Idempotent protobuf descriptor builder clusters and immutable gRPC service
+// descriptor tables discharge under single-subject execution when both the
+// declaring cluster/table and the runtime types satisfy mechanical structural
+// verification across any version or local origin, while unattested runs,
+// tampered runtimes, malformed clusters (even bearing protoc-gen-go headers),
+// and sibling mutable variables remain downgraded
+// (REQ-closure-shared-dynamic-state-proto, REQ-vouch-recorded).
 func TestGeneratedProtoClusterDischarges(t *testing.T) {
 	if testing.Short() {
 		t.Skip("populates a module cache and runs the engine over a temporary module")
 	}
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateProofCache(t)
 	modCache, err := os.MkdirTemp("", "gofresh-modcache-*")
 	if err != nil {
 		t.Fatal(err)
@@ -1698,30 +1744,39 @@ func TestGeneratedProtoClusterDischarges(t *testing.T) {
 		os.RemoveAll(modCache)
 	})
 	proxy := t.TempDir()
-	stub := map[string]string{
+	cleanImplSrc := "package protoimpl\n\nimport (\n\t\"reflect\"\n\t\"sync\"\n\t\"sync/atomic\"\n)\n\ntype FileDescriptor interface{ ProtoFile() }\n\ntype fileDesc struct{ raw []byte }\n\nfunc (*fileDesc) ProtoFile() {}\n\ntype DescBuilder struct {\n\tRawDescriptor []byte\n\tNumMessages   int32\n}\n\ntype Out struct {\n\tFile FileDescriptor\n}\n\ntype MessageInfo struct {\n\tGoReflectType reflect.Type\n\tDesc          any\n\tinitMu        sync.Mutex\n\tinitDone      uint32\n\tsizecache     int\n}\n\nfunc (mi *MessageInfo) initOnce() {\n\tmi.initMu.Lock()\n\tdefer mi.initMu.Unlock()\n\tif mi.initDone == 1 {\n\t\treturn\n\t}\n\tmi.sizecache = 1\n\tatomic.StoreUint32(&mi.initDone, 1)\n}\n\nfunc (mi *MessageInfo) Size() int {\n\tif atomic.LoadUint32(&mi.initDone) == 0 {\n\t\tmi.initOnce()\n\t}\n\treturn mi.sizecache\n}\n\ntype TypeBuilder struct {\n\tFile         DescBuilder\n\tGoTypes      []any\n\tMessageInfos []MessageInfo\n}\n\nfunc (tb TypeBuilder) Build() Out {\n\tfor i := range tb.MessageInfos {\n\t\ttb.MessageInfos[i].GoReflectType = reflect.TypeOf(tb.GoTypes[i])\n\t\ttb.MessageInfos[i].Desc = i\n\t}\n\treturn Out{File: &fileDesc{raw: tb.File.RawDescriptor}}\n}\n"
+	cleanProtoMod := map[string]string{
 		"go.mod":                    "module google.golang.org/protobuf\n\ngo 1.26\n",
-		"runtime/protoimpl/impl.go": "package protoimpl\n\ntype TypeBuilder struct{ N int }\n",
+		"runtime/protoimpl/impl.go": cleanImplSrc,
 	}
-	writeFileProxyModule(t, proxy, "google.golang.org/protobuf", "v1.36.11", stub)
-	writeFileProxyModule(t, proxy, "google.golang.org/protobuf", "v1.36.12", stub)
-	writeFileProxyModule(t, proxy, "google.golang.org/grpc", "v1.82.1", map[string]string{
-		"go.mod":         "module google.golang.org/grpc\n\ngo 1.26\n",
-		"codes/codes.go": "package codes\n\ntype Code uint32\n",
-	})
+	tamperedProtoMod := map[string]string{
+		"go.mod":                    "module google.golang.org/protobuf\n\ngo 1.26\n",
+		"runtime/protoimpl/impl.go": cleanImplSrc + "\nfunc Tamper(mi *MessageInfo) { mi.Desc = \"mutated\" }\n",
+	}
+	writeFileProxyModule(t, proxy, "google.golang.org/protobuf", "v1.36.11", cleanProtoMod)
+	writeFileProxyModule(t, proxy, "google.golang.org/protobuf", "v1.36.12", cleanProtoMod)
+	writeFileProxyModule(t, proxy, "google.golang.org/protobuf", "v1.36.13", tamperedProtoMod)
+
+	cleanGrpcMod := map[string]string{
+		"go.mod":     "module google.golang.org/grpc\n\ngo 1.26\n",
+		"service.go": "package grpc\n\ntype MethodDesc struct {\n\tMethodName string\n\tHandler    func(srv any) error\n}\n\ntype StreamDesc struct {\n\tStreamName string\n\tHandler    func(srv any) error\n}\n\ntype ServiceDesc struct {\n\tServiceName string\n\tHandlerType any\n\tMethods     []MethodDesc\n\tStreams     []StreamDesc\n\tMetadata    any\n}\n",
+	}
+	writeFileProxyModule(t, proxy, "google.golang.org/grpc", "v1.82.1", cleanGrpcMod)
+	writeFileProxyModule(t, proxy, "google.golang.org/grpc", "v1.99.0", cleanGrpcMod)
 	t.Setenv("GOPROXY", "file://"+proxy)
 	t.Setenv("GOSUMDB", "off")
 
 	genFile := func(header string) string {
-		return header + "\n// versions:\n// \tprotoc-gen-go v1.36.11\n\npackage view\n\nimport _ \"google.golang.org/protobuf/runtime/protoimpl\"\n\nvar File_x_proto any\n\nvar file_x_proto_msgTypes = []func(){func() {}}\n\nfunc file_x_proto_init() {\n\tif File_x_proto != nil {\n\t\treturn\n\t}\n\tFile_x_proto = struct{}{}\n}\n\nfunc init() { file_x_proto_init() }\n"
+		prefix := ""
+		if header != "" {
+			prefix = header + "\n\n"
+		}
+		return prefix + "package view\n\nimport \"google.golang.org/protobuf/runtime/protoimpl\"\n\ntype Msg struct{ X int }\n\nvar File_x_proto protoimpl.FileDescriptor\nvar file_x_proto_rawDesc = []byte{0x0a, 0x01}\nvar file_x_proto_msgTypes = make([]protoimpl.MessageInfo, 1)\nvar file_x_proto_goTypes = []any{(*Msg)(nil)}\n\nfunc file_x_proto_init() {\n\tif File_x_proto != nil {\n\t\treturn\n\t}\n\tout := protoimpl.TypeBuilder{\n\t\tFile: protoimpl.DescBuilder{\n\t\t\tRawDescriptor: file_x_proto_rawDesc,\n\t\t\tNumMessages:   1,\n\t\t},\n\t\tGoTypes:      file_x_proto_goTypes,\n\t\tMessageInfos: file_x_proto_msgTypes,\n\t}.Build()\n\tFile_x_proto = out.File\n\tfile_x_proto_goTypes = nil\n}\n\nfunc init() { file_x_proto_init() }\n"
 	}
 	ctx := context.Background()
-	capture := func(t *testing.T, version, header, symbol string, opts ...option) (Fingerprint, Verdict) {
+	captureCustom := func(t *testing.T, files map[string]string, symbol string, opts ...option) (Fingerprint, Verdict) {
 		t.Helper()
-		dir := writeModuleTree(t, map[string]string{
-			"go.mod":    "module example.com/view\n\ngo 1.26\n\nrequire google.golang.org/protobuf " + version + "\n",
-			"gen.pb.go": genFile(header),
-			"view.go":   "package view\n\nfunc F() *func() { return &file_x_proto_msgTypes[0] }\n\nvar handHooks = map[string]func(){}\n\nfunc F2() int {\n\thandHooks[\"k\"] = func() {}\n\treturn len(handHooks)\n}\n",
-		})
+		dir := writeModuleTree(t, files)
 		tidy := exec.Command("go", "mod", "tidy")
 		tidy.Dir = dir
 		tidy.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
@@ -1748,69 +1803,92 @@ func TestGeneratedProtoClusterDischarges(t *testing.T) {
 		}
 		return fingerprint, verdict
 	}
+	capture := func(t *testing.T, version, header, symbol string, opts ...option) (Fingerprint, Verdict) {
+		t.Helper()
+		return captureCustom(t, map[string]string{
+			"go.mod":    "module example.com/view\n\ngo 1.26\n\nrequire google.golang.org/protobuf " + version + "\n",
+			"gen.pb.go": genFile(header),
+			"view.go":   "package view\n\nimport \"google.golang.org/protobuf/runtime/protoimpl\"\n\nfunc F() *protoimpl.MessageInfo { return &file_x_proto_msgTypes[0] }\n\nvar handHooks = map[string]func(){}\n\nfunc F2() int {\n\thandHooks[\"k\"] = func() {}\n\treturn len(handHooks)\n}\n",
+		}, symbol, opts...)
+	}
 	const goHeader = "// Code generated by protoc-gen-go. DO NOT EDIT."
 
-	fingerprint, verdict := capture(t, "v1.36.11", goHeader, "F", withSingleSubjectExecution())
-	if verdict.Status != Valid {
-		t.Fatalf("attested verdict = %+v, want Valid - the generated cluster discharges under the audited runtime", verdict)
-	}
-	if !strings.Contains(fingerprint.SingleSubjectDischarges, "example.com/view.file_x_proto_msgTypes") {
-		t.Fatalf("evidence = %q, want the discharged generated variable recorded", fingerprint.SingleSubjectDischarges)
+	// 1. Valid cluster + clean runtime discharges across any version and without header comments.
+	for _, tc := range []struct {
+		ver, hdr string
+	}{
+		{"v1.36.11", goHeader},
+		{"v1.36.12", goHeader},
+		{"v1.36.12", ""},
+	} {
+		fingerprint, verdict := capture(t, tc.ver, tc.hdr, "F", withSingleSubjectExecution())
+		if verdict.Status != Valid {
+			t.Fatalf("attested (%s, hdr=%q) verdict = %+v, want Valid", tc.ver, tc.hdr, verdict)
+		}
+		if !strings.Contains(fingerprint.SingleSubjectDischarges, "example.com/view.file_x_proto_msgTypes") {
+			t.Fatalf("evidence (%s) = %q, want file_x_proto_msgTypes recorded", tc.ver, fingerprint.SingleSubjectDischarges)
+		}
 	}
 
+	// Local replace checkout of clean protobuf runtime also discharges under single-subject execution.
+	localFP, localVerdict := captureCustom(t, map[string]string{
+		"go.mod":                                "module example.com/view\n\ngo 1.26\n\nrequire google.golang.org/protobuf v0.0.0\n\nreplace google.golang.org/protobuf => ./local-proto\n",
+		"local-proto/go.mod":                    "module google.golang.org/protobuf\n\ngo 1.26\n",
+		"local-proto/runtime/protoimpl/impl.go": cleanImplSrc,
+		"gen.pb.go":                             genFile(""),
+		"view.go":                               "package view\n\nimport \"google.golang.org/protobuf/runtime/protoimpl\"\n\nfunc F() *protoimpl.MessageInfo { return &file_x_proto_msgTypes[0] }\n",
+	}, "F", withSingleSubjectExecution())
+	if localVerdict.Status != Valid || !strings.Contains(localFP.SingleSubjectDischarges, "example.com/view.file_x_proto_msgTypes") {
+		t.Fatalf("local clean proto runtime verdict = %+v evidence = %q, want Valid with discharge", localVerdict, localFP.SingleSubjectDischarges)
+	}
+
+	// 2. Without single-subject attestation, the cluster stays downgraded.
 	_, unattested := capture(t, "v1.36.11", goHeader, "F")
 	if unattested.Status != Unverifiable || !strings.Contains(unattested.Reason, "example.com/view.file_x_proto_msgTypes is mutated") {
-		t.Fatalf("unattested verdict = %+v, want the downgrade - the header alone confers nothing", unattested)
+		t.Fatalf("unattested verdict = %+v, want the downgrade", unattested)
 	}
 
-	_, unaudited := capture(t, "v1.36.12", goHeader, "F", withSingleSubjectExecution())
-	if unaudited.Status != Unverifiable || !strings.Contains(unaudited.Reason, "example.com/view.file_x_proto_msgTypes is mutated") {
-		t.Fatalf("unaudited-runtime verdict = %+v, want the downgrade - no version inherits the audit", unaudited)
+	// 3. A runtime that mutates MessageInfo outside locked once-init fails closed even with protoc-gen-go header.
+	_, tamperedRT := capture(t, "v1.36.13", goHeader, "F", withSingleSubjectExecution())
+	if tamperedRT.Status != Unverifiable || !strings.Contains(tamperedRT.Reason, "example.com/view.file_x_proto_msgTypes is mutated") {
+		t.Fatalf("tampered-runtime verdict = %+v, want the downgrade", tamperedRT)
 	}
 
-	_, gogo := capture(t, "v1.36.11", "// Code generated by protoc-gen-gogo. DO NOT EDIT.", "F", withSingleSubjectExecution())
-	if gogo.Status != Unverifiable || !strings.Contains(gogo.Reason, "example.com/view.file_x_proto_msgTypes is mutated") {
-		t.Fatalf("gogo-header verdict = %+v, want the downgrade - a sibling generator's header never matches", gogo)
+	// 4. A fake []func(){func() {}} cluster fails closed even with protoc-gen-go header and clean v1.36.11 runtime.
+	_, fakeCluster := captureCustom(t, map[string]string{
+		"go.mod":    "module example.com/view\n\ngo 1.26\n\nrequire google.golang.org/protobuf v1.36.11\n",
+		"gen.pb.go": goHeader + "\n\npackage view\n\nimport _ \"google.golang.org/protobuf/runtime/protoimpl\"\n\nvar File_x_proto any\nvar file_x_proto_msgTypes = []func(){func() {}}\nfunc file_x_proto_init() {\n\tif File_x_proto != nil {\n\t\treturn\n\t}\n\tFile_x_proto = struct{}{}\n}\nfunc init() { file_x_proto_init() }\n",
+		"view.go":   "package view\n\nfunc F() *func() { return &file_x_proto_msgTypes[0] }\n",
+	}, "F", withSingleSubjectExecution())
+	if fakeCluster.Status != Unverifiable || !strings.Contains(fakeCluster.Reason, "example.com/view.file_x_proto_msgTypes is mutated") {
+		t.Fatalf("fake cluster under protoc-gen-go header verdict = %+v, want the downgrade", fakeCluster)
 	}
 
-	// The second audited generator: a protoc-gen-go-grpc header
-	// discharges under the audited pinned grpc runtime.
-	grpcDir := writeModuleTree(t, map[string]string{
+	// 5. Immutable gRPC ServiceDesc composite literal discharges across versions without header privilege,
+	// while a fake []func() under protoc-gen-go-grpc header refuses.
+	for _, grpcVer := range []string{"v1.82.1", "v1.99.0"} {
+		grpcFP, grpcVerdict := captureCustom(t, map[string]string{
+			"go.mod":         "module example.com/view\n\ngo 1.26\n\nrequire google.golang.org/grpc " + grpcVer + "\n",
+			"gen_grpc.pb.go": "package view\n\nimport \"google.golang.org/grpc\"\n\ntype SvcServer interface{ Ping() }\n\nfunc _Svc_Ping_Handler(srv any) error { return nil }\n\nvar Svc_ServiceDesc = grpc.ServiceDesc{\n\tServiceName: \"view.Svc\",\n\tHandlerType: (*SvcServer)(nil),\n\tMethods:     []grpc.MethodDesc{{MethodName: \"Ping\", Handler: _Svc_Ping_Handler}},\n\tStreams:     []grpc.StreamDesc{},\n\tMetadata:    \"x.proto\",\n}\n",
+			"view.go":        "package view\n\nimport \"google.golang.org/grpc\"\n\nfunc F() *grpc.ServiceDesc { return &Svc_ServiceDesc }\n",
+		}, "F", withSingleSubjectExecution())
+		if grpcVerdict.Status != Valid || !strings.Contains(grpcFP.SingleSubjectDischarges, "example.com/view.Svc_ServiceDesc") {
+			t.Fatalf("grpc (%s) verdict = %+v evidence = %q, want Valid with Svc_ServiceDesc recorded", grpcVer, grpcVerdict, grpcFP.SingleSubjectDischarges)
+		}
+	}
+	_, fakeGrpc := captureCustom(t, map[string]string{
 		"go.mod":         "module example.com/view\n\ngo 1.26\n\nrequire google.golang.org/grpc v1.82.1\n",
-		"gen_grpc.pb.go": "// Code generated by protoc-gen-go-grpc. DO NOT EDIT.\n\npackage view\n\nimport _ \"google.golang.org/grpc/codes\"\n\nvar Svc_ServiceDesc = []func(){func() {}}\n",
+		"gen_grpc.pb.go": "// Code generated by protoc-gen-go-grpc. DO NOT EDIT.\n\npackage view\n\nimport _ \"google.golang.org/grpc\"\n\nvar Svc_ServiceDesc = []func(){func() {}}\n",
 		"view.go":        "package view\n\nfunc F() *func() { return &Svc_ServiceDesc[0] }\n",
-	})
-	tidy := exec.Command("go", "mod", "tidy")
-	tidy.Dir = grpcDir
-	tidy.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
-	if out, err := tidy.CombinedOutput(); err != nil {
-		t.Fatalf("go mod tidy: %v\n%s", err, out)
-	}
-	processFactCache.Reset()
-	grpcSubject := Subject{Package: "example.com/view", Symbol: "F"}
-	grpcEngine, err := newEngine(withDir(grpcDir), withSingleSubjectExecution())
-	if err != nil {
-		t.Fatal(err)
-	}
-	grpcView, err := grpcEngine.newView(ctx, []Subject{grpcSubject}, grpcDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	grpcFP, err := grpcView.Capture(ctx, grpcSubject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	grpcVerdict, err := grpcView.Check(ctx, grpcFP, grpcSubject)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if grpcVerdict.Status != Valid || !strings.Contains(grpcFP.SingleSubjectDischarges, "example.com/view.Svc_ServiceDesc") {
-		t.Fatalf("go-grpc verdict = %+v evidence = %q, want Valid with the discharge recorded", grpcVerdict, grpcFP.SingleSubjectDischarges)
+	}, "F", withSingleSubjectExecution())
+	if fakeGrpc.Status != Unverifiable || !strings.Contains(fakeGrpc.Reason, "example.com/view.Svc_ServiceDesc is mutated") {
+		t.Fatalf("fake grpc under header verdict = %+v, want the downgrade", fakeGrpc)
 	}
 
+	// 6. Hand-written mutable sibling variable remains downgraded.
 	_, hand := capture(t, "v1.36.11", goHeader, "F2", withSingleSubjectExecution())
 	if hand.Status != Unverifiable || !strings.Contains(hand.Reason, "example.com/view.handHooks is mutated") {
-		t.Fatalf("hand-written verdict = %+v, want the downgrade - the discharge covers generated files only", hand)
+		t.Fatalf("hand-written verdict = %+v, want the downgrade", hand)
 	}
 }
 

@@ -156,7 +156,7 @@ func PreviewPruneMemos(maxBytes int64) (MemoPruneReport, error) {
 // whose per-package facts the persistent memo serves for version-pinned
 // packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps
 // this version like any other strategy change.
-const DynamicStateStrategy = "gofresh/dynamic-state@59"
+const DynamicStateStrategy = "gofresh/dynamic-state@73"
 
 // ClosureStrategy identifies the closure identity derivation — the
 // maximal closure's and the test-variant compartment's — as the
@@ -178,7 +178,7 @@ const ClosureStrategy = closure.IdentityStrategy
 // classification change bumps it, so persistently memoized analyses and
 // recorded proofs from the prior interpretation refuse instead of serving
 // under semantics they were not computed by.
-const ObservationRTA = "gofresh/observation-rta@58"
+const ObservationRTA = "gofresh/observation-rta@65"
 
 // BuildDescription describes compilation, not the environment of the resulting
 // program. Inputs is explicitly present (possibly empty): the executor accepts

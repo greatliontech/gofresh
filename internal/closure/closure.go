@@ -148,6 +148,7 @@ type Hasher struct {
 	maximalTesting map[string]maximalEffectScan    // typed testing-runtime effects by requested package
 	maximalEffects map[string]maximalEffectsResult // package external-effect scans by requested package
 	maximalFiles   map[string]maximalEffectScan    // per-file effect scans by absolute path
+	harnessVerdict map[string]bool                 // mechanical property-harness verification verdicts by package dir
 	// contribs memoizes per-node closure contributions within ONE
 	// top-level batch call: each public batch entry resets it, so content
 	// is re-observed per call (the Hasher's pinned contract) while subjects
@@ -724,6 +725,11 @@ func (h *Hasher) resetCallScope() {
 	for _, p := range h.progs {
 		if p != nil {
 			p.Summaries = nil
+		}
+	}
+	for dir := range h.harnessVerdict {
+		if dir == "" || strings.HasPrefix(dir, "\x00") || !h.underCache(dir) {
+			delete(h.harnessVerdict, dir)
 		}
 	}
 }

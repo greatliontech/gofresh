@@ -10,15 +10,19 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/gofresh/internal/cachefile"
 	arta "github.com/greatliontech/gofresh/internal/closure/internal/rta"
+	"github.com/greatliontech/gofresh/internal/dynstate"
 	"go/ast"
+	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
 	"maps"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -2393,21 +2397,1015 @@ func TestDynamicStateFactStoreMissesOnScopeAndBucketChange(t *testing.T) {
 	}
 }
 
-// The version gate: audited releases pass, anything else keeps the
-// package's ordinary classification - a silent registry upgrade must
-// never extend the audit (local source is judged separately, by the
-// module's Main/Replace facts).
-func TestAuditedPropertyHarnessVersion(t *testing.T) {
-	for version, want := range map[string]bool{
-		"":       false,
-		"v1.3.0": true,
-		"v1.2.0": false,
-		"v1.4.0": false,
-		"v2.0.0": false,
-	} {
-		if auditedPropertyHarnessVersion(version) != want {
-			t.Fatalf("auditedPropertyHarnessVersion(%q) = %v, want %v", version, auditedPropertyHarnessVersion(version), want)
+// verifyPropertyHarnessPackage judges pgregory.net/rapid mechanically from
+// source across any version pin or local checkout, admitting real v1.3.0 and
+// clean protocol implementations while failing closed on any structural
+// violation regardless of version or local replace origin
+// (REQ-closure-observability-property-harness).
+func TestVerifyPropertyHarnessPackageStructuralGates(t *testing.T) {
+	baseRapidSrc := `package rapid
+
+import (
+	"flag"
+	"fmt"
+	"hash/maphash"
+	"html/template"
+	"io"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync"
+	"testing"
+	"testing/synctest"
+	"time"
+)
+
+var flags struct {
+	checks   int
+	seed     uint64
+	failfile string
+	debugvis bool
+}
+
+var visTmpl = template.Must(template.New("rapid-vis").Parse("{{.Title}}"))
+
+type visTmplData struct {
+	Title string
+	Style template.CSS
+}
+
+func envInt(key string, lookup func(string) (string, bool)) int {
+	if v, ok := lookup(key); ok && v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
 		}
+	}
+	return 100
+}
+
+func init() {
+	flags.checks = envInt("RAPID_CHECKS", os.LookupEnv)
+	if v, ok := os.LookupEnv("RAPID_FAILFILE"); ok && v != "" {
+		flags.failfile = v
+	}
+	flag.IntVar(&flags.checks, "rapid.checks", 100, "number of checks")
+	flag.Uint64Var(&flags.seed, "rapid.seed", 0, "PRNG seed")
+	flag.StringVar(&flags.failfile, "rapid.failfile", "", "failure file")
+	flag.BoolVar(&flags.debugvis, "rapid.debugvis", false, "debug vis")
+}
+
+var strMapCache sync.Map
+var genCache sync.Map
+
+func cachedWords(k string) []string {
+	if v, ok := strMapCache.Load(k); ok {
+		return v.([]string)
+	}
+	res := []string{k}
+	strMapCache.Store(k, res)
+	return res
+}
+
+type TB interface {
+	Helper()
+	Logf(format string, args ...any)
+	Errorf(format string, args ...any)
+	Name() string
+}
+
+type tb TB
+
+type T struct {
+	tb
+	state uint64
+	fail  bool
+}
+
+func (t *T) Errorf(format string, args ...any) { t.fail = true }
+
+type exampleTB struct{}
+
+func (*exampleTB) Helper()                       {}
+func (*exampleTB) Logf(format string, args ...any) {}
+func (*exampleTB) Errorf(format string, args ...any) {}
+func (*exampleTB) Name() string                  { return "example" }
+
+func baseSeed() uint64 {
+	if flags.seed != 0 {
+		return flags.seed
+	}
+	var h maphash.Hash
+	h.SetSeed(maphash.MakeSeed())
+	return h.Sum64()
+}
+
+type generatorImpl[V any] interface {
+	value(*T) V
+}
+
+type Generator[V any] struct {
+	impl generatorImpl[V]
+	gen  func(*T) V
+}
+
+func newGenerator[V any](impl generatorImpl[V]) *Generator[V] {
+	return &Generator[V]{impl: impl}
+}
+
+type statelessIntGen struct{}
+
+func (*statelessIntGen) value(t *T) int { return int(t.state >> 33) }
+
+type statelessSliceGen struct {
+	items []int
+}
+
+func (s *statelessSliceGen) value(t *T) int { return s.items[0] }
+func (s *statelessSliceGen) maybeValue() (int, bool) {
+	if len(s.items) == 0 {
+		return 0, false
+	}
+	return s.items[0], true
+}
+
+var defaultIntGen = newGenerator[int](&statelessIntGen{})
+
+func cachedSliceGen(k string) *Generator[int] {
+	if v, ok := genCache.Load(k); ok {
+		return v.(*Generator[int])
+	}
+	impl := &statelessSliceGen{items: []int{1, 2}}
+	_ = impl.maybeValue
+	g := newGenerator[int](impl)
+	genCache.Store(k, g)
+	return g
+}
+
+func (g *Generator[V]) Draw(t *T, label string) V {
+	t.state = t.state*6364136223846793005 + 1442695040888963407
+	if g.impl != nil {
+		return g.impl.value(t)
+	}
+	return g.gen(t)
+}
+
+func (g *Generator[V]) Example(seed ...int) V {
+	s := baseSeed()
+	if len(seed) > 0 {
+		s = uint64(seed[0])
+	}
+	return g.Draw(&T{tb: &exampleTB{}, state: s}, "example")
+}
+
+func ID[V any](v V) V { return v }
+
+func Int() *Generator[int] {
+	return &Generator[int]{gen: func(t *T) int { return int(t.state >> 33) }}
+}
+
+func Check(t *testing.T, prop func(*T)) {
+	t.Helper()
+	checkTB(t, prop)
+}
+
+func MakeCheck(prop func(*T)) func(*testing.T) {
+	return func(t *testing.T) { checkTB(t, prop) }
+}
+
+var failReporter = reportFailure
+
+func reportFailure(tb TB, seed uint64) {
+	tb.Errorf("[rapid] failed (seed=%d)", seed)
+}
+
+func defaultFailFile(name string) string {
+	if flags.failfile != "" {
+		return flags.failfile
+	}
+	return filepath.Join("testdata", "rapid", name)
+}
+
+func saveFailFile(filename string, data []byte) error {
+	dir := filepath.Dir(filename)
+	if err := os.MkdirAll(dir, 0o775); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".rapid-fail-*")
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return err
+	}
+	return os.Rename(f.Name(), filename)
+}
+
+func loadFailFiles(name string) {
+	matches, err := filepath.Glob(defaultFailFile(name))
+	if err != nil {
+		return
+	}
+	for _, m := range matches {
+		f, err := os.Open(m)
+		if err == nil {
+			_ = f.Close()
+		}
+	}
+}
+
+func saveVis(id int) {
+	if flags.debugvis {
+		f, err := os.Create(fmt.Sprintf("rapid-vis-%d.html", id))
+		if err == nil {
+			_ = visTmpl.Execute(f, &visTmplData{Title: "ok", Style: template.CSS("body{}")})
+			_ = f.Close()
+		}
+	}
+}
+
+func runSynctest(fn func()) {
+	ch := make(chan struct{})
+	go func() {
+		defer func() { ch <- struct{}{} }()
+		synctest.Test(&testing.T{}, func(*testing.T) { fn() })
+	}()
+	<-ch
+}
+
+type testError struct {
+	msg string
+}
+
+func runSynctestBuffered(fn func()) {
+	resultCh := make(chan *testError, 1)
+	go func() {
+		var res *testError
+		defer func() { resultCh <- res }()
+		synctest.Test(&testing.T{}, func(*testing.T) { fn() })
+	}()
+	if err := <-resultCh; err != nil {
+		_ = err.msg
+	}
+}
+
+func checkTB(tb TB, prop func(*T)) {
+	start := time.Now()
+	seed := baseSeed()
+	_ = defaultIntGen
+	_ = cachedSliceGen("seed")
+	_ = ID(1)
+	_ = len(cachedWords("seed"))
+	loadFailFiles(tb.Name())
+	saveVis(0)
+	runSynctest(func() {})
+	runSynctestBuffered(func() {})
+	t := &T{tb: tb, state: seed}
+	for i := 0; i < flags.checks && !t.fail; i++ {
+		prop(t)
+	}
+	if t.fail {
+		_ = saveFailFile(defaultFailFile(tb.Name()), []byte(fmt.Sprintf("seed=%d", t.state)))
+		failReporter(tb, t.state)
+		return
+	}
+	_ = io.EOF
+	tb.Logf("[rapid] OK, passed %v tests (%v)", flags.checks, time.Since(start))
+}
+`
+	parseRapid := func(t *testing.T, src, version string, mainMod bool) *packages.Package {
+		t.Helper()
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, "rapid.go", src, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("ParseFile: %v", err)
+		}
+		info := &types.Info{
+			Types:      make(map[ast.Expr]types.TypeAndValue),
+			Instances:  make(map[*ast.Ident]types.Instance),
+			Defs:       make(map[*ast.Ident]types.Object),
+			Uses:       make(map[*ast.Ident]types.Object),
+			Implicits:  make(map[ast.Node]types.Object),
+			Selections: make(map[*ast.SelectorExpr]*types.Selection),
+			Scopes:     make(map[ast.Node]*types.Scope),
+		}
+		conf := types.Config{Importer: importer.Default()}
+		tp, err := conf.Check("pgregory.net/rapid", fset, []*ast.File{f}, info)
+		if err != nil {
+			t.Fatalf("types.Check: %v", err)
+		}
+		imps := make(map[string]*packages.Package, len(tp.Imports()))
+		for _, dep := range tp.Imports() {
+			imps[dep.Path()] = &packages.Package{ID: dep.Path(), PkgPath: dep.Path(), Name: dep.Name(), Types: dep}
+		}
+		return &packages.Package{
+			ID:        "pgregory.net/rapid",
+			PkgPath:   "pgregory.net/rapid",
+			Name:      "rapid",
+			Fset:      fset,
+			Syntax:    []*ast.File{f},
+			Types:     tp,
+			TypesInfo: info,
+			Imports:   imps,
+			Module: &packages.Module{
+				Path:    "pgregory.net/rapid",
+				Version: version,
+				Main:    mainMod,
+			},
+		}
+	}
+
+	// 0. Length-prefixed pinned memo key resists delimiter collisions across slices and fields.
+	k1 := buildPinnedHarnessMemoKey("fe", "tc", "pol", "rapid@v1.3.0", []string{"A=1|B=2"}, []string{"-tags=a"}, []string{"a.go\x00b.go"})
+	k2 := buildPinnedHarnessMemoKey("fe", "tc", "pol", "rapid@v1.3.0", []string{"A=1", "B=2"}, []string{"-tags=a"}, []string{"a.go\x00b.go"})
+	k3 := buildPinnedHarnessMemoKey("fe", "tc", "pol", "rapid@v1.3.0", []string{"A=1|B=2"}, []string{"-tags=a"}, []string{"a.go", "b.go"})
+	if k1 == k2 || k1 == k3 || k2 == k3 {
+		t.Fatalf("buildPinnedHarnessMemoKey collision: k1=%q k2=%q k3=%q", k1, k2, k3)
+	}
+
+	// 1. Clean implementation passes across arbitrary versions and main/replace origins when audited=true,
+	// and fails closed when audited=false.
+	for _, version := range []string{"", "v0.0.1", "v1.3.0", "v1.4.0", "v2.0.0"} {
+		cleanPkg := parseRapid(t, baseRapidSrc, version, version == "")
+		if ok, reason := verifyPropertyHarnessPackageWithReason(true, cleanPkg); !ok {
+			t.Fatalf("verifyPropertyHarnessPackage(true, version=%q) = false (%s), want true", version, reason)
+		}
+		if verifyPropertyHarnessPackage(false, cleanPkg) {
+			t.Fatalf("verifyPropertyHarnessPackage(false, version=%q) = true, want false", version)
+		}
+	}
+
+	// 2. Structural violations fail closed even when stamped v1.3.0 or local main/replace.
+	violations := []struct {
+		name  string
+		extra string
+	}{
+		{"non_rapid_env_key", "func init() { _ = os.Getenv(\"SECRET_KEY\") }\n"},
+		{"env_read_outside_init", "func ReadEnvLater() string { v, _ := os.LookupEnv(\"RAPID_CHECKS\"); return v }\n"},
+		{"timer_sleep", "func Nap() { time.Sleep(time.Millisecond) }\n"},
+		{"exported_var", "var ExportedSeed uint64\n"},
+		{"post_init_callable_mutation", "func SwapReporter() { failReporter = reportFailure }\n"},
+		{"unparameterized_any_return", "func LeakAny() any { return 0 }\n"},
+		{"imported_std_var_write", "func ClobberStd() { io.EOF = nil }\n"},
+		// TypeParam return & maphash caller confinement
+		{"exported_typeparam_return_without_tb", "func BadSample[V any](g *Generator[V]) V { return g.Example(1) }\n"},
+		{"exported_two_arg_typeparam_return", "func PickFirst[V any](a, b V) V { return a }\n"},
+		{"maphash_called_from_draw", "func leakSeed() uint64 { var h maphash.Hash; h.SetSeed(maphash.MakeSeed()); return h.Sum64() }\nfunc BadGen() *Generator[int] { _ = leakSeed(); return Int() }\n"},
+		{"maphash_called_from_init", "func init() { _ = maphash.MakeSeed() }\n"},
+		// Goroutine & synctest join hazards
+		{"unjoined_goroutine", "func Spawn() { go func() {}() }\n"},
+		{"synctest_early_return_before_join", "func BadBubble() { ch := make(chan struct{}); go func() { synctest.Test(&testing.T{}, func(*testing.T) {}); ch <- struct{}{} }(); if flags.checks > 0 { return }; <-ch }\n"},
+		{"synctest_dead_branch_join", "func BadDeadJoin() { ch := make(chan struct{}); go func() { defer func() { ch <- struct{}{} }(); synctest.Test(&testing.T{}, func(*testing.T) {}) }(); if false { <-ch } }\n"},
+		{"synctest_send_before_bubble", "func BadEarlySend() { ch := make(chan struct{}, 1); go func() { ch <- struct{}{}; synctest.Test(&testing.T{}, func(*testing.T) {}) }(); <-ch }\n"},
+		{"synctest_work_after_send", "func BadPostSend() { ch := make(chan struct{}); go func() { synctest.Test(&testing.T{}, func(*testing.T) {}); ch <- struct{}{}; _ = cachedWords(\"late\") }(); <-ch }\n"},
+		{"synctest_buffered_two_chan", "func BadBufTwo() { ch := make(chan struct{}, 2); go func() { defer func() { ch <- struct{}{} }(); synctest.Test(&testing.T{}, func(*testing.T) {}) }(); <-ch }\n"},
+		{"synctest_prepopulated_buffered_chan", "func BadPreSend() { ch := make(chan struct{}, 1); ch <- struct{}{}; go func() { defer func() { ch <- struct{}{} }(); synctest.Test(&testing.T{}, func(*testing.T) {}) }(); <-ch }\n"},
+		{"init_goroutine_env_read", "func init() { go func() { _, _ = os.LookupEnv(\"RAPID_ASYNC\") }() }\n"},
+		{"init_goroutine_flag_write", "func init() { go func() { flags.checks = 1 }() }\n"},
+		{"goroutine_syncmap_store", "func RaceCache() { ch := make(chan struct{}); go func() { strMapCache.Store(\"k\", []string{\"a\"}); synctest.Test(&testing.T{}, func(*testing.T) {}); ch <- struct{}{} }(); <-ch }\n"},
+		// sync.Map cached value & global Generator impl immutability
+		{"syncmap_store_mutable_int_ptr", "func badCachePtr() { p := new(int); strMapCache.Store(\"k\", p) }\n"},
+		{"syncmap_store_mutable_map", "func badCacheMap() { m := make(map[string]int); strMapCache.Store(\"k\", m) }\n"},
+		{"syncmap_store_callable", "func badCacheFn() { strMapCache.Store(\"k\", func() {}) }\n"},
+		{"syncmap_store_slice_mutated_after_store", "func badCacheSlice() { s := []string{\"a\"}; strMapCache.Store(\"k\", s); s[0] = \"b\" }\n"},
+		{"syncmap_caller_mutates_returned_slice", "func badCallerMut() { s := cachedWords(\"x\"); s[0] = \"evil\" }\n"},
+		{"syncmap_mutated_named_struct", "type mutBox struct{ x int }\nfunc badBox() { b := mutBox{x: 1}; b.x = 2; strMapCache.Store(\"k\", b) }\n"},
+		{"global_generator_stateful_impl", "type counterImpl struct{ n int }\nfunc (c *counterImpl) value(t *T) int { c.n++; return c.n }\nvar badGlobalGen = newGenerator[int](&counterImpl{})\n"},
+		{"global_generator_generic_slice_mutated", "type sliceMutImpl[V any] struct{ buf []V }\nfunc (s *sliceMutImpl[V]) value(t *T) V { var z V; s.buf[0] = z; return s.buf[0] }\nvar badGenericSliceGen = newGenerator[int](&sliceMutImpl[int]{buf: []int{0}})\n"},
+		{"syncmap_cached_generator_stateful_impl", "type cacheCounterImpl struct{ n int }\nfunc (c *cacheCounterImpl) value(t *T) int { c.n++; return c.n }\nfunc badCacheGen() { genCache.Store(\"bad\", newGenerator[int](&cacheCounterImpl{})) }\n"},
+		// Exported & unexported Rule-2 return surface & promoted methods
+		{"unexported_handle_leaks_any", "type secretHandle struct{ x int }\nfunc (h *secretHandle) Leak() any { return 0 }\nfunc NewSecret() *secretHandle { return &secretHandle{} }\n"},
+		{"promoted_embedded_method_leaks_ptr", "type embBase struct{ x int }\nfunc (b *embBase) LeakPtr() *int { return &b.x }\ntype ExportedHolder struct{ embBase }\n"},
+		{"embedded_interface_method_leaks_any", "type badIface interface{ LeakAny() any }\ntype ExportedIfaceHolder struct{ badIface }\n"},
+		// os.* & filepath.Glob provenance and non-value-taken discipline
+		{"os_readfile_evicted", "func badReadFile() { _, _ = os.ReadFile(flags.failfile) }\n"},
+		{"os_writefile_evicted", "func badWriteFile() { _ = os.WriteFile(flags.failfile, nil, 0o644) }\n"},
+		{"os_open_arbitrary_path", "func badOpen() { f, _ := os.Open(\"/etc/hosts\"); if f != nil { _ = f.Close() } }\n"},
+		{"os_create_unguarded_by_flag", "func badCreate() { f, _ := os.Create(fmt.Sprintf(\"vis-%d.html\", 1)); if f != nil { _ = f.Close() } }\n"},
+		{"os_create_non_html_path", "func badCreateExt() { if flags.debugvis { f, _ := os.Create(fmt.Sprintf(\"vis-%d.txt\", 1)); if f != nil { _ = f.Close() } } }\n"},
+		{"os_remove_non_tempfile", "func badRemove() { _ = os.Remove(flags.failfile) }\n"},
+		{"filepath_glob_arbitrary_pattern", "func badGlob() { _, _ = filepath.Glob(\"*.go\") }\n"},
+		{"filepath_join_dotdot_traversal", "func badJoinDotDot() { f, _ := os.Open(filepath.Join(flags.failfile, \"..\", \"secret\")); if f != nil { _ = f.Close() } }\n"},
+		{"os_open_value_taken", "func badValOpen() { fn := os.Open; _ = fn }\n"},
+		{"filepath_glob_value_taken", "func badValGlob() { fn := filepath.Glob; _ = fn }\n"},
+		{"html_template_parsefiles", "func badTmplParseFiles() { _, _ = template.ParseFiles(\"/etc/hosts\") }\n"},
+		{"html_template_execute_method_data", "type methodVisData struct{ Title string }\nfunc (methodVisData) Secret() string { return \"x\" }\nfunc badTmplExec() { _ = visTmpl.Execute(io.Discard, &methodVisData{Title: \"a\"}) }\n"},
+		{"html_template_value_taken", "func badTmplVal() { fn := template.New; _ = fn }\n"},
+		// Package-scope variable reference/pointer/channel confinement & range-assign hazards
+		{"category_a_int_ptr_alias_mutated", "var sharedCount = new(int)\nfunc bumpPtr() { p := sharedCount; *p++ }\n"},
+		{"category_a_struct_slice_field_mutated", "var sharedBuf struct{ buf []int }\nfunc init() { sharedBuf.buf = []int{0} }\nfunc mutStructBuf() { s := sharedBuf.buf; s[0] = 9 }\n"},
+		{"category_a_nested_slice_row_mutated", "var sharedMatrix = [][]int{{0}}\nfunc mutRow() { row := sharedMatrix[0]; row[0]++ }\n"},
+		{"category_a_chan_global_forbidden", "var sharedChan = make(chan int, 1)\n"},
+		{"category_a_range_assign_scalar_global", "var rangeCalls int\nfunc mutViaRange() { for rangeCalls = range []int{1} {} }\n"},
+		{"category_a_param_slice_aliased_mutated", "var sharedSlice = []int{0}\nfunc mutViaAlias(pv []int) { alias := pv; alias[0] = 1 }\nfunc callMutAlias() { mutViaAlias(sharedSlice) }\n"},
+		{"exported_slice_var", "var ExportedTable = []int{0}\n"},
+		// Generator implementation pointer/closure/aliased-field/unnamed-struct/type-arg immutability
+		{"global_generator_ptr_field_type_forbidden", "type ptrHolderImpl struct{ calls *int }\nfunc (c *ptrHolderImpl) value(t *T) int { return 0 }\nvar badPtrHolderGen = newGenerator[int](&ptrHolderImpl{})\n"},
+		{"global_generator_ptr_field_mutated", "type ptrCounterImpl struct{ calls *int }\nfunc (c *ptrCounterImpl) value(t *T) int { *c.calls++; return *c.calls }\nvar badPtrGen = newGenerator[int](&ptrCounterImpl{calls: new(int)})\n"},
+		{"global_generator_closure_captures_ptr_local", "func makeStatefulClosureGen() *Generator[int] {\n\tp := new(int)\n\treturn &Generator[int]{gen: func(t *T) int { *p++; return *p }}\n}\nvar badClosurePtrGen = makeStatefulClosureGen()\n"},
+		{"global_generator_closure_captures_aliased_slice_local", "func makeStatefulSliceClosureGen() *Generator[int] {\n\ts := []int{0}\n\treturn &Generator[int]{gen: func(t *T) int { a := s; a[0]++; return a[0] }}\n}\nvar badClosureSliceGen = makeStatefulSliceClosureGen()\n"},
+		{"global_generator_aliased_slice_field_mutated", "type aliasedBufImpl struct{ buf []int }\nfunc (g *aliasedBufImpl) value(t *T) int { s := g.buf; s[0]++; return s[0] }\nvar badAliasedBufGen = newGenerator[int](&aliasedBufImpl{buf: []int{0}})\n"},
+		{"global_generator_unnamed_struct_impl", "func badUnnamedGen() *Generator[int] { return newGenerator[int](&struct{ statelessIntGen }{}) }\nvar badUnnamedGlobalGen = badUnnamedGen()\n"},
+		{"global_generator_generic_mutable_type_arg", "type sampledImpl[V any] struct{ vals []V }\nfunc (s *sampledImpl[V]) value(t *T) V { return s.vals[0] }\nvar badSliceGen = newGenerator[[]int](&sampledImpl[[]int]{vals: [][]int{{0}}})\nfunc corruptViaDraw(t *T) { s := badSliceGen.Draw(t, \"x\"); s[0]++ }\n"},
+		// sync.Map fresh-at-store & capsule/forwarded-return slice confinement
+		{"syncmap_store_reslice_expr", "func badStoreReslice() { s := []string{\"a\", \"b\"}; strMapCache.Store(\"k\", s[:1]); s[0] = \"x\" }\n"},
+		{"syncmap_store_pre_aliased_local_mutated", "func badPreAliasStore() { s := []string{\"a\"}; alias := s; strMapCache.Store(\"k\", s); alias[0] = \"x\" }\n"},
+		{"syncmap_store_outer_loop_reused_slice", "func badLoopStore() {\n\ts := make([]string, 1)\n\tfor i := 0; i < 2; i++ {\n\t\ts[0] = fmt.Sprint(i)\n\t\tstrMapCache.Store(fmt.Sprint(i), s)\n\t}\n}\n"},
+		{"syncmap_store_backward_goto_mutated", "func badGotoStore() {\n\ts := []string{\"a\"}\n\tif flags.debugvis { goto store }\nmut:\n\ts[0] = \"evil\"\n\treturn\nstore:\n\tstrMapCache.Store(\"k\", s)\n\tgoto mut\n}\n"},
+		{"syncmap_cached_capsule_struct_slice_mutated", "type cachedEntry struct{ items []string }\nfunc loadEntry(k string) cachedEntry {\n\tif v, ok := strMapCache.Load(k); ok { return v.(cachedEntry) }\n\ts := []string{k}\n\te := cachedEntry{items: s}\n\tstrMapCache.Store(k, e)\n\treturn e\n}\nfunc badMutEntry() { e := loadEntry(\"x\"); e.items[0] = \"mut\" }\n"},
+		{"syncmap_load_only_typeassert_mutated", "func readOnlyCorrupt() {\n\tif v, ok := strMapCache.Load(\"k\"); ok {\n\t\ts := v.([]string)\n\t\ts[0] = \"mut\"\n\t}\n}\n"},
+		{"syncmap_store_only_return_mutated", "func storeWithoutLoadAssert() []string {\n\ts := []string{\"a\"}\n\tstrMapCache.Store(\"k\", s)\n\treturn s\n}\nfunc corruptStoreRet() { x := storeWithoutLoadAssert(); x[0] = \"mut\" }\n"},
+		{"syncmap_caller_mutates_forwarded_returned_slice", "func forwardWords(k string) []string { return cachedWords(k) }\nfunc badMutForwarded() { x := forwardWords(\"k\"); x[0] = \"mut\" }\n"},
+		{"global_generator_bound_method_val_mutates_slice", "type boundMutImpl struct{ buf []int }\nfunc (b *boundMutImpl) value(t *T) int { return b.buf[0] }\nfunc (b *boundMutImpl) mut() { b.buf[0]++ }\nfunc makeBoundMut() *Generator[int] { impl := &boundMutImpl{buf: []int{0}}; fn := impl.mut; _ = fn; return newGenerator[int](impl) }\nvar badBoundMutGen = makeBoundMut()\n"},
+		{"global_generator_bound_method_val_returns_slice", "type boundLeakImpl struct{ buf []int }\nfunc (b *boundLeakImpl) value(t *T) int { return b.buf[0] }\nfunc (b *boundLeakImpl) leak() []int { return b.buf }\nfunc makeBoundLeak() *Generator[int] { impl := &boundLeakImpl{buf: []int{0}}; fn := impl.leak; _ = fn; return newGenerator[int](impl) }\nvar badBoundLeakGen = makeBoundLeak()\n"},
+		{"syncmap_cached_generator_helper_captures_tb_in_closure", "func makeBaseWithParent(parent *T) *Generator[int] { return &Generator[int]{gen: func(t *T) int { parent.state++; return int(parent.state) }} }\nfunc cachedEvil(parent *T) *Generator[int] {\n\tif v, ok := genCache.Load(\"p\"); ok { return v.(*Generator[int]) }\n\tg := makeBaseWithParent(parent)\n\tgenCache.Store(\"p\", g)\n\treturn g\n}\n"},
+		{"syncmap_unexported_iface_dispatch_returns_cached_slice_mutated", "type wordGetter interface { rawWords() []string }\ntype wordBox struct{ w []string }\nfunc (b wordBox) rawWords() []string { return b.w }\nfunc cachedWordBox() wordBox {\n\tif v, ok := strMapCache.Load(\"wb\"); ok { return v.(wordBox) }\n\ts := []string{\"a\"}\n\tb := wordBox{w: s}\n\tstrMapCache.Store(\"wb\", b)\n\treturn b\n}\nfunc mutViaWordIface() { var g wordGetter = cachedWordBox(); g.rawWords()[0] = \"mut\" }\n"},
+	}
+	for _, tc := range violations {
+		t.Run(tc.name, func(t *testing.T) {
+			badPkg := parseRapid(t, baseRapidSrc+"\n"+tc.extra, "v1.3.0", false)
+			if verifyPropertyHarnessPackage(true, badPkg) {
+				t.Fatalf("verifyPropertyHarnessPackage accepted %s under v1.3.0", tc.name)
+			}
+			badLocal := parseRapid(t, baseRapidSrc+"\n"+tc.extra, "", true)
+			if verifyPropertyHarnessPackage(true, badLocal) {
+				t.Fatalf("verifyPropertyHarnessPackage accepted %s under local main", tc.name)
+			}
+		})
+	}
+	t.Run("tampered_example_ignoring_seed", func(t *testing.T) {
+		badExampleSrc := strings.Replace(baseRapidSrc, "if len(seed) > 0 {\n\t\ts = uint64(seed[0])\n\t}", "_ = seed", 1)
+		if verifyPropertyHarnessPackage(true, parseRapid(t, badExampleSrc, "v1.3.0", false)) {
+			t.Fatal("verifyPropertyHarnessPackage accepted Example(seed ...int) ignoring explicit seed")
+		}
+	})
+	t.Run("exported_field_on_T", func(t *testing.T) {
+		badTSrc := strings.Replace(baseRapidSrc, "state uint64", "State uint64", 1)
+		badTSrc = strings.ReplaceAll(badTSrc, "t.state", "t.State")
+		badTSrc = strings.ReplaceAll(badTSrc, "state:", "State:")
+		if verifyPropertyHarnessPackage(true, parseRapid(t, badTSrc, "v1.3.0", false)) {
+			t.Fatal("verifyPropertyHarnessPackage accepted exported field on rapid.T")
+		}
+	})
+
+	// End-to-end check on a local replace checkout violating the protocol:
+	// unlike the retired unverified local-checkout trust rule, a tampered local rapid refuses!
+	t.Run("tampered_local_replace_refused", func(t *testing.T) {
+		tamperedDir := t.TempDir()
+		for _, sub := range []string{"rapid", "app"} {
+			if err := os.MkdirAll(filepath.Join(tamperedDir, sub), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		writeFile(t, tamperedDir, "rapid/go.mod", "module pgregory.net/rapid\n\ngo 1.26\n")
+		writeFile(t, tamperedDir, "rapid/rapid.go", baseRapidSrc+"\nfunc init() { _ = os.Getenv(\"UNLOGGED_SECRET\") }\n")
+		writeFile(t, tamperedDir, "app/go.mod", "module example.com/app\n\ngo 1.26\n\nrequire pgregory.net/rapid v0.0.0\n\nreplace pgregory.net/rapid => ../rapid\n")
+		writeFile(t, tamperedDir, "app/app_test.go", "package app\n\nimport (\n\t\"testing\"\n\t\"pgregory.net/rapid\"\n)\n\nfunc TestProp(t *testing.T) {\n\trapid.Check(t, func(rt *rapid.T) {\n\t\t_ = rapid.Int().Draw(rt, \"x\")\n\t})\n}\n")
+		tamperedH, err := newAt(filepath.Join(tamperedDir, "app"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		tamperedProofs, err := tamperedH.ComputeObservabilityBatch([]Subject{{Package: "example.com/app", Symbol: "TestProp"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := tamperedProofs[Subject{Package: "example.com/app", Symbol: "TestProp"}]; got.Observable {
+			t.Fatalf("tampered local rapid checkout proved Observable = %+v, want refusal", got)
+		}
+	})
+}
+
+func TestRealGOMODCACHEPackagesMechanicalVerification(t *testing.T) {
+	if testing.Short() {
+		t.Skip("loads real GOMODCACHE modules via go/packages")
+	}
+	modCacheOut, err := exec.Command("go", "env", "GOMODCACHE").Output()
+	if err != nil {
+		t.Skipf("go env GOMODCACHE unavailable: %v", err)
+	}
+	modCache := strings.TrimSpace(string(modCacheOut))
+	loadCachedBatch := func(t *testing.T, relModDir string, patterns ...string) map[string]*packages.Package {
+		t.Helper()
+		fullDir := filepath.Join(modCache, filepath.FromSlash(relModDir))
+		info, statErr := os.Stat(fullDir)
+		if statErr != nil || !info.IsDir() {
+			t.Skipf("%s not present in GOMODCACHE (%s)", relModDir, fullDir)
+		}
+		mode := packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
+			packages.NeedImports | packages.NeedDeps | packages.NeedTypes |
+			packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedModule
+		pkgs, loadErr := packages.Load(&packages.Config{
+			Mode: mode,
+			Dir:  fullDir,
+		}, patterns...)
+		hasPkgErr := loadErr != nil || len(pkgs) != len(patterns)
+		if !hasPkgErr {
+			for _, pkg := range pkgs {
+				if len(pkg.Errors) > 0 {
+					hasPkgErr = true
+					break
+				}
+			}
+		}
+		if hasPkgErr && strings.Contains(relModDir, "@") {
+			modPath, modVer, _ := strings.Cut(relModDir, "@")
+			impPatterns := make([]string, len(patterns))
+			for i, pat := range patterns {
+				impPath := modPath
+				if trimmed := strings.TrimPrefix(pat, "./"); trimmed != "." && trimmed != pat {
+					impPath = modPath + "/" + trimmed
+				}
+				impPatterns[i] = impPath
+			}
+			wrapDir := t.TempDir()
+			gomod := "module testload\n\ngo 1.24\n\nrequire " + modPath + " " + modVer + "\n\nreplace " + modPath + " => " + fullDir + "\n"
+			if wErr := os.WriteFile(filepath.Join(wrapDir, "go.mod"), []byte(gomod), 0o644); wErr == nil {
+				pkgs, loadErr = packages.Load(&packages.Config{
+					Mode: mode,
+					Dir:  wrapDir,
+				}, impPatterns...)
+			}
+		}
+		if loadErr != nil || len(pkgs) != len(patterns) {
+			t.Fatalf("packages.Load(%s, %v): err=%v len=%d", fullDir, patterns, loadErr, len(pkgs))
+		}
+		byPath := make(map[string]*packages.Package, len(pkgs))
+		for _, pkg := range pkgs {
+			if len(pkg.Errors) > 0 {
+				t.Fatalf("packages.Load(%s, %s) errors: %v", fullDir, pkg.PkgPath, pkg.Errors)
+			}
+			byPath[pkg.PkgPath] = pkg
+		}
+		return byPath
+	}
+
+	// 1. Real pgregory.net/rapid@v1.3.0 (both direct verifyPropertyHarnessPackage and end-to-end ComputeObservabilityBatch)
+	t.Run("rapid@v1.3.0", func(t *testing.T) {
+		rapidPkg := loadCachedBatch(t, "pgregory.net/rapid@v1.3.0", ".")["pgregory.net/rapid"]
+		if ok, reason := verifyPropertyHarnessPackageWithReason(true, rapidPkg); !ok {
+			t.Fatalf("verifyPropertyHarnessPackage(true, real pgregory.net/rapid@v1.3.0) = false (%s), want true", reason)
+		}
+		if verifyPropertyHarnessPackage(false, rapidPkg) {
+			t.Fatal("verifyPropertyHarnessPackage(false, real pgregory.net/rapid@v1.3.0) = true, want false")
+		}
+		e2eDir := t.TempDir()
+		rapidCacheDir := filepath.Join(modCache, "pgregory.net", "rapid@v1.3.0")
+		writeFile(t, e2eDir, "go.mod", "module example.com/realrapid\n\ngo 1.24\n\nrequire pgregory.net/rapid v1.3.0\n\nreplace pgregory.net/rapid => "+rapidCacheDir+"\n")
+		writeFile(t, e2eDir, "real_test.go", `package realrapid
+
+import (
+	"errors"
+	"fmt"
+	"hash/crc32"
+	"os"
+	"strconv"
+	"testing"
+	"unsafe"
+	"pgregory.net/rapid"
+)
+
+type realPair struct {
+	A int
+	B string
+}
+
+type cleanSM struct {
+	n int
+}
+
+func (m *cleanSM) Check(t *rapid.T) {
+	if m.n < 0 {
+		t.Fatalf("negative")
+	}
+}
+
+func (m *cleanSM) Step(t *rapid.T) {
+	_ = crc32.ChecksumIEEE([]byte("abc"))
+	m.n += rapid.IntRange(0, 3).Draw(t, "d")
+}
+
+func (m *cleanSM) Reset() {
+	m.n = 0
+}
+
+type dirtySM struct{}
+
+func (m *dirtySM) Check(t *rapid.T) {}
+
+func (m *dirtySM) Leak(t *rapid.T) {
+	_, _ = os.Hostname()
+}
+
+type lazyEnv struct{}
+
+func (lazyEnv) String() string {
+	return os.Getenv("REAL_RAPID_SECRET")
+}
+
+type lazyEnvWrapper struct {
+	inner lazyEnv
+}
+
+type lazyUnobs struct{}
+
+func (lazyUnobs) String() string {
+	h, _ := os.Hostname()
+	return h
+}
+
+type lazyUnobsWrapper struct {
+	inner lazyUnobs
+}
+
+var sharedMutCounter int
+
+type lazyMut struct{}
+
+func (lazyMut) String() string {
+	sharedMutCounter++
+	return "mut"
+}
+
+var sharedGen *rapid.Generator[int]
+
+func TestRealRapidCheck(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		n := rapid.Int().Draw(rt, "n")
+		if n+0 != n {
+			rt.Fatalf("broken")
+		}
+	})
+}
+
+func TestRealRapidMakeAndError(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		p := rapid.Make[realPair]().Draw(rt, "p")
+		if _, err := strconv.Atoi(p.B); err != nil && errors.Is(err, strconv.ErrSyntax) {
+			_ = p.A
+		}
+		errs := []error{errors.New(p.B)}
+		_ = errs[0].Error()
+		_ = rt.Context().Err()
+	})
+}
+
+func TestRealRapidStateMachineAndMake(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		_ = rapid.Make[realPair]().Draw(rt, "p")
+		rt.Repeat(rapid.StateMachineActions(&cleanSM{}))
+	})
+}
+
+func TestRealRapidDirtyStateMachine(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		rt.Repeat(rapid.StateMachineActions(&dirtySM{}))
+	})
+}
+
+func TestRealRapidUnsafeGenerator(t *testing.T) {
+	g := rapid.Just[unsafe.Pointer](nil)
+	_ = g
+}
+
+func TestRealRapidSharedGeneratorFormat(t *testing.T) {
+	_ = fmt.Sprintf("%v", sharedGen)
+}
+
+func TestRealRapidLazyEnvStringer(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		_ = rapid.Just(lazyEnv{}).Draw(rt, "x")
+	})
+}
+
+func TestRealRapidNestedLazyEnvStringer(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		_ = rapid.Just(lazyEnvWrapper{}).Draw(rt, "x")
+	})
+}
+
+func TestRealRapidNestedLazyUnobsStringer(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		_ = rapid.Just(lazyUnobsWrapper{}).Draw(rt, "x")
+	})
+}
+
+func TestRealRapidLazyMutStringer(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		_ = rapid.Just(lazyMut{}).Draw(rt, "x")
+	})
+}
+`)
+		hReal, err := newAt(e2eDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		realProofs, err := hReal.ComputeObservabilityBatch([]Subject{
+			{Package: "example.com/realrapid", Symbol: "TestRealRapidCheck"},
+			{Package: "example.com/realrapid", Symbol: "TestRealRapidMakeAndError"},
+			{Package: "example.com/realrapid", Symbol: "TestRealRapidStateMachineAndMake"},
+			{Package: "example.com/realrapid", Symbol: "TestRealRapidDirtyStateMachine"},
+			{Package: "example.com/realrapid", Symbol: "TestRealRapidUnsafeGenerator"},
+			{Package: "example.com/realrapid", Symbol: "TestRealRapidSharedGeneratorFormat"},
+			{Package: "example.com/realrapid", Symbol: "TestRealRapidLazyEnvStringer"},
+			{Package: "example.com/realrapid", Symbol: "TestRealRapidNestedLazyEnvStringer"},
+			{Package: "example.com/realrapid", Symbol: "TestRealRapidNestedLazyUnobsStringer"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, sym := range []string{"TestRealRapidCheck", "TestRealRapidMakeAndError", "TestRealRapidStateMachineAndMake"} {
+			gotReal := realProofs[Subject{Package: "example.com/realrapid", Symbol: sym}]
+			if !gotReal.Observable || !gotReal.EffectFree {
+				t.Fatalf("end-to-end real pgregory.net/rapid@v1.3.0 %s = %+v, want Observable=true EffectFree=true", sym, gotReal)
+			}
+		}
+		if gotDirty := realProofs[Subject{Package: "example.com/realrapid", Symbol: "TestRealRapidDirtyStateMachine"}]; gotDirty.Observable || !strings.Contains(gotDirty.Reason, "os.Hostname") {
+			t.Fatalf("end-to-end real pgregory.net/rapid@v1.3.0 TestRealRapidDirtyStateMachine = %+v, want Observable=false witnessing os.Hostname", gotDirty)
+		}
+		if gotUnsafe := realProofs[Subject{Package: "example.com/realrapid", Symbol: "TestRealRapidUnsafeGenerator"}]; gotUnsafe.Observable || !strings.Contains(gotUnsafe.Reason, "unsafe pointer reachable") {
+			t.Fatalf("end-to-end real pgregory.net/rapid@v1.3.0 TestRealRapidUnsafeGenerator = %+v, want Observable=false with unsafe pointer reachable", gotUnsafe)
+		}
+		if gotShared := realProofs[Subject{Package: "example.com/realrapid", Symbol: "TestRealRapidSharedGeneratorFormat"}]; gotShared.Observable {
+			t.Fatalf("end-to-end real pgregory.net/rapid@v1.3.0 TestRealRapidSharedGeneratorFormat = %+v, want Observable=false", gotShared)
+		}
+		for _, sym := range []string{"TestRealRapidLazyEnvStringer", "TestRealRapidNestedLazyEnvStringer"} {
+			gotEnv := realProofs[Subject{Package: "example.com/realrapid", Symbol: sym}]
+			if !gotEnv.Observable || gotEnv.EffectFree {
+				t.Fatalf("end-to-end real pgregory.net/rapid@v1.3.0 %s = %+v, want Observable=true EffectFree=false", sym, gotEnv)
+			}
+		}
+		if gotUnobs := realProofs[Subject{Package: "example.com/realrapid", Symbol: "TestRealRapidNestedLazyUnobsStringer"}]; gotUnobs.Observable || !strings.Contains(gotUnobs.Reason, "os.Hostname") {
+			t.Fatalf("end-to-end real pgregory.net/rapid@v1.3.0 TestRealRapidNestedLazyUnobsStringer = %+v, want Observable=false witnessing os.Hostname", gotUnobs)
+		}
+		rooted, err := hReal.ComputeRootedFunctions(context.Background(), []Subject{
+			{Package: "example.com/realrapid", Symbol: "TestRealRapidLazyMutStringer"},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mutSubj := Subject{Package: "example.com/realrapid", Symbol: "TestRealRapidLazyMutStringer"}
+		mutRooted := rooted[mutSubj]
+		if !mutRooted.Complete {
+			t.Fatalf("ComputeRootedFunctions(TestRealRapidLazyMutStringer) Complete=false, want Complete=true with lazyMut.String")
+		}
+		sawLazyMutString := false
+		for fn := range mutRooted.Fns {
+			if strings.Contains(fn, "example.com/realrapid") && strings.Contains(fn, "lazyMut") && strings.HasSuffix(fn, "String") {
+				sawLazyMutString = true
+				break
+			}
+		}
+		if !sawLazyMutString {
+			t.Fatalf("ComputeRootedFunctions(TestRealRapidLazyMutStringer) = %+v, want lazyMut.String attributed", mutRooted.Fns)
+		}
+	})
+
+	// 2. Real gopkg.in/yaml.v3@v3.0.1
+	t.Run("yaml.v3@v3.0.1", func(t *testing.T) {
+		yamlPkg := loadCachedBatch(t, "gopkg.in/yaml.v3@v3.0.1", ".")["gopkg.in/yaml.v3"]
+		fact := dynstate.FactOf(true, yamlPkg, false)
+		if !slices.Contains(fact.MemoDischarges, "gopkg.in/yaml.v3.structMap") {
+			t.Fatalf("real gopkg.in/yaml.v3@v3.0.1 MemoDischarges = %v, want gopkg.in/yaml.v3.structMap", fact.MemoDischarges)
+		}
+	})
+
+	// 3. Real golang.org/x/sys/unix across multiple upstream versions
+	for _, sysVer := range []string{"v0.42.0", "v0.48.0"} {
+		t.Run("x_sys_unix@"+sysVer, func(t *testing.T) {
+			unixPkg := loadCachedBatch(t, "golang.org/x/sys@"+sysVer, "./unix")["golang.org/x/sys/unix"]
+			fact := dynstate.FactOf(true, unixPkg, false)
+			if !slices.Contains(fact.MappingDischarges, "golang.org/x/sys/unix.mapper") {
+				t.Fatalf("real golang.org/x/sys@%s/unix MappingDischarges = %v, want golang.org/x/sys/unix.mapper", sysVer, fact.MappingDischarges)
+			}
+		})
+	}
+
+	// 4. Real google.golang.org/protobuf across multiple upstream versions (Classic + Edition 2023 Opaque API),
+	// loading the full transitive google.golang.org/protobuf/... package cone from reflect/protodesc and types/descriptorpb.
+	for _, pbVer := range []string{"v1.33.0", "v1.35.1", "v1.36.10", "v1.36.11"} {
+		t.Run("protobuf@"+pbVer, func(t *testing.T) {
+			loaded := loadCachedBatch(
+				t,
+				"google.golang.org/protobuf@"+pbVer,
+				"./internal/filedesc",
+				"./internal/filetype",
+				"./internal/encoding/tag",
+				"./internal/impl",
+				"./runtime/protoimpl",
+				"./reflect/protodesc",
+				"./types/descriptorpb",
+			)
+			allPB := map[string]*packages.Package{}
+			var collectPBCone func(p *packages.Package)
+			collectPBCone = func(p *packages.Package) {
+				if p == nil || !strings.HasPrefix(p.PkgPath, "google.golang.org/protobuf/") {
+					return
+				}
+				if allPB[p.PkgPath] != nil {
+					return
+				}
+				allPB[p.PkgPath] = p
+				for _, imp := range p.Imports {
+					collectPBCone(imp)
+				}
+			}
+			for _, rootPkg := range loaded {
+				collectPBCone(rootPkg)
+			}
+			pbPaths := make([]string, 0, len(allPB))
+			for pkgPath := range allPB {
+				pbPaths = append(pbPaths, pkgPath)
+			}
+			slices.Sort(pbPaths)
+			pbPatterns := make([]string, len(pbPaths))
+			for i, pkgPath := range pbPaths {
+				pbPatterns[i] = "./" + strings.TrimPrefix(pkgPath, "google.golang.org/protobuf/")
+			}
+			allPB = loadCachedBatch(t, "google.golang.org/protobuf@"+pbVer, pbPatterns...)
+			for _, pkgPath := range pbPaths {
+				p := allPB[pkgPath]
+				if p == nil || (len(p.GoFiles) > 0 && (len(p.Syntax) == 0 || p.TypesInfo == nil)) {
+					t.Fatalf("real protobuf@%s package %s missing AST/TypesInfo after full-cone load", pbVer, pkgPath)
+				}
+			}
+
+			pbFacts := make(map[string]dynstate.Fact, len(pbPaths))
+			meta := make([]dynstate.GraphPackage, 0, len(pbPaths))
+			facts := make(map[string][]dynstate.Fact, len(pbPaths))
+			for _, pkgPath := range pbPaths {
+				p := allPB[pkgPath]
+				f := dynstate.FactOf(true, p, false)
+				pbFacts[pkgPath] = f
+				facts[pkgPath] = []dynstate.Fact{f}
+				var imps []string
+				for impPath := range p.Imports {
+					if allPB[impPath] != nil {
+						imps = append(imps, impPath)
+					}
+				}
+				slices.Sort(imps)
+				meta = append(meta, dynstate.GraphPackage{
+					ImportPath: pkgPath,
+					PkgPath:    pkgPath,
+					Imports:    imps,
+					Class:      dynstate.PinnedPackage,
+					Pin:        "google.golang.org/protobuf@" + pbVer,
+				})
+			}
+
+			implPkg := allPB["google.golang.org/protobuf/internal/impl"]
+			fdFact := pbFacts["google.golang.org/protobuf/internal/filedesc"]
+			ftFact := pbFacts["google.golang.org/protobuf/internal/filetype"]
+			implFact := pbFacts["google.golang.org/protobuf/internal/impl"]
+			descFact := pbFacts["google.golang.org/protobuf/types/descriptorpb"]
+
+			var fdBuilderFact *dynstate.ProtoRuntimeTypeFact
+			for i := range fdFact.ProtoRuntimeTypes {
+				rt := &fdFact.ProtoRuntimeTypes[i]
+				if rt.Type.Name == "Builder" && rt.Role == dynstate.ProtoRoleDescBuilder {
+					fdBuilderFact = rt
+				}
+			}
+			if fdBuilderFact == nil {
+				t.Fatalf("real protobuf@%s/internal/filedesc ProtoRuntimeTypes = %+v, missing desc_builder Builder", pbVer, fdFact.ProtoRuntimeTypes)
+			}
+			fileGuardRef := dynstate.TypeRef{Pkg: "google.golang.org/protobuf/internal/filedesc", Name: "File"}
+			if !slices.Contains(fdBuilderFact.GuardTypes, fileGuardRef) {
+				t.Fatalf("real protobuf@%s/internal/filedesc Builder GuardTypes = %+v, missing File", pbVer, fdBuilderFact.GuardTypes)
+			}
+
+			var ftBuilderFact *dynstate.ProtoRuntimeTypeFact
+			for i := range ftFact.ProtoRuntimeTypes {
+				rt := &ftFact.ProtoRuntimeTypes[i]
+				if rt.Type.Name == "Builder" && rt.Role == dynstate.ProtoRoleBuilder {
+					ftBuilderFact = rt
+				}
+			}
+			wantSubBuilder := dynstate.TypeRef{Pkg: "google.golang.org/protobuf/internal/filedesc", Name: "Builder"}
+			if ftBuilderFact == nil || ftBuilderFact.SubBuilder != wantSubBuilder {
+				t.Fatalf("real protobuf@%s/internal/filetype Builder = %+v, want SubBuilder=%+v", pbVer, ftFact.ProtoRuntimeTypes, wantSubBuilder)
+			}
+
+			roles := map[string]dynstate.ProtoRuntimeTypeFact{}
+			for _, rt := range implFact.ProtoRuntimeTypes {
+				roles[rt.Type.Name] = rt
+			}
+			if roles["EnumInfo"].Role != dynstate.ProtoRoleEnum ||
+				roles["MessageInfo"].Role != dynstate.ProtoRoleMessage ||
+				roles["ExtensionInfo"].Role != dynstate.ProtoRoleExtension {
+				t.Fatalf("real protobuf@%s/internal/impl ProtoRuntimeTypes = %+v", pbVer, implFact.ProtoRuntimeTypes)
+			}
+			var methodsGuardRef dynstate.TypeRef
+			for _, imp := range implPkg.Types.Imports() {
+				if imp.Path() == "google.golang.org/protobuf/runtime/protoiface" {
+					if mObj := imp.Scope().Lookup("Methods"); mObj != nil {
+						var okRef bool
+						methodsGuardRef, okRef = dynstate.TypeRefOfStruct(mObj.Type())
+						if !okRef {
+							t.Fatalf("real protobuf@%s TypeRefOfStruct(protoiface.Methods) returned false", pbVer)
+						}
+					}
+				}
+			}
+			atomicNilGuardRef := dynstate.TypeRef{Pkg: "google.golang.org/protobuf/internal/impl", Name: "atomicNilMessage"}
+			if !methodsGuardRef.Valid() || !slices.Contains(roles["MessageInfo"].GuardTypes, methodsGuardRef) || !slices.Contains(roles["MessageInfo"].GuardTypes, atomicNilGuardRef) {
+				t.Fatalf("real protobuf@%s/internal/impl MessageInfo GuardTypes = %+v, missing %+v or %+v", pbVer, roles["MessageInfo"].GuardTypes, methodsGuardRef, atomicNilGuardRef)
+			}
+
+			allGuarded := map[dynstate.TypeRef]string{}
+			for _, g := range fdBuilderFact.GuardTypes {
+				allGuarded[g] = "filedesc.Builder"
+			}
+			for _, g := range ftBuilderFact.GuardTypes {
+				allGuarded[g] = "filetype.Builder"
+			}
+			for _, g := range roles["MessageInfo"].GuardTypes {
+				allGuarded[g] = "impl.MessageInfo"
+			}
+			for _, g := range roles["ExtensionInfo"].GuardTypes {
+				allGuarded[g] = "impl.ExtensionInfo"
+			}
+			var guardHits []string
+			for _, pkgPath := range pbPaths {
+				f := pbFacts[pkgPath]
+				for _, mut := range f.MutatedStructTypes {
+					if owner, guarded := allGuarded[mut]; guarded {
+						guardHits = append(guardHits, pkgPath+" -> "+owner+":"+mut.Pkg+"."+mut.Name)
+					}
+					if mut.Pkg == "google.golang.org/protobuf/internal/impl" &&
+						(mut.Name == "EnumInfo" || mut.Name == "MessageInfo" || mut.Name == "ExtensionInfo") {
+						guardHits = append(guardHits, pkgPath+" -> impl:"+mut.Name)
+					}
+				}
+			}
+			if len(guardHits) > 0 {
+				t.Fatalf("real protobuf@%s unexpectedly marked guarded structs in MutatedStructTypes:\n  %s", pbVer, strings.Join(guardHits, "\n  "))
+			}
+
+			if len(descFact.ProtoClusters) == 0 {
+				t.Fatalf("real protobuf@%s/types/descriptorpb ProtoClusters = empty, want >= 1", pbVer)
+			}
+			for _, rootPkgPath := range []string{
+				"google.golang.org/protobuf/reflect/protodesc",
+				"google.golang.org/protobuf/types/descriptorpb",
+			} {
+				st := dynstate.Compose(meta, facts, rootPkgPath, nil, true, false)
+				discharged := strings.Split(st.AttestationDischarges, ",")
+				for _, wantKey := range []string{
+					"google.golang.org/protobuf/types/descriptorpb.file_google_protobuf_descriptor_proto_enumTypes",
+					"google.golang.org/protobuf/types/descriptorpb.file_google_protobuf_descriptor_proto_goTypes",
+					"google.golang.org/protobuf/types/descriptorpb.file_google_protobuf_descriptor_proto_msgTypes",
+				} {
+					if !slices.Contains(discharged, wantKey) {
+						t.Fatalf("real protobuf@%s (%s) AttestationDischarges = %q, missing %s", pbVer, rootPkgPath, st.AttestationDischarges, wantKey)
+					}
+				}
+				for _, c := range st.RootCulprits {
+					if c.PkgPath == "google.golang.org/protobuf/types/descriptorpb" ||
+						c.PkgPath == "google.golang.org/protobuf/runtime/protoimpl" {
+						t.Fatalf("real protobuf@%s (%s) unexpectedly retained cluster/protoimpl culprit %+v", pbVer, rootPkgPath, c)
+					}
+				}
+			}
+
+			// Mutating either protoiface.Methods or filedesc.File in a caller package must revoke descriptorpb discharges!
+			for _, poisonRef := range []dynstate.TypeRef{methodsGuardRef, fileGuardRef} {
+				metaPoison := append([]dynstate.GraphPackage{{
+					ImportPath: "example.com/caller",
+					PkgPath:    "example.com/caller",
+					Imports:    []string{"google.golang.org/protobuf/reflect/protodesc"},
+					Class:      dynstate.MutableLocalPackage,
+				}}, meta...)
+				factsPoison := make(map[string][]dynstate.Fact, len(facts)+1)
+				for k, v := range facts {
+					factsPoison[k] = v
+				}
+				factsPoison["example.com/caller"] = []dynstate.Fact{{MutatedStructTypes: []dynstate.TypeRef{poisonRef}}}
+				stPoison := dynstate.Compose(metaPoison, factsPoison, "example.com/caller", nil, true, false)
+				if slices.Contains(strings.Split(stPoison.AttestationDischarges, ","), "google.golang.org/protobuf/types/descriptorpb.file_google_protobuf_descriptor_proto_msgTypes") {
+					t.Fatalf("real protobuf@%s GuardTypes mutation on %+v failed to revoke msgTypes AttestationDischarges: %q", pbVer, poisonRef, stPoison.AttestationDischarges)
+				}
+			}
+		})
+	}
+
+	// 5. Real google.golang.org/grpc across multiple upstream versions
+	for _, grpcVer := range []string{"v1.80.0", "v1.82.1", "v1.83.2"} {
+		t.Run("grpc@"+grpcVer, func(t *testing.T) {
+			grpcPkg := loadCachedBatch(t, "google.golang.org/grpc@"+grpcVer, ".")["google.golang.org/grpc"]
+			grpcFact := dynstate.FactOf(true, grpcPkg, false)
+			for _, mut := range grpcFact.MutatedStructTypes {
+				if mut.Pkg == "google.golang.org/grpc" &&
+					(mut.Name == "ServiceDesc" || mut.Name == "MethodDesc" || mut.Name == "StreamDesc") {
+					t.Fatalf("real grpc@%s unexpectedly marked %+v in MutatedStructTypes", grpcVer, mut)
+				}
+			}
+		})
 	}
 }
 
@@ -2421,7 +3419,18 @@ func TestAuditedPropertyHarnessVersion(t *testing.T) {
 // (REQ-closure-observability-property-harness).
 func TestPropertyHarnessAudit(t *testing.T) {
 	dir := t.TempDir()
-	for _, sub := range []string{"rapid", "prop", "prop/propinit", "prop/propmain", "prop/propquiet"} {
+	for _, sub := range []string{
+		"rapid",
+		"prop",
+		"prop/propinit",
+		"prop/propmain",
+		"prop/propquiet",
+		"prop/propexampleinit",
+		"prop/propexamplemain",
+		"prop/propenum",
+		"prop/propenummut",
+		"prop/propinitbox",
+	} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -2432,7 +3441,11 @@ func TestPropertyHarnessAudit(t *testing.T) {
 import (
 	"flag"
 	"fmt"
+	"hash/maphash"
+	"io"
 	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -2457,33 +3470,68 @@ type TB interface {
 }
 
 type T struct {
-	tb    TB
-	state uint64
-	fail  bool
+	tb         TB
+	customHook interface{ RapidInternalNeverInvoked() }
+	state      uint64
+	fail       bool
 }
 
+func (t *T) Helper()                           { t.tb.Helper() }
+func (t *T) Name() string                      { return t.tb.Name() }
 func (t *T) Logf(format string, args ...any)   { t.tb.Logf(format, args...) }
 func (t *T) Errorf(format string, args ...any) { t.fail = true }
 
-type Generator struct {
-	gen func(*T) int
+type exampleTB struct{}
+
+func (*exampleTB) Helper()                         {}
+func (*exampleTB) Logf(format string, args ...any) {}
+func (*exampleTB) Errorf(format string, args ...any) {}
+func (*exampleTB) Name() string                    { return "example" }
+
+func baseSeed() uint64 {
+	if flags.seed != 0 {
+		return flags.seed
+	}
+	var h maphash.Hash
+	h.SetSeed(maphash.MakeSeed())
+	return h.Sum64()
 }
 
-func (g *Generator) Draw(t *T, label string) int {
+type Generator[V any] struct {
+	gen func(*T) V
+}
+
+func (g *Generator[V]) Draw(t *T, label string) V {
 	t.state = t.state*6364136223846793005 + 1442695040888963407
-	return g.gen(t)
+	v := g.gen(t)
+	if t.fail && t.tb != nil {
+		_ = fmt.Sprintf("%s=%v/%#v", label, v, v)
+	}
+	return v
 }
 
-func Int() *Generator {
-	return &Generator{gen: func(t *T) int { return int(t.state >> 33) }}
+func (g *Generator[V]) Example(seed ...int) V {
+	s := baseSeed()
+	if len(seed) > 0 {
+		s = uint64(seed[0])
+	}
+	return g.Draw(&T{tb: &exampleTB{}, state: s}, "example")
 }
 
-func Custom(fn func(*T) int) *Generator {
-	return &Generator{gen: fn}
+func Int() *Generator[int] {
+	return &Generator[int]{gen: func(t *T) int { return int(t.state >> 33) }}
 }
 
-func Deriv(g *Generator) *Generator {
-	return &Generator{gen: g.gen}
+func Just[V any](v V) *Generator[V] {
+	return &Generator[V]{gen: func(t *T) V { return v }}
+}
+
+func Custom[V any](fn func(*T) V) *Generator[V] {
+	return &Generator[V]{gen: fn}
+}
+
+func Deriv[V any](g *Generator[V]) *Generator[V] {
+	return &Generator[V]{gen: g.gen}
 }
 
 // The real v1.3.0 boundary: a concrete *testing.T entry, the TB
@@ -2508,6 +3556,23 @@ func reportFailure(tb TB, seed uint64) {
 	tb.Errorf("[rapid] failed (seed=%d)", seed)
 }
 
+func saveFailFile(filename string, data []byte) error {
+	dir := filepath.Dir(filename)
+	if err := os.MkdirAll(dir, 0o775); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, ".rapid-fail-*")
+	if err != nil {
+		return err
+	}
+	_, _ = f.Write(data)
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return err
+	}
+	return os.Rename(f.Name(), filename)
+}
+
 func checkTB(tb TB, prop func(*T)) {
 	start := time.Now()
 	t := &T{tb: tb, state: flags.seed}
@@ -2516,18 +3581,75 @@ func checkTB(tb TB, prop func(*T)) {
 	}
 	if t.fail {
 		if flags.failfile != "" {
-			_ = os.WriteFile(flags.failfile, []byte(fmt.Sprintf("seed=%d", t.state)), 0o644)
+			_ = saveFailFile(flags.failfile, []byte(fmt.Sprintf("seed=%d", t.state)))
 		}
 		failReporter(tb, t.state)
 		return
 	}
+	_ = io.EOF
 	tb.Logf("[rapid] OK, passed %v tests (%v)", flags.checks, time.Since(start))
 }
 
 func checkOnce(t *T, prop func(*T)) {
 	prop(t)
 }
+
+type StateMachine interface {
+	Check(*T)
+}
+
+func StateMachineActions(sm StateMachine) map[string]func(*T) {
+	v := reflect.ValueOf(sm)
+	typ := v.Type()
+	actions := make(map[string]func(*T))
+	for i := 0; i < typ.NumMethod(); i++ {
+		name := typ.Method(i).Name
+		if name == "Check" {
+			continue
+		}
+		if fn, ok := v.Method(i).Interface().(func(*T)); ok {
+			actions[name] = fn
+		} else if fnTB, ok := v.Method(i).Interface().(func(TB)); ok {
+			actions[name] = func(t *T) { fnTB(t) }
+		}
+	}
+	return actions
+}
+
+func StateMachineSetActions(sm StateMachine) map[string]func(*T) {
+	v := reflect.ValueOf(sm)
+	typ := v.Type()
+	actions := make(map[string]func(*T))
+	mv := reflect.ValueOf(actions)
+	for i := 0; i < typ.NumMethod(); i++ {
+		name := typ.Method(i).Name
+		if name == "Check" {
+			continue
+		}
+		m := v.Method(i)
+		if m.Type().AssignableTo(mv.Type().Elem()) {
+			mv.SetMapIndex(reflect.ValueOf(name), m)
+		}
+	}
+	return actions
+}
+
+func (t *T) Repeat(actions map[string]func(*T)) {
+	for _, fn := range actions {
+		fn(t)
+	}
+}
 `)
+	if rapidPkgs, rErr := packages.Load(&packages.Config{
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
+			packages.NeedImports | packages.NeedDeps | packages.NeedTypes |
+			packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedModule,
+		Dir: filepath.Join(dir, "rapid"),
+	}, "."); rErr != nil || len(rapidPkgs) != 1 {
+		t.Fatalf("load rapid fixture: err=%v pkgs=%v", rErr, rapidPkgs)
+	} else if ok, reason := verifyPropertyHarnessPackageWithReason(true, rapidPkgs[0]); !ok {
+		t.Fatalf("verifyPropertyHarnessPackage(rapid fixture) = false (%s), want true", reason)
+	}
 	writeFile(t, dir, "prop/go.mod", `module example.com/prop
 
 go 1.26
@@ -2546,12 +3668,14 @@ func Add(a, b int) int { return a + b }
 // the boundary gate exactly as it would in subject flow.
 var derived = rapid.Deriv(rapid.Int())
 
-func Derived() *rapid.Generator { return derived }
+func Derived() *rapid.Generator[int] { return derived }
 `)
 	writeFile(t, dir, "prop/prop_test.go", `package prop
 
 import (
+	"os"
 	"testing"
+	"time"
 
 	"pgregory.net/rapid"
 )
@@ -2610,7 +3734,7 @@ func TestCustomOpen(t *testing.T) {
 // A generator loaded from shared mutable state is a sibling's plant:
 // the receiver refuses at the boundary - harness-owned TYPES confer
 // no admission, only handle parameters and gated call results do.
-var sharedGen *rapid.Generator
+var sharedGen *rapid.Generator[int]
 
 func TestDrawShared(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
@@ -2622,9 +3746,9 @@ func TestDrawShared(t *testing.T) {
 
 // A generator laundered through a helper parameter refuses the same
 // way: the parameter crossing judges the caller's argument.
-func drawDirect(rt *rapid.T, g *rapid.Generator) int { return g.Draw(rt, "d") }
+func drawDirect(rt *rapid.T, g *rapid.Generator[int]) int { return g.Draw(rt, "d") }
 
-var sharedGen2 *rapid.Generator
+var sharedGen2 *rapid.Generator[int]
 
 func TestParamLaunder(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
@@ -2646,6 +3770,158 @@ func TestDynamicDriver(t *testing.T) {
 		f = altCheck
 	}
 	f(t, func(rt *rapid.T) {})
+}
+
+func TestExampleSeeded(t *testing.T) {
+	if rapid.Int().Example(42) < -1<<60 {
+		t.Fatal("bad")
+	}
+}
+
+func TestExampleUnseeded(t *testing.T) {
+	if rapid.Int().Example() < -1<<60 {
+		t.Fatal("bad")
+	}
+}
+
+var dynamicSeeds []int
+
+func TestExampleDynamicSeedSlice(t *testing.T) {
+	if rapid.Int().Example(dynamicSeeds...) < -1<<60 {
+		t.Fatal("bad")
+	}
+}
+
+func altExample(seed ...int) int { return 0 }
+
+func TestExampleValueTaken(t *testing.T) {
+	fn := rapid.Int().Example
+	if flip {
+		fn = altExample
+	}
+	if fn(42) < -1<<60 {
+		t.Fatal("bad")
+	}
+}
+
+func TestExampleBoundSeeded(t *testing.T) {
+	fn := rapid.Int().Example
+	if fn(42) < -1<<60 {
+		t.Fatal("bad")
+	}
+}
+
+func TestExampleBoundUnseeded(t *testing.T) {
+	fn := rapid.Int().Example
+	if fn() < -1<<60 {
+		t.Fatal("bad")
+	}
+}
+
+func TestDrawBoundShared(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		draw := sharedGen.Draw
+		if draw(rt, "s") < 0 {
+			rt.Errorf("bad")
+		}
+	})
+}
+
+func TestSmuggleHarnessValue(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		g := rapid.Just(rapid.Int().Example)
+		if g == nil {
+			rt.Errorf("nil")
+		}
+	})
+}
+
+func PlainExampleUnseeded() int {
+	return rapid.Int().Example()
+}
+
+type cleanMachine struct{ sum int }
+
+func (m *cleanMachine) AddOne(rt *rapid.T) { m.sum = Add(m.sum, 1) }
+func (m *cleanMachine) Check(rt *rapid.T) {
+	if m.sum < 0 {
+		rt.Errorf("negative")
+	}
+}
+
+func TestStateMachineClean(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		m := &cleanMachine{}
+		rt.Repeat(rapid.StateMachineActions(m))
+		m.Check(rt)
+	})
+}
+
+func TestStateMachineSubtest(t *testing.T) {
+	t.Run("sub", func(t *testing.T) {
+		rapid.Check(t, func(rt *rapid.T) {
+			m := &cleanMachine{}
+			rt.Repeat(rapid.StateMachineActions(m))
+			m.Check(rt)
+		})
+	})
+}
+
+type impureMachine struct{}
+
+func (m *impureMachine) LeakClock(rt *rapid.T) { _ = time.Now() }
+func (m *impureMachine) Check(rt *rapid.T)     {}
+
+func TestStateMachineImpureClock(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		m := &impureMachine{}
+		rt.Repeat(rapid.StateMachineActions(m))
+		m.Check(rt)
+	})
+}
+
+type impureTBMachine struct{}
+
+func (m *impureTBMachine) LeakTB(tb rapid.TB) { _ = time.Now() }
+func (m *impureTBMachine) Check(rt *rapid.T)  {}
+
+func TestStateMachineImpureTB(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		m := &impureTBMachine{}
+		rt.Repeat(rapid.StateMachineActions(m))
+		m.Check(rt)
+	})
+}
+
+type envMachine struct{}
+
+func (m *envMachine) ReadEnv(rt *rapid.T) { _ = os.Getenv("LOGGED_VAR") }
+func (m *envMachine) Check(rt *rapid.T)   {}
+
+func TestStateMachineEnvNotEffectFree(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		m := &envMachine{}
+		rt.Repeat(rapid.StateMachineActions(m))
+		m.Check(rt)
+	})
+}
+
+func TestStateMachineSetMapSubtest(t *testing.T) {
+	t.Run("sub", func(t *testing.T) {
+		rapid.Check(t, func(rt *rapid.T) {
+			m := &cleanMachine{}
+			rt.Repeat(rapid.StateMachineSetActions(m))
+			m.Check(rt)
+		})
+	})
+}
+
+func TestStateMachineSetMapImpure(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		m := &impureMachine{}
+		rt.Repeat(rapid.StateMachineSetActions(m))
+		m.Check(rt)
+	})
 }
 `)
 	writeFile(t, dir, "prop/propquiet/propquiet.go", `package propquiet
@@ -2730,6 +4006,378 @@ func TestProd(t *testing.T) {
 	}
 }
 `)
+	writeFile(t, dir, "prop/propexampleinit/propexampleinit.go", `package propexampleinit
+
+import "pgregory.net/rapid"
+
+var boot = rapid.Int().Example()
+
+func Prod() int { return boot + 1 }
+`)
+	writeFile(t, dir, "prop/propexampleinit/propexampleinit_test.go", `package propexampleinit
+
+import "testing"
+
+func TestProd(t *testing.T) {
+	if Prod() == -999999999 {
+		t.Fatal()
+	}
+}
+`)
+	writeFile(t, dir, "prop/propexamplemain/propexamplemain.go", `package propexamplemain
+
+func Prod() int { return 7 }
+`)
+	writeFile(t, dir, "prop/propexamplemain/propexamplemain_test.go", `package propexamplemain
+
+import (
+	"os"
+	"testing"
+
+	"pgregory.net/rapid"
+)
+
+func TestMain(m *testing.M) {
+	_ = rapid.Int().Example()
+	os.Exit(m.Run())
+}
+
+func TestProd(t *testing.T) {
+	if Prod() == 0 {
+		t.Fatal()
+	}
+}
+`)
+	writeFile(t, dir, "prop/propenum/propenum.go", `package propenum
+
+func Ok() int { return 1 }
+`)
+	writeFile(t, dir, "prop/propenum/propenum_test.go", `package propenum
+
+import (
+	"fmt"
+	"os"
+	"testing"
+
+	"pgregory.net/rapid"
+)
+
+const deadEnumMode = os.ModeDir
+
+type cleanTag struct{}
+
+func (cleanTag) String() string { return "tag" }
+
+type enumDirtySM struct{}
+
+func (*enumDirtySM) Leak(rt *rapid.T) { _, _ = os.Hostname() }
+func (*enumDirtySM) Check(rt *rapid.T) {}
+
+func RunStateMachine(t *testing.T, tag fmt.Stringer) {
+	_ = tag
+	rapid.Check(t, func(rt *rapid.T) {
+		m := &enumDirtySM{}
+		rt.Repeat(rapid.StateMachineActions(m))
+		m.Check(rt)
+	})
+}
+
+func TestCallerStateMachine(t *testing.T) {
+	RunStateMachine(t, cleanTag{})
+}
+
+type enumCleanSM struct{ n int }
+
+func (m *enumCleanSM) Step(rt *rapid.T) { m.n++ }
+func (m *enumCleanSM) Check(rt *rapid.T) {
+	if m.n < 0 {
+		rt.Errorf("neg")
+	}
+}
+
+func RunCleanStateMachine(t *testing.T, tag fmt.Stringer) {
+	_ = tag
+	rapid.Check(t, func(rt *rapid.T) {
+		m := &enumCleanSM{}
+		rt.Repeat(rapid.StateMachineActions(m))
+		m.Check(rt)
+	})
+}
+
+func TestCallerCleanStateMachine(t *testing.T) {
+	RunCleanStateMachine(t, cleanTag{})
+}
+
+func TestCallerCleanWithUnusedDeadTag(t *testing.T) {
+	RunCleanStateMachine(t, enumDeadLinkStringer{})
+}
+
+type enumHostStringer struct{}
+
+func (enumHostStringer) String() string {
+	h, _ := os.Hostname()
+	return h
+}
+
+func RunStringerProp(t *testing.T, s fmt.Stringer) {
+	rapid.Check(t, func(rt *rapid.T) {
+		_ = rapid.Just(s).Draw(rt, "s")
+	})
+}
+
+func TestCallerStringerProp(t *testing.T) {
+	RunStringerProp(t, enumHostStringer{})
+}
+
+type enumDeadLinkStringer struct{}
+
+func (enumDeadLinkStringer) String() string {
+	if deadEnumMode == 0 {
+		return ""
+	}
+	return "ok"
+}
+
+func RunDeadAstStringerProp(t *testing.T, s fmt.Stringer) {
+	rapid.Check(t, func(rt *rapid.T) {
+		_ = rapid.Just(s).Draw(rt, "s")
+	})
+}
+
+func TestCallerDeadAstStringerProp(t *testing.T) {
+	RunDeadAstStringerProp(t, enumDeadLinkStringer{})
+}
+`)
+	writeFile(t, dir, "prop/propenummut/propenummut.go", `package propenummut
+
+func Ok() int { return 1 }
+`)
+	writeFile(t, dir, "prop/propenummut/propenummut_test.go", `package propenummut
+
+import (
+	"fmt"
+	"testing"
+
+	"pgregory.net/rapid"
+)
+
+var enumMutCounter int
+
+type mutCleanTag struct{}
+
+func (mutCleanTag) String() string { return "clean" }
+
+type mutSM struct{}
+
+func (*mutSM) Bump(rt *rapid.T) { enumMutCounter++ }
+func (*mutSM) Check(rt *rapid.T) {}
+
+func RunMutStateMachine(t *testing.T, tag fmt.Stringer) {
+	_ = tag
+	rapid.Check(t, func(rt *rapid.T) {
+		m := &mutSM{}
+		rt.Repeat(rapid.StateMachineActions(m))
+		m.Check(rt)
+	})
+}
+
+func TestMutSMCaller(t *testing.T) {
+	RunMutStateMachine(t, mutCleanTag{})
+}
+
+type mutStringer struct{}
+
+func (*mutStringer) String() string {
+	enumMutCounter++
+	return "m"
+}
+
+func RunMutStringer(t *testing.T, s fmt.Stringer) {
+	rapid.Check(t, func(rt *rapid.T) {
+		_ = rapid.Just(s).Draw(rt, "s")
+	})
+}
+
+func TestMutStringerCaller(t *testing.T) {
+	RunMutStringer(t, &mutStringer{})
+}
+`)
+	writeFile(t, dir, "prop/propinitbox/propinitbox.go", `package propinitbox
+
+import (
+	"os"
+
+	"pgregory.net/rapid"
+)
+
+type customIface interface{ Tag() }
+
+type initHostStringer struct{}
+
+func (initHostStringer) Tag() {}
+func (initHostStringer) GoString() string {
+	return os.Getenv("INIT_BOX_ENV")
+}
+func (initHostStringer) Error() string {
+	return os.Getenv("INIT_BOX_ENV")
+}
+
+var sharedInitMut int
+
+type initMutStringer struct{}
+
+func (*initMutStringer) Tag() {}
+func (*initMutStringer) GoString() string {
+	sharedInitMut++
+	return "m"
+}
+
+type carrierBox struct {
+	v customIface
+}
+
+var (
+	initLiveStringer customIface
+	initMutBox       customIface = &initMutStringer{}
+)
+
+func initHelperBox() {
+	initLiveStringer = initHostStringer{}
+}
+
+func init() {
+	initHelperBox()
+}
+
+func UseInitBoxedStringer() int {
+	_ = rapid.Custom(func(rt *rapid.T) customIface { return initLiveStringer }).Example(42)
+	return 0
+}
+
+func UseInitMutBoxed() int {
+	_ = rapid.Custom(func(rt *rapid.T) customIface { return initMutBox }).Example(42)
+	return 0
+}
+
+func UnrelatedRapidClean() int {
+	return rapid.Int().Example(42)
+}
+`)
+	writeFile(t, dir, "prop/propinitdead/propinitdead.go", `package propinitdead
+
+import (
+	"os"
+
+	"pgregory.net/rapid"
+)
+
+func deadEnvHelper() string {
+	return os.Getenv("DEAD_INIT_ENV")
+}
+
+type deadCustomIface interface{ Tag() }
+
+type initDeadLinkStringer struct{}
+
+func (initDeadLinkStringer) Tag() {
+	if false {
+		_ = deadEnvHelper()
+	}
+}
+
+var initDeadStringer deadCustomIface = initDeadLinkStringer{}
+
+func UseInitBoxedDeadAst() int {
+	_ = rapid.Custom(func(rt *rapid.T) deadCustomIface { return initDeadStringer }).Example(42)
+	return 0
+}
+
+func UnrelatedRapidDeadClean() int {
+	return rapid.Int().Example(42)
+}
+`)
+	writeFile(t, dir, "prop/propinitcall/propinitcall.go", `package propinitcall
+
+import (
+	"os"
+
+	"pgregory.net/rapid"
+)
+
+type initCallIface interface{ Tag() }
+
+type initCallStringer struct{}
+
+func (initCallStringer) Tag() {}
+func (initCallStringer) GoString() string {
+	return os.Getenv("INIT_CALL_ENV")
+}
+
+var initCallLive initCallIface = initCallStringer{}
+
+func init() {
+	_ = rapid.Custom(func(rt *rapid.T) initCallIface { return initCallLive }).Example(42)
+}
+
+func StartupCallsHarnessFormat() int {
+	return 0
+}
+`)
+	writeFile(t, dir, "prop/propenumdead/propenumdead_test.go", `package propenumdead
+
+import (
+	"os"
+	"testing"
+
+	"pgregory.net/rapid"
+)
+
+func enumDeadEnvHelper() string {
+	return os.Getenv("ENUM_DEAD_AST_ENV")
+}
+
+type enumDeadIface interface {
+	Tag()
+	Clean()
+}
+
+type enumDeadImpl struct{}
+
+func (enumDeadImpl) Clean() {}
+
+func (enumDeadImpl) Tag() {
+	if false {
+		_ = enumDeadEnvHelper()
+	}
+}
+
+func (enumDeadImpl) RapidInternalNeverInvoked() {
+	if false {
+		_ = enumDeadEnvHelper()
+	}
+}
+
+func RunEnumDeadAstTag(t *testing.T, v enumDeadIface) {
+	rapid.Check(t, func(rt *rapid.T) {
+		_ = rapid.Just(v).Draw(rt, "v")
+	})
+}
+
+func TestCallerEnumDeadAstTag(t *testing.T) {
+	RunEnumDeadAstTag(t, enumDeadImpl{})
+}
+
+func RunEnumUnrelatedClean(t *testing.T, v enumDeadIface) {
+	v.Clean()
+	rapid.Check(t, func(rt *rapid.T) {
+		_ = rapid.Int().Draw(rt, "n")
+	})
+}
+
+func TestCallerEnumUnrelatedClean(t *testing.T) {
+	RunEnumUnrelatedClean(t, enumDeadImpl{})
+}
+`)
 	h, err := newAt(filepath.Join(dir, "prop"))
 	if err != nil {
 		t.Fatal(err)
@@ -2743,8 +4391,42 @@ func TestProd(t *testing.T) {
 		{Package: "example.com/prop", Symbol: "TestDrawShared"},
 		{Package: "example.com/prop", Symbol: "TestParamLaunder"},
 		{Package: "example.com/prop", Symbol: "TestDynamicDriver"},
+		{Package: "example.com/prop", Symbol: "TestExampleSeeded"},
+		{Package: "example.com/prop", Symbol: "TestExampleUnseeded"},
+		{Package: "example.com/prop", Symbol: "TestExampleDynamicSeedSlice"},
+		{Package: "example.com/prop", Symbol: "TestExampleValueTaken"},
+		{Package: "example.com/prop", Symbol: "TestExampleBoundSeeded"},
+		{Package: "example.com/prop", Symbol: "TestExampleBoundUnseeded"},
+		{Package: "example.com/prop", Symbol: "TestDrawBoundShared"},
+		{Package: "example.com/prop", Symbol: "TestSmuggleHarnessValue"},
+		{Package: "example.com/prop", Symbol: "PlainExampleUnseeded"},
+		{Package: "example.com/prop", Symbol: "TestStateMachineClean"},
+		{Package: "example.com/prop", Symbol: "TestStateMachineSubtest"},
+		{Package: "example.com/prop", Symbol: "TestStateMachineImpureClock"},
+		{Package: "example.com/prop", Symbol: "TestStateMachineImpureTB"},
+		{Package: "example.com/prop", Symbol: "TestStateMachineEnvNotEffectFree"},
+		{Package: "example.com/prop", Symbol: "TestStateMachineSetMapSubtest"},
+		{Package: "example.com/prop", Symbol: "TestStateMachineSetMapImpure"},
 		{Package: "example.com/prop/propinit", Symbol: "TestProd"},
 		{Package: "example.com/prop/propmain", Symbol: "TestProd"},
+		{Package: "example.com/prop/propexampleinit", Symbol: "TestProd"},
+		{Package: "example.com/prop/propexamplemain", Symbol: "TestProd"},
+		{Package: "example.com/prop/propenum", Symbol: "RunStateMachine"},
+		{Package: "example.com/prop/propenum", Symbol: "TestCallerStateMachine"},
+		{Package: "example.com/prop/propenum", Symbol: "RunCleanStateMachine"},
+		{Package: "example.com/prop/propenum", Symbol: "TestCallerCleanStateMachine"},
+		{Package: "example.com/prop/propenum", Symbol: "TestCallerCleanWithUnusedDeadTag"},
+		{Package: "example.com/prop/propenum", Symbol: "RunStringerProp"},
+		{Package: "example.com/prop/propenum", Symbol: "TestCallerStringerProp"},
+		{Package: "example.com/prop/propenum", Symbol: "RunDeadAstStringerProp"},
+		{Package: "example.com/prop/propenum", Symbol: "TestCallerDeadAstStringerProp"},
+		{Package: "example.com/prop/propenumdead", Symbol: "RunEnumDeadAstTag"},
+		{Package: "example.com/prop/propenumdead", Symbol: "RunEnumUnrelatedClean"},
+		{Package: "example.com/prop/propinitbox", Symbol: "UseInitBoxedStringer"},
+		{Package: "example.com/prop/propinitbox", Symbol: "UnrelatedRapidClean"},
+		{Package: "example.com/prop/propinitdead", Symbol: "UseInitBoxedDeadAst"},
+		{Package: "example.com/prop/propinitdead", Symbol: "UnrelatedRapidDeadClean"},
+		{Package: "example.com/prop/propinitcall", Symbol: "StartupCallsHarnessFormat"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2752,24 +4434,131 @@ func TestProd(t *testing.T) {
 	for _, tc := range []struct {
 		pkg, symbol string
 		observable  bool
+		effectFree  bool
 		reason      string
 	}{
-		{pkg: "example.com/prop", symbol: "TestCheckLiteral", observable: true},
+		{pkg: "example.com/prop", symbol: "TestCheckLiteral", observable: true, effectFree: true},
 		{pkg: "example.com/prop", symbol: "TestCheckOpen", reason: "property-harness argument is not locally closed"},
-		{pkg: "example.com/prop", symbol: "TestMakeCheck", observable: true},
-		{pkg: "example.com/prop", symbol: "TestMakeCheckComputed", observable: true},
+		{pkg: "example.com/prop", symbol: "TestMakeCheck", observable: true, effectFree: true},
+		{pkg: "example.com/prop", symbol: "TestMakeCheckComputed", observable: true, effectFree: true},
 		{pkg: "example.com/prop", symbol: "TestCustomOpen", reason: "property-harness argument is not locally closed"},
 		{pkg: "example.com/prop", symbol: "TestDrawShared", reason: "property-harness argument is not locally closed"},
 		{pkg: "example.com/prop", symbol: "TestParamLaunder", reason: "property-harness argument is not locally closed"},
 		{pkg: "example.com/prop", symbol: "TestDynamicDriver", reason: "property harness reached as a dynamic target"},
+		{pkg: "example.com/prop", symbol: "TestExampleSeeded", observable: true, effectFree: true},
+		{pkg: "example.com/prop", symbol: "TestExampleUnseeded", reason: "Generator.Example without an explicit seed (entropy)"},
+		{pkg: "example.com/prop", symbol: "TestExampleDynamicSeedSlice", reason: "Generator.Example without an explicit seed (entropy)"},
+		{pkg: "example.com/prop", symbol: "TestExampleValueTaken", reason: "property harness reached as a dynamic target"},
+		{pkg: "example.com/prop", symbol: "TestExampleBoundSeeded", observable: true, effectFree: true},
+		{pkg: "example.com/prop", symbol: "TestExampleBoundUnseeded", reason: "Generator.Example without an explicit seed (entropy)"},
+		{pkg: "example.com/prop", symbol: "TestDrawBoundShared", reason: "property-harness argument is not locally closed"},
+		{pkg: "example.com/prop", symbol: "TestSmuggleHarnessValue", reason: "property-harness argument is not locally closed"},
+		{pkg: "example.com/prop", symbol: "PlainExampleUnseeded", reason: "Generator.Example without an explicit seed (entropy)"},
+		{pkg: "example.com/prop", symbol: "TestStateMachineClean", observable: true, effectFree: true},
+		{pkg: "example.com/prop", symbol: "TestStateMachineSubtest", observable: true, effectFree: true},
+		{pkg: "example.com/prop", symbol: "TestStateMachineImpureClock", reason: "time.Now"},
+		{pkg: "example.com/prop", symbol: "TestStateMachineImpureTB", reason: "time.Now"},
+		{pkg: "example.com/prop", symbol: "TestStateMachineEnvNotEffectFree", observable: true, effectFree: false},
+		{pkg: "example.com/prop", symbol: "TestStateMachineSetMapSubtest", observable: true, effectFree: true},
+		{pkg: "example.com/prop", symbol: "TestStateMachineSetMapImpure", reason: "time.Now"},
 		{pkg: "example.com/prop/propinit", symbol: "TestProd", reason: "property-harness argument is not locally closed in startup flow"},
 		{pkg: "example.com/prop/propmain", symbol: "TestProd", reason: "property-harness argument is not locally closed"},
+		{pkg: "example.com/prop/propexampleinit", symbol: "TestProd", reason: "Generator.Example without an explicit seed (entropy)"},
+		{pkg: "example.com/prop/propexamplemain", symbol: "TestProd", reason: "Generator.Example without an explicit seed (entropy)"},
+		{pkg: "example.com/prop/propenum", symbol: "RunStateMachine", reason: "os.Hostname"},
+		{pkg: "example.com/prop/propenum", symbol: "TestCallerStateMachine", reason: "os.Hostname"},
+		{pkg: "example.com/prop/propenum", symbol: "RunCleanStateMachine", observable: true, effectFree: true},
+		{pkg: "example.com/prop/propenum", symbol: "TestCallerCleanStateMachine", observable: true, effectFree: true},
+		{pkg: "example.com/prop/propenum", symbol: "TestCallerCleanWithUnusedDeadTag", reason: "os.ModeDir"},
+		{pkg: "example.com/prop/propenum", symbol: "RunStringerProp", reason: "os.Hostname"},
+		{pkg: "example.com/prop/propenum", symbol: "TestCallerStringerProp", reason: "os.Hostname"},
+		{pkg: "example.com/prop/propenum", symbol: "RunDeadAstStringerProp", reason: "os.ModeDir"},
+		{pkg: "example.com/prop/propenum", symbol: "TestCallerDeadAstStringerProp", reason: "os.ModeDir"},
+		{pkg: "example.com/prop/propenumdead", symbol: "RunEnumDeadAstTag", observable: true, effectFree: false},
+		{pkg: "example.com/prop/propenumdead", symbol: "RunEnumUnrelatedClean", observable: true, effectFree: true},
+		{pkg: "example.com/prop/propinitbox", symbol: "UseInitBoxedStringer", observable: true, effectFree: false},
+		{pkg: "example.com/prop/propinitbox", symbol: "UnrelatedRapidClean", observable: true, effectFree: true},
+		{pkg: "example.com/prop/propinitdead", symbol: "UseInitBoxedDeadAst", observable: true, effectFree: false},
+		{pkg: "example.com/prop/propinitdead", symbol: "UnrelatedRapidDeadClean", observable: true, effectFree: true},
+		{pkg: "example.com/prop/propinitcall", symbol: "StartupCallsHarnessFormat", reason: "startup effect:"},
 	} {
 		got := proofs[Subject{Package: tc.pkg, Symbol: tc.symbol}]
-		if got.Observable != tc.observable || tc.reason != "" && !strings.Contains(got.Reason, tc.reason) {
-			t.Fatalf("%s = %+v, want observable=%v reason containing %q", tc.symbol, got, tc.observable, tc.reason)
+		if got.Observable != tc.observable || got.EffectFree != tc.effectFree || tc.reason != "" && !strings.Contains(got.Reason, tc.reason) {
+			t.Fatalf("%s/%s = %+v, want observable=%v effectFree=%v reason containing %q", tc.pkg, tc.symbol, got, tc.observable, tc.effectFree, tc.reason)
 		}
 	}
+
+	// Verify order-independent non-contamination of init-boxed interface globals
+	// when clean unrelated subjects run before init-boxed subjects on a fresh Hasher.
+	hRev, err := newAt(filepath.Join(dir, "prop"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	revProofs, err := hRev.ComputeObservabilityBatch([]Subject{
+		{Package: "example.com/prop/propinitdead", Symbol: "UnrelatedRapidDeadClean"},
+		{Package: "example.com/prop/propinitdead", Symbol: "UseInitBoxedDeadAst"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := revProofs[Subject{Package: "example.com/prop/propinitdead", Symbol: "UnrelatedRapidDeadClean"}]; !got.Observable || !got.EffectFree {
+		t.Fatalf("reversed UnrelatedRapidDeadClean = %+v, want observable=true effectFree=true", got)
+	}
+	if got := revProofs[Subject{Package: "example.com/prop/propinitdead", Symbol: "UseInitBoxedDeadAst"}]; !got.Observable || got.EffectFree {
+		t.Fatalf("reversed UseInitBoxedDeadAst = %+v, want observable=true effectFree=false", got)
+	}
+
+	// Verify ComputeRootedFunctions attributes enumerated StateMachine action methods,
+	// enumerated Plane-1 fmt.Stringer methods, and init-boxed Plane-1 fmt.GoStringer methods
+	// without dropping bound wrappers or polluting unrelated clean rapid subjects.
+	rooted, err := h.ComputeRootedFunctions(context.Background(), []Subject{
+		{Package: "example.com/prop/propenum", Symbol: "RunCleanStateMachine"},
+		{Package: "example.com/prop/propenummut", Symbol: "RunMutStateMachine"},
+		{Package: "example.com/prop/propenummut", Symbol: "RunMutStringer"},
+		{Package: "example.com/prop/propinitbox", Symbol: "UseInitMutBoxed"},
+		{Package: "example.com/prop/propinitbox", Symbol: "UnrelatedRapidClean"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rc := range []struct {
+		subj       Subject
+		wantFn     string
+		wantAbsent string
+	}{
+		{
+			subj:   Subject{Package: "example.com/prop/propenum", Symbol: "RunCleanStateMachine"},
+			wantFn: "example.com/prop/propenum\x00enumCleanSM.Step",
+		},
+		{
+			subj:   Subject{Package: "example.com/prop/propenummut", Symbol: "RunMutStateMachine"},
+			wantFn: "example.com/prop/propenummut\x00mutSM.Bump",
+		},
+		{
+			subj:   Subject{Package: "example.com/prop/propenummut", Symbol: "RunMutStringer"},
+			wantFn: "example.com/prop/propenummut\x00mutStringer.String",
+		},
+		{
+			subj:   Subject{Package: "example.com/prop/propinitbox", Symbol: "UseInitMutBoxed"},
+			wantFn: "example.com/prop/propinitbox\x00initMutStringer.GoString",
+		},
+		{
+			subj:       Subject{Package: "example.com/prop/propinitbox", Symbol: "UnrelatedRapidClean"},
+			wantAbsent: "example.com/prop/propinitbox\x00initMutStringer.GoString",
+		},
+	} {
+		rf := rooted[rc.subj]
+		if !rf.Complete {
+			t.Fatalf("ComputeRootedFunctions(%v) Complete = false, want true (Fns=%v)", rc.subj, rf.Fns)
+		}
+		if rc.wantFn != "" && !rf.Fns[rc.wantFn] {
+			t.Fatalf("ComputeRootedFunctions(%v) missing %q in Fns=%v", rc.subj, rc.wantFn, rf.Fns)
+		}
+		if rc.wantAbsent != "" && rf.Fns[rc.wantAbsent] {
+			t.Fatalf("ComputeRootedFunctions(%v) unexpectedly attributed %q in Fns=%v", rc.subj, rc.wantAbsent, rf.Fns)
+		}
+	}
+
 	// The audit admits observation, never purity: a package reaching the
 	// harness stays unverifiable at the closure tier, so validity is
 	// proven through the observation path rather than the source hash.

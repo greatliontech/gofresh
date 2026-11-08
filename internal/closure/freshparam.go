@@ -275,21 +275,22 @@ type freshParamKey struct {
 }
 
 func newBitOnlyFreshParamAnalysis(propertyHarnessAudited, selectionAudited bool, pureDelegates map[string]bool, userPaths map[string]bool, summary *callerReferenceSummary, isStd func(*ssa.Function) bool) *freshParamAnalysis {
-	var p *program
+	idx := ssaProgramIndex{
+		propertyHarnessAudited: propertyHarnessAudited,
+		selectionAudited:       selectionAudited,
+		pureDelegates:          pureDelegates,
+		userPaths:              userPaths,
+		summary:                summary,
+		isStd:                  isStd,
+	}
 	if summary != nil {
-		p = summary.prog
+		idx.prog = summary.prog
+		idx.structFieldStores = summary.structFieldStores
+		idx.structWholeStores = summary.structWholeStores
+		idx.structPoisoned = summary.structPoisoned
+		idx.structReferencedByType = summary.structReferencedByType
 	}
-	return &freshParamAnalysis{
-		ssaProgramIndex: ssaProgramIndex{
-			prog:                   p,
-			propertyHarnessAudited: propertyHarnessAudited,
-			selectionAudited:       selectionAudited,
-			pureDelegates:          pureDelegates,
-			userPaths:              userPaths,
-			summary:                summary,
-			isStd:                  isStd,
-		},
-	}
+	return &freshParamAnalysis{ssaProgramIndex: idx}
 }
 
 func newEnumFreshParamAnalysis(audited bool, pureDelegates map[string]bool, userPaths map[string]bool, root *ssa.Function, sites []ssa.CallInstruction, summary *callerReferenceSummary) *freshParamAnalysis {

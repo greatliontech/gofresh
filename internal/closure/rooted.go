@@ -21,7 +21,7 @@ import (
 // unnameable receiver yields no key — their marks are never attributed,
 // so no site can reference them.
 func rootedFunctionKey(fn *ssa.Function) string {
-	if fn == nil || fn.Object() == nil || isUnnamedStructPromotedWrapper(fn) {
+	if fn == nil || fn.Object() == nil || fn.Object().Pkg() == nil || isUnnamedStructPromotedWrapper(fn) {
 		return ""
 	}
 	name := functionSymbolName(fn)
