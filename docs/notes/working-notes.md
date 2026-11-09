@@ -601,3 +601,24 @@ All 7 Round-4 findings (`4` `HIGH` soundness gaps + `2` `MEDIUM` + `1` `LOW` con
   - Verified zero duplicate mechanisms or vestigial scaffolding across touched files (`VerifyReadOnlyRefConfinement` in `internal/dynstate/refconfine.go`, `pkgSyntaxIndex`, `verifyProtoStructFieldsAndCollectChildren`, `verifyPropertyHarnessPackageWithReason`, and `computePackageFreshConstructors` consolidated across Rounds 1–5; `auditset.VersionListing`, `dynstate.AuditedSourceListing`, `dynstate.GeneratedProtoHeader`, `gofresh.generatedProtoHeader`, `auditedPropertyHarnessListing`, `protoRuntimeAudited`, and `grpcRuntimeAudited` deleted completely).
   - Verified zero leaked planning labels, finding IDs, or `TODO`/`FIXME` markers.
   - Full `-race` test suites (`./internal/...`, `./internal/closure`, and root `.`), `TestRealGOMODCACHEPackagesMechanicalVerification` (`11/11` subtests), `TestModulePackagesHaveNoSharedDynamicStateUnderPackageExecution`, `TestPublicPackagesReadNoAmbientEnvironment`, cross-OS `go vet ./...` (`linux`, `darwin`, `windows`), `61/61` mutation probes, and `stipulator verify --no-test` (`912` bindings, `0` stale, `0` unpinned, `0` moved, `0` gaps) all green.
+
+---
+
+## 11. Rebase onto `origin/main` (`v0.122.0`), Stock Go 1.27.1 `go/types` Race Fix & Chunk B.3 Downstream Audit (2026-11-09)
+
+### 11.1 Audit & Rebase onto `origin/main` (`ff8b26d` / `v0.122.0`)
+- **Remote Commit Audited (`ff8b26d`, `feat: expose runtime-bound producer snapshots`, tagged `v0.122.0`):**
+  - Added `(*RuntimeBinding).ProducerSnapshot(ctx context.Context) (ProducerSnapshot, error)` in `session.go` (`REQ-fresh-runtime-producer` in `docs/specs/overview.md`), delegating to `b.view.produceRuntimeSnapshot(ctx, b.runtime.Directory, b.runtime.Environment, b.snapshot)` so callers holding a live `RuntimeBinding` can reuse the view's construction `EnvSnapshot` without spawning a redundant `go env -json` subprocess.
+  - Soundness verified: `b.view == nil`, `b.view.env == nil`, and `b.snapshot == nil` fail closed with `"gofresh: runtime binding has no view"` before touching `ctx`; `produceRuntimeSnapshot` uses `PrimedEnvReader(r, dir, env, viewSnapshot)` only when `envSlicesEqual(b.view.env, env)` holds and falls back to an unprimed `NewEnvReader` when `RuntimeDescription.Environment` overrides the view's build environment.
+  - Rebased all 29 local commits cleanly onto `ff8b26d`, updated `producer_snapshot_test.go` imports (`internal/gotool`, `internal/runtimeinput`), re-pinned (`915` bindings, `0` stale, `0` gaps), and pushed `4188aef` to `origin/main`.
+
+### 11.2 Root-Cause Diagnosis & Fix: Stock Go 1.27.1 `go/types.(*Checker).isComplete` vs `(*Named).unpack` Race (`CI` `42553419461`)
+- **Symptom:** In GitHub Actions `CI` run `42553419461` (`gate / race (cj-n)` under stock Go `1.27.1`), `TestModulePackagesHaveNoSharedDynamicStateUnderPackageExecution` reported a `go/types` data race between `go/types.(*Checker).isComplete` (`cycles.go:122`, called from `rangeStmt` at `range.go:38`) and `go/types.(*Named).unpack` (`named.go:244`, called from `rangeStmt` $\rightarrow$ `rangeKeyVal` at `range.go:68`) during `go/packages` concurrent `loadPackage` workers.
+- **Root Cause:**
+  - In stock Go `1.27.1` (`golang/go#79035`, patched in `godst` at `go/types/cycles.go:122-142`), `(*Checker).isComplete` reads `t.fromRHS` on `*types.Named` without calling `t.unpack()` or checking `t.stateHas(unpacked)`.
+  - At the end of `(*Checker).Files`, `(*Named).cleanup()` (`named.go:367-374`) calls `n.Underlying()` only when `n.inst == nil`, leaving instantiated generic `*types.Named` objects (`n.inst != nil`) in a completed `*types.Package` (`strings`, `go/types`) with `!n.stateHas(unpacked)` (`n.fromRHS == nil`).
+  - In the Go standard library, `strings.SplitSeq` (`func(string, string) iter.Seq[string]`) and `(*types.MethodSet).Methods()` (`func() iter.Seq[*types.Selection]`) are non-generic functions/methods whose return types are pre-instantiated generic `*types.Named` objects (`iter.Seq[...]`) shared across all packages that import `strings` or `go/types`.
+  - When `go/packages` type-checks package variants concurrently in `errgroup` (e.g., `rta` and `rta [rta.test]` both type-checking `rta.go`, or `internal/trace`, `internal/closure`, and `gofresh [gofresh.test]` type-checking `strings.SplitSeq` loops), one worker's `rangeStmt` calls `check.isComplete(typ)` (reading `t.fromRHS` bare) while another worker's `rangeStmt` calls `rangeKeyVal` $\rightarrow$ `typ.Underlying()` $\rightarrow$ `t.unpack()` (writing `t.fromRHS = t.expandRHS()`).
+- **Causal Fix:**
+  - Replaced `strings.SplitSeq` with `strings.Split` in `internal/trace/trace.go:209`, `internal/closure/toolchain_loader.go:1272`, and `trace_witness_test.go:469`.
+  - Replaced `for method := range mset.Methods()` with `for i, n := 0, mset.Len(); i < n; i++ { method := mset.At(i) ... }` in `internal/closure/internal/rta/rta.go:1653,1758,1902`.
