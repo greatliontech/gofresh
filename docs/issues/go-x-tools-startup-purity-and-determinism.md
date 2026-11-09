@@ -1,6 +1,6 @@
 # Eliminate Startup Environment, RNG, and Unaudited Reflection Side Effects in `go-x-tools`
 
-**Lands:** Chunk 6 in [`docs/plans/plan.md`](../plans/plan.md) (`Redesign Snapshot / Sibling Observability Sharing, Downstream Efficiency & go-x-tools Fixes`).
+**Lands:** Chunk 8 in [`docs/plans/plan.md`](../plans/plan.md) (`Downstream Fleet Refactoring, Batching & Startup Purity`).
 
 ## Context & Concrete Findings in `go-x-tools`
 
@@ -22,4 +22,4 @@
 
 ## Resolution
 
-Land in `go-x-tools` and bump `go-x-tools` across `gofresh`, `pew`, `stipulator`, and `gomutant` in Chunk 6.
+Land in `go-x-tools` and bump `go-x-tools` across `gofresh`, `pew`, `stipulator`, and `gomutant` in Chunk 8.
