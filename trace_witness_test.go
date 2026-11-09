@@ -466,7 +466,7 @@ func FuzzUniversalTraceNonInterference(f *testing.F) {
 				if err != nil || len(bytes.TrimSpace(rawTrace)) == 0 {
 					t.Fatalf("expected non-empty JSONL trace file at %s, err=%v", tracePath, err)
 				}
-				for line := range strings.SplitSeq(strings.TrimSpace(string(rawTrace)), "\n") {
+				for _, line := range strings.Split(strings.TrimSpace(string(rawTrace)), "\n") {
 					var parsed map[string]any
 					if err := json.Unmarshal([]byte(line), &parsed); err != nil {
 						t.Fatalf("invalid JSONL trace line %q: %v", line, err)

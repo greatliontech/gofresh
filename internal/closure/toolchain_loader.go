@@ -1269,7 +1269,7 @@ func storeToolchainDigests(scope string, l surfaceListing, d sourceDigests) {
 
 func toolchainSnapshotIdentity(snapshot *gotool.EnvSnapshot) string {
 	var b strings.Builder
-	for line := range strings.SplitSeq(snapshot.Identity(), "\n") {
+	for _, line := range strings.Split(snapshot.Identity(), "\n") {
 		if line == "" || strings.HasPrefix(line, "GOMOD=") || strings.HasPrefix(line, "GOWORK=") {
 			continue
 		}

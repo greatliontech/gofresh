@@ -206,7 +206,7 @@ func parseFilter(spec string) filter {
 		return filter{}
 	}
 	var out filter
-	for token := range strings.SplitSeq(spec, ",") {
+	for _, token := range strings.Split(spec, ",") {
 		token = strings.TrimSpace(token)
 		if token == "" {
 			continue

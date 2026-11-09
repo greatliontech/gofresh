@@ -1650,7 +1650,8 @@ func (r *attributedRTA) addRuntimeType(T types.Type, masks uint64, skip bool) {
 	r.traversedTypes.Set(T, prevTraversed|traverseDelta)
 
 	mset := r.prog.MethodSets.MethodSet(T)
-	for method := range mset.Methods() {
+	for i, n := 0, mset.Len(); i < n; i++ {
+		method := mset.At(i)
 		sig := method.Type().(*types.Signature)
 		if sig.TypeParams() == nil {
 			r.addRuntimeType(sig.Params(), traverseDelta, true)
@@ -1755,7 +1756,8 @@ func (r *attributedRTA) addHarnessStdRuntimeType(T types.Type, masks uint64, ski
 	r.harnessTraversedTypes.Set(T, prevTraversed|traverseDelta)
 
 	mset := r.prog.MethodSets.MethodSet(T)
-	for method := range mset.Methods() {
+	for i, n := 0, mset.Len(); i < n; i++ {
+		method := mset.At(i)
 		sig := method.Type().(*types.Signature)
 		if sig.TypeParams() == nil {
 			r.addHarnessStdRuntimeType(sig.Params(), traverseDelta, true)
@@ -1899,8 +1901,8 @@ func (r *attributedRTA) addWritableRuntimeType(T types.Type, masks uint64, embed
 func attributedFingerprint(mset *types.MethodSet) uint64 {
 	var space [64]byte
 	var mask uint64
-	for method := range mset.Methods() {
-		method := method.Obj()
+	for i, n := 0, mset.Len(); i < n; i++ {
+		method := mset.At(i).Obj()
 		sig := method.Type().(*types.Signature)
 		if sig.TypeParams() != nil {
 			continue
