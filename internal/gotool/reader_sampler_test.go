@@ -93,6 +93,26 @@ func TestPrimedEnvReaderPrimesOnlyARealSnapshot(t *testing.T) {
 	if got, err := unprimed.Value(ctx, "GOROOT"); err != nil || got == "" || spawns != 1 {
 		t.Fatalf("nil-primed reader: %q, %v after %d spawns; want its own snapshot taken once", got, err, spawns)
 	}
+	if (*EnvSnapshot)(nil).Values() != nil {
+		t.Fatal("nil EnvSnapshot.Values() returned non-nil map")
+	}
+	if _, err := EnvSnapshotFromValues(nil); err == nil {
+		t.Fatal("nil map accepted by EnvSnapshotFromValues")
+	}
+	if _, err := EnvSnapshotFromValues(map[string]string{}); err == nil {
+		t.Fatal("empty map accepted by EnvSnapshotFromValues")
+	}
+	inputMap := map[string]string{"GOVERSION": "go1.27.0"}
+	fromMap, err := EnvSnapshotFromValues(inputMap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputMap["GOVERSION"] = "mutated-caller"
+	returnedMap := fromMap.Values()
+	returnedMap["GOVERSION"] = "mutated-return"
+	if got := fromMap.Value("GOVERSION"); got != "go1.27.0" {
+		t.Fatalf("EnvSnapshot aliased caller or returned map: got %q, want go1.27.0", got)
+	}
 }
 
 // The judged-run memo's key is the directory's coordinate and the

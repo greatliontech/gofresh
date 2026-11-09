@@ -132,6 +132,9 @@ func Capture(ctx context.Context, reader *gotool.EnvReader, runtimeEnv []string,
 	if kind != CodeResult && kind != Measurement {
 		return Guards{}, fmt.Errorf("guard: invalid result kind %d", kind)
 	}
+	if reader.Env == nil {
+		return Guards{}, errors.New("guard: nil environment")
+	}
 	normalized, err := gotool.NormalizeEnv(reader.Env)
 	if err != nil {
 		return Guards{}, fmt.Errorf("guard: %w", err)

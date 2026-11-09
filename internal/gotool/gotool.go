@@ -241,6 +241,35 @@ func (s *EnvSnapshot) Value(key string) string {
 	return s.values[key]
 }
 
+// Values returns an owned copy of the parsed go-env settings.
+func (s *EnvSnapshot) Values() map[string]string {
+	if s == nil {
+		return nil
+	}
+	out := make(map[string]string, len(s.values))
+	for k, v := range s.values {
+		out[k] = v
+	}
+	return out
+}
+
+// EnvSnapshotFromValues constructs an EnvSnapshot from a parsed `go env -json`
+// setting map, refusing an empty map as parseEnvDocument does.
+func EnvSnapshotFromValues(values map[string]string) (*EnvSnapshot, error) {
+	if len(values) == 0 {
+		return nil, errors.New("gotool: parse go env -json: no values")
+	}
+	cloned := make(map[string]string, len(values))
+	for k, v := range values {
+		cloned[k] = v
+	}
+	raw, err := json.Marshal(cloned)
+	if err != nil {
+		return nil, fmt.Errorf("gotool: encode go env -json: %w", err)
+	}
+	return &EnvSnapshot{JSON: raw, values: cloned}, nil
+}
+
 // TakeEnvSnapshot performs the pass's one `go env -json` read under the
 // runner's spawn policy and the caller's complete environment.
 func (r Runner) TakeEnvSnapshot(ctx context.Context, dir string, env []string) (*EnvSnapshot, error) {

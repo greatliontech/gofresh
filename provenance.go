@@ -131,7 +131,15 @@ func ResolveToolchainSelection(ctx context.Context, build BuildDescription, prep
 	if build.Environment == nil {
 		return ToolchainSelection{}, errors.New("gofresh: build environment must be explicitly provided")
 	}
-	reader := gotool.NewEnvReader(gotool.Runner{Prepare: firstPrepare(prepare)}, build.Directory, build.Environment)
+	var snapshot *gotool.EnvSnapshot
+	if build.GoEnv != nil {
+		var err error
+		snapshot, err = gotool.EnvSnapshotFromValues(build.GoEnv)
+		if err != nil {
+			return ToolchainSelection{}, err
+		}
+	}
+	reader := gotool.PrimedEnvReader(gotool.Runner{Prepare: firstPrepare(prepare)}, gotool.Coordinate(build.Directory), build.Environment, snapshot)
 	return resolveToolchainSelection(ctx, reader, build.Flags...)
 }
 

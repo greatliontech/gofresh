@@ -8887,10 +8887,64 @@ func TestResolveToolchainSelection(t *testing.T) {
 	if _, err := nilSession.ToolchainSelection(context.Background()); err == nil {
 		t.Fatal("nil session accepted by ToolchainSelection")
 	}
+	if _, err := ResolveToolchainSelection(context.Background(), BuildDescription{Directory: dir, Environment: os.Environ(), GoEnv: map[string]string{}}); err == nil {
+		t.Fatal("empty GoEnv map accepted by ResolveToolchainSelection")
+	}
+	if _, err := CaptureGuards(context.Background(), BuildDescription{Directory: dir, Environment: os.Environ(), GoEnv: map[string]string{}}, nil, CodeResult); err == nil {
+		t.Fatal("empty GoEnv map accepted by CaptureGuards")
+	}
+	if _, err := CaptureGuards(context.Background(), BuildDescription{
+		Directory: dir,
+		GoEnv: map[string]string{
+			"GOVERSION":  "go1.27.0",
+			"GOHOSTOS":   runtime.GOOS,
+			"GOHOSTARCH": runtime.GOARCH,
+			"GOOS":       runtime.GOOS,
+			"GOARCH":     runtime.GOARCH,
+		},
+	}, nil, CodeResult); err == nil {
+		t.Fatal("nil Environment accepted by CaptureGuards when GoEnv is primed")
+	}
+	linkDir := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(dir, linkDir); err != nil {
+		t.Fatal(err)
+	}
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envSpawns := 0
+	var seenDirs []string
+	primedGuard, err := CaptureGuards(context.Background(), BuildDescription{
+		Directory:   linkDir,
+		Environment: os.Environ(),
+		GoEnv: map[string]string{
+			"GOVERSION":  "go1.27.0",
+			"GOHOSTOS":   runtime.GOOS,
+			"GOHOSTARCH": runtime.GOARCH,
+			"GOOS":       runtime.GOOS,
+			"GOARCH":     runtime.GOARCH,
+		},
+	}, nil, CodeResult, func(cmd *exec.Cmd) {
+		seenDirs = append(seenDirs, cmd.Dir)
+		if len(cmd.Args) > 1 && cmd.Args[1] == "env" {
+			envSpawns++
+		}
+	})
+	if err != nil || primedGuard.Toolchain == "" || primedGuard.BuildConfig == "" || envSpawns != 0 {
+		t.Fatalf("primed CaptureGuards: guards=%+v err=%v envSpawns=%d", primedGuard, err, envSpawns)
+	}
 	degradedEnv := environmentWith(map[string]string{"GOENV": "off", "GOFLAGS": "-tags"})
-	degraded, err := ResolveToolchainSelection(context.Background(), BuildDescription{Directory: dir, Environment: degradedEnv})
+	degraded, err := ResolveToolchainSelection(context.Background(), BuildDescription{Directory: linkDir, Environment: degradedEnv}, func(cmd *exec.Cmd) {
+		seenDirs = append(seenDirs, cmd.Dir)
+	})
 	if err != nil {
 		t.Fatalf("ResolveToolchainSelection degraded GOFLAGS: %v", err)
+	}
+	for _, seenDir := range seenDirs {
+		if seenDir != resolvedDir {
+			t.Fatalf("spawn ran in %q, want canonical coordinate %q", seenDir, resolvedDir)
+		}
 	}
 	if degraded.ToolchainContent != "" || degraded.AdmissionPolicy == "" || !strings.Contains(degraded.SelectionNotice, "-tags (from $GOFLAGS)") {
 		t.Fatalf("ResolveToolchainSelection degraded GOFLAGS = %+v", degraded)

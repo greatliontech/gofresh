@@ -75,10 +75,21 @@ func CaptureGuards(ctx context.Context, build BuildDescription, runtimeEnv []str
 	if build.Directory == "" {
 		return Guards{}, errors.New("gofresh: empty guard capture directory")
 	}
+	if build.Environment == nil {
+		return Guards{}, errors.New("gofresh: build environment must be explicitly provided")
+	}
 	if runtimeEnv == nil {
 		runtimeEnv = build.Environment
 	}
-	reader := gotool.NewEnvReader(gotool.Runner{Prepare: firstPrepare(prepare)}, build.Directory, build.Environment)
+	var snapshot *gotool.EnvSnapshot
+	if build.GoEnv != nil {
+		var err error
+		snapshot, err = gotool.EnvSnapshotFromValues(build.GoEnv)
+		if err != nil {
+			return Guards{}, err
+		}
+	}
+	reader := gotool.PrimedEnvReader(gotool.Runner{Prepare: firstPrepare(prepare)}, gotool.Coordinate(build.Directory), build.Environment, snapshot)
 	inputs := make([]string, 0, len(build.Flags)+len(build.Inputs))
 	for _, flag := range build.Flags {
 		inputs = append(inputs, "flag="+flag)
@@ -190,6 +201,12 @@ type BuildDescription struct {
 	Environment []string
 	Flags       []string
 	Inputs      []string
+	// GoEnv is an optional pass-scoped `go env -json` setting map already
+	// taken by the caller in the same observation pass for Directory and
+	// Environment, avoiding a duplicate `go env` subprocess in CaptureGuards
+	// and ResolveToolchainSelection. NewSession ignores it and always takes
+	// its own snapshot.
+	GoEnv map[string]string
 }
 
 // RuntimeDescription is the complete environment of the built program. A nil
