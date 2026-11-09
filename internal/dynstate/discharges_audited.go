@@ -606,7 +606,7 @@ func isEmptyMapInitializer(p *packages.Package, expr ast.Expr) bool {
 	expr = ast.Unparen(expr)
 	switch e := expr.(type) {
 	case *ast.CompositeLit:
-		_, ok := types.Unalias(p.TypesInfo.TypeOf(e)).Underlying().(*types.Map)
+		_, ok := underlyingType(p.TypesInfo.TypeOf(e)).(*types.Map)
 		return ok && len(e.Elts) == 0
 	case *ast.CallExpr:
 		id, ok := ast.Unparen(e.Fun).(*ast.Ident)
@@ -617,7 +617,7 @@ func isEmptyMapInitializer(p *packages.Package, expr ast.Expr) bool {
 		if !ok || b.Name() != "make" || len(e.Args) < 1 || len(e.Args) > 2 {
 			return false
 		}
-		_, isMap := types.Unalias(p.TypesInfo.TypeOf(e)).Underlying().(*types.Map)
+		_, isMap := underlyingType(p.TypesInfo.TypeOf(e)).(*types.Map)
 		return isMap
 	}
 	return false
@@ -1279,7 +1279,7 @@ func isUnsafePointerOfAddr(p *packages.Package, expr ast.Expr, syscallAddrs map[
 	if !ok || len(call.Args) != 1 || !p.TypesInfo.Types[call.Fun].IsType() {
 		return false
 	}
-	basic, ok := types.Unalias(p.TypesInfo.TypeOf(call)).Underlying().(*types.Basic)
+	basic, ok := underlyingType(p.TypesInfo.TypeOf(call)).(*types.Basic)
 	if !ok || basic.Kind() != types.UnsafePointer {
 		return false
 	}
@@ -1892,7 +1892,7 @@ func verifyNoAliasedProtectedContainerMutation(
 			if fn.Name() != "FieldByIndex" && fn.Name() != "FieldByIndexErr" {
 				return false
 			}
-			sl, isSl := types.Unalias(p.TypesInfo.TypeOf(arg)).Underlying().(*types.Slice)
+			sl, isSl := underlyingType(p.TypesInfo.TypeOf(arg)).(*types.Slice)
 			return isSl && !typeContainsRefOrPointerWith(sl.Elem(), isProtectedPtr)
 		},
 	})
@@ -2123,7 +2123,7 @@ func verifyMemoFunctionBody(
 				}
 			}
 		case *ast.RangeStmt:
-			rt := types.Unalias(p.TypesInfo.TypeOf(x.X)).Underlying()
+			rt := underlyingType(p.TypesInfo.TypeOf(x.X))
 			switch rt.(type) {
 			case *types.Slice, *types.Array:
 			case *types.Basic:
@@ -2596,7 +2596,7 @@ func callBoxesProtectedIntoInterface(p *packages.Package, call *ast.CallExpr, pr
 		}
 		return false
 	}
-	sig, ok := types.Unalias(p.TypesInfo.TypeOf(fun)).Underlying().(*types.Signature)
+	sig, ok := underlyingType(p.TypesInfo.TypeOf(fun)).(*types.Signature)
 	if !ok {
 		return false
 	}

@@ -14,6 +14,30 @@ func IsDirectMutableRef(t types.Type) bool {
 	return IsDirectMutableRefWith(t, nil)
 }
 
+func underlyingType(t types.Type) types.Type {
+	if t = types.Unalias(t); t != nil {
+		return t.Underlying()
+	}
+	return nil
+}
+
+func lookupBuiltin(info *types.Info, fun ast.Expr) *types.Builtin {
+	if info == nil {
+		return nil
+	}
+	switch f := ast.Unparen(fun).(type) {
+	case *ast.Ident:
+		b, _ := info.Uses[f].(*types.Builtin)
+		return b
+	case *ast.SelectorExpr:
+		if f.Sel != nil && info.Selections[f] == nil {
+			b, _ := info.Uses[f.Sel].(*types.Builtin)
+			return b
+		}
+	}
+	return nil
+}
+
 // IsDirectMutableRefWith is like IsDirectMutableRef, treating pointers matched
 // by isImmutablePtr as non-mutable handles.
 func IsDirectMutableRefWith(t types.Type, isImmutablePtr func(types.Type) bool) bool {
@@ -734,36 +758,34 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 				}
 				return aRef || isDirectRef(dstT), true
 			}
-			if id, isID := fun.(*ast.Ident); isID {
-				if b, isB := info.Uses[id].(*types.Builtin); isB {
-					switch b.Name() {
-					case "make", "new", "len", "cap":
+			if b := lookupBuiltin(info, fun); b != nil {
+				switch b.Name() {
+				case "make", "new", "len", "cap", "Sizeof", "Alignof", "Offsetof":
+					return false, false
+				case "append":
+					if len(e.Args) == 0 {
 						return false, false
-					case "append":
-						if len(e.Args) == 0 {
-							return false, false
+					}
+					dRef, dCar := classifyExpr(e.Args[0])
+					elemTainted := false
+					var slElem types.Type
+					if sl, ok := underlyingType(info.TypeOf(e)).(*types.Slice); ok {
+						slElem = sl.Elem()
+					}
+					for _, arg := range e.Args[1:] {
+						_, aCar := classifyExpr(arg)
+						if !aCar {
+							continue
 						}
-						dRef, dCar := classifyExpr(e.Args[0])
-						elemTainted := false
-						var slElem types.Type
-						if sl, ok := types.Unalias(info.TypeOf(e)).Underlying().(*types.Slice); ok {
-							slElem = sl.Elem()
-						}
-						for _, arg := range e.Args[1:] {
-							_, aCar := classifyExpr(arg)
-							if !aCar {
-								continue
-							}
-							if e.Ellipsis.IsValid() {
-								if elemHasHandle(slElem) {
-									elemTainted = true
-								}
-							} else {
+						if e.Ellipsis.IsValid() {
+							if elemHasHandle(slElem) {
 								elemTainted = true
 							}
+						} else {
+							elemTainted = true
 						}
-						return dRef, dRef || dCar || elemTainted
 					}
+					return dRef, dRef || dCar || elemTainted
 				}
 			}
 			if callee := resolveConcretePkgCallee(e.Fun); callee != nil {
@@ -1669,39 +1691,37 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 					if !aCar {
 						continue
 					}
-					if id, isID := fun.(*ast.Ident); isID {
-						if b, isB := info.Uses[id].(*types.Builtin); isB {
-							if b.Name() == "len" || b.Name() == "cap" {
-								continue
-							}
-							if b.Name() == "append" {
-								if argIdx == 0 {
-									if !aRef && selfAssignedAppendCalls[s] {
-										continue
-									}
-									ok = false
-									return false
-								}
-								if s.Ellipsis.IsValid() {
-									if sl, isSl := types.Unalias(info.TypeOf(arg)).Underlying().(*types.Slice); isSl && !elemHasHandle(sl.Elem()) {
-										continue
-									}
-								} else if selfAssignedAppendCalls[s] {
-									if sl, isSl := types.Unalias(info.TypeOf(s)).Underlying().(*types.Slice); isSl && !assignErasesTaint(sl.Elem(), info.TypeOf(arg)) {
-										continue
-									}
+					if b := lookupBuiltin(info, fun); b != nil {
+						if b.Name() == "len" || b.Name() == "cap" || b.Name() == "Sizeof" || b.Name() == "Alignof" || b.Name() == "Offsetof" {
+							continue
+						}
+						if b.Name() == "append" {
+							if argIdx == 0 {
+								if !aRef && selfAssignedAppendCalls[s] {
+									continue
 								}
 								ok = false
 								return false
 							}
-							if b.Name() == "copy" && argIdx == 1 {
-								if sl, isSl := types.Unalias(info.TypeOf(arg)).Underlying().(*types.Slice); isSl && !elemHasHandle(sl.Elem()) {
+							if s.Ellipsis.IsValid() {
+								if sl, isSl := underlyingType(info.TypeOf(arg)).(*types.Slice); isSl && !elemHasHandle(sl.Elem()) {
+									continue
+								}
+							} else if selfAssignedAppendCalls[s] {
+								if sl, isSl := underlyingType(info.TypeOf(s)).(*types.Slice); isSl && !assignErasesTaint(sl.Elem(), info.TypeOf(arg)) {
 									continue
 								}
 							}
 							ok = false
 							return false
 						}
+						if b.Name() == "copy" && argIdx == 1 {
+							if sl, isSl := underlyingType(info.TypeOf(arg)).(*types.Slice); isSl && !elemHasHandle(sl.Elem()) {
+								continue
+							}
+						}
+						ok = false
+						return false
 					}
 
 					if callee := resolveConcretePkgCallee(s.Fun); callee != nil {
@@ -2044,8 +2064,17 @@ func callCallErasesSeedStruct(
 	if len(call.Args) == 0 {
 		return false
 	}
+	if tv, ok := info.Types[call]; ok && tv.Value != nil {
+		return false
+	}
 	fun := ast.Unparen(call.Fun)
-	sig, isSig := types.Unalias(info.TypeOf(fun)).Underlying().(*types.Signature)
+	if b := lookupBuiltin(info, fun); b != nil {
+		switch b.Name() {
+		case "len", "cap", "Sizeof", "Alignof", "Offsetof":
+			return false
+		}
+	}
+	sig, isSig := underlyingType(info.TypeOf(fun)).(*types.Signature)
 	if !isSig {
 		for _, arg := range call.Args {
 			if seedStructTypeViolated(nil, info.TypeOf(arg)) {
@@ -2113,7 +2142,7 @@ func callCallErasesSeedStruct(
 		if paramIdx < sig.Params().Len() {
 			dstT = sig.Params().At(paramIdx).Type()
 			if isNonEllipsisVariadic {
-				if sl, isSl := types.Unalias(dstT).Underlying().(*types.Slice); isSl {
+				if sl, isSl := underlyingType(dstT).(*types.Slice); isSl {
 					dstT = sl.Elem()
 				}
 			}
@@ -2124,7 +2153,7 @@ func callCallErasesSeedStruct(
 		if originSig != nil && paramIdx < originSig.Params().Len() {
 			origT := originSig.Params().At(paramIdx).Type()
 			if isNonEllipsisVariadic {
-				if sl, isSl := types.Unalias(origT).Underlying().(*types.Slice); isSl {
+				if sl, isSl := underlyingType(origT).(*types.Slice); isSl {
 					origT = sl.Elem()
 				}
 			}

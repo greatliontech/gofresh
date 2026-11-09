@@ -6612,3 +6612,90 @@ func ReadSize() (int, string) { return file_d_proto_msgTypes[0].Size(), E_Ext.Na
 		})
 	}
 }
+
+//gofresh:pure
+func TestVerifyReadOnlyRefConfinementUnsafeConstantBuiltins(t *testing.T) {
+	pkg := mustTypecheckPackage(t, "example.com/unsafeconfine", map[string]string{
+		"p.go": `package unsafeconfine
+
+import "unsafe"
+
+type holder struct {
+	items []int
+	tag   int
+}
+
+var seed = holder{items: []int{1, 2, 3}, tag: 7}
+
+const (
+	seedSize   = unsafe.Sizeof(seed)
+	seedAlign  = unsafe.Alignof(seed)
+	itemsOff   = unsafe.Offsetof(seed.items)
+)
+
+func Inspect() uintptr {
+	h := &seed
+	return unsafe.Sizeof(*h) + unsafe.Alignof(*h) + unsafe.Offsetof(h.items) + uintptr(len(h.items))
+}
+`,
+	})
+	seedObj, ok := pkg.Types.Scope().Lookup("seed").(*types.Var)
+	if !ok || seedObj == nil {
+		t.Fatal("missing seed var")
+	}
+	holderType, ok := pkg.Types.Scope().Lookup("holder").(*types.TypeName)
+	if !ok || holderType == nil {
+		t.Fatal("missing holder type")
+	}
+	holderNamed, ok := holderType.Type().(*types.Named)
+	if !ok || holderNamed == nil {
+		t.Fatal("holder is not a *types.Named")
+	}
+	if !VerifyReadOnlyRefConfinement(pkg, RefConfineConfig{
+		SeedExpr: func(expr ast.Expr) (bool, bool) {
+			id, ok := ast.Unparen(expr).(*ast.Ident)
+			if ok && pkg.TypesInfo.Uses[id] == seedObj {
+				return false, true
+			}
+			return false, false
+		},
+		SeedStructOrigin: func(named *types.Named) bool {
+			return named != nil && named.Origin() == holderNamed.Origin()
+		},
+	}) {
+		t.Fatal("VerifyReadOnlyRefConfinement rejected compile-time constant unsafe.{Sizeof,Alignof,Offsetof} on seed struct")
+	}
+
+	badPkg := mustTypecheckPackage(t, "example.com/unsafeconfinebad", map[string]string{
+		"p.go": `package unsafeconfinebad
+
+import "unsafe"
+
+type holder struct {
+	items []int
+}
+
+var seed = holder{items: []int{1, 2, 3}}
+
+func Leak() *int {
+	return unsafe.SliceData(seed.items)
+}
+`,
+	})
+	badSeedObj := badPkg.Types.Scope().Lookup("seed").(*types.Var)
+	badHolderNamed := badPkg.Types.Scope().Lookup("holder").(*types.TypeName).Type().(*types.Named)
+	if VerifyReadOnlyRefConfinement(badPkg, RefConfineConfig{
+		SeedExpr: func(expr ast.Expr) (bool, bool) {
+			id, ok := ast.Unparen(expr).(*ast.Ident)
+			if ok && badPkg.TypesInfo.Uses[id] == badSeedObj {
+				return false, true
+			}
+			return false, false
+		},
+		SeedStructOrigin: func(named *types.Named) bool {
+			return named != nil && named.Origin() == badHolderNamed.Origin()
+		},
+	}) {
+		t.Fatal("VerifyReadOnlyRefConfinement unexpectedly accepted unsafe.SliceData on seed slice")
+	}
+}

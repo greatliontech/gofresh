@@ -751,7 +751,7 @@ func deriveNoPostInitCarrierWrites(
 					if len(call.Args) != 1 {
 						return false, nil
 					}
-					ptr, isPtr := types.Unalias(p.TypesInfo.TypeOf(call.Args[0])).Underlying().(*types.Pointer)
+					ptr, isPtr := underlyingType(p.TypesInfo.TypeOf(call.Args[0])).(*types.Pointer)
 					if !isPtr || !structFreeOfCarrierHandles(ptr.Elem()) {
 						return false, nil
 					}
@@ -7926,7 +7926,7 @@ func verifyLockedStructFamilyDiscipline(
 							}
 							if (b.Name() == "append" || b.Name() == "copy") && !isRootedAtFreshLocal(p, x.Args[0], freshVars, freshEsc) {
 								if hitSt, _ := lhsRootFamilyField(p, x.Args[0], allProtected); hitSt != nil {
-									if sl, isSl := types.Unalias(p.TypesInfo.TypeOf(x.Args[0])).Underlying().(*types.Slice); isSl && types.IsInterface(sl.Elem()) {
+									if sl, isSl := underlyingType(p.TypesInfo.TypeOf(x.Args[0])).(*types.Slice); isSl && types.IsInterface(sl.Elem()) {
 										if b.Name() == "copy" {
 											if len(x.Args) < 2 {
 												valid = false
@@ -9111,7 +9111,7 @@ func verifyGrpcServiceVarUses(p *packages.Package, idx *pkgSyntaxIndex, v *types
 					if !isExpr {
 						return false
 					}
-					if b, isBasic := types.Unalias(p.TypesInfo.TypeOf(curExpr)).Underlying().(*types.Basic); !isBasic || b.Kind() == types.UnsafePointer {
+					if b, isBasic := underlyingType(p.TypesInfo.TypeOf(curExpr)).(*types.Basic); !isBasic || b.Kind() == types.UnsafePointer {
 						return false
 					}
 				}
@@ -9284,7 +9284,7 @@ func collectMutatedStructTypes(
 					forEachValueContainedStructType(p.TypesInfo.TypeOf(e.X), func(vt types.Type) {
 						recordStructAt(at, vt)
 					})
-					if ptr, isPtr := types.Unalias(p.TypesInfo.TypeOf(e.X)).Underlying().(*types.Pointer); isPtr {
+					if ptr, isPtr := underlyingType(p.TypesInfo.TypeOf(e.X)).(*types.Pointer); isPtr {
 						elem := types.Unalias(ptr.Elem())
 						forEachValueContainedStructType(elem, func(vt types.Type) {
 							recordStructAt(at, vt)
@@ -9363,7 +9363,7 @@ func collectMutatedStructTypes(
 	recordUnsafeSliceArg := func(at ast.Node, arg ast.Expr) {
 		argT := p.TypesInfo.TypeOf(arg)
 		recordStructAt(at, argT)
-		if ptr, isPtr := types.Unalias(argT).Underlying().(*types.Pointer); isPtr {
+		if ptr, isPtr := underlyingType(argT).(*types.Pointer); isPtr {
 			forEachValueContainedStructType(ptr.Elem(), func(vt types.Type) {
 				recordStructAt(at, vt)
 			})
@@ -9459,14 +9459,14 @@ func collectMutatedStructTypes(
 					}
 					if b, isB := dstT.Underlying().(*types.Basic); isB && b.Kind() == types.UnsafePointer {
 						if !isSafeAtomicPointerValueArg(p, idx, x) && !isPureAtomicLoadInnerConv(p, idx, x) && !isFreshAddrTarget(syncEncl, x.Args[0], fresh, freshEsc) {
-							if ptr, isPtr := types.Unalias(p.TypesInfo.TypeOf(x.Args[0])).Underlying().(*types.Pointer); isPtr {
+							if ptr, isPtr := underlyingType(p.TypesInfo.TypeOf(x.Args[0])).(*types.Pointer); isPtr {
 								forEachValueContainedStructType(ptr.Elem(), func(vt types.Type) {
 									recordStructAt(x, vt)
 								})
 							}
 						}
 					} else if dstPtr, isDstPtr := dstT.Underlying().(*types.Pointer); isDstPtr {
-						if srcPtr, isSrcPtr := types.Unalias(p.TypesInfo.TypeOf(x.Args[0])).Underlying().(*types.Pointer); isSrcPtr {
+						if srcPtr, isSrcPtr := underlyingType(p.TypesInfo.TypeOf(x.Args[0])).(*types.Pointer); isSrcPtr {
 							dstElem := types.Unalias(dstPtr.Elem())
 							srcElem := types.Unalias(srcPtr.Elem())
 							if !types.Identical(dstElem, srcElem) && !isFreshAddrTarget(syncEncl, x.Args[0], fresh, freshEsc) {
@@ -9490,7 +9490,7 @@ func collectMutatedStructTypes(
 									recordNamedContainerAt(x, p.TypesInfo.TypeOf(x.Args[0]))
 								}
 								if (b.Name() == "clear" || b.Name() == "copy" || b.Name() == "append") && !isFreshAddrTarget(syncEncl, x.Args[0], fresh, freshEsc) {
-									if sl, isSl := types.Unalias(p.TypesInfo.TypeOf(x.Args[0])).Underlying().(*types.Slice); isSl {
+									if sl, isSl := underlyingType(p.TypesInfo.TypeOf(x.Args[0])).(*types.Slice); isSl {
 										forEachValueContainedStructType(sl.Elem(), func(vt types.Type) {
 											recordStructAt(x, vt)
 										})
@@ -10265,7 +10265,7 @@ func isRootedAtFreshLocal(
 			}
 			return false
 		case *ast.IndexExpr:
-			if _, isArr := types.Unalias(p.TypesInfo.TypeOf(e.X)).Underlying().(*types.Array); isArr {
+			if _, isArr := underlyingType(p.TypesInfo.TypeOf(e.X)).(*types.Array); isArr {
 				cur = ast.Unparen(e.X)
 				continue
 			}
@@ -10490,7 +10490,7 @@ func (pf *pkgFreshConstructors) isFreshContainerAt(sum *freshFuncSummary, expr a
 			first = false
 			continue
 		case *ast.IndexExpr:
-			xt := types.Unalias(pf.p.TypesInfo.TypeOf(e.X)).Underlying()
+			xt := underlyingType(pf.p.TypesInfo.TypeOf(e.X))
 			switch u := xt.(type) {
 			case *types.Array:
 				cur = ast.Unparen(e.X)
@@ -11361,7 +11361,7 @@ func analyzeSingleFreshConstructorFunc(
 						}
 					}
 				} else if ix, isIx := ast.Unparen(l).(*ast.IndexExpr); isIx {
-					if _, isSl := types.Unalias(p.TypesInfo.TypeOf(ix.X)).Underlying().(*types.Slice); isSl {
+					if _, isSl := underlyingType(p.TypesInfo.TypeOf(ix.X)).(*types.Slice); isSl {
 						if cl := unwrapCompositeLit(rhs); cl != nil {
 							recordCompositeLitNonFreshFields(p, cl, freshReturnFuncs, sum.nonFreshFields)
 						} else {
@@ -12017,7 +12017,7 @@ func useIsNonEscapingOnFreshVar(
 					return len(x.Args) == 1 && ast.Unparen(x.Args[0]) == cur
 				case "copy":
 					if len(x.Args) == 2 && (ast.Unparen(x.Args[0]) == cur || ast.Unparen(x.Args[1]) == cur) {
-						if sl, isSl := types.Unalias(p.TypesInfo.TypeOf(cur)).Underlying().(*types.Slice); isSl && !TypeContainsRefOrPointer(sl.Elem()) {
+						if sl, isSl := underlyingType(p.TypesInfo.TypeOf(cur)).(*types.Slice); isSl && !TypeContainsRefOrPointer(sl.Elem()) {
 							return true
 						}
 					}
@@ -12061,7 +12061,7 @@ func useIsNonEscapingOnFreshVar(
 				// fresh node in `sum.vars` provided no fresh variable in `sum.vars` implements that interface and the callee
 				// returns only scalar/error results without retaining carriers!
 				if cur != id && !x.Ellipsis.IsValid() {
-					if iface, isIface := types.Unalias(p.TypesInfo.TypeOf(cur)).Underlying().(*types.Interface); isIface && iface.NumMethods() > 0 {
+					if iface, isIface := underlyingType(p.TypesInfo.TypeOf(cur)).(*types.Interface); isIface && iface.NumMethods() > 0 {
 						anyFreshImplements := false
 						for fv := range sum.vars {
 							if fv == nil || fv.Type() == nil {
@@ -13610,7 +13610,7 @@ func isMakeFixedSliceCall(p *packages.Package, expr ast.Expr) bool {
 	if !ok || b.Name() != "make" || !isNonNegConstInt(p, call.Args[1]) {
 		return false
 	}
-	_, isSlice := types.Unalias(p.TypesInfo.TypeOf(call)).Underlying().(*types.Slice)
+	_, isSlice := underlyingType(p.TypesInfo.TypeOf(call)).(*types.Slice)
 	return isSlice
 }
 

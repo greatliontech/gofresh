@@ -3978,7 +3978,7 @@ func isMakeChanCall(info *types.Info, e ast.Expr) bool {
 	if !ok || b.Name() != "make" {
 		return false
 	}
-	if _, isCh := types.Unalias(info.TypeOf(call.Args[0])).Underlying().(*types.Chan); !isCh {
+	if _, isCh := underlyingType(info.TypeOf(call.Args[0])).(*types.Chan); !isCh {
 		return false
 	}
 	if len(call.Args) == 2 {
@@ -4030,12 +4030,19 @@ func isEmptyFailfileReset(info *types.Info, e ast.Expr) bool {
 	return false
 }
 
+func underlyingType(t types.Type) types.Type {
+	if t = types.Unalias(t); t != nil {
+		return t.Underlying()
+	}
+	return nil
+}
+
 func isCategoryABoolFieldExpr(info *types.Info, e ast.Expr, categoryA map[*types.Var]bool) bool {
 	sel, ok := ast.Unparen(e).(*ast.SelectorExpr)
 	if !ok {
 		return false
 	}
-	b, ok := types.Unalias(info.TypeOf(sel)).Underlying().(*types.Basic)
+	b, ok := underlyingType(info.TypeOf(sel)).(*types.Basic)
 	if !ok || b.Kind() != types.Bool {
 		return false
 	}

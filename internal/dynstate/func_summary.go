@@ -2950,7 +2950,7 @@ func analyzeSeamCallGraph(p *packages.Package) seamCallGraph {
 					recvSlot := dynHubID(exprSig, 0)
 					recvSlotWrite := dynHubWriteID(exprSig, 0)
 					for i := 0; i+1 < exprSig.Params().Len(); i++ {
-						if typeMayCarryParallel(exprSig.Params().At(i+1).Type()) {
+						if typeMayCarryParallel(exprSig.Params().At(i + 1).Type()) {
 							addParEdge(recvSlotWrite, dynHubID(exprSig, i+1))
 						}
 					}
@@ -2959,7 +2959,7 @@ func analyzeSeamCallGraph(p *packages.Package) seamCallGraph {
 							addParEdge(ifaceRecvID(origFn.Name()), recvSlot)
 							addParEdge(recvSlotWrite, ifaceRecvWriteID(origFn.Name()))
 							for i := 0; i+1 < exprSig.Params().Len(); i++ {
-								if typeMayCarryParallel(exprSig.Params().At(i+1).Type()) {
+								if typeMayCarryParallel(exprSig.Params().At(i + 1).Type()) {
 									addParEdge(ifaceHubID(origFn.Name(), i), dynHubID(exprSig, i+1))
 									addParEdge(dynHubWriteID(exprSig, i+1), ifaceHubWriteID(origFn.Name(), i))
 								}
@@ -2986,9 +2986,9 @@ func analyzeSeamCallGraph(p *packages.Package) seamCallGraph {
 									addParEdge(recvSlotWrite, crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#wrecv"}))
 								}
 								for i := 0; i+1 < exprSig.Params().Len(); i++ {
-									if typeMayCarryParallel(exprSig.Params().At(i+1).Type()) {
+									if typeMayCarryParallel(exprSig.Params().At(i + 1).Type()) {
 										addParEdge(crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#" + strconv.Itoa(i)}), dynHubID(exprSig, i+1))
-										if typeMayCarryMutableAlias(exprSig.Params().At(i+1).Type()) {
+										if typeMayCarryMutableAlias(exprSig.Params().At(i + 1).Type()) {
 											addParEdge(dynHubWriteID(exprSig, i+1), crossID(FuncKey{Pkg: fk.Pkg, Name: fk.Name + "#w#" + strconv.Itoa(i)}))
 										}
 									}
@@ -7425,7 +7425,7 @@ func recordDynamicGlobalUses(
 						if base, ok := unparenExpr(index.X).(*ast.Ident); ok {
 							if obj, ok := resolve(base); ok {
 								if owner, ok := dynamicPackageVar(obj); ok {
-									if sig, ok := types.Unalias(p.TypesInfo.TypeOf(n.Fun)).Underlying().(*types.Signature); ok {
+									if sig, ok := underlyingType(p.TypesInfo.TypeOf(n.Fun)).(*types.Signature); ok {
 										ownerKey := dynamicVarKey(owner)
 										for i, arg := range n.Args {
 											ident, ok := unparenExpr(arg).(*ast.Ident)
@@ -10460,7 +10460,7 @@ func boundValueJudged(
 								if base, ok := unparenExpr(index.X).(*ast.Ident); ok {
 									obj := p.TypesInfo.Uses[base]
 									if v, isVar := obj.(*types.Var); isVar && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() && TypeMayCarryUnknownDynamic(audited, v.Type()) {
-										if sig, sigOK := types.Unalias(p.TypesInfo.TypeOf(n.Fun)).Underlying().(*types.Signature); sigOK && sig.Params().Len() > 0 {
+										if sig, sigOK := underlyingType(p.TypesInfo.TypeOf(n.Fun)).(*types.Signature); sigOK && sig.Params().Len() > 0 {
 											idx := i
 											if sig.Variadic() && idx >= sig.Params().Len()-1 {
 												idx = sig.Params().Len() - 1
