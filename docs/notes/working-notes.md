@@ -115,3 +115,21 @@ Target repositories (ordered smallest-to-largest): **`pew` → `stipulator` → 
 5. **Shared CLI / MCP / Process Utilities**:
    - Deduplicate `internal/{gotool,guidance,resident,toolversion,shortgates,shapecorpus,trace}` across `pew`, `stipulator`, `gomutant`.
 
+---
+
+## 4. Initial Bottleneck & Observability Diagnosis (2026-11-09)
+
+1. **Premature Uninstrumented `stipulator check -C ../pew` Aborted**:
+   - An uninstrumented `stipulator check -C ../pew` run spent `8m30.3s` in `discovery` (peak RSS `4.6 GiB`) and then stalled in `race: 11/12 packages` (`cmd/pew`) from `12m40s` to `44m24s` (`32+ minutes` on one package), while only `1/11` packages (`internal/guidance`) emitted a `persisted:` note.
+2. **Code-Level Root Cause Identified in `stipulator` + `gofresh`**:
+   - In `stipulator/internal/backends/golang/native.go` (`captureNativeGeneration`, lines 107–170), `stipulator` creates a group `Snapshot` over all 475 subjects and then a second `soloSession.Snapshot` (`SingleSubjectExecution`) over all subjects that had `SharedDynamicStateCause` under `PackageExecution`, calling `CaptureBatch` on both — but never pre-populating `observable` on the parent snapshots.
+   - In `stipulator/internal/backends/golang/selection.go` (lines 158–263), every `solo` subject (`view.isSolo(s)`) and every `Fuzz*` subject mixed with `Test*` subjects in a package (e.g., `~150+` tests in `cmd/pew`) is placed into `plannedSolos[pkg]` and executed via `runNativePackage` in `inSlot`.
+   - For **every single solo test** (`j = 0 .. N-1`):
+     1. `prepareNativeAttempt` calls `binding.BeginPackage([]Subject{solo})` → `b.snapshot.Sibling([]Subject{solo})`. Because the parent snapshot's `observable` map is empty, each child `Sibling` starts with an empty `observable` map.
+     2. `unit.Register` calls `u.view.prepareOutcomeSupport` → `u.view.ensureObservable(preparing, [solo])` (`gofresh/view.go:1823`), which runs `hasher.ComputeObservabilityBatch([solo])` **and** a full `after, err := v.observe(ctx)` pass (`go env -json` + `scanViewSubjects` + `ComputeMaximalFactsBatch`), storing the result only in the ephemeral child `v.observable`!
+     3. After the test binary finishes, `afterSlot` calls `finishNativeRun(ctx, &units[i].solos[j])` → `a.unit.Close(ctx)` (`gofresh/unit.go:505`), which calls `u.view.Validate(ctx)` — running **another** full `v.observe(ctx)` pass per solo test!
+   - Thus, a package with `150` solo tests triggers **300+ sequential `observeView` passes** (`~35 minutes`) instead of sharing batch observability and package-level validation!
+3. **Immediate Action (Chunk 1)**:
+   - Wire `internal/trace` across `pew`, `stipulator`, and `gomutant` (and add fine-grained timing spans in `stipulator/internal/backends/golang/{native.go,selection.go,nativeexecution.go,witnessrun.go}` so every group snapshot, solo execution, `unit.Register`, `unit.Close`, and `publishPackage` emits its exact `duration_ms` and refusal reason) before running any further protocol commands.
+
+
