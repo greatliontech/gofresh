@@ -61,3 +61,49 @@ Target repositories (ordered smallest-to-largest): **`pew` → `stipulator` → 
 ### Stage 4: Bottleneck & Survivor Fix Loop
 1. **Speed / Efficiency**: Profile and fix any phase exhibiting redundant `go` tool spawns, unexpected cache invalidation, schema-compile blowup, or excessive RSS.
 2. **Accuracy / Coverage**: For any genuine surviving mutant, strengthen tests to kill it or record a verified semantic equivalence; for any false `unverifiable` refusal on a pure/hermetic target, diagnose and fix the underlying analyzer from first principles.
+
+---
+
+## 3. Code Architecture Roadmap & Sequencing
+
+### 3.1 Sequencing Decision (Before / While / After Protocol)
+1. **Before running the full protocol — Unify & Extend Tracing (`trace`)**:
+   - Expose `gofresh`'s zero-disabled-cost structured tracing (`github.com/greatliontech/gofresh/trace`, backed by `internal/trace`) so `pew`, `stipulator`, and `gomutant` emit structured phase and event spans into the same timeline/recorder as `gofresh`.
+   - Running the evaluation protocol with unified tracing gives immediate causal visibility into every phase, cache hit/miss, `go` command spawn, schema compile, and closure/dynstate pass.
+2. **During the protocol — Establish Golden Incremental Baselines**:
+   - Populate `.gomutant/findings.json` (v17), `.stipulator/` caches, and `benchmarks/` baselines across `pew`, `stipulator`, `gomutant`, and `gofresh`, fixing any speed, efficiency, or accuracy defects uncovered by the trace-instrumented runs.
+3. **After / Interleaved with Golden Baselines — Package Decomposition & Deduplication**:
+   - Decompose oversized packages one bounded chunk at a time while using the newly populated incremental findings and `stipulator`/`pew` baselines as continuous regression guards.
+
+### 3.2 Quantitative Size Audit (Non-Test `.go` Lines)
+- **`gofresh` (`~84,000` non-test lines concentrated in 2 flat packages)**:
+  - `internal/closure`: `~48,600` lines across 23 files (`toolchain_audit_io.go` 8,319; `toolchain_audit_core.go` 6,091; `propertyharness.go` 5,355; `freshpath.go` 5,090; `attribution.go` 4,104; `asmverify.go` 3,483; `toolchain_loader.go` 2,814; `analyzer.go` 2,745; `observability.go` 2,742; `toolchain_cpreprocessor.go` 2,107; `toolchain_contracts.go` 1,995; `maximal.go` 1,887; `closure.go` 1,083).
+  - `internal/dynstate`: `~35,500` lines across 9 files (`discharges_proto.go` 14,063; `func_summary.go` 12,325; `discharges_audited.go` 3,051; `refconfine.go` 2,166; `fixpoint.go` 1,826; `facts.go` 1,330).
+  - Root `package gofresh`: `view.go` (3,253), `session.go` (1,158).
+- **`gomutant` (`~19,900` non-test lines)**:
+  - Root `package gomutant`: `~13,400` lines (`run.go` 3,548; `findings.go` 3,306; `freshness.go` 1,911; `store.go` 1,456; `reconcile.go` 1,300; `gomutant.go` 1,006; `ephemeral.go` 962; `prepare.go` 931).
+  - `internal/engine`: `run.go` (1,776), `buildset.go` (1,320), `schema.go` (990).
+- **`stipulator`**:
+  - Already modular across 33 `internal/*` packages; largest non-generated package is `internal/backends/golang` (`~8,585` lines across `execute.go` 1,894; `derive.go` 1,867; `golang.go` 1,769; `witnessrun.go` 1,683; `served.go` 1,372).
+- **`pew`**:
+  - Compact (`cmd/pew/run.go` 1,472; `internal/store/store.go` 1,047; `internal/compare/compare.go` 927).
+
+### 3.3 Proposed Target Package Boundaries
+1. **Cross-Tool Observability (`gofresh/trace`)**:
+   - Promote/expose `github.com/greatliontech/gofresh/trace` (zero-alloc when disabled, context-scoped `Recorder` + `GOFRESH_TRACE` / `GOFRESH_TRACE_FILE` env activation) so `pew`, `stipulator`, and `gomutant` share one trace event model and sink.
+2. **Decomposing `gofresh/internal/closure` (`~48.6k` lines → 5 focused packages)**:
+   - `internal/closure/internal/asmverify`: Mechanical `.s` assembly verifier (`asmverify.go`, `~3.5k` lines). Input: `go/types` package + `.s` file bytes.
+   - `internal/closure/internal/propharness`: Mechanical property-testing harness verifier (`propertyharness.go`, `~5.4k` lines).
+   - `internal/closure/internal/toolchain`: Toolchain stdlib/runtime loader, C preprocessor, scope/index, and stdlib/runtime purity audit (`toolchain_*.go`, `~23.1k` lines, further split between loader/preprocessor and audit rules).
+   - `internal/closure/internal/freshpath`: SSA freshness-path and impurity attribution (`freshpath.go`, `attribution.go`, `~9.2k` lines).
+   - `internal/closure`: Thin coordinator (`closure.go`, `analyzer.go`, `observability.go`, `maximal.go`, `canonical.go`, `viewload.go`, `~7.4k` lines) composing `program`, `rta`, `compartment`, `digest`, `listing`, and the 4 subpackages above.
+3. **Decomposing `gofresh/internal/dynstate` (`~35.5k` lines → 4 focused packages)**:
+   - `internal/dynstate/internal/refconfine`: Read-only reference and seed-struct confinement engine (`refconfine.go`, `~2.2k` lines).
+   - `internal/dynstate/internal/protoaudit`: Protobuf generated-code and runtime descriptor/extension/enum verifiers (`discharges_proto.go`, `~14.1k` lines, split by descriptor/enum/extension/message domain).
+   - `internal/dynstate/internal/funcsummary`: Per-function AST/SSA mutation, return-env, and parameter-leak summaries (`func_summary.go`, `~12.3k` lines).
+   - `internal/dynstate`: Fact schema, audited stdlib discharges, and least-fixed-point graph solver (`facts.go`, `fixpoint.go`, `discharges_audited.go`, `typecarrier.go`, `~6.9k` lines).
+4. **Decomposing `gomutant` Root Package (`~13.4k` lines)**:
+   - Extract `internal/findings` (document v4–v17 schema, table interning, store lock/IO from `findings.go` + `store.go`) and `internal/reconcile` (freshness revalidation and incremental merge from `freshness.go` + `reconcile.go`), leaving root `package gomutant` as the public `Tree` orchestration facade.
+5. **Shared CLI / MCP / Process Utilities**:
+   - Deduplicate `internal/{gotool,guidance,resident,toolversion,shortgates,shapecorpus}` (~2,500 lines duplicated 3x across `pew`, `stipulator`, `gomutant`).
+
