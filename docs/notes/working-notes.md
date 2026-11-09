@@ -88,81 +88,61 @@ Target repositories (ordered smallest-to-largest): **`pew` → `stipulator` → 
 - **`pew`**:
   - Compact (`cmd/pew/run.go` 1,472; `internal/store/store.go` 1,047; `internal/compare/compare.go` 927).
 
-### 3.3 Proposed Target Package Boundaries & User Alignment (2026-11-09)
-- **User Alignment**:
-  1. **Unified Tracing**: Approved. Wire structured tracing into `pew`, `stipulator`, and `gomutant` before running the evaluation protocol.
-  2. **Natural Package Boundaries Only**: Approved. Follow natural, low-coupling boundaries (`asmverify`, `propharness`, `refconfine`, etc.); if a boundary is unclear or would force artificial coupling, do not force it.
+### 3.3 Agreed Package Boundaries & Coupling Audit (2026-11-09)
+- **User Alignment (2026-11-09)**:
+  1. **Unified Tracing**: Approved & completed (Chunk 1).
+  2. **Architecture & Decomposition Before Ad-Hoc Patching**: Approved. Stop reactive symptom patching; execute a structured package decomposition and `Snapshot`/`Sibling` batching redesign (`docs/plans/plan.md`) before running the 4-repo evaluation protocol.
+  3. **Follow Natural, Low-Coupling Boundaries Only**: Approved. Note that `gofresh/.stipulator/policy.textproto` already routes `./internal/closure/internal/...` to the fast `race:leaf` invocation (`5m` budget), where `compartment`, `digest`, `listing`, `program`, and `rta` already live.
 
-1. **Cross-Tool Observability (`internal/trace` across `gofresh`, `pew`, `stipulator`, `gomutant`)**:
-   - Because `gofresh` enforces a single-package public surface (`TestExportedSurfaceInventory` / `REQ-fresh-surface`) and `internal/gotool` in all 4 repos already strips `GOFRESH_TRACE` and `GOFRESH_TRACE_FILE` via `gotool.IsTraceEnvKey` (`REQ-fresh-trace-non-interference`), adding `internal/trace` to `pew`, `stipulator`, and `gomutant` (reading the same `GOFRESH_TRACE` and `GOFRESH_TRACE_FILE` env vars and emitting the identical JSONL/text schema) yields a **single interleaved trace stream** across both the downstream tool and `gofresh v0.122.2` without touching `gofresh`'s public surface.
-   - Domains per tool:
-     - **`pew`**: `select` (inventory & freshness), `execute` (`go test -bench` runs & profiles), `compare` (statistical analysis), `store` (artifact read/write).
-     - **`stipulator`**: `compile` (spec/binding/pin load), `discover` (subject/witness discovery), `resolve` (resolution cache hit/miss & typed derivation), `witness` (witness cache hit/refusal & leg execution), `verify` (claim/pin/gap verification).
-     - **`gomutant`**: `prepare` (target discovery & RTA oracle ordering), `schema` (per-package mutant schema compile & fallback), `oracle` (baseline bank hit/miss, `go test`/schema binary execution, runtime-input ingest), `reconcile` (freshness serve vs stale reason & findings merge).
-2. **Decomposing `gofresh/internal/closure` (`~48.6k` lines → natural subpackages)**:
-   - `internal/closure/internal/asmverify`: Mechanical `.s` assembly verifier (`asmverify.go`, `~3.5k` lines). Input: `go/types` package + `.s` file bytes.
-   - `internal/closure/internal/propharness`: Mechanical property-testing harness verifier (`propertyharness.go`, `~5.4k` lines).
-   - `internal/closure/internal/toolchain`: Toolchain stdlib/runtime loader, C preprocessor, scope/index, and stdlib/runtime purity audit (`toolchain_*.go`, `~23.1k` lines).
-   - `internal/closure/internal/freshpath`: SSA freshness-path and impurity attribution (`freshpath.go`, `attribution.go`, `~9.2k` lines) — extract only if its coupling with `analyzer.go` / `observability.go` is clean; otherwise keep tightly coupled pass state together.
-   - `internal/closure`: Coordinator (`closure.go`, `analyzer.go`, `observability.go`, `maximal.go`, `canonical.go`, `viewload.go`).
-3. **Decomposing `gofresh/internal/dynstate` (`~35.5k` lines → natural subpackages)**:
-   - `internal/dynstate/internal/refconfine`: Read-only reference and seed-struct confinement engine (`refconfine.go`, `~2.2k` lines).
-   - `internal/dynstate/internal/protoaudit`: Protobuf generated-code and runtime descriptor/extension/enum verifiers (`discharges_proto.go`, `~14.1k` lines, split by descriptor/enum/extension/message domain).
-   - `internal/dynstate/internal/funcsummary`: Per-function AST/SSA mutation, return-env, and parameter-leak summaries (`func_summary.go`, `~12.3k` lines) — extract if coupling with `facts.go` is narrow; otherwise split by file within `dynstate`.
-   - `internal/dynstate`: Fact schema, audited stdlib discharges, and least-fixed-point graph solver (`facts.go`, `fixpoint.go`, `discharges_audited.go`, `typecarrier.go`).
-4. **Decomposing `gomutant` Root Package (`~13.4k` lines)**:
-   - Extract `internal/findings` (document v4–v17 schema, table interning, store lock/IO from `findings.go` + `store.go`) and `internal/reconcile` (freshness revalidation and incremental merge from `freshness.go` + `reconcile.go`) where boundaries with `Tree` are clean.
-5. **Shared CLI / MCP / Process Utilities**:
-   - Deduplicate `internal/{gotool,guidance,resident,toolversion,shortgates,shapecorpus,trace}` across `pew`, `stipulator`, `gomutant`.
+1. **`gofresh/internal/closure` (`48,600` lines → `~17,000` lines + 4 `internal/closure/internal/*` leaf packages — Chunks 2 & 3)**:
+   - **`internal/closure/internal/cprep`** (`~2,570` lines from `toolchain_cpreprocessor.go` + `cgo_includes.go`):
+     - Deterministic C and Go-assembler `#include`/`#define`/`#if` preprocessor and header-graph scanner.
+     - Zero dependencies on `closure`, `ssa`, or `packages` (stdlib only). Shared by `asmverify`, `toolchain`, and `closure`.
+   - **`internal/closure/internal/asmverify`** (`~3,300` lines from `asmverify.go`):
+     - Mechanical Plan 9 `.s` assembly parser, `RODATA`/`(SB)` discipline checker, and ISA instruction verifier across `amd64`, `arm64`, `ppc64le`, `riscv64`, `s390x`, `loong64`.
+     - Depends only on `go/types`, stdlib, and `internal/closure/internal/cprep`. Leaves `<200` lines of `tier2Base` / `tier2Analyzer` memo and linkname glue in `closure/asmverify.go`.
+   - **`internal/closure/internal/propharness`** (`~4,700` lines from `propertyharness.go` lines 839–5355):
+     - Mechanical AST and `go/types` source verifier for `pgregory.net/rapid` (`VerifyPackageWithReason(audited bool, pkg *packages.Package) (bool, string)`).
+     - Depends only on `go/ast`, `go/constant`, `go/token`, `go/types`, `go-x-tools/go/packages`, `internal/auditset`, `internal/dynstate`. Leaves `~600` lines of SSA call-site boundary-gate checks in `closure/propertyharness.go`.
+   - **`internal/closure/internal/toolchain`** (`~21,100` lines from `toolchain_loader.go`, `toolchain_scope.go`, `toolchain_index.go`, `toolchain_contracts.go`, `toolchain_audit_core.go`, `toolchain_audit_io.go`, `toolchainsource_*.go`):
+     - Go toolchain `std`/`runtime` inventory loader, stamp-gated memo, AST scope/directive indexer, and structural stdlib/runtime purity verifiers.
+     - Narrow interface back to `closure`: `ResolveSelection`, `ResolveToolchainSelection`, `SelectionDegradation`, `SourceDigests`, `AttributeSelection`.
+2. **`gofresh/internal/dynstate` (`35,595` lines → `~13,500` lines + 4 `internal/dynstate/internal/*` leaf packages — Chunk 4)**:
+   - **`internal/dynstate/internal/refconfine`** (`~2,800` lines from `refconfine.go` + `typecarrier.go`):
+     - Mutable-reference and dynamic-carrier type predicates (`IsDirectMutableRef`, `TypeCarriesMutableRef`, `TypeContainsRefOrPointer`, `TypeMayCarryDynamic`, `IsDynamicCarrierType`) and `VerifyReadOnlyRefConfinement`.
+     - Depends only on `go/ast`, `go/token`, `go/types`, `go-x-tools/go/packages`, `internal/auditset`. Re-exported thinly from `dynstate`.
+   - **`internal/dynstate/internal/seams`** (`~6,350` lines from `func_summary.go` lines 279–6626):
+     - Self-contained bracketed test-seam (`t.Cleanup` / `defer` global save-and-restore) call-graph and live-testing-handle analyzer (`AnalyzeBracketedSeams`). Cuts `func_summary.go` in half (`12,325` → `~5,975` lines).
+   - **`internal/dynstate/internal/protoaudit`** (`~7,800` lines from `discharges_proto.go` lines 1388–9128):
+     - Protobuf, gRPC, and locked/once/atomic descriptor and memoizer verifiers, split internally into `cluster.go`, `runtime.go`, `memoizer.go`, and `grpc.go`.
+   - **`internal/dynstate/internal/freshstruct`** (`~4,900` lines from `discharges_proto.go` lines 9129–14063):
+     - Fresh local struct constructors, non-escaping intra-procedural parameter summaries, and mutex-confined constructor caches.
+   - Add `./internal/dynstate/internal/...` to `race:leaf` in `gofresh/.stipulator/policy.textproto`.
+3. **`gomutant` Root Package (`~13.4k` lines — Chunk 5)**:
+   - Extract internal findings codec/interning helpers and split `findings.go` (`3,306` lines) and `run.go` (`3,572` lines) along natural phase/responsibility boundaries while preserving all exported `package gomutant` types and `.stipulator/bindings/` symbols.
 
 ---
 
-## 4. Initial Bottleneck & Observability Diagnosis (2026-11-09)
+## 4. Architectural Bottleneck & Observability Diagnosis (2026-11-09)
 
-1. **Premature Uninstrumented `stipulator check -C ../pew` Aborted**:
-   - An uninstrumented `stipulator check -C ../pew` run spent `8m30.3s` in `discovery` (peak RSS `4.6 GiB`) and then stalled in `race: 11/12 packages` (`cmd/pew`) from `12m40s` to `44m24s` (`32+ minutes` on one package), while only `1/11` packages (`internal/guidance`) emitted a `persisted:` note.
-2. **Code-Level Root Cause Identified in `stipulator` + `gofresh`**:
-   - In `stipulator/internal/backends/golang/native.go` (`captureNativeGeneration`, lines 107–170), `stipulator` creates a group `Snapshot` over all 475 subjects and then a second `soloSession.Snapshot` (`SingleSubjectExecution`) over all subjects that had `SharedDynamicStateCause` under `PackageExecution`, calling `CaptureBatch` on both — but never pre-populating `observable` on the parent snapshots.
-   - In `stipulator/internal/backends/golang/selection.go` (lines 158–263), every `solo` subject (`view.isSolo(s)`) and every `Fuzz*` subject mixed with `Test*` subjects in a package (e.g., `~150+` tests in `cmd/pew`) is placed into `plannedSolos[pkg]` and executed via `runNativePackage` in `inSlot`.
-   - For **every single solo test** (`j = 0 .. N-1`):
-     1. `prepareNativeAttempt` calls `binding.BeginPackage([]Subject{solo})` → `b.snapshot.Sibling([]Subject{solo})`. Because the parent snapshot's `observable` map is empty, each child `Sibling` starts with an empty `observable` map.
-     2. `unit.Register` calls `u.view.prepareOutcomeSupport` → `u.view.ensureObservable(preparing, [solo])` (`gofresh/view.go:1823`), which runs `hasher.ComputeObservabilityBatch([solo])` **and** a full `after, err := v.observe(ctx)` pass (`go env -json` + `scanViewSubjects` + `ComputeMaximalFactsBatch`), storing the result only in the ephemeral child `v.observable`!
-     3. After the test binary finishes, `afterSlot` calls `finishNativeRun(ctx, &units[i].solos[j])` → `a.unit.Close(ctx)` (`gofresh/unit.go:505`), which calls `u.view.Validate(ctx)` — running **another** full `v.observe(ctx)` pass per solo test!
-   - Thus, a package with `150` solo tests triggers **300+ sequential `observeView` passes** (`~35 minutes`) instead of sharing batch observability and package-level validation!
-3. **Immediate Action (Chunk 1 — Completed 2026-11-09)**:
-   - Wired `internal/trace` across `pew` (`6f17379`), `stipulator` (`490afde`), and `gomutant` (`6a6cab4`) with `0` allocations on the disabled fast path, carrier-free package-level state, and identical `GOFRESH_TRACE` / `GOFRESH_TRACE_FILE` wire format so all 4 repositories interleave into a single diagnostic timeline.
+1. **Completed Chunk 1 (`internal/trace` Across Fleet)**:
+   - Wired `internal/trace` across `pew v0.11.0` (`6f17379`), `stipulator v0.77.0` (`490afde`), and `gomutant v0.68.0` (`6a6cab4`) with `0` allocations on the disabled fast path, carrier-free package-level state, and identical `GOFRESH_TRACE` / `GOFRESH_TRACE_FILE` wire format.
    - Verified cold-to-warm `stipulator verify --no-test` resolution-cache performance across all 3 downstream repos:
      - **`pew`**: Cold `48.1s` (`1` served, `309` resolved typed, peak `2.0 GiB`) → Warm `1.8s` (`310/310` served from records, `0` resolved typed, peak `112 MiB`).
      - **`stipulator`**: Cold `5m20.9s` (`0` served, `1153` resolved typed, peak `5.5 GiB`) → Warm `11.8s` (`1153/1153` served from records, `0` resolved typed, peak `325 MiB`).
      - **`gomutant`**: Cold `44.0s` (`0` served, `732` resolved typed, peak `1.1 GiB`) → Warm `2.3s` (`732/732` served from records, `0` resolved typed, peak `199 MiB`).
-4. **Chunk 2 Trace-Enabled Probe & Root-Cause Findings (2026-11-09)**:
-   - **Cause 1 — False Startup Effect Refusals (`StartupEffect: true` → `Observable: false`)**:
-     - Running a targeted probe on `pew/internal/store` and `pew/cmd/pew` exposed 4 distinct sources of false startup effects that prevented witness caching (`persisted:`) on `11/12` `pew` packages:
-     - **Cause 1A (`go-x-tools` package initializers)**:
-       1. `go/packages/golist.go:29`: `var debug, _ = strconv.ParseBool(os.Getenv("GOPACKAGESDEBUG"))` runs at package init in every binary importing `go-x-tools/go/packages`, attributing `startup effect: reaches os.Getenv (environment input)` to any package transitively importing `go/packages`. Evaluating `GOPACKAGESDEBUG` lazily inside `defaultDriver` (`packages.go:737`) eliminates the startup environment read.
-       2. `go/ssa/builder.go:95`: `var tRune = types.Universe.Lookup("rune").Type().(*types.Basic)` calls `(*types.Scope).Lookup` at init; replacing with `types.Typ[types.Rune]` eliminates the un-audited `go/types.Lookup` startup call.
-     - **Cause 1B (Missing pure stdlib symbols in `gofresh/internal/auditset/auditset.go`)**:
-       1. `reflect.TypeFor` is already listed in `allowedPureReflectSelectors` (`internal/closure/toolchain_contracts.go:195`), but omitted from `reflectSymbols` in `internal/auditset/auditset.go:121` (affecting `go/ast/edge.init` and `golang.org/x/crypto/ssh.init`).
-       2. Pure IEEE-754 `math` functions (`NaN`, `Inf`, `Pow`, `Abs`, `Ceil`, `Copysign`, `Float32bits`, `Float32frombits`, `Float64bits`, `Float64frombits`, `Floor`, `Frexp`, `IsInf`, `IsNaN`, `Ldexp`, `Max`, `Min`, `Modf`, `Round`, `RoundToEven`, `Signbit`, `Sqrt`, `Trunc`) are listed in `allowedPureMathSelectors` (`toolchain_contracts.go:107-151`), whereas `mathSymbols` in `auditset.go:507` only listed constants (affecting `github.com/aclements/go-moremath/{mathx,stats}.init` and `golang.org/x/perf/benchunit.init`).
-     - **Cause 1C (`(*strconv.NumError).Error()` rejection in `resolveConcreteMethodTargetsSeen`, `internal/closure/freshpath.go:4492`)**:
-       - In `pew/internal/recordingtest.Set$1`: `dirty, err := strconv.ParseBool(value); if err != nil { panic(... + err.Error()) }`.
-       - `closedInvokeTargets` traces `err` to `*strconv.NumError`, but `resolveConcreteMethodTargetsSeen` rejects `*strconv.NumError` because `NumError.Err` is of interface type `error` (`typeMayCarryDynamicTop == true`) and `(*strconv.NumError).Error` calls `e.Err.Error()` (`paramMaySupplyDynamicSeen == true`). When `closedInvokeTargets` fails, `narrowedTargets` falls back to all RTA `error.Error()` targets in `init`, hitting `(compress/flate.InternalError).Error`.
-       - By first principles, `*strconv.NumError` allocated inside `strconv` (`syntaxError` / `rangeError`) populates `Err` exclusively with `strconv.ErrSyntax` or `strconv.ErrRange` (`*errors.errorString`), unless a non-standard function constructs or mutates `strconv.NumError.Err`.
-     - **Cause 1D (Spurious RTA cross-contamination out of standard-library `init` roots and carrier-free stdlib calls in `internal/closure/attribution.go`)**:
-       - All consumers of `startupFunctions` (`observability.go:564, 576`, `analyzer.go:2658`) strip `std` functions via `nonStandardFunctions`.
-       - However, `cachedBaseStartupReachability` seeds all `initRoots` (both `std` and `non-std`) under a single RTA mask (`startupMask = 1`) and traverses `result.Targets[site]` out of `std` frames indiscriminately:
-         - `crypto/internal/fips140/aes.init -> fips140.CAST("AES-CBC", init#2$1) -> (io.Closer).Close$bound -> (*dotgit.ObjectWriter).Close`
-         - `crypto/internal/fips140/check.init -> check.init#1 -> (*crypto/tls.Conn).Write`
-         - `go/types.init -> fmt.Sprintf("go1.%d", int) -> (*fmt.pp).handleMethods -> (*object.Tag).String`
-         - `internal/buildcfg.init -> os.Getenv("GOROOT") -> syscall.Getenv -> sync.Once.Do(copyenv) -> pflag.init$1`
-         - `pew/internal/store.init -> regexp.MustCompile("^[0-9a-f]{64}$") -> (*encoding/json/v2.SemanticError).Error -> internal/sysinfo.init$1`
-         - `gofresh/internal/closure.init -> typeShape -> crypto/sha256.Sum256(b) -> (ssh.truncatingMAC).Sum`
-       - By first principles:
-         1. Standard-library `init` functions (`isStdPkgPath`) only import standard-library packages and cannot reach non-standard functions unless a non-standard `init` function writes a dynamic carrier into a `std` global (`userTouchedStdGlobals`).
-         2. A static call to an audited pure standard-library function whose arguments carry no non-standard dynamic values (`!argMaySupplyNonStdDynamic`) cannot dynamically dispatch to any non-standard function or method.
-   - **Cause 2 — Unscoped `soloSession.Snapshot` & Per-Solo `Sibling` Observability Re-Evaluation**:
-     1. In `stipulator/internal/backends/golang/native.go` (`captureNativeGeneration`), `soloSession.Snapshot` (`SingleSubjectExecution`) captures all `438` `SharedDynamicStateCause` candidates even when `stipulator check --ids ...` is scoped to 1 requirement (`6` subjects) and the unrequested candidates have no cached `SingleSubjectExecution` records.
-     2. In `gofresh/view.go`, `Sibling` resets `v.observable` to an empty map instead of inheriting or sharing already-computed observability entries from the parent snapshot/batch, causing per-solo `BeginPackage([solo])` units to re-run `ensureObservable` (`ComputeObservabilityBatch` + `v.observe(ctx)`).
+2. **Exact Mathematical Root Cause of the 32-Minute Solo-Test Stall (`Snapshot` / `Sibling` / `Unit` Lifecycle — Chunk 6)**:
+   - `gofresh/view.go:1022` (`Sibling`) ALREADY inherits `observable[subject]` from its parent `Snapshot`, and `ensureObservable` (`view.go:1836-1843`) is a `0ms` no-op when `v.observable[subject]` is already populated.
+   - However:
+     1. In `stipulator/internal/backends/golang/native.go` (`captureNativeGeneration`), `stipulator` calls `CaptureBatch` (not `CaptureObservedBatch`), so the parent `Snapshot` and `solo` `Snapshot` have an empty `v.observable` map.
+     2. When `prepareNativeAttempt` creates a 1-subject `Sibling` `Unit` for each of the $N \approx 150$ solo tests in `cmd/pew`, `u.view.ensureObservable` computes `observableComputed` and stores it **only** in the ephemeral child `Sibling`'s `v.observable` map — never sharing it back to the parent `Snapshot` — and runs a full `v.observe(ctx)` pass (`~4.5s` over `cmd/pew`'s 114-package dependency graph) per solo test.
+     3. In `unit.Close(ctx)` → `u.view.Validate(ctx)` → `validateObserved(ctx)` (`view.go:1155-1164`), each solo `Unit` runs `v.newSeededValidationView(ctx)` (`v.observe(ctx)` #2) AND `current.ensureObservable(ctx, [solo])` (`v.observe(ctx)` #3).
+     4. Total for 150 solo tests in one package: $150 \times 3 = 450$ full `observeView` passes $\times 4.5\text{s} \approx 33.75\text{ minutes}$.
+   -Additionally, in `captureNativeGeneration` (`native.go:156-220`), `soloSession.Snapshot` (`SingleSubjectExecution`) captures all `438` `SharedDynamicStateCause` candidates across the repository even when `stipulator check --ids ...` is scoped to 1 requirement (`6` subjects).
+3. **Correction on `auditset` vs. Policy Configuration**:
+   - Per `docs/specs/closure.md:1597,1725` and `internal/auditset/auditset_test.go:73,76`, `math` runtime floating-point functions (`NaN`, `Inf`, `Pow`) and `reflect.TypeFor` are intentionally excluded from `auditset.go` (whereas `allowedPureMathSelectors` / `allowedPureReflectSelectors` in `toolchain_contracts.go` govern internal `std` pure-delegate verification only).
+   - `gofresh` and `stipulator` set `assume_pure: true` in `.stipulator/policy.textproto` for witness execution, whereas `pew` and `gomutant` do not. We must never weaken `auditset` invariants (`REQ-closure-observability-audited-set` / `REQ-closure-observability-reflect-exclusion`).
+
 
 
 
