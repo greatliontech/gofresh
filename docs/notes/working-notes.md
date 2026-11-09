@@ -135,8 +135,35 @@ Target repositories (ordered smallest-to-largest): **`pew` → `stipulator` → 
      - **`pew`**: Cold `48.1s` (`1` served, `309` resolved typed, peak `2.0 GiB`) → Warm `1.8s` (`310/310` served from records, `0` resolved typed, peak `112 MiB`).
      - **`stipulator`**: Cold `5m20.9s` (`0` served, `1153` resolved typed, peak `5.5 GiB`) → Warm `11.8s` (`1153/1153` served from records, `0` resolved typed, peak `325 MiB`).
      - **`gomutant`**: Cold `44.0s` (`0` served, `732` resolved typed, peak `1.1 GiB`) → Warm `2.3s` (`732/732` served from records, `0` resolved typed, peak `199 MiB`).
-4. **Next Action (Chunk 2)**:
-   - Run a targeted trace-enabled probe on `stipulator check` to inspect the interleaved `gofresh` + `stipulator` trace timeline, then fix the per-solo `ensureObservable` / `Validate` bottleneck in `gofresh` / `stipulator` before running the full evaluation protocol.
+4. **Chunk 2 Trace-Enabled Probe & Root-Cause Findings (2026-11-09)**:
+   - **Cause 1 — False Startup Effect Refusals (`StartupEffect: true` → `Observable: false`)**:
+     - Running a targeted probe on `pew/internal/store` and `pew/cmd/pew` exposed 4 distinct sources of false startup effects that prevented witness caching (`persisted:`) on `11/12` `pew` packages:
+     - **Cause 1A (`go-x-tools` package initializers)**:
+       1. `go/packages/golist.go:29`: `var debug, _ = strconv.ParseBool(os.Getenv("GOPACKAGESDEBUG"))` runs at package init in every binary importing `go-x-tools/go/packages`, attributing `startup effect: reaches os.Getenv (environment input)` to any package transitively importing `go/packages`. Evaluating `GOPACKAGESDEBUG` lazily inside `defaultDriver` (`packages.go:737`) eliminates the startup environment read.
+       2. `go/ssa/builder.go:95`: `var tRune = types.Universe.Lookup("rune").Type().(*types.Basic)` calls `(*types.Scope).Lookup` at init; replacing with `types.Typ[types.Rune]` eliminates the un-audited `go/types.Lookup` startup call.
+     - **Cause 1B (Missing pure stdlib symbols in `gofresh/internal/auditset/auditset.go`)**:
+       1. `reflect.TypeFor` is already listed in `allowedPureReflectSelectors` (`internal/closure/toolchain_contracts.go:195`), but omitted from `reflectSymbols` in `internal/auditset/auditset.go:121` (affecting `go/ast/edge.init` and `golang.org/x/crypto/ssh.init`).
+       2. Pure IEEE-754 `math` functions (`NaN`, `Inf`, `Pow`, `Abs`, `Ceil`, `Copysign`, `Float32bits`, `Float32frombits`, `Float64bits`, `Float64frombits`, `Floor`, `Frexp`, `IsInf`, `IsNaN`, `Ldexp`, `Max`, `Min`, `Modf`, `Round`, `RoundToEven`, `Signbit`, `Sqrt`, `Trunc`) are listed in `allowedPureMathSelectors` (`toolchain_contracts.go:107-151`), whereas `mathSymbols` in `auditset.go:507` only listed constants (affecting `github.com/aclements/go-moremath/{mathx,stats}.init` and `golang.org/x/perf/benchunit.init`).
+     - **Cause 1C (`(*strconv.NumError).Error()` rejection in `resolveConcreteMethodTargetsSeen`, `internal/closure/freshpath.go:4492`)**:
+       - In `pew/internal/recordingtest.Set$1`: `dirty, err := strconv.ParseBool(value); if err != nil { panic(... + err.Error()) }`.
+       - `closedInvokeTargets` traces `err` to `*strconv.NumError`, but `resolveConcreteMethodTargetsSeen` rejects `*strconv.NumError` because `NumError.Err` is of interface type `error` (`typeMayCarryDynamicTop == true`) and `(*strconv.NumError).Error` calls `e.Err.Error()` (`paramMaySupplyDynamicSeen == true`). When `closedInvokeTargets` fails, `narrowedTargets` falls back to all RTA `error.Error()` targets in `init`, hitting `(compress/flate.InternalError).Error`.
+       - By first principles, `*strconv.NumError` allocated inside `strconv` (`syntaxError` / `rangeError`) populates `Err` exclusively with `strconv.ErrSyntax` or `strconv.ErrRange` (`*errors.errorString`), unless a non-standard function constructs or mutates `strconv.NumError.Err`.
+     - **Cause 1D (Spurious RTA cross-contamination out of standard-library `init` roots and carrier-free stdlib calls in `internal/closure/attribution.go`)**:
+       - All consumers of `startupFunctions` (`observability.go:564, 576`, `analyzer.go:2658`) strip `std` functions via `nonStandardFunctions`.
+       - However, `cachedBaseStartupReachability` seeds all `initRoots` (both `std` and `non-std`) under a single RTA mask (`startupMask = 1`) and traverses `result.Targets[site]` out of `std` frames indiscriminately:
+         - `crypto/internal/fips140/aes.init -> fips140.CAST("AES-CBC", init#2$1) -> (io.Closer).Close$bound -> (*dotgit.ObjectWriter).Close`
+         - `crypto/internal/fips140/check.init -> check.init#1 -> (*crypto/tls.Conn).Write`
+         - `go/types.init -> fmt.Sprintf("go1.%d", int) -> (*fmt.pp).handleMethods -> (*object.Tag).String`
+         - `internal/buildcfg.init -> os.Getenv("GOROOT") -> syscall.Getenv -> sync.Once.Do(copyenv) -> pflag.init$1`
+         - `pew/internal/store.init -> regexp.MustCompile("^[0-9a-f]{64}$") -> (*encoding/json/v2.SemanticError).Error -> internal/sysinfo.init$1`
+         - `gofresh/internal/closure.init -> typeShape -> crypto/sha256.Sum256(b) -> (ssh.truncatingMAC).Sum`
+       - By first principles:
+         1. Standard-library `init` functions (`isStdPkgPath`) only import standard-library packages and cannot reach non-standard functions unless a non-standard `init` function writes a dynamic carrier into a `std` global (`userTouchedStdGlobals`).
+         2. A static call to an audited pure standard-library function whose arguments carry no non-standard dynamic values (`!argMaySupplyNonStdDynamic`) cannot dynamically dispatch to any non-standard function or method.
+   - **Cause 2 — Unscoped `soloSession.Snapshot` & Per-Solo `Sibling` Observability Re-Evaluation**:
+     1. In `stipulator/internal/backends/golang/native.go` (`captureNativeGeneration`), `soloSession.Snapshot` (`SingleSubjectExecution`) captures all `438` `SharedDynamicStateCause` candidates even when `stipulator check --ids ...` is scoped to 1 requirement (`6` subjects) and the unrequested candidates have no cached `SingleSubjectExecution` records.
+     2. In `gofresh/view.go`, `Sibling` resets `v.observable` to an empty map instead of inheriting or sharing already-computed observability entries from the parent snapshot/batch, causing per-solo `BeginPackage([solo])` units to re-run `ensureObservable` (`ComputeObservabilityBatch` + `v.observe(ctx)`).
+
 
 
 
