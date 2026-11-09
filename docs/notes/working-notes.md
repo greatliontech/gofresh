@@ -129,7 +129,14 @@ Target repositories (ordered smallest-to-largest): **`pew` → `stipulator` → 
      2. `unit.Register` calls `u.view.prepareOutcomeSupport` → `u.view.ensureObservable(preparing, [solo])` (`gofresh/view.go:1823`), which runs `hasher.ComputeObservabilityBatch([solo])` **and** a full `after, err := v.observe(ctx)` pass (`go env -json` + `scanViewSubjects` + `ComputeMaximalFactsBatch`), storing the result only in the ephemeral child `v.observable`!
      3. After the test binary finishes, `afterSlot` calls `finishNativeRun(ctx, &units[i].solos[j])` → `a.unit.Close(ctx)` (`gofresh/unit.go:505`), which calls `u.view.Validate(ctx)` — running **another** full `v.observe(ctx)` pass per solo test!
    - Thus, a package with `150` solo tests triggers **300+ sequential `observeView` passes** (`~35 minutes`) instead of sharing batch observability and package-level validation!
-3. **Immediate Action (Chunk 1)**:
-   - Wire `internal/trace` across `pew`, `stipulator`, and `gomutant` (and add fine-grained timing spans in `stipulator/internal/backends/golang/{native.go,selection.go,nativeexecution.go,witnessrun.go}` so every group snapshot, solo execution, `unit.Register`, `unit.Close`, and `publishPackage` emits its exact `duration_ms` and refusal reason) before running any further protocol commands.
+3. **Immediate Action (Chunk 1 — Completed 2026-11-09)**:
+   - Wired `internal/trace` across `pew` (`6f17379`), `stipulator` (`490afde`), and `gomutant` (`6a6cab4`) with `0` allocations on the disabled fast path, carrier-free package-level state, and identical `GOFRESH_TRACE` / `GOFRESH_TRACE_FILE` wire format so all 4 repositories interleave into a single diagnostic timeline.
+   - Verified cold-to-warm `stipulator verify --no-test` resolution-cache performance across all 3 downstream repos:
+     - **`pew`**: Cold `48.1s` (`1` served, `309` resolved typed, peak `2.0 GiB`) → Warm `1.8s` (`310/310` served from records, `0` resolved typed, peak `112 MiB`).
+     - **`stipulator`**: Cold `5m20.9s` (`0` served, `1153` resolved typed, peak `5.5 GiB`) → Warm `11.8s` (`1153/1153` served from records, `0` resolved typed, peak `325 MiB`).
+     - **`gomutant`**: Cold `44.0s` (`0` served, `732` resolved typed, peak `1.1 GiB`) → Warm `2.3s` (`732/732` served from records, `0` resolved typed, peak `199 MiB`).
+4. **Next Action (Chunk 2)**:
+   - Run a targeted trace-enabled probe on `stipulator check` to inspect the interleaved `gofresh` + `stipulator` trace timeline, then fix the per-solo `ensureObservable` / `Validate` bottleneck in `gofresh` / `stipulator` before running the full evaluation protocol.
+
 
 
