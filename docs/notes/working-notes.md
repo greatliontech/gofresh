@@ -88,22 +88,30 @@ Target repositories (ordered smallest-to-largest): **`pew` → `stipulator` → 
 - **`pew`**:
   - Compact (`cmd/pew/run.go` 1,472; `internal/store/store.go` 1,047; `internal/compare/compare.go` 927).
 
-### 3.3 Proposed Target Package Boundaries
-1. **Cross-Tool Observability (`gofresh/trace`)**:
-   - Promote/expose `github.com/greatliontech/gofresh/trace` (zero-alloc when disabled, context-scoped `Recorder` + `GOFRESH_TRACE` / `GOFRESH_TRACE_FILE` env activation) so `pew`, `stipulator`, and `gomutant` share one trace event model and sink.
-2. **Decomposing `gofresh/internal/closure` (`~48.6k` lines → 5 focused packages)**:
+### 3.3 Proposed Target Package Boundaries & User Alignment (2026-11-09)
+- **User Alignment**:
+  1. **Unified Tracing**: Approved. Wire structured tracing into `pew`, `stipulator`, and `gomutant` before running the evaluation protocol.
+  2. **Natural Package Boundaries Only**: Approved. Follow natural, low-coupling boundaries (`asmverify`, `propharness`, `refconfine`, etc.); if a boundary is unclear or would force artificial coupling, do not force it.
+
+1. **Cross-Tool Observability (`internal/trace` across `gofresh`, `pew`, `stipulator`, `gomutant`)**:
+   - Because `gofresh` enforces a single-package public surface (`TestExportedSurfaceInventory` / `REQ-fresh-surface`) and `internal/gotool` in all 4 repos already strips `GOFRESH_TRACE` and `GOFRESH_TRACE_FILE` via `gotool.IsTraceEnvKey` (`REQ-fresh-trace-non-interference`), adding `internal/trace` to `pew`, `stipulator`, and `gomutant` (reading the same `GOFRESH_TRACE` and `GOFRESH_TRACE_FILE` env vars and emitting the identical JSONL/text schema) yields a **single interleaved trace stream** across both the downstream tool and `gofresh v0.122.2` without touching `gofresh`'s public surface.
+   - Domains per tool:
+     - **`pew`**: `select` (inventory & freshness), `execute` (`go test -bench` runs & profiles), `compare` (statistical analysis), `store` (artifact read/write).
+     - **`stipulator`**: `compile` (spec/binding/pin load), `discover` (subject/witness discovery), `resolve` (resolution cache hit/miss & typed derivation), `witness` (witness cache hit/refusal & leg execution), `verify` (claim/pin/gap verification).
+     - **`gomutant`**: `prepare` (target discovery & RTA oracle ordering), `schema` (per-package mutant schema compile & fallback), `oracle` (baseline bank hit/miss, `go test`/schema binary execution, runtime-input ingest), `reconcile` (freshness serve vs stale reason & findings merge).
+2. **Decomposing `gofresh/internal/closure` (`~48.6k` lines → natural subpackages)**:
    - `internal/closure/internal/asmverify`: Mechanical `.s` assembly verifier (`asmverify.go`, `~3.5k` lines). Input: `go/types` package + `.s` file bytes.
    - `internal/closure/internal/propharness`: Mechanical property-testing harness verifier (`propertyharness.go`, `~5.4k` lines).
-   - `internal/closure/internal/toolchain`: Toolchain stdlib/runtime loader, C preprocessor, scope/index, and stdlib/runtime purity audit (`toolchain_*.go`, `~23.1k` lines, further split between loader/preprocessor and audit rules).
-   - `internal/closure/internal/freshpath`: SSA freshness-path and impurity attribution (`freshpath.go`, `attribution.go`, `~9.2k` lines).
-   - `internal/closure`: Thin coordinator (`closure.go`, `analyzer.go`, `observability.go`, `maximal.go`, `canonical.go`, `viewload.go`, `~7.4k` lines) composing `program`, `rta`, `compartment`, `digest`, `listing`, and the 4 subpackages above.
-3. **Decomposing `gofresh/internal/dynstate` (`~35.5k` lines → 4 focused packages)**:
+   - `internal/closure/internal/toolchain`: Toolchain stdlib/runtime loader, C preprocessor, scope/index, and stdlib/runtime purity audit (`toolchain_*.go`, `~23.1k` lines).
+   - `internal/closure/internal/freshpath`: SSA freshness-path and impurity attribution (`freshpath.go`, `attribution.go`, `~9.2k` lines) — extract only if its coupling with `analyzer.go` / `observability.go` is clean; otherwise keep tightly coupled pass state together.
+   - `internal/closure`: Coordinator (`closure.go`, `analyzer.go`, `observability.go`, `maximal.go`, `canonical.go`, `viewload.go`).
+3. **Decomposing `gofresh/internal/dynstate` (`~35.5k` lines → natural subpackages)**:
    - `internal/dynstate/internal/refconfine`: Read-only reference and seed-struct confinement engine (`refconfine.go`, `~2.2k` lines).
    - `internal/dynstate/internal/protoaudit`: Protobuf generated-code and runtime descriptor/extension/enum verifiers (`discharges_proto.go`, `~14.1k` lines, split by descriptor/enum/extension/message domain).
-   - `internal/dynstate/internal/funcsummary`: Per-function AST/SSA mutation, return-env, and parameter-leak summaries (`func_summary.go`, `~12.3k` lines).
-   - `internal/dynstate`: Fact schema, audited stdlib discharges, and least-fixed-point graph solver (`facts.go`, `fixpoint.go`, `discharges_audited.go`, `typecarrier.go`, `~6.9k` lines).
+   - `internal/dynstate/internal/funcsummary`: Per-function AST/SSA mutation, return-env, and parameter-leak summaries (`func_summary.go`, `~12.3k` lines) — extract if coupling with `facts.go` is narrow; otherwise split by file within `dynstate`.
+   - `internal/dynstate`: Fact schema, audited stdlib discharges, and least-fixed-point graph solver (`facts.go`, `fixpoint.go`, `discharges_audited.go`, `typecarrier.go`).
 4. **Decomposing `gomutant` Root Package (`~13.4k` lines)**:
-   - Extract `internal/findings` (document v4–v17 schema, table interning, store lock/IO from `findings.go` + `store.go`) and `internal/reconcile` (freshness revalidation and incremental merge from `freshness.go` + `reconcile.go`), leaving root `package gomutant` as the public `Tree` orchestration facade.
+   - Extract `internal/findings` (document v4–v17 schema, table interning, store lock/IO from `findings.go` + `store.go`) and `internal/reconcile` (freshness revalidation and incremental merge from `freshness.go` + `reconcile.go`) where boundaries with `Tree` are clean.
 5. **Shared CLI / MCP / Process Utilities**:
-   - Deduplicate `internal/{gotool,guidance,resident,toolversion,shortgates,shapecorpus}` (~2,500 lines duplicated 3x across `pew`, `stipulator`, `gomutant`).
+   - Deduplicate `internal/{gotool,guidance,resident,toolversion,shortgates,shapecorpus,trace}` across `pew`, `stipulator`, `gomutant`.
 
