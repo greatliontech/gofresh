@@ -742,6 +742,16 @@ bindings {
 }
 
 bindings {
+  requirement_id: "REQ-inputs-relative-identities"
+  content_hash: "7bbee3bb3b8d935db7eb7accafcd64331a37a4ef66da17fe35e30cfb712982b7"
+  source_hash: "350fff8c23624360934e37c32607f953784a943cae8402f2ac74634747a82a5d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/runtimeinput.TestPWDConversionReanchorsSubpackageToModuleRoot"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "24c9f6d109d811a8d0450b7ff4baa4d51267968bba5e98f9d0925cbf47fff57c"
+}
+
+bindings {
   requirement_id: "REQ-inputs-guard-covered"
   content_hash: "c02b0a23a9293a3bb124c937a35b7c3d4c588f9cad4b5196a310a510e473888c"
   source_hash: "cdad9fdeb235158fb0bd17c03e1d59b43526b425a339b10f21dd19a663d64465"

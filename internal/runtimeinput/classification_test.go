@@ -4113,6 +4113,64 @@ func TestPWDAdmitsOnlyWhenPinnedToSpawnDir(t *testing.T) {
 	}
 }
 
+func TestPWDConversionReanchorsSubpackageToModuleRoot(t *testing.T) {
+	moduleDir := t.TempDir()
+	pkgA := filepath.Join(moduleDir, "internal", "alpha")
+	pkgB := filepath.Join(moduleDir, "internal", "beta")
+	for _, pkgDir := range []string{pkgA, pkgB} {
+		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(pkgDir, "fixture.txt"), []byte(filepath.Base(pkgDir)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bracket, err := ambientCaptureBracket(moduleDir, []string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obsA, err := FromTestLog([]byte("getenv PWD\nopen fixture.txt\n"), moduleDir, pkgA, []string{"PWD=" + pkgA},
+		WithCompletedProcess("worker-a"), WithBracket(bracket))
+	if err != nil || obsA.Unverifiable {
+		t.Fatalf("FromTestLog(pkgA) = %+v, %v", obsA, err)
+	}
+	obsB, err := FromTestLog([]byte("getenv PWD\nopen fixture.txt\n"), moduleDir, pkgB, []string{"PWD=" + pkgB},
+		WithCompletedProcess("worker-b"), WithBracket(bracket))
+	if err != nil || obsB.Unverifiable {
+		t.Fatalf("FromTestLog(pkgB) = %+v, %v", obsB, err)
+	}
+
+	if _, err := Absolute(obsA, moduleDir, []string{"PWD=" + filepath.Join(moduleDir, "unrelated")}); err == nil || !strings.Contains(err.Error(), "state moved before absolute identity conversion") {
+		t.Fatalf("Absolute with unrelated PWD = %v, want state-moved refusal", err)
+	}
+
+	treeEnv := []string{"PWD=" + moduleDir}
+	absA, err := Absolute(obsA, moduleDir, treeEnv)
+	if err != nil || absA.Unverifiable {
+		t.Fatalf("Absolute(pkgA, treeEnv) = %+v, %v", absA, err)
+	}
+	absB, err := Absolute(obsB, moduleDir, treeEnv)
+	if err != nil || absB.Unverifiable {
+		t.Fatalf("Absolute(pkgB, treeEnv) = %+v, %v", absB, err)
+	}
+	merged, err := Merge(moduleDir, treeEnv, absA, absB)
+	if err != nil || merged.Unverifiable {
+		t.Fatalf("Merge(absA, absB) = %+v, %v", merged, err)
+	}
+	rel, err := Relative(merged, moduleDir, treeEnv)
+	if err != nil || rel.Unverifiable {
+		t.Fatalf("Relative(merged) = %+v, %v", rel, err)
+	}
+	adopted, err := Adopt(rel.Manifest, moduleDir, "reader", treeEnv)
+	if err != nil || adopted.Unverifiable {
+		t.Fatalf("Adopt(rel) = %+v, %v", adopted, err)
+	}
+	cur, err := Current(context.Background(), rel.Manifest, moduleDir, treeEnv)
+	if err != nil || cur != rel.State {
+		t.Fatalf("Current(rel) = %+v, %v; want %+v", cur, err, rel.State)
+	}
+}
+
 // An external directory's stat binds existence alone: the entry
 // revalidates equal while the directory exists, moves when it vanishes
 // or becomes a file, and the open/listing form keeps ordinary

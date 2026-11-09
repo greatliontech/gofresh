@@ -45,6 +45,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/outcome"
 )
 
@@ -89,6 +90,7 @@ type Observation struct {
 	Attribution string
 	processes   []processObservation
 	empty       bool
+	pkgDir      string
 	seal        string
 }
 
@@ -295,7 +297,22 @@ func convertIdentityKinds(ctx context.Context, observation Observation, moduleDi
 	if err != nil {
 		return Observation{}, err
 	}
-	current, err := currentWithNormalizedEnvContext(ctx, state.Manifest, moduleDir, normalized)
+	absModuleDir, err := filepath.Abs(moduleDir)
+	if err != nil {
+		return Observation{}, fmt.Errorf("runtimeinputs: module dir: %w", err)
+	}
+	validationEnv := normalized
+	outPkgDir := observation.pkgDir
+	if observation.pkgDir != "" {
+		if pwd, ok := gotool.LookupEnv(normalized, "PWD"); ok && sameDirectoryPath(pwd, absModuleDir) && pwd != observation.pkgDir {
+			validationEnv, err = normalizeEnvironment(gotool.SetEnv(normalized, "PWD", observation.pkgDir))
+			if err != nil {
+				return Observation{}, err
+			}
+			outPkgDir = pwd
+		}
+	}
+	current, err := currentWithNormalizedEnvContext(ctx, state.Manifest, moduleDir, validationEnv)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -313,10 +330,7 @@ func convertIdentityKinds(ctx context.Context, observation Observation, moduleDi
 		}
 		addUnverifiable(&m, seen, current.Reason)
 	}
-	moduleDir, err = filepath.Abs(moduleDir)
-	if err != nil {
-		return Observation{}, fmt.Errorf("runtimeinputs: module dir: %w", err)
-	}
+	moduleDir = absModuleDir
 	convertedPaths := make([]pathInput, 0, len(m.Paths))
 	convertedIndex := map[pathID]int{}
 	for _, entry := range m.Paths {
@@ -345,7 +359,7 @@ func convertIdentityKinds(ctx context.Context, observation Observation, moduleDi
 			view:    conversionProcessView(conversion.name, record.origin),
 		}
 	}
-	sealed := sealObservation(converted, records, observation.empty)
+	sealed := sealObservationWithPkgDir(converted, records, observation.empty, outPkgDir)
 	// The conversion is the same measurement's evidence: its attribution
 	// rides along, the directory it names converted as the identities
 	// are (module-relative under the module in the portable form, a
@@ -363,6 +377,18 @@ func convertIdentityKinds(ctx context.Context, observation Observation, moduleDi
 	return sealed, nil
 }
 
+func sameDirectoryPath(a, b string) bool {
+	if a == b {
+		return true
+	}
+	if a == "" || b == "" {
+		return false
+	}
+	ra, errA := filepath.EvalSymlinks(a)
+	rb, errB := filepath.EvalSymlinks(b)
+	return errA == nil && errB == nil && ra == rb
+}
+
 func validateProcess(process string) error {
 	if process == "" || !utf8.ValidString(process) || strings.ContainsAny(process, "\x00\r\n") {
 		return fmt.Errorf("runtimeinputs: invalid process identity %q", process)
@@ -371,9 +397,13 @@ func validateProcess(process string) error {
 }
 
 func newObservation(state State, process, disposition string) Observation {
+	return newObservationWithPkgDir(state, process, disposition, "")
+}
+
+func newObservationWithPkgDir(state State, process, disposition, pkgDir string) Observation {
 	origin := processOrigin(state, process, disposition)
 	records := []processObservation{{process: process, origin: origin, view: origin}}
-	return sealObservation(state, records, false)
+	return sealObservationWithPkgDir(state, records, false, pkgDir)
 }
 
 func processOrigin(state State, process, disposition string) string {
@@ -389,9 +419,13 @@ func conversionProcessView(name, origin string) string {
 // sealObservation seals the state's identity — the attribution, a
 // construction-time diagnostic, is outside the seal.
 func sealObservation(state State, processes []processObservation, empty bool) Observation {
-	observation := Observation{State: state, processes: append([]processObservation(nil), processes...), empty: empty}
+	return sealObservationWithPkgDir(state, processes, empty, "")
+}
+
+func sealObservationWithPkgDir(state State, processes []processObservation, empty bool, pkgDir string) Observation {
+	observation := Observation{State: state, processes: append([]processObservation(nil), processes...), empty: empty, pkgDir: pkgDir}
 	h := sha256.New()
-	fprintf(h, "manifest %s\ndigest %s\nbracket-moved %t\nunverifiable %t\nreason %s\nok %t\nempty %t\n", state.Manifest, state.Digest, state.BracketMoved, state.Unverifiable, state.Reason, state.OK, empty)
+	fprintf(h, "manifest %s\ndigest %s\nbracket-moved %t\nunverifiable %t\nreason %s\nok %t\nempty %t\npkg-dir %s\n", state.Manifest, state.Digest, state.BracketMoved, state.Unverifiable, state.Reason, state.OK, empty, pkgDir)
 	for _, record := range observation.processes {
 		fprintf(h, "process %s %s %s\n", record.process, record.origin, record.view)
 	}
@@ -401,7 +435,7 @@ func sealObservation(state State, processes []processObservation, empty bool) Ob
 
 func validateObservation(observation Observation, _ bool) error {
 	if len(observation.processes) == 0 {
-		if observation.empty && observation.State.OK && observation.State.Manifest != "" && observation.State.Digest != "" {
+		if observation.empty && observation.pkgDir == "" && observation.State.OK && observation.State.Manifest != "" && observation.State.Digest != "" {
 			if sealObservation(observation.State, nil, true).seal == observation.seal {
 				return nil
 			}
@@ -417,7 +451,7 @@ func validateObservation(observation Observation, _ bool) error {
 			return errors.New("runtimeinputs: observation process provenance is invalid")
 		}
 	}
-	if sealObservation(observation.State, observation.processes, observation.empty).seal != observation.seal {
+	if sealObservationWithPkgDir(observation.State, observation.processes, observation.empty, observation.pkgDir).seal != observation.seal {
 		return errors.New("runtimeinputs: observation seal is invalid")
 	}
 	return nil

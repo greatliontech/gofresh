@@ -589,7 +589,11 @@ func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, 
 	if m.Outcome != "" {
 		origin = "outcome-supported"
 	}
-	observation := newObservation(st, cfg.process, origin)
+	sealedPkgDir := ""
+	if pwdTruthful {
+		sealedPkgDir = packageDir
+	}
+	observation := newObservationWithPkgDir(st, cfg.process, origin, sealedPkgDir)
 	// The attribution is the one of the reason the state names — the
 	// first clause of the sorted manifest; a reason the hashing pass
 	// raised carries its own attribution, in the reason itself.
