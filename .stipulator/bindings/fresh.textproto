@@ -2221,6 +2221,17 @@ bindings {
   content_hash: "dc0ac36e777d860cdc219631009667d904c6e658eebb3fc556327a3b8aac0f3d"
   source_hash: "8588a48c8645da6be5044abd20ee1d56763a9cb94671e5f4568095f46c6b0aa1"
   backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestPackageUnitOwnsTheWholeExecution"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "6dd878126a538353f78df15491de11bc1cfaef6a36e67d44db3dcdc54aa499ee"
+  clause_label: "transaction-isolation"
+}
+
+bindings {
+  requirement_id: "REQ-fresh-package-unit"
+  content_hash: "dc0ac36e777d860cdc219631009667d904c6e658eebb3fc556327a3b8aac0f3d"
+  source_hash: "8588a48c8645da6be5044abd20ee1d56763a9cb94671e5f4568095f46c6b0aa1"
+  backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestPackageUnitRefusesIncompatibleScope"
   role: BINDING_ROLE_TESTS
   shape_hash: "276635d0e5b21d828570aca7063a2a4739ae19cb86bbb631f27550b477f72bf4"
