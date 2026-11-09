@@ -143,6 +143,46 @@ Target repositories (ordered smallest-to-largest): **`pew` → `stipulator` → 
    - Per `docs/specs/closure.md:1597,1725` and `internal/auditset/auditset_test.go:73,76`, `math` runtime floating-point functions (`NaN`, `Inf`, `Pow`) and `reflect.TypeFor` are intentionally excluded from `auditset.go` (whereas `allowedPureMathSelectors` / `allowedPureReflectSelectors` in `toolchain_contracts.go` govern internal `std` pure-delegate verification only).
    - `gofresh` and `stipulator` set `assume_pure: true` in `.stipulator/policy.textproto` for witness execution, whereas `pew` and `gomutant` do not. We must never weaken `auditset` invariants (`REQ-closure-observability-audited-set` / `REQ-closure-observability-reflect-exclusion`).
 
+---
+
+## 5. Comprehensive 5-Repository Audit & Single-Pass Issue Schedule (2026-11-09)
+
+To ensure every package refactoring chunk folds in its structural decomposition, deduplication, efficiency, and precision fixes in a **single pass** (rather than moving code blindly and doing a 2nd/3rd/Nth pass), three independent audits were completed across `gofresh` (`internal/closure`, `internal/dynstate`, root `package gofresh`), `go-x-tools`, `pew`, `stipulator`, and `gomutant`, and all findings were filed as tracked `docs/issues/*.md` items with concrete `Lands: Chunk N` slots in [`docs/plans/plan.md`](../plans/plan.md):
+
+1. **Chunk 2 (`gofresh/internal/closure` Leaf Verifiers)**:
+   - [`closure-leaf-verifiers-cprep-asmverify-propharness.md`](../issues/closure-leaf-verifiers-cprep-asmverify-propharness.md):
+     - Extract `internal/closure/internal/cprep`, `internal/closure/internal/asmverify`, and `internal/closure/internal/propharness`.
+     - Deduplicate the two 200-line assembly preprocessor passes (`verifyAssemblyFileSinglePass` vs `verifyNonStdAsmPreprocessorPass`), 3 Cgo preamble extractors, 14+ open-coded quoted-literal skippers, `[]byte` vs `string` symbol scanners, 4 variadic slice-over-local-alloc SSA extractors (`extractLocalVariadicSliceElems`), `unwrapParens`/`unwrapASTParen` (`ast.Unparen`), and 8 repeated `ast.Inspect` passes in `propertyharness.go` (`harnessPkgIndex`).
+2. **Chunk 3 (`gofresh/internal/closure/internal/toolchain` & Reachability/Wrapper-Error Precision)**:
+   - [`closure-toolchain-extraction-and-monolith-splits.md`](../issues/closure-toolchain-extraction-and-monolith-splits.md):
+     - Move `auditedLinknameTargets`, `auditedReadOnlyVarLinknameTargets`, and `ClassBPackages` into `internal/auditset`.
+     - Extract `internal/closure/internal/toolchain` (`~23.2k` lines), unify directive scanners and `receiverBaseTypeName`, and decompose `verifyOSPackageAST` (`1,622` lines), `verifyTestingPackageAST` (`1,348` lines), `verifyTimePackageAST` (`1,056` lines), `verifyReflectPackageAST` (`950` lines), and `verifySyncPackageAST` (`838` lines).
+   - [`closure-reachability-provenance-and-wrapper-error-precision.md`](../issues/closure-reachability-provenance-and-wrapper-error-precision.md):
+     - Fix `provenanceReachable` / `provenanceReachableWithCandidates` (`attribution.go:3709, 3714`) hardcoding `audited = false` and `provenanceBFSWithCandidates` (`attribution.go:4018`) allocating a throwaway `freshParamAnalysis` with `summary: nil` and `dynamicMemos: nil` on every dynamic call site in the BFS.
+     - Eliminate `std` `init` root traversal into non-standard functions (`attribution.go:3717-3779, 4041`), cut static calls to carrier-free audited pure `std` functions with carrier-free arguments (`attribution.go:3990-4015`), filter `startupTargets` by provenance-pruned `startupFns` (`attribution.go:573, 670`), skip `std` functions in `userTouchedStdGlobals` (`attribution.go:718`), and stop seeding `computeRTAAsyncStartupFunctions` from internal `std` dynamic dispatches (`observability.go:1991`).
+     - Close wrapper-error method dispatch (`(*strconv.NumError).Error()` in `freshpath.go:4492`) from whole-program field stores on `fp.summary`.
+3. **Chunk 4 (`gofresh/internal/dynstate` Subpackages & AST/Index Deduplication)**:
+   - [`dynstate-syntaxutil-and-ast-helper-deduplication.md`](../issues/dynstate-syntaxutil-and-ast-helper-deduplication.md):
+     - Extract `internal/dynstate/internal/syntaxutil` shared leaf package and eliminate 70+ `unparenExpr` calls (`ast.Unparen`), 7 duplicate identifier object resolvers, 8 named-type predicates, 3 builtin call resolvers, 6 callee unwrappers, 7 place-spine extractors, duplicated struct-deref/selection-hop walkers, 14+ recursive type switches, and 4 mutex lock/unlock matchers.
+   - [`dynstate-factof-redundant-ast-scans-and-monoliths.md`](../issues/dynstate-factof-redundant-ast-scans-and-monoliths.md):
+     - Build a single `PkgAnalysisIndex` once at the start of `FactOfWithHooks` (eliminating 5x `directCallSites`, 2x `initOnlyReachableHelpers`, 2x `findMutexConfinedConstructorCaches`, and per-var `funcValueTaken` / `computeLocalFreshContainers` AST scans) and decompose the 7 `dynstate` monolithic functions (`analyzeSeamCallGraph`, `VerifyReadOnlyRefConfinement`, `analyzeBracketedSeams`, `recordDynamicGlobalUses`, `Compose`, `returnEnvFreeFunctions`, `verifyProtoDescBuilderType`) across `refconfine`, `seams`, `protoaudit`, `freshstruct`, and `dynstate`.
+4. **Chunk 5 (`gomutant` God-File Decomposition & Freshness/Oracle Batching)**:
+   - [`gomutant:decompose-god-files-and-batch-freshness-checks.md`](../../gomutant/docs/issues/decompose-god-files-and-batch-freshness-checks.md):
+     - Split `findings.go` (`3,306` lines), `run.go` (`3,572` lines, decomposing the 2,700-line `runCounted`), and `internal/mcpserver/server.go` (`2,413` lines) along phase/tool boundaries while preserving all `.stipulator/bindings/` symbols.
+     - Deduplicate CLI/MCP `explain` domain logic (`ExplainSymbol` / `ExplainTriage`).
+     - Share `runtimeMemo` and batch `CheckObservedBatch` / `CheckBatch` checks (with narrowed `Sibling` views per target package) in `freshness.go` and `run.go` (eliminating $1100+$ full-module `observeView` reloads in `InspectFindings` / `opts.Posture`).
+     - Check cheap view-free pin predicates before `t.newSubjectViews` in `freshForContext` and batch `LinkedTestPackagesContext` in `OracleClosureSignpostContext` + include `NeedImports | NeedDeps` in `internal/engine/engine.go`.
+5. **Chunk 6 (`Snapshot`/`Sibling` Batching, `stipulator` & `pew` Efficiency, and `go-x-tools` Startup Purity)**:
+   - [`go-x-tools-startup-purity-and-determinism.md`](../issues/go-x-tools-startup-purity-and-determinism.md):
+     - Remove package-init `os.Getenv("GOPACKAGESDEBUG")` in `go/packages/golist.go:29`, replace `reflect.TypeFor` on concrete types with `reflect.TypeOf` in `go/ast/edge/edge.go:185` and `go/ssa/ssa.go:1629, 1633`, convert `tRune` in `go/ssa/builder.go:95` to a function, and replace startup `maphash.MakeSeed()` in `go/types/typeutil/map.go:375` with deterministic `hashString`.
+   - [`view-sibling-observability-batching-and-validation-economy.md`](../issues/view-sibling-observability-batching-and-validation-economy.md):
+     - Batch package-mates into `ComputeObservabilityBatch` (up to 64 subjects per SSA build) and publish verified `Observability` proofs back to the parent `Snapshot` after `ensureObservable`'s closing `v.observe(ctx)` succeeds; pass `meta` from `scanViewSubjectsWithMemo` to `deriveViewDynamicState`; reuse session `buildFlags` in `NewBracketAt`; share validation brackets in `Snapshot.Validate`; and deduplicate `OutcomeBinding` / `CompletedState` / `completeBuildEnvironment` work.
+   - [`stipulator:eliminate-redundant-gofresh-sessions-and-split-golang-backend.md`](../../stipulator/docs/issues/eliminate-redundant-gofresh-sessions-and-split-golang-backend.md):
+     - Eliminate the second full-repo `soloSession.Snapshot` reload in `captureNativeGeneration`, reuse opening captures/certificates between `NewServed` and `openingCapture` (and check `len(subjects) == 0` before `selectionEngine`), deduplicate opening `declarationPackages` `go list` calls, scope `retryDrifted` to drifted packages, and split oversized `internal/backends/golang` files.
+   - [`pew:ab-memoization-and-cli-helper-deduplication.md`](../../pew/docs/issues/ab-memoization-and-cli-helper-deduplication.md):
+     - Switch `sideGuards` in `cmd/pew/ab.go` to `preparationReader`, eliminate duplicate `sideGuards` and `abPackageMetadata` calls per package in `pew ab`, and deduplicate `run.HarnessCompleted` and `resolveExistingPrefix`.
+
+
 
 
 
