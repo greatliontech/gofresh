@@ -73,7 +73,7 @@ func (r Runner) Run(ctx context.Context, dir string, env []string, args ...strin
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err = cmd.Run()
+	err = runCollected(cmd, isContained(cmd))
 	if err != nil {
 		if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
 			return stdout.Bytes(), fmt.Errorf("go %s: %w", strings.Join(args, " "), err)
