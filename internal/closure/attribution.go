@@ -221,7 +221,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 					if args := fn.TypeArgs(); len(args) > 0 {
 						parameterized := false
 						for _, arg := range args {
-							if rta.ContainsTypeParam(arg, make(map[types.Type]bool)) {
+							if rta.ContainsTypeParam(arg, nil) {
 								parameterized = true
 								break
 							}
@@ -338,12 +338,17 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 	unclosedCleanup := make([]bool, len(subjects))
 	unclosedFuzz := make([]bool, len(subjects))
 	rootedCallbacks := make([]map[*ssa.Function]bool, len(subjects))
+	analyzer := rta.NewAnalyzer()
+	stepRoots := roots
+	stepSeeds := seeds
 	var res *rta.Result
 	for {
-		res, err = rta.Analyze(ctx, roots, seeds)
+		res, err = analyzer.Extend(ctx, stepRoots, stepSeeds)
 		if err != nil {
 			return nil, err
 		}
+		var deltaRoots map[*ssa.Function]uint64
+		var deltaSeeds *rta.Seeds
 		addedAny := false
 		for i, subject := range subjects {
 			mask := uint64(1) << i
@@ -380,7 +385,10 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 				if !rootedCallbacks[i][cb] {
 					rootedCallbacks[i][cb] = true
 					cleanupRoots[i] = append(cleanupRoots[i], cb)
-					roots[cb] |= mask
+					if deltaRoots == nil {
+						deltaRoots = make(map[*ssa.Function]uint64)
+					}
+					deltaRoots[cb] |= mask
 					addedAny = true
 				}
 			}
@@ -391,12 +399,15 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 				if !rootedCallbacks[i][fb] {
 					rootedCallbacks[i][fb] = true
 					fuzzRoots[i] = append(fuzzRoots[i], fb)
-					roots[fb] |= mask
+					if deltaRoots == nil {
+						deltaRoots = make(map[*ssa.Function]uint64)
+					}
+					deltaRoots[fb] |= mask
 					if len(fb.Params) > 0 && isHarnessPointerType(fb.Params[0].Type()) && paramHasMakeInterface(fb.Params[0], make(map[*ssa.Parameter]bool)) {
-						if seeds == nil {
-							seeds = &rta.Seeds{}
+						if deltaSeeds == nil {
+							deltaSeeds = &rta.Seeds{}
 						}
-						seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: fb.Params[0].Type(), Masks: mask})
+						deltaSeeds.RuntimeTypes = append(deltaSeeds.RuntimeTypes, rta.TypeSeed{Type: fb.Params[0].Type(), Masks: mask})
 					}
 					addedAny = true
 				}
@@ -405,6 +416,8 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 		if !addedAny {
 			break
 		}
+		stepRoots = deltaRoots
+		stepSeeds = deltaSeeds
 	}
 	// Fold each parameterized origin into the result under its subject's
 	// mask: its declaration is the subject's own source — the subject's
@@ -877,7 +890,7 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 					if args := fn.TypeArgs(); len(args) > 0 {
 						parameterized := false
 						for _, arg := range args {
-							if rta.ContainsTypeParam(arg, make(map[types.Type]bool)) {
+							if rta.ContainsTypeParam(arg, nil) {
 								parameterized = true
 								break
 							}
@@ -954,11 +967,14 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 		initBoxedTypes = baseStartup.initBoxedTypes
 	}
 	rootedCallbacks := map[*ssa.Function]bool{}
+	analyzer := rta.NewAnalyzer()
+	stepRoots := roots
+	stepSeeds := seeds
 	var res *rta.Result
 	var provenance map[*ssa.Function]bool
 	for {
 		var err error
-		res, err = rta.Analyze(ctx, roots, seeds)
+		res, err = analyzer.Extend(ctx, stepRoots, stepSeeds)
 		if err != nil {
 			if ctx.Err() != nil {
 				return RootedFunctions{}, err
@@ -981,11 +997,16 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 		if unclosedCB || unclosedFB {
 			return RootedFunctions{}, nil
 		}
+		var deltaRoots map[*ssa.Function]uint64
+		var deltaSeeds *rta.Seeds
 		addedAny := false
 		for _, cb := range cbs {
 			if !rootedCallbacks[cb] {
 				rootedCallbacks[cb] = true
-				roots[cb] |= unionMask
+				if deltaRoots == nil {
+					deltaRoots = make(map[*ssa.Function]uint64)
+				}
+				deltaRoots[cb] |= unionMask
 				subjectProvenance = append(subjectProvenance, cb)
 				addedAny = true
 			}
@@ -993,13 +1014,16 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 		for _, fb := range fbs {
 			if !rootedCallbacks[fb] {
 				rootedCallbacks[fb] = true
-				roots[fb] |= unionMask
+				if deltaRoots == nil {
+					deltaRoots = make(map[*ssa.Function]uint64)
+				}
+				deltaRoots[fb] |= unionMask
 				subjectProvenance = append(subjectProvenance, fb)
 				if len(fb.Params) > 0 && isHarnessPointerType(fb.Params[0].Type()) && paramHasMakeInterface(fb.Params[0], make(map[*ssa.Parameter]bool)) {
-					if seeds == nil {
-						seeds = &rta.Seeds{}
+					if deltaSeeds == nil {
+						deltaSeeds = &rta.Seeds{}
 					}
-					seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: fb.Params[0].Type(), Masks: unionMask})
+					deltaSeeds.RuntimeTypes = append(deltaSeeds.RuntimeTypes, rta.TypeSeed{Type: fb.Params[0].Type(), Masks: unionMask})
 				}
 				addedAny = true
 			}
@@ -1007,6 +1031,8 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 		if !addedAny {
 			break
 		}
+		stepRoots = deltaRoots
+		stepSeeds = deltaSeeds
 	}
 	if rootedProvenanceIncomplete(audited, harnessAudited, prog, userPaths, provenance) {
 		return RootedFunctions{}, nil
@@ -3762,7 +3788,7 @@ func typeCanCarryAnyInitBoxed(t types.Type, initBoxed []types.Type) bool {
 		if !ok {
 			return true
 		}
-		if rta.ContainsTypeParam(iface, map[types.Type]bool{}) {
+		if rta.ContainsTypeParam(iface, nil) {
 			found = true
 			return false
 		}
@@ -3770,7 +3796,7 @@ func typeCanCarryAnyInitBoxed(t types.Type, initBoxed []types.Type) bool {
 			if bt == nil {
 				continue
 			}
-			if rta.ContainsTypeParam(bt, map[types.Type]bool{}) || types.Implements(bt, iface) {
+			if rta.ContainsTypeParam(bt, nil) || types.Implements(bt, iface) {
 				found = true
 				return false
 			}

@@ -1,6 +1,6 @@
 # Comprehensive `gofresh` Phase, Subprocess, Cache & Verifier Tracing (`internal/trace`)
 
-**Lands:** Chunks 3–7 in [`docs/plans/plan.md`](../plans/plan.md) (building on the `DomainDynstate`/`DomainRuntimeInput`/`DomainCache` additions and `cprep`/`asmverify`/`propharness` leaf-verifier trace events landed in Chunk 2).
+**Lands:** Chunks 5–7 in [`docs/plans/plan.md`](../plans/plan.md) (building on the `DomainDynstate`/`DomainRuntimeInput`/`DomainCache` additions, `cprep`/`asmverify`/`propharness` leaf-verifier trace events, and `rta.analyze.done` trace events landed in Chunks 2–3).
 
 ## Context & Current Blind Spots
 

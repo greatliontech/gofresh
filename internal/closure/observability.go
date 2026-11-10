@@ -47,7 +47,7 @@ func parameterizedBody(fn *ssa.Function) bool {
 		return true
 	}
 	for _, arg := range args {
-		if rta.ContainsTypeParam(arg, make(map[types.Type]bool)) {
+		if rta.ContainsTypeParam(arg, nil) {
 			return true
 		}
 	}
