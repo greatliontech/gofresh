@@ -31,10 +31,13 @@ const (
 type Domain string
 
 const (
-	DomainToolchain Domain = "toolchain"
-	DomainClosure   Domain = "closure"
-	DomainView      Domain = "view"
-	DomainSession   Domain = "session"
+	DomainToolchain    Domain = "toolchain"
+	DomainClosure      Domain = "closure"
+	DomainDynstate     Domain = "dynstate"
+	DomainRuntimeInput Domain = "runtimeinput"
+	DomainCache        Domain = "cache"
+	DomainView         Domain = "view"
+	DomainSession      Domain = "session"
 )
 
 // FieldKind discriminates the value carried by a Field.
@@ -233,6 +236,12 @@ func parseFilter(spec string) filter {
 			dom = DomainToolchain
 		case string(DomainClosure):
 			dom = DomainClosure
+		case string(DomainDynstate):
+			dom = DomainDynstate
+		case string(DomainRuntimeInput):
+			dom = DomainRuntimeInput
+		case string(DomainCache):
+			dom = DomainCache
 		case string(DomainView):
 			dom = DomainView
 		case string(DomainSession):

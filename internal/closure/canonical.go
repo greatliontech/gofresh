@@ -7,8 +7,9 @@ import (
 	"go/token"
 	"strings"
 
-	"github.com/greatliontech/gofresh/internal/closure/internal/digest"
 	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
+	"github.com/greatliontech/gofresh/internal/closure/internal/digest"
 )
 
 // A compiled Go member contributes its CANONICAL FORM to the closure
@@ -235,12 +236,12 @@ func cgoPreamble(items []tokenItem, i int, inImportGroup bool) bool {
 		if m >= len(items) {
 			return false
 		}
-		if items[m].tok == token.STRING && isCgoImportLit(items[m].lit) {
+		if items[m].tok == token.STRING && cprep.IsCgoImportLit(items[m].lit) {
 			return true
 		}
 		if items[m].tok == token.LPAREN {
 			s := nextIndex(items, m)
-			if s < len(items) && items[s].tok == token.STRING && isCgoImportLit(items[s].lit) {
+			if s < len(items) && items[s].tok == token.STRING && cprep.IsCgoImportLit(items[s].lit) {
 				end := nextIndex(items, s)
 				if end < len(items) && items[end].tok == token.SEMICOLON {
 					end = nextIndex(items, end)
@@ -252,7 +253,7 @@ func cgoPreamble(items []tokenItem, i int, inImportGroup bool) bool {
 		}
 		return false
 	}
-	return inImportGroup && items[k].tok == token.STRING && isCgoImportLit(items[k].lit)
+	return inImportGroup && items[k].tok == token.STRING && cprep.IsCgoImportLit(items[k].lit)
 }
 
 // canonicalFileDigest serves one compiled Go member's canonical digest

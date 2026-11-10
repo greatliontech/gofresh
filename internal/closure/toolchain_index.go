@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
 )
 
 // parsedPkgIndex indexes package-level declarations, per-file imports, and
@@ -372,32 +373,17 @@ func verifyHarnessFileDirectives(pkgPath, text string, runtimePullLinknames, sel
 func verifyFileLinknameDirectives(pkgPath string, text string) error {
 	return scanVerifiedLinknameDirectives(text, func(line string, fields []string) error {
 		if len(fields) == 2 {
-			if !allowedPureSingleArgLinknames[pkgPath+"."+fields[1]] {
+			if !cprep.AllowedPureSingleArgLinknames[pkgPath+"."+fields[1]] {
 				return fmt.Errorf("unapproved single-argument linkname %q in %s", line, pkgPath)
 			}
 			return nil
 		}
 		target := fields[2]
-		if !strings.HasPrefix(target, pkgPath+".") && !allowedPureLinknameTargets[target] {
+		if !strings.HasPrefix(target, pkgPath+".") && !cprep.AllowedPureLinknameTargets[target] {
 			return fmt.Errorf("unapproved pure-package linkname target %q", target)
 		}
 		return nil
 	})
-}
-
-func splitLinknameTarget(target string) (pkgPath, sym string, ok bool) {
-	slash := strings.LastIndexByte(target, '/')
-	dotRel := strings.IndexByte(target[slash+1:], '.')
-	if dotRel <= 0 {
-		return "", "", false
-	}
-	dot := slash + 1 + dotRel
-	pkgPath = target[:dot]
-	sym = target[dot+1:]
-	if sym == "" {
-		return "", "", false
-	}
-	return pkgPath, sym, true
 }
 
 func scanOffSurfaceGoDirectives(src string, directRuntime map[string]bool, onTwoArgLink func(localSym, target string)) {
@@ -461,7 +447,7 @@ func collectGoLinknameTargets(selfPkg, src string, runtimeOut, externalOut map[s
 				runtimeOut[target] = true
 			}
 		} else if externalOut != nil {
-			if tPkg, _, ok := splitLinknameTarget(target); ok && tPkg != selfPkg {
+			if tPkg, _, ok := cprep.SplitLinknameTarget(target); ok && tPkg != selfPkg {
 				externalOut[target] = true
 			}
 		}
@@ -469,13 +455,7 @@ func collectGoLinknameTargets(selfPkg, src string, runtimeOut, externalOut map[s
 }
 
 func unwrapParens(expr ast.Expr) ast.Expr {
-	for {
-		p, ok := expr.(*ast.ParenExpr)
-		if !ok {
-			return expr
-		}
-		expr = p.X
-	}
+	return ast.Unparen(expr)
 }
 
 func recvTypeIdent(expr ast.Expr) *ast.Ident {

@@ -13,6 +13,8 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
+	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
+	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
 )
 
 type tier2Result struct {
@@ -267,7 +269,7 @@ type tier2Base struct {
 	baseStartupZeroGlobals map[*ssa.Global]bool
 	wholeZeroDone          bool
 	wholeZeroGlobals       map[*ssa.Global]bool
-	verifiedAsm            map[string]*verifiedAsmPackage
+	verifiedAsm            map[string]*asmverify.VerifiedPackage
 }
 
 type tier2Analyzer struct {
@@ -1847,7 +1849,7 @@ func (a *tier2Analyzer) isOpaquePropertyHarnessStruct(n *types.Named) bool {
 		return false
 	}
 	st, ok := n.Underlying().(*types.Struct)
-	return ok && structHasNoExportedFields(st)
+	return ok && propharness.StructHasNoExportedFields(st)
 }
 
 func (a *tier2Analyzer) typeUsesUnsafePointer(t types.Type) bool {

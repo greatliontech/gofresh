@@ -26,6 +26,7 @@ import (
 
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/cachefile"
+	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
 	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/trace"
@@ -1974,7 +1975,7 @@ func verifyToolchainSurfaceAndDelegatesWithIO(ctx context.Context, d sourceDiges
 			}
 		}
 		for _, ext := range surfaceVerdicts[pkg].ExternalLinknamePulls {
-			if tPkg, tSym, ok := splitLinknameTarget(ext); ok {
+			if tPkg, tSym, ok := cprep.SplitLinknameTarget(ext); ok {
 				externalLinknameSeeds = append(externalLinknameSeeds, offSurfaceCrossEdge{Pkg: tPkg, Sym: tSym})
 			}
 		}
@@ -1984,7 +1985,7 @@ func verifyToolchainSurfaceAndDelegatesWithIO(ctx context.Context, d sourceDiges
 			pulledRuntimeTargets[sym] = true
 		}
 		for _, ext := range delegateVerdicts[delPkg].ExternalLinknamePulls {
-			if tPkg, tSym, ok := splitLinknameTarget(ext); ok {
+			if tPkg, tSym, ok := cprep.SplitLinknameTarget(ext); ok {
 				externalLinknameSeeds = append(externalLinknameSeeds, offSurfaceCrossEdge{Pkg: tPkg, Sym: tSym})
 			}
 		}
@@ -2250,7 +2251,7 @@ func verifyPureCandidateWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 			return verifiedPackageVerdict{}, nil, fmt.Errorf("%s/%s: %w", lp.ImportPath, name, err)
 		}
 		if len(asmFiles) > 0 {
-			if err := verifyAssemblyFile(lp.ImportPath, name, string(src), selectedHeaders); err != nil {
+			if err := verifyToolchainAssemblyFile(ctx, lp.ImportPath, name, string(src), selectedHeaders); err != nil {
 				return verifiedPackageVerdict{}, err, nil
 			}
 		}
@@ -2266,7 +2267,7 @@ func verifyPureCandidateWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 		if vErr != nil {
 			return verifiedPackageVerdict{}, vErr, nil
 		}
-		if scanPreprocessedNonGoSymbolRefs(lp.ImportPath, incHdrs, nonGoTexts, runtimePullTargets, externalPullTargets, nil) {
+		if cprep.ScanPreprocessedNonGoSymbolRefs(lp.ImportPath, incHdrs, nonGoTexts, runtimePullTargets, externalPullTargets, nil) {
 			return verifiedPackageVerdict{}, fmt.Errorf("%s: non-Go macro expansion budget exceeded", lp.ImportPath), nil
 		}
 	}
@@ -2353,7 +2354,7 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 	for _, name := range lp.Files {
 		if strings.EqualFold(filepath.Ext(name), ".go") {
 			goFiles = append(goFiles, name)
-		} else if lp.ImportPath == "runtime" && allowedPureAsmStandardHeaders[name] {
+		} else if lp.ImportPath == "runtime" && cprep.AllowedPureAsmStandardHeaders[name] {
 			runtimeAsmHeaders = append(runtimeAsmHeaders, name)
 		} else if lp.ImportPath == "os" || lp.ImportPath == "internal/testlog" || lp.ImportPath == "testing/internal/testdeps" || lp.ImportPath == "testing" {
 			return verifiedPackageVerdict{}, fmt.Errorf("%s: unexpected non-Go file %s", lp.ImportPath, name), nil
@@ -2384,7 +2385,7 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 			}
 			if lp.ImportPath == "runtime" {
 				if ext == ".syso" {
-					collectRuntimeIdentsAndMachO(raw, runtimeNonGoIdents)
+					cprep.CollectRuntimeIdentsAndMachO(raw, runtimeNonGoIdents)
 				} else {
 					text := string(raw)
 					collectStrippedAsmRuntimeIdents(text, runtimeNonGoIdents)
@@ -2395,7 +2396,7 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 				}
 			} else {
 				if ext == ".syso" {
-					collectRawBytesRuntimeSymbolRefs(raw, runtimePullTargets)
+					cprep.CollectRawBytesRuntimeSymbolRefs(raw, runtimePullTargets)
 				} else {
 					nonGoTexts = append(nonGoTexts, string(raw))
 				}
@@ -2414,7 +2415,7 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 			if vErr != nil {
 				return verifiedPackageVerdict{}, vErr, nil
 			}
-			if scanPreprocessedNonGoSymbolRefs(lp.ImportPath, incHdrs, nonGoTexts, runtimePullTargets, externalPullTargets, nil) {
+			if cprep.ScanPreprocessedNonGoSymbolRefs(lp.ImportPath, incHdrs, nonGoTexts, runtimePullTargets, externalPullTargets, nil) {
 				return verifiedPackageVerdict{}, fmt.Errorf("%s: non-Go macro expansion budget exceeded", lp.ImportPath), nil
 			}
 		}
@@ -2445,7 +2446,7 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 			return verifiedPackageVerdict{}, nil, fmt.Errorf("%s/%s: %w", lp.ImportPath, name, err)
 		}
 		text := string(src)
-		if err := verifyAssemblyFile("", lp.ImportPath+"/"+name, text, nil); err != nil {
+		if err := verifyToolchainAssemblyFile(ctx, "", lp.ImportPath+"/"+name, text, nil); err != nil {
 			return verifiedPackageVerdict{}, err, nil
 		}
 		collectStrippedAsmRuntimeIdents(text, runtimeNonGoIdents)
@@ -2485,7 +2486,7 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 						return verifiedPackageVerdict{}, nil, fmt.Errorf("pkg/include/%s: %w", rel, err)
 					}
 					text := string(src)
-					if err := verifyAssemblyFile("", "pkg/include/"+rel, text, nil); err != nil {
+					if err := verifyToolchainAssemblyFile(ctx, "", "pkg/include/"+rel, text, nil); err != nil {
 						return verifiedPackageVerdict{}, err, nil
 					}
 					collectStrippedAsmRuntimeIdents(text, runtimeNonGoIdents)
@@ -2524,7 +2525,7 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 			}
 		}
 		mode := parser.Mode(0)
-		if sourceMayImportC(text) {
+		if cprep.SourceMayImportC(text) {
 			mode = parser.ParseComments
 		}
 		file, err := parser.ParseFile(fset, name, src, mode)
@@ -2532,7 +2533,7 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 			return verifiedPackageVerdict{}, fmt.Errorf("%s/%s: %w", lp.ImportPath, name, err), nil
 		}
 		if mode == parser.ParseComments {
-			preambles := extractFileCgoPreambles(file)
+			preambles := cprep.ExtractFileCgoPreambles(file)
 			if lp.ImportPath == "runtime" {
 				runtimeNonGoTexts = append(runtimeNonGoTexts, preambles...)
 			} else {
@@ -2542,7 +2543,7 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 		parsed = append(parsed, file)
 	}
 	if lp.ImportPath == "runtime" && len(runtimeNonGoTexts) > 0 {
-		if scanPreprocessedNonGoSymbolRefs(lp.ImportPath, runtimeIncludeHdrs, runtimeNonGoTexts, nil, externalPullTargets, runtimeNonGoIdents) {
+		if cprep.ScanPreprocessedNonGoSymbolRefs(lp.ImportPath, runtimeIncludeHdrs, runtimeNonGoTexts, nil, externalPullTargets, runtimeNonGoIdents) {
 			return verifiedPackageVerdict{}, fmt.Errorf("%s: non-Go macro expansion budget exceeded", lp.ImportPath), nil
 		}
 	} else if len(nonGoTexts) > 0 && lp.ImportPath != "runtime" {
@@ -2553,7 +2554,7 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 		if vErr != nil {
 			return verifiedPackageVerdict{}, vErr, nil
 		}
-		if scanPreprocessedNonGoSymbolRefs(lp.ImportPath, incHdrs, nonGoTexts, runtimePullTargets, externalPullTargets, nil) {
+		if cprep.ScanPreprocessedNonGoSymbolRefs(lp.ImportPath, incHdrs, nonGoTexts, runtimePullTargets, externalPullTargets, nil) {
 			return verifiedPackageVerdict{}, fmt.Errorf("%s: non-Go macro expansion budget exceeded", lp.ImportPath), nil
 		}
 	}
@@ -2787,17 +2788,34 @@ func (h *Hasher) SelectionAttribution() string {
 	return h.verdict().axis
 }
 
+func verifyToolchainAssemblyFile(ctx context.Context, pkgPath, name, src string, selectedHeaders map[string]bool) error {
+	err := cprep.VerifyAssemblyFile(pkgPath, name, src, selectedHeaders)
+	if trace.AnyEnabled() {
+		target := name
+		if pkgPath != "" {
+			target = pkgPath + "/" + name
+		}
+		if trace.Enabled(ctx, trace.DomainClosure, target) {
+			trace.Emit(ctx, trace.DomainClosure, "cprep.verify.done", target,
+				trace.Bool("ok", err == nil),
+				trace.Err(err),
+			)
+		}
+	}
+	return err
+}
+
 func collectStrippedAsmRuntimeIdents(src string, out map[string]bool) {
 	var prevStripped string
 	for passIdx, joinSpace := range []bool{false, true} {
-		stripped := stripAssemblyComments(src, true, joinSpace)
+		stripped := cprep.StripAssemblyComments(src, true, joinSpace)
 		if passIdx > 0 && stripped == prevStripped {
 			continue
 		}
 		prevStripped = stripped
-		collectRuntimeIdentsAndMachOString(stripped, out)
-		if collapsed := collapseTokenPasteOps(normalizeCStringLiterals(stripped, true)); collapsed != stripped {
-			collectRuntimeIdentsAndMachOString(collapsed, out)
+		cprep.CollectRuntimeIdentsAndMachOString(stripped, out)
+		if collapsed := cprep.CollapseTokenPasteOps(cprep.NormalizeCStringLiterals(stripped, true)); collapsed != stripped {
+			cprep.CollectRuntimeIdentsAndMachOString(collapsed, out)
 		}
 	}
 }

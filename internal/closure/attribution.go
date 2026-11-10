@@ -13,6 +13,8 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
+	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
+	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/closure/internal/rta"
 	"github.com/greatliontech/gofresh/internal/dynstate"
 )
@@ -694,7 +696,7 @@ func cachedBaseStartupReachability(ctx context.Context, audited bool, prog *prog
 		seenBoxed := map[types.Type]bool{}
 		for _, fn := range orderedStartup {
 			fp := funcPkgPath(fn)
-			if isStdPkgPath(userPaths, fp) || fp == "testing" || propertyHarnessPath(fp) {
+			if isStdPkgPath(userPaths, fp) || fp == "testing" || propharness.IsHarnessPath(fp) {
 				continue
 			}
 			for _, b := range fn.Blocks {
@@ -763,7 +765,7 @@ func partitionHarnessInitRoots(prog *program, harnessAudited bool, userPaths map
 		if len(prog.Pkgs) > 0 {
 			var nonHarnessRoots []*packages.Package
 			for _, pkg := range prog.Pkgs {
-				if pkg == nil || propertyHarnessPath(pkg.PkgPath) {
+				if pkg == nil || propharness.IsHarnessPath(pkg.PkgPath) {
 					continue
 				}
 				if pkg.Module != nil || !isStdPkgPath(userPaths, pkg.PkgPath) || pkg.PkgPath == prog.PkgPath || pkg.PkgPath == prog.PkgPath+"_test" || pkg.ForTest == prog.PkgPath || (pkg.Name == "main" && pkg.PkgPath == prog.PkgPath+".test") {
@@ -771,7 +773,7 @@ func partitionHarnessInitRoots(prog *program, harnessAudited bool, userPaths map
 				}
 			}
 			packages.Visit(nonHarnessRoots, func(pkg *packages.Package) bool {
-				if pkg == nil || propertyHarnessPath(pkg.PkgPath) {
+				if pkg == nil || propharness.IsHarnessPath(pkg.PkgPath) {
 					return false
 				}
 				if pkg.Types != nil {
@@ -782,7 +784,7 @@ func partitionHarnessInitRoots(prog *program, harnessAudited bool, userPaths map
 		} else {
 			var queue []*types.Package
 			enqueue := func(tp *types.Package) {
-				if tp == nil || nonHarnessReachable[tp] || propertyHarnessPath(tp.Path()) {
+				if tp == nil || nonHarnessReachable[tp] || propharness.IsHarnessPath(tp.Path()) {
 					return
 				}
 				nonHarnessReachable[tp] = true
@@ -793,7 +795,7 @@ func partitionHarnessInitRoots(prog *program, harnessAudited bool, userPaths map
 					continue
 				}
 				p := sp.Pkg.Path()
-				if isGeneratedTestMainPackage(prog, sp) || p == prog.PkgPath || p == prog.PkgPath+"_test" || (!propertyHarnessPath(p) && !isStdPkgPath(userPaths, p)) {
+				if isGeneratedTestMainPackage(prog, sp) || p == prog.PkgPath || p == prog.PkgPath+"_test" || (!propharness.IsHarnessPath(p) && !isStdPkgPath(userPaths, p)) {
 					enqueue(sp.Pkg)
 				}
 			}
@@ -814,7 +816,7 @@ func partitionHarnessInitRoots(prog *program, harnessAudited bool, userPaths map
 		if init == nil {
 			continue
 		}
-		if harnessAudited && p.Pkg != nil && !propertyHarnessPath(p.Pkg.Path()) && !nonHarnessReachable[p.Pkg] {
+		if harnessAudited && p.Pkg != nil && !propharness.IsHarnessPath(p.Pkg.Path()) && !nonHarnessReachable[p.Pkg] {
 			harnessStdInitRoots = append(harnessStdInitRoots, init)
 			continue
 		}
@@ -832,7 +834,7 @@ func newHarnessRTASeeds(userPaths map[string]bool, harnessStdInitRoots []*ssa.Fu
 		}
 	}
 	return &rta.Seeds{
-		HarnessPkg:      propertyHarnessModulePath,
+		HarnessPkg:      propharness.ModulePath,
 		UserPkgs:        userPaths,
 		HarnessStdRoots: stdRoots,
 	}
@@ -3265,7 +3267,7 @@ func collectTestingHarnessCallbacks(audited, harnessAudited bool, pureDelegates 
 		if cb == nil {
 			return
 		}
-		if cb.Parent() == nil && propertyHarnessPath(funcPkgPath(cb)) {
+		if cb.Parent() == nil && propharness.IsHarnessPath(funcPkgPath(cb)) {
 			markUnclosed(kind)
 			return
 		}
@@ -3404,7 +3406,7 @@ func isVerifiedPureRootedAsmStub(audited bool, prog *program, fn *ssa.Function) 
 	if fn.Signature == nil || fn.Signature.Recv() != nil || fn.Pkg == nil || fn.Pkg.Pkg == nil {
 		return false
 	}
-	if !asmSignatureCarrierFree(fn.Signature) {
+	if !asmverify.SignatureCarrierFree(fn.Signature) {
 		return false
 	}
 	pkgPath := fn.Pkg.Pkg.Path()
@@ -3413,11 +3415,11 @@ func isVerifiedPureRootedAsmStub(audited bool, prog *program, fn *ssa.Function) 
 		return false
 	}
 	vp := hazards.verifiedAsm[pkgPath]
-	if vp == nil || !vp.ok {
+	if vp == nil || !vp.OK {
 		return false
 	}
-	sum, ok := vp.funcs[fn.Name()]
-	return ok && sum.impureKind == ""
+	sum, ok := vp.Funcs[fn.Name()]
+	return ok && sum.ImpureKind == ""
 }
 
 func rootedProvenanceIncomplete(audited, harnessAudited bool, prog *program, userPaths map[string]bool, sets ...map[*ssa.Function]bool) bool {
@@ -3542,7 +3544,7 @@ func isOpaqueStructNamed(n *types.Named) bool {
 		return false
 	}
 	st, ok := n.Underlying().(*types.Struct)
-	return ok && structHasNoExportedFields(st)
+	return ok && propharness.StructHasNoExportedFields(st)
 }
 
 func nonStdTypeUsesUnsafePointer(audited, harnessAudited bool, userPaths map[string]bool, t types.Type) bool {
@@ -3571,7 +3573,7 @@ func nonStdTypeUsesUnsafePointer(audited, harnessAudited bool, userPaths map[str
 					return walk(elem)
 				}
 				if (isStdImportPath(pkgPath) && !userPaths[pkgPath]) ||
-					(harnessAudited && propertyHarnessPath(pkgPath) && isOpaqueStructNamed(tt)) {
+					(harnessAudited && propharness.IsHarnessPath(pkgPath) && isOpaqueStructNamed(tt)) {
 					for i := 0; i < tt.TypeArgs().Len(); i++ {
 						if walk(tt.TypeArgs().At(i)) {
 							return true
@@ -3822,7 +3824,7 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 				return true
 			}
 			pkgPath := named.Obj().Pkg().Path()
-			if isStdPkgPath(userPaths, pkgPath) || pkgPath == "testing" || (harnessAudited && propertyHarnessPath(pkgPath)) {
+			if isStdPkgPath(userPaths, pkgPath) || pkgPath == "testing" || (harnessAudited && propharness.IsHarnessPath(pkgPath)) {
 				return true
 			}
 			for _, mt := range []types.Type{named, types.NewPointer(named)} {
@@ -3919,7 +3921,7 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 		// property harness - is never subject content; its dispatch
 		// targets still traverse, so the caller-supplied callbacks it
 		// runs stay subject flow (REQ-closure-observability-analysis).
-		harnessFrame := funcPkgPath(fn) == "testing" || harnessAudited && propertyHarnessPath(funcPkgPath(fn))
+		harnessFrame := funcPkgPath(fn) == "testing" || harnessAudited && propharness.IsHarnessPath(funcPkgPath(fn))
 		if !harnessFrame {
 			reachable[fn] = true
 			if !usedInitBoxed && len(initBoxedTypes) > 0 && len(fn.FreeVars) > 0 &&
@@ -3962,7 +3964,7 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 							if g.Pkg != nil && g.Pkg.Pkg != nil {
 								gPkg = g.Pkg.Pkg.Path()
 							}
-							if gPkg == "testing" || (harnessAudited && propertyHarnessPath(gPkg)) {
+							if gPkg == "testing" || (harnessAudited && propharness.IsHarnessPath(gPkg)) {
 								continue
 							}
 							if isStdPkgPath(userPaths, gPkg) && baseStartup != nil && !baseStartup.userTouchedStdGlobals[g] {
@@ -3989,7 +3991,7 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 				}
 				if callee != nil {
 					calleePath := funcPkgPath(callee)
-					calleeHarness := calleePath == "testing" || harnessAudited && propertyHarnessPath(calleePath)
+					calleeHarness := calleePath == "testing" || harnessAudited && propharness.IsHarnessPath(calleePath)
 					if !harnessFrame || calleeHarness {
 						queue = append(queue, callee)
 					}
@@ -4022,7 +4024,7 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 							continue
 						}
 						targetPath := funcPkgPath(target)
-						targetHarness := targetPath == "testing" || harnessAudited && propertyHarnessPath(targetPath)
+						targetHarness := targetPath == "testing" || harnessAudited && propharness.IsHarnessPath(targetPath)
 						// User callbacks dispatched from harness frames stay
 						// in the walk by the load's module facts, never by
 						// path shape: a dotless user module's callback

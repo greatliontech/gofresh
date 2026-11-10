@@ -9,6 +9,8 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/gofresh/internal/cachefile"
+	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
+	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
 	arta "github.com/greatliontech/gofresh/internal/closure/internal/rta"
 	"github.com/greatliontech/gofresh/internal/dynstate"
 	"go/ast"
@@ -2732,11 +2734,11 @@ func checkTB(tb TB, prop func(*T)) {
 	// and fails closed when audited=false.
 	for _, version := range []string{"", "v0.0.1", "v1.3.0", "v1.4.0", "v2.0.0"} {
 		cleanPkg := parseRapid(t, baseRapidSrc, version, version == "")
-		if ok, reason := verifyPropertyHarnessPackageWithReason(true, cleanPkg); !ok {
-			t.Fatalf("verifyPropertyHarnessPackage(true, version=%q) = false (%s), want true", version, reason)
+		if ok, reason := propharness.VerifyPackageWithReason(true, cleanPkg); !ok {
+			t.Fatalf("VerifyPackage(true, version=%q) = false (%s), want true", version, reason)
 		}
-		if verifyPropertyHarnessPackage(false, cleanPkg) {
-			t.Fatalf("verifyPropertyHarnessPackage(false, version=%q) = true, want false", version)
+		if propharness.VerifyPackage(false, cleanPkg) {
+			t.Fatalf("VerifyPackage(false, version=%q) = true, want false", version)
 		}
 	}
 
@@ -2829,27 +2831,27 @@ func checkTB(tb TB, prop func(*T)) {
 	for _, tc := range violations {
 		t.Run(tc.name, func(t *testing.T) {
 			badPkg := parseRapid(t, baseRapidSrc+"\n"+tc.extra, "v1.3.0", false)
-			if verifyPropertyHarnessPackage(true, badPkg) {
-				t.Fatalf("verifyPropertyHarnessPackage accepted %s under v1.3.0", tc.name)
+			if propharness.VerifyPackage(true, badPkg) {
+				t.Fatalf("VerifyPackage accepted %s under v1.3.0", tc.name)
 			}
 			badLocal := parseRapid(t, baseRapidSrc+"\n"+tc.extra, "", true)
-			if verifyPropertyHarnessPackage(true, badLocal) {
-				t.Fatalf("verifyPropertyHarnessPackage accepted %s under local main", tc.name)
+			if propharness.VerifyPackage(true, badLocal) {
+				t.Fatalf("VerifyPackage accepted %s under local main", tc.name)
 			}
 		})
 	}
 	t.Run("tampered_example_ignoring_seed", func(t *testing.T) {
 		badExampleSrc := strings.Replace(baseRapidSrc, "if len(seed) > 0 {\n\t\ts = uint64(seed[0])\n\t}", "_ = seed", 1)
-		if verifyPropertyHarnessPackage(true, parseRapid(t, badExampleSrc, "v1.3.0", false)) {
-			t.Fatal("verifyPropertyHarnessPackage accepted Example(seed ...int) ignoring explicit seed")
+		if propharness.VerifyPackage(true, parseRapid(t, badExampleSrc, "v1.3.0", false)) {
+			t.Fatal("VerifyPackage accepted Example(seed ...int) ignoring explicit seed")
 		}
 	})
 	t.Run("exported_field_on_T", func(t *testing.T) {
 		badTSrc := strings.Replace(baseRapidSrc, "state uint64", "State uint64", 1)
 		badTSrc = strings.ReplaceAll(badTSrc, "t.state", "t.State")
 		badTSrc = strings.ReplaceAll(badTSrc, "state:", "State:")
-		if verifyPropertyHarnessPackage(true, parseRapid(t, badTSrc, "v1.3.0", false)) {
-			t.Fatal("verifyPropertyHarnessPackage accepted exported field on rapid.T")
+		if propharness.VerifyPackage(true, parseRapid(t, badTSrc, "v1.3.0", false)) {
+			t.Fatal("VerifyPackage accepted exported field on rapid.T")
 		}
 	})
 
@@ -2947,11 +2949,11 @@ func TestRealGOMODCACHEPackagesMechanicalVerification(t *testing.T) {
 	// 1. Real pgregory.net/rapid@v1.3.0 (both direct verifyPropertyHarnessPackage and end-to-end ComputeObservabilityBatch)
 	t.Run("rapid@v1.3.0", func(t *testing.T) {
 		rapidPkg := loadCachedBatch(t, "pgregory.net/rapid@v1.3.0", ".")["pgregory.net/rapid"]
-		if ok, reason := verifyPropertyHarnessPackageWithReason(true, rapidPkg); !ok {
-			t.Fatalf("verifyPropertyHarnessPackage(true, real pgregory.net/rapid@v1.3.0) = false (%s), want true", reason)
+		if ok, reason := propharness.VerifyPackageWithReason(true, rapidPkg); !ok {
+			t.Fatalf("VerifyPackage(true, real pgregory.net/rapid@v1.3.0) = false (%s), want true", reason)
 		}
-		if verifyPropertyHarnessPackage(false, rapidPkg) {
-			t.Fatal("verifyPropertyHarnessPackage(false, real pgregory.net/rapid@v1.3.0) = true, want false")
+		if propharness.VerifyPackage(false, rapidPkg) {
+			t.Fatal("VerifyPackage(false, real pgregory.net/rapid@v1.3.0) = true, want false")
 		}
 		e2eDir := t.TempDir()
 		rapidCacheDir := filepath.Join(modCache, "pgregory.net", "rapid@v1.3.0")
@@ -3647,8 +3649,8 @@ func (t *T) Repeat(actions map[string]func(*T)) {
 		Dir: filepath.Join(dir, "rapid"),
 	}, "."); rErr != nil || len(rapidPkgs) != 1 {
 		t.Fatalf("load rapid fixture: err=%v pkgs=%v", rErr, rapidPkgs)
-	} else if ok, reason := verifyPropertyHarnessPackageWithReason(true, rapidPkgs[0]); !ok {
-		t.Fatalf("verifyPropertyHarnessPackage(rapid fixture) = false (%s), want true", reason)
+	} else if ok, reason := propharness.VerifyPackageWithReason(true, rapidPkgs[0]); !ok {
+		t.Fatalf("VerifyPackage(rapid fixture) = false (%s), want true", reason)
 	}
 	writeFile(t, dir, "prop/go.mod", `module example.com/prop
 
@@ -8458,8 +8460,8 @@ func TestClean(t *testing.T) {}
 	}
 
 	rootSep := string(filepath.Separator)
-	if !pathWithin(filepath.Join(rootSep, "tmp", "cfg.h"), rootSep) || !pathWithin(rootSep, rootSep) {
-		t.Fatal("pathWithin must accept paths under the filesystem root")
+	if !cprep.PathWithin(filepath.Join(rootSep, "tmp", "cfg.h"), rootSep) || !cprep.PathWithin(rootSep, rootSep) {
+		t.Fatal("PathWithin must accept paths under the filesystem root")
 	}
 	for _, src := range []string{
 		"package p\nimport \"testing\"\nfunc TestMain[T any](m *testing.M) {}\n",

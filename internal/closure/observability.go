@@ -17,6 +17,8 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 
 	prog "github.com/greatliontech/gofresh/internal/closure/internal/program"
+	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
+	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/closure/internal/rta"
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/outcome"
@@ -995,7 +997,7 @@ func dispatchProvenanceClosed(site ssa.CallInstruction, fp *freshParamAnalysis) 
 			receiver := wrapperReceiver(c, callee)
 			return receiver != nil && subjectClosedDynamicValue(receiver, make(map[ssa.Value]bool), siteFP)
 		}
-		if propertyHarnessPath(funcPkgPath(callee)) {
+		if propharness.IsHarnessPath(funcPkgPath(callee)) {
 			return propertyHarnessClosedArgs(c, siteFP)
 		}
 		if _, isFunc := c.Value.(*ssa.Function); isFunc {
@@ -1081,7 +1083,7 @@ func maximalObservabilityBlocker(audited bool, effect externalEffect) bool {
 	// The property-harness fact keeps the closure verdict unverifiable
 	// without blocking observability: the subject tiers judge every
 	// harness crossing precisely (REQ-closure-observability-property-harness).
-	if effect.kind == externalEffectTestRuntime && propertyHarnessPath(effect.packagePath) {
+	if effect.kind == externalEffectTestRuntime && propharness.IsHarnessPath(effect.packagePath) {
 		return false
 	}
 	// The receiver-escape rejection is package-scan diagnostic, never a
@@ -1520,47 +1522,14 @@ func flagProvenSetUse(proven map[ssa.Value]flagSetKind, pkgPath, name string, c 
 // own literal: the nil slice, or a whole slice of an array allocation
 // whose only uses are element stores of string constants.
 func closedParseArgument(v ssa.Value) bool {
-	switch x := v.(type) {
-	case *ssa.Const:
-		return x.Value == nil
-	case *ssa.Slice:
-		if x.Low != nil || x.High != nil || x.Max != nil {
-			return false
-		}
-		alloc, ok := x.X.(*ssa.Alloc)
-		if !ok || alloc.Referrers() == nil {
-			return false
-		}
-		for _, ref := range *alloc.Referrers() {
-			switch r := ref.(type) {
-			case *ssa.DebugRef:
-			case *ssa.Slice:
-				if r != x {
-					return false
-				}
-			case *ssa.IndexAddr:
-				if r.X != alloc || r.Referrers() == nil {
-					return false
-				}
-				for _, elem := range *r.Referrers() {
-					switch e := elem.(type) {
-					case *ssa.DebugRef:
-					case *ssa.Store:
-						c, isConst := e.Val.(*ssa.Const)
-						if e.Addr != r || !isConst || c.Value == nil {
-							return false
-						}
-					default:
-						return false
-					}
-				}
-			default:
-				return false
-			}
-		}
-		return true
+	if c, ok := v.(*ssa.Const); ok {
+		return c.Value == nil
 	}
-	return false
+	slice, _, ok := forEachLocalSliceAllocStore(v, true, func(_ *ssa.IndexAddr, val ssa.Value) bool {
+		c, isConst := val.(*ssa.Const)
+		return isConst && c.Value != nil
+	})
+	return ok && slice.Low == nil && slice.High == nil && slice.Max == nil
 }
 
 // ownInitializerFrame reports whether fn is itself an initializer
@@ -2057,7 +2026,7 @@ func computeRTAAsyncStartupFunctions(result *rta.Result, mask uint64) map[*ssa.F
 type nonSSAGlobalHazardSummary struct {
 	blockedPkgs   map[string]bool
 	linknamedVars map[pkgVarKey]bool
-	verifiedAsm   map[string]*verifiedAsmPackage
+	verifiedAsm   map[string]*asmverify.VerifiedPackage
 }
 
 func classifyOtherNativeExt(ext string) (isAsm bool, isCAsmHeader bool, isOtherNative bool) {
@@ -2119,7 +2088,7 @@ func nonSSAGlobalHazardsSummary(audited bool, p *program) *nonSSAGlobalHazardSum
 
 	blocked := map[string]bool{}
 	linknamed := map[pkgVarKey]bool{}
-	verifiedAsm := map[string]*verifiedAsmPackage{}
+	verifiedAsm := map[string]*asmverify.VerifiedPackage{}
 	for _, pkg := range allVisited {
 		if pkg.Imports["runtime/cgo"] != nil || pkg.Imports["C"] != nil {
 			blocked[pkg.PkgPath] = true

@@ -1,6 +1,6 @@
 # Comprehensive `gofresh` Phase, Subprocess, Cache & Verifier Tracing (`internal/trace`)
 
-**Lands:** Chunk 2 in [`docs/plans/plan.md`](../plans/plan.md) (instrumented across each touched package as it is refactored, with core `internal/trace` domain additions and `gotool`/`cachefile`/`closure`/`dynstate`/`runtimeinput`/`view`/`session` spans verified in `internal/trace/trace_test.go`).
+**Lands:** Chunks 3–7 in [`docs/plans/plan.md`](../plans/plan.md) (building on the `DomainDynstate`/`DomainRuntimeInput`/`DomainCache` additions and `cprep`/`asmverify`/`propharness` leaf-verifier trace events landed in Chunk 2).
 
 ## Context & Current Blind Spots
 

@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
 )
 
 // allowedPureSupportImports lists the non-pure standard-library packages that a
@@ -327,94 +328,6 @@ var allowedPureTimeSelectors = map[string]bool{
 	"Weekday":       true,
 }
 
-// allowedPureAsmStandardHeaders lists the standard Go assembler headers
-// provided by GOROOT/pkg/include (plus compiler-generated go_asm.h) that an
-// assembly file in a pure or pure-delegate package may #include.
-var allowedPureAsmStandardHeaders = map[string]bool{
-	"asm_amd64.h":   true,
-	"asm_ppc64x.h":  true,
-	"asm_riscv64.h": true,
-	"funcdata.h":    true,
-	"go_asm.h":      true,
-	"textflag.h":    true,
-}
-
-// allowedPureAsmCrossPkgSymbols lists cross-package middle-dot symbol
-// references permitted inside pure and pure-delegate assembly files beyond
-// allowedPureSingleArgLinknames.
-var allowedPureAsmCrossPkgSymbols = map[string]bool{
-	"runtime.cmpstring":       true,
-	"runtime.memequal":        true,
-	"runtime.memequal_varlen": true,
-	"runtime.memmove":         true,
-}
-
-// allowedPureLinknameTargets lists the two-argument //go:linkname and
-// //go:linknamestd targets permitted inside auditset.PurePackages() and its
-// transitive pure delegates beyond a package's own self-links.
-var allowedPureLinknameTargets = map[string]bool{
-	"runtime.cmpstring":                      true,
-	"runtime.coroswitch":                     true,
-	"runtime.divideError":                    true,
-	"runtime.memequal":                       true,
-	"runtime.memequal_varlen":                true,
-	"runtime.newcoro":                        true,
-	"runtime.overflowError":                  true,
-	"crypto/internal/fips140hash.sha3Unwrap": true,
-}
-
-// allowedPureSingleArgLinknames lists the one-argument //go:linkname and
-// //go:linknamestd directives permitted inside auditset.PurePackages() and its
-// transitive pure delegates.
-var allowedPureSingleArgLinknames = map[string]bool{
-	"bytes.Compare":                          true,
-	"bytes.Equal":                            true,
-	"bytes.IndexByte":                        true,
-	"bytes.Repeat":                           true,
-	"bytes.explode":                          true,
-	"crypto/internal/fips140hash.sha3Unwrap": true,
-	"crypto/subtle.setDITDisabled":           true,
-	"crypto/subtle.setDITEnabled":            true,
-	"internal/cpu.ARM":                       true,
-	"internal/cpu.ARM64":                     true,
-	"internal/cpu.HWCap":                     true,
-	"internal/cpu.Loong64":                   true,
-	"internal/cpu.MIPS64X":                   true,
-	"internal/cpu.PPC64":                     true,
-	"internal/cpu.RISCV64":                   true,
-	"internal/cpu.S390X":                     true,
-	"internal/cpu.X86":                       true,
-	"internal/cpu.isProcessorFeaturePresent": true,
-	"internal/cpu.riscvHWProbe":              true,
-	"internal/cpu.sysctlEnabled":             true,
-	"internal/race.Acquire":                  true,
-	"internal/race.Disable":                  true,
-	"internal/race.Enable":                   true,
-	"internal/race.Errors":                   true,
-	"internal/race.Read":                     true,
-	"internal/race.ReadObjectPC":             true,
-	"internal/race.ReadPC":                   true,
-	"internal/race.ReadRange":                true,
-	"internal/race.Release":                  true,
-	"internal/race.ReleaseMerge":             true,
-	"internal/race.Write":                    true,
-	"internal/race.WriteObjectPC":            true,
-	"internal/race.WritePC":                  true,
-	"internal/race.WriteRange":               true,
-	"math/big.addMulVVW":                     true,
-	"math/big.addVV":                         true,
-	"math/big.addVW":                         true,
-	"math/big.mulAddVWW":                     true,
-	"math/big.shlVU":                         true,
-	"math/big.subVV":                         true,
-	"math/big.subVW":                         true,
-	"net/url.newError":                       true,
-	"strconv.bsearch":                        true,
-	"strings.IndexByte":                      true,
-	"strings.clone":                          true,
-	"strings.explode":                        true,
-}
-
 func isPureSupportImport(pkgPath, importPath string) bool {
 	if importPath == "unsafe" || allowedPureSupportImports[importPath] {
 		return true
@@ -499,7 +412,7 @@ func verifyOffSurfacePackageWithIO(ctx context.Context, lp listedPackage, pkgInc
 				return offSurfaceVerdict{}, fmt.Errorf("%s/%s: %w", lp.ImportPath, name, err)
 			}
 			if ext == ".syso" {
-				collectRawBytesRuntimeSymbolRefs(raw, directRuntime)
+				cprep.CollectRawBytesRuntimeSymbolRefs(raw, directRuntime)
 			} else {
 				nonGoTexts = append(nonGoTexts, string(raw))
 			}
@@ -526,7 +439,7 @@ func verifyOffSurfacePackageWithIO(ctx context.Context, lp listedPackage, pkgInc
 			linkDirectives = append(linkDirectives, twoArgLink{localSym: localSym, target: target})
 		})
 		mode := parser.Mode(0)
-		if sourceMayImportC(text) {
+		if cprep.SourceMayImportC(text) {
 			mode = parser.ParseComments
 		}
 		file, err := parser.ParseFile(fset, name, src, mode)
@@ -536,7 +449,7 @@ func verifyOffSurfacePackageWithIO(ctx context.Context, lp listedPackage, pkgInc
 			continue
 		}
 		if mode == parser.ParseComments {
-			nonGoTexts = append(nonGoTexts, extractFileCgoPreambles(file)...)
+			nonGoTexts = append(nonGoTexts, cprep.ExtractFileCgoPreambles(file)...)
 		}
 		parsed = append(parsed, file)
 	}
@@ -549,11 +462,11 @@ func verifyOffSurfacePackageWithIO(ctx context.Context, lp listedPackage, pkgInc
 		if vErr != nil {
 			directRuntime["runtime.*"] = true
 		} else {
-			if scanPreprocessedNonGoSymbolRefs(lp.ImportPath, incHdrs, nonGoTexts, directRuntime, extAsm, nil) {
+			if cprep.ScanPreprocessedNonGoSymbolRefs(lp.ImportPath, incHdrs, nonGoTexts, directRuntime, extAsm, nil) {
 				directRuntime["runtime.*"] = true
 			}
 			for ext := range extAsm {
-				if tPkg, tSym, ok := splitLinknameTarget(ext); ok && tPkg != lp.ImportPath {
+				if tPkg, tSym, ok := cprep.SplitLinknameTarget(ext); ok && tPkg != lp.ImportPath {
 					seedCrossMap[offSurfaceCrossEdge{Pkg: tPkg, Sym: tSym}] = true
 				}
 			}
@@ -635,7 +548,7 @@ func verifyOffSurfacePackageWithIO(ctx context.Context, lp listedPackage, pkgInc
 
 	seedDeclSet := map[string]bool{}
 	for _, ld := range linkDirectives {
-		tPkg, tSym, ok := splitLinknameTarget(ld.target)
+		tPkg, tSym, ok := cprep.SplitLinknameTarget(ld.target)
 		if !ok {
 			if strings.HasPrefix(ld.target, "runtime") {
 				directRuntime["runtime.*"] = true
@@ -1071,7 +984,7 @@ func collectOffSurfaceStartupRuntimePulls(ctx context.Context, d sourceDigests, 
 
 	enqueueCross := func(rawPkg, sym string) {
 		if rawPkg == "runtime" {
-			if base := leadingASCIIIdent(sym); base != "" {
+			if base := cprep.LeadingASCIIIdent(sym); base != "" {
 				pulledRuntimeTargets["runtime."+base] = true
 			} else {
 				pulledRuntimeTargets["runtime."+sym] = true
@@ -1083,7 +996,7 @@ func collectOffSurfaceStartupRuntimePulls(ctx context.Context, d sourceDigests, 
 			if typePart, methodPart, hasDot := strings.Cut(sym, "."); hasDot {
 				tBase := strings.TrimSuffix(strings.TrimPrefix(typePart, "(*"), ")")
 				tBase = strings.TrimPrefix(tBase, "*")
-				mBase := leadingASCIIIdent(methodPart)
+				mBase := cprep.LeadingASCIIIdent(methodPart)
 				if tBase != "" && mBase != "" {
 					enqueue(resolved, tBase)
 					enqueue(resolved, "method:"+tBase+"."+mBase)

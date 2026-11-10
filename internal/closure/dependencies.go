@@ -10,6 +10,8 @@ import (
 	"strconv"
 
 	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
+	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
 )
 
 // ToolchainContent identifies every standard package's selected source files
@@ -83,17 +85,17 @@ func capturePolicyInputs() policyInputs {
 	for k, v := range allowedPureTimeSelectors {
 		packages["pure-time-allow:"+k] = v
 	}
-	for k, v := range allowedPureAsmStandardHeaders {
+	for k, v := range cprep.AllowedPureAsmStandardHeaders {
 		packages["pure-asm-hdr-allow:"+k] = v
 	}
 	linknames := maps.Clone(auditedLinknameTargets)
-	for k, v := range allowedPureLinknameTargets {
+	for k, v := range cprep.AllowedPureLinknameTargets {
 		linknames["pure-link2:"+k] = v
 	}
-	for k, v := range allowedPureSingleArgLinknames {
+	for k, v := range cprep.AllowedPureSingleArgLinknames {
 		linknames["pure-link1:"+k] = v
 	}
-	for k, v := range allowedPureAsmCrossPkgSymbols {
+	for k, v := range cprep.AllowedPureAsmCrossPkgSymbols {
 		linknames["pure-asm-sym:"+k] = v
 	}
 	for k, v := range auditedReadOnlyVarLinknameTargets {
@@ -101,7 +103,7 @@ func capturePolicyInputs() policyInputs {
 	}
 	return policyInputs{
 		verifier:    toolchainVerifierVersion,
-		asmVerifier: nonStdAsmVerifierVersion,
+		asmVerifier: asmverify.NonStdAsmVerifierVersion,
 		audit:       auditset.Identity(),
 		packages:    packages,
 		linknames:   linknames,

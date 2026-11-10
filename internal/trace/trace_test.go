@@ -67,14 +67,14 @@ func TestFilterGrammarAndContextSinks(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		rec := NewRecorder()
 		tctx := WithFilteredSink(ctx, allSpec, rec)
-		for _, dom := range []Domain{DomainToolchain, DomainClosure, DomainView, DomainSession} {
+		for _, dom := range []Domain{DomainToolchain, DomainClosure, DomainDynstate, DomainRuntimeInput, DomainCache, DomainView, DomainSession} {
 			if !Enabled(tctx, dom, "any") {
 				t.Fatalf("spec %q did not enable domain %s", allSpec, dom)
 			}
 			Emit(tctx, dom, "evt", "any")
 		}
-		if got := len(rec.Events()); got != 4 {
-			t.Fatalf("spec %q recorded %d events, want 4", allSpec, got)
+		if got := len(rec.Events()); got != 7 {
+			t.Fatalf("spec %q recorded %d events, want 7", allSpec, got)
 		}
 		cancel()
 		if Enabled(tctx, DomainToolchain, "any") {
@@ -86,7 +86,7 @@ func TestFilterGrammarAndContextSinks(t *testing.T) {
 	parentCtx, cancelParent := context.WithCancel(context.Background())
 	defer cancelParent()
 	parentRec := NewRecorder()
-	pctx := WithFilteredSink(parentCtx, "closure:BenchmarkPWD,toolchain:encoding/json,view", parentRec)
+	pctx := WithFilteredSink(parentCtx, "closure:BenchmarkPWD,toolchain:encoding/json,dynstate:example.com/p,runtimeinput:testlog,cache:tier2,view", parentRec)
 
 	childCtx, cancelChild := context.WithCancel(pctx)
 	childRec := NewRecorder()
@@ -96,11 +96,17 @@ func TestFilterGrammarAndContextSinks(t *testing.T) {
 	Emit(cctx, DomainClosure, "subject_closure", "example.com/p.BenchmarkOther", String("hash", "h2"))
 	Emit(cctx, DomainToolchain, "stamp_fallback", "encoding/json", Bool("content_equal", true))
 	Emit(cctx, DomainToolchain, "stamp_fallback", "fmt", Bool("content_equal", true))
+	Emit(cctx, DomainDynstate, "fact.package.done", "example.com/p", Int("culprits", 0))
+	Emit(cctx, DomainDynstate, "fact.package.done", "example.com/other", Int("culprits", 1))
+	Emit(cctx, DomainRuntimeInput, "testlog.extract.done", "testlog", Int("ops", 5))
+	Emit(cctx, DomainRuntimeInput, "testlog.extract.done", "bracket", Int("ops", 0))
+	Emit(cctx, DomainCache, "cache.load", "tier2", Bool("hit", true))
+	Emit(cctx, DomainCache, "cache.load", "scanfacts", Bool("hit", false))
 	Emit(cctx, DomainView, "pass_summary", "dir", Int("subjects", 2))
 	Emit(cctx, DomainSession, "check_verdict", "example.com/p.SpecialTarget", String("status", "valid"))
 
-	if got := len(parentRec.Events()); got != 3 {
-		t.Fatalf("parent recorder got %d events, want 3: %+v", got, parentRec.Events())
+	if got := len(parentRec.Events()); got != 6 {
+		t.Fatalf("parent recorder got %d events, want 6: %+v", got, parentRec.Events())
 	}
 	if got := len(childRec.Events()); got != 1 || childRec.Events()[0].Target != "example.com/p.SpecialTarget" {
 		t.Fatalf("child recorder got %+v, want 1 SpecialTarget event", childRec.Events())

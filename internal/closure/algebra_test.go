@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
 	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
+	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 	"go/ast"
@@ -2560,11 +2561,11 @@ func FuzzMaximalEffectsMonotonicity(f *testing.F) {
 			t.Fatalf("colliding explicit import aliases did not fail closed: %+v, err=%v", collideScan, err)
 		}
 
-		if !propertyHarnessPath("pgregory.net/rapid") || propertyHarnessPath("testing") {
-			t.Fatal("propertyHarnessPath misclassified pgregory.net/rapid vs testing")
+		if !propharness.IsHarnessPath("pgregory.net/rapid") || propharness.IsHarnessPath("testing") {
+			t.Fatal("IsHarnessPath misclassified pgregory.net/rapid vs testing")
 		}
-		if verifyPropertyHarnessPackage(false, nil) || verifyPropertyHarnessPackage(true, nil) {
-			t.Fatal("verifyPropertyHarnessPackage accepted nil package")
+		if propharness.VerifyPackage(false, nil) || propharness.VerifyPackage(true, nil) {
+			t.Fatal("VerifyPackage accepted nil package")
 		}
 		rapidPkg := types.NewPackage("pgregory.net/rapid", "rapid")
 		closedT := types.NewNamed(

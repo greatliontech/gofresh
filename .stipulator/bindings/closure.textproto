@@ -2468,9 +2468,9 @@ bindings {
   content_hash: "a98dbf8d38b78756c4ca763cc6249cc1194aa0c991e343bea2c5624071429e18"
   source_hash: "735f5a5c6e65e928e338dcf215348d341dfb6dd8ba65015664c711b1af0ec30e"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/internal/closure.TestCPreprocessorEdgeMatrix"
+  symbol: "github.com/greatliontech/gofresh/internal/closure/internal/cprep.TestCPreprocessorEdgeMatrix"
   role: BINDING_ROLE_TESTS
-  shape_hash: "bdb9cc8c0bd2d1c7e90eca0e3ae28aac4cee6129d7de86ab55e355229c8d927a"
+  shape_hash: "d78d8bb5a09477045f17bf78e39ae00c22c0ed4c17250e5123c840854ea1269e"
   clause_label: "widened"
 }
 
@@ -2479,9 +2479,9 @@ bindings {
   content_hash: "a98dbf8d38b78756c4ca763cc6249cc1194aa0c991e343bea2c5624071429e18"
   source_hash: "735f5a5c6e65e928e338dcf215348d341dfb6dd8ba65015664c711b1af0ec30e"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/internal/closure.FuzzCPreprocessor"
+  symbol: "github.com/greatliontech/gofresh/internal/closure/internal/cprep.FuzzCPreprocessor"
   role: BINDING_ROLE_TESTS
-  shape_hash: "df195de8689c291217dd7ca7cd95c1487cc4d4549bc591cf268cc41d0e10376c"
+  shape_hash: "f4727201f738b287bdca0c10f60f67b8b3b1486514f9755ca929a94e83978fe2"
   clause_label: "resolved"
 }
 

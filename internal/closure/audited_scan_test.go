@@ -6,6 +6,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
 	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"go/ast"
 	"go/parser"
@@ -4778,7 +4779,7 @@ TEXT ·ImpureWordOnAmd64(SB), NOSPLIT, $0-0
 	RET
 `,
 	}
-	vpAmd64, ok := verifyNonStdAssemblyFiles(
+	vpAmd64, ok := asmverify.VerifyNonStdFiles(
 		"amd64",
 		"example.com/any-pkg/simd",
 		"/virtual/pkg",
@@ -4791,14 +4792,14 @@ TEXT ·ImpureWordOnAmd64(SB), NOSPLIT, $0-0
 		t.Fatalf("verifyNonStdAssemblyFiles(amd64) on valid multi-file package failed")
 	}
 	for _, pureName := range []string{"PureSIMD", "StaticXgetbv"} {
-		sum, found := vpAmd64.funcs[pureName]
-		if !found || sum.impureKind != "" || sum.cpuidArgs != 0 {
+		sum, found := vpAmd64.Funcs[pureName]
+		if !found || sum.ImpureKind != "" || sum.CPUIDArgs != 0 {
 			t.Errorf("amd64 %s summary = %+v (found=%v), want pure non-cpuid summary", pureName, sum, found)
 		}
 	}
 	for _, impureName := range []string{"ImpureRdtscp", "ImpureControlReg", "ImpureWordOnAmd64"} {
-		sum, found := vpAmd64.funcs[impureName]
-		if !found || sum.impureKind == "" {
+		sum, found := vpAmd64.Funcs[impureName]
+		if !found || sum.ImpureKind == "" {
 			t.Errorf("amd64 %s summary = %+v (found=%v), want non-empty impureKind", impureName, sum, found)
 		}
 	}
@@ -4832,7 +4833,7 @@ TEXT ·ImpureDwordOnArm64(SB), NOSPLIT, $0-0
 	RET
 `,
 	}
-	vpArm64, okArm := verifyNonStdAssemblyFiles(
+	vpArm64, okArm := asmverify.VerifyNonStdFiles(
 		"arm64",
 		"example.com/any/armpkg",
 		"/virtual/armpkg",
@@ -4844,18 +4845,18 @@ TEXT ·ImpureDwordOnArm64(SB), NOSPLIT, $0-0
 	if !okArm || vpArm64 == nil {
 		t.Fatalf("verifyNonStdAssemblyFiles(arm64) failed")
 	}
-	if sum := vpArm64.funcs["StaticArm64Features"]; sum.impureKind != "" || sum.cpuidArgs != 0 {
+	if sum := vpArm64.Funcs["StaticArm64Features"]; sum.ImpureKind != "" || sum.CPUIDArgs != 0 {
 		t.Errorf("arm64 StaticArm64Features summary = %+v, want pure", sum)
 	}
 	for _, impureName := range []string{"ImpureArm64Mpidr", "ImpureByteOnArm64", "ImpureDwordOnArm64"} {
-		if sum := vpArm64.funcs[impureName]; sum.impureKind == "" {
+		if sum := vpArm64.Funcs[impureName]; sum.ImpureKind == "" {
 			t.Errorf("arm64 %s summary = %+v, want non-empty impureKind", impureName, sum)
 		}
 	}
 
 	// Unsupported GOARCH values must fail closed unconditionally.
 	for _, unsupportedArch := range []string{"", "386", "arm", "riscv64", "ppc64le", "s390x", "wasm"} {
-		if _, okArch := verifyNonStdAssemblyFiles(
+		if _, okArch := asmverify.VerifyNonStdFiles(
 			unsupportedArch,
 			"example.com/arch",
 			"/virtual/arch",
@@ -4870,7 +4871,7 @@ TEXT ·ImpureDwordOnArm64(SB), NOSPLIT, $0-0
 
 	// Uppercase G(...) macro and lowercase frame-slot labels (g+0(FP), fs+8(FP))
 	// remain admitted while bare g / FS registers are rejected.
-	if vpUpperG, okUpperG := verifyNonStdAssemblyFiles(
+	if vpUpperG, okUpperG := asmverify.VerifyNonStdFiles(
 		"amd64",
 		"example.com/upperg",
 		"/virtual/upperg",
@@ -4878,7 +4879,7 @@ TEXT ·ImpureDwordOnArm64(SB), NOSPLIT, $0-0
 		nil,
 		nil,
 		readMem(map[string]string{"gslot.s": "#include \"textflag.h\"\n#define G(a, b) XORQ b, a\nTEXT ·SlotG(SB), NOSPLIT, $0-24\n\tMOVQ g+0(FP), AX\n\tMOVQ fs+8(FP), BX\n\tG(AX, BX)\n\tMOVQ AX, ret+16(FP)\n\tRET\n"}),
-	); !okUpperG || vpUpperG == nil || vpUpperG.funcs["SlotG"].impureKind != "" {
+	); !okUpperG || vpUpperG == nil || vpUpperG.Funcs["SlotG"].ImpureKind != "" {
 		t.Errorf("verifyNonStdAssemblyFiles rejected valid G macro / g+0(FP) stack slot: ok=%v vp=%+v", okUpperG, vpUpperG)
 	}
 
@@ -4959,7 +4960,7 @@ TEXT ·BadPermutedSlots(SB), NOSPLIT, $0-24
 	MOVL DX, edx+20(FP)
 	RET
 `
-	vpCPUID, okCPUID := verifyNonStdAssemblyFiles(
+	vpCPUID, okCPUID := asmverify.VerifyNonStdFiles(
 		"amd64",
 		"example.com/cpuid",
 		"/virtual/cpuid",
@@ -4972,12 +4973,12 @@ TEXT ·BadPermutedSlots(SB), NOSPLIT, $0-24
 		t.Fatalf("verifyNonStdAssemblyFiles(cpuidAsm) failed")
 	}
 	for fn, wantArgs := range map[string]int{"Cpuid1_Amd64": 1, "Cpuid2_Amd64": 2} {
-		if sum := vpCPUID.funcs[fn]; sum.cpuidArgs != wantArgs || sum.impureKind != "" {
+		if sum := vpCPUID.Funcs[fn]; sum.CPUIDArgs != wantArgs || sum.ImpureKind != "" {
 			t.Errorf("%s summary = %+v, want cpuidArgs=%d impureKind=\"\"", fn, sum, wantArgs)
 		}
 	}
 	for _, badFn := range []string{"Cpuid1_386Layout", "BadIfdefCpuid", "BadHardcodedLeaf", "BadShiftedEBX", "BadPermutedSlots"} {
-		if sum := vpCPUID.funcs[badFn]; sum.cpuidArgs != 0 || sum.impureKind == "" {
+		if sum := vpCPUID.Funcs[badFn]; sum.CPUIDArgs != 0 || sum.ImpureKind == "" {
 			t.Errorf("%s summary = %+v, want cpuidArgs=0 and non-empty impureKind", badFn, sum)
 		}
 	}
@@ -4990,7 +4991,7 @@ TEXT ·BadPermutedSlots(SB), NOSPLIT, $0-24
 		types.NewTuple(types.NewVar(token.NoPos, nil, "op", u32), types.NewVar(token.NoPos, nil, "sub", u32)),
 		types.NewTuple(types.NewVar(token.NoPos, nil, "", u32), types.NewVar(token.NoPos, nil, "", u32), types.NewVar(token.NoPos, nil, "", u32), types.NewVar(token.NoPos, nil, "", u32)),
 		false)
-	if !isCanonicalCPUIDSignature(sig1, 1) || isCanonicalCPUIDSignature(sig1, 2) || !isCanonicalCPUIDSignature(sig2, 2) || isCanonicalCPUIDSignature(sig2, 1) {
+	if !asmverify.IsCanonicalCPUIDSignature(sig1, 1) || asmverify.IsCanonicalCPUIDSignature(sig1, 2) || !asmverify.IsCanonicalCPUIDSignature(sig2, 2) || asmverify.IsCanonicalCPUIDSignature(sig2, 1) {
 		t.Errorf("isCanonicalCPUIDSignature arity mismatch admitted or valid signature rejected")
 	}
 
@@ -5071,7 +5072,7 @@ TEXT ·BadPermutedSlots(SB), NOSPLIT, $0-24
 		"reserved-fpcr-macro":   {"arm64", "#include \"textflag.h\"\n#define FPCR R0\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
 		"unclosed-quote-imm":    {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ $\"unclosed, AX\n\tRET\n"},
 	} {
-		if _, ok := verifyNonStdAssemblyFiles(
+		if _, ok := asmverify.VerifyNonStdFiles(
 			rc.arch,
 			"example.com/reject",
 			"/virtual/reject",
@@ -5085,7 +5086,7 @@ TEXT ·BadPermutedSlots(SB), NOSPLIT, $0-24
 	}
 
 	// Exhaustive #ifdef / #else R14 overwrite on both arms must pass on amd64.
-	if vpIfElseR14, okIfElseR14 := verifyNonStdAssemblyFiles(
+	if vpIfElseR14, okIfElseR14 := asmverify.VerifyNonStdFiles(
 		"amd64",
 		"example.com/r14ifelse",
 		"/virtual/r14ifelse",
@@ -5093,7 +5094,7 @@ TEXT ·BadPermutedSlots(SB), NOSPLIT, $0-24
 		nil,
 		nil,
 		readMem(map[string]string{"ok.s": "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-8\n#ifdef MAYBE\n\tMOVQ $1, R14\n#else\n\tXORL R14, R14\n#endif\n\tMOVQ R14, ret+0(FP)\n\tRET\n"}),
-	); !okIfElseR14 || vpIfElseR14 == nil || vpIfElseR14.funcs["F"].impureKind != "" {
+	); !okIfElseR14 || vpIfElseR14 == nil || vpIfElseR14.Funcs["F"].ImpureKind != "" {
 		t.Errorf("verifyNonStdAssemblyFiles rejected exhaustive #ifdef/#else R14 kill: ok=%v vp=%+v", okIfElseR14, vpIfElseR14)
 	}
 
@@ -5112,7 +5113,7 @@ TEXT ·QuotePure(SB), NOSPLIT, $0-8
 	MOVQ R14, ret+0(FP)
 	RET
 `
-	if vpQuote, okQuote := verifyNonStdAssemblyFiles(
+	if vpQuote, okQuote := asmverify.VerifyNonStdFiles(
 		"amd64",
 		"example.com/quoteasm",
 		"/virtual/quoteasm",
@@ -5120,13 +5121,13 @@ TEXT ·QuotePure(SB), NOSPLIT, $0-8
 		nil,
 		nil,
 		readMem(map[string]string{"q.s": quotedAsm}),
-	); !okQuote || vpQuote == nil || vpQuote.funcs["QuotePure"].impureKind != "" {
+	); !okQuote || vpQuote == nil || vpQuote.Funcs["QuotePure"].ImpureKind != "" {
 		t.Errorf("verifyNonStdAssemblyFiles rejected quoted DATA/immediate literals: ok=%v vp=%+v", okQuote, vpQuote)
 	}
-	if !hasUnquotedColon(`$"unclosed`) || !hasUnquotedColon(`$'x`) {
+	if !asmverify.HasUnquotedColon(`$"unclosed`) || !asmverify.HasUnquotedColon(`$'x`) {
 		t.Errorf("hasUnquotedColon failed open on unclosed quote")
 	}
-	if _, okHybrid := verifyNonStdAssemblyFiles(
+	if _, okHybrid := asmverify.VerifyNonStdFiles(
 		"amd64",
 		"example.com/quoteasm",
 		"/virtual/quoteasm",
@@ -5195,7 +5196,7 @@ TEXT ·SplitByte(SB), NOSPLIT, $0-0
 	BYTE $0xd0
 	RET
 `
-	if vpImp, okImp := verifyNonStdAssemblyFiles(
+	if vpImp, okImp := asmverify.VerifyNonStdFiles(
 		"amd64",
 		"example.com/impureops",
 		"/virtual/impureops",
@@ -5207,7 +5208,7 @@ TEXT ·SplitByte(SB), NOSPLIT, $0-0
 		t.Fatalf("verifyNonStdAssemblyFiles(impureAmd64Asm) = %v, want ok=true with impure summaries", okImp)
 	} else {
 		for _, fn := range []string{"RdrandQ", "RdseedL", "WrfsbaseQ", "RdpmcOp", "TsxOp", "StdFlag", "FxrstorOp", "SmswOp", "LslAmd64", "PopfqOp", "PushfqOp", "LfsqOp", "GetcallerpcOp", "UndefOp", "CondByte", "SplitByte"} {
-			if sum := vpImp.funcs[fn]; sum.impureKind == "" {
+			if sum := vpImp.Funcs[fn]; sum.ImpureKind == "" {
 				t.Errorf("amd64 %s summary = %+v, want non-empty impureKind", fn, sum)
 			}
 		}
@@ -5245,7 +5246,7 @@ TEXT ·WordReadR28(SB), NOSPLIT, $0-0
 	WORD $0xd340ff80
 	RET
 `
-	if vpImpArm, okImpArm := verifyNonStdAssemblyFiles(
+	if vpImpArm, okImpArm := asmverify.VerifyNonStdFiles(
 		"arm64",
 		"example.com/impurearm",
 		"/virtual/impurearm",
@@ -5256,18 +5257,18 @@ TEXT ·WordReadR28(SB), NOSPLIT, $0-0
 	); !okImpArm || vpImpArm == nil {
 		t.Fatalf("verifyNonStdAssemblyFiles(impureArm64Asm) = %v, want ok=true", okImpArm)
 	} else {
-		if sum := vpImpArm.funcs["MovdMidrPure"]; sum.impureKind != "" || sum.cpuidArgs != 0 {
+		if sum := vpImpArm.Funcs["MovdMidrPure"]; sum.ImpureKind != "" || sum.CPUIDArgs != 0 {
 			t.Errorf("arm64 MovdMidrPure summary = %+v, want pure", sum)
 		}
 		for _, fn := range []string{"SyslOp", "SvcEqOp", "MovdPmccntr", "MovdWriteFpcr", "MovdPstateDit", "MovdMidrBadDst", "WordClobberR18", "WordReadR28"} {
-			if sum := vpImpArm.funcs[fn]; sum.impureKind == "" {
+			if sum := vpImpArm.Funcs[fn]; sum.ImpureKind == "" {
 				t.Errorf("arm64 %s summary = %+v, want non-empty impureKind", fn, sum)
 			}
 		}
 	}
 
 	// Uppercase .S extension (GAS C-preprocessed assembly) must be rejected.
-	if _, okUpperS := verifyNonStdAssemblyFiles(
+	if _, okUpperS := asmverify.VerifyNonStdFiles(
 		"amd64",
 		"example.com/uppers",
 		"/virtual/uppers",
@@ -5283,7 +5284,7 @@ TEXT ·WordReadR28(SB), NOSPLIT, $0-0
 	}
 
 	// Cyclic #include between local headers must fail closed cleanly.
-	if _, okCycle := verifyNonStdAssemblyFiles(
+	if _, okCycle := asmverify.VerifyNonStdFiles(
 		"amd64",
 		"example.com/cycle",
 		"/virtual/cycle",
@@ -5323,7 +5324,7 @@ TEXT ·TrailingSneak(SB), NOSPLIT, $0-8
 	RET
 #define LATE_REG MIDR_EL1
 `
-	if vpCond, okCond := verifyNonStdAssemblyFiles(
+	if vpCond, okCond := asmverify.VerifyNonStdFiles(
 		"arm64",
 		"example.com/cond",
 		"/virtual/cond",
@@ -5338,12 +5339,12 @@ TEXT ·TrailingSneak(SB), NOSPLIT, $0-8
 		t.Fatalf("verifyNonStdAssemblyFiles(condMacroAsm) = %v, want ok=true with impure summaries", okCond)
 	} else {
 		for _, fn := range []string{"CondSneak", "UndefSneak", "TrailingSneak"} {
-			if sum := vpCond.funcs[fn]; sum.impureKind == "" {
+			if sum := vpCond.Funcs[fn]; sum.ImpureKind == "" {
 				t.Errorf("%s summary = %+v, want non-empty impureKind", fn, sum)
 			}
 		}
 	}
-	if _, okFuncMacro := verifyNonStdAssemblyFiles(
+	if _, okFuncMacro := asmverify.VerifyNonStdFiles(
 		"amd64",
 		"example.com/condfn",
 		"/virtual/condfn",
@@ -5360,7 +5361,7 @@ TEXT ·TrailingSneak(SB), NOSPLIT, $0-8
 	basePkg := types.NewPackage("example.com/sc", "sc")
 	testPkg := types.NewPackage("example.com/sc", "sc")
 	testPkg.Scope().Insert(types.NewVar(token.NoPos, testPkg, "testLut", types.Typ[types.Int]))
-	if _, ok := verifyNonStdAssemblyFiles(
+	if _, ok := asmverify.VerifyNonStdFiles(
 		"amd64",
 		"example.com/sc",
 		"/virtual/sc",
@@ -5378,11 +5379,11 @@ TEXT ·TrailingSneak(SB), NOSPLIT, $0-8
 	uptr := types.Typ[types.Uintptr]
 	up := types.Typ[types.UnsafePointer]
 	fnSig := types.NewSignatureType(nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, nil, "x", i32)), types.NewTuple(types.NewVar(token.NoPos, nil, "", types.NewSlice(i32))), false)
-	if !asmSignatureCarrierFree(fnSig) {
+	if !asmverify.SignatureCarrierFree(fnSig) {
 		t.Errorf("asmSignatureCarrierFree rejected scalar/slice signature")
 	}
 	methodSig := types.NewSignatureType(types.NewVar(token.NoPos, nil, "recv", i32), nil, nil, nil, nil, false)
-	if asmSignatureCarrierFree(methodSig) {
+	if asmverify.SignatureCarrierFree(methodSig) {
 		t.Errorf("asmSignatureCarrierFree admitted method signature with receiver")
 	}
 	for badKind, badType := range map[string]types.Type{
@@ -5394,7 +5395,7 @@ TEXT ·TrailingSneak(SB), NOSPLIT, $0-8
 		"map":            types.NewMap(i32, i32),
 	} {
 		badSig := types.NewSignatureType(nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, nil, "x", badType)), nil, false)
-		if asmSignatureCarrierFree(badSig) {
+		if asmverify.SignatureCarrierFree(badSig) {
 			t.Errorf("asmSignatureCarrierFree admitted %s parameter", badKind)
 		}
 	}
@@ -5483,7 +5484,7 @@ TEXT ·TrailingSneak(SB), NOSPLIT, $0-8
 		if dotlessHaz.blockedPkgs["mymod"] {
 			t.Errorf("dotless user module with verified pure .s was blocked")
 		}
-		if dotlessHaz.verifiedAsm["mymod"] == nil || !dotlessHaz.verifiedAsm["mymod"].ok {
+		if dotlessHaz.verifiedAsm["mymod"] == nil || !dotlessHaz.verifiedAsm["mymod"].OK {
 			t.Errorf("dotless user module verifiedAsm[\"mymod\"] = %+v, want verified", dotlessHaz.verifiedAsm["mymod"])
 		}
 		if !dotlessHaz.linknamedVars[pkgVarKey{pkgPath: "mymod", name: "hooked"}] {

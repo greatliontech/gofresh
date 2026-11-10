@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
@@ -982,11 +983,11 @@ func ifCondRequiresNonZeroGlobalTyped(expr ast.Expr, info *types.Info, zeroGloba
 
 func ifCondRequiresNonZeroGlobalWith(expr ast.Expr, isUniverseZeroIdent, isZeroGlobalIdent func(*ast.Ident) bool) bool {
 	isZeroIdentExpr := func(e ast.Expr) bool {
-		id, ok := unwrapASTParen(e).(*ast.Ident)
+		id, ok := ast.Unparen(e).(*ast.Ident)
 		return ok && isZeroGlobalIdent(id)
 	}
 	isZeroLiteralExpr := func(e ast.Expr) bool {
-		switch x := unwrapASTParen(e).(type) {
+		switch x := ast.Unparen(e).(type) {
 		case *ast.Ident:
 			return isUniverseZeroIdent != nil && isUniverseZeroIdent(x)
 		case *ast.BasicLit:
@@ -1001,7 +1002,7 @@ func ifCondRequiresNonZeroGlobalWith(expr ast.Expr, isUniverseZeroIdent, isZeroG
 		}
 		return false
 	}
-	switch x := unwrapASTParen(expr).(type) {
+	switch x := ast.Unparen(expr).(type) {
 	case *ast.Ident:
 		return isZeroIdentExpr(x)
 	case *ast.StarExpr:
@@ -1022,22 +1023,12 @@ func ifCondRequiresNonZeroGlobalWith(expr ast.Expr, isUniverseZeroIdent, isZeroG
 	return false
 }
 
-func unwrapASTParen(expr ast.Expr) ast.Expr {
-	for {
-		p, ok := expr.(*ast.ParenExpr)
-		if !ok {
-			return expr
-		}
-		expr = p.X
-	}
-}
-
 func isASTTimeFixedZoneCall(expr ast.Expr, aliases map[string]string) bool {
-	call, ok := unwrapASTParen(expr).(*ast.CallExpr)
+	call, ok := ast.Unparen(expr).(*ast.CallExpr)
 	if !ok || len(call.Args) != 2 || call.Ellipsis.IsValid() {
 		return false
 	}
-	sel, ok := unwrapASTParen(call.Fun).(*ast.SelectorExpr)
+	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
 	if !ok || sel.Sel == nil || sel.Sel.Name != "FixedZone" {
 		return false
 	}
@@ -1049,7 +1040,7 @@ func chainedTimeUnixSelector(outerCall *ast.CallExpr, aliases map[string]string,
 	if outerCall == nil || outerCall.Ellipsis.IsValid() {
 		return nil
 	}
-	outerSel, ok := unwrapASTParen(outerCall.Fun).(*ast.SelectorExpr)
+	outerSel, ok := ast.Unparen(outerCall.Fun).(*ast.SelectorExpr)
 	if !ok || outerSel.Sel == nil {
 		return nil
 	}
@@ -1065,11 +1056,11 @@ func chainedTimeUnixSelector(outerCall *ast.CallExpr, aliases map[string]string,
 	default:
 		return nil
 	}
-	innerCall, ok := unwrapASTParen(outerSel.X).(*ast.CallExpr)
+	innerCall, ok := ast.Unparen(outerSel.X).(*ast.CallExpr)
 	if !ok || innerCall.Ellipsis.IsValid() {
 		return nil
 	}
-	innerSel, ok := unwrapASTParen(innerCall.Fun).(*ast.SelectorExpr)
+	innerSel, ok := ast.Unparen(innerCall.Fun).(*ast.SelectorExpr)
 	if !ok || innerSel.Sel == nil {
 		return nil
 	}
@@ -1147,7 +1138,7 @@ func (h *Hasher) subjectMaximalExternalEffectsWithZeroGlobals(base *tier2Base, p
 		if pkg.Standard || pkg.Module == nil || pkg.IsGeneratedTestMainFor(pkgPath) {
 			continue
 		}
-		if propertyHarnessPath(pkg.ImportPath) &&
+		if propharness.IsHarnessPath(pkg.ImportPath) &&
 			!listPkgHasNativeOrEmbed(&pkg) &&
 			base != nil &&
 			propertyHarnessAuditedProg(h.SelectionAudited(), base.prog) {
@@ -1479,7 +1470,7 @@ func testingIdentifierUseSupported(identifier *ast.Ident, parents map[ast.Node]a
 			if lhs == node {
 				return true
 			}
-			if i < len(parent.Rhs) && unwrapASTParen(parent.Rhs[i]) == identifier {
+			if i < len(parent.Rhs) && ast.Unparen(parent.Rhs[i]) == identifier {
 				_, ok := lhs.(*ast.Ident)
 				return ok
 			}
@@ -1491,7 +1482,7 @@ func testingIdentifierUseSupported(identifier *ast.Ident, parents map[ast.Node]a
 			}
 		}
 		for i, value := range parent.Values {
-			if unwrapASTParen(value) == identifier {
+			if ast.Unparen(value) == identifier {
 				return i < len(parent.Names)
 			}
 		}
@@ -1500,7 +1491,7 @@ func testingIdentifierUseSupported(identifier *ast.Ident, parents map[ast.Node]a
 }
 
 func identifierName(expression ast.Expr) (string, bool) {
-	expression = unwrapASTParen(expression)
+	expression = ast.Unparen(expression)
 	identifier, ok := expression.(*ast.Ident)
 	if !ok {
 		return "", false

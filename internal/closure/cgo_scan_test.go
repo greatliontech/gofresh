@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
 )
 
 func TestContributionCgoCallbackHashesPackageFiles(t *testing.T) {
@@ -41,7 +43,7 @@ func TestContributionCgoCallbackHashesPackageFiles(t *testing.T) {
 }
 
 func cgoNativeFileHasRawString(text string) bool {
-	_, raw := stripCComments(text)
+	_, raw := cprep.StripCComments(text)
 	return raw
 }
 

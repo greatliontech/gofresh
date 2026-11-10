@@ -12,6 +12,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
 	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
 )
 
 func observableCallEffect(audited bool, effect externalEffect, call *ssa.CallCommon, site ssa.CallInstruction, fp *freshParamAnalysis) bool {
@@ -316,59 +317,85 @@ func freshPathStoreFeedsJoin(store *ssa.Store, pathValue ssa.Value, seen map[ssa
 	return false
 }
 
+func forEachLocalSliceAllocStore(v ssa.Value, allowDebugRef bool, visit func(idx *ssa.IndexAddr, val ssa.Value) bool) (*ssa.Slice, *types.Array, bool) {
+	slice, ok := v.(*ssa.Slice)
+	if !ok || slice.X == nil {
+		return nil, nil, false
+	}
+	alloc, ok := slice.X.(*ssa.Alloc)
+	if !ok || alloc.Referrers() == nil {
+		return nil, nil, false
+	}
+	var arr *types.Array
+	if ptr, ok := types.Unalias(alloc.Type()).Underlying().(*types.Pointer); ok {
+		arr, _ = types.Unalias(ptr.Elem()).Underlying().(*types.Array)
+	}
+	for _, ref := range *alloc.Referrers() {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+			if !allowDebugRef {
+				return nil, nil, false
+			}
+		case *ssa.Slice:
+			if r != slice {
+				return nil, nil, false
+			}
+		case *ssa.IndexAddr:
+			if r.X != alloc || r.Referrers() == nil {
+				return nil, nil, false
+			}
+			for _, elem := range *r.Referrers() {
+				switch e := elem.(type) {
+				case *ssa.DebugRef:
+					if !allowDebugRef {
+						return nil, nil, false
+					}
+				case *ssa.Store:
+					if e.Addr != r || (visit != nil && !visit(r, e.Val)) {
+						return nil, nil, false
+					}
+				default:
+					return nil, nil, false
+				}
+			}
+		default:
+			return nil, nil, false
+		}
+	}
+	return slice, arr, true
+}
+
 func fixedVariadicArgs(site *ssa.Call) ([]ssa.Value, bool) {
 	if site == nil || site.Common() == nil || len(site.Common().Args) != 1 {
 		return nil, false
 	}
-	slice, ok := site.Common().Args[0].(*ssa.Slice)
-	if !ok || slice.X == nil {
-		return nil, false
-	}
-	alloc, ok := slice.X.(*ssa.Alloc)
-	if !ok || alloc.Referrers() == nil {
-		return nil, false
-	}
-	pointer, ok := alloc.Type().Underlying().(*types.Pointer)
-	if !ok {
-		return nil, false
-	}
-	array, ok := pointer.Elem().Underlying().(*types.Array)
-	if !ok || array.Len() < 1 || array.Len() > 64 {
-		return nil, false
-	}
-	args := make([]ssa.Value, int(array.Len()))
-	for _, ref := range *alloc.Referrers() {
-		switch ref := ref.(type) {
-		case *ssa.DebugRef:
-		case *ssa.Slice:
-			if ref != slice {
-				return nil, false
-			}
-		case *ssa.IndexAddr:
-			index, ok := constInt(ref.Index)
-			if !ok || index < 0 || index >= int64(len(args)) || args[index] != nil || ref.Referrers() == nil {
-				return nil, false
-			}
-			var stored ssa.Value
-			for _, addressRef := range *ref.Referrers() {
-				switch addressRef := addressRef.(type) {
-				case *ssa.DebugRef:
-				case *ssa.Store:
-					if stored != nil || addressRef.Addr != ref {
-						return nil, false
-					}
-					stored = addressRef.Val
-				default:
-					return nil, false
-				}
-			}
-			if stored == nil {
-				return nil, false
-			}
-			args[index] = stored
-		default:
-			return nil, false
+	var args []ssa.Value
+	seenIdxAddr := map[*ssa.IndexAddr]bool{}
+	slice, array, ok := forEachLocalSliceAllocStore(site.Common().Args[0], true, func(ref *ssa.IndexAddr, val ssa.Value) bool {
+		if seenIdxAddr[ref] || val == nil {
+			return false
 		}
+		seenIdxAddr[ref] = true
+		if args == nil {
+			ptr, ok := ref.X.Type().Underlying().(*types.Pointer)
+			if !ok {
+				return false
+			}
+			arr, ok := ptr.Elem().Underlying().(*types.Array)
+			if !ok || arr.Len() < 1 || arr.Len() > 64 {
+				return false
+			}
+			args = make([]ssa.Value, int(arr.Len()))
+		}
+		index, ok := constInt(ref.Index)
+		if !ok || index < 0 || index >= int64(len(args)) || args[index] != nil {
+			return false
+		}
+		args[index] = val
+		return true
+	})
+	if !ok || array == nil || array.Len() < 1 || array.Len() > 64 || len(args) != int(array.Len()) {
+		return nil, false
 	}
 	for _, arg := range args {
 		if arg == nil {
@@ -1959,7 +1986,7 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 						return false
 					}
 				}
-			} else if ok && propertyHarnessPath(funcPkgPath(fn)) {
+			} else if ok && propharness.IsHarnessPath(funcPkgPath(fn)) {
 				if wrapFP == nil || !wrapFP.propertyHarnessAudited {
 					return false
 				}
@@ -2917,7 +2944,7 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 			return false
 		}
 	} else {
-		if (!fp.functions[callee] && !fp.programFunctions[callee]) || (callee == fp.enumRoot && !fp.selectionAudited) || (callee.Signature.Variadic() && !fp.selectionAudited && !fp.inFieldStore && !fp.inProgramSites) || propertyHarnessPath(pkgPath) {
+		if (!fp.functions[callee] && !fp.programFunctions[callee]) || (callee == fp.enumRoot && !fp.selectionAudited) || (callee.Signature.Variadic() && !fp.selectionAudited && !fp.inFieldStore && !fp.inProgramSites) || propharness.IsHarnessPath(pkgPath) {
 			return false
 		}
 		if fp.enumOnly && !collect.isSeeds() {
@@ -4430,7 +4457,7 @@ func resolveConcreteMethodTargetsSeen(prog *ssa.Program, recvType types.Type, me
 			if _, isIface := types.Unalias(sig.Recv().Type()).Underlying().(*types.Interface); !isIface {
 				return false
 			}
-			if fnObj.Pkg() != nil && propertyHarnessPath(fnObj.Pkg().Path()) {
+			if fnObj.Pkg() != nil && propharness.IsHarnessPath(fnObj.Pkg().Path()) {
 				return false
 			}
 			named := derefNamedStruct(fp.userPkgPaths(), ct)
@@ -4484,7 +4511,7 @@ func resolveConcreteMethodTargetsSeen(prog *ssa.Program, recvType types.Type, me
 			}
 			return true
 		} else {
-			if len(declFn.Blocks) == 0 || propertyHarnessPath(funcPkgPath(declFn)) {
+			if len(declFn.Blocks) == 0 || propharness.IsHarnessPath(funcPkgPath(declFn)) {
 				return false
 			}
 			if fp.isStdFunc(declFn) {
