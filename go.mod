@@ -3,7 +3,7 @@ module github.com/greatliontech/gofresh
 go 1.27.0
 
 require (
-	github.com/greatliontech/go-x-tools v0.51.1-0.20261109045235-5215c18e3297
+	github.com/greatliontech/go-x-tools v0.51.1-0.20261110114516-95ae5480b949
 	github.com/greatliontech/stipulator/stipulate/structural v0.3.1
 	golang.org/x/mod v0.41.0
 	golang.org/x/sys v0.48.0
