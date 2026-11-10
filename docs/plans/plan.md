@@ -40,9 +40,9 @@
 - [x] Unify `exclusionPatterns` UTF-8/control-byte validation, resolve `moduleDir` once, reuse `chainResolveObserved` target in `hashPath`, memoize `bracketCoverage.covers`, run `finalizeManifestState` once, eliminate manifest encode/decode round-trips, and consolidate path/symlink helpers in `internal/runtimeinput`
 - [x] Fix `drainCollected` `WaitDelay == 0` timer race and double `NormalizeEnv` in `internal/gotool`, pre-index `testvariant.InertForSubject`, fix `cachefile.go` `knownBytes` overwrite drift and `writeSeq` pruning, clean up `guard.go` and `testenv`, and emit `DomainRuntimeInput`/`DomainCache`/`DomainView`/`DomainSession` trace events
 
-## Chunk 8: Downstream Fleet Refactoring, Batching & Startup Purity ([`gomutant:decompose-god-files-and-batch-freshness-checks`](../../../gomutant/docs/issues/decompose-god-files-and-batch-freshness-checks.md))
+## Chunk 8: Downstream Fleet Refactoring, Batching & Startup Purity
 - [x] Eliminate startup `os.Getenv("GOPACKAGESDEBUG")`, `reflect.TypeFor` on concrete types, startup `tRune` global, and startup `maphash.MakeSeed()` in `go-x-tools`
-- [ ] Split `gomutant` `findings.go`, `run.go` (decomposing `runCounted`), and `internal/mcpserver/server.go`; deduplicate `ExplainSymbol`/`ExplainTriage`; share `runtimeMemo` and batch `CheckObservedBatch`/`CheckBatch` checks; check view-free pin predicates before `t.newSubjectViews`; and batch `LinkedTestPackagesContext` in `OracleClosureSignpostContext`
+- [x] Split `gomutant` `findings.go`, `run.go` (decomposing `runCounted`), and `internal/mcpserver/server.go`; deduplicate `ExplainSymbol`/`ExplainTriage`; share `runtimeMemo` and batch `CheckObservedBatch`/`CheckBatch` checks; check view-free pin predicates before `t.newSubjectViews`; and batch `LinkedTestPackagesContext` in `OracleClosureSignpostContext`
 - [x] Eliminate redundant `BindRuntime` + `CheckBatchWithLedgers` re-observations in `stipulator/internal/backends/golang/native.go`, reuse opening captures/certificates in `served.go`, scope `retryDrifted` to drifted packages, and split oversized `internal/backends/golang` files
 - [x] Switch `sideGuards` in `pew/cmd/pew/ab.go` to `preparationReader`, eliminate duplicate `sideGuards` and `abPackageMetadata` calls per package in `pew ab`, and deduplicate `run.HarnessCompleted` and `resolveExistingPrefix`
 
