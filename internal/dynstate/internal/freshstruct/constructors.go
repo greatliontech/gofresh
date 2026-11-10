@@ -40,6 +40,25 @@ func recordFreshVarGuardPkg(sum *freshFuncSummary, v *types.Var, guardPkg string
 	if sum == nil || v == nil || guardPkg == "" || syntaxutil.IsStandardLibraryPkgPath(guardPkg) {
 		return
 	}
+	recordFreshVarCondGuard(sum, v, func(ref syntaxutil.TypeRef) syntaxutil.ConditionalStructMutation {
+		return syntaxutil.ConditionalStructMutation{Struct: ref, GuardPkg: guardPkg}
+	})
+}
+
+func recordFreshVarDescBuilderGuard(sum *freshFuncSummary, v *types.Var, guardStruct syntaxutil.TypeRef) {
+	if sum == nil || v == nil || !guardStruct.Valid() {
+		return
+	}
+	recordFreshVarCondGuard(sum, v, func(ref syntaxutil.TypeRef) syntaxutil.ConditionalStructMutation {
+		return syntaxutil.ConditionalStructMutation{
+			Struct:                  ref,
+			GuardStruct:             guardStruct,
+			RequireDescBuilderGuard: true,
+		}
+	})
+}
+
+func recordFreshVarCondGuard(sum *freshFuncSummary, v *types.Var, makeCond func(syntaxutil.TypeRef) syntaxutil.ConditionalStructMutation) {
 	if sum.condGuards == nil {
 		sum.condGuards = map[syntaxutil.ConditionalStructMutation]bool{}
 	}
@@ -50,10 +69,7 @@ func recordFreshVarGuardPkg(sum *freshFuncSummary, v *types.Var, guardPkg string
 		u := types.Unalias(t)
 		if named, isN := u.(*types.Named); isN && named.Obj() != nil && named.Obj().Pkg() != nil {
 			if sl, isSl := named.Underlying().(*types.Slice); isSl && !refconfine.TypeContainsRefOrPointer(sl.Elem()) {
-				cm := syntaxutil.ConditionalStructMutation{
-					Struct:   syntaxutil.TypeRef{Pkg: named.Obj().Pkg().Path(), Name: named.Obj().Name()},
-					GuardPkg: guardPkg,
-				}
+				cm := makeCond(syntaxutil.TypeRef{Pkg: named.Obj().Pkg().Path(), Name: named.Obj().Name()})
 				if cm.Valid() {
 					sum.condGuards[cm] = true
 				}
@@ -64,7 +80,7 @@ func recordFreshVarGuardPkg(sum *freshFuncSummary, v *types.Var, guardPkg string
 		}
 		ref, _, st, ok := syntaxutil.TypeRefOfStructFull(u)
 		if ok && st != nil && st.NumFields() > 0 && ref.Valid() {
-			cm := syntaxutil.ConditionalStructMutation{Struct: ref, GuardPkg: guardPkg}
+			cm := makeCond(ref)
 			if cm.Valid() {
 				sum.condGuards[cm] = true
 			}

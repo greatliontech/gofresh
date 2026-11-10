@@ -1,7 +1,7 @@
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
-github.com/greatliontech/go-x-tools v0.51.1-0.20261110163050-3b0091521e91 h1:SwS7cdlUYOPF3gw6tHW8ceW+ePPluqeAHV52kPllckY=
-github.com/greatliontech/go-x-tools v0.51.1-0.20261110163050-3b0091521e91/go.mod h1:6ZWRszosVL/0Dx6X8TxIjNBTllvMuhlEZ7tpMqc+FqU=
+github.com/greatliontech/go-x-tools v0.51.1-0.20261110191506-66fca0a77c41 h1:NSRGuebjAO5u2kwKv3+2jg3VfbXPxJ1CUPVmJq7eR0U=
+github.com/greatliontech/go-x-tools v0.51.1-0.20261110191506-66fca0a77c41/go.mod h1:6ZWRszosVL/0Dx6X8TxIjNBTllvMuhlEZ7tpMqc+FqU=
 github.com/greatliontech/stipulator/stipulate/structural v0.3.1 h1:FRe2S11CXSP2WnSXM7/RD5iqzn2wYI8kYskD2oGoKUE=
 github.com/greatliontech/stipulator/stipulate/structural v0.3.1/go.mod h1:A+jeHEOG2USUYwkp57hG7Rqk+nng3OSXHwa1nO2YTMY=
 golang.org/x/mod v0.41.0 h1:qJmnOUb4YB+FsEuM3HcWucdZASCPGhsX6uljO6pog0c=

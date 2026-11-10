@@ -235,6 +235,12 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 	return res, a.seenObjects, nil
 }
 
+type cachedNodeRefs struct {
+	objs  []types.Object
+	types []types.Type
+	hasIf bool
+}
+
 type pkgIndex struct {
 	pkg            *packages.Package
 	ssa            *ssa.Package
@@ -246,6 +252,7 @@ type pkgIndex struct {
 	cache          bool
 	mutable        bool
 	decls          map[types.Object]ast.Node
+	nodeRefs       map[ast.Node]*cachedNodeRefs
 	vars           []ast.Node
 	inits          []ast.Node
 	wasmImport     bool
@@ -295,6 +302,10 @@ type tier2Base struct {
 	wholeZeroDone          bool
 	wholeZeroGlobals       map[*ssa.Global]bool
 	verifiedAsm            map[string]*asmverify.VerifiedPackage
+	unsafeValueType        map[types.Type]bool
+	unsafeElemType         map[types.Type]bool
+	ifaceMethodDone        map[types.Type]bool
+	ifaceMethodObjs        map[types.Type][]*types.Func
 }
 
 type tier2Analyzer struct {
@@ -347,6 +358,8 @@ type tier2Analyzer struct {
 	zeroGlobalDecls      map[pkgVarKey]bool
 	openWorld            bool
 	scanned              map[*ssa.Function]bool
+	scannedNodes         map[ast.Node]bool
+	seenIfaceBoxTypes    map[types.Type]bool
 	effects              []externalEffect
 
 	widen        bool
@@ -566,6 +579,10 @@ func newTier2Base(h *Hasher, prog *program, metas []listPkg) *tier2Base {
 		idxByTypes:       a.idxByTypes,
 		objByName:        a.objByName,
 		objsByLinkTarget: a.objsByLinkTarget,
+		unsafeValueType:  map[types.Type]bool{},
+		unsafeElemType:   map[types.Type]bool{},
+		ifaceMethodDone:  map[types.Type]bool{},
+		ifaceMethodObjs:  map[types.Type][]*types.Func{},
 	}
 }
 
@@ -590,6 +607,8 @@ func (b *tier2Base) analyzer() *tier2Analyzer {
 		rtaResolved:              map[ssa.CallInstruction]bool{},
 		subjectDeterminedInvokes: map[ssa.CallInstruction]bool{},
 		scanned:                  map[*ssa.Function]bool{},
+		scannedNodes:             map[ast.Node]bool{},
+		seenIfaceBoxTypes:        map[types.Type]bool{},
 	}
 }
 
@@ -624,6 +643,7 @@ func (a *tier2Analyzer) buildIndex(p *packages.Package) *pkgIndex {
 		std:            std,
 		testMain:       p.Name == "main" && path == a.prog.PkgPath+".test",
 		decls:          map[types.Object]ast.Node{},
+		nodeRefs:       map[ast.Node]*cachedNodeRefs{},
 		linknames:      map[types.Object]string{},
 		linknameByName: map[string]string{},
 		funcKeys:       map[types.Object]funcDeclKey{},
@@ -989,7 +1009,7 @@ func (a *tier2Analyzer) scanValue(callerIdx *pkgIndex, v ssa.Value) {
 	if v == nil {
 		return
 	}
-	a.addValueType(a.idxForFunction(v.Parent()), v)
+	a.addValueType(nil, v)
 	switch x := v.(type) {
 	case *ssa.Global:
 		if obj := x.Object(); obj != nil {
@@ -1413,15 +1433,34 @@ func stdBodyCut(audited bool, fn *ssa.Function, classified externalEffect, class
 }
 
 func (a *tier2Analyzer) addInterfaceMethodSet(t types.Type) {
-	if !a.hasNonStdNamedType(t) {
+	if t == nil || a.seenIfaceBoxTypes[t] {
 		return
 	}
-	for _, mt := range []types.Type{t, types.NewPointer(t)} {
-		set := types.NewMethodSet(mt)
-		for i := 0; i < set.Len(); i++ {
-			if fn, ok := set.At(i).Obj().(*types.Func); ok {
-				a.enqueueObject(fn)
+	if a.seenIfaceBoxTypes != nil {
+		a.seenIfaceBoxTypes[t] = true
+	}
+	if a.base != nil && a.base.ifaceMethodDone != nil && a.base.ifaceMethodDone[t] {
+		for _, fn := range a.base.ifaceMethodObjs[t] {
+			a.enqueueObject(fn)
+		}
+		return
+	}
+	var funcs []*types.Func
+	if a.hasNonStdNamedType(t) {
+		for _, mt := range []types.Type{t, types.NewPointer(t)} {
+			set := types.NewMethodSet(mt)
+			for i := 0; i < set.Len(); i++ {
+				if fn, ok := set.At(i).Obj().(*types.Func); ok {
+					funcs = append(funcs, fn)
+					a.enqueueObject(fn)
+				}
 			}
+		}
+	}
+	if a.base != nil && a.base.ifaceMethodDone != nil {
+		a.base.ifaceMethodDone[t] = true
+		if len(funcs) > 0 {
+			a.base.ifaceMethodObjs[t] = funcs
 		}
 	}
 }
@@ -1842,9 +1881,16 @@ func ssaOpaqueHandle(t types.Type) bool {
 // unsafe pointer anywhere in it — the one judgment every value-typed
 // scan site shares; std packages carry the toolchain guard instead.
 func (a *tier2Analyzer) addValueType(idx *pkgIndex, v ssa.Value) {
-	a.addType(v.Type())
+	t := v.Type()
+	a.addType(t)
+	if !a.valueTypeUsesUnsafePointer(t) {
+		return
+	}
+	if idx == nil && v.Parent() != nil {
+		idx = a.idxForFunction(v.Parent())
+	}
 	unindexedWrapper := idx == nil && v.Parent() != nil && isAnalyzableUnnamedWrapper(v.Parent())
-	if (unindexedWrapper || (idx != nil && !idx.std)) && a.valueTypeUsesUnsafePointer(v.Type()) {
+	if unindexedWrapper || (idx != nil && !idx.std) {
 		pkgID := "<synthetic>"
 		if idx != nil {
 			pkgID = idx.id
@@ -1854,16 +1900,30 @@ func (a *tier2Analyzer) addValueType(idx *pkgIndex, v ssa.Value) {
 }
 
 func (a *tier2Analyzer) valueTypeUsesUnsafePointer(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	if a != nil && a.base != nil && a.base.unsafeValueType != nil {
+		if v, ok := a.base.unsafeValueType[t]; ok {
+			return v
+		}
+	}
+	res := false
 	if tuple, ok := types.Unalias(t).(*types.Tuple); ok {
 		for i := 0; i < tuple.Len(); i++ {
 			elem := tuple.At(i).Type()
 			if a.typeUsesUnsafePointer(elem) && !isOSFileType(elem) {
-				return true
+				res = true
+				break
 			}
 		}
-		return false
+	} else {
+		res = a.typeUsesUnsafePointer(t) && !isOSFileType(t)
 	}
-	return a.typeUsesUnsafePointer(t) && !isOSFileType(t)
+	if a != nil && a.base != nil && a.base.unsafeValueType != nil {
+		a.base.unsafeValueType[t] = res
+	}
+	return res
 }
 
 func (a *tier2Analyzer) isOpaquePropertyHarnessStruct(n *types.Named) bool {
@@ -1878,8 +1938,16 @@ func (a *tier2Analyzer) isOpaquePropertyHarnessStruct(n *types.Named) bool {
 }
 
 func (a *tier2Analyzer) typeUsesUnsafePointer(t types.Type) bool {
+	if t == nil {
+		return false
+	}
 	if a == nil {
 		return typeUsesUnsafePointer(t)
+	}
+	if a.base != nil && a.base.unsafeElemType != nil {
+		if v, ok := a.base.unsafeElemType[t]; ok {
+			return v
+		}
 	}
 	seen := make(map[types.Type]bool)
 	var walk func(types.Type) bool
@@ -1888,6 +1956,11 @@ func (a *tier2Analyzer) typeUsesUnsafePointer(t types.Type) bool {
 			return false
 		}
 		cur = types.Unalias(cur)
+		if a.base != nil && a.base.unsafeElemType != nil {
+			if v, ok := a.base.unsafeElemType[cur]; ok {
+				return v
+			}
+		}
 		if ssaOpaqueHandle(cur) || seen[cur] {
 			return false
 		}
@@ -1941,7 +2014,11 @@ func (a *tier2Analyzer) typeUsesUnsafePointer(t types.Type) bool {
 		}
 		return false
 	}
-	return walk(t)
+	res := walk(t)
+	if a.base != nil && a.base.unsafeElemType != nil {
+		a.base.unsafeElemType[t] = res
+	}
+	return res
 }
 
 // addType enqueues every named type the walked structure carries. The
@@ -1950,20 +2027,82 @@ func (a *tier2Analyzer) typeUsesUnsafePointer(t types.Type) bool {
 // possible divergence direction is conservative: enqueues add scans,
 // scans add effects and widens, never the reverse.
 func (a *tier2Analyzer) addType(t types.Type) {
-	walkTypeGraph(t, true, a.seenTypes, func(t types.Type) bool {
+	if t == nil || a.seenTypes[t] {
+		return
+	}
+	u := types.Unalias(t)
+	if a.seenTypes[u] {
+		a.seenTypes[t] = true
+		return
+	}
+	walkTypeGraph(u, true, a.seenTypes, func(t types.Type) bool {
 		if named, ok := t.(*types.Named); ok {
 			a.enqueueObject(named.Obj())
 		}
 		return true
 	})
+	a.seenTypes[t] = true
+}
+
+func (idx *pkgIndex) cachedRefsForNode(node ast.Node) *cachedNodeRefs {
+	if idx == nil || node == nil || idx.pkg == nil || idx.pkg.TypesInfo == nil {
+		return nil
+	}
+	if idx.nodeRefs != nil {
+		if refs := idx.nodeRefs[node]; refs != nil {
+			return refs
+		}
+	} else {
+		idx.nodeRefs = map[ast.Node]*cachedNodeRefs{}
+	}
+	refs := &cachedNodeRefs{}
+	seenObj := map[types.Object]bool{}
+	seenType := map[types.Type]bool{}
+	addObj := func(obj types.Object) {
+		if obj != nil && !seenObj[obj] {
+			seenObj[obj] = true
+			refs.objs = append(refs.objs, obj)
+		}
+	}
+	addTyp := func(t types.Type) {
+		if t != nil && !seenType[t] {
+			seenType[t] = true
+			refs.types = append(refs.types, t)
+		}
+	}
+	ast.Inspect(node, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.IfStmt:
+			if x.Init == nil && x.Body != nil {
+				refs.hasIf = true
+			}
+		case *ast.Ident:
+			if obj := idx.pkg.TypesInfo.Uses[x]; obj != nil {
+				addObj(obj)
+				addTyp(obj.Type())
+			}
+		case *ast.SelectorExpr:
+			if sel := idx.pkg.TypesInfo.Selections[x]; sel != nil {
+				addObj(sel.Obj())
+				addTyp(sel.Recv())
+			}
+		}
+		return true
+	})
+	idx.nodeRefs[node] = refs
+	return refs
 }
 
 func (a *tier2Analyzer) scanNodeRefs(idx *pkgIndex, node ast.Node, startupOnly bool) {
 	if idx == nil || node == nil || idx.pkg.TypesInfo == nil {
 		return
 	}
+	refs := idx.cachedRefsForNode(node)
+	if refs == nil {
+		return
+	}
 	var skippedBody map[*ast.BlockStmt]bool
-	if startupOnly && len(a.zeroGlobalDecls) > 0 {
+	if startupOnly && len(a.zeroGlobalDecls) > 0 && refs.hasIf {
 		ast.Inspect(node, func(n ast.Node) bool {
 			if _, isFuncLit := n.(*ast.FuncLit); isFuncLit {
 				return false
@@ -1976,6 +2115,21 @@ func (a *tier2Analyzer) scanNodeRefs(idx *pkgIndex, node ast.Node, startupOnly b
 			}
 			return true
 		})
+	}
+	if len(skippedBody) == 0 {
+		if a.scannedNodes[node] {
+			return
+		}
+		if a.scannedNodes != nil {
+			a.scannedNodes[node] = true
+		}
+		for _, obj := range refs.objs {
+			a.enqueueObject(obj)
+		}
+		for _, t := range refs.types {
+			a.addType(t)
+		}
+		return
 	}
 	ast.Inspect(node, func(n ast.Node) bool {
 		if blk, ok := n.(*ast.BlockStmt); ok && skippedBody[blk] {

@@ -787,6 +787,10 @@ func stepNonEscapingIntraParams(
 						}
 						if as, isAs := par.(*ast.AssignStmt); isAs && as.Tok == token.ASSIGN && len(as.Lhs) == 1 && len(as.Rhs) == 1 && ast.Unparen(as.Lhs[0]) == uid {
 							rhs := ast.Unparen(as.Rhs[0])
+							rhsType := p.TypesInfo.TypeOf(rhs)
+							if rhsType != nil && !refconfine.TypeContainsRefOrPointer(rhsType) && !syntaxutil.ContainsUintptr(rhsType) {
+								continue
+							}
 							if c, isC := rhs.(*ast.CallExpr); isC && !c.Ellipsis.IsValid() {
 								extFn := syntaxutil.ResolveCalledFuncObj(p, c.Fun)
 								if extFn != nil && extFn.Origin().Pkg() != nil {

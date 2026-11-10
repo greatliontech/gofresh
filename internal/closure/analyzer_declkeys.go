@@ -35,6 +35,12 @@ func typeDeclaringPkg(t types.Type) *types.Package {
 }
 
 func funcDeclaringPkg(fn *ssa.Function) *types.Package {
+	if fn == nil {
+		return nil
+	}
+	if fn.Pkg != nil && fn.Pkg.Pkg != nil {
+		return fn.Pkg.Pkg
+	}
 	if isUnnamedStructPromotedWrapper(fn) {
 		return unnamedWrapperDeclaringPkg(fn)
 	}

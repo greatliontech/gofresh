@@ -90,6 +90,12 @@ type subjectQuery struct {
 
 	argFresh map[freshParamKey]bool
 	usesOK   map[freshParamKey]bool
+	state    *freshParamState
+}
+
+type freshParamState struct {
+	callersReady bool
+	resolved     bool
 }
 
 // calleeFrame tracks active call-site parameter bindings and recursion guards
@@ -440,6 +446,7 @@ func newFreshParamAnalysis(audited bool, pureDelegates map[string]bool, reach at
 			subjectRoot: reach.subjectRoot,
 			argFresh:    map[freshParamKey]bool{},
 			usesOK:      map[freshParamKey]bool{},
+			state:       &freshParamState{},
 		},
 	}
 	fp.resetDynamicMemos()
@@ -451,29 +458,6 @@ func newFreshParamAnalysis(audited bool, pureDelegates map[string]bool, reach at
 			fp.enumRecvNamed = derefNamedStruct(fp.userPkgPaths(), fp.enumRoot.Signature.Recv().Type())
 		}
 	}
-	if fp.summary != nil && len(fp.summary.allStaticSites) > 0 {
-		for callee := range reach.functions {
-			for _, site := range fp.summary.allStaticSites[callee] {
-				if reach.functions[site.Parent()] {
-					fp.callers[callee] = append(fp.callers[callee], site)
-				}
-			}
-		}
-	} else {
-		for fn := range reach.functions {
-			for _, block := range fn.Blocks {
-				for _, instruction := range block.Instrs {
-					site, ok := instruction.(ssa.CallInstruction)
-					if !ok || site.Common() == nil {
-						continue
-					}
-					if callee := site.Common().StaticCallee(); callee != nil && reach.functions[callee] {
-						fp.callers[callee] = append(fp.callers[callee], site)
-					}
-				}
-			}
-		}
-	}
 	// The dynamic-carrier view is built over the enumeration's own
 	// targets, before any narrowing: the narrowing consults this view
 	// (the parameter crossing), so it must not depend on it — the
@@ -483,8 +467,72 @@ func newFreshParamAnalysis(audited bool, pureDelegates map[string]bool, reach at
 			fp.dynamic[target] = true
 		}
 	}
-	fp.resolve()
 	return fp
+}
+
+func (fp *freshParamAnalysis) callersOf(fn *ssa.Function) []ssa.CallInstruction {
+	if fp == nil || fn == nil || !fp.functions[fn] {
+		return nil
+	}
+	if sites, ok := fp.callers[fn]; ok || (fp.state != nil && fp.state.callersReady) {
+		return sites
+	}
+	if fp.summary != nil && len(fp.summary.allStaticSites) > 0 {
+		var sites []ssa.CallInstruction
+		for _, site := range fp.summary.allStaticSites[fn] {
+			if fp.functions[site.Parent()] {
+				sites = append(sites, site)
+			}
+		}
+		if fp.callers != nil {
+			fp.callers[fn] = sites
+		}
+		return sites
+	}
+	fp.ensureAllCallers()
+	return fp.callers[fn]
+}
+
+func (fp *freshParamAnalysis) ensureAllCallers() {
+	if fp == nil || fp.state == nil || fp.state.callersReady {
+		return
+	}
+	fp.state.callersReady = true
+	if fp.summary != nil && len(fp.summary.allStaticSites) > 0 {
+		for callee := range fp.functions {
+			if _, ok := fp.callers[callee]; ok {
+				continue
+			}
+			for _, site := range fp.summary.allStaticSites[callee] {
+				if fp.functions[site.Parent()] {
+					fp.callers[callee] = append(fp.callers[callee], site)
+				}
+			}
+		}
+		return
+	}
+	for fn := range fp.functions {
+		for _, block := range fn.Blocks {
+			for _, instruction := range block.Instrs {
+				site, ok := instruction.(ssa.CallInstruction)
+				if !ok || site.Common() == nil {
+					continue
+				}
+				if callee := site.Common().StaticCallee(); callee != nil && fp.functions[callee] {
+					fp.callers[callee] = append(fp.callers[callee], site)
+				}
+			}
+		}
+	}
+}
+
+func (fp *freshParamAnalysis) ensureResolved() {
+	if fp == nil || fp.state == nil || fp.state.resolved {
+		return
+	}
+	fp.state.resolved = true
+	fp.ensureAllCallers()
+	fp.resolve()
 }
 
 // resolve evaluates both fixpoint directions for every candidate
@@ -496,8 +544,8 @@ func (fp *freshParamAnalysis) resolve() {
 		fnName string
 	}
 	var keys []sortKey
-	for fn := range fp.callers {
-		if !fp.paramCrossingEligible(fn) {
+	for fn, sites := range fp.callers {
+		if len(sites) == 0 || !fp.paramCrossingEligible(fn) || fp.dynamic[fn] || len(fn.FreeVars) != 0 || fn.Signature.Variadic() {
 			continue
 		}
 		var fnName string
@@ -569,6 +617,7 @@ func (fp *freshParamAnalysis) paramEligible(fn *ssa.Function, idx int) bool {
 }
 
 func (fp *freshParamAnalysis) paramArgFreshMemo(key freshParamKey, inProgress map[freshParamKey]bool) bool {
+	fp.ensureResolved()
 	if v, done := fp.argFresh[key]; done {
 		return v
 	}
@@ -585,7 +634,7 @@ func (fp *freshParamAnalysis) paramArgFreshMemo(key freshParamKey, inProgress ma
 		fp.argFresh[key] = false
 		return false
 	}
-	sites := fp.callers[key.fn]
+	sites := fp.callersOf(key.fn)
 	if len(sites) == 0 {
 		fp.argFresh[key] = false
 		return false
@@ -614,6 +663,7 @@ func (fp *freshParamAnalysis) paramArgFreshMemo(key freshParamKey, inProgress ma
 }
 
 func (fp *freshParamAnalysis) paramUsesObservableMemo(key freshParamKey, inProgress map[freshParamKey]bool) bool {
+	fp.ensureResolved()
 	if v, done := fp.usesOK[key]; done {
 		return v
 	}

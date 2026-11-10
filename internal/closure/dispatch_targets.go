@@ -566,7 +566,7 @@ func attributedParameterArgs(param *ssa.Parameter, fp *freshParamAnalysis) ([]ss
 	if idx < 0 {
 		return nil, false, false
 	}
-	sites := fp.callers[fn]
+	sites := fp.callersOf(fn)
 	usedProgramSites := false
 	if fn == fp.enumRoot {
 		// The subject root's own parameters cross to its whole-view

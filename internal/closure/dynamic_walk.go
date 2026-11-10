@@ -1241,7 +1241,7 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		if !ok {
 			if !collect.isSink() && fp != nil && fp.selectionAudited && ((!fp.enumOnly && fp.enumRoot == nil) || fp.enumOnly) && (fp.inProgramSites || fp.inFieldStore) {
 				fn := v.Parent()
-				if fn != nil && fn != fp.enumRoot && fn != fp.subjectRoot && !fp.isEnumSiteCaller(fn) && !fp.functions[fn] && !fp.dynamic[fn] && len(fp.callers[fn]) == 0 && !fp.programValueRef[fn] && len(fp.programSites[fn]) == 0 && !initFlowFrame(fn) {
+				if fn != nil && fn != fp.enumRoot && fn != fp.subjectRoot && !fp.isEnumSiteCaller(fn) && !fp.functions[fn] && !fp.dynamic[fn] && len(fp.callersOf(fn)) == 0 && !fp.programValueRef[fn] && len(fp.programSites[fn]) == 0 && !initFlowFrame(fn) {
 					if fp.usedSubject != nil {
 						*fp.usedSubject = true
 					}

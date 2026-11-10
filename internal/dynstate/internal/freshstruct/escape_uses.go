@@ -487,8 +487,15 @@ func isNonEscapingMethodOrHelperCallOnFresh(
 					targetAssign = as2
 					dstRoot = dr
 					if extCtor.Origin().Pkg() != p.Types {
-						recordFreshVarGuardPkg(sum, srcVar, extCtor.Origin().Pkg().Path())
-						recordFreshVarGuardPkg(sum, dr, extCtor.Origin().Pkg().Path())
+						if stNamed, isN := types.Unalias(p.TypesInfo.TypeOf(extCall)).(*types.Named); isN &&
+							isOpaqueUnexportedForeignStruct(p.Types, stNamed) && stNamed.Obj().Pkg() == extCtor.Origin().Pkg() {
+							guardRef := syntaxutil.TypeRef{Pkg: stNamed.Obj().Pkg().Path(), Name: stNamed.Obj().Name()}
+							recordFreshVarDescBuilderGuard(sum, srcVar, guardRef)
+							recordFreshVarDescBuilderGuard(sum, dr, guardRef)
+						} else {
+							recordFreshVarGuardPkg(sum, srcVar, extCtor.Origin().Pkg().Path())
+							recordFreshVarGuardPkg(sum, dr, extCtor.Origin().Pkg().Path())
+						}
 					}
 				}
 			}
