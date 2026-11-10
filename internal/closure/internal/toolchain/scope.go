@@ -1,4 +1,4 @@
-package closure
+package toolchain
 
 import (
 	"go/ast"
@@ -670,7 +670,14 @@ func funcDeclaresParamOrResult(fn *ast.FuncDecl, name string) bool {
 	if fn == nil || name == "" {
 		return false
 	}
-	if recvVarName(fn) == name {
+	return funcDeclaresAnyParamOrResult(fn, map[string]bool{name: true})
+}
+
+func funcDeclaresAnyParamOrResult(fn *ast.FuncDecl, names map[string]bool) bool {
+	if fn == nil || len(names) == 0 {
+		return false
+	}
+	if recv := recvVarName(fn); recv != "" && names[recv] {
 		return true
 	}
 	if fn.Type != nil {
@@ -680,7 +687,7 @@ func funcDeclaresParamOrResult(fn *ast.FuncDecl, name string) bool {
 			}
 			for _, f := range fl.List {
 				for _, id := range f.Names {
-					if id.Name == name {
+					if names[id.Name] {
 						return true
 					}
 				}
@@ -694,12 +701,7 @@ func funcShadowsAnyIdent(fn *ast.FuncDecl, names map[string]bool) bool {
 	if fn == nil || len(names) == 0 {
 		return false
 	}
-	for name := range names {
-		if funcDeclaresParamOrResult(fn, name) {
-			return true
-		}
-	}
-	return bodyDeclaresAnyIdent(fn.Body, names)
+	return funcDeclaresAnyParamOrResult(fn, names) || bodyDeclaresAnyIdent(fn.Body, names)
 }
 
 func funcLitShadowsAnyIdent(fl *ast.FuncLit, names map[string]bool) bool {

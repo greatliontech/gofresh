@@ -629,7 +629,7 @@ func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, con
 			}
 			continue
 		}
-		if isAlwaysExternalPackage(imp.pkgPath) && imp.alias != "." && imp.alias != "_" {
+		if auditset.AlwaysExternalPackage(imp.pkgPath) && imp.alias != "." && imp.alias != "_" {
 			// A plain always-external import is a diagnostic candidate
 			// only: the dot and blank spellings record the effect
 			// itself below.
@@ -646,7 +646,7 @@ func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, con
 		// executes no package init and introduces no unqualified identifiers;
 		// dot-importing "unsafe" remains blocked.
 		if imp.alias == "." || (imp.alias == "_" && imp.pkgPath != "unsafe") {
-			if isAlwaysExternalPackage(imp.pkgPath) {
+			if auditset.AlwaysExternalPackage(imp.pkgPath) {
 				scan.add(trueExternalEffect(imp.pkgPath))
 			} else if packageHasClassifiedExternalAPI(imp.pkgPath) || isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(audited, imp.pkgPath) {
 				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches "+imp.pkgPath+" (potential external dependence)"))
@@ -732,7 +732,7 @@ func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, con
 					// storage refuses on reference, an untraceable
 					// sink poisons the package
 					// (REQ-closure-observability-flag-registration).
-				} else if !auditedStandardSymbol(audited, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isStandardFallbackExempt(audited, pkgPath)) {
+				} else if !auditedStandardSymbol(audited, pkgPath, sel.Sel.Name) && (auditset.AlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isStandardFallbackExempt(audited, pkgPath)) {
 					addSelEffect(sel, unauditedStandardEffect(pkgPath, sel.Sel.Name))
 				}
 			}
@@ -1551,19 +1551,6 @@ func isTestingHandleType(expression ast.Expr, aliases map[string]string, handles
 	return false
 }
 
-func isAlwaysExternalPackage(pkgPath string) bool {
-	return pkgPath == "plugin" || pkgPath == "syscall" ||
-		strings.HasPrefix(pkgPath, "golang.org/x/sys/") || networkPackage(pkgPath)
-}
-
-// networkPackage is the one spelling of the net tree's network-I/O
-// classification: net and every package beneath it except net/url —
-// value computation with no socket, admitted by symbol
-// (REQ-closure-observability-audited-set).
-func networkPackage(pkgPath string) bool {
-	return pkgPath == "net" || (strings.HasPrefix(pkgPath, "net/") && pkgPath != "net/url")
-}
-
 // isSourceOnlyStandardPackage is the deliberately small set whose public
 // operations cannot directly acquire process-external state. Unknown standard
 // packages fail closed to package-wide unverifiability; additions require a
@@ -1600,25 +1587,6 @@ func isSourceOnlyStandardPackage(audited bool, pkgPath string) bool {
 	// (REQ-closure-observability-audited-set). The set itself is one table
 	// in internal/auditset beside the other audited sets.
 	return auditset.PurePackage(pkgPath)
-}
-
-// auditedLinknameTargets is the audited linkname-target set: standard
-// symbols whose pull-style linkname is a read-only trampoline, each
-// audited at the source of its version-pinned importer
-// (golang.org/x/sys/unix on linux) — runtime.getAuxv (a read-only
-// accessor of the runtime's startup-captured auxiliary vector),
-// runtime.vgetrandom (the kernel entropy read the Getrandom surface
-// already classifies), and syscall.prlimit (a standard syscall the
-// calling surface's own syscall classifications already carry). The
-// trampoline adds no effect its file's remaining classifications do
-// not price, so an audited-only linkname file drops exactly the
-// OPAQUE-linkage effect and keeps every other effect it carries —
-// REQ-closure-blindspot's "resolved" disposition applied at the
-// tier-1 floor, per target and by source audit only.
-var auditedLinknameTargets = map[string]bool{
-	"runtime.getAuxv":    true,
-	"runtime.vgetrandom": true,
-	"syscall.prlimit":    true,
 }
 
 func auditedLinknamesOnly(audited bool, text string) bool {
@@ -1661,15 +1629,15 @@ func auditedLinknamesWithLocals(audited bool, text string, verifiedLocals map[st
 		if len(fields) != 3 {
 			return false
 		}
-		_, isROVarTarget := auditedReadOnlyVarLinknameTargets[fields[2]]
-		if !auditedLinknameTargets[fields[2]] && !(len(verifiedLocals) > 0 && verifiedLocals[fields[1]] && isROVarTarget) {
+		_, isROVarTarget := auditset.AuditedReadOnlyVarLinknameTarget(fields[2])
+		if !auditset.AuditedLinknameTarget(fields[2]) && !(len(verifiedLocals) > 0 && verifiedLocals[fields[1]] && isROVarTarget) {
 			return false
 		}
 	}
 }
 
 func packageHasClassifiedExternalAPI(pkgPath string) bool {
-	return classBPackages[pkgPath]
+	return auditset.ClassBPackage(pkgPath)
 }
 
 // implicitImportName is the fallback identifier derived from an import
@@ -1759,13 +1727,13 @@ func trueReason(pkgPath string) string {
 }
 
 // trueExternalEffect names an always-external package's effect; it is
-// meaningful for isAlwaysExternalPackage members alone, which both
+// meaningful for auditset.AlwaysExternalPackage members alone, which both
 // call sites gate on.
 func trueExternalEffect(pkgPath string) externalEffect {
 	switch {
 	case pkgPath == "plugin":
 		return symbolExternalEffect(externalEffectPlugin, pkgPath, "", "reaches plugin")
-	case networkPackage(pkgPath):
+	case auditset.NetworkPackage(pkgPath):
 		return symbolExternalEffect(externalEffectNetwork, pkgPath, "", "reaches "+pkgPath+" (network I/O)")
 	default:
 		return symbolExternalEffect(externalEffectNative, pkgPath, "", "reaches "+pkgPath+" (external system call)")

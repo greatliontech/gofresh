@@ -96,6 +96,27 @@ func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
 	if !Symbol("reflect", "TypeOf") || Symbol("reflect", "ValueOf") || !ReflectImmutable("Type") || ReflectImmutable("Value") {
 		t.Fatal("reflect predicates wrong")
 	}
+	if !slices.Equal(AuditedLinknameTargets(), []string{"runtime.getAuxv", "runtime.vgetrandom", "syscall.prlimit"}) || !AuditedLinknameTarget("runtime.getAuxv") || AuditedLinknameTarget("runtime.nanotime") {
+		t.Fatalf("audited linkname targets = %v", AuditedLinknameTargets())
+	}
+	if kind, ok := AuditedReadOnlyVarLinknameTarget("internal/cpu.HWCap"); !ok || kind != types.Uint {
+		t.Fatalf("AuditedReadOnlyVarLinknameTarget(internal/cpu.HWCap) = %v, %v", kind, ok)
+	}
+	if _, ok := AuditedReadOnlyVarLinknameTarget("runtime.writeBarrier"); ok {
+		t.Fatal("AuditedReadOnlyVarLinknameTarget admitted runtime.writeBarrier")
+	}
+	if got := AuditedReadOnlyVarLinknameTargets(); !maps.Equal(got, map[string]types.BasicKind{"internal/cpu.HWCap": types.Uint}) {
+		t.Fatalf("AuditedReadOnlyVarLinknameTargets() = %v", got)
+	}
+	if !slices.Equal(ClassBPackages(), []string{"crypto/rand", "fmt", "golang.org/x/sys/unix", "html/template", "net", "net/http", "os", "plugin", "syscall", "testing", "text/template"}) || !ClassBPackage("os") || ClassBPackage("strings") {
+		t.Fatalf("ClassBPackages() = %v", ClassBPackages())
+	}
+	if !NetworkPackage("net") || !NetworkPackage("net/http") || NetworkPackage("net/url") || NetworkPackage("os") {
+		t.Fatal("NetworkPackage predicate wrong")
+	}
+	if !AlwaysExternalPackage("plugin") || !AlwaysExternalPackage("syscall") || !AlwaysExternalPackage("golang.org/x/sys/unix") || !AlwaysExternalPackage("net/http") || AlwaysExternalPackage("net/url") || AlwaysExternalPackage("os") {
+		t.Fatal("AlwaysExternalPackage predicate wrong")
+	}
 }
 
 func TestBoundedTokenNeverShadowsALongerName(t *testing.T) {
@@ -206,7 +227,7 @@ func TestIdentityCoversFlagSurfaceRolesAndReceiverTables(t *testing.T) {
 
 func TestIdentityCoversAdmissionInventories(t *testing.T) {
 	base := Identity()
-	for _, table := range []map[string]bool{purePackages, reflectImmutableTypes, constantImmutableTypes, symbolTables["reflect"]} {
+	for _, table := range []map[string]bool{purePackages, reflectImmutableTypes, constantImmutableTypes, symbolTables["reflect"], auditedLinknameTargets, classBPackages} {
 		defer delete(table, "identity-test")
 		table["identity-test"] = true
 		changed := Identity()
@@ -214,6 +235,13 @@ func TestIdentityCoversAdmissionInventories(t *testing.T) {
 		if changed == base || Identity() != base {
 			t.Fatal("admission membership did not key its identity")
 		}
+	}
+	defer delete(auditedReadOnlyVarLinknameTargets, "identity-test")
+	auditedReadOnlyVarLinknameTargets["identity-test"] = types.Uint64
+	changedRO := Identity()
+	delete(auditedReadOnlyVarLinknameTargets, "identity-test")
+	if changedRO == base || Identity() != base {
+		t.Fatal("auditedReadOnlyVarLinknameTargets did not key its identity")
 	}
 	for _, table := range []map[string][]string{syncMethods, poolMethods, memoMethods, timeMethods, reflectMethods, randMethods, atomicMethods, standardSentinelGlobals} {
 		defer delete(table, "identity-test")

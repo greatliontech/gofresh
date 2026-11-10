@@ -15,6 +15,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
 	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
+	"github.com/greatliontech/gofresh/internal/closure/internal/toolchain"
 )
 
 type tier2Result struct {
@@ -2535,25 +2536,6 @@ type funcDeclKey struct {
 	name      string
 }
 
-func receiverBaseTypeName(expr ast.Expr) string {
-	for {
-		switch x := expr.(type) {
-		case *ast.ParenExpr:
-			expr = x.X
-		case *ast.StarExpr:
-			expr = x.X
-		case *ast.IndexExpr:
-			expr = x.X
-		case *ast.IndexListExpr:
-			expr = x.X
-		case *ast.Ident:
-			return x.Name
-		default:
-			return ""
-		}
-	}
-}
-
 func funcDeclKeyForAST(dir, pkgClause string, fn *ast.FuncDecl) (funcDeclKey, bool) {
 	if fn == nil || fn.Name == nil || fn.Name.Name == "" || fn.Name.Name == "init" {
 		return funcDeclKey{}, false
@@ -2563,7 +2545,7 @@ func funcDeclKeyForAST(dir, pkgClause string, fn *ast.FuncDecl) (funcDeclKey, bo
 		if len(fn.Recv.List) != 1 {
 			return funcDeclKey{}, false
 		}
-		recv = receiverBaseTypeName(fn.Recv.List[0].Type)
+		recv = toolchain.RecvBaseTypeName(fn.Recv.List[0].Type)
 		if recv == "" {
 			return funcDeclKey{}, false
 		}

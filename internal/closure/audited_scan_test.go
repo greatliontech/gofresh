@@ -1421,14 +1421,14 @@ func (t *T) Run(name string, f func(*T)) bool { return true }
 // (REQ-closure-observability-audited-set).
 func TestNetURLAndFilepathAdmissions(t *testing.T) {
 	t.Parallel()
-	if isSourceOnlyStandardPackage(true, "net/url") || isAlwaysExternalPackage("net/url") || !isAlwaysExternalPackage("net/http") || !isAlwaysExternalPackage("net") {
+	if isSourceOnlyStandardPackage(true, "net/url") || auditset.AlwaysExternalPackage("net/url") || !auditset.AlwaysExternalPackage("net/http") || !auditset.AlwaysExternalPackage("net") {
 		t.Fatal("net/url membership: want by symbol only, outside the always-external net tree, the tree itself unchanged")
 	}
 	// A package admitted by symbol is never always-external: the
 	// admission at the selector ladder would otherwise override the
 	// tree's classification with no test failing.
 	for _, pkgPath := range auditset.SymbolPackages() {
-		if isAlwaysExternalPackage(pkgPath) || isSourceOnlyStandardPackage(true, pkgPath) {
+		if auditset.AlwaysExternalPackage(pkgPath) || isSourceOnlyStandardPackage(true, pkgPath) {
 			t.Fatalf("%s is admitted by symbol and classified whole", pkgPath)
 		}
 	}

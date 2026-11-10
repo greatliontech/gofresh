@@ -184,10 +184,10 @@ type classBEntry struct {
 }
 
 // classBTable is the one declarative classification table for effect-bearing
-// packages, and classBPackages is derived from its keys so the classifier
+// packages, and auditset.ClassBPackages matches its keys so the classifier
 // and the maximal tier's dot-import backstop (packageHasClassifiedExternalAPI)
 // can never disagree (REQ-closure-observability-audited-set).
-var classBTable, classBPackages = func() (map[string]map[string]classBEntry, map[string]bool) {
+var classBTable = func() map[string]map[string]classBEntry {
 	arms := []struct {
 		pkgs   []string
 		kind   externalEffectKind
@@ -295,10 +295,8 @@ var classBTable, classBPackages = func() (map[string]map[string]classBEntry, map
 		},
 	}
 	table := make(map[string]map[string]classBEntry)
-	pkgs := make(map[string]bool)
 	for _, arm := range arms {
 		for _, pkg := range arm.pkgs {
-			pkgs[pkg] = true
 			byName := table[pkg]
 			if byName == nil {
 				byName = make(map[string]classBEntry, len(arm.names))
@@ -309,7 +307,7 @@ var classBTable, classBPackages = func() (map[string]map[string]classBEntry, map
 			}
 		}
 	}
-	return table, pkgs
+	return table
 }()
 
 func classBEffect(pkgPath, name string) (externalEffect, bool) {

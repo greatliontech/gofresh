@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
 	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
+	"github.com/greatliontech/gofresh/internal/closure/internal/toolchain"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 	"go/parser"
 	"go/token"
@@ -1957,7 +1958,7 @@ func FuzzToolchainKeyObligations(f *testing.F) {
 		src := "package " + pkgName + "\nfunc Helper() {}\n"
 		if strings.HasPrefix(body, "package "+pkgName+"\n") {
 			_, parseErr := parser.ParseFile(token.NewFileSet(), mainFile, body+"\nvar _ = 1\n", 0)
-			dirErr := verifyFileLinknameDirectives(pkgName, body+"\nvar _ = 1\n")
+			dirErr := toolchain.VerifyFileLinknameDirectives(pkgName, body+"\nvar _ = 1\n")
 			if parseErr == nil && dirErr == nil && !strings.Contains(body, "import") && !strings.Contains(body, "//") {
 				src = body
 			} else if parseErr != nil || dirErr != nil {

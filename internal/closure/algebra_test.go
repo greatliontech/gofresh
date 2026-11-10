@@ -3,7 +3,9 @@ package closure
 import (
 	"context"
 	"fmt"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
+	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
 	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
 	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/testenv"
@@ -819,13 +821,13 @@ func TestHasherSuppliesCompleteMemoDependencies(t *testing.T) {
 }
 
 func TestAdmissionPolicyTracksInventoryNotLabels(t *testing.T) {
-	original := maps.Clone(auditedLinknameTargets)
-	t.Cleanup(func() { auditedLinknameTargets = original })
+	original := maps.Clone(cprep.AllowedPureLinknameTargets)
+	t.Cleanup(func() { cprep.AllowedPureLinknameTargets = original })
 	base := admissionPolicy()
 	if base == "" {
 		t.Fatal("empty policy identity")
 	}
-	auditedLinknameTargets["runtime.extraTargetForTest"] = true
+	cprep.AllowedPureLinknameTargets["runtime.extraTargetForTest"] = true
 	if admissionPolicy() == base {
 		t.Fatal("changed admission inventory did not move policy")
 	}
@@ -2446,7 +2448,7 @@ func FuzzAuditedStdlibClosure(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, pkg, sym string, audited bool, choice uint8) {
 		if isSourceOnlyStandardPackage(true, pkg) {
-			if isAlwaysExternalPackage(pkg) {
+			if auditset.AlwaysExternalPackage(pkg) {
 				t.Fatalf("package %q is both source-only audited-pure and always-external", pkg)
 			}
 			if _, ok := classBEffect(pkg, sym); ok {

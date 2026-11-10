@@ -13,20 +13,10 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
-
-// auditedReadOnlyVarLinknameTargets maps runtime startup-constant scalar
-// variables to their exact underlying Go BasicKind so two-argument pull-form
-// //go:linkname bindings cannot widen layout or reinterpret scalars as string
-// or pointer headers, and are admitted at Tier-2 observability only when the
-// local variable (and every peer bound to the same target in the program) has
-// no initializer, no stores, no address escapes, and no non-SSA native hazards
-// in its declaring package.
-var auditedReadOnlyVarLinknameTargets = map[string]types.BasicKind{
-	"internal/cpu.HWCap": types.Uint,
-}
 
 const verifiedNonStdAsmMemoSummaryKey = "gofresh/verified-nonstd-asm@4"
 
@@ -248,7 +238,7 @@ func (b *tier2Base) isVerifiedReadOnlyLinknameVar(idx *pkgIndex, obj types.Objec
 	if b == nil || b.h == nil || !b.h.SelectionAudited() || idx == nil || obj == nil {
 		return false
 	}
-	wantKind, ok := auditedReadOnlyVarLinknameTargets[target]
+	wantKind, ok := auditset.AuditedReadOnlyVarLinknameTarget(target)
 	if !ok {
 		return false
 	}

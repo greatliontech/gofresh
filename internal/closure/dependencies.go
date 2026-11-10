@@ -4,14 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"maps"
 	"slices"
 	"sort"
-	"strconv"
 
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
 	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
+	"github.com/greatliontech/gofresh/internal/closure/internal/toolchain"
 )
 
 // ToolchainContent identifies every standard package's selected source files
@@ -36,59 +35,12 @@ type policyInputs struct {
 // Production inventories change only through source edits; tests may replace
 // them between calls. The memo holds no aliases into either form.
 func capturePolicyInputs() policyInputs {
-	packages := maps.Clone(classBPackages)
-	for k, v := range allowedPureSupportImports {
-		packages["pure-import:"+k] = v
-	}
-	for k, v := range allowedPureCryptoInternalFIPS140Selectors {
-		packages["pure-fips140-allow:"+k] = v
-	}
-	for k, v := range allowedPureBoringCipherSelectors {
-		packages["pure-boring-cipher-allow:"+k] = v
-	}
-	for k, v := range allowedPureFIPS140OnlyFIPSSelectors {
-		packages["pure-fips140only-fips-allow:"+k] = v
-	}
-	for k, v := range allowedPureFIPS140OnlyDRBGSelectors {
-		packages["pure-fips140only-drbg-allow:"+k] = v
-	}
-	for k, v := range allowedPureSHAGodebugSettings {
-		packages["pure-sha-godebug-allow:"+k] = v
-	}
-	for k, v := range allowedPureFmtSelectors {
-		packages["pure-fmt-allow:"+k] = v
-	}
-	for k, v := range allowedPureMathSelectors {
-		packages["pure-math-allow:"+k] = v
-	}
-	for k, v := range allowedPureReflectSelectors {
-		packages["pure-reflect-allow:"+k] = v
-	}
-	for k, v := range allowedPureFilepathliteSyscallSelectors {
-		packages["pure-filepathlite-syscall-allow:"+k] = v
-	}
-	for k, v := range allowedPureFilepathliteWindowsSelectors {
-		packages["pure-filepathlite-windows-allow:"+k] = v
-	}
-	for k, v := range allowedPureMathRandSelectors {
-		packages["pure-rand-allow:"+k] = v
-	}
-	for k, v := range allowedPureRuntimeSelectors {
-		packages["pure-runtime-allow:"+k] = v
-	}
-	for k, v := range allowedPureSyncSelectors {
-		packages["pure-sync-allow:"+k] = v
-	}
-	for k, v := range allowedPureSyncAtomicSelectors {
-		packages["pure-sync-atomic-allow:"+k] = v
-	}
-	for k, v := range allowedPureTimeSelectors {
-		packages["pure-time-allow:"+k] = v
-	}
+	packages := map[string]bool{}
+	toolchain.AppendPolicyPackages(packages)
 	for k, v := range cprep.AllowedPureAsmStandardHeaders {
 		packages["pure-asm-hdr-allow:"+k] = v
 	}
-	linknames := maps.Clone(auditedLinknameTargets)
+	linknames := map[string]bool{}
 	for k, v := range cprep.AllowedPureLinknameTargets {
 		linknames["pure-link2:"+k] = v
 	}
@@ -97,9 +49,6 @@ func capturePolicyInputs() policyInputs {
 	}
 	for k, v := range cprep.AllowedPureAsmCrossPkgSymbols {
 		linknames["pure-asm-sym:"+k] = v
-	}
-	for k, v := range auditedReadOnlyVarLinknameTargets {
-		linknames["tier2-ro-var-link:"+k+"="+strconv.Itoa(int(v))] = true
 	}
 	return policyInputs{
 		verifier:    toolchainVerifierVersion,

@@ -1,10 +1,14 @@
-package closure
+// Package toolchain provides the Go toolchain AST declaration/scope indexer,
+// compiler-directive scanner, off-surface startup runtime-pull graph builder,
+// and structural standard-library/runtime purity verifiers.
+package toolchain
 
 import (
 	"fmt"
 	"go/ast"
 	"go/scanner"
 	"go/token"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -12,61 +16,79 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
 )
 
-// parsedPkgIndex indexes package-level declarations, per-file imports, and
-// method sets across a parsed standard-library package's AST files.
-type parsedPkgIndex struct {
-	fileImports      map[*ast.File]map[string]bool
-	fileImportNames  map[*ast.File]map[string]bool
-	funcFile         map[*ast.FuncDecl]*ast.File
-	funcDeclsByName  map[string][]*ast.FuncDecl
-	topFuncs         map[string]*ast.FuncDecl
-	dupTopFuncs      map[string]bool
-	typeMethods      map[string]map[string]*ast.FuncDecl
-	dupTypeMethods   map[string]map[string]bool
-	anyDupTypeMethod bool
-	typeSpecs        map[string]*ast.TypeSpec
-	typeSpecFile     map[*ast.TypeSpec]*ast.File
-	typeSpecCounts   map[string]int
-	pkgDeclCounts    map[string]int
-	pkgValueCounts   map[string]int
-	pkgVarSpecs      map[string]*ast.ValueSpec
-	pkgVarFiles      map[string]*ast.File
-	pkgVarCounts     map[string]int
-	constPosInt      map[string]bool
-	zeroInitPkgVars  map[string]*ast.ValueSpec
-	zeroInitBoolVars map[string]bool
-	initPkgVars      map[string]ast.Expr
-	initPkgVarFile   map[string]*ast.File
-	varDeclIdents    map[string]map[*ast.Ident]bool
-	hasInitFunc      bool
-	hasMethods       bool
-	bodylessFuncs    []*ast.FuncDecl
+func sortedKeys(set map[string]bool) []string {
+	if len(set) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(set))
+	for k, ok := range set {
+		if ok {
+			keys = append(keys, k)
+		}
+	}
+	slices.Sort(keys)
+	return keys
 }
 
-func indexPackageAST(pkgName string, files []*ast.File, reserved map[string]bool, unaliasedImports map[string]bool) (*parsedPkgIndex, error) {
-	idx := &parsedPkgIndex{
-		fileImports:      make(map[*ast.File]map[string]bool, len(files)),
-		fileImportNames:  make(map[*ast.File]map[string]bool, len(files)),
-		funcFile:         map[*ast.FuncDecl]*ast.File{},
-		funcDeclsByName:  map[string][]*ast.FuncDecl{},
-		topFuncs:         map[string]*ast.FuncDecl{},
-		dupTopFuncs:      map[string]bool{},
-		typeMethods:      map[string]map[string]*ast.FuncDecl{},
-		dupTypeMethods:   map[string]map[string]bool{},
-		typeSpecs:        map[string]*ast.TypeSpec{},
-		typeSpecFile:     map[*ast.TypeSpec]*ast.File{},
-		typeSpecCounts:   map[string]int{},
-		pkgDeclCounts:    map[string]int{},
-		pkgValueCounts:   map[string]int{},
-		pkgVarSpecs:      map[string]*ast.ValueSpec{},
-		pkgVarFiles:      map[string]*ast.File{},
-		pkgVarCounts:     map[string]int{},
-		constPosInt:      map[string]bool{},
-		zeroInitPkgVars:  map[string]*ast.ValueSpec{},
-		zeroInitBoolVars: map[string]bool{},
-		initPkgVars:      map[string]ast.Expr{},
-		initPkgVarFile:   map[string]*ast.File{},
-		varDeclIdents:    map[string]map[*ast.Ident]bool{},
+// PackageASTIndex indexes package-level declarations, per-file imports, and
+// method sets across a parsed standard-library package's AST files.
+type PackageASTIndex struct {
+	fileImports        map[*ast.File]map[string]bool
+	fileImportNames    map[*ast.File]map[string]bool
+	funcFile           map[*ast.FuncDecl]*ast.File
+	funcDeclsByName    map[string][]*ast.FuncDecl
+	topFuncs           map[string]*ast.FuncDecl
+	dupTopFuncs        map[string]bool
+	typeMethods        map[string]map[string]*ast.FuncDecl
+	dupTypeMethods     map[string]map[string]bool
+	anyDupTypeMethod   bool
+	typeSpecs          map[string]*ast.TypeSpec
+	typeSpecFile       map[*ast.TypeSpec]*ast.File
+	typeSpecCounts     map[string]int
+	nonAliasStructSpec map[string]*ast.TypeSpec
+	pkgDeclCounts      map[string]int
+	pkgValueCounts     map[string]int
+	pkgVarSpecs        map[string]*ast.ValueSpec
+	pkgVarFiles        map[string]*ast.File
+	pkgVarCounts       map[string]int
+	constPosInt        map[string]bool
+	zeroInitPkgVars    map[string]*ast.ValueSpec
+	zeroInitBoolVars   map[string]bool
+	initPkgVars        map[string]ast.Expr
+	initPkgVarFile     map[string]*ast.File
+	varDeclIdents      map[string]map[*ast.Ident]bool
+	hasInitFunc        bool
+	hasMethods         bool
+	bodylessFuncs      []*ast.FuncDecl
+}
+
+// indexPackageAST indexes package-level declarations, imports, and method sets
+// across files.
+func indexPackageAST(pkgName string, files []*ast.File, reserved map[string]bool, unaliasedImports map[string]bool) (*PackageASTIndex, error) {
+	idx := &PackageASTIndex{
+		fileImports:        make(map[*ast.File]map[string]bool, len(files)),
+		fileImportNames:    make(map[*ast.File]map[string]bool, len(files)),
+		funcFile:           map[*ast.FuncDecl]*ast.File{},
+		funcDeclsByName:    map[string][]*ast.FuncDecl{},
+		topFuncs:           map[string]*ast.FuncDecl{},
+		dupTopFuncs:        map[string]bool{},
+		typeMethods:        map[string]map[string]*ast.FuncDecl{},
+		dupTypeMethods:     map[string]map[string]bool{},
+		typeSpecs:          map[string]*ast.TypeSpec{},
+		typeSpecFile:       map[*ast.TypeSpec]*ast.File{},
+		typeSpecCounts:     map[string]int{},
+		nonAliasStructSpec: map[string]*ast.TypeSpec{},
+		pkgDeclCounts:      map[string]int{},
+		pkgValueCounts:     map[string]int{},
+		pkgVarSpecs:        map[string]*ast.ValueSpec{},
+		pkgVarFiles:        map[string]*ast.File{},
+		pkgVarCounts:       map[string]int{},
+		constPosInt:        map[string]bool{},
+		zeroInitPkgVars:    map[string]*ast.ValueSpec{},
+		zeroInitBoolVars:   map[string]bool{},
+		initPkgVars:        map[string]ast.Expr{},
+		initPkgVarFile:     map[string]*ast.File{},
+		varDeclIdents:      map[string]map[*ast.Ident]bool{},
 	}
 	for _, f := range files {
 		idx.fileImports[f] = map[string]bool{}
@@ -145,6 +167,11 @@ func indexPackageAST(pkgName string, files []*ast.File, reserved map[string]bool
 							idx.typeSpecCounts[sp.Name.Name]++
 							idx.typeSpecs[sp.Name.Name] = sp
 							idx.typeSpecFile[sp] = f
+							if !sp.Assign.IsValid() {
+								if _, okST := unwrapParens(sp.Type).(*ast.StructType); okST {
+									idx.nonAliasStructSpec[sp.Name.Name] = sp
+								}
+							}
 						}
 					}
 				}
@@ -193,11 +220,11 @@ func indexPackageAST(pkgName string, files []*ast.File, reserved map[string]bool
 	return idx, nil
 }
 
-func (idx *parsedPkgIndex) hasFileImport(f *ast.File, importPath string) bool {
+func (idx *PackageASTIndex) hasFileImport(f *ast.File, importPath string) bool {
 	return idx != nil && idx.fileImports[f][importPath]
 }
 
-func (idx *parsedPkgIndex) fileImportSet(importPath string) map[*ast.File]bool {
+func (idx *PackageASTIndex) fileImportSet(importPath string) map[*ast.File]bool {
 	out := map[*ast.File]bool{}
 	if idx == nil {
 		return out
@@ -210,7 +237,7 @@ func (idx *parsedPkgIndex) fileImportSet(importPath string) map[*ast.File]bool {
 	return out
 }
 
-func (idx *parsedPkgIndex) hasAnyImport(importPath string) bool {
+func (idx *PackageASTIndex) hasAnyImport(importPath string) bool {
 	if idx == nil {
 		return false
 	}
@@ -222,11 +249,91 @@ func (idx *parsedPkgIndex) hasAnyImport(importPath string) bool {
 	return false
 }
 
-func (idx *parsedPkgIndex) uniqueTypeSpec(name string) *ast.TypeSpec {
+func (idx *PackageASTIndex) uniqueTypeSpec(name string) *ast.TypeSpec {
 	if idx == nil || idx.typeSpecCounts[name] != 1 {
 		return nil
 	}
 	return idx.typeSpecs[name]
+}
+
+// VerifyStructFields checks that name is a unique, non-alias, non-generic struct
+// with no embedded or duplicate fields, and whose required fields match their
+// type predicates (and has no extra fields when allowExtra is false).
+func (idx *PackageASTIndex) VerifyStructFields(name string, required map[string]func(ast.Expr) bool, allowExtra bool) (*ast.StructType, *ast.File, bool) {
+	if idx == nil || idx.pkgDeclCounts[name] != 1 {
+		return nil, nil, false
+	}
+	sp := idx.uniqueTypeSpec(name)
+	if sp == nil || sp.Assign.IsValid() || sp.TypeParams != nil {
+		return nil, nil, false
+	}
+	st, ok := unwrapParens(sp.Type).(*ast.StructType)
+	if !ok || st.Fields == nil {
+		return nil, nil, false
+	}
+	seen := make(map[string]bool, len(required))
+	allFields := map[string]bool{}
+	for _, fld := range st.Fields.List {
+		if len(fld.Names) == 0 {
+			return nil, nil, false
+		}
+		for _, id := range fld.Names {
+			if allFields[id.Name] {
+				return nil, nil, false
+			}
+			allFields[id.Name] = true
+			check, want := required[id.Name]
+			if !want {
+				if !allowExtra {
+					return nil, nil, false
+				}
+				continue
+			}
+			if check != nil && !check(fld.Type) {
+				return nil, nil, false
+			}
+			seen[id.Name] = true
+		}
+	}
+	if len(seen) != len(required) {
+		return nil, nil, false
+	}
+	return st, idx.typeSpecFile[sp], true
+}
+
+// VerifyFuncPreamble looks up a unique concrete function or method, verifying
+// that it has a body, no type parameters, no shadowing of reserved identifiers,
+// and no control-flow/recover bypasses.
+func (idx *PackageASTIndex) VerifyFuncPreamble(recvType, name string, wantPtrRecv bool, reserved map[string]bool) (*ast.FuncDecl, *ast.File, bool) {
+	if idx == nil {
+		return nil, nil, false
+	}
+	var fn *ast.FuncDecl
+	if recvType == "" {
+		if idx.pkgDeclCounts[name] != 1 || idx.dupTopFuncs[name] {
+			return nil, nil, false
+		}
+		fn = idx.topFuncs[name]
+	} else {
+		if idx.dupTypeMethods[recvType][name] {
+			return nil, nil, false
+		}
+		fn = idx.typeMethods[recvType][name]
+		if fn == nil || fn.Recv == nil || len(fn.Recv.List) != 1 {
+			return nil, nil, false
+		}
+		_, isPtr := unwrapParens(fn.Recv.List[0].Type).(*ast.StarExpr)
+		if wantPtrRecv && !isPtr {
+			return nil, nil, false
+		}
+	}
+	if fn == nil || fn.Body == nil || fn.Type == nil || fn.Type.TypeParams != nil {
+		return nil, nil, false
+	}
+	if funcShadowsAnyIdent(fn, reserved) || bodyHasControlFlowOrRecoverBypass(fn.Body) {
+		return nil, nil, false
+	}
+	return fn, idx.funcFile[fn], true
 }
 
 func scanGoDirectiveComments(src string, visit func(lit string) error) error {
@@ -307,7 +414,9 @@ var forbiddenOSLinknameLocals = map[string]bool{
 	"SameFile": true, "sameFile": true,
 }
 
-func verifyHarnessFileDirectives(pkgPath, text string, runtimePullLinknames, selfPushLinknames map[string]bool, osRuntimePullMap map[string]string, osAnyLinknameLocals map[string]bool) error {
+// VerifyHarnessFileDirectives verifies compiler directives in harness-premise
+// packages (testing, internal/testlog, testing/internal/testdeps, os).
+func VerifyHarnessFileDirectives(pkgPath, text string, runtimePullLinknames, selfPushLinknames map[string]bool, osRuntimePullMap map[string]string, osAnyLinknameLocals map[string]bool) error {
 	return scanVerifiedLinknameDirectives(text, func(line string, fields []string) error {
 		switch pkgPath {
 		case "testing/internal/testdeps":
@@ -370,7 +479,9 @@ func verifyHarnessFileDirectives(pkgPath, text string, runtimePullLinknames, sel
 	})
 }
 
-func verifyFileLinknameDirectives(pkgPath string, text string) error {
+// VerifyFileLinknameDirectives verifies //go:linkname directives in a pure-candidate
+// standard-library source file.
+func VerifyFileLinknameDirectives(pkgPath string, text string) error {
 	return scanVerifiedLinknameDirectives(text, func(line string, fields []string) error {
 		if len(fields) == 2 {
 			if !cprep.AllowedPureSingleArgLinknames[pkgPath+"."+fields[1]] {
@@ -386,7 +497,9 @@ func verifyFileLinknameDirectives(pkgPath string, text string) error {
 	})
 }
 
-func scanOffSurfaceGoDirectives(src string, directRuntime map[string]bool, onTwoArgLink func(localSym, target string)) {
+// ScanOffSurfaceGoDirectives scans Go source comments in an off-surface package
+// for linkname and cgo directives.
+func ScanOffSurfaceGoDirectives(src string, directRuntime map[string]bool, onTwoArgLink func(localSym, target string)) {
 	fset := token.NewFileSet()
 	file := fset.AddFile("", fset.Base(), len(src))
 	var s scanner.Scanner
@@ -436,12 +549,9 @@ func scanOffSurfaceGoDirectives(src string, directRuntime map[string]bool, onTwo
 	}
 }
 
-func collectGoRuntimeLinknameTargets(src string, out map[string]bool) {
-	collectGoLinknameTargets("", src, out, nil)
-}
-
-func collectGoLinknameTargets(selfPkg, src string, runtimeOut, externalOut map[string]bool) {
-	scanOffSurfaceGoDirectives(src, runtimeOut, func(_, target string) {
+// CollectGoLinknameTargets records runtime.* and cross-package linkname targets in src.
+func CollectGoLinknameTargets(selfPkg, src string, runtimeOut, externalOut map[string]bool) {
+	ScanOffSurfaceGoDirectives(src, runtimeOut, func(_, target string) {
 		if strings.HasPrefix(target, "runtime.") {
 			if runtimeOut != nil {
 				runtimeOut[target] = true
@@ -491,7 +601,10 @@ func baseTypeIdentName(expr ast.Expr) string {
 	return ""
 }
 
-func recvBaseTypeName(expr ast.Expr) string {
+// RecvBaseTypeName extracts the base type identifier name from a method
+// receiver type expression, unwrapping parentheses, pointer stars, and generic
+// type-parameter index expressions.
+func RecvBaseTypeName(expr ast.Expr) string {
 	expr = unwrapParens(expr)
 	if star, ok := expr.(*ast.StarExpr); ok {
 		expr = unwrapParens(star.X)
@@ -526,6 +639,18 @@ func funcResultFieldTypeAt(results *ast.FieldList, targetIdx int) ast.Expr {
 		cur += n
 	}
 	return nil
+}
+
+func funcHasUnnamedResults(ft *ast.FuncType, count int) bool {
+	if ft == nil || ft.Results == nil || ft.Results.NumFields() != count || len(ft.Results.List) != count {
+		return false
+	}
+	for _, fld := range ft.Results.List {
+		if len(fld.Names) != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func isMethodCallNamed(expr ast.Expr, name string) bool {
@@ -833,4 +958,159 @@ func isConstantOrTrivialCond(cond ast.Expr) bool {
 	default:
 		return exprHasCallOrFuncLit(cond)
 	}
+}
+
+func condChecksNonZeroErr(cond ast.Expr) string {
+	bin, ok := unwrapParens(cond).(*ast.BinaryExpr)
+	if !ok || bin.Op != token.NEQ {
+		return ""
+	}
+	lhs, rhs := unwrapParens(bin.X), unwrapParens(bin.Y)
+	if id, ok := lhs.(*ast.Ident); ok {
+		if rID, ok := rhs.(*ast.Ident); ok && rID.Name == "nil" {
+			return id.Name
+		}
+		if lit, ok := rhs.(*ast.BasicLit); ok && lit.Kind == token.INT && lit.Value == "0" {
+			return id.Name
+		}
+	}
+	if id, ok := rhs.(*ast.Ident); ok {
+		if lID, ok := lhs.(*ast.Ident); ok && lID.Name == "nil" {
+			return id.Name
+		}
+		if lit, ok := lhs.(*ast.BasicLit); ok && lit.Kind == token.INT && lit.Value == "0" {
+			return id.Name
+		}
+	}
+	return ""
+}
+
+func condChecksEqErr(cond ast.Expr, wantIdent string) bool {
+	bin, ok := unwrapParens(cond).(*ast.BinaryExpr)
+	if !ok || bin.Op != token.EQL {
+		return false
+	}
+	lhs, rhs := unwrapParens(bin.X), unwrapParens(bin.Y)
+	if id, ok := lhs.(*ast.Ident); ok && id.Name == wantIdent {
+		if rID, ok := rhs.(*ast.Ident); ok && rID.Name == "nil" {
+			return true
+		}
+	}
+	if id, ok := rhs.(*ast.Ident); ok && id.Name == wantIdent {
+		if lID, ok := lhs.(*ast.Ident); ok && lID.Name == "nil" {
+			return true
+		}
+	}
+	return false
+}
+
+func isCountAdvanceSliceAssign(s *ast.AssignStmt, sliceName string, countAliases map[string]bool) bool {
+	if s.Tok != token.ASSIGN || len(s.Lhs) != 1 || len(s.Rhs) != 1 {
+		return false
+	}
+	lhsID, ok := unwrapParens(s.Lhs[0]).(*ast.Ident)
+	if !ok || lhsID.Name != sliceName {
+		return false
+	}
+	sl, ok := unwrapParens(s.Rhs[0]).(*ast.SliceExpr)
+	if !ok || sl.Slice3 || sl.High != nil || sl.Low == nil {
+		return false
+	}
+	baseID, ok := unwrapParens(sl.X).(*ast.Ident)
+	if !ok || baseID.Name != sliceName {
+		return false
+	}
+	low := unwrapParens(sl.Low)
+	if conv, isCall := low.(*ast.CallExpr); isCall && len(conv.Args) == 1 && !conv.Ellipsis.IsValid() {
+		if cid, ok := unwrapParens(conv.Fun).(*ast.Ident); ok && (cid.Name == "int" || cid.Name == "uintptr") {
+			low = unwrapParens(conv.Args[0])
+		}
+	}
+	advID, ok := low.(*ast.Ident)
+	return ok && countAliases[advID.Name]
+}
+
+// VerifyIgnoringEINTRHelper verifies the structural shape of os.ignoringEINTR
+// (arity 1) or os.ignoringEINTR2 (arity 2).
+func VerifyIgnoringEINTRHelper(igFn *ast.FuncDecl, hasUnaliasedSyscall bool, reserved map[string]bool, arity int) bool {
+	if (arity != 1 && arity != 2) || igFn == nil || igFn.Body == nil || igFn.Type == nil {
+		return false
+	}
+	if arity == 1 && igFn.Type.TypeParams != nil {
+		return false
+	}
+	if arity == 2 && igFn.Type.TypeParams != nil && igFn.Type.TypeParams.NumFields() > 1 {
+		return false
+	}
+	if !funcHasUnnamedResults(igFn.Type, arity) || funcShadowsAnyIdent(igFn, reserved) || bodyHasControlFlowOrRecoverBypass(igFn.Body) {
+		return false
+	}
+	igParams := paramNamesFlat(igFn.Type.Params)
+	if len(igParams) != 1 || igParams[0] == "" || igParams[0] == "_" || len(igFn.Body.List) != 1 {
+		return false
+	}
+	if ret, okRet := igFn.Body.List[0].(*ast.ReturnStmt); okRet && len(ret.Results) == 1 {
+		c, okC := unwrapParens(ret.Results[0]).(*ast.CallExpr)
+		if !okC || c.Ellipsis.IsValid() || len(c.Args) != 0 {
+			return false
+		}
+		_, okFn := isIdentNamed(c.Fun, igParams[0])
+		return okFn
+	}
+	fs, okFor := igFn.Body.List[0].(*ast.ForStmt)
+	if !okFor || !hasUnaliasedSyscall || fs.Init != nil || fs.Cond != nil || fs.Post != nil || len(fs.Body.List) != 2 {
+		return false
+	}
+	as, okA := fs.Body.List[0].(*ast.AssignStmt)
+	if !okA || as.Tok != token.DEFINE || len(as.Lhs) != arity || len(as.Rhs) != 1 {
+		return false
+	}
+	var vName, errName string
+	if arity == 1 {
+		errID, okE := unwrapParens(as.Lhs[0]).(*ast.Ident)
+		if !okE || errID.Name == "" || errID.Name == "_" {
+			return false
+		}
+		errName = errID.Name
+	} else {
+		vID, okV := unwrapParens(as.Lhs[0]).(*ast.Ident)
+		errID, okE := unwrapParens(as.Lhs[1]).(*ast.Ident)
+		if !okV || !okE || vID.Name == "" || vID.Name == "_" || errID.Name == "" || errID.Name == "_" || vID.Name == errID.Name {
+			return false
+		}
+		vName, errName = vID.Name, errID.Name
+	}
+	c, okC := unwrapParens(as.Rhs[0]).(*ast.CallExpr)
+	if !okC || c.Ellipsis.IsValid() || len(c.Args) != 0 {
+		return false
+	}
+	if _, okFn := isIdentNamed(c.Fun, igParams[0]); !okFn {
+		return false
+	}
+	ifs, okI := fs.Body.List[1].(*ast.IfStmt)
+	if !okI || ifs.Init != nil || ifs.Else != nil || len(ifs.Body.List) != 1 {
+		return false
+	}
+	condBin, okCB := unwrapParens(ifs.Cond).(*ast.BinaryExpr)
+	if !okCB || condBin.Op != token.NEQ {
+		return false
+	}
+	_, okEL := isIdentNamed(condBin.X, errName)
+	_, okSysR := isSelectorBaseField(condBin.Y, "syscall", "EINTR")
+	_, okSysL := isSelectorBaseField(condBin.X, "syscall", "EINTR")
+	_, okER := isIdentNamed(condBin.Y, errName)
+	if !((okEL && okSysR) || (okSysL && okER)) {
+		return false
+	}
+	ret, okR := ifs.Body.List[0].(*ast.ReturnStmt)
+	if !okR || len(ret.Results) != arity {
+		return false
+	}
+	if arity == 1 {
+		_, okRetErr := isIdentNamed(ret.Results[0], errName)
+		return okRetErr
+	}
+	_, okRV := isIdentNamed(ret.Results[0], vName)
+	_, okRE := isIdentNamed(ret.Results[1], errName)
+	return okRV && okRE
 }

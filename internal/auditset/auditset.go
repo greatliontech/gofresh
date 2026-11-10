@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"go/types"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -39,6 +40,7 @@ func Identity() string {
 	data, _ := json.Marshal([]any{
 		purePackages, symbolTables, flagSurface, receivers, syncSymbols,
 		methods(standardSentinelGlobals), reflectImmutableTypes, constantImmutableTypes,
+		auditedLinknameTargets, auditedReadOnlyVarLinknameTargets, classBPackages,
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -680,6 +682,96 @@ func ReflectImmutable(name string) bool { return reflectImmutableTypes[name] }
 // ConstantImmutable reports whether a go/constant type is in the audited
 // immutable-type set.
 func ConstantImmutable(name string) bool { return constantImmutableTypes[name] }
+
+// auditedLinknameTargets is the audited linkname-target set: standard
+// symbols whose pull-style linkname is a read-only trampoline, each
+// audited at the source of its version-pinned importer
+// (golang.org/x/sys/unix on linux) — runtime.getAuxv (a read-only
+// accessor of the runtime's startup-captured auxiliary vector),
+// runtime.vgetrandom (the kernel entropy read the Getrandom surface
+// already classifies), and syscall.prlimit (a standard syscall the
+// calling surface's own syscall classifications already carry). The
+// trampoline adds no effect its file's remaining classifications do
+// not price, so an audited-only linkname file drops exactly the
+// OPAQUE-linkage effect and keeps every other effect it carries —
+// REQ-closure-blindspot's "resolved" disposition applied at the
+// tier-1 floor, per target and by source audit only.
+var auditedLinknameTargets = map[string]bool{
+	"runtime.getAuxv":    true,
+	"runtime.vgetrandom": true,
+	"syscall.prlimit":    true,
+}
+
+// AuditedLinknameTarget reports whether target is in the audited
+// pull-style linkname-target set.
+func AuditedLinknameTarget(target string) bool { return auditedLinknameTargets[target] }
+
+// AuditedLinknameTargets returns the sorted audited linkname targets.
+func AuditedLinknameTargets() []string { return slices.Sorted(maps.Keys(auditedLinknameTargets)) }
+
+// auditedReadOnlyVarLinknameTargets maps runtime startup-constant scalar
+// variables to their exact underlying Go BasicKind so two-argument pull-form
+// //go:linkname bindings cannot widen layout or reinterpret scalars as string
+// or pointer headers, and are admitted at Tier-2 observability only when the
+// local variable (and every peer bound to the same target in the program) has
+// no initializer, no stores, no address escapes, and no non-SSA native hazards
+// in its declaring package.
+var auditedReadOnlyVarLinknameTargets = map[string]types.BasicKind{
+	"internal/cpu.HWCap": types.Uint,
+}
+
+// AuditedReadOnlyVarLinknameTarget reports whether target is an audited
+// startup-constant scalar linkname target and returns its required BasicKind.
+func AuditedReadOnlyVarLinknameTarget(target string) (types.BasicKind, bool) {
+	k, ok := auditedReadOnlyVarLinknameTargets[target]
+	return k, ok
+}
+
+// AuditedReadOnlyVarLinknameTargets returns a copy of the audited
+// startup-constant scalar linkname targets and their required BasicKinds.
+func AuditedReadOnlyVarLinknameTargets() map[string]types.BasicKind {
+	return maps.Clone(auditedReadOnlyVarLinknameTargets)
+}
+
+// classBPackages is the set of effect-bearing packages with declarative Class-B
+// operation entries, shared between the effect classifier, the maximal tier's
+// dot-import backstop, and toolchain pure-delegate verification
+// (REQ-closure-observability-audited-set).
+var classBPackages = map[string]bool{
+	"crypto/rand":          true,
+	"fmt":                  true,
+	"golang.org/x/sys/unix": true,
+	"html/template":        true,
+	"net":                  true,
+	"net/http":             true,
+	"os":                   true,
+	"plugin":               true,
+	"syscall":              true,
+	"testing":              true,
+	"text/template":        true,
+}
+
+// ClassBPackage reports whether pkgPath has declarative Class-B external-effect
+// operation entries.
+func ClassBPackage(pkgPath string) bool { return classBPackages[pkgPath] }
+
+// ClassBPackages returns the sorted package paths in the Class-B package set.
+func ClassBPackages() []string { return slices.Sorted(maps.Keys(classBPackages)) }
+
+// NetworkPackage is the one spelling of the net tree's network-I/O
+// classification: net and every package beneath it except net/url —
+// value computation with no socket, admitted by symbol
+// (REQ-closure-observability-audited-set).
+func NetworkPackage(pkgPath string) bool {
+	return pkgPath == "net" || (strings.HasPrefix(pkgPath, "net/") && pkgPath != "net/url")
+}
+
+// AlwaysExternalPackage reports whether pkgPath is an always-external package
+// (plugin, syscall, golang.org/x/sys/..., or a network-I/O package).
+func AlwaysExternalPackage(pkgPath string) bool {
+	return pkgPath == "plugin" || pkgPath == "syscall" ||
+		strings.HasPrefix(pkgPath, "golang.org/x/sys/") || NetworkPackage(pkgPath)
+}
 
 // names is the union of a method set's receiver and method names.
 func names(set map[string][]string) []string {

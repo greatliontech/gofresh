@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -1408,7 +1409,7 @@ func referenceMaximalFileReason(filename string) (string, error) {
 			}
 			continue
 		}
-		if isAlwaysExternalPackage(pkgPath) {
+		if auditset.AlwaysExternalPackage(pkgPath) {
 			return trueReason(pkgPath), nil
 		}
 		if alias == "." && packageHasClassifiedExternalAPI(pkgPath) && potentialExternal == "" {
@@ -1445,7 +1446,7 @@ func referenceMaximalFileReason(filename string) (string, error) {
 						reason = classified
 						return false
 					}
-					if pkgPath != "testing" && !flagRegistrationSymbol(pkgPath, sel.Sel.Name) && !auditedStandardSymbol(true, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) && unauditedReason == "" {
+					if pkgPath != "testing" && !flagRegistrationSymbol(pkgPath, sel.Sel.Name) && !auditedStandardSymbol(true, pkgPath, sel.Sel.Name) && (auditset.AlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) && unauditedReason == "" {
 						unauditedReason = "reaches unaudited standard operation " + pkgPath + "." + sel.Sel.Name
 					}
 				}
@@ -1577,11 +1578,11 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 			}
 			continue
 		}
-		if isAlwaysExternalPackage(pkgPath) && alias != "." && alias != "_" {
+		if auditset.AlwaysExternalPackage(pkgPath) && alias != "." && alias != "_" {
 			scan.importCandidates = append(scan.importCandidates, trueExternalEffect(pkgPath))
 		}
 		if alias == "." || (alias == "_" && pkgPath != "unsafe") {
-			if isAlwaysExternalPackage(pkgPath) {
+			if auditset.AlwaysExternalPackage(pkgPath) {
 				scan.add(trueExternalEffect(pkgPath))
 			} else if packageHasClassifiedExternalAPI(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath) {
 				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches "+pkgPath+" (potential external dependence)"))
@@ -1610,7 +1611,7 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 			// carve-out
 		} else if flagRegistrationSymbol(pkgPath, sel.Sel.Name) {
 			// mirrors the production flag-registration admission
-		} else if pkgPath != "testing" && !auditedStandardSymbol(true, pkgPath, sel.Sel.Name) && (isAlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) {
+		} else if pkgPath != "testing" && !auditedStandardSymbol(true, pkgPath, sel.Sel.Name) && (auditset.AlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) {
 			scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 		}
 		return true

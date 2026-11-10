@@ -8,6 +8,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/callgraph/rta"
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/cachefile"
 	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
 	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
@@ -4921,16 +4922,16 @@ func TestCryptoRandIsTheEntropyClass(t *testing.T) {
 	}
 }
 
-// classBPackages is derived from classBTable's keys so the classifier
+// auditset.ClassBPackages matches classBTable's keys so the classifier
 // and the maximal tier's dot-import backstop (packageHasClassifiedExternalAPI)
-// share one table by construction (REQ-closure-observability-audited-set).
+// stay aligned by test (REQ-closure-observability-audited-set).
 func TestClassBPackagesMatchTheArms(t *testing.T) {
 	samples := map[string]string{
 		"fmt": "Println", "os": "Getenv", "syscall": "Mkdir", "golang.org/x/sys/unix": "Mkdir", "testing": "Short",
 		"net": "Dial", "net/http": "Get", "html/template": "ParseFiles", "text/template": "ParseFiles", "plugin": "Open",
 		"crypto/rand": "Read",
 	}
-	for pkgPath := range classBPackages {
+	for _, pkgPath := range auditset.ClassBPackages() {
 		name, ok := samples[pkgPath]
 		if !ok {
 			t.Errorf("%s is listed but this test carries no sample name for it — add one", pkgPath)
@@ -4943,8 +4944,13 @@ func TestClassBPackagesMatchTheArms(t *testing.T) {
 			t.Errorf("%s classifies but the dot-import backstop does not list it", pkgPath)
 		}
 	}
+	for pkgPath := range classBTable {
+		if !auditset.ClassBPackage(pkgPath) {
+			t.Errorf("%s is in classBTable but not in auditset.ClassBPackages", pkgPath)
+		}
+	}
 	for pkgPath := range samples {
-		if !classBPackages[pkgPath] {
+		if !auditset.ClassBPackage(pkgPath) {
 			t.Errorf("%s carries a sample but is not listed", pkgPath)
 		}
 	}
