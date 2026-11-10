@@ -613,7 +613,7 @@ func diffTestVariantLedgersWithBindings(before, after TestVariantLedger) (TestVa
 				oldFiles = old
 				nowFiles = now
 				validBindings = true
-				delta.BindingsPreserved = bindingsPreservedFrom(old, now, delta.Added)
+				delta.BindingsPreserved = bindingsPreserved(old, now, delta.Added)
 			}
 		}
 	}
@@ -734,7 +734,7 @@ func fileImportsMap(b *TestVariantFileBindings) map[string]string {
 	return m
 }
 
-func bindingsPreservedFrom(old, now map[string]*TestVariantFileBindings, added []TestVariantDeclaration) bool {
+func bindingsPreserved(old, now map[string]*TestVariantFileBindings, added []TestVariantDeclaration) bool {
 	var addedByPkgName map[string]map[string]bool
 	if len(added) > 0 {
 		addedByPkgName = make(map[string]map[string]bool)

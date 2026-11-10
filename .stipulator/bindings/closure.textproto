@@ -1358,7 +1358,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/testvariant.bindingsPreserved"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "5d6b78bee45417440a33a6d4c736a24db01afb73d82c8b83d3036355aefdf5e5"
+  shape_hash: "299a39263f27b8bd64e30988f517018854847db75b00f5093d92580239bfb933"
 }
 
 bindings {
