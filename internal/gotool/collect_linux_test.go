@@ -110,7 +110,7 @@ func TestRunnerContainsPreparedProcessGroupDescendants(t *testing.T) {
 			limit = time.Now().Add(time.Second)
 			for {
 				data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
-				if os.IsNotExist(err) {
+				if os.IsNotExist(err) || errors.Is(err, syscall.ESRCH) {
 					break
 				}
 				if err != nil {
