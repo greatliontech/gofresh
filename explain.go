@@ -12,8 +12,9 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 // The explain surface turns a refusal into its derivation chain
@@ -150,12 +151,12 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	type deferralObservation struct {
 		key       string
 		kind      byte
-		resolvent dynstate.DeferralResolvent
+		resolvent syntaxutil.DeferralResolvent
 		link      ChainLink
 	}
 	type exportedSeamObservation struct {
 		key  string
-		fn   dynstate.FuncKey
+		fn   syntaxutil.FuncKey
 		link ChainLink
 	}
 	var allSites []siteObservation
@@ -169,11 +170,11 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		position := p.Fset.Position(at)
 		return fmt.Sprintf("%s:%d", position.Filename, position.Line)
 	}
-	hooks := &dynstate.ExplainHookSet{
+	hooks := &syntaxutil.ExplainHookSet{
 		Site: func(p *packages.Package, kind, key string, at token.Pos) {
 			allSites = append(allSites, siteObservation{key: key, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Clause: kind, Pos: pos(p, at)}})
 		},
-		ExportedSeamSite: func(p *packages.Package, fn dynstate.FuncKey, key string, at token.Pos) {
+		ExportedSeamSite: func(p *packages.Package, fn syntaxutil.FuncKey, key string, at token.Pos) {
 			allExportedSeams = append(allExportedSeams, exportedSeamObservation{
 				key:  key,
 				fn:   fn,
@@ -183,7 +184,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		Store: func(p *packages.Package, key string, at token.Pos) {
 			allStores = append(allStores, storeObservation{key: key, link: ChainLink{Kind: "store", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)}})
 		},
-		Deferral: func(p *packages.Package, kind byte, key string, resolvent dynstate.DeferralResolvent, at token.Pos) {
+		Deferral: func(p *packages.Package, kind byte, key string, resolvent syntaxutil.DeferralResolvent, at token.Pos) {
 			allDeferrals = append(allDeferrals, deferralObservation{key: key, kind: kind, resolvent: resolvent, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)}})
 		},
 	}
@@ -251,7 +252,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 				continue
 			}
 			link.Clause = "a deferred argument's parameter unproven"
-			link.Callee = paramKeyDisplay(obs.resolvent.Param)
+			link.Callee = obs.resolvent.Param.Display()
 			escapeLinks = append(escapeLinks, link)
 		case 'm':
 			if resolution.ReadOnly[obs.resolvent.Method] {
@@ -265,7 +266,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 				continue
 			}
 			link.Clause = "an init-flow argument's parameter unproven"
-			link.Callee = paramKeyDisplay(obs.resolvent.Param)
+			link.Callee = obs.resolvent.Param.Display()
 			escapeLinks = append(escapeLinks, link)
 		case 'n':
 			if resolution.ReceiverRetention[obs.resolvent.Method] || !resolution.NotOpaque[varKey] {
@@ -284,22 +285,22 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 			}
 			link.Clause = "the registered population refused the field position"
 			link.Callee = obs.resolvent.FieldPos.Field + " parameter " + strconv.Itoa(obs.resolvent.FieldPos.Index)
-			if failParam != (dynstate.ParamKey{}) {
-				link.Callee += " (registrant " + paramKeyDisplay(failParam) + " unproven)"
+			if failParam != (syntaxutil.ParamKey{}) {
+				link.Callee += " (registrant " + failParam.Display() + " unproven)"
 			}
 			escapeLinks = append(escapeLinks, link)
 		case 'e':
 			if !obs.resolvent.ElemUse.Valid() || !resolution.NotOpaque[varKey] {
 				continue
 			}
-			proves, failParam := resolution.FieldPopulationProves(obs.resolvent.ElemUse.Owner, dynstate.ElemPositionField, obs.resolvent.ElemUse.Index)
+			proves, failParam := resolution.FieldPopulationProves(obs.resolvent.ElemUse.Owner, syntaxutil.ElemPositionField, obs.resolvent.ElemUse.Index)
 			if proves {
 				continue
 			}
 			link.Clause = "the element population refused the position"
 			link.Callee = obs.resolvent.ElemUse.Owner + " element parameter " + strconv.Itoa(obs.resolvent.ElemUse.Index)
-			if failParam != (dynstate.ParamKey{}) {
-				link.Callee += " (registrant " + paramKeyDisplay(failParam) + " unproven)"
+			if failParam != (syntaxutil.ParamKey{}) {
+				link.Callee += " (registrant " + failParam.Display() + " unproven)"
 			}
 			escapeLinks = append(escapeLinks, link)
 		}
@@ -331,7 +332,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	protect := len(links)
 	if refusedFn != "" && refusedPath != "" {
 		var refusals []ChainLink
-		refusalHooks := &dynstate.ExplainHookSet{
+		refusalHooks := &syntaxutil.ExplainHookSet{
 			Refusal: func(p *packages.Package, fn string, e ast.Expr, clause string) {
 				if fn != refusedFn || p.PkgPath != refusedPath {
 					return
@@ -352,39 +353,39 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 
 func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]dynamicStateFact, linkedKeys map[string]bool, varName string) ([]ChainLink, string, string) {
 	ea := resolveEnvAudit(facts, nil)
-	renderEdge := func(key dynstate.EnvAuditTarget) (string, string) {
+	renderEdge := func(key syntaxutil.EnvAuditTarget) (string, string) {
 		if key.IsParam() {
 			return key.Func.Pkg, key.Func.Name + " (parameter " + strconv.Itoa(key.ParamIndex) + ")"
 		}
 		return key.Func.Pkg, key.Func.Name
 	}
-	renderSite := func(key dynstate.EnvAuditTarget) (string, string) {
+	renderSite := func(key syntaxutil.EnvAuditTarget) (string, string) {
 		return key.Func.Pkg, key.Func.Name
 	}
-	sortedFuncs := func(m map[dynstate.FuncKey]bool) []dynstate.EnvAuditTarget {
-		keys := make([]dynstate.FuncKey, 0, len(m))
+	sortedFuncs := func(m map[syntaxutil.FuncKey]bool) []syntaxutil.EnvAuditTarget {
+		keys := make([]syntaxutil.FuncKey, 0, len(m))
 		for k := range m {
 			keys = append(keys, k)
 		}
-		slices.SortFunc(keys, func(a, b dynstate.FuncKey) int { return a.Compare(b) })
-		out := make([]dynstate.EnvAuditTarget, len(keys))
+		slices.SortFunc(keys, func(a, b syntaxutil.FuncKey) int { return a.Compare(b) })
+		out := make([]syntaxutil.EnvAuditTarget, len(keys))
 		for i, k := range keys {
-			out[i] = dynstate.FuncAuditTarget(k)
+			out[i] = syntaxutil.FuncAuditTarget(k)
 		}
 		return out
 	}
-	sortedTargets := func(m map[dynstate.EnvAuditTarget]bool) []dynstate.EnvAuditTarget {
-		keys := make([]dynstate.EnvAuditTarget, 0, len(m))
+	sortedTargets := func(m map[syntaxutil.EnvAuditTarget]bool) []syntaxutil.EnvAuditTarget {
+		keys := make([]syntaxutil.EnvAuditTarget, 0, len(m))
 		for k := range m {
 			keys = append(keys, k)
 		}
-		slices.SortFunc(keys, func(a, b dynstate.EnvAuditTarget) int { return a.Compare(b) })
+		slices.SortFunc(keys, func(a, b syntaxutil.EnvAuditTarget) int { return a.Compare(b) })
 		return keys
 	}
 
 	type rootedCallee struct {
 		from   string
-		callee dynstate.FuncKey
+		callee syntaxutil.FuncKey
 	}
 	var callees []rootedCallee
 	for fromPath, fl := range facts {
@@ -404,23 +405,23 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 	})
 
 	var edges []ChainLink
-	visited := map[dynstate.EnvAuditTarget]bool{}
-	var walk func(key dynstate.EnvAuditTarget) (string, string)
-	walk = func(key dynstate.EnvAuditTarget) (string, string) {
+	visited := map[syntaxutil.EnvAuditTarget]bool{}
+	var walk func(key syntaxutil.EnvAuditTarget) (string, string)
+	walk = func(key syntaxutil.EnvAuditTarget) (string, string) {
 		if !key.Valid() || visited[key] {
 			return "", ""
 		}
 		visited[key] = true
 		pkgPath, name := renderSite(key)
 		var declaredHere bool
-		var depSets [][]dynstate.EnvAuditTarget
+		var depSets [][]syntaxutil.EnvAuditTarget
 		if key.IsParam() {
 			p := key.Param()
 			declaredHere = ea.InsDeclared[p]
-			depSets = [][]dynstate.EnvAuditTarget{sortedTargets(ea.InsDeps[p])}
+			depSets = [][]syntaxutil.EnvAuditTarget{sortedTargets(ea.InsDeps[p])}
 		} else {
 			declaredHere = ea.Declared[key.Func]
-			depSets = [][]dynstate.EnvAuditTarget{sortedFuncs(ea.RetDeps[key.Func]), sortedTargets(ea.RetInsDeps[key.Func])}
+			depSets = [][]syntaxutil.EnvAuditTarget{sortedFuncs(ea.RetDeps[key.Func]), sortedTargets(ea.RetInsDeps[key.Func])}
 		}
 		if !declaredHere {
 			if len(variants[pkgPath]) > 0 {
@@ -444,7 +445,7 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 		return "", ""
 	}
 	for _, rc := range callees {
-		target := dynstate.FuncAuditTarget(rc.callee)
+		target := syntaxutil.FuncAuditTarget(rc.callee)
 		calleePkg, calleeName := renderEdge(target)
 		edges = append(edges, ChainLink{Kind: "edge", Package: rc.from, Symbol: varName, Callee: calleePkg + "." + calleeName})
 		if fn, p := walk(target); fn != "" {
@@ -483,8 +484,4 @@ func boundChain(c Chain, protect int) Chain {
 	c.Omitted = len(c.Links) - len(kept)
 	c.Links = kept
 	return c
-}
-
-func paramKeyDisplay(paramKey dynstate.ParamKey) string {
-	return paramKey.Display()
 }

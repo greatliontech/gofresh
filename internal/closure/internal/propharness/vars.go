@@ -5,7 +5,7 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 )
 
 func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Var]bool, bool) {
@@ -33,7 +33,7 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 				}
 			}
 			categorySyncMap[v] = true
-		case !dynstate.TypeMayCarryUnknownDynamic(audited, vt):
+		case !refconfine.TypeMayCarryUnknownDynamic(audited, vt):
 			// Disallow package-scope mutexes, atomics, or Once primitives.
 			if containsSyncPrimitive(vt, map[types.Type]bool{}) {
 				return nil, false
@@ -76,7 +76,7 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 		params := fn.Signature().Params()
 		for pIdx := 0; pIdx < params.Len(); pIdx++ {
 			pv := params.At(pIdx)
-			if !dynstate.TypeMayCarryUnknownDynamic(audited, pv.Type()) {
+			if !refconfine.TypeMayCarryUnknownDynamic(audited, pv.Type()) {
 				carrierFreeParam[pv] = true
 				continue
 			}
@@ -87,7 +87,7 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 					break
 				}
 				argType := info.TypeOf(site.Args[pIdx])
-				if argType == nil || dynstate.TypeMayCarryUnknownDynamic(audited, argType) {
+				if argType == nil || refconfine.TypeMayCarryUnknownDynamic(audited, argType) {
 					allCF = false
 					break
 				}
@@ -357,7 +357,7 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 	isGenPtr := func(t types.Type) bool {
 		return isAnyGeneratorPtrType(pkgTypes, t)
 	}
-	if !dynstate.VerifyReadOnlyRefConfinement(pkg, dynstate.RefConfineConfig{
+	if !refconfine.VerifyReadOnlyRefConfinement(pkg, refconfine.Config{
 		IsImmutablePtr: isGenPtr,
 		SeedStructOrigin: func(orig *types.Named) bool {
 			return orig != nil && orig.Obj() != nil && !orig.Obj().Exported() && checkedGenStructs[orig]
@@ -374,10 +374,10 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 			case *ast.Ident:
 				if nonInitCategoryAUses[e] {
 					vt := info.TypeOf(e)
-					if dynstate.IsDirectMutableRefWith(vt, isGenPtr) {
+					if refconfine.IsDirectMutableRefWith(vt, isGenPtr) {
 						return true, true
 					}
-					if dynstate.TypeCarriesMutableRefWith(vt, isGenPtr) {
+					if refconfine.TypeCarriesMutableRefWith(vt, isGenPtr) {
 						return false, true
 					}
 					return false, false
@@ -388,8 +388,8 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 			case *ast.TypeAssertExpr:
 				if syncMapTypeAsserts[e] && e.Type != nil {
 					et := info.TypeOf(e.Type)
-					if dynstate.TypeCarriesMutableRefWith(et, isGenPtr) {
-						return dynstate.IsDirectMutableRefWith(et, isGenPtr), true
+					if refconfine.TypeCarriesMutableRefWith(et, isGenPtr) {
+						return refconfine.IsDirectMutableRefWith(et, isGenPtr), true
 					}
 				}
 			case *ast.CallExpr:
@@ -397,14 +397,14 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 					ct := info.TypeOf(e)
 					if tup, isTup := ct.(*types.Tuple); isTup {
 						for ti := 0; ti < tup.Len(); ti++ {
-							if dynstate.TypeCarriesMutableRefWith(tup.At(ti).Type(), isGenPtr) {
+							if refconfine.TypeCarriesMutableRefWith(tup.At(ti).Type(), isGenPtr) {
 								return false, true
 							}
 						}
 						return false, false
 					}
-					if dynstate.TypeCarriesMutableRefWith(ct, isGenPtr) {
-						return dynstate.IsDirectMutableRefWith(ct, isGenPtr), true
+					if refconfine.TypeCarriesMutableRefWith(ct, isGenPtr) {
+						return refconfine.IsDirectMutableRefWith(ct, isGenPtr), true
 					}
 				}
 			}
@@ -478,7 +478,7 @@ func isAddrOfCarrierFreeFlagField(
 	if _, exists := pkgVarSet[v]; !exists {
 		return false
 	}
-	if dynstate.TypeMayCarryUnknownDynamic(audited, v.Type()) {
+	if refconfine.TypeMayCarryUnknownDynamic(audited, v.Type()) {
 		return false
 	}
 	_, isStruct := types.Unalias(v.Type()).Underlying().(*types.Struct)
@@ -521,7 +521,7 @@ func isCarrierFreeGeneratorPtrType(audited bool, pkgTypes *types.Package, t type
 	}
 	if targs := named.TypeArgs(); targs != nil {
 		for i := 0; i < targs.Len(); i++ {
-			if dynstate.TypeMayCarryUnknownDynamic(audited, targs.At(i)) {
+			if refconfine.TypeMayCarryUnknownDynamic(audited, targs.At(i)) {
 				return nil, false
 			}
 		}
@@ -622,7 +622,7 @@ func isCarrierFreeSyncMapKey(audited bool, info *types.Info, keyExpr ast.Expr, c
 	if kt == nil {
 		return false
 	}
-	if !dynstate.TypeMayCarryUnknownDynamic(audited, kt) {
+	if !refconfine.TypeMayCarryUnknownDynamic(audited, kt) {
 		return true
 	}
 	if id, ok := ast.Unparen(keyExpr).(*ast.Ident); ok {
@@ -805,7 +805,7 @@ func verifyCachedAndGlobalGeneratorImplsImmutable(
 						if _, isTP := targ.(*types.TypeParam); isTP {
 							continue
 						}
-						if dynstate.TypeCarriesMutableRefWith(targ, isGenPtr) || types.IsInterface(targ) || !verifyFieldType(targ, map[types.Type]bool{}) {
+						if refconfine.TypeCarriesMutableRefWith(targ, isGenPtr) || types.IsInterface(targ) || !verifyFieldType(targ, map[types.Type]bool{}) {
 							okNode = false
 							return false
 						}
@@ -895,7 +895,7 @@ func verifyCachedAndGlobalGeneratorImplsImmutable(
 					if id, isID := cn.(*ast.Ident); isID {
 						if uv, isV := info.Uses[id].(*types.Var); isV && uv != nil && !uv.IsField() &&
 							uv.Pkg() == pkgTypes && uv.Parent() != pkgTypes.Scope() && !localDefs[uv] {
-							if mutatedOrAddrLocals[uv] || dynstate.TypeCarriesMutableRefWith(uv.Type(), isGenPtr) || !verifyFieldType(uv.Type(), map[types.Type]bool{}) {
+							if mutatedOrAddrLocals[uv] || refconfine.TypeCarriesMutableRefWith(uv.Type(), isGenPtr) || !verifyFieldType(uv.Type(), map[types.Type]bool{}) {
 								okNode = false
 								return false
 							}

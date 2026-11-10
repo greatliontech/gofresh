@@ -1,23 +1,22 @@
-package dynstate
+package refconfine
 
 import (
 	"go/ast"
 	"go/types"
 	"strconv"
 
-	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/auditset"
 )
 
 // CarrierWalkPolicy parameterizes WalkDynamicCarrier across the three carrier
 // walk surfaces:
 //   - CarrierPolicyClosure: the closure tier's carries-dynamic walk
-//     (typeMayCarryDynamic), sharing seen into TypeParam constraint bounds.
+//     (TypeMayCarryDynamic), sharing seen into TypeParam constraint bounds.
 //   - CarrierPolicyConsumer: the consumer tier's carries-dynamic walk
-//     (typeMayCarryUnknownDynamic), entering TypeParam constraint bounds with
+//     (TypeMayCarryUnknownDynamic), entering TypeParam constraint bounds with
 //     a fresh seen map.
 //   - CarrierPolicyAlias: the consumer tier's alias-handing walk
-//     (typeHandsOutDynamicAlias), where Signature is not an alias, TypeParam
+//     (TypeHandsOutDynamicAlias), where Signature is not an alias, TypeParam
 //     recurses into t.Constraint() with seen, and reference-header elements
 //     delegate to CarrierPolicyConsumer with a fresh seen map.
 type CarrierWalkPolicy uint8
@@ -47,11 +46,6 @@ func SignatureOpenWorldTerm(audited bool, sig *types.Signature, extraTypeParams 
 	if allowHarnessSignature && isHarnessSubjectSignature(sig) {
 		return ""
 	}
-	// One fresh map per parameter: sharing across parameters would let
-	// one walk's marks short-circuit another's (a constraint interface
-	// marked by a bounding evaluation reading clean as a later value
-	// type); within one parameter's evaluation the map is shared - the
-	// cycle guard for recursive constraints.
 	if recv := sig.Recv(); recv != nil && WalkDynamicCarrier(audited, recv.Type(), make(map[types.Type]bool), policy) {
 		return "receiver " + types.TypeString(recv.Type(), packageNameQualifier)
 	}
@@ -107,13 +101,7 @@ func isHarnessSubjectSignature(sig *types.Signature) bool {
 // atomic transparency the carrier walks see the type as *T — its
 // internal unsafe pointer is an implementation cell the zero-width *T
 // field and the whole method set type-pin to *T, never an unsafe
-// channel (REQ-closure-shared-dynamic-state). The audit covers exactly
-// the toolchain's type: a defined wrapper inherits no methods and its
-// cell is reached only through an address conversion the ordinary
-// escape rules already mark, so it keeps the fail-closed judgment and
-// never matches here (its Obj is not sync/atomic's). One helper for
-// every carrier walk, so the tiers cannot diverge on this rule
-// (REQ-closure-analysis's one-answer arm).
+// channel (REQ-closure-shared-dynamic-state).
 func AuditedAtomicPointerElem(audited bool, t *types.Named) (types.Type, bool) {
 	if !audited {
 		return nil, false
@@ -194,7 +182,9 @@ func TypeMayCarryUnknownDynamic(audited bool, t types.Type) bool {
 	return WalkDynamicCarrier(audited, t, make(map[types.Type]bool), CarrierPolicyConsumer)
 }
 
-func typeMayCarryDynamic(audited bool, t types.Type, seen map[types.Type]bool) bool {
+// TypeMayCarryDynamic reports whether t may carry dynamic reach under the
+// closure policy using seen for cycle detection.
+func TypeMayCarryDynamic(audited bool, t types.Type, seen map[types.Type]bool) bool {
 	return WalkDynamicCarrier(audited, t, seen, CarrierPolicyClosure)
 }
 
@@ -209,10 +199,7 @@ func TypeHandsOutDynamicAlias(audited bool, t types.Type) bool {
 }
 
 // TypeParamBoundsAwayFromDynamic reports whether one type parameter's
-// constraint provably bounds its type set away from dynamic carriers -
-// the openness question a parameterized subject asks per parameter,
-// shared with the view tier so both tiers give one answer
-// (REQ-closure-analysis's parameterized-subject arm).
+// constraint provably bounds its type set away from dynamic carriers.
 func TypeParamBoundsAwayFromDynamic(audited bool, tp *types.TypeParam) bool {
 	if tp == nil {
 		return false
@@ -220,16 +207,6 @@ func TypeParamBoundsAwayFromDynamic(audited bool, tp *types.TypeParam) bool {
 	return constraintBoundsAwayFromDynamic(audited, tp.Constraint(), make(map[types.Type]bool))
 }
 
-// constraintBoundsAwayFromDynamic reports whether a type parameter's
-// constraint provably bounds its type set away from dynamic carriers: the
-// complete interface is methodless (a constraint method is a dispatch
-// surface this analysis does not narrow), and at least one embedded
-// element bounds the set - a union or specific type whose every term is
-// free of interface, function, channel, and unsafe reach, or an embedded
-// interface that itself bounds. Intersection semantics make one clean
-// bounded element sufficient: the type set is the intersection of every
-// element's set, so a dirty sibling only shrinks a clean bound, never
-// widens it. `any` and `comparable` embed nothing and bound nothing.
 func constraintBoundsAwayFromDynamic(audited bool, constraint types.Type, seen map[types.Type]bool) bool {
 	iface, ok := types.Unalias(constraint).Underlying().(*types.Interface)
 	if !ok {
@@ -252,7 +229,7 @@ func interfaceBoundsAwayFromDynamic(audited bool, iface *types.Interface, seen m
 		case *types.Union:
 			clean := true
 			for j := 0; j < e.Len(); j++ {
-				if typeMayCarryDynamic(audited, e.Term(j).Type(), seen) {
+				if TypeMayCarryDynamic(audited, e.Term(j).Type(), seen) {
 					clean = false
 					break
 				}
@@ -267,7 +244,7 @@ func interfaceBoundsAwayFromDynamic(audited bool, iface *types.Interface, seen m
 				}
 				continue
 			}
-			if !typeMayCarryDynamic(audited, e, seen) {
+			if !TypeMayCarryDynamic(audited, e, seen) {
 				bounded = true
 			}
 		}
@@ -275,12 +252,9 @@ func interfaceBoundsAwayFromDynamic(audited bool, iface *types.Interface, seen m
 	return bounded
 }
 
-// walkTypeStructure traverses a type graph with cycle detection, invoking
-// classify on each unaliased leaf/composite node. When classify returns
-// decided=true, walkTypeStructure returns hit immediately; otherwise it
-// descends into structural children (Named underlying, Struct fields, Array
-// element).
-func walkTypeStructure(t types.Type, seen map[types.Type]bool, nilResult bool, classify func(types.Type) (hit, decided bool)) bool {
+// WalkTypeStructure traverses a type graph with cycle detection, invoking
+// classify on each unaliased leaf/composite node.
+func WalkTypeStructure(t types.Type, seen map[types.Type]bool, nilResult bool, classify func(types.Type) (hit, decided bool)) bool {
 	if t == nil {
 		return nilResult
 	}
@@ -294,33 +268,30 @@ func walkTypeStructure(t types.Type, seen map[types.Type]bool, nilResult bool, c
 	}
 	switch u := u.(type) {
 	case *types.Named:
-		return walkTypeStructure(u.Underlying(), seen, nilResult, classify)
+		return WalkTypeStructure(u.Underlying(), seen, nilResult, classify)
 	case *types.Struct:
 		for i := 0; i < u.NumFields(); i++ {
-			if walkTypeStructure(u.Field(i).Type(), seen, nilResult, classify) {
+			if WalkTypeStructure(u.Field(i).Type(), seen, nilResult, classify) {
 				return true
 			}
 		}
 		return false
 	case *types.Array:
-		return walkTypeStructure(u.Elem(), seen, nilResult, classify)
+		return WalkTypeStructure(u.Elem(), seen, nilResult, classify)
 	default:
 		return true
 	}
 }
 
-// typeCarriesSignature reports whether a type can hold a function value — a
+// TypeCarriesSignature reports whether a type can hold a function value — a
 // signature directly, or a container reaching one through struct fields,
-// array/slice/map elements, pointers, or channels. Interfaces report false - a
-// method call through a carrier-held interface value refuses in the use-shape
-// engine, and a type assertion extracting a function is an unrecognized use
-// there too, so the environment audit owes interfaces nothing.
-func typeCarriesSignature(t types.Type) bool {
+// array/slice/map elements, pointers, or channels.
+func TypeCarriesSignature(t types.Type) bool {
 	return typeCarriesSignatureSeen(t, make(map[types.Type]bool))
 }
 
 func typeCarriesSignatureSeen(t types.Type, seen map[types.Type]bool) bool {
-	return walkTypeStructure(t, seen, false, func(u types.Type) (bool, bool) {
+	return WalkTypeStructure(t, seen, false, func(u types.Type) (bool, bool) {
 		switch u := u.(type) {
 		case *types.Signature:
 			return true, true
@@ -342,38 +313,28 @@ func typeCarriesSignatureSeen(t types.Type, seen map[types.Type]bool) bool {
 	})
 }
 
-// callResultHandsOut reports whether a call's result set can hand its
-// consumer carrier-derived state: any result - the single result type, or
-// any element of a multi-result tuple - that hands out mutable reach or
-// carries a signature refuses. A void call hands out nothing. Missing
-// type information refuses, fail-closed like every judged value position.
-func callResultHandsOut(t types.Type) bool {
+// CallResultHandsOut reports whether a call's result set can hand its
+// consumer carrier-derived state.
+func CallResultHandsOut(t types.Type) bool {
 	if t == nil {
 		return true
 	}
 	if tuple, ok := t.(*types.Tuple); ok {
 		for i := 0; i < tuple.Len(); i++ {
 			rt := tuple.At(i).Type()
-			if typeHandsOutMutableReach(rt) || typeCarriesSignature(rt) {
+			if TypeHandsOutMutableReach(rt) || TypeCarriesSignature(rt) {
 				return true
 			}
 		}
 		return false
 	}
-	return typeHandsOutMutableReach(t) || typeCarriesSignature(t)
+	return TypeHandsOutMutableReach(t) || TypeCarriesSignature(t)
 }
 
-// typeHandsOutMutableReach reports whether holding a value of the type
-// hands out write access to the memory it aliases: pointers, maps,
-// slices, channels, unsafe pointers, and interfaces (concrete type
-// unknown) do; function values do not - calling one executes program
-// code whose own writes are judged where they are written, but the
-// value itself cannot be written through. The receiver-effect and
-// carrier read discharges gate on this, not on dynamic reach: a write
-// through any aliased part of a tracked carrier is mutation
-// (REQ-closure-shared-dynamic-state).
-func typeHandsOutMutableReach(t types.Type) bool {
-	return walkTypeStructure(t, make(map[types.Type]bool), false, func(u types.Type) (bool, bool) {
+// TypeHandsOutMutableReach reports whether holding a value of the type
+// hands out write access to the memory it aliases.
+func TypeHandsOutMutableReach(t types.Type) bool {
+	return WalkTypeStructure(t, make(map[types.Type]bool), false, func(u types.Type) (bool, bool) {
 		switch u := u.(type) {
 		case *types.Basic:
 			return u.Kind() == types.UnsafePointer, true
@@ -389,19 +350,19 @@ func typeHandsOutMutableReach(t types.Type) bool {
 	})
 }
 
-// rangeBindsAlias reports whether ranging the type binds an
+// RangeBindsAlias reports whether ranging the type binds an
 // alias-handing value into the iteration variables.
-func rangeBindsAlias(t types.Type) bool {
+func RangeBindsAlias(t types.Type) bool {
 	switch t := types.Unalias(t).Underlying().(type) {
 	case *types.Map:
-		return typeHandsOutMutableReach(t.Key()) || typeHandsOutMutableReach(t.Elem())
+		return TypeHandsOutMutableReach(t.Key()) || TypeHandsOutMutableReach(t.Elem())
 	case *types.Slice:
-		return typeHandsOutMutableReach(t.Elem())
+		return TypeHandsOutMutableReach(t.Elem())
 	case *types.Array:
-		return typeHandsOutMutableReach(t.Elem())
+		return TypeHandsOutMutableReach(t.Elem())
 	case *types.Pointer:
 		if arr, ok := types.Unalias(t.Elem()).Underlying().(*types.Array); ok {
-			return typeHandsOutMutableReach(arr.Elem())
+			return TypeHandsOutMutableReach(arr.Elem())
 		}
 		return true
 	default:
@@ -409,18 +370,19 @@ func rangeBindsAlias(t types.Type) bool {
 	}
 }
 
-func fillSelection(info *types.Info, expr ast.Expr) bool {
+// FillSelection reports whether expr is a selector or index expression whose
+// type does not reach sync.Once by value.
+func FillSelection(info *types.Info, expr ast.Expr) bool {
 	switch expr.(type) {
 	case *ast.SelectorExpr, *ast.IndexExpr:
-		return !typeReachesOnce(info.TypeOf(expr))
+		return !TypeReachesOnce(info.TypeOf(expr))
 	}
 	return false
 }
 
-// typeReachesOnce reports whether a type is or contains sync.Once by
-// value — through named, struct, and array types.
-func typeReachesOnce(t types.Type) bool {
-	return walkTypeStructure(t, make(map[types.Type]bool), true, func(u types.Type) (bool, bool) {
+// TypeReachesOnce reports whether a type is or contains sync.Once by value.
+func TypeReachesOnce(t types.Type) bool {
+	return WalkTypeStructure(t, make(map[types.Type]bool), true, func(u types.Type) (bool, bool) {
 		switch u := u.(type) {
 		case *types.Named:
 			if u.Obj() != nil && u.Obj().Pkg() != nil && u.Obj().Pkg().Path() == "sync" && u.Obj().Name() == "Once" {
@@ -435,9 +397,8 @@ func typeReachesOnce(t types.Type) bool {
 	})
 }
 
-// onceFieldCount counts the by-value sync.Once fields of a receiver
-// type (through its pointer), the memo bound's denominator.
-func onceFieldCount(recv types.Type) int {
+// OnceFieldCount counts the by-value sync.Once fields of a receiver type.
+func OnceFieldCount(recv types.Type) int {
 	if ptr, ok := types.Unalias(recv).(*types.Pointer); ok {
 		recv = ptr.Elem()
 	}
@@ -454,7 +415,9 @@ func onceFieldCount(recv types.Type) int {
 	return n
 }
 
-func instantiatedResultsHandOutNothing(audited bool, t types.Type) bool {
+// InstantiatedResultsHandOutNothing reports whether every result of sig is
+// either audited-immutable or free of mutable reach and signatures.
+func InstantiatedResultsHandOutNothing(audited bool, t types.Type) bool {
 	sig, ok := types.Unalias(t).(*types.Signature)
 	if !ok {
 		return false
@@ -465,7 +428,7 @@ func instantiatedResultsHandOutNothing(audited bool, t types.Type) bool {
 		if AuditedImmutableType(audited, rt) {
 			continue
 		}
-		if typeHandsOutMutableReach(rt) || typeCarriesSignature(rt) {
+		if TypeHandsOutMutableReach(rt) || TypeCarriesSignature(rt) {
 			return false
 		}
 	}
@@ -473,21 +436,17 @@ func instantiatedResultsHandOutNothing(audited bool, t types.Type) bool {
 }
 
 // AuditedImmutableType is the audited set of types whose values are
-// immutable by construction even though their kind hands out reach:
-// reflect.Type is runtime-canonical and never written after
-// construction. Grows only by source audit
-// (REQ-closure-shared-dynamic-state).
+// immutable by construction even though their kind hands out reach.
 func AuditedImmutableType(audited bool, t types.Type) bool {
 	if !audited {
 		return false
 	}
-	return immutableRuntimeType(t)
+	return ImmutableRuntimeType(t)
 }
 
-// immutableRuntimeType is the one spelling of the audited-immutable
-// reflect types — the effect tiers' ruling and the object-closed
-// store rule read it alike.
-func immutableRuntimeType(t types.Type) bool {
+// ImmutableRuntimeType reports whether t is in the audited-immutable reflect or
+// go/constant type sets.
+func ImmutableRuntimeType(t types.Type) bool {
 	named, ok := types.Unalias(t).(*types.Named)
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
 		return false
@@ -496,133 +455,25 @@ func immutableRuntimeType(t types.Type) bool {
 		named.Obj().Pkg().Path() == "go/constant" && auditset.ConstantImmutable(named.Obj().Name())
 }
 
-// interfaceReceiver reports whether the method's receiver is an
-// interface - dispatch the per-package proof cannot resolve.
-func interfaceReceiver(fn *types.Func) bool {
-	sig, ok := fn.Type().(*types.Signature)
-	if !ok || sig.Recv() == nil {
-		return true
-	}
-	t := types.Unalias(sig.Recv().Type())
-	if pointer, ok := t.(*types.Pointer); ok {
-		t = types.Unalias(pointer.Elem())
-	}
-	_, isInterface := t.Underlying().(*types.Interface)
-	return isInterface
-}
-
-// methodRecvNamedTypeName returns the declared receiver type's bare name
-// (unwrapping pointer indirection and aliases), or "" when fn has no named
-// receiver.
-func methodRecvNamedTypeName(fn *types.Func) string {
-	if fn == nil {
-		return ""
-	}
-	sig, ok := fn.Type().(*types.Signature)
-	if !ok || sig.Recv() == nil {
-		return ""
-	}
-	t := types.Unalias(sig.Recv().Type())
-	if pointer, ok := t.(*types.Pointer); ok {
-		t = types.Unalias(pointer.Elem())
-	}
-	named, ok := t.(*types.Named)
-	if !ok || named.Obj() == nil {
-		return ""
-	}
-	return named.Obj().Name()
-}
-
-// methodFactKey is the cross-package identity of a method's
-// receiver-effect proof: declaring package path, receiver type name,
-// method name.
-func methodFactKey(fn *types.Func) FuncKey {
-	recvName := methodRecvNamedTypeName(fn)
-	pkg := ""
-	if fn != nil && fn.Pkg() != nil {
-		pkg = fn.Pkg().Path()
-	}
-	name := ""
-	if fn != nil {
-		name = recvName + "." + fn.Name()
-	}
-	return FuncKey{Pkg: pkg, Name: name}
-}
-
-// AuditedSynchronization reports whether the method is in the audited
-// synchronization set: sync.Mutex and sync.RWMutex lock operations,
-// receiver-neutral because lock state cannot change dispatch. Grows
-// only by source audit (REQ-closure-shared-dynamic-state).
+// AuditedSynchronization reports whether fn is in the audited sync.Mutex /
+// sync.RWMutex method set.
 func AuditedSynchronization(audited bool, fn *types.Func) bool {
 	return audited && auditset.ReceiverMethod(fn, "sync", auditset.SyncMethod)
 }
 
-// AuditedPooling reports whether the method is in the audited pooling
-// set: sync.Pool's Get and Put (REQ-closure-shared-dynamic-state).
+// AuditedPooling reports whether fn is sync.Pool.Get or sync.Pool.Put.
 func AuditedPooling(audited bool, fn *types.Func) bool {
 	return audited && auditset.ReceiverMethod(fn, "sync", auditset.PoolMethod)
 }
 
-// dataMemoMethod reports whether the method is sync.Map's Load, Store,
-// or LoadOrStore — the operations a data memo admits.
-func dataMemoMethod(audited bool, fn *types.Func) bool {
+// DataMemoMethod reports whether fn is sync.Map.Load, Store, or LoadOrStore.
+func DataMemoMethod(audited bool, fn *types.Func) bool {
 	return audited && auditset.ReceiverMethod(fn, "sync", auditset.MemoMethod)
 }
 
-// auditedOnceDo reports whether the method is sync.Once's Do, the
-// audited synchronization set's memo guard.
-func auditedOnceDo(audited bool, fn *types.Func) bool {
+// AuditedOnceDo reports whether fn is sync.Once.Do.
+func AuditedOnceDo(audited bool, fn *types.Func) bool {
 	return audited && auditset.ReceiverMethod(fn, "sync", func(receiver, method string) bool {
 		return receiver == "Once" && method == "Do"
 	})
-}
-
-// RecvTypeName is a method's receiver type name with the leading pointer star
-// and any generic parameters stripped — "" for a plain function or an
-// unnameable receiver.
-func RecvTypeName(fd *ast.FuncDecl) string {
-	if fd.Recv == nil || len(fd.Recv.List) == 0 {
-		return ""
-	}
-	t := fd.Recv.List[0].Type
-	for {
-		switch e := t.(type) {
-		case *ast.ParenExpr:
-			t = e.X
-		case *ast.StarExpr:
-			t = e.X
-		case *ast.IndexExpr:
-			t = e.X
-		case *ast.IndexListExpr:
-			t = e.X
-		case *ast.Ident:
-			return e.Name
-		default:
-			return ""
-		}
-	}
-}
-
-// recvTypeNameOf resolves the receiver type name of a selection's
-// method through its declaring type, mirroring RecvTypeName's shape.
-func recvTypeNameOf(p *packages.Package, sel *ast.SelectorExpr) string {
-	selection, ok := p.TypesInfo.Selections[sel]
-	if !ok {
-		return ""
-	}
-	fn, ok := selection.Obj().(*types.Func)
-	if !ok {
-		return ""
-	}
-	return methodRecvNamedTypeName(fn)
-}
-
-// dynamicVarKey identifies a package-level variable stably across the
-// test-variant recompilations packages.Load produces: variant type
-// objects differ per graph, the (package path, name) pair does not.
-func dynamicVarKey(variable *types.Var) string {
-	if variable.Pkg() == nil {
-		return variable.Name()
-	}
-	return variable.Pkg().Path() + "." + variable.Name()
 }

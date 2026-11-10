@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/closure"
-	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"go/ast"
 	"go/importer"
 	"go/parser"
@@ -548,7 +548,7 @@ func TestMalformedAttributedUseMarksEveryDeclaredKey(t *testing.T) {
 	// An invalid attribution — its function key missing the name —
 	// cannot be judged and must not be dropped.
 	poison(func(fact *dynamicStateFact) {
-		fact.AttributedUses = append(fact.AttributedUses, dynstate.AttributedUse{Func: dynstate.FuncKey{Pkg: "golang.org/x/sync/errgroup"}, Key: "golang.org/x/sync/errgroup.Ghost"})
+		fact.AttributedUses = append(fact.AttributedUses, syntaxutil.AttributedUse{Func: syntaxutil.FuncKey{Pkg: "golang.org/x/sync/errgroup"}, Key: "golang.org/x/sync/errgroup.Ghost"})
 	})
 	poisoned := runScan(t, scope, dir, pkg)
 	if reason := poisoned.downgradeReason[subject]; !strings.Contains(reason, "golang.org/x/sync/errgroup.Ghost is mutated") {
@@ -564,7 +564,7 @@ func TestCarrierAliasLinkRecorded(t *testing.T) {
 		"example.com/xesc/reg": {"reg.go": "package reg\n\nfunc one() int { return 1 }\n\nvar Hooks = map[string]func() int{\"a\": one}\n\nvar Alias = Hooks\n\nfunc Count() int { return len(Hooks) }\n"},
 	})
 	fact := dynamicStateFactOf(true, pkgs[0], false)
-	want := dynstate.CarrierLink{From: "example.com/xesc/reg.Alias", To: "example.com/xesc/reg.Hooks"}
+	want := syntaxutil.CarrierLink{From: "example.com/xesc/reg.Alias", To: "example.com/xesc/reg.Hooks"}
 	found := false
 	for _, link := range fact.CarrierLinks {
 		if link == want {
@@ -585,7 +585,7 @@ func TestCarrierStoreLinkRecordedAndCallResultsUnlinked(t *testing.T) {
 		"example.com/xesc/reg": {"reg.go": "package reg\n\nfunc one() int { return 1 }\n\nvar Inner = []func() int{one}\n\nvar Hooks = map[string][]func() int{}\n\nfunc pick(m map[string][]func() int) map[string][]func() int { return m }\n\nvar Picked = pick(Hooks)\n\nfunc init() {\n\tHooks[\"a\"] = Inner\n}\n\nfunc Count() int { return len(Hooks) }\n"},
 	})
 	fact := dynamicStateFactOf(true, pkgs[0], false)
-	wantStore := dynstate.CarrierLink{From: "example.com/xesc/reg.Hooks", To: "example.com/xesc/reg.Inner"}
+	wantStore := syntaxutil.CarrierLink{From: "example.com/xesc/reg.Hooks", To: "example.com/xesc/reg.Inner"}
 	foundStore := false
 	for _, link := range fact.CarrierLinks {
 		if link == wantStore {
@@ -625,7 +625,7 @@ func TestCarrierLinkCrossesMutationMarks(t *testing.T) {
 			// exists, with it the mark crosses to the origin.
 			fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
 			fact.Mutates = append(fact.Mutates, "golang.org/x/sync/errgroup.ghostAlias")
-			fact.CarrierLinks = append(fact.CarrierLinks, dynstate.CarrierLink{From: "golang.org/x/sync/errgroup.ghostAlias", To: "golang.org/x/sync/errgroup.Ghost"})
+			fact.CarrierLinks = append(fact.CarrierLinks, syntaxutil.CarrierLink{From: "golang.org/x/sync/errgroup.ghostAlias", To: "golang.org/x/sync/errgroup.Ghost"})
 			processFactCache.Store(k, fact)
 			hit = true
 		}
@@ -661,7 +661,7 @@ func TestCarrierLinkCrossesEscapeMarks(t *testing.T) {
 		if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 			fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
 			fact.Escapes = append(fact.Escapes, "golang.org/x/sync/errgroup.ghostAlias")
-			fact.CarrierLinks = append(fact.CarrierLinks, dynstate.CarrierLink{From: "golang.org/x/sync/errgroup.ghostAlias", To: "golang.org/x/sync/errgroup.Ghost"})
+			fact.CarrierLinks = append(fact.CarrierLinks, syntaxutil.CarrierLink{From: "golang.org/x/sync/errgroup.ghostAlias", To: "golang.org/x/sync/errgroup.Ghost"})
 			processFactCache.Store(k, fact)
 			hit = true
 		}
@@ -697,7 +697,7 @@ func TestMalformedCarrierLinkMarksEveryDeclaredKey(t *testing.T) {
 		if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 			fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
 			// Missing To key - the link lost one of its keys.
-			fact.CarrierLinks = append(fact.CarrierLinks, dynstate.CarrierLink{From: "golang.org/x/sync/errgroup.Ghost"})
+			fact.CarrierLinks = append(fact.CarrierLinks, syntaxutil.CarrierLink{From: "golang.org/x/sync/errgroup.Ghost"})
 			processFactCache.Store(k, fact)
 			hit = true
 		}
@@ -733,7 +733,7 @@ func TestMalformedParamUseMarksEveryDeclaredKey(t *testing.T) {
 		if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 			fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
 			// Callee parameter key missing function name.
-			fact.ParamUses = append(fact.ParamUses, dynstate.VarParamUse{Key: "golang.org/x/sync/errgroup.Ghost", Param: dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "bad"}}})
+			fact.ParamUses = append(fact.ParamUses, syntaxutil.VarParamUse{Key: "golang.org/x/sync/errgroup.Ghost", Param: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "bad"}}})
 			processFactCache.Store(k, fact)
 			hit = true
 		}
@@ -769,7 +769,7 @@ func TestMalformedFieldParamUseMarksEveryDeclaredKey(t *testing.T) {
 		if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 			fact.Declares = append(fact.Declares, "golang.org/x/sync/errgroup.Ghost")
 			// Invalid negative index in FieldParamUses.
-			fact.FieldParamUses = append(fact.FieldParamUses, dynstate.FieldPosKey{Owner: "golang.org/x/sync/errgroup.Ghost", Field: "bad", Index: -1})
+			fact.FieldParamUses = append(fact.FieldParamUses, syntaxutil.FieldPosKey{Owner: "golang.org/x/sync/errgroup.Ghost", Field: "bad", Index: -1})
 			processFactCache.Store(k, fact)
 			hit = true
 		}
@@ -795,25 +795,25 @@ func TestMalformedFieldPopulationRecordsMarkEveryDeclaredKey(t *testing.T) {
 	}{
 		{"fieldParamDefer", func(fact *dynamicStateFact) {
 			// Deferral with a negative index - outside the record domain.
-			fact.FieldParamDefer = append(fact.FieldParamDefer, dynstate.FieldParamDefer{
-				Pos:   dynstate.FieldPosKey{Owner: "golang.org/x/sync/errgroup.Ghost", Field: "Build", Index: -1},
-				Param: dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "p", Name: "f"}, Index: 0},
+			fact.FieldParamDefer = append(fact.FieldParamDefer, syntaxutil.FieldParamDefer{
+				Pos:   syntaxutil.FieldPosKey{Owner: "golang.org/x/sync/errgroup.Ghost", Field: "Build", Index: -1},
+				Param: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "p", Name: "f"}, Index: 0},
 			})
 		}},
 		{"fieldParamPoison", func(fact *dynamicStateFact) {
 			// HasPos=true with missing Field name.
-			fact.FieldParamPoison = append(fact.FieldParamPoison, dynstate.FieldParamPoison{Owner: "golang.org/x/sync/errgroup.Ghost", HasPos: true})
+			fact.FieldParamPoison = append(fact.FieldParamPoison, syntaxutil.FieldParamPoison{Owner: "golang.org/x/sync/errgroup.Ghost", HasPos: true})
 		}},
 		{"returnFieldParamDefer", func(fact *dynamicStateFact) {
 			// Function key missing Name.
-			fact.ReturnFieldParamDefer = append(fact.ReturnFieldParamDefer, dynstate.ReturnFieldParamDefer{
-				Pos:   dynstate.ReturnFieldPosKey{Func: dynstate.FuncKey{Pkg: "badfn"}, Field: "Build", Index: 0},
-				Param: dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "p", Name: "f"}, Index: 0},
+			fact.ReturnFieldParamDefer = append(fact.ReturnFieldParamDefer, syntaxutil.ReturnFieldParamDefer{
+				Pos:   syntaxutil.ReturnFieldPosKey{Func: syntaxutil.FuncKey{Pkg: "badfn"}, Field: "Build", Index: 0},
+				Param: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "p", Name: "f"}, Index: 0},
 			})
 		}},
 		{"returnFieldParamPoison", func(fact *dynamicStateFact) {
-			fact.ReturnFieldParamPoison = append(fact.ReturnFieldParamPoison, dynstate.ReturnFieldParamPoison{
-				Func:   dynstate.FuncKey{Pkg: "badfn"},
+			fact.ReturnFieldParamPoison = append(fact.ReturnFieldParamPoison, syntaxutil.ReturnFieldParamPoison{
+				Func:   syntaxutil.FuncKey{Pkg: "badfn"},
 				HasPos: true,
 				Field:  "Build",
 				Index:  0,
@@ -821,40 +821,40 @@ func TestMalformedFieldPopulationRecordsMarkEveryDeclaredKey(t *testing.T) {
 		}},
 		{"elemParamUses", func(fact *dynamicStateFact) {
 			// Missing Owner key.
-			fact.ElemParamUses = append(fact.ElemParamUses, dynstate.ElemParamUse{Key: "golang.org/x/sync/errgroup.Ghost"})
+			fact.ElemParamUses = append(fact.ElemParamUses, syntaxutil.ElemParamUse{Key: "golang.org/x/sync/errgroup.Ghost"})
 		}},
 		{"paramLeakFreeDeps", func(fact *dynamicStateFact) {
 			// Dependency key missing Name.
-			fact.ParamLeakFreeDeps = append(fact.ParamLeakFreeDeps, dynstate.ParamDepEdge{
-				Own: dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "golang.org/x/sync/errgroup", Name: "Go"}, Index: 0},
-				Dep: dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "bad"}},
+			fact.ParamLeakFreeDeps = append(fact.ParamLeakFreeDeps, syntaxutil.ParamDepEdge{
+				Own: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "golang.org/x/sync/errgroup", Name: "Go"}, Index: 0},
+				Dep: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "bad"}},
 			})
 		}},
 		{"paramRetentionFreeDeps", func(fact *dynamicStateFact) {
 			// The retention grade's edges validate identically.
-			fact.ParamRetentionFreeDeps = append(fact.ParamRetentionFreeDeps, dynstate.ParamDepEdge{
-				Own: dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "golang.org/x/sync/errgroup", Name: "Go"}, Index: 0},
-				Dep: dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "bad"}},
+			fact.ParamRetentionFreeDeps = append(fact.ParamRetentionFreeDeps, syntaxutil.ParamDepEdge{
+				Own: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "golang.org/x/sync/errgroup", Name: "Go"}, Index: 0},
+				Dep: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "bad"}},
 			})
 		}},
 		{"initParamUses", func(fact *dynamicStateFact) {
 			// Callee parameter key missing Name.
-			fact.InitParamUses = append(fact.InitParamUses, dynstate.VarParamUse{
+			fact.InitParamUses = append(fact.InitParamUses, syntaxutil.VarParamUse{
 				Key:   "golang.org/x/sync/errgroup.Ghost",
-				Param: dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "bad"}},
+				Param: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "bad"}},
 			})
 		}},
 		{"initMethodUses", func(fact *dynamicStateFact) {
 			// Method key is missing.
-			fact.InitMethodUses = append(fact.InitMethodUses, dynstate.VarMethodUse{Key: "golang.org/x/sync/errgroup.Ghost"})
+			fact.InitMethodUses = append(fact.InitMethodUses, syntaxutil.VarMethodUse{Key: "golang.org/x/sync/errgroup.Ghost"})
 		}},
 		{"elemNegativeIndex", func(fact *dynamicStateFact) {
-			fact.ElemParamUses = append(fact.ElemParamUses, dynstate.ElemParamUse{Key: "golang.org/x/sync/errgroup.Ghost", Owner: "owner.Key", Index: -1})
+			fact.ElemParamUses = append(fact.ElemParamUses, syntaxutil.ElemParamUse{Key: "golang.org/x/sync/errgroup.Ghost", Owner: "owner.Key", Index: -1})
 		}},
 		{"negativeParamIndex", func(fact *dynamicStateFact) {
-			fact.FieldParamDefer = append(fact.FieldParamDefer, dynstate.FieldParamDefer{
-				Pos:   dynstate.FieldPosKey{Owner: "golang.org/x/sync/errgroup.Ghost", Field: "Build", Index: 0},
-				Param: dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "p", Name: "f"}, Index: -1},
+			fact.FieldParamDefer = append(fact.FieldParamDefer, syntaxutil.FieldParamDefer{
+				Pos:   syntaxutil.FieldPosKey{Owner: "golang.org/x/sync/errgroup.Ghost", Field: "Build", Index: 0},
+				Param: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "p", Name: "f"}, Index: -1},
 			})
 		}},
 	}
@@ -2441,9 +2441,9 @@ func Mutate() {
 	// Verify envAuditTrail follows linkedKeys across CarrierLinks.
 	linkedFacts := map[string][]dynamicStateFact{
 		"example.com/p": {{
-			CarrierLinks: []dynstate.CarrierLink{{From: "example.com/p.Aliased", To: "example.com/p.backing"}},
+			CarrierLinks: []syntaxutil.CarrierLink{{From: "example.com/p.Aliased", To: "example.com/p.backing"}},
 			EnvCarrying:  []string{"example.com/p.backing"},
-			EnvCallUses:  []dynstate.EnvCallUse{{Key: "example.com/p.backing", Callee: dynstate.FuncKey{Pkg: "example.com/dep", Name: "Make"}}},
+			EnvCallUses:  []syntaxutil.EnvCallUse{{Key: "example.com/p.backing", Callee: syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Make"}}},
 		}},
 	}
 	edges, refusedFn, refusedPath := envAuditTrail(
@@ -2795,16 +2795,16 @@ func TestRecvTypeNameReducesEveryReceiverForm(t *testing.T) {
 				fd = x
 			}
 		}
-		if got := recvTypeName(fd); got != tc.want {
-			t.Errorf("recvTypeName(recv %s) = %q, want %q", tc.recv, got, tc.want)
+		if got := syntaxutil.RecvTypeName(fd); got != tc.want {
+			t.Errorf("syntaxutil.RecvTypeName(recv %s) = %q, want %q", tc.recv, got, tc.want)
 		}
 	}
 	// The entry guard's second operand is reachable only from a
 	// hand-constructed AST — the parser never yields a receiver-bearing
 	// declaration with an empty field list — so construct it directly:
 	// the pinned outcome is the guard's "" refusal, not an index panic.
-	if got := recvTypeName(&ast.FuncDecl{Name: ast.NewIdent("M"), Recv: &ast.FieldList{}}); got != "" {
-		t.Errorf(`recvTypeName(empty receiver list) = %q, want ""`, got)
+	if got := syntaxutil.RecvTypeName(&ast.FuncDecl{Name: ast.NewIdent("M"), Recv: &ast.FieldList{}}); got != "" {
+		t.Errorf(`syntaxutil.RecvTypeName(empty receiver list) = %q, want ""`, got)
 	}
 }
 

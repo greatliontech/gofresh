@@ -8,6 +8,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
 	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
 	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 	"go/ast"
@@ -2502,8 +2503,8 @@ func FuzzAuditedStdlibClosure(f *testing.F) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if elem, ok := auditedAtomicPointerElem(audited, inst.(*types.Named)); ok != audited || (ok && elem != elemType) {
-			t.Fatalf("auditedAtomicPointerElem(%v) = (%v, %v)", audited, elem, ok)
+		if elem, ok := refconfine.AuditedAtomicPointerElem(audited, inst.(*types.Named)); ok != audited || (ok && elem != elemType) {
+			t.Fatalf("AuditedAtomicPointerElem(%v) = (%v, %v)", audited, elem, ok)
 		}
 	})
 }
@@ -2608,10 +2609,10 @@ func FuzzObservabilityLattice(f *testing.F) {
 
 		closedSig := types.NewSignatureType(nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, nil, "x", types.Typ[types.Int])), nil, false)
 		openSig := types.NewSignatureType(nil, nil, nil, types.NewTuple(types.NewVar(token.NoPos, nil, "fn", types.NewSignatureType(nil, nil, nil, nil, nil, false))), nil, false)
-		if term := signatureOpenWorldTerm(audited, closedSig, nil, false, carrierPolicyClosure); term != "" {
+		if term := refconfine.SignatureOpenWorldTerm(audited, closedSig, nil, false, refconfine.CarrierPolicyClosure); term != "" {
 			t.Fatalf("closed signature reported open-world term %q", term)
 		}
-		if term := signatureOpenWorldTerm(audited, openSig, nil, false, carrierPolicyClosure); !strings.Contains(term, "parameter fn") {
+		if term := refconfine.SignatureOpenWorldTerm(audited, openSig, nil, false, refconfine.CarrierPolicyClosure); !strings.Contains(term, "parameter fn") {
 			t.Fatalf("open signature term = %q, want parameter fn", term)
 		}
 		gomaxEff := symbolExternalEffect(externalEffectUnauditedStandard, "runtime", "GOMAXPROCS", "reaches unaudited standard operation runtime.GOMAXPROCS")

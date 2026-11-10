@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"go/token"
 	"go/types"
@@ -326,16 +327,16 @@ func TestUnauditedToolchainDropsPurityAdmissions(t *testing.T) {
 	// Hasher-resolved audit verdict the scan entries read once — an
 	// unlisted surface or unaudited selection reaches every
 	// admission as false.
-	if !auditedSynchronization(true, lock) || !auditedPooling(true, get) || !auditedImmutableType(true, reflType) {
+	if !refconfine.AuditedSynchronization(true, lock) || !refconfine.AuditedPooling(true, get) || !refconfine.AuditedImmutableType(true, reflType) {
 		t.Fatal("fakes not admitted under an audited verdict; the refusal arms below would be vacuous")
 	}
-	if auditedSynchronization(false, lock) {
-		t.Error("auditedSynchronization admits sync.Mutex.Lock on an unaudited toolchain")
+	if refconfine.AuditedSynchronization(false, lock) {
+		t.Error("AuditedSynchronization admits sync.Mutex.Lock on an unaudited toolchain")
 	}
-	if auditedPooling(false, get) {
-		t.Error("auditedPooling admits sync.Pool.Get on an unaudited toolchain")
+	if refconfine.AuditedPooling(false, get) {
+		t.Error("AuditedPooling admits sync.Pool.Get on an unaudited toolchain")
 	}
-	if auditedImmutableType(false, reflType) {
-		t.Error("auditedImmutableType admits reflect.Type on an unaudited toolchain")
+	if refconfine.AuditedImmutableType(false, reflType) {
+		t.Error("AuditedImmutableType admits reflect.Type on an unaudited toolchain")
 	}
 }

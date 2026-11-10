@@ -6,7 +6,7 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 )
 
 // verifyHarnessExportedSurface verifies the exported types, functions, and
@@ -256,7 +256,7 @@ func validHarnessExportedResultType(
 	// 0. Pure value results (scalars, strings, and value arrays/structs of them) that neither
 	// carry dynamic dispatch nor hand out pointers, slices, maps, or channels. If a value
 	// struct defined in pkgTypes is returned, enqueue it so any promoted exported methods are checked.
-	if !dynstate.TypeMayCarryUnknownDynamic(audited, ret) && !typeHandsOutMutableAlias(ret, map[types.Type]bool{}) {
+	if !refconfine.TypeMayCarryUnknownDynamic(audited, ret) && !typeHandsOutMutableAlias(ret, map[types.Type]bool{}) {
 		if named, ok := unaliased.(*types.Named); ok && named.Obj() != nil && named.Obj().Pkg() == pkgTypes && enqueueNamed != nil {
 			enqueueNamed(named)
 		}

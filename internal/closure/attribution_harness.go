@@ -10,7 +10,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
 	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/closure/internal/rta"
-	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 )
 
 // subjectEnumerationClosure judges one open-signature root against its
@@ -35,7 +35,7 @@ func subjectEnumerationClosure(audited bool, pureDelegates map[string]bool, user
 		}
 		for _, list := range []*types.TypeParamList{root.TypeParams(), root.Signature.TypeParams(), root.Signature.RecvTypeParams()} {
 			for i := 0; list != nil && i < list.Len(); i++ {
-				if !typeParamBoundsAwayFromDynamic(audited, list.At(i)) {
+				if !refconfine.TypeParamBoundsAwayFromDynamic(audited, list.At(i)) {
 					return enumerationClosure{}, false
 				}
 			}
@@ -354,7 +354,7 @@ func carrierFreeFieldAddr(audited bool, fa *ssa.FieldAddr, root *ssa.Function) b
 	if !ok {
 		return false
 	}
-	if !typeMayCarryDynamic(audited, ptr.Elem(), make(map[types.Type]bool)) {
+	if !refconfine.TypeMayCarryDynamic(audited, ptr.Elem(), make(map[types.Type]bool)) {
 		return true
 	}
 	return carrierFreeReadOnlyAddr(audited, fa, root)
@@ -368,7 +368,7 @@ func carrierFreeReadOnlyAddr(audited bool, addr ssa.Value, root *ssa.Function) b
 	if !ok {
 		return false
 	}
-	elemCarries := typeMayCarryDynamic(audited, ptr.Elem(), make(map[types.Type]bool))
+	elemCarries := refconfine.TypeMayCarryDynamic(audited, ptr.Elem(), make(map[types.Type]bool))
 	for _, ref := range *addr.Referrers() {
 		switch r := ref.(type) {
 		case *ssa.DebugRef:
@@ -406,7 +406,7 @@ func carrierFreeValueUsesSeen(audited bool, val ssa.Value, root *ssa.Function, s
 		return true
 	}
 	seen[val] = true
-	if !typeMayCarryDynamic(audited, val.Type(), make(map[types.Type]bool)) {
+	if !refconfine.TypeMayCarryDynamic(audited, val.Type(), make(map[types.Type]bool)) {
 		return true
 	}
 	refs := val.Referrers()
@@ -634,7 +634,7 @@ func collectStructCarrierFieldTargets(audited bool, userPaths map[string]bool, n
 				return false
 			}
 			for i := 0; i < st.NumFields(); i++ {
-				if typeMayCarryDynamic(audited, st.Field(i).Type(), make(map[types.Type]bool)) {
+				if refconfine.TypeMayCarryDynamic(audited, st.Field(i).Type(), make(map[types.Type]bool)) {
 					needed[i] = true
 				}
 			}
@@ -851,31 +851,7 @@ func rootMayReceiveUnknownDynamic(audited bool, prog *program, root *ssa.Functio
 	if root.Signature.TypeParams() == nil {
 		extraTypeParams = root.TypeParams()
 	}
-	return signatureOpenWorldTerm(audited, root.Signature, extraTypeParams, subjectRunsThroughHarness(prog, root), carrierPolicyClosure) != ""
-}
-
-type carrierWalkPolicy = dynstate.CarrierWalkPolicy
-
-const (
-	carrierPolicyClosure  = dynstate.CarrierPolicyClosure
-	carrierPolicyConsumer = dynstate.CarrierPolicyConsumer
-	carrierPolicyAlias    = dynstate.CarrierPolicyAlias
-)
-
-func signatureOpenWorldTerm(audited bool, sig *types.Signature, extraTypeParams *types.TypeParamList, allowHarnessSignature bool, policy carrierWalkPolicy) string {
-	return dynstate.SignatureOpenWorldTerm(audited, sig, extraTypeParams, allowHarnessSignature, policy)
-}
-
-func auditedAtomicPointerElem(audited bool, t *types.Named) (types.Type, bool) {
-	return dynstate.AuditedAtomicPointerElem(audited, t)
-}
-
-func walkDynamicCarrier(audited bool, t types.Type, seen map[types.Type]bool, policy carrierWalkPolicy) bool {
-	return dynstate.WalkDynamicCarrier(audited, t, seen, policy)
-}
-
-func typeMayCarryDynamic(audited bool, t types.Type, seen map[types.Type]bool) bool {
-	return walkDynamicCarrier(audited, t, seen, carrierPolicyClosure)
+	return refconfine.SignatureOpenWorldTerm(audited, root.Signature, extraTypeParams, subjectRunsThroughHarness(prog, root), refconfine.CarrierPolicyClosure) != ""
 }
 
 func typeMayCarryDynamicTop(audited bool, t types.Type) bool {
@@ -888,11 +864,7 @@ func typeMayCarryDynamicTop(audited bool, t types.Type) bool {
 	case *types.Interface, *types.Signature:
 		return true
 	}
-	return walkDynamicCarrier(audited, t, make(map[types.Type]bool), carrierPolicyClosure)
-}
-
-func typeParamBoundsAwayFromDynamic(audited bool, tp *types.TypeParam) bool {
-	return dynstate.TypeParamBoundsAwayFromDynamic(audited, tp)
+	return refconfine.WalkDynamicCarrier(audited, t, make(map[types.Type]bool), refconfine.CarrierPolicyClosure)
 }
 
 func isGeneratedTestMainPackage(prog *program, pkg *ssa.Package) bool {
@@ -1330,7 +1302,7 @@ func nonStdTypeUsesUnsafePointer(audited, harnessAudited bool, userPaths map[str
 				if pkgPath == "unsafe" && obj.Name() == "Pointer" {
 					return true
 				}
-				if elem, ok := auditedAtomicPointerElem(audited, tt); ok {
+				if elem, ok := refconfine.AuditedAtomicPointerElem(audited, tt); ok {
 					return walk(elem)
 				}
 				if (isStdImportPath(pkgPath) && !userPaths[pkgPath]) ||

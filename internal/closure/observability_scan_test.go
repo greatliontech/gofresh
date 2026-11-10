@@ -14,6 +14,9 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
 	arta "github.com/greatliontech/gofresh/internal/closure/internal/rta"
 	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
+	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"go/ast"
 	"go/importer"
 	"go/parser"
@@ -3267,60 +3270,60 @@ func TestRealRapidLazyMutStringer(t *testing.T) {
 			implFact := pbFacts["google.golang.org/protobuf/internal/impl"]
 			descFact := pbFacts["google.golang.org/protobuf/types/descriptorpb"]
 
-			var fdBuilderFact *dynstate.ProtoRuntimeTypeFact
+			var fdBuilderFact *protoaudit.ProtoRuntimeTypeFact
 			for i := range fdFact.ProtoRuntimeTypes {
 				rt := &fdFact.ProtoRuntimeTypes[i]
-				if rt.Type.Name == "Builder" && rt.Role == dynstate.ProtoRoleDescBuilder {
+				if rt.Type.Name == "Builder" && rt.Role == protoaudit.ProtoRoleDescBuilder {
 					fdBuilderFact = rt
 				}
 			}
 			if fdBuilderFact == nil {
 				t.Fatalf("real protobuf@%s/internal/filedesc ProtoRuntimeTypes = %+v, missing desc_builder Builder", pbVer, fdFact.ProtoRuntimeTypes)
 			}
-			fileGuardRef := dynstate.TypeRef{Pkg: "google.golang.org/protobuf/internal/filedesc", Name: "File"}
+			fileGuardRef := syntaxutil.TypeRef{Pkg: "google.golang.org/protobuf/internal/filedesc", Name: "File"}
 			if !slices.Contains(fdBuilderFact.GuardTypes, fileGuardRef) {
 				t.Fatalf("real protobuf@%s/internal/filedesc Builder GuardTypes = %+v, missing File", pbVer, fdBuilderFact.GuardTypes)
 			}
 
-			var ftBuilderFact *dynstate.ProtoRuntimeTypeFact
+			var ftBuilderFact *protoaudit.ProtoRuntimeTypeFact
 			for i := range ftFact.ProtoRuntimeTypes {
 				rt := &ftFact.ProtoRuntimeTypes[i]
-				if rt.Type.Name == "Builder" && rt.Role == dynstate.ProtoRoleBuilder {
+				if rt.Type.Name == "Builder" && rt.Role == protoaudit.ProtoRoleBuilder {
 					ftBuilderFact = rt
 				}
 			}
-			wantSubBuilder := dynstate.TypeRef{Pkg: "google.golang.org/protobuf/internal/filedesc", Name: "Builder"}
+			wantSubBuilder := syntaxutil.TypeRef{Pkg: "google.golang.org/protobuf/internal/filedesc", Name: "Builder"}
 			if ftBuilderFact == nil || ftBuilderFact.SubBuilder != wantSubBuilder {
 				t.Fatalf("real protobuf@%s/internal/filetype Builder = %+v, want SubBuilder=%+v", pbVer, ftFact.ProtoRuntimeTypes, wantSubBuilder)
 			}
 
-			roles := map[string]dynstate.ProtoRuntimeTypeFact{}
+			roles := map[string]protoaudit.ProtoRuntimeTypeFact{}
 			for _, rt := range implFact.ProtoRuntimeTypes {
 				roles[rt.Type.Name] = rt
 			}
-			if roles["EnumInfo"].Role != dynstate.ProtoRoleEnum ||
-				roles["MessageInfo"].Role != dynstate.ProtoRoleMessage ||
-				roles["ExtensionInfo"].Role != dynstate.ProtoRoleExtension {
+			if roles["EnumInfo"].Role != protoaudit.ProtoRoleEnum ||
+				roles["MessageInfo"].Role != protoaudit.ProtoRoleMessage ||
+				roles["ExtensionInfo"].Role != protoaudit.ProtoRoleExtension {
 				t.Fatalf("real protobuf@%s/internal/impl ProtoRuntimeTypes = %+v", pbVer, implFact.ProtoRuntimeTypes)
 			}
-			var methodsGuardRef dynstate.TypeRef
+			var methodsGuardRef syntaxutil.TypeRef
 			for _, imp := range implPkg.Types.Imports() {
 				if imp.Path() == "google.golang.org/protobuf/runtime/protoiface" {
 					if mObj := imp.Scope().Lookup("Methods"); mObj != nil {
 						var okRef bool
-						methodsGuardRef, okRef = dynstate.TypeRefOfStruct(mObj.Type())
+						methodsGuardRef, okRef = syntaxutil.TypeRefOfStruct(mObj.Type())
 						if !okRef {
 							t.Fatalf("real protobuf@%s TypeRefOfStruct(protoiface.Methods) returned false", pbVer)
 						}
 					}
 				}
 			}
-			atomicNilGuardRef := dynstate.TypeRef{Pkg: "google.golang.org/protobuf/internal/impl", Name: "atomicNilMessage"}
+			atomicNilGuardRef := syntaxutil.TypeRef{Pkg: "google.golang.org/protobuf/internal/impl", Name: "atomicNilMessage"}
 			if !methodsGuardRef.Valid() || !slices.Contains(roles["MessageInfo"].GuardTypes, methodsGuardRef) || !slices.Contains(roles["MessageInfo"].GuardTypes, atomicNilGuardRef) {
 				t.Fatalf("real protobuf@%s/internal/impl MessageInfo GuardTypes = %+v, missing %+v or %+v", pbVer, roles["MessageInfo"].GuardTypes, methodsGuardRef, atomicNilGuardRef)
 			}
 
-			allGuarded := map[dynstate.TypeRef]string{}
+			allGuarded := map[syntaxutil.TypeRef]string{}
 			for _, g := range fdBuilderFact.GuardTypes {
 				allGuarded[g] = "filedesc.Builder"
 			}
@@ -3377,7 +3380,7 @@ func TestRealRapidLazyMutStringer(t *testing.T) {
 			}
 
 			// Mutating either protoiface.Methods or filedesc.File in a caller package must revoke descriptorpb discharges!
-			for _, poisonRef := range []dynstate.TypeRef{methodsGuardRef, fileGuardRef} {
+			for _, poisonRef := range []syntaxutil.TypeRef{methodsGuardRef, fileGuardRef} {
 				metaPoison := append([]dynstate.GraphPackage{{
 					ImportPath: "example.com/caller",
 					PkgPath:    "example.com/caller",
@@ -3388,7 +3391,7 @@ func TestRealRapidLazyMutStringer(t *testing.T) {
 				for k, v := range facts {
 					factsPoison[k] = v
 				}
-				factsPoison["example.com/caller"] = []dynstate.Fact{{MutatedStructTypes: []dynstate.TypeRef{poisonRef}}}
+				factsPoison["example.com/caller"] = []dynstate.Fact{{MutatedStructTypes: []syntaxutil.TypeRef{poisonRef}}}
 				stPoison := dynstate.Compose(metaPoison, factsPoison, "example.com/caller", nil, true, false)
 				if slices.Contains(strings.Split(stPoison.AttestationDischarges, ","), "google.golang.org/protobuf/types/descriptorpb.file_google_protobuf_descriptor_proto_msgTypes") {
 					t.Fatalf("real protobuf@%s GuardTypes mutation on %+v failed to revoke msgTypes AttestationDischarges: %q", pbVer, poisonRef, stPoison.AttestationDischarges)
@@ -7479,15 +7482,15 @@ type FnChan chan func()
 		typ := pkg.Scope().Lookup(tc.name).Type()
 		for _, p := range []struct {
 			name   string
-			policy carrierWalkPolicy
+			policy refconfine.CarrierWalkPolicy
 			want   bool
 		}{
-			{"Closure", carrierPolicyClosure, tc.wantClosure},
-			{"Consumer", carrierPolicyConsumer, tc.wantConsumer},
-			{"Alias", carrierPolicyAlias, tc.wantAlias},
+			{"Closure", refconfine.CarrierPolicyClosure, tc.wantClosure},
+			{"Consumer", refconfine.CarrierPolicyConsumer, tc.wantConsumer},
+			{"Alias", refconfine.CarrierPolicyAlias, tc.wantAlias},
 		} {
-			if got := walkDynamicCarrier(true, typ, make(map[types.Type]bool), p.policy); got != p.want {
-				t.Errorf("walkDynamicCarrier(%s, %s) = %v, want %v", tc.name, p.name, got, p.want)
+			if got := refconfine.WalkDynamicCarrier(true, typ, make(map[types.Type]bool), p.policy); got != p.want {
+				t.Errorf("WalkDynamicCarrier(%s, %s) = %v, want %v", tc.name, p.name, got, p.want)
 			}
 		}
 	}

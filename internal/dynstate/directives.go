@@ -1,3 +1,7 @@
+// Package dynstate derives per-package dynamic-state facts (FactOf,
+// FactOfWithHooks) over a single precomputed refconfine.PkgIndex and composes
+// them across test-binary dependency cones (Compose, NewDeferralResolution,
+// ResolveEnvAudit, BlockedExportedSeams, CarrierLinkGraph).
 package dynstate
 
 import (
@@ -7,61 +11,9 @@ import (
 	"path/filepath"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
+	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
-
-// NodeDeclarationKey and ObjectDeclarationKey derive the identity the
-// ambiguous-subject refusal compares: one declaration must yield one key no
-// matter which build variant sights it. Under Tests: true the same source
-// package is visited once per variant with distinct pkg.IDs ("p" and
-// "p [p.test]"), so no key may incorporate the sighting variant's identity —
-// a variant-dependent key manufactures ambiguity for a single declaration and
-// fails the whole package.
-func NodeDeclarationKey(pkg *packages.Package, node ast.Node) string {
-	if pkg != nil && pkg.Fset != nil && node != nil {
-		position := pkg.Fset.PositionFor(node.Pos(), false)
-		if position.Filename != "" {
-			return fmt.Sprintf("%s:%d", position.Filename, position.Offset)
-		}
-	}
-	var pkgPath string
-	if pkg != nil {
-		pkgPath = pkg.PkgPath
-	}
-	if node == nil {
-		return fmt.Sprintf("%s:0", pkgPath)
-	}
-	return fmt.Sprintf("%s:%d", pkgPath, node.Pos())
-}
-
-func ObjectDeclarationKey(pkg *packages.Package, obj types.Object) string {
-	if pkg != nil && pkg.Fset != nil && obj != nil {
-		position := pkg.Fset.PositionFor(obj.Pos(), false)
-		if position.Filename != "" {
-			return fmt.Sprintf("%s:%d", position.Filename, position.Offset)
-		}
-	}
-	if obj != nil && obj.Pkg() != nil {
-		return obj.Pkg().Path() + "." + obj.Name()
-	}
-	// Position-less and package-less means a universe declaration — the
-	// canonical case is error's Error method promoted through embedding.
-	return fmt.Sprintf("universe:%v", obj)
-}
-
-// HasDirective reports whether a doc comment group carries the named gofresh
-// directive — a comment line whose text is exactly the directive, the Go
-// directive form with no leading space.
-func HasDirective(doc *ast.CommentGroup, directive string) bool {
-	if doc == nil {
-		return false
-	}
-	for _, c := range doc.List {
-		if c.Text == directive {
-			return true
-		}
-	}
-	return false
-}
 
 // MethodDirectives resolves a promoted method's purity and externality
 // directives from its declaring package's fact inside the view package's
@@ -70,7 +22,7 @@ func MethodDirectives(cones map[string]map[string][]Fact, viewPackage string, m 
 	if cones == nil || m == nil || m.Pkg() == nil {
 		return "", ""
 	}
-	recvName := methodRecvNamedTypeName(m)
+	recvName := syntaxutil.MethodRecvNamedTypeName(m)
 	if recvName == "" {
 		return "", ""
 	}
@@ -126,7 +78,7 @@ func WalkLoadedSubjects(audited, computeOpenWorld bool, pkgs []*packages.Package
 						continue
 					}
 					sym := fd.Name.Name
-					if recv := RecvTypeName(fd); recv != "" {
+					if recv := syntaxutil.RecvTypeName(fd); recv != "" {
 						sym = recv + "." + sym
 					} else if fd.Recv != nil {
 						continue
@@ -137,9 +89,9 @@ func WalkLoadedSubjects(audited, computeOpenWorld bool, pkgs []*packages.Package
 						sym = fmt.Sprintf("init#%s#%d", filepath.Base(p.Fset.PositionFor(f.Pos(), false).Filename), initOrdinal)
 						initOrdinal++
 					}
-					declKey := NodeDeclarationKey(p, fd.Name)
-					isPure := HasDirective(fd.Doc, "//gofresh:pure")
-					isExternal := HasDirective(fd.Doc, "//gofresh:external")
+					declKey := syntaxutil.NodeDeclarationKey(p, fd.Name)
+					isPure := syntaxutil.HasDirective(fd.Doc, "//gofresh:pure")
+					isExternal := syntaxutil.HasDirective(fd.Doc, "//gofresh:external")
 					if isPure && isExternal && scanErr == nil {
 						scanErr = fmt.Errorf("gofresh: %s carries both //gofresh:pure and //gofresh:external", declKey)
 					}
@@ -147,7 +99,7 @@ func WalkLoadedSubjects(audited, computeOpenWorld bool, pkgs []*packages.Package
 					if computeOpenWorld && p.TypesInfo != nil && p.TypesInfo.Defs != nil {
 						if fn, ok := p.TypesInfo.Defs[fd.Name].(*types.Func); ok {
 							if sig, ok := fn.Type().(*types.Signature); ok {
-								term = OpenWorldTerm(audited, sig)
+								term = refconfine.OpenWorldTerm(audited, sig)
 							}
 						}
 					}
@@ -183,7 +135,7 @@ func WalkLoadedSubjects(audited, computeOpenWorld bool, pkgs []*packages.Package
 					var term string
 					if computeOpenWorld {
 						if sig, ok := method.Type().(*types.Signature); ok {
-							term = OpenWorldTerm(audited, sig)
+							term = refconfine.OpenWorldTerm(audited, sig)
 						}
 					}
 					pureKey, externalKey := MethodDirectives(cones, pkgPath, method)
@@ -193,7 +145,7 @@ func WalkLoadedSubjects(audited, computeOpenWorld bool, pkgs []*packages.Package
 					visit(ScannedSymbol{
 						Package:     pkgPath,
 						Symbol:      name + "." + method.Name(),
-						Declaration: ObjectDeclarationKey(p, method),
+						Declaration: syntaxutil.ObjectDeclarationKey(p, method),
 						Pure:        pureKey != "",
 						External:    externalKey != "",
 						OpenWorld:   term,

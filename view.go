@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go/ast"
 	"go/types"
 	"maps"
 	"os"
@@ -2753,30 +2752,6 @@ func scanSubjectsFromLoadedWith(audited, computeOpenWorld bool, pkgs []*packages
 		}
 	}
 	return scan, nil
-}
-
-func nodeDeclarationKey(pkg *packages.Package, node ast.Node) string {
-	return dynstate.NodeDeclarationKey(pkg, node)
-}
-
-func objectDeclarationKey(pkg *packages.Package, obj types.Object) string {
-	return dynstate.ObjectDeclarationKey(pkg, obj)
-}
-
-func recvTypeName(fd *ast.FuncDecl) string {
-	return dynstate.RecvTypeName(fd)
-}
-
-func auditedSynchronization(audited bool, fn *types.Func) bool {
-	return dynstate.AuditedSynchronization(audited, fn)
-}
-
-func auditedPooling(audited bool, fn *types.Func) bool {
-	return dynstate.AuditedPooling(audited, fn)
-}
-
-func auditedImmutableType(audited bool, t types.Type) bool {
-	return dynstate.AuditedImmutableType(audited, t)
 }
 
 // dynamicStateFact is one package's contribution to the shared-dynamic-state

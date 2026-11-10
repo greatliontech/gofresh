@@ -7,6 +7,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"go/ast"
 	"go/parser"
@@ -1349,8 +1350,8 @@ func TestUnauditedToolchainDropsAdmissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := auditedAtomicPointerElem(false, inst.(*types.Named)); ok {
-		t.Error("auditedAtomicPointerElem admits sync/atomic.Pointer on an unaudited toolchain")
+	if _, ok := refconfine.AuditedAtomicPointerElem(false, inst.(*types.Named)); ok {
+		t.Error("AuditedAtomicPointerElem admits sync/atomic.Pointer on an unaudited toolchain")
 	}
 	if driver := harnessSubtestDriverForTest(t); auditedHarnessSubtestDriver(false, driver) {
 		t.Error("auditedHarnessSubtestDriver admits (*T).Run on an unaudited toolchain")
@@ -1373,7 +1374,7 @@ func TestAuditedToolchainAdmitsTheDropFakes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := auditedAtomicPointerElem(true, inst.(*types.Named)); !ok {
+	if _, ok := refconfine.AuditedAtomicPointerElem(true, inst.(*types.Named)); !ok {
 		t.Error("the instantiated atomic.Pointer fake is not admitted on the audited toolchain")
 	}
 	if !auditedHarnessSubtestDriver(true, harnessSubtestDriverForTest(t)) {

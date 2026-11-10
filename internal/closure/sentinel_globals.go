@@ -7,6 +7,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
 	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 )
 
 const verifiedUserSentinelGlobalsSummaryKey = "gofresh/user-sentinel-globals@1"
@@ -257,7 +258,7 @@ func (fp *freshParamAnalysis) stdTypeMayDelegateDynamic(t types.Type) bool {
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
 		return true
 	}
-	if _, ok := auditedAtomicPointerElem(audited, named); ok {
+	if _, ok := refconfine.AuditedAtomicPointerElem(audited, named); ok {
 		return true
 	}
 	if _, isStruct := named.Underlying().(*types.Struct); !isStruct {

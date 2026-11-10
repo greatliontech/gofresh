@@ -33,7 +33,7 @@ invocations {
     packages: "./internal/buildflags"
     packages: "./internal/cachefile"
     packages: "./internal/closure/internal/..."
-    packages: "./internal/dynstate"
+    packages: "./internal/dynstate/..."
     packages: "./internal/gotool"
     packages: "./internal/guard"
     packages: "./internal/jsonrecord"

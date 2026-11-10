@@ -2,6 +2,7 @@ package gofresh
 
 import (
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -24,19 +25,19 @@ func TestDeclarationKeysIgnoreBuildVariantIdentity(t *testing.T) {
 	}
 	production := &packages.Package{ID: "example.com/p", PkgPath: "example.com/p", Fset: token.NewFileSet()}
 	variant := &packages.Package{ID: "example.com/p [example.com/p.test]", PkgPath: "example.com/p", Fset: token.NewFileSet()}
-	if got, want := objectDeclarationKey(variant, universeError), objectDeclarationKey(production, universeError); got != want {
-		t.Errorf("objectDeclarationKey varies by build variant: %q vs %q", got, want)
+	if got, want := syntaxutil.ObjectDeclarationKey(variant, universeError), syntaxutil.ObjectDeclarationKey(production, universeError); got != want {
+		t.Errorf("ObjectDeclarationKey varies by build variant: %q vs %q", got, want)
 	}
 	// A key-scheme pin, not an end-to-end collision: the subject scan only
 	// records *types.Func objects, and error's Error is the sole universe
 	// method, so no second position-less declaration is recordable today.
 	// The pin keeps the scheme honest for any future one.
-	if same := objectDeclarationKey(production, universeError) == objectDeclarationKey(production, types.Universe.Lookup("len")); same {
+	if same := syntaxutil.ObjectDeclarationKey(production, universeError) == syntaxutil.ObjectDeclarationKey(production, types.Universe.Lookup("len")); same {
 		t.Errorf("distinct position-less declarations share one key")
 	}
 	node := ast.NewIdent("f") // token.NoPos: the position-less fallback arm
-	if got, want := nodeDeclarationKey(variant, node), nodeDeclarationKey(production, node); got != want {
-		t.Errorf("nodeDeclarationKey varies by build variant: %q vs %q", got, want)
+	if got, want := syntaxutil.NodeDeclarationKey(variant, node), syntaxutil.NodeDeclarationKey(production, node); got != want {
+		t.Errorf("NodeDeclarationKey varies by build variant: %q vs %q", got, want)
 	}
 }
 

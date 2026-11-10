@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testenv"
@@ -417,8 +417,9 @@ func TestExportedSurfaceInventory(t *testing.T) {
 	internalPkgs := map[string]bool{
 		"auditset": true, "buildflags": true, "cachefile": true, "closure": true,
 		"dynstate": true, "gotool": true, "guard": true, "jsonrecord": true,
-		"outcome": true, "render": true, "runtimeinput": true, "testenv": true,
-		"testvariant": true, "trace": true,
+		"outcome": true, "protoaudit": true, "refconfine": true, "render": true,
+		"runtimeinput": true, "syntaxutil": true, "testenv": true, "testvariant": true,
+		"trace": true,
 	}
 	fset := token.NewFileSet()
 	entries, err := os.ReadDir(".")
@@ -602,12 +603,12 @@ func TestModulePackagesHaveNoSharedDynamicStateUnderPackageExecution(t *testing.
 				if !ok || fn.Name == nil || fn.Name.Name == "init" || fn.Name.Name == "TestMain" || fn.Name.Name == "_" {
 					continue
 				}
-				if dynstate.HasDirective(fn.Doc, "//gofresh:external") {
+				if syntaxutil.HasDirective(fn.Doc, "//gofresh:external") {
 					continue
 				}
 				sym := fn.Name.Name
 				if fn.Recv != nil {
-					recv := dynstate.RecvTypeName(fn)
+					recv := syntaxutil.RecvTypeName(fn)
 					if recv == "" {
 						continue
 					}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/greatliontech/gofresh/internal/cachefile"
 	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
@@ -447,7 +448,7 @@ func propertyHarnessClosedArgs(c *ssa.CallCommon, fp *freshParamAnalysis) bool {
 	}
 	if mc, ok := c.Value.(*ssa.MakeClosure); ok {
 		for _, b := range mc.Bindings {
-			if b == nil || !typeMayCarryDynamic(fp.selectionAudited, b.Type(), map[types.Type]bool{}) {
+			if b == nil || !refconfine.TypeMayCarryDynamic(fp.selectionAudited, b.Type(), map[types.Type]bool{}) {
 				continue
 			}
 			if !propertyHarnessClosedValue(b, fp) {
@@ -456,7 +457,7 @@ func propertyHarnessClosedArgs(c *ssa.CallCommon, fp *freshParamAnalysis) bool {
 		}
 	}
 	for _, arg := range c.Args {
-		if arg == nil || !typeMayCarryDynamic(fp.selectionAudited, arg.Type(), map[types.Type]bool{}) {
+		if arg == nil || !refconfine.TypeMayCarryDynamic(fp.selectionAudited, arg.Type(), map[types.Type]bool{}) {
 			continue
 		}
 		if !propertyHarnessClosedValue(arg, fp) {

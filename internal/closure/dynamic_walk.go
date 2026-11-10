@@ -7,6 +7,7 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 )
 
 // locallyClosedDynamicValue is the intraprocedural projection of
@@ -962,7 +963,7 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 					return false
 				}
 				for _, binding := range v.Bindings {
-					if binding == nil || !typeMayCarryDynamic(wrapFP.selectionAudited, binding.Type(), map[types.Type]bool{}) {
+					if binding == nil || !refconfine.TypeMayCarryDynamic(wrapFP.selectionAudited, binding.Type(), map[types.Type]bool{}) {
 						continue
 					}
 					if !propertyHarnessClosedValue(binding, wrapFP) {

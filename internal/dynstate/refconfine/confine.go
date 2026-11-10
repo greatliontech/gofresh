@@ -1,4 +1,4 @@
-package dynstate
+package refconfine
 
 import (
 	"go/ast"
@@ -6,141 +6,11 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
 
-// IsDirectMutableRef reports whether t is directly a slice, map, pointer,
-// channel, or unsafe.Pointer handle to shared backing state.
-func IsDirectMutableRef(t types.Type) bool {
-	return IsDirectMutableRefWith(t, nil)
-}
-
-func underlyingType(t types.Type) types.Type {
-	if t = types.Unalias(t); t != nil {
-		return t.Underlying()
-	}
-	return nil
-}
-
-func lookupBuiltin(info *types.Info, fun ast.Expr) *types.Builtin {
-	if info == nil {
-		return nil
-	}
-	switch f := ast.Unparen(fun).(type) {
-	case *ast.Ident:
-		b, _ := info.Uses[f].(*types.Builtin)
-		return b
-	case *ast.SelectorExpr:
-		if f.Sel != nil && info.Selections[f] == nil {
-			b, _ := info.Uses[f.Sel].(*types.Builtin)
-			return b
-		}
-	}
-	return nil
-}
-
-// IsDirectMutableRefWith is like IsDirectMutableRef, treating pointers matched
-// by isImmutablePtr as non-mutable handles.
-func IsDirectMutableRefWith(t types.Type, isImmutablePtr func(types.Type) bool) bool {
-	if t == nil {
-		return false
-	}
-	t = types.Unalias(t)
-	if isImmutablePtr != nil && isImmutablePtr(t) {
-		return false
-	}
-	switch u := t.Underlying().(type) {
-	case *types.Slice, *types.Map, *types.Pointer, *types.Chan:
-		return true
-	case *types.Basic:
-		return u.Kind() == types.UnsafePointer
-	}
-	return false
-}
-
-// TypeCarriesMutableRef reports whether t is a direct mutable reference/pointer
-// or a struct/array value that recursively contains one.
-func TypeCarriesMutableRef(t types.Type) bool {
-	return TypeCarriesMutableRefWith(t, nil)
-}
-
-// TypeCarriesMutableRefWith is like TypeCarriesMutableRef, treating pointers
-// matched by isImmutablePtr as non-mutable handles.
-func TypeCarriesMutableRefWith(root types.Type, isImmutablePtr func(types.Type) bool) bool {
-	seen := map[types.Type]bool{}
-	hit := false
-	var walk func(t types.Type)
-	walk = func(t types.Type) {
-		if t == nil || hit {
-			return
-		}
-		t = types.Unalias(t)
-		if isImmutablePtr != nil && isImmutablePtr(t) {
-			return
-		}
-		if seen[t] {
-			return
-		}
-		seen[t] = true
-		if IsDirectMutableRefWith(t, isImmutablePtr) {
-			hit = true
-			return
-		}
-		switch u := t.Underlying().(type) {
-		case *types.Array:
-			walk(u.Elem())
-		case *types.Struct:
-			for i := 0; i < u.NumFields(); i++ {
-				walk(u.Field(i).Type())
-			}
-		}
-	}
-	walk(root)
-	return hit
-}
-
-// TypeContainsRefOrPointer reports whether t contains any direct mutable
-// reference/pointer, interface, function signature, or type parameter.
-func TypeContainsRefOrPointer(root types.Type) bool {
-	return typeContainsRefOrPointerWith(root, nil)
-}
-
-func typeContainsRefOrPointerWith(root types.Type, isImmutablePtr func(types.Type) bool) bool {
-	seen := map[types.Type]bool{}
-	hit := false
-	var walk func(t types.Type)
-	walk = func(t types.Type) {
-		if t == nil || hit {
-			return
-		}
-		t = types.Unalias(t)
-		if isImmutablePtr != nil && isImmutablePtr(t) {
-			return
-		}
-		if seen[t] {
-			return
-		}
-		seen[t] = true
-		if IsDirectMutableRefWith(t, isImmutablePtr) {
-			hit = true
-			return
-		}
-		switch u := t.Underlying().(type) {
-		case *types.Interface, *types.Signature, *types.TypeParam:
-			hit = true
-		case *types.Array:
-			walk(u.Elem())
-		case *types.Struct:
-			for i := 0; i < u.NumFields(); i++ {
-				walk(u.Field(i).Type())
-			}
-		}
-	}
-	walk(root)
-	return hit
-}
-
-// RefConfineConfig configures mechanical read-only reference and pointer
-// confinement across all syntax trees of a type-checked package.
+// Config configures mechanical read-only reference and pointer confinement
+// across all syntax trees of a type-checked package.
 //
 // The engine tracks two monotonic properties over variables and intra-package
 // call/return boundaries:
@@ -155,7 +25,11 @@ func typeContainsRefOrPointerWith(root types.Type, isImmutablePtr func(types.Typ
 //     holding one. Projecting a field or element from a carrier yields isRef
 //     when the projected component is a direct ref, or isCarrier when it still
 //     contains one, while scalar projections evaluate untainted.
-type RefConfineConfig struct {
+type Config struct {
+	// Index optionally supplies the precomputed package syntax and confinement
+	// index so callers running multiple confinement checks on p do not rebuild it.
+	Index *PkgIndex
+
 	// IsImmutablePtr optionally classifies a pointer type (such as an immutable
 	// handle whose fields are separately verified write-once) as non-mutable.
 	IsImmutablePtr func(types.Type) bool
@@ -222,15 +96,36 @@ type RefConfineConfig struct {
 	// value rhs into a non-ident, non-slice-index target lhs (such as copying
 	// an opaque unexported foreign struct value into a verified fresh target).
 	AllowAssignTarget func(lhs, rhs ast.Expr, rhsIsRef bool) bool
+
+	// ForbidNonNilSeedStructPtrCompare rejects non-nil pointer identity
+	// comparisons (==/!=, switch tags/cases, and map keys) on pointers to
+	// SeedStructOrigin structs, enforces recursive composite erasure checks
+	// (assignErasesSeedStruct) on any type mentioning a SeedStructOrigin, and
+	// forbids direct mutations or interior address-takes on SeedStructOrigin
+	// structs outside AllowSeedStructMutationInFunc.
+	ForbidNonNilSeedStructPtrCompare bool
+
+	// AllowSeedStructMutationInFunc optionally names the sole *ast.FuncDecl
+	// inside which synchronous mutations and interior address-takes on
+	// SeedStructOrigin structs are permitted when ForbidNonNilSeedStructPtrCompare
+	// is set.
+	AllowSeedStructMutationInFunc *ast.FuncDecl
 }
 
 // VerifyReadOnlyRefConfinement verifies that every protected reference, pointer,
 // or composite carrier seeded by cfg across p.Syntax remains strictly read-only
 // and confined without element/pointee writes, address-takes, container-builtin
 // mutations, interface/unsafe/pointer type erasures, or unapproved escapes.
-func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) bool {
+func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 	if p == nil || p.Types == nil || p.TypesInfo == nil {
 		return false
+	}
+	idx := cfg.Index
+	if idx == nil {
+		idx = BuildPkgIndex(p)
+		if idx == nil {
+			return false
+		}
 	}
 	info := p.TypesInfo
 	isDirectRef := func(t types.Type) bool {
@@ -240,7 +135,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 		return TypeCarriesMutableRefWith(t, cfg.IsImmutablePtr)
 	}
 	elemHasHandle := func(t types.Type) bool {
-		return typeContainsRefOrPointerWith(t, cfg.IsImmutablePtr)
+		return TypeContainsRefOrPointerWith(t, cfg.IsImmutablePtr)
 	}
 	isOpaqueIfaceOrTP := func(t types.Type) bool {
 		if t == nil {
@@ -325,7 +220,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 					return false
 				}
 				hit := false
-				forEachSelectionHopStruct(selInfo, func(st *types.Named) {
+				syntaxutil.ForEachSelectionHopStruct(selInfo, func(st *types.Named) {
 					if isSeedStruct(st) {
 						hit = true
 					}
@@ -335,14 +230,14 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 				}
 				cur = x.X
 			case *ast.IndexExpr:
-				if st := derefNamedStruct(info.TypeOf(x)); isSeedStruct(st) {
+				if st := syntaxutil.DerefNamedStruct(info.TypeOf(x)); isSeedStruct(st) {
 					return true
 				}
 				cur = x.X
 			case *ast.SliceExpr:
 				cur = x.X
 			case *ast.StarExpr:
-				if st := derefNamedStruct(info.TypeOf(x.X)); isSeedStruct(st) {
+				if st := syntaxutil.DerefNamedStruct(info.TypeOf(x.X)); isSeedStruct(st) {
 					return true
 				}
 				cur = x.X
@@ -353,101 +248,12 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 		return false
 	}
 
-	// Inventory intra-package functions, value-taken functions, directly called
-	// bound method selections, concrete method/function bodies, enclosing functions
-	// of ReturnStmts, and named result variables.
-	funcValueTaken := map[*types.Func]bool{}
-	calleeIdents := map[*ast.Ident]bool{}
-	calledMethodSels := map[*ast.SelectorExpr]bool{}
-	declBodies := map[*types.Func]*ast.BlockStmt{}
-	returnEnclFunc := map[*ast.ReturnStmt]*types.Func{}
-	resultVarFunc := map[*types.Var]*types.Func{}
-	litResultVars := map[*types.Var]bool{}
-
-	recordFuncResults := func(ft *ast.FuncType, fn *types.Func) {
-		if ft == nil || ft.Results == nil {
-			return
-		}
-		for _, field := range ft.Results.List {
-			for _, nm := range field.Names {
-				if v, ok := info.Defs[nm].(*types.Var); ok && v != nil {
-					if fn != nil {
-						resultVarFunc[v] = fn
-					} else {
-						litResultVars[v] = true
-					}
-				}
-			}
-		}
-	}
-
-	for _, file := range p.Syntax {
-		var walkInv func(n ast.Node, curFn *types.Func)
-		walkInv = func(n ast.Node, curFn *types.Func) {
-			if n == nil {
-				return
-			}
-			switch x := n.(type) {
-			case *ast.FuncDecl:
-				var fn *types.Func
-				if x.Name != nil && !(x.Recv == nil && x.Name.Name == "init") {
-					fn, _ = info.Defs[x.Name].(*types.Func)
-					if fn != nil && x.Body != nil {
-						declBodies[fn] = x.Body
-					}
-				}
-				recordFuncResults(x.Type, fn)
-				if x.Body != nil {
-					walkInv(x.Body, fn)
-				}
-				return
-			case *ast.FuncLit:
-				recordFuncResults(x.Type, nil)
-				if x.Body != nil {
-					walkInv(x.Body, nil)
-				}
-				return
-			case *ast.ReturnStmt:
-				returnEnclFunc[x] = curFn
-			case *ast.CallExpr:
-				if !info.Types[ast.Unparen(x.Fun)].IsType() {
-					switch fun := ast.Unparen(x.Fun).(type) {
-					case *ast.Ident:
-						calleeIdents[fun] = true
-					case *ast.SelectorExpr:
-						selInfo := info.Selections[fun]
-						if selInfo == nil || selInfo.Kind() != types.MethodExpr {
-							if fun.Sel != nil {
-								calleeIdents[fun.Sel] = true
-							}
-						}
-						if selInfo != nil && selInfo.Kind() == types.MethodVal {
-							calledMethodSels[fun] = true
-						}
-					}
-				}
-			}
-			ast.Inspect(n, func(child ast.Node) bool {
-				if child == nil || child == n {
-					return true
-				}
-				walkInv(child, curFn)
-				return false
-			})
-		}
-		walkInv(file, nil)
-
-		ast.Inspect(file, func(n ast.Node) bool {
-			id, ok := n.(*ast.Ident)
-			if !ok || calleeIdents[id] {
-				return true
-			}
-			if fn, ok := info.Uses[id].(*types.Func); ok && fn != nil && fn.Pkg() == p.Types {
-				funcValueTaken[fn.Origin()] = true
-			}
-			return true
-		})
-	}
+	funcValueTaken := idx.FuncValueTaken
+	calledMethodSels := idx.CalledMethodSels
+	declBodies := idx.DeclBodies
+	returnEnclFunc := idx.ReturnEnclFunc
+	resultVarFunc := idx.ResultVarFunc
+	litResultVars := idx.LitResultVars
 
 	isNonGenericConcretePkgCallee := func(callee *types.Func) bool {
 		if callee == nil || callee.Pkg() != p.Types || callee.Origin() != callee {
@@ -532,7 +338,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 			}
 		}
 		if origSig.RecvTypeParams().Len() > 0 {
-			recvSt := derefNamedStruct(info.TypeOf(sel.X))
+			recvSt := syntaxutil.DerefNamedStruct(info.TypeOf(sel.X))
 			if recvSt == nil {
 				return nil, false
 			}
@@ -651,7 +457,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 		case *ast.SelectorExpr:
 			selInfo := info.Selections[e]
 			if selInfo != nil && selInfo.Kind() == types.FieldVal {
-				if cfg.IsExemptField != nil && !selectionCrossesEmbeddedPointer(selInfo) {
+				if cfg.IsExemptField != nil && !syntaxutil.SelectionCrossesEmbeddedPointer(selInfo) {
 					if fv, isFV := selInfo.Obj().(*types.Var); isFV && cfg.IsExemptField(fv) {
 						return false, false
 					}
@@ -672,7 +478,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 				return false, false
 			}
 			if selInfo != nil && selInfo.Kind() == types.MethodVal && !calledMethodSels[e] {
-				if _, bCar := classifyExpr(e.X); bCar || exprMutatesTaintedTarget(e.X) || selChainHitsSeedStruct(e) || isSeedStruct(derefNamedStruct(info.TypeOf(e.X))) {
+				if _, bCar := classifyExpr(e.X); bCar || exprMutatesTaintedTarget(e.X) || selChainHitsSeedStruct(e) || isSeedStruct(syntaxutil.DerefNamedStruct(info.TypeOf(e.X))) {
 					if _, okM := boundPkgMethodRecv(e); !okM {
 						return true, true
 					}
@@ -753,12 +559,12 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 					return false, false
 				}
 				dstT := info.Types[fun].Type
-				if !elemHasHandle(dstT) && !containsUintptr(dstT) {
+				if !elemHasHandle(dstT) && !syntaxutil.ContainsUintptr(dstT) {
 					return false, false
 				}
 				return aRef || isDirectRef(dstT), true
 			}
-			if b := lookupBuiltin(info, fun); b != nil {
+			if b := syntaxutil.LookupBuiltin(info, fun); b != nil {
 				switch b.Name() {
 				case "make", "new", "len", "cap", "Sizeof", "Alignof", "Offsetof":
 					return false, false
@@ -769,7 +575,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 					dRef, dCar := classifyExpr(e.Args[0])
 					elemTainted := false
 					var slElem types.Type
-					if sl, ok := underlyingType(info.TypeOf(e)).(*types.Slice); ok {
+					if sl, ok := syntaxutil.UnderlyingType(info.TypeOf(e)).(*types.Slice); ok {
 						slElem = sl.Elem()
 					}
 					for _, arg := range e.Args[1:] {
@@ -794,8 +600,6 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 				}
 				return false, false
 			}
-			// Non-concrete or external calls with tainted arguments are rejected by the
-			// final verification pass unless explicitly approved via AllowCallArg/AllowMethodRecv.
 			return false, false
 
 		case *ast.TypeAssertExpr:
@@ -862,7 +666,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 						}
 					}
 				}
-				if selectionCrossesEmbeddedPointer(selInfo) {
+				if syntaxutil.SelectionCrossesEmbeddedPointer(selInfo) {
 					if _, bCar := classifyExpr(x.X); bCar {
 						return true
 					}
@@ -933,7 +737,6 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 			}
 			return false, false
 		}
-		// Comma-ok map index, type assertion, or channel receive: only slot 0 carries the value.
 		if _, rCar := classifyExpr(rhs); !rCar || slot != 0 {
 			return false, false
 		}
@@ -943,10 +746,6 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 		return projectedClassify(slotType, nil)
 	}
 
-	// Outer monotone loop: promote eligible unexported capsule structs when a
-	// CompositeLit encapsulates a tainted ref/carrier, resetting and recomputing
-	// the inner taint fixed-point cleanly so pre-promotion literals do not leave
-	// stale carrier taint on the constructed capsule pointer/value.
 	for {
 		clear(taintedRef)
 		clear(taintedCarrier)
@@ -955,8 +754,6 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 		clear(taintedRetAnyRef)
 		clear(taintedRetAnyCarrier)
 
-		// Fixed-point taint propagation across local variables, range bindings,
-		// intra-package parameters/receivers, and (when enabled) unexported returns.
 		changed := true
 		for changed {
 			changed = false
@@ -970,7 +767,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 						if selInfo := info.Selections[s]; selInfo != nil && selInfo.Kind() == types.MethodVal && !calledMethodSels[s] {
 							xRef, xCar := classifyExpr(s.X)
 							mutX := exprMutatesTaintedTarget(s.X)
-							seedX := selChainHitsSeedStruct(s) || isSeedStruct(derefNamedStruct(info.TypeOf(s.X)))
+							seedX := selChainHitsSeedStruct(s) || isSeedStruct(syntaxutil.DerefNamedStruct(info.TypeOf(s.X)))
 							if xCar || mutX || seedX {
 								if rv, okM := boundPkgMethodRecv(s); okM {
 									_, recvIsPtr := types.Unalias(rv.Type()).(*types.Pointer)
@@ -989,12 +786,12 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 								if !rCar {
 									continue
 								}
-								if v := lookupIdentVar(p, lhs); v != nil {
+								if v := syntaxutil.LookupIdentVar(info, lhs); v != nil {
 									if markVarTaint(v, rRef, true) {
 										changed = true
 									}
 								} else if ix, isIX := ast.Unparen(lhs).(*ast.IndexExpr); isIX {
-									if bv := lookupIdentVar(p, ix.X); bv != nil {
+									if bv := syntaxutil.LookupIdentVar(info, ix.X); bv != nil {
 										if markVarTaint(bv, false, true) {
 											changed = true
 										}
@@ -1004,7 +801,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 						} else if len(s.Lhs) > 1 && len(s.Rhs) == 1 {
 							rhsTup, _ := info.TypeOf(s.Rhs[0]).(*types.Tuple)
 							for i, lhs := range s.Lhs {
-								v := lookupIdentVar(p, lhs)
+								v := syntaxutil.LookupIdentVar(info, lhs)
 								if v == nil {
 									continue
 								}
@@ -1061,7 +858,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 								if bindExpr == nil {
 									continue
 								}
-								if v := lookupIdentVar(p, bindExpr); v != nil {
+								if v := syntaxutil.LookupIdentVar(info, bindExpr); v != nil {
 									if pRef, pCar := projectedClassify(v.Type(), s.X); pCar {
 										if markVarTaint(v, pRef, true) {
 											changed = true
@@ -1215,7 +1012,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 					if !isCL {
 						return true
 					}
-					st := derefNamedStruct(info.TypeOf(cl))
+					st := syntaxutil.DerefNamedStruct(info.TypeOf(cl))
 					if st == nil {
 						return true
 					}
@@ -1254,10 +1051,14 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 	}
 
 	// Identify local container variables whose backing storage is provably freshly
-	// allocated in the declaring function (never passed in as a parameter/receiver
-	// or copied from another slice/map variable), so storing or appending tainted
-	// carriers into them cannot leak backward into an untainted caller alias.
-	localFreshContainer := computeLocalFreshContainers(p, taintedRef)
+	// allocated in the declaring function (from precomputed idx.FreshContainerCandidates)
+	// and not directly tainted as a protected reference.
+	localFreshContainer := make(map[*types.Var]bool, len(idx.FreshContainerCandidates))
+	for v := range idx.FreshContainerCandidates {
+		if !taintedRef[v] {
+			localFreshContainer[v] = true
+		}
+	}
 
 	// Track `v = append(v, elem)` statements where v is a fresh local slice variable.
 	selfAssignedAppendCalls := map[*ast.CallExpr]bool{}
@@ -1267,7 +1068,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 			if !ok || as.Tok != token.ASSIGN || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
 				return true
 			}
-			lv := lookupIdentVar(p, as.Lhs[0])
+			lv := syntaxutil.LookupIdentVar(info, as.Lhs[0])
 			if lv == nil || !localFreshContainer[lv] {
 				return true
 			}
@@ -1275,7 +1076,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 			if !ok || len(call.Args) == 0 {
 				return true
 			}
-			if lookupIdentVar(p, call.Args[0]) == lv {
+			if syntaxutil.LookupIdentVar(info, call.Args[0]) == lv {
 				selfAssignedAppendCalls[call] = true
 			}
 			return true
@@ -1288,8 +1089,59 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 		return false
 	}
 
+	isPtrToSeedStruct := func(t types.Type) bool {
+		if t == nil {
+			return false
+		}
+		ptr, ok := types.Unalias(t).(*types.Pointer)
+		if !ok {
+			return false
+		}
+		st, ok := types.Unalias(ptr.Elem()).(*types.Named)
+		return ok && isSeedStruct(st)
+	}
+	typeContainsPtrToSeedStruct := func(root types.Type) bool {
+		seen := map[types.Type]bool{}
+		hit := false
+		var walk func(t types.Type)
+		walk = func(t types.Type) {
+			if t == nil || hit {
+				return
+			}
+			t = types.Unalias(t)
+			if seen[t] {
+				return
+			}
+			seen[t] = true
+			if isPtrToSeedStruct(t) {
+				hit = true
+				return
+			}
+			switch u := t.Underlying().(type) {
+			case *types.Array:
+				walk(u.Elem())
+			case *types.Struct:
+				for i := 0; i < u.NumFields(); i++ {
+					walk(u.Field(i).Type())
+				}
+			}
+		}
+		walk(root)
+		return hit
+	}
+
 	seedStructTypeViolated := func(dstT, srcT types.Type) bool {
-		srcSt := derefNamedStruct(srcT)
+		if cfg.ForbidNonNilSeedStructPtrCompare {
+			if typeMentionsSeedStruct(srcT, isSeedStruct) {
+				if dstT == nil || syntaxutil.IsUnsafePointerType(dstT) {
+					return true
+				}
+				if assignErasesSeedStruct(srcT, dstT, isSeedStruct) {
+					return true
+				}
+			}
+		}
+		srcSt := syntaxutil.DerefNamedStruct(srcT)
 		if !isSeedStruct(srcSt) {
 			return false
 		}
@@ -1301,14 +1153,9 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 			return true
 		}
 		if iface, isIface := d.Underlying().(*types.Interface); isIface {
-			return iface.NumMethods() == 0
+			return cfg.ForbidNonNilSeedStructPtrCompare || iface.NumMethods() == 0
 		}
 		return !types.Identical(d, types.Unalias(srcT))
-	}
-
-	isBlankIdent := func(e ast.Expr) bool {
-		id, ok := ast.Unparen(e).(*ast.Ident)
-		return ok && id.Name == "_"
 	}
 
 	ok := true
@@ -1317,10 +1164,52 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 			if !ok || n == nil {
 				return false
 			}
+			inSyncAllowed := !cfg.ForbidNonNilSeedStructPtrCompare || idx.IsSyncInFuncDecl(n, cfg.AllowSeedStructMutationInFunc)
 			switch s := n.(type) {
+			case *ast.BinaryExpr:
+				if cfg.ForbidNonNilSeedStructPtrCompare && (s.Op == token.EQL || s.Op == token.NEQ) {
+					lt := info.TypeOf(s.X)
+					rt := info.TypeOf(s.Y)
+					if (isPtrToSeedStruct(lt) && !syntaxutil.IsNilIdent(info, s.Y)) ||
+						(isPtrToSeedStruct(rt) && !syntaxutil.IsNilIdent(info, s.X)) {
+						ok = false
+						return false
+					}
+				}
+
+			case *ast.SwitchStmt:
+				if cfg.ForbidNonNilSeedStructPtrCompare && s.Tag != nil && isPtrToSeedStruct(info.TypeOf(s.Tag)) && s.Body != nil {
+					for _, st := range s.Body.List {
+						if cc, okCC := st.(*ast.CaseClause); okCC {
+							for _, ce := range cc.List {
+								if !syntaxutil.IsNilIdent(info, ce) {
+									ok = false
+									return false
+								}
+							}
+						}
+					}
+				}
+
+			case *ast.CaseClause:
+				if cfg.ForbidNonNilSeedStructPtrCompare {
+					for _, ce := range s.List {
+						if !syntaxutil.IsNilIdent(info, ce) && isPtrToSeedStruct(info.TypeOf(ce)) {
+							ok = false
+							return false
+						}
+					}
+				}
+
+			case *ast.MapType:
+				if cfg.ForbidNonNilSeedStructPtrCompare && typeContainsPtrToSeedStruct(info.TypeOf(s.Key)) {
+					ok = false
+					return false
+				}
+
 			case *ast.SelectorExpr:
 				if selInfo := info.Selections[s]; selInfo != nil && selInfo.Kind() == types.MethodVal && !calledMethodSels[s] {
-					if _, xCar := classifyExpr(s.X); xCar || exprMutatesTaintedTarget(s.X) || selChainHitsSeedStruct(s) || isSeedStruct(derefNamedStruct(info.TypeOf(s.X))) {
+					if _, xCar := classifyExpr(s.X); xCar || exprMutatesTaintedTarget(s.X) || selChainHitsSeedStruct(s) || isSeedStruct(syntaxutil.DerefNamedStruct(info.TypeOf(s.X))) {
 						if _, okM := boundPkgMethodRecv(s); !okM {
 							ok = false
 							return false
@@ -1356,7 +1245,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 
 			case *ast.AssignStmt:
 				for _, lhs := range s.Lhs {
-					if exprMutatesTaintedTarget(lhs) {
+					if exprMutatesTaintedTarget(lhs) || (!inSyncAllowed && exprHitsStructPred(info, lhs, isSeedStruct, true)) {
 						ok = false
 						return false
 					}
@@ -1373,7 +1262,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 				}
 				if len(s.Lhs) == len(s.Rhs) {
 					for i, lhs := range s.Lhs {
-						if !isBlankIdent(lhs) && seedStructTypeViolated(info.TypeOf(lhs), info.TypeOf(s.Rhs[i])) {
+						if (!syntaxutil.IsBlankIdent(lhs) || cfg.ForbidNonNilSeedStructPtrCompare) && seedStructTypeViolated(info.TypeOf(lhs), info.TypeOf(s.Rhs[i])) {
 							ok = false
 							return false
 						}
@@ -1381,10 +1270,10 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 						if !rCar {
 							continue
 						}
-						if isBlankIdent(lhs) {
+						if syntaxutil.IsBlankIdent(lhs) {
 							continue
 						}
-						if v := lookupIdentVar(p, lhs); v != nil {
+						if v := syntaxutil.LookupIdentVar(info, lhs); v != nil {
 							if assignErasesTaint(v.Type(), info.TypeOf(s.Rhs[i])) {
 								ok = false
 								return false
@@ -1392,7 +1281,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 							continue
 						}
 						if ix, isIX := ast.Unparen(lhs).(*ast.IndexExpr); isIX {
-							if bv := lookupIdentVar(p, ix.X); bv != nil && localFreshContainer[bv] {
+							if bv := syntaxutil.LookupIdentVar(info, ix.X); bv != nil && localFreshContainer[bv] {
 								if !assignErasesTaint(info.TypeOf(ix), info.TypeOf(s.Rhs[i])) {
 									continue
 								}
@@ -1407,14 +1296,18 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 						return false
 					}
 				} else if len(s.Lhs) > 1 && len(s.Rhs) == 1 {
-					rhsTup, _ := info.TypeOf(s.Rhs[0]).(*types.Tuple)
+					rhsT := info.TypeOf(s.Rhs[0])
+					rhsTup, _ := rhsT.(*types.Tuple)
 					if rhsTup != nil {
 						for i, lhs := range s.Lhs {
-							if i < rhsTup.Len() && !isBlankIdent(lhs) && seedStructTypeViolated(info.TypeOf(lhs), rhsTup.At(i).Type()) {
+							if i < rhsTup.Len() && (!syntaxutil.IsBlankIdent(lhs) || cfg.ForbidNonNilSeedStructPtrCompare) && seedStructTypeViolated(info.TypeOf(lhs), rhsTup.At(i).Type()) {
 								ok = false
 								return false
 							}
 						}
+					} else if cfg.ForbidNonNilSeedStructPtrCompare && seedStructTypeViolated(info.TypeOf(s.Lhs[0]), rhsT) {
+						ok = false
+						return false
 					}
 					for i, lhs := range s.Lhs {
 						var srcElemT types.Type
@@ -1426,10 +1319,10 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 						if _, sCar := classifyMultiReturnSlot(s.Rhs[0], i, srcElemT); !sCar {
 							continue
 						}
-						if isBlankIdent(lhs) {
+						if syntaxutil.IsBlankIdent(lhs) {
 							continue
 						}
-						v := lookupIdentVar(p, lhs)
+						v := syntaxutil.LookupIdentVar(info, lhs)
 						if v == nil || assignErasesTaint(v.Type(), srcElemT) {
 							ok = false
 							return false
@@ -1440,7 +1333,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 			case *ast.ValueSpec:
 				if len(s.Names) == len(s.Values) {
 					for i, nm := range s.Names {
-						if nm.Name != "_" {
+						if nm.Name != "_" || cfg.ForbidNonNilSeedStructPtrCompare {
 							if v, _ := info.Defs[nm].(*types.Var); v != nil && seedStructTypeViolated(v.Type(), info.TypeOf(s.Values[i])) {
 								ok = false
 								return false
@@ -1458,15 +1351,21 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 						}
 					}
 				} else if len(s.Names) > 1 && len(s.Values) == 1 {
-					rhsTup, _ := info.TypeOf(s.Values[0]).(*types.Tuple)
+					rhsT := info.TypeOf(s.Values[0])
+					rhsTup, _ := rhsT.(*types.Tuple)
 					if rhsTup != nil {
 						for i, nm := range s.Names {
-							if i < rhsTup.Len() && nm.Name != "_" {
+							if i < rhsTup.Len() && (nm.Name != "_" || cfg.ForbidNonNilSeedStructPtrCompare) {
 								if v, _ := info.Defs[nm].(*types.Var); v != nil && seedStructTypeViolated(v.Type(), rhsTup.At(i).Type()) {
 									ok = false
 									return false
 								}
 							}
+						}
+					} else if cfg.ForbidNonNilSeedStructPtrCompare {
+						if v, _ := info.Defs[s.Names[0]].(*types.Var); v != nil && seedStructTypeViolated(v.Type(), rhsT) {
+							ok = false
+							return false
 						}
 					}
 					for i, nm := range s.Names {
@@ -1491,27 +1390,27 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 				}
 
 			case *ast.IncDecStmt:
-				if exprMutatesTaintedTarget(s.X) {
+				if exprMutatesTaintedTarget(s.X) || (!inSyncAllowed && exprHitsStructPred(info, s.X, isSeedStruct, true)) {
 					ok = false
 					return false
 				}
 
 			case *ast.RangeStmt:
 				if s.Tok == token.ASSIGN {
-					if (s.Key != nil && exprMutatesTaintedTarget(s.Key)) ||
-						(s.Value != nil && exprMutatesTaintedTarget(s.Value)) {
+					if (s.Key != nil && (exprMutatesTaintedTarget(s.Key) || (!inSyncAllowed && exprHitsStructPred(info, s.Key, isSeedStruct, true)))) ||
+						(s.Value != nil && (exprMutatesTaintedTarget(s.Value) || (!inSyncAllowed && exprHitsStructPred(info, s.Value, isSeedStruct, true)))) {
 						ok = false
 						return false
 					}
 					if _, xCar := classifyExpr(s.X); xCar {
 						for _, bindExpr := range []ast.Expr{s.Key, s.Value} {
-							if bindExpr == nil || isBlankIdent(bindExpr) {
+							if bindExpr == nil || syntaxutil.IsBlankIdent(bindExpr) {
 								continue
 							}
 							if _, pCar := projectedClassify(info.TypeOf(bindExpr), s.X); !pCar {
 								continue
 							}
-							if lookupIdentVar(p, bindExpr) == nil {
+							if syntaxutil.LookupIdentVar(info, bindExpr) == nil {
 								ok = false
 								return false
 							}
@@ -1520,7 +1419,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 				}
 
 			case *ast.UnaryExpr:
-				if s.Op == token.AND && exprMutatesTaintedTarget(s.X) {
+				if s.Op == token.AND && (exprMutatesTaintedTarget(s.X) || (!inSyncAllowed && exprHitsStructPred(info, s.X, isSeedStruct, false))) {
 					ok = false
 					return false
 				}
@@ -1538,6 +1437,9 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 							ok = false
 							return false
 						}
+					} else if cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(info.TypeOf(s.Value), isSeedStruct) {
+						ok = false
+						return false
 					}
 				}
 				if _, chCar := classifyExpr(s.Chan); chCar {
@@ -1615,14 +1517,36 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 
 			case *ast.ReturnStmt:
 				fn := returnEnclFunc[s]
+				if len(s.Results) == 1 && cfg.ForbidNonNilSeedStructPtrCompare {
+					if tup, isTup := info.TypeOf(s.Results[0]).(*types.Tuple); isTup {
+						for ti := 0; ti < tup.Len(); ti++ {
+							rT := tup.At(ti).Type()
+							if fn != nil && fn.Signature().Results() != nil && ti < fn.Signature().Results().Len() {
+								if seedStructTypeViolated(fn.Signature().Results().At(ti).Type(), rT) {
+									ok = false
+									return false
+								}
+							} else if typeMentionsSeedStruct(rT, isSeedStruct) {
+								ok = false
+								return false
+							}
+						}
+					}
+				}
 				for ri, r := range s.Results {
 					if fn != nil {
 						res := fn.Signature().Results()
-						if ri < res.Len() && seedStructTypeViolated(res.At(ri).Type(), info.TypeOf(r)) {
+						if ri < res.Len() {
+							if seedStructTypeViolated(res.At(ri).Type(), info.TypeOf(r)) {
+								ok = false
+								return false
+							}
+						} else if cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(info.TypeOf(r), isSeedStruct) {
 							ok = false
 							return false
 						}
-					} else if isSeedStruct(derefNamedStruct(info.TypeOf(r))) {
+					} else if isSeedStruct(syntaxutil.DerefNamedStruct(info.TypeOf(r))) ||
+						(cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(info.TypeOf(r), isSeedStruct)) {
 						ok = false
 						return false
 					}
@@ -1641,6 +1565,10 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 				}
 
 			case *ast.CallExpr:
+				if !inSyncAllowed && callMutatesSeedStructContainer(info, s, isSeedStruct) {
+					ok = false
+					return false
+				}
 				fun := ast.Unparen(s.Fun)
 				if info.Types[fun].IsType() && len(s.Args) == 1 {
 					if seedStructTypeViolated(info.Types[fun].Type, info.TypeOf(s.Args[0])) {
@@ -1691,7 +1619,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 					if !aCar {
 						continue
 					}
-					if b := lookupBuiltin(info, fun); b != nil {
+					if b := syntaxutil.LookupBuiltin(info, fun); b != nil {
 						if b.Name() == "len" || b.Name() == "cap" || b.Name() == "Sizeof" || b.Name() == "Alignof" || b.Name() == "Offsetof" {
 							continue
 						}
@@ -1704,11 +1632,11 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 								return false
 							}
 							if s.Ellipsis.IsValid() {
-								if sl, isSl := underlyingType(info.TypeOf(arg)).(*types.Slice); isSl && !elemHasHandle(sl.Elem()) {
+								if sl, isSl := syntaxutil.UnderlyingType(info.TypeOf(arg)).(*types.Slice); isSl && !elemHasHandle(sl.Elem()) {
 									continue
 								}
 							} else if selfAssignedAppendCalls[s] {
-								if sl, isSl := underlyingType(info.TypeOf(s)).(*types.Slice); isSl && !assignErasesTaint(sl.Elem(), info.TypeOf(arg)) {
+								if sl, isSl := syntaxutil.UnderlyingType(info.TypeOf(s)).(*types.Slice); isSl && !assignErasesTaint(sl.Elem(), info.TypeOf(arg)) {
 									continue
 								}
 							}
@@ -1716,7 +1644,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 							return false
 						}
 						if b.Name() == "copy" && argIdx == 1 {
-							if sl, isSl := underlyingType(info.TypeOf(arg)).(*types.Slice); isSl && !elemHasHandle(sl.Elem()) {
+							if sl, isSl := syntaxutil.UnderlyingType(info.TypeOf(arg)).(*types.Slice); isSl && !elemHasHandle(sl.Elem()) {
 								continue
 							}
 						}
@@ -1786,381 +1714,4 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg RefConfineConfig) boo
 		})
 	}
 	return ok
-}
-
-func indexValueTypeFromType(t types.Type) types.Type {
-	if tup, isTup := t.(*types.Tuple); isTup && tup.Len() > 0 {
-		return tup.At(0).Type()
-	}
-	return t
-}
-
-func computeLocalFreshContainers(p *packages.Package, taintedRef map[*types.Var]bool) map[*types.Var]bool {
-	info := p.TypesInfo
-	sigVars := map[*types.Var]bool{}
-	recordFieldList := func(fl *ast.FieldList) {
-		if fl == nil {
-			return
-		}
-		for _, f := range fl.List {
-			for _, nm := range f.Names {
-				if v, ok := info.Defs[nm].(*types.Var); ok && v != nil {
-					sigVars[v] = true
-				}
-			}
-		}
-	}
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			switch x := n.(type) {
-			case *ast.FuncDecl:
-				recordFieldList(x.Recv)
-				if x.Type != nil {
-					recordFieldList(x.Type.Params)
-					recordFieldList(x.Type.Results)
-				}
-			case *ast.FuncLit:
-				if x.Type != nil {
-					recordFieldList(x.Type.Params)
-					recordFieldList(x.Type.Results)
-				}
-			}
-			return true
-		})
-	}
-
-	candidates := map[*types.Var]bool{}
-	disqualified := map[*types.Var]bool{}
-
-	isFreshInit := func(v *types.Var, rhs ast.Expr) bool {
-		rhs = ast.Unparen(rhs)
-		if isNilIdent(p, rhs) {
-			return true
-		}
-		switch e := rhs.(type) {
-		case *ast.CompositeLit:
-			if t := info.TypeOf(e); t != nil {
-				switch types.Unalias(t).Underlying().(type) {
-				case *types.Slice, *types.Array, *types.Map:
-					return true
-				}
-			}
-		case *ast.CallExpr:
-			if id, isID := ast.Unparen(e.Fun).(*ast.Ident); isID {
-				if b, isB := info.Uses[id].(*types.Builtin); isB {
-					if b.Name() == "make" {
-						return true
-					}
-					if b.Name() == "append" && len(e.Args) > 0 && lookupIdentVar(p, e.Args[0]) == v {
-						return true
-					}
-				}
-			}
-		}
-		return false
-	}
-
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			switch s := n.(type) {
-			case *ast.ValueSpec:
-				if len(s.Values) == 0 {
-					for _, nm := range s.Names {
-						if v, ok := info.Defs[nm].(*types.Var); ok && v != nil && v.Parent() != nil && v.Parent() != p.Types.Scope() && !sigVars[v] {
-							candidates[v] = true
-						}
-					}
-				} else if len(s.Names) == len(s.Values) {
-					for i, nm := range s.Names {
-						v, ok := info.Defs[nm].(*types.Var)
-						if !ok || v == nil || v.Parent() == nil || v.Parent() == p.Types.Scope() || sigVars[v] {
-							continue
-						}
-						candidates[v] = true
-						if !isFreshInit(v, s.Values[i]) {
-							disqualified[v] = true
-						}
-					}
-				} else {
-					for _, nm := range s.Names {
-						if v, ok := info.Defs[nm].(*types.Var); ok && v != nil {
-							disqualified[v] = true
-						}
-					}
-				}
-
-			case *ast.AssignStmt:
-				if s.Tok != token.DEFINE && s.Tok != token.ASSIGN {
-					for _, lhs := range s.Lhs {
-						if v := lookupIdentVar(p, lhs); v != nil {
-							disqualified[v] = true
-						}
-					}
-					return true
-				}
-				if len(s.Lhs) == len(s.Rhs) {
-					for i, lhs := range s.Lhs {
-						var v *types.Var
-						if id, isID := ast.Unparen(lhs).(*ast.Ident); isID {
-							if defV, ok := info.Defs[id].(*types.Var); ok && defV != nil {
-								v = defV
-							} else {
-								v = lookupIdentVar(p, id)
-							}
-						}
-						if v == nil || v.Parent() == nil || v.Parent() == p.Types.Scope() || sigVars[v] {
-							continue
-						}
-						candidates[v] = true
-						if !isFreshInit(v, s.Rhs[i]) {
-							disqualified[v] = true
-						}
-					}
-				} else {
-					for _, lhs := range s.Lhs {
-						if id, isID := ast.Unparen(lhs).(*ast.Ident); isID {
-							if defV, ok := info.Defs[id].(*types.Var); ok && defV != nil {
-								disqualified[defV] = true
-							} else if useV := lookupIdentVar(p, id); useV != nil {
-								disqualified[useV] = true
-							}
-						}
-					}
-				}
-
-			case *ast.RangeStmt:
-				for _, be := range []ast.Expr{s.Key, s.Value} {
-					if id, isID := ast.Unparen(be).(*ast.Ident); isID {
-						if defV, ok := info.Defs[id].(*types.Var); ok && defV != nil {
-							disqualified[defV] = true
-						} else if useV := lookupIdentVar(p, id); useV != nil {
-							disqualified[useV] = true
-						}
-					}
-				}
-
-			case *ast.UnaryExpr:
-				if s.Op == token.AND {
-					cur := ast.Unparen(s.X)
-					for {
-						switch inner := cur.(type) {
-						case *ast.IndexExpr:
-							cur = ast.Unparen(inner.X)
-							continue
-						case *ast.SliceExpr:
-							cur = ast.Unparen(inner.X)
-							continue
-						case *ast.SelectorExpr:
-							cur = ast.Unparen(inner.X)
-							continue
-						}
-						break
-					}
-					if v := lookupIdentVar(p, cur); v != nil {
-						disqualified[v] = true
-					}
-				}
-			}
-			return true
-		})
-	}
-
-	out := map[*types.Var]bool{}
-	for v := range candidates {
-		if !disqualified[v] && !taintedRef[v] {
-			out[v] = true
-		}
-	}
-	return out
-}
-
-func verifyCapsuleStructsWriteFree(p *packages.Package, capsules map[*types.Named]bool) bool {
-	info := p.TypesInfo
-	exprHitsCapsule := func(expr ast.Expr) bool {
-		cur := expr
-		for cur != nil {
-			switch x := ast.Unparen(cur).(type) {
-			case *ast.SelectorExpr:
-				selInfo := info.Selections[x]
-				if selInfo == nil || selInfo.Kind() != types.FieldVal {
-					return false
-				}
-				hit := false
-				forEachSelectionHopStruct(selInfo, func(st *types.Named) {
-					if st != nil && capsules[st.Origin()] {
-						hit = true
-					}
-				})
-				if hit {
-					return true
-				}
-				cur = x.X
-			case *ast.StarExpr:
-				if st := derefNamedStruct(info.TypeOf(x.X)); st != nil && capsules[st.Origin()] {
-					return true
-				}
-				cur = x.X
-			case *ast.IndexExpr:
-				if st := derefNamedStruct(info.TypeOf(x)); st != nil && capsules[st.Origin()] {
-					return true
-				}
-				cur = x.X
-			case *ast.SliceExpr:
-				cur = x.X
-			default:
-				return false
-			}
-		}
-		return false
-	}
-
-	ok := true
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			if !ok || n == nil {
-				return false
-			}
-			switch s := n.(type) {
-			case *ast.AssignStmt:
-				for _, lhs := range s.Lhs {
-					if exprHitsCapsule(lhs) {
-						ok = false
-						return false
-					}
-				}
-			case *ast.IncDecStmt:
-				if exprHitsCapsule(s.X) {
-					ok = false
-					return false
-				}
-			case *ast.RangeStmt:
-				if s.Tok == token.ASSIGN {
-					if (s.Key != nil && exprHitsCapsule(s.Key)) ||
-						(s.Value != nil && exprHitsCapsule(s.Value)) {
-						ok = false
-						return false
-					}
-				}
-			case *ast.UnaryExpr:
-				if s.Op == token.AND {
-					if _, isCL := ast.Unparen(s.X).(*ast.CompositeLit); !isCL && exprHitsCapsule(s.X) {
-						ok = false
-						return false
-					}
-				}
-			}
-			return true
-		})
-	}
-	return ok
-}
-
-func callCallErasesSeedStruct(
-	info *types.Info,
-	call *ast.CallExpr,
-	seedStructTypeViolated func(dstT, srcT types.Type) bool,
-	allowCallArg func(call *ast.CallExpr, argIdx int, arg ast.Expr) bool,
-) bool {
-	if len(call.Args) == 0 {
-		return false
-	}
-	if tv, ok := info.Types[call]; ok && tv.Value != nil {
-		return false
-	}
-	fun := ast.Unparen(call.Fun)
-	if b := lookupBuiltin(info, fun); b != nil {
-		switch b.Name() {
-		case "len", "cap", "Sizeof", "Alignof", "Offsetof":
-			return false
-		}
-	}
-	sig, isSig := underlyingType(info.TypeOf(fun)).(*types.Signature)
-	if !isSig {
-		for _, arg := range call.Args {
-			if seedStructTypeViolated(nil, info.TypeOf(arg)) {
-				return true
-			}
-		}
-		return false
-	}
-	var originSig *types.Signature
-	switch fn := fun.(type) {
-	case *ast.Ident:
-		if callee, ok := info.Uses[fn].(*types.Func); ok && callee.Origin() != callee {
-			originSig, _ = callee.Origin().Type().(*types.Signature)
-		}
-	case *ast.SelectorExpr:
-		if fn.Sel != nil {
-			if callee, ok := info.Uses[fn.Sel].(*types.Func); ok && callee.Origin() != callee {
-				originSig, _ = callee.Origin().Type().(*types.Signature)
-			}
-		}
-	case *ast.IndexExpr:
-		if id, isID := ast.Unparen(fn.X).(*ast.Ident); isID {
-			if callee, ok := info.Uses[id].(*types.Func); ok {
-				originSig, _ = callee.Origin().Type().(*types.Signature)
-			}
-		}
-	case *ast.IndexListExpr:
-		if id, isID := ast.Unparen(fn.X).(*ast.Ident); isID {
-			if callee, ok := info.Uses[id].(*types.Func); ok {
-				originSig, _ = callee.Origin().Type().(*types.Signature)
-			}
-		}
-	}
-
-	if len(call.Args) == 1 {
-		if tup, isTup := info.TypeOf(call.Args[0]).(*types.Tuple); isTup {
-			for ti := 0; ti < tup.Len(); ti++ {
-				var dstT types.Type
-				if ti < sig.Params().Len() {
-					dstT = sig.Params().At(ti).Type()
-				}
-				if seedStructTypeViolated(dstT, tup.At(ti).Type()) {
-					return true
-				}
-				if originSig != nil && ti < originSig.Params().Len() && seedStructTypeViolated(originSig.Params().At(ti).Type(), tup.At(ti).Type()) {
-					return true
-				}
-			}
-			return false
-		}
-	}
-
-	for argIdx, arg := range call.Args {
-		if allowCallArg != nil && allowCallArg(call, argIdx, arg) {
-			continue
-		}
-		argT := info.TypeOf(arg)
-		paramIdx := argIdx
-		isNonEllipsisVariadic := false
-		if sig.Variadic() && argIdx >= sig.Params().Len()-1 {
-			paramIdx = sig.Params().Len() - 1
-			isNonEllipsisVariadic = !call.Ellipsis.IsValid()
-		}
-		var dstT types.Type
-		if paramIdx < sig.Params().Len() {
-			dstT = sig.Params().At(paramIdx).Type()
-			if isNonEllipsisVariadic {
-				if sl, isSl := underlyingType(dstT).(*types.Slice); isSl {
-					dstT = sl.Elem()
-				}
-			}
-		}
-		if seedStructTypeViolated(dstT, argT) {
-			return true
-		}
-		if originSig != nil && paramIdx < originSig.Params().Len() {
-			origT := originSig.Params().At(paramIdx).Type()
-			if isNonEllipsisVariadic {
-				if sl, isSl := underlyingType(origT).(*types.Slice); isSl {
-					origT = sl.Elem()
-				}
-			}
-			if seedStructTypeViolated(origT, argT) {
-				return true
-			}
-		}
-	}
-	return false
 }

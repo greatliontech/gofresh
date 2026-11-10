@@ -7,7 +7,7 @@ import (
 	"go/types"
 	"strings"
 
-	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 )
 
 var harnessPureStdImports = map[string]bool{
@@ -1651,7 +1651,7 @@ func verifyHarnessTemplateCall(
 }
 
 func isMethodlessCarrierFreeHarnessData(audited bool, pkgTypes *types.Package, t types.Type) bool {
-	if !audited || pkgTypes == nil || t == nil || dynstate.TypeMayCarryUnknownDynamic(audited, t) {
+	if !audited || pkgTypes == nil || t == nil || refconfine.TypeMayCarryUnknownDynamic(audited, t) {
 		return false
 	}
 	top := types.Unalias(t)

@@ -14,7 +14,15 @@ import (
 	"testing"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/seams"
+	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
+	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
+
+func bracketedSeamNodes(audited bool, p *packages.Package) map[ast.Node]bool {
+	return seams.AnalyzeBracketedSeams(audited, p, nil, nil).Exempt
+}
 
 func syntheticPackageImports(tp *types.Package, nonStd map[string]*types.Package) map[string]*packages.Package {
 	memo := map[*types.Package]*packages.Package{}
@@ -100,7 +108,7 @@ func mustTypecheckPackage(t *testing.T, pkgPath string, files map[string]string)
 
 //gofresh:pure
 func TestFixedPointMonotonicityIdempotenceAndPermutationInvariance(t *testing.T) {
-	// 1. solveLeastFixedPoint & solveReachFixedPoint on cyclic graphs with self-loops and diamonds.
+	// 1. SolveLeastFixedPoint & SolveReachFixedPoint on cyclic graphs with self-loops and diamonds.
 	lfpDeps := map[string]map[string]bool{
 		"a": {"b": true, "c": true},
 		"b": {"d": true},
@@ -111,25 +119,25 @@ func TestFixedPointMonotonicityIdempotenceAndPermutationInvariance(t *testing.T)
 		"g": {"g": true}, // self-loop -> stays false
 	}
 	lfpSet := map[string]bool{}
-	solveLeastFixedPoint(lfpSet, lfpDeps, func(dep string) bool { return lfpSet[dep] })
+	syntaxutil.SolveLeastFixedPoint(lfpSet, lfpDeps, func(dep string) bool { return lfpSet[dep] })
 	for _, wantTrue := range []string{"a", "b", "c", "d"} {
 		if !lfpSet[wantTrue] {
-			t.Fatalf("solveLeastFixedPoint missing %q: %v", wantTrue, lfpSet)
+			t.Fatalf("SolveLeastFixedPoint missing %q: %v", wantTrue, lfpSet)
 		}
 	}
 	for _, wantFalse := range []string{"e", "f", "g"} {
 		if lfpSet[wantFalse] {
-			t.Fatalf("solveLeastFixedPoint unexpectedly included cycle node %q: %v", wantFalse, lfpSet)
+			t.Fatalf("SolveLeastFixedPoint unexpectedly included cycle node %q: %v", wantFalse, lfpSet)
 		}
 	}
-	// Idempotence: re-running solveLeastFixedPoint on the converged set leaves it identical.
+	// Idempotence: re-running SolveLeastFixedPoint on the converged set leaves it identical.
 	beforeLFP := make(map[string]bool, len(lfpSet))
 	for k, v := range lfpSet {
 		beforeLFP[k] = v
 	}
-	solveLeastFixedPoint(lfpSet, lfpDeps, func(dep string) bool { return lfpSet[dep] })
+	syntaxutil.SolveLeastFixedPoint(lfpSet, lfpDeps, func(dep string) bool { return lfpSet[dep] })
 	if !reflect.DeepEqual(lfpSet, beforeLFP) {
-		t.Fatalf("solveLeastFixedPoint not idempotent: got %v, want %v", lfpSet, beforeLFP)
+		t.Fatalf("SolveLeastFixedPoint not idempotent: got %v, want %v", lfpSet, beforeLFP)
 	}
 
 	reachDeps := map[string]map[string]bool{
@@ -140,24 +148,24 @@ func TestFixedPointMonotonicityIdempotenceAndPermutationInvariance(t *testing.T)
 		"v": {"u": true},
 	}
 	reachSet := map[string]bool{"seed": true}
-	solveReachFixedPoint(reachSet, reachDeps, func(dep string) bool { return reachSet[dep] })
+	syntaxutil.SolveReachFixedPoint(reachSet, reachDeps, func(dep string) bool { return reachSet[dep] })
 	for _, wantTrue := range []string{"seed", "x", "y", "z"} {
 		if !reachSet[wantTrue] {
-			t.Fatalf("solveReachFixedPoint missing %q: %v", wantTrue, reachSet)
+			t.Fatalf("SolveReachFixedPoint missing %q: %v", wantTrue, reachSet)
 		}
 	}
 	for _, wantFalse := range []string{"u", "v"} {
 		if reachSet[wantFalse] {
-			t.Fatalf("solveReachFixedPoint unexpectedly included disconnected cycle %q: %v", wantFalse, reachSet)
+			t.Fatalf("SolveReachFixedPoint unexpectedly included disconnected cycle %q: %v", wantFalse, reachSet)
 		}
 	}
 
 	// 2. Permutational invariance of ResolveEnvAudit, NewDeferralResolution, and Compose.
-	fA := FuncKey{Pkg: "example.com/a", Name: "NewA"}
-	fB := FuncKey{Pkg: "example.com/b", Name: "NewB"}
-	fCycle := FuncKey{Pkg: "example.com/c", Name: "Cycle"}
-	pA0 := ParamKey{Func: fA, Index: 0}
-	pB0 := ParamKey{Func: fB, Index: 0}
+	fA := syntaxutil.FuncKey{Pkg: "example.com/a", Name: "NewA"}
+	fB := syntaxutil.FuncKey{Pkg: "example.com/b", Name: "NewB"}
+	fCycle := syntaxutil.FuncKey{Pkg: "example.com/c", Name: "Cycle"}
+	pA0 := syntaxutil.ParamKey{Func: fA, Index: 0}
+	pB0 := syntaxutil.ParamKey{Func: fB, Index: 0}
 
 	baseMeta := []GraphPackage{
 		{
@@ -183,37 +191,37 @@ func TestFixedPointMonotonicityIdempotenceAndPermutationInvariance(t *testing.T)
 		"example.com/a": {
 			{
 				Declares:               []string{"example.com/a.reg", "example.com/a.hook"},
-				ReturnEnvFree:          []FuncKey{fA},
-				ReturnEnvDeps:          []FuncDepEdge{{Func: fA, Callee: fB}},
-				ReturnEnvInsertionDeps: []FuncInsertionDepEdge{{Func: fA, Dep: ParamAuditTarget(pA0)}},
-				ParamInsertionFree:     []ParamKey{pA0},
-				ParamInsertionDeps:     []ParamInsertionDepEdge{{Param: pA0, Dep: ParamAuditTarget(pB0)}},
-				ParamLeakFree:          []ParamKey{pA0},
-				ParamLeakFreeDeps:      []ParamDepEdge{{Own: pA0, Dep: pB0}},
-				EnvCallUses:            []EnvCallUse{{Key: "example.com/a.reg", Callee: fA}},
-				AttributedUses: []AttributedUse{
-					{Func: FuncKey{Pkg: "example.com/a", Name: "Mut"}, Key: "example.com/a.hook"},
+				ReturnEnvFree:          []syntaxutil.FuncKey{fA},
+				ReturnEnvDeps:          []syntaxutil.FuncDepEdge{{Func: fA, Callee: fB}},
+				ReturnEnvInsertionDeps: []syntaxutil.FuncInsertionDepEdge{{Func: fA, Dep: syntaxutil.ParamAuditTarget(pA0)}},
+				ParamInsertionFree:     []syntaxutil.ParamKey{pA0},
+				ParamInsertionDeps:     []syntaxutil.ParamInsertionDepEdge{{Param: pA0, Dep: syntaxutil.ParamAuditTarget(pB0)}},
+				ParamLeakFree:          []syntaxutil.ParamKey{pA0},
+				ParamLeakFreeDeps:      []syntaxutil.ParamDepEdge{{Own: pA0, Dep: pB0}},
+				EnvCallUses:            []syntaxutil.EnvCallUse{{Key: "example.com/a.reg", Callee: fA}},
+				AttributedUses: []syntaxutil.AttributedUse{
+					{Func: syntaxutil.FuncKey{Pkg: "example.com/a", Name: "Mut"}, Key: "example.com/a.hook"},
 				},
-				FuncRefs: []FuncRef{
-					{Callee: FuncKey{Pkg: "example.com/a", Name: "Mut"}, Region: RefRegion{Kind: RegionProg}},
+				FuncRefs: []syntaxutil.FuncRef{
+					{Callee: syntaxutil.FuncKey{Pkg: "example.com/a", Name: "Mut"}, Region: syntaxutil.RefRegion{Kind: syntaxutil.RegionProg}},
 				},
 			},
 		},
 		"example.com/b": {
 			{
 				Declares:           []string{"example.com/b.shared"},
-				ReturnEnvFree:      []FuncKey{fB},
-				ParamInsertionFree: []ParamKey{pB0},
-				ParamLeakFree:      []ParamKey{pB0},
-				CarrierLinks:       []CarrierLink{{From: "example.com/b.shared", To: "example.com/a.hook"}},
+				ReturnEnvFree:      []syntaxutil.FuncKey{fB},
+				ParamInsertionFree: []syntaxutil.ParamKey{pB0},
+				ParamLeakFree:      []syntaxutil.ParamKey{pB0},
+				CarrierLinks:       []syntaxutil.CarrierLink{{From: "example.com/b.shared", To: "example.com/a.hook"}},
 			},
 		},
 		"example.com/c": {
 			{
 				Declares:      []string{"example.com/c.pinned"},
 				Mutates:       []string{"example.com/c.pinned"},
-				ReturnEnvFree: []FuncKey{fCycle},
-				ReturnEnvDeps: []FuncDepEdge{{Func: fCycle, Callee: fCycle}},
+				ReturnEnvFree: []syntaxutil.FuncKey{fCycle},
+				ReturnEnvDeps: []syntaxutil.FuncDepEdge{{Func: fCycle, Callee: fCycle}},
 			},
 		},
 	}
@@ -259,31 +267,31 @@ func TestFixedPointMonotonicityIdempotenceAndPermutationInvariance(t *testing.T)
 
 //gofresh:pure
 func TestFieldPopulationProvesPoisonsDeferralsAndCyclicCtors(t *testing.T) {
-	ctorA := FuncKey{Pkg: "example.com/p", Name: "NewA"}
-	ctorB := FuncKey{Pkg: "example.com/p", Name: "NewB"}
-	regFn := FuncKey{Pkg: "example.com/p", Name: "Register"}
-	cleanParam := ParamKey{Func: regFn, Index: 0}
-	dirtyParamA := ParamKey{Func: ctorA, Index: 1}
-	dirtyParamB := ParamKey{Func: ctorB, Index: 2}
+	ctorA := syntaxutil.FuncKey{Pkg: "example.com/p", Name: "NewA"}
+	ctorB := syntaxutil.FuncKey{Pkg: "example.com/p", Name: "NewB"}
+	regFn := syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Register"}
+	cleanParam := syntaxutil.ParamKey{Func: regFn, Index: 0}
+	dirtyParamA := syntaxutil.ParamKey{Func: ctorA, Index: 1}
+	dirtyParamB := syntaxutil.ParamKey{Func: ctorB, Index: 2}
 
 	// 1a. Mutual cycle in ReturnEnvDeps fails least fixed point (EnvFreeResolved == false), so FieldPopulationProves fails closed.
 	factsUnresolvedCycle := map[string][]Fact{
 		"example.com/p": {
 			{
-				ReturnEnvFree: []FuncKey{ctorA, ctorB},
-				ReturnEnvDeps: []FuncDepEdge{
+				ReturnEnvFree: []syntaxutil.FuncKey{ctorA, ctorB},
+				ReturnEnvDeps: []syntaxutil.FuncDepEdge{
 					{Func: ctorA, Callee: ctorB},
 					{Func: ctorB, Callee: ctorA},
 				},
-				ParamLeakFree: []ParamKey{cleanParam},
-				EnvCallUses: []EnvCallUse{
+				ParamLeakFree: []syntaxutil.ParamKey{cleanParam},
+				EnvCallUses: []syntaxutil.EnvCallUse{
 					{Key: "example.com/p.reg", Callee: ctorA},
 				},
 			},
 		},
 	}
 	resUnresolved := NewDeferralResolution(factsUnresolvedCycle, nil)
-	if ok, culprit := resUnresolved.FieldPopulationProves("example.com/p.reg", "fn", 0); ok || culprit != (ParamKey{}) {
+	if ok, culprit := resUnresolved.FieldPopulationProves("example.com/p.reg", "fn", 0); ok || culprit != (syntaxutil.ParamKey{}) {
 		t.Fatalf("FieldPopulationProves on unresolved constructor cycle = (%v, %+v), want (false, zero)", ok, culprit)
 	}
 
@@ -291,15 +299,15 @@ func TestFieldPopulationProvesPoisonsDeferralsAndCyclicCtors(t *testing.T) {
 	resCleanCycle := NewDeferralResolution(factsUnresolvedCycle, nil)
 	resCleanCycle.EnvFreeResolved[ctorA] = true
 	resCleanCycle.EnvFreeResolved[ctorB] = true
-	resCleanCycle.FieldDeferAt[FieldPosKey{Owner: "example.com/p.reg", Field: "fn", Index: 0}] = []ParamKey{cleanParam}
-	resCleanCycle.RetDeferAt[ReturnFieldPosKey{Func: ctorA, Field: "fn", Index: 0}] = []ParamKey{cleanParam}
-	resCleanCycle.RetDeferAt[ReturnFieldPosKey{Func: ctorB, Field: "fn", Index: 0}] = []ParamKey{cleanParam}
-	if ok, culprit := resCleanCycle.FieldPopulationProves("example.com/p.reg", "fn", 0); !ok || culprit != (ParamKey{}) {
+	resCleanCycle.FieldDeferAt[syntaxutil.FieldPosKey{Owner: "example.com/p.reg", Field: "fn", Index: 0}] = []syntaxutil.ParamKey{cleanParam}
+	resCleanCycle.RetDeferAt[syntaxutil.ReturnFieldPosKey{Func: ctorA, Field: "fn", Index: 0}] = []syntaxutil.ParamKey{cleanParam}
+	resCleanCycle.RetDeferAt[syntaxutil.ReturnFieldPosKey{Func: ctorB, Field: "fn", Index: 0}] = []syntaxutil.ParamKey{cleanParam}
+	if ok, culprit := resCleanCycle.FieldPopulationProves("example.com/p.reg", "fn", 0); !ok || culprit != (syntaxutil.ParamKey{}) {
 		t.Fatalf("FieldPopulationProves on resolved cyclic EnvFreeDeps = (%v, %+v), want (true, zero)", ok, culprit)
 	}
 
 	// 2. Direct poisons: whole-owner (!HasPos), wildcard index (Index == -1), and specific index (Index == idx).
-	for _, poison := range []FieldParamPoison{
+	for _, poison := range []syntaxutil.FieldParamPoison{
 		{Owner: "example.com/p.reg"},
 		{Owner: "example.com/p.reg", HasPos: true, Field: "fn", Index: -1},
 		{Owner: "example.com/p.reg", HasPos: true, Field: "fn", Index: 0},
@@ -307,12 +315,12 @@ func TestFieldPopulationProvesPoisonsDeferralsAndCyclicCtors(t *testing.T) {
 		poisonedFacts := map[string][]Fact{
 			"example.com/p": {
 				{
-					FieldParamPoison: []FieldParamPoison{poison},
+					FieldParamPoison: []syntaxutil.FieldParamPoison{poison},
 				},
 			},
 		}
 		pres := NewDeferralResolution(poisonedFacts, nil)
-		if ok, culprit := pres.FieldPopulationProves("example.com/p.reg", "fn", 0); ok || culprit != (ParamKey{}) {
+		if ok, culprit := pres.FieldPopulationProves("example.com/p.reg", "fn", 0); ok || culprit != (syntaxutil.ParamKey{}) {
 			t.Fatalf("FieldPopulationProves with poison %+v = (%v, %+v), want (false, zero)", poison, ok, culprit)
 		}
 	}
@@ -321,9 +329,9 @@ func TestFieldPopulationProvesPoisonsDeferralsAndCyclicCtors(t *testing.T) {
 	deferFailFacts := map[string][]Fact{
 		"example.com/p": {
 			{
-				FieldParamDefer: []FieldParamDefer{
-					{Pos: FieldPosKey{Owner: "example.com/p.reg", Field: "fn", Index: 0}, Param: dirtyParamB},
-					{Pos: FieldPosKey{Owner: "example.com/p.reg", Field: "fn", Index: 0}, Param: dirtyParamA},
+				FieldParamDefer: []syntaxutil.FieldParamDefer{
+					{Pos: syntaxutil.FieldPosKey{Owner: "example.com/p.reg", Field: "fn", Index: 0}, Param: dirtyParamB},
+					{Pos: syntaxutil.FieldPosKey{Owner: "example.com/p.reg", Field: "fn", Index: 0}, Param: dirtyParamA},
 				},
 			},
 		},
@@ -337,16 +345,16 @@ func TestFieldPopulationProvesPoisonsDeferralsAndCyclicCtors(t *testing.T) {
 	ctorBranchFacts := map[string][]Fact{
 		"example.com/p": {
 			{
-				ReturnEnvFree: []FuncKey{regFn, ctorA, ctorB},
-				ReturnEnvDeps: []FuncDepEdge{
+				ReturnEnvFree: []syntaxutil.FuncKey{regFn, ctorA, ctorB},
+				ReturnEnvDeps: []syntaxutil.FuncDepEdge{
 					{Func: regFn, Callee: ctorB},
 					{Func: regFn, Callee: ctorA},
 				},
-				ReturnFieldParamDefer: []ReturnFieldParamDefer{
-					{Pos: ReturnFieldPosKey{Func: ctorA, Field: "fn", Index: 0}, Param: dirtyParamA},
-					{Pos: ReturnFieldPosKey{Func: ctorB, Field: "fn", Index: 0}, Param: dirtyParamB},
+				ReturnFieldParamDefer: []syntaxutil.ReturnFieldParamDefer{
+					{Pos: syntaxutil.ReturnFieldPosKey{Func: ctorA, Field: "fn", Index: 0}, Param: dirtyParamA},
+					{Pos: syntaxutil.ReturnFieldPosKey{Func: ctorB, Field: "fn", Index: 0}, Param: dirtyParamB},
 				},
-				EnvCallUses: []EnvCallUse{
+				EnvCallUses: []syntaxutil.EnvCallUse{
 					{Key: "example.com/p.reg", Callee: regFn},
 				},
 			},
@@ -361,7 +369,7 @@ func TestFieldPopulationProvesPoisonsDeferralsAndCyclicCtors(t *testing.T) {
 	}
 
 	// 5. Constructor ReturnFieldParamPoison (whole-func, wildcard index -1, specific index).
-	for _, rpoison := range []ReturnFieldParamPoison{
+	for _, rpoison := range []syntaxutil.ReturnFieldParamPoison{
 		{Func: ctorA},
 		{Func: ctorA, HasPos: true, Field: "fn", Index: -1},
 		{Func: ctorA, HasPos: true, Field: "fn", Index: 0},
@@ -369,14 +377,14 @@ func TestFieldPopulationProvesPoisonsDeferralsAndCyclicCtors(t *testing.T) {
 		rfacts := map[string][]Fact{
 			"example.com/p": {
 				{
-					ReturnEnvFree:          []FuncKey{ctorA},
-					ReturnFieldParamPoison: []ReturnFieldParamPoison{rpoison},
-					EnvCallUses:            []EnvCallUse{{Key: "example.com/p.reg", Callee: ctorA}},
+					ReturnEnvFree:          []syntaxutil.FuncKey{ctorA},
+					ReturnFieldParamPoison: []syntaxutil.ReturnFieldParamPoison{rpoison},
+					EnvCallUses:            []syntaxutil.EnvCallUse{{Key: "example.com/p.reg", Callee: ctorA}},
 				},
 			},
 		}
 		rres := NewDeferralResolution(rfacts, nil)
-		if ok, culprit := rres.FieldPopulationProves("example.com/p.reg", "fn", 0); ok || culprit != (ParamKey{}) {
+		if ok, culprit := rres.FieldPopulationProves("example.com/p.reg", "fn", 0); ok || culprit != (syntaxutil.ParamKey{}) {
 			t.Fatalf("FieldPopulationProves with ReturnFieldParamPoison %+v = (%v, %+v), want (false, zero)", rpoison, ok, culprit)
 		}
 	}
@@ -391,75 +399,77 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			Class:      MutableLocalPackage,
 		},
 	}
-	validFn := FuncKey{Pkg: "example.com/p", Name: "F"}
-	unusedFn := FuncKey{Pkg: "example.com/p", Name: "UnusedHelper"}
-	validParam := ParamKey{Func: validFn, Index: 0}
+	validFn := syntaxutil.FuncKey{Pkg: "example.com/p", Name: "F"}
+	unusedFn := syntaxutil.FuncKey{Pkg: "example.com/p", Name: "UnusedHelper"}
+	validParam := syntaxutil.ParamKey{Func: validFn, Index: 0}
 
 	cases := []struct {
 		name   string
 		mutate func(*Fact)
 	}{
-		{"invalid ReturnEnvFree NUL", func(f *Fact) { f.ReturnEnvFree = []FuncKey{{Pkg: "a\x00b", Name: "F"}} }},
-		{"invalid ReturnEnvDeps empty", func(f *Fact) { f.ReturnEnvDeps = []FuncDepEdge{{Func: validFn}} }},
+		{"invalid ReturnEnvFree NUL", func(f *Fact) { f.ReturnEnvFree = []syntaxutil.FuncKey{{Pkg: "a\x00b", Name: "F"}} }},
+		{"invalid ReturnEnvDeps empty", func(f *Fact) { f.ReturnEnvDeps = []syntaxutil.FuncDepEdge{{Func: validFn}} }},
 		{"invalid ReturnEnvInsertionDeps", func(f *Fact) {
-			f.ReturnEnvInsertionDeps = []FuncInsertionDepEdge{{Func: validFn, Dep: EnvAuditTarget{Func: validFn, ParamIndex: -2}}}
+			f.ReturnEnvInsertionDeps = []syntaxutil.FuncInsertionDepEdge{{Func: validFn, Dep: syntaxutil.EnvAuditTarget{Func: validFn, ParamIndex: -2}}}
 		}},
-		{"invalid ParamInsertionFree", func(f *Fact) { f.ParamInsertionFree = []ParamKey{{Func: validFn, Index: -1}} }},
+		{"invalid ParamInsertionFree", func(f *Fact) { f.ParamInsertionFree = []syntaxutil.ParamKey{{Func: validFn, Index: -1}} }},
 		{"invalid ParamInsertionDeps", func(f *Fact) {
-			f.ParamInsertionDeps = []ParamInsertionDepEdge{{Param: validParam, Dep: EnvAuditTarget{ParamIndex: 0}}}
+			f.ParamInsertionDeps = []syntaxutil.ParamInsertionDepEdge{{Param: validParam, Dep: syntaxutil.EnvAuditTarget{ParamIndex: 0}}}
 		}},
-		{"invalid ParamLeakFree", func(f *Fact) { f.ParamLeakFree = []ParamKey{{Func: validFn, Index: -1}} }},
-		{"invalid ParamLeakFreeDeps", func(f *Fact) { f.ParamLeakFreeDeps = []ParamDepEdge{{Own: validParam}} }},
-		{"invalid ParamRetentionFree", func(f *Fact) { f.ParamRetentionFree = []ParamKey{{Func: validFn, Index: -1}} }},
-		{"invalid ParamRetentionFreeDeps", func(f *Fact) { f.ParamRetentionFreeDeps = []ParamDepEdge{{Own: validParam}} }},
-		{"invalid ReceiverReadOnly", func(f *Fact) { f.ReceiverReadOnly = []FuncKey{{Pkg: "example.com/p"}} }},
-		{"invalid ReceiverRetentionFree", func(f *Fact) { f.ReceiverRetentionFree = []FuncKey{{Name: "M"}} }},
-		{"invalid OpaqueDeps", func(f *Fact) { f.OpaqueDeps = []OpaqueDep{{Own: "a\x00b", Dep: "c"}} }},
+		{"invalid ParamLeakFree", func(f *Fact) { f.ParamLeakFree = []syntaxutil.ParamKey{{Func: validFn, Index: -1}} }},
+		{"invalid ParamLeakFreeDeps", func(f *Fact) { f.ParamLeakFreeDeps = []syntaxutil.ParamDepEdge{{Own: validParam}} }},
+		{"invalid ParamRetentionFree", func(f *Fact) { f.ParamRetentionFree = []syntaxutil.ParamKey{{Func: validFn, Index: -1}} }},
+		{"invalid ParamRetentionFreeDeps", func(f *Fact) { f.ParamRetentionFreeDeps = []syntaxutil.ParamDepEdge{{Own: validParam}} }},
+		{"invalid ReceiverReadOnly", func(f *Fact) { f.ReceiverReadOnly = []syntaxutil.FuncKey{{Pkg: "example.com/p"}} }},
+		{"invalid ReceiverRetentionFree", func(f *Fact) { f.ReceiverRetentionFree = []syntaxutil.FuncKey{{Name: "M"}} }},
+		{"invalid OpaqueDeps", func(f *Fact) { f.OpaqueDeps = []syntaxutil.OpaqueDep{{Own: "a\x00b", Dep: "c"}} }},
 		{"invalid FieldParamDefer", func(f *Fact) {
-			f.FieldParamDefer = []FieldParamDefer{{Pos: FieldPosKey{Owner: "v", Field: "f", Index: -1}, Param: validParam}}
+			f.FieldParamDefer = []syntaxutil.FieldParamDefer{{Pos: syntaxutil.FieldPosKey{Owner: "v", Field: "f", Index: -1}, Param: validParam}}
 		}},
 		{"invalid FieldParamPoison", func(f *Fact) {
-			f.FieldParamPoison = []FieldParamPoison{{Owner: "v", HasPos: false, Field: "nonempty"}}
+			f.FieldParamPoison = []syntaxutil.FieldParamPoison{{Owner: "v", HasPos: false, Field: "nonempty"}}
 		}},
 		{"invalid ReturnFieldParamDefer", func(f *Fact) {
-			f.ReturnFieldParamDefer = []ReturnFieldParamDefer{{Pos: ReturnFieldPosKey{Func: validFn, Field: "", Index: 0}, Param: validParam}}
+			f.ReturnFieldParamDefer = []syntaxutil.ReturnFieldParamDefer{{Pos: syntaxutil.ReturnFieldPosKey{Func: validFn, Field: "", Index: 0}, Param: validParam}}
 		}},
 		{"invalid ReturnFieldParamPoison", func(f *Fact) {
-			f.ReturnFieldParamPoison = []ReturnFieldParamPoison{{Func: validFn, HasPos: true, Field: "f", Index: -2}}
+			f.ReturnFieldParamPoison = []syntaxutil.ReturnFieldParamPoison{{Func: validFn, HasPos: true, Field: "f", Index: -2}}
 		}},
-		{"invalid EnvCallUses", func(f *Fact) { f.EnvCallUses = []EnvCallUse{{Key: "", Callee: validFn}} }},
-		{"invalid MethodUses", func(f *Fact) { f.MethodUses = []VarMethodUse{{Key: "a\x00b", Method: validFn}} }},
-		{"invalid InitMethodUses", func(f *Fact) { f.InitMethodUses = []VarMethodUse{{Key: "v"}} }},
-		{"invalid ParamUses", func(f *Fact) { f.ParamUses = []VarParamUse{{Key: "v", Param: ParamKey{Func: validFn, Index: -1}}} }},
-		{"invalid InitParamUses", func(f *Fact) { f.InitParamUses = []VarParamUse{{Key: "", Param: validParam}} }},
-		{"invalid FieldParamUses", func(f *Fact) { f.FieldParamUses = []FieldPosKey{{Owner: "v", Field: "f", Index: -1}} }},
-		{"invalid ElemParamUses", func(f *Fact) { f.ElemParamUses = []ElemParamUse{{Key: "v", Owner: "o", Index: -1}} }},
+		{"invalid EnvCallUses", func(f *Fact) { f.EnvCallUses = []syntaxutil.EnvCallUse{{Key: "", Callee: validFn}} }},
+		{"invalid MethodUses", func(f *Fact) { f.MethodUses = []syntaxutil.VarMethodUse{{Key: "a\x00b", Method: validFn}} }},
+		{"invalid InitMethodUses", func(f *Fact) { f.InitMethodUses = []syntaxutil.VarMethodUse{{Key: "v"}} }},
+		{"invalid ParamUses", func(f *Fact) {
+			f.ParamUses = []syntaxutil.VarParamUse{{Key: "v", Param: syntaxutil.ParamKey{Func: validFn, Index: -1}}}
+		}},
+		{"invalid InitParamUses", func(f *Fact) { f.InitParamUses = []syntaxutil.VarParamUse{{Key: "", Param: validParam}} }},
+		{"invalid FieldParamUses", func(f *Fact) { f.FieldParamUses = []syntaxutil.FieldPosKey{{Owner: "v", Field: "f", Index: -1}} }},
+		{"invalid ElemParamUses", func(f *Fact) { f.ElemParamUses = []syntaxutil.ElemParamUse{{Key: "v", Owner: "o", Index: -1}} }},
 		{"invalid FuncRefs kind", func(f *Fact) {
-			f.FuncRefs = append(f.FuncRefs, FuncRef{Callee: validFn, Region: RefRegion{Kind: 99}})
+			f.FuncRefs = append(f.FuncRefs, syntaxutil.FuncRef{Callee: validFn, Region: syntaxutil.RefRegion{Kind: 99}})
 		}},
 		{"invalid FuncRefs RegionInit with caller", func(f *Fact) {
-			f.FuncRefs = append(f.FuncRefs, FuncRef{Callee: validFn, Region: RefRegion{Kind: RegionInit, Caller: validFn}})
+			f.FuncRefs = append(f.FuncRefs, syntaxutil.FuncRef{Callee: validFn, Region: syntaxutil.RefRegion{Kind: syntaxutil.RegionInit, Caller: validFn}})
 		}},
 		{"invalid AttributedUses", func(f *Fact) {
-			f.AttributedUses = append(f.AttributedUses, AttributedUse{Func: validFn, Key: "example.com/p.v", Escape: true, HasMethod: true, Method: validFn})
+			f.AttributedUses = append(f.AttributedUses, syntaxutil.AttributedUse{Func: validFn, Key: "example.com/p.v", Escape: true, HasMethod: true, Method: validFn})
 		}},
 		{"invalid CarrierLinks", func(f *Fact) {
-			f.CarrierLinks = []CarrierLink{{From: "example.com/p.v", To: "bad\x00key"}}
+			f.CarrierLinks = []syntaxutil.CarrierLink{{From: "example.com/p.v", To: "bad\x00key"}}
 		}},
 		{"invalid ExportedSeams", func(f *Fact) {
-			f.ExportedSeams = []ExportedSeam{{Func: FuncKey{}, Key: "example.com/p.v"}}
+			f.ExportedSeams = []syntaxutil.ExportedSeam{{Func: syntaxutil.FuncKey{}, Key: "example.com/p.v"}}
 		}},
 		{"invalid NonSeqFuncUses", func(f *Fact) {
-			f.NonSeqFuncUses = []FuncKey{{Pkg: "example.com/p", Name: ""}}
+			f.NonSeqFuncUses = []syntaxutil.FuncKey{{Pkg: "example.com/p", Name: ""}}
 		}},
 		{"invalid SeqFuncEdges", func(f *Fact) {
-			f.SeqFuncEdges = []FuncDepEdge{{Func: validFn}}
+			f.SeqFuncEdges = []syntaxutil.FuncDepEdge{{Func: validFn}}
 		}},
 		{"invalid ParallelFuncs", func(f *Fact) {
-			f.ParallelFuncs = []FuncKey{{Name: "EnterParallel"}}
+			f.ParallelFuncs = []syntaxutil.FuncKey{{Name: "EnterParallel"}}
 		}},
 		{"invalid ParallelEdges", func(f *Fact) {
-			f.ParallelEdges = []FuncDepEdge{{Func: validFn}}
+			f.ParallelEdges = []syntaxutil.FuncDepEdge{{Func: validFn}}
 		}},
 		{"invalid MappingDischarges", func(f *Fact) {
 			f.MappingDischarges = []string{"bad\x00key"}
@@ -468,92 +478,92 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			f.MemoDischarges = []string{""}
 		}},
 		{"invalid ProtoClusters empty vars", func(f *Fact) {
-			f.ProtoClusters = []ProtoClusterFact{{
+			f.ProtoClusters = []protoaudit.ProtoClusterFact{{
 				InitFn:      validFn,
-				BuilderType: TypeRef{Pkg: "example.com/rt", Name: "TypeBuilder"},
+				BuilderType: syntaxutil.TypeRef{Pkg: "example.com/rt", Name: "TypeBuilder"},
 			}}
 		}},
 		{"invalid ProtoExtAliases self-target", func(f *Fact) {
-			f.ProtoExtAliases = []ProtoExtAlias{{Key: "example.com/p.E", Target: "example.com/p.E"}}
+			f.ProtoExtAliases = []protoaudit.ProtoExtAlias{{Key: "example.com/p.E", Target: "example.com/p.E"}}
 		}},
 		{"invalid ProtoRuntimeTypes unknown role", func(f *Fact) {
-			f.ProtoRuntimeTypes = []ProtoRuntimeTypeFact{{
-				Type: TypeRef{Pkg: "example.com/p", Name: "MessageInfo"},
+			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
+				Type: syntaxutil.TypeRef{Pkg: "example.com/p", Name: "MessageInfo"},
 				Role: "unknown",
 			}}
 		}},
 		{"invalid ProtoRuntimeTypes builder InitHelper", func(f *Fact) {
-			f.ProtoRuntimeTypes = []ProtoRuntimeTypeFact{{
-				Type:       TypeRef{Pkg: "example.com/p", Name: "TypeBuilder"},
-				Role:       ProtoRoleBuilder,
+			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
+				Type:       syntaxutil.TypeRef{Pkg: "example.com/p", Name: "TypeBuilder"},
+				Role:       protoaudit.ProtoRoleBuilder,
 				InitHelper: validFn,
 			}}
 		}},
 		{"invalid ProtoRuntimeTypes extension AllowedHelpers", func(f *Fact) {
-			f.ProtoRuntimeTypes = []ProtoRuntimeTypeFact{{
-				Type:           TypeRef{Pkg: "example.com/p", Name: "ExtensionInfo"},
-				Role:           ProtoRoleExtension,
-				AllowedHelpers: []FuncKey{validFn},
+			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
+				Type:           syntaxutil.TypeRef{Pkg: "example.com/p", Name: "ExtensionInfo"},
+				Role:           protoaudit.ProtoRoleExtension,
+				AllowedHelpers: []syntaxutil.FuncKey{validFn},
 			}}
 		}},
 		{"invalid ProtoRuntimeTypes builder malformed SubBuilder", func(f *Fact) {
-			f.ProtoRuntimeTypes = []ProtoRuntimeTypeFact{{
-				Type:       TypeRef{Pkg: "example.com/p", Name: "TypeBuilder"},
-				Role:       ProtoRoleBuilder,
-				SubBuilder: TypeRef{Pkg: "example.com/p", Name: "a.Builder"},
+			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
+				Type:       syntaxutil.TypeRef{Pkg: "example.com/p", Name: "TypeBuilder"},
+				Role:       protoaudit.ProtoRoleBuilder,
+				SubBuilder: syntaxutil.TypeRef{Pkg: "example.com/p", Name: "a.Builder"},
 			}}
 		}},
 		{"invalid ProtoRuntimeTypes builder malformed GuardTypes", func(f *Fact) {
-			f.ProtoRuntimeTypes = []ProtoRuntimeTypeFact{{
-				Type:       TypeRef{Pkg: "example.com/p", Name: "TypeBuilder"},
-				Role:       ProtoRoleBuilder,
-				GuardTypes: []TypeRef{{Pkg: "example.com/p", Name: ""}},
+			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
+				Type:       syntaxutil.TypeRef{Pkg: "example.com/p", Name: "TypeBuilder"},
+				Role:       protoaudit.ProtoRoleBuilder,
+				GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: ""}},
 			}}
 		}},
 		{"invalid ProtoRuntimeTypes desc_builder empty GuardTypes", func(f *Fact) {
-			f.ProtoRuntimeTypes = []ProtoRuntimeTypeFact{{
-				Type: TypeRef{Pkg: "example.com/p", Name: "Builder"},
-				Role: ProtoRoleDescBuilder,
+			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
+				Type: syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Builder"},
+				Role: protoaudit.ProtoRoleDescBuilder,
 			}}
 		}},
 		{"invalid ProtoRuntimeTypes desc_builder non-zero SubBuilder", func(f *Fact) {
-			f.ProtoRuntimeTypes = []ProtoRuntimeTypeFact{{
-				Type:       TypeRef{Pkg: "example.com/p", Name: "Builder"},
-				Role:       ProtoRoleDescBuilder,
-				SubBuilder: TypeRef{Pkg: "example.com/p", Name: "Sub"},
-				GuardTypes: []TypeRef{{Pkg: "example.com/p", Name: "File"}},
+			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
+				Type:       syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Builder"},
+				Role:       protoaudit.ProtoRoleDescBuilder,
+				SubBuilder: syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Sub"},
+				GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "File"}},
 			}}
 		}},
 		{"invalid ProtoRuntimeTypes desc_builder AllowedHelpers", func(f *Fact) {
-			f.ProtoRuntimeTypes = []ProtoRuntimeTypeFact{{
-				Type:           TypeRef{Pkg: "example.com/p", Name: "Builder"},
-				Role:           ProtoRoleDescBuilder,
-				AllowedHelpers: []FuncKey{validFn},
-				GuardTypes:     []TypeRef{{Pkg: "example.com/p", Name: "File"}},
+			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
+				Type:           syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Builder"},
+				Role:           protoaudit.ProtoRoleDescBuilder,
+				AllowedHelpers: []syntaxutil.FuncKey{validFn},
+				GuardTypes:     []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "File"}},
 			}}
 		}},
 		{"invalid ProtoRuntimeTypes enum GuardTypes", func(f *Fact) {
-			f.ProtoRuntimeTypes = []ProtoRuntimeTypeFact{{
-				Type:       TypeRef{Pkg: "example.com/p", Name: "EnumInfo"},
-				Role:       ProtoRoleEnum,
-				GuardTypes: []TypeRef{{Pkg: "example.com/p", Name: "Methods"}},
+			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
+				Type:       syntaxutil.TypeRef{Pkg: "example.com/p", Name: "EnumInfo"},
+				Role:       protoaudit.ProtoRoleEnum,
+				GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "Methods"}},
 			}}
 		}},
 		{"invalid ProtoRuntimeTypes message malformed GuardTypes", func(f *Fact) {
-			f.ProtoRuntimeTypes = []ProtoRuntimeTypeFact{{
-				Type:       TypeRef{Pkg: "example.com/p", Name: "MessageInfo"},
-				Role:       ProtoRoleMessage,
-				GuardTypes: []TypeRef{{Pkg: "example.com/p", Name: ""}},
+			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
+				Type:       syntaxutil.TypeRef{Pkg: "example.com/p", Name: "MessageInfo"},
+				Role:       protoaudit.ProtoRoleMessage,
+				GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: ""}},
 			}}
 		}},
 		{"invalid GrpcServiceVars qualified type name", func(f *Fact) {
-			f.GrpcServiceVars = []GrpcServiceVarFact{{
+			f.GrpcServiceVars = []protoaudit.GrpcServiceVarFact{{
 				Key:     "example.com/p.Desc",
-				SvcDesc: TypeRef{Pkg: "example.com/grpc", Name: "a.ServiceDesc"},
+				SvcDesc: syntaxutil.TypeRef{Pkg: "example.com/grpc", Name: "a.ServiceDesc"},
 			}}
 		}},
 		{"invalid MutatedStructTypes empty name", func(f *Fact) {
-			f.MutatedStructTypes = []TypeRef{{Pkg: "example.com/p", Name: ""}}
+			f.MutatedStructTypes = []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: ""}}
 		}},
 		{"invalid DirectVarWrites bare symbol", func(f *Fact) {
 			f.DirectVarWrites = []string{"bare"}
@@ -562,40 +572,40 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			f.DirectVarWrites = []string{"example.com/p.x\x00y"}
 		}},
 		{"invalid ConditionalStructMutations missing guards", func(f *Fact) {
-			f.ConditionalStructMutations = []ConditionalStructMutation{{
-				Struct: TypeRef{Pkg: "example.com/p", Name: "S"},
+			f.ConditionalStructMutations = []syntaxutil.ConditionalStructMutation{{
+				Struct: syntaxutil.TypeRef{Pkg: "example.com/p", Name: "S"},
 			}}
 		}},
 		{"invalid ConditionalStructMutations bad Struct", func(f *Fact) {
-			f.ConditionalStructMutations = []ConditionalStructMutation{{
-				Struct:   TypeRef{Pkg: "example.com/p", Name: ""},
+			f.ConditionalStructMutations = []syntaxutil.ConditionalStructMutation{{
+				Struct:   syntaxutil.TypeRef{Pkg: "example.com/p", Name: ""},
 				GuardPkg: "example.com/dep",
 			}}
 		}},
 		{"invalid ConditionalStructMutations nul GuardPkg", func(f *Fact) {
-			f.ConditionalStructMutations = []ConditionalStructMutation{{
-				Struct:   TypeRef{Pkg: "example.com/p", Name: "S"},
+			f.ConditionalStructMutations = []syntaxutil.ConditionalStructMutation{{
+				Struct:   syntaxutil.TypeRef{Pkg: "example.com/p", Name: "S"},
 				GuardPkg: "example.com/d\x00p",
 			}}
 		}},
 		{"invalid ConditionalStructMutations bad GuardStruct", func(f *Fact) {
-			f.ConditionalStructMutations = []ConditionalStructMutation{{
-				Struct:      TypeRef{Pkg: "example.com/p", Name: "S"},
-				GuardStruct: TypeRef{Pkg: "example.com/dep", Name: "a.b"},
+			f.ConditionalStructMutations = []syntaxutil.ConditionalStructMutation{{
+				Struct:      syntaxutil.TypeRef{Pkg: "example.com/p", Name: "S"},
+				GuardStruct: syntaxutil.TypeRef{Pkg: "example.com/dep", Name: "a.b"},
 			}}
 		}},
 		{"invalid ConditionalStructMutations RequireDescBuilderGuard without GuardStruct", func(f *Fact) {
-			f.ConditionalStructMutations = []ConditionalStructMutation{{
-				Struct:                  TypeRef{Pkg: "example.com/p", Name: "S"},
+			f.ConditionalStructMutations = []syntaxutil.ConditionalStructMutation{{
+				Struct:                  syntaxutil.TypeRef{Pkg: "example.com/p", Name: "S"},
 				GuardPkg:                "example.com/dep",
 				RequireDescBuilderGuard: true,
 			}}
 		}},
 		{"invalid ConditionalStructMutations multiple modes", func(f *Fact) {
-			f.ConditionalStructMutations = []ConditionalStructMutation{{
-				Struct:      TypeRef{Pkg: "example.com/p", Name: "S"},
+			f.ConditionalStructMutations = []syntaxutil.ConditionalStructMutation{{
+				Struct:      syntaxutil.TypeRef{Pkg: "example.com/p", Name: "S"},
 				GuardPkg:    "example.com/dep",
-				GuardStruct: TypeRef{Pkg: "example.com/dep", Name: "G"},
+				GuardStruct: syntaxutil.TypeRef{Pkg: "example.com/dep", Name: "G"},
 			}}
 		}},
 		{"invalid CarrierImportCalls without NoPostInitCarrierWrites", func(f *Fact) {
@@ -620,11 +630,11 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			fact := Fact{
 				Declares:    []string{"example.com/p.v"},
 				EnvCallable: []string{"example.com/p.v"},
-				AttributedUses: []AttributedUse{
+				AttributedUses: []syntaxutil.AttributedUse{
 					{Func: unusedFn, Key: "example.com/p.v"},
 				},
-				FuncRefs: []FuncRef{
-					{Callee: validFn, Region: RefRegion{Kind: RegionInit}},
+				FuncRefs: []syntaxutil.FuncRef{
+					{Callee: validFn, Region: syntaxutil.RefRegion{Kind: syntaxutil.RegionInit}},
 				},
 			}
 			tc.mutate(&fact)
@@ -643,8 +653,8 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 	// fact has Declares == nil and carries a partially malformed dependency, deferral,
 	// opacity, or call-region edge, ResolveEnvAudit, NewDeferralResolution, and Compose
 	// must poison the affected symbol/carrier rather than dropping the broken precondition.
-	helperFn := FuncKey{Pkg: "example.com/p", Name: "Helper"}
-	helperParam := ParamKey{Func: helperFn, Index: 0}
+	helperFn := syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Helper"}
+	helperParam := syntaxutil.ParamKey{Func: helperFn, Index: 0}
 	crossFactCases := []struct {
 		name       string
 		ownerFact  Fact
@@ -656,11 +666,11 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			ownerFact: Fact{
 				Declares:    []string{"example.com/p.v"},
 				EnvCallable: []string{"example.com/p.v"},
-				EnvCallUses: []EnvCallUse{{Key: "example.com/p.v", Callee: helperFn}},
+				EnvCallUses: []syntaxutil.EnvCallUse{{Key: "example.com/p.v", Callee: helperFn}},
 			},
 			helperFact: Fact{
-				ReturnEnvFree: []FuncKey{helperFn},
-				ReturnEnvDeps: []FuncDepEdge{{Func: helperFn, Callee: FuncKey{}}},
+				ReturnEnvFree: []syntaxutil.FuncKey{helperFn},
+				ReturnEnvDeps: []syntaxutil.FuncDepEdge{{Func: helperFn, Callee: syntaxutil.FuncKey{}}},
 			},
 			check: func(t *testing.T, ea *EnvAuditResolution, dr *DeferralResolution, cs ConeState) {
 				if ea.Resolved[helperFn] || dr.EnvFreeResolved[helperFn] || cs.Downgraded == "" {
@@ -673,11 +683,11 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			ownerFact: Fact{
 				Declares:    []string{"example.com/p.v"},
 				EnvCallable: []string{"example.com/p.v"},
-				EnvCallUses: []EnvCallUse{{Key: "example.com/p.v", Callee: helperFn}},
+				EnvCallUses: []syntaxutil.EnvCallUse{{Key: "example.com/p.v", Callee: helperFn}},
 			},
 			helperFact: Fact{
-				ReturnEnvFree:          []FuncKey{helperFn},
-				ReturnEnvInsertionDeps: []FuncInsertionDepEdge{{Func: helperFn, Dep: EnvAuditTarget{Func: helperFn, ParamIndex: -2}}},
+				ReturnEnvFree:          []syntaxutil.FuncKey{helperFn},
+				ReturnEnvInsertionDeps: []syntaxutil.FuncInsertionDepEdge{{Func: helperFn, Dep: syntaxutil.EnvAuditTarget{Func: helperFn, ParamIndex: -2}}},
 			},
 			check: func(t *testing.T, ea *EnvAuditResolution, _ *DeferralResolution, cs ConeState) {
 				if ea.Resolved[helperFn] || cs.Downgraded == "" {
@@ -691,8 +701,8 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 				Declares: []string{"example.com/p.v"},
 			},
 			helperFact: Fact{
-				ParamInsertionFree: []ParamKey{helperParam},
-				ParamInsertionDeps: []ParamInsertionDepEdge{{Param: helperParam, Dep: EnvAuditTarget{ParamIndex: 0}}},
+				ParamInsertionFree: []syntaxutil.ParamKey{helperParam},
+				ParamInsertionDeps: []syntaxutil.ParamInsertionDepEdge{{Param: helperParam, Dep: syntaxutil.EnvAuditTarget{ParamIndex: 0}}},
 			},
 			check: func(t *testing.T, ea *EnvAuditResolution, _ *DeferralResolution, _ ConeState) {
 				if ea.InsResolved[helperParam] {
@@ -704,13 +714,13 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			name: "cross-fact malformed ParamLeakFreeDeps poisons param",
 			ownerFact: Fact{
 				Declares:      []string{"example.com/p.v"},
-				ParamLeakFree: []ParamKey{{Func: FuncKey{Pkg: "example.com/p", Name: "clean"}, Index: 0}},
-				ParamUses:     []VarParamUse{{Key: "example.com/p.v", Param: helperParam}},
+				ParamLeakFree: []syntaxutil.ParamKey{{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "clean"}, Index: 0}},
+				ParamUses:     []syntaxutil.VarParamUse{{Key: "example.com/p.v", Param: helperParam}},
 			},
 			helperFact: Fact{
-				ParamLeakFree: []ParamKey{helperParam},
-				ParamLeakFreeDeps: []ParamDepEdge{
-					{Own: helperParam, Dep: ParamKey{Func: FuncKey{Pkg: "example.com/p", Name: "clean"}, Index: 0}},
+				ParamLeakFree: []syntaxutil.ParamKey{helperParam},
+				ParamLeakFreeDeps: []syntaxutil.ParamDepEdge{
+					{Own: helperParam, Dep: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "clean"}, Index: 0}},
 					{Own: helperParam},
 				},
 			},
@@ -724,13 +734,13 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			name: "cross-fact malformed ParamRetentionFreeDeps poisons param",
 			ownerFact: Fact{
 				Declares:           []string{"example.com/p.v"},
-				ParamRetentionFree: []ParamKey{{Func: FuncKey{Pkg: "example.com/p", Name: "clean"}, Index: 0}},
-				InitParamUses:      []VarParamUse{{Key: "example.com/p.v", Param: helperParam}},
+				ParamRetentionFree: []syntaxutil.ParamKey{{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "clean"}, Index: 0}},
+				InitParamUses:      []syntaxutil.VarParamUse{{Key: "example.com/p.v", Param: helperParam}},
 			},
 			helperFact: Fact{
-				ParamRetentionFree: []ParamKey{helperParam},
-				ParamRetentionFreeDeps: []ParamDepEdge{
-					{Own: helperParam, Dep: ParamKey{Func: FuncKey{Pkg: "example.com/p", Name: "clean"}, Index: 0}},
+				ParamRetentionFree: []syntaxutil.ParamKey{helperParam},
+				ParamRetentionFreeDeps: []syntaxutil.ParamDepEdge{
+					{Own: helperParam, Dep: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "clean"}, Index: 0}},
 					{Own: helperParam},
 				},
 			},
@@ -747,7 +757,7 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 				Opaque:   []string{"example.com/p.v"},
 			},
 			helperFact: Fact{
-				OpaqueDeps: []OpaqueDep{{Own: "example.com/p.v", Dep: "bad\x00dep"}},
+				OpaqueDeps: []syntaxutil.OpaqueDep{{Own: "example.com/p.v", Dep: "bad\x00dep"}},
 			},
 			check: func(t *testing.T, _ *EnvAuditResolution, dr *DeferralResolution, _ ConeState) {
 				if !dr.NotOpaque["example.com/p.v"] {
@@ -759,10 +769,10 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			name: "cross-fact malformed FieldParamDefer poisons owner",
 			ownerFact: Fact{
 				Declares:       []string{"example.com/p.v"},
-				FieldParamUses: []FieldPosKey{{Owner: "example.com/p.v", Field: "fn", Index: 0}},
+				FieldParamUses: []syntaxutil.FieldPosKey{{Owner: "example.com/p.v", Field: "fn", Index: 0}},
 			},
 			helperFact: Fact{
-				FieldParamDefer: []FieldParamDefer{{Pos: FieldPosKey{Owner: "example.com/p.v", Field: "fn", Index: -1}, Param: helperParam}},
+				FieldParamDefer: []syntaxutil.FieldParamDefer{{Pos: syntaxutil.FieldPosKey{Owner: "example.com/p.v", Field: "fn", Index: -1}, Param: helperParam}},
 			},
 			check: func(t *testing.T, _ *EnvAuditResolution, dr *DeferralResolution, cs ConeState) {
 				if ok, _ := dr.FieldPopulationProves("example.com/p.v", "fn", 0); ok || cs.Downgraded == "" {
@@ -774,12 +784,12 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			name: "cross-fact malformed ReturnFieldParamDefer poisons constructor",
 			ownerFact: Fact{
 				Declares:       []string{"example.com/p.v"},
-				EnvCallUses:    []EnvCallUse{{Key: "example.com/p.v", Callee: helperFn}},
-				FieldParamUses: []FieldPosKey{{Owner: "example.com/p.v", Field: "fn", Index: 0}},
+				EnvCallUses:    []syntaxutil.EnvCallUse{{Key: "example.com/p.v", Callee: helperFn}},
+				FieldParamUses: []syntaxutil.FieldPosKey{{Owner: "example.com/p.v", Field: "fn", Index: 0}},
 			},
 			helperFact: Fact{
-				ReturnEnvFree:         []FuncKey{helperFn},
-				ReturnFieldParamDefer: []ReturnFieldParamDefer{{Pos: ReturnFieldPosKey{Func: helperFn, Field: "", Index: 0}, Param: helperParam}},
+				ReturnEnvFree:         []syntaxutil.FuncKey{helperFn},
+				ReturnFieldParamDefer: []syntaxutil.ReturnFieldParamDefer{{Pos: syntaxutil.ReturnFieldPosKey{Func: helperFn, Field: "", Index: 0}, Param: helperParam}},
 			},
 			check: func(t *testing.T, _ *EnvAuditResolution, dr *DeferralResolution, cs ConeState) {
 				if ok, _ := dr.FieldPopulationProves("example.com/p.v", "fn", 0); ok || cs.Downgraded == "" {
@@ -791,11 +801,11 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			name: "cross-fact malformed FuncRefs forces non-init reachability",
 			ownerFact: Fact{
 				Declares:       []string{"example.com/p.v"},
-				AttributedUses: []AttributedUse{{Func: validFn, Key: "example.com/p.v"}},
-				FuncRefs:       []FuncRef{{Callee: validFn, Region: RefRegion{Kind: RegionInit}}},
+				AttributedUses: []syntaxutil.AttributedUse{{Func: validFn, Key: "example.com/p.v"}},
+				FuncRefs:       []syntaxutil.FuncRef{{Callee: validFn, Region: syntaxutil.RefRegion{Kind: syntaxutil.RegionInit}}},
 			},
 			helperFact: Fact{
-				FuncRefs: []FuncRef{{Callee: validFn, Region: RefRegion{Kind: 99}}},
+				FuncRefs: []syntaxutil.FuncRef{{Callee: validFn, Region: syntaxutil.RefRegion{Kind: 99}}},
 			},
 			check: func(t *testing.T, _ *EnvAuditResolution, _ *DeferralResolution, cs ConeState) {
 				if cs.Downgraded == "" {
@@ -807,10 +817,10 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			name: "cross-fact malformed ExportedSeams blocks valid exported seam",
 			ownerFact: Fact{
 				Declares:      []string{"example.com/p.v"},
-				ExportedSeams: []ExportedSeam{{Func: validFn, Key: "example.com/p.v"}},
+				ExportedSeams: []syntaxutil.ExportedSeam{{Func: validFn, Key: "example.com/p.v"}},
 			},
 			helperFact: Fact{
-				ExportedSeams: []ExportedSeam{{Func: FuncKey{}, Key: ""}},
+				ExportedSeams: []syntaxutil.ExportedSeam{{Func: syntaxutil.FuncKey{}, Key: ""}},
 			},
 			check: func(t *testing.T, _ *EnvAuditResolution, _ *DeferralResolution, cs ConeState) {
 				if cs.Downgraded == "" || !cs.CulpritSites["example.com/p.v"].Unattributed {
@@ -822,10 +832,10 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			name: "cross-fact malformed NonSeqFuncUses blocks valid exported seam",
 			ownerFact: Fact{
 				Declares:      []string{"example.com/p.v"},
-				ExportedSeams: []ExportedSeam{{Func: validFn, Key: "example.com/p.v"}},
+				ExportedSeams: []syntaxutil.ExportedSeam{{Func: validFn, Key: "example.com/p.v"}},
 			},
 			helperFact: Fact{
-				NonSeqFuncUses: []FuncKey{{Pkg: "example.com/p", Name: ""}},
+				NonSeqFuncUses: []syntaxutil.FuncKey{{Pkg: "example.com/p", Name: ""}},
 			},
 			check: func(t *testing.T, _ *EnvAuditResolution, _ *DeferralResolution, cs ConeState) {
 				if cs.Downgraded == "" || !cs.CulpritSites["example.com/p.v"].Unattributed {
@@ -837,10 +847,10 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			name: "cross-fact malformed SeqFuncEdges blocks valid exported seam",
 			ownerFact: Fact{
 				Declares:      []string{"example.com/p.v"},
-				ExportedSeams: []ExportedSeam{{Func: validFn, Key: "example.com/p.v"}},
+				ExportedSeams: []syntaxutil.ExportedSeam{{Func: validFn, Key: "example.com/p.v"}},
 			},
 			helperFact: Fact{
-				SeqFuncEdges: []FuncDepEdge{{}},
+				SeqFuncEdges: []syntaxutil.FuncDepEdge{{}},
 			},
 			check: func(t *testing.T, _ *EnvAuditResolution, _ *DeferralResolution, cs ConeState) {
 				if cs.Downgraded == "" || !cs.CulpritSites["example.com/p.v"].Unattributed {
@@ -852,10 +862,10 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			name: "cross-fact malformed ParallelFuncs blocks valid exported seam",
 			ownerFact: Fact{
 				Declares:      []string{"example.com/p.v"},
-				ExportedSeams: []ExportedSeam{{Func: validFn, Key: "example.com/p.v"}},
+				ExportedSeams: []syntaxutil.ExportedSeam{{Func: validFn, Key: "example.com/p.v"}},
 			},
 			helperFact: Fact{
-				ParallelFuncs: []FuncKey{{Name: "EnterParallel"}},
+				ParallelFuncs: []syntaxutil.FuncKey{{Name: "EnterParallel"}},
 			},
 			check: func(t *testing.T, _ *EnvAuditResolution, _ *DeferralResolution, cs ConeState) {
 				if cs.Downgraded == "" || !cs.CulpritSites["example.com/p.v"].Unattributed {
@@ -867,10 +877,10 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			name: "cross-fact malformed ParallelEdges blocks valid exported seam",
 			ownerFact: Fact{
 				Declares:      []string{"example.com/p.v"},
-				ExportedSeams: []ExportedSeam{{Func: validFn, Key: "example.com/p.v"}},
+				ExportedSeams: []syntaxutil.ExportedSeam{{Func: validFn, Key: "example.com/p.v"}},
 			},
 			helperFact: Fact{
-				ParallelEdges: []FuncDepEdge{{Func: validFn}},
+				ParallelEdges: []syntaxutil.FuncDepEdge{{Func: validFn}},
 			},
 			check: func(t *testing.T, _ *EnvAuditResolution, _ *DeferralResolution, cs ConeState) {
 				if cs.Downgraded == "" || !cs.CulpritSites["example.com/p.v"].Unattributed {
@@ -899,13 +909,13 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			ownerFact: Fact{
 				Declares: []string{"example.com/p.v"},
 				Mutates:  []string{"example.com/p.v"},
-				GrpcServiceVars: []GrpcServiceVarFact{{
+				GrpcServiceVars: []protoaudit.GrpcServiceVarFact{{
 					Key:     "example.com/p.v",
-					SvcDesc: TypeRef{Pkg: "example.com/grpc", Name: "ServiceDesc"},
+					SvcDesc: syntaxutil.TypeRef{Pkg: "example.com/grpc", Name: "ServiceDesc"},
 				}},
 			},
 			helperFact: Fact{
-				MutatedStructTypes: []TypeRef{{Pkg: "example.com/grpc", Name: ""}},
+				MutatedStructTypes: []syntaxutil.TypeRef{{Pkg: "example.com/grpc", Name: ""}},
 			},
 			check: func(t *testing.T, _ *EnvAuditResolution, _ *DeferralResolution, cs ConeState) {
 				if cs.Downgraded == "" || !cs.CulpritSites["example.com/p.v"].Unattributed {
@@ -918,14 +928,14 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			ownerFact: Fact{
 				Declares: []string{"example.com/p.v"},
 				Mutates:  []string{"example.com/p.v"},
-				GrpcServiceVars: []GrpcServiceVarFact{{
+				GrpcServiceVars: []protoaudit.GrpcServiceVarFact{{
 					Key:     "example.com/p.v",
-					SvcDesc: TypeRef{Pkg: "example.com/grpc", Name: "ServiceDesc"},
+					SvcDesc: syntaxutil.TypeRef{Pkg: "example.com/grpc", Name: "ServiceDesc"},
 				}},
 			},
 			helperFact: Fact{
-				ConditionalStructMutations: []ConditionalStructMutation{{
-					Struct: TypeRef{Pkg: "example.com/p", Name: "S"},
+				ConditionalStructMutations: []syntaxutil.ConditionalStructMutation{{
+					Struct: syntaxutil.TypeRef{Pkg: "example.com/p", Name: "S"},
 				}},
 			},
 			check: func(t *testing.T, _ *EnvAuditResolution, _ *DeferralResolution, cs ConeState) {
@@ -939,9 +949,9 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			ownerFact: Fact{
 				Declares: []string{"example.com/p.v"},
 				Mutates:  []string{"example.com/p.v"},
-				GrpcServiceVars: []GrpcServiceVarFact{{
+				GrpcServiceVars: []protoaudit.GrpcServiceVarFact{{
 					Key:     "example.com/p.v",
-					SvcDesc: TypeRef{Pkg: "example.com/grpc", Name: "ServiceDesc"},
+					SvcDesc: syntaxutil.TypeRef{Pkg: "example.com/grpc", Name: "ServiceDesc"},
 				}},
 			},
 			helperFact: Fact{
@@ -977,8 +987,8 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 		{
 			name: "cross-pkg malformed ConditionalStructMutations",
 			depFact: Fact{
-				ConditionalStructMutations: []ConditionalStructMutation{{
-					Struct:                  TypeRef{Pkg: "example.com/dep", Name: "S"},
+				ConditionalStructMutations: []syntaxutil.ConditionalStructMutation{{
+					Struct:                  syntaxutil.TypeRef{Pkg: "example.com/dep", Name: "S"},
 					GuardPkg:                "example.com/other",
 					RequireDescBuilderGuard: true,
 				}},
@@ -994,22 +1004,22 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 		{
 			name: "cross-pkg malformed NonMutatingMethods invalid FuncKey",
 			depFact: Fact{
-				NonMutatingMethods: []FuncKey{{Pkg: "example.com/dep", Name: ""}},
+				NonMutatingMethods: []syntaxutil.FuncKey{{Pkg: "example.com/dep", Name: ""}},
 			},
 		},
 		{
 			name: "cross-pkg malformed NonMutatingMethods mismatched Pkg",
 			depFact: Fact{
-				NonMutatingMethods: []FuncKey{{Pkg: "example.com/other", Name: " T.M"}},
+				NonMutatingMethods: []syntaxutil.FuncKey{{Pkg: "example.com/other", Name: " T.M"}},
 			},
 		},
 		{
 			name: "cross-pkg malformed ConditionalStructMutations RequireNonMutatingMethod",
 			depFact: Fact{
-				ConditionalStructMutations: []ConditionalStructMutation{{
-					Struct:                   TypeRef{Pkg: "example.com/dep", Name: "S"},
+				ConditionalStructMutations: []syntaxutil.ConditionalStructMutation{{
+					Struct:                   syntaxutil.TypeRef{Pkg: "example.com/dep", Name: "S"},
 					GuardPkg:                 "example.com/other",
-					RequireNonMutatingMethod: FuncKey{Pkg: "example.com/other", Name: "T.M"},
+					RequireNonMutatingMethod: syntaxutil.FuncKey{Pkg: "example.com/other", Name: "T.M"},
 				}},
 			},
 		},
@@ -1023,9 +1033,9 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 				"example.com/p": {{
 					Declares: []string{"example.com/p.v"},
 					Mutates:  []string{"example.com/p.v"},
-					GrpcServiceVars: []GrpcServiceVarFact{{
+					GrpcServiceVars: []protoaudit.GrpcServiceVarFact{{
 						Key:     "example.com/p.v",
-						SvcDesc: TypeRef{Pkg: "example.com/grpc", Name: "ServiceDesc"},
+						SvcDesc: syntaxutil.TypeRef{Pkg: "example.com/grpc", Name: "ServiceDesc"},
 					}},
 				}},
 				"example.com/dep": {xpkg.depFact},
@@ -1102,27 +1112,27 @@ func ConflictFn(x int) int { return x }
 	// 1. Recursive clean vs dirty types terminate and classify accurately.
 	recClean := lookupType("RecursiveClean")
 	recDirty := lookupType("RecursiveDirty")
-	for _, policy := range []CarrierWalkPolicy{CarrierPolicyClosure, CarrierPolicyConsumer, CarrierPolicyAlias} {
-		if WalkDynamicCarrier(true, recClean, make(map[types.Type]bool), policy) {
+	for _, policy := range []refconfine.CarrierWalkPolicy{refconfine.CarrierPolicyClosure, refconfine.CarrierPolicyConsumer, refconfine.CarrierPolicyAlias} {
+		if refconfine.WalkDynamicCarrier(true, recClean, make(map[types.Type]bool), policy) {
 			t.Fatalf("RecursiveClean classified as carrier under policy %v", policy)
 		}
 	}
-	if !TypeMayCarryUnknownDynamic(true, recDirty) || !TypeHandsOutDynamicAlias(true, recDirty) {
+	if !refconfine.TypeMayCarryUnknownDynamic(true, recDirty) || !refconfine.TypeHandsOutDynamicAlias(true, recDirty) {
 		t.Fatal("RecursiveDirty (*RecursiveDirty reaching func()) must carry dynamic and hand out alias")
 	}
 
 	// 2. Plain func() carries dynamic under Closure/Consumer, but does NOT hand out alias by value.
 	fnType := types.NewSignatureType(nil, nil, nil, nil, nil, false)
-	if !TypeMayCarryUnknownDynamic(true, fnType) {
+	if !refconfine.TypeMayCarryUnknownDynamic(true, fnType) {
 		t.Fatal("func() must carry dynamic under consumer policy")
 	}
-	if TypeHandsOutDynamicAlias(true, fnType) {
+	if refconfine.TypeHandsOutDynamicAlias(true, fnType) {
 		t.Fatal("func() by value must not hand out dynamic alias")
 	}
-	if !TypeHandsOutDynamicAlias(true, types.NewSlice(fnType)) {
+	if !refconfine.TypeHandsOutDynamicAlias(true, types.NewSlice(fnType)) {
 		t.Fatal("[]func() must hand out dynamic alias")
 	}
-	if !TypeMayCarryUnknownDynamic(true, types.Typ[types.UnsafePointer]) {
+	if !refconfine.TypeMayCarryUnknownDynamic(true, types.Typ[types.UnsafePointer]) {
 		t.Fatal("unsafe.Pointer must carry dynamic")
 	}
 
@@ -1131,16 +1141,16 @@ func ConflictFn(x int) int { return x }
 	atomicClean := lookupType("AtomicClean")
 	atomicDirty := lookupType("AtomicDirty")
 	wrappedAtomic := lookupType("WrappedAtomic")
-	if TypeMayCarryUnknownDynamic(true, atomicClean) {
+	if refconfine.TypeMayCarryUnknownDynamic(true, atomicClean) {
 		t.Fatal("audited atomic.Pointer[int] must not carry dynamic")
 	}
-	if !TypeMayCarryUnknownDynamic(false, atomicClean) {
+	if !refconfine.TypeMayCarryUnknownDynamic(false, atomicClean) {
 		t.Fatal("unaudited atomic.Pointer[int] must fail closed")
 	}
-	if !TypeMayCarryUnknownDynamic(true, atomicDirty) {
+	if !refconfine.TypeMayCarryUnknownDynamic(true, atomicDirty) {
 		t.Fatal("atomic.Pointer[func()] must carry dynamic")
 	}
-	if !TypeMayCarryUnknownDynamic(true, wrappedAtomic) {
+	if !refconfine.TypeMayCarryUnknownDynamic(true, wrappedAtomic) {
 		t.Fatal("defined wrapper over atomic.Pointer[int] must fail closed")
 	}
 
@@ -1152,19 +1162,19 @@ func ConflictFn(x int) int { return x }
 		}
 		return fn.Type().(*types.Signature)
 	}
-	if term := OpenWorldTerm(true, lookupSig("GenericClean")); term != "" {
+	if term := refconfine.OpenWorldTerm(true, lookupSig("GenericClean")); term != "" {
 		t.Fatalf("OpenWorldTerm(GenericClean) = %q, want empty", term)
 	}
-	if term := OpenWorldTerm(true, lookupSig("GenericDirty")); !strings.Contains(term, "type parameter T") {
+	if term := refconfine.OpenWorldTerm(true, lookupSig("GenericDirty")); !strings.Contains(term, "type parameter T") {
 		t.Fatalf("OpenWorldTerm(GenericDirty) = %q, want type parameter T refusal", term)
 	}
-	if term := OpenWorldTerm(true, lookupSig("GenericMethodConstraint")); !strings.Contains(term, "type parameter T") {
+	if term := refconfine.OpenWorldTerm(true, lookupSig("GenericMethodConstraint")); !strings.Contains(term, "type parameter T") {
 		t.Fatalf("OpenWorldTerm(GenericMethodConstraint) = %q, want type parameter T refusal", term)
 	}
-	if term := OpenWorldTerm(true, lookupSig("HarnessTest")); term != "" {
+	if term := refconfine.OpenWorldTerm(true, lookupSig("HarnessTest")); term != "" {
 		t.Fatalf("OpenWorldTerm(HarnessTest) = %q, want empty", term)
 	}
-	if term := SignatureOpenWorldTerm(true, lookupSig("HarnessTest"), nil, false, CarrierPolicyConsumer); !strings.Contains(term, "parameter t") {
+	if term := refconfine.SignatureOpenWorldTerm(true, lookupSig("HarnessTest"), nil, false, refconfine.CarrierPolicyConsumer); !strings.Contains(term, "parameter t") {
 		t.Fatalf("SignatureOpenWorldTerm(HarnessTest, allowHarness=false) = %q, want parameter t refusal", term)
 	}
 
@@ -1187,10 +1197,10 @@ func ConflictFn(x int) int { return x }
 	}
 
 	// 6. NodeDeclarationKey, ObjectDeclarationKey, and WalkLoadedSubjects handle nil inputs without panicking.
-	if got := NodeDeclarationKey(nil, nil); got != ":0" {
+	if got := syntaxutil.NodeDeclarationKey(nil, nil); got != ":0" {
 		t.Fatalf("NodeDeclarationKey(nil, nil) = %q, want :0", got)
 	}
-	if got := ObjectDeclarationKey(nil, nil); !strings.HasPrefix(got, "universe:") {
+	if got := syntaxutil.ObjectDeclarationKey(nil, nil); !strings.HasPrefix(got, "universe:") {
 		t.Fatalf("ObjectDeclarationKey(nil, nil) = %q, want universe:<nil>", got)
 	}
 	pkgNoTypesInfo := &packages.Package{
@@ -1213,7 +1223,7 @@ func FuzzComposeAndDeferralResolutionInvariants(f *testing.F) {
 			return
 		}
 		pkgs := []string{"example.com/p0", "example.com/p1", "example.com/p2"}
-		fns := []FuncKey{
+		fns := []syntaxutil.FuncKey{
 			{Pkg: pkgs[0], Name: "F0"},
 			{Pkg: pkgs[1], Name: "F1"},
 			{Pkg: pkgs[2], Name: "F2"},
@@ -1247,35 +1257,35 @@ func FuzzComposeAndDeferralResolutionInvariants(f *testing.F) {
 			case 0:
 				f.ReturnEnvFree = append(f.ReturnEnvFree, fnA)
 			case 1:
-				f.ReturnEnvDeps = append(f.ReturnEnvDeps, FuncDepEdge{Func: fnA, Callee: fnB})
+				f.ReturnEnvDeps = append(f.ReturnEnvDeps, syntaxutil.FuncDepEdge{Func: fnA, Callee: fnB})
 			case 2:
-				f.ParamLeakFree = append(f.ParamLeakFree, ParamKey{Func: fnA, Index: int(b & 1)})
+				f.ParamLeakFree = append(f.ParamLeakFree, syntaxutil.ParamKey{Func: fnA, Index: int(b & 1)})
 			case 3:
-				f.ParamLeakFreeDeps = append(f.ParamLeakFreeDeps, ParamDepEdge{
-					Own: ParamKey{Func: fnA, Index: int(b & 1)},
-					Dep: ParamKey{Func: fnB, Index: int((b >> 1) & 1)},
+				f.ParamLeakFreeDeps = append(f.ParamLeakFreeDeps, syntaxutil.ParamDepEdge{
+					Own: syntaxutil.ParamKey{Func: fnA, Index: int(b & 1)},
+					Dep: syntaxutil.ParamKey{Func: fnB, Index: int((b >> 1) & 1)},
 				})
 			case 4:
-				f.CarrierLinks = append(f.CarrierLinks, CarrierLink{From: vA, To: vB})
+				f.CarrierLinks = append(f.CarrierLinks, syntaxutil.CarrierLink{From: vA, To: vB})
 			case 5:
 				f.Mutates = append(f.Mutates, vA)
 			case 6:
-				f.FieldParamDefer = append(f.FieldParamDefer, FieldParamDefer{
-					Pos:   FieldPosKey{Owner: vA, Field: "fn", Index: 0},
-					Param: ParamKey{Func: fnA, Index: int(b & 1)},
+				f.FieldParamDefer = append(f.FieldParamDefer, syntaxutil.FieldParamDefer{
+					Pos:   syntaxutil.FieldPosKey{Owner: vA, Field: "fn", Index: 0},
+					Param: syntaxutil.ParamKey{Func: fnA, Index: int(b & 1)},
 				})
 			case 7:
-				f.EnvCallUses = append(f.EnvCallUses, EnvCallUse{Key: vA, Callee: fnA})
+				f.EnvCallUses = append(f.EnvCallUses, syntaxutil.EnvCallUse{Key: vA, Callee: fnA})
 			case 8:
-				f.ExportedSeams = append(f.ExportedSeams, ExportedSeam{Func: fnA, Key: vA})
+				f.ExportedSeams = append(f.ExportedSeams, syntaxutil.ExportedSeam{Func: fnA, Key: vA})
 			case 9:
 				f.NonSeqFuncUses = append(f.NonSeqFuncUses, fnA)
 			case 10:
-				f.SeqFuncEdges = append(f.SeqFuncEdges, FuncDepEdge{Func: fnA, Callee: fnB})
+				f.SeqFuncEdges = append(f.SeqFuncEdges, syntaxutil.FuncDepEdge{Func: fnA, Callee: fnB})
 			case 11:
 				f.ParallelFuncs = append(f.ParallelFuncs, fnB)
 			case 12:
-				f.ParallelEdges = append(f.ParallelEdges, FuncDepEdge{Func: fnA, Callee: fnB})
+				f.ParallelEdges = append(f.ParallelEdges, syntaxutil.FuncDepEdge{Func: fnA, Callee: fnB})
 			}
 		}
 
@@ -5221,7 +5231,7 @@ func mutateTag(c *capsule) {
 }
 `,
 		}, nil)
-		ok := VerifyReadOnlyRefConfinement(pkg, RefConfineConfig{
+		ok := refconfine.VerifyReadOnlyRefConfinement(pkg, refconfine.Config{
 			AllowCompositeLitIntoSeedStruct: true,
 			AllowReturnFromUnexportedFunc:   true,
 			CanBeSeedStructCapsule:          func(*types.Named) bool { return true },
@@ -5256,7 +5266,7 @@ func (c *capsule) firstOrZero() int {
 `
 		runConfine := func(src string) bool {
 			pkg := mustTypecheckWithDeps(t, "example.com/captest", map[string]string{"cap.go": src}, nil)
-			return VerifyReadOnlyRefConfinement(pkg, RefConfineConfig{
+			return refconfine.VerifyReadOnlyRefConfinement(pkg, refconfine.Config{
 				AllowCompositeLitIntoSeedStruct: true,
 				AllowReturnFromUnexportedFunc:   true,
 				CanBeSeedStructCapsule:          func(*types.Named) bool { return true },
@@ -5457,7 +5467,7 @@ func (xi *ExtensionInfo) TypeDescriptor() *ExtTypeDesc {
 		t.Run("impl_"+badImpl.name, func(t *testing.T) {
 			pkg := mustTypecheckWithDeps(t, "example.com/proto/internal/impl", map[string]string{"impl.go": badImpl.src}, nil)
 			for _, rt := range FactOf(true, pkg, false).ProtoRuntimeTypes {
-				if rt.Type.Name == "MessageInfo" && rt.Role == ProtoRoleMessage {
+				if rt.Type.Name == "MessageInfo" && rt.Role == protoaudit.ProtoRoleMessage {
 					t.Fatalf("%s unexpectedly verified ProtoRoleMessage: %+v", badImpl.name, rt)
 				}
 			}
@@ -5471,25 +5481,25 @@ func (xi *ExtensionInfo) TypeDescriptor() *ExtTypeDesc {
 	}{
 		{
 			name: "enum_exported_int_slice",
-			role: ProtoRoleEnum,
+			role: protoaudit.ProtoRoleEnum,
 			typ:  "EnumInfo",
 			src:  strings.Replace(implSrc, "type EnumInfo struct {\n\tGoReflectType reflect.Type", "type EnumInfo struct {\n\tGoReflectType reflect.Type\n\tTags []int32", 1),
 		},
 		{
 			name: "enum_aliased_unexported_slice_mutated",
-			role: ProtoRoleEnum,
+			role: protoaudit.ProtoRoleEnum,
 			typ:  "EnumInfo",
 			src:  strings.Replace(implSrc, "type EnumInfo struct {\n\tGoReflectType reflect.Type", "type EnumInfo struct {\n\tGoReflectType reflect.Type\n\traw []byte", 1) + "\nfunc (ei *EnumInfo) Corrupt() { b := ei.raw; b[0] = 99 }\n",
 		},
 		{
 			name: "ext_exported_by_value_substruct",
-			role: ProtoRoleExtension,
+			role: protoaudit.ProtoRoleExtension,
 			typ:  "ExtensionInfo",
 			src:  strings.Replace(implSrc, "td            ExtTypeDesc", "td            ExtTypeDesc\n\tSub           ExtTypeDesc", 1),
 		},
 		{
 			name: "ext_aliased_unexported_slice_mutated_outside_once",
-			role: ProtoRoleExtension,
+			role: protoaudit.ProtoRoleExtension,
 			typ:  "ExtensionInfo",
 			src:  strings.Replace(implSrc, "td            ExtTypeDesc", "td            ExtTypeDesc\n\traw           []byte", 1) + "\nfunc (xi *ExtensionInfo) Corrupt() { s := xi.raw; s[0] = 99 }\n",
 		},
@@ -5509,7 +5519,7 @@ func (xi *ExtensionInfo) TypeDescriptor() *ExtTypeDesc {
 			"\nfunc clobberEnum(ei *EnumInfo) { if ei != nil { ei.Desc = \"bad\" } }\n",
 	}, nil)
 	factCrossFamily := FactOf(true, implCrossFamily, false)
-	if !slices.Contains(factCrossFamily.MutatedStructTypes, TypeRef{Pkg: "example.com/proto/internal/impl", Name: "EnumInfo"}) {
+	if !slices.Contains(factCrossFamily.MutatedStructTypes, syntaxutil.TypeRef{Pkg: "example.com/proto/internal/impl", Name: "EnumInfo"}) {
 		t.Fatalf("onceCone mutating unrelated EnumInfo failed to record EnumInfo in MutatedStructTypes: %+v", factCrossFamily.MutatedStructTypes)
 	}
 
@@ -5592,7 +5602,7 @@ func (tb Builder) Build() Out {
 }
 `}, map[string]*types.Package{"example.com/proto/internal/impl": implPkg.Types})
 	for _, rt := range FactOf(true, badBuilderPkg, false).ProtoRuntimeTypes {
-		if rt.Type.Name == "Builder" && rt.Role == ProtoRoleBuilder {
+		if rt.Type.Name == "Builder" && rt.Role == protoaudit.ProtoRoleBuilder {
 			t.Fatalf("builder assigning mutable direct Desc struct unexpectedly verified ProtoRoleBuilder: %+v", rt)
 		}
 	}
@@ -6651,7 +6661,7 @@ func Inspect() uintptr {
 	if !ok || holderNamed == nil {
 		t.Fatal("holder is not a *types.Named")
 	}
-	if !VerifyReadOnlyRefConfinement(pkg, RefConfineConfig{
+	if !refconfine.VerifyReadOnlyRefConfinement(pkg, refconfine.Config{
 		SeedExpr: func(expr ast.Expr) (bool, bool) {
 			id, ok := ast.Unparen(expr).(*ast.Ident)
 			if ok && pkg.TypesInfo.Uses[id] == seedObj {
@@ -6684,7 +6694,7 @@ func Leak() *int {
 	})
 	badSeedObj := badPkg.Types.Scope().Lookup("seed").(*types.Var)
 	badHolderNamed := badPkg.Types.Scope().Lookup("holder").(*types.TypeName).Type().(*types.Named)
-	if VerifyReadOnlyRefConfinement(badPkg, RefConfineConfig{
+	if refconfine.VerifyReadOnlyRefConfinement(badPkg, refconfine.Config{
 		SeedExpr: func(expr ast.Expr) (bool, bool) {
 			id, ok := ast.Unparen(expr).(*ast.Ident)
 			if ok && badPkg.TypesInfo.Uses[id] == badSeedObj {
@@ -6697,5 +6707,140 @@ func Leak() *int {
 		},
 	}) {
 		t.Fatal("VerifyReadOnlyRefConfinement unexpectedly accepted unsafe.SliceData on seed slice")
+	}
+}
+
+//gofresh:pure
+func TestDefects1To4BoundValueRangeCopyRootedSelectorValueSpecAndCrossPkgCarrierLinks(t *testing.T) {
+	// Defect 1: boundValueRetentionFreeJudged rejects init-time carrier smuggling via range or copy.
+	smugglePkg := mustTypecheckPackage(t, "example.com/smuggle", map[string]string{
+		"p.go": `package smuggle
+
+var globalHooks = []func(){func() {}}
+
+type Box struct {
+	slot  func()
+	slots []func()
+}
+
+func (b *Box) SmuggleViaRange() {
+	for _, fn := range globalHooks {
+		b.slot = fn
+	}
+}
+
+func (b *Box) SmuggleViaCopy() {
+	tmp := make([]func(), len(globalHooks))
+	copy(tmp, globalHooks)
+	b.slots = tmp
+}
+
+func (b *Box) CleanInitStore() {
+	b.slots = nil
+}
+`,
+	})
+	smuggleFact := FactOf(true, smugglePkg, false)
+	for _, badMethod := range []string{"Box.SmuggleViaRange", "Box.SmuggleViaCopy"} {
+		if slices.Contains(smuggleFact.ReceiverRetentionFree, syntaxutil.FuncKey{Pkg: "example.com/smuggle", Name: badMethod}) {
+			t.Fatalf("ReceiverRetentionFree unexpectedly admitted %s: %+v", badMethod, smuggleFact.ReceiverRetentionFree)
+		}
+	}
+	if !slices.Contains(smuggleFact.ReceiverRetentionFree, syntaxutil.FuncKey{Pkg: "example.com/smuggle", Name: "Box.CleanInitStore"}) {
+		t.Fatalf("ReceiverRetentionFree omitted Box.CleanInitStore: %+v", smuggleFact.ReceiverRetentionFree)
+	}
+
+	// Defect 2 & Defect 3: boundValueJudged rooted(n.X) on chained SelectorExpr/IndexExpr scalar reads,
+	// and receiverReadOnlyMethods ValueSpec local var bindings.
+	precPkg := mustTypecheckPackage(t, "example.com/prec", map[string]string{
+		"p.go": `package prec
+
+type Sub struct {
+	Count int
+}
+
+type Holder struct {
+	sub   *Sub
+	items []Sub
+	nums  []int
+}
+
+func ReadChainedScalar(h *Holder) int {
+	return h.sub.Count + h.items[0].Count
+}
+
+func (h *Holder) ReadViaVarSpec() int {
+	var local []int = h.nums
+	return len(local)
+}
+
+func (h *Holder) RangeScalarElems() int {
+	sum := 0
+	for i, v := range h.nums {
+		sum += i + v
+	}
+	return sum
+}
+
+var extSubSink []*Sub
+
+type PtrSliceHolder struct {
+	items []*Sub
+}
+
+func (h *PtrSliceHolder) RangeLeakIntoIndexLvalue() {
+	for _, extSubSink[0] = range h.items {
+	}
+}
+`,
+	})
+	precFact := FactOf(true, precPkg, false)
+	wantParam := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/prec", Name: "ReadChainedScalar"}, Index: 0}
+	if !slices.Contains(precFact.ParamLeakFree, wantParam) {
+		t.Fatalf("ParamLeakFree omitted ReadChainedScalar(h *Holder) on chained scalar field read: %+v", precFact.ParamLeakFree)
+	}
+	wantRecvRO := syntaxutil.FuncKey{Pkg: "example.com/prec", Name: "Holder.ReadViaVarSpec"}
+	if !slices.Contains(precFact.ReceiverReadOnly, wantRecvRO) {
+		t.Fatalf("ReceiverReadOnly omitted Holder.ReadViaVarSpec with local var ValueSpec: %+v", precFact.ReceiverReadOnly)
+	}
+	wantRangeScalarRO := syntaxutil.FuncKey{Pkg: "example.com/prec", Name: "Holder.RangeScalarElems"}
+	if !slices.Contains(precFact.ReceiverReadOnly, wantRangeScalarRO) {
+		t.Fatalf("ReceiverReadOnly omitted Holder.RangeScalarElems with scalar range loop vars: %+v", precFact.ReceiverReadOnly)
+	}
+	unwantedRangeLeakRO := syntaxutil.FuncKey{Pkg: "example.com/prec", Name: "PtrSliceHolder.RangeLeakIntoIndexLvalue"}
+	if slices.Contains(precFact.ReceiverReadOnly, unwantedRangeLeakRO) {
+		t.Fatalf("ReceiverReadOnly admitted PtrSliceHolder.RangeLeakIntoIndexLvalue with non-ident range lvalue: %+v", precFact.ReceiverReadOnly)
+	}
+
+	// Defect 4: initAliasedLocals records CarrierLinks for cross-package pkgB.ExportedCarrier = ownCarrier
+	// and SliceExpr LHS ownSlice[:1][0] = otherCarrier.
+	stdImp := inMemoryStdImporter(t)
+	pkgB := mustTypecheckWithStdImp(t, stdImp, "example.com/pkgb", map[string]string{
+		"b.go": `package pkgb
+var ExportedHook func()
+`,
+	}, nil)
+	pkgA := mustTypecheckWithStdImp(t, stdImp, "example.com/pkga", map[string]string{
+		"a.go": `package pkga
+import "example.com/pkgb"
+var (
+	ownHook   func()
+	sliceHook []func()
+	otherHook func()
+)
+func init() {
+	pkgb.ExportedHook = ownHook
+	sliceHook[:1][0] = otherHook
+}
+`,
+	}, map[string]*types.Package{"example.com/pkgb": pkgB.Types})
+	factA := FactOf(true, pkgA, false)
+	wantCrossLink := syntaxutil.CarrierLink{From: "example.com/pkgb.ExportedHook", To: "example.com/pkga.ownHook"}
+	wantSliceLink := syntaxutil.CarrierLink{From: "example.com/pkga.sliceHook", To: "example.com/pkga.otherHook"}
+	if !slices.Contains(factA.CarrierLinks, wantCrossLink) {
+		t.Fatalf("CarrierLinks missing cross-package init assignment %+v: got %+v", wantCrossLink, factA.CarrierLinks)
+	}
+	if !slices.Contains(factA.CarrierLinks, wantSliceLink) {
+		t.Fatalf("CarrierLinks missing SliceExpr LHS init assignment %+v: got %+v", wantSliceLink, factA.CarrierLinks)
 	}
 }

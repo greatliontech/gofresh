@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/closure"
-	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
+	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"go/ast"
 	"go/importer"
 	"go/parser"
@@ -149,19 +150,19 @@ func (Widget) External() int { return 2 }
 	if !contains(restored.Declares, wantKey) {
 		t.Fatalf("fact lost declaration content: %+v", restored)
 	}
-	if !slices.Contains(restored.AttributedUses, dynstate.AttributedUse{Func: dynstate.FuncKey{Pkg: "example.com/factsrc", Name: "Rebind"}, Key: "example.com/factsrc.Hook"}) {
+	if !slices.Contains(restored.AttributedUses, syntaxutil.AttributedUse{Func: syntaxutil.FuncKey{Pkg: "example.com/factsrc", Name: "Rebind"}, Key: "example.com/factsrc.Hook"}) {
 		t.Fatalf("fact lost the attributed mutation - a dropped attribution silently discharges a runtime rebind: %+v", restored)
 	}
-	if !slices.Contains(restored.FuncRefs, dynstate.FuncRef{Callee: dynstate.FuncKey{Pkg: "example.com/factsrc", Name: "take"}, Region: dynstate.RefRegion{Kind: dynstate.RegionFunc, Caller: dynstate.FuncKey{Pkg: "example.com/factsrc", Name: "Escape"}}}) {
+	if !slices.Contains(restored.FuncRefs, syntaxutil.FuncRef{Callee: syntaxutil.FuncKey{Pkg: "example.com/factsrc", Name: "take"}, Region: syntaxutil.RefRegion{Kind: syntaxutil.RegionFunc, Caller: syntaxutil.FuncKey{Pkg: "example.com/factsrc", Name: "Escape"}}}) {
 		t.Fatalf("fact lost the reference-region edge - a dropped edge starves the fixed point: %+v", restored.FuncRefs)
 	}
-	if !slices.Contains(restored.AttributedUses, dynstate.AttributedUse{Func: dynstate.FuncKey{Pkg: "example.com/factsrc", Name: "Pass"}, Key: "example.com/factsrc.Hooks", Escape: true}) {
+	if !slices.Contains(restored.AttributedUses, syntaxutil.AttributedUse{Func: syntaxutil.FuncKey{Pkg: "example.com/factsrc", Name: "Pass"}, Key: "example.com/factsrc.Hooks", Escape: true}) {
 		t.Fatalf("fact lost the attributed escape - a dropped attribution silently closes an open package: %+v", restored)
 	}
-	if !slices.Contains(restored.ParamUses, dynstate.VarParamUse{Key: "example.com/factsrc.Hooks", Param: dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "example.com/factsrc", Name: "take"}, Index: 0}}) {
+	if !slices.Contains(restored.ParamUses, syntaxutil.VarParamUse{Key: "example.com/factsrc.Hooks", Param: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/factsrc", Name: "take"}, Index: 0}}) {
 		t.Fatalf("fact lost the deferred call-argument mark - a dropped deferral silently closes an open package: %+v", restored.ParamUses)
 	}
-	if !slices.Contains(restored.ParamLeakFree, dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "example.com/factsrc", Name: "take"}, Index: 0}) {
+	if !slices.Contains(restored.ParamLeakFree, syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/factsrc", Name: "take"}, Index: 0}) {
 		t.Fatalf("fact lost the leak-free parameter proof - a dropped proof refuses every deferred argument: %+v", restored.ParamLeakFree)
 	}
 	if !contains(restored.Opaque, "example.com/factsrc.ErrSentinel") {
@@ -227,10 +228,10 @@ func (Widget) External() int { return 2 }
 // union would let it discharge a return-proof edge it never proved
 // (the chunk-83 review's M2).
 func TestResolveEnvAuditRefusesMisfiledInsertionKeys(t *testing.T) {
-	fnKey := dynstate.FuncKey{Pkg: "example.com/dep", Name: "Make"}
-	badParam := dynstate.ParamKey{Func: fnKey, Index: -1}
+	fnKey := syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Make"}
+	badParam := syntaxutil.ParamKey{Func: fnKey, Index: -1}
 	misfiled := dynamicStateFact{
-		ParamInsertionFree: []dynstate.ParamKey{badParam},
+		ParamInsertionFree: []syntaxutil.ParamKey{badParam},
 	}
 	marked := 0
 	e := resolveEnvAudit(map[string][]dynamicStateFact{"example.com/dep": {misfiled}}, func(dynamicStateFact) { marked++ })
@@ -240,7 +241,7 @@ func TestResolveEnvAuditRefusesMisfiledInsertionKeys(t *testing.T) {
 	if e.InsDeclared[badParam] || e.InsResolved[badParam] {
 		t.Fatal("misfiled insertion key entered the declared set")
 	}
-	if e.DepResolved(dynstate.FuncAuditTarget(fnKey)) {
+	if e.DepResolved(syntaxutil.FuncAuditTarget(fnKey)) {
 		t.Fatal("misfiled key discharges a return-proof dependency")
 	}
 }
@@ -464,87 +465,87 @@ func UsePoolAndHooks() {
 		opaqueVar := "example.com/dep.Opaque" + varName
 		protoVar := "example.com/p.File_p_proto"
 		grpcVar := "example.com/p.Service_Desc"
-		methodKey := dynstate.FuncKey{Pkg: "example.com/dep", Name: "T." + methodName}
-		paramKey := dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "example.com/dep", Name: helperName}, Index: 0}
-		paramDepKey := dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "example.com/dep", Name: helperName + "Leaf"}, Index: 0}
-		ctorKey := dynstate.FuncKey{Pkg: "example.com/dep", Name: "Make" + helperName}
-		ctorDepKey := dynstate.FuncKey{Pkg: "example.com/dep", Name: "MakeLeaf" + helperName}
+		methodKey := syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "T." + methodName}
+		paramKey := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/dep", Name: helperName}, Index: 0}
+		paramDepKey := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/dep", Name: helperName + "Leaf"}, Index: 0}
+		ctorKey := syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Make" + helperName}
+		ctorDepKey := syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "MakeLeaf" + helperName}
 
 		var depFact dynamicStateFact
 		depFact.Declares = []string{depVar, aliasVar, opaqueVar}
 		depFact.Opaque = []string{opaqueVar}
 		depFact.Escapes = []string{opaqueVar}
-		depFact.CarrierLinks = []dynstate.CarrierLink{{From: depVar, To: aliasVar}}
+		depFact.CarrierLinks = []syntaxutil.CarrierLink{{From: depVar, To: aliasVar}}
 
 		switch mode % 5 {
 		case 0:
 			// Deferred method use vs ReceiverReadOnly proof (REQ-closure-shared-dynamic-state-receiver-proof).
-			depFact.MethodUses = []dynstate.VarMethodUse{{Key: depVar, Method: methodKey}}
+			depFact.MethodUses = []syntaxutil.VarMethodUse{{Key: depVar, Method: methodKey}}
 			if hasProof {
-				depFact.ReceiverReadOnly = []dynstate.FuncKey{methodKey}
+				depFact.ReceiverReadOnly = []syntaxutil.FuncKey{methodKey}
 			}
 		case 1:
 			// Deferred call-argument use + conditional ParamLeakFreeDeps fixed point
 			// (REQ-closure-shared-dynamic-state-parameter-facts).
-			depFact.ParamUses = []dynstate.VarParamUse{{Key: depVar, Param: paramKey}}
-			depFact.ParamLeakFreeDeps = []dynstate.ParamDepEdge{{Own: paramKey, Dep: paramDepKey}}
+			depFact.ParamUses = []syntaxutil.VarParamUse{{Key: depVar, Param: paramKey}}
+			depFact.ParamLeakFreeDeps = []syntaxutil.ParamDepEdge{{Own: paramKey, Dep: paramDepKey}}
 			if hasProof {
-				depFact.ParamLeakFree = []dynstate.ParamKey{paramDepKey}
+				depFact.ParamLeakFree = []syntaxutil.ParamKey{paramDepKey}
 			}
 		case 2:
 			// Deferred constructor registration + ReturnEnvDeps & ReturnEnvInsertionDeps fixed point
 			// (REQ-closure-shared-dynamic-state-registration-audit, REQ-closure-shared-dynamic-state-parameter-facts).
-			depFact.EnvCallUses = []dynstate.EnvCallUse{{Key: depVar, Callee: ctorKey}}
-			depFact.ReturnEnvFree = []dynstate.FuncKey{ctorKey}
-			depFact.ReturnEnvDeps = []dynstate.FuncDepEdge{{Func: ctorKey, Callee: ctorDepKey}}
-			depFact.ReturnEnvInsertionDeps = []dynstate.FuncInsertionDepEdge{{Func: ctorKey, Dep: dynstate.ParamAuditTarget(paramDepKey)}}
+			depFact.EnvCallUses = []syntaxutil.EnvCallUse{{Key: depVar, Callee: ctorKey}}
+			depFact.ReturnEnvFree = []syntaxutil.FuncKey{ctorKey}
+			depFact.ReturnEnvDeps = []syntaxutil.FuncDepEdge{{Func: ctorKey, Callee: ctorDepKey}}
+			depFact.ReturnEnvInsertionDeps = []syntaxutil.FuncInsertionDepEdge{{Func: ctorKey, Dep: syntaxutil.ParamAuditTarget(paramDepKey)}}
 			if hasProof {
-				depFact.ReturnEnvFree = []dynstate.FuncKey{ctorKey, ctorDepKey}
-				depFact.ParamInsertionFree = []dynstate.ParamKey{paramDepKey}
+				depFact.ReturnEnvFree = []syntaxutil.FuncKey{ctorKey, ctorDepKey}
+				depFact.ParamInsertionFree = []syntaxutil.ParamKey{paramDepKey}
 			}
 		case 3:
 			// Init-flow method use vs ReceiverRetentionFree proof (ReceiverReadOnly does NOT substitute;
 			// REQ-closure-shared-dynamic-state-init-flow, REQ-closure-shared-dynamic-state-receiver-proof).
-			depFact.InitMethodUses = []dynstate.VarMethodUse{{Key: depVar, Method: methodKey}}
+			depFact.InitMethodUses = []syntaxutil.VarMethodUse{{Key: depVar, Method: methodKey}}
 			if hasProof {
-				depFact.ReceiverRetentionFree = []dynstate.FuncKey{methodKey}
+				depFact.ReceiverRetentionFree = []syntaxutil.FuncKey{methodKey}
 			} else {
-				depFact.ReceiverReadOnly = []dynstate.FuncKey{methodKey}
+				depFact.ReceiverReadOnly = []syntaxutil.FuncKey{methodKey}
 			}
 		default:
 			// Value-plane field-position argument deferral vs registered population proof
 			// (REQ-closure-shared-dynamic-state-leak-free).
-			posKey := dynstate.FieldPosKey{Owner: depVar, Field: "Fn", Index: 0}
-			depFact.FieldParamUses = []dynstate.FieldPosKey{posKey}
-			depFact.FieldParamDefer = []dynstate.FieldParamDefer{{Pos: posKey, Param: paramKey}}
+			posKey := syntaxutil.FieldPosKey{Owner: depVar, Field: "Fn", Index: 0}
+			depFact.FieldParamUses = []syntaxutil.FieldPosKey{posKey}
+			depFact.FieldParamDefer = []syntaxutil.FieldParamDefer{{Pos: posKey, Param: paramKey}}
 			if hasProof {
-				depFact.ParamLeakFree = []dynstate.ParamKey{paramKey}
+				depFact.ParamLeakFree = []syntaxutil.ParamKey{paramKey}
 			}
 		}
 
-		protoInitFn := dynstate.FuncKey{Pkg: "example.com/p", Name: "file_p_proto_init"}
-		builderType := dynstate.TypeRef{Pkg: "google.golang.org/protobuf/runtime/protoimpl", Name: "TypeBuilder"}
-		msgInfoType := dynstate.TypeRef{Pkg: "google.golang.org/protobuf/runtime/protoimpl", Name: "MessageInfo"}
-		svcDescType := dynstate.TypeRef{Pkg: "google.golang.org/grpc", Name: "ServiceDesc"}
+		protoInitFn := syntaxutil.FuncKey{Pkg: "example.com/p", Name: "file_p_proto_init"}
+		builderType := syntaxutil.TypeRef{Pkg: "google.golang.org/protobuf/runtime/protoimpl", Name: "TypeBuilder"}
+		msgInfoType := syntaxutil.TypeRef{Pkg: "google.golang.org/protobuf/runtime/protoimpl", Name: "MessageInfo"}
+		svcDescType := syntaxutil.TypeRef{Pkg: "google.golang.org/grpc", Name: "ServiceDesc"}
 
 		allFacts := map[string][]dynamicStateFact{
 			"example.com/p": {
 				{
 					Declares:          []string{varKey, protoVar, grpcVar},
 					SingleSubjectVars: []string{varKey},
-					ProtoClusters: []dynstate.ProtoClusterFact{{
+					ProtoClusters: []protoaudit.ProtoClusterFact{{
 						InitFn:      protoInitFn,
 						Vars:        []string{protoVar},
 						BuilderType: builderType,
 						MsgType:     msgInfoType,
 					}},
-					GrpcServiceVars: []dynstate.GrpcServiceVarFact{{
+					GrpcServiceVars: []protoaudit.GrpcServiceVarFact{{
 						Key:     grpcVar,
 						SvcDesc: svcDescType,
 					}},
-					FuncRefs: []dynstate.FuncRef{{
+					FuncRefs: []syntaxutil.FuncRef{{
 						Callee: protoInitFn,
-						Region: dynstate.RefRegion{Kind: dynstate.RegionInit},
+						Region: syntaxutil.RefRegion{Kind: syntaxutil.RegionInit},
 					}},
 					Mutates: []string{varKey, protoVar, grpcVar},
 				},
@@ -561,9 +562,9 @@ func UsePoolAndHooks() {
 				Mutates:        []string{"gopkg.in/yaml.v3.structMap"},
 			}},
 			"google.golang.org/protobuf/runtime/protoimpl": {{
-				ProtoRuntimeTypes: []dynstate.ProtoRuntimeTypeFact{
-					{Type: builderType, Role: dynstate.ProtoRoleBuilder},
-					{Type: msgInfoType, Role: dynstate.ProtoRoleMessage},
+				ProtoRuntimeTypes: []protoaudit.ProtoRuntimeTypeFact{
+					{Type: builderType, Role: protoaudit.ProtoRoleBuilder},
+					{Type: msgInfoType, Role: protoaudit.ProtoRoleMessage},
 				},
 			}},
 			"google.golang.org/grpc": {{}},
@@ -742,7 +743,7 @@ func TestExplainEnvAuditOutsideScopeEndsAtEdges(t *testing.T) {
 	facts := map[string][]dynamicStateFact{
 		"example.com/reg": {{
 			EnvCarrying: []string{culprit},
-			EnvCallUses: []dynstate.EnvCallUse{{Key: culprit, Callee: dynstate.FuncKey{Pkg: "example.com/dep", Name: "Make"}}},
+			EnvCallUses: []syntaxutil.EnvCallUse{{Key: culprit, Callee: syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Make"}}},
 		}},
 	}
 	edges, refusedFn, refusedPath := envAuditTrail(map[string][]*packages.Package{}, facts, map[string]bool{culprit: true}, "Registry")
@@ -764,23 +765,23 @@ func TestExplainEnvAuditOutsideScopeEndsAtEdges(t *testing.T) {
 // chain onward (REQ-explain-chain; the chunk-83 review's M1).
 func TestExplainEnvAuditInsertionChain(t *testing.T) {
 	const culprit = "example.com/reg.Registry"
-	genFn := dynstate.FuncKey{Pkg: "example.com/reg", Name: "Gen"}
-	sinkParam := dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "example.com/dep", Name: "Sink"}, Index: 0}
-	fillParam := dynstate.ParamKey{Func: dynstate.FuncKey{Pkg: "example.com/dep", Name: "Fill"}, Index: 1}
+	genFn := syntaxutil.FuncKey{Pkg: "example.com/reg", Name: "Gen"}
+	sinkParam := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Sink"}, Index: 0}
+	fillParam := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Fill"}, Index: 1}
 	facts := map[string][]dynamicStateFact{
 		"example.com/reg": {{
 			EnvCarrying:   []string{culprit},
-			EnvCallUses:   []dynstate.EnvCallUse{{Key: culprit, Callee: genFn}},
-			ReturnEnvFree: []dynstate.FuncKey{genFn},
-			ReturnEnvInsertionDeps: []dynstate.FuncInsertionDepEdge{
-				{Func: genFn, Dep: dynstate.ParamAuditTarget(sinkParam)},
-				{Func: genFn, Dep: dynstate.ParamAuditTarget(fillParam)},
+			EnvCallUses:   []syntaxutil.EnvCallUse{{Key: culprit, Callee: genFn}},
+			ReturnEnvFree: []syntaxutil.FuncKey{genFn},
+			ReturnEnvInsertionDeps: []syntaxutil.FuncInsertionDepEdge{
+				{Func: genFn, Dep: syntaxutil.ParamAuditTarget(sinkParam)},
+				{Func: genFn, Dep: syntaxutil.ParamAuditTarget(fillParam)},
 			},
 		}},
 		"example.com/dep": {{
 			// Fill's parameter resolves; Sink's is undeclared - only
 			// Sink may contribute an edge and the refusal site.
-			ParamInsertionFree: []dynstate.ParamKey{fillParam},
+			ParamInsertionFree: []syntaxutil.ParamKey{fillParam},
 		}},
 	}
 	edges, refusedFn, refusedPath := envAuditTrail(map[string][]*packages.Package{"example.com/dep": {{}}}, facts, map[string]bool{culprit: true}, "Registry")
