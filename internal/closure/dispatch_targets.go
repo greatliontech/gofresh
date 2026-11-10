@@ -961,3 +961,23 @@ func isAuditedStandardContextRecvType(ct types.Type) bool {
 		return false
 	}
 }
+
+func isAuditedStandardFmtErrorRecvType(ct types.Type) bool {
+	if ct == nil {
+		return false
+	}
+	base := ct
+	if ptr, ok := types.Unalias(ct).(*types.Pointer); ok {
+		base = ptr.Elem()
+	}
+	named, ok := types.Unalias(base).(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "fmt" {
+		return false
+	}
+	switch named.Obj().Name() {
+	case "wrapError", "wrapErrors":
+		return true
+	default:
+		return false
+	}
+}

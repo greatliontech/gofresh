@@ -120,6 +120,11 @@ func auditedStandardCallee(audited bool, pkgPath, name string, fn *ssa.Function)
 			}
 		}
 	}
+	if audited && pkgPath == "fmt" && fn != nil && fn.Name() == "Error" && fn.Signature != nil && fn.Signature.Recv() != nil {
+		if isAuditedStandardFmtErrorRecvType(fn.Signature.Recv().Type()) {
+			return true
+		}
+	}
 	if fn != nil && fn.Object() == nil && fn.Parent() != nil {
 		top := fn.Parent()
 		for top.Parent() != nil {

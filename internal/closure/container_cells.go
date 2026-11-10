@@ -402,6 +402,9 @@ func walkMakeSliceIndexedStoresWithFP(s ssa.Value, visited map[ssa.Value]bool, f
 				continue
 			}
 			callee := r.Common().StaticCallee()
+			if fp != nil && fp.selectionAudited && callee != nil && funcPkgPath(callee) == "fmt" && auditedStandardSymbol(true, "fmt", functionSymbolName(callee)) {
+				continue
+			}
 			if fp != nil && fp.selectionAudited && callee != nil && funcPkgPath(callee) == "slices" {
 				if admitted, aliasesReturn := isAuditedSlicesCallForSlice(functionSymbolName(callee), r.Common().Args, s); admitted {
 					if aliasesReturn {

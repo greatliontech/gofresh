@@ -156,6 +156,7 @@ func (v *Snapshot) newSeededValidationView(ctx context.Context) (*Snapshot, erro
 	defer v.mu.RUnlock()
 	current := &Snapshot{
 		session:              v.session,
+		parent:               v.parent,
 		runtime:              v.runtime,
 		runtimeCurrent:       v.runtimeCurrent,
 		subjects:             v.subjects,

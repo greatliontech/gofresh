@@ -1236,12 +1236,116 @@ func isReflectMutationSymbol(name string) bool {
 	switch name {
 	case "Set", "SetZero", "SetInt", "SetUint", "SetFloat", "SetComplex", "SetBool",
 		"SetBytes", "SetString", "SetPointer", "SetMapIndex", "SetIterKey", "SetIterValue",
-		"SetLen", "SetCap", "Addr", "UnsafeAddr", "Pointer", "NewAt", "Copy",
+		"SetLen", "SetCap", "Addr", "UnsafeAddr", "Pointer", "NewAt", "SliceAt", "Copy",
 		"Append", "AppendSlice", "Grow", "Clear":
 		return true
 	default:
 		return false
 	}
+}
+
+func isReflectOpenProducerSymbol(name string) bool {
+	switch name {
+	case "New", "NewAt", "SliceAt", "Zero", "MakeSlice", "MakeMap", "MakeMapWithSize",
+		"MakeChan", "MakeFunc", "Call", "CallSlice", "Method", "MethodByName", "Select":
+		return true
+	default:
+		return false
+	}
+}
+
+func typeReachesOpenReflectCarrier(t types.Type) bool {
+	open := false
+	walkTypeGraph(t, true, map[types.Type]bool{}, func(sub types.Type) bool {
+		switch tt := sub.(type) {
+		case *types.Interface, *types.TypeParam:
+			open = true
+			return false
+		case *types.Named:
+			if obj := tt.Obj(); obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == "reflect" && obj.Name() == "Value" {
+				open = true
+				return false
+			}
+		}
+		return true
+	})
+	return open
+}
+
+func isAddrOnlyForUnsafePointerConvert(site ssa.CallInstruction) bool {
+	if site == nil {
+		return false
+	}
+	val := site.Value()
+	if val == nil || val.Referrers() == nil {
+		return false
+	}
+	sawUse := false
+	for _, ref := range *val.Referrers() {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+		case ssa.CallInstruction:
+			if r.Common() == nil || r.Common().IsInvoke() {
+				return false
+			}
+			callee := r.Common().StaticCallee()
+			if callee == nil || funcPkgPath(callee) != "reflect" {
+				return false
+			}
+			sym := strings.TrimSuffix(strings.TrimSuffix(functionSymbolName(callee), "$bound"), "$thunk")
+			if sym != "UnsafePointer" {
+				return false
+			}
+			uval := r.Value()
+			if uval == nil || uval.Referrers() == nil {
+				return false
+			}
+			for _, uref := range *uval.Referrers() {
+				switch conv := uref.(type) {
+				case *ssa.DebugRef:
+				case *ssa.Convert:
+					ptr, ok := types.Unalias(conv.Type()).(*types.Pointer)
+					if !ok {
+						return false
+					}
+					basic, ok := types.Unalias(ptr.Elem()).(*types.Basic)
+					if !ok || basic.Kind() == types.UnsafePointer || basic.Kind() == types.Uintptr || basic.Kind() == types.Invalid {
+						return false
+					}
+					if conv.Referrers() == nil {
+						return false
+					}
+					sawConvUse := false
+					for _, cref := range *conv.Referrers() {
+						switch cr := cref.(type) {
+						case *ssa.DebugRef:
+						case *ssa.Store:
+							if cr.Addr != conv {
+								return false
+							}
+							sawConvUse = true
+						case *ssa.UnOp:
+							if cr.Op != token.MUL || cr.X != conv {
+								return false
+							}
+							sawConvUse = true
+						default:
+							return false
+						}
+					}
+					if !sawConvUse {
+						return false
+					}
+					sawUse = true
+				default:
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return sawUse
 }
 
 func isStdDeserializerCall(pkgPath, sym string) bool {

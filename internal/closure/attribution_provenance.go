@@ -475,8 +475,14 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 		cand  *ssa.Function
 		iface *types.Interface
 	}
+	type reflectTypeRef struct {
+		typ types.Type
+		fn  *ssa.Function
+	}
 	var implMemo map[candIfaceKey]bool
+	var reflectValueTypes []reflectTypeRef
 	sawReflectMutation := false
+	sawOpenReflectValue := false
 	var space [16]*ssa.Value
 	for _, fn := range ordered {
 		initFrame := initFlowFrame(fn)
@@ -765,14 +771,35 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 						if site, ok := instr.(ssa.CallInstruction); ok && site.Common() != nil {
 							c := site.Common()
 							if c.IsInvoke() {
-								if c.Method != nil && c.Method.Pkg() != nil && c.Method.Pkg().Path() == "reflect" && isReflectMutationSymbol(c.Method.Name()) {
-									sawReflectMutation = true
+								if c.Method != nil && c.Method.Pkg() != nil && c.Method.Pkg().Path() == "reflect" {
+									mName := c.Method.Name()
+									if isReflectMutationSymbol(mName) && (mName != "Addr" || !isAddrOnlyForUnsafePointerConvert(site)) {
+										sawReflectMutation = true
+									}
+									if mName == "ValueOf" || isReflectOpenProducerSymbol(mName) {
+										sawOpenReflectValue = true
+									}
 								}
 							} else if callee := c.StaticCallee(); callee != nil {
 								calleePkg := funcPkgPath(callee)
 								calleeSym := strings.TrimSuffix(strings.TrimSuffix(functionSymbolName(callee), "$bound"), "$thunk")
-								if calleePkg == "reflect" && isReflectMutationSymbol(calleeSym) {
-									sawReflectMutation = true
+								if calleePkg == "reflect" {
+									if isReflectMutationSymbol(calleeSym) && (calleeSym != "Addr" || !isAddrOnlyForUnsafePointerConvert(site)) {
+										sawReflectMutation = true
+									}
+									if calleeSym == "ValueOf" {
+										if len(c.Args) == 1 {
+											if mi, ok := c.Args[0].(*ssa.MakeInterface); ok && mi.X != nil && mi.X.Type() != nil {
+												reflectValueTypes = append(reflectValueTypes, reflectTypeRef{typ: mi.X.Type(), fn: fn})
+											} else {
+												sawOpenReflectValue = true
+											}
+										} else {
+											sawOpenReflectValue = true
+										}
+									} else if isReflectOpenProducerSymbol(calleeSym) {
+										sawOpenReflectValue = true
+									}
 								}
 								calleeNonStd := !isStdPkgPath(userPaths, calleePkg)
 								if (calleeNonStd && len(callee.Blocks) == 0 && callee.Synthetic == "" && !parameterizedBody(callee)) || isStdDeserializerCall(calleePkg, calleeSym) {
@@ -873,8 +900,14 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 						}
 					}
 					if g, ok := (*op).(*ssa.Function); ok {
-						if audited && nonStdFrame && funcPkgPath(g) == "reflect" && isReflectMutationSymbol(strings.TrimSuffix(strings.TrimSuffix(functionSymbolName(g), "$bound"), "$thunk")) {
-							sawReflectMutation = true
+						if audited && nonStdFrame && funcPkgPath(g) == "reflect" {
+							gSym := strings.TrimSuffix(strings.TrimSuffix(functionSymbolName(g), "$bound"), "$thunk")
+							if isReflectMutationSymbol(gSym) {
+								sawReflectMutation = true
+							}
+							if gSym == "ValueOf" || isReflectOpenProducerSymbol(gSym) {
+								sawOpenReflectValue = true
+							}
 						}
 						summary.directValueRef[g] = true
 						if !initFrame {
@@ -943,11 +976,29 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 			poisonEmbeddedCarriers(w.Signature.Recv().Type(), wTopNamed, w)
 		}
 		if sawReflectMutation {
-			for named := range summary.structReferencedByType {
-				poisonStruct(named, -1)
+			if !sawOpenReflectValue {
+				if len(reflectValueTypes) == 0 {
+					sawOpenReflectValue = true
+				} else {
+					for _, rv := range reflectValueTypes {
+						if typeReachesOpenReflectCarrier(rv.typ) {
+							sawOpenReflectValue = true
+							break
+						}
+					}
+				}
 			}
-			for ns := range namedSigReferenced {
-				summary.namedSigPoisoned[ns] = true
+			if sawOpenReflectValue {
+				for named := range summary.structReferencedByType {
+					poisonStruct(named, -1)
+				}
+				for ns := range namedSigReferenced {
+					summary.namedSigPoisoned[ns] = true
+				}
+			} else {
+				for _, rv := range reflectValueTypes {
+					poisonContainedTypes(rv.typ, rv.fn)
+				}
 			}
 		}
 		var collectFuncValueCallSites func(val ssa.Value, seen map[ssa.Value]bool) ([]ssa.CallInstruction, bool)
@@ -1378,6 +1429,80 @@ func typeCanCarryAnyInitBoxed(t types.Type, initBoxed []types.Type) bool {
 	return found
 }
 
+func isMethodlessCarrierFreeType(audited bool, t types.Type) bool {
+	if t == nil || typeMayCarryDynamicTop(audited, t) {
+		return false
+	}
+	cur := types.Unalias(t)
+	for {
+		switch u := cur.(type) {
+		case *types.Basic:
+			return true
+		case *types.Slice:
+			cur = types.Unalias(u.Elem())
+		case *types.Array:
+			cur = types.Unalias(u.Elem())
+		default:
+			return false
+		}
+	}
+}
+
+func isCarrierFreeCallArg(audited bool, site ssa.CallInstruction, arg ssa.Value) bool {
+	if arg == nil || !typeMayCarryDynamicTop(audited, arg.Type()) {
+		return true
+	}
+	if c, ok := arg.(*ssa.Const); ok && c.Value == nil {
+		return true
+	}
+	if mi, ok := arg.(*ssa.MakeInterface); ok && mi.X != nil {
+		return isMethodlessCarrierFreeType(audited, mi.X.Type())
+	}
+	if sl, ok := arg.(*ssa.Slice); ok && sl.Low == nil && sl.High == nil && sl.Max == nil {
+		alloc, ok := sl.X.(*ssa.Alloc)
+		if !ok || alloc.Referrers() == nil || sl.Referrers() == nil {
+			return false
+		}
+		for _, sref := range *sl.Referrers() {
+			switch sref.(type) {
+			case *ssa.DebugRef:
+			default:
+				if sref != site {
+					return false
+				}
+			}
+		}
+		for _, aref := range *alloc.Referrers() {
+			switch ar := aref.(type) {
+			case *ssa.DebugRef:
+			case *ssa.Slice:
+				if ar != sl {
+					return false
+				}
+			case *ssa.IndexAddr:
+				if ar.X != alloc || ar.Referrers() == nil {
+					return false
+				}
+				for _, iref := range *ar.Referrers() {
+					switch ir := iref.(type) {
+					case *ssa.DebugRef:
+					case *ssa.Store:
+						if ir.Addr != ar || !isCarrierFreeCallArg(audited, site, ir.Val) {
+							return false
+						}
+					default:
+						return false
+					}
+				}
+			default:
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
 func isCarrierFreeStaticCall(audited bool, site ssa.CallInstruction, callee *ssa.Function) bool {
 	if site == nil || site.Common() == nil || callee == nil {
 		return false
@@ -1391,7 +1516,7 @@ func isCarrierFreeStaticCall(audited bool, site ssa.CallInstruction, callee *ssa
 		}
 	}
 	for _, arg := range c.Args {
-		if arg != nil && typeMayCarryDynamicTop(audited, arg.Type()) {
+		if !isCarrierFreeCallArg(audited, site, arg) {
 			return false
 		}
 	}

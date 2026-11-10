@@ -9255,5 +9255,24 @@ func TestThree(t *testing.T) { _ = os.Getenv("THREE") }
 			t.Fatalf("sib3 unexpectedly triggered SSA %s event: %+v", ev.Phase, ev)
 		}
 	}
+
+	// Seeded validation view from a Sibling preserves parent so ensureObservable
+	// uses the parent's package-mates key and hits the disk memo with 0 SSA loads.
+	events = nil
+	seeded, err := sib1.newSeededValidationView(ctx)
+	if err != nil {
+		t.Fatalf("sib1.newSeededValidationView: %v", err)
+	}
+	if seeded.parent != parent {
+		t.Fatalf("seeded.parent = %p, want %p", seeded.parent, parent)
+	}
+	if err := seeded.ensureObservable(ctx, []Subject{s1}); err != nil {
+		t.Fatalf("seeded.ensureObservable: %v", err)
+	}
+	for _, ev := range events {
+		if ev.Phase == "load" || ev.Phase == "prove" {
+			t.Fatalf("seeded validation view unexpectedly triggered SSA %s event: %+v", ev.Phase, ev)
+		}
+	}
 }
 

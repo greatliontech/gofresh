@@ -1294,6 +1294,126 @@ func (g *parGraph) buildAndSolve(out *CallGraph) {
 		}
 	}
 
+	if g.p.Types != nil && g.p.Types.Path() != "" {
+		pkgPath := g.p.Types.Path()
+		canReachFromRoot := make([]bool, len(g.adj))
+		for id, fk := range g.rootKeys {
+			if fk.Valid() && !g.reachesPar[id] {
+				canReachFromRoot[id] = true
+				rootQueue = append(rootQueue, id)
+			}
+		}
+		for len(rootQueue) > 0 {
+			cur := rootQueue[len(rootQueue)-1]
+			rootQueue = rootQueue[:len(rootQueue)-1]
+			for _, next := range g.adj[cur] {
+				if !canReachFromRoot[next] && canReachRoot[next] && !g.reachesPar[next] && !g.rootKeys[next].Valid() {
+					canReachFromRoot[next] = true
+					rootQueue = append(rootQueue, next)
+				}
+			}
+		}
+		type hubCandidate struct {
+			id       int
+			inRoots  []syntaxutil.FuncKey
+			outRoots []syntaxutil.FuncKey
+		}
+		var hubCandidates []hubCandidate
+		hubStamp := make([]uint32, len(g.adj))
+		var hubEpoch uint32
+		var hubStack []int
+		for id := range g.adj {
+			if g.rootKeys[id].Valid() || g.reachesPar[id] || !canReachFromRoot[id] || !canReachRoot[id] {
+				continue
+			}
+			liveIn := 0
+			for _, prev := range revPar[id] {
+				if prev != id && !g.reachesPar[prev] && canReachFromRoot[prev] {
+					liveIn++
+				}
+			}
+			if liveIn < 2 {
+				continue
+			}
+			liveOut := 0
+			for _, next := range g.adj[id] {
+				if next != id && canReachRoot[next] {
+					liveOut++
+				}
+			}
+			if liveOut < 2 || liveIn*liveOut <= liveIn+liveOut {
+				continue
+			}
+			hubEpoch++
+			hubStamp[id] = hubEpoch
+			hubStack = append(hubStack[:0], id)
+			var inRoots []syntaxutil.FuncKey
+			for len(hubStack) > 0 {
+				cur := hubStack[len(hubStack)-1]
+				hubStack = hubStack[:len(hubStack)-1]
+				if cur != id && g.rootKeys[cur].Valid() {
+					if !g.reachesPar[cur] {
+						inRoots = append(inRoots, g.rootKeys[cur])
+					}
+					continue
+				}
+				for _, prev := range revPar[cur] {
+					if hubStamp[prev] != hubEpoch && !g.reachesPar[prev] && canReachFromRoot[prev] {
+						hubStamp[prev] = hubEpoch
+						hubStack = append(hubStack, prev)
+					}
+				}
+			}
+			slices.SortFunc(inRoots, syntaxutil.FuncKey.Compare)
+			inRoots = slices.Compact(inRoots)
+			if len(inRoots) < 2 {
+				continue
+			}
+			hubEpoch++
+			hubStamp[id] = hubEpoch
+			hubStack = append(hubStack[:0], id)
+			var outRoots []syntaxutil.FuncKey
+			for len(hubStack) > 0 {
+				cur := hubStack[len(hubStack)-1]
+				hubStack = hubStack[:len(hubStack)-1]
+				if cur != id && g.rootKeys[cur].Valid() {
+					outRoots = append(outRoots, g.rootKeys[cur])
+					continue
+				}
+				for _, next := range g.adj[cur] {
+					if hubStamp[next] != hubEpoch && canReachRoot[next] {
+						hubStamp[next] = hubEpoch
+						hubStack = append(hubStack, next)
+					}
+				}
+			}
+			slices.SortFunc(outRoots, syntaxutil.FuncKey.Compare)
+			outRoots = slices.Compact(outRoots)
+			if len(outRoots) < 2 || len(inRoots)*len(outRoots) <= len(inRoots)+len(outRoots) {
+				continue
+			}
+			hubCandidates = append(hubCandidates, hubCandidate{
+				id:       id,
+				inRoots:  inRoots,
+				outRoots: outRoots,
+			})
+		}
+		slices.SortFunc(hubCandidates, func(a, b hubCandidate) int {
+			if c := slices.CompareFunc(a.inRoots, b.inRoots, syntaxutil.FuncKey.Compare); c != 0 {
+				return c
+			}
+			return slices.CompareFunc(a.outRoots, b.outRoots, syntaxutil.FuncKey.Compare)
+		})
+		hubSeq := 0
+		for i, cand := range hubCandidates {
+			if i > 0 && (slices.CompareFunc(cand.inRoots, hubCandidates[i-1].inRoots, syntaxutil.FuncKey.Compare) != 0 ||
+				slices.CompareFunc(cand.outRoots, hubCandidates[i-1].outRoots, syntaxutil.FuncKey.Compare) != 0) {
+				hubSeq++
+			}
+			g.rootKeys[cand.id] = syntaxutil.FuncKey{Pkg: pkgPath, Name: "#par#" + strconv.Itoa(hubSeq)}
+		}
+	}
+
 	seenParEdge := map[syntaxutil.FuncDepEdge]bool{}
 	seenStamp := make([]uint32, len(g.adj))
 	var epoch uint32

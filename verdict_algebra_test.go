@@ -872,13 +872,13 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@65" {
+	if ObservationRTA != "gofresh/observation-rta@66" {
 		t.Fatalf("ObservationRTA = %q, want content- and policy-bound proof evidence", ObservationRTA)
 	}
 }
 
 func TestDynamicStateStrategyVersion(t *testing.T) {
-	if DynamicStateStrategy != "gofresh/dynamic-state@76" {
+	if DynamicStateStrategy != "gofresh/dynamic-state@77" {
 		t.Fatalf("DynamicStateStrategy = %q, want the typed dynamic-state fact and summary derivation", DynamicStateStrategy)
 	}
 }

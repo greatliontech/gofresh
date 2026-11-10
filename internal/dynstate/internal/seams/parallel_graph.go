@@ -184,6 +184,9 @@ func (g *parGraph) directNamedMethods(named *types.Named) []*types.Func {
 		if m.Name() == "Parallel" || seen[m] {
 			return
 		}
+		if g.p.Types != nil && m.Pkg() != g.p.Types && !m.Exported() {
+			return
+		}
 		seen[m] = true
 		methods = append(methods, m)
 	}
@@ -1261,7 +1264,7 @@ func (g *parGraph) recordMethodTarget(ownerID int, m *types.Func) {
 	m = m.Origin()
 	if g.allDecls[m] != nil {
 		g.addParEdge(ownerID, g.execFuncID(m))
-	} else if (g.p.Types == nil || m.Pkg() != g.p.Types) && !g.isStdCallee(m) {
+	} else if (g.p.Types == nil || m.Pkg() != g.p.Types) && m.Exported() && !g.isStdCallee(m) {
 		if fk, ok := syntaxutil.CallableFactKey(m); ok {
 			g.addParEdge(ownerID, g.crossID(fk))
 		}

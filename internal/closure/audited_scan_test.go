@@ -5511,3 +5511,204 @@ TEXT ·TrailingSneak(SB), NOSPLIT, $0-8
 	}
 }
 
+func TestScopedReflectMutationAndFmtErrorfClosure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs SSA observability over it")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/scopedreflect\n\ngo 1.26\n")
+	writeFile(t, dir, "pkg.go", `package scopedreflect
+
+import (
+	"errors"
+	"fmt"
+	"reflect"
+	"strconv"
+)
+
+type ConfigLike struct {
+	UsesCgo bool
+}
+
+func SetUsesCgoLike(c *ConfigLike) {
+	v := reflect.ValueOf(c).Elem().FieldByName("UsesCgo")
+	if v.IsValid() {
+		*(*bool)(v.Addr().UnsafePointer()) = true
+	}
+}
+
+type MutatedBox struct {
+	Fn func() string
+}
+
+func MutateBox(b *MutatedBox, fn func() string) {
+	reflect.ValueOf(b).Elem().Field(0).Set(reflect.ValueOf(fn))
+}
+
+type CleanRunner struct {
+	Step func() string
+}
+
+func UnreachedMutator() string {
+	var cfg ConfigLike
+	SetUsesCgoLike(&cfg)
+	var mb MutatedBox
+	MutateBox(&mb, func() string { return "mutated" })
+	return mb.Fn()
+}
+
+func UseMutatedBox(mb *MutatedBox) string {
+	return mb.Fn()
+}
+
+func ParseAndFormat(raw string) string {
+	if _, err := strconv.ParseBool(raw); err != nil {
+		w1 := fmt.Errorf("parse %q failed: %w", raw, err)
+		w2 := fmt.Errorf("multi %w %w", w1, errors.New("sentinel"))
+		return w1.Error() + ":" + w2.Error()
+	}
+	r := CleanRunner{Step: func() string { return "ok" }}
+	return r.Step()
+}
+`)
+	writeFile(t, dir, "pkg_test.go", `package scopedreflect
+
+import "testing"
+
+func TestParseAndFormat(t *testing.T) {
+	if got := ParseAndFormat("not-a-bool"); got == "" {
+		t.Fatal("expected formatted error")
+	}
+}
+
+func TestUseMutatedBox(t *testing.T) {
+	mb := &MutatedBox{Fn: func() string { return "clean" }}
+	_ = UseMutatedBox(mb)
+}
+`)
+
+	h, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanSubj := Subject{Package: "example.com/scopedreflect", Symbol: "TestParseAndFormat"}
+	mutatedSubj := Subject{Package: "example.com/scopedreflect", Symbol: "TestUseMutatedBox"}
+	obsMap, err := h.ComputeObservabilityBatch([]Subject{cleanSubj, mutatedSubj})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs := obsMap[cleanSubj]; !obs.Observable {
+		t.Fatalf("TestParseAndFormat observability = %+v, want Observable", obs)
+	}
+	if obs := obsMap[mutatedSubj]; obs.Observable {
+		t.Fatalf("TestUseMutatedBox observability = %+v, want !Observable (MutatedBox is poisoned by MutateBox)", obs)
+	}
+
+	openDir := t.TempDir()
+	writeFile(t, openDir, "go.mod", "module example.com/openreflect\n\ngo 1.26\n")
+	writeFile(t, openDir, "pkg.go", `package openreflect
+
+import (
+	"os"
+	"reflect"
+)
+
+type InnerBox struct {
+	Fn func() string
+}
+
+type OuterIface struct {
+	Payload any
+}
+
+func MutateViaInterfaceField(o *OuterIface) {
+	fn := func() string { return os.Getenv("IMPURE_REFLECT") }
+	reflect.ValueOf(o).Elem().Field(0).Elem().Elem().Field(0).Set(reflect.ValueOf(fn))
+}
+
+func UnreachedOpenMutator() string {
+	ib := &InnerBox{Fn: func() string { return "clean" }}
+	o := OuterIface{Payload: ib}
+	MutateViaInterfaceField(&o)
+	return ib.Fn()
+}
+
+func UseInnerBox(ib *InnerBox) string {
+	return ib.Fn()
+}
+`)
+	writeFile(t, openDir, "pkg_test.go", `package openreflect
+
+import "testing"
+
+func TestUseInnerBox(t *testing.T) {
+	ib := &InnerBox{Fn: func() string { return "clean" }}
+	_ = UseInnerBox(ib)
+}
+`)
+	openH, err := newAt(openDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	innerSubj := Subject{Package: "example.com/openreflect", Symbol: "TestUseInnerBox"}
+	openObs, err := openH.ComputeObservabilityBatch([]Subject{innerSubj})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs := openObs[innerSubj]; obs.Observable {
+		t.Fatalf("TestUseInnerBox observability = %+v, want !Observable when ValueOf container reaches an interface field", obs)
+	}
+
+	addrDir := t.TempDir()
+	writeFile(t, addrDir, "go.mod", "module example.com/addrreflect\n\ngo 1.26\n")
+	writeFile(t, addrDir, "pkg.go", `package addrreflect
+
+import (
+	"os"
+	"reflect"
+)
+
+type AddrBox struct {
+	Fn func() string
+}
+
+func MutateViaAddrFuncPtr(b *AddrBox) {
+	fn := func() string { return os.Getenv("IMPURE_ADDR") }
+	v := reflect.ValueOf(b).Elem().Field(0)
+	*(*func() string)(v.Addr().UnsafePointer()) = fn
+}
+
+func UnreachedAddrMutator() string {
+	var ab AddrBox
+	MutateViaAddrFuncPtr(&ab)
+	return ab.Fn()
+}
+
+func UseAddrBox(ab *AddrBox) string {
+	return ab.Fn()
+}
+`)
+	writeFile(t, addrDir, "pkg_test.go", `package addrreflect
+
+import "testing"
+
+func TestUseAddrBox(t *testing.T) {
+	ab := &AddrBox{Fn: func() string { return "clean" }}
+	_ = UseAddrBox(ab)
+}
+`)
+	addrH, err := newAt(addrDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addrSubj := Subject{Package: "example.com/addrreflect", Symbol: "TestUseAddrBox"}
+	addrObs, err := addrH.ComputeObservabilityBatch([]Subject{addrSubj})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs := addrObs[addrSubj]; obs.Observable {
+		t.Fatalf("TestUseAddrBox observability = %+v, want !Observable when Addr().UnsafePointer() converts to *func() string", obs)
+	}
+}
+
+
