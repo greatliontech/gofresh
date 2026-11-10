@@ -6843,4 +6843,35 @@ func init() {
 	if !slices.Contains(factA.CarrierLinks, wantSliceLink) {
 		t.Fatalf("CarrierLinks missing SliceExpr LHS init assignment %+v: got %+v", wantSliceLink, factA.CarrierLinks)
 	}
+
+	// 5. Two-valued comma-ok map lookup on an unexported read-only function map
+	// (`cmp, ok := builtinOrders[order]`) does not report mutable reach on the
+	// *types.Tuple(func(string, string) int, bool) index expression.
+	commaOkMapPkg := mustTypecheckPackage(t, "example.com/commaok", map[string]string{
+		"order.go": `package commaok
+
+var builtinOrders = map[string]func(a, b string) int{
+	"alpha": func(a, b string) int {
+		if a < b {
+			return -1
+		}
+		if a > b {
+			return 1
+		}
+		return 0
+	},
+}
+
+func Compare(order, x, y string) int {
+	if cmp, ok := builtinOrders[order]; ok {
+		return cmp(x, y)
+	}
+	return 0
+}
+`,
+	})
+	commaOkFact := FactOf(true, commaOkMapPkg, false)
+	if len(commaOkFact.Mutates) != 0 || len(commaOkFact.Escapes) != 0 {
+		t.Fatalf("comma-ok lookup on read-only function map produced Mutates=%v Escapes=%v, want empty", commaOkFact.Mutates, commaOkFact.Escapes)
+	}
 }

@@ -69,6 +69,10 @@ func TypeCarriesMutableRefWith(root types.Type, isImmutablePtr func(types.Type) 
 			for i := 0; i < u.NumFields(); i++ {
 				walk(u.Field(i).Type())
 			}
+		case *types.Tuple:
+			for i := 0; i < u.Len(); i++ {
+				walk(u.At(i).Type())
+			}
 		}
 	}
 	walk(root)
@@ -111,6 +115,10 @@ func TypeContainsRefOrPointerWith(root types.Type, isImmutablePtr func(types.Typ
 		case *types.Struct:
 			for i := 0; i < u.NumFields(); i++ {
 				walk(u.Field(i).Type())
+			}
+		case *types.Tuple:
+			for i := 0; i < u.Len(); i++ {
+				walk(u.At(i).Type())
 			}
 		}
 	}

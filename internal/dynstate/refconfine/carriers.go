@@ -278,6 +278,13 @@ func WalkTypeStructure(t types.Type, seen map[types.Type]bool, nilResult bool, c
 		return false
 	case *types.Array:
 		return WalkTypeStructure(u.Elem(), seen, nilResult, classify)
+	case *types.Tuple:
+		for i := 0; i < u.Len(); i++ {
+			if WalkTypeStructure(u.At(i).Type(), seen, nilResult, classify) {
+				return true
+			}
+		}
+		return false
 	default:
 		return true
 	}
@@ -305,7 +312,7 @@ func typeCarriesSignatureSeen(t types.Type, seen map[types.Type]bool) bool {
 			return typeCarriesSignatureSeen(u.Elem(), seen), true
 		case *types.Map:
 			return typeCarriesSignatureSeen(u.Elem(), seen), true
-		case *types.Named, *types.Struct, *types.Array:
+		case *types.Named, *types.Struct, *types.Array, *types.Tuple:
 			return false, false
 		default:
 			return true, true
@@ -318,15 +325,6 @@ func typeCarriesSignatureSeen(t types.Type, seen map[types.Type]bool) bool {
 func CallResultHandsOut(t types.Type) bool {
 	if t == nil {
 		return true
-	}
-	if tuple, ok := t.(*types.Tuple); ok {
-		for i := 0; i < tuple.Len(); i++ {
-			rt := tuple.At(i).Type()
-			if TypeHandsOutMutableReach(rt) || TypeCarriesSignature(rt) {
-				return true
-			}
-		}
-		return false
 	}
 	return TypeHandsOutMutableReach(t) || TypeCarriesSignature(t)
 }
@@ -342,7 +340,7 @@ func TypeHandsOutMutableReach(t types.Type) bool {
 			return true, true
 		case *types.Signature:
 			return false, true
-		case *types.Named, *types.Struct, *types.Array:
+		case *types.Named, *types.Struct, *types.Array, *types.Tuple:
 			return false, false
 		default:
 			return true, true
@@ -389,7 +387,7 @@ func TypeReachesOnce(t types.Type) bool {
 				return true, true
 			}
 			return false, false
-		case *types.Struct, *types.Array:
+		case *types.Struct, *types.Array, *types.Tuple:
 			return false, false
 		default:
 			return false, true

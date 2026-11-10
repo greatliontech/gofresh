@@ -195,3 +195,45 @@ func Mutate() {
 		t.Fatal("VerifyProtectedStructOriginConfinement unexpectedly accepted slice element write outside buildEntry")
 	}
 }
+
+func TestTuplePredicatesTraverseElements(t *testing.T) {
+	intType := types.Typ[types.Int]
+	boolType := types.Typ[types.Bool]
+	ptrIntType := types.NewPointer(intType)
+	sigType := types.NewSignatureType(nil, nil, nil, nil, nil, false)
+
+	sigBoolTuple := types.NewTuple(
+		types.NewVar(0, nil, "fn", sigType),
+		types.NewVar(0, nil, "ok", boolType),
+	)
+	if TypeHandsOutMutableReach(sigBoolTuple) {
+		t.Fatal("TypeHandsOutMutableReach((func(), bool)) = true, want false")
+	}
+	if !TypeCarriesSignature(sigBoolTuple) {
+		t.Fatal("TypeCarriesSignature((func(), bool)) = false, want true")
+	}
+	if TypeCarriesMutableRef(sigBoolTuple) {
+		t.Fatal("TypeCarriesMutableRef((func(), bool)) = true, want false")
+	}
+	if !TypeContainsRefOrPointer(sigBoolTuple) {
+		t.Fatal("TypeContainsRefOrPointer((func(), bool)) = false, want true")
+	}
+	if TypeReachesOnce(sigBoolTuple) {
+		t.Fatal("TypeReachesOnce((func(), bool)) = true, want false")
+	}
+
+	ptrBoolTuple := types.NewTuple(
+		types.NewVar(0, nil, "p", ptrIntType),
+		types.NewVar(0, nil, "ok", boolType),
+	)
+	if !TypeHandsOutMutableReach(ptrBoolTuple) {
+		t.Fatal("TypeHandsOutMutableReach((*int, bool)) = false, want true")
+	}
+	if !TypeCarriesMutableRef(ptrBoolTuple) {
+		t.Fatal("TypeCarriesMutableRef((*int, bool)) = false, want true")
+	}
+	if !TypeContainsRefOrPointer(ptrBoolTuple) {
+		t.Fatal("TypeContainsRefOrPointer((*int, bool)) = false, want true")
+	}
+}
+
