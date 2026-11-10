@@ -145,10 +145,12 @@ type Hasher struct {
 	// snapshot is the pass's env snapshot when the caller supplied one —
 	// the listing memo's scope identity; nil leaves that memo inert.
 	snapshot       *gotool.EnvSnapshot
-	maximalTesting map[string]maximalEffectScan    // typed testing-runtime effects by requested package
-	maximalEffects map[string]maximalEffectsResult // package external-effect scans by requested package
-	maximalFiles   map[string]maximalEffectScan    // per-file effect scans by absolute path
-	harnessVerdict map[string]bool                 // mechanical property-harness verification verdicts by package dir
+	maximalTesting          map[string]maximalEffectScan     // typed testing-runtime effects by requested package
+	maximalTestingUnfiltered map[string]maximalEffectScan     // per-call unfiltered typed testing-runtime effects by requested package
+	maximalEffects          map[string]maximalEffectsResult  // package external-effect scans by requested package
+	maximalFiles            map[string]maximalEffectScan     // per-file effect scans by absolute path
+	maximalParsedFiles      map[string]*parsedMaximalFile    // per-call parsed ASTs and import tables for maximal scans
+	harnessVerdict          map[string]bool                  // mechanical property-harness verification verdicts by package dir
 	// contribs memoizes per-node closure contributions within ONE
 	// top-level batch call: each public batch entry resets it, so content
 	// is re-observed per call (the Hasher's pinned contract) while subjects
@@ -720,6 +722,8 @@ func (h *Hasher) resetCallScope() {
 	// is armed here and dropped when the call returns (the batch entries
 	// defer it), so no later entry can fold bytes an earlier call saw.
 	h.contents = map[string]fileBytes{}
+	h.maximalParsedFiles = map[string]*parsedMaximalFile{}
+	h.maximalTestingUnfiltered = map[string]maximalEffectScan{}
 	// Clear per-program summaries on any retained SSA programs so subsequent
 	// batch calls re-verify non-Go .s/.h members against this call's contents.
 	for _, p := range h.progs {

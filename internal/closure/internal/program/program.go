@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
@@ -20,6 +21,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
 	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // Program is one package test binary's whole-program SSA with its
@@ -234,6 +236,11 @@ func build(ctx context.Context, pkgPath string, roots []*packages.Package) (*Pro
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	tracing := trace.Enabled(ctx, trace.DomainClosure, pkgPath)
+	var start time.Time
+	if tracing {
+		start = time.Now()
+	}
 	var errs []string
 	var all []*packages.Package
 	seen := map[*packages.Package]bool{}
@@ -445,6 +452,14 @@ func build(ctx context.Context, pkgPath string, roots []*packages.Package) (*Pro
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if tracing {
+		trace.Emit(ctx, trace.DomainClosure, "program.build.done", pkgPath,
+			trace.Int("packages", len(all)),
+			trace.Int("ssa_packages", len(ssaPackages)),
+			trace.Int("roots", len(funcRoots)),
+			trace.Int64("elapsed_ns", time.Since(start).Nanoseconds()),
+		)
 	}
 	return &Program{PkgPath: pkgPath, Prog: prog, Pkgs: all, Roots: funcRoots, Ambiguous: ambiguousRoots, TestMain: testMain, Summaries: map[string]any{}}, nil
 }

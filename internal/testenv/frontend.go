@@ -191,7 +191,7 @@ func isFullCandidateStdPkg(path string) bool {
 	}
 	switch path {
 	case "slices", "maps", "cmp", "sync", "sync/atomic", "io", "context", "testing", "fmt", "errors", "strings", "bytes",
-		"reflect", "path/filepath", "crypto", "text/template", "sort":
+		"reflect", "path/filepath", "crypto", "text/template", "sort", "strconv", "internal/strconv":
 		return true
 	default:
 		return false
@@ -473,6 +473,10 @@ func (c *stdlibMetaCache) activeStdlibForImports(userImports map[string]bool) ma
 			active["io"] = true
 			active["errors"] = true
 		case "errors":
+			active["errors"] = true
+		case "strconv":
+			active["strconv"] = true
+			active["internal/strconv"] = true
 			active["errors"] = true
 		case "context":
 			active["context"] = true

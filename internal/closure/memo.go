@@ -5,9 +5,32 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 
 	"github.com/greatliontech/gofresh/internal/cachefile"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
+
+func emitMemoLoadTrace(dirName, key string, hit bool, count int) {
+	if !trace.Enabled(nil, trace.DomainCache, dirName) {
+		return
+	}
+	trace.Emit(nil, trace.DomainCache, "closure.memo.load", dirName,
+		trace.String("key", key),
+		trace.Bool("hit", hit),
+		trace.Int("count", count),
+	)
+}
+
+func emitMemoStoreTrace(dirName, key string, count int) {
+	if !trace.Enabled(nil, trace.DomainCache, dirName) {
+		return
+	}
+	trace.Emit(nil, trace.DomainCache, "closure.memo.store", dirName,
+		trace.String("key", key),
+		trace.Int("count", count),
+	)
+}
 
 // SetAnalysisScope arms every persistent closure memo that needs the
 // caller's guards — the observability proofs, the typed testing-effect
@@ -73,8 +96,10 @@ const observabilityDirName = "observability"
 func loadMemo(scope, closureKey string) map[string]Observability {
 	var proofs map[string]Observability
 	if !cachefile.Load(observabilityDirName, scope, closureKey, &proofs) {
+		emitMemoLoadTrace(observabilityDirName, closureKey, false, 0)
 		return nil
 	}
+	emitMemoLoadTrace(observabilityDirName, closureKey, true, len(proofs))
 	return proofs
 }
 
@@ -83,6 +108,7 @@ func loadMemo(scope, closureKey string) map[string]Observability {
 // recomputation, never a wrong proof.
 func storeMemo(scope, closureKey string, proofs map[string]Observability) {
 	cachefile.Merge(observabilityDirName, scope, closureKey, proofs)
+	emitMemoStoreTrace(observabilityDirName, closureKey, len(proofs))
 }
 
 // testBinaryClosureKey is the memo-key identity of everything the
@@ -180,6 +206,7 @@ const (
 func loadRootedMemo(scope, closureKey string) map[string]RootedFunctions {
 	var inventories map[string]RootedFunctions
 	if !cachefile.Load(rootedDirName, scope, closureKey, &inventories) {
+		emitMemoLoadTrace(rootedDirName, closureKey, false, 0)
 		return nil
 	}
 	for k, inv := range inventories {
@@ -188,11 +215,13 @@ func loadRootedMemo(scope, closureKey string) map[string]RootedFunctions {
 			inventories[k] = inv
 		}
 	}
+	emitMemoLoadTrace(rootedDirName, closureKey, true, len(inventories))
 	return inventories
 }
 
 func storeRootedMemo(scope, closureKey string, inventories map[string]RootedFunctions) {
 	cachefile.Merge(rootedDirName, scope, closureKey, inventories)
+	emitMemoStoreTrace(rootedDirName, closureKey, len(inventories))
 }
 
 func (h *Hasher) rootedGroupMemo(pkgPath string) (closureHash string, inventories map[string]RootedFunctions) {
@@ -209,16 +238,19 @@ func (h *Hasher) rootedGroupMemo(pkgPath string) (closureHash string, inventorie
 func loadBinaryRootedMemo(scope, closureKey string) (RootedFunctions, bool) {
 	var inventory RootedFunctions
 	if !cachefile.Load(binaryRootedDirName, scope, closureKey, &inventory) {
+		emitMemoLoadTrace(binaryRootedDirName, closureKey, false, 0)
 		return RootedFunctions{}, false
 	}
 	if inventory.Complete && inventory.Fns == nil {
 		inventory.Fns = map[string]bool{}
 	}
+	emitMemoLoadTrace(binaryRootedDirName, closureKey, true, len(inventory.Fns))
 	return inventory, true
 }
 
 func storeBinaryRootedMemo(scope, closureKey string, inventory RootedFunctions) {
 	cachefile.Store(binaryRootedDirName, scope, closureKey, inventory)
+	emitMemoStoreTrace(binaryRootedDirName, closureKey, len(inventory.Fns))
 }
 
 func (h *Hasher) binaryRootedMemo(pkgPath string) (closureHash string, inventory RootedFunctions, ok bool) {
@@ -231,4 +263,185 @@ func (h *Hasher) binaryRootedMemo(pkgPath string) (closureHash string, inventory
 	}
 	inv, ok := loadBinaryRootedMemo(h.scope.Rooted(), key)
 	return key, inv, ok
+}
+
+// effectScanStrategy versions the per-file effect scan's semantics: the
+// classification tables, the directive markers, and the preferred-reason
+// derivation. Any change that can move an effect set or a preferred
+// diagnostic bumps it, so persisted scans from the prior interpretation
+// refuse instead of serving (REQ-closure-effect-scan-memo).
+// @10 adds the audited linkname-target floor (audited-only linkname
+// files drop exactly the opaque-linkage effect). ObservationRTA was
+// deliberately NOT bumped with @10: no observation proof could have
+// existed for a file the opaque-linkage effect blocked, so no recorded
+// proof could serve under semantics it predated. @11 admits
+// encoding/base32 into the scan's source-only consultation and parses
+// //go:linknamestd as its own directive under the linkname floor's
+// grammar with the floor keyed to the audited toolchain releases —
+// the floor changes ride this surface alone (the same
+// no-prior-proof argument as @10: a file the floor blocked had no
+// servable proof), while ObservationRTA@27 carries base32 and the
+// keying for the walk tiers. @12 admits math/big whole into the
+// audited-pure package set: the per-file scan's unaudited-dependence
+// marker and selector classification both consult the set, so a scan
+// persisted under the narrower set must refuse rather than serve
+// (ObservationRTA@28 carries the same widening for the walk tiers).
+// @13 admits time's fixed-argument construction and value computation
+// (ObservationRTA@29 carries the same widening for the walk tiers).
+// @14 composes the discharge channel into the ambient-effect reasons
+// the fold persists (ObservationRTA@30 carries the same text for the
+// walk tiers).
+// @15 admits net/url's escaping and composition and path/filepath's
+// lexical operations, both by symbol (ObservationRTA@31 carries the
+// same widening for the walk tiers).
+// @16 stops classifying b.N and b.Loop as package-wide configuration
+// reads: benchmark pacing is a harness fact the walk records
+// (ObservationRTA@32 carries the admission for the walk tiers).
+// @17 classifies crypto/rand's operations as the entropy class at the
+// fold and binds an unnamed major-versioned import's declared name as a
+// secondary beside its last element, two imports binding one identifier
+// refusing the file (ObservationRTA@34 carries the same for the walk
+// tiers).
+// @18 admits the flag package's FlagSet forms at the fold
+// (ObservationRTA@35 carries the same for the walk tiers).
+// @19 admits sync.Map's Load, Store, and LoadOrStore (and the type
+// name) at the fold as the audited memo set.
+// @20 admits reflect's Elem at the fold beside the runtime-type set:
+// the fold's selector match is unresolved, so a field or method
+// selector through an import alias a local shadows (`r.Elem` under
+// `import r "reflect"`) spells reflect.Elem to it (ObservationRTA@38
+// carries the audit for the walk tiers).
+// @21 admits reflect's descriptor-view surface, the Kind and ChanDir
+// constants, and the StructField/StructTag shapes at the fold as a
+// per-package symbol table like its peers (ObservationRTA@40 carries
+// the same for the walk tiers). The unresolved alias match now spells
+// sixty-odd names through a shadowed import alias; that is sound
+// because the fold is a refusal-only backstop consulted after the
+// walks — a shadow adds false resolutions and removes none of the
+// file's real ones, so no proof the walks refuse is ever granted.
+// @28 admits runtime.GOOS, runtime.GOARCH, strconv.ErrRange, and
+// strconv.ErrSyntax into the audited symbol set and exempts blank
+// `import _ "unsafe"` (a compiler pseudo-package with no init function,
+// whose //go:linkname directives are classified independently; dot-imports
+// remain blocked).
+const effectScanStrategy = "gofresh/effect-scan@28"
+
+// effectScanScope is the memo's full scope: the strategy version, the
+// analyzing frontend, complete selected source and admission policy. A Boolean
+// admission is not their identity, including under the default selection
+// (REQ-closure-effect-scan-memo). Missing dependencies leave the memo inert.
+func (h *Hasher) effectScanScope() string {
+	if h.ToolchainContent() == "" || h.AdmissionPolicy() == "" {
+		return ""
+	}
+	scope := effectScanStrategy + " " + AnalyzingFrontend() + "|" + h.ToolchainContent() + "|" + h.AdmissionPolicy()
+	if !h.SelectionAudited() {
+		scope += "|unaudited"
+	}
+	return scope
+}
+
+// testingScanStrategy versions the typed testing-effect scan's semantics:
+// the testing classification table and the selection walk. Any change that
+// can move the scan's effect set or preferred diagnostic bumps it, so
+// persisted scans from the prior interpretation refuse instead of serving
+// (REQ-closure-testing-scan-memo).
+// @4 stops classifying b.N and b.Loop: benchmark pacing records nothing
+// at the fold (ObservationRTA@32, effect-scan@16).
+const testingScanStrategy = "gofresh/testing-scan@6"
+
+// testingScanScope completes the typed scan's analysis identity outside
+// the source closure: its own strategy version plus the code guards —
+// toolchain and build configuration — the type environment depends on,
+// read from the caller's analysis scope
+// (REQ-closure-testing-scan-memo). Empty when the caller set no guards:
+// the memo stays disabled.
+func (h *Hasher) testingScanScope() string {
+	return h.scope.TestingScan()
+}
+
+// effectScanPayload is one package's persisted effect scan — the shared
+// cache-file envelope carries the scope and key.
+type effectScanPayload struct {
+	Effects []effectScanEffect `json:"effects"`
+	// ImportCandidates are the scan's diagnostic-only plain-import
+	// candidates: preferred-reason participants that bear no verdict.
+	ImportCandidates []effectScanEffect `json:"importCandidates,omitempty"`
+	Selected         string             `json:"selected"`
+}
+
+// effectScanEffect mirrors externalEffect for persistence; the memo owns
+// the wire shape so the in-memory struct stays private.
+type effectScanEffect struct {
+	Kind        int    `json:"kind"`
+	PackagePath string `json:"packagePath,omitempty"`
+	Symbol      string `json:"symbol,omitempty"`
+	Detail      string `json:"detail,omitempty"`
+	Reason      string `json:"reason"`
+	Unrefinable bool   `json:"unrefinable,omitempty"`
+	Observable  bool   `json:"observable,omitempty"`
+}
+
+func encodeEffects(effects []externalEffect) []effectScanEffect {
+	out := make([]effectScanEffect, len(effects))
+	for i, e := range effects {
+		out[i] = effectScanEffect{Kind: int(e.kind), PackagePath: e.packagePath, Symbol: e.symbol, Detail: e.detail, Reason: e.reason, Unrefinable: e.unrefinable, Observable: e.observable}
+	}
+	return out
+}
+
+func decodeEffects(encoded []effectScanEffect) []externalEffect {
+	if len(encoded) == 0 {
+		return nil
+	}
+	out := make([]externalEffect, len(encoded))
+	for i, e := range encoded {
+		out[i] = externalEffect{kind: externalEffectKind(e.Kind), packagePath: e.PackagePath, symbol: e.Symbol, detail: e.Detail, reason: e.Reason, unrefinable: e.Unrefinable, observable: e.Observable}
+	}
+	return out
+}
+
+// effectScanKey is the complete input identity of one pinned package's
+// per-file effect-scan fold: the module version pin, the package import
+// path, and the identity — with the Go/cgo partition — of the file set the
+// current listing selects (REQ-closure-effect-scan-memo — no type
+// environment participates; the scan is syntactic per file).
+func effectScanKey(pin, importPath string, goFiles, cgoFiles []string) string {
+	sum := sha256.Sum256([]byte(pin + "\x00" + importPath + "\x00" + strings.Join(goFiles, "\x00") + "\x01" + strings.Join(cgoFiles, "\x00")))
+	return hex.EncodeToString(sum[:])
+}
+
+// effectScanDirName and testingScanDirName are the two sibling store
+// directories one scan-memo mechanism serves: the syntactic per-file fold
+// (REQ-closure-effect-scan-memo) and the typed testing-effect scan
+// (REQ-closure-testing-scan-memo).
+const (
+	effectScanDirName  = "effectscan"
+	testingScanDirName = "testingscan"
+)
+
+// loadEffectScan returns the persisted scan for (scope, key) in dirName;
+// ok is false on any failure — the memo is a cache, never a record.
+func loadEffectScan(dirName, scope, key string) (maximalEffectScan, bool) {
+	if scope == "" {
+		return maximalEffectScan{}, false
+	}
+	var payload effectScanPayload
+	if !cachefile.Load(dirName, scope, key, &payload) {
+		emitMemoLoadTrace(dirName, key, false, 0)
+		return maximalEffectScan{}, false
+	}
+	emitMemoLoadTrace(dirName, key, true, len(payload.Effects))
+	return maximalEffectScan{effects: decodeEffects(payload.Effects), importCandidates: decodeEffects(payload.ImportCandidates), preferred: payload.Selected}, true
+}
+
+// storeEffectScan persists one package's scan in dirName with an atomic
+// replace; failures are silent — a lost store costs one recomputation,
+// never a wrong scan.
+func storeEffectScan(dirName, scope, key string, scan maximalEffectScan) {
+	if scope == "" {
+		return
+	}
+	cachefile.Store(dirName, scope, key, effectScanPayload{Effects: encodeEffects(scan.effects), ImportCandidates: encodeEffects(scan.importCandidates), Selected: scan.preferred})
+	emitMemoStoreTrace(dirName, key, len(scan.effects))
 }

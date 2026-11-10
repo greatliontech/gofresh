@@ -8553,3 +8553,202 @@ func UseMultiReturnBodyless() int {
 		t.Fatalf("UseMultiReturnBodyless = %+v, want Observable=false (Carrier struct returned in tuple from bodyless call must be poisoned)", obs)
 	}
 }
+
+func TestClosurePrecisionAndProvenanceFixes(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/precision\n\ngo 1.24\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	src := `package precision
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strconv"
+	"testing"
+)
+
+func openReadHelper(t *testing.T, path string) {
+	if err := os.WriteFile(path, []byte("abcd"), 0o600); err != nil {
+		t.Fatal("write failed")
+	}
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		t.Fatal("open failed")
+	}
+	var buf [4]byte
+	if _, err := f.Read(buf[:]); err != nil {
+		_ = f.Close()
+		t.Fatal("read failed")
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal("close failed")
+	}
+}
+
+func TestParamBackedOpenFileDominated(t *testing.T) {
+	p1 := filepath.Join(t.TempDir(), "data1.txt")
+	openReadHelper(t, p1)
+}
+
+func openFileNameHelper(path string) string {
+	f, err := os.OpenFile(path, os.O_RDONLY, 0)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	return f.Name()
+}
+
+func TestParamBackedFreshOpenFileNameRefused(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "data.txt")
+	if err := os.WriteFile(p, []byte("abcd"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_ = openFileNameHelper(p)
+}
+
+func ParseAndFormatNumError(s string) string {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		u := errors.Unwrap(err)
+		if u != nil {
+			return err.Error() + ":" + u.Error()
+		}
+		return err.Error()
+	}
+	return strconv.Itoa(n)
+}
+
+type impureCustomErr struct{}
+
+func (impureCustomErr) Error() string {
+	return strconv.Itoa(len(os.Environ()))
+}
+
+type impureStringer struct{}
+
+func (impureStringer) String() string {
+	return strconv.Itoa(len(os.Environ()))
+}
+
+func UnrelatedImpureStringerCaller() string {
+	var e error = impureCustomErr{}
+	var s interface{ String() string } = impureStringer{}
+	return e.Error() + s.String()
+}
+
+func PureItoaCaller(x int) string {
+	return strconv.Itoa(x)
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "p_test.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	poisonDir := filepath.Join(dir, "poisonednumerr")
+	if err := os.MkdirAll(poisonDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	poisonSrc := `package poisonednumerr
+
+import (
+	"os"
+	"strconv"
+)
+
+type envErr struct{}
+
+func (envErr) Error() string {
+	return strconv.Itoa(len(os.Environ()))
+}
+
+func WrapImpureNumError() string {
+	var e error = &strconv.NumError{Func: "Atoi", Num: "x", Err: envErr{}}
+	return e.Error()
+}
+`
+	if err := os.WriteFile(filepath.Join(poisonDir, "p.go"), []byte(poisonSrc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	initFlagDir := filepath.Join(dir, "initflag")
+	if err := os.MkdirAll(initFlagDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	initFlagSrc := `package initflag
+
+import "io"
+
+type initBoxed struct{ x int }
+
+var boxedSink any
+var discardSink io.Writer
+
+func init() {
+	boxedSink = initBoxed{x: 1}
+	discardSink = io.Discard
+}
+
+func PureFn() int { return 1 }
+`
+	if err := os.WriteFile(filepath.Join(initFlagDir, "p.go"), []byte(initFlagSrc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	primeHasherFromDir(t, h, dir)
+	subjects := []Subject{
+		{Package: "example.com/precision", Symbol: "TestParamBackedOpenFileDominated"},
+		{Package: "example.com/precision", Symbol: "TestParamBackedFreshOpenFileNameRefused"},
+		{Package: "example.com/precision", Symbol: "ParseAndFormatNumError"},
+		{Package: "example.com/precision", Symbol: "PureItoaCaller"},
+		{Package: "example.com/precision", Symbol: "UnrelatedImpureStringerCaller"},
+	}
+	got, err := h.ComputeObservabilityBatch(subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs := got[Subject{Package: "example.com/precision", Symbol: "TestParamBackedOpenFileDominated"}]; !obs.Observable {
+		t.Errorf("TestParamBackedOpenFileDominated = %+v, want Observable=true", obs)
+	}
+	if obs := got[Subject{Package: "example.com/precision", Symbol: "TestParamBackedFreshOpenFileNameRefused"}]; obs.Observable {
+		t.Errorf("TestParamBackedFreshOpenFileNameRefused = %+v, want Observable=false", obs)
+	}
+	if obs := got[Subject{Package: "example.com/precision", Symbol: "ParseAndFormatNumError"}]; !obs.Observable || !obs.EffectFree {
+		t.Errorf("ParseAndFormatNumError = %+v, want Observable=true EffectFree=true", obs)
+	}
+	if obs := got[Subject{Package: "example.com/precision", Symbol: "PureItoaCaller"}]; !obs.Observable || !obs.EffectFree {
+		t.Errorf("PureItoaCaller = %+v, want Observable=true EffectFree=true", obs)
+	}
+	poisonSubj := Subject{Package: "example.com/precision/poisonednumerr", Symbol: "WrapImpureNumError"}
+	poisonGot, err := h.ComputeObservabilityBatch([]Subject{poisonSubj})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs := poisonGot[poisonSubj]; obs.Observable {
+		t.Errorf("WrapImpureNumError = %+v, want Observable=false", obs)
+	}
+	initProg, err := h.loadCached("example.com/precision/initflag")
+	if err != nil {
+		t.Fatal(err)
+	}
+	initUserPaths := userModulePaths(initProg.Pkgs)
+	initRoots, harnessStdInitRoots := partitionHarnessInitRoots(initProg, true, initUserPaths)
+	baseStartup, err := cachedBaseStartupReachability(context.Background(), true, initProg, initRoots, harnessStdInitRoots, true, initUserPaths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundStdGlobal := false
+	for g := range baseStartup.userTouchedStdGlobals {
+		if g != nil && g.Pkg != nil && g.Pkg.Pkg != nil && g.Pkg.Pkg.Path() == "io" && g.Name() == "Discard" {
+			foundStdGlobal = true
+		}
+	}
+	if !foundStdGlobal {
+		t.Errorf("userTouchedStdGlobals = %v, want io.Discard recorded when touched by user init", baseStartup.userTouchedStdGlobals)
+	}
+}

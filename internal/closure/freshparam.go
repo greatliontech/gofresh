@@ -293,8 +293,18 @@ func newBitOnlyFreshParamAnalysis(propertyHarnessAudited, selectionAudited bool,
 	return &freshParamAnalysis{ssaProgramIndex: idx}
 }
 
+func (fp *freshParamAnalysis) resetDynamicMemos() {
+	fp.closedDone = map[ssa.Value]bool{}
+	fp.typesMemo = map[ssa.Value][]types.Type{}
+	fp.typesFailed = map[ssa.Value]bool{}
+	fp.funcsMemo = map[ssa.Value][]*ssa.Function{}
+	fp.funcsFailed = map[ssa.Value]bool{}
+	fp.invokeTargets = map[ssa.CallInstruction]map[*ssa.Function]bool{}
+	fp.invokeFailed = map[ssa.CallInstruction]bool{}
+}
+
 func newEnumFreshParamAnalysis(audited bool, pureDelegates map[string]bool, userPaths map[string]bool, root *ssa.Function, sites []ssa.CallInstruction, summary *callerReferenceSummary) *freshParamAnalysis {
-	return &freshParamAnalysis{
+	fp := &freshParamAnalysis{
 		ssaProgramIndex: ssaProgramIndex{
 			prog:                   summary.prog,
 			selectionAudited:       audited,
@@ -313,19 +323,14 @@ func newEnumFreshParamAnalysis(audited bool, pureDelegates map[string]bool, user
 			},
 		},
 		subjectQuery: subjectQuery{
-			enumOnly:      true,
-			enumRoot:      root,
-			subjectRoot:   root,
-			enumSites:     sites,
-			closedDone:    map[ssa.Value]bool{},
-			typesMemo:     map[ssa.Value][]types.Type{},
-			typesFailed:   map[ssa.Value]bool{},
-			funcsMemo:     map[ssa.Value][]*ssa.Function{},
-			funcsFailed:   map[ssa.Value]bool{},
-			invokeTargets: map[ssa.CallInstruction]map[*ssa.Function]bool{},
-			invokeFailed:  map[ssa.CallInstruction]bool{},
+			enumOnly:    true,
+			enumRoot:    root,
+			subjectRoot: root,
+			enumSites:   sites,
 		},
 	}
+	fp.resetDynamicMemos()
+	return fp
 }
 
 func (fp *freshParamAnalysis) withoutCallee(fn *ssa.Function) *freshParamAnalysis {
@@ -382,13 +387,7 @@ func (fp *freshParamAnalysis) newStructVisitingScopeFP(visiting map[*types.Named
 	sub := *fp
 	sub.baseCarrierNamed = nil
 	sub.enumStructVisiting = visiting
-	sub.closedDone = map[ssa.Value]bool{}
-	sub.typesMemo = map[ssa.Value][]types.Type{}
-	sub.typesFailed = map[ssa.Value]bool{}
-	sub.funcsMemo = map[ssa.Value][]*ssa.Function{}
-	sub.funcsFailed = map[ssa.Value]bool{}
-	sub.invokeTargets = map[ssa.CallInstruction]map[*ssa.Function]bool{}
-	sub.invokeFailed = map[ssa.CallInstruction]bool{}
+	sub.resetDynamicMemos()
 	return &sub
 }
 
@@ -401,13 +400,7 @@ func (fp *freshParamAnalysis) newStructStoreWalkFP(inProgramSites, inFieldStore 
 	sub.baseCarrierNamed = nil
 	sub.enumStructVisiting = visiting
 	if sub.closedDone == nil {
-		sub.closedDone = map[ssa.Value]bool{}
-		sub.typesMemo = map[ssa.Value][]types.Type{}
-		sub.typesFailed = map[ssa.Value]bool{}
-		sub.funcsMemo = map[ssa.Value][]*ssa.Function{}
-		sub.funcsFailed = map[ssa.Value]bool{}
-		sub.invokeTargets = map[ssa.CallInstruction]map[*ssa.Function]bool{}
-		sub.invokeFailed = map[ssa.CallInstruction]bool{}
+		sub.resetDynamicMemos()
 	}
 	sub.walkFrame = walkFrame{
 		stackDepth:      map[ssa.Value]int{},
@@ -441,21 +434,15 @@ func newFreshParamAnalysis(audited bool, pureDelegates map[string]bool, reach at
 			isStd:                  isStd,
 		},
 		subjectQuery: subjectQuery{
-			functions:     reach.functions,
-			callers:       map[*ssa.Function][]ssa.CallInstruction{},
-			dynamic:       map[*ssa.Function]bool{},
-			subjectRoot:   reach.subjectRoot,
-			argFresh:      map[freshParamKey]bool{},
-			usesOK:        map[freshParamKey]bool{},
-			closedDone:    map[ssa.Value]bool{},
-			typesMemo:     map[ssa.Value][]types.Type{},
-			typesFailed:   map[ssa.Value]bool{},
-			funcsMemo:     map[ssa.Value][]*ssa.Function{},
-			funcsFailed:   map[ssa.Value]bool{},
-			invokeTargets: map[ssa.CallInstruction]map[*ssa.Function]bool{},
-			invokeFailed:  map[ssa.CallInstruction]bool{},
+			functions:   reach.functions,
+			callers:     map[*ssa.Function][]ssa.CallInstruction{},
+			dynamic:     map[*ssa.Function]bool{},
+			subjectRoot: reach.subjectRoot,
+			argFresh:    map[freshParamKey]bool{},
+			usesOK:      map[freshParamKey]bool{},
 		},
 	}
+	fp.resetDynamicMemos()
 	if len(reach.enumeratedRootSites) > 0 || len(reach.enumeratedFieldStores) > 0 || reach.enumeratedRoot {
 		fp.enumRoot = reach.subjectRoot
 		fp.enumSites = reach.enumeratedRootSites
@@ -464,15 +451,25 @@ func newFreshParamAnalysis(audited bool, pureDelegates map[string]bool, reach at
 			fp.enumRecvNamed = derefNamedStruct(fp.userPkgPaths(), fp.enumRoot.Signature.Recv().Type())
 		}
 	}
-	for fn := range reach.functions {
-		for _, block := range fn.Blocks {
-			for _, instruction := range block.Instrs {
-				site, ok := instruction.(ssa.CallInstruction)
-				if !ok || site.Common() == nil {
-					continue
-				}
-				if callee := site.Common().StaticCallee(); callee != nil && reach.functions[callee] {
+	if fp.summary != nil && len(fp.summary.allStaticSites) > 0 {
+		for callee := range reach.functions {
+			for _, site := range fp.summary.allStaticSites[callee] {
+				if reach.functions[site.Parent()] {
 					fp.callers[callee] = append(fp.callers[callee], site)
+				}
+			}
+		}
+	} else {
+		for fn := range reach.functions {
+			for _, block := range fn.Blocks {
+				for _, instruction := range block.Instrs {
+					site, ok := instruction.(ssa.CallInstruction)
+					if !ok || site.Common() == nil {
+						continue
+					}
+					if callee := site.Common().StaticCallee(); callee != nil && reach.functions[callee] {
+						fp.callers[callee] = append(fp.callers[callee], site)
+					}
 				}
 			}
 		}

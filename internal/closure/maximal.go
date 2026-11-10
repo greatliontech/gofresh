@@ -15,10 +15,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // ComputeMaximalBatch returns the maximal sound closure for every subject. All
@@ -58,7 +60,11 @@ func (h *Hasher) ComputeMaximalFactsBatch(subjects []Subject) (map[Subject]Maxim
 	}
 	// One call observes one tree generation; a later call re-observes.
 	h.resetCallScope()
-	defer func() { h.contents = nil }()
+	defer func() {
+		h.contents = nil
+		h.maximalParsedFiles = nil
+		h.maximalTestingUnfiltered = nil
+	}()
 	results := make(map[Subject]MaximalFacts, len(subjects))
 	sources := make(map[Subject][]string, len(subjects))
 	byPackage := make(map[string][]Subject)
@@ -365,10 +371,11 @@ func (h *Hasher) maximalFileEffectsCachedWithContext(pkgPath, path string, decla
 		if err != nil {
 			return maximalEffectScan{}, err
 		}
-		scan, err := maximalFileEffectsContentWithContextFiltered(h.SelectionAudited(), path, content, declaredNames, nonStdPaths, nil)
+		parsed, err := h.parsedMaximalFile(path, content, declaredNames, nonStdPaths, overridesKey)
 		if err != nil {
 			return maximalEffectScan{}, err
 		}
+		scan := maximalFileEffectsParsed(h.SelectionAudited(), parsed, nonStdPaths, nil, nil, "", nil, nil, nil, nil)
 		h.maximalFiles[cacheKey] = scan
 		return scan, nil
 	}
@@ -385,10 +392,11 @@ func (h *Hasher) maximalFileEffectsCachedWithContext(pkgPath, path string, decla
 		return scan, nil
 	}
 	emitFileParseHook(path)
-	scan, err := maximalFileEffectsContentWithContextFiltered(h.SelectionAudited(), path, fb.content, declaredNames, nonStdPaths, nil)
+	parsed, err := h.parsedMaximalFile(path, fb.content, declaredNames, nonStdPaths, overridesKey)
 	if err != nil {
 		return maximalEffectScan{}, err
 	}
+	scan := maximalFileEffectsParsed(h.SelectionAudited(), parsed, nonStdPaths, nil, nil, "", nil, nil, nil, nil)
 	h.recordFileScan(dir, digestKey, scan)
 	h.maximalFiles[cacheKey] = scan
 	return scan, nil
@@ -538,15 +546,31 @@ func maximalFileEffectsContentWithContextFiltered(audited bool, filename string,
 	return maximalFileEffectsContentWithZeroGlobals(audited, filename, content, declaredNames, nonStdPaths, reachedDecls, nil, "", nil, nil, nil, nil)
 }
 
-func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, filePkgPath string, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed, verifiedLinknameLocals map[string]bool) (maximalEffectScan, error) {
+type parsedMaximalFile struct {
+	filename      string
+	dir           string
+	pkgClause     string
+	text          string
+	hasWasmImport bool
+	file          *ast.File
+	imports       []importAlias
+	aliases       map[string]string
+	stdAliases    map[string]string
+	collisions    []string
+	importNames   map[string]bool
+	testMainDecl  *ast.FuncDecl
+	handleTypes   map[string]bool
+	localNames    map[*ast.FuncDecl]map[string]bool
+}
+
+func parseMaximalFile(filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool) (*parsedMaximalFile, error) {
 	text := string(content)
 	hasWasmImport := strings.Contains(text, "//go:wasmimport")
-	hasLinkname := strings.Contains(text, "//go:linkname") && !auditedLinknamesWithLocals(audited, text, verifiedLinknameLocals)
 	// The walks read identifiers by name and imports from file.Imports;
 	// object resolution is unused, so skipping it saves its allocations.
 	file, err := parser.ParseFile(token.NewFileSet(), filename, content, parser.SkipObjectResolution)
 	if err != nil {
-		return maximalEffectScan{}, fmt.Errorf("closure: parse %s: %w", filename, err)
+		return nil, fmt.Errorf("closure: parse %s: %w", filename, err)
 	}
 	imports := make([]importAlias, 0, len(file.Imports))
 	aliases := make(map[string]string, len(file.Imports))
@@ -567,7 +591,7 @@ func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, con
 	for _, spec := range file.Imports {
 		pkgPath, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
-			return maximalEffectScan{}, fmt.Errorf("closure: parse import in %s: %w", filename, err)
+			return nil, fmt.Errorf("closure: parse import in %s: %w", filename, err)
 		}
 		alias := path.Base(pkgPath)
 		if spec.Name != nil {
@@ -600,6 +624,83 @@ func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, con
 			aliases[name] = paths[0]
 		}
 	}
+	stdAliases := aliases
+	if len(nonStdPaths) > 0 {
+		stdAliases = make(map[string]string, len(aliases))
+		for alias, pkgPath := range aliases {
+			if !(isStdImportPath(pkgPath) && nonStdPaths[pkgPath]) {
+				stdAliases[alias] = pkgPath
+			}
+		}
+	}
+	pkgClause := ""
+	if file.Name != nil {
+		pkgClause = file.Name.Name
+	}
+	return &parsedMaximalFile{
+		filename:      filename,
+		dir:           filepath.Clean(filepath.Dir(filename)),
+		pkgClause:     pkgClause,
+		text:          text,
+		hasWasmImport: hasWasmImport,
+		file:          file,
+		imports:       imports,
+		aliases:       aliases,
+		stdAliases:    stdAliases,
+		collisions:    collisions,
+		importNames:   fileImportNames(file, declaredNames),
+		testMainDecl:  userTestMainDecl(file, stdAliases),
+		handleTypes:   testingHandleTypeNames(file, stdAliases),
+	}, nil
+}
+
+func (p *parsedMaximalFile) funcLocals(fn *ast.FuncDecl) map[string]bool {
+	if fn == nil {
+		return nil
+	}
+	if p.localNames != nil {
+		if names, ok := p.localNames[fn]; ok {
+			return names
+		}
+	}
+	names := funcLocalDeclaredNames(fn)
+	if p.localNames == nil {
+		p.localNames = make(map[*ast.FuncDecl]map[string]bool)
+	}
+	p.localNames[fn] = names
+	return names
+}
+
+func (h *Hasher) parsedMaximalFile(filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool, overridesKey string) (*parsedMaximalFile, error) {
+	cacheKey := filename + overridesKey
+	if h != nil && h.maximalParsedFiles != nil {
+		if parsed, ok := h.maximalParsedFiles[cacheKey]; ok {
+			return parsed, nil
+		}
+	}
+	parsed, err := parseMaximalFile(filename, content, declaredNames, nonStdPaths)
+	if err != nil {
+		return nil, err
+	}
+	if h != nil && h.maximalParsedFiles != nil {
+		h.maximalParsedFiles[cacheKey] = parsed
+	}
+	return parsed, nil
+}
+
+func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, filePkgPath string, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed, verifiedLinknameLocals map[string]bool) (maximalEffectScan, error) {
+	parsed, err := parseMaximalFile(filename, content, declaredNames, nonStdPaths)
+	if err != nil {
+		return maximalEffectScan{}, err
+	}
+	return maximalFileEffectsParsed(audited, parsed, nonStdPaths, reachedDecls, startupOnlyDecls, filePkgPath, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals), nil
+}
+
+func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPaths map[string]bool, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, filePkgPath string, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed, verifiedLinknameLocals map[string]bool) maximalEffectScan {
+	file := parsed.file
+	text := parsed.text
+	hasWasmImport := parsed.hasWasmImport
+	hasLinkname := strings.Contains(text, "//go:linkname") && !auditedLinknamesWithLocals(audited, text, verifiedLinknameLocals)
 	var scan maximalEffectScan
 	// The preferred diagnostic derives from the same single walk's
 	// effect set under the shared cause-preference order
@@ -615,10 +716,10 @@ func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, con
 	if hasLinkname {
 		scan.add(opaqueExternalEffect(externalEffectLinkage, "reaches go:linkname (opaque linkage)"))
 	}
-	for _, collision := range collisions {
+	for _, collision := range parsed.collisions {
 		scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, collision))
 	}
-	for _, imp := range imports {
+	for _, imp := range parsed.imports {
 		if isStdImportPath(imp.pkgPath) && nonStdPaths[imp.pkgPath] {
 			continue
 		}
@@ -653,29 +754,17 @@ func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, con
 			}
 		}
 	}
-	stdAliases := aliases
-	if len(nonStdPaths) > 0 {
-		stdAliases = make(map[string]string, len(aliases))
-		for alias, pkgPath := range aliases {
-			if !(isStdImportPath(pkgPath) && nonStdPaths[pkgPath]) {
-				stdAliases[alias] = pkgPath
-			}
-		}
-	}
+	stdAliases := parsed.stdAliases
 	// The canonical test-main epilogue is harness protocol, not an
 	// unaudited operation: os.Exit inside the user TestMain(*testing.M)
 	// declaration is admitted exactly as the observed test-main walk
 	// admits it - it runs post-bracket and adds no input channel to any
 	// subject's execution (REQ-closure-observability-testmain-exit).
-	testMainDecl := userTestMainDecl(file, stdAliases)
+	testMainDecl := parsed.testMainDecl
 	inTestMain := func(node ast.Node) bool {
 		return testMainDecl != nil && node.Pos() >= testMainDecl.Pos() && node.End() <= testMainDecl.End()
 	}
-	pkgClause := ""
-	if file.Name != nil {
-		pkgClause = file.Name.Name
-	}
-	unreachedDecls := unreachedASTDecls(filepath.Dir(filename), pkgClause, file, testMainDecl, reachedDecls)
+	unreachedDecls := unreachedASTDecls(parsed.dir, parsed.pkgClause, file, testMainDecl, reachedDecls)
 	inUnreachedDecl := func(node ast.Node) bool {
 		for _, d := range unreachedDecls {
 			if node.Pos() >= d.Pos() && node.End() <= d.End() {
@@ -684,7 +773,7 @@ func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, con
 		}
 		return false
 	}
-	deadInBinaryBody, deadForSubjectBody := deadZeroGlobalIfBodies(file, filepath.Dir(filename), pkgClause, filePkgPath, testMainDecl, startupOnlyDecls, startupZeroGlobalDecls, wholeZeroGlobalDecls, declaredNames, pkgScopeShadowed)
+	deadInBinaryBody, deadForSubjectBody := deadZeroGlobalIfBodiesParsed(parsed, filePkgPath, startupOnlyDecls, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed)
 	inDeadForSubjectBody := func(node ast.Node) bool {
 		for blk := range deadForSubjectBody {
 			if node.Pos() >= blk.Pos() && node.End() <= blk.End() {
@@ -749,14 +838,14 @@ func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, con
 			testingSkipped[blk] = true
 		}
 	}
-	for _, effect := range testingMethodEffectsFilteredWithSkipped(file, stdAliases, unreachedDecls, testingSkipped) {
+	for _, effect := range testingMethodEffectsFilteredWithHandles(file, stdAliases, parsed.handleTypes, unreachedDecls, testingSkipped) {
 		scan.add(effect)
 	}
 	scan.preferred = preferredEffectReason(append(append([]externalEffect(nil), scan.effects...), scan.importCandidates...))
 	if scan.preferred == "" && potentialExternal != "" {
 		scan.preferred = "reaches " + potentialExternal + " (potential external dependence)"
 	}
-	return scan, nil
+	return scan
 }
 
 func hasPkgZeroGlobals(zeroGlobalDecls map[pkgVarKey]bool, pkgPath string) bool {
@@ -771,30 +860,28 @@ func hasPkgZeroGlobals(zeroGlobalDecls map[pkgVarKey]bool, pkgPath string) bool 
 	return false
 }
 
-func deadZeroGlobalIfBodies(file *ast.File, dir, pkgClause, pkgPath string, testMainDecl *ast.FuncDecl, startupOnlyDecls map[funcDeclKey]bool, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, declaredNames map[string]string, pkgScopeShadowed map[string]bool) (deadInBinary, deadForSubject map[*ast.BlockStmt]bool) {
+func deadZeroGlobalIfBodiesParsed(parsed *parsedMaximalFile, pkgPath string, startupOnlyDecls map[funcDeclKey]bool, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed map[string]bool) (deadInBinary, deadForSubject map[*ast.BlockStmt]bool) {
 	hasStartup := hasPkgZeroGlobals(startupZeroGlobalDecls, pkgPath)
 	hasWhole := hasPkgZeroGlobals(wholeZeroGlobalDecls, pkgPath)
-	if file == nil || pkgPath == "" || (!hasStartup && !hasWhole) {
+	if parsed == nil || parsed.file == nil || pkgPath == "" || (!hasStartup && !hasWhole) {
 		return nil, nil
 	}
-	dir = filepath.Clean(dir)
-	importNames := fileImportNames(file, declaredNames)
-	for _, decl := range file.Decls {
+	for _, decl := range parsed.file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Body == nil || fn == testMainDecl || (fn.Name != nil && fn.Name.Name == "TestMain") {
+		if !ok || fn.Body == nil || fn == parsed.testMainDecl || (fn.Name != nil && fn.Name.Name == "TestMain") {
 			continue
 		}
 		isInitDecl := fn.Recv == nil && fn.Name != nil && fn.Name.Name == "init"
 		isStartupOnlyDecl := false
 		if isInitDecl {
 			isStartupOnlyDecl = hasStartup
-		} else if key, ok := funcDeclKeyForAST(dir, pkgClause, fn); ok && startupOnlyDecls[key] {
+		} else if key, ok := funcDeclKeyForAST(parsed.dir, parsed.pkgClause, fn); ok && startupOnlyDecls[key] {
 			isStartupOnlyDecl = true
 		}
 		if !hasWhole && !isStartupOnlyDecl {
 			continue
 		}
-		shadowed := mergeShadowedNames(pkgScopeShadowed, importNames, funcLocalDeclaredNames(fn))
+		shadowed := mergeShadowedNames(pkgScopeShadowed, parsed.importNames, parsed.funcLocals(fn))
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			if _, isFuncLit := n.(*ast.FuncLit); isFuncLit {
 				return false
@@ -1113,6 +1200,11 @@ func pkgScopeShadowedUniverseZeroNames(base *tier2Base, pkgPath string) map[stri
 }
 
 func (h *Hasher) subjectMaximalExternalEffectsWithZeroGlobals(base *tier2Base, pkgPath string, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool) ([]externalEffect, error) {
+	tracing := trace.Enabled(h.ctx, trace.DomainClosure, pkgPath)
+	var start time.Time
+	if tracing {
+		start = time.Now()
+	}
 	pkgs, err := h.list(pkgPath)
 	if err != nil {
 		return nil, err
@@ -1181,12 +1273,20 @@ func (h *Hasher) subjectMaximalExternalEffectsWithZeroGlobals(base *tier2Base, p
 			if err != nil {
 				return nil, err
 			}
-			scan, err := maximalFileEffectsContentWithZeroGlobals(h.SelectionAudited(), fullPath, content, declaredNames, nonStdPaths, reachedDecls, startupOnlyDecls, srcPath, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals)
+			parsed, err := h.parsedMaximalFile(fullPath, content, declaredNames, nonStdPaths, overridesKey)
 			if err != nil {
 				return nil, err
 			}
+			scan := maximalFileEffectsParsed(h.SelectionAudited(), parsed, nonStdPaths, reachedDecls, startupOnlyDecls, srcPath, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals)
 			record(scan)
 		}
+	}
+	if tracing {
+		trace.Emit(h.ctx, trace.DomainClosure, "maximal.subject.done", pkgPath,
+			trace.Int("effects", len(effects)),
+			trace.Bool("filtered", reachedDecls != nil),
+			trace.Int64("elapsed_ns", time.Since(start).Nanoseconds()),
+		)
 	}
 	return effects, nil
 }
@@ -1194,6 +1294,11 @@ func (h *Hasher) subjectMaximalExternalEffectsWithZeroGlobals(base *tier2Base, p
 func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath string, reachedDecls map[funcDeclKey]bool) (maximalEffectScan, error) {
 	if cached, ok := h.maximalTesting[pkgPath]; ok && (reachedDecls == nil || !hasFilterableMaximalBlocker(h.SelectionAudited(), cached.effects)) {
 		return cached, nil
+	}
+	if reachedDecls != nil && h.maximalTestingUnfiltered != nil {
+		if cached, ok := h.maximalTestingUnfiltered[pkgPath]; ok && !hasFilterableMaximalBlocker(h.SelectionAudited(), cached.effects) {
+			return cached, nil
+		}
 	}
 	scope := ""
 	key := ""
@@ -1249,6 +1354,7 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 		}
 	}
 	var scan maximalEffectScan
+	var unfilteredScan maximalEffectScan
 	for _, pkg := range loaded {
 		if pkg.PkgPath != pkgPath && pkg.ForTest != pkgPath {
 			continue
@@ -1294,8 +1400,11 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 					return true
 				}
 				effect, ok := classBEffect("testing", object.Name())
-				if ok && (!inUnreachedDecl(selector) || packageWideMaximalHazard(effect)) {
-					scan.add(effect)
+				if ok {
+					unfilteredScan.add(effect)
+					if !inUnreachedDecl(selector) || packageWideMaximalHazard(effect) {
+						scan.add(effect)
+					}
 				}
 				return true
 			})
@@ -1308,6 +1417,9 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 			h.persisted.scans++
 		}
 		h.maximalTesting[pkgPath] = scan
+	} else if h.maximalTestingUnfiltered != nil {
+		unfilteredScan.preferred = preferredEffectReason(unfilteredScan.effects)
+		h.maximalTestingUnfiltered[pkgPath] = unfilteredScan
 	}
 	return scan, nil
 }
@@ -1321,19 +1433,18 @@ func testingMethodEffectsFilteredWithSkipped(file *ast.File, aliases map[string]
 	if file == nil {
 		return nil
 	}
-	handleTypes := testingHandleTypeNames(file, aliases)
+	return testingMethodEffectsFilteredWithHandles(file, aliases, testingHandleTypeNames(file, aliases), unreachedDecls, skippedBody)
+}
+
+func testingMethodEffectsFilteredWithHandles(file *ast.File, aliases map[string]string, handleTypes map[string]bool, unreachedDecls []ast.Node, skippedBody map[*ast.BlockStmt]bool) []externalEffect {
+	if file == nil {
+		return nil
+	}
 	var effects []externalEffect
 	for _, declaration := range file.Decls {
 		function, ok := declaration.(*ast.FuncDecl)
 		if !ok || function.Type.Params == nil || function.Body == nil {
 			continue
-		}
-		unreached := slices.Contains(unreachedDecls, ast.Node(function))
-		addTestingEffect := func(effect externalEffect) {
-			if unreached && !packageWideMaximalHazard(effect) {
-				return
-			}
-			effects = appendExternalEffect(effects, effect)
 		}
 		receivers := map[string]bool{}
 		for _, field := range function.Type.Params.List {
@@ -1343,18 +1454,38 @@ func testingMethodEffectsFilteredWithSkipped(file *ast.File, aliases map[string]
 				}
 			}
 		}
-		// One body walk collects the name-propagation edges; the fixed
-		// point then iterates the small edge list instead of re-walking
-		// the whole body per round. The fixed point is order-independent,
-		// so the collection order only bounds round count
+		if len(receivers) == 0 {
+			continue
+		}
+		unreached := slices.Contains(unreachedDecls, ast.Node(function))
+		addTestingEffect := func(effect externalEffect) {
+			if unreached && !packageWideMaximalHazard(effect) {
+				return
+			}
+			effects = appendExternalEffect(effects, effect)
+		}
+		// One body walk collects both the parent map and the name-propagation
+		// edges; the fixed point then iterates the small edge list instead of
+		// re-walking the whole body per round. The fixed point is
+		// order-independent, so the collection order only bounds round count
 		// (equivalence-pinned by
 		// TestFileEffectScanMatchesTwoPassReference's backward rows).
 		type propagation struct{ from, to string }
 		var edges []propagation
+		parents := make(map[ast.Node]ast.Node)
+		var stack []ast.Node
 		ast.Inspect(function.Body, func(node ast.Node) bool {
+			if node == nil {
+				stack = stack[:len(stack)-1]
+				return false
+			}
 			if blk, ok := node.(*ast.BlockStmt); ok && skippedBody[blk] {
 				return false
 			}
+			if len(stack) != 0 {
+				parents[node] = stack[len(stack)-1]
+			}
+			stack = append(stack, node)
 			if specification, ok := node.(*ast.ValueSpec); ok {
 				for i, value := range specification.Values {
 					if name, ok := identifierName(value); ok && i < len(specification.Names) {
@@ -1387,19 +1518,6 @@ func testingMethodEffectsFilteredWithSkipped(file *ast.File, aliases map[string]
 				}
 			}
 		}
-		parents := make(map[ast.Node]ast.Node)
-		var stack []ast.Node
-		ast.Inspect(function.Body, func(node ast.Node) bool {
-			if node == nil {
-				stack = stack[:len(stack)-1]
-				return false
-			}
-			if len(stack) != 0 {
-				parents[node] = stack[len(stack)-1]
-			}
-			stack = append(stack, node)
-			return true
-		})
 		escape := opaqueExternalEffect(externalEffectTestRuntime, "testing runtime value escapes analyzable receiver")
 		ast.Inspect(function.Body, func(node ast.Node) bool {
 			if blk, ok := node.(*ast.BlockStmt); ok && skippedBody[blk] {

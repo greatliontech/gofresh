@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/buildflags"
+	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // ViewLoad is one typed load of an analysis view's packages: syntax, types,
@@ -81,7 +83,25 @@ func loadView(ctx context.Context, reader *gotool.EnvReader, buildFlags []string
 	if deps {
 		mode |= packages.NeedDeps
 	}
+	target := ""
+	if len(pkgPaths) > 0 {
+		target = pkgPaths[0]
+	}
+	tracing := trace.Enabled(ctx, trace.DomainClosure, target)
+	var start time.Time
+	if tracing {
+		start = time.Now()
+	}
 	pkgs, err := gotool.LoadPackages(ctx, mode, dir, packageEnv, buildFlags, pkgPaths...)
+	if tracing {
+		trace.Emit(ctx, trace.DomainClosure, "viewload.packages.done", target,
+			trace.Int("patterns", len(pkgPaths)),
+			trace.Int("packages", len(pkgs)),
+			trace.Bool("deps", deps),
+			trace.Int64("elapsed_ns", time.Since(start).Nanoseconds()),
+			trace.Err(err),
+		)
+	}
 	if err != nil {
 		return nil, err
 	}
