@@ -220,12 +220,8 @@ func SharedGOROOTOverlay(t testing.TB, key string, env []string, overlays map[st
 	return dstRoot
 }
 
-// SharedGOROOTOverlayEnv constructs or reuses a process-wide read-only GOROOT
-// overlay and returns a normalized environment rooted at that GOROOT with
-// GOCACHE explicitly pinned.
-func SharedGOROOTOverlayEnv(t testing.TB, key string, baseEnv []string, overlays map[string]string) (string, []string) {
+func overlayRootEnv(t testing.TB, dstRoot string, baseEnv []string) (string, []string) {
 	t.Helper()
-	dstRoot := SharedGOROOTOverlay(t, key, baseEnv, overlays)
 	preserved, err := gotool.PreserveBuildCache(context.Background(), baseEnv)
 	if err != nil {
 		t.Fatal(err)
@@ -233,6 +229,14 @@ func SharedGOROOTOverlayEnv(t testing.TB, key string, baseEnv []string, overlays
 	preserved = gotool.SetEnv(preserved, "GOROOT", dstRoot)
 	preserved = gotool.SetEnv(preserved, "GOTOOLCHAIN", "local")
 	return dstRoot, preserved
+}
+
+// SharedGOROOTOverlayEnv constructs or reuses a process-wide read-only GOROOT
+// overlay and returns a normalized environment rooted at that GOROOT with
+// GOCACHE explicitly pinned.
+func SharedGOROOTOverlayEnv(t testing.TB, key string, baseEnv []string, overlays map[string]string) (string, []string) {
+	t.Helper()
+	return overlayRootEnv(t, SharedGOROOTOverlay(t, key, baseEnv, overlays), baseEnv)
 }
 
 // CleanupShared removes all process-wide shared GOROOT overlays and temporary
@@ -252,14 +256,7 @@ func CleanupShared() {
 // normalized environment rooted at that GOROOT with GOCACHE explicitly pinned.
 func OverlayGOROOTEnv(t testing.TB, baseEnv []string, overlays map[string]string) (string, []string) {
 	t.Helper()
-	dstRoot := OverlayGOROOT(t, baseEnv, overlays)
-	preserved, err := gotool.PreserveBuildCache(context.Background(), baseEnv)
-	if err != nil {
-		t.Fatal(err)
-	}
-	preserved = gotool.SetEnv(preserved, "GOROOT", dstRoot)
-	preserved = gotool.SetEnv(preserved, "GOTOOLCHAIN", "local")
-	return dstRoot, preserved
+	return overlayRootEnv(t, OverlayGOROOT(t, baseEnv, overlays), baseEnv)
 }
 
 const unauditedBadStdSource = "//go:build badstd\n\npackage strings\n\nimport _ \"unsafe\"\n\n//go:linkname gofreshUnapproved\nfunc gofreshUnapproved() {}\n"

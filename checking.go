@@ -9,8 +9,9 @@ import (
 
 	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/outcome"
-	"github.com/greatliontech/gofresh/internal/trace"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
+	"github.com/greatliontech/gofresh/internal/testvariant"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // Candidate is one historical recording to judge. Repeated subjects and identical
@@ -319,10 +320,16 @@ func (b *RuntimeBinding) BeginCheck(subjects []Subject) (*CheckingUnit, error) {
 // CheckBatch appends one ordinary slot per candidate, including duplicates. The
 // returned indices remain stable through later rounds and explicit extensions.
 func (u *CheckingUnit) CheckBatch(ctx context.Context, candidates []Candidate) ([]CheckedCandidate, error) {
+	return u.checkBatch(ctx, candidates, true)
+}
+
+func (u *CheckingUnit) checkBatch(ctx context.Context, candidates []Candidate, validate bool) ([]CheckedCandidate, error) {
 	owned := append([]Candidate(nil), candidates...)
 	return u.round(ctx, func() ([]checkingSlot, error) {
-		if err := u.view.prepareCandidates(owned); err != nil {
-			return nil, err
+		if validate {
+			if err := u.view.prepareCandidates(owned); err != nil {
+				return nil, err
+			}
 		}
 		slots := make([]checkingSlot, len(owned))
 		for i, candidate := range owned {
@@ -585,7 +592,7 @@ func (b *RuntimeBinding) CheckBatchWithLedgers(ctx context.Context, candidates [
 		return nil, err
 	}
 	defer u.Abort()
-	provisional, err := u.CheckBatch(ctx, candidates)
+	provisional, err := u.checkBatch(ctx, candidates, false)
 	if err != nil {
 		return nil, err
 	}
@@ -703,7 +710,7 @@ func (v *Snapshot) prepareInertExtension(recorded Fingerprint, prior TestVariant
 	if err != nil {
 		return refuse(Verdict{}, err)
 	}
-	if !inertTestVariantLedgersForSubject(prior, ledger, subject.Symbol) {
+	if !testvariant.InertForSubject(prior, ledger, subject.Symbol) {
 		return refuse(refusal(Stale, TestVariantsCause, Refused, ReasonTestVariants), nil)
 	}
 	return candidate, ledger, Verdict{}, nil

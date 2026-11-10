@@ -8,8 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/closure"
+	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
@@ -181,8 +182,8 @@ func TestUnscopedFactsNeverUseTheProcessCache(t *testing.T) {
 			t.Fatal("complete scope did not serve")
 		}
 		var key string
-		var poison dynamicStateFact
-		processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+		var poison dynstate.Fact
+		processFactCache.Range(func(k string, fact dynstate.Fact) bool {
 			if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 				key = k[strings.IndexByte(k, 0):]
 				poison = fact
@@ -296,7 +297,7 @@ func TestVouchedFingerprintRecordsDischarge(t *testing.T) {
 			t.Fatal(err)
 		}
 		var hit bool
-		processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+		processFactCache.Range(func(k string, fact dynstate.Fact) bool {
 			if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 				fact.Declares = append(fact.Declares, ghost)
 				fact.Mutates = append(fact.Mutates, ghost)
@@ -431,7 +432,7 @@ func TestAuditedMappingDischargeIsAttestationFree(t *testing.T) {
 		// unattested mode: the discharge names exactly the audited variable.
 		const ghost = "golang.org/x/sys/unix.Ghost"
 		var hit bool
-		processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+		processFactCache.Range(func(k string, fact dynstate.Fact) bool {
 			if strings.HasSuffix(k, "\x00golang.org/x/sys/unix") {
 				fact.Declares = append(fact.Declares, ghost)
 				fact.Mutates = append(fact.Mutates, ghost)
@@ -862,7 +863,7 @@ func TestObservedEvidenceNeverSuppressesSharedDynamicState(t *testing.T) {
 			t.Fatal(err)
 		}
 		var hit bool
-		processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+		processFactCache.Range(func(k string, fact dynstate.Fact) bool {
 			if strings.HasSuffix(k, "\x00golang.org/x/mod/semver") {
 				fact.Declares = append(fact.Declares, ghost)
 				fact.Mutates = append(fact.Mutates, ghost)
@@ -1003,7 +1004,7 @@ func TestVouchDischargeRecordsPerOwningPackage(t *testing.T) {
 		t.Fatalf("baseline downgraded: %q", r)
 	}
 	var poisoned int
-	processFactCache.Range(func(key string, fact dynamicStateFact) bool {
+	processFactCache.Range(func(key string, fact dynstate.Fact) bool {
 		if strings.HasSuffix(key, "\x00golang.org/x/mod/semver") || strings.HasSuffix(key, "\x00golang.org/x/sync/errgroup") {
 			fact.Declares = append(fact.Declares, shared)
 			fact.Mutates = append(fact.Mutates, shared)
@@ -1052,7 +1053,7 @@ func TestVouchWithdrawalRefusesObservedServe(t *testing.T) {
 			t.Fatal(err)
 		}
 		var hit bool
-		processFactCache.Range(func(k string, fact dynamicStateFact) bool {
+		processFactCache.Range(func(k string, fact dynstate.Fact) bool {
 			if strings.HasSuffix(k, "\x00golang.org/x/sync/errgroup") {
 				fact.Declares = append(fact.Declares, ghost)
 				fact.Mutates = append(fact.Mutates, ghost)
@@ -6616,14 +6617,14 @@ func TestMemoStoreKnobIsVerdictInvariant(t *testing.T) {
 		return verdict.Status
 	}
 	restore := func(t *testing.T) {
-		t.Cleanup(func() { setMemoRoot("") })
+		t.Cleanup(func() { closure.SetMemoRoot("") })
 	}
 	base := verdictUnder(t, func(t *testing.T) { restore(t) })
 
 	redirected := t.TempDir()
 	got := verdictUnder(t, func(t *testing.T) {
 		restore(t)
-		setMemoRoot(redirected)
+		closure.SetMemoRoot(redirected)
 	})
 	if got != base {
 		t.Fatalf("redirected store changed the verdict: %v vs %v", got, base)
@@ -6639,13 +6640,13 @@ func TestMemoStoreKnobContainsPersistentWrites(t *testing.T) {
 	}
 	forbidden := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", forbidden)
-	t.Cleanup(func() { setMemoRoot("") })
+	t.Cleanup(func() { closure.SetMemoRoot("") })
 	dir := writePinnedDepModule(t)
 	const pkg = "example.com/pinned"
 	const scope = DynamicStateStrategy + "|knob-containment|cfg"
 
 	redirected := t.TempDir()
-	setMemoRoot(redirected)
+	closure.SetMemoRoot(redirected)
 	processFactCache.Reset()
 	first := runScan(t, scope, dir, pkg)
 	if !first.known[Subject{Package: pkg, Symbol: "Run"}] {
@@ -9155,3 +9156,104 @@ func TestScanKeepsRecompiledDependencySubjectsUnderOwnPackage(t *testing.T) {
 		t.Errorf("r.G: pure=true, want false (a's directive must not leak to r's same-named symbol)")
 	}
 }
+
+func TestSiblingObservabilityBatchesPackageMatesAndPublishesToParent(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs SSA observability over it")
+	}
+	isolateProofCache(t)
+	dir := writeModuleTree(t, map[string]string{
+		"go.mod": "module example.com/mates\n\ngo 1.26\n",
+		"mates_test.go": `package mates
+
+import (
+	"os"
+	"testing"
+)
+
+func TestOne(t *testing.T)   { _ = os.Getenv("ONE") }
+func TestTwo(t *testing.T)   { _ = os.Getenv("TWO") }
+func TestThree(t *testing.T) { _ = os.Getenv("THREE") }
+`,
+	})
+	s1 := Subject{Package: "example.com/mates", Symbol: "TestOne"}
+	s2 := Subject{Package: "example.com/mates", Symbol: "TestTwo"}
+	s3 := Subject{Package: "example.com/mates", Symbol: "TestThree"}
+
+	var events []Progress
+	engine, err := newEngine(withDir(dir), withProgress(func(ev Progress) {
+		events = append(events, ev)
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	parent, err := engine.newView(ctx, []Subject{s1, s2, s3}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events = nil
+	sib1, err := parent.Sibling([]Subject{s1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp1, err := sib1.captureObserved(ctx, s1)
+	if err != nil {
+		t.Fatalf("sib1 captureObserved: %v", err)
+	}
+	if !fp1.ObservationProof.Observable {
+		t.Fatalf("s1 ObservationProof = %+v, want Observable", fp1.ObservationProof)
+	}
+	// First sibling runs 1 SSA load + prove and batches s2 and s3 into the same slice.
+	loadsAfterSib1 := 0
+	for _, ev := range events {
+		if ev.Phase == "load" {
+			loadsAfterSib1++
+		}
+	}
+	if loadsAfterSib1 != 1 {
+		t.Fatalf("sib1 observability load events = %d, want 1", loadsAfterSib1)
+	}
+
+	// Second sibling for s2 must hit the memo populated by sib1's package-mate batching
+	// with 0 SSA loads and 0 prove events.
+	events = nil
+	sib2, err := parent.Sibling([]Subject{s2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp2, err := sib2.captureObserved(ctx, s2)
+	if err != nil {
+		t.Fatalf("sib2 captureObserved: %v", err)
+	}
+	if !fp2.ObservationProof.Observable {
+		t.Fatalf("s2 ObservationProof = %+v, want Observable", fp2.ObservationProof)
+	}
+	for _, ev := range events {
+		if ev.Phase == "load" || ev.Phase == "prove" {
+			t.Fatalf("sib2 unexpectedly triggered SSA %s event: %+v", ev.Phase, ev)
+		}
+	}
+
+	// Third sibling for s3 also hits the memo populated by sib1's package-mate batching
+	// with 0 SSA loads and 0 prove events.
+	events = nil
+	sib3, err := parent.Sibling([]Subject{s3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp3, err := sib3.captureObserved(ctx, s3)
+	if err != nil {
+		t.Fatalf("sib3 captureObserved: %v", err)
+	}
+	if !fp3.ObservationProof.Observable {
+		t.Fatalf("s3 ObservationProof = %+v, want Observable", fp3.ObservationProof)
+	}
+	for _, ev := range events {
+		if ev.Phase == "load" || ev.Phase == "prove" {
+			t.Fatalf("sib3 unexpectedly triggered SSA %s event: %+v", ev.Phase, ev)
+		}
+	}
+}
+

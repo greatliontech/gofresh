@@ -315,10 +315,9 @@ func (e bracketEphemera) admits(p string, memo map[string]bool) bool {
 // loudly: swallowing a module-relative identity would silently vacate a
 // content-bearing directory digest, the opposite of the class's
 // one-external-identity blast radius (REQ-inputs-ephemeral-root).
-func resolveEphemeralRoots(roots []string, moduleDir string) ([][2]string, error) {
-	resolvedModule, err := filepath.EvalSymlinks(moduleDir)
-	if err != nil {
-		resolvedModule = moduleDir
+func resolveEphemeralRoots(roots []string, moduleDir, resolvedModule string) ([][2]string, error) {
+	if resolvedModule == "" {
+		resolvedModule = resolveModuleRoot(moduleDir)
 	}
 	out := make([][2]string, 0, len(roots))
 	for _, r := range roots {

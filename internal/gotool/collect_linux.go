@@ -136,7 +136,7 @@ func drainCollected(copied <-chan error, wait time.Duration, closePipes func()) 
 			continue
 		default:
 		}
-		if timer == nil {
+		if wait > 0 && timer == nil && !timedOut {
 			timer = time.NewTimer(wait)
 			expired = timer.C
 		}

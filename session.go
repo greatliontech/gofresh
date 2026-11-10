@@ -31,17 +31,15 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
-	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/buildflags"
 	"github.com/greatliontech/gofresh/internal/closure"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/guard"
-	"github.com/greatliontech/gofresh/internal/outcome"
+	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 	"github.com/greatliontech/gofresh/internal/trace"
-	"github.com/greatliontech/gofresh/internal/runtimeinput"
 )
 
 // Kind classifies a cached result for guard selection (REQ-fresh-guard-set): a
@@ -125,26 +123,12 @@ func DiffTestVariantLedgers(before, after TestVariantLedger) TestVariantDelta {
 	return testvariant.DiffTestVariantLedgers(before, after)
 }
 
-func inertTestVariantLedgersForSubject(before, after TestVariantLedger, subjectSymbol string) bool {
-	return testvariant.InertForSubject(before, after, subjectSymbol)
-}
-
 // Subject names the symbol whose freshness is tracked — a package import path and a
 // symbol within it, either a function name or a "Type.Method" method reference.
 type Subject struct {
 	Package string
 	Symbol  string
 }
-
-// setMemoRoot redirects gofresh's persistent memo store — one knob
-// covering every memo class (observability proofs, effect and testing
-// scans, dynamic-state facts, package scans, listings, per-file scans
-// and compartment derivations). Empty restores the user-cache default.
-// The store is a cache, never a record: no knob position changes a
-// verdict, only what is recomputed, and a hermetic environment that
-// forbids user-cache writes redirects it to scratch. Set at process
-// start, before any Session runs.
-func setMemoRoot(dir string) { closure.SetMemoRoot(dir) }
 
 // DefaultMemoMaxBytes is the default retention ceiling (2 GiB) for the
 // persistent memo store across all memo classes.
@@ -284,6 +268,7 @@ type Session struct {
 	// variables the caller accepts as stable after initialization
 	// (REQ-vouch-input). Empty means no vouches.
 	dynamicStateVouches map[string]bool
+	sortedVouches       []string
 	// executionModel holds the caller's positive execution-model
 	// attestation; the zero value is GeneralExecution, which supplies no
 	// positive assertion.
@@ -322,17 +307,13 @@ func NewSession(ctx context.Context, build BuildDescription, policy SessionPolic
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	normalized, err := gotool.NormalizeEnv(build.Environment)
+	buildEnv, err := gotool.EnvForPackages(build.Environment)
 	if err != nil {
 		return nil, fmt.Errorf("gofresh: %w", err)
 	}
-	buildEnv, err := gotool.EnvForPackages(normalized)
-	if err != nil {
-		return nil, fmt.Errorf("gofresh: build environment: %w", err)
-	}
 	buildEnv, err = gotool.EnvForCommand(buildEnv, buildDir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("gofresh: build environment: %w", err)
 	}
 	vouches, err := canonicalSessionVouches(policy.Vouches)
 	if err != nil {
@@ -391,6 +372,7 @@ func NewSession(ctx context.Context, build BuildDescription, policy SessionPolic
 		runner:              gotool.Runner{Prepare: policy.PrepareCommand},
 		progress:            policy.Progress,
 		dynamicStateVouches: vouchMap,
+		sortedVouches:       vouches,
 		executionModel:      policy.Execution,
 	}
 	passReader := s.newPassReader()
@@ -449,121 +431,6 @@ func rebaseProcessPath(directory, path string) (string, error) {
 	return directory + string(filepath.Separator) + path, nil
 }
 
-// RuntimeBinding owns an immutable process directory, complete environment and
-// applicable runtime guards over one snapshot. It owns no execution or closing
-// state; independent units may use the same retained package artifact.
-type RuntimeBinding struct {
-	snapshot *Snapshot
-	runtime  boundRuntime
-}
-
-// boundRuntime is shared read-only by every view derived from a binding. Source
-// observations stay on the engine's compilation environment.
-type boundRuntime struct {
-	dir    string
-	env    []string
-	guards guard.RuntimeGuards
-}
-
-// Snapshot returns the immutable source/build generation underlying this binding.
-func (b *RuntimeBinding) Snapshot() *Snapshot {
-	if b == nil {
-		return nil
-	}
-	return b.snapshot
-}
-
-// BindRuntime admits the actual process configuration without re-observing source
-// or compilation facts. Nil Environment inherits the build environment; a present
-// empty environment contains only derived PWD. Measurement guards require a fresh
-// agreement pair. The caller protects both dependency sets through their spans.
-func (s *Snapshot) BindRuntime(ctx context.Context, execution RuntimeDescription) (binding *RuntimeBinding, err error) {
-	if ctx == nil {
-		return nil, errors.New("gofresh: nil runtime binding context")
-	}
-	defer func() {
-		if cause := ctx.Err(); cause != nil {
-			binding, err = nil, cause
-		}
-	}()
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if s == nil || s.session == nil || s.session.build.Directory == "" || !validKind(s.kind) {
-		return nil, errors.New("gofresh: uninitialized snapshot")
-	}
-	dir, err := rebaseProcessPath(s.session.build.Directory, execution.Directory)
-	if err != nil {
-		return nil, fmt.Errorf("gofresh: runtime directory: %w", err)
-	}
-	dir, err = gotool.CanonicalDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("gofresh: runtime directory: %w", err)
-	}
-	env := execution.Environment
-	if env == nil {
-		env = s.session.build.Environment
-	}
-	env, err = gotool.EnvForCommand(env, dir)
-	if err != nil {
-		return nil, fmt.Errorf("gofresh: runtime environment: %w", err)
-	}
-	r := boundRuntime{dir: dir, env: env}
-	r.guards, err = r.observe(ctx, s.kind)
-	if err != nil {
-		return nil, err
-	}
-	second, err := r.observe(ctx, s.kind)
-	if err != nil {
-		return nil, err
-	}
-	if r.guards != second {
-		return nil, fmt.Errorf("%w: runtime guards during binding", ErrViewChanged)
-	}
-	return &RuntimeBinding{snapshot: s, runtime: r}, nil
-}
-
-func (r *boundRuntime) observe(ctx context.Context, kind Kind) (guard.RuntimeGuards, error) {
-	guards, err := guard.CaptureRuntime(ctx, r.env, kind)
-	if err != nil {
-		return guard.RuntimeGuards{}, err
-	}
-	emitRuntimeGuardsViewHook(&guards)
-	if err := ctx.Err(); err != nil {
-		return guard.RuntimeGuards{}, err
-	}
-	return guards, nil
-}
-
-// ProducerSnapshot selects a nonempty subset of this binding's source snapshot
-// for a caller-managed producer transaction. It observes no new source or build
-// facts and uses this binding's runtime environment and guards. Subjects outside
-// the source snapshot are refused; duplicates collapse in first-request order.
-// Captured source observability proofs and their validation obligations survive
-// selection, but attachments and closing state do not. Capture any missing proof
-// before execution, attach the execution's observation afterward, and successfully
-// Validate before publishing its fingerprints. The caller owns execution scope,
-// completion and dependency protection throughout that span. This operation
-// supplies no built-artifact declaration, execution receipt or outcome support;
-// identity-only observations retain their original authority.
-func (b *RuntimeBinding) ProducerSnapshot(subjects []Subject) (*Snapshot, error) {
-	return b.newView(subjects)
-}
-
-// newView selects immutable source facts and the binding while giving the caller
-// a fresh transaction. No attachment, obligation or seal crosses this boundary.
-func (b *RuntimeBinding) newView(subjects []Subject) (*Snapshot, error) {
-	if b == nil || b.snapshot == nil || b.snapshot.facts == nil {
-		return nil, errors.New("gofresh: uninitialized runtime binding")
-	}
-	v, err := b.snapshot.Sibling(subjects)
-	if err != nil {
-		return nil, err
-	}
-	v.runtime = &b.runtime
-	return v, nil
-}
-
 // Snapshot observes the requested subjects under the session's admitted build.
 // It captures no measurement-side guards; BindRuntime admits those separately.
 func (s *Session) Snapshot(ctx context.Context, subjects []Subject, kind Kind) (*Snapshot, error) {
@@ -583,294 +450,11 @@ func (s *Session) SnapshotFor(ctx context.Context, subjects []Subject, moduleDir
 	return s.observeSnapshot(ctx, subjects, moduleDir, kind)
 }
 
-// BuildDescription returns an owned copy for a package represented in the
-// snapshot. The executor protects these build dependencies through execution and
-// closing, and uses this description rather than rebuilding under runtime env.
-func (s *Snapshot) BuildDescription(pkg string) (BuildDescription, error) {
-	if s == nil || s.session == nil || s.session.build.Directory == "" || !slices.Contains(s.packages, pkg) {
-		return BuildDescription{}, fmt.Errorf("gofresh: package %q is outside the snapshot", pkg)
-	}
-	b := s.session.build
-	b.Package = pkg
-	b.Environment, b.Flags, b.Inputs = slices.Clone(b.Environment), slices.Clone(b.Flags), slices.Clone(b.Inputs)
-	return b, nil
-}
-
-// BuildBinding is the executor's declaration that a retained package test
-// artifact was successfully built from this snapshot's description. It prevents
-// accidental cross-snapshot borrowing; it does not authenticate the executor
-// or certify that the executor followed the description.
-type BuildBinding struct {
-	snapshot *Snapshot
-	pkg      string
-	identity string
-}
-
-// BindBuilt binds the executor's nonempty artifact identity to this snapshot.
-// The executor keeps the artifact and its dependencies protected through use.
-func (s *Snapshot) BindBuilt(pkg, identity string) (BuildBinding, error) {
-	if _, err := s.BuildDescription(pkg); err != nil {
-		return BuildBinding{}, err
-	}
-	if identity == "" {
-		return BuildBinding{}, errors.New("gofresh: empty built-artifact identity")
-	}
-	return BuildBinding{snapshot: s, pkg: pkg, identity: identity}, nil
-}
-
-// Check automatically selects admissible established native evidence and closes
-// its own checking interval before returning a judgment. It never fills missing
-// historical producing support or seals another unit.
-func (b *RuntimeBinding) Check(ctx context.Context, subject Subject, recorded Fingerprint) (Verdict, error) {
-	u, err := b.BeginCheck([]Subject{subject})
-	if err != nil {
-		return Verdict{}, err
-	}
-	defer u.Abort()
-	if _, err := u.CheckBatch(ctx, []Candidate{{subject, recorded}}); err != nil {
-		return Verdict{}, err
-	}
-	checked, err := u.Close(ctx)
-	if err != nil {
-		return Verdict{}, err
-	}
-	return checked[0].Verdict, nil
-}
-
-// CurrentFacts returns this binding's analysis-only fingerprint projection for
-// explanations. It carries neither an execution receipt nor runtime observation
-// or selected producing proof. It is not a newly produced result.
-func (b *RuntimeBinding) CurrentFacts(ctx context.Context, subject Subject) (Fingerprint, error) {
-	if ctx == nil {
-		return Fingerprint{}, errors.New("gofresh: nil facts context")
-	}
-	if err := ctx.Err(); err != nil {
-		return Fingerprint{}, err
-	}
-	if b == nil || b.snapshot == nil || b.snapshot.facts == nil {
-		return Fingerprint{}, errors.New("gofresh: uninitialized runtime binding")
-	}
-	if err := requireSubjects([]Subject{subject}, func(s Subject) bool {
-		return slices.Contains(b.snapshot.subjects, s)
-	}, SelectedView); err != nil {
-		return Fingerprint{}, err
-	}
-	v, err := b.newView([]Subject{subject})
-	if err != nil {
-		return Fingerprint{}, err
-	}
-	return v.Capture(ctx, subject)
-}
-
-// viewTestHookSet holds internal observation callbacks and explicitly named
-// test controls. Nil or zero disables them.
-type viewTestHookSet struct {
-	// observe observes every source/guard/purity observation pass — tests
-	// pin how many observations an operation performs.
-	observe func()
-	// runtimeGuards observes or perturbs an execution-side guard sample in
-	// binding/closing tests, independently of source/build observation passes.
-	runtimeGuards func(*guard.RuntimeGuards)
-	// snapshot observes the env snapshot each precise-analysis bracket
-	// derives its configuration from — tests pin that the bracket reuses
-	// the view's construction snapshot instead of re-reading go env.
-	snapshot func(*gotool.EnvSnapshot)
-	// dynamicStateMissLoad observes the batched typed load of
-	// version-pinned packages whose dynamic-state facts missed the memo.
-	dynamicStateMissLoad func(patterns []string)
-	// guardDir observes the directory each guard observation captures
-	// in — tests pin that an evidence root moves no guard or load off
-	// the module directory (REQ-inputs-evidence-root).
-	guardDir func(dir string)
-	// typedLoad observes every typed package load an observation pass
-	// performs; runtimeWindow every runtime-input window a check opens;
-	// maximalBatch every maximal-closure fold — tests pin that a
-	// preparation refusal fires before each of them.
-	typedLoad     func()
-	runtimeWindow func()
-	maximalBatch  func()
-	// beforeAnalysis observes the point a precise analysis is about to
-	// start, after its Hasher exists — tests cancel there to pin the
-	// kept-on-cancel report.
-	beforeAnalysis func()
-	// beforeDischarge observes the point the dynamic-state discharges'
-	// reachability analysis is about to start — tests cancel there to
-	// pin that an operation's cancellation is never read as a budget
-	// cut.
-	beforeDischarge func()
-	// analysisBound replaces only positive-budget deadline construction in
-	// tests. A provenance fixture can expire its selected analysis phase
-	// deterministically while default-clock tests exercise real deadlines.
-	analysisBound func(context.Context, time.Duration) (context.Context, context.CancelFunc)
-	// scanMemoOff disables the view scan memo (REQ-closure-scan-memo) so
-	// derivation tests that poison the in-process fact cache between two
-	// scans — a seam with no production analogue, since a pinned fact
-	// moves only when its key does — exercise the derivation itself.
-	scanMemoOff bool
-	// factScope observes the derived dynamic-state fact scope — tests
-	// pin the execution-model markers that keep option-on and
-	// option-off sessions from serving each other's facts.
-	factScope func(scope string)
-}
-
-var (
-	viewTestHooksMu sync.Mutex
-	viewTestHooks   atomic.Pointer[viewTestHookSet]
-)
-
-func withViewTestHooks(hooks viewTestHookSet, fn func()) {
-	viewTestHooksMu.Lock()
-	defer viewTestHooksMu.Unlock()
-	defer viewTestHooks.Store(nil)
-	viewTestHooks.Store(&hooks)
-	fn()
-}
-
-func hasAnyViewTestHook() bool {
-	h := viewTestHooks.Load()
-	if h == nil {
-		return false
-	}
-	return h.observe != nil || h.runtimeGuards != nil ||
-		h.snapshot != nil || h.dynamicStateMissLoad != nil ||
-		h.guardDir != nil || h.typedLoad != nil ||
-		h.runtimeWindow != nil || h.maximalBatch != nil ||
-		h.beforeAnalysis != nil || h.beforeDischarge != nil ||
-		h.analysisBound != nil || h.scanMemoOff ||
-		h.factScope != nil
-}
-
-func hasScanOverrideViewTestHook() bool {
-	h := viewTestHooks.Load()
-	return h != nil && (h.dynamicStateMissLoad != nil || h.typedLoad != nil)
-}
-
-func emitObserveViewHook() {
-	if h := viewTestHooks.Load(); h != nil && h.observe != nil {
-		h.observe()
-	}
-}
-
-func emitRuntimeGuardsViewHook(g *guard.RuntimeGuards) {
-	if h := viewTestHooks.Load(); h != nil && h.runtimeGuards != nil {
-		h.runtimeGuards(g)
-	}
-}
-
-func emitSnapshotViewHook(s *gotool.EnvSnapshot) {
-	if h := viewTestHooks.Load(); h != nil && h.snapshot != nil {
-		h.snapshot(s)
-	}
-}
-
-func emitDynamicStateMissLoadViewHook(patterns []string) {
-	if h := viewTestHooks.Load(); h != nil && h.dynamicStateMissLoad != nil {
-		h.dynamicStateMissLoad(patterns)
-	}
-}
-
-func emitGuardDirViewHook(dir string) {
-	if h := viewTestHooks.Load(); h != nil && h.guardDir != nil {
-		h.guardDir(dir)
-	}
-}
-
-func emitTypedLoadViewHook() {
-	if h := viewTestHooks.Load(); h != nil && h.typedLoad != nil {
-		h.typedLoad()
-	}
-}
-
-func emitRuntimeWindowViewHook() {
-	if h := viewTestHooks.Load(); h != nil && h.runtimeWindow != nil {
-		h.runtimeWindow()
-	}
-}
-
-func emitMaximalBatchViewHook() {
-	if h := viewTestHooks.Load(); h != nil && h.maximalBatch != nil {
-		h.maximalBatch()
-	}
-}
-
-func emitBeforeAnalysisViewHook() {
-	if h := viewTestHooks.Load(); h != nil && h.beforeAnalysis != nil {
-		h.beforeAnalysis()
-	}
-}
-
-func emitBeforeDischargeViewHook() {
-	if h := viewTestHooks.Load(); h != nil && h.beforeDischarge != nil {
-		h.beforeDischarge()
-	}
-}
-
-func runAnalysisBoundViewHook(ctx context.Context, budget time.Duration) (context.Context, context.CancelFunc, bool) {
-	if h := viewTestHooks.Load(); h != nil && h.analysisBound != nil {
-		boundCtx, cancel := h.analysisBound(ctx, budget)
-		return boundCtx, cancel, true
-	}
-	return nil, nil, false
-}
-
-func isScanMemoOffViewHook() bool {
-	h := viewTestHooks.Load()
-	return h != nil && h.scanMemoOff
-}
-
-func emitFactScopeViewHook(scope string) {
-	if h := viewTestHooks.Load(); h != nil && h.factScope != nil {
-		h.factScope(scope)
-	}
-}
-
 // newPassReader mints a pass's environment reader over the session's
 // runner, directory, and analysis environment: one per pass, its
 // snapshot taken on the pass's first key.
 func (s *Session) newPassReader() *gotool.EnvReader {
 	return gotool.NewEnvReader(s.runner, s.dir, s.env)
-}
-
-// Progress reports the start of one analysis step, or a fact about an
-// operation: Phase is "observe" for a view observation pass, "runtime"
-// for each runtime-input observation pass (a check's window performs
-// two), "list" for a package's dependency listing, "typecheck" for a
-// typed load (the view's shared load or a dynamic-state miss load, Total
-// its pattern count; or a package's own testing-effect scan load when
-// that memo is cold and no shared load covers the package), "load" for
-// a package program load, "hash" for a package's closure fold, "prove" for a package's observability batch
-// (one event per attribution slice, Index/Total the slice position),
-// "served" once per operation per memo class that stood in for a step —
-// Served names the class (an observability proof, an effect scan, a
-// testing scan, dynamic-state facts, a package scan, a dependency
-// listing, a file scan, a compartment parse) and Index counts the distinct
-// packages it served from the persistent store; "cancelled" once per
-// operation that returns its caller's context error, Detail saying what
-// the operation persisted and a rerun serves; "toolchain-unaudited" and
-// "analysis-unavailable" carry their diagnostic payload in Detail, as
-// does "listing-unmodelled" (a module file this build cannot parse
-// leaves a package's listing spawned every pass) and "budget-exhausted"
-// (once per proof pass the analysis budget cut, Detail naming the
-// budget and the count of subjects it left unproven). Package
-// names the package for the per-package phases; Index and Total give the
-// unit's position when the pass knows it (1-based; zero when unknown).
-// Events are emitted before the step runs — except the facts about an
-// operation ("served", "cancelled", "budget-exhausted"), reported when
-// they are known — and carry no completion signal; they are keep-alive
-// facts about work, never verdict evidence (REQ-fresh-progress).
-type Progress struct {
-	Phase   string
-	Package string
-	Index   int
-	Total   int
-	// Served names the memo class of a "served" summary.
-	Served string
-	// Detail carries a diagnostic payload for phases that have one -
-	// the per-subject analysis-unavailable provenance included, whose
-	// walk-order-dependent content must reach the operator without
-	// riding any memoized, hashed surface
-	// (REQ-closure-observability-memo).
-	Detail string
 }
 
 // evidenceRootFor is the root a view re-hashes runtime-input identities
@@ -1099,60 +683,4 @@ func normalizedGCCFlags(text string) ([]string, error) {
 		}
 	}
 	return flags, nil
-}
-
-// prepareOutcomeSupport derives support for exactly this view's contributing
-// subject set, before execution. Use a sibling view for a narrower process set.
-// The caller runs that exact set under the view's complete runtime environment
-// and excludes environment mutation. Unsupported inventories return a capability
-// carrying their refusal; they never turn process health into outcome evidence.
-// Preparation selects each subject's observation proof for producer validation.
-func (v *Snapshot) prepareOutcomeSupport(ctx context.Context, frame runtimeinput.ProducerFrame, process string) (runtimeinput.OutcomeSupport, map[Subject]Fingerprint, error) {
-	if v == nil || v.facts == nil || v.session == nil {
-		return runtimeinput.OutcomeSupport{}, nil, errors.New("gofresh: uninitialized snapshot")
-	}
-	if len(v.subjects) == 0 {
-		return runtimeinput.OutcomeSupport{}, nil, fmt.Errorf("gofresh: outcome support needs contributing subjects")
-	}
-	env, err := gotool.EnvForCommand(v.evidenceEnv(), frame.PkgDir)
-	if err != nil {
-		return runtimeinput.OutcomeSupport{}, nil, err
-	}
-	binding, err := frame.OutcomeBinding(process, env)
-	if err != nil {
-		return runtimeinput.OutcomeSupport{}, nil, err
-	}
-	fingerprints, err := v.CaptureObservedBatch(ctx)
-	if err != nil {
-		return runtimeinput.OutcomeSupport{}, nil, err
-	}
-	if v.beforeOutcomeIssue != nil {
-		v.beforeOutcomeIssue()
-	}
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-	if v.sealed {
-		return runtimeinput.OutcomeSupport{}, nil, errViewSealed
-	}
-	if err := ctx.Err(); err != nil {
-		return runtimeinput.OutcomeSupport{}, nil, err
-	}
-	var subjects []string
-	reason := ""
-	for _, subject := range v.subjects {
-		proof := v.observable[subject]
-		if proof.OutcomeMethod != outcome.Method && reason == "" {
-			reason = fmt.Sprintf("operation-outcome support unavailable for %q", subject.Package+"."+subject.Symbol)
-		}
-		subjects = append(subjects, outcomeSubject(fingerprints[subject], subject))
-	}
-	return outcome.Prepare(binding, subjects, reason), fingerprints, nil
-}
-
-func outcomeSubject(fingerprint Fingerprint, subject Subject) string {
-	// A string-array encoding is total; it frames every field and uses the
-	// manifest's canonical escaping without another serialization grammar.
-	data, _ := json.Marshal([]string{outcome.Method, subject.Package, subject.Symbol, fingerprint.MaximalClosure, fingerprint.TestVariantClosure, fingerprint.Guards.Toolchain, fingerprint.Guards.BuildConfig, fingerprint.ToolchainContent, fingerprint.AdmissionPolicy, fingerprint.ObservationProof.Strategy})
-	digest := sha256.Sum256(data)
-	return hex.EncodeToString(digest[:])
 }

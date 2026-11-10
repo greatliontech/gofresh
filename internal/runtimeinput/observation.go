@@ -139,11 +139,7 @@ func incompleteContext(ctx context.Context, moduleDir, process, reason string, e
 	if err != nil {
 		return Observation{}, err
 	}
-	encoded, err := encode(manifest{Version: manifestVersion, Unverifiable: []string{reason}})
-	if err != nil {
-		return Observation{}, err
-	}
-	state, err := currentWithNormalizedEnvContext(ctx, encoded, moduleDir, normalized)
+	state, err := stateFromManifest(ctx, manifest{Version: manifestVersion, Unverifiable: []string{reason}}, moduleDir, normalized)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -312,16 +308,12 @@ func convertIdentityKinds(ctx context.Context, observation Observation, moduleDi
 			outPkgDir = pwd
 		}
 	}
-	current, err := currentWithNormalizedEnvContext(ctx, state.Manifest, moduleDir, validationEnv)
+	current, m, err := currentAndManifestWithNormalizedEnv(ctx, state.Manifest, moduleDir, validationEnv)
 	if err != nil {
 		return Observation{}, err
 	}
 	if current != state {
 		return Observation{}, fmt.Errorf("runtimeinputs: state moved before %s identity conversion", conversion.name)
-	}
-	m, err := decode(state.Manifest)
-	if err != nil {
-		return Observation{}, err
 	}
 	if current.Unverifiable && current.Reason != "" {
 		seen := make(map[string]bool, len(m.Unverifiable)+1)
@@ -526,16 +518,12 @@ func Merge(moduleDir string, env []string, observations ...Observation) (Observa
 		if !input.OK || input.Manifest == "" || input.Digest == "" {
 			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d is incomplete", i)
 		}
-		current, err := currentWithNormalizedEnvContext(ctx, input.Manifest, moduleDir, normalized)
+		current, m, err := currentAndManifestWithNormalizedEnv(ctx, input.Manifest, moduleDir, normalized)
 		if err != nil {
 			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
 		}
 		if current != input {
 			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d moved", i)
-		}
-		m, err := decode(input.Manifest)
-		if err != nil {
-			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
 		}
 		merged.BracketMoved = merged.BracketMoved || m.BracketMoved
 		if len(observation.processes) > 0 {
@@ -560,11 +548,7 @@ func Merge(moduleDir string, env []string, observations ...Observation) (Observa
 	} else {
 		merged.Subjects = nil
 	}
-	result, err := encode(merged)
-	if err != nil {
-		return Observation{}, err
-	}
-	state, err := currentWithNormalizedEnvContext(ctx, result, moduleDir, normalized)
+	state, err := stateFromManifest(ctx, merged, moduleDir, normalized)
 	if err != nil {
 		return Observation{}, err
 	}

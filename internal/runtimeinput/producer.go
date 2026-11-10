@@ -98,8 +98,8 @@ func CaptureProducerFrame(ctx context.Context, treeRoot, pkgDir string, opts Fra
 	if err != nil {
 		return ProducerFrame{reason: fmt.Sprintf("observation bracket capture failed: %v", err)}
 	}
-	rel, err := filepath.Rel(root, resolvedPkgDir)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	rel, ok := relUnder(root, resolvedPkgDir)
+	if !ok {
 		return ProducerFrame{reason: fmt.Sprintf("package directory %s lies outside the tree; no observation bracket can cover it", pkgDir)}
 	}
 	roots := append([]string{filepath.ToSlash(rel)}, opts.BracketPaths...)
@@ -270,6 +270,20 @@ func HasOutcomeSupport(encoded, subject string) bool {
 	// Canonical decoding already requires a recognized method whenever the
 	// subject set is nonempty; membership is the remaining premise.
 	return err == nil && slices.Contains(m.Subjects, subject)
+}
+
+// OutcomeSupportSet returns the set of recorded subject identities retained by
+// a canonical manifest. Malformed and older records return nil.
+func OutcomeSupportSet(encoded string) map[string]bool {
+	m, err := decode(encoded)
+	if err != nil || len(m.Subjects) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(m.Subjects))
+	for _, s := range m.Subjects {
+		out[s] = true
+	}
+	return out
 }
 
 func (f ProducerFrame) completionPremise(in ProducerIngest) (OutcomeBinding, string) {

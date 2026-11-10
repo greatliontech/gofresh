@@ -10,11 +10,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/outcome"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // TestLogOption configures observation construction from a testlog.
@@ -189,13 +191,16 @@ func WithExcludedPaths(patterns ...string) TestLogOption {
 }
 
 // exclusionPatterns normalizes exclusion patterns to identity form: a non-empty
-// module-relative or clean absolute path (REQ-inputs-exclusions). An empty
-// pattern is refused rather than read as anything.
+// module-relative or clean absolute path (REQ-inputs-exclusions). An empty or
+// unrepresentable pattern is refused rather than read as anything.
 func exclusionPatterns(patterns []string) ([]pathID, error) {
 	var excluded []pathID
 	for _, q := range patterns {
 		if q == "" {
 			return nil, errors.New("runtimeinputs: empty exclusion pattern")
+		}
+		if !utf8.ValidString(q) || strings.ContainsAny(q, "\x00\r\n") {
+			return nil, fmt.Errorf("runtimeinputs: unrepresentable exclusion pattern %q", q)
 		}
 		if filepath.IsAbs(q) {
 			excluded = append(excluded, pathID{Kind: pathAbs, Path: filepath.Clean(q)})
@@ -270,6 +275,11 @@ func FromTestLog(log []byte, moduleDir, packageDir string, env []string, opts ..
 func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, env []string, opts ...TestLogOption) (Observation, error) {
 	if err := ctx.Err(); err != nil {
 		return Observation{}, err
+	}
+	var start time.Time
+	traced := trace.Enabled(ctx, trace.DomainRuntimeInput, "testlog.extract.done")
+	if traced {
+		start = time.Now()
 	}
 	cfg, err := applyTestLogOptions(opts)
 	if err != nil {
@@ -555,10 +565,6 @@ func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, 
 	if err != nil {
 		return Observation{}, err
 	}
-	st, err := finalizeManifestState(m, pathUnverifiable, pathReason)
-	if err != nil {
-		return Observation{}, err
-	}
 	// The bracket is revalidated strictly after the manifest digest's last
 	// input read (REQ-inputs-value-binding). Demonstrated movement is retained
 	// separately from unknown binding, so purity cannot waive a failed guard.
@@ -581,9 +587,10 @@ func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, 
 			reason = clause
 		}
 		addUnverifiable(&m, unverifiableSeen, reason)
-		if st, err = finalizeManifestState(m, pathUnverifiable, pathReason); err != nil {
-			return Observation{}, err
-		}
+	}
+	st, err := finalizeManifestState(m, pathUnverifiable, pathReason)
+	if err != nil {
+		return Observation{}, err
 	}
 	origin := "identity-only"
 	if m.Outcome != "" {
@@ -598,6 +605,14 @@ func fromTestLog(ctx context.Context, log []byte, moduleDir, packageDir string, 
 	// first clause of the sorted manifest; a reason the hashing pass
 	// raised carries its own attribution, in the reason itself.
 	observation.Attribution = attributions[st.Reason]
+	if traced {
+		trace.Emit(ctx, trace.DomainRuntimeInput, "testlog.extract.done", packageDir,
+			trace.Bool("unverifiable", observation.State.Unverifiable),
+			trace.Int("env_count", len(m.Env)),
+			trace.Int("path_count", len(m.Paths)),
+			trace.Int64("elapsed_ms", time.Since(start).Milliseconds()),
+		)
+	}
 	return observation, nil
 }
 

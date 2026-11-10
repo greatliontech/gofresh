@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/closure"
+	"github.com/greatliontech/gofresh/internal/dynstate"
 	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"go/ast"
@@ -125,10 +126,10 @@ func (Widget) External() int { return 2 }
 		},
 	})
 	var plain *types.Package
-	var fact dynamicStateFact
+	var fact dynstate.Fact
 	for _, p := range pkgs {
 		if p.PkgPath == "example.com/factsrc" && p.ForTest == "" {
-			fact = dynamicStateFactOf(true, p, false)
+			fact = dynstate.FactOf(true, p, false)
 			plain = p.Types
 		}
 	}
@@ -139,7 +140,7 @@ func (Widget) External() int { return 2 }
 	if err != nil {
 		t.Fatal(err)
 	}
-	var restored dynamicStateFact
+	var restored dynstate.Fact
 	if err := json.Unmarshal(raw, &restored); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +176,7 @@ func (Widget) External() int { return 2 }
 		t.Fatalf("fact lost method directives: %+v", restored)
 	}
 
-	state := &viewDynamicState{cones: map[string]map[string][]dynamicStateFact{"example.com/factsrc": {"example.com/factsrc": {restored}}}}
+	state := &viewDynamicState{cones: map[string]map[string][]dynstate.Fact{"example.com/factsrc": {"example.com/factsrc": {restored}}}}
 	widget, ok := plain.Scope().Lookup("Widget").(*types.TypeName)
 	if !ok {
 		t.Fatal("Widget type missing")
@@ -203,17 +204,17 @@ func (Widget) External() int { return 2 }
 	if len(restored.PoolDischarges) != 0 {
 		t.Fatalf("unattested fact carries pool discharges: %+v", restored.PoolDischarges)
 	}
-	var attested dynamicStateFact
+	var attested dynstate.Fact
 	for _, p := range pkgs {
 		if p.PkgPath == "example.com/factsrc" && p.ForTest == "" {
-			attested = dynamicStateFactOf(true, p, true)
+			attested = dynstate.FactOf(true, p, true)
 		}
 	}
 	rawAttested, err := json.Marshal(attested)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var restoredAttested dynamicStateFact
+	var restoredAttested dynstate.Fact
 	if err := json.Unmarshal(rawAttested, &restoredAttested); err != nil {
 		t.Fatal(err)
 	}
@@ -230,11 +231,11 @@ func (Widget) External() int { return 2 }
 func TestResolveEnvAuditRefusesMisfiledInsertionKeys(t *testing.T) {
 	fnKey := syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Make"}
 	badParam := syntaxutil.ParamKey{Func: fnKey, Index: -1}
-	misfiled := dynamicStateFact{
+	misfiled := dynstate.Fact{
 		ParamInsertionFree: []syntaxutil.ParamKey{badParam},
 	}
 	marked := 0
-	e := resolveEnvAudit(map[string][]dynamicStateFact{"example.com/dep": {misfiled}}, func(dynamicStateFact) { marked++ })
+	e := dynstate.ResolveEnvAudit(map[string][]dynstate.Fact{"example.com/dep": {misfiled}}, func(dynstate.Fact) { marked++ })
 	if marked == 0 {
 		t.Fatal("misfiled insertion key did not mark the fact malformed")
 	}
@@ -374,7 +375,7 @@ func UsePoolAndHooks() {
 			TypesInfo: info,
 			Module:    &packages.Module{Path: "example.com/p"},
 		}
-		derived := dynamicStateFactOf(true, pkg, singleSubject)
+		derived := dynstate.FactOf(true, pkg, singleSubject)
 		varKey := "example.com/p." + varName
 		scalarKey := "example.com/p.ScalarInt"
 		atomicIntKey := "example.com/p.AtomicInt"
@@ -471,7 +472,7 @@ func UsePoolAndHooks() {
 		ctorKey := syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Make" + helperName}
 		ctorDepKey := syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "MakeLeaf" + helperName}
 
-		var depFact dynamicStateFact
+		var depFact dynstate.Fact
 		depFact.Declares = []string{depVar, aliasVar, opaqueVar}
 		depFact.Opaque = []string{opaqueVar}
 		depFact.Escapes = []string{opaqueVar}
@@ -528,7 +529,7 @@ func UsePoolAndHooks() {
 		msgInfoType := syntaxutil.TypeRef{Pkg: "google.golang.org/protobuf/runtime/protoimpl", Name: "MessageInfo"}
 		svcDescType := syntaxutil.TypeRef{Pkg: "google.golang.org/grpc", Name: "ServiceDesc"}
 
-		allFacts := map[string][]dynamicStateFact{
+		allFacts := map[string][]dynstate.Fact{
 			"example.com/p": {
 				{
 					Declares:          []string{varKey, protoVar, grpcVar},
@@ -574,50 +575,50 @@ func UsePoolAndHooks() {
 		// ProtoRuntimeTypes), and grpcVar (GrpcServiceVars) in example.com/p are discharged,
 		// and unix.mapper / yaml.structMap are discharged by structural MappingDischarges /
 		// MemoDischarges; depVar depends on hasProof.
-		cone := composeDynamicState(meta, allFacts, "example.com/p", nil, singleSubject, packageProcess)
+		cone := dynstate.Compose(meta, allFacts, "example.com/p", nil, singleSubject, packageProcess)
 		if !singleSubject {
-			if cone.downgraded == "" {
+			if cone.Downgraded == "" {
 				t.Fatal("expected downgrade when singleSubject=false and varKey is mutated without attestation")
 			}
-			if packageProcess && !strings.Contains(cone.downgraded, "backed by no single-subject attestation") {
-				t.Fatalf("expected packageProcess unbacked-directive channel in %q", cone.downgraded)
+			if packageProcess && !strings.Contains(cone.Downgraded, "backed by no single-subject attestation") {
+				t.Fatalf("expected packageProcess unbacked-directive channel in %q", cone.Downgraded)
 			}
-			if !packageProcess && !strings.Contains(cone.downgraded, "//gofresh:single-subject directive on the declaration") {
-				t.Fatalf("expected standard directive channel in %q", cone.downgraded)
+			if !packageProcess && !strings.Contains(cone.Downgraded, "//gofresh:single-subject directive on the declaration") {
+				t.Fatalf("expected standard directive channel in %q", cone.Downgraded)
 			}
 		} else {
-			if hasProof && cone.downgraded != "" {
-				t.Fatalf("expected clean composition when proof holds and singleSubject=true, got downgrade=%q", cone.downgraded)
+			if hasProof && cone.Downgraded != "" {
+				t.Fatalf("expected clean composition when proof holds and singleSubject=true, got downgrade=%q", cone.Downgraded)
 			}
-			if !hasProof && cone.downgraded == "" {
+			if !hasProof && cone.Downgraded == "" {
 				t.Fatalf("expected downgrade when proof is absent (mode=%d)", mode%5)
 			}
 			// Breaking opacity on opaqueVar causes its escape to downgrade even when hasProof=true.
 			if hasProof {
 				brokenFact := depFact
 				brokenFact.OpacityBreaks = []string{opaqueVar}
-				allFacts["example.com/dep"] = []dynamicStateFact{brokenFact}
-				brokenCone := composeDynamicState(meta, allFacts, "example.com/p", nil, true, packageProcess)
-				if !strings.Contains(brokenCone.downgraded, opaqueVar+" escapes writable") {
-					t.Fatalf("expected opacity break on %s to surface escape culprit, got %q", opaqueVar, brokenCone.downgraded)
+				allFacts["example.com/dep"] = []dynstate.Fact{brokenFact}
+				brokenCone := dynstate.Compose(meta, allFacts, "example.com/p", nil, true, packageProcess)
+				if !strings.Contains(brokenCone.Downgraded, opaqueVar+" escapes writable") {
+					t.Fatalf("expected opacity break on %s to surface escape culprit, got %q", opaqueVar, brokenCone.Downgraded)
 				}
 			}
 		}
 
 		// Carrier link propagation: if depVar marks mutated/escaped/envCarrying, aliasVar shares the mark.
-		links := carrierLinkGraph(allFacts, func(dynamicStateFact) {})
+		links := dynstate.CarrierLinkGraph(allFacts, func(dynstate.Fact) {})
 		if !links[depVar][aliasVar] || !links[aliasVar][depVar] {
 			t.Fatalf("carrierLinkGraph did not record symmetric link between %s and %s", depVar, aliasVar)
 		}
 
 		// Reachability dischargeCulprits stops at the first culprit whose site is reached or unattributed.
 		vds := &viewDynamicState{
-			rootCulprits: map[string][]dynCulprit{
-				"example.com/p": {{pkgPath: "example.com/dep", key: depVar}},
+			rootCulprits: map[string][]dynstate.Culprit{
+				"example.com/p": {{PkgPath: "example.com/dep", Key: depVar}},
 			},
-			culpritSites: map[string]map[string]culpritSiteSet{
+			culpritSites: map[string]map[string]dynstate.CulpritSiteSet{
 				"example.com/p": {
-					depVar: {fns: map[string]bool{"example.com/p.Caller": true}},
+					depVar: {Fns: map[string]bool{"example.com/p.Caller": true}},
 				},
 			},
 		}
@@ -740,7 +741,7 @@ func TestExplainChainCycleEndsAtEdges(t *testing.T) {
 // view (see TestExplainChainReplacedDepIsInScope).
 func TestExplainEnvAuditOutsideScopeEndsAtEdges(t *testing.T) {
 	const culprit = "example.com/reg.Registry"
-	facts := map[string][]dynamicStateFact{
+	facts := map[string][]dynstate.Fact{
 		"example.com/reg": {{
 			EnvCarrying: []string{culprit},
 			EnvCallUses: []syntaxutil.EnvCallUse{{Key: culprit, Callee: syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Make"}}},
@@ -768,7 +769,7 @@ func TestExplainEnvAuditInsertionChain(t *testing.T) {
 	genFn := syntaxutil.FuncKey{Pkg: "example.com/reg", Name: "Gen"}
 	sinkParam := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Sink"}, Index: 0}
 	fillParam := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Fill"}, Index: 1}
-	facts := map[string][]dynamicStateFact{
+	facts := map[string][]dynstate.Fact{
 		"example.com/reg": {{
 			EnvCarrying:   []string{culprit},
 			EnvCallUses:   []syntaxutil.EnvCallUse{{Key: culprit, Callee: genFn}},

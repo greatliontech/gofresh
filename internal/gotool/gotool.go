@@ -22,8 +22,10 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // Runner runs the go command line tool under a caller-supplied command
@@ -67,6 +69,11 @@ func (r Runner) Command(ctx context.Context, dir string, env []string, args ...s
 // so a refusal text a consumer keys a record on never grows with a
 // tree's diagnostics.
 func (r Runner) Run(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
+	var start time.Time
+	traced := trace.Enabled(ctx, trace.DomainSession, dir)
+	if traced {
+		start = time.Now()
+	}
 	cmd, err := r.Command(ctx, dir, env, args...)
 	if err != nil {
 		return nil, err
@@ -74,6 +81,19 @@ func (r Runner) Run(ctx context.Context, dir string, env []string, args ...strin
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err = runCollected(cmd, isContained(cmd))
+	if traced {
+		subcmd := ""
+		if len(args) > 0 {
+			subcmd = args[0]
+		}
+		trace.Emit(ctx, trace.DomainSession, "gotool.exec.done", dir,
+			trace.String("subcmd", subcmd),
+			trace.Int("args", len(args)),
+			trace.Int("stdout_bytes", stdout.Len()),
+			trace.Int64("elapsed_ms", time.Since(start).Milliseconds()),
+			trace.Err(err),
+		)
+	}
 	if err != nil {
 		if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
 			return stdout.Bytes(), fmt.Errorf("go %s: %w", strings.Join(args, " "), err)

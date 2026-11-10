@@ -219,3 +219,53 @@ func TestConcurrentStoreLoadAndPrune(t *testing.T) {
 		t.Fatalf("remaining bytes exceeded bound after concurrent run: %+v", report)
 	}
 }
+
+func TestOverwriteDoesNotInflateKnownBytesAndReconcilesWriteSeq(t *testing.T) {
+	root := t.TempDir()
+	SetRoot(root)
+	SetMaxBytes(4096)
+	t.Cleanup(func() {
+		SetMaxBytes(0)
+		SetRoot("")
+	})
+
+	Store("class", "scope", "k1", map[string]int{"v": 100})
+	Store("class", "scope", "k2", map[string]int{"v": 200})
+
+	p1, err := Path("class", "scope", "k1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pruneMu.Lock()
+	initialKnown := knownBytes
+	pruneMu.Unlock()
+	if initialKnown <= 0 {
+		t.Fatalf("expected positive knownBytes after initial stores, got %d", initialKnown)
+	}
+
+	// Overwriting k1 repeatedly with identical-sized payloads must keep knownBytes stable.
+	for range 20 {
+		Store("class", "scope", "k1", map[string]int{"v": 100})
+	}
+	pruneMu.Lock()
+	afterOverwrites := knownBytes
+	pruneMu.Unlock()
+	if afterOverwrites != initialKnown {
+		t.Fatalf("knownBytes drifted on identical-size overwrites: got %d, want %d", afterOverwrites, initialKnown)
+	}
+
+	// Removing k1 on disk and pruning reconciles writeSeq and entrySizes.
+	if err := os.Remove(p1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Prune(4096); err != nil {
+		t.Fatal(err)
+	}
+	pruneMu.Lock()
+	_, inSeq := writeSeq[p1]
+	_, inSizes := entrySizes[p1]
+	pruneMu.Unlock()
+	if inSeq || inSizes {
+		t.Fatalf("removed path %s remained in writeSeq (%v) or entrySizes (%v) after Prune", p1, inSeq, inSizes)
+	}
+}

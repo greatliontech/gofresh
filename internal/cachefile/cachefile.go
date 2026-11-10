@@ -20,6 +20,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // DefaultMaxBytes bounds the persistent memo store under <root>/gofresh at
@@ -56,6 +58,7 @@ var (
 	knownValid bool
 	nextSeq    uint64
 	writeSeq   = map[string]uint64{}
+	entrySizes = map[string]int64{}
 )
 
 // SetRoot redirects the persistent memo store to dir; the empty string
@@ -68,6 +71,7 @@ func SetRoot(dir string) {
 	pruneMu.Lock()
 	knownValid = false
 	clear(writeSeq)
+	clear(entrySizes)
 	pruneMu.Unlock()
 }
 
@@ -123,7 +127,15 @@ func Path(dirName, scope, key string) (string, error) {
 
 // Load unmarshals the (dirName, scope, key) entry's payload into payload;
 // false on any failure.
-func Load(dirName, scope, key string, payload any) bool {
+func Load(dirName, scope, key string, payload any) (hit bool) {
+	if trace.Enabled(nil, trace.DomainCache, dirName) {
+		defer func() {
+			trace.Emit(nil, trace.DomainCache, "cache.load", dirName,
+				trace.String("scope", scope),
+				trace.Bool("hit", hit),
+			)
+		}()
+	}
 	path, err := Path(dirName, scope, key)
 	if err != nil {
 		return false
@@ -194,6 +206,12 @@ func Store(dirName, scope, key string, payload any) {
 		return
 	}
 	recordWriteAndEnforce(filepath.Dir(filepath.Dir(path)), path, int64(len(data)))
+	if trace.Enabled(nil, trace.DomainCache, dirName) {
+		trace.Emit(nil, trace.DomainCache, "cache.store", dirName,
+			trace.String("scope", scope),
+			trace.Int("bytes", len(data)),
+		)
+	}
 }
 
 func recordWriteAndEnforce(gofreshRoot, path string, size int64) {
@@ -202,11 +220,14 @@ func recordWriteAndEnforce(gofreshRoot, path string, size int64) {
 	defer pruneMu.Unlock()
 	nextSeq++
 	writeSeq[path] = nextSeq
+	prevSize := entrySizes[path]
+	entrySizes[path] = size
 	if limit < 0 {
 		return
 	}
-	if knownValid && knownRoot == gofreshRoot && knownBytes+size <= limit {
-		knownBytes += size
+	delta := size - prevSize
+	if knownValid && knownRoot == gofreshRoot && max(knownBytes+delta, 0) <= limit {
+		knownBytes = max(knownBytes+delta, 0)
 		return
 	}
 	_, _ = pruneDirLocked(gofreshRoot, limit, path, false)
@@ -251,6 +272,9 @@ type diskEntry struct {
 }
 
 func pruneDirLocked(gofreshRoot string, targetBytes int64, preservePath string, dryRun bool) (PruneReport, error) {
+	if !dryRun {
+		knownValid = false
+	}
 	report := PruneReport{Root: gofreshRoot}
 	if _, err := os.Stat(gofreshRoot); err != nil {
 		if os.IsNotExist(err) {
@@ -258,6 +282,8 @@ func pruneDirLocked(gofreshRoot string, targetBytes int64, preservePath string, 
 				knownRoot = gofreshRoot
 				knownBytes = 0
 				knownValid = true
+				clear(writeSeq)
+				clear(entrySizes)
 			}
 			return report, nil
 		}
@@ -265,8 +291,9 @@ func pruneDirLocked(gofreshRoot string, targetBytes int64, preservePath string, 
 	}
 
 	var (
-		entries []diskEntry
-		dirs    []string
+		entries   []diskEntry
+		dirs      []string
+		livePaths = map[string]int64{}
 	)
 	walkErr := filepath.WalkDir(gofreshRoot, func(path string, d fs.DirEntry, err error) error {
 		if path == gofreshRoot {
@@ -306,6 +333,7 @@ func pruneDirLocked(gofreshRoot string, targetBytes int64, preservePath string, 
 		}
 		size := info.Size()
 		report.UsedBytes += size
+		livePaths[path] = size
 		entries = append(entries, diskEntry{
 			path:    path,
 			size:    size,
@@ -360,6 +388,8 @@ func pruneDirLocked(gofreshRoot string, targetBytes int64, preservePath string, 
 				report.RemovedEntries++
 			}
 			delete(writeSeq, entry.path)
+			delete(entrySizes, entry.path)
+			delete(livePaths, entry.path)
 			report.ReclaimedBytes += entry.size
 			report.RemainingBytes -= entry.size
 		}
@@ -368,9 +398,24 @@ func pruneDirLocked(gofreshRoot string, targetBytes int64, preservePath string, 
 		for i := len(dirs) - 1; i >= 0; i-- {
 			_ = os.Remove(dirs[i])
 		}
+		for p := range writeSeq {
+			if _, ok := livePaths[p]; !ok {
+				delete(writeSeq, p)
+			}
+		}
+		clear(entrySizes)
+		maps.Copy(entrySizes, livePaths)
 		knownRoot = gofreshRoot
 		knownBytes = report.RemainingBytes
 		knownValid = true
+		if trace.Enabled(nil, trace.DomainCache, gofreshRoot) {
+			trace.Emit(nil, trace.DomainCache, "cache.prune", gofreshRoot,
+				trace.Int64("used_bytes", report.UsedBytes),
+				trace.Int64("reclaimed_bytes", report.ReclaimedBytes),
+				trace.Int64("remaining_bytes", report.RemainingBytes),
+				trace.Int("removed_entries", report.RemovedEntries),
+			)
+		}
 	}
 	return report, nil
 }

@@ -128,7 +128,7 @@ func classifyProbe(p string) (os.FileInfo, error) {
 // (REQ-inputs-bracket-coverage): declaring it is the caller's
 // mutation-free assertion over the whole tree, an external replace
 // module as one surface.
-func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, skip func(rel string) bool, visit func(rel string), existenceBindsExternalDirs, metadata bool, observed *pathFacts) (bool, string, error) {
+func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleRoot string, skip func(rel string) bool, visit func(rel string), existenceBindsExternalDirs, metadata bool, observed *pathFacts) (bool, string, error) {
 	if err := ctx.Err(); err != nil {
 		return false, "", err
 	}
@@ -145,8 +145,11 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		observed.put("", machineFact, facts.Fingerprint())
 		return false, "", nil
 	}
+	var preResolved string
 	if observed != nil {
-		chainResolveObserved(ctx, p, observed)
+		if r, _, ok, complete := chainResolveObservedComplete(ctx, p, observed); ok && complete {
+			preResolved = r
+		}
 		if err := ctx.Err(); err != nil {
 			return false, "", err
 		}
@@ -165,7 +168,7 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 	target := p
 	if id.Kind == pathRel {
 		var external bool
-		target, external, err = resolvedTarget(p, moduleDir)
+		target, external, err = resolvedTarget(p, moduleRoot, preResolved)
 		if err != nil {
 			fprintf(h, "path %s %s unhashable-target\n", id.Kind, id.Path)
 			return true, "unhashable runtime input: " + id.displayPath(), nil
@@ -186,7 +189,9 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 		// rule for absolute roots). The volatile-OS refusal the
 		// declaration passed lexically is re-judged over the target — a
 		// link into a volatile tree walks nothing.
-		if target, err = filepath.EvalSymlinks(p); err != nil {
+		if preResolved != "" {
+			target = preResolved
+		} else if target, err = filepath.EvalSymlinks(p); err != nil {
 			fprintf(h, "path %s %s unhashable-target\n", id.Kind, id.Path)
 			return true, "unhashable runtime input: " + id.displayPath(), nil
 		}
@@ -237,14 +242,21 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleDir string, 
 	}
 }
 
-func resolvedTarget(path, moduleDir string) (string, bool, error) {
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return "", false, err
+func resolveModuleRoot(moduleDir string) string {
+	if resolved, err := filepath.EvalSymlinks(moduleDir); err == nil {
+		return resolved
 	}
-	moduleRoot, err := filepath.EvalSymlinks(moduleDir)
-	if err != nil {
-		moduleRoot = moduleDir
+	return moduleDir
+}
+
+func resolvedTarget(path, moduleRoot, preResolved string) (string, bool, error) {
+	resolved := preResolved
+	if resolved == "" {
+		var err error
+		resolved, err = filepath.EvalSymlinks(path)
+		if err != nil {
+			return "", false, err
+		}
 	}
 	if _, ok := relUnder(moduleRoot, resolved); !ok {
 		return resolved, true, nil

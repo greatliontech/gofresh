@@ -266,6 +266,7 @@ type packageBatch struct {
 	path        string
 	closureHash string
 	subjects    []Subject
+	memoSymbols map[string]bool
 }
 
 func runSubjectBatch[V any](
@@ -343,6 +344,10 @@ func runSubjectBatch[V any](
 		}
 		memo := resolveGroupMemo(group)
 		if len(memo) > 0 {
+			group.memoSymbols = make(map[string]bool, len(memo))
+			for sym := range memo {
+				group.memoSymbols[sym] = true
+			}
 			remaining := group.subjects[:0:0]
 			for _, subject := range group.subjects {
 				if val, ok := memo[subject.Symbol]; ok {
@@ -490,10 +495,47 @@ func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, resu
 		}
 		h.emitUnit("prove", group.path, start/maxAttributedSubjects+1, slices)
 		end := min(start+maxAttributedSubjects, len(group.subjects))
-		batch := group.subjects[start:end]
-		reachable, err := attributedReachableSets(h.ctx, h.SelectionAudited(), h.source.pureDelegates, prog, batch)
-		if err != nil {
-			return err
+		requestedBatch := group.subjects[start:end]
+		batch := requestedBatch
+		var reachable []attributedReachability
+		if (memoArmed || rootedMemoArmed) && start == 0 && len(requestedBatch) < maxAttributedSubjects && len(h.packageMates[group.path]) > 0 {
+			seenSym := make(map[string]bool, len(group.subjects)+len(unrooted))
+			for _, s := range group.subjects {
+				seenSym[s.Symbol] = true
+			}
+			for sym := range unrooted {
+				seenSym[sym] = true
+			}
+			var mates []Subject
+			for _, mate := range h.packageMates[group.path] {
+				if len(requestedBatch)+len(mates) >= maxAttributedSubjects {
+					break
+				}
+				if mate.Package != group.path || seenSym[mate.Symbol] || group.memoSymbols[mate.Symbol] {
+					continue
+				}
+				if prog.Roots[mate.Symbol] == nil || prog.Ambiguous[mate.Symbol] {
+					continue
+				}
+				seenSym[mate.Symbol] = true
+				mates = append(mates, mate)
+			}
+			if len(mates) > 0 {
+				combined := make([]Subject, 0, len(requestedBatch)+len(mates))
+				combined = append(combined, requestedBatch...)
+				combined = append(combined, mates...)
+				if combReach, combErr := runAnalyzeAttributedBatch(h.ctx, h.SelectionAudited(), h.source.pureDelegates, prog, combined); combErr == nil {
+					batch = combined
+					reachable = combReach
+				}
+			}
+		}
+		if reachable == nil {
+			var err error
+			reachable, err = attributedReachableSets(h.ctx, h.SelectionAudited(), h.source.pureDelegates, prog, requestedBatch)
+			if err != nil {
+				return err
+			}
 		}
 		sliceProofs := make(map[string]Observability, len(batch))
 		sliceRooted := make(map[string]RootedFunctions, len(batch))
@@ -501,8 +543,13 @@ func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, resu
 			if err := h.ctx.Err(); err != nil {
 				return fmt.Errorf("closure: analysis cancelled: %w", err)
 			}
+			isRequested := i < len(requestedBatch)
 			sliceRooted[subject.Symbol] = rootedFunctionsFromReachability(reachable[i])
 			if reachable[i].unavailable != "" {
+				if !isRequested {
+					delete(sliceRooted, subject.Symbol)
+					continue
+				}
 				// The bisection isolated this subject's analysis
 				// failure: it refuses alone, fail-closed, and its
 				// siblings keep their evidence
@@ -520,10 +567,19 @@ func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, resu
 			}
 			result, err := h.observabilityFromReachability(base, subject.Package, reachable[i])
 			if err != nil {
+				if !isRequested && h.ctx.Err() == nil {
+					delete(sliceRooted, subject.Symbol)
+					continue
+				}
 				return err
 			}
-			results[subject] = result
+			if isRequested {
+				results[subject] = result
+			}
 			sliceProofs[subject.Symbol] = result
+		}
+		if err := h.ctx.Err(); err != nil {
+			return fmt.Errorf("closure: analysis cancelled: %w", err)
 		}
 		if memoArmed {
 			storeMemo(memoScope, closureHash, sliceProofs)

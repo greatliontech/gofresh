@@ -528,39 +528,41 @@ func (c *stdlibMetaCache) activeStdlibForImports(userImports map[string]bool) ma
 	return active
 }
 
-func (c *stdlibMetaCache) materialize(fset *token.FileSet, typesByPath map[string]*types.Package, active map[string]bool, fallback types.Importer) (map[string]*packages.Package, map[string]*packages.Package, error) {
-	typesByPath["unsafe"] = types.Unsafe
-	headerByPath := map[string]*packages.Package{
-		"unsafe": {
-			ID:      "unsafe",
-			Name:    "unsafe",
-			PkgPath: "unsafe",
-			Types:   types.Unsafe,
-			Fset:    fset,
-		},
+func newTypesInfo() *types.Info {
+	return &types.Info{
+		Types:        make(map[ast.Expr]types.TypeAndValue),
+		Defs:         make(map[*ast.Ident]types.Object),
+		Uses:         make(map[*ast.Ident]types.Object),
+		Implicits:    make(map[ast.Node]types.Object),
+		Instances:    make(map[*ast.Ident]types.Instance),
+		Scopes:       make(map[ast.Node]*types.Scope),
+		Selections:   make(map[*ast.SelectorExpr]*types.Selection),
+		FileVersions: make(map[*ast.File]string),
 	}
-	fullByPath := make(map[string]*packages.Package, len(active))
+}
 
-	var importPkg func(path string) (*types.Package, error)
-	importPkg = func(path string) (*types.Package, error) {
+func (c *stdlibMetaCache) newStdImporter(fset *token.FileSet, typesByPath map[string]*types.Package, headerByPath map[string]*packages.Package, fallback types.Importer) types.Importer {
+	return mapImporterFunc(func(path string) (*types.Package, error) {
 		if tp, ok := typesByPath[path]; ok && tp.Complete() {
 			return tp, nil
 		}
-		if meta, ok := c.byPath[path]; ok {
-			if expBytes, okExp := c.ensureExportBytes(path); okExp {
-				tp, err := gcexportdata.Read(bytes.NewReader(expBytes), fset, typesByPath, path)
-				if err != nil {
-					return nil, err
+		if c != nil {
+			if meta, ok := c.byPath[path]; ok {
+				if expBytes, okExp := c.ensureExportBytes(path); okExp {
+					tp, err := gcexportdata.Read(bytes.NewReader(expBytes), fset, typesByPath, path)
+					if err != nil {
+						return nil, err
+					}
+					headerByPath[path] = &packages.Package{
+						ID:      meta.id,
+						Name:    meta.name,
+						PkgPath: meta.pkgPath,
+						GoFiles: meta.goFiles,
+						Types:   tp,
+						Fset:    fset,
+					}
+					return tp, nil
 				}
-				headerByPath[path] = &packages.Package{
-					ID:      meta.id,
-					Name:    meta.name,
-					PkgPath: meta.pkgPath,
-					GoFiles: meta.goFiles,
-					Types:   tp,
-					Fset:    fset,
-				}
-				return tp, nil
 			}
 		}
 		tp, err := fallback.Import(path)
@@ -576,7 +578,22 @@ func (c *stdlibMetaCache) materialize(fset *token.FileSet, typesByPath map[strin
 			Fset:    fset,
 		}
 		return tp, nil
+	})
+}
+
+func (c *stdlibMetaCache) materialize(fset *token.FileSet, typesByPath map[string]*types.Package, active map[string]bool, fallback types.Importer) (map[string]*packages.Package, map[string]*packages.Package, error) {
+	typesByPath["unsafe"] = types.Unsafe
+	headerByPath := map[string]*packages.Package{
+		"unsafe": {
+			ID:      "unsafe",
+			Name:    "unsafe",
+			PkgPath: "unsafe",
+			Types:   types.Unsafe,
+			Fset:    fset,
+		},
 	}
+	fullByPath := make(map[string]*packages.Package, len(active))
+	stdImp := c.newStdImporter(fset, typesByPath, headerByPath, fallback)
 
 	stdSizes := c.typesSizes()
 	for _, p := range c.topoOrder {
@@ -601,18 +618,9 @@ func (c *stdlibMetaCache) materialize(fset *token.FileSet, typesByPath map[strin
 			syntax = append(syntax, af)
 			compiledPaths = append(compiledPaths, sf.path)
 		}
-		info := &types.Info{
-			Types:        make(map[ast.Expr]types.TypeAndValue),
-			Defs:         make(map[*ast.Ident]types.Object),
-			Uses:         make(map[*ast.Ident]types.Object),
-			Implicits:    make(map[ast.Node]types.Object),
-			Instances:    make(map[*ast.Ident]types.Instance),
-			Scopes:       make(map[ast.Node]*types.Scope),
-			Selections:   make(map[*ast.SelectorExpr]*types.Selection),
-			FileVersions: make(map[*ast.File]string),
-		}
+		info := newTypesInfo()
 		tpkg := types.NewPackage(meta.pkgPath, meta.name)
-		conf := &types.Config{Importer: mapImporterFunc(importPkg), Sizes: stdSizes}
+		conf := &types.Config{Importer: stdImp, Sizes: stdSizes}
 		if err := types.NewChecker(conf, fset, tpkg, info).Files(syntax); err != nil {
 			return nil, nil, fmt.Errorf("typecheck stdlib %s: %w", p, err)
 		}
@@ -651,7 +659,7 @@ func (c *stdlibMetaCache) materialize(fset *token.FileSet, typesByPath map[strin
 				imps[impPath] = ac
 			} else if hdr, ok := headerByPath[impPath]; ok {
 				imps[impPath] = hdr
-			} else if tp, err := importPkg(impPath); err == nil {
+			} else if tp, err := stdImp.Import(impPath); err == nil {
 				imps[impPath] = &packages.Package{
 					ID:      impPath,
 					Name:    tp.Name(),
@@ -1048,36 +1056,7 @@ func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]st
 		}
 	}
 
-	imp := mapImporterFunc(func(path string) (*types.Package, error) {
-		if tp, ok := typesByPath[path]; ok && tp.Complete() {
-			return tp, nil
-		}
-		if stdCache != nil {
-			if meta, ok := stdCache.byPath[path]; ok {
-				if expBytes, okExp := stdCache.ensureExportBytes(path); okExp {
-					tp, err := gcexportdata.Read(bytes.NewReader(expBytes), fset, typesByPath, path)
-					if err != nil {
-						return nil, err
-					}
-					dagStdHeaders[path] = &packages.Package{
-						ID:      meta.id,
-						Name:    meta.name,
-						PkgPath: meta.pkgPath,
-						GoFiles: meta.goFiles,
-						Types:   tp,
-						Fset:    fset,
-					}
-					return tp, nil
-				}
-			}
-		}
-		tp, err := fallbackImp.Import(path)
-		if err != nil {
-			return nil, err
-		}
-		typesByPath[path] = tp
-		return tp, nil
-	})
+	imp := stdCache.newStdImporter(fset, typesByPath, dagStdHeaders, fallbackImp)
 
 	dagSizes := effectiveTypesSizes(env)
 	if stdCache != nil {
@@ -1085,16 +1064,7 @@ func parseAndTypecheckDAG(env []string, virtualDir string, pkgDirs map[string]st
 	}
 	result := make([]*packages.Package, 0, len(ordered))
 	for _, u := range ordered {
-		info := &types.Info{
-			Types:        make(map[ast.Expr]types.TypeAndValue),
-			Defs:         make(map[*ast.Ident]types.Object),
-			Uses:         make(map[*ast.Ident]types.Object),
-			Implicits:    make(map[ast.Node]types.Object),
-			Instances:    make(map[*ast.Ident]types.Instance),
-			Scopes:       make(map[ast.Node]*types.Scope),
-			Selections:   make(map[*ast.SelectorExpr]*types.Selection),
-			FileVersions: make(map[*ast.File]string),
-		}
+		info := newTypesInfo()
 		tpkg := types.NewPackage(u.pkgPath, u.pkgName)
 		conf := &types.Config{
 			Importer: imp,

@@ -139,8 +139,9 @@ func usableGuardRootOutside(root, treeRoot string) string {
 	if root == "" {
 		return ""
 	}
-	for _, form := range []string{root, resolveOrSelf(root)} {
-		for _, tree := range []string{treeRoot, resolveOrSelf(treeRoot)} {
+	trees := [2]string{treeRoot, resolveOrSelf(treeRoot)}
+	for _, form := range [2]string{root, resolveOrSelf(root)} {
+		for _, tree := range trees {
 			if pathWithin(form, tree) || pathWithin(tree, form) {
 				return ""
 			}
@@ -151,13 +152,8 @@ func usableGuardRootOutside(root, treeRoot string) string {
 
 // pathWithin reports whether target equals root or lies beneath it.
 func pathWithin(root, target string) bool {
-	if root == target {
-		return true
-	}
-	if root == string(filepath.Separator) {
-		return filepath.IsAbs(target)
-	}
-	return strings.HasPrefix(target, root+string(filepath.Separator))
+	_, ok := pathOffset(root, target)
+	return ok
 }
 
 // usableGuardRoot returns root cleaned when it can serve as a guard
@@ -214,8 +210,9 @@ func usableTempRoot(root, treeRoot string) string {
 	// The inside direction only: a temp root containing the tree (/tmp
 	// over a checkout under it) is the common case, and the ingest's own
 	// module-interior gate keeps in-tree reads observed under it.
-	for _, form := range []string{root, resolveOrSelf(root)} {
-		for _, tree := range []string{treeRoot, resolveOrSelf(treeRoot)} {
+	trees := [2]string{treeRoot, resolveOrSelf(treeRoot)}
+	for _, form := range [2]string{root, resolveOrSelf(root)} {
+		for _, tree := range trees {
 			if pathWithin(tree, form) {
 				return ""
 			}

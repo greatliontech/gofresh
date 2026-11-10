@@ -59,7 +59,7 @@ func TestCodeCaptureSkipsMeasurementSupport(t *testing.T) {
 			machineCalled = true
 			return MachineFacts{}, errors.New("unsupported")
 		},
-		func([]string) string {
+		func() string {
 			runtimeCalled = true
 			return "runtime"
 		},
@@ -79,7 +79,7 @@ func TestMeasurementCaptureRequiresMachineSupport(t *testing.T) {
 	want := errors.New("unsupported")
 	_, err := captureFor(context.Background(), gotool.NewEnvReader(gotool.Runner{}, t.TempDir(), os.Environ()), Measurement, nil,
 		func() (MachineFacts, error) { return MachineFacts{}, want },
-		func([]string) string { return "runtime" },
+		func() string { return "runtime" },
 	)
 	if !errors.Is(err, want) {
 		t.Fatalf("measurement capture error = %v, want %v", err, want)
@@ -422,10 +422,10 @@ func TestCaptureRuntimeAdmission(t *testing.T) {
 func TestRuntimeCaptureCancellationOutranksMachineAnswer(t *testing.T) {
 	for _, machineError := range []error{nil, errors.New("probe refused")} {
 		ctx, cancel := context.WithCancel(t.Context())
-		got, err := captureRuntimeFor(ctx, nil, Measurement, func() (MachineFacts, error) {
+		got, err := captureRuntimeFor(ctx, Measurement, func() (MachineFacts, error) {
 			cancel()
 			return MachineFacts{CPUModel: "captured"}, machineError
-		}, func([]string) string {
+		}, func() string {
 			t.Fatal("cancelled machine capture continued into runtime capture")
 			return ""
 		})
@@ -664,4 +664,12 @@ func buildConfigOfT(t *testing.T, dir string, env, buildInputs []string) (string
 		return "", err
 	}
 	return buildConfigDigest(snapshot.JSON, env, buildInputs)
+}
+
+func buildConfigDigest(envJSON []byte, processEnv, buildInputs []string) (string, error) {
+	var env map[string]string
+	if err := json.Unmarshal(envJSON, &env); err != nil {
+		return "", fmt.Errorf("guard: parse go env: %w", err)
+	}
+	return buildConfigDigestFromValues(func(k string) string { return env[k] }, processEnv, buildInputs), nil
 }

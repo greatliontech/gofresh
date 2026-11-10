@@ -102,14 +102,20 @@ func normalizeEnvironment(env []string) ([]string, error) {
 }
 
 func currentWithNormalizedEnvContext(ctx context.Context, encoded, moduleDir string, env []string) (State, error) {
+	state, _, err := currentAndManifestWithNormalizedEnv(ctx, encoded, moduleDir, env)
+	return state, err
+}
+
+func currentAndManifestWithNormalizedEnv(ctx context.Context, encoded, moduleDir string, env []string) (State, manifest, error) {
 	if err := ctx.Err(); err != nil {
-		return State{OK: false}, err
+		return State{OK: false}, manifest{}, err
 	}
 	m, err := decode(encoded)
 	if err != nil {
-		return State{OK: false}, err
+		return State{OK: false}, manifest{}, err
 	}
-	return stateFromManifest(ctx, m, moduleDir, env)
+	state, err := stateFromManifest(ctx, m, moduleDir, env)
+	return state, m, err
 }
 
 // envEntryDigest digests one environment input: presence and value, names
@@ -123,9 +129,9 @@ func envEntryDigest(env []string, name string) string {
 
 // pathEntryDigest digests one path input's observed object state through the
 // same framed stream hashPath has always produced, into its own hasher.
-func pathEntryDigest(ctx context.Context, id pathID, path, moduleDir string, metadata bool) (string, bool, string, error) {
+func pathEntryDigest(ctx context.Context, id pathID, path, moduleRoot string, metadata bool) (string, bool, string, error) {
 	h := sha256.New()
-	unverifiable, reason, err := hashPath(ctx, h, id, path, moduleDir, nil, nil, true, metadata, nil)
+	unverifiable, reason, err := hashPath(ctx, h, id, path, moduleRoot, nil, nil, true, metadata, nil)
 	if err != nil {
 		return "", false, "", err
 	}
@@ -146,6 +152,7 @@ func populateManifestDigests(ctx context.Context, m *manifest, moduleDir string,
 	if err != nil {
 		return false, "", err
 	}
+	moduleRoot := resolveModuleRoot(moduleDir)
 	for i, entry := range m.Env {
 		if err := ctx.Err(); err != nil {
 			return false, "", err
@@ -165,7 +172,7 @@ func populateManifestDigests(ctx context.Context, m *manifest, moduleDir string,
 		// Manifest hashing never filters: exclusion is per identity, never per
 		// content (REQ-inputs-exclusions), so a recorded directory identity
 		// digests everything its hash walks.
-		d, pathUnverifiable, pathReason, err := pathEntryDigest(ctx, entry.pathID, path, moduleDir, entry.Metadata)
+		d, pathUnverifiable, pathReason, err := pathEntryDigest(ctx, entry.pathID, path, moduleRoot, entry.Metadata)
 		if err != nil {
 			return false, "", err
 		}
@@ -373,6 +380,7 @@ func MovedInputs(ctx context.Context, encoded, moduleDir string, env []string) (
 	if err != nil {
 		return nil, fmt.Errorf("runtimeinputs: module dir: %w", err)
 	}
+	moduleRoot := resolveModuleRoot(abs)
 	var moved []string
 	for _, entry := range m.Env {
 		if err := ctx.Err(); err != nil {
@@ -390,7 +398,7 @@ func MovedInputs(ctx context.Context, encoded, moduleDir string, env []string) (
 		if err != nil {
 			return nil, err
 		}
-		d, _, _, err := pathEntryDigest(ctx, entry.pathID, path, abs, entry.Metadata)
+		d, _, _, err := pathEntryDigest(ctx, entry.pathID, path, moduleRoot, entry.Metadata)
 		if err != nil {
 			return nil, err
 		}

@@ -187,7 +187,8 @@ type Hasher struct {
 	// viewLoad, when set, is the observation pass's shared typed load; the
 	// testing-type effect scan reads it instead of performing its own load
 	// (REQ-fresh-coherent-view: one load per pass, no same-pass mixture).
-	viewLoad *ViewLoad
+	viewLoad     *ViewLoad
+	packageMates map[string][]Subject
 	// listOnMiss, loadProgramOnMiss, and testingPackagesOnMiss allow the
 	// in-memory test harness to satisfy this Hasher's listing, SSA program, or
 	// testing-type scan load on demand without spawning `go list` or
@@ -195,6 +196,21 @@ type Hasher struct {
 	listOnMiss            func(h *Hasher, pkgPath string) ([]listPkg, bool)
 	loadProgramOnMiss     func(ctx context.Context, h *Hasher, pkgPath string) (*program, bool, error)
 	testingPackagesOnMiss func(h *Hasher, pkgPath string) *program
+}
+
+// SetPackageMates supplies same-package sibling subjects that may opportunistically
+// share unused bitmask slots (< 64) when an observability batch already loads and
+// analyzes their package's test-binary SSA program.
+func (h *Hasher) SetPackageMates(subjects []Subject) {
+	if len(subjects) == 0 {
+		h.packageMates = nil
+		return
+	}
+	byPkg := make(map[string][]Subject)
+	for _, s := range subjects {
+		byPkg[s.Package] = append(byPkg[s.Package], s)
+	}
+	h.packageMates = byPkg
 }
 
 // UseViewLoad supplies the observation pass's shared typed load. The caller
@@ -307,28 +323,17 @@ func NewBracketAt(ctx context.Context, reader *gotool.EnvReader, buildFlags ...s
 	if reader == nil {
 		return nil, errors.New("closure: nil environment reader")
 	}
-	normalized, err := gotool.NormalizeEnv(reader.Env)
-	if err != nil {
-		return nil, fmt.Errorf("closure: %w", err)
-	}
 	// The live probe is the bracket's own pass: a fresh reader over the
 	// construction reader's runner, directory, and environment — GOFLAGS
 	// validates from it, and the listing memo scopes by it, so a
 	// bracket's entries never persist under an environment the bracket's
 	// loads did not run in.
-	livePass := gotool.NewEnvReader(reader.Runner, reader.Dir, normalized)
-	if err := buildflags.Validate(ctx, livePass, buildFlags); err != nil {
-		return nil, err
-	}
-	live, err := livePass.Snapshot(ctx)
+	livePass := gotool.NewEnvReader(reader.Runner, reader.Dir, reader.Env)
+	h, err := NewAt(ctx, livePass, buildFlags...)
 	if err != nil {
 		return nil, err
 	}
 	base, err := reader.Snapshot(ctx)
-	if err != nil {
-		return nil, err
-	}
-	h, err := NewAt(ctx, livePass, buildFlags...)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +342,6 @@ func NewBracketAt(ctx context.Context, reader *gotool.EnvReader, buildFlags ...s
 	// the memo, and its identity carries GOMODCACHE, so no entry crosses
 	// a moved module cache.
 	h.modCache = filepath.Clean(base.Value("GOMODCACHE"))
-	h.snapshot = live
 	return h, nil
 }
 

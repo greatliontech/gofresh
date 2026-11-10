@@ -11,9 +11,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/greatliontech/gofresh/internal/guard"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // Bracket is an observation bracket (REQ-inputs-value-binding): a fingerprint
@@ -66,16 +68,6 @@ type bracketConfig struct {
 // uncovered, never bound.
 func WithBracketExcludedPaths(patterns ...string) BracketOption {
 	return func(c *bracketConfig) {
-		// Exclusion identities enter the fingerprint's newline-framed
-		// preimage exactly as roots do, so they carry the same
-		// representability bound: a pattern with framing bytes could alias
-		// a different exclusion set.
-		for _, q := range patterns {
-			if !utf8.ValidString(q) || strings.ContainsAny(q, "\x00\r\n") {
-				c.err = fmt.Errorf("runtimeinputs: unrepresentable bracket exclusion %q", q)
-				return
-			}
-		}
 		excluded, err := exclusionPatterns(patterns)
 		if err != nil {
 			c.err = err
@@ -101,6 +93,11 @@ func WithBracketExcludedPaths(patterns ...string) BracketOption {
 func CaptureBracket(ctx context.Context, moduleDir string, roots []string, opts ...BracketOption) (Bracket, error) {
 	if ctx == nil {
 		return Bracket{}, errors.New("runtimeinputs: nil context")
+	}
+	var start time.Time
+	traced := trace.Enabled(ctx, trace.DomainRuntimeInput, moduleDir)
+	if traced {
+		start = time.Now()
 	}
 	var cfg bracketConfig
 	for _, opt := range opts {
@@ -139,6 +136,15 @@ func CaptureBracket(ctx context.Context, moduleDir string, roots []string, opts 
 	b.seal = sealBracket(b)
 	if err := ctx.Err(); err != nil {
 		return Bracket{}, err
+	}
+	if traced {
+		trace.Emit(ctx, trace.DomainRuntimeInput, "bracket.capture.done", moduleDir,
+			trace.Int("roots", len(b.roots)),
+			trace.Int("exclusions", len(b.exclusions)),
+			trace.Bool("unverifiable", b.reason != ""),
+			trace.String("reason", b.reason),
+			trace.Int64("elapsed_ms", time.Since(start).Milliseconds()),
+		)
 	}
 	return b, nil
 }
@@ -179,6 +185,19 @@ func (b Bracket) checkModuleView(moduleDir string) error {
 func (b Bracket) revalidate(ctx context.Context, moduleDir string) (unchanged, moved bool, reason string, err error) {
 	if ctx == nil {
 		return false, false, "", errors.New("runtimeinputs: nil context")
+	}
+	if trace.Enabled(ctx, trace.DomainRuntimeInput, b.moduleDir) {
+		start := time.Now()
+		defer func() {
+			trace.Emit(ctx, trace.DomainRuntimeInput, "bracket.revalidate.done", b.moduleDir,
+				trace.Int("roots", len(b.roots)),
+				trace.Bool("unchanged", unchanged),
+				trace.Bool("moved", moved),
+				trace.String("reason", reason),
+				trace.Int64("elapsed_ms", time.Since(start).Milliseconds()),
+				trace.Err(err),
+			)
+		}()
 	}
 	if err := ctx.Err(); err != nil {
 		return false, false, "", err
@@ -274,11 +293,12 @@ type bracketCapture struct {
 // The bracket seal binds them with the module view and exclusions.
 func fingerprintBracket(ctx context.Context, moduleDir string, ids, exclusions []pathID) (bracketCapture, error) {
 	var capture bracketCapture
+	moduleRoot := resolveModuleRoot(moduleDir)
 	for _, id := range ids {
 		if err := ctx.Err(); err != nil {
 			return bracketCapture{}, err
 		}
-		root, reason, err := fingerprintBracketRoot(ctx, moduleDir, id, exclusions)
+		root, reason, err := fingerprintBracketRoot(ctx, moduleDir, moduleRoot, id, exclusions)
 		if err != nil {
 			return bracketCapture{}, err
 		}
@@ -295,7 +315,7 @@ func fingerprintBracket(ctx context.Context, moduleDir string, ids, exclusions [
 // (REQ-inputs-bracket-coverage), retaining the walked membership when the
 // object is a directory. A root that is itself excluded contributes a
 // constant: its subtree is removed from the fingerprint entirely.
-func fingerprintBracketRoot(ctx context.Context, moduleDir string, id pathID, exclusions []pathID) (bracketRoot, string, error) {
+func fingerprintBracketRoot(ctx context.Context, moduleDir, moduleRoot string, id pathID, exclusions []pathID) (bracketRoot, string, error) {
 	root := bracketRoot{id: id}
 	if excludesIdentity(exclusions, id) {
 		return root, "", nil
@@ -316,7 +336,7 @@ func fingerprintBracketRoot(ctx context.Context, moduleDir string, id pathID, ex
 	// integrity — detecting any mid-span modification, a content-restoring
 	// one included — so the metadata the persisted-reuse identity drops is
 	// exactly what it must keep (REQ-inputs-observation-class).
-	_, reason, err := hashPath(ctx, h, id, p, moduleDir, bracketSkip(id, exclusions), visit, false, true, root.facts)
+	_, reason, err := hashPath(ctx, h, id, p, moduleRoot, bracketSkip(id, exclusions), visit, false, true, root.facts)
 	if ctx.Err() != nil {
 		return bracketRoot{}, "", ctx.Err()
 	}
@@ -344,6 +364,13 @@ func bracketSkip(root pathID, exclusions []pathID) func(rel string) bool {
 // view's resolved root and every declared root's own resolved path, computed
 // once so each recorded identity's resolution chain is compared against the
 // same root positions (REQ-inputs-value-binding).
+type dirChainEntry struct {
+	resolved string
+	links    []string
+	ok       bool
+	complete bool
+}
+
 type bracketCoverage struct {
 	bracket Bracket
 	// moduleRoot is the module view's resolved root. Module-relative walks
@@ -355,6 +382,9 @@ type bracketCoverage struct {
 	// bracket.roots; empty when the root does not resolve, in which case it
 	// covers nothing.
 	resolved []string
+	// dirMemo caches chainResolve results for directory prefixes within one
+	// coverage pass so sibling files do not re-lstat their shared ancestors.
+	dirMemo map[string]dirChainEntry
 }
 
 // coverage resolves the module view and every declared root's own path for
@@ -363,9 +393,16 @@ type bracketCoverage struct {
 // the root fingerprint follows the same chain at hash time, so a retarget
 // anywhere along it moves the digest of the content it reaches.
 func (b Bracket) coverage() bracketCoverage {
-	c := bracketCoverage{bracket: b, resolved: make([]string, len(b.roots))}
-	if moduleRoot, _, ok := chainResolve(b.moduleDir); ok {
+	c := bracketCoverage{
+		bracket:  b,
+		resolved: make([]string, len(b.roots)),
+		dirMemo:  make(map[string]dirChainEntry, len(b.roots)+8),
+	}
+	if moduleRoot, _, ok, complete := chainResolveComplete(b.moduleDir); ok {
 		c.moduleRoot = moduleRoot
+		if complete {
+			c.dirMemo[c.moduleRoot] = dirChainEntry{resolved: c.moduleRoot, ok: true, complete: true}
+		}
 	} else {
 		c.moduleRoot = b.moduleDir
 	}
@@ -374,11 +411,65 @@ func (b Bracket) coverage() bracketCoverage {
 		if root.id.Kind == pathRel {
 			start = filepath.Join(c.moduleRoot, filepath.FromSlash(root.id.Path))
 		}
-		if resolved, _, ok := chainResolve(start); ok {
+		if resolved, _, ok := c.resolvePath(start); ok {
 			c.resolved[i] = resolved
 		}
 	}
 	return c
+}
+
+func (c bracketCoverage) resolveDir(dir string) dirChainEntry {
+	if entry, cached := c.dirMemo[dir]; cached {
+		return entry
+	}
+	parent := filepath.Dir(dir)
+	var entry dirChainEntry
+	if parent != dir {
+		pEntry := c.resolveDir(parent)
+		if !pEntry.ok {
+			entry = dirChainEntry{ok: false}
+			c.dirMemo[dir] = entry
+			return entry
+		}
+		if !pEntry.complete {
+			entry = dirChainEntry{
+				resolved: filepath.Join(pEntry.resolved, filepath.Base(dir)),
+				links:    pEntry.links,
+				ok:       true,
+				complete: false,
+			}
+			c.dirMemo[dir] = entry
+			return entry
+		}
+		resolved, links, ok, complete := chainResolveFrom(pEntry.resolved, pEntry.links, filepath.Base(dir))
+		entry = dirChainEntry{resolved: resolved, links: links, ok: ok, complete: complete}
+		c.dirMemo[dir] = entry
+		return entry
+	}
+	resolved, links, ok, complete := chainResolveComplete(dir)
+	entry = dirChainEntry{resolved: resolved, links: links, ok: ok, complete: complete}
+	c.dirMemo[dir] = entry
+	return entry
+}
+
+func (c bracketCoverage) resolvePath(p string) (string, []string, bool) {
+	if entry, cached := c.dirMemo[p]; cached {
+		return entry.resolved, entry.links, entry.ok
+	}
+	parent := filepath.Dir(p)
+	if parent != p {
+		pEntry := c.resolveDir(parent)
+		if !pEntry.ok {
+			return "", nil, false
+		}
+		if !pEntry.complete {
+			return filepath.Join(pEntry.resolved, filepath.Base(p)), pEntry.links, true
+		}
+		resolved, links, ok, _ := chainResolveFrom(pEntry.resolved, pEntry.links, filepath.Base(p))
+		return resolved, links, ok
+	}
+	resolved, links, ok, _ := chainResolveComplete(p)
+	return resolved, links, ok
 }
 
 // covers reports whether a recorded identity is bracket-covered
@@ -409,7 +500,7 @@ func (c bracketCoverage) covers(id pathID) (bool, string, error) {
 		return covered, escaped, nil
 	}
 	start := filepath.Join(c.moduleRoot, filepath.FromSlash(id.Path))
-	resolved, links, ok := chainResolve(start)
+	resolved, links, ok := c.resolvePath(start)
 	if !ok {
 		return false, "", nil
 	}
@@ -457,7 +548,7 @@ func (c bracketCoverage) coversAbsolute(id pathID) (bool, string) {
 		if offset != "." {
 			start = filepath.Join(start, filepath.FromSlash(offset))
 		}
-		resolved, links, ok := chainResolve(start)
+		resolved, links, ok := c.resolvePath(start)
 		if !ok {
 			continue
 		}
@@ -520,23 +611,46 @@ func (c bracketCoverage) contains(target string, absOnly bool) bool {
 // that cannot be inspected or exceeds the link-hop budget reports no
 // resolution, leaving the identity uncovered rather than guessed.
 func chainResolve(p string) (string, []string, bool) {
-	return chainResolveObserved(context.Background(), p, nil)
+	resolved, links, ok, _ := chainResolveObservedComplete(context.Background(), p, nil)
+	return resolved, links, ok
+}
+
+func chainResolveComplete(p string) (string, []string, bool, bool) {
+	return chainResolveObservedComplete(context.Background(), p, nil)
 }
 
 func chainResolveObserved(ctx context.Context, p string, facts *pathFacts) (string, []string, bool) {
+	resolved, links, ok, _ := chainResolveObservedComplete(ctx, p, facts)
+	return resolved, links, ok
+}
+
+func chainResolveFrom(baseResolved string, baseLinks []string, component string) (string, []string, bool, bool) {
+	var links []string
+	if len(baseLinks) > 0 {
+		links = make([]string, len(baseLinks))
+		copy(links, baseLinks)
+	}
+	return chainResolveStepLoop(context.Background(), "", baseResolved, []string{component}, links, nil)
+}
+
+func chainResolveObservedComplete(ctx context.Context, p string, facts *pathFacts) (string, []string, bool, bool) {
+	sep := string(filepath.Separator)
+	volume := filepath.VolumeName(p)
+	resolved := volume + sep
+	pending := strings.Split(p[len(volume):], sep)
+	return chainResolveStepLoop(ctx, p, resolved, pending, nil, facts)
+}
+
+func chainResolveStepLoop(ctx context.Context, rootPath, resolved string, pending, links []string, facts *pathFacts) (string, []string, bool, bool) {
 	// maxLinkHops mirrors filepath.EvalSymlinks' link budget; the kernel's
 	// own limit is lower (40 on Linux), so exhausting it here is only ever
 	// more conservative.
 	const maxLinkHops = 255
 	sep := string(filepath.Separator)
-	volume := filepath.VolumeName(p)
-	resolved := volume + sep
-	pending := strings.Split(p[len(volume):], sep)
-	var links []string
-	hops := 0
+	hops := len(links)
 	for len(pending) > 0 {
 		if ctx.Err() != nil {
-			return "", nil, false
+			return "", nil, false, false
 		}
 		component := pending[0]
 		pending = pending[1:]
@@ -553,24 +667,26 @@ func chainResolveObserved(ctx context.Context, p string, facts *pathFacts) (stri
 			// Only a final lookup establishes the resolved absent entry. A
 			// missing ancestor leaves the suffix uninspected: its lexical join
 			// remains useful to coverage, but is not resolution evidence.
-			if len(pending) == 0 {
-				facts.put(next, namespaceFact, "missing")
-				facts.put(p, resolutionFact, next)
+			if rootPath != "" {
+				if len(pending) == 0 {
+					facts.put(next, namespaceFact, "missing")
+					facts.put(rootPath, resolutionFact, next)
+				}
+				// A missing ancestor makes the root namespace absent, but a
+				// dangling target does not erase the link already observed there.
+				if !facts.knows(rootPath, namespaceFact) {
+					facts.put(rootPath, namespaceFact, "missing")
+				}
 			}
-			// A missing ancestor makes the root namespace absent, but a
-			// dangling target does not erase the link already observed there.
-			if !facts.knows(p, namespaceFact) {
-				facts.put(p, namespaceFact, "missing")
-			}
-			return filepath.Join(append([]string{next}, pending...)...), links, true
+			return filepath.Join(append([]string{next}, pending...)...), links, true, false
 		}
 		if err != nil {
-			return "", nil, false
+			return "", nil, false, false
 		}
 		facts.put(next, namespaceFact, fmt.Sprintf("type %x", uint32(info.Mode().Type())))
-		if len(pending) == 0 {
-			if !facts.knows(p, namespaceFact) {
-				facts.put(p, namespaceFact, fmt.Sprintf("type %x", uint32(info.Mode().Type())))
+		if rootPath != "" && len(pending) == 0 {
+			if !facts.knows(rootPath, namespaceFact) {
+				facts.put(rootPath, namespaceFact, fmt.Sprintf("type %x", uint32(info.Mode().Type())))
 			}
 		}
 		if info.Mode()&os.ModeSymlink == 0 {
@@ -579,27 +695,29 @@ func chainResolveObserved(ctx context.Context, p string, facts *pathFacts) (stri
 		}
 		hops++
 		if hops > maxLinkHops {
-			return "", nil, false
+			return "", nil, false, false
 		}
 		links = append(links, next)
 		target, err := os.Readlink(next)
 		if err != nil {
-			return "", nil, false
+			return "", nil, false, false
 		}
 		facts.put(next, linkFact, target)
 		// An empty target — not creatable via os.Symlink, but representable
 		// on disk — splits to one empty component and resolves to the link's
 		// parent.
 		if filepath.IsAbs(target) {
-			volume = filepath.VolumeName(target)
+			volume := filepath.VolumeName(target)
 			resolved = volume + sep
 			pending = append(strings.Split(target[len(volume):], sep), pending...)
 			continue
 		}
 		pending = append(strings.Split(target, sep), pending...)
 	}
-	facts.put(p, resolutionFact, resolved)
-	return resolved, links, true
+	if rootPath != "" {
+		facts.put(rootPath, resolutionFact, resolved)
+	}
+	return resolved, links, true, true
 }
 
 // pathOffset reports whether p is root itself or lies beneath it, returning
@@ -609,6 +727,9 @@ func pathOffset(root, p string) (string, bool) {
 		return ".", true
 	}
 	sep := string(filepath.Separator)
+	if root == sep && filepath.IsAbs(p) {
+		return filepath.ToSlash(p[len(sep):]), true
+	}
 	if strings.HasPrefix(p, root+sep) {
 		return filepath.ToSlash(p[len(root)+len(sep):]), true
 	}

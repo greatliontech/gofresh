@@ -102,6 +102,10 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 	env := v.session.env
 	flags := v.session.buildFlags
 	patterns := append([]string(nil), v.packages...)
+	var snapshot *gotool.EnvSnapshot
+	if v.facts != nil {
+		snapshot = v.facts.snapshot
+	}
 	v.mu.RUnlock()
 	if len(patterns) == 0 {
 		patterns = []string{pkgPath}
@@ -116,7 +120,11 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 		}
 	}
 	varKey := pkgPath + "." + varName
-	sel, err := v.session.ToolchainSelection(ctx)
+	reader := v.session.newPassReader()
+	if snapshot != nil {
+		reader = gotool.PrimedEnvReader(v.session.runner, v.session.dir, v.session.env, snapshot)
+	}
+	sel, err := resolveToolchainSelection(ctx, reader, v.session.buildFlags...)
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: toolchain selection: %w", err)
 	}
@@ -188,7 +196,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 			allDeferrals = append(allDeferrals, deferralObservation{key: key, kind: kind, resolvent: resolvent, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)}})
 		},
 	}
-	facts := map[string][]dynamicStateFact{}
+	facts := map[string][]dynstate.Fact{}
 	for _, p := range order {
 		facts[p.PkgPath] = append(facts[p.PkgPath], dynstate.FactOfWithHooks(audited, p, singleSubject, hooks))
 	}
@@ -199,7 +207,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		}
 	}
 
-	linkAdj := carrierLinkGraph(facts, nil)
+	linkAdj := dynstate.CarrierLinkGraph(facts, nil)
 	linkedKeys := map[string]bool{varKey: true}
 	for changed := len(linkAdj[varKey]) > 0; changed; {
 		changed = false
@@ -213,7 +221,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		}
 	}
 
-	resolution := newDeferralResolution(facts, nil)
+	resolution := dynstate.NewDeferralResolution(facts, nil)
 	var collectedSites []ChainLink
 	for _, obs := range allSites {
 		if !linkedKeys[obs.key] {
@@ -351,8 +359,8 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	return boundChain(Chain{Arm: "environment-audit", Links: links}, protect), nil
 }
 
-func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]dynamicStateFact, linkedKeys map[string]bool, varName string) ([]ChainLink, string, string) {
-	ea := resolveEnvAudit(facts, nil)
+func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]dynstate.Fact, linkedKeys map[string]bool, varName string) ([]ChainLink, string, string) {
+	ea := dynstate.ResolveEnvAudit(facts, nil)
 	renderEdge := func(key syntaxutil.EnvAuditTarget) (string, string) {
 		if key.IsParam() {
 			return key.Func.Pkg, key.Func.Name + " (parameter " + strconv.Itoa(key.ParamIndex) + ")"

@@ -330,7 +330,7 @@ func TestProcessAccountRetainsObservationComputedBeforeAbort(t *testing.T) {
 			artifact: "retained-artifact", ready: true, terminal: terminal, cancel: func() {}},
 	}
 	u.Abort()
-	if err := u.recordObservation(observation, reason); err != nil {
+	if _, err := u.recordObservation(observation, reason); err != nil {
 		t.Fatal(err)
 	}
 	account, ok := u.Account()

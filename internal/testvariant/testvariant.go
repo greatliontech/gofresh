@@ -298,11 +298,11 @@ func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool
 	if name == "" || (hasDot && recv == "") || strings.Contains(name, ".") {
 		return false
 	}
-	d := DiffTestVariantLedgers(before, after)
+	d, oldFiles, nowFiles, validBindings := diffTestVariantLedgersWithBindings(before, after)
 	if d.Inert() {
 		return true
 	}
-	if before.BindingStrategy != BindingStrategy || after.BindingStrategy != BindingStrategy {
+	if !validBindings {
 		return false
 	}
 	for _, decl := range before.Declarations {
@@ -314,17 +314,6 @@ func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool
 		if decl.Kind == "directive" {
 			return false
 		}
-	}
-	if !reflect.DeepEqual(before.BaseFiles, after.BaseFiles) {
-		return false
-	}
-	oldFiles, ok := ledgerFileBindings(before)
-	if !ok {
-		return false
-	}
-	nowFiles, ok := ledgerFileBindings(after)
-	if !ok {
-		return false
 	}
 	for _, header := range d.HeaderChanges {
 		if header.Embedded {
@@ -358,9 +347,16 @@ func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool
 		afterByKey[key] = append(afterByKey[key], decl)
 	}
 
-	matchesSubject := func(decl TestVariantDeclaration) bool {
+	recvTypes := make([]string, len(before.Declarations))
+	for i, decl := range before.Declarations {
+		if decl.Kind == "method" {
+			recvTypes[i] = receiverTypeName(decl.Receiver)
+		}
+	}
+
+	matchesSubject := func(i int, decl TestVariantDeclaration) bool {
 		if hasDot {
-			return decl.Kind == "method" && decl.Name == name && receiverTypeName(decl.Receiver) == recv
+			return decl.Kind == "method" && decl.Name == name && recvTypes[i] == recv
 		}
 		return decl.Kind != "method" && decl.Kind != "directive" && decl.Kind != "init" && decl.Name == name
 	}
@@ -414,7 +410,7 @@ func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool
 			addName(decl.Package, decl.Name)
 		}
 		if decl.Kind == "method" {
-			if rt := receiverTypeName(decl.Receiver); rt != "" {
+			if rt := recvTypes[i]; rt != "" {
 				addName(decl.Package, rt)
 			}
 		}
@@ -433,7 +429,7 @@ func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool
 
 	rooted := false
 	for i, decl := range before.Declarations {
-		if matchesSubject(decl) {
+		if matchesSubject(i, decl) {
 			rooted = true
 			markDecl(i)
 			continue
@@ -442,7 +438,7 @@ func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool
 		case decl.Kind == "init", decl.Kind == "var", decl.Kind == "directive", decl.Kind == "func" && decl.Name == "TestMain":
 			markDecl(i)
 		case decl.Kind == "method":
-			rt := receiverTypeName(decl.Receiver)
+			rt := recvTypes[i]
 			if rt == "" || baseRefsByPkg[decl.Package][rt] {
 				markDecl(i)
 			}
@@ -475,7 +471,7 @@ func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool
 				continue
 			}
 			if decl.Kind == "method" {
-				rt := receiverTypeName(decl.Receiver)
+				rt := recvTypes[i]
 				if rt == "" || reachableNamesByPkg[decl.Package][rt] {
 					progressed = markDecl(i) || progressed
 				}
@@ -545,14 +541,16 @@ func InertForSubject(before, after TestVariantLedger, subjectSymbol string) bool
 // sorted hash, surplus recorded entries reporting as removed and surplus
 // current ones as added. The result is deterministic for any two ledgers.
 func DiffTestVariantLedgers(before, after TestVariantLedger) TestVariantDelta {
-	type identity struct {
-		file, pkg, kind, receiver, name string
-	}
-	group := func(declarations []TestVariantDeclaration) (map[identity][]TestVariantDeclaration, []identity) {
-		grouped := make(map[identity][]TestVariantDeclaration, len(declarations))
-		var order []identity
+	delta, _, _, _ := diffTestVariantLedgersWithBindings(before, after)
+	return delta
+}
+
+func diffTestVariantLedgersWithBindings(before, after TestVariantLedger) (TestVariantDelta, map[string]*TestVariantFileBindings, map[string]*TestVariantFileBindings, bool) {
+	group := func(declarations []TestVariantDeclaration) (map[declarationIdentity][]TestVariantDeclaration, []declarationIdentity) {
+		grouped := make(map[declarationIdentity][]TestVariantDeclaration, len(declarations))
+		var order []declarationIdentity
 		for _, declaration := range declarations {
-			key := identity{declaration.File, declaration.Package, declaration.Kind, declaration.Receiver, declaration.Name}
+			key := idOfDeclaration(declaration)
 			if _, ok := grouped[key]; !ok {
 				order = append(order, key)
 			}
@@ -605,7 +603,20 @@ func DiffTestVariantLedgers(before, after TestVariantLedger) TestVariantDelta {
 			delta.Added = append(delta.Added, current[key]...)
 		}
 	}
-	delta.BindingsPreserved = bindingsPreserved(before, after, delta.Added)
+	var (
+		oldFiles, nowFiles map[string]*TestVariantFileBindings
+		validBindings      bool
+	)
+	if before.BindingStrategy == BindingStrategy && after.BindingStrategy == BindingStrategy && reflect.DeepEqual(before.BaseFiles, after.BaseFiles) {
+		if old, ok := ledgerFileBindings(before); ok {
+			if now, ok := ledgerFileBindings(after); ok {
+				oldFiles = old
+				nowFiles = now
+				validBindings = true
+				delta.BindingsPreserved = bindingsPreservedFrom(old, now, delta.Added)
+			}
+		}
+	}
 	headers := func(ledger TestVariantLedger) map[string]TestVariantFileHeader {
 		byFile := make(map[string]TestVariantFileHeader, len(ledger.FileHeaders))
 		for _, header := range ledger.FileHeaders {
@@ -637,7 +648,7 @@ func DiffTestVariantLedgers(before, after TestVariantLedger) TestVariantDelta {
 	sortDeclarations(delta.Removed)
 	sort.Slice(delta.Changed, func(i, j int) bool { return LessDeclaration(delta.Changed[i].After, delta.Changed[j].After) })
 	sort.Slice(delta.HeaderChanges, func(i, j int) bool { return delta.HeaderChanges[i].File < delta.HeaderChanges[j].File })
-	return delta
+	return delta, oldFiles, nowFiles, validBindings
 }
 
 // LessDeclaration is the ledger's canonical declaration order: by file,
@@ -723,22 +734,30 @@ func fileImportsMap(b *TestVariantFileBindings) map[string]string {
 	return m
 }
 
-func bindingsPreserved(before, after TestVariantLedger, added []TestVariantDeclaration) bool {
-	if before.BindingStrategy != BindingStrategy || after.BindingStrategy != BindingStrategy {
-		return false
-	}
-	// The caller guards the core, but the evidence must also describe the
-	// same base files. Never accept a truncated or mixed-generation ledger.
-	if !reflect.DeepEqual(before.BaseFiles, after.BaseFiles) {
-		return false
-	}
-	old, ok := ledgerFileBindings(before)
-	if !ok {
-		return false
-	}
-	now, ok := ledgerFileBindings(after)
-	if !ok {
-		return false
+func bindingsPreservedFrom(old, now map[string]*TestVariantFileBindings, added []TestVariantDeclaration) bool {
+	var addedByPkgName map[string]map[string]bool
+	if len(added) > 0 {
+		addedByPkgName = make(map[string]map[string]bool)
+		addShadow := func(pkg, name string) {
+			m := addedByPkgName[pkg]
+			if m == nil {
+				m = make(map[string]bool)
+				addedByPkgName[pkg] = m
+			}
+			m[name] = true
+		}
+		for _, a := range added {
+			if a.Name == "_" {
+				if a.Kind == "const" {
+					addShadow(a.Package, "_")
+				}
+				continue
+			}
+			addShadow(a.Package, a.Name)
+			if ast.IsExported(a.Name) {
+				addShadow(a.Package+"_test", a.Name)
+			}
+		}
 	}
 	for file, b := range old {
 		n := now[file]
@@ -749,20 +768,10 @@ func bindingsPreserved(before, after TestVariantLedger, added []TestVariantDecla
 		if len(b.References) != 0 && was["."] != next["."] {
 			return false
 		}
+		pkgShadow := addedByPkgName[b.Package]
 		for _, ref := range b.References {
-			if was[ref] != next[ref] {
+			if was[ref] != next[ref] || pkgShadow[ref] {
 				return false
-			}
-			for _, a := range added {
-				if a.Name == "_" {
-					if a.Kind == "const" && a.Package == b.Package && ref == "_" {
-						return false
-					}
-					continue
-				}
-				if a.Name == ref && (a.Package == b.Package || (ast.IsExported(a.Name) && a.Package+"_test" == b.Package)) {
-					return false
-				}
 			}
 		}
 	}

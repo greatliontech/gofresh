@@ -34,11 +34,8 @@ func newPathClassifier(moduleDir string, cfg testLogConfig) (pathClassifier, err
 	// and the temp admissions never fire on them — declaring the system
 	// temp directory stays sound for a repository checked out beneath it
 	// (REQ-inputs-ephemeral-root).
-	resolvedModule, err := filepath.EvalSymlinks(moduleDir)
-	if err != nil {
-		resolvedModule = moduleDir
-	}
-	ephemeralRoots, err := resolveEphemeralRoots(cfg.ephemeralRoots, moduleDir)
+	resolvedModule := resolveModuleRoot(moduleDir)
+	ephemeralRoots, err := resolveEphemeralRoots(cfg.ephemeralRoots, moduleDir, resolvedModule)
 	if err != nil {
 		return pathClassifier{}, err
 	}

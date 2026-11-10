@@ -1262,7 +1262,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 				}
 				if len(s.Lhs) == len(s.Rhs) {
 					for i, lhs := range s.Lhs {
-						if (!syntaxutil.IsBlankIdent(lhs) || cfg.ForbidNonNilSeedStructPtrCompare) && seedStructTypeViolated(info.TypeOf(lhs), info.TypeOf(s.Rhs[i])) {
+						if !syntaxutil.IsBlankIdent(lhs) && seedStructTypeViolated(info.TypeOf(lhs), info.TypeOf(s.Rhs[i])) {
 							ok = false
 							return false
 						}
@@ -1300,12 +1300,12 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 					rhsTup, _ := rhsT.(*types.Tuple)
 					if rhsTup != nil {
 						for i, lhs := range s.Lhs {
-							if i < rhsTup.Len() && (!syntaxutil.IsBlankIdent(lhs) || cfg.ForbidNonNilSeedStructPtrCompare) && seedStructTypeViolated(info.TypeOf(lhs), rhsTup.At(i).Type()) {
+							if i < rhsTup.Len() && !syntaxutil.IsBlankIdent(lhs) && seedStructTypeViolated(info.TypeOf(lhs), rhsTup.At(i).Type()) {
 								ok = false
 								return false
 							}
 						}
-					} else if cfg.ForbidNonNilSeedStructPtrCompare && seedStructTypeViolated(info.TypeOf(s.Lhs[0]), rhsT) {
+					} else if !syntaxutil.IsBlankIdent(s.Lhs[0]) && seedStructTypeViolated(info.TypeOf(s.Lhs[0]), rhsT) {
 						ok = false
 						return false
 					}
@@ -1333,7 +1333,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 			case *ast.ValueSpec:
 				if len(s.Names) == len(s.Values) {
 					for i, nm := range s.Names {
-						if nm.Name != "_" || cfg.ForbidNonNilSeedStructPtrCompare {
+						if nm.Name != "_" {
 							if v, _ := info.Defs[nm].(*types.Var); v != nil && seedStructTypeViolated(v.Type(), info.TypeOf(s.Values[i])) {
 								ok = false
 								return false
@@ -1355,14 +1355,14 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 					rhsTup, _ := rhsT.(*types.Tuple)
 					if rhsTup != nil {
 						for i, nm := range s.Names {
-							if i < rhsTup.Len() && (nm.Name != "_" || cfg.ForbidNonNilSeedStructPtrCompare) {
+							if i < rhsTup.Len() && nm.Name != "_" {
 								if v, _ := info.Defs[nm].(*types.Var); v != nil && seedStructTypeViolated(v.Type(), rhsTup.At(i).Type()) {
 									ok = false
 									return false
 								}
 							}
 						}
-					} else if cfg.ForbidNonNilSeedStructPtrCompare {
+					} else if s.Names[0].Name != "_" {
 						if v, _ := info.Defs[s.Names[0]].(*types.Var); v != nil && seedStructTypeViolated(v.Type(), rhsT) {
 							ok = false
 							return false

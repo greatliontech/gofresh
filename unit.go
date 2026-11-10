@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // errUnitClosed reports admission, submission or closing after the unit started
@@ -460,6 +462,11 @@ func (u *Unit) Close(ctx context.Context) (result Finalized, err error) {
 	if x.terminal.Kind == NeverStarted {
 		return Finalized{}, fmt.Errorf("gofresh: execution %q never started: %s", x.process.Identity, x.terminal.Reason)
 	}
+	var closeStart time.Time
+	tracing := trace.Enabled(ctx, trace.DomainSession, "unit.close.done")
+	if tracing {
+		closeStart = time.Now()
+	}
 	var observation runtimeinput.Observation
 	var inputs *runtimeinput.State
 	// An absent optional capture is not an incomplete observation. Diagnostic
@@ -481,10 +488,7 @@ func (u *Unit) Close(ctx context.Context) (result Finalized, err error) {
 		if err != nil {
 			return Finalized{}, err
 		}
-		if err := u.recordObservation(observation, observationReason); err != nil {
-			return Finalized{}, err
-		}
-		state, err := runtimeinput.CompletedState(observation)
+		state, err := u.recordObservation(observation, observationReason)
 		if err != nil {
 			return Finalized{}, err
 		}
@@ -524,6 +528,13 @@ func (u *Unit) Close(ctx context.Context) (result Finalized, err error) {
 	if len(result.Subjects) > 0 {
 		result.Fingerprint = result.Subjects[0].Fingerprint
 		result.Verdict = result.Subjects[0].Verdict
+	}
+	if tracing {
+		trace.Emit(ctx, trace.DomainSession, "unit.close.done", x.process.Identity,
+			trace.Int("subjects", len(u.view.subjects)),
+			trace.Int("observed_subjects", len(x.observed)),
+			trace.Int64("elapsed_ms", time.Since(closeStart).Milliseconds()),
+		)
 	}
 	return result, nil
 }
@@ -604,13 +615,15 @@ func (u *Unit) account() (ProcessAccount, bool) {
 		} else {
 			if len(x.observed) == 0 {
 				disposition = IdentityObservation
-			}
-			for subject := range x.observed {
-				// Attachment adds only runtime inputs and their digest; neither
-				// is part of the prepared outcome-subject identity.
-				if !runtimeinput.HasOutcomeSupport(x.observation.inputs.Manifest, outcomeSubject(x.fingerprints[subject], subject)) {
-					disposition = IdentityObservation
-					break
+			} else {
+				supported := runtimeinput.OutcomeSupportSet(x.observation.inputs.Manifest)
+				for subject := range x.observed {
+					// Attachment adds only runtime inputs and their digest; neither
+					// is part of the prepared outcome-subject identity.
+					if !supported[outcomeSubject(x.fingerprints[subject], subject)] {
+						disposition = IdentityObservation
+						break
+					}
 				}
 			}
 		}
@@ -626,13 +639,13 @@ func (u *Unit) account() (ProcessAccount, bool) {
 // recordObservation retains finalized facts before attachment or closing checks
 // can refuse. Abort may already have won: retaining observed facts gives no
 // closing authority and does not continue observation work.
-func (u *Unit) recordObservation(observation runtimeinput.Observation, reason string) error {
+func (u *Unit) recordObservation(observation runtimeinput.Observation, reason string) (runtimeinput.State, error) {
 	state, err := runtimeinput.CompletedState(observation)
 	if err != nil {
-		return err
+		return runtimeinput.State{}, err
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.execution.observation = finalizedProcessObservation{inputs: state, reason: reason, attribution: observation.Attribution}
-	return nil
+	return state, nil
 }

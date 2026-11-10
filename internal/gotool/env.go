@@ -65,14 +65,7 @@ func EnvForCommand(env []string, dir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	command := make([]string, 0, len(normalized)+1)
-	for _, entry := range normalized {
-		name, _, _ := split(entry)
-		if !equalKey(name, "PWD") {
-			command = append(command, entry)
-		}
-	}
-	return NormalizeEnv(append(command, "PWD="+abs))
+	return SetEnv(normalized, "PWD", abs), nil
 }
 
 // NormalizeEnv returns a deterministic owned copy of env. Entries must use the
@@ -128,14 +121,7 @@ func EnvForPackages(env []string) ([]string, error) {
 			return nil, fmt.Errorf("GOPACKAGESDRIVER=%q is unsupported because freshness analysis requires Go package loading", driver)
 		}
 	}
-	pinned := make([]string, 0, len(normalized)+1)
-	for _, entry := range normalized {
-		name, _, _ := split(entry)
-		if !equalKey(name, "GOPACKAGESDRIVER") {
-			pinned = append(pinned, entry)
-		}
-	}
-	return NormalizeEnv(append(pinned, "GOPACKAGESDRIVER=off"))
+	return SetEnv(normalized, "GOPACKAGESDRIVER", "off"), nil
 }
 
 // LookupEnv returns key's value from a normalized complete environment.

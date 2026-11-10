@@ -1784,7 +1784,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/runtimeinput.hashPath"
   role: BINDING_ROLE_IMPLEMENTS
-  shape_hash: "8123bb3747f69d94a54f7706b7a55ce653e9e4e1ebea2781e27fa5f697b84627"
+  shape_hash: "4ff05d2fbd27c3b7fecbefc522c31d0a4906d9c995f047c1966a63a201926a1f"
 }
 
 bindings {

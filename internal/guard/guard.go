@@ -16,13 +16,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // Guards are the captured guard values for one result. Every field is a digest or
@@ -63,10 +64,10 @@ func CaptureRuntime(ctx context.Context, env []string, kind Kind) (guards Runtim
 	if err != nil {
 		return RuntimeGuards{}, fmt.Errorf("guard: runtime env: %w", err)
 	}
-	return captureRuntimeFor(ctx, env, kind, gatherFacts, runtimeConfig)
+	return captureRuntimeFor(ctx, kind, gatherFacts, func() string { return runtimeConfig(env) })
 }
 
-func captureRuntimeFor(ctx context.Context, env []string, kind Kind, machine func() (MachineFacts, error), runtimeGuard func([]string) string) (RuntimeGuards, error) {
+func captureRuntimeFor(ctx context.Context, kind Kind, machine func() (MachineFacts, error), runtimeGuard func() string) (RuntimeGuards, error) {
 	if err := ctx.Err(); err != nil {
 		return RuntimeGuards{}, err
 	}
@@ -80,7 +81,7 @@ func captureRuntimeFor(ctx context.Context, env []string, kind Kind, machine fun
 	if err != nil {
 		return RuntimeGuards{}, err
 	}
-	return RuntimeGuards{Machine: facts.Fingerprint(), RuntimeConfig: runtimeGuard(env)}, nil
+	return RuntimeGuards{Machine: facts.Fingerprint(), RuntimeConfig: runtimeGuard()}, nil
 }
 
 // Kind classifies a cached result for guard selection (REQ-fresh-guard-set).
@@ -147,15 +148,31 @@ func Capture(ctx context.Context, reader *gotool.EnvReader, runtimeEnv []string,
 	// caller's later keys read it too — and the guard's own reader
 	// carries the normalized environment primed with it: one probe per
 	// pass, whichever reader asks first (REQ-guard-buildconfig).
+	var start time.Time
+	traced := trace.Enabled(ctx, trace.DomainRuntimeInput, reader.Dir)
+	if traced {
+		start = time.Now()
+	}
 	snapshot, err := reader.Snapshot(ctx)
 	if err != nil {
 		return Guards{}, err
 	}
 	pass := gotool.PrimedEnvReader(reader.Runner, reader.Dir, normalized, snapshot)
-	return captureFor(ctx, pass, kind, buildInputs, gatherFacts, func([]string) string { return runtimeConfig(normalizedRuntime) })
+	guards, err := captureFor(ctx, pass, kind, buildInputs, gatherFacts, func() string { return runtimeConfig(normalizedRuntime) })
+	if traced {
+		trace.Emit(ctx, trace.DomainRuntimeInput, "guard.capture.done", reader.Dir,
+			trace.String("toolchain", guards.Toolchain),
+			trace.String("build_config", guards.BuildConfig),
+			trace.String("machine", guards.Machine),
+			trace.String("runtime_config", guards.RuntimeConfig),
+			trace.Int64("elapsed_ms", time.Since(start).Milliseconds()),
+			trace.Err(err),
+		)
+	}
+	return guards, err
 }
 
-func captureFor(ctx context.Context, reader *gotool.EnvReader, kind Kind, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func([]string) string) (Guards, error) {
+func captureFor(ctx context.Context, reader *gotool.EnvReader, kind Kind, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func() string) (Guards, error) {
 	if kind != CodeResult && kind != Measurement {
 		return Guards{}, fmt.Errorf("guard: invalid result kind %d", kind)
 	}
@@ -174,7 +191,7 @@ func captureFor(ctx context.Context, reader *gotool.EnvReader, kind Kind, buildI
 	}
 	bc := buildConfigDigestFromValues(snapshot.Value, env, buildInputs)
 	guards := Guards{Toolchain: tc, BuildConfig: bc}
-	runtime, err := captureRuntimeFor(ctx, env, kind, machine, runtimeGuard)
+	runtime, err := captureRuntimeFor(ctx, kind, machine, runtimeGuard)
 	if err != nil {
 		return Guards{}, err
 	}
@@ -294,17 +311,6 @@ var buildConfigGoEnvKeys = []string{
 // buildConfigOSEnvKeys are the pkg-config search variables — plain OS env, not go
 // env vars — that change which .pc files cgo resolves and thus the compiled code.
 var buildConfigOSEnvKeys = []string{"PKG_CONFIG_PATH", "PKG_CONFIG_LIBDIR", "PKG_CONFIG_SYSROOT_DIR"}
-
-// buildConfigDigest parses the `go env -json` output and digests the build-affecting
-// settings plus buildInputs. A malformed env output fails closed with an error
-// (REQ-guard-buildconfig-failclosed) rather than digesting a partial value.
-func buildConfigDigest(envJSON []byte, processEnv, buildInputs []string) (string, error) {
-	var env map[string]string
-	if err := json.Unmarshal(envJSON, &env); err != nil {
-		return "", fmt.Errorf("guard: parse go env: %w", err)
-	}
-	return buildConfigDigestFromValues(func(k string) string { return env[k] }, processEnv, buildInputs), nil
-}
 
 func buildConfigDigestFromValues(lookup func(string) string, processEnv, buildInputs []string) string {
 	vals := map[string]string{}

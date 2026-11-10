@@ -531,9 +531,14 @@ func TestCaptureBracketRejectsMalformedRootsAndPatterns(t *testing.T) {
 	}
 	// Exclusion identities enter the same newline-framed preimage as roots,
 	// so framing bytes could alias a different exclusion set.
-	for _, pattern := range []string{"bad\nname", "nul\x00byte", "cr\rname"} {
+	bracket := testBracket(t, moduleDir, "data")
+	for _, pattern := range []string{"bad\nname", "nul\x00byte", "cr\rname", "\xff"} {
 		if _, err := ambientCaptureBracket(moduleDir, []string{"data"}, WithBracketExcludedPaths(pattern)); err == nil {
 			t.Errorf("CaptureBracket accepted unrepresentable exclusion %q", pattern)
+		}
+		if _, err := ambientFromTestLog([]byte("# test log\n"), moduleDir, moduleDir,
+			WithCompletedProcess("worker"), WithBracket(bracket), WithExcludedPaths(pattern)); err == nil {
+			t.Errorf("FromTestLog accepted unrepresentable exclusion %q", pattern)
 		}
 	}
 }

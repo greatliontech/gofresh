@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/types"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +21,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/buildflags"
 	"github.com/greatliontech/gofresh/internal/closure"
+	"github.com/greatliontech/gofresh/internal/dynstate"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
@@ -285,6 +288,87 @@ func scanPureDirectivesIn(dir string, pkgPaths ...string) (func(Subject) bool, e
 	return scanPureDirectivesAt(dir, os.Environ(), nil, pkgPaths...)
 }
 
+func scanPureDirectivesAt(dir string, env, buildFlags []string, pkgPaths ...string) (func(Subject) bool, error) {
+	scan, err := scanSubjectsInWithBuildFlagsEnv(context.Background(), dir, env, buildFlags, pkgPaths...)
+	if err != nil {
+		return nil, err
+	}
+	return scan.directivePure, nil
+}
+
+func scanSubjectsInWithBuildFlagsEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*subjectScan, error) {
+	hasher, err := closure.NewAt(ctx, gotool.NewEnvReader(gotool.Runner{}, dir, env), buildFlags...)
+	if err != nil {
+		return nil, err
+	}
+	load, err := closure.LoadViewPackages(ctx, hasher.PassReader(), buildFlags, pkgPaths...)
+	if err != nil {
+		return nil, err
+	}
+	byPkg := map[string][]dynstate.Fact{}
+	for _, pkg := range load.Packages() {
+		if pkg.Name == "main" && strings.HasSuffix(pkg.PkgPath, ".test") {
+			continue
+		}
+		for _, loadErr := range pkg.Errors {
+			return nil, fmt.Errorf("gofresh: directive scan: load %s: %s", pkg.PkgPath, loadErr)
+		}
+		byPkg[pkg.PkgPath] = append(byPkg[pkg.PkgPath], dynstate.MethodDirectivesFactOf(pkg))
+	}
+	missingPromoted := map[string]bool{}
+	for _, pkg := range load.Packages() {
+		if pkg.Types == nil {
+			continue
+		}
+		scope := pkg.Types.Scope()
+		for _, name := range scope.Names() {
+			typeName, ok := scope.Lookup(name).(*types.TypeName)
+			if !ok {
+				continue
+			}
+			for _, methods := range []*types.MethodSet{
+				types.NewMethodSet(types.NewPointer(typeName.Type())),
+				types.NewMethodSet(typeName.Type()),
+			} {
+				for i := 0; i < methods.Len(); i++ {
+					method, ok := methods.At(i).Obj().(*types.Func)
+					if !ok || method.Pkg() == nil {
+						continue
+					}
+					depPath := method.Pkg().Path()
+					first, _, _ := strings.Cut(depPath, "/")
+					if len(byPkg[depPath]) == 0 && strings.Contains(first, ".") {
+						missingPromoted[depPath] = true
+					}
+				}
+			}
+		}
+	}
+	if len(missingPromoted) > 0 {
+		depPatterns := make([]string, 0, len(missingPromoted))
+		for depPath := range missingPromoted {
+			depPatterns = append(depPatterns, depPath)
+		}
+		sort.Strings(depPatterns)
+		depLoad, err := closure.LoadViewPackages(ctx, hasher.PassReader(), buildFlags, depPatterns...)
+		if err != nil {
+			return nil, err
+		}
+		for _, pkg := range depLoad.Packages() {
+			if pkg.ForTest != "" || pkg.Name == "main" {
+				continue
+			}
+			byPkg[pkg.PkgPath] = append(byPkg[pkg.PkgPath], dynstate.MethodDirectivesFactOf(pkg))
+		}
+	}
+	cones := make(map[string]map[string][]dynstate.Fact, len(pkgPaths))
+	for _, pkgPath := range pkgPaths {
+		cones[pkgPath] = byPkg
+	}
+	state := &viewDynamicState{cones: cones}
+	return scanSubjectsFromLoadedWith(hasher.SelectionAudited(), false, load.Packages(), state, pkgPaths...)
+}
+
 func closureLoadViewPackagesEnv(ctx context.Context, dir string, env, buildFlags []string, pkgPaths ...string) (*closure.ViewLoad, error) {
 	return closure.LoadViewPackages(ctx, gotool.NewEnvReader(gotool.Runner{}, dir, env), buildFlags, pkgPaths...)
 }
@@ -443,11 +527,11 @@ func parseAndTypecheckModuleDir(dir string, viewPackages ...string) ([]*packages
 	return pkgs, modPath, true
 }
 
-func buildInMemoryViewDynamicState(pkgs []*packages.Package, viewPackages []string, vouches map[string]bool, singleSubject, packageProcess bool) (*viewDynamicState, map[string]dynamicStateFact, bool) {
+func buildInMemoryViewDynamicState(pkgs []*packages.Package, viewPackages []string, vouches map[string]bool, singleSubject, packageProcess bool) (*viewDynamicState, map[string]dynstate.Fact, bool) {
 	var meta []closure.GraphPackage
 	byListing := make(map[string]closure.GraphPackage, len(pkgs))
-	factsByListing := make(map[string]dynamicStateFact, len(pkgs))
-	factsByPkg := make(map[string]dynamicStateFact, len(pkgs))
+	factsByListing := make(map[string]dynstate.Fact, len(pkgs))
+	factsByPkg := make(map[string]dynstate.Fact, len(pkgs))
 	for _, p := range pkgs {
 		if p.Name == "main" && strings.HasSuffix(p.PkgPath, ".test") {
 			continue
@@ -477,7 +561,7 @@ func buildInMemoryViewDynamicState(pkgs []*packages.Package, viewPackages []stri
 		}
 		meta = append(meta, node)
 		byListing[listing] = node
-		fact := dynamicStateFactOf(true, p, singleSubject)
+		fact := dynstate.FactOf(true, p, singleSubject)
 		factsByListing[listing] = fact
 		if p.ForTest == "" || p.PkgPath == p.ForTest {
 			factsByPkg[p.PkgPath] = fact
@@ -486,35 +570,35 @@ func buildInMemoryViewDynamicState(pkgs []*packages.Package, viewPackages []stri
 	state := &viewDynamicState{
 		downgraded: map[string]string{},
 		culprits:   map[string]Subject{},
-		cones:      map[string]map[string][]dynamicStateFact{},
+		cones:      map[string]map[string][]dynstate.Fact{},
 	}
 	for _, viewPackage := range viewPackages {
-		coneMeta, coneFacts := dynamicStateCone(meta, byListing, factsByListing, viewPackage)
+		coneMeta, coneFacts := dynstate.Cone(meta, byListing, factsByListing, viewPackage)
 		state.cones[viewPackage] = coneFacts
-		cone := composeDynamicState(coneMeta, coneFacts, viewPackage, vouches, singleSubject, packageProcess)
-		if cone.downgraded != "" {
-			state.downgraded[viewPackage] = cone.downgraded
-			state.culprits[viewPackage] = cone.culprit
+		composed := dynstate.Compose(coneMeta, coneFacts, viewPackage, vouches, singleSubject, packageProcess)
+		if composed.Downgraded != "" {
+			state.downgraded[viewPackage] = composed.Downgraded
+			state.culprits[viewPackage] = Subject{Package: composed.CulpritPkg, Symbol: composed.CulpritSym}
 		}
-		if cone.vouchDischarges != "" {
+		if composed.VouchDischarges != "" {
 			if state.vouchDischarges == nil {
 				state.vouchDischarges = map[string]string{}
 			}
-			state.vouchDischarges[viewPackage] = cone.vouchDischarges
+			state.vouchDischarges[viewPackage] = composed.VouchDischarges
 		}
-		if cone.attestationDischarges != "" {
+		if composed.AttestationDischarges != "" {
 			if state.attestationDischarges == nil {
 				state.attestationDischarges = map[string]string{}
 			}
-			state.attestationDischarges[viewPackage] = cone.attestationDischarges
+			state.attestationDischarges[viewPackage] = composed.AttestationDischarges
 		}
-		if len(cone.rootCulprits) > 0 {
+		if len(composed.RootCulprits) > 0 {
 			if state.rootCulprits == nil {
-				state.rootCulprits = map[string][]dynCulprit{}
-				state.culpritSites = map[string]map[string]culpritSiteSet{}
+				state.rootCulprits = map[string][]dynstate.Culprit{}
+				state.culpritSites = map[string]map[string]dynstate.CulpritSiteSet{}
 			}
-			state.rootCulprits[viewPackage] = cone.rootCulprits
-			state.culpritSites[viewPackage] = cone.culpritSites
+			state.rootCulprits[viewPackage] = composed.RootCulprits
+			state.culpritSites[viewPackage] = composed.CulpritSites
 		}
 	}
 	return state, factsByPkg, true
@@ -547,7 +631,7 @@ func inMemorySnapshotForSubject(dir string, subject Subject, opts ...option) (*S
 		return nil, nil, false
 	}
 	if singleSubject {
-		if culprits := state.rootCulprits[subject.Package]; scan.downgradeReason[subject] != "" && len(culprits) > 0 && !state.culpritSites[subject.Package][culprits[0].key].unattributed {
+		if culprits := state.rootCulprits[subject.Package]; scan.downgradeReason[subject] != "" && len(culprits) > 0 && !state.culpritSites[subject.Package][culprits[0].Key].Unattributed {
 			req := closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
 			rooted, err := closure.InMemoryRootedFunctions(context.Background(), true, pkgs, subject.Package, []closure.Subject{req})
 			if err != nil {
@@ -575,7 +659,7 @@ func inMemorySnapshotForSubject(dir string, subject Subject, opts ...option) (*S
 			}
 		}
 	} else if packageProcess {
-		if culprits := state.rootCulprits[subject.Package]; scan.downgradeReason[subject] != "" && len(culprits) > 0 && !state.culpritSites[subject.Package][culprits[0].key].unattributed {
+		if culprits := state.rootCulprits[subject.Package]; scan.downgradeReason[subject] != "" && len(culprits) > 0 && !state.culpritSites[subject.Package][culprits[0].Key].Unattributed {
 			proof, err := closure.InMemoryBinaryRootedFunctions(context.Background(), true, pkgs, subject.Package)
 			if err != nil {
 				return nil, nil, false
@@ -700,9 +784,9 @@ type pinnedDepTemplate struct {
 	files            map[string]string
 	meta             []closure.GraphPackage
 	byListing        map[string]closure.GraphPackage
-	localFacts       map[string]dynamicStateFact
+	localFacts       map[string]dynstate.Fact
 	errgroupBucket   string
-	errgroupBaseFact dynamicStateFact
+	errgroupBaseFact dynstate.Fact
 }
 
 var (
@@ -808,19 +892,19 @@ func getPinnedDepTemplate(t testing.TB) *pinnedDepTemplate {
 	for _, node := range meta {
 		byListing[node.ImportPath] = node
 	}
-	localFacts := map[string]dynamicStateFact{}
-	var egFact dynamicStateFact
+	localFacts := map[string]dynstate.Fact{}
+	var egFact dynstate.Fact
 	for _, pkg := range dagPkgs {
 		if pkg.PkgPath == "golang.org/x/sync/errgroup" {
 			pkg.Module = &packages.Module{Path: "golang.org/x/sync", Version: version}
-			egFact = dynamicStateFactOf(true, pkg, false)
+			egFact = dynstate.FactOf(true, pkg, false)
 			continue
 		}
 		if pkg.PkgPath == "example.com/pinned" {
-			localFacts["example.com/pinned"] = dynamicStateFactOf(true, pkg, false)
+			localFacts["example.com/pinned"] = dynstate.FactOf(true, pkg, false)
 		}
 	}
-	buckets, _ := pinnedBuckets(meta)
+	buckets, _ := dynstate.PinnedBuckets(meta)
 	egBucket := buckets["golang.org/x/sync@"+version]
 	if egBucket == "" {
 		t.Fatalf("missing errgroup bucket in %v", buckets)
@@ -836,8 +920,8 @@ func getPinnedDepTemplate(t testing.TB) *pinnedDepTemplate {
 	return pinnedDepTemplateVal
 }
 
-func cloneDynamicStateFact(f dynamicStateFact) dynamicStateFact {
-	var out dynamicStateFact
+func cloneDynamicStateFact(f dynstate.Fact) dynstate.Fact {
+	var out dynstate.Fact
 	if raw, err := json.Marshal(f); err == nil {
 		_ = json.Unmarshal(raw, &out)
 		return out
@@ -866,7 +950,7 @@ func pinnedDirUnmodified(dir string, expected map[string]string) bool {
 	return true
 }
 
-func inMemoryRunScanVouched(scope, dir string, vouches map[string]bool, pkgPaths ...string) (*subjectScan, map[string]dynamicStateFact, bool) {
+func inMemoryRunScanVouched(scope, dir string, vouches map[string]bool, pkgPaths ...string) (*subjectScan, map[string]dynstate.Fact, bool) {
 	if hasScanOverrideViewTestHook() {
 		return nil, nil, false
 	}
@@ -890,27 +974,27 @@ func inMemoryRunScanVouched(scope, dir string, vouches map[string]bool, pkgPaths
 			}
 		}
 		localFact := cloneDynamicStateFact(tmpl.localFacts["example.com/pinned"])
-		factsByListing := map[string]dynamicStateFact{
+		factsByListing := map[string]dynstate.Fact{
 			"example.com/pinned":         localFact,
 			"golang.org/x/sync/errgroup": egFact,
 		}
 
-		coneMeta, coneFacts := dynamicStateCone(tmpl.meta, tmpl.byListing, factsByListing, "example.com/pinned")
-		cone := composeDynamicState(coneMeta, coneFacts, "example.com/pinned", vouches, false, false)
+		coneMeta, coneFacts := dynstate.Cone(tmpl.meta, tmpl.byListing, factsByListing, "example.com/pinned")
+		composed := dynstate.Compose(coneMeta, coneFacts, "example.com/pinned", vouches, false, false)
 		state := &viewDynamicState{
 			downgraded: map[string]string{},
 			culprits:   map[string]Subject{},
-			cones:      map[string]map[string][]dynamicStateFact{"example.com/pinned": coneFacts},
+			cones:      map[string]map[string][]dynstate.Fact{"example.com/pinned": coneFacts},
 		}
-		if cone.downgraded != "" {
-			state.downgraded["example.com/pinned"] = cone.downgraded
-			state.culprits["example.com/pinned"] = cone.culprit
+		if composed.Downgraded != "" {
+			state.downgraded["example.com/pinned"] = composed.Downgraded
+			state.culprits["example.com/pinned"] = Subject{Package: composed.CulpritPkg, Symbol: composed.CulpritSym}
 		}
-		if cone.vouchDischarges != "" {
-			state.vouchDischarges = map[string]string{"example.com/pinned": cone.vouchDischarges}
+		if composed.VouchDischarges != "" {
+			state.vouchDischarges = map[string]string{"example.com/pinned": composed.VouchDischarges}
 		}
-		if cone.attestationDischarges != "" {
-			state.attestationDischarges = map[string]string{"example.com/pinned": cone.attestationDischarges}
+		if composed.AttestationDischarges != "" {
+			state.attestationDischarges = map[string]string{"example.com/pinned": composed.AttestationDischarges}
 		}
 		pkgs, err := testenv.ParseAndTypecheckInPlace(
 			dir,
@@ -935,7 +1019,7 @@ func inMemoryRunScanVouched(scope, dir string, vouches map[string]bool, pkgPaths
 		if err != nil {
 			return nil, nil, false
 		}
-		return scan, map[string]dynamicStateFact{"example.com/pinned": localFact}, true
+		return scan, map[string]dynstate.Fact{"example.com/pinned": localFact}, true
 	}
 	pkgs, _, ok := parseAndTypecheckModuleDir(dir, pkgPaths...)
 	if !ok {

@@ -128,3 +128,17 @@ func TestRunnerContainsPreparedProcessGroupDescendants(t *testing.T) {
 		})
 	}
 }
+
+func TestDrainCollectedZeroWaitDelayDoesNotArmImmediateTimer(t *testing.T) {
+	copied := make(chan error, 2)
+	closed := false
+	go func() {
+		time.Sleep(15 * time.Millisecond)
+		copied <- nil
+		copied <- nil
+	}()
+	copyErr, timedOut := drainCollected(copied, 0, func() { closed = true })
+	if copyErr != nil || timedOut || closed {
+		t.Fatalf("drainCollected(wait=0) = (%v, timedOut=%v, closed=%v), want (nil, false, false)", copyErr, timedOut, closed)
+	}
+}
