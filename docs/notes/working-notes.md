@@ -422,19 +422,21 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
     - `invocation "race:leaf"`: **`401 served, 3 executed, 3 uncacheable, 0 no-outcome`** (`100%` of the `401` cacheable `race:leaf` subjects across all 25 leaf packages served fresh from cache!).
     - `invocation "race:core"`: **`20 served, 694 executed, 1 uncacheable, 0 no-outcome`** — the `20` solo `Fuzz*` targets (`10` in `gofresh`, `10` in `gofresh/internal/closure`) served fresh from cache, while **`693` cacheable batch subjects (`361` in `gofresh`, `332` in `gofresh/internal/closure`) failed `check_verdict` and re-executed** due to ephemeral `/tmp/stipulator-retained-<id>/package.test` in `RuntimeInputs` (see Issue G below)!
 
-### 3. `gomutant` Full Unscoped `stipulator check` (`/tmp/gomutant-full-check-p1.jsonl`, `/tmp/gomutant-full-check-p2.jsonl` — IN PROGRESS)
-- **Pass 1 Live Trace Observations**:
-  - `resolve:serve_selection`: `25.4s` (`1,074` records, `0` served).
-  - `resolve:opening_capture`: **`1 ms`** (`1,074` unserved) — unlike `gofresh` (`32.8s`), `gomutant` uses `plain_witness: true` (`build_flags: []`, matching `new_served`'s `build_flags: []`) and has no `ClosureStrategy` non-callable bindings, so `reuseCheckedCapture` succeeded in `1 ms`!
-  - `resolve:publish_selection`: `1,074` installed (`moved: 0`).
+### 3. `gomutant` Full Unscoped `stipulator check` (`/tmp/gomutant-full-check-p1.jsonl`, `/tmp/gomutant-full-check-p2.jsonl` — PASS 1 COMPLETED, PASS 2 IN PROGRESS)
+- **Pass 1 Summary (COMPLETED)**:
+  - `check: pass`, total **`34m48s`** (`compile 100ms, discovery 8m42.4s, execution 26m5.5s, verification 100ms, coverage 0s`, resident `6.8 GiB`, peak **`11.5 GiB`** at execution's exit).
+  - `resolution`: `0 served from records, 1,074 resolved typed`, **`1,074` records published under `"default"`** (`moved: 0`; `resolve:serve_selection` `25.4s`, `resolve:opening_capture` **`1 ms`** because `plain_witness: true` has `build_flags: []` matching `new_served` and no `ClosureStrategy` bindings).
   - `witness:capture_native_generation`: took **`485,878 ms` (`8m05.8s`)** (`subjects: 1069, candidates: 996, solos: 1`) because `996` out of `1,069` subjects failed with `SharedDynamicStateCause` (`github.com/greatliontech/gomutant.embeddedGuidance is mutated`, `internal/engine.goCommandObserver is mutated`, `internal/engine.goRunner escapes`, `internal/cmd.productionSeams is mutated`, `internal/mcpserver.productionSeams is mutated`), forcing `soloSession` (`SingleSubjectExecution`) to run `dischargeUnreachableCulprits` across all `1,069` declared symbols in 17 RTA batches!
-  - First 16 completed packages in `plain` execution:
-    - `internal/windowcost`: `3` records, `0` uncacheable.
-    - `internal/guidance`: `15` records, `2` uncacheable.
-    - `internal/engine`: `2` records (the 2 solo `Fuzz*` targets), **`157` uncacheable** (`prep_ms: 64,533 ms` = `1m04.5s`, `binary_ms: 82,924 ms` = `1m22.9s`).
-    - `internal/cmd`: `2` records (the 2 solo `Fuzz*` targets), rest uncacheable.
-    - `internal/mcpserver`: `1` record, rest uncacheable.
-    - All other 11 completed packages (`internal/gitcmd`, `internal/shortgates`, `internal/trace`, `internal/integrationtest`, `internal/fixtureguard`, `internal/testsuite`, `internal/toolversion`, `internal/contextio`, `internal/resident`, `internal/gitref`, `cmd/gomutant`): **`0` records, 100% uncacheable**.
+  - `witnessed`: **`1 served fresh, 1,068 executed, 1,033 uncacheable`** (`only 35` records persisted across all 17 packages: `3` in `internal/windowcost`, `15` in `internal/guidance`, `2` in `internal/engine`, `2` in `internal/cmd`, `1` in `internal/mcpserver`, `12` in `gomutant`, `0` in the other 11 packages!):
+    - `552` subjects (`gomutant`): `uncacheable: post-run validation: relative runtime input after working-directory change: analysisbudget_test.go` (plus `6`: `runtime input not covered by observation bracket: analysisbudget_test.go`).
+    - `155` subjects (`internal/engine`): `uncacheable: post-run validation: runtime input not covered by observation bracket: /usr/bin/ps`.
+    - `144` subjects (`internal/cmd`, `internal/gitref`, `internal/integrationtest`, `internal/fixtureguard`): `uncacheable: post-run validation: runtime input not covered by observation bracket: /usr/bin/git`.
+    - `134` subjects (`internal/cmd`): `uncacheable: post-run validation: runtime input not covered by observation bracket: /tmp/TestVersionSurfaces3187139984/001`.
+    - `14` subjects: `uncacheable: post-run validation: runtime input not covered by observation bracket: /usr/bin/sh`.
+    - `7` subjects: `uncacheable: post-run validation: reaches golang.org/x/sys/unix (external system call)`.
+    - `5` subjects: `uncacheable: post-run validation: reaches testing.Setenv (process or path mutation)`.
+  - `testlog.extract.done` & `unit.close.done` on `github.com/greatliontech/gomutant` (`564` subjects):
+    - `/tmp/stipulator-testlog-2656573119.txt` grew to **`2.1 GiB`**; `testlog.extract.done` took **`24,017 ms` (`24.0s`)** (`path_count: 653, env_count: 26, unverifiable: true`), and `unit.close.done` took **`25,218 ms` (`25.2s`)**, driving peak RSS to **`11.5 GiB`**.
   - **Root Cause of `startup effect: reaches non-standard assembly` in `gomutant` (`internal/gitref`, `cmd/gomutant`, `internal/cmd`, `internal/engine`, `internal/mcpserver`, `internal/testsuite`)**:
     - `asmverify.package.done` in `/tmp/gomutant-full-check-p1.jsonl` shows:
       - `golang.org/x/sys/cpu`: `ok: true, funcs: 2, sfiles: 1`
@@ -602,6 +604,21 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
      - In `rootedGroup` (`rooted.go:139`), `attributedReachableSets` is called on `prog` without first initializing `getSummary(ctx, h.SelectionAudited(), h.source.pureDelegates, prog)`.
      - Inside `provenanceBFSWithCandidates` (`attribution_provenance.go:1865-1885`), `sum := lookupSummaryForProg(prog, audited)` therefore returns **`nil`**, leaving `fp.summary = nil`, `fp.inProgramSites = false`, `fp.programSites = nil`, and `fp.programValueRef = nil`!
      - Worse, `getProvFP()` is local to `provenanceBFSWithCandidates` (called 3 times per subject across `1,069` subjects = `3,207` calls) and calls `fp.resetDynamicMemos()` on every call, even though `getProvFP()` has `fp.subjectRoot == nil` and `fp.enumRoot == nil` (100% subject-independent!).
+
+#### Issue K (`gofresh/internal/runtimeinput/testlog.go` & `stipulator/internal/backends/golang/retainedenv.go`, `nativeexecution.go`): `chdir` Elision Omission (`t.Chdir(t.TempDir())`), Sticky `cwdChanged` Across Restored `t.Chdir`, and Missing `ScratchRoot` / Delayed `logPath` Cleanup in `stipulator`
+- **Evidence from `/tmp/gomutant-full-check-p1.jsonl`**:
+  1. **`134` subjects in `gomutant/internal/cmd` failed post-run validation with `runtime input not covered by observation bracket: /tmp/TestVersionSurfaces3187139984/001`**:
+     - `TestVersionSurfaces` (`gomutant/internal/cmd/version_test.go:22-26`) creates `dir := t.TempDir()` and calls `t.Chdir(dir)`.
+     - In `fromTestLog` (`gofresh/internal/runtimeinput/testlog.go:392, 417, 486-507`), `case "open":` and `case "stat":` both check `if !ambiguousParent && !relativeAfterChdir && classifier.elidesUnambiguous(p) { continue }`, which elides `testing.T.TempDir()` paths (`testTempRoot`).
+     - However, `case "chdir":` (`lines 493-507`) **never calls `classifier.elidesUnambiguous(p)`**! Instead it calls `classifier.classify(p)` and inserts `/tmp/TestVersionSurfaces3187139984/001` into `m.Paths` (`line 501`), which then fails `coverage.covers(id)` (`line 549`) with `runtime input not covered by observation bracket: /tmp/TestVersionSurfaces3187139984/001`!
+  2. **`552` subjects in `github.com/greatliontech/gomutant` failed post-run validation with `relative runtime input after working-directory change: analysisbudget_test.go`**:
+     - When a test in `github.com/greatliontech/gomutant` calls `t.Chdir(dir)`, `testlog.go:508-509` sets `cwd = p` and `cwdChanged = true`.
+     - When `t.Chdir`'s cleanup runs at the end of that test, `os.Chdir(packageDir)` logs `chdir /home/nikolas/repos/github.com/greatliontech/gomutant`, restoring `cwd` to `packageDir`, **but `cwdChanged` remains `true` for all subsequent tests in the batch**!
+     - Any subsequent test in the batch that opens/stats a relative path (like `"analysisbudget_test.go"`) while `cwd == packageDir` hits `relativeAfterChdir := cwdChanged && !filepath.IsAbs(name)` (`lines 386, 410-412`) and fails with `"relative runtime input after working-directory change: analysisbudget_test.go"`.
+  3. **`stipulator` Omits `ScratchRoot` on `ProcessDescription` (`retainedenv.go:28-64`, `nativeexecution.go:286-289`) and Delays `logPath` Removal Until Whole-Invocation Exit (`nativeexecution.go:58-90`, `execute.go:313-317, 548`)**:
+     - Unlike `gomutant` (which allocates a per-execution `ScratchRoot`, sets `TMPDIR` in the child environment, and passes `ScratchRoot` on `gofresh.ProcessDescription`), `stipulator` leaves `ScratchRoot: ""` and `TMPDIR` at `/tmp`. As a result, `os.CreateTemp("", ...)` files created by tests or child `go` commands are not elided under `ScratchRoot`, and leaked temp files accumulate in `/tmp` (`tmpfs` RAM — `35 GiB` used in `/tmp`!).
+     - In `finishNativeRun` (`nativeexecution.go:58-90`), after `closeNativeProcess(ctx, a.unit)` finishes reading `a.logPath`, `a.logPath` (`2.1 GiB` for `gomutant`, `957 MiB` for `gofresh`) is NOT removed immediately — it is retained in `/tmp` (`tmpfs` RAM) until `executeSelection` exits (`execute.go:548`)!
+
 
 
 
