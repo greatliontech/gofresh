@@ -392,3 +392,84 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
        - **Finding 2 (`MEDIUM`, `introduced`, FIXED)**: Keyed `walkFrame.stackDepth` by `carrierMemoKey{value, named}` (`map[carrierMemoKey]int`) across `freshparam.go`, `dispatch_targets.go`, and `dynamic_walk.go`, and added regression test `CarrierCycleSliceUnclosedField` (`observability_scan_test.go`).
        - **Finding 3 (`LOW`, `introduced`, FIXED)**: Gated `outDone = fp.rootDone` on `fp.baseCarrierNamed == nil && fp.rootDone != nil` in `withProgramSites` (`freshparam.go:423-428`) and simplified `walkUserStructFieldDynamicValue` (`dynamic_walk.go:1545-1550`).
        - **Round 2 Verdict**: `ZERO FINDINGS`.
+
+## Full Unscoped `stipulator check` 4-Repo Evaluation (`v0.122.9`) — Live Trace Findings & Issues
+
+### 1. `pew` Full Unscoped `stipulator check` (`/tmp/pew-full-check-p1.jsonl`, `/tmp/pew-full-check-p2.jsonl`)
+- **Pass 1 Summary**:
+  - `check: pass`, total **`25m27s`** (`compile 0s, discovery 8m18.8s, execution 17m8.1s, verification 0s, coverage 0s`, resident `5.0 GiB`, peak **`10.0 GiB`** at execution's exit).
+  - `resolution`: `0 served from records, 555 resolved typed`, `555 records published under "default"`.
+  - `witnessed`: **`0 served fresh, 480 executed, 465 uncacheable`** (`only 15/480 cached` — in `internal/guidance`!).
+- **Pass 2 Summary (Warm Zero-Edit — in progress)**:
+  - `discovery`: dropped from `8m18.8s` (`3.9 GiB` peak) to **`3.9s` (`180 MiB` peak)** — `555/555` resolution records served!
+  - `execution`: re-executed **`465/480` subjects in `13` packages** because `465` subjects were marked `uncacheable` in Pass 1!
+
+### Concrete Architectural, Performance & Incremental-Reuse Bottlenecks Identified So Far
+
+#### Issue A (`gofresh/internal/closure`): `inProgScope` and `inCycleScope` Completely Disabled Whenever `reach.enumeratedRoot` Is True (`freshparam.go:494-495`, `dynamic_walk.go:249-250`, `dispatch_targets.go:120`)
+- **Evidence from `/tmp/pew-full-check-p1.jsonl`**:
+  - During `PrepareTestUnit` (`18:17:23 .. 18:23:27`), `ComputeObservabilityBatch` took **`6m04s`** across `273` test subjects in `pew/cmd/pew` (~`1.0s` per subject), emitting **`685,000+` `closure.invoke.unclosed`** and **`500,000+` `closure.callee.reject`** events (`74,954` on `context.WithTimeout`, `55,446` on `(*Session).beginOperation`, `36,768` on `go/types.Unalias`, `25,361` on `gofresh.analysisBound`, `16,877` on `pew.commandContext`, `15,863` on `(reflect.Value).Type`).
+- **Root Cause**:
+  1. In `newFreshParamAnalysis` (`internal/closure/freshparam.go:494-501`):
+     ```go
+     if len(reach.enumeratedRootSites) > 0 || len(reach.enumeratedFieldStores) > 0 || reach.enumeratedRoot {
+         fp.enumRoot = reach.subjectRoot
+         ...
+     }
+     ```
+     Whenever a subject widens (`reach.enumeratedRoot == true`, which holds for all 273 test subjects in `pew/cmd/pew` due to `(*openpgp/packet.Config).Now`), `fp.enumRoot` is set to `reach.subjectRoot` (`!= nil`) while `fp.enumOnly` is `false`.
+  2. In `dynamic_walk.go:249-250` and `dispatch_targets.go:120`:
+     ```go
+     inCycleScope := (fp.enumOnly || fp.enumRoot == nil) && (fp.inProgramSites || fp.inFieldStore || fp.enumOnly) && value.Parent() != fp.enumRoot && value.Parent() != fp.subjectRoot
+     inProgScope := outsideCallee && inCycleScope && !fp.ignoreContextValuePayload && fp.enumRecvNamed == nil
+     ```
+     Because `fp.enumOnly` is `false` and `fp.enumRoot != nil`, **`(fp.enumOnly || fp.enumRoot == nil)` is `false` for the entire subject walk**!
+  3. Consequently, **`inProgScope` is `false` for 100% of all widened subjects**, completely disabling `summary.progClosedDone`, `summary.progCarrierDone`, `summary.progInvokeTargets`, `summary.progInvokeFailed`, `summary.progTypesMemo`, `summary.progTypesFailed`, `summary.progFuncsMemo`, and `summary.progFuncsFailed` across all 273 subjects! Every subject re-walks the entire 462-package SSA program (`gofresh`, `go-x-tools`, `go-git`, `ProtonMail/go-crypto`, `golang.org/x/crypto/ssh`) from scratch!
+  4. Furthermore, why did `inCycleScope` / `inProgScope` check `(fp.enumOnly || fp.enumRoot == nil)` and `fp.enumRecvNamed == nil`?
+     - When `fp.inProgramSites || fp.inFieldStore` is true (i.e., we have already crossed into whole-program callers `withProgramSites` or whole-program struct field stores) AND `!myUsedSubject` (the sub-walk never touched `fp.enumRoot` or `fp.subjectRoot`), the result is 100% independent of `fp.enumRoot` and `fp.enumRecvNamed` (as long as `fp.enumRecvNamed` was not matched, which is already tracked by `*fp.usedSubject = true` at `callee_return.go:309`, `dynamic_walk.go:126,245,511,1364,1579`)!
+
+#### Issue B (`gofresh/internal/closure`): `contextCancelMethodFP` / `withIgnoreContextValuePayload` Wipes All Memos (`resetDynamicMemos()`) and Disables `inProgScope` on Every `ctx.Err()` / `ctx.Done()` / `ctx.Deadline()` Site (`dispatch_targets.go:118-120, 952-974`, `callee_return.go:66, 146`)
+- **Evidence from `/tmp/pew-full-check-p1.jsonl`**:
+  - Within a single subject walk, `compareObservations -> (context.Context).Err` failed `8,145` times (`~30` times per subject), `(*Snapshot).ensureObservable -> (context.Context).Err` failed `4,770` times, `movedBracketRoot -> (context.Context).Err` failed `4,212` times, and `(*Session).beginOperation` failed `55,446` times (`~203` times per subject).
+- **Root Cause**:
+  1. In `closedInvokeTargets` (`dispatch_targets.go:118`):
+     `fp = contextCancelMethodFP(site, fp)` is called **before** checking `pFailed[site]` / `pTargets[site]` and `fp.invokeFailed[site]` / `fp.invokeTargets[site]`.
+  2. `withIgnoreContextValuePayload(fp)` (`dispatch_targets.go:952-967`) creates a local copy `copied := *fp` and calls **`copied.resetDynamicMemos()`**, allocating brand-new empty maps for `invokeTargets`, `invokeFailed`, `closedDone`, `carrierDone`, `typesMemo`, `typesFailed`, `funcsMemo`, `funcsFailed`.
+  3. Because `copied` has `ignoreContextValuePayload == true` and brand-new empty maps:
+     - `inProgScope` (`!fp.ignoreContextValuePayload`) is forced to `false`.
+     - `fp.invokeFailed[site]` / `fp.invokeTargets[site]` are always empty on entry to `closedInvokeTargets` for every `ctx.Err()` call, and any entries written at exit (`lines 167, 194`) are written to the throwaway local `copied` and immediately discarded when `closedInvokeTargets` returns!
+     - Inside the `ctx.Err()` receiver walk, all work done in `copied.closedDone` and `copied.carrierDone` is also discarded when `closedInvokeTargets` returns, so the next `ctx.Err()` call in the same function/subject re-walks the entire `context.Context` call chain from scratch!
+
+#### Issue C (`gofresh/internal/closure`): `(*Session).beginOperation(ctx)` Rejected on `tupleIndex == 0` (`gate: "struct_arg_walk"`) Because Tuple-Return Closure at `tupleIndex == 1` Captures `s *Session` (`callee_return.go:288-303`, `attribution_harness.go:279-348`)
+- **Evidence from `/tmp/pew-full-check-p1.jsonl`**:
+  - `(*github.com/greatliontech/gofresh.Session).beginOperation` is rejected `55,446` times on `tuple_index: 0` with `gate: "struct_arg_walk"`, which then causes `compareObservations`, `ensureObservable`, `movedBracketRoot`, `verifyToolchainSurfaceAndDelegatesWithIO`, and `verifyListedPackageWithIOAndSalt` to fail `closedInvokeTargets` on `(context.Context).Err` (`eval_recv`).
+- **Root Cause**:
+  - `(*Session).beginOperation(ctx context.Context) (context.Context, func(*error))` (`gofresh/progress.go:89-113`) returns `(ctx, finish)`:
+    - Result `0` (`tupleIndex == 0`) is `ctx` or `context.WithValue(ctx, opAccountKey{}, acc)`. Receiver `s *Session` only has a carrier-free nil check `if s.progress == nil` on the path to result `0`.
+    - Result `1` (`tupleIndex == 1`) is a closure `func(err *error)` (`*ssa.MakeClosure`) that captures `s *Session` and is returned directly at `ret.Results[1]`.
+  - When `calleeResultDynamicValue` evaluates `beginOperation` for **`tupleIndex == 0`** (`context.Context`), `paramMaySupplyDynamicSeen` (`attribution_harness.go:279-348`) and `calleeParamMayAffectResult` (`callee_return.go:616-721`) inspect all referrers of `s` (`callee.Params[0]`) without considering `tupleIndex`. Because `s` is captured by `*ssa.MakeClosure` (even though that `*ssa.MakeClosure`'s only referrer in `beginOperation` is `*ssa.Return` at `Results[1]`, never `Results[0]` and never called inside `beginOperation`), `paramMaySupplyDynamicSeen` returns `true` and requires walking `s *Session` (`struct_arg_walk`), which fails because `Session` holds unclosed fields.
+
+#### Issue D (`gofresh/scan.go`, `gofresh/view.go`): Triple `dynstate.FactOf` Recomputation & Unscoped `dischargeUnreachableCulprits` in `SingleSubjectExecution`
+- **Evidence from `/tmp/pew-full-check-p1.jsonl`**:
+  1. `dynstate.FactOf` ran `637` times across `213` unique packages (`110.29s` total):
+     - `scope.Facts()` (`internal/toolchain/toolchain.go`) includes `|package-process-execution` when `PackageProcess == true`, causing `dynamicstate` disk cache misses between `GeneralExecution` (`resolve:new_served`) and `PackageExecution` (`witness:prepare_witness_groups`), even though `dynstate.FactOf(audited, pkg, singleSubject)` does not depend on `packageProcess` (`packageProcess` only affects `dynstate.Compose`).
+     - Similarly, `SingleSubjectExecution` (`soloSession`) misses the `dynamicstate` cache again because `singleSubject` gates `SingleSubjectSites` population in `FactOf`. Always populating `SingleSubjectSites` in `FactOf` makes `dynstate.Fact` independent of both `PackageProcess` and `SingleSubjectExecution`.
+     - For mutable-local packages (`cmd/pew`), `observeSnapshot` calls `observeView` twice (`first` and `second`), running `dynstate.FactOf` twice per snapshot (`6` times = `16.86s`) with no memoization keyed by the package's source/file digest.
+  2. In `scanViewSubjectsWithMemo` (`gofresh/scan.go:161-168`), `dischargeUnreachableCulprits` (`scan.go:463-506`) iterates over `for subject := range scan.known` (**all 616 declared symbols** in `cmd/pew`, running 10 batches of 64 subjects = **`4m40.6s`**), AND inside `provenanceBFSWithCandidates` (`attribution_provenance.go:1860`), `getProvFP()` calls `fp.resetDynamicMemos()` on **every single subject (`616` times)** instead of sharing the non-subject-dependent memos across subjects in the batch.
+
+#### Issue E (`pew` & `stipulator` Post-Run Validation Uncacheable Witness Causes — `465/480` Uncacheable in `pew` Pass 1)
+- **Evidence from `task-31210.log` (`pew` Pass 1)**:
+  - Out of `480` executed test subjects in `pew`, **`465` were marked `uncacheable`** in Pass 1 (causing Pass 2 warm `stipulator check` to re-execute `465/480` subjects across all 13 packages!):
+    1. **`272` subjects (`cmd/pew`)**: `uncacheable: post-run validation: external directory input: /home/nikolas/.cache/gofresh` (and `ProtonMail/go-crypto/openpgp/internal/algorithm.CipherById escapes writable`).
+       - Why did `cmd/pew` tests access `/home/nikolas/.cache/gofresh`? Because tests in `cmd/pew` invoke `pew` -> `gofresh` without isolating `XDG_CACHE_HOME` (or `gofresh`'s own cache root `~/.cache/gofresh` is not recognized as an internal/scratch cache root when `pew` tests run `gofresh`).
+    2. **`55 + 38 = 93` subjects**: `uncacheable: post-run validation: runtime input not covered by observation bracket: /tmp/stipulator-retained-530510267/package.test` and `/tmp/stipulator-retained-689746490/package.test`.
+       - `stipulator` builds the retained test binary in `/tmp/stipulator-retained-<random>/package.test`. When tests read their own executable path (`os.Executable()`), `testlog` records `open /tmp/stipulator-retained-.../package.test` or `stat /tmp/stipulator-retained-.../package.test`, which is outside the package's observation bracket!
+    3. **`43` subjects**: `uncacheable: post-run validation: reaches go:linkname (opaque linkage)`.
+    4. **`17` subjects**: `uncacheable: post-run validation: runtime input not covered by observation bracket: /usr/bin/git`.
+    5. **`11` subjects**: `uncacheable: post-run validation: package graph shares mutated dynamic state: github.com/google/pprof/profile: github.com/google/pprof/profile.functionDecoder escapes writable`.
+    6. **`11` subjects**: `uncacheable: post-run validation: runtime input not covered by observation bracket: internal`.
+    7. **`5` subjects**: `uncacheable: post-run validation: reaches testing.Setenv (process or path mutation)`.
+    8. **`13` more subjects across 6 reasons** (to be extracted from `/tmp/pew-full-check-p1.jsonl`).
+- ** Issue F (`gofresh/internal/cachefile`): `~/.cache/gofresh` 2 GiB Ceiling Evictions Mid-Run (`cache.prune`)**:
+  - `/tmp/pew-full-check-p1.jsonl` shows `cache:cache.prune` firing 4 times during `pew` Pass 1 (`18:13:32`, `18:14:26`, `18:16:15`, `18:16:29`) because `~/.cache/gofresh` exceeded `DefaultMaxBytes` (`2 GiB`), with single `dynamicstate` bucket files reaching `17.3 MiB`.
+
