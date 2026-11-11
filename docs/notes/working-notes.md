@@ -400,9 +400,27 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
   - `check: pass`, total **`25m27s`** (`compile 0s, discovery 8m18.8s, execution 17m8.1s, verification 0s, coverage 0s`, resident `5.0 GiB`, peak **`10.0 GiB`** at execution's exit).
   - `resolution`: `0 served from records, 555 resolved typed`, `555 records published under "default"`.
   - `witnessed`: **`0 served fresh, 480 executed, 465 uncacheable`** (`only 15/480 cached` — in `internal/guidance`!).
-- **Pass 2 Summary (Warm Zero-Edit — in progress)**:
-  - `discovery`: dropped from `8m18.8s` (`3.9 GiB` peak) to **`3.9s` (`180 MiB` peak)** — `555/555` resolution records served!
-  - `execution`: re-executed **`465/480` subjects in `13` packages** because `465` subjects were marked `uncacheable` in Pass 1!
+- **Pass 2 Summary (Warm Zero-Edit — COMPLETED)**:
+  - `check: pass`, total **`10m25.5s`** (`compile 0s, discovery 3.9s, execution 10m21.5s, verification 100ms, coverage 0s`, resident `4.3 GiB`, peak **`4.3 GiB`** at execution's exit).
+  - `discovery`: dropped from `8m18.8s` (`3.9 GiB` peak) to **`3.9s` (`180 MiB` peak)** — **`555/555` resolution records served from records, `0` resolved typed**!
+  - `witnessed`: **`15 served fresh, 465 executed, 465 uncacheable`** (`15/15` cacheable records from `internal/guidance` served fresh; `465/480` subjects in `13` packages re-executed because they were marked `uncacheable` in Pass 1, with `9m47s` of the `10m21.5s` spent running `cmd/pew`'s `package.test` binary and `37s` spent in `cmd/pew` `unit.Close`).
+  - `GOFRESH_TRACE=all` Pass 2 stats (`/tmp/pew-full-check-p2.jsonl`): `0` `closure.invoke.unclosed`, `0` `closure.callee.reject`, `0` `tier2.subject.done`, `0` `dynstate.factof.done` (`100%` disk memo hits on all static analysis phases!).
+
+### 2. `gofresh` Full Unscoped `stipulator check` (`/tmp/gofresh-full-check-p1.jsonl`, `/tmp/gofresh-full-check-p2.jsonl`)
+- **Pass 1 Summary**:
+  - `check: pass`, total **`24m19.3s`** (`compile 100ms, discovery 3m36.8s, execution 20m42.2s, verification 100ms, coverage 0s`, resident `1.3 GiB`, peak **`3.9 GiB`** at execution's exit).
+  - `resolution`: `0 served from records, 1200 resolved typed`; `resolution published under "default": 0 records; skipped 1200 moved between the opening and closing capture` (caused by our commit to `docs/notes/working-notes.md` in `gofresh` at `18:46:40Z` during the Pass 1 run).
+  - `witnessed`: **`2 served fresh, 1116 executed, 4 uncacheable`**:
+    - `invocation "race:core"`: `0 served, 714 executed, 1 uncacheable, 0 no-outcome` (`342` records persisted in `gofresh/internal/closure`, `371` records persisted in `gofresh`).
+    - `invocation "race:leaf"`: `2 served, 402 executed, 3 uncacheable, 0 no-outcome`.
+    - `4 uncacheable: random-seeded property witness: executes every run, never served`.
+  - `witness cache`: **`4508 observed refusals`** (`WITNESS_CACHE_REFUSAL_CAUSE_RUNTIME_MANIFEST: runtimeinputs: unsupported manifest version 2`).
+- **Pass 2 Summary (Warm Zero-Edit — COMPLETED)**:
+  - `check: pass`, total **`20m50.9s`** (`compile 100ms, discovery 1m20.4s, execution 18m56.2s, verification 34.3s, coverage 0s`, resident `1.2 GiB`, peak **`3.3 GiB`** at execution's exit).
+  - `resolution`: `0 served from records, 1200 resolved typed`, **`1200 records published under "default"`** (`moved: 0`).
+  - `witnessed`: **`421 served fresh, 697 executed, 4 uncacheable`**:
+    - `invocation "race:leaf"`: **`401 served, 3 executed, 3 uncacheable, 0 no-outcome`** (`100%` of the `401` cacheable `race:leaf` subjects across all 25 leaf packages served fresh from cache!).
+    - `invocation "race:core"`: **`20 served, 694 executed, 1 uncacheable, 0 no-outcome`** — the `20` solo `Fuzz*` targets (`10` in `gofresh`, `10` in `gofresh/internal/closure`) served fresh from cache, while **`693` cacheable batch subjects (`361` in `gofresh`, `332` in `gofresh/internal/closure`) failed `check_verdict` and re-executed** due to ephemeral `/tmp/stipulator-retained-<id>/package.test` in `RuntimeInputs` (see Issue G below)!
 
 ### Concrete Architectural, Performance & Incremental-Reuse Bottlenecks Identified So Far
 
@@ -449,12 +467,16 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
     - Result `1` (`tupleIndex == 1`) is a closure `func(err *error)` (`*ssa.MakeClosure`) that captures `s *Session` and is returned directly at `ret.Results[1]`.
   - When `calleeResultDynamicValue` evaluates `beginOperation` for **`tupleIndex == 0`** (`context.Context`), `paramMaySupplyDynamicSeen` (`attribution_harness.go:279-348`) and `calleeParamMayAffectResult` (`callee_return.go:616-721`) inspect all referrers of `s` (`callee.Params[0]`) without considering `tupleIndex`. Because `s` is captured by `*ssa.MakeClosure` (even though that `*ssa.MakeClosure`'s only referrer in `beginOperation` is `*ssa.Return` at `Results[1]`, never `Results[0]` and never called inside `beginOperation`), `paramMaySupplyDynamicSeen` returns `true` and requires walking `s *Session` (`struct_arg_walk`), which fails because `Session` holds unclosed fields.
 
-#### Issue D (`gofresh/scan.go`, `gofresh/view.go`): Triple `dynstate.FactOf` Recomputation & Unscoped `dischargeUnreachableCulprits` in `SingleSubjectExecution`
-- **Evidence from `/tmp/pew-full-check-p1.jsonl`**:
-  1. `dynstate.FactOf` ran `637` times across `213` unique packages (`110.29s` total):
-     - `scope.Facts()` (`internal/toolchain/toolchain.go`) includes `|package-process-execution` when `PackageProcess == true`, causing `dynamicstate` disk cache misses between `GeneralExecution` (`resolve:new_served`) and `PackageExecution` (`witness:prepare_witness_groups`), even though `dynstate.FactOf(audited, pkg, singleSubject)` does not depend on `packageProcess` (`packageProcess` only affects `dynstate.Compose`).
+#### Issue D (`gofresh/scan.go`, `gofresh/view.go`, `stipulator/internal/backends/golang`): 6x `dynstate.FactOf` Recomputation & Unscoped `dischargeUnreachableCulprits`
+- **Evidence from `/tmp/pew-full-check-p1.jsonl` & `/tmp/gofresh-full-check-p1.jsonl`**:
+  1. In `pew` Pass 1, `dynstate.FactOf` ran `637` times across `213` unique packages (`110.29s` total). In `gofresh` Pass 1 (`3m36.8s` discovery), `dynstate.FactOf` ran **`6` times** on `gofresh/internal/closure` (`105,414.9 ms` = `1m45s`, `~17.5s` each) and **`6` times** on `gofresh` (`20,922.4 ms` = `20.9s`, `~3.5s` each), totaling **`126.3s` (`2m06s`)**:
+     - `stipulator check` opened 3 separate sessions with 3 distinct `guards_buildconfig` / `scope` keys:
+       1. `resolve:new_served`: `build_flags: []` (`GeneralExecution`), `guards_buildconfig: b4444cb9c8832c67ca6b647d3b4697f4` -> runs `observeSnapshot` (`2` passes of `observeView`).
+       2. `resolve:opening_capture`: `build_flags: ["-tags=race"]` (`GeneralExecution`), `guards_buildconfig: c67f40b984cc6f1200cb27fb8632d770` -> runs `observeSnapshot` (`2` passes of `observeView`).
+       3. `witness:group_snapshot`: `build_flags: ["-race"]` (`PackageExecution`), `guards_buildconfig: 2a6de3e57d43ffc81c8c93fcbdd46261` -> runs `observeSnapshot` (`2` passes of `observeView`).
+     - `scope.Facts()` (`internal/toolchain/toolchain.go`) includes `|package-process-execution` when `PackageProcess == true`, causing `dynamicstate` disk cache misses between `GeneralExecution` and `PackageExecution`, even though `dynstate.FactOf(audited, pkg, singleSubject)` does not depend on `packageProcess` (`packageProcess` only affects `dynstate.Compose`).
      - Similarly, `SingleSubjectExecution` (`soloSession`) misses the `dynamicstate` cache again because `singleSubject` gates `SingleSubjectSites` population in `FactOf`. Always populating `SingleSubjectSites` in `FactOf` makes `dynstate.Fact` independent of both `PackageProcess` and `SingleSubjectExecution`.
-     - For mutable-local packages (`cmd/pew`), `observeSnapshot` calls `observeView` twice (`first` and `second`), running `dynstate.FactOf` twice per snapshot (`6` times = `16.86s`) with no memoization keyed by the package's source/file digest.
+     - For `MutableLocalPackage` packages (`gofresh`, `gofresh/internal/closure`, `pew/cmd/pew`), `observeSnapshot` calls `observeView` twice (`first` and `second`) and skips disk/session memoization in `scanViewSubjectsWithMemo` (`scan.go`), re-running `dynstate.FactOf` twice per snapshot even when the package's source file digests did not change between `first` and `second`!
   2. In `scanViewSubjectsWithMemo` (`gofresh/scan.go:161-168`), `dischargeUnreachableCulprits` (`scan.go:463-506`) iterates over `for subject := range scan.known` (**all 616 declared symbols** in `cmd/pew`, running 10 batches of 64 subjects = **`4m40.6s`**), AND inside `provenanceBFSWithCandidates` (`attribution_provenance.go:1860`), `getProvFP()` calls `fp.resetDynamicMemos()` on **every single subject (`616` times)** instead of sharing the non-subject-dependent memos across subjects in the batch.
 
 #### Issue E (`pew` & `stipulator` Post-Run Validation Uncacheable Witness Causes — `465/480` Uncacheable in `pew` Pass 1)
@@ -485,9 +507,47 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
        - **`github.com/greatliontech/pew/internal/trace` (`5` subjects)**:
          - `2` subjects failed `observability` with `interface invoke outside RTA: github.com/greatliontech/pew/internal/trace.emitSlow dispatches context.Context.Value` / `WithFilteredSink dispatches context.Context.Value` / `emitSlow dispatches Sink.Emit`.
 
-#### Issue F (`gofresh/internal/runtimeinput` & `gofresh/unit.go`): `unit.Close` Takes `37.0s` on `pew/cmd/pew` (`testlog.extract.done` `26.3s` + Duplicate Disk Cache Reloads) & `~/.cache/gofresh` 2 GiB Evictions (`cache.prune`)
-- **Evidence from `/tmp/pew-full-check-p1.jsonl`**:
-  1. At `18:33:51`, `runtimeinput:testlog.extract.done` on `pew/cmd/pew` took **`26,345 ms` (`26.3s`)** (`path_count: 5950, unverifiable: true`) because `cmd/pew` tests invoked `gofresh` against `/home/nikolas/.cache/gofresh`, logging thousands of reads/stats of multi-megabyte cache files in `testlog.txt`, and `testlog` extraction hashed all `5,950` paths sequentially on disk even after encountering an unbracketed external directory (`/home/nikolas/.cache/gofresh`).
-  2. Between `18:33:51` and `18:34:01` (`10s`), `unit.Close` (`Validate` + `Check`) performed **`1,908` `cache.load` and `1,596` `closure.memo.load`** disk reads to re-verify facts already held in the `Snapshot`.
-  3. `/tmp/pew-full-check-p1.jsonl` shows `cache:cache.prune` firing 4 times during `pew` Pass 1 (`18:13:32`, `18:14:26`, `18:16:15`, `18:16:29`) because `~/.cache/gofresh` exceeded `DefaultMaxBytes` (`2 GiB`), with single `dynamicstate` bucket files reaching `17.3 MiB`.
+#### Issue F (`gofresh/internal/runtimeinput/testlog.go` & `stipulator/internal/backends/golang/nativeexecution.go`): Multi-Hundred-MiB `testlog.txt` Allocation/Parsing, Leaked `/tmp` Artifacts, and `unit.Close` Bottlenecks
+- **Evidence from `/tmp/pew-full-check-p1.jsonl` & `/tmp/gofresh-full-check-p1.jsonl`**:
+  1. During `gofresh` Pass 1:
+     - `gofresh` `package.test` generated a **`957 MiB` (`8,487,316` lines)** `/tmp/stipulator-testlog-2429520621.txt` (`testlog.extract.done`: `10,837 ms` = `10.8s`, `path_count: 345`, `env_count: 18`).
+     - `gofresh/internal/closure` `package.test` generated a **`343 MiB` (`3,943,805` lines)** `/tmp/stipulator-testlog-3721028677.txt` (`testlog.extract.done`: `3,962 ms` = `4.0s`, `path_count: 2`, `env_count: 5`).
+     - `fromTestLog` (`internal/runtimeinput/testlog.go:342-350`) reads the entire `957 MiB` file into memory (`os.ReadFile`), calls `bytes.Split(log, []byte{'\n'})` (allocating an `8.5M`-element `[][]byte` slice = `204 MiB` of slice headers on top of the `957 MiB` buffer, driving peak RSS to `3.9 GiB`), and runs `applyTestLogLine` (`filepath.Clean` + map lookups) `8.5M` times without streaming `bufio.Scanner` or deduplicating `(cwd, op, arg)` lines before path resolution.
+  2. `/tmp` has **`487` leaked `/tmp/stipulator-testlog-*.txt` files** and **`2,974` leaked `/tmp/gofresh-inmem-pkg-*` directories** because `stipulator` (`nativeexecution.go:355`) creates `os.CreateTemp("", "stipulator-testlog-*.txt")` and never removes it after `unit.Close`.
+  3. On `pew/cmd/pew` (`18:33:51`), `testlog.extract.done` took **`26.3s`** (`path_count: 5950, unverifiable: true`), and `unit.Close` (`Validate` + `Check`) performed `1,908` `cache.load` and `1,596` `closure.memo.load` disk reads (`10s`), while `~/.cache/gofresh` hit 4 `cache.prune` evictions (`2 GiB` cap).
+
+#### Issue G (`gofresh/unit.go`, `gofresh/judgment.go`, `stipulator/internal/backends/golang/nativeexecution.go`, `retainedbuild.go`): Ephemeral `/tmp/stipulator-retained-<id>/package.test` Poisons `RuntimeInputs` and Causes `693/714` `race:core` Witnesses in `gofresh` Pass 2 to Re-Execute!
+- **Evidence from `/tmp/gofresh-full-check-p2.jsonl`**:
+  - In `gofresh` Pass 2 (`=== GOFRESH PASS 2 ===`), `401/404` `race:leaf` witnesses served fresh from cache, and `20/20` solo `Fuzz*` witnesses in `race:core` served fresh from cache, **but `693/694` batch subjects in `race:core` (`361` in `gofresh`, `332` in `gofresh/internal/closure`) missed the witness cache and re-executed (`18m56s`)**!
+  - `session:check_verdict` in `/tmp/gofresh-full-check-p2.jsonl` proves the exact cause:
+    - `361` subjects in `gofresh`: `status: "stale", reason: "runtimeinputs (moved: path /tmp/stipulator-retained-4188518620/package.test)"`
+    - `332` subjects in `gofresh/internal/closure`: `status: "stale", reason: "runtimeinputs (moved: path /tmp/stipulator-retained-4015067910/package.test)"`
+- **Three-Part Root Cause**:
+  1. **`stipulator` Retained Test Binary Path Not Excluded from `ProcessDescription` (`retainedbuild.go:51, 95`, `nativeexecution.go:286-289`)**:
+     - `stipulator` builds each package's retained test binary in `os.MkdirTemp("", "stipulator-retained-*")` (`retainedbuild.go:95`) and deletes that temporary directory in `retainedArtifact.Close()` (`retainedbuild.go:51`) as soon as the package finishes executing.
+     - During execution of `package.test`, the Go test binary (or `os.Executable()` / stack/symbol/DWARF inspection) stats/opens `/proc/self/exe` -> `/tmp/stipulator-retained-<id>/package.test`, which `GODEBUG=testlogfile` records.
+     - `prepareNativeAttempt` (`nativeexecution.go:286-289`) passes `ExcludePaths: leg.excludePaths` to `gofresh.ProcessDescription`, which does NOT include `artifact.Path` (or its parent `stipulator-retained-*` temp dir)!
+  2. **`gofresh` Attaches Unverifiable `RuntimeInputs` to Pure (`assume_pure: true`) Subjects and Discharges `rt.Unverifiable` at Publish Time Only to Fail on `rt.BracketMoved` After Temp Dir Deletion (`unit.go:475-504`, `judgment.go:338-375`)**:
+     - In `gofresh`, `.stipulator/policy.textproto` declares `assume_pure: true`, so `PureSubjects` includes all test subjects and `len(x.observed) == 0`.
+     - However, in `Unit.Close` (`unit.go:475-504`), because `x.process.Capture != ""` (`testlog`), `x.frame.ObserveInputs` still extracts `testlog.txt`, sees `/tmp/stipulator-retained-<id>/package.test` outside the observation bracket (`rt.Unverifiable == true`), and attaches `state.Manifest` (containing `/tmp/stipulator-retained-<id>/package.test`) to `Fingerprint.RuntimeInputs` for all `361` (`gofresh`) and `332` (`internal/closure`) batch subjects!
+     - During `Unit.Close`'s self-check (`decideAfterClosureObserved`, `judgment.go:338-375`), `/tmp/stipulator-retained-<id>/package.test` **still exists on disk** (`rt.BracketMoved == false`, `rt.Unverifiable == true`), and `if pure.accepted() { return Verdict{Status: Valid} }` (`line 369`) discharges `rt.Unverifiable`, allowing `publishPackage` to persist all `693` records with `/tmp/stipulator-retained-<id>/package.test` baked into `Fingerprint.RuntimeInputs`!
+     - Immediately after `publishPackage`, `retainedArtifact.Close()` deletes `/tmp/stipulator-retained-<id>/package.test`.
+     - On Pass 2, `decideKnownGuards` (`judgment.go:315-318`) checks `if rt.BracketMoved` **before** `decideAfterClosureObserved` checks `if pure.accepted()`. Because `/tmp/stipulator-retained-<id>/package.test` no longer exists (`ENOENT`), `rt.BracketMoved` is `true`, and all `693` records are rejected as `Stale` (`runtimeinputs (moved: path /tmp/stipulator-retained-<id>/package.test)`)!
+  3. **Misleading `re-executed: closure` Attribution & Unpruned Stale Witness Cache Records (`stipulator`)**:
+     - Because `witnesscache` never prunes superseded per-subject records (`4,508` observed refusals on `manifest version 2`, plus older `closure`-stale records per subject), when `stipulator` checks `~4` candidate records for a subject and all 4 are stale (`3` old records stale on `closure`, `1` newest record stale on `runtimeinputs (moved: path /tmp/stipulator-retained-.../package.test)`), `stipulator` reports the miss reason of the **first/oldest** candidate (`690 re-executed: closure`) instead of the **most recent** candidate (`runtimeinputs (moved: ...)`), hiding the real invalidation cause in user-facing output!
+
+#### Issue H (`stipulator/internal/backends/golang/served.go` & `selection.go`): `reuseCheckedCapture` Fails on Non-Callable `ClosureStrategy` Symbols and `Fuzz*` Targets Force 20 Solo Invocations
+- **Evidence from `/tmp/gofresh-full-check-p2.jsonl`**:
+  1. In `gofresh` Pass 2 discovery (`1m20.4s`), `resolve:new_served` took `34.1s` (`1,200` subjects) and `resolve:opening_capture` took another `32.8s` (`1,200` subjects) even though `serveSelection` had just computed the exact same `1,200` fingerprints!
+     - In `served.go:480-505, 634-637`: `serveSelection` partitions non-callable symbols (`gofresh.ClosureStrategy`, `gofresh.RecordedBatchError`, where `rec.Fingerprint == (gofresh.Fingerprint{})`) into `nonCallables` and never records them in `s.checkedCaptures[key]` or `s.checkedUnknown[key]`.
+     - When `openingCapture` calls `s.reuseCheckedCapture(key, s.unserved)` (`line 455`), it iterates over `s.unserved`, hits `gofresh.ClosureStrategy` first (`line 501`), sees it in neither `checked` nor `unknown`, and returns `false` — discarding all `1,198` callable fingerprints and re-running `engine.Snapshot` + `CaptureBatch` twice!
+  2. In `selection.go`, `20` `Fuzz*` functions (`10` in `gofresh`, `10` in `gofresh/internal/closure`) are split out of batch execution (`cause: "mixed_fuzz"`) into `20` separate solo `package.test` invocations in Pass 1 (`~1.5s-3s` each = `~45s` overhead).
+
+#### Issue I (`gofresh/validate.go:475-485` & `gofresh/checking.go:523-542`): Unmemoized `withMovedInputs` Amplification & `CheckingUnit.Close` Re-Evaluating Already-`Stale` Slots (`34.3s` in `phase verification`)
+- **Evidence from `/tmp/gofresh-full-check-p2.jsonl`**:
+  - In `gofresh` Pass 2 `phase verification` (`34.3s`), `witness:revalidate_served` took **`17,825 ms` (`17.8s`)** on `github.com/greatliontech/gofresh` (to revalidate `10` served solo fuzz records!) and **`13,246 ms` (`13.2s`)** on `github.com/greatliontech/gofresh/internal/closure` (to revalidate `10` served solo fuzz records!).
+- **Two-Part Root Cause**:
+  1. In `withMovedInputs` (`validate.go:475-485`), `movedInputsForView(ctx, v, recorded.RuntimeInputs)` has **no per-manifest memoization**. When `361` records in `gofresh` and `332` records in `gofresh/internal/closure` share the same `recorded.RuntimeInputs` manifest (`345` paths in `gofresh`), `withMovedInputs` calls `movedInputsForView` `361` times during `CheckBatch` (`selectPkg`) and `361` times again during `CheckingUnit.Close` (`revalidateServed`), re-decoding the manifest and re-statting/re-hashing all `345` paths `361 * 345 = 124,545` times per call!
+  2. In `CheckingUnit.close` (`checking.go:523-542`), `u.slots` contains all `1,451` historical candidates checked during `selectPkg` (`1,431` of which were already judged `Stale` in `CheckBatch`). Line 525 only sets `records[i].refusal = slot.result.verdict` when `!slot.result.evaluated`, so all `1,431` already-`Stale` evaluated slots are re-checked (`observeRecordInputs` + `withMovedInputs`) in `current.checkRecords` (`line 529`), only for lines 537-538 (`if slot.result.verdict.Status == Stale { result.verdict = slot.result.verdict }`) to overwrite and discard the recomputed verdict!
+
 
