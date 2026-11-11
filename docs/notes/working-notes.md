@@ -422,7 +422,7 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
     - `invocation "race:leaf"`: **`401 served, 3 executed, 3 uncacheable, 0 no-outcome`** (`100%` of the `401` cacheable `race:leaf` subjects across all 25 leaf packages served fresh from cache!).
     - `invocation "race:core"`: **`20 served, 694 executed, 1 uncacheable, 0 no-outcome`** — the `20` solo `Fuzz*` targets (`10` in `gofresh`, `10` in `gofresh/internal/closure`) served fresh from cache, while **`693` cacheable batch subjects (`361` in `gofresh`, `332` in `gofresh/internal/closure`) failed `check_verdict` and re-executed** due to ephemeral `/tmp/stipulator-retained-<id>/package.test` in `RuntimeInputs` (see Issue G below)!
 
-### 3. `gomutant` Full Unscoped `stipulator check` (`/tmp/gomutant-full-check-p1.jsonl`, `/tmp/gomutant-full-check-p2.jsonl` — PASS 1 COMPLETED, PASS 2 IN PROGRESS)
+### 3. `gomutant` Full Unscoped `stipulator check` (`/tmp/gomutant-full-check-p1.jsonl`, `/tmp/gomutant-full-check-p2.jsonl` — COMPLETED)
 - **Pass 1 Summary (COMPLETED)**:
   - `check: pass`, total **`34m48s`** (`compile 100ms, discovery 8m42.4s, execution 26m5.5s, verification 100ms, coverage 0s`, resident `6.8 GiB`, peak **`11.5 GiB`** at execution's exit).
   - `resolution`: `0 served from records, 1,074 resolved typed`, **`1,074` records published under `"default"`** (`moved: 0`; `resolve:serve_selection` `25.4s`, `resolve:opening_capture` **`1 ms`** because `plain_witness: true` has `build_flags: []` matching `new_served` and no `ClosureStrategy` bindings).
@@ -437,6 +437,15 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
     - `5` subjects: `uncacheable: post-run validation: reaches testing.Setenv (process or path mutation)`.
   - `testlog.extract.done` & `unit.close.done` on `github.com/greatliontech/gomutant` (`564` subjects):
     - `/tmp/stipulator-testlog-2656573119.txt` grew to **`2.1 GiB`**; `testlog.extract.done` took **`24,017 ms` (`24.0s`)** (`path_count: 653, env_count: 26, unverifiable: true`), and `unit.close.done` took **`25,218 ms` (`25.2s`)**, driving peak RSS to **`11.5 GiB`**.
+- **Pass 2 Summary (Warm Zero-Edit — COMPLETED)**:
+  - `check: pass`, total **`16m57s`** (`compile 100ms, discovery 6.1s, execution 16m49.4s, verification 1.4s, coverage 0s`, resident `436 MiB`, peak **`5.6 GiB`** at execution's exit).
+  - `phase discovery` dropped from **`8m42.4s` (`3.2 GiB` peak)** in Pass 1 down to **`6.1s` (`332 MiB` peak)** in Pass 2:
+    - `resolution`: **`1,074/1,074 served from records, 0 resolved typed`** (`resolve:serve_selection` `826 ms`, `resolve:new_served` `2,457 ms`).
+    - `witness:capture_native_generation`: dropped from `485,878 ms` (`8m05.8s`) to **`1,598 ms` (`1.6s`)** (`8,843` `cache.load`, `6,054` `closure.memo.load`, `0` `closure.invoke.unclosed`, `0` `closure.callee.reject`, `0` `dynstate.factof.done`, `0` `tier2.subject.done`).
+  - `witnessed`: **`36 served fresh, 1,033 executed, 1,033 uncacheable`**:
+    - **`100%` (`36/36`) of cacheable witnesses served fresh from cache** (`4/4` in `internal/windowcost`, `15` in `internal/guidance`, `12` in `gomutant`, `2` in `internal/cmd`, `2` in `internal/engine`, `1` in `internal/mcpserver`), skipping `internal/windowcost` completely (`17 -> 16` packages).
+    - All `16m49.4s` of Pass 2 execution was spent re-running the `1,033` `uncacheable` subjects across `16` packages (`14m05s` in `github.com/greatliontech/gomutant` + `23.1s` `testlog.extract.done` / `24.1s` `unit.close.done` on the `2.1 GiB` `testlog.txt`).
+  - `phase verification` (`1.4s`): revalidated the `36` served records across 6 packages (`gomutant` `418 ms`, `internal/cmd` `283 ms`, `internal/mcpserver` `260 ms`, `internal/engine` `213 ms`, `internal/guidance` `87 ms`, `internal/windowcost` `82 ms`).
   - **Root Cause of `startup effect: reaches non-standard assembly` in `gomutant` (`internal/gitref`, `cmd/gomutant`, `internal/cmd`, `internal/engine`, `internal/mcpserver`, `internal/testsuite`)**:
     - `asmverify.package.done` in `/tmp/gomutant-full-check-p1.jsonl` shows:
       - `golang.org/x/sys/cpu`: `ok: true, funcs: 2, sfiles: 1`
