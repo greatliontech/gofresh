@@ -330,9 +330,6 @@ func newBitOnlyFreshParamAnalysis(propertyHarnessAudited, selectionAudited bool,
 		idx.structWholeStores = summary.structWholeStores
 		idx.structPoisoned = summary.structPoisoned
 		idx.structReferencedByType = summary.structReferencedByType
-		idx.programSites = summary.sites
-		idx.programValueRef = summary.valueRef
-		idx.programFunctions = summary.allFunctions
 	}
 	return &freshParamAnalysis{ssaProgramIndex: idx}
 }
