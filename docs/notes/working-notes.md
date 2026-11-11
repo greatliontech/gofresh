@@ -258,3 +258,19 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
                 - `/tmp/pew-stage2-recovery-p1.jsonl` lines 8004–8005 pinpointed the `202.36s` gap (`07:43:50.914` → `07:47:13.279`) to the first incremental `opts.Commit` (`s.Update`) on `Parse`: `/home/nikolas/.cache/gomutant/repos/dd0da3f64c77e836144d71d0/findings` held `204 MiB` across 22 overlay findings left behind by the cancelled `task-28414` (each containing 278 `OracleEvidence` entries with a copy of `cmd/pew`'s huge `RuntimeInputs` manifest).
                 - In `portableLineWalk` (`gomutant/store.go:536-577`) and `stampProvenance` (`gomutant/reconcile.go:293-374`), every `OracleEvidence` entry shares the identical `completedObservationUnion` `RuntimeInputs` manifest, yet both loops re-call `gofresh.RuntimeInputPaths(ev.RuntimeInputs, base)` (and `repository.placement(p)` in `stampProvenance`) for all 278 `OracleEvidence` entries instead of deduplicating by `(base, RuntimeInputs)`.
                 - Fix: deduplicate `(base, RuntimeInputs)` in `portableLineWalk` and `stampProvenance` in `gomutant`, and remove the stale `204 MiB` overlay entries in `/home/nikolas/.cache/gomutant/repos/dd0da3f64c77e836144d71d0/findings`.
+           - **User Alignment (2026-11-11): Custom `internal/trace` vs. OpenTelemetry & Complete Causal Rejection Event Taxonomy**:
+             - **Decision**: Retain custom `internal/trace` (carrier-free integer atomics, `0` allocs on disabled fast path, 100% `gofresh` self-analysis purity without `otel` global provider/goroutine/RNG/reflect exemptions, and multi-process `O_APPEND` JSONL) and complete its event taxonomy in one pass across all 4 repos by adding **causal rejection / decision events** alongside the existing stopwatch (`*.done`) spans:
+               1. **`gofresh/internal/closure`**:
+                  - `closure.struct.poison`: emitted when `poisonStruct` poisons a struct/field (`struct`, `field`, `fn`, `reason`).
+                  - `closure.struct.unclosed`: emitted when `enumUserStructClosed` fails on a struct or field store (`struct`, `field`, `store_val`, `fn`, `reason`).
+                  - `closure.callee.reject`: emitted when `calleeResultDynamicValue` rejects stepping into a call (`caller`, `callee`, `gate`).
+                  - `closure.invoke.unclosed`: emitted when `closedInvokeTargets` fails to close an interface invoke (`fn`, `method`, `recv`, `recv_type`).
+               2. **`gofresh/internal/dynstate`**:
+                  - `dynstate.var.reject`: emitted in `FactOfWithHooks` when a package-level variable is recorded in `Mutates` or `Escapes` (`pkg`, `var`, `kind`, `cause`).
+               3. **`stipulator` (`internal/backends/golang/selection.go`)**:
+                  - `witness.solo_plan`: emitted when a witness is routed to `plannedSolos` or `deniedTests` (`subject`, `mode`, `cause`).
+               4. **`gomutant` (`run_window.go`, `store.go`)**:
+                  - `oracle.window_confirm`: emitted in `confirmWindowKills` (`symbol`, `mode`, `volatile_reason`, `kills`, `duration_ms`).
+                  - `reconcile.store_update`: emitted in `s.Update` (`symbol`, `findings`, `duration_ms`).
+               5. **`pew` (`cmd/pew/status.go`)**:
+                  - `select.benchmark_stale`: emitted in `check_package` when a benchmark is stale (`benchmark`, `status`, `reason`).
