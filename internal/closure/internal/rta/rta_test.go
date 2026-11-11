@@ -1247,3 +1247,83 @@ func Subj4(fn func(int) int, r Runner) int {
 	}
 }
 
+func TestStaticGlobalCompositeLiteralPoolStoreIsolation(t *testing.T) {
+	src := `package p
+
+type poolHolder struct {
+	New func() any
+}
+
+type deadItem struct{}
+
+func (d *deadItem) Run() {}
+
+var unreferencedPool = poolHolder{
+	New: func() any { return new(deadItem) },
+}
+
+var referencedPool = poolHolder{
+	New: func() any { return new(deadItem) },
+}
+
+func EntryUnused() {
+	var a, b poolHolder
+	for i := 0; i < 2; i++ {
+		a = b
+		b = a
+	}
+	_ = a
+	var r interface{ Run() }
+	if r != nil {
+		r.Run()
+	}
+}
+
+func EntryUsed() any {
+	return referencedPool.New()
+}
+`
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "p.go", src, 0)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	tpkg := types.NewPackage("example.com/p", "p")
+	pkg, _, err := ssautil.BuildPackage(&types.Config{Importer: importer.Default()}, fset, tpkg, []*ast.File{f}, ssa.InstantiateGenerics)
+	if err != nil {
+		t.Fatalf("BuildPackage: %v", err)
+	}
+	prog := pkg.Prog
+	initFn := pkg.Func("init")
+	entryUnused := pkg.Func("EntryUnused")
+	entryUsed := pkg.Func("EntryUsed")
+	deadRun := prog.LookupMethod(types.NewPointer(pkg.Type("deadItem").Type()), pkg.Pkg, "Run")
+	if initFn == nil || entryUnused == nil || entryUsed == nil || deadRun == nil {
+		t.Fatalf("missing expected SSA functions: init=%v unused=%v used=%v deadRun=%v", initFn, entryUnused, entryUsed, deadRun)
+	}
+
+	resUnused, err := Analyze(context.Background(), map[*ssa.Function]uint64{
+		initFn:      1 << 0,
+		entryUnused: 1 << 0,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Analyze(unused): %v", err)
+	}
+	if resUnused.Reachable[deadRun] != 0 {
+		t.Fatalf("Reachable[(*deadItem).Run] = %#b when pool global is never read, want 0", resUnused.Reachable[deadRun])
+	}
+
+	resUsed, err := Analyze(context.Background(), map[*ssa.Function]uint64{
+		initFn:      1 << 0,
+		entryUnused: 1 << 0,
+		entryUsed:   1 << 0,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Analyze(used): %v", err)
+	}
+	if resUsed.Reachable[deadRun] == 0 {
+		t.Fatalf("Reachable[(*deadItem).Run] = 0 when referencedPool.New() is called, want non-zero")
+	}
+}
+
+

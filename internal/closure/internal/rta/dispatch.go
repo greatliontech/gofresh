@@ -1,6 +1,7 @@
 package rta
 
 import (
+	"go/token"
 	"go/types"
 	"hash/crc32"
 	"strconv"
@@ -159,6 +160,255 @@ func (r *attributedRTA) visitHarnessStdAddrTakenFunc(f *ssa.Function, masks uint
 	}
 	if r.reflectValueCall != nil || r.reflectValueCallSlice != nil {
 		r.addHarnessStdReachable(f, delta)
+	}
+}
+
+type pendingGlobalFunc struct {
+	fn              *ssa.Function
+	masks           uint64
+	harnessStdPlane bool
+	noteReflect     bool
+}
+
+func (r *attributedRTA) releaseGlobalStoredFunc(p pendingGlobalFunc, masks uint64) {
+	if p.fn == nil || masks == 0 {
+		return
+	}
+	if p.harnessStdPlane {
+		r.visitHarnessStdAddrTakenFunc(p.fn, masks)
+		return
+	}
+	r.visitAddrTakenFunc(p.fn, masks)
+	if p.noteReflect {
+		r.noteReflectCalleeUse(p.fn, masks)
+	}
+}
+
+func (r *attributedRTA) visitGlobalStoredFunc(g *ssa.Global, fn *ssa.Function, masks uint64, harnessStdPlane, noteReflect bool) {
+	if g == nil || fn == nil || masks == 0 {
+		return
+	}
+	if r.pendingGlobalFuncs == nil {
+		r.pendingGlobalFuncs = make(map[*ssa.Global][]pendingGlobalFunc, 8)
+	}
+	list := r.pendingGlobalFuncs[g]
+	found := false
+	for i := range list {
+		if list[i].fn == fn && list[i].harnessStdPlane == harnessStdPlane && list[i].noteReflect == noteReflect {
+			list[i].masks |= masks
+			found = true
+			break
+		}
+	}
+	if !found {
+		list = append(list, pendingGlobalFunc{
+			fn:              fn,
+			masks:           masks,
+			harnessStdPlane: harnessStdPlane,
+			noteReflect:     noteReflect,
+		})
+		r.pendingGlobalFuncs[g] = list
+	}
+	if readMasks := r.globalReadMasks[g] & masks; readMasks != 0 {
+		r.releaseGlobalStoredFunc(pendingGlobalFunc{
+			fn:              fn,
+			masks:           readMasks,
+			harnessStdPlane: harnessStdPlane,
+			noteReflect:     noteReflect,
+		}, readMasks)
+	}
+}
+
+func (r *attributedRTA) noteGlobalRead(g *ssa.Global, masks uint64) {
+	if g == nil || masks == 0 {
+		return
+	}
+	if r.globalReadMasks == nil {
+		r.globalReadMasks = make(map[*ssa.Global]uint64, 16)
+	}
+	delta := masks &^ r.globalReadMasks[g]
+	if delta == 0 {
+		return
+	}
+	r.globalReadMasks[g] |= delta
+	for _, p := range r.pendingGlobalFuncs[g] {
+		if matched := p.masks & delta; matched != 0 {
+			r.releaseGlobalStoredFunc(p, matched)
+		}
+	}
+}
+
+func isPointerToArray(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	ptr, ok := types.Unalias(t).(*types.Pointer)
+	if !ok {
+		return false
+	}
+	_, isArr := types.Unalias(ptr.Elem()).(*types.Array)
+	return isArr
+}
+
+func isOnlyStoreAddrChain(v ssa.Value) bool {
+	if v == nil {
+		return false
+	}
+	refs := v.Referrers()
+	if refs == nil || len(*refs) == 0 {
+		return false
+	}
+	for _, ref := range *refs {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+		case *ssa.Store:
+			if r.Addr != v || r.Val == v {
+				return false
+			}
+		case *ssa.FieldAddr:
+			if r.X != v || !isOnlyStoreAddrChain(r) {
+				return false
+			}
+		case *ssa.IndexAddr:
+			if r.X != v || r.Index == v || !isPointerToArray(r.X.Type()) || !isOnlyStoreAddrChain(r) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func staticGlobalStoreRoot(addr ssa.Value) *ssa.Global {
+	return staticGlobalStoreRootSeen(addr, nil)
+}
+
+func staticGlobalStoreRootSeen(addr ssa.Value, seen map[*ssa.Alloc]bool) *ssa.Global {
+	cur := addr
+	for cur != nil {
+		switch a := cur.(type) {
+		case *ssa.Global:
+			if a.Object() != nil && !a.Object().Exported() {
+				return a
+			}
+			return nil
+		case *ssa.FieldAddr:
+			if !isOnlyStoreAddrChain(a) {
+				return nil
+			}
+			cur = a.X
+		case *ssa.IndexAddr:
+			if !isPointerToArray(a.X.Type()) || !isOnlyStoreAddrChain(a) {
+				return nil
+			}
+			cur = a.X
+		case *ssa.Alloc:
+			return staticGlobalStoreAllocRootSeen(a, seen)
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
+func staticGlobalStoreAllocRootSeen(a *ssa.Alloc, seen map[*ssa.Alloc]bool) *ssa.Global {
+	if a == nil || a.Referrers() == nil || len(*a.Referrers()) == 0 || seen[a] {
+		return nil
+	}
+	if seen == nil {
+		seen = make(map[*ssa.Alloc]bool, 2)
+	}
+	seen[a] = true
+	var root *ssa.Global
+	for _, ref := range *a.Referrers() {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+		case *ssa.Store:
+			if r.Addr != a || r.Val == a {
+				return nil
+			}
+		case *ssa.FieldAddr:
+			if r.X != a || !isOnlyStoreAddrChain(r) {
+				return nil
+			}
+		case *ssa.IndexAddr:
+			if r.X != a || r.Index == a || !isPointerToArray(r.X.Type()) || !isOnlyStoreAddrChain(r) {
+				return nil
+			}
+		case *ssa.UnOp:
+			if r.Op != token.MUL || r.X != a || r.Referrers() == nil || len(*r.Referrers()) == 0 {
+				return nil
+			}
+			sawStore := false
+			for _, uref := range *r.Referrers() {
+				switch ur := uref.(type) {
+				case *ssa.DebugRef:
+				case *ssa.Store:
+					if ur.Val != r || ur.Addr == r {
+						return nil
+					}
+					g := staticGlobalStoreRootSeen(ur.Addr, seen)
+					if g == nil || (root != nil && root != g) {
+						return nil
+					}
+					root = g
+					sawStore = true
+				default:
+					return nil
+				}
+			}
+			if !sawStore {
+				return nil
+			}
+		default:
+			return nil
+		}
+	}
+	return root
+}
+
+func onlyStaticGlobalStoreTarget(mk *ssa.MakeClosure) *ssa.Global {
+	if mk == nil {
+		return nil
+	}
+	refs := mk.Referrers()
+	if refs == nil || len(*refs) == 0 {
+		return nil
+	}
+	var root *ssa.Global
+	for _, ref := range *refs {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+		case *ssa.Store:
+			if r.Val != mk || r.Addr == mk {
+				return nil
+			}
+			g := staticGlobalStoreRoot(r.Addr)
+			if g == nil || (root != nil && root != g) {
+				return nil
+			}
+			root = g
+		default:
+			return nil
+		}
+	}
+	return root
+}
+
+func isPureStaticGlobalStoreAddrOp(instr ssa.Instruction, op *ssa.Value, g *ssa.Global) bool {
+	if g == nil || g.Object() == nil || g.Object().Exported() {
+		return false
+	}
+	switch x := instr.(type) {
+	case *ssa.Store:
+		return op == &x.Addr && x.Val != g
+	case *ssa.FieldAddr:
+		return op == &x.X && isOnlyStoreAddrChain(x)
+	case *ssa.IndexAddr:
+		return op == &x.X && x.Index != g && isPointerToArray(x.X.Type()) && isOnlyStoreAddrChain(x)
+	default:
+		return false
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/closure/internal/rta"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // enumerationClosure is one signature-open subject's whole-view caller
@@ -72,12 +73,45 @@ type callerReferenceSummary struct {
 	progFuncsMemo     map[ssa.Value][]*ssa.Function
 	progFuncsFailed   map[ssa.Value]bool
 	progInvokeTargets map[ssa.CallInstruction]map[*ssa.Function]bool
-	progInvokeFailed  map[ssa.CallInstruction]bool
-	enumInvokeTargets map[ssa.CallInstruction]map[*ssa.Function]bool
-	enumInvokeFailed  map[ssa.CallInstruction]bool
-	enumSeedsMemo     map[ssa.Value]dynamicSeedEntry
-	enumStructClosed  map[*types.Named]bool
-	prog              *program
+	progInvokeFailed          map[ssa.CallInstruction]bool
+	enumInvokeTargets         map[ssa.CallInstruction]map[*ssa.Function]bool
+	enumInvokeFailed          map[ssa.CallInstruction]bool
+	enumSeedsMemo             map[ssa.Value]dynamicSeedEntry
+	enumStructClosed          map[*types.Named]bool
+	userMutatesOSWrapperError bool
+	prog                      *program
+}
+
+func isOSWrapperErrorStruct(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	base := types.Unalias(t)
+	if ptr, ok := base.(*types.Pointer); ok {
+		base = types.Unalias(ptr.Elem())
+	}
+	named, ok := base.(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+		return false
+	}
+	pkgPath := named.Obj().Pkg().Path()
+	name := named.Obj().Name()
+	return (pkgPath == "os" && name == "SyscallError") || ((pkgPath == "io/fs" || pkgPath == "os") && name == "PathError")
+}
+
+func typeContainsOSWrapperErrorStruct(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	found := false
+	walkTypeGraph(t, true, map[types.Type]bool{}, func(sub types.Type) bool {
+		if isOSWrapperErrorStruct(sub) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 func (s *callerReferenceSummary) isStructReferencedOutside(named *types.Named, root *ssa.Function) bool {
@@ -206,7 +240,12 @@ func enumerateCallerReferencesForProgram(prog *program, audited bool, pureDelega
 			wholeProgram = true
 		}
 	}
-	res := enumerateCallerReferencesWithOrdered(audited, userPaths, all, ordered)
+	harnessAudited := propertyHarnessAuditedProg(audited, prog)
+	var rootPkgPath string
+	if prog != nil {
+		rootPkgPath = prog.PkgPath
+	}
+	res := enumerateCallerReferencesWithOrdered(audited, harnessAudited, rootPkgPath, userPaths, all, ordered)
 	res.prog = prog
 	res.pureDelegates = pureDelegates
 	if prog != nil {
@@ -222,10 +261,10 @@ func enumerateCallerReferencesForProgram(prog *program, audited bool, pureDelega
 }
 
 func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[*ssa.Function]bool) *callerReferenceSummary {
-	return enumerateCallerReferencesWithOrdered(audited, userPaths, all, nil)
+	return enumerateCallerReferencesWithOrdered(audited, false, "", userPaths, all, nil)
 }
 
-func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]bool, all map[*ssa.Function]bool, ordered []*ssa.Function) *callerReferenceSummary {
+func enumerateCallerReferencesWithOrdered(audited, harnessAudited bool, rootPkgPath string, userPaths map[string]bool, all map[*ssa.Function]bool, ordered []*ssa.Function) *callerReferenceSummary {
 	if ordered == nil {
 		ordered = orderedFunctionsForProgram(all)
 	}
@@ -395,7 +434,15 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 			return
 		}
 		if field < 0 {
-			summary.structPoisoned[structFieldKey{named: named, field: -1}] = true
+			key := structFieldKey{named: named, field: -1}
+			if !summary.structPoisoned[key] {
+				summary.structPoisoned[key] = true
+				if trace.AnyEnabled() {
+					trace.Emit(nil, trace.DomainClosure, "closure.struct.poison", named.String(),
+						trace.Int("field", -1),
+					)
+				}
+			}
 			if st, ok := named.Underlying().(*types.Struct); ok {
 				for i := 0; i < st.NumFields(); i++ {
 					summary.structPoisoned[structFieldKey{named: named, field: i}] = true
@@ -403,10 +450,21 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 			}
 			return
 		}
-		summary.structPoisoned[structFieldKey{named: named, field: field}] = true
+		key := structFieldKey{named: named, field: field}
+		if !summary.structPoisoned[key] {
+			summary.structPoisoned[key] = true
+			if trace.AnyEnabled() {
+				trace.Emit(nil, trace.DomainClosure, "closure.struct.poison", named.String(),
+					trace.Int("field", field),
+				)
+			}
+		}
 	}
 	poisonContainedTypes := func(t types.Type, refFn *ssa.Function) {
 		walkTypeGraph(t, true, map[types.Type]bool{}, func(sub types.Type) bool {
+			if isOSWrapperErrorStruct(sub) {
+				summary.userMutatesOSWrapperError = true
+			}
 			if named := derefNamedStruct(userPaths, sub); named != nil {
 				if refFn != nil {
 					recordStructRef(named, refFn)
@@ -481,8 +539,8 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 	}
 	var implMemo map[candIfaceKey]bool
 	var reflectValueTypes []reflectTypeRef
-	sawReflectMutation := false
-	sawOpenReflectValue := false
+	var reflectMutationFns []*ssa.Function
+	var reflectOpenValueFns []*ssa.Function
 	var space [16]*ssa.Value
 	for _, fn := range ordered {
 		initFrame := initFlowFrame(fn)
@@ -528,6 +586,7 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 		structJudgeable := fn.Synthetic == "" || fnIsPromotedWrapper || (audited && fn.Origin() != nil)
 		fnPkg := funcPkgPath(fn)
 		nonStdFrame := !isStdPkgPath(userPaths, fnPkg)
+		nonHarnessUserFrame := nonStdFrame && !(harnessAudited && propharness.IsHarnessPath(fnPkg))
 		hasUserTypes := nonStdFrame || (fnPkg == "strconv" && fn.Synthetic == "")
 		if !hasUserTypes {
 			for cur := fn; cur != nil; cur = cur.Parent() {
@@ -567,6 +626,9 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 			for _, instr := range b.Instrs {
 				if audited && hasUserTypes {
 					if v, ok := instr.(ssa.Value); ok && v.Type() != nil {
+						if _, isAlloc := instr.(*ssa.Alloc); isAlloc && nonHarnessUserFrame && isOSWrapperErrorStruct(v.Type()) {
+							summary.userMutatesOSWrapperError = true
+						}
 						if named := derefNamedStruct(userPaths, v.Type()); named != nil {
 							recordStructRef(named, fn)
 							poison := !structJudgeable
@@ -643,15 +705,27 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 					case *ssa.Convert:
 						if x.X != nil {
 							poisonContainedTypes(x.X.Type(), fn)
+							if typeContainsOSWrapperErrorStruct(x.X.Type()) {
+								summary.userMutatesOSWrapperError = true
+							}
 						}
 						if x.Type() != nil {
 							poisonContainedTypes(x.Type(), fn)
+							if typeContainsOSWrapperErrorStruct(x.Type()) {
+								summary.userMutatesOSWrapperError = true
+							}
 						}
 					case *ssa.ChangeType:
 						if x.X != nil {
 							if named := derefNamedStruct(userPaths, x.X.Type()); named != nil {
 								poisonStruct(named, -1)
 							}
+							if typeContainsOSWrapperErrorStruct(x.X.Type()) {
+								summary.userMutatesOSWrapperError = true
+							}
+						}
+						if x.Type() != nil && typeContainsOSWrapperErrorStruct(x.Type()) {
+							summary.userMutatesOSWrapperError = true
 						}
 					case *ssa.MakeInterface:
 						if x.X != nil && x.X.Type() != nil {
@@ -693,6 +767,23 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 						}
 					}
 					if fa, ok := instr.(*ssa.FieldAddr); ok && fa.X != nil {
+						if nonHarnessUserFrame && isOSWrapperErrorStruct(fa.X.Type()) {
+							if !structJudgeable || fa.Referrers() == nil {
+								summary.userMutatesOSWrapperError = true
+							} else {
+								for _, ref := range *fa.Referrers() {
+									switch r := ref.(type) {
+									case *ssa.DebugRef:
+									case *ssa.UnOp:
+										if r.Op != token.MUL || r.X != fa {
+											summary.userMutatesOSWrapperError = true
+										}
+									default:
+										summary.userMutatesOSWrapperError = true
+									}
+								}
+							}
+						}
 						if named := derefNamedStruct(userPaths, fa.X.Type()); named != nil {
 							recordStructRef(named, fn)
 							innerNamed := derefNamedStruct(userPaths, fa.Type())
@@ -713,7 +804,7 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 											structFieldReads[key] = append(structFieldReads[key], r)
 										}
 									case *ssa.Store:
-										if r.Addr != fa {
+										if r.Addr != fa || r.Val == nil {
 											poisonStruct(named, fa.Field)
 										} else {
 											key := structFieldKey{named: named, field: fa.Field}
@@ -751,6 +842,9 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 						c, isConst := st.Val.(*ssa.Const)
 						isZero := isConst && c.Value == nil
 						if !isZero {
+							if nonHarnessUserFrame && typeContainsOSWrapperErrorStruct(st.Val.Type()) {
+								summary.userMutatesOSWrapperError = true
+							}
 							var topNamed *types.Named
 							if _, isPtr := types.Unalias(st.Val.Type()).(*types.Pointer); !isPtr {
 								topNamed = derefNamedStruct(userPaths, st.Val.Type())
@@ -767,42 +861,47 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 							}
 						}
 					}
-					if nonStdFrame {
+					if nonHarnessUserFrame {
 						if site, ok := instr.(ssa.CallInstruction); ok && site.Common() != nil {
 							c := site.Common()
 							if c.IsInvoke() {
 								if c.Method != nil && c.Method.Pkg() != nil && c.Method.Pkg().Path() == "reflect" {
 									mName := c.Method.Name()
 									if isReflectMutationSymbol(mName) && (mName != "Addr" || !isAddrOnlyForUnsafePointerConvert(site)) {
-										sawReflectMutation = true
+										reflectMutationFns = append(reflectMutationFns, fn)
 									}
 									if mName == "ValueOf" || isReflectOpenProducerSymbol(mName) {
-										sawOpenReflectValue = true
+										reflectOpenValueFns = append(reflectOpenValueFns, fn)
 									}
 								}
 							} else if callee := c.StaticCallee(); callee != nil {
 								calleePkg := funcPkgPath(callee)
 								calleeSym := strings.TrimSuffix(strings.TrimSuffix(functionSymbolName(callee), "$bound"), "$thunk")
+								if calleePkg == "os" && calleeSym == "NewSyscallError" {
+									summary.userMutatesOSWrapperError = true
+								}
 								if calleePkg == "reflect" {
 									if isReflectMutationSymbol(calleeSym) && (calleeSym != "Addr" || !isAddrOnlyForUnsafePointerConvert(site)) {
-										sawReflectMutation = true
+										reflectMutationFns = append(reflectMutationFns, fn)
 									}
 									if calleeSym == "ValueOf" {
-										if len(c.Args) == 1 {
-											if mi, ok := c.Args[0].(*ssa.MakeInterface); ok && mi.X != nil && mi.X.Type() != nil {
-												reflectValueTypes = append(reflectValueTypes, reflectTypeRef{typ: mi.X.Type(), fn: fn})
+										if !isNonMutatingReflectValueRoot(site.Value()) {
+											if len(c.Args) == 1 {
+												if mi, ok := c.Args[0].(*ssa.MakeInterface); ok && mi.X != nil && mi.X.Type() != nil {
+													reflectValueTypes = append(reflectValueTypes, reflectTypeRef{typ: mi.X.Type(), fn: fn})
+												} else {
+													reflectOpenValueFns = append(reflectOpenValueFns, fn)
+												}
 											} else {
-												sawOpenReflectValue = true
+												reflectOpenValueFns = append(reflectOpenValueFns, fn)
 											}
-										} else {
-											sawOpenReflectValue = true
 										}
 									} else if isReflectOpenProducerSymbol(calleeSym) {
-										sawOpenReflectValue = true
+										reflectOpenValueFns = append(reflectOpenValueFns, fn)
 									}
 								}
 								calleeNonStd := !isStdPkgPath(userPaths, calleePkg)
-								if (calleeNonStd && len(callee.Blocks) == 0 && callee.Synthetic == "" && !parameterizedBody(callee)) || isStdDeserializerCall(calleePkg, calleeSym) {
+								if (calleeNonStd && len(callee.Blocks) == 0 && callee.Synthetic == "" && !parameterizedBody(callee)) || isStdDeserializerCall(calleePkg, calleeSym) || (harnessAudited && propharness.IsHarnessPath(calleePkg) && (calleeSym == "Make" || calleeSym == "MakeCustom")) {
 									for _, arg := range c.Args {
 										if arg != nil {
 											poisonContainedTypes(arg.Type(), fn)
@@ -900,13 +999,19 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 						}
 					}
 					if g, ok := (*op).(*ssa.Function); ok {
-						if audited && nonStdFrame && funcPkgPath(g) == "reflect" {
+						if audited && nonHarnessUserFrame {
+							gPkg := funcPkgPath(g)
 							gSym := strings.TrimSuffix(strings.TrimSuffix(functionSymbolName(g), "$bound"), "$thunk")
-							if isReflectMutationSymbol(gSym) {
-								sawReflectMutation = true
+							if gPkg == "os" && gSym == "NewSyscallError" {
+								summary.userMutatesOSWrapperError = true
 							}
-							if gSym == "ValueOf" || isReflectOpenProducerSymbol(gSym) {
-								sawOpenReflectValue = true
+							if gPkg == "reflect" {
+								if isReflectMutationSymbol(gSym) {
+									reflectMutationFns = append(reflectMutationFns, fn)
+								}
+								if gSym == "ValueOf" || isReflectOpenProducerSymbol(gSym) {
+									reflectOpenValueFns = append(reflectOpenValueFns, fn)
+								}
 							}
 						}
 						summary.directValueRef[g] = true
@@ -975,29 +1080,107 @@ func enumerateCallerReferencesWithOrdered(audited bool, userPaths map[string]boo
 			wTopNamed := derefNamedStruct(userPaths, w.Signature.Recv().Type())
 			poisonEmbeddedCarriers(w.Signature.Recv().Type(), wTopNamed, w)
 		}
-		if sawReflectMutation {
-			if !sawOpenReflectValue {
-				if len(reflectValueTypes) == 0 {
-					sawOpenReflectValue = true
-				} else {
-					for _, rv := range reflectValueTypes {
-						if typeReachesOpenReflectCarrier(rv.typ) {
-							sawOpenReflectValue = true
-							break
+		if len(reflectMutationFns) > 0 {
+			var reflectLiveMemo map[*ssa.Function]bool
+			var reflectVisiting map[*ssa.Function]bool
+			var reflectFnLive func(*ssa.Function) (bool, bool)
+			reflectFnLive = func(fn *ssa.Function) (bool, bool) {
+				if fn == nil {
+					return false, false
+				}
+				if rootPkgPath == "" {
+					return true, false
+				}
+				top := fn
+				for top.Parent() != nil {
+					top = top.Parent()
+				}
+				if v, ok := reflectLiveMemo[top]; ok {
+					return v, false
+				}
+				if reflectVisiting[top] {
+					return false, true
+				}
+				if reflectLiveMemo == nil {
+					reflectLiveMemo = make(map[*ssa.Function]bool, 16)
+					reflectVisiting = make(map[*ssa.Function]bool, 16)
+				}
+				reflectVisiting[top] = true
+				defer delete(reflectVisiting, top)
+				pkgPath := funcPkgPath(top)
+				if pkgPath == rootPkgPath || pkgPath == rootPkgPath+"_test" || pkgPath == "main" || initFlowFrame(top) || summary.directValueRef[top] || summary.valueRef[top] {
+					reflectLiveMemo[top] = true
+					return true, false
+				}
+				if top.Signature != nil && top.Signature.Recv() != nil {
+					if recvNamed := derefNamedStruct(userPaths, top.Signature.Recv().Type()); recvNamed == nil || len(summary.structBoxedValues[recvNamed]) > 0 || summary.structPoisoned[structFieldKey{named: recvNamed, field: -1}] {
+						reflectLiveMemo[top] = true
+						return true, false
+					}
+				}
+				tainted := false
+				for _, site := range summary.allStaticSites[top] {
+					if site != nil && site.Parent() != nil {
+						cLive, cTainted := reflectFnLive(site.Parent())
+						if cLive {
+							reflectLiveMemo[top] = true
+							return true, false
+						}
+						if cTainted {
+							tainted = true
 						}
 					}
 				}
+				if !tainted {
+					reflectLiveMemo[top] = false
+				}
+				return false, tainted
 			}
-			if sawOpenReflectValue {
-				for named := range summary.structReferencedByType {
-					poisonStruct(named, -1)
+			sawReflectMutation := false
+			for _, fn := range reflectMutationFns {
+				if live, _ := reflectFnLive(fn); live {
+					sawReflectMutation = true
+					break
 				}
-				for ns := range namedSigReferenced {
-					summary.namedSigPoisoned[ns] = true
+			}
+			if sawReflectMutation {
+				summary.userMutatesOSWrapperError = true
+				sawOpenReflectValue := false
+				for _, fn := range reflectOpenValueFns {
+					if live, _ := reflectFnLive(fn); live {
+						sawOpenReflectValue = true
+						break
+					}
 				}
-			} else {
-				for _, rv := range reflectValueTypes {
-					poisonContainedTypes(rv.typ, rv.fn)
+				var liveReflectTypes []reflectTypeRef
+				if !sawOpenReflectValue {
+					for _, rv := range reflectValueTypes {
+						if live, _ := reflectFnLive(rv.fn); live {
+							liveReflectTypes = append(liveReflectTypes, rv)
+						}
+					}
+					if len(liveReflectTypes) == 0 {
+						sawOpenReflectValue = true
+					} else {
+						for _, rv := range liveReflectTypes {
+							if typeReachesOpenReflectCarrier(rv.typ) {
+								sawOpenReflectValue = true
+								break
+							}
+						}
+					}
+				}
+				if sawOpenReflectValue {
+					for named := range summary.structReferencedByType {
+						poisonStruct(named, -1)
+					}
+					for ns := range namedSigReferenced {
+						summary.namedSigPoisoned[ns] = true
+					}
+				} else {
+					for _, rv := range liveReflectTypes {
+						poisonContainedTypes(rv.typ, rv.fn)
+					}
 				}
 			}
 		}

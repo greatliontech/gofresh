@@ -25,6 +25,7 @@ import (
 	progpkg "github.com/greatliontech/gofresh/internal/closure/internal/program"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/testvariant"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // TestMain gives this test binary its own memo root under os.TempDir so a
@@ -35,6 +36,7 @@ import (
 // commands under GOENV=off keep the warm build cache rather than falling back
 // into the fresh XDG_CACHE_HOME.
 func TestMain(m *testing.M) {
+	trace.Refresh(os.Getenv(trace.EnvTrace), os.Getenv(trace.EnvTraceFile))
 	if cache, err := gotool.GoBuildCache(context.Background(), os.Environ()); err == nil && cache != "" {
 		_ = os.Setenv("GOCACHE", cache)
 	}

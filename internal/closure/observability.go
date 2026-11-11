@@ -941,6 +941,12 @@ func recordCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site ssa.Ca
 		if isTestMain {
 			effect.observable = observableCallEffect(analyzer.h.SelectionAudited(), effect, site.Common(), site, analyzer.fresh)
 		}
+		if !isTestMain && !effect.observable && trace.AnyEnabled() && site != nil && site.Parent() != nil {
+			trace.Emit(analyzer.h.ctx, trace.DomainClosure, "closure.startup.effect", site.Parent().String(),
+				trace.String("callee", callee.String()),
+				trace.String("reason", effect.reason),
+			)
+		}
 		analyzer.recordExternalEffect(effect)
 	}
 }

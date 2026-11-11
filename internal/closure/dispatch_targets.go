@@ -6,6 +6,7 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 func newDispatchWalkStates(fp *freshParamAnalysis) (evalFP, collectFP *freshParamAnalysis, rootDone map[ssa.Value]bool, propagate func() (noEscape, usedSubj bool)) {
@@ -136,7 +137,27 @@ func closedInvokeTargets(site ssa.CallInstruction, fp *freshParamAnalysis) (map[
 		}
 	}
 	evalFP, collectFP, rootDone, propagateWalkFlags := newDispatchWalkStates(fp)
-	fail := func() (map[*ssa.Function]bool, bool) {
+	var concreteTypes map[types.Type]bool
+	fail := func(reason string) (map[*ssa.Function]bool, bool) {
+		if trace.AnyEnabled() && site != nil && site.Parent() != nil && !fp.isStdFunc(site.Parent()) {
+			var methodStr, recvStr, recvTypeStr string
+			if c.Method != nil {
+				methodStr = c.Method.FullName()
+			}
+			if c.Value != nil {
+				recvStr = c.Value.String()
+				if c.Value.Type() != nil {
+					recvTypeStr = c.Value.Type().String()
+				}
+			}
+			trace.Emit(nil, trace.DomainClosure, "closure.invoke.unclosed", site.Parent().String(),
+				trace.String("method", methodStr),
+				trace.String("recv", recvStr),
+				trace.String("recv_type", recvTypeStr),
+				trace.Int("concrete_count", len(concreteTypes)),
+				trace.String("reason", reason),
+			)
+		}
 		noEscape, usedSubj := propagateWalkFlags()
 		if noEscape {
 			if cacheable {
@@ -153,16 +174,16 @@ func closedInvokeTargets(site ssa.CallInstruction, fp *freshParamAnalysis) (map[
 		return nil, false
 	}
 	if !walkDynamicValue(c.Value, nil, make(map[ssa.Value]bool), rootDone, evalFP) {
-		return fail()
+		return fail("eval_recv")
 	}
-	concreteTypes := map[types.Type]bool{}
+	concreteTypes = map[types.Type]bool{}
 	allowEmptyConcrete := fp != nil && fp.selectionAudited && !isDirectNilOnlyParam(c.Value, fp)
 	if !walkDynamicValue(c.Value, &dynamicValueCollector{types: concreteTypes}, map[ssa.Value]bool{}, nil, collectFP) || (len(concreteTypes) == 0 && !allowEmptyConcrete) {
-		return fail()
+		return fail("collect_concrete_types")
 	}
 	targets, ok := resolveConcreteMethodTargets(site.Parent().Prog, c.Value.Type(), c.Method, concreteTypes, collectFP)
 	if !ok {
-		return fail()
+		return fail("resolve_method_targets")
 	}
 	noEscape, usedSubj := propagateWalkFlags()
 	if noEscape {
@@ -241,6 +262,12 @@ func resolveConcreteMethodTargetsSeen(prog *ssa.Program, recvType types.Type, me
 				return false
 			}
 			targets[cmethod] = true
+			return true
+		}
+		if mName == "Error" && isAdmittedOSGetwdErrorType(audited, ct, fp) {
+			if cmethod := prog.LookupMethod(ct, mPkg, mName); cmethod != nil && len(cmethod.Blocks) > 0 {
+				targets[cmethod] = true
+			}
 			return true
 		}
 		sel := prog.MethodSets.MethodSet(ct).Lookup(mPkg, mName)

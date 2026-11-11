@@ -197,6 +197,33 @@ func isAuditedStdAliasValue(audited bool, v ssa.Value) bool {
 	return false
 }
 
+func isAdmittedOSGetwdErrorType(audited bool, ct types.Type, fp *freshParamAnalysis) bool {
+	if !audited || ct == nil || fp == nil || fp.summary == nil || fp.summary.userMutatesOSWrapperError {
+		return false
+	}
+	u := types.Unalias(ct)
+	if ptr, ok := u.(*types.Pointer); ok {
+		named, ok := types.Unalias(ptr.Elem()).(*types.Named)
+		if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+			return false
+		}
+		pkgPath, name := named.Obj().Pkg().Path(), named.Obj().Name()
+		return (pkgPath == "os" && name == "SyscallError") || ((pkgPath == "io/fs" || pkgPath == "os") && name == "PathError") || (pkgPath == "syscall" && name == "Errno")
+	}
+	named, ok := u.(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+		return false
+	}
+	return named.Obj().Pkg().Path() == "syscall" && named.Obj().Name() == "Errno"
+}
+
+func isAdmittedOSGetwdErrorMethod(audited bool, callee *ssa.Function, fp *freshParamAnalysis) bool {
+	if !audited || callee == nil || callee.Name() != "Error" || callee.Signature == nil || callee.Signature.Recv() == nil {
+		return false
+	}
+	return isAdmittedOSGetwdErrorType(audited, callee.Signature.Recv().Type(), fp)
+}
+
 func admitPureDelegateCall(audited bool, pureDelegates map[string]bool, pkgPath string, callee *ssa.Function, site ssa.CallInstruction, callerStd bool, fp *freshParamAnalysis) bool {
 	if !audited || pkgPath == "" {
 		return false
@@ -205,7 +232,15 @@ func admitPureDelegateCall(audited bool, pureDelegates map[string]bool, pkgPath 
 		return true
 	}
 	if !pureDelegates[pkgPath] {
-		return false
+		if site == nil || site.Common() == nil || !site.Common().IsInvoke() || !isAdmittedOSGetwdErrorMethod(audited, callee, fp) {
+			return false
+		}
+		siteFP := contextCancelMethodFP(site, fp)
+		if !subjectClosedDynamicValue(site.Common().Value, make(map[ssa.Value]bool), siteFP) {
+			return false
+		}
+		held, ok := closedInvokeTargets(site, siteFP)
+		return ok && held[callee]
 	}
 	if callerStd || isInternalStdPackagePath(pkgPath) {
 		return true
@@ -295,6 +330,9 @@ func newBitOnlyFreshParamAnalysis(propertyHarnessAudited, selectionAudited bool,
 		idx.structWholeStores = summary.structWholeStores
 		idx.structPoisoned = summary.structPoisoned
 		idx.structReferencedByType = summary.structReferencedByType
+		idx.programSites = summary.sites
+		idx.programValueRef = summary.valueRef
+		idx.programFunctions = summary.allFunctions
 	}
 	return &freshParamAnalysis{ssaProgramIndex: idx}
 }

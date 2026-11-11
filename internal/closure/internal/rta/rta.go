@@ -151,6 +151,8 @@ type attributedRTA struct {
 	pureHarnessStdTypes map[types.Type]bool
 	pkgPaths            map[*ssa.Function]string
 	unwrappedCallees    map[*ssa.Function]*ssa.Function
+	globalReadMasks     map[*ssa.Global]uint64
+	pendingGlobalFuncs  map[*ssa.Global][]pendingGlobalFunc
 }
 
 func newAttributedRTA(prog *ssa.Program, seeds *Seeds) *attributedRTA {
@@ -319,17 +321,33 @@ func (r *attributedRTA) visitFunc(f *ssa.Function, masks uint64, harnessStdPlane
 			case *ssa.MakeClosure:
 				if onlyDirectCallCallee(instr) {
 					rands = rands[1:]
+				} else if g := onlyStaticGlobalStoreTarget(instr); g != nil {
+					if fn, ok := instr.Fn.(*ssa.Function); ok {
+						r.visitGlobalStoredFunc(g, fn, masks, harnessStdPlane, !ignoreReflectCallee)
+						rands = rands[1:]
+					}
 				}
 			}
 			for _, op := range rands {
-				if g, ok := (*op).(*ssa.Function); ok {
-					if harnessStdPlane {
-						r.visitHarnessStdAddrTakenFunc(g, masks)
-					} else {
-						r.visitAddrTakenFunc(g, masks)
-						if !ignoreReflectCallee {
-							r.noteReflectCalleeUse(g, masks)
+				switch v := (*op).(type) {
+				case *ssa.Function:
+					if store, isStore := instr.(*ssa.Store); isStore && op == &store.Val && op != &store.Addr {
+						if g := staticGlobalStoreRoot(store.Addr); g != nil {
+							r.visitGlobalStoredFunc(g, v, masks, harnessStdPlane, !ignoreReflectCallee)
+							continue
 						}
+					}
+					if harnessStdPlane {
+						r.visitHarnessStdAddrTakenFunc(v, masks)
+					} else {
+						r.visitAddrTakenFunc(v, masks)
+						if !ignoreReflectCallee {
+							r.noteReflectCalleeUse(v, masks)
+						}
+					}
+				case *ssa.Global:
+					if !isPureStaticGlobalStoreAddrOp(instr, op, v) {
+						r.noteGlobalRead(v, masks)
 					}
 				}
 			}

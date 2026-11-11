@@ -8,6 +8,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // locallyClosedDynamicValue is the intraprocedural projection of
@@ -554,6 +555,15 @@ func enumUserStructClosed(named *types.Named, fp *freshParamAnalysis) bool {
 		return true
 	}
 	if fp.structPoisoned[structFieldKey{named: named, field: -1}] || !fp.structReferencedByType[named] {
+		if trace.AnyEnabled() {
+			reason := "unreferenced"
+			if fp.structPoisoned[structFieldKey{named: named, field: -1}] {
+				reason = "struct_poisoned"
+			}
+			trace.Emit(nil, trace.DomainClosure, "closure.struct.unclosed", named.String(),
+				trace.String("reason", reason),
+			)
+		}
 		return false
 	}
 	if fp.enumStructVisiting[named] {
@@ -592,6 +602,20 @@ func enumUserStructClosed(named *types.Named, fp *freshParamAnalysis) bool {
 			usedSubject = true
 		}
 		if !ok {
+			if trace.AnyEnabled() {
+				var fnName, storeValStr string
+				if wv != nil {
+					storeValStr = wv.String()
+					if wv.Parent() != nil {
+						fnName = wv.Parent().String()
+					}
+				}
+				trace.Emit(nil, trace.DomainClosure, "closure.struct.unclosed", named.String(),
+					trace.String("reason", "whole_store"),
+					trace.String("store_val", storeValStr),
+					trace.String("fn", fnName),
+				)
+			}
 			if usedSubject && fp.usedSubject != nil {
 				*fp.usedSubject = true
 			}
@@ -608,6 +632,12 @@ func enumUserStructClosed(named *types.Named, fp *freshParamAnalysis) bool {
 		}
 		key := structFieldKey{named: named, field: f}
 		if fp.structPoisoned[key] {
+			if trace.AnyEnabled() {
+				trace.Emit(nil, trace.DomainClosure, "closure.struct.unclosed", named.String(),
+					trace.String("reason", "field_poisoned"),
+					trace.String("field", st.Field(f).Name()),
+				)
+			}
 			if topLevel && fp.summary != nil && !fp.ignoreContextValuePayload {
 				fp.summary.enumStructClosed[named] = false
 			}
@@ -624,6 +654,12 @@ func enumUserStructClosed(named *types.Named, fp *freshParamAnalysis) bool {
 					usedSubject = true
 				}
 				if !ok {
+					if trace.AnyEnabled() {
+						trace.Emit(nil, trace.DomainClosure, "closure.struct.unclosed", named.String(),
+							trace.String("reason", "inner_struct"),
+							trace.String("field", st.Field(f).Name()),
+						)
+					}
 					if usedSubject && fp.usedSubject != nil {
 						*fp.usedSubject = true
 					}
@@ -643,6 +679,21 @@ func enumUserStructClosed(named *types.Named, fp *freshParamAnalysis) bool {
 				usedSubject = true
 			}
 			if !ok {
+				if trace.AnyEnabled() {
+					var fnName, storeValStr string
+					if sv != nil {
+						storeValStr = sv.String()
+						if sv.Parent() != nil {
+							fnName = sv.Parent().String()
+						}
+					}
+					trace.Emit(nil, trace.DomainClosure, "closure.struct.unclosed", named.String(),
+						trace.String("reason", "field_store"),
+						trace.String("field", st.Field(f).Name()),
+						trace.String("store_val", storeValStr),
+						trace.String("fn", fnName),
+					)
+				}
 				if usedSubject && fp.usedSubject != nil {
 					*fp.usedSubject = true
 				}

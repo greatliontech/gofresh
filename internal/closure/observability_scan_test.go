@@ -8645,6 +8645,32 @@ func UnrelatedImpureStringerCaller() string {
 func PureItoaCaller(x int) string {
 	return strconv.Itoa(x)
 }
+
+func absWrapper(dir string) (string, error) {
+	return filepath.Abs(dir)
+}
+
+type absErrHolder struct {
+	err error
+}
+
+func StoreAbsWrapperError(dir string) absErrHolder {
+	_, err := absWrapper(dir)
+	return absErrHolder{err: err}
+}
+
+func FormatPureHolderError() string {
+	h := absErrHolder{err: errors.New("pure")}
+	return h.err.Error()
+}
+
+func AssertAbsWrapperTimeout() bool {
+	h := absErrHolder{err: errors.New("pure")}
+	if u, ok := h.err.(interface{ Timeout() bool }); ok {
+		return u.Timeout()
+	}
+	return false
+}
 `
 	if err := os.WriteFile(filepath.Join(dir, "p_test.go"), []byte(src), 0o600); err != nil {
 		t.Fatal(err)
@@ -8699,6 +8725,109 @@ func PureFn() int { return 1 }
 		t.Fatal(err)
 	}
 
+	mutatedPathErrDir := filepath.Join(dir, "mutatedpatherr")
+	if err := os.MkdirAll(mutatedPathErrDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mutatedPathErrSrc := `package mutatedpatherr
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strconv"
+)
+
+type envErr struct{}
+
+func (envErr) Error() string {
+	return strconv.Itoa(len(os.Environ()))
+}
+
+type errHolder struct {
+	err error
+}
+
+func StoreMutatedAbsError(dir string) errHolder {
+	_, err := filepath.Abs(dir)
+	if pe, ok := err.(*os.PathError); ok {
+		pe.Err = envErr{}
+	}
+	return errHolder{err: err}
+}
+
+func FormatMutatedHolderError() string {
+	h := errHolder{err: errors.New("pure")}
+	return h.err.Error()
+}
+`
+	if err := os.WriteFile(filepath.Join(mutatedPathErrDir, "p.go"), []byte(mutatedPathErrSrc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reflectSCCDir := filepath.Join(dir, "reflectscc")
+	if err := os.MkdirAll(reflectSCCDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reflectSCCSrc := `package reflectscc
+
+import (
+	"errors"
+	"os"
+	"reflect"
+	"strconv"
+)
+
+type envErr struct{}
+
+func (envErr) Error() string {
+	return strconv.Itoa(len(os.Environ()))
+}
+
+type dummy struct {
+	X int
+}
+
+type holder struct {
+	Err error
+}
+
+type nodeA struct{}
+type nodeC struct{}
+
+func (a *nodeA) step(n int, h *holder) {
+	var d dummy
+	_ = reflect.ValueOf(&d)
+	if n <= 0 {
+		var c nodeC
+		c.step(n, h)
+		return
+	}
+	var c nodeC
+	c.step(n-1, h)
+}
+
+func (c *nodeC) step(n int, h *holder) {
+	v := reflect.ValueOf(h)
+	if n <= 0 {
+		v.Elem().Field(0).Set(reflect.ValueOf(error(envErr{})))
+		return
+	}
+	var a nodeA
+	a.step(n-1, h)
+}
+
+func TriggerReflectSCC() string {
+	h := holder{Err: errors.New("pure")}
+	var a nodeA
+	a.step(2, &h)
+	return h.Err.Error()
+}
+`
+	if err := os.WriteFile(filepath.Join(reflectSCCDir, "p.go"), []byte(reflectSCCSrc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	h, err := newAt(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -8709,6 +8838,8 @@ func PureFn() int { return 1 }
 		{Package: "example.com/precision", Symbol: "TestParamBackedFreshOpenFileNameRefused"},
 		{Package: "example.com/precision", Symbol: "ParseAndFormatNumError"},
 		{Package: "example.com/precision", Symbol: "PureItoaCaller"},
+		{Package: "example.com/precision", Symbol: "FormatPureHolderError"},
+		{Package: "example.com/precision", Symbol: "AssertAbsWrapperTimeout"},
 		{Package: "example.com/precision", Symbol: "UnrelatedImpureStringerCaller"},
 	}
 	got, err := h.ComputeObservabilityBatch(subjects)
@@ -8726,6 +8857,28 @@ func PureFn() int { return 1 }
 	}
 	if obs := got[Subject{Package: "example.com/precision", Symbol: "PureItoaCaller"}]; !obs.Observable || !obs.EffectFree {
 		t.Errorf("PureItoaCaller = %+v, want Observable=true EffectFree=true", obs)
+	}
+	if obs := got[Subject{Package: "example.com/precision", Symbol: "FormatPureHolderError"}]; !obs.Observable || !obs.EffectFree {
+		t.Errorf("FormatPureHolderError = %+v, want Observable=true EffectFree=true", obs)
+	}
+	if obs := got[Subject{Package: "example.com/precision", Symbol: "AssertAbsWrapperTimeout"}]; obs.Observable {
+		t.Errorf("AssertAbsWrapperTimeout = %+v, want Observable=false", obs)
+	}
+	mutatedSubj := Subject{Package: "example.com/precision/mutatedpatherr", Symbol: "FormatMutatedHolderError"}
+	mutatedGot, err := h.ComputeObservabilityBatch([]Subject{mutatedSubj})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs := mutatedGot[mutatedSubj]; obs.Observable {
+		t.Errorf("FormatMutatedHolderError = %+v, want Observable=false when *os.PathError is mutated", obs)
+	}
+	reflectSubj := Subject{Package: "example.com/precision/reflectscc", Symbol: "TriggerReflectSCC"}
+	reflectGot, err := h.ComputeObservabilityBatch([]Subject{reflectSubj})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs := reflectGot[reflectSubj]; obs.Observable {
+		t.Errorf("TriggerReflectSCC = %+v, want Observable=false when cyclic SCC reaches reflect mutation", obs)
 	}
 	poisonSubj := Subject{Package: "example.com/precision/poisonednumerr", Symbol: "WrapImpureNumError"}
 	poisonGot, err := h.ComputeObservabilityBatch([]Subject{poisonSubj})

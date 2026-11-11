@@ -312,6 +312,18 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 			protoaudit.DeriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
 	}
 	if tracing {
+		for _, v := range fact.Mutates {
+			trace.Emit(nil, trace.DomainDynstate, "dynstate.var.reject", p.PkgPath,
+				trace.String("var", v),
+				trace.String("kind", "mutates"),
+			)
+		}
+		for _, v := range fact.Escapes {
+			trace.Emit(nil, trace.DomainDynstate, "dynstate.var.reject", p.PkgPath,
+				trace.String("var", v),
+				trace.String("kind", "escapes"),
+			)
+		}
 		trace.Emit(nil, trace.DomainDynstate, "dynstate.factof.done", p.PkgPath,
 			trace.Bool("audited", audited),
 			trace.Bool("single_subject", singleSubject),

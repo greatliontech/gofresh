@@ -2072,7 +2072,11 @@ from an unmutated standard-library sentinel global (`io.Discard`,
 stores a carrier-free concrete value that no code in the analyzed program
 writes or takes the address of outside package initialization,
 from the return expressions of a static call to an audited
-standard-library function or a reached non-recursive, non-variadic,
+standard-library function (or to `context.Context.Err()` on a closed standard
+context receiver when `context.Canceled` is unmutated, or to `os.Getwd()` /
+`path/filepath.Abs` for `error.Error()` dispatch when the `os` sentinel error
+globals and `os.PathError` / `os.SyscallError` wrappers are unmutated) or a
+reached non-recursive, non-variadic,
 non-dynamically-targeted in-module function whose dynamic-carrying arguments
 themselves close under the closed-value walk, or
 from a parameter whose function is not dynamically targeted, closes over

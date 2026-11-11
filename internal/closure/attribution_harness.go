@@ -3,6 +3,7 @@ package closure
 import (
 	"go/token"
 	"go/types"
+	"slices"
 	"sort"
 	"strings"
 
@@ -1346,6 +1347,61 @@ func isAddrOnlyForUnsafePointerConvert(site ssa.CallInstruction) bool {
 		}
 	}
 	return sawUse
+}
+
+func isNonMutatingReflectValueRoot(val ssa.Value) bool {
+	return isNonMutatingReflectValueRootSeen(val, nil)
+}
+
+func isNonMutatingReflectValueRootSeen(val ssa.Value, seen map[ssa.Value]bool) bool {
+	if val == nil || val.Referrers() == nil {
+		return false
+	}
+	if seen[val] {
+		return true
+	}
+	if seen == nil {
+		seen = make(map[ssa.Value]bool, 4)
+	}
+	seen[val] = true
+	for _, ref := range *val.Referrers() {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+		case *ssa.Phi:
+			if !isNonMutatingReflectValueRootSeen(r, seen) {
+				return false
+			}
+		case ssa.CallInstruction:
+			c := r.Common()
+			if c == nil || c.IsInvoke() || len(c.Args) == 0 || c.Args[0] != val || slices.Contains(c.Args[1:], val) {
+				return false
+			}
+			callee := c.StaticCallee()
+			if callee == nil || funcPkgPath(callee) != "reflect" {
+				return false
+			}
+			sym := strings.TrimSuffix(strings.TrimSuffix(functionSymbolName(callee), "$bound"), "$thunk")
+			switch sym {
+			case "Elem", "Indirect", "Field", "FieldByName", "FieldByIndex", "FieldByNameFunc", "Index", "MapIndex", "Slice", "Slice3", "Convert":
+				if !isNonMutatingReflectValueRootSeen(r.Value(), seen) {
+					return false
+				}
+			case "Addr":
+				if !isAddrOnlyForUnsafePointerConvert(r) {
+					return false
+				}
+			case "Kind", "IsNil", "IsValid", "IsZero", "Int", "Uint", "Float", "Complex", "Bool", "String",
+				"Len", "Cap", "NumField", "NumMethod", "Type", "CanAddr", "CanSet", "CanInterface",
+				"CanInt", "CanUint", "CanFloat", "CanComplex", "Comparable",
+				"OverflowInt", "OverflowUint", "OverflowFloat", "OverflowComplex", "Interface":
+			default:
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func isStdDeserializerCall(pkgPath, sym string) bool {

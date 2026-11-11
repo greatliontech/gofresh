@@ -229,6 +229,8 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 			trace.Int("objects", len(a.seenObjects)),
 			trace.Int("effects", len(res.effects)),
 			trace.Bool("widen", res.widen),
+			trace.String("widen_reason", res.widenReason),
+			trace.String("reason", res.reason),
 			trace.Int64("elapsed_ns", time.Since(start).Nanoseconds()),
 		)
 	}
