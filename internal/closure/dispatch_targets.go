@@ -20,12 +20,14 @@ func newDispatchWalkStates(fp *freshParamAnalysis) (evalFP, collectFP *freshPara
 			e.rootLowlink = fp.rootLowlink
 			e.rootHasLeaf = fp.rootHasLeaf
 			e.rootUsedSubject = fp.rootUsedSubject
+			e.carrierRootDone = fp.carrierRootDone
 		} else {
-			e.stackDepth = map[ssa.Value]int{}
+			e.stackDepth = map[carrierMemoKey]int{}
 			e.rootDone = map[ssa.Value]bool{}
 			e.rootLowlink = map[ssa.Value]int{}
 			e.rootHasLeaf = map[ssa.Value]bool{}
 			e.rootUsedSubject = map[ssa.Value]bool{}
+			e.carrierRootDone = map[carrierMemoKey]carrierRootMemoEntry{}
 		}
 		e.lowlink = &lowlink1
 		e.hasLeaf = &hasLeaf1
@@ -45,6 +47,7 @@ func newDispatchWalkStates(fp *freshParamAnalysis) (evalFP, collectFP *freshPara
 		col.rootLowlink = nil
 		col.rootHasLeaf = nil
 		col.rootUsedSubject = nil
+		col.carrierRootDone = nil
 		col.rootSeen = nil
 		collectFP = &col
 	} else {
@@ -52,7 +55,7 @@ func newDispatchWalkStates(fp *freshParamAnalysis) (evalFP, collectFP *freshPara
 	}
 	propagate = func() (bool, bool) {
 		usedSubj := usedSubject1 || usedSubject2
-		noEscape := lowlink1 == 0 && lowlink2 == 0 && (fp == nil || fp.baseCarrierNamed == nil)
+		noEscape := lowlink1 == 0 && lowlink2 == 0
 		if fp != nil {
 			if fp.lowlink != nil {
 				if lowlink1 != 0 && (*fp.lowlink == 0 || lowlink1 < *fp.lowlink) {
@@ -958,6 +961,7 @@ func withIgnoreContextValuePayload(fp *freshParamAnalysis) *freshParamAnalysis {
 		copied.rootLowlink = map[ssa.Value]int{}
 		copied.rootHasLeaf = map[ssa.Value]bool{}
 		copied.rootUsedSubject = map[ssa.Value]bool{}
+		copied.carrierRootDone = map[carrierMemoKey]carrierRootMemoEntry{}
 	}
 	return &copied
 }

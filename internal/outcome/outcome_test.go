@@ -28,6 +28,9 @@ func TestSupportOwnsItsSubjectsAndRequiresPremises(t *testing.T) {
 	if got := support.Reason(binding); got != "" {
 		t.Fatalf("supported binding refused: %q", got)
 	}
+	if got := support.Reason(Bind(new(Span), "worker", "environment", "", "")); got == "" {
+		t.Fatal("mismatched binding accepted")
+	}
 	if got := Prepare(binding, []string{"a"}, "unsupported operation").Reason(binding); got != "unsupported operation" {
 		t.Fatalf("lost refusal: %q", got)
 	}

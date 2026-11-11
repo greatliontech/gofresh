@@ -402,7 +402,7 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 			seen = map[ssa.Value]bool{}
 		}
 		rootFP := *fp
-		rootFP.stackDepth = map[ssa.Value]int{}
+		rootFP.stackDepth = map[carrierMemoKey]int{}
 		rootFP.lowlink = &lowlink
 		rootFP.hasLeaf = &hasLeaf
 		rootFP.usedSubject = &usedSubject
@@ -410,8 +410,10 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 		rootFP.rootLowlink = map[ssa.Value]int{}
 		rootFP.rootHasLeaf = map[ssa.Value]bool{}
 		rootFP.rootUsedSubject = map[ssa.Value]bool{}
+		rootFP.carrierRootDone = map[carrierMemoKey]carrierRootMemoEntry{}
 		fp = &rootFP
 	}
+	stackKey := carrierMemoKey{value: value, named: fp.baseCarrierNamed}
 	if outsideCallee {
 		if inProgScope && fp.summary != nil {
 			progMemo := fp.summary.progClosedDone
@@ -424,6 +426,18 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 				}
 				return r
 			}
+			if fp.baseCarrierNamed != nil {
+				carrierProgMemo := fp.summary.progCarrierDone
+				if fp.enumOnly {
+					carrierProgMemo = fp.summary.enumCarrierDone
+				}
+				if r, ok := carrierProgMemo[stackKey]; ok && (r || len(fp.enumStructVisiting) == 0) {
+					if r {
+						markDynamicLeaf(fp)
+					}
+					return r
+				}
+			}
 		}
 		if fp.closedDone != nil {
 			if r, ok := fp.closedDone[value]; ok && (r || fp.baseCarrierNamed == nil) {
@@ -433,15 +447,23 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 				return r
 			}
 		}
+		if fp.baseCarrierNamed != nil && fp.carrierDone != nil {
+			if r, ok := fp.carrierDone[stackKey]; ok {
+				if r {
+					markDynamicLeaf(fp)
+				}
+				return r
+			}
+		}
 	} else if done != nil {
-		if r, ok := done[value]; ok && (r || fp.baseCarrierNamed == nil) {
+		if r, ok := done[value]; ok {
 			if r {
 				markDynamicLeaf(fp)
 			}
 			return r
 		}
 	}
-	if d, onStack := fp.stackDepth[value]; onStack {
+	if d, onStack := fp.stackDepth[stackKey]; onStack {
 		if fp.selectionAudited && !isTestingTBInterface(value.Type()) {
 			if *fp.lowlink == 0 || d < *fp.lowlink {
 				*fp.lowlink = d
@@ -450,22 +472,37 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 		}
 		return false
 	}
-	if outsideCallee && fp.rootDone != nil {
-		if r, ok := fp.rootDone[value]; ok {
-			if ll := fp.rootLowlink[value]; ll != 0 && (*fp.lowlink == 0 || ll < *fp.lowlink) {
-				*fp.lowlink = ll
+	if outsideCallee {
+		if fp.baseCarrierNamed == nil && fp.rootDone != nil {
+			if r, ok := fp.rootDone[value]; ok {
+				if ll := fp.rootLowlink[value]; ll != 0 && (*fp.lowlink == 0 || ll < *fp.lowlink) {
+					*fp.lowlink = ll
+				}
+				if r && fp.rootHasLeaf[value] {
+					markDynamicLeaf(fp)
+				}
+				if fp.rootUsedSubject[value] && fp.usedSubject != nil {
+					*fp.usedSubject = true
+				}
+				return r
 			}
-			if r && fp.rootHasLeaf[value] {
-				markDynamicLeaf(fp)
+		} else if fp.baseCarrierNamed != nil && fp.carrierRootDone != nil {
+			if entry, ok := fp.carrierRootDone[stackKey]; ok {
+				if entry.lowlink != 0 && (*fp.lowlink == 0 || entry.lowlink < *fp.lowlink) {
+					*fp.lowlink = entry.lowlink
+				}
+				if entry.closed && entry.hasLeaf {
+					markDynamicLeaf(fp)
+				}
+				if entry.usedSubject && fp.usedSubject != nil {
+					*fp.usedSubject = true
+				}
+				return entry.closed
 			}
-			if fp.rootUsedSubject[value] && fp.usedSubject != nil {
-				*fp.usedSubject = true
-			}
-			return r
 		}
 	}
 	myDepth := fp.baseDepth + len(fp.stackDepth) + 1
-	fp.stackDepth[value] = myDepth
+	fp.stackDepth[stackKey] = myDepth
 	outerLowlink := *fp.lowlink
 	*fp.lowlink = 0
 	outerHasLeaf := *fp.hasLeaf
@@ -475,7 +512,7 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 
 	r := walkDynamicValueUncached(value, nil, seen, done, fp)
 
-	delete(fp.stackDepth, value)
+	delete(fp.stackDepth, stackKey)
 	myLowlink := *fp.lowlink
 	myHasLeaf := *fp.hasLeaf
 	myUsedSubject := *fp.usedSubject
@@ -495,6 +532,11 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 					delete(fp.rootUsedSubject, k)
 				}
 			}
+			for k, entry := range fp.carrierRootDone {
+				if entry.lowlink >= myDepth {
+					delete(fp.carrierRootDone, k)
+				}
+			}
 		}
 	}
 	*fp.lowlink = outerLowlink
@@ -506,24 +548,61 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 
 	if myLowlink == 0 && (!r || myHasLeaf) {
 		if outsideCallee {
-			if fp.closedDone != nil && fp.baseCarrierNamed == nil {
-				fp.closedDone[value] = r
-			}
-			if inProgScope && fp.summary != nil && !myUsedSubject && len(fp.enumStructVisiting) == 0 && fp.baseCarrierNamed == nil {
-				progMemo := fp.summary.progClosedDone
-				if fp.enumOnly {
-					progMemo = fp.summary.enumClosedDone
+			if fp.baseCarrierNamed == nil {
+				if fp.closedDone != nil {
+					fp.closedDone[value] = r
 				}
-				progMemo[value] = r
+				if fp.rootDone != nil {
+					fp.rootDone[value] = r
+					fp.rootLowlink[value] = 0
+					fp.rootHasLeaf[value] = r && myHasLeaf
+					fp.rootUsedSubject[value] = myUsedSubject
+				}
+				if inProgScope && fp.summary != nil && !myUsedSubject && len(fp.enumStructVisiting) == 0 {
+					progMemo := fp.summary.progClosedDone
+					if fp.enumOnly {
+						progMemo = fp.summary.enumClosedDone
+					}
+					progMemo[value] = r
+				}
+			} else {
+				ckey := carrierMemoKey{value: value, named: fp.baseCarrierNamed}
+				if fp.carrierDone != nil {
+					fp.carrierDone[ckey] = r
+				}
+				if fp.carrierRootDone != nil {
+					fp.carrierRootDone[ckey] = carrierRootMemoEntry{
+						closed:      r,
+						hasLeaf:     r && myHasLeaf,
+						usedSubject: myUsedSubject,
+						lowlink:     0,
+					}
+				}
+				if inProgScope && fp.summary != nil && !myUsedSubject && len(fp.enumStructVisiting) == 0 {
+					carrierProgMemo := fp.summary.progCarrierDone
+					if fp.enumOnly {
+						carrierProgMemo = fp.summary.enumCarrierDone
+					}
+					carrierProgMemo[ckey] = r
+				}
 			}
-		} else if done != nil && fp.baseCarrierNamed == nil {
+		} else if done != nil {
 			done[value] = r
 		}
-	} else if outsideCallee && fp.rootDone != nil {
-		fp.rootDone[value] = r
-		fp.rootLowlink[value] = myLowlink
-		fp.rootHasLeaf[value] = r && myHasLeaf
-		fp.rootUsedSubject[value] = myUsedSubject
+	} else if outsideCallee {
+		if fp.baseCarrierNamed == nil && fp.rootDone != nil {
+			fp.rootDone[value] = r
+			fp.rootLowlink[value] = myLowlink
+			fp.rootHasLeaf[value] = r && myHasLeaf
+			fp.rootUsedSubject[value] = myUsedSubject
+		} else if fp.baseCarrierNamed != nil && fp.carrierRootDone != nil {
+			fp.carrierRootDone[carrierMemoKey{value: value, named: fp.baseCarrierNamed}] = carrierRootMemoEntry{
+				closed:      r,
+				hasLeaf:     r && myHasLeaf,
+				usedSubject: myUsedSubject,
+				lowlink:     myLowlink,
+			}
+		}
 	}
 	return r
 }
@@ -1111,7 +1190,9 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 				if cell := cellOf(alloc, map[ssa.Value]bool{}); cell != nil {
 					if !collecting {
 						if fp != nil && fp.stackDepth != nil {
-							if d, onStack := fp.stackDepth[cell]; onStack {
+							cellKey := carrierMemoKey{value: cell, named: fp.baseCarrierNamed}
+							valKey := carrierMemoKey{value: value, named: fp.baseCarrierNamed}
+							if d, onStack := fp.stackDepth[cellKey]; onStack {
 								if fp.selectionAudited {
 									if *fp.lowlink == 0 || d < *fp.lowlink {
 										*fp.lowlink = d
@@ -1120,8 +1201,8 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 								}
 								return false
 							}
-							fp.stackDepth[cell] = fp.stackDepth[value]
-							defer delete(fp.stackDepth, cell)
+							fp.stackDepth[cellKey] = fp.stackDepth[valKey]
+							defer delete(fp.stackDepth, cellKey)
 						} else {
 							if seen[cell] {
 								return false
@@ -1188,7 +1269,11 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 				}
 				outerFP := *fp
 				outerFP.baseCarrierNamed = outerNamed
-				return walkDynamicValue(v.X, nil, seen, done, &outerFP)
+				outerDone := done
+				if fp.baseCarrierNamed != outerNamed && done != nil {
+					outerDone = map[ssa.Value]bool{}
+				}
+				return walkDynamicValue(v.X, nil, seen, outerDone, &outerFP)
 			}
 			if closed, handled := walkUserStructFieldDynamicValue(v.X, v.Field, collect, seen, done, fp); handled {
 				if !closed {
@@ -1421,7 +1506,9 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		}
 		if !collecting {
 			if fp != nil && fp.stackDepth != nil {
-				if d, onStack := fp.stackDepth[cell]; onStack {
+				cellKey := carrierMemoKey{value: cell, named: fp.baseCarrierNamed}
+				valKey := carrierMemoKey{value: value, named: fp.baseCarrierNamed}
+				if d, onStack := fp.stackDepth[cellKey]; onStack {
 					if fp.selectionAudited {
 						if *fp.lowlink == 0 || d < *fp.lowlink {
 							*fp.lowlink = d
@@ -1430,8 +1517,8 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 					}
 					return false
 				}
-				fp.stackDepth[cell] = fp.stackDepth[value]
-				defer delete(fp.stackDepth, cell)
+				fp.stackDepth[cellKey] = fp.stackDepth[valKey]
+				defer delete(fp.stackDepth, cellKey)
 			} else {
 				if seen[cell] {
 					return false
@@ -1462,6 +1549,8 @@ func walkUserStructFieldDynamicValue(base ssa.Value, fieldIdx int, collect *dyna
 	fieldDone := done
 	if fp.rootDone != nil {
 		fieldDone = fp.rootDone
+	} else if done != nil {
+		fieldDone = map[ssa.Value]bool{}
 	}
 	checkInnerStruct := func(named *types.Named) bool {
 		if named == nil {
@@ -1524,7 +1613,11 @@ func walkUserStructFieldDynamicValue(base ssa.Value, fieldIdx int, collect *dyna
 		}
 		baseFP := *fp
 		baseFP.baseCarrierNamed = named
-		if !walkDynamicValue(base, nil, seen, done, &baseFP) {
+		baseDone := done
+		if fp.baseCarrierNamed != named && done != nil {
+			baseDone = map[ssa.Value]bool{}
+		}
+		if !walkDynamicValue(base, nil, seen, baseDone, &baseFP) {
 			return false, true
 		}
 		if fp.hasLeaf != nil {

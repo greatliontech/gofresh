@@ -33,6 +33,18 @@ type structFieldKey struct {
 	field int
 }
 
+type carrierMemoKey struct {
+	value ssa.Value
+	named *types.Named
+}
+
+type carrierRootMemoEntry struct {
+	closed      bool
+	hasLeaf     bool
+	usedSubject bool
+	lowlink     int
+}
+
 type dynamicSeedEntry struct {
 	types []types.Type
 	funcs []*ssa.Function
@@ -66,6 +78,8 @@ type callerReferenceSummary struct {
 
 	progClosedDone    map[ssa.Value]bool
 	enumClosedDone    map[ssa.Value]bool
+	progCarrierDone   map[carrierMemoKey]bool
+	enumCarrierDone   map[carrierMemoKey]bool
 	progTypesMemo     map[ssa.Value][]types.Type
 	progTypesFailed   map[ssa.Value]bool
 	enumTypesMemo     map[ssa.Value][]types.Type
@@ -294,6 +308,8 @@ func enumerateCallerReferencesWithOrdered(audited, harnessAudited bool, rootPkgP
 		userPaths:              userPaths,
 		progClosedDone:         make(map[ssa.Value]bool),
 		enumClosedDone:         make(map[ssa.Value]bool),
+		progCarrierDone:        make(map[carrierMemoKey]bool),
+		enumCarrierDone:        make(map[carrierMemoKey]bool),
 		progTypesMemo:          make(map[ssa.Value][]types.Type),
 		progTypesFailed:        make(map[ssa.Value]bool),
 		enumTypesMemo:          make(map[ssa.Value][]types.Type),

@@ -8671,6 +8671,62 @@ func AssertAbsWrapperTimeout() bool {
 	}
 	return false
 }
+
+type carrierDiamond struct {
+	err error
+}
+
+func (c *carrierDiamond) checkErr() error {
+	if c == nil {
+		return nil
+	}
+	return c.err
+}
+
+func cdStep0(c *carrierDiamond) string {
+	return cdStep1(c) + cdStep1(c)
+}
+
+func cdStep1(c *carrierDiamond) string {
+	return cdStep2(c) + cdStep2(c)
+}
+
+func cdStep2(c *carrierDiamond) string {
+	return cdStep3(c) + cdStep3(c)
+}
+
+func cdStep3(c *carrierDiamond) string {
+	return cdStep4(c) + cdStep4(c)
+}
+
+func cdStep4(c *carrierDiamond) string {
+	if err := c.checkErr(); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func CarrierDiamondInvoke() string {
+	c := &carrierDiamond{err: errors.New("diamond")}
+	return cdStep0(c)
+}
+
+type carrierCycleStruct struct {
+	clean error
+	bad   error
+}
+
+func stepSliceCycle(xs []*carrierCycleStruct) *carrierCycleStruct {
+	return &carrierCycleStruct{clean: xs[0].bad, bad: xs[0].bad}
+}
+
+func CarrierCycleSliceUnclosedField(n int) string {
+	v := &carrierCycleStruct{clean: errors.New("clean"), bad: impureCustomErr{}}
+	for i := 0; i < n; i++ {
+		v = stepSliceCycle([]*carrierCycleStruct{v})
+	}
+	return v.clean.Error()
+}
 `
 	if err := os.WriteFile(filepath.Join(dir, "p_test.go"), []byte(src), 0o600); err != nil {
 		t.Fatal(err)
@@ -8840,6 +8896,8 @@ func TriggerReflectSCC() string {
 		{Package: "example.com/precision", Symbol: "PureItoaCaller"},
 		{Package: "example.com/precision", Symbol: "FormatPureHolderError"},
 		{Package: "example.com/precision", Symbol: "AssertAbsWrapperTimeout"},
+		{Package: "example.com/precision", Symbol: "CarrierDiamondInvoke"},
+		{Package: "example.com/precision", Symbol: "CarrierCycleSliceUnclosedField"},
 		{Package: "example.com/precision", Symbol: "UnrelatedImpureStringerCaller"},
 	}
 	got, err := h.ComputeObservabilityBatch(subjects)
@@ -8863,6 +8921,12 @@ func TriggerReflectSCC() string {
 	}
 	if obs := got[Subject{Package: "example.com/precision", Symbol: "AssertAbsWrapperTimeout"}]; obs.Observable {
 		t.Errorf("AssertAbsWrapperTimeout = %+v, want Observable=false", obs)
+	}
+	if obs := got[Subject{Package: "example.com/precision", Symbol: "CarrierDiamondInvoke"}]; !obs.Observable || !obs.EffectFree {
+		t.Errorf("CarrierDiamondInvoke = %+v, want Observable=true EffectFree=true", obs)
+	}
+	if obs := got[Subject{Package: "example.com/precision", Symbol: "CarrierCycleSliceUnclosedField"}]; obs.Observable {
+		t.Errorf("CarrierCycleSliceUnclosedField = %+v, want Observable=false", obs)
 	}
 	mutatedSubj := Subject{Package: "example.com/precision/mutatedpatherr", Symbol: "FormatMutatedHolderError"}
 	mutatedGot, err := h.ComputeObservabilityBatch([]Subject{mutatedSubj})

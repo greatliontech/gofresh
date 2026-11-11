@@ -263,9 +263,14 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 	calleeFP.calleeDepth = calleeDepth
 	calleeFP.baseDepth = depth
 	argCheckFP := *fp
+	argCheckFP.baseCarrierNamed = nil
 	argCheckFP.calleeSeen = calleeSeen
 	argCheckFP.calleeDepth = calleeDepth
 	argCheckFP.baseDepth = depth
+	argDone := done
+	if fp.baseCarrierNamed != nil && done != nil {
+		argDone = map[ssa.Value]bool{}
+	}
 	for i, arg := range callArgs {
 		if boundRecvCall && i == 0 {
 			continue
@@ -289,7 +294,11 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 					}
 					carrierFP := argCheckFP
 					carrierFP.baseCarrierNamed = named
-					if !walkDynamicValue(arg, nil, seen, done, &carrierFP) {
+					carrierDone := done
+					if fp.baseCarrierNamed != named && done != nil {
+						carrierDone = map[ssa.Value]bool{}
+					}
+					if !walkDynamicValue(arg, nil, seen, carrierDone, &carrierFP) {
 						return reject("struct_arg_walk")
 					}
 					if argCheckFP.hasLeaf != nil {
@@ -306,7 +315,7 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 					}
 				}
 				if collect.isSeeds() && typeMayCarryDynamicTop(fp.selectionAudited, named) {
-					walkDynamicValue(arg, collect, seen, done, &argCheckFP)
+					walkDynamicValue(arg, collect, seen, argDone, &argCheckFP)
 					collectUserStructSeeds(named, collect, &argCheckFP)
 				}
 				continue
@@ -317,16 +326,16 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 			if argCheckFP.hasLeaf != nil {
 				savedLeaf = *argCheckFP.hasLeaf
 			}
-			if !walkDynamicValue(arg, nil, seen, done, &argCheckFP) {
+			if !walkDynamicValue(arg, nil, seen, argDone, &argCheckFP) {
 				return reject("arg_walk")
 			}
 			if argCheckFP.hasLeaf != nil {
 				*argCheckFP.hasLeaf = savedLeaf
 			}
 		} else if collect.isSeeds() {
-			walkDynamicValue(arg, collect, seen, done, &argCheckFP)
+			walkDynamicValue(arg, collect, seen, argDone, &argCheckFP)
 		} else if collect.collecting() && ((i == 0 && funcPkgPath(callee) == "context" && (callee.Name() == "WithValue" || callee.Name() == "WithoutCancel" || (tupleIndex != 1 && (callee.Name() == "WithCancel" || callee.Name() == "WithCancelCause")))) || isAuditedIOWrapperArg(callee, i)) {
-			if !walkDynamicValue(arg, collect, seen, done, &argCheckFP) {
+			if !walkDynamicValue(arg, collect, seen, argDone, &argCheckFP) {
 				return reject("wrapper_arg_walk")
 			}
 		}

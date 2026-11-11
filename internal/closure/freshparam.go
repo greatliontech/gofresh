@@ -81,6 +81,7 @@ type subjectQuery struct {
 	subjectRoot               *ssa.Function
 
 	closedDone    map[ssa.Value]bool
+	carrierDone   map[carrierMemoKey]bool
 	typesMemo     map[ssa.Value][]types.Type
 	typesFailed   map[ssa.Value]bool
 	funcsMemo     map[ssa.Value][]*ssa.Function
@@ -114,7 +115,7 @@ type calleeFrame struct {
 // walkFrame holds ephemeral per-traversal Tarjan SCC and cycle-detection state
 // for walkDynamicValue.
 type walkFrame struct {
-	stackDepth      map[ssa.Value]int
+	stackDepth      map[carrierMemoKey]int
 	lowlink         *int
 	hasLeaf         *bool
 	usedSubject     *bool
@@ -122,6 +123,7 @@ type walkFrame struct {
 	rootLowlink     map[ssa.Value]int
 	rootHasLeaf     map[ssa.Value]bool
 	rootUsedSubject map[ssa.Value]bool
+	carrierRootDone map[carrierMemoKey]carrierRootMemoEntry
 	rootSeen        map[ssa.Value]bool
 }
 
@@ -336,6 +338,7 @@ func newBitOnlyFreshParamAnalysis(propertyHarnessAudited, selectionAudited bool,
 
 func (fp *freshParamAnalysis) resetDynamicMemos() {
 	fp.closedDone = map[ssa.Value]bool{}
+	fp.carrierDone = map[carrierMemoKey]bool{}
 	fp.typesMemo = map[ssa.Value][]types.Type{}
 	fp.typesFailed = map[ssa.Value]bool{}
 	fp.funcsMemo = map[ssa.Value][]*ssa.Function{}
@@ -418,8 +421,10 @@ func (fp *freshParamAnalysis) withProgramSites(done map[ssa.Value]bool) (*freshP
 		outFP = &copied
 	}
 	outDone := done
-	if fp.rootDone != nil {
+	if fp.baseCarrierNamed == nil && fp.rootDone != nil {
 		outDone = fp.rootDone
+	} else if fp.baseCarrierNamed != nil && done != nil {
+		outDone = map[ssa.Value]bool{}
 	}
 	return outFP, outDone
 }
@@ -444,7 +449,7 @@ func (fp *freshParamAnalysis) newStructStoreWalkFP(inProgramSites, inFieldStore 
 		sub.resetDynamicMemos()
 	}
 	sub.walkFrame = walkFrame{
-		stackDepth:      map[ssa.Value]int{},
+		stackDepth:      map[carrierMemoKey]int{},
 		lowlink:         lowlink,
 		hasLeaf:         hasLeaf,
 		usedSubject:     usedSubject,
@@ -452,6 +457,7 @@ func (fp *freshParamAnalysis) newStructStoreWalkFP(inProgramSites, inFieldStore 
 		rootLowlink:     map[ssa.Value]int{},
 		rootHasLeaf:     map[ssa.Value]bool{},
 		rootUsedSubject: map[ssa.Value]bool{},
+		carrierRootDone: map[carrierMemoKey]carrierRootMemoEntry{},
 	}
 	return &sub
 }
