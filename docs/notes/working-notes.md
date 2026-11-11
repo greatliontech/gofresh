@@ -373,3 +373,22 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
        - Pass 1 (refresh across 5 benchmarks): **`2m15.1s`** (`recorded BenchmarkComputeObservabilityBatch`, `recorded BenchmarkFixturePreparation`, `recorded BenchmarkHashFiles`, `recorded BenchmarkMaximalFileEffects`, `recorded BenchmarkTestingHeavyFileEffects`; `execute:measure_bench`: `94,753ms`, `store:persist_arm`: `164ms`).
        - Post-run `pew status`: **`0.705s`** (`valid` for all 5 benchmarks).
        - Pass 2 (warm zero-edit `100%` serve): **`0.684s`** (`served github.com/greatliontech/gofresh/internal/closure: 5 valid, nothing to run`; `select:check_package`: `260ms`, `select:resolve_packages`: `69ms`).
+   - **Stage 4 (Fix Remaining Bottlenecks & Surviving Mutants Across All 4 Repos + Adversarial Review `7c701af4-9f33-4aeb-a0f3-157d1fdd29a9`)**:
+     - **`gofresh` (`internal/closure`, `internal/outcome`, `.gomutant/outcome-targets.json`)**:
+       - Fixed $O(2^N)$ `walkDynamicValue` DAG re-walk on struct-pointer call-graph DAGs (`baseCarrierNamed != nil`) and unpopulated `fp.rootDone` on `myLowlink == 0`:
+         - Added `carrierMemoKey{value, named}` and `carrierRootMemoEntry` (`progCarrierDone`, `enumCarrierDone`, `fp.carrierDone`, `fp.carrierRootDone`) so `walkDynamicValue` memoizes `(value, fp.baseCarrierNamed)` in $O(1)$ during `baseCarrierNamed != nil` walks without polluting `fp.closedDone` / `fp.rootDone` / `progClosedDone`.
+         - Populated `fp.rootDone` (when `baseCarrierNamed == nil`) and `fp.carrierRootDone` (when `baseCarrierNamed != nil`) when `myLowlink == 0 && (!r || myHasLeaf)` as well as on `myLowlink != 0`.
+         - Isolated intra-callee `done` maps when `baseCarrierNamed` changes (`argDone`, `carrierDone`, `outerDone`, `fieldDone`, `baseDone`, `withProgramSites`), cleared `argCheckFP.baseCarrierNamed = nil` in `calleeResultDynamicValue`, and simplified `noEscape` in `newDispatchWalkStates` (`dispatch_targets.go:58`) to `lowlink1 == 0 && lowlink2 == 0`.
+       - Added mismatched-binding check `support.Reason(Bind(new(Span), "worker", "environment", "", ""))` to `TestSupportOwnsItsSubjectsAndRequiresPremises` in `internal/outcome/outcome_test.go` (`gomutant run` verified **`45 killed, 0 survived`** across all 3 targets in `internal/outcome`) and updated `.gomutant/outcome-targets.json` symbols (`Snapshot.prepareOutcomeSupport`, `internal/runtimeinput.*`).
+     - **`pew` (`internal/store/recovery_test.go`)**:
+       - Added `"pew-key: \t\n"` to `TestParseIdentifiesUnusablePewRecordings` (`gomutant run --targets .gomutant/recovery-targets.json --budget 0` verified **`77 killed, 0 survived`** across all 4 targets in `pew/internal/store`).
+     - **`stipulator` (`.gomutant/outcome-targets.json`)**:
+       - Updated `packageLeg.prepareOutcome` → `prepareNativeAttempt`.
+     - **`gomutant` (`store.go`, `internal/windowcost/windowcost_test.go`)**:
+       - Updated `portableLineWalk` (`store.go:565-580`) to record `seenManifest[manifestKey] = true` (unreadable) or `false` (readable) before `continue` on `err != nil` so `gofresh.RuntimeInputPaths` is called at most once per unique `(base, RuntimeInputs)` even when `err != nil`, while still emitting `"unreadable runtime manifest for " + ev.Symbol` when `stopAtFirst == false`.
+       - Added `Bounds(16, 1)` to `TestBoundsDeriveFromTheWorkerCount` (`gomutant run` verified **`16 killed, 0 survived`** across both targets in `internal/windowcost`).
+     - **Adversarial Review Dispositions (`7c701af4-9f33-4aeb-a0f3-157d1fdd29a9`)**:
+       - **Finding 1 (`MEDIUM`, `introduced`, FIXED)**: Reset `copied.carrierRootDone = map[carrierMemoKey]carrierRootMemoEntry{}` alongside `copied.rootDone` in `withIgnoreContextValuePayload` (`internal/closure/dispatch_targets.go:952-967`).
+       - **Finding 2 (`MEDIUM`, `introduced`, FIXED)**: Keyed `walkFrame.stackDepth` by `carrierMemoKey{value, named}` (`map[carrierMemoKey]int`) across `freshparam.go`, `dispatch_targets.go`, and `dynamic_walk.go`, and added regression test `CarrierCycleSliceUnclosedField` (`observability_scan_test.go`).
+       - **Finding 3 (`LOW`, `introduced`, FIXED)**: Gated `outDone = fp.rootDone` on `fp.baseCarrierNamed == nil && fp.rootDone != nil` in `withProgramSites` (`freshparam.go:423-428`) and simplified `walkUserStructFieldDynamicValue` (`dynamic_walk.go:1545-1550`).
+       - **Round 2 Verdict**: `ZERO FINDINGS`.
