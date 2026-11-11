@@ -47,7 +47,7 @@
 - [x] Switch `sideGuards` in `pew/cmd/pew/ab.go` to `preparationReader`, eliminate duplicate `sideGuards` and `abPackageMetadata` calls per package in `pew ab`, and deduplicate `run.HarnessCompleted` and `resolveExistingPrefix`
 
 ## Chunk 9: Execute 4-Repo Speed, Efficiency, Accuracy & Incremental Findings Protocol
-- [ ] Run Stage 1 (`stipulator check` & `stipulator verify --no-test` Pass 1 cold/refresh and Pass 2 warm zero-edit re-run) across `pew`, `stipulator`, `gomutant`, and `gofresh`
-- [ ] Run Stage 2 (`gomutant run` Pass 1 campaign, Pass 2 warm zero-edit `100%` serve, Pass 3 surgical inert + semantic edit delta) across `pew`, `stipulator`, `gomutant`, and `gofresh`
-- [ ] Run Stage 3 (`pew status`, `pew run` under `mlock quiet`, and warm `pew verify`) across `pew`, `stipulator`, `gomutant`, and `gofresh`
+- [x] Run Stage 1 (`stipulator check` & `stipulator verify --no-test` Pass 1 cold/refresh and Pass 2 warm zero-edit re-run) across `pew`, `stipulator`, `gomutant`, and `gofresh`
+- [x] Run Stage 2 (`gomutant run` Pass 1 campaign, Pass 2 warm zero-edit `100%` serve, Pass 3 surgical inert + semantic edit delta) across `pew`, `stipulator`, `gomutant`, and `gofresh`
+- [x] Run Stage 3 (`pew status`, `pew run` under `mlock quiet`, and warm `pew verify`) across `pew`, `stipulator`, `gomutant`, and `gofresh`
 - [ ] Run Stage 4 (fix any remaining performance bottlenecks or surviving mutants exposed by the protocol)
