@@ -316,4 +316,7 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
        - Pass 2 (warm): **`4m49.9s`** (`prepare:build_group_views` dropped from `74,634ms` to **`447ms`** with 100% `closure.memo.load` hits; `reconcile:store_update`: `112ms`; target re-executed as expected per `.gomutant/README.md` because `internal/backends/golang`'s test harness performs startup scratch cleanup `os.Open` and `afterServedCheckForTest` carries `//gofresh:single-subject`).
    - **`stipulator` Stage 3 (`pew status` & `pew run` under `mlock quiet` with `GOFRESH_TRACE=all`)**:
      - `pew status` (`/tmp/stip-stage3-status-p1.jsonl`, `/tmp/stip-stage3-status-p2.jsonl`): Pass 1 `0.355s`, Pass 2 (warm) `0.358s` (4 benchmarks marked `stale (dynamic-state strategy)`).
-     - `pew run ./internal/compile ./internal/resolutioncache ./internal/backends/golang` under `mlock quiet` (`task-30722` in progress).
+     - `pew run ./internal/compile ./internal/resolutioncache ./internal/backends/golang` under `mlock quiet` (`/tmp/stip-stage3-run-p1.jsonl`, `/tmp/stip-stage3-run-p2.jsonl`):
+       - Pass 1 (stale refresh across 3 packages / 4 benchmarks): **`2m19.8s`** (`recorded BenchmarkCompile`, `recorded BenchmarkDecodeRecord`, `recorded BenchmarkSymbolPackageCandidates`, `recorded BenchmarkWarmGraphs`; `execute:measure_bench`: `48,813ms`, `store:persist_arm`: `205ms`).
+       - Post-run `pew status`: **`1.360s`** (`valid` for all 4 benchmarks).
+       - Pass 2 (warm zero-edit 100% serve): **`1.323s`** (`served .../internal/compile: 1 valid, nothing to run`, `served .../internal/resolutioncache: 1 valid, nothing to run`, `served .../internal/backends/golang: 2 valid, nothing to run`; `select:check_package`: `432ms`, `select:resolve_packages`: `89ms`).
