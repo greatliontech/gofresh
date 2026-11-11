@@ -427,8 +427,12 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
   - `resolve:serve_selection`: `25.4s` (`1,074` records, `0` served).
   - `resolve:opening_capture`: **`1 ms`** (`1,074` unserved) — unlike `gofresh` (`32.8s`), `gomutant` uses `plain_witness: true` (`build_flags: []`, matching `new_served`'s `build_flags: []`) and has no `ClosureStrategy` non-callable bindings, so `reuseCheckedCapture` succeeded in `1 ms`!
   - `resolve:publish_selection`: `1,074` installed (`moved: 0`).
-  - `dynstate.factof.done`: ran 3 times per package across `GeneralExecution`, `PackageExecution` (`|package-process-execution|`), and `SingleSubjectExecution` (`|single-subject-execution|`).
-  - `dynstate.var.reject`: `github.com/greatliontech/gomutant/internal/engine.goRunner` (`kind: "escapes"`).
+  - `witness:capture_native_generation`: took **`485,878 ms` (`8m05.8s`)** (`subjects: 1069, candidates: 996, solos: 1`) because `996` out of `1,069` subjects failed with `SharedDynamicStateCause` (`github.com/greatliontech/gomutant.embeddedGuidance is mutated`, `internal/engine.goCommandObserver is mutated`, `internal/engine.goRunner escapes`, `internal/cmd.productionSeams is mutated`, `internal/mcpserver.productionSeams is mutated`), forcing `soloSession` (`SingleSubjectExecution`) to run `dischargeUnreachableCulprits` across all `1,069` declared symbols in 17 RTA batches!
+  - First 14 completed packages in `plain` execution:
+    - `internal/windowcost`: `3` records, `0` uncacheable.
+    - `internal/guidance`: `15` records, `2` uncacheable.
+    - `internal/engine`: `2` records (the 2 solo `Fuzz*` targets), **`157` uncacheable** (`prep_ms: 64,533 ms` = `1m04.5s`, `binary_ms: 82,924 ms` = `1m22.9s`).
+    - All other 11 completed packages (`internal/gitcmd`, `internal/shortgates`, `internal/trace`, `internal/integrationtest`, `internal/fixtureguard`, `internal/testsuite`, `internal/toolversion`, `internal/contextio`, `internal/resident`, `internal/gitref`, `cmd/gomutant`): **`0` records, 100% uncacheable**.
 
 ### Concrete Architectural, Performance & Incremental-Reuse Bottlenecks Identified So Far
 
@@ -560,5 +564,27 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
 - **Two-Part Root Cause**:
   1. In `withMovedInputs` (`validate.go:475-485`), `movedInputsForView(ctx, v, recorded.RuntimeInputs)` has **no per-manifest memoization**. When `361` records in `gofresh` and `332` records in `gofresh/internal/closure` share the same `recorded.RuntimeInputs` manifest (`345` paths in `gofresh`), `withMovedInputs` calls `movedInputsForView` `361` times during `CheckBatch` (`selectPkg`) and `361` times again during `CheckingUnit.Close` (`revalidateServed`), re-decoding the manifest and re-statting/re-hashing all `345` paths `361 * 345 = 124,545` times per call!
   2. In `CheckingUnit.close` (`checking.go:523-542`), `u.slots` contains all `1,451` historical candidates checked during `selectPkg` (`1,431` of which were already judged `Stale` in `CheckBatch`). Line 525 only sets `records[i].refusal = slot.result.verdict` when `!slot.result.evaluated`, so all `1,431` already-`Stale` evaluated slots are re-checked (`observeRecordInputs` + `withMovedInputs`) in `current.checkRecords` (`line 529`), only for lines 537-538 (`if slot.result.verdict.Status == Stale { result.verdict = slot.result.verdict }`) to overwrite and discard the recomputed verdict!
+
+#### Issue J (`gofresh/internal/dynstate/summary_leakfree.go:1243`, `gofresh/internal/closure/rooted.go:139`, `attribution_provenance.go:1860-1885`): `sync.Once` Memoizer Disqualification (`embeddedGuidance is mutated` Poisoning 996/1069 Subjects) & `ComputeRootedFunctions` Running Without `progSummary`
+- **Evidence from `/tmp/gomutant-full-check-p1.jsonl`**:
+  - In `gomutant` Pass 1 discovery (`8m42.5s`), `witness:capture_native_generation` took **`485,878 ms` (`8m05.8s`)** because **`996` out of `1,069` test subjects** failed `CheckBatch` with `SharedDynamicStateCause` (`github.com/greatliontech/gomutant.embeddedGuidance is mutated`), forcing `soloSession` (`SingleSubjectExecution`) to run `dischargeUnreachableCulprits` -> `ComputeRootedFunctions` across all `1,069` declared symbols!
+- **Two-Part Root Cause**:
+  1. **`sync.Once` Struct-Pointer Memoizer Disqualified Because `onceFill` omits `consume(lhs)` (`internal/dynstate/summary_leakfree.go:1243-1245, 1450-1460`)**:
+     - `var embeddedGuidance = guidance.Embed("gomutant", guidanceSrc)` (`gomutant/guidancedoc.go:22`) is a `*guidance.Embedded` whose method `(*Embedded).Document()` (`internal/guidance/guidance.go:752-755`) runs:
+       ```go
+       func (e *Embedded) Document() (*Document, error) {
+           e.once.Do(func() { e.doc, e.err = Parse(e.src) })
+           return e.doc, e.err
+       }
+       ```
+     - In `summary_leakfree.go:1131-1142`, `onceFill[stmt] = true` recognizes `e.doc, e.err = Parse(e.src)` inside `e.once.Do(func() { ... })`.
+     - At `*ast.AssignStmt` (`lines 1243-1245`), when `recvRooted(lhs)` and `onceFill[n]` is `true`, the code avoids setting `disqualified[key] = true`, **but forgets to call `consume(lhs)`**!
+     - When `ast.Inspect` subsequently visits the child `*ast.SelectorExpr` `e.doc` (`*Document`) and `e.err` (`error`) on the LHS of the assignment (`lines 1450-1460`), `!allowed[syntaxutil.RootIdent(n.X)]` is `true`, and `refconfine.CallResultHandsOut(p.TypesInfo.TypeOf(n))` returns `true` (because `*Document` is a pointer and `error` is an interface), setting `disqualified["Embedded.Document"] = true` (and similarly for `e.src` `[]byte` passed to `Parse(e.src)`)!
+     - That causes `(*Embedded).Document` to be marked as mutating its receiver, which marks `embeddedGuidance` as `is mutated` and poisons all `996` subjects in `gomutant`, `internal/cmd`, `internal/mcpserver`, and `cmd/gomutant`!
+  2. **`ComputeRootedFunctions` (`rooted.go:139`) Never Calls `getSummary(ctx, audited, pureDelegates, prog)` and `getProvFP()` (`attribution_provenance.go:1860-1885`) Resets Memos on Every Subject**:
+     - In `rootedGroup` (`rooted.go:139`), `attributedReachableSets` is called on `prog` without first initializing `getSummary(ctx, h.SelectionAudited(), h.source.pureDelegates, prog)`.
+     - Inside `provenanceBFSWithCandidates` (`attribution_provenance.go:1865-1885`), `sum := lookupSummaryForProg(prog, audited)` therefore returns **`nil`**, leaving `fp.summary = nil`, `fp.inProgramSites = false`, `fp.programSites = nil`, and `fp.programValueRef = nil`!
+     - Worse, `getProvFP()` is local to `provenanceBFSWithCandidates` (called 3 times per subject across `1,069` subjects = `3,207` calls) and calls `fp.resetDynamicMemos()` on every call, even though `getProvFP()` has `fp.subjectRoot == nil` and `fp.enumRoot == nil` (100% subject-independent!).
+
 
 
