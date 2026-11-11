@@ -469,7 +469,25 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
     5. **`11` subjects**: `uncacheable: post-run validation: package graph shares mutated dynamic state: github.com/google/pprof/profile: github.com/google/pprof/profile.functionDecoder escapes writable`.
     6. **`11` subjects**: `uncacheable: post-run validation: runtime input not covered by observation bracket: internal`.
     7. **`5` subjects**: `uncacheable: post-run validation: reaches testing.Setenv (process or path mutation)`.
-    8. **`13` more subjects across 6 reasons** (to be extracted from `/tmp/pew-full-check-p1.jsonl`).
-- ** Issue F (`gofresh/internal/cachefile`): `~/.cache/gofresh` 2 GiB Ceiling Evictions Mid-Run (`cache.prune`)**:
-  - `/tmp/pew-full-check-p1.jsonl` shows `cache:cache.prune` firing 4 times during `pew` Pass 1 (`18:13:32`, `18:14:26`, `18:16:15`, `18:16:29`) because `~/.cache/gofresh` exceeded `DefaultMaxBytes` (`2 GiB`), with single `dynamicstate` bucket files reaching `17.3 MiB`.
+    8. **Complete per-package uncacheable breakdown (`publish_package` + `observability` + `tier2.subject.done` in `/tmp/pew-full-check-p1.jsonl`)**:
+       - **`github.com/greatliontech/pew/internal/profiles` (`14` subjects), `internal/recordingtest` (`2` subjects), `internal/run` (`55/56` subjects), `internal/store` (`38/39` subjects)**:
+         - Every single subject in these 4 packages (`110` test subjects / `220` observability evaluations) had **`observable: false, reason: "startup effect: reaches unaudited standard operation math.Inf"`**!
+         - Because `math` (`math.Inf`, `math.NaN`, `math.IsNaN`, `math.IsInf`, `math.Abs`, `math.Sqrt`, `math.Log`, `math.Exp`, etc.) is not in the audited standard-library surface (`internal/auditset`), a package-level `var ... = math.Inf(...)` initializer poisons startup observability for the entire package subgraph (`observable = false`), preventing Tier-2 per-subject effect narrowing and causing `internal/profiles` (`3`), `internal/recordingtest` (`2`), `internal/run` (`1`), and `internal/store` (`1`) to fall back to Tier-1 `maximal` (`reaches go:linkname (opaque linkage)` from `golang.org/x/sys/unix`).
+       - **`github.com/greatliontech/pew/internal/compare` (`36` subjects) & `internal/guidance` (`1` subject)**:
+         - `tier2.subject.done` reported `reason: "reaches fmt.Fprintf (formatted output)"` because `fmt.Fprint` / `fmt.Fprintf` / `fmt.Fprintln` (which write to their `w io.Writer` first argument, such as `&bytes.Buffer{}` or `&strings.Builder{}` or `sha256.New()`, unlike `fmt.Printf` which writes to `os.Stdout`) are unconditionally classified as `EffectFormattedOutput` (`Class B`) instead of checking whether `w` (`arg 0`) is a closed in-memory `io.Writer`.
+         - `observability` on `internal/compare` also reported `startup effect: reaches unaudited standard operation hash/maphash.MakeSeed` (from `golang.org/x/perf/benchproc` `init()`), causing fallback to Tier-1 `reaches go:linkname (opaque linkage)`.
+       - **`github.com/greatliontech/pew` (`1` subject) & `internal/shortgates` (`3` subjects)**:
+         - `observability` reported `subject reachability is not closed: interface invoke outside RTA: github.com/greatliontech/pew/internal/shortgates.check$2 dispatches go/ast.Stmt.Pos` (invoking `.Pos()` on an `ast.Stmt` node produced by `go/parser.ParseFile`).
+       - **`github.com/greatliontech/pew/internal/guidance` (`TestMustRefusalsNameTheTool`)**:
+         - `15/17` subjects in `internal/guidance` were `observable=true, effect_free=true` and cached (`15 records`). `TestMustRefusalsNameTheTool` failed `observability` with `computed function call in github.com/greatliontech/pew/internal/guidance.TestMustRefusalsNameTheTool$1 calling parameter f` (a local `mustPanic := func(f func())` closure called on two inline function literals).
+       - **`github.com/greatliontech/pew/internal/toolversion` (`3` subjects)**:
+         - `observability` reported `package scan: reaches unaudited standard operation runtime/debug.BuildInfo` / `runtime/debug.ReadBuildInfo`.
+       - **`github.com/greatliontech/pew/internal/trace` (`5` subjects)**:
+         - `2` subjects failed `observability` with `interface invoke outside RTA: github.com/greatliontech/pew/internal/trace.emitSlow dispatches context.Context.Value` / `WithFilteredSink dispatches context.Context.Value` / `emitSlow dispatches Sink.Emit`.
+
+#### Issue F (`gofresh/internal/runtimeinput` & `gofresh/unit.go`): `unit.Close` Takes `37.0s` on `pew/cmd/pew` (`testlog.extract.done` `26.3s` + Duplicate Disk Cache Reloads) & `~/.cache/gofresh` 2 GiB Evictions (`cache.prune`)
+- **Evidence from `/tmp/pew-full-check-p1.jsonl`**:
+  1. At `18:33:51`, `runtimeinput:testlog.extract.done` on `pew/cmd/pew` took **`26,345 ms` (`26.3s`)** (`path_count: 5950, unverifiable: true`) because `cmd/pew` tests invoked `gofresh` against `/home/nikolas/.cache/gofresh`, logging thousands of reads/stats of multi-megabyte cache files in `testlog.txt`, and `testlog` extraction hashed all `5,950` paths sequentially on disk even after encountering an unbracketed external directory (`/home/nikolas/.cache/gofresh`).
+  2. Between `18:33:51` and `18:34:01` (`10s`), `unit.Close` (`Validate` + `Check`) performed **`1,908` `cache.load` and `1,596` `closure.memo.load`** disk reads to re-verify facts already held in the `Snapshot`.
+  3. `/tmp/pew-full-check-p1.jsonl` shows `cache:cache.prune` firing 4 times during `pew` Pass 1 (`18:13:32`, `18:14:26`, `18:16:15`, `18:16:29`) because `~/.cache/gofresh` exceeded `DefaultMaxBytes` (`2 GiB`), with single `dynamicstate` bucket files reaching `17.3 MiB`.
 
