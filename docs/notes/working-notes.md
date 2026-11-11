@@ -428,11 +428,28 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
   - `resolve:opening_capture`: **`1 ms`** (`1,074` unserved) — unlike `gofresh` (`32.8s`), `gomutant` uses `plain_witness: true` (`build_flags: []`, matching `new_served`'s `build_flags: []`) and has no `ClosureStrategy` non-callable bindings, so `reuseCheckedCapture` succeeded in `1 ms`!
   - `resolve:publish_selection`: `1,074` installed (`moved: 0`).
   - `witness:capture_native_generation`: took **`485,878 ms` (`8m05.8s`)** (`subjects: 1069, candidates: 996, solos: 1`) because `996` out of `1,069` subjects failed with `SharedDynamicStateCause` (`github.com/greatliontech/gomutant.embeddedGuidance is mutated`, `internal/engine.goCommandObserver is mutated`, `internal/engine.goRunner escapes`, `internal/cmd.productionSeams is mutated`, `internal/mcpserver.productionSeams is mutated`), forcing `soloSession` (`SingleSubjectExecution`) to run `dischargeUnreachableCulprits` across all `1,069` declared symbols in 17 RTA batches!
-  - First 14 completed packages in `plain` execution:
+  - First 16 completed packages in `plain` execution:
     - `internal/windowcost`: `3` records, `0` uncacheable.
     - `internal/guidance`: `15` records, `2` uncacheable.
     - `internal/engine`: `2` records (the 2 solo `Fuzz*` targets), **`157` uncacheable** (`prep_ms: 64,533 ms` = `1m04.5s`, `binary_ms: 82,924 ms` = `1m22.9s`).
+    - `internal/cmd`: `2` records (the 2 solo `Fuzz*` targets), rest uncacheable.
+    - `internal/mcpserver`: `1` record, rest uncacheable.
     - All other 11 completed packages (`internal/gitcmd`, `internal/shortgates`, `internal/trace`, `internal/integrationtest`, `internal/fixtureguard`, `internal/testsuite`, `internal/toolversion`, `internal/contextio`, `internal/resident`, `internal/gitref`, `cmd/gomutant`): **`0` records, 100% uncacheable**.
+  - **Root Cause of `startup effect: reaches non-standard assembly` in `gomutant` (`internal/gitref`, `cmd/gomutant`, `internal/cmd`, `internal/engine`, `internal/mcpserver`, `internal/testsuite`)**:
+    - `asmverify.package.done` in `/tmp/gomutant-full-check-p1.jsonl` shows:
+      - `golang.org/x/sys/cpu`: `ok: true, funcs: 2, sfiles: 1`
+      - `github.com/segmentio/asm/base64`: `ok: true, funcs: 3, sfiles: 2`
+      - `github.com/segmentio/asm/keyset`: `ok: true, funcs: 1, sfiles: 1`
+      - **`github.com/segmentio/asm/ascii`**: **`ok: false, funcs: 0, sfiles: 3`** (`equal_fold_amd64.s`, `valid_amd64.s`, `valid_print_amd64.s`, pulled in via `modelcontextprotocol/go-sdk` -> `github.com/segmentio/encoding/json` -> `github.com/segmentio/asm/ascii`)!
+    - Why did `github.com/segmentio/asm/ascii` fail `asmverify.VerifyNonStdFiles` (`internal/closure/internal/asmverify/isa.go:536-561, 608-611`)?
+      1. `equal_fold_amd64.s:18`, `valid_amd64.s:15`, and `valid_print_amd64.s:14` execute:
+         `BTL $0x08, github·com∕segmentio∕asm∕cpu·X86+0(SB)`
+         - `BTL` (`BT`, `BTW`, `BTL`, `BTQ`) is a **read-only bit test instruction** (unlike `BTS`/`BTR`/`BTC` which are already in `isAsmReadModifyWriteMnemonic`), where the `(SB)` operand is the second operand (`idx == 1 == len(operands)-1`), but `isAsmReadOnlyCompareMnemonic(baseOp)` (`isa.go:608-611`) only checks `CMP`, `TEST`, `UCOMI`, `VCOMI` and omits `BT`/`BTW`/`BTL`/`BTQ`!
+         - Furthermore, `github·com∕segmentio∕asm∕cpu·X86+0(SB)` reads an unmutated package-level variable in an imported package (`github.com/segmentio/asm/cpu`), whereas `parseAsmLocalSBRef` (`parse.go:498`) rejects `pkgPrefix != pkgPath` and `!rodataSyms[normSym]`.
+      2. `equal_fold_amd64.s:22` executes:
+         `LEAQ github·com∕segmentio∕asm∕ascii·lowerCase+0(SB), R9`
+         - `lowerCase` (`var lowerCase = [256]byte{...}` in `ascii.go:36`) is an unmutated Go package-level lookup table in `github.com/segmentio/asm/ascii`, NOT an assembly `GLOBL ... RODATA` symbol in `.s`, so `rodataSyms["·lowerCase"]` is `false`!
+      3. Moreover, in `addReachedPackageFiles` (`internal/closure/analyzer.go:2216-2226`), whenever `github.com/segmentio/asm/ascii.init()` is walked during `startupSummary` (which only initializes `var lowerCase = [256]byte{...}` and never calls any `.s` function, and none of the `.s` files define `TEXT ·init` or `DATA` on Go globals), `addReachedPackageFiles` unconditionally records `"reaches non-standard assembly"` on `startupSummary` simply because `ascii` is in `a.filePkgs` and `!a.verifiedPackageAssembly(idx.meta)`!
 
 ### Concrete Architectural, Performance & Incremental-Reuse Bottlenecks Identified So Far
 
