@@ -289,3 +289,20 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
                - **Finding 5 (`LOW`, `introduced`, FIXED)**: Wrapped all new `trace.Emit` calls in `if trace.AnyEnabled() { ... }` across `stipulator`, `gomutant`, and `pew`.
                - **Finding 6 (`LOW`, `introduced`, FIXED)**: Documented `context.Context.Err()` and `os.Getwd()` / `path/filepath.Abs` return-value closure rules in `REQ-closure-observability-dispatch` (`docs/specs/closure.md`).
                - **Round 2 Verdict**: `ZERO FINDINGS` (all 6 findings verified resolved with regression tests).
+               - **Released & Installed Fleet (`2026-11-11`)**: `gofresh v0.122.8` (`eb895de`), `pew v0.11.4` (`d7edb5e`), `stipulator v0.77.3` (`dd2ad26`), `gomutant v0.68.3` (`bb3bab7`).
+             - **`pew` Stage 2 Final Results (`gomutant v0.68.3` + `gofresh v0.122.8` with `GOFRESH_TRACE=all`)**:
+               1. **`.gomutant/recovery-targets.json` (`/tmp/pew-stage2-recovery-v2-p1.jsonl`, `/tmp/pew-stage2-recovery-v2-p2.jsonl`)**:
+                  - Pass 1: **`45.5s`** (down from `4m42s` in `task-28464`; `reconcile.store_update` dropped from `202,360ms` to `<50ms` after deduplicating `(base, RuntimeInputs)` in `portableLineWalk` and `stampProvenance`).
+                  - Pass 2: **`15.6s`** (`4 targets: 4 measured, 94 generated, 76 killed, 1 survived, 17 discarded, 0 candidateEvidence panics`).
+                  - Causal trace (`closure.startup.effect` in `/tmp/pew-stage2-recovery-v2-p1.jsonl`) pinpointed the two startup effects in `pew/internal/store` in 12 JSONL lines without file-hunting: `(struct{io.Reader}).Read` (promoted wrapper method on `io.NopCloser` / `struct{io.Reader}` where `newBitOnlyFreshParamAnalysis` omitted `programSites`/`programFunctions` for non-sink dispatch walks) and `math.NaN`/`math.Inf`/`math.Pow` in `go-moremath`/`benchunit` `init()`.
+                  - 1 remaining survivor in `pewMarked` (`store.go:978-985`: `continue -> break` on a 1-line malformed `pew-` input) queued for Stage 4 test addition in `pew/internal/store/recovery_test.go`.
+               2. **`.gomutant/environment-targets.json` (`/tmp/pew-stage2-env-p1.jsonl`, `/tmp/pew-stage2-env-p2.jsonl`)**:
+                  - Pass 1: **`10.1s`**, Pass 2: **`3.3s`** (`5 targets: 5 measured, 27 generated, 16 killed, 0 survived, 11 discarded, 0 open`).
+                  - Trace (`tier2.subject.done`) verified `context.Context.Err()` and `os.Getwd()` / `path/filepath.Abs` are 100% closed (`Environment.Lookup`, `Environment.Values`, and `Environment.WithParallelism` have `effects: 0, widen: false, reason: ""`; `NewEnvironment` has `effects: 1, reason: "reaches os.Environ (environment input)"`; only the whole-package `maximal` backstop on `TestEnvironmentAdmissionPreservesEmptyAndInherited`'s `t.Setenv` blocks reuse).
+             - **`pew` Stage 3 Final Results (`pew v0.11.4` + `gofresh v0.122.8` with `GOFRESH_TRACE=all`)**:
+               1. **`pew status` (`/tmp/pew-stage3-status-p1.jsonl`, `/tmp/pew-stage3-status-p2.jsonl`)**:
+                  - Pass 1: `0.56s` user (`resolve_packages`: `141ms`, `check_package`: `1ms` each); Pass 2 (warm): **`0.216s`** (`216ms`), emitting `select.benchmark_stale` (`reason: "dynamic-state strategy"`) on the 3 recorded benchmarks.
+               2. **`pew run ./internal/compare ./internal/run ./internal/store` under `mlock quiet` (`/tmp/pew-stage3-run-p1.jsonl`, `/tmp/pew-stage3-run-p2.jsonl`)**:
+                  - Pass 1 (stale refresh across 3 packages): **`1m09.0s`** (`recorded BenchmarkCompare`, `recorded BenchmarkParseStream`, `recorded BenchmarkParseRecording`).
+                  - Post-run `pew status`: **`0.608s`** (`valid` for all 3 benchmarks).
+                  - Pass 2 (warm zero-edit 100% serve): **`0.648s`** (`served github.com/greatliontech/pew/internal/compare: 1 valid, nothing to run`, `served .../internal/run: 1 valid, nothing to run`, `served .../internal/store: 1 valid, nothing to run`; `check_package` took `81ms` with 100% `effectscan` and `filescan` memo hits).
