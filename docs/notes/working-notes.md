@@ -422,6 +422,14 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
     - `invocation "race:leaf"`: **`401 served, 3 executed, 3 uncacheable, 0 no-outcome`** (`100%` of the `401` cacheable `race:leaf` subjects across all 25 leaf packages served fresh from cache!).
     - `invocation "race:core"`: **`20 served, 694 executed, 1 uncacheable, 0 no-outcome`** — the `20` solo `Fuzz*` targets (`10` in `gofresh`, `10` in `gofresh/internal/closure`) served fresh from cache, while **`693` cacheable batch subjects (`361` in `gofresh`, `332` in `gofresh/internal/closure`) failed `check_verdict` and re-executed** due to ephemeral `/tmp/stipulator-retained-<id>/package.test` in `RuntimeInputs` (see Issue G below)!
 
+### 3. `gomutant` Full Unscoped `stipulator check` (`/tmp/gomutant-full-check-p1.jsonl`, `/tmp/gomutant-full-check-p2.jsonl` — IN PROGRESS)
+- **Pass 1 Live Trace Observations**:
+  - `resolve:serve_selection`: `25.4s` (`1,074` records, `0` served).
+  - `resolve:opening_capture`: **`1 ms`** (`1,074` unserved) — unlike `gofresh` (`32.8s`), `gomutant` uses `plain_witness: true` (`build_flags: []`, matching `new_served`'s `build_flags: []`) and has no `ClosureStrategy` non-callable bindings, so `reuseCheckedCapture` succeeded in `1 ms`!
+  - `resolve:publish_selection`: `1,074` installed (`moved: 0`).
+  - `dynstate.factof.done`: ran 3 times per package across `GeneralExecution`, `PackageExecution` (`|package-process-execution|`), and `SingleSubjectExecution` (`|single-subject-execution|`).
+  - `dynstate.var.reject`: `github.com/greatliontech/gomutant/internal/engine.goRunner` (`kind: "escapes"`).
+
 ### Concrete Architectural, Performance & Incremental-Reuse Bottlenecks Identified So Far
 
 #### Issue A (`gofresh/internal/closure`): `inProgScope` and `inCycleScope` Completely Disabled Whenever `reach.enumeratedRoot` Is True (`freshparam.go:494-495`, `dynamic_walk.go:249-250`, `dispatch_targets.go:120`)
@@ -533,8 +541,11 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
      - During `Unit.Close`'s self-check (`decideAfterClosureObserved`, `judgment.go:338-375`), `/tmp/stipulator-retained-<id>/package.test` **still exists on disk** (`rt.BracketMoved == false`, `rt.Unverifiable == true`), and `if pure.accepted() { return Verdict{Status: Valid} }` (`line 369`) discharges `rt.Unverifiable`, allowing `publishPackage` to persist all `693` records with `/tmp/stipulator-retained-<id>/package.test` baked into `Fingerprint.RuntimeInputs`!
      - Immediately after `publishPackage`, `retainedArtifact.Close()` deletes `/tmp/stipulator-retained-<id>/package.test`.
      - On Pass 2, `decideKnownGuards` (`judgment.go:315-318`) checks `if rt.BracketMoved` **before** `decideAfterClosureObserved` checks `if pure.accepted()`. Because `/tmp/stipulator-retained-<id>/package.test` no longer exists (`ENOENT`), `rt.BracketMoved` is `true`, and all `693` records are rejected as `Stale` (`runtimeinputs (moved: path /tmp/stipulator-retained-<id>/package.test)`)!
-  3. **Misleading `re-executed: closure` Attribution & Unpruned Stale Witness Cache Records (`stipulator`)**:
-     - Because `witnesscache` never prunes superseded per-subject records (`4,508` observed refusals on `manifest version 2`, plus older `closure`-stale records per subject), when `stipulator` checks `~4` candidate records for a subject and all 4 are stale (`3` old records stale on `closure`, `1` newest record stale on `runtimeinputs (moved: path /tmp/stipulator-retained-.../package.test)`), `stipulator` reports the miss reason of the **first/oldest** candidate (`690 re-executed: closure`) instead of the **most recent** candidate (`runtimeinputs (moved: ...)`), hiding the real invalidation cause in user-facing output!
+  3. **Misleading `re-executed: closure` Attribution (`witnessrun.go:998, 1022`) & Unpruned Stale Witness Cache Records (`stipulator`)**:
+     - In `prepareWitnessGroups` (`stipulator/internal/backends/golang/witnessrun.go:1011-1049`), round-based variant checking orders `groupCached` with the **most recently installed record first (`round == 0`)** and older historical records in `round == 1, 2, ...`.
+     - However, in `checkRound` (`witnessrun.go:998-1001`) and `roundCandidates` (`witnessrun.go:1022`), every failed round unconditionally overwrites `wg.executedWhy[s] = verdictExecutedReason(checked.Verdict.Reason)`!
+     - Consequently, when all variants fail, `wg.executedWhy[s]` retains the refusal reason of the **oldest historical variant (`round == len-1`)** (`closure` from weeks ago) instead of the **most recent variant (`round == 0`)** (`runtimeinputs (moved: path /tmp/stipulator-retained-.../package.test)`). Only the `3` newly added tests that had a single variant (`round == 0` only) reported `runtimeinputs (moved: ...)`, while the other `690` tests had their `round == 0` `runtimeinputs` reason overwritten by `round > 0`'s old `closure` refusal!
+     - Furthermore, `witnesscache` never prunes superseded per-subject records (`4,508` observed refusals on `manifest version 2`, plus multiple stale records per subject).
 
 #### Issue H (`stipulator/internal/backends/golang/served.go` & `selection.go`): `reuseCheckedCapture` Fails on Non-Callable `ClosureStrategy` Symbols and `Fuzz*` Targets Force 20 Solo Invocations
 - **Evidence from `/tmp/gofresh-full-check-p2.jsonl`**:
