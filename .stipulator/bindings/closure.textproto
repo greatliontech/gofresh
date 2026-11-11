@@ -613,8 +613,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-dispatch"
-  content_hash: "d1130b9263323be78665748019562a908d64108ecf239897ec5e27a0ea870c89"
-  source_hash: "8568ea7f4c0efd0efc3c6767d2594af24293b52fd60d7e1adc06a989a3fba4c9"
+  content_hash: "885d45ba7749037682dbfe785b5f87483ef95a8841981f06d7b03b166a2e1a0c"
+  source_hash: "a39b3d4e3bed024ac6a753f3fb89f8d03461e24965c0dc25f06e5796345b519f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/closure.TestCalleeParameterClosesThroughAttributedSites"
   role: BINDING_ROLE_TESTS
@@ -2075,8 +2075,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-observability-dispatch"
-  content_hash: "d1130b9263323be78665748019562a908d64108ecf239897ec5e27a0ea870c89"
-  source_hash: "8568ea7f4c0efd0efc3c6767d2594af24293b52fd60d7e1adc06a989a3fba4c9"
+  content_hash: "885d45ba7749037682dbfe785b5f87483ef95a8841981f06d7b03b166a2e1a0c"
+  source_hash: "a39b3d4e3bed024ac6a753f3fb89f8d03461e24965c0dc25f06e5796345b519f"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/closure.FuzzObservabilityLattice"
   role: BINDING_ROLE_TESTS
