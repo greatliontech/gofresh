@@ -684,10 +684,6 @@ func TestModulePackagesHaveNoSharedDynamicStateUnderPackageExecution(t *testing.
 		Inputs:      []string{},
 	}, SessionPolicy{
 		Execution: PackageExecution,
-		Vouches: []string{
-			"github.com/greatliontech/go-x-tools/internal/gcimporter.exportMap",
-			"github.com/greatliontech/go-x-tools/go/ast/edge.fieldInfos",
-		},
 	})
 	if err != nil {
 		t.Fatalf("NewSession: %v", err)
