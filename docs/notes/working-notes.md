@@ -660,6 +660,25 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
        even though both `go.mod` files **exist on disk**!
      - `storeListing` writes this poisoned `rec.Absent` to `~/.cache/gofresh/listing/...`, and on the very next pass `loadListing` (`lines 163-166`) checks `os.Lstat(path); !os.IsNotExist(err)` -> returns `false`, causing **100% `loadListing` validation misses** and spawning `go list` `217` times (`22.2s`) in `stipulate/structural` and `105` times (`10.4s`) in `stipulate`!
 
+#### Issue M (`stipulator/internal/backends/golang/admission.go:489-520`, `gofresh/internal/runtimeinput/scratch.go:393-395`, `testlog.go:911-936`): `GOMAXPROCS=2` Long-Pole Starvation, `ephemeralScratch` Ordering Against `retainedArtifact.Close()`, and Unisolated Cache / Volatile `/proc` Reads in `stipulator/internal/backends/golang`
+- **Evidence from `/tmp/stipulator-testlog-447714370.txt` & `/proc/609483/environ`**:
+  1. **`witnessSpawnBound` / `witnessChildWidth` (`admission.go:489-520`, `observe.go:173-181`) Starves Long-Pole Packages at `GOMAXPROCS=2` on a 32-Thread Host**:
+     - On a 32-processor machine (`processors = 32`), `witnessSpawnBound(32, packages)` sets `n.SpawnBound = min(16, packages)` (`16` in `stipulator`'s 36-package `race`, `16` in `gomutant`'s 17-package suite, `13` in `pew`'s 13-package suite), and `witnessChildWidth(n) = 32 / SpawnBound = 2` (`GOMAXPROCS=2` in `n.WitnessEnv`).
+     - In all three repositories, the 12-35 small leaf packages finish within the first 30-120 seconds, leaving a single heavy integration package (`stipulator/internal/backends/golang` with `719` sequential `Test*` functions and `0` `t.Parallel()` calls, `gomutant` + `gomutant/internal/cmd`, `pew/cmd/pew`) running alone for 15-40 minutes with `GOMAXPROCS=2` while 30 of 32 CPU threads sit idle.
+     - Worse, because `GOMAXPROCS=2` is exported into `package.test`'s environment, every child `go test -c -race`, `go list`, and `gofresh` SSA/RTA build spawned inside those integration tests inherits `GOMAXPROCS=2`.
+  2. **Why `ephemeralScratch` (`gofresh/internal/runtimeinput/scratch.go:393-395`) Fails to Elide `/tmp/stipulator-retained-<id>/package.test` and Leaked `/tmp/gofresh-inmem-pkg-*` / `/tmp/stipulator-testlog-*.txt`**:
+     - `ephemeralScratch` (`scratch.go:393-395`) elides paths under `/tmp` (`ephemeralRoots`) only when `os.Lstat(p)` returns `os.IsNotExist(err)` at observation ingest time (`Unit.Close`).
+     - Because `stipulator` calls `Unit.Close` (`finishNativeRun`, `nativeexecution.go:63-90`) **before** `retainedArtifact.Close()` (`execute.go:314`) removes `/tmp/stipulator-retained-<id>/package.test`, `/tmp/stipulator-retained-<id>/package.test` still exists on disk during `Unit.Close` (`os.IsNotExist(err) == false`).
+     - Therefore `ephemeralScratch` returns `false`, `/tmp/stipulator-retained-<id>/package.test` is recorded in `Fingerprint.RuntimeInputs`, `Unit.Close`'s self-check passes (because the file still exists), and 1 millisecond later `retainedArtifact.Close()` deletes `/tmp/stipulator-retained-<id>/package.test` — guaranteeing that Pass 2 fails `decideKnownGuards` with `rt.BracketMoved == true` (`runtimeinputs (moved: path /tmp/stipulator-retained-<id>/package.test)`)!
+     - The exact same mechanism causes leaked `/tmp/gofresh-inmem-pkg-*` (`6,693` in `stipulator/internal/witnesscache`), leaked `/tmp/stipulator-testlog-*.txt`, and `/tmp/stipulator-telemetry-off-1000` to survive at `Unit.Close` time (`os.IsNotExist == false`) and get baked into `RuntimeInputs`.
+  3. **Unisolated `~/.cache/gofresh`, `~/.cache/stipulator`, and Volatile OS Reads (`/proc`, `/sys/fs/cgroup`) in `stipulator/internal/backends/golang` Tests**:
+     - Inspecting `/tmp/stipulator-testlog-447714370.txt` during `stipulator/internal/backends/golang` execution reveals:
+       - `6,771 stat + 498 open` on `/home/nikolas/.cache/gofresh` and `2,994 stat + 398 open` on `/home/nikolas/.cache/stipulator` (from tests invoking `gofresh` / `stipulator` without isolating `XDG_CACHE_HOME`).
+       - `1,170 open` on `/sys/fs/cgroup/user.slice` and `195 open` on `/proc/<pid>/status` and `/proc/<pid>/task/<tid>` (from tests calling `resident.Readings()`).
+     - Any read of `/proc/...` or `/sys/fs/cgroup/...` hits `volatileOSPath(p)` (`testlog.go:911-936`), marking the batch observation `Unverifiable: true` (`volatile OS input: /proc/...`).
+     - Any concurrent modification or cache pruning inside `/home/nikolas/.cache/gofresh` or `/home/nikolas/.cache/stipulator` during the 25-minute test run sets `observation.BracketMoved = true`, causing `Unit.Close` (`unit.go:515-517`) to return `RuntimeInputSpanError` (which even `assume_pure: true` cannot discharge) and rendering all `~464` witnesses in `internal/backends/golang` uncacheable!
+
+
 
 
 
