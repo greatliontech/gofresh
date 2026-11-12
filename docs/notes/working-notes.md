@@ -462,6 +462,19 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
          - `lowerCase` (`var lowerCase = [256]byte{...}` in `ascii.go:36`) is an unmutated Go package-level lookup table in `github.com/segmentio/asm/ascii`, NOT an assembly `GLOBL ... RODATA` symbol in `.s`, so `rodataSyms["·lowerCase"]` is `false`!
       3. Moreover, in `addReachedPackageFiles` (`internal/closure/analyzer.go:2216-2226`), whenever `github.com/segmentio/asm/ascii.init()` is walked during `startupSummary` (which only initializes `var lowerCase = [256]byte{...}` and never calls any `.s` function, and none of the `.s` files define `TEXT ·init` or `DATA` on Go globals), `addReachedPackageFiles` unconditionally records `"reaches non-standard assembly"` on `startupSummary` simply because `ascii` is in `a.filePkgs` and `!a.verifiedPackageAssembly(idx.meta)`!
 
+### 4. `stipulator` Full Unscoped `stipulator check` (`/tmp/stipulator-full-check-p1.jsonl`, `/tmp/stipulator-full-check-p2.jsonl` — PASS 1 IN PROGRESS)
+- **Pass 1 Discovery & Execution Observations (`task-32332`)**:
+  - `phase discovery`: took **`6m43.3s` (`403.3s`, resident `766 MiB`, peak `4.1 GiB`)**:
+    - `resolve:new_served`: `95,973 ms` (`1m36s`), `served: 0, unserved: 1,268` (`resolve:serve_selection` on `"default"` took `78,391 ms`).
+    - `resolve:opening_capture`: **`133,836 ms` (`2m13.8s`)**, running **6 separate `GeneralExecution` sessions (`12` `pass_summary` passes x `1,264` subjects = `15,168` subject evaluations)** across `"default"`, `module=stipulate`, `module=stipulate/structural`, `tags=race`, `module=stipulate,tags=race`, and `module=stipulate/structural,tags=race` — even though **100% (`1,268/1,268`) of symbols resolved under `"default"`** (`resolve:publish_selection | default | installed: 1,268, duration_ms: 7,304`)!
+    - `witness:group_snapshot`: **`114,254 ms` (`1m54.3s`)** (`race`: `113,847 ms` for `1,133` subjects in `36` packages; `race:stipulate`: `184 ms` for `1` subject; `race:stipulate/structural`: `223 ms` for `6` subjects).
+    - Total `dynstate.factof.done` in Pass 1 discovery: **`177,004.8 ms` (`2m57s`, `255` calls)**:
+      - `stipulator/internal/backends/golang`: `86,485.8 ms` (`6` calls, `~14.4s` each)
+      - `gofresh/internal/closure`: `38,683.4 ms` (`3` calls, `~12.9s` each)
+      - `stipulator/internal/mcpserver`: `11,124.7 ms` (`6` calls)
+      - `stipulator/gen/stipulator/v1`: `8,649.6 ms` (`3` calls)
+    - Total `session:gotool.exec.done` in Pass 1 discovery: **`47,342.0 ms` (`47.3s`, `562` calls)** — including **`217` `go list` spawns (`22.2s`) in `dir=/stipulator/stipulate/structural`** and **`105` `go list` spawns (`10.4s`) in `dir=/stipulator/stipulate`** because `listingInputs` (`internal/closure/listingmemo.go:360-370`) records existing nested `go.mod` files in `rec.Absent` when listing ancestor-module packages from a nested workspace submodule directory (see Issue L below)!
+
 ### Concrete Architectural, Performance & Incremental-Reuse Bottlenecks Identified So Far
 
 #### Issue A (`gofresh/internal/closure`): `inProgScope` and `inCycleScope` Completely Disabled Whenever `reach.enumeratedRoot` Is True (`freshparam.go:494-495`, `dynamic_walk.go:249-250`, `dispatch_targets.go:120`)
@@ -627,6 +640,25 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
   3. **`stipulator` Omits `ScratchRoot` on `ProcessDescription` (`retainedenv.go:28-64`, `nativeexecution.go:286-289`) and Delays `logPath` Removal Until Whole-Invocation Exit (`nativeexecution.go:58-90`, `execute.go:313-317, 548`)**:
      - Unlike `gomutant` (which allocates a per-execution `ScratchRoot`, sets `TMPDIR` in the child environment, and passes `ScratchRoot` on `gofresh.ProcessDescription`), `stipulator` leaves `ScratchRoot: ""` and `TMPDIR` at `/tmp`. As a result, `os.CreateTemp("", ...)` files created by tests or child `go` commands are not elided under `ScratchRoot`, and leaked temp files accumulate in `/tmp` (`tmpfs` RAM — `35 GiB` used in `/tmp`!).
      - In `finishNativeRun` (`nativeexecution.go:58-90`), after `closeNativeProcess(ctx, a.unit)` finishes reading `a.logPath`, `a.logPath` (`2.1 GiB` for `gomutant`, `957 MiB` for `gofresh`) is NOT removed immediately — it is retained in `/tmp` (`tmpfs` RAM) until `executeSelection` exits (`execute.go:548`)!
+
+#### Issue L (`stipulator/internal/backends/golang/resolutioncontext.go`, `served.go` & `gofresh/internal/closure/listingmemo.go`): Workspace `buildSelection` 6x Whole-Corpus Amplification (`2m13.8s` in `openingCapture`) & Poisoned `listingmemo` `rec.Absent` When `h.dir` Is a Nested Submodule (`217` `go list` Spawns)
+- **Evidence from `/tmp/stipulator-full-check-p1.jsonl`**:
+  1. **`stipulator` `openingCapture` Evaluates All `1,264` Corpus Symbols Across 6 `buildSelection`s (`15,168` Subject Evaluations, `133.8s`) Even Though 100% (`1,268/1,268`) Resolve Under `"default"`**:
+     - `stipulator/.stipulator/policy.textproto` declares `race` (`module_root: ""`), `race:stipulate` (`module_root: "stipulate"`), and `race:stipulate/structural` (`module_root: "stipulate/structural"`).
+     - `policyBuildSelections` (`golang.go:533-549`) generates 6 `buildSelection`s: `default`, `module=stipulate`, `module=stipulate/structural`, `tags=race`, `module=stipulate,tags=race`, `module=stipulate/structural,tags=race`.
+     - In `buildSelection.members(root)` (`resolutioncontext.go:36-38`), when `go.work` exists at `root` (`hasWork == true`) and `workspaceMode != OFF`, `sel.members(root)` returns `workspaceMembers(root)` (`[".", "stipulate", "stipulate/structural"]`) **ignoring `sel.moduleRoot`**!
+     - Consequently:
+       - `declarationPackages` (`packageinventory.go:56-84`) marks all `1,264` symbols across `.`, `stipulate`, and `stipulate/structural` as belonging to `s.inventory[key]` for **every one of the 6 selections**.
+       - `openingCapture` (`served.go:453-466`) eagerly calls `s.captureUnder(endpoint, key, s.unserved, "opening")` on all `1,264` symbols for all 6 selections BEFORE `typed_load` runs — even though `"default"` already loads all 3 workspace members (`".", "stipulate", "stipulate/structural"`) and resolves **100% (`1,268/1,268`) of the symbols**, so the other 5 selections resolve **0 symbols**!
+       - Even when a secondary selection is needed for `//go:build` tag-split symbols, `openingCapture` does not need to pre-capture all `1,268` symbols under every secondary selection before knowing which symbols failed to resolve in earlier selections (or when `sel.moduleRoot != ""` under an active `go.work` produces an identical workspace member set).
+  2. **`gofresh/internal/closure/listingmemo.go:360-370` Records Existing Nested `go.mod` Files in `rec.Absent` When `h.dir` Is a Nested Workspace Submodule**:
+     - When `h.dir` is `/home/nikolas/repos/github.com/greatliontech/stipulator/stipulate/structural` (under `go.work`) and `gofresh` lists a package in the root module (`github.com/greatliontech/stipulator/internal/...`), that package's dependency cone `pkgs` does not contain any package from `stipulate/structural`.
+     - Therefore, `mainDirs` (`listingmemo.go:304-312`) only contains `/home/nikolas/repos/github.com/greatliontech/stipulator` (not `/stipulator/stipulate/structural`).
+     - At lines 360-364, `strings.HasPrefix(dir, candidate+"/")` matches `mainDir = "/home/nikolas/repos/github.com/greatliontech/stipulator"`, and then lines 368-370 walk `for d := dir; d != mainDir; d = filepath.Dir(d)` and set:
+       `absent["/home/nikolas/repos/github.com/greatliontech/stipulator/stipulate/structural/go.mod"] = true`
+       `absent["/home/nikolas/repos/github.com/greatliontech/stipulator/stipulate/go.mod"] = true`
+       even though both `go.mod` files **exist on disk**!
+     - `storeListing` writes this poisoned `rec.Absent` to `~/.cache/gofresh/listing/...`, and on the very next pass `loadListing` (`lines 163-166`) checks `os.Lstat(path); !os.IsNotExist(err)` -> returns `false`, causing **100% `loadListing` validation misses** and spawning `go list` `217` times (`22.2s`) in `stipulate/structural` and `105` times (`10.4s`) in `stipulate`!
 
 
 
