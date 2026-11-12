@@ -1,0 +1,43 @@
+# Audited Standard-Library Math/Formatted-IO/AST-Interface Coverage & Non-Standard Assembly Verification
+
+- **Status:** Open
+- **Governing contract:** [`docs/specs/closure.md`](../specs/closure.md) (`REQ-closure-observability-toolchain-key`, `REQ-closure-observability-audited-set`, `REQ-closure-observability-entropy`, `REQ-closure-observability-writer-sink`, `REQ-closure-blindspot`, `REQ-fresh-dependency-identities`), [`docs/specs/purity.md`](../specs/purity.md)
+- **Lands:** Chunk 4 in [`docs/plans/plan.md`](../plans/plan.md)
+
+## Problem
+
+First-principles static closure and effect audits across `pew` and `gomutant` surfaced four deterministic standard-library and assembly verification gaps that force pure subjects into conservative `unverifiable` / `maximal` fallbacks:
+
+1. **Pure `math` Operations Absent from `internal/auditset` (and `runtime/debug.ReadBuildInfo` VCS Audit)**
+   - Deterministic `math` functions (`math.Inf`, `math.NaN`, `math.IsNaN`, `math.IsInf`, `math.Abs`, `math.Sqrt`, `math.Log`, `math.Exp`, `math.Float64bits`, `math.Float64frombits`, etc.) are not yet mechanically audited into [`internal/auditset`](../../internal/auditset) / [`internal/closure/internal/toolchain`](../../internal/closure/internal/toolchain) (and [`docs/specs/closure.md`](../specs/closure.md) lines 1689–1691 under `REQ-closure-observability-entropy` currently notes package `math` as un-admitted).
+   - Any package-level `var` initializer calling `math.Inf(...)` fails startup observability (`startup effect: reaches unaudited standard operation math.Inf`), disabling Tier-2 per-subject effect narrowing for every subject in the importing subgraph (`110` test subjects across 4 packages in `pew` fall back to Tier-1 `reaches go:linkname` from `golang.org/x/sys/unix`).
+   - Separately, `runtime/debug.ReadBuildInfo` (`3` subjects in `pew/internal/toolversion`) reads build metadata stamped into the binary; whether it is covered by source/build/toolchain guards depends on whether `-buildvcs` can stamp uncommitted `.git` state (`vcs.revision` / `vcs.modified`) outside `BuildConfig` and excluded `.git` brackets.
+
+2. **`inMemoryFormattedSink` (`fmt.Fprint*`) Lacks Delegating In-Memory Wrappers (`*tabwriter.Writer`) and `fmt.Fscan*` Reader Counterparts**
+   - `inMemoryFormattedSink` ([`internal/closure/analyzer.go`](../../internal/closure/analyzer.go) lines 1248–1255, [`internal/closure/dispatch_targets.go`](../../internal/closure/dispatch_targets.go) lines 761–795, implementing `REQ-closure-observability-writer-sink` in [`docs/specs/closure.md`](../specs/closure.md) lines 1814–1836) already admits direct `*bytes.Buffer` and `*strings.Builder` sinks.
+   - However, `auditedInMemorySinkType` rejects pure formatting wrappers such as `tabwriter.NewWriter(w, ...)` (`*text/tabwriter.Writer` wrapping an audited in-memory `io.Writer`, causing `36` `fmt.Fprintf` / `fmt.Fprintln` refusals in `pew/internal/compare`) and in-memory `hash.Hash` sinks, while `fmt.Fscan`, `fmt.Fscanf`, and `fmt.Fscanln` (`80` subjects in `gomutant`) have no symmetric `inMemoryFormattedSource` check for closed in-memory `io.Reader` inputs (`*strings.Reader`, `*bytes.Reader`, `*bytes.Buffer`).
+
+3. **Non-Standard Assembly Verifier (`internal/closure/internal/asmverify`) Rejects `BT*` Read-Only Bit Tests, Carrier-Free Go Lookup Tables, CPU-Guarded `(SB)` Globals & Unreached `.s` Files in Pure-Go `init()`**
+   - In [`internal/closure/internal/asmverify/isa.go`](../../internal/closure/internal/asmverify/isa.go) lines 608–611, `isAsmReadOnlyCompareMnemonic` recognizes `CMP`, `TEST`, `UCOMI`, and `VCOMI`, where the `(SB)` operand is the final read-only operand (`BTL $0x08, cpu·X86+0(SB)`), **but omits x86 read-only bit-test mnemonics `BT`, `BTW`, `BTL`, and `BTQ`** (mutating bit operations `BTS`, `BTR`, `BTC` are already rejected separately by `isAsmReadModifyWriteMnemonic`).
+   - In [`internal/closure/internal/asmverify/parse.go`](../../internal/closure/internal/asmverify/parse.go) lines 496–503 (`REQ-closure-blindspot` in [`docs/specs/closure.md`](../specs/closure.md) lines 346–349), `parseAsmLocalSBRef` restricts `(SB)` global reads to same-package assembly `GLOBL ... RODATA` symbols, rejecting:
+     - `LEAQ ·lowerCase+0(SB), R9` reading an unmutated carrier-free Go lookup table (`var lowerCase = [256]byte{...}`), and
+     - `BTL $0x08, cpu·X86+0(SB)` reading an `init()`-populated hardware-feature struct in an imported package (`github.com/segmentio/asm/cpu`).
+   - In `addReachedPackageFiles` ([`internal/closure/analyzer.go`](../../internal/closure/analyzer.go) lines 2216–2226), walking a pure-Go `init()` function in a package containing `.s` files unconditionally records `"reaches non-standard assembly"` on `startupSummary` whenever `!a.verifiedPackageAssembly(idx.meta)` — even when `init()` calls zero `.s` functions and no `.s` file defines `TEXT ·init` or `DATA` directives touching Go globals.
+
+4. **Local Higher-Order Closure Parameter Calls & `go/parser` AST Interface Receivers**
+   - Local non-escaping helper closures taking `func()` parameters called exclusively with closed inline function literals (`mustPanic := func(f func()) { ... }` in `pew/internal/guidance.TestMustRefusalsNameTheTool`, which also caused `a.fresh == nil` to miss `fmt.Fprintf(&b, ...)`) fail observability with `computed function call ... calling parameter f`, and invoking `.Pos()` on `go/ast.Stmt` interface values constructed by `go/parser.ParseFile` (`pew/internal/shortgates`) fails with `interface invoke outside RTA: ... dispatches go/ast.Stmt.Pos`.
+
+## Soundness Constraints & Resolution Scope
+
+1. **Pure `math` & `-buildvcs` Audit**:
+   - Update `REQ-closure-observability-entropy` in [`docs/specs/closure.md`](../specs/closure.md) lines 1689–1691, mechanically verify pure `math` operations in `internal/closure/internal/toolchain` and `internal/auditset`, and bump `ObservationRTA` ([`session.go`](../../session.go) line 176).
+   - Audit `-buildvcs` stamping on `go test` / retained binaries: admit `runtime/debug.ReadBuildInfo` only when VCS stamping is absent/disabled or fully covered by existing guards; otherwise retain conservative classification when `.git` is excluded.
+2. **Formatted Writer Wrappers & Reader Sources**:
+   - Update `REQ-closure-observability-writer-sink` in [`docs/specs/closure.md`](../specs/closure.md) lines 1814–1836 to cover pure in-memory delegating writers (`*text/tabwriter.Writer` constructed over an audited in-memory `io.Writer`, stdlib `hash.Hash` implementations) and symmetric `fmt.Fscan*` calls over closed in-memory `io.Reader`s (`*strings.Reader`, `*bytes.Reader`, `*bytes.Buffer`).
+3. **Assembly `BT*`, Carrier-Free Lookup Tables & CPU-Feature Guard (`REQ-closure-blindspot`)**:
+   - Add `BT`, `BTW`, `BTL`, and `BTQ` to `isAsmReadOnlyCompareMnemonic`.
+   - Because `dynstate` tracks only dynamic-carrier types (`REQ-closure-shared-dynamic-state-carrier-free`) and ignores `[256]byte`, **never rely on `dynstate` for assembly `(SB)` table immutability**. Instead, update `REQ-closure-blindspot` in [`docs/specs/closure.md`](../specs/closure.md) lines 346–349 and implement a dedicated **carrier-free global immutability check** (verifying literal/init-only writes, zero post-init writes, and zero `&`/slice-aliasing escapes across the defining package, plus unexportedness or whole-program write-freedom) paired with an `asmverify` register-flow check proving any register loaded via `LEA* sym(SB), reg` (and register copies/offsets derived from it) is never used as a memory store or read-modify-write base inside the `TEXT` body.
+   - For `init()`-populated hardware-feature globals (`cpu·X86+0(SB)` where the defining package's `init()` queries `CPUID`/ISA registers and never mutates the struct post-init), propagate the **CPU-feature guard** rather than unconditional `EffectFree`.
+   - Record `"reaches non-standard assembly"` during `init()` only when an unverified `.s` symbol or assembly `DATA` directive is reachable.
+4. **Local Closure Parameter Propagation & `go/parser` AST Nodes**:
+   - Propagate closed inline function arguments across non-escaping local helper closures and close `go/ast` node interface dispatches produced by `go/parser.ParseFile`.
