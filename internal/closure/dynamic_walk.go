@@ -46,7 +46,7 @@ func resetWalkState(fp *freshParamAnalysis) *freshParamAnalysis {
 		return fp
 	}
 	copied := *fp
-	copied.walkFrame = walkFrame{}
+	copied.walkFrame = walkFrame{usedSubject: fp.usedSubject}
 	return &copied
 }
 
@@ -123,14 +123,12 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 			walkDynamicValueUncached(value, collect, seen, done, nil)
 			return true
 		}
-		if fp.usedSubject != nil && value.Parent() != nil && (value.Parent() == fp.enumRoot || value.Parent() == fp.subjectRoot) {
-			*fp.usedSubject = true
-		}
 		outsideCallee := !inActiveCallee(value.Parent(), fp.calleeSeen)
-		inProgScope := outsideCallee && !fp.ignoreContextValuePayload && fp.enumRecvNamed == nil && value.Parent() != fp.enumRoot && value.Parent() != fp.subjectRoot
+		seedsTable := fp.enumSeedsTable()
+		inSeedProgScope := seedsTable != nil && fp.canReadProgMemo(outsideCallee)
 		if outsideCallee {
-			if inProgScope && fp.summary != nil {
-				if entry, ok := fp.summary.enumSeedsMemo[value]; ok {
+			if inSeedProgScope {
+				if entry, ok := seedsTable[value]; ok {
 					for _, t := range entry.types {
 						collect.types[t] = true
 					}
@@ -152,7 +150,7 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 				return true
 			}
 			topSeedWalk := len(collect.visitedStructs) == 0
-			usedSubject := value.Parent() != nil && (value.Parent() == fp.enumRoot || value.Parent() == fp.subjectRoot)
+			usedSubject := false
 			rootFP := *fp
 			rootFP.rootSeen = map[ssa.Value]bool{value: true}
 			rootFP.usedSubject = &usedSubject
@@ -173,8 +171,8 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 			if seen != nil {
 				seen[value] = true
 			}
-			if fp.usedSubject != nil && usedSubject {
-				*fp.usedSubject = true
+			if usedSubject {
+				fp.markSubjectUsed()
 			}
 			for t := range subCollect.types {
 				collect.types[t] = true
@@ -190,7 +188,7 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 					collect.visitedStructs[s] = true
 				}
 			}
-			if topSeedWalk && inProgScope && fp.summary != nil && !usedSubject && len(fp.calleeSeen) == 0 && len(fp.invokeSeen) == 0 {
+			if topSeedWalk && seedsTable != nil && fp.canWriteProgMemo(outsideCallee, usedSubject) {
 				var dedupTypes []types.Type
 				if len(subCollect.types) > 0 {
 					dedupTypes = make([]types.Type, 0, len(subCollect.types))
@@ -205,7 +203,7 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 						funcs = append(funcs, fn)
 					}
 				}
-				fp.summary.enumSeedsMemo[value] = dynamicSeedEntry{
+				seedsTable[value] = dynamicSeedEntry{
 					types: dedupTypes,
 					funcs: funcs,
 				}
@@ -242,60 +240,62 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 		}
 		return r
 	}
-	if fp.usedSubject != nil && value.Parent() != nil && (value.Parent() == fp.enumRoot || value.Parent() == fp.subjectRoot) {
-		*fp.usedSubject = true
-	}
 	outsideCallee := !inActiveCallee(value.Parent(), fp.calleeSeen)
-	inCycleScope := (fp.enumOnly || fp.enumRoot == nil) && (fp.inProgramSites || fp.inFieldStore || fp.enumOnly) && value.Parent() != fp.enumRoot && value.Parent() != fp.subjectRoot
-	inProgScope := outsideCallee && inCycleScope && !fp.ignoreContextValuePayload && fp.enumRecvNamed == nil
+	pMemo := fp.progMemo()
+	sMemo := fp.subjMemo()
+	canReadProg := fp.canReadProgMemo(outsideCallee)
 	if collecting {
 		if outsideCallee {
-			if inProgScope && fp.summary != nil {
+			if canReadProg && pMemo != nil {
 				if collect.types != nil && collect.funcs == nil {
-					tMemo, tFail := fp.summary.progTypesMemo, fp.summary.progTypesFailed
-					if fp.enumOnly {
-						tMemo, tFail = fp.summary.enumTypesMemo, fp.summary.enumTypesFailed
-					}
-					if tFail[value] {
-						return false
-					}
-					if ts, ok := tMemo[value]; ok {
-						for _, t := range ts {
-							collect.types[t] = true
+					if entry, ok := pMemo.typesMemo[value]; ok {
+						if entry.ok {
+							for _, t := range entry.types {
+								collect.types[t] = true
+							}
+							return true
 						}
-						return true
-					}
-				} else if collect.funcs != nil && collect.types == nil && !fp.enumOnly {
-					if fp.summary.progFuncsFailed[value] {
-						return false
-					}
-					if fs, ok := fp.summary.progFuncsMemo[value]; ok {
-						for _, fn := range fs {
-							collect.funcs[fn] = true
+						if fp.canReadNegativeProgMemo() {
+							return false
 						}
-						return true
+					}
+				} else if collect.funcs != nil && collect.types == nil {
+					if entry, ok := pMemo.funcsMemo[value]; ok {
+						if entry.ok {
+							for _, fn := range entry.funcs {
+								collect.funcs[fn] = true
+							}
+							return true
+						}
+						if fp.canReadNegativeProgMemo() {
+							return false
+						}
 					}
 				}
 			}
-			if collect.types != nil && collect.funcs == nil {
-				if fp.typesFailed != nil && fp.typesFailed[value] {
-					return false
-				}
-				if fp.typesMemo != nil {
-					if ts, ok := fp.typesMemo[value]; ok {
-						for _, t := range ts {
+			if sMemo != nil {
+				if collect.types != nil && collect.funcs == nil {
+					if entry, ok := sMemo.typesMemo[value]; ok && (entry.ok || fp.baseCarrierNamed == nil) {
+						if entry.usedSubject {
+							fp.markSubjectUsed()
+						}
+						if !entry.ok {
+							return false
+						}
+						for _, t := range entry.types {
 							collect.types[t] = true
 						}
 						return true
 					}
-				}
-			} else if collect.funcs != nil && collect.types == nil {
-				if fp.funcsFailed != nil && fp.funcsFailed[value] {
-					return false
-				}
-				if fp.funcsMemo != nil {
-					if fs, ok := fp.funcsMemo[value]; ok {
-						for _, fn := range fs {
+				} else if collect.funcs != nil && collect.types == nil {
+					if entry, ok := sMemo.funcsMemo[value]; ok && (entry.ok || fp.baseCarrierNamed == nil) {
+						if entry.usedSubject {
+							fp.markSubjectUsed()
+						}
+						if !entry.ok {
+							return false
+						}
+						for _, fn := range entry.funcs {
 							collect.funcs[fn] = true
 						}
 						return true
@@ -309,7 +309,7 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 				fp.rootSeen[value] = true
 				return walkDynamicValueUncached(value, collect, seen, done, fp)
 			}
-			usedSubject := value.Parent() != nil && (value.Parent() == fp.enumRoot || value.Parent() == fp.subjectRoot)
+			usedSubject := false
 			rootFP := *fp
 			rootFP.rootSeen = map[ssa.Value]bool{value: true}
 			rootFP.usedSubject = &usedSubject
@@ -321,8 +321,8 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 				subCollect.funcs = map[*ssa.Function]bool{}
 			}
 			r := walkDynamicValueUncached(value, &subCollect, seen, done, &rootFP)
-			if fp.usedSubject != nil && usedSubject {
-				*fp.usedSubject = true
+			if usedSubject {
+				fp.markSubjectUsed()
 			}
 			if r {
 				for t := range subCollect.types {
@@ -332,34 +332,26 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 					collect.funcs[fn] = true
 				}
 			}
-			if len(fp.calleeSeen) == 0 && len(fp.invokeSeen) == 0 && fp.baseCarrierNamed == nil {
-				canSaveProg := inProgScope && fp.summary != nil && !usedSubject && len(fp.enumStructVisiting) == 0
+			if fp.canWriteSubjMemo(outsideCallee) && fp.baseCarrierNamed == nil {
+				canSaveProg := fp.canWriteProgMemo(outsideCallee, usedSubject) && pMemo != nil
 				if collect.types != nil && collect.funcs == nil {
 					if r {
 						ts := make([]types.Type, 0, len(subCollect.types))
 						for t := range subCollect.types {
 							ts = append(ts, t)
 						}
-						if fp.typesMemo != nil {
-							fp.typesMemo[value] = ts
+						if sMemo != nil {
+							sMemo.typesMemo[value] = typesMemoEntry{types: ts, ok: true, usedSubject: usedSubject}
 						}
 						if canSaveProg {
-							tMemo := fp.summary.progTypesMemo
-							if fp.enumOnly {
-								tMemo = fp.summary.enumTypesMemo
-							}
-							tMemo[value] = ts
+							pMemo.typesMemo[value] = typesMemoEntry{types: ts, ok: true}
 						}
 					} else {
-						if fp.typesFailed != nil {
-							fp.typesFailed[value] = true
+						if sMemo != nil {
+							sMemo.typesMemo[value] = typesMemoEntry{ok: false, usedSubject: usedSubject}
 						}
 						if canSaveProg {
-							tFail := fp.summary.progTypesFailed
-							if fp.enumOnly {
-								tFail = fp.summary.enumTypesFailed
-							}
-							tFail[value] = true
+							pMemo.typesMemo[value] = typesMemoEntry{ok: false}
 						}
 					}
 				} else if collect.funcs != nil && collect.types == nil {
@@ -368,18 +360,18 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 						for fn := range subCollect.funcs {
 							fs = append(fs, fn)
 						}
-						if fp.funcsMemo != nil {
-							fp.funcsMemo[value] = fs
+						if sMemo != nil {
+							sMemo.funcsMemo[value] = funcsMemoEntry{funcs: fs, ok: true, usedSubject: usedSubject}
 						}
-						if canSaveProg && !fp.enumOnly {
-							fp.summary.progFuncsMemo[value] = fs
+						if canSaveProg {
+							pMemo.funcsMemo[value] = funcsMemoEntry{funcs: fs, ok: true}
 						}
 					} else {
-						if fp.funcsFailed != nil {
-							fp.funcsFailed[value] = true
+						if sMemo != nil {
+							sMemo.funcsMemo[value] = funcsMemoEntry{ok: false, usedSubject: usedSubject}
 						}
-						if canSaveProg && !fp.enumOnly {
-							fp.summary.progFuncsFailed[value] = true
+						if canSaveProg {
+							pMemo.funcsMemo[value] = funcsMemoEntry{ok: false}
 						}
 					}
 				}
@@ -395,6 +387,14 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 	if fp.stackDepth == nil {
 		var lowlink int
 		var hasLeaf, usedSubject bool
+		callerUsedSubject := fp.usedSubject
+		if callerUsedSubject != nil {
+			defer func() {
+				if usedSubject {
+					*callerUsedSubject = true
+				}
+			}()
+		}
 		if done == nil {
 			done = map[ssa.Value]bool{}
 		}
@@ -413,46 +413,44 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 		rootFP.carrierRootDone = map[carrierMemoKey]carrierRootMemoEntry{}
 		fp = &rootFP
 	}
-	stackKey := carrierMemoKey{value: value, named: fp.baseCarrierNamed}
+	stackKey := fp.carrierKey(value)
 	if outsideCallee {
-		if inProgScope && fp.summary != nil {
-			progMemo := fp.summary.progClosedDone
-			if fp.enumOnly {
-				progMemo = fp.summary.enumClosedDone
-			}
-			if r, ok := progMemo[value]; ok && (r || (len(fp.enumStructVisiting) == 0 && fp.baseCarrierNamed == nil)) {
-				if r {
+		if canReadProg && pMemo != nil {
+			if entry, ok := pMemo.closedDone[value]; ok && (entry.closed || fp.canReadNegativeProgMemo()) {
+				if entry.closed {
 					markDynamicLeaf(fp)
 				}
-				return r
+				return entry.closed
 			}
 			if fp.baseCarrierNamed != nil {
-				carrierProgMemo := fp.summary.progCarrierDone
-				if fp.enumOnly {
-					carrierProgMemo = fp.summary.enumCarrierDone
-				}
-				if r, ok := carrierProgMemo[stackKey]; ok && (r || len(fp.enumStructVisiting) == 0) {
-					if r {
+				if entry, ok := pMemo.carrierDone[stackKey]; ok && (entry.closed || len(fp.enumStructVisiting) == 0) {
+					if entry.closed {
 						markDynamicLeaf(fp)
 					}
-					return r
+					return entry.closed
 				}
 			}
 		}
-		if fp.closedDone != nil {
-			if r, ok := fp.closedDone[value]; ok && (r || fp.baseCarrierNamed == nil) {
-				if r {
+		if sMemo != nil {
+			if entry, ok := sMemo.closedDone[value]; ok && (entry.closed || fp.baseCarrierNamed == nil) {
+				if entry.usedSubject {
+					fp.markSubjectUsed()
+				}
+				if entry.closed {
 					markDynamicLeaf(fp)
 				}
-				return r
+				return entry.closed
 			}
-		}
-		if fp.baseCarrierNamed != nil && fp.carrierDone != nil {
-			if r, ok := fp.carrierDone[stackKey]; ok {
-				if r {
-					markDynamicLeaf(fp)
+			if fp.baseCarrierNamed != nil {
+				if entry, ok := sMemo.carrierDone[stackKey]; ok {
+					if entry.usedSubject {
+						fp.markSubjectUsed()
+					}
+					if entry.closed {
+						markDynamicLeaf(fp)
+					}
+					return entry.closed
 				}
-				return r
 			}
 		}
 	} else if done != nil {
@@ -481,8 +479,8 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 				if r && fp.rootHasLeaf[value] {
 					markDynamicLeaf(fp)
 				}
-				if fp.rootUsedSubject[value] && fp.usedSubject != nil {
-					*fp.usedSubject = true
+				if fp.rootUsedSubject[value] {
+					fp.markSubjectUsed()
 				}
 				return r
 			}
@@ -494,8 +492,8 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 				if entry.closed && entry.hasLeaf {
 					markDynamicLeaf(fp)
 				}
-				if entry.usedSubject && fp.usedSubject != nil {
-					*fp.usedSubject = true
+				if entry.usedSubject {
+					fp.markSubjectUsed()
 				}
 				return entry.closed
 			}
@@ -508,7 +506,7 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 	outerHasLeaf := *fp.hasLeaf
 	*fp.hasLeaf = false
 	outerUsedSubject := *fp.usedSubject
-	*fp.usedSubject = value.Parent() != nil && (value.Parent() == fp.enumRoot || value.Parent() == fp.subjectRoot)
+	*fp.usedSubject = false
 
 	r := walkDynamicValueUncached(value, nil, seen, done, fp)
 
@@ -518,7 +516,7 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 	myUsedSubject := *fp.usedSubject
 	if myLowlink != 0 && myLowlink >= myDepth {
 		if r && !myHasLeaf {
-			if !(fp.selectionAudited && inCycleScope && !myUsedSubject) {
+			if !(fp.selectionAudited && fp.inCycleScope() && !myUsedSubject) {
 				r = false
 			}
 		}
@@ -548,9 +546,11 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 
 	if myLowlink == 0 && (!r || myHasLeaf) {
 		if outsideCallee {
+			canSaveSubj := fp.canWriteSubjMemo(outsideCallee) && sMemo != nil
+			canSaveProg := fp.canWriteProgMemo(outsideCallee, myUsedSubject) && pMemo != nil
 			if fp.baseCarrierNamed == nil {
-				if fp.closedDone != nil {
-					fp.closedDone[value] = r
+				if canSaveSubj {
+					sMemo.closedDone[value] = closedMemoEntry{closed: r, usedSubject: myUsedSubject}
 				}
 				if fp.rootDone != nil {
 					fp.rootDone[value] = r
@@ -558,17 +558,13 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 					fp.rootHasLeaf[value] = r && myHasLeaf
 					fp.rootUsedSubject[value] = myUsedSubject
 				}
-				if inProgScope && fp.summary != nil && !myUsedSubject && len(fp.enumStructVisiting) == 0 {
-					progMemo := fp.summary.progClosedDone
-					if fp.enumOnly {
-						progMemo = fp.summary.enumClosedDone
-					}
-					progMemo[value] = r
+				if canSaveProg {
+					pMemo.closedDone[value] = closedMemoEntry{closed: r}
 				}
 			} else {
-				ckey := carrierMemoKey{value: value, named: fp.baseCarrierNamed}
-				if fp.carrierDone != nil {
-					fp.carrierDone[ckey] = r
+				ckey := fp.carrierKey(value)
+				if canSaveSubj {
+					sMemo.carrierDone[ckey] = closedMemoEntry{closed: r, usedSubject: myUsedSubject}
 				}
 				if fp.carrierRootDone != nil {
 					fp.carrierRootDone[ckey] = carrierRootMemoEntry{
@@ -578,12 +574,8 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 						lowlink:     0,
 					}
 				}
-				if inProgScope && fp.summary != nil && !myUsedSubject && len(fp.enumStructVisiting) == 0 {
-					carrierProgMemo := fp.summary.progCarrierDone
-					if fp.enumOnly {
-						carrierProgMemo = fp.summary.enumCarrierDone
-					}
-					carrierProgMemo[ckey] = r
+				if canSaveProg {
+					pMemo.carrierDone[ckey] = closedMemoEntry{closed: r}
 				}
 			}
 		} else if done != nil {
@@ -596,7 +588,7 @@ func walkDynamicValue(value ssa.Value, collect *dynamicValueCollector, seen, don
 			fp.rootHasLeaf[value] = r && myHasLeaf
 			fp.rootUsedSubject[value] = myUsedSubject
 		} else if fp.baseCarrierNamed != nil && fp.carrierRootDone != nil {
-			fp.carrierRootDone[carrierMemoKey{value: value, named: fp.baseCarrierNamed}] = carrierRootMemoEntry{
+			fp.carrierRootDone[fp.carrierKey(value)] = carrierRootMemoEntry{
 				closed:      r,
 				hasLeaf:     r && myHasLeaf,
 				usedSubject: myUsedSubject,
@@ -649,8 +641,9 @@ func enumUserStructClosed(named *types.Named, fp *freshParamAnalysis) bool {
 		markDynamicLeaf(fp)
 		return true
 	}
-	if fp.summary != nil && !fp.ignoreContextValuePayload {
-		if r, ok := fp.summary.enumStructClosed[named]; ok && (r || (len(fp.enumStructVisiting) == 0 && fp.enumRecvNamed == nil)) {
+	structMemo := fp.enumStructTable()
+	if structMemo != nil {
+		if r, ok := structMemo[named]; ok && (r || (len(fp.enumStructVisiting) == 0 && fp.enumRecvNamed == nil)) {
 			if r {
 				markDynamicLeaf(fp)
 			}
@@ -698,8 +691,8 @@ func enumUserStructClosed(named *types.Named, fp *freshParamAnalysis) bool {
 			if usedSubject && fp.usedSubject != nil {
 				*fp.usedSubject = true
 			}
-			if topLevel && !usedSubject && fp.summary != nil && !fp.ignoreContextValuePayload {
-				fp.summary.enumStructClosed[named] = false
+			if topLevel && !usedSubject && structMemo != nil {
+				structMemo[named] = false
 			}
 			return false
 		}
@@ -717,8 +710,8 @@ func enumUserStructClosed(named *types.Named, fp *freshParamAnalysis) bool {
 					trace.String("field", st.Field(f).Name()),
 				)
 			}
-			if topLevel && fp.summary != nil && !fp.ignoreContextValuePayload {
-				fp.summary.enumStructClosed[named] = false
+			if topLevel && structMemo != nil {
+				structMemo[named] = false
 			}
 			return false
 		}
@@ -742,8 +735,8 @@ func enumUserStructClosed(named *types.Named, fp *freshParamAnalysis) bool {
 					if usedSubject && fp.usedSubject != nil {
 						*fp.usedSubject = true
 					}
-					if topLevel && !usedSubject && fp.summary != nil && !fp.ignoreContextValuePayload {
-						fp.summary.enumStructClosed[named] = false
+					if topLevel && !usedSubject && structMemo != nil {
+						structMemo[named] = false
 					}
 					return false
 				}
@@ -776,8 +769,8 @@ func enumUserStructClosed(named *types.Named, fp *freshParamAnalysis) bool {
 				if usedSubject && fp.usedSubject != nil {
 					*fp.usedSubject = true
 				}
-				if topLevel && !usedSubject && fp.summary != nil && !fp.ignoreContextValuePayload {
-					fp.summary.enumStructClosed[named] = false
+				if topLevel && !usedSubject && structMemo != nil {
+					structMemo[named] = false
 				}
 				return false
 			}
@@ -786,9 +779,9 @@ func enumUserStructClosed(named *types.Named, fp *freshParamAnalysis) bool {
 	if usedSubject && fp.usedSubject != nil {
 		*fp.usedSubject = true
 	}
-	if topLevel && !usedSubject && fp.summary != nil && !fp.ignoreContextValuePayload {
+	if topLevel && !usedSubject && structMemo != nil {
 		for s := range visiting {
-			fp.summary.enumStructClosed[s] = true
+			structMemo[s] = true
 		}
 	}
 	markDynamicLeaf(fp)
@@ -822,13 +815,20 @@ func collectUserStructSeeds(named *types.Named, collect *dynamicValueCollector, 
 		collect.visitedStructs = map[*types.Named]bool{}
 	}
 	collect.visitedStructs[named] = true
+	wasProgScope := fp.inProgramSites || fp.inFieldStore
 	wholeFP := *fp
 	wholeFP.calleeFrame = calleeFrame{inProgramSites: true}
+	if !wasProgScope {
+		wholeFP.rootSeen = nil
+	}
 	for _, wv := range fp.structWholeStores[named] {
 		walkDynamicValue(wv, collect, map[ssa.Value]bool{}, nil, &wholeFP)
 	}
 	fieldFP := *fp
 	fieldFP.calleeFrame = calleeFrame{inProgramSites: fp.inProgramSites, inFieldStore: true}
+	if !wasProgScope {
+		fieldFP.rootSeen = nil
+	}
 	for f := 0; f < st.NumFields(); f++ {
 		fType := st.Field(f).Type()
 		if !typeMayCarryDynamicTop(fp.selectionAudited, fType) {
@@ -857,15 +857,22 @@ func userStructWholeStoresClosed(named *types.Named, collect *dynamicValueCollec
 	if len(wholeStores) == 0 {
 		return true
 	}
+	wasProgScope := fp.inProgramSites || fp.inFieldStore
 	wholeFP := *fp
 	wholeFP.inProgramSites = true
 	wholeFP.inFieldStore = true
+	wholeFP.baseCarrierNamed = nil
 	wholeFP.callBindings = nil
 	wholeFP.calleeSeen = nil
 	wholeFP.calleeDepth = nil
+	if !wasProgScope {
+		wholeFP.isolateRootScope()
+	}
 	wholeDone := done
-	if fp.rootDone != nil {
-		wholeDone = fp.rootDone
+	if wholeFP.rootDone != nil {
+		wholeDone = wholeFP.rootDone
+	} else if (!wasProgScope || fp.baseCarrierNamed != nil) && done != nil {
+		wholeDone = map[ssa.Value]bool{}
 	}
 	if !collect.collecting() {
 		savedLeaf := false
@@ -1075,16 +1082,16 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 				return false
 			}
 		}
-		wrapFP := fp
+		wrapFP, wrapDone := fp, done
 		if ok && syntheticInterfaceMethodWrapper(fn) {
 			if mObj, mOK := fn.Object().(*types.Func); mOK && isContextCancelMethod(mObj) {
-				wrapFP = withIgnoreContextValuePayload(fp)
+				wrapFP, wrapDone = withIgnoreContextValuePayloadDone(fp, done)
 			}
 		}
 		if !collecting {
 			if ok && syntheticInterfaceMethodWrapper(fn) {
 				for _, binding := range v.Bindings {
-					if !walkDynamicValue(binding, nil, seen, done, wrapFP) {
+					if !walkDynamicValue(binding, nil, seen, wrapDone, wrapFP) {
 						return false
 					}
 				}
@@ -1109,7 +1116,7 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		}
 		if syntheticInterfaceMethodWrapper(fn) && wrapFP != nil && wrapFP.selectionAudited {
 			if collect.isSeeds() && len(v.Bindings) == 1 {
-				walkDynamicValue(v.Bindings[0], collect, seen, done, wrapFP)
+				walkDynamicValue(v.Bindings[0], collect, seen, wrapDone, wrapFP)
 			}
 			if len(v.Bindings) != 1 || v.Parent() == nil || v.Parent().Prog == nil {
 				if collect.isSeeds() {
@@ -1190,8 +1197,8 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 				if cell := cellOf(alloc, map[ssa.Value]bool{}); cell != nil {
 					if !collecting {
 						if fp != nil && fp.stackDepth != nil {
-							cellKey := carrierMemoKey{value: cell, named: fp.baseCarrierNamed}
-							valKey := carrierMemoKey{value: value, named: fp.baseCarrierNamed}
+							cellKey := fp.carrierKey(cell)
+							valKey := fp.carrierKey(value)
 							if d, onStack := fp.stackDepth[cellKey]; onStack {
 								if fp.selectionAudited {
 									if *fp.lowlink == 0 || d < *fp.lowlink {
@@ -1362,6 +1369,7 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 				return walkDynamicValue(bound, collect, seen, done, fp.withoutCallee(v.Parent()))
 			}
 			if fp.enumRecvNamed != nil && fp.enumRoot != nil && len(fp.enumRoot.Params) > 0 && v == fp.enumRoot.Params[0] {
+				fp.markSubjectUsed()
 				if !collecting {
 					markDynamicLeaf(fp)
 					return true
@@ -1375,14 +1383,14 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		}
 		args, usedProgramSites, ok := attributedParameterArgs(v, fp)
 		if !ok {
-			if !collect.isSink() && fp != nil && fp.selectionAudited && ((!fp.enumOnly && fp.enumRoot == nil) || fp.enumOnly) && (fp.inProgramSites || fp.inFieldStore) {
+			if !collect.isSink() && fp != nil && fp.selectionAudited && fp.programSites != nil && (fp.inProgramSites || fp.inFieldStore) {
 				fn := v.Parent()
-				if fn != nil && fn != fp.enumRoot && fn != fp.subjectRoot && !fp.isEnumSiteCaller(fn) && !fp.functions[fn] && !fp.dynamic[fn] && len(fp.callersOf(fn)) == 0 && !fp.programValueRef[fn] && len(fp.programSites[fn]) == 0 && !initFlowFrame(fn) {
-					if fp.usedSubject != nil {
-						*fp.usedSubject = true
+				if fn != nil && !fp.programValueRef[fn] && len(fp.programSites[fn]) == 0 && !initFlowFrame(fn) {
+					fp.markSubjectUsed()
+					if !fp.isSubjectRoot(fn) && !fp.isEnumSiteCaller(fn) && !fp.functions[fn] && !fp.dynamic[fn] && len(fp.callersOf(fn)) == 0 && (fp.enumOnly || fp.enumRoot == nil) {
+						markDynamicLeaf(fp)
+						return true
 					}
-					markDynamicLeaf(fp)
-					return true
 				}
 			}
 			return collect.isSeeds()
@@ -1506,8 +1514,8 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 		}
 		if !collecting {
 			if fp != nil && fp.stackDepth != nil {
-				cellKey := carrierMemoKey{value: cell, named: fp.baseCarrierNamed}
-				valKey := carrierMemoKey{value: value, named: fp.baseCarrierNamed}
+				cellKey := fp.carrierKey(cell)
+				valKey := fp.carrierKey(value)
 				if d, onStack := fp.stackDepth[cellKey]; onStack {
 					if fp.selectionAudited {
 						if *fp.lowlink == 0 || d < *fp.lowlink {
@@ -1540,16 +1548,20 @@ func walkUserStructFieldDynamicValue(base ssa.Value, fieldIdx int, collect *dyna
 		return false, false
 	}
 	collecting := collect.collecting()
+	wasProgScope := fp.inProgramSites || fp.inFieldStore
 	fieldFP := *fp
 	fieldFP.inFieldStore = true
 	fieldFP.baseCarrierNamed = nil
 	fieldFP.callBindings = nil
 	fieldFP.calleeSeen = nil
 	fieldFP.calleeDepth = nil
+	if !wasProgScope {
+		fieldFP.isolateRootScope()
+	}
 	fieldDone := done
-	if fp.rootDone != nil {
-		fieldDone = fp.rootDone
-	} else if done != nil {
+	if fieldFP.rootDone != nil {
+		fieldDone = fieldFP.rootDone
+	} else if (!wasProgScope || fp.baseCarrierNamed != nil) && done != nil {
 		fieldDone = map[ssa.Value]bool{}
 	}
 	checkInnerStruct := func(named *types.Named) bool {
@@ -1576,24 +1588,27 @@ func walkUserStructFieldDynamicValue(base ssa.Value, fieldIdx int, collect *dyna
 		}
 		return true
 	}
-	if fp.enumRoot != nil && len(fp.enumRoot.Params) > 0 && base == fp.enumRoot.Params[0] && len(fp.enumFieldStores) > 0 {
-		named := derefNamedStruct(fp.userPkgPaths(), base.Type())
-		if named != nil && (!userStructWholeStoresClosed(named, collect, seen, fieldDone, &fieldFP) || !checkInnerStruct(named)) && !collect.isSeeds() {
-			return false, true
-		}
-		stores, ok := fp.enumFieldStores[fieldIdx]
-		if ok && len(stores) == 0 {
-			if !collecting {
-				markDynamicLeaf(fp)
+	if fp.enumRoot != nil && len(fp.enumRoot.Params) > 0 && base == fp.enumRoot.Params[0] {
+		fp.markSubjectUsed()
+		if len(fp.enumFieldStores) > 0 {
+			named := derefNamedStruct(fp.userPkgPaths(), base.Type())
+			if named != nil && (!userStructWholeStoresClosed(named, collect, seen, fieldDone, &fieldFP) || !checkInnerStruct(named)) && !collect.isSeeds() {
+				return false, true
+			}
+			stores, ok := fp.enumFieldStores[fieldIdx]
+			if ok && len(stores) == 0 {
+				if !collecting {
+					markDynamicLeaf(fp)
+				}
+				return true, true
+			}
+			for _, sv := range stores {
+				if !walkDynamicValue(sv, collect, seen, fieldDone, &fieldFP) && !collect.isSeeds() {
+					return false, true
+				}
 			}
 			return true, true
 		}
-		for _, sv := range stores {
-			if !walkDynamicValue(sv, collect, seen, fieldDone, &fieldFP) && !collect.isSeeds() {
-				return false, true
-			}
-		}
-		return true, true
 	}
 	if !fp.selectionAudited && !collect.isSeeds() {
 		return false, false

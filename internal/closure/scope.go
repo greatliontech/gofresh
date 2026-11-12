@@ -81,7 +81,7 @@ func (s AnalysisScope) TestingScan() string {
 	return testingScanStrategy + "|" + s.guards()
 }
 
-const rootedFunctionsStrategy = "gofresh/rooted-functions@11"
+const rootedFunctionsStrategy = "gofresh/rooted-functions@12"
 
 // Rooted is the rooted-functions and binary-rooted-functions memo's scope:
 // its strategy version and the guard key (the code guards and the analyzing
@@ -112,12 +112,16 @@ func (s AnalysisScope) Facts() string {
 }
 
 // Scan is the view scan memo's scope: the facts' scope joined with the
-// sorted vouch set, since a vouch is load-bearing for the discharges an
-// entry records.
+// rooted-functions strategy when execution attestations run reachability
+// culprit discharges, and the sorted vouch set, since both are load-bearing
+// for the discharges an entry records.
 func (s AnalysisScope) Scan() string {
 	facts := s.Facts()
 	if facts == "" {
 		return ""
+	}
+	if s.SingleSubject || s.PackageProcess {
+		facts += "|" + rootedFunctionsStrategy
 	}
 	keys := append([]string(nil), s.Vouches...)
 	sort.Strings(keys)

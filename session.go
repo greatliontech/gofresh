@@ -173,7 +173,7 @@ const ClosureStrategy = closure.IdentityStrategy
 // classification change bumps it, so persistently memoized analyses and
 // recorded proofs from the prior interpretation refuse instead of serving
 // under semantics they were not computed by.
-const ObservationRTA = "gofresh/observation-rta@69"
+const ObservationRTA = "gofresh/observation-rta@70"
 
 // BuildDescription describes compilation, not the environment of the resulting
 // program. Inputs is explicitly present (possibly empty): the executor accepts

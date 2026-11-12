@@ -117,26 +117,24 @@ func closedInvokeTargets(site ssa.CallInstruction, fp *freshParamAnalysis) (map[
 	}
 	fp = contextCancelMethodFP(site, fp)
 	outsideCallee := fp != nil && (c.Value == nil || !inActiveCallee(c.Value.Parent(), fp.calleeSeen))
-	inProgScope := outsideCallee && !fp.ignoreContextValuePayload && fp.enumRecvNamed == nil && (fp.enumOnly || fp.enumRoot == nil) && (fp.inProgramSites || fp.inFieldStore || fp.enumOnly) && site.Parent() != fp.enumRoot && site.Parent() != fp.subjectRoot
-	if inProgScope && fp.summary != nil {
-		pTargets, pFailed := fp.summary.progInvokeTargets, fp.summary.progInvokeFailed
-		if fp.enumOnly {
-			pTargets, pFailed = fp.summary.enumInvokeTargets, fp.summary.enumInvokeFailed
-		}
-		if pFailed[site] {
-			return nil, false
-		}
-		if cached, ok := pTargets[site]; ok {
-			return cached, true
+	pMemo := fp.progMemo()
+	if fp.canReadProgMemo(outsideCallee) && pMemo != nil {
+		if entry, ok := pMemo.invokeMemo[site]; ok {
+			if entry.ok {
+				return entry.targets, true
+			}
+			if fp.canReadNegativeProgMemo() {
+				return nil, false
+			}
 		}
 	}
-	cacheable := outsideCallee && fp.invokeTargets != nil && fp.invokeFailed != nil
-	if cacheable {
-		if fp.invokeFailed[site] {
-			return nil, false
-		}
-		if cached, ok := fp.invokeTargets[site]; ok {
-			return cached, true
+	sMemo := fp.subjMemo()
+	if outsideCallee && sMemo != nil {
+		if entry, ok := sMemo.invokeMemo[site]; ok && (entry.ok || fp.baseCarrierNamed == nil) {
+			if entry.usedSubject {
+				fp.markSubjectUsed()
+			}
+			return entry.targets, entry.ok
 		}
 	}
 	evalFP, collectFP, rootDone, propagateWalkFlags := newDispatchWalkStates(fp)
@@ -162,16 +160,12 @@ func closedInvokeTargets(site ssa.CallInstruction, fp *freshParamAnalysis) (map[
 			)
 		}
 		noEscape, usedSubj := propagateWalkFlags()
-		if noEscape {
-			if cacheable {
-				fp.invokeFailed[site] = true
+		if noEscape && fp.baseCarrierNamed == nil {
+			if sMemo != nil && fp.canWriteSubjMemo(outsideCallee) {
+				sMemo.invokeMemo[site] = invokeMemoEntry{ok: false, usedSubject: usedSubj}
 			}
-			if inProgScope && fp.summary != nil && !usedSubj && len(fp.enumStructVisiting) == 0 {
-				pFailed := fp.summary.progInvokeFailed
-				if fp.enumOnly {
-					pFailed = fp.summary.enumInvokeFailed
-				}
-				pFailed[site] = true
+			if fp.canWriteProgMemo(outsideCallee, usedSubj) && pMemo != nil {
+				pMemo.invokeMemo[site] = invokeMemoEntry{ok: false}
 			}
 		}
 		return nil, false
@@ -180,7 +174,7 @@ func closedInvokeTargets(site ssa.CallInstruction, fp *freshParamAnalysis) (map[
 		return fail("eval_recv")
 	}
 	concreteTypes = map[types.Type]bool{}
-	allowEmptyConcrete := fp != nil && fp.selectionAudited && !isDirectNilOnlyParam(c.Value, fp)
+	allowEmptyConcrete := fp != nil && fp.selectionAudited && !isDirectNilOnlyParam(c.Value, collectFP)
 	if !walkDynamicValue(c.Value, &dynamicValueCollector{types: concreteTypes}, map[ssa.Value]bool{}, nil, collectFP) || (len(concreteTypes) == 0 && !allowEmptyConcrete) {
 		return fail("collect_concrete_types")
 	}
@@ -190,15 +184,11 @@ func closedInvokeTargets(site ssa.CallInstruction, fp *freshParamAnalysis) (map[
 	}
 	noEscape, usedSubj := propagateWalkFlags()
 	if noEscape {
-		if cacheable {
-			fp.invokeTargets[site] = targets
+		if sMemo != nil && fp.canWriteSubjMemo(outsideCallee) {
+			sMemo.invokeMemo[site] = invokeMemoEntry{targets: targets, ok: true, usedSubject: usedSubj}
 		}
-		if inProgScope && fp.summary != nil && !usedSubj && len(fp.enumStructVisiting) == 0 {
-			pTargets := fp.summary.progInvokeTargets
-			if fp.enumOnly {
-				pTargets = fp.summary.enumInvokeTargets
-			}
-			pTargets[site] = targets
+		if fp.canWriteProgMemo(outsideCallee, usedSubj) && pMemo != nil {
+			pMemo.invokeMemo[site] = invokeMemoEntry{targets: targets, ok: true}
 		}
 	}
 	return targets, true
@@ -596,9 +586,16 @@ func attributedParameterArgs(param *ssa.Parameter, fp *freshParamAnalysis) ([]ss
 	if idx < 0 {
 		return nil, false, false
 	}
-	sites := fp.callersOf(fn)
+	var sites []ssa.CallInstruction
+	if fn == fp.enumRoot || (!fp.inProgramSites && !fp.inFieldStore) {
+		if !fp.enumOnly {
+			fp.markSubjectUsed()
+		}
+		sites = fp.callersOf(fn)
+	}
 	usedProgramSites := false
 	if fn == fp.enumRoot {
+		fp.markSubjectUsed()
 		// The subject root's own parameters cross to its whole-view
 		// caller enumeration; any subject-internal recursion sites join
 		// the conjunction rather than replacing it.
@@ -607,7 +604,7 @@ func attributedParameterArgs(param *ssa.Parameter, fp *freshParamAnalysis) ([]ss
 			usedProgramSites = true
 		}
 	}
-	needRecvProgram := fn != fp.enumRoot && (fp.dynamic[fn] || fp.inProgramSites || fp.inFieldStore || fp.enumOnly || len(sites) == 0 || len(fn.FreeVars) != 0)
+	needRecvProgram := fn != fp.enumRoot && (fp.inProgramSites || fp.inFieldStore || fp.enumOnly || len(sites) == 0 || len(fn.FreeVars) != 0 || fp.dynamic[fn])
 	if idx == 0 && fn.Signature != nil && fn.Signature.Recv() != nil && fp != nil && fp.selectionAudited && fp.summary != nil && needRecvProgram {
 		if namedSig := derefNamedSignature(fp.userPkgPaths(), param.Type()); namedSig != nil {
 			if _, isPtr := types.Unalias(param.Type()).(*types.Pointer); isPtr || fp.programValueRef[fn] || fp.summary.namedSigPoisoned[namedSig] {
@@ -658,6 +655,9 @@ func attributedParameterArgs(param *ssa.Parameter, fp *freshParamAnalysis) ([]ss
 	if param.Type() != nil {
 		_, isSigParam = types.Unalias(param.Type()).Underlying().(*types.Signature)
 	}
+	if isSigParam && fp.enumOnly {
+		fp.markSubjectUsed()
+	}
 	if isSigParam && !fp.inFieldStore && !fp.inProgramSites {
 		if (!fp.functions[fn] && (!fp.selectionAudited || fp.enumOnly || fp.programValueRef[fn] || len(fp.programSites[fn]) == 0)) || fp.dynamic[fn] || len(fn.FreeVars) != 0 || fn.Signature.Variadic() {
 			return nil, false, false
@@ -665,7 +665,7 @@ func attributedParameterArgs(param *ssa.Parameter, fp *freshParamAnalysis) ([]ss
 	}
 	isEnumSigParam := fp.enumOnly && !fp.inFieldStore && !fp.inProgramSites && isSigParam
 	perSubjectSigParam := isSigParam && !fp.inFieldStore && !fp.inProgramSites && !fp.enumOnly && fp.functions[fn] && (len(sites) > 0 || !fp.selectionAudited)
-	needProgramSites := (len(sites) == 0 || len(fn.FreeVars) != 0 || (fn != fp.enumRoot && (fp.dynamic[fn] || fp.inProgramSites || fp.inFieldStore || fp.enumOnly))) && !isEnumSigParam && !perSubjectSigParam
+	needProgramSites := (len(sites) == 0 || len(fn.FreeVars) != 0 || (fn != fp.enumRoot && (fp.inProgramSites || fp.inFieldStore || fp.enumOnly || fp.dynamic[fn]))) && !isEnumSigParam && !perSubjectSigParam
 	if needProgramSites {
 		if fp.programSites == nil || fp.programValueRef[fn] || (len(fn.FreeVars) != 0 && !fp.selectionAudited) {
 			return nil, false, false
@@ -744,14 +744,19 @@ func attributedFreeVarBindings(fv *ssa.FreeVar, fp *freshParamAnalysis) ([]ssa.V
 	if len(mcs) == 0 {
 		return nil, false, false
 	}
-	usedProgramSites := fn.Parent() == nil
+	usedProgramSites := fn.Parent() == nil || (fp.inProgramSites && !fp.inFieldStore && len(fp.callBindings) == 0 && len(fp.calleeSeen) == 0)
 	bindings := make([]ssa.Value, 0, len(mcs))
 	for _, mc := range mcs {
 		if mc == nil || idx >= len(mc.Bindings) || mc.Bindings[idx] == nil {
 			return nil, false, false
 		}
-		if !usedProgramSites && (len(fp.functions) == 0 || !fp.functions[mc.Parent()]) {
-			usedProgramSites = true
+		if !usedProgramSites {
+			if !fp.enumOnly {
+				fp.markSubjectUsed()
+			}
+			if len(fp.functions) == 0 || !fp.functions[mc.Parent()] {
+				usedProgramSites = true
+			}
 		}
 		bindings = append(bindings, mc.Bindings[idx])
 	}
@@ -949,28 +954,40 @@ func isContextCancelSite(site ssa.CallInstruction) bool {
 	return false
 }
 
-func withIgnoreContextValuePayload(fp *freshParamAnalysis) *freshParamAnalysis {
+func withIgnoreContextValuePayloadDone(fp *freshParamAnalysis, done map[ssa.Value]bool) (*freshParamAnalysis, map[ssa.Value]bool) {
 	if fp == nil || !fp.selectionAudited || fp.ignoreContextValuePayload {
-		return fp
+		return fp, done
 	}
 	copied := *fp
 	copied.ignoreContextValuePayload = true
-	copied.resetDynamicMemos()
-	if fp.rootDone != nil {
-		copied.rootDone = map[ssa.Value]bool{}
-		copied.rootLowlink = map[ssa.Value]int{}
-		copied.rootHasLeaf = map[ssa.Value]bool{}
-		copied.rootUsedSubject = map[ssa.Value]bool{}
-		copied.carrierRootDone = map[carrierMemoKey]carrierRootMemoEntry{}
+	if copied.memoTables == nil {
+		copied.resetDynamicMemos()
 	}
-	return &copied
+	copied.isolateRootScope()
+	outDone := done
+	if copied.baseCarrierNamed == nil && copied.rootDone != nil && len(copied.calleeSeen) == 0 {
+		outDone = copied.rootDone
+	} else if done != nil {
+		outDone = map[ssa.Value]bool{}
+	}
+	return &copied, outDone
+}
+
+func withIgnoreContextValuePayload(fp *freshParamAnalysis) *freshParamAnalysis {
+	outFP, _ := withIgnoreContextValuePayloadDone(fp, nil)
+	return outFP
+}
+
+func contextCancelMethodFPDone(site ssa.CallInstruction, fp *freshParamAnalysis, done map[ssa.Value]bool) (*freshParamAnalysis, map[ssa.Value]bool) {
+	if fp == nil || !fp.selectionAudited || fp.ignoreContextValuePayload || !isContextCancelSite(site) {
+		return fp, done
+	}
+	return withIgnoreContextValuePayloadDone(fp, done)
 }
 
 func contextCancelMethodFP(site ssa.CallInstruction, fp *freshParamAnalysis) *freshParamAnalysis {
-	if fp == nil || !fp.selectionAudited || fp.ignoreContextValuePayload || !isContextCancelSite(site) {
-		return fp
-	}
-	return withIgnoreContextValuePayload(fp)
+	outFP, _ := contextCancelMethodFPDone(site, fp, nil)
+	return outFP
 }
 
 func isAuditedStandardContextRecvType(ct types.Type) bool {

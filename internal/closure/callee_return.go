@@ -63,7 +63,7 @@ func staticCallResultDynamicValue(call *ssa.Call, tupleIndex int, collect *dynam
 	if fp == nil || !fp.selectionAudited || call == nil || call.Common() == nil {
 		return false
 	}
-	fp = contextCancelMethodFP(call, fp)
+	fp, done = contextCancelMethodFPDone(call, fp, done)
 	if call.Common().IsInvoke() || call.Common().StaticCallee() == nil {
 		if fp.invokeSeen[call] {
 			if fp.lowlink != nil {
@@ -143,7 +143,7 @@ func staticCallResultDynamicValue(call *ssa.Call, tupleIndex int, collect *dynam
 	}
 	callee := call.Common().StaticCallee()
 	if tupleIndex == 1 && callee != nil && funcPkgPath(callee) == "context" && (callee.Name() == "WithCancel" || callee.Name() == "WithCancelCause") {
-		fp = withIgnoreContextValuePayload(fp)
+		fp, done = withIgnoreContextValuePayloadDone(fp, done)
 	}
 	return calleeResultDynamicValue(call, callee, call.Common().Args, tupleIndex, collect, seen, done, fp)
 }
@@ -187,11 +187,6 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 		}
 		return fp.selectionAudited
 	}
-	if callee == fp.enumRoot || callee == fp.subjectRoot {
-		if fp.usedSubject != nil {
-			*fp.usedSubject = true
-		}
-	}
 	pkgPath := funcPkgPath(callee)
 	if fp.isStdFunc(callee) {
 		var callerFn *ssa.Function
@@ -226,7 +221,10 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 			return reject("std_unaudited")
 		}
 	} else {
-		if (!fp.functions[callee] && !fp.programFunctions[callee]) || (callee == fp.enumRoot && !fp.selectionAudited) || (callee.Signature.Variadic() && !fp.selectionAudited && !fp.inFieldStore && !fp.inProgramSites) || propharness.IsHarnessPath(pkgPath) {
+		if !fp.programFunctions[callee] || !fp.selectionAudited {
+			fp.markSubjectUsed()
+		}
+		if (!fp.functions[callee] && !fp.programFunctions[callee]) || (callee == fp.enumRoot && !fp.selectionAudited) || (callee.Signature != nil && callee.Signature.Variadic() && !fp.selectionAudited && !fp.inFieldStore && !fp.inProgramSites) || propharness.IsHarnessPath(pkgPath) {
 			return reject("nonstd_inadmissible")
 		}
 		if fp.enumOnly && !collect.isSeeds() {
@@ -281,12 +279,12 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 		if call.Common().IsInvoke() && i == 0 && !collect.isSeeds() {
 			continue
 		}
-		if fp != nil && fp.ignoreContextValuePayload && !fp.enumOnly && !collect.isSeeds() && !calleeParamMayAffectResult(fp, callee, i) {
+		if fp != nil && fp.ignoreContextValuePayload && !fp.enumOnly && !collect.isSeeds() && !calleeParamMayAffectTupleResult(fp, callee, i, tupleIndex, make(map[paramTupleKey]bool)) {
 			continue
 		}
 		if !fp.isStdFunc(callee) {
 			if named := derefNamedStruct(fp.userPkgPaths(), arg.Type()); named != nil {
-				paramSupplies := len(callee.Blocks) == 0 || callee.Synthetic != "" || parameterizedBody(callee) || paramMaySupplyDynamicSeen(fp.selectionAudited, fp.userPkgPaths(), callee.Params[i], nil, make(map[*ssa.Parameter]bool))
+				paramSupplies := len(callee.Blocks) == 0 || callee.Synthetic != "" || parameterizedBody(callee) || paramMaySupplyTupleDynamicSeen(fp.selectionAudited, fp.userPkgPaths(), callee.Params[i], nil, tupleIndex, make(map[paramTupleKey]bool))
 				if !collect.collecting() && paramSupplies && typeMayCarryDynamicTop(fp.selectionAudited, named) {
 					savedLeaf := false
 					if argCheckFP.hasLeaf != nil {
@@ -614,6 +612,10 @@ func isAuditedIOWrapperArg(callee *ssa.Function, argIdx int) bool {
 }
 
 func calleeParamMayAffectResult(fp *freshParamAnalysis, callee *ssa.Function, idx int) bool {
+	return calleeParamMayAffectTupleResult(fp, callee, idx, -1, make(map[paramTupleKey]bool))
+}
+
+func calleeParamMayAffectTupleResult(fp *freshParamAnalysis, callee *ssa.Function, idx, tupleIndex int, paramSeen map[paramTupleKey]bool) bool {
 	audited := fp != nil && fp.selectionAudited
 	if !audited || callee == nil || idx < 0 || idx >= len(callee.Params) {
 		return true
@@ -625,12 +627,18 @@ func calleeParamMayAffectResult(fp *freshParamAnalysis, callee *ssa.Function, id
 		if len(callee.Blocks) == 0 || callee.Synthetic != "" || parameterizedBody(callee) {
 			return true
 		}
-		return paramFlowsOutsideContextValuePayload(fp, callee.Params[idx], make(map[ssa.Value]bool))
+		param := callee.Params[idx]
+		key := paramTupleKey{param: param, tupleIndex: tupleIndex}
+		if paramSeen[key] {
+			return false
+		}
+		paramSeen[key] = true
+		return paramFlowsOutsideContextValuePayload(fp, param, callee, tupleIndex, make(map[ssa.Value]bool), paramSeen)
 	}
 	return true
 }
 
-func paramFlowsOutsideContextValuePayload(fp *freshParamAnalysis, val ssa.Value, seen map[ssa.Value]bool) bool {
+func paramFlowsOutsideContextValuePayload(fp *freshParamAnalysis, val ssa.Value, callee *ssa.Function, tupleIndex int, seen map[ssa.Value]bool, paramSeen map[paramTupleKey]bool) bool {
 	audited := fp != nil && fp.selectionAudited
 	if val == nil {
 		return true
@@ -646,6 +654,10 @@ func paramFlowsOutsideContextValuePayload(fp *freshParamAnalysis, val ssa.Value,
 	for _, ref := range *refs {
 		switch r := ref.(type) {
 		case *ssa.DebugRef:
+		case *ssa.Return:
+			if !returnExcludesTupleIndex(r, val, callee, tupleIndex) {
+				return true
+			}
 		case *ssa.BinOp:
 			if r.Op != token.EQL && r.Op != token.NEQ {
 				return true
@@ -654,20 +666,20 @@ func paramFlowsOutsideContextValuePayload(fp *freshParamAnalysis, val ssa.Value,
 			if r.X != val {
 				return true
 			}
-			if carrierFreeValueUses(audited, r, nil) {
+			if carrierFreeValueUsesTuple(audited, r, nil, callee, tupleIndex) {
 				continue
 			}
-			if paramFlowsOutsideContextValuePayload(fp, r, seen) {
+			if paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
 				return true
 			}
 		case *ssa.FieldAddr:
 			if r.X != val {
 				return true
 			}
-			if carrierFreeFieldAddr(audited, r, nil) {
+			if carrierFreeFieldAddrTuple(audited, r, nil, callee, tupleIndex) {
 				continue
 			}
-			if paramFlowsOutsideContextValuePayload(fp, r, seen) {
+			if paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
 				return true
 			}
 		case *ssa.Store:
@@ -681,23 +693,42 @@ func paramFlowsOutsideContextValuePayload(fp *freshParamAnalysis, val ssa.Value,
 			case *ssa.FieldAddr:
 				alloc, _ = a.X.(*ssa.Alloc)
 			}
-			if alloc == nil || allocFlowsOutsideContextValuePayload(fp, alloc, seen) {
+			if alloc == nil || allocFlowsOutsideContextValuePayload(fp, alloc, callee, tupleIndex, seen, paramSeen) {
 				return true
 			}
 		case *ssa.UnOp:
-			if r.Op != token.MUL || r.X != val || paramFlowsOutsideContextValuePayload(fp, r, seen) {
+			if r.Op != token.MUL || r.X != val || paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
 				return true
 			}
 		case *ssa.MakeInterface:
-			if r.X != val || paramFlowsOutsideContextValuePayload(fp, r, seen) {
+			if r.X != val {
+				return true
+			}
+			if valueOnlyReturnedOutsideTupleIndex(r, callee, tupleIndex, make(map[ssa.Value]bool)) {
+				continue
+			}
+			if paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
 				return true
 			}
 		case *ssa.ChangeInterface:
-			if r.X != val || paramFlowsOutsideContextValuePayload(fp, r, seen) {
+			if r.X != val {
+				return true
+			}
+			if valueOnlyReturnedOutsideTupleIndex(r, callee, tupleIndex, make(map[ssa.Value]bool)) {
+				continue
+			}
+			if paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
 				return true
 			}
 		case *ssa.Phi:
-			if paramFlowsOutsideContextValuePayload(fp, r, seen) {
+			if valueOnlyReturnedOutsideTupleIndex(r, callee, tupleIndex, make(map[ssa.Value]bool)) {
+				continue
+			}
+			if paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
+				return true
+			}
+		case *ssa.MakeClosure:
+			if !closureCaptureOnlyReturnedOutsideTupleIndex(r, val, callee, tupleIndex) {
 				return true
 			}
 		case ssa.CallInstruction:
@@ -708,9 +739,14 @@ func paramFlowsOutsideContextValuePayload(fp *freshParamAnalysis, val ssa.Value,
 			if subCallee == nil || len(r.Common().Args) != len(subCallee.Params) {
 				return true
 			}
+			subTupleIndices := callResultSubTupleIndices(r, callee, tupleIndex)
 			for i, arg := range r.Common().Args {
-				if arg == val && calleeParamMayAffectResult(fp, subCallee, i) {
-					return true
+				if arg == val {
+					for _, subIdx := range subTupleIndices {
+						if calleeParamMayAffectTupleResult(fp, subCallee, i, subIdx, paramSeen) {
+							return true
+						}
+					}
 				}
 			}
 		default:
@@ -720,7 +756,7 @@ func paramFlowsOutsideContextValuePayload(fp *freshParamAnalysis, val ssa.Value,
 	return false
 }
 
-func allocFlowsOutsideContextValuePayload(fp *freshParamAnalysis, alloc *ssa.Alloc, seen map[ssa.Value]bool) bool {
+func allocFlowsOutsideContextValuePayload(fp *freshParamAnalysis, alloc *ssa.Alloc, callee *ssa.Function, tupleIndex int, seen map[ssa.Value]bool, paramSeen map[paramTupleKey]bool) bool {
 	if alloc == nil {
 		return true
 	}
@@ -735,8 +771,12 @@ func allocFlowsOutsideContextValuePayload(fp *freshParamAnalysis, alloc *ssa.All
 	for _, ref := range *refs {
 		switch r := ref.(type) {
 		case *ssa.DebugRef:
+		case *ssa.Return:
+			if !returnExcludesTupleIndex(r, alloc, callee, tupleIndex) {
+				return true
+			}
 		case *ssa.Store:
-			if r.Addr != alloc {
+			if r.Addr != alloc || r.Val == alloc {
 				return true
 			}
 		case *ssa.FieldAddr:
@@ -747,11 +787,11 @@ func allocFlowsOutsideContextValuePayload(fp *freshParamAnalysis, alloc *ssa.All
 				switch fr := fref.(type) {
 				case *ssa.DebugRef:
 				case *ssa.Store:
-					if fr.Addr != r {
+					if fr.Addr != r || fr.Val == r {
 						return true
 					}
 				case *ssa.UnOp:
-					if fr.Op != token.MUL || fr.X != r || paramFlowsOutsideContextValuePayload(fp, fr, seen) {
+					if fr.Op != token.MUL || fr.X != r || paramFlowsOutsideContextValuePayload(fp, fr, callee, tupleIndex, seen, paramSeen) {
 						return true
 					}
 				default:
@@ -759,11 +799,15 @@ func allocFlowsOutsideContextValuePayload(fp *freshParamAnalysis, alloc *ssa.All
 				}
 			}
 		case *ssa.UnOp:
-			if r.Op != token.MUL || r.X != alloc || paramFlowsOutsideContextValuePayload(fp, r, seen) {
+			if r.Op != token.MUL || r.X != alloc || paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
 				return true
 			}
 		case *ssa.MakeInterface:
-			if r.X != alloc || paramFlowsOutsideContextValuePayload(fp, r, seen) {
+			if r.X != alloc || paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
+				return true
+			}
+		case *ssa.MakeClosure:
+			if !closureCaptureOnlyReturnedOutsideTupleIndex(r, alloc, callee, tupleIndex) {
 				return true
 			}
 		default:

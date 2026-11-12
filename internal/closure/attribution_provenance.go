@@ -36,6 +36,7 @@ type structFieldKey struct {
 type carrierMemoKey struct {
 	value ssa.Value
 	named *types.Named
+	scope uint8
 }
 
 type carrierRootMemoEntry struct {
@@ -76,22 +77,10 @@ type callerReferenceSummary struct {
 	userPaths               map[string]bool
 	pureDelegates           map[string]bool
 
-	progClosedDone    map[ssa.Value]bool
-	enumClosedDone    map[ssa.Value]bool
-	progCarrierDone   map[carrierMemoKey]bool
-	enumCarrierDone   map[carrierMemoKey]bool
-	progTypesMemo     map[ssa.Value][]types.Type
-	progTypesFailed   map[ssa.Value]bool
-	enumTypesMemo     map[ssa.Value][]types.Type
-	enumTypesFailed   map[ssa.Value]bool
-	progFuncsMemo     map[ssa.Value][]*ssa.Function
-	progFuncsFailed   map[ssa.Value]bool
-	progInvokeTargets map[ssa.CallInstruction]map[*ssa.Function]bool
-	progInvokeFailed          map[ssa.CallInstruction]bool
-	enumInvokeTargets         map[ssa.CallInstruction]map[*ssa.Function]bool
-	enumInvokeFailed          map[ssa.CallInstruction]bool
-	enumSeedsMemo             map[ssa.Value]dynamicSeedEntry
-	enumStructClosed          map[*types.Named]bool
+	progMemos                 [4]dynamicMemoTables
+	enumMemos                 [4]dynamicMemoTables
+	enumSeedsMemo             [2]map[ssa.Value]dynamicSeedEntry
+	enumStructClosed          [2]map[*types.Named]bool
 	userMutatesOSWrapperError bool
 	prog                      *program
 }
@@ -306,22 +295,16 @@ func enumerateCallerReferencesWithOrdered(audited, harnessAudited bool, rootPkgP
 		mutatedGlobals:         make(map[*ssa.Global]bool),
 		allFunctions:           all,
 		userPaths:              userPaths,
-		progClosedDone:         make(map[ssa.Value]bool),
-		enumClosedDone:         make(map[ssa.Value]bool),
-		progCarrierDone:        make(map[carrierMemoKey]bool),
-		enumCarrierDone:        make(map[carrierMemoKey]bool),
-		progTypesMemo:          make(map[ssa.Value][]types.Type),
-		progTypesFailed:        make(map[ssa.Value]bool),
-		enumTypesMemo:          make(map[ssa.Value][]types.Type),
-		enumTypesFailed:        make(map[ssa.Value]bool),
-		progFuncsMemo:          make(map[ssa.Value][]*ssa.Function),
-		progFuncsFailed:        make(map[ssa.Value]bool),
-		progInvokeTargets:      make(map[ssa.CallInstruction]map[*ssa.Function]bool),
-		progInvokeFailed:       make(map[ssa.CallInstruction]bool),
-		enumInvokeTargets:      make(map[ssa.CallInstruction]map[*ssa.Function]bool),
-		enumInvokeFailed:       make(map[ssa.CallInstruction]bool),
-		enumSeedsMemo:          make(map[ssa.Value]dynamicSeedEntry),
-		enumStructClosed:       make(map[*types.Named]bool),
+		progMemos: *newDynamicMemoQuad(),
+		enumMemos: *newDynamicMemoQuad(),
+		enumSeedsMemo: [2]map[ssa.Value]dynamicSeedEntry{
+			make(map[ssa.Value]dynamicSeedEntry),
+			make(map[ssa.Value]dynamicSeedEntry),
+		},
+		enumStructClosed: [2]map[*types.Named]bool{
+			make(map[*types.Named]bool),
+			make(map[*types.Named]bool),
+		},
 	}
 	errType := types.Universe.Lookup("error").Type()
 	errSentinelPoisoned := make(map[*ssa.Global]bool)
@@ -1863,19 +1846,12 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 		}
 		provFPInit = true
 		sum := lookupSummaryForProg(prog, audited)
-		var pureDelegates map[string]bool
-		if sum != nil {
-			pureDelegates = sum.pureDelegates
+		fp := &freshParamAnalysis{
+			ssaProgramIndex: sum.ssaIndex(audited, harnessAudited, nil, userPaths, nil),
 		}
-		fp := newBitOnlyFreshParamAnalysis(harnessAudited, audited, pureDelegates, userPaths, sum, func(f *ssa.Function) bool {
-			return isStdPkgPath(userPaths, funcPkgPath(f))
-		})
 		fp.resetDynamicMemos()
 		if sum != nil {
 			fp.inProgramSites = true
-			fp.programSites = sum.sites
-			fp.programValueRef = sum.valueRef
-			fp.programFunctions = sum.allFunctions
 		} else if prog != nil {
 			fp.prog = prog
 			fp.programFunctions = progAllFunctions(prog)

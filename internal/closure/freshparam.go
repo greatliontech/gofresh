@@ -54,6 +54,60 @@ type ssaProgramIndex struct {
 	isStd func(*ssa.Function) bool
 }
 
+type closedMemoEntry struct {
+	closed      bool
+	usedSubject bool
+}
+
+type typesMemoEntry struct {
+	types       []types.Type
+	ok          bool
+	usedSubject bool
+}
+
+type funcsMemoEntry struct {
+	funcs       []*ssa.Function
+	ok          bool
+	usedSubject bool
+}
+
+type invokeMemoEntry struct {
+	targets     map[*ssa.Function]bool
+	ok          bool
+	usedSubject bool
+}
+
+// dynamicMemoTables holds the dynamic-value, concrete-type, function-target,
+// and invoke-target memo maps for one (program-scope, context-payload-mode)
+// slice, recording per-entry subject-state dependency so subject-local memos
+// never launder subject-dependent outcomes into program-wide memos.
+type dynamicMemoTables struct {
+	closedDone  map[ssa.Value]closedMemoEntry
+	carrierDone map[carrierMemoKey]closedMemoEntry
+	typesMemo   map[ssa.Value]typesMemoEntry
+	funcsMemo   map[ssa.Value]funcsMemoEntry
+	invokeMemo  map[ssa.CallInstruction]invokeMemoEntry
+}
+
+func newDynamicMemoTables() dynamicMemoTables {
+	return dynamicMemoTables{
+		closedDone:  make(map[ssa.Value]closedMemoEntry),
+		carrierDone: make(map[carrierMemoKey]closedMemoEntry),
+		typesMemo:   make(map[ssa.Value]typesMemoEntry),
+		funcsMemo:   make(map[ssa.Value]funcsMemoEntry),
+		invokeMemo:  make(map[ssa.CallInstruction]invokeMemoEntry),
+	}
+}
+
+func newDynamicMemoQuad() *[4]dynamicMemoTables {
+	return &[4]dynamicMemoTables{
+		newDynamicMemoTables(),
+		newDynamicMemoTables(),
+		newDynamicMemoTables(),
+		newDynamicMemoTables(),
+	}
+}
+
 // subjectQuery holds the per-subject reachability, caller enumeration, and
 // per-subject memo tables.
 type subjectQuery struct {
@@ -80,14 +134,7 @@ type subjectQuery struct {
 	ignoreContextValuePayload bool
 	subjectRoot               *ssa.Function
 
-	closedDone    map[ssa.Value]bool
-	carrierDone   map[carrierMemoKey]bool
-	typesMemo     map[ssa.Value][]types.Type
-	typesFailed   map[ssa.Value]bool
-	funcsMemo     map[ssa.Value][]*ssa.Function
-	funcsFailed   map[ssa.Value]bool
-	invokeTargets map[ssa.CallInstruction]map[*ssa.Function]bool
-	invokeFailed  map[ssa.CallInstruction]bool
+	memoTables *[4]dynamicMemoTables
 
 	argFresh map[freshParamKey]bool
 	usesOK   map[freshParamKey]bool
@@ -317,55 +364,182 @@ type freshParamKey struct {
 	idx int
 }
 
-func newBitOnlyFreshParamAnalysis(propertyHarnessAudited, selectionAudited bool, pureDelegates map[string]bool, userPaths map[string]bool, summary *callerReferenceSummary, isStd func(*ssa.Function) bool) *freshParamAnalysis {
+func (s *callerReferenceSummary) ssaIndex(selectionAudited, propertyHarnessAudited bool, pureDelegates, userPaths map[string]bool, isStd func(*ssa.Function) bool) ssaProgramIndex {
+	if s != nil {
+		if pureDelegates == nil {
+			pureDelegates = s.pureDelegates
+		}
+		if userPaths == nil {
+			userPaths = s.userPaths
+		}
+	}
+	if isStd == nil && userPaths != nil {
+		isStd = func(fn *ssa.Function) bool {
+			return isStdPkgPath(userPaths, funcPkgPath(fn))
+		}
+	}
 	idx := ssaProgramIndex{
 		propertyHarnessAudited: propertyHarnessAudited,
 		selectionAudited:       selectionAudited,
 		pureDelegates:          pureDelegates,
 		userPaths:              userPaths,
-		summary:                summary,
+		summary:                s,
 		isStd:                  isStd,
 	}
-	if summary != nil {
-		idx.prog = summary.prog
-		idx.structFieldStores = summary.structFieldStores
-		idx.structWholeStores = summary.structWholeStores
-		idx.structPoisoned = summary.structPoisoned
-		idx.structReferencedByType = summary.structReferencedByType
+	if s != nil {
+		idx.prog = s.prog
+		idx.structFieldStores = s.structFieldStores
+		idx.structWholeStores = s.structWholeStores
+		idx.structPoisoned = s.structPoisoned
+		idx.structReferencedByType = s.structReferencedByType
+		idx.programSites = s.sites
+		idx.programValueRef = s.valueRef
+		idx.programFunctions = s.allFunctions
 	}
-	return &freshParamAnalysis{ssaProgramIndex: idx}
+	return idx
+}
+
+func newBitOnlyFreshParamAnalysis(propertyHarnessAudited, selectionAudited bool, pureDelegates map[string]bool, userPaths map[string]bool, summary *callerReferenceSummary, isStd func(*ssa.Function) bool) *freshParamAnalysis {
+	idx := summary.ssaIndex(selectionAudited, propertyHarnessAudited, pureDelegates, userPaths, isStd)
+	// Parameter crossing stays refused on bit-only analyses
+	// (REQ-closure-observability-property-harness).
+	idx.programSites = nil
+	idx.programValueRef = nil
+	idx.programFunctions = nil
+	if isStd == nil {
+		idx.isStd = nil
+	}
+	fp := &freshParamAnalysis{ssaProgramIndex: idx}
+	fp.resetDynamicMemos()
+	return fp
 }
 
 func (fp *freshParamAnalysis) resetDynamicMemos() {
-	fp.closedDone = map[ssa.Value]bool{}
-	fp.carrierDone = map[carrierMemoKey]bool{}
-	fp.typesMemo = map[ssa.Value][]types.Type{}
-	fp.typesFailed = map[ssa.Value]bool{}
-	fp.funcsMemo = map[ssa.Value][]*ssa.Function{}
-	fp.funcsFailed = map[ssa.Value]bool{}
-	fp.invokeTargets = map[ssa.CallInstruction]map[*ssa.Function]bool{}
-	fp.invokeFailed = map[ssa.CallInstruction]bool{}
+	fp.memoTables = newDynamicMemoQuad()
+}
+
+func (fp *freshParamAnalysis) markSubjectUsed() {
+	if fp != nil && fp.usedSubject != nil {
+		*fp.usedSubject = true
+	}
+}
+
+func (fp *freshParamAnalysis) isSubjectRoot(fn *ssa.Function) bool {
+	return fp != nil && fn != nil && (fn == fp.enumRoot || fn == fp.subjectRoot)
+}
+
+func (fp *freshParamAnalysis) progScopeIndex() int {
+	if fp != nil && (fp.inProgramSites || fp.inFieldStore) {
+		return 1
+	}
+	return 0
+}
+
+func (fp *freshParamAnalysis) memoModeIndex() int {
+	if fp != nil && fp.ignoreContextValuePayload {
+		return 1
+	}
+	return 0
+}
+
+func (fp *freshParamAnalysis) memoScopeIndex() int {
+	return (fp.progScopeIndex() << 1) | fp.memoModeIndex()
+}
+
+func (fp *freshParamAnalysis) carrierKey(v ssa.Value) carrierMemoKey {
+	if fp == nil {
+		return carrierMemoKey{value: v}
+	}
+	return carrierMemoKey{
+		value: v,
+		named: fp.baseCarrierNamed,
+		scope: uint8(fp.memoScopeIndex()),
+	}
+}
+
+func (fp *freshParamAnalysis) isolateRootScope() {
+	if fp == nil {
+		return
+	}
+	if fp.rootDone != nil {
+		fp.rootDone = map[ssa.Value]bool{}
+		fp.rootLowlink = map[ssa.Value]int{}
+		fp.rootHasLeaf = map[ssa.Value]bool{}
+		fp.rootUsedSubject = map[ssa.Value]bool{}
+		fp.carrierRootDone = map[carrierMemoKey]carrierRootMemoEntry{}
+	}
+	fp.rootSeen = nil
+}
+
+func (fp *freshParamAnalysis) subjMemo() *dynamicMemoTables {
+	if fp == nil || fp.memoTables == nil {
+		return nil
+	}
+	return &fp.memoTables[fp.memoScopeIndex()]
+}
+
+func (fp *freshParamAnalysis) progMemo() *dynamicMemoTables {
+	if fp == nil || fp.summary == nil || fp.programSites == nil {
+		return nil
+	}
+	if fp.enumOnly {
+		return &fp.summary.enumMemos[fp.memoScopeIndex()]
+	}
+	return &fp.summary.progMemos[fp.memoScopeIndex()]
+}
+
+func (fp *freshParamAnalysis) enumSeedsTable() map[ssa.Value]dynamicSeedEntry {
+	if fp == nil || fp.summary == nil || fp.programSites == nil || !fp.enumOnly || fp.ignoreContextValuePayload {
+		return nil
+	}
+	return fp.summary.enumSeedsMemo[fp.progScopeIndex()]
+}
+
+func (fp *freshParamAnalysis) enumStructTable() map[*types.Named]bool {
+	if fp == nil || fp.summary == nil || fp.programSites == nil || fp.ignoreContextValuePayload {
+		return nil
+	}
+	if fp.enumOnly {
+		return fp.summary.enumStructClosed[1]
+	}
+	return fp.summary.enumStructClosed[0]
+}
+
+func (fp *freshParamAnalysis) inCycleScope() bool {
+	return fp != nil && (fp.inProgramSites || fp.inFieldStore || fp.enumOnly)
+}
+
+func (fp *freshParamAnalysis) canWriteSubjMemo(outsideCallee bool) bool {
+	return outsideCallee && fp != nil && len(fp.calleeSeen) == 0 && len(fp.invokeSeen) == 0 && len(fp.callBindings) == 0
+}
+
+// canReadProgMemo reports whether dynamic-walk queries outside active callee
+// bindings may consult whole-program or enum-only summary memos. Summary
+// memos partition (inProgramSites || inFieldStore, ignoreContextValuePayload)
+// into 4 disjoint slices on both progMemos and enumMemos; bit-only analyses
+// (programSites == nil) never consult summary memos, and enumRecvNamed == nil
+// guards against optimistic receiver-method exemptions.
+func (fp *freshParamAnalysis) canReadProgMemo(outsideCallee bool) bool {
+	return outsideCallee && fp != nil && fp.summary != nil && fp.programSites != nil && fp.enumRecvNamed == nil
+}
+
+// canReadNegativeProgMemo guards negative (!ok / !closed) reads from summary
+// memos against optimistic cycle/carrier exemptions that could close a value a
+// general walk rejected.
+func (fp *freshParamAnalysis) canReadNegativeProgMemo() bool {
+	return fp != nil && len(fp.enumStructVisiting) == 0 && fp.baseCarrierNamed == nil
+}
+
+// canWriteProgMemo admits summary-memo writes only when no per-subject state,
+// struct-cycle visiting set, active callee/invoke stack, or call binding
+// participated in the evaluation.
+func (fp *freshParamAnalysis) canWriteProgMemo(outsideCallee bool, usedSubject bool) bool {
+	return fp.canReadProgMemo(outsideCallee) && !usedSubject && len(fp.enumStructVisiting) == 0 && fp.canWriteSubjMemo(outsideCallee)
 }
 
 func newEnumFreshParamAnalysis(audited bool, pureDelegates map[string]bool, userPaths map[string]bool, root *ssa.Function, sites []ssa.CallInstruction, summary *callerReferenceSummary) *freshParamAnalysis {
 	fp := &freshParamAnalysis{
-		ssaProgramIndex: ssaProgramIndex{
-			prog:                   summary.prog,
-			selectionAudited:       audited,
-			pureDelegates:          pureDelegates,
-			summary:                summary,
-			userPaths:              userPaths,
-			structFieldStores:      summary.structFieldStores,
-			structWholeStores:      summary.structWholeStores,
-			structPoisoned:         summary.structPoisoned,
-			structReferencedByType: summary.structReferencedByType,
-			programSites:           summary.sites,
-			programValueRef:        summary.valueRef,
-			programFunctions:       summary.allFunctions,
-			isStd: func(fn *ssa.Function) bool {
-				return isStdPkgPath(userPaths, funcPkgPath(fn))
-			},
-		},
+		ssaProgramIndex: summary.ssaIndex(audited, false, pureDelegates, userPaths, nil),
 		subjectQuery: subjectQuery{
 			enumOnly:    true,
 			enumRoot:    root,
@@ -410,6 +584,7 @@ func (fp *freshParamAnalysis) withProgramSites(done map[ssa.Value]bool) (*freshP
 	if fp == nil {
 		return nil, done
 	}
+	wasProgScope := fp.inProgramSites || fp.inFieldStore
 	outFP := fp
 	if !fp.inProgramSites || fp.inFieldStore || len(fp.callBindings) > 0 {
 		copied := *fp
@@ -418,10 +593,19 @@ func (fp *freshParamAnalysis) withProgramSites(done map[ssa.Value]bool) (*freshP
 		copied.callBindings = nil
 		copied.calleeSeen = nil
 		copied.calleeDepth = nil
+		if !wasProgScope {
+			copied.isolateRootScope()
+		}
 		outFP = &copied
 	}
 	outDone := done
-	if fp.baseCarrierNamed == nil && fp.rootDone != nil {
+	if !wasProgScope {
+		if outFP.rootDone != nil && done != nil {
+			outDone = outFP.rootDone
+		} else if done != nil {
+			outDone = map[ssa.Value]bool{}
+		}
+	} else if fp.baseCarrierNamed == nil && fp.rootDone != nil {
 		outDone = fp.rootDone
 	} else if fp.baseCarrierNamed != nil && done != nil {
 		outDone = map[ssa.Value]bool{}
@@ -445,7 +629,7 @@ func (fp *freshParamAnalysis) newStructStoreWalkFP(inProgramSites, inFieldStore 
 	}
 	sub.baseCarrierNamed = nil
 	sub.enumStructVisiting = visiting
-	if sub.closedDone == nil {
+	if sub.memoTables == nil {
 		sub.resetDynamicMemos()
 	}
 	sub.walkFrame = walkFrame{
@@ -463,23 +647,36 @@ func (fp *freshParamAnalysis) newStructStoreWalkFP(inProgramSites, inFieldStore 
 }
 
 func newFreshParamAnalysis(audited bool, pureDelegates map[string]bool, reach attributedReachability, isStd func(*ssa.Function) bool) *freshParamAnalysis {
+	idx := reach.summary.ssaIndex(audited, reach.propertyHarnessAudited, pureDelegates, reach.userPaths, isStd)
+	if isStd == nil {
+		idx.isStd = nil
+	}
+	if reach.prog != nil {
+		idx.prog = reach.prog
+	}
+	if reach.structFieldStores != nil {
+		idx.structFieldStores = reach.structFieldStores
+	}
+	if reach.structWholeStores != nil {
+		idx.structWholeStores = reach.structWholeStores
+	}
+	if reach.structPoisoned != nil {
+		idx.structPoisoned = reach.structPoisoned
+	}
+	if reach.structReferencedByType != nil {
+		idx.structReferencedByType = reach.structReferencedByType
+	}
+	if reach.programSites != nil {
+		idx.programSites = reach.programSites
+	}
+	if reach.programValueRef != nil {
+		idx.programValueRef = reach.programValueRef
+	}
+	if reach.programFunctions != nil {
+		idx.programFunctions = reach.programFunctions
+	}
 	fp := &freshParamAnalysis{
-		ssaProgramIndex: ssaProgramIndex{
-			prog:                   reach.prog,
-			selectionAudited:       audited,
-			pureDelegates:          pureDelegates,
-			summary:                reach.summary,
-			userPaths:              reach.userPaths,
-			structFieldStores:      reach.structFieldStores,
-			structWholeStores:      reach.structWholeStores,
-			structPoisoned:         reach.structPoisoned,
-			structReferencedByType: reach.structReferencedByType,
-			programSites:           reach.programSites,
-			programValueRef:        reach.programValueRef,
-			programFunctions:       reach.programFunctions,
-			propertyHarnessAudited: reach.propertyHarnessAudited,
-			isStd:                  isStd,
-		},
+		ssaProgramIndex: idx,
 		subjectQuery: subjectQuery{
 			functions:   reach.functions,
 			callers:     map[*ssa.Function][]ssa.CallInstruction{},
@@ -627,20 +824,37 @@ func (fp *freshParamAnalysis) paramCrossingEligible(fn *ssa.Function) bool {
 	if fp == nil || fn == nil {
 		return false
 	}
+	if fn == fp.enumRoot {
+		fp.markSubjectUsed()
+	}
 	if len(fn.FreeVars) != 0 {
 		if !fp.selectionAudited || fp.programSites == nil || fp.programValueRef[fn] {
 			return false
 		}
 	}
-	if fp.dynamic[fn] {
-		if fn != fp.enumRoot && (!fp.selectionAudited || fp.programSites == nil || fp.programValueRef[fn] || (fn.Signature == nil || (fn.Signature.Recv() == nil && len(fn.FreeVars) == 0 && len(fp.programSites[fn]) == 0))) {
+	dynRefusalCond := fn != fp.enumRoot && (!fp.selectionAudited || fp.programSites == nil || fp.programValueRef[fn] || (fn.Signature == nil || (fn.Signature.Recv() == nil && len(fn.FreeVars) == 0 && len(fp.programSites[fn]) == 0)))
+	if dynRefusalCond {
+		if fp.dynamic[fn] {
+			fp.markSubjectUsed()
+			return false
+		}
+		if !fp.selectionAudited || fn.Signature == nil || (!fp.inProgramSites && !fp.inFieldStore && !fp.enumOnly) {
+			fp.markSubjectUsed()
+		}
+	}
+	if fn.Signature != nil && fn.Signature.Variadic() && fn != fp.enumRoot && !fp.selectionAudited {
+		fp.markSubjectUsed()
+		if !fp.inFieldStore && !fp.inProgramSites {
 			return false
 		}
 	}
-	if fn.Signature.Variadic() && fn != fp.enumRoot && !fp.selectionAudited && !fp.inFieldStore && !fp.inProgramSites {
-		return false
+	if fp.programFunctions[fn] {
+		return true
 	}
-	return fp.functions[fn] || fp.programFunctions[fn] || fn == fp.enumRoot
+	if !fp.enumOnly {
+		fp.markSubjectUsed()
+	}
+	return fp.functions[fn] || fn == fp.enumRoot
 }
 
 // paramEligible refuses every shape the boundary extension cannot

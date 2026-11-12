@@ -105,6 +105,7 @@ func subjectEnumerationClosure(audited bool, pureDelegates map[string]bool, user
 			return enumerationClosure{}, false
 		}
 		fp.enumRecvNamed = named
+		fp.resetDynamicMemos()
 		for _, site := range sites {
 			if site.Common().IsInvoke() && len(summary.structBoxedValues[named]) > 0 {
 				continue
@@ -269,6 +270,191 @@ func derefNamedSignature(userPaths map[string]bool, t types.Type) *types.Named {
 	return named
 }
 
+const excludedAllReturns = -2
+
+type paramTupleKey struct {
+	param      *ssa.Parameter
+	tupleIndex int
+}
+
+// returnExcludesTupleIndex reports whether ret belongs to callee and val is
+// absent from the queried tupleIndex result slot (either because all returns
+// of callee are excluded via excludedAllReturns, or because tupleIndex selects
+// a valid slot of ret.Results whose operand is not val).
+func returnExcludesTupleIndex(ret *ssa.Return, val ssa.Value, callee *ssa.Function, tupleIndex int) bool {
+	if ret == nil || val == nil || callee == nil || ret.Parent() != callee {
+		return false
+	}
+	if tupleIndex == excludedAllReturns {
+		return true
+	}
+	return tupleIndex >= 0 && tupleIndex < len(ret.Results) && ret.Results[tupleIndex] != val
+}
+
+func closureCaptureOnlyReturnedOutsideTupleIndex(mc *ssa.MakeClosure, val ssa.Value, callee *ssa.Function, tupleIndex int) bool {
+	if mc == nil || val == nil || callee == nil || (tupleIndex < 0 && tupleIndex != excludedAllReturns) {
+		return false
+	}
+	fn, ok := mc.Fn.(*ssa.Function)
+	if !ok || fn == nil || mc.Fn == val {
+		return false
+	}
+	return valueOnlyReturnedOutsideTupleIndex(mc, callee, tupleIndex, make(map[ssa.Value]bool))
+}
+
+func valueOnlyReturnedOutsideTupleIndex(val ssa.Value, callee *ssa.Function, tupleIndex int, seen map[ssa.Value]bool) bool {
+	if val == nil || callee == nil || (tupleIndex < 0 && tupleIndex != excludedAllReturns) {
+		return false
+	}
+	if seen[val] {
+		return true
+	}
+	seen[val] = true
+	refs := val.Referrers()
+	if refs == nil {
+		return false
+	}
+	for _, ref := range *refs {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+		case *ssa.Return:
+			if !returnExcludesTupleIndex(r, val, callee, tupleIndex) {
+				return false
+			}
+		case *ssa.Phi:
+			if !valueOnlyReturnedOutsideTupleIndex(r, callee, tupleIndex, seen) {
+				return false
+			}
+		case *ssa.MakeInterface:
+			if r.X != val || !valueOnlyReturnedOutsideTupleIndex(r, callee, tupleIndex, seen) {
+				return false
+			}
+		case *ssa.ChangeInterface:
+			if r.X != val || !valueOnlyReturnedOutsideTupleIndex(r, callee, tupleIndex, seen) {
+				return false
+			}
+		case *ssa.MakeClosure:
+			fn, ok := r.Fn.(*ssa.Function)
+			if !ok || fn == nil || r.Fn == val || !valueOnlyReturnedOutsideTupleIndex(r, callee, tupleIndex, seen) {
+				return false
+			}
+		case *ssa.Store:
+			if r.Val != val || r.Addr == val {
+				return false
+			}
+			var alloc *ssa.Alloc
+			switch a := r.Addr.(type) {
+			case *ssa.Alloc:
+				alloc = a
+			case *ssa.FieldAddr:
+				alloc, _ = a.X.(*ssa.Alloc)
+			}
+			if alloc == nil || alloc.Parent() != callee || !allocOnlyReturnedOutsideTupleIndex(alloc, callee, tupleIndex, seen) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func allocOnlyReturnedOutsideTupleIndex(alloc *ssa.Alloc, callee *ssa.Function, tupleIndex int, seen map[ssa.Value]bool) bool {
+	if alloc == nil || callee == nil || alloc.Parent() != callee || (tupleIndex < 0 && tupleIndex != excludedAllReturns) {
+		return false
+	}
+	if seen[alloc] {
+		return true
+	}
+	seen[alloc] = true
+	refs := alloc.Referrers()
+	if refs == nil {
+		return false
+	}
+	for _, ref := range *refs {
+		switch r := ref.(type) {
+		case *ssa.DebugRef:
+		case *ssa.Store:
+			if r.Addr != alloc || r.Val == alloc {
+				return false
+			}
+		case *ssa.FieldAddr:
+			if r.X != alloc || r.Referrers() == nil {
+				return false
+			}
+			for _, fref := range *r.Referrers() {
+				switch fr := fref.(type) {
+				case *ssa.DebugRef:
+				case *ssa.Store:
+					if fr.Addr != r || fr.Val == r {
+						return false
+					}
+				case *ssa.UnOp:
+					if fr.Op != token.MUL || fr.X != r || !valueOnlyReturnedOutsideTupleIndex(fr, callee, tupleIndex, seen) {
+						return false
+					}
+				default:
+					return false
+				}
+			}
+		case *ssa.UnOp:
+			if r.Op != token.MUL || r.X != alloc || !valueOnlyReturnedOutsideTupleIndex(r, callee, tupleIndex, seen) {
+				return false
+			}
+		case *ssa.MakeClosure:
+			fn, ok := r.Fn.(*ssa.Function)
+			if !ok || fn == nil || r.Fn == alloc || !valueOnlyReturnedOutsideTupleIndex(r, callee, tupleIndex, seen) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func callResultSubTupleIndices(site ssa.CallInstruction, callee *ssa.Function, tupleIndex int) []int {
+	call, ok := site.(*ssa.Call)
+	if !ok || call == nil || callee == nil || (tupleIndex < 0 && tupleIndex != excludedAllReturns) {
+		return []int{-1}
+	}
+	if tup, isTuple := call.Type().(*types.Tuple); isTuple {
+		if tup.Len() == 0 {
+			return []int{-1}
+		}
+		refs := call.Referrers()
+		if refs == nil {
+			return []int{-1}
+		}
+		var indices []int
+		for _, ref := range *refs {
+			switch r := ref.(type) {
+			case *ssa.DebugRef:
+			case *ssa.Extract:
+				if r.Tuple != call || r.Index < 0 || r.Index >= tup.Len() {
+					return []int{-1}
+				}
+				if valueOnlyReturnedOutsideTupleIndex(r, callee, tupleIndex, make(map[ssa.Value]bool)) {
+					continue
+				}
+				if !slices.Contains(indices, r.Index) {
+					indices = append(indices, r.Index)
+				}
+			default:
+				return []int{-1}
+			}
+		}
+		if len(indices) == 0 {
+			return []int{excludedAllReturns}
+		}
+		return indices
+	}
+	if call.Type() != nil && valueOnlyReturnedOutsideTupleIndex(call, callee, tupleIndex, make(map[ssa.Value]bool)) {
+		return []int{excludedAllReturns}
+	}
+	return []int{-1}
+}
+
 func paramMaySupplyDynamic(audited bool, userPaths map[string]bool, param *ssa.Parameter) bool {
 	if param == nil {
 		return false
@@ -280,51 +466,109 @@ func paramMaySupplyDynamicSeen(audited bool, userPaths map[string]bool, param *s
 	if param == nil {
 		return false
 	}
-	if seen[param] {
+	tupleSeen := make(map[paramTupleKey]bool, len(seen))
+	for p, v := range seen {
+		if v {
+			tupleSeen[paramTupleKey{param: p, tupleIndex: -1}] = true
+		}
+	}
+	res := paramMaySupplyTupleDynamicSeen(audited, userPaths, param, root, -1, tupleSeen)
+	if seen != nil {
+		for k, v := range tupleSeen {
+			if v && k.tupleIndex == -1 {
+				seen[k.param] = true
+			}
+		}
+	}
+	return res
+}
+
+func paramMaySupplyTupleDynamicSeen(audited bool, userPaths map[string]bool, param *ssa.Parameter, root *ssa.Function, tupleIndex int, seen map[paramTupleKey]bool) bool {
+	if param == nil {
 		return false
 	}
-	seen[param] = true
+	key := paramTupleKey{param: param, tupleIndex: tupleIndex}
+	if seen[key] {
+		return false
+	}
+	seen[key] = true
 	refs := param.Referrers()
 	if refs == nil {
 		return true
 	}
+	fn := param.Parent()
 	for _, ref := range *refs {
 		switch r := ref.(type) {
 		case *ssa.DebugRef:
+		case *ssa.Return:
+			if !((root != nil && r.Parent() == root) || returnExcludesTupleIndex(r, param, fn, tupleIndex)) {
+				return true
+			}
 		case *ssa.BinOp:
 			if r.Op != token.EQL && r.Op != token.NEQ {
 				return true
 			}
+		case *ssa.Phi:
+			if !valueOnlyReturnedOutsideTupleIndex(r, fn, tupleIndex, make(map[ssa.Value]bool)) {
+				return true
+			}
+		case *ssa.MakeClosure:
+			if !closureCaptureOnlyReturnedOutsideTupleIndex(r, param, fn, tupleIndex) {
+				return true
+			}
+		case *ssa.Store:
+			if r.Val != param || r.Addr == param {
+				return true
+			}
+			var alloc *ssa.Alloc
+			switch a := r.Addr.(type) {
+			case *ssa.Alloc:
+				alloc = a
+			case *ssa.FieldAddr:
+				alloc, _ = a.X.(*ssa.Alloc)
+			}
+			if alloc == nil || !allocOnlyReturnedOutsideTupleIndex(alloc, fn, tupleIndex, make(map[ssa.Value]bool)) {
+				return true
+			}
 		case *ssa.FieldAddr:
-			if r.X != param || !carrierFreeFieldAddr(audited, r, root) {
+			if r.X != param || !carrierFreeFieldAddrTuple(audited, r, root, fn, tupleIndex) {
 				return true
 			}
 		case *ssa.IndexAddr:
-			if r.X != param || !carrierFreeReadOnlyAddr(audited, r, root) {
+			if r.X != param || !carrierFreeReadOnlyAddrTuple(audited, r, root, fn, tupleIndex) {
 				return true
 			}
 		case *ssa.UnOp:
-			if r.Op != token.MUL || r.X != param || !carrierFreeValueUses(audited, r, root) {
+			if r.Op != token.MUL || r.X != param || !carrierFreeValueUsesTuple(audited, r, root, fn, tupleIndex) {
 				return true
 			}
 		case *ssa.Field:
-			if r.X != param || !carrierFreeValueUses(audited, r, root) {
+			if r.X != param || !carrierFreeValueUsesTuple(audited, r, root, fn, tupleIndex) {
 				return true
 			}
 		case *ssa.Index:
-			if r.X != param || !carrierFreeValueUses(audited, r, root) {
+			if r.X != param || !carrierFreeValueUsesTuple(audited, r, root, fn, tupleIndex) {
 				return true
 			}
 		case *ssa.MakeInterface:
 			if r.X != param {
 				return true
 			}
+			if valueOnlyReturnedOutsideTupleIndex(r, fn, tupleIndex, make(map[ssa.Value]bool)) {
+				continue
+			}
 			named := derefNamedStruct(userPaths, param.Type())
-			if named == nil || param.Parent() == nil || param.Parent().Prog == nil {
+			if named == nil || fn == nil || fn.Prog == nil {
 				return true
 			}
 			needed := make(map[int]bool)
-			if !interfaceValueStructFieldTargets(audited, userPaths, named, param.Type(), param.Parent().Prog, r, root, needed, seen, make(map[ssa.Value]bool)) || len(needed) > 0 {
+			paramSeen := make(map[*ssa.Parameter]bool, len(seen))
+			for k, v := range seen {
+				if v && k.tupleIndex == -1 {
+					paramSeen[k.param] = true
+				}
+			}
+			if !interfaceValueStructFieldTargets(audited, userPaths, named, param.Type(), fn.Prog, r, root, needed, paramSeen, make(map[ssa.Value]bool)) || len(needed) > 0 {
 				return true
 			}
 		case ssa.CallInstruction:
@@ -335,9 +579,14 @@ func paramMaySupplyDynamicSeen(audited bool, userPaths map[string]bool, param *s
 			if callee == nil || (root != nil && callee == root) || len(callee.Blocks) == 0 || (callee.Synthetic != "" && !isPromotedWrapper(callee) && !(audited && callee.Origin() != nil)) || parameterizedBody(callee) || len(r.Common().Args) != len(callee.Params) {
 				return true
 			}
+			subTupleIndices := callResultSubTupleIndices(r, fn, tupleIndex)
 			for i, arg := range r.Common().Args {
-				if arg == param && paramMaySupplyDynamicSeen(audited, userPaths, callee.Params[i], root, seen) {
-					return true
+				if arg == param {
+					for _, subIdx := range subTupleIndices {
+						if paramMaySupplyTupleDynamicSeen(audited, userPaths, callee.Params[i], root, subIdx, seen) {
+							return true
+						}
+					}
 				}
 			}
 		default:
@@ -348,6 +597,10 @@ func paramMaySupplyDynamicSeen(audited bool, userPaths map[string]bool, param *s
 }
 
 func carrierFreeFieldAddr(audited bool, fa *ssa.FieldAddr, root *ssa.Function) bool {
+	return carrierFreeFieldAddrTuple(audited, fa, root, nil, -1)
+}
+
+func carrierFreeFieldAddrTuple(audited bool, fa *ssa.FieldAddr, root, callee *ssa.Function, tupleIndex int) bool {
 	if fa == nil || fa.Type() == nil {
 		return false
 	}
@@ -358,10 +611,14 @@ func carrierFreeFieldAddr(audited bool, fa *ssa.FieldAddr, root *ssa.Function) b
 	if !refconfine.TypeMayCarryDynamic(audited, ptr.Elem(), make(map[types.Type]bool)) {
 		return true
 	}
-	return carrierFreeReadOnlyAddr(audited, fa, root)
+	return carrierFreeReadOnlyAddrTuple(audited, fa, root, callee, tupleIndex)
 }
 
 func carrierFreeReadOnlyAddr(audited bool, addr ssa.Value, root *ssa.Function) bool {
+	return carrierFreeReadOnlyAddrTuple(audited, addr, root, nil, -1)
+}
+
+func carrierFreeReadOnlyAddrTuple(audited bool, addr ssa.Value, root, callee *ssa.Function, tupleIndex int) bool {
 	if addr == nil || addr.Type() == nil || addr.Referrers() == nil {
 		return false
 	}
@@ -377,15 +634,15 @@ func carrierFreeReadOnlyAddr(audited bool, addr ssa.Value, root *ssa.Function) b
 			if r.Op != token.MUL || r.X != addr {
 				return false
 			}
-			if elemCarries && !carrierFreeValueUses(audited, r, root) {
+			if elemCarries && !carrierFreeValueUsesTuple(audited, r, root, callee, tupleIndex) {
 				return false
 			}
 		case *ssa.FieldAddr:
-			if r.X != addr || !carrierFreeFieldAddr(audited, r, root) {
+			if r.X != addr || !carrierFreeFieldAddrTuple(audited, r, root, callee, tupleIndex) {
 				return false
 			}
 		case *ssa.IndexAddr:
-			if r.X != addr || !carrierFreeReadOnlyAddr(audited, r, root) {
+			if r.X != addr || !carrierFreeReadOnlyAddrTuple(audited, r, root, callee, tupleIndex) {
 				return false
 			}
 		default:
@@ -396,10 +653,14 @@ func carrierFreeReadOnlyAddr(audited bool, addr ssa.Value, root *ssa.Function) b
 }
 
 func carrierFreeValueUses(audited bool, val ssa.Value, root *ssa.Function) bool {
-	return carrierFreeValueUsesSeen(audited, val, root, make(map[ssa.Value]bool))
+	return carrierFreeValueUsesTuple(audited, val, root, nil, -1)
 }
 
-func carrierFreeValueUsesSeen(audited bool, val ssa.Value, root *ssa.Function, seen map[ssa.Value]bool) bool {
+func carrierFreeValueUsesTuple(audited bool, val ssa.Value, root, callee *ssa.Function, tupleIndex int) bool {
+	return carrierFreeValueUsesSeenTuple(audited, val, root, callee, tupleIndex, make(map[ssa.Value]bool))
+}
+
+func carrierFreeValueUsesSeenTuple(audited bool, val ssa.Value, root, callee *ssa.Function, tupleIndex int, seen map[ssa.Value]bool) bool {
 	if val == nil || val.Type() == nil {
 		return false
 	}
@@ -418,7 +679,7 @@ func carrierFreeValueUsesSeen(audited bool, val ssa.Value, root *ssa.Function, s
 		switch r := ref.(type) {
 		case *ssa.DebugRef:
 		case *ssa.Return:
-			if root == nil || r.Parent() != root {
+			if !((root != nil && r.Parent() == root) || returnExcludesTupleIndex(r, val, callee, tupleIndex)) {
 				return false
 			}
 		case *ssa.BinOp:
@@ -426,19 +687,23 @@ func carrierFreeValueUsesSeen(audited bool, val ssa.Value, root *ssa.Function, s
 				return false
 			}
 		case *ssa.Field:
-			if r.X != val || !carrierFreeValueUsesSeen(audited, r, root, seen) {
+			if r.X != val || !carrierFreeValueUsesSeenTuple(audited, r, root, callee, tupleIndex, seen) {
 				return false
 			}
 		case *ssa.Index:
-			if r.X != val || !carrierFreeValueUsesSeen(audited, r, root, seen) {
+			if r.X != val || !carrierFreeValueUsesSeenTuple(audited, r, root, callee, tupleIndex, seen) {
 				return false
 			}
 		case *ssa.Phi:
-			if !carrierFreeValueUsesSeen(audited, r, root, seen) {
+			if !carrierFreeValueUsesSeenTuple(audited, r, root, callee, tupleIndex, seen) {
+				return false
+			}
+		case *ssa.MakeClosure:
+			if !closureCaptureOnlyReturnedOutsideTupleIndex(r, val, callee, tupleIndex) {
 				return false
 			}
 		case *ssa.MakeInterface:
-			if !audited || r.X != val || !makeInterfaceOnlyReturned(r, root) {
+			if !audited || r.X != val || !makeInterfaceOnlyReturnedTuple(r, root, callee, tupleIndex) {
 				return false
 			}
 			if _, isIface := types.Unalias(val.Type()).Underlying().(*types.Interface); isIface {
@@ -451,8 +716,14 @@ func carrierFreeValueUsesSeen(audited bool, val ssa.Value, root *ssa.Function, s
 	return true
 }
 
-func makeInterfaceOnlyReturned(mi *ssa.MakeInterface, root *ssa.Function) bool {
-	if mi == nil || mi.Referrers() == nil || root == nil {
+func makeInterfaceOnlyReturnedTuple(mi *ssa.MakeInterface, root, callee *ssa.Function, tupleIndex int) bool {
+	if mi == nil || mi.Referrers() == nil {
+		return false
+	}
+	if valueOnlyReturnedOutsideTupleIndex(mi, callee, tupleIndex, make(map[ssa.Value]bool)) {
+		return true
+	}
+	if root == nil {
 		return false
 	}
 	sawReturn := false
