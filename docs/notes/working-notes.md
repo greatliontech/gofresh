@@ -678,6 +678,28 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
      - Any read of `/proc/...` or `/sys/fs/cgroup/...` hits `volatileOSPath(p)` (`testlog.go:911-936`), marking the batch observation `Unverifiable: true` (`volatile OS input: /proc/...`).
      - Any concurrent modification or cache pruning inside `/home/nikolas/.cache/gofresh` or `/home/nikolas/.cache/stipulator` during the 25-minute test run sets `observation.BracketMoved = true`, causing `Unit.Close` (`unit.go:515-517`) to return `RuntimeInputSpanError` (which even `assume_pure: true` cannot discharge) and rendering all `~464` witnesses in `internal/backends/golang` uncacheable!
 
+#### Issue N (`stipulator/internal/backends/golang/selection.go:233-302, 358-400`, `freshness_test.go:900-1010`, `allocation_integration_test.go:168`, `admission_test.go:1126-1420`, `execute_unix_test.go:26`): `GOMAXPROCS=2` Breaks 6 Tests in `stipulator/internal/backends/golang` and `deniedTests` Triggers `553` Sequential Solo Re-Executions After the `48m12s` Batch Run
+- **Evidence from `/tmp/stipulator-full-check-p1.jsonl` (`16:19:07Z`)**:
+  - In `stipulator` Pass 1:
+    - `35/36` packages in `race` completed in **`5m45s`** (at `12m28.6s` total wall time) and persisted **`498` witness records**.
+    - The 36th package (`github.com/greatliontech/stipulator/internal/backends/golang`, `559` batch tests) ran for **`48m12s` (`binary_ms: 2,892,154`)**, generating a **`2.1 GiB` (`/tmp/stipulator-testlog-447714370.txt`)** testlog, and finished with **`disposition: "HEALTH_DISPOSITION_TEST_FAILED"`**.
+  - **Why 6 of the 559 Batch Tests Failed or Skipped Under `stipulator check`**:
+    1. **`TestServedRecordRevalidatesAfterTheRunsExecutions` (`freshness_test.go:900-1010`) — Deadlocked for 60s and Failed Due to `GOMAXPROCS=2` (`witnessSpawnBound(2, 2) = 1`)**:
+       - `TestServedRecordRevalidatesAfterTheRunsExecutions` creates a 2-package module (`example.com/sibserve/reader` and `example.com/sibserve/writer`) where `writer`'s `TestWritesOnce` polls for 60 seconds waiting for `reader` to persist (`go.ahead`), requiring `reader` and `writer` to execute concurrently (`SpawnBound >= 2`).
+       - Because the parent `stipulator check` set `GOMAXPROCS=2` in `package.test`'s environment (`witnessChildWidth = 32 / 16 = 2`), `runtime.GOMAXPROCS(0)` inside `package.test` was `2`, so `RunWitnesses` inside `TestServedRecordRevalidatesAfterTheRunsExecutions` computed `witnessSpawnBound(2, 2) = min(max(1, 2/2), 2) = 1`!
+       - With `SpawnBound = 1`, `reader` and `writer` could not run concurrently; `writer` blocked for 60 seconds and failed with `t.Fatal("the reader's package never persisted")`!
+    2. **`TestGoScopedAllocationWarmWidthMovement` & `TestGoScopedAllocationWarmUnobservedWidthMovement` (`allocation_integration_test.go:146-170`) — Skipped Due to `GOMAXPROCS=2` (`runtime.GOMAXPROCS(0) < 4`)**:
+       - Both tests check `if runtime.GOMAXPROCS(0) < 4 { t.Skip("two package slots require at least four processors") }`. Because `stipulator check` narrowed `GOMAXPROCS=2`, both witness-bound tests skipped (`TEST_OUTCOME_SKIPPED`), denying their requirement bindings a witness!
+    3. **`TestSelectionNoticesAttributeUnwalkedSelections` (`selectionnotices_test.go:34-54`) — Skipped Due to `unauditedTagGOROOT` Under `godst`**:
+       - Hits `t.Skipf("the running toolchain's race selection is not admitted here...")` (`TEST_OUTCOME_SKIPPED`), denying `REQ-check-policy-notices` its witness.
+    4. **`TestAdmissionsOfOneProcessShareTheHostGate` (`admission_test.go:1126-1420`) & `TestGoExecuteEnvelopeTimeoutNamesAbortedTests` (`execute_unix_test.go:26-62`) — Failed Under `GOMAXPROCS=2` + `-race`**:
+       - `TestAdmissionsOfOneProcessShareTheHostGate` uses `time.Sleep(50 * time.Millisecond)` / `time.Sleep(100 * time.Millisecond)` after spawning goroutines via `admitAsync(...)` (`lines 1190, 1404, 1413`), assuming the goroutines have already called `readingFor(true)` and parked in `g.cond.Wait()` before `before := reads.Load()` or `cancel2()`.
+       - `TestGoExecuteEnvelopeTimeoutNamesAbortedTests` sets `n.Timeout = 2*time.Second` (`line 37`) for the entire `ExecuteInvocation` (which includes `prepareNativeAttempt` -> `CaptureProducerFrame` + `engine.Snapshot` + `PrepareTestUnit` + `-race` binary startup before `=== RUN TestHang` is emitted).
+  - **Catastrophic `553`-Solo-Rerun Amplification in `deniedTests` (`selection.go:233-302, 358-400`)**:
+    - When `unit.run.disposition` is `HEALTH_DISPOSITION_TEST_FAILED` (because 3 tests out of `559` failed), `deniedTests` (`selection.go:381-382`) marks **every single completed passing test (`case TestOutcome_TEST_OUTCOME_PASSED: denied[name] = true`)** — all **`553` passing tests** — as "denied" and re-executes all `553` passing tests sequentially one by one in `553` separate `package.test` processes (`mode: "denied"`), taking another `~50` minutes!
+    - Worse, `inSlot` (`lines 247-282`) keeps the `2.1 GiB` batch `testlog.txt` and all `553` solo `testlog.txt` files open/unclosed until `afterSlot` (`lines 287-302`), which then acquires `mu.Lock()` and calls `finishNativeRun` (`Unit.Close` -> `fromTestLog` + `checkMap` + `Validate`) `554` times sequentially — including on the already-failed `2.1 GiB` batch run!
+
+
 
 
 
