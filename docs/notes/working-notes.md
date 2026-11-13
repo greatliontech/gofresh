@@ -874,3 +874,10 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
 - **Round 3 Disposition (1 finding, confirmed & fixed)**:
   - `R3-F1 (LOW)`: Extracted shared `recordPackageDirInputs` in `internal/closure/listingmemo.go` (called by both `listingInputs` and `SnapshotScanInputs`), recording regular `listingSourceExts` byte digests (including build-tag-excluded files) and `embedRoots` directory trees.
 - **Round 4 Adversarial Review**: `ZERO FINDINGS`. Cross-OS `go vet`, `stipulator verify --no-test` (`917 bindings, 0 stale, 0 gaps, 0 moved`), full plain + `-short -race` suites across all 25 packages, and 8 `gomutant ephemeral` probes all passed/killed cleanly.
+
+
+### 11. Post-Chunk-4 De-Specialization Audit & Consolidation Checkpoint (`2026-11-13`)
+
+- **User Alignment**:
+  1. Execute **Chunk 3** (`internal/dynstate/flowir` normalized local memory/effect kernel, unified confinement/freshness summaries, and `summary_uses`/`summary_env` splits) and **Chunk 4** (`onceFill` LHS consumption, mechanical `OnceMemoType` + `GuardTypes`, and cross-package `EnvSummary` edges on `flowir`) first so the generic Go confinement and lazy-memoizer foundations are landed and verified.
+  2. **Mandatory Checkpoint Immediately After Chunk 4 (Before Chunks 5–9)**: Audit the entire codebase (`internal/dynstate/protoaudit`, `internal/dynstate/discharges_mapping.go`, `internal/dynstate/discharges_memo.go`, `internal/dynstate/internal/seams`, `internal/closure`, etc.) for every domain-special or template/field-name-matched mechanism (such as `grpc.go`'s `"ServiceName"`/`"Methods"`/`"Streams"` static composite-table matcher, `ProtoExtAlias`'s pointer-alias special case, `protoaudit`'s `"RawDescriptor"`/`"GoTypes"`/`"EnumInfos"`/`"MessageInfos"`/`"Build"` role matchers, `yaml.v3`-shaped `structMap` mapping/memo templates, and any closure-tier special cases) that can and should be collapsed into general first-principles Go mechanisms, align on the resulting plan chunks with the user, and schedule/execute them cleanly.
