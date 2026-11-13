@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go/types"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -55,6 +56,10 @@ func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure
 }
 
 func scanViewSubjectsWithMemo(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, useScanMemo bool, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
+	return scanViewSubjectsWithLocalMemo(ctx, hasher, scope, buildFlags, budget, useScanMemo, nil, pkgPaths...)
+}
+
+func scanViewSubjectsWithLocalMemo(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, useScanMemo bool, localFacts *localFactMemo, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
 	scope = hasher.SetAnalysisScope(scope)
 	// The scope is the one source of the attestations and the vouches:
 	// what keys a memo is what the derivation applies.
@@ -135,14 +140,24 @@ func scanViewSubjectsWithMemo(ctx context.Context, hasher *closure.Hasher, scope
 		seenPattern[node.PkgPath] = true
 		patterns = append(patterns, node.PkgPath)
 	}
+	var preFactKeys map[string]string
+	var expectedFiles map[string]map[string]bool
+	if (localFacts != nil || scanScope != "") && factScope != "" {
+		preFactKeys, expectedFiles = hasher.MutableFactKeys(factScope, meta, false, pkgPaths...)
+	}
+	var scanInputs closure.TreeDigestSnapshot
+	if scanScope != "" {
+		scanInputs = hasher.SnapshotScanInputs(pkgPaths...)
+	}
 	emitTypedLoadViewHook()
 	hasher.Unit("typecheck", "", 0, len(patterns))
 	load, err := closure.LoadViewPackages(ctx, hasher.PassReader(), buildFlags, patterns...)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	postLoadDiskUnchanged := scanScope != "" && scanInputs.MatchesDisk()
 	hasher.UseViewLoad(load)
-	state, err := deriveViewDynamicState(ctx, hasher, factScope, buildFlags, load, meta, pkgPaths, vouches, singleSubject, scope.PackageProcess)
+	state, err := deriveViewDynamicState(ctx, hasher, factScope, buildFlags, load, meta, pkgPaths, vouches, singleSubject, scope.PackageProcess, localFacts, preFactKeys, expectedFiles)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -187,8 +202,9 @@ func scanViewSubjectsWithMemo(ctx context.Context, hasher *closure.Hasher, scope
 	for subject := range cut {
 		cutPackages[subject.Package] = true
 	}
+	diskUnchanged := postLoadDiskUnchanged && scanInputs.MatchesDisk()
 	for _, pkgPath := range pkgPaths {
-		if key := keys[pkgPath]; key != "" && !cutPackages[pkgPath] {
+		if key := keys[pkgPath]; key != "" && diskUnchanged && !cutPackages[pkgPath] && !state.drifted[pkgPath] {
 			storeScanFacts(scanScope, key, entryOf(scan, pkgPath))
 		}
 	}
@@ -200,7 +216,7 @@ func scanViewSubjectsWithMemo(ctx context.Context, hasher *closure.Hasher, scope
 // text of every field it persists (a downgrade reason is scan output, so
 // a change to its composition bumps the version); a bump recomputes
 // rather than serving an older entry's text or misreading its shape.
-const scanEntryVersion = 6
+const scanEntryVersion = 7
 
 // subjectScanEntry is one subject's scan outputs as persisted.
 type subjectScanEntry struct {
@@ -449,6 +465,7 @@ type viewDynamicState struct {
 	attestationDischarges map[string]string
 	rootCulprits          map[string][]dynstate.Culprit
 	culpritSites          map[string]map[string]dynstate.CulpritSiteSet
+	drifted               map[string]bool
 }
 
 func (s *viewDynamicState) methodDirectives(viewPackage string, m *types.Func) (pureKey, externalKey string) {
@@ -599,29 +616,197 @@ func joinDischargedKeys(discharged map[string]bool) string {
 	return strings.Join(keys, ",")
 }
 
-func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factScope string, buildFlags []string, load *closure.ViewLoad, meta []closure.GraphPackage, viewPackages []string, vouches map[string]bool, singleSubject, packageProcess bool) (*viewDynamicState, error) {
+func loadedPackageMatchesFiles(pkg *packages.Package, expected map[string]bool) bool {
+	if pkg == nil || len(pkg.Errors) > 0 {
+		return false
+	}
+	seen := make(map[string]bool, len(expected))
+	for _, list := range [][]string{pkg.GoFiles, pkg.CompiledGoFiles, pkg.OtherFiles, pkg.EmbedFiles} {
+		for _, path := range list {
+			clean := filepath.Clean(path)
+			if !expected[clean] {
+				return false
+			}
+			seen[clean] = true
+		}
+	}
+	return len(seen) == len(expected)
+}
+
+func loadedPackageMatchesImports(hasher *closure.Hasher, pkg *packages.Package, node closure.GraphPackage, nodesByListing map[string]closure.GraphPackage) bool {
+	if pkg == nil {
+		return false
+	}
+	expectedPaths := make(map[string]bool, len(node.Imports))
+	for _, imp := range node.Imports {
+		if imp == "C" || imp == "unsafe" {
+			continue
+		}
+		impNode, exists := nodesByListing[imp]
+		if !exists {
+			return false
+		}
+		expectedPaths[impNode.PkgPath] = true
+		impPkg := pkg.Imports[impNode.PkgPath]
+		if impPkg == nil {
+			return false
+		}
+		modDir := ""
+		if impPkg.Module != nil {
+			modDir = impPkg.Module.Dir
+			if impPkg.Module.Replace != nil && impPkg.Module.Replace.Dir != "" {
+				modDir = impPkg.Module.Replace.Dir
+			}
+		}
+		pkgDir := impPkg.Dir
+		if pkgDir == "" && len(impPkg.GoFiles) > 0 {
+			pkgDir = filepath.Dir(impPkg.GoFiles[0])
+		}
+		if pkgDir == "" && len(impPkg.OtherFiles) > 0 {
+			pkgDir = filepath.Dir(impPkg.OtherFiles[0])
+		}
+		if pkgDir == "" && len(impPkg.EmbedFiles) > 0 {
+			pkgDir = filepath.Dir(impPkg.EmbedFiles[0])
+		}
+		if pkgDir == "" {
+			pkgDir = modDir
+		}
+		switch impNode.Class {
+		case closure.PinnedPackage:
+			if impPkg.Module == nil || impPkg.Module.Main || modDir == "" || pkgDir == "" || !hasher.IsPinnedDir(false, pkgDir) || hasher.ModulePinForDir(modDir) != impNode.Pin {
+				return false
+			}
+		case closure.MutableLocalPackage:
+			if impPkg.Module == nil || pkgDir == "" || hasher.IsPinnedDir(impPkg.Module.Main, pkgDir) {
+				return false
+			}
+		case closure.StandardPackage:
+			if impPkg.Module != nil {
+				return false
+			}
+		}
+	}
+	for impPath := range pkg.Imports {
+		if impPath != "C" && impPath != "unsafe" && !expectedPaths[impPath] {
+			return false
+		}
+	}
+	return true
+}
+
+func coneLocalFilesMatch(hasher *closure.Hasher, listing string, pkg *packages.Package, loaded map[string]*packages.Package, nodesByListing map[string]closure.GraphPackage, expectedFiles map[string]map[string]bool) bool {
+	if !loadedPackageMatchesFiles(pkg, expectedFiles[listing]) || !loadedPackageMatchesImports(hasher, pkg, nodesByListing[listing], nodesByListing) {
+		return false
+	}
+	visited := map[string]bool{listing: true}
+	ok := true
+	var walk func(string)
+	walk = func(cur string) {
+		if !ok {
+			return
+		}
+		for _, imp := range nodesByListing[cur].Imports {
+			if visited[imp] {
+				continue
+			}
+			visited[imp] = true
+			node, exists := nodesByListing[imp]
+			if !exists {
+				continue
+			}
+			if node.Class == closure.MutableLocalPackage && !node.TestMain {
+				impPkg := loaded[imp]
+				if !loadedPackageMatchesFiles(impPkg, expectedFiles[imp]) || !loadedPackageMatchesImports(hasher, impPkg, node, nodesByListing) {
+					ok = false
+					return
+				}
+			}
+			walk(imp)
+		}
+	}
+	walk(listing)
+	return ok
+}
+
+func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factScope string, buildFlags []string, load *closure.ViewLoad, meta []closure.GraphPackage, viewPackages []string, vouches map[string]bool, singleSubject, packageProcess bool, localFacts *localFactMemo, preFactKeys map[string]string, expectedFiles map[string]map[string]bool) (*viewDynamicState, error) {
 	state := &viewDynamicState{downgraded: map[string]string{}, culprits: map[string]Subject{}, cones: map[string]map[string][]dynstate.Fact{}}
 	factsByListing := map[string]dynstate.Fact{}
 	record := func(listing, _ string, fact dynstate.Fact) {
 		factsByListing[listing] = fact
 	}
-
+	var postFactKeys map[string]string
+	if len(preFactKeys) > 0 {
+		postFactKeys, _ = hasher.MutableFactKeys(factScope, meta, true, viewPackages...)
+	}
 	nodesByListing := make(map[string]closure.GraphPackage, len(meta))
 	for _, node := range meta {
 		nodesByListing[node.ImportPath] = node
 	}
+	driftedListings := map[string]bool{}
+	driftedForTest := map[string]bool{}
+	allViewPackagesDrifted := false
+	deriveLocalFact := func(listing string, pkg *packages.Package, verifiedKeys map[string]string, loaded map[string]*packages.Package) dynstate.Fact {
+		key := preFactKeys[listing]
+		verified := key != "" && !allViewPackagesDrifted && !driftedForTest[pkg.PkgPath] && key == verifiedKeys[listing] && coneLocalFilesMatch(hasher, listing, pkg, loaded, nodesByListing, expectedFiles)
+		if (key != "" && !verified) || !loadedPackageMatchesImports(hasher, pkg, nodesByListing[listing], nodesByListing) {
+			driftedListings[listing] = true
+		}
+		if localFacts != nil && verified {
+			if cached, ok := localFacts.load(key); ok {
+				emitLocalFactLoadViewHook(listing, true)
+				hasher.Served("dynamic-state facts", pkg.PkgPath)
+				return cached
+			}
+			emitLocalFactLoadViewHook(listing, false)
+			fact := dynstate.FactOf(hasher.SelectionAudited(), pkg)
+			localFacts.store(key, fact)
+			return fact
+		}
+		emitLocalFactLoadViewHook(listing, false)
+		return dynstate.FactOf(hasher.SelectionAudited(), pkg)
+	}
+
+	requestedViewPkg := make(map[string]bool, len(viewPackages))
+	for _, vp := range viewPackages {
+		requestedViewPkg[vp] = true
+	}
+	extraVariantFacts := map[string][]*packages.Package{}
+	loadedLocal := map[string]*packages.Package{}
+	type localPkgEntry struct {
+		listing string
+		pkg     *packages.Package
+	}
+	var rootLocals []localPkgEntry
 	matched := map[string]bool{}
 	for _, pkg := range load.Packages() {
+		if pkg.Name == "main" && strings.HasSuffix(pkg.PkgPath, ".test") {
+			continue
+		}
 		listing := pkg.PkgPath
 		if pkg.ForTest != "" {
 			listing = pkg.PkgPath + " [" + pkg.ForTest + ".test]"
 		}
 		node, ok := nodesByListing[listing]
-		if !ok || node.Class != closure.MutableLocalPackage || node.TestMain {
+		if !ok {
+			if pkg.ForTest != "" {
+				if requestedViewPkg[pkg.ForTest] {
+					driftedForTest[pkg.ForTest] = true
+					extraVariantFacts[pkg.ForTest] = append(extraVariantFacts[pkg.ForTest], pkg)
+				}
+			} else if pkg.Module != nil {
+				allViewPackagesDrifted = true
+			}
+			continue
+		}
+		if node.Class != closure.MutableLocalPackage || node.TestMain {
 			continue
 		}
 		matched[listing] = true
-		record(listing, pkg.PkgPath, dynstate.FactOf(hasher.SelectionAudited(), pkg, singleSubject))
+		loadedLocal[listing] = pkg
+		rootLocals = append(rootLocals, localPkgEntry{listing: listing, pkg: pkg})
+	}
+	for _, entry := range rootLocals {
+		record(entry.listing, entry.pkg.PkgPath, deriveLocalFact(entry.listing, entry.pkg, postFactKeys, loadedLocal))
 	}
 	var testedWithIntermediates []string
 	seenTested := map[string]bool{}
@@ -644,18 +829,47 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		if err != nil {
 			return nil, err
 		}
+		var interPostKeys map[string]string
+		if len(preFactKeys) > 0 {
+			interPostKeys, _ = hasher.MutableFactKeys(factScope, meta, true, viewPackages...)
+		}
+		graphLoaded := make(map[string]*packages.Package, len(loadedLocal))
+		for k, v := range loadedLocal {
+			graphLoaded[k] = v
+		}
+		var interEntries []localPkgEntry
 		packages.Visit(graphLoad.Packages(), nil, func(pkg *packages.Package) {
-			if pkg.ForTest == "" {
+			if pkg.Name == "main" && strings.HasSuffix(pkg.PkgPath, ".test") {
 				return
 			}
-			listing := pkg.PkgPath + " [" + pkg.ForTest + ".test]"
+			listing := pkg.PkgPath
+			if pkg.ForTest != "" {
+				listing = pkg.PkgPath + " [" + pkg.ForTest + ".test]"
+			}
 			node, ok := nodesByListing[listing]
-			if !ok || node.Class == closure.StandardPackage || matched[listing] {
+			if !ok {
+				if pkg.ForTest != "" && seenTested[pkg.ForTest] && pkg.Module != nil {
+					driftedForTest[pkg.ForTest] = true
+					extraVariantFacts[pkg.ForTest] = append(extraVariantFacts[pkg.ForTest], pkg)
+				}
+				return
+			}
+			if node.Class == closure.MutableLocalPackage && !node.TestMain {
+				graphLoaded[listing] = pkg
+			}
+			if pkg.ForTest == "" || node.Class == closure.StandardPackage || matched[listing] {
 				return
 			}
 			matched[listing] = true
-			record(listing, pkg.PkgPath, dynstate.FactOf(hasher.SelectionAudited(), pkg, singleSubject))
+			interEntries = append(interEntries, localPkgEntry{listing: listing, pkg: pkg})
 		})
+		for _, entry := range interEntries {
+			if nodesByListing[entry.listing].Class == closure.MutableLocalPackage {
+				record(entry.listing, entry.pkg.PkgPath, deriveLocalFact(entry.listing, entry.pkg, interPostKeys, graphLoaded))
+			} else {
+				record(entry.listing, entry.pkg.PkgPath, dynstate.FactOf(hasher.SelectionAudited(), entry.pkg))
+			}
+		}
 	}
 	for _, node := range meta {
 		if node.TestMain || node.Class == closure.StandardPackage || matched[node.ImportPath] {
@@ -722,7 +936,7 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 			for _, loadErr := range pkg.Errors {
 				return nil, fmt.Errorf("gofresh: dynamic-state scan: load %s: %s", pkg.PkgPath, loadErr)
 			}
-			derived[pkg.PkgPath] = dynstate.FactOf(hasher.SelectionAudited(), pkg, singleSubject)
+			derived[pkg.PkgPath] = dynstate.FactOf(hasher.SelectionAudited(), pkg)
 		}
 		store := map[string]map[string]json.RawMessage{}
 		for _, node := range missing {
@@ -750,6 +964,39 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 
 	for _, viewPackage := range viewPackages {
 		coneMeta, coneFacts := dynstate.Cone(meta, nodesByListing, factsByListing, viewPackage)
+		if extra := extraVariantFacts[viewPackage]; len(extra) > 0 {
+			seenExtra := map[string]bool{}
+			for _, node := range coneMeta {
+				seenExtra[node.PkgPath] = true
+			}
+			for _, pkg := range extra {
+				coneFacts[pkg.PkgPath] = append(coneFacts[pkg.PkgPath], dynstate.FactOf(hasher.SelectionAudited(), pkg))
+				if !seenExtra[pkg.PkgPath] {
+					seenExtra[pkg.PkgPath] = true
+					coneMeta = append(coneMeta, closure.GraphPackage{
+						ImportPath: pkg.PkgPath,
+						PkgPath:    pkg.PkgPath,
+						ForTest:    pkg.ForTest,
+						Class:      closure.MutableLocalPackage,
+					})
+				}
+			}
+		}
+		drifted := allViewPackagesDrifted || driftedForTest[viewPackage]
+		if !drifted {
+			for _, node := range coneMeta {
+				if driftedListings[node.ImportPath] {
+					drifted = true
+					break
+				}
+			}
+		}
+		if drifted {
+			if state.drifted == nil {
+				state.drifted = map[string]bool{}
+			}
+			state.drifted[viewPackage] = true
+		}
 		state.cones[viewPackage] = coneFacts
 		composed := dynstate.Compose(coneMeta, coneFacts, viewPackage, vouches, singleSubject, packageProcess)
 		if composed.Downgraded != "" {

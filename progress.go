@@ -246,10 +246,12 @@ type viewTestHookSet struct {
 	// scans — a seam with no production analogue, since a pinned fact
 	// moves only when its key does — exercise the derivation itself.
 	scanMemoOff bool
-	// factScope observes the derived dynamic-state fact scope — tests
-	// pin the execution-model markers that keep option-on and
-	// option-off sessions from serving each other's facts.
+	// factScope observes the derived execution-agnostic dynamic-state fact scope,
+	// while scanScope observes the execution-attested view scan scope.
 	factScope func(scope string)
+	scanScope func(scope string)
+	// localFactLoad observes session-scoped mutable-local dynstate.Fact lookups.
+	localFactLoad func(listing string, hit bool)
 }
 
 var (
@@ -276,7 +278,8 @@ func hasAnyViewTestHook() bool {
 		h.runtimeWindow != nil || h.maximalBatch != nil ||
 		h.beforeAnalysis != nil || h.beforeDischarge != nil ||
 		h.analysisBound != nil || h.scanMemoOff ||
-		h.factScope != nil
+		h.factScope != nil || h.scanScope != nil ||
+		h.localFactLoad != nil
 }
 
 func hasScanOverrideViewTestHook() bool {
@@ -360,5 +363,17 @@ func isScanMemoOffViewHook() bool {
 func emitFactScopeViewHook(scope string) {
 	if h := viewTestHooks.Load(); h != nil && h.factScope != nil {
 		h.factScope(scope)
+	}
+}
+
+func emitScanScopeViewHook(scope string) {
+	if h := viewTestHooks.Load(); h != nil && h.scanScope != nil {
+		h.scanScope(scope)
+	}
+}
+
+func emitLocalFactLoadViewHook(listing string, hit bool) {
+	if h := viewTestHooks.Load(); h != nil && h.localFactLoad != nil {
+		h.localFactLoad(listing, hit)
 	}
 }

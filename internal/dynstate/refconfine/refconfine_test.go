@@ -237,3 +237,51 @@ func TestTuplePredicatesTraverseElements(t *testing.T) {
 	}
 }
 
+func TestCallMutatesNamedStructContainer(t *testing.T) {
+	pkg := mustTypecheckPkg(t, "example.com/cont", `package cont
+
+type guarded struct {
+	m  map[string]int
+	sl []int
+}
+
+type unrelated struct {
+	m  map[string]int
+	sl []int
+}
+
+func MutDelete(g *guarded)              { delete(g.m, "k") }
+func MutClearMap(g *guarded)            { clear(g.m) }
+func MutClearSlice(g *guarded)          { clear(g.sl) }
+func MutCopyDst(g *guarded, s []int)    { copy(g.sl, s) }
+func ReadCopySrc(g *guarded, d []int)   { copy(d, g.sl) }
+func ReadLen(g *guarded) int            { return len(g.m) + cap(g.sl) }
+func MutOther(u *unrelated)             { delete(u.m, "k"); clear(u.sl) }
+`)
+	guardedNamed := pkg.Types.Scope().Lookup("guarded").(*types.TypeName).Type().(*types.Named)
+	seeds := map[*types.Named]bool{guardedNamed: true}
+	idx := BuildPkgIndex(pkg)
+
+	checkFunc := func(name string) bool {
+		fd := idx.PlainByName[name][0]
+		found := false
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			if ce, ok := n.(*ast.CallExpr); ok && CallMutatesNamedStructContainer(pkg, ce, seeds) {
+				found = true
+			}
+			return true
+		})
+		return found
+	}
+
+	for _, mutFn := range []string{"MutDelete", "MutClearMap", "MutClearSlice", "MutCopyDst"} {
+		if !checkFunc(mutFn) {
+			t.Errorf("%s: CallMutatesNamedStructContainer = false, want true", mutFn)
+		}
+	}
+	for _, readFn := range []string{"ReadCopySrc", "ReadLen", "MutOther"} {
+		if checkFunc(readFn) {
+			t.Errorf("%s: CallMutatesNamedStructContainer = true, want false", readFn)
+		}
+	}
+}

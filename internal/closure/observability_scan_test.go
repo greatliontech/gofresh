@@ -3174,7 +3174,7 @@ func TestRealRapidLazyMutStringer(t *testing.T) {
 	// 2. Real gopkg.in/yaml.v3@v3.0.1
 	t.Run("yaml.v3@v3.0.1", func(t *testing.T) {
 		yamlPkg := loadCachedBatch(t, "gopkg.in/yaml.v3@v3.0.1", ".")["gopkg.in/yaml.v3"]
-		fact := dynstate.FactOf(true, yamlPkg, false)
+		fact := dynstate.FactOf(true, yamlPkg)
 		if !slices.Contains(fact.MemoDischarges, "gopkg.in/yaml.v3.structMap") {
 			t.Fatalf("real gopkg.in/yaml.v3@v3.0.1 MemoDischarges = %v, want gopkg.in/yaml.v3.structMap", fact.MemoDischarges)
 		}
@@ -3184,7 +3184,7 @@ func TestRealRapidLazyMutStringer(t *testing.T) {
 	for _, sysVer := range []string{"v0.42.0", "v0.48.0"} {
 		t.Run("x_sys_unix@"+sysVer, func(t *testing.T) {
 			unixPkg := loadCachedBatch(t, "golang.org/x/sys@"+sysVer, "./unix")["golang.org/x/sys/unix"]
-			fact := dynstate.FactOf(true, unixPkg, false)
+			fact := dynstate.FactOf(true, unixPkg)
 			if !slices.Contains(fact.MappingDischarges, "golang.org/x/sys/unix.mapper") {
 				t.Fatalf("real golang.org/x/sys@%s/unix MappingDischarges = %v, want golang.org/x/sys/unix.mapper", sysVer, fact.MappingDischarges)
 			}
@@ -3245,7 +3245,7 @@ func TestRealRapidLazyMutStringer(t *testing.T) {
 			facts := make(map[string][]dynstate.Fact, len(pbPaths))
 			for _, pkgPath := range pbPaths {
 				p := allPB[pkgPath]
-				f := dynstate.FactOf(true, p, false)
+				f := dynstate.FactOf(true, p)
 				pbFacts[pkgPath] = f
 				facts[pkgPath] = []dynstate.Fact{f}
 				var imps []string
@@ -3404,7 +3404,7 @@ func TestRealRapidLazyMutStringer(t *testing.T) {
 	for _, grpcVer := range []string{"v1.80.0", "v1.82.1", "v1.83.2"} {
 		t.Run("grpc@"+grpcVer, func(t *testing.T) {
 			grpcPkg := loadCachedBatch(t, "google.golang.org/grpc@"+grpcVer, ".")["google.golang.org/grpc"]
-			grpcFact := dynstate.FactOf(true, grpcPkg, false)
+			grpcFact := dynstate.FactOf(true, grpcPkg)
 			for _, mut := range grpcFact.MutatedStructTypes {
 				if mut.Pkg == "google.golang.org/grpc" &&
 					(mut.Name == "ServiceDesc" || mut.Name == "MethodDesc" || mut.Name == "StreamDesc") {

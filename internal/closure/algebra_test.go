@@ -1555,8 +1555,9 @@ func TestObservabilityRefusalAttributesTheUnauditedSelection(t *testing.T) {
 
 // Each memo's scope renders exactly the axes its derivation reads: the
 // proofs, facts and typed scans share the complete guard/dependency identity;
-// the view scan additionally joins the sorted vouch set. A partial identity
-// and the zero value arm nothing.
+// the view scan additionally joins the execution attestations, the
+// reachability-discharge strategy when an execution attestation is active,
+// and the sorted vouch set. A partial identity and the zero value arm nothing.
 func TestAnalysisScopeRendersEachMemosAxes(t *testing.T) {
 	scope := AnalysisScope{ProofStrategy: "rta@1", FactStrategy: "facts@2", Toolchain: "tc", BuildConfig: "bc", Vouches: []string{"b:y", "a:x"}, toolchainContent: "content", admissionPolicy: "policy"}
 	if got, want := scope.Proofs(), "rta@1|tc|bc|"+AnalyzingFrontend()+"|content|policy"; got != want {
@@ -1573,8 +1574,11 @@ func TestAnalysisScopeRendersEachMemosAxes(t *testing.T) {
 	}
 	attested := scope
 	attested.SingleSubject, attested.PackageProcess = true, true
-	if got, want := attested.Facts(), "facts@2|tc|bc|"+AnalyzingFrontend()+"|content|policy|single-subject-execution|package-process-execution"; got != want {
+	if got, want := attested.Facts(), scope.Facts(); got != want {
 		t.Errorf("attested Facts = %q, want %q", got, want)
+	}
+	if got, want := attested.Scan(), "facts@2|tc|bc|"+AnalyzingFrontend()+"|content|policy|single-subject-execution|package-process-execution|"+rootedFunctionsStrategy+"|vouches:a:x,b:y"; got != want {
+		t.Errorf("attested Scan = %q, want %q", got, want)
 	}
 	if attested.Proofs() != scope.Proofs() || attested.TestingScan() != scope.TestingScan() {
 		t.Error("an attestation moved a scope that does not read it")

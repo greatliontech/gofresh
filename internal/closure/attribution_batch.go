@@ -188,6 +188,165 @@ func splitAttributed(ctx context.Context, audited bool, pureDelegates map[string
 	return append(left, right...), nil
 }
 
+type openCandidateSpec struct {
+	idx  int
+	mask uint64
+}
+
+type preparedProgramRTA struct {
+	harnessAudited      bool
+	userPaths           map[string]bool
+	initRoots           []*ssa.Function
+	harnessStdInitRoots []*ssa.Function
+	summary             *callerReferenceSummary
+	provFP              *freshParamAnalysis
+	enumClosed          map[int]enumerationClosure
+	enumCandidateTypes  []types.Type
+	baseStartup         *baseStartupReachSummary
+	initBoxedTypes      []types.Type
+	res                 *rta.Result
+}
+
+func materializedConcreteInstances(instances []*ssa.Function) []*ssa.Function {
+	var out []*ssa.Function
+	for _, fn := range instances {
+		if args := fn.TypeArgs(); len(args) > 0 {
+			parameterized := false
+			for _, arg := range args {
+				if rta.ContainsTypeParam(arg, nil) {
+					parameterized = true
+					break
+				}
+			}
+			if parameterized {
+				continue
+			}
+		}
+		out = append(out, fn)
+	}
+	return out
+}
+
+func addFuzzCallbackTypeSeed(deltaSeeds **rta.Seeds, fb *ssa.Function, mask uint64) {
+	if len(fb.Params) > 0 && isHarnessPointerType(fb.Params[0].Type()) && paramHasMakeInterface(fb.Params[0], make(map[*ssa.Parameter]bool)) {
+		if *deltaSeeds == nil {
+			*deltaSeeds = &rta.Seeds{}
+		}
+		(*deltaSeeds).RuntimeTypes = append((*deltaSeeds).RuntimeTypes, rta.TypeSeed{Type: fb.Params[0].Type(), Masks: mask})
+	}
+}
+
+func prepareProgramRTA(
+	ctx context.Context,
+	audited bool,
+	pureDelegates map[string]bool,
+	prog *program,
+	roots map[*ssa.Function]uint64,
+	allMasks uint64,
+	testMasks uint64,
+	openCandidates map[*ssa.Function]openCandidateSpec,
+	requireAllOpenClosed bool,
+	needFullBaseStartup bool,
+	collectStepCallbacks func(res *rta.Result, p *preparedProgramRTA) (deltaRoots map[*ssa.Function]uint64, deltaSeeds *rta.Seeds, abort bool, err error),
+) (preparedProgramRTA, bool, error) {
+	var p preparedProgramRTA
+	p.harnessAudited = propertyHarnessAuditedProg(audited, prog)
+	p.userPaths = userModulePaths(prog.Pkgs)
+	// The init-root set is subject-independent; only the test-main prepend
+	// varies by harness. One derivation serves the RTA roots and every
+	// subject's startup provenance, isolating stdlib packages imported
+	// exclusively by a verified property harness onto the harness-stdlib plane.
+	p.initRoots, p.harnessStdInitRoots = partitionHarnessInitRoots(prog, p.harnessAudited, p.userPaths)
+	for _, init := range p.initRoots {
+		roots[init] |= allMasks
+	}
+	p.enumClosed = map[int]enumerationClosure{}
+	var seeds *rta.Seeds
+	if p.harnessAudited {
+		seeds = newHarnessRTASeeds(p.userPaths, p.harnessStdInitRoots, allMasks)
+	}
+	// Populate the whole-program caller-reference summary and shared
+	// subject-independent provenance analysis unconditionally so solo and
+	// batched evaluations share identical program-wide call sites and memos.
+	p.summary = enumerateCallerReferencesForProgram(prog, audited, pureDelegates, p.userPaths, nil)
+	p.provFP = newProvenanceFP(audited, p.harnessAudited, pureDelegates, prog, p.summary, p.userPaths)
+	if len(openCandidates) > 0 {
+		openRoots := make([]*ssa.Function, 0, len(openCandidates))
+		for root := range openCandidates {
+			openRoots = append(openRoots, root)
+		}
+		sort.Slice(openRoots, func(i, j int) bool { return openRoots[i].String() < openRoots[j].String() })
+		for _, root := range openRoots {
+			spec := openCandidates[root]
+			enc, ok := subjectEnumerationClosure(audited, pureDelegates, p.userPaths, root, p.summary)
+			if !ok {
+				if requireAllOpenClosed {
+					return preparedProgramRTA{}, false, nil
+				}
+				continue
+			}
+			if seeds == nil {
+				seeds = &rta.Seeds{AddrTaken: map[*ssa.Function]uint64{}}
+			} else if seeds.AddrTaken == nil {
+				seeds.AddrTaken = map[*ssa.Function]uint64{}
+			}
+			for fn := range enc.addrTaken {
+				seeds.AddrTaken[fn] |= spec.mask
+			}
+			for _, t := range enc.types {
+				seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: t, Masks: spec.mask})
+				p.enumCandidateTypes = append(p.enumCandidateTypes, t)
+			}
+			if spec.idx >= 0 {
+				p.enumClosed[spec.idx] = enc
+			}
+		}
+	}
+	cancelCtxMasks := testMasks
+	if p.harnessAudited {
+		cancelCtxMasks = allMasks
+	}
+	if audited && cancelCtxMasks != 0 {
+		if ct := programCancelCtxType(prog.Prog); ct != nil {
+			if seeds == nil {
+				seeds = &rta.Seeds{}
+			}
+			seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: ct, Masks: cancelCtxMasks})
+		}
+	}
+	if needFullBaseStartup || p.harnessAudited {
+		baseStartup, err := cachedBaseStartupReachability(ctx, audited, prog, p.initRoots, p.harnessStdInitRoots, p.harnessAudited, p.userPaths)
+		if err != nil {
+			return preparedProgramRTA{}, false, err
+		}
+		p.baseStartup = baseStartup
+		p.initBoxedTypes = baseStartup.initBoxedTypes
+	}
+	analyzer := rta.NewAnalyzer()
+	stepRoots := roots
+	stepSeeds := seeds
+	for {
+		res, err := analyzer.Extend(ctx, stepRoots, stepSeeds)
+		if err != nil {
+			return preparedProgramRTA{}, false, err
+		}
+		p.res = res
+		deltaRoots, deltaSeeds, abort, err := collectStepCallbacks(res, &p)
+		if err != nil {
+			return preparedProgramRTA{}, false, err
+		}
+		if abort {
+			return preparedProgramRTA{}, false, nil
+		}
+		if len(deltaRoots) == 0 && deltaSeeds == nil {
+			break
+		}
+		stepRoots = deltaRoots
+		stepSeeds = deltaSeeds
+	}
+	return p, true, nil
+}
+
 func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegates map[string]bool, prog *program, subjects []Subject) ([]attributedReachability, error) {
 	var pkgPath string
 	if prog != nil {
@@ -204,9 +363,9 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 		allMasks = 1<<len(subjects) - 1
 	}
 	var testMasks uint64
-	var allFunctions map[*ssa.Function]bool
 	var instancesByOrigin map[*ssa.Function][]*ssa.Function
 	instantiated := map[uint64]map[*ssa.Function]bool{}
+	openCandidates := map[*ssa.Function]openCandidateSpec{}
 	for i, subject := range subjects {
 		mask := subjectMask(1) << i
 		root := prog.Roots[subject.Symbol]
@@ -223,35 +382,19 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 		switch {
 		case !parameterizedBody(root):
 			roots[root] |= mask
+			if root != nil && rootMayReceiveUnknownDynamic(audited, prog, root) {
+				openCandidates[root] = openCandidateSpec{idx: i, mask: mask}
+			}
 		case !rootMayReceiveUnknownDynamic(audited, prog, root):
 			if instancesByOrigin == nil {
 				instancesByOrigin = progInstancesByOrigin(prog)
 			}
-			for _, fn := range instancesByOrigin[root] {
-				if args := fn.TypeArgs(); len(args) > 0 {
-					parameterized := false
-					for _, arg := range args {
-						if rta.ContainsTypeParam(arg, nil) {
-							parameterized = true
-							break
-						}
-					}
-					if parameterized {
-						// A parameterized instance (type arguments
-						// still mentioning type parameters, created
-						// inside another origin's body) is not a
-						// concrete dispatch surface: its coverage
-						// arrives through the fully concrete
-						// instances, and rooting it would walk a
-						// parameterized body.
-						continue
-					}
-				}
+			// Parameterized instances (type arguments still mentioning type
+			// parameters, created inside another origin's body) are excluded:
+			// only concrete instantiations enter RTA roots while the origin's
+			// own body yields to them.
+			for _, fn := range materializedConcreteInstances(instancesByOrigin[root]) {
 				roots[fn] |= mask
-				// The origin's own body scan yields to the rooted
-				// instantiations': each dispatches concretely, so
-				// scanning the open-over-T origin beside them would
-				// re-widen exactly the sites the rooting resolves.
 				if instantiated[mask] == nil {
 					instantiated[mask] = map[*ssa.Function]bool{}
 				}
@@ -265,167 +408,93 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 	if prog.TestMain != nil {
 		roots[prog.TestMain] |= testMasks
 	}
-	harnessAudited := propertyHarnessAuditedProg(audited, prog)
-	userPaths := userModulePaths(prog.Pkgs)
-	// The init-root set is subject-independent; only the test-main prepend
-	// varies by harness. One derivation serves the RTA roots and every
-	// subject's startup provenance, isolating stdlib packages imported
-	// exclusively by a verified property harness onto the harness-stdlib plane.
-	initRoots, harnessStdInitRoots := partitionHarnessInitRoots(prog, harnessAudited, userPaths)
-	for _, init := range initRoots {
-		roots[init] |= allMasks
-	}
-	// Whole-view caller enumeration for signature-open subjects
-	// (REQ-closure-analysis): one deterministic pass collects every
-	// candidate's references; a subject whose only references are direct
-	// static calls with caller-frame-closed dynamic arguments analyzes
-	// closed, its enumerated candidates seeded into the walk. Everything
-	// else keeps the open world.
-	enumClosed := map[int]enumerationClosure{}
-	var seeds *rta.Seeds
-	if harnessAudited {
-		seeds = newHarnessRTASeeds(userPaths, harnessStdInitRoots, allMasks)
-	}
-	openCandidates := map[*ssa.Function]int{}
-	for i, subject := range subjects {
-		root := prog.Roots[subject.Symbol]
-		if root == nil || parameterizedBody(root) || !rootMayReceiveUnknownDynamic(audited, prog, root) {
-			continue
-		}
-		openCandidates[root] = i
-	}
-	var valueRefOutsideInit map[*ssa.Function]bool
-	var summary *callerReferenceSummary
-	if audited || len(openCandidates) > 0 {
-		summary = enumerateCallerReferencesForProgram(prog, audited, pureDelegates, userPaths, allFunctions)
-		allFunctions = summary.allFunctions
-		valueRefOutsideInit = summary.valueRefOutsideInit
-		var openRoots []*ssa.Function
-		for root := range openCandidates {
-			openRoots = append(openRoots, root)
-		}
-		sort.Slice(openRoots, func(i, j int) bool { return openRoots[i].String() < openRoots[j].String() })
-		for _, root := range openRoots {
-			i := openCandidates[root]
-			enc, ok := subjectEnumerationClosure(audited, pureDelegates, userPaths, root, summary)
-			if !ok {
-				continue
-			}
-			mask := uint64(1) << i
-			if seeds == nil {
-				seeds = &rta.Seeds{AddrTaken: map[*ssa.Function]uint64{}}
-			} else if seeds.AddrTaken == nil {
-				seeds.AddrTaken = map[*ssa.Function]uint64{}
-			}
-			for fn := range enc.addrTaken {
-				seeds.AddrTaken[fn] |= mask
-			}
-			for _, t := range enc.types {
-				seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: t, Masks: mask})
-			}
-			enumClosed[i] = enc
-		}
-	}
-	cancelCtxMasks := testMasks
-	if harnessAudited {
-		cancelCtxMasks = allMasks
-	}
-	if audited && cancelCtxMasks != 0 {
-		if ct := programCancelCtxType(prog.Prog); ct != nil {
-			if seeds == nil {
-				seeds = &rta.Seeds{}
-			}
-			seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: ct, Masks: cancelCtxMasks})
-		}
-	}
-	baseStartup, err := cachedBaseStartupReachability(ctx, audited, prog, initRoots, harnessStdInitRoots, harnessAudited, userPaths)
-	if err != nil {
-		return nil, err
-	}
 	cleanupRoots := make([][]*ssa.Function, len(subjects))
 	fuzzRoots := make([][]*ssa.Function, len(subjects))
 	unclosedCleanup := make([]bool, len(subjects))
 	unclosedFuzz := make([]bool, len(subjects))
 	rootedCallbacks := make([]map[*ssa.Function]bool, len(subjects))
-	analyzer := rta.NewAnalyzer()
-	stepRoots := roots
-	stepSeeds := seeds
-	var res *rta.Result
-	for {
-		res, err = analyzer.Extend(ctx, stepRoots, stepSeeds)
-		if err != nil {
-			return nil, err
-		}
-		var deltaRoots map[*ssa.Function]uint64
-		var deltaSeeds *rta.Seeds
-		addedAny := false
-		for i, subject := range subjects {
-			mask := uint64(1) << i
-			subjectRoot := prog.Roots[subject.Symbol]
-			if subjectRoot == nil {
-				continue
-			}
-			provRoots := []*ssa.Function{subjectRoot}
-			if len(instantiated[mask]) > 0 {
-				if instancesByOrigin == nil {
-					instancesByOrigin = progInstancesByOrigin(prog)
+	prep, _, err := prepareProgramRTA(
+		ctx,
+		audited,
+		pureDelegates,
+		prog,
+		roots,
+		allMasks,
+		testMasks,
+		openCandidates,
+		false,
+		true,
+		func(res *rta.Result, p *preparedProgramRTA) (map[*ssa.Function]uint64, *rta.Seeds, bool, error) {
+			var deltaRoots map[*ssa.Function]uint64
+			var deltaSeeds *rta.Seeds
+			for i, subject := range subjects {
+				mask := uint64(1) << i
+				subjectRoot := prog.Roots[subject.Symbol]
+				if subjectRoot == nil {
+					continue
 				}
-				provRoots = append(provRoots[:0], instancesByOrigin[subjectRoot]...)
-			}
-			if prog.TestMain != nil && subjectRunsThroughHarness(prog, subjectRoot) {
-				provRoots = append(provRoots, prog.TestMain)
-			}
-			provRoots = append(provRoots, cleanupRoots[i]...)
-			provRoots = append(provRoots, fuzzRoots[i]...)
-			enc, enumerated := enumClosed[i]
-			prov, _, err := provenanceReachableWithCandidates(ctx, audited, prog, provRoots, mask, res, harnessAudited, userPaths, nil, enc.types, baseStartup.initBoxedTypes)
-			if err != nil {
-				return nil, err
-			}
-			cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, harnessAudited, pureDelegates, userPaths, summary, subjectRoot, enumerated, enc, prov, mask, res)
-			unclosedCleanup[i] = unclosedCleanup[i] || unclosedCB
-			unclosedFuzz[i] = unclosedFuzz[i] || unclosedFB
-			for _, cb := range cbs {
-				if rootedCallbacks[i] == nil {
-					rootedCallbacks[i] = map[*ssa.Function]bool{}
-				}
-				if !rootedCallbacks[i][cb] {
-					rootedCallbacks[i][cb] = true
-					cleanupRoots[i] = append(cleanupRoots[i], cb)
-					if deltaRoots == nil {
-						deltaRoots = make(map[*ssa.Function]uint64)
+				provRoots := []*ssa.Function{subjectRoot}
+				if len(instantiated[mask]) > 0 {
+					if instancesByOrigin == nil {
+						instancesByOrigin = progInstancesByOrigin(prog)
 					}
-					deltaRoots[cb] |= mask
-					addedAny = true
+					provRoots = append(provRoots[:0], instancesByOrigin[subjectRoot]...)
 				}
-			}
-			for _, fb := range fbs {
-				if rootedCallbacks[i] == nil {
-					rootedCallbacks[i] = map[*ssa.Function]bool{}
+				if prog.TestMain != nil && subjectRunsThroughHarness(prog, subjectRoot) {
+					provRoots = append(provRoots, prog.TestMain)
 				}
-				if !rootedCallbacks[i][fb] {
-					rootedCallbacks[i][fb] = true
-					fuzzRoots[i] = append(fuzzRoots[i], fb)
-					if deltaRoots == nil {
-						deltaRoots = make(map[*ssa.Function]uint64)
+				provRoots = append(provRoots, cleanupRoots[i]...)
+				provRoots = append(provRoots, fuzzRoots[i]...)
+				enc, enumerated := p.enumClosed[i]
+				prov, _, err := provenanceReachableWithCandidates(ctx, audited, prog, provRoots, mask, res, p.harnessAudited, p.userPaths, nil, enc.types, p.initBoxedTypes, p.provFP)
+				if err != nil {
+					return nil, nil, false, err
+				}
+				cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, p.harnessAudited, pureDelegates, p.userPaths, p.summary, subjectRoot, enumerated, enc, prov, mask, res)
+				unclosedCleanup[i] = unclosedCleanup[i] || unclosedCB
+				unclosedFuzz[i] = unclosedFuzz[i] || unclosedFB
+				for _, cb := range cbs {
+					if rootedCallbacks[i] == nil {
+						rootedCallbacks[i] = map[*ssa.Function]bool{}
 					}
-					deltaRoots[fb] |= mask
-					if len(fb.Params) > 0 && isHarnessPointerType(fb.Params[0].Type()) && paramHasMakeInterface(fb.Params[0], make(map[*ssa.Parameter]bool)) {
-						if deltaSeeds == nil {
-							deltaSeeds = &rta.Seeds{}
+					if !rootedCallbacks[i][cb] {
+						rootedCallbacks[i][cb] = true
+						cleanupRoots[i] = append(cleanupRoots[i], cb)
+						if deltaRoots == nil {
+							deltaRoots = make(map[*ssa.Function]uint64)
 						}
-						deltaSeeds.RuntimeTypes = append(deltaSeeds.RuntimeTypes, rta.TypeSeed{Type: fb.Params[0].Type(), Masks: mask})
+						deltaRoots[cb] |= mask
 					}
-					addedAny = true
+				}
+				for _, fb := range fbs {
+					if rootedCallbacks[i] == nil {
+						rootedCallbacks[i] = map[*ssa.Function]bool{}
+					}
+					if !rootedCallbacks[i][fb] {
+						rootedCallbacks[i][fb] = true
+						fuzzRoots[i] = append(fuzzRoots[i], fb)
+						if deltaRoots == nil {
+							deltaRoots = make(map[*ssa.Function]uint64)
+						}
+						deltaRoots[fb] |= mask
+						addFuzzCallbackTypeSeed(&deltaSeeds, fb, mask)
+					}
 				}
 			}
-		}
-		if !addedAny {
-			break
-		}
-		stepRoots = deltaRoots
-		stepSeeds = deltaSeeds
+			return deltaRoots, deltaSeeds, false, nil
+		},
+	)
+	if err != nil {
+		return nil, err
 	}
+	res := prep.res
+	summary := prep.summary
+	harnessAudited := prep.harnessAudited
+	userPaths := prep.userPaths
+	initRoots := prep.initRoots
+	baseStartup := prep.baseStartup
+	enumClosed := prep.enumClosed
+	valueRefOutsideInit := summary.valueRefOutsideInit
 	// Fold each parameterized origin into the result under its subject's
 	// mask: its declaration is the subject's own source — the subject's
 	// content must move when the generic body moves — while its body was
@@ -439,22 +508,6 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 	dropCollidedFuncs := make([]func(ssa.CallInstruction, *ssa.Function) bool, len(subjects))
 	for i := range reachable {
 		enc, enumerated := enumClosed[i]
-		var structFieldStores map[structFieldKey][]ssa.Value
-		var structWholeStores map[*types.Named][]ssa.Value
-		var structPoisoned map[structFieldKey]bool
-		var structReferencedByType map[*types.Named]bool
-		var programSites map[*ssa.Function][]ssa.CallInstruction
-		var programValueRef map[*ssa.Function]bool
-		var programFunctions map[*ssa.Function]bool
-		if summary != nil {
-			structFieldStores = summary.structFieldStores
-			structWholeStores = summary.structWholeStores
-			structPoisoned = summary.structPoisoned
-			structReferencedByType = summary.structReferencedByType
-			programSites = summary.sites
-			programValueRef = summary.valueRef
-			programFunctions = summary.allFunctions
-		}
 		rtaFns := make(map[*ssa.Function]bool, len(res.Reachable))
 		reachable[i] = attributedReachability{
 			functions:              rtaFns,
@@ -467,13 +520,13 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 			enumeratedRootSites:    enc.sites,
 			enumeratedTypes:        enc.types,
 			enumeratedFieldStores:  enc.fieldStores,
-			structFieldStores:      structFieldStores,
-			structWholeStores:      structWholeStores,
-			structPoisoned:         structPoisoned,
-			structReferencedByType: structReferencedByType,
-			programSites:           programSites,
-			programValueRef:        programValueRef,
-			programFunctions:       programFunctions,
+			structFieldStores:      summary.structFieldStores,
+			structWholeStores:      summary.structWholeStores,
+			structPoisoned:         summary.structPoisoned,
+			structReferencedByType: summary.structReferencedByType,
+			programSites:           summary.sites,
+			programValueRef:        summary.valueRef,
+			programFunctions:       summary.allFunctions,
 			userPaths:              userPaths,
 			subjectRoot:            prog.Roots[subjects[i].Symbol],
 			prog:                   prog,
@@ -517,7 +570,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 			dropCollidedFuncs[i] = dropCollided
 		}
 		var usedInitBoxed bool
-		reachable[i].subjectFunctions, usedInitBoxed, err = provenanceReachableWithCandidates(ctx, audited, prog, subjectProvenance, mask, res, harnessAudited, userPaths, dropCollided, enc.types, baseStartup.initBoxedTypes)
+		reachable[i].subjectFunctions, usedInitBoxed, err = provenanceReachableWithCandidates(ctx, audited, prog, subjectProvenance, mask, res, harnessAudited, userPaths, dropCollided, enc.types, baseStartup.initBoxedTypes, prep.provFP)
 		if err != nil {
 			return nil, err
 		}
@@ -529,7 +582,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 			extraRoots = append(extraRoots, subjectProvenance...)
 			extraRoots = append(extraRoots, fuzzRoots[i]...)
 			var extraUsedInitBoxed bool
-			reachable[i].rootedExtraFunctions, extraUsedInitBoxed, err = provenanceReachableWithCandidates(ctx, audited, prog, extraRoots, mask, res, harnessAudited, userPaths, nil, enc.types, baseStartup.initBoxedTypes)
+			reachable[i].rootedExtraFunctions, extraUsedInitBoxed, err = provenanceReachableWithCandidates(ctx, audited, prog, extraRoots, mask, res, harnessAudited, userPaths, nil, enc.types, baseStartup.initBoxedTypes, prep.provFP)
 			if err != nil {
 				return nil, err
 			}
@@ -539,7 +592,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 		}
 		if prog.TestMain != nil && subjectRunsThroughHarness(prog, subjectRoot) {
 			var tmUsedInitBoxed bool
-			reachable[i].testMainFunctions, tmUsedInitBoxed, err = provenanceReachableWithCandidates(ctx, audited, prog, []*ssa.Function{prog.TestMain}, mask, res, harnessAudited, userPaths, nil, nil, baseStartup.initBoxedTypes)
+			reachable[i].testMainFunctions, tmUsedInitBoxed, err = provenanceReachableWithCandidates(ctx, audited, prog, []*ssa.Function{prog.TestMain}, mask, res, harnessAudited, userPaths, nil, nil, baseStartup.initBoxedTypes, prep.provFP)
 			if err != nil {
 				return nil, err
 			}
@@ -921,14 +974,11 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 		return RootedFunctions{Fns: map[string]bool{}, Complete: true}, nil
 	}
 	const unionMask uint64 = 1
-	harnessAudited := propertyHarnessAuditedProg(audited, prog)
-	userPaths := userModulePaths(prog.Pkgs)
 	roots := make(map[*ssa.Function]uint64)
 	var subjectProvenance []*ssa.Function
 	includeTestMain := false
-	var allFunctions map[*ssa.Function]bool
 	var instancesByOrigin map[*ssa.Function][]*ssa.Function
-	openCandidates := map[*ssa.Function]bool{}
+	openCandidates := map[*ssa.Function]openCandidateSpec{}
 	for _, subject := range subjects {
 		root := prog.Roots[subject.Symbol]
 		if root == nil {
@@ -939,31 +989,18 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 			roots[root] |= unionMask
 			subjectProvenance = append(subjectProvenance, root)
 			if rootMayReceiveUnknownDynamic(audited, prog, root) {
-				openCandidates[root] = true
+				openCandidates[root] = openCandidateSpec{idx: -1, mask: unionMask}
 			}
 		case !rootMayReceiveUnknownDynamic(audited, prog, root):
 			if instancesByOrigin == nil {
 				instancesByOrigin = progInstancesByOrigin(prog)
 			}
-			instantiatedAny := false
-			for _, fn := range instancesByOrigin[root] {
-				if args := fn.TypeArgs(); len(args) > 0 {
-					parameterized := false
-					for _, arg := range args {
-						if rta.ContainsTypeParam(arg, nil) {
-							parameterized = true
-							break
-						}
-					}
-					if parameterized {
-						continue
-					}
-				}
+			concrete := materializedConcreteInstances(instancesByOrigin[root])
+			for _, fn := range concrete {
 				roots[fn] |= unionMask
 				subjectProvenance = append(subjectProvenance, fn)
-				instantiatedAny = true
 			}
-			if !instantiatedAny {
+			if len(concrete) == 0 {
 				subjectProvenance = append(subjectProvenance, root)
 			}
 		default:
@@ -973,127 +1010,81 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 			includeTestMain = true
 		}
 	}
-	initRoots, harnessStdInitRoots := partitionHarnessInitRoots(prog, harnessAudited, userPaths)
-	var seeds *rta.Seeds
-	if harnessAudited {
-		seeds = newHarnessRTASeeds(userPaths, harnessStdInitRoots, unionMask)
-	}
-	var summary *callerReferenceSummary
-	var enumCandidateTypes []types.Type
-	if audited || len(openCandidates) > 0 {
-		summary = enumerateCallerReferencesForProgram(prog, audited, pureDelegates, userPaths, allFunctions)
-		allFunctions = summary.allFunctions
-		for root := range openCandidates {
-			enc, ok := subjectEnumerationClosure(audited, pureDelegates, userPaths, root, summary)
-			if !ok {
-				return RootedFunctions{}, nil
-			}
-			if seeds == nil {
-				seeds = &rta.Seeds{AddrTaken: map[*ssa.Function]uint64{}}
-			} else if seeds.AddrTaken == nil {
-				seeds.AddrTaken = map[*ssa.Function]uint64{}
-			}
-			for fn := range enc.addrTaken {
-				seeds.AddrTaken[fn] |= unionMask
-			}
-			for _, t := range enc.types {
-				seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: t, Masks: unionMask})
-				enumCandidateTypes = append(enumCandidateTypes, t)
-			}
+	var testMasks uint64
+	if includeTestMain {
+		testMasks = unionMask
+		if prog.TestMain != nil {
+			roots[prog.TestMain] |= unionMask
+			subjectProvenance = append(subjectProvenance, prog.TestMain)
 		}
-	}
-	if audited && (includeTestMain || harnessAudited) {
-		if ct := programCancelCtxType(prog.Prog); ct != nil {
-			if seeds == nil {
-				seeds = &rta.Seeds{}
-			}
-			seeds.RuntimeTypes = append(seeds.RuntimeTypes, rta.TypeSeed{Type: ct, Masks: unionMask})
-		}
-	}
-	if prog.TestMain != nil && includeTestMain {
-		roots[prog.TestMain] |= unionMask
-		subjectProvenance = append(subjectProvenance, prog.TestMain)
-	}
-	for _, init := range initRoots {
-		roots[init] |= unionMask
-	}
-	var initBoxedTypes []types.Type
-	if harnessAudited {
-		baseStartup, err := cachedBaseStartupReachability(ctx, audited, prog, initRoots, harnessStdInitRoots, harnessAudited, userPaths)
-		if err != nil {
-			return RootedFunctions{}, err
-		}
-		initBoxedTypes = baseStartup.initBoxedTypes
 	}
 	rootedCallbacks := map[*ssa.Function]bool{}
-	analyzer := rta.NewAnalyzer()
-	stepRoots := roots
-	stepSeeds := seeds
-	var res *rta.Result
 	var provenance map[*ssa.Function]bool
-	for {
-		var err error
-		res, err = analyzer.Extend(ctx, stepRoots, stepSeeds)
-		if err != nil {
-			if ctx.Err() != nil {
-				return RootedFunctions{}, err
+	prep, ok, err := prepareProgramRTA(
+		ctx,
+		audited,
+		pureDelegates,
+		prog,
+		roots,
+		unionMask,
+		testMasks,
+		openCandidates,
+		true,
+		false,
+		func(res *rta.Result, p *preparedProgramRTA) (map[*ssa.Function]uint64, *rta.Seeds, bool, error) {
+			for _, subject := range subjects {
+				if origin := prog.Roots[subject.Symbol]; parameterizedBody(origin) {
+					res.Reachable[origin] |= unionMask
+				}
 			}
-			if shapeFailure(err) {
-				return RootedFunctions{}, nil
+			var err error
+			provenance, _, err = provenanceReachableWithCandidates(ctx, audited, prog, subjectProvenance, unionMask, res, p.harnessAudited, p.userPaths, nil, p.enumCandidateTypes, p.initBoxedTypes, p.provFP)
+			if err != nil {
+				return nil, nil, false, err
 			}
+			cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, p.harnessAudited, pureDelegates, p.userPaths, p.summary, nil, false, enumerationClosure{}, provenance, unionMask, res)
+			if unclosedCB || unclosedFB {
+				return nil, nil, true, nil
+			}
+			var deltaRoots map[*ssa.Function]uint64
+			var deltaSeeds *rta.Seeds
+			for _, cb := range cbs {
+				if !rootedCallbacks[cb] {
+					rootedCallbacks[cb] = true
+					if deltaRoots == nil {
+						deltaRoots = make(map[*ssa.Function]uint64)
+					}
+					deltaRoots[cb] |= unionMask
+					subjectProvenance = append(subjectProvenance, cb)
+				}
+			}
+			for _, fb := range fbs {
+				if !rootedCallbacks[fb] {
+					rootedCallbacks[fb] = true
+					if deltaRoots == nil {
+						deltaRoots = make(map[*ssa.Function]uint64)
+					}
+					deltaRoots[fb] |= unionMask
+					subjectProvenance = append(subjectProvenance, fb)
+					addFuzzCallbackTypeSeed(&deltaSeeds, fb, unionMask)
+				}
+			}
+			return deltaRoots, deltaSeeds, false, nil
+		},
+	)
+	if err != nil {
+		if ctx.Err() != nil {
 			return RootedFunctions{}, err
 		}
-		for _, subject := range subjects {
-			if origin := prog.Roots[subject.Symbol]; parameterizedBody(origin) {
-				res.Reachable[origin] |= unionMask
-			}
-		}
-		provenance, _, err = provenanceReachableWithCandidates(ctx, audited, prog, subjectProvenance, unionMask, res, harnessAudited, userPaths, nil, enumCandidateTypes, initBoxedTypes)
-		if err != nil {
-			return RootedFunctions{}, err
-		}
-		cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, harnessAudited, pureDelegates, userPaths, summary, nil, false, enumerationClosure{}, provenance, unionMask, res)
-		if unclosedCB || unclosedFB {
+		if shapeFailure(err) {
 			return RootedFunctions{}, nil
 		}
-		var deltaRoots map[*ssa.Function]uint64
-		var deltaSeeds *rta.Seeds
-		addedAny := false
-		for _, cb := range cbs {
-			if !rootedCallbacks[cb] {
-				rootedCallbacks[cb] = true
-				if deltaRoots == nil {
-					deltaRoots = make(map[*ssa.Function]uint64)
-				}
-				deltaRoots[cb] |= unionMask
-				subjectProvenance = append(subjectProvenance, cb)
-				addedAny = true
-			}
-		}
-		for _, fb := range fbs {
-			if !rootedCallbacks[fb] {
-				rootedCallbacks[fb] = true
-				if deltaRoots == nil {
-					deltaRoots = make(map[*ssa.Function]uint64)
-				}
-				deltaRoots[fb] |= unionMask
-				subjectProvenance = append(subjectProvenance, fb)
-				if len(fb.Params) > 0 && isHarnessPointerType(fb.Params[0].Type()) && paramHasMakeInterface(fb.Params[0], make(map[*ssa.Parameter]bool)) {
-					if deltaSeeds == nil {
-						deltaSeeds = &rta.Seeds{}
-					}
-					deltaSeeds.RuntimeTypes = append(deltaSeeds.RuntimeTypes, rta.TypeSeed{Type: fb.Params[0].Type(), Masks: unionMask})
-				}
-				addedAny = true
-			}
-		}
-		if !addedAny {
-			break
-		}
-		stepRoots = deltaRoots
-		stepSeeds = deltaSeeds
+		return RootedFunctions{}, err
 	}
-	if rootedProvenanceIncomplete(audited, harnessAudited, prog, userPaths, provenance) {
+	if !ok {
+		return RootedFunctions{}, nil
+	}
+	if rootedProvenanceIncomplete(audited, prep.harnessAudited, prog, prep.userPaths, provenance) {
 		return RootedFunctions{}, nil
 	}
 	fns := make(map[string]bool, len(provenance))

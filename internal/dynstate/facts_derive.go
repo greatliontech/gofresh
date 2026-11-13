@@ -16,14 +16,16 @@ import (
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
-// FactOf derives one package's dynamic-state fact from its syntax and type
-// information.
-func FactOf(audited bool, p *packages.Package, singleSubject bool) Fact {
-	return FactOfWithHooks(audited, p, singleSubject, nil)
+// FactOf derives one package's execution-agnostic dynamic-state fact from its
+// syntax and type information.
+func FactOf(audited bool, p *packages.Package) Fact {
+	return FactOfWithHooks(audited, p, false, nil)
 }
 
 // FactOfWithHooks derives one package's dynamic-state fact with optional
-// explain observation hooks armed.
+// explain observation hooks armed. Returned Fact fields are independent of
+// singleSubject; singleSubject only suppresses hooks observations at sync.Pool
+// call sites that single-subject attestation discharges.
 func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hooks *syntaxutil.ExplainHookSet) Fact {
 	var fact Fact
 	if p == nil {
@@ -55,10 +57,10 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	elemUses := map[string]map[syntaxutil.ElemParamUse]bool{}
 	carrierLinks := map[string]map[string]bool{}
 	var attributedUses []syntaxutil.AttributedUse
-	var poolDischarged map[string]bool
-	if singleSubject {
-		poolDischarged = map[string]bool{}
-	}
+	poolDischarged := map[string]bool{}
+	poolMutated := map[string]bool{}
+	poolEscaped := map[string]bool{}
+	var poolAttributedUses []syntaxutil.AttributedUse
 	var seamHook seams.ExportedSeamMarkHook
 	if hooks != nil && hooks.ExportedSeamSite != nil {
 		seamHook = hooks.ExportedSeamSite
@@ -69,11 +71,21 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	fact.SeqFuncEdges = seamAnalysis.SeqFuncEdges
 	fact.ParallelFuncs = seamAnalysis.ParallelFuncs
 	fact.ParallelEdges = seamAnalysis.ParallelEdges
-	recordDynamicGlobalUses(audited, p, idx, callIdx, seamAnalysis.Exempt, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses, singleSubject, poolDischarged, hooks)
+	recordDynamicGlobalUses(audited, p, idx, callIdx, seamAnalysis.Exempt, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses, singleSubject, poolDischarged, poolMutated, poolEscaped, &poolAttributedUses, hooks)
 	for key := range poolDischarged {
 		fact.PoolDischarges = append(fact.PoolDischarges, key)
 	}
 	sort.Strings(fact.PoolDischarges)
+	for key := range poolMutated {
+		fact.PoolMutates = append(fact.PoolMutates, key)
+	}
+	sort.Strings(fact.PoolMutates)
+	for key := range poolEscaped {
+		fact.PoolEscapes = append(fact.PoolEscapes, key)
+	}
+	sort.Strings(fact.PoolEscapes)
+	fact.PoolAttributedUses = append(fact.PoolAttributedUses, poolAttributedUses...)
+	slices.SortFunc(fact.PoolAttributedUses, syntaxutil.AttributedUse.Compare)
 	funcRefs := map[syntaxutil.FuncKey]map[syntaxutil.RefRegion]bool{}
 	recordFunctionReferenceRegions(p, initOnly, funcRefs)
 	opaque := map[string]bool{}
@@ -299,8 +311,15 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 			sort.Strings(fact.SingleSubjectVars)
 			fact.MappingDischarges = deriveMappingDischarges(audited, p, idx)
 			fact.MemoDischarges = deriveMemoDischarges(audited, p, idx)
+			unattestedMutated := make(map[string]bool, len(mutated)+len(poolMutated))
+			for key := range mutated {
+				unattestedMutated[key] = true
+			}
+			for key := range poolMutated {
+				unattestedMutated[key] = true
+			}
 			fact.ProtoClusters, fact.ProtoExtAliases, fact.ProtoRuntimeTypes, fact.GrpcServiceVars, fact.MutatedStructTypes, fact.ConditionalStructMutations =
-				protoaudit.DeriveProtoAndStructFacts(audited, p, idx, initOnly, mutated)
+				protoaudit.DeriveProtoAndStructFacts(audited, p, idx, initOnly, unattestedMutated)
 			fact.NonMutatingMethods = protoaudit.DeriveNonMutatingMethods(audited, p, idx)
 			fact.NoPostInitCarrierWrites, fact.CarrierImportCalls =
 				protoaudit.DeriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
@@ -326,7 +345,6 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 		}
 		trace.Emit(nil, trace.DomainDynstate, "dynstate.factof.done", p.PkgPath,
 			trace.Bool("audited", audited),
-			trace.Bool("single_subject", singleSubject),
 			trace.Int("declares", len(fact.Declares)),
 			trace.Int("mutates", len(fact.Mutates)),
 			trace.Int("escapes", len(fact.Escapes)),

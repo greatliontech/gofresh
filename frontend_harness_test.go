@@ -561,7 +561,7 @@ func buildInMemoryViewDynamicState(pkgs []*packages.Package, viewPackages []stri
 		}
 		meta = append(meta, node)
 		byListing[listing] = node
-		fact := dynstate.FactOf(true, p, singleSubject)
+		fact := dynstate.FactOf(true, p)
 		factsByListing[listing] = fact
 		if p.ForTest == "" || p.PkgPath == p.ForTest {
 			factsByPkg[p.PkgPath] = fact
@@ -773,7 +773,7 @@ func inMemoryExplainViewForSubject(t *testing.T, dir string, subject Subject, pk
 	} else if verdict.Ground.Cause.Culprit != (Subject{}) {
 		t.Fatalf("non-shared-state verdict carried culprit: %+v", verdict.Ground.Cause)
 	}
-	chain, err := explainCulprit(true, pkgs, pkgPath, pkgPath+"."+varName, varName, false)
+	chain, err := explainCulprit(true, pkgs, pkgPath, pkgPath+"."+varName, varName, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -897,11 +897,11 @@ func getPinnedDepTemplate(t testing.TB) *pinnedDepTemplate {
 	for _, pkg := range dagPkgs {
 		if pkg.PkgPath == "golang.org/x/sync/errgroup" {
 			pkg.Module = &packages.Module{Path: "golang.org/x/sync", Version: version}
-			egFact = dynstate.FactOf(true, pkg, false)
+			egFact = dynstate.FactOf(true, pkg)
 			continue
 		}
 		if pkg.PkgPath == "example.com/pinned" {
-			localFacts["example.com/pinned"] = dynstate.FactOf(true, pkg, false)
+			localFacts["example.com/pinned"] = dynstate.FactOf(true, pkg)
 		}
 	}
 	buckets, _ := dynstate.PinnedBuckets(meta)
@@ -1263,4 +1263,3 @@ func viewUsesSource(t *testing.T, engine *engine, fixture workspaceEnvironmentFi
 		t.Fatalf("selected source files = %v, want %s and not %s", files, want, notWant)
 	}
 }
-

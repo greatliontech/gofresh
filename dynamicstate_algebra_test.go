@@ -129,7 +129,7 @@ func (Widget) External() int { return 2 }
 	var fact dynstate.Fact
 	for _, p := range pkgs {
 		if p.PkgPath == "example.com/factsrc" && p.ForTest == "" {
-			fact = dynstate.FactOf(true, p, false)
+			fact = dynstate.FactOf(true, p)
 			plain = p.Types
 		}
 	}
@@ -197,29 +197,24 @@ func (Widget) External() int { return 2 }
 		t.Fatalf("promoted-method directive lookup failed: pure=%q external=%q", pureKey, externalKey)
 	}
 
-	// The pooling-discharge audit record: absent from an unattested
-	// fact, present in an attested one, and surviving serialization —
-	// a dropped record silently hides the load-bearing attestation
-	// (REQ-vouch-recorded, REQ-closure-shared-dynamic-state).
-	if len(restored.PoolDischarges) != 0 {
-		t.Fatalf("unattested fact carries pool discharges: %+v", restored.PoolDischarges)
+	// The execution-agnostic pooling record: both the candidate pool
+	// discharge and the unattested pool use survive serialization on one
+	// per-package fact, and composition gates the discharge on the
+	// caller's single-subject attestation (REQ-vouch-recorded,
+	// REQ-closure-shared-dynamic-state-pool).
+	if !contains(restored.PoolDischarges, "example.com/factsrc.pool") {
+		t.Fatalf("execution-agnostic fact lost the pooling-discharge record: %+v", restored.PoolDischarges)
 	}
-	var attested dynstate.Fact
-	for _, p := range pkgs {
-		if p.PkgPath == "example.com/factsrc" && p.ForTest == "" {
-			attested = dynstate.FactOf(true, p, true)
-		}
+	if !slices.Contains(restored.PoolAttributedUses, syntaxutil.AttributedUse{Func: syntaxutil.FuncKey{Pkg: "example.com/factsrc", Name: "Recycle"}, Key: "example.com/factsrc.pool"}) {
+		t.Fatalf("execution-agnostic fact lost the unattested pool use record: %+v", restored.PoolAttributedUses)
 	}
-	rawAttested, err := json.Marshal(attested)
-	if err != nil {
-		t.Fatal(err)
+	poolMeta := []closure.GraphPackage{{ImportPath: "example.com/factsrc", PkgPath: "example.com/factsrc", Class: closure.MutableLocalPackage}}
+	poolFacts := map[string][]dynstate.Fact{"example.com/factsrc": {restored}}
+	if unattested := dynstate.Compose(poolMeta, poolFacts, "example.com/factsrc", nil, false, false); strings.Contains(unattested.AttestationDischarges, "example.com/factsrc.pool") {
+		t.Fatalf("unattested composition discharged pool: %+v", unattested)
 	}
-	var restoredAttested dynstate.Fact
-	if err := json.Unmarshal(rawAttested, &restoredAttested); err != nil {
-		t.Fatal(err)
-	}
-	if !contains(restoredAttested.PoolDischarges, "example.com/factsrc.pool") {
-		t.Fatalf("attested fact lost the pooling-discharge record: %+v", restoredAttested.PoolDischarges)
+	if attested := dynstate.Compose(poolMeta, poolFacts, "example.com/factsrc", nil, true, false); !strings.Contains(attested.AttestationDischarges, "example.com/factsrc.pool") {
+		t.Fatalf("attested composition lost the pooling-discharge record: %+v", attested)
 	}
 }
 
@@ -375,7 +370,7 @@ func UsePoolAndHooks() {
 			TypesInfo: info,
 			Module:    &packages.Module{Path: "example.com/p"},
 		}
-		derived := dynstate.FactOf(true, pkg, singleSubject)
+		derived := dynstate.FactOf(true, pkg)
 		varKey := "example.com/p." + varName
 		scalarKey := "example.com/p.ScalarInt"
 		atomicIntKey := "example.com/p.AtomicInt"
@@ -404,13 +399,18 @@ func UsePoolAndHooks() {
 		if !slices.Contains(derived.SingleSubjectVars, varKey) {
 			t.Fatalf("expected %s in SingleSubjectVars, got %v", varKey, derived.SingleSubjectVars)
 		}
+		if len(derived.PoolDischarges) != 1 || derived.PoolDischarges[0] != poolKey || len(derived.AttributedUses) != 0 || len(derived.PoolAttributedUses) == 0 {
+			t.Fatalf("expected execution-agnostic PoolDischarges=[%s], empty AttributedUses, and non-empty PoolAttributedUses, got PoolDischarges=%v AttributedUses=%v PoolAttributedUses=%v", poolKey, derived.PoolDischarges, derived.AttributedUses, derived.PoolAttributedUses)
+		}
+		derivedMeta := []closure.GraphPackage{{ImportPath: "example.com/p", PkgPath: "example.com/p", Class: closure.MutableLocalPackage}}
+		derivedCone := dynstate.Compose(derivedMeta, map[string][]dynstate.Fact{"example.com/p": {derived}}, "example.com/p", nil, singleSubject, packageProcess)
 		if singleSubject {
-			if len(derived.PoolDischarges) != 1 || derived.PoolDischarges[0] != poolKey || len(derived.AttributedUses) != 0 {
-				t.Fatalf("expected PoolDischarges=[%s] and empty AttributedUses when singleSubject=true, got PoolDischarges=%v AttributedUses=%v", poolKey, derived.PoolDischarges, derived.AttributedUses)
+			if derivedCone.Downgraded != "" || !strings.Contains(derivedCone.AttestationDischarges, poolKey) {
+				t.Fatalf("expected derived package clean with %s in AttestationDischarges when singleSubject=true, got %+v", poolKey, derivedCone)
 			}
 		} else {
-			if len(derived.PoolDischarges) != 0 || len(derived.AttributedUses) == 0 {
-				t.Fatalf("expected no PoolDischarges and PoolVar AttributedUses when singleSubject=false, got PoolDischarges=%v AttributedUses=%v", derived.PoolDischarges, derived.AttributedUses)
+			if !strings.Contains(derivedCone.Downgraded, poolKey) || derivedCone.AttestationDischarges != "" {
+				t.Fatalf("expected derived package downgraded on %s with empty AttestationDischarges when singleSubject=false, got %+v", poolKey, derivedCone)
 			}
 		}
 

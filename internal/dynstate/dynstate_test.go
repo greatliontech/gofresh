@@ -2048,7 +2048,7 @@ func TestOpaqueUnderlying(t *testing.T) {
 			if got := len(bracketedSeamNodes(true, badPkg)); got != 0 {
 				t.Fatalf("%s: bracketedSeamNodes exempted %d nodes, want 0", tc.name, got)
 			}
-			fact := FactOf(true, badPkg, false)
+			fact := FactOf(true, badPkg)
 			if len(fact.Mutates) == 0 && len(fact.AttributedUses) == 0 {
 				t.Fatalf("%s: FactOf produced neither Mutates nor AttributedUses: %+v", tc.name, fact)
 			}
@@ -2136,7 +2136,7 @@ func ScheduleRace() {
 	if got := len(bracketedSeamNodes(true, nonRetEscClosurePkg)); got != 0 {
 		t.Fatalf("non-returned escaping closure bracketedSeamNodes len = %d, want 0", got)
 	}
-	if fact := FactOf(true, nonRetEscClosurePkg, false); len(fact.AttributedUses) == 0 {
+	if fact := FactOf(true, nonRetEscClosurePkg); len(fact.AttributedUses) == 0 {
 		t.Fatalf("non-returned escaping closure FactOf.AttributedUses = %v, want non-empty", fact.AttributedUses)
 	}
 
@@ -2265,7 +2265,7 @@ func ReadProbe() int {
 	}
 
 	seamPkg := parseCheck("example.com/seam", seamSrc, nil)
-	seamFact := FactOf(true, seamPkg, false)
+	seamFact := FactOf(true, seamPkg)
 	if len(seamFact.ExportedSeams) != 2 {
 		t.Fatalf("seamFact.ExportedSeams = %+v, want 2 entries (WithHooks, WithProbe)", seamFact.ExportedSeams)
 	}
@@ -2288,7 +2288,7 @@ func TestSequential(t *testing.T) {
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}
 	seqState := Compose(seqMeta, map[string][]Fact{
-		"example.com/caller": {FactOf(true, seqCaller, false)},
+		"example.com/caller": {FactOf(true, seqCaller)},
 		"example.com/seam":   {seamFact},
 	}, "example.com/caller", nil, false, true)
 	if seqState.Downgraded != "" {
@@ -2324,8 +2324,8 @@ func TestParallel(t *testing.T) {
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}
 	parState := Compose(chainMeta, map[string][]Fact{
-		"example.com/top":  {FactOf(true, parCaller, false)},
-		"example.com/mid":  {FactOf(true, midPkg, false)},
+		"example.com/top":  {FactOf(true, parCaller)},
+		"example.com/mid":  {FactOf(true, midPkg)},
 		"example.com/seam": {seamFact},
 	}, "example.com/top", nil, false, true)
 	if len(parState.RootCulprits) != 2 {
@@ -2345,7 +2345,7 @@ var _ = seam.WithHooks
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}
 	escState := Compose(escMeta, map[string][]Fact{
-		"example.com/esc":  {FactOf(true, initEscCaller, false)},
+		"example.com/esc":  {FactOf(true, initEscCaller)},
 		"example.com/seam": {seamFact},
 	}, "example.com/esc", nil, true, false)
 	if site := escState.CulpritSites["example.com/seam.hooks"]; !site.Unattributed {
@@ -2540,9 +2540,9 @@ func RunConcurrent() {
 				{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 			}
 			st := Compose(meta, map[string][]Fact{
-				"example.com/parcaller": {FactOf(true, cPkg, false)},
-				"example.com/parmid":    {FactOf(true, parMidPkg, false)},
-				"example.com/testutil":  {FactOf(true, testutilPkg, false)},
+				"example.com/parcaller": {FactOf(true, cPkg)},
+				"example.com/parmid":    {FactOf(true, parMidPkg)},
+				"example.com/testutil":  {FactOf(true, testutilPkg)},
 				"example.com/seam":      {seamFact},
 			}, "example.com/parcaller", nil, false, true)
 			if len(st.RootCulprits) != 2 {
@@ -2576,8 +2576,8 @@ func TestSeqWrapper(t *testing.T) {
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}
 	seqWrapState := Compose(seqWrapMeta, map[string][]Fact{
-		"example.com/seqwrap":  {FactOf(true, seqWrapperCaller, false)},
-		"example.com/testutil": {FactOf(true, testutilPkg, false)},
+		"example.com/seqwrap":  {FactOf(true, seqWrapperCaller)},
+		"example.com/testutil": {FactOf(true, testutilPkg)},
 		"example.com/seam":     {seamFact},
 	}, "example.com/seqwrap", nil, false, true)
 	if seqWrapState.Downgraded != "" {
@@ -2632,8 +2632,8 @@ func TestRaceUnexported(t *testing.T) {
 		{ImportPath: "example.com/testutil", PkgPath: "example.com/testutil", Class: MutableLocalPackage},
 	}
 	intraState := Compose(intraMeta, map[string][]Fact{
-		"example.com/intraseam": {FactOf(true, intraPkg, false)},
-		"example.com/testutil":  {FactOf(true, testutilPkg, false)},
+		"example.com/intraseam": {FactOf(true, intraPkg)},
+		"example.com/testutil":  {FactOf(true, testutilPkg)},
 	}, "example.com/intraseam", nil, false, true)
 	if len(intraState.RootCulprits) != 2 {
 		t.Fatalf("cross-pkg .Parallel helper + unexported intra-pkg seam RootCulprits = %+v, want 2 culprits (hooks and saved)", intraState.RootCulprits)
@@ -2726,10 +2726,10 @@ func TestThreePkgParamSetter(t *testing.T) {
 				{ImportPath: "example.com/testutil", PkgPath: "example.com/testutil", Class: MutableLocalPackage},
 			}
 			xState := Compose(xMeta, map[string][]Fact{
-				"example.com/xcaller":    {FactOf(true, xPkg, false)},
-				"example.com/hookholder": {FactOf(true, hookHolderPkg, false)},
+				"example.com/xcaller":    {FactOf(true, xPkg)},
+				"example.com/hookholder": {FactOf(true, hookHolderPkg)},
 				"example.com/seam":       {seamFact},
-				"example.com/testutil":   {FactOf(true, testutilPkg, false)},
+				"example.com/testutil":   {FactOf(true, testutilPkg)},
 			}, "example.com/xcaller", nil, false, true)
 			if _, ok := xState.CulpritSites["example.com/seam.hooks"]; !ok {
 				t.Fatalf("%s: expected example.com/seam.hooks to be blocked: %+v", xCase.name, xState.CulpritSites)
@@ -2762,8 +2762,8 @@ func TestCrossSeqParamSetter(t *testing.T) {
 		{ImportPath: "example.com/hookholder", PkgPath: "example.com/hookholder", Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/xseqcaller": {FactOf(true, seqSetterCaller, false)},
-		"example.com/hookholder": {FactOf(true, hookHolderPkg, false)},
+		"example.com/xseqcaller": {FactOf(true, seqSetterCaller)},
+		"example.com/hookholder": {FactOf(true, hookHolderPkg)},
 		"example.com/seam":       {seamFact},
 	}, "example.com/xseqcaller", nil, false, true)
 	if _, bad := seqSetterState.CulpritSites["example.com/seam.hooks"]; bad {
@@ -2790,7 +2790,7 @@ func TestSeam(t *testing.T) {
 	t.Cleanup(func() { probe = orig })
 }
 `, nil)
-	runnerSeamFact := FactOf(true, runnerSeamPkg, false)
+	runnerSeamFact := FactOf(true, runnerSeamPkg)
 	if len(runnerSeamFact.ExportedSeams) != 1 || !runnerSeamFact.ExportedSeams[0].RunnerOnly {
 		t.Fatalf("runnerSeamFact.ExportedSeams = %+v, want 1 RunnerOnly entry", runnerSeamFact.ExportedSeams)
 	}
@@ -2817,7 +2817,7 @@ func TestForeignCall(t *testing.T) {
 		{ImportPath: "example.com/extcaller", PkgPath: "example.com/extcaller", Imports: []string{"example.com/cleanupseam"}, Class: MutableLocalPackage},
 		{ImportPath: "example.com/cleanupseam", PkgPath: "example.com/cleanupseam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/extcaller":   {FactOf(true, foreignTestCaller, false)},
+		"example.com/extcaller":   {FactOf(true, foreignTestCaller)},
 		"example.com/cleanupseam": {runnerSeamFact},
 	}, "example.com/extcaller", nil, false, true)
 	if len(foreignState.RootCulprits) != 1 || foreignState.RootCulprits[0].Key != "example.com/cleanupseam.probe" {
@@ -2875,10 +2875,10 @@ func TestSeqSinkArg(t *testing.T) {
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
 		"example.com/mixedroot": {{}},
-		"example.com/parsink":   {FactOf(true, parSinkCaller, false)},
-		"example.com/seqsink":   {FactOf(true, seqSinkCaller, false)},
-		"example.com/midclean":  {FactOf(true, midCleanPkg, false)},
-		"example.com/sink":      {FactOf(true, sinkPkg, false)},
+		"example.com/parsink":   {FactOf(true, parSinkCaller)},
+		"example.com/seqsink":   {FactOf(true, seqSinkCaller)},
+		"example.com/midclean":  {FactOf(true, midCleanPkg)},
+		"example.com/sink":      {FactOf(true, sinkPkg)},
 		"example.com/seam":      {seamFact},
 	}, "example.com/mixedroot", nil, false, true)
 	if mixedState.Downgraded != "" || len(mixedState.RootCulprits) != 0 {
@@ -2912,7 +2912,7 @@ func TestRecvFactory(t *testing.T) {
 		{ImportPath: "example.com/recvfactory", PkgPath: "example.com/recvfactory", Imports: []string{"example.com/seam"}, Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/recvfactory": {FactOf(true, recvFactoryCaller, false)},
+		"example.com/recvfactory": {FactOf(true, recvFactoryCaller)},
 		"example.com/seam":        {seamFact},
 	}, "example.com/recvfactory", nil, false, true)
 	if _, ok := recvFactoryState.CulpritSites["example.com/seam.hooks"]; !ok {
@@ -2927,7 +2927,7 @@ func Put(m map[string]func(*testing.T), f func(*testing.T)) {
 	m["k"] = f
 }
 `, nil)
-	mapStoreFact := FactOf(true, mapStorePkg, false)
+	mapStoreFact := FactOf(true, mapStorePkg)
 	mapWriteDirtyCaller := parseCheckNamed("example.com/mapdirty", "mapdirty_test.go", `package mapdirty
 import (
 	"testing"
@@ -2952,7 +2952,7 @@ func TestMapDirty(t *testing.T) {
 		{ImportPath: "example.com/mapstore", PkgPath: "example.com/mapstore", Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/mapdirty": {FactOf(true, mapWriteDirtyCaller, false)},
+		"example.com/mapdirty": {FactOf(true, mapWriteDirtyCaller)},
 		"example.com/mapstore": {mapStoreFact},
 		"example.com/seam":     {seamFact},
 	}, "example.com/mapdirty", nil, false, true)
@@ -2985,7 +2985,7 @@ func TestSeqSeamWithHelper(t *testing.T) {
 		{ImportPath: "example.com/noncarrier", PkgPath: "example.com/noncarrier", Imports: []string{"example.com/seam"}, Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/noncarrier": {FactOf(true, nonCarrierCaller, false)},
+		"example.com/noncarrier": {FactOf(true, nonCarrierCaller)},
 		"example.com/seam":       {seamFact},
 	}, "example.com/noncarrier", nil, false, true)
 	if nonCarrierState.Downgraded != "" || len(nonCarrierState.RootCulprits) != 0 {
@@ -3004,7 +3004,7 @@ func Enter(t *testing.T) {
 	}
 }
 `, nil)
-	slotFact := FactOf(true, slotPkg, false)
+	slotFact := FactOf(true, slotPkg)
 	slotSetupPkg := parseCheck("example.com/slotsetup", `package slotsetup
 import (
 	"testing"
@@ -3036,8 +3036,8 @@ func TestViaHookSlot(t *testing.T) {
 		{ImportPath: "example.com/slotpkg", PkgPath: "example.com/slotpkg", Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/slotcaller": {FactOf(true, slotCallerPkg, false)},
-		"example.com/slotsetup":  {FactOf(true, slotSetupPkg, false)},
+		"example.com/slotcaller": {FactOf(true, slotCallerPkg)},
+		"example.com/slotsetup":  {FactOf(true, slotSetupPkg)},
 		"example.com/slotpkg":    {slotFact},
 		"example.com/seam":       {seamFact},
 	}, "example.com/slotcaller", nil, false, true)
@@ -3071,7 +3071,7 @@ func EnterRecv(t *testing.T) {
 	}
 }
 `, nil)
-	genFact := FactOf(true, genPkg, false)
+	genFact := FactOf(true, genPkg)
 	genSetupPkg := parseCheck("example.com/gensetup", `package gensetup
 import (
 	"testing"
@@ -3108,8 +3108,8 @@ func TestViaGenFn(t *testing.T) {
 		{ImportPath: "example.com/genpkg", PkgPath: "example.com/genpkg", Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/genfncaller": {FactOf(true, genFnCaller, false)},
-		"example.com/gensetup":    {FactOf(true, genSetupPkg, false)},
+		"example.com/genfncaller": {FactOf(true, genFnCaller)},
+		"example.com/gensetup":    {FactOf(true, genSetupPkg)},
 		"example.com/genpkg":      {genFact},
 		"example.com/seam":        {seamFact},
 	}, "example.com/genfncaller", nil, false, true)
@@ -3140,8 +3140,8 @@ func TestViaGenRecv(t *testing.T) {
 		{ImportPath: "example.com/genpkg", PkgPath: "example.com/genpkg", Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/genrecvcaller": {FactOf(true, genRecvCaller, false)},
-		"example.com/gensetup":      {FactOf(true, genSetupPkg, false)},
+		"example.com/genrecvcaller": {FactOf(true, genRecvCaller)},
+		"example.com/gensetup":      {FactOf(true, genSetupPkg)},
 		"example.com/genpkg":        {genFact},
 		"example.com/seam":          {seamFact},
 	}, "example.com/genrecvcaller", nil, false, true)
@@ -3165,7 +3165,7 @@ func EnterPtr(t *testing.T)   { enterHook(t) }
 func EnterMap(t *testing.T)   { enterMap["k"](t) }
 func EnterClean(t *testing.T) { cleanMap["k"](t) }
 `, nil)
-	aliasFact := FactOf(true, aliasPkg, false)
+	aliasFact := FactOf(true, aliasPkg)
 
 	aliasPtrCaller := parseCheckNamed("example.com/aliasptrcaller", "aliasptr_test.go", `package aliasptrcaller
 import (
@@ -3191,7 +3191,7 @@ func TestAliasPtr(t *testing.T) {
 		{ImportPath: "example.com/aliaspkg", PkgPath: "example.com/aliaspkg", Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/aliasptrcaller": {FactOf(true, aliasPtrCaller, false)},
+		"example.com/aliasptrcaller": {FactOf(true, aliasPtrCaller)},
 		"example.com/aliaspkg":       {aliasFact},
 		"example.com/seam":           {seamFact},
 	}, "example.com/aliasptrcaller", nil, false, true)
@@ -3223,7 +3223,7 @@ func TestAliasDot(t *testing.T) {
 		{ImportPath: "example.com/aliaspkg", PkgPath: "example.com/aliaspkg", Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/aliasdotcaller": {FactOf(true, aliasDotCaller, false)},
+		"example.com/aliasdotcaller": {FactOf(true, aliasDotCaller)},
 		"example.com/aliaspkg":       {aliasFact},
 		"example.com/seam":           {seamFact},
 	}, "example.com/aliasdotcaller", nil, false, true)
@@ -3254,7 +3254,7 @@ func TestAliasRebindClean(t *testing.T) {
 		{ImportPath: "example.com/aliaspkg", PkgPath: "example.com/aliaspkg", Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/aliasrebindclean": {FactOf(true, aliasRebindCleanCaller, false)},
+		"example.com/aliasrebindclean": {FactOf(true, aliasRebindCleanCaller)},
 		"example.com/aliaspkg":         {aliasFact},
 		"example.com/seam":             {seamFact},
 	}, "example.com/aliasrebindclean", nil, false, true)
@@ -3286,7 +3286,7 @@ func TestAliasMap(t *testing.T) {
 		{ImportPath: "example.com/aliaspkg", PkgPath: "example.com/aliaspkg", Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/aliasmapcaller": {FactOf(true, aliasMapCaller, false)},
+		"example.com/aliasmapcaller": {FactOf(true, aliasMapCaller)},
 		"example.com/aliaspkg":       {aliasFact},
 		"example.com/seam":           {seamFact},
 	}, "example.com/aliasmapcaller", nil, false, true)
@@ -3319,7 +3319,7 @@ func (e *Enabler) Enable() {
 	e.Dst.Fn = parFromRecv
 }
 `, nil)
-	recvHubFact := FactOf(true, recvHubPkg, false)
+	recvHubFact := FactOf(true, recvHubPkg)
 
 	recvReadCaller := parseCheckNamed("example.com/recvreadcaller", "recvread_test.go", `package recvreadcaller
 import (
@@ -3345,7 +3345,7 @@ func TestRecvRead(t *testing.T) {
 		{ImportPath: "example.com/recvhubpkg", PkgPath: "example.com/recvhubpkg", Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/recvreadcaller": {FactOf(true, recvReadCaller, false)},
+		"example.com/recvreadcaller": {FactOf(true, recvReadCaller)},
 		"example.com/recvhubpkg":     {recvHubFact},
 		"example.com/seam":           {seamFact},
 	}, "example.com/recvreadcaller", nil, false, true)
@@ -3380,7 +3380,7 @@ func TestRecvWrite(t *testing.T) {
 		{ImportPath: "example.com/recvhubpkg", PkgPath: "example.com/recvhubpkg", Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/recvwritecaller": {FactOf(true, recvWriteCaller, false)},
+		"example.com/recvwritecaller": {FactOf(true, recvWriteCaller)},
 		"example.com/recvhubpkg":      {recvHubFact},
 		"example.com/seam":            {seamFact},
 	}, "example.com/recvwritecaller", nil, false, true)
@@ -3409,7 +3409,7 @@ func PtrSeq(p *func(*testing.T)) iter.Seq[*func(*testing.T)] {
 	}
 }
 `, nil)
-	poolSlotFact := FactOf(true, poolSlotPkg, false)
+	poolSlotFact := FactOf(true, poolSlotPkg)
 
 	slotPoolCaller := parseCheckNamed("example.com/slotpoolcaller", "slotpool_test.go", `package slotpoolcaller
 import (
@@ -3437,7 +3437,7 @@ func TestSlotPool(t *testing.T) {
 		{ImportPath: "example.com/poolslotpkg", PkgPath: "example.com/poolslotpkg", Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/slotpoolcaller": {FactOf(true, slotPoolCaller, false)},
+		"example.com/slotpoolcaller": {FactOf(true, slotPoolCaller)},
 		"example.com/poolslotpkg":    {poolSlotFact},
 		"example.com/seam":           {seamFact},
 	}, "example.com/slotpoolcaller", nil, false, true)
@@ -3472,7 +3472,7 @@ func TestSeqCollect(t *testing.T) {
 		{ImportPath: "example.com/poolslotpkg", PkgPath: "example.com/poolslotpkg", Class: MutableLocalPackage},
 		{ImportPath: "example.com/seam", PkgPath: "example.com/seam", Class: MutableLocalPackage},
 	}, map[string][]Fact{
-		"example.com/seqcollectcaller": {FactOf(true, seqCollectCaller, false)},
+		"example.com/seqcollectcaller": {FactOf(true, seqCollectCaller)},
 		"example.com/poolslotpkg":      {poolSlotFact},
 		"example.com/seam":             {seamFact},
 	}, "example.com/seqcollectcaller", nil, false, true)
@@ -4581,7 +4581,7 @@ func TestSeam(t *testing.T) {
 			if !tc.wantSeam && len(seamNodes) != 2 {
 				t.Fatalf("%s: bracketedSeamNodes len = %d, want 2", tc.name, len(seamNodes))
 			}
-			fact := FactOf(true, pkg, false)
+			fact := FactOf(true, pkg)
 			state := Compose([]GraphPackage{
 				{ImportPath: "example.com/p", PkgPath: "example.com/p", Class: MutableLocalPackage},
 			}, map[string][]Fact{
@@ -4835,11 +4835,11 @@ func Mmap(fd int, offset int64, length int, prot int, flags int) ([]byte, error)
 func Munmap(b []byte) error { return mapper.Munmap(b) }
 `
 	unixClean := mustTypecheckWithDeps(t, "example.com/unix", map[string]string{"mmap.go": cleanMapperSrc}, nil)
-	factUnixAudited := FactOf(true, unixClean, false)
+	factUnixAudited := FactOf(true, unixClean)
 	if !reflect.DeepEqual(factUnixAudited.MappingDischarges, []string{"example.com/unix.mapper"}) {
 		t.Fatalf("FactOf(audited=true) MappingDischarges = %v, want [example.com/unix.mapper]", factUnixAudited.MappingDischarges)
 	}
-	if factUnaudited := FactOf(false, unixClean, false); len(factUnaudited.MappingDischarges) != 0 {
+	if factUnaudited := FactOf(false, unixClean); len(factUnaudited.MappingDischarges) != 0 {
 		t.Fatalf("FactOf(audited=false) MappingDischarges = %v, want empty", factUnaudited.MappingDischarges)
 	}
 	unixMeta := []GraphPackage{{ImportPath: "example.com/unix", PkgPath: "example.com/unix", Class: MutableLocalPackage}}
@@ -4851,7 +4851,7 @@ func Munmap(b []byte) error { return mapper.Munmap(b) }
 		"mmap.go":      cleanMapperSrc,
 		"mmap_test.go": "package unix\nfunc SwapForTest() { mapper.mmap = mmapSyscall }\n",
 	}, nil)
-	factUnixTest := FactOf(true, unixTestVariant, false)
+	factUnixTest := FactOf(true, unixTestVariant)
 	if len(factUnixTest.MappingDischarges) != 0 {
 		t.Fatalf("expected callable-field mutation in test variant to block MappingDischarges, got %v", factUnixTest.MappingDischarges)
 	}
@@ -4893,7 +4893,7 @@ func Munmap(b []byte) error { return mapper.Munmap(b) }
 	} {
 		t.Run("mapping_"+badMap.name, func(t *testing.T) {
 			pkg := mustTypecheckWithDeps(t, "example.com/unix", map[string]string{"mmap.go": badMap.src}, nil)
-			if f := FactOf(true, pkg, false); len(f.MappingDischarges) != 0 {
+			if f := FactOf(true, pkg); len(f.MappingDischarges) != 0 {
 				t.Fatalf("%s unexpectedly discharged: %v", badMap.name, f.MappingDischarges)
 			}
 		})
@@ -4961,11 +4961,11 @@ func FieldCount(st reflect.Type) int {
 }
 `
 	yamlClean := mustTypecheckWithDeps(t, "example.com/yaml", map[string]string{"yaml.go": cleanMemoSrc}, nil)
-	factYamlAudited := FactOf(true, yamlClean, false)
+	factYamlAudited := FactOf(true, yamlClean)
 	if !reflect.DeepEqual(factYamlAudited.MemoDischarges, []string{"example.com/yaml.structMap"}) {
 		t.Fatalf("FactOf(audited=true) MemoDischarges = %v, want [example.com/yaml.structMap]", factYamlAudited.MemoDischarges)
 	}
-	if factYamlUn := FactOf(false, yamlClean, false); len(factYamlUn.MemoDischarges) != 0 {
+	if factYamlUn := FactOf(false, yamlClean); len(factYamlUn.MemoDischarges) != 0 {
 		t.Fatalf("FactOf(audited=false) MemoDischarges = %v, want empty", factYamlUn.MemoDischarges)
 	}
 	for _, badMemo := range []struct {
@@ -5198,7 +5198,7 @@ func FieldCount(st reflect.Type) int {
 	} {
 		t.Run("memo_"+badMemo.name, func(t *testing.T) {
 			pkg := mustTypecheckWithDeps(t, "example.com/yaml", badMemo.files, nil)
-			if f := FactOf(true, pkg, false); len(f.MemoDischarges) != 0 {
+			if f := FactOf(true, pkg); len(f.MemoDischarges) != 0 {
 				t.Fatalf("%s unexpectedly discharged: %v", badMemo.name, f.MemoDischarges)
 			}
 		})
@@ -5208,7 +5208,7 @@ func FieldCount(st reflect.Type) int {
 		"yaml_test.go": "package yaml\nimport \"reflect\"\nfunc Mutate(t reflect.Type) { si, _ := getStructInfo(t); si.fieldsList[0].num = 99 }\n",
 	}, nil)
 	yamlMeta := []GraphPackage{{ImportPath: "example.com/yaml", PkgPath: "example.com/yaml", Class: MutableLocalPackage}}
-	if st := Compose(yamlMeta, map[string][]Fact{"example.com/yaml": {factYamlAudited, FactOf(true, mutMemoPkg, false)}}, "example.com/yaml", nil, true, false); !strings.Contains(st.Downgraded, "example.com/yaml.structMap is mutated") {
+	if st := Compose(yamlMeta, map[string][]Fact{"example.com/yaml": {factYamlAudited, FactOf(true, mutMemoPkg)}}, "example.com/yaml", nil, true, false); !strings.Contains(st.Downgraded, "example.com/yaml.structMap is mutated") {
 		t.Fatalf("cross-variant memo mutation failed to block discharge: %q", st.Downgraded)
 	}
 
@@ -5466,7 +5466,7 @@ func (xi *ExtensionInfo) TypeDescriptor() *ExtTypeDesc {
 	} {
 		t.Run("impl_"+badImpl.name, func(t *testing.T) {
 			pkg := mustTypecheckWithDeps(t, "example.com/proto/internal/impl", map[string]string{"impl.go": badImpl.src}, nil)
-			for _, rt := range FactOf(true, pkg, false).ProtoRuntimeTypes {
+			for _, rt := range FactOf(true, pkg).ProtoRuntimeTypes {
 				if rt.Type.Name == "MessageInfo" && rt.Role == protoaudit.ProtoRoleMessage {
 					t.Fatalf("%s unexpectedly verified ProtoRoleMessage: %+v", badImpl.name, rt)
 				}
@@ -5506,7 +5506,7 @@ func (xi *ExtensionInfo) TypeDescriptor() *ExtTypeDesc {
 	} {
 		t.Run("impl_"+badRole.name, func(t *testing.T) {
 			pkg := mustTypecheckWithDeps(t, "example.com/proto/internal/impl", map[string]string{"impl.go": badRole.src}, nil)
-			for _, rt := range FactOf(true, pkg, false).ProtoRuntimeTypes {
+			for _, rt := range FactOf(true, pkg).ProtoRuntimeTypes {
 				if rt.Type.Name == badRole.typ && rt.Role == badRole.role {
 					t.Fatalf("%s unexpectedly verified %s (%v): %+v", badRole.name, badRole.typ, badRole.role, rt)
 				}
@@ -5518,7 +5518,7 @@ func (xi *ExtensionInfo) TypeDescriptor() *ExtTypeDesc {
 		"impl.go": strings.Replace(implSrc, "mi.sizecache = 1", "mi.sizecache = 1\n\tclobberEnum(nil)", 1) +
 			"\nfunc clobberEnum(ei *EnumInfo) { if ei != nil { ei.Desc = \"bad\" } }\n",
 	}, nil)
-	factCrossFamily := FactOf(true, implCrossFamily, false)
+	factCrossFamily := FactOf(true, implCrossFamily)
 	if !slices.Contains(factCrossFamily.MutatedStructTypes, syntaxutil.TypeRef{Pkg: "example.com/proto/internal/impl", Name: "EnumInfo"}) {
 		t.Fatalf("onceCone mutating unrelated EnumInfo failed to record EnumInfo in MutatedStructTypes: %+v", factCrossFamily.MutatedStructTypes)
 	}
@@ -5601,7 +5601,7 @@ func (tb Builder) Build() Out {
 	return Out{File: &fileDesc{raw: tb.File.RawDescriptor}}
 }
 `}, map[string]*types.Package{"example.com/proto/internal/impl": implPkg.Types})
-	for _, rt := range FactOf(true, badBuilderPkg, false).ProtoRuntimeTypes {
+	for _, rt := range FactOf(true, badBuilderPkg).ProtoRuntimeTypes {
 		if rt.Type.Name == "Builder" && rt.Role == protoaudit.ProtoRoleBuilder {
 			t.Fatalf("builder assigning mutable direct Desc struct unexpectedly verified ProtoRoleBuilder: %+v", rt)
 		}
@@ -5716,7 +5716,7 @@ func RegisterSvc(reg func(*grpc.ServiceDesc)) {
 	pbBlankLit := mustTypecheckWithDeps(t, "example.com/pb", map[string]string{
 		"x.pb.go": pbSrc + "\nvar _ = func() { File_x_proto = nil }\n",
 	}, pbDeps)
-	if len(FactOf(true, pbBlankLit, false).ProtoClusters) != 0 {
+	if len(FactOf(true, pbBlankLit).ProtoClusters) != 0 {
 		t.Fatal("package-scope FuncLit writing File_x_proto unexpectedly retained ProtoClusters")
 	}
 
@@ -5755,12 +5755,12 @@ func RegisterRemote(reg func(*grpc.ServiceDesc)) { reg(&pb.Svc_ServiceDesc) }
 	}
 	baseProtoFacts := func() map[string][]Fact {
 		return map[string][]Fact{
-			"example.com/pbalias":                 {FactOf(true, pbAliasPkg, false)},
-			"example.com/pb":                      {FactOf(true, pbPkg, false)},
-			"example.com/proto/runtime/protoimpl": {FactOf(true, protoimplPkg, false)},
-			"example.com/proto/internal/filetype": {FactOf(true, filetypePkg, false)},
-			"example.com/proto/internal/impl":     {FactOf(true, implPkg, false)},
-			"example.com/grpc":                    {FactOf(true, grpcPkg, false)},
+			"example.com/pbalias":                 {FactOf(true, pbAliasPkg)},
+			"example.com/pb":                      {FactOf(true, pbPkg)},
+			"example.com/proto/runtime/protoimpl": {FactOf(true, protoimplPkg)},
+			"example.com/proto/internal/filetype": {FactOf(true, filetypePkg)},
+			"example.com/proto/internal/impl":     {FactOf(true, implPkg)},
+			"example.com/grpc":                    {FactOf(true, grpcPkg)},
 		}
 	}
 	// Unattested singleSubject=false must refuse.
@@ -5975,7 +5975,7 @@ func RegisterRemote(reg func(*grpc.ServiceDesc)) { reg(&pb.Svc_ServiceDesc) }
 		t.Run("proto_grpc_"+xpkgCase.name, func(t *testing.T) {
 			badCaller := mustTypecheckWithDeps(t, "example.com/pbalias", map[string]string{"alias.go": xpkgCase.src}, pbAliasDeps)
 			factsBad := baseProtoFacts()
-			factsBad["example.com/pbalias"] = []Fact{FactOf(true, badCaller, false)}
+			factsBad["example.com/pbalias"] = []Fact{FactOf(true, badCaller)}
 			st := Compose(protoMeta, factsBad, "example.com/pbalias", nil, true, false)
 			if !strings.Contains(st.Downgraded, xpkgCase.want) {
 				t.Fatalf("%s failed to downgrade with %q: got %q", xpkgCase.name, xpkgCase.want, st.Downgraded)
@@ -5989,7 +5989,7 @@ func RegisterRemote(reg func(*grpc.ServiceDesc)) { reg(&pb.Svc_ServiceDesc) }
 		"x_test.go": "package pb\nimport \"example.com/proto/runtime/protoimpl\"\nfunc ResetInTest() { file_x_proto_msgTypes = make([]protoimpl.MessageInfo, 1) }\n",
 	}, pbDeps)
 	factsCrossVariant := baseProtoFacts()
-	factsCrossVariant["example.com/pb"] = []Fact{FactOf(true, pbPkg, false), FactOf(true, pbTestVariant, false)}
+	factsCrossVariant["example.com/pb"] = []Fact{FactOf(true, pbPkg), FactOf(true, pbTestVariant)}
 	if st := Compose(protoMeta, factsCrossVariant, "example.com/pbalias", nil, true, false); st.Downgraded == "" {
 		t.Fatal("cross-variant post-init mutation in pb [pb.test] failed to block ProtoClusters discharge")
 	}
@@ -6417,7 +6417,7 @@ func ReadSize() (int, string) { return file_d_proto_msgTypes[0].Size(), E_Ext.Na
 			pkgSet[p.PkgPath] = true
 		}
 		for _, p := range pkgs {
-			facts[p.PkgPath] = []Fact{FactOf(true, p, false)}
+			facts[p.PkgPath] = []Fact{FactOf(true, p)}
 			var imps []string
 			for impPath := range p.Imports {
 				if pkgSet[impPath] {
@@ -6740,7 +6740,7 @@ func (b *Box) CleanInitStore() {
 }
 `,
 	})
-	smuggleFact := FactOf(true, smugglePkg, false)
+	smuggleFact := FactOf(true, smugglePkg)
 	for _, badMethod := range []string{"Box.SmuggleViaRange", "Box.SmuggleViaCopy"} {
 		if slices.Contains(smuggleFact.ReceiverRetentionFree, syntaxutil.FuncKey{Pkg: "example.com/smuggle", Name: badMethod}) {
 			t.Fatalf("ReceiverRetentionFree unexpectedly admitted %s: %+v", badMethod, smuggleFact.ReceiverRetentionFree)
@@ -6794,7 +6794,7 @@ func (h *PtrSliceHolder) RangeLeakIntoIndexLvalue() {
 }
 `,
 	})
-	precFact := FactOf(true, precPkg, false)
+	precFact := FactOf(true, precPkg)
 	wantParam := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/prec", Name: "ReadChainedScalar"}, Index: 0}
 	if !slices.Contains(precFact.ParamLeakFree, wantParam) {
 		t.Fatalf("ParamLeakFree omitted ReadChainedScalar(h *Holder) on chained scalar field read: %+v", precFact.ParamLeakFree)
@@ -6834,7 +6834,7 @@ func init() {
 }
 `,
 	}, map[string]*types.Package{"example.com/pkgb": pkgB.Types})
-	factA := FactOf(true, pkgA, false)
+	factA := FactOf(true, pkgA)
 	wantCrossLink := syntaxutil.CarrierLink{From: "example.com/pkgb.ExportedHook", To: "example.com/pkga.ownHook"}
 	wantSliceLink := syntaxutil.CarrierLink{From: "example.com/pkga.sliceHook", To: "example.com/pkga.otherHook"}
 	if !slices.Contains(factA.CarrierLinks, wantCrossLink) {
@@ -6870,8 +6870,189 @@ func Compare(order, x, y string) int {
 }
 `,
 	})
-	commaOkFact := FactOf(true, commaOkMapPkg, false)
+	commaOkFact := FactOf(true, commaOkMapPkg)
 	if len(commaOkFact.Mutates) != 0 || len(commaOkFact.Escapes) != 0 {
 		t.Fatalf("comma-ok lookup on read-only function map produced Mutates=%v Escapes=%v, want empty", commaOkFact.Mutates, commaOkFact.Escapes)
+	}
+}
+
+func TestExecutionAgnosticPoolFactsAndNonVouchDischarges(t *testing.T) {
+	poolPkg := mustTypecheckPackage(t, "example.com/poolag", map[string]string{
+		"pool.go": `package poolag
+
+import (
+	"bytes"
+	"sync"
+)
+
+var ExportedPool sync.Pool
+var InitGetPool sync.Pool
+var InitPutPool sync.Pool
+var MixedWritePool sync.Pool
+var provenPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+
+//gofresh:single-subject
+var DirectiveVar func()
+
+func init() {
+	_ = InitGetPool.Get()
+	InitPutPool.Put(1)
+}
+
+func UseExported() any {
+	ExportedPool.Put(1)
+	return ExportedPool.Get()
+}
+
+func UseProven() string {
+	buf := provenPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	buf.WriteString("ok")
+	out := buf.String()
+	provenPool.Put(buf)
+	return out
+}
+
+func OverwriteMixed() {
+	MixedWritePool.Put(1)
+	MixedWritePool = sync.Pool{}
+}
+
+func WriteDirective() {
+	DirectiveVar = func() {}
+}
+`,
+	})
+	var unattestedSites, attestedSites []string
+	factUnattestedHooks := FactOfWithHooks(true, poolPkg, false, &syntaxutil.ExplainHookSet{
+		Site: func(_ *packages.Package, kind, key string, _ token.Pos) {
+			unattestedSites = append(unattestedSites, kind+":"+key)
+		},
+	})
+	factAttestedHooks := FactOfWithHooks(true, poolPkg, true, &syntaxutil.ExplainHookSet{
+		Site: func(_ *packages.Package, kind, key string, _ token.Pos) {
+			attestedSites = append(attestedSites, kind+":"+key)
+		},
+	})
+	fact := FactOf(true, poolPkg)
+	if !reflect.DeepEqual(fact, factUnattestedHooks) || !reflect.DeepEqual(fact, factAttestedHooks) {
+		t.Fatalf("FactOf varied by hooks/singleSubject:\nplain=%+v\nunattested=%+v\nattested=%+v", fact, factUnattestedHooks, factAttestedHooks)
+	}
+
+	// Unproven init-flow Get() (returning any) and Put() both record unattested PoolEscapes
+	// (never Fact.Escapes or Fact.Mutates) alongside PoolDischarges, while intra-package
+	// provenSharedPools calls record neither PoolEscapes nor PoolMutates.
+	for _, wantDischarge := range []string{
+		"example.com/poolag.ExportedPool",
+		"example.com/poolag.InitGetPool",
+		"example.com/poolag.InitPutPool",
+		"example.com/poolag.MixedWritePool",
+		"example.com/poolag.provenPool",
+	} {
+		if !slices.Contains(fact.PoolDischarges, wantDischarge) {
+			t.Fatalf("PoolDischarges = %v, missing %s", fact.PoolDischarges, wantDischarge)
+		}
+	}
+	for _, initPool := range []string{"example.com/poolag.InitGetPool", "example.com/poolag.InitPutPool"} {
+		if !slices.Contains(fact.PoolEscapes, initPool) {
+			t.Fatalf("PoolEscapes = %v, missing %s", fact.PoolEscapes, initPool)
+		}
+		if slices.Contains(fact.Escapes, initPool) || slices.Contains(fact.Mutates, initPool) || slices.Contains(fact.PoolMutates, initPool) {
+			t.Fatalf("init pool %s leaked into unconditional/post-init marks: Mutates=%v Escapes=%v PoolMutates=%v", initPool, fact.Mutates, fact.Escapes, fact.PoolMutates)
+		}
+	}
+	if slices.Contains(fact.PoolEscapes, "example.com/poolag.provenPool") || slices.Contains(fact.PoolMutates, "example.com/poolag.provenPool") {
+		t.Fatalf("provenPool unexpectedly marked in unattested pool sets: PoolMutates=%v PoolEscapes=%v", fact.PoolMutates, fact.PoolEscapes)
+	}
+	for _, use := range fact.PoolAttributedUses {
+		if use.Key == "example.com/poolag.provenPool" {
+			t.Fatalf("PoolAttributedUses unexpectedly recorded provenPool: %v", fact.PoolAttributedUses)
+		}
+	}
+	if !slices.Contains(fact.PoolAttributedUses, syntaxutil.AttributedUse{
+		Func: syntaxutil.FuncKey{Pkg: "example.com/poolag", Name: "UseExported"},
+		Key:  "example.com/poolag.ExportedPool",
+	}) {
+		t.Fatalf("PoolAttributedUses missing UseExported on ExportedPool: %v", fact.PoolAttributedUses)
+	}
+
+	// Hook observations suppress pool Get/Put under singleSubject=true while keeping direct MixedWritePool reassignment.
+	if !slices.Contains(unattestedSites, "mutation:example.com/poolag.ExportedPool") || !slices.Contains(unattestedSites, "escape:example.com/poolag.InitGetPool") {
+		t.Fatalf("unattested hooks missed pool sites: %v", unattestedSites)
+	}
+	if slices.Contains(attestedSites, "mutation:example.com/poolag.ExportedPool") ||
+		slices.Contains(attestedSites, "escape:example.com/poolag.InitGetPool") ||
+		slices.Contains(attestedSites, "escape:example.com/poolag.InitPutPool") {
+		t.Fatalf("attested hooks emitted discharged pool site: %v", attestedSites)
+	}
+	if !slices.Contains(attestedSites, "mutation:example.com/poolag.MixedWritePool") {
+		t.Fatalf("attested hooks suppressed non-pool MixedWritePool reassignment: %v", attestedSites)
+	}
+
+	// Compose under singleSubject=false vs singleSubject=true; MixedWritePool still downgrades under singleSubject=true,
+	// while provenPool never downgrades even under singleSubject=false.
+	culpritKeys := func(c ConeState) []string {
+		var keys []string
+		for _, rc := range c.RootCulprits {
+			keys = append(keys, rc.Key)
+		}
+		slices.Sort(keys)
+		return keys
+	}
+	localMeta := []GraphPackage{{ImportPath: "example.com/poolag", PkgPath: "example.com/poolag", Class: MutableLocalPackage}}
+	unattestedCone := Compose(localMeta, map[string][]Fact{"example.com/poolag": {fact}}, "example.com/poolag", nil, false, false)
+	wantUnattested := []string{
+		"example.com/poolag.DirectiveVar",
+		"example.com/poolag.ExportedPool",
+		"example.com/poolag.InitGetPool",
+		"example.com/poolag.InitPutPool",
+		"example.com/poolag.MixedWritePool",
+	}
+	if got := culpritKeys(unattestedCone); !slices.Equal(got, wantUnattested) || unattestedCone.AttestationDischarges != "" {
+		t.Fatalf("unattested Compose keys = %v (want %v), AttestationDischarges = %q", got, wantUnattested, unattestedCone.AttestationDischarges)
+	}
+	attestedCone := Compose(localMeta, map[string][]Fact{"example.com/poolag": {fact}}, "example.com/poolag", nil, true, false)
+	wantAttested := []string{"example.com/poolag.MixedWritePool"}
+	if got := culpritKeys(attestedCone); !slices.Equal(got, wantAttested) {
+		t.Fatalf("attested Compose keys = %v, want %v (cone=%+v)", got, wantAttested, attestedCone)
+	}
+	for _, want := range []string{"example.com/poolag.DirectiveVar", "example.com/poolag.ExportedPool", "example.com/poolag.InitGetPool", "example.com/poolag.InitPutPool"} {
+		if !strings.Contains(attestedCone.AttestationDischarges, want) {
+			t.Fatalf("attested AttestationDischarges = %q, missing %s", attestedCone.AttestationDischarges, want)
+		}
+	}
+
+	// NonVouchDischargedVars includes SingleSubjectVars on MutableLocalPackage when singleSubject=true,
+	// excludes SingleSubjectVars on PinnedPackage, and excludes PoolDischarges (which do not cover non-pool writes).
+	localDischarged := NonVouchDischargedVars(localMeta, map[string][]Fact{"example.com/poolag": {fact}}, true)
+	if !localDischarged["example.com/poolag.DirectiveVar"] {
+		t.Fatalf("NonVouchDischargedVars missing DirectiveVar on MutableLocalPackage: %v", localDischarged)
+	}
+	if localDischarged["example.com/poolag.ExportedPool"] || localDischarged["example.com/poolag.MixedWritePool"] {
+		t.Fatalf("NonVouchDischargedVars unexpectedly included pool variable: %v", localDischarged)
+	}
+	pinnedMeta := []GraphPackage{{ImportPath: "example.com/poolag", PkgPath: "example.com/poolag", Class: PinnedPackage, Pin: "example.com/poolag@v1.0.0"}}
+	if pinnedDischarged := NonVouchDischargedVars(pinnedMeta, map[string][]Fact{"example.com/poolag": {fact}}, true); pinnedDischarged["example.com/poolag.DirectiveVar"] {
+		t.Fatalf("NonVouchDischargedVars honored SingleSubjectVars on PinnedPackage: %v", pinnedDischarged)
+	}
+
+	// Malformed PoolDischarges / PoolMutates / PoolEscapes / PoolAttributedUses fail closed.
+	for name, mutateFact := range map[string]func(*Fact){
+		"malformed PoolDischarges": func(f *Fact) { f.PoolDischarges = []string{"not-qualified"} },
+		"malformed PoolMutates":    func(f *Fact) { f.PoolMutates = []string{"not-qualified"} },
+		"malformed PoolEscapes":    func(f *Fact) { f.PoolEscapes = []string{"not-qualified"} },
+		"malformed PoolAttributedUses": func(f *Fact) {
+			f.PoolAttributedUses = []syntaxutil.AttributedUse{{Key: "example.com/poolag.ExportedPool"}}
+		},
+	} {
+		bad := Fact{
+			Declares:       []string{"example.com/poolag.ExportedPool"},
+			PoolDischarges: []string{"example.com/poolag.ExportedPool"},
+		}
+		mutateFact(&bad)
+		st := Compose(localMeta, map[string][]Fact{"example.com/poolag": {bad}}, "example.com/poolag", nil, true, false)
+		if st.Downgraded == "" || st.AttestationDischarges != "" {
+			t.Fatalf("%s: expected fail-closed downgrade and suppressed AttestationDischarges, got %+v", name, st)
+		}
 	}
 }

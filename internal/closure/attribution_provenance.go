@@ -295,8 +295,8 @@ func enumerateCallerReferencesWithOrdered(audited, harnessAudited bool, rootPkgP
 		mutatedGlobals:         make(map[*ssa.Global]bool),
 		allFunctions:           all,
 		userPaths:              userPaths,
-		progMemos: *newDynamicMemoQuad(),
-		enumMemos: *newDynamicMemoQuad(),
+		progMemos:              *newDynamicMemoQuad(),
+		enumMemos:              *newDynamicMemoQuad(),
 		enumSeedsMemo: [2]map[ssa.Value]dynamicSeedEntry{
 			make(map[ssa.Value]dynamicSeedEntry),
 			make(map[ssa.Value]dynamicSeedEntry),
@@ -1539,17 +1539,34 @@ func provenanceReachableStartup(ctx context.Context, audited bool, prog *program
 }
 
 func provenanceReachable(ctx context.Context, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool) (map[*ssa.Function]bool, error) {
-	reach, _, err := provenanceBFSWithCandidates(ctx, false, nil, roots, mask, result, harnessAudited, userPaths, false, dropTarget, nil, nil)
+	reach, _, err := provenanceBFSWithCandidates(ctx, false, nil, roots, mask, result, harnessAudited, userPaths, false, dropTarget, nil, nil, nil)
 	return reach, err
 }
 
-func provenanceReachableWithCandidates(ctx context.Context, audited bool, prog *program, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool, candidateTypes, initBoxedTypes []types.Type) (map[*ssa.Function]bool, bool, error) {
-	return provenanceBFSWithCandidates(ctx, audited, prog, roots, mask, result, harnessAudited, userPaths, false, dropTarget, candidateTypes, initBoxedTypes)
+func provenanceReachableWithCandidates(ctx context.Context, audited bool, prog *program, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool, candidateTypes, initBoxedTypes []types.Type, sharedProvFP *freshParamAnalysis) (map[*ssa.Function]bool, bool, error) {
+	return provenanceBFSWithCandidates(ctx, audited, prog, roots, mask, result, harnessAudited, userPaths, false, dropTarget, candidateTypes, initBoxedTypes, sharedProvFP)
 }
 
 func provenanceBFS(ctx context.Context, audited bool, prog *program, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, deferUnscannedClosures bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool) (map[*ssa.Function]bool, error) {
-	reach, _, err := provenanceBFSWithCandidates(ctx, audited, prog, roots, mask, result, harnessAudited, userPaths, deferUnscannedClosures, dropTarget, nil, nil)
+	reach, _, err := provenanceBFSWithCandidates(ctx, audited, prog, roots, mask, result, harnessAudited, userPaths, deferUnscannedClosures, dropTarget, nil, nil, nil)
 	return reach, err
+}
+
+func newProvenanceFP(audited, harnessAudited bool, pureDelegates map[string]bool, prog *program, summary *callerReferenceSummary, userPaths map[string]bool) *freshParamAnalysis {
+	if summary == nil {
+		summary = lookupSummaryForProg(prog, audited)
+	}
+	fp := &freshParamAnalysis{
+		ssaProgramIndex: summary.ssaIndex(audited, harnessAudited, pureDelegates, userPaths, nil),
+	}
+	fp.resetDynamicMemos()
+	if summary != nil {
+		fp.inProgramSites = true
+	} else if prog != nil {
+		fp.prog = prog
+		fp.programFunctions = progAllFunctions(prog)
+	}
+	return fp
 }
 
 func lookupCachedBaseStartup(prog *program) *baseStartupReachSummary {
@@ -1710,7 +1727,7 @@ func isCarrierFreeStaticCall(audited bool, site ssa.CallInstruction, callee *ssa
 	return true
 }
 
-func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *program, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, deferUnscannedClosures bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool, candidateTypes, initBoxedTypes []types.Type) (map[*ssa.Function]bool, bool, error) {
+func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *program, roots []*ssa.Function, mask uint64, result *rta.Result, harnessAudited bool, userPaths map[string]bool, deferUnscannedClosures bool, dropTarget func(ssa.CallInstruction, *ssa.Function) bool, candidateTypes, initBoxedTypes []types.Type, sharedProvFP *freshParamAnalysis) (map[*ssa.Function]bool, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
@@ -1838,25 +1855,14 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 			noteHarnessCandidateType(ssaProg, bt)
 		}
 	}
-	var provFP *freshParamAnalysis
-	var provFPInit bool
+	provFP := sharedProvFP
+	provFPInit := provFP != nil
 	getProvFP := func() *freshParamAnalysis {
 		if provFPInit {
 			return provFP
 		}
 		provFPInit = true
-		sum := lookupSummaryForProg(prog, audited)
-		fp := &freshParamAnalysis{
-			ssaProgramIndex: sum.ssaIndex(audited, harnessAudited, nil, userPaths, nil),
-		}
-		fp.resetDynamicMemos()
-		if sum != nil {
-			fp.inProgramSites = true
-		} else if prog != nil {
-			fp.prog = prog
-			fp.programFunctions = progAllFunctions(prog)
-		}
-		provFP = fp
+		provFP = newProvenanceFP(audited, harnessAudited, nil, prog, nil, userPaths)
 		return provFP
 	}
 	var opsBuf [8]*ssa.Value

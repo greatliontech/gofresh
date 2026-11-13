@@ -1387,7 +1387,7 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 				fn := v.Parent()
 				if fn != nil && !fp.programValueRef[fn] && len(fp.programSites[fn]) == 0 && !initFlowFrame(fn) {
 					fp.markSubjectUsed()
-					if !fp.isSubjectRoot(fn) && !fp.isEnumSiteCaller(fn) && !fp.functions[fn] && !fp.dynamic[fn] && len(fp.callersOf(fn)) == 0 && (fp.enumOnly || fp.enumRoot == nil) {
+					if !fp.isSubjectRoot(fn) && !fp.isEnumSiteCaller(fn) && (fp.enumOnly || (fp.functions != nil && !fp.functions[fn] && fp.enumRoot == nil)) && !fp.dynamic[fn] && len(fp.callersOf(fn)) == 0 {
 						markDynamicLeaf(fp)
 						return true
 					}

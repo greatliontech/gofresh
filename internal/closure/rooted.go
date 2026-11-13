@@ -352,12 +352,16 @@ func InMemoryRootedFunctions(ctx context.Context, audited bool, pkgs []*packages
 	if len(rooted) == 0 {
 		return results, nil
 	}
-	reachable, err := attributedReachableSets(ctx, audited, nil, prog, rooted)
-	if err != nil {
-		return nil, err
-	}
-	for i, subject := range rooted {
-		results[subject] = rootedFunctionsFromReachability(reachable[i])
+	for start := 0; start < len(rooted); start += maxAttributedSubjects {
+		end := min(start+maxAttributedSubjects, len(rooted))
+		batch := rooted[start:end]
+		reachable, err := attributedReachableSets(ctx, audited, nil, prog, batch)
+		if err != nil {
+			return nil, err
+		}
+		for i, subject := range batch {
+			results[subject] = rootedFunctionsFromReachability(reachable[i])
+		}
 	}
 	return results, nil
 }

@@ -144,13 +144,13 @@ type Hasher struct {
 	lists    map[string][]listPkg // parsed `go list -deps -test`, by package import path
 	// snapshot is the pass's env snapshot when the caller supplied one —
 	// the listing memo's scope identity; nil leaves that memo inert.
-	snapshot       *gotool.EnvSnapshot
-	maximalTesting          map[string]maximalEffectScan     // typed testing-runtime effects by requested package
-	maximalTestingUnfiltered map[string]maximalEffectScan     // per-call unfiltered typed testing-runtime effects by requested package
-	maximalEffects          map[string]maximalEffectsResult  // package external-effect scans by requested package
-	maximalFiles            map[string]maximalEffectScan     // per-file effect scans by absolute path
-	maximalParsedFiles      map[string]*parsedMaximalFile    // per-call parsed ASTs and import tables for maximal scans
-	harnessVerdict          map[string]bool                  // mechanical property-harness verification verdicts by package dir
+	snapshot                 *gotool.EnvSnapshot
+	maximalTesting           map[string]maximalEffectScan    // typed testing-runtime effects by requested package
+	maximalTestingUnfiltered map[string]maximalEffectScan    // per-call unfiltered typed testing-runtime effects by requested package
+	maximalEffects           map[string]maximalEffectsResult // package external-effect scans by requested package
+	maximalFiles             map[string]maximalEffectScan    // per-file effect scans by absolute path
+	maximalParsedFiles       map[string]*parsedMaximalFile   // per-call parsed ASTs and import tables for maximal scans
+	harnessVerdict           map[string]bool                 // mechanical property-harness verification verdicts by package dir
 	// contribs memoizes per-node closure contributions within ONE
 	// top-level batch call: each public batch entry resets it, so content
 	// is re-observed per call (the Hasher's pinned contract) while subjects
@@ -746,14 +746,40 @@ func (h *Hasher) resetCallScope() {
 // contribution shares: the cache-relative module content dir —
 // modpath@version, replace-correct via Module.Dir.
 func (h *Hasher) modulePin(mod *listMod) string {
-	return filepath.ToSlash(strings.TrimPrefix(filepath.Clean(mod.Dir), h.modCache+string(filepath.Separator)))
+	return h.ModulePinForDir(mod.Dir)
+}
+
+// ModulePinForDir formats modDir's cache-relative module pin identity
+// (modpath@version).
+func (h *Hasher) ModulePinForDir(modDir string) string {
+	if h == nil {
+		return ""
+	}
+	return filepath.ToSlash(strings.TrimPrefix(filepath.Clean(modDir), h.modCache+string(filepath.Separator)))
+}
+
+// IsPinnedDir reports whether pkgDir belongs to a non-main module located
+// inside h's module cache on a path-segment boundary.
+func (h *Hasher) IsPinnedDir(main bool, pkgDir string) bool {
+	return h != nil && IsPinnedPackageDir(main, pkgDir, h.modCache)
+}
+
+// IsPinnedPackageDir reports whether pkgDir belongs to a non-main module
+// located inside modCache on a path-segment boundary.
+func IsPinnedPackageDir(main bool, pkgDir, modCache string) bool {
+	if main || pkgDir == "" || modCache == "" {
+		return false
+	}
+	pkgDir = filepath.Clean(pkgDir)
+	modCache = filepath.Clean(modCache)
+	return pkgDir == modCache || strings.HasPrefix(pkgDir, modCache+string(filepath.Separator))
 }
 
 // pinnedPackage reports the pinned-dependency classification: resolved
 // source immutable under the module cache. REQ-closure-mutable-local
 // names the package Dir, so classification uses it.
 func (h *Hasher) pinnedPackage(p *listPkg) bool {
-	return p.Module != nil && !p.Module.Main && h.underCache(p.Dir)
+	return p.Module != nil && IsPinnedPackageDir(p.Module.Main, p.Dir, h.modCache)
 }
 
 func (h *Hasher) contextErr() error {
@@ -972,11 +998,7 @@ func allPackageFiles(check func() error, dir string) ([]string, error) {
 // underCache reports whether dir is inside the module cache (a path segment
 // boundary, so "/mod" does not match "/modificator").
 func (h *Hasher) underCache(dir string) bool {
-	if dir == "" {
-		return false
-	}
-	dir = filepath.Clean(dir)
-	return dir == h.modCache || strings.HasPrefix(dir, h.modCache+string(filepath.Separator))
+	return IsPinnedPackageDir(false, dir, h.modCache)
 }
 
 // hashFiles is the fold over the Hasher's once-per-pass reads: the same

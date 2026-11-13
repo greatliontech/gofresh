@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/dynstate"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/gotool"
@@ -128,7 +130,11 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: toolchain selection: %w", err)
 	}
-	return explainCulprit(sel.SelectionNotice == "", pkgs, pkgPath, varKey, varName, v.session.executionModel.singleSubject())
+	modCache, err := reader.Value(ctx, "GOMODCACHE")
+	if err != nil {
+		return Chain{}, fmt.Errorf("explain: env: %w", err)
+	}
+	return explainCulprit(sel.SelectionNotice == "", pkgs, pkgPath, varKey, varName, v.session.executionModel.singleSubject(), modCache)
 }
 
 // explainCulprit re-derives every loaded package's fact with mark
@@ -136,7 +142,7 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 // package or a test variant - and assembles the chain, following
 // environment-audit dependency edges to the first locally refused
 // proof.
-func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, varName string, singleSubject bool) (Chain, error) {
+func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, varName string, singleSubject bool, modCache string) (Chain, error) {
 	variants := map[string][]*packages.Package{}
 	var order []*packages.Package
 	packages.Visit(roots, func(p *packages.Package) bool {
@@ -197,8 +203,42 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		},
 	}
 	facts := map[string][]dynstate.Fact{}
+	var meta []dynstate.GraphPackage
+	seenMetaPkg := map[string]bool{}
 	for _, p := range order {
 		facts[p.PkgPath] = append(facts[p.PkgPath], dynstate.FactOfWithHooks(audited, p, singleSubject, hooks))
+		if !seenMetaPkg[p.PkgPath] {
+			seenMetaPkg[p.PkgPath] = true
+			pkgDir := p.Dir
+			if pkgDir == "" && len(p.GoFiles) > 0 {
+				pkgDir = filepath.Dir(p.GoFiles[0])
+			}
+			if pkgDir == "" && len(p.OtherFiles) > 0 {
+				pkgDir = filepath.Dir(p.OtherFiles[0])
+			}
+			if pkgDir == "" && len(p.EmbedFiles) > 0 {
+				pkgDir = filepath.Dir(p.EmbedFiles[0])
+			}
+			if pkgDir == "" && p.Module != nil {
+				if p.Module.Replace != nil && p.Module.Replace.Dir != "" {
+					pkgDir = p.Module.Replace.Dir
+				} else {
+					pkgDir = p.Module.Dir
+				}
+			}
+			class := dynstate.MutableLocalPackage
+			if p.Module != nil && !p.Module.Main && ((pkgDir == "" && modCache == "") || closure.IsPinnedPackageDir(false, pkgDir, modCache)) {
+				class = dynstate.PinnedPackage
+			}
+			meta = append(meta, dynstate.GraphPackage{
+				ImportPath: p.PkgPath,
+				PkgPath:    p.PkgPath,
+				Class:      class,
+			})
+		}
+	}
+	if dynstate.NonVouchDischargedVars(meta, facts, singleSubject)[varKey] {
+		return Chain{}, nil
 	}
 	blockedSeams := dynstate.BlockedExportedSeams(facts, nil)
 	for _, obs := range allExportedSeams {

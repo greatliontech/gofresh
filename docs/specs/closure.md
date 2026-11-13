@@ -632,8 +632,10 @@ discharge is the engine's own derived verdict, not a caller assertion: it
 needs no attestation, but retains its checked derivation dependencies. An exported pool,
 an element of a package-level array or slice of `sync.Pool`, and
 every shape the proof cannot see keep the attestation requirement.
-The attestation is part of the persisted fact identity, so
-attested and unattested sessions never serve each other's facts, and a
+Per-package facts record both the unattested pool marks and the candidate
+pool discharges unconditionally so attested and unattested sessions share
+the same persisted per-package fact identity while composition applies the
+attestation, and a
 load-bearing attestation is recorded on the subject's evidence exactly
 as a vouch discharge is — naming the discharged pool variables,
 auditable and never silent (REQ-vouch-recorded in
@@ -876,8 +878,9 @@ evidence (the walk stops at the first survivor, which names the
 downgrade), canonically and never silently, attestation-borne exactly
 as the per-subject scoping's (REQ-vouch-recorded in
 [purity.md](purity.md)); the attestation is part of the persisted
-fact identity, so option-on and option-off sessions never serve each
-other's facts.
+scan-memo identity (REQ-closure-scan-memo), while per-package facts stay
+execution-model-independent so option-on and option-off sessions share
+pinned per-package facts without ever serving each other's scan verdicts.
 
 **REQ-closure-shared-dynamic-state-escape-narrowings** (invariant): One narrowing applies to
 the escape class alone (the escape marks
@@ -2225,20 +2228,22 @@ variable identities its code mutates after initialization
 be served from a persistent memo for version-pinned packages, because each fact
 is a pure function of its key's complete input identity: the caller's scope
 (the fact derivation and memo representation, analyzing frontend, code guards,
-dependent selected implementation content, checked subordinate claims and
-inference rules, and the execution
-attestations, which change what a fact
-records, so attested and unattested sessions never serve each other's
-facts) plus the module's version pin and the version signature of every
+dependent selected implementation content, and checked subordinate claims and
+inference rules — independent of the caller's execution-model attestations,
+because per-package facts record execution-conditional pool candidates and
+marks side by side for composition to evaluate, so attested and unattested
+sessions share persisted pinned facts) plus the module's version pin and the version signature of every
 pinned module reachable from its packages, its type environment's complete
 version surface (the standard library rides its complete toolchain evidence). A
 mutable-local package's facts are never memoized by version — its source
-carries no version signal (REQ-closure-mutable-local) — and derive fresh
-from each observation pass's own load, or serve as part of a view
+carries no version signal (REQ-closure-mutable-local) — and derive from live
+source, reusable within a session only under a key binding the fact scope,
+listing identity, reachable pinned module versions, and live byte digests of
+every file in its transitive local import cone, or serve as part of a view
 package's whole scan under the package scan key of REQ-closure-scan-memo,
-whose content digest is the signal a version cannot give; a
-process-lifetime cache is sound exactly for keyed pinned facts and never
-holds a mutable-local derivation, so no stale process state can override
+whose content digest is the signal a version cannot give; an unverified
+process-lifetime cache is sound only for keyed pinned facts and never
+holds a mutable-local derivation without live content digests, so no stale process state can override
 newer local source. A pinned module whose import
 cone reaches any mutable-local node is unkeyable — part of its type
 environment carries no version signal — and its facts derive fresh every
@@ -2330,7 +2335,7 @@ complete input identity — the shared-dynamic-state judgment reads the
 package's own graph and nothing of its sibling view packages
 (REQ-closure-shared-dynamic-state): the fact-strategy version, the analyzing frontend's version, and the code guards
 (toolchain and build configuration), dependent selected implementation content,
-checked subordinate claims and inference rules, the memo representation, the execution attestations, and the
+checked subordinate claims and inference rules, the memo representation, the execution attestations (including the rooted-functions derivation identity when an attestation arms reachability discharges), and the
 caller's vouch set — the scope — plus the package scan key: the maximal
 closure hash joined with the test-variant compartment identity, which
 pins the core and test-variant source equivalence of the test binary's graph
@@ -2338,7 +2343,8 @@ and every pinned version it is built from (the standard library rides its
 complete toolchain evidence), plus any additional source dependencies of its
 persisted payload. A served package takes no part in the pass's typed load, its
 derivation, or its discharges; the load runs over the missed packages
-alone. A memo hit is output-equivalent to recomputation. The memo is a
+alone, and only whole-package complete scans (never budget-cut packages) are
+persisted. A memo hit is output-equivalent to recomputation. The memo is a
 cache, never a record — the observability memo's discipline verbatim: a
 sibling directory of the consumer-controlled store, atomic writes, silent
 recomputation on any miss, corruption, key mismatch, or entry-shape

@@ -4,11 +4,15 @@ import (
 	"context"
 	"maps"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 func TestWidenedSubjectsPopulateProgMemosWithoutCrossSubjectTaint(t *testing.T) {
@@ -934,18 +938,265 @@ func TestAnalysisScopeScanIncludesRootedStrategyUnderExecutionAttestations(t *te
 		toolchainContent: "tcc",
 		admissionPolicy:  "ap",
 	}
+	if base.Facts() == "" {
+		t.Fatal("plain Facts() is empty")
+	}
 	if base.Scan() == "" || strings.Contains(base.Scan(), rootedFunctionsStrategy) {
 		t.Fatalf("plain Scan() = %q, want non-empty without %q", base.Scan(), rootedFunctionsStrategy)
 	}
 	pkgExec := base
 	pkgExec.PackageProcess = true
-	if !strings.Contains(pkgExec.Scan(), rootedFunctionsStrategy) {
-		t.Fatalf("PackageProcess Scan() = %q, want substring %q", pkgExec.Scan(), rootedFunctionsStrategy)
+	if pkgExec.Facts() != base.Facts() {
+		t.Fatalf("PackageProcess Facts() = %q, want identical to base %q", pkgExec.Facts(), base.Facts())
+	}
+	if !strings.Contains(pkgExec.Scan(), "|package-process-execution|"+rootedFunctionsStrategy) {
+		t.Fatalf("PackageProcess Scan() = %q, want package-process marker and %q", pkgExec.Scan(), rootedFunctionsStrategy)
 	}
 	singleExec := base
 	singleExec.SingleSubject = true
-	if !strings.Contains(singleExec.Scan(), rootedFunctionsStrategy) {
-		t.Fatalf("SingleSubject Scan() = %q, want substring %q", singleExec.Scan(), rootedFunctionsStrategy)
+	if singleExec.Facts() != base.Facts() {
+		t.Fatalf("SingleSubject Facts() = %q, want identical to base %q", singleExec.Facts(), base.Facts())
+	}
+	if !strings.Contains(singleExec.Scan(), "|single-subject-execution|"+rootedFunctionsStrategy) {
+		t.Fatalf("SingleSubject Scan() = %q, want single-subject marker and %q", singleExec.Scan(), rootedFunctionsStrategy)
+	}
+	bothExec := base
+	bothExec.SingleSubject = true
+	bothExec.PackageProcess = true
+	if bothExec.Facts() != base.Facts() || !strings.Contains(bothExec.Scan(), "|single-subject-execution|package-process-execution|"+rootedFunctionsStrategy) {
+		t.Fatalf("both attestations: Facts=%q Scan=%q, want Facts=%q and both execution markers with %q", bothExec.Facts(), bothExec.Scan(), base.Facts(), rootedFunctionsStrategy)
+	}
+}
+
+func TestMutableFactKeysTracksModuleGraphAndRejectsModfileFlag(t *testing.T) {
+	root := t.TempDir()
+	dep1 := filepath.Join(root, "dep1")
+	dep2 := filepath.Join(root, "dep2")
+	app := filepath.Join(root, "app")
+	writeFile(t, dep1, "go.mod", "module example.com/dep\n\ngo 1.26\n")
+	writeFile(t, dep1, "dep.go", "package dep\n\nfunc V() int { return 1 }\n")
+	writeFile(t, dep2, "go.mod", "module example.com/dep\n\ngo 1.26\n")
+	writeFile(t, dep2, "dep.go", "package dep\n\nfunc V() int { return 2 }\n")
+	writeFile(t, app, "go.mod", "module example.com/app\n\ngo 1.26\n\nrequire example.com/dep v0.0.0\nreplace example.com/dep => ../dep1\n")
+	writeFile(t, app, "app.go", "package app\n\nimport (\n\t_ \"embed\"\n\t\"example.com/dep\"\n)\n\n//go:embed assets/*\nvar _ string\n\nfunc F() int { return dep.V() }\n")
+	writeFile(t, app, "excluded.go", "//go:build ignore\n\npackage app\n\nvar IgnoredHook func()\n")
+	writeFile(t, filepath.Join(app, "assets"), "one.txt", "one\n")
+
+	h, err := newAt(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkgPath := "example.com/app"
+	meta, err := h.GraphMetadata(pkgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preKeys, expectedFiles := h.MutableFactKeys("facts@1", meta, false, pkgPath)
+	if preKeys[pkgPath] == "" || !expectedFiles[pkgPath][filepath.Clean(filepath.Join(app, "app.go"))] {
+		t.Fatalf("initial MutableFactKeys = (%v, %v), want non-empty key and app.go", preKeys, expectedFiles)
+	}
+	sameKeys, _ := h.MutableFactKeys("facts@1", meta, true, pkgPath)
+	if sameKeys[pkgPath] != preKeys[pkgPath] {
+		t.Fatalf("freshDisk MutableFactKeys on unchanged tree = %q, want %q", sameKeys[pkgPath], preKeys[pkgPath])
+	}
+
+	// Rewriting go.mod's replace target on disk without reloading metadata must
+	// move the freshDisk key immediately.
+	writeFile(t, app, "go.mod", "module example.com/app\n\ngo 1.26\n\nrequire example.com/dep v0.0.0\nreplace example.com/dep => ../dep2\n")
+	driftedKeys, _ := h.MutableFactKeys("facts@1", meta, true, pkgPath)
+	if driftedKeys[pkgPath] == "" || driftedKeys[pkgPath] == preKeys[pkgPath] {
+		t.Fatalf("freshDisk MutableFactKeys after go.mod replace edit = %q, want distinct non-empty key from %q", driftedKeys[pkgPath], preKeys[pkgPath])
+	}
+
+	// SnapshotScanInputs fails closed on zero value and -modfile, and captures
+	// non-empty file digests, absent sentinels, and mutable-local directory entries.
+	if (TreeDigestSnapshot{}).MatchesDisk() {
+		t.Fatal("zero TreeDigestSnapshot unexpectedly matched disk")
+	}
+	snap := h.SnapshotScanInputs(pkgPath)
+	if !snap.valid || len(snap.files) == 0 || len(snap.absent) == 0 || len(snap.pkgDirs) == 0 {
+		t.Fatalf("SnapshotScanInputs = %+v, want valid non-empty files/absent/pkgDirs", snap)
+	}
+	if !snap.MatchesDisk() {
+		t.Fatal("fresh SnapshotScanInputs did not match unchanged disk")
+	}
+	// Editing a tracked file invalidates MatchesDisk.
+	writeFile(t, app, "app.go", "package app\n\nimport (\n\t_ \"embed\"\n\t\"example.com/dep\"\n)\n\n//go:embed assets/*\nvar _ string\n\nfunc F() int { return dep.V() + 1 }\n")
+	if snap.MatchesDisk() {
+		t.Fatal("SnapshotScanInputs matched after app.go content edit")
+	}
+	writeFile(t, app, "app.go", "package app\n\nimport (\n\t_ \"embed\"\n\t\"example.com/dep\"\n)\n\n//go:embed assets/*\nvar _ string\n\nfunc F() int { return dep.V() }\n")
+	if !snap.MatchesDisk() {
+		t.Fatal("SnapshotScanInputs did not match after restoring app.go")
+	}
+	// Editing a build-tag-excluded file in place (dropping //go:build ignore)
+	// invalidates MatchesDisk via source-ext byte digests.
+	writeFile(t, app, "excluded.go", "package app\n\nvar IgnoredHook func()\n")
+	if snap.MatchesDisk() {
+		t.Fatal("SnapshotScanInputs matched after in-place edit of build-tag-excluded excluded.go")
+	}
+	writeFile(t, app, "excluded.go", "//go:build ignore\n\npackage app\n\nvar IgnoredHook func()\n")
+	if !snap.MatchesDisk() {
+		t.Fatal("SnapshotScanInputs did not match after restoring excluded.go")
+	}
+	// Adding a file inside an //go:embed directory invalidates MatchesDisk via embedRoots pkgDirs.
+	extraAsset := filepath.Join(app, "assets", "two.txt")
+	writeFile(t, filepath.Join(app, "assets"), "two.txt", "two\n")
+	if snap.MatchesDisk() {
+		t.Fatal("SnapshotScanInputs matched after adding file under //go:embed directory")
+	}
+	if err := os.Remove(extraAsset); err != nil {
+		t.Fatal(err)
+	}
+	if !snap.MatchesDisk() {
+		t.Fatal("SnapshotScanInputs did not match after removing extra embedded file")
+	}
+	// Adding an untracked *_test.go file in app invalidates MatchesDisk via pkgDirs.
+	testPath := filepath.Join(app, "app_test.go")
+	writeFile(t, app, "app_test.go", "package app\n")
+	if snap.MatchesDisk() {
+		t.Fatal("SnapshotScanInputs matched after adding app_test.go")
+	}
+	if err := os.Remove(testPath); err != nil {
+		t.Fatal(err)
+	}
+	// Materializing a previously-absent go.sum invalidates MatchesDisk via absent sentinels.
+	goSumPath := filepath.Join(app, "go.sum")
+	writeFile(t, app, "go.sum", "")
+	if snap.MatchesDisk() {
+		t.Fatal("SnapshotScanInputs matched after previously-absent go.sum appeared")
+	}
+	if err := os.Remove(goSumPath); err != nil {
+		t.Fatal(err)
+	}
+	if !snap.MatchesDisk() {
+		t.Fatal("SnapshotScanInputs did not match after removing go.sum")
+	}
+
+	// Passing -modfile disables MutableFactKeys and SnapshotScanInputs so callers fail closed.
+	hModfile, err := newAt(app, "-modfile="+filepath.Join(app, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modfileKeys, modfileFiles := hModfile.MutableFactKeys("facts@1", meta, false, pkgPath)
+	if len(modfileKeys) != 0 || len(modfileFiles) != 0 {
+		t.Fatalf("MutableFactKeys with -modfile = (%v, %v), want empty", modfileKeys, modfileFiles)
+	}
+	if hModfile.SnapshotScanInputs(pkgPath).MatchesDisk() {
+		t.Fatal("SnapshotScanInputs with -modfile unexpectedly matched disk")
+	}
+
+	// Hasher constructed with reader.Dir == "" (current working directory) in a
+	// subdirectory of a module inside a go.work workspace must still track both
+	// go.work replace edits and intermediate go.mod sentinels.
+	sub := filepath.Join(app, "sub")
+	writeFile(t, sub, "sub.go", "package sub\n\nimport \"example.com/dep\"\n\nfunc S() int { return dep.V() }\n")
+	writeFile(t, root, "go.work", "go 1.26\n\nuse ./app\nreplace example.com/dep => ./dep1\n")
+	t.Setenv("GOWORK", "")
+	t.Chdir(sub)
+	cwdHasher, err := NewAt(context.Background(), &gotool.EnvReader{Dir: "", Env: os.Environ()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subPkg := "example.com/app/sub"
+	subMeta, err := cwdHasher.GraphMetadata(subPkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwdKeys0, _ := cwdHasher.MutableFactKeys("facts@1", subMeta, false, subPkg)
+	if cwdKeys0[subPkg] == "" {
+		t.Fatalf("Dir==\"\" MutableFactKeys = %v, want non-empty key", cwdKeys0)
+	}
+	writeFile(t, root, "go.work", "go 1.26\n\nuse ./app\nreplace example.com/dep => ./dep2\n")
+	cwdKeysWorkEdited, _ := cwdHasher.MutableFactKeys("facts@1", subMeta, true, subPkg)
+	if cwdKeysWorkEdited[subPkg] == "" || cwdKeysWorkEdited[subPkg] == cwdKeys0[subPkg] {
+		t.Fatalf("Dir==\"\" MutableFactKeys after go.work replace edit = %q, want distinct from %q", cwdKeysWorkEdited[subPkg], cwdKeys0[subPkg])
+	}
+	writeFile(t, root, "go.work", "go 1.26\n\nuse ./app\nreplace example.com/dep => ./dep1\n")
+	writeFile(t, sub, "go.mod", "module example.com/app/sub\n\ngo 1.26\n")
+	cwdKeysNestedMod, _ := cwdHasher.MutableFactKeys("facts@1", subMeta, true, subPkg)
+	if cwdKeysNestedMod[subPkg] == "" || cwdKeysNestedMod[subPkg] == cwdKeys0[subPkg] {
+		t.Fatalf("Dir==\"\" MutableFactKeys after nested sub/go.mod appeared = %q, want distinct from %q", cwdKeysNestedMod[subPkg], cwdKeys0[subPkg])
+	}
+}
+
+func TestIsPinnedPackageDirAndPrepareProgramRTASharedProvenance(t *testing.T) {
+	if IsPinnedPackageDir(true, "/cache/mod/dep@v1.0.0", "/cache/mod") {
+		t.Fatal("main module inside modCache classified as pinned")
+	}
+	if IsPinnedPackageDir(false, "", "/cache/mod") || IsPinnedPackageDir(false, "/cache/mod/dep@v1.0.0", "") {
+		t.Fatal("empty pkgDir or modCache classified as pinned")
+	}
+	if IsPinnedPackageDir(false, "/cache/mod2/dep@v1.0.0", "/cache/mod") {
+		t.Fatal("sibling prefix /cache/mod2 classified as under /cache/mod")
+	}
+	if !IsPinnedPackageDir(false, "/cache/mod/dep@v1.0.0/sub", "/cache/mod") {
+		t.Fatal("module-cache subdirectory not classified as pinned")
+	}
+
+	// Verify prepareProgramRTA populates summary unconditionally when audited=false
+	// and len(openCandidates)==0, batches >64 InMemoryRootedFunctions subjects, and
+	// never treats an uncalled subject root's *ssa.Parameter as dead code on provFP.
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/rtaprep\n\ngo 1.26\n")
+	var b strings.Builder
+	b.WriteString("package rtaprep\n\nimport \"testing\"\n\n")
+	b.WriteString("type Runner interface { Run() }\n\n")
+	b.WriteString("type impl struct{}\nfunc (impl) Run() { hitTarget() }\nfunc hitTarget() {}\n\n")
+	b.WriteString("func UncalledWithInterfaceParam(r Runner) { r.Run() }\n")
+	b.WriteString("func SeedImpl() Runner { return impl{} }\n")
+	b.WriteString("func TestSeed(t *testing.T) { _ = SeedImpl() }\n")
+	for i := 0; i < 70; i++ {
+		b.WriteString("func PureLeaf")
+		b.WriteString(strconv.Itoa(i))
+		b.WriteString("() int { return ")
+		b.WriteString(strconv.Itoa(i))
+		b.WriteString(" }\n")
+	}
+	writeFile(t, dir, "pkg_test.go", b.String())
+
+	h, err := newAt(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkgPath := "example.com/rtaprep"
+	prog, err := h.loadCached(pkgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Run binaryReachableUnion with audited=false and zero open candidates:
+	// prepareProgramRTA must still populate lookupSummaryForProg(prog, false) and provFP.
+	binFns, err := binaryReachableUnion(context.Background(), false, nil, prog, []Subject{{Package: pkgPath, Symbol: "TestSeed"}})
+	if err != nil {
+		t.Fatalf("binaryReachableUnion: %v", err)
+	}
+	if !binFns.Complete || !binFns.Fns["example.com/rtaprep\x00SeedImpl"] {
+		t.Fatalf("binaryReachableUnion missed SeedImpl: %+v", binFns)
+	}
+	if lookupSummaryForProg(prog, false) == nil {
+		t.Fatal("prepareProgramRTA left summary nil when audited=false and openCandidates empty")
+	}
+
+	// UncalledWithInterfaceParam is never called in the program, so its parameter r
+	// is an uncalled subject root's *ssa.Parameter: provFP must NOT treat it as dead code.
+	uncalledSubj := Subject{Package: pkgPath, Symbol: "UncalledWithInterfaceParam"}
+	var batch []Subject
+	batch = append(batch, uncalledSubj)
+	for i := 0; i < 70; i++ {
+		batch = append(batch, Subject{Package: pkgPath, Symbol: "PureLeaf" + strconv.Itoa(i)})
+	}
+	rf, err := h.ComputeRootedFunctions(context.Background(), batch)
+	if err != nil {
+		t.Fatalf("ComputeRootedFunctions (>64 batch): %v", err)
+	}
+	if rf[uncalledSubj].Complete {
+		t.Fatalf("open-world UncalledWithInterfaceParam unexpectedly marked Complete: %+v", rf[uncalledSubj])
+	}
+	for i := 0; i < 70; i++ {
+		leaf := Subject{Package: pkgPath, Symbol: "PureLeaf" + strconv.Itoa(i)}
+		if !rf[leaf].Complete {
+			t.Fatalf("%s not Complete in >64 subject batch: %+v", leaf.Symbol, rf[leaf])
+		}
 	}
 }
 

@@ -97,6 +97,9 @@ type Fact struct {
 	PureMethods                map[string]string                      `json:"pureMethods,omitempty"`
 	ExternalMethods            map[string]string                      `json:"externalMethods,omitempty"`
 	PoolDischarges             []string                               `json:"poolDischarges,omitempty"`
+	PoolMutates                []string                               `json:"poolMutates,omitempty"`
+	PoolEscapes                []string                               `json:"poolEscapes,omitempty"`
+	PoolAttributedUses         []syntaxutil.AttributedUse             `json:"poolAttributedUses,omitempty"`
 	SingleSubjectVars          []string                               `json:"singleSubjectVars,omitempty"`
 	MappingDischarges          []string                               `json:"mappingDischarges,omitempty"`
 	MemoDischarges             []string                               `json:"memoDischarges,omitempty"`

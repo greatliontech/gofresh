@@ -11,9 +11,9 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/dynstate"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/testvariant"
-	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -7287,8 +7287,11 @@ func TestValidateSharesManifestEvaluationAcrossSubjects(t *testing.T) {
 
 // The execution-model attestations are part of the persisted fact
 // identity: each option stamps its marker into the derived fact scope,
-// so option-on and option-off sessions can never serve each other's
-// facts (REQ-closure-dynamic-state-memo,
+// Per-package dynamic-state facts stay execution-agnostic while the
+// view scan scope carries the execution-model and rooted-functions
+// markers so option-on and option-off sessions share pinned facts
+// without ever serving each other's scan verdicts
+// (REQ-closure-dynamic-state-memo, REQ-closure-scan-memo,
 // REQ-closure-shared-dynamic-state).
 func TestExecutionModelMarkersSplitTheFactScope(t *testing.T) {
 	if testing.Short() {
@@ -7296,11 +7299,12 @@ func TestExecutionModelMarkersSplitTheFactScope(t *testing.T) {
 	}
 	dir := writeViewModule(t, "package view\n\nfunc F() int { return 1 }\n")
 	subject := Subject{Package: "example.com/view", Symbol: "F"}
-	capture := func(opts ...option) string {
+	capture := func(opts ...option) (string, string) {
 		t.Helper()
-		var scope string
+		var fScope, sScope string
 		withViewTestHooks(viewTestHookSet{
-			factScope: func(s string) { scope = s },
+			factScope: func(s string) { fScope = s },
+			scanScope: func(s string) { sScope = s },
 		}, func() {
 			engine, err := newEngine(append([]option{withDir(dir)}, opts...)...)
 			if err != nil {
@@ -7310,24 +7314,32 @@ func TestExecutionModelMarkersSplitTheFactScope(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
-		if scope == "" {
-			t.Fatal("the view derived no fact scope")
+		if fScope == "" || sScope == "" {
+			t.Fatalf("the view derived incomplete scopes: fact=%q scan=%q", fScope, sScope)
 		}
-		return scope
+		return fScope, sScope
 	}
-	plain := capture()
-	single := capture(withSingleSubjectExecution())
-	pkgproc := capture(withPackageProcessExecution())
-	if !strings.Contains(single, "|single-subject-execution") || plain == single {
-		t.Fatalf("single-subject marker missing: plain=%q single=%q", plain, single)
+	plainFact, plainScan := capture()
+	singleFact, singleScan := capture(withSingleSubjectExecution())
+	pkgprocFact, pkgprocScan := capture(withPackageProcessExecution())
+	bothFact, bothScan := capture(withSingleSubjectExecution(), withPackageProcessExecution())
+	revFact, revScan := capture(withPackageProcessExecution(), withSingleSubjectExecution())
+	for _, fScope := range []string{plainFact, singleFact, pkgprocFact, bothFact, revFact} {
+		if strings.Contains(fScope, "|single-subject-execution") || strings.Contains(fScope, "|package-process-execution") {
+			t.Fatalf("execution-agnostic fact scope leaked execution marker: %q", fScope)
+		}
+		if fScope != plainFact {
+			t.Fatalf("fact scope varied by execution model: got %q, want %q", fScope, plainFact)
+		}
 	}
-	if !strings.Contains(pkgproc, "|package-process-execution") || plain == pkgproc || single == pkgproc {
-		t.Fatalf("package-process marker missing: plain=%q pkgproc=%q", plain, pkgproc)
+	if !strings.Contains(singleScan, "|single-subject-execution|gofresh/rooted-functions@") || plainScan == singleScan {
+		t.Fatalf("single-subject marker missing from scan scope: plain=%q single=%q", plainScan, singleScan)
 	}
-	both := capture(withSingleSubjectExecution(), withPackageProcessExecution())
-	reverseBoth := capture(withPackageProcessExecution(), withSingleSubjectExecution())
-	if both != single || reverseBoth != single {
-		t.Fatalf("both-options scope did not resolve to single-subject precedence: both=%q reverse=%q single=%q", both, reverseBoth, single)
+	if !strings.Contains(pkgprocScan, "|package-process-execution|gofresh/rooted-functions@") || plainScan == pkgprocScan || singleScan == pkgprocScan {
+		t.Fatalf("package-process marker missing from scan scope: plain=%q pkgproc=%q", plainScan, pkgprocScan)
+	}
+	if bothScan != singleScan || revScan != singleScan {
+		t.Fatalf("both-options scan scope did not resolve to single-subject precedence: both=%q reverse=%q single=%q", bothScan, revScan, singleScan)
 	}
 }
 
@@ -9276,3 +9288,358 @@ func TestThree(t *testing.T) { _ = os.Getenv("THREE") }
 	}
 }
 
+func TestMutableLocalFactsReuseAcrossUnchangedSnapshotPassesAndInvalidateOnEdit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a module fixture and runs paired snapshot observations")
+	}
+	isolateProofCache(t)
+	dir := writeModuleTree(t, map[string]string{
+		"go.mod": "module example.com/localmemo\n\ngo 1.26\n",
+		"p.go":   "package localmemo\n\nfunc F() int { return 1 }\n",
+	})
+	subject := Subject{Package: "example.com/localmemo", Symbol: "F"}
+	session, err := NewSession(context.Background(), BuildDescription{
+		Directory:   dir,
+		Environment: os.Environ(),
+		Inputs:      []string{},
+	}, SessionPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type loadObs struct {
+		listing string
+		hit     bool
+	}
+	var firstSnapObs []loadObs
+	withViewTestHooks(viewTestHookSet{
+		scanMemoOff: true,
+		localFactLoad: func(listing string, hit bool) {
+			firstSnapObs = append(firstSnapObs, loadObs{listing: listing, hit: hit})
+		},
+	}, func() {
+		if _, err := session.Snapshot(context.Background(), []Subject{subject}, CodeResult); err != nil {
+			t.Fatal(err)
+		}
+	})
+	// Snapshot performs two paired observeView passes: the first derives fresh (miss),
+	// and the second serves from the session's digest-verified localFactMemo (hit).
+	if len(firstSnapObs) != 2 || firstSnapObs[0].hit || !firstSnapObs[1].hit {
+		t.Fatalf("paired unchanged snapshot localFactLoad = %+v, want [miss, hit]", firstSnapObs)
+	}
+
+	// Mutating the local source file on disk (adding a mutable dynamic global) must
+	// immediately invalidate the digest key on the next snapshot's first pass.
+	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte("package localmemo\n\nvar Hook func()\n\nfunc Touch() { Hook = func() {} }\n\nfunc F() int { Touch(); return 1 }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var editedSnapObs []loadObs
+	var snap *Snapshot
+	withViewTestHooks(viewTestHookSet{
+		scanMemoOff: true,
+		localFactLoad: func(listing string, hit bool) {
+			editedSnapObs = append(editedSnapObs, loadObs{listing: listing, hit: hit})
+		},
+	}, func() {
+		var snapErr error
+		snap, snapErr = session.Snapshot(context.Background(), []Subject{subject}, CodeResult)
+		if snapErr != nil {
+			t.Fatal(snapErr)
+		}
+	})
+	if len(editedSnapObs) != 2 || editedSnapObs[0].hit || !editedSnapObs[1].hit {
+		t.Fatalf("edited snapshot localFactLoad = %+v, want [miss, hit]", editedSnapObs)
+	}
+	fp, err := snap.Capture(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := snap.Check(context.Background(), fp, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Unverifiable || verdict.Ground.Cause.Kind != SharedDynamicStateCause {
+		t.Fatalf("edited snapshot verdict = %+v, want Unverifiable SharedDynamicStateCause", verdict)
+	}
+
+	// Mid-load TOCTOU guards: neither a transient file addition (created at
+	// typedLoad and deleted at beforeDischarge) nor a mid-load go.mod replace
+	// retarget may poison Session.localFacts or persistent scanfacts under the
+	// pre-load key.
+	wsRoot := t.TempDir()
+	depPure := filepath.Join(wsRoot, "dep1")
+	depImpure := filepath.Join(wsRoot, "dep2")
+	for _, d := range []string{depPure, depImpure} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(depPure, "go.mod"), []byte("module example.com/dep\n\ngo 1.26\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depPure, "dep.go"), []byte("package dep\n\nfunc V() int { return 1 }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depImpure, "go.mod"), []byte("module example.com/dep\n\ngo 1.26\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depImpure, "dep.go"), []byte("package dep\n\nvar ImpureHook func()\n\nfunc V() int { ImpureHook = func() {}; return 2 }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	verifyMidLoadTOCTOU := func(name string, scanMemoOff bool, inject func(appDir, pureGoMod, impureGoMod string), revert func(appDir, pureGoMod string)) {
+		t.Helper()
+		appDir := filepath.Join(wsRoot, name)
+		if err := os.MkdirAll(appDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		modPath := "example.com/" + name
+		pureGoMod := "module " + modPath + "\n\ngo 1.26\n\nrequire example.com/dep v0.0.0\nreplace example.com/dep => ../dep1\n"
+		impureGoMod := "module " + modPath + "\n\ngo 1.26\n\nrequire example.com/dep v0.0.0\nreplace example.com/dep => ../dep2\n"
+		if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(pureGoMod), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(appDir, "app.go"), []byte("package app\n\nimport \"example.com/dep\"\n\nfunc G() int { return dep.V() }\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		subj := Subject{Package: modPath, Symbol: "G"}
+		sess, err := NewSession(context.Background(), BuildDescription{
+			Directory:   appDir,
+			Environment: os.Environ(),
+			Inputs:      []string{},
+		}, SessionPolicy{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		injected := false
+		var driftedObs []loadObs
+		withViewTestHooks(viewTestHookSet{
+			scanMemoOff: scanMemoOff,
+			typedLoad: func() {
+				if !injected {
+					injected = true
+					inject(appDir, pureGoMod, impureGoMod)
+				}
+			},
+			beforeDischarge: func() {
+				revert(appDir, pureGoMod)
+			},
+			localFactLoad: func(listing string, hit bool) {
+				if listing == modPath {
+					driftedObs = append(driftedObs, loadObs{listing: listing, hit: hit})
+				}
+			},
+		}, func() {
+			if _, err := sess.Snapshot(context.Background(), []Subject{subj}, CodeResult); !errors.Is(err, ErrViewChanged) {
+				t.Fatalf("%s: drifted Snapshot err = %v, want ErrViewChanged", name, err)
+			}
+		})
+		if scanMemoOff && (len(driftedObs) != 2 || driftedObs[0].hit || driftedObs[1].hit) {
+			t.Fatalf("%s: drifted localFactLoad = %+v, want [miss, miss] (Pass 1 must not store poisoned localFact)", name, driftedObs)
+		}
+		cleanSnap, err := sess.Snapshot(context.Background(), []Subject{subj}, CodeResult)
+		if err != nil {
+			t.Fatalf("%s: clean Snapshot: %v", name, err)
+		}
+		cleanFP, err := cleanSnap.Capture(context.Background(), subj)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cleanVerdict, err := cleanSnap.Check(context.Background(), cleanFP, subj)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cleanVerdict.Status != Valid {
+			t.Fatalf("%s: clean verdict = %+v, want Valid", name, cleanVerdict)
+		}
+	}
+
+	injectExtraFile := func(appDir, _, _ string) {
+		_ = os.WriteFile(filepath.Join(appDir, "extra.go"), []byte("package app\n\nvar ExtraHook func()\n\nfunc TouchExtra() { ExtraHook = func() {} }\n"), 0o600)
+	}
+	revertExtraFile := func(appDir, _ string) {
+		_ = os.Remove(filepath.Join(appDir, "extra.go"))
+	}
+	injectGoMod := func(appDir, _, impureGoMod string) {
+		_ = os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(impureGoMod), 0o600)
+	}
+	revertGoMod := func(appDir, pureGoMod string) {
+		_ = os.WriteFile(filepath.Join(appDir, "go.mod"), []byte(pureGoMod), 0o600)
+	}
+
+	injectTestVariant := func(appDir, _, _ string) {
+		_ = os.WriteFile(filepath.Join(appDir, "app_test.go"), []byte("package app\n\nvar TestHook func()\n\nfunc TouchTest() { TestHook = func() {} }\n"), 0o600)
+	}
+	revertTestVariant := func(appDir, _ string) {
+		_ = os.Remove(filepath.Join(appDir, "app_test.go"))
+	}
+
+	verifyMidLoadTOCTOU("toctoufilescan", false, injectExtraFile, revertExtraFile)
+	verifyMidLoadTOCTOU("toctoufilelocal", true, injectExtraFile, revertExtraFile)
+	verifyMidLoadTOCTOU("toctoumodscan", false, injectGoMod, revertGoMod)
+	verifyMidLoadTOCTOU("toctoumodlocal", true, injectGoMod, revertGoMod)
+	verifyMidLoadTOCTOU("toctoutestvariantscan", false, injectTestVariant, revertTestVariant)
+	verifyMidLoadTOCTOU("toctoutestvariantlocal", true, injectTestVariant, revertTestVariant)
+
+	// Mid-discharge edit (injected at beforeDischarge, after LoadViewPackages and
+	// postLoadDiskUnchanged have already passed) must fail the post-discharge
+	// scanInputs.MatchesDisk() check so storeScanFacts does not persist the
+	// pre-edit scan under an unstable tree, nor poison a restored tree.
+	dischargeDir := filepath.Join(wsRoot, "toctoudischarge")
+	if err := os.MkdirAll(dischargeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dischargeDir, "go.mod"), []byte("module example.com/toctoudischarge\n\ngo 1.26\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	impureApp := "package app\n\nvar DischargeHook func()\n\nfunc Mutate() { DischargeHook = func() {} }\n\nfunc H() int { Mutate(); return 1 }\n"
+	pureApp := "package app\n\nfunc H() int { return 1 }\n"
+	if err := os.WriteFile(filepath.Join(dischargeDir, "app.go"), []byte(impureApp), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dischargeSubj := Subject{Package: "example.com/toctoudischarge", Symbol: "H"}
+	dischargeSess, err := NewSession(context.Background(), BuildDescription{
+		Directory:   dischargeDir,
+		Environment: os.Environ(),
+		Inputs:      []string{},
+	}, SessionPolicy{Execution: SingleSubjectExecution})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutatedAtDischarge := false
+	withViewTestHooks(viewTestHookSet{
+		beforeDischarge: func() {
+			if !mutatedAtDischarge {
+				mutatedAtDischarge = true
+				_ = os.WriteFile(filepath.Join(dischargeDir, "app.go"), []byte(pureApp), 0o600)
+			}
+		},
+	}, func() {
+		if _, err := dischargeSess.Snapshot(context.Background(), []Subject{dischargeSubj}, CodeResult); !errors.Is(err, ErrViewChanged) {
+			t.Fatalf("mid-discharge Snapshot err = %v, want ErrViewChanged", err)
+		}
+	})
+	// Restore impureApp: if storeScanFacts had persisted the mid-discharge
+	// false-discharge under impureApp's pre-load PackageScanKey, this quiescent
+	// Snapshot would serve pure=true from scanfacts instead of SharedDynamicStateCause.
+	if err := os.WriteFile(filepath.Join(dischargeDir, "app.go"), []byte(impureApp), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restoredSnap, err := dischargeSess.Snapshot(context.Background(), []Subject{dischargeSubj}, CodeResult)
+	if err != nil {
+		t.Fatalf("restored post-discharge Snapshot: %v", err)
+	}
+	restoredFP, err := restoredSnap.Capture(context.Background(), dischargeSubj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoredVerdict, err := restoredSnap.Check(context.Background(), restoredFP, dischargeSubj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restoredVerdict.Status != Unverifiable || restoredVerdict.Ground.Cause.Kind != SharedDynamicStateCause {
+		t.Fatalf("restored post-discharge verdict = %+v, want Unverifiable SharedDynamicStateCause", restoredVerdict)
+	}
+}
+
+func TestExplainDynamicStateDischargesSingleSubjectLocalReplaceAndPoolSites(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a multi-module local-replace fixture and runs ExplainDynamicState")
+	}
+	isolateProofCache(t)
+	root := t.TempDir()
+	depDir := filepath.Join(root, "dep")
+	mainDir := filepath.Join(root, "app")
+	if err := os.MkdirAll(depDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(mainDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "go.mod"), []byte("module example.com/dep\n\ngo 1.26\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "dep.go"), []byte(`package dep
+
+import "sync"
+
+//gofresh:single-subject
+var Hook func()
+
+var Pool sync.Pool
+
+func Arm() {
+	Hook = func() {}
+	Pool.Put(1)
+	_ = Pool.Get()
+}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mainDir, "go.mod"), []byte("module example.com/app\n\ngo 1.26\n\nrequire example.com/dep v0.0.0\nreplace example.com/dep => ../dep\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mainDir, "app.go"), []byte("package app\n\nimport \"example.com/dep\"\n\nfunc Run() int { dep.Arm(); return 1 }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	subject := Subject{Package: "example.com/app", Symbol: "Run"}
+
+	// Under SingleSubjectExecution, both //gofresh:single-subject on local-replace dep.Hook
+	// and Get/Put on dep.Pool discharge, so Check is Valid and ExplainDynamicState returns empty Chain{}.
+	singleSess, err := NewSession(context.Background(), BuildDescription{
+		Directory:   mainDir,
+		Environment: os.Environ(),
+		Inputs:      []string{},
+	}, SessionPolicy{Execution: SingleSubjectExecution, PureSubjects: []Subject{subject}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	singleSnap, err := singleSess.Snapshot(context.Background(), []Subject{subject}, CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp, err := singleSnap.Capture(context.Background(), subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := singleSnap.Check(context.Background(), fp, subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Valid {
+		t.Fatalf("SingleSubjectExecution verdict = %+v, want Valid", verdict)
+	}
+	for _, varName := range []string{"Hook", "Pool"} {
+		chain, err := singleSnap.ExplainDynamicState(context.Background(), "example.com/dep", varName)
+		if err != nil {
+			t.Fatalf("SingleSubjectExecution ExplainDynamicState(%s): %v", varName, err)
+		}
+		if chain.Arm != "" || len(chain.Links) != 0 {
+			t.Fatalf("SingleSubjectExecution ExplainDynamicState(%s) = %+v, want empty chain", varName, chain)
+		}
+	}
+
+	// Under GeneralExecution, neither Hook nor Pool is discharged, and ExplainDynamicState reports mutation chains.
+	genSess, err := NewSession(context.Background(), BuildDescription{
+		Directory:   mainDir,
+		Environment: os.Environ(),
+		Inputs:      []string{},
+	}, SessionPolicy{Execution: GeneralExecution, PureSubjects: []Subject{subject}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	genSnap, err := genSess.Snapshot(context.Background(), []Subject{subject}, CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, varName := range []string{"Hook", "Pool"} {
+		chain, err := genSnap.ExplainDynamicState(context.Background(), "example.com/dep", varName)
+		if err != nil {
+			t.Fatalf("GeneralExecution ExplainDynamicState(%s): %v", varName, err)
+		}
+		if chain.Arm != "mutation" || len(chain.Links) == 0 {
+			t.Fatalf("GeneralExecution ExplainDynamicState(%s) = %+v, want mutation chain", varName, chain)
+		}
+	}
+}

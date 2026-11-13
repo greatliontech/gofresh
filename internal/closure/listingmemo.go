@@ -231,28 +231,6 @@ func (h *Hasher) listingInputs(pkgPath string, pkgs []listPkg) (*listingRecord, 
 		rec.Files[path] = fb.digest()
 		return fb.content, true
 	}
-	addDir := func(dir string) bool {
-		if _, done := rec.Dirs[dir]; done {
-			return true
-		}
-		names, err := listingEntries(dir)
-		if err != nil {
-			return false
-		}
-		rec.Dirs[dir] = names
-		return true
-	}
-	addTree := func(root string) bool {
-		return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() && !addDir(path) {
-				return os.ErrInvalid
-			}
-			return nil
-		}) == nil
-	}
 	// addModule records a module directory's go.mod and go.sum and, from
 	// the go.mod, the module file of every local replacement target —
 	// requirements the graph reads without any package of the target
@@ -314,38 +292,11 @@ func (h *Hasher) listingInputs(pkgPath string, pkgs []listPkg) (*listingRecord, 
 				return nil, false
 			}
 		}
-		dir := filepath.Clean(p.Dir)
-		if !addDir(dir) {
+		if !recordPackageDirInputs(p.Dir, &p, rec.Dirs, func(path string) bool {
+			_, ok := addFile(path)
+			return ok
+		}) {
 			return nil, false
-		}
-		for _, entry := range rec.Dirs[dir] {
-			if !listingSourceExts[filepath.Ext(entry.Name)] || !entry.regular() {
-				continue
-			}
-			path := filepath.Join(dir, entry.Name)
-			if _, ok := addFile(path); !ok {
-				return nil, false
-			}
-		}
-		for _, root := range embedRoots(dir, p.EmbedPatterns, p.TestEmbedPatterns, p.XTestEmbedPatterns) {
-			info, err := os.Stat(root)
-			switch {
-			case err != nil:
-				if !os.IsNotExist(err) {
-					return nil, false
-				}
-				if !addDir(filepath.Dir(root)) {
-					return nil, false
-				}
-			case info.IsDir():
-				if !addTree(root) {
-					return nil, false
-				}
-			default:
-				if !addDir(filepath.Dir(root)) {
-					return nil, false
-				}
-			}
 		}
 	}
 	dir := filepath.Clean(h.dir)
@@ -430,6 +381,68 @@ func (h *Hasher) listingInputs(pkgPath string, pkgs []listPkg) (*listingRecord, 
 	}
 	sort.Strings(rec.Absent)
 	return rec, true
+}
+
+// recordPackageDirInputs records dir's entry listing, every regular source-ext
+// file in dir (compiled and build-tag-excluded alike), and every directory
+// consulted by p's //go:embed patterns into dirs.
+func recordPackageDirInputs(dir string, p *listPkg, dirs map[string][]listingEntry, addSourceFile func(string) bool) bool {
+	addDir := func(d string) bool {
+		d = filepath.Clean(d)
+		if _, done := dirs[d]; done {
+			return true
+		}
+		names, err := listingEntries(d)
+		if err != nil {
+			return false
+		}
+		dirs[d] = names
+		return true
+	}
+	addTree := func(root string) bool {
+		return filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() && !addDir(path) {
+				return os.ErrInvalid
+			}
+			return nil
+		}) == nil
+	}
+	dir = filepath.Clean(dir)
+	if !addDir(dir) {
+		return false
+	}
+	for _, entry := range dirs[dir] {
+		if !listingSourceExts[filepath.Ext(entry.Name)] || !entry.regular() {
+			continue
+		}
+		if !addSourceFile(filepath.Join(dir, entry.Name)) {
+			return false
+		}
+	}
+	for _, root := range embedRoots(dir, p.EmbedPatterns, p.TestEmbedPatterns, p.XTestEmbedPatterns) {
+		info, err := os.Stat(root)
+		switch {
+		case err != nil:
+			if !os.IsNotExist(err) {
+				return false
+			}
+			if !addDir(filepath.Dir(root)) {
+				return false
+			}
+		case info.IsDir():
+			if !addTree(root) {
+				return false
+			}
+		default:
+			if !addDir(filepath.Dir(root)) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // embedRoots resolves the directory or file each embed pattern is

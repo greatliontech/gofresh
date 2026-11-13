@@ -35,6 +35,7 @@ import (
 
 	"github.com/greatliontech/gofresh/internal/buildflags"
 	"github.com/greatliontech/gofresh/internal/closure"
+	"github.com/greatliontech/gofresh/internal/dynstate"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/guard"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
@@ -151,7 +152,7 @@ func PreviewPruneMemos(maxBytes int64) (MemoPruneReport, error) {
 // whose per-package facts the persistent memo serves for version-pinned
 // packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps
 // this version like any other strategy change.
-const DynamicStateStrategy = "gofresh/dynamic-state@77"
+const DynamicStateStrategy = "gofresh/dynamic-state@78"
 
 // ClosureStrategy identifies the closure identity derivation — the
 // maximal closure's and the test-variant compartment's — as the
@@ -273,6 +274,42 @@ type Session struct {
 	// attestation; the zero value is GeneralExecution, which supplies no
 	// positive assertion.
 	executionModel ExecutionModel
+	// localFacts caches mutable-local dynstate.Fact derivations within this
+	// session alone, keyed by (factScope, listing, reachable pins, live byte
+	// digests of the transitive local import cone) (REQ-closure-dynamic-state-memo).
+	localFacts localFactMemo
+}
+
+const maxSessionLocalFacts = 512
+
+type localFactMemo struct {
+	mu      sync.Mutex
+	entries map[string]dynstate.Fact
+}
+
+func (m *localFactMemo) load(key string) (dynstate.Fact, bool) {
+	if m == nil || key == "" {
+		return dynstate.Fact{}, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	fact, ok := m.entries[key]
+	return fact, ok
+}
+
+func (m *localFactMemo) store(key string, fact dynstate.Fact) {
+	if m == nil || key == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.entries) >= maxSessionLocalFacts {
+		clear(m.entries)
+	}
+	if m.entries == nil {
+		m.entries = make(map[string]dynstate.Fact, 32)
+	}
+	m.entries[key] = fact
 }
 
 // NewSession admits a complete compilation description and analysis policy.

@@ -263,7 +263,8 @@ func (s *Session) observeView(ctx context.Context, subjects []Subject, requests 
 	// REQ-closure-dynamic-state-memo, REQ-closure-scan-memo).
 	scope := hasher.SetAnalysisScope(s.analysisScope(guards))
 	emitFactScopeViewHook(scope.Facts())
-	scan, source, cut, err := scanViewSubjects(ctx, hasher, scope, s.buildFlags, s.analysisBudget, packages...)
+	emitScanScopeViewHook(scope.Scan())
+	scan, source, cut, err := scanViewSubjectsWithLocalMemo(ctx, hasher, scope, s.buildFlags, s.analysisBudget, true, &s.localFacts, packages...)
 	if err != nil {
 		return observationFacts{}, err
 	}

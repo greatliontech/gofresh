@@ -340,6 +340,28 @@ func TouchesAnyNamedStruct(p *packages.Package, expr ast.Expr, targets map[*type
 	}
 }
 
+// CallMutatesNamedStructContainer reports whether call invokes a mutating
+// container builtin (delete, clear, copy, append) whose destination touches any
+// named struct in targets.
+func CallMutatesNamedStructContainer(
+	p *packages.Package,
+	call *ast.CallExpr,
+	targets map[*types.Named]bool,
+) bool {
+	if p == nil || p.TypesInfo == nil || call == nil || len(call.Args) == 0 || len(targets) == 0 {
+		return false
+	}
+	b := syntaxutil.LookupBuiltin(p.TypesInfo, call.Fun)
+	if b == nil {
+		return false
+	}
+	switch b.Name() {
+	case "delete", "clear", "copy", "append":
+		return TouchesAnyNamedStruct(p, call.Args[0], targets)
+	}
+	return false
+}
+
 // PkgHasAnyMutationOnStructs reports whether any non-exempt AST node in
 // p.Syntax mutates or takes the address of a field/element on any named struct
 // in targets.
@@ -382,16 +404,9 @@ func PkgHasAnyMutationOnStructs(
 					}
 				}
 			case *ast.CallExpr:
-				if cid, isID := ast.Unparen(x.Fun).(*ast.Ident); isID && len(x.Args) > 0 {
-					if b, isB := p.TypesInfo.Uses[cid].(*types.Builtin); isB {
-						switch b.Name() {
-						case "delete", "clear", "copy", "append":
-							if TouchesAnyNamedStruct(p, x.Args[0], targets) {
-								hit = true
-								return false
-							}
-						}
-					}
+				if CallMutatesNamedStructContainer(p, x, targets) {
+					hit = true
+					return false
 				}
 			case *ast.UnaryExpr:
 				if x.Op == token.AND {
@@ -733,5 +748,3 @@ func ComputeExclusiveHelperCone(p *packages.Package, idx *PkgIndex, root *types.
 	}
 	return out
 }
-
-

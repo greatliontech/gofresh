@@ -38,7 +38,8 @@ func recordDynamicGlobalUses(
 	carrierLinks map[string]map[string]bool,
 	attributed *[]syntaxutil.AttributedUse,
 	singleSubject bool,
-	poolDischarged map[string]bool,
+	poolDischarged, poolMutated, poolEscaped map[string]bool,
+	poolAttributed *[]syntaxutil.AttributedUse,
 	hooks *syntaxutil.ExplainHookSet,
 ) {
 	if p == nil || p.TypesInfo == nil {
@@ -494,10 +495,7 @@ func recordDynamicGlobalUses(
 			poolDischarged[syntaxutil.DynamicVarKey(variable)] = true
 		}
 	}
-	provenCalls := map[*ast.SelectorExpr]bool{}
-	if !singleSubject {
-		_, provenCalls = provenSharedPools(audited, p)
-	}
+	_, provenCalls := provenSharedPools(audited, p)
 	markExemptEscapes := func(arg ast.Expr) {
 		ast.Inspect(arg, func(inner ast.Node) bool {
 			if ident, ok := inner.(*ast.Ident); ok {
@@ -542,17 +540,35 @@ func recordDynamicGlobalUses(
 				} else if sel, ok := n.Fun.(*ast.SelectorExpr); ok {
 					if selection, selOK := p.TypesInfo.Selections[sel]; selOK && selection.Kind() == types.MethodVal {
 						deferred := false
+						var poolIdent *ast.Ident
 						var poolVar *types.Var
-						if fn, fnOK := selection.Obj().(*types.Func); fnOK && (singleSubject || provenCalls[sel]) && refconfine.AuditedPooling(audited, fn) {
-							_, poolVar = poolCarrierIdent(sel.X)
+						fn, fnOK := selection.Obj().(*types.Func)
+						if fnOK && refconfine.AuditedPooling(audited, fn) {
+							poolIdent, poolVar = poolCarrierIdent(sel.X)
 						}
 						if poolVar != nil {
 							dischargePool(poolVar)
 							if index, isIndex := sel.X.(*ast.IndexExpr); isIndex {
 								markExemptEscapes(index.Index)
 							}
+							if !provenCalls[sel] {
+								if _, vOK := dynamicPackageVar(poolVar); vOK && refconfine.TypeHandsOutDynamicAlias(audited, poolVar.Type()) {
+									key := syntaxutil.DynamicVarKey(poolVar)
+									if poolEscaped != nil {
+										poolEscaped[key] = true
+									}
+									if !singleSubject {
+										if _, isIdent := sel.X.(*ast.Ident); isIdent && !syntaxutil.InterfaceReceiver(fn) && refconfine.InstantiatedResultsHandOutNothing(audited, selection.Type()) {
+											factKey := syntaxutil.MethodFactKey(fn)
+											syntaxutil.ExplainDeferralMark(hooks, p, 'n', key, syntaxutil.DeferralResolvent{Method: factKey}, sel.Pos())
+										} else if poolIdent != nil {
+											syntaxutil.ExplainMark(hooks, p, "escape", key, poolIdent.Pos())
+										}
+									}
+								}
+							}
 							deferred = true
-						} else if fn, fnOK := selection.Obj().(*types.Func); fnOK && !syntaxutil.InterfaceReceiver(fn) && refconfine.InstantiatedResultsHandOutNothing(audited, selection.Type()) {
+						} else if fnOK && !syntaxutil.InterfaceReceiver(fn) && refconfine.InstantiatedResultsHandOutNothing(audited, selection.Type()) {
 							if ident, idOK := sel.X.(*ast.Ident); idOK {
 								if obj, rOK := resolve(ident); rOK {
 									if variable, vOK := dynamicPackageVar(obj); vOK {
@@ -831,9 +847,43 @@ func recordDynamicGlobalUses(
 			case *ast.SelectorExpr:
 				if selection, ok := p.TypesInfo.Selections[n]; ok && selection.Kind() == types.MethodVal {
 					if fn, ok := selection.Obj().(*types.Func); ok {
-						if (singleSubject || provenCalls[n]) && calledSelectors[n] && refconfine.AuditedPooling(audited, fn) {
+						if calledSelectors[n] && refconfine.AuditedPooling(audited, fn) {
 							if ident, variable := poolCarrierIdent(n.X); variable != nil {
 								dischargePool(variable)
+								if !provenCalls[n] {
+									if _, vOK := dynamicPackageVar(variable); vOK {
+										key := syntaxutil.DynamicVarKey(variable)
+										_, isIdent := n.X.(*ast.Ident)
+										if methodUses != nil && isIdent && !syntaxutil.InterfaceReceiver(fn) && refconfine.InstantiatedResultsHandOutNothing(audited, selection.Type()) {
+											if poolMutated != nil {
+												poolMutated[key] = true
+											}
+											if !singleSubject {
+												factKey := syntaxutil.MethodFactKey(fn)
+												syntaxutil.ExplainDeferralMark(hooks, p, 'm', key, syntaxutil.DeferralResolvent{Method: factKey}, n.Pos())
+											}
+										} else {
+											if sig, sigOK := fn.Type().(*types.Signature); sigOK && sig.Recv() != nil {
+												if _, pointer := types.Unalias(sig.Recv().Type()).(*types.Pointer); pointer {
+													if !singleSubject {
+														syntaxutil.ExplainMark(hooks, p, "mutation", key, ident.Pos())
+													}
+													if poolMutated != nil {
+														poolMutated[key] = true
+													}
+												}
+											}
+											if refconfine.TypeHandsOutDynamicAlias(audited, variable.Type()) {
+												if !singleSubject {
+													syntaxutil.ExplainMark(hooks, p, "escape", key, ident.Pos())
+												}
+												if poolEscaped != nil {
+													poolEscaped[key] = true
+												}
+											}
+										}
+									}
+								}
 								readContext[ident] = true
 								return true
 							}
@@ -921,10 +971,13 @@ func recordDynamicGlobalUses(
 	}
 	walkAttributedDecl := func(decl *ast.FuncDecl, fnKey syntaxutil.FuncKey, setCurrentFn bool) {
 		litMutated, litEscaped := map[string]bool{}, map[string]bool{}
+		litPoolMutated, litPoolEscaped := map[string]bool{}, map[string]bool{}
 		litMethods := map[string]map[syntaxutil.FuncKey]bool{}
 		interiors := map[ast.Node]bool{}
 		saveLM, saveLE, saveLMU := mutated, escaped, methodUses
+		saveLPM, saveLPE := poolMutated, poolEscaped
 		mutated, escaped, methodUses = litMutated, litEscaped, litMethods
+		poolMutated, poolEscaped = litPoolMutated, litPoolEscaped
 		ast.Inspect(decl.Body, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.FuncLit:
@@ -941,6 +994,7 @@ func recordDynamicGlobalUses(
 			return true
 		})
 		mutated, escaped, methodUses = saveLM, saveLE, saveLMU
+		poolMutated, poolEscaped = saveLPM, saveLPE
 		if fnKey.Valid() {
 			for key := range litMutated {
 				*attributed = append(*attributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, Literal: true})
@@ -951,6 +1005,14 @@ func recordDynamicGlobalUses(
 			for key, methods := range litMethods {
 				for method := range methods {
 					*attributed = append(*attributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, HasMethod: true, Method: method, Literal: true})
+				}
+			}
+			if poolAttributed != nil {
+				for key := range litPoolMutated {
+					*poolAttributed = append(*poolAttributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, Literal: true})
+				}
+				for key := range litPoolEscaped {
+					*poolAttributed = append(*poolAttributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, Escape: true, Literal: true})
 				}
 			}
 		} else {
@@ -968,11 +1030,24 @@ func recordDynamicGlobalUses(
 					methodUses[key][method] = true
 				}
 			}
+			if poolMutated != nil {
+				for key := range litPoolMutated {
+					poolMutated[key] = true
+				}
+			}
+			if poolEscaped != nil {
+				for key := range litPoolEscaped {
+					poolEscaped[key] = true
+				}
+			}
 		}
 		localMutated, localEscaped := map[string]bool{}, map[string]bool{}
+		localPoolMutated, localPoolEscaped := map[string]bool{}, map[string]bool{}
 		localMethods := map[string]map[syntaxutil.FuncKey]bool{}
 		saveM, saveE, saveMU := mutated, escaped, methodUses
+		savePM, savePE := poolMutated, poolEscaped
 		mutated, escaped, methodUses = localMutated, localEscaped, localMethods
+		poolMutated, poolEscaped = localPoolMutated, localPoolEscaped
 		skipInteriors = interiors
 		if setCurrentFn {
 			currentFn, currentAttrFn = decl, fnKey
@@ -983,6 +1058,7 @@ func recordDynamicGlobalUses(
 		}
 		skipInteriors = nil
 		mutated, escaped, methodUses = saveM, saveE, saveMU
+		poolMutated, poolEscaped = savePM, savePE
 		for key := range localMutated {
 			*attributed = append(*attributed, syntaxutil.AttributedUse{Func: fnKey, Key: key})
 		}
@@ -992,6 +1068,14 @@ func recordDynamicGlobalUses(
 		for key, methods := range localMethods {
 			for method := range methods {
 				*attributed = append(*attributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, HasMethod: true, Method: method})
+			}
+		}
+		if poolAttributed != nil {
+			for key := range localPoolMutated {
+				*poolAttributed = append(*poolAttributed, syntaxutil.AttributedUse{Func: fnKey, Key: key})
+			}
+			for key := range localPoolEscaped {
+				*poolAttributed = append(*poolAttributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, Escape: true})
 			}
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/dynstate"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"go/ast"
 	"go/importer"
 	"go/parser"
@@ -564,7 +565,7 @@ func TestCarrierAliasLinkRecorded(t *testing.T) {
 	pkgs := parseAndTypecheckDAG(t, "", map[string]map[string]string{
 		"example.com/xesc/reg": {"reg.go": "package reg\n\nfunc one() int { return 1 }\n\nvar Hooks = map[string]func() int{\"a\": one}\n\nvar Alias = Hooks\n\nfunc Count() int { return len(Hooks) }\n"},
 	})
-	fact := dynstate.FactOf(true, pkgs[0], false)
+	fact := dynstate.FactOf(true, pkgs[0])
 	want := syntaxutil.CarrierLink{From: "example.com/xesc/reg.Alias", To: "example.com/xesc/reg.Hooks"}
 	found := false
 	for _, link := range fact.CarrierLinks {
@@ -585,7 +586,7 @@ func TestCarrierStoreLinkRecordedAndCallResultsUnlinked(t *testing.T) {
 	pkgs := parseAndTypecheckDAG(t, "", map[string]map[string]string{
 		"example.com/xesc/reg": {"reg.go": "package reg\n\nfunc one() int { return 1 }\n\nvar Inner = []func() int{one}\n\nvar Hooks = map[string][]func() int{}\n\nfunc pick(m map[string][]func() int) map[string][]func() int { return m }\n\nvar Picked = pick(Hooks)\n\nfunc init() {\n\tHooks[\"a\"] = Inner\n}\n\nfunc Count() int { return len(Hooks) }\n"},
 	})
-	fact := dynstate.FactOf(true, pkgs[0], false)
+	fact := dynstate.FactOf(true, pkgs[0])
 	wantStore := syntaxutil.CarrierLink{From: "example.com/xesc/reg.Hooks", To: "example.com/xesc/reg.Inner"}
 	foundStore := false
 	for _, link := range fact.CarrierLinks {
@@ -970,7 +971,7 @@ func TestBracketedSeamNodes(t *testing.T) {
 			TypesInfo: info,
 			Module:    &packages.Module{Path: "example.com/p"},
 		}
-		return dynstate.FactOf(audited, pkg, false)
+		return dynstate.FactOf(audited, pkg)
 	}
 	deriveFactWithAudit := func(t *testing.T, audited bool, src string) dynstate.Fact {
 		t.Helper()
@@ -2421,7 +2422,7 @@ func Mutate() {
 		Types:     typesPkg,
 		TypesInfo: info,
 	}
-	fact := dynstate.FactOf(true, pkg, false)
+	fact := dynstate.FactOf(true, pkg)
 	for _, link := range fact.CarrierLinks {
 		if (strings.Contains(link.From, "FileDesc") || strings.Contains(link.To, "FileDesc")) &&
 			(strings.Contains(link.From, "msgTypes") || strings.Contains(link.To, "msgTypes")) {
@@ -9096,5 +9097,140 @@ func TestViaStdlibMapsCopy(t *testing.T) {
 	mapsCopyVerdict := captureCheck(t, mapsCopyDir, Subject{Package: "example.com/xseam/app", Symbol: "TestClean"}, withPackageProcessExecution())
 	if mapsCopyVerdict.Status != Unverifiable || !strings.Contains(mapsCopyVerdict.Reason, "example.com/xseam/seam.probe is mutated") {
 		t.Fatalf("stdlib maps.Copy .Parallel verdict = %+v, want Unverifiable naming example.com/xseam/seam.probe", mapsCopyVerdict)
+	}
+}
+
+func TestLoadedPackageMatchesImportsRejectsClassAndPinFlips(t *testing.T) {
+	root := t.TempDir()
+	modCache := filepath.Join(root, "modcache")
+	appDir := filepath.Join(root, "app")
+	vendorDir := filepath.Join(appDir, "vendor", "example.com", "dep")
+	localReplaceDir := filepath.Join(root, "localdep")
+	pinnedModDir := filepath.Join(modCache, "example.com", "dep@v1.0.0")
+	pinnedPkgDir := filepath.Join(pinnedModDir, "sub")
+	for _, d := range []string{modCache, appDir, vendorDir, localReplaceDir, pinnedPkgDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "go.mod"), []byte("module example.com/app\n\ngo 1.26\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env := append(os.Environ(), "GOMODCACHE="+modCache)
+	hasher, err := closure.NewAt(context.Background(), &gotool.EnvReader{Dir: appDir, Env: env})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appNode := closure.GraphPackage{
+		ImportPath: "example.com/app",
+		PkgPath:    "example.com/app",
+		Class:      closure.MutableLocalPackage,
+		Imports:    []string{"fmt", "example.com/dep/sub"},
+	}
+	pinnedNodes := map[string]closure.GraphPackage{
+		"example.com/app": appNode,
+		"fmt":             {ImportPath: "fmt", PkgPath: "fmt", Class: closure.StandardPackage},
+		"example.com/dep/sub": {
+			ImportPath: "example.com/dep/sub",
+			PkgPath:    "example.com/dep/sub",
+			Class:      closure.PinnedPackage,
+			Pin:        "example.com/dep@v1.0.0",
+		},
+	}
+
+	validPinnedPkg := &packages.Package{
+		PkgPath: "example.com/app",
+		Imports: map[string]*packages.Package{
+			"fmt": {PkgPath: "fmt"},
+			"example.com/dep/sub": {
+				PkgPath: "example.com/dep/sub",
+				Dir:     pinnedPkgDir,
+				Module:  &packages.Module{Path: "example.com/dep", Version: "v1.0.0", Dir: pinnedModDir},
+			},
+		},
+	}
+	if !loadedPackageMatchesImports(hasher, validPinnedPkg, appNode, pinnedNodes) {
+		t.Fatal("valid PinnedPackage import rejected")
+	}
+
+	// PinnedPackage pre-load -> vendored mid-load (Module.Dir == "", Dir in vendor/).
+	vendoredFlip := &packages.Package{
+		PkgPath: "example.com/app",
+		Imports: map[string]*packages.Package{
+			"fmt": {PkgPath: "fmt"},
+			"example.com/dep/sub": {
+				PkgPath: "example.com/dep/sub",
+				Dir:     vendorDir,
+				Module:  &packages.Module{Path: "example.com/dep", Version: "v1.0.0", Dir: ""},
+			},
+		},
+	}
+	if loadedPackageMatchesImports(hasher, vendoredFlip, appNode, pinnedNodes) {
+		t.Fatal("PinnedPackage -> vendor flip accepted")
+	}
+
+	// PinnedPackage pre-load -> local replace mid-load (Dir outside modCache).
+	replaceFlip := &packages.Package{
+		PkgPath: "example.com/app",
+		Imports: map[string]*packages.Package{
+			"fmt": {PkgPath: "fmt"},
+			"example.com/dep/sub": {
+				PkgPath: "example.com/dep/sub",
+				Dir:     localReplaceDir,
+				Module: &packages.Module{
+					Path:    "example.com/dep",
+					Version: "v1.0.0",
+					Dir:     localReplaceDir,
+					Replace: &packages.Module{Path: "../localdep", Dir: localReplaceDir},
+				},
+			},
+		},
+	}
+	if loadedPackageMatchesImports(hasher, replaceFlip, appNode, pinnedNodes) {
+		t.Fatal("PinnedPackage -> local replace flip accepted")
+	}
+
+	// PinnedPackage pre-load -> nil Module stub rejected.
+	nilModFlip := &packages.Package{
+		PkgPath: "example.com/app",
+		Imports: map[string]*packages.Package{
+			"fmt":                 {PkgPath: "fmt"},
+			"example.com/dep/sub": {PkgPath: "example.com/dep/sub", Dir: pinnedPkgDir},
+		},
+	}
+	if loadedPackageMatchesImports(hasher, nilModFlip, appNode, pinnedNodes) {
+		t.Fatal("PinnedPackage with nil Module accepted")
+	}
+
+	// MutableLocalPackage pre-load (vendored: Module != nil, Module.Dir == "", Dir in vendor/) accepted.
+	localNodes := map[string]closure.GraphPackage{
+		"example.com/app": appNode,
+		"fmt":             {ImportPath: "fmt", PkgPath: "fmt", Class: closure.StandardPackage},
+		"example.com/dep/sub": {
+			ImportPath: "example.com/dep/sub",
+			PkgPath:    "example.com/dep/sub",
+			Class:      closure.MutableLocalPackage,
+		},
+	}
+	if !loadedPackageMatchesImports(hasher, vendoredFlip, appNode, localNodes) {
+		t.Fatal("valid vendored MutableLocalPackage rejected")
+	}
+
+	// MutableLocalPackage pre-load -> GOMODCACHE mid-load (local replace/vendor removed) rejected.
+	if loadedPackageMatchesImports(hasher, validPinnedPkg, appNode, localNodes) {
+		t.Fatal("MutableLocalPackage -> PinnedPackage (GOMODCACHE) flip accepted")
+	}
+
+	// StandardPackage with non-nil Module rejected.
+	stdNonNilMod := &packages.Package{
+		PkgPath: "example.com/app",
+		Imports: map[string]*packages.Package{
+			"fmt":                 {PkgPath: "fmt", Module: &packages.Module{Path: "example.com/fmt", Dir: appDir}},
+			"example.com/dep/sub": vendoredFlip.Imports["example.com/dep/sub"],
+		},
+	}
+	if loadedPackageMatchesImports(hasher, stdNonNilMod, appNode, localNodes) {
+		t.Fatal("StandardPackage with non-nil Module accepted")
 	}
 }

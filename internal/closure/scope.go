@@ -34,8 +34,9 @@ type AnalysisScope struct {
 	// type environment and every classification table depend on.
 	Toolchain, BuildConfig string
 	// SingleSubject and PackageProcess are the caller's execution
-	// attestations: they change what the derived facts record, so
-	// attested and unattested sessions never serve each other.
+	// attestations: they govern dynamic-state composition and scan-level
+	// reachability culprit discharges, so attested and unattested view scans
+	// never serve each other.
 	SingleSubject, PackageProcess bool
 	// Vouches are the caller's dynamic-state vouch identities; a vouch
 	// is load-bearing for the discharges a scan records.
@@ -81,7 +82,7 @@ func (s AnalysisScope) TestingScan() string {
 	return testingScanStrategy + "|" + s.guards()
 }
 
-const rootedFunctionsStrategy = "gofresh/rooted-functions@12"
+const rootedFunctionsStrategy = "gofresh/rooted-functions@13"
 
 // Rooted is the rooted-functions and binary-rooted-functions memo's scope:
 // its strategy version and the guard key (the code guards and the analyzing
@@ -94,36 +95,36 @@ func (s AnalysisScope) Rooted() string {
 }
 
 // Facts is the dynamic-state fact memo's scope: the fact-strategy
-// version, the guard key (the code guards and the analyzing frontend),
-// and the execution attestations, which change
-// what a fact records.
+// version and the guard key (the code guards and the analyzing frontend).
+// Per-package syntax/type facts are independent of execution attestations,
+// which apply during graph composition and scan-level reachability discharge.
 func (s AnalysisScope) Facts() string {
 	if s.FactStrategy == "" || !s.completeGuards() {
 		return ""
 	}
-	scope := s.FactStrategy + "|" + s.guards()
+	return s.FactStrategy + "|" + s.guards()
+}
+
+// Scan is the view scan memo's scope: the facts' scope joined with the
+// execution attestations (and the rooted-functions strategy when an
+// execution attestation runs reachability culprit discharges) and the
+// sorted vouch set, since both are load-bearing for the discharges an
+// entry records.
+func (s AnalysisScope) Scan() string {
+	scope := s.Facts()
+	if scope == "" {
+		return ""
+	}
 	if s.SingleSubject {
 		scope += "|single-subject-execution"
 	}
 	if s.PackageProcess {
 		scope += "|package-process-execution"
 	}
-	return scope
-}
-
-// Scan is the view scan memo's scope: the facts' scope joined with the
-// rooted-functions strategy when execution attestations run reachability
-// culprit discharges, and the sorted vouch set, since both are load-bearing
-// for the discharges an entry records.
-func (s AnalysisScope) Scan() string {
-	facts := s.Facts()
-	if facts == "" {
-		return ""
-	}
 	if s.SingleSubject || s.PackageProcess {
-		facts += "|" + rootedFunctionsStrategy
+		scope += "|" + rootedFunctionsStrategy
 	}
 	keys := append([]string(nil), s.Vouches...)
 	sort.Strings(keys)
-	return facts + "|vouches:" + strings.Join(keys, ",")
+	return scope + "|vouches:" + strings.Join(keys, ",")
 }
