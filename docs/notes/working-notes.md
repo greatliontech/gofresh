@@ -859,3 +859,18 @@ All findings are tracked in `docs/issues/*.md` and sequenced into 9 isolated, co
   - `F5 (LOW)`: Updated `Chunks 1–6` -> `Chunks 1–7` in `closure-and-toolchain-file-decomposition.md` and `Chunks 2–8` / `Chunk 8` -> `Chunks 2–9` / `Chunk 9` in `working-notes.md` Section 8.
   - `F6 (NIT)`: Included `FuncAuditTarget` plain-call propagation and `.stipulator/policy.textproto` comment alignment in `dynstate-flowir-kernel-and-summary-splits.md` Resolution Scope.
 - **Bottom-Up Plan & Issues Adversarial Review Round 2 (`dfb0d0d7-49d5-4bcc-b0c3-dee5eb8451a6`)**: `ZERO FINDINGS` across `docs/plans/plan.md`, `docs/issues/`, and `docs/notes/working-notes.md`.
+
+#### `gofresh` Chunk 2 Clean-Tree Execution & Adversarial Review Dispositions (`e511cccc-6edb-4816-9892-11db602702b7`, `2026-11-13`)
+- **Round 1 Dispositions (4 findings, all confirmed & fixed)**:
+  - `F1 (MEDIUM)`: Added `(*Hasher).moduleGraphInputs` / `moduleGraphDigest` (`internal/closure/dynamicstate.go`) folding `go.mod`, `go.sum`, `vendor/modules.txt`, `go.work`, `go.work.sum`, local `replace`/`use` targets, and ancestor sentinels (rejecting `-modfile`) into `MutableFactKeys`, plus `loadedPackageMatchesImports` in `scan.go`.
+  - `F2 (MEDIUM)`: Added `pkg.CompiledGoFiles` to `loadedPackageMatchesFiles` (`scan.go:623`) so mid-load `import "C"` cgo additions are rejected.
+  - `F3 (LOW)`: Guarded `storeScanFacts` (`scan.go:205-208`) against mid-load and mid-discharge TOCTOU edits.
+  - `F4 (NIT)`: Removed unused `infoNamed` parameter from `verifyMemoFunctionBody` (`internal/dynstate/discharges_memo.go`).
+- **Round 2 Dispositions (3 findings + 1 consolidation candidate, all confirmed & fixed/scheduled)**:
+  - `R2-F1 (MEDIUM)`: Replaced `SnapshotRecordedDigests` (`h.contents == nil` prior to `resetCallScope()`) with `TreeDigestSnapshot` + `(*Hasher).SnapshotScanInputs` + `(TreeDigestSnapshot).MatchesDisk()` (`internal/closure/dynamicstate.go`, reading `h.fileDigests`, `moduleGraphInputs`, `pkgDirs`, and `wholeTrees`, failing closed on zero value and `-modfile`), and marked unmatched loaded base packages and requested-view test variants (`!ok` in `nodesByListing`) as `drifted` while folding `extraVariantFacts` into `coneFacts` (`scan.go`).
+  - `R2-F2 (MEDIUM)`: Extended `loadedPackageMatchesImports` (`scan.go`) with `(*Hasher).IsPinnedDir` checks across `PinnedPackage`, `MutableLocalPackage`, and `StandardPackage` to catch `PinnedPackage` <-> vendored/local-`replace`/`GOMODCACHE` flips.
+  - `R2-F3 (LOW)`: Removed `if h.dir != ""` in `moduleGraphInputs` (`internal/closure/dynamicstate.go`), resolving `filepath.Clean(h.dir)` via `filepath.Abs` unconditionally so `reader.Dir == ""` tracks `go.work` and ancestor `go.mod` sentinels.
+  - `R2-C1 (LOW, consolidation)`: Scheduled unifying `(*Hasher).moduleGraphInputs` and `(*Hasher).listingInputs` onto one shared `package closure` module/workspace collector in Chunk 5 (`docs/plans/plan.md` and `docs/issues/listing-memo-nested-workspace-absent-gomod.md`).
+- **Round 3 Disposition (1 finding, confirmed & fixed)**:
+  - `R3-F1 (LOW)`: Extracted shared `recordPackageDirInputs` in `internal/closure/listingmemo.go` (called by both `listingInputs` and `SnapshotScanInputs`), recording regular `listingSourceExts` byte digests (including build-tag-excluded files) and `embedRoots` directory trees.
+- **Round 4 Adversarial Review**: `ZERO FINDINGS`. Cross-OS `go vet`, `stipulator verify --no-test` (`917 bindings, 0 stale, 0 gaps, 0 moved`), full plain + `-short -race` suites across all 25 packages, and 8 `gomutant ephemeral` probes all passed/killed cleanly.
