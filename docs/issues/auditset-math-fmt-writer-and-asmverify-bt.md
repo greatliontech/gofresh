@@ -2,7 +2,7 @@
 
 - **Status:** Open
 - **Governing contract:** [`docs/specs/closure.md`](../specs/closure.md) (`REQ-closure-observability-toolchain-key`, `REQ-closure-observability-audited-set`, `REQ-closure-observability-entropy`, `REQ-closure-observability-writer-sink`, `REQ-closure-blindspot`, `REQ-fresh-dependency-identities`), [`docs/specs/purity.md`](../specs/purity.md)
-- **Lands:** Chunk 4 in [`docs/plans/plan.md`](../plans/plan.md)
+- **Lands:** Chunk 6 in [`docs/plans/plan.md`](../plans/plan.md)
 
 ## Problem
 

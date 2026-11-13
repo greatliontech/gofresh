@@ -2,7 +2,7 @@
 
 - **Status:** Open
 - **Governing contract:** [`docs/specs/closure.md`](../specs/closure.md) (`REQ-closure-analysis`, `REQ-closure-observability-toolchain-key`)
-- **Lands:** Chunk 8 in [`docs/plans/plan.md`](../plans/plan.md)
+- **Lands:** Chunk 9 in [`docs/plans/plan.md`](../plans/plan.md)
 
 ## Problem
 
@@ -17,4 +17,4 @@ Seven files across `internal/closure` and `internal/closure/internal/toolchain` 
 
 ## Resolution Scope
 
-Decompose each file strictly within its existing package (`package closure` and `package toolchain`, keeping stipulator-bound `Hasher.ComputeObservabilityBatch` and `observableCallEffect` in `package closure`) along the responsibility boundaries above (`analyzer_effects.go`, `analyzer_types.go`, `attribution_summary.go`, `observability_flag.go`, `dynamic_provenance.go`, `attribution_open_closure.go`, `attribution_completeness.go`, `audit_os_file_sink.go`, `audit_testing_logfile.go`) after Chunks 1–6 semantic changes have landed and stabilized.
+Decompose each file strictly within its existing package (`package closure` and `package toolchain`, keeping stipulator-bound `Hasher.ComputeObservabilityBatch` and `observableCallEffect` in `package closure`) along the responsibility boundaries above (`analyzer_effects.go`, `analyzer_types.go`, `attribution_summary.go`, `observability_flag.go`, `dynamic_provenance.go`, `attribution_open_closure.go`, `attribution_completeness.go`, `audit_os_file_sink.go`, `audit_testing_logfile.go`) after Chunks 1–7 semantic changes have landed and stabilized.

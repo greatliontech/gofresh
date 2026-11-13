@@ -2,7 +2,7 @@
 
 - **Status:** Open
 - **Governing contract:** [`docs/specs/guards.md`](../specs/guards.md), [`docs/specs/closure.md`](../specs/closure.md) (`REQ-fresh-dependency-identities`)
-- **Lands:** Chunk 3 in [`docs/plans/plan.md`](../plans/plan.md)
+- **Lands:** Chunk 5 in [`docs/plans/plan.md`](../plans/plan.md)
 
 ## Problem
 

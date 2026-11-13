@@ -2,7 +2,7 @@
 
 - **Status:** Open
 - **Governing contract:** [`docs/specs/runtime-inputs.md`](../specs/runtime-inputs.md) (`REQ-inputs-observation-disposition`, `REQ-inputs-path-congruence`, `REQ-inputs-exclusions`, `REQ-inputs-unbounded`), [`docs/specs/evidence.md`](../specs/evidence.md) (`REQ-fresh-built-unit`, `REQ-fresh-final-evidence-selection`), [`docs/specs/closure.md`](../specs/closure.md) (`REQ-closure-observability-toolchain-key`)
-- **Lands:** Chunk 5 in [`docs/plans/plan.md`](../plans/plan.md)
+- **Lands:** Chunk 7 in [`docs/plans/plan.md`](../plans/plan.md)
 
 ## Problem
 

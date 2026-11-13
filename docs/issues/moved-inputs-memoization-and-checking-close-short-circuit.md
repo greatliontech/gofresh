@@ -2,7 +2,7 @@
 
 - **Status:** Open
 - **Governing contract:** [`docs/specs/evidence.md`](../specs/evidence.md) (`REQ-fresh-result-model`, `REQ-fresh-checking-unit`), [`docs/specs/runtime-inputs.md`](../specs/runtime-inputs.md), [`docs/specs/purity.md`](../specs/purity.md) (`REQ-purity-override`)
-- **Lands:** Chunk 6 in [`docs/plans/plan.md`](../plans/plan.md)
+- **Lands:** Chunk 8 in [`docs/plans/plan.md`](../plans/plan.md)
 
 ## Problem
 
