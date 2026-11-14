@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
@@ -32,7 +33,18 @@ func boundValueLeakFreeJudged(
 	fieldWants map[syntaxutil.FieldPosKey]bool,
 	elemWants map[syntaxutil.ElemParamUse]bool,
 ) bool {
-	return boundValueJudged(audited, p, roots, body, wants, returns, methodWants, fieldWants, elemWants, false)
+	return boundValueJudged(audited, p, roots, body, wants, returns, methodWants, fieldWants, elemWants, false, false)
+}
+
+func boundValueClosureEnvLeakFreeJudged(
+	audited bool,
+	p *packages.Package,
+	roots map[types.Object]bool,
+	body ast.Node,
+	wants map[syntaxutil.ParamKey]bool,
+	methodWants map[syntaxutil.FuncKey]bool,
+) bool {
+	return boundValueJudged(audited, p, roots, body, wants, nil, methodWants, nil, nil, false, true)
 }
 
 func boundValueRetentionFreeJudged(
@@ -43,7 +55,7 @@ func boundValueRetentionFreeJudged(
 	wants map[syntaxutil.ParamKey]bool,
 	methodWants map[syntaxutil.FuncKey]bool,
 ) bool {
-	return boundValueJudged(audited, p, roots, body, wants, nil, methodWants, nil, nil, true)
+	return boundValueJudged(audited, p, roots, body, wants, nil, methodWants, nil, nil, true, false)
 }
 
 func boundValueJudged(
@@ -57,459 +69,1572 @@ func boundValueJudged(
 	fieldWants map[syntaxutil.FieldPosKey]bool,
 	elemWants map[syntaxutil.ElemParamUse]bool,
 	tolerateRootedStores bool,
+	allowCapturedClosure bool,
 ) bool {
 	if p == nil || p.TypesInfo == nil || body == nil || len(roots) == 0 {
 		return false
 	}
-	goCalls := map[*ast.CallExpr]bool{}
-	goIdents := map[ast.Node]bool{}
-	litReturns := map[*ast.ReturnStmt]bool{}
-	calleeReads := map[ast.Node]bool{}
-	ast.Inspect(body, func(n ast.Node) bool {
-		if call, ok := n.(*ast.CallExpr); ok {
-			for cur := syntaxutil.UnparenExpr(call.Fun); ; {
-				switch x := cur.(type) {
-				case *ast.SelectorExpr, *ast.Ident:
-					calleeReads[x] = true
-					goto doneCallee
-				case *ast.IndexExpr:
-					calleeReads[x] = true
-					cur = syntaxutil.UnparenExpr(x.X)
-				case *ast.IndexListExpr:
-					calleeReads[x] = true
-					cur = syntaxutil.UnparenExpr(x.X)
-				default:
-					goto doneCallee
+	for r := range roots {
+		if r == nil || refconfine.TypeReachesSyncNoCopyByValue(r.Type()) {
+			return false
+		}
+	}
+	lowered := flowir.LowerNode(p.TypesInfo, p.Types, body)
+	if lowered == nil {
+		return false
+	}
+	eng := &confinementEngine{
+		audited:              audited,
+		p:                    p,
+		rootBody:             lowered,
+		roots:                roots,
+		tainted:              map[types.Object]bool{},
+		tolerateRootedStores: tolerateRootedStores,
+		allowCapturedClosure: allowCapturedClosure,
+		wants:                wants,
+		returns:              returns,
+		methodWants:          methodWants,
+		fieldWants:           fieldWants,
+		elemWants:            elemWants,
+	}
+	return eng.run()
+}
+
+type valueEvalMode uint8
+
+const (
+	modeGeneral valueEvalMode = iota
+	modeGovernedBindOrReturn
+	modeBlankDiscard
+)
+
+type confinementEngine struct {
+	audited              bool
+	p                    *packages.Package
+	rootBody             *flowir.Body
+	roots                map[types.Object]bool
+	tainted              map[types.Object]bool
+	externalReaching     map[types.Object]bool
+	tolerateRootedStores bool
+	allowCapturedClosure bool
+
+	// Bound-value deferral sinks.
+	wants       map[syntaxutil.ParamKey]bool
+	returns     *bool
+	methodWants map[syntaxutil.FuncKey]bool
+	fieldWants  map[syntaxutil.FieldPosKey]bool
+	elemWants   map[syntaxutil.ElemParamUse]bool
+
+	// Receiver read-only mode configuration.
+	recvMode          bool
+	recvObj           types.Object
+	methods           map[string]methodBodyEntry
+	declared          map[string]bool
+	declaredByName    map[string][]string
+	bodyless          map[string]bool
+	closedFields      map[*types.Var][]string
+	admittedOnceDo    map[*ast.CallExpr]bool
+	recordMethodChain func(target string)
+}
+
+type methodBodyEntry struct {
+	decl *ast.FuncDecl
+	recv *ast.Ident
+}
+
+func (e *confinementEngine) run() bool {
+	e.propagateTaint()
+	if e.tolerateRootedStores {
+		e.propagateExternalReaching()
+	}
+	return e.checkBody(e.rootBody, true, false)
+}
+
+func (e *confinementEngine) isRootOrTainted(obj types.Object) bool {
+	return obj != nil && (e.roots[obj] || e.tainted[obj])
+}
+
+func (e *confinementEngine) placeIsRooted(pl flowir.Place) bool {
+	if pl.Obj != nil {
+		return e.isRootOrTainted(pl.Obj)
+	}
+	if pl.Root == flowir.RootTransient && pl.Base != nil {
+		return e.valueIsRooted(pl.Base) || (e.recvMode && e.isGovernableRecvCall(pl.Base))
+	}
+	return false
+}
+
+func (e *confinementEngine) valueIsRooted(v *flowir.Value) bool {
+	if v == nil {
+		return false
+	}
+	switch v.Kind {
+	case flowir.ValPlace:
+		return e.placeIsRooted(v.Place)
+	case flowir.ValAddrOf:
+		return e.placeIsRooted(v.AddrPlace)
+	case flowir.ValMethodVal:
+		return e.valueIsRooted(v.Recv) || (v.HasRecvPlace && e.placeIsRooted(v.RecvPlace))
+	case flowir.ValConvert:
+		return e.valueIsRooted(v.Arg)
+	case flowir.ValChanRecv:
+		return e.valueIsRooted(v.Chan)
+	default:
+		return false
+	}
+}
+
+func (e *confinementEngine) isMethodVal(v *flowir.Value) bool {
+	if v == nil {
+		return false
+	}
+	if v.Kind == flowir.ValMethodVal {
+		return true
+	}
+	if v.Kind == flowir.ValConvert {
+		return e.isMethodVal(v.Arg)
+	}
+	return false
+}
+
+// isGovernableRecvCall reports whether v is a method call on a receiver-rooted
+// expression targeting an in-package sibling, unexported interface method, or
+// closed-world interface field on recvObj.
+func (e *confinementEngine) isGovernableRecvCall(v *flowir.Value) bool {
+	if !e.recvMode || v == nil || v.Kind != flowir.ValCall || v.CallKind != flowir.CallMethod || v.IsMethodExprCall {
+		return false
+	}
+	if !e.valueIsRooted(v.Recv) || v.CalleeFunc == nil || v.Selection == nil || v.CallAST == nil {
+		return false
+	}
+	if v.CalleeFunc.Pkg() != e.p.Types {
+		return false
+	}
+	sel, ok := syntaxutil.UnwrapCallee(v.CallAST.Fun).(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	target := syntaxutil.RecvTypeNameOf(e.p, sel) + "." + v.CalleeFunc.Name()
+	if _, sibling := e.methods[target]; sibling {
+		return true
+	}
+	if _, ok := unexportedDispatchTargets(e.p, v.Selection, v.CalleeFunc, e.declaredByName, e.bodyless); ok {
+		return true
+	}
+	if !e.bodyless[v.CalleeFunc.Name()] {
+		if _, ok := closedFieldDispatchTargets(e.p.TypesInfo, e.recvObj, sel, v.CalleeFunc.Name(), e.closedFields, e.declared); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *confinementEngine) isSyncOnceCall(v *flowir.Value) bool {
+	if v == nil || v.Kind != flowir.ValCall || v.CallKind != flowir.CallMethod || v.IsMethodExprCall {
+		return false
+	}
+	if len(v.Args) != 1 || v.Args[0] == nil || v.Args[0].Kind != flowir.ValMakeClosure || v.Args[0].Closure == nil {
+		return false
+	}
+	if e.recvMode {
+		return v.CallAST != nil && e.admittedOnceDo[v.CallAST]
+	}
+	if !refconfine.AuditedOnceDo(e.audited, v.CalleeFunc) {
+		return false
+	}
+	if !v.HasRecvPlace || !refconfine.InPlaceSyncReceiver(e.p.TypesInfo, v.RecvPlace.Raw) {
+		return false
+	}
+	if e.valueIsRooted(v.Recv) {
+		return e.tolerateRootedStores
+	}
+	return true
+}
+
+func (e *confinementEngine) valueSuppliesRoot(v *flowir.Value) bool {
+	if v == nil {
+		return false
+	}
+	if v.Type != nil &&
+		!refconfine.TypeHandsOutMutableReach(v.Type) &&
+		!refconfine.TypeCarriesSignature(v.Type) &&
+		!refconfine.TypeReachesSyncNoCopyByValue(v.Type) {
+		return false
+	}
+	if e.valueIsRooted(v) {
+		return true
+	}
+	switch v.Kind {
+	case flowir.ValInvalid:
+		return true
+	case flowir.ValPlace:
+		if v.Place.Root == flowir.RootTransient {
+			return e.valueSuppliesRoot(v.Place.Base)
+		}
+		return false
+	case flowir.ValAddrOf:
+		if v.AddrPlace.Root == flowir.RootTransient {
+			return e.valueSuppliesRoot(v.AddrPlace.Base)
+		}
+		return false
+	case flowir.ValMethodVal:
+		return e.valueSuppliesRoot(v.Recv)
+	case flowir.ValChanRecv:
+		return e.valueSuppliesRoot(v.Chan)
+	case flowir.ValConvert:
+		return e.valueSuppliesRoot(v.Arg)
+	case flowir.ValAllocFresh:
+		switch v.AllocKind {
+		case flowir.AllocMake, flowir.AllocBuiltinNewType:
+			return false
+		case flowir.AllocBuiltinNewExpr:
+			return len(v.Args) > 0 && e.valueSuppliesRoot(v.Args[0])
+		case flowir.AllocCompositeLit:
+			for i := range v.CompositeElts {
+				elt := &v.CompositeElts[i]
+				if e.valueSuppliesRoot(elt.MapKey) || e.valueSuppliesRoot(elt.Value) {
+					return true
 				}
 			}
-		doneCallee:
+			return false
 		}
-		return true
-	})
-	ast.Inspect(body, func(n ast.Node) bool {
-		switch n := n.(type) {
-		case *ast.GoStmt:
-			ast.Inspect(n, func(inner ast.Node) bool {
-				if call, ok := inner.(*ast.CallExpr); ok {
-					goCalls[call] = true
+	case flowir.ValMakeClosure:
+		if v.Closure != nil {
+			for fv := range v.Closure.FreeVars {
+				if e.isRootOrTainted(fv) {
+					return true
 				}
-				if lit, ok := inner.(*ast.FuncLit); ok {
-					ast.Inspect(lit, func(deep ast.Node) bool {
-						if call, ok := deep.(*ast.CallExpr); ok {
-							goCalls[call] = true
+			}
+		}
+		return false
+	case flowir.ValCall:
+		if e.recvMode && e.isGovernableRecvCall(v) {
+			return !refconfine.InstantiatedResultsHandOutNothing(e.audited, v.Selection.Type())
+		}
+		if v.CallKind == flowir.CallBuiltin && v.BuiltinName == "append" {
+			for _, a := range v.Args {
+				if e.valueSuppliesRoot(a) {
+					return true
+				}
+			}
+		}
+		if v.CallKind == flowir.CallIIFE && v.IIFE != nil {
+			supplied := false
+			v.IIFE.ForEachSyncOp(func(op *flowir.Op) bool {
+				if op.Kind == flowir.OpReturn {
+					for _, r := range op.Results {
+						if e.valueSuppliesRoot(r) {
+							supplied = true
+							return false
 						}
-						if ident, ok := deep.(*ast.Ident); ok {
-							goIdents[ident] = true
+					}
+				}
+				return true
+			})
+			return supplied
+		}
+	case flowir.ValCompositeExpr:
+		for _, a := range v.Args {
+			if e.valueSuppliesRoot(a) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (e *confinementEngine) propagateTaint() {
+	eligible := func(v *types.Var) bool {
+		return v != nil && !v.IsField() && !e.roots[v] && refconfine.CallResultHandsOut(v.Type())
+	}
+	markPlaceBase := func(pl flowir.Place) bool {
+		if pl.Obj != nil && eligible(pl.Obj) && !e.tainted[pl.Obj] {
+			e.tainted[pl.Obj] = true
+			return true
+		}
+		return false
+	}
+	for changed := true; changed; {
+		changed = false
+		var visitBody func(b *flowir.Body)
+		var visitVal func(v *flowir.Value)
+		visitVal = func(v *flowir.Value) {
+			if v == nil {
+				return
+			}
+			if v.Kind == flowir.ValCall {
+				if v.CallKind == flowir.CallBuiltin && v.BuiltinName == "copy" && len(v.Args) == 2 {
+					if e.valueSuppliesRoot(v.Args[1]) && v.Args[0] != nil && v.Args[0].Kind == flowir.ValPlace {
+						if markPlaceBase(v.Args[0].Place) {
+							changed = true
 						}
+					}
+				}
+				if v.CallKind == flowir.CallIIFE && v.IIFE != nil {
+					for i, arg := range v.Args {
+						if pIdx, ok := v.ParamIndexForArg(i); ok && pIdx < len(v.IIFE.Params) {
+							if pv := v.IIFE.Params[pIdx]; eligible(pv) && !e.tainted[pv] && e.valueSuppliesRoot(arg) {
+								e.tainted[pv] = true
+								changed = true
+							}
+						}
+					}
+					visitBody(v.IIFE)
+				} else if e.isSyncOnceCall(v) {
+					visitBody(v.Args[0].Closure)
+				}
+			}
+			v.ForEachChildValue(func(child *flowir.Value) bool {
+				visitVal(child)
+				return true
+			})
+		}
+		visitBody = func(b *flowir.Body) {
+			if b == nil {
+				return
+			}
+			b.ForEachSyncOp(func(op *flowir.Op) bool {
+				switch op.Kind {
+				case flowir.OpAssign:
+					op.ForEachAssignPair(func(_ int, dst flowir.Place, _ bool, src *flowir.Value) bool {
+						if src != nil && e.valueSuppliesRoot(src) {
+							if markPlaceBase(dst) {
+								changed = true
+							}
+						}
+						if mapPlace, keyVal, isMapWrite := dst.AsMapWrite(); isMapWrite && keyVal != nil && e.valueSuppliesRoot(keyVal) {
+							if markPlaceBase(mapPlace) {
+								changed = true
+							}
+						}
+						dst.ForEachChildValue(func(cv *flowir.Value) bool {
+							visitVal(cv)
+							return true
+						})
 						return true
 					})
+					for _, src := range op.Srcs {
+						visitVal(src)
+					}
+				case flowir.OpTypeSwitchBind:
+					if eligible(op.SwitchDst) && !e.tainted[op.SwitchDst] && e.valueSuppliesRoot(op.SwitchSrc) {
+						e.tainted[op.SwitchDst] = true
+						changed = true
+					}
+					visitVal(op.SwitchSrc)
+				case flowir.OpChanSend:
+					if e.valueSuppliesRoot(op.SendVal) {
+						if markPlaceBase(op.ChanPlace) {
+							changed = true
+						}
+					}
+					visitVal(op.ChanVal)
+					visitVal(op.SendVal)
+				case flowir.OpReturn:
+					for _, r := range op.Results {
+						visitVal(r)
+					}
+				case flowir.OpDefer:
+					visitVal(op.Call)
+				case flowir.OpExpr:
+					visitVal(op.Expr)
+				}
+				return true
+			})
+		}
+		visitBody(e.rootBody)
+	}
+}
+
+func (e *confinementEngine) isExternalSeedVar(v *types.Var) bool {
+	if v == nil || v.IsField() || e.roots[v] {
+		return false
+	}
+	if e.externalReaching[v] {
+		return true
+	}
+	isPkgGlobal := v.Pkg() != nil && v.Parent() == v.Pkg().Scope()
+	isOuter := v.Pos() < e.rootBody.BodyStart || v.Pos() > e.rootBody.BodyEnd
+	if !isPkgGlobal && !isOuter {
+		return false
+	}
+	t := v.Type()
+	return t == nil ||
+		refconfine.TypeHandsOutMutableReach(t) ||
+		refconfine.TypeMayCarryUnknownDynamic(e.audited, t) ||
+		refconfine.TypeCarriesSignature(t)
+}
+
+func (e *confinementEngine) valueReachesExternal(v *flowir.Value) bool {
+	if v == nil {
+		return false
+	}
+	found := false
+	var walk func(cur *flowir.Value)
+	walk = func(cur *flowir.Value) {
+		if found || cur == nil {
+			return
+		}
+		switch cur.Kind {
+		case flowir.ValPlace:
+			if cur.Place.Obj != nil && !e.roots[cur.Place.Obj] && e.isExternalSeedVar(cur.Place.Obj) {
+				found = true
+				return
+			}
+		case flowir.ValAddrOf:
+			if vObj := cur.AddrPlace.Obj; vObj != nil && !e.roots[vObj] {
+				if e.externalReaching[vObj] || vObj.Pos() < e.rootBody.BodyStart || vObj.Pos() > e.rootBody.BodyEnd ||
+					(vObj.Pkg() != nil && vObj.Parent() == vObj.Pkg().Scope()) {
+					found = true
+					return
+				}
+			}
+		case flowir.ValMethodVal:
+			if cur.AutoAddr && cur.HasRecvPlace && cur.RecvPlace.Obj != nil && !e.roots[cur.RecvPlace.Obj] {
+				vObj := cur.RecvPlace.Obj
+				if e.externalReaching[vObj] || vObj.Pos() < e.rootBody.BodyStart || vObj.Pos() > e.rootBody.BodyEnd ||
+					(vObj.Pkg() != nil && vObj.Parent() == vObj.Pkg().Scope()) {
+					found = true
+					return
+				}
+			}
+		case flowir.ValChanRecv:
+			found = true
+			return
+		case flowir.ValAllocFresh:
+			if cur.AllocKind == flowir.AllocMake || cur.AllocKind == flowir.AllocBuiltinNewType {
+				return
+			}
+		case flowir.ValMakeClosure:
+			if cur.Closure != nil {
+				for fv := range cur.Closure.FreeVars {
+					if e.isExternalSeedVar(fv) {
+						found = true
+						return
+					}
+				}
+			}
+			return
+		case flowir.ValCall:
+			ct := cur.Type
+			if ct == nil ||
+				refconfine.TypeHandsOutMutableReach(ct) ||
+				refconfine.TypeMayCarryUnknownDynamic(e.audited, ct) ||
+				refconfine.TypeCarriesSignature(ct) {
+				switch cur.CallKind {
+				case flowir.CallBuiltin:
+					switch cur.BuiltinName {
+					case "make":
+						return
+					case "append":
+						for _, a := range cur.Args {
+							walk(a)
+						}
+						return
+					default:
+						found = true
+						return
+					}
+				case flowir.CallPlain:
+					fk := syntaxutil.FuncKey{Pkg: cur.CalleePkg, Name: ""}
+					if cur.CalleeFunc != nil {
+						fk.Name = cur.CalleeFunc.Name()
+					}
+					if !auditedValuePlane[fk] {
+						found = true
+						return
+					}
+				default:
+					found = true
+					return
+				}
+			}
+		}
+		cur.ForEachChildValue(func(child *flowir.Value) bool {
+			walk(child)
+			return !found
+		})
+	}
+	walk(v)
+	return found
+}
+
+func (e *confinementEngine) propagateExternalReaching() {
+	e.externalReaching = map[types.Object]bool{}
+	markVar := func(v *types.Var) bool {
+		if v != nil && !v.IsField() && !e.roots[v] && !e.externalReaching[v] {
+			e.externalReaching[v] = true
+			return true
+		}
+		return false
+	}
+	for changed := true; changed; {
+		changed = false
+		var visitBody func(b *flowir.Body)
+		var visitVal func(v *flowir.Value)
+		visitVal = func(v *flowir.Value) {
+			if v == nil {
+				return
+			}
+			if v.Kind == flowir.ValCall {
+				if v.CallKind == flowir.CallBuiltin && v.BuiltinName == "copy" && len(v.Args) == 2 {
+					if e.valueReachesExternal(v.Args[1]) && v.Args[0] != nil && v.Args[0].Kind == flowir.ValPlace {
+						if markVar(v.Args[0].Place.Obj) {
+							changed = true
+						}
+					}
+				}
+				if v.CallKind == flowir.CallIIFE && v.IIFE != nil {
+					for i, arg := range v.Args {
+						if pIdx, ok := v.ParamIndexForArg(i); ok && pIdx < len(v.IIFE.Params) {
+							if pv := v.IIFE.Params[pIdx]; pv != nil && e.valueReachesExternal(arg) && markVar(pv) {
+								changed = true
+							}
+						}
+					}
+					visitBody(v.IIFE)
+				} else if e.isSyncOnceCall(v) {
+					visitBody(v.Args[0].Closure)
+				}
+			}
+			v.ForEachChildValue(func(child *flowir.Value) bool {
+				visitVal(child)
+				return true
+			})
+		}
+		visitBody = func(b *flowir.Body) {
+			if b == nil {
+				return
+			}
+			b.ForEachSyncOp(func(op *flowir.Op) bool {
+				switch op.Kind {
+				case flowir.OpAssign:
+					op.ForEachAssignPair(func(_ int, dst flowir.Place, _ bool, src *flowir.Value) bool {
+						if src != nil && e.valueReachesExternal(src) && markVar(dst.Obj) {
+							changed = true
+						}
+						if mapPlace, keyVal, isMapWrite := dst.AsMapWrite(); isMapWrite && keyVal != nil && e.valueReachesExternal(keyVal) {
+							if markVar(mapPlace.Obj) {
+								changed = true
+							}
+						}
+						dst.ForEachChildValue(func(cv *flowir.Value) bool {
+							visitVal(cv)
+							return true
+						})
+						return true
+					})
+					for _, src := range op.Srcs {
+						visitVal(src)
+					}
+				case flowir.OpTypeSwitchBind:
+					if e.valueReachesExternal(op.SwitchSrc) && markVar(op.SwitchDst) {
+						changed = true
+					}
+					visitVal(op.SwitchSrc)
+				case flowir.OpChanSend:
+					if e.valueReachesExternal(op.SendVal) && markVar(op.ChanPlace.Obj) {
+						changed = true
+					}
+					visitVal(op.ChanVal)
+					visitVal(op.SendVal)
+				case flowir.OpReturn:
+					for _, r := range op.Results {
+						visitVal(r)
+					}
+				case flowir.OpDefer:
+					visitVal(op.Call)
+				case flowir.OpExpr:
+					visitVal(op.Expr)
+				}
+				return true
+			})
+		}
+		visitBody(e.rootBody)
+	}
+}
+
+func (e *confinementEngine) valueTouchesAnyRoot(v *flowir.Value) bool {
+	if v == nil {
+		return false
+	}
+	hit := false
+	var walk func(cur *flowir.Value)
+	walk = func(cur *flowir.Value) {
+		if hit || cur == nil {
+			return
+		}
+		switch cur.Kind {
+		case flowir.ValPlace:
+			if cur.Place.Obj != nil && e.isRootOrTainted(cur.Place.Obj) {
+				hit = true
+				return
+			}
+		case flowir.ValAddrOf:
+			if cur.AddrPlace.Obj != nil && e.isRootOrTainted(cur.AddrPlace.Obj) {
+				hit = true
+				return
+			}
+		case flowir.ValMethodVal:
+			if cur.HasRecvPlace && cur.RecvPlace.Obj != nil && e.isRootOrTainted(cur.RecvPlace.Obj) {
+				hit = true
+				return
+			}
+		case flowir.ValMakeClosure:
+			if cur.Closure != nil {
+				for fv := range cur.Closure.FreeVars {
+					if e.isRootOrTainted(fv) {
+						hit = true
+						return
+					}
+				}
+			}
+		case flowir.ValCall:
+			if cur.CallKind == flowir.CallIIFE && cur.IIFE != nil {
+				for fv := range cur.IIFE.FreeVars {
+					if e.isRootOrTainted(fv) {
+						hit = true
+						return
+					}
+				}
+			}
+		}
+		cur.ForEachChildValue(func(child *flowir.Value) bool {
+			walk(child)
+			return !hit
+		})
+	}
+	walk(v)
+	return hit
+}
+
+func (e *confinementEngine) bodyTouchesAnyRoot(b *flowir.Body) bool {
+	if b == nil {
+		return false
+	}
+	for fv := range b.FreeVars {
+		if e.isRootOrTainted(fv) {
+			return true
+		}
+	}
+	hit := false
+	b.ForEachSyncOp(func(op *flowir.Op) bool {
+		switch op.Kind {
+		case flowir.OpAssign:
+			for i := range op.Dsts {
+				if op.Dsts[i].Obj != nil && e.isRootOrTainted(op.Dsts[i].Obj) {
+					hit = true
 					return false
 				}
-				return true
-			})
-		case *ast.FuncLit:
-			ast.Inspect(n, func(inner ast.Node) bool {
-				if ret, ok := inner.(*ast.ReturnStmt); ok {
-					litReturns[ret] = true
-				}
-				return true
-			})
-			return false
-		}
-		return true
-	})
-	carrierReaching := map[types.Object]bool{}
-	carrierReach := func(expr ast.Expr) bool {
-		if expr == nil {
-			return false
-		}
-		found := false
-		ast.Inspect(expr, func(m ast.Node) bool {
-			if found {
-				return false
-			}
-			if ident, ok := m.(*ast.Ident); ok {
-				if obj := p.TypesInfo.Uses[ident]; obj != nil {
-					if carrierReaching[obj] {
-						found = true
+				op.Dsts[i].ForEachChildValue(func(cv *flowir.Value) bool {
+					if e.valueTouchesAnyRoot(cv) {
+						hit = true
 						return false
 					}
-					if variable, ok := obj.(*types.Var); ok && variable.Pkg() != nil &&
-						variable.Parent() == variable.Pkg().Scope() &&
-						refconfine.TypeMayCarryUnknownDynamic(audited, variable.Type()) {
-						found = true
+					return true
+				})
+				if hit {
+					return false
+				}
+			}
+			for _, s := range op.Srcs {
+				if e.valueTouchesAnyRoot(s) {
+					hit = true
+					return false
+				}
+			}
+		case flowir.OpTypeSwitchBind:
+			if (op.SwitchDst != nil && e.isRootOrTainted(op.SwitchDst)) || e.valueTouchesAnyRoot(op.SwitchSrc) {
+				hit = true
+			}
+		case flowir.OpChanSend:
+			if (op.ChanPlace.Obj != nil && e.isRootOrTainted(op.ChanPlace.Obj)) ||
+				e.valueTouchesAnyRoot(op.ChanVal) || e.valueTouchesAnyRoot(op.SendVal) {
+				hit = true
+			}
+		case flowir.OpReturn:
+			if op.IsNaked {
+				for _, rv := range b.Results {
+					if e.isRootOrTainted(rv) {
+						hit = true
+						break
 					}
+				}
+			} else {
+				for _, r := range op.Results {
+					if e.valueTouchesAnyRoot(r) {
+						hit = true
+						break
+					}
+				}
+			}
+		case flowir.OpGo, flowir.OpDefer:
+			if e.valueTouchesAnyRoot(op.Call) {
+				hit = true
+			}
+		case flowir.OpExpr:
+			if e.valueTouchesAnyRoot(op.Expr) {
+				hit = true
+			}
+		}
+		return !hit
+	})
+	return hit
+}
+
+func (e *confinementEngine) placeMapKeysSmuggle(pl flowir.Place, allowEmptyCarrier bool) bool {
+	for i := range pl.Projs {
+		pr := &pl.Projs[i]
+		if pr.Kind != flowir.ProjIndex || pr.Key == nil || !syntaxutil.TypeMayBeMap(pr.BaseType) {
+			continue
+		}
+		var slotT types.Type
+		if mt, isMap := syntaxutil.UnderlyingType(pr.BaseType).(*types.Map); isMap {
+			slotT = mt.Key()
+		} else {
+			// Type parameter constrained by ~map[K]V: use key's static type.
+			slotT = pr.Key.Type
+		}
+		kt := pr.Key.Type
+		if slotT == nil || kt == nil ||
+			refconfine.TypeReachesSyncNoCopyByValue(slotT) || refconfine.TypeReachesSyncNoCopyByValue(kt) {
+			return true
+		}
+		if (refconfine.TypeMayCarryUnknownDynamic(e.audited, slotT) || refconfine.TypeCarriesSignature(slotT) ||
+			refconfine.TypeMayCarryUnknownDynamic(e.audited, kt) || refconfine.TypeCarriesSignature(kt)) &&
+			(!allowEmptyCarrier || !isCarrierEmptySlotStore(e.audited, e.p.TypesInfo, slotT, pr.Key.Raw)) {
+			return true
+		}
+		if (refconfine.TypeHandsOutMutableReach(slotT) || refconfine.TypeHandsOutMutableReach(kt)) &&
+			(!e.tolerateRootedStores || e.valueReachesExternal(pr.Key)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *confinementEngine) checkPlaceChildValues(pl flowir.Place) bool {
+	ok := true
+	if pl.Root == flowir.RootTransient && pl.Base != nil {
+		if e.placeIsRooted(pl) {
+			if !e.checkRootedReadOperand(pl.Base) {
+				return false
+			}
+		} else if !e.checkValue(pl.Base, modeGeneral) {
+			return false
+		}
+	}
+	for i := range pl.Projs {
+		pr := &pl.Projs[i]
+		if pr.Key != nil && !e.checkValue(pr.Key, modeGeneral) {
+			ok = false
+			break
+		}
+		if pr.Low != nil && !e.checkValue(pr.Low, modeGeneral) {
+			ok = false
+			break
+		}
+		if pr.High != nil && !e.checkValue(pr.High, modeGeneral) {
+			ok = false
+			break
+		}
+		if pr.Max != nil && !e.checkValue(pr.Max, modeGeneral) {
+			ok = false
+			break
+		}
+	}
+	return ok
+}
+
+func (e *confinementEngine) checkRootedReadOperand(v *flowir.Value) bool {
+	if v == nil {
+		return false
+	}
+	switch v.Kind {
+	case flowir.ValInvalid, flowir.ValMethodVal, flowir.ValAddrOf, flowir.ValChanRecv:
+		return false
+	case flowir.ValPlace:
+		return e.checkPlaceChildValues(v.Place)
+	case flowir.ValConvert:
+		if v.Type == nil || v.Arg == nil || v.Arg.Type == nil ||
+			syntaxutil.IsUnsafePointerType(v.Type) ||
+			refconfine.TypeReachesSyncNoCopyByValue(v.Type) ||
+			refconfine.TypeReachesSyncNoCopyByValue(v.Arg.Type) {
+			return false
+		}
+		if v.IsTypeAssert && refconfine.TypeCarriesSignature(v.Type) && !refconfine.TypeCarriesSignature(v.Arg.Type) {
+			return false
+		}
+		return e.checkRootedReadOperand(v.Arg)
+	case flowir.ValCall:
+		if e.recvMode && e.isGovernableRecvCall(v) {
+			return e.checkCall(v, true)
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+func (e *confinementEngine) isEscapingGlobalType(t types.Type) bool {
+	return t == nil ||
+		refconfine.TypeHandsOutMutableReach(t) ||
+		refconfine.TypeCarriesSignature(t) ||
+		refconfine.TypeReachesSyncNoCopyByValue(t)
+}
+
+func (e *confinementEngine) checkRootedStoreAllowed(op *flowir.Op, dst flowir.Place, isDef bool, src *flowir.Value, inOnceDo bool) bool {
+	if e.tolerateRootedStores {
+		switch op.AssignKind {
+		case flowir.AssignIncDec:
+			return !e.placeMapKeysSmuggle(dst, true)
+		case flowir.AssignRange:
+			return !isDef &&
+				dst.Type != nil &&
+				!refconfine.TypeMayCarryUnknownDynamic(e.audited, dst.Type) &&
+				!refconfine.CallResultHandsOut(dst.Type) &&
+				!refconfine.TypeReachesSyncNoCopyByValue(dst.Type) &&
+				!e.placeMapKeysSmuggle(dst, true)
+		case flowir.AssignPlain:
+			if dst.Type == nil || refconfine.TypeReachesSyncNoCopyByValue(dst.Type) {
+				return false
+			}
+			if refconfine.TypeMayCarryUnknownDynamic(e.audited, dst.Type) || refconfine.TypeCarriesSignature(dst.Type) {
+				if src == nil || !isCarrierEmptySlotStore(e.audited, e.p.TypesInfo, dst.Type, src.Raw) {
+					return false
+				}
+			}
+			if refconfine.TypeHandsOutMutableReach(dst.Type) {
+				if src == nil || e.valueReachesExternal(src) {
+					return false
+				}
+			}
+			return !e.placeMapKeysSmuggle(dst, true)
+		default:
+			return dst.Type != nil &&
+				!refconfine.TypeMayCarryUnknownDynamic(e.audited, dst.Type) &&
+				!refconfine.CallResultHandsOut(dst.Type) &&
+				!refconfine.TypeReachesSyncNoCopyByValue(dst.Type) &&
+				!e.placeMapKeysSmuggle(dst, true)
+		}
+	}
+	if e.recvMode && inOnceDo && op.TopLevelInBody && op.AssignKind != flowir.AssignRange {
+		if !refconfine.FillSelection(e.p.TypesInfo, dst.Raw) {
+			return false
+		}
+		if dst.Type == nil ||
+			refconfine.TypeMayCarryUnknownDynamic(e.audited, dst.Type) ||
+			refconfine.CallResultHandsOut(dst.Type) ||
+			refconfine.TypeReachesSyncNoCopyByValue(dst.Type) {
+			return false
+		}
+		return !e.placeMapKeysSmuggle(dst, false)
+	}
+	return false
+}
+
+func (e *confinementEngine) checkBody(b *flowir.Body, isTopBody bool, inOnceDo bool) bool {
+	if b == nil {
+		return false
+	}
+	for i := range b.Ops {
+		if !e.checkOp(&b.Ops[i], b, isTopBody, inOnceDo) {
+			return false
+		}
+	}
+	return true
+}
+
+func (e *confinementEngine) checkOp(op *flowir.Op, b *flowir.Body, isTopBody bool, inOnceDo bool) bool {
+	switch op.Kind {
+	case flowir.OpGo:
+		if op.Call == nil || op.Call.Kind != flowir.ValCall || op.Call.CallKind == flowir.CallBuiltin {
+			return !e.valueTouchesAnyRoot(op.Call)
+		}
+		if op.Call.CallKind == flowir.CallIIFE && (op.Call.IIFE == nil || e.bodyTouchesAnyRoot(op.Call.IIFE)) {
+			return false
+		}
+		if (op.Call.Recv != nil && e.valueIsRooted(op.Call.Recv)) ||
+			(op.Call.AutoAddrRecv && op.Call.HasRecvPlace && e.placeIsRooted(op.Call.RecvPlace)) ||
+			(op.Call.Callee != nil && e.valueIsRooted(op.Call.Callee)) {
+			return false
+		}
+		prevAllow := e.allowCapturedClosure
+		e.allowCapturedClosure = false
+		defer func() { e.allowCapturedClosure = prevAllow }()
+		if op.Call.Recv != nil && !e.checkValue(op.Call.Recv, modeGeneral) {
+			return false
+		}
+		if op.Call.Callee != nil && !e.checkValue(op.Call.Callee, modeGeneral) {
+			return false
+		}
+		for _, arg := range op.Call.Args {
+			if e.valueSuppliesRoot(arg) || !e.checkValue(arg, modeGeneral) {
+				return false
+			}
+		}
+		return true
+
+	case flowir.OpDefer:
+		return e.checkValue(op.Call, modeGeneral)
+
+	case flowir.OpBranch:
+		return true
+
+	case flowir.OpExpr:
+		return e.checkValue(op.Expr, modeGeneral)
+
+	case flowir.OpChanSend:
+		if e.placeIsRooted(op.ChanPlace) || e.valueIsRooted(op.ChanVal) {
+			return false
+		}
+		if !e.checkValue(op.ChanVal, modeGeneral) {
+			return false
+		}
+		return e.checkValue(op.SendVal, modeGeneral)
+
+	case flowir.OpTypeSwitchBind:
+		if e.valueIsRooted(op.SwitchSrc) || (e.recvMode && e.isGovernableRecvCall(op.SwitchSrc)) {
+			if e.isMethodVal(op.SwitchSrc) ||
+				op.SwitchSrc.Type == nil ||
+				refconfine.TypeReachesSyncNoCopyByValue(op.SwitchSrc.Type) ||
+				(op.SwitchDst != nil && (op.SwitchDst.Type() == nil ||
+					refconfine.TypeReachesSyncNoCopyByValue(op.SwitchDst.Type()) ||
+					(refconfine.TypeCarriesSignature(op.SwitchDst.Type()) && !refconfine.TypeCarriesSignature(op.SwitchSrc.Type)))) {
+				return false
+			}
+			return e.checkValue(op.SwitchSrc, modeGovernedBindOrReturn)
+		}
+		return e.checkValue(op.SwitchSrc, modeGeneral)
+
+	case flowir.OpReturn:
+		if op.IsNaked {
+			for _, resVar := range b.Results {
+				if resVar == nil || !e.isRootOrTainted(resVar) {
+					continue
+				}
+				synth := &flowir.Value{
+					Kind: flowir.ValPlace,
+					Type: resVar.Type(),
+					Place: flowir.Place{
+						Root: flowir.RootResult,
+						Obj:  resVar,
+						Type: resVar.Type(),
+					},
+				}
+				if !e.checkReturnResult(synth, isTopBody) {
+					return false
 				}
 			}
 			return true
-		})
-		return found
-	}
-	if tolerateRootedStores {
-		syntaxutil.PropagateLocalTaint(
-			p.TypesInfo,
-			body,
-			carrierReaching,
-			func(types.Object) bool { return true },
-			carrierReach,
-			carrierReach,
-		)
-	}
-	tainted := map[types.Object]bool{}
-	isRoot := func(expr ast.Expr) bool {
-		ident, ok := expr.(*ast.Ident)
-		if !ok {
-			return false
 		}
-		obj := p.TypesInfo.Uses[ident]
-		if obj == nil {
-			obj = p.TypesInfo.Defs[ident]
-		}
-		return obj != nil && (roots[obj] || tainted[obj])
-	}
-	rooted := func(expr ast.Expr) bool {
-		ident := syntaxutil.RootIdent(expr)
-		return ident != nil && isRoot(ident)
-	}
-	syntaxutil.PropagateLocalTaint(
-		p.TypesInfo,
-		body,
-		tainted,
-		func(obj types.Object) bool {
-			return !roots[obj] && (refconfine.TypeHandsOutMutableReach(obj.Type()) || refconfine.TypeCarriesSignature(obj.Type()))
-		},
-		rooted,
-		rooted,
-	)
-	allowed := map[ast.Node]bool{}
-	consume := func(expr ast.Expr) {
-		if ident := syntaxutil.RootIdent(expr); ident != nil {
-			allowed[ident] = true
-		}
-	}
-	methodValueBind := func(expr ast.Expr) bool {
-		return syntaxutil.IsMethodValueBind(p.TypesInfo, expr)
-	}
-	leaky := false
-	ast.Inspect(body, func(n ast.Node) bool {
-		if leaky {
-			return false
-		}
-		switch n := n.(type) {
-		case *ast.AssignStmt:
-			if len(n.Lhs) == len(n.Rhs) {
-				for i, rhs := range n.Rhs {
-					if rooted(rhs) {
-						if methodValueBind(rhs) {
-							leaky = true
-						} else if _, ok := n.Lhs[i].(*ast.Ident); ok {
-							consume(rhs)
-						}
-					}
-				}
-			} else if len(n.Rhs) == 1 && rooted(n.Rhs[0]) {
-				if methodValueBind(n.Rhs[0]) {
-					leaky = true
-				} else {
-					allIdent := true
-					for _, lhs := range n.Lhs {
-						if _, ok := lhs.(*ast.Ident); !ok {
-							allIdent = false
-						}
-					}
-					if allIdent {
-						consume(n.Rhs[0])
-					}
-				}
-			}
-			for i, lhs := range n.Lhs {
-				if ident, ok := lhs.(*ast.Ident); ok {
-					if obj := syntaxutil.IdentDefOrUse(p.TypesInfo, ident); obj != nil && (roots[obj] || tainted[obj]) {
-						if obj.Pos() < body.Pos() || obj.Pos() > body.End() {
-							leaky = true
-						}
-						if fieldWants != nil && refconfine.TypeCarriesSignature(obj.Type()) {
-							var rhs ast.Expr
-							if len(n.Lhs) == len(n.Rhs) {
-								rhs = n.Rhs[i]
-							} else if len(n.Rhs) == 1 {
-								rhs = n.Rhs[0]
-							}
-							originDefine := roots[obj] && p.TypesInfo.Defs[ident] != nil
-							if (rhs == nil || !rooted(rhs)) && !originDefine {
-								leaky = true
-							}
-						}
-					}
-					consume(ident)
-					continue
-				}
-				if rooted(lhs) {
-					var rhs ast.Expr
-					if len(n.Lhs) == len(n.Rhs) {
-						rhs = n.Rhs[i]
-					} else if len(n.Rhs) == 1 {
-						rhs = n.Rhs[0]
-					}
-					smuggles := false
-					if rhs != nil {
-						if t := p.TypesInfo.TypeOf(rhs); t == nil ||
-							refconfine.TypeHandsOutMutableReach(t) ||
-							refconfine.TypeCarriesSignature(t) {
-							smuggles = carrierReach(rhs) || t == nil
-						}
-					}
-					if tolerateRootedStores && !smuggles {
-						consume(lhs)
-					} else {
-						leaky = true
-					}
-				}
-			}
-		case *ast.ValueSpec:
-			if len(n.Names) == len(n.Values) {
-				for i, rhs := range n.Values {
-					if rooted(rhs) {
-						if methodValueBind(rhs) {
-							leaky = true
-							continue
-						}
-						consume(rhs)
-						allowed[n.Names[i]] = true
-					}
-				}
-			} else if len(n.Values) == 1 && rooted(n.Values[0]) {
-				if methodValueBind(n.Values[0]) {
-					leaky = true
-				} else {
-					consume(n.Values[0])
-					for _, name := range n.Names {
-						allowed[name] = true
-					}
-				}
-			}
-		case *ast.IncDecStmt:
-			if rooted(n.X) {
-				if tolerateRootedStores {
-					consume(n.X)
-				} else {
-					leaky = true
-				}
-			}
-		case *ast.SendStmt:
-			if rooted(n.Chan) {
-				leaky = true
-			}
-		case *ast.UnaryExpr:
-			if (n.Op == token.AND || n.Op == token.ARROW) && rooted(n.X) {
-				leaky = true
-			}
-		case *ast.RangeStmt:
-			for _, bind := range []ast.Expr{n.Key, n.Value} {
-				if bind == nil {
-					continue
-				}
-				if ident, ok := bind.(*ast.Ident); ok {
-					if obj := syntaxutil.IdentDefOrUse(p.TypesInfo, ident); obj != nil && (roots[obj] || tainted[obj]) {
-						if obj.Pos() < body.Pos() || obj.Pos() > body.End() {
-							leaky = true
-						}
-						if fieldWants != nil && refconfine.TypeCarriesSignature(obj.Type()) {
-							originDefine := roots[obj] && p.TypesInfo.Defs[ident] != nil
-							if !rooted(n.X) && !originDefine {
-								leaky = true
-							}
-						}
-					}
-					consume(ident)
-					continue
-				}
-				if rooted(bind) {
-					smuggles := false
-					if t := p.TypesInfo.TypeOf(bind); t == nil ||
-						refconfine.TypeHandsOutMutableReach(t) ||
-						refconfine.TypeCarriesSignature(t) {
-						smuggles = carrierReach(n.X) || t == nil
-					}
-					if tolerateRootedStores && !smuggles {
-						consume(bind)
-					} else {
-						leaky = true
-					}
-				}
-			}
-			if rooted(n.X) {
-				if t := p.TypesInfo.TypeOf(n.X); t == nil {
-					leaky = true
-				} else if _, isChan := types.Unalias(t).Underlying().(*types.Chan); isChan {
-					leaky = true
-				} else {
-					for _, bind := range []ast.Expr{n.Key, n.Value} {
-						if ident, ok := bind.(*ast.Ident); ok {
-							consume(ident)
-						} else if bind != nil {
-							leaky = true
-						}
-					}
-					consume(n.X)
-				}
-			}
-		case *ast.ReturnStmt:
-			for _, result := range n.Results {
-				if rooted(result) {
-					if t := p.TypesInfo.TypeOf(result); t == nil || refconfine.TypeHandsOutMutableReach(t) {
-						if returns != nil && t != nil && !litReturns[n] && !methodValueBind(result) {
-							*returns = true
-							consume(result)
-						} else {
-							leaky = true
-						}
-					} else if methodValueBind(result) || refconfine.TypeCarriesSignature(p.TypesInfo.TypeOf(result)) {
-						leaky = true
-					} else {
-						consume(result)
-					}
-				}
-			}
-		case *ast.CallExpr:
-			if ident, ok := n.Fun.(*ast.Ident); ok {
-				if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && (ident.Name == "len" || ident.Name == "cap") {
-					for _, arg := range n.Args {
-						if rooted(arg) {
-							consume(arg)
-						}
-					}
-					break
-				}
-			}
-			if tv, ok := p.TypesInfo.Types[n.Fun]; ok && tv.IsType() {
-				if len(n.Args) == 1 && rooted(n.Args[0]) && !methodValueBind(n.Args[0]) {
-					if t := p.TypesInfo.TypeOf(n); t != nil && !refconfine.TypeHandsOutMutableReach(t) && !refconfine.TypeCarriesSignature(t) {
-						consume(n.Args[0])
-					}
-				}
-				break
-			}
-			if sel, ok := syntaxutil.UnwrapCallee(n.Fun).(*ast.SelectorExpr); ok && rooted(sel.X) {
-				selection, selOK := p.TypesInfo.Selections[sel]
-				if selOK && selection.Kind() == types.MethodVal {
-					fn, isFunc := selection.Obj().(*types.Func)
-					if isFunc && refconfine.AuditedSynchronization(audited, fn) {
-						consume(sel.X)
-						break
-					}
-					if isFunc && methodWants != nil && !goCalls[n] && fn.Pkg() != nil && !syntaxutil.InterfaceReceiver(fn) && refconfine.InstantiatedResultsHandOutNothing(audited, selection.Type()) {
-						methodWants[syntaxutil.MethodFactKey(fn)] = true
-						consume(sel.X)
-					} else {
-						leaky = true
-					}
-				} else if selOK && selection.Kind() == types.FieldVal {
-				} else {
-					leaky = true
-				}
-			}
-			if fun := syntaxutil.UnparenExpr(n.Fun); rooted(fun) {
-				if refconfine.CallResultHandsOut(p.TypesInfo.TypeOf(n)) {
-					leaky = true
-				}
-			}
-			for i, arg := range n.Args {
-				if rooted(arg) {
-					if t := p.TypesInfo.TypeOf(arg); t == nil || refconfine.TypeHandsOutMutableReach(t) || refconfine.TypeCarriesSignature(t) {
-						deferred := false
-						if wants != nil && !goCalls[n] {
-							if fn, pkgPath := syntaxutil.PlainCalleeFunc(p, n.Fun); fn != nil {
-								if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() == nil && sig.Params().Len() > 0 {
-									idx := i
-									if sig.Variadic() && idx >= sig.Params().Len()-1 {
-										idx = sig.Params().Len() - 1
-									}
-									wants[syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: pkgPath, Name: fn.Name()}, Index: idx}] = true
-									consume(arg)
-									deferred = true
-								}
-							}
-						}
-						if !deferred && fieldWants != nil && !goCalls[n] {
-							if sel, ok := syntaxutil.UnwrapCallee(n.Fun).(*ast.SelectorExpr); ok && rooted(sel.X) {
-								if selection, selOK := p.TypesInfo.Selections[sel]; selOK && selection.Kind() == types.FieldVal {
-									if sig, sigOK := types.Unalias(selection.Type()).Underlying().(*types.Signature); sigOK && sig.Params().Len() > 0 {
-										idx := i
-										if sig.Variadic() && idx >= sig.Params().Len()-1 {
-											idx = sig.Params().Len() - 1
-										}
-										fieldWants[syntaxutil.FieldPosKey{Field: sel.Sel.Name, Index: idx}] = true
-										consume(arg)
-										deferred = true
-									}
-								}
-							}
-						}
-						if !deferred && elemWants != nil && !goCalls[n] {
-							if index, ok := syntaxutil.UnparenExpr(n.Fun).(*ast.IndexExpr); ok {
-								if base, ok := syntaxutil.UnparenExpr(index.X).(*ast.Ident); ok {
-									obj := p.TypesInfo.Uses[base]
-									if v, isVar := obj.(*types.Var); isVar && v.Pkg() != nil && v.Parent() == v.Pkg().Scope() && refconfine.TypeMayCarryUnknownDynamic(audited, v.Type()) {
-										if sig, sigOK := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(n.Fun)).(*types.Signature); sigOK && sig.Params().Len() > 0 {
-											idx := i
-											if sig.Variadic() && idx >= sig.Params().Len()-1 {
-												idx = sig.Params().Len() - 1
-											}
-											elemWants[syntaxutil.ElemParamUse{Owner: syntaxutil.DynamicVarKey(v), Index: idx}] = true
-											consume(arg)
-											deferred = true
-										}
-									}
-								}
-							}
-						}
-						if !deferred {
-							leaky = true
-						}
-					} else if methodValueBind(arg) {
-						leaky = true
-					} else {
-						consume(arg)
-					}
-				}
-			}
-		case *ast.IndexExpr:
-			if rooted(n.X) && !allowed[syntaxutil.RootIdent(n.X)] {
-				if t := p.TypesInfo.TypeOf(n); t == nil || refconfine.TypeHandsOutMutableReach(t) || (!calleeReads[n] && refconfine.TypeCarriesSignature(t)) {
-					leaky = true
-				} else {
-					consume(n.X)
-				}
-			}
-		case *ast.SelectorExpr:
-			if rooted(n.X) && !allowed[syntaxutil.RootIdent(n.X)] {
-				if selection, ok := p.TypesInfo.Selections[n]; ok && selection.Kind() == types.MethodVal {
-					break
-				}
-				if t := p.TypesInfo.TypeOf(n); t == nil || refconfine.TypeHandsOutMutableReach(t) || (!calleeReads[n] && refconfine.TypeCarriesSignature(t)) {
-					leaky = true
-				} else {
-					consume(n.X)
-				}
-			}
-		case *ast.BinaryExpr:
-			if n.Op == token.EQL || n.Op == token.NEQ {
-				if rooted(n.X) {
-					consume(n.X)
-				}
-				if rooted(n.Y) {
-					consume(n.Y)
-				}
-			}
-		case *ast.Ident:
-			if isRoot(n) && (goIdents[n] || (!allowed[n] && !calleeReads[n])) {
-				leaky = true
+		for _, res := range op.Results {
+			if !e.checkReturnResult(res, isTopBody) {
+				return false
 			}
 		}
 		return true
+
+	case flowir.OpAssign:
+		return e.checkAssignOp(op, isTopBody, inOnceDo)
+
+	default:
+		return false
+	}
+}
+
+func (e *confinementEngine) checkReturnResult(res *flowir.Value, isTopBody bool) bool {
+	if res == nil {
+		return false
+	}
+	if e.valueIsRooted(res) || (e.recvMode && e.isGovernableRecvCall(res)) {
+		if e.isMethodVal(res) || res.Type == nil || refconfine.TypeReachesSyncNoCopyByValue(res.Type) {
+			return false
+		}
+		if e.recvMode {
+			if !isTopBody {
+				return false
+			}
+			return e.checkValue(res, modeGovernedBindOrReturn)
+		}
+		if refconfine.TypeHandsOutMutableReach(res.Type) {
+			if isTopBody && e.returns != nil {
+				*e.returns = true
+				return e.checkValue(res, modeGovernedBindOrReturn)
+			}
+			return false
+		}
+		if refconfine.TypeCarriesSignature(res.Type) {
+			return false
+		}
+		return e.checkValue(res, modeGovernedBindOrReturn)
+	}
+	return e.checkValue(res, modeGeneral)
+}
+
+func (e *confinementEngine) dstAcceptsGovernedRoot(dst flowir.Place) bool {
+	if dst.IsBlank() {
+		return true
+	}
+	if !dst.IsBareVar() {
+		return false
+	}
+	if dst.Root == flowir.RootPkgGlobal {
+		return !e.isEscapingGlobalType(dst.Type)
+	}
+	return true
+}
+
+func (e *confinementEngine) checkAssignLHS(op *flowir.Op, dst flowir.Place, isDef bool, src *flowir.Value, inOnceDo bool) bool {
+	if !e.checkPlaceChildValues(dst) {
+		return false
+	}
+	if dst.IsBlank() {
+		return true
+	}
+	if dst.IsBareVar() {
+		if dst.Root == flowir.RootPkgGlobal {
+			if src != nil && (e.valueIsRooted(src) || e.valueSuppliesRoot(src) || (e.recvMode && e.isGovernableRecvCall(src))) {
+				if e.isEscapingGlobalType(dst.Type) {
+					return false
+				}
+			}
+			return true
+		}
+		if e.recvMode && dst.Obj == e.recvObj {
+			return false
+		}
+		if e.isRootOrTainted(dst.Obj) {
+			if dst.Obj.Pos() < e.rootBody.BodyStart || dst.Obj.Pos() > e.rootBody.BodyEnd {
+				return false
+			}
+			if !e.recvMode && e.fieldWants != nil && refconfine.TypeCarriesSignature(dst.Obj.Type()) {
+				originDefine := e.roots[dst.Obj] && isDef
+				if (src == nil || !e.valueIsRooted(src)) && !originDefine {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	if e.placeIsRooted(dst) {
+		return e.checkRootedStoreAllowed(op, dst, isDef, src, inOnceDo)
+	}
+	return true
+}
+
+func (e *confinementEngine) checkAssignOp(op *flowir.Op, isTopBody bool, inOnceDo bool) bool {
+	if op.AssignKind == flowir.AssignRange {
+		var rngSrc *flowir.Value
+		if len(op.Srcs) == 1 {
+			rngSrc = op.Srcs[0]
+		}
+		for i, dst := range op.Dsts {
+			isDef := i < len(op.DstDefs) && op.DstDefs[i]
+			if !e.checkAssignLHS(op, dst, isDef, rngSrc, inOnceDo) {
+				return false
+			}
+		}
+		if rngSrc != nil {
+			if e.valueIsRooted(rngSrc) || (e.recvMode && e.isGovernableRecvCall(rngSrc)) {
+				if rngSrc.Type == nil || e.isMethodVal(rngSrc) {
+					return false
+				}
+				switch syntaxutil.UnderlyingType(rngSrc.Type).(type) {
+				case *types.Chan, *types.Signature:
+					return false
+				}
+				for _, dst := range op.Dsts {
+					if !e.dstAcceptsGovernedRoot(dst) {
+						return false
+					}
+					if !dst.IsBlank() && refconfine.TypeReachesSyncNoCopyByValue(dst.Type) {
+						return false
+					}
+				}
+				if !e.checkValue(rngSrc, modeGovernedBindOrReturn) {
+					return false
+				}
+			} else if !e.checkValue(rngSrc, modeGeneral) {
+				return false
+			}
+		}
+		if op.RangeBody != nil {
+			return e.checkBody(op.RangeBody, isTopBody, false)
+		}
+		return true
+	}
+
+	if op.AssignKind == flowir.AssignIncDec {
+		if len(op.Dsts) != 1 {
+			return false
+		}
+		return e.checkAssignLHS(op, op.Dsts[0], false, op.Srcs[0], inOnceDo)
+	}
+
+	if op.AssignKind == flowir.AssignCompound {
+		if len(op.Dsts) != 1 || len(op.Srcs) != 1 {
+			return false
+		}
+		dst := op.Dsts[0]
+		var rhsOperand *flowir.Value
+		if op.Srcs[0] != nil && op.Srcs[0].Kind == flowir.ValCompositeExpr && len(op.Srcs[0].Args) == 2 {
+			rhsOperand = op.Srcs[0].Args[1]
+		} else {
+			rhsOperand = op.Srcs[0]
+		}
+		if !e.checkAssignLHS(op, dst, false, rhsOperand, inOnceDo) {
+			return false
+		}
+		if !e.placeIsRooted(dst) && op.Srcs[0] != nil && op.Srcs[0].Kind == flowir.ValCompositeExpr && len(op.Srcs[0].Args) == 2 {
+			if !e.checkValue(op.Srcs[0].Args[0], modeGeneral) {
+				return false
+			}
+		}
+		return rhsOperand == nil || e.checkValue(rhsOperand, modeGeneral)
+	}
+
+	if op.AssignKind == flowir.AssignZeroDecl {
+		for i, dst := range op.Dsts {
+			isDef := i < len(op.DstDefs) && op.DstDefs[i]
+			if !e.checkAssignLHS(op, dst, isDef, nil, inOnceDo) {
+				return false
+			}
+		}
+		return true
+	}
+
+	if op.AssignKind == flowir.AssignMulti && len(op.Srcs) == 1 {
+		src := op.Srcs[0]
+		allGoverned := true
+		for i, dst := range op.Dsts {
+			isDef := i < len(op.DstDefs) && op.DstDefs[i]
+			if !e.checkAssignLHS(op, dst, isDef, src, inOnceDo) {
+				return false
+			}
+			if !e.dstAcceptsGovernedRoot(dst) || (!dst.IsBlank() && refconfine.TypeReachesSyncNoCopyByValue(dst.Type)) {
+				allGoverned = false
+			}
+		}
+		mode := modeGeneral
+		if allGoverned {
+			mode = modeGovernedBindOrReturn
+			if len(op.Dsts) > 0 && op.Dsts[0].IsBlank() {
+				blankPrimary := true
+				for _, dst := range op.Dsts[1:] {
+					if !dst.IsBlank() && (dst.Type == nil || refconfine.CallResultHandsOut(dst.Type) || refconfine.TypeReachesSyncNoCopyByValue(dst.Type)) {
+						blankPrimary = false
+						break
+					}
+				}
+				if blankPrimary {
+					mode = modeBlankDiscard
+				}
+			}
+		}
+		if (mode == modeGovernedBindOrReturn || mode == modeBlankDiscard) && e.valueIsRooted(src) {
+			if e.isMethodVal(src) || refconfine.TypeReachesSyncNoCopyByValue(src.Type) {
+				return false
+			}
+		}
+		return e.checkValue(src, mode)
+	}
+
+	// AssignPlain (1:1 or N:N).
+	ok := true
+	op.ForEachAssignPair(func(_ int, dst flowir.Place, isDef bool, src *flowir.Value) bool {
+		if !e.checkAssignLHS(op, dst, isDef, src, inOnceDo) {
+			ok = false
+			return false
+		}
+		if src == nil {
+			return true
+		}
+		mode := modeGeneral
+		if dst.IsBlank() {
+			mode = modeBlankDiscard
+		} else if e.dstAcceptsGovernedRoot(dst) {
+			mode = modeGovernedBindOrReturn
+		}
+		if (mode == modeGovernedBindOrReturn || mode == modeBlankDiscard) && e.valueIsRooted(src) {
+			if e.isMethodVal(src) || refconfine.TypeReachesSyncNoCopyByValue(src.Type) ||
+				(!dst.IsBlank() && refconfine.TypeReachesSyncNoCopyByValue(dst.Type)) {
+				ok = false
+				return false
+			}
+		}
+		if !e.checkValue(src, mode) {
+			ok = false
+			return false
+		}
+		return true
 	})
-	return !leaky
+	return ok
+}
+
+func (e *confinementEngine) checkValue(v *flowir.Value, mode valueEvalMode) bool {
+	if v == nil {
+		return true
+	}
+	switch v.Kind {
+	case flowir.ValInvalid:
+		return false
+
+	case flowir.ValScalarLitOrConst:
+		return true
+
+	case flowir.ValPlace:
+		if e.placeIsRooted(v.Place) {
+			if mode == modeGovernedBindOrReturn || mode == modeBlankDiscard {
+				return e.checkRootedReadOperand(v)
+			}
+			if v.Type == nil || refconfine.CallResultHandsOut(v.Type) {
+				return false
+			}
+			return e.checkRootedReadOperand(v)
+		}
+		return e.checkPlaceChildValues(v.Place)
+
+	case flowir.ValAddrOf:
+		if e.placeIsRooted(v.AddrPlace) {
+			return false
+		}
+		if !e.checkPlaceChildValues(v.AddrPlace) {
+			return false
+		}
+		if v.Low != nil && !e.checkValue(v.Low, modeGeneral) {
+			return false
+		}
+		if v.High != nil && !e.checkValue(v.High, modeGeneral) {
+			return false
+		}
+		if v.Max != nil && !e.checkValue(v.Max, modeGeneral) {
+			return false
+		}
+		return true
+
+	case flowir.ValMethodVal:
+		if e.valueIsRooted(v.Recv) || (v.HasRecvPlace && e.placeIsRooted(v.RecvPlace)) {
+			return false
+		}
+		return e.checkValue(v.Recv, modeGeneral)
+
+	case flowir.ValChanRecv:
+		if e.valueIsRooted(v.Chan) {
+			return false
+		}
+		return e.checkValue(v.Chan, modeGeneral)
+
+	case flowir.ValConvert:
+		if e.valueIsRooted(v.Arg) || (e.recvMode && e.isGovernableRecvCall(v.Arg)) {
+			if e.isMethodVal(v.Arg) || v.Arg == nil || v.Arg.Type == nil || v.Type == nil ||
+				syntaxutil.IsUnsafePointerType(v.Type) ||
+				refconfine.TypeReachesSyncNoCopyByValue(v.Arg.Type) ||
+				refconfine.TypeReachesSyncNoCopyByValue(v.Type) {
+				return false
+			}
+			if v.IsTypeAssert && mode != modeBlankDiscard &&
+				refconfine.TypeCarriesSignature(v.Type) && !refconfine.TypeCarriesSignature(v.Arg.Type) {
+				return false
+			}
+			if !refconfine.CallResultHandsOut(v.Type) {
+				return e.checkRootedReadOperand(v.Arg)
+			}
+			if v.IsTypeAssert && (mode == modeGovernedBindOrReturn || mode == modeBlankDiscard) {
+				return e.checkRootedReadOperand(v.Arg)
+			}
+			return false
+		}
+		return e.checkValue(v.Arg, mode)
+
+	case flowir.ValCompare:
+		for _, side := range []*flowir.Value{v.Left, v.Right} {
+			if side == nil {
+				continue
+			}
+			if e.valueIsRooted(side) {
+				if e.isMethodVal(side) || side.Type == nil || refconfine.TypeReachesSyncNoCopyByValue(side.Type) {
+					return false
+				}
+				if !e.checkRootedReadOperand(side) {
+					return false
+				}
+			} else if !e.checkValue(side, modeGeneral) {
+				return false
+			}
+		}
+		return true
+
+	case flowir.ValAllocFresh:
+		for i := range v.CompositeElts {
+			elt := &v.CompositeElts[i]
+			if elt.MapKey != nil && !e.checkValue(elt.MapKey, modeGeneral) {
+				return false
+			}
+			if elt.Index != nil && !e.checkValue(elt.Index, modeGeneral) {
+				return false
+			}
+			if elt.Value != nil && !e.checkValue(elt.Value, modeGeneral) {
+				return false
+			}
+		}
+		for _, a := range v.Args {
+			if !e.checkValue(a, modeGeneral) {
+				return false
+			}
+		}
+		return true
+
+	case flowir.ValMakeClosure:
+		if v.Closure == nil {
+			return false
+		}
+		captured := map[types.Object]bool{}
+		for fv := range v.Closure.FreeVars {
+			if e.isRootOrTainted(fv) {
+				captured[fv] = true
+			}
+		}
+		if len(captured) == 0 {
+			return true
+		}
+		if !e.allowCapturedClosure {
+			return false
+		}
+		subEng := &confinementEngine{
+			audited:              e.audited,
+			p:                    e.p,
+			rootBody:             v.Closure,
+			roots:                captured,
+			tainted:              map[types.Object]bool{},
+			tolerateRootedStores: e.tolerateRootedStores,
+			allowCapturedClosure: true,
+			wants:                e.wants,
+			methodWants:          e.methodWants,
+			fieldWants:           e.fieldWants,
+			elemWants:            e.elemWants,
+		}
+		return subEng.run()
+
+	case flowir.ValCall:
+		return e.checkCall(v, mode == modeGovernedBindOrReturn || mode == modeBlankDiscard)
+
+	case flowir.ValCompositeExpr:
+		for _, a := range v.Args {
+			if !e.checkValue(a, modeGeneral) {
+				return false
+			}
+		}
+		return true
+
+	default:
+		return false
+	}
+}
+
+func (e *confinementEngine) checkCall(v *flowir.Value, governed bool) bool {
+	switch v.CallKind {
+	case flowir.CallBuiltin:
+		if v.BuiltinName == "len" || v.BuiltinName == "cap" {
+			for _, arg := range v.Args {
+				if e.valueIsRooted(arg) {
+					if e.isMethodVal(arg) || !e.checkRootedReadOperand(arg) {
+						return false
+					}
+				} else if !e.checkValue(arg, modeGeneral) {
+					return false
+				}
+			}
+			return true
+		}
+		for _, arg := range v.Args {
+			if !e.checkValue(arg, modeGeneral) {
+				return false
+			}
+		}
+		return true
+
+	case flowir.CallIIFE:
+		if v.IIFE == nil {
+			return false
+		}
+		for i, arg := range v.Args {
+			pIdx, ok := v.ParamIndexForArg(i)
+			isPackedVariadic := v.CalleeSig != nil && v.CalleeSig.Variadic() && !v.Ellipsis && i >= v.CalleeSig.Params().Len()-1
+			if ok && !isPackedVariadic && pIdx < len(v.IIFE.Params) {
+				if e.valueIsRooted(arg) {
+					if e.isMethodVal(arg) || arg.Type == nil || refconfine.TypeReachesSyncNoCopyByValue(arg.Type) {
+						return false
+					}
+					if !e.checkValue(arg, modeGovernedBindOrReturn) {
+						return false
+					}
+					continue
+				}
+			}
+			if !e.checkValue(arg, modeGeneral) {
+				return false
+			}
+		}
+		return e.checkBody(v.IIFE, false, false)
+
+	case flowir.CallMethod:
+		if e.isSyncOnceCall(v) {
+			if e.valueIsRooted(v.Recv) {
+				if !e.checkRootedReadOperand(v.Recv) {
+					return false
+				}
+			} else if !e.checkValue(v.Recv, modeGeneral) {
+				return false
+			}
+			return e.checkBody(v.Args[0].Closure, false, e.recvMode)
+		}
+		if e.valueIsRooted(v.Recv) {
+			if v.IsMethodExprCall || !e.checkRootedReadOperand(v.Recv) {
+				return false
+			}
+			if refconfine.AuditedSynchronization(e.audited, v.CalleeFunc) {
+				if !v.HasRecvPlace || !refconfine.InPlaceSyncReceiver(e.p.TypesInfo, v.RecvPlace.Raw) {
+					return false
+				}
+				for _, arg := range v.Args {
+					if !e.checkValue(arg, modeGeneral) {
+						return false
+					}
+				}
+				return true
+			}
+			if e.recvMode {
+				if v.CalleeFunc == nil || v.CalleeFunc.Pkg() != e.p.Types || v.Selection == nil || v.CallAST == nil {
+					return false
+				}
+				sel, ok := syntaxutil.UnwrapCallee(v.CallAST.Fun).(*ast.SelectorExpr)
+				if !ok {
+					return false
+				}
+				target := syntaxutil.RecvTypeNameOf(e.p, sel) + "." + v.CalleeFunc.Name()
+				if _, sibling := e.methods[target]; sibling {
+					if e.recordMethodChain != nil {
+						e.recordMethodChain(target)
+					}
+					if !refconfine.InstantiatedResultsHandOutNothing(e.audited, v.Selection.Type()) && !governed {
+						return false
+					}
+				} else {
+					targets, ok := unexportedDispatchTargets(e.p, v.Selection, v.CalleeFunc, e.declaredByName, e.bodyless)
+					if !ok && !e.bodyless[v.CalleeFunc.Name()] {
+						targets, ok = closedFieldDispatchTargets(e.p.TypesInfo, e.recvObj, sel, v.CalleeFunc.Name(), e.closedFields, e.declared)
+					}
+					if !ok {
+						return false
+					}
+					if e.recordMethodChain != nil {
+						for _, t := range targets {
+							e.recordMethodChain(t)
+						}
+					}
+					if !refconfine.InstantiatedResultsHandOutNothing(e.audited, v.Selection.Type()) && !governed {
+						return false
+					}
+				}
+				for _, arg := range v.Args {
+					if !e.checkValue(arg, modeGeneral) {
+						return false
+					}
+				}
+				return true
+			}
+			if e.methodWants == nil || v.CalleeFunc == nil || v.CalleeFunc.Pkg() == nil ||
+				v.CalleeFunc.Pkg().Path() == "sync" || syntaxutil.InterfaceReceiver(v.CalleeFunc) ||
+				v.Selection == nil || !refconfine.InstantiatedResultsHandOutNothing(e.audited, v.Selection.Type()) {
+				return false
+			}
+			e.methodWants[syntaxutil.MethodFactKey(v.CalleeFunc)] = true
+			return e.checkCallArgs(v)
+		}
+		if !e.checkValue(v.Recv, modeGeneral) {
+			return false
+		}
+		return e.checkCallArgs(v)
+
+	case flowir.CallPlain:
+		return e.checkCallArgs(v)
+
+	case flowir.CallIndirect:
+		if e.valueIsRooted(v.Callee) {
+			if e.recvMode || e.isMethodVal(v.Callee) || refconfine.CallResultHandsOut(v.Type) {
+				return false
+			}
+			if !e.checkRootedReadOperand(v.Callee) {
+				return false
+			}
+		} else if !e.checkValue(v.Callee, modeGeneral) {
+			return false
+		}
+		return e.checkCallArgs(v)
+
+	default:
+		return false
+	}
+}
+
+func (e *confinementEngine) checkCallArgs(v *flowir.Value) bool {
+	for i, arg := range v.Args {
+		if !e.valueIsRooted(arg) {
+			if !e.checkValue(arg, modeGeneral) {
+				return false
+			}
+			continue
+		}
+		if e.recvMode || arg.Type == nil || e.isMethodVal(arg) || refconfine.TypeReachesSyncNoCopyByValue(arg.Type) {
+			return false
+		}
+		if !refconfine.TypeHandsOutMutableReach(arg.Type) && !refconfine.TypeCarriesSignature(arg.Type) {
+			if !e.checkRootedReadOperand(arg) {
+				return false
+			}
+			continue
+		}
+		deferred := false
+		if v.CallKind == flowir.CallPlain && e.wants != nil && v.CalleeFunc != nil && v.CalleeSig != nil && v.CalleeSig.Recv() == nil {
+			if pIdx, ok := v.ParamIndexForArg(i); ok {
+				e.wants[syntaxutil.ParamKey{
+					Func:  syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Name()},
+					Index: pIdx,
+				}] = true
+				deferred = true
+			}
+		}
+		if !deferred && v.CallKind == flowir.CallIndirect && e.fieldWants != nil &&
+			v.Callee != nil && v.Callee.Kind == flowir.ValPlace && len(v.Callee.Place.Projs) > 0 {
+			last := v.Callee.Place.Projs[len(v.Callee.Place.Projs)-1]
+			prefix := v.Callee.Place
+			prefix.Projs = v.Callee.Place.Projs[:len(v.Callee.Place.Projs)-1]
+			if last.Kind == flowir.ProjField && last.Field != nil && e.placeIsRooted(prefix) {
+				if pIdx, ok := v.ParamIndexForArg(i); ok {
+					e.fieldWants[syntaxutil.FieldPosKey{Field: last.Field.Name(), Index: pIdx}] = true
+					deferred = true
+				}
+			}
+		}
+		if !deferred && v.CallKind == flowir.CallIndirect && e.elemWants != nil &&
+			v.Callee != nil && v.Callee.Kind == flowir.ValPlace &&
+			v.Callee.Place.Root == flowir.RootPkgGlobal && v.Callee.Place.Obj != nil &&
+			len(v.Callee.Place.Projs) == 1 && v.Callee.Place.Projs[0].Kind == flowir.ProjIndex &&
+			refconfine.TypeMayCarryUnknownDynamic(e.audited, v.Callee.Place.Obj.Type()) {
+			if pIdx, ok := v.ParamIndexForArg(i); ok {
+				e.elemWants[syntaxutil.ElemParamUse{
+					Owner: syntaxutil.DynamicVarKey(v.Callee.Place.Obj),
+					Index: pIdx,
+				}] = true
+				deferred = true
+			}
+		}
+		if !deferred || !e.checkRootedReadOperand(arg) {
+			return false
+		}
+	}
+	return true
 }
 
 func paramLeakFreeFunctions(
@@ -592,6 +1717,7 @@ func paramLeakFreeFunctions(
 						}
 					}
 					if !methodsProven {
+						retainOnly(obj, fd.Body, key)
 						continue
 					}
 					if len(wants) == 0 {
@@ -599,6 +1725,7 @@ func paramLeakFreeFunctions(
 						continue
 					}
 					allWants[key] = wants
+					retainOnly(obj, fd.Body, key)
 				}
 			}
 		}
@@ -609,6 +1736,9 @@ func paramLeakFreeFunctions(
 	retentionDeps := resolveLocalParamDeps(ownPath, retention, allRetentionWants, func(need syntaxutil.ParamKey) bool {
 		return retention[need] || proven[need]
 	})
+	for key := range proven {
+		delete(retentionDeps, key)
+	}
 	return proven, deps, retention, retentionDeps
 }
 
@@ -640,7 +1770,26 @@ func resolveLocalParamDeps(ownPath string, proven map[syntaxutil.ParamKey]bool, 
 				edges[need] = true
 			}
 		}
-		deps[key] = edges
+		if len(edges) > 0 {
+			deps[key] = edges
+		}
+	}
+	for key, wants := range deps {
+		if satisfied(key) {
+			delete(deps, key)
+			continue
+		}
+		edges := map[syntaxutil.ParamKey]bool{}
+		for need := range wants {
+			if !satisfied(need) {
+				edges[need] = true
+			}
+		}
+		if len(edges) > 0 {
+			deps[key] = edges
+		} else {
+			delete(deps, key)
+		}
 	}
 	return deps
 }
@@ -671,6 +1820,9 @@ func receiverRetentionFreeMethods(audited bool, p *packages.Package, _ map[strin
 				recvIdent = names[0]
 			}
 			if recvIdent == nil {
+				if recvField := fd.Recv.List[0]; recvField != nil && refconfine.TypeReachesSyncNoCopyByValue(p.TypesInfo.TypeOf(recvField.Type)) {
+					continue
+				}
 				proven[key] = true
 				continue
 			}
@@ -840,7 +1992,7 @@ func closedInterfaceFields(p *packages.Package, callIdx *refconfine.CallSiteInde
 				}
 				for i, elt := range n.Elts {
 					if kv, ok := elt.(*ast.KeyValueExpr); ok {
-						if key, ok := kv.Key.(*ast.Ident); ok {
+						if key, ok := ast.Unparen(kv.Key).(*ast.Ident); ok {
 							if field, ok := info.Uses[key].(*types.Var); ok {
 								store(field, kv.Value)
 							}
@@ -852,7 +2004,7 @@ func closedInterfaceFields(p *packages.Package, callIdx *refconfine.CallSiteInde
 			case *ast.AssignStmt:
 				if len(n.Lhs) != len(n.Rhs) {
 					for _, lhs := range n.Lhs {
-						if sel, ok := lhs.(*ast.SelectorExpr); ok {
+						if sel, ok := ast.Unparen(lhs).(*ast.SelectorExpr); ok {
 							if selection, ok := info.Selections[sel]; ok && selection.Kind() == types.FieldVal {
 								if field, ok := selection.Obj().(*types.Var); ok {
 									open[field] = true
@@ -864,7 +2016,7 @@ func closedInterfaceFields(p *packages.Package, callIdx *refconfine.CallSiteInde
 					return true
 				}
 				for i, lhs := range n.Lhs {
-					sel, ok := lhs.(*ast.SelectorExpr)
+					sel, ok := ast.Unparen(lhs).(*ast.SelectorExpr)
 					if !ok {
 						continue
 					}
@@ -878,7 +2030,7 @@ func closedInterfaceFields(p *packages.Package, callIdx *refconfine.CallSiteInde
 				}
 			case *ast.UnaryExpr:
 				if n.Op == token.AND {
-					if sel, ok := n.X.(*ast.SelectorExpr); ok {
+					if sel, ok := ast.Unparen(n.X).(*ast.SelectorExpr); ok {
 						if selection, ok := info.Selections[sel]; ok && selection.Kind() == types.FieldVal {
 							if field, ok := selection.Obj().(*types.Var); ok {
 								open[field] = true
@@ -888,7 +2040,7 @@ func closedInterfaceFields(p *packages.Package, callIdx *refconfine.CallSiteInde
 					}
 				}
 			case *ast.CallExpr:
-				tv, ok := info.Types[n.Fun]
+				tv, ok := info.Types[ast.Unparen(n.Fun)]
 				if !ok || !tv.IsType() || len(n.Args) != 1 {
 					return true
 				}
@@ -925,11 +2077,11 @@ func closedInterfaceFields(p *packages.Package, callIdx *refconfine.CallSiteInde
 }
 
 func closedFieldDispatchTargets(info *types.Info, recvObj types.Object, sel *ast.SelectorExpr, name string, closed map[*types.Var][]string, declared map[string]bool) ([]string, bool) {
-	fieldSel, ok := sel.X.(*ast.SelectorExpr)
+	fieldSel, ok := ast.Unparen(sel.X).(*ast.SelectorExpr)
 	if !ok {
 		return nil, false
 	}
-	ident, ok := fieldSel.X.(*ast.Ident)
+	ident, ok := ast.Unparen(fieldSel.X).(*ast.Ident)
 	if !ok || info.Uses[ident] != recvObj {
 		return nil, false
 	}
@@ -975,11 +2127,7 @@ func receiverReadOnlyMethods(audited bool, p *packages.Package, callIdx *refconf
 	if p == nil || p.TypesInfo == nil {
 		return nil
 	}
-	type methodBody struct {
-		decl *ast.FuncDecl
-		recv *ast.Ident
-	}
-	methods := map[string]methodBody{}
+	methods := map[string]methodBodyEntry{}
 	bodyless := map[string]bool{}
 	for _, file := range p.Syntax {
 		for _, decl := range file.Decls {
@@ -998,25 +2146,13 @@ func receiverReadOnlyMethods(audited bool, p *packages.Package, callIdx *refconf
 			if names := fd.Recv.List[0].Names; len(names) == 1 && names[0].Name != "_" {
 				recvIdent = names[0]
 			}
-			methods[recvName+"."+fd.Name.Name] = methodBody{decl: fd, recv: recvIdent}
+			methods[recvName+"."+fd.Name.Name] = methodBodyEntry{decl: fd, recv: recvIdent}
 		}
 	}
 	if len(methods) == 0 {
 		return nil
 	}
-	onceSites := map[*types.Var]int{}
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			if field := onceFieldOfDo(audited, p.TypesInfo, call); field != nil {
-				onceSites[field]++
-			}
-			return true
-		})
-	}
+	onceSites, onceFieldRefs := collectPackageOnceFieldUsage(audited, p)
 	declaredByName := map[string][]string{}
 	declared := map[string]bool{}
 	for key := range methods {
@@ -1033,454 +2169,370 @@ func receiverReadOnlyMethods(audited bool, p *packages.Package, callIdx *refconf
 	chains := map[string]map[string]bool{}
 	for key, m := range methods {
 		if m.recv == nil {
+			if recvField := m.decl.Recv.List[0]; recvField != nil && refconfine.TypeReachesSyncNoCopyByValue(p.TypesInfo.TypeOf(recvField.Type)) {
+				disqualified[key] = true
+			}
 			continue
 		}
 		recvObj := p.TypesInfo.Defs[m.recv]
-		if recvObj == nil {
+		if recvObj == nil || refconfine.TypeReachesSyncNoCopyByValue(recvObj.Type()) {
 			disqualified[key] = true
 			continue
 		}
-		tainted := map[types.Object]bool{}
-		isRecv := func(expr ast.Expr) bool {
-			ident, ok := expr.(*ast.Ident)
-			if !ok {
-				return false
-			}
-			obj := p.TypesInfo.Uses[ident]
-			return obj == recvObj || (obj != nil && tainted[obj])
+		lowered := flowir.LowerFunc(p.TypesInfo, p.Types, m.decl)
+		if lowered == nil {
+			disqualified[key] = true
+			continue
 		}
-		recvRooted := func(expr ast.Expr) bool {
-			ident := syntaxutil.RootIdent(expr)
-			return ident != nil && isRecv(ident)
-		}
-		siblingLeaky := func(sel *ast.SelectorExpr) (bool, bool) {
-			selection, ok := p.TypesInfo.Selections[sel]
-			if !ok || selection.Kind() != types.MethodVal {
-				return false, false
-			}
-			fn, ok := selection.Obj().(*types.Func)
-			if !ok || fn.Pkg() != p.Types {
-				return false, false
-			}
-			if _, sibling := methods[syntaxutil.RecvTypeNameOf(p, sel)+"."+fn.Name()]; !sibling {
-				return false, false
-			}
-			return true, !refconfine.InstantiatedResultsHandOutNothing(audited, selection.Type())
-		}
-		rhsHandsReceiverValue := func(rhs ast.Expr) bool {
-			if recvRooted(rhs) {
-				return true
-			}
-			if call, ok := rhs.(*ast.CallExpr); ok {
-				if sel, ok := syntaxutil.UnwrapCallee(call.Fun).(*ast.SelectorExpr); ok && recvRooted(sel.X) {
-					if _, leaky := siblingLeaky(sel); leaky {
-						return true
-					}
+		admittedOnceDo := findAdmittedReceiverOnceDo(audited, p, lowered, recvObj, onceSites, onceFieldRefs)
+		eng := &confinementEngine{
+			audited:        audited,
+			p:              p,
+			rootBody:       lowered,
+			roots:          map[types.Object]bool{recvObj: true},
+			tainted:        map[types.Object]bool{},
+			recvMode:       true,
+			recvObj:        recvObj,
+			methods:        methods,
+			declared:       declared,
+			declaredByName: declaredByName,
+			bodyless:       bodyless,
+			closedFields:   closedFields,
+			admittedOnceDo: admittedOnceDo,
+			recordMethodChain: func(target string) {
+				if chains[key] == nil {
+					chains[key] = map[string]bool{}
 				}
-			}
-			return false
-		}
-		syntaxutil.PropagateLocalTaint(
-			p.TypesInfo,
-			m.decl.Body,
-			tainted,
-			func(obj types.Object) bool {
-				return obj != recvObj && refconfine.TypeHandsOutMutableReach(obj.Type())
+				chains[key][target] = true
 			},
-			rhsHandsReceiverValue,
-			recvRooted,
-		)
-		allowed := map[ast.Node]bool{}
-		governedCalls := map[*ast.CallExpr]bool{}
-		consume := func(expr ast.Expr) {
-			if ident := syntaxutil.RootIdent(expr); ident != nil {
-				allowed[ident] = true
-			}
 		}
-		methodValueBind := func(expr ast.Expr) bool {
-			return syntaxutil.IsMethodValueBind(p.TypesInfo, expr)
+		if !eng.run() {
+			disqualified[key] = true
 		}
-		escapingSink := func(ident *ast.Ident) bool {
-			if p.Types == nil {
-				return true
-			}
-			obj := syntaxutil.IdentDefOrUse(p.TypesInfo, ident)
-			return obj != nil && obj.Pkg() != nil && obj.Parent() == obj.Pkg().Scope() && refconfine.TypeHandsOutMutableReach(obj.Type())
-		}
-		onceFill := map[ast.Node]bool{}
-		ast.Inspect(m.decl.Body, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			field := onceFieldOfDo(audited, p.TypesInfo, call)
-			if field == nil || onceSites[field] != 1 || field.Exported() {
-				return true
-			}
-			ident, ok := call.Fun.(*ast.SelectorExpr).X.(*ast.SelectorExpr).X.(*ast.Ident)
-			if !ok || p.TypesInfo.Uses[ident] != recvObj || refconfine.OnceFieldCount(recvObj.Type()) != 1 {
-				return true
-			}
-			if _, pointer := types.Unalias(recvObj.Type()).(*types.Pointer); !pointer {
-				return true
-			}
-			lit, ok := call.Args[0].(*ast.FuncLit)
-			if !ok {
-				return true
-			}
-			for _, stmt := range lit.Body.List {
-				switch stmt := stmt.(type) {
-				case *ast.AssignStmt:
-					fill := true
-					for _, lhs := range stmt.Lhs {
-						if recvRooted(lhs) && !refconfine.FillSelection(p.TypesInfo, lhs) {
-							fill = false
-						}
-					}
-					if fill {
-						onceFill[stmt] = true
-					}
-				case *ast.IncDecStmt:
-					if refconfine.FillSelection(p.TypesInfo, stmt.X) {
-						onceFill[stmt] = true
-					}
-				}
-			}
-			return true
-		})
-		innerReturns := map[*ast.ReturnStmt]bool{}
-		ast.Inspect(m.decl.Body, func(n ast.Node) bool {
-			lit, ok := n.(*ast.FuncLit)
-			if !ok {
-				return true
-			}
-			ast.Inspect(lit.Body, func(inner ast.Node) bool {
-				if r, ok := inner.(*ast.ReturnStmt); ok {
-					innerReturns[r] = true
-				}
-				return true
-			})
-			return false
-		})
-		ast.Inspect(m.decl.Body, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.AssignStmt:
-				governRHS := func(i int, rhs ast.Expr) {
-					call, ok := rhs.(*ast.CallExpr)
-					if !ok {
-						return
-					}
-					sel, ok := syntaxutil.UnwrapCallee(call.Fun).(*ast.SelectorExpr)
-					if !ok || !recvRooted(sel.X) {
-						return
-					}
-					if sibling, _ := siblingLeaky(sel); !sibling {
-						return
-					}
-					if i >= 0 {
-						ident, ok := n.Lhs[i].(*ast.Ident)
-						if !ok || escapingSink(ident) {
-							return
-						}
-					} else {
-						for _, lhs := range n.Lhs {
-							ident, ok := lhs.(*ast.Ident)
-							if !ok || escapingSink(ident) {
-								return
-							}
-						}
-					}
-					governedCalls[call] = true
-				}
-				if len(n.Lhs) == len(n.Rhs) {
-					for i, rhs := range n.Rhs {
-						governRHS(i, rhs)
-						if recvRooted(rhs) {
-							if methodValueBind(rhs) {
-								disqualified[key] = true
-							} else if ident, ok := n.Lhs[i].(*ast.Ident); ok {
-								if escapingSink(ident) {
-									disqualified[key] = true
-								} else {
-									consume(rhs)
-								}
-							}
-						}
-					}
-				} else if len(n.Rhs) == 1 {
-					governRHS(-1, n.Rhs[0])
-					if recvRooted(n.Rhs[0]) {
-						if methodValueBind(n.Rhs[0]) {
-							disqualified[key] = true
-						}
-						allIdent := true
-						sink := false
-						for _, lhs := range n.Lhs {
-							ident, ok := lhs.(*ast.Ident)
-							if !ok {
-								allIdent = false
-							} else if escapingSink(ident) {
-								sink = true
-							}
-						}
-						if allIdent && !methodValueBind(n.Rhs[0]) {
-							if sink {
-								disqualified[key] = true
-							} else {
-								consume(n.Rhs[0])
-							}
-						}
-					}
-				}
-				for _, lhs := range n.Lhs {
-					if ident, ok := lhs.(*ast.Ident); ok {
-						if p.TypesInfo.Uses[ident] == recvObj || p.TypesInfo.Defs[ident] == recvObj {
-							disqualified[key] = true
-						}
-						consume(ident)
-						continue
-					}
-					if recvRooted(lhs) && !onceFill[n] {
-						disqualified[key] = true
-					}
-				}
-			case *ast.ValueSpec:
-				governSpecRHS := func(i int, rhs ast.Expr) {
-					call, ok := rhs.(*ast.CallExpr)
-					if !ok {
-						return
-					}
-					sel, ok := syntaxutil.UnwrapCallee(call.Fun).(*ast.SelectorExpr)
-					if !ok || !recvRooted(sel.X) {
-						return
-					}
-					if sibling, _ := siblingLeaky(sel); !sibling {
-						return
-					}
-					if i >= 0 {
-						if escapingSink(n.Names[i]) {
-							return
-						}
-					} else {
-						for _, name := range n.Names {
-							if escapingSink(name) {
-								return
-							}
-						}
-					}
-					governedCalls[call] = true
-				}
-				if len(n.Names) == len(n.Values) {
-					for i, rhs := range n.Values {
-						governSpecRHS(i, rhs)
-						if recvRooted(rhs) {
-							if methodValueBind(rhs) || escapingSink(n.Names[i]) {
-								disqualified[key] = true
-								continue
-							}
-							consume(rhs)
-							allowed[n.Names[i]] = true
-						}
-					}
-				} else if len(n.Values) == 1 {
-					governSpecRHS(-1, n.Values[0])
-					if recvRooted(n.Values[0]) {
-						if methodValueBind(n.Values[0]) {
-							disqualified[key] = true
-						} else {
-							sink := false
-							for _, name := range n.Names {
-								if escapingSink(name) {
-									sink = true
-								}
-							}
-							if sink {
-								disqualified[key] = true
-							} else {
-								consume(n.Values[0])
-								for _, name := range n.Names {
-									allowed[name] = true
-								}
-							}
-						}
-					}
-				}
-			case *ast.IncDecStmt:
-				if recvRooted(n.X) && !onceFill[n] {
-					disqualified[key] = true
-				}
-			case *ast.SendStmt:
-				if recvRooted(n.Chan) {
-					disqualified[key] = true
-				}
-			case *ast.UnaryExpr:
-				if n.Op == token.AND && recvRooted(n.X) {
-					disqualified[key] = true
-				}
-			case *ast.RangeStmt:
-				for _, bind := range []ast.Expr{n.Key, n.Value} {
-					if bind == nil {
-						continue
-					}
-					if ident, ok := bind.(*ast.Ident); ok {
-						if p.TypesInfo.Uses[ident] == recvObj || p.TypesInfo.Defs[ident] == recvObj {
-							disqualified[key] = true
-						}
-						consume(ident)
-						continue
-					}
-					if recvRooted(bind) && !onceFill[n] {
-						disqualified[key] = true
-					}
-				}
-				if recvRooted(n.X) {
-					t := p.TypesInfo.TypeOf(n.X)
-					if t == nil {
-						disqualified[key] = true
-					} else if _, isChan := types.Unalias(t).Underlying().(*types.Chan); isChan {
-						disqualified[key] = true
-					} else {
-						for _, bind := range []ast.Expr{n.Key, n.Value} {
-							if ident, ok := bind.(*ast.Ident); ok && ident != nil {
-								if escapingSink(ident) {
-									disqualified[key] = true
-									continue
-								}
-								consume(ident)
-							} else if bind != nil {
-								disqualified[key] = true
-							}
-						}
-						consume(n.X)
-					}
-				}
-			case *ast.ReturnStmt:
-				if innerReturns[n] {
-					for _, result := range n.Results {
-						if recvRooted(result) {
-							disqualified[key] = true
-						}
-					}
-					break
-				}
-				for _, result := range n.Results {
-					if recvRooted(result) {
-						if methodValueBind(result) {
-							disqualified[key] = true
-							continue
-						}
-						consume(result)
-					}
-					if call, ok := result.(*ast.CallExpr); ok {
-						if sel, ok := syntaxutil.UnwrapCallee(call.Fun).(*ast.SelectorExpr); ok && recvRooted(sel.X) {
-							if sibling, _ := siblingLeaky(sel); sibling {
-								governedCalls[call] = true
-							}
-						}
-					}
-				}
-			case *ast.CallExpr:
-				if ident, ok := n.Fun.(*ast.Ident); ok {
-					if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && (ident.Name == "len" || ident.Name == "cap") {
-						for _, arg := range n.Args {
-							if recvRooted(arg) {
-								consume(arg)
-							}
-						}
-						break
-					}
-				}
-				if tv, ok := p.TypesInfo.Types[n.Fun]; ok && tv.IsType() {
-					if len(n.Args) == 1 && recvRooted(n.Args[0]) && !methodValueBind(n.Args[0]) {
-						if !refconfine.CallResultHandsOut(p.TypesInfo.TypeOf(n)) {
-							consume(n.Args[0])
-						}
-					}
-					break
-				}
-				if sel, ok := syntaxutil.UnwrapCallee(n.Fun).(*ast.SelectorExpr); ok && recvRooted(sel.X) {
-					if selection, ok := p.TypesInfo.Selections[sel]; ok && selection.Kind() == types.MethodVal {
-						if fn, ok := selection.Obj().(*types.Func); ok && refconfine.AuditedSynchronization(audited, fn) {
-							consume(sel.X)
-							break
-						}
-						if fn, ok := selection.Obj().(*types.Func); ok && fn.Pkg() == p.Types {
-							target := syntaxutil.RecvTypeNameOf(p, sel) + "." + fn.Name()
-							if _, sibling := methods[target]; sibling {
-								if chains[key] == nil {
-									chains[key] = map[string]bool{}
-								}
-								chains[key][target] = true
-								consume(sel.X)
-								if _, leaky := siblingLeaky(sel); leaky && !governedCalls[n] {
-									disqualified[key] = true
-								}
-								break
-							}
-							targets, ok := unexportedDispatchTargets(p, selection, fn, declaredByName, bodyless)
-							if !ok && !bodyless[fn.Name()] {
-								targets, ok = closedFieldDispatchTargets(p.TypesInfo, recvObj, sel, fn.Name(), closedFields, declared)
-							}
-							if ok {
-								if chains[key] == nil {
-									chains[key] = map[string]bool{}
-								}
-								for _, target := range targets {
-									chains[key][target] = true
-								}
-								consume(sel.X)
-								if !refconfine.InstantiatedResultsHandOutNothing(audited, selection.Type()) && !governedCalls[n] {
-									disqualified[key] = true
-								}
-								break
-							}
-						}
-					}
-					disqualified[key] = true
-				}
-			case *ast.IndexExpr:
-				if recvRooted(n.X) && !allowed[syntaxutil.RootIdent(n.X)] {
-					if refconfine.CallResultHandsOut(p.TypesInfo.TypeOf(n)) {
-						disqualified[key] = true
-					} else {
-						consume(n.X)
-					}
-				}
-			case *ast.SelectorExpr:
-				if recvRooted(n.X) && !allowed[syntaxutil.RootIdent(n.X)] {
-					if selection, ok := p.TypesInfo.Selections[n]; ok && selection.Kind() == types.MethodVal {
-						disqualified[key] = true
-						break
-					}
-					if refconfine.CallResultHandsOut(p.TypesInfo.TypeOf(n)) {
-						disqualified[key] = true
-					} else {
-						consume(n.X)
-					}
-				}
-			case *ast.BinaryExpr:
-				if n.Op == token.EQL || n.Op == token.NEQ {
-					if recvRooted(n.X) {
-						consume(n.X)
-					}
-					if recvRooted(n.Y) {
-						consume(n.Y)
-					}
-				}
-			case *ast.Ident:
-				if isRecv(n) && !allowed[n] {
-					disqualified[key] = true
-				}
-			}
-			return true
-		})
 	}
 	syntaxutil.SolveReachFixedPoint(disqualified, chains, func(d string) bool { return disqualified[d] })
 	readOnly := map[string]bool{}
-	for key, m := range methods {
-		if m.recv == nil || !disqualified[key] {
+	for key := range methods {
+		if !disqualified[key] {
 			readOnly[key] = true
 		}
 	}
 	return readOnly
+}
+
+func collectPackageOnceFieldUsage(audited bool, p *packages.Package) (onceSites map[*types.Var]int, onceFieldRefs map[*types.Var]int) {
+	onceSites = map[*types.Var]int{}
+	onceFieldRefs = map[*types.Var]int{}
+	zeroOnceKeyIdents := map[*ast.Ident]bool{}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.CallExpr:
+				if field := onceFieldOfDo(audited, p.TypesInfo, x); field != nil {
+					onceSites[field]++
+				}
+				if tv, ok := p.TypesInfo.Types[ast.Unparen(x.Fun)]; ok && tv.IsType() && len(x.Args) == 1 {
+					to := p.TypesInfo.TypeOf(x)
+					from := p.TypesInfo.TypeOf(x.Args[0])
+					if to != nil && from != nil && !types.Identical(from, to) {
+						for _, convT := range []types.Type{to, from} {
+							if ptr, isPtr := types.Unalias(convT).(*types.Pointer); isPtr {
+								convT = ptr.Elem()
+							}
+							if st, isSt := types.Unalias(convT).Underlying().(*types.Struct); isSt {
+								for i := 0; i < st.NumFields(); i++ {
+									onceFieldRefs[st.Field(i)] += 2
+								}
+							}
+						}
+					}
+				}
+			case *ast.CompositeLit:
+				ct := p.TypesInfo.TypeOf(x)
+				if ct != nil {
+					if ptr, isPtr := types.Unalias(ct).Underlying().(*types.Pointer); isPtr {
+						ct = ptr.Elem()
+					}
+					if st, isSt := types.Unalias(ct).Underlying().(*types.Struct); isSt && len(x.Elts) > 0 {
+						if _, keyed := x.Elts[0].(*ast.KeyValueExpr); keyed {
+							for _, elt := range x.Elts {
+								if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
+									if keyID, isID := ast.Unparen(kv.Key).(*ast.Ident); isID && isZeroSyncOnceExpr(p.TypesInfo, kv.Value) {
+										zeroOnceKeyIdents[keyID] = true
+									}
+								}
+							}
+						} else {
+							for i, elt := range x.Elts {
+								if i < st.NumFields() && refconfine.TypeReachesOnce(st.Field(i).Type()) && !isZeroSyncOnceExpr(p.TypesInfo, elt) {
+									onceFieldRefs[st.Field(i)] += 2
+								}
+							}
+						}
+					}
+				}
+			}
+			return true
+		})
+	}
+	for _, file := range p.Syntax {
+		ast.Inspect(file, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok && !zeroOnceKeyIdents[id] {
+				if fld, isVar := p.TypesInfo.Uses[id].(*types.Var); isVar && fld != nil && fld.IsField() {
+					onceFieldRefs[fld]++
+				}
+			}
+			return true
+		})
+	}
+	return onceSites, onceFieldRefs
+}
+
+func findAdmittedReceiverOnceDo(
+	audited bool,
+	p *packages.Package,
+	body *flowir.Body,
+	recvObj types.Object,
+	onceSites map[*types.Var]int,
+	onceFieldRefs map[*types.Var]int,
+) map[*ast.CallExpr]bool {
+	if body == nil || recvObj == nil {
+		return nil
+	}
+	if _, pointer := types.Unalias(recvObj.Type()).(*types.Pointer); !pointer {
+		return nil
+	}
+	if refconfine.OnceFieldCount(recvObj.Type()) != 1 {
+		return nil
+	}
+	for i := range body.Ops {
+		op := &body.Ops[i]
+		if !op.TopLevelInBody {
+			return nil
+		}
+		if op.Kind == flowir.OpExpr && op.Expr != nil && op.Expr.Kind == flowir.ValCall && op.Expr.CallAST != nil {
+			call := op.Expr.CallAST
+			field := onceFieldOfDo(audited, p.TypesInfo, call)
+			if field != nil && !field.Exported() && onceSites[field] == 1 && onceFieldRefs[field] == 1 {
+				if ident, ok := call.Fun.(*ast.SelectorExpr).X.(*ast.SelectorExpr).X.(*ast.Ident); ok && p.TypesInfo.Uses[ident] == recvObj {
+					if _, rawLit := call.Args[0].(*ast.FuncLit); rawLit && len(op.Expr.Args) == 1 &&
+						op.Expr.Args[0] != nil && op.Expr.Args[0].Kind == flowir.ValMakeClosure && op.Expr.Args[0].Closure != nil {
+						doBody := op.Expr.Args[0].Closure
+						capturesOther := false
+						for fv := range doBody.FreeVars {
+							if fv != recvObj {
+								capturesOther = true
+								break
+							}
+						}
+						if !capturesOther {
+							return map[*ast.CallExpr]bool{call: true}
+						}
+					}
+				}
+			}
+		}
+		if !opCleanBeforeOnceDo(op, recvObj) {
+			return nil
+		}
+	}
+	return nil
+}
+
+func opCleanBeforeOnceDo(op *flowir.Op, recvObj types.Object) bool {
+	if op == nil || !op.TopLevelInBody || op.Kind != flowir.OpAssign || op.AssignKind == flowir.AssignRange {
+		return false
+	}
+	clean := true
+	checkVal := func(v *flowir.Value) {
+		if v == nil || !clean {
+			return
+		}
+		v.WalkValues(func(cur *flowir.Value) bool {
+			switch cur.Kind {
+			case flowir.ValInvalid, flowir.ValCall, flowir.ValChanRecv:
+				clean = false
+				return false
+			case flowir.ValPlace:
+				if cur.Place.Obj == recvObj || cur.Place.Root == flowir.RootPkgGlobal {
+					clean = false
+					return false
+				}
+			case flowir.ValAddrOf:
+				if cur.AddrPlace.Obj == recvObj || cur.AddrPlace.Root == flowir.RootPkgGlobal {
+					clean = false
+					return false
+				}
+			case flowir.ValMethodVal:
+				if cur.HasRecvPlace && (cur.RecvPlace.Obj == recvObj || cur.RecvPlace.Root == flowir.RootPkgGlobal) {
+					clean = false
+					return false
+				}
+			case flowir.ValMakeClosure:
+				if rVar, ok := recvObj.(*types.Var); ok && cur.Closure != nil && cur.Closure.FreeVars[rVar] {
+					clean = false
+					return false
+				}
+			}
+			return true
+		})
+	}
+	op.ForEachAssignPair(func(_ int, dst flowir.Place, _ bool, src *flowir.Value) bool {
+		if !dst.IsBareVar() || dst.Root != flowir.RootLocal {
+			clean = false
+			return false
+		}
+		checkVal(src)
+		return clean
+	})
+	return clean
+}
+
+func isZeroSyncOnceExpr(info *types.Info, expr ast.Expr) bool {
+	if info == nil || expr == nil {
+		return false
+	}
+	cl, ok := ast.Unparen(expr).(*ast.CompositeLit)
+	if !ok || len(cl.Elts) != 0 {
+		return false
+	}
+	named, ok := types.Unalias(info.TypeOf(cl)).(*types.Named)
+	return ok && named.Obj() != nil && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "sync" && named.Obj().Name() == "Once"
+}
+
+func isNilInterfaceValueExpr(info *types.Info, expr ast.Expr) bool {
+	if info == nil || expr == nil {
+		return false
+	}
+	switch e := ast.Unparen(expr).(type) {
+	case *ast.Ident:
+		_, ok := info.Uses[e].(*types.Nil)
+		return ok
+	case *ast.CallExpr:
+		tv := info.Types[ast.Unparen(e.Fun)]
+		if tv.IsType() && types.IsInterface(tv.Type) && len(e.Args) == 1 && !e.Ellipsis.IsValid() {
+			return isNilInterfaceValueExpr(info, e.Args[0])
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+func isTypedNilNonInterfaceExpr(info *types.Info, expr ast.Expr) bool {
+	if info == nil || expr == nil {
+		return false
+	}
+	switch e := ast.Unparen(expr).(type) {
+	case *ast.Ident:
+		_, ok := info.Uses[e].(*types.Nil)
+		return ok
+	case *ast.CallExpr:
+		tv := info.Types[ast.Unparen(e.Fun)]
+		if tv.IsType() && !types.IsInterface(tv.Type) && len(e.Args) == 1 && !e.Ellipsis.IsValid() {
+			return isTypedNilNonInterfaceExpr(info, e.Args[0])
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// isCarrierEmptySlotStore reports whether expr produces a value for slotType
+// whose every dynamic-carrier or function-signature slot is provably nil/zero
+// (and contains no sync.noCopy value).
+func isCarrierEmptySlotStore(audited bool, info *types.Info, slotType types.Type, expr ast.Expr) bool {
+	if info == nil || slotType == nil || expr == nil {
+		return false
+	}
+	if refconfine.TypeReachesSyncNoCopyByValue(slotType) {
+		return false
+	}
+	if !refconfine.TypeMayCarryUnknownDynamic(audited, slotType) && !refconfine.TypeCarriesSignature(slotType) {
+		return true
+	}
+	if types.IsInterface(slotType) {
+		return isNilInterfaceValueExpr(info, expr)
+	}
+	if isTypedNilNonInterfaceExpr(info, expr) {
+		return true
+	}
+	switch e := ast.Unparen(expr).(type) {
+	case *ast.CallExpr:
+		b := syntaxutil.LookupBuiltin(info, ast.Unparen(e.Fun))
+		if b == nil {
+			return false
+		}
+		switch b.Name() {
+		case "make":
+			return len(e.Args) >= 1 && info.Types[ast.Unparen(e.Args[0])].IsType()
+		case "new":
+			return syntaxutil.IsBuiltinNewType(info, e)
+		default:
+			return false
+		}
+	case *ast.CompositeLit:
+		switch u := types.Unalias(slotType).Underlying().(type) {
+		case *types.Struct:
+			if len(e.Elts) == 0 {
+				return true
+			}
+			if _, keyed := e.Elts[0].(*ast.KeyValueExpr); keyed {
+				for _, elt := range e.Elts {
+					kv, ok := elt.(*ast.KeyValueExpr)
+					if !ok {
+						return false
+					}
+					keyID, ok := ast.Unparen(kv.Key).(*ast.Ident)
+					if !ok {
+						return false
+					}
+					fld, ok := info.Uses[keyID].(*types.Var)
+					if !ok || fld == nil || !fld.IsField() {
+						return false
+					}
+					if !isCarrierEmptySlotStore(audited, info, fld.Type(), kv.Value) {
+						return false
+					}
+				}
+				return true
+			}
+			if len(e.Elts) != u.NumFields() {
+				return false
+			}
+			for i, elt := range e.Elts {
+				if !isCarrierEmptySlotStore(audited, info, u.Field(i).Type(), elt) {
+					return false
+				}
+			}
+			return true
+		case *types.Array, *types.Slice:
+			elemT := u.(interface{ Elem() types.Type }).Elem()
+			for _, elt := range e.Elts {
+				val := elt
+				if kv, ok := elt.(*ast.KeyValueExpr); ok {
+					val = kv.Value
+				}
+				if !isCarrierEmptySlotStore(audited, info, elemT, val) {
+					return false
+				}
+			}
+			return true
+		case *types.Map:
+			for _, elt := range e.Elts {
+				kv, ok := elt.(*ast.KeyValueExpr)
+				if !ok {
+					return false
+				}
+				if !isCarrierEmptySlotStore(audited, info, u.Key(), kv.Key) || !isCarrierEmptySlotStore(audited, info, u.Elem(), kv.Value) {
+					return false
+				}
+			}
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
+	}
 }

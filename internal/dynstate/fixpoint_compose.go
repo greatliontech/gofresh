@@ -7,6 +7,7 @@ import (
 
 	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -61,10 +62,29 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 	envFreeResolved := resolution.EnvFreeResolved
 	readOnly := resolution.ReadOnly
 	paramLeakFree := resolution.ParamLeakFree
-	refRegions := map[syntaxutil.FuncKey]map[syntaxutil.RefRegion]bool{}
+	refRegions := resolution.RefRegions
+	initOnlyFn := resolution.InitOnlyFn
+	initReachFn := resolution.InitReachFn
 
 	for _, facts := range allFacts {
 		for _, fact := range facts {
+			factEnvSet := make(map[string]bool, len(fact.EnvCarrying))
+			for _, key := range fact.EnvCarrying {
+				factEnvSet[key] = true
+			}
+			for _, use := range fact.EnvCarryingFns {
+				if !use.Valid() || !factEnvSet[use.Key] {
+					markDeclaresMutated(fact)
+					for _, key := range fact.Declares {
+						envCarrying[key] = true
+					}
+					if syntaxutil.ValidFactKey(use.Key) {
+						envCarrying[use.Key] = true
+						mutated[use.Key] = true
+						unattributedMark[use.Key] = true
+					}
+				}
+			}
 			for _, use := range fact.EnvCallUses {
 				if !use.Valid() {
 					markDeclaresMutated(fact)
@@ -117,12 +137,15 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 					}
 					continue
 				}
+				if !use.Func.IsZero() {
+					continue
+				}
 				if !paramLeakFree[use.Param] {
 					escaped[use.Key] = true
 				}
 			}
 			for _, use := range fact.InitParamUses {
-				if !use.Valid() {
+				if !use.Valid() || !use.Func.IsZero() {
 					markDeclaresMutated(fact)
 					if syntaxutil.ValidFactKey(use.Key) {
 						escaped[use.Key] = true
@@ -160,39 +183,8 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 					escaped[use.Key] = true
 				}
 			}
-			for _, edge := range fact.FuncRefs {
-				if !edge.Valid() {
-					markDeclaresMutated(fact)
-					if edge.Callee.Valid() {
-						if refRegions[edge.Callee] == nil {
-							refRegions[edge.Callee] = map[syntaxutil.RefRegion]bool{}
-						}
-						refRegions[edge.Callee][syntaxutil.RefRegion{Kind: syntaxutil.RegionProg}] = true
-					}
-					continue
-				}
-				if refRegions[edge.Callee] == nil {
-					refRegions[edge.Callee] = map[syntaxutil.RefRegion]bool{}
-				}
-				refRegions[edge.Callee][edge.Region] = true
-			}
 		}
 	}
-
-	initOnlyFn := map[syntaxutil.FuncKey]bool{}
-	syntaxutil.SolveLeastFixedPoint(initOnlyFn, refRegions, func(region syntaxutil.RefRegion) bool {
-		if region.Kind == syntaxutil.RegionInit {
-			return true
-		}
-		return region.Kind == syntaxutil.RegionFunc && initOnlyFn[region.Caller]
-	})
-	initReachFn := map[syntaxutil.FuncKey]bool{}
-	syntaxutil.SolveReachFixedPoint(initReachFn, refRegions, func(region syntaxutil.RefRegion) bool {
-		if region.Kind == syntaxutil.RegionInit || region.Kind == syntaxutil.RegionProg {
-			return true
-		}
-		return (region.Kind == syntaxutil.RegionFunc || region.Kind == syntaxutil.RegionLitFunc) && initReachFn[region.Caller]
-	})
 
 	for key := range mutated {
 		unattributedMark[key] = true
@@ -212,6 +204,12 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 		}
 		siteFns[key][fn.SiteKey()] = true
 	}
+	mayRunAtInit := func(fn syntaxutil.FuncKey) bool {
+		return initReachFn[fn] || strings.Contains(fn.Name, ".")
+	}
+	isInitOnlyPlain := func(fn syntaxutil.FuncKey) bool {
+		return refRegions[fn] != nil && initOnlyFn[fn]
+	}
 	applyAttributedUse := func(fact Fact, use syntaxutil.AttributedUse, applyMarks bool) {
 		if !use.Valid() {
 			markDeclaresMutated(fact)
@@ -225,11 +223,6 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 			return
 		}
 		fn, key := use.Func, use.Key
-		if !use.Literal && use.Escape {
-			escaped[key] = true
-			attributeSite(key, fn)
-			return
-		}
 		if use.Literal {
 			if use.HasMethod {
 				if readOnly[use.Method] {
@@ -241,33 +234,112 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 			} else {
 				mutated[key] = true
 			}
-			if initReachFn[fn] || strings.Contains(fn.Name, ".") {
+			if mayRunAtInit(fn) {
 				unattributedMark[key] = true
 			} else {
 				attributeSite(key, fn)
 			}
 			return
 		}
-		if refRegions[fn] != nil && initOnlyFn[fn] {
+		if use.Escape {
+			escaped[key] = true
+			if mayRunAtInit(fn) {
+				unattributedMark[key] = true
+			} else {
+				attributeSite(key, fn)
+			}
 			return
 		}
 		if use.HasMethod {
-			if !readOnly[use.Method] {
-				mutated[key] = true
+			if readOnly[use.Method] {
+				return
+			}
+			if isInitOnlyPlain(fn) {
+				if !resolution.ReceiverRetention[use.Method] {
+					mutated[key] = true
+					unattributedMark[key] = true
+				}
+				return
+			}
+			mutated[key] = true
+			if !resolution.ReceiverRetention[use.Method] && mayRunAtInit(fn) {
+				unattributedMark[key] = true
+			} else {
 				attributeSite(key, fn)
 			}
-		} else {
-			mutated[key] = true
-			attributeSite(key, fn)
+			return
 		}
+		if isInitOnlyPlain(fn) {
+			return
+		}
+		mutated[key] = true
+		attributeSite(key, fn)
 	}
 	for _, facts := range allFacts {
 		for _, fact := range facts {
+			factAttrEnv := map[string][]syntaxutil.FuncKey{}
+			for _, use := range fact.EnvCarryingFns {
+				if use.Valid() {
+					factAttrEnv[use.Key] = append(factAttrEnv[use.Key], use.Func)
+				}
+			}
+			for _, key := range fact.EnvCarrying {
+				fns := factAttrEnv[key]
+				if envCallable[key] || len(fns) == 0 {
+					unattributedMark[key] = true
+					continue
+				}
+				for _, fn := range fns {
+					if mayRunAtInit(fn) {
+						unattributedMark[key] = true
+					} else {
+						attributeSite(key, fn)
+					}
+				}
+			}
+			for _, use := range fact.EnvCallUses {
+				if !use.Valid() || envFreeResolved[use.Callee] {
+					continue
+				}
+				if use.Func.IsZero() || envCallable[use.Key] || mayRunAtInit(use.Func) {
+					unattributedMark[use.Key] = true
+				} else {
+					attributeSite(use.Key, use.Func)
+				}
+			}
 			for _, use := range fact.AttributedUses {
 				applyAttributedUse(fact, use, true)
 			}
 			for _, use := range fact.PoolAttributedUses {
 				applyAttributedUse(fact, use, !singleSubject)
+			}
+			for _, use := range fact.ParamUses {
+				if !use.Valid() || use.Func.IsZero() || paramLeakFree[use.Param] {
+					continue
+				}
+				fn, key := use.Func, use.Key
+				if use.Literal {
+					escaped[key] = true
+					if mayRunAtInit(fn) {
+						unattributedMark[key] = true
+					} else {
+						attributeSite(key, fn)
+					}
+					continue
+				}
+				if isInitOnlyPlain(fn) {
+					if !resolution.ParamRetentionFree[use.Param] {
+						escaped[key] = true
+						unattributedMark[key] = true
+					}
+					continue
+				}
+				escaped[key] = true
+				if !resolution.ParamRetentionFree[use.Param] && mayRunAtInit(fn) {
+					unattributedMark[key] = true
+				} else {
+					attributeSite(key, fn)
+				}
 			}
 		}
 	}
@@ -281,7 +353,7 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 			}
 		}
 	}
-	linkAdj := CarrierLinkGraph(allFacts, func(fact Fact) {
+	linkAdj := ActiveCarrierLinkGraph(allFacts, resolution, func(fact Fact) {
 		markDeclaresMutated(fact)
 		for _, link := range fact.CarrierLinks {
 			if !link.Valid() {
@@ -311,9 +383,9 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 				cur := queue[len(queue)-1]
 				queue = queue[:len(queue)-1]
 				for next := range linkAdj[cur] {
+					unattributedMark[next] = true
 					if !set[next] {
 						set[next] = true
-						unattributedMark[next] = true
 						queue = append(queue, next)
 					}
 				}
@@ -330,6 +402,7 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 	pkgHasMalformedFact := discharges.pkgHasMalformedFact
 	mappingDischargedVars := discharges.mappingDischargedVars
 	memoDischargedVars := discharges.memoDischargedVars
+	harnessDischargedVars := discharges.harnessDischargedVars
 	directiveCovered := discharges.directiveCovered
 	protoVerifiedVars := discharges.protoVerifiedVars
 	grpcVerifiedVars := discharges.grpcVerifiedVars
@@ -349,7 +422,7 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 	attestedDischarged := map[string][]string{}
 	auditedSourceOut := func(pkgPath, key string) bool {
 		return (pinnedPkg[pkgPath] || mutableLocalPkg[pkgPath]) && !malformedFactVars[key] &&
-			(mappingDischargedVars[key] || memoDischargedVars[key])
+			(mappingDischargedVars[key] || memoDischargedVars[key] || harnessDischargedVars[key])
 	}
 	directiveDischargedOut := func(pkgPath, key string) bool {
 		if !singleSubject || !mutableLocalPkg[pkgPath] || !directiveCovered[key] || malformedFactVars[key] {
@@ -628,6 +701,7 @@ type sourceAndAttestedDischarges struct {
 	pkgHasMalformedFact   map[string]bool
 	mappingDischargedVars map[string]bool
 	memoDischargedVars    map[string]bool
+	harnessDischargedVars map[string]bool
 	directiveCovered      map[string]bool
 	protoVerifiedVars     map[string]bool
 	grpcVerifiedVars      map[string]bool
@@ -661,6 +735,11 @@ func isFactDischargeMalformed(fact Fact) bool {
 		}
 	}
 	for _, key := range fact.MemoDischarges {
+		if !syntaxutil.ValidQualifiedVarKey(key) {
+			bad = true
+		}
+	}
+	for _, key := range fact.HarnessDischarges {
 		if !syntaxutil.ValidQualifiedVarKey(key) {
 			bad = true
 		}
@@ -745,7 +824,21 @@ func deriveSourceAndAttestedDischarges(
 	var allCondStructMutations []syntaxutil.ConditionalStructMutation
 	for pkgPath, pkgFacts := range allFacts {
 		for _, fact := range pkgFacts {
-			if isFactDischargeMalformed(fact) {
+			harnessMalformed := false
+			if len(fact.HarnessDischarges) > 0 {
+				if !propharness.IsHarnessPath(pkgPath) {
+					harnessMalformed = true
+				} else {
+					prefix := pkgPath + "."
+					for _, key := range fact.HarnessDischarges {
+						if !strings.HasPrefix(key, prefix) || strings.Contains(key[len(prefix):], ".") {
+							harnessMalformed = true
+							break
+						}
+					}
+				}
+			}
+			if isFactDischargeMalformed(fact) || harnessMalformed {
 				out.pkgHasMalformedFact[pkgPath] = true
 				for _, sibling := range pkgFacts {
 					if onMalformedFact != nil {
@@ -1002,6 +1095,18 @@ func deriveSourceAndAttestedDischarges(
 		}
 		return m
 	})
+	out.harnessDischargedVars = intersectDeclaredVarSet(func(pkgPath string, fact Fact) map[string]bool {
+		if anyMalformedDirectVarWrite || !propharness.IsHarnessPath(pkgPath) {
+			return nil
+		}
+		m := make(map[string]bool, len(fact.HarnessDischarges))
+		for _, key := range fact.HarnessDischarges {
+			if !directVarWritten[key] {
+				m[key] = true
+			}
+		}
+		return m
+	})
 	out.directiveCovered = intersectDeclaredVarSet(func(_ string, fact Fact) map[string]bool {
 		directed := make(map[string]bool, len(fact.SingleSubjectVars))
 		for _, key := range fact.SingleSubjectVars {
@@ -1236,13 +1341,22 @@ func NonVouchDischargedVars(meta []GraphPackage, allFacts map[string][]Fact, sin
 			malformedFactVars[key] = true
 		}
 	}
-	NewDeferralResolution(allFacts, markMalformed)
+	resolution := NewDeferralResolution(allFacts, markMalformed)
 	BlockedExportedSeams(allFacts, markMalformed)
-	CarrierLinkGraph(allFacts, markMalformed)
-	refRegions := map[syntaxutil.FuncKey]map[syntaxutil.RefRegion]bool{}
+	ActiveCarrierLinkGraph(allFacts, resolution, markMalformed)
+	refRegions, initOnlyFn := resolution.RefRegions, resolution.InitOnlyFn
 	for _, facts := range allFacts {
 		for _, fact := range facts {
 			bad := false
+			factEnvSet := make(map[string]bool, len(fact.EnvCarrying))
+			for _, key := range fact.EnvCarrying {
+				factEnvSet[key] = true
+			}
+			for _, use := range fact.EnvCarryingFns {
+				if !use.Valid() || !factEnvSet[use.Key] {
+					bad = true
+				}
+			}
 			for _, use := range fact.EnvCallUses {
 				if !use.Valid() {
 					bad = true
@@ -1264,7 +1378,7 @@ func NonVouchDischargedVars(meta []GraphPackage, allFacts map[string][]Fact, sin
 				}
 			}
 			for _, use := range fact.InitParamUses {
-				if !use.Valid() {
+				if !use.Valid() || !use.Func.IsZero() {
 					bad = true
 				}
 			}
@@ -1288,34 +1402,11 @@ func NonVouchDischargedVars(meta []GraphPackage, allFacts map[string][]Fact, sin
 					bad = true
 				}
 			}
-			for _, edge := range fact.FuncRefs {
-				if !edge.Valid() {
-					bad = true
-					if edge.Callee.Valid() {
-						if refRegions[edge.Callee] == nil {
-							refRegions[edge.Callee] = map[syntaxutil.RefRegion]bool{}
-						}
-						refRegions[edge.Callee][syntaxutil.RefRegion{Kind: syntaxutil.RegionProg}] = true
-					}
-					continue
-				}
-				if refRegions[edge.Callee] == nil {
-					refRegions[edge.Callee] = map[syntaxutil.RefRegion]bool{}
-				}
-				refRegions[edge.Callee][edge.Region] = true
-			}
 			if bad {
 				markMalformed(fact)
 			}
 		}
 	}
-	initOnlyFn := map[syntaxutil.FuncKey]bool{}
-	syntaxutil.SolveLeastFixedPoint(initOnlyFn, refRegions, func(region syntaxutil.RefRegion) bool {
-		if region.Kind == syntaxutil.RegionInit {
-			return true
-		}
-		return region.Kind == syntaxutil.RegionFunc && initOnlyFn[region.Caller]
-	})
 
 	d := deriveSourceAndAttestedDischarges(meta, allFacts, refRegions, initOnlyFn, malformedFactVars, markMalformed)
 	discharged := map[string]bool{}
@@ -1329,7 +1420,7 @@ func NonVouchDischargedVars(meta []GraphPackage, allFacts map[string][]Fact, sin
 				if malformedFactVars[key] {
 					continue
 				}
-				if d.mappingDischargedVars[key] || d.memoDischargedVars[key] {
+				if d.mappingDischargedVars[key] || d.memoDischargedVars[key] || d.harnessDischargedVars[key] {
 					discharged[key] = true
 					continue
 				}

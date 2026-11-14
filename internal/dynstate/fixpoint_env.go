@@ -11,19 +11,30 @@ import (
 // return-environment-free fixed point, and the registered field populations
 // (REQ-explain-chain).
 type DeferralResolution struct {
+	Declared           map[string]bool
 	ParamLeakFree      map[syntaxutil.ParamKey]bool
 	ParamRetentionFree map[syntaxutil.ParamKey]bool
 	ReadOnly           map[syntaxutil.FuncKey]bool
 	ReceiverRetention  map[syntaxutil.FuncKey]bool
 	NotOpaque          map[string]bool
+	OwnerUnproven      map[string]bool
 	EnvFreeResolved    map[syntaxutil.FuncKey]bool
 	EnvFreeDeps        map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool
+	RefRegions         map[syntaxutil.FuncKey]map[syntaxutil.RefRegion]bool
+	InitOnlyFn         map[syntaxutil.FuncKey]bool
+	InitReachFn        map[syntaxutil.FuncKey]bool
 
 	FieldDeferAt  map[syntaxutil.FieldPosKey][]syntaxutil.ParamKey
 	FieldPoisonAt map[syntaxutil.FieldParamPoison]bool
 	RetDeferAt    map[syntaxutil.ReturnFieldPosKey][]syntaxutil.ParamKey
 	RetPoisonAt   map[syntaxutil.ReturnFieldParamPoison]bool
 	CtorsOf       map[string][]syntaxutil.FuncKey
+}
+
+// IsObjectClosed reports whether key is a declared package variable whose
+// closed sentinel opacity remains unbroken across allFacts.
+func (r *DeferralResolution) IsObjectClosed(key string) bool {
+	return r != nil && r.Declared[key] && !r.NotOpaque[key]
 }
 
 // EnvAuditResolution is the environment-audit resolution shared by the verdict
@@ -179,11 +190,13 @@ func ResolveEnvAudit(allFacts map[string][]Fact, malformed func(fact Fact)) *Env
 // NewDeferralResolution composes the cross-package proof state across allFacts.
 func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)) *DeferralResolution {
 	r := &DeferralResolution{
+		Declared:           map[string]bool{},
 		ParamLeakFree:      map[syntaxutil.ParamKey]bool{},
 		ParamRetentionFree: map[syntaxutil.ParamKey]bool{},
 		ReadOnly:           map[syntaxutil.FuncKey]bool{},
 		ReceiverRetention:  map[syntaxutil.FuncKey]bool{},
 		NotOpaque:          map[string]bool{},
+		OwnerUnproven:      map[string]bool{},
 		EnvFreeResolved:    map[syntaxutil.FuncKey]bool{},
 		EnvFreeDeps:        map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool{},
 
@@ -193,11 +206,16 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 		RetPoisonAt:   map[syntaxutil.ReturnFieldParamPoison]bool{},
 		CtorsOf:       map[string][]syntaxutil.FuncKey{},
 	}
-	if malformed == nil {
-		malformed = func(Fact) {}
+	markMalformed := func(fact Fact) {
+		for _, key := range fact.Declares {
+			r.OwnerUnproven[key] = true
+		}
+		if malformed != nil {
+			malformed(fact)
+		}
 	}
 
-	declaredKeys := map[string]bool{}
+	declaredKeys := r.Declared
 	opaqueDeps := map[string]map[string]bool{}
 	paramDeps := map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool{}
 	retentionDeps := map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool{}
@@ -207,14 +225,14 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 		for _, fact := range facts {
 			for _, key := range fact.ParamLeakFree {
 				if !key.Valid() {
-					malformed(fact)
+					markMalformed(fact)
 					continue
 				}
 				r.ParamLeakFree[key] = true
 			}
 			for _, edge := range fact.ParamLeakFreeDeps {
 				if !edge.Valid() {
-					malformed(fact)
+					markMalformed(fact)
 					if edge.Own.Valid() {
 						poisonedLeakParam[edge.Own] = true
 					}
@@ -227,14 +245,14 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			}
 			for _, key := range fact.ParamRetentionFree {
 				if !key.Valid() {
-					malformed(fact)
+					markMalformed(fact)
 					continue
 				}
 				r.ParamRetentionFree[key] = true
 			}
 			for _, edge := range fact.ParamRetentionFreeDeps {
 				if !edge.Valid() {
-					malformed(fact)
+					markMalformed(fact)
 					if edge.Own.Valid() {
 						poisonedRetParam[edge.Own] = true
 					}
@@ -247,14 +265,14 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			}
 			for _, key := range fact.ReceiverReadOnly {
 				if !key.Valid() {
-					malformed(fact)
+					markMalformed(fact)
 					continue
 				}
 				r.ReadOnly[key] = true
 			}
 			for _, key := range fact.ReceiverRetentionFree {
 				if !key.Valid() {
-					malformed(fact)
+					markMalformed(fact)
 					continue
 				}
 				r.ReceiverRetention[key] = true
@@ -274,7 +292,7 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			}
 			for _, edge := range fact.OpaqueDeps {
 				if !edge.Valid() {
-					malformed(fact)
+					markMalformed(fact)
 					if syntaxutil.ValidFactKey(edge.Own) {
 						r.NotOpaque[edge.Own] = true
 					}
@@ -287,7 +305,7 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			}
 			for _, entry := range fact.FieldParamDefer {
 				if !entry.Valid() {
-					malformed(fact)
+					markMalformed(fact)
 					if syntaxutil.ValidFactKey(entry.Pos.Owner) {
 						r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: entry.Pos.Owner}] = true
 					}
@@ -297,7 +315,7 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			}
 			for _, entry := range fact.FieldParamPoison {
 				if !entry.Valid() {
-					malformed(fact)
+					markMalformed(fact)
 					if syntaxutil.ValidFactKey(entry.Owner) {
 						r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: entry.Owner}] = true
 					}
@@ -307,7 +325,7 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			}
 			for _, entry := range fact.ReturnFieldParamDefer {
 				if !entry.Valid() {
-					malformed(fact)
+					markMalformed(fact)
 					if entry.Pos.Func.Valid() {
 						r.RetPoisonAt[syntaxutil.ReturnFieldParamPoison{Func: entry.Pos.Func}] = true
 					}
@@ -317,7 +335,7 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			}
 			for _, entry := range fact.ReturnFieldParamPoison {
 				if !entry.Valid() {
-					malformed(fact)
+					markMalformed(fact)
 					if entry.Func.Valid() {
 						r.RetPoisonAt[syntaxutil.ReturnFieldParamPoison{Func: entry.Func}] = true
 					}
@@ -327,9 +345,10 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 			}
 			for _, use := range fact.EnvCallUses {
 				if !use.Valid() {
-					malformed(fact)
+					markMalformed(fact)
 					if syntaxutil.ValidFactKey(use.Key) {
 						r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: use.Key}] = true
+						r.OwnerUnproven[use.Key] = true
 					}
 					continue
 				}
@@ -356,9 +375,242 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 		return r.NotOpaque[dep] || !declaredKeys[dep]
 	})
 
-	ea := ResolveEnvAudit(allFacts, malformed)
+	ea := ResolveEnvAudit(allFacts, markMalformed)
 	r.EnvFreeResolved = ea.Resolved
 	r.EnvFreeDeps = ea.RetDeps
+
+	refRegions, initOnlyFn, initReachFn := ResolveFuncRefRegions(allFacts, markMalformed)
+	r.RefRegions = refRegions
+	r.InitOnlyFn = initOnlyFn
+	r.InitReachFn = initReachFn
+	blockedSeams := BlockedExportedSeams(allFacts, markMalformed)
+	for key := range blockedSeams {
+		r.OwnerUnproven[key] = true
+	}
+
+	linkAdj := ActiveCarrierLinkGraph(allFacts, r, func(fact Fact) {
+		markMalformed(fact)
+		for _, link := range fact.CarrierLinks {
+			if !link.Valid() {
+				if syntaxutil.ValidFactKey(link.From) {
+					r.OwnerUnproven[link.From] = true
+				}
+				if syntaxutil.ValidFactKey(link.To) {
+					r.OwnerUnproven[link.To] = true
+				}
+			}
+		}
+	})
+
+	if len(linkAdj) > 0 {
+		visited := map[string]bool{}
+		var components [][]string
+		for start := range linkAdj {
+			if visited[start] {
+				continue
+			}
+			visited[start] = true
+			comp := []string{start}
+			for i := 0; i < len(comp); i++ {
+				for next := range linkAdj[comp[i]] {
+					if !visited[next] {
+						visited[next] = true
+						comp = append(comp, next)
+					}
+				}
+			}
+			if len(comp) > 1 {
+				components = append(components, comp)
+			}
+		}
+		if len(components) > 0 {
+			compOf := map[string]int{}
+			for idx, comp := range components {
+				for _, k := range comp {
+					compOf[k] = idx + 1
+				}
+			}
+			for _, comp := range components {
+				var pooledCtors []syntaxutil.FuncKey
+				for _, k := range comp {
+					pooledCtors = append(pooledCtors, r.CtorsOf[k]...)
+				}
+				if len(pooledCtors) > 0 {
+					slices.SortFunc(pooledCtors, syntaxutil.FuncKey.Compare)
+					pooledCtors = slices.Compact(pooledCtors)
+					for _, k := range comp {
+						r.CtorsOf[k] = pooledCtors
+					}
+				}
+			}
+			type poisonEntry struct {
+				compIdx int
+				hasPos  bool
+				field   string
+				index   int
+			}
+			var addPoisons []poisonEntry
+			for p := range r.FieldPoisonAt {
+				if cid := compOf[p.Owner]; cid > 0 {
+					addPoisons = append(addPoisons, poisonEntry{compIdx: cid - 1, hasPos: p.HasPos, field: p.Field, index: p.Index})
+				}
+			}
+			for _, pe := range addPoisons {
+				for _, k := range components[pe.compIdx] {
+					r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: k, HasPos: pe.hasPos, Field: pe.field, Index: pe.index}] = true
+				}
+			}
+			type deferEntry struct {
+				compIdx int
+				field   string
+				index   int
+				params  []syntaxutil.ParamKey
+			}
+			var addDefers []deferEntry
+			for pos, params := range r.FieldDeferAt {
+				if cid := compOf[pos.Owner]; cid > 0 {
+					addDefers = append(addDefers, deferEntry{compIdx: cid - 1, field: pos.Field, index: pos.Index, params: params})
+				}
+			}
+			for _, de := range addDefers {
+				for _, k := range components[de.compIdx] {
+					targetPos := syntaxutil.FieldPosKey{Owner: k, Field: de.field, Index: de.index}
+					r.FieldDeferAt[targetPos] = append(r.FieldDeferAt[targetPos], de.params...)
+				}
+			}
+		}
+	}
+
+	var validFieldUses []syntaxutil.FieldPosKey
+	var validElemUses []syntaxutil.ElemParamUse
+	for _, facts := range allFacts {
+		for _, fact := range facts {
+			for _, key := range fact.Mutates {
+				r.OwnerUnproven[key] = true
+			}
+			for _, key := range fact.Escapes {
+				if !r.IsObjectClosed(key) {
+					r.OwnerUnproven[key] = true
+				}
+			}
+			for _, key := range fact.EnvCarrying {
+				r.OwnerUnproven[key] = true
+			}
+			for _, use := range fact.MethodUses {
+				if !use.Valid() {
+					markMalformed(fact)
+					if syntaxutil.ValidFactKey(use.Key) {
+						r.OwnerUnproven[use.Key] = true
+					}
+					continue
+				}
+				if !r.ReadOnly[use.Method] {
+					r.OwnerUnproven[use.Key] = true
+				}
+			}
+			for _, use := range fact.InitMethodUses {
+				if !use.Valid() {
+					markMalformed(fact)
+					if syntaxutil.ValidFactKey(use.Key) {
+						r.OwnerUnproven[use.Key] = true
+					}
+					continue
+				}
+				if !r.ReceiverRetention[use.Method] && !r.IsObjectClosed(use.Key) {
+					r.OwnerUnproven[use.Key] = true
+				}
+			}
+			for _, use := range fact.ParamUses {
+				if !use.Valid() {
+					markMalformed(fact)
+					if syntaxutil.ValidFactKey(use.Key) {
+						r.OwnerUnproven[use.Key] = true
+					}
+					continue
+				}
+				if r.ParamLeakFree[use.Param] {
+					continue
+				}
+				if !use.Func.IsZero() && !use.Literal && refRegions[use.Func] != nil && initOnlyFn[use.Func] && r.ParamRetentionFree[use.Param] {
+					continue
+				}
+				if !r.IsObjectClosed(use.Key) {
+					r.OwnerUnproven[use.Key] = true
+				}
+			}
+			for _, use := range fact.InitParamUses {
+				if !use.Valid() || !use.Func.IsZero() {
+					markMalformed(fact)
+					if syntaxutil.ValidFactKey(use.Key) {
+						r.OwnerUnproven[use.Key] = true
+					}
+					continue
+				}
+				if !r.ParamLeakFree[use.Param] && !r.ParamRetentionFree[use.Param] && !r.IsObjectClosed(use.Key) {
+					r.OwnerUnproven[use.Key] = true
+				}
+			}
+			for _, use := range fact.FieldParamUses {
+				if !use.Valid(0) {
+					markMalformed(fact)
+					if syntaxutil.ValidFactKey(use.Owner) {
+						r.OwnerUnproven[use.Owner] = true
+					}
+					continue
+				}
+				validFieldUses = append(validFieldUses, use)
+			}
+			for _, use := range fact.ElemParamUses {
+				if !use.Valid() {
+					markMalformed(fact)
+					if syntaxutil.ValidFactKey(use.Key) {
+						r.OwnerUnproven[use.Key] = true
+					}
+					continue
+				}
+				validElemUses = append(validElemUses, use)
+			}
+			for _, use := range fact.AttributedUses {
+				if !use.Valid() {
+					markMalformed(fact)
+					if syntaxutil.ValidFactKey(use.Key) {
+						r.OwnerUnproven[use.Key] = true
+					}
+					continue
+				}
+				fn, key := use.Func, use.Key
+				if !use.Literal && use.Escape {
+					if !r.IsObjectClosed(key) {
+						r.OwnerUnproven[key] = true
+					}
+					continue
+				}
+				if use.Literal {
+					if use.HasMethod {
+						if !r.ReadOnly[use.Method] {
+							r.OwnerUnproven[key] = true
+						}
+					} else if use.Escape {
+						if !r.IsObjectClosed(key) {
+							r.OwnerUnproven[key] = true
+						}
+					} else {
+						r.OwnerUnproven[key] = true
+					}
+					continue
+				}
+				if refRegions[fn] != nil && initOnlyFn[fn] {
+					if use.HasMethod && !r.ReadOnly[use.Method] && !r.ReceiverRetention[use.Method] {
+						r.OwnerUnproven[key] = true
+					}
+					continue
+				}
+				if !use.HasMethod || !r.ReadOnly[use.Method] {
+					r.OwnerUnproven[key] = true
+				}
+			}
+		}
+	}
 
 	for pos, params := range r.FieldDeferAt {
 		slices.SortFunc(params, syntaxutil.ParamKey.Compare)
@@ -372,15 +624,52 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 		slices.SortFunc(ctors, syntaxutil.FuncKey.Compare)
 		r.CtorsOf[key] = slices.Compact(ctors)
 	}
+
+	for changed := true; changed; {
+		changed = false
+		for key := range r.OwnerUnproven {
+			for next := range linkAdj[key] {
+				if !r.IsObjectClosed(next) && !r.OwnerUnproven[next] {
+					r.OwnerUnproven[next] = true
+					changed = true
+				}
+			}
+		}
+		for _, use := range validFieldUses {
+			if r.IsObjectClosed(use.Owner) || len(linkAdj[use.Owner]) == 0 {
+				continue
+			}
+			if ok, _ := r.FieldPopulationProves(use.Owner, use.Field, use.Index); !ok {
+				for next := range linkAdj[use.Owner] {
+					if !r.IsObjectClosed(next) && !r.OwnerUnproven[next] {
+						r.OwnerUnproven[next] = true
+						changed = true
+					}
+				}
+			}
+		}
+		for _, use := range validElemUses {
+			if r.IsObjectClosed(use.Key) || r.OwnerUnproven[use.Key] {
+				continue
+			}
+			if ok, _ := r.FieldPopulationProves(use.Owner, syntaxutil.ElemPositionField, use.Index); !ok {
+				r.OwnerUnproven[use.Key] = true
+				changed = true
+			}
+		}
+	}
 	return r
 }
 
 // FieldPopulationProves resolves one field-position use against the carrier's
 // registered population. On failure the second result names the unproven
-// deferred parameter key when one decided it — zero value when a poison or an
-// unresolved constructor decided (REQ-closure-shared-dynamic-state,
-// REQ-explain-chain).
+// deferred parameter key when one decided it — zero value when a poison, an
+// unresolved constructor, or an unproven carrier owner decided
+// (REQ-closure-shared-dynamic-state, REQ-explain-chain).
 func (r *DeferralResolution) FieldPopulationProves(varKey, field string, idx int) (bool, syntaxutil.ParamKey) {
+	if r == nil {
+		return false, syntaxutil.ParamKey{}
+	}
 	if r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: varKey}] ||
 		r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: varKey, HasPos: true, Field: field, Index: -1}] ||
 		r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: varKey, HasPos: true, Field: field, Index: idx}] {
@@ -427,6 +716,9 @@ func (r *DeferralResolution) FieldPopulationProves(varKey, field string, idx int
 				stack = append(stack, sortedDeps[i])
 			}
 		}
+	}
+	if r.OwnerUnproven[varKey] {
+		return false, syntaxutil.ParamKey{}
 	}
 	return true, syntaxutil.ParamKey{}
 }

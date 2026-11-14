@@ -596,9 +596,12 @@ func isDirectFreshConstructExpr(p *packages.Package, expr ast.Expr, freshReturnF
 			}
 		}
 	case *ast.CallExpr:
+		if syntaxutil.IsBuiltinNewType(p.TypesInfo, e) {
+			return isFreshConstructableRootType(p.TypesInfo.TypeOf(e))
+		}
 		if id, ok := ast.Unparen(e.Fun).(*ast.Ident); ok {
 			if b, isB := p.TypesInfo.Uses[id].(*types.Builtin); isB {
-				if b.Name() == "new" || b.Name() == "make" {
+				if b.Name() == "make" {
 					return isFreshConstructableRootType(p.TypesInfo.TypeOf(e))
 				}
 				if b.Name() == "append" && len(e.Args) >= 1 && syntaxutil.IsTypedNilSliceConv(p, e.Args[0]) {
@@ -627,9 +630,12 @@ func isFreshFieldAssignRHS(p *packages.Package, lhs, rhs ast.Expr, freshReturnFu
 			return ok
 		}
 	case *ast.CallExpr:
+		if syntaxutil.IsBuiltinNewType(p.TypesInfo, e) {
+			return true
+		}
 		if id, ok := ast.Unparen(e.Fun).(*ast.Ident); ok {
 			if b, isB := p.TypesInfo.Uses[id].(*types.Builtin); isB {
-				if b.Name() == "new" || b.Name() == "make" {
+				if b.Name() == "make" {
 					return true
 				}
 				if b.Name() == "append" && len(e.Args) >= 1 &&

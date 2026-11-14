@@ -4,7 +4,6 @@ import (
 	"go/types"
 	"slices"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
@@ -13,6 +12,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -57,6 +57,7 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	elemUses := map[string]map[syntaxutil.ElemParamUse]bool{}
 	carrierLinks := map[string]map[string]bool{}
 	var attributedUses []syntaxutil.AttributedUse
+	var attributedParamUses []syntaxutil.VarParamUse
 	poolDischarged := map[string]bool{}
 	poolMutated := map[string]bool{}
 	poolEscaped := map[string]bool{}
@@ -71,7 +72,7 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	fact.SeqFuncEdges = seamAnalysis.SeqFuncEdges
 	fact.ParallelFuncs = seamAnalysis.ParallelFuncs
 	fact.ParallelEdges = seamAnalysis.ParallelEdges
-	recordDynamicGlobalUses(audited, p, idx, callIdx, seamAnalysis.Exempt, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses, singleSubject, poolDischarged, poolMutated, poolEscaped, &poolAttributedUses, hooks)
+	recordDynamicGlobalUses(audited, p, idx, callIdx, seamAnalysis.Exempt, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses, &attributedParamUses, singleSubject, poolDischarged, poolMutated, poolEscaped, &poolAttributedUses, hooks)
 	for key := range poolDischarged {
 		fact.PoolDischarges = append(fact.PoolDischarges, key)
 	}
@@ -86,6 +87,7 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	sort.Strings(fact.PoolEscapes)
 	fact.PoolAttributedUses = append(fact.PoolAttributedUses, poolAttributedUses...)
 	slices.SortFunc(fact.PoolAttributedUses, syntaxutil.AttributedUse.Compare)
+	fact.PoolAttributedUses = slices.Compact(fact.PoolAttributedUses)
 	funcRefs := map[syntaxutil.FuncKey]map[syntaxutil.RefRegion]bool{}
 	recordFunctionReferenceRegions(p, initOnly, funcRefs)
 	opaque := map[string]bool{}
@@ -98,11 +100,116 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 		}
 	}
 	slices.SortFunc(fact.OpaqueDeps, syntaxutil.OpaqueDep.Compare)
+	readOnly := receiverReadOnlyMethods(audited, p, callIdx)
+	retentionMethods := receiverRetentionFreeMethods(audited, p, readOnly)
+	var paramLeakFree map[syntaxutil.ParamKey]bool
+	var paramDeps map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool
+	var paramRetention map[syntaxutil.ParamKey]bool
+	var paramRetentionDeps map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool
+	var settledGlobals settledGlobalMap
+	var unattestedBroken map[string]bool
+	singleSubjectSet := map[string]bool{}
+	if p.Types != nil && p.Module != nil && idx != nil {
+		for variable, vs := range idx.VarSpecs {
+			if variable == nil || vs == nil || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
+				continue
+			}
+			if !refconfine.TypeMayCarryUnknownDynamic(audited, variable.Type()) {
+				continue
+			}
+			doc := vs.Doc
+			if doc == nil {
+				if gd := idx.VarGenDecls[variable]; gd != nil && len(gd.Specs) == 1 {
+					doc = gd.Doc
+				}
+			}
+			if syntaxutil.HasDirective(doc, "//gofresh:single-subject") {
+				key := syntaxutil.DynamicVarKey(variable)
+				singleSubjectSet[key] = true
+				fact.SingleSubjectVars = append(fact.SingleSubjectVars, key)
+			}
+		}
+		sort.Strings(fact.SingleSubjectVars)
+	}
+	if p.Types != nil {
+		pkgPath := p.Types.Path()
+		for method := range readOnly {
+			fact.ReceiverReadOnly = append(fact.ReceiverReadOnly, syntaxutil.FuncKey{Pkg: pkgPath, Name: method})
+		}
+		slices.SortFunc(fact.ReceiverReadOnly, syntaxutil.FuncKey.Compare)
+		for method := range retentionMethods {
+			fact.ReceiverRetentionFree = append(fact.ReceiverRetentionFree, syntaxutil.FuncKey{Pkg: pkgPath, Name: method})
+		}
+		slices.SortFunc(fact.ReceiverRetentionFree, syntaxutil.FuncKey.Compare)
+		paramLeakFree, paramDeps, paramRetention, paramRetentionDeps = paramLeakFreeFunctions(audited, p, readOnly, retentionMethods)
+		unattestedBroken = make(map[string]bool, len(mutated)+len(escaped)+len(poolMutated)+len(poolEscaped))
+		for k := range mutated {
+			unattestedBroken[k] = true
+		}
+		for k := range escaped {
+			unattestedBroken[k] = true
+		}
+		for k := range poolMutated {
+			unattestedBroken[k] = true
+		}
+		for k := range poolEscaped {
+			unattestedBroken[k] = true
+		}
+		for _, seam := range seamAnalysis.ExportedSeams {
+			unattestedBroken[seam.Key] = true
+		}
+		for _, au := range attributedUses {
+			if !au.HasMethod || au.Method.Pkg != pkgPath || !readOnly[au.Method.Name] {
+				unattestedBroken[au.Key] = true
+			}
+		}
+		for _, au := range poolAttributedUses {
+			unattestedBroken[au.Key] = true
+		}
+		for _, mm := range []map[string]map[syntaxutil.FuncKey]bool{methodUses, initMethodUses} {
+			for varKey, mks := range mm {
+				for mk := range mks {
+					if mk.Pkg != pkgPath || !readOnly[mk.Name] {
+						unattestedBroken[varKey] = true
+					}
+				}
+			}
+		}
+		for _, pm := range []map[string]map[syntaxutil.ParamKey]bool{paramUses, initParamUses} {
+			for varKey, pks := range pm {
+				for pk := range pks {
+					if pk.Func.Pkg != pkgPath || !paramLeakFree[pk] {
+						unattestedBroken[varKey] = true
+					}
+				}
+			}
+		}
+		for _, pu := range attributedParamUses {
+			if pu.Param.Func.Pkg != pkgPath || !paramLeakFree[pu.Param] {
+				unattestedBroken[pu.Key] = true
+			}
+		}
+		for varKey, wants := range fieldUses {
+			if len(wants) > 0 {
+				unattestedBroken[varKey] = true
+			}
+		}
+		for varKey, wants := range elemUses {
+			if len(wants) > 0 {
+				unattestedBroken[varKey] = true
+			}
+		}
+		settledGlobals = settledPackageDataGlobals(audited, p, paramLeakFree, readOnly, unattestedBroken, singleSubjectSet)
+	}
 	envCarrying := map[string]bool{}
-	envCalls := map[string]map[syntaxutil.FuncKey]bool{}
+	envCarryingFns := map[string]map[syntaxutil.FuncKey]bool{}
+	envCarryingUnattr := map[string]bool{}
+	envCallableVars := map[string]bool{}
+	envCalls := map[syntaxutil.EnvCallUse]bool{}
+	regCarrierLinks := map[syntaxutil.CarrierLink]bool{}
 	fieldDefer := map[syntaxutil.FieldPosKey]map[syntaxutil.ParamKey]bool{}
 	fieldPoison := map[string]map[syntaxutil.FieldParamPoison]bool{}
-	recordEnvCarryingRegistrations(audited, p, seamAnalysis.Exempt, envCarrying, envCalls, fieldDefer, fieldPoison, hooks)
+	recordEnvCarryingRegistrations(audited, p, idx, callIdx, initOnly, unattestedBroken, singleSubjectSet, settledGlobals, paramLeakFree, readOnly, seamAnalysis.Exempt, envCarrying, envCarryingFns, envCarryingUnattr, envCallableVars, envCalls, regCarrierLinks, fieldDefer, fieldPoison, hooks)
 	for pos, params := range fieldDefer {
 		for param := range params {
 			fact.FieldParamDefer = append(fact.FieldParamDefer, syntaxutil.FieldParamDefer{Pos: pos, Param: param})
@@ -131,51 +238,35 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 		fact.EnvCarrying = append(fact.EnvCarrying, key)
 	}
 	sort.Strings(fact.EnvCarrying)
-	ownPrefix := ""
-	if p.Types != nil {
-		ownPrefix = p.Types.Path() + "."
+	for key, fns := range envCarryingFns {
+		if envCarryingUnattr[key] {
+			continue
+		}
+		for fn := range fns {
+			fact.EnvCarryingFns = append(fact.EnvCarryingFns, syntaxutil.VarFuncUse{Key: key, Func: fn})
+		}
 	}
-	for key := range envCarrying {
-		callable := true
-		if ownPrefix != "" && strings.HasPrefix(key, ownPrefix) {
-			if variable, ok := p.Types.Scope().Lookup(strings.TrimPrefix(key, ownPrefix)).(*types.Var); ok {
-				if _, isFunc := types.Unalias(variable.Type()).Underlying().(*types.Signature); !isFunc {
-					callable = false
-				}
-			}
-		}
-		if callable {
-			fact.EnvCallable = append(fact.EnvCallable, key)
-		}
+	slices.SortFunc(fact.EnvCarryingFns, syntaxutil.VarFuncUse.Compare)
+	for key := range envCallableVars {
+		fact.EnvCallable = append(fact.EnvCallable, key)
 	}
 	sort.Strings(fact.EnvCallable)
-	for varKey, callees := range envCalls {
-		for callee := range callees {
-			fact.EnvCallUses = append(fact.EnvCallUses, syntaxutil.EnvCallUse{Key: varKey, Callee: callee})
+	for use := range envCalls {
+		if !use.Func.IsZero() && envCalls[syntaxutil.EnvCallUse{Key: use.Key, Callee: use.Callee}] {
+			continue
 		}
+		fact.EnvCallUses = append(fact.EnvCallUses, use)
 	}
 	slices.SortFunc(fact.EnvCallUses, syntaxutil.EnvCallUse.Compare)
 	fact.AttributedUses = append(fact.AttributedUses, attributedUses...)
 	slices.SortFunc(fact.AttributedUses, syntaxutil.AttributedUse.Compare)
+	fact.AttributedUses = slices.Compact(fact.AttributedUses)
 	for callee, regions := range funcRefs {
 		for region := range regions {
 			fact.FuncRefs = append(fact.FuncRefs, syntaxutil.FuncRef{Callee: callee, Region: region})
 		}
 	}
 	slices.SortFunc(fact.FuncRefs, syntaxutil.FuncRef.Compare)
-	readOnly := receiverReadOnlyMethods(audited, p, callIdx)
-	retentionMethods := receiverRetentionFreeMethods(audited, p, readOnly)
-	if p.Types != nil {
-		pkgPath := p.Types.Path()
-		for method := range readOnly {
-			fact.ReceiverReadOnly = append(fact.ReceiverReadOnly, syntaxutil.FuncKey{Pkg: pkgPath, Name: method})
-		}
-		slices.SortFunc(fact.ReceiverReadOnly, syntaxutil.FuncKey.Compare)
-		for method := range retentionMethods {
-			fact.ReceiverRetentionFree = append(fact.ReceiverRetentionFree, syntaxutil.FuncKey{Pkg: pkgPath, Name: method})
-		}
-		slices.SortFunc(fact.ReceiverRetentionFree, syntaxutil.FuncKey.Compare)
-	}
 	for varKey, methodKeys := range methodUses {
 		for methodKey := range methodKeys {
 			fact.MethodUses = append(fact.MethodUses, syntaxutil.VarMethodUse{Key: varKey, Method: methodKey})
@@ -183,7 +274,6 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	}
 	slices.SortFunc(fact.MethodUses, syntaxutil.VarMethodUse.Compare)
 	if p.Types != nil {
-		paramLeakFree, paramDeps, paramRetention, paramRetentionDeps := paramLeakFreeFunctions(audited, p, readOnly, retentionMethods)
 		for paramKey := range paramLeakFree {
 			fact.ParamLeakFree = append(fact.ParamLeakFree, paramKey)
 		}
@@ -204,7 +294,7 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 			}
 		}
 		slices.SortFunc(fact.ParamRetentionFreeDeps, syntaxutil.ParamDepEdge.Compare)
-		envFree, envDeps, retFieldDefer, retFieldPoison, insFree, insDeps, callerInsDeps := returnEnvFreeFunctions(audited, p, paramLeakFree, readOnly, hooks)
+		envFree, envDeps, retFieldDefer, retFieldPoison, insFree, insDeps, callerInsDeps := returnEnvFreeFunctions(audited, p, settledGlobals, paramLeakFree, readOnly, hooks)
 		pkgPath := p.Types.Path()
 		for fnName := range envFree {
 			fnKey := syntaxutil.FuncKey{Pkg: pkgPath, Name: fnName}
@@ -241,7 +331,9 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 			fact.ParamUses = append(fact.ParamUses, syntaxutil.VarParamUse{Key: varKey, Param: paramKey})
 		}
 	}
+	fact.ParamUses = append(fact.ParamUses, attributedParamUses...)
 	slices.SortFunc(fact.ParamUses, syntaxutil.VarParamUse.Compare)
+	fact.ParamUses = slices.Compact(fact.ParamUses)
 	for varKey, paramKeys := range initParamUses {
 		for paramKey := range paramKeys {
 			fact.InitParamUses = append(fact.InitParamUses, syntaxutil.VarParamUse{Key: varKey, Param: paramKey})
@@ -259,7 +351,11 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 			fact.CarrierLinks = append(fact.CarrierLinks, syntaxutil.CarrierLink{From: keyA, To: keyB})
 		}
 	}
+	for link := range regCarrierLinks {
+		fact.CarrierLinks = append(fact.CarrierLinks, link)
+	}
 	slices.SortFunc(fact.CarrierLinks, syntaxutil.CarrierLink.Compare)
+	fact.CarrierLinks = slices.Compact(fact.CarrierLinks)
 	for key := range mutated {
 		fact.Mutates = append(fact.Mutates, key)
 	}
@@ -291,26 +387,11 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	}
 	if p.Types != nil && p.Module != nil {
 		if idx != nil {
-			for variable, vs := range idx.VarSpecs {
-				if variable == nil || vs == nil || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
-					continue
-				}
-				if !refconfine.TypeMayCarryUnknownDynamic(audited, variable.Type()) {
-					continue
-				}
-				doc := vs.Doc
-				if doc == nil {
-					if gd := idx.VarGenDecls[variable]; gd != nil && len(gd.Specs) == 1 {
-						doc = gd.Doc
-					}
-				}
-				if syntaxutil.HasDirective(doc, "//gofresh:single-subject") {
-					fact.SingleSubjectVars = append(fact.SingleSubjectVars, syntaxutil.DynamicVarKey(variable))
-				}
-			}
-			sort.Strings(fact.SingleSubjectVars)
 			fact.MappingDischarges = deriveMappingDischarges(audited, p, idx)
 			fact.MemoDischarges = deriveMemoDischarges(audited, p, idx)
+			if len(fact.Declares) > 0 && propharness.IsHarnessPath(p.PkgPath) && propharness.VerifyPackage(audited, p) {
+				fact.HarnessDischarges = slices.Clone(fact.Declares)
+			}
 			unattestedMutated := make(map[string]bool, len(mutated)+len(poolMutated))
 			for key := range mutated {
 				unattestedMutated[key] = true

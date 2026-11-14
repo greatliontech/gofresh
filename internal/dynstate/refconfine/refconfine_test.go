@@ -36,6 +36,29 @@ func mustTypecheckPkg(t *testing.T, pkgPath string, src string) *packages.Packag
 			if path == "unsafe" {
 				return types.Unsafe, nil
 			}
+			if path == "sync" {
+				syncPkg := types.NewPackage("sync", "sync")
+				for _, spec := range []struct {
+					name    string
+					methods []string
+				}{
+					{"Once", []string{"Do"}},
+					{"Cond", []string{"Signal", "Broadcast", "Wait"}},
+					{"Mutex", []string{"Lock", "Unlock", "TryLock"}},
+					{"RWMutex", []string{"Lock", "Unlock", "RLock", "RUnlock", "TryLock", "TryRLock"}},
+				} {
+					tn := types.NewTypeName(token.NoPos, syncPkg, spec.name, nil)
+					named := types.NewNamed(tn, types.NewStruct(nil, nil), nil)
+					for _, m := range spec.methods {
+						recv := types.NewVar(token.NoPos, syncPkg, "r", types.NewPointer(named))
+						sig := types.NewSignatureType(recv, nil, nil, nil, nil, false)
+						named.AddMethod(types.NewFunc(token.NoPos, syncPkg, m, sig))
+					}
+					syncPkg.Scope().Insert(tn)
+				}
+				syncPkg.MarkComplete()
+				return syncPkg, nil
+			}
 			return nil, fmt.Errorf("unexpected import %q", path)
 		}),
 	}).Check(pkgPath, fset, []*ast.File{file}, info)
@@ -234,6 +257,185 @@ func TestTuplePredicatesTraverseElements(t *testing.T) {
 	}
 	if !TypeContainsRefOrPointer(ptrBoolTuple) {
 		t.Fatal("TypeContainsRefOrPointer((*int, bool)) = false, want true")
+	}
+	if !TypeContainsRefOrPointer(nil) {
+		t.Fatal("TypeContainsRefOrPointer(nil) = false, want fail-closed true")
+	}
+
+	carrierStruct := types.NewStruct([]*types.Var{types.NewVar(0, nil, "fn", sigType)}, nil)
+	sigKeyMap := types.NewMap(types.NewPointer(carrierStruct), intType)
+	if !TypeCarriesSignature(sigKeyMap) {
+		t.Fatal("TypeCarriesSignature(map[*carrier]int) = false, want true")
+	}
+	scalarMap := types.NewMap(types.Typ[types.String], intType)
+	if TypeCarriesSignature(scalarMap) {
+		t.Fatal("TypeCarriesSignature(map[string]int) = true, want false")
+	}
+}
+
+func TestVerifyReadOnlyRefConfinementRejectsBuiltinNewExprSeedCopy(t *testing.T) {
+	badPkg := mustTypecheckPkg(t, "example.com/newexprbad", `package newexprbad
+
+type holder struct {
+	items []int
+}
+
+var seed = holder{items: []int{1, 2, 3}}
+
+func LeakViaNewExpr() *holder {
+	return new(seed)
+}
+`)
+	badSeedObj := badPkg.Types.Scope().Lookup("seed").(*types.Var)
+	badHolderNamed := badPkg.Types.Scope().Lookup("holder").(*types.TypeName).Type().(*types.Named)
+	if VerifyReadOnlyRefConfinement(badPkg, Config{
+		SeedExpr: func(expr ast.Expr) (bool, bool) {
+			id, ok := ast.Unparen(expr).(*ast.Ident)
+			if ok && badPkg.TypesInfo.Uses[id] == badSeedObj {
+				return false, true
+			}
+			return false, false
+		},
+		SeedStructOrigin: func(named *types.Named) bool {
+			return named != nil && named.Origin() == badHolderNamed.Origin()
+		},
+	}) {
+		t.Fatal("VerifyReadOnlyRefConfinement unexpectedly accepted Go 1.26+ new(seed) escaping seed slice")
+	}
+}
+
+func TestAuditedSynchronizationOnceFieldCountAndInPlaceSyncReceiver(t *testing.T) {
+	syncPkg := types.NewPackage("sync", "sync")
+	makeMethod := func(recvName, methodName string) *types.Func {
+		tn := types.NewTypeName(token.NoPos, syncPkg, recvName, nil)
+		named := types.NewNamed(tn, types.NewStruct(nil, nil), nil)
+		recv := types.NewVar(token.NoPos, syncPkg, "r", types.NewPointer(named))
+		sig := types.NewSignatureType(recv, nil, nil, nil, nil, false)
+		fn := types.NewFunc(token.NoPos, syncPkg, methodName, sig)
+		named.AddMethod(fn)
+		return fn
+	}
+	for _, okCase := range [][2]string{
+		{"Mutex", "Lock"},
+		{"Mutex", "Unlock"},
+		{"Mutex", "TryLock"},
+		{"RWMutex", "Lock"},
+		{"RWMutex", "Unlock"},
+		{"RWMutex", "RLock"},
+		{"RWMutex", "RUnlock"},
+		{"RWMutex", "TryLock"},
+		{"RWMutex", "TryRLock"},
+		{"Cond", "Signal"},
+		{"Cond", "Broadcast"},
+	} {
+		fn := makeMethod(okCase[0], okCase[1])
+		if !AuditedSynchronization(true, fn) || AuditedSynchronization(false, fn) {
+			t.Fatalf("AuditedSynchronization mismatch on %s.%s", okCase[0], okCase[1])
+		}
+	}
+	for _, badCase := range [][2]string{
+		{"Cond", "Wait"},
+		{"Once", "Do"},
+		{"RWMutex", "RLocker"},
+		{"WaitGroup", "Wait"},
+	} {
+		if AuditedSynchronization(true, makeMethod(badCase[0], badCase[1])) {
+			t.Fatalf("AuditedSynchronization(true, %s.%s) = true, want false", badCase[0], badCase[1])
+		}
+	}
+
+	pkg := mustTypecheckPkg(t, "example.com/p", `package p
+
+import "sync"
+
+type subOnce struct{ once sync.Once }
+type embeddedTwoOnce struct {
+	subOnce
+	once sync.Once
+}
+type ptrEmbeddedTwoOnce struct {
+	*subOnce
+	once sync.Once
+}
+type dupSubOnce struct{ a, b subOnce }
+type arrayTwoOnce struct{ onces [2]sync.Once }
+type arrayOneOnce struct{ onces [1]sync.Once }
+type arrayZeroOnce struct{ onces [0]sync.Once }
+type ptrSubOnce struct {
+	sub  *subOnce
+	once sync.Once
+}
+type mutexHolder struct{ mu sync.Mutex }
+type condHolder struct{ cond sync.Cond }
+type ptrCondHolder struct{ cond *sync.Cond }
+
+func retMutexHolder() mutexHolder     { return mutexHolder{} }
+func retPtrMutexHolder() *mutexHolder { return nil }
+func byPtr(h *condHolder)             { h.cond.Signal() }
+func byVal(h condHolder)              { h.cond.Signal() }
+func ptrFieldByVal(h ptrCondHolder)   { h.cond.Signal() }
+func derefCopy(h *condHolder)         { cp := *h; cp.cond.Signal() }
+`)
+	lookupType := func(name string) types.Type {
+		obj := pkg.Types.Scope().Lookup(name)
+		if obj == nil {
+			t.Fatalf("missing type %s", name)
+		}
+		return obj.Type()
+	}
+	for _, tc := range []struct {
+		name string
+		typ  types.Type
+		want int
+	}{
+		{"nil", nil, 0},
+		{"subOnce", lookupType("subOnce"), 1},
+		{"*subOnce", types.NewPointer(lookupType("subOnce")), 1},
+		{"embeddedTwoOnce", lookupType("embeddedTwoOnce"), 2},
+		{"ptrEmbeddedTwoOnce", lookupType("ptrEmbeddedTwoOnce"), 2},
+		{"dupSubOnce", lookupType("dupSubOnce"), 2},
+		{"arrayTwoOnce", lookupType("arrayTwoOnce"), 2},
+		{"arrayOneOnce", lookupType("arrayOneOnce"), 1},
+		{"arrayZeroOnce", lookupType("arrayZeroOnce"), 0},
+		{"ptrSubOnce", lookupType("ptrSubOnce"), 1},
+	} {
+		if got := OnceFieldCount(tc.typ); got != tc.want {
+			t.Fatalf("OnceFieldCount(%s) = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+	if !CallResultHandsOut(lookupType("mutexHolder")) {
+		t.Fatal("CallResultHandsOut(mutexHolder) = false, want true")
+	}
+	if InstantiatedResultsHandOutNothing(true, pkg.Types.Scope().Lookup("retMutexHolder").Type()) {
+		t.Fatal("InstantiatedResultsHandOutNothing(retMutexHolder) = true, want false")
+	}
+	if !TypeReachesSyncNoCopyByValue(lookupType("condHolder")) || TypeReachesSyncNoCopyByValue(types.NewPointer(lookupType("condHolder"))) || TypeReachesSyncNoCopyByValue(lookupType("ptrCondHolder")) {
+		t.Fatal("TypeReachesSyncNoCopyByValue mismatch")
+	}
+
+	idx := BuildPkgIndex(pkg)
+	callRecv := func(fnName string) ast.Expr {
+		fd := idx.PlainByName[fnName][0]
+		var recv ast.Expr
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			if ce, ok := n.(*ast.CallExpr); ok {
+				recv = ce.Fun.(*ast.SelectorExpr).X
+			}
+			return true
+		})
+		return recv
+	}
+	if !InPlaceSyncReceiver(pkg.TypesInfo, callRecv("byPtr")) {
+		t.Fatal("InPlaceSyncReceiver(byPtr) = false, want true")
+	}
+	if InPlaceSyncReceiver(pkg.TypesInfo, callRecv("byVal")) {
+		t.Fatal("InPlaceSyncReceiver(byVal) = true, want false")
+	}
+	if !InPlaceSyncReceiver(pkg.TypesInfo, callRecv("ptrFieldByVal")) {
+		t.Fatal("InPlaceSyncReceiver(ptrFieldByVal) = false, want true")
+	}
+	if InPlaceSyncReceiver(pkg.TypesInfo, callRecv("derefCopy")) {
+		t.Fatal("InPlaceSyncReceiver(derefCopy) = true, want false")
 	}
 }
 

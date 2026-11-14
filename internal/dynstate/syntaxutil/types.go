@@ -311,6 +311,61 @@ func IsByteSliceType(t types.Type) bool {
 	return ok && b.Kind() == types.Byte
 }
 
+// TypeMayBeMap reports whether t is a map type or a type parameter whose
+// constraint admits a map instantiation.
+func TypeMayBeMap(t types.Type) bool {
+	return typeMayBeMapSeen(t, make(map[types.Type]bool))
+}
+
+func typeMayBeMapSeen(t types.Type, seen map[types.Type]bool) bool {
+	if t == nil {
+		return false
+	}
+	t = types.Unalias(t)
+	if tp, ok := t.(*types.TypeParam); ok {
+		iface, okI := UnderlyingType(tp.Constraint()).(*types.Interface)
+		if !okI {
+			return true
+		}
+		return ifaceAdmitsMap(iface, seen)
+	}
+	_, isMap := t.Underlying().(*types.Map)
+	return isMap
+}
+
+func ifaceAdmitsMap(iface *types.Interface, seen map[types.Type]bool) bool {
+	if iface == nil || seen[iface] {
+		return true
+	}
+	seen[iface] = true
+	for i := 0; i < iface.NumEmbeddeds(); i++ {
+		switch e := types.Unalias(iface.EmbeddedType(i)).(type) {
+		case *types.Union:
+			anyMap := false
+			for j := 0; j < e.Len(); j++ {
+				if typeMayBeMapSeen(e.Term(j).Type(), seen) {
+					anyMap = true
+					break
+				}
+			}
+			if !anyMap {
+				return false
+			}
+		default:
+			if sub, ok := e.Underlying().(*types.Interface); ok {
+				if !ifaceAdmitsMap(sub, seen) {
+					return false
+				}
+				continue
+			}
+			if !typeMayBeMapSeen(e, seen) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // StructHasExportedIfaceField reports whether st has an exported interface-typed
 // field with the given name.
 func StructHasExportedIfaceField(st *types.Struct, name string) bool {

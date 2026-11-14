@@ -160,7 +160,11 @@ func (Widget) External() int { return 2 }
 	if !slices.Contains(restored.AttributedUses, syntaxutil.AttributedUse{Func: syntaxutil.FuncKey{Pkg: "example.com/factsrc", Name: "Pass"}, Key: "example.com/factsrc.Hooks", Escape: true}) {
 		t.Fatalf("fact lost the attributed escape - a dropped attribution silently closes an open package: %+v", restored)
 	}
-	if !slices.Contains(restored.ParamUses, syntaxutil.VarParamUse{Key: "example.com/factsrc.Hooks", Param: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/factsrc", Name: "take"}, Index: 0}}) {
+	if !slices.Contains(restored.ParamUses, syntaxutil.VarParamUse{
+		Key:   "example.com/factsrc.Hooks",
+		Param: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/factsrc", Name: "take"}, Index: 0},
+		Func:  syntaxutil.FuncKey{Pkg: "example.com/factsrc", Name: "Escape"},
+	}) {
 		t.Fatalf("fact lost the deferred call-argument mark - a dropped deferral silently closes an open package: %+v", restored.ParamUses)
 	}
 	if !slices.Contains(restored.ParamLeakFree, syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/factsrc", Name: "take"}, Index: 0}) {

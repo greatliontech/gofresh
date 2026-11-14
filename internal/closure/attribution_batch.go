@@ -15,7 +15,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
-	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
+	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/closure/internal/rta"
 	"github.com/greatliontech/gofresh/internal/trace"
 )

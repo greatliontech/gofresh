@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A data memo — an unexported by-value sync.Map whose every use is a Load,
@@ -9233,4 +9234,632 @@ func TestLoadedPackageMatchesImportsRejectsClassAndPinFlips(t *testing.T) {
 	if loadedPackageMatchesImports(hasher, stdNonNilMod, appNode, localNodes) {
 		t.Fatal("StandardPackage with non-nil Module accepted")
 	}
+}
+
+func writePinnedRapidModule(t *testing.T, extraFiles map[string]string) string {
+	t.Helper()
+	goModBytes, err := os.ReadFile("go.mod")
+	if err != nil {
+		t.Fatalf("read parent go.mod: %v", err)
+	}
+	var goVersion, rapidVer string
+	for _, line := range strings.Split(string(goModBytes), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && fields[0] == "go" {
+			goVersion = fields[1]
+		}
+		if len(fields) >= 2 && fields[0] == "pgregory.net/rapid" {
+			rapidVer = fields[1]
+		}
+		if len(fields) >= 3 && fields[0] == "require" && fields[1] == "pgregory.net/rapid" {
+			rapidVer = fields[2]
+		}
+	}
+	if goVersion == "" {
+		goVersion = "1.26"
+	}
+	if rapidVer == "" {
+		t.Fatal("could not find pgregory.net/rapid version in parent go.mod")
+	}
+	goSumBytes, err := os.ReadFile("go.sum")
+	if err != nil {
+		t.Fatalf("read parent go.sum: %v", err)
+	}
+	var sumLines []string
+	prefix := "pgregory.net/rapid " + rapidVer
+	for _, line := range strings.Split(string(goSumBytes), "\n") {
+		if strings.HasPrefix(line, prefix+" ") || strings.HasPrefix(line, prefix+"/go.mod ") {
+			sumLines = append(sumLines, line)
+		}
+	}
+	dir := t.TempDir()
+	files := map[string]string{
+		"go.mod": "module example.com/rapiduser\n\ngo " + goVersion + "\n\nrequire pgregory.net/rapid " + rapidVer + "\n",
+		"go.sum": strings.Join(sumLines, "\n") + "\n",
+	}
+	for k, v := range extraFiles {
+		files[k] = v
+	}
+	for rel, content := range files {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestRealRapidDynamicStateAndAttributedParamForeclosureEndToEnd(t *testing.T) {
+	t.Run("real_rapid_sibling_unit_tests_and_caller_generator_global", func(t *testing.T) {
+		// 1. Maximal package-scan tier (without passing t to rapid.Check): verifies pgregory.net/rapid
+		// (ignoring rapid's own _test.go variant via NeedForTest) and records the audited harness fact
+		// rather than falling back to rapid's internal os.Create calls.
+		seededDir := writePinnedRapidModule(t, map[string]string{
+			"calc.go": `package rapiduser
+
+func PureAdd(a, b int) int { return a + b }
+`,
+			"calc_test.go": `package rapiduser
+
+import (
+	"testing"
+	"pgregory.net/rapid"
+)
+
+func TestSeededExample(t *testing.T) {
+	_ = rapid.Int().Example(42)
+	if PureAdd(2, 3) != 5 {
+		t.Fatal("bad sum")
+	}
+}
+`,
+		})
+		vMax := captureCheck(t, seededDir, Subject{Package: "example.com/rapiduser", Symbol: "PureAdd"}, withPackageProcessExecution())
+		if vMax.Status != Unverifiable || !strings.Contains(vMax.Reason, "audited property-testing harness pgregory.net/rapid") {
+			t.Fatalf("maximal-tier PureAdd verdict=%+v, want audited property-testing harness refusal", vMax)
+		}
+
+		// 2. Observed tier with real rapid.Check + sibling unit test: zero vouches and zero attestation discharges,
+		// while pure-hash Check remains Unverifiable.
+		cleanDir := writePinnedRapidModule(t, map[string]string{
+			"calc.go": `package rapiduser
+
+func PureAdd(a, b int) int { return a + b }
+`,
+			"calc_test.go": `package rapiduser
+
+import (
+	"testing"
+	"pgregory.net/rapid"
+)
+
+func TestUnitPureAdd(t *testing.T) {
+	if PureAdd(2, 3) != 5 {
+		t.Fatal("bad sum")
+	}
+}
+
+func TestPropCommutative(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		a := rapid.Int().Draw(rt, "a")
+		b := rapid.Int().Draw(rt, "b")
+		if PureAdd(a, b) != PureAdd(b, a) {
+			rt.Fatal("not commutative")
+		}
+	})
+}
+`,
+		})
+		subjects := []Subject{
+			{Package: "example.com/rapiduser", Symbol: "TestUnitPureAdd"},
+			{Package: "example.com/rapiduser", Symbol: "TestPropCommutative"},
+		}
+		for _, opt := range []option{withPackageProcessExecution(), withSingleSubjectExecution()} {
+			ctx := context.Background()
+			eng, err := newEngineContext(ctx, withDir(cleanDir), opt, withAnalysisBudget(time.Minute))
+			if err != nil {
+				t.Fatal(err)
+			}
+			producer, err := eng.newView(ctx, subjects, cleanDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			obs := supportedObservation(t, producer, cleanDir, cleanDir, "worker", "")
+			checker, err := eng.newView(ctx, subjects, cleanDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, subj := range subjects {
+				fp, err := producer.captureObserved(ctx, subj)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if fp.DynamicStateVouches != "" || fp.SingleSubjectDischarges != "" || fp.PackageProcessDischarges != "" || !fp.ObservationProof.Observable {
+					t.Fatalf("%v captured fp=%+v, want Observable=true with empty vouch/attestation discharges", subj, fp)
+				}
+				fp, err = producer.AttachObservation(subj, fp, obs)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Pure-hash Check remains Unverifiable even with attached observation.
+				if vHash, err := checker.Check(ctx, fp, subj); err != nil || vHash.Status != Unverifiable {
+					t.Fatalf("%v Check=(%+v, %v), want Unverifiable at pure-hash tier", subj, vHash, err)
+				}
+				if vObs, err := checker.CheckObserved(ctx, fp, subj); err != nil || vObs.Status != Valid {
+					t.Fatalf("%v CheckObserved=(%+v, %v), want Valid", subj, vObs, err)
+				}
+			}
+		}
+
+		// 3. User-declared package-level *rapid.Generator global still downgrades sibling unit tests under PackageExecution,
+		// even on CheckObserved!
+		sharedGenDir := writePinnedRapidModule(t, map[string]string{
+			"calc.go": `package rapiduser
+
+func PureAdd(a, b int) int { return a + b }
+`,
+			"calc_test.go": `package rapiduser
+
+import (
+	"testing"
+	"pgregory.net/rapid"
+)
+
+var SharedGen = rapid.Int()
+
+func TestUnitPureAdd(t *testing.T) {
+	if PureAdd(2, 3) != 5 {
+		t.Fatal("bad sum")
+	}
+}
+
+func TestMutateSharedGen(t *testing.T) {
+	_ = SharedGen.Example(1)
+}
+`,
+		})
+		unitSubj := Subject{Package: "example.com/rapiduser", Symbol: "TestUnitPureAdd"}
+		ctx := context.Background()
+		engShared, err := newEngineContext(ctx, withDir(sharedGenDir), withPackageProcessExecution(), withAnalysisBudget(time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		prodShared, err := engShared.newView(ctx, []Subject{unitSubj}, sharedGenDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fpShared, err := prodShared.captureObserved(ctx, unitSubj)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fpShared, err = prodShared.AttachObservation(unitSubj, fpShared, supportedObservation(t, prodShared, sharedGenDir, sharedGenDir, "worker", ""))
+		if err != nil {
+			t.Fatal(err)
+		}
+		vShared, err := prodShared.CheckObserved(ctx, fpShared, unitSubj)
+		if err != nil || vShared.Status != Unverifiable || !strings.Contains(vShared.Reason, "SharedGen") {
+			t.Fatalf("user-declared SharedGen CheckObserved=(%+v, %v), want Unverifiable naming SharedGen", vShared, err)
+		}
+	})
+
+	t.Run("attributed_param_uses_init_only_retention_and_foreclosure", func(t *testing.T) {
+		// 1. Unreachable plain function with retaining ParamUse discharges under PackageExecution,
+		// while reaching it downgrades; initOnly plain function with ParamRetentionFree discharges outright.
+		reachDir := writeModuleTree(t, map[string]string{
+			"go.mod": "module example.com/paramattr\n\ngo 1.26\n",
+			"p/p.go": `package p
+
+var sink [][]func()
+var Hooks = []func(){func() {}}
+
+func fillInPlace(s []func()) {
+	if len(s) > 0 {
+		s[0] = nil
+	}
+}
+
+func retainSlice(s []func()) {
+	sink = append(sink, s)
+}
+
+func SeedAtInit() {
+	fillInPlace(Hooks)
+}
+
+func init() {
+	SeedAtInit()
+}
+
+func DeadLeak() {
+	retainSlice(Hooks)
+}
+
+func CleanCount() int {
+	return len(Hooks)
+}
+`,
+			"p/p_test.go": `package p
+
+import "testing"
+
+func TestCleanOnly(t *testing.T) {
+	if CleanCount() != 1 {
+		t.Fatal("bad len")
+	}
+}
+`,
+		})
+		if v := captureCheck(t, reachDir, Subject{Package: "example.com/paramattr/p", Symbol: "TestCleanOnly"}, withPackageProcessExecution()); v.Status != Valid {
+			t.Fatalf("unreachable DeadLeak ParamUse under PackageExecution = %+v, want Valid", v)
+		}
+		// Under GeneralExecution (unattested), DeadLeak is not reachability-discharged, and ExplainDynamicState
+		// attributes only DeadLeak's retainSlice(Hooks) — never seedAtInit's init-discharged fillInPlace(Hooks)!
+		if vGen := captureCheck(t, reachDir, Subject{Package: "example.com/paramattr/p", Symbol: "CleanCount"}); vGen.Status != Unverifiable {
+			t.Fatalf("GeneralExecution CleanCount = %+v, want Unverifiable", vGen)
+		}
+		chain := explainViewForSubject(t, reachDir, Subject{Package: "example.com/paramattr/p", Symbol: "CleanCount"}, "example.com/paramattr/p", "Hooks")
+		if chain.Arm != "escape" || len(chain.Links) == 0 {
+			t.Fatalf("ExplainDynamicState(Hooks) = %+v, want escape chain", chain)
+		}
+		for _, link := range chain.Links {
+			if strings.Contains(link.Callee, "fillInPlace") {
+				t.Fatalf("ExplainDynamicState included init-discharged fillInPlace deferral: %+v", chain)
+			}
+		}
+
+		// 2. Init-reachable plain function and method encloser with retaining/escaping direct uses
+		// foreclose reachability discharge even when post-init callers never invoke them!
+		for _, tc := range []struct {
+			name string
+			code string
+		}{
+			{
+				name: "init_reachable_retaining_param_use",
+				code: `package p
+
+var Hooks = []func(){func() {}}
+
+func retainSlice(s []func()) { go func() { _ = len(s) }() }
+
+func Setup() int {
+	retainSlice(Hooks)
+	return 1
+}
+
+var _ = Setup()
+
+func Dead() { _ = Setup() }
+
+func CleanCount() int { return len(Hooks) }
+`,
+			},
+			{
+				name: "init_reachable_direct_escape",
+				code: `package p
+
+var Hooks = []func(){func() {}}
+
+func Setup() int {
+	pair := []any{Hooks}
+	_ = pair
+	return 1
+}
+
+var _ = Setup()
+
+func Dead() { _ = Setup() }
+
+func CleanCount() int { return len(Hooks) }
+`,
+			},
+			{
+				name: "method_encloser_retaining_method_use",
+				code: `package p
+
+type box struct{ fn func() }
+var sinkBox *box
+func (b *box) RetainSelf() { sinkBox = b }
+
+var Hooks = &box{fn: func() {}}
+
+type runner struct{}
+func (r *runner) Leak() { Hooks.RetainSelf() }
+
+func init() {
+	var r runner
+	r.Leak()
+}
+
+func CleanCount() int {
+	if Hooks != nil {
+		return 1
+	}
+	return 0
+}
+`,
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				forecloseDir := writeModuleTree(t, map[string]string{
+					"go.mod": "module example.com/foreclose\n\ngo 1.26\n",
+					"p/p.go": tc.code,
+					"p/p_test.go": `package p
+
+import "testing"
+
+func TestClean(t *testing.T) {
+	if CleanCount() != 1 {
+		t.Fatal("bad")
+	}
+}
+`,
+				})
+				for _, opt := range []option{withPackageProcessExecution(), withSingleSubjectExecution()} {
+					v := captureCheck(t, forecloseDir, Subject{Package: "example.com/foreclose/p", Symbol: "TestClean"}, opt)
+					if v.Status != Unverifiable || !strings.Contains(v.Reason, "Hooks") {
+						t.Fatalf("%s unexpectedly discharged: %+v", tc.name, v)
+					}
+				}
+			})
+		}
+
+		// 3. Non-callable carrier planted with a stateful closure in init flow, an init-only/init-reachable
+		// helper, or a method forecloses reachability discharge even when a dead post-init function also
+		// touches the carrier, because markless reads (`Registry["next"]()`) execute the planted closure!
+		for _, tc := range []struct {
+			name string
+			code string
+		}{
+			{
+				name: "init_direct_closure_with_dead_leak_use",
+				code: `package p
+
+var Registry = map[string]func() int{}
+var sink any
+
+func init() {
+	n := 0
+	Registry["next"] = func() int { n++; return n }
+}
+
+func DeadPass() { sink = Registry }
+
+func Run() int { return Registry["next"]() }
+`,
+			},
+			{
+				name: "init_constructor_closure_with_dead_write",
+				code: `package p
+
+var Registry = map[string]func() int{}
+
+func makeCounter() func() int {
+	n := 0
+	return func() int { n++; return n }
+}
+
+func init() {
+	Registry["next"] = makeCounter()
+}
+
+func DeadReset() { Registry = nil }
+
+func Run() int { return Registry["next"]() }
+`,
+			},
+			{
+				name: "exported_init_only_plain_stateful_closure",
+				code: `package p
+
+var Registry = map[string]func() int{}
+
+func Setup() {
+	n := 0
+	Registry["next"] = func() int { n++; return n }
+}
+
+func init() { Setup() }
+
+func DeadReset() { Registry = nil }
+
+func Run() int { return Registry["next"]() }
+`,
+			},
+			{
+				name: "method_encloser_stateful_closure",
+				code: `package p
+
+var Registry = map[string]func() int{}
+
+type loader struct{}
+
+func (loader) Seed() {
+	n := 0
+	Registry["next"] = func() int { n++; return n }
+}
+
+func init() {
+	var l loader
+	l.Seed()
+}
+
+func Run() int { return Registry["next"]() }
+`,
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				envForecloseDir := writeModuleTree(t, map[string]string{
+					"go.mod": "module example.com/envforeclose\n\ngo 1.26\n",
+					"p/p.go": tc.code,
+					"p/p_test.go": `package p
+
+import "testing"
+
+func TestRun(t *testing.T) {
+	if Run() < 0 {
+		t.Fatal("bad")
+	}
+}
+`,
+				})
+				for _, opt := range []option{withPackageProcessExecution(), withSingleSubjectExecution()} {
+					v := captureCheck(t, envForecloseDir, Subject{Package: "example.com/envforeclose/p", Symbol: "TestRun"}, opt)
+					if v.Status != Unverifiable || !strings.Contains(v.Reason, "Registry") {
+						t.Fatalf("%s unexpectedly discharged stateful closure container: %+v", tc.name, v)
+					}
+				}
+			})
+		}
+
+		// 4. ExplainDynamicState discharges synchronous initOnlyPlain mutation marks:
+		// a Valid exported initOnlyPlain mutator yields an empty Chain, while an
+		// exported initOnlyPlain stateful-closure registration yields "environment-audit"
+		// rather than a stale "mutation" chain!
+		t.Run("explain_discharges_init_only_plain_mutation_marks", func(t *testing.T) {
+			cleanInitHelperDir := writeModuleTree(t, map[string]string{
+				"go.mod": "module example.com/expinit\n\ngo 1.26\n",
+				"p/p.go": `package p
+
+var Hooks = map[string]func() int{}
+
+func pureOne() int { return 1 }
+
+func Setup() {
+	Hooks["one"] = pureOne
+}
+
+func init() { Setup() }
+
+func Count() int { return len(Hooks) }
+`,
+			})
+			if v := captureCheck(t, cleanInitHelperDir, Subject{Package: "example.com/expinit/p", Symbol: "Count"}); v.Status != Valid {
+				t.Fatalf("expected Valid verdict on clean exported initOnlyPlain helper, got %+v", v)
+			}
+			cleanChain := explainViewForSubject(t, cleanInitHelperDir, Subject{Package: "example.com/expinit/p", Symbol: "Count"}, "example.com/expinit/p", "Hooks")
+			if cleanChain.Arm != "" || len(cleanChain.Links) != 0 {
+				t.Fatalf("expected empty ExplainDynamicState chain on Valid initOnlyPlain helper, got %+v", cleanChain)
+			}
+
+			dirtyInitHelperDir := writeModuleTree(t, map[string]string{
+				"go.mod": "module example.com/expinitdirty\n\ngo 1.26\n",
+				"p/p.go": `package p
+
+var Hooks = map[string]func() int{}
+
+func Setup() {
+	n := 0
+	Hooks["next"] = func() int { n++; return n }
+}
+
+func init() { Setup() }
+
+func Next() int { return Hooks["next"]() }
+`,
+			})
+			v := captureCheck(t, dirtyInitHelperDir, Subject{Package: "example.com/expinitdirty/p", Symbol: "Next"})
+			if v.Status != Unverifiable || !strings.Contains(v.Reason, "environment-free") {
+				t.Fatalf("expected environment-audit refusal on dirty exported initOnlyPlain helper, got %+v", v)
+			}
+			dirtyChain := explainViewForSubject(t, dirtyInitHelperDir, Subject{Package: "example.com/expinitdirty/p", Symbol: "Next"}, "example.com/expinitdirty/p", "Hooks")
+			if dirtyChain.Arm != "environment-audit" || len(dirtyChain.Links) == 0 {
+				t.Fatalf("expected environment-audit chain (not stale mutation arm) on dirty initOnlyPlain helper, got %+v", dirtyChain)
+			}
+		})
+
+		t.Run("explain_carrier_link_constructor_and_site_symbols", func(t *testing.T) {
+			crossLinkDir := writeModuleTree(t, map[string]string{
+				"go.mod": "module example.com/expclink\n\ngo 1.26\n",
+				"dep/dep.go": `package dep
+
+func makeDirtyTable() map[string]func() int {
+	var n int
+	return map[string]func() int{"x": func() int { n++; return n }}
+}
+
+var CleanTable = makeDirtyTable()
+
+func init() {
+	var k int
+	CleanTable["y"] = func() int { k++; return k }
+}
+`,
+				"app/app.go": `package app
+
+import "example.com/expclink/dep"
+
+var SizeHook func() int
+
+func init() {
+	m := dep.CleanTable
+	SizeHook = func() int { return len(m) }
+}
+
+func CallSize() int { return SizeHook() }
+`,
+			})
+			crossChain := explainViewForSubject(t, crossLinkDir, Subject{Package: "example.com/expclink/app", Symbol: "CallSize"}, "example.com/expclink/app", "SizeHook")
+			if crossChain.Arm != "environment-audit" {
+				t.Fatalf("expected environment-audit arm on linked cross-package constructor, got %+v", crossChain)
+			}
+			sawCrossEdge, sawCrossStore := false, false
+			for _, l := range crossChain.Links {
+				if l.Kind == "edge" && l.Package == "example.com/expclink/dep" {
+					if l.Symbol != "CleanTable" {
+						t.Fatalf("expected linked constructor edge Symbol = CleanTable, got %+v", l)
+					}
+					sawCrossEdge = true
+				}
+				if l.Kind == "store" && l.Package == "example.com/expclink/dep" {
+					if l.Symbol != "CleanTable" {
+						t.Fatalf("expected linked store Symbol = CleanTable, got %+v", l)
+					}
+					sawCrossStore = true
+				}
+			}
+			if !sawCrossEdge || !sawCrossStore {
+				t.Fatalf("missing linked CleanTable store/edge in chain: %+v", crossChain)
+			}
+
+			intraLinkDir := writeModuleTree(t, map[string]string{
+				"go.mod": "module example.com/expclinkintra\n\ngo 1.26\n",
+				"app/app.go": `package app
+
+func makeDirtyTable() map[string]func() int {
+	var n int
+	return map[string]func() int{"x": func() int { n++; return n }}
+}
+
+var CleanTable = makeDirtyTable()
+var SizeHook func() int
+
+func init() {
+	m := CleanTable
+	SizeHook = func() int { return len(m) }
+}
+
+func CallSize() int { return SizeHook() }
+`,
+			})
+			intraChain := explainViewForSubject(t, intraLinkDir, Subject{Package: "example.com/expclinkintra/app", Symbol: "CallSize"}, "example.com/expclinkintra/app", "SizeHook")
+			if intraChain.Arm != "environment-audit" {
+				t.Fatalf("expected environment-audit arm on intra-package linked constructor, got %+v", intraChain)
+			}
+			sawIntraEdge := false
+			for _, l := range intraChain.Links {
+				if l.Kind == "edge" && strings.Contains(l.Callee, "makeDirtyTable") {
+					if l.Symbol != "CleanTable" {
+						t.Fatalf("expected intra-package linked constructor edge Symbol = CleanTable, got %+v", l)
+					}
+					sawIntraEdge = true
+				}
+			}
+			if !sawIntraEdge {
+				t.Fatalf("missing intra-package linked CleanTable constructor edge in chain: %+v", intraChain)
+			}
+		})
+	})
 }

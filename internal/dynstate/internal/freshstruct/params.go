@@ -346,8 +346,11 @@ func isAuxLocalInit(p *packages.Package, expr ast.Expr) bool {
 			return ok
 		}
 	case *ast.CallExpr:
+		if syntaxutil.IsBuiltinNewType(p.TypesInfo, e) {
+			return true
+		}
 		if id, isID := ast.Unparen(e.Fun).(*ast.Ident); isID {
-			if b, isB := p.TypesInfo.Uses[id].(*types.Builtin); isB && (b.Name() == "make" || b.Name() == "new") {
+			if b, isB := p.TypesInfo.Uses[id].(*types.Builtin); isB && b.Name() == "make" {
 				return true
 			}
 		}

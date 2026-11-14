@@ -7,7 +7,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
 	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
 	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
-	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
+	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/testvariant"

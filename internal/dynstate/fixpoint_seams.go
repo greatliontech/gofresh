@@ -9,6 +9,13 @@ import (
 // CarrierLinkGraph builds the symmetric adjacency map of init-flow carrier
 // storage links across allFacts.
 func CarrierLinkGraph(allFacts map[string][]Fact, malformed func(Fact)) map[string]map[string]bool {
+	return ActiveCarrierLinkGraph(allFacts, nil, malformed)
+}
+
+// ActiveCarrierLinkGraph builds the symmetric adjacency map of init-flow
+// carrier storage links across allFacts, excluding object-closed opaque
+// sentinel variables that cannot transmit mutable dynamic state.
+func ActiveCarrierLinkGraph(allFacts map[string][]Fact, resolution *DeferralResolution, malformed func(Fact)) map[string]map[string]bool {
 	linkAdj := map[string]map[string]bool{}
 	for _, facts := range allFacts {
 		for _, fact := range facts {
@@ -17,6 +24,9 @@ func CarrierLinkGraph(allFacts map[string][]Fact, malformed func(Fact)) map[stri
 					if malformed != nil {
 						malformed(fact)
 					}
+					continue
+				}
+				if resolution != nil && (resolution.IsObjectClosed(link.From) || resolution.IsObjectClosed(link.To)) {
 					continue
 				}
 				if linkAdj[link.From] == nil {
@@ -31,6 +41,55 @@ func CarrierLinkGraph(allFacts map[string][]Fact, malformed func(Fact)) map[stri
 		}
 	}
 	return linkAdj
+}
+
+// ResolveFuncRefRegions resolves cross-package function reference regions,
+// init-only functions, and init/program-reachable functions across allFacts.
+func ResolveFuncRefRegions(allFacts map[string][]Fact, malformed func(Fact)) (
+	refRegions map[syntaxutil.FuncKey]map[syntaxutil.RefRegion]bool,
+	initOnlyFn map[syntaxutil.FuncKey]bool,
+	initReachFn map[syntaxutil.FuncKey]bool,
+) {
+	refRegions = map[syntaxutil.FuncKey]map[syntaxutil.RefRegion]bool{}
+	for _, facts := range allFacts {
+		for _, fact := range facts {
+			bad := false
+			for _, edge := range fact.FuncRefs {
+				if !edge.Valid() {
+					bad = true
+					if edge.Callee.Valid() {
+						if refRegions[edge.Callee] == nil {
+							refRegions[edge.Callee] = map[syntaxutil.RefRegion]bool{}
+						}
+						refRegions[edge.Callee][syntaxutil.RefRegion{Kind: syntaxutil.RegionProg}] = true
+					}
+					continue
+				}
+				if refRegions[edge.Callee] == nil {
+					refRegions[edge.Callee] = map[syntaxutil.RefRegion]bool{}
+				}
+				refRegions[edge.Callee][edge.Region] = true
+			}
+			if bad && malformed != nil {
+				malformed(fact)
+			}
+		}
+	}
+	initOnlyFn = map[syntaxutil.FuncKey]bool{}
+	syntaxutil.SolveLeastFixedPoint(initOnlyFn, refRegions, func(region syntaxutil.RefRegion) bool {
+		if region.Kind == syntaxutil.RegionInit {
+			return true
+		}
+		return region.Kind == syntaxutil.RegionFunc && initOnlyFn[region.Caller]
+	})
+	initReachFn = map[syntaxutil.FuncKey]bool{}
+	syntaxutil.SolveReachFixedPoint(initReachFn, refRegions, func(region syntaxutil.RefRegion) bool {
+		if region.Kind == syntaxutil.RegionInit || region.Kind == syntaxutil.RegionProg {
+			return true
+		}
+		return (region.Kind == syntaxutil.RegionFunc || region.Kind == syntaxutil.RegionLitFunc) && initReachFn[region.Caller]
+	})
+	return refRegions, initOnlyFn, initReachFn
 }
 
 // BlockedExportedSeams resolves which exported mutating seam functions across

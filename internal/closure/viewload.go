@@ -78,6 +78,7 @@ func loadView(ctx context.Context, reader *gotool.EnvReader, buildFlags []string
 		return nil, err
 	}
 	mode := packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
+		packages.NeedEmbedFiles | packages.NeedEmbedPatterns |
 		packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo |
 		packages.NeedImports | packages.NeedModule | packages.NeedForTest
 	if deps {

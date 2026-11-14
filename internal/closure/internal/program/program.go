@@ -213,7 +213,7 @@ func (p *Prepared) Release(pkgPath string) {
 func load(ctx context.Context, dir string, env, flags, paths []string) ([]*packages.Package, error) {
 	return gotool.LoadPackages(
 		ctx,
-		packages.LoadAllSyntax|packages.NeedForTest|packages.NeedModule,
+		packages.LoadAllSyntax|packages.NeedForTest|packages.NeedModule|packages.NeedEmbedFiles|packages.NeedEmbedPatterns,
 		dir,
 		env,
 		flags,

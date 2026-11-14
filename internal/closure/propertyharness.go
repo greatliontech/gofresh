@@ -11,9 +11,9 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 
 	"github.com/greatliontech/gofresh/internal/cachefile"
-	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -248,7 +248,7 @@ func (h *Hasher) propertyHarnessAuditedListPkg(callerPkgPath string, pkg *listPk
 		}
 		loaded, err := gotool.LoadPackages(
 			h.ctx,
-			packages.NeedName|packages.NeedFiles|packages.NeedCompiledGoFiles|packages.NeedEmbedFiles|packages.NeedEmbedPatterns|packages.NeedSyntax|packages.NeedTypes|packages.NeedTypesInfo|packages.NeedImports|packages.NeedModule,
+			packages.NeedName|packages.NeedFiles|packages.NeedCompiledGoFiles|packages.NeedEmbedFiles|packages.NeedEmbedPatterns|packages.NeedSyntax|packages.NeedTypes|packages.NeedTypesInfo|packages.NeedImports|packages.NeedModule|packages.NeedForTest,
 			loadDir,
 			h.packageEnv,
 			h.buildFlags,

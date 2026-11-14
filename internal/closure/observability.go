@@ -16,7 +16,7 @@ import (
 
 	"github.com/greatliontech/gofresh/internal/auditset"
 	prog "github.com/greatliontech/gofresh/internal/closure/internal/program"
-	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
+	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/closure/internal/rta"
 	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/trace"

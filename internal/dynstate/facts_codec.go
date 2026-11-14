@@ -87,6 +87,7 @@ type Fact struct {
 	OpaqueDeps                 []syntaxutil.OpaqueDep                 `json:"opaqueDeps,omitempty"`
 	CarrierLinks               []syntaxutil.CarrierLink               `json:"carrierLinks,omitempty"`
 	EnvCarrying                []string                               `json:"envCarrying,omitempty"`
+	EnvCarryingFns             []syntaxutil.VarFuncUse                `json:"envCarryingFns,omitempty"`
 	EnvCallable                []string                               `json:"envCallable,omitempty"`
 	EnvCallUses                []syntaxutil.EnvCallUse                `json:"envCallUses,omitempty"`
 	ReturnEnvFree              []syntaxutil.FuncKey                   `json:"returnEnvFree,omitempty"`
@@ -103,6 +104,7 @@ type Fact struct {
 	SingleSubjectVars          []string                               `json:"singleSubjectVars,omitempty"`
 	MappingDischarges          []string                               `json:"mappingDischarges,omitempty"`
 	MemoDischarges             []string                               `json:"memoDischarges,omitempty"`
+	HarnessDischarges          []string                               `json:"harnessDischarges,omitempty"`
 	ProtoClusters              []protoaudit.ProtoClusterFact          `json:"protoClusters,omitempty"`
 	ProtoExtAliases            []protoaudit.ProtoExtAlias             `json:"protoExtAliases,omitempty"`
 	ProtoRuntimeTypes          []protoaudit.ProtoRuntimeTypeFact      `json:"protoRuntimeTypes,omitempty"`

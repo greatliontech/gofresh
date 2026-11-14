@@ -112,7 +112,7 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 	if len(patterns) == 0 {
 		patterns = []string{pkgPath}
 	}
-	pkgs, err := gotool.LoadPackages(ctx, packages.LoadAllSyntax|packages.NeedModule, dir, env, flags, patterns...)
+	pkgs, err := gotool.LoadPackages(ctx, packages.LoadAllSyntax|packages.NeedForTest|packages.NeedModule|packages.NeedEmbedFiles|packages.NeedEmbedPatterns, dir, env, flags, patterns...)
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: load: %w", err)
 	}
@@ -155,8 +155,10 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	}, nil)
 
 	type siteObservation struct {
-		key  string
-		link ChainLink
+		key         string
+		enclosingFn syntaxutil.FuncKey
+		literal     bool
+		link        ChainLink
 	}
 	type storeObservation struct {
 		key  string
@@ -184,22 +186,30 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		position := p.Fset.Position(at)
 		return fmt.Sprintf("%s:%d", position.Filename, position.Line)
 	}
+	bareSym := func(key string) string {
+		return bareSymbol(key, varName)
+	}
 	hooks := &syntaxutil.ExplainHookSet{
-		Site: func(p *packages.Package, kind, key string, at token.Pos) {
-			allSites = append(allSites, siteObservation{key: key, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Clause: kind, Pos: pos(p, at)}})
+		Site: func(p *packages.Package, kind, key string, fn syntaxutil.FuncKey, literal bool, at token.Pos) {
+			allSites = append(allSites, siteObservation{
+				key:         key,
+				enclosingFn: fn,
+				literal:     literal,
+				link:        ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: bareSym(key), Clause: kind, Pos: pos(p, at)},
+			})
 		},
 		ExportedSeamSite: func(p *packages.Package, fn syntaxutil.FuncKey, key string, at token.Pos) {
 			allExportedSeams = append(allExportedSeams, exportedSeamObservation{
 				key:  key,
 				fn:   fn,
-				link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Clause: "mutation", Pos: pos(p, at)},
+				link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: bareSym(key), Clause: "mutation", Pos: pos(p, at)},
 			})
 		},
 		Store: func(p *packages.Package, key string, at token.Pos) {
-			allStores = append(allStores, storeObservation{key: key, link: ChainLink{Kind: "store", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)}})
+			allStores = append(allStores, storeObservation{key: key, link: ChainLink{Kind: "store", Package: p.PkgPath, Symbol: bareSym(key), Pos: pos(p, at)}})
 		},
 		Deferral: func(p *packages.Package, kind byte, key string, resolvent syntaxutil.DeferralResolvent, at token.Pos) {
-			allDeferrals = append(allDeferrals, deferralObservation{key: key, kind: kind, resolvent: resolvent, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: varName, Pos: pos(p, at)}})
+			allDeferrals = append(allDeferrals, deferralObservation{key: key, kind: kind, resolvent: resolvent, link: ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: bareSym(key), Pos: pos(p, at)}})
 		},
 	}
 	facts := map[string][]dynstate.Fact{}
@@ -247,7 +257,13 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		}
 	}
 
-	linkAdj := dynstate.CarrierLinkGraph(facts, nil)
+	resolution := dynstate.NewDeferralResolution(facts, nil)
+	refRegions := resolution.RefRegions
+	initOnlyFn := resolution.InitOnlyFn
+	isInitOnlyPlain := func(fn syntaxutil.FuncKey) bool {
+		return !fn.IsZero() && refRegions[fn] != nil && initOnlyFn[fn]
+	}
+	linkAdj := dynstate.ActiveCarrierLinkGraph(facts, resolution, nil)
 	linkedKeys := map[string]bool{varKey: true}
 	for changed := len(linkAdj[varKey]) > 0; changed; {
 		changed = false
@@ -261,10 +277,12 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		}
 	}
 
-	resolution := dynstate.NewDeferralResolution(facts, nil)
 	var collectedSites []ChainLink
 	for _, obs := range allSites {
 		if !linkedKeys[obs.key] {
+			continue
+		}
+		if obs.link.Clause == "mutation" && !obs.literal && isInitOnlyPlain(obs.enclosingFn) {
 			continue
 		}
 		if obs.link.Clause != "mutation" && !resolution.NotOpaque[varKey] {
@@ -299,11 +317,17 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 			if resolution.ParamLeakFree[obs.resolvent.Param] || !resolution.NotOpaque[varKey] {
 				continue
 			}
+			if !obs.resolvent.Literal && isInitOnlyPlain(obs.resolvent.EnclosingFn) && resolution.ParamRetentionFree[obs.resolvent.Param] {
+				continue
+			}
 			link.Clause = "a deferred argument's parameter unproven"
 			link.Callee = obs.resolvent.Param.Display()
 			escapeLinks = append(escapeLinks, link)
 		case 'm':
 			if resolution.ReadOnly[obs.resolvent.Method] {
+				continue
+			}
+			if !obs.resolvent.Literal && isInitOnlyPlain(obs.resolvent.EnclosingFn) && resolution.ReceiverRetention[obs.resolvent.Method] {
 				continue
 			}
 			link.Clause = "a deferred method use unproven"
@@ -433,6 +457,7 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 
 	type rootedCallee struct {
 		from   string
+		key    string
 		callee syntaxutil.FuncKey
 	}
 	var callees []rootedCallee
@@ -440,7 +465,7 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 		for _, f := range fl {
 			for _, use := range f.EnvCallUses {
 				if use.Valid() && linkedKeys[use.Key] && !ea.Resolved[use.Callee] {
-					callees = append(callees, rootedCallee{fromPath, use.Callee})
+					callees = append(callees, rootedCallee{from: fromPath, key: use.Key, callee: use.Callee})
 				}
 			}
 		}
@@ -448,6 +473,9 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 	sort.Slice(callees, func(i, j int) bool {
 		if callees[i].from != callees[j].from {
 			return callees[i].from < callees[j].from
+		}
+		if callees[i].key != callees[j].key {
+			return callees[i].key < callees[j].key
 		}
 		return callees[i].callee.Compare(callees[j].callee) < 0
 	})
@@ -495,12 +523,19 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 	for _, rc := range callees {
 		target := syntaxutil.FuncAuditTarget(rc.callee)
 		calleePkg, calleeName := renderEdge(target)
-		edges = append(edges, ChainLink{Kind: "edge", Package: rc.from, Symbol: varName, Callee: calleePkg + "." + calleeName})
+		edges = append(edges, ChainLink{Kind: "edge", Package: rc.from, Symbol: bareSymbol(rc.key, varName), Callee: calleePkg + "." + calleeName})
 		if fn, p := walk(target); fn != "" {
 			return edges, fn, p
 		}
 	}
 	return edges, "", ""
+}
+
+func bareSymbol(key, fallback string) string {
+	if i := strings.LastIndexByte(key, '.'); i >= 0 {
+		return key[i+1:]
+	}
+	return fallback
 }
 
 func dedupeLinks(links []ChainLink) []ChainLink {

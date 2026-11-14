@@ -145,8 +145,11 @@ func CollectFreshLocalStructVars(
 				}
 			}
 		case *ast.CallExpr:
+			if syntaxutil.IsBuiltinNewType(p.TypesInfo, e) {
+				return true
+			}
 			if id, ok := ast.Unparen(e.Fun).(*ast.Ident); ok {
-				if b, isB := p.TypesInfo.Uses[id].(*types.Builtin); isB && (b.Name() == "new" || b.Name() == "make") {
+				if b, isB := p.TypesInfo.Uses[id].(*types.Builtin); isB && b.Name() == "make" {
 					return true
 				}
 			}
@@ -166,10 +169,8 @@ func CollectFreshLocalStructVars(
 				}
 			}
 		case *ast.CallExpr:
-			if id, ok := ast.Unparen(e.Fun).(*ast.Ident); ok && len(e.Args) == 1 {
-				if b, isB := p.TypesInfo.Uses[id].(*types.Builtin); isB && b.Name() == "new" {
-					return hasNonEmptyStructElem(p.TypesInfo.TypeOf(e))
-				}
+			if syntaxutil.IsBuiltinNewType(p.TypesInfo, e) {
+				return hasNonEmptyStructElem(p.TypesInfo.TypeOf(e))
 			}
 		}
 		return false

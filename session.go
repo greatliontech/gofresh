@@ -152,7 +152,7 @@ func PreviewPruneMemos(maxBytes int64) (MemoPruneReport, error) {
 // whose per-package facts the persistent memo serves for version-pinned
 // packages (REQ-closure-dynamic-state-memo). Changing fact semantics bumps
 // this version like any other strategy change.
-const DynamicStateStrategy = "gofresh/dynamic-state@78"
+const DynamicStateStrategy = "gofresh/dynamic-state@83"
 
 // ClosureStrategy identifies the closure identity derivation — the
 // maximal closure's and the test-variant compartment's — as the

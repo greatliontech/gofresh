@@ -566,7 +566,17 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 			}
 			if b := syntaxutil.LookupBuiltin(info, fun); b != nil {
 				switch b.Name() {
-				case "make", "new", "len", "cap", "Sizeof", "Alignof", "Offsetof":
+				case "make", "len", "cap", "Sizeof", "Alignof", "Offsetof":
+					return false, false
+				case "new":
+					if syntaxutil.IsBuiltinNewType(info, e) {
+						return false, false
+					}
+					if len(e.Args) == 1 {
+						if _, aCar := classifyExpr(e.Args[0]); aCar {
+							return false, true
+						}
+					}
 					return false, false
 				case "append":
 					if len(e.Args) == 0 {

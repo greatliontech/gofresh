@@ -88,11 +88,18 @@ func TypeContainsRefOrPointer(root types.Type) bool {
 // TypeContainsRefOrPointerWith is like TypeContainsRefOrPointer, treating
 // pointers matched by isImmutablePtr as non-mutable handles.
 func TypeContainsRefOrPointerWith(root types.Type, isImmutablePtr func(types.Type) bool) bool {
+	if root == nil {
+		return true
+	}
 	seen := map[types.Type]bool{}
 	hit := false
 	var walk func(t types.Type)
 	walk = func(t types.Type) {
-		if t == nil || hit {
+		if hit {
+			return
+		}
+		if t == nil {
+			hit = true
 			return
 		}
 		t = types.Unalias(t)

@@ -667,7 +667,7 @@ func hasHarnessForbiddenDirective(text string) bool {
 	trimmed := strings.TrimSpace(strings.TrimPrefix(text, "//"))
 	trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "/*"))
 	trimmed = strings.TrimSpace(strings.TrimSuffix(trimmed, "*/"))
-	for _, dir := range []string{"go:linkname", "go:linknamestd", "go:wasmimport", "go:cgo_"} {
+	for _, dir := range []string{"go:linkname", "go:linknamestd", "go:wasmimport", "go:cgo_", "go:embed"} {
 		if strings.HasPrefix(trimmed, dir) {
 			if dir == "go:cgo_" || trimmed == dir {
 				return true

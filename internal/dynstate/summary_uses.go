@@ -7,20 +7,20 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
 
 // pendingReturnDisposition is one conditionally discharged range whose
 // enclosing function returned the binding: the fn's callers decide, and
-// an uncontained handout restores the escape - to the attributed record
+// an uncontained handout restores the escape — to the attributed record
 // when the range sat in an attributed body, to the immediate marks
 // otherwise (REQ-closure-shared-dynamic-state).
 type pendingReturnDisposition struct {
 	fn     string
 	keys   []string
 	attrFn syntaxutil.FuncKey
+	pos    token.Pos
 }
 
 func recordDynamicGlobalUses(
@@ -37,6 +37,7 @@ func recordDynamicGlobalUses(
 	elemUses map[string]map[syntaxutil.ElemParamUse]bool,
 	carrierLinks map[string]map[string]bool,
 	attributed *[]syntaxutil.AttributedUse,
+	attributedParams *[]syntaxutil.VarParamUse,
 	singleSubject bool,
 	poolDischarged, poolMutated, poolEscaped map[string]bool,
 	poolAttributed *[]syntaxutil.AttributedUse,
@@ -59,6 +60,13 @@ func recordDynamicGlobalUses(
 		}
 		return variable, true
 	}
+	isPackageScopeVar := func(obj types.Object) (*types.Var, bool) {
+		variable, ok := obj.(*types.Var)
+		if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
+			return nil, false
+		}
+		return variable, true
+	}
 	resolve := func(ident *ast.Ident) (types.Object, bool) {
 		if obj, ok := p.TypesInfo.Uses[ident]; ok {
 			return obj, true
@@ -68,9 +76,18 @@ func recordDynamicGlobalUses(
 		}
 		return nil, false
 	}
+	canAliasCarrier := func(t types.Type) bool {
+		return refconfine.TypeHandsOutDynamicAlias(audited, t) ||
+			refconfine.TypeHandsOutMutableReach(t) ||
+			refconfine.TypeReachesSyncNoCopyByValue(t)
+	}
+
 	var aliasedLocals map[types.Object]map[string]bool
+	var poolMethods map[string]map[syntaxutil.FuncKey]bool
 	var currentFn *ast.FuncDecl
 	var currentAttrFn syntaxutil.FuncKey
+	var currentDeferFn syntaxutil.FuncKey
+	var currentDeferLit bool
 	var pendingReturns []pendingReturnDisposition
 	markTargets := func(expr ast.Expr) {
 		ast.Inspect(expr, func(n ast.Node) bool {
@@ -80,11 +97,11 @@ func recordDynamicGlobalUses(
 			}
 			if obj, ok := resolve(ident); ok {
 				if variable, ok := dynamicPackageVar(obj); ok {
-					syntaxutil.ExplainMark(hooks, p, "mutation", syntaxutil.DynamicVarKey(variable), ident.Pos())
+					syntaxutil.ExplainAttributedMark(hooks, p, "mutation", syntaxutil.DynamicVarKey(variable), currentDeferFn, currentDeferLit, ident.Pos())
 					mutated[syntaxutil.DynamicVarKey(variable)] = true
 				} else {
 					for key := range aliasedLocals[obj] {
-						syntaxutil.ExplainMark(hooks, p, "mutation", key, ident.Pos())
+						syntaxutil.ExplainAttributedMark(hooks, p, "mutation", key, currentDeferFn, currentDeferLit, ident.Pos())
 						mutated[key] = true
 					}
 				}
@@ -92,6 +109,7 @@ func recordDynamicGlobalUses(
 			return true
 		})
 	}
+
 	initOnlyParams := callIdx.FuncParamsOf(initOnly)
 	paramSeeds := map[types.Object]map[string]bool{}
 	paramLinkSeeds := map[types.Object]map[string]bool{}
@@ -114,48 +132,202 @@ func recordDynamicGlobalUses(
 			}
 			linkAliased[obj] = set
 		}
+
+		var collectRHSKeys func(expr ast.Expr, addressed bool, out map[string]bool)
+		collectRHSKeys = func(expr ast.Expr, addressed bool, out map[string]bool) {
+			if expr == nil {
+				return
+			}
+			e := syntaxutil.UnparenExpr(expr)
+			if !addressed {
+				if t := p.TypesInfo.TypeOf(e); t != nil && !canAliasCarrier(t) {
+					return
+				}
+			}
+			switch n := e.(type) {
+			case *ast.FuncLit:
+				return
+			case *ast.Ident:
+				if obj, ok := resolve(n); ok {
+					if variable, ok := dynamicPackageVar(obj); ok {
+						out[syntaxutil.DynamicVarKey(variable)] = true
+					} else if source := aliased[obj]; source != nil {
+						for key := range source {
+							out[key] = true
+						}
+					}
+				}
+			case *ast.UnaryExpr:
+				if n.Op == token.AND {
+					collectRHSKeys(n.X, true, out)
+					return
+				}
+				collectRHSKeys(n.X, addressed, out)
+			case *ast.SelectorExpr:
+				if x, ok := syntaxutil.UnparenExpr(n.X).(*ast.Ident); ok {
+					if _, isPkg := p.TypesInfo.Uses[x].(*types.PkgName); isPkg {
+						collectRHSKeys(n.Sel, addressed, out)
+						return
+					}
+				}
+				collectRHSKeys(n.X, addressed, out)
+			case *ast.IndexExpr:
+				collectRHSKeys(n.X, addressed, out)
+				collectRHSKeys(n.Index, false, out)
+			case *ast.IndexListExpr:
+				collectRHSKeys(n.X, addressed, out)
+			case *ast.SliceExpr:
+				isArr := false
+				if t := p.TypesInfo.TypeOf(n.X); t != nil {
+					_, isArr = types.Unalias(t).Underlying().(*types.Array)
+				}
+				collectRHSKeys(n.X, addressed || isArr, out)
+				collectRHSKeys(n.Low, false, out)
+				collectRHSKeys(n.High, false, out)
+				collectRHSKeys(n.Max, false, out)
+			case *ast.StarExpr:
+				collectRHSKeys(n.X, addressed, out)
+			case *ast.TypeAssertExpr:
+				collectRHSKeys(n.X, addressed, out)
+			case *ast.CompositeLit:
+				syntaxutil.EachCompositeLitFlow(p.TypesInfo, n, func(flow ast.Expr, _ bool) bool {
+					collectRHSKeys(flow, false, out)
+					return true
+				})
+			case *ast.CallExpr:
+				if ident, ok := syntaxutil.UnparenExpr(n.Fun).(*ast.Ident); ok {
+					if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
+						if ident.Name == "make" || syntaxutil.IsBuiltinNewType(p.TypesInfo, n) ||
+							ident.Name == "len" || ident.Name == "cap" {
+							return
+						}
+					}
+				}
+				collectRHSKeys(n.Fun, false, out)
+				for _, arg := range n.Args {
+					collectRHSKeys(arg, false, out)
+				}
+			case *ast.BinaryExpr:
+				collectRHSKeys(n.X, false, out)
+				collectRHSKeys(n.Y, false, out)
+			default:
+				ast.Inspect(e, func(sub ast.Node) bool {
+					if _, isLit := sub.(*ast.FuncLit); isLit {
+						return false
+					}
+					if id, ok := sub.(*ast.Ident); ok {
+						if obj, ok := resolve(id); ok {
+							if variable, ok := dynamicPackageVar(obj); ok {
+								out[syntaxutil.DynamicVarKey(variable)] = true
+							} else if source := aliased[obj]; source != nil {
+								for key := range source {
+									out[key] = true
+								}
+							}
+						}
+					}
+					return true
+				})
+			}
+		}
 		rhsKeys := func(expr ast.Expr) map[string]bool {
 			keys := map[string]bool{}
-			ast.Inspect(expr, func(n ast.Node) bool {
-				switch n := n.(type) {
-				case *ast.FuncLit:
-					return false
-				case *ast.Ident:
-					if obj, ok := resolve(n); ok {
-						if variable, ok := dynamicPackageVar(obj); ok {
-							keys[syntaxutil.DynamicVarKey(variable)] = true
-						} else if source := aliased[obj]; source != nil {
-							for key := range source {
-								keys[key] = true
+			collectRHSKeys(expr, false, keys)
+			return keys
+		}
+
+		// collectLinkKeys collects init-flow carrier storage links without crossing
+		// general function calls (preserving TestCarrierStoreLinkRecordedAndCallResultsUnlinked),
+		// while traversing type conversions, append, Go 1.26+ new(expr), &place,
+		// array [:], and composite literals.
+		var collectLinkKeys func(expr ast.Expr, addressed bool, out map[string]bool)
+		collectLinkKeys = func(expr ast.Expr, addressed bool, out map[string]bool) {
+			if expr == nil {
+				return
+			}
+			e := syntaxutil.UnparenExpr(expr)
+			if !addressed {
+				if t := p.TypesInfo.TypeOf(e); t != nil && !refconfine.CallResultHandsOut(t) {
+					return
+				}
+			}
+			switch n := e.(type) {
+			case *ast.FuncLit:
+				return
+			case *ast.Ident:
+				if obj, ok := resolve(n); ok {
+					if variable, ok := dynamicPackageVar(obj); ok {
+						out[syntaxutil.DynamicVarKey(variable)] = true
+					} else if source := linkAliased[obj]; source != nil {
+						for key := range source {
+							out[key] = true
+						}
+					}
+				}
+			case *ast.UnaryExpr:
+				if n.Op == token.AND {
+					collectLinkKeys(n.X, true, out)
+					return
+				}
+				collectLinkKeys(n.X, addressed, out)
+			case *ast.SelectorExpr:
+				if x, ok := syntaxutil.UnparenExpr(n.X).(*ast.Ident); ok {
+					if _, isPkg := p.TypesInfo.Uses[x].(*types.PkgName); isPkg {
+						collectLinkKeys(n.Sel, addressed, out)
+						return
+					}
+				}
+				collectLinkKeys(n.X, addressed, out)
+			case *ast.IndexExpr:
+				collectLinkKeys(n.X, addressed, out)
+			case *ast.IndexListExpr:
+				collectLinkKeys(n.X, addressed, out)
+			case *ast.SliceExpr:
+				isArr := false
+				if t := p.TypesInfo.TypeOf(n.X); t != nil {
+					_, isArr = types.Unalias(t).Underlying().(*types.Array)
+				}
+				collectLinkKeys(n.X, addressed || isArr, out)
+			case *ast.StarExpr:
+				collectLinkKeys(n.X, addressed, out)
+			case *ast.TypeAssertExpr:
+				collectLinkKeys(n.X, addressed, out)
+			case *ast.CompositeLit:
+				syntaxutil.EachCompositeLitFlow(p.TypesInfo, n, func(flow ast.Expr, _ bool) bool {
+					collectLinkKeys(flow, false, out)
+					return true
+				})
+			case *ast.CallExpr:
+				if tv, ok := p.TypesInfo.Types[n.Fun]; ok && tv.IsType() && len(n.Args) == 1 {
+					if refconfine.CallResultHandsOut(tv.Type) {
+						collectLinkKeys(n.Args[0], false, out)
+					}
+					return
+				}
+				if ident, ok := syntaxutil.UnparenExpr(n.Fun).(*ast.Ident); ok {
+					if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
+						switch ident.Name {
+						case "append":
+							for _, arg := range n.Args {
+								collectLinkKeys(arg, false, out)
+							}
+						case "new":
+							if !syntaxutil.IsBuiltinNewType(p.TypesInfo, n) && len(n.Args) == 1 {
+								collectLinkKeys(n.Args[0], false, out)
 							}
 						}
 					}
 				}
-				return true
-			})
-			return keys
+				// Plain/method/indirect CallExpr results intentionally do not emit CarrierLinks.
+				return
+			}
 		}
 		linkKeys := func(expr ast.Expr) map[string]bool {
 			keys := map[string]bool{}
-			ast.Inspect(expr, func(n ast.Node) bool {
-				switch n := n.(type) {
-				case *ast.FuncLit, *ast.CallExpr:
-					return false
-				case *ast.Ident:
-					if obj, ok := resolve(n); ok {
-						if variable, ok := dynamicPackageVar(obj); ok {
-							keys[syntaxutil.DynamicVarKey(variable)] = true
-						} else if source := linkAliased[obj]; source != nil {
-							for key := range source {
-								keys[key] = true
-							}
-						}
-					}
-				}
-				return true
-			})
+			collectLinkKeys(expr, false, keys)
 			return keys
 		}
+
 		markRHSMethodValues := func(rhs ast.Expr) {
 			if seedingPass {
 				return
@@ -193,10 +365,86 @@ func recordDynamicGlobalUses(
 				return true
 			})
 		}
+
+		bindObj := func(obj types.Object, pos token.Pos, composite bool, keys, lkeys map[string]bool) bool {
+			if obj == nil || (len(keys) == 0 && len(lkeys) == 0) {
+				return false
+			}
+			if _, isPkg := obj.(*types.PkgName); isPkg {
+				return false
+			}
+			if variable, pkg := dynamicPackageVar(obj); pkg {
+				if carrierLinks != nil && !seedingPass {
+					own := syntaxutil.DynamicVarKey(variable)
+					for key := range lkeys {
+						if key == own {
+							continue
+						}
+						if carrierLinks[own] == nil {
+							carrierLinks[own] = map[string]bool{}
+						}
+						carrierLinks[own][key] = true
+					}
+				}
+				return false
+			}
+			if pkgVar, isPkgScope := isPackageScopeVar(obj); isPkgScope {
+				if !seedingPass && (composite || refconfine.TypeHandsOutMutableReach(pkgVar.Type())) {
+					for key := range lkeys {
+						syntaxutil.ExplainMark(hooks, p, "escape", key, pos)
+						escaped[key] = true
+					}
+					for key := range keys {
+						syntaxutil.ExplainMark(hooks, p, "escape", key, pos)
+						escaped[key] = true
+					}
+				}
+				return false
+			}
+			if composite && carrierLinks != nil && !seedingPass && len(lkeys) != 0 {
+				for own := range aliased[obj] {
+					for key := range lkeys {
+						if key == own {
+							continue
+						}
+						if carrierLinks[own] == nil {
+							carrierLinks[own] = map[string]bool{}
+						}
+						carrierLinks[own][key] = true
+					}
+				}
+			}
+			changed := false
+			if len(keys) != 0 && (composite || canAliasCarrier(obj.Type())) {
+				if aliased[obj] == nil {
+					aliased[obj] = map[string]bool{}
+				}
+				for key := range keys {
+					if !aliased[obj][key] {
+						aliased[obj][key] = true
+						changed = true
+					}
+				}
+			}
+			if len(lkeys) != 0 {
+				if linkAliased[obj] == nil {
+					linkAliased[obj] = map[string]bool{}
+				}
+				for key := range lkeys {
+					if !linkAliased[obj][key] {
+						linkAliased[obj][key] = true
+						changed = true
+					}
+				}
+			}
+			return changed
+		}
+
 		bind := func(target ast.Expr, keys, lkeys map[string]bool) bool {
 			if len(keys) == 0 && len(lkeys) == 0 {
 				return false
 			}
+			origTarget := target
 			composite := false
 		unwrap:
 			for {
@@ -233,53 +481,26 @@ func recordDynamicGlobalUses(
 			if !ok {
 				return false
 			}
-			if _, isPkg := obj.(*types.PkgName); isPkg {
-				return false
-			}
-			if variable, pkg := dynamicPackageVar(obj); pkg {
-				if carrierLinks != nil && !seedingPass {
-					own := syntaxutil.DynamicVarKey(variable)
-					for key := range lkeys {
-						if key == own {
-							continue
-						}
-						if carrierLinks[own] == nil {
-							carrierLinks[own] = map[string]bool{}
-						}
-						carrierLinks[own][key] = true
-					}
+			if _, mapKey, isMapW := syntaxutil.LHSMapWriteKey(p.TypesInfo, origTarget); isMapW {
+				mergedK := map[string]bool{}
+				for k := range keys {
+					mergedK[k] = true
 				}
-				return false
-			}
-			if len(keys) == 0 {
-				return false
-			}
-			if !composite && !refconfine.TypeHandsOutDynamicAlias(audited, obj.Type()) {
-				return false
-			}
-			changed := false
-			if aliased[obj] == nil {
-				aliased[obj] = map[string]bool{}
-			}
-			for key := range keys {
-				if !aliased[obj][key] {
-					aliased[obj][key] = true
-					changed = true
+				for k := range rhsKeys(mapKey) {
+					mergedK[k] = true
 				}
-			}
-			if len(lkeys) != 0 {
-				if linkAliased[obj] == nil {
-					linkAliased[obj] = map[string]bool{}
+				mergedL := map[string]bool{}
+				for k := range lkeys {
+					mergedL[k] = true
 				}
-				for key := range lkeys {
-					if !linkAliased[obj][key] {
-						linkAliased[obj][key] = true
-						changed = true
-					}
+				for k := range linkKeys(mapKey) {
+					mergedL[k] = true
 				}
+				keys, lkeys = mergedK, mergedL
 			}
-			return changed
+			return bindObj(obj, ident.Pos(), composite, keys, lkeys)
 		}
+
 		for changed := true; changed; {
 			changed = false
 			ast.Inspect(body, func(n ast.Node) bool {
@@ -330,8 +551,15 @@ func recordDynamicGlobalUses(
 							changed = true
 						}
 					}
+				case *ast.TypeSwitchStmt:
+					syntaxutil.EachTypeSwitchImplicit(p.TypesInfo, n, func(impVar *types.Var, srcExpr ast.Expr) {
+						markRHSMethodValues(srcExpr)
+						if bindObj(impVar, n.Pos(), false, rhsKeys(srcExpr), linkKeys(srcExpr)) {
+							changed = true
+						}
+					})
 				case *ast.CallExpr:
-					if ident, ok := n.Fun.(*ast.Ident); ok && len(n.Args) == 2 {
+					if ident, ok := syntaxutil.UnparenExpr(n.Fun).(*ast.Ident); ok && len(n.Args) == 2 {
 						if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && ident.Name == "copy" {
 							if bind(n.Args[0], rhsKeys(n.Args[1]), linkKeys(n.Args[1])) {
 								changed = true
@@ -358,7 +586,7 @@ func recordDynamicGlobalUses(
 											gateType = slice.Elem()
 										}
 									}
-									if !refconfine.TypeHandsOutDynamicAlias(audited, gateType) {
+									if !canAliasCarrier(gateType) {
 										continue
 									}
 									for key := range rhsKeys(arg) {
@@ -389,6 +617,7 @@ func recordDynamicGlobalUses(
 		}
 		return aliased
 	}
+
 	carrierArgVar := func(arg ast.Expr) (*ast.Ident, *types.Var) {
 		arg = syntaxutil.UnparenExpr(arg)
 		var target *ast.Ident
@@ -418,6 +647,7 @@ func recordDynamicGlobalUses(
 		}
 		return target, variable
 	}
+
 	deferCarrierArgs := func(n *ast.CallExpr, sink map[string]map[syntaxutil.ParamKey]bool, kind byte, onDeferred func(*ast.Ident)) {
 		fn, pkgPath := syntaxutil.PlainCalleeFunc(p, n.Fun)
 		if fn == nil {
@@ -442,22 +672,43 @@ func recordDynamicGlobalUses(
 			}
 			paramKey := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: pkgPath, Name: fn.Name()}, Index: idx}
 			sink[key][paramKey] = true
-			syntaxutil.ExplainDeferralMark(hooks, p, kind, key, syntaxutil.DeferralResolvent{Param: paramKey}, target.Pos())
+			res := syntaxutil.DeferralResolvent{Param: paramKey}
+			if kind == 'p' {
+				res.EnclosingFn = currentDeferFn
+				res.Literal = currentDeferLit
+			}
+			syntaxutil.ExplainDeferralMark(hooks, p, kind, key, res, target.Pos())
 			if onDeferred != nil {
 				onDeferred(target)
 			}
 		}
 	}
+
+	identOrPkgQual := func(expr ast.Expr) *ast.Ident {
+		switch e := syntaxutil.UnparenExpr(expr).(type) {
+		case *ast.Ident:
+			return e
+		case *ast.SelectorExpr:
+			if x, ok := syntaxutil.UnparenExpr(e.X).(*ast.Ident); ok {
+				if _, isPkg := p.TypesInfo.Uses[x].(*types.PkgName); isPkg {
+					return e.Sel
+				}
+			}
+		}
+		return nil
+	}
+
 	poolCarrierIdent := func(recv ast.Expr) (*ast.Ident, *types.Var) {
-		ident, isIdent := recv.(*ast.Ident)
+		recv = syntaxutil.UnparenExpr(recv)
+		ident := identOrPkgQual(recv)
 		element := false
-		if !isIdent {
+		if ident == nil {
 			index, isIndex := recv.(*ast.IndexExpr)
 			if !isIndex {
 				return nil, nil
 			}
-			ident, isIdent = index.X.(*ast.Ident)
-			if !isIdent {
+			ident = identOrPkgQual(index.X)
+			if ident == nil {
 				return nil, nil
 			}
 			element = true
@@ -496,36 +747,141 @@ func recordDynamicGlobalUses(
 		}
 	}
 	_, provenCalls := provenSharedPools(audited, p)
-	markExemptEscapes := func(arg ast.Expr) {
-		ast.Inspect(arg, func(inner ast.Node) bool {
-			if ident, ok := inner.(*ast.Ident); ok {
-				if obj, ok := resolve(ident); ok {
-					if variable, ok := dynamicPackageVar(obj); ok {
-						if refconfine.TypeHandsOutDynamicAlias(audited, variable.Type()) {
-							syntaxutil.ExplainMark(hooks, p, "escape", syntaxutil.DynamicVarKey(variable), ident.Pos())
-							escaped[syntaxutil.DynamicVarKey(variable)] = true
-						}
-					} else {
-						for key := range aliasedLocals[obj] {
-							syntaxutil.ExplainMark(hooks, p, "escape", key, ident.Pos())
-							escaped[key] = true
-						}
+
+	var markExemptEscapesExpr func(expr ast.Expr, addressed bool)
+	markExemptEscapesExpr = func(expr ast.Expr, addressed bool) {
+		if expr == nil {
+			return
+		}
+		e := syntaxutil.UnparenExpr(expr)
+		if !addressed {
+			if t := p.TypesInfo.TypeOf(e); t != nil && !canAliasCarrier(t) {
+				return
+			}
+		}
+		switch n := e.(type) {
+		case *ast.FuncLit:
+			return
+		case *ast.Ident:
+			if obj, ok := resolve(n); ok {
+				if variable, ok := dynamicPackageVar(obj); ok {
+					if addressed || refconfine.TypeHandsOutDynamicAlias(audited, variable.Type()) {
+						syntaxutil.ExplainMark(hooks, p, "escape", syntaxutil.DynamicVarKey(variable), n.Pos())
+						escaped[syntaxutil.DynamicVarKey(variable)] = true
+					}
+				} else {
+					for key := range aliasedLocals[obj] {
+						syntaxutil.ExplainMark(hooks, p, "escape", key, n.Pos())
+						escaped[key] = true
 					}
 				}
 			}
-			return true
-		})
+		case *ast.UnaryExpr:
+			if n.Op == token.AND {
+				markExemptEscapesExpr(n.X, true)
+				return
+			}
+			markExemptEscapesExpr(n.X, addressed)
+		case *ast.SelectorExpr:
+			if x, ok := syntaxutil.UnparenExpr(n.X).(*ast.Ident); ok {
+				if _, isPkg := p.TypesInfo.Uses[x].(*types.PkgName); isPkg {
+					markExemptEscapesExpr(n.Sel, addressed)
+					return
+				}
+			}
+			markExemptEscapesExpr(n.X, addressed)
+		case *ast.IndexExpr:
+			markExemptEscapesExpr(n.X, addressed)
+			markExemptEscapesExpr(n.Index, false)
+		case *ast.IndexListExpr:
+			markExemptEscapesExpr(n.X, addressed)
+		case *ast.SliceExpr:
+			isArr := false
+			if t := p.TypesInfo.TypeOf(n.X); t != nil {
+				_, isArr = types.Unalias(t).Underlying().(*types.Array)
+			}
+			markExemptEscapesExpr(n.X, addressed || isArr)
+			markExemptEscapesExpr(n.Low, false)
+			markExemptEscapesExpr(n.High, false)
+			markExemptEscapesExpr(n.Max, false)
+		case *ast.StarExpr:
+			markExemptEscapesExpr(n.X, addressed)
+		case *ast.TypeAssertExpr:
+			markExemptEscapesExpr(n.X, addressed)
+		case *ast.CompositeLit:
+			syntaxutil.EachCompositeLitFlow(p.TypesInfo, n, func(flow ast.Expr, _ bool) bool {
+				markExemptEscapesExpr(flow, false)
+				return true
+			})
+		case *ast.CallExpr:
+			if ident, ok := syntaxutil.UnparenExpr(n.Fun).(*ast.Ident); ok {
+				if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
+					if ident.Name == "len" || ident.Name == "cap" {
+						return
+					}
+				}
+			}
+			for _, arg := range n.Args {
+				markExemptEscapesExpr(arg, false)
+			}
+		case *ast.BinaryExpr:
+			markExemptEscapesExpr(n.X, false)
+			markExemptEscapesExpr(n.Y, false)
+		default:
+			ast.Inspect(e, func(inner ast.Node) bool {
+				if _, isLit := inner.(*ast.FuncLit); isLit {
+					return false
+				}
+				if ident, ok := inner.(*ast.Ident); ok {
+					if obj, ok := resolve(ident); ok {
+						if variable, ok := dynamicPackageVar(obj); ok {
+							if refconfine.TypeHandsOutDynamicAlias(audited, variable.Type()) {
+								syntaxutil.ExplainMark(hooks, p, "escape", syntaxutil.DynamicVarKey(variable), ident.Pos())
+								escaped[syntaxutil.DynamicVarKey(variable)] = true
+							}
+						} else {
+							for key := range aliasedLocals[obj] {
+								syntaxutil.ExplainMark(hooks, p, "escape", key, ident.Pos())
+								escaped[key] = true
+							}
+						}
+					}
+				}
+				return true
+			})
+		}
 	}
-	scanExemptCalls := func(body ast.Node) {
+	markExemptEscapes := func(arg ast.Expr) {
+		markExemptEscapesExpr(arg, false)
+	}
+
+	scanExemptCalls := func(body ast.Node, fnType *ast.FuncType) {
 		if initParamUses == nil || body == nil {
 			return
+		}
+		var resultIdents []*ast.Ident
+		if fnType != nil && fnType.Results != nil {
+			for _, field := range fnType.Results.List {
+				resultIdents = append(resultIdents, field.Names...)
+			}
 		}
 		ast.Inspect(body, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.FuncLit, *ast.GoStmt:
 				return false
+			case *ast.ReturnStmt:
+				if len(n.Results) == 0 && len(resultIdents) > 0 {
+					for _, id := range resultIdents {
+						markExemptEscapes(id)
+					}
+				} else {
+					for _, res := range n.Results {
+						markExemptEscapes(res)
+					}
+				}
 			case *ast.CallExpr:
-				if ident, ok := n.Fun.(*ast.Ident); ok {
+				funExpr := syntaxutil.UnparenExpr(n.Fun)
+				if ident, ok := funExpr.(*ast.Ident); ok {
 					if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
 						switch ident.Name {
 						case "len", "cap", "delete", "clear", "append", "copy":
@@ -537,7 +893,7 @@ func recordDynamicGlobalUses(
 				if fn, _ := syntaxutil.PlainCalleeFunc(p, n.Fun); fn != nil {
 					plain = true
 					deferCarrierArgs(n, initParamUses, 'q', nil)
-				} else if sel, ok := n.Fun.(*ast.SelectorExpr); ok {
+				} else if sel, ok := funExpr.(*ast.SelectorExpr); ok {
 					if selection, selOK := p.TypesInfo.Selections[sel]; selOK && selection.Kind() == types.MethodVal {
 						deferred := false
 						var poolIdent *ast.Ident
@@ -548,7 +904,7 @@ func recordDynamicGlobalUses(
 						}
 						if poolVar != nil {
 							dischargePool(poolVar)
-							if index, isIndex := sel.X.(*ast.IndexExpr); isIndex {
+							if index, isIndex := syntaxutil.UnparenExpr(sel.X).(*ast.IndexExpr); isIndex {
 								markExemptEscapes(index.Index)
 							}
 							if !provenCalls[sel] {
@@ -558,7 +914,7 @@ func recordDynamicGlobalUses(
 										poolEscaped[key] = true
 									}
 									if !singleSubject {
-										if _, isIdent := sel.X.(*ast.Ident); isIdent && !syntaxutil.InterfaceReceiver(fn) && refconfine.InstantiatedResultsHandOutNothing(audited, selection.Type()) {
+										if identOrPkgQual(sel.X) != nil && !syntaxutil.InterfaceReceiver(fn) && refconfine.InstantiatedResultsHandOutNothing(audited, selection.Type()) {
 											factKey := syntaxutil.MethodFactKey(fn)
 											syntaxutil.ExplainDeferralMark(hooks, p, 'n', key, syntaxutil.DeferralResolvent{Method: factKey}, sel.Pos())
 										} else if poolIdent != nil {
@@ -569,7 +925,7 @@ func recordDynamicGlobalUses(
 							}
 							deferred = true
 						} else if fnOK && !syntaxutil.InterfaceReceiver(fn) && refconfine.InstantiatedResultsHandOutNothing(audited, selection.Type()) {
-							if ident, idOK := sel.X.(*ast.Ident); idOK {
+							if ident := identOrPkgQual(sel.X); ident != nil {
 								if obj, rOK := resolve(ident); rOK {
 									if variable, vOK := dynamicPackageVar(obj); vOK {
 										key := syntaxutil.DynamicVarKey(variable)
@@ -601,17 +957,33 @@ func recordDynamicGlobalUses(
 			return true
 		})
 	}
+
 	var skipInteriors map[ast.Node]bool
 	walkBody := func(body ast.Node) {
 		readContext := map[*ast.Ident]bool{}
 		calledSelectors := map[*ast.SelectorExpr]bool{}
 		goCalls := map[*ast.CallExpr]bool{}
-		markRead := func(expr ast.Expr) {
-			switch expr := expr.(type) {
+		var markRead func(expr ast.Expr)
+		markRead = func(expr ast.Expr) {
+			switch expr := syntaxutil.UnparenExpr(expr).(type) {
 			case *ast.Ident:
 				readContext[expr] = true
 			case *ast.SelectorExpr:
 				readContext[expr.Sel] = true
+			}
+		}
+		var markLValueBaseRead func(expr ast.Expr)
+		markLValueBaseRead = func(expr ast.Expr) {
+			switch expr := syntaxutil.UnparenExpr(expr).(type) {
+			case *ast.Ident:
+				readContext[expr] = true
+			case *ast.SelectorExpr:
+				readContext[expr.Sel] = true
+				markLValueBaseRead(expr.X)
+			case *ast.StarExpr:
+				markLValueBaseRead(expr.X)
+			case *ast.IndexExpr:
+				markLValueBaseRead(expr.X)
 			}
 		}
 		ast.Inspect(body, func(n ast.Node) bool {
@@ -622,37 +994,39 @@ func recordDynamicGlobalUses(
 			case *ast.AssignStmt:
 				for _, lhs := range n.Lhs {
 					if exemptSeamNodes[lhs] {
-						markRead(lhs)
-						if sel, ok := syntaxutil.UnparenExpr(lhs).(*ast.SelectorExpr); ok {
-							markRead(sel.X)
-						}
+						markLValueBaseRead(lhs)
 						continue
 					}
 					markTargets(lhs)
-					if index, ok := lhs.(*ast.IndexExpr); ok {
-						markRead(index.X)
-					}
+					markLValueBaseRead(lhs)
 				}
 				if len(n.Lhs) == 2 && len(n.Rhs) == 1 {
-					if blank, ok := n.Lhs[0].(*ast.Ident); ok && blank.Name == "_" {
+					if blank, ok := syntaxutil.UnparenExpr(n.Lhs[0]).(*ast.Ident); ok && blank.Name == "_" {
 						if index, ok := syntaxutil.UnparenExpr(n.Rhs[0]).(*ast.IndexExpr); ok {
-							markRead(syntaxutil.UnparenExpr(index.X))
+							markRead(index.X)
 						}
 					}
 				}
 			case *ast.IncDecStmt:
 				markTargets(n.X)
+				markLValueBaseRead(n.X)
 			case *ast.RangeStmt:
 				if n.Key != nil {
 					markTargets(n.Key)
+					if n.Tok == token.ASSIGN {
+						markLValueBaseRead(n.Key)
+					}
 				}
 				if n.Value != nil {
 					markTargets(n.Value)
+					if n.Tok == token.ASSIGN {
+						markLValueBaseRead(n.Value)
+					}
 				}
 				if t := p.TypesInfo.TypeOf(n.X); t != nil {
 					if _, isChan := types.Unalias(t).Underlying().(*types.Chan); isChan {
 						markTargets(n.X)
-					} else if !refconfine.RangeBindsAlias(t) {
+					} else if !refconfine.RangeBindsAlias(t) && !refconfine.TypeReachesSyncNoCopyByValue(t) {
 						markRead(n.X)
 					} else if n.Key == nil && n.Value == nil {
 						markRead(n.X)
@@ -668,8 +1042,14 @@ func recordDynamicGlobalUses(
 								sound = false
 								break
 							}
-							if obj := p.TypesInfo.Defs[ident]; obj != nil && refconfine.TypeHandsOutMutableReach(obj.Type()) {
-								roots[obj] = true
+							if obj := p.TypesInfo.Defs[ident]; obj != nil {
+								if refconfine.TypeReachesSyncNoCopyByValue(obj.Type()) {
+									sound = false
+									break
+								}
+								if refconfine.TypeHandsOutMutableReach(obj.Type()) {
+									roots[obj] = true
+								}
 							}
 						}
 						var wants map[syntaxutil.ParamKey]bool
@@ -719,14 +1099,14 @@ func recordDynamicGlobalUses(
 										}
 										for want := range wants {
 											paramUses[key][want] = true
-											syntaxutil.ExplainDeferralMark(hooks, p, 'p', key, syntaxutil.DeferralResolvent{Param: want}, n.X.Pos())
+											syntaxutil.ExplainDeferralMark(hooks, p, 'p', key, syntaxutil.DeferralResolvent{Param: want, EnclosingFn: currentDeferFn, Literal: currentDeferLit}, n.X.Pos())
 										}
 										if len(methodWants) > 0 && methodUses[key] == nil {
 											methodUses[key] = map[syntaxutil.FuncKey]bool{}
 										}
 										for want := range methodWants {
 											methodUses[key][want] = true
-											syntaxutil.ExplainDeferralMark(hooks, p, 'm', key, syntaxutil.DeferralResolvent{Method: want}, n.X.Pos())
+											syntaxutil.ExplainDeferralMark(hooks, p, 'm', key, syntaxutil.DeferralResolvent{Method: want, EnclosingFn: currentDeferFn, Literal: currentDeferLit}, n.X.Pos())
 										}
 										if len(fieldWants) > 0 && fieldUses[key] == nil {
 											fieldUses[key] = map[syntaxutil.FieldPosKey]bool{}
@@ -750,6 +1130,7 @@ func recordDynamicGlobalUses(
 											fn:     currentFn.Name.Name,
 											keys:   keys,
 											attrFn: currentAttrFn,
+											pos:    n.X.Pos(),
 										})
 									}
 									markRead(n.X)
@@ -766,14 +1147,26 @@ func recordDynamicGlobalUses(
 						markTargets(n.X)
 					}
 				}
+			case *ast.SliceExpr:
+				if t := p.TypesInfo.TypeOf(n.X); t != nil {
+					if _, isArr := types.Unalias(t).Underlying().(*types.Array); isArr {
+						markTargets(n.X)
+					}
+				}
 			case *ast.IndexExpr:
-				if t := p.TypesInfo.TypeOf(n); t == nil || !refconfine.TypeHandsOutMutableReach(t) {
+				if t := p.TypesInfo.TypeOf(n); t != nil &&
+					!refconfine.TypeHandsOutMutableReach(t) &&
+					!refconfine.TypeReachesSyncNoCopyByValue(t) {
 					markRead(n.X)
 				}
 			case *ast.BinaryExpr:
 				if n.Op == token.EQL || n.Op == token.NEQ {
-					markRead(n.X)
-					markRead(n.Y)
+					if tx := p.TypesInfo.TypeOf(n.X); tx != nil && !refconfine.TypeReachesSyncNoCopyByValue(tx) {
+						markRead(n.X)
+					}
+					if ty := p.TypesInfo.TypeOf(n.Y); ty != nil && !refconfine.TypeReachesSyncNoCopyByValue(ty) {
+						markRead(n.Y)
+					}
 				}
 			case *ast.GoStmt:
 				ast.Inspect(n, func(inner ast.Node) bool {
@@ -783,10 +1176,11 @@ func recordDynamicGlobalUses(
 					return true
 				})
 			case *ast.CallExpr:
-				if sel, ok := n.Fun.(*ast.SelectorExpr); ok {
+				funExpr := syntaxutil.UnparenExpr(n.Fun)
+				if sel, ok := funExpr.(*ast.SelectorExpr); ok {
 					calledSelectors[sel] = true
 				}
-				if ident, ok := n.Fun.(*ast.Ident); ok {
+				if ident, ok := funExpr.(*ast.Ident); ok {
 					if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
 						switch ident.Name {
 						case "len", "cap":
@@ -796,6 +1190,7 @@ func recordDynamicGlobalUses(
 						case "delete", "clear":
 							if len(n.Args) > 0 {
 								markTargets(n.Args[0])
+								markLValueBaseRead(n.Args[0])
 							}
 						}
 					}
@@ -806,15 +1201,15 @@ func recordDynamicGlobalUses(
 					})
 				}
 				if elemUses != nil && !goCalls[n] {
-					if index, ok := syntaxutil.UnparenExpr(n.Fun).(*ast.IndexExpr); ok {
-						if base, ok := syntaxutil.UnparenExpr(index.X).(*ast.Ident); ok {
+					if index, ok := funExpr.(*ast.IndexExpr); ok {
+						if base := identOrPkgQual(index.X); base != nil {
 							if obj, ok := resolve(base); ok {
 								if owner, ok := dynamicPackageVar(obj); ok {
 									if sig, ok := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(n.Fun)).(*types.Signature); ok {
 										ownerKey := syntaxutil.DynamicVarKey(owner)
 										for i, arg := range n.Args {
-											ident, ok := syntaxutil.UnparenExpr(arg).(*ast.Ident)
-											if !ok {
+											ident := identOrPkgQual(arg)
+											if ident == nil {
 												continue
 											}
 											aobj, ok := resolve(ident)
@@ -853,20 +1248,25 @@ func recordDynamicGlobalUses(
 								if !provenCalls[n] {
 									if _, vOK := dynamicPackageVar(variable); vOK {
 										key := syntaxutil.DynamicVarKey(variable)
-										_, isIdent := n.X.(*ast.Ident)
-										if methodUses != nil && isIdent && !syntaxutil.InterfaceReceiver(fn) && refconfine.InstantiatedResultsHandOutNothing(audited, selection.Type()) {
-											if poolMutated != nil {
+										isDirectIdent := identOrPkgQual(n.X) != nil
+										if methodUses != nil && isDirectIdent && !syntaxutil.InterfaceReceiver(fn) && refconfine.InstantiatedResultsHandOutNothing(audited, selection.Type()) {
+											factKey := syntaxutil.MethodFactKey(fn)
+											if poolMethods != nil {
+												if poolMethods[key] == nil {
+													poolMethods[key] = map[syntaxutil.FuncKey]bool{}
+												}
+												poolMethods[key][factKey] = true
+											} else if poolMutated != nil {
 												poolMutated[key] = true
 											}
 											if !singleSubject {
-												factKey := syntaxutil.MethodFactKey(fn)
-												syntaxutil.ExplainDeferralMark(hooks, p, 'm', key, syntaxutil.DeferralResolvent{Method: factKey}, n.Pos())
+												syntaxutil.ExplainDeferralMark(hooks, p, 'm', key, syntaxutil.DeferralResolvent{Method: factKey, EnclosingFn: currentDeferFn, Literal: currentDeferLit}, n.Pos())
 											}
 										} else {
 											if sig, sigOK := fn.Type().(*types.Signature); sigOK && sig.Recv() != nil {
 												if _, pointer := types.Unalias(sig.Recv().Type()).(*types.Pointer); pointer {
 													if !singleSubject {
-														syntaxutil.ExplainMark(hooks, p, "mutation", key, ident.Pos())
+														syntaxutil.ExplainAttributedMark(hooks, p, "mutation", key, currentDeferFn, currentDeferLit, ident.Pos())
 													}
 													if poolMutated != nil {
 														poolMutated[key] = true
@@ -889,7 +1289,7 @@ func recordDynamicGlobalUses(
 							}
 						}
 						if calledSelectors[n] && refconfine.DataMemoMethod(audited, fn) {
-							if ident, ok := n.X.(*ast.Ident); ok {
+							if ident := identOrPkgQual(n.X); ident != nil {
 								if obj, ok := resolve(ident); ok {
 									if variable, ok := obj.(*types.Var); ok && dataMemos[variable] {
 										readContext[ident] = true
@@ -899,13 +1299,13 @@ func recordDynamicGlobalUses(
 							}
 						}
 						if calledSelectors[n] && exemptSeamNodes[n] {
-							if ident, ok := syntaxutil.UnparenExpr(n.X).(*ast.Ident); ok {
+							if ident := identOrPkgQual(n.X); ident != nil {
 								readContext[ident] = true
 							}
 							return true
 						}
 						if methodUses != nil && calledSelectors[n] && !syntaxutil.InterfaceReceiver(fn) && refconfine.InstantiatedResultsHandOutNothing(audited, selection.Type()) {
-							if ident, ok := n.X.(*ast.Ident); ok {
+							if ident := identOrPkgQual(n.X); ident != nil {
 								if obj, ok := resolve(ident); ok {
 									if variable, ok := dynamicPackageVar(obj); ok {
 										key := syntaxutil.DynamicVarKey(variable)
@@ -914,7 +1314,7 @@ func recordDynamicGlobalUses(
 										}
 										factKey := syntaxutil.MethodFactKey(fn)
 										methodUses[key][factKey] = true
-										syntaxutil.ExplainDeferralMark(hooks, p, 'm', key, syntaxutil.DeferralResolvent{Method: factKey}, n.Pos())
+										syntaxutil.ExplainDeferralMark(hooks, p, 'm', key, syntaxutil.DeferralResolvent{Method: factKey, EnclosingFn: currentDeferFn, Literal: currentDeferLit}, n.Pos())
 										readContext[ident] = true
 										return true
 									}
@@ -947,6 +1347,7 @@ func recordDynamicGlobalUses(
 			return true
 		})
 	}
+
 	if len(initOnlyParams) != 0 {
 		seedingPass = true
 		for {
@@ -969,15 +1370,24 @@ func recordDynamicGlobalUses(
 		}
 		seedingPass = false
 	}
+
 	walkAttributedDecl := func(decl *ast.FuncDecl, fnKey syntaxutil.FuncKey, setCurrentFn bool) {
 		litMutated, litEscaped := map[string]bool{}, map[string]bool{}
 		litPoolMutated, litPoolEscaped := map[string]bool{}, map[string]bool{}
+		litPoolMethods := map[string]map[syntaxutil.FuncKey]bool{}
 		litMethods := map[string]map[syntaxutil.FuncKey]bool{}
+		var litParams map[string]map[syntaxutil.ParamKey]bool
+		if paramUses != nil {
+			litParams = map[string]map[syntaxutil.ParamKey]bool{}
+		}
 		interiors := map[ast.Node]bool{}
-		saveLM, saveLE, saveLMU := mutated, escaped, methodUses
-		saveLPM, saveLPE := poolMutated, poolEscaped
-		mutated, escaped, methodUses = litMutated, litEscaped, litMethods
-		poolMutated, poolEscaped = litPoolMutated, litPoolEscaped
+		saveLM, saveLE, saveLMU, saveLPU := mutated, escaped, methodUses, paramUses
+		saveLPM, saveLPE, saveLPMU := poolMutated, poolEscaped, poolMethods
+		mutated, escaped, methodUses, paramUses = litMutated, litEscaped, litMethods, litParams
+		poolMutated, poolEscaped, poolMethods = litPoolMutated, litPoolEscaped, litPoolMethods
+		if fnKey.Valid() {
+			currentDeferFn, currentDeferLit = fnKey, true
+		}
 		ast.Inspect(decl.Body, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.FuncLit:
@@ -993,8 +1403,9 @@ func recordDynamicGlobalUses(
 			}
 			return true
 		})
-		mutated, escaped, methodUses = saveLM, saveLE, saveLMU
-		poolMutated, poolEscaped = saveLPM, saveLPE
+		currentDeferFn, currentDeferLit = syntaxutil.FuncKey{}, false
+		mutated, escaped, methodUses, paramUses = saveLM, saveLE, saveLMU, saveLPU
+		poolMutated, poolEscaped, poolMethods = saveLPM, saveLPE, saveLPMU
 		if fnKey.Valid() {
 			for key := range litMutated {
 				*attributed = append(*attributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, Literal: true})
@@ -1007,12 +1418,24 @@ func recordDynamicGlobalUses(
 					*attributed = append(*attributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, HasMethod: true, Method: method, Literal: true})
 				}
 			}
+			if attributedParams != nil {
+				for key, params := range litParams {
+					for param := range params {
+						*attributedParams = append(*attributedParams, syntaxutil.VarParamUse{Key: key, Param: param, Func: fnKey, Literal: true})
+					}
+				}
+			}
 			if poolAttributed != nil {
 				for key := range litPoolMutated {
 					*poolAttributed = append(*poolAttributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, Literal: true})
 				}
 				for key := range litPoolEscaped {
 					*poolAttributed = append(*poolAttributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, Escape: true, Literal: true})
+				}
+				for key, methods := range litPoolMethods {
+					for method := range methods {
+						*poolAttributed = append(*poolAttributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, HasMethod: true, Method: method, Literal: true})
+					}
 				}
 			}
 		} else {
@@ -1022,16 +1445,31 @@ func recordDynamicGlobalUses(
 			for key := range litEscaped {
 				escaped[key] = true
 			}
-			for key, methods := range litMethods {
-				for method := range methods {
-					if methodUses[key] == nil {
-						methodUses[key] = map[syntaxutil.FuncKey]bool{}
+			if methodUses != nil {
+				for key, methods := range litMethods {
+					for method := range methods {
+						if methodUses[key] == nil {
+							methodUses[key] = map[syntaxutil.FuncKey]bool{}
+						}
+						methodUses[key][method] = true
 					}
-					methodUses[key][method] = true
+				}
+			}
+			if paramUses != nil {
+				for key, params := range litParams {
+					for param := range params {
+						if paramUses[key] == nil {
+							paramUses[key] = map[syntaxutil.ParamKey]bool{}
+						}
+						paramUses[key][param] = true
+					}
 				}
 			}
 			if poolMutated != nil {
 				for key := range litPoolMutated {
+					poolMutated[key] = true
+				}
+				for key := range litPoolMethods {
 					poolMutated[key] = true
 				}
 			}
@@ -1043,42 +1481,106 @@ func recordDynamicGlobalUses(
 		}
 		localMutated, localEscaped := map[string]bool{}, map[string]bool{}
 		localPoolMutated, localPoolEscaped := map[string]bool{}, map[string]bool{}
+		localPoolMethods := map[string]map[syntaxutil.FuncKey]bool{}
 		localMethods := map[string]map[syntaxutil.FuncKey]bool{}
-		saveM, saveE, saveMU := mutated, escaped, methodUses
-		savePM, savePE := poolMutated, poolEscaped
-		mutated, escaped, methodUses = localMutated, localEscaped, localMethods
-		poolMutated, poolEscaped = localPoolMutated, localPoolEscaped
+		var localParams map[string]map[syntaxutil.ParamKey]bool
+		if paramUses != nil {
+			localParams = map[string]map[syntaxutil.ParamKey]bool{}
+		}
+		saveM, saveE, saveMU, savePU := mutated, escaped, methodUses, paramUses
+		savePM, savePE, savePMU := poolMutated, poolEscaped, poolMethods
+		mutated, escaped, methodUses, paramUses = localMutated, localEscaped, localMethods, localParams
+		poolMutated, poolEscaped, poolMethods = localPoolMutated, localPoolEscaped, localPoolMethods
 		skipInteriors = interiors
 		if setCurrentFn {
 			currentFn, currentAttrFn = decl, fnKey
 		}
+		if fnKey.Valid() {
+			currentDeferFn, currentDeferLit = fnKey, false
+		}
 		walkBody(decl.Body)
+		currentDeferFn, currentDeferLit = syntaxutil.FuncKey{}, false
 		if setCurrentFn {
 			currentFn, currentAttrFn = nil, syntaxutil.FuncKey{}
 		}
 		skipInteriors = nil
-		mutated, escaped, methodUses = saveM, saveE, saveMU
-		poolMutated, poolEscaped = savePM, savePE
-		for key := range localMutated {
-			*attributed = append(*attributed, syntaxutil.AttributedUse{Func: fnKey, Key: key})
-		}
-		for key := range localEscaped {
-			*attributed = append(*attributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, Escape: true})
-		}
-		for key, methods := range localMethods {
-			for method := range methods {
-				*attributed = append(*attributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, HasMethod: true, Method: method})
+		mutated, escaped, methodUses, paramUses = saveM, saveE, saveMU, savePU
+		poolMutated, poolEscaped, poolMethods = savePM, savePE, savePMU
+		if fnKey.Valid() {
+			for key := range localMutated {
+				*attributed = append(*attributed, syntaxutil.AttributedUse{Func: fnKey, Key: key})
 			}
-		}
-		if poolAttributed != nil {
-			for key := range localPoolMutated {
-				*poolAttributed = append(*poolAttributed, syntaxutil.AttributedUse{Func: fnKey, Key: key})
+			for key := range localEscaped {
+				*attributed = append(*attributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, Escape: true})
 			}
-			for key := range localPoolEscaped {
-				*poolAttributed = append(*poolAttributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, Escape: true})
+			for key, methods := range localMethods {
+				for method := range methods {
+					*attributed = append(*attributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, HasMethod: true, Method: method})
+				}
+			}
+			if attributedParams != nil {
+				for key, params := range localParams {
+					for param := range params {
+						*attributedParams = append(*attributedParams, syntaxutil.VarParamUse{Key: key, Param: param, Func: fnKey})
+					}
+				}
+			}
+			if poolAttributed != nil {
+				for key := range localPoolMutated {
+					*poolAttributed = append(*poolAttributed, syntaxutil.AttributedUse{Func: fnKey, Key: key})
+				}
+				for key := range localPoolEscaped {
+					*poolAttributed = append(*poolAttributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, Escape: true})
+				}
+				for key, methods := range localPoolMethods {
+					for method := range methods {
+						*poolAttributed = append(*poolAttributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, HasMethod: true, Method: method})
+					}
+				}
+			}
+		} else {
+			for key := range localMutated {
+				mutated[key] = true
+			}
+			for key := range localEscaped {
+				escaped[key] = true
+			}
+			if methodUses != nil {
+				for key, methods := range localMethods {
+					for method := range methods {
+						if methodUses[key] == nil {
+							methodUses[key] = map[syntaxutil.FuncKey]bool{}
+						}
+						methodUses[key][method] = true
+					}
+				}
+			}
+			if paramUses != nil {
+				for key, params := range localParams {
+					for param := range params {
+						if paramUses[key] == nil {
+							paramUses[key] = map[syntaxutil.ParamKey]bool{}
+						}
+						paramUses[key][param] = true
+					}
+				}
+			}
+			if poolMutated != nil {
+				for key := range localPoolMutated {
+					poolMutated[key] = true
+				}
+				for key := range localPoolMethods {
+					poolMutated[key] = true
+				}
+			}
+			if poolEscaped != nil {
+				for key := range localPoolEscaped {
+					poolEscaped[key] = true
+				}
 			}
 		}
 	}
+
 	for _, file := range p.Syntax {
 		for _, decl := range file.Decls {
 			switch decl := decl.(type) {
@@ -1095,11 +1597,8 @@ func recordDynamicGlobalUses(
 					walkAttributedDecl(decl, methodKey, false)
 					continue
 				}
-				if decl.Recv == nil && decl.Name != nil && attributed != nil && !initOnly[decl.Name.Name] && decl.Name.Name != "init" && decl.Body != nil {
-					var fnKey syntaxutil.FuncKey
-					if p.Types != nil {
-						fnKey = syntaxutil.FuncKey{Pkg: p.Types.Path(), Name: decl.Name.Name}
-					}
+				if decl.Recv == nil && decl.Name != nil && attributed != nil && !initOnly[decl.Name.Name] && decl.Name.Name != "init" && decl.Name.Name != "_" && decl.Body != nil && p.Types != nil {
+					fnKey := syntaxutil.FuncKey{Pkg: p.Types.Path(), Name: decl.Name.Name}
 					walkAttributedDecl(decl, fnKey, true)
 					continue
 				}
@@ -1119,7 +1618,7 @@ func recordDynamicGlobalUses(
 							}
 							return true
 						})
-						scanExemptCalls(decl.Body)
+						scanExemptCalls(decl.Body, decl.Type)
 						aliasedLocals = nil
 					}
 					continue
@@ -1138,11 +1637,12 @@ func recordDynamicGlobalUses(
 					}
 					return true
 				})
-				scanExemptCalls(decl)
+				scanExemptCalls(decl, nil)
 				aliasedLocals = nil
 			}
 		}
 	}
+
 	if len(pendingReturns) > 0 {
 		returnerKeys := map[string]map[string]bool{}
 		mergeKeys := func(fn string, keys map[string]bool) bool {
@@ -1225,18 +1725,37 @@ func recordDynamicGlobalUses(
 					if !tracked || !frontierSet[fnName] {
 						return true
 					}
-					if len(stack) == 0 {
+					// Unwind parenthesized/instantiated callee spine up to enclosing CallExpr.
+					callIdxInStack := len(stack) - 1
+					for callIdxInStack >= 0 {
+						switch stack[callIdxInStack].(type) {
+						case *ast.ParenExpr, *ast.IndexExpr, *ast.IndexListExpr:
+							callIdxInStack--
+						default:
+							goto foundCallParent
+						}
+					}
+				foundCallParent:
+					if callIdxInStack < 0 {
 						bad[fnName] = true
 						return true
 					}
-					call, ok := stack[len(stack)-1].(*ast.CallExpr)
-					if !ok || call.Fun != ast.Expr(ident) {
+					call, ok := stack[callIdxInStack].(*ast.CallExpr)
+					if !ok || syntaxutil.UnwrapCallee(call.Fun) != ast.Expr(ident) {
 						bad[fnName] = true
 						return true
+					}
+					grandIdx := callIdxInStack - 1
+					for grandIdx >= 0 {
+						if _, isParen := stack[grandIdx].(*ast.ParenExpr); isParen {
+							grandIdx--
+						} else {
+							break
+						}
 					}
 					var grand ast.Node
-					if len(stack) >= 2 {
-						grand = stack[len(stack)-2]
+					if grandIdx >= 0 {
+						grand = stack[grandIdx]
 					}
 					fnObj, isFunc := obj.(*types.Func)
 					if !isFunc {
@@ -1270,13 +1789,13 @@ func recordDynamicGlobalUses(
 						}
 						return true
 					case *ast.AssignStmt:
-						if len(g.Rhs) != 1 || g.Rhs[0] != ast.Expr(call) {
+						if len(g.Rhs) != 1 || syntaxutil.UnparenExpr(g.Rhs[0]) != ast.Expr(call) {
 							bad[fnName] = true
 							return true
 						}
 						targets = g.Lhs
 					case *ast.ValueSpec:
-						if len(g.Values) != 1 || g.Values[0] != ast.Expr(call) {
+						if len(g.Values) != 1 || syntaxutil.UnparenExpr(g.Values[0]) != ast.Expr(call) {
 							bad[fnName] = true
 							return true
 						}
@@ -1294,7 +1813,7 @@ func recordDynamicGlobalUses(
 					}
 					roots := map[types.Object]bool{}
 					for i, target := range targets {
-						tIdent, ok := target.(*ast.Ident)
+						tIdent, ok := syntaxutil.UnparenExpr(target).(*ast.Ident)
 						if !ok {
 							bad[fnName] = true
 							return true
@@ -1407,7 +1926,7 @@ func recordDynamicGlobalUses(
 						if decl.Name != nil {
 							name = decl.Name.Name
 						}
-						eligible := decl.Recv == nil && decl.Name != nil && !decl.Name.IsExported() && name != "init"
+						eligible := decl.Recv == nil && decl.Name != nil && !decl.Name.IsExported() && name != "init" && name != "_"
 						scanSites(decl.Body, name, eligible)
 					case *ast.GenDecl:
 						if !hasTopLevelValueUse {
@@ -1430,7 +1949,7 @@ func recordDynamicGlobalUses(
 										if obj := p.TypesInfo.Uses[ident]; obj != nil {
 											if fnName, tracked := returnerObjs[obj]; tracked && frontierSet[fnName] {
 												contained := false
-												if call, isCall := value.(*ast.CallExpr); isCall && call.Fun == ast.Expr(ident) {
+												if call, isCall := syntaxutil.UnparenExpr(value).(*ast.CallExpr); isCall && syntaxutil.UnwrapCallee(call.Fun) == ast.Expr(ident) {
 													if fnObj, isFunc := obj.(*types.Func); isFunc {
 														if sig, isSig := fnObj.Type().(*types.Signature); isSig && sig.Results().Len() == len(vs.Names) {
 															contained = true
@@ -1472,623 +1991,14 @@ func recordDynamicGlobalUses(
 					rk := restoredKey{fn: pending.attrFn, key: key}
 					if !restored[rk] {
 						restored[rk] = true
+						syntaxutil.ExplainAttributedMark(hooks, p, "escape", key, pending.attrFn, false, pending.pos)
 						*attributed = append(*attributed, syntaxutil.AttributedUse{Func: pending.attrFn, Key: key, Escape: true})
 					}
 				} else {
-					syntaxutil.ExplainMark(hooks, p, "escape", key, token.NoPos)
+					syntaxutil.ExplainMark(hooks, p, "escape", key, pending.pos)
 					escaped[key] = true
 				}
 			}
 		}
-	}
-}
-
-func walkSyncVarCalls(p *packages.Package, candidates map[*types.Var]bool, evictNonCallUses bool, judgeCall func(v *types.Var, sel *ast.SelectorExpr, call *ast.CallExpr) (admittedMethod, siteConforms bool)) map[*ast.SelectorExpr]bool {
-	if len(candidates) == 0 {
-		return nil
-	}
-	info := p.TypesInfo
-	receiver := map[*ast.Ident]bool{}
-	conformingBySelector := map[*ast.SelectorExpr]*types.Var{}
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			ident, ok := sel.X.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			v, ok := info.Uses[ident].(*types.Var)
-			if !ok || !candidates[v] {
-				return true
-			}
-			admittedMethod, siteConforms := judgeCall(v, sel, call)
-			if !admittedMethod {
-				delete(candidates, v)
-				return true
-			}
-			receiver[ident] = true
-			if siteConforms {
-				conformingBySelector[sel] = v
-			} else if !evictNonCallUses {
-				delete(candidates, v)
-			}
-			return true
-		})
-	}
-	if evictNonCallUses {
-		for _, file := range p.Syntax {
-			ast.Inspect(file, func(n ast.Node) bool {
-				ident, ok := n.(*ast.Ident)
-				if !ok {
-					return true
-				}
-				v, ok := info.Uses[ident].(*types.Var)
-				if ok && candidates[v] && !receiver[ident] {
-					delete(candidates, v)
-				}
-				return true
-			})
-		}
-	}
-	calls := map[*ast.SelectorExpr]bool{}
-	for sel, v := range conformingBySelector {
-		if candidates[v] {
-			calls[sel] = true
-		}
-	}
-	return calls
-}
-
-func dataMemoVars(audited bool, p *packages.Package, callIdx *refconfine.CallSiteIndex) map[*types.Var]bool {
-	if p == nil || p.TypesInfo == nil || p.Types == nil {
-		return nil
-	}
-	isSyncMap := func(t types.Type) bool {
-		named, ok := types.Unalias(t).(*types.Named)
-		return ok && named.Obj() != nil && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "sync" && named.Obj().Name() == "Map"
-	}
-	candidates := map[*types.Var]bool{}
-	scope := p.Types.Scope()
-	for _, name := range scope.Names() {
-		v, ok := scope.Lookup(name).(*types.Var)
-		if !ok || v.Exported() || !isSyncMap(v.Type()) {
-			continue
-		}
-		candidates[v] = true
-	}
-	if len(candidates) == 0 {
-		return nil
-	}
-	carrierFree := func(expr ast.Expr) bool {
-		if callIdx == nil {
-			callIdx = refconfine.BuildCallSiteIndex(p)
-		}
-		return callIdx.JudgeExpr(expr, func(t types.Type) (bool, bool) {
-			if !refconfine.TypeMayCarryUnknownDynamic(audited, t) {
-				return true, true
-			}
-			return false, false
-		})
-	}
-	walkSyncVarCalls(p, candidates, false, func(_ *types.Var, sel *ast.SelectorExpr, call *ast.CallExpr) (bool, bool) {
-		if !auditset.MemoMethod("Map", sel.Sel.Name) {
-			return false, false
-		}
-		for _, arg := range call.Args {
-			if !carrierFree(arg) {
-				return true, false
-			}
-		}
-		return true, true
-	})
-	return candidates
-}
-
-func provenSharedPools(audited bool, p *packages.Package) (proven map[*types.Var]types.Type, calls map[*ast.SelectorExpr]bool) {
-	proven = map[*types.Var]types.Type{}
-	calls = map[*ast.SelectorExpr]bool{}
-	if p.TypesInfo == nil {
-		return proven, calls
-	}
-	for _, file := range p.Syntax {
-		for _, decl := range file.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.VAR {
-				continue
-			}
-			for _, spec := range gen.Specs {
-				vs, ok := spec.(*ast.ValueSpec)
-				if !ok || len(vs.Names) != 1 || len(vs.Values) != 1 {
-					continue
-				}
-				name := vs.Names[0]
-				if name.IsExported() {
-					continue
-				}
-				variable, ok := p.TypesInfo.Defs[name].(*types.Var)
-				if !ok || variable.Pkg() == nil {
-					continue
-				}
-				named, ok := types.Unalias(variable.Type()).(*types.Named)
-				if !ok || named.Obj() == nil || named.Obj().Pkg() == nil ||
-					named.Obj().Pkg().Path() != "sync" || named.Obj().Name() != "Pool" {
-					continue
-				}
-				lit, ok := syntaxutil.UnparenExpr(vs.Values[0]).(*ast.CompositeLit)
-				if !ok || len(lit.Elts) != 1 {
-					continue
-				}
-				kv, ok := lit.Elts[0].(*ast.KeyValueExpr)
-				if !ok {
-					continue
-				}
-				key, ok := kv.Key.(*ast.Ident)
-				if !ok || key.Name != "New" {
-					continue
-				}
-				fnLit, ok := syntaxutil.UnparenExpr(kv.Value).(*ast.FuncLit)
-				if !ok {
-					continue
-				}
-				content := provenPoolContentType(audited, p, fnLit)
-				if content == nil {
-					continue
-				}
-				proven[variable] = content
-			}
-		}
-	}
-	if len(proven) == 0 {
-		return proven, calls
-	}
-	candidates := make(map[*types.Var]bool, len(proven))
-	for v := range proven {
-		candidates[v] = true
-	}
-	calls = walkSyncVarCalls(p, candidates, true, func(v *types.Var, sel *ast.SelectorExpr, call *ast.CallExpr) (bool, bool) {
-		selection, ok := p.TypesInfo.Selections[sel]
-		if !ok || selection.Kind() != types.MethodVal {
-			return false, false
-		}
-		fn, ok := selection.Obj().(*types.Func)
-		if !ok || !refconfine.AuditedPooling(audited, fn) {
-			return false, false
-		}
-		return true, provenPoolCallConforms(p, fn, call, proven[v])
-	})
-	for v := range proven {
-		if !candidates[v] {
-			delete(proven, v)
-		}
-	}
-	return proven, calls
-}
-
-func provenPoolContentType(audited bool, p *packages.Package, lit *ast.FuncLit) types.Type {
-	if lit.Type == nil || lit.Type.Results == nil {
-		return nil
-	}
-	for _, field := range lit.Type.Results.List {
-		if len(field.Names) > 0 {
-			return nil
-		}
-	}
-	var content types.Type
-	conforming := true
-	ast.Inspect(lit.Body, func(n ast.Node) bool {
-		if !conforming {
-			return false
-		}
-		if _, nested := n.(*ast.FuncLit); nested {
-			return false
-		}
-		if _, deferred := n.(*ast.DeferStmt); deferred {
-			conforming = false
-			return false
-		}
-		ret, ok := n.(*ast.ReturnStmt)
-		if !ok {
-			return true
-		}
-		if len(ret.Results) != 1 {
-			conforming = false
-			return false
-		}
-		tv, ok := p.TypesInfo.Types[ret.Results[0]]
-		if !ok || tv.Type == nil {
-			conforming = false
-			return false
-		}
-		t := tv.Type
-		if basic, isBasic := types.Unalias(t).(*types.Basic); isBasic && basic.Info()&types.IsUntyped != 0 {
-			conforming = false
-			return false
-		}
-		if content == nil {
-			content = t
-		} else if !types.Identical(content, t) {
-			conforming = false
-			return false
-		}
-		return true
-	})
-	if !conforming || content == nil {
-		return nil
-	}
-	if refconfine.TypeMayCarryUnknownDynamic(audited, content) {
-		return nil
-	}
-	return content
-}
-
-func provenPoolCallConforms(p *packages.Package, fn *types.Func, call *ast.CallExpr, content types.Type) bool {
-	switch fn.Name() {
-	case "Get":
-		return len(call.Args) == 0
-	case "Put":
-		if len(call.Args) != 1 {
-			return false
-		}
-		tv, ok := p.TypesInfo.Types[call.Args[0]]
-		if !ok || tv.Type == nil {
-			return false
-		}
-		return types.Identical(tv.Type, content)
-	default:
-		return false
-	}
-}
-
-func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]bool, refs map[syntaxutil.FuncKey]map[syntaxutil.RefRegion]bool) {
-	if p == nil || p.TypesInfo == nil || p.Types == nil {
-		return
-	}
-	funcKeyOf := func(obj types.Object) (syntaxutil.FuncKey, bool) {
-		fn, ok := obj.(*types.Func)
-		if !ok || fn.Pkg() == nil {
-			return syntaxutil.FuncKey{}, false
-		}
-		fn = fn.Origin()
-		sig, ok := fn.Type().(*types.Signature)
-		if !ok || sig.Recv() != nil {
-			return syntaxutil.FuncKey{}, false
-		}
-		return syntaxutil.FuncKey{Pkg: fn.Pkg().Path(), Name: fn.Name()}, true
-	}
-	add := func(callee syntaxutil.FuncKey, region syntaxutil.RefRegion) {
-		if refs[callee] == nil {
-			refs[callee] = map[syntaxutil.RefRegion]bool{}
-		}
-		refs[callee][region] = true
-	}
-	literalRegion := func(region syntaxutil.RefRegion) syntaxutil.RefRegion {
-		switch region.Kind {
-		case syntaxutil.RegionLitFunc:
-			return region
-		case syntaxutil.RegionFunc:
-			return syntaxutil.RefRegion{Kind: syntaxutil.RegionLitFunc, Caller: region.Caller}
-		default:
-			return syntaxutil.RefRegion{Kind: syntaxutil.RegionProg}
-		}
-	}
-	var scan func(region syntaxutil.RefRegion, root ast.Node)
-	scan = func(region syntaxutil.RefRegion, root ast.Node) {
-		calls := map[*ast.Ident]bool{}
-		ast.Inspect(root, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.FuncLit:
-				if n != root && n.Body != nil {
-					scan(literalRegion(region), n.Body)
-					return false
-				}
-			case *ast.GoStmt:
-				scan(literalRegion(region), n.Call)
-				return false
-			case *ast.CallExpr:
-				fun := syntaxutil.UnwrapCallee(n.Fun)
-				if ident, ok := fun.(*ast.Ident); ok {
-					if key, ok := funcKeyOf(p.TypesInfo.Uses[ident]); ok {
-						calls[ident] = true
-						add(key, region)
-					}
-				}
-				if sel, ok := fun.(*ast.SelectorExpr); ok {
-					if key, ok := funcKeyOf(p.TypesInfo.Uses[sel.Sel]); ok {
-						calls[sel.Sel] = true
-						add(key, region)
-					}
-				}
-			case *ast.Ident:
-				if calls[n] {
-					return true
-				}
-				if key, ok := funcKeyOf(p.TypesInfo.Uses[n]); ok {
-					add(key, literalRegion(region))
-				}
-			}
-			return true
-		})
-	}
-	initReg := syntaxutil.RefRegion{Kind: syntaxutil.RegionInit}
-	progReg := syntaxutil.RefRegion{Kind: syntaxutil.RegionProg}
-	for _, file := range p.Syntax {
-		for _, decl := range file.Decls {
-			switch decl := decl.(type) {
-			case *ast.FuncDecl:
-				switch {
-				case decl.Recv != nil:
-					if decl.Body != nil {
-						scan(progReg, decl.Body)
-					}
-				case decl.Name != nil && (decl.Name.Name == "init" || initOnly[decl.Name.Name]):
-					if decl.Body != nil {
-						scan(initReg, decl.Body)
-					}
-				case decl.Name != nil:
-					if decl.Body != nil && p.Types != nil {
-						scan(syntaxutil.RefRegion{Kind: syntaxutil.RegionFunc, Caller: syntaxutil.FuncKey{Pkg: p.Types.Path(), Name: decl.Name.Name}}, decl.Body)
-					}
-				}
-			default:
-				scan(initReg, decl)
-			}
-		}
-	}
-}
-
-func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool, deps map[string]map[string]bool) {
-	if p == nil || p.TypesInfo == nil || p.Types == nil {
-		return
-	}
-	interfacePackageVar := func(obj types.Object) (*types.Var, bool) {
-		variable, ok := obj.(*types.Var)
-		if !ok || variable.Pkg() == nil || variable.Parent() != variable.Pkg().Scope() {
-			return nil, false
-		}
-		_, isInterface := types.Unalias(variable.Type()).Underlying().(*types.Interface)
-		return variable, isInterface
-	}
-	var auditedImmutable func(expr ast.Expr, storeDeps map[string]bool) bool
-	auditedArgument := func(expr ast.Expr, storeDeps map[string]bool) bool {
-		if auditedImmutable(expr, storeDeps) {
-			return true
-		}
-		if storeDeps != nil {
-			var target *ast.Ident
-			switch e := syntaxutil.UnparenExpr(expr).(type) {
-			case *ast.Ident:
-				target = e
-			case *ast.SelectorExpr:
-				if x, ok := e.X.(*ast.Ident); ok {
-					if _, isPkg := p.TypesInfo.Uses[x].(*types.PkgName); isPkg {
-						target = e.Sel
-					}
-				}
-			}
-			if target != nil {
-				if obj, ok := p.TypesInfo.Uses[target]; ok {
-					if variable, ok := interfacePackageVar(obj); ok {
-						storeDeps[syntaxutil.DynamicVarKey(variable)] = true
-						return true
-					}
-				}
-			}
-		}
-		return false
-	}
-	auditedImmutable = func(expr ast.Expr, storeDeps map[string]bool) bool {
-		if tv, ok := p.TypesInfo.Types[expr]; ok && tv.Value != nil {
-			return true
-		}
-		if t := p.TypesInfo.TypeOf(expr); t != nil && refconfine.ImmutableRuntimeType(t) {
-			return true
-		}
-		switch expr := expr.(type) {
-		case *ast.Ident:
-			return expr.Name == "nil" && p.TypesInfo.Uses[expr] == types.Universe.Lookup("nil")
-		case *ast.CallExpr:
-			sel, ok := expr.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return false
-			}
-			fn, ok := p.TypesInfo.Uses[sel.Sel].(*types.Func)
-			if !ok || fn.Pkg() == nil {
-				return false
-			}
-			if fn.Pkg().Path() == "errors" && fn.Name() == "New" {
-				return true
-			}
-			if fn.Pkg().Path() == "fmt" && fn.Name() == "Errorf" {
-				if sig, ok := fn.Type().(*types.Signature); !ok || sig.Recv() != nil {
-					return false
-				}
-				for _, arg := range expr.Args {
-					if !auditedArgument(arg, storeDeps) {
-						return false
-					}
-				}
-				return true
-			}
-			return false
-		default:
-			return false
-		}
-	}
-	failed := map[string]bool{}
-	scope := p.Types.Scope()
-	for _, name := range scope.Names() {
-		if variable, ok := interfacePackageVar(scope.Lookup(name)); ok {
-			opaque[syntaxutil.DynamicVarKey(variable)] = true
-		}
-	}
-	audit := func(target ast.Expr, value ast.Expr) {
-		ident, ok := target.(*ast.Ident)
-		if !ok {
-			return
-		}
-		obj, ok := p.TypesInfo.Defs[ident]
-		if !ok || obj == nil {
-			if obj, ok = p.TypesInfo.Uses[ident]; !ok {
-				return
-			}
-		}
-		if variable, ok := interfacePackageVar(obj); ok {
-			key := syntaxutil.DynamicVarKey(variable)
-			storeDeps := map[string]bool{}
-			if value == nil || !auditedArgument(value, storeDeps) {
-				failed[key] = true
-				return
-			}
-			for dep := range storeDeps {
-				if deps == nil {
-					break
-				}
-				if deps[key] == nil {
-					deps[key] = map[string]bool{}
-				}
-				deps[key][dep] = true
-			}
-		}
-	}
-	failSubtree := func(expr ast.Expr) {
-		ast.Inspect(expr, func(n ast.Node) bool {
-			ident, ok := n.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			if obj, ok := p.TypesInfo.Uses[ident]; ok {
-				if variable, ok := interfacePackageVar(obj); ok {
-					failed[syntaxutil.DynamicVarKey(variable)] = true
-				}
-			}
-			return true
-		})
-	}
-	failTargets := func(expr ast.Expr) {
-		for {
-			switch t := expr.(type) {
-			case *ast.Ident:
-				if obj, ok := p.TypesInfo.Uses[t]; ok {
-					if variable, ok := interfacePackageVar(obj); ok {
-						failed[syntaxutil.DynamicVarKey(variable)] = true
-					}
-				}
-				return
-			case *ast.SelectorExpr:
-				if obj, ok := p.TypesInfo.Uses[t.Sel]; ok {
-					if variable, ok := interfacePackageVar(obj); ok {
-						failed[syntaxutil.DynamicVarKey(variable)] = true
-						return
-					}
-				}
-				expr = t.X
-			case *ast.IndexExpr:
-				expr = t.X
-			case *ast.StarExpr:
-				expr = t.X
-			case *ast.ParenExpr:
-				expr = t.X
-			default:
-				failSubtree(expr)
-				return
-			}
-		}
-	}
-	failCaptures := func(expr ast.Expr) {
-		ast.Inspect(expr, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.FuncLit:
-				return false
-			case *ast.UnaryExpr:
-				if n.Op == token.AND {
-					if _, composite := syntaxutil.UnparenExpr(n.X).(*ast.CompositeLit); !composite {
-						failTargets(n.X)
-					}
-				}
-			}
-			return true
-		})
-	}
-	for _, file := range p.Syntax {
-		for _, decl := range file.Decls {
-			switch decl := decl.(type) {
-			case *ast.GenDecl:
-				for _, spec := range decl.Specs {
-					vs, ok := spec.(*ast.ValueSpec)
-					if !ok {
-						continue
-					}
-					for i, ident := range vs.Names {
-						var value ast.Expr
-						if i < len(vs.Values) {
-							value = vs.Values[i]
-						}
-						if len(vs.Values) == 0 {
-							continue
-						}
-						audit(ident, value)
-						if value != nil {
-							failCaptures(value)
-						}
-					}
-				}
-			case *ast.FuncDecl:
-				if decl.Recv != nil || decl.Name == nil || decl.Body == nil {
-					continue
-				}
-				ast.Inspect(decl.Body, func(n ast.Node) bool {
-					switch n := n.(type) {
-					case *ast.FuncLit:
-						return false
-					case *ast.AssignStmt:
-						for i, lhs := range n.Lhs {
-							var value ast.Expr
-							if i < len(n.Rhs) {
-								value = n.Rhs[i]
-							}
-							switch target := lhs.(type) {
-							case *ast.Ident:
-								audit(target, value)
-							case *ast.SelectorExpr:
-								if base, ok := target.X.(*ast.Ident); ok {
-									if _, isPkg := p.TypesInfo.Uses[base].(*types.PkgName); isPkg {
-										audit(target.Sel, value)
-										continue
-									}
-								}
-								failTargets(lhs)
-							default:
-								failTargets(lhs)
-							}
-						}
-					case *ast.UnaryExpr:
-						if n.Op == token.AND {
-							if _, composite := syntaxutil.UnparenExpr(n.X).(*ast.CompositeLit); !composite {
-								failTargets(n.X)
-							}
-						}
-					case *ast.RangeStmt:
-						if n.Key != nil {
-							failTargets(n.Key)
-						}
-						if n.Value != nil {
-							failTargets(n.Value)
-						}
-					}
-					return true
-				})
-			}
-		}
-	}
-	for key := range failed {
-		delete(opaque, key)
-		breaks[key] = true
 	}
 }

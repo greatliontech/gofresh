@@ -38,13 +38,14 @@ invocations {
     packages: "./internal/guard"
     packages: "./internal/jsonrecord"
     packages: "./internal/outcome"
+    packages: "./internal/propharness"
     packages: "./internal/render"
     packages: "./internal/runtimeinput"
     packages: "./internal/testenv"
     packages: "./internal/testvariant"
     packages: "./internal/trace"
     race: true
-    # 5m governs the per-binary cap of the 18 leaf internal packages, and the
+    # 5m governs the per-binary cap of the leaf internal packages, and the
     # 300s invocation budget above bounds the leaf witness suite.
     args: "-test.timeout=5m"
     bracket_paths: "/bin/sh"

@@ -311,7 +311,7 @@ func typeCarriesSignatureSeen(t types.Type, seen map[types.Type]bool) bool {
 		case *types.Chan:
 			return typeCarriesSignatureSeen(u.Elem(), seen), true
 		case *types.Map:
-			return typeCarriesSignatureSeen(u.Elem(), seen), true
+			return typeCarriesSignatureSeen(u.Key(), seen) || typeCarriesSignatureSeen(u.Elem(), seen), true
 		case *types.Named, *types.Struct, *types.Array, *types.Tuple:
 			return false, false
 		default:
@@ -321,12 +321,12 @@ func typeCarriesSignatureSeen(t types.Type, seen map[types.Type]bool) bool {
 }
 
 // CallResultHandsOut reports whether a call's result set can hand its
-// consumer carrier-derived state.
+// consumer carrier-derived state or a value-copied synchronization primitive.
 func CallResultHandsOut(t types.Type) bool {
 	if t == nil {
 		return true
 	}
-	return TypeHandsOutMutableReach(t) || TypeCarriesSignature(t)
+	return TypeHandsOutMutableReach(t) || TypeCarriesSignature(t) || TypeReachesSyncNoCopyByValue(t)
 }
 
 // TypeHandsOutMutableReach reports whether holding a value of the type
@@ -395,26 +395,133 @@ func TypeReachesOnce(t types.Type) bool {
 	})
 }
 
-// OnceFieldCount counts the by-value sync.Once fields of a receiver type.
+// OnceFieldCount counts the sync.Once occurrences reachable on recv (by value
+// across nested/embedded structs and arrays, plus embedded struct pointers that
+// promote sync.Once into recv's field/method set), capped at 2.
 func OnceFieldCount(recv types.Type) int {
+	if recv == nil {
+		return 0
+	}
 	if ptr, ok := types.Unalias(recv).(*types.Pointer); ok {
 		recv = ptr.Elem()
 	}
-	st, ok := types.Unalias(recv).Underlying().(*types.Struct)
-	if !ok {
+	if _, ok := types.Unalias(recv).Underlying().(*types.Struct); !ok {
 		return 0
 	}
-	n := 0
-	for i := 0; i < st.NumFields(); i++ {
-		if named, ok := types.Unalias(st.Field(i).Type()).(*types.Named); ok && named.Obj() != nil && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "sync" && named.Obj().Name() == "Once" {
-			n++
+	return countByValueOnce(recv, make(map[types.Type]bool))
+}
+
+func countByValueOnce(t types.Type, visiting map[types.Type]bool) int {
+	if t == nil {
+		return 0
+	}
+	u := types.Unalias(t)
+	if visiting[u] {
+		return 2
+	}
+	visiting[u] = true
+	defer delete(visiting, u)
+
+	switch u := u.(type) {
+	case *types.Named:
+		if u.Obj() != nil && u.Obj().Pkg() != nil && u.Obj().Pkg().Path() == "sync" && u.Obj().Name() == "Once" {
+			return 1
+		}
+		return countByValueOnce(u.Underlying(), visiting)
+	case *types.Struct:
+		n := 0
+		for i := 0; i < u.NumFields(); i++ {
+			f := u.Field(i)
+			ft := f.Type()
+			if f.Embedded() {
+				if ptr, ok := types.Unalias(ft).(*types.Pointer); ok {
+					ft = ptr.Elem()
+				}
+			}
+			n += countByValueOnce(ft, visiting)
+			if n >= 2 {
+				return 2
+			}
+		}
+		return n
+	case *types.Array:
+		if u.Len() <= 0 {
+			return 0
+		}
+		c := countByValueOnce(u.Elem(), visiting)
+		if c == 0 {
+			return 0
+		}
+		if u.Len() >= 2 || c >= 2 {
+			return 2
+		}
+		return 1
+	default:
+		return 0
+	}
+}
+
+// TypeReachesSyncNoCopyByValue reports whether a value of type t contains
+// sync.Mutex, sync.RWMutex, sync.Cond, or sync.Once by value (directly or
+// through by-value structs, arrays, or tuples), so binding or passing a value
+// of type t copies that synchronization primitive.
+func TypeReachesSyncNoCopyByValue(t types.Type) bool {
+	return WalkTypeStructure(t, make(map[types.Type]bool), true, func(u types.Type) (bool, bool) {
+		switch u := u.(type) {
+		case *types.Basic:
+			return u.Kind() == types.Invalid, true
+		case *types.Named:
+			if u.Obj() != nil && u.Obj().Pkg() != nil && u.Obj().Pkg().Path() == "sync" {
+				switch u.Obj().Name() {
+				case "Mutex", "RWMutex", "Cond", "Once":
+					return true, true
+				}
+			}
+			return false, false
+		case *types.Struct, *types.Array, *types.Tuple:
+			return false, false
+		default:
+			return false, true
+		}
+	})
+}
+
+// InPlaceSyncReceiver reports whether recvExpr addresses a synchronization
+// primitive in place through an uncopied root variable (never a by-value
+// struct/sync parameter, value receiver, or dereferenced local struct copy).
+func InPlaceSyncReceiver(info *types.Info, recvExpr ast.Expr) bool {
+	if info == nil || recvExpr == nil {
+		return false
+	}
+	cur := recvExpr
+	for {
+		switch x := cur.(type) {
+		case *ast.ParenExpr:
+			cur = x.X
+		case *ast.SelectorExpr:
+			if id, ok := ast.Unparen(x.X).(*ast.Ident); ok {
+				if _, isPkg := info.Uses[id].(*types.PkgName); isPkg {
+					obj, ok := info.Uses[x.Sel].(*types.Var)
+					return ok && !TypeReachesSyncNoCopyByValue(obj.Type())
+				}
+			}
+			cur = x.X
+		case *ast.IndexExpr:
+			cur = x.X
+		case *ast.StarExpr:
+			cur = x.X
+		case *ast.Ident:
+			obj, ok := info.Uses[x].(*types.Var)
+			return ok && !TypeReachesSyncNoCopyByValue(obj.Type())
+		default:
+			return false
 		}
 	}
-	return n
 }
 
 // InstantiatedResultsHandOutNothing reports whether every result of sig is
-// either audited-immutable or free of mutable reach and signatures.
+// either audited-immutable or free of mutable reach, signatures, and
+// value-copied synchronization primitives.
 func InstantiatedResultsHandOutNothing(audited bool, t types.Type) bool {
 	sig, ok := types.Unalias(t).(*types.Signature)
 	if !ok {
@@ -426,7 +533,7 @@ func InstantiatedResultsHandOutNothing(audited bool, t types.Type) bool {
 		if AuditedImmutableType(audited, rt) {
 			continue
 		}
-		if TypeHandsOutMutableReach(rt) || TypeCarriesSignature(rt) {
+		if TypeHandsOutMutableReach(rt) || TypeCarriesSignature(rt) || TypeReachesSyncNoCopyByValue(rt) {
 			return false
 		}
 	}
@@ -453,10 +560,28 @@ func ImmutableRuntimeType(t types.Type) bool {
 		named.Obj().Pkg().Path() == "go/constant" && auditset.ConstantImmutable(named.Obj().Name())
 }
 
-// AuditedSynchronization reports whether fn is in the audited sync.Mutex /
-// sync.RWMutex method set.
+// AuditedSynchronization reports whether fn is a callback-free, Locker-free
+// synchronization operation in package sync that leaves uncopied receivers
+// free of semantic state transitions (Mutex and RWMutex lock operations plus
+// Cond.Signal and Cond.Broadcast; Cond's copy checker anchors address identity
+// on first use and panics only on value copies, which callers reject via
+// InPlaceSyncReceiver). Cond.Wait dispatches through Cond.L's sync.Locker
+// interface, and Once.Do mutates Once's persistent done flag and runs a caller
+// callback, so neither is receiver- or parameter-read-only on its own.
 func AuditedSynchronization(audited bool, fn *types.Func) bool {
-	return audited && auditset.ReceiverMethod(fn, "sync", auditset.SyncMethod)
+	return audited && auditset.ReceiverMethod(fn, "sync", func(receiver, method string) bool {
+		if !auditset.SyncMethod(receiver, method) {
+			return false
+		}
+		switch receiver {
+		case "Mutex", "RWMutex":
+			return true
+		case "Cond":
+			return method == "Signal" || method == "Broadcast"
+		default:
+			return false
+		}
+	})
 }
 
 // AuditedPooling reports whether fn is sync.Pool.Get or sync.Pool.Put.

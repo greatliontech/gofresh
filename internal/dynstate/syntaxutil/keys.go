@@ -199,21 +199,62 @@ func (u VarMethodUse) Compare(o VarMethodUse) int {
 	return u.Method.Compare(o.Method)
 }
 
+// VarFuncUse records a direct environment-carrying registration inside a plain
+// named function when no unattributed registration occurred for Key in the same
+// compilation unit.
+type VarFuncUse struct {
+	Key  string  `json:"key"`
+	Func FuncKey `json:"func"`
+}
+
+func (u VarFuncUse) Valid() bool {
+	return u.Key != "" && !strings.Contains(u.Key, "\x00") && u.Func.Valid()
+}
+
+func (u VarFuncUse) Compare(o VarFuncUse) int {
+	if c := cmp.Compare(u.Key, o.Key); c != 0 {
+		return c
+	}
+	return u.Func.Compare(o.Func)
+}
+
 // VarParamUse records a deferred call-argument use of a package-level carrier.
+// When Func is non-zero, the call occurred inside that named function or method
+// (nested inside a function literal when Literal is true).
 type VarParamUse struct {
-	Key   string   `json:"key"`
-	Param ParamKey `json:"param"`
+	Key     string   `json:"key"`
+	Param   ParamKey `json:"param"`
+	Func    FuncKey  `json:"func,omitempty"`
+	Literal bool     `json:"literal,omitempty"`
 }
 
 func (u VarParamUse) Valid() bool {
-	return u.Key != "" && !strings.Contains(u.Key, "\x00") && u.Param.Valid()
+	if u.Key == "" || strings.Contains(u.Key, "\x00") || !u.Param.Valid() {
+		return false
+	}
+	if u.Func.IsZero() {
+		return !u.Literal
+	}
+	return u.Func.Valid()
 }
 
 func (u VarParamUse) Compare(o VarParamUse) int {
 	if c := cmp.Compare(u.Key, o.Key); c != 0 {
 		return c
 	}
-	return u.Param.Compare(o.Param)
+	if c := u.Param.Compare(o.Param); c != 0 {
+		return c
+	}
+	if c := u.Func.Compare(o.Func); c != 0 {
+		return c
+	}
+	if u.Literal != o.Literal {
+		if !u.Literal {
+			return -1
+		}
+		return 1
+	}
+	return 0
 }
 
 // ParamDepEdge records a conditional parameter-forwarding edge between two
@@ -505,21 +546,29 @@ func (r FuncRef) Compare(o FuncRef) int {
 }
 
 // EnvCallUse records a deferred constructor-registration mark on a carrier
-// variable.
+// variable. When Func is non-zero, the registration occurred inside that plain
+// named function; a zero Func denotes top-level, init, or method flow.
 type EnvCallUse struct {
 	Key    string  `json:"key"`
 	Callee FuncKey `json:"callee"`
+	Func   FuncKey `json:"func,omitempty"`
 }
 
 func (u EnvCallUse) Valid() bool {
-	return u.Key != "" && !strings.Contains(u.Key, "\x00") && u.Callee.Valid()
+	if u.Key == "" || strings.Contains(u.Key, "\x00") || !u.Callee.Valid() {
+		return false
+	}
+	return u.Func.IsZero() || u.Func.Valid()
 }
 
 func (u EnvCallUse) Compare(o EnvCallUse) int {
 	if c := cmp.Compare(u.Key, o.Key); c != 0 {
 		return c
 	}
-	return u.Callee.Compare(o.Callee)
+	if c := u.Callee.Compare(o.Callee); c != 0 {
+		return c
+	}
+	return u.Func.Compare(o.Func)
 }
 
 // FuncDepEdge records a return-environment-free conditional edge from a
@@ -611,16 +660,18 @@ func (s ExportedSeam) Compare(o ExportedSeam) int {
 // DeferralResolvent carries the typed resolvent of an explain deferral
 // observation.
 type DeferralResolvent struct {
-	Param    ParamKey
-	Method   FuncKey
-	FieldPos FieldPosKey
-	ElemUse  ElemParamUse
+	Param       ParamKey
+	Method      FuncKey
+	FieldPos    FieldPosKey
+	ElemUse     ElemParamUse
+	EnclosingFn FuncKey
+	Literal     bool
 }
 
 // ExplainHookSet carries the observation callbacks one explain re-derivation
 // arms.
 type ExplainHookSet struct {
-	Site             func(p *packages.Package, kind, key string, pos token.Pos)
+	Site             func(p *packages.Package, kind, key string, fn FuncKey, literal bool, pos token.Pos)
 	ExportedSeamSite func(p *packages.Package, fn FuncKey, key string, pos token.Pos)
 	Store            func(p *packages.Package, key string, pos token.Pos)
 	Deferral         func(p *packages.Package, kind byte, key string, resolvent DeferralResolvent, at token.Pos)
@@ -628,8 +679,12 @@ type ExplainHookSet struct {
 }
 
 func ExplainMark(hooks *ExplainHookSet, p *packages.Package, kind, key string, at token.Pos) {
+	ExplainAttributedMark(hooks, p, kind, key, FuncKey{}, false, at)
+}
+
+func ExplainAttributedMark(hooks *ExplainHookSet, p *packages.Package, kind, key string, fn FuncKey, literal bool, at token.Pos) {
 	if hooks != nil && hooks.Site != nil {
-		hooks.Site(p, kind, key, at)
+		hooks.Site(p, kind, key, fn, literal, at)
 	}
 }
 

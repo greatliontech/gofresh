@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
-	"github.com/greatliontech/gofresh/internal/closure/internal/propharness"
+	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/trace"
 )

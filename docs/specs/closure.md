@@ -498,23 +498,31 @@ REQ-closure-shared-dynamic-state-mutation-shape's mutation-equivalence: the
 declaring package proves a method unable to write receiver-reachable state —
 the receiver never stands in a write position and never escapes, with one
 exception, the once-filled memo: a write to a receiver-rooted field or element
-whose selection hands out no mutable reach and carries no signature, placed
+whose selection hands out no mutable reach and carries no signature or
+synchronization primitive (with written map keys likewise carrying no unknown
+dynamic carrier, signature, or synchronization primitive), placed
 directly in the function literal a receiver-rooted sync.Once's Do runs — the
-Once selected from the pointer receiver's identifier itself, the only
-by-value sync.Once field of the receiver's type, unexported, with exactly one
-Do site in its package, the fill's targets reaching no Once — so no second
+Once selected from the pointer receiver's identifier itself, the unique
+sync.Once reachable on the receiver's type across nested or embedded structs
+(including embedded struct pointers) and arrays, unexported, with that single
+Do call as its sole reference in the package (forbidding struct conversions and
+non-zero composite-literal elements on its enclosing struct), the fill's targets reaching no Once — so no second
 literal, second memo, other package, shared pointer, receiver copy, or re-arm
 can make two fills observable — fills at most once per receiver, so every subject observes the
 same value whichever subject filled it — the get-or-compute idiom,
-warm/cold-equivalent by construction — values read
+warm/cold-equivalent by construction — neither the receiver itself nor any
+receiver-derived synchronization primitive is copied by value, no goroutine or
+non-synchronous nested function literal references the receiver or a tainted
+binding, values read
 off it are tracked as the receiver's own — a binding whose type hands out
-mutable reach taints its local (a value copy that cannot write back flows
+mutable reach, carries a signature, or reaches a synchronization primitive by
+value taints its local (a value copy that cannot write back or copy synchronization state flows
 freely), a receiver-rooted read is judged at its outermost selector or index
 step by the value it produces — an intermediate reach-bearing step is
 evaluation, not a handout — a conversion of a receiver-reachable value admits
 exactly when its result type hands out no mutable reach and the operand is
 not a method value (a method value carries its receiver whatever the result
-type says; an aliasing conversion keeps the escape), a bind whose target
+type says; an aliasing conversion keeps the escape, and a non-blank type-assertion or type-switch narrowing of a non-signature value into a signature-carrying type refuses), a bind whose target
 outlives the body — a package-level variable — refuses whenever the target's
 type hands out mutable reach (a reach-free copy flows; the proof's tracked
 bindings die with the body, and an outliving alias escapes it — a sibling
@@ -553,11 +561,23 @@ the fail-closed mark.
 **REQ-closure-shared-dynamic-state-audited-discharges** (invariant): A synchronization discharge — sync.Mutex and
 sync.RWMutex with their lock operations, sync.Cond, sync.NewCond, and sync.Locker with Cond's Wait, Signal, and Broadcast operations, and sync.Once's Do (a done flag
 under a mutex running the caller's own function once, program code judged
-where it is written), receiver-neutral and never
-process-external because lock and condition-wait state cannot change dispatch — MUST require a
+where it is written), never process-external at the effect classification tiers because lock and condition-wait state introduce no ambient channel — MUST require a
 checked derivation of those properties for the selected implementation,
-including its native leaves. The same claim applies identically at the effect
-classification tiers, alongside scalar `sync/atomic` types (`Bool`, `Int32`,
+including its native leaves; for receiver-read-only, parameter-leak-free, and
+retention-only confinement, only the callback-free, Locker-free operations
+(`Mutex` and `RWMutex` lock operations plus `Cond.Signal` and `Cond.Broadcast`)
+invoked synchronously in place on an uncopied synchronization receiver
+(rejecting value copies of `Mutex`, `RWMutex`, `Cond`, and `Once`, since `Cond`
+anchors address identity on first use and panics when copied) are
+receiver-neutral on their own, while `Cond.Wait` dispatches through `Cond.L`
+and `Once.Do` mutates `Once`'s persistent flag unless discharged as a
+once-filled memo under REQ-closure-shared-dynamic-state-receiver-proof (or as a
+non-goroutine inline literal on an uncopied receiver under retention-only
+confinement, where rooted stores into carrier- or signature-capable slots carry
+only provably nil/zero carrier slots, rooted stores into mutable-reach slots
+read no external mutable or carrier state, and no goroutine or non-synchronous
+closure references a tracked root). At the effect classification tiers,
+the synchronization discharge stands alongside scalar `sync/atomic` types (`Bool`, `Int32`,
 `Int64`, `Uint32`, `Uint64`, `Uintptr`), their top-level scalar operations, and
 their scalar receiver methods (`Load`, `Store`, `Add`, `Swap`,
 `CompareAndSwap`, `And`, `Or`), which read and write process-memory scalars fed
@@ -788,11 +808,11 @@ literal's outside any named body —
 forecloses the discharge for its variable, and a variable with any
 rooted marking site keeps every mark. Named functions and methods
 alike are attributable sites (a method's under its type-qualified
-name). A function literal's or go statement's marks nested in a named
-body are literal-borne sites of the enclosing declaration — the
-mutation, escape, and carrier-method-use classes alike, while the
-remaining use classes (parameter, field, and element deferrals,
-carrier links) keep their fact-immediate composition: executing
+name) for direct and literal-borne mutation, escape, carrier-method,
+and carrier-parameter marks, while field and element deferrals and
+carrier links keep their fact-immediate composition. A function
+literal's or go statement's marks nested in a named body are
+literal-borne sites of the enclosing declaration: executing
 the literal requires the encloser to have produced it, so the
 encloser's unreachability bounds the literal wherever the value
 travels — but the value outlives the encloser's frame, so a
@@ -810,18 +830,35 @@ value cannot be handed out unless the encloser ran — while the same
 reference in init flow or a method body records as bare program code,
 poisoned everywhere: its creation site the regions cannot bound. A METHOD encloser forecloses its literal-borne marks
 outright: methods are outside the reference-region graph, so their
-init reach is unknowable — fail-closed (a method's DIRECT marks keep
-their attributed siting; they execute only while the method runs). A direct use needs no such foreclosure — it executes only
-while its encloser runs, so an init-only encloser makes it
-init-determined and an unreachable one makes it dead. An environment-audit refusal rides the variable's use-site
-inventory when the variable's type is not directly callable — the
-value-plane rule already marks every extraction able to execute the
-carried value — while a callable variable keeps a markless execution
-channel (its call is a tolerated read) and its environment refusal
-never discharges. The inventory is per variable and class-blind: any
+init reach is unknowable — fail-closed. Direct marks in a named body
+follow the same outliving-alias rule: a direct synchronous in-place
+mutation executes only while its encloser runs, so an init-only plain
+encloser makes it init-determined and an unreachable encloser makes it
+dead, whereas a direct escape, a direct carrier-method call without a
+retention-free receiver proof, or a direct carrier-parameter call
+without a retention-free parameter proof can plant an alias into
+external storage that outlives the call — under an init-only plain
+encloser a direct carrier-method or carrier-parameter deferral
+discharges only when its retention-free proof holds, and whenever init
+flow can reach the encloser or the encloser is a method any direct
+mark lacking that synchronous-completion guarantee forecloses
+reachability discharge outright. An environment-audit refusal on a
+non-callable variable attributes to the plain named post-init
+function(s) whose stores (direct or via an unproven constructor call)
+registered the environment-carrying value when every such registration
+sits in a plain named function unreachable from init flow, whereas any
+initializer/init-flow, init-reachable, or method-borne
+environment-carrying registration forecloses reachability discharge
+outright because a non-callable container still admits markless
+post-init execution channels (indexing a scalar-returning function
+element, reading or calling a function field, or passing the container
+to a receiver-read-only method or leak-free helper), while a directly
+callable variable keeps a markless execution channel (its call is a
+tolerated read) and its environment refusal never discharges. The inventory is per variable and class-blind: any
 foreclosing mark keeps every rank's refusal for that
 variable. The checked implementation and explicit assertion discharge channels
-— pooling, mapping, memoization, the vouches, and the
+— pooling, mapping, memoization, verified property-harness package
+globals, the vouches, and the
 `//gofresh:single-subject` directive — decide before this scoping and
 are never weakened by it: they remain the channels for state the
 subject's own rooted flow DOES write, while the reachability scoping
@@ -928,19 +965,22 @@ selection; a familiar type or constructor name supplies none.
 **REQ-closure-shared-dynamic-state-init-aliasing** (invariant): An escape MUST NOT
 discharge by init flow — the alias outlives initialization. Proven
 init-only functions are scanned for escapes under the full use-shape
-rules; `init` bodies and qualified helpers are scanned exactly for
+rules, including result expressions and named result variables whose types
+can hand out carrier-derived state or mutable reach; `init` bodies and
+qualified helpers are scanned exactly for
 alias-creating bindings — an init-flow local bound from a carrier by
 whole-identifier assignment or declaration, by range binding, as a
-builtin copy destination, as a qualified helper's parameter bound at
+builtin copy or append destination, as a qualified helper's parameter bound at
 an init call site (carried across bodies to the same fixpoint, under
-the alias-handing type gate of the value's landing type — a non-spread
+the mutable-reach type gate of the value's landing type — a non-spread
 variadic argument lands as the element, boxing into an interface keeps
 the gate's fail-close — for the direct, parenthesized, and
 generic-instantiated call spellings; a conversion-wrapped or
 func-value spelling refuses fail-closed through the escape backstop
 instead), or
-through a composite target (a struct field, element, or indirection
-store binds its base coarsely — the whole base is the carrier),
+through a composite target or shared local backing memory (a struct field,
+element, channel send, map key, or indirection store binds its base and
+co-aliased local storage coarsely — the whole base is the carrier),
 chained to a fixpoint,
 is the carrier inside nested program code —
 while init-flow stores and calls stay exempt from the mutation marks;
@@ -952,14 +992,20 @@ methods whose results hand out nothing, the receiver a bare identifier
 naming the package variable (an expression or foreign-qualified
 receiver keeps the escape), the method provably never
 escaping or outliving its receiver while writes through it are
-tolerated (init flow's own exempt shape), an unproven, dispatched,
+tolerated when carrier- or signature-capable targets and written map keys carry
+only provably nil or zero carrier slots and mutable-reach targets and written
+map keys read no external mutable or carrier state, an unproven, dispatched,
 result-handing, or value-bound method keeping the fail-closed escape —
 a bound method value retains its receiver past initialization. An init-flow
-bind or store whose target is itself a carrier links the two keys as
+bind or store whose target is itself a carrier — or an init-flow store
+of an admitted environment-free closure capturing an init-flow local
+alias of a dynamic-capable package variable, non-directive when declared in the same package — links the two keys as
 one storage — mutation, escape, and environment marks crossing the
-pair symmetrically and transitively at composition, since the shared
+pair symmetrically and transitively at composition and foreclosing
+reachability discharge on the crossed target, since the shared
 backing is one object under every name it carries — reach-free
-sources recording no key and staying unlinked.
+sources recording no key and object-closed carriers staying unlinked at
+composition.
 
 **REQ-closure-shared-dynamic-state-leak-free** (invariant): Two further narrowings
 MUST discharge specific escape shapes by proof: a carrier passed as a direct
@@ -974,7 +1020,9 @@ shape keeping the fail-closed escape. A callee that writes its
 parameter refuses the program-code deferral; an init-flow argument
 defers instead to the parameter's retention fact — the bound value
 provably never escapes or outlives the call, its writes through the
-binding tolerated exactly as the region's own stores are exempt, the
+binding tolerated when carrier- or signature-capable targets and written map
+keys carry only provably nil or zero carrier slots and mutable-reach targets
+and written map keys read no external mutable or carrier state, the
 write-path element and field reads feeding those stores priced as
 writes rather than handouts — recorded beside the leak-free grade,
 chained and resolved identically with either grade satisfying an
@@ -982,7 +1030,7 @@ edge, absence refusing; and a range binding over an alias-handing
 carrier discharges the iteration read when every alias-handing bound
 value is proven leak-free over the loop body by the same judgment,
 fail-closed on any other binding shape — where the leak-free judgment
-recognizes the call of a func-typed field of a bound value: the target
+recognizes the call of a func-typed field of a bound value (while refusing non-blank type-assertion or type-switch narrowing of a non-signature value into a signature-carrying type): the target
 is the field read the read shapes already judge, and the callee receives
 only its arguments, judged like any call — a rooted alias-handing
 argument through such a field call deferring to the field position's
@@ -1001,9 +1049,12 @@ population: its receiver environment already refuses the carrier at
 admission), marks pooling by field name
 across composite levels since a nested value can become a judged
 binding through the taint chain; at composition the use discharges only
-when no poison covers the position, every deferral resolves against the
-leak-free union, and every constructor resolves, any malformed record
-marking the declaring fact's variables fail-closed — and a carrier
+when the carrier itself suffers no mutation, escape, unproven method or argument
+deferral, or environment-carrying registration (population marks and
+carrier links pooling across shared storage), no poison covers the
+position, every deferral resolves against the leak-free union, and every
+constructor resolves, any malformed record marking the declaring fact's
+variables fail-closed — and a carrier
 argument to a callee-position index read of another carrier (the
 dispatch-table shape) defers identically to the dispatch carrier's
 element population, a reserved position the same records carry: a bare
@@ -1070,10 +1121,15 @@ audit's plane the callees-join-their-populations rule binds through
 per-parameter argument-storage insertion facts, keyed exactly as the
 parameter facts above: the declaring package proves, per parameter,
 that everything the function stores into storage reachable from that
-parameter — slot and unattributable-depth stores alike — judges under
-the audit's own value judgment, a stored bare parameter neither
-rebound nor capture-broken contributing nothing — the caller's
-obligation, discharged at each deferring call site: every argument of
+parameter — slot and unattributable-depth stores alike, across header
+aliases and value-copied composite holders sharing interior reach —
+judges under the audit's own value and mutable-reach argument
+judgments, a stored parameter neither rebound, capture-broken, nor
+use-poisoned satisfying the check once every in-body write into its
+shared header or interior reach so judges (folding any deferred
+insertion uses on it into the parameter's insertion dependencies) so
+caller-supplied contents remain the caller's obligation, discharged at
+each deferring call site: every argument of
 the call judges under the audit's value judgment, to a poison
 fixpoint, and a call with an unjudgeable argument poisons the storage
 it was handed instead of deferring — a parameter handed onward to a
@@ -1105,21 +1161,21 @@ final declared parameter's index.
 **REQ-closure-shared-dynamic-state-registration-audit** (invariant): Every admitted read path is sound only under the environment-free
 registration audit: a function-carrying value a package's direct code
 stores into a carrier — its own or a foreign one, initializer
-expressions and builtin copies included, a store through a local alias
-of the carrier resolved to it, stores inside nested literals
-and go statements excluded as program code the mutation rules refuse on
-their own — MUST be environment-free. A plain named function, a method
+expressions, nested function literals, go statements, and builtin copies or appends included, with a store through a local alias
+resolved to the local's root-header carrier set when the write stays within the local's own single root header (or bare-addressed pointer dereference) and to the local's full interior-reach carrier set whenever the write crosses a second pointer, slice, map, channel, interface, embedded-pointer, or type-parameter hop or writes into a slice or channel container — MUST be environment-free. A plain named function, a method
 expression, and nil carry no environment; a function literal is
 environment-free when every variable it references from an enclosing
 function scope proves leak-free under the use-shape judgment over the
 literal's body and over every sibling literal of the enclosing body
-referencing the variable's alias set — the set closed over every
-whole-identifier binding, range binding, and builtin copy of the
-enclosing body whose source expression reaches an enclosing-function
-variable of mutable reach, address, reslice, wrapping, and call-result
-chains included by the source walk, since a shared environment is one
+referencing the variable's alias set — the set closed across the
+enclosing body (nested closures and go statements included) over
+every local binding, composite/indexed/field/map-key/channel write,
+type-switch binding, builtin copy or append, and non-builtin call
+connecting a local root to an enclosing-scope variable via mutable
+reach, place address-of, value-array slicing, or implicit
+pointer-receiver method-value addressing, since a shared environment is one
 object under every name it carries and however many carriers its
-closures reach — with a
+closures reach — AND every root in that alias set has a confined origin (excluding channel or function-iterator range bindings, excluding non-scalar enclosing receivers and named results, excluding non-scalar enclosing parameters for directly registered literals outside synchronous init-only helpers while admitting caller-obligated unbroken parameters for returned literals and call-site-verified parameters of unexported synchronous init-only helpers where non-spread variadic calls allocate a fresh slice and spread calls require pure fresh slice data, verifying single-definition unmutated/unaddressed non-directive same-package signature sources with constructor edges propagated, rejecting type-switch narrowing into a signature-carrying type, and requiring mutable-reach local roots to initialize solely from pure fresh data over variable-free append bases, fresh allocations, value-plane clones over clean operands, settled unexported package data, or — in synchronous init flow — dynamic carriers, unbroken and non-directive when declared in the same package, from which neither the literal nor any sibling closure extracts or invokes a carrier, signature, or mutable-reach value, recorded as init-flow carrier links, with any signature-carrying operand boxed into an interface or composite within those roots satisfying this signature audit), with a
 reference to the alias set from a go statement's call outside any
 literal refusing outright. A call result whose callee is a plain named
 function — a bare identifier or package-qualified selector,
@@ -1127,7 +1183,9 @@ receiverless, explicit generic instantiation included with the
 dependency key instantiation-independent — defers to that callee's
 return-environment-free proof:
 the store records the callee against the carrier, the call's arguments
-judged recursively by this audit (a carrying argument poisons the
+judged recursively by this audit (a signature-carrying argument — including one boxed into an interface conversion or mutable-reach composite — that fails
+this audit, or a mutable-reach argument on a non-value-plane callee not proven fresh or settled over
+unmutated unexported package data — an unexported single-definition carrier-free and non-copy-sync-free package variable initialized from pure fresh data over variable-free append bases and settled siblings, unmutated and confined across all package declarations, and embedding mutable reach into at most one unbroken non-directive carrier matching the store target, either unexported or exported when closure-only or alias-handing with that single declaration use and no function-body references — poisons the
 store), and composition admits the store exactly when the proof
 resolves. The declaring package proves a function
 return-environment-free by judging every return expression under this
@@ -1149,26 +1207,29 @@ result is boolean and free), a cyclic binding chain among the
 derivation edges judging by its external sources and stores alone —
 recirculation contributes no new values — an append
 of judged elements (an append onto the binding itself flowing only the
-new elements), a conversion of a judged value, an instantiated
+new elements), a non-assertion conversion of a judged value (type-assertion and type-switch narrowings refusing), an instantiated
 reference of a named function, a call of a value-plane helper with judged
 arguments and a checked claim that its results carry exactly those arguments'
 values — slices.Clone, slices.Concat and maps.Clone require this same
 implementation proof, including their copying and native dependencies — and a call of a plain named callee with
-judged arguments, explicit generic instantiation included with the
+judged signature-carrying arguments and clean, caller-parameter-obligated, or settled mutable-reach arguments, explicit generic instantiation included with the
 dependency key instantiation-independent — and a zero-valued
 declaration binds the nil zero value, environment-free. An element,
 field, slice-step, or dereference write of a present value is a
 store. A slot write — one whose chain stays on the root's owned
-spine: for a root bound only from body-owned storage (fresh
-allocations, appends and conversions over them, and values read back
-out of such containers, transitively), an initial dereference of the
-root's own pointer, selector steps over struct values, and at most
-one index in final position taken on the root's own header, past its
-own dereference and slice steps over that same header at most — a
-header reached through a selector may have
+spine: for a root bound only by direct bindings (comma-ok map element
+reads included) from body-owned storage (fresh allocations, slice
+reslices, appends, and conversions over them, and index reads out of
+body-owned maps or slices whose stored elements are themselves
+body-owned), an initial dereference of the root's own pointer,
+selector steps over by-value struct fields (excluding promoted fields
+reached through embedded pointers), and at most one index in final
+position taken on the root's own header, past its own dereference and
+slice steps over that same header at most — a header reached through
+a selector or a container holding caller reach may have
 arrived inside a held copy, invisible to body-ownership; for any
 other root, selector steps over
-struct values alone — lands in the root's own storage, and the base
+by-value struct fields alone — lands in the root's own storage, and the base
 stays judged exactly when everything stored into it judges, the
 store set unioned across names sharing one storage (index operands
 and other subexpressions stay reads). Any other chain may write
@@ -1198,8 +1259,8 @@ the embedded tracked names break — the callee holds a write path into
 their backing the population sweep never sees; value-plane
 callees with checked non-mutation claims keep that scoped exemption; builtin callees are
 likewise exempt, append and copy never holding the argument beyond the
-call, their destinations covered by the bind link and the copy
-target-break — the implicit
+call, their destinations covered by the bind link, spare-capacity element-write tracking onto slice-header bases (breaking non-header append bases when elements are appended), and the copy
+target-break and source-element judgment — the implicit
 address of a pointer-receiver method use included, exempting methods
 the declaring package proves receiver-read-only — or any bind
 position or address
@@ -1213,8 +1274,8 @@ composition to a least fixed point over the edges; naked returns and
 every unrecognized signature-carrying shape refuse the proof. Cycles
 and absent proofs keep the store's poison — fail-closed. Every other
 value shape — a bound method value, a call through anything but a
-plain name (builtin make and new excepted: they construct empty or
-zero values, and no function value rides them), a parameter, an opaque
+plain name (builtin make and type-operand new excepted: they construct empty or
+zero values, while Go's expression-operand new judges its operand), a parameter, an opaque
 local or variable of
 function-carrying type — is beyond the audit; the one further
 call-shaped
@@ -2024,7 +2085,13 @@ keeps the package unverifiable at the closure tier — the checked protocol clai
 observation, never purity: a property run's outcome rides the
 harness's log-surfaced run configuration, not the sources alone, so
 the package scan records an admitted harness fact where it exempts
-the harness's files.
+the harness's files. When the property-harness package's own sources pass
+that full mechanical verification under an audited toolchain across every
+compilation variant and without cross-package direct writes, the
+shared-dynamic-state judgment likewise discharges the harness package's
+own declared unexported globals without caller vouch or execution
+attestation while keeping every struct-mutation, parameter, and receiver
+obligation active on caller-declared variables of harness types.
 
 **REQ-closure-observability-dispatch** (invariant): An open-world refusal MUST name the dispatch edge
 that widened it — the enclosing function and, for an unresolved

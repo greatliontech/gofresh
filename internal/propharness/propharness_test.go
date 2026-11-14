@@ -365,6 +365,7 @@ func TestVerifyPackageGates(t *testing.T) {
 		extra string
 	}{
 		{"forbidden_directive", "//go:linkname bad runtime.nanotime\n"},
+		{"go_embed_directive", "//go:embed rapid.go\nvar embedded string\n"},
 		{"non_rapid_env", "func init() { _ = os.Getenv(\"HOME\") }\n"},
 		{"env_outside_init", "func LeakEnv() string { return os.Getenv(\"RAPID_CHECKS\") }\n"},
 		{"exported_global", "var ExportedGlobal int\n"},

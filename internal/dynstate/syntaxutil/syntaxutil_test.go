@@ -165,3 +165,105 @@ func TestPropagateBFSMatchesReachFixedPoint(t *testing.T) {
 		t.Errorf("PropagateBFS reached disconnected component: %v", set)
 	}
 }
+
+func TestNewTypeCompositeFlowMapWriteAndTypeSwitchHelpers(t *testing.T) {
+	const src = `package p
+
+type box struct{ f int }
+type mapAlias map[string]int
+
+func genericPut[M ~map[K]V, K comparable, V any](m M, k K, v V) M {
+	m[k] = v
+	return M{k: v}
+}
+
+func genericSetSlice[S ~[]V, V any](s S, v V) {
+	s[0] = v
+}
+
+func F(in any, s []int, m map[string]int) {
+	pZero := new(int)
+	pInit := new(*pZero)
+	_ = pInit
+	var elided []*mapAlias = []*mapAlias{{"k1": 1}}
+	_ = elided
+	st := box{f: 2}
+	_ = st
+	m["k2"] = 3
+	s[0] = 4
+	switch x := in.(type) {
+	case int:
+		_ = x
+	case string:
+		_ = x
+	}
+}
+`
+	_, file, pkg, info := parseAndCheck(t, src)
+	if IsLocalVar(pkg.Scope().Lookup("F")) {
+		t.Fatal("IsLocalVar(*types.Func) = true, want false")
+	}
+
+	var calls []*ast.CallExpr
+	var mapWrites []string
+	var litKeys []string
+	var implicitCount int
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.CallExpr:
+			if b := LookupBuiltin(info, x.Fun); b != nil && b.Name() == "new" {
+				calls = append(calls, x)
+			}
+		case *ast.AssignStmt:
+			if x.Tok == token.ASSIGN && len(x.Lhs) == 1 {
+				if _, keyExpr, ok := LHSMapWriteKey(info, x.Lhs[0]); ok {
+					switch k := keyExpr.(type) {
+					case *ast.Ident:
+						mapWrites = append(mapWrites, k.Name)
+					case *ast.BasicLit:
+						mapWrites = append(mapWrites, k.Value)
+					}
+				}
+			}
+		case *ast.CompositeLit:
+			EachCompositeLitFlow(info, x, func(expr ast.Expr, isMapKey bool) bool {
+				if isMapKey {
+					switch k := expr.(type) {
+					case *ast.Ident:
+						litKeys = append(litKeys, k.Name)
+					case *ast.BasicLit:
+						litKeys = append(litKeys, k.Value)
+					}
+				}
+				return true
+			})
+		case *ast.TypeSwitchStmt:
+			EachTypeSwitchImplicit(info, x, func(v *types.Var, _ ast.Expr) {
+				if !IsLocalVar(v) {
+					t.Errorf("IsLocalVar(type-switch implicit %v) = false, want true", v)
+				}
+				implicitCount++
+			})
+		}
+		return true
+	})
+
+	if len(calls) != 2 {
+		t.Fatalf("got %d builtin new calls, want 2", len(calls))
+	}
+	if !IsBuiltinNewType(info, calls[0]) {
+		t.Fatal("IsBuiltinNewType(new(int)) = false, want true")
+	}
+	if IsBuiltinNewType(info, calls[1]) {
+		t.Fatal("IsBuiltinNewType(new(*pZero)) = true, want false")
+	}
+	if len(mapWrites) != 2 || mapWrites[0] != "k" || mapWrites[1] != `"k2"` {
+		t.Fatalf("LHSMapWriteKey keys = %v, want [k \"k2\"]", mapWrites)
+	}
+	if len(litKeys) != 2 || litKeys[0] != "k" || litKeys[1] != `"k1"` {
+		t.Fatalf("EachCompositeLitFlow map keys = %v, want [k \"k1\"]", litKeys)
+	}
+	if implicitCount != 2 {
+		t.Fatalf("EachTypeSwitchImplicit visited %d vars, want 2", implicitCount)
+	}
+}

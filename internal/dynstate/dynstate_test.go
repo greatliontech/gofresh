@@ -441,7 +441,16 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 		{"invalid ParamUses", func(f *Fact) {
 			f.ParamUses = []syntaxutil.VarParamUse{{Key: "v", Param: syntaxutil.ParamKey{Func: validFn, Index: -1}}}
 		}},
+		{"invalid ParamUses literal without Func", func(f *Fact) {
+			f.ParamUses = []syntaxutil.VarParamUse{{Key: "example.com/p.v", Param: validParam, Literal: true}}
+		}},
+		{"invalid ParamUses invalid Func", func(f *Fact) {
+			f.ParamUses = []syntaxutil.VarParamUse{{Key: "example.com/p.v", Param: validParam, Func: syntaxutil.FuncKey{Pkg: "example.com/p"}}}
+		}},
 		{"invalid InitParamUses", func(f *Fact) { f.InitParamUses = []syntaxutil.VarParamUse{{Key: "", Param: validParam}} }},
+		{"invalid InitParamUses non-zero Func", func(f *Fact) {
+			f.InitParamUses = []syntaxutil.VarParamUse{{Key: "example.com/p.v", Param: validParam, Func: validFn}}
+		}},
 		{"invalid FieldParamUses", func(f *Fact) { f.FieldParamUses = []syntaxutil.FieldPosKey{{Owner: "v", Field: "f", Index: -1}} }},
 		{"invalid ElemParamUses", func(f *Fact) { f.ElemParamUses = []syntaxutil.ElemParamUse{{Key: "v", Owner: "o", Index: -1}} }},
 		{"invalid FuncRefs kind", func(f *Fact) {
@@ -476,6 +485,12 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 		}},
 		{"invalid MemoDischarges", func(f *Fact) {
 			f.MemoDischarges = []string{""}
+		}},
+		{"invalid HarnessDischarges key", func(f *Fact) {
+			f.HarnessDischarges = []string{"bad\x00key"}
+		}},
+		{"non-harness HarnessDischarges", func(f *Fact) {
+			f.HarnessDischarges = []string{"example.com/p.v"}
 		}},
 		{"invalid ProtoClusters empty vars", func(f *Fact) {
 			f.ProtoClusters = []protoaudit.ProtoClusterFact{{
@@ -1253,7 +1268,7 @@ func FuzzComposeAndDeferralResolutionInvariants(f *testing.F) {
 			fnB := fns[(int(b>>4)+i)%len(fns)]
 			vA := vars[int(b>>1)%len(vars)]
 			vB := vars[(int(b>>3)+i)%len(vars)]
-			switch b % 13 {
+			switch b % 19 {
 			case 0:
 				f.ReturnEnvFree = append(f.ReturnEnvFree, fnA)
 			case 1:
@@ -1286,6 +1301,45 @@ func FuzzComposeAndDeferralResolutionInvariants(f *testing.F) {
 				f.ParallelFuncs = append(f.ParallelFuncs, fnB)
 			case 12:
 				f.ParallelEdges = append(f.ParallelEdges, syntaxutil.FuncDepEdge{Func: fnA, Callee: fnB})
+			case 13:
+				var encl syntaxutil.FuncKey
+				if b&2 != 0 {
+					encl = fnB
+				}
+				f.ParamUses = append(f.ParamUses, syntaxutil.VarParamUse{
+					Key:     vA,
+					Param:   syntaxutil.ParamKey{Func: fnA, Index: int(b & 1)},
+					Func:    encl,
+					Literal: !encl.IsZero() && (b&4 != 0),
+				})
+			case 14:
+				f.ParamRetentionFree = append(f.ParamRetentionFree, syntaxutil.ParamKey{Func: fnA, Index: int(b & 1)})
+			case 15:
+				f.ReceiverReadOnly = append(f.ReceiverReadOnly, fnA)
+			case 16:
+				f.ReceiverRetentionFree = append(f.ReceiverRetentionFree, fnA)
+			case 17:
+				hasMethod := b&2 != 0
+				var m syntaxutil.FuncKey
+				if hasMethod {
+					m = fnA
+				}
+				f.AttributedUses = append(f.AttributedUses, syntaxutil.AttributedUse{
+					Func:      fnB,
+					Key:       vA,
+					Escape:    !hasMethod && (b&4 != 0),
+					HasMethod: hasMethod,
+					Method:    m,
+					Literal:   b&8 != 0,
+				})
+			case 18:
+				reg := syntaxutil.RefRegion{Kind: syntaxutil.RegionInit}
+				if b&2 != 0 {
+					reg = syntaxutil.RefRegion{Kind: syntaxutil.RegionFunc, Caller: fnB}
+				} else if b&4 != 0 {
+					reg = syntaxutil.RefRegion{Kind: syntaxutil.RegionProg}
+				}
+				f.FuncRefs = append(f.FuncRefs, syntaxutil.FuncRef{Callee: fnA, Region: reg})
 			}
 		}
 
@@ -6925,12 +6979,12 @@ func WriteDirective() {
 	})
 	var unattestedSites, attestedSites []string
 	factUnattestedHooks := FactOfWithHooks(true, poolPkg, false, &syntaxutil.ExplainHookSet{
-		Site: func(_ *packages.Package, kind, key string, _ token.Pos) {
+		Site: func(_ *packages.Package, kind, key string, _ syntaxutil.FuncKey, _ bool, _ token.Pos) {
 			unattestedSites = append(unattestedSites, kind+":"+key)
 		},
 	})
 	factAttestedHooks := FactOfWithHooks(true, poolPkg, true, &syntaxutil.ExplainHookSet{
-		Site: func(_ *packages.Package, kind, key string, _ token.Pos) {
+		Site: func(_ *packages.Package, kind, key string, _ syntaxutil.FuncKey, _ bool, _ token.Pos) {
 			attestedSites = append(attestedSites, kind+":"+key)
 		},
 	})

@@ -200,6 +200,120 @@ func ChainRoot(expr ast.Expr) *ast.Ident {
 	}
 }
 
+// PlaceRootIdent unwraps selector, index, index-list, slice, dereference, and
+// parenthesized spine expressions down to the root identifier, stopping at a
+// package-qualified selector (pkg.Symbol -> Symbol) when info resolves pkg to
+// *types.PkgName.
+func PlaceRootIdent(info *types.Info, expr ast.Expr) *ast.Ident {
+	for {
+		switch e := expr.(type) {
+		case *ast.Ident:
+			return e
+		case *ast.SelectorExpr:
+			if info != nil {
+				if x, ok := ast.Unparen(e.X).(*ast.Ident); ok {
+					if _, isPkg := info.Uses[x].(*types.PkgName); isPkg {
+						return e.Sel
+					}
+				}
+			}
+			expr = e.X
+		case *ast.IndexExpr:
+			expr = e.X
+		case *ast.IndexListExpr:
+			expr = e.X
+		case *ast.SliceExpr:
+			expr = e.X
+		case *ast.StarExpr:
+			expr = e.X
+		case *ast.ParenExpr:
+			expr = e.X
+		default:
+			return nil
+		}
+	}
+}
+
+// IsLocalVar reports whether obj is a non-blank function-local variable
+// (receiver, parameter, named result, local declaration, or implicit
+// type-switch binding) rather than a struct field or package-scope variable.
+func IsLocalVar(obj types.Object) bool {
+	v, ok := obj.(*types.Var)
+	if !ok || v == nil || v.IsField() || v.Name() == "_" {
+		return false
+	}
+	if v.Pkg() != nil && v.Parent() == v.Pkg().Scope() {
+		return false
+	}
+	return true
+}
+
+// IsBuiltinNewType reports whether call is the zero-allocating builtin new(T)
+// form whose sole argument is a type expression (as opposed to Go 1.26+
+// value-initializing new(expr)).
+func IsBuiltinNewType(info *types.Info, call *ast.CallExpr) bool {
+	if info == nil || call == nil || len(call.Args) != 1 || call.Ellipsis.IsValid() {
+		return false
+	}
+	b := LookupBuiltin(info, call.Fun)
+	if b == nil || b.Name() != "new" {
+		return false
+	}
+	if tv, ok := info.Types[call.Args[0]]; ok && tv.IsType() {
+		return true
+	}
+	tv, ok := info.Types[ast.Unparen(call.Args[0])]
+	return ok && tv.IsType()
+}
+
+// LHSMapWriteKey reports whether lhs (after unparenthesizing) is a map-index
+// write target m[k] (including generic type parameters whose constraint admits
+// a map), returning m and k when so.
+func LHSMapWriteKey(info *types.Info, lhs ast.Expr) (mapExpr, keyExpr ast.Expr, ok bool) {
+	if info == nil || lhs == nil {
+		return nil, nil, false
+	}
+	idx, isIdx := ast.Unparen(lhs).(*ast.IndexExpr)
+	if !isIdx || idx.X == nil || idx.Index == nil {
+		return nil, nil, false
+	}
+	if !TypeMayBeMap(info.TypeOf(idx.X)) {
+		return nil, nil, false
+	}
+	return idx.X, idx.Index, true
+}
+
+// EachTypeSwitchImplicit visits every implicit case-clause *types.Var bound by
+// a type switch with a short variable guard (switch x := rhs.(type)), pairing
+// each implicit variable with rhs.
+func EachTypeSwitchImplicit(info *types.Info, n ast.Node, visit func(v *types.Var, rhs ast.Expr)) bool {
+	if info == nil {
+		return false
+	}
+	ts, ok := n.(*ast.TypeSwitchStmt)
+	if !ok || ts.Assign == nil || ts.Body == nil {
+		return false
+	}
+	as, ok := ts.Assign.(*ast.AssignStmt)
+	if !ok || len(as.Rhs) != 1 {
+		return false
+	}
+	ta, ok := ast.Unparen(as.Rhs[0]).(*ast.TypeAssertExpr)
+	if !ok || ta.X == nil {
+		return false
+	}
+	for _, st := range ts.Body.List {
+		cc, ok := st.(*ast.CaseClause)
+		if !ok {
+			continue
+		}
+		if v, ok := info.Implicits[cc].(*types.Var); ok && v != nil {
+			visit(v, ta.X)
+		}
+	}
+	return true
+}
+
 // IdentDefOrUse resolves ident in info.Defs first, falling back to info.Uses.
 func IdentDefOrUse(info *types.Info, ident *ast.Ident) types.Object {
 	if info == nil || ident == nil {
@@ -346,8 +460,9 @@ func EachLocalBinding(info *types.Info, n ast.Node, visit func(lhs, rhs ast.Expr
 }
 
 // PropagateLocalTaint computes the least fixed point of tainted local objects
-// in body: any identifier bound by an assignment, value specification, range
-// statement, or builtin copy(dst, src) call whose source expression satisfies
+// in body: any identifier or implicit type-switch variable bound by an
+// assignment, value specification, range statement, type switch, or builtin
+// copy(dst, src) / append(dst, elems...) call whose source expression satisfies
 // rhsTainted (or rangeTainted for a range operand) and whose object satisfies
 // allow is added to tainted until convergence.
 func PropagateLocalTaint(
@@ -360,13 +475,15 @@ func PropagateLocalTaint(
 ) {
 	for changed := true; changed; {
 		changed = false
-		taint := func(ident *ast.Ident) {
-			obj := IdentDefOrUse(info, ident)
+		taintObj := func(obj types.Object) {
 			if obj == nil || tainted[obj] || !allow(obj) {
 				return
 			}
 			tainted[obj] = true
 			changed = true
+		}
+		taint := func(ident *ast.Ident) {
+			taintObj(IdentDefOrUse(info, ident))
 		}
 		ast.Inspect(body, func(n ast.Node) bool {
 			if r, isRange := n.(*ast.RangeStmt); isRange {
@@ -379,6 +496,26 @@ func PropagateLocalTaint(
 				}
 				return true
 			}
+			if EachTypeSwitchImplicit(info, n, func(v *types.Var, rhs ast.Expr) {
+				if rhs != nil && rhsTainted(rhs) {
+					taintObj(v)
+				}
+			}) {
+				return true
+			}
+			if call, isCall := n.(*ast.CallExpr); isCall && info != nil && len(call.Args) >= 2 {
+				if b := LookupBuiltin(info, call.Fun); b != nil && b.Name() == "append" {
+					for _, arg := range call.Args[1:] {
+						if arg != nil && rhsTainted(arg) {
+							if ident := PlaceRootIdent(info, call.Args[0]); ident != nil {
+								taint(ident)
+							}
+							break
+						}
+					}
+					return true
+				}
+			}
 			EachLocalBinding(info, n, func(lhs, rhs ast.Expr) {
 				if rhs == nil || !rhsTainted(rhs) {
 					return
@@ -386,7 +523,7 @@ func PropagateLocalTaint(
 				if ident, ok := ast.Unparen(lhs).(*ast.Ident); ok {
 					taint(ident)
 				} else if _, isCall := n.(*ast.CallExpr); isCall {
-					if ident := ChainRoot(lhs); ident != nil {
+					if ident := PlaceRootIdent(info, lhs); ident != nil {
 						taint(ident)
 					}
 				}
@@ -408,6 +545,44 @@ func EachCompositeLitValue(lit *ast.CompositeLit, fn func(ast.Expr) bool) bool {
 			v = kv.Value
 		}
 		if !fn(v) {
+			return false
+		}
+	}
+	return true
+}
+
+// EachCompositeLitFlow visits every runtime value expression evaluated by lit
+// (both keys and values for map or type-parameter literals, including elided-&
+// pointer-to-map literals, and element/field values for struct, slice, and
+// array literals) until fn returns false.
+func EachCompositeLitFlow(info *types.Info, lit *ast.CompositeLit, fn func(expr ast.Expr, isMapKey bool) bool) bool {
+	if lit == nil {
+		return true
+	}
+	visitKeys := true
+	if info != nil {
+		u := UnderlyingType(info.TypeOf(lit))
+		if ptr, ok := u.(*types.Pointer); ok {
+			u = UnderlyingType(ptr.Elem())
+		}
+		switch u.(type) {
+		case *types.Struct, *types.Slice, *types.Array:
+			visitKeys = false
+		}
+	}
+	for _, elt := range lit.Elts {
+		if kv, ok := elt.(*ast.KeyValueExpr); ok {
+			if visitKeys && kv.Key != nil {
+				if !fn(kv.Key, true) {
+					return false
+				}
+			}
+			if !fn(kv.Value, false) {
+				return false
+			}
+			continue
+		}
+		if !fn(elt, false) {
 			return false
 		}
 	}

@@ -415,11 +415,12 @@ func TestExportedSurfaceInventory(t *testing.T) {
 	// 2. Verify no exported struct field or exported function/method signature in
 	// root gofresh spells an internal package selector directly in the AST.
 	internalPkgs := map[string]bool{
-		"auditset": true, "buildflags": true, "cachefile": true, "closure": true,
-		"dynstate": true, "gotool": true, "guard": true, "jsonrecord": true,
-		"outcome": true, "protoaudit": true, "refconfine": true, "render": true,
-		"runtimeinput": true, "syntaxutil": true, "testenv": true, "testvariant": true,
-		"trace": true,
+		"asmverify": true, "auditset": true, "buildflags": true, "cachefile": true,
+		"closure": true, "cprep": true, "dynstate": true, "flowir": true,
+		"freshstruct": true, "gotool": true, "guard": true, "jsonrecord": true,
+		"outcome": true, "propharness": true, "protoaudit": true, "refconfine": true,
+		"render": true, "runtimeinput": true, "seams": true, "syntaxutil": true,
+		"testenv": true, "testvariant": true, "toolchain": true, "trace": true,
 	}
 	fset := token.NewFileSet()
 	entries, err := os.ReadDir(".")
