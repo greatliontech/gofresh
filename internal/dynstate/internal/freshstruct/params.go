@@ -624,9 +624,30 @@ func stepNonEscapingIntraParams(
 								continue
 							}
 							return false, 0, false, false, nil
+						case *ast.RangeStmt:
+							if ast.Unparen(x.X) == cur && (x.Value == nil || syntaxutil.IsBlankIdent(x.Value) || !refconfine.TypeContainsRefOrPointer(p.TypesInfo.TypeOf(x.Value))) {
+								continue
+							}
+							return false, 0, false, false, nil
+						case *ast.IncDecStmt:
+							return false, 0, false, false, nil
+						case *ast.UnaryExpr:
+							if x.Op == token.AND {
+								return false, 0, false, false, nil
+							}
+							if cur != uid && !refconfine.TypeContainsRefOrPointer(p.TypesInfo.TypeOf(cur)) {
+								continue
+							}
+							return false, 0, false, false, nil
 						case *ast.CallExpr:
 							if !refconfine.TypeContainsRefOrPointer(p.TypesInfo.TypeOf(cur)) {
 								continue
+							}
+							if bn := syntaxutil.LookupBuiltin(p.TypesInfo, ast.Unparen(x.Fun)); bn != nil {
+								if (bn.Name() == "len" || bn.Name() == "cap") && len(x.Args) == 1 && !x.Ellipsis.IsValid() && ast.Unparen(x.Args[0]) == cur {
+									continue
+								}
+								return false, 0, false, false, nil
 							}
 							callee := syntaxutil.ResolveCalledFuncObj(p, x.Fun)
 							if callee == nil || x.Ellipsis.IsValid() {

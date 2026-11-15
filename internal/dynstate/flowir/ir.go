@@ -410,6 +410,49 @@ func (v *Value) ParamIndexForArg(argIdx int) (int, bool) {
 	return argIdx, true
 }
 
+// ForEachArgParam visits each call-argument slot supplied by v.Args and maps it
+// to its formal parameter index on CalleeSig, expanding Go's multi-return
+// f(g()) tuple unpacking when len(v.Args) == 1 && !v.Ellipsis and v.Args[0].Type
+// is a multi-element *types.Tuple. packedVariadic reports whether the slot is
+// packed as an element into a variadic `...T` slice parameter rather than bound 1:1.
+func (v *Value) ForEachArgParam(fn func(arg *Value, slotType types.Type, slotIdx int, paramIdx int, ok bool, packedVariadic bool) bool) bool {
+	if v == nil {
+		return true
+	}
+	isPacked := func(slotIdx int) bool {
+		return v.CalleeSig != nil && v.CalleeSig.Variadic() && !v.Ellipsis &&
+			v.CalleeSig.Params() != nil && v.CalleeSig.Params().Len() > 0 &&
+			slotIdx >= v.CalleeSig.Params().Len()-1
+	}
+	if len(v.Args) == 1 && !v.Ellipsis && v.Args[0] != nil && v.Args[0].Type != nil {
+		if tup, isTuple := types.Unalias(v.Args[0].Type).(*types.Tuple); isTuple && tup.Len() > 1 {
+			arg := v.Args[0]
+			for k := 0; k < tup.Len(); k++ {
+				pIdx, ok := v.ParamIndexForArg(k)
+				var slotT types.Type
+				if tup.At(k) != nil {
+					slotT = tup.At(k).Type()
+				}
+				if !fn(arg, slotT, k, pIdx, ok, isPacked(k)) {
+					return false
+				}
+			}
+			return true
+		}
+	}
+	for i, arg := range v.Args {
+		pIdx, ok := v.ParamIndexForArg(i)
+		var slotT types.Type
+		if arg != nil {
+			slotT = arg.Type
+		}
+		if !fn(arg, slotT, i, pIdx, ok, isPacked(i)) {
+			return false
+		}
+	}
+	return true
+}
+
 // OpKind classifies a lowered statement operation.
 type OpKind uint8
 

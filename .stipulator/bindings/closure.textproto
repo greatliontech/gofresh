@@ -683,8 +683,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-receiver-proof"
-  content_hash: "9b43e15935d7d82d0e0423ee9660f7362c0775589c81a93fb89721a01e8641b1"
-  source_hash: "628597c59f3ee8cc4072c002e7ea737f7ff0d458ed92de5a6d2328e4d4c3c6c0"
+  content_hash: "924b359a1a3b4911e5579dd27c0edcfe8bdce011c7ccaddd82153ae3b5162f0f"
+  source_hash: "df9fc6cee36c53aba329d0f13edbc3e8c15f8ad2282ab96bb60cef00f138f848"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestClosedInterfaceFieldDispatchChains"
   role: BINDING_ROLE_TESTS
@@ -2265,8 +2265,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-leak-free"
-  content_hash: "dd7d7f67e2e1c50ae1f29752486224870715024a46e6fa3a58be6c5b401ff832"
-  source_hash: "d8c1c4d5fba84e287308f96f57cc7dc388b4617172e2dbd48cb7fb2932a59cfa"
+  content_hash: "f52d89ab92c1a228f9781a86c3490b45422f431dd058becb2c0b9775e1b08444"
+  source_hash: "f5ca982cde215a869c5c1c2981cfe4fb1e8b274f82e7fa1a89490c93740c9e1d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.FuzzSharedDynamicStateInvariants"
   role: BINDING_ROLE_TESTS
@@ -2285,8 +2285,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-memo"
-  content_hash: "bc970d813f2cf51e2d30f20642974729dd688b195d4c539557d0c659f48e4e5d"
-  source_hash: "c4efe89c99dc645a638a6736df460e346c9f787459db142ee664ce4c51542509"
+  content_hash: "e445b34f15fbc6eccda4f08caa1bfea0928bfabf325b0003de3809e8ee2fc238"
+  source_hash: "f560c6021d400c890e7455ac9c4be36eb82f582ab7f64f19b2c67c96954a9707"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.FuzzSharedDynamicStateInvariants"
   role: BINDING_ROLE_TESTS
@@ -2305,8 +2305,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-parameter-facts"
-  content_hash: "f2a935c2b92d6cb9fc9eb617ac8d9b1b99750fd792a78a6361c5f603fab1b796"
-  source_hash: "40ae2b54432294098ae75d3ae5c14ce0c8ae6f6098f8b508c4522f2cae8a50f9"
+  content_hash: "465bc35d31f1ed2a7873e9c7f09432e7ffcdf60582152b79c23edb0950bf8514"
+  source_hash: "fbb32de6b76d0c74e320ae8bda4310b4bc4b14adeddf7fbc4c084a0763a54d60"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.FuzzSharedDynamicStateInvariants"
   role: BINDING_ROLE_TESTS
@@ -2345,8 +2345,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-receiver-proof"
-  content_hash: "9b43e15935d7d82d0e0423ee9660f7362c0775589c81a93fb89721a01e8641b1"
-  source_hash: "628597c59f3ee8cc4072c002e7ea737f7ff0d458ed92de5a6d2328e4d4c3c6c0"
+  content_hash: "924b359a1a3b4911e5579dd27c0edcfe8bdce011c7ccaddd82153ae3b5162f0f"
+  source_hash: "df9fc6cee36c53aba329d0f13edbc3e8c15f8ad2282ab96bb60cef00f138f848"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.FuzzSharedDynamicStateInvariants"
   role: BINDING_ROLE_TESTS
@@ -2355,8 +2355,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-registration-audit"
-  content_hash: "a6a49f67d7c8dd33e6a8499d1257c516fe638c05b0bf1739506668ef2047f27f"
-  source_hash: "45675dea532957be86bc2382e9a28d3ccf30a55c8c048df70419f3678a472d45"
+  content_hash: "a6cd4257881b008aceabf0c48814291cbd0d977892c1496615231404ca3121d7"
+  source_hash: "a2c0ab55d96423c2ec8ff701b58e871d429c108d6d2682f5cc1f032aa0849f93"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.FuzzSharedDynamicStateInvariants"
   role: BINDING_ROLE_TESTS
@@ -2375,8 +2375,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-receiver-proof"
-  content_hash: "9b43e15935d7d82d0e0423ee9660f7362c0775589c81a93fb89721a01e8641b1"
-  source_hash: "628597c59f3ee8cc4072c002e7ea737f7ff0d458ed92de5a6d2328e4d4c3c6c0"
+  content_hash: "924b359a1a3b4911e5579dd27c0edcfe8bdce011c7ccaddd82153ae3b5162f0f"
+  source_hash: "df9fc6cee36c53aba329d0f13edbc3e8c15f8ad2282ab96bb60cef00f138f848"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestFieldPopulationProvesPoisonsDeferralsAndCyclicCtors"
   role: BINDING_ROLE_TESTS
@@ -2385,8 +2385,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-memo"
-  content_hash: "bc970d813f2cf51e2d30f20642974729dd688b195d4c539557d0c659f48e4e5d"
-  source_hash: "c4efe89c99dc645a638a6736df460e346c9f787459db142ee664ce4c51542509"
+  content_hash: "e445b34f15fbc6eccda4f08caa1bfea0928bfabf325b0003de3809e8ee2fc238"
+  source_hash: "f560c6021d400c890e7455ac9c4be36eb82f582ab7f64f19b2c67c96954a9707"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestMalformedFactEntriesFailClosedInCompose"
   role: BINDING_ROLE_TESTS
@@ -2631,8 +2631,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-memo"
-  content_hash: "bc970d813f2cf51e2d30f20642974729dd688b195d4c539557d0c659f48e4e5d"
-  source_hash: "c4efe89c99dc645a638a6736df460e346c9f787459db142ee664ce4c51542509"
+  content_hash: "e445b34f15fbc6eccda4f08caa1bfea0928bfabf325b0003de3809e8ee2fc238"
+  source_hash: "f560c6021d400c890e7455ac9c4be36eb82f582ab7f64f19b2c67c96954a9707"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestStructuralDischargesAndCrossVariantIntersection"
   role: BINDING_ROLE_TESTS
@@ -2641,8 +2641,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-memo"
-  content_hash: "bc970d813f2cf51e2d30f20642974729dd688b195d4c539557d0c659f48e4e5d"
-  source_hash: "c4efe89c99dc645a638a6736df460e346c9f787459db142ee664ce4c51542509"
+  content_hash: "e445b34f15fbc6eccda4f08caa1bfea0928bfabf325b0003de3809e8ee2fc238"
+  source_hash: "f560c6021d400c890e7455ac9c4be36eb82f582ab7f64f19b2c67c96954a9707"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestAuditedMemoizationDischargeIsAttestationFree"
   role: BINDING_ROLE_TESTS
@@ -2701,8 +2701,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-leak-free"
-  content_hash: "dd7d7f67e2e1c50ae1f29752486224870715024a46e6fa3a58be6c5b401ff832"
-  source_hash: "d8c1c4d5fba84e287308f96f57cc7dc388b4617172e2dbd48cb7fb2932a59cfa"
+  content_hash: "f52d89ab92c1a228f9781a86c3490b45422f431dd058becb2c0b9775e1b08444"
+  source_hash: "f5ca982cde215a869c5c1c2981cfe4fb1e8b274f82e7fa1a89490c93740c9e1d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/dynstate/flowir.TestRapidFlowIRStructuralAndAliasInvariants"
   role: BINDING_ROLE_TESTS
@@ -2711,8 +2711,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-leak-free"
-  content_hash: "dd7d7f67e2e1c50ae1f29752486224870715024a46e6fa3a58be6c5b401ff832"
-  source_hash: "d8c1c4d5fba84e287308f96f57cc7dc388b4617172e2dbd48cb7fb2932a59cfa"
+  content_hash: "f52d89ab92c1a228f9781a86c3490b45422f431dd058becb2c0b9775e1b08444"
+  source_hash: "f5ca982cde215a869c5c1c2981cfe4fb1e8b274f82e7fa1a89490c93740c9e1d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/dynstate/flowir.TestRapidFlowIRDesugaringEquivalence"
   role: BINDING_ROLE_TESTS
@@ -2721,8 +2721,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-leak-free"
-  content_hash: "dd7d7f67e2e1c50ae1f29752486224870715024a46e6fa3a58be6c5b401ff832"
-  source_hash: "d8c1c4d5fba84e287308f96f57cc7dc388b4617172e2dbd48cb7fb2932a59cfa"
+  content_hash: "f52d89ab92c1a228f9781a86c3490b45422f431dd058becb2c0b9775e1b08444"
+  source_hash: "f5ca982cde215a869c5c1c2981cfe4fb1e8b274f82e7fa1a89490c93740c9e1d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestRapidDynstateSoundnessAgainstStateDriftOracle"
   role: BINDING_ROLE_TESTS
@@ -2731,8 +2731,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-closure-shared-dynamic-state-leak-free"
-  content_hash: "dd7d7f67e2e1c50ae1f29752486224870715024a46e6fa3a58be6c5b401ff832"
-  source_hash: "d8c1c4d5fba84e287308f96f57cc7dc388b4617172e2dbd48cb7fb2932a59cfa"
+  content_hash: "f52d89ab92c1a228f9781a86c3490b45422f431dd058becb2c0b9775e1b08444"
+  source_hash: "f5ca982cde215a869c5c1c2981cfe4fb1e8b274f82e7fa1a89490c93740c9e1d"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestRapidDynstateMetamorphicInvariance"
   role: BINDING_ROLE_TESTS
@@ -2777,4 +2777,84 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestRealRapidDynamicStateAndAttributedParamForeclosureEndToEnd"
   role: BINDING_ROLE_TESTS
   shape_hash: "d83b136d4e42e02aeb5c53f81645304e844fbe3d0ab7ae12f56f1de3e31e4f08"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-receiver-proof"
+  content_hash: "924b359a1a3b4911e5579dd27c0edcfe8bdce011c7ccaddd82153ae3b5162f0f"
+  source_hash: "df9fc6cee36c53aba329d0f13edbc3e8c15f8ad2282ab96bb60cef00f138f848"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestPropertyJointConfinementLFPAcrossMultiPackageGraphs"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7bbdad891b818a2e400d4c4dbf55500ca11bb606b3cf3a736a06dccc6758ac31"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-leak-free"
+  content_hash: "f52d89ab92c1a228f9781a86c3490b45422f431dd058becb2c0b9775e1b08444"
+  source_hash: "f5ca982cde215a869c5c1c2981cfe4fb1e8b274f82e7fa1a89490c93740c9e1d"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestPropertyJointConfinementLFPAcrossMultiPackageGraphs"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7bbdad891b818a2e400d4c4dbf55500ca11bb606b3cf3a736a06dccc6758ac31"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-parameter-facts"
+  content_hash: "465bc35d31f1ed2a7873e9c7f09432e7ffcdf60582152b79c23edb0950bf8514"
+  source_hash: "fbb32de6b76d0c74e320ae8bda4310b4bc4b14adeddf7fbc4c084a0763a54d60"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestPropertyCrossPackageEnvSummaryStateDriftOracle"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1b0f05acbb446bbd171a2a6c58da74e3ee8232669729fad0883932d7596900d1"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-registration-audit"
+  content_hash: "a6cd4257881b008aceabf0c48814291cbd0d977892c1496615231404ca3121d7"
+  source_hash: "a2c0ab55d96423c2ec8ff701b58e871d429c108d6d2682f5cc1f032aa0849f93"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestPropertyCrossPackageEnvSummaryStateDriftOracle"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "1b0f05acbb446bbd171a2a6c58da74e3ee8232669729fad0883932d7596900d1"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-memo"
+  content_hash: "e445b34f15fbc6eccda4f08caa1bfea0928bfabf325b0003de3809e8ee2fc238"
+  source_hash: "f560c6021d400c890e7455ac9c4be36eb82f582ab7f64f19b2c67c96954a9707"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestPropertyOnceMemoTypeAndCandidateStructuralInvariants"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "026aa5864ed3cbf0b30d8afce2862bc51c559a38209528c4a26544526ecfac62"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-memo"
+  content_hash: "e445b34f15fbc6eccda4f08caa1bfea0928bfabf325b0003de3809e8ee2fc238"
+  source_hash: "f560c6021d400c890e7455ac9c4be36eb82f582ab7f64f19b2c67c96954a9707"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate.TestOnceMemoEmbeddedGuidanceAndCodecPoison"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "9964253beb209b6167c16697298f53c427e5f6719de85900135d6ce288f4af38"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-memo"
+  content_hash: "e445b34f15fbc6eccda4f08caa1bfea0928bfabf325b0003de3809e8ee2fc238"
+  source_hash: "f560c6021d400c890e7455ac9c4be36eb82f582ab7f64f19b2c67c96954a9707"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct.TestTwoLevelMapCommaOkSelfAppendAndClosureFieldFreshness"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "020e9b34662c06a6ab258b0098910419a4b3f200f7ad75c81fe0207995170b1a"
+}
+
+bindings {
+  requirement_id: "REQ-closure-shared-dynamic-state-memo"
+  content_hash: "e445b34f15fbc6eccda4f08caa1bfea0928bfabf325b0003de3809e8ee2fc238"
+  source_hash: "f560c6021d400c890e7455ac9c4be36eb82f582ab7f64f19b2c67c96954a9707"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct.TestRapidFreshStructConstructorAndFieldFreshnessOracle"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "b9413daf51bc9fe9b57bc3c410fbd71d759a442c94b4c96a2498047d295331d6"
 }

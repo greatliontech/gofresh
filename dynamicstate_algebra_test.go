@@ -878,3 +878,256 @@ func TestOpenWorldRefusalNamesTheConferringTerm(t *testing.T) {
 		}
 	})
 }
+
+// Unproven parameter-confinement and method-confinement edges on environment-audit
+// registrations, ReturnEnvFree generators, and ParamInsertionFree helpers emit
+// terminating "edge" links without a spurious local refusal expression or raw NULs
+// (REQ-explain-chain).
+func TestExplainEnvAuditConfinementEdges(t *testing.T) {
+	t.Run("direct EnvCallParamUses and EnvCallMethodUses plus transitive confinement walk", func(t *testing.T) {
+		const culprit = "example.com/reg.Registry"
+		cleanParam := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Clean"}, Index: 0}
+		midParam := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/mid", Name: "Forward"}, Index: 1}
+		midMethod := syntaxutil.FuncKey{Pkg: "example.com/mid", Name: "Box.Step"}
+		leafMethod := syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Sink.Mutate"}
+		leafParam := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Retain"}, Index: 0}
+		directMethod := syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Holder.Write"}
+
+		facts := map[string][]dynstate.Fact{
+			"example.com/reg": {{
+				Declares: []string{culprit},
+				EnvCallParamUses: []syntaxutil.EnvCallParamUse{
+					{Key: culprit, Param: cleanParam},
+					{Key: culprit, Param: midParam},
+				},
+				EnvCallMethodUses: []syntaxutil.EnvCallMethodUse{
+					{Key: culprit, Method: directMethod},
+				},
+			}},
+			"example.com/mid": {{
+				ParamLeakFree: []syntaxutil.ParamKey{midParam},
+				ParamLeakFreeMethodDeps: []syntaxutil.ParamMethodDepEdge{
+					{Param: midParam, Method: midMethod},
+				},
+				ReceiverReadOnly: []syntaxutil.FuncKey{midMethod},
+				ReceiverReadOnlyDeps: []syntaxutil.FuncDepEdge{
+					{Func: midMethod, Callee: leafMethod},
+				},
+				ReceiverReadOnlyParamDeps: []syntaxutil.FuncParamDepEdge{
+					{Func: midMethod, Param: leafParam},
+				},
+			}},
+			"example.com/dep": {{
+				ParamLeakFree: []syntaxutil.ParamKey{cleanParam},
+			}},
+		}
+
+		edges, refusedFn, refusedPath := envAuditTrail(
+			map[string][]*packages.Package{"example.com/dep": {{}}, "example.com/mid": {{}}},
+			facts,
+			map[string]bool{culprit: true},
+			"Registry",
+		)
+		if refusedFn != "" || refusedPath != "" {
+			t.Fatalf("confinement-edge failure reported local refusal site (%q, %q), want empty", refusedFn, refusedPath)
+		}
+		wantCallees := map[string]bool{
+			"example.com/mid.Forward (parameter 1)": false,
+			"example.com/mid.Box.Step":              false,
+			"example.com/dep.Sink.Mutate":           false,
+			"example.com/dep.Retain (parameter 0)":  false,
+			"example.com/dep.Holder.Write":          false,
+		}
+		for _, e := range edges {
+			if e.Kind != "edge" {
+				t.Fatalf("unexpected link kind = %+v, want edge", e)
+			}
+			if strings.ContainsRune(e.Symbol+e.Callee+e.Package, 0) {
+				t.Fatalf("chain link carries a raw NUL: %+v", e)
+			}
+			if strings.Contains(e.Callee, "Clean") {
+				t.Fatalf("resolved ParamLeakFree edge leaked into trail: %+v", e)
+			}
+			if _, ok := wantCallees[e.Callee]; ok {
+				wantCallees[e.Callee] = true
+			}
+		}
+		for callee, seen := range wantCallees {
+			if !seen {
+				t.Fatalf("missing expected confinement edge %q in %+v", callee, edges)
+			}
+		}
+	})
+
+	t.Run("ReturnEnvParamDeps, ReturnEnvMethodDeps, ParamInsertionParamDeps, and ParamInsertionMethodDeps", func(t *testing.T) {
+		const culprit = "example.com/reg.Registry"
+		genFn := syntaxutil.FuncKey{Pkg: "example.com/gen", Name: "Make"}
+		insParam := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/gen", Name: "Fill"}, Index: 0}
+		unprovenParam := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Stash"}, Index: 0}
+		unprovenMethod := syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Cell.Clobber"}
+
+		facts := map[string][]dynstate.Fact{
+			"example.com/reg": {{
+				Declares:    []string{culprit},
+				EnvCallUses: []syntaxutil.EnvCallUse{{Key: culprit, Callee: genFn}},
+			}},
+			"example.com/gen": {{
+				ReturnEnvFree: []syntaxutil.FuncKey{genFn},
+				ReturnEnvInsertionDeps: []syntaxutil.FuncInsertionDepEdge{
+					{Func: genFn, Dep: syntaxutil.ParamAuditTarget(insParam)},
+				},
+				ReturnEnvParamDeps: []syntaxutil.FuncParamDepEdge{
+					{Func: genFn, Param: unprovenParam},
+				},
+				ReturnEnvMethodDeps: []syntaxutil.FuncDepEdge{
+					{Func: genFn, Callee: unprovenMethod},
+				},
+				ParamInsertionFree: []syntaxutil.ParamKey{insParam},
+				ParamInsertionParamDeps: []syntaxutil.ParamDepEdge{
+					{Own: insParam, Dep: unprovenParam},
+				},
+				ParamInsertionMethodDeps: []syntaxutil.ParamMethodDepEdge{
+					{Param: insParam, Method: unprovenMethod},
+				},
+			}},
+			"example.com/dep": {{}},
+		}
+		edges, refusedFn, refusedPath := envAuditTrail(
+			map[string][]*packages.Package{"example.com/gen": {{}}, "example.com/dep": {{}}},
+			facts,
+			map[string]bool{culprit: true},
+			"Registry",
+		)
+		if refusedFn != "" || refusedPath != "" {
+			t.Fatalf("confinement-gated generator reported local refusal (%q, %q), want empty", refusedFn, refusedPath)
+		}
+		sawInsEdge := false
+		sawParamEdge := false
+		sawMethodEdge := false
+		for _, e := range edges {
+			if strings.ContainsRune(e.Symbol+e.Callee+e.Package, 0) {
+				t.Fatalf("chain link carries a raw NUL: %+v", e)
+			}
+			if e.Symbol == "Fill (parameter 0)" && e.Callee == "example.com/dep.Stash (parameter 0)" {
+				sawParamEdge = true
+			}
+			if e.Symbol == "Fill (parameter 0)" && e.Callee == "example.com/dep.Cell.Clobber" {
+				sawMethodEdge = true
+			}
+			if e.Symbol == "Make" && e.Callee == "example.com/gen.Fill (parameter 0)" {
+				sawInsEdge = true
+			}
+		}
+		if !sawInsEdge || !sawParamEdge || !sawMethodEdge {
+			t.Fatalf("missing expected generator/insertion confinement edges (ins=%v param=%v method=%v): %+v", sawInsEdge, sawParamEdge, sawMethodEdge, edges)
+		}
+	})
+
+	t.Run("end-to-end ExplainDynamicState ends at cross-package parameter confinement edge", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod": "module example.com/explainconf\n\ngo 1.26\n",
+			"dep/dep.go": `package dep
+
+var leaked []int
+
+func Retain(xs []int) int {
+	leaked = xs
+	return len(xs)
+}
+
+func ReadOnly(xs []int) int {
+	return len(xs)
+}
+`,
+			"gen/gen.go": `package gen
+
+import "example.com/explainconf/dep"
+
+func Make(n int) func() int {
+	buf := []int{n}
+	_ = dep.ReadOnly(buf)
+	_ = dep.Retain(buf)
+	return func() int { return buf[0] }
+}
+`,
+			"reg/reg.go": `package reg
+
+import "example.com/explainconf/gen"
+
+var Registry = []func() int{gen.Make(7)}
+
+func Count() int { return Registry[0]() }
+`,
+		}
+		dir := writeModuleTree(t, files)
+		chain := explainView(t, dir, "example.com/explainconf/reg", "Registry")
+		if chain.Arm != "environment-audit" || len(chain.Links) < 2 {
+			t.Fatalf("unexpected explain chain: %+v", chain)
+		}
+		if chain.Links[0].Kind != "store" {
+			t.Fatalf("chain.Links[0] = %+v, want leading store link (chain=%+v)", chain.Links[0], chain)
+		}
+		for _, l := range chain.Links {
+			if l.Kind == "refusal" {
+				t.Fatalf("confinement-edge chain emitted unexpected refusal link: %+v", chain)
+			}
+			if strings.Contains(l.Callee, "ReadOnly") {
+				t.Fatalf("resolved ReadOnly parameter leaked into explain chain: %+v", chain)
+			}
+		}
+		last := chain.Links[len(chain.Links)-1]
+		if last.Kind != "edge" || last.Callee != "example.com/explainconf/dep.Retain (parameter 0)" {
+			t.Fatalf("last link = %+v, want terminating edge to example.com/explainconf/dep.Retain (parameter 0) (chain=%+v)", last, chain)
+		}
+	})
+
+	t.Run("direct EnvCallParamUses and EnvCallMethodUses emit store before terminating edge", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod": "module example.com/explaindirect\n\ngo 1.26\n",
+			"dep/dep.go": `package dep
+
+var leaked []int
+
+func Retain(xs []int) int {
+	leaked = xs
+	return len(xs)
+}
+
+type Cell struct{ V []int }
+
+func (c *Cell) Clobber() int {
+	c.V = append(c.V, 9)
+	return len(c.V)
+}
+`,
+			"reg/reg.go": `package reg
+
+import "example.com/explaindirect/dep"
+
+var Registry []func() int
+
+func init() {
+	buf := []int{7}
+	_ = dep.Retain(buf)
+	cell := &dep.Cell{V: []int{1}}
+	_ = cell.Clobber()
+	Registry = append(Registry, func() int { return buf[0] + len(cell.V) })
+}
+
+func Count() int { return Registry[0]() }
+`,
+		}
+		dir := writeModuleTree(t, files)
+		chain := explainView(t, dir, "example.com/explaindirect/reg", "Registry")
+		if chain.Arm != "environment-audit" || len(chain.Links) < 2 {
+			t.Fatalf("unexpected direct confinement explain chain: %+v", chain)
+		}
+		if chain.Links[0].Kind != "store" {
+			t.Fatalf("chain.Links[0] = %+v, want leading store link (chain=%+v)", chain.Links[0], chain)
+		}
+		last := chain.Links[len(chain.Links)-1]
+		if last.Kind != "edge" {
+			t.Fatalf("last link = %+v, want terminating edge (chain=%+v)", last, chain)
+		}
+	})
+}

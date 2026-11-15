@@ -19,32 +19,54 @@ func returnEnvFreeFunctions(
 	audited bool,
 	p *packages.Package,
 	settledGlobals settledGlobalMap,
-	paramLeakFree map[syntaxutil.ParamKey]bool,
-	readOnly map[string]bool,
+	pkgConf *packageConfinementSummary,
 	hooks *syntaxutil.ExplainHookSet,
 ) (
 	map[string]bool,
+	map[string]map[syntaxutil.FuncKey]bool,
+	map[string]map[syntaxutil.ParamKey]bool,
 	map[string]map[syntaxutil.FuncKey]bool,
 	map[string]map[syntaxutil.ReturnFieldParamDefer]bool,
 	map[string]map[syntaxutil.ReturnFieldParamPoison]bool,
 	map[syntaxutil.ParamKey]bool,
 	map[syntaxutil.ParamKey]map[syntaxutil.EnvAuditTarget]bool,
+	map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool,
+	map[syntaxutil.ParamKey]map[syntaxutil.FuncKey]bool,
 	map[string]map[syntaxutil.EnvAuditTarget]bool,
 ) {
 	if p == nil || p.TypesInfo == nil || p.Types == nil {
-		return nil, nil, nil, nil, nil, nil, nil
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
 	}
 	ownPath := p.Types.Path()
 	carries := refconfine.TypeCarriesSignature
-	wantsResolve := func(wants map[syntaxutil.ParamKey]bool, methodWants map[syntaxutil.FuncKey]bool) bool {
+	classifyWants := func(
+		wants map[syntaxutil.ParamKey]bool,
+		methodWants map[syntaxutil.FuncKey]bool,
+		paramOut map[syntaxutil.ParamKey]bool,
+		methodOut map[syntaxutil.FuncKey]bool,
+	) bool {
 		for want := range wants {
-			if want.Func.Pkg != ownPath || !paramLeakFree[want] {
+			provenLocal, conditional := pkgConf.classifyParam(ownPath, want)
+			if !provenLocal && (!conditional || paramOut == nil) {
 				return false
 			}
 		}
 		for want := range methodWants {
-			if want.Pkg != ownPath || !readOnly[want.Name] {
+			provenLocal, conditional := pkgConf.classifyMethod(ownPath, want)
+			if !provenLocal && (!conditional || methodOut == nil) {
 				return false
+			}
+		}
+		for want := range wants {
+			provenLocal, _ := pkgConf.classifyParam(ownPath, want)
+			if !provenLocal {
+				paramOut[want] = true
+			}
+		}
+		for want := range methodWants {
+			provenLocal, _ := pkgConf.classifyMethod(ownPath, want)
+			if !provenLocal {
+				methodOut[want] = true
 			}
 		}
 		return true
@@ -79,10 +101,14 @@ func returnEnvFreeFunctions(
 
 	proven := map[string]bool{}
 	deps := map[string]map[syntaxutil.FuncKey]bool{}
+	retParamDeps := map[string]map[syntaxutil.ParamKey]bool{}
+	retMethodDeps := map[string]map[syntaxutil.FuncKey]bool{}
 	retDefer := map[string]map[syntaxutil.ReturnFieldParamDefer]bool{}
 	retPoison := map[string]map[syntaxutil.ReturnFieldParamPoison]bool{}
 	insFree := map[syntaxutil.ParamKey]bool{}
 	insDeps := map[syntaxutil.ParamKey]map[syntaxutil.EnvAuditTarget]bool{}
+	insParamDeps := map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool{}
+	insMethodDeps := map[syntaxutil.ParamKey]map[syntaxutil.FuncKey]bool{}
 	callerInsDeps := map[string]map[syntaxutil.EnvAuditTarget]bool{}
 
 	for _, file := range p.Syntax {
@@ -133,6 +159,8 @@ func returnEnvFreeFunctions(
 			var aliasPairs [][2]types.Object
 			var heldPairs [][2]types.Object
 			stmtCallDeps := map[syntaxutil.FuncKey]bool{}
+			rawObjParamDeps := map[types.Object]map[syntaxutil.ParamKey]bool{}
+			rawObjMethodDeps := map[types.Object]map[syntaxutil.FuncKey]bool{}
 
 			trackedVar := func(obj types.Object) (*types.Var, bool) {
 				if !syntaxutil.IsLocalVar(obj) {
@@ -298,12 +326,8 @@ func returnEnvFreeFunctions(
 					}
 				case flowir.ValChanRecv:
 					linkBacking(obj, src.Chan)
-				case flowir.ValMakeClosure:
-					if src.Closure != nil {
-						for fv := range src.Closure.FreeVars {
-							pairLink(obj, fv, true)
-						}
-					}
+				case flowir.ValScalarLitOrConst, flowir.ValMakeClosure:
+					return
 				case flowir.ValCompositeExpr:
 					for _, a := range src.Args {
 						linkBacking(obj, a)
@@ -484,10 +508,29 @@ func returnEnvFreeFunctions(
 							}
 							wants := map[syntaxutil.ParamKey]bool{}
 							mw := map[syntaxutil.FuncKey]bool{}
+							fvParams := map[syntaxutil.ParamKey]bool{}
+							fvMethods := map[syntaxutil.FuncKey]bool{}
 							if !boundValueClosureEnvLeakFreeJudged(audited, p, map[types.Object]bool{fv: true}, v.Lit.Body, wants, mw) ||
-								!wantsResolve(wants, mw) {
+								!classifyWants(wants, mw, fvParams, fvMethods) {
 								localBroken[fv] = true
 								captureBroken[fv] = true
+								continue
+							}
+							if len(fvParams) > 0 {
+								if rawObjParamDeps[fv] == nil {
+									rawObjParamDeps[fv] = map[syntaxutil.ParamKey]bool{}
+								}
+								for pk := range fvParams {
+									rawObjParamDeps[fv][pk] = true
+								}
+							}
+							if len(fvMethods) > 0 {
+								if rawObjMethodDeps[fv] == nil {
+									rawObjMethodDeps[fv] = map[syntaxutil.FuncKey]bool{}
+								}
+								for mk := range fvMethods {
+									rawObjMethodDeps[fv][mk] = true
+								}
 							}
 						}
 					}
@@ -509,7 +552,8 @@ func returnEnvFreeFunctions(
 							}
 						case v.BuiltinName == "append" && len(v.Args) >= 2:
 							base := v.Args[0]
-							freshBase := base != nil && (base.Kind == flowir.ValPlace && base.Place.Root == flowir.RootConstOrNil ||
+							freshBase := base != nil && (base.Kind == flowir.ValScalarLitOrConst ||
+								base.Kind == flowir.ValPlace && base.Place.Root == flowir.RootConstOrNil ||
 								base.Kind == flowir.ValAllocFresh && (base.AllocKind == flowir.AllocMake || base.AllocKind == flowir.AllocBuiltinNewType || base.AllocKind == flowir.AllocCompositeLit) ||
 								base.Kind == flowir.ValCall && base.CallKind == flowir.CallBuiltin && base.BuiltinName == "make" ||
 								base.Raw != nil && isPureFreshDataExprWith(p, base.Raw, nil))
@@ -760,19 +804,24 @@ func returnEnvFreeFunctions(
 									breakReachIn(arg)
 								}
 							}
-							for j, arg := range v.Args {
-								idx := j
-								if v.CalleeSig != nil && v.CalleeSig.Variadic() && v.CalleeSig.Params().Len() > 0 && idx >= v.CalleeSig.Params().Len()-1 {
-									idx = v.CalleeSig.Params().Len() - 1
+							v.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, slotIdx int, pIdx int, pOK bool, _ bool) bool {
+								if slotType != nil && !refconfine.CallResultHandsOut(slotType) {
+									return true
+								}
+								idx := slotIdx
+								if pOK {
+									idx = pIdx
 								}
 								classifyArg(arg, syntaxutil.ParamKey{Func: calleeFK, Index: idx}, v.Args)
-							}
+								return true
+							})
 						}
 					case flowir.CallMethod:
 						for _, a := range v.Args {
 							breakTargets(a)
 						}
 						recvExempt := false
+						var deferredRecvMethod syntaxutil.FuncKey
 						if !v.IsMethodExprCall && v.CalleeFunc != nil && !syntaxutil.InterfaceReceiver(v.CalleeFunc) &&
 							v.Selection != nil && refconfine.InstantiatedResultsHandOutNothing(audited, v.Selection.Type()) {
 							if sig, ok := v.CalleeFunc.Type().(*types.Signature); ok && sig.Recv() != nil {
@@ -783,7 +832,40 @@ func returnEnvFreeFunctions(
 							}
 							if !recvExempt {
 								mk := syntaxutil.MethodFactKey(v.CalleeFunc)
-								if mk.Pkg == ownPath && readOnly[mk.Name] {
+								provenLocal, conditional := pkgConf.classifyMethod(ownPath, mk)
+								if provenLocal {
+									recvExempt = true
+								} else if conditional {
+									deferredRecvMethod = mk
+								}
+							}
+						}
+						if !recvExempt && deferredRecvMethod.Valid() {
+							var recvPl flowir.Place
+							hasRecvPl := false
+							if v.AutoAddrRecv && v.HasRecvPlace {
+								recvPl = v.RecvPlace
+								hasRecvPl = true
+							} else {
+								cur := v.Recv
+								for cur != nil && cur.Kind == flowir.ValConvert && !cur.IsTypeAssert {
+									cur = cur.Arg
+								}
+								if cur != nil && cur.Kind == flowir.ValPlace {
+									recvPl = cur.Place
+									hasRecvPl = true
+								}
+							}
+							if hasRecvPl && recvPl.Obj != nil {
+								if _, tr := trackedVar(recvPl.Obj); tr || params[recvPl.Obj] {
+									recvPl.ForEachChildValue(func(cv *flowir.Value) bool {
+										breakTargets(cv)
+										return true
+									})
+									if rawObjMethodDeps[recvPl.Obj] == nil {
+										rawObjMethodDeps[recvPl.Obj] = map[syntaxutil.FuncKey]bool{}
+									}
+									rawObjMethodDeps[recvPl.Obj][deferredRecvMethod] = true
 									recvExempt = true
 								}
 							}
@@ -1250,7 +1332,7 @@ func returnEnvFreeFunctions(
 									idx = v.CalleeSig.Params().Len() - 1
 								}
 								calleeParam := syntaxutil.ParamKey{Func: calleeFK, Index: idx}
-								if calleeParam.Func.Pkg == ownPath && paramLeakFree[calleeParam] {
+								if pkgConf != nil && calleeParam.Func.Pkg == ownPath && pkgConf.paramLeakFree[calleeParam] {
 									var extras []*flowir.Value
 									if _, ok := unwrapBareOrResliceVar(arg, &extras); ok {
 										for _, ex := range extras {
@@ -1696,7 +1778,30 @@ func returnEnvFreeFunctions(
 				sharedInsertionWrites[rRoot] = append(sharedInsertionWrites[rRoot], stores...)
 			}
 
+			objParamDeps := map[types.Object]map[syntaxutil.ParamKey]bool{}
+			for obj, pks := range rawObjParamDeps {
+				rRoot := reachFind(obj)
+				if objParamDeps[rRoot] == nil {
+					objParamDeps[rRoot] = map[syntaxutil.ParamKey]bool{}
+				}
+				for pk := range pks {
+					objParamDeps[rRoot][pk] = true
+				}
+			}
+			objMethodDeps := map[types.Object]map[syntaxutil.FuncKey]bool{}
+			for obj, mks := range rawObjMethodDeps {
+				rRoot := reachFind(obj)
+				if objMethodDeps[rRoot] == nil {
+					objMethodDeps[rRoot] = map[syntaxutil.FuncKey]bool{}
+				}
+				for mk := range mks {
+					objMethodDeps[rRoot][mk] = true
+				}
+			}
+
 			resolvedUses := map[types.Object]map[syntaxutil.EnvAuditTarget]bool{}
+			resolvedParamDeps := map[types.Object]map[syntaxutil.ParamKey]bool{}
+			resolvedMethodDeps := map[types.Object]map[syntaxutil.FuncKey]bool{}
 			usePoison := map[types.Object]bool{}
 			componentMembers := map[types.Object][]types.Object{}
 			memberSeen := map[types.Object]bool{}
@@ -1741,7 +1846,25 @@ func returnEnvFreeFunctions(
 				fnDeps[callee] = true
 			}
 			insCallDeps := map[syntaxutil.EnvAuditTarget]bool{}
+			retFnParamDeps := map[syntaxutil.ParamKey]bool{}
+			retFnMethodDeps := map[syntaxutil.FuncKey]bool{}
 			useFold := &insCallDeps
+			paramDepFold := &retFnParamDeps
+			methodDepFold := &retFnMethodDeps
+			foldRootConfinementDeps := func(rRoot types.Object) {
+				for pk := range objParamDeps[rRoot] {
+					(*paramDepFold)[pk] = true
+				}
+				for mk := range objMethodDeps[rRoot] {
+					(*methodDepFold)[mk] = true
+				}
+				for pk := range resolvedParamDeps[rRoot] {
+					(*paramDepFold)[pk] = true
+				}
+				for mk := range resolvedMethodDeps[rRoot] {
+					(*methodDepFold)[mk] = true
+				}
+			}
 			recordFnDep := func(callee syntaxutil.FuncKey) {
 				fnDeps[callee] = true
 			}
@@ -1811,11 +1934,16 @@ func returnEnvFreeFunctions(
 						for use := range resolvedUses[rRoot] {
 							(*useFold)[use] = true
 						}
+						foldRootConfinementDeps(rRoot)
 						if !allowInsParam && rRoot != skipInsertionRoot {
 							for _, use := range pendingInsertionUses {
 								if reachFind(use.root) == rRoot && use.call != currentCall {
-									if use.calleeParam.Func.Pkg != ownPath || !paramLeakFree[use.calleeParam] {
-										return false
+									provenLocal, conditional := pkgConf.classifyParam(ownPath, use.calleeParam)
+									if !provenLocal {
+										if !conditional {
+											return false
+										}
+										(*paramDepFold)[use.calleeParam] = true
 									}
 								}
 							}
@@ -1946,6 +2074,7 @@ func returnEnvFreeFunctions(
 				for use := range resolvedUses[rRoot] {
 					(*useFold)[use] = true
 				}
+				foldRootConfinementDeps(rRoot)
 				switch localFree[obj] {
 				case 2:
 					return true, math.MaxInt
@@ -2001,6 +2130,7 @@ func returnEnvFreeFunctions(
 				for use := range resolvedUses[rRoot] {
 					(*useFold)[use] = true
 				}
+				foldRootConfinementDeps(rRoot)
 				switch localFree[obj] {
 				case 2:
 					return true, math.MaxInt
@@ -2138,7 +2268,7 @@ func returnEnvFreeFunctions(
 					if !environmentFreeFuncLitWithOrigin(audited, p, v.Lit, fd, wants, methodWants, origin) {
 						return false, math.MaxInt
 					}
-					if !wantsResolve(wants, methodWants) {
+					if !classifyWants(wants, methodWants, *paramDepFold, *methodDepFold) {
 						return false, math.MaxInt
 					}
 					// Ensure any captured signature-carrying or mutable-reach outer local/param in fd is also sound.
@@ -2269,12 +2399,21 @@ func returnEnvFreeFunctions(
 				return okVal
 			}
 
-			computeResolvedUses := func(insMode bool) (map[types.Object]bool, map[types.Object]map[syntaxutil.EnvAuditTarget]bool) {
+			computeResolvedUses := func(insMode bool) (
+				map[types.Object]bool,
+				map[types.Object]map[syntaxutil.EnvAuditTarget]bool,
+				map[types.Object]map[syntaxutil.ParamKey]bool,
+				map[types.Object]map[syntaxutil.FuncKey]bool,
+			) {
 				poison := map[types.Object]bool{}
 				resolved := map[types.Object]map[syntaxutil.EnvAuditTarget]bool{}
-				prevPoison, prevResolved, prevInsMode := usePoison, resolvedUses, inInsMode
+				resParams := map[types.Object]map[syntaxutil.ParamKey]bool{}
+				resMethods := map[types.Object]map[syntaxutil.FuncKey]bool{}
+				prevPoison, prevResolved, prevResP, prevResM, prevInsMode := usePoison, resolvedUses, resolvedParamDeps, resolvedMethodDeps, inInsMode
 				usePoison = poison
 				resolvedUses = resolved
+				resolvedParamDeps = resParams
+				resolvedMethodDeps = resMethods
 				inInsMode = insMode
 
 				step := func(record bool) bool {
@@ -2286,9 +2425,13 @@ func returnEnvFreeFunctions(
 						}
 						argFnDeps := map[syntaxutil.FuncKey]bool{}
 						argUseDeps := map[syntaxutil.EnvAuditTarget]bool{}
-						prevRec, prevFold := recordFnDep, useFold
+						argParamDeps := map[syntaxutil.ParamKey]bool{}
+						argMethodDeps := map[syntaxutil.FuncKey]bool{}
+						prevRec, prevFold, prevPFold, prevMFold := recordFnDep, useFold, paramDepFold, methodDepFold
 						recordFnDep = func(callee syntaxutil.FuncKey) { argFnDeps[callee] = true }
 						useFold = &argUseDeps
+						paramDepFold = &argParamDeps
+						methodDepFold = &argMethodDeps
 						clear(localFree)
 
 						allFree := true
@@ -2303,7 +2446,7 @@ func returnEnvFreeFunctions(
 								break
 							}
 						}
-						recordFnDep, useFold = prevRec, prevFold
+						recordFnDep, useFold, paramDepFold, methodDepFold = prevRec, prevFold, prevPFold, prevMFold
 
 						if !allFree {
 							poison[rRoot] = true
@@ -2327,6 +2470,24 @@ func returnEnvFreeFunctions(
 							for u := range argUseDeps {
 								addUse(u)
 							}
+							for pk := range argParamDeps {
+								if resParams[rRoot] == nil {
+									resParams[rRoot] = map[syntaxutil.ParamKey]bool{}
+								}
+								if !resParams[rRoot][pk] {
+									resParams[rRoot][pk] = true
+									changed = true
+								}
+							}
+							for mk := range argMethodDeps {
+								if resMethods[rRoot] == nil {
+									resMethods[rRoot] = map[syntaxutil.FuncKey]bool{}
+								}
+								if !resMethods[rRoot][mk] {
+									resMethods[rRoot][mk] = true
+									changed = true
+								}
+							}
 						}
 					}
 					return changed
@@ -2334,27 +2495,33 @@ func returnEnvFreeFunctions(
 
 				scratchFnDeps := map[syntaxutil.FuncKey]bool{}
 				scratchUseDeps := map[syntaxutil.EnvAuditTarget]bool{}
-				savedRecordFnDep, savedFold := recordFnDep, useFold
+				scratchParamDeps := map[syntaxutil.ParamKey]bool{}
+				scratchMethodDeps := map[syntaxutil.FuncKey]bool{}
+				savedRecordFnDep, savedFold, savedPFold, savedMFold := recordFnDep, useFold, paramDepFold, methodDepFold
 				recordFnDep = func(callee syntaxutil.FuncKey) { scratchFnDeps[callee] = true }
 				useFold = &scratchUseDeps
+				paramDepFold = &scratchParamDeps
+				methodDepFold = &scratchMethodDeps
 				for step(false) {
 					clear(localFree)
 				}
-				recordFnDep, useFold = savedRecordFnDep, savedFold
+				recordFnDep, useFold, paramDepFold, methodDepFold = savedRecordFnDep, savedFold, savedPFold, savedMFold
 				clear(localFree)
 				for step(true) {
 					clear(localFree)
 				}
 				clear(localFree)
 
-				usePoison, resolvedUses, inInsMode = prevPoison, prevResolved, prevInsMode
-				return poison, resolved
+				usePoison, resolvedUses, resolvedParamDeps, resolvedMethodDeps, inInsMode = prevPoison, prevResolved, prevResP, prevResM, prevInsMode
+				return poison, resolved, resParams, resMethods
 			}
 
-			retUsePoison, retResolvedUses := computeResolvedUses(false)
-			insUsePoison, insResolvedUses := computeResolvedUses(true)
+			retUsePoison, retResolvedUses, retResParamDeps, retResMethodDeps := computeResolvedUses(false)
+			insUsePoison, insResolvedUses, insResParamDeps, insResMethodDeps := computeResolvedUses(true)
 			usePoison = insUsePoison
 			resolvedUses = insResolvedUses
+			resolvedParamDeps = insResParamDeps
+			resolvedMethodDeps = insResMethodDeps
 
 			for obj, idx := range paramIndex {
 				key := syntaxutil.ParamKey{Func: ownFuncKey, Index: idx}
@@ -2365,10 +2532,15 @@ func returnEnvFreeFunctions(
 				}
 				clear(localFree)
 				collected := map[syntaxutil.EnvAuditTarget]bool{}
-				savedRec, savedF := recordFnDep, useFold
+				collectedParams := map[syntaxutil.ParamKey]bool{}
+				collectedMethods := map[syntaxutil.FuncKey]bool{}
+				savedRec, savedF, savedPF, savedMF := recordFnDep, useFold, paramDepFold, methodDepFold
 				recordFnDep = func(callee syntaxutil.FuncKey) { collected[syntaxutil.FuncAuditTarget(callee)] = true }
 				useFold = &collected
+				paramDepFold = &collectedParams
+				methodDepFold = &collectedMethods
 				inInsMode = true
+				foldRootConfinementDeps(rRoot)
 				okIns := true
 				for _, stored := range append(append([]*flowir.Value{}, sharedWrites[root]...), sharedInsertionWrites[rRoot]...) {
 					if !free(stored) {
@@ -2382,7 +2554,7 @@ func returnEnvFreeFunctions(
 					}
 				}
 				inInsMode = false
-				recordFnDep, useFold = savedRec, savedF
+				recordFnDep, useFold, paramDepFold, methodDepFold = savedRec, savedF, savedPF, savedMF
 				if !okIns {
 					continue
 				}
@@ -2393,9 +2565,17 @@ func returnEnvFreeFunctions(
 				if len(collected) > 0 {
 					insDeps[key] = collected
 				}
+				if len(collectedParams) > 0 {
+					insParamDeps[key] = collectedParams
+				}
+				if len(collectedMethods) > 0 {
+					insMethodDeps[key] = collectedMethods
+				}
 			}
 			usePoison = retUsePoison
 			resolvedUses = retResolvedUses
+			resolvedParamDeps = retResParamDeps
+			resolvedMethodDeps = retResMethodDeps
 			clear(localFree)
 
 			emitRefusal := func(v *flowir.Value) {
@@ -2464,13 +2644,19 @@ func returnEnvFreeFunctions(
 			if len(fnDeps) > 0 {
 				deps[fnKey] = fnDeps
 			}
+			if len(retFnParamDeps) > 0 {
+				retParamDeps[fnKey] = retFnParamDeps
+			}
+			if len(retFnMethodDeps) > 0 {
+				retMethodDeps[fnKey] = retFnMethodDeps
+			}
 			if len(insCallDeps) > 0 {
 				callerInsDeps[fnKey] = insCallDeps
 			}
 			recordReturnFieldRegistrants(audited, p, fnKey, fd.Body, retDefer, retPoison)
 		}
 	}
-	return proven, deps, retDefer, retPoison, insFree, insDeps, callerInsDeps
+	return proven, deps, retParamDeps, retMethodDeps, retDefer, retPoison, insFree, insDeps, insParamDeps, insMethodDeps, callerInsDeps
 }
 
 func recordReturnFieldRegistrants(

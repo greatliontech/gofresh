@@ -497,10 +497,24 @@ carrier MUST be judged by the method's own receiver-effect proof instead of
 REQ-closure-shared-dynamic-state-mutation-shape's mutation-equivalence: the
 declaring package proves a method unable to write receiver-reachable state —
 the receiver never stands in a write position and never escapes, with one
-exception, the once-filled memo: a write to a receiver-rooted field or element
-whose selection hands out no mutable reach and carries no signature or
-synchronization primitive (with written map keys likewise carrying no unknown
-dynamic carrier, signature, or synchronization primitive), placed
+exception, the once-filled memo: a write to an unexported receiver-rooted field
+or element (or a local alias tainted exclusively from such fields without
+smuggling) whose selection hands out no mutable reach and carries no signature
+or synchronization primitive, provided the underlying field has no aliased or
+non-pure composite-literal initialization in the package and is referenced
+nowhere outside this method's once-body or synchronous top-level statements
+following that Do call (with written map keys likewise carrying no unknown
+dynamic carrier, signature, or synchronization primitive and smuggling no
+external mutable reach) — or to a direct
+unexported field reached from the dereferenced pointer receiver over by-value
+struct steps alone whose type hands out mutable reach while carrying no unknown
+dynamic behavior, signature, or by-value synchronization primitive, provided
+the field has no non-zero composite-literal initialization in the package, is
+referenced nowhere outside this method's once-body or synchronous top-level statements
+following that Do call, receives a value whose derivation inside the once-body
+reads no package-level or outer variable carrying mutable reach, unknown
+dynamic behavior, or a signature (and calls no non-audited function), and suffers no element or subfield mutation
+inside the once-body unless initialized from a fresh local allocation — placed
 directly in the function literal a receiver-rooted sync.Once's Do runs — the
 Once selected from the pointer receiver's identifier itself, the unique
 sync.Once reachable on the receiver's type across nested or embedded structs
@@ -530,7 +544,7 @@ call's results bound to such a target refuse identically), a write
 through or an escape of a tainted value refuses, and only the method's own
 return position hands one out — a return inside a nested function literal is
 an escape position, since the literal outlives the body carrying what it
-captured and no call-site result judgment sees through a signature — and it chains only into sibling methods already proven or into
+captured and no call-site result judgment sees through a signature — and it chains into sibling receiver-read-only methods, foreign statically dispatched non-interface receiver-read-only methods whose instantiated results hand out no mutable reach, and leak-free plain-function parameters for non-signature-carrying arguments (over conditional method and parameter edges resolved jointly with parameter leak-free proofs at composition, retention proofs remaining intra-package, and go-statement subtrees never deferring) or into
 checked synchronization claims under
 REQ-closure-shared-dynamic-state-audited-discharges, a dispatch of an UNEXPORTED method through a
 receiver-reachable interface value chaining into every in-package
@@ -758,7 +772,51 @@ never holds a carrier, so it is the data-only variable this invariant
 leaves out and its calls mark nothing, under no attestation but with the
 checked map implementation claim required below; any other use — Range, Delete, Swap, CompareAndSwap,
 CompareAndDelete, Clear, the address taken, the variable passed, bound, or
-rebound — and an exported or pointer variable keep every mark. At the
+rebound — and an exported or pointer variable keep every mark. A second
+content-invariant form is the once-populated immutable struct memoizer,
+likewise needing no execution attestation: a non-directive package-level
+variable initialized once at declaration by a direct call to a verified
+constructor returning `*T` for a named struct `T` (every non-literal
+mutable-reach argument at that constructor call being an unexported
+single-definition carrier-free package variable free of mutations and
+reference-confined across all remaining uses in its package), where the
+memoizer variable itself is never written or address-taken and every
+non-initializer reference across the analyzed graph is a direct method call on
+`*T`; in `T`'s declaring package (intersected across compilation variants), `T`
+partitions its fields into a single unexported `sync.Once` reachable nowhere
+else and referenced solely by one `recv.once.Do(func() { ... })` statement in a
+two-statement getter method on `*T` with unnamed results that immediately
+returns `recv`'s memo fields (forbidding struct conversions into `T`), one or
+more unexported memo fields written solely by top-level assignments in that
+`once.Do` literal (never non-zero in any composite literal, never mutated
+elsewhere, and read solely in that getter's return statement, with an `error`
+memo field or `error` panic operand admitted only when every `error` value produced in the `once.Do`
+compute cone originates from `nil`, audited pure standard-library
+string/wrapping error constructors over scalar and cone-verified `error`
+operands, or cone calls whose declared result slot has predeclared type `error`
+rather than a concrete type converted to `error`), and optional unexported
+carrier-free constructor-populated input fields never mutated and confined
+across every read in `T`'s methods (conditional plain-function parameter
+dependencies resolved against the composed leak-free set), with `T`'s `once.Do`
+compute cone pure and deterministic (no goroutines, channels, map iteration,
+ambient calls, or non-settled global reads, and no writes outside cone-local
+allocations and the memo fields), every sibling method on `*T` confining its
+receiver without mutating or escaping `T`, executing within a pure cone free of
+goroutines, channels, deferred calls, ambient calls, global writes, non-settled
+global reads, composite literals of guarded structs carrying unexported
+reference fields, or unverified interface dispatches (admitting `error.Error()`
+and confined non-`error` caller interface parameters that never escape into
+aggregates or globals), proving pure `error` origins whenever the cone returns or panics with an `error` value,
+and restricting every non-scalar, non-`error` result slot to either a guarded
+named struct or pointer thereto in `T`'s verified closure or a carrier-free
+value freshly allocated per call, every unexported reference or container field
+in `T`'s reachable type closure proven freshly constructed and read-only
+confined in `T`'s package, every exported field on structs reachable from the
+getter's results restricted to scalars, by-value structs, pointers to non-empty
+named structs, or slices/arrays of non-empty named structs, and `T` together
+with every non-empty named struct reachable in `T`'s type closure guarded
+binary-wide so any non-fresh struct or element mutation across the graph revokes
+the discharge fail-closed. At the
 effect classification tiers the memo claim covers sync.Map itself and
 its Load, Store, and LoadOrStore — process-memory reads and writes fed by
 the analyzed program alone, requiring a checked implementation derivation
@@ -1083,9 +1141,14 @@ call on a bound value defers identically to the method's
 receiver-read-only fact — statically dispatched non-interface receivers
 only, the call's instantiated results handing out no mutable reach —
 carried as the carrier's deferred method-use marks in the existing
-encoding, an unproven method marking mutation fail-closed, with a
-fact-time parameter proof chaining only through same-package
-receiver-read-only methods; inside the
+encoding, an unproven method marking mutation fail-closed, with
+parameter leak-free and pointer-receiver read-only proofs solving
+jointly to a single least fixed point within the declaring package at
+fact time and across packages at composition over conditional
+parameter-to-parameter, parameter-to-method, method-to-method, and
+method-to-parameter edges (cycles, absence, and malformed edge records
+refusing, any malformed edge record marking the declaring fact's
+variables fail-closed, while retention proofs remain intra-package); inside the
 judgment as at the discharge, no call within a go statement's subtree
 defers its arguments or its method receivers — a goroutine literal
 wrapping the call is the
@@ -1146,10 +1209,13 @@ conversions of clean operands) classify nothing: a tracked
 chain-rooted argument whose value hands out mutable reach defers over
 a conditional edge naming the callee's parameter key, resolved with
 the return-environment-free proofs in one least fixed point — the
-insertion conditions ride their own edge list so the return proofs'
-edge list stays a pure function-key channel for its population-join
-consumers, and the resolution has one implementation serving verdict
-composition and explain alike — while a composite-literal argument,
+insertion conditions and any foreign or conditional parameter-leak-free
+and receiver-read-only confinement edges ride their own dedicated edge
+lists, gated against the composed parameter-leak-free and
+receiver-read-only sets so the return proofs' constructor edge list
+stays a pure function-key channel for its population-join consumers,
+and the resolution has one implementation serving verdict composition
+and explain alike — while a composite-literal argument,
 plain, addressed, or Go's elided address-of in a pointer-element
 literal (which carries no address syntax to see), breaks its embedded
 reach-bearing tracked names fail-closed, and a call-rooted or
@@ -1184,7 +1250,7 @@ dependency key instantiation-independent — defers to that callee's
 return-environment-free proof:
 the store records the callee against the carrier, the call's arguments
 judged recursively by this audit (a signature-carrying argument — including one boxed into an interface conversion or mutable-reach composite — that fails
-this audit, or a mutable-reach argument on a non-value-plane callee not proven fresh or settled over
+this audit, or a mutable-reach argument on a non-value-plane callee proven neither leak-free at that callee parameter — locally or over a conditional registration parameter-use edge resolved against the composed leak-free set — nor fresh or settled over
 unmutated unexported package data — an unexported single-definition carrier-free and non-copy-sync-free package variable initialized from pure fresh data over variable-free append bases and settled siblings, unmutated and confined across all package declarations, and embedding mutable reach into at most one unbroken non-directive carrier matching the store target, either unexported or exported when closure-only or alias-handing with that single declaration use and no function-body references — poisons the
 store), and composition admits the store exactly when the proof
 resolves. The declaring package proves a function
@@ -1212,7 +1278,7 @@ reference of a named function, a call of a value-plane helper with judged
 arguments and a checked claim that its results carry exactly those arguments'
 values — slices.Clone, slices.Concat and maps.Clone require this same
 implementation proof, including their copying and native dependencies — and a call of a plain named callee with
-judged signature-carrying arguments and clean, caller-parameter-obligated, or settled mutable-reach arguments, explicit generic instantiation included with the
+judged signature-carrying arguments and clean, caller-parameter-obligated, leak-free-parameter-confined, or settled mutable-reach arguments, explicit generic instantiation included with the
 dependency key instantiation-independent — and a zero-valued
 declaration binds the nil zero value, environment-free. An element,
 field, slice-step, or dereference write of a present value is a
@@ -1262,13 +1328,17 @@ likewise exempt, append and copy never holding the argument beyond the
 call, their destinations covered by the bind link, spare-capacity element-write tracking onto slice-header bases (breaking non-header append bases when elements are appended), and the copy
 target-break and source-element judgment — the implicit
 address of a pointer-receiver method use included, exempting methods
-the declaring package proves receiver-read-only — or any bind
+proven receiver-read-only locally or over conditional method-confinement
+edges (while keeping tracked caller-insertion aliasing conservative when
+auto-addressing a carrier-bearing value receiver) — or any bind
 position or address
 capture of a parameter, breaks the binding or the parameter's
-caller-judged assumption outright; a returned literal is audited exactly as a registered
-literal with the constructor body as its enclosing scope, its
-collected parameter and method wants resolving against the declaring
-package's own facts only; a plain-named-callee result inside a return
+caller-judged assumption outright; a returned or registered literal is
+audited with its enclosing scope's collected foreign or conditional
+parameter and method wants recorded on dedicated confinement edges and
+resolved at composition against the composed parameter-leak-free and
+receiver-read-only sets (any malformed confinement-edge record marking
+the declaring fact's variables fail-closed); a plain-named-callee result inside a return
 expression records a dependency edge, the proofs resolving at
 composition to a least fixed point over the edges; naked returns and
 every unrecognized signature-carrying shape refuse the proof. Cycles

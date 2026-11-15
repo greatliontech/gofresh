@@ -159,6 +159,7 @@ func DeriveProtoAndStructFacts(
 	idx *refconfine.PkgIndex,
 	initOnly map[string]bool,
 	mutatedVars map[string]bool,
+	extraExemptNodes map[ast.Node]bool,
 ) ([]ProtoClusterFact, []ProtoExtAlias, []ProtoRuntimeTypeFact, []GrpcServiceVarFact, []syntaxutil.TypeRef, []syntaxutil.ConditionalStructMutation) {
 	if p == nil || p.Types == nil || p.TypesInfo == nil || len(p.Syntax) == 0 {
 		return nil, nil, nil, nil, nil, nil
@@ -169,7 +170,12 @@ func DeriveProtoAndStructFacts(
 	if initOnly == nil {
 		initOnly = idx.InitOnly
 	}
-	exempted := map[ast.Node]bool{}
+	exempted := make(map[ast.Node]bool, len(extraExemptNodes))
+	for n, v := range extraExemptNodes {
+		if v {
+			exempted[n] = true
+		}
+	}
 	exemptFamilyByFunc := map[*ast.FuncDecl]map[*types.Named]bool{}
 	exemptReadFields := map[*types.Var]bool{}
 
@@ -932,6 +938,9 @@ func CollectDirectCrossPkgVarWrites(audited bool, p *packages.Package, idx *refc
 			case *ast.SliceExpr:
 				cur = ast.Unparen(e.X)
 				direct = false
+			case *ast.StarExpr:
+				cur = ast.Unparen(e.X)
+				direct = false
 			default:
 				return nil, false
 			}
@@ -989,14 +998,12 @@ func CollectDirectCrossPkgVarWrites(audited bool, p *packages.Package, idx *refc
 					}
 				}
 			case *ast.CallExpr:
-				if cid, isID := ast.Unparen(x.Fun).(*ast.Ident); isID {
-					if b, isB := p.TypesInfo.Uses[cid].(*types.Builtin); isB {
-						switch b.Name() {
-						case "delete", "clear", "copy", "append":
-							if len(x.Args) > 0 {
-								if v, _ := rootImportedVar(x.Args[0]); v != nil {
-									recordVar(v)
-								}
+				if b := syntaxutil.LookupBuiltin(p.TypesInfo, ast.Unparen(x.Fun)); b != nil {
+					switch b.Name() {
+					case "delete", "clear", "copy", "append":
+						if len(x.Args) > 0 {
+							if v, _ := rootImportedVar(x.Args[0]); v != nil {
+								recordVar(v)
 							}
 						}
 					}
@@ -1004,6 +1011,57 @@ func CollectDirectCrossPkgVarWrites(audited bool, p *packages.Package, idx *refc
 			}
 			return true
 		})
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// CollectNonMethodCrossPkgVarUses returns the sorted qualified variable keys of
+// every cross-package dynamic-capable package variable referenced in p.Syntax
+// in any position other than the direct receiver X of a non-promoted method
+// call X.Method(...).
+func CollectNonMethodCrossPkgVarUses(audited bool, p *packages.Package, idx *refconfine.PkgIndex) []string {
+	if p == nil || p.Types == nil || p.TypesInfo == nil || len(p.Syntax) == 0 {
+		return nil
+	}
+	if idx == nil {
+		idx = refconfine.BuildPkgIndex(p)
+	}
+	seen := map[string]bool{}
+	isDirectMethodCallRecv := func(varExpr ast.Expr) bool {
+		mSel, ok := idx.ParentUnparen(varExpr).(*ast.SelectorExpr)
+		if !ok || ast.Unparen(mSel.X) != varExpr {
+			return false
+		}
+		selInfo := p.TypesInfo.Selections[mSel]
+		if selInfo == nil || selInfo.Kind() != types.MethodVal || len(selInfo.Index()) != 1 {
+			return false
+		}
+		call, ok := idx.ParentUnparen(mSel).(*ast.CallExpr)
+		return ok && ast.Unparen(call.Fun) == mSel
+	}
+	for ident, obj := range p.TypesInfo.Uses {
+		v, ok := obj.(*types.Var)
+		if !ok || v == nil || v.IsField() || v.Pkg() == nil || v.Pkg() == p.Types || v.Parent() != v.Pkg().Scope() {
+			continue
+		}
+		if !refconfine.TypeMayCarryUnknownDynamic(audited, v.Type()) {
+			continue
+		}
+		var varExpr ast.Expr = ident
+		if parSel, isSel := idx.ParentMap[ident].(*ast.SelectorExpr); isSel && parSel.Sel == ident && p.TypesInfo.Selections[parSel] == nil {
+			varExpr = parSel
+		}
+		if !isDirectMethodCallRecv(varExpr) {
+			seen[syntaxutil.DynamicVarKey(v)] = true
+		}
 	}
 	if len(seen) == 0 {
 		return nil

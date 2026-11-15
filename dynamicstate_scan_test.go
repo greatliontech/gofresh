@@ -7101,17 +7101,31 @@ func TestCarrierEscapeDischarges(t *testing.T) {
 	t.Run("reach-bearing chain leaf keeps the refusal", func(t *testing.T) {
 		t.Parallel()
 		// The outermost-node judgment still refuses when the produced
-		// value itself hands out reach: a pointer leaf handed to a
-		// callee is an escape however deep the chain.
+		// value itself hands out reach to a non-leak-free callee: a
+		// pointer leaf retained by a callee is an escape however deep
+		// the chain, while a leak-free callee defers cleanly.
 		files := map[string]string{
 			"go.mod":       goMod,
-			"reg/reg.go":   "package reg\n\ntype inner struct {\n\trule string\n\tp    *int\n}\n\ntype entry struct {\n\tCols  []string\n\tIn    inner\n\tBuild func(n int) int\n}\n\nfunc sink(p *int) int { return *p }\n\nfunc (e entry) Leaf() int { return sink(e.In.p) }\n\nvar Registry []entry\n\nfunc init() {\n\tn := 1\n\tRegistry = []entry{{Cols: []string{\"a\"}, In: inner{rule: \"r\", p: &n}}}\n}\n\nfunc Leaves() int {\n\tn := 0\n\tfor _, e := range Registry {\n\t\tn += e.Leaf()\n\t}\n\treturn n\n}\n",
+			"reg/reg.go":   "package reg\n\ntype inner struct {\n\trule string\n\tp    *int\n}\n\ntype entry struct {\n\tCols  []string\n\tIn    inner\n\tBuild func(n int) int\n}\n\nfunc sink(p *int) *int { return p }\n\nfunc (e entry) Leaf() int { return *sink(e.In.p) }\n\nvar Registry []entry\n\nfunc init() {\n\tn := 1\n\tRegistry = []entry{{Cols: []string{\"a\"}, In: inner{rule: \"r\", p: &n}}}\n}\n\nfunc Leaves() int {\n\tn := 0\n\tfor _, e := range Registry {\n\t\tn += e.Leaf()\n\t}\n\treturn n\n}\n",
 			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Leaves() }\n",
 		}
 		dir := writeModuleTree(t, files)
 		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Leaves"})
 		if verdict.Status != Unverifiable || !strings.Contains(verdict.Reason, "reg.Registry is mutated") {
 			t.Fatalf("verdict = %+v, want the mutation downgrade naming reg.Registry - a reach-bearing chain leaf proved read-only", verdict)
+		}
+	})
+	t.Run("reach-bearing chain leaf into leak-free parameter defers", func(t *testing.T) {
+		t.Parallel()
+		files := map[string]string{
+			"go.mod":       goMod,
+			"reg/reg.go":   "package reg\n\ntype inner struct {\n\trule string\n\tp    *int\n}\n\ntype entry struct {\n\tCols  []string\n\tIn    inner\n\tBuild func(n int) int\n}\n\nfunc readPtr(p *int) int { return *p }\n\nfunc (e entry) Leaf() int { return readPtr(e.In.p) }\n\nvar Registry []entry\n\nfunc init() {\n\tn := 1\n\tRegistry = []entry{{Cols: []string{\"a\"}, In: inner{rule: \"r\", p: &n}}}\n}\n\nfunc Leaves() int {\n\tn := 0\n\tfor _, e := range Registry {\n\t\tn += e.Leaf()\n\t}\n\treturn n\n}\n",
+			"user/user.go": "package user\n\nimport \"example.com/xesc/reg\"\n\nfunc F() int { return reg.Leaves() }\n",
+		}
+		dir := writeModuleTree(t, files)
+		verdict := captureCheck(t, dir, Subject{Package: "example.com/xesc/reg", Symbol: "Leaves"})
+		if verdict.Status != Valid {
+			t.Fatalf("verdict = %+v, want Valid - a non-signature-carrying reach leaf passed to a leak-free parameter refused", verdict)
 		}
 	})
 	t.Run("writing method call through the binding refuses", func(t *testing.T) {
@@ -7736,7 +7750,7 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 			culprit: "example.com/view.R is mutated",
 		},
 		"shadowed len keeps the mark": {
-			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc len(m map[string]int) int { return 0 }\n\nfunc (r *reg) Size() int { return len(r.m) }\n\nfunc F() int { return R.Size() }\n",
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc len(m map[string]int) map[string]int { return m }\n\nfunc (r *reg) Size() int { _ = len(r.m); return 0 }\n\nfunc F() int { return R.Size() }\n",
 			culprit: "example.com/view.R is mutated",
 		},
 		"mixed parallel assign keeps the mark": {
@@ -7772,7 +7786,7 @@ func TestSharedDynamicStateEscapesAndRebindsDowngradeWithCulprit(t *testing.T) {
 			culprit: "example.com/view.R is mutated",
 		},
 		"tainted arg escape marks": {
-			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc probe(m map[string]int) int { return len(m) }\n\nfunc (r *reg) Peek() int {\n\tv := r.m\n\treturn probe(v)\n}\n\nfunc F() int { return R.Peek() }\n",
+			source:  "package view\n\ntype reg struct {\n\tfn func()\n\tm  map[string]int\n}\n\nvar R = &reg{m: map[string]int{}}\n\nfunc probe(m map[string]int) map[string]int { return m }\n\nfunc (r *reg) Peek() int {\n\tv := r.m\n\t_ = probe(v)\n\treturn 0\n}\n\nfunc F() int { return R.Peek() }\n",
 			culprit: "example.com/view.R is mutated",
 		},
 		"local-alias write through method marks": {

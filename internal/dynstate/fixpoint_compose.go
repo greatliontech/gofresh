@@ -102,6 +102,40 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 					envCarrying[use.Key] = true
 				}
 			}
+			for _, use := range fact.EnvCallParamUses {
+				if !use.Valid() {
+					markDeclaresMutated(fact)
+					for _, key := range fact.Declares {
+						envCarrying[key] = true
+					}
+					if syntaxutil.ValidFactKey(use.Key) {
+						envCarrying[use.Key] = true
+						mutated[use.Key] = true
+						unattributedMark[use.Key] = true
+					}
+					continue
+				}
+				if !paramLeakFree[use.Param] {
+					envCarrying[use.Key] = true
+				}
+			}
+			for _, use := range fact.EnvCallMethodUses {
+				if !use.Valid() {
+					markDeclaresMutated(fact)
+					for _, key := range fact.Declares {
+						envCarrying[key] = true
+					}
+					if syntaxutil.ValidFactKey(use.Key) {
+						envCarrying[use.Key] = true
+						mutated[use.Key] = true
+						unattributedMark[use.Key] = true
+					}
+					continue
+				}
+				if !readOnly[use.Method] {
+					envCarrying[use.Key] = true
+				}
+			}
 			for _, use := range fact.MethodUses {
 				if !use.Valid() {
 					markDeclaresMutated(fact)
@@ -307,6 +341,26 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 					attributeSite(use.Key, use.Func)
 				}
 			}
+			for _, use := range fact.EnvCallParamUses {
+				if !use.Valid() || paramLeakFree[use.Param] {
+					continue
+				}
+				if use.Func.IsZero() || envCallable[use.Key] || mayRunAtInit(use.Func) {
+					unattributedMark[use.Key] = true
+				} else {
+					attributeSite(use.Key, use.Func)
+				}
+			}
+			for _, use := range fact.EnvCallMethodUses {
+				if !use.Valid() || readOnly[use.Method] {
+					continue
+				}
+				if use.Func.IsZero() || envCallable[use.Key] || mayRunAtInit(use.Func) {
+					unattributedMark[use.Key] = true
+				} else {
+					attributeSite(use.Key, use.Func)
+				}
+			}
 			for _, use := range fact.AttributedUses {
 				applyAttributedUse(fact, use, true)
 			}
@@ -396,7 +450,7 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 		propagateWithUnattributed(envCarrying)
 	}
 	notOpaque := resolution.NotOpaque
-	discharges := deriveSourceAndAttestedDischarges(meta, allFacts, refRegions, initOnlyFn, malformedFactVars, markDeclaresMutated)
+	discharges := deriveSourceAndAttestedDischarges(meta, allFacts, refRegions, initOnlyFn, paramLeakFree, malformedFactVars, markDeclaresMutated)
 	pinnedPkg := discharges.pinnedPkg
 	mutableLocalPkg := discharges.mutableLocalPkg
 	pkgHasMalformedFact := discharges.pkgHasMalformedFact
@@ -739,6 +793,16 @@ func isFactDischargeMalformed(fact Fact) bool {
 			bad = true
 		}
 	}
+	for _, mt := range fact.OnceMemoTypes {
+		if !mt.Valid() {
+			bad = true
+		}
+	}
+	for _, cand := range fact.OnceMemoCandidates {
+		if !cand.Valid() {
+			bad = true
+		}
+	}
 	for _, key := range fact.HarnessDischarges {
 		if !syntaxutil.ValidQualifiedVarKey(key) {
 			bad = true
@@ -792,6 +856,11 @@ func isFactDischargeMalformed(fact Fact) bool {
 			bad = true
 		}
 	}
+	for _, key := range fact.NonMethodVarUses {
+		if !syntaxutil.ValidQualifiedVarKey(key) {
+			bad = true
+		}
+	}
 	return bad
 }
 
@@ -800,6 +869,7 @@ func deriveSourceAndAttestedDischarges(
 	allFacts map[string][]Fact,
 	refRegions map[syntaxutil.FuncKey]map[syntaxutil.RefRegion]bool,
 	initOnlyFn map[syntaxutil.FuncKey]bool,
+	paramLeakFree map[syntaxutil.ParamKey]bool,
 	malformedFactVars map[string]bool,
 	onMalformedFact func(Fact),
 ) sourceAndAttestedDischarges {
@@ -819,17 +889,19 @@ func deriveSourceAndAttestedDischarges(
 
 	mutatedStructs := map[syntaxutil.TypeRef]bool{}
 	directVarWritten := map[string]bool{}
+	nonMethodVarUsed := map[string]bool{}
 	anyMalformedMutatedStruct := false
 	anyMalformedDirectVarWrite := false
+	anyMalformedNonMethodVarUse := false
 	var allCondStructMutations []syntaxutil.ConditionalStructMutation
 	for pkgPath, pkgFacts := range allFacts {
+		prefix := pkgPath + "."
 		for _, fact := range pkgFacts {
 			harnessMalformed := false
 			if len(fact.HarnessDischarges) > 0 {
 				if !propharness.IsHarnessPath(pkgPath) {
 					harnessMalformed = true
 				} else {
-					prefix := pkgPath + "."
 					for _, key := range fact.HarnessDischarges {
 						if !strings.HasPrefix(key, prefix) || strings.Contains(key[len(prefix):], ".") {
 							harnessMalformed = true
@@ -838,7 +910,21 @@ func deriveSourceAndAttestedDischarges(
 					}
 				}
 			}
-			if isFactDischargeMalformed(fact) || harnessMalformed {
+			onceMemoMalformed := false
+			for _, mt := range fact.OnceMemoTypes {
+				if !mt.Valid() || mt.Type.Pkg != pkgPath {
+					onceMemoMalformed = true
+					anyMalformedMutatedStruct = true
+					break
+				}
+			}
+			for _, cand := range fact.OnceMemoCandidates {
+				if !cand.Valid() || !strings.HasPrefix(cand.Key, prefix) || strings.Contains(cand.Key[len(prefix):], ".") {
+					onceMemoMalformed = true
+					break
+				}
+			}
+			if isFactDischargeMalformed(fact) || harnessMalformed || onceMemoMalformed {
 				out.pkgHasMalformedFact[pkgPath] = true
 				for _, sibling := range pkgFacts {
 					if onMalformedFact != nil {
@@ -878,6 +964,13 @@ func deriveSourceAndAttestedDischarges(
 					directVarWritten[key] = true
 				} else {
 					anyMalformedDirectVarWrite = true
+				}
+			}
+			for _, key := range fact.NonMethodVarUses {
+				if syntaxutil.ValidQualifiedVarKey(key) {
+					nonMethodVarUsed[key] = true
+				} else {
+					anyMalformedNonMethodVarUse = true
 				}
 			}
 		}
@@ -1071,6 +1164,89 @@ func deriveSourceAndAttestedDischarges(
 		return res
 	}
 
+	verifiedOnceMemoCtors := map[syntaxutil.TypeRef]map[syntaxutil.FuncKey]bool{}
+	if !anyMalformedMutatedStruct {
+		type onceMemoAgg struct {
+			ctors     map[syntaxutil.FuncKey]bool
+			guards    map[syntaxutil.TypeRef]bool
+			inputDeps map[syntaxutil.ParamKey]bool
+		}
+		for pkgPath, pkgFacts := range allFacts {
+			if len(pkgFacts) == 0 || out.pkgHasMalformedFact[pkgPath] || (!out.pinnedPkg[pkgPath] && !out.mutableLocalPkg[pkgPath]) {
+				continue
+			}
+			var common map[syntaxutil.TypeRef]*onceMemoAgg
+			for fi, fact := range pkgFacts {
+				cur := map[syntaxutil.TypeRef]*onceMemoAgg{}
+				for _, mt := range fact.OnceMemoTypes {
+					if mt.Type.Pkg != pkgPath {
+						continue
+					}
+					agg := &onceMemoAgg{
+						ctors:     make(map[syntaxutil.FuncKey]bool, len(mt.Constructors)),
+						guards:    make(map[syntaxutil.TypeRef]bool, len(mt.GuardTypes)),
+						inputDeps: make(map[syntaxutil.ParamKey]bool, len(mt.InputParamDeps)),
+					}
+					for _, c := range mt.Constructors {
+						agg.ctors[c] = true
+					}
+					for _, g := range mt.GuardTypes {
+						agg.guards[g] = true
+					}
+					for _, pk := range mt.InputParamDeps {
+						agg.inputDeps[pk] = true
+					}
+					cur[mt.Type] = agg
+				}
+				if fi == 0 {
+					common = cur
+					continue
+				}
+				for tRef, prev := range common {
+					next, ok := cur[tRef]
+					if !ok {
+						delete(common, tRef)
+						continue
+					}
+					for c := range prev.ctors {
+						if !next.ctors[c] {
+							delete(prev.ctors, c)
+						}
+					}
+					for g := range next.guards {
+						prev.guards[g] = true
+					}
+					for pk := range next.inputDeps {
+						prev.inputDeps[pk] = true
+					}
+				}
+			}
+			for tRef, agg := range common {
+				if len(agg.ctors) == 0 || mutatedStructs[tRef] {
+					continue
+				}
+				clean := true
+				for g := range agg.guards {
+					if mutatedStructs[g] {
+						clean = false
+						break
+					}
+				}
+				if clean {
+					for pk := range agg.inputDeps {
+						if !paramLeakFree[pk] {
+							clean = false
+							break
+						}
+					}
+				}
+				if clean {
+					verifiedOnceMemoCtors[tRef] = agg.ctors
+				}
+			}
+		}
+	}
+
 	out.mappingDischargedVars = intersectDeclaredVarSet(func(_ string, fact Fact) map[string]bool {
 		if anyMalformedDirectVarWrite {
 			return nil
@@ -1087,10 +1263,20 @@ func deriveSourceAndAttestedDischarges(
 		if anyMalformedDirectVarWrite {
 			return nil
 		}
-		m := make(map[string]bool, len(fact.MemoDischarges))
+		m := make(map[string]bool, len(fact.MemoDischarges)+len(fact.OnceMemoCandidates))
 		for _, key := range fact.MemoDischarges {
 			if !directVarWritten[key] {
 				m[key] = true
+			}
+		}
+		if !anyMalformedNonMethodVarUse && !anyMalformedMutatedStruct {
+			for _, cand := range fact.OnceMemoCandidates {
+				if directVarWritten[cand.Key] || nonMethodVarUsed[cand.Key] {
+					continue
+				}
+				if ctors := verifiedOnceMemoCtors[cand.Type]; ctors[cand.Constructor] {
+					m[cand.Key] = true
+				}
 			}
 		}
 		return m
@@ -1362,6 +1548,16 @@ func NonVouchDischargedVars(meta []GraphPackage, allFacts map[string][]Fact, sin
 					bad = true
 				}
 			}
+			for _, use := range fact.EnvCallParamUses {
+				if !use.Valid() {
+					bad = true
+				}
+			}
+			for _, use := range fact.EnvCallMethodUses {
+				if !use.Valid() {
+					bad = true
+				}
+			}
 			for _, use := range fact.MethodUses {
 				if !use.Valid() {
 					bad = true
@@ -1408,7 +1604,7 @@ func NonVouchDischargedVars(meta []GraphPackage, allFacts map[string][]Fact, sin
 		}
 	}
 
-	d := deriveSourceAndAttestedDischarges(meta, allFacts, refRegions, initOnlyFn, malformedFactVars, markMalformed)
+	d := deriveSourceAndAttestedDischarges(meta, allFacts, refRegions, initOnlyFn, resolution.ParamLeakFree, malformedFactVars, markMalformed)
 	discharged := map[string]bool{}
 	for pkgPath, pkgFacts := range allFacts {
 		inGraph := d.pinnedPkg[pkgPath] || d.mutableLocalPkg[pkgPath]

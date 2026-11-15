@@ -179,6 +179,18 @@ func useIsNonEscapingOnFreshVar(
 					}
 					return false
 				case *ast.CallExpr:
+					if cid, isCID := ast.Unparen(up.Fun).(*ast.Ident); isCID {
+						if b, isB := p.TypesInfo.Uses[cid].(*types.Builtin); isB && b.Name() == "append" && !up.Ellipsis.IsValid() {
+							for ai := 1; ai < len(up.Args); ai++ {
+								if ast.Unparen(up.Args[ai]) == x {
+									if dstRoot := resolveRoot(up.Args[0]); dstRoot != nil && sum.vars[dstRoot] != nil {
+										*couplings = append(*couplings, freshEscapeCoupling{srcRoot: sum.vars[v].rootVar, dstRoot: dstRoot, atPos: up.Pos()})
+										return true
+									}
+								}
+							}
+						}
+					}
 					for ai, arg := range up.Args {
 						if ast.Unparen(arg) == x {
 							return isNonEscapingMethodOrHelperCallOnFresh(
@@ -222,6 +234,25 @@ func useIsNonEscapingOnFreshVar(
 							return true
 						}
 					}
+				}
+			}
+		}
+		if len(x.Lhs) == 2 && len(x.Rhs) == 1 && ast.Unparen(x.Rhs[0]) == cur && cur != id {
+			if _, isIx := cur.(*ast.IndexExpr); isIx {
+				scalarLHS := true
+				for _, lhs := range x.Lhs {
+					lhs = ast.Unparen(lhs)
+					if syntaxutil.IsBlankIdent(lhs) {
+						continue
+					}
+					lt := p.TypesInfo.TypeOf(lhs)
+					if lt == nil || refconfine.TypeContainsRefOrPointer(lt) {
+						scalarLHS = false
+						break
+					}
+				}
+				if scalarLHS {
+					return true
 				}
 			}
 		}
@@ -345,11 +376,109 @@ func useIsNonEscapingOnFreshVar(
 		}
 		return false
 	default:
+		if kv, isKV := par.(*ast.KeyValueExpr); isKV && ast.Unparen(kv.Value) == cur {
+			if cl, isCL := idx.ParentUnparen(kv).(*ast.CompositeLit); isCL && compositeLitFieldUseIsNonEscaping(p, idx, fd, sum, v, cl, resolveRoot, couplings) {
+				return true
+			}
+		} else if cl, isCL := par.(*ast.CompositeLit); isCL && compositeLitFieldUseIsNonEscaping(p, idx, fd, sum, v, cl, resolveRoot, couplings) {
+			return true
+		}
 		if cur != id && !refconfine.TypeContainsRefOrPointer(p.TypesInfo.TypeOf(cur)) {
 			return true
 		}
 		return false
 	}
+}
+
+func compositeLitFieldUseIsNonEscaping(
+	p *packages.Package,
+	idx *refconfine.PkgIndex,
+	fd *ast.FuncDecl,
+	sum *freshFuncSummary,
+	v *types.Var,
+	cl *ast.CompositeLit,
+	resolveRoot func(ast.Expr) *types.Var,
+	couplings *[]freshEscapeCoupling,
+) bool {
+	if cl == nil || sum.vars[v] == nil {
+		return false
+	}
+	if _, st := syntaxutil.DerefAnyStructType(p.TypesInfo.TypeOf(cl)); st == nil {
+		return false
+	}
+	litExpr := ast.Expr(cl)
+	if un, isUn := idx.ParentUnparen(cl).(*ast.UnaryExpr); isUn && un.Op == token.AND {
+		litExpr = un
+	}
+	switch up := idx.ParentUnparen(litExpr).(type) {
+	case *ast.ValueSpec:
+		for i, val := range up.Values {
+			if ast.Unparen(val) == litExpr && i < len(up.Names) {
+				if dv, _ := p.TypesInfo.Defs[up.Names[i]].(*types.Var); dv != nil && sum.vars[dv] != nil {
+					*couplings = append(*couplings, freshEscapeCoupling{srcRoot: sum.vars[v].rootVar, dstRoot: sum.vars[dv].rootVar, atPos: cl.Pos()})
+					return true
+				}
+			}
+		}
+	case *ast.AssignStmt:
+		if len(up.Lhs) == len(up.Rhs) {
+			for i, rhs := range up.Rhs {
+				if ast.Unparen(rhs) == litExpr {
+					lhs := ast.Unparen(up.Lhs[i])
+					if lid, isID := lhs.(*ast.Ident); isID {
+						var dv *types.Var
+						if defV, isDef := p.TypesInfo.Defs[lid].(*types.Var); isDef {
+							dv = defV
+						} else if useV, isUse := p.TypesInfo.Uses[lid].(*types.Var); isUse {
+							dv = useV
+						}
+						if dv != nil && sum.vars[dv] != nil {
+							*couplings = append(*couplings, freshEscapeCoupling{srcRoot: sum.vars[v].rootVar, dstRoot: sum.vars[dv].rootVar, atPos: cl.Pos()})
+							return true
+						}
+					} else if sel, isSel := lhs.(*ast.SelectorExpr); isSel {
+						if dstRoot := resolveRoot(sel.X); dstRoot != nil && sum.vars[dstRoot] != nil {
+							*couplings = append(*couplings, freshEscapeCoupling{srcRoot: sum.vars[v].rootVar, dstRoot: dstRoot, atPos: cl.Pos()})
+							return true
+						}
+					}
+				}
+			}
+		}
+	case *ast.ReturnStmt:
+		if len(up.Results) >= 1 && ast.Unparen(up.Results[0]) == litExpr && !funcBodyHasDefer(fd) {
+			for ri := 1; ri < len(up.Results); ri++ {
+				switch ast.Unparen(up.Results[ri]).(type) {
+				case *ast.Ident, *ast.BasicLit:
+				default:
+					return false
+				}
+			}
+			return true
+		}
+	}
+	return false
+}
+
+func funcBodyHasDefer(fd *ast.FuncDecl) bool {
+	if fd == nil || fd.Body == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(fd.Body, func(n ast.Node) bool {
+		if found || n == nil {
+			return false
+		}
+		if _, isLit := n.(*ast.FuncLit); isLit {
+			return false
+		}
+		if _, isDef := n.(*ast.DeferStmt); isDef {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 func isNonEscapingMethodOrHelperCallOnFresh(

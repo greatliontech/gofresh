@@ -454,18 +454,62 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 		slices.SortFunc(keys, func(a, b syntaxutil.EnvAuditTarget) int { return a.Compare(b) })
 		return keys
 	}
+	sortedParams := func(m map[syntaxutil.ParamKey]bool) []syntaxutil.ParamKey {
+		keys := make([]syntaxutil.ParamKey, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		slices.SortFunc(keys, syntaxutil.ParamKey.Compare)
+		return keys
+	}
+	sortedRawFuncs := func(m map[syntaxutil.FuncKey]bool) []syntaxutil.FuncKey {
+		keys := make([]syntaxutil.FuncKey, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		slices.SortFunc(keys, syntaxutil.FuncKey.Compare)
+		return keys
+	}
+	formatParamEdge := func(pk syntaxutil.ParamKey) string {
+		return pk.Func.Pkg + "." + pk.Func.Name + " (parameter " + strconv.Itoa(pk.Index) + ")"
+	}
+	formatMethodEdge := func(mk syntaxutil.FuncKey) string {
+		return mk.Pkg + "." + mk.Name
+	}
 
 	type rootedCallee struct {
 		from   string
 		key    string
 		callee syntaxutil.FuncKey
 	}
+	type rootedParam struct {
+		from  string
+		key   string
+		param syntaxutil.ParamKey
+	}
+	type rootedMethod struct {
+		from   string
+		key    string
+		method syntaxutil.FuncKey
+	}
 	var callees []rootedCallee
+	var directParams []rootedParam
+	var directMethods []rootedMethod
 	for fromPath, fl := range facts {
 		for _, f := range fl {
 			for _, use := range f.EnvCallUses {
 				if use.Valid() && linkedKeys[use.Key] && !ea.Resolved[use.Callee] {
 					callees = append(callees, rootedCallee{from: fromPath, key: use.Key, callee: use.Callee})
+				}
+			}
+			for _, use := range f.EnvCallParamUses {
+				if use.Valid() && linkedKeys[use.Key] && !ea.ParamLeakFree[use.Param] {
+					directParams = append(directParams, rootedParam{from: fromPath, key: use.Key, param: use.Param})
+				}
+			}
+			for _, use := range f.EnvCallMethodUses {
+				if use.Valid() && linkedKeys[use.Key] && !ea.ReadOnly[use.Method] {
+					directMethods = append(directMethods, rootedMethod{from: fromPath, key: use.Key, method: use.Method})
 				}
 			}
 		}
@@ -479,9 +523,73 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 		}
 		return callees[i].callee.Compare(callees[j].callee) < 0
 	})
+	sort.Slice(directParams, func(i, j int) bool {
+		if directParams[i].from != directParams[j].from {
+			return directParams[i].from < directParams[j].from
+		}
+		if directParams[i].key != directParams[j].key {
+			return directParams[i].key < directParams[j].key
+		}
+		return directParams[i].param.Compare(directParams[j].param) < 0
+	})
+	sort.Slice(directMethods, func(i, j int) bool {
+		if directMethods[i].from != directMethods[j].from {
+			return directMethods[i].from < directMethods[j].from
+		}
+		if directMethods[i].key != directMethods[j].key {
+			return directMethods[i].key < directMethods[j].key
+		}
+		return directMethods[i].method.Compare(directMethods[j].method) < 0
+	})
 
 	var edges []ChainLink
 	visited := map[syntaxutil.EnvAuditTarget]bool{}
+	visitedParamConf := map[syntaxutil.ParamKey]bool{}
+	visitedMethodConf := map[syntaxutil.FuncKey]bool{}
+	var walkParamConfinement func(pk syntaxutil.ParamKey)
+	var walkMethodConfinement func(mk syntaxutil.FuncKey)
+	walkParamConfinement = func(pk syntaxutil.ParamKey) {
+		if !pk.Valid() || visitedParamConf[pk] || ea.ParamLeakFree[pk] {
+			return
+		}
+		visitedParamConf[pk] = true
+		sym := pk.Func.Name + " (parameter " + strconv.Itoa(pk.Index) + ")"
+		for _, dep := range sortedParams(ea.ParamDeps[pk]) {
+			if ea.ParamLeakFree[dep] {
+				continue
+			}
+			edges = append(edges, ChainLink{Kind: "edge", Package: pk.Func.Pkg, Symbol: sym, Callee: formatParamEdge(dep)})
+			walkParamConfinement(dep)
+		}
+		for _, mk := range sortedRawFuncs(ea.ParamMethodDeps[pk]) {
+			if ea.ReadOnly[mk] {
+				continue
+			}
+			edges = append(edges, ChainLink{Kind: "edge", Package: pk.Func.Pkg, Symbol: sym, Callee: formatMethodEdge(mk)})
+			walkMethodConfinement(mk)
+		}
+	}
+	walkMethodConfinement = func(mk syntaxutil.FuncKey) {
+		if !mk.Valid() || visitedMethodConf[mk] || ea.ReadOnly[mk] {
+			return
+		}
+		visitedMethodConf[mk] = true
+		for _, dep := range sortedRawFuncs(ea.MethodDeps[mk]) {
+			if ea.ReadOnly[dep] {
+				continue
+			}
+			edges = append(edges, ChainLink{Kind: "edge", Package: mk.Pkg, Symbol: mk.Name, Callee: formatMethodEdge(dep)})
+			walkMethodConfinement(dep)
+		}
+		for _, pk := range sortedParams(ea.MethodParamDeps[mk]) {
+			if ea.ParamLeakFree[pk] {
+				continue
+			}
+			edges = append(edges, ChainLink{Kind: "edge", Package: mk.Pkg, Symbol: mk.Name, Callee: formatParamEdge(pk)})
+			walkParamConfinement(pk)
+		}
+	}
+
 	var walk func(key syntaxutil.EnvAuditTarget) (string, string)
 	walk = func(key syntaxutil.EnvAuditTarget) (string, string) {
 		if !key.Valid() || visited[key] {
@@ -505,17 +613,49 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 			}
 			return "", ""
 		}
+		_, symbol := renderEdge(key)
 		for _, set := range depSets {
 			for _, dep := range set {
 				if ea.DepResolved(dep) {
 					continue
 				}
 				depPkg, depName := renderEdge(dep)
-				_, symbol := renderEdge(key)
 				edges = append(edges, ChainLink{Kind: "edge", Package: pkgPath, Symbol: symbol, Callee: depPkg + "." + depName})
 				if fn, p := walk(dep); fn != "" {
 					return fn, p
 				}
+			}
+		}
+		if key.IsParam() {
+			p := key.Param()
+			for _, pk := range sortedParams(ea.InsParamDeps[p]) {
+				if ea.ParamLeakFree[pk] {
+					continue
+				}
+				edges = append(edges, ChainLink{Kind: "edge", Package: pkgPath, Symbol: symbol, Callee: formatParamEdge(pk)})
+				walkParamConfinement(pk)
+			}
+			for _, mk := range sortedRawFuncs(ea.InsMethodDeps[p]) {
+				if ea.ReadOnly[mk] {
+					continue
+				}
+				edges = append(edges, ChainLink{Kind: "edge", Package: pkgPath, Symbol: symbol, Callee: formatMethodEdge(mk)})
+				walkMethodConfinement(mk)
+			}
+		} else {
+			for _, pk := range sortedParams(ea.RetParamDeps[key.Func]) {
+				if ea.ParamLeakFree[pk] {
+					continue
+				}
+				edges = append(edges, ChainLink{Kind: "edge", Package: pkgPath, Symbol: symbol, Callee: formatParamEdge(pk)})
+				walkParamConfinement(pk)
+			}
+			for _, mk := range sortedRawFuncs(ea.RetMethodDeps[key.Func]) {
+				if ea.ReadOnly[mk] {
+					continue
+				}
+				edges = append(edges, ChainLink{Kind: "edge", Package: pkgPath, Symbol: symbol, Callee: formatMethodEdge(mk)})
+				walkMethodConfinement(mk)
 			}
 		}
 		return "", ""
@@ -527,6 +667,14 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 		if fn, p := walk(target); fn != "" {
 			return edges, fn, p
 		}
+	}
+	for _, rp := range directParams {
+		edges = append(edges, ChainLink{Kind: "edge", Package: rp.from, Symbol: bareSymbol(rp.key, varName), Callee: formatParamEdge(rp.param)})
+		walkParamConfinement(rp.param)
+	}
+	for _, rm := range directMethods {
+		edges = append(edges, ChainLink{Kind: "edge", Package: rm.from, Symbol: bareSymbol(rm.key, varName), Callee: formatMethodEdge(rm.method)})
+		walkMethodConfinement(rm.method)
 	}
 	return edges, "", ""
 }

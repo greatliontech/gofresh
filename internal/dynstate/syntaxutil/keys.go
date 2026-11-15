@@ -275,6 +275,42 @@ func (e ParamDepEdge) Compare(o ParamDepEdge) int {
 	return e.Dep.Compare(o.Dep)
 }
 
+// FuncParamDepEdge records a conditional dependency from a function or method
+// proof to a plain-function parameter leak-free proof.
+type FuncParamDepEdge struct {
+	Func  FuncKey  `json:"func"`
+	Param ParamKey `json:"param"`
+}
+
+func (e FuncParamDepEdge) Valid() bool {
+	return e.Func.Valid() && e.Param.Valid()
+}
+
+func (e FuncParamDepEdge) Compare(o FuncParamDepEdge) int {
+	if c := e.Func.Compare(o.Func); c != 0 {
+		return c
+	}
+	return e.Param.Compare(o.Param)
+}
+
+// ParamMethodDepEdge records a conditional dependency from a parameter proof
+// to a pointer-receiver method's read-only proof.
+type ParamMethodDepEdge struct {
+	Param  ParamKey `json:"param"`
+	Method FuncKey  `json:"method"`
+}
+
+func (e ParamMethodDepEdge) Valid() bool {
+	return e.Param.Valid() && e.Method.Valid()
+}
+
+func (e ParamMethodDepEdge) Compare(o ParamMethodDepEdge) int {
+	if c := e.Param.Compare(o.Param); c != 0 {
+		return c
+	}
+	return e.Method.Compare(o.Method)
+}
+
 // OpaqueDep records a conditional object-closed dependency edge between two
 // interface-typed package-level variables.
 type OpaqueDep struct {
@@ -569,6 +605,127 @@ func (u EnvCallUse) Compare(o EnvCallUse) int {
 		return c
 	}
 	return u.Func.Compare(o.Func)
+}
+
+// EnvCallParamUse records a deferred parameter-leak-free obligation on a
+// carrier's environment-free registration (from a registered literal's
+// body/enclosing scope or a plain-call mutable-reach argument). When Func is
+// non-zero, the registration occurred inside that plain named function.
+type EnvCallParamUse struct {
+	Key   string   `json:"key"`
+	Param ParamKey `json:"param"`
+	Func  FuncKey  `json:"func,omitempty"`
+}
+
+func (u EnvCallParamUse) Valid() bool {
+	if u.Key == "" || strings.Contains(u.Key, "\x00") || !u.Param.Valid() {
+		return false
+	}
+	return u.Func.IsZero() || u.Func.Valid()
+}
+
+func (u EnvCallParamUse) Compare(o EnvCallParamUse) int {
+	if c := cmp.Compare(u.Key, o.Key); c != 0 {
+		return c
+	}
+	if c := u.Param.Compare(o.Param); c != 0 {
+		return c
+	}
+	return u.Func.Compare(o.Func)
+}
+
+// EnvCallMethodUse records a deferred receiver-read-only obligation on a
+// carrier's environment-free registration (from a registered literal's body or
+// enclosing scope). When Func is non-zero, the registration occurred inside
+// that plain named function.
+type EnvCallMethodUse struct {
+	Key    string  `json:"key"`
+	Method FuncKey `json:"method"`
+	Func   FuncKey `json:"func,omitempty"`
+}
+
+func (u EnvCallMethodUse) Valid() bool {
+	if u.Key == "" || strings.Contains(u.Key, "\x00") || !u.Method.Valid() {
+		return false
+	}
+	return u.Func.IsZero() || u.Func.Valid()
+}
+
+func (u EnvCallMethodUse) Compare(o EnvCallMethodUse) int {
+	if c := cmp.Compare(u.Key, o.Key); c != 0 {
+		return c
+	}
+	if c := u.Method.Compare(o.Method); c != 0 {
+		return c
+	}
+	return u.Func.Compare(o.Func)
+}
+
+// OnceMemoTypeFact records that a named struct type in its declaring package
+// mechanically satisfies the once-populated immutable struct memoizer contract
+// (REQ-closure-shared-dynamic-state-memo).
+type OnceMemoTypeFact struct {
+	Type           TypeRef    `json:"type"`
+	Constructors   []FuncKey  `json:"constructors"`
+	GuardTypes     []TypeRef  `json:"guardTypes,omitempty"`
+	InputParamDeps []ParamKey `json:"inputParamDeps,omitempty"`
+}
+
+func (f OnceMemoTypeFact) Valid() bool {
+	if !f.Type.Valid() || len(f.Constructors) == 0 || len(f.GuardTypes) == 0 {
+		return false
+	}
+	hasSelfGuard := false
+	for _, c := range f.Constructors {
+		if !c.Valid() || c.Pkg != f.Type.Pkg {
+			return false
+		}
+	}
+	for _, g := range f.GuardTypes {
+		if !g.Valid() {
+			return false
+		}
+		if g == f.Type {
+			hasSelfGuard = true
+		}
+	}
+	if !hasSelfGuard {
+		return false
+	}
+	for _, p := range f.InputParamDeps {
+		if !p.Valid() {
+			return false
+		}
+	}
+	return true
+}
+
+func (f OnceMemoTypeFact) Compare(o OnceMemoTypeFact) int {
+	return cmp.Compare(f.Type.Key(), o.Type.Key())
+}
+
+// OnceMemoVarCandidate records a non-directive package-level *T variable
+// initialized once at declaration by a direct call to Constructor, free of
+// mutations and non-method-call uses in its declaring package, and passing only
+// confined arguments to Constructor.
+type OnceMemoVarCandidate struct {
+	Key         string  `json:"key"`
+	Type        TypeRef `json:"type"`
+	Constructor FuncKey `json:"constructor"`
+}
+
+func (c OnceMemoVarCandidate) Valid() bool {
+	return ValidQualifiedVarKey(c.Key) && c.Type.Valid() && c.Constructor.Valid() && c.Constructor.Pkg == c.Type.Pkg
+}
+
+func (c OnceMemoVarCandidate) Compare(o OnceMemoVarCandidate) int {
+	if k := cmp.Compare(c.Key, o.Key); k != 0 {
+		return k
+	}
+	if t := cmp.Compare(c.Type.Key(), o.Type.Key()); t != 0 {
+		return t
+	}
+	return c.Constructor.Compare(o.Constructor)
 }
 
 // FuncDepEdge records a return-environment-free conditional edge from a

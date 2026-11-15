@@ -104,7 +104,7 @@ func (mi *MessageInfo) initOnce() {
 		t.Fatalf("expected %v in DeriveNonMutatingMethods, got %v", want, methods)
 	}
 
-	_, _, runtimeTypes, _, _, _ := DeriveProtoAndStructFacts(true, p, idx, idx.InitOnly, nil)
+	_, _, runtimeTypes, _, _, _ := DeriveProtoAndStructFacts(true, p, idx, idx.InitOnly, nil, nil)
 	roles := map[string]bool{}
 	for _, rt := range runtimeTypes {
 		if !rt.Valid() {

@@ -185,12 +185,13 @@ func isSettledReachArg(
 	currentTargets []*types.Var,
 	enclosing ast.Node,
 	exemptCall *ast.CallExpr,
-	paramLeakFree map[syntaxutil.ParamKey]bool,
-	readOnly map[string]bool,
+	pkgConf *packageConfinementSummary,
+	paramSink map[syntaxutil.ParamKey]bool,
+	methodSink map[syntaxutil.FuncKey]bool,
 	checkSigOrigin func(ast.Expr) bool,
 	expr ast.Expr,
 ) bool {
-	return isSettledReachArgSeen(audited, p, settledGlobals, currentTargets, enclosing, exemptCall, paramLeakFree, readOnly, checkSigOrigin, expr, map[*types.Var]bool{})
+	return isSettledReachArgSeen(audited, p, settledGlobals, currentTargets, enclosing, exemptCall, pkgConf, paramSink, methodSink, checkSigOrigin, expr, map[*types.Var]bool{})
 }
 
 func isSettledReachArgSeen(
@@ -200,8 +201,9 @@ func isSettledReachArgSeen(
 	currentTargets []*types.Var,
 	enclosing ast.Node,
 	exemptCall *ast.CallExpr,
-	paramLeakFree map[syntaxutil.ParamKey]bool,
-	readOnly map[string]bool,
+	pkgConf *packageConfinementSummary,
+	paramSink map[syntaxutil.ParamKey]bool,
+	methodSink map[syntaxutil.FuncKey]bool,
 	checkSigOrigin func(ast.Expr) bool,
 	expr ast.Expr,
 	visiting map[*types.Var]bool,
@@ -223,20 +225,44 @@ func isSettledReachArgSeen(
 	if isPureFreshDataExpr(p, settledGlobals, e) {
 		return true
 	}
+	localParams := map[syntaxutil.ParamKey]bool{}
+	localMethods := map[syntaxutil.FuncKey]bool{}
+	commitSinks := func() bool {
+		if len(localParams) > 0 {
+			if paramSink == nil {
+				return false
+			}
+			for pk := range localParams {
+				paramSink[pk] = true
+			}
+		}
+		if len(localMethods) > 0 {
+			if methodSink == nil {
+				return false
+			}
+			for mk := range localMethods {
+				methodSink[mk] = true
+			}
+		}
+		return true
+	}
 	recur := func(sub ast.Expr) bool {
-		return isSettledReachArgSeen(audited, p, settledGlobals, currentTargets, enclosing, exemptCall, paramLeakFree, readOnly, checkSigOrigin, sub, visiting)
+		return isSettledReachArgSeen(audited, p, settledGlobals, currentTargets, enclosing, exemptCall, pkgConf, localParams, localMethods, checkSigOrigin, sub, visiting)
 	}
 	switch n := e.(type) {
 	case *ast.BasicLit:
 		return true
 	case *ast.CompositeLit:
-		return syntaxutil.EachCompositeLitFlow(p.TypesInfo, n, func(elt ast.Expr, _ bool) bool {
+		if !syntaxutil.EachCompositeLitFlow(p.TypesInfo, n, func(elt ast.Expr, _ bool) bool {
 			return recur(elt)
-		})
+		}) {
+			return false
+		}
+		return commitSinks()
 	case *ast.UnaryExpr:
 		if n.Op == token.AND {
 			_, isComp := syntaxutil.UnparenExpr(n.X).(*ast.CompositeLit)
-			return isComp && recur(n.X)
+			return isComp && recur(n.X) && commitSinks()
 		}
 		return false
 	case *ast.CallExpr:
@@ -249,7 +275,7 @@ func isSettledReachArgSeen(
 					if syntaxutil.IsBuiltinNewType(p.TypesInfo, n) {
 						return true
 					}
-					return len(n.Args) == 1 && !n.Ellipsis.IsValid() && recur(n.Args[0])
+					return len(n.Args) == 1 && !n.Ellipsis.IsValid() && recur(n.Args[0]) && commitSinks()
 				case "append":
 					if len(n.Args) == 0 || !isPureFreshDataExprWith(p, n.Args[0], nil) {
 						return false
@@ -259,13 +285,13 @@ func isSettledReachArgSeen(
 							return false
 						}
 					}
-					return true
+					return commitSinks()
 				}
 				return false
 			}
 		}
 		if tv, ok := p.TypesInfo.Types[n.Fun]; ok && tv.IsType() && len(n.Args) == 1 && !n.Ellipsis.IsValid() {
-			return !syntaxutil.IsUnsafePointerType(tv.Type) && recur(n.Args[0])
+			return !syntaxutil.IsUnsafePointerType(tv.Type) && recur(n.Args[0]) && commitSinks()
 		}
 		if fn, pkgPath := syntaxutil.PlainCalleeFunc(p, n.Fun); fn != nil {
 			fk := syntaxutil.FuncKey{Pkg: pkgPath, Name: fn.Name()}
@@ -275,7 +301,7 @@ func isSettledReachArgSeen(
 						return false
 					}
 				}
-				return true
+				return commitSinks()
 			}
 		}
 		return false
@@ -330,7 +356,7 @@ func isSettledReachArgSeen(
 			}
 			return true
 		})
-		if defs != 1 || initRaw == nil || !isSettledReachArgSeen(audited, p, settledGlobals, currentTargets, enclosing, nil, paramLeakFree, readOnly, checkSigOrigin, initRaw, visiting) {
+		if defs != 1 || initRaw == nil || !isSettledReachArgSeen(audited, p, settledGlobals, currentTargets, enclosing, nil, pkgConf, localParams, localMethods, checkSigOrigin, initRaw, visiting) {
 			return false
 		}
 		wants := map[syntaxutil.ParamKey]bool{}
@@ -350,16 +376,24 @@ func isSettledReachArgSeen(
 			ownPath = p.Types.Path()
 		}
 		for w := range wants {
-			if w.Func.Pkg != ownPath || !paramLeakFree[w] {
+			provenLocal, conditional := pkgConf.classifyParam(ownPath, w)
+			if !provenLocal && !conditional {
 				return false
+			}
+			if !provenLocal {
+				localParams[w] = true
 			}
 		}
 		for mw := range methodWants {
-			if mw.Pkg != ownPath || !readOnly[mw.Name] {
+			provenLocal, conditional := pkgConf.classifyMethod(ownPath, mw)
+			if !provenLocal && !conditional {
 				return false
 			}
+			if !provenLocal {
+				localMethods[mw] = true
+			}
 		}
-		return true
+		return commitSinks()
 	}
 	return false
 }
@@ -588,7 +622,7 @@ func settledPackageDataGlobals(
 							}
 							return
 						}
-						if v.CallKind == flowir.CallPlain && v.CalleeFunc != nil {
+						if v.CallKind == flowir.CallPlain && !v.IsMethodExprCall && v.CalleeFunc != nil {
 							fk := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Name()}
 							if auditedValuePlane[fk] {
 								shallowSafe := !elemHandsOutMutableReach(v.Type)
@@ -600,21 +634,24 @@ func settledPackageDataGlobals(
 								}
 								return
 							}
-							for i, arg := range v.Args {
-								if !valueMentionsVar(arg, g) {
-									continue
+							v.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, _ int, pIdx int, pOK bool, _ bool) bool {
+								if !okSpec || !valueMentionsVar(arg, g) {
+									return okSpec
+								}
+								if slotType != nil && !refconfine.CallResultHandsOut(slotType) &&
+									!(v.AutoAddrRecv && v.HasRecvPlace && v.RecvPlace.Obj == g) {
+									return true
 								}
 								if !refconfine.TypeHandsOutMutableReach(g.Type()) && !(v.AutoAddrRecv && v.HasRecvPlace && v.RecvPlace.Obj == g) {
-									continue
+									return true
 								}
 								if v.Type == nil || refconfine.TypeHandsOutMutableReach(v.Type) || refconfine.TypeReachesSyncNoCopyByValue(v.Type) {
 									okSpec = false
-									return
+									return false
 								}
-								pIdx, pOK := v.ParamIndexForArg(i)
 								if !pOK {
 									okSpec = false
-									return
+									return false
 								}
 								pk := syntaxutil.ParamKey{Func: fk, Index: pIdx}
 								confinementOK := fk.Pkg == ownPath && paramLeakFree[pk] && !refconfine.CallResultHandsOut(v.Type)
@@ -634,8 +671,12 @@ func settledPackageDataGlobals(
 								}
 								if !confinementOK {
 									okSpec = false
-									return
+									return false
 								}
+								return true
+							})
+							if !okSpec {
+								return
 							}
 							for _, arg := range v.Args {
 								if arg != nil && arg.Kind == flowir.ValPlace && arg.Place.Obj == g && len(arg.Place.Projs) == 0 {
@@ -1156,7 +1197,8 @@ func enclosingConfinesRoots(
 			if !refconfine.TypeCarriesSignature(v.Type) {
 				return true
 			}
-			if v.Kind == flowir.ValPlace && (v.Place.Root == flowir.RootConstOrNil || v.Place.Root == flowir.RootFunc) {
+			if v.Kind == flowir.ValScalarLitOrConst ||
+				(v.Kind == flowir.ValPlace && (v.Place.Root == flowir.RootConstOrNil || v.Place.Root == flowir.RootFunc)) {
 				return true
 			}
 			if origin != nil && origin.checkCarryingValue != nil {
@@ -1360,6 +1402,9 @@ func enclosingConfinesRoots(
 				}
 			}
 		case flowir.ValCall:
+			if v.AutoAddrRecv && v.HasRecvPlace && v.RecvPlace.Obj != nil && roots[v.RecvPlace.Obj] {
+				out[v.RecvPlace.Obj] = true
+			}
 			valMutableRoots(v.Recv, out)
 			valMutableRoots(v.Callee, out)
 			for _, a := range v.Args {
@@ -1560,7 +1605,7 @@ func enclosingConfinesRoots(
 					}
 				}
 			case flowir.CallPlain:
-				if v.CalleeFunc == nil {
+				if v.CalleeFunc == nil || v.IsMethodExprCall {
 					for _, a := range v.Args {
 						if suppliesMutableRoot(a) {
 							sound = false
@@ -1571,16 +1616,22 @@ func enclosingConfinesRoots(
 				}
 				fk := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Name()}
 				if !auditedValuePlane[fk] {
-					for i, a := range v.Args {
+					v.ForEachArgParam(func(a *flowir.Value, slotType types.Type, _ int, pIdx int, pOK bool, _ bool) bool {
 						if !suppliesMutableRoot(a) {
-							continue
+							return true
 						}
-						pIdx, pOK := v.ParamIndexForArg(i)
+						if slotType != nil && !refconfine.CallResultHandsOut(slotType) {
+							return true
+						}
 						if wants == nil || !pOK {
 							sound = false
-							return
+							return false
 						}
 						wants[syntaxutil.ParamKey{Func: fk, Index: pIdx}] = true
+						return true
+					})
+					if !sound {
+						return
 					}
 				}
 			case flowir.CallMethod:
@@ -2384,14 +2435,15 @@ func recordEnvCarryingRegistrations(
 	unattestedBroken map[string]bool,
 	singleSubjectVars map[string]bool,
 	settledGlobals settledGlobalMap,
-	paramLeakFree map[syntaxutil.ParamKey]bool,
-	readOnly map[string]bool,
+	pkgConf *packageConfinementSummary,
 	exemptSeamNodes map[ast.Node]bool,
 	envCarrying map[string]bool,
 	envCarryingFns map[string]map[syntaxutil.FuncKey]bool,
 	envCarryingUnattr map[string]bool,
 	envCallableVars map[string]bool,
 	envCalls map[syntaxutil.EnvCallUse]bool,
+	envParamCalls map[syntaxutil.EnvCallParamUse]bool,
+	envMethodCalls map[syntaxutil.EnvCallMethodUse]bool,
 	carrierLinks map[syntaxutil.CarrierLink]bool,
 	fieldDefer map[syntaxutil.FieldPosKey]map[syntaxutil.ParamKey]bool,
 	fieldPoison map[string]map[syntaxutil.FieldParamPoison]bool,
@@ -2843,15 +2895,38 @@ func recordEnvCarryingRegistrations(
 		return aliased
 	}
 
+	var enclosingScope ast.Node
+	var currentRegFn syntaxutil.FuncKey
+	var currentTargets []*types.Var
+	var pendingEnvCalls map[syntaxutil.FuncKey]bool
+	var pendingEnvParams map[syntaxutil.ParamKey]bool
+	var pendingEnvMethods map[syntaxutil.FuncKey]bool
+	var pendingCarrierLinks map[string]bool
+	var carrying func(expr ast.Expr) bool
+
 	wantsResolve := func(wants map[syntaxutil.ParamKey]bool, methodWants map[syntaxutil.FuncKey]bool) bool {
 		for w := range wants {
-			if w.Func.Pkg != ownPath || !paramLeakFree[w] {
+			provenLocal, conditional := pkgConf.classifyParam(ownPath, w)
+			if !provenLocal && (!conditional || pendingEnvParams == nil) {
 				return false
 			}
 		}
 		for mw := range methodWants {
-			if mw.Pkg != ownPath || !readOnly[mw.Name] {
+			provenLocal, conditional := pkgConf.classifyMethod(ownPath, mw)
+			if !provenLocal && (!conditional || pendingEnvMethods == nil) {
 				return false
+			}
+		}
+		for w := range wants {
+			provenLocal, _ := pkgConf.classifyParam(ownPath, w)
+			if !provenLocal {
+				pendingEnvParams[w] = true
+			}
+		}
+		for mw := range methodWants {
+			provenLocal, _ := pkgConf.classifyMethod(ownPath, mw)
+			if !provenLocal {
+				pendingEnvMethods[mw] = true
 			}
 		}
 		return true
@@ -3007,20 +3082,56 @@ func recordEnvCarryingRegistrations(
 		return initExpr, true
 	}
 
-	var enclosingScope ast.Node
-	var currentRegFn syntaxutil.FuncKey
-	var currentTargets []*types.Var
-	var pendingEnvCalls map[syntaxutil.FuncKey]bool
-	var pendingCarrierLinks map[string]bool
-	var carrying func(expr ast.Expr) bool
 	visitingSingleWriteVars := map[*types.Var]bool{}
 	visitingInitParams := map[syntaxutil.ParamKey]bool{}
 
+	cloneFuncMap := func(m map[syntaxutil.FuncKey]bool) map[syntaxutil.FuncKey]bool {
+		if m == nil {
+			return nil
+		}
+		out := make(map[syntaxutil.FuncKey]bool, len(m))
+		for k, v := range m {
+			out[k] = v
+		}
+		return out
+	}
+	cloneParamMap := func(m map[syntaxutil.ParamKey]bool) map[syntaxutil.ParamKey]bool {
+		if m == nil {
+			return nil
+		}
+		out := make(map[syntaxutil.ParamKey]bool, len(m))
+		for k, v := range m {
+			out[k] = v
+		}
+		return out
+	}
+	cloneStringMap := func(m map[string]bool) map[string]bool {
+		if m == nil {
+			return nil
+		}
+		out := make(map[string]bool, len(m))
+		for k, v := range m {
+			out[k] = v
+		}
+		return out
+	}
+
 	carryingAtScope := func(scope ast.Node, expr ast.Expr) bool {
 		prev := enclosingScope
+		snapCalls := cloneFuncMap(pendingEnvCalls)
+		snapParams := cloneParamMap(pendingEnvParams)
+		snapMethods := cloneFuncMap(pendingEnvMethods)
+		snapLinks := cloneStringMap(pendingCarrierLinks)
 		enclosingScope = scope
-		defer func() { enclosingScope = prev }()
-		return carrying(expr)
+		bad := carrying(expr)
+		enclosingScope = prev
+		if bad {
+			pendingEnvCalls = snapCalls
+			pendingEnvParams = snapParams
+			pendingEnvMethods = snapMethods
+			pendingCarrierLinks = snapLinks
+		}
+		return bad
 	}
 
 	var checkCapturedSigOriginAtScope func(scope ast.Node, expr ast.Expr) bool
@@ -3328,7 +3439,7 @@ func recordEnvCarryingRegistrations(
 							return true
 						}
 						if argT := p.TypesInfo.TypeOf(arg); argT != nil && refconfine.TypeHandsOutMutableReach(argT) {
-							if !isSettledReachArg(audited, p, settledGlobals, currentTargets, enclosingScope, e, paramLeakFree, readOnly, checkLocalCarryingInit, arg) {
+							if !isSettledReachArg(audited, p, settledGlobals, currentTargets, enclosingScope, e, pkgConf, pendingEnvParams, pendingEnvMethods, checkLocalCarryingInit, arg) {
 								return true
 							}
 						}
@@ -3425,15 +3536,21 @@ func recordEnvCarryingRegistrations(
 		}
 		poison := false
 		pendingEnvCalls = map[syntaxutil.FuncKey]bool{}
+		pendingEnvParams = map[syntaxutil.ParamKey]bool{}
+		pendingEnvMethods = map[syntaxutil.FuncKey]bool{}
 		pendingCarrierLinks = map[string]bool{}
 		prevTargets := currentTargets
 		currentTargets = targets
-		var poisonAt token.Pos
+		var poisonAt, deferredAt token.Pos
 		for _, flow := range flows {
+			beforeCalls, beforeParams, beforeMethods := len(pendingEnvCalls), len(pendingEnvParams), len(pendingEnvMethods)
 			if carrying(flow) {
 				poison = true
 				poisonAt = flow.Pos()
 				break
+			}
+			if deferredAt == token.NoPos && (len(pendingEnvCalls) > beforeCalls || len(pendingEnvParams) > beforeParams || len(pendingEnvMethods) > beforeMethods) {
+				deferredAt = flow.Pos()
 			}
 		}
 		currentTargets = prevTargets
@@ -3459,9 +3576,12 @@ func recordEnvCarryingRegistrations(
 				}
 			}
 		} else {
-			if len(pendingEnvCalls) > 0 {
+			if len(pendingEnvCalls) > 0 || len(pendingEnvParams) > 0 || len(pendingEnvMethods) > 0 {
 				for _, variable := range targets {
 					key := syntaxutil.DynamicVarKey(variable)
+					if deferredAt != token.NoPos {
+						syntaxutil.ExplainStoreMark(hooks, p, key, deferredAt)
+					}
 					if envCallableVars != nil {
 						if _, isFunc := types.Unalias(variable.Type()).Underlying().(*types.Signature); isFunc {
 							envCallableVars[key] = true
@@ -3470,6 +3590,16 @@ func recordEnvCarryingRegistrations(
 					if envCalls != nil {
 						for callee := range pendingEnvCalls {
 							envCalls[syntaxutil.EnvCallUse{Key: key, Callee: callee, Func: currentRegFn}] = true
+						}
+					}
+					if envParamCalls != nil {
+						for pk := range pendingEnvParams {
+							envParamCalls[syntaxutil.EnvCallParamUse{Key: key, Param: pk, Func: currentRegFn}] = true
+						}
+					}
+					if envMethodCalls != nil {
+						for mk := range pendingEnvMethods {
+							envMethodCalls[syntaxutil.EnvCallMethodUse{Key: key, Method: mk, Func: currentRegFn}] = true
 						}
 					}
 				}
@@ -3516,6 +3646,8 @@ func recordEnvCarryingRegistrations(
 			}
 		}
 		pendingEnvCalls = nil
+		pendingEnvParams = nil
+		pendingEnvMethods = nil
 		pendingCarrierLinks = nil
 	}
 

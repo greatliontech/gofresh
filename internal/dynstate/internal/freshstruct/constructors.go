@@ -30,10 +30,42 @@ type freshFuncSummary struct {
 // PkgFreshConstructors summarizes function-local and unexported-constructor
 // fresh struct allocations across a package.
 type PkgFreshConstructors struct {
-	p          *packages.Package
-	idx        *refconfine.PkgIndex
-	funcs      map[*ast.FuncDecl]*freshFuncSummary
-	condGuards map[syntaxutil.ConditionalStructMutation]bool
+	p                *packages.Package
+	idx              *refconfine.PkgIndex
+	funcs            map[*ast.FuncDecl]*freshFuncSummary
+	freshReturnFuncs map[*types.Func]bool
+	condGuards       map[syntaxutil.ConditionalStructMutation]bool
+}
+
+// ReturnsFreshAllocation reports whether fd has no conditional guards in its
+// constructor cone, executes at least one return statement, and returns only
+// nil, a direct fresh allocation, or a live unescaped fresh local variable on
+// its primary result across every return path.
+func (pf *PkgFreshConstructors) ReturnsFreshAllocation(fd *ast.FuncDecl) bool {
+	if pf == nil || pf.p == nil || pf.p.TypesInfo == nil || fd == nil || fd.Body == nil || FuncBodyHasGoto(fd.Body) {
+		return false
+	}
+	sum := pf.funcs[fd]
+	if sum == nil || len(sum.condGuards) > 0 || !funcHasReturnStmt(fd.Body) {
+		return false
+	}
+	var sig *types.Signature
+	if sum.fn != nil {
+		sig, _ = sum.fn.Type().(*types.Signature)
+	} else if fd.Type != nil {
+		sig, _ = pf.p.TypesInfo.TypeOf(fd.Type).(*types.Signature)
+	}
+	return pf.funcDeclReturnsFreshAllocation(fd, sum, sig, pf.freshReturnFuncs)
+}
+
+// IsFieldFreshInCone reports whether field is never assigned a non-fresh
+// reference/container value or address-taken anywhere in fd's constructor cone.
+func (pf *PkgFreshConstructors) IsFieldFreshInCone(fd *ast.FuncDecl, field *types.Var) bool {
+	if pf == nil || fd == nil || field == nil {
+		return false
+	}
+	sum := pf.funcs[fd]
+	return sum != nil && !sum.nonFreshFields[field]
 }
 
 func recordFreshVarGuardPkg(sum *freshFuncSummary, v *types.Var, guardPkg string) {
@@ -216,7 +248,7 @@ func (pf *PkgFreshConstructors) isFreshContainerAt(sum *freshFuncSummary, expr a
 		case *ast.IndexExpr:
 			xt := syntaxutil.UnderlyingType(pf.p.TypesInfo.TypeOf(e.X))
 			switch u := xt.(type) {
-			case *types.Array:
+			case *types.Array, *types.Map:
 				cur = ast.Unparen(e.X)
 				first = false
 				continue
@@ -342,7 +374,11 @@ func ComputePackageFreshConstructors(
 
 	freshReturnFuncs := map[*types.Func]bool{}
 	freshParamFuncs := map[*types.Func]map[int]bool{}
-	for fn, fd := range eligibleUnexported {
+	for _, fd := range allFDs {
+		fn, _ := p.TypesInfo.Defs[fd.Name].(*types.Func)
+		if fn == nil || fn.Pkg() != p.Types {
+			continue
+		}
 		sig, okSig := fn.Type().(*types.Signature)
 		if !okSig {
 			continue
@@ -351,6 +387,12 @@ func ComputePackageFreshConstructors(
 			if isFreshConstructableRootType(sig.Results().At(0).Type()) && funcHasReturnStmt(fd.Body) {
 				freshReturnFuncs[fn] = true
 			}
+		}
+	}
+	for fn := range eligibleUnexported {
+		sig, okSig := fn.Type().(*types.Signature)
+		if !okSig {
+			continue
 		}
 		if len(idx.UsesOf[fn]) > 0 {
 			for pi := 0; pi < sig.Params().Len(); pi++ {
@@ -448,52 +490,10 @@ func ComputePackageFreshConstructors(
 
 		// Validate freshReturnFuncs: every ReturnStmt in fn must return nil, a fresh alloc, or a live fresh root var!
 		for fn := range freshReturnFuncs {
-			fd := eligibleUnexported[fn]
+			fd := idx.FuncDecls[fn]
 			sum := pf.funcs[fd]
 			sig, _ := fn.Type().(*types.Signature)
-			if sum == nil || sig == nil {
-				delete(freshReturnFuncs, fn)
-				changed = true
-				continue
-			}
-			var res0Var *types.Var
-			if sig.Results().Len() > 0 {
-				res0Var = sig.Results().At(0)
-			}
-			okRet := true
-			ast.Inspect(fd.Body, func(n ast.Node) bool {
-				if !okRet || n == nil {
-					return false
-				}
-				if _, isLit := n.(*ast.FuncLit); isLit {
-					return false
-				}
-				ret, isRet := n.(*ast.ReturnStmt)
-				if !isRet {
-					return true
-				}
-				if len(ret.Results) == 0 {
-					if res0Var == nil || !pf.checkVarLiveAt(sum, res0Var, ret.Pos()) {
-						okRet = false
-					}
-					return false
-				}
-				r0 := ast.Unparen(ret.Results[0])
-				if syntaxutil.IsNilIdent(p.TypesInfo, r0) || isDirectFreshConstructExpr(p, r0, freshReturnFuncs) {
-					return false
-				}
-				if id, isID := r0.(*ast.Ident); isID {
-					v, _ := p.TypesInfo.Uses[id].(*types.Var)
-					st := sum.vars[v]
-					if st != nil && st.rootVar == v && (st.declPos == token.NoPos || ret.Pos() >= st.declPos) &&
-						(st.escapePos == token.NoPos || ret.Pos() <= st.escapePos) {
-						return false
-					}
-				}
-				okRet = false
-				return false
-			})
-			if !okRet {
+			if !pf.funcDeclReturnsFreshAllocation(fd, sum, sig, freshReturnFuncs) {
 				delete(freshReturnFuncs, fn)
 				changed = true
 			}
@@ -554,6 +554,7 @@ func ComputePackageFreshConstructors(
 			break
 		}
 	}
+	pf.freshReturnFuncs = freshReturnFuncs
 	pf.condGuards = map[syntaxutil.ConditionalStructMutation]bool{}
 	for _, sum := range pf.funcs {
 		if sum == nil {
@@ -564,6 +565,55 @@ func ComputePackageFreshConstructors(
 		}
 	}
 	return pf
+}
+
+func (pf *PkgFreshConstructors) funcDeclReturnsFreshAllocation(
+	fd *ast.FuncDecl,
+	sum *freshFuncSummary,
+	sig *types.Signature,
+	freshReturnFuncs map[*types.Func]bool,
+) bool {
+	if pf == nil || pf.p == nil || pf.p.TypesInfo == nil || fd == nil || fd.Body == nil || sum == nil || sig == nil {
+		return false
+	}
+	var res0Var *types.Var
+	if sig.Results().Len() > 0 {
+		res0Var = sig.Results().At(0)
+	}
+	okRet := true
+	ast.Inspect(fd.Body, func(n ast.Node) bool {
+		if !okRet || n == nil {
+			return false
+		}
+		if _, isLit := n.(*ast.FuncLit); isLit {
+			return false
+		}
+		ret, isRet := n.(*ast.ReturnStmt)
+		if !isRet {
+			return true
+		}
+		if len(ret.Results) == 0 {
+			if res0Var == nil || !pf.checkVarLiveAt(sum, res0Var, ret.Pos()) {
+				okRet = false
+			}
+			return false
+		}
+		r0 := ast.Unparen(ret.Results[0])
+		if syntaxutil.IsNilIdent(pf.p.TypesInfo, r0) || isDirectFreshConstructExpr(pf.p, r0, freshReturnFuncs) {
+			return false
+		}
+		if id, isID := r0.(*ast.Ident); isID {
+			v, _ := pf.p.TypesInfo.Uses[id].(*types.Var)
+			st := sum.vars[v]
+			if st != nil && st.rootVar == v && (st.declPos == token.NoPos || ret.Pos() >= st.declPos) &&
+				(st.escapePos == token.NoPos || ret.Pos() <= st.escapePos) {
+				return false
+			}
+		}
+		okRet = false
+		return false
+	})
+	return okRet
 }
 
 func funcHasReturnStmt(body *ast.BlockStmt) bool {
@@ -604,7 +654,7 @@ func isDirectFreshConstructExpr(p *packages.Package, expr ast.Expr, freshReturnF
 				if b.Name() == "make" {
 					return isFreshConstructableRootType(p.TypesInfo.TypeOf(e))
 				}
-				if b.Name() == "append" && len(e.Args) >= 1 && syntaxutil.IsTypedNilSliceConv(p, e.Args[0]) {
+				if b.Name() == "append" && len(e.Args) >= 1 && syntaxutil.IsTypedNilSliceConv(p, e.Args[0]) && appendArgsAreFresh(p, e, freshReturnFuncs) {
 					return isFreshConstructableRootType(p.TypesInfo.TypeOf(e))
 				}
 			}
@@ -616,18 +666,163 @@ func isDirectFreshConstructExpr(p *packages.Package, expr ast.Expr, freshReturnF
 	return false
 }
 
+func appendArgsAreFresh(p *packages.Package, call *ast.CallExpr, freshReturnFuncs map[*types.Func]bool) bool {
+	return appendArgsAreFreshWithDeferred(p, call, freshReturnFuncs, nil, nil)
+}
+
+func appendArgsAreFreshWithDeferred(
+	p *packages.Package,
+	call *ast.CallExpr,
+	freshReturnFuncs map[*types.Func]bool,
+	field *types.Var,
+	deferred *[]deferredFieldAssignVar,
+) bool {
+	if call == nil || len(call.Args) < 1 {
+		return false
+	}
+	var checkpoint int
+	if deferred != nil {
+		checkpoint = len(*deferred)
+	}
+	rollback := func() bool {
+		if deferred != nil {
+			*deferred = (*deferred)[:checkpoint]
+		}
+		return false
+	}
+	if call.Ellipsis.IsValid() {
+		if len(call.Args) != 2 || !isFreshFieldAssignRHSWithDeferred(p, nil, call.Args[1], freshReturnFuncs, field, deferred) {
+			return rollback()
+		}
+		return true
+	}
+	for _, elemArg := range call.Args[1:] {
+		if et := p.TypesInfo.TypeOf(elemArg); isRefOrContainerType(et) && !isFreshFieldAssignRHSWithDeferred(p, nil, elemArg, freshReturnFuncs, field, deferred) {
+			return rollback()
+		}
+	}
+	return true
+}
+
+func isSelfAppendFreshRHS(p *packages.Package, lhs, rhs ast.Expr, freshReturnFuncs map[*types.Func]bool) bool {
+	call, isCall := ast.Unparen(rhs).(*ast.CallExpr)
+	if !isCall || len(call.Args) < 1 || lhs == nil || !syntaxutil.SameFieldTargetExpr(p, lhs, call.Args[0]) {
+		return false
+	}
+	id, ok := ast.Unparen(call.Fun).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	b, isB := p.TypesInfo.Uses[id].(*types.Builtin)
+	return isB && b.Name() == "append" && appendArgsAreFresh(p, call, freshReturnFuncs)
+}
+
+func lookupIdentOrDerefIdentVar(info *types.Info, expr ast.Expr) *types.Var {
+	if info == nil || expr == nil {
+		return nil
+	}
+	cur := ast.Unparen(expr)
+	if st, isStar := cur.(*ast.StarExpr); isStar {
+		cur = ast.Unparen(st.X)
+	}
+	id, isID := cur.(*ast.Ident)
+	if !isID {
+		return nil
+	}
+	v, _ := info.Uses[id].(*types.Var)
+	return v
+}
+
+type deferredAppendElemVar struct {
+	v        *types.Var
+	pos      token.Pos
+	elemType types.Type
+}
+
+type deferredFieldAssignVar struct {
+	field    *types.Var
+	v        *types.Var
+	addrExpr ast.Expr
+	pos      token.Pos
+}
+
+func recordAppendElemNonFreshFields(
+	p *packages.Package,
+	rhs ast.Expr,
+	freshReturnFuncs map[*types.Func]bool,
+	nonFresh map[*types.Var]bool,
+	deferred *[]deferredAppendElemVar,
+) {
+	call, isCall := ast.Unparen(rhs).(*ast.CallExpr)
+	if !isCall || len(call.Args) < 2 {
+		return
+	}
+	cid, isCID := ast.Unparen(call.Fun).(*ast.Ident)
+	if !isCID {
+		return
+	}
+	b, isB := p.TypesInfo.Uses[cid].(*types.Builtin)
+	if !isB || b.Name() != "append" {
+		return
+	}
+	if call.Ellipsis.IsValid() {
+		arg1 := call.Args[1]
+		if cl := unwrapCompositeLit(arg1); cl != nil {
+			recordCompositeLitNonFreshFields(p, cl, freshReturnFuncs, nonFresh)
+		} else if sl, isSl := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(arg1)).(*types.Slice); isSl {
+			if v := lookupIdentOrDerefIdentVar(p.TypesInfo, arg1); v != nil && deferred != nil {
+				*deferred = append(*deferred, deferredAppendElemVar{v: v, pos: arg1.Pos(), elemType: sl.Elem()})
+			} else {
+				markValueContainedRefFieldsNonFresh(sl.Elem(), nonFresh)
+			}
+		}
+		return
+	}
+	for _, elemArg := range call.Args[1:] {
+		if cl := unwrapCompositeLit(elemArg); cl != nil {
+			recordCompositeLitNonFreshFields(p, cl, freshReturnFuncs, nonFresh)
+		} else if v := lookupIdentOrDerefIdentVar(p.TypesInfo, elemArg); v != nil && deferred != nil {
+			*deferred = append(*deferred, deferredAppendElemVar{v: v, pos: elemArg.Pos(), elemType: p.TypesInfo.TypeOf(elemArg)})
+		} else {
+			markValueContainedRefFieldsNonFresh(p.TypesInfo.TypeOf(elemArg), nonFresh)
+		}
+	}
+}
+
 func isFreshFieldAssignRHS(p *packages.Package, lhs, rhs ast.Expr, freshReturnFuncs map[*types.Func]bool) bool {
+	return isFreshFieldAssignRHSWithDeferred(p, lhs, rhs, freshReturnFuncs, nil, nil)
+}
+
+func isFreshFieldAssignRHSWithDeferred(
+	p *packages.Package,
+	lhs, rhs ast.Expr,
+	freshReturnFuncs map[*types.Func]bool,
+	field *types.Var,
+	deferred *[]deferredFieldAssignVar,
+) bool {
 	rhs = ast.Unparen(rhs)
 	if syntaxutil.IsNilIdent(p.TypesInfo, rhs) || syntaxutil.IsTypedNilSliceConv(p, rhs) {
 		return true
 	}
 	switch e := rhs.(type) {
+	case *ast.Ident:
+		if deferred != nil && field != nil {
+			if rhsV := syntaxutil.LookupIdentVar(p.TypesInfo, e); rhsV != nil && rhsV.Parent() != p.Types.Scope() {
+				*deferred = append(*deferred, deferredFieldAssignVar{field: field, v: rhsV, pos: e.Pos()})
+				return true
+			}
+		}
 	case *ast.CompositeLit:
-		return true
+		return compositeLitElementsAreFreshWithDeferred(p, e, freshReturnFuncs, field, deferred)
 	case *ast.UnaryExpr:
 		if e.Op == token.AND {
-			_, ok := ast.Unparen(e.X).(*ast.CompositeLit)
-			return ok
+			if cl, ok := ast.Unparen(e.X).(*ast.CompositeLit); ok {
+				return compositeLitElementsAreFreshWithDeferred(p, cl, freshReturnFuncs, field, deferred)
+			}
+			if deferred != nil && field != nil {
+				*deferred = append(*deferred, deferredFieldAssignVar{field: field, addrExpr: e.X, pos: e.Pos()})
+				return true
+			}
 		}
 	case *ast.CallExpr:
 		if syntaxutil.IsBuiltinNewType(p.TypesInfo, e) {
@@ -639,7 +834,8 @@ func isFreshFieldAssignRHS(p *packages.Package, lhs, rhs ast.Expr, freshReturnFu
 					return true
 				}
 				if b.Name() == "append" && len(e.Args) >= 1 &&
-					(syntaxutil.IsTypedNilSliceConv(p, e.Args[0]) || (lhs != nil && syntaxutil.SameFieldTargetExpr(p, lhs, e.Args[0]))) {
+					(syntaxutil.IsTypedNilSliceConv(p, e.Args[0]) || (lhs != nil && syntaxutil.SameFieldTargetExpr(p, lhs, e.Args[0]))) &&
+					appendArgsAreFreshWithDeferred(p, e, freshReturnFuncs, field, deferred) {
 					return true
 				}
 			}
@@ -679,39 +875,220 @@ func markValueContainedRefFieldsNonFresh(t types.Type, out map[*types.Var]bool) 
 	walk(t)
 }
 
+func compositeLitElementsAreFresh(p *packages.Package, cl *ast.CompositeLit, freshReturnFuncs map[*types.Func]bool) bool {
+	return compositeLitElementsAreFreshWithDeferred(p, cl, freshReturnFuncs, nil, nil)
+}
+
+func compositeLitElementsAreFreshWithDeferred(
+	p *packages.Package,
+	cl *ast.CompositeLit,
+	freshReturnFuncs map[*types.Func]bool,
+	field *types.Var,
+	deferred *[]deferredFieldAssignVar,
+) bool {
+	if cl == nil {
+		return false
+	}
+	var checkpoint int
+	if deferred != nil {
+		checkpoint = len(*deferred)
+	}
+	rollback := func() bool {
+		if deferred != nil {
+			*deferred = (*deferred)[:checkpoint]
+		}
+		return false
+	}
+	switch syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(cl)).(type) {
+	case *types.Map, *types.Slice, *types.Array:
+		for _, elt := range cl.Elts {
+			val := elt
+			if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
+				val = kv.Value
+				if kt := p.TypesInfo.TypeOf(kv.Key); isRefOrContainerType(kt) && !isFreshFieldAssignRHSWithDeferred(p, nil, kv.Key, freshReturnFuncs, field, deferred) {
+					return rollback()
+				}
+			}
+			vt := p.TypesInfo.TypeOf(val)
+			if isRefOrContainerType(vt) && !isFreshFieldAssignRHSWithDeferred(p, nil, val, freshReturnFuncs, field, deferred) {
+				return rollback()
+			}
+		}
+	}
+	return true
+}
+
 func recordCompositeLitNonFreshFields(p *packages.Package, cl *ast.CompositeLit, freshReturnFuncs map[*types.Func]bool, nonFresh map[*types.Var]bool) {
+	recordCompositeLitNonFreshFieldsWithDeferred(p, cl, freshReturnFuncs, nonFresh, nil, nil)
+}
+
+func recordCompositeLitNonFreshFieldsWithDeferred(
+	p *packages.Package,
+	cl *ast.CompositeLit,
+	freshReturnFuncs map[*types.Func]bool,
+	nonFresh map[*types.Var]bool,
+	sum *freshFuncSummary,
+	deferredFields *[]deferredFieldAssignVar,
+) {
 	if cl == nil {
 		return
 	}
-	_, st := syntaxutil.DerefAnyStructType(p.TypesInfo.TypeOf(cl))
-	if st == nil {
+	t := p.TypesInfo.TypeOf(cl)
+	if _, st := syntaxutil.DerefAnyStructType(t); st != nil {
+		for i, elt := range cl.Elts {
+			var fObj *types.Var
+			val := elt
+			if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
+				val = kv.Value
+				if kid, isID := ast.Unparen(kv.Key).(*ast.Ident); isID {
+					fObj, _ = p.TypesInfo.Uses[kid].(*types.Var)
+				}
+			} else if i < st.NumFields() {
+				fObj = st.Field(i)
+			}
+			if fObj == nil {
+				continue
+			}
+			if isRefOrContainerType(fObj.Type()) {
+				var dfTarget *[]deferredFieldAssignVar
+				if sum != nil {
+					dfTarget = deferredFields
+				}
+				if !isFreshFieldAssignRHSWithDeferred(p, nil, val, freshReturnFuncs, fObj, dfTarget) {
+					nonFresh[fObj] = true
+				}
+			}
+			if subCL := unwrapCompositeLit(val); subCL != nil {
+				recordCompositeLitNonFreshFieldsWithDeferred(p, subCL, freshReturnFuncs, nonFresh, sum, deferredFields)
+			} else if _, subSt := syntaxutil.DerefAnyStructType(fObj.Type()); subSt != nil && !isRefOrContainerType(fObj.Type()) {
+				markValueContainedRefFieldsNonFresh(fObj.Type(), nonFresh)
+			}
+		}
 		return
 	}
-	for i, elt := range cl.Elts {
-		var fObj *types.Var
-		val := elt
-		if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
-			val = kv.Value
-			if kid, isID := ast.Unparen(kv.Key).(*ast.Ident); isID {
-				fObj, _ = p.TypesInfo.Uses[kid].(*types.Var)
+	switch syntaxutil.UnderlyingType(t).(type) {
+	case *types.Slice, *types.Array, *types.Map:
+		for _, elt := range cl.Elts {
+			val := elt
+			if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
+				val = kv.Value
+				if keyCL := unwrapCompositeLit(kv.Key); keyCL != nil {
+					recordCompositeLitNonFreshFieldsWithDeferred(p, keyCL, freshReturnFuncs, nonFresh, sum, deferredFields)
+				} else {
+					markValueContainedRefFieldsNonFresh(p.TypesInfo.TypeOf(kv.Key), nonFresh)
+				}
 			}
-		} else if i < st.NumFields() {
-			fObj = st.Field(i)
-		}
-		if fObj == nil {
-			continue
-		}
-		if isRefOrContainerType(fObj.Type()) {
-			if !isFreshFieldAssignRHS(p, nil, val, freshReturnFuncs) {
-				nonFresh[fObj] = true
+			if subCL := unwrapCompositeLit(val); subCL != nil {
+				recordCompositeLitNonFreshFieldsWithDeferred(p, subCL, freshReturnFuncs, nonFresh, sum, deferredFields)
+			} else {
+				markValueContainedRefFieldsNonFresh(p.TypesInfo.TypeOf(val), nonFresh)
 			}
-		}
-		if subCL := unwrapCompositeLit(val); subCL != nil {
-			recordCompositeLitNonFreshFields(p, subCL, freshReturnFuncs, nonFresh)
-		} else if _, subSt := syntaxutil.DerefAnyStructType(fObj.Type()); subSt != nil && !isRefOrContainerType(fObj.Type()) {
-			markValueContainedRefFieldsNonFresh(fObj.Type(), nonFresh)
 		}
 	}
+}
+
+func unwrapIndexChainBase(expr ast.Expr) ast.Expr {
+	cur := ast.Unparen(expr)
+	for {
+		ix, isIx := cur.(*ast.IndexExpr)
+		if !isIx {
+			return cur
+		}
+		cur = ast.Unparen(ix.X)
+	}
+}
+
+func markAssignLHSFieldNonFresh(p *packages.Package, l ast.Expr, nonFresh map[*types.Var]bool) {
+	if sel, isSel := unwrapIndexChainBase(l).(*ast.SelectorExpr); isSel {
+		if selInfo := p.TypesInfo.Selections[sel]; selInfo != nil && selInfo.Kind() == types.FieldVal {
+			if fObj, _ := selInfo.Obj().(*types.Var); fObj != nil {
+				if isRefOrContainerType(fObj.Type()) {
+					nonFresh[fObj] = true
+				}
+				markValueContainedRefFieldsNonFresh(fObj.Type(), nonFresh)
+			}
+		}
+	}
+}
+
+func inspectClosureForFieldFreshness(
+	p *packages.Package,
+	body *ast.BlockStmt,
+	freshReturnFuncs map[*types.Func]bool,
+	nonFresh map[*types.Var]bool,
+	coneCallees map[*types.Func]bool,
+) {
+	if body == nil {
+		return
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		if n == nil {
+			return false
+		}
+		switch s := n.(type) {
+		case *ast.CompositeLit:
+			recordCompositeLitNonFreshFields(p, s, freshReturnFuncs, nonFresh)
+		case *ast.UnaryExpr:
+			if s.Op == token.AND {
+				markAssignLHSFieldNonFresh(p, s.X, nonFresh)
+			}
+		case *ast.RangeStmt:
+			if s.Tok == token.ASSIGN {
+				if s.Key != nil {
+					markAssignLHSFieldNonFresh(p, s.Key, nonFresh)
+				}
+				if s.Value != nil {
+					markAssignLHSFieldNonFresh(p, s.Value, nonFresh)
+				}
+			}
+		case *ast.AssignStmt:
+			if len(s.Lhs) != len(s.Rhs) {
+				for _, l := range s.Lhs {
+					markAssignLHSFieldNonFresh(p, l, nonFresh)
+				}
+				return true
+			}
+			for i, l := range s.Lhs {
+				rhs := s.Rhs[i]
+				if sel, isSel := ast.Unparen(l).(*ast.SelectorExpr); isSel {
+					if selInfo := p.TypesInfo.Selections[sel]; selInfo != nil && selInfo.Kind() == types.FieldVal {
+						if fObj, _ := selInfo.Obj().(*types.Var); fObj != nil {
+							if isRefOrContainerType(fObj.Type()) && !isFreshFieldAssignRHS(p, l, rhs, freshReturnFuncs) {
+								nonFresh[fObj] = true
+							} else if _, subSt := syntaxutil.DerefAnyStructType(fObj.Type()); subSt != nil && unwrapCompositeLit(rhs) == nil {
+								markValueContainedRefFieldsNonFresh(fObj.Type(), nonFresh)
+							}
+						}
+					}
+				} else if ix, isIx := ast.Unparen(l).(*ast.IndexExpr); isIx {
+					ixType := p.TypesInfo.TypeOf(ix)
+					if sel, isSel := unwrapIndexChainBase(ix).(*ast.SelectorExpr); isSel {
+						if selInfo := p.TypesInfo.Selections[sel]; selInfo != nil && selInfo.Kind() == types.FieldVal {
+							if fObj, _ := selInfo.Obj().(*types.Var); fObj != nil && isRefOrContainerType(ixType) && !isFreshFieldAssignRHS(p, ix, rhs, freshReturnFuncs) {
+								nonFresh[fObj] = true
+							}
+						}
+					}
+					if unwrapCompositeLit(rhs) == nil {
+						markValueContainedRefFieldsNonFresh(ixType, nonFresh)
+					}
+				}
+			}
+		case *ast.CallExpr:
+			if callee := syntaxutil.ResolveCalledFuncObj(p, s.Fun); callee != nil && callee.Origin().Pkg() == p.Types {
+				coneCallees[callee.Origin()] = true
+			}
+			if b := syntaxutil.LookupBuiltin(p.TypesInfo, ast.Unparen(s.Fun)); b != nil {
+				switch b.Name() {
+				case "delete", "clear", "copy":
+					if len(s.Args) >= 1 {
+						markAssignLHSFieldNonFresh(p, s.Args[0], nonFresh)
+					}
+				}
+			}
+		}
+		return true
+	})
 }
 
 func unwrapCompositeLit(expr ast.Expr) *ast.CompositeLit {
@@ -806,15 +1183,21 @@ func analyzeSingleFreshConstructorFunc(
 		pos     token.Pos
 		addrArg ast.Expr
 	}
+	var deferredAppendVars []deferredAppendElemVar
+	var deferredFieldVars []deferredFieldAssignVar
+	selfAppendSeen := map[*types.Var]bool{}
 
 	ast.Inspect(fd.Body, func(n ast.Node) bool {
 		if n == nil {
 			return false
 		}
-		if _, isLit := n.(*ast.FuncLit); isLit {
+		if lit, isLit := n.(*ast.FuncLit); isLit {
+			inspectClosureForFieldFreshness(p, lit.Body, freshReturnFuncs, sum.nonFreshFields, sum.coneCallees)
 			return false
 		}
 		switch s := n.(type) {
+		case *ast.CompositeLit:
+			recordCompositeLitNonFreshFieldsWithDeferred(p, s, freshReturnFuncs, sum.nonFreshFields, sum, &deferredFieldVars)
 		case *ast.ForStmt:
 			loops = append(loops, s)
 		case *ast.RangeStmt:
@@ -823,10 +1206,16 @@ func analyzeSingleFreshConstructorFunc(
 				if v := syntaxutil.LookupIdentVar(p.TypesInfo, s.Key); v != nil {
 					disqualified[v] = true
 				}
+				if s.Tok == token.ASSIGN {
+					markAssignLHSFieldNonFresh(p, s.Key, sum.nonFreshFields)
+				}
 			}
 			if s.Value != nil {
 				if v := syntaxutil.LookupIdentVar(p.TypesInfo, s.Value); v != nil {
 					disqualified[v] = true
+				}
+				if s.Tok == token.ASSIGN {
+					markAssignLHSFieldNonFresh(p, s.Value, sum.nonFreshFields)
 				}
 			}
 		case *ast.DeferStmt:
@@ -848,12 +1237,14 @@ func analyzeSingleFreshConstructorFunc(
 					}
 				} else if i < len(s.Values) {
 					rhs := s.Values[i]
-					if isDirectFreshConstructExpr(p, rhs, freshReturnFuncs) {
-						_, isSl := syntaxutil.UnderlyingType(v.Type()).(*types.Slice)
-						sum.vars[v] = &freshVarState{rootVar: v, declPos: nm.Pos(), escapePos: token.NoPos, isValSlice: isSl}
-						if cl := unwrapCompositeLit(rhs); cl != nil {
-							recordCompositeLitNonFreshFields(p, cl, freshReturnFuncs, sum.nonFreshFields)
-						}
+						if isDirectFreshConstructExpr(p, rhs, freshReturnFuncs) {
+							_, isSl := syntaxutil.UnderlyingType(v.Type()).(*types.Slice)
+							sum.vars[v] = &freshVarState{rootVar: v, declPos: nm.Pos(), escapePos: token.NoPos, isValSlice: isSl}
+							if cl := unwrapCompositeLit(rhs); cl != nil {
+								recordCompositeLitNonFreshFieldsWithDeferred(p, cl, freshReturnFuncs, sum.nonFreshFields, sum, &deferredFieldVars)
+							} else {
+								recordAppendElemNonFreshFields(p, rhs, freshReturnFuncs, sum.nonFreshFields, &deferredAppendVars)
+							}
 					} else if un, isUn := ast.Unparen(rhs).(*ast.UnaryExpr); isUn && un.Op == token.AND {
 						aliasDefs = append(aliasDefs, struct {
 							v       *types.Var
@@ -901,21 +1292,13 @@ func analyzeSingleFreshConstructorFunc(
 							if v1 := syntaxutil.LookupIdentVar(p.TypesInfo, s.Lhs[1]); v1 != nil {
 								disqualified[v1] = true
 							}
+							markAssignLHSFieldNonFresh(p, s.Lhs[1], sum.nonFreshFields)
 							return true
 						}
 					}
 				}
 				for _, l := range s.Lhs {
-					if sel, isSel := ast.Unparen(l).(*ast.SelectorExpr); isSel {
-						if selInfo := p.TypesInfo.Selections[sel]; selInfo != nil && selInfo.Kind() == types.FieldVal {
-							if fObj, _ := selInfo.Obj().(*types.Var); fObj != nil {
-								if isRefOrContainerType(fObj.Type()) {
-									sum.nonFreshFields[fObj] = true
-								}
-								markValueContainedRefFieldsNonFresh(fObj.Type(), sum.nonFreshFields)
-							}
-						}
-					}
+					markAssignLHSFieldNonFresh(p, l, sum.nonFreshFields)
 					if v := syntaxutil.LookupIdentVar(p.TypesInfo, l); v != nil {
 						disqualified[v] = true
 					}
@@ -951,7 +1334,9 @@ func analyzeSingleFreshConstructorFunc(
 							_, isSl := syntaxutil.UnderlyingType(defV.Type()).(*types.Slice)
 							sum.vars[defV] = &freshVarState{rootVar: defV, declPos: lid.Pos(), escapePos: token.NoPos, isValSlice: isSl}
 							if cl := unwrapCompositeLit(rhs); cl != nil {
-								recordCompositeLitNonFreshFields(p, cl, freshReturnFuncs, sum.nonFreshFields)
+								recordCompositeLitNonFreshFieldsWithDeferred(p, cl, freshReturnFuncs, sum.nonFreshFields, sum, &deferredFieldVars)
+							} else {
+								recordAppendElemNonFreshFields(p, rhs, freshReturnFuncs, sum.nonFreshFields, &deferredAppendVars)
 							}
 						} else if un, isUn := ast.Unparen(rhs).(*ast.UnaryExpr); isUn && un.Op == token.AND {
 							aliasDefs = append(aliasDefs, struct {
@@ -963,16 +1348,27 @@ func analyzeSingleFreshConstructorFunc(
 						continue
 					}
 					if useV, isUse := p.TypesInfo.Uses[lid].(*types.Var); isUse && useV != nil {
-						assignCount[useV]++
 						if namedResults[useV] {
-							if !syntaxutil.IsNilIdent(p.TypesInfo, rhs) && !isDirectFreshConstructExpr(p, rhs, freshReturnFuncs) && !isFreshFieldAssignRHS(p, l, rhs, freshReturnFuncs) {
+							assignCount[useV]++
+							if s.Tok != token.ASSIGN || (!syntaxutil.IsNilIdent(p.TypesInfo, rhs) && !isDirectFreshConstructExpr(p, rhs, freshReturnFuncs) && !isFreshFieldAssignRHS(p, l, rhs, freshReturnFuncs)) {
 								disqualified[useV] = true
 							} else if cl := unwrapCompositeLit(rhs); cl != nil {
-								recordCompositeLitNonFreshFields(p, cl, freshReturnFuncs, sum.nonFreshFields)
+								recordCompositeLitNonFreshFieldsWithDeferred(p, cl, freshReturnFuncs, sum.nonFreshFields, sum, &deferredFieldVars)
+							} else {
+								recordAppendElemNonFreshFields(p, rhs, freshReturnFuncs, sum.nonFreshFields, &deferredAppendVars)
 							}
 							continue
 						}
-						if isTop && assignCount[useV] == 1 {
+						if !params[useV] && !idx.InFuncLit[lid] && !idx.InGoStmt[lid] &&
+							sum.vars[useV] != nil && sum.vars[useV].isValSlice &&
+							s.Tok == token.ASSIGN && len(s.Lhs) == 1 &&
+							isSelfAppendFreshRHS(p, l, rhs, freshReturnFuncs) {
+							selfAppendSeen[useV] = true
+							recordAppendElemNonFreshFields(p, rhs, freshReturnFuncs, sum.nonFreshFields, &deferredAppendVars)
+							continue
+						}
+						assignCount[useV]++
+						if isTop && assignCount[useV] == 1 && !selfAppendSeen[useV] {
 							if _, hasInit := initialDefTopIdx[useV]; hasInit && topIdx > initialDefTopIdx[useV] {
 								rebindTopIdx[useV] = topIdx
 								rebindAssign[useV] = s
@@ -987,26 +1383,16 @@ func analyzeSingleFreshConstructorFunc(
 					if selInfo := p.TypesInfo.Selections[sel]; selInfo != nil && selInfo.Kind() == types.FieldVal {
 						if fObj, _ := selInfo.Obj().(*types.Var); fObj != nil {
 							if isRefOrContainerType(fObj.Type()) {
-								if !isFreshFieldAssignRHS(p, l, rhs, freshReturnFuncs) {
+								if !isFreshFieldAssignRHSWithDeferred(p, l, rhs, freshReturnFuncs, fObj, &deferredFieldVars) {
 									sum.nonFreshFields[fObj] = true
 								} else if cl := unwrapCompositeLit(rhs); cl != nil {
-									recordCompositeLitNonFreshFields(p, cl, freshReturnFuncs, sum.nonFreshFields)
-								} else if call, isCall := ast.Unparen(rhs).(*ast.CallExpr); isCall && len(call.Args) >= 2 {
-									if cid, isCID := ast.Unparen(call.Fun).(*ast.Ident); isCID {
-										if b, isB := p.TypesInfo.Uses[cid].(*types.Builtin); isB && b.Name() == "append" {
-											for _, elemArg := range call.Args[1:] {
-												if cl := unwrapCompositeLit(elemArg); cl != nil {
-													recordCompositeLitNonFreshFields(p, cl, freshReturnFuncs, sum.nonFreshFields)
-												} else {
-													markValueContainedRefFieldsNonFresh(p.TypesInfo.TypeOf(elemArg), sum.nonFreshFields)
-												}
-											}
-										}
-									}
+									recordCompositeLitNonFreshFieldsWithDeferred(p, cl, freshReturnFuncs, sum.nonFreshFields, sum, &deferredFieldVars)
+								} else {
+									recordAppendElemNonFreshFields(p, rhs, freshReturnFuncs, sum.nonFreshFields, &deferredAppendVars)
 								}
 							} else if _, subSt := syntaxutil.DerefAnyStructType(fObj.Type()); subSt != nil {
 								if cl := unwrapCompositeLit(rhs); cl != nil {
-									recordCompositeLitNonFreshFields(p, cl, freshReturnFuncs, sum.nonFreshFields)
+									recordCompositeLitNonFreshFieldsWithDeferred(p, cl, freshReturnFuncs, sum.nonFreshFields, sum, &deferredFieldVars)
 								} else {
 									markValueContainedRefFieldsNonFresh(fObj.Type(), sum.nonFreshFields)
 								}
@@ -1014,19 +1400,25 @@ func analyzeSingleFreshConstructorFunc(
 						}
 					}
 				} else if ix, isIx := ast.Unparen(l).(*ast.IndexExpr); isIx {
-					if _, isSl := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(ix.X)).(*types.Slice); isSl {
-						if cl := unwrapCompositeLit(rhs); cl != nil {
-							recordCompositeLitNonFreshFields(p, cl, freshReturnFuncs, sum.nonFreshFields)
-						} else {
-							markValueContainedRefFieldsNonFresh(p.TypesInfo.TypeOf(ix), sum.nonFreshFields)
+					ixType := p.TypesInfo.TypeOf(ix)
+					if sel, isSel := unwrapIndexChainBase(ix).(*ast.SelectorExpr); isSel {
+						if selInfo := p.TypesInfo.Selections[sel]; selInfo != nil && selInfo.Kind() == types.FieldVal {
+							if fObj, _ := selInfo.Obj().(*types.Var); fObj != nil && isRefOrContainerType(ixType) && !isFreshFieldAssignRHSWithDeferred(p, ix, rhs, freshReturnFuncs, fObj, &deferredFieldVars) {
+								sum.nonFreshFields[fObj] = true
+							}
 						}
+					}
+					if cl := unwrapCompositeLit(rhs); cl != nil {
+						recordCompositeLitNonFreshFieldsWithDeferred(p, cl, freshReturnFuncs, sum.nonFreshFields, sum, &deferredFieldVars)
+					} else {
+						markValueContainedRefFieldsNonFresh(ixType, sum.nonFreshFields)
 					}
 				}
 			}
 		case *ast.ReturnStmt:
 			if len(s.Results) > 0 {
 				if cl := unwrapCompositeLit(s.Results[0]); cl != nil {
-					recordCompositeLitNonFreshFields(p, cl, freshReturnFuncs, sum.nonFreshFields)
+					recordCompositeLitNonFreshFieldsWithDeferred(p, cl, freshReturnFuncs, sum.nonFreshFields, sum, &deferredFieldVars)
 				}
 				if call, isCall := ast.Unparen(s.Results[0]).(*ast.CallExpr); isCall {
 					if callee := syntaxutil.ResolveCalledFuncObj(p, call.Fun); callee != nil && callee.Origin().Pkg() == p.Types {
@@ -1037,6 +1429,14 @@ func analyzeSingleFreshConstructorFunc(
 		case *ast.CallExpr:
 			if callee := syntaxutil.ResolveCalledFuncObj(p, s.Fun); callee != nil && callee.Origin().Pkg() == p.Types {
 				sum.coneCallees[callee.Origin()] = true
+			}
+			if b := syntaxutil.LookupBuiltin(p.TypesInfo, ast.Unparen(s.Fun)); b != nil {
+				switch b.Name() {
+				case "delete", "clear", "copy":
+					if len(s.Args) >= 1 {
+						markAssignLHSFieldNonFresh(p, s.Args[0], sum.nonFreshFields)
+					}
+				}
 			}
 		}
 		return true
@@ -1170,10 +1570,23 @@ func analyzeSingleFreshConstructorFunc(
 		return changed
 	}
 
+	var nonReturnEscaped map[*types.Var]bool
+	recordNonReturnEscape := func(v *types.Var, pos token.Pos) bool {
+		st := sum.vars[v]
+		if st != nil {
+			nonReturnEscaped[v] = true
+			if st.rootVar != nil {
+				nonReturnEscaped[st.rootVar] = true
+			}
+		}
+		return recordEscape(v, pos)
+	}
+
 	for {
 		for _, st := range sum.vars {
 			st.escapePos = token.NoPos
 		}
+		nonReturnEscaped = map[*types.Var]bool{}
 		var couplings []freshEscapeCoupling
 
 		for v, st := range sum.vars {
@@ -1183,7 +1596,7 @@ func analyzeSingleFreshConstructorFunc(
 					continue
 				}
 				if idx.InGoStmt[id] {
-					recordEscape(v, fd.Body.Pos())
+					recordNonReturnEscape(v, fd.Body.Pos())
 					continue
 				}
 				for _, df := range defers {
@@ -1197,16 +1610,16 @@ func analyzeSingleFreshConstructorFunc(
 					ownerRoot, readOnlyFieldClosure, returnsAddrOnly := classifyFieldAssignedClosureUse(p, idx, lit, v, resolveRootOfExpr)
 					if readOnlyFieldClosure && ownerRoot != nil {
 						if returnsAddrOnly {
-							recordEscape(v, lit.Pos())
+							recordNonReturnEscape(v, lit.Pos())
 						} else {
 							couplings = append(couplings, freshEscapeCoupling{srcRoot: st.rootVar, dstRoot: ownerRoot, atPos: lit.Pos()})
 						}
 						continue
 					}
 					if lit != nil {
-						recordEscape(v, lit.Pos())
+						recordNonReturnEscape(v, lit.Pos())
 					} else {
-						recordEscape(v, fd.Body.Pos())
+						recordNonReturnEscape(v, fd.Body.Pos())
 					}
 					continue
 				}
@@ -1230,7 +1643,7 @@ func analyzeSingleFreshConstructorFunc(
 				) {
 					continue
 				}
-				if (!params[v] || namedResults[v]) && st.rootVar == v && len(defers) == 0 {
+				if (!params[v] || namedResults[v]) && st.rootVar == v {
 					if retStmt, isRet := idx.ParentUnparen(id).(*ast.ReturnStmt); isRet &&
 						len(retStmt.Results) >= 1 && ast.Unparen(retStmt.Results[0]) == id {
 						pureRet := true
@@ -1247,14 +1660,17 @@ func analyzeSingleFreshConstructorFunc(
 							}
 						}
 						if pureRet {
+							if len(defers) > 0 {
+								recordEscape(v, id.Pos())
+							}
 							continue
 						}
 					}
 				}
-				recordEscape(v, id.Pos())
+				recordNonReturnEscape(v, id.Pos())
 			}
 			if usedInDefer {
-				recordEscape(v, fd.Body.Pos())
+				recordNonReturnEscape(v, fd.Body.Pos())
 			}
 		}
 
@@ -1282,10 +1698,18 @@ func analyzeSingleFreshConstructorFunc(
 			for _, cp := range couplings {
 				dstSt := sum.vars[cp.dstRoot]
 				if dstSt == nil {
+					if !nonReturnEscaped[cp.srcRoot] {
+						nonReturnEscaped[cp.srcRoot] = true
+						changed = true
+					}
 					if recordEscape(cp.srcRoot, cp.atPos) {
 						changed = true
 					}
 					continue
+				}
+				if nonReturnEscaped[cp.dstRoot] && !nonReturnEscaped[cp.srcRoot] {
+					nonReturnEscaped[cp.srcRoot] = true
+					changed = true
 				}
 				if dstSt.escapePos != token.NoPos {
 					targetPos := dstSt.escapePos
@@ -1326,6 +1750,62 @@ func analyzeSingleFreshConstructorFunc(
 			}
 		}
 		if !evictedAlias {
+			break
+		}
+	}
+
+	aliasAddrByVar := map[*types.Var]struct {
+		pos     token.Pos
+		addrArg ast.Expr
+	}{}
+	for _, ad := range aliasDefs {
+		aliasAddrByVar[ad.v] = struct {
+			pos     token.Pos
+			addrArg ast.Expr
+		}{pos: ad.pos, addrArg: ad.addrArg}
+	}
+
+	for {
+		progressed := false
+		for _, ad := range aliasDefs {
+			st := sum.vars[ad.v]
+			if st != nil && st.rootVar != ad.v && !dummyPF.isFreshContainerAt(sum, ad.addrArg, ad.pos) {
+				delete(sum.vars, ad.v)
+				progressed = true
+			}
+		}
+		for _, dv := range deferredAppendVars {
+			st := sum.vars[dv.v]
+			if !dummyPF.checkVarLiveAt(sum, dv.v, dv.pos) || st == nil || nonReturnEscaped[st.rootVar] {
+				before := len(sum.nonFreshFields)
+				markValueContainedRefFieldsNonFresh(dv.elemType, sum.nonFreshFields)
+				if len(sum.nonFreshFields) > before {
+					progressed = true
+				}
+			}
+		}
+		for _, df := range deferredFieldVars {
+			if sum.nonFreshFields[df.field] {
+				continue
+			}
+			if df.addrExpr != nil {
+				addrRoot := resolveRootOfExpr(df.addrExpr)
+				if !dummyPF.isFreshContainerAt(sum, df.addrExpr, df.pos) || addrRoot == nil || nonReturnEscaped[addrRoot] {
+					sum.nonFreshFields[df.field] = true
+					progressed = true
+				}
+				continue
+			}
+			st := sum.vars[df.v]
+			if ad, isAlias := aliasAddrByVar[df.v]; isAlias && !dummyPF.isFreshContainerAt(sum, ad.addrArg, ad.pos) {
+				st = nil
+			}
+			if !dummyPF.checkVarLiveAt(sum, df.v, df.pos) || st == nil || nonReturnEscaped[st.rootVar] {
+				sum.nonFreshFields[df.field] = true
+				progressed = true
+			}
+		}
+		if !progressed {
 			break
 		}
 	}

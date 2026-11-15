@@ -392,6 +392,11 @@ func CollectMutatedStructTypes(
 						case "SliceData":
 							if len(x.Args) > 0 && !isFreshAddrTarget(syncEncl, x.Args[0], fresh, freshEsc) && !syntaxutil.IsNilIdent(p.TypesInfo, x.Args[0]) && !syntaxutil.IsTypedNilSliceConv(p, x.Args[0]) {
 								recordNamedContainerAt(x, p.TypesInfo.TypeOf(x.Args[0]))
+								if sl, isSl := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(x.Args[0])).(*types.Slice); isSl {
+									syntaxutil.ForEachValueContainedStructType(sl.Elem(), func(vt types.Type) {
+										recordStructAt(x, vt)
+									})
+								}
 							}
 						case "Slice":
 							if len(x.Args) > 0 {
@@ -409,6 +414,11 @@ func CollectMutatedStructTypes(
 						case "SliceData":
 							if !isFreshAddrTarget(syncEncl, x.Args[0], fresh, freshEsc) && !syntaxutil.IsNilIdent(p.TypesInfo, x.Args[0]) && !syntaxutil.IsTypedNilSliceConv(p, x.Args[0]) {
 								recordNamedContainerAt(x, p.TypesInfo.TypeOf(x.Args[0]))
+								if sl, isSl := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(x.Args[0])).(*types.Slice); isSl {
+									syntaxutil.ForEachValueContainedStructType(sl.Elem(), func(vt types.Type) {
+										recordStructAt(x, vt)
+									})
+								}
 							}
 							return true
 						}

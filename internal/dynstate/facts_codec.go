@@ -64,12 +64,15 @@ type Fact struct {
 	ParallelFuncs              []syntaxutil.FuncKey                   `json:"parallelFuncs,omitempty"`
 	ParallelEdges              []syntaxutil.FuncDepEdge               `json:"parallelEdges,omitempty"`
 	ReceiverReadOnly           []syntaxutil.FuncKey                   `json:"receiverReadOnly,omitempty"`
+	ReceiverReadOnlyDeps       []syntaxutil.FuncDepEdge               `json:"receiverReadOnlyDeps,omitempty"`
+	ReceiverReadOnlyParamDeps  []syntaxutil.FuncParamDepEdge          `json:"receiverReadOnlyParamDeps,omitempty"`
 	ReceiverRetentionFree      []syntaxutil.FuncKey                   `json:"receiverRetentionFree,omitempty"`
 	NonMutatingMethods         []syntaxutil.FuncKey                   `json:"nonMutatingMethods,omitempty"`
 	MethodUses                 []syntaxutil.VarMethodUse              `json:"methodUses,omitempty"`
 	InitMethodUses             []syntaxutil.VarMethodUse              `json:"initMethodUses,omitempty"`
 	ParamLeakFree              []syntaxutil.ParamKey                  `json:"paramLeakFree,omitempty"`
 	ParamLeakFreeDeps          []syntaxutil.ParamDepEdge              `json:"paramLeakFreeDeps,omitempty"`
+	ParamLeakFreeMethodDeps    []syntaxutil.ParamMethodDepEdge        `json:"paramLeakFreeMethodDeps,omitempty"`
 	ParamRetentionFree         []syntaxutil.ParamKey                  `json:"paramRetentionFree,omitempty"`
 	ParamRetentionFreeDeps     []syntaxutil.ParamDepEdge              `json:"paramRetentionFreeDeps,omitempty"`
 	ParamUses                  []syntaxutil.VarParamUse               `json:"paramUses,omitempty"`
@@ -90,11 +93,17 @@ type Fact struct {
 	EnvCarryingFns             []syntaxutil.VarFuncUse                `json:"envCarryingFns,omitempty"`
 	EnvCallable                []string                               `json:"envCallable,omitempty"`
 	EnvCallUses                []syntaxutil.EnvCallUse                `json:"envCallUses,omitempty"`
+	EnvCallParamUses           []syntaxutil.EnvCallParamUse           `json:"envCallParamUses,omitempty"`
+	EnvCallMethodUses          []syntaxutil.EnvCallMethodUse          `json:"envCallMethodUses,omitempty"`
 	ReturnEnvFree              []syntaxutil.FuncKey                   `json:"returnEnvFree,omitempty"`
 	ReturnEnvDeps              []syntaxutil.FuncDepEdge               `json:"returnEnvDeps,omitempty"`
+	ReturnEnvParamDeps         []syntaxutil.FuncParamDepEdge          `json:"returnEnvParamDeps,omitempty"`
+	ReturnEnvMethodDeps        []syntaxutil.FuncDepEdge               `json:"returnEnvMethodDeps,omitempty"`
 	ParamInsertionFree         []syntaxutil.ParamKey                  `json:"paramInsertionFree,omitempty"`
 	ReturnEnvInsertionDeps     []syntaxutil.FuncInsertionDepEdge      `json:"returnEnvInsertionDeps,omitempty"`
 	ParamInsertionDeps         []syntaxutil.ParamInsertionDepEdge     `json:"paramInsertionDeps,omitempty"`
+	ParamInsertionParamDeps    []syntaxutil.ParamDepEdge              `json:"paramInsertionParamDeps,omitempty"`
+	ParamInsertionMethodDeps   []syntaxutil.ParamMethodDepEdge        `json:"paramInsertionMethodDeps,omitempty"`
 	PureMethods                map[string]string                      `json:"pureMethods,omitempty"`
 	ExternalMethods            map[string]string                      `json:"externalMethods,omitempty"`
 	PoolDischarges             []string                               `json:"poolDischarges,omitempty"`
@@ -104,6 +113,8 @@ type Fact struct {
 	SingleSubjectVars          []string                               `json:"singleSubjectVars,omitempty"`
 	MappingDischarges          []string                               `json:"mappingDischarges,omitempty"`
 	MemoDischarges             []string                               `json:"memoDischarges,omitempty"`
+	OnceMemoTypes              []syntaxutil.OnceMemoTypeFact          `json:"onceMemoTypes,omitempty"`
+	OnceMemoCandidates         []syntaxutil.OnceMemoVarCandidate      `json:"onceMemoCandidates,omitempty"`
 	HarnessDischarges          []string                               `json:"harnessDischarges,omitempty"`
 	ProtoClusters              []protoaudit.ProtoClusterFact          `json:"protoClusters,omitempty"`
 	ProtoExtAliases            []protoaudit.ProtoExtAlias             `json:"protoExtAliases,omitempty"`
@@ -114,6 +125,7 @@ type Fact struct {
 	NoPostInitCarrierWrites    bool                                   `json:"noPostInitCarrierWrites,omitempty"`
 	CarrierImportCalls         []string                               `json:"carrierImportCalls,omitempty"`
 	DirectVarWrites            []string                               `json:"directVarWrites,omitempty"`
+	NonMethodVarUses           []string                               `json:"nonMethodVarUses,omitempty"`
 }
 
 // MethodDirectivesFactOf extracts only the method purity and externality

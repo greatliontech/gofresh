@@ -42,13 +42,23 @@ func (r *DeferralResolution) IsObjectClosed(key string) bool {
 // claims resolve in one least fixed point over their conditional edges
 // (REQ-closure-shared-dynamic-state).
 type EnvAuditResolution struct {
-	Declared    map[syntaxutil.FuncKey]bool
-	InsDeclared map[syntaxutil.ParamKey]bool
-	Resolved    map[syntaxutil.FuncKey]bool
-	InsResolved map[syntaxutil.ParamKey]bool
-	RetDeps     map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool
-	RetInsDeps  map[syntaxutil.FuncKey]map[syntaxutil.EnvAuditTarget]bool
-	InsDeps     map[syntaxutil.ParamKey]map[syntaxutil.EnvAuditTarget]bool
+	Declared        map[syntaxutil.FuncKey]bool
+	InsDeclared     map[syntaxutil.ParamKey]bool
+	Resolved        map[syntaxutil.FuncKey]bool
+	InsResolved     map[syntaxutil.ParamKey]bool
+	RetDeps         map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool
+	RetParamDeps    map[syntaxutil.FuncKey]map[syntaxutil.ParamKey]bool
+	RetMethodDeps   map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool
+	RetInsDeps      map[syntaxutil.FuncKey]map[syntaxutil.EnvAuditTarget]bool
+	InsDeps         map[syntaxutil.ParamKey]map[syntaxutil.EnvAuditTarget]bool
+	InsParamDeps    map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool
+	InsMethodDeps   map[syntaxutil.ParamKey]map[syntaxutil.FuncKey]bool
+	ParamLeakFree   map[syntaxutil.ParamKey]bool
+	ReadOnly        map[syntaxutil.FuncKey]bool
+	ParamDeps       map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool
+	ParamMethodDeps map[syntaxutil.ParamKey]map[syntaxutil.FuncKey]bool
+	MethodDeps      map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool
+	MethodParamDeps map[syntaxutil.FuncKey]map[syntaxutil.ParamKey]bool
 }
 
 func (e *EnvAuditResolution) DepResolved(dep syntaxutil.EnvAuditTarget) bool {
@@ -61,17 +71,206 @@ func (e *EnvAuditResolution) DepResolved(dep syntaxutil.EnvAuditTarget) bool {
 	return e.Resolved[dep.Func]
 }
 
+type confinementResolution struct {
+	paramLeakFree   map[syntaxutil.ParamKey]bool
+	readOnly        map[syntaxutil.FuncKey]bool
+	paramDeps       map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool
+	paramMethodDeps map[syntaxutil.ParamKey]map[syntaxutil.FuncKey]bool
+	methodDeps      map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool
+	methodParamDeps map[syntaxutil.FuncKey]map[syntaxutil.ParamKey]bool
+}
+
+func resolveConfinementJointLFP(allFacts map[string][]Fact, malformed func(fact Fact)) confinementResolution {
+	if malformed == nil {
+		malformed = func(Fact) {}
+	}
+	res := confinementResolution{
+		paramLeakFree:   map[syntaxutil.ParamKey]bool{},
+		readOnly:        map[syntaxutil.FuncKey]bool{},
+		paramDeps:       map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool{},
+		paramMethodDeps: map[syntaxutil.ParamKey]map[syntaxutil.FuncKey]bool{},
+		methodDeps:      map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool{},
+		methodParamDeps: map[syntaxutil.FuncKey]map[syntaxutil.ParamKey]bool{},
+	}
+	paramCandidates := map[syntaxutil.ParamKey]bool{}
+	methodCandidates := map[syntaxutil.FuncKey]bool{}
+	poisonedParam := map[syntaxutil.ParamKey]bool{}
+	poisonedMethod := map[syntaxutil.FuncKey]bool{}
+
+	for _, facts := range allFacts {
+		for _, fact := range facts {
+			for _, key := range fact.ParamLeakFree {
+				if !key.Valid() {
+					malformed(fact)
+					continue
+				}
+				res.paramLeakFree[key] = true
+			}
+			for _, edge := range fact.ParamLeakFreeDeps {
+				if !edge.Valid() {
+					malformed(fact)
+					if edge.Own.Valid() {
+						poisonedParam[edge.Own] = true
+					}
+					continue
+				}
+				paramCandidates[edge.Own] = true
+				if res.paramDeps[edge.Own] == nil {
+					res.paramDeps[edge.Own] = map[syntaxutil.ParamKey]bool{}
+				}
+				res.paramDeps[edge.Own][edge.Dep] = true
+			}
+			for _, edge := range fact.ParamLeakFreeMethodDeps {
+				if !edge.Valid() {
+					malformed(fact)
+					if edge.Param.Valid() {
+						poisonedParam[edge.Param] = true
+					}
+					continue
+				}
+				paramCandidates[edge.Param] = true
+				if res.paramMethodDeps[edge.Param] == nil {
+					res.paramMethodDeps[edge.Param] = map[syntaxutil.FuncKey]bool{}
+				}
+				res.paramMethodDeps[edge.Param][edge.Method] = true
+			}
+			for _, key := range fact.ReceiverReadOnly {
+				if !key.Valid() {
+					malformed(fact)
+					continue
+				}
+				res.readOnly[key] = true
+			}
+			for _, edge := range fact.ReceiverReadOnlyDeps {
+				if !edge.Valid() {
+					malformed(fact)
+					if edge.Func.Valid() {
+						poisonedMethod[edge.Func] = true
+					}
+					continue
+				}
+				methodCandidates[edge.Func] = true
+				if res.methodDeps[edge.Func] == nil {
+					res.methodDeps[edge.Func] = map[syntaxutil.FuncKey]bool{}
+				}
+				res.methodDeps[edge.Func][edge.Callee] = true
+			}
+			for _, edge := range fact.ReceiverReadOnlyParamDeps {
+				if !edge.Valid() {
+					malformed(fact)
+					if edge.Func.Valid() {
+						poisonedMethod[edge.Func] = true
+					}
+					continue
+				}
+				methodCandidates[edge.Func] = true
+				if res.methodParamDeps[edge.Func] == nil {
+					res.methodParamDeps[edge.Func] = map[syntaxutil.ParamKey]bool{}
+				}
+				res.methodParamDeps[edge.Func][edge.Param] = true
+			}
+		}
+	}
+
+	for pk := range paramCandidates {
+		delete(res.paramLeakFree, pk)
+	}
+	for pk := range poisonedParam {
+		delete(res.paramLeakFree, pk)
+		delete(paramCandidates, pk)
+		delete(res.paramDeps, pk)
+		delete(res.paramMethodDeps, pk)
+	}
+	for mk := range methodCandidates {
+		delete(res.readOnly, mk)
+	}
+	for mk := range poisonedMethod {
+		delete(res.readOnly, mk)
+		delete(methodCandidates, mk)
+		delete(res.methodDeps, mk)
+		delete(res.methodParamDeps, mk)
+	}
+
+	for changed := true; changed; {
+		changed = false
+		for pk := range paramCandidates {
+			if res.paramLeakFree[pk] {
+				continue
+			}
+			ok := true
+			for dep := range res.paramDeps[pk] {
+				if !res.paramLeakFree[dep] {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				for mk := range res.paramMethodDeps[pk] {
+					if !res.readOnly[mk] {
+						ok = false
+						break
+					}
+				}
+			}
+			if ok {
+				res.paramLeakFree[pk] = true
+				changed = true
+			}
+		}
+		for mk := range methodCandidates {
+			if res.readOnly[mk] {
+				continue
+			}
+			ok := true
+			for dep := range res.methodDeps[mk] {
+				if !res.readOnly[dep] {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				for pk := range res.methodParamDeps[mk] {
+					if !res.paramLeakFree[pk] {
+						ok = false
+						break
+					}
+				}
+			}
+			if ok {
+				res.readOnly[mk] = true
+				changed = true
+			}
+		}
+	}
+	return res
+}
+
 // ResolveEnvAudit computes the joint least fixed point over ReturnEnvFree and
 // ParamInsertionFree claims across allFacts.
 func ResolveEnvAudit(allFacts map[string][]Fact, malformed func(fact Fact)) *EnvAuditResolution {
+	conf := resolveConfinementJointLFP(allFacts, malformed)
+	return resolveEnvAuditWithConfinement(allFacts, conf, malformed)
+}
+
+func resolveEnvAuditWithConfinement(allFacts map[string][]Fact, conf confinementResolution, malformed func(fact Fact)) *EnvAuditResolution {
 	e := &EnvAuditResolution{
-		Declared:    map[syntaxutil.FuncKey]bool{},
-		InsDeclared: map[syntaxutil.ParamKey]bool{},
-		Resolved:    map[syntaxutil.FuncKey]bool{},
-		InsResolved: map[syntaxutil.ParamKey]bool{},
-		RetDeps:     map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool{},
-		RetInsDeps:  map[syntaxutil.FuncKey]map[syntaxutil.EnvAuditTarget]bool{},
-		InsDeps:     map[syntaxutil.ParamKey]map[syntaxutil.EnvAuditTarget]bool{},
+		Declared:        map[syntaxutil.FuncKey]bool{},
+		InsDeclared:     map[syntaxutil.ParamKey]bool{},
+		Resolved:        map[syntaxutil.FuncKey]bool{},
+		InsResolved:     map[syntaxutil.ParamKey]bool{},
+		RetDeps:         map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool{},
+		RetParamDeps:    map[syntaxutil.FuncKey]map[syntaxutil.ParamKey]bool{},
+		RetMethodDeps:   map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool{},
+		RetInsDeps:      map[syntaxutil.FuncKey]map[syntaxutil.EnvAuditTarget]bool{},
+		InsDeps:         map[syntaxutil.ParamKey]map[syntaxutil.EnvAuditTarget]bool{},
+		InsParamDeps:    map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool{},
+		InsMethodDeps:   map[syntaxutil.ParamKey]map[syntaxutil.FuncKey]bool{},
+		ParamLeakFree:   conf.paramLeakFree,
+		ReadOnly:        conf.readOnly,
+		ParamDeps:       conf.paramDeps,
+		ParamMethodDeps: conf.paramMethodDeps,
+		MethodDeps:      conf.methodDeps,
+		MethodParamDeps: conf.methodParamDeps,
 	}
 	if malformed == nil {
 		malformed = func(Fact) {}
@@ -99,6 +298,32 @@ func ResolveEnvAudit(allFacts map[string][]Fact, malformed func(fact Fact)) *Env
 					e.RetDeps[edge.Func] = map[syntaxutil.FuncKey]bool{}
 				}
 				e.RetDeps[edge.Func][edge.Callee] = true
+			}
+			for _, edge := range fact.ReturnEnvParamDeps {
+				if !edge.Valid() {
+					malformed(fact)
+					if edge.Func.Valid() {
+						poisonedFunc[edge.Func] = true
+					}
+					continue
+				}
+				if e.RetParamDeps[edge.Func] == nil {
+					e.RetParamDeps[edge.Func] = map[syntaxutil.ParamKey]bool{}
+				}
+				e.RetParamDeps[edge.Func][edge.Param] = true
+			}
+			for _, edge := range fact.ReturnEnvMethodDeps {
+				if !edge.Valid() {
+					malformed(fact)
+					if edge.Func.Valid() {
+						poisonedFunc[edge.Func] = true
+					}
+					continue
+				}
+				if e.RetMethodDeps[edge.Func] == nil {
+					e.RetMethodDeps[edge.Func] = map[syntaxutil.FuncKey]bool{}
+				}
+				e.RetMethodDeps[edge.Func][edge.Callee] = true
 			}
 			for _, edge := range fact.ReturnEnvInsertionDeps {
 				if !edge.Valid() {
@@ -133,6 +358,32 @@ func ResolveEnvAudit(allFacts map[string][]Fact, malformed func(fact Fact)) *Env
 				}
 				e.InsDeps[edge.Param][edge.Dep] = true
 			}
+			for _, edge := range fact.ParamInsertionParamDeps {
+				if !edge.Valid() {
+					malformed(fact)
+					if edge.Own.Valid() {
+						poisonedParam[edge.Own] = true
+					}
+					continue
+				}
+				if e.InsParamDeps[edge.Own] == nil {
+					e.InsParamDeps[edge.Own] = map[syntaxutil.ParamKey]bool{}
+				}
+				e.InsParamDeps[edge.Own][edge.Dep] = true
+			}
+			for _, edge := range fact.ParamInsertionMethodDeps {
+				if !edge.Valid() {
+					malformed(fact)
+					if edge.Param.Valid() {
+						poisonedParam[edge.Param] = true
+					}
+					continue
+				}
+				if e.InsMethodDeps[edge.Param] == nil {
+					e.InsMethodDeps[edge.Param] = map[syntaxutil.FuncKey]bool{}
+				}
+				e.InsMethodDeps[edge.Param][edge.Method] = true
+			}
 		}
 	}
 	for fnKey := range poisonedFunc {
@@ -152,6 +403,22 @@ func ResolveEnvAudit(allFacts map[string][]Fact, malformed func(fact Fact)) *Env
 				if !e.Resolved[dep] {
 					ok = false
 					break
+				}
+			}
+			if ok {
+				for pk := range e.RetParamDeps[fnKey] {
+					if !e.ParamLeakFree[pk] {
+						ok = false
+						break
+					}
+				}
+			}
+			if ok {
+				for mk := range e.RetMethodDeps[fnKey] {
+					if !e.ReadOnly[mk] {
+						ok = false
+						break
+					}
 				}
 			}
 			if ok {
@@ -176,6 +443,22 @@ func ResolveEnvAudit(allFacts map[string][]Fact, malformed func(fact Fact)) *Env
 				if !e.DepResolved(dep) {
 					ok = false
 					break
+				}
+			}
+			if ok {
+				for pk := range e.InsParamDeps[paramKey] {
+					if !e.ParamLeakFree[pk] {
+						ok = false
+						break
+					}
+				}
+			}
+			if ok {
+				for mk := range e.InsMethodDeps[paramKey] {
+					if !e.ReadOnly[mk] {
+						ok = false
+						break
+					}
 				}
 			}
 			if ok {
@@ -215,34 +498,16 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 		}
 	}
 
+	conf := resolveConfinementJointLFP(allFacts, markMalformed)
+	r.ParamLeakFree = conf.paramLeakFree
+	r.ReadOnly = conf.readOnly
+
 	declaredKeys := r.Declared
 	opaqueDeps := map[string]map[string]bool{}
-	paramDeps := map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool{}
 	retentionDeps := map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool{}
-	poisonedLeakParam := map[syntaxutil.ParamKey]bool{}
 	poisonedRetParam := map[syntaxutil.ParamKey]bool{}
 	for _, facts := range allFacts {
 		for _, fact := range facts {
-			for _, key := range fact.ParamLeakFree {
-				if !key.Valid() {
-					markMalformed(fact)
-					continue
-				}
-				r.ParamLeakFree[key] = true
-			}
-			for _, edge := range fact.ParamLeakFreeDeps {
-				if !edge.Valid() {
-					markMalformed(fact)
-					if edge.Own.Valid() {
-						poisonedLeakParam[edge.Own] = true
-					}
-					continue
-				}
-				if paramDeps[edge.Own] == nil {
-					paramDeps[edge.Own] = map[syntaxutil.ParamKey]bool{}
-				}
-				paramDeps[edge.Own][edge.Dep] = true
-			}
 			for _, key := range fact.ParamRetentionFree {
 				if !key.Valid() {
 					markMalformed(fact)
@@ -262,13 +527,6 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 					retentionDeps[edge.Own] = map[syntaxutil.ParamKey]bool{}
 				}
 				retentionDeps[edge.Own][edge.Dep] = true
-			}
-			for _, key := range fact.ReceiverReadOnly {
-				if !key.Valid() {
-					markMalformed(fact)
-					continue
-				}
-				r.ReadOnly[key] = true
 			}
 			for _, key := range fact.ReceiverRetentionFree {
 				if !key.Valid() {
@@ -354,20 +612,39 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 				}
 				r.CtorsOf[use.Key] = append(r.CtorsOf[use.Key], use.Callee)
 			}
+			for _, use := range fact.EnvCallParamUses {
+				if !use.Valid() {
+					markMalformed(fact)
+					if syntaxutil.ValidFactKey(use.Key) {
+						r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: use.Key}] = true
+						r.OwnerUnproven[use.Key] = true
+					}
+					continue
+				}
+				if !r.ParamLeakFree[use.Param] {
+					r.OwnerUnproven[use.Key] = true
+				}
+			}
+			for _, use := range fact.EnvCallMethodUses {
+				if !use.Valid() {
+					markMalformed(fact)
+					if syntaxutil.ValidFactKey(use.Key) {
+						r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: use.Key}] = true
+						r.OwnerUnproven[use.Key] = true
+					}
+					continue
+				}
+				if !r.ReadOnly[use.Method] {
+					r.OwnerUnproven[use.Key] = true
+				}
+			}
 		}
-	}
-	for paramKey := range poisonedLeakParam {
-		delete(r.ParamLeakFree, paramKey)
-		delete(paramDeps, paramKey)
 	}
 	for paramKey := range poisonedRetParam {
 		delete(r.ParamRetentionFree, paramKey)
 		delete(retentionDeps, paramKey)
 	}
 
-	syntaxutil.SolveLeastFixedPoint(r.ParamLeakFree, paramDeps, func(dep syntaxutil.ParamKey) bool {
-		return r.ParamLeakFree[dep]
-	})
 	syntaxutil.SolveLeastFixedPoint(r.ParamRetentionFree, retentionDeps, func(dep syntaxutil.ParamKey) bool {
 		return r.ParamRetentionFree[dep] || r.ParamLeakFree[dep]
 	})
@@ -375,7 +652,7 @@ func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)
 		return r.NotOpaque[dep] || !declaredKeys[dep]
 	})
 
-	ea := ResolveEnvAudit(allFacts, markMalformed)
+	ea := resolveEnvAuditWithConfinement(allFacts, conf, markMalformed)
 	r.EnvFreeResolved = ea.Resolved
 	r.EnvFreeDeps = ea.RetDeps
 

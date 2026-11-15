@@ -348,3 +348,72 @@ func TestPropLowerFuncInvariantsAndAliasSymmetry(t *testing.T) {
 		}
 	}
 }
+
+func TestForEachArgParamTupleAndVariadicMapping(t *testing.T) {
+	_, file, pkg, info := mustTypecheck(t, `package p
+
+func pair() (int, []int) { return 1, []int{2} }
+func triple() (int, []int, []int) { return 1, []int{2}, []int{3} }
+func sink(a int, b []int) {}
+func varSink(a int, rest ...[]int) {}
+
+func Calls(xs [][]int) {
+	sink(pair())
+	varSink(triple())
+	varSink(0, xs...)
+	buf := make([]int, 1)
+	func(n int, s []int) {
+		_ = n
+		_ = s
+	}(func() (int, []int) {
+		return 7, buf
+	}())
+}
+`)
+	body := LowerFunc(info, pkg, findFuncDecl(t, file, "Calls"))
+	if len(body.Ops) < 5 {
+		t.Fatalf("Calls ops = %d, want >= 5", len(body.Ops))
+	}
+
+	type slotWant struct {
+		slotIdx int
+		pIdx    int
+		packed  bool
+	}
+	collect := func(v *Value) []slotWant {
+		var got []slotWant
+		v.ForEachArgParam(func(_ *Value, slotType types.Type, slotIdx int, paramIdx int, ok bool, packed bool) bool {
+			if !ok || slotType == nil {
+				t.Fatalf("unexpected invalid slot (%d, %d, ok=%v, type=%v)", slotIdx, paramIdx, ok, slotType)
+			}
+			got = append(got, slotWant{slotIdx: slotIdx, pIdx: paramIdx, packed: packed})
+			return true
+		})
+		return got
+	}
+
+	if got := collect(body.Ops[0].Expr); len(got) != 2 || got[0] != (slotWant{0, 0, false}) || got[1] != (slotWant{1, 1, false}) {
+		t.Fatalf("sink(pair()) slots = %+v, want [(0,0,false) (1,1,false)]", got)
+	}
+	if got := collect(body.Ops[1].Expr); len(got) != 3 ||
+		got[0] != (slotWant{0, 0, false}) ||
+		got[1] != (slotWant{1, 1, true}) ||
+		got[2] != (slotWant{2, 1, true}) {
+		t.Fatalf("varSink(triple()) slots = %+v, want [(0,0,false) (1,1,true) (2,1,true)]", got)
+	}
+	if got := collect(body.Ops[2].Expr); len(got) != 2 || got[0] != (slotWant{0, 0, false}) || got[1] != (slotWant{1, 1, false}) {
+		t.Fatalf("varSink(0, xs...) slots = %+v, want [(0,0,false) (1,1,false)]", got)
+	}
+
+	aliases := BuildScopedMemAliases(body, syntaxutil.IsLocalVar, refconfine.CallResultHandsOut)
+	bufObj := body.Ops[3].Dsts[0].Obj
+	iifeCall := body.Ops[4].Expr
+	paramN := iifeCall.IIFE.Params[0]
+	paramS := iifeCall.IIFE.Params[1]
+	if !aliases[bufObj][paramS] || !aliases[paramS][bufObj] {
+		t.Fatalf("expected BuildScopedMemAliases to link buf <-> s across multi-return IIFE, got %+v", aliases)
+	}
+	if aliases[bufObj][paramN] || aliases[paramN][bufObj] {
+		t.Fatalf("scalar parameter n unexpectedly linked to buf in BuildScopedMemAliases: %+v", aliases)
+	}
+}

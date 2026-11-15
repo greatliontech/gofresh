@@ -151,7 +151,7 @@ func buildMemAliases(
 		case ValMakeClosure:
 			if descendNested && v.Closure != nil {
 				for fv := range v.Closure.FreeVars {
-					if eligibleVar(fv) && (fv.Type() == nil || sharesMem(fv.Type())) {
+					if eligibleVar(fv) {
 						out = append(out, fv)
 					}
 				}
@@ -159,6 +159,29 @@ func buildMemAliases(
 			return out
 
 		case ValCall:
+			if v.CallKind == CallIIFE && v.IIFE != nil {
+				for fv := range v.IIFE.FreeVars {
+					if eligibleVar(fv) {
+						out = append(out, fv)
+					}
+				}
+				v.IIFE.ForEachSyncOp(func(op *Op) bool {
+					if op.Kind == OpReturn {
+						if op.IsNaked {
+							for _, rv := range v.IIFE.Results {
+								if eligibleVar(rv) && (rv.Type() == nil || sharesMem(rv.Type())) {
+									out = append(out, rv)
+								}
+							}
+						} else {
+							for _, r := range op.Results {
+								out = collectValueSources(r, out)
+							}
+						}
+					}
+					return true
+				})
+			}
 			if v.AutoAddrRecv && v.HasRecvPlace {
 				out = collectPlaceAddrVars(v.RecvPlace, out)
 			}
@@ -269,10 +292,12 @@ func buildMemAliases(
 			}
 			if v.CallKind == CallIIFE && v.IIFE != nil {
 				if len(v.Args) > 0 && len(v.IIFE.Params) > 0 {
-					for i, arg := range v.Args {
-						pIdx, ok := v.ParamIndexForArg(i)
+					v.ForEachArgParam(func(arg *Value, slotType types.Type, _ int, pIdx int, ok bool, _ bool) bool {
 						if !ok || pIdx >= len(v.IIFE.Params) || v.IIFE.Params[pIdx] == nil {
-							continue
+							return true
+						}
+						if slotType != nil && !sharesMem(slotType) {
+							return true
 						}
 						pv := v.IIFE.Params[pIdx]
 						if pv.Type() == nil || sharesMem(pv.Type()) {
@@ -280,7 +305,8 @@ func buildMemAliases(
 								addEdge(pv, sv)
 							}
 						}
-					}
+						return true
+					})
 				}
 				scanBody(v.IIFE)
 			}

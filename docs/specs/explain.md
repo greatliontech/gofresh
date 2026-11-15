@@ -14,8 +14,10 @@ the explain surface MUST return the culprit's derivation chain: the
 culprit arm (mutation, writable escape, or environment audit), and
 per arm the sites that decided it. An environment-audit chain names,
 in order, the registration store site, each unresolved dependency
-edge (caller package and function to callee package and function),
-and for the first function whose proof failed, the innermost refusing
+edge (from the registering package or caller function to the unproven
+callee function, callee parameter, or receiver method),
+and for the first function whose proof failed locally rather than at an
+unproven edge, the innermost refusing
 expression with its position and the spec clause family that refused
 it, one of the closed clause set: "write or capture broke the
 binding", "a binding source refused", "a stored value refused",
@@ -45,8 +47,9 @@ is a vouch-discharged variable: its chain still derives on request —
 the vouch suppresses the verdict's downgrade, never the derivation a
 caller audits (REQ-vouch-recorded).
 An environment-audit refusal that is the fixed point of a dependency
-cycle, or whose callee lies outside the loaded scope, has no single
-refusing expression: its chain ends at the edges.
+cycle, whose callee lies outside the loaded scope, or whose deciding
+link is an unproven parameter-confinement or method-confinement edge has
+no single refusing expression: its chain ends at the edges.
 
 **REQ-explain-vocabulary** (behavior): Chain links MUST name their
 refusal in the closure contract's vocabulary — the clause families

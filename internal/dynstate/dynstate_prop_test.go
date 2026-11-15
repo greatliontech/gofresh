@@ -107,6 +107,25 @@ func assertFactCanonicalAndValid(t testFataler, fact Fact) {
 	checkSortedStrings("PoolMutates", fact.PoolMutates)
 	checkSortedStrings("PoolEscapes", fact.PoolEscapes)
 	checkSortedStrings("HarnessDischarges", fact.HarnessDischarges)
+	for _, pair := range []struct {
+		label string
+		xs    []string
+	}{
+		{"DirectVarWrites", fact.DirectVarWrites},
+		{"NonMethodVarUses", fact.NonMethodVarUses},
+	} {
+		if !slices.IsSorted(pair.xs) {
+			t.Fatalf("%s not sorted: %+v", pair.label, pair.xs)
+		}
+		for i, s := range pair.xs {
+			if !syntaxutil.ValidQualifiedVarKey(s) {
+				t.Fatalf("%s[%d] invalid qualified key %q", pair.label, i, s)
+			}
+			if i > 0 && pair.xs[i-1] == s {
+				t.Fatalf("%s duplicate key %q", pair.label, s)
+			}
+		}
+	}
 
 	for i, pu := range fact.ParamUses {
 		if !pu.Valid() {
@@ -216,6 +235,127 @@ func assertFactCanonicalAndValid(t testFataler, fact Fact) {
 		}
 		if i > 0 && fact.CarrierLinks[i-1].Compare(cl) >= 0 {
 			t.Fatalf("CarrierLinks not strictly sorted at %d: %+v", i, fact.CarrierLinks)
+		}
+	}
+	for i, e := range fact.ReceiverReadOnlyDeps {
+		if !e.Valid() {
+			t.Fatalf("ReceiverReadOnlyDeps[%d] invalid: %+v", i, e)
+		}
+		if i > 0 && fact.ReceiverReadOnlyDeps[i-1].Compare(e) >= 0 {
+			t.Fatalf("ReceiverReadOnlyDeps not strictly sorted at %d: %+v", i, fact.ReceiverReadOnlyDeps)
+		}
+	}
+	for i, e := range fact.ReceiverReadOnlyParamDeps {
+		if !e.Valid() {
+			t.Fatalf("ReceiverReadOnlyParamDeps[%d] invalid: %+v", i, e)
+		}
+		if i > 0 && fact.ReceiverReadOnlyParamDeps[i-1].Compare(e) >= 0 {
+			t.Fatalf("ReceiverReadOnlyParamDeps not strictly sorted at %d: %+v", i, fact.ReceiverReadOnlyParamDeps)
+		}
+	}
+	for i, e := range fact.ParamLeakFreeMethodDeps {
+		if !e.Valid() {
+			t.Fatalf("ParamLeakFreeMethodDeps[%d] invalid: %+v", i, e)
+		}
+		if i > 0 && fact.ParamLeakFreeMethodDeps[i-1].Compare(e) >= 0 {
+			t.Fatalf("ParamLeakFreeMethodDeps not strictly sorted at %d: %+v", i, fact.ParamLeakFreeMethodDeps)
+		}
+	}
+	for i, e := range fact.ReturnEnvParamDeps {
+		if !e.Valid() {
+			t.Fatalf("ReturnEnvParamDeps[%d] invalid: %+v", i, e)
+		}
+		if i > 0 && fact.ReturnEnvParamDeps[i-1].Compare(e) >= 0 {
+			t.Fatalf("ReturnEnvParamDeps not strictly sorted at %d: %+v", i, fact.ReturnEnvParamDeps)
+		}
+	}
+	for i, e := range fact.ReturnEnvMethodDeps {
+		if !e.Valid() {
+			t.Fatalf("ReturnEnvMethodDeps[%d] invalid: %+v", i, e)
+		}
+		if i > 0 && fact.ReturnEnvMethodDeps[i-1].Compare(e) >= 0 {
+			t.Fatalf("ReturnEnvMethodDeps not strictly sorted at %d: %+v", i, fact.ReturnEnvMethodDeps)
+		}
+	}
+	for i, e := range fact.ParamInsertionParamDeps {
+		if !e.Valid() {
+			t.Fatalf("ParamInsertionParamDeps[%d] invalid: %+v", i, e)
+		}
+		if i > 0 && fact.ParamInsertionParamDeps[i-1].Compare(e) >= 0 {
+			t.Fatalf("ParamInsertionParamDeps not strictly sorted at %d: %+v", i, fact.ParamInsertionParamDeps)
+		}
+	}
+	for i, e := range fact.ParamInsertionMethodDeps {
+		if !e.Valid() {
+			t.Fatalf("ParamInsertionMethodDeps[%d] invalid: %+v", i, e)
+		}
+		if i > 0 && fact.ParamInsertionMethodDeps[i-1].Compare(e) >= 0 {
+			t.Fatalf("ParamInsertionMethodDeps not strictly sorted at %d: %+v", i, fact.ParamInsertionMethodDeps)
+		}
+	}
+	unattrEnvParams := map[syntaxutil.EnvCallParamUse]bool{}
+	for _, u := range fact.EnvCallParamUses {
+		if u.Func.IsZero() {
+			unattrEnvParams[u] = true
+		}
+	}
+	for i, u := range fact.EnvCallParamUses {
+		if !u.Valid() {
+			t.Fatalf("EnvCallParamUses[%d] invalid: %+v", i, u)
+		}
+		if !u.Func.IsZero() && unattrEnvParams[syntaxutil.EnvCallParamUse{Key: u.Key, Param: u.Param}] {
+			t.Fatalf("EnvCallParamUses[%d] redundant attributed entry alongside unattributed pair: %+v", i, u)
+		}
+		if i > 0 && fact.EnvCallParamUses[i-1].Compare(u) >= 0 {
+			t.Fatalf("EnvCallParamUses not strictly sorted at %d: %+v", i, fact.EnvCallParamUses)
+		}
+	}
+	unattrEnvMethods := map[syntaxutil.EnvCallMethodUse]bool{}
+	for _, u := range fact.EnvCallMethodUses {
+		if u.Func.IsZero() {
+			unattrEnvMethods[u] = true
+		}
+	}
+	for i, u := range fact.EnvCallMethodUses {
+		if !u.Valid() {
+			t.Fatalf("EnvCallMethodUses[%d] invalid: %+v", i, u)
+		}
+		if !u.Func.IsZero() && unattrEnvMethods[syntaxutil.EnvCallMethodUse{Key: u.Key, Method: u.Method}] {
+			t.Fatalf("EnvCallMethodUses[%d] redundant attributed entry alongside unattributed pair: %+v", i, u)
+		}
+		if i > 0 && fact.EnvCallMethodUses[i-1].Compare(u) >= 0 {
+			t.Fatalf("EnvCallMethodUses not strictly sorted at %d: %+v", i, fact.EnvCallMethodUses)
+		}
+	}
+	for i, om := range fact.OnceMemoTypes {
+		if !om.Valid() {
+			t.Fatalf("OnceMemoTypes[%d] invalid: %+v", i, om)
+		}
+		if i > 0 && fact.OnceMemoTypes[i-1].Compare(om) >= 0 {
+			t.Fatalf("OnceMemoTypes not strictly sorted at %d: %+v", i, fact.OnceMemoTypes)
+		}
+		for j, c := range om.Constructors {
+			if j > 0 && om.Constructors[j-1].Compare(c) >= 0 {
+				t.Fatalf("OnceMemoTypes[%d].Constructors not strictly sorted at %d: %+v", i, j, om.Constructors)
+			}
+		}
+		for j, g := range om.GuardTypes {
+			if j > 0 && om.GuardTypes[j-1].Key() >= g.Key() {
+				t.Fatalf("OnceMemoTypes[%d].GuardTypes not strictly sorted at %d: %+v", i, j, om.GuardTypes)
+			}
+		}
+		for j, p := range om.InputParamDeps {
+			if j > 0 && om.InputParamDeps[j-1].Compare(p) >= 0 {
+				t.Fatalf("OnceMemoTypes[%d].InputParamDeps not strictly sorted at %d: %+v", i, j, om.InputParamDeps)
+			}
+		}
+	}
+	for i, oc := range fact.OnceMemoCandidates {
+		if !oc.Valid() {
+			t.Fatalf("OnceMemoCandidates[%d] invalid: %+v", i, oc)
+		}
+		if i > 0 && fact.OnceMemoCandidates[i-1].Compare(oc) >= 0 {
+			t.Fatalf("OnceMemoCandidates not strictly sorted at %d: %+v", i, fact.OnceMemoCandidates)
 		}
 	}
 }
@@ -963,6 +1103,14 @@ func TestRapidDynstateMetamorphicInvariance(t *testing.T) {
 		`var settledNums = []int{3, 4, 5}`,
 		`var ExportedHook func() int = MakePure(2)`,
 		`var ExportedMap = map[string]func() int{}`,
+		`type parsedDoc struct { Label string }`,
+		`type onceEmbed struct { src []byte; once sync.Once; doc *parsedDoc; err error }`,
+		`func newOnceEmbed(src []byte) *onceEmbed { return &onceEmbed{src: src} }`,
+		`func parseOnceDoc(src []byte) (*parsedDoc, error) { return &parsedDoc{Label: string(src)}, nil }`,
+		`func (e *onceEmbed) Doc() (*parsedDoc, error) { e.once.Do(func() { e.doc, e.err = parseOnceDoc(e.src) }); return e.doc, e.err }`,
+		`var settledSrc = []byte("hello")`,
+		`var embeddedMemo = newOnceEmbed(settledSrc)`,
+		`func ReadMemo() string { d, _ := embeddedMemo.Doc(); if d == nil { return "" }; return d.Label }`,
 	}
 
 	rapid.Check(t, func(rt *rapid.T) {
@@ -970,7 +1118,8 @@ func TestRapidDynstateMetamorphicInvariance(t *testing.T) {
 		perm := rapid.Permutation(declPool).Draw(rt, "declPerm")
 		nFiles := rapid.IntRange(1, 3).Draw(rt, "nFiles")
 
-		singleSrc := "package meta\n\n" + strings.Join(declPool, "\n\n") + "\n"
+		fileHeader := "package meta\n\nimport \"sync\"\n\nvar _ sync.Once\n\n"
+		singleSrc := fileHeader + strings.Join(declPool, "\n\n") + "\n"
 		pkgCanonical := mustTypecheckOrderedPackage(t, pkgPath, []namedSourceFile{{name: "all.go", src: singleSrc}})
 		factCanonical := FactOf(true, pkgCanonical)
 		assertFactCanonicalAndValid(t, factCanonical)
@@ -982,7 +1131,7 @@ func TestRapidDynstateMetamorphicInvariance(t *testing.T) {
 		}
 		splitFiles := make([]namedSourceFile, 0, nFiles)
 		for i := 0; i < nFiles; i++ {
-			body := "package meta\n\n" + strings.Join(buckets[i], "\n\n") + "\n"
+			body := fileHeader + strings.Join(buckets[i], "\n\n") + "\n"
 			splitFiles = append(splitFiles, namedSourceFile{
 				name: fmt.Sprintf("part_%d.go", i),
 				src:  body,
@@ -1052,6 +1201,7 @@ func FuzzFactOfAndComposeArbitraryGoSource(f *testing.F) {
 		`package p; type T struct{ x int }; func (t *T) R() int { return t.x }`,
 		`package p; func Gen[S ~[]func()](s S) S { return append(s[:0], nil) }`,
 		`package p; var Bad = unknown(); func init() { switch v := any(Bad).(type) { case []int: v[0] = 1 } }`,
+		`package p; import "sync"; type D struct{ K string }; type E struct{ s []byte; o sync.Once; d *D; err error }; func New(s []byte) *E { return &E{s: s} }; func (e *E) Get() (*D, error) { e.o.Do(func() { e.d = &D{K: string(e.s)} }); return e.d, e.err }; var b = []byte("x"); var v = New(b)`,
 	}
 	for _, s := range seeds {
 		f.Add(s)
@@ -1400,14 +1550,10 @@ func TestPropertyAttributedEncloserReachabilityAndForeclosureTheorem(t *testing.
 			initCalls1 || (initCalls0 && edge0to1),
 			true, // method encloser conservatively treated as mayRunAtInit
 		}
-		nonInitReach := [3]bool{
-			deadCalls0,
-			deadCalls1 || (deadCalls0 && edge0to1),
-			true,
-		}
+		isInitOnly0 := initCalls0 && !deadCalls0
 		isInitOnlyPlain := [3]bool{
-			initReach[0] && !nonInitReach[0],
-			initReach[1] && !nonInitReach[1],
+			isInitOnly0,
+			(initCalls1 || (edge0to1 && isInitOnly0)) && !deadCalls1 && (!edge0to1 || isInitOnly0),
 			false,
 		}
 		siteKeys := [3]string{
@@ -3046,6 +3192,481 @@ func TestPropertyInterfaceBoundaryStateDriftOracle(t *testing.T) {
 		}
 		if useBoxGlobal && useKind == 3 && cs.Downgraded != "" {
 			rt.Fatalf("PRECISION FAILURE: blank-discarded type assertion on Box downgraded: %+v\nsrc:\n%s", cs, src.String())
+		}
+	})
+}
+
+type orderedPkgSpec struct {
+	pkgPath string
+	imports []string
+	src     string
+}
+
+func mustTypecheckOrderedDAG(t testFataler, specs []orderedPkgSpec) ([]GraphPackage, map[string]*packages.Package, map[string][]Fact) {
+	t.Helper()
+	stdImp := importer.Default()
+	builtTypes := map[string]*types.Package{}
+	builtPkgs := map[string]*packages.Package{}
+	facts := map[string][]Fact{}
+	meta := make([]GraphPackage, 0, len(specs))
+
+	for _, sp := range specs {
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, "pkg.go", sp.src, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("ParseFile(%s): %v\n%s", sp.pkgPath, err, sp.src)
+		}
+		info := &types.Info{
+			Types:      make(map[ast.Expr]types.TypeAndValue),
+			Instances:  make(map[*ast.Ident]types.Instance),
+			Defs:       make(map[*ast.Ident]types.Object),
+			Uses:       make(map[*ast.Ident]types.Object),
+			Implicits:  make(map[ast.Node]types.Object),
+			Selections: make(map[*ast.SelectorExpr]*types.Selection),
+			Scopes:     make(map[ast.Node]*types.Scope),
+		}
+		conf := types.Config{
+			Importer: importerFunc(func(path string) (*types.Package, error) {
+				if tp, ok := builtTypes[path]; ok {
+					return tp, nil
+				}
+				return stdImp.Import(path)
+			}),
+		}
+		tp, err := conf.Check(sp.pkgPath, fset, []*ast.File{f}, info)
+		if err != nil {
+			t.Fatalf("types.Check(%s): %v\n%s", sp.pkgPath, err, sp.src)
+		}
+		builtTypes[sp.pkgPath] = tp
+		p := &packages.Package{
+			ID:        sp.pkgPath,
+			PkgPath:   sp.pkgPath,
+			Name:      tp.Name(),
+			Fset:      fset,
+			Syntax:    []*ast.File{f},
+			Types:     tp,
+			TypesInfo: info,
+			Imports:   syntheticPackageImports(tp, builtTypes),
+			Module:    &packages.Module{Path: "example.com/mod"},
+		}
+		builtPkgs[sp.pkgPath] = p
+		fact := FactOf(true, p)
+		assertFactCanonicalAndValid(t, fact)
+		facts[sp.pkgPath] = []Fact{fact}
+	}
+	for i := len(specs) - 1; i >= 0; i-- {
+		sp := specs[i]
+		meta = append(meta, GraphPackage{
+			ImportPath: sp.pkgPath,
+			PkgPath:    sp.pkgPath,
+			Imports:    sp.imports,
+			Class:      MutableLocalPackage,
+		})
+	}
+	return meta, builtPkgs, facts
+}
+
+func TestPropertyJointConfinementLFPAcrossMultiPackageGraphs(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		// Topology across example.com/lib and example.com/app:
+		// app.Holder.Query (Method) -> lib.Inspect (Param) -> lib.Peer.Count (Method)
+		// plus optional onceFill on app.Holder.Query, optional cycle inside lib,
+		// optional unproven leaf on lib.Peer.Count, optional signature-carrying field on Holder,
+		// and optional onceFill smuggling of global/parameter slice.
+		leafMutates := rapid.Bool().Draw(rt, "leafMutates")
+		libMutualCycle := rapid.Bool().Draw(rt, "libMutualCycle")
+		holderCarriesSig := rapid.Bool().Draw(rt, "holderCarriesSig")
+		useOnceFill := rapid.Bool().Draw(rt, "useOnceFill")
+		smuggleKind := rapid.IntRange(0, 2).Draw(rt, "smuggleKind") // 0=clean fresh, 1=global slice, 2=param slice
+		coldReadOutsideOnce := rapid.Bool().Draw(rt, "coldReadOutsideOnce")
+
+		var libSrc strings.Builder
+		libSrc.WriteString("package lib\n\n")
+		libSrc.WriteString("type Peer struct { Items []int }\n")
+		if leafMutates {
+			libSrc.WriteString("func (p *Peer) Count() int { p.Items = append(p.Items, 1); return len(p.Items) }\n")
+		} else if libMutualCycle {
+			libSrc.WriteString("func (p *Peer) Count() int { return InspectPeer(p) }\n")
+		} else {
+			libSrc.WriteString("func (p *Peer) Count() int { return len(p.Items) }\n")
+		}
+		libSrc.WriteString("func InspectPeer(p *Peer) int { if p == nil { return 0 }; return p.Count() }\n")
+		libSrc.WriteString("func ProbeAny(v any) int { if v == nil { return 0 }; return 1 }\n")
+
+		var appSrc strings.Builder
+		appSrc.WriteString("package app\n\nimport (\n\t\"sync\"\n\t\"example.com/lib\"\n)\n\nvar _ sync.Once\n")
+		appSrc.WriteString("var globalBuf = []int{9}\n")
+		appSrc.WriteString("type Holder struct {\n\tonce sync.Once\n\tcached []int\n\tpeer *lib.Peer\n")
+		if holderCarriesSig {
+			appSrc.WriteString("\thook func() int\n")
+		} else {
+			appSrc.WriteString("\t DynamicTag any\n")
+		}
+		appSrc.WriteString("}\n")
+		appSrc.WriteString("var Shared = &Holder{peer: &lib.Peer{Items: []int{1, 2}}}\n")
+		appSrc.WriteString("func (h *Holder) Query(extra []int) int {\n")
+		if useOnceFill {
+			if coldReadOutsideOnce {
+				appSrc.WriteString("\tif len(h.cached) > 0 { return h.cached[0] }\n")
+			}
+			appSrc.WriteString("\th.once.Do(func() {\n")
+			switch smuggleKind {
+			case 0:
+				appSrc.WriteString("\t\th.cached = []int{lib.InspectPeer(h.peer)}\n")
+			case 1:
+				appSrc.WriteString("\t\th.cached = globalBuf\n")
+			case 2:
+				appSrc.WriteString("\t\th.cached = extra\n")
+			}
+			appSrc.WriteString("\t})\n")
+		}
+		appSrc.WriteString("\treturn lib.InspectPeer(h.peer) + lib.ProbeAny(h) + len(extra)\n}\n")
+		appSrc.WriteString("func Entry() int { return Shared.Query([]int{3}) }\n")
+
+		meta, _, facts := mustTypecheckOrderedDAG(rt, []orderedPkgSpec{
+			{pkgPath: "example.com/lib", src: libSrc.String()},
+			{pkgPath: "example.com/app", imports: []string{"example.com/lib"}, src: appSrc.String()},
+		})
+		cs := Compose(meta, facts, "example.com/app", nil, false, false)
+
+		libChainClean := !leafMutates && !libMutualCycle
+		onceClean := !useOnceFill || (smuggleKind == 0 && !coldReadOutsideOnce)
+		wantClean := libChainClean && !holderCarriesSig && onceClean
+
+		if wantClean && cs.Downgraded != "" {
+			rt.Fatalf("PRECISION FAILURE: sound joint-LFP confinement graph downgraded: %+v\nlib:\n%s\napp:\n%s",
+				cs, libSrc.String(), appSrc.String())
+		}
+		if !wantClean && cs.Downgraded == "" {
+			rt.Fatalf("SOUNDNESS FAILURE: broken joint-LFP confinement graph admitted without downgrade!\nlib:\n%s\napp:\n%s\nappFact: %+v",
+				libSrc.String(), appSrc.String(), facts["example.com/app"][0])
+		}
+	})
+}
+
+func TestPropertyCrossPackageEnvSummaryStateDriftOracle(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		// Modes across example.com/base, example.com/mid, and example.com/app:
+		// 0: ReturnEnvParamDeps (mid.Make captures fresh local slice s and calls cross-pkg base.CheckSlice(s))
+		// 1: ReturnEnvMethodDeps (mid.Make captures fresh local *base.Box b and calls cross-pkg b.Read())
+		// 2: ParamInsertionParamDeps (mid.Insert inserts closure capturing fresh local slice s calling base.CheckSlice(s))
+		// 3: ParamInsertionMethodDeps (mid.Insert inserts closure capturing fresh local *base.Box b calling b.Read())
+		// 4: EnvCallParamUses via literal (app init registers literal capturing fresh local slice s calling base.CheckSlice(s))
+		// 5: EnvCallMethodUses via literal (app init registers literal capturing fresh local *base.Box b calling b.Read())
+		// 6: EnvCallParamUses + ParamDeps via registration call arg (app registers mid.MakeFromSlice(appSettledSlice) -> base.CheckSlice)
+		mode := rapid.IntRange(0, 6).Draw(rt, "mode")
+		helperLeaksOrMutates := rapid.Bool().Draw(rt, "helperLeaksOrMutates")
+		closureMutatesEnv := rapid.Bool().Draw(rt, "closureMutatesEnv")
+
+		var baseSrc, midSrc, appSrc strings.Builder
+		baseSrc.WriteString("package base\n\n")
+		baseSrc.WriteString("var EscapedSlice []int\n")
+		baseSrc.WriteString("type Box struct { N int; S []int }\n")
+		if helperLeaksOrMutates {
+			baseSrc.WriteString("func CheckSlice(xs []int) int { EscapedSlice = xs; if len(xs) > 0 { xs[0]++ }; return len(xs) }\n")
+			baseSrc.WriteString("func (b *Box) Read() int { b.N++; return b.N }\n")
+		} else {
+			baseSrc.WriteString("func CheckSlice(xs []int) int { return len(xs) }\n")
+			baseSrc.WriteString("func (b *Box) Read() int { return b.N + len(b.S) }\n")
+		}
+
+		midSrc.WriteString("package mid\n\nimport \"example.com/base\"\n\n")
+		midSrc.WriteString("var _ = base.CheckSlice\n")
+		midSrc.WriteString("func Dummy() int { return 0 }\n")
+		fnTail := "return v\n"
+		if closureMutatesEnv {
+			fnTail = "counter++; return v + counter\n"
+		}
+		switch mode {
+		case 0:
+			midSrc.WriteString("func Make() func() int {\n\ts := []int{10, 20}\n")
+			if closureMutatesEnv {
+				midSrc.WriteString("\tvar counter int\n")
+			}
+			midSrc.WriteString("\treturn func() int { v := base.CheckSlice(s); " + fnTail + " }\n}\n")
+		case 1:
+			midSrc.WriteString("func Make() func() int {\n\tb := &base.Box{N: 5, S: []int{1}}\n")
+			if closureMutatesEnv {
+				midSrc.WriteString("\tvar counter int\n")
+			}
+			midSrc.WriteString("\treturn func() int { v := b.Read(); " + fnTail + " }\n}\n")
+		case 2:
+			midSrc.WriteString("func Insert(dst []func() int) {\n\ts := []int{10, 20}\n")
+			if closureMutatesEnv {
+				midSrc.WriteString("\tvar counter int\n")
+			}
+			midSrc.WriteString("\tdst[0] = func() int { v := base.CheckSlice(s); " + fnTail + " }\n}\n")
+			midSrc.WriteString("func Make() func() int { out := make([]func() int, 1); Insert(out); return out[0] }\n")
+		case 3:
+			midSrc.WriteString("func Insert(dst []func() int) {\n\tb := &base.Box{N: 5, S: []int{1}}\n")
+			if closureMutatesEnv {
+				midSrc.WriteString("\tvar counter int\n")
+			}
+			midSrc.WriteString("\tdst[0] = func() int { v := b.Read(); " + fnTail + " }\n}\n")
+			midSrc.WriteString("func Make() func() int { out := make([]func() int, 1); Insert(out); return out[0] }\n")
+		case 4, 5:
+		case 6:
+			midSrc.WriteString("func MakeFromSlice(xs []int) func() int {\n")
+			if closureMutatesEnv {
+				midSrc.WriteString("\tvar counter int\n\treturn func() int { v := xs[0]; counter++; return v + counter }\n}\n")
+			} else {
+				midSrc.WriteString("\treturn func() int { return xs[0] }\n}\n")
+			}
+		}
+
+		appSrc.WriteString("package app\n\nimport (\n\t\"example.com/base\"\n\t\"example.com/mid\"\n)\n\n")
+		appSrc.WriteString("var _ = base.CheckSlice\nvar _ = mid.Dummy\n")
+		switch mode {
+		case 0, 1, 2, 3:
+			appSrc.WriteString("var Registry = []func() int{mid.Make()}\n")
+		case 4:
+			appSrc.WriteString("var Registry []func() int\nfunc init() {\n\ts := []int{3, 4}\n")
+			if closureMutatesEnv {
+				appSrc.WriteString("\tvar counter int\n")
+			}
+			appSrc.WriteString("\tRegistry = []func() int{func() int { v := base.CheckSlice(s); " + fnTail + " }}\n}\n")
+		case 5:
+			appSrc.WriteString("var Registry []func() int\nfunc init() {\n\tb := &base.Box{N: 2, S: []int{8}}\n")
+			if closureMutatesEnv {
+				appSrc.WriteString("\tvar counter int\n")
+			}
+			appSrc.WriteString("\tRegistry = []func() int{func() int { v := b.Read(); " + fnTail + " }}\n}\n")
+		case 6:
+			appSrc.WriteString("var Registry []func() int\nfunc init() {\n\ts := []int{3, 4}\n\t_ = base.CheckSlice(s)\n\tRegistry = []func() int{mid.MakeFromSlice(s)}\n}\n")
+		}
+		appSrc.WriteString("func Run() int { return Registry[0]() }\n")
+
+		specs := []orderedPkgSpec{
+			{pkgPath: "example.com/base", src: baseSrc.String()},
+			{pkgPath: "example.com/mid", imports: []string{"example.com/base"}, src: midSrc.String()},
+			{pkgPath: "example.com/app", imports: []string{"example.com/base", "example.com/mid"}, src: appSrc.String()},
+		}
+		meta, _, facts := mustTypecheckOrderedDAG(rt, specs)
+		ea := ResolveEnvAudit(facts, func(f Fact) {
+			rt.Fatalf("unexpected malformed fact: %+v", f)
+		})
+		cs := Compose(meta, facts, "example.com/app", nil, false, false)
+
+		if !closureMutatesEnv {
+			midFact := facts["example.com/mid"][0]
+			appFact := facts["example.com/app"][0]
+			switch mode {
+			case 0:
+				if len(midFact.ReturnEnvParamDeps) == 0 {
+					rt.Fatalf("expected non-empty ReturnEnvParamDeps on midFact: %+v", midFact)
+				}
+			case 1:
+				if len(midFact.ReturnEnvMethodDeps) == 0 {
+					rt.Fatalf("expected non-empty ReturnEnvMethodDeps on midFact: %+v", midFact)
+				}
+			case 2:
+				if len(midFact.ParamInsertionParamDeps) == 0 {
+					rt.Fatalf("expected non-empty ParamInsertionParamDeps on midFact: %+v", midFact)
+				}
+			case 3:
+				if len(midFact.ParamInsertionMethodDeps) == 0 {
+					rt.Fatalf("expected non-empty ParamInsertionMethodDeps on midFact: %+v", midFact)
+				}
+			case 4, 6:
+				if len(appFact.EnvCallParamUses) == 0 {
+					rt.Fatalf("expected non-empty EnvCallParamUses on appFact (mode=%d): %+v", mode, appFact)
+				}
+			case 5:
+				if len(appFact.EnvCallMethodUses) == 0 {
+					rt.Fatalf("expected non-empty EnvCallMethodUses on appFact: %+v", appFact)
+				}
+			}
+		}
+
+		// Ground-truth state-drift oracle: calling Run() twice observes shared closure-env or
+		// registration-argument drift whenever helperLeaksOrMutates OR closureMutatesEnv.
+		drifts := helperLeaksOrMutates || closureMutatesEnv
+		if drifts && cs.Downgraded == "" {
+			rt.Fatalf("SOUNDNESS FAILURE: cross-package state-drifting registration admitted without downgrade (mode=%d)!\nbase:\n%s\nmid:\n%s\napp:\n%s\nea: %+v",
+				mode, baseSrc.String(), midSrc.String(), appSrc.String(), ea)
+		}
+		if !drifts && cs.Downgraded != "" {
+			rt.Fatalf("PRECISION FAILURE: clean cross-package registration downgraded (mode=%d): %+v\nbase:\n%s\nmid:\n%s\napp:\n%s",
+				mode, cs, baseSrc.String(), midSrc.String(), appSrc.String())
+		}
+	})
+}
+
+func TestPropertyOnceMemoTypeAndCandidateStructuralInvariants(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		// violation == 0 => clean OnceMemoType + OnceMemoVarCandidate across all 3 execution modes.
+		// violation in 1..19 => exactly one structural violation injected; must refuse without vouches.
+		violation := rapid.IntRange(0, 19).Draw(rt, "violation")
+		useLocalClosureHelper := rapid.Bool().Draw(rt, "useLocalClosureHelper")
+		useUnicodeFuncVal := rapid.Bool().Draw(rt, "useUnicodeFuncVal")
+		useFmtErrorf := rapid.Bool().Draw(rt, "useFmtErrorf")
+
+		var memoSrc, appSrc strings.Builder
+		memoSrc.WriteString("package memo\n\nimport (\n\t\"errors\"\n\t\"fmt\"\n\t\"strings\"\n\t\"sync\"\n\t\"unicode\"\n)\n\n")
+		memoSrc.WriteString("var (\n\t_ = errors.New\n\t_ = fmt.Errorf\n\t_ = strings.IndexFunc\n\t_ = unicode.IsSpace\n)\n")
+		memoSrc.WriteString("var settledPrefixes = []string{\"k:\"}\n")
+		memoSrc.WriteString("var leakedInputSink []byte\n")
+		memoSrc.WriteString("func impureSpace(r rune) bool { leakedInputSink = []byte{byte(r)}; return r == ' ' }\n")
+		memoSrc.WriteString("type customStatefulErr struct { msg *string }\nfunc (e *customStatefulErr) Error() string { if e.msg == nil { return \"\" }; return *e.msg }\n")
+		memoSrc.WriteString("func makeConcreteErr() *customStatefulErr { s := \"bad\"; return &customStatefulErr{msg: &s} }\n")
+
+		if violation == 1 {
+			// GuardType carries exported slice field whose element is not a GuardType (allows caller to mutate slice backing array!).
+			memoSrc.WriteString("type Knob struct { Name string }\n")
+			memoSrc.WriteString("type Document struct { Title string; Tags []string; Knobs []Knob; index map[string]map[string]int }\n")
+		} else {
+			memoSrc.WriteString("type SurfaceName string\n")
+			memoSrc.WriteString("type Knob struct { Name string }\n")
+			memoSrc.WriteString("type Document struct { Title string; Knobs []Knob; surfaces []SurfaceName; index map[string]map[string]int }\n")
+		}
+
+		if violation == 2 {
+			// Exported field on OnceMemoType itself.
+			memoSrc.WriteString("type Embedded struct { Tool string; src []byte; once sync.Once; doc *Document; err error }\n")
+		} else {
+			memoSrc.WriteString("type Embedded struct { tool string; src []byte; once sync.Once; doc *Document; err error }\n")
+		}
+
+		// Constructor
+		if violation == 3 {
+			// Constructor leaks input parameter to package global -> unproven InputParamDeps!
+			memoSrc.WriteString("func keepInput(b []byte) { leakedInputSink = b }\n")
+			memoSrc.WriteString("func Embed(tool string, src []byte) *Embedded { keepInput(src); return &Embedded{src: src} }\n")
+		} else if violation == 2 {
+			memoSrc.WriteString("func Embed(tool string, src []byte) *Embedded { return &Embedded{Tool: tool, src: src} }\n")
+		} else {
+			memoSrc.WriteString("func Embed(tool string, src []byte) *Embedded { return &Embedded{tool: tool, src: src} }\n")
+		}
+
+		// Parse helper in compute cone
+		memoSrc.WriteString("func Parse(src []byte) (*Document, error) {\n")
+		memoSrc.WriteString("\tdoc := &Document{Title: settledPrefixes[0] + string(src), index: map[string]map[string]int{}}\n")
+		memoSrc.WriteString("\tdoc.index[\"main\"] = map[string]int{}\n")
+		memoSrc.WriteString("\tif prev, taken := doc.index[\"main\"][\"k\"]; !taken { doc.index[\"main\"][\"k\"] = prev + 1 }\n")
+		if violation == 4 {
+			// Reassigned local closure variable in compute cone!
+			memoSrc.WriteString("\tfmtLabel := func(s string) string { return s }\n")
+			memoSrc.WriteString("\tfmtLabel = func(s string) string { leakedInputSink = src; return s }\n")
+			memoSrc.WriteString("\tdoc.Knobs = []Knob{{Name: fmtLabel(\"x\")}}\n")
+		} else if useLocalClosureHelper {
+			memoSrc.WriteString("\tfmtLabel := func(s string) string { return strings.TrimSpace(s) }\n")
+			memoSrc.WriteString("\tdoc.Knobs = []Knob{{Name: fmtLabel(\" x \")}}\n")
+		}
+		if violation == 5 {
+			// Non-call impure function value passed to stdlib higher-order function!
+			memoSrc.WriteString("\t_ = strings.IndexFunc(doc.Title, impureSpace)\n")
+		} else if useUnicodeFuncVal {
+			memoSrc.WriteString("\t_ = strings.IndexFunc(doc.Title, unicode.IsSpace)\n")
+		}
+		if violation == 6 {
+			// Pointer-address formatting verb %p in error construction!
+			memoSrc.WriteString("\tif len(src) == 0 { return nil, fmt.Errorf(\"bad %p\", doc) }\n")
+		} else if violation == 7 {
+			// Custom pointer-bearing error value!
+			memoSrc.WriteString("\tif len(src) == 0 { s := \"bad\"; return nil, &customStatefulErr{msg: &s} }\n")
+		} else if violation == 16 {
+			// RangeStmt smuggling custom stateful error into local error variable!
+			memoSrc.WriteString("\tif len(src) == 0 { s := \"bad\"; errs := []error{&customStatefulErr{msg: &s}}; for _, err := range errs { return nil, err } }\n")
+		} else if violation == 17 {
+			// TypeSwitchStmt smuggling custom stateful error into implicit error variable!
+			memoSrc.WriteString("\tif len(src) == 0 { s := \"bad\"; switch err := any(&customStatefulErr{msg: &s}).(type) { case error: return nil, err } }\n")
+		} else if violation == 18 {
+			// Helper returning concrete *customStatefulErr implicitly converted to error!
+			memoSrc.WriteString("\tif len(src) == 0 { return nil, makeConcreteErr() }\n")
+		} else if useFmtErrorf {
+			memoSrc.WriteString("\tif len(src) == 0 { return nil, fmt.Errorf(\"%w (knob %q)\", errors.New(\"empty\"), \"main\") }\n")
+		}
+		if violation == 8 {
+			// Input slice mutated inside compute cone!
+			memoSrc.WriteString("\tif len(src) > 0 { src[0] = 'z' }\n")
+		}
+		memoSrc.WriteString("\treturn doc, nil\n}\n")
+
+		// Getter & sibling methods
+		memoSrc.WriteString("func (e *Embedded) Document() (*Document, error) {\n")
+		if violation == 9 {
+			// Early-exit cold read of memoized field outside once.Do!
+			memoSrc.WriteString("\tif e.doc != nil { return e.doc, e.err }\n")
+		} else if violation == 15 {
+			// Non-returning cold read of memoized field before once.Do!
+			memoSrc.WriteString("\t_ = e.doc\n")
+		}
+		memoSrc.WriteString("\te.once.Do(func() {\n\t\te.doc, e.err = Parse(e.src)\n\t})\n")
+		if violation == 10 {
+			// Second once.Do site!
+			memoSrc.WriteString("\te.once.Do(func() {})\n")
+		}
+		memoSrc.WriteString("\treturn e.doc, e.err\n}\n")
+		memoSrc.WriteString("func (e *Embedded) MustKnob() Knob {\n\td, err := e.Document()\n\tif err != nil || len(d.Knobs) == 0 { panic(err) }\n\treturn d.Knobs[0]\n}\n")
+		if violation == 19 {
+			// Sibling method returning non-fresh package-global slice!
+			memoSrc.WriteString("func (e *Embedded) LeakPrefixes() []string { return settledPrefixes }\n")
+		}
+
+		// Consumer package
+		appSrc.WriteString("package app\n\nimport \"example.com/memo\"\n\n")
+		if violation == 11 {
+			// Exported mutable constructor input in consumer!
+			appSrc.WriteString("var RawBytes = []byte(\"spec\")\n")
+		} else {
+			appSrc.WriteString("var RawBytes = \"spec\"\n")
+		}
+		appSrc.WriteString("var rawSlice = []byte(\"spec\")\n")
+		if violation == 12 {
+			// //gofresh:single-subject directive on candidate variable -> excluded from OnceMemoCandidates!
+			appSrc.WriteString("//gofresh:single-subject\nvar embeddedGuidance = memo.Embed(\"tool\", rawSlice)\n")
+		} else if violation == 11 {
+			appSrc.WriteString("var embeddedGuidance = memo.Embed(\"tool\", RawBytes)\n")
+		} else {
+			appSrc.WriteString("var embeddedGuidance = memo.Embed(\"tool\", rawSlice)\n")
+		}
+		if violation == 13 {
+			// Non-method use of candidate variable!
+			appSrc.WriteString("var Sink any = embeddedGuidance\n")
+		}
+		if violation == 14 {
+			// Consumer mutates GuardType Knob!
+			appSrc.WriteString("func MutateGuard(k *memo.Knob) { k.Name = \"mutated\" }\n")
+		}
+		appSrc.WriteString("func ReadKnob() string { return embeddedGuidance.MustKnob().Name }\n")
+
+		meta, _, facts := mustTypecheckOrderedDAG(rt, []orderedPkgSpec{
+			{pkgPath: "example.com/memo", src: memoSrc.String()},
+			{pkgPath: "example.com/app", imports: []string{"example.com/memo"}, src: appSrc.String()},
+		})
+
+		csGen := Compose(meta, facts, "example.com/app", nil, false, false)
+		csPkg := Compose(meta, facts, "example.com/app", nil, false, true)
+		csSub := Compose(meta, facts, "example.com/app", nil, true, false)
+
+		if violation == 0 {
+			if len(facts["example.com/memo"][0].OnceMemoTypes) != 1 {
+				rt.Fatalf("expected 1 OnceMemoType in memo, got %+v\nmemo:\n%s", facts["example.com/memo"][0].OnceMemoTypes, memoSrc.String())
+			}
+			if len(facts["example.com/app"][0].OnceMemoCandidates) != 1 {
+				rt.Fatalf("expected 1 OnceMemoCandidate in app, got %+v\napp:\n%s", facts["example.com/app"][0].OnceMemoCandidates, appSrc.String())
+			}
+			if csGen.Downgraded != "" || csPkg.Downgraded != "" || csSub.Downgraded != "" {
+				rt.Fatalf("PRECISION FAILURE: clean OnceMemoType + candidate downgraded (gen=%q pkg=%q sub=%q)\nmemo:\n%s\napp:\n%s",
+					csGen.Downgraded, csPkg.Downgraded, csSub.Downgraded, memoSrc.String(), appSrc.String())
+			}
+		} else {
+			switch violation {
+			case 1, 2, 3, 4, 5, 6, 7, 9, 10, 15, 16, 17, 18, 19:
+				if len(facts["example.com/memo"][0].OnceMemoTypes) != 0 {
+					rt.Fatalf("SOUNDNESS FAILURE: memo-type violation=%d still derived OnceMemoTypes=%+v!\nmemo:\n%s",
+						violation, facts["example.com/memo"][0].OnceMemoTypes, memoSrc.String())
+				}
+			}
+			if csGen.Downgraded == "" || csPkg.Downgraded == "" {
+				rt.Fatalf("SOUNDNESS FAILURE: violation=%d admitted under General/PackageExecution (gen=%q pkg=%q)!\nmemo:\n%s\napp:\n%s\nmemoFact=%+v\nappFact=%+v",
+					violation, csGen.Downgraded, csPkg.Downgraded, memoSrc.String(), appSrc.String(), facts["example.com/memo"][0], facts["example.com/app"][0])
+			}
+			// Violation 12 has //gofresh:single-subject (and clean rawSlice), so SingleSubjectExecution discharges via attestation while General/Package refuse!
+			if violation != 12 && csSub.Downgraded == "" {
+				rt.Fatalf("SOUNDNESS FAILURE: violation=%d admitted under SingleSubjectExecution!\nmemo:\n%s\napp:\n%s",
+					violation, memoSrc.String(), appSrc.String())
+			}
 		}
 	})
 }

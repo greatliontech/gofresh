@@ -3,8 +3,8 @@
 
 bindings {
   requirement_id: "REQ-explain-chain"
-  content_hash: "aff9e09e8f72860a93c25b2f47c10edc22672a82ab5877b5b41ae091a859f24a"
-  source_hash: "ccc8c3bc1bdedb8db5448fc41d2e58f8383c5eb480b1f3a2177aef511479078c"
+  content_hash: "efab26f3380b80e521fc0888c45f084704cd7c26543e87b8494f69372ffe2e16"
+  source_hash: "84e00f7b030fd65b1d497a66253c1a42d8b598a0cfcc9a72c7490480b2923b93"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExplainChains"
   role: BINDING_ROLE_TESTS
@@ -13,8 +13,8 @@ bindings {
 
 bindings {
   requirement_id: "REQ-explain-chain"
-  content_hash: "aff9e09e8f72860a93c25b2f47c10edc22672a82ab5877b5b41ae091a859f24a"
-  source_hash: "ccc8c3bc1bdedb8db5448fc41d2e58f8383c5eb480b1f3a2177aef511479078c"
+  content_hash: "efab26f3380b80e521fc0888c45f084704cd7c26543e87b8494f69372ffe2e16"
+  source_hash: "84e00f7b030fd65b1d497a66253c1a42d8b598a0cfcc9a72c7490480b2923b93"
   backend: "go"
   symbol: "github.com/greatliontech/gofresh.TestExplainDeferralChains"
   role: BINDING_ROLE_TESTS
@@ -69,4 +69,14 @@ bindings {
   symbol: "github.com/greatliontech/gofresh.TestExplainStraddlesALaterEdit"
   role: BINDING_ROLE_TESTS
   shape_hash: "bc9a806f626937d89af1db73d60bb4df6a663be1611092fb707f97611337a885"
+}
+
+bindings {
+  requirement_id: "REQ-explain-chain"
+  content_hash: "efab26f3380b80e521fc0888c45f084704cd7c26543e87b8494f69372ffe2e16"
+  source_hash: "84e00f7b030fd65b1d497a66253c1a42d8b598a0cfcc9a72c7490480b2923b93"
+  backend: "go"
+  symbol: "github.com/greatliontech/gofresh.TestExplainEnvAuditConfinementEdges"
+  role: BINDING_ROLE_TESTS
+  shape_hash: "7d853e40e672dabf3ebb969c5096e747c1659d5ebb371618e6480755224578d9"
 }

@@ -258,6 +258,22 @@ func CollectFreshLocalStructVars(
 					addrTaken[rv] = true
 				}
 			}
+		case *ast.SliceExpr:
+			if _, isArr := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(s.X)).(*types.Array); isArr {
+				if rv := rootLocalIdent(s.X); rv != nil {
+					addrTaken[rv] = true
+				}
+			}
+		case *ast.SelectorExpr:
+			if selInfo := p.TypesInfo.Selections[s]; selInfo != nil && selInfo.Kind() == types.MethodVal {
+				if _, isPtrRecv := types.Unalias(selInfo.Recv()).(*types.Pointer); isPtrRecv {
+					if _, isXPtr := types.Unalias(p.TypesInfo.TypeOf(s.X)).(*types.Pointer); !isXPtr {
+						if rv := rootLocalIdent(s.X); rv != nil {
+							addrTaken[rv] = true
+						}
+					}
+				}
+			}
 		case *ast.AssignStmt:
 			if len(s.Lhs) != len(s.Rhs) {
 				for _, l := range s.Lhs {
@@ -355,7 +371,8 @@ func CollectFreshLocalStructVars(
 				escapePos[v] = useEsc
 			}
 		}
-		if _, hasEsc := escapePos[v]; hasEsc && (addrTaken[v] || usedInDefer) {
+		_, hasEsc := escapePos[v]
+		if addrTaken[v] || (hasEsc && usedInDefer) {
 			delete(candidates, v)
 			delete(escapePos, v)
 		}

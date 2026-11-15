@@ -1,6 +1,7 @@
 package dynstate
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/importer"
@@ -1268,7 +1269,7 @@ func FuzzComposeAndDeferralResolutionInvariants(f *testing.F) {
 			fnB := fns[(int(b>>4)+i)%len(fns)]
 			vA := vars[int(b>>1)%len(vars)]
 			vB := vars[(int(b>>3)+i)%len(vars)]
-			switch b % 19 {
+			switch b % 33 {
 			case 0:
 				f.ReturnEnvFree = append(f.ReturnEnvFree, fnA)
 			case 1:
@@ -1340,10 +1341,77 @@ func FuzzComposeAndDeferralResolutionInvariants(f *testing.F) {
 					reg = syntaxutil.RefRegion{Kind: syntaxutil.RegionProg}
 				}
 				f.FuncRefs = append(f.FuncRefs, syntaxutil.FuncRef{Callee: fnA, Region: reg})
+			case 19:
+				f.ReceiverReadOnlyDeps = append(f.ReceiverReadOnlyDeps, syntaxutil.FuncDepEdge{Func: fnA, Callee: fnB})
+			case 20:
+				f.ReceiverReadOnlyParamDeps = append(f.ReceiverReadOnlyParamDeps, syntaxutil.FuncParamDepEdge{
+					Func:  fnA,
+					Param: syntaxutil.ParamKey{Func: fnB, Index: int(b & 1)},
+				})
+			case 21:
+				f.ParamLeakFreeMethodDeps = append(f.ParamLeakFreeMethodDeps, syntaxutil.ParamMethodDepEdge{
+					Param:  syntaxutil.ParamKey{Func: fnA, Index: int(b & 1)},
+					Method: fnB,
+				})
+			case 22:
+				f.EnvCallParamUses = append(f.EnvCallParamUses, syntaxutil.EnvCallParamUse{
+					Key:   vA,
+					Param: syntaxutil.ParamKey{Func: fnB, Index: int(b & 1)},
+				})
+			case 23:
+				f.EnvCallMethodUses = append(f.EnvCallMethodUses, syntaxutil.EnvCallMethodUse{
+					Key:    vA,
+					Method: fnB,
+				})
+			case 24:
+				f.ReturnEnvParamDeps = append(f.ReturnEnvParamDeps, syntaxutil.FuncParamDepEdge{
+					Func:  fnA,
+					Param: syntaxutil.ParamKey{Func: fnB, Index: int(b & 1)},
+				})
+			case 25:
+				f.ReturnEnvMethodDeps = append(f.ReturnEnvMethodDeps, syntaxutil.FuncDepEdge{Func: fnA, Callee: fnB})
+			case 26:
+				f.ParamInsertionFree = append(f.ParamInsertionFree, syntaxutil.ParamKey{Func: fnA, Index: int(b & 1)})
+			case 27:
+				f.ParamInsertionParamDeps = append(f.ParamInsertionParamDeps, syntaxutil.ParamDepEdge{
+					Own: syntaxutil.ParamKey{Func: fnA, Index: int(b & 1)},
+					Dep: syntaxutil.ParamKey{Func: fnB, Index: int((b >> 1) & 1)},
+				})
+			case 28:
+				f.ParamInsertionMethodDeps = append(f.ParamInsertionMethodDeps, syntaxutil.ParamMethodDepEdge{
+					Param:  syntaxutil.ParamKey{Func: fnA, Index: int(b & 1)},
+					Method: fnB,
+				})
+			case 29:
+				ownPkg := pkgs[pIdx]
+				tRef := syntaxutil.TypeRef{Pkg: ownPkg, Name: "MemoT"}
+				f.OnceMemoTypes = append(f.OnceMemoTypes, syntaxutil.OnceMemoTypeFact{
+					Type:           tRef,
+					Constructors:   []syntaxutil.FuncKey{{Pkg: ownPkg, Name: "NewMemoT"}},
+					GuardTypes:     []syntaxutil.TypeRef{tRef, {Pkg: pkgs[(pIdx+1)%len(pkgs)], Name: "GuardT"}},
+					InputParamDeps: []syntaxutil.ParamKey{{Func: fnB, Index: int(b & 1)}},
+				})
+			case 30:
+				ownVar := vars[pIdx]
+				targetPkg := pkgs[(pIdx+1)%len(pkgs)]
+				f.OnceMemoCandidates = append(f.OnceMemoCandidates, syntaxutil.OnceMemoVarCandidate{
+					Key:         ownVar,
+					Type:        syntaxutil.TypeRef{Pkg: targetPkg, Name: "MemoT"},
+					Constructor: syntaxutil.FuncKey{Pkg: targetPkg, Name: "NewMemoT"},
+				})
+			case 31:
+				f.MutatedStructTypes = append(f.MutatedStructTypes, syntaxutil.TypeRef{Pkg: pkgs[int(b>>2)%len(pkgs)], Name: "GuardT"})
+			case 32:
+				if b&1 == 0 {
+					f.DirectVarWrites = append(f.DirectVarWrites, vB)
+				} else {
+					f.NonMethodVarUses = append(f.NonMethodVarUses, vB)
+				}
 			}
 		}
 
 		res1 := NewDeferralResolution(factsByPkg, nil)
+		ea1 := ResolveEnvAudit(factsByPkg, nil)
 		state1 := Compose(meta, factsByPkg, pkgs[0], nil, true, false)
 		ok1, param1 := res1.FieldPopulationProves(vars[0], "fn", 0)
 
@@ -1355,12 +1423,16 @@ func FuzzComposeAndDeferralResolutionInvariants(f *testing.F) {
 			pkgs[0]: factsByPkg[pkgs[0]],
 		}
 		res2 := NewDeferralResolution(revFacts, nil)
+		ea2 := ResolveEnvAudit(revFacts, nil)
 		state2 := Compose(revMeta, revFacts, pkgs[0], nil, true, false)
 		ok2, param2 := res2.FieldPopulationProves(vars[0], "fn", 0)
 
 		if !reflect.DeepEqual(res1.ParamLeakFree, res2.ParamLeakFree) ||
-			!reflect.DeepEqual(res1.EnvFreeResolved, res2.EnvFreeResolved) {
-			t.Fatalf("NewDeferralResolution order-dependent: %+v vs %+v", res1, res2)
+			!reflect.DeepEqual(res1.ReadOnly, res2.ReadOnly) ||
+			!reflect.DeepEqual(res1.EnvFreeResolved, res2.EnvFreeResolved) ||
+			!reflect.DeepEqual(ea1.Resolved, ea2.Resolved) ||
+			!reflect.DeepEqual(ea1.InsResolved, ea2.InsResolved) {
+			t.Fatalf("NewDeferralResolution/ResolveEnvAudit order-dependent: %+v / %+v vs %+v / %+v", res1, ea1, res2, ea2)
 		}
 		if ok1 != ok2 || param1 != param2 {
 			t.Fatalf("FieldPopulationProves order-dependent: (%v, %+v) vs (%v, %+v)", ok1, param1, ok2, param2)
@@ -7109,4 +7181,1498 @@ func WriteDirective() {
 			t.Fatalf("%s: expected fail-closed downgrade and suppressed AttestationDischarges, got %+v", name, st)
 		}
 	}
+}
+
+func TestOnceMemoEmbeddedGuidanceAndCodecPoison(t *testing.T) {
+	t.Parallel()
+
+	const guidanceSrc = `package guidance
+
+import (
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"unicode"
+)
+
+type Document struct {
+	Title       string
+	Verbs       []Verb
+	DecisionMap string
+	index       map[string]map[string]int
+}
+
+type Verb struct {
+	Name     string
+	Surfaces []SurfaceName
+	Does     string
+	Knobs    []Knob
+	When     string
+	Example  string
+}
+
+type SurfaceName struct {
+	Surface string
+	Name    string
+}
+
+type Knob struct {
+	Name     string
+	Surfaces []SurfaceName
+	Text     string
+}
+
+var surfaces = []string{"mcp", "cli"}
+
+func knownSurface(s string) bool { return s == "mcp" || s == "cli" }
+
+func on(declared []SurfaceName, canonical, surface string) (string, bool) {
+	if len(declared) == 0 {
+		return canonical, true
+	}
+	for _, s := range declared {
+		if s.Surface == surface {
+			return s.Name, true
+		}
+	}
+	return "", false
+}
+
+type parser struct {
+	lines    []string
+	i        int
+	fenceLen int
+}
+
+func (p *parser) structural() bool {
+	return p.fenceLen == 0 && p.i < len(p.lines) && (strings.HasPrefix(p.lines[p.i], "#") || strings.HasPrefix(p.lines[p.i], "**"))
+}
+
+func (p *parser) line() string {
+	if p.i >= len(p.lines) {
+		return ""
+	}
+	return p.lines[p.i]
+}
+
+func (p *parser) advance() string {
+	l := p.lines[p.i]
+	p.i++
+	return l
+}
+
+func (p *parser) skipBlank() {
+	for p.i < len(p.lines) && strings.TrimSpace(p.lines[p.i]) == "" {
+		p.i++
+	}
+}
+
+func (p *parser) head() string {
+	if p.i >= len(p.lines) {
+		return "end of document"
+	}
+	return p.lines[p.i]
+}
+
+func Parse(src []byte) (*Document, error) {
+	normalized := strings.ReplaceAll(string(src), "\r", "")
+	p := &parser{lines: strings.Split(normalized, "\n")}
+	doc := &Document{index: map[string]map[string]int{}}
+	for _, s := range surfaces {
+		doc.index[s] = map[string]int{}
+	}
+	p.skipBlank()
+	title, ok := strings.CutPrefix(p.line(), "# ")
+	if p.i >= len(p.lines) || !ok || strings.TrimSpace(title) == "" {
+		return nil, fmt.Errorf("guidance: missing title, got %q", p.head())
+	}
+	doc.Title = strings.TrimSpace(title)
+	p.advance()
+	for p.i < len(p.lines) {
+		p.skipBlank()
+		if p.i >= len(p.lines) {
+			break
+		}
+		if strings.TrimSpace(p.line()) == "## decision map" {
+			p.advance()
+			break
+		}
+		name, ok := strings.CutPrefix(p.line(), "### ")
+		if !ok {
+			return nil, fmt.Errorf("guidance: expected verb, got %q", p.head())
+		}
+		p.advance()
+		verb, err := parseVerb(strings.TrimSpace(name), p)
+		if err != nil {
+			return nil, err
+		}
+		doc.Verbs = append(doc.Verbs, *verb)
+		vi := len(doc.Verbs) - 1
+		for _, s := range surfaces {
+			spelling, exists := on(verb.Surfaces, verb.Name, s)
+			if !exists {
+				continue
+			}
+			if prev, taken := doc.index[s][spelling]; taken {
+				return nil, fmt.Errorf("guidance: verb %q: %s spelling %q collides with verb %q", verb.Name, s, spelling, doc.Verbs[prev].Name)
+			}
+			doc.index[s][spelling] = vi
+		}
+	}
+	var body []string
+	for p.i < len(p.lines) {
+		body = append(body, p.advance())
+	}
+	doc.DecisionMap = strings.TrimSpace(strings.Join(body, "\n"))
+	return doc, nil
+}
+
+func parseVerb(name string, p *parser) (*Verb, error) {
+	v := &Verb{Name: name}
+	label := func(want string) (string, bool) {
+		p.skipBlank()
+		if p.i >= len(p.lines) || !strings.HasPrefix(p.line(), "**"+want+":**") {
+			return "", false
+		}
+		first := strings.TrimSpace(strings.TrimPrefix(p.line(), "**"+want+":**"))
+		p.advance()
+		return first, true
+	}
+	body := func(field string) (string, error) {
+		var parts []string
+		for p.i < len(p.lines) && !p.structural() {
+			parts = append(parts, p.advance())
+		}
+		if p.fenceLen > 0 {
+			return "", fmt.Errorf("guidance: verb %q: **%s:** open fence", name, field)
+		}
+		return strings.TrimRight(strings.Join(parts, "\n"), "\n \t"), nil
+	}
+	first, ok := label("does")
+	if !ok || first == "" {
+		return nil, fmt.Errorf("guidance: verb %q: missing does", name)
+	}
+	extra, err := body("does")
+	if err != nil {
+		return nil, err
+	}
+	if extra != "" {
+		return nil, fmt.Errorf("guidance: verb %q: extra does %q", name, extra)
+	}
+	v.Does = first
+	if knFirst, okK := label("knobs"); okK && knFirst == "" {
+		items, err := body("knobs")
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range strings.Split(items, "\n") {
+			item = strings.TrimSpace(item)
+			if item == "" {
+				continue
+			}
+			kn, err := parseKnob(name, item)
+			if err != nil {
+				return nil, err
+			}
+			v.Knobs = append(v.Knobs, *kn)
+		}
+	}
+	return v, nil
+}
+
+func parseKnob(verb, item string) (*Knob, error) {
+	rest, ok := strings.CutPrefix(item, "- ")
+	if !ok {
+		return nil, fmt.Errorf("guidance: verb %q: bad knob %q", verb, item)
+	}
+	name, tail, ok := strings.Cut(rest, ":")
+	if !ok || name == "" {
+		baseErr := fmt.Errorf("guidance: verb %q: bad knob %q", verb, item)
+		return nil, fmt.Errorf("%w (knob %q)", baseErr, name)
+	}
+	return &Knob{Name: strings.TrimSpace(name), Text: strings.TrimSpace(tail)}, nil
+}
+
+func (d *Document) resolve(surface, name string) (*Verb, error) {
+	if !knownSurface(surface) {
+		return nil, fmt.Errorf("guidance: unknown surface %q", surface)
+	}
+	i, ok := d.index[surface][name]
+	if !ok {
+		return nil, fmt.Errorf("guidance: no verb %q on %s", name, surface)
+	}
+	return &d.Verbs[i], nil
+}
+
+type spelledKnob struct {
+	Knob
+	spelling string
+}
+
+func knobsOn(v *Verb, surface string) []spelledKnob {
+	var out []spelledKnob
+	for _, k := range v.Knobs {
+		if spelling, exists := on(k.Surfaces, k.Name, surface); exists {
+			out = append(out, spelledKnob{Knob: k, spelling: spelling})
+		}
+	}
+	return out
+}
+
+func (d *Document) Knob(surface, verb, name string) (Knob, error) {
+	v, err := d.resolve(surface, verb)
+	if err != nil {
+		return Knob{}, err
+	}
+	for _, kn := range knobsOn(v, surface) {
+		if kn.spelling == name {
+			return kn.Knob, nil
+		}
+	}
+	return Knob{}, fmt.Errorf("guidance: missing knob %q", name)
+}
+
+func (k Knob) Clause() string { return strings.TrimSpace(k.Text) }
+func (k Knob) Usage() string  { return strings.ReplaceAll(k.Clause(), "` + "`" + `", "") }
+
+type Registered map[string]bool
+
+func (d *Document) Coverage(surface string, registered map[string]Registered) ([]string, error) {
+	if !knownSurface(surface) {
+		return nil, fmt.Errorf("guidance: unknown surface %q", surface)
+	}
+	var defects []string
+	verbs := make([]string, 0, len(registered))
+	for verb := range registered {
+		verbs = append(verbs, verb)
+	}
+	sort.Strings(verbs)
+	for _, verb := range verbs {
+		vi, ok := d.index[surface][verb]
+		if !ok {
+			defects = append(defects, verb)
+			continue
+		}
+		v := &d.Verbs[vi]
+		if v.Does == "" {
+			defects = append(defects, verb)
+		}
+	}
+	return defects, nil
+}
+
+type SchemaNode interface {
+	Properties() []string
+	Property(name string) (SchemaNode, bool)
+	Items() (SchemaNode, bool)
+	Describe(text string)
+}
+
+func (d *Document) DescribeSchema(surface, verb string, root SchemaNode) ([]string, error) {
+	visited := map[string]bool{}
+	if err := d.describe(surface, verb, root, visited); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(visited))
+	for name := range visited {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func (d *Document) describe(surface, verb string, node SchemaNode, visited map[string]bool) error {
+	if node == nil {
+		return nil
+	}
+	names := append([]string(nil), node.Properties()...)
+	sort.Strings(names)
+	for _, name := range names {
+		k, err := d.Knob(surface, verb, name)
+		if err != nil {
+			return err
+		}
+		visited[name] = true
+		prop, ok := node.Property(name)
+		if !ok {
+			continue
+		}
+		prop.Describe(k.Clause())
+		if err := d.describe(surface, verb, prop, visited); err != nil {
+			return err
+		}
+	}
+	if items, ok := node.Items(); ok {
+		return d.describe(surface, verb, items, visited)
+	}
+	return nil
+}
+
+type Registration struct {
+	Verb         string
+	Description  string
+	Help         string
+	Long         string
+	Knobs        []KnobUsage
+	ProsePointer string
+	LongHelp     string
+}
+
+type KnobUsage struct {
+	Name   string
+	Clause string
+	Usage  string
+}
+
+func longOf(v *Verb, surface string) string {
+	var b strings.Builder
+	b.WriteString(v.Does)
+	b.WriteString("\n\nknobs:")
+	listed := false
+	for _, kn := range knobsOn(v, surface) {
+		fmt.Fprintf(&b, "\n  %s — %s", kn.spelling, kn.Text)
+		listed = true
+	}
+	if !listed {
+		b.WriteString(" none")
+	}
+	return b.String()
+}
+
+func (d *Document) Registration(surface, verb string) (Registration, error) {
+	v, err := d.resolve(surface, verb)
+	if err != nil {
+		return Registration{}, err
+	}
+	spelling, _ := on(v.Surfaces, v.Name, surface)
+	r := Registration{Verb: spelling, Description: v.Does, Help: v.Does, Long: longOf(v, surface)}
+	for _, kn := range knobsOn(v, surface) {
+		r.Knobs = append(r.Knobs, KnobUsage{Name: kn.spelling, Clause: kn.Clause(), Usage: kn.Usage()})
+	}
+	return r, nil
+}
+
+type Embedded struct {
+	tool string
+	src  []byte
+	once sync.Once
+	doc  *Document
+	err  error
+}
+
+func Embed(tool string, src []byte) *Embedded {
+	return &Embedded{tool: tool, src: src}
+}
+
+func (e *Embedded) Document() (*Document, error) {
+	e.once.Do(func() { e.doc, e.err = Parse(e.src) })
+	return e.doc, e.err
+}
+
+func (e *Embedded) Must() *Document {
+	doc, err := e.Document()
+	if err != nil {
+		panic(e.tool + ": embedded guidance document malformed: " + err.Error())
+	}
+	return doc
+}
+
+func (e *Embedded) refuse(err error) {
+	panic(e.tool + ": guidance: " + strings.TrimPrefix(err.Error(), "guidance: "))
+}
+
+func (e *Embedded) MustKnob(surface, verb, name string) Knob {
+	k, err := e.Must().Knob(surface, verb, name)
+	if err != nil {
+		e.refuse(err)
+	}
+	return k
+}
+
+func (e *Embedded) MustRegistration(surface, verb string) Registration {
+	e.Must()
+	r, err := e.Registration(surface, verb)
+	if err != nil {
+		e.refuse(err)
+	}
+	return r
+}
+
+func (e *Embedded) MustDescribeSchema(surface, verb string, root SchemaNode) []string {
+	names, err := e.Must().DescribeSchema(surface, verb, root)
+	if err != nil {
+		e.refuse(err)
+	}
+	return names
+}
+
+func (e *Embedded) Registration(surface, verb string) (Registration, error) {
+	doc, err := e.Document()
+	if err != nil {
+		return Registration{}, err
+	}
+	r, err := doc.Registration(surface, verb)
+	if err != nil {
+		return Registration{}, err
+	}
+	r.ProsePointer = e.prosePointer(surface, r.Verb)
+	if surface == "cli" {
+		r.LongHelp = r.Help + "\n\n" + r.ProsePointer
+	}
+	return r, nil
+}
+
+func (e *Embedded) prosePointer(surface, spelling string) string {
+	if surface == "mcp" {
+		return "The knobs' whole prose: the guidance tool, verb " + spelling + "."
+	}
+	if strings.IndexFunc(spelling, unicode.IsSpace) >= 0 {
+		spelling = strconv.Quote(spelling)
+	}
+	return "The knobs' whole prose: " + e.tool + " guidance " + spelling + "."
+}
+`
+
+	const toolConsumerSrc = `package tool
+
+import (
+	_ "embed"
+	"unsafe"
+
+	"example.com/tool/internal/guidance"
+)
+
+//go:embed docs/guidance.md
+var guidanceSrc []byte
+
+var embeddedGuidance = guidance.Embed("gomutant", guidanceSrc)
+
+func Guidance() *guidance.Document { return embeddedGuidance.Must() }
+
+func GuidanceDocument() (*guidance.Document, error) { return embeddedGuidance.Document() }
+
+func GuidanceKnob(face, verb, name string) guidance.Knob {
+	return embeddedGuidance.MustKnob(face, verb, name)
+}
+
+func GuidanceRegistration(face, verb string) guidance.Registration {
+	return embeddedGuidance.MustRegistration(face, verb)
+}
+
+func DescribeGuidanceSchema(verb string, root guidance.SchemaNode) {
+	embeddedGuidance.MustDescribeSchema("mcp", verb, root)
+}
+
+func CheckInternedManifests(a, b string) bool {
+	fp := unsafe.StringData(a)
+	sp := unsafe.StringData(b)
+	return fp == sp && unsafe.Sizeof(fp) > 0
+}
+
+func ReadSyntheticDoc() int {
+	doc := &guidance.Document{Verbs: []guidance.Verb{{Name: "run", Surfaces: []guidance.SurfaceName{{Surface: "cli", Name: "run"}}}}}
+	n := 0
+	for _, v := range doc.Verbs {
+		if len(v.Surfaces) == 1 {
+			n++
+		}
+	}
+	return n
+}
+`
+
+	t.Run("faithful guidance and consumer discharge without vouches or attestations", func(t *testing.T) {
+		meta, _, allFacts := mustTypecheckOrderedDAG(t, []orderedPkgSpec{
+			{pkgPath: "example.com/tool/internal/guidance", src: guidanceSrc},
+			{pkgPath: "example.com/tool", imports: []string{"example.com/tool/internal/guidance"}, src: toolConsumerSrc},
+		})
+		gFact := allFacts["example.com/tool/internal/guidance"][0]
+		tFact := allFacts["example.com/tool"][0]
+		if len(gFact.OnceMemoTypes) != 1 || gFact.OnceMemoTypes[0].Type != (syntaxutil.TypeRef{Pkg: "example.com/tool/internal/guidance", Name: "Embedded"}) {
+			t.Fatalf("OnceMemoTypes = %+v, want [guidance.Embedded]", gFact.OnceMemoTypes)
+		}
+		wantGuards := []syntaxutil.TypeRef{
+			{Pkg: "example.com/tool/internal/guidance", Name: "Document"},
+			{Pkg: "example.com/tool/internal/guidance", Name: "Embedded"},
+			{Pkg: "example.com/tool/internal/guidance", Name: "Knob"},
+			{Pkg: "example.com/tool/internal/guidance", Name: "SurfaceName"},
+			{Pkg: "example.com/tool/internal/guidance", Name: "Verb"},
+		}
+		if !slices.Equal(gFact.OnceMemoTypes[0].GuardTypes, wantGuards) {
+			t.Fatalf("GuardTypes = %+v, want %+v", gFact.OnceMemoTypes[0].GuardTypes, wantGuards)
+		}
+		for _, gt := range wantGuards {
+			if slices.Contains(gFact.MutatedStructTypes, gt) {
+				t.Fatalf("guard type %+v unexpectedly marked in guidance MutatedStructTypes: %+v", gt, gFact.MutatedStructTypes)
+			}
+		}
+		if len(tFact.OnceMemoCandidates) != 1 || tFact.OnceMemoCandidates[0].Key != "example.com/tool.embeddedGuidance" {
+			t.Fatalf("OnceMemoCandidates = %+v, want [example.com/tool.embeddedGuidance]", tFact.OnceMemoCandidates)
+		}
+		for _, singleSubject := range []bool{false, true} {
+			for _, packageProcess := range []bool{false, true} {
+				cone := Compose(meta, allFacts, "example.com/tool", nil, singleSubject, packageProcess)
+				if cone.Downgraded != "" || len(cone.RootCulprits) != 0 || cone.AttestationDischarges != "" || cone.VouchDischarges != "" {
+					t.Fatalf("Compose(single=%v, pkgProc=%v) = %+v, want zero culprits and zero attestation/vouch discharges", singleSubject, packageProcess, cone)
+				}
+			}
+		}
+
+		// Multi-variant revocation: if a test variant omits OnceMemoTypes (e.g. adds a second once.Do),
+		// mutates a GuardType, or leaves an InputParamDeps obligation unproven, Compose revokes fail-closed.
+		revokedFacts := map[string][]Fact{
+			"example.com/tool/internal/guidance": {gFact, {}},
+			"example.com/tool":                   {tFact},
+		}
+		if cone := Compose(meta, revokedFacts, "example.com/tool", nil, false, false); cone.Downgraded == "" || cone.CulpritSym != "embeddedGuidance" {
+			t.Fatalf("variant missing OnceMemoTypes failed to revoke discharge: %+v", cone)
+		}
+
+		tFactMutatingGuard := tFact
+		tFactMutatingGuard.MutatedStructTypes = []syntaxutil.TypeRef{
+			{Pkg: "example.com/tool/internal/guidance", Name: "Knob"},
+		}
+		guardRevokedFacts := map[string][]Fact{
+			"example.com/tool/internal/guidance": {gFact},
+			"example.com/tool":                   {tFactMutatingGuard},
+		}
+		if cone := Compose(meta, guardRevokedFacts, "example.com/tool", nil, false, false); cone.Downgraded == "" || cone.CulpritSym != "embeddedGuidance" {
+			t.Fatalf("mutated GuardType failed to revoke OnceMemoType discharge: %+v", cone)
+		}
+
+		gFactWithUnprovenInputDep := gFact
+		gFactWithUnprovenInputDep.OnceMemoTypes = []syntaxutil.OnceMemoTypeFact{gFact.OnceMemoTypes[0]}
+		gFactWithUnprovenInputDep.OnceMemoTypes[0].InputParamDeps = []syntaxutil.ParamKey{
+			{Func: syntaxutil.FuncKey{Pkg: "example.com/ext", Name: "LeakInput"}, Index: 0},
+		}
+		inputDepRevokedFacts := map[string][]Fact{
+			"example.com/tool/internal/guidance": {gFactWithUnprovenInputDep},
+			"example.com/tool":                   {tFact},
+		}
+		if cone := Compose(meta, inputDepRevokedFacts, "example.com/tool", nil, false, false); cone.Downgraded == "" || cone.CulpritSym != "embeddedGuidance" {
+			t.Fatalf("unproven InputParamDeps failed to revoke OnceMemoType discharge: %+v", cone)
+		}
+	})
+
+	t.Run("consumer unsafe mutation and cross-package deref write revoke discharge", func(t *testing.T) {
+		badUnsafeConsumer := strings.Replace(
+			toolConsumerSrc,
+			"return fp == sp && unsafe.Sizeof(fp) > 0",
+			"*fp = 'x'\n\treturn fp == sp",
+			1,
+		)
+		meta, _, allFacts := mustTypecheckOrderedDAG(t, []orderedPkgSpec{
+			{pkgPath: "example.com/tool/internal/guidance", src: guidanceSrc},
+			{pkgPath: "example.com/tool", imports: []string{"example.com/tool/internal/guidance"}, src: badUnsafeConsumer},
+		})
+		if len(allFacts["example.com/tool"][0].OnceMemoCandidates) != 0 {
+			t.Fatalf("mutating *unsafe.StringData unexpectedly produced OnceMemoCandidates: %+v", allFacts["example.com/tool"][0].OnceMemoCandidates)
+		}
+		if cone := Compose(meta, allFacts, "example.com/tool", nil, false, false); cone.Downgraded == "" || cone.CulpritSym != "embeddedGuidance" {
+			t.Fatalf("mutating *unsafe.StringData did not downgrade naming embeddedGuidance: %+v", cone)
+		}
+
+		// Exported memoizer overwritten via cross-package *tool.ExportedGuidance = ... revokes via DirectVarWrites + NonMethodVarUses.
+		exportedTool := strings.ReplaceAll(toolConsumerSrc, "embeddedGuidance", "ExportedGuidance")
+		metaExp, _, factsExp := mustTypecheckOrderedDAG(t, []orderedPkgSpec{
+			{pkgPath: "example.com/tool/internal/guidance", src: guidanceSrc},
+			{pkgPath: "example.com/tool", imports: []string{"example.com/tool/internal/guidance"}, src: exportedTool},
+			{
+				pkgPath: "example.com/mutator",
+				imports: []string{"example.com/tool", "example.com/tool/internal/guidance"},
+				src: `package mutator
+
+import (
+	"example.com/tool"
+	"example.com/tool/internal/guidance"
+)
+
+func Clobber() {
+	*tool.ExportedGuidance = *guidance.Embed("evil", nil)
+}
+`,
+			},
+		})
+		if !slices.Contains(factsExp["example.com/mutator"][0].DirectVarWrites, "example.com/tool.ExportedGuidance") {
+			t.Fatalf("DirectVarWrites missed *tool.ExportedGuidance dereference overwrite: %+v", factsExp["example.com/mutator"][0].DirectVarWrites)
+		}
+		if cone := Compose(metaExp, factsExp, "example.com/mutator", nil, false, false); cone.Downgraded == "" {
+			t.Fatalf("cross-package *tool.ExportedGuidance overwrite did not downgrade: %+v", cone)
+		}
+	})
+
+	t.Run("Fact JSON codec round-trip preserves confinement and OnceMemo slices", func(t *testing.T) {
+		orig := Fact{
+			Declares:         []string{"example.com/p.V"},
+			ReceiverReadOnly: []syntaxutil.FuncKey{{Pkg: "example.com/p", Name: "T.Get"}},
+			ReceiverReadOnlyDeps: []syntaxutil.FuncDepEdge{
+				{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "T.Get"}, Callee: syntaxutil.FuncKey{Pkg: "example.com/q", Name: "Sub.Read"}},
+			},
+			ReceiverReadOnlyParamDeps: []syntaxutil.FuncParamDepEdge{
+				{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "T.Get"}, Param: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/q", Name: "Inspect"}, Index: 0}},
+			},
+			ParamLeakFree: []syntaxutil.ParamKey{
+				{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Use"}, Index: 0},
+			},
+			ParamLeakFreeMethodDeps: []syntaxutil.ParamMethodDepEdge{
+				{Param: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Use"}, Index: 0}, Method: syntaxutil.FuncKey{Pkg: "example.com/q", Name: "Sub.Read"}},
+			},
+			EnvCallParamUses: []syntaxutil.EnvCallParamUse{
+				{Key: "example.com/p.V", Param: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/q", Name: "Inspect"}, Index: 0}, Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Reg"}},
+			},
+			EnvCallMethodUses: []syntaxutil.EnvCallMethodUse{
+				{Key: "example.com/p.V", Method: syntaxutil.FuncKey{Pkg: "example.com/q", Name: "Sub.Read"}, Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Reg"}},
+			},
+			ReturnEnvFree: []syntaxutil.FuncKey{{Pkg: "example.com/p", Name: "Make"}},
+			ReturnEnvParamDeps: []syntaxutil.FuncParamDepEdge{
+				{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Make"}, Param: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/q", Name: "Inspect"}, Index: 0}},
+			},
+			ReturnEnvMethodDeps: []syntaxutil.FuncDepEdge{
+				{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Make"}, Callee: syntaxutil.FuncKey{Pkg: "example.com/q", Name: "Sub.Read"}},
+			},
+			ParamInsertionFree: []syntaxutil.ParamKey{
+				{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Fill"}, Index: 0},
+			},
+			ParamInsertionParamDeps: []syntaxutil.ParamDepEdge{
+				{Own: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Fill"}, Index: 0}, Dep: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/q", Name: "Inspect"}, Index: 0}},
+			},
+			ParamInsertionMethodDeps: []syntaxutil.ParamMethodDepEdge{
+				{Param: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Fill"}, Index: 0}, Method: syntaxutil.FuncKey{Pkg: "example.com/q", Name: "Sub.Read"}},
+			},
+			OnceMemoTypes: []syntaxutil.OnceMemoTypeFact{{
+				Type:           syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Memo"},
+				Constructors:   []syntaxutil.FuncKey{{Pkg: "example.com/p", Name: "NewMemo"}},
+				GuardTypes:     []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "Memo"}, {Pkg: "example.com/p", Name: "Doc"}},
+				InputParamDeps: []syntaxutil.ParamKey{{Func: syntaxutil.FuncKey{Pkg: "example.com/q", Name: "Inspect"}, Index: 0}},
+			}},
+			OnceMemoCandidates: []syntaxutil.OnceMemoVarCandidate{{
+				Key:         "example.com/p.V",
+				Type:        syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Memo"},
+				Constructor: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "NewMemo"},
+			}},
+			DirectVarWrites:  []string{"example.com/q.Other"},
+			NonMethodVarUses: []string{"example.com/q.Other"},
+		}
+		raw, err := json.Marshal(orig)
+		if err != nil {
+			t.Fatalf("json.Marshal(Fact): %v", err)
+		}
+		var decoded Fact
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatalf("json.Unmarshal(Fact): %v", err)
+		}
+		if !reflect.DeepEqual(orig, decoded) {
+			t.Fatalf("Fact JSON round-trip mismatch:\norig:    %+v\ndecoded: %+v", orig, decoded)
+		}
+	})
+
+	t.Run("malformed confinement and OnceMemo Fact fields fail closed", func(t *testing.T) {
+		meta := []GraphPackage{{ImportPath: "example.com/p", PkgPath: "example.com/p", Class: MutableLocalPackage}}
+		baseValid := func() Fact {
+			return Fact{
+				Declares: []string{"example.com/p.V"},
+				Mutates:  []string{"example.com/p.V"},
+				OnceMemoTypes: []syntaxutil.OnceMemoTypeFact{{
+					Type:         syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Memo"},
+					Constructors: []syntaxutil.FuncKey{{Pkg: "example.com/p", Name: "NewMemo"}},
+					GuardTypes:   []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "Memo"}},
+				}},
+				OnceMemoCandidates: []syntaxutil.OnceMemoVarCandidate{{
+					Key:         "example.com/p.V",
+					Type:        syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Memo"},
+					Constructor: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "NewMemo"},
+				}},
+			}
+		}
+		if clean := Compose(meta, map[string][]Fact{"example.com/p": {baseValid()}}, "example.com/p", nil, false, false); clean.Downgraded != "" {
+			t.Fatalf("baseline OnceMemo discharge unexpectedly downgraded: %+v", clean)
+		}
+
+		for name, corrupt := range map[string]func(*Fact){
+			"ReceiverReadOnlyDeps": func(f *Fact) {
+				f.ReceiverReadOnlyDeps = []syntaxutil.FuncDepEdge{{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Memo.Get"}}}
+			},
+			"ReceiverReadOnlyParamDeps": func(f *Fact) {
+				f.ReceiverReadOnlyParamDeps = []syntaxutil.FuncParamDepEdge{{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Memo.Get"}}}
+			},
+			"ParamLeakFreeMethodDeps": func(f *Fact) {
+				f.ParamLeakFreeMethodDeps = []syntaxutil.ParamMethodDepEdge{{Param: syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Fn"}, Index: 0}}}
+			},
+			"EnvCallParamUses": func(f *Fact) {
+				f.EnvCallParamUses = []syntaxutil.EnvCallParamUse{{Key: "example.com/p.V"}}
+			},
+			"EnvCallMethodUses": func(f *Fact) {
+				f.EnvCallMethodUses = []syntaxutil.EnvCallMethodUse{{Key: "example.com/p.V"}}
+			},
+			"ReturnEnvParamDeps": func(f *Fact) {
+				f.ReturnEnvFree = []syntaxutil.FuncKey{{Pkg: "example.com/p", Name: "Gen"}}
+				f.ReturnEnvParamDeps = []syntaxutil.FuncParamDepEdge{{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Gen"}}}
+			},
+			"ReturnEnvMethodDeps": func(f *Fact) {
+				f.ReturnEnvFree = []syntaxutil.FuncKey{{Pkg: "example.com/p", Name: "Gen"}}
+				f.ReturnEnvMethodDeps = []syntaxutil.FuncDepEdge{{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Gen"}}}
+			},
+			"ParamInsertionParamDeps": func(f *Fact) {
+				pk := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Ins"}, Index: 0}
+				f.ParamInsertionFree = []syntaxutil.ParamKey{pk}
+				f.ParamInsertionParamDeps = []syntaxutil.ParamDepEdge{{Own: pk}}
+			},
+			"ParamInsertionMethodDeps": func(f *Fact) {
+				pk := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/p", Name: "Ins"}, Index: 0}
+				f.ParamInsertionFree = []syntaxutil.ParamKey{pk}
+				f.ParamInsertionMethodDeps = []syntaxutil.ParamMethodDepEdge{{Param: pk}}
+			},
+			"OnceMemoTypes missing self guard": func(f *Fact) {
+				f.OnceMemoTypes[0].GuardTypes = []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "Other"}}
+			},
+			"OnceMemoTypes foreign ctor": func(f *Fact) {
+				f.OnceMemoTypes[0].Constructors = []syntaxutil.FuncKey{{Pkg: "example.com/q", Name: "NewMemo"}}
+			},
+			"OnceMemoTypes wrong pkg": func(f *Fact) {
+				f.OnceMemoTypes[0].Type = syntaxutil.TypeRef{Pkg: "example.com/q", Name: "Memo"}
+				f.OnceMemoTypes[0].Constructors = []syntaxutil.FuncKey{{Pkg: "example.com/q", Name: "NewMemo"}}
+				f.OnceMemoTypes[0].GuardTypes = []syntaxutil.TypeRef{{Pkg: "example.com/q", Name: "Memo"}}
+			},
+			"OnceMemoCandidates foreign var key": func(f *Fact) {
+				f.OnceMemoCandidates[0].Key = "example.com/q.V"
+			},
+			"DirectVarWrites unqualified": func(f *Fact) {
+				f.DirectVarWrites = []string{"not-qualified"}
+			},
+			"NonMethodVarUses unqualified": func(f *Fact) {
+				f.NonMethodVarUses = []string{"not-qualified"}
+			},
+		} {
+			bad := baseValid()
+			corrupt(&bad)
+			st := Compose(meta, map[string][]Fact{"example.com/p": {bad}}, "example.com/p", nil, false, false)
+			if st.Downgraded == "" {
+				t.Fatalf("%s: malformed Fact failed to poison Compose (got %+v)", name, st)
+			}
+		}
+	})
+
+	t.Run("onceFill receiver confinement and OnceMemoType soundness guards", func(t *testing.T) {
+		// 1. onceFill must reject non-IIFE call results, receiver-aliased composite interior writes,
+		// and scalar writes to cold-read/exported fields on *T.
+		_, _, leakFacts := mustTypecheckOrderedDAG(t, []orderedPkgSpec{{
+			pkgPath: "example.com/onceguard",
+			src: `package onceguard
+
+import "sync"
+
+var sharedVals = []int{1, 2}
+func leakVals() []int { return sharedVals }
+
+type CallCache struct {
+	once sync.Once
+	vals []int
+}
+
+func (c *CallCache) Get() int {
+	c.once.Do(func() { c.vals = leakVals() })
+	return c.vals[0]
+}
+
+type Holder struct {
+	once   sync.Once
+	Shared [][]int
+	memo   [][][]int
+}
+
+func NewAliasedHolder(ext [][]int) *Holder {
+	return &Holder{Shared: ext}
+}
+
+func (h *Holder) Mutate() {
+	h.once.Do(func() {
+		h.memo = [][][]int{h.Shared}
+		s := h.memo[0]
+		s[0] = []int{999}
+	})
+}
+
+type Counter struct {
+	once sync.Once
+	N    int
+}
+
+func (c *Counter) Peek() int { return c.N }
+func (c *Counter) Bump()     { c.once.Do(func() { c.N++ }) }
+
+type MixedAlias struct {
+	once    sync.Once
+	Aliased []int
+	m       []int
+}
+
+var _ = &MixedAlias{m: []int{0}}
+
+func (m *MixedAlias) Mutate() {
+	m.once.Do(func() {
+		s := m.m
+		s = m.Aliased
+		s[0] = 9
+	})
+}
+
+type NonZeroNested struct {
+	once sync.Once
+	m    [][]int
+}
+
+var _ = &NonZeroNested{m: [][]int{{0}}}
+
+func (n *NonZeroNested) Mutate() {
+	n.once.Do(func() {
+		n.m[0] = []int{1}
+	})
+}
+
+var globalSlices = [][]int{{10, 20}}
+
+type GlobalSmuggler struct {
+	once sync.Once
+	m    [][][]int
+}
+
+func (g *GlobalSmuggler) Mutate() {
+	g.once.Do(func() {
+		buf := make([][]int, 1)
+		copy(buf, globalSlices)
+		g.m = [][][]int{buf}
+		alias := g.m[0][0]
+		alias[0] = 999
+	})
+}
+
+type CopyWholeFillSmuggler struct {
+	once sync.Once
+	m    [][]int
+}
+
+func (c *CopyWholeFillSmuggler) Get() int {
+	c.once.Do(func() {
+		buf := make([][]int, 1)
+		copy(buf, globalSlices)
+		c.m = buf
+	})
+	return len(c.m)
+}
+
+func voidFillGlobal(dst [][]int) {
+	dst[0] = globalSlices[0]
+}
+
+type VoidHelperSmuggler struct {
+	once sync.Once
+	m    [][]int
+}
+
+func (v *VoidHelperSmuggler) Mutate() {
+	v.once.Do(func() {
+		buf := make([][]int, 1)
+		voidFillGlobal(buf)
+		v.m = buf
+	})
+}
+
+var publishedBuf []int
+
+type GlobalEscapeOnce struct {
+	once sync.Once
+	m    []int
+}
+
+func (g *GlobalEscapeOnce) Get() int {
+	g.once.Do(func() {
+		buf := make([]int, 1)
+		g.m = buf
+		publishedBuf = buf
+	})
+	return g.m[0]
+}
+
+type GoroutineEscapeOnce struct {
+	once sync.Once
+	m    []int
+}
+
+func (g *GoroutineEscapeOnce) Get() int {
+	g.once.Do(func() {
+		buf := make([]int, 1)
+		g.m = buf
+		go func() { buf[0] = 99 }()
+	})
+	return g.m[0]
+}
+
+var publishedNested [][]int
+func saveNested(x [][]int) { publishedNested = x }
+
+type CompositeArgEscapeOnce struct {
+	once sync.Once
+	m    []int
+}
+
+func (g *CompositeArgEscapeOnce) Get() int {
+	g.once.Do(func() {
+		buf := make([]int, 1)
+		g.m = buf
+		saveNested([][]int{buf})
+	})
+	return g.m[0]
+}
+
+var publishedFn func()
+
+type ClosureVarEscapeOnce struct {
+	once sync.Once
+	m    []int
+}
+
+func (g *ClosureVarEscapeOnce) Get() int {
+	g.once.Do(func() {
+		buf := make([]int, 1)
+		g.m = buf
+		fn := func() { buf[0]++ }
+		publishedFn = fn
+	})
+	return g.m[0]
+}
+
+type ScalarCellClosureEscapeOnce struct {
+	once sync.Once
+	p    *int
+}
+
+func (g *ScalarCellClosureEscapeOnce) Get() int {
+	g.once.Do(func() {
+		x := 0
+		g.p = &x
+		fn := func() { x++ }
+		publishedFn = fn
+	})
+	return *g.p
+}
+
+type pubBox struct{ s []int }
+func (p *pubBox) Publish() { publishedBuf = p.s }
+
+type MethodValEscapeOnce struct {
+	once sync.Once
+	m    []int
+}
+
+func (g *MethodValEscapeOnce) Get() int {
+	g.once.Do(func() {
+		buf := make([]int, 1)
+		g.m = buf
+		b := &pubBox{s: buf}
+		mv := b.Publish
+		mv()
+	})
+	return g.m[0]
+}
+
+type DirectMethodValCallEscapeOnce struct {
+	once sync.Once
+	m    []int
+}
+
+func (g *DirectMethodValCallEscapeOnce) Get() int {
+	g.once.Do(func() {
+		buf := make([]int, 1)
+		g.m = buf
+		b := &pubBox{s: buf}
+		([1]func(){b.Publish}[0])()
+	})
+	return g.m[0]
+}
+
+type AutoAddrMethodEscapeOnce struct {
+	once sync.Once
+	m    []int
+}
+
+func (g *AutoAddrMethodEscapeOnce) Get() int {
+	g.once.Do(func() {
+		buf := make([]int, 1)
+		g.m = buf
+		var b pubBox
+		b.s = buf
+		b.Publish()
+	})
+	return g.m[0]
+}
+`,
+		}})
+		ro := leakFacts["example.com/onceguard"][0].ReceiverReadOnly
+		for _, forbidden := range []string{
+			"CallCache.Get",
+			"Holder.Mutate",
+			"Counter.Bump",
+			"MixedAlias.Mutate",
+			"NonZeroNested.Mutate",
+			"GlobalSmuggler.Mutate",
+			"CopyWholeFillSmuggler.Get",
+			"VoidHelperSmuggler.Mutate",
+			"GlobalEscapeOnce.Get",
+			"GoroutineEscapeOnce.Get",
+			"CompositeArgEscapeOnce.Get",
+			"ClosureVarEscapeOnce.Get",
+			"ScalarCellClosureEscapeOnce.Get",
+			"MethodValEscapeOnce.Get",
+			"DirectMethodValCallEscapeOnce.Get",
+			"AutoAddrMethodEscapeOnce.Get",
+		} {
+			if slices.Contains(ro, syntaxutil.FuncKey{Pkg: "example.com/onceguard", Name: forbidden}) {
+				t.Fatalf("%s unexpectedly proved ReceiverReadOnly: %+v", forbidden, ro)
+			}
+		}
+
+		// 2. OnceMemoType must reject ValConvert constructor smuggling, concrete-to-error conversions,
+		// non-memo getter returns, unguarded/stateful sibling methods, and method-expression ParamKey collisions.
+		for name, badMemoSrc := range map[string]string{
+			"ctor ValConvert smuggling": strings.Replace(
+				guidanceSrc,
+				`func Embed(tool string, src []byte) *Embedded {
+	return &Embedded{tool: tool, src: src}
+}`,
+				`var leakedSrc []byte
+func steal(b []byte) int { leakedSrc = b; return 65 }
+func Embed(tool string, src []byte) *Embedded {
+	return &Embedded{tool: string(steal(src)), src: src}
+}`,
+				1,
+			),
+			"concrete custom error helper": strings.Replace(
+				guidanceSrc,
+				`return nil, fmt.Errorf("guidance: missing title, got %q", p.head())`,
+				`return nil, makeCustomErr()`,
+				1,
+			) + `
+type customErr struct{ calls int }
+func (e *customErr) Error() string { e.calls++; return "custom" }
+func makeCustomErr() *customErr { return &customErr{} }
+`,
+			"getter non-memo return": strings.Replace(
+				guidanceSrc,
+				`func (e *Embedded) Document() (*Document, error) {
+	e.once.Do(func() { e.doc, e.err = Parse(e.src) })
+	return e.doc, e.err
+}`,
+				`func (e *Embedded) Document() (*Document, error) {
+	e.once.Do(func() { e.doc, e.err = Parse(e.src) })
+	return e.doc, nil
+}`,
+				1,
+			),
+			"sibling method unguarded global return": guidanceSrc + `
+type Rogue struct{ X int }
+var sharedRogue = &Rogue{X: 1}
+func (e *Embedded) LeakRogue() *Rogue { return sharedRogue }
+`,
+			"sibling method stateful error return": guidanceSrc + `
+type sibErr struct{ n int }
+func (e *sibErr) Error() string { e.n++; return "sib" }
+func (e *Embedded) BadErr() error { return &sibErr{} }
+`,
+			"sibling method stateful error panic": guidanceSrc + `
+type panicErr struct{ n int }
+func (e *panicErr) Error() string { e.n++; return "panic" }
+func (e *Embedded) BadPanic() Knob {
+	panic(error(&panicErr{}))
+}
+`,
+			"cone helper error param pass-through": strings.Replace(
+				guidanceSrc,
+				`e.once.Do(func() { e.doc, e.err = Parse(e.src) })`,
+				`e.once.Do(func() { e.doc, e.err = Parse(e.src); e.err = idErr(&statefulConeErr{}) })`,
+				1,
+			) + `
+type statefulConeErr struct{ n int }
+func (e *statefulConeErr) Error() string { e.n++; return "cone" }
+func idErr(err error) error { return err }
+`,
+			"exported sibling error param sink": guidanceSrc + `
+func (e *Embedded) ExportedSink(err error) string { return err.Error() }
+`,
+			"internal sibling error param passed stateful error": guidanceSrc + `
+type statefulRefuseErr struct{ n int }
+func (e *statefulRefuseErr) Error() string { e.n++; return "refuse" }
+func (e *Embedded) BadRefuse() { e.refuse(error(&statefulRefuseErr{})) }
+`,
+			"discarded fmt.Errorf stateful error in err-free once.Do": `package guidance
+
+import (
+	"fmt"
+	"sync"
+)
+
+type Doc struct{ Title string }
+
+type ErrFreeMemo struct {
+	src  string
+	once sync.Once
+	doc  *Doc
+}
+
+func NewErrFreeMemo(src string) *ErrFreeMemo { return &ErrFreeMemo{src: src} }
+
+type strMutator struct{ out *string }
+
+func (s *strMutator) Error() string { *s.out = "mutated"; return "bad" }
+
+func (m *ErrFreeMemo) Doc() *Doc {
+	m.once.Do(func() {
+		title := m.src
+		_ = fmt.Errorf("%w", error(&strMutator{out: &title}))
+		m.doc = &Doc{Title: title}
+	})
+	return m.doc
+}
+`,
+			"inline error conversion Error() call in sibling": guidanceSrc + `
+type inlineMutErr struct{ n int }
+func (e *inlineMutErr) Error() string { e.n++; return "inline" }
+func (e *Embedded) BadInlineError() string { return (error(&inlineMutErr{})).Error() }
+`,
+			"sibling call passing stateful non-error interface": guidanceSrc + `
+type pureNode interface{ Eval() int }
+type statefulNode struct{ hits int }
+func (s *statefulNode) Eval() int { s.hits++; return s.hits }
+func (e *Embedded) EvalNode(n pureNode) int { return n.Eval() }
+func (e *Embedded) BadEval() int { return e.EvalNode(&statefulNode{}) }
+`,
+			"sibling method-expression call smuggling": guidanceSrc + `
+type pureRunnerNode interface{ Run() int }
+type mutRunnerNode struct{ hits int }
+func (m *mutRunnerNode) Run() int { m.hits++; return m.hits }
+type nodeRunner struct{}
+func (r *nodeRunner) Exec(n pureRunnerNode) int { return n.Run() }
+func (e *Embedded) BadMethodExpr() int {
+	return (*nodeRunner).Exec(&nodeRunner{}, &mutRunnerNode{})
+}
+`,
+			"once.Do range over channel": `package guidance
+
+import "sync"
+
+type Doc struct{ N int }
+
+type ChanMemo struct {
+	once sync.Once
+	doc  *Doc
+}
+
+func NewChanMemo() *ChanMemo { return &ChanMemo{} }
+
+func (m *ChanMemo) Doc() *Doc {
+	m.once.Do(func() {
+		var ch chan int
+		n := 0
+		for v := range ch {
+			n += v
+		}
+		m.doc = &Doc{N: n}
+	})
+	return m.doc
+}
+`,
+			"sibling non-nil pointer identity comparison": guidanceSrc + `
+func (e *Embedded) PtrEq() bool {
+	a, b := new(int), new(int)
+	return a == b
+}
+`,
+			"sibling method non-fresh slice return": guidanceSrc + `
+var settledGlobalNames = []string{"a", "b"}
+func (e *Embedded) SharedNames() []string { return settledGlobalNames }
+`,
+			"method-expression ParamKey collision": strings.Replace(
+				guidanceSrc,
+				`e.once.Do(func() { e.doc, e.err = Parse(e.src) })`,
+				`e.once.Do(func() { (*mutSink).Spy(&mutSink{}, e.src); e.doc, e.err = Parse(e.src) })`,
+				1,
+			) + `
+var leakedMethodExpr []byte
+func Spy(b []byte) int { return len(b) }
+type mutSink struct{}
+func (m *mutSink) Spy(b []byte) { leakedMethodExpr = b }
+`,
+		} {
+			_, _, badFacts := mustTypecheckOrderedDAG(t, []orderedPkgSpec{
+				{pkgPath: "example.com/tool/internal/guidance", src: badMemoSrc},
+			})
+			if len(badFacts["example.com/tool/internal/guidance"][0].OnceMemoTypes) != 0 {
+				t.Fatalf("%s: expected 0 OnceMemoTypes, got %+v", name, badFacts["example.com/tool/internal/guidance"][0].OnceMemoTypes)
+			}
+		}
+	})
+}
+
+func TestTupleCallUnpackingAndRetentionEscapeConfinement(t *testing.T) {
+	t.Run("multi-return tuple unpacking in once.Do and sibling receiver confinement", func(t *testing.T) {
+		_, _, facts := mustTypecheckOrderedDAG(t, []orderedPkgSpec{{
+			pkgPath: "example.com/tupleonce",
+			src: `package tupleonce
+
+import "sync"
+
+var publishedBuf []int
+var globalSlice = []int{0}
+var globalInt int
+
+func pairGlobal() (int, []int) { return 0, globalSlice }
+func slot() *[]int             { return &publishedBuf }
+
+type MultiReturnIIFE struct {
+	once sync.Once
+	m    []int
+}
+
+func (g *MultiReturnIIFE) Get() int {
+	g.once.Do(func() {
+		buf := make([]int, 1)
+		g.m = buf
+		func(a int, b []int) {
+			publishedBuf = b
+		}(func() (int, []int) {
+			return 0, buf
+		}())
+	})
+	return g.m[0]
+}
+
+type TupleFillSmuggler struct {
+	once sync.Once
+	m    []int
+}
+
+func (g *TupleFillSmuggler) Get() int {
+	g.once.Do(func() {
+		var x []int
+		func(a int, b []int) { x = b }(pairGlobal())
+		g.m = x
+	})
+	return g.m[0]
+}
+
+type TransientSlotEscapeOnce struct {
+	once sync.Once
+	m    []int
+}
+
+func (g *TransientSlotEscapeOnce) Get() int {
+	g.once.Do(func() {
+		buf := make([]int, 1)
+		g.m = buf
+		*slot() = buf
+	})
+	return g.m[0]
+}
+
+type TupleSibling struct {
+	s []int
+}
+
+func (r *TupleSibling) pair() (int, []int) { return 1, r.s }
+
+func (r *TupleSibling) LeakSecond() int {
+	return func(a int, b []int) int {
+		publishedBuf = b
+		return a
+	}(r.pair())
+}
+
+func (r *TupleSibling) LeakVariadicPack() int {
+	return func(a int, rest ...[]int) int {
+		publishedBuf = rest[0]
+		return a
+	}(r.pair())
+}
+
+func (r *TupleSibling) CleanLen() int {
+	return func(a int, b []int) int {
+		return a + len(b)
+	}(r.pair())
+}
+
+type CleanMultiReturnIIFE struct {
+	once sync.Once
+	m    []int
+}
+
+func (g *CleanMultiReturnIIFE) Get() int {
+	g.once.Do(func() {
+		buf := make([]int, 1)
+		g.m = buf
+		func(b []int, n int) {
+			b[0] = n
+			globalInt = n
+		}(func() ([]int, int) {
+			return buf, 7
+		}())
+	})
+	return g.m[0]
+}
+`,
+		}})
+		ro := facts["example.com/tupleonce"][0].ReceiverReadOnly
+		for _, forbidden := range []string{
+			"MultiReturnIIFE.Get",
+			"TupleFillSmuggler.Get",
+			"TransientSlotEscapeOnce.Get",
+			"TupleSibling.LeakSecond",
+			"TupleSibling.LeakVariadicPack",
+		} {
+			if slices.Contains(ro, syntaxutil.FuncKey{Pkg: "example.com/tupleonce", Name: forbidden}) {
+				t.Fatalf("%s unexpectedly proved ReceiverReadOnly: %+v", forbidden, ro)
+			}
+		}
+		for _, want := range []string{
+			"TupleSibling.CleanLen",
+			"CleanMultiReturnIIFE.Get",
+		} {
+			if !slices.Contains(ro, syntaxutil.FuncKey{Pkg: "example.com/tupleonce", Name: want}) {
+				t.Fatalf("%s failed to prove ReceiverReadOnly: %+v", want, ro)
+			}
+		}
+	})
+
+	t.Run("retention-free parameter and receiver proofs reject local buffer escapes", func(t *testing.T) {
+		meta, _, allFacts := mustTypecheckOrderedDAG(t, []orderedPkgSpec{{
+			pkgPath: "example.com/retescape",
+			src: `package retescape
+
+var publishedBuf []int
+var globalSlice = []int{1}
+var globalChan = make(chan []int, 1)
+
+func pairGlobal() (int, []int) { return 0, globalSlice }
+func slot() *[]int             { return &publishedBuf }
+
+type Holder struct {
+	f func() int
+	m []int
+}
+
+var DirtyG = &Holder{}
+var CleanG = &Holder{}
+
+func initPublishGlobal(h *Holder) {
+	buf := make([]int, 1)
+	h.m = buf
+	publishedBuf = buf
+}
+
+func initPublishOuter(h *Holder, out *[]int) {
+	buf := make([]int, 1)
+	h.m = buf
+	*out = buf
+}
+
+func initPublishReturn(h *Holder) []int {
+	buf := make([]int, 1)
+	h.m = buf
+	return buf
+}
+
+func initPublishNamedReturn(h *Holder) (out []int) {
+	buf := make([]int, 1)
+	h.m = buf
+	out = buf
+	return
+}
+
+func initPublishChan(h *Holder) {
+	buf := make([]int, 1)
+	h.m = buf
+	globalChan <- buf
+}
+
+func initPublishGoroutine(h *Holder) {
+	buf := make([]int, 1)
+	h.m = buf
+	go func() { buf[0] = 99 }()
+}
+
+func initPublishTransient(h *Holder) {
+	buf := make([]int, 1)
+	h.m = buf
+	*slot() = buf
+}
+
+func initPublishTupleIIFE(h *Holder) {
+	func(a int, b []int) {
+		_ = a
+		h.m = b
+	}(pairGlobal())
+}
+
+func (h *Holder) InitAndPublish() {
+	buf := make([]int, 1)
+	h.m = buf
+	publishedBuf = buf
+}
+
+func initClean(h *Holder) int {
+	buf := make([]int, 1)
+	buf[0] = 5
+	h.m = buf
+	return len(buf)
+}
+
+func init() {
+	initPublishGlobal(DirtyG)
+	_ = initClean(CleanG)
+}
+
+func (h *Holder) Len() int { return len(h.m) }
+
+func ReadDirty() int { return DirtyG.Len() }
+func ReadClean() int { return CleanG.Len() }
+`,
+		}})
+		fact := allFacts["example.com/retescape"][0]
+		for _, badFn := range []string{
+			"initPublishGlobal",
+			"initPublishOuter",
+			"initPublishReturn",
+			"initPublishNamedReturn",
+			"initPublishChan",
+			"initPublishGoroutine",
+			"initPublishTransient",
+			"initPublishTupleIIFE",
+		} {
+			pk := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/retescape", Name: badFn}, Index: 0}
+			if slices.Contains(fact.ParamRetentionFree, pk) || slices.Contains(fact.ParamLeakFree, pk) {
+				t.Fatalf("%s unexpectedly proved retention/leak-free: ret=%+v leak=%+v", badFn, fact.ParamRetentionFree, fact.ParamLeakFree)
+			}
+		}
+		if slices.Contains(fact.ReceiverRetentionFree, syntaxutil.FuncKey{Pkg: "example.com/retescape", Name: "Holder.InitAndPublish"}) {
+			t.Fatalf("Holder.InitAndPublish unexpectedly proved ReceiverRetentionFree: %+v", fact.ReceiverRetentionFree)
+		}
+		cleanPK := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/retescape", Name: "initClean"}, Index: 0}
+		if !slices.Contains(fact.ParamRetentionFree, cleanPK) {
+			t.Fatalf("initClean failed to prove ParamRetentionFree: %+v", fact.ParamRetentionFree)
+		}
+
+		cone := Compose(meta, allFacts, "example.com/retescape", nil, false, false)
+		hasDirtyCulprit := slices.ContainsFunc(cone.RootCulprits, func(c Culprit) bool {
+			return c.Key == "example.com/retescape.DirtyG"
+		})
+		if !hasDirtyCulprit {
+			t.Fatalf("expected DirtyG in RootCulprits when init helper publishes interior slice, got %+v", cone.RootCulprits)
+		}
+		hasCleanCulprit := slices.ContainsFunc(cone.RootCulprits, func(c Culprit) bool {
+			return c.Key == "example.com/retescape.CleanG"
+		})
+		if hasCleanCulprit {
+			t.Fatalf("CleanG unexpectedly flagged in RootCulprits: %+v", cone.RootCulprits)
+		}
+	})
 }

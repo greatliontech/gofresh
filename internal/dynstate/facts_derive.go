@@ -1,6 +1,7 @@
 package dynstate
 
 import (
+	"go/ast"
 	"go/types"
 	"slices"
 	"sort"
@@ -100,12 +101,7 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 		}
 	}
 	slices.SortFunc(fact.OpaqueDeps, syntaxutil.OpaqueDep.Compare)
-	readOnly := receiverReadOnlyMethods(audited, p, callIdx)
-	retentionMethods := receiverRetentionFreeMethods(audited, p, readOnly)
-	var paramLeakFree map[syntaxutil.ParamKey]bool
-	var paramDeps map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool
-	var paramRetention map[syntaxutil.ParamKey]bool
-	var paramRetentionDeps map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool
+	var pkgConf packageConfinementSummary
 	var settledGlobals settledGlobalMap
 	var unattestedBroken map[string]bool
 	singleSubjectSet := map[string]bool{}
@@ -133,15 +129,31 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	}
 	if p.Types != nil {
 		pkgPath := p.Types.Path()
-		for method := range readOnly {
+		pkgConf = solvePackageConfinement(audited, p, callIdx)
+		for method := range pkgConf.readOnly {
 			fact.ReceiverReadOnly = append(fact.ReceiverReadOnly, syntaxutil.FuncKey{Pkg: pkgPath, Name: method})
 		}
 		slices.SortFunc(fact.ReceiverReadOnly, syntaxutil.FuncKey.Compare)
-		for method := range retentionMethods {
+		for method, deps := range pkgConf.readOnlyDeps {
+			fnKey := syntaxutil.FuncKey{Pkg: pkgPath, Name: method}
+			for callee := range deps {
+				fact.ReceiverReadOnlyDeps = append(fact.ReceiverReadOnlyDeps, syntaxutil.FuncDepEdge{Func: fnKey, Callee: callee})
+			}
+		}
+		slices.SortFunc(fact.ReceiverReadOnlyDeps, syntaxutil.FuncDepEdge.Compare)
+		for method, pdeps := range pkgConf.readOnlyParamDeps {
+			fnKey := syntaxutil.FuncKey{Pkg: pkgPath, Name: method}
+			for pk := range pdeps {
+				fact.ReceiverReadOnlyParamDeps = append(fact.ReceiverReadOnlyParamDeps, syntaxutil.FuncParamDepEdge{Func: fnKey, Param: pk})
+			}
+		}
+		slices.SortFunc(fact.ReceiverReadOnlyParamDeps, syntaxutil.FuncParamDepEdge.Compare)
+		for method := range pkgConf.retentionMethods {
 			fact.ReceiverRetentionFree = append(fact.ReceiverRetentionFree, syntaxutil.FuncKey{Pkg: pkgPath, Name: method})
 		}
 		slices.SortFunc(fact.ReceiverRetentionFree, syntaxutil.FuncKey.Compare)
-		paramLeakFree, paramDeps, paramRetention, paramRetentionDeps = paramLeakFreeFunctions(audited, p, readOnly, retentionMethods)
+		readOnly := pkgConf.readOnly
+		paramLeakFree := pkgConf.paramLeakFree
 		unattestedBroken = make(map[string]bool, len(mutated)+len(escaped)+len(poolMutated)+len(poolEscaped))
 		for k := range mutated {
 			unattestedBroken[k] = true
@@ -206,10 +218,12 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	envCarryingUnattr := map[string]bool{}
 	envCallableVars := map[string]bool{}
 	envCalls := map[syntaxutil.EnvCallUse]bool{}
+	envParamCalls := map[syntaxutil.EnvCallParamUse]bool{}
+	envMethodCalls := map[syntaxutil.EnvCallMethodUse]bool{}
 	regCarrierLinks := map[syntaxutil.CarrierLink]bool{}
 	fieldDefer := map[syntaxutil.FieldPosKey]map[syntaxutil.ParamKey]bool{}
 	fieldPoison := map[string]map[syntaxutil.FieldParamPoison]bool{}
-	recordEnvCarryingRegistrations(audited, p, idx, callIdx, initOnly, unattestedBroken, singleSubjectSet, settledGlobals, paramLeakFree, readOnly, seamAnalysis.Exempt, envCarrying, envCarryingFns, envCarryingUnattr, envCallableVars, envCalls, regCarrierLinks, fieldDefer, fieldPoison, hooks)
+	recordEnvCarryingRegistrations(audited, p, idx, callIdx, initOnly, unattestedBroken, singleSubjectSet, settledGlobals, &pkgConf, seamAnalysis.Exempt, envCarrying, envCarryingFns, envCarryingUnattr, envCallableVars, envCalls, envParamCalls, envMethodCalls, regCarrierLinks, fieldDefer, fieldPoison, hooks)
 	for pos, params := range fieldDefer {
 		for param := range params {
 			fact.FieldParamDefer = append(fact.FieldParamDefer, syntaxutil.FieldParamDefer{Pos: pos, Param: param})
@@ -258,6 +272,20 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 		fact.EnvCallUses = append(fact.EnvCallUses, use)
 	}
 	slices.SortFunc(fact.EnvCallUses, syntaxutil.EnvCallUse.Compare)
+	for use := range envParamCalls {
+		if !use.Func.IsZero() && envParamCalls[syntaxutil.EnvCallParamUse{Key: use.Key, Param: use.Param}] {
+			continue
+		}
+		fact.EnvCallParamUses = append(fact.EnvCallParamUses, use)
+	}
+	slices.SortFunc(fact.EnvCallParamUses, syntaxutil.EnvCallParamUse.Compare)
+	for use := range envMethodCalls {
+		if !use.Func.IsZero() && envMethodCalls[syntaxutil.EnvCallMethodUse{Key: use.Key, Method: use.Method}] {
+			continue
+		}
+		fact.EnvCallMethodUses = append(fact.EnvCallMethodUses, use)
+	}
+	slices.SortFunc(fact.EnvCallMethodUses, syntaxutil.EnvCallMethodUse.Compare)
 	fact.AttributedUses = append(fact.AttributedUses, attributedUses...)
 	slices.SortFunc(fact.AttributedUses, syntaxutil.AttributedUse.Compare)
 	fact.AttributedUses = slices.Compact(fact.AttributedUses)
@@ -274,33 +302,45 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	}
 	slices.SortFunc(fact.MethodUses, syntaxutil.VarMethodUse.Compare)
 	if p.Types != nil {
-		for paramKey := range paramLeakFree {
+		for paramKey := range pkgConf.paramLeakFree {
 			fact.ParamLeakFree = append(fact.ParamLeakFree, paramKey)
 		}
 		slices.SortFunc(fact.ParamLeakFree, syntaxutil.ParamKey.Compare)
-		for ownKey, edges := range paramDeps {
+		for ownKey, edges := range pkgConf.paramDeps {
 			for dep := range edges {
 				fact.ParamLeakFreeDeps = append(fact.ParamLeakFreeDeps, syntaxutil.ParamDepEdge{Own: ownKey, Dep: dep})
 			}
 		}
 		slices.SortFunc(fact.ParamLeakFreeDeps, syntaxutil.ParamDepEdge.Compare)
-		for paramKey := range paramRetention {
+		for ownKey, edges := range pkgConf.paramMethodDeps {
+			for mk := range edges {
+				fact.ParamLeakFreeMethodDeps = append(fact.ParamLeakFreeMethodDeps, syntaxutil.ParamMethodDepEdge{Param: ownKey, Method: mk})
+			}
+		}
+		slices.SortFunc(fact.ParamLeakFreeMethodDeps, syntaxutil.ParamMethodDepEdge.Compare)
+		for paramKey := range pkgConf.paramRetention {
 			fact.ParamRetentionFree = append(fact.ParamRetentionFree, paramKey)
 		}
 		slices.SortFunc(fact.ParamRetentionFree, syntaxutil.ParamKey.Compare)
-		for ownKey, edges := range paramRetentionDeps {
+		for ownKey, edges := range pkgConf.paramRetDeps {
 			for dep := range edges {
 				fact.ParamRetentionFreeDeps = append(fact.ParamRetentionFreeDeps, syntaxutil.ParamDepEdge{Own: ownKey, Dep: dep})
 			}
 		}
 		slices.SortFunc(fact.ParamRetentionFreeDeps, syntaxutil.ParamDepEdge.Compare)
-		envFree, envDeps, retFieldDefer, retFieldPoison, insFree, insDeps, callerInsDeps := returnEnvFreeFunctions(audited, p, settledGlobals, paramLeakFree, readOnly, hooks)
+		envFree, envDeps, retParamDeps, retMethodDeps, retFieldDefer, retFieldPoison, insFree, insDeps, insParamDeps, insMethodDeps, callerInsDeps := returnEnvFreeFunctions(audited, p, settledGlobals, &pkgConf, hooks)
 		pkgPath := p.Types.Path()
 		for fnName := range envFree {
 			fnKey := syntaxutil.FuncKey{Pkg: pkgPath, Name: fnName}
 			fact.ReturnEnvFree = append(fact.ReturnEnvFree, fnKey)
 			for callee := range envDeps[fnName] {
 				fact.ReturnEnvDeps = append(fact.ReturnEnvDeps, syntaxutil.FuncDepEdge{Func: fnKey, Callee: callee})
+			}
+			for pk := range retParamDeps[fnName] {
+				fact.ReturnEnvParamDeps = append(fact.ReturnEnvParamDeps, syntaxutil.FuncParamDepEdge{Func: fnKey, Param: pk})
+			}
+			for mk := range retMethodDeps[fnName] {
+				fact.ReturnEnvMethodDeps = append(fact.ReturnEnvMethodDeps, syntaxutil.FuncDepEdge{Func: fnKey, Callee: mk})
 			}
 			for dep := range callerInsDeps[fnName] {
 				fact.ReturnEnvInsertionDeps = append(fact.ReturnEnvInsertionDeps, syntaxutil.FuncInsertionDepEdge{Func: fnKey, Dep: dep})
@@ -314,6 +354,8 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 		}
 		slices.SortFunc(fact.ReturnEnvFree, syntaxutil.FuncKey.Compare)
 		slices.SortFunc(fact.ReturnEnvDeps, syntaxutil.FuncDepEdge.Compare)
+		slices.SortFunc(fact.ReturnEnvParamDeps, syntaxutil.FuncParamDepEdge.Compare)
+		slices.SortFunc(fact.ReturnEnvMethodDeps, syntaxutil.FuncDepEdge.Compare)
 		slices.SortFunc(fact.ReturnEnvInsertionDeps, syntaxutil.FuncInsertionDepEdge.Compare)
 		slices.SortFunc(fact.ReturnFieldParamDefer, syntaxutil.ReturnFieldParamDefer.Compare)
 		slices.SortFunc(fact.ReturnFieldParamPoison, syntaxutil.ReturnFieldParamPoison.Compare)
@@ -322,9 +364,17 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 			for dep := range insDeps[ownKey] {
 				fact.ParamInsertionDeps = append(fact.ParamInsertionDeps, syntaxutil.ParamInsertionDepEdge{Param: ownKey, Dep: dep})
 			}
+			for pk := range insParamDeps[ownKey] {
+				fact.ParamInsertionParamDeps = append(fact.ParamInsertionParamDeps, syntaxutil.ParamDepEdge{Own: ownKey, Dep: pk})
+			}
+			for mk := range insMethodDeps[ownKey] {
+				fact.ParamInsertionMethodDeps = append(fact.ParamInsertionMethodDeps, syntaxutil.ParamMethodDepEdge{Param: ownKey, Method: mk})
+			}
 		}
 		slices.SortFunc(fact.ParamInsertionFree, syntaxutil.ParamKey.Compare)
 		slices.SortFunc(fact.ParamInsertionDeps, syntaxutil.ParamInsertionDepEdge.Compare)
+		slices.SortFunc(fact.ParamInsertionParamDeps, syntaxutil.ParamDepEdge.Compare)
+		slices.SortFunc(fact.ParamInsertionMethodDeps, syntaxutil.ParamMethodDepEdge.Compare)
 	}
 	for varKey, paramKeys := range paramUses {
 		for paramKey := range paramKeys {
@@ -384,11 +434,15 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	recordPackageMethodDirectives(p, &fact)
 	if idx != nil {
 		fact.DirectVarWrites = protoaudit.CollectDirectCrossPkgVarWrites(audited, p, idx)
+		fact.NonMethodVarUses = protoaudit.CollectNonMethodCrossPkgVarUses(audited, p, idx)
 	}
 	if p.Types != nil && p.Module != nil {
 		if idx != nil {
 			fact.MappingDischarges = deriveMappingDischarges(audited, p, idx)
 			fact.MemoDischarges = deriveMemoDischarges(audited, p, idx)
+			var onceMemoExempt map[ast.Node]bool
+			fact.OnceMemoTypes, onceMemoExempt = deriveOnceMemoTypes(audited, p, idx, &pkgConf)
+			fact.OnceMemoCandidates = deriveOnceMemoCandidates(audited, p, idx, singleSubjectSet)
 			if len(fact.Declares) > 0 && propharness.IsHarnessPath(p.PkgPath) && propharness.VerifyPackage(audited, p) {
 				fact.HarnessDischarges = slices.Clone(fact.Declares)
 			}
@@ -400,7 +454,7 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 				unattestedMutated[key] = true
 			}
 			fact.ProtoClusters, fact.ProtoExtAliases, fact.ProtoRuntimeTypes, fact.GrpcServiceVars, fact.MutatedStructTypes, fact.ConditionalStructMutations =
-				protoaudit.DeriveProtoAndStructFacts(audited, p, idx, initOnly, unattestedMutated)
+				protoaudit.DeriveProtoAndStructFacts(audited, p, idx, initOnly, unattestedMutated, onceMemoExempt)
 			fact.NonMutatingMethods = protoaudit.DeriveNonMutatingMethods(audited, p, idx)
 			fact.NoPostInitCarrierWrites, fact.CarrierImportCalls =
 				protoaudit.DeriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
