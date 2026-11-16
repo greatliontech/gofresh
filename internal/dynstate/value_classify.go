@@ -13,15 +13,14 @@ import (
 // once-field initialization, and memoizer input checking evaluate one structural
 // tree walker without Raw AST back-edges.
 type valuePurityPolicy struct {
-	allowVar                    func(*types.Var) bool
-	allowPlace                  func(*flowir.Value) bool
-	allowAppend                 bool
-	allowValuePlane             bool
-	allowRuntimeOps             bool
-	allowTypeAssert             bool
-	allowNonMutableReach        bool
-	forbidStringNonMutableReach bool
-	allowSigLeaf                func(*flowir.Value) bool
+	allowVar             func(*types.Var) bool
+	allowPlace           func(*flowir.Value) bool
+	allowAppend          bool
+	allowValuePlane      bool
+	allowRuntimeOps      bool
+	allowTypeAssert      bool
+	allowNonMutableReach bool
+	allowSigLeaf         func(*flowir.Value) bool
 }
 
 func isPureFreshDataValue(settledGlobals settledGlobalMap, v *flowir.Value) bool {
@@ -50,8 +49,7 @@ func checkPureOrFreshValue(v *flowir.Value, pol valuePurityPolicy) bool {
 	}
 	if pol.allowNonMutableReach {
 		if !refconfine.TypeHandsOutMutableReach(v.Type) &&
-			!syntaxutil.ContainsUintptr(v.Type) &&
-			!(pol.forbidStringNonMutableReach && syntaxutil.TypeReachesString(v.Type)) {
+			!syntaxutil.ContainsUintptr(v.Type) {
 			if refconfine.TypeCarriesSignature(v.Type) {
 				return pol.allowSigLeaf != nil && pol.allowSigLeaf(v)
 			}

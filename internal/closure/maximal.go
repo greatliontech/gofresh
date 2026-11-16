@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/trace"
@@ -375,7 +376,7 @@ func (h *Hasher) maximalFileEffectsCachedWithContext(pkgPath, path string, decla
 		if err != nil {
 			return maximalEffectScan{}, err
 		}
-		scan := maximalFileEffectsParsed(h.SelectionAudited(), parsed, nonStdPaths, nil, nil, "", nil, nil, nil, nil)
+		scan := maximalFileEffectsParsed(h.SelectionAudited(), parsed, nonStdPaths, nil, nil, "", nil, nil, nil, nil, false)
 		h.maximalFiles[cacheKey] = scan
 		return scan, nil
 	}
@@ -396,7 +397,7 @@ func (h *Hasher) maximalFileEffectsCachedWithContext(pkgPath, path string, decla
 	if err != nil {
 		return maximalEffectScan{}, err
 	}
-	scan := maximalFileEffectsParsed(h.SelectionAudited(), parsed, nonStdPaths, nil, nil, "", nil, nil, nil, nil)
+	scan := maximalFileEffectsParsed(h.SelectionAudited(), parsed, nonStdPaths, nil, nil, "", nil, nil, nil, nil, false)
 	h.recordFileScan(dir, digestKey, scan)
 	h.maximalFiles[cacheKey] = scan
 	return scan, nil
@@ -693,10 +694,10 @@ func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, con
 	if err != nil {
 		return maximalEffectScan{}, err
 	}
-	return maximalFileEffectsParsed(audited, parsed, nonStdPaths, reachedDecls, startupOnlyDecls, filePkgPath, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals), nil
+	return maximalFileEffectsParsed(audited, parsed, nonStdPaths, reachedDecls, startupOnlyDecls, filePkgPath, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals, false), nil
 }
 
-func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPaths map[string]bool, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, filePkgPath string, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed, verifiedLinknameLocals map[string]bool) maximalEffectScan {
+func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPaths map[string]bool, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, filePkgPath string, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed, verifiedLinknameLocals map[string]bool, pkgConfinedUnsafe bool) maximalEffectScan {
 	file := parsed.file
 	text := parsed.text
 	hasWasmImport := parsed.hasWasmImport
@@ -783,7 +784,7 @@ func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPat
 		return false
 	}
 	addSelEffect := func(sel *ast.SelectorExpr, effect externalEffect) {
-		if (inUnreachedDecl(sel) || inDeadForSubjectBody(sel)) && !packageWideMaximalHazard(effect) {
+		if (inUnreachedDecl(sel) || inDeadForSubjectBody(sel)) && !packageWideMaximalHazardForPkg(effect, pkgConfinedUnsafe) {
 			return
 		}
 		scan.add(effect)
@@ -813,6 +814,13 @@ func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPat
 					addSelEffect(sel, effect)
 				} else if pkgPath == "os" && sel.Sel.Name == "Exit" && inTestMain(sel) {
 					// admitted test-main epilogue
+				} else if isCompileTimeUnsafeIntrinsic(pkgPath, sel.Sel.Name) {
+					// Go language compile-time layout intrinsics (unsafe.Alignof,
+					// unsafe.Offsetof, unsafe.Sizeof) evaluate strictly to compile-time
+					// uintptr constants determined by (MaximalClosure, Toolchain,
+					// BuildConfig) without executing runtime code or dereferencing
+					// runtime memory; operand syntax continues to be walked below
+					// (REQ-closure-observability-unsafe).
 				} else if flagRegistrationSymbol(pkgPath, sel.Sel.Name) {
 					// flag registration is a process-local registry
 					// mutation; the name-based admission is sound
@@ -846,6 +854,10 @@ func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPat
 		scan.preferred = "reaches " + potentialExternal + " (potential external dependence)"
 	}
 	return scan
+}
+
+func isCompileTimeUnsafeIntrinsic(pkgPath, name string) bool {
+	return pkgPath == "unsafe" && refconfine.IsCompileTimeUnsafeBuiltinName(name)
 }
 
 func hasPkgZeroGlobals(zeroGlobalDecls map[pkgVarKey]bool, pkgPath string) bool {
@@ -1248,6 +1260,7 @@ func (h *Hasher) subjectMaximalExternalEffectsWithZeroGlobals(base *tier2Base, p
 		record(h.tier2PackageExternalEffects(base, &pkg, reachedDecls != nil))
 		pkgScopeShadowed := pkgScopeShadowedUniverseZeroNames(base, srcPath)
 		verifiedLinknameLocals := base.verifiedReadOnlyLinknameLocals(srcPath)
+		pkgConfinedUnsafe := reachedDecls != nil && base.pkgConfinedUnsafe(pkg.ImportPath, srcPath)
 		files := append(append([]string(nil), pkg.GoFiles...), pkg.CgoFiles...)
 		for _, name := range files {
 			if err := h.contextErr(); err != nil {
@@ -1277,7 +1290,7 @@ func (h *Hasher) subjectMaximalExternalEffectsWithZeroGlobals(base *tier2Base, p
 			if err != nil {
 				return nil, err
 			}
-			scan := maximalFileEffectsParsed(h.SelectionAudited(), parsed, nonStdPaths, reachedDecls, startupOnlyDecls, srcPath, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals)
+			scan := maximalFileEffectsParsed(h.SelectionAudited(), parsed, nonStdPaths, reachedDecls, startupOnlyDecls, srcPath, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals, pkgConfinedUnsafe)
 			record(scan)
 		}
 	}

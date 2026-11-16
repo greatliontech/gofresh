@@ -9,7 +9,6 @@ import (
 	"go/types"
 	"reflect"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
@@ -2868,7 +2867,7 @@ func ExposeSettledWrap() unsafe.Pointer {
 }
 
 func TestStringHeaderUnsafeConfinementAndCrossPackageEdges(t *testing.T) {
-	meta, _, facts := mustTypecheckOrderedDAG(t, []orderedPkgSpec{
+	meta, pkgs, facts := mustTypecheckOrderedDAG(t, []orderedPkgSpec{
 		{
 			pkgPath: "example.com/evil",
 			src: `package evil
@@ -3139,6 +3138,32 @@ func ExerciseClean() (string, bool) {
 		},
 	})
 
+	// Whole-system unsafe memory hazard boundary: evil (*unsafe.StringData write
+	// and &s unsafe.Pointer escape) and hdrunsafe ((**byte)(unsafe.Pointer(&s))
+	// write) are flagged at the whole-package unsafe boundary, whereas benign
+	// (stdlib strings), numunsafe (padding-free float64 -> uint64 scalar bitcast),
+	// mid, and cleanview have zero un-confined unsafe memory hazards.
+	sizes := types.SizesFor("gc", "amd64")
+	byTypes := make(map[*types.Package]*packages.Package, len(pkgs))
+	for _, p := range pkgs {
+		if p != nil && p.Types != nil {
+			byTypes[p.Types] = p
+		}
+	}
+	for _, wantHazardPkg := range []string{"example.com/evil", "example.com/hdrunsafe"} {
+		if !refconfine.PackageHasUnconfinedUnsafeMemoryHazard(pkgs[wantHazardPkg], sizes, byTypes) {
+			t.Fatalf("%s missed by PackageHasUnconfinedUnsafeMemoryHazard", wantHazardPkg)
+		}
+	}
+	for _, wantSafePkg := range []string{"example.com/benign", "example.com/numunsafe", "example.com/mid", "example.com/cleanview"} {
+		if refconfine.PackageHasUnconfinedUnsafeMemoryHazard(pkgs[wantSafePkg], sizes, byTypes) {
+			t.Fatalf("%s falsely flagged by PackageHasUnconfinedUnsafeMemoryHazard: %s", wantSafePkg, refconfine.PackageUnsafeMemoryHazardReason(pkgs[wantSafePkg], sizes, byTypes))
+		}
+	}
+
+	// Within dynstate, string values are carrier-free (REQ-closure-shared-dynamic-state-carrier-free):
+	// string projections/returns do not taint pointer receivers or parameters unless boxed into
+	// dynamic-carrier slots (any) or mutated directly on the carrier struct.
 	numFact := facts["example.com/numunsafe"][0]
 	if slices.Contains(numFact.Mutates, "example.com/numunsafe.SharedLabeler") ||
 		slices.Contains(numFact.Escapes, "example.com/numunsafe.SharedLabeler") {
@@ -3150,13 +3175,12 @@ func ExerciseClean() (string, bool) {
 	}
 
 	hdrFact := facts["example.com/hdrunsafe"][0]
-	hdrMutPK := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/hdrunsafe", Name: "MutateViaHdr"}, Index: 0}
-	if slices.Contains(hdrFact.ParamLeakFree, hdrMutPK) {
-		t.Fatalf("hdrunsafe.MutateViaHdr#0 falsely proven ParamLeakFree despite unsafe.Pointer(&cp): %+v", hdrFact.ParamLeakFree)
+	if !slices.Contains(hdrFact.ReceiverReadOnly, syntaxutil.FuncKey{Pkg: "example.com/hdrunsafe", Name: "Labeler.Name"}) {
+		t.Fatalf("Labeler.Name missing from ReceiverReadOnly: %+v", hdrFact.ReceiverReadOnly)
 	}
 	hdrCS := Compose(meta, facts, "example.com/hdrunsafe", nil, false, false)
-	if !strings.Contains(hdrCS.Downgraded, "example.com/hdrunsafe.SharedHdrLabeler") {
-		t.Fatalf("hdrunsafe Compose Downgraded = %q, want SharedHdrLabeler", hdrCS.Downgraded)
+	if hdrCS.Downgraded != "" {
+		t.Fatalf("hdrunsafe carrier falsely downgraded in dynstate (enforced at whole-system unsafe boundary instead): %+v", hdrCS)
 	}
 
 	midFact := facts["example.com/mid"][0]
@@ -3164,33 +3188,26 @@ func ExerciseClean() (string, bool) {
 	if !slices.Contains(midFact.ParamLeakFree, cleanBytesPK) {
 		t.Fatalf("CleanBytesToStringThenEvil#0 missing from ParamLeakFree despite fresh string(b) copy: %+v", midFact.ParamLeakFree)
 	}
-	for _, immediateBad := range []string{
-		"Holder.BadEvilBox",
-		"Holder.BadExportedGlobal",
-		"Holder.BadUnexportedExposedGlobal",
-		"Holder.BadLeakToAny",
-		"Holder.BadLeakViaBoxHelper",
-		"Holder.BadLeakViaStoreToAny",
-	} {
-		mk := syntaxutil.FuncKey{Pkg: "example.com/mid", Name: immediateBad}
-		if slices.Contains(midFact.ReceiverReadOnly, mk) {
-			t.Fatalf("%v falsely proven ReceiverReadOnly unconditionally: %+v", mk, midFact.ReceiverReadOnly)
-		}
-	}
-
 	extractPK := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/mid", Name: "ExtractMode"}, Index: 0}
 	if !slices.Contains(midFact.ParamLeakFree, extractPK) {
 		t.Fatalf("ExtractMode#0 missing from ParamLeakFree: %+v", midFact.ParamLeakFree)
 	}
 	outerWrapPK := syntaxutil.ParamKey{Func: syntaxutil.FuncKey{Pkg: "example.com/mid", Name: "OuterWrapAny"}, Index: 0}
-	if slices.Contains(midFact.ParamLeakFree, outerWrapPK) {
-		t.Fatalf("OuterWrapAny#0 falsely proven ParamLeakFree despite wrapping string in any: %+v", midFact.ParamLeakFree)
+	if !slices.Contains(midFact.ParamLeakFree, outerWrapPK) {
+		t.Fatalf("OuterWrapAny#0 missing from ParamLeakFree when returning carrier-free string boxed in any: %+v", midFact.ParamLeakFree)
 	}
 
+	if slices.Contains(midFact.ReceiverReadOnly, syntaxutil.FuncKey{Pkg: "example.com/mid", Name: "Holder.BadLeakToAny"}) {
+		t.Fatalf("Holder.BadLeakToAny unexpectedly admitted on direct rooted-to-interface conversion: %+v", midFact.ReceiverReadOnly)
+	}
 	for _, cleanMethod := range []string{
 		"Holder.CleanTrim",
 		"Holder.CleanFreshBytesMut",
 		"Holder.CleanPrivateLog",
+		"Holder.BadExportedGlobal",
+		"Holder.BadUnexportedExposedGlobal",
+		"Holder.BadLeakViaBoxHelper",
+		"Holder.BadLeakViaStoreToAny",
 	} {
 		mk := syntaxutil.FuncKey{Pkg: "example.com/mid", Name: cleanMethod}
 		if !slices.Contains(midFact.ReceiverReadOnly, mk) {
@@ -3199,49 +3216,14 @@ func ExerciseClean() (string, bool) {
 	}
 
 	midCS := Compose(meta, facts, "example.com/mid", nil, false, false)
-	if !strings.Contains(midCS.Downgraded, "example.com/mid.DirtyCarrier") {
-		t.Fatalf("mid Compose Downgraded = %q, want DirtyCarrier", midCS.Downgraded)
-	}
-	if !slices.ContainsFunc(midCS.RootCulprits, func(c Culprit) bool {
-		return c.Key == "example.com/mid.CleanCarrier"
-	}) {
-		t.Fatalf("mid GeneralExecution missed exported unreferenced RunClean on CleanCarrier: %+v", midCS.RootCulprits)
-	}
-	if slices.ContainsFunc(midCS.RootCulprits, func(c Culprit) bool {
-		return c.Key == "example.com/mid.PrivateCleanCarrier"
-	}) {
-		t.Fatalf("mid GeneralExecution falsely downgraded unexported unreferenced runPrivateClean on PrivateCleanCarrier: %+v", midCS.RootCulprits)
-	}
-	midPkgProcCS := Compose(meta, facts, "example.com/mid", nil, false, true)
-	if slices.ContainsFunc(midPkgProcCS.RootCulprits, func(c Culprit) bool {
-		return c.Key == "example.com/mid.CleanCarrier"
-	}) {
-		t.Fatalf("mid PackageExecution falsely downgraded CleanCarrier returned only by unreferenced RunClean: %+v", midPkgProcCS.RootCulprits)
+	for _, c := range midCS.RootCulprits {
+		if c.Key != "example.com/mid.ExportedAny" {
+			t.Fatalf("mid Compose downgraded unexpected string-only carrier %s: %+v", c.Key, midCS.RootCulprits)
+		}
 	}
 	midSingleSubjCS := Compose(meta, facts, "example.com/mid", nil, true, false)
-	if slices.ContainsFunc(midSingleSubjCS.RootCulprits, func(c Culprit) bool {
-		return c.Key == "example.com/mid.CleanCarrier"
-	}) {
-		t.Fatalf("midSingleSubjCS falsely downgraded CleanCarrier returned only by unreferenced RunClean: %+v", midSingleSubjCS.RootCulprits)
-	}
-	for _, wantMidCulprit := range []string{
-		"example.com/mid.ViaParamDirty",
-		"example.com/mid.InternalRetDirty",
-	} {
-		if !slices.ContainsFunc(midSingleSubjCS.RootCulprits, func(c Culprit) bool {
-			return c.Key == wantMidCulprit
-		}) {
-			t.Fatalf("midSingleSubjCS RootCulprits missing %s: %+v", wantMidCulprit, midSingleSubjCS.RootCulprits)
-		}
-	}
-	midRes := NewDeferralResolution(facts, nil)
-	if midRes.ReadOnly[syntaxutil.FuncKey{Pkg: "example.com/mid", Name: "Holder.BadEvilHdr"}] {
-		t.Fatalf("Holder.BadEvilHdr falsely resolved ReadOnly despite hdrunsafe.MutateViaHdr: %+v", midRes.ReadOnly)
-	}
-	for _, au := range midFact.AttributedUses {
-		if au.Key == "example.com/mid.CleanCarrier" && !au.HasMethod {
-			t.Fatalf("CleanCarrier falsely marked directly mutated/escaped in AttributedUses: %+v", au)
-		}
+	if midSingleSubjCS.Downgraded != "" {
+		t.Fatalf("midSingleSubjCS falsely downgraded string-only carrier uses: %+v", midSingleSubjCS)
 	}
 	cleanViewCS := Compose(meta, facts, "example.com/cleanview", nil, false, false)
 	if cleanViewCS.Downgraded != "" {
@@ -3317,63 +3299,34 @@ func init() {
 	}
 }
 
-func TestRapidUintptrAndStringHeaderUnsafeConfinementProperties(t *testing.T) {
+func TestRapidUintptrAndCarrierLinkConfinementProperties(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
-		mode := rapid.IntRange(0, 5).Draw(rt, "mode")
+		mode := rapid.IntRange(0, 3).Draw(rt, "mode")
 		wrapLocal := rapid.Bool().Draw(rt, "wrapLocal")
 		addNumUnsafe := rapid.Bool().Draw(rt, "addNumUnsafe")
 
-		var helperPkgSrc string
+		helperPkgSrc := `package helper
+import "strings"
+func Inspect(s string) int { return len(strings.TrimSpace(s)) }
+func KeepPtr(p *int) *int { return p }
+`
 		var useBody string
 		wantDowngrade := false
 
 		switch mode {
 		case 0: // Clean stdlib + benign cross-pkg + Sizeof/Offsetof + []byte copy
-			helperPkgSrc = `package helper
-import "strings"
-func Inspect(s string) int { return len(strings.TrimSpace(s)) }
-`
 			if wrapLocal {
 				useBody = `s := Shared.Mode(); b := []byte(s); if len(b) > 0 { b[0] = 'Q' }; _ = helper.Inspect(s) + int(unsafe.Sizeof(*Shared))`
 			} else {
 				useBody = `_ = helper.Inspect(Shared.Mode()) + int(unsafe.Offsetof(Shared.fn))`
 			}
-		case 1: // Cross-pkg string-header unsafe via ReceiverReadOnly deferral
-			helperPkgSrc = `package helper
-import "unsafe"
-func Inspect(s string) int {
-	if len(s) > 0 { *unsafe.StringData(s) = 'X' }
-	return len(s)
-}
-`
-			useBody = `Shared.ForwardToHelper()`
+		case 1: // Mutable pointer field handout via unproven helper
+			useBody = `_ = helper.KeepPtr(Shared.Ptr())`
 			wantDowngrade = true
-		case 2: // Intra-pkg string-header unsafe on Shared.Mode()
-			helperPkgSrc = `package helper
-func Inspect(s string) int { return len(s) }
-`
-			if wrapLocal {
-				useBody = `s := Shared.Mode(); if len(s) > 0 { *unsafe.StringData(s) = 'Z' }`
-			} else {
-				useBody = `s := Shared.Mode(); _ = unsafe.Pointer(&s)`
-			}
-			wantDowngrade = true
-		case 3: // Exported string global store inside receiver method
-			helperPkgSrc = `package helper
-func Inspect(s string) int { return len(s) }
-`
-			useBody = `Shared.StashExported()`
-			wantDowngrade = true
-		case 4: // uintptr wrapper handout from receiver method reconstructed via unsafe.Pointer
-			helperPkgSrc = `package helper
-func Inspect(s string) int { return len(s) }
-`
+		case 2: // uintptr wrapper handout from receiver method reconstructed via unsafe.Pointer
 			useBody = `w := Shared.AddrBox(); p := (*int)(unsafe.Pointer(w.U)); if p != nil { *p = 1 }`
 			wantDowngrade = true
-		case 5: // Init CarrierLink via min/max or unsafe.Add propagating post-init mutation
-			helperPkgSrc = `package helper
-func Inspect(s string) int { return len(s) }
-`
+		case 3: // Init CarrierLink via min/max or unsafe.Add propagating post-init mutation
 			useBody = `MutateLinked()`
 			wantDowngrade = true
 		}
@@ -3385,7 +3338,7 @@ func Inspect(s string) int { return len(s) }
 
 		linkDecls := ""
 		var vouches map[string]bool
-		if mode == 5 {
+		if mode == 3 {
 			vouches = map[string]bool{"example.com/app.LinkedPtr": true}
 			initStmt := `LinkedPtr = unsafe.Add(unsafe.Pointer(Shared), 0)`
 			if wrapLocal {
@@ -3405,22 +3358,20 @@ import (
 	"example.com/helper"
 )
 
-var ExportedStash string
-
 type AddrBox struct { U uintptr }
 
 type Box struct {
 	fn   func() int
 	mode string
+	ptr  *int
 	addr uintptr
 }
 
 func (b *Box) Mode() string { return b.mode }
-func (b *Box) ForwardToHelper() int { return helper.Inspect(b.mode) }
-func (b *Box) StashExported() { ExportedStash = b.mode }
+func (b *Box) Ptr() *int { return b.ptr }
 func (b *Box) AddrBox() AddrBox { return AddrBox{U: b.addr} }
 
-var Shared = &Box{fn: func() int { return 7 }, mode: string([]byte{'a', 'b'}), addr: 0}
+var Shared = &Box{fn: func() int { return 7 }, mode: string([]byte{'a', 'b'}), ptr: new(int), addr: 0}
 
 %s
 %s
@@ -3453,357 +3404,8 @@ func Exercise() {
 	})
 }
 
-func TestFormalParamSlotTypeErasureStringSlicePtrSinksAndDerivedHazards(t *testing.T) {
-	meta, _, facts := mustTypecheckOrderedDAG(t, []orderedPkgSpec{
-		{
-			pkgPath: "example.com/evil",
-			src: `package evil
-
-import "unsafe"
-
-func MutateData(s string) {
-	if len(s) > 0 {
-		*unsafe.StringData(s) = 'Z'
-	}
-}
-
-func Run(fn func()) {
-	if fn != nil {
-		fn()
-	}
-}
-
-type StrKey string
-
-func (s StrKey) Corrupt() {
-	if len(s) > 0 {
-		*unsafe.StringData(string(s)) = 'Z'
-	}
-}
-`,
-		},
-		{
-			pkgPath: "example.com/confinedstrdata",
-			src: `package confinedstrdata
-
-import "unsafe"
-
-func SameBacking(a, b string) bool {
-	fp := unsafe.StringData(a)
-	sp := unsafe.StringData(b)
-	return fp == sp && unsafe.Sizeof(fp) == unsafe.Alignof(sp)
-}
-`,
-		},
-		{
-			pkgPath: "example.com/slotandsinks",
-			imports: []string{"example.com/evil"},
-			src: `package slotandsinks
-
-import (
-	"strings"
-	"unsafe"
-
-	"example.com/evil"
-)
-
-var (
-	ExportedAny   any
-	ExportedSlice = make([]string, 1)
-	ExportedPtr   *string
-	savedSlice    []string
-)
-
-func TakeAny(x any) {
-	ExportedAny = x
-}
-
-func TakeAnyBenign(x any) {
-	_ = x
-}
-
-func TakeVariadicAny(xs ...any) {
-	if len(xs) > 0 {
-		ExportedAny = xs[0]
-	}
-}
-
-func TakeAnyAndInt(x any, n int) {
-	_ = n
-	ExportedAny = x
-}
-
-func idStr(s string) string {
-	return s
-}
-
-type Holder struct {
-	fn   func() int
-	mode string
-	num  int
-}
-
-func (h *Holder) modePair() (string, int) {
-	return h.mode, 1
-}
-
-func (h *Holder) LeakViaTakeAny() {
-	TakeAny(h.mode)
-}
-
-func (h *Holder) LeakViaVariadicAny() {
-	TakeVariadicAny(h.mode)
-}
-
-func (h *Holder) LeakViaMultiValueAny() {
-	TakeAnyAndInt(h.modePair())
-}
-
-func (h *Holder) CleanViaTakeAnyBenign() {
-	TakeAnyBenign(h.mode)
-}
-
-func (h *Holder) CleanIntViaTakeAny() {
-	TakeAny(h.num)
-}
-
-func (h *Holder) LeakViaExportedSlice() {
-	ExportedSlice = []string{h.mode}
-}
-
-func (h *Holder) LeakViaExportedPtr() {
-	s := h.mode
-	ExportedPtr = &s
-}
-
-func (h *Holder) LeakViaCopySlice() {
-	copy(ExportedSlice, []string{h.mode})
-}
-
-type CarrierBox struct {
-	fn func() int
-	s  string
-}
-
-type PtrFnBox struct {
-	fn func()
-	p  *int
-}
-
-var (
-	CarrierAnyCall       = CarrierBox{fn: func() int { return 1 }, s: string([]byte{'a'})}
-	CarrierVarAnyCall    = CarrierBox{fn: func() int { return 1 }, s: string([]byte{'b'})}
-	CarrierMultiAnyCall  = CarrierBox{fn: func() int { return 1 }, s: string([]byte{'c'})}
-	CarrierTrimSub       = CarrierBox{fn: func() int { return 1 }, s: string([]byte{'d'})}
-	CarrierHelperSub     = CarrierBox{fn: func() int { return 1 }, s: string([]byte{'e'})}
-	CarrierMapStrIntPtr  = map[string]*PtrFnBox{string([]byte{'f'}): {fn: func() {}, p: new(int)}}
-	CarrierMapStrClos    = map[string]func(){string([]byte{'g'}): func() {}}
-	CarrierMapHdr        = map[string]func(){string([]byte{'j'}): func() {}}
-	CarrierSavedSlice    = CarrierBox{fn: func() int { return 1 }, s: string([]byte{'h'})}
-	CarrierCopySlice     = CarrierBox{fn: func() int { return 1 }, s: string([]byte{'i'})}
-	CarrierMethodVal     = struct {
-		fn func() int
-		k  evil.StrKey
-	}{fn: func() int { return 1 }, k: evil.StrKey(string([]byte{'m'}))}
-)
-
-func carrierModePair() (string, int) {
-	return CarrierMultiAnyCall.s, 7
-}
-
-func ExerciseHazards() {
-	TakeAny(CarrierAnyCall.s)
-	TakeVariadicAny(CarrierVarAnyCall.s)
-	TakeAnyAndInt(carrierModePair())
-
-	sub := strings.TrimPrefix(CarrierTrimSub.s, "")
-	if len(sub) > 0 {
-		*unsafe.StringData(sub) = 'Z'
-	}
-
-	sub2 := idStr(CarrierHelperSub.s)
-	if len(sub2) > 0 {
-		*unsafe.StringData(sub2) = 'Z'
-	}
-
-	for k, v := range CarrierMapStrIntPtr {
-		_ = v
-		if len(k) > 0 {
-			*unsafe.StringData(k) = 'Z'
-		}
-	}
-
-	for k := range CarrierMapStrClos {
-		fn := func() { evil.MutateData(k) }
-		evil.Run(fn)
-	}
-
-	for k := range CarrierMapHdr {
-		hdr := (**byte)(unsafe.Pointer(&k))
-		if len(k) > 0 {
-			**hdr = 'Z'
-		}
-	}
-
-	savedSlice = []string{CarrierSavedSlice.s}
-	copy(ExportedSlice, []string{CarrierCopySlice.s})
-	corruptFn := CarrierMethodVal.k.Corrupt
-	corruptFn()
-}
-
-func MutateSavedSlice() {
-	if len(savedSlice) > 0 && len(savedSlice[0]) > 0 {
-		*unsafe.StringData(savedSlice[0]) = 'Z'
-	}
-}
-
-func MakeClosureErasingStr(s string) func() byte {
-	TakeAny(s)
-	return func() byte {
-		if len(s) > 0 {
-			return s[0]
-		}
-		return 0
-	}
-}
-`,
-		},
-	})
-
-	confFact := facts["example.com/confinedstrdata"][0]
-	if confFact.HasStringHeaderUnsafe {
-		t.Fatalf("confined read-only StringData comparison falsely set HasStringHeaderUnsafe: %+v", confFact)
-	}
-
-	sf := facts["example.com/slotandsinks"][0]
-	if !sf.HasStringHeaderUnsafe {
-		t.Fatalf("expected HasStringHeaderUnsafe on slotandsinks")
-	}
-	res := NewDeferralResolutionWithMeta(meta, facts, nil)
-	for _, badMethod := range []string{
-		"Holder.LeakViaTakeAny",
-		"Holder.LeakViaVariadicAny",
-		"Holder.LeakViaMultiValueAny",
-		"Holder.LeakViaExportedSlice",
-		"Holder.LeakViaExportedPtr",
-		"Holder.LeakViaCopySlice",
-	} {
-		mk := syntaxutil.FuncKey{Pkg: "example.com/slotandsinks", Name: badMethod}
-		if res.ReadOnly[mk] {
-			t.Fatalf("%v falsely resolved ReadOnly: %+v", mk, res.ReadOnly)
-		}
-	}
-	for _, cleanMethod := range []string{
-		"Holder.CleanViaTakeAnyBenign",
-		"Holder.CleanIntViaTakeAny",
-	} {
-		mk := syntaxutil.FuncKey{Pkg: "example.com/slotandsinks", Name: cleanMethod}
-		if !res.ReadOnly[mk] {
-			t.Fatalf("%v missing from resolved ReadOnly: %+v", mk, res.ReadOnly)
-		}
-	}
-
-	envRes := ResolveEnvAuditWithMeta(meta, facts, nil)
-	if envRes.Resolved[syntaxutil.FuncKey{Pkg: "example.com/slotandsinks", Name: "MakeClosureErasingStr"}] {
-		t.Fatalf("MakeClosureErasingStr falsely resolved ReturnEnvFree despite TakeAny(s) erasure under stringUnsafe: %+v", envRes.Resolved)
-	}
-
-	cs := Compose(meta, facts, "example.com/slotandsinks", nil, false, false)
-	culpritKeys := map[string]bool{}
-	for _, c := range cs.RootCulprits {
-		culpritKeys[c.Key] = true
-	}
-	for _, wantCulprit := range []string{
-		"example.com/slotandsinks.CarrierAnyCall",
-		"example.com/slotandsinks.CarrierVarAnyCall",
-		"example.com/slotandsinks.CarrierMultiAnyCall",
-		"example.com/slotandsinks.CarrierTrimSub",
-		"example.com/slotandsinks.CarrierHelperSub",
-		"example.com/slotandsinks.CarrierMapStrIntPtr",
-		"example.com/slotandsinks.CarrierMapStrClos",
-		"example.com/slotandsinks.CarrierMapHdr",
-		"example.com/slotandsinks.CarrierSavedSlice",
-		"example.com/slotandsinks.CarrierCopySlice",
-		"example.com/slotandsinks.CarrierMethodVal",
-	} {
-		if !culpritKeys[wantCulprit] {
-			t.Fatalf("Compose RootCulprits missed %s; got %+v", wantCulprit, cs.RootCulprits)
-		}
-	}
-
-	// Verify malformed String* Fact entries fail closed in Compose.
-	for _, mutateFact := range []struct {
-		name string
-		fn   func(*Fact)
-	}{
-		{"StringEscapes", func(f *Fact) { f.StringEscapes = []string{"badkey"} }},
-		{"StringAttributedUses", func(f *Fact) { f.StringAttributedUses = []syntaxutil.AttributedUse{{Key: "badkey"}} }},
-		{"StringEnvCarrying", func(f *Fact) { f.StringEnvCarrying = []string{"badkey"} }},
-		{"StringEnvCarryingFns", func(f *Fact) { f.StringEnvCarryingFns = []syntaxutil.VarFuncUse{{Key: "example.com/clean.V"}} }},
-		{"StringReturnEnvBlocked", func(f *Fact) { f.StringReturnEnvBlocked = []syntaxutil.FuncKey{{Pkg: "example.com/other", Name: "F"}} }},
-		{"StringParamInsertionBlocked", func(f *Fact) {
-			f.StringParamInsertionBlocked = []syntaxutil.ParamKey{{Func: syntaxutil.FuncKey{Pkg: "example.com/other", Name: "F"}, Index: 0}}
-		}},
-	} {
-		f := Fact{Declares: []string{"example.com/clean.V"}, HasStringHeaderUnsafe: true}
-		mutateFact.fn(&f)
-		badCS := Compose(
-			[]GraphPackage{{ImportPath: "example.com/clean", PkgPath: "example.com/clean"}},
-			map[string][]Fact{"example.com/clean": {f}},
-			"example.com/clean",
-			nil,
-			false,
-			false,
-		)
-		if badCS.Downgraded == "" {
-			t.Fatalf("malformed %s failed to downgrade Compose: %+v", mutateFact.name, badCS)
-		}
-	}
-}
-
-func TestUpstreamStringHeaderUnsafeIntermediaryEnvAndOnceMemoRevocation(t *testing.T) {
-	meta, _, facts := mustTypecheckOrderedDAG(t, []orderedPkgSpec{
-		{
-			pkgPath: "example.com/leafunsafe",
-			src: `package leafunsafe
-
-import "unsafe"
-
-func Corrupt(s string) {
-	if len(s) > 0 {
-		*unsafe.StringData(s) = 'X'
-	}
-}
-`,
-		},
-		{
-			pkgPath: "example.com/mid",
-			src: `package mid
-
-var (
-	ExportedStr    string
-	ExportedStrPtr *string
-)
-
-func Publish(s string) {
-	ExportedStr = s
-}
-
-func PublishStrPtr(p *string) {
-	ExportedStrPtr = p
-}
-
-func Identity(s string) string {
-	return s
-}
-
-type StrKey string
-
-func (s StrKey) Publish() {
-	ExportedStr = string(s)
-}
-`,
-		},
+func TestBuildScopedMemAliasesColliderAndIndirectPointerConfinement(t *testing.T) {
+	_, _, memoFacts := mustTypecheckOrderedDAG(t, []orderedPkgSpec{
 		{
 			pkgPath: "example.com/memo",
 			src: `package memo
@@ -3845,294 +3447,24 @@ func (m *UintptrMemo) Get() (uintptr, error) {
 }
 `,
 		},
-		{
-			pkgPath: "example.com/reg",
-			imports: []string{"example.com/leafunsafe", "example.com/mid", "example.com/memo"},
-			src: `package reg
-
-import (
-	_ "example.com/leafunsafe"
-	"example.com/memo"
-	"example.com/mid"
-)
-
-var ExportedBuf string
-
-var unexpBuf = string([]byte{'a'})
-
-func GetUnexpBuf() string {
-	return unexpBuf
-}
-
-var RegDirect = map[string]func() byte{}
-
-func registerDirect(s string) {
-	ExportedBuf = s
-	RegDirect["h"] = func() byte {
-		if len(s) > 0 {
-			return s[0]
-		}
-		return 0
-	}
-}
-
-func init() {
-	registerDirect(string([]byte{'z'}))
-}
-
-func derefStrMaker(s string) func() byte {
-	return func() byte {
-		if len(s) > 0 {
-			return s[0]
-		}
-		return 0
-	}
-}
-
-var RegSettled = []func() byte{derefStrMaker(unexpBuf)}
-
-var RegSettledLocal []func() byte
-
-func init() {
-	buf := unexpBuf
-	RegSettledLocal = []func() byte{
-		func() byte {
-			if len(buf) > 0 {
-				return buf[0]
-			}
-			return 0
-		},
-	}
-}
-
-func MakeClosureAndLeak(s string) func() byte {
-	ExportedBuf = s
-	return func() byte {
-		if len(s) > 0 {
-			return s[0]
-		}
-		return 0
-	}
-}
-
-var RegCtor = []func() byte{MakeClosureAndLeak(string([]byte{'b'}))}
-
-func InsertClosureAndLeak(dst []func() byte, s string) {
-	ExportedBuf = s
-	dst[0] = func() byte {
-		if len(s) > 0 {
-			return s[0]
-		}
-		return 0
-	}
-}
-
-func BuildViaInsert(s string) []func() byte {
-	out := make([]func() byte, 1)
-	InsertClosureAndLeak(out, s)
-	return out
-}
-
-var RegIns = BuildViaInsert(string([]byte{'c'}))
-
-type Box struct {
-	fn   func() int
-	mode string
-}
-
-var SharedIdentity = Box{fn: func() int { return 1 }, mode: string([]byte{'d'})}
-
-func ReadIdentity() string {
-	return mid.Identity(SharedIdentity.mode)
-}
-
-var SharedMemo = memo.NewStrMemo()
-
-func ReadMemo() string {
-	s, _ := SharedMemo.Get()
-	return s
-}
-`,
-		},
-		{
-			pkgPath: "example.com/router",
-			imports: []string{"example.com/mid"},
-			src: `package router
-
-import "example.com/mid"
-
-var (
-	ExportedRouterSlice = make([]string, 1)
-	unexpExposedSlice   []string
-)
-
-func ReadUnexpSlice() []string {
-	return unexpExposedSlice
-}
-
-type Holder struct {
-	fn   func() int
-	mode string
-}
-
-func (h *Holder) LeakViaMid() {
-	mid.Publish(h.mode)
-}
-
-func (h *Holder) LeakViaUnexpSlice() {
-	unexpExposedSlice = []string{h.mode}
-}
-
-var (
-	SharedRouter      = Holder{fn: func() int { return 1 }, mode: string([]byte{'r'})}
-	SharedCopySlice   = Holder{fn: func() int { return 1 }, mode: string([]byte{'s'})}
-	SharedMapKeyAddr  = map[string]func(){string([]byte{'k'}): func() {}}
-	SharedRouterMethodVal = struct {
-		fn func() int
-		k  mid.StrKey
-	}{fn: func() int { return 1 }, k: mid.StrKey(string([]byte{'v'}))}
-)
-
-func LeakGlobalViaMid() {
-	mid.Publish(SharedRouter.mode)
-	copy(ExportedRouterSlice, []string{SharedCopySlice.mode})
-	for k := range SharedMapKeyAddr {
-		mid.PublishStrPtr(&k)
-	}
-	fn := SharedRouterMethodVal.k.Publish
-	fn()
-}
-`,
-		},
-		{
-			pkgPath: "example.com/upstreamunsafe",
-			imports: []string{"example.com/reg", "example.com/router"},
-			src: `package upstreamunsafe
-
-import (
-	"unsafe"
-
-	"example.com/reg"
-	_ "example.com/router"
-)
-
-func CorruptViaUpstream() {
-	s := reg.ReadIdentity()
-	if len(s) > 0 {
-		*unsafe.StringData(s) = 'Z'
-	}
-}
-`,
-		},
 	})
-
-	// 1. UintptrMemo must NOT be admitted into OnceMemoTypes, whereas StrMemo MUST
-	// be admitted with ReturnsString == true.
-	memoFact := facts["example.com/memo"][0]
+	memoFact := memoFacts["example.com/memo"][0]
 	for _, omt := range memoFact.OnceMemoTypes {
 		if omt.Type.Name == "UintptrMemo" {
 			t.Fatalf("UintptrMemo falsely admitted into OnceMemoTypes: %+v", omt)
 		}
 	}
-	if len(memoFact.OnceMemoTypes) != 1 || memoFact.OnceMemoTypes[0].Type.Name != "StrMemo" || !memoFact.OnceMemoTypes[0].ReturnsString {
-		t.Fatalf("StrMemo missing or ReturnsString=false in OnceMemoTypes: %+v", memoFact.OnceMemoTypes)
+	if len(memoFact.OnceMemoTypes) != 1 || memoFact.OnceMemoTypes[0].Type.Name != "StrMemo" {
+		t.Fatalf("StrMemo missing in OnceMemoTypes: %+v", memoFact.OnceMemoTypes)
 	}
 
-	// 2. Pure-Go intermediary `mid.Publish` (neither `mid` nor `router` imports `unsafe`)
-	// must refuse ParamLeakFree on `mid.Publish#0`, refusing `Holder.LeakViaMid` ReadOnly
-	// and downgrading `SharedRouter`!
-	routerMeta := []GraphPackage{
-		{ImportPath: "example.com/mid", PkgPath: "example.com/mid"},
-		{ImportPath: "example.com/router", PkgPath: "example.com/router", Imports: []string{"example.com/mid"}},
-	}
-	routerFacts := map[string][]Fact{
-		"example.com/mid":    facts["example.com/mid"],
-		"example.com/router": facts["example.com/router"],
-	}
-	routerRes := NewDeferralResolutionWithMeta(routerMeta, routerFacts, nil)
-	for _, badRouterMethod := range []string{"Holder.LeakViaMid", "Holder.LeakViaUnexpSlice"} {
-		if routerRes.ReadOnly[syntaxutil.FuncKey{Pkg: "example.com/router", Name: badRouterMethod}] {
-			t.Fatalf("%s falsely resolved ReadOnly", badRouterMethod)
-		}
-	}
-	routerCS := Compose(routerMeta, routerFacts, "example.com/router", nil, false, false)
-	for _, wantRouterCulprit := range []string{
-		"example.com/router.SharedRouter",
-		"example.com/router.SharedCopySlice",
-		"example.com/router.SharedMapKeyAddr",
-		"example.com/router.SharedRouterMethodVal",
-	} {
-		if !slices.ContainsFunc(routerCS.RootCulprits, func(c Culprit) bool {
-			return c.Key == wantRouterCulprit
-		}) {
-			t.Fatalf("router Compose missed culprit %s: %+v", wantRouterCulprit, routerCS.RootCulprits)
-		}
-	}
-
-	// 3. Downstream leaf dependency `leafunsafe` (`HasStringHeaderUnsafe == true`, imported by `reg`)
-	// does NOT import `reg`, so `reg` composed without `upstreamunsafe` MUST remain 100% clean
-	// (including `RegDirect`, `RegSettled`, `RegCtor`, `RegIns`, `SharedIdentity`, and `SharedMemo`)!
-	regOnlyMeta := []GraphPackage{
-		{ImportPath: "example.com/leafunsafe", PkgPath: "example.com/leafunsafe"},
-		{ImportPath: "example.com/mid", PkgPath: "example.com/mid"},
-		{ImportPath: "example.com/memo", PkgPath: "example.com/memo"},
-		{ImportPath: "example.com/reg", PkgPath: "example.com/reg", Imports: []string{"example.com/leafunsafe", "example.com/mid", "example.com/memo"}},
-	}
-	regOnlyFacts := map[string][]Fact{
-		"example.com/leafunsafe": facts["example.com/leafunsafe"],
-		"example.com/mid":        facts["example.com/mid"],
-		"example.com/memo":       facts["example.com/memo"],
-		"example.com/reg":        facts["example.com/reg"],
-	}
-	if regCleanCS := Compose(regOnlyMeta, regOnlyFacts, "example.com/reg", nil, false, false); regCleanCS.Downgraded != "" {
-		t.Fatalf("downstream-only leafunsafe falsely downgraded upstream reg: %+v", regCleanCS)
-	}
-	if !NonVouchDischargedVars(regOnlyMeta, regOnlyFacts, false)["example.com/reg.SharedMemo"] {
-		t.Fatalf("SharedMemo missing from NonVouchDischargedVars without upstream string-header unsafe")
-	}
-
-	// 4. When upstream `upstreamunsafe` (`HasStringHeaderUnsafe == true`, including via a `[.test]`
-	// variant `ImportPath`!) transitively imports `reg`, ALL of `RegDirect`, `RegSettled`, `RegCtor`,
-	// `RegIns`, `SharedIdentity`, and `SharedMemo` MUST be revoked / downgraded!
-	variantMeta := []GraphPackage{
-		{ImportPath: "example.com/leafunsafe", PkgPath: "example.com/leafunsafe"},
-		{ImportPath: "example.com/mid", PkgPath: "example.com/mid"},
-		{ImportPath: "example.com/memo", PkgPath: "example.com/memo"},
-		{ImportPath: "example.com/reg [example.com/upstreamunsafe.test]", PkgPath: "example.com/reg", ForTest: "example.com/upstreamunsafe", Imports: []string{"example.com/leafunsafe", "example.com/mid", "example.com/memo"}},
-		{ImportPath: "example.com/router", PkgPath: "example.com/router", Imports: []string{"example.com/mid"}},
-		{ImportPath: "example.com/upstreamunsafe_test [example.com/upstreamunsafe.test]", PkgPath: "example.com/upstreamunsafe", ForTest: "example.com/upstreamunsafe", Imports: []string{"example.com/reg", "example.com/router"}},
-	}
-	fullCS := Compose(variantMeta, facts, "example.com/upstreamunsafe", nil, false, false)
-	fullCulprits := map[string]bool{}
-	for _, c := range fullCS.RootCulprits {
-		fullCulprits[c.Key] = true
-	}
-	for _, want := range []string{
-		"example.com/reg.RegDirect",
-		"example.com/reg.RegSettled",
-		"example.com/reg.RegSettledLocal",
-		"example.com/reg.RegCtor",
-		"example.com/reg.RegIns",
-		"example.com/reg.SharedIdentity",
-		"example.com/reg.SharedMemo",
-	} {
-		if !fullCulprits[want] {
-			t.Fatalf("upstream string-header unsafe Compose missed culprit %s; got %+v", want, fullCS.RootCulprits)
-		}
-	}
-	if NonVouchDischargedVars(variantMeta, facts, false)["example.com/reg.SharedMemo"] {
-		t.Fatalf("SharedMemo falsely retained in NonVouchDischargedVars under upstream string-header unsafe")
-	}
-	_ = meta
-
-	// 5. Directional string value returns (`results[i].verdict = v.makeVerdict()`) and
+	// Directional value returns (`results[i].verdict = v.makeVerdict()`) and
 	// multi-arg slice+error tuple returns (`before, err := v.observeInputs(records, results)`)
 	// must NOT create collider memory-alias stars from `results` back into `v` or `records`
-	// that would falsely attribute unrelated sibling field stores (`results[i].err = ErrSentinel`,
-	// `CleanHolder.label`) to method calls on `v` (`t := v.tag; t.begin()`), while genuine
-	// common-ancestor views (`view := idSlice(local); view[0] = SharedBoxView`) and indirect
-	// deref stores (`p := &s2; *p = s1; s1[0] = SharedBoxPtr` and init-closure `*p = s1`) MUST
-	// still propagate!
+	// that would falsely attribute unrelated sibling field stores (`results[i].err = ErrSentinel`)
+	// to method calls on `v` (`t := v.tag; t.begin()`), while genuine common-ancestor views
+	// (`view := idSlice(local); view[0] = SharedBoxView`) and indirect deref stores
+	// (`p := &s2; *p = s1; s1[0] = SharedBoxPtr` and init-closure `*p = s1`) MUST propagate!
 	noRevMeta, noRevPkgs, noRevFacts := mustTypecheckOrderedDAG(t, []orderedPkgSpec{
 		{
 			pkgPath: "example.com/norevtrace",
@@ -4325,17 +3657,10 @@ func init() {
 		}
 	}
 
-	// 6. Caller-mediated helper / bridge / callback string-header unsafe propagation,
-	// AssignMulti zero-arg co-aliasing, indirect container copy/append/map/chan writes,
-	// OwnerUnproven on StringEnvCarrying/StringEscapes/StringAttributedUses, conditional
-	// StringEnvCall* / StringReturnEnv* edges + StringEnvCallable, and ValMethodVal
-	// pointer-receiver ProjDeref mutation marks.
 	sinkMeta, sinkPkgs, sinkFacts := mustTypecheckOrderedDAG(t, []orderedPkgSpec{
 		{
 			pkgPath: "example.com/sinkleaf",
 			src: `package sinkleaf
-
-import "unsafe"
 
 type ptrHolder struct {
 	fn  func()
@@ -4346,16 +3671,6 @@ var (
 	escapedPtrMatrix [][]*int
 	escapedPtrRow    []*int
 )
-
-func CorruptLeaf(s string) {
-	if len(s) > 0 {
-		*unsafe.StringData(s) = 'Q'
-	}
-}
-
-func SafeLen(s string) int {
-	return len(s)
-}
 
 func LeakViaIndirectCopy(h *ptrHolder) {
 	inner := make([]*int, 1)
@@ -4383,214 +3698,16 @@ func RetainLocalPtr(h *ptrHolder) {
 	h.ptr = local[0]
 }
 
-type strHolder struct {
-	fn func()
-	s  string
-}
-
-var (
-	leafSlots      = make([]string, 1)
-	globalStrSlice []string
-	GlobalPlainStr string
-)
-
-func Slots() []string {
-	return leafSlots
-}
-
-func CorruptSlot() {
-	if len(leafSlots) > 0 && len(leafSlots[0]) > 0 {
-		*unsafe.StringData(leafSlots[0]) = 'Z'
-	}
-}
-
 func SneakPtrArraySlice(p *int) *int {
 	var arr [1]*int
 	copy(arr[:], []*int{p})
 	return arr[0]
-}
-
-func RetainStrElem(h *strHolder) {
-	row := make([]string, 1)
-	row[0] = h.s
-	GlobalPlainStr = row[0]
-}
-
-func SneakArraySlice(s string) {
-	var arr [1]string
-	copy(arr[:], []string{s})
-	CorruptLeaf(arr[0])
-}
-
-func SneakClosureWrite(s string) {
-	var slot string
-	fn := func() { slot = s }
-	fn()
-	CorruptLeaf(slot)
-}
-
-func SneakExternalStr(s string) {
-	var arr [1]string
-	globalStrSlice = arr[:]
-	arr[0] = s
-}
-`,
-		},
-		{
-			pkgPath: "example.com/cbbus",
-			src: `package cbbus
-
-var hook func(string)
-var hooks = make([]func(string), 1)
-
-func Register(fn func(string)) {
-	hook = fn
-}
-
-func Hooks() []func(string) {
-	return hooks
-}
-
-func Dispatch(s string) {
-	if hook != nil {
-		hook(s)
-	}
-	if len(hooks) > 0 && hooks[0] != nil {
-		hooks[0](s)
-	}
-}
-
-func CleanAny(v any) int {
-	if v == nil {
-		return 0
-	}
-	return 1
-}
-
-var savedAny any
-
-func BadAny(v any) {
-	savedAny = v
-}
-
-func SneakPtrArraySlice(p *int) *int {
-	var arr [1]*int
-	copy(arr[:], []*int{p})
-	return arr[0]
-}
-`,
-		},
-		{
-			pkgPath: "example.com/safecaller",
-			imports: []string{"example.com/sinkleaf"},
-			src: `package safecaller
-
-import "example.com/sinkleaf"
-
-var buf = string([]byte{'s'})
-
-var SafeEnvReg []func() byte
-
-func init() {
-	local := buf
-	SafeEnvReg = []func() byte{
-		func() byte {
-			if len(local) > 0 {
-				return local[0]
-			}
-			return 0
-		},
-	}
-}
-
-func Inspect() int {
-	return sinkleaf.SafeLen(buf)
-}
-`,
-		},
-		{
-			pkgPath: "example.com/directsink",
-			imports: []string{"example.com/sinkleaf"},
-			src: `package directsink
-
-import "example.com/sinkleaf"
-
-var buf = string([]byte{'b'})
-
-var DirectSinkEnvReg []func() byte
-
-func init() {
-	local := buf
-	DirectSinkEnvReg = []func() byte{
-		func() byte {
-			if len(local) > 0 {
-				return local[0]
-			}
-			return 0
-		},
-	}
-}
-
-func Trigger() {
-	sinkleaf.CorruptLeaf(buf)
-}
-`,
-		},
-		{
-			pkgPath: "example.com/cbsink",
-			imports: []string{"example.com/cbbus"},
-			src: `package cbsink
-
-import "example.com/cbbus"
-
-var buf = string([]byte{'c'})
-
-var CallbackEnvReg []func() byte
-
-func init() {
-	local := buf
-	CallbackEnvReg = []func() byte{
-		func() byte {
-			if len(local) > 0 {
-				return local[0]
-			}
-			return 0
-		},
-	}
-}
-
-func Trigger() {
-	cbbus.Dispatch(buf)
-}
-`,
-		},
-		{
-			pkgPath: "example.com/cbplanter",
-			imports: []string{"example.com/cbbus", "example.com/cbsink"},
-			src: `package cbplanter
-
-import (
-	"unsafe"
-
-	"example.com/cbbus"
-	_ "example.com/cbsink"
-)
-
-func Plant() {
-	cbbus.Register(func(s string) {
-		if len(s) > 0 {
-			*unsafe.StringData(s) = 'P'
-		}
-	})
 }
 `,
 		},
 		{
 			pkgPath: "example.com/strorigin",
-			imports: []string{"example.com/cbbus"},
 			src: `package strorigin
-
-import "example.com/cbbus"
 
 type cell struct {
 	fn func() int
@@ -4609,11 +3726,6 @@ var (
 	SharedPair         = &cell{}
 	SharedMethodVal    = &cell{}
 	SharedIndirectCopy = &cell{}
-	IndirectEscBox     = struct {
-		fn   func() int
-		mode string
-	}{fn: func() int { return 1 }, mode: string([]byte{'m'})}
-	StrHook func() byte
 )
 
 func pair() ([]*cell, []*cell) {
@@ -4637,77 +3749,7 @@ func LeakPair(x *cell) []*cell {
 	return b
 }
 
-func ReadIndirectCopy() string {
-	s1 := make([][]any, 1)
-	p := new([][]any)
-	*p = s1
-	inner := make([]any, 1)
-	src := [][]any{inner}
-	copy(*p, src)
-	s1[0] = make([]any, 1)
-	s1[0][0] = IndirectEscBox.mode
-	out, _ := inner[0].(string)
-	return out
-}
-
-func MakeCleanHandler(cfg string) func() byte {
-	_ = cbbus.CleanAny(cfg)
-	return func() byte {
-		if len(cfg) > 0 {
-			return cfg[0]
-		}
-		return 0
-	}
-}
-
-func MakeBadHandler(cfg string) func() byte {
-	cbbus.BadAny(cfg)
-	return func() byte {
-		if len(cfg) > 0 {
-			return cfg[0]
-		}
-		return 0
-	}
-}
-
-var (
-	CleanCondReg      []func() byte
-	BadCondReg        []func() byte
-	DirectBadParamReg []func() byte
-)
-
-var hookSecret = string([]byte{'h'})
-
-func InstallHook() {
-	local := hookSecret
-	cbbus.BadAny(local)
-	StrHook = func() byte {
-		if len(local) > 0 {
-			return local[0]
-		}
-		return 0
-	}
-}
-
-//gofresh:single-subject
-var DispatchTable = map[string]func(*cell){
-	"run": func(c *cell) {
-		_ = hookSecret
-	},
-}
-
 func init() {
-	cleanCfg := string([]byte{'k'})
-	_ = cbbus.CleanAny(cleanCfg)
-	CleanCondReg = []func() byte{MakeCleanHandler(cleanCfg)}
-
-	badCfg := string([]byte{'x'})
-	BadCondReg = []func() byte{MakeBadHandler(badCfg)}
-
-	directBadCfg := string([]byte{'y'})
-	cbbus.BadAny(directBadCfg)
-	DirectBadParamReg = []func() byte{MakeCleanHandler(directBadCfg)}
-
 	s1 := make([][]*cell, 1)
 	p := make([]*[][]*cell, 1)
 	inner := make([]*cell, 1)
@@ -4721,105 +3763,11 @@ func init() {
 	}
 	s1[0] = make([]*cell, 1)
 	s1[0][0] = SharedIndirectCopy
-
-	cbbus.BadAny(hookSecret)
-}
-`,
-		},
-		{
-			pkgPath: "example.com/bridgeapp",
-			imports: []string{"example.com/sinkleaf", "example.com/strorigin"},
-			src: `package bridgeapp
-
-import (
-	"example.com/sinkleaf"
-	"example.com/strorigin"
-)
-
-var BridgeTarget = new(struct{ f func() })
-
-func RunBridge() {
-	sinkleaf.CorruptLeaf(strorigin.ReadIndirectCopy())
-	strorigin.DispatchTable["run"](nil)
-}
-`,
-		},
-		{
-			pkgPath: "example.com/tableuser",
-			imports: []string{"example.com/sinkleaf", "example.com/strorigin"},
-			src: `package tableuser
-
-import (
-	"example.com/sinkleaf"
-	"example.com/strorigin"
-)
-
-var UnvouchedArg = func() any { return func() {} }()
-
-//gofresh:single-subject
-var OwnerTable = map[string]func(any){
-	"run": func(x any) {
-		_ = x
-	},
-}
-
-var tableSecret = string([]byte{'t'})
-
-func init() {
-	local := tableSecret
-	OwnerTable["str"] = func(x any) {
-		if len(local) > 0 && x != nil {
-			_ = local[0]
-		}
-	}
-}
-
-func RunTable() {
-	sinkleaf.CorruptLeaf(tableSecret)
-	OwnerTable["run"](UnvouchedArg)
-	_ = strorigin.ReadIndirectCopy()
 }
 `,
 		},
 	})
 
-	// SafeLen#0 is ParamLeakFree, so safecaller calling sinkleaf.SafeLen stays clean!
-	safeSubMeta := []GraphPackage{
-		{ImportPath: "example.com/sinkleaf", PkgPath: "example.com/sinkleaf"},
-		{ImportPath: "example.com/safecaller", PkgPath: "example.com/safecaller", Imports: []string{"example.com/sinkleaf"}},
-	}
-	safeSubFacts := map[string][]Fact{
-		"example.com/sinkleaf":   sinkFacts["example.com/sinkleaf"],
-		"example.com/safecaller": sinkFacts["example.com/safecaller"],
-	}
-	if safeCS := Compose(safeSubMeta, safeSubFacts, "example.com/safecaller", nil, false, false); safeCS.Downgraded != "" {
-		t.Fatalf("ParamLeakFree SafeLen falsely propagated string-header unsafe to safecaller: %+v", safeCS)
-	}
-
-	// Direct 2-package sink (directsink -> sinkleaf.CorruptLeaf) must downgrade DirectSinkEnvReg!
-	directSubMeta := []GraphPackage{
-		{ImportPath: "example.com/sinkleaf", PkgPath: "example.com/sinkleaf"},
-		{ImportPath: "example.com/directsink", PkgPath: "example.com/directsink", Imports: []string{"example.com/sinkleaf"}},
-	}
-	directSubFacts := map[string][]Fact{
-		"example.com/sinkleaf":   sinkFacts["example.com/sinkleaf"],
-		"example.com/directsink": sinkFacts["example.com/directsink"],
-	}
-	if directCS := Compose(directSubMeta, directSubFacts, "example.com/directsink", nil, false, false); directCS.Downgraded == "" {
-		t.Fatalf("2-package helper sink directsink -> sinkleaf.CorruptLeaf failed to downgrade DirectSinkEnvReg")
-	}
-
-	// 3-package callback-planting topology (cbplanter -> cbbus <- cbsink) must downgrade CallbackEnvReg!
-	cbCS := Compose(sinkMeta, sinkFacts, "example.com/cbplanter", nil, false, false)
-	if !slices.ContainsFunc(cbCS.RootCulprits, func(c Culprit) bool {
-		return c.Key == "example.com/cbsink.CallbackEnvReg"
-	}) {
-		t.Fatalf("callback-planting topology missed CallbackEnvReg: %+v", cbCS.RootCulprits)
-	}
-
-	// Verify LeakPair#0 is NOT ParamLeakFree, StrHook has StringEnvCallable without StringEnvCarryingFns,
-	// SharedPair and SharedMethodVal are CulpritMutated, CleanCondReg stays clean while BadCondReg,
-	// DirectBadParamReg, IndirectEscBox, and StrHook are culprits under 3-package bridge bridgeapp!
 	leafPkg := sinkPkgs["example.com/sinkleaf"]
 	findBodyAndLocals := func(fnName string) (*flowir.Body, map[string]*types.Var) {
 		for _, decl := range leafPkg.Syntax[0].Decls {
@@ -4861,25 +3809,11 @@ func RunTable() {
 	}) {
 		t.Fatalf("RetainLocalPtr#0 missing from ParamRetentionFree: %+v", leafFact.ParamRetentionFree)
 	}
-	if slices.Contains(sinkFacts["example.com/cbbus"][0].ParamLeakFree, syntaxutil.ParamKey{
-		Func:  syntaxutil.FuncKey{Pkg: "example.com/cbbus", Name: "SneakPtrArraySlice"},
+	if slices.Contains(leafFact.ParamLeakFree, syntaxutil.ParamKey{
+		Func:  syntaxutil.FuncKey{Pkg: "example.com/sinkleaf", Name: "SneakPtrArraySlice"},
 		Index: 0,
 	}) {
-		t.Fatalf("cbbus.SneakPtrArraySlice#0 falsely proven ParamLeakFree: %+v", sinkFacts["example.com/cbbus"][0].ParamLeakFree)
-	}
-	for _, sneakFn := range []string{"SneakPtrArraySlice", "SneakArraySlice", "SneakClosureWrite", "SneakExternalStr"} {
-		if slices.Contains(leafFact.ParamLeakFree, syntaxutil.ParamKey{
-			Func:  syntaxutil.FuncKey{Pkg: "example.com/sinkleaf", Name: sneakFn},
-			Index: 0,
-		}) {
-			t.Fatalf("%s#0 falsely proven ParamLeakFree: %+v", sneakFn, leafFact.ParamLeakFree)
-		}
-	}
-	if slices.Contains(leafFact.ParamRetentionFree, syntaxutil.ParamKey{
-		Func:  syntaxutil.FuncKey{Pkg: "example.com/sinkleaf", Name: "RetainStrElem"},
-		Index: 0,
-	}) {
-		t.Fatalf("RetainStrElem#0 falsely proven ParamRetentionFree despite GlobalPlainStr = row[0]: %+v", leafFact.ParamRetentionFree)
+		t.Fatalf("SneakPtrArraySlice#0 falsely proven ParamLeakFree: %+v", leafFact.ParamLeakFree)
 	}
 
 	originFact := sinkFacts["example.com/strorigin"][0]
@@ -4889,321 +3823,26 @@ func RunTable() {
 	}) {
 		t.Fatalf("LeakPair#0 falsely marked ParamLeakFree: %+v", originFact.ParamLeakFree)
 	}
-	if !slices.Contains(originFact.StringEnvCallable, "example.com/strorigin.StrHook") {
-		t.Fatalf("StrHook missing from StringEnvCallable: %+v", originFact.StringEnvCallable)
-	}
-	for _, fnUse := range originFact.StringEnvCarryingFns {
-		if fnUse.Key == "example.com/strorigin.StrHook" {
-			t.Fatalf("directly callable StrHook unexpectedly emitted StringEnvCarryingFns: %+v", fnUse)
-		}
-	}
-
-	bridgeCS := Compose(sinkMeta, sinkFacts, "example.com/bridgeapp", nil, true, false)
-	bridgeCulprits := map[string]CulpritVerb{}
-	for _, c := range bridgeCS.RootCulprits {
-		bridgeCulprits[c.Key] = c.Verb
-	}
-	if _, falsePos := bridgeCulprits["example.com/strorigin.CleanCondReg"]; falsePos {
-		t.Fatalf("CleanCondReg with proven ParamLeakFree CleanAny#0 falsely downgraded: %+v", bridgeCS.RootCulprits)
+	originCS := Compose(sinkMeta, sinkFacts, "example.com/strorigin", nil, true, false)
+	originCulprits := map[string]CulpritVerb{}
+	for _, c := range originCS.RootCulprits {
+		originCulprits[c.Key] = c.Verb
 	}
 	for _, wantMut := range []string{
 		"example.com/strorigin.SharedPair",
 		"example.com/strorigin.SharedMethodVal",
 		"example.com/strorigin.SharedIndirectCopy",
 	} {
-		if v, ok := bridgeCulprits[wantMut]; !ok || v != CulpritMutated {
-			t.Fatalf("expected CulpritMutated on %s, got ok=%v verb=%v culprits=%+v", wantMut, ok, v, bridgeCS.RootCulprits)
-		}
-	}
-	for _, wantBridge := range []string{
-		"example.com/strorigin.IndirectEscBox",
-		"example.com/strorigin.BadCondReg",
-		"example.com/strorigin.DirectBadParamReg",
-		"example.com/strorigin.StrHook",
-	} {
-		if _, ok := bridgeCulprits[wantBridge]; !ok {
-			t.Fatalf("3-package bridge Compose missed culprit %s: %+v", wantBridge, bridgeCS.RootCulprits)
-		}
-	}
-	if !bridgeCS.CulpritSites["example.com/strorigin.StrHook"].Unattributed {
-		t.Fatalf("directly callable StrHook was not marked Unattributed in CulpritSites: %+v", bridgeCS.CulpritSites["example.com/strorigin.StrHook"])
-	}
-
-	// Verify NewDeferralResolutionWithMeta marks OwnerTable OwnerUnproven under StringEnvCarrying so
-	// UnvouchedArg is NOT discharged when OwnerTable itself is single-subject discharged!
-	tableMeta := make([]GraphPackage, len(sinkMeta))
-	copy(tableMeta, sinkMeta)
-	for i := range tableMeta {
-		tableMeta[i].Class = MutableLocalPackage
-	}
-	tableRes := NewDeferralResolutionWithMeta(tableMeta, sinkFacts, nil)
-	if !tableRes.OwnerUnproven["example.com/tableuser.OwnerTable"] {
-		t.Fatalf("NewDeferralResolutionWithMeta failed to mark OwnerTable OwnerUnproven from StringEnvCarrying")
-	}
-	tableCS := Compose(tableMeta, sinkFacts, "example.com/tableuser", nil, true, false)
-	if !slices.ContainsFunc(tableCS.RootCulprits, func(c Culprit) bool {
-		return c.Key == "example.com/tableuser.UnvouchedArg"
-	}) {
-		t.Fatalf("Compose missed UnvouchedArg passed into StringEnvCarrying OwnerTable: %+v", tableCS.RootCulprits)
-	}
-
-	// Verify foreign mutable string containers (Slots() []string) and first-class callback
-	// registrars (r := cbbus.Register; r(cb)) emit StringSinkPkgs and StringCallbackTargets,
-	// and malformed StringCarrierLinks mark valid foreign endpoints in Compose and NonVouchDischargedVars!
-	containerMeta, _, containerFacts := mustTypecheckOrderedDAG(t, []orderedPkgSpec{
-		{
-			pkgPath: "example.com/slotleaf",
-			src: `package slotleaf
-
-import "unsafe"
-
-var slots = make([]string, 1)
-var slotCh = make(chan []string, 1)
-
-type RecNode struct {
-	Next *RecNode
-}
-
-type Corruptor struct{}
-
-func (Corruptor) Touch(s string) {
-	if len(s) > 0 {
-		*unsafe.StringData(s) = 'T'
-	}
-}
-
-func Slots() []string { return slots }
-
-func RootNode() *RecNode { return nil }
-
-func SlotChan() <-chan []string { return slotCh }
-
-func CorruptSlot() {
-	if len(slots) > 0 && len(slots[0]) > 0 {
-		*unsafe.StringData(slots[0]) = 'Z'
-	}
-}
-`,
-		},
-		{
-			pkgPath: "example.com/slotreg",
-			src: `package slotreg
-
-type Box struct {
-	fn   func() int
-	mode string
-}
-
-var SlotCarrier = Box{fn: func() int { return 1 }, mode: string([]byte{'s'})}
-
-func ReadSlotMode() string { return SlotCarrier.mode }
-`,
-		},
-		{
-			pkgPath: "example.com/slotbridge",
-			imports: []string{"example.com/slotleaf", "example.com/slotreg"},
-			src: `package slotbridge
-
-import (
-	"example.com/slotleaf"
-	"example.com/slotreg"
-)
-
-func RunSlotBridge() {
-	_ = slotleaf.RootNode()
-	slotleaf.Slots()[0] = slotreg.ReadSlotMode()
-	slotleaf.CorruptSlot()
-}
-`,
-		},
-		{
-			pkgPath: "example.com/chanbridge",
-			imports: []string{"example.com/slotleaf", "example.com/slotreg"},
-			src: `package chanbridge
-
-import (
-	"example.com/slotleaf"
-	"example.com/slotreg"
-)
-
-func RunChanBridge() {
-	s := <-slotleaf.SlotChan()
-	s[0] = slotreg.ReadSlotMode()
-}
-`,
-		},
-		{
-			pkgPath: "example.com/ifacebridge",
-			imports: []string{"example.com/slotleaf", "example.com/slotreg"},
-			src: `package ifacebridge
-
-import (
-	"example.com/slotleaf"
-	"example.com/slotreg"
-)
-
-func RunIfaceBridge() {
-	var t interface{ Touch(string) } = slotleaf.Corruptor{}
-	t.Touch(slotreg.ReadSlotMode())
-}
-`,
-		},
-		{
-			pkgPath: "example.com/genericbridge",
-			imports: []string{"example.com/slotleaf", "example.com/slotreg"},
-			src: `package genericbridge
-
-import (
-	"example.com/slotleaf"
-	"example.com/slotreg"
-)
-
-func runZero[T interface{ Touch(string) }](s string) {
-	var z T
-	z.Touch(s)
-}
-
-func RunGenericBridge() {
-	runZero[slotleaf.Corruptor](slotreg.ReadSlotMode())
-}
-`,
-		},
-		{
-			pkgPath: "example.com/fnbus",
-			src: `package fnbus
-
-var fn func(string)
-var hookCh = make(chan []func(string), 1)
-
-type Bus struct{}
-
-func (*Bus) Register(cb func(string)) { fn = cb }
-
-func Register(cb func(string)) { fn = cb }
-
-func HookChan() <-chan []func(string) { return hookCh }
-
-func Emit(s string) {
-	if fn != nil {
-		fn(s)
-	}
-}
-`,
-		},
-		{
-			pkgPath: "example.com/fnsink",
-			imports: []string{"example.com/fnbus"},
-			src: `package fnsink
-
-import "example.com/fnbus"
-
-var buf = string([]byte{'f'})
-var FnBusEnvReg []func() byte
-
-func init() {
-	local := buf
-	FnBusEnvReg = []func() byte{func() byte { return local[0] }}
-}
-
-func RunEmit() { fnbus.Emit(buf) }
-`,
-		},
-		{
-			pkgPath: "example.com/fnplanter",
-			imports: []string{"example.com/fnbus", "example.com/fnsink"},
-			src: `package fnplanter
-
-import (
-	"unsafe"
-
-	"example.com/fnbus"
-	_ "example.com/fnsink"
-)
-
-func PlantViaFuncVal() {
-	reg := fnbus.Register
-	reg(func(s string) {
-		if len(s) > 0 {
-			*unsafe.StringData(s) = 'K'
-		}
-	})
-}
-`,
-		},
-		{
-			pkgPath: "example.com/ifaceplanter",
-			imports: []string{"example.com/fnbus", "example.com/fnsink"},
-			src: `package ifaceplanter
-
-import (
-	"unsafe"
-
-	"example.com/fnbus"
-	_ "example.com/fnsink"
-)
-
-func PlantViaIface() {
-	var r interface{ Register(func(string)) } = &fnbus.Bus{}
-	r.Register(func(s string) {
-		if len(s) > 0 {
-			*unsafe.StringData(s) = 'K'
-		}
-	})
-}
-`,
-		},
-		{
-			pkgPath: "example.com/genericplanter",
-			imports: []string{"example.com/fnbus", "example.com/fnsink"},
-			src: `package genericplanter
-
-import (
-	"unsafe"
-
-	"example.com/fnbus"
-	_ "example.com/fnsink"
-)
-
-func plantZero[B any, P interface {
-	*B
-	Register(func(string))
-}](cb func(string)) {
-	var b B
-	P(&b).Register(cb)
-}
-
-func PlantViaGenericTypeArg() {
-	plantZero[fnbus.Bus](func(s string) {
-		if len(s) > 0 {
-			*unsafe.StringData(s) = 'K'
-		}
-	})
-}
-`,
-		},
-	})
-	for _, bridgeView := range []string{"example.com/slotbridge", "example.com/chanbridge", "example.com/ifacebridge", "example.com/genericbridge"} {
-		cs := Compose(containerMeta, containerFacts, bridgeView, nil, true, false)
-		if !slices.ContainsFunc(cs.RootCulprits, func(c Culprit) bool {
-			return c.Key == "example.com/slotreg.SlotCarrier"
-		}) {
-			t.Fatalf("%s container/interface sink missed SlotCarrier: %+v", bridgeView, cs.RootCulprits)
-		}
-	}
-	for _, planterView := range []string{"example.com/fnplanter", "example.com/ifaceplanter", "example.com/genericplanter"} {
-		cs := Compose(containerMeta, containerFacts, planterView, nil, false, false)
-		if !slices.ContainsFunc(cs.RootCulprits, func(c Culprit) bool {
-			return c.Key == "example.com/fnsink.FnBusEnvReg"
-		}) {
-			t.Fatalf("%s callback registrar missed FnBusEnvReg: %+v", planterView, cs.RootCulprits)
+		if v, ok := originCulprits[wantMut]; !ok || v != CulpritMutated {
+			t.Fatalf("expected CulpritMutated on %s, got ok=%v verb=%v culprits=%+v", wantMut, ok, v, originCS.RootCulprits)
 		}
 	}
 
-	malformedStrLinkMeta := []GraphPackage{
+	malformedLinkMeta := []GraphPackage{
 		{ImportPath: "example.com/clean", PkgPath: "example.com/clean", Class: MutableLocalPackage},
 		{ImportPath: "example.com/badimp", PkgPath: "example.com/badimp", Imports: []string{"example.com/clean"}, Class: MutableLocalPackage},
 	}
-	malformedStrLinkFacts := map[string][]Fact{
+	malformedLinkFacts := map[string][]Fact{
 		"example.com/clean": {
 			{
 				Declares:          []string{"example.com/clean.V"},
@@ -5212,19 +3851,18 @@ func PlantViaGenericTypeArg() {
 		},
 		"example.com/badimp": {
 			{
-				HasStringHeaderUnsafe: true,
-				StringCarrierLinks:    []syntaxutil.CarrierLink{{From: "example.com/clean.V", To: ""}},
+				CarrierLinks: []syntaxutil.CarrierLink{{From: "example.com/clean.V", To: ""}},
 			},
 		},
 	}
-	malformedLinkCS := Compose(malformedStrLinkMeta, malformedStrLinkFacts, "example.com/badimp", nil, true, false)
+	malformedLinkCS := Compose(malformedLinkMeta, malformedLinkFacts, "example.com/badimp", nil, true, false)
 	if !slices.ContainsFunc(malformedLinkCS.RootCulprits, func(c Culprit) bool {
 		return c.Key == "example.com/clean.V"
 	}) {
-		t.Fatalf("Compose failed to mark foreign endpoint of malformed StringCarrierLinks: %+v", malformedLinkCS)
+		t.Fatalf("Compose failed to mark foreign endpoint of malformed CarrierLinks: %+v", malformedLinkCS)
 	}
-	if NonVouchDischargedVars(malformedStrLinkMeta, malformedStrLinkFacts, true)["example.com/clean.V"] {
-		t.Fatalf("NonVouchDischargedVars discharged foreign endpoint of malformed StringCarrierLinks")
+	if NonVouchDischargedVars(malformedLinkMeta, malformedLinkFacts, true)["example.com/clean.V"] {
+		t.Fatalf("NonVouchDischargedVars discharged foreign endpoint of malformed CarrierLinks")
 	}
 }
 

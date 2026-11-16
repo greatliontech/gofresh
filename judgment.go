@@ -92,9 +92,12 @@ type ObservationAuthority struct {
 	ProofStrategy        string
 	OutcomeMethod        string
 	CurrentApplicability bool
+	SingleSubject        bool
 }
 
-func (o ObservationAuthority) accepted() bool { return o != (ObservationAuthority{}) }
+func (o ObservationAuthority) accepted() bool {
+	return o.Assertion != "" && o.ProofStrategy != "" && o.OutcomeMethod != ""
+}
 
 // AcceptedAuthority names the facts admitted by the deciding check. Zero fields
 // grant no authority, including premises skipped by an early refusal. Agreement
@@ -168,15 +171,22 @@ func purityAttribution(assertion string) PurityAttribution {
 }
 
 func admittedObservation(rec Fingerprint, subject Subject, cl closure.Closure) ObservationAuthority {
-	compatible, effectFree := compatibleObservationProofMode(rec, subject)
+	return admittedObservationForModel(rec, subject, cl, false)
+}
+
+func admittedObservationForModel(rec Fingerprint, subject Subject, cl closure.Closure, singleSubject bool) ObservationAuthority {
+	compatible, effectFree, reqSingleSubject := compatibleObservationProofFull(rec, subject)
 	if !compatible || rec.AdmissionPolicy != cl.AdmissionPolicy || !rec.ObservationProof.Observable {
 		return ObservationAuthority{}
 	}
+	if reqSingleSubject && !singleSubject {
+		return ObservationAuthority{}
+	}
 	if runtimeinput.HasOutcomeSupport(rec.RuntimeInputs, outcomeSubject(rec, subject)) {
-		return ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: rec.ObservationProof.Strategy, OutcomeMethod: outcome.Method}
+		return ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: rec.ObservationProof.Strategy, OutcomeMethod: outcome.Method, SingleSubject: reqSingleSubject}
 	}
 	if effectFree {
-		return ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: rec.ObservationProof.Strategy, OutcomeMethod: outcome.StaticMethod}
+		return ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: rec.ObservationProof.Strategy, OutcomeMethod: outcome.StaticMethod, SingleSubject: reqSingleSubject}
 	}
 	return ObservationAuthority{}
 }

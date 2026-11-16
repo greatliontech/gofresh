@@ -245,9 +245,10 @@ func (v *Snapshot) prepareOutcomeSupport(ctx context.Context, frame runtimeinput
 	}
 	var subjects []string
 	reason := ""
+	singleSubject := v.session != nil && v.session.executionModel.singleSubject()
 	for _, subject := range v.subjects {
 		proof := v.observable[subject]
-		if proof.OutcomeMethod != outcome.Method && reason == "" {
+		if (proof.OutcomeMethod != outcome.Method || (proof.RequiresSingleSubject && !singleSubject)) && reason == "" {
 			reason = fmt.Sprintf("operation-outcome support unavailable for %q", subject.Package+"."+subject.Symbol)
 		}
 		subjects = append(subjects, outcomeSubject(fingerprints[subject], subject))

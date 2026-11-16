@@ -1,9 +1,7 @@
 package dynstate
 
 import (
-	"go/token"
 	"slices"
-	"strings"
 
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
@@ -26,36 +24,11 @@ type DeferralResolution struct {
 	InitOnlyFn         map[syntaxutil.FuncKey]bool
 	InitReachFn        map[syntaxutil.FuncKey]bool
 
-	StringUnsafePackages       map[string]bool
-	ReturnStringUnsafePackages map[string]bool
-	BoundedRoots               bool
-
 	FieldDeferAt  map[syntaxutil.FieldPosKey][]syntaxutil.ParamKey
 	FieldPoisonAt map[syntaxutil.FieldParamPoison]bool
 	RetDeferAt    map[syntaxutil.ReturnFieldPosKey][]syntaxutil.ParamKey
 	RetPoisonAt   map[syntaxutil.ReturnFieldParamPoison]bool
 	CtorsOf       map[string][]syntaxutil.FuncKey
-}
-
-// AppliesStringAttributedUse reports whether a return-string escape use in
-// pkgPath is reachable by a string-header unsafe consumer in this cone.
-func (r *DeferralResolution) AppliesStringAttributedUse(pkgPath string, fn syntaxutil.FuncKey) bool {
-	if r == nil {
-		return false
-	}
-	if r.ReturnStringUnsafePackages[pkgPath] {
-		return true
-	}
-	if !r.StringUnsafePackages[pkgPath] {
-		return false
-	}
-	if fn.IsZero() || strings.Contains(fn.Name, ".") {
-		return true
-	}
-	if !r.BoundedRoots && token.IsExported(fn.Name) {
-		return true
-	}
-	return r.RefRegions[fn] != nil
 }
 
 // IsObjectClosed reports whether key is a declared package variable whose
@@ -84,9 +57,8 @@ type EnvAuditResolution struct {
 	ReadOnly        map[syntaxutil.FuncKey]bool
 	ParamDeps       map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool
 	ParamMethodDeps map[syntaxutil.ParamKey]map[syntaxutil.FuncKey]bool
-	MethodDeps           map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool
-	MethodParamDeps      map[syntaxutil.FuncKey]map[syntaxutil.ParamKey]bool
-	StringUnsafePackages map[string]bool
+	MethodDeps      map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool
+	MethodParamDeps map[syntaxutil.FuncKey]map[syntaxutil.ParamKey]bool
 }
 
 func (e *EnvAuditResolution) DepResolved(dep syntaxutil.EnvAuditTarget) bool {
@@ -276,62 +248,37 @@ func resolveConfinementJointLFP(allFacts map[string][]Fact, malformed func(fact 
 // ResolveEnvAudit computes the joint least fixed point over ReturnEnvFree and
 // ParamInsertionFree claims across allFacts.
 func ResolveEnvAudit(allFacts map[string][]Fact, malformed func(fact Fact)) *EnvAuditResolution {
-	return ResolveEnvAuditWithMeta(nil, allFacts, malformed)
-}
-
-func ResolveEnvAuditWithMeta(meta []GraphPackage, allFacts map[string][]Fact, malformed func(fact Fact)) *EnvAuditResolution {
 	conf := resolveConfinementJointLFP(allFacts, malformed)
-	strUnsafe, _ := upstreamStringUnsafePackagesWithConfinement(meta, allFacts, conf.paramLeakFree, conf.readOnly, malformed)
-	return resolveEnvAuditWithConfinement(strUnsafe, allFacts, conf, malformed)
+	return resolveEnvAuditWithConfinement(allFacts, conf, malformed)
 }
 
-func resolveEnvAuditWithConfinement(strUnsafePkg map[string]bool, allFacts map[string][]Fact, conf confinementResolution, malformed func(fact Fact)) *EnvAuditResolution {
+func resolveEnvAuditWithConfinement(allFacts map[string][]Fact, conf confinementResolution, malformed func(fact Fact)) *EnvAuditResolution {
 	e := &EnvAuditResolution{
-		Declared:             map[syntaxutil.FuncKey]bool{},
-		InsDeclared:          map[syntaxutil.ParamKey]bool{},
-		Resolved:             map[syntaxutil.FuncKey]bool{},
-		InsResolved:          map[syntaxutil.ParamKey]bool{},
-		RetDeps:              map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool{},
-		RetParamDeps:         map[syntaxutil.FuncKey]map[syntaxutil.ParamKey]bool{},
-		RetMethodDeps:        map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool{},
-		RetInsDeps:           map[syntaxutil.FuncKey]map[syntaxutil.EnvAuditTarget]bool{},
-		InsDeps:              map[syntaxutil.ParamKey]map[syntaxutil.EnvAuditTarget]bool{},
-		InsParamDeps:         map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool{},
-		InsMethodDeps:        map[syntaxutil.ParamKey]map[syntaxutil.FuncKey]bool{},
-		ParamLeakFree:        conf.paramLeakFree,
-		ReadOnly:             conf.readOnly,
-		ParamDeps:            conf.paramDeps,
-		ParamMethodDeps:      conf.paramMethodDeps,
-		MethodDeps:           conf.methodDeps,
-		MethodParamDeps:      conf.methodParamDeps,
-		StringUnsafePackages: strUnsafePkg,
+		Declared:        map[syntaxutil.FuncKey]bool{},
+		InsDeclared:     map[syntaxutil.ParamKey]bool{},
+		Resolved:        map[syntaxutil.FuncKey]bool{},
+		InsResolved:     map[syntaxutil.ParamKey]bool{},
+		RetDeps:         map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool{},
+		RetParamDeps:    map[syntaxutil.FuncKey]map[syntaxutil.ParamKey]bool{},
+		RetMethodDeps:   map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool{},
+		RetInsDeps:      map[syntaxutil.FuncKey]map[syntaxutil.EnvAuditTarget]bool{},
+		InsDeps:         map[syntaxutil.ParamKey]map[syntaxutil.EnvAuditTarget]bool{},
+		InsParamDeps:    map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool{},
+		InsMethodDeps:   map[syntaxutil.ParamKey]map[syntaxutil.FuncKey]bool{},
+		ParamLeakFree:   conf.paramLeakFree,
+		ReadOnly:        conf.readOnly,
+		ParamDeps:       conf.paramDeps,
+		ParamMethodDeps: conf.paramMethodDeps,
+		MethodDeps:      conf.methodDeps,
+		MethodParamDeps: conf.methodParamDeps,
 	}
 	if malformed == nil {
 		malformed = func(Fact) {}
 	}
 	poisonedFunc := map[syntaxutil.FuncKey]bool{}
 	poisonedParam := map[syntaxutil.ParamKey]bool{}
-	for pkgPath, facts := range allFacts {
-		applyStrBlock := strUnsafePkg[pkgPath]
+	for _, facts := range allFacts {
 		for _, fact := range facts {
-			for _, key := range fact.StringReturnEnvBlocked {
-				if !key.Valid() || key.Pkg != pkgPath {
-					malformed(fact)
-					continue
-				}
-				if applyStrBlock || strUnsafePkg[key.Pkg] {
-					poisonedFunc[key] = true
-				}
-			}
-			for _, key := range fact.StringParamInsertionBlocked {
-				if !key.Valid() || key.Func.Pkg != pkgPath {
-					malformed(fact)
-					continue
-				}
-				if applyStrBlock || strUnsafePkg[key.Func.Pkg] {
-					poisonedParam[key] = true
-				}
-			}
 			for _, key := range fact.ReturnEnvFree {
 				if !key.Valid() {
 					malformed(fact)
@@ -437,111 +384,6 @@ func resolveEnvAuditWithConfinement(strUnsafePkg map[string]bool, allFacts map[s
 				}
 				e.InsMethodDeps[edge.Param][edge.Method] = true
 			}
-			for _, edge := range fact.StringReturnEnvDeps {
-				if !edge.Valid() || edge.Func.Pkg != pkgPath {
-					malformed(fact)
-					if edge.Func.Valid() {
-						poisonedFunc[edge.Func] = true
-					}
-					continue
-				}
-				if applyStrBlock {
-					if e.RetDeps[edge.Func] == nil {
-						e.RetDeps[edge.Func] = map[syntaxutil.FuncKey]bool{}
-					}
-					e.RetDeps[edge.Func][edge.Callee] = true
-				}
-			}
-			for _, edge := range fact.StringReturnEnvParamDeps {
-				if !edge.Valid() || edge.Func.Pkg != pkgPath {
-					malformed(fact)
-					if edge.Func.Valid() {
-						poisonedFunc[edge.Func] = true
-					}
-					continue
-				}
-				if applyStrBlock {
-					if e.RetParamDeps[edge.Func] == nil {
-						e.RetParamDeps[edge.Func] = map[syntaxutil.ParamKey]bool{}
-					}
-					e.RetParamDeps[edge.Func][edge.Param] = true
-				}
-			}
-			for _, edge := range fact.StringReturnEnvMethodDeps {
-				if !edge.Valid() || edge.Func.Pkg != pkgPath {
-					malformed(fact)
-					if edge.Func.Valid() {
-						poisonedFunc[edge.Func] = true
-					}
-					continue
-				}
-				if applyStrBlock {
-					if e.RetMethodDeps[edge.Func] == nil {
-						e.RetMethodDeps[edge.Func] = map[syntaxutil.FuncKey]bool{}
-					}
-					e.RetMethodDeps[edge.Func][edge.Callee] = true
-				}
-			}
-			for _, edge := range fact.StringReturnEnvInsertionDeps {
-				if !edge.Valid() || edge.Func.Pkg != pkgPath {
-					malformed(fact)
-					if edge.Func.Valid() {
-						poisonedFunc[edge.Func] = true
-					}
-					continue
-				}
-				if applyStrBlock {
-					if e.RetInsDeps[edge.Func] == nil {
-						e.RetInsDeps[edge.Func] = map[syntaxutil.EnvAuditTarget]bool{}
-					}
-					e.RetInsDeps[edge.Func][edge.Dep] = true
-				}
-			}
-			for _, edge := range fact.StringParamInsertionDeps {
-				if !edge.Valid() || edge.Param.Func.Pkg != pkgPath {
-					malformed(fact)
-					if edge.Param.Valid() {
-						poisonedParam[edge.Param] = true
-					}
-					continue
-				}
-				if applyStrBlock {
-					if e.InsDeps[edge.Param] == nil {
-						e.InsDeps[edge.Param] = map[syntaxutil.EnvAuditTarget]bool{}
-					}
-					e.InsDeps[edge.Param][edge.Dep] = true
-				}
-			}
-			for _, edge := range fact.StringParamInsertionParamDeps {
-				if !edge.Valid() || edge.Own.Func.Pkg != pkgPath {
-					malformed(fact)
-					if edge.Own.Valid() {
-						poisonedParam[edge.Own] = true
-					}
-					continue
-				}
-				if applyStrBlock {
-					if e.InsParamDeps[edge.Own] == nil {
-						e.InsParamDeps[edge.Own] = map[syntaxutil.ParamKey]bool{}
-					}
-					e.InsParamDeps[edge.Own][edge.Dep] = true
-				}
-			}
-			for _, edge := range fact.StringParamInsertionMethodDeps {
-				if !edge.Valid() || edge.Param.Func.Pkg != pkgPath {
-					malformed(fact)
-					if edge.Param.Valid() {
-						poisonedParam[edge.Param] = true
-					}
-					continue
-				}
-				if applyStrBlock {
-					if e.InsMethodDeps[edge.Param] == nil {
-						e.InsMethodDeps[edge.Param] = map[syntaxutil.FuncKey]bool{}
-					}
-					e.InsMethodDeps[edge.Param][edge.Method] = true
-				}
-			}
 		}
 	}
 	for fnKey := range poisonedFunc {
@@ -630,21 +472,6 @@ func resolveEnvAuditWithConfinement(strUnsafePkg map[string]bool, allFacts map[s
 
 // NewDeferralResolution composes the cross-package proof state across allFacts.
 func NewDeferralResolution(allFacts map[string][]Fact, malformed func(fact Fact)) *DeferralResolution {
-	return NewDeferralResolutionWithMeta(nil, allFacts, malformed)
-}
-
-// NewDeferralResolutionWithMeta composes the cross-package proof state across
-// allFacts using meta's package import graph to scope string-header unsafe
-// invalidations to packages reachable from a string-header unsafe importer.
-func NewDeferralResolutionWithMeta(meta []GraphPackage, allFacts map[string][]Fact, malformed func(fact Fact)) *DeferralResolution {
-	return NewDeferralResolutionWithRoots(meta, allFacts, false, malformed)
-}
-
-// NewDeferralResolutionWithRoots composes the cross-package proof state across
-// allFacts, setting BoundedRoots when the execution model bounds invoked roots
-// to test subjects compiled inside allFacts (SingleSubjectExecution or
-// PackageExecution).
-func NewDeferralResolutionWithRoots(meta []GraphPackage, allFacts map[string][]Fact, boundedRoots bool, malformed func(fact Fact)) *DeferralResolution {
 	r := &DeferralResolution{
 		Declared:           map[string]bool{},
 		ParamLeakFree:      map[syntaxutil.ParamKey]bool{},
@@ -655,7 +482,6 @@ func NewDeferralResolutionWithRoots(meta []GraphPackage, allFacts map[string][]F
 		OwnerUnproven:      map[string]bool{},
 		EnvFreeResolved:    map[syntaxutil.FuncKey]bool{},
 		EnvFreeDeps:        map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool{},
-		BoundedRoots:       boundedRoots,
 
 		FieldDeferAt:  map[syntaxutil.FieldPosKey][]syntaxutil.ParamKey{},
 		FieldPoisonAt: map[syntaxutil.FieldParamPoison]bool{},
@@ -675,14 +501,12 @@ func NewDeferralResolutionWithRoots(meta []GraphPackage, allFacts map[string][]F
 	conf := resolveConfinementJointLFP(allFacts, markMalformed)
 	r.ParamLeakFree = conf.paramLeakFree
 	r.ReadOnly = conf.readOnly
-	r.StringUnsafePackages, r.ReturnStringUnsafePackages = upstreamStringUnsafePackagesWithConfinement(meta, allFacts, r.ParamLeakFree, r.ReadOnly, markMalformed)
 
 	declaredKeys := r.Declared
 	opaqueDeps := map[string]map[string]bool{}
 	retentionDeps := map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool{}
 	poisonedRetParam := map[syntaxutil.ParamKey]bool{}
-	for pkgPath, facts := range allFacts {
-		applyStr := r.StringUnsafePackages[pkgPath]
+	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, key := range fact.ParamRetentionFree {
 				if !key.Valid() {
@@ -814,45 +638,6 @@ func NewDeferralResolutionWithRoots(meta []GraphPackage, allFacts map[string][]F
 					r.OwnerUnproven[use.Key] = true
 				}
 			}
-			for _, use := range fact.StringEnvCallUses {
-				if !use.Valid() {
-					markMalformed(fact)
-					if syntaxutil.ValidFactKey(use.Key) {
-						r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: use.Key}] = true
-						r.OwnerUnproven[use.Key] = true
-					}
-					continue
-				}
-				if applyStr {
-					r.CtorsOf[use.Key] = append(r.CtorsOf[use.Key], use.Callee)
-				}
-			}
-			for _, use := range fact.StringEnvCallParamUses {
-				if !use.Valid() {
-					markMalformed(fact)
-					if syntaxutil.ValidFactKey(use.Key) {
-						r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: use.Key}] = true
-						r.OwnerUnproven[use.Key] = true
-					}
-					continue
-				}
-				if applyStr && !r.ParamLeakFree[use.Param] {
-					r.OwnerUnproven[use.Key] = true
-				}
-			}
-			for _, use := range fact.StringEnvCallMethodUses {
-				if !use.Valid() {
-					markMalformed(fact)
-					if syntaxutil.ValidFactKey(use.Key) {
-						r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: use.Key}] = true
-						r.OwnerUnproven[use.Key] = true
-					}
-					continue
-				}
-				if applyStr && !r.ReadOnly[use.Method] {
-					r.OwnerUnproven[use.Key] = true
-				}
-			}
 		}
 	}
 	for paramKey := range poisonedRetParam {
@@ -867,7 +652,7 @@ func NewDeferralResolutionWithRoots(meta []GraphPackage, allFacts map[string][]F
 		return r.NotOpaque[dep] || !declaredKeys[dep]
 	})
 
-	ea := resolveEnvAuditWithConfinement(r.StringUnsafePackages, allFacts, conf, markMalformed)
+	ea := resolveEnvAuditWithConfinement(allFacts, conf, markMalformed)
 	r.EnvFreeResolved = ea.Resolved
 	r.EnvFreeDeps = ea.RetDeps
 
@@ -883,16 +668,6 @@ func NewDeferralResolutionWithRoots(meta []GraphPackage, allFacts map[string][]F
 	linkAdj := ActiveCarrierLinkGraph(allFacts, r, func(fact Fact) {
 		markMalformed(fact)
 		for _, link := range fact.CarrierLinks {
-			if !link.Valid() {
-				if syntaxutil.ValidFactKey(link.From) {
-					r.OwnerUnproven[link.From] = true
-				}
-				if syntaxutil.ValidFactKey(link.To) {
-					r.OwnerUnproven[link.To] = true
-				}
-			}
-		}
-		for _, link := range fact.StringCarrierLinks {
 			if !link.Valid() {
 				if syntaxutil.ValidFactKey(link.From) {
 					r.OwnerUnproven[link.From] = true
@@ -1028,8 +803,7 @@ func NewDeferralResolutionWithRoots(meta []GraphPackage, allFacts map[string][]F
 
 	var validFieldUses []syntaxutil.FieldPosKey
 	var validElemUses []syntaxutil.ElemParamUse
-	for pkgPath, facts := range allFacts {
-		applyStr := r.StringUnsafePackages[pkgPath]
+	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, key := range fact.Mutates {
 				r.OwnerUnproven[key] = true
@@ -1039,41 +813,8 @@ func NewDeferralResolutionWithRoots(meta []GraphPackage, allFacts map[string][]F
 					r.OwnerUnproven[key] = true
 				}
 			}
-			for _, key := range fact.StringEscapes {
-				if !syntaxutil.ValidQualifiedVarKey(key) {
-					markMalformed(fact)
-					continue
-				}
-				if applyStr && !r.IsObjectClosed(key) {
-					r.OwnerUnproven[key] = true
-				}
-			}
 			for _, key := range fact.EnvCarrying {
 				r.OwnerUnproven[key] = true
-			}
-			factStrEnvSet := make(map[string]bool, len(fact.StringEnvCarrying))
-			for _, key := range fact.StringEnvCarrying {
-				if !syntaxutil.ValidQualifiedVarKey(key) {
-					markMalformed(fact)
-					continue
-				}
-				factStrEnvSet[key] = true
-				if applyStr {
-					r.OwnerUnproven[key] = true
-				}
-			}
-			for _, key := range fact.StringEnvCallable {
-				if !syntaxutil.ValidQualifiedVarKey(key) {
-					markMalformed(fact)
-				}
-			}
-			for _, use := range fact.StringEnvCarryingFns {
-				if !use.Valid() || !factStrEnvSet[use.Key] {
-					markMalformed(fact)
-					if syntaxutil.ValidFactKey(use.Key) {
-						r.OwnerUnproven[use.Key] = true
-					}
-				}
 			}
 			for _, use := range fact.MethodUses {
 				if !use.Valid() {
@@ -1151,9 +892,6 @@ func NewDeferralResolutionWithRoots(meta []GraphPackage, allFacts map[string][]F
 			}
 			for _, use := range fact.AttributedUses {
 				applyOwnerAttributedUse(fact, use, true)
-			}
-			for _, use := range fact.StringAttributedUses {
-				applyOwnerAttributedUse(fact, use, r.AppliesStringAttributedUse(pkgPath, use.Func))
 			}
 		}
 	}

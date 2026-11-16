@@ -62,19 +62,14 @@ func isTypeParamType(t types.Type) bool {
 	return ok
 }
 
-func canAliasCarrierType(audited, allowString bool, t types.Type) bool {
+func canAliasCarrierType(audited bool, t types.Type) bool {
 	return refconfine.TypeHandsOutDynamicAlias(audited, t) ||
 		refconfine.TypeHandsOutMutableReach(t) ||
 		refconfine.TypeReachesSyncNoCopyByValue(t) ||
-		syntaxutil.ContainsUintptr(t) ||
-		(allowString && syntaxutil.TypeReachesString(t))
+		syntaxutil.ContainsUintptr(t)
 }
 
-func callResultHandsOutOrTuple(allowString bool, t types.Type) bool {
-	return refconfine.CallResultHandsOut(t) || (allowString && syntaxutil.TypeReachesString(t))
-}
-
-func addrOfSubplaceCanAliasCarrier(audited, allowString bool, v *flowir.Value) bool {
+func addrOfSubplaceCanAliasCarrier(audited bool, v *flowir.Value) bool {
 	if v == nil || v.Kind != flowir.ValAddrOf {
 		return true
 	}
@@ -86,9 +81,9 @@ func addrOfSubplaceCanAliasCarrier(audited, allowString bool, v *flowir.Value) b
 		if !ok {
 			return true
 		}
-		return canAliasCarrierType(audited, allowString, sl.Elem())
+		return canAliasCarrierType(audited, sl.Elem())
 	}
-	return v.AddrPlace.Type == nil || canAliasCarrierType(audited, allowString, v.AddrPlace.Type)
+	return v.AddrPlace.Type == nil || canAliasCarrierType(audited, v.AddrPlace.Type)
 }
 
 // placeEntersInterior reports whether accessing or writing through p (with
@@ -401,17 +396,17 @@ func forEachNestedLiteralAndGo(b *flowir.Body, onLit func(*flowir.Body), onGo fu
 }
 
 func collectValueCarrierVars(
-	audited, allowString bool,
+	audited bool,
 	v *flowir.Value,
 	carrierVar func(types.Object) (*types.Var, bool),
 	aliases map[types.Object]localCarrierAliases,
 	skipMethodRecv func(*flowir.Value) bool,
 ) []*types.Var {
-	return collectValueCarrierVarsWithOpts(audited, allowString, v, carrierVar, aliases, skipMethodRecv, false)
+	return collectValueCarrierVarsWithOpts(audited, v, carrierVar, aliases, skipMethodRecv, false)
 }
 
 func collectValueCarrierVarsWithOpts(
-	audited, allowString bool,
+	audited bool,
 	v *flowir.Value,
 	carrierVar func(types.Object) (*types.Var, bool),
 	aliases map[types.Object]localCarrierAliases,
@@ -432,7 +427,6 @@ func collectValueCarrierVarsWithOpts(
 			appendUniqueVars(&vars, aliases[u].all)
 		}
 	}
-	strOK := allowString
 	var walk func(cur *flowir.Value)
 	walk = func(cur *flowir.Value) {
 		if cur == nil || cur.Kind == flowir.ValMakeClosure {
@@ -440,7 +434,7 @@ func collectValueCarrierVarsWithOpts(
 		}
 		isStrBuiltin := cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallBuiltin &&
 			(cur.BuiltinName == "String" || cur.BuiltinName == "StringData")
-		if !isStrBuiltin && cur.Type != nil && !canAliasCarrierType(audited, strOK, cur.Type) && !isTypeParamType(cur.Type) {
+		if !isStrBuiltin && cur.Type != nil && !canAliasCarrierType(audited, cur.Type) && !isTypeParamType(cur.Type) {
 			return
 		}
 		if cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallIIFE {
@@ -463,19 +457,11 @@ func collectValueCarrierVarsWithOpts(
 		case flowir.ValCall:
 			if cur.CallKind == flowir.CallBuiltin {
 				switch cur.BuiltinName {
-				case "len", "cap", "Sizeof", "Alignof", "Offsetof":
+				case "len", "cap", "Sizeof", "Alignof", "Offsetof", "StringData":
 					return
 				case "Slice", "SliceData", "String":
 					if len(cur.Args) > 0 {
 						walk(cur.Args[0])
-					}
-					return
-				case "StringData":
-					if len(cur.Args) > 0 {
-						prev := strOK
-						strOK = true
-						walk(cur.Args[0])
-						strOK = prev
 					}
 					return
 				}
@@ -503,7 +489,7 @@ func collectValueCarrierVarsWithOpts(
 }
 
 func valueCarrierSources(
-	audited, allowString bool,
+	audited bool,
 	v *flowir.Value,
 	carrierVar func(types.Object) (*types.Var, bool),
 	aliases map[types.Object]localCarrierAliases,
@@ -513,7 +499,7 @@ func valueCarrierSources(
 	if v == nil {
 		return nil, nil
 	}
-	allSrcs = collectValueCarrierVarsWithOpts(audited, allowString, v, carrierVar, aliases, skipMethodRecv, skipNonBuiltinCalls)
+	allSrcs = collectValueCarrierVarsWithOpts(audited, v, carrierVar, aliases, skipMethodRecv, skipNonBuiltinCalls)
 	if len(allSrcs) == 0 {
 		return nil, nil
 	}
@@ -560,7 +546,7 @@ func valueCarrierSources(
 		if v.CallKind == flowir.CallIIFE && v.IIFE != nil {
 			var rSrcs []*types.Var
 			forEachIIFEReturnValue(v, func(retVal *flowir.Value) {
-				rs, _ := valueCarrierSources(audited, allowString, retVal, carrierVar, aliases, skipMethodRecv, skipNonBuiltinCalls)
+				rs, _ := valueCarrierSources(audited, retVal, carrierVar, aliases, skipMethodRecv, skipNonBuiltinCalls)
 				appendUniqueVars(&rSrcs, rs)
 			})
 			return rSrcs, allSrcs
@@ -576,7 +562,6 @@ func valueCarrierSources(
 // &place, array [:], composite literals, Go 1.26+ new(expr), CallResultHandsOut
 // conversions/type assertions, and pointer/value-forwarding builtins.
 func collectValueLinkVars(
-	allowString bool,
 	v *flowir.Value,
 	carrierVar func(types.Object) (*types.Var, bool),
 	linkAliases map[types.Object][]*types.Var,
@@ -595,11 +580,11 @@ func collectValueLinkVars(
 			appendUniqueVars(&vars, linkAliases[u])
 		}
 	}
-	strOK := allowString
+	inStringData := false
 	var walkPlaceBase func(pl flowir.Place, addressed bool)
 	var walk func(cur *flowir.Value)
 	walkPlaceBase = func(pl flowir.Place, addressed bool) {
-		if !addressed && pl.Type != nil && !callResultHandsOutOrTuple(strOK, pl.Type) && !isTypeParamType(pl.Type) {
+		if !addressed && !inStringData && pl.Type != nil && !refconfine.CallResultHandsOut(pl.Type) && !isTypeParamType(pl.Type) {
 			return
 		}
 		if pl.Obj != nil {
@@ -616,7 +601,7 @@ func collectValueLinkVars(
 		}
 		isStrBuiltin := cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallBuiltin &&
 			(cur.BuiltinName == "String" || cur.BuiltinName == "StringData")
-		if !isStrBuiltin && cur.Type != nil && !callResultHandsOutOrTuple(strOK, cur.Type) {
+		if !isStrBuiltin && !inStringData && cur.Type != nil && !refconfine.CallResultHandsOut(cur.Type) {
 			return
 		}
 		switch cur.Kind {
@@ -668,10 +653,10 @@ func collectValueLinkVars(
 					}
 				case "StringData":
 					if len(cur.Args) > 0 {
-						prev := strOK
-						strOK = true
+						prev := inStringData
+						inStringData = true
 						walk(cur.Args[0])
-						strOK = prev
+						inStringData = prev
 					}
 				}
 			}
@@ -682,7 +667,6 @@ func collectValueLinkVars(
 }
 
 type carrierAliasConfig struct {
-	allowString          bool
 	parentAliases        map[types.Object]localCarrierAliases
 	parentLinks          map[types.Object][]*types.Var
 	carrierVar           func(types.Object) (*types.Var, bool)
@@ -811,13 +795,13 @@ func computeBodyCarrierAliases(
 	}
 
 	valSources := func(v *flowir.Value) (rootSrcs, allSrcs []*types.Var) {
-		return valueCarrierSources(audited, cfg.allowString, v, cfg.carrierVar, aliased, cfg.skipMethodRecv, cfg.skipNonBuiltinCalls)
+		return valueCarrierSources(audited, v, cfg.carrierVar, aliased, cfg.skipMethodRecv, cfg.skipNonBuiltinCalls)
 	}
 	valLinks := func(v *flowir.Value) []*types.Var {
 		if !cfg.trackLinks {
 			return nil
 		}
-		return collectValueLinkVars(cfg.allowString, v, cfg.carrierVar, linkAliased)
+		return collectValueLinkVars(v, cfg.carrierVar, linkAliased)
 	}
 
 	isTopParam := make(map[*types.Var]bool, len(b.Params))
@@ -891,7 +875,7 @@ func computeBodyCarrierAliases(
 		}
 		changed := false
 		if len(rootSrcs) > 0 || len(allSrcs) > 0 {
-			if composite || inPlace || canAliasCarrierType(audited, cfg.allowString, obj.Type()) || isTypeParamType(obj.Type()) {
+			if composite || inPlace || canAliasCarrierType(audited, obj.Type()) || isTypeParamType(obj.Type()) {
 				var ownRoot []*types.Var
 				if (!composite && !inPlace) || (derefStore && addrTakenBare[obj]) {
 					ownRoot = rootSrcs

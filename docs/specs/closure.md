@@ -401,15 +401,20 @@ included, is REQ-closure-shared-dynamic-state-reason.)
 REQ-closure-shared-dynamic-state names — a plain
 scalar or any other carrier-free type — is deliberately outside this
 net: its direct mutation is per-process-deterministic content the
-whole-graph hash already covers, and an unsafe-mediated mutation of
+whole-graph hash already covers, compile-time layout queries
+(`unsafe.Sizeof`, `unsafe.Alignof`, and `unsafe.Offsetof`) evaluate to
+compile-time constants already covered by the code guards without
+touching runtime memory, and an unsafe-mediated mutation of
 it refuses on the channel it uses — a write through an
-unsafe.Pointer-typed value refuses at the subject walk (the scan
-carries that class as a diagnostic only for the observability
-proof, REQ-closure-observability-unsafe, and the maximal-tier
-unverifiable judgment keeps it), while `unsafe.Slice`,
-`unsafe.String`, and the package's other operations keep the
-maximal-tier scan block, their call sites carrying no
-unsafe-pointer-typed value the walk can price; the non-Go write
+`unsafe.Pointer`-typed value refuses at the subject walk when reached and,
+when present in unreached code of any loaded non-standard package in the
+test binary without a mechanical read-only or layout-confined proof, marks
+the observability proof single-subject-only (REQ-closure-observability-unsafe,
+while the maximal-tier unverifiable judgment keeps the whole-package scan
+block), whereas `unsafe.Slice`,
+`unsafe.String`, and the package's other runtime operations keep the
+maximal-tier and package-wide scan block, their call sites carrying no
+`unsafe.Pointer`-typed value the walk can price; the non-Go write
 channels — assembly, `//go:linkname`, cgo — MUST remain scan blockers.
 
 **REQ-closure-shared-dynamic-state-atomic** (invariant): Checked atomic transparency governs every carrier walk of this
@@ -443,7 +448,7 @@ or slice reaching a dynamic carrier, or an unsafe pointer — hands shared mutab
 access through the value, so it is judged by use shape, still fail-closed: a read
 that provably cannot write — indexing or iterating the carrier, taking its length
 or capacity, querying its compile-time size, alignment, or field offset, or comparing it — is not mutation, and the indexing and iteration
-discharges hold only when the produced value hands out no mutable reach or raw `uintptr` address (and no string value exposed to un-confined string-header `unsafe` operations in the package, through an active cross-package string sink or planted callback, or in an upstream importer) — a
+discharges hold only when the produced value hands out no mutable reach or raw `uintptr` address — a
 pointer, map, slice, channel, interface, or `uintptr` anywhere in it refuses; a function
 value is program code judged where written, not write access (an indexed-out
 map still writes through) — but a signature-carrying value IS its
@@ -538,16 +543,16 @@ receiver-derived synchronization primitive is copied by value, no goroutine or
 non-synchronous nested function literal references the receiver or a tainted
 binding, values read
 off it are tracked as the receiver's own — a binding whose type hands out
-mutable reach, carries a raw `uintptr` address (or a string value in a scope reaching or exposing string-header `unsafe` operations), carries a signature, or reaches a synchronization primitive by
+mutable reach, carries a raw `uintptr` address, carries a signature, or reaches a synchronization primitive by
 value taints its local (a value copy that cannot write back, reconstruct an unsafe pointer, or copy synchronization state flows
 freely, and compile-time size, alignment, and field-offset queries read types without evaluating runtime memory), a receiver-rooted read is judged at its outermost selector or index
 step by the value it produces — an intermediate reach-bearing step is
 evaluation, not a handout — a conversion of a receiver-reachable value admits
-when its result type hands out no mutable reach or raw `uintptr` address (or converts between a string and a fresh byte or rune slice copy, whereas string-header `unsafe` extractions and pointer-to-`unsafe.Pointer` conversions over string-bearing storage refuse) and the operand is
+when its result type hands out no mutable reach or raw `uintptr` address (or converts between a string and a fresh byte or rune slice copy) and the operand is
 not a method value (a method value carries its receiver whatever the result
 type says; an aliasing conversion keeps the escape, and a non-blank type-assertion or type-switch narrowing of a non-signature value into a signature-carrying type refuses), a bind whose target
 outlives the body — a package-level variable — refuses whenever the target's
-type hands out mutable reach or a raw `uintptr` address (or writes a string-bearing value into a package variable exposed to string-header `unsafe` operations; a reach-free copy flows; the proof's tracked
+type hands out mutable reach or a raw `uintptr` address (a reach-free copy flows; the proof's tracked
 bindings die with the body, and an outliving alias escapes it — a sibling
 call's results bound to such a target refuse identically), a write
 through or an escape of a tainted value refuses, and only the method's own
@@ -572,7 +577,7 @@ declaration of the method (a member promoting it refuses), while any other
 exported dispatch keeps the escape, a composite being able to promote it
 from a foreign type — and a call to a proven method marks nothing,
 generic receivers included, provided the call site's instantiated result types
-each hand out no mutable reach or raw `uintptr` address (and no string value in a scope reaching string-header `unsafe` operations) or have checked immutable-implementation claims
+each hand out no mutable reach or raw `uintptr` address or have checked immutable-implementation claims
 (for reflect.Type this requires runtime-canonical descriptors never written
 after construction, and for reflect.TypeOf a separately checked pure-constructor
 claim at the effect classification tiers; for go/constant.Value this requires
@@ -824,7 +829,7 @@ confined in `T`'s package, every exported field on structs reachable from the
 getter's results restricted to scalars, by-value structs, pointers to non-empty
 named structs, or slices/arrays of non-empty named structs, and `T` together
 with every non-empty named struct reachable in `T`'s type closure guarded
-binary-wide so any non-fresh struct or element mutation across the graph (or un-confined string-header `unsafe` capability reaching the package directly, through an active cross-package string sink or planted callback, or from an upstream importer when the memoizer hands out string-bearing values, raw `uintptr` addresses being excluded from scalar slots) revokes
+binary-wide so any non-fresh struct or element mutation across the graph (raw `uintptr` addresses being excluded from scalar slots) revokes
 the discharge fail-closed. At the
 effect classification tiers the memo claim covers sync.Map itself and
 its Load, Store, and LoadOrStore — process-memory reads and writes fed by
@@ -1255,7 +1260,7 @@ connecting a local root to an enclosing-scope variable via mutable
 reach, place address-of, value-array slicing, or implicit
 pointer-receiver method-value addressing, since a shared environment is one
 object under every name it carries and however many carriers its
-closures reach — AND every root in that alias set has a confined origin (excluding channel or function-iterator range bindings, excluding non-scalar enclosing receivers and named results, excluding non-scalar enclosing parameters for directly registered literals outside synchronous init-only helpers while admitting caller-obligated unbroken parameters for returned literals and call-site-verified parameters of unexported synchronous init-only helpers where non-spread variadic calls allocate a fresh slice and spread calls require pure fresh slice data, verifying single-definition unmutated/unaddressed non-directive same-package signature sources with constructor edges propagated, rejecting type-switch narrowing into a signature-carrying type, and requiring mutable-reach local roots (including raw `uintptr` addresses, and string-bearing values when un-confined string-header `unsafe` capability reaches the package directly, through an active cross-package string sink or planted callback, or from an upstream importer) to initialize solely from pure fresh data over variable-free append bases, fresh allocations, value-plane clones over clean operands, settled unexported package data, or — in synchronous init flow — dynamic carriers, unbroken and non-directive when declared in the same package, from which neither the literal nor any sibling closure extracts or invokes a carrier, signature, or mutable-reach value, recorded as init-flow carrier links, with any signature-carrying operand boxed into an interface or composite within those roots satisfying this signature audit), with a
+closures reach — AND every root in that alias set has a confined origin (excluding channel or function-iterator range bindings, excluding non-scalar enclosing receivers and named results, excluding non-scalar enclosing parameters for directly registered literals outside synchronous init-only helpers while admitting caller-obligated unbroken parameters for returned literals and call-site-verified parameters of unexported synchronous init-only helpers where non-spread variadic calls allocate a fresh slice and spread calls require pure fresh slice data, verifying single-definition unmutated/unaddressed non-directive same-package signature sources with constructor edges propagated, rejecting type-switch narrowing into a signature-carrying type, and requiring mutable-reach local roots (including raw `uintptr` addresses) to initialize solely from pure fresh data over variable-free append bases, fresh allocations, value-plane clones over clean operands, settled unexported package data, or — in synchronous init flow — dynamic carriers, unbroken and non-directive when declared in the same package, from which neither the literal nor any sibling closure extracts or invokes a carrier, signature, or mutable-reach value, recorded as init-flow carrier links, with any signature-carrying operand boxed into an interface or composite within those roots satisfying this signature audit), with a
 reference to the alias set from a go statement's call outside any
 literal refusing outright. A call result whose callee is a plain named
 function — a bare identifier or package-qualified selector,
@@ -1699,7 +1704,13 @@ may reject opaque linkage, native code, process execution, dot imports, unsuppor
 standard-library access, or other unclassified external-capable syntax, but can never
 grant the proof on its own.
 
-**REQ-closure-observability-unsafe** (invariant): For a subject whose reachability
+**REQ-closure-observability-unsafe** (invariant): Compile-time layout intrinsics in
+package `unsafe` (`Sizeof`, `Alignof`, and `Offsetof`) evaluate solely to compile-time
+`uintptr` constants determined by the hashed source, toolchain, and build configuration
+without executing runtime code or dereferencing runtime memory, so both the maximal
+file scan and the observability scan admit them (while continuing to hash the
+declaring file and walk operand syntax for type and symbol dependencies; dot-importing
+`unsafe` remains blocked). For a subject whose reachability
 is closed, the package-scan backstop for the observability proof
 (REQ-closure-observability-analysis) MUST both scope ordinary function, method,
 `type`, and `const` declarations to the declarations and named `types.Object`s
@@ -1707,25 +1718,33 @@ reached by the subject, package initialization (`init` and package-level
 variable initializers), and `TestMain` — while keeping package-level and
 file-level constructs (imports, directives, cgo, assembly, `init`, `TestMain`,
 and top-level `var` declarations) and explicit package-wide process or memory
-hazards (`unsafe` operations other than `unsafe.Pointer`, `os.Exit` outside
+hazards (runtime `unsafe` operations other than `unsafe.Pointer` and the compile-time
+layout intrinsics, `os.Exit` outside
 `TestMain`, and process-environment or working-directory mutations such as
 `Setenv`, `Unsetenv`, `Clearenv`, `Chdir`, and `Fchdir` on `testing`, `os`,
 `syscall`, or `golang.org/x/sys/`) blocking across the whole package (excluding
 `if` bodies inside synchronous-startup-only declarations guarded by non-zero
 checks of verified unmutated zero-valued package globals) — and
-narrow the unsafe reference class out of the package-scan backstop's blocking
-set: an in-scope `unsafe.Pointer` reference is diagnostic only, because the
-subject walk prices every attributed unsafe-typed value and a subject world the
-walk cannot close refuses independently — a subject reaching unsafe-typed state
-still refuses at its own tier, while a sibling declaration's unsafe (an
-operator-grammar fixture, a low-level helper file) no longer blocks a clean
-subject's proof; the package's other operations (unsafe.Slice, unsafe.String,
-and kin) keep the package-wide scan block, because their call sites carry no
-unsafe-typed value the walk can price and a fabricated slice or string is a
-testlog-invisible read. The SSA builder's internal iterator and deferred-call
-stack handles and `sync.notifyList` runtime wait-queue cells are opaque runtime
-tokens, not source unsafe values; their source operands and callbacks remain
-independently judged.
+narrow the `unsafe.Pointer` reference class out of the package-scan backstop's
+unconditional blocking set: a subject reaching `unsafe.Pointer`-typed state
+still refuses at its own walk tier, an unreached `unsafe` use across the binary's
+loaded non-standard packages that is mechanically proven memory-safe and read-only
+(compile-time `Sizeof`/`Alignof`/`Offsetof`, reference-confined read-only
+`StringData` or `Slice(StringData, len)` projections, padding-free pure rvalue scalar bitcast
+reads within source size and alignment bounds, and read-only or immutable-capsule
+isomorphic value-layout pointer casts) leaves clean sibling subjects observable
+under every execution model, and any un-confined `unsafe.Pointer` capability in a
+loaded non-standard package of the test binary marks the observability disposition
+single-subject-only (`Observability.RequiresSingleSubject`) so shared-process
+execution models refuse fail-closed on the un-confined sibling `unsafe.Pointer`
+channel while caller-attested single-subject-process execution admits the clean
+subject's proof; the package's other runtime operations (`unsafe.Slice`,
+`unsafe.String`, `unsafe.Add`, and kin) keep the package-wide scan block, because
+their call sites carry no `unsafe.Pointer`-typed value the walk can price and a
+fabricated slice or string is a testlog-invisible read. The SSA builder's internal
+iterator and deferred-call stack handles and `sync.notifyList` runtime wait-queue
+cells are opaque runtime tokens, not source unsafe values; their source operands
+and callbacks remain independently judged.
 
 **REQ-closure-observability-audited-set** (invariant): A value-computation
 claim MUST establish that every ambient effect enters through an independently
@@ -2339,7 +2358,11 @@ with the test-variant compartment identity, since the compartment partition
 keeps test-only bytes out of the core while the analyzed binary compiles both
 (stdlib rides the complete toolchain evidence, version-locked cache dependencies their
 version pins, per REQ-closure-mutable-local and REQ-closure-pinned-dep), plus
-the source dependencies of any additional persisted payload such as positions.
+the source dependencies of any additional persisted payload such as positions
+— independent of the caller's execution-model attestations, because execution-conditional
+premises such as `Observability.RequiresSingleSubject` are derived and persisted
+execution-agnostically alongside the shared-process refusal diagnostic for caller
+projection and check-time enforcement.
 A memo hit is
 byte-equivalent to recomputation — including recorded unrooted-subject
 dispositions — and a full-group hit skips the program load entirely. The

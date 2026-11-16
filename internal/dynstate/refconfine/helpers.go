@@ -422,11 +422,34 @@ func PkgHasAnyMutationOnStructs(
 						return false
 					}
 				}
+			case *ast.SliceExpr:
+				if t := p.TypesInfo.TypeOf(x.X); t != nil {
+					if _, isArr := types.Unalias(t).Underlying().(*types.Array); isArr && TouchesAnyNamedStruct(p, x.X, targets) {
+						hit = true
+						return false
+					}
+				}
 			}
 			return true
 		})
 	}
 	return hit
+}
+
+// SelectionHasPointerReceiver reports whether a MethodVal/MethodExpr selection
+// invokes a method whose declared receiver is a pointer type (regardless of
+// whether go/types.Selection.Indirect() is false due to implicit &-addressing
+// of an addressable value operand).
+func SelectionHasPointerReceiver(sel *types.Selection) bool {
+	if sel == nil {
+		return false
+	}
+	mFn, ok := sel.Obj().(*types.Func)
+	if !ok || mFn == nil || mFn.Signature() == nil || mFn.Signature().Recv() == nil {
+		return false
+	}
+	_, isPtr := types.Unalias(mFn.Signature().Recv().Type()).(*types.Pointer)
+	return isPtr
 }
 
 // IsSafeAtomicPointerValueArg reports whether conv is the value (non-target)

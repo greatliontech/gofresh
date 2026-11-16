@@ -26,27 +26,11 @@ func boundValueLeakFreeJudged(
 	fieldWants map[syntaxutil.FieldPosKey]bool,
 	elemWants map[syntaxutil.ElemParamUse]bool,
 ) bool {
-	return boundValueJudged(audited, p, fc, roots, body, wants, returns, methodWants, fieldWants, elemWants, false, false, false)
-}
-
-func boundValueRangeBodyLeakFreeJudged(
-	audited bool,
-	p *packages.Package,
-	fc *pkgFlowCache,
-	roots map[types.Object]bool,
-	body ast.Node,
-	wants map[syntaxutil.ParamKey]bool,
-	returns *bool,
-	methodWants map[syntaxutil.FuncKey]bool,
-	fieldWants map[syntaxutil.FieldPosKey]bool,
-	elemWants map[syntaxutil.ElemParamUse]bool,
-) bool {
-	return boundValueJudged(audited, p, fc, roots, body, wants, returns, methodWants, fieldWants, elemWants, false, false, true)
+	return boundValueJudged(audited, p, fc, roots, body, wants, returns, methodWants, fieldWants, elemWants, false, false)
 }
 
 func boundValueClosureEnvLeakFreeJudged(
 	audited bool,
-	stringUnsafe bool,
 	p *packages.Package,
 	fc *pkgFlowCache,
 	roots map[types.Object]bool,
@@ -54,40 +38,7 @@ func boundValueClosureEnvLeakFreeJudged(
 	wants map[syntaxutil.ParamKey]bool,
 	methodWants map[syntaxutil.FuncKey]bool,
 ) bool {
-	if p == nil || p.TypesInfo == nil || body == nil {
-		return false
-	}
-	filtered := make(map[types.Object]bool, len(roots))
-	for r := range roots {
-		if r == nil || refconfine.TypeReachesSyncNoCopyByValue(r.Type()) {
-			return false
-		}
-		if !stringUnsafe && !refconfine.CallResultHandsOut(r.Type()) && syntaxutil.TypeReachesString(r.Type()) {
-			continue
-		}
-		filtered[r] = true
-	}
-	if len(filtered) == 0 {
-		return true
-	}
-	lowered := fc.body(p, body)
-	if lowered == nil {
-		return false
-	}
-	eng := &confinementEngine{
-		audited:              audited,
-		p:                    p,
-		fc:                   fc,
-		rootBody:             lowered,
-		roots:                filtered,
-		tainted:              map[types.Object]bool{},
-		allowCapturedClosure: true,
-		wants:                wants,
-		methodWants:          methodWants,
-		forceTrackString:     stringUnsafe,
-		forbidStringReturn:   stringUnsafe,
-	}
-	return eng.run()
+	return boundValueJudged(audited, p, fc, roots, body, wants, nil, methodWants, nil, nil, false, true)
 }
 
 func boundValueRetentionFreeJudged(
@@ -99,7 +50,7 @@ func boundValueRetentionFreeJudged(
 	wants map[syntaxutil.ParamKey]bool,
 	methodWants map[syntaxutil.FuncKey]bool,
 ) bool {
-	return boundValueJudged(audited, p, fc, roots, body, wants, nil, methodWants, nil, nil, true, false, false)
+	return boundValueJudged(audited, p, fc, roots, body, wants, nil, methodWants, nil, nil, true, false)
 }
 
 func boundValueJudged(
@@ -115,7 +66,6 @@ func boundValueJudged(
 	elemWants map[syntaxutil.ElemParamUse]bool,
 	tolerateRootedStores bool,
 	allowCapturedClosure bool,
-	skipStringBodyHaz bool,
 ) bool {
 	if p == nil || p.TypesInfo == nil || body == nil || len(roots) == 0 {
 		return false
@@ -138,7 +88,6 @@ func boundValueJudged(
 		tainted:              map[types.Object]bool{},
 		tolerateRootedStores: tolerateRootedStores,
 		allowCapturedClosure: allowCapturedClosure,
-		skipStringBodyHaz:    skipStringBodyHaz,
 		wants:                wants,
 		returns:              returns,
 		methodWants:          methodWants,
@@ -186,11 +135,6 @@ type confinementEngine struct {
 	admittedOnceDo          map[*ast.CallExpr]*onceDoAdmission
 	activeOnceAdmission     *onceDoAdmission
 	recordMethodChain       func(target string)
-	forceTrackString        bool
-	forbidStringReturn      bool
-	skipStringBodyHaz       bool
-	provingStringRoot       bool
-	trackStringReach        bool
 }
 
 type onceDoAdmission struct {
@@ -210,25 +154,15 @@ type methodBodyEntry struct {
 }
 
 func (e *confinementEngine) run() bool {
-	if !e.recvMode {
-		for r := range e.roots {
-			if r != nil && !refconfine.CallResultHandsOut(r.Type()) && syntaxutil.TypeReachesString(r.Type()) {
-				e.provingStringRoot = true
-				break
-			}
-		}
-	}
-	bodyHaz := !e.skipStringBodyHaz && e.fc != nil && (e.fc.pkgHasStringHeaderUnsafe || e.fc.bodyMayPassStringToUnsafe(e.rootBody))
-	e.trackStringReach = e.forceTrackString || e.provingStringRoot || bodyHaz
 	e.propagateTaint()
-	if e.tolerateRootedStores || e.trackStringReach {
+	if e.tolerateRootedStores {
 		e.propagateExternalReaching()
 	}
 	return e.checkBody(e.rootBody, true, false)
 }
 
 func (e *confinementEngine) typeHandsOut(t types.Type) bool {
-	return refconfine.CallResultHandsOut(t) || (e.trackStringReach && syntaxutil.TypeReachesString(t))
+	return refconfine.CallResultHandsOut(t)
 }
 
 func (e *confinementEngine) isRootOrTainted(obj types.Object) bool {
@@ -369,7 +303,7 @@ func (e *confinementEngine) valueSuppliesRoot(v *flowir.Value) bool {
 			if syntaxutil.IsFreshStringSliceCopy(v.Arg.Type, v.Type) {
 				return false
 			}
-			if !refconfine.CallResultHandsOut(v.Type) && !syntaxutil.TypeReachesString(v.Arg.Type) {
+			if !refconfine.CallResultHandsOut(v.Type) {
 				return false
 			}
 		}
@@ -400,8 +334,7 @@ func (e *confinementEngine) valueSuppliesRoot(v *flowir.Value) bool {
 		return false
 	case flowir.ValCall:
 		if e.recvMode && e.isGovernableRecvCall(v) {
-			return !refconfine.InstantiatedResultsHandOutNothing(e.audited, v.Selection.Type()) ||
-				(e.trackStringReach && syntaxutil.TypeReachesString(v.Type))
+			return !refconfine.InstantiatedResultsHandOutNothing(e.audited, v.Selection.Type())
 		}
 		if v.CallKind == flowir.CallBuiltin {
 			switch v.BuiltinName {
@@ -418,16 +351,6 @@ func (e *confinementEngine) valueSuppliesRoot(v *flowir.Value) bool {
 			}
 			return false
 		}
-		if e.trackStringReach && v.CallKind != flowir.CallIIFE && syntaxutil.TypeReachesString(v.Type) {
-			if e.valueSuppliesRoot(v.Recv) || e.valueSuppliesRoot(v.Callee) {
-				return true
-			}
-			for _, a := range v.Args {
-				if e.valueSuppliesRoot(a) {
-					return true
-				}
-			}
-		}
 		// CallIIFE bodies run under checkBody(..., isTopBody=false), where
 		// checkBody already rejects any rooted/tainted explicit or named
 		// result of a CallResultHandsOut type.
@@ -442,7 +365,7 @@ func (e *confinementEngine) valueSuppliesRoot(v *flowir.Value) bool {
 }
 
 func (e *confinementEngine) propagateTaint() {
-	memAdj := e.fc.scopedBodyInteriorAliases(e.audited, e.trackStringReach, e.rootBody, e.roots)
+	memAdj := e.fc.scopedBodyInteriorAliases(e.audited, e.rootBody, e.roots)
 	eligible := func(v *types.Var) bool {
 		return v != nil && !v.IsField() && !e.roots[v] && e.typeHandsOut(v.Type())
 	}
@@ -604,14 +527,14 @@ func (e *confinementEngine) isExternalSeedVar(v *types.Var) bool {
 	if !isPkgGlobal && !isOuter {
 		return false
 	}
-	return sharesMemOrSigOrDynamicWithStr(e.audited, e.trackStringReach)(v.Type())
+	return sharesMemOrSigOrDynamic(e.audited)(v.Type())
 }
 
 func (e *confinementEngine) valueReachesExternal(v *flowir.Value) bool {
 	if v == nil {
 		return false
 	}
-	shares := sharesMemOrSigOrDynamicWithStr(e.audited, e.trackStringReach)
+	shares := sharesMemOrSigOrDynamic(e.audited)
 	found := false
 	var walk func(cur *flowir.Value)
 	walk = func(cur *flowir.Value) {
@@ -709,7 +632,6 @@ type bodyVarTaintConfig struct {
 	isSyncOnceCall     func(*flowir.Value) bool
 	transientDstExempt func(flowir.Place) bool
 	taintRootReturns   bool
-	includeStrings     bool
 }
 
 func propagateBodyVarTaint(
@@ -722,8 +644,8 @@ func propagateBodyVarTaint(
 	if rootBody == nil || out == nil || cfg.valTaints == nil {
 		return
 	}
-	shares := sharesMemOrSigOrDynamicWithStr(audited, cfg.includeStrings)
-	memAdj := fc.scopedBodyInteriorAliases(audited, cfg.includeStrings, rootBody, cfg.exclude)
+	shares := sharesMemOrSigOrDynamic(audited)
+	memAdj := fc.scopedBodyInteriorAliases(audited, rootBody, cfg.exclude)
 	markVar := func(v *types.Var) bool {
 		if v == nil || v.IsField() || cfg.exclude[v] || isPkgOrOuterToBody(rootBody, v) {
 			return false
@@ -742,7 +664,7 @@ func propagateBodyVarTaint(
 		return changed
 	}
 	markValVars := func(a *flowir.Value) bool {
-		return markEscapingValueVars(audited, cfg.includeStrings, a, markVar)
+		return markEscapingValueVars(audited, a, markVar)
 	}
 	isPureNonMutatingCall := func(v *flowir.Value) bool {
 		switch v.CallKind {
@@ -771,7 +693,7 @@ func propagateBodyVarTaint(
 			}
 			if v.Kind == flowir.ValCall {
 				if v.CallKind == flowir.CallBuiltin && v.BuiltinName == "copy" && len(v.Args) == 2 {
-					if v.Args[0] != nil && sliceCopyElemCarriesReachOrDynamic(audited, cfg.includeStrings, v.Args[0].Type) &&
+					if v.Args[0] != nil && sliceCopyElemCarriesReachOrDynamic(audited, v.Args[0].Type) &&
 						cfg.valTaints(v.Args[1]) && markValVars(v.Args[0]) {
 						changed = true
 					}
@@ -797,7 +719,7 @@ func propagateBodyVarTaint(
 				} else if cfg.isSyncOnceCall != nil && cfg.isSyncOnceCall(v) {
 					visitBody(v.Args[0].Closure)
 				} else if !isPureNonMutatingCall(v) {
-					if markCallTargetVars(audited, cfg.includeStrings, v, markVar) {
+					if markCallTargetVars(audited, v, markVar) {
 						changed = true
 					}
 				}
@@ -885,7 +807,7 @@ func propagateBodyVarTaint(
 				case flowir.OpDefer:
 					visitVal(op.Call)
 				case flowir.OpGo:
-					if markCallTargetVars(audited, cfg.includeStrings, op.Call, markVar) {
+					if markCallTargetVars(audited, op.Call, markVar) {
 						changed = true
 					}
 					visitVal(op.Call)
@@ -907,7 +829,6 @@ func (e *confinementEngine) propagateExternalReaching() {
 		isSyncOnceCall:     e.isSyncOnceCall,
 		transientDstExempt: e.placeIsRooted,
 		taintRootReturns:   true,
-		includeStrings:     e.trackStringReach,
 	})
 }
 
@@ -1312,10 +1233,6 @@ func (e *confinementEngine) checkOp(op *flowir.Op, b *flowir.Body, isTopBody boo
 		if e.placeIsRooted(op.ChanPlace) || e.valueIsRooted(op.ChanVal) {
 			return false
 		}
-		if e.trackStringReach && op.SendVal != nil && (syntaxutil.TypeReachesString(op.SendVal.Type) || typeMayHoldErasedString(op.SendVal.Type)) &&
-			(e.valueIsRooted(op.SendVal) || e.valueSuppliesRoot(op.SendVal)) {
-			return false
-		}
 		if !e.checkValue(op.ChanVal, modeGeneral) {
 			return false
 		}
@@ -1360,25 +1277,11 @@ func (e *confinementEngine) checkReturnResult(res *flowir.Value, slotType types.
 		return false
 	}
 	effType := res.Type
-	if slotType != nil && (refconfine.CallResultHandsOut(slotType) || typeMayHoldErasedString(slotType)) {
+	if slotType != nil && refconfine.CallResultHandsOut(slotType) {
 		effType = slotType
 	}
-	erasesIntoSlot := slotType != nil && erasesStringIntoType(res.Type, slotType)
-	if (!e.recvMode || !isTopBody) && (e.provingStringRoot || e.trackStringReach) && (e.valueIsRooted(res) || e.valueSuppliesRoot(res)) {
-		if (e.forbidStringReturn && syntaxutil.TypeReachesString(effType)) || erasesIntoSlot || (!syntaxutil.TypeReachesString(effType) && typeMayHoldErasedString(effType)) ||
-			(!isTopBody && (refconfine.CallResultHandsOut(effType) || syntaxutil.TypeReachesString(effType))) {
-			if !e.recvMode && !e.forbidStringReturn && isTopBody && e.returns != nil &&
-				(refconfine.TypeHandsOutMutableReach(effType) || syntaxutil.ContainsUintptr(effType)) &&
-				!erasesIntoSlot &&
-				e.valueIsRooted(res) {
-				*e.returns = true
-				return e.checkValue(res, modeGovernedBindOrReturn)
-			}
-			return false
-		}
-		if !e.recvMode && isTopBody && e.returns != nil && syntaxutil.TypeReachesString(effType) {
-			*e.returns = true
-		}
+	if !e.recvMode && !isTopBody && e.valueSuppliesRoot(res) && refconfine.CallResultHandsOut(effType) {
+		return false
 	}
 	if e.valueIsRooted(res) || (e.recvMode && e.isGovernableRecvCall(res)) {
 		if e.isMethodVal(res) || res.Type == nil || refconfine.TypeReachesSyncNoCopyByValue(res.Type) {
@@ -1390,14 +1293,14 @@ func (e *confinementEngine) checkReturnResult(res *flowir.Value, slotType types.
 			}
 			return e.checkValue(res, modeGovernedBindOrReturn)
 		}
-		if refconfine.TypeHandsOutMutableReach(res.Type) || syntaxutil.ContainsUintptr(res.Type) {
+		if refconfine.TypeHandsOutMutableReach(effType) || syntaxutil.ContainsUintptr(effType) {
 			if isTopBody && e.returns != nil {
 				*e.returns = true
 				return e.checkValue(res, modeGovernedBindOrReturn)
 			}
 			return false
 		}
-		if refconfine.TypeCarriesSignature(res.Type) {
+		if refconfine.TypeCarriesSignature(effType) {
 			return false
 		}
 		return e.checkValue(res, modeGovernedBindOrReturn)
@@ -1413,7 +1316,7 @@ func (e *confinementEngine) dstAcceptsGovernedRoot(dst flowir.Place) bool {
 		return false
 	}
 	if dst.Root == flowir.RootPkgGlobal {
-		return !e.isEscapingGlobalType(dst.Type) && !e.fc.isExposedStringGlobal(dst.Obj)
+		return !e.isEscapingGlobalType(dst.Type)
 	}
 	return true
 }
@@ -1428,7 +1331,7 @@ func (e *confinementEngine) checkAssignLHS(op *flowir.Op, dst flowir.Place, isDe
 	if dst.IsBareVar() {
 		if dst.Root == flowir.RootPkgGlobal {
 			if src != nil && (e.valueIsRooted(src) || e.valueSuppliesRoot(src) || (e.recvMode && e.isGovernableRecvCall(src))) {
-				if e.isEscapingGlobalType(dst.Type) || e.fc.isExposedStringGlobal(dst.Obj) {
+				if e.isEscapingGlobalType(dst.Type) {
 					return false
 				}
 			}
@@ -1452,17 +1355,6 @@ func (e *confinementEngine) checkAssignLHS(op *flowir.Op, dst flowir.Place, isDe
 	}
 	if e.placeIsRooted(dst) {
 		return e.checkRootedStoreAllowed(op, dst, isDef, src, inOnceDo)
-	}
-	if e.trackStringReach && (dst.Root != flowir.RootLocal || e.isExternalSeedVar(dst.Obj)) {
-		if src != nil && (syntaxutil.TypeReachesString(dst.Type) || typeMayHoldErasedString(dst.Type)) &&
-			(e.valueIsRooted(src) || e.valueSuppliesRoot(src)) {
-			return false
-		}
-		if _, keyVal, isMapW := dst.AsMapWrite(); isMapW && keyVal != nil &&
-			(syntaxutil.TypeReachesString(keyVal.Type) || typeMayHoldErasedString(keyVal.Type)) &&
-			(e.valueIsRooted(keyVal) || e.valueSuppliesRoot(keyVal)) {
-			return false
-		}
 	}
 	return true
 }
@@ -1672,7 +1564,7 @@ func (e *confinementEngine) checkValue(v *flowir.Value, mode valueEvalMode) bool
 
 	case flowir.ValConvert:
 		if syntaxutil.IsUnsafePointerType(v.Type) &&
-			(v.Arg == nil || v.Arg.Type == nil || syntaxutil.ContainsUintptr(v.Arg.Type) || syntaxutil.PointerMayReachString(v.Arg.Type)) {
+			(v.Arg == nil || v.Arg.Type == nil || syntaxutil.ContainsUintptr(v.Arg.Type) || e.valueSuppliesRoot(v.Arg)) {
 			return false
 		}
 		if e.valueIsRooted(v.Arg) || (e.recvMode && e.isGovernableRecvCall(v.Arg)) {
@@ -1769,8 +1661,6 @@ func (e *confinementEngine) checkValue(v *flowir.Value, mode valueEvalMode) bool
 			methodWants:          e.methodWants,
 			fieldWants:           e.fieldWants,
 			elemWants:            e.elemWants,
-			forceTrackString:     e.forceTrackString || e.trackStringReach,
-			forbidStringReturn:   e.forbidStringReturn,
 		}
 		return subEng.run()
 
@@ -1793,19 +1683,12 @@ func (e *confinementEngine) checkValue(v *flowir.Value, mode valueEvalMode) bool
 func (e *confinementEngine) checkCall(v *flowir.Value, governed bool) bool {
 	switch v.CallKind {
 	case flowir.CallBuiltin:
-		if v.BuiltinName == "StringData" {
+		if v.BuiltinName == "StringData" && len(v.Args) > 0 && (e.valueIsRooted(v.Args[0]) || e.valueSuppliesRoot(v.Args[0])) {
 			return false
 		}
 		switch v.BuiltinName {
 		case "Sizeof", "Alignof", "Offsetof":
 			return true
-		case "copy":
-			if e.trackStringReach && len(v.Args) == 2 && v.Args[0] != nil && v.Args[1] != nil &&
-				syntaxutil.TypeReachesString(v.Args[0].Type) &&
-				e.valueReachesExternal(v.Args[0]) &&
-				(e.valueIsRooted(v.Args[1]) || e.valueSuppliesRoot(v.Args[1])) {
-				return false
-			}
 		case "len", "cap":
 			for _, arg := range v.Args {
 				if e.valueIsRooted(arg) {
@@ -1988,11 +1871,7 @@ func (e *confinementEngine) checkCallArgs(v *flowir.Value) bool {
 	okAll := true
 	v.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, _ int, pIdx int, hasParam bool, packedVariadic bool) bool {
 		paramType := v.FormalParamSlotType(pIdx, packedVariadic)
-		boxesStr := paramType != nil && erasesStringIntoType(slotType, paramType)
-		rootedArg := e.valueIsRooted(arg)
-		strHazardArg := !rootedArg && e.trackStringReach && e.valueSuppliesRoot(arg) &&
-			(e.fc.callMayReachStringHeaderUnsafe(e.audited, v) || boxesStr)
-		if !rootedArg && !strHazardArg {
+		if !e.valueIsRooted(arg) {
 			if arg != checkedUnrooted {
 				checkedUnrooted = arg
 				if !e.checkValue(arg, modeGeneral) {
@@ -2008,17 +1887,10 @@ func (e *confinementEngine) checkCallArgs(v *flowir.Value) bool {
 			okAll = false
 			return false
 		}
-		strHazardSlot := e.trackStringReach &&
-			((syntaxutil.TypeReachesString(slotType) && e.fc.callMayReachStringHeaderUnsafe(e.audited, v)) || boxesStr)
 		handsOutSlot := refconfine.CallResultHandsOut(slotType) ||
-			(paramType != nil && refconfine.CallResultHandsOut(paramType) && (refconfine.CallResultHandsOut(slotType) || strHazardSlot))
-		if !handsOutSlot && !strHazardSlot {
-			if rootedArg {
-				if !e.checkRootedReadOperand(arg) {
-					okAll = false
-					return false
-				}
-			} else if !e.checkValue(arg, modeGeneral) {
+			(paramType != nil && refconfine.CallResultHandsOut(paramType) && refconfine.CallResultHandsOut(slotType))
+		if !handsOutSlot {
+			if !e.checkRootedReadOperand(arg) {
 				okAll = false
 				return false
 			}
@@ -2068,12 +1940,7 @@ func (e *confinementEngine) checkCallArgs(v *flowir.Value) bool {
 			okAll = false
 			return false
 		}
-		if rootedArg {
-			if !e.checkRootedReadOperand(arg) {
-				okAll = false
-				return false
-			}
-		} else if !e.checkValue(arg, modeGeneral) {
+		if !e.checkRootedReadOperand(arg) {
 			okAll = false
 			return false
 		}
@@ -2689,7 +2556,7 @@ func solvePackageConfinement(audited bool, p *packages.Package, fc *pkgFlowCache
 						continue
 					}
 					obj := p.TypesInfo.Defs[name]
-					if obj == nil || (!refconfine.TypeHandsOutMutableReach(obj.Type()) && !syntaxutil.ContainsUintptr(obj.Type()) && !syntaxutil.TypeReachesString(obj.Type())) {
+					if obj == nil || (!refconfine.TypeHandsOutMutableReach(obj.Type()) && !syntaxutil.ContainsUintptr(obj.Type())) {
 						continue
 					}
 					retainInputs = append(retainInputs, retainCandidate{obj: obj, body: fd.Body, key: key})
@@ -3409,35 +3276,30 @@ func onceFillValueSmuggles(
 }
 
 func sharesMemOrSigOrDynamic(audited bool) func(types.Type) bool {
-	return sharesMemOrSigOrDynamicWithStr(audited, false)
-}
-
-func sharesMemOrSigOrDynamicWithStr(audited, includeStrings bool) func(types.Type) bool {
 	return func(t types.Type) bool {
 		return t == nil ||
 			refconfine.TypeHandsOutMutableReach(t) ||
 			refconfine.TypeMayCarryUnknownDynamic(audited, t) ||
 			refconfine.TypeCarriesSignature(t) ||
-			syntaxutil.ContainsUintptr(t) ||
-			(includeStrings && syntaxutil.TypeReachesString(t))
+			syntaxutil.ContainsUintptr(t)
 	}
 }
 
-func markEscapingAddrPlaceVars(audited, includeStrings bool, p flowir.Place, markObj func(*types.Var) bool) bool {
+func markEscapingAddrPlaceVars(audited bool, p flowir.Place, markObj func(*types.Var) bool) bool {
 	if p.Obj != nil {
 		return markObj(p.Obj)
 	}
 	if p.Root == flowir.RootTransient && p.Base != nil {
-		return markEscapingValueVars(audited, includeStrings, p.Base, markObj)
+		return markEscapingValueVars(audited, p.Base, markObj)
 	}
 	return false
 }
 
-func markEscapingValueVars(audited, includeStrings bool, v *flowir.Value, markObj func(*types.Var) bool) bool {
+func markEscapingValueVars(audited bool, v *flowir.Value, markObj func(*types.Var) bool) bool {
 	if v == nil || markObj == nil {
 		return false
 	}
-	canCarry := sharesMemOrSigOrDynamicWithStr(audited, includeStrings)
+	canCarry := sharesMemOrSigOrDynamic(audited)
 	didMark := false
 	var walk func(cur *flowir.Value)
 	walk = func(cur *flowir.Value) {
@@ -3461,13 +3323,13 @@ func markEscapingValueVars(audited, includeStrings bool, v *flowir.Value, markOb
 				walk(cur.Place.Base)
 			}
 		case flowir.ValAddrOf:
-			if markEscapingAddrPlaceVars(audited, includeStrings, cur.AddrPlace, markObj) {
+			if markEscapingAddrPlaceVars(audited, cur.AddrPlace, markObj) {
 				didMark = true
 			}
 		case flowir.ValMethodVal:
 			if cur.HasRecvPlace {
 				if cur.AutoAddr || cur.RecvPlace.Obj == nil || cur.RecvPlace.Obj.Type() == nil || canCarry(cur.RecvPlace.Obj.Type()) {
-					if markEscapingAddrPlaceVars(audited, includeStrings, cur.RecvPlace, markObj) {
+					if markEscapingAddrPlaceVars(audited, cur.RecvPlace, markObj) {
 						didMark = true
 					}
 				}
@@ -3521,7 +3383,7 @@ func markEscapingValueVars(audited, includeStrings bool, v *flowir.Value, markOb
 				}
 				return
 			}
-			if cur.AutoAddrRecv && cur.HasRecvPlace && markEscapingAddrPlaceVars(audited, includeStrings, cur.RecvPlace, markObj) {
+			if cur.AutoAddrRecv && cur.HasRecvPlace && markEscapingAddrPlaceVars(audited, cur.RecvPlace, markObj) {
 				didMark = true
 			}
 			walk(cur.Recv)
@@ -3544,7 +3406,7 @@ func markEscapingValueVars(audited, includeStrings bool, v *flowir.Value, markOb
 	return didMark
 }
 
-func markCallTargetVars(audited, includeStrings bool, callVal *flowir.Value, markObj func(*types.Var) bool) bool {
+func markCallTargetVars(audited bool, callVal *flowir.Value, markObj func(*types.Var) bool) bool {
 	if callVal == nil || markObj == nil {
 		return false
 	}
@@ -3556,24 +3418,24 @@ func markCallTargetVars(audited, includeStrings bool, callVal *flowir.Value, mar
 			}
 		}
 	}
-	if callVal.AutoAddrRecv && callVal.HasRecvPlace && markEscapingAddrPlaceVars(audited, includeStrings, callVal.RecvPlace, markObj) {
+	if callVal.AutoAddrRecv && callVal.HasRecvPlace && markEscapingAddrPlaceVars(audited, callVal.RecvPlace, markObj) {
 		didMark = true
 	}
-	if markEscapingValueVars(audited, includeStrings, callVal.Recv, markObj) {
+	if markEscapingValueVars(audited, callVal.Recv, markObj) {
 		didMark = true
 	}
-	if markEscapingValueVars(audited, includeStrings, callVal.Callee, markObj) {
+	if markEscapingValueVars(audited, callVal.Callee, markObj) {
 		didMark = true
 	}
 	for _, a := range callVal.Args {
-		if markEscapingValueVars(audited, includeStrings, a, markObj) {
+		if markEscapingValueVars(audited, a, markObj) {
 			didMark = true
 		}
 	}
 	return didMark
 }
 
-func sliceCopyElemCarriesReachOrDynamic(audited, includeStrings bool, dstType types.Type) bool {
+func sliceCopyElemCarriesReachOrDynamic(audited bool, dstType types.Type) bool {
 	if dstType == nil {
 		return true
 	}
@@ -3582,7 +3444,7 @@ func sliceCopyElemCarriesReachOrDynamic(audited, includeStrings bool, dstType ty
 		return true
 	}
 	elemT := sl.Elem()
-	return sharesMemOrSigOrDynamicWithStr(audited, includeStrings)(elemT)
+	return sharesMemOrSigOrDynamic(audited)(elemT)
 }
 
 func computeOnceFillSmuggledLocals(
@@ -3890,8 +3752,7 @@ func computeOnceDoFieldAdmissions(
 	if recvObj != nil {
 		excludeRecv = map[types.Object]bool{recvObj: true}
 	}
-	doStrHaz := fc != nil && (fc.pkgHasStringHeaderUnsafe || fc.bodyMayPassStringToUnsafe(doBody))
-	freshMemAdj := fc.scopedBodyInteriorAliases(audited, doStrHaz, doBody, excludeRecv)
+	freshMemAdj := fc.scopedBodyInteriorAliases(audited, doBody, excludeRecv)
 	var collectFreshCandidates func(b *flowir.Body)
 	collectFreshCandidates = func(b *flowir.Body) {
 		if b == nil {
@@ -4000,13 +3861,13 @@ func computeOnceDoFieldAdmissions(
 		return evictFreshObj(v)
 	}
 	evictArgObj := func(a *flowir.Value) bool {
-		return markEscapingValueVars(audited, doStrHaz, a, evictFreshVar)
+		return markEscapingValueVars(audited, a, evictFreshVar)
 	}
 	for changed := true; changed; {
 		changed = false
 		for obj := range freshLocals {
 			for nb := range freshMemAdj[obj] {
-				if !freshLocals[nb] && sharesMemOrSigOrDynamicWithStr(audited, doStrHaz)(nb.Type()) {
+				if !freshLocals[nb] && sharesMemOrSigOrDynamic(audited)(nb.Type()) {
 					delete(freshLocals, obj)
 					changed = true
 					break
@@ -4021,11 +3882,11 @@ func computeOnceDoFieldAdmissions(
 			}
 			switch v.Kind {
 			case flowir.ValAddrOf:
-				if markEscapingAddrPlaceVars(audited, doStrHaz, v.AddrPlace, evictFreshVar) {
+				if markEscapingAddrPlaceVars(audited, v.AddrPlace, evictFreshVar) {
 					changed = true
 				}
 			case flowir.ValMethodVal:
-				if v.HasRecvPlace && markEscapingAddrPlaceVars(audited, doStrHaz, v.RecvPlace, evictFreshVar) {
+				if v.HasRecvPlace && markEscapingAddrPlaceVars(audited, v.RecvPlace, evictFreshVar) {
 					changed = true
 				}
 				if evictArgObj(v.Recv) {
@@ -4041,7 +3902,7 @@ func computeOnceDoFieldAdmissions(
 					checkFreshBody(v.IIFE)
 				case v.CallKind == flowir.CallBuiltin && (v.BuiltinName == "make" || v.BuiltinName == "len" || v.BuiltinName == "cap" || v.BuiltinName == "delete" || v.BuiltinName == "clear" || v.BuiltinName == "Sizeof" || v.BuiltinName == "Alignof" || v.BuiltinName == "Offsetof"):
 				case v.CallKind == flowir.CallBuiltin && v.BuiltinName == "copy" && len(v.Args) == 2:
-					if v.Args[0] != nil && sliceCopyElemCarriesReachOrDynamic(audited, doStrHaz, v.Args[0].Type) &&
+					if v.Args[0] != nil && sliceCopyElemCarriesReachOrDynamic(audited, v.Args[0].Type) &&
 						!isFreshLocalOnceValue(audited, v.Args[1], freshLocals) && evictArgObj(v.Args[0]) {
 						changed = true
 					}
@@ -4056,7 +3917,7 @@ func computeOnceDoFieldAdmissions(
 					}
 				case v.CallKind == flowir.CallPlain && !v.IsMethodExprCall && v.CalleeFunc != nil && auditedValuePlane[syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Name()}]:
 				default:
-					if markCallTargetVars(audited, doStrHaz, v, evictFreshVar) {
+					if markCallTargetVars(audited, v, evictFreshVar) {
 						changed = true
 					}
 				}

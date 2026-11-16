@@ -17,7 +17,6 @@ import (
 // admission of the environment-free registration audit.
 func returnEnvFreeFunctions(
 	audited bool,
-	stringUnsafe bool,
 	p *packages.Package,
 	fc *pkgFlowCache,
 	settledGlobals settledGlobalMap,
@@ -87,7 +86,7 @@ func returnEnvFreeFunctions(
 		return true
 	}
 	reachOrAddrOrStr := func(t types.Type) bool {
-		return refconfine.TypeHandsOutMutableReach(t) || syntaxutil.ContainsUintptr(t) || (stringUnsafe && syntaxutil.TypeReachesString(t))
+		return refconfine.TypeHandsOutMutableReach(t) || syntaxutil.ContainsUintptr(t)
 	}
 	elemReach := func(t types.Type) bool {
 		if t == nil {
@@ -506,7 +505,7 @@ func returnEnvFreeFunctions(
 				switch v.Kind {
 				case flowir.ValConvert:
 					if v.Arg != nil && (syntaxutil.IsUnsafePointerType(v.Arg.Type) ||
-						(syntaxutil.IsUnsafePointerType(v.Type) && (syntaxutil.ContainsUintptr(v.Arg.Type) || syntaxutil.PointerMayReachString(v.Arg.Type)))) {
+						(syntaxutil.IsUnsafePointerType(v.Type) && syntaxutil.ContainsUintptr(v.Arg.Type))) {
 						breakTargets(v.Arg)
 					}
 				case flowir.ValAddrOf:
@@ -545,7 +544,7 @@ func returnEnvFreeFunctions(
 							mw := map[syntaxutil.FuncKey]bool{}
 							fvParams := map[syntaxutil.ParamKey]bool{}
 							fvMethods := map[syntaxutil.FuncKey]bool{}
-							if !boundValueClosureEnvLeakFreeJudged(audited, stringUnsafe, p, fc, map[types.Object]bool{fv: true}, v.Lit.Body, wants, mw) ||
+							if !boundValueClosureEnvLeakFreeJudged(audited, p, fc, map[types.Object]bool{fv: true}, v.Lit.Body, wants, mw) ||
 								!classifyWants(wants, mw, fvParams, fvMethods) {
 								localBroken[fv] = true
 								captureBroken[fv] = true
@@ -846,11 +845,9 @@ func returnEnvFreeFunctions(
 							}
 							v.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, slotIdx int, pIdx int, pOK bool, packedVariadic bool) bool {
 								paramType := v.FormalParamSlotType(pIdx, packedVariadic)
-								boxesStr := paramType != nil && erasesStringIntoType(slotType, paramType)
 								handsOutSlot := refconfine.CallResultHandsOut(slotType) ||
-									(paramType != nil && refconfine.CallResultHandsOut(paramType) && (refconfine.CallResultHandsOut(slotType) || (stringUnsafe && boxesStr)))
-								if slotType != nil && !handsOutSlot &&
-									!(stringUnsafe && (boxesStr || (syntaxutil.TypeReachesString(slotType) && fc.callMayReachStringHeaderUnsafe(audited, v)))) {
+									(paramType != nil && refconfine.CallResultHandsOut(paramType) && refconfine.CallResultHandsOut(slotType))
+								if slotType != nil && !handsOutSlot {
 									return true
 								}
 								idx := slotIdx
@@ -872,8 +869,7 @@ func returnEnvFreeFunctions(
 							if sig, ok := v.CalleeFunc.Type().(*types.Signature); ok && sig.Recv() != nil {
 								_, ptr := types.Unalias(sig.Recv().Type()).(*types.Pointer)
 								if !ptr && !v.AutoAddrRecv && !sharesHeader(sig.Recv().Type()) &&
-									!refconfine.CallResultHandsOut(sig.Recv().Type()) &&
-									!(stringUnsafe && syntaxutil.TypeReachesString(sig.Recv().Type()) && fc.callMayReachStringHeaderUnsafe(audited, v)) {
+									!refconfine.CallResultHandsOut(sig.Recv().Type()) {
 									recvExempt = true
 								}
 							}
@@ -1927,11 +1923,10 @@ func returnEnvFreeFunctions(
 					return true
 				}
 				return checkPureOrFreshValue(arg, valuePurityPolicy{
-					allowAppend:                 true,
-					allowValuePlane:             true,
-					allowRuntimeOps:             true,
-					allowNonMutableReach:        true,
-					forbidStringNonMutableReach: stringUnsafe,
+					allowAppend:          true,
+					allowValuePlane:      true,
+					allowRuntimeOps:      true,
+					allowNonMutableReach: true,
 					allowSigLeaf: func(leaf *flowir.Value) bool {
 						okArg, _ := evalFree(leaf)
 						return okArg
@@ -2244,7 +2239,7 @@ func returnEnvFreeFunctions(
 							return okSub
 						},
 					}
-					if !environmentFreeFuncLitWithOrigin(audited, stringUnsafe, p, fc, v.Lit, fd, wants, methodWants, origin) {
+					if !environmentFreeFuncLitWithOrigin(audited, p, fc, v.Lit, fd, wants, methodWants, origin) {
 						return false, math.MaxInt
 					}
 					if !classifyWants(wants, methodWants, *paramDepFold, *methodDepFold) {

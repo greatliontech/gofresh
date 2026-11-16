@@ -1446,7 +1446,7 @@ func referenceMaximalFileReason(filename string) (string, error) {
 						reason = classified
 						return false
 					}
-					if pkgPath != "testing" && !flagRegistrationSymbol(pkgPath, sel.Sel.Name) && !auditedStandardSymbol(true, pkgPath, sel.Sel.Name) && (auditset.AlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) && unauditedReason == "" {
+					if pkgPath != "testing" && !(pkgPath == "unsafe" && (sel.Sel.Name == "Sizeof" || sel.Sel.Name == "Alignof" || sel.Sel.Name == "Offsetof")) && !flagRegistrationSymbol(pkgPath, sel.Sel.Name) && !auditedStandardSymbol(true, pkgPath, sel.Sel.Name) && (auditset.AlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) && unauditedReason == "" {
 						unauditedReason = "reaches unaudited standard operation " + pkgPath + "." + sel.Sel.Name
 					}
 				}
@@ -1609,6 +1609,8 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 		} else if pkgPath == "os" && sel.Sel.Name == "Exit" && referenceInTestMain(file, aliases, sel) {
 			// admitted test-main epilogue - mirrors the production
 			// carve-out
+		} else if pkgPath == "unsafe" && (sel.Sel.Name == "Sizeof" || sel.Sel.Name == "Alignof" || sel.Sel.Name == "Offsetof") {
+			// mirrors the production compile-time unsafe intrinsic admission
 		} else if flagRegistrationSymbol(pkgPath, sel.Sel.Name) {
 			// mirrors the production flag-registration admission
 		} else if pkgPath != "testing" && !auditedStandardSymbol(true, pkgPath, sel.Sel.Name) && (auditset.AlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) {

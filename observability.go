@@ -165,38 +165,57 @@ func (v *Snapshot) ensureObservable(ctx context.Context, subjects []Subject) (er
 }
 
 func compatibleObservationProof(recorded Fingerprint, subject Subject) bool {
-	compatible, _ := compatibleObservationProofMode(recorded, subject)
+	compatible, _, _ := compatibleObservationProofFull(recorded, subject)
 	return compatible
 }
 
 func compatibleObservationProofMode(recorded Fingerprint, subject Subject) (compatible, effectFree bool) {
+	compatible, effectFree, _ = compatibleObservationProofFull(recorded, subject)
+	return compatible, effectFree
+}
+
+func compatibleObservationProofFull(recorded Fingerprint, subject Subject) (compatible, effectFree, reqSingleSubject bool) {
 	proof := recorded.ObservationProof
 	if recorded.ObservationAssertion != "caller assertion" || proof.Strategy != ObservationRTA || proof.Subject != subject || recorded.ToolchainContent == "" || recorded.AdmissionPolicy == "" {
-		return false, false
+		return false, false, false
 	}
 	if proof.Observable == (proof.Reason != "") {
-		return false, false
+		return false, false, false
 	}
-	if proof.Evidence == observationProofEvidence(recorded) {
-		return true, false
+	if proof.Evidence == observationProofEvidenceFull(recorded, false, false) {
+		return true, false, false
 	}
-	if proof.Observable && proof.Evidence == observationProofEvidenceMode(recorded, true) {
-		return true, true
+	if proof.Observable && proof.Evidence == observationProofEvidenceFull(recorded, true, false) {
+		return true, true, false
 	}
-	return false, false
+	if proof.Observable && proof.Evidence == observationProofEvidenceFull(recorded, false, true) {
+		return true, false, true
+	}
+	if proof.Observable && proof.Evidence == observationProofEvidenceFull(recorded, true, true) {
+		return true, true, true
+	}
+	return false, false, false
 }
 
 func observationProofEvidence(recorded Fingerprint) string {
-	return observationProofEvidenceMode(recorded, false)
+	return observationProofEvidenceFull(recorded, false, false)
 }
 
 func observationProofEvidenceMode(recorded Fingerprint, effectFree bool) string {
+	return observationProofEvidenceFull(recorded, effectFree, false)
+}
+
+func observationProofEvidenceFull(recorded Fingerprint, effectFree, reqSingleSubject bool) string {
 	proof := recorded.ObservationProof
 	maximalClosure, assertion := recorded.MaximalClosure, recorded.ObservationAssertion
-	if !effectFree {
+	if !effectFree && !reqSingleSubject {
 		sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s%d:%s%t%d:%s%d:%s%d:%s", len(maximalClosure), maximalClosure, len(assertion), assertion, len(proof.Strategy), proof.Strategy, len(proof.Subject.Package), proof.Subject.Package, len(proof.Subject.Symbol), proof.Subject.Symbol, proof.Observable, len(proof.Reason), proof.Reason, len(recorded.ToolchainContent), recorded.ToolchainContent, len(recorded.AdmissionPolicy), recorded.AdmissionPolicy))
 		return hex.EncodeToString(sum[:])[:32]
 	}
-	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s%d:%s%t%t%d:%s%d:%s%d:%s", len(maximalClosure), maximalClosure, len(assertion), assertion, len(proof.Strategy), proof.Strategy, len(proof.Subject.Package), proof.Subject.Package, len(proof.Subject.Symbol), proof.Subject.Symbol, proof.Observable, effectFree, len(proof.Reason), proof.Reason, len(recorded.ToolchainContent), recorded.ToolchainContent, len(recorded.AdmissionPolicy), recorded.AdmissionPolicy))
+	if !reqSingleSubject {
+		sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s%d:%s%t%t%d:%s%d:%s%d:%s", len(maximalClosure), maximalClosure, len(assertion), assertion, len(proof.Strategy), proof.Strategy, len(proof.Subject.Package), proof.Subject.Package, len(proof.Subject.Symbol), proof.Subject.Symbol, proof.Observable, effectFree, len(proof.Reason), proof.Reason, len(recorded.ToolchainContent), recorded.ToolchainContent, len(recorded.AdmissionPolicy), recorded.AdmissionPolicy))
+		return hex.EncodeToString(sum[:])[:32]
+	}
+	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s%d:%s%t%t:ss:%t%d:%s%d:%s%d:%s", len(maximalClosure), maximalClosure, len(assertion), assertion, len(proof.Strategy), proof.Strategy, len(proof.Subject.Package), proof.Subject.Package, len(proof.Subject.Symbol), proof.Subject.Symbol, proof.Observable, effectFree, reqSingleSubject, len(proof.Reason), proof.Reason, len(recorded.ToolchainContent), recorded.ToolchainContent, len(recorded.AdmissionPolicy), recorded.AdmissionPolicy))
 	return hex.EncodeToString(sum[:])[:32]
 }

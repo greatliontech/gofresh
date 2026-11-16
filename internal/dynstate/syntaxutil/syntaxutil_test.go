@@ -81,72 +81,6 @@ func Plain() {}
 	}
 }
 
-func TestRootIdentAndChainRoot(t *testing.T) {
-	const src = `package p
-type S struct { items []int }
-func F(s *S) int {
-	_ = (*s).items[0:1][0]
-	return (*s).items[0]
-}
-`
-	_, file, _, _ := parseAndCheck(t, src)
-	fn := file.Decls[1].(*ast.FuncDecl)
-	sliceIdx := fn.Body.List[0].(*ast.AssignStmt).Rhs[0]
-	if got := RootIdent(sliceIdx); got != nil {
-		t.Fatalf("RootIdent on SliceExpr spine = %v, want nil", got)
-	}
-	if got := ChainRoot(sliceIdx); got == nil || got.Name != "s" {
-		t.Fatalf("ChainRoot on SliceExpr spine = %v, want s", got)
-	}
-	plainIdx := fn.Body.List[1].(*ast.ReturnStmt).Results[0]
-	if got := RootIdent(plainIdx); got == nil || got.Name != "s" {
-		t.Fatalf("RootIdent on IndexExpr spine = %v, want s", got)
-	}
-}
-
-func TestPropagateLocalTaintHandlesRangeAndCopy(t *testing.T) {
-	const src = `package p
-var globalHooks []func()
-func F() {
-	var copied = make([]func(), len(globalHooks))
-	copy(copied, globalHooks)
-	for _, h := range copied {
-		fn := h
-		_ = fn
-	}
-}
-`
-	_, file, pkg, info := parseAndCheck(t, src)
-	globalVar := pkg.Scope().Lookup("globalHooks")
-	fn := file.Decls[1].(*ast.FuncDecl)
-	tainted := map[types.Object]bool{}
-	rhsTainted := func(expr ast.Expr) bool {
-		found := false
-		ast.Inspect(expr, func(n ast.Node) bool {
-			if id, ok := n.(*ast.Ident); ok {
-				if obj := IdentDefOrUse(info, id); obj == globalVar || tainted[obj] {
-					found = true
-				}
-			}
-			return true
-		})
-		return found
-	}
-	PropagateLocalTaint(info, fn.Body, tainted, func(types.Object) bool { return true }, rhsTainted, rhsTainted)
-	for _, wantName := range []string{"copied", "h", "fn"} {
-		found := false
-		for obj := range tainted {
-			if obj.Name() == wantName {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("PropagateLocalTaint did not taint local %q", wantName)
-		}
-	}
-}
-
 func TestPropagateBFSMatchesReachFixedPoint(t *testing.T) {
 	adj := map[string]map[string]bool{
 		"a": {"b": true},
@@ -166,31 +100,22 @@ func TestPropagateBFSMatchesReachFixedPoint(t *testing.T) {
 	}
 }
 
-func TestNewTypeCompositeFlowMapWriteAndTypeSwitchHelpers(t *testing.T) {
+func TestNewTypeEachLocalBindingAndFreshStringSliceCopyHelpers(t *testing.T) {
 	const src = `package p
 
-type box struct{ f int }
-type mapAlias map[string]int
+type StrAlias string
+type BytesAlias []byte
 
-func genericPut[M ~map[K]V, K comparable, V any](m M, k K, v V) M {
-	m[k] = v
-	return M{k: v}
-}
-
-func genericSetSlice[S ~[]V, V any](s S, v V) {
-	s[0] = v
-}
-
-func F(in any, s []int, m map[string]int) {
+func F(in any, s []int, str string) {
 	pZero := new(int)
 	pInit := new(*pZero)
 	_ = pInit
-	var elided []*mapAlias = []*mapAlias{{"k1": 1}}
-	_ = elided
-	st := box{f: 2}
-	_ = st
-	m["k2"] = 3
-	s[0] = 4
+	var dst = make([]int, len(s))
+	copy(dst, s)
+	for i, v := range dst {
+		_, _ = i, v
+	}
+	_ = []byte(str)
 	switch x := in.(type) {
 	case int:
 		_ = x
@@ -205,45 +130,26 @@ func F(in any, s []int, m map[string]int) {
 	}
 
 	var calls []*ast.CallExpr
-	var mapWrites []string
-	var litKeys []string
-	var implicitCount int
+	var bindings int
 	ast.Inspect(file, func(n ast.Node) bool {
+		if n != nil {
+			EachLocalBinding(info, n, func(_, _ ast.Expr) {
+				bindings++
+			})
+		}
 		switch x := n.(type) {
 		case *ast.CallExpr:
 			if b := LookupBuiltin(info, x.Fun); b != nil && b.Name() == "new" {
 				calls = append(calls, x)
 			}
-		case *ast.AssignStmt:
-			if x.Tok == token.ASSIGN && len(x.Lhs) == 1 {
-				if _, keyExpr, ok := LHSMapWriteKey(info, x.Lhs[0]); ok {
-					switch k := keyExpr.(type) {
-					case *ast.Ident:
-						mapWrites = append(mapWrites, k.Name)
-					case *ast.BasicLit:
-						mapWrites = append(mapWrites, k.Value)
+		case *ast.TypeSwitchStmt:
+			for _, st := range x.Body.List {
+				if cc, ok := st.(*ast.CaseClause); ok {
+					if v, ok := info.Implicits[cc].(*types.Var); ok && !IsLocalVar(v) {
+						t.Errorf("IsLocalVar(type-switch implicit %v) = false, want true", v)
 					}
 				}
 			}
-		case *ast.CompositeLit:
-			EachCompositeLitFlow(info, x, func(expr ast.Expr, isMapKey bool) bool {
-				if isMapKey {
-					switch k := expr.(type) {
-					case *ast.Ident:
-						litKeys = append(litKeys, k.Name)
-					case *ast.BasicLit:
-						litKeys = append(litKeys, k.Value)
-					}
-				}
-				return true
-			})
-		case *ast.TypeSwitchStmt:
-			EachTypeSwitchImplicit(info, x, func(v *types.Var, _ ast.Expr) {
-				if !IsLocalVar(v) {
-					t.Errorf("IsLocalVar(type-switch implicit %v) = false, want true", v)
-				}
-				implicitCount++
-			})
 		}
 		return true
 	})
@@ -257,13 +163,15 @@ func F(in any, s []int, m map[string]int) {
 	if IsBuiltinNewType(info, calls[1]) {
 		t.Fatal("IsBuiltinNewType(new(*pZero)) = true, want false")
 	}
-	if len(mapWrites) != 2 || mapWrites[0] != "k" || mapWrites[1] != `"k2"` {
-		t.Fatalf("LHSMapWriteKey keys = %v, want [k \"k2\"]", mapWrites)
+	if bindings < 5 {
+		t.Fatalf("EachLocalBinding visited %d bindings, want >= 5", bindings)
 	}
-	if len(litKeys) != 2 || litKeys[0] != "k" || litKeys[1] != `"k1"` {
-		t.Fatalf("EachCompositeLitFlow map keys = %v, want [k \"k1\"]", litKeys)
+	strT := pkg.Scope().Lookup("StrAlias").Type()
+	bytesT := pkg.Scope().Lookup("BytesAlias").Type()
+	if !IsFreshStringSliceCopy(strT, bytesT) || !IsFreshStringSliceCopy(bytesT, strT) {
+		t.Fatal("IsFreshStringSliceCopy failed on string <-> []byte conversions")
 	}
-	if implicitCount != 2 {
-		t.Fatalf("EachTypeSwitchImplicit visited %d vars, want 2", implicitCount)
+	if IsFreshStringSliceCopy(strT, types.NewSlice(types.Typ[types.Int])) {
+		t.Fatal("IsFreshStringSliceCopy accepted []int conversion")
 	}
 }

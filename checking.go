@@ -173,7 +173,7 @@ func (v *Snapshot) checkRecords(ctx context.Context, records []recordCheck, defe
 		results[i].evaluated = true
 		hasRuntime = hasRuntime || record.Recorded.RuntimeInputs != ""
 		if record.observed {
-			positives[i] = admittedObservation(record.Recorded, record.Subject, cl)
+			positives[i] = admittedObservationForModel(record.Recorded, record.Subject, cl, v.session != nil && v.session.executionModel.singleSubject())
 		}
 	}
 	emitRuntimeWindowViewHook()
@@ -207,8 +207,11 @@ func (v *Snapshot) checkRecords(ctx context.Context, records []recordCheck, defe
 			continue
 		}
 		if selected[i] {
-			if v.currentApplicabilityObservable(record.Subject, positives[i].OutcomeMethod) {
+			if ok, reqSingle := v.currentApplicabilityObservableMode(record.Subject, positives[i].OutcomeMethod); ok {
 				positives[i].CurrentApplicability = true
+				if reqSingle {
+					positives[i].SingleSubject = true
+				}
 			} else {
 				positives[i] = ObservationAuthority{}
 				v.mu.RLock()
@@ -742,13 +745,24 @@ func (v *Snapshot) retainApplicabilityCheck(ctx context.Context, rec Fingerprint
 }
 
 func (v *Snapshot) currentApplicabilityObservable(subject Subject, outcomeMethod string) bool {
+	ok, _ := v.currentApplicabilityObservableMode(subject, outcomeMethod)
+	return ok
+}
+
+func (v *Snapshot) currentApplicabilityObservableMode(subject Subject, outcomeMethod string) (ok, reqSingleSubject bool) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	p := v.observable[subject]
-	if outcomeMethod == outcome.StaticMethod {
-		return p.Observable && p.EffectFree
+	if !p.Observable {
+		return false, false
 	}
-	return p.Observable && p.OutcomeMethod == outcome.Method
+	if p.RequiresSingleSubject && (v.session == nil || !v.session.executionModel.singleSubject()) {
+		return false, false
+	}
+	if outcomeMethod == outcome.StaticMethod {
+		return p.EffectFree, p.RequiresSingleSubject
+	}
+	return p.OutcomeMethod == outcome.Method, p.RequiresSingleSubject
 }
 
 func (v *Snapshot) validateApplicabilityChecks(ctx context.Context) error {

@@ -216,7 +216,7 @@ func scanViewSubjectsWithLocalMemo(ctx context.Context, hasher *closure.Hasher, 
 // text of every field it persists (a downgrade reason is scan output, so
 // a change to its composition bumps the version); a bump recomputes
 // rather than serving an older entry's text or misreading its shape.
-const scanEntryVersion = 7
+const scanEntryVersion = 8
 
 // subjectScanEntry is one subject's scan outputs as persisted.
 type subjectScanEntry struct {

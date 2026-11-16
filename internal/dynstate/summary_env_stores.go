@@ -53,7 +53,6 @@ func (m settledGlobalMap) allowedForTargets(v *types.Var, targets []*types.Var) 
 // mutable reach.
 func isSettledReachArgValue(
 	audited bool,
-	stringUnsafe bool,
 	p *packages.Package,
 	fc *pkgFlowCache,
 	settledGlobals settledGlobalMap,
@@ -66,12 +65,11 @@ func isSettledReachArgValue(
 	checkSigOrigin func(*flowir.Value) bool,
 	val *flowir.Value,
 ) bool {
-	return isSettledReachArgValueSeen(audited, stringUnsafe, p, fc, settledGlobals, currentTargets, enclosing, exemptCall, pkgConf, paramSink, methodSink, checkSigOrigin, val, map[*types.Var]bool{})
+	return isSettledReachArgValueSeen(audited, p, fc, settledGlobals, currentTargets, enclosing, exemptCall, pkgConf, paramSink, methodSink, checkSigOrigin, val, map[*types.Var]bool{})
 }
 
 func isSettledReachArgValueSeen(
 	audited bool,
-	stringUnsafe bool,
 	p *packages.Package,
 	fc *pkgFlowCache,
 	settledGlobals settledGlobalMap,
@@ -113,11 +111,10 @@ func isSettledReachArgValueSeen(
 		return true
 	}
 	ok := checkPureOrFreshValue(val, valuePurityPolicy{
-		allowAppend:                 true,
-		allowValuePlane:             true,
-		allowRuntimeOps:             true,
-		allowNonMutableReach:        true,
-		forbidStringNonMutableReach: stringUnsafe,
+		allowAppend:          true,
+		allowValuePlane:      true,
+		allowRuntimeOps:      true,
+		allowNonMutableReach: true,
 		allowSigLeaf: func(leaf *flowir.Value) bool {
 			return checkSigOrigin != nil && checkSigOrigin(leaf)
 		},
@@ -162,7 +159,7 @@ func isSettledReachArgValueSeen(
 				}
 				return true
 			})
-			if defs != 1 || initVal == nil || !isSettledReachArgValueSeen(audited, stringUnsafe, p, fc, settledGlobals, currentTargets, enclosing, nil, pkgConf, localParams, localMethods, checkSigOrigin, initVal, visiting) {
+			if defs != 1 || initVal == nil || !isSettledReachArgValueSeen(audited, p, fc, settledGlobals, currentTargets, enclosing, nil, pkgConf, localParams, localMethods, checkSigOrigin, initVal, visiting) {
 				return false
 			}
 			wants := map[syntaxutil.ParamKey]bool{}
@@ -174,7 +171,7 @@ func isSettledReachArgValueSeen(
 				currentTargets:     currentTargets,
 				checkCarryingValue: checkSigOrigin,
 			}
-			if !enclosingConfinesRoots(audited, stringUnsafe, p, fc, enclosing, nil, exemptCall, roots, wants, methodWants, origin) {
+			if !enclosingConfinesRoots(audited, p, fc, enclosing, nil, exemptCall, roots, wants, methodWants, origin) {
 				return false
 			}
 			ownPath := ""
@@ -205,12 +202,12 @@ func isSettledReachArgValueSeen(
 	return ok && commitSinks()
 }
 
-func elemHandsOutReach(stringUnsafe bool, t types.Type) bool {
+func elemHandsOutReach(t types.Type) bool {
 	if t == nil {
 		return true
 	}
 	hasReach := func(et types.Type) bool {
-		return refconfine.TypeHandsOutMutableReach(et) || syntaxutil.ContainsUintptr(et) || (stringUnsafe && syntaxutil.TypeReachesString(et))
+		return refconfine.TypeHandsOutMutableReach(et) || syntaxutil.ContainsUintptr(et)
 	}
 	switch u := types.Unalias(t).Underlying().(type) {
 	case *types.Slice:
@@ -240,7 +237,6 @@ func varSetEqual(a, b map[*types.Var]bool) bool {
 // initializer directly embeds the global's mutable reach.
 func settledPackageDataGlobals(
 	audited bool,
-	stringUnsafe bool,
 	p *packages.Package,
 	fc *pkgFlowCache,
 	paramLeakFree map[syntaxutil.ParamKey]bool,
@@ -366,7 +362,7 @@ func settledPackageDataGlobals(
 					}
 					wants := map[syntaxutil.ParamKey]bool{}
 					mw := map[syntaxutil.FuncKey]bool{}
-					if !enclosingConfinesRoots(audited, stringUnsafe, p, fc, d, nil, nil, map[types.Object]bool{carrier: true}, wants, mw, nil) ||
+					if !enclosingConfinesRoots(audited, p, fc, d, nil, nil, map[types.Object]bool{carrier: true}, wants, mw, nil) ||
 						!wantsResolve(wants, mw) {
 						return false
 					}
@@ -377,7 +373,7 @@ func settledPackageDataGlobals(
 	}
 
 	reachOrStr := func(t types.Type) bool {
-		return refconfine.TypeHandsOutMutableReach(t) || syntaxutil.ContainsUintptr(t) || (stringUnsafe && syntaxutil.TypeReachesString(t))
+		return refconfine.TypeHandsOutMutableReach(t) || syntaxutil.ContainsUintptr(t)
 	}
 
 	checkTopValueSpecUse := func(g *types.Var, vs *ast.ValueSpec, embeddedOut map[*types.Var]bool, embeddedRawExported *bool) bool {
@@ -385,7 +381,7 @@ func settledPackageDataGlobals(
 			if lhsVar, ok := p.TypesInfo.Defs[vs.Names[0]].(*types.Var); ok && lhsVar != nil {
 				carriersOfLHS, inSettled := settled[lhsVar]
 				isCarrierLHS := refconfine.TypeMayCarryUnknownDynamic(audited, lhsVar.Type())
-				if !inSettled && !isCarrierLHS && (reachOrStr(lhsVar.Type()) || fc.isExposedStringGlobal(lhsVar)) {
+				if !inSettled && !isCarrierLHS && reachOrStr(lhsVar.Type()) {
 					return false
 				}
 				rhsVal := fc.exprValue(p, vs.Values[0])
@@ -426,7 +422,7 @@ func settledPackageDataGlobals(
 						if v.Lit != nil && bodyMentionsVar(v.Closure, g) {
 							wants := map[syntaxutil.ParamKey]bool{}
 							mw := map[syntaxutil.FuncKey]bool{}
-							if !enclosingConfinesRoots(audited, stringUnsafe, p, fc, v.Lit, nil, nil, map[types.Object]bool{g: true}, wants, mw, nil) ||
+							if !enclosingConfinesRoots(audited, p, fc, v.Lit, nil, nil, map[types.Object]bool{g: true}, wants, mw, nil) ||
 								!wantsResolve(wants, mw) {
 								okSpec = false
 								return
@@ -462,7 +458,7 @@ func settledPackageDataGlobals(
 						if v.CallKind == flowir.CallPlain && !v.IsMethodExprCall && v.CalleeFunc != nil {
 							fk := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Origin().Name()}
 							if auditedValuePlane[fk] {
-								shallowSafe := !elemHandsOutReach(stringUnsafe, v.Type)
+								shallowSafe := !elemHandsOutReach(v.Type)
 								for _, arg := range v.Args {
 									if shallowSafe && arg != nil && arg.Kind == flowir.ValPlace && arg.Place.Obj == g && len(arg.Place.Projs) == 0 {
 										continue
@@ -476,11 +472,9 @@ func settledPackageDataGlobals(
 									return okSpec
 								}
 								paramType := v.FormalParamSlotType(pIdx, packedVariadic)
-								boxesStr := paramType != nil && erasesStringIntoType(slotType, paramType)
 								handsOutSlot := refconfine.CallResultHandsOut(slotType) ||
-									(paramType != nil && refconfine.CallResultHandsOut(paramType) && (refconfine.CallResultHandsOut(slotType) || (stringUnsafe && boxesStr)))
+									(paramType != nil && refconfine.CallResultHandsOut(paramType) && refconfine.CallResultHandsOut(slotType))
 								if slotType != nil && !handsOutSlot &&
-									!(stringUnsafe && (boxesStr || (syntaxutil.TypeReachesString(slotType) && fc.callMayReachStringHeaderUnsafe(audited, v)))) &&
 									!(v.AutoAddrRecv && v.HasRecvPlace && v.RecvPlace.Obj == g) {
 									return true
 								}
@@ -497,7 +491,7 @@ func settledPackageDataGlobals(
 								}
 								pk := syntaxutil.ParamKey{Func: fk, Index: pIdx}
 								confinementOK := fk.Pkg == ownPath && paramLeakFree[pk] &&
-									!refconfine.CallResultHandsOut(v.Type) && !(stringUnsafe && syntaxutil.TypeReachesString(v.Type))
+									!refconfine.CallResultHandsOut(v.Type)
 								if !confinementOK && arg != nil && arg.Kind == flowir.ValPlace && arg.Place.Obj == g && len(arg.Place.Projs) == 0 {
 									if fd := funcDecls[v.CalleeFunc]; fd != nil {
 										fnBody := fc.funcBody(p, fd)
@@ -505,7 +499,7 @@ func settledPackageDataGlobals(
 											wants := map[syntaxutil.ParamKey]bool{}
 											mw := map[syntaxutil.FuncKey]bool{}
 											pRoot := map[types.Object]bool{fnBody.Params[pIdx]: true}
-											if enclosingConfinesRoots(audited, stringUnsafe, p, fc, fd, nil, nil, pRoot, wants, mw, nil) &&
+											if enclosingConfinesRoots(audited, p, fc, fd, nil, nil, pRoot, wants, mw, nil) &&
 												wantsResolve(wants, mw) {
 												confinementOK = true
 											}
@@ -613,7 +607,7 @@ func settledPackageDataGlobals(
 						usedInFuncDecl = true
 						wants := map[syntaxutil.ParamKey]bool{}
 						mw := map[syntaxutil.FuncKey]bool{}
-						if !enclosingConfinesRoots(audited, stringUnsafe, p, fc, d, nil, nil, map[types.Object]bool{g: true}, wants, mw, nil) ||
+						if !enclosingConfinesRoots(audited, p, fc, d, nil, nil, map[types.Object]bool{g: true}, wants, mw, nil) ||
 							!wantsResolve(wants, mw) {
 							keep = false
 						}
@@ -782,15 +776,14 @@ func valueMentionsVar(v *flowir.Value, target *types.Var) bool {
 	return hit
 }
 
-func closureExtractsNoCarrierFromRoots(audited, stringUnsafe bool, b *flowir.Body, carrierAliasRoots map[types.Object]bool) bool {
+func closureExtractsNoCarrierFromRoots(audited bool, b *flowir.Body, carrierAliasRoots map[types.Object]bool) bool {
 	if b == nil || len(carrierAliasRoots) == 0 {
 		return true
 	}
 	isScalarType := func(t types.Type) bool {
 		return t != nil &&
 			!refconfine.CallResultHandsOut(t) &&
-			!refconfine.TypeMayCarryUnknownDynamic(audited, t) &&
-			!(stringUnsafe && syntaxutil.TypeReachesString(t))
+			!refconfine.TypeMayCarryUnknownDynamic(audited, t)
 	}
 	ok := true
 	var checkVal func(v *flowir.Value)
@@ -825,7 +818,7 @@ func closureExtractsNoCarrierFromRoots(audited, stringUnsafe bool, b *flowir.Bod
 				return
 			}
 		case flowir.ValMakeClosure:
-			if v.Closure == nil || !closureExtractsNoCarrierFromRoots(audited, stringUnsafe, v.Closure, carrierAliasRoots) {
+			if v.Closure == nil || !closureExtractsNoCarrierFromRoots(audited, v.Closure, carrierAliasRoots) {
 				ok = false
 			}
 			return
@@ -846,7 +839,7 @@ func closureExtractsNoCarrierFromRoots(audited, stringUnsafe bool, b *flowir.Bod
 				return
 			}
 			if v.CallKind == flowir.CallIIFE {
-				if v.IIFE == nil || !closureExtractsNoCarrierFromRoots(audited, stringUnsafe, v.IIFE, carrierAliasRoots) {
+				if v.IIFE == nil || !closureExtractsNoCarrierFromRoots(audited, v.IIFE, carrierAliasRoots) {
 					ok = false
 					return
 				}
@@ -995,7 +988,6 @@ type rootOriginPolicy struct {
 // storage of roots outside selfLit (and exemptCall when non-nil).
 func enclosingConfinesRoots(
 	audited bool,
-	stringUnsafe bool,
 	p *packages.Package,
 	fc *pkgFlowCache,
 	enclosing ast.Node,
@@ -1018,7 +1010,7 @@ func enclosingConfinesRoots(
 	}
 
 	reachOrStr := func(t types.Type) bool {
-		return refconfine.TypeHandsOutMutableReach(t) || syntaxutil.ContainsUintptr(t) || (stringUnsafe && syntaxutil.TypeReachesString(t))
+		return refconfine.TypeHandsOutMutableReach(t) || syntaxutil.ContainsUintptr(t)
 	}
 
 	var exemptMap map[*ast.CallExpr]bool
@@ -1104,12 +1096,11 @@ func enclosingConfinesRoots(
 			return true
 		}
 		return checkPureOrFreshValue(v, valuePurityPolicy{
-			allowAppend:                 true,
-			allowValuePlane:             true,
-			allowRuntimeOps:             true,
-			allowTypeAssert:             true,
-			allowNonMutableReach:        true,
-			forbidStringNonMutableReach: stringUnsafe,
+			allowAppend:          true,
+			allowValuePlane:      true,
+			allowRuntimeOps:      true,
+			allowTypeAssert:      true,
+			allowNonMutableReach: true,
 			allowSigLeaf: func(leaf *flowir.Value) bool {
 				if leaf.Kind == flowir.ValScalarLitOrConst ||
 					(leaf.Kind == flowir.ValPlace && (leaf.Place.Root == flowir.RootConstOrNil || (leaf.Place.Root == flowir.RootFunc && !leaf.Place.IsMethodExpr))) {
@@ -1362,7 +1353,7 @@ func enclosingConfinesRoots(
 			return
 		case flowir.ValConvert:
 			if syntaxutil.IsUnsafePointerType(v.Type) &&
-				(suppliesMutableRoot(v.Arg) || (valTouchesAnyRoot(v.Arg) && (v.Arg == nil || syntaxutil.ContainsUintptr(v.Arg.Type) || syntaxutil.PointerMayReachString(v.Arg.Type)))) {
+				(suppliesMutableRoot(v.Arg) || (valTouchesAnyRoot(v.Arg) && (v.Arg == nil || syntaxutil.ContainsUintptr(v.Arg.Type)))) {
 				sound = false
 				return
 			}
@@ -1409,7 +1400,7 @@ func enclosingConfinesRoots(
 					subRoots[gv] = true
 				}
 			}
-			if len(localRoots) > 0 && !boundValueClosureEnvLeakFreeJudged(audited, stringUnsafe, p, fc, localRoots, v.Lit.Body, wants, methodWants) {
+			if len(localRoots) > 0 && !boundValueClosureEnvLeakFreeJudged(audited, p, fc, localRoots, v.Lit.Body, wants, methodWants) {
 				sound = false
 				return
 			}
@@ -1420,7 +1411,7 @@ func enclosingConfinesRoots(
 					cp.nestedClosure = true
 					subOrigin = &cp
 				}
-				if !enclosingConfinesRoots(audited, stringUnsafe, p, fc, v.Lit, selfLit, exemptCall, subRoots, wants, methodWants, subOrigin) {
+				if !enclosingConfinesRoots(audited, p, fc, v.Lit, selfLit, exemptCall, subRoots, wants, methodWants, subOrigin) {
 					sound = false
 					return
 				}
@@ -1448,7 +1439,7 @@ func enclosingConfinesRoots(
 						return
 					}
 					if len(v.Args) == 2 && suppliesMutableRoot(v.Args[1]) &&
-						(v.Args[0] == nil || elemHandsOutReach(stringUnsafe, v.Args[0].Type)) {
+						(v.Args[0] == nil || elemHandsOutReach(v.Args[0].Type)) {
 						sound = false
 						return
 					}
@@ -1483,11 +1474,9 @@ func enclosingConfinesRoots(
 							return true
 						}
 						paramType := v.FormalParamSlotType(pIdx, packedVariadic)
-						boxesStr := paramType != nil && erasesStringIntoType(slotType, paramType)
 						handsOutSlot := refconfine.CallResultHandsOut(slotType) ||
-							(paramType != nil && refconfine.CallResultHandsOut(paramType) && (refconfine.CallResultHandsOut(slotType) || (stringUnsafe && boxesStr)))
-						if slotType != nil && !handsOutSlot &&
-							!(stringUnsafe && (boxesStr || (syntaxutil.TypeReachesString(slotType) && fc.callMayReachStringHeaderUnsafe(audited, v)))) {
+							(paramType != nil && refconfine.CallResultHandsOut(paramType) && refconfine.CallResultHandsOut(slotType))
+						if slotType != nil && !handsOutSlot {
 							return true
 						}
 						if wants == nil || !pOK {
@@ -1761,7 +1750,7 @@ func enclosingConfinesRoots(
 						return false
 					}
 					if cur.Kind == flowir.ValMakeClosure && cur.Lit != selfLit {
-						if cur.Closure == nil || !closureExtractsNoCarrierFromRoots(audited, stringUnsafe, cur.Closure, origin.carrierAliasRoots) {
+						if cur.Closure == nil || !closureExtractsNoCarrierFromRoots(audited, cur.Closure, origin.carrierAliasRoots) {
 							sound = false
 							return false
 						}
@@ -1777,7 +1766,6 @@ func enclosingConfinesRoots(
 
 func environmentFreeFuncLitWithOrigin(
 	audited bool,
-	stringUnsafe bool,
 	p *packages.Package,
 	fc *pkgFlowCache,
 	lit *ast.FuncLit,
@@ -1803,10 +1791,10 @@ func environmentFreeFuncLitWithOrigin(
 	if enclosing == nil {
 		return false
 	}
-	if !enclosingConfinesRoots(audited, stringUnsafe, p, fc, enclosing, lit, nil, roots, wants, methodWants, origin) {
+	if !enclosingConfinesRoots(audited, p, fc, enclosing, lit, nil, roots, wants, methodWants, origin) {
 		return false
 	}
-	if origin != nil && len(origin.carrierAliasRoots) > 0 && !closureExtractsNoCarrierFromRoots(audited, stringUnsafe, litBody, origin.carrierAliasRoots) {
+	if origin != nil && len(origin.carrierAliasRoots) > 0 && !closureExtractsNoCarrierFromRoots(audited, litBody, origin.carrierAliasRoots) {
 		return false
 	}
 	localRoots := make(map[types.Object]bool, len(roots))
@@ -1815,7 +1803,7 @@ func environmentFreeFuncLitWithOrigin(
 			localRoots[r] = true
 		}
 	}
-	if len(localRoots) > 0 && !boundValueClosureEnvLeakFreeJudged(audited, stringUnsafe, p, fc, localRoots, lit.Body, wants, methodWants) {
+	if len(localRoots) > 0 && !boundValueClosureEnvLeakFreeJudged(audited, p, fc, localRoots, lit.Body, wants, methodWants) {
 		return false
 	}
 	return true
@@ -2026,7 +2014,6 @@ func classifyLiteralRegistrant(audited bool, p *packages.Package, fc *pkgFlowCac
 // function-carrying value into it that is not provably environment-free.
 func recordEnvCarryingRegistrations(
 	audited bool,
-	stringUnsafe bool,
 	p *packages.Package,
 	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
@@ -2060,7 +2047,7 @@ func recordEnvCarryingRegistrations(
 		ownPath = p.Types.Path()
 	}
 	reachOrStr := func(t types.Type) bool {
-		return refconfine.TypeHandsOutMutableReach(t) || syntaxutil.ContainsUintptr(t) || (stringUnsafe && syntaxutil.TypeReachesString(t))
+		return refconfine.TypeHandsOutMutableReach(t) || syntaxutil.ContainsUintptr(t)
 	}
 	carrierVar := func(obj types.Object) (*types.Var, bool) {
 		variable, ok := obj.(*types.Var)
@@ -2087,7 +2074,7 @@ func recordEnvCarryingRegistrations(
 			return localAliases[dst.Obj].root
 		}
 		if dst.Root == flowir.RootTransient && dst.Base != nil {
-			return collectValueCarrierVars(audited, stringUnsafe, dst.Base, carrierVar, localAliases, nil)
+			return collectValueCarrierVars(audited, dst.Base, carrierVar, localAliases, nil)
 		}
 		return nil
 	}
@@ -2109,12 +2096,11 @@ func recordEnvCarryingRegistrations(
 				return flowir.Place{}, false, localAliases[val.AddrPlace.Obj].root
 			}
 		}
-		return flowir.Place{}, false, collectValueCarrierVars(audited, stringUnsafe, val, carrierVar, localAliases, nil)
+		return flowir.Place{}, false, collectValueCarrierVars(audited, val, carrierVar, localAliases, nil)
 	}
 	computeLocalAliases := func(scopeBody *flowir.Body, parent map[types.Object]localCarrierAliases) map[types.Object]localCarrierAliases {
 		aliased, _ := computeBodyCarrierAliases(audited, fc, scopeBody, carrierAliasConfig{
 			parentAliases: parent,
-			allowString:   stringUnsafe,
 			carrierVar:    carrierVar,
 			descendNested: true,
 		})
@@ -2606,7 +2592,7 @@ func recordEnvCarryingRegistrations(
 				checkCarryingValue:   checkLocalCarryingInit,
 				checkEnclosingParam:  checkParamFn,
 			}
-			if !environmentFreeFuncLitWithOrigin(audited, stringUnsafe, p, fc, val.Lit, enclosingScope, wants, methodWants, origin) {
+			if !environmentFreeFuncLitWithOrigin(audited, p, fc, val.Lit, enclosingScope, wants, methodWants, origin) {
 				return true
 			}
 			if !wantsResolve(wants, methodWants) {
@@ -2663,7 +2649,7 @@ func recordEnvCarryingRegistrations(
 								return true
 							}
 							if arg != nil && arg.Type != nil && reachOrStr(arg.Type) {
-								if !isSettledReachArgValue(audited, stringUnsafe, p, fc, settledGlobals, currentTargets, enclosingScope, val.CallAST, pkgConf, pendingEnvParams, pendingEnvMethods, checkLocalCarryingInit, arg) {
+								if !isSettledReachArgValue(audited, p, fc, settledGlobals, currentTargets, enclosingScope, val.CallAST, pkgConf, pendingEnvParams, pendingEnvMethods, checkLocalCarryingInit, arg) {
 									return true
 								}
 							}

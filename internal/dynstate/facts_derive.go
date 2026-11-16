@@ -73,40 +73,9 @@ func factOfWithCache(audited bool, p *packages.Package, fc *pkgFlowCache, single
 	poolMutated := map[string]bool{}
 	poolEscaped := map[string]bool{}
 	var poolAttributedUses []syntaxutil.AttributedUse
-	stringEscaped := map[string]bool{}
-	var stringAttributedUses []syntaxutil.AttributedUse
-	pkgStrUnsafe := fc != nil && fc.pkgHasStringHeaderUnsafe
-	fact.HasStringHeaderUnsafe = pkgStrUnsafe
-	if p.Types != nil {
-		sinkPkgs := map[string]bool{}
-		sinkParams := map[syntaxutil.ParamKey]bool{}
-		sinkMethods := map[syntaxutil.FuncKey]bool{}
-		callbackTargets := map[string]bool{}
-		collectForeignStringAndCallbackEdges(audited, p, fc, sinkPkgs, sinkParams, sinkMethods, callbackTargets)
-		for q := range sinkPkgs {
-			fact.StringSinkPkgs = append(fact.StringSinkPkgs, q)
-		}
-		sort.Strings(fact.StringSinkPkgs)
-		for pk := range sinkParams {
-			fact.StringSinkParams = append(fact.StringSinkParams, pk)
-		}
-		slices.SortFunc(fact.StringSinkParams, syntaxutil.ParamKey.Compare)
-		for mk := range sinkMethods {
-			fact.StringSinkMethods = append(fact.StringSinkMethods, mk)
-		}
-		slices.SortFunc(fact.StringSinkMethods, syntaxutil.FuncKey.Compare)
-		for q := range callbackTargets {
-			fact.StringCallbackTargets = append(fact.StringCallbackTargets, q)
-		}
-		sort.Strings(fact.StringCallbackTargets)
-	}
-	baseHooks := hooks
-	if hooks != nil && hooks.StringUnsafeOnly {
-		baseHooks = nil
-	}
 	var seamHook seams.ExportedSeamMarkHook
-	if baseHooks != nil && baseHooks.ExportedSeamSite != nil {
-		seamHook = baseHooks.ExportedSeamSite
+	if hooks != nil && hooks.ExportedSeamSite != nil {
+		seamHook = hooks.ExportedSeamSite
 	}
 	seamAnalysis := seams.AnalyzeBracketedSeams(audited, p, idx, seamHook)
 	fact.ExportedSeams = seamAnalysis.ExportedSeams
@@ -114,14 +83,7 @@ func factOfWithCache(audited bool, p *packages.Package, fc *pkgFlowCache, single
 	fact.SeqFuncEdges = seamAnalysis.SeqFuncEdges
 	fact.ParallelFuncs = seamAnalysis.ParallelFuncs
 	fact.ParallelEdges = seamAnalysis.ParallelEdges
-	recordDynamicGlobalUses(audited, p, fc, idx, callIdx, seamAnalysis.Exempt, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses, &attributedParamUses, singleSubject, poolDischarged, poolMutated, poolEscaped, &poolAttributedUses, stringEscaped, &stringAttributedUses, baseHooks)
-	for key := range stringEscaped {
-		fact.StringEscapes = append(fact.StringEscapes, key)
-	}
-	sort.Strings(fact.StringEscapes)
-	fact.StringAttributedUses = append(fact.StringAttributedUses, stringAttributedUses...)
-	slices.SortFunc(fact.StringAttributedUses, syntaxutil.AttributedUse.Compare)
-	fact.StringAttributedUses = slices.Compact(fact.StringAttributedUses)
+	recordDynamicGlobalUses(audited, p, fc, idx, callIdx, seamAnalysis.Exempt, mutated, escaped, initOnly, methodUses, paramUses, initParamUses, initMethodUses, fieldUses, elemUses, carrierLinks, &attributedUses, &attributedParamUses, singleSubject, poolDischarged, poolMutated, poolEscaped, &poolAttributedUses, hooks)
 	for key := range poolDischarged {
 		fact.PoolDischarges = append(fact.PoolDischarges, key)
 	}
@@ -259,7 +221,7 @@ func factOfWithCache(audited bool, p *packages.Package, fc *pkgFlowCache, single
 				unattestedBroken[varKey] = true
 			}
 		}
-		settledGlobals = settledPackageDataGlobals(audited, pkgStrUnsafe, p, fc, paramLeakFree, readOnly, unattestedBroken, singleSubjectSet)
+		settledGlobals = settledPackageDataGlobals(audited, p, fc, paramLeakFree, readOnly, unattestedBroken, singleSubjectSet)
 	}
 	envCarrying := map[string]bool{}
 	envCarryingFns := map[string]map[syntaxutil.FuncKey]bool{}
@@ -271,7 +233,7 @@ func factOfWithCache(audited bool, p *packages.Package, fc *pkgFlowCache, single
 	regCarrierLinks := map[syntaxutil.CarrierLink]bool{}
 	fieldDefer := map[syntaxutil.FieldPosKey]map[syntaxutil.ParamKey]bool{}
 	fieldPoison := map[string]map[syntaxutil.FieldParamPoison]bool{}
-	recordEnvCarryingRegistrations(audited, pkgStrUnsafe, p, fc, idx, callIdx, initOnly, unattestedBroken, singleSubjectSet, settledGlobals, &pkgConf, seamAnalysis.Exempt, envCarrying, envCarryingFns, envCarryingUnattr, envCallableVars, envCalls, envParamCalls, envMethodCalls, regCarrierLinks, fieldDefer, fieldPoison, baseHooks)
+	recordEnvCarryingRegistrations(audited, p, fc, idx, callIdx, initOnly, unattestedBroken, singleSubjectSet, settledGlobals, &pkgConf, seamAnalysis.Exempt, envCarrying, envCarryingFns, envCarryingUnattr, envCallableVars, envCalls, envParamCalls, envMethodCalls, regCarrierLinks, fieldDefer, fieldPoison, hooks)
 	for pos, params := range fieldDefer {
 		for param := range params {
 			fact.FieldParamDefer = append(fact.FieldParamDefer, syntaxutil.FieldParamDefer{Pos: pos, Param: param})
@@ -376,7 +338,7 @@ func factOfWithCache(audited bool, p *packages.Package, fc *pkgFlowCache, single
 			}
 		}
 		slices.SortFunc(fact.ParamRetentionFreeDeps, syntaxutil.ParamDepEdge.Compare)
-		envFree, envDeps, retParamDeps, retMethodDeps, retFieldDefer, retFieldPoison, insFree, insDeps, insParamDeps, insMethodDeps, callerInsDeps := returnEnvFreeFunctions(audited, pkgStrUnsafe, p, fc, settledGlobals, &pkgConf, baseHooks)
+		envFree, envDeps, retParamDeps, retMethodDeps, retFieldDefer, retFieldPoison, insFree, insDeps, insParamDeps, insMethodDeps, callerInsDeps := returnEnvFreeFunctions(audited, p, fc, settledGlobals, &pkgConf, hooks)
 		pkgPath := p.Types.Path()
 		for fnName := range envFree {
 			fnKey := syntaxutil.FuncKey{Pkg: pkgPath, Name: fnName}
@@ -423,144 +385,6 @@ func factOfWithCache(audited bool, p *packages.Package, fc *pkgFlowCache, single
 		slices.SortFunc(fact.ParamInsertionDeps, syntaxutil.ParamInsertionDepEdge.Compare)
 		slices.SortFunc(fact.ParamInsertionParamDeps, syntaxutil.ParamDepEdge.Compare)
 		slices.SortFunc(fact.ParamInsertionMethodDeps, syntaxutil.ParamMethodDepEdge.Compare)
-
-		if !pkgStrUnsafe {
-			var strHooks *syntaxutil.ExplainHookSet
-			if hooks != nil && hooks.IncludeStringUnsafeSites {
-				strHooks = hooks
-			}
-			strSettled := settledPackageDataGlobals(audited, true, p, fc, pkgConf.paramLeakFree, pkgConf.readOnly, unattestedBroken, singleSubjectSet)
-			strEnvCarrying := map[string]bool{}
-			strEnvCarryingFns := map[string]map[syntaxutil.FuncKey]bool{}
-			strEnvCarryingUnattr := map[string]bool{}
-			strEnvCallable := map[string]bool{}
-			strEnvCalls := map[syntaxutil.EnvCallUse]bool{}
-			strEnvParamCalls := map[syntaxutil.EnvCallParamUse]bool{}
-			strEnvMethodCalls := map[syntaxutil.EnvCallMethodUse]bool{}
-			strRegLinks := map[syntaxutil.CarrierLink]bool{}
-			strFieldDefer := map[syntaxutil.FieldPosKey]map[syntaxutil.ParamKey]bool{}
-			strFieldPoison := map[string]map[syntaxutil.FieldParamPoison]bool{}
-			recordEnvCarryingRegistrations(audited, true, p, fc, idx, callIdx, initOnly, unattestedBroken, singleSubjectSet, strSettled, &pkgConf, seamAnalysis.Exempt, strEnvCarrying, strEnvCarryingFns, strEnvCarryingUnattr, strEnvCallable, strEnvCalls, strEnvParamCalls, strEnvMethodCalls, strRegLinks, strFieldDefer, strFieldPoison, strHooks)
-			for key := range strEnvCarrying {
-				fact.StringEnvCarrying = append(fact.StringEnvCarrying, key)
-			}
-			sort.Strings(fact.StringEnvCarrying)
-			for key := range strEnvCallable {
-				if !envCallableVars[key] {
-					fact.StringEnvCallable = append(fact.StringEnvCallable, key)
-				}
-			}
-			sort.Strings(fact.StringEnvCallable)
-			for key, fns := range strEnvCarryingFns {
-				if strEnvCarryingUnattr[key] || strEnvCallable[key] || envCallableVars[key] {
-					continue
-				}
-				for fn := range fns {
-					fact.StringEnvCarryingFns = append(fact.StringEnvCarryingFns, syntaxutil.VarFuncUse{Key: key, Func: fn})
-				}
-			}
-			slices.SortFunc(fact.StringEnvCarryingFns, syntaxutil.VarFuncUse.Compare)
-			for use := range strEnvCalls {
-				if envCalls[use] {
-					continue
-				}
-				unattr := syntaxutil.EnvCallUse{Key: use.Key, Callee: use.Callee}
-				if !use.Func.IsZero() && (envCalls[unattr] || strEnvCalls[unattr]) {
-					continue
-				}
-				fact.StringEnvCallUses = append(fact.StringEnvCallUses, use)
-			}
-			slices.SortFunc(fact.StringEnvCallUses, syntaxutil.EnvCallUse.Compare)
-			for use := range strEnvParamCalls {
-				if envParamCalls[use] {
-					continue
-				}
-				unattr := syntaxutil.EnvCallParamUse{Key: use.Key, Param: use.Param}
-				if !use.Func.IsZero() && (envParamCalls[unattr] || strEnvParamCalls[unattr]) {
-					continue
-				}
-				fact.StringEnvCallParamUses = append(fact.StringEnvCallParamUses, use)
-			}
-			slices.SortFunc(fact.StringEnvCallParamUses, syntaxutil.EnvCallParamUse.Compare)
-			for use := range strEnvMethodCalls {
-				if envMethodCalls[use] {
-					continue
-				}
-				unattr := syntaxutil.EnvCallMethodUse{Key: use.Key, Method: use.Method}
-				if !use.Func.IsZero() && (envMethodCalls[unattr] || strEnvMethodCalls[unattr]) {
-					continue
-				}
-				fact.StringEnvCallMethodUses = append(fact.StringEnvCallMethodUses, use)
-			}
-			slices.SortFunc(fact.StringEnvCallMethodUses, syntaxutil.EnvCallMethodUse.Compare)
-			for link := range strRegLinks {
-				if !regCarrierLinks[link] && !carrierLinks[link.From][link.To] {
-					fact.StringCarrierLinks = append(fact.StringCarrierLinks, link)
-				}
-			}
-			slices.SortFunc(fact.StringCarrierLinks, syntaxutil.CarrierLink.Compare)
-
-			strEnvFree, strEnvDeps, strRetParamDeps, strRetMethodDeps, strRetFieldDefer, strRetFieldPoison, strInsFree, strInsDeps, strInsParamDeps, strInsMethodDeps, strCallerInsDeps := returnEnvFreeFunctions(audited, true, p, fc, strSettled, &pkgConf, strHooks)
-			for fnName := range envFree {
-				fnKey := syntaxutil.FuncKey{Pkg: pkgPath, Name: fnName}
-				if !strEnvFree[fnName] ||
-					!boolMapSubset(strRetFieldDefer[fnName], retFieldDefer[fnName]) ||
-					!boolMapSubset(strRetFieldPoison[fnName], retFieldPoison[fnName]) {
-					fact.StringReturnEnvBlocked = append(fact.StringReturnEnvBlocked, fnKey)
-					continue
-				}
-				for callee := range strEnvDeps[fnName] {
-					if !envDeps[fnName][callee] {
-						fact.StringReturnEnvDeps = append(fact.StringReturnEnvDeps, syntaxutil.FuncDepEdge{Func: fnKey, Callee: callee})
-					}
-				}
-				for pk := range strRetParamDeps[fnName] {
-					if !retParamDeps[fnName][pk] {
-						fact.StringReturnEnvParamDeps = append(fact.StringReturnEnvParamDeps, syntaxutil.FuncParamDepEdge{Func: fnKey, Param: pk})
-					}
-				}
-				for mk := range strRetMethodDeps[fnName] {
-					if !retMethodDeps[fnName][mk] {
-						fact.StringReturnEnvMethodDeps = append(fact.StringReturnEnvMethodDeps, syntaxutil.FuncDepEdge{Func: fnKey, Callee: mk})
-					}
-				}
-				for dep := range strCallerInsDeps[fnName] {
-					if !callerInsDeps[fnName][dep] {
-						fact.StringReturnEnvInsertionDeps = append(fact.StringReturnEnvInsertionDeps, syntaxutil.FuncInsertionDepEdge{Func: fnKey, Dep: dep})
-					}
-				}
-			}
-			slices.SortFunc(fact.StringReturnEnvBlocked, syntaxutil.FuncKey.Compare)
-			slices.SortFunc(fact.StringReturnEnvDeps, syntaxutil.FuncDepEdge.Compare)
-			slices.SortFunc(fact.StringReturnEnvParamDeps, syntaxutil.FuncParamDepEdge.Compare)
-			slices.SortFunc(fact.StringReturnEnvMethodDeps, syntaxutil.FuncDepEdge.Compare)
-			slices.SortFunc(fact.StringReturnEnvInsertionDeps, syntaxutil.FuncInsertionDepEdge.Compare)
-			for ownKey := range insFree {
-				if !strInsFree[ownKey] {
-					fact.StringParamInsertionBlocked = append(fact.StringParamInsertionBlocked, ownKey)
-					continue
-				}
-				for dep := range strInsDeps[ownKey] {
-					if !insDeps[ownKey][dep] {
-						fact.StringParamInsertionDeps = append(fact.StringParamInsertionDeps, syntaxutil.ParamInsertionDepEdge{Param: ownKey, Dep: dep})
-					}
-				}
-				for pk := range strInsParamDeps[ownKey] {
-					if !insParamDeps[ownKey][pk] {
-						fact.StringParamInsertionParamDeps = append(fact.StringParamInsertionParamDeps, syntaxutil.ParamDepEdge{Own: ownKey, Dep: pk})
-					}
-				}
-				for mk := range strInsMethodDeps[ownKey] {
-					if !insMethodDeps[ownKey][mk] {
-						fact.StringParamInsertionMethodDeps = append(fact.StringParamInsertionMethodDeps, syntaxutil.ParamMethodDepEdge{Param: ownKey, Method: mk})
-					}
-				}
-			}
-			slices.SortFunc(fact.StringParamInsertionBlocked, syntaxutil.ParamKey.Compare)
-			slices.SortFunc(fact.StringParamInsertionDeps, syntaxutil.ParamInsertionDepEdge.Compare)
-			slices.SortFunc(fact.StringParamInsertionParamDeps, syntaxutil.ParamDepEdge.Compare)
-			slices.SortFunc(fact.StringParamInsertionMethodDeps, syntaxutil.ParamMethodDepEdge.Compare)
-		}
 	}
 	for varKey, paramKeys := range paramUses {
 		for paramKey := range paramKeys {
@@ -673,13 +497,4 @@ func factOfWithCache(audited bool, p *packages.Package, fc *pkgFlowCache, single
 		)
 	}
 	return fact
-}
-
-func boolMapSubset[K comparable](sub, super map[K]bool) bool {
-	for k := range sub {
-		if !super[k] {
-			return false
-		}
-	}
-	return true
 }

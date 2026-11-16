@@ -56,7 +56,14 @@ observation with matching runtime-input guards is admitted under the derived
 static-reachability outcome method (`gofresh/static-reachability@1`) without
 requiring runtime operation-outcome support (`gofresh/immutable-environment@1`),
 whereas any subject that reaches an external input operation requires
-established runtime operation-outcome support. Unknown,
+established runtime operation-outcome support. When a positive observability
+proof relies on excluding unreached un-confined `unsafe.Pointer` operations in a
+loaded non-standard package (`Observability.RequiresSingleSubject`, bound into the
+proof's integrity evidence), producing capture, check admission, and current
+applicability extension require the caller's single-subject-process
+execution attestation (`SingleSubjectExecution`), refusing shared-process capture
+and cross-mode replay fail-closed and recording `SingleSubject` on the accepted
+`ObservationAuthority`. Unknown,
 absent or incompatible support supplies no positive evidence. Hashes, seals,
 successful decoding, set union and current reconstruction establish none of
 the missing historical premises. Explicit purity keeps its specified override

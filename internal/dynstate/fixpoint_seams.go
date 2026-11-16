@@ -39,14 +39,10 @@ func ActiveCarrierLinkGraph(allFacts map[string][]Fact, resolution *DeferralReso
 		linkAdj[link.From][link.To] = true
 		linkAdj[link.To][link.From] = true
 	}
-	for pkgPath, facts := range allFacts {
-		applyStr := resolution != nil && resolution.StringUnsafePackages[pkgPath]
+	for _, facts := range allFacts {
 		for _, fact := range facts {
 			for _, link := range fact.CarrierLinks {
 				addLink(fact, link, true)
-			}
-			for _, link := range fact.StringCarrierLinks {
-				addLink(fact, link, applyStr)
 			}
 		}
 	}

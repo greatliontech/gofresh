@@ -593,16 +593,30 @@ func (v *Snapshot) CaptureObservedBatch(ctx context.Context) (fps map[Subject]Fi
 
 func (v *Snapshot) observedFingerprintLocked(subject Subject) Fingerprint {
 	disposition := v.observable[subject]
+	singleSubject := v.session != nil && v.session.executionModel.singleSubject()
+	observable := disposition.Observable
+	reason := disposition.Reason
+	effectFree := disposition.EffectFree
+	reqSingleSubject := disposition.RequiresSingleSubject
+	if observable && reqSingleSubject && !singleSubject {
+		observable = false
+		reason = disposition.SharedProcessUnsafeReason
+		if reason == "" {
+			reason = "package scan: reaches un-confined unsafe.Pointer"
+		}
+		effectFree = false
+		reqSingleSubject = false
+	}
 	proof := ObservationProof{
 		Strategy:   ObservationRTA,
 		Subject:    subject,
-		Observable: disposition.Observable,
-		Reason:     disposition.Reason,
+		Observable: observable,
+		Reason:     reason,
 	}
 	const assertion = "caller assertion"
 	fingerprint := v.fingerprintLocked(subject, v.facts.closure(subject))
 	fingerprint.ObservationAssertion, fingerprint.ObservationProof = assertion, proof
-	fingerprint.ObservationProof.Evidence = observationProofEvidenceMode(fingerprint, disposition.EffectFree)
+	fingerprint.ObservationProof.Evidence = observationProofEvidenceFull(fingerprint, effectFree, reqSingleSubject)
 	return fingerprint
 }
 

@@ -579,18 +579,8 @@ func verifyOnceMemoStructType(
 		}
 		ptrMethodSet[mfn] = mfd
 	}
-	returnsString := false
 	for i := 0; i < ptrMSet.Len(); i++ {
 		mfn := ptrMSet.At(i).Obj().(*types.Func)
-		if sig, okSig := mfn.Type().(*types.Signature); okSig && sig.Results() != nil {
-			for ri := 0; ri < sig.Results().Len(); ri++ {
-				rt := sig.Results().At(ri).Type()
-				if syntaxutil.TypeReachesString(rt) || typeMayHoldErasedString(rt) {
-					returnsString = true
-					break
-				}
-			}
-		}
 		mfd := ptrMethodSet[mfn]
 		if !verifyOnceMemoMethodRecvConfinement(
 			audited,
@@ -645,7 +635,6 @@ func verifyOnceMemoStructType(
 		Constructors:   constructors,
 		GuardTypes:     guardTypes,
 		InputParamDeps: depSlice,
-		ReturnsString:  returnsString,
 	}, memoAssigns, true
 }
 

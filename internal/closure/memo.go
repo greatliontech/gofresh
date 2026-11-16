@@ -324,7 +324,9 @@ func (h *Hasher) binaryRootedMemo(pkgPath string) (closureHash string, inventory
 // `import _ "unsafe"` (a compiler pseudo-package with no init function,
 // whose //go:linkname directives are classified independently; dot-imports
 // remain blocked).
-const effectScanStrategy = "gofresh/effect-scan@28"
+// @29 exempts Go language compile-time layout intrinsics (unsafe.Alignof,
+// unsafe.Offsetof, unsafe.Sizeof) from unaudited standard operation effects.
+const effectScanStrategy = "gofresh/effect-scan@29"
 
 // effectScanScope is the memo's full scope: the strategy version, the
 // analyzing frontend, complete selected source and admission policy. A Boolean

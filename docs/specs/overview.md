@@ -170,11 +170,14 @@ separate, broader caller-responsible override.
 
 **REQ-fresh-observation-compatibility** (invariant): Recorded observability evidence
 MUST be usable only when its non-empty recognized strategy/version, subject identity,
-maximal closure hash, assertion attribution, and complete disposition agree with its
-integrity evidence. An unchanged maximal hash may retain compatible evidence; after
+maximal closure hash, assertion attribution, and complete disposition (including any
+execution-model prerequisite such as `Observability.RequiresSingleSubject`) agree with its
+integrity evidence and with the checking session's declared execution model (retaining
+the fixed `ObservationProof` wire keys of REQ-fresh-fingerprint-record). An unchanged
+maximal hash may retain compatible evidence; after
 maximal drift the recording is stale on its closure before any observability
 evidence is consulted (REQ-fresh-hierarchical-check), and missing,
-unrecognized, incomplete, or inconsistent evidence never suppresses
+unrecognized, incomplete, execution-model-incompatible, or inconsistent evidence never suppresses
 unverifiability. Its dependency and compatibility identities follow
 REQ-fresh-dependency-identities: a reported toolchain version alone cannot
 certify the selected content on which an admitted proof depended. Changing

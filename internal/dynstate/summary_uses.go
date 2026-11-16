@@ -41,8 +41,6 @@ func recordDynamicGlobalUses(
 	singleSubject bool,
 	poolDischarged, poolMutated, poolEscaped map[string]bool,
 	poolAttributed *[]syntaxutil.AttributedUse,
-	stringEscaped map[string]bool,
-	stringAttributed *[]syntaxutil.AttributedUse,
 	hooks *syntaxutil.ExplainHookSet,
 ) {
 	if p == nil || p.TypesInfo == nil {
@@ -100,24 +98,6 @@ func recordDynamicGlobalUses(
 		}
 	}
 
-	markStringReturnEscapedVars := func(vars []*types.Var, pos token.Pos) {
-		if fc != nil && fc.pkgHasStringHeaderUnsafe {
-			markEscapedVars(vars, pos)
-			return
-		}
-		if stringEscaped == nil {
-			return
-		}
-		for _, v := range vars {
-			if v == nil {
-				continue
-			}
-			key := syntaxutil.DynamicVarKey(v)
-			syntaxutil.ExplainStringReturnMark(hooks, p, key, currentDeferFn, currentDeferLit, pos)
-			stringEscaped[key] = true
-		}
-	}
-
 	poolCarrierPlace := func(pl flowir.Place) (token.Pos, *types.Var, bool) {
 		if pl.Obj == nil || pl.Obj.Pkg() == nil || pl.Obj.Parent() != pl.Obj.Pkg().Scope() {
 			return token.NoPos, nil, false
@@ -147,16 +127,9 @@ func recordDynamicGlobalUses(
 		return pl.RootPos, pl.Obj, !element
 	}
 
-	initAllowStr := fc != nil && fc.pkgHasStringHeaderUnsafe
-	initAliasStr := fc != nil && (fc.pkgHasStringHeaderUnsafe || len(fc.exposedStringGlobals) > 0 || fc.pkgWritesForeignStrGlob)
-	activeAllowStr := initAllowStr
-
 	isExemptMethodRecvCall := func(v *flowir.Value) bool {
 		if v == nil || v.Kind != flowir.ValCall || v.CallKind != flowir.CallMethod || v.IsMethodExprCall ||
 			v.Selection == nil || v.Selection.Kind() != types.MethodVal || v.CalleeFunc == nil {
-			return false
-		}
-		if activeAllowStr && syntaxutil.TypeReachesString(v.Type) {
 			return false
 		}
 		fn := v.CalleeFunc
@@ -195,7 +168,7 @@ func recordDynamicGlobalUses(
 			return
 		}
 		if pl.Root == flowir.RootTransient && pl.Base != nil {
-			vars := collectValueCarrierVars(audited, activeAllowStr, pl.Base, dynamicPackageVar, aliasedLocals, isExemptMethodRecvCall)
+			vars := collectValueCarrierVars(audited, pl.Base, dynamicPackageVar, aliasedLocals, isExemptMethodRecvCall)
 			markMutatedVars(vars, pl.RootPos)
 		}
 	}
@@ -282,7 +255,6 @@ func recordDynamicGlobalUses(
 
 	initAliasedLocals := func(b *flowir.Body) map[types.Object]localCarrierAliases {
 		cfg := carrierAliasConfig{
-			allowString:    initAliasStr,
 			parentAliases:  paramSeeds,
 			parentLinks:    paramLinkSeeds,
 			carrierVar:     dynamicPackageVar,
@@ -315,7 +287,7 @@ func recordDynamicGlobalUses(
 							gateType = slice.Elem()
 						}
 					}
-					if !canAliasCarrierType(audited, initAliasStr, gateType) && !isTypeParamType(gateType) {
+					if !canAliasCarrierType(audited, gateType) && !isTypeParamType(gateType) {
 						return true
 					}
 					rootSrcs, allSrcs := valSources(arg)
@@ -364,7 +336,7 @@ func recordDynamicGlobalUses(
 				}
 			}
 			cfg.onNonCarrierPkgBind = func(pkgVar *types.Var, pos token.Pos, composite bool, allVars, linkVars []*types.Var) {
-				if composite || refconfine.CallResultHandsOut(pkgVar.Type()) || fc.isExposedStringGlobal(pkgVar) {
+				if composite || refconfine.CallResultHandsOut(pkgVar.Type()) {
 					markEscapedVars(linkVars, pos)
 					markEscapedVars(allVars, pos)
 				}
@@ -403,7 +375,7 @@ func recordDynamicGlobalUses(
 		return aliased
 	}
 
-	carrierArgVar := func(callVal *flowir.Value, arg *flowir.Value) (token.Pos, *types.Var) {
+	carrierArgVar := func(arg *flowir.Value) (token.Pos, *types.Var) {
 		if arg == nil || arg.Kind != flowir.ValPlace || !arg.Place.IsBareVar() || arg.Place.Obj == nil {
 			return token.NoPos, nil
 		}
@@ -412,9 +384,7 @@ func recordDynamicGlobalUses(
 			return token.NoPos, nil
 		}
 		vt := variable.Type()
-		if !refconfine.TypeHandsOutDynamicAlias(audited, vt) &&
-			!syntaxutil.ContainsUintptr(vt) &&
-			!(activeAllowStr && syntaxutil.TypeReachesString(vt) && fc.callMayReachStringHeaderUnsafe(audited, callVal)) {
+		if !refconfine.TypeHandsOutDynamicAlias(audited, vt) && !syntaxutil.ContainsUintptr(vt) {
 			return token.NoPos, nil
 		}
 		return arg.Place.RootPos, variable
@@ -424,13 +394,6 @@ func recordDynamicGlobalUses(
 		if callVal == nil || callVal.CallKind != flowir.CallPlain || callVal.IsMethodExprCall || callVal.CalleeFunc == nil {
 			return nil
 		}
-		allowStr := activeAllowStr
-		if kind == 'q' {
-			allowStr = initAllowStr
-		}
-		if allowStr && syntaxutil.TypeReachesString(callVal.Type) {
-			return nil
-		}
 		fn := callVal.CalleeFunc.Origin()
 		sig, ok := fn.Type().(*types.Signature)
 		if !ok || sig.Recv() != nil || sig.Params().Len() == 0 {
@@ -438,7 +401,7 @@ func recordDynamicGlobalUses(
 		}
 		var deferredArgIdxs map[int]bool
 		for i, arg := range callVal.Args {
-			pos, variable := carrierArgVar(callVal, arg)
+			pos, variable := carrierArgVar(arg)
 			if variable == nil {
 				continue
 			}
@@ -482,13 +445,13 @@ func recordDynamicGlobalUses(
 		if pl.Obj != nil {
 			if variable, ok := dynamicPackageVar(pl.Obj); ok {
 				if addressed || refconfine.TypeHandsOutDynamicAlias(audited, variable.Type()) ||
-					syntaxutil.ContainsUintptr(vt) || (fc != nil && fc.pkgHasStringHeaderUnsafe && syntaxutil.TypeReachesString(vt)) {
+					syntaxutil.ContainsUintptr(vt) {
 					markEscapedVars([]*types.Var{variable}, pl.RootPos)
 				}
 			} else {
 				entry := aliasedLocals[pl.Obj]
 				vars := entry.root
-				if placeEntersInterior(pl, false) || canAliasCarrierType(audited, initAllowStr, vt) || isTypeParamType(vt) {
+				if placeEntersInterior(pl, false) || canAliasCarrierType(audited, vt) || isTypeParamType(vt) {
 					vars = entry.all
 				}
 				markEscapedVars(vars, pl.RootPos)
@@ -510,7 +473,7 @@ func recordDynamicGlobalUses(
 		}
 		isStrBuiltin := v.Kind == flowir.ValCall && v.CallKind == flowir.CallBuiltin &&
 			(v.BuiltinName == "String" || v.BuiltinName == "StringData")
-		if !isStrBuiltin && v.Type != nil && !canAliasCarrierType(audited, initAllowStr, v.Type) && !isTypeParamType(v.Type) {
+		if !isStrBuiltin && v.Type != nil && !canAliasCarrierType(audited, v.Type) && !isTypeParamType(v.Type) {
 			return
 		}
 		switch v.Kind {
@@ -625,8 +588,7 @@ func recordDynamicGlobalUses(
 									}
 									if !singleSubject {
 										if isBarePool && !syntaxutil.InterfaceReceiver(fn) &&
-											refconfine.InstantiatedResultsHandOutNothing(audited, v.Selection.Type()) &&
-											!(initAllowStr && syntaxutil.TypeReachesString(v.Type)) && sel != nil {
+											refconfine.InstantiatedResultsHandOutNothing(audited, v.Selection.Type()) && sel != nil {
 											factKey := syntaxutil.MethodFactKey(fn)
 											syntaxutil.ExplainDeferralMark(hooks, p, 'n', key, syntaxutil.DeferralResolvent{Method: factKey}, sel.Pos())
 										} else if poolPos.IsValid() {
@@ -638,7 +600,6 @@ func recordDynamicGlobalUses(
 							deferred = true
 						} else if !syntaxutil.InterfaceReceiver(fn) &&
 							refconfine.InstantiatedResultsHandOutNothing(audited, v.Selection.Type()) &&
-							!(initAllowStr && syntaxutil.TypeReachesString(v.Type)) &&
 							v.HasRecvPlace && v.RecvPlace.IsBareVar() && sel != nil {
 							if variable, vOK := dynamicPackageVar(v.RecvPlace.Obj); vOK {
 								key := syntaxutil.DynamicVarKey(variable)
@@ -664,10 +625,9 @@ func recordDynamicGlobalUses(
 						scanCallTree(v.Callee)
 					}
 				}
-				safeStrCall := !fc.callMayReachStringHeaderUnsafe(audited, v)
 				for i, a := range v.Args {
 					if !deferredArgs[i] {
-						if safeStrCall && a != nil && a.Kind == flowir.ValPlace &&
+						if a != nil && a.Kind == flowir.ValPlace &&
 							!refconfine.CallResultHandsOut(a.Type) && !isTypeParamType(a.Type) {
 							a.Place.ForEachChildValue(func(cv *flowir.Value) bool {
 								markExemptEscapesVal(cv)
@@ -688,7 +648,7 @@ func recordDynamicGlobalUses(
 		}
 
 		for _, rv := range b.Results {
-			if rv != nil && (canAliasCarrierType(audited, initAllowStr, rv.Type()) || isTypeParamType(rv.Type())) {
+			if rv != nil && (canAliasCarrierType(audited, rv.Type()) || isTypeParamType(rv.Type())) {
 				markEscapedVars(aliasedLocals[rv].all, rv.Pos())
 			}
 		}
@@ -739,7 +699,6 @@ func recordDynamicGlobalUses(
 		if len(aliasedLocals) > 0 && !precomputedDeclAliases {
 			savedAliases := aliasedLocals
 			extended, _ := computeBodyCarrierAliases(audited, fc, b, carrierAliasConfig{
-				allowString:    activeAllowStr,
 				parentAliases:  savedAliases,
 				carrierVar:     dynamicPackageVar,
 				skipMethodRecv: isExemptMethodRecvCall,
@@ -781,7 +740,7 @@ func recordDynamicGlobalUses(
 		}
 
 		var walkValue func(v *flowir.Value)
-		walkPlaceRead := func(pl flowir.Place, vt types.Type, suppressStr bool) {
+		walkPlaceRead := func(pl flowir.Place, vt types.Type) {
 			pl.ForEachChildValue(func(cv *flowir.Value) bool {
 				walkValue(cv)
 				return true
@@ -789,36 +748,32 @@ func recordDynamicGlobalUses(
 			if pl.Obj == nil || judgedRangeVars[pl.Obj] {
 				return
 			}
-			allowStr := activeAllowStr && !suppressStr
 			// A 1-hop index read whose element hands out no mutable reach and no
 			// sync.noCopy value (such as `m[k]` returning int or func()) is writeless.
 			if len(pl.Projs) == 1 && pl.Projs[0].Kind == flowir.ProjIndex && vt != nil &&
 				!refconfine.TypeHandsOutMutableReach(vt) &&
 				!refconfine.TypeReachesSyncNoCopyByValue(vt) &&
-				!syntaxutil.ContainsUintptr(vt) &&
-				!(allowStr && syntaxutil.TypeReachesString(vt)) {
+				!syntaxutil.ContainsUintptr(vt) {
 				return
 			}
 			if variable, ok := dynamicPackageVar(pl.Obj); ok {
 				if refconfine.TypeHandsOutDynamicAlias(audited, variable.Type()) ||
-					syntaxutil.ContainsUintptr(vt) ||
-					(allowStr && syntaxutil.TypeReachesString(vt)) {
+					syntaxutil.ContainsUintptr(vt) {
 					markEscapedVars([]*types.Var{variable}, pl.RootPos)
 				}
 				return
 			}
 			entry := aliasedLocals[pl.Obj]
 			vars := entry.root
-			if placeEntersInterior(pl, false) || canAliasCarrierType(audited, allowStr, vt) || isTypeParamType(vt) {
+			if placeEntersInterior(pl, false) || canAliasCarrierType(audited, vt) || isTypeParamType(vt) {
 				vars = entry.all
 			}
 			markEscapedVars(vars, pl.RootPos)
 		}
-		walkCallArg := func(callVal, a *flowir.Value) {
+		walkCallArg := func(a *flowir.Value) {
 			if a != nil && a.Kind == flowir.ValPlace &&
-				!refconfine.CallResultHandsOut(a.Type) && !isTypeParamType(a.Type) &&
-				!fc.callMayReachStringHeaderUnsafe(audited, callVal) {
-				walkPlaceRead(a.Place, a.Type, true)
+				!refconfine.CallResultHandsOut(a.Type) && !isTypeParamType(a.Type) {
+				walkPlaceRead(a.Place, a.Type)
 				return
 			}
 			walkValue(a)
@@ -836,7 +791,7 @@ func recordDynamicGlobalUses(
 				return
 
 			case flowir.ValPlace:
-				walkPlaceRead(v.Place, v.Type, false)
+				walkPlaceRead(v.Place, v.Type)
 				return
 
 			case flowir.ValAddrOf:
@@ -864,7 +819,7 @@ func recordDynamicGlobalUses(
 					} else {
 						entry := aliasedLocals[v.AddrPlace.Obj]
 						vars := entry.root
-						canAlias := placeEntersInterior(v.AddrPlace, false) || addrOfSubplaceCanAliasCarrier(audited, activeAllowStr, v)
+						canAlias := placeEntersInterior(v.AddrPlace, false) || addrOfSubplaceCanAliasCarrier(audited, v)
 						if canAlias {
 							vars = entry.all
 						}
@@ -874,7 +829,7 @@ func recordDynamicGlobalUses(
 						}
 					}
 				} else if v.AddrPlace.Root == flowir.RootTransient && v.AddrPlace.Base != nil {
-					vars := collectValueCarrierVars(audited, activeAllowStr, v.AddrPlace.Base, dynamicPackageVar, aliasedLocals, isExemptMethodRecvCall)
+					vars := collectValueCarrierVars(audited, v.AddrPlace.Base, dynamicPackageVar, aliasedLocals, isExemptMethodRecvCall)
 					markMutatedVars(vars, v.AddrPlace.RootPos)
 					if !isDirectLocalBind {
 						markEscapedVars(vars, v.AddrPlace.RootPos)
@@ -969,7 +924,7 @@ func recordDynamicGlobalUses(
 						if deferredArgs[i] {
 							continue
 						}
-						walkCallArg(v, a)
+						walkCallArg(a)
 					}
 					return
 
@@ -984,15 +939,14 @@ func recordDynamicGlobalUses(
 									return true
 								})
 								for _, a := range v.Args {
-									walkCallArg(v, a)
+									walkCallArg(a)
 								}
 								dischargePool(poolVar)
 								if sel == nil || !provenCalls[sel] {
 									if _, vOK := dynamicPackageVar(poolVar); vOK {
 										key := syntaxutil.DynamicVarKey(poolVar)
 										if methodUses != nil && isBarePool && !syntaxutil.InterfaceReceiver(fn) &&
-											refconfine.InstantiatedResultsHandOutNothing(audited, v.Selection.Type()) &&
-											!(activeAllowStr && syntaxutil.TypeReachesString(v.Type)) && sel != nil {
+											refconfine.InstantiatedResultsHandOutNothing(audited, v.Selection.Type()) && sel != nil {
 											factKey := syntaxutil.MethodFactKey(fn)
 											if poolMethods != nil {
 												if poolMethods[key] == nil {
@@ -1051,7 +1005,6 @@ func recordDynamicGlobalUses(
 						}
 						if methodUses != nil && !syntaxutil.InterfaceReceiver(fn) &&
 							refconfine.InstantiatedResultsHandOutNothing(audited, v.Selection.Type()) &&
-							!(activeAllowStr && syntaxutil.TypeReachesString(v.Type)) &&
 							v.HasRecvPlace && v.RecvPlace.IsBareVar() && sel != nil {
 							if variable, vOK := dynamicPackageVar(v.RecvPlace.Obj); vOK {
 								key := syntaxutil.DynamicVarKey(variable)
@@ -1066,7 +1019,7 @@ func recordDynamicGlobalUses(
 									Literal:     currentDeferLit,
 								}, sel.Pos())
 								for _, a := range v.Args {
-									walkCallArg(v, a)
+									walkCallArg(a)
 								}
 								return
 							}
@@ -1080,7 +1033,7 @@ func recordDynamicGlobalUses(
 					}
 					walkValue(v.Recv)
 					for _, a := range v.Args {
-						walkCallArg(v, a)
+						walkCallArg(a)
 					}
 					return
 
@@ -1092,7 +1045,7 @@ func recordDynamicGlobalUses(
 						if owner, ok := dynamicPackageVar(v.Callee.Place.Obj); ok {
 							ownerKey := syntaxutil.DynamicVarKey(owner)
 							for i, arg := range v.Args {
-								argPos, variable := carrierArgVar(v, arg)
+								argPos, variable := carrierArgVar(arg)
 								if variable == nil {
 									continue
 								}
@@ -1207,7 +1160,7 @@ func recordDynamicGlobalUses(
 									retPtr = &returned
 								}
 							}
-							if sound && (len(roots) == 0 || boundValueRangeBodyLeakFreeJudged(audited, p, fc, roots, rngStmt.Body, wants, retPtr, methodWants, fieldWants, elemWants)) {
+							if sound && (len(roots) == 0 || boundValueLeakFreeJudged(audited, p, fc, roots, rngStmt.Body, wants, retPtr, methodWants, fieldWants, elemWants)) {
 								markRangeBoundObjs := func() {
 									for _, dst := range op.Dsts {
 										if dst.IsBareVar() && dst.Obj != nil && roots[dst.Obj] {
@@ -1227,7 +1180,7 @@ func recordDynamicGlobalUses(
 									walkValue(rngSrc)
 									return true
 								}
-								srcVars := collectValueCarrierVars(audited, activeAllowStr, rngSrc, dynamicPackageVar, aliasedLocals, isExemptMethodRecvCall)
+								srcVars := collectValueCarrierVars(audited, rngSrc, dynamicPackageVar, aliasedLocals, isExemptMethodRecvCall)
 								if rngSrc.Kind == flowir.ValPlace && rngSrc.Place.Obj != nil {
 									if cv, ok := dynamicPackageVar(rngSrc.Place.Obj); ok {
 										appendUniqueVars(&srcVars, []*types.Var{cv})
@@ -1429,7 +1382,7 @@ func recordDynamicGlobalUses(
 	flushScopeUses := func(
 		fnKey syntaxutil.FuncKey,
 		literal bool,
-		scopeMut, scopeEsc, scopeStrEsc map[string]bool,
+		scopeMut, scopeEsc map[string]bool,
 		scopeMethods map[string]map[syntaxutil.FuncKey]bool,
 		scopeParams map[string]map[syntaxutil.ParamKey]bool,
 		scopePoolMut, scopePoolEsc map[string]bool,
@@ -1440,15 +1393,6 @@ func recordDynamicGlobalUses(
 		}
 		for key := range scopeEsc {
 			*attributed = append(*attributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, Escape: true, Literal: literal})
-		}
-		if stringAttributed != nil {
-			for key := range scopeStrEsc {
-				*stringAttributed = append(*stringAttributed, syntaxutil.AttributedUse{Func: fnKey, Key: key, Escape: true, Literal: literal})
-			}
-		} else if stringEscaped != nil {
-			for key := range scopeStrEsc {
-				stringEscaped[key] = true
-			}
 		}
 		for key, methods := range scopeMethods {
 			for m := range methods {
@@ -1500,554 +1444,12 @@ func recordDynamicGlobalUses(
 		}
 	}
 
-	prepareBodyStrDerived := func(
-		topBody *flowir.Body,
-		parentAliases map[types.Object]localCarrierAliases,
-	) func(*flowir.Value) []*types.Var {
-		if topBody == nil || fc == nil || !fc.bodyReturnsOrExposesString(topBody) {
-			return nil
-		}
-		prevAllow := activeAllowStr
-		activeAllowStr = true
-		allStrAliases, _ := computeBodyCarrierAliases(audited, fc, topBody, carrierAliasConfig{
-			allowString:         true,
-			parentAliases:       parentAliases,
-			carrierVar:          dynamicPackageVar,
-			skipMethodRecv:      isExemptMethodRecvCall,
-			skipNonBuiltinCalls: false,
-			descendNested:       true,
-		})
-		activeAllowStr = prevAllow
-		memAdj := fc.scopedLocalCarrierAliases(audited, topBody, nil)
-		strDerivedLocals := map[types.Object][]*types.Var{}
-
-		addLocalDerived := func(obj types.Object, svs []*types.Var, propagateSharedMem bool) bool {
-			if obj == nil || len(svs) == 0 || !syntaxutil.IsLocalVar(obj) {
-				return false
-			}
-			cur := strDerivedLocals[obj]
-			changed := false
-			if appendUniqueVars(&cur, svs) {
-				strDerivedLocals[obj] = cur
-				changed = true
-			}
-			if propagateSharedMem {
-				for nb := range memAdj[obj] {
-					nbCur := strDerivedLocals[nb]
-					if appendUniqueVars(&nbCur, cur) {
-						strDerivedLocals[nb] = nbCur
-						changed = true
-					}
-				}
-			}
-			return changed
-		}
-
-		addTargetValDerived := func(target *flowir.Value, svs []*types.Var) bool {
-			if target == nil || len(svs) == 0 {
-				return false
-			}
-			changed := false
-			walkTransientTargetValues(target, func(cur *flowir.Value) {
-				if cur.Kind == flowir.ValPlace && cur.Place.Obj != nil {
-					if addLocalDerived(cur.Place.Obj, svs, true) {
-						changed = true
-					}
-				} else if cur.Kind == flowir.ValAddrOf && cur.AddrPlace.Obj != nil {
-					if addLocalDerived(cur.AddrPlace.Obj, svs, true) {
-						changed = true
-					}
-				}
-			})
-			return changed
-		}
-
-		for obj, alias := range allStrAliases {
-			if obj != nil && syntaxutil.IsLocalVar(obj) &&
-				!canAliasCarrierType(audited, false, obj.Type()) &&
-				syntaxutil.TypeReachesString(obj.Type()) {
-				addLocalDerived(obj, alias.all, false)
-			}
-		}
-
-		var valStrDerived func(v *flowir.Value) []*types.Var
-		valStrDerived = func(v *flowir.Value) []*types.Var {
-			if v == nil {
-				return nil
-			}
-			var out []*types.Var
-			var walk func(cur *flowir.Value)
-			walk = func(cur *flowir.Value) {
-				if cur == nil {
-					return
-				}
-				if cur.Type != nil && !canAliasCarrierType(audited, false, cur.Type) && syntaxutil.TypeReachesString(cur.Type) {
-					saveAllow := activeAllowStr
-					activeAllowStr = true
-					appendUniqueVars(&out, collectValueCarrierVarsWithOpts(audited, true, cur, dynamicPackageVar, allStrAliases, isExemptMethodRecvCall, false))
-					activeAllowStr = saveAllow
-				}
-				if cur.Kind == flowir.ValMakeClosure {
-					if cur.Closure != nil {
-						visitAllBodyOps(cur.Closure, func(cop *flowir.Op) {
-							if cop.Kind == flowir.OpReturn {
-								for _, cr := range cop.Results {
-									appendUniqueVars(&out, valStrDerived(cr))
-								}
-							}
-						})
-					}
-					return
-				}
-				if cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallIIFE {
-					forEachIIFEReturnValue(cur, walk)
-					return
-				}
-				switch cur.Kind {
-				case flowir.ValAllocFresh:
-					if cur.AllocKind == flowir.AllocMake || cur.AllocKind == flowir.AllocBuiltinNewType {
-						return
-					}
-				case flowir.ValConvert:
-					if !cur.IsTypeAssert && cur.Arg != nil && syntaxutil.IsFreshStringSliceCopy(cur.Arg.Type, cur.Type) {
-						return
-					}
-				case flowir.ValPlace:
-					if cur.Place.Obj != nil {
-						appendUniqueVars(&out, strDerivedLocals[cur.Place.Obj])
-					}
-				case flowir.ValAddrOf:
-					if cur.AddrPlace.Obj != nil {
-						appendUniqueVars(&out, strDerivedLocals[cur.AddrPlace.Obj])
-					}
-				case flowir.ValCall:
-					if cur.CallKind == flowir.CallBuiltin {
-						switch cur.BuiltinName {
-						case "len", "cap", "Sizeof", "Alignof", "Offsetof":
-							return
-						case "Slice", "SliceData", "String", "StringData":
-							if len(cur.Args) > 0 {
-								walk(cur.Args[0])
-							}
-							return
-						}
-					}
-				}
-				cur.ForEachChildValue(func(ch *flowir.Value) bool {
-					walk(ch)
-					return true
-				})
-			}
-			walk(v)
-			return out
-		}
-
-		for changed := true; changed; {
-			changed = false
-			visitAllBodyOps(topBody, func(op *flowir.Op) {
-				switch op.Kind {
-				case flowir.OpAssign:
-					if op.AssignKind != flowir.AssignZeroDecl && op.AssignKind != flowir.AssignIncDec {
-						op.ForEachAssignPair(func(_ int, dst flowir.Place, _ bool, src *flowir.Value) bool {
-							srcSVs := valStrDerived(src)
-							if dst.Obj != nil {
-								if addLocalDerived(dst.Obj, srcSVs, !dst.IsBareVar()) {
-									changed = true
-								}
-							} else if dst.Root == flowir.RootTransient && dst.Base != nil {
-								if addTargetValDerived(dst.Base, srcSVs) {
-									changed = true
-								}
-							}
-							if mapPl, keyVal, isMapW := dst.AsMapWrite(); isMapW {
-								keySVs := valStrDerived(keyVal)
-								if mapPl.Obj != nil {
-									if addLocalDerived(mapPl.Obj, keySVs, true) {
-										changed = true
-									}
-								} else if mapPl.Root == flowir.RootTransient && mapPl.Base != nil {
-									if addTargetValDerived(mapPl.Base, keySVs) {
-										changed = true
-									}
-								}
-							}
-							return true
-						})
-					}
-				case flowir.OpTypeSwitchBind:
-					if op.SwitchDst != nil && addLocalDerived(op.SwitchDst, valStrDerived(op.SwitchSrc), false) {
-						changed = true
-					}
-				case flowir.OpChanSend:
-					sendSVs := valStrDerived(op.SendVal)
-					if op.ChanPlace.Obj != nil {
-						if addLocalDerived(op.ChanPlace.Obj, sendSVs, true) {
-							changed = true
-						}
-					} else if op.ChanPlace.Root == flowir.RootTransient && op.ChanPlace.Base != nil {
-						if addTargetValDerived(op.ChanPlace.Base, sendSVs) {
-							changed = true
-						}
-					}
-				}
-				forEachOpTopValues(op, func(tv *flowir.Value) {
-					if tv == nil {
-						return
-					}
-					tv.WalkValues(func(cur *flowir.Value) bool {
-						if cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallIIFE && cur.IIFE != nil {
-							cur.ForEachArgParam(func(arg *flowir.Value, _ types.Type, _ int, pIdx int, pOK bool, _ bool) bool {
-								if pOK && pIdx < len(cur.IIFE.Params) && addLocalDerived(cur.IIFE.Params[pIdx], valStrDerived(arg), false) {
-									changed = true
-								}
-								return true
-							})
-						}
-						if cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallBuiltin {
-							switch cur.BuiltinName {
-							case "copy":
-								if len(cur.Args) == 2 && addTargetValDerived(cur.Args[0], valStrDerived(cur.Args[1])) {
-									changed = true
-								}
-							case "append":
-								if len(cur.Args) >= 2 {
-									for _, el := range cur.Args[1:] {
-										if addTargetValDerived(cur.Args[0], valStrDerived(el)) {
-											changed = true
-										}
-									}
-								}
-							}
-						}
-						return true
-					})
-				})
-			})
-		}
-		return valStrDerived
-	}
-
-	valueReachesNonLocalStrSink := func(topBody *flowir.Body, v *flowir.Value) bool {
-		if v == nil {
-			return false
-		}
-		hit := false
-		v.WalkValues(func(cur *flowir.Value) bool {
-			if hit || cur == nil {
-				return false
-			}
-			var obj *types.Var
-			switch cur.Kind {
-			case flowir.ValPlace:
-				obj = cur.Place.Obj
-			case flowir.ValAddrOf:
-				obj = cur.AddrPlace.Obj
-			}
-			if obj != nil {
-				if obj.Pkg() != nil && obj.Parent() == obj.Pkg().Scope() {
-					if fc.isExposedStringGlobal(obj) || typeMayHoldErasedString(obj.Type()) || refconfine.CallResultHandsOut(obj.Type()) {
-						hit = true
-						return false
-					}
-				} else if topBody == nil || !topBody.OwnsVar(obj) || obj == topBody.Recv || topBody.ResultSet[obj] {
-					hit = true
-					return false
-				} else if _, isParam := topBody.ParamIndex[obj]; isParam {
-					hit = true
-					return false
-				}
-			}
-			return true
-		})
-		return hit
-	}
-
-	scanBodyStrHazards := func(
-		topBody *flowir.Body,
-		curBody *flowir.Body,
-		strDerivedOf func(*flowir.Value) []*types.Var,
-		paramSink map[string]map[syntaxutil.ParamKey]bool,
-		methodSink map[string]map[syntaxutil.FuncKey]bool,
-		kind byte,
-		descend bool,
-		forceInGo bool,
-	) {
-		if curBody == nil || strDerivedOf == nil || fc == nil {
-			return
-		}
-		posOf := func(v *flowir.Value, fallback token.Pos) token.Pos {
-			if v != nil && v.Raw != nil && v.Raw.Pos().IsValid() {
-				return v.Raw.Pos()
-			}
-			return fallback
-		}
-		var walkHazBody func(cb *flowir.Body, inGo bool)
-		var walkHazVal func(cb *flowir.Body, v *flowir.Value, inGo bool)
-		walkHazVal = func(cb *flowir.Body, v *flowir.Value, inGo bool) {
-			if v == nil {
-				return
-			}
-			if v.Kind == flowir.ValMakeClosure {
-				if descend && v.Closure != nil {
-					walkHazBody(v.Closure, inGo)
-				}
-				return
-			}
-			if v.Kind == flowir.ValMethodVal && v.Recv != nil && syntaxutil.TypeReachesString(v.Recv.Type) {
-				markEscapedVars(strDerivedOf(v.Recv), posOf(v, token.NoPos))
-			}
-			if v.Kind == flowir.ValConvert && syntaxutil.IsUnsafePointerType(v.Type) &&
-				(v.Arg == nil || syntaxutil.ContainsUintptr(v.Arg.Type) || syntaxutil.PointerMayReachString(v.Arg.Type)) {
-				markEscapedVars(strDerivedOf(v.Arg), posOf(v, token.NoPos))
-			}
-			if v.Kind == flowir.ValCall {
-				if v.CallKind == flowir.CallIIFE {
-					for _, a := range v.Args {
-						walkHazVal(cb, a, inGo)
-					}
-					if descend && v.IIFE != nil {
-						walkHazBody(v.IIFE, inGo)
-					}
-					return
-				}
-				if v.CallKind == flowir.CallBuiltin {
-					switch v.BuiltinName {
-					case "StringData":
-						if len(v.Args) > 0 && !isConfinedReadOnlyStringDataCall(topBody, v) {
-							markEscapedVars(strDerivedOf(v.Args[0]), posOf(v, token.NoPos))
-						}
-					case "copy":
-						if len(v.Args) == 2 && v.Args[0] != nil && v.Args[1] != nil &&
-							syntaxutil.TypeReachesString(v.Args[0].Type) &&
-							valueReachesNonLocalStrSink(topBody, v.Args[0]) {
-							markEscapedVars(strDerivedOf(v.Args[1]), posOf(v, token.NoPos))
-						}
-					}
-				} else {
-					if syntaxutil.ContainsUnsafePointer(v.Type) {
-						markEscapedVars(strDerivedOf(v.Recv), posOf(v, token.NoPos))
-						for _, a := range v.Args {
-							markEscapedVars(strDerivedOf(a), posOf(a, token.NoPos))
-						}
-					}
-					isValPlane := v.CallKind == flowir.CallPlain && !v.IsMethodExprCall && v.CalleeFunc != nil &&
-						auditedValuePlane[syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Origin().Name()}]
-					localClos := isLocalOnlyClosureCall(topBody, v) || isLocalOnlyClosureCall(cb, v)
-					strHaz := !localClos && fc.callMayReachStringHeaderUnsafe(audited, v)
-					if !isValPlane {
-						if v.CallKind == flowir.CallPlain && !v.IsMethodExprCall && v.CalleeFunc != nil {
-							fn := v.CalleeFunc.Origin()
-							fk := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: fn.Name()}
-							v.ForEachArgParam(func(a *flowir.Value, slotType types.Type, _ int, pIdx int, pOK bool, packedVariadic bool) bool {
-								if a == nil {
-									return true
-								}
-								if _, bareVar := carrierArgVar(v, a); bareVar != nil {
-									return true
-								}
-								paramType := slotType
-								if pOK {
-									if pt := v.FormalParamSlotType(pIdx, packedVariadic); pt != nil {
-										paramType = pt
-									}
-								}
-								argAlreadyErased := erasesStringIntoType(a.Type, slotType) ||
-									(!syntaxutil.TypeReachesString(a.Type) && typeMayHoldErasedString(a.Type))
-								if argAlreadyErased {
-									if !localClos {
-										markEscapedVars(strDerivedOf(a), posOf(a, token.NoPos))
-									}
-									return true
-								}
-								boxesIntoParam := erasesStringIntoType(slotType, paramType)
-								if !localClos && (boxesIntoParam || (strHaz && (syntaxutil.TypeReachesString(a.Type) ||
-									(slotType != nil && syntaxutil.TypeReachesString(slotType)) ||
-									(paramType != nil && syntaxutil.TypeReachesString(paramType))))) {
-									svs := strDerivedOf(a)
-									if len(svs) > 0 {
-										pPos := posOf(a, token.NoPos)
-										if paramSink != nil && !inGo && pOK {
-											paramKey := syntaxutil.ParamKey{Func: fk, Index: pIdx}
-											for _, sv := range svs {
-												key := syntaxutil.DynamicVarKey(sv)
-												if paramSink[key] == nil {
-													paramSink[key] = map[syntaxutil.ParamKey]bool{}
-												}
-												if !paramSink[key][paramKey] {
-													paramSink[key][paramKey] = true
-													res := syntaxutil.DeferralResolvent{Param: paramKey}
-													if kind == 'p' {
-														res.EnclosingFn = currentDeferFn
-														res.Literal = currentDeferLit
-													}
-													syntaxutil.ExplainDeferralMark(hooks, p, kind, key, res, pPos)
-												}
-											}
-										} else {
-											markEscapedVars(svs, pPos)
-										}
-									}
-								}
-								return true
-							})
-						} else if !localClos {
-							if v.Recv != nil && strHaz && syntaxutil.TypeReachesString(v.Recv.Type) {
-								svs := strDerivedOf(v.Recv)
-								if len(svs) > 0 {
-									rPos := posOf(v.Recv, token.NoPos)
-									if v.CallKind == flowir.CallMethod && !v.IsMethodExprCall &&
-										v.CalleeFunc != nil && !syntaxutil.InterfaceReceiver(v.CalleeFunc) &&
-										methodSink != nil && !inGo {
-										mk := syntaxutil.MethodFactKey(v.CalleeFunc.Origin())
-										if mk.Valid() {
-											mkKind := byte('m')
-											if kind == 'q' {
-												mkKind = 'n'
-											}
-											for _, sv := range svs {
-												if !syntaxutil.TypeReachesString(sv.Type()) {
-													markEscapedVars([]*types.Var{sv}, rPos)
-													continue
-												}
-												key := syntaxutil.DynamicVarKey(sv)
-												if methodSink[key] == nil {
-													methodSink[key] = map[syntaxutil.FuncKey]bool{}
-												}
-												if !methodSink[key][mk] {
-													methodSink[key][mk] = true
-													res := syntaxutil.DeferralResolvent{Method: mk}
-													if kind == 'p' {
-														res.EnclosingFn = currentDeferFn
-														res.Literal = currentDeferLit
-													}
-													syntaxutil.ExplainDeferralMark(hooks, p, mkKind, key, res, rPos)
-												}
-											}
-										} else {
-											markEscapedVars(svs, rPos)
-										}
-									} else {
-										markEscapedVars(svs, rPos)
-									}
-								}
-							}
-							v.ForEachArgParam(func(a *flowir.Value, slotType types.Type, _ int, pIdx int, pOK bool, packedVariadic bool) bool {
-								if a == nil {
-									return true
-								}
-								paramType := slotType
-								if pOK {
-									if pt := v.FormalParamSlotType(pIdx, packedVariadic); pt != nil {
-										paramType = pt
-									}
-								}
-								erased := erasesStringIntoType(a.Type, slotType) || erasesStringIntoType(slotType, paramType) ||
-									(!syntaxutil.TypeReachesString(a.Type) && typeMayHoldErasedString(a.Type))
-								if erased || (strHaz && (syntaxutil.TypeReachesString(a.Type) ||
-									(slotType != nil && syntaxutil.TypeReachesString(slotType)) ||
-									(paramType != nil && syntaxutil.TypeReachesString(paramType)))) {
-									markEscapedVars(strDerivedOf(a), posOf(a, token.NoPos))
-								}
-								return true
-							})
-						}
-					}
-				}
-			}
-			v.ForEachChildValue(func(ch *flowir.Value) bool {
-				walkHazVal(cb, ch, inGo)
-				return true
-			})
-		}
-		walkHazBody = func(cb *flowir.Body, inGo bool) {
-			if cb == nil {
-				return
-			}
-			cb.ForEachSyncOp(func(op *flowir.Op) bool {
-				switch op.Kind {
-				case flowir.OpGo:
-					if descend {
-						walkHazVal(cb, op.Call, true)
-					}
-					return true
-				case flowir.OpAssign:
-					if op.AssignKind != flowir.AssignZeroDecl && op.AssignKind != flowir.AssignIncDec {
-						op.ForEachAssignPair(func(_ int, dst flowir.Place, _ bool, src *flowir.Value) bool {
-							if dst.IsBlank() {
-								return true
-							}
-							switch dst.Root {
-							case flowir.RootPkgGlobal:
-								if fc.isExposedStringGlobal(dst.Obj) || typeMayHoldErasedString(dst.Type) {
-									markEscapedVars(strDerivedOf(src), dst.RootPos)
-								}
-							case flowir.RootResult:
-								if (src != nil && erasesStringIntoType(src.Type, dst.Type)) || (!syntaxutil.TypeReachesString(dst.Type) && typeMayHoldErasedString(dst.Type)) {
-									markEscapedVars(strDerivedOf(src), dst.RootPos)
-								} else if cb == topBody && syntaxutil.TypeReachesString(dst.Type) {
-									markStringReturnEscapedVars(strDerivedOf(src), dst.RootPos)
-								}
-							case flowir.RootOuterVar:
-								if (src != nil && erasesStringIntoType(src.Type, dst.Type)) || (!syntaxutil.TypeReachesString(dst.Type) && typeMayHoldErasedString(dst.Type)) ||
-									(topBody != nil && (dst.Obj == nil || dst.Obj.Pos() < topBody.BodyStart || dst.Obj.Pos() > topBody.BodyEnd)) {
-									markEscapedVars(strDerivedOf(src), dst.RootPos)
-								}
-							default:
-								if !dst.IsBareVar() && dst.Root != flowir.RootLocal {
-									if syntaxutil.TypeReachesString(dst.Type) || typeMayHoldErasedString(dst.Type) {
-										markEscapedVars(strDerivedOf(src), dst.RootPos)
-									}
-									if _, keyVal, isMapW := dst.AsMapWrite(); isMapW && keyVal != nil &&
-										(syntaxutil.TypeReachesString(keyVal.Type) || typeMayHoldErasedString(keyVal.Type)) {
-										markEscapedVars(strDerivedOf(keyVal), dst.RootPos)
-									}
-								}
-							}
-							return true
-						})
-					}
-				case flowir.OpChanSend:
-					if op.SendVal != nil && (syntaxutil.TypeReachesString(op.SendVal.Type) || typeMayHoldErasedString(op.SendVal.Type) ||
-						(op.ChanVal != nil && typeMayHoldErasedString(op.ChanVal.Type))) {
-						markEscapedVars(strDerivedOf(op.SendVal), posOf(op.SendVal, op.ChanPlace.RootPos))
-					}
-				case flowir.OpReturn:
-					for i, r := range op.Results {
-						if r == nil {
-							continue
-						}
-						var slotT types.Type
-						if i < len(cb.ResultTypes) {
-							slotT = cb.ResultTypes[i]
-						}
-						erased := erasesStringIntoType(r.Type, slotT) || (!syntaxutil.TypeReachesString(r.Type) && typeMayHoldErasedString(r.Type))
-						if erased {
-							markEscapedVars(strDerivedOf(r), posOf(r, token.NoPos))
-						} else if cb == topBody && (syntaxutil.TypeReachesString(r.Type) || (slotT != nil && syntaxutil.TypeReachesString(slotT))) {
-							markStringReturnEscapedVars(strDerivedOf(r), posOf(r, token.NoPos))
-						}
-					}
-				}
-				forEachOpTopValues(op, func(tv *flowir.Value) {
-					walkHazVal(cb, tv, inGo)
-				})
-				return true
-			})
-		}
-		walkHazBody(curBody, forceInGo || inGoOp)
-	}
-
 	walkAttributedDecl := func(decl *ast.FuncDecl, fnKey syntaxutil.FuncKey, setCurrentFn bool) {
 		b := fc.funcBody(p, decl)
 		if b == nil {
 			return
 		}
-		declAllowStr := fc != nil && fc.bodyExposesStringToPkgUnsafe(b)
-		prevAllowStr := activeAllowStr
-		activeAllowStr = declAllowStr
-		strDerivedOf := prepareBodyStrDerived(b, aliasedLocals)
 		declAliases, _ := computeBodyCarrierAliases(audited, fc, b, carrierAliasConfig{
-			allowString:         declAllowStr,
 			parentAliases:       aliasedLocals,
 			carrierVar:          dynamicPackageVar,
 			skipMethodRecv:      isExemptMethodRecvCall,
@@ -2059,13 +1461,12 @@ func recordDynamicGlobalUses(
 		aliasedLocals = declAliases
 		precomputedDeclAliases = true
 		defer func() {
-			activeAllowStr = prevAllowStr
 			aliasedLocals = prevAliases
 			precomputedDeclAliases = prevPrecomp
 		}()
 
 		runScopedPass := func(literal bool, exec func()) {
-			scMut, scEsc, scStrEsc := map[string]bool{}, map[string]bool{}, map[string]bool{}
+			scMut, scEsc := map[string]bool{}, map[string]bool{}
 			scPoolMut, scPoolEsc := map[string]bool{}, map[string]bool{}
 			scPoolMethods := map[string]map[syntaxutil.FuncKey]bool{}
 			scMethods := map[string]map[syntaxutil.FuncKey]bool{}
@@ -2073,29 +1474,27 @@ func recordDynamicGlobalUses(
 			if paramUses != nil {
 				scParams = map[string]map[syntaxutil.ParamKey]bool{}
 			}
-			saveM, saveE, saveSE, saveMU, savePU := mutated, escaped, stringEscaped, methodUses, paramUses
+			saveM, saveE, saveMU, savePU := mutated, escaped, methodUses, paramUses
 			savePM, savePE, savePMU := poolMutated, poolEscaped, poolMethods
-			mutated, escaped, stringEscaped, methodUses, paramUses = scMut, scEsc, scStrEsc, scMethods, scParams
+			mutated, escaped, methodUses, paramUses = scMut, scEsc, scMethods, scParams
 			poolMutated, poolEscaped, poolMethods = scPoolMut, scPoolEsc, scPoolMethods
 			if fnKey.Valid() {
 				currentDeferFn, currentDeferLit = fnKey, literal
 			}
 			exec()
 			currentDeferFn, currentDeferLit = syntaxutil.FuncKey{}, false
-			mutated, escaped, stringEscaped, methodUses, paramUses = saveM, saveE, saveSE, saveMU, savePU
+			mutated, escaped, methodUses, paramUses = saveM, saveE, saveMU, savePU
 			poolMutated, poolEscaped, poolMethods = savePM, savePE, savePMU
-			flushScopeUses(fnKey, literal, scMut, scEsc, scStrEsc, scMethods, scParams, scPoolMut, scPoolEsc, scPoolMethods)
+			flushScopeUses(fnKey, literal, scMut, scEsc, scMethods, scParams, scPoolMut, scPoolEsc, scPoolMethods)
 		}
 
 		// Pass 1: nested closures (ValMakeClosure / CallIIFE) and OpGo statements -> Literal: true.
 		runScopedPass(true, func() {
 			forEachNestedLiteralAndGo(b, func(litBody *flowir.Body) {
 				walkBody(litBody, true)
-				scanBodyStrHazards(b, litBody, strDerivedOf, paramUses, methodUses, 'p', true, false)
 			}, func(goOp *flowir.Op) {
 				goBody := &flowir.Body{AST: goOp.StmtAST, Ops: []flowir.Op{*goOp}}
 				walkBody(goBody, true)
-				scanBodyStrHazards(b, goBody, strDerivedOf, paramUses, methodUses, 'p', true, true)
 			})
 		})
 
@@ -2106,7 +1505,6 @@ func recordDynamicGlobalUses(
 				currentAttrFn = fnKey
 			}
 			walkBody(b, false)
-			scanBodyStrHazards(b, b, strDerivedOf, paramUses, methodUses, 'p', false, false)
 			if setCurrentFn {
 				currentFn = nil
 				currentAttrFn = syntaxutil.FuncKey{}
@@ -2142,30 +1540,21 @@ func recordDynamicGlobalUses(
 				if decl.Recv == nil && decl.Name != nil && (decl.Name.Name == "init" || initOnly[decl.Name.Name]) {
 					if decl.Body != nil {
 						b := fc.funcBody(p, decl)
-						strDerivedOf := prepareBodyStrDerived(b, paramSeeds)
 						aliasedLocals = initAliasedLocals(b)
 						forEachNestedLiteralAndGo(b, func(litBody *flowir.Body) {
 							walkBody(litBody, true)
-							scanBodyStrHazards(b, litBody, strDerivedOf, paramUses, methodUses, 'p', true, false)
 						}, func(goOp *flowir.Op) {
 							goBody := &flowir.Body{AST: goOp.StmtAST, Ops: []flowir.Op{*goOp}}
 							walkBody(goBody, true)
-							scanBodyStrHazards(b, goBody, strDerivedOf, paramUses, methodUses, 'p', true, true)
 						})
 						scanExemptCalls(b)
-						scanBodyStrHazards(b, b, strDerivedOf, initParamUses, initMethodUses, 'q', false, false)
 						aliasedLocals = nil
 					}
 					continue
 				}
 				if decl.Body != nil {
 					b := fc.funcBody(p, decl)
-					declAllowStr := fc != nil && fc.bodyExposesStringToPkgUnsafe(b)
-					prevAllowStr := activeAllowStr
-					activeAllowStr = declAllowStr
-					strDerivedOf := prepareBodyStrDerived(b, aliasedLocals)
 					declAliases, _ := computeBodyCarrierAliases(audited, fc, b, carrierAliasConfig{
-						allowString:         declAllowStr,
 						parentAliases:       aliasedLocals,
 						carrierVar:          dynamicPackageVar,
 						skipMethodRecv:      isExemptMethodRecvCall,
@@ -2178,23 +1567,18 @@ func recordDynamicGlobalUses(
 					precomputedDeclAliases = true
 					currentFn = decl
 					walkBody(b, true)
-					scanBodyStrHazards(b, b, strDerivedOf, paramUses, methodUses, 'p', true, false)
 					currentFn = nil
-					activeAllowStr = prevAllowStr
 					aliasedLocals = prevAliases
 					precomputedDeclAliases = prevPrecomp
 				}
 			case *ast.GenDecl:
 				if decl.Tok == token.VAR || decl.Tok == token.CONST {
 					b := fc.body(p, decl)
-					strDerivedOf := prepareBodyStrDerived(b, paramSeeds)
 					aliasedLocals = initAliasedLocals(b)
 					forEachNestedLiteralAndGo(b, func(litBody *flowir.Body) {
 						walkBody(litBody, true)
-						scanBodyStrHazards(b, litBody, strDerivedOf, paramUses, methodUses, 'p', true, false)
 					}, nil)
 					scanExemptCalls(b)
-					scanBodyStrHazards(b, b, strDerivedOf, initParamUses, initMethodUses, 'q', false, false)
 					aliasedLocals = nil
 				} else {
 					// Fail closed on any alias-handing dynamic package global referenced inside a type declaration.

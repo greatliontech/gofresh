@@ -56,6 +56,14 @@ type Config struct {
 	// because every subsequent field selection on S anywhere in p re-seeds taint.
 	AllowCompositeLitIntoSeedStruct bool
 
+	// AllowCompositeLitFieldPropagation permits storing tainted values into
+	// fields of a CompositeLit of an unexported, non-generic named struct S in
+	// p.Types (having zero exported fields, zero package-scope variable bindings,
+	// and zero mentions in exported function/method signatures in p.Types) by
+	// propagating taint per-field to every selection of those fields across
+	// p.Syntax while still allowing writes to untainted sibling fields of S.
+	AllowCompositeLitFieldPropagation bool
+
 	// AllowReturnFromUnexportedFunc propagates tainted return values from
 	// concrete, non-generic, non-value-taken unexported functions/methods in
 	// p.Types to their intra-package call sites, while still rejecting returns
@@ -196,6 +204,8 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 	}
 
 	capsuleStructs := map[*types.Named]bool{}
+	propagatedStructs := map[*types.Named]bool{}
+	propagatedFields := map[*types.Var]bool{}
 	isSeedStruct := func(st *types.Named) bool {
 		if st == nil {
 			return false
@@ -205,6 +215,37 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 			return true
 		}
 		return cfg.SeedStructOrigin != nil && cfg.SeedStructOrigin(orig)
+	}
+	isPropagatedStruct := func(st *types.Named) bool {
+		return st != nil && propagatedStructs[st.Origin()]
+	}
+	selectionHitsFieldSet := func(selInfo *types.Selection, fields map[*types.Var]bool) bool {
+		if selInfo == nil || selInfo.Kind() != types.FieldVal || len(fields) == 0 {
+			return false
+		}
+		if fv, ok := selInfo.Obj().(*types.Var); ok && fv != nil && fields[fv.Origin()] {
+			return true
+		}
+		curT := selInfo.Recv()
+		for _, fIdx := range selInfo.Index() {
+			if curT == nil {
+				break
+			}
+			u := types.Unalias(curT)
+			if ptr, ok := u.(*types.Pointer); ok {
+				u = types.Unalias(ptr.Elem())
+			}
+			st, ok := u.Underlying().(*types.Struct)
+			if !ok || fIdx < 0 || fIdx >= st.NumFields() {
+				break
+			}
+			fv := st.Field(fIdx)
+			if fields[fv.Origin()] {
+				return true
+			}
+			curT = fv.Type()
+		}
+		return false
 	}
 
 	selChainHitsSeedStruct := func(sel *ast.SelectorExpr) bool {
@@ -248,6 +289,76 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 		return false
 	}
 
+	selChainHitsPropagatedField := func(sel *ast.SelectorExpr) bool {
+		if len(propagatedFields) == 0 {
+			return false
+		}
+		cur := ast.Expr(sel)
+		for cur != nil {
+			switch x := ast.Unparen(cur).(type) {
+			case *ast.SelectorExpr:
+				selInfo := info.Selections[x]
+				if selInfo == nil || selInfo.Kind() != types.FieldVal {
+					return false
+				}
+				if selectionHitsFieldSet(selInfo, propagatedFields) {
+					return true
+				}
+				cur = x.X
+			case *ast.IndexExpr:
+				cur = x.X
+			case *ast.SliceExpr:
+				cur = x.X
+			case *ast.StarExpr:
+				cur = x.X
+			default:
+				return false
+			}
+		}
+		return false
+	}
+
+	exprHitsPropagated := func(expr ast.Expr, includeWholeOrStarStruct bool) bool {
+		if len(propagatedStructs) == 0 {
+			return false
+		}
+		if includeWholeOrStarStruct {
+			if t := info.TypeOf(expr); t != nil {
+				if st, ok := types.Unalias(t).(*types.Named); ok && propagatedStructs[st.Origin()] {
+					return true
+				}
+			}
+		}
+		cur := expr
+		for cur != nil {
+			switch x := ast.Unparen(cur).(type) {
+			case *ast.SelectorExpr:
+				si := info.Selections[x]
+				if si == nil || si.Kind() != types.FieldVal {
+					return false
+				}
+				if selectionHitsFieldSet(si, propagatedFields) {
+					return true
+				}
+				cur = x.X
+			case *ast.StarExpr:
+				if includeWholeOrStarStruct {
+					if st := syntaxutil.DerefNamedStruct(info.TypeOf(x.X)); st != nil && propagatedStructs[st.Origin()] {
+						return true
+					}
+				}
+				cur = x.X
+			case *ast.IndexExpr:
+				cur = x.X
+			case *ast.SliceExpr:
+				cur = x.X
+			default:
+				return false
+			}
+		}
+		return false
+	}
+
 	funcValueTaken := idx.FuncValueTaken
 	calledMethodSels := idx.CalledMethodSels
 	declBodies := idx.DeclBodies
@@ -279,7 +390,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 				}
 			}
 			if selInfo := info.Selections[fn]; selInfo != nil {
-				if types.IsInterface(selInfo.Recv()) || selInfo.Kind() == types.MethodExpr {
+				if (selInfo.Recv() != nil && types.IsInterface(selInfo.Recv())) || selInfo.Kind() == types.MethodExpr {
 					return nil
 				}
 			}
@@ -288,6 +399,29 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 			}
 		}
 		return nil
+	}
+
+	pkgIfaceMethodNames := map[string]bool{}
+	noteIfaceMethods := func(t types.Type) {
+		if t == nil {
+			return
+		}
+		if iface, ok := types.Unalias(t).Underlying().(*types.Interface); ok {
+			for i := 0; i < iface.NumMethods(); i++ {
+				m := iface.Method(i)
+				if m != nil && m.Pkg() == p.Types {
+					pkgIfaceMethodNames[m.Name()] = true
+				}
+			}
+		}
+	}
+	for _, tv := range info.Types {
+		noteIfaceMethods(tv.Type)
+	}
+	for _, obj := range info.Defs {
+		if obj != nil {
+			noteIfaceMethods(obj.Type())
+		}
 	}
 
 	canPropagateReturn := func(fn *types.Func) bool {
@@ -299,7 +433,13 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 			return false
 		}
 		sig, ok := fn.Type().(*types.Signature)
-		return ok && sig.Recv() == nil
+		if !ok {
+			return false
+		}
+		if sig.Recv() == nil {
+			return true
+		}
+		return !types.IsInterface(sig.Recv().Type()) && !pkgIfaceMethodNames[fn.Name()]
 	}
 
 	boundPkgMethodRecv := func(sel *ast.SelectorExpr) (*types.Var, bool) {
@@ -312,7 +452,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 			}
 		}
 		selInfo := info.Selections[sel]
-		if selInfo == nil || selInfo.Kind() != types.MethodVal || types.IsInterface(selInfo.Recv()) || len(selInfo.Index()) != 1 {
+		if selInfo == nil || selInfo.Kind() != types.MethodVal || selInfo.Recv() == nil || types.IsInterface(selInfo.Recv()) || len(selInfo.Index()) != 1 {
 			return nil, false
 		}
 		mObj, ok := selInfo.Obj().(*types.Func)
@@ -437,6 +577,41 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 	var classifyMultiReturnSlot func(rhs ast.Expr, slot int, slotType types.Type) (isRef bool, isCarrier bool)
 	var exprMutatesTaintedTarget func(expr ast.Expr) bool
 
+	isAllowedPropagatedCompositeLit := func(cl *ast.CompositeLit) bool {
+		if !cfg.AllowCompositeLitFieldPropagation || len(propagatedStructs) == 0 {
+			return false
+		}
+		st := syntaxutil.DerefNamedStruct(info.TypeOf(cl))
+		if st == nil || !propagatedStructs[st.Origin()] {
+			return false
+		}
+		stUnder, okSt := st.Origin().Underlying().(*types.Struct)
+		if !okSt {
+			return false
+		}
+		for ei, elt := range cl.Elts {
+			var fv *types.Var
+			val := elt
+			if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
+				if kid, okID := ast.Unparen(kv.Key).(*ast.Ident); okID {
+					fv, _ = info.Uses[kid].(*types.Var)
+				}
+				val = kv.Value
+			} else if ei < stUnder.NumFields() {
+				fv = stUnder.Field(ei)
+			}
+			if _, vCar := classifyExpr(val); vCar {
+				if fv == nil || !propagatedFields[fv.Origin()] {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	isAllowedStructCompositeLit := func(cl *ast.CompositeLit) bool {
+		return isAllowedSeedStructCompositeLit(cl) || isAllowedPropagatedCompositeLit(cl)
+	}
+
 	classifyExpr = func(expr ast.Expr) (bool, bool) {
 		expr = ast.Unparen(expr)
 		if expr == nil {
@@ -463,6 +638,9 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 					}
 				}
 				ft := selInfo.Type()
+				if selChainHitsPropagatedField(e) {
+					return projectedClassify(ft, e.X)
+				}
 				if selChainHitsSeedStruct(e) {
 					if isDirectRef(ft) {
 						return true, true
@@ -478,7 +656,8 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 				return false, false
 			}
 			if selInfo != nil && selInfo.Kind() == types.MethodVal && !calledMethodSels[e] {
-				if _, bCar := classifyExpr(e.X); bCar || exprMutatesTaintedTarget(e.X) || selChainHitsSeedStruct(e) || isSeedStruct(syntaxutil.DerefNamedStruct(info.TypeOf(e.X))) {
+				rxSt := syntaxutil.DerefNamedStruct(info.TypeOf(e.X))
+				if _, bCar := classifyExpr(e.X); bCar || exprMutatesTaintedTarget(e.X) || selChainHitsSeedStruct(e) || selChainHitsPropagatedField(e) || isSeedStruct(rxSt) || isPropagatedStruct(rxSt) {
 					if _, okM := boundPkgMethodRecv(e); !okM {
 						return true, true
 					}
@@ -512,7 +691,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 
 		case *ast.UnaryExpr:
 			if e.Op == token.AND {
-				if cl, isCL := ast.Unparen(e.X).(*ast.CompositeLit); isCL && isAllowedSeedStructCompositeLit(cl) {
+				if cl, isCL := ast.Unparen(e.X).(*ast.CompositeLit); isCL && isAllowedStructCompositeLit(cl) {
 					return false, false
 				}
 				bRef, bCar := classifyExpr(e.X)
@@ -534,7 +713,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 			return false, false
 
 		case *ast.CompositeLit:
-			if isAllowedSeedStructCompositeLit(e) {
+			if isAllowedStructCompositeLit(e) {
 				return false, false
 			}
 			for _, elt := range e.Elts {
@@ -638,7 +817,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 		})
 		if hit {
 			et := info.TypeOf(expr)
-			if isDirectRef(et) || types.IsInterface(et) {
+			if et == nil || isDirectRef(et) || types.IsInterface(et) {
 				return true, true
 			}
 			if carriesRefOrIface(et) {
@@ -710,15 +889,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 			return false
 		}
 		st, isSt := orig.Underlying().(*types.Struct)
-		if !isSt {
-			return false
-		}
-		for i := 0; i < st.NumFields(); i++ {
-			if st.Field(i).Exported() {
-				return false
-			}
-		}
-		return true
+		return isSt && structHasNoExportedFieldsDeep(st)
 	}
 
 	classifyMultiReturnSlot = func(rhs ast.Expr, slot int, slotType types.Type) (bool, bool) {
@@ -777,7 +948,8 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 						if selInfo := info.Selections[s]; selInfo != nil && selInfo.Kind() == types.MethodVal && !calledMethodSels[s] {
 							xRef, xCar := classifyExpr(s.X)
 							mutX := exprMutatesTaintedTarget(s.X)
-							seedX := selChainHitsSeedStruct(s) || isSeedStruct(syntaxutil.DerefNamedStruct(info.TypeOf(s.X)))
+							rxSt := syntaxutil.DerefNamedStruct(info.TypeOf(s.X))
+							seedX := selChainHitsSeedStruct(s) || selChainHitsPropagatedField(s) || isSeedStruct(rxSt) || isPropagatedStruct(rxSt)
 							if xCar || mutX || seedX {
 								if rv, okM := boundPkgMethodRecv(s); okM {
 									_, recvIsPtr := types.Unalias(rv.Type()).(*types.Pointer)
@@ -1045,6 +1217,51 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 				})
 			}
 		}
+		if cfg.AllowCompositeLitFieldPropagation {
+			for _, file := range p.Syntax {
+				ast.Inspect(file, func(n ast.Node) bool {
+					cl, isCL := n.(*ast.CompositeLit)
+					if !isCL {
+						return true
+					}
+					st := syntaxutil.DerefNamedStruct(info.TypeOf(cl))
+					if st == nil {
+						return true
+					}
+					orig := st.Origin()
+					if isSeedStruct(orig) || !isEligibleCapsule(orig) {
+						return true
+					}
+					stUnder, okSt := orig.Underlying().(*types.Struct)
+					if !okSt {
+						return true
+					}
+					for ei, elt := range cl.Elts {
+						var fv *types.Var
+						val := elt
+						if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
+							if kid, okID := ast.Unparen(kv.Key).(*ast.Ident); okID {
+								fv, _ = info.Uses[kid].(*types.Var)
+							}
+							val = kv.Value
+						} else if ei < stUnder.NumFields() {
+							fv = stUnder.Field(ei)
+						}
+						if _, vCar := classifyExpr(val); vCar && fv != nil {
+							if !propagatedStructs[orig] {
+								propagatedStructs[orig] = true
+								promoted = true
+							}
+							if !propagatedFields[fv.Origin()] {
+								propagatedFields[fv.Origin()] = true
+								promoted = true
+							}
+						}
+					}
+					return true
+				})
+			}
+		}
 		if !promoted {
 			break
 		}
@@ -1099,6 +1316,49 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 		return false
 	}
 
+	// Verify field-propagated structs cannot be stored in package-scope variables,
+	// surfaced in exported function/type/method signatures, or instantiated into
+	// generic type parameters.
+	if len(propagatedStructs) > 0 {
+		scope := p.Types.Scope()
+		for _, name := range scope.Names() {
+			obj := scope.Lookup(name)
+			switch x := obj.(type) {
+			case *types.Var:
+				if typeMentionsSeedStruct(x.Type(), isPropagatedStruct) {
+					return false
+				}
+			case *types.Func:
+				if x.Exported() && typeMentionsSeedStruct(x.Type(), isPropagatedStruct) {
+					return false
+				}
+			case *types.TypeName:
+				if x.Exported() {
+					if typeMentionsSeedStruct(x.Type(), isPropagatedStruct) {
+						return false
+					}
+					if named, isN := types.Unalias(x.Type()).(*types.Named); isN {
+						mset := types.NewMethodSet(types.NewPointer(named))
+						for mi := 0; mi < mset.Len(); mi++ {
+							if m := mset.At(mi).Obj(); m != nil && m.Exported() && typeMentionsSeedStruct(m.Type(), isPropagatedStruct) {
+								return false
+							}
+						}
+					}
+				}
+			}
+		}
+		for _, inst := range info.Instances {
+			if inst.TypeArgs != nil {
+				for ti := 0; ti < inst.TypeArgs.Len(); ti++ {
+					if typeMentionsSeedStruct(inst.TypeArgs.At(ti), isPropagatedStruct) {
+						return false
+					}
+				}
+			}
+		}
+	}
+
 	isPtrToSeedStruct := func(t types.Type) bool {
 		if t == nil {
 			return false
@@ -1151,8 +1411,13 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 				}
 			}
 		}
+		if len(propagatedStructs) > 0 && typeMentionsSeedStruct(srcT, isPropagatedStruct) {
+			if dstT == nil || syntaxutil.IsUnsafePointerType(dstT) || assignErasesSeedStruct(srcT, dstT, isPropagatedStruct) {
+				return true
+			}
+		}
 		srcSt := syntaxutil.DerefNamedStruct(srcT)
-		if !isSeedStruct(srcSt) {
+		if !isSeedStruct(srcSt) && !isPropagatedStruct(srcSt) {
 			return false
 		}
 		if dstT == nil {
@@ -1163,9 +1428,21 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 			return true
 		}
 		if iface, isIface := d.Underlying().(*types.Interface); isIface {
-			return cfg.ForbidNonNilSeedStructPtrCompare || iface.NumMethods() == 0
+			return cfg.ForbidNonNilSeedStructPtrCompare || iface.NumMethods() == 0 || isPropagatedStruct(srcSt)
 		}
 		return !types.Identical(d, types.Unalias(srcT))
+	}
+
+	isFreshDefineIdent := func(tok token.Token, lhs ast.Expr) bool {
+		if tok != token.DEFINE {
+			return false
+		}
+		id, ok := ast.Unparen(lhs).(*ast.Ident)
+		if !ok {
+			return false
+		}
+		v, ok := info.Defs[id].(*types.Var)
+		return ok && v != nil
 	}
 
 	ok := true
@@ -1218,8 +1495,16 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 				}
 
 			case *ast.SelectorExpr:
-				if selInfo := info.Selections[s]; selInfo != nil && selInfo.Kind() == types.MethodVal && !calledMethodSels[s] {
-					if _, xCar := classifyExpr(s.X); xCar || exprMutatesTaintedTarget(s.X) || selChainHitsSeedStruct(s) || isSeedStruct(syntaxutil.DerefNamedStruct(info.TypeOf(s.X))) {
+				selInfo := info.Selections[s]
+				if selInfo != nil && selInfo.Kind() == types.MethodVal && !selInfo.Indirect() && SelectionHasPointerReceiver(selInfo) {
+					if (!inSyncAllowed && exprHitsStructPred(info, s.X, isSeedStruct, false)) || exprHitsPropagated(s.X, false) {
+						ok = false
+						return false
+					}
+				}
+				if selInfo != nil && selInfo.Kind() == types.MethodVal && !calledMethodSels[s] {
+					rxSt := syntaxutil.DerefNamedStruct(info.TypeOf(s.X))
+					if _, xCar := classifyExpr(s.X); xCar || exprMutatesTaintedTarget(s.X) || selChainHitsSeedStruct(s) || selChainHitsPropagatedField(s) || isSeedStruct(rxSt) || isPropagatedStruct(rxSt) {
 						if _, okM := boundPkgMethodRecv(s); !okM {
 							ok = false
 							return false
@@ -1255,7 +1540,9 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 
 			case *ast.AssignStmt:
 				for _, lhs := range s.Lhs {
-					if exprMutatesTaintedTarget(lhs) || (!inSyncAllowed && exprHitsStructPred(info, lhs, isSeedStruct, true)) {
+					if exprMutatesTaintedTarget(lhs) ||
+						(!inSyncAllowed && exprHitsStructPred(info, lhs, isSeedStruct, true)) ||
+						exprHitsPropagated(lhs, !isFreshDefineIdent(s.Tok, lhs)) {
 						ok = false
 						return false
 					}
@@ -1400,15 +1687,15 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 				}
 
 			case *ast.IncDecStmt:
-				if exprMutatesTaintedTarget(s.X) || (!inSyncAllowed && exprHitsStructPred(info, s.X, isSeedStruct, true)) {
+				if exprMutatesTaintedTarget(s.X) || (!inSyncAllowed && exprHitsStructPred(info, s.X, isSeedStruct, true)) || exprHitsPropagated(s.X, true) {
 					ok = false
 					return false
 				}
 
 			case *ast.RangeStmt:
 				if s.Tok == token.ASSIGN {
-					if (s.Key != nil && (exprMutatesTaintedTarget(s.Key) || (!inSyncAllowed && exprHitsStructPred(info, s.Key, isSeedStruct, true)))) ||
-						(s.Value != nil && (exprMutatesTaintedTarget(s.Value) || (!inSyncAllowed && exprHitsStructPred(info, s.Value, isSeedStruct, true)))) {
+					if (s.Key != nil && (exprMutatesTaintedTarget(s.Key) || (!inSyncAllowed && exprHitsStructPred(info, s.Key, isSeedStruct, true)) || exprHitsPropagated(s.Key, true))) ||
+						(s.Value != nil && (exprMutatesTaintedTarget(s.Value) || (!inSyncAllowed && exprHitsStructPred(info, s.Value, isSeedStruct, true)) || exprHitsPropagated(s.Value, true))) {
 						ok = false
 						return false
 					}
@@ -1429,12 +1716,21 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 				}
 
 			case *ast.UnaryExpr:
-				if s.Op == token.AND && (exprMutatesTaintedTarget(s.X) || (!inSyncAllowed && exprHitsStructPred(info, s.X, isSeedStruct, false))) {
+				if s.Op == token.AND && (exprMutatesTaintedTarget(s.X) || (!inSyncAllowed && exprHitsStructPred(info, s.X, isSeedStruct, false)) || exprHitsPropagated(s.X, false)) {
 					ok = false
 					return false
 				}
 				if s.Op == token.ARROW {
 					if _, cCar := classifyExpr(s.X); cCar {
+						ok = false
+						return false
+					}
+				}
+
+			case *ast.SliceExpr:
+				if t := info.TypeOf(s.X); t != nil {
+					if _, isArr := types.Unalias(t).Underlying().(*types.Array); isArr &&
+						(exprMutatesTaintedTarget(s.X) || (!inSyncAllowed && exprHitsStructPred(info, s.X, isSeedStruct, false)) || exprHitsPropagated(s.X, false)) {
 						ok = false
 						return false
 					}
@@ -1447,7 +1743,8 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 							ok = false
 							return false
 						}
-					} else if cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(info.TypeOf(s.Value), isSeedStruct) {
+					} else if (cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(info.TypeOf(s.Value), isSeedStruct)) ||
+						(len(propagatedStructs) > 0 && typeMentionsSeedStruct(info.TypeOf(s.Value), isPropagatedStruct)) {
 						ok = false
 						return false
 					}
@@ -1474,7 +1771,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 				_, isArray := baseT.Underlying().(*types.Array)
 				_, isMap := baseT.Underlying().(*types.Map)
 				stUnder, isStruct := baseT.Underlying().(*types.Struct)
-				allowedSeedSt := isStruct && isAllowedSeedStructCompositeLit(s)
+				allowedSeedSt := isStruct && isAllowedStructCompositeLit(s)
 
 				for idx, elt := range s.Elts {
 					val := elt
@@ -1527,7 +1824,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 
 			case *ast.ReturnStmt:
 				fn := returnEnclFunc[s]
-				if len(s.Results) == 1 && cfg.ForbidNonNilSeedStructPtrCompare {
+				if len(s.Results) == 1 && (cfg.ForbidNonNilSeedStructPtrCompare || len(propagatedStructs) > 0) {
 					if tup, isTup := info.TypeOf(s.Results[0]).(*types.Tuple); isTup {
 						for ti := 0; ti < tup.Len(); ti++ {
 							rT := tup.At(ti).Type()
@@ -1536,7 +1833,8 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 									ok = false
 									return false
 								}
-							} else if typeMentionsSeedStruct(rT, isSeedStruct) {
+							} else if (cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(rT, isSeedStruct)) ||
+								(len(propagatedStructs) > 0 && typeMentionsSeedStruct(rT, isPropagatedStruct)) {
 								ok = false
 								return false
 							}
@@ -1551,12 +1849,14 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 								ok = false
 								return false
 							}
-						} else if cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(info.TypeOf(r), isSeedStruct) {
+						} else if (cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(info.TypeOf(r), isSeedStruct)) ||
+							(len(propagatedStructs) > 0 && typeMentionsSeedStruct(info.TypeOf(r), isPropagatedStruct)) {
 							ok = false
 							return false
 						}
 					} else if isSeedStruct(syntaxutil.DerefNamedStruct(info.TypeOf(r))) ||
-						(cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(info.TypeOf(r), isSeedStruct)) {
+						(cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(info.TypeOf(r), isSeedStruct)) ||
+						(len(propagatedStructs) > 0 && typeMentionsSeedStruct(info.TypeOf(r), isPropagatedStruct)) {
 						ok = false
 						return false
 					}
@@ -1604,7 +1904,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 						if _, rCar := classifyExpr(sel.X); rCar {
 							if callee := resolveConcretePkgCallee(s.Fun); callee != nil {
 								// Taint propagated to callee's receiver parameter.
-							} else if !types.IsInterface(selInfo.Recv()) && cfg.AllowMethodRecv != nil {
+							} else if selInfo.Recv() != nil && !types.IsInterface(selInfo.Recv()) && cfg.AllowMethodRecv != nil {
 								mFn, _ := selInfo.Obj().(*types.Func)
 								if !cfg.AllowMethodRecv(s, mFn, sel.X) {
 									ok = false
@@ -1681,7 +1981,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 										continue
 									}
 									pt := sig.Params().At(ti).Type()
-									if !(cfg.AllowIntraPkgInterfaceParam && types.IsInterface(pt)) && assignErasesTaint(pt, st) {
+									if !(cfg.AllowIntraPkgInterfaceParam && pt != nil && types.IsInterface(pt)) && assignErasesTaint(pt, st) {
 										erased = true
 										break
 									}
@@ -1706,7 +2006,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 									pt = sl.Elem()
 								}
 							}
-							if (cfg.AllowIntraPkgInterfaceParam && types.IsInterface(pt)) || !assignErasesTaint(pt, info.TypeOf(arg)) {
+							if (cfg.AllowIntraPkgInterfaceParam && pt != nil && types.IsInterface(pt)) || !assignErasesTaint(pt, info.TypeOf(arg)) {
 								continue
 							}
 						}

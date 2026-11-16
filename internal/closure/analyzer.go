@@ -308,6 +308,10 @@ type tier2Base struct {
 	unsafeElemType         map[types.Type]bool
 	ifaceMethodDone        map[types.Type]bool
 	ifaceMethodObjs        map[types.Type][]*types.Func
+	binaryUnsafeDone       bool
+	binaryUnsafeReason     string
+	pkgUnsafeKnown         map[string]bool
+	pkgUnsafeHazard        map[string]bool
 }
 
 type tier2Analyzer struct {

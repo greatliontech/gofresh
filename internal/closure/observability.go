@@ -12,13 +12,15 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
 
 	"github.com/greatliontech/gofresh/internal/auditset"
 	prog "github.com/greatliontech/gofresh/internal/closure/internal/program"
-	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/closure/internal/rta"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/outcome"
+	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -233,6 +235,17 @@ type Observability struct {
 	// startup and user test-main flow) reaches no external input operations
 	// beyond admitted harness protocol facts.
 	EffectFree bool
+	// RequiresSingleSubject reports that the subject's own reachability is
+	// clean, while a loaded non-standard package of the test binary contains
+	// an un-confined unsafe.Pointer operation that a sibling subject could
+	// execute in a shared process. Persisted execution-agnostically in Proofs()
+	// memos and enforced by the consumer against SingleSubjectExecution
+	// (REQ-closure-observability-unsafe, REQ-closure-observability-memo).
+	RequiresSingleSubject bool
+	// SharedProcessUnsafeReason carries the deterministic package-scan refusal
+	// diagnostic surfaced when RequiresSingleSubject is true and the caller has
+	// not attested SingleSubjectExecution.
+	SharedProcessUnsafeReason string
 }
 
 // ImmutableEnvironmentOutcomes identifies the derivation for an empty effect
@@ -399,6 +412,7 @@ func (h *Hasher) ComputeObservabilityBatch(subjects []Subject) (map[Subject]Obse
 	if axis := h.SelectionAttribution(); axis != "" {
 		for subject, proof := range results {
 			proof.Reason = AttributeSelection(proof.Reason, axis)
+			proof.SharedProcessUnsafeReason = AttributeSelection(proof.SharedProcessUnsafeReason, axis)
 			results[subject] = proof
 		}
 	}
@@ -764,7 +778,85 @@ func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, 
 		method = immutableEnvironmentMethod(subjectResult.effects, testMainEffects)
 	}
 	effectFree := h.SelectionAudited() && hasNoExternalInputEffects(subjectResult.effects, testMainEffects)
+	if unsafeReason := base.binaryUnconfinedUnsafeReason(); unsafeReason != "" {
+		return Observability{
+			Observable:                true,
+			OutcomeMethod:             method,
+			EffectFree:                effectFree,
+			RequiresSingleSubject:     true,
+			SharedProcessUnsafeReason: unsafeReason,
+		}, nil
+	}
 	return Observability{Observable: true, OutcomeMethod: method, EffectFree: effectFree}, nil
+}
+
+func (b *tier2Base) ensureBinaryUnsafeEvaluated() {
+	if b == nil || b.prog == nil || b.binaryUnsafeDone {
+		return
+	}
+	b.binaryUnsafeDone = true
+	b.pkgUnsafeKnown = map[string]bool{}
+	b.pkgUnsafeHazard = map[string]bool{}
+	loadedByTypes := make(map[*types.Package]*packages.Package, len(b.prog.Pkgs))
+	for _, p := range b.prog.Pkgs {
+		if p != nil && p.Types != nil {
+			loadedByTypes[p.Types] = p
+		}
+	}
+	var candidates []*pkgIndex
+	for _, idx := range b.idxByTypes {
+		if idx == nil || idx.std || idx.testMain || idx.pkg == nil {
+			continue
+		}
+		candidates = append(candidates, idx)
+	}
+	slices.SortFunc(candidates, func(x, y *pkgIndex) int {
+		if c := strings.Compare(x.path, y.path); c != 0 {
+			return c
+		}
+		return strings.Compare(x.id, y.id)
+	})
+	var sizes types.Sizes
+	if b.prog.GOARCH != "" {
+		sizes = types.SizesFor("gc", b.prog.GOARCH)
+	}
+	for _, idx := range candidates {
+		pkgSizes := sizes
+		if pkgSizes == nil {
+			pkgSizes = idx.pkg.TypesSizes
+		}
+		b.pkgUnsafeKnown[idx.path] = true
+		b.pkgUnsafeKnown[idx.id] = true
+		if refconfine.PackageHasUnconfinedUnsafeMemoryHazard(idx.pkg, pkgSizes, loadedByTypes) {
+			b.pkgUnsafeHazard[idx.path] = true
+			b.pkgUnsafeHazard[idx.id] = true
+			if b.binaryUnsafeReason == "" {
+				b.binaryUnsafeReason = "package scan: reaches un-confined unsafe.Pointer in " + idx.path
+			}
+		}
+	}
+}
+
+func (b *tier2Base) binaryUnconfinedUnsafeReason() string {
+	if b == nil || b.prog == nil {
+		return ""
+	}
+	b.ensureBinaryUnsafeEvaluated()
+	return b.binaryUnsafeReason
+}
+
+func (b *tier2Base) pkgConfinedUnsafe(importID, srcPath string) bool {
+	if b == nil || b.prog == nil {
+		return false
+	}
+	b.ensureBinaryUnsafeEvaluated()
+	if importID != "" && b.pkgUnsafeKnown[importID] {
+		return !b.pkgUnsafeHazard[importID] && !b.pkgUnsafeHazard[srcPath]
+	}
+	if srcPath != "" && b.pkgUnsafeKnown[srcPath] {
+		return !b.pkgUnsafeHazard[srcPath]
+	}
+	return false
 }
 
 // hasNoExternalInputEffects reports whether the classified effect sets contain
@@ -1174,7 +1266,7 @@ func maximalObservabilityBlocker(audited bool, effect externalEffect) bool {
 	// out), so they keep the scan block - carving them would grant
 	// proofs over testlog-invisible out-of-bounds reads
 	// (REQ-closure-observability-unsafe).
-	if effect.packagePath == "unsafe" && effect.symbol == "Pointer" {
+	if effect.packagePath == "unsafe" && (effect.symbol == "Pointer" || isCompileTimeUnsafeIntrinsic(effect.packagePath, effect.symbol)) {
 		return false
 	}
 	return true
@@ -1805,7 +1897,7 @@ const unsupportedShapeReason = "attributed reachability unavailable: unsupported
 // package even when it sits inside an unreachable function or method
 // declaration (REQ-closure-observability-unsafe).
 func packageWideMaximalHazard(effect externalEffect) bool {
-	if effect.packagePath == "unsafe" && effect.symbol != "Pointer" {
+	if effect.packagePath == "unsafe" && effect.symbol != "Pointer" && !isCompileTimeUnsafeIntrinsic(effect.packagePath, effect.symbol) {
 		return true
 	}
 	if effect.packagePath == "os" && effect.symbol == "Exit" {
@@ -1823,9 +1915,20 @@ func packageWideMaximalHazard(effect externalEffect) bool {
 	return false
 }
 
+func isConditionallyConfinedUnsafeSymbol(effect externalEffect) bool {
+	return effect.packagePath == "unsafe" && (effect.symbol == "StringData" || effect.symbol == "Slice")
+}
+
+func packageWideMaximalHazardForPkg(effect externalEffect, pkgConfinedUnsafe bool) bool {
+	if pkgConfinedUnsafe && isConditionallyConfinedUnsafeSymbol(effect) {
+		return false
+	}
+	return packageWideMaximalHazard(effect)
+}
+
 func hasFilterableMaximalBlocker(audited bool, effects []externalEffect) bool {
 	for _, effect := range effects {
-		if maximalObservabilityBlocker(audited, effect) && !packageWideMaximalHazard(effect) {
+		if maximalObservabilityBlocker(audited, effect) && (!packageWideMaximalHazard(effect) || isConditionallyConfinedUnsafeSymbol(effect)) {
 			return true
 		}
 	}
