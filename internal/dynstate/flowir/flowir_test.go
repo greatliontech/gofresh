@@ -356,8 +356,9 @@ func pair() (int, []int) { return 1, []int{2} }
 func triple() (int, []int, []int) { return 1, []int{2}, []int{3} }
 func sink(a int, b []int) {}
 func varSink(a int, rest ...[]int) {}
+func anyVarSink(a any, rest ...any) {}
 
-func Calls(xs [][]int) {
+func Calls(xs [][]int, ys []any) {
 	sink(pair())
 	varSink(triple())
 	varSink(0, xs...)
@@ -368,6 +369,8 @@ func Calls(xs [][]int) {
 	}(func() (int, []int) {
 		return 7, buf
 	}())
+	anyVarSink("hi", 1, "there")
+	anyVarSink("hi", ys...)
 }
 `)
 	body := LowerFunc(info, pkg, findFuncDecl(t, file, "Calls"))
@@ -415,5 +418,261 @@ func Calls(xs [][]int) {
 	}
 	if aliases[bufObj][paramN] || aliases[paramN][bufObj] {
 		t.Fatalf("scalar parameter n unexpectedly linked to buf in BuildScopedMemAliases: %+v", aliases)
+	}
+
+	packedCall := body.Ops[5].Expr
+	packedCall.ForEachArgParam(func(_ *Value, slotType types.Type, slotIdx int, paramIdx int, ok bool, packed bool) bool {
+		pt := packedCall.FormalParamSlotType(paramIdx, packed)
+		if !ok || pt == nil || !types.IsInterface(pt) {
+			t.Fatalf("packedCall slot %d FormalParamSlotType(%d, %v) = %v, want any interface (arg slotType=%v)", slotIdx, paramIdx, packed, pt, slotType)
+		}
+		return true
+	})
+	ellipsisCall := body.Ops[6].Expr
+	ellipsisCall.ForEachArgParam(func(_ *Value, _ types.Type, slotIdx int, paramIdx int, ok bool, packed bool) bool {
+		pt := ellipsisCall.FormalParamSlotType(paramIdx, packed)
+		if !ok || pt == nil {
+			t.Fatalf("ellipsisCall slot %d FormalParamSlotType = nil", slotIdx)
+		}
+		if slotIdx == 1 {
+			if _, isSlice := pt.Underlying().(*types.Slice); !isSlice || packed {
+				t.Fatalf("ellipsisCall slot 1 FormalParamSlotType(%d, %v) = %v, want []any with packed=false", paramIdx, packed, pt)
+			}
+		}
+		return true
+	})
+}
+
+func TestLowerNodeGenDeclValueSpecRootPosCalleeSelectorAndShadowedNil(t *testing.T) {
+	_, file, pkg, info := mustTypecheck(t, `package p
+
+import (
+	"bytes"
+	"slices"
+)
+
+func pair() (int, []int) { return 7, []int{8} }
+
+const (
+	cZero = 1 << iota
+	cOne
+	cPairA, cPairB = 10, 20
+)
+
+var (
+	vSingle     = 42
+	vZero       []int
+	vMultiA, vMultiB = 1, 2
+	vTupA, vTupB     = pair()
+	vErrNil     error = nil
+)
+
+type holder struct {
+	buf []int
+	n   int
+}
+
+func (h *holder) Touch(x int) int { return h.n + x }
+
+func makeHolder() *holder { return &holder{} }
+
+func ExerciseSelectorsPositionsAndNil(in []int) int {
+	var nilSlice []int = nil
+	local := holder{buf: in, n: 3}
+	_ = ((local).buf)[0]
+	_ = bytes.ErrTooLarge
+	_ = makeHolder().n
+	_ = (&local).Touch(1)
+	_ = (local.Touch)(2)
+	_ = slices.Clone[[]int](in)
+	_ = slices.Insert[[]int, int](in, 0, 9)
+	_ = plainHelper(3)
+	_ = (func() int { return 4 })()
+	_ = new(int)
+	return len(nilSlice)
+}
+
+func plainHelper(x int) int { return x }
+
+func ShadowVarNil() []int {
+	nil := []int{1, 2}
+	return nil
+}
+
+func ShadowErrNil() error {
+	var nil error
+	return nil
+}
+
+func ShadowConstNil() int {
+	const nil = 99
+	return nil
+}
+`)
+
+	var constGD, varGD *ast.GenDecl
+	for _, d := range file.Decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		if gd.Tok == token.CONST {
+			constGD = gd
+		} else if gd.Tok == token.VAR {
+			varGD = gd
+		}
+	}
+	if constGD == nil || varGD == nil {
+		t.Fatalf("missing const or var GenDecl: const=%v var=%v", constGD, varGD)
+	}
+
+	// 1. const GenDecl lowers explicit expressions to OpExpr{IsConst: true} with zero Dsts;
+	// implicit iota carry-forward specs have no Values and emit no spurious AssignZeroDecl.
+	constBody := LowerNode(info, pkg, constGD)
+	if constBody == nil || len(constBody.Ops) != 3 {
+		t.Fatalf("const GenDecl ops = %+v, want 3 OpExprs", constBody)
+	}
+	for i, op := range constBody.Ops {
+		if op.Kind != OpExpr || len(op.Dsts) != 0 || op.Expr == nil || !op.Expr.IsConst || op.Expr.IsNil {
+			t.Fatalf("const op[%d] = %+v (expr=%+v), want OpExpr{IsConst:true, IsNil:false}", i, op, op.Expr)
+		}
+	}
+	constSpec0 := constGD.Specs[0].(*ast.ValueSpec)
+	if vsB := LowerNode(info, pkg, constSpec0); vsB == nil || len(vsB.Ops) != 1 || vsB.Ops[0].Kind != OpExpr || !vsB.Ops[0].Expr.IsConst {
+		t.Fatalf("LowerNode(const ValueSpec) = %+v, want 1 OpExpr{IsConst:true}", vsB)
+	}
+
+	// 2. var GenDecl covers AssignPlain, AssignZeroDecl, multi-name AssignPlain, tuple AssignMulti, and typed error nil.
+	varBody := LowerNode(info, pkg, varGD)
+	if varBody == nil || len(varBody.Ops) != 5 {
+		t.Fatalf("var GenDecl ops = %+v, want 5 OpAssigns", varBody)
+	}
+	wantAssignKinds := []AssignKind{AssignPlain, AssignZeroDecl, AssignPlain, AssignMulti, AssignPlain}
+	for i, wantK := range wantAssignKinds {
+		if varBody.Ops[i].Kind != OpAssign || varBody.Ops[i].AssignKind != wantK {
+			t.Fatalf("var op[%d] = (%v, %v), want (OpAssign, %v)", i, varBody.Ops[i].Kind, varBody.Ops[i].AssignKind, wantK)
+		}
+	}
+	errNilVal := varBody.Ops[4].Srcs[0]
+	if !errNilVal.IsNil || errNilVal.IsConst {
+		t.Fatalf("typed error nil = (IsNil=%v, IsConst=%v), want (true, false)", errNilVal.IsNil, errNilVal.IsConst)
+	}
+	varSpec1 := varGD.Specs[1].(*ast.ValueSpec)
+	if vsZero := LowerNode(info, pkg, varSpec1); vsZero == nil || len(vsZero.Ops) != 1 || vsZero.Ops[0].AssignKind != AssignZeroDecl {
+		t.Fatalf("LowerNode(zero var ValueSpec) = %+v, want AssignZeroDecl", vsZero)
+	}
+
+	// 3. Place.RootPos, CalleeSelector(), and IsTypeExpr.
+	var nilVal *Value
+	if nilVal.CalleeSelector() != nil {
+		t.Fatal("nil Value.CalleeSelector() != nil")
+	}
+
+	exFD := findFuncDecl(t, file, "ExerciseSelectorsPositionsAndNil")
+	exBody := LowerFunc(info, pkg, exFD)
+	if exBody == nil || len(exBody.Ops) < 11 {
+		t.Fatalf("unexpected ExerciseSelectorsPositionsAndNil ops: %+v", exBody)
+	}
+	if !exBody.Ops[0].Srcs[0].IsNil {
+		t.Fatalf("var nilSlice []int = nil Src[0].IsNil = false, want true")
+	}
+	if exBody.Ops[0].Srcs[0].CalleeSelector() != nil {
+		t.Fatal("non-call Value.CalleeSelector() != nil")
+	}
+
+	// Ops[2]: `_ = ((local).buf)[0]` -> RootPos matches inner `local` Ident.Pos().
+	projRead := exBody.Ops[2].Srcs[0]
+	localObj := exBody.Ops[1].Dsts[0].Obj
+	var wantLocalIdentPos token.Pos
+	ast.Inspect(exFD.Body.List[2], func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && info.Uses[id] == localObj {
+			wantLocalIdentPos = id.Pos()
+		}
+		return true
+	})
+	if projRead.Kind != ValPlace || projRead.Place.RootPos != wantLocalIdentPos || !wantLocalIdentPos.IsValid() {
+		t.Fatalf("((local).buf)[0] RootPos = %v, want %v", projRead.Place.RootPos, wantLocalIdentPos)
+	}
+
+	// Ops[3]: `_ = bytes.ErrTooLarge` -> RootPos matches `Sel.Pos()`, NOT `bytes` PkgName Pos().
+	pkgQualRead := exBody.Ops[3].Srcs[0]
+	selPkgAST := exFD.Body.List[3].(*ast.AssignStmt).Rhs[0].(*ast.SelectorExpr)
+	if pkgQualRead.Kind != ValPlace || pkgQualRead.Place.RootPos != selPkgAST.Sel.Pos() {
+		t.Fatalf("bytes.ErrTooLarge RootPos = %v, want Sel.Pos() %v (X.Pos()=%v)", pkgQualRead.Place.RootPos, selPkgAST.Sel.Pos(), selPkgAST.X.Pos())
+	}
+
+	// Ops[4]: `_ = makeHolder().n` -> RootTransient RootPos matches Base CallExpr.Pos().
+	transRead := exBody.Ops[4].Srcs[0]
+	if transRead.Kind != ValPlace || transRead.Place.Root != RootTransient || transRead.Place.RootPos != transRead.Place.Base.Raw.Pos() {
+		t.Fatalf("makeHolder().n transient RootPos = %v, want %v", transRead.Place.RootPos, transRead.Place.Base.Raw.Pos())
+	}
+
+	// Ops[5..10]: CalleeSelector matrix across direct, paren, IndexExpr generic, IndexListExpr generic, plain, and IIFE calls.
+	selMatrix := []struct {
+		opIdx   int
+		wantSel string
+	}{
+		{opIdx: 5, wantSel: "Touch"},
+		{opIdx: 6, wantSel: "Touch"},
+		{opIdx: 7, wantSel: "Clone"},
+		{opIdx: 8, wantSel: "Insert"},
+		{opIdx: 9, wantSel: ""},
+		{opIdx: 10, wantSel: ""},
+	}
+	for _, tc := range selMatrix {
+		callVal := exBody.Ops[tc.opIdx].Srcs[0]
+		gotSel := callVal.CalleeSelector()
+		if tc.wantSel == "" {
+			if gotSel != nil {
+				t.Fatalf("op[%d] CalleeSelector() = %v, want nil", tc.opIdx, gotSel.Sel.Name)
+			}
+		} else if gotSel == nil || gotSel.Sel.Name != tc.wantSel {
+			t.Fatalf("op[%d] CalleeSelector() = %+v, want %q", tc.opIdx, gotSel, tc.wantSel)
+		}
+	}
+
+	// Ops[11]: `_ = new(int)` -> LowerNode on CallExpr.Args[0] yields IsTypeExpr == true.
+	newTypeCall := exFD.Body.List[11].(*ast.AssignStmt).Rhs[0].(*ast.CallExpr)
+	typeArgBody := LowerNode(info, pkg, newTypeCall.Args[0])
+	if typeArgBody == nil || len(typeArgBody.Ops) != 1 || typeArgBody.Ops[0].Expr == nil || !typeArgBody.Ops[0].Expr.IsTypeExpr {
+		t.Fatalf("LowerNode(new(int) type arg) = %+v, want IsTypeExpr=true", typeArgBody)
+	}
+
+	// 4. Shadowed `nil` (local slice var, local error var, local const) must NEVER set IsNil == true.
+	for _, fnName := range []string{"ShadowVarNil", "ShadowErrNil", "ShadowConstNil"} {
+		sb := LowerFunc(info, pkg, findFuncDecl(t, file, fnName))
+		retOp := sb.Ops[len(sb.Ops)-1]
+		if retOp.Kind != OpReturn || len(retOp.Results) != 1 {
+			t.Fatalf("%s missing single-result return: %+v", fnName, retOp)
+		}
+		rv := retOp.Results[0]
+		if rv.IsNil {
+			t.Fatalf("%s: shadowed `nil` had IsNil=true (%+v)", fnName, rv)
+		}
+		if fnName == "ShadowConstNil" && !rv.IsConst {
+			t.Fatalf("%s: const `nil` had IsConst=false (%+v)", fnName, rv)
+		}
+	}
+
+	// 5. AssignCompound synthetic ValCompositeExpr leaves Raw == nil so parenthesized
+	// RHS expressions index to their own lowered Value rather than the synthetic wrapper.
+	_, compFile, compPkg, compInfo := mustTypecheck(t, `package p
+func AddParen(x int) int {
+	y := 1
+	x += (y)
+	return x
+}
+`)
+	compFD := findFuncDecl(t, compFile, "AddParen")
+	compBody := LowerFunc(compInfo, compPkg, compFD)
+	if len(compBody.Ops) < 2 || compBody.Ops[1].Kind != OpAssign || compBody.Ops[1].AssignKind != AssignCompound {
+		t.Fatalf("expected AssignCompound at Ops[1], got %+v", compBody.Ops)
+	}
+	compSrc := compBody.Ops[1].Srcs[0]
+	if compSrc.Kind != ValCompositeExpr || compSrc.Raw != nil || len(compSrc.Args) != 2 {
+		t.Fatalf("AssignCompound Src[0] = %+v, want ValCompositeExpr with Raw == nil and 2 Args", compSrc)
+	}
+	if compSrc.Args[1].Kind != ValPlace || compSrc.Args[1].Raw == nil {
+		t.Fatalf("AssignCompound Args[1] = %+v, want ValPlace with non-nil Raw", compSrc.Args[1])
 	}
 }

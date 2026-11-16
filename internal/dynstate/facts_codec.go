@@ -122,10 +122,33 @@ type Fact struct {
 	GrpcServiceVars            []protoaudit.GrpcServiceVarFact        `json:"grpcServiceVars,omitempty"`
 	MutatedStructTypes         []syntaxutil.TypeRef                   `json:"mutatedStructTypes,omitempty"`
 	ConditionalStructMutations []syntaxutil.ConditionalStructMutation `json:"conditionalStructMutations,omitempty"`
-	NoPostInitCarrierWrites    bool                                   `json:"noPostInitCarrierWrites,omitempty"`
-	CarrierImportCalls         []string                               `json:"carrierImportCalls,omitempty"`
-	DirectVarWrites            []string                               `json:"directVarWrites,omitempty"`
-	NonMethodVarUses           []string                               `json:"nonMethodVarUses,omitempty"`
+	NoPostInitCarrierWrites     bool                                   `json:"noPostInitCarrierWrites,omitempty"`
+	CarrierImportCalls          []string                               `json:"carrierImportCalls,omitempty"`
+	DirectVarWrites             []string                               `json:"directVarWrites,omitempty"`
+	NonMethodVarUses            []string                               `json:"nonMethodVarUses,omitempty"`
+	HasStringHeaderUnsafe          bool                                    `json:"hasStringHeaderUnsafe,omitempty"`
+	StringSinkPkgs                 []string                                `json:"stringSinkPkgs,omitempty"`
+	StringSinkParams               []syntaxutil.ParamKey                   `json:"stringSinkParams,omitempty"`
+	StringSinkMethods              []syntaxutil.FuncKey                    `json:"stringSinkMethods,omitempty"`
+	StringCallbackTargets          []string                                `json:"stringCallbackTargets,omitempty"`
+	StringEscapes                  []string                                `json:"stringEscapes,omitempty"`
+	StringAttributedUses           []syntaxutil.AttributedUse              `json:"stringAttributedUses,omitempty"`
+	StringEnvCarrying              []string                                `json:"stringEnvCarrying,omitempty"`
+	StringEnvCallable              []string                                `json:"stringEnvCallable,omitempty"`
+	StringEnvCarryingFns           []syntaxutil.VarFuncUse                 `json:"stringEnvCarryingFns,omitempty"`
+	StringEnvCallUses              []syntaxutil.EnvCallUse                 `json:"stringEnvCallUses,omitempty"`
+	StringEnvCallParamUses         []syntaxutil.EnvCallParamUse            `json:"stringEnvCallParamUses,omitempty"`
+	StringEnvCallMethodUses        []syntaxutil.EnvCallMethodUse           `json:"stringEnvCallMethodUses,omitempty"`
+	StringCarrierLinks             []syntaxutil.CarrierLink                `json:"stringCarrierLinks,omitempty"`
+	StringReturnEnvBlocked         []syntaxutil.FuncKey                    `json:"stringReturnEnvBlocked,omitempty"`
+	StringReturnEnvDeps            []syntaxutil.FuncDepEdge                `json:"stringReturnEnvDeps,omitempty"`
+	StringReturnEnvParamDeps       []syntaxutil.FuncParamDepEdge           `json:"stringReturnEnvParamDeps,omitempty"`
+	StringReturnEnvMethodDeps      []syntaxutil.FuncDepEdge                `json:"stringReturnEnvMethodDeps,omitempty"`
+	StringReturnEnvInsertionDeps   []syntaxutil.FuncInsertionDepEdge       `json:"stringReturnEnvInsertionDeps,omitempty"`
+	StringParamInsertionBlocked    []syntaxutil.ParamKey                   `json:"stringParamInsertionBlocked,omitempty"`
+	StringParamInsertionDeps       []syntaxutil.ParamInsertionDepEdge      `json:"stringParamInsertionDeps,omitempty"`
+	StringParamInsertionParamDeps  []syntaxutil.ParamDepEdge               `json:"stringParamInsertionParamDeps,omitempty"`
+	StringParamInsertionMethodDeps []syntaxutil.ParamMethodDepEdge         `json:"stringParamInsertionMethodDeps,omitempty"`
 }
 
 // MethodDirectivesFactOf extracts only the method purity and externality

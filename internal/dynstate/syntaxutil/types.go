@@ -253,8 +253,8 @@ func IsErrorType(t types.Type) bool {
 	return types.Identical(types.Unalias(t), types.Universe.Lookup("error").Type())
 }
 
-// ContainsUintptr reports whether root is uintptr or a value-contained struct
-// or array recursively containing uintptr.
+// ContainsUintptr reports whether root is uintptr or a value-contained struct,
+// array, or tuple recursively containing uintptr.
 func ContainsUintptr(root types.Type) bool {
 	seen := map[types.Type]bool{}
 	hit := false
@@ -279,9 +279,214 @@ func ContainsUintptr(root types.Type) bool {
 			for i := 0; i < u.NumFields(); i++ {
 				walk(u.Field(i).Type())
 			}
+		case *types.Tuple:
+			for i := 0; i < u.Len(); i++ {
+				walk(u.At(i).Type())
+			}
 		}
 	}
 	walk(root)
+	return hit
+}
+
+// ContainsUnsafePointer reports whether root is unsafe.Pointer or reaches
+// unsafe.Pointer across pointers, slices, arrays, maps, channels, structs, or tuples.
+func ContainsUnsafePointer(root types.Type) bool {
+	seen := map[types.Type]bool{}
+	hit := false
+	var walk func(t types.Type)
+	walk = func(t types.Type) {
+		if t == nil || hit {
+			return
+		}
+		t = types.Unalias(t)
+		if seen[t] {
+			return
+		}
+		seen[t] = true
+		switch u := t.Underlying().(type) {
+		case *types.Basic:
+			if u.Kind() == types.UnsafePointer {
+				hit = true
+			}
+		case *types.Pointer:
+			walk(u.Elem())
+		case *types.Slice:
+			walk(u.Elem())
+		case *types.Array:
+			walk(u.Elem())
+		case *types.Chan:
+			walk(u.Elem())
+		case *types.Map:
+			walk(u.Key())
+			walk(u.Elem())
+		case *types.Struct:
+			for i := 0; i < u.NumFields(); i++ {
+				walk(u.Field(i).Type())
+			}
+		case *types.Tuple:
+			for i := 0; i < u.Len(); i++ {
+				walk(u.At(i).Type())
+			}
+		}
+	}
+	walk(root)
+	return hit
+}
+
+// ContainsString reports whether root is string or a value-contained struct,
+// array, or tuple recursively containing string.
+func ContainsString(root types.Type) bool {
+	seen := map[types.Type]bool{}
+	hit := false
+	var walk func(t types.Type)
+	walk = func(t types.Type) {
+		if t == nil || hit {
+			return
+		}
+		t = types.Unalias(t)
+		if seen[t] {
+			return
+		}
+		seen[t] = true
+		switch u := t.Underlying().(type) {
+		case *types.Basic:
+			if u.Kind() == types.String || u.Kind() == types.UntypedString {
+				hit = true
+			}
+		case *types.Array:
+			walk(u.Elem())
+		case *types.Struct:
+			for i := 0; i < u.NumFields(); i++ {
+				walk(u.Field(i).Type())
+			}
+		case *types.Tuple:
+			for i := 0; i < u.Len(); i++ {
+				walk(u.At(i).Type())
+			}
+		}
+	}
+	walk(root)
+	return hit
+}
+
+// TypeReachesString reports whether a concrete static type root reaches string
+// through value fields, arrays, tuples, slices, maps, or pointers (without
+// crossing dynamic type-erasing boundaries such as interfaces, function
+// signatures, channels, or unsafe.Pointer).
+func TypeReachesString(root types.Type) bool {
+	seen := map[types.Type]bool{}
+	hit := false
+	var walk func(t types.Type)
+	walk = func(t types.Type) {
+		if t == nil || hit {
+			return
+		}
+		t = types.Unalias(t)
+		if seen[t] {
+			return
+		}
+		seen[t] = true
+		switch u := t.Underlying().(type) {
+		case *types.Basic:
+			if u.Kind() == types.String || u.Kind() == types.UntypedString {
+				hit = true
+			}
+		case *types.Array:
+			walk(u.Elem())
+		case *types.Slice:
+			walk(u.Elem())
+		case *types.Pointer:
+			walk(u.Elem())
+		case *types.Map:
+			walk(u.Key())
+			walk(u.Elem())
+		case *types.Struct:
+			for i := 0; i < u.NumFields(); i++ {
+				walk(u.Field(i).Type())
+			}
+		case *types.Tuple:
+			for i := 0; i < u.Len(); i++ {
+				walk(u.At(i).Type())
+			}
+		}
+	}
+	walk(root)
+	return hit
+}
+
+// PointerMayReachString reports whether converting an operand of type root to
+// unsafe.Pointer may expose a string header (directly or through struct/array
+// fields, pointers, slices, maps, channels, interfaces, closures, or type
+// parameters), while returning false for pointers to purely non-string scalar,
+// byte-slice/array, or numeric-composite memory.
+func PointerMayReachString(root types.Type) bool {
+	if root == nil {
+		return true
+	}
+	root = types.Unalias(root)
+	if _, isTP := root.(*types.TypeParam); isTP {
+		return true
+	}
+	if IsUnsafePointerType(root) {
+		return true
+	}
+	ptr, ok := root.Underlying().(*types.Pointer)
+	if !ok {
+		return false
+	}
+	seen := map[types.Type]bool{}
+	hit := false
+	var walk func(t types.Type)
+	walk = func(t types.Type) {
+		if hit {
+			return
+		}
+		if t == nil {
+			hit = true
+			return
+		}
+		t = types.Unalias(t)
+		if _, isTP := t.(*types.TypeParam); isTP {
+			hit = true
+			return
+		}
+		if seen[t] {
+			return
+		}
+		seen[t] = true
+		switch u := t.Underlying().(type) {
+		case *types.Basic:
+			if u.Kind() == types.String || u.Kind() == types.UntypedString ||
+				u.Kind() == types.UnsafePointer || u.Kind() == types.Invalid {
+				hit = true
+			}
+		case *types.Interface, *types.Signature:
+			hit = true
+		case *types.Pointer:
+			walk(u.Elem())
+		case *types.Slice:
+			walk(u.Elem())
+		case *types.Array:
+			walk(u.Elem())
+		case *types.Chan:
+			walk(u.Elem())
+		case *types.Map:
+			walk(u.Key())
+			walk(u.Elem())
+		case *types.Struct:
+			for i := 0; i < u.NumFields(); i++ {
+				walk(u.Field(i).Type())
+			}
+		case *types.Tuple:
+			for i := 0; i < u.Len(); i++ {
+				walk(u.At(i).Type())
+			}
+		default:
+			hit = true
+		}
+	}
+	walk(ptr.Elem())
 	return hit
 }
 
@@ -487,4 +692,39 @@ func TypeMentionsTypeParam(root types.Type) bool {
 	walk(root)
 	return hit
 }
+
+// IsFreshStringSliceCopy reports whether a Go conversion from srcType to
+// dstType is a concrete string <-> []byte/[]rune conversion, which allocates a
+// fresh backing array rather than aliasing the operand's backing memory.
+func IsFreshStringSliceCopy(srcType, dstType types.Type) bool {
+	if srcType == nil || dstType == nil {
+		return false
+	}
+	srcT := types.Unalias(srcType)
+	dstT := types.Unalias(dstType)
+	if _, isTP := srcT.(*types.TypeParam); isTP {
+		return false
+	}
+	if _, isTP := dstT.(*types.TypeParam); isTP {
+		return false
+	}
+	isStr := func(t types.Type) bool {
+		b, ok := t.Underlying().(*types.Basic)
+		return ok && b.Info()&types.IsString != 0
+	}
+	isByteOrRuneSlice := func(t types.Type) bool {
+		sl, ok := t.Underlying().(*types.Slice)
+		if !ok {
+			return false
+		}
+		el := types.Unalias(sl.Elem())
+		if _, isTP := el.(*types.TypeParam); isTP {
+			return false
+		}
+		b, ok := el.Underlying().(*types.Basic)
+		return ok && (b.Kind() == types.Byte || b.Kind() == types.Rune)
+	}
+	return (isStr(srcT) && isByteOrRuneSlice(dstT)) || (isByteOrRuneSlice(srcT) && isStr(dstT))
+}
+
 

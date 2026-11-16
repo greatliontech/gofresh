@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
 
 // CarrierWalkPolicy parameterizes WalkDynamicCarrier across the three carrier
@@ -321,12 +322,13 @@ func typeCarriesSignatureSeen(t types.Type, seen map[types.Type]bool) bool {
 }
 
 // CallResultHandsOut reports whether a call's result set can hand its
-// consumer carrier-derived state or a value-copied synchronization primitive.
+// consumer carrier-derived state, raw uintptr address bits, or a value-copied
+// synchronization primitive.
 func CallResultHandsOut(t types.Type) bool {
 	if t == nil {
 		return true
 	}
-	return TypeHandsOutMutableReach(t) || TypeCarriesSignature(t) || TypeReachesSyncNoCopyByValue(t)
+	return TypeHandsOutMutableReach(t) || TypeCarriesSignature(t) || TypeReachesSyncNoCopyByValue(t) || syntaxutil.ContainsUintptr(t)
 }
 
 // TypeHandsOutMutableReach reports whether holding a value of the type
@@ -349,18 +351,21 @@ func TypeHandsOutMutableReach(t types.Type) bool {
 }
 
 // RangeBindsAlias reports whether ranging the type binds an
-// alias-handing value into the iteration variables.
+// alias-handing or uintptr-bearing value into the iteration variables.
 func RangeBindsAlias(t types.Type) bool {
+	elemHandsOut := func(et types.Type) bool {
+		return TypeHandsOutMutableReach(et) || syntaxutil.ContainsUintptr(et)
+	}
 	switch t := types.Unalias(t).Underlying().(type) {
 	case *types.Map:
-		return TypeHandsOutMutableReach(t.Key()) || TypeHandsOutMutableReach(t.Elem())
+		return elemHandsOut(t.Key()) || elemHandsOut(t.Elem())
 	case *types.Slice:
-		return TypeHandsOutMutableReach(t.Elem())
+		return elemHandsOut(t.Elem())
 	case *types.Array:
-		return TypeHandsOutMutableReach(t.Elem())
+		return elemHandsOut(t.Elem())
 	case *types.Pointer:
 		if arr, ok := types.Unalias(t.Elem()).Underlying().(*types.Array); ok {
-			return TypeHandsOutMutableReach(arr.Elem())
+			return elemHandsOut(arr.Elem())
 		}
 		return true
 	default:
@@ -533,7 +538,7 @@ func InstantiatedResultsHandOutNothing(audited bool, t types.Type) bool {
 		if AuditedImmutableType(audited, rt) {
 			continue
 		}
-		if TypeHandsOutMutableReach(rt) || TypeCarriesSignature(rt) || TypeReachesSyncNoCopyByValue(rt) {
+		if CallResultHandsOut(rt) {
 			return false
 		}
 	}

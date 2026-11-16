@@ -29,11 +29,12 @@ type Body struct {
 	BodyStart  token.Pos
 	BodyEnd    token.Pos
 
-	Recv       *types.Var
-	Params     []*types.Var
-	ParamIndex map[*types.Var]int
-	Results    []*types.Var
-	ResultSet  map[*types.Var]bool
+	Recv        *types.Var
+	Params      []*types.Var
+	ParamIndex  map[*types.Var]int
+	Results     []*types.Var
+	ResultTypes []types.Type
+	ResultSet   map[*types.Var]bool
 
 	Ops      []Op
 	FreeVars map[*types.Var]bool
@@ -120,6 +121,7 @@ type Proj struct {
 // (Projs[len(Projs)-1]).
 type Place struct {
 	Root         RootKind
+	RootPos      token.Pos
 	Obj          *types.Var
 	ConstOrNil   types.Object
 	Func         *types.Func
@@ -245,9 +247,12 @@ type CompositeElt struct {
 
 // Value is a normalized rvalue expression.
 type Value struct {
-	Kind ValueKind
-	Type types.Type
-	Raw  ast.Expr
+	Kind       ValueKind
+	Type       types.Type
+	Raw        ast.Expr
+	IsConst    bool
+	IsNil      bool
+	IsTypeExpr bool
 
 	// ValPlace
 	Place Place
@@ -281,6 +286,7 @@ type Value struct {
 	// ValCall (also reuses Recv, RecvPlace, HasRecvPlace, Selection, Args, Ellipsis)
 	CallKind         CallKind
 	CallAST          *ast.CallExpr
+	CalleeSel        *ast.SelectorExpr
 	BuiltinName      string
 	CalleeFunc       *types.Func
 	CalleePkg        string
@@ -301,6 +307,16 @@ type Value struct {
 
 	// ValChanRecv (<-ch)
 	Chan *Value
+}
+
+// CalleeSelector returns the unwrapped *ast.SelectorExpr of a call's callee
+// expression when v is a ValCall over a selector (including parenthesized or
+// type-instantiated selectors), or nil otherwise.
+func (v *Value) CalleeSelector() *ast.SelectorExpr {
+	if v == nil || v.Kind != ValCall {
+		return nil
+	}
+	return v.CalleeSel
 }
 
 // ForEachChildValue visits the immediate child Value expressions of v (without
@@ -451,6 +467,23 @@ func (v *Value) ForEachArgParam(fn func(arg *Value, slotType types.Type, slotIdx
 		}
 	}
 	return true
+}
+
+// FormalParamSlotType returns the callee's formal parameter type for paramIdx
+// on v.CalleeSig, unwrapping the variadic slice element type when packedVariadic
+// is true. It returns nil when v.CalleeSig has no parameter at paramIdx.
+func (v *Value) FormalParamSlotType(paramIdx int, packedVariadic bool) types.Type {
+	if v == nil || v.CalleeSig == nil || v.CalleeSig.Params() == nil ||
+		paramIdx < 0 || paramIdx >= v.CalleeSig.Params().Len() {
+		return nil
+	}
+	pt := v.CalleeSig.Params().At(paramIdx).Type()
+	if packedVariadic && pt != nil {
+		if sl, isSlice := types.Unalias(pt).Underlying().(*types.Slice); isSlice {
+			return sl.Elem()
+		}
+	}
+	return pt
 }
 
 // OpKind classifies a lowered statement operation.

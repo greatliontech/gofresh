@@ -773,7 +773,7 @@ func inMemoryExplainViewForSubject(t *testing.T, dir string, subject Subject, pk
 	} else if verdict.Ground.Cause.Culprit != (Subject{}) {
 		t.Fatalf("non-shared-state verdict carried culprit: %+v", verdict.Ground.Cause)
 	}
-	chain, err := explainCulprit(true, pkgs, pkgPath, pkgPath+"."+varName, varName, false, "")
+	chain, err := explainCulprit(true, pkgs, pkgPath, pkgPath+"."+varName, varName, false, false, "")
 	if err != nil {
 		t.Fatal(err)
 	}

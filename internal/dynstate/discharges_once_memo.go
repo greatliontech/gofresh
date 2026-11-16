@@ -23,6 +23,7 @@ import (
 func deriveOnceMemoTypes(
 	audited bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
 	pkgConf *packageConfinementSummary,
 ) ([]syntaxutil.OnceMemoTypeFact, map[ast.Node]bool) {
@@ -68,7 +69,7 @@ func deriveOnceMemoTypes(
 			return settledCache[v]
 		}
 		settledChecked[v] = true
-		ok := verifyReadOnlyCarrierFreeGlobalVar(audited, p, idx, v, nil, true)
+		ok := verifyReadOnlyCarrierFreeGlobalVar(audited, p, fc, idx, v, nil, true)
 		settledCache[v] = ok
 		return ok
 	}
@@ -92,6 +93,7 @@ func deriveOnceMemoTypes(
 		fact, memoAssigns, ok := verifyOnceMemoStructType(
 			audited,
 			p,
+			fc,
 			idx,
 			pkgConf,
 			freshCache,
@@ -123,6 +125,7 @@ func deriveOnceMemoTypes(
 func deriveOnceMemoCandidates(
 	audited bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
 	singleSubjectSet map[string]bool,
 ) []syntaxutil.OnceMemoVarCandidate {
@@ -176,7 +179,7 @@ func deriveOnceMemoCandidates(
 		}
 		argsOK := true
 		for _, arg := range call.Args {
-			if !verifyOnceMemoCtorCallArg(audited, p, idx, arg) {
+			if !verifyOnceMemoCtorCallArg(audited, p, fc, idx, arg) {
 				argsOK = false
 				break
 			}
@@ -384,6 +387,7 @@ func collectConvertedTargetStructs(p *packages.Package) map[*types.Named]bool {
 func verifyOnceMemoStructType(
 	audited bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
 	pkgConf *packageConfinementSummary,
 	freshCache *freshstruct.FreshLocalsCache,
@@ -498,7 +502,7 @@ func verifyOnceMemoStructType(
 		if !syntaxutil.IsPtrToNamed(sig.Results().At(0).Type(), named) {
 			continue
 		}
-		if verifyOnceMemoConstructor(audited, p, idx, pkgFresh, fd, sig, named, inputFields) {
+		if verifyOnceMemoConstructor(audited, p, fc, idx, pkgFresh, fd, sig, named, inputFields) {
 			ck := syntaxutil.FuncKey{Pkg: p.Types.Path(), Name: fn.Name()}
 			if ck.Valid() {
 				constructors = append(constructors, ck)
@@ -536,6 +540,7 @@ func verifyOnceMemoStructType(
 	if !verifyOnceMemoComputeCone(
 		audited,
 		p,
+		fc,
 		idx,
 		pkgConf,
 		funcDecls,
@@ -574,12 +579,23 @@ func verifyOnceMemoStructType(
 		}
 		ptrMethodSet[mfn] = mfd
 	}
+	returnsString := false
 	for i := 0; i < ptrMSet.Len(); i++ {
 		mfn := ptrMSet.At(i).Obj().(*types.Func)
+		if sig, okSig := mfn.Type().(*types.Signature); okSig && sig.Results() != nil {
+			for ri := 0; ri < sig.Results().Len(); ri++ {
+				rt := sig.Results().At(ri).Type()
+				if syntaxutil.TypeReachesString(rt) || typeMayHoldErasedString(rt) {
+					returnsString = true
+					break
+				}
+			}
+		}
 		mfd := ptrMethodSet[mfn]
 		if !verifyOnceMemoMethodRecvConfinement(
 			audited,
 			p,
+			fc,
 			pkgConf,
 			named,
 			mfn,
@@ -598,6 +614,7 @@ func verifyOnceMemoStructType(
 			if !verifyOnceMemoSiblingMethod(
 				audited,
 				p,
+				fc,
 				idx,
 				pkgFresh,
 				funcDecls,
@@ -628,6 +645,7 @@ func verifyOnceMemoStructType(
 		Constructors:   constructors,
 		GuardTypes:     guardTypes,
 		InputParamDeps: depSlice,
+		ReturnsString:  returnsString,
 	}, memoAssigns, true
 }
 
@@ -866,6 +884,7 @@ func verifyOnceMemoFieldUsesInGetter(
 func verifyOnceMemoConstructor(
 	audited bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
 	pkgFresh *freshstruct.PkgFreshConstructors,
 	fd *ast.FuncDecl,
@@ -891,7 +910,7 @@ func verifyOnceMemoConstructor(
 		}
 	}
 
-	b := flowir.LowerFunc(p.TypesInfo, p.Types, fd)
+	b := fc.funcBody(p, fd)
 	if b == nil {
 		return false
 	}
@@ -1118,7 +1137,7 @@ func verifyOnceMemoResultClosure(
 		}
 		switch u := t.Underlying().(type) {
 		case *types.Basic:
-			return u.Kind() != types.UnsafePointer && u.Kind() != types.Invalid
+			return u.Kind() != types.UnsafePointer && u.Kind() != types.Uintptr && u.Kind() != types.Invalid
 		case *types.Pointer:
 			elemNamed, ok := types.Unalias(u.Elem()).(*types.Named)
 			if !ok {
@@ -1269,6 +1288,7 @@ func checkUnexportedClosureType(t types.Type, checkStruct func(*types.Named) boo
 func verifyOnceMemoComputeCone(
 	audited bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
 	pkgConf *packageConfinementSummary,
 	funcDecls map[*types.Func]*ast.FuncDecl,
@@ -1477,10 +1497,11 @@ func verifyOnceMemoComputeCone(
 	}
 
 	// Verify getterRecv references inside doLit.Body (memoAssigns LHS + confined inputField reads).
-	doIR := flowir.LowerFuncLit(p.TypesInfo, p.Types, doLit)
+	doIR := fc.litBody(p, doLit)
 	if doIR == nil || !verifyOnceMemoRecvUsesInBody(
 		audited,
 		p,
+		fc,
 		pkgConf,
 		ownerNamed,
 		getterRecv,
@@ -2044,6 +2065,7 @@ func verifyPureFmtFormatArgs(p *packages.Package, fmtExpr ast.Expr, args []ast.E
 func verifyOnceMemoSiblingMethod(
 	audited bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
 	pkgFresh *freshstruct.PkgFreshConstructors,
 	funcDecls map[*types.Func]*ast.FuncDecl,
@@ -2360,7 +2382,7 @@ func verifyOnceMemoSiblingMethod(
 			continue
 		}
 		if sl, isSL := types.Unalias(rt).Underlying().(*types.Slice); isSL && isScalarBasicType(sl.Elem()) {
-			if funcSlotReturnsFreshScalarSlice(p, idx, funcDecls, mfd, ri, map[*ast.FuncDecl]bool{}) {
+			if funcSlotReturnsFreshScalarSlice(p, fc, idx, funcDecls, mfd, ri, map[*ast.FuncDecl]bool{}) {
 				continue
 			}
 		}
@@ -2725,11 +2747,11 @@ func siblingReturnsFreshStructValue(
 		// unverified inner mutable references (e.g. []KnobUsage where KnobUsage is pure strings).
 		switch u := types.Unalias(ft).Underlying().(type) {
 		case *types.Slice:
-			if refconfine.TypeCarriesMutableRef(u.Elem()) {
+			if refconfine.TypeCarriesMutableRef(u.Elem()) || syntaxutil.ContainsUintptr(u.Elem()) {
 				return false
 			}
 		case *types.Map:
-			if !isScalarBasicType(u.Key()) || refconfine.TypeCarriesMutableRef(u.Elem()) {
+			if !isScalarBasicType(u.Key()) || refconfine.TypeCarriesMutableRef(u.Elem()) || syntaxutil.ContainsUintptr(u.Elem()) {
 				return false
 			}
 		default:
@@ -2741,6 +2763,7 @@ func siblingReturnsFreshStructValue(
 
 func funcSlotReturnsFreshScalarSlice(
 	p *packages.Package,
+	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
 	funcDecls map[*types.Func]*ast.FuncDecl,
 	fd *ast.FuncDecl,
@@ -2766,7 +2789,7 @@ func funcSlotReturnsFreshScalarSlice(
 	seen[fd] = true
 	defer delete(seen, fd)
 
-	b := flowir.LowerFunc(p.TypesInfo, p.Types, fd)
+	b := fc.funcBody(p, fd)
 	if b == nil {
 		return false
 	}
@@ -2814,7 +2837,7 @@ func funcSlotReturnsFreshScalarSlice(
 				}
 			}
 		}
-		return funcSlotReturnsFreshScalarSlice(p, idx, funcDecls, funcDecls[v.CalleeFunc], cSlot, seen)
+		return funcSlotReturnsFreshScalarSlice(p, fc, idx, funcDecls, funcDecls[v.CalleeFunc], cSlot, seen)
 	}
 
 	var isFreshSliceExpr func(v *flowir.Value, selfVar *types.Var, freshLocals map[*types.Var]bool) (*ast.Ident, bool)
@@ -3011,6 +3034,7 @@ func funcSlotReturnsFreshScalarSlice(
 func verifyOnceMemoMethodRecvConfinement(
 	audited bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	pkgConf *packageConfinementSummary,
 	ownerNamed *types.Named,
 	mfn *types.Func,
@@ -3051,13 +3075,14 @@ func verifyOnceMemoMethodRecvConfinement(
 			}
 		}
 	}
-	b := flowir.LowerFunc(p.TypesInfo, p.Types, mfd)
+	b := fc.funcBody(p, mfd)
 	if b == nil {
 		return false
 	}
 	return verifyOnceMemoRecvUsesInBody(
 		audited,
 		p,
+		fc,
 		pkgConf,
 		ownerNamed,
 		recvVar,
@@ -3075,6 +3100,7 @@ func verifyOnceMemoMethodRecvConfinement(
 func verifyOnceMemoRecvUsesInBody(
 	audited bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	pkgConf *packageConfinementSummary,
 	ownerNamed *types.Named,
 	recvVar *types.Var,
@@ -3139,7 +3165,7 @@ func verifyOnceMemoRecvUsesInBody(
 		fieldWants := map[syntaxutil.FieldPosKey]bool{}
 		elemWants := map[syntaxutil.ElemParamUse]bool{}
 		var returns bool
-		if !boundValueLeakFreeJudged(audited, p, roots, b.AST, wants, &returns, methodWants, fieldWants, elemWants) {
+		if !boundValueLeakFreeJudged(audited, p, fc, roots, b.AST, wants, &returns, methodWants, fieldWants, elemWants) {
 			return false
 		}
 		if returns || len(fieldWants) > 0 || len(elemWants) > 0 {
@@ -3195,7 +3221,7 @@ func verifyOnceMemoRecvUsesInBody(
 						}
 					}
 					if !verifyOnceMemoRecvUsesInBody(
-						audited, p, pkgConf, ownerNamed, recvVar, nil, false,
+						audited, p, fc, pkgConf, ownerNamed, recvVar, nil, false,
 						memoFields, inputFields, nil, nil, v.Closure, inputParamDeps,
 					) {
 						ok = false
@@ -3206,7 +3232,7 @@ func verifyOnceMemoRecvUsesInBody(
 			case flowir.ValCall:
 				if v.CallKind == flowir.CallIIFE && v.IIFE != nil {
 					if !verifyOnceMemoRecvUsesInBody(
-						audited, p, pkgConf, ownerNamed, recvVar, nil, false,
+						audited, p, fc, pkgConf, ownerNamed, recvVar, nil, false,
 						memoFields, inputFields, nil, nil, v.IIFE, inputParamDeps,
 					) {
 						ok = false
@@ -3442,6 +3468,7 @@ func isPureDeterministicConeStdlibFuncValue(fn *types.Func, sig *types.Signature
 func verifyOnceMemoCtorCallArg(
 	audited bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
 	arg ast.Expr,
 ) bool {
@@ -3453,10 +3480,10 @@ func verifyOnceMemoCtorCallArg(
 	if argT == nil || refconfine.TypeMayCarryUnknownDynamic(audited, argT) || refconfine.TypeCarriesSignature(argT) {
 		return false
 	}
-	if !refconfine.TypeCarriesMutableRef(argT) {
+	if !refconfine.TypeCarriesMutableRef(argT) && !syntaxutil.ContainsUintptr(argT) {
 		return true
 	}
-	if isPureConstantOrCompositeDataExpr(p, arg) {
+	if isPureConstantOrCompositeDataValue(fc.exprValue(p, arg)) {
 		return true
 	}
 	id, isID := arg.(*ast.Ident)
@@ -3467,12 +3494,13 @@ func verifyOnceMemoCtorCallArg(
 	if v == nil || v.IsField() || v.Pkg() != p.Types || v.Parent() != p.Types.Scope() || v.Exported() {
 		return false
 	}
-	return verifyReadOnlyCarrierFreeGlobalVar(audited, p, idx, v, id, false)
+	return verifyReadOnlyCarrierFreeGlobalVar(audited, p, fc, idx, v, id, false)
 }
 
 func verifyReadOnlyCarrierFreeGlobalVar(
 	audited bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
 	v *types.Var,
 	exemptIdent *ast.Ident,
@@ -3491,7 +3519,7 @@ func verifyReadOnlyCarrierFreeGlobalVar(
 	if len(vs.Values) > 1 {
 		return false
 	}
-	if len(vs.Values) == 1 && !isPureConstantOrCompositeDataExpr(p, vs.Values[0]) {
+	if len(vs.Values) == 1 && !isPureConstantOrCompositeDataValue(fc.exprValue(p, vs.Values[0])) {
 		return false
 	}
 	if requirePureInit && len(vs.Values) == 0 {
@@ -3524,53 +3552,6 @@ func verifyReadOnlyCarrierFreeGlobalVar(
 			return refconfine.IsDirectMutableRef(v.Type()), true
 		},
 	})
-}
-
-func isPureConstantOrCompositeDataExpr(p *packages.Package, expr ast.Expr) bool {
-	if p == nil || p.TypesInfo == nil || expr == nil {
-		return false
-	}
-	expr = ast.Unparen(expr)
-	if syntaxutil.IsNilIdent(p.TypesInfo, expr) {
-		return true
-	}
-	if tv := p.TypesInfo.Types[expr]; tv.Value != nil {
-		return true
-	}
-	switch e := expr.(type) {
-	case *ast.CompositeLit:
-		for _, elt := range e.Elts {
-			if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
-				if _, isMap := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(e)).(*types.Map); isMap {
-					if !isPureConstantOrCompositeDataExpr(p, kv.Key) {
-						return false
-					}
-				}
-				if !isPureConstantOrCompositeDataExpr(p, kv.Value) {
-					return false
-				}
-			} else if !isPureConstantOrCompositeDataExpr(p, elt) {
-				return false
-			}
-		}
-		return true
-	case *ast.UnaryExpr:
-		if e.Op == token.AND {
-			cl, isCL := ast.Unparen(e.X).(*ast.CompositeLit)
-			return isCL && isPureConstantOrCompositeDataExpr(p, cl)
-		}
-	case *ast.CallExpr:
-		tv := p.TypesInfo.Types[ast.Unparen(e.Fun)]
-		if tv.IsType() && len(e.Args) == 1 && !e.Ellipsis.IsValid() && !syntaxutil.IsUnsafePointerType(tv.Type) {
-			return isPureConstantOrCompositeDataExpr(p, e.Args[0])
-		}
-		if b := syntaxutil.LookupBuiltin(p.TypesInfo, ast.Unparen(e.Fun)); b != nil {
-			if b.Name() == "make" || (b.Name() == "new" && syntaxutil.IsBuiltinNewType(p.TypesInfo, e)) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func varHasAnyDirectWriteOrAddr(p *packages.Package, idx *refconfine.PkgIndex, v *types.Var) bool {
@@ -3931,7 +3912,7 @@ func isScalarBasicType(t types.Type) bool {
 		return false
 	}
 	b, ok := types.Unalias(t).Underlying().(*types.Basic)
-	if !ok {
+	if !ok || b.Kind() == types.Uintptr {
 		return false
 	}
 	return (b.Info() & (types.IsBoolean | types.IsInteger | types.IsFloat | types.IsComplex | types.IsString)) != 0

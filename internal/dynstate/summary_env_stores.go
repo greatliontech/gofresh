@@ -20,19 +20,6 @@ var auditedValuePlane = map[syntaxutil.FuncKey]bool{
 	{Pkg: "maps", Name: "Clone"}:    true,
 }
 
-func lowerEnclosingScope(info *types.Info, pkg *types.Package, enclosing ast.Node) *flowir.Body {
-	switch n := enclosing.(type) {
-	case nil:
-		return nil
-	case *ast.FuncDecl:
-		return flowir.LowerFunc(info, pkg, n)
-	case *ast.FuncLit:
-		return flowir.LowerFuncLit(info, pkg, n)
-	default:
-		return flowir.LowerNode(info, pkg, n)
-	}
-}
-
 // settledGlobalMap maps each proven settled unexported package data global to
 // the set of single-definition carrier variables whose top-level initializer
 // embeds its mutable reach directly (empty when never embedded in a carrier).
@@ -60,127 +47,15 @@ func (m settledGlobalMap) allowedForTargets(v *types.Var, targets []*types.Var) 
 	return len(targets) == 1 && carriers[targets[0]]
 }
 
-func isPureFreshDataExpr(p *packages.Package, settledGlobals settledGlobalMap, expr ast.Expr) bool {
-	return isPureFreshDataExprWith(p, expr, settledGlobals.hasUnembedded)
-}
-
-func isPureFreshDataExprWith(p *packages.Package, expr ast.Expr, allowVar func(*types.Var) bool) bool {
-	if p == nil || p.TypesInfo == nil || expr == nil {
-		return false
-	}
-	e := syntaxutil.UnparenExpr(expr)
-	et := p.TypesInfo.TypeOf(e)
-	if et == nil || refconfine.TypeCarriesSignature(et) || refconfine.TypeReachesSyncNoCopyByValue(et) {
-		return false
-	}
-	if tv, ok := p.TypesInfo.Types[e]; ok && tv.Value != nil {
-		return true
-	}
-	switch v := e.(type) {
-	case *ast.BasicLit:
-		return true
-	case *ast.Ident:
-		obj := syntaxutil.IdentDefOrUse(p.TypesInfo, v)
-		if obj == nil {
-			return false
-		}
-		if _, isNil := obj.(*types.Nil); isNil {
-			return true
-		}
-		if _, isConst := obj.(*types.Const); isConst {
-			return true
-		}
-		if gv, ok := obj.(*types.Var); ok && allowVar != nil && allowVar(gv) {
-			return true
-		}
-		return false
-	case *ast.UnaryExpr:
-		if v.Op == token.AND {
-			_, isComp := syntaxutil.UnparenExpr(v.X).(*ast.CompositeLit)
-			return isComp && isPureFreshDataExprWith(p, v.X, allowVar)
-		}
-		if v.Op == token.ADD || v.Op == token.SUB || v.Op == token.NOT || v.Op == token.XOR {
-			return isPureFreshDataExprWith(p, v.X, allowVar)
-		}
-		return false
-	case *ast.BinaryExpr:
-		return isPureFreshDataExprWith(p, v.X, allowVar) && isPureFreshDataExprWith(p, v.Y, allowVar)
-	case *ast.CompositeLit:
-		t := p.TypesInfo.TypeOf(v)
-		if t == nil || refconfine.TypeCarriesSignature(t) || refconfine.TypeReachesSyncNoCopyByValue(t) {
-			return false
-		}
-		return syntaxutil.EachCompositeLitFlow(p.TypesInfo, v, func(elt ast.Expr, _ bool) bool {
-			return isPureFreshDataExprWith(p, elt, allowVar)
-		})
-	case *ast.CallExpr:
-		if ident, ok := syntaxutil.UnparenExpr(v.Fun).(*ast.Ident); ok {
-			if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
-				switch ident.Name {
-				case "make":
-					for i := 1; i < len(v.Args); i++ {
-						if !isPureFreshDataExprWith(p, v.Args[i], allowVar) {
-							return false
-						}
-					}
-					t := p.TypesInfo.TypeOf(v)
-					return !refconfine.TypeCarriesSignature(t) && !refconfine.TypeReachesSyncNoCopyByValue(t)
-				case "new":
-					t := p.TypesInfo.TypeOf(v)
-					if syntaxutil.IsBuiltinNewType(p.TypesInfo, v) {
-						return !refconfine.TypeCarriesSignature(t) && !refconfine.TypeReachesSyncNoCopyByValue(t)
-					}
-					return len(v.Args) == 1 && !v.Ellipsis.IsValid() &&
-						!refconfine.TypeCarriesSignature(t) && !refconfine.TypeReachesSyncNoCopyByValue(t) &&
-						isPureFreshDataExprWith(p, v.Args[0], allowVar)
-				case "append":
-					t := p.TypesInfo.TypeOf(v)
-					if len(v.Args) == 0 || refconfine.TypeCarriesSignature(t) || refconfine.TypeReachesSyncNoCopyByValue(t) {
-						return false
-					}
-					// Appending onto a variable's slice could mutate its spare capacity;
-					// require a variable-free fresh base expression for append.
-					if !isPureFreshDataExprWith(p, v.Args[0], nil) {
-						return false
-					}
-					for _, a := range v.Args[1:] {
-						if !isPureFreshDataExprWith(p, a, allowVar) {
-							return false
-						}
-					}
-					return true
-				}
-				return false
-			}
-		}
-		if tv, ok := p.TypesInfo.Types[v.Fun]; ok && tv.IsType() && len(v.Args) == 1 && !v.Ellipsis.IsValid() {
-			return !syntaxutil.IsUnsafePointerType(tv.Type) &&
-				!refconfine.TypeCarriesSignature(tv.Type) &&
-				!refconfine.TypeReachesSyncNoCopyByValue(tv.Type) &&
-				isPureFreshDataExprWith(p, v.Args[0], allowVar)
-		}
-		if fn, pkgPath := syntaxutil.PlainCalleeFunc(p, v.Fun); fn != nil {
-			fk := syntaxutil.FuncKey{Pkg: pkgPath, Name: fn.Name()}
-			t := p.TypesInfo.TypeOf(v)
-			if auditedValuePlane[fk] && !refconfine.TypeCarriesSignature(t) && !refconfine.TypeReachesSyncNoCopyByValue(t) {
-				for _, a := range v.Args {
-					if !isPureFreshDataExprWith(p, a, allowVar) {
-						return false
-					}
-				}
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// isSettledReachArg reports whether expr, appearing as a mutable-reach argument
-// to a plain constructor call at a registration site (whose signature plane was
-// already verified by carrying(expr)), introduces no unsettled mutable reach.
-func isSettledReachArg(
+// isSettledReachArgValue reports whether val, appearing as a mutable-reach
+// argument to a plain constructor call at a registration site (whose signature
+// plane was already verified by carryingValue(val)), introduces no unsettled
+// mutable reach.
+func isSettledReachArgValue(
 	audited bool,
+	stringUnsafe bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	settledGlobals settledGlobalMap,
 	currentTargets []*types.Var,
 	enclosing ast.Node,
@@ -188,15 +63,17 @@ func isSettledReachArg(
 	pkgConf *packageConfinementSummary,
 	paramSink map[syntaxutil.ParamKey]bool,
 	methodSink map[syntaxutil.FuncKey]bool,
-	checkSigOrigin func(ast.Expr) bool,
-	expr ast.Expr,
+	checkSigOrigin func(*flowir.Value) bool,
+	val *flowir.Value,
 ) bool {
-	return isSettledReachArgSeen(audited, p, settledGlobals, currentTargets, enclosing, exemptCall, pkgConf, paramSink, methodSink, checkSigOrigin, expr, map[*types.Var]bool{})
+	return isSettledReachArgValueSeen(audited, stringUnsafe, p, fc, settledGlobals, currentTargets, enclosing, exemptCall, pkgConf, paramSink, methodSink, checkSigOrigin, val, map[*types.Var]bool{})
 }
 
-func isSettledReachArgSeen(
+func isSettledReachArgValueSeen(
 	audited bool,
+	stringUnsafe bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	settledGlobals settledGlobalMap,
 	currentTargets []*types.Var,
 	enclosing ast.Node,
@@ -204,25 +81,14 @@ func isSettledReachArgSeen(
 	pkgConf *packageConfinementSummary,
 	paramSink map[syntaxutil.ParamKey]bool,
 	methodSink map[syntaxutil.FuncKey]bool,
-	checkSigOrigin func(ast.Expr) bool,
-	expr ast.Expr,
+	checkSigOrigin func(*flowir.Value) bool,
+	val *flowir.Value,
 	visiting map[*types.Var]bool,
 ) bool {
-	if p == nil || p.TypesInfo == nil || expr == nil {
+	if p == nil || p.TypesInfo == nil || val == nil || val.IsTypeExpr || val.Type == nil {
 		return false
 	}
-	e := syntaxutil.UnparenExpr(expr)
-	t := p.TypesInfo.TypeOf(e)
-	if t == nil || refconfine.TypeReachesSyncNoCopyByValue(t) {
-		return false
-	}
-	if !refconfine.TypeHandsOutMutableReach(t) {
-		if refconfine.TypeCarriesSignature(t) {
-			return checkSigOrigin != nil && checkSigOrigin(e)
-		}
-		return true
-	}
-	if isPureFreshDataExpr(p, settledGlobals, e) {
+	if isPureFreshDataValue(settledGlobals, val) {
 		return true
 	}
 	localParams := map[syntaxutil.ParamKey]bool{}
@@ -246,167 +112,111 @@ func isSettledReachArgSeen(
 		}
 		return true
 	}
-	recur := func(sub ast.Expr) bool {
-		return isSettledReachArgSeen(audited, p, settledGlobals, currentTargets, enclosing, exemptCall, pkgConf, localParams, localMethods, checkSigOrigin, sub, visiting)
-	}
-	switch n := e.(type) {
-	case *ast.BasicLit:
-		return true
-	case *ast.CompositeLit:
-		if !syntaxutil.EachCompositeLitFlow(p.TypesInfo, n, func(elt ast.Expr, _ bool) bool {
-			return recur(elt)
-		}) {
-			return false
-		}
-		return commitSinks()
-	case *ast.UnaryExpr:
-		if n.Op == token.AND {
-			_, isComp := syntaxutil.UnparenExpr(n.X).(*ast.CompositeLit)
-			return isComp && recur(n.X) && commitSinks()
-		}
-		return false
-	case *ast.CallExpr:
-		if ident, ok := syntaxutil.UnparenExpr(n.Fun).(*ast.Ident); ok {
-			if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
-				switch ident.Name {
-				case "make":
-					return true
-				case "new":
-					if syntaxutil.IsBuiltinNewType(p.TypesInfo, n) {
+	ok := checkPureOrFreshValue(val, valuePurityPolicy{
+		allowAppend:                 true,
+		allowValuePlane:             true,
+		allowRuntimeOps:             true,
+		allowNonMutableReach:        true,
+		forbidStringNonMutableReach: stringUnsafe,
+		allowSigLeaf: func(leaf *flowir.Value) bool {
+			return checkSigOrigin != nil && checkSigOrigin(leaf)
+		},
+		allowPlace: func(pv *flowir.Value) bool {
+			if !pv.Place.IsBareVar() {
+				return false
+			}
+			v := pv.Place.Obj
+			if v.Pkg() != nil && v.Parent() == v.Pkg().Scope() {
+				return settledGlobals.allowedForTargets(v, currentTargets)
+			}
+			if !syntaxutil.IsLocalVar(v) || enclosing == nil || visiting[v] {
+				return false
+			}
+			enclBody := fc.scopeBody(p, enclosing)
+			if enclBody == nil || !enclBody.OwnsVar(v) {
+				return false
+			}
+			if v == enclBody.Recv || enclBody.ResultSet[v] {
+				return false
+			}
+			if _, isParam := enclBody.ParamIndex[v]; isParam {
+				return false
+			}
+			visiting[v] = true
+			defer delete(visiting, v)
+			defs := 0
+			var initVal *flowir.Value
+			enclBody.ForEachSyncOp(func(op *flowir.Op) bool {
+				if op.Kind == flowir.OpAssign {
+					op.ForEachAssignPair(func(_ int, dst flowir.Place, isDef bool, src *flowir.Value) bool {
+						if dst.Obj == v {
+							if dst.IsBareVar() && isDef && src != nil {
+								defs++
+								initVal = src
+							} else {
+								defs = 2
+							}
+						}
 						return true
-					}
-					return len(n.Args) == 1 && !n.Ellipsis.IsValid() && recur(n.Args[0]) && commitSinks()
-				case "append":
-					if len(n.Args) == 0 || !isPureFreshDataExprWith(p, n.Args[0], nil) {
-						return false
-					}
-					for _, a := range n.Args[1:] {
-						if !recur(a) {
-							return false
-						}
-					}
-					return commitSinks()
+					})
 				}
+				return true
+			})
+			if defs != 1 || initVal == nil || !isSettledReachArgValueSeen(audited, stringUnsafe, p, fc, settledGlobals, currentTargets, enclosing, nil, pkgConf, localParams, localMethods, checkSigOrigin, initVal, visiting) {
 				return false
 			}
-		}
-		if tv, ok := p.TypesInfo.Types[n.Fun]; ok && tv.IsType() && len(n.Args) == 1 && !n.Ellipsis.IsValid() {
-			return !syntaxutil.IsUnsafePointerType(tv.Type) && recur(n.Args[0]) && commitSinks()
-		}
-		if fn, pkgPath := syntaxutil.PlainCalleeFunc(p, n.Fun); fn != nil {
-			fk := syntaxutil.FuncKey{Pkg: pkgPath, Name: fn.Name()}
-			if auditedValuePlane[fk] {
-				for _, a := range n.Args {
-					if !recur(a) {
-						return false
-					}
+			wants := map[syntaxutil.ParamKey]bool{}
+			methodWants := map[syntaxutil.FuncKey]bool{}
+			roots := map[types.Object]bool{v: true}
+			origin := &rootOriginPolicy{
+				verifyLocalOrigins: true,
+				settledGlobals:     settledGlobals,
+				currentTargets:     currentTargets,
+				checkCarryingValue: checkSigOrigin,
+			}
+			if !enclosingConfinesRoots(audited, stringUnsafe, p, fc, enclosing, nil, exemptCall, roots, wants, methodWants, origin) {
+				return false
+			}
+			ownPath := ""
+			if p.Types != nil {
+				ownPath = p.Types.Path()
+			}
+			for w := range wants {
+				provenLocal, conditional := pkgConf.classifyParam(ownPath, w)
+				if !provenLocal && !conditional {
+					return false
 				}
-				return commitSinks()
+				if !provenLocal {
+					localParams[w] = true
+				}
 			}
-		}
-		return false
-	case *ast.Ident:
-		obj := syntaxutil.IdentDefOrUse(p.TypesInfo, n)
-		if obj == nil {
-			return false
-		}
-		if _, isNil := obj.(*types.Nil); isNil {
-			return true
-		}
-		if _, isConst := obj.(*types.Const); isConst {
-			return true
-		}
-		v, ok := obj.(*types.Var)
-		if !ok {
-			return false
-		}
-		if v.Pkg() != nil && v.Parent() == v.Pkg().Scope() {
-			return settledGlobals.allowedForTargets(v, currentTargets)
-		}
-		if !syntaxutil.IsLocalVar(v) || enclosing == nil || visiting[v] {
-			return false
-		}
-		enclBody := lowerEnclosingScope(p.TypesInfo, p.Types, enclosing)
-		if enclBody == nil || !enclBody.OwnsVar(v) {
-			return false
-		}
-		if v == enclBody.Recv || enclBody.ResultSet[v] {
-			return false
-		}
-		if _, isParam := enclBody.ParamIndex[v]; isParam {
-			return false
-		}
-		visiting[v] = true
-		defer delete(visiting, v)
-		defs := 0
-		var initRaw ast.Expr
-		enclBody.ForEachSyncOp(func(op *flowir.Op) bool {
-			if op.Kind == flowir.OpAssign {
-				op.ForEachAssignPair(func(_ int, dst flowir.Place, isDef bool, src *flowir.Value) bool {
-					if dst.Obj == v {
-						if dst.IsBareVar() && isDef && src != nil && src.Raw != nil {
-							defs++
-							initRaw = src.Raw
-						} else {
-							defs = 2
-						}
-					}
-					return true
-				})
+			for mw := range methodWants {
+				provenLocal, conditional := pkgConf.classifyMethod(ownPath, mw)
+				if !provenLocal && !conditional {
+					return false
+				}
+				if !provenLocal {
+					localMethods[mw] = true
+				}
 			}
 			return true
-		})
-		if defs != 1 || initRaw == nil || !isSettledReachArgSeen(audited, p, settledGlobals, currentTargets, enclosing, nil, pkgConf, localParams, localMethods, checkSigOrigin, initRaw, visiting) {
-			return false
-		}
-		wants := map[syntaxutil.ParamKey]bool{}
-		methodWants := map[syntaxutil.FuncKey]bool{}
-		roots := map[types.Object]bool{v: true}
-		origin := &rootOriginPolicy{
-			verifyLocalOrigins: true,
-			settledGlobals:     settledGlobals,
-			currentTargets:     currentTargets,
-			checkCarryingExpr:  checkSigOrigin,
-		}
-		if !enclosingConfinesRoots(audited, p, enclosing, nil, exemptCall, roots, wants, methodWants, origin) {
-			return false
-		}
-		ownPath := ""
-		if p.Types != nil {
-			ownPath = p.Types.Path()
-		}
-		for w := range wants {
-			provenLocal, conditional := pkgConf.classifyParam(ownPath, w)
-			if !provenLocal && !conditional {
-				return false
-			}
-			if !provenLocal {
-				localParams[w] = true
-			}
-		}
-		for mw := range methodWants {
-			provenLocal, conditional := pkgConf.classifyMethod(ownPath, mw)
-			if !provenLocal && !conditional {
-				return false
-			}
-			if !provenLocal {
-				localMethods[mw] = true
-			}
-		}
-		return commitSinks()
-	}
-	return false
+		},
+	})
+	return ok && commitSinks()
 }
 
-func elemHandsOutMutableReach(t types.Type) bool {
+func elemHandsOutReach(stringUnsafe bool, t types.Type) bool {
 	if t == nil {
 		return true
 	}
+	hasReach := func(et types.Type) bool {
+		return refconfine.TypeHandsOutMutableReach(et) || syntaxutil.ContainsUintptr(et) || (stringUnsafe && syntaxutil.TypeReachesString(et))
+	}
 	switch u := types.Unalias(t).Underlying().(type) {
 	case *types.Slice:
-		return refconfine.TypeHandsOutMutableReach(u.Elem())
+		return hasReach(u.Elem())
 	case *types.Map:
-		return refconfine.TypeHandsOutMutableReach(u.Key()) || refconfine.TypeHandsOutMutableReach(u.Elem())
+		return hasReach(u.Key()) || hasReach(u.Elem())
 	default:
 		return true
 	}
@@ -430,7 +240,9 @@ func varSetEqual(a, b map[*types.Var]bool) bool {
 // initializer directly embeds the global's mutable reach.
 func settledPackageDataGlobals(
 	audited bool,
+	stringUnsafe bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	paramLeakFree map[syntaxutil.ParamKey]bool,
 	readOnly map[string]bool,
 	unattestedBroken map[string]bool,
@@ -451,7 +263,7 @@ func settledPackageDataGlobals(
 		}
 	}
 
-	candidates := map[*types.Var]ast.Expr{}
+	candidates := map[*types.Var]*flowir.Value{}
 	for _, file := range p.Syntax {
 		for _, decl := range file.Decls {
 			gd, ok := decl.(*ast.GenDecl)
@@ -475,7 +287,7 @@ func settledPackageDataGlobals(
 						refconfine.TypeReachesSyncNoCopyByValue(v.Type()) {
 						continue
 					}
-					candidates[v] = vs.Values[i]
+					candidates[v] = fc.exprValue(p, vs.Values[i])
 				}
 			}
 		}
@@ -493,11 +305,11 @@ func settledPackageDataGlobals(
 	}
 	for changed := true; changed; {
 		changed = false
-		for v, initExpr := range candidates {
+		for v, initVal := range candidates {
 			if _, ok := settled[v]; ok {
 				continue
 			}
-			if isPureFreshDataExprWith(p, initExpr, inSettledVar) {
+			if isPureFreshDataValueWith(initVal, inSettledVar) {
 				settled[v] = map[*types.Var]bool{}
 				changed = true
 			}
@@ -541,7 +353,7 @@ func settledPackageDataGlobals(
 						if !ok || vs == ownSpec {
 							continue
 						}
-						if subtreeUsesObj(p.TypesInfo, vs, carrier) {
+						if bodyMentionsVar(fc.body(p, vs), carrier) {
 							return false
 						}
 					}
@@ -549,12 +361,12 @@ func settledPackageDataGlobals(
 					if d.Body == nil || d.Name == nil {
 						continue
 					}
-					if !subtreeUsesObj(p.TypesInfo, d.Body, carrier) {
+					if !bodyMentionsVar(fc.funcBody(p, d), carrier) {
 						continue
 					}
 					wants := map[syntaxutil.ParamKey]bool{}
 					mw := map[syntaxutil.FuncKey]bool{}
-					if !enclosingConfinesRoots(audited, p, d, nil, nil, map[types.Object]bool{carrier: true}, wants, mw, nil) ||
+					if !enclosingConfinesRoots(audited, stringUnsafe, p, fc, d, nil, nil, map[types.Object]bool{carrier: true}, wants, mw, nil) ||
 						!wantsResolve(wants, mw) {
 						return false
 					}
@@ -564,16 +376,20 @@ func settledPackageDataGlobals(
 		return true
 	}
 
+	reachOrStr := func(t types.Type) bool {
+		return refconfine.TypeHandsOutMutableReach(t) || syntaxutil.ContainsUintptr(t) || (stringUnsafe && syntaxutil.TypeReachesString(t))
+	}
+
 	checkTopValueSpecUse := func(g *types.Var, vs *ast.ValueSpec, embeddedOut map[*types.Var]bool, embeddedRawExported *bool) bool {
 		if len(vs.Names) == 1 && len(vs.Values) == 1 {
 			if lhsVar, ok := p.TypesInfo.Defs[vs.Names[0]].(*types.Var); ok && lhsVar != nil {
 				carriersOfLHS, inSettled := settled[lhsVar]
 				isCarrierLHS := refconfine.TypeMayCarryUnknownDynamic(audited, lhsVar.Type())
-				if !inSettled && !isCarrierLHS && refconfine.TypeHandsOutMutableReach(lhsVar.Type()) {
+				if !inSettled && !isCarrierLHS && (reachOrStr(lhsVar.Type()) || fc.isExposedStringGlobal(lhsVar)) {
 					return false
 				}
-				exprBody := flowir.LowerNode(p.TypesInfo, p.Types, vs.Values[0])
-				if exprBody == nil || len(exprBody.Ops) != 1 || exprBody.Ops[0].Kind != flowir.OpExpr || exprBody.Ops[0].Expr == nil {
+				rhsVal := fc.exprValue(p, vs.Values[0])
+				if rhsVal == nil {
 					return false
 				}
 				okSpec := true
@@ -586,10 +402,15 @@ func settledPackageDataGlobals(
 					}
 					switch v.Kind {
 					case flowir.ValPlace:
-						if v.Place.Obj == g && refconfine.TypeHandsOutMutableReach(g.Type()) &&
-							(len(v.Place.Projs) == 0 || v.Type == nil || refconfine.TypeHandsOutMutableReach(v.Type)) {
+						if v.Place.Obj == g && reachOrStr(g.Type()) &&
+							(len(v.Place.Projs) == 0 || v.Type == nil || reachOrStr(v.Type)) {
 							embedsReach = true
 							embedsRawData = true
+						}
+					case flowir.ValConvert:
+						if syntaxutil.IsUnsafePointerType(v.Type) && valueMentionsVar(v.Arg, g) {
+							okSpec = false
+							return
 						}
 					case flowir.ValAddrOf:
 						if v.AddrPlace.Obj == g {
@@ -602,10 +423,10 @@ func settledPackageDataGlobals(
 							return
 						}
 					case flowir.ValMakeClosure:
-						if v.Lit != nil && subtreeUsesObj(p.TypesInfo, v.Lit.Body, g) {
+						if v.Lit != nil && bodyMentionsVar(v.Closure, g) {
 							wants := map[syntaxutil.ParamKey]bool{}
 							mw := map[syntaxutil.FuncKey]bool{}
-							if !enclosingConfinesRoots(audited, p, v.Lit, nil, nil, map[types.Object]bool{g: true}, wants, mw, nil) ||
+							if !enclosingConfinesRoots(audited, stringUnsafe, p, fc, v.Lit, nil, nil, map[types.Object]bool{g: true}, wants, mw, nil) ||
 								!wantsResolve(wants, mw) {
 								okSpec = false
 								return
@@ -613,19 +434,35 @@ func settledPackageDataGlobals(
 						}
 						return
 					case flowir.ValCall:
-						if v.CallKind == flowir.CallBuiltin && (v.BuiltinName == "len" || v.BuiltinName == "cap") {
-							for _, arg := range v.Args {
-								if arg != nil && arg.Kind == flowir.ValPlace && arg.Place.Obj == g && len(arg.Place.Projs) == 0 {
-									continue
-								}
-								checkVal(arg)
+						if v.CallKind == flowir.CallIIFE {
+							if valueMentionsVar(v, g) {
+								okSpec = false
 							}
 							return
 						}
+						if v.CallKind == flowir.CallBuiltin {
+							switch v.BuiltinName {
+							case "StringData", "String":
+								if valueMentionsVar(v, g) {
+									okSpec = false
+								}
+								return
+							case "Sizeof", "Alignof", "Offsetof":
+								return
+							case "len", "cap":
+								for _, arg := range v.Args {
+									if arg != nil && arg.Kind == flowir.ValPlace && arg.Place.Obj == g && len(arg.Place.Projs) == 0 {
+										continue
+									}
+									checkVal(arg)
+								}
+								return
+							}
+						}
 						if v.CallKind == flowir.CallPlain && !v.IsMethodExprCall && v.CalleeFunc != nil {
-							fk := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Name()}
+							fk := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Origin().Name()}
 							if auditedValuePlane[fk] {
-								shallowSafe := !elemHandsOutMutableReach(v.Type)
+								shallowSafe := !elemHandsOutReach(stringUnsafe, v.Type)
 								for _, arg := range v.Args {
 									if shallowSafe && arg != nil && arg.Kind == flowir.ValPlace && arg.Place.Obj == g && len(arg.Place.Projs) == 0 {
 										continue
@@ -634,18 +471,23 @@ func settledPackageDataGlobals(
 								}
 								return
 							}
-							v.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, _ int, pIdx int, pOK bool, _ bool) bool {
+							v.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, _ int, pIdx int, pOK bool, packedVariadic bool) bool {
 								if !okSpec || !valueMentionsVar(arg, g) {
 									return okSpec
 								}
-								if slotType != nil && !refconfine.CallResultHandsOut(slotType) &&
+								paramType := v.FormalParamSlotType(pIdx, packedVariadic)
+								boxesStr := paramType != nil && erasesStringIntoType(slotType, paramType)
+								handsOutSlot := refconfine.CallResultHandsOut(slotType) ||
+									(paramType != nil && refconfine.CallResultHandsOut(paramType) && (refconfine.CallResultHandsOut(slotType) || (stringUnsafe && boxesStr)))
+								if slotType != nil && !handsOutSlot &&
+									!(stringUnsafe && (boxesStr || (syntaxutil.TypeReachesString(slotType) && fc.callMayReachStringHeaderUnsafe(audited, v)))) &&
 									!(v.AutoAddrRecv && v.HasRecvPlace && v.RecvPlace.Obj == g) {
 									return true
 								}
-								if !refconfine.TypeHandsOutMutableReach(g.Type()) && !(v.AutoAddrRecv && v.HasRecvPlace && v.RecvPlace.Obj == g) {
+								if !reachOrStr(g.Type()) && !(v.AutoAddrRecv && v.HasRecvPlace && v.RecvPlace.Obj == g) {
 									return true
 								}
-								if v.Type == nil || refconfine.TypeHandsOutMutableReach(v.Type) || refconfine.TypeReachesSyncNoCopyByValue(v.Type) {
+								if v.Type == nil || reachOrStr(v.Type) || refconfine.TypeReachesSyncNoCopyByValue(v.Type) {
 									okSpec = false
 									return false
 								}
@@ -654,15 +496,16 @@ func settledPackageDataGlobals(
 									return false
 								}
 								pk := syntaxutil.ParamKey{Func: fk, Index: pIdx}
-								confinementOK := fk.Pkg == ownPath && paramLeakFree[pk] && !refconfine.CallResultHandsOut(v.Type)
+								confinementOK := fk.Pkg == ownPath && paramLeakFree[pk] &&
+									!refconfine.CallResultHandsOut(v.Type) && !(stringUnsafe && syntaxutil.TypeReachesString(v.Type))
 								if !confinementOK && arg != nil && arg.Kind == flowir.ValPlace && arg.Place.Obj == g && len(arg.Place.Projs) == 0 {
 									if fd := funcDecls[v.CalleeFunc]; fd != nil {
-										fnBody := flowir.LowerFunc(p.TypesInfo, p.Types, fd)
+										fnBody := fc.funcBody(p, fd)
 										if fnBody != nil && pIdx < len(fnBody.Params) && fnBody.Params[pIdx] != nil {
 											wants := map[syntaxutil.ParamKey]bool{}
 											mw := map[syntaxutil.FuncKey]bool{}
 											pRoot := map[types.Object]bool{fnBody.Params[pIdx]: true}
-											if enclosingConfinesRoots(audited, p, fd, nil, nil, pRoot, wants, mw, nil) &&
+											if enclosingConfinesRoots(audited, stringUnsafe, p, fc, fd, nil, nil, pRoot, wants, mw, nil) &&
 												wantsResolve(wants, mw) {
 												confinementOK = true
 											}
@@ -687,7 +530,7 @@ func settledPackageDataGlobals(
 							return
 						}
 						for _, arg := range v.Args {
-							if valueMentionsVar(arg, g) && (refconfine.TypeHandsOutMutableReach(g.Type()) || (v.AutoAddrRecv && v.HasRecvPlace && v.RecvPlace.Obj == g)) {
+							if valueMentionsVar(arg, g) && (reachOrStr(g.Type()) || (v.AutoAddrRecv && v.HasRecvPlace && v.RecvPlace.Obj == g)) {
 								okSpec = false
 								return
 							}
@@ -698,7 +541,7 @@ func settledPackageDataGlobals(
 						return okSpec
 					})
 				}
-				checkVal(exprBody.Ops[0].Expr)
+				checkVal(rhsVal)
 				if !okSpec {
 					return false
 				}
@@ -740,7 +583,7 @@ func settledPackageDataGlobals(
 			usedInFuncDecl := false
 			specUses := 0
 			for dep := range settled {
-				if dep == g || !refconfine.TypeHandsOutMutableReach(dep.Type()) || !subtreeUsesObj(p.TypesInfo, candidates[g], dep) {
+				if dep == g || !reachOrStr(dep.Type()) || !valueMentionsVar(candidates[g], dep) {
 					continue
 				}
 				for c := range settled[dep] {
@@ -764,13 +607,13 @@ func settledPackageDataGlobals(
 					}
 					switch d := decl.(type) {
 					case *ast.FuncDecl:
-						if d.Body == nil || !subtreeUsesObj(p.TypesInfo, d.Body, g) {
+						if d.Body == nil || !bodyMentionsVar(fc.funcBody(p, d), g) {
 							continue
 						}
 						usedInFuncDecl = true
 						wants := map[syntaxutil.ParamKey]bool{}
 						mw := map[syntaxutil.FuncKey]bool{}
-						if !enclosingConfinesRoots(audited, p, d, nil, nil, map[types.Object]bool{g: true}, wants, mw, nil) ||
+						if !enclosingConfinesRoots(audited, stringUnsafe, p, fc, d, nil, nil, map[types.Object]bool{g: true}, wants, mw, nil) ||
 							!wantsResolve(wants, mw) {
 							keep = false
 						}
@@ -792,14 +635,14 @@ func settledPackageDataGlobals(
 									if p.TypesInfo.Defs[nm] == g {
 										continue
 									}
-									if i < len(vs.Values) && subtreeUsesObj(p.TypesInfo, vs.Values[i], g) {
+									if i < len(vs.Values) && valueMentionsVar(fc.exprValue(p, vs.Values[i]), g) {
 										keep = false
 										break
 									}
 								}
 								continue
 							}
-							if !subtreeUsesObj(p.TypesInfo, vs, g) {
+							if !bodyMentionsVar(fc.body(p, vs), g) {
 								continue
 							}
 							specUses++
@@ -814,7 +657,7 @@ func settledPackageDataGlobals(
 			if keep && rawExported && (usedInFuncDecl || specUses > 1) {
 				keep = false
 			}
-			if keep && !isPureFreshDataExprWith(p, candidates[g], inSettledVar) {
+			if keep && !isPureFreshDataValueWith(candidates[g], inSettledVar) {
 				keep = false
 			}
 			if !keep {
@@ -831,24 +674,70 @@ func settledPackageDataGlobals(
 	return settled
 }
 
-func subtreeUsesObj(info *types.Info, root ast.Node, target types.Object) bool {
-	if info == nil || root == nil || target == nil {
+func bodyMentionsVar(b *flowir.Body, target *types.Var) bool {
+	if b == nil || target == nil {
 		return false
 	}
-	found := false
-	ast.Inspect(root, func(n ast.Node) bool {
-		if found || n == nil {
-			return false
+	hit := false
+	checkLocalVal := func(v *flowir.Value) {
+		if hit || v == nil {
+			return
 		}
-		if id, ok := n.(*ast.Ident); ok {
-			if info.Uses[id] == target || info.Defs[id] == target {
-				found = true
+		v.WalkValues(func(cur *flowir.Value) bool {
+			if hit {
 				return false
 			}
+			switch cur.Kind {
+			case flowir.ValPlace:
+				if cur.Place.Obj == target {
+					hit = true
+					return false
+				}
+			case flowir.ValAddrOf:
+				if cur.AddrPlace.Obj == target {
+					hit = true
+					return false
+				}
+			case flowir.ValMethodVal:
+				if cur.HasRecvPlace && cur.RecvPlace.Obj == target {
+					hit = true
+					return false
+				}
+			case flowir.ValCall:
+				if cur.AutoAddrRecv && cur.HasRecvPlace && cur.RecvPlace.Obj == target {
+					hit = true
+					return false
+				}
+			}
+			return true
+		})
+	}
+	visitAllBodyOps(b, func(op *flowir.Op) {
+		if hit {
+			return
 		}
-		return true
+		switch op.Kind {
+		case flowir.OpAssign:
+			for _, dst := range op.Dsts {
+				if dst.Obj == target {
+					hit = true
+					return
+				}
+			}
+		case flowir.OpTypeSwitchBind:
+			if op.SwitchDst == target {
+				hit = true
+				return
+			}
+		case flowir.OpChanSend:
+			if op.ChanPlace.Obj == target {
+				hit = true
+				return
+			}
+		}
+		forEachOpTopValues(op, checkLocalVal)
 	})
-	return found
+	return hit
 }
 
 func valueMentionsVar(v *flowir.Value, target *types.Var) bool {
@@ -877,7 +766,13 @@ func valueMentionsVar(v *flowir.Value, target *types.Var) bool {
 				return false
 			}
 		case flowir.ValMakeClosure:
-			if cur.Closure != nil && cur.Closure.FreeVars[target] {
+			if bodyMentionsVar(cur.Closure, target) {
+				hit = true
+				return false
+			}
+		case flowir.ValCall:
+			if (cur.AutoAddrRecv && cur.HasRecvPlace && cur.RecvPlace.Obj == target) ||
+				(cur.CallKind == flowir.CallIIFE && bodyMentionsVar(cur.IIFE, target)) {
 				hit = true
 				return false
 			}
@@ -887,14 +782,15 @@ func valueMentionsVar(v *flowir.Value, target *types.Var) bool {
 	return hit
 }
 
-func closureExtractsNoCarrierFromRoots(audited bool, b *flowir.Body, carrierAliasRoots map[types.Object]bool) bool {
+func closureExtractsNoCarrierFromRoots(audited, stringUnsafe bool, b *flowir.Body, carrierAliasRoots map[types.Object]bool) bool {
 	if b == nil || len(carrierAliasRoots) == 0 {
 		return true
 	}
 	isScalarType := func(t types.Type) bool {
 		return t != nil &&
 			!refconfine.CallResultHandsOut(t) &&
-			!refconfine.TypeMayCarryUnknownDynamic(audited, t)
+			!refconfine.TypeMayCarryUnknownDynamic(audited, t) &&
+			!(stringUnsafe && syntaxutil.TypeReachesString(t))
 	}
 	ok := true
 	var checkVal func(v *flowir.Value)
@@ -929,7 +825,7 @@ func closureExtractsNoCarrierFromRoots(audited bool, b *flowir.Body, carrierAlia
 				return
 			}
 		case flowir.ValMakeClosure:
-			if v.Closure == nil || !closureExtractsNoCarrierFromRoots(audited, v.Closure, carrierAliasRoots) {
+			if v.Closure == nil || !closureExtractsNoCarrierFromRoots(audited, stringUnsafe, v.Closure, carrierAliasRoots) {
 				ok = false
 			}
 			return
@@ -950,7 +846,7 @@ func closureExtractsNoCarrierFromRoots(audited bool, b *flowir.Body, carrierAlia
 				return
 			}
 			if v.CallKind == flowir.CallIIFE {
-				if v.IIFE == nil || !closureExtractsNoCarrierFromRoots(audited, v.IIFE, carrierAliasRoots) {
+				if v.IIFE == nil || !closureExtractsNoCarrierFromRoots(audited, stringUnsafe, v.IIFE, carrierAliasRoots) {
 					ok = false
 					return
 				}
@@ -962,17 +858,25 @@ func closureExtractsNoCarrierFromRoots(audited bool, b *flowir.Body, carrierAlia
 				}
 				return
 			}
-			if v.CallKind == flowir.CallBuiltin && (v.BuiltinName == "len" || v.BuiltinName == "cap") {
-				for _, a := range v.Args {
-					if a != nil && a.Kind == flowir.ValPlace && a.Place.IsBareVar() && carrierAliasRoots[a.Place.Obj] {
-						continue
+			if v.CallKind == flowir.CallBuiltin {
+				switch v.BuiltinName {
+				case "StringData", "String":
+					ok = false
+					return
+				case "Sizeof", "Alignof", "Offsetof":
+					return
+				case "len", "cap":
+					for _, a := range v.Args {
+						if a != nil && a.Kind == flowir.ValPlace && a.Place.IsBareVar() && carrierAliasRoots[a.Place.Obj] {
+							continue
+						}
+						checkVal(a)
+						if !ok {
+							return
+						}
 					}
-					checkVal(a)
-					if !ok {
-						return
-					}
+					return
 				}
-				return
 			}
 		}
 		v.ForEachChildValue(func(ch *flowir.Value) bool {
@@ -1058,14 +962,6 @@ func closureExtractsNoCarrierFromRoots(audited bool, b *flowir.Body, carrierAlia
 			checkVal(op.ChanVal)
 			checkVal(op.SendVal)
 		case flowir.OpReturn:
-			if op.IsNaked {
-				for _, res := range b.Results {
-					if carrierAliasRoots[res] {
-						ok = false
-						return false
-					}
-				}
-			}
 			for _, r := range op.Results {
 				checkVal(r)
 			}
@@ -1088,7 +984,6 @@ type rootOriginPolicy struct {
 	singleSubjectVars    map[string]bool
 	settledGlobals       settledGlobalMap
 	currentTargets       []*types.Var
-	checkCarryingExpr    func(ast.Expr) bool
 	checkCarryingValue   func(*flowir.Value) bool
 	checkEnclosingParam  func(pIdx int, paramVar *types.Var) bool
 	carrierAliasRoots    map[types.Object]bool
@@ -1100,7 +995,9 @@ type rootOriginPolicy struct {
 // storage of roots outside selfLit (and exemptCall when non-nil).
 func enclosingConfinesRoots(
 	audited bool,
+	stringUnsafe bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	enclosing ast.Node,
 	selfLit *ast.FuncLit,
 	exemptCall *ast.CallExpr,
@@ -1115,9 +1012,13 @@ func enclosingConfinesRoots(
 	if len(roots) == 0 {
 		return true
 	}
-	enclBody := lowerEnclosingScope(p.TypesInfo, p.Types, enclosing)
+	enclBody := fc.scopeBody(p, enclosing)
 	if enclBody == nil {
 		return false
+	}
+
+	reachOrStr := func(t types.Type) bool {
+		return refconfine.TypeHandsOutMutableReach(t) || syntaxutil.ContainsUintptr(t) || (stringUnsafe && syntaxutil.TypeReachesString(t))
 	}
 
 	var exemptMap map[*ast.CallExpr]bool
@@ -1127,7 +1028,7 @@ func enclosingConfinesRoots(
 	aliases := flowir.BuildEnclosingMemAliasesExcept(
 		enclBody,
 		func(o types.Object) bool { return syntaxutil.IsLocalVar(o) || roots[o] },
-		refconfine.TypeHandsOutMutableReach,
+		reachOrStr,
 		exemptMap,
 	)
 	for changed := true; changed; {
@@ -1152,14 +1053,17 @@ func enclosingConfinesRoots(
 			return false
 		}
 		if syntaxutil.IsLocalVar(v) {
+			if enclBody.ResultSet[v] {
+				return false
+			}
 			if origin != nil && !origin.nestedClosure {
 				if !enclBody.OwnsVar(v) {
 					return false
 				}
-				nonScalar := refconfine.TypeHandsOutMutableReach(v.Type()) ||
+				nonScalar := reachOrStr(v.Type()) ||
 					refconfine.TypeCarriesSignature(v.Type()) ||
 					refconfine.TypeMayCarryUnknownDynamic(audited, v.Type())
-				if nonScalar && (v == enclBody.Recv || enclBody.ResultSet[v]) {
+				if nonScalar && v == enclBody.Recv {
 					return false
 				}
 				if nonScalar && !origin.allowEnclosingParams {
@@ -1174,7 +1078,7 @@ func enclosingConfinesRoots(
 					return false
 				}
 				if origin != nil && origin.verifyLocalOrigins {
-					if v == enclBody.Recv || enclBody.ResultSet[v] {
+					if v == enclBody.Recv {
 						return false
 					}
 					if _, isParam := enclBody.ParamIndex[v]; isParam {
@@ -1190,133 +1094,68 @@ func enclosingConfinesRoots(
 	usedCarrierGlobal := false
 	var isCleanRootInitValue func(v *flowir.Value) bool
 	isCleanRootInitValue = func(v *flowir.Value) bool {
-		if v == nil || v.Type == nil || refconfine.TypeReachesSyncNoCopyByValue(v.Type) {
-			return false
-		}
-		if !refconfine.TypeHandsOutMutableReach(v.Type) {
-			if !refconfine.TypeCarriesSignature(v.Type) {
-				return true
-			}
-			if v.Kind == flowir.ValScalarLitOrConst ||
-				(v.Kind == flowir.ValPlace && (v.Place.Root == flowir.RootConstOrNil || v.Place.Root == flowir.RootFunc)) {
-				return true
-			}
-			if origin != nil && origin.checkCarryingValue != nil {
-				return origin.checkCarryingValue(v)
-			}
-			if origin != nil && origin.checkCarryingExpr != nil && v.Raw != nil {
-				return origin.checkCarryingExpr(v.Raw)
-			}
-			return false
-		}
 		var settled settledGlobalMap
 		var targets []*types.Var
 		if origin != nil {
 			settled = origin.settledGlobals
 			targets = origin.currentTargets
 		}
-		if v.Raw != nil && isPureFreshDataExpr(p, settled, v.Raw) {
+		if isPureFreshDataValue(settled, v) {
 			return true
 		}
-		switch v.Kind {
-		case flowir.ValScalarLitOrConst:
-			return true
-		case flowir.ValPlace:
-			if v.Place.Root == flowir.RootConstOrNil || v.Place.Root == flowir.RootFunc {
-				return true
-			}
-			if v.Place.Root == flowir.RootPkgGlobal {
-				gv := v.Place.Obj
-				if gv == nil {
+		return checkPureOrFreshValue(v, valuePurityPolicy{
+			allowAppend:                 true,
+			allowValuePlane:             true,
+			allowRuntimeOps:             true,
+			allowTypeAssert:             true,
+			allowNonMutableReach:        true,
+			forbidStringNonMutableReach: stringUnsafe,
+			allowSigLeaf: func(leaf *flowir.Value) bool {
+				if leaf.Kind == flowir.ValScalarLitOrConst ||
+					(leaf.Kind == flowir.ValPlace && (leaf.Place.Root == flowir.RootConstOrNil || (leaf.Place.Root == flowir.RootFunc && !leaf.Place.IsMethodExpr))) {
+					return true
+				}
+				return origin != nil && origin.checkCarryingValue != nil && origin.checkCarryingValue(leaf)
+			},
+			allowPlace: func(pv *flowir.Value) bool {
+				if pv.Place.Root == flowir.RootFunc && !pv.Place.IsMethodExpr {
+					return true
+				}
+				if pv.Place.Root == flowir.RootPkgGlobal {
+					gv := pv.Place.Obj
+					if gv == nil {
+						return false
+					}
+					if settled.allowedForTargets(gv, targets) {
+						return true
+					}
+					if origin != nil && origin.inInitFlow && !origin.nestedClosure && len(pv.Place.Projs) == 0 &&
+						!gv.IsField() && gv.Pkg() != nil && gv.Parent() == gv.Pkg().Scope() &&
+						refconfine.TypeMayCarryUnknownDynamic(audited, gv.Type()) {
+						gvKey := syntaxutil.DynamicVarKey(gv)
+						if (p.Types == nil || gv.Pkg() != p.Types || !origin.unattestedBroken[gvKey]) && !origin.singleSubjectVars[gvKey] {
+							if origin.linkedCarrierGlobals == nil {
+								origin.linkedCarrierGlobals = map[string]bool{}
+							}
+							origin.linkedCarrierGlobals[gvKey] = true
+							usedCarrierGlobal = true
+							return true
+						}
+					}
 					return false
 				}
-				if settled.allowedForTargets(gv, targets) {
-					return true
-				}
-				if origin != nil && origin.inInitFlow && !origin.nestedClosure && len(v.Place.Projs) == 0 &&
-					!gv.IsField() && gv.Pkg() != nil && gv.Parent() == gv.Pkg().Scope() &&
-					refconfine.TypeMayCarryUnknownDynamic(audited, gv.Type()) {
-					gvKey := syntaxutil.DynamicVarKey(gv)
-					if (p.Types == nil || gv.Pkg() != p.Types || !origin.unattestedBroken[gvKey]) && !origin.singleSubjectVars[gvKey] {
-						if origin.linkedCarrierGlobals == nil {
-							origin.linkedCarrierGlobals = map[string]bool{}
-						}
-						origin.linkedCarrierGlobals[gvKey] = true
+				if pv.Place.Obj != nil && roots[pv.Place.Obj] {
+					if origin != nil && origin.carrierAliasRoots[pv.Place.Obj] {
 						usedCarrierGlobal = true
-						return true
 					}
+					return true
+				}
+				if pv.Place.Root == flowir.RootTransient && pv.Place.Base != nil {
+					return isCleanRootInitValue(pv.Place.Base)
 				}
 				return false
-			}
-			if v.Place.Obj != nil && roots[v.Place.Obj] {
-				if origin != nil && origin.carrierAliasRoots[v.Place.Obj] {
-					usedCarrierGlobal = true
-				}
-				return true
-			}
-			if v.Place.Root == flowir.RootTransient && v.Place.Base != nil {
-				return isCleanRootInitValue(v.Place.Base)
-			}
-			return false
-		case flowir.ValAllocFresh:
-			switch v.AllocKind {
-			case flowir.AllocMake, flowir.AllocBuiltinNewType:
-				return true
-			case flowir.AllocBuiltinNewExpr:
-				return len(v.Args) == 1 && isCleanRootInitValue(v.Args[0])
-			case flowir.AllocCompositeLit:
-				for i := range v.CompositeElts {
-					if v.CompositeElts[i].MapKey != nil && !isCleanRootInitValue(v.CompositeElts[i].MapKey) {
-						return false
-					}
-					if v.CompositeElts[i].Value != nil && !isCleanRootInitValue(v.CompositeElts[i].Value) {
-						return false
-					}
-				}
-				return true
-			}
-		case flowir.ValConvert:
-			if v.IsTypeAssert {
-				return v.Arg != nil && isCleanRootInitValue(v.Arg)
-			}
-			return !syntaxutil.IsUnsafePointerType(v.Type) && v.Arg != nil && isCleanRootInitValue(v.Arg)
-		case flowir.ValCall:
-			if v.CallKind == flowir.CallBuiltin {
-				switch v.BuiltinName {
-				case "make":
-					return true
-				case "new":
-					if v.CallAST != nil && syntaxutil.IsBuiltinNewType(p.TypesInfo, v.CallAST) {
-						return true
-					}
-					return len(v.Args) == 1 && !v.Ellipsis && isCleanRootInitValue(v.Args[0])
-				case "append":
-					if len(v.Args) == 0 || v.Args[0] == nil || v.Args[0].Raw == nil ||
-						!isPureFreshDataExprWith(p, v.Args[0].Raw, nil) {
-						return false
-					}
-					for _, a := range v.Args[1:] {
-						if !isCleanRootInitValue(a) {
-							return false
-						}
-					}
-					return true
-				}
-				return false
-			}
-			if v.CallKind == flowir.CallPlain && v.CalleeFunc != nil && !v.IsMethodExprCall {
-				fk := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Name()}
-				if auditedValuePlane[fk] {
-					for _, a := range v.Args {
-						if !isCleanRootInitValue(a) {
-							return false
-						}
-					}
-					return true
-				}
-			}
-		}
-		return false
+			},
+		})
 	}
 
 	isOuterOrSigVar := func(v *types.Var) bool {
@@ -1334,9 +1173,12 @@ func enclosingConfinesRoots(
 
 	// valMutableRoots collects mutable-reach roots whose backing memory may be
 	// handed out by evaluating v.
+	reachOrSyncOrStr := func(t types.Type) bool {
+		return reachOrStr(t) || refconfine.TypeReachesSyncNoCopyByValue(t)
+	}
 	var valMutableRoots func(v *flowir.Value, out map[*types.Var]bool)
 	placeMutableRoots := func(pl flowir.Place, out map[*types.Var]bool) {
-		if pl.Obj != nil && roots[pl.Obj] && refconfine.CallResultHandsOut(pl.Obj.Type()) {
+		if pl.Obj != nil && roots[pl.Obj] && reachOrSyncOrStr(pl.Obj.Type()) {
 			out[pl.Obj] = true
 		}
 		if pl.Root == flowir.RootTransient && pl.Base != nil {
@@ -1353,15 +1195,16 @@ func enclosingConfinesRoots(
 		if exemptCall != nil && v.Kind == flowir.ValCall && v.CallAST == exemptCall {
 			return
 		}
-		if v.Kind != flowir.ValAddrOf && v.Kind != flowir.ValMethodVal &&
-			v.Type != nil && !refconfine.CallResultHandsOut(v.Type) {
+		isStrBuiltin := v.Kind == flowir.ValCall && v.CallKind == flowir.CallBuiltin &&
+			(v.BuiltinName == "String" || v.BuiltinName == "StringData")
+		if !isStrBuiltin && v.Kind != flowir.ValAddrOf && v.Kind != flowir.ValMethodVal &&
+			v.Type != nil && !reachOrSyncOrStr(v.Type) {
 			return
 		}
 		switch v.Kind {
 		case flowir.ValPlace:
 			if len(v.Place.Projs) > 0 && v.Type != nil &&
-				!refconfine.TypeHandsOutMutableReach(v.Type) &&
-				!refconfine.TypeReachesSyncNoCopyByValue(v.Type) {
+				!reachOrSyncOrStr(v.Type) {
 				return
 			}
 			placeMutableRoots(v.Place, out)
@@ -1391,17 +1234,28 @@ func enclosingConfinesRoots(
 		case flowir.ValMakeClosure:
 			if v.Closure != nil {
 				for fv := range v.Closure.FreeVars {
-					if roots[fv] && refconfine.CallResultHandsOut(fv.Type()) {
+					if roots[fv] && reachOrSyncOrStr(fv.Type()) {
 						out[fv] = true
 					}
 				}
 				for _, gv := range globalRoots {
-					if v.Lit != nil && refconfine.CallResultHandsOut(gv.Type()) && subtreeUsesObj(p.TypesInfo, v.Lit.Body, gv) {
+					if reachOrSyncOrStr(gv.Type()) && bodyMentionsVar(v.Closure, gv) {
 						out[gv] = true
 					}
 				}
 			}
 		case flowir.ValCall:
+			if v.CallKind == flowir.CallBuiltin {
+				switch v.BuiltinName {
+				case "len", "cap", "Sizeof", "Alignof", "Offsetof":
+					return
+				case "Slice", "SliceData", "String", "StringData":
+					if len(v.Args) > 0 {
+						valMutableRoots(v.Args[0], out)
+					}
+					return
+				}
+			}
 			if v.AutoAddrRecv && v.HasRecvPlace && v.RecvPlace.Obj != nil && roots[v.RecvPlace.Obj] {
 				out[v.RecvPlace.Obj] = true
 			}
@@ -1460,10 +1314,8 @@ func enclosingConfinesRoots(
 							return false
 						}
 					}
-				}
-				if cur.Lit != nil {
 					for _, gv := range globalRoots {
-						if subtreeUsesObj(p.TypesInfo, cur.Lit.Body, gv) {
+						if bodyMentionsVar(cur.Closure, gv) {
 							hit = true
 							return false
 						}
@@ -1477,12 +1329,10 @@ func enclosingConfinesRoots(
 							return false
 						}
 					}
-					if cur.IIFE.AST != nil {
-						for _, gv := range globalRoots {
-							if subtreeUsesObj(p.TypesInfo, cur.IIFE.AST, gv) {
-								hit = true
-								return false
-							}
+					for _, gv := range globalRoots {
+						if bodyMentionsVar(cur.IIFE, gv) {
+							hit = true
+							return false
 						}
 					}
 				}
@@ -1510,6 +1360,12 @@ func enclosingConfinesRoots(
 		case flowir.ValInvalid:
 			sound = false
 			return
+		case flowir.ValConvert:
+			if syntaxutil.IsUnsafePointerType(v.Type) &&
+				(suppliesMutableRoot(v.Arg) || (valTouchesAnyRoot(v.Arg) && (v.Arg == nil || syntaxutil.ContainsUintptr(v.Arg.Type) || syntaxutil.PointerMayReachString(v.Arg.Type)))) {
+				sound = false
+				return
+			}
 		case flowir.ValAddrOf:
 			if v.AddrPlace.Obj != nil && roots[v.AddrPlace.Obj] {
 				sound = false
@@ -1549,11 +1405,11 @@ func enclosingConfinesRoots(
 				}
 			}
 			for _, gv := range globalRoots {
-				if subtreeUsesObj(p.TypesInfo, v.Lit.Body, gv) {
+				if bodyMentionsVar(v.Closure, gv) {
 					subRoots[gv] = true
 				}
 			}
-			if len(localRoots) > 0 && !boundValueClosureEnvLeakFreeJudged(audited, p, localRoots, v.Lit.Body, wants, methodWants) {
+			if len(localRoots) > 0 && !boundValueClosureEnvLeakFreeJudged(audited, stringUnsafe, p, fc, localRoots, v.Lit.Body, wants, methodWants) {
 				sound = false
 				return
 			}
@@ -1564,7 +1420,7 @@ func enclosingConfinesRoots(
 					cp.nestedClosure = true
 					subOrigin = &cp
 				}
-				if !enclosingConfinesRoots(audited, p, v.Lit, selfLit, exemptCall, subRoots, wants, methodWants, subOrigin) {
+				if !enclosingConfinesRoots(audited, stringUnsafe, p, fc, v.Lit, selfLit, exemptCall, subRoots, wants, methodWants, subOrigin) {
 					sound = false
 					return
 				}
@@ -1574,6 +1430,13 @@ func enclosingConfinesRoots(
 			switch v.CallKind {
 			case flowir.CallBuiltin:
 				switch v.BuiltinName {
+				case "StringData", "String":
+					if suppliesMutableRoot(v) || valTouchesAnyRoot(v) {
+						sound = false
+						return
+					}
+				case "Sizeof", "Alignof", "Offsetof":
+					return
 				case "delete", "clear", "close":
 					if len(v.Args) > 0 && suppliesMutableRoot(v.Args[0]) {
 						sound = false
@@ -1585,7 +1448,7 @@ func enclosingConfinesRoots(
 						return
 					}
 					if len(v.Args) == 2 && suppliesMutableRoot(v.Args[1]) &&
-						(v.Args[0] == nil || elemHandsOutMutableReach(v.Args[0].Type)) {
+						(v.Args[0] == nil || elemHandsOutReach(stringUnsafe, v.Args[0].Type)) {
 						sound = false
 						return
 					}
@@ -1594,8 +1457,7 @@ func enclosingConfinesRoots(
 						sound = false
 						return
 					}
-					if len(v.Args) >= 2 &&
-						(v.Args[0] == nil || v.Args[0].Raw == nil || !isPureFreshDataExprWith(p, v.Args[0].Raw, nil)) {
+					if len(v.Args) >= 2 && !isPureFreshDataValueWith(v.Args[0], nil) {
 						for _, a := range v.Args[1:] {
 							if suppliesMutableRoot(a) {
 								sound = false
@@ -1614,13 +1476,18 @@ func enclosingConfinesRoots(
 					}
 					break
 				}
-				fk := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Name()}
+				fk := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Origin().Name()}
 				if !auditedValuePlane[fk] {
-					v.ForEachArgParam(func(a *flowir.Value, slotType types.Type, _ int, pIdx int, pOK bool, _ bool) bool {
+					v.ForEachArgParam(func(a *flowir.Value, slotType types.Type, _ int, pIdx int, pOK bool, packedVariadic bool) bool {
 						if !suppliesMutableRoot(a) {
 							return true
 						}
-						if slotType != nil && !refconfine.CallResultHandsOut(slotType) {
+						paramType := v.FormalParamSlotType(pIdx, packedVariadic)
+						boxesStr := paramType != nil && erasesStringIntoType(slotType, paramType)
+						handsOutSlot := refconfine.CallResultHandsOut(slotType) ||
+							(paramType != nil && refconfine.CallResultHandsOut(paramType) && (refconfine.CallResultHandsOut(slotType) || (stringUnsafe && boxesStr)))
+						if slotType != nil && !handsOutSlot &&
+							!(stringUnsafe && (boxesStr || (syntaxutil.TypeReachesString(slotType) && fc.callMayReachStringHeaderUnsafe(audited, v)))) {
 							return true
 						}
 						if wants == nil || !pOK {
@@ -1655,7 +1522,7 @@ func enclosingConfinesRoots(
 					}
 					if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() != nil {
 						_, ptrRecv := types.Unalias(sig.Recv().Type()).(*types.Pointer)
-						if ptrRecv || refconfine.TypeHandsOutMutableReach(sig.Recv().Type()) {
+						if ptrRecv || reachOrStr(sig.Recv().Type()) {
 							if methodWants == nil {
 								sound = false
 								return
@@ -1741,7 +1608,7 @@ func enclosingConfinesRoots(
 							return false
 						}
 						usedCarrierGlobal = false
-						if origin != nil && origin.verifyLocalOrigins && refconfine.TypeHandsOutMutableReach(dst.Obj.Type()) {
+						if origin != nil && origin.verifyLocalOrigins && reachOrStr(dst.Obj.Type()) {
 							if !isCleanRootInitValue(src) {
 								sound = false
 								return false
@@ -1755,16 +1622,9 @@ func enclosingConfinesRoots(
 						}
 						isBareCarrierAlias := usedCarrierGlobal && src.Kind == flowir.ValPlace && len(src.Place.Projs) == 0
 						if !isBareCarrierAlias && origin != nil && refconfine.TypeCarriesSignature(dst.Obj.Type()) {
-							if !origin.nestedClosure && origin.checkCarryingValue != nil {
-								if !origin.checkCarryingValue(src) {
-									sound = false
-									return false
-								}
-							} else if !origin.nestedClosure && origin.checkCarryingExpr != nil {
-								if src.Raw == nil || !origin.checkCarryingExpr(src.Raw) {
-									sound = false
-									return false
-								}
+							if !origin.nestedClosure && origin.checkCarryingValue != nil && !origin.checkCarryingValue(src) {
+								sound = false
+								return false
 							}
 						}
 					}
@@ -1805,7 +1665,7 @@ func enclosingConfinesRoots(
 				}
 				definedOnce[op.SwitchDst] = true
 				usedCarrierGlobal = false
-				if origin != nil && origin.verifyLocalOrigins && refconfine.TypeHandsOutMutableReach(op.SwitchDst.Type()) {
+				if origin != nil && origin.verifyLocalOrigins && reachOrStr(op.SwitchDst.Type()) {
 					if !isCleanRootInitValue(op.SwitchSrc) {
 						sound = false
 						return false
@@ -1822,23 +1682,15 @@ func enclosingConfinesRoots(
 						sound = false
 						return false
 					}
-					if !usedCarrierGlobal && origin != nil && !origin.nestedClosure {
-						if origin.checkCarryingValue != nil {
-							if !origin.checkCarryingValue(op.SwitchSrc) {
-								sound = false
-								return false
-							}
-						} else if origin.checkCarryingExpr != nil {
-							if op.SwitchSrc.Raw == nil || !origin.checkCarryingExpr(op.SwitchSrc.Raw) {
-								sound = false
-								return false
-							}
-						}
+					if !usedCarrierGlobal && origin != nil && !origin.nestedClosure &&
+						origin.checkCarryingValue != nil && !origin.checkCarryingValue(op.SwitchSrc) {
+						sound = false
+						return false
 					}
 				}
 			} else if op.SwitchDst != nil && op.SwitchSrc != nil && suppliesMutableRoot(op.SwitchSrc) &&
 				(op.SwitchDst.Type() == nil ||
-					refconfine.TypeHandsOutMutableReach(op.SwitchDst.Type()) ||
+					reachOrStr(op.SwitchDst.Type()) ||
 					refconfine.TypeCarriesSignature(op.SwitchDst.Type()) ||
 					refconfine.TypeReachesSyncNoCopyByValue(op.SwitchDst.Type())) {
 				sound = false
@@ -1855,14 +1707,6 @@ func enclosingConfinesRoots(
 			checkValue(op.SendVal)
 
 		case flowir.OpReturn:
-			if op.IsNaked {
-				for _, res := range enclBody.Results {
-					if roots[res] {
-						sound = false
-						return false
-					}
-				}
-			}
 			for _, resVal := range op.Results {
 				checkValue(resVal)
 				if !sound {
@@ -1917,7 +1761,7 @@ func enclosingConfinesRoots(
 						return false
 					}
 					if cur.Kind == flowir.ValMakeClosure && cur.Lit != selfLit {
-						if cur.Closure == nil || !closureExtractsNoCarrierFromRoots(audited, cur.Closure, origin.carrierAliasRoots) {
+						if cur.Closure == nil || !closureExtractsNoCarrierFromRoots(audited, stringUnsafe, cur.Closure, origin.carrierAliasRoots) {
 							sound = false
 							return false
 						}
@@ -1925,59 +1769,17 @@ func enclosingConfinesRoots(
 					return true
 				})
 			}
-			switch op.Kind {
-			case flowir.OpAssign:
-				for _, dst := range op.Dsts {
-					dst.ForEachChildValue(func(cv *flowir.Value) bool { checkLitVal(cv); return sound })
-				}
-				for _, src := range op.Srcs {
-					checkLitVal(src)
-				}
-			case flowir.OpTypeSwitchBind:
-				checkLitVal(op.SwitchSrc)
-			case flowir.OpChanSend:
-				op.ChanPlace.ForEachChildValue(func(cv *flowir.Value) bool { checkLitVal(cv); return sound })
-				checkLitVal(op.ChanVal)
-				checkLitVal(op.SendVal)
-			case flowir.OpReturn:
-				for _, r := range op.Results {
-					checkLitVal(r)
-				}
-			case flowir.OpDefer, flowir.OpGo:
-				checkLitVal(op.Call)
-			case flowir.OpExpr:
-				checkLitVal(op.Expr)
-			}
+			forEachOpTopValues(op, checkLitVal)
 		})
 	}
 	return sound
 }
 
-// environmentFreeFuncLit reports whether a function literal registered into a
-// carrier is provably environment-free: every variable it references from an
-// enclosing function scope proves leak-free and unmutated.
-func environmentFreeFuncLit(audited bool, p *packages.Package, lit *ast.FuncLit, enclosing ast.Node) bool {
-	return environmentFreeFuncLitJudged(audited, p, lit, enclosing, nil, nil)
-}
-
-// environmentFreeFuncLitJudged additionally collects parameter and method wants
-// when the caller supplies sinks, instead of refusing deferrable shapes outright.
-func environmentFreeFuncLitJudged(
-	audited bool,
-	p *packages.Package,
-	lit *ast.FuncLit,
-	enclosing ast.Node,
-	wants map[syntaxutil.ParamKey]bool,
-	methodWants map[syntaxutil.FuncKey]bool,
-) bool {
-	return environmentFreeFuncLitWithOrigin(audited, p, lit, enclosing, wants, methodWants, &rootOriginPolicy{
-		verifyLocalOrigins: true,
-	})
-}
-
 func environmentFreeFuncLitWithOrigin(
 	audited bool,
+	stringUnsafe bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	lit *ast.FuncLit,
 	enclosing ast.Node,
 	wants map[syntaxutil.ParamKey]bool,
@@ -1987,7 +1789,7 @@ func environmentFreeFuncLitWithOrigin(
 	if p == nil || p.TypesInfo == nil || lit == nil || lit.Body == nil {
 		return false
 	}
-	litBody := flowir.LowerFuncLit(p.TypesInfo, p.Types, lit)
+	litBody := fc.litBody(p, lit)
 	if litBody == nil {
 		return false
 	}
@@ -2001,10 +1803,10 @@ func environmentFreeFuncLitWithOrigin(
 	if enclosing == nil {
 		return false
 	}
-	if !enclosingConfinesRoots(audited, p, enclosing, lit, nil, roots, wants, methodWants, origin) {
+	if !enclosingConfinesRoots(audited, stringUnsafe, p, fc, enclosing, lit, nil, roots, wants, methodWants, origin) {
 		return false
 	}
-	if origin != nil && len(origin.carrierAliasRoots) > 0 && !closureExtractsNoCarrierFromRoots(audited, litBody, origin.carrierAliasRoots) {
+	if origin != nil && len(origin.carrierAliasRoots) > 0 && !closureExtractsNoCarrierFromRoots(audited, stringUnsafe, litBody, origin.carrierAliasRoots) {
 		return false
 	}
 	localRoots := make(map[types.Object]bool, len(roots))
@@ -2013,7 +1815,7 @@ func environmentFreeFuncLitWithOrigin(
 			localRoots[r] = true
 		}
 	}
-	if len(localRoots) > 0 && !boundValueClosureEnvLeakFreeJudged(audited, p, localRoots, lit.Body, wants, methodWants) {
+	if len(localRoots) > 0 && !boundValueClosureEnvLeakFreeJudged(audited, stringUnsafe, p, fc, localRoots, lit.Body, wants, methodWants) {
 		return false
 	}
 	return true
@@ -2030,126 +1832,121 @@ type fieldRegMark struct {
 	param syntaxutil.ParamKey
 }
 
-// classifyFieldRegistrants derives the registered-population marks of one
-// admitted registration store.
-func classifyFieldRegistrants(audited bool, p *packages.Package, lhs, rhs ast.Expr, emit func(fieldRegMark)) {
-	if sel, ok := syntaxutil.UnparenExpr(lhs).(*ast.SelectorExpr); ok {
-		if selection, ok := p.TypesInfo.Selections[sel]; ok && selection.Kind() == types.FieldVal {
-			if _, isSig := types.Unalias(selection.Type()).Underlying().(*types.Signature); isSig {
-				classifyFieldRegistrantValue(audited, p, sel.Sel.Name, rhs, emit)
+// classifyFieldRegistrantsValue derives the registered-population marks of one
+// admitted registration store over lowered flowir places and values.
+func classifyFieldRegistrantsValue(
+	audited bool,
+	p *packages.Package,
+	fc *pkgFlowCache,
+	dst flowir.Place,
+	hasDst bool,
+	rhs *flowir.Value,
+	emit func(fieldRegMark),
+) {
+	if hasDst && len(dst.Projs) > 0 {
+		last := dst.Projs[len(dst.Projs)-1]
+		if last.Kind == flowir.ProjField && last.Field != nil && last.Selection != nil && last.Type != nil {
+			if _, isSig := types.Unalias(last.Type).Underlying().(*types.Signature); isSig {
+				classifyFieldRegistrantFlowValue(audited, p, fc, last.Field.Name(), rhs, emit)
 				return
 			}
 		}
 	}
-	classifyRegistrantFlow(audited, p, rhs, emit)
+	classifyRegistrantFlowValue(audited, p, fc, rhs, emit)
 }
 
-func classifyRegistrantFlow(audited bool, p *packages.Package, expr ast.Expr, emit func(fieldRegMark)) {
-	switch e := syntaxutil.UnparenExpr(expr).(type) {
-	case *ast.CompositeLit:
-		classifyRegistrantComposite(audited, p, e, emit)
+func classifyRegistrantFlowValue(audited bool, p *packages.Package, fc *pkgFlowCache, v *flowir.Value, emit func(fieldRegMark)) {
+	if v == nil || v.IsTypeExpr {
 		return
-	case *ast.UnaryExpr:
-		if e.Op == token.AND {
-			classifyRegistrantFlow(audited, p, e.X, emit)
+	}
+	switch v.Kind {
+	case flowir.ValScalarLitOrConst:
+		return
+	case flowir.ValAllocFresh:
+		switch v.AllocKind {
+		case flowir.AllocCompositeLit:
+			classifyRegistrantCompositeValue(audited, p, fc, v, emit)
+			return
+		case flowir.AllocMake, flowir.AllocBuiltinNewType:
+			return
+		case flowir.AllocBuiltinNewExpr:
+			for _, arg := range v.Args {
+				classifyRegistrantFlowValue(audited, p, fc, arg, emit)
+			}
 			return
 		}
-	case *ast.FuncLit:
-		classifyLiteralRegistrant(audited, p, syntaxutil.ElemPositionField, e, emit)
+	case flowir.ValMakeClosure:
+		classifyLiteralRegistrant(audited, p, fc, syntaxutil.ElemPositionField, v.Lit, emit)
 		return
-	case *ast.BasicLit:
+	case flowir.ValConvert:
+		if !v.IsTypeAssert && v.Arg != nil && !syntaxutil.IsUnsafePointerType(v.Arg.Type) {
+			classifyRegistrantFlowValue(audited, p, fc, v.Arg, emit)
+			return
+		}
+	case flowir.ValCall:
+		if v.IsMethodExprCall && v.Recv != nil {
+			classifyRegistrantFlowValue(audited, p, fc, v.Recv, emit)
+		}
+		for _, arg := range v.Args {
+			classifyRegistrantFlowValue(audited, p, fc, arg, emit)
+		}
 		return
-	case *ast.CallExpr:
-		if ident, ok := syntaxutil.UnparenExpr(e.Fun).(*ast.Ident); ok {
-			if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
-				if ident.Name == "make" || syntaxutil.IsBuiltinNewType(p.TypesInfo, e) {
-					return
-				}
-			}
+	case flowir.ValPlace:
+		if v.IsNil || v.IsConst || v.Place.Root == flowir.RootConstOrNil {
+			return
 		}
-		for _, arg := range e.Args {
-			classifyRegistrantFlow(audited, p, arg, emit)
-		}
-		return
-	case *ast.Ident:
-		if obj := syntaxutil.IdentDefOrUse(p.TypesInfo, e); obj != nil {
-			switch obj.(type) {
-			case *types.Func:
-				classifyFieldRegistrantValue(audited, p, syntaxutil.ElemPositionField, e, emit)
-				return
-			case *types.Nil:
-				return
-			}
-		}
-	case *ast.SelectorExpr:
-		if _, isSelection := p.TypesInfo.Selections[e]; !isSelection {
-			if obj, ok := p.TypesInfo.Uses[e.Sel]; ok {
-				if _, isFunc := obj.(*types.Func); isFunc {
-					classifyFieldRegistrantValue(audited, p, syntaxutil.ElemPositionField, e, emit)
-					return
-				}
-			}
-		}
-	case *ast.IndexExpr, *ast.IndexListExpr:
-		if fn, _ := syntaxutil.PlainCalleeFunc(p, e); fn != nil {
-			classifyFieldRegistrantValue(audited, p, syntaxutil.ElemPositionField, e, emit)
+		if v.Place.Root == flowir.RootFunc && !v.Place.IsMethodExpr && len(v.Place.Projs) == 0 && v.Place.Func != nil {
+			classifyFieldRegistrantFlowValue(audited, p, fc, syntaxutil.ElemPositionField, v, emit)
 			return
 		}
 	}
-	if refconfine.TypeCarriesSignature(p.TypesInfo.TypeOf(syntaxutil.UnparenExpr(expr))) {
+	if refconfine.TypeCarriesSignature(v.Type) {
 		emit(fieldRegMark{class: 'p', idx: -1})
 	}
 }
 
-func classifyRegistrantComposite(audited bool, p *packages.Package, lit *ast.CompositeLit, emit func(fieldRegMark)) {
-	t := p.TypesInfo.TypeOf(lit)
-	if t == nil {
+func classifyRegistrantCompositeValue(audited bool, p *packages.Package, fc *pkgFlowCache, litVal *flowir.Value, emit func(fieldRegMark)) {
+	if litVal == nil || litVal.ElemType == nil {
 		emit(fieldRegMark{class: 'p', idx: -1})
 		return
 	}
-	u := types.Unalias(t).Underlying()
-	if ptr, ok := u.(*types.Pointer); ok {
-		u = types.Unalias(ptr.Elem()).Underlying()
-	}
-	switch u := u.(type) {
+	switch syntaxutil.UnderlyingType(litVal.ElemType).(type) {
 	case *types.Struct:
-		for i, elt := range lit.Elts {
-			var field *types.Var
-			value := elt
-			if kv, ok := elt.(*ast.KeyValueExpr); ok {
-				value = kv.Value
-				if key, ok := kv.Key.(*ast.Ident); ok {
-					for j := 0; j < u.NumFields(); j++ {
-						if u.Field(j).Name() == key.Name {
-							field = u.Field(j)
-							break
-						}
-					}
-				}
-			} else if i < u.NumFields() {
-				field = u.Field(i)
-			}
-			if field == nil {
+		for i := range litVal.CompositeElts {
+			elt := &litVal.CompositeElts[i]
+			if elt.Field == nil {
 				emit(fieldRegMark{class: 'p', idx: -1})
 				continue
 			}
-			if _, isSig := types.Unalias(field.Type()).Underlying().(*types.Signature); isSig {
-				classifyFieldRegistrantValue(audited, p, field.Name(), value, emit)
+			if _, isSig := types.Unalias(elt.Field.Type()).Underlying().(*types.Signature); isSig {
+				classifyFieldRegistrantFlowValue(audited, p, fc, elt.Field.Name(), elt.Value, emit)
 				continue
 			}
-			classifyRegistrantFlow(audited, p, value, emit)
+			classifyRegistrantFlowValue(audited, p, fc, elt.Value, emit)
 		}
-	case *types.Map, *types.Slice, *types.Array:
-		syntaxutil.EachCompositeLitFlow(p.TypesInfo, lit, func(flow ast.Expr, _ bool) bool {
-			classifyRegistrantFlow(audited, p, flow, emit)
-			return true
-		})
+	case *types.Map:
+		for i := range litVal.CompositeElts {
+			elt := &litVal.CompositeElts[i]
+			if elt.MapKey != nil {
+				classifyRegistrantFlowValue(audited, p, fc, elt.MapKey, emit)
+			}
+			if elt.Value != nil {
+				classifyRegistrantFlowValue(audited, p, fc, elt.Value, emit)
+			}
+		}
+	case *types.Slice, *types.Array:
+		for i := range litVal.CompositeElts {
+			elt := &litVal.CompositeElts[i]
+			if elt.Value != nil {
+				classifyRegistrantFlowValue(audited, p, fc, elt.Value, emit)
+			}
+		}
 	default:
 		emit(fieldRegMark{class: 'p', idx: -1})
 	}
 }
 
-func classifyFieldRegistrantValue(audited bool, p *packages.Package, field string, value ast.Expr, emit func(fieldRegMark)) {
+func classifyFieldRegistrantFlowValue(audited bool, p *packages.Package, fc *pkgFlowCache, field string, v *flowir.Value, emit func(fieldRegMark)) {
 	deferNamed := func(fn *types.Func) bool {
 		if fn == nil || fn.Pkg() == nil {
 			return false
@@ -2165,39 +1962,29 @@ func classifyFieldRegistrantValue(audited bool, p *packages.Package, field strin
 		}
 		return true
 	}
-	switch v := syntaxutil.UnparenExpr(value).(type) {
-	case *ast.FuncLit:
-		classifyLiteralRegistrant(audited, p, field, v, emit)
-		return
-	case *ast.Ident:
-		if obj := syntaxutil.IdentDefOrUse(p.TypesInfo, v); obj != nil {
-			if _, isNil := obj.(*types.Nil); isNil {
+	if v != nil && !v.IsTypeExpr {
+		switch v.Kind {
+		case flowir.ValScalarLitOrConst:
+			if v.IsNil {
 				return
 			}
-			if fn, ok := obj.(*types.Func); ok && deferNamed(fn) {
-				return
-			}
-		}
-	case *ast.SelectorExpr:
-		if _, isSelection := p.TypesInfo.Selections[v]; !isSelection {
-			if x, ok := v.X.(*ast.Ident); ok {
-				if _, isPkg := p.TypesInfo.Uses[x].(*types.PkgName); isPkg {
-					if fn, ok := p.TypesInfo.Uses[v.Sel].(*types.Func); ok && deferNamed(fn) {
-						return
-					}
-				}
-			}
-		}
-	case *ast.IndexExpr, *ast.IndexListExpr:
-		if fn, _ := syntaxutil.PlainCalleeFunc(p, v); fn != nil && deferNamed(fn) {
+		case flowir.ValMakeClosure:
+			classifyLiteralRegistrant(audited, p, fc, field, v.Lit, emit)
 			return
+		case flowir.ValPlace:
+			if v.IsNil {
+				return
+			}
+			if v.Place.Root == flowir.RootFunc && !v.Place.IsMethodExpr && len(v.Place.Projs) == 0 && v.Place.Func != nil && deferNamed(v.Place.Func) {
+				return
+			}
 		}
 	}
 	emit(fieldRegMark{class: 'p', field: field, idx: -1})
 }
 
-func classifyLiteralRegistrant(audited bool, p *packages.Package, field string, lit *ast.FuncLit, emit func(fieldRegMark)) {
-	if lit.Type == nil || lit.Body == nil {
+func classifyLiteralRegistrant(audited bool, p *packages.Package, fc *pkgFlowCache, field string, lit *ast.FuncLit, emit func(fieldRegMark)) {
+	if lit == nil || lit.Type == nil || lit.Body == nil {
 		emit(fieldRegMark{class: 'p', field: field, idx: -1})
 		return
 	}
@@ -2221,7 +2008,7 @@ func classifyLiteralRegistrant(audited bool, p *packages.Package, field string, 
 					continue
 				}
 				wants := map[syntaxutil.ParamKey]bool{}
-				if boundValueLeakFreeJudged(audited, p, map[types.Object]bool{obj: true}, lit.Body, wants, nil, nil, nil, nil) {
+				if boundValueLeakFreeJudged(audited, p, fc, map[types.Object]bool{obj: true}, lit.Body, wants, nil, nil, nil, nil) {
 					for want := range wants {
 						emit(fieldRegMark{class: 'd', field: field, idx: idx, param: want})
 					}
@@ -2234,201 +2021,14 @@ func classifyLiteralRegistrant(audited bool, p *packages.Package, field string, 
 	}
 }
 
-type localCarrierAliases struct {
-	root []*types.Var
-	all  []*types.Var
-}
-
-func isRefHeaderType(t types.Type) bool {
-	if t == nil {
-		return false
-	}
-	switch types.Unalias(t).Underlying().(type) {
-	case *types.Pointer, *types.Slice, *types.Map, *types.Chan, *types.Interface:
-		return true
-	}
-	return false
-}
-
-func isTypeParamType(t types.Type) bool {
-	if t == nil {
-		return false
-	}
-	_, ok := types.Unalias(t).Underlying().(*types.TypeParam)
-	return ok
-}
-
-// placeEntersInterior reports whether accessing p (and, when writeContainer is
-// true, writing into the slice/channel header designated by p as in copy,
-// append, or channel send) crosses an interior pointer, slice, map, channel, or
-// interface hop beyond p.Obj's own single root header.
-func placeEntersInterior(p flowir.Place, writeContainer bool) bool {
-	if p.Obj == nil || p.Obj.Type() == nil || isTypeParamType(p.Obj.Type()) {
-		return true
-	}
-	usedHeader := !isRefHeaderType(p.Obj.Type())
-	crossHop := func() bool {
-		if usedHeader {
-			return true
-		}
-		usedHeader = true
-		return false
-	}
-	for _, proj := range p.Projs {
-		if proj.BaseType == nil || isTypeParamType(proj.BaseType) {
-			return true
-		}
-		baseU := types.Unalias(proj.BaseType).Underlying()
-		switch proj.Kind {
-		case flowir.ProjDeref:
-			if crossHop() {
-				return true
-			}
-		case flowir.ProjIndex:
-			switch baseU.(type) {
-			case *types.Array:
-				// Inline array element: no pointer/header indirection.
-			case *types.Pointer, *types.Slice, *types.Map:
-				if crossHop() {
-					return true
-				}
-			default:
-				return true
-			}
-		case flowir.ProjSlice:
-			switch baseU.(type) {
-			case *types.Slice, *types.Array:
-				// Re-slicing a slice or inline array yields a slice view without an extra hop.
-			case *types.Pointer:
-				if crossHop() {
-					return true
-				}
-			default:
-				return true
-			}
-		case flowir.ProjField:
-			cur := baseU
-			if ptr, isPtr := cur.(*types.Pointer); isPtr {
-				if crossHop() {
-					return true
-				}
-				cur = types.Unalias(ptr.Elem()).Underlying()
-			}
-			if proj.Selection == nil {
-				return true
-			}
-			idx := proj.Selection.Index()
-			for _, fi := range idx[:len(idx)-1] {
-				st, ok := cur.(*types.Struct)
-				if !ok || fi < 0 || fi >= st.NumFields() {
-					return true
-				}
-				ft := st.Field(fi).Type()
-				if isTypeParamType(ft) {
-					return true
-				}
-				fu := types.Unalias(ft).Underlying()
-				if ptr, isPtr := fu.(*types.Pointer); isPtr {
-					if crossHop() {
-						return true
-					}
-					cur = types.Unalias(ptr.Elem()).Underlying()
-				} else {
-					cur = fu
-				}
-			}
-		default:
-			return true
-		}
-	}
-	if writeContainer {
-		if crossHop() {
-			return true
-		}
-	}
-	return false
-}
-
-func visitAllBodyOps(b *flowir.Body, fn func(*flowir.Op)) {
-	if b == nil {
-		return
-	}
-	var scanVal func(v *flowir.Value)
-	scanVal = func(v *flowir.Value) {
-		if v == nil {
-			return
-		}
-		if v.Kind == flowir.ValMakeClosure && v.Closure != nil {
-			visitAllBodyOps(v.Closure, fn)
-		}
-		if v.Kind == flowir.ValCall && v.CallKind == flowir.CallIIFE && v.IIFE != nil {
-			visitAllBodyOps(v.IIFE, fn)
-		}
-		v.ForEachChildValue(func(ch *flowir.Value) bool {
-			scanVal(ch)
-			return true
-		})
-	}
-	b.ForEachSyncOp(func(op *flowir.Op) bool {
-		fn(op)
-		switch op.Kind {
-		case flowir.OpAssign:
-			for _, dst := range op.Dsts {
-				dst.ForEachChildValue(func(cv *flowir.Value) bool {
-					scanVal(cv)
-					return true
-				})
-			}
-			for _, src := range op.Srcs {
-				scanVal(src)
-			}
-		case flowir.OpTypeSwitchBind:
-			scanVal(op.SwitchSrc)
-		case flowir.OpChanSend:
-			op.ChanPlace.ForEachChildValue(func(cv *flowir.Value) bool {
-				scanVal(cv)
-				return true
-			})
-			scanVal(op.ChanVal)
-			scanVal(op.SendVal)
-		case flowir.OpReturn:
-			for _, r := range op.Results {
-				scanVal(r)
-			}
-		case flowir.OpDefer, flowir.OpGo:
-			scanVal(op.Call)
-		case flowir.OpExpr:
-			scanVal(op.Expr)
-		}
-		return true
-	})
-}
-
-func appendUniqueVars(dst *[]*types.Var, sources []*types.Var) bool {
-	if len(sources) == 0 {
-		return false
-	}
-	have := make(map[*types.Var]bool, len(*dst))
-	for _, v := range *dst {
-		have[v] = true
-	}
-	changed := false
-	for _, v := range sources {
-		if v != nil && !have[v] {
-			*dst = append(*dst, v)
-			have[v] = true
-			changed = true
-		}
-	}
-	return changed
-}
-
 // recordEnvCarryingRegistrations records, per dynamic-capable package variable
 // (own or foreign), whether this package's direct code stores a
 // function-carrying value into it that is not provably environment-free.
 func recordEnvCarryingRegistrations(
 	audited bool,
+	stringUnsafe bool,
 	p *packages.Package,
+	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
 	callIdx *refconfine.CallSiteIndex,
 	initOnly map[string]bool,
@@ -2452,18 +2052,15 @@ func recordEnvCarryingRegistrations(
 	if p == nil || p.TypesInfo == nil {
 		return
 	}
+	if fc == nil {
+		fc = newPkgFlowCache(audited, p)
+	}
 	ownPath := ""
 	if p.Types != nil {
 		ownPath = p.Types.Path()
 	}
-	resolve := func(ident *ast.Ident) (types.Object, bool) {
-		if obj, ok := p.TypesInfo.Uses[ident]; ok {
-			return obj, true
-		}
-		if obj, ok := p.TypesInfo.Defs[ident]; ok && obj != nil {
-			return obj, true
-		}
-		return nil, false
+	reachOrStr := func(t types.Type) bool {
+		return refconfine.TypeHandsOutMutableReach(t) || syntaxutil.ContainsUintptr(t) || (stringUnsafe && syntaxutil.TypeReachesString(t))
 	}
 	carrierVar := func(obj types.Object) (*types.Var, bool) {
 		variable, ok := obj.(*types.Var)
@@ -2476,422 +2073,51 @@ func recordEnvCarryingRegistrations(
 		return variable, true
 	}
 	var localAliases map[types.Object]localCarrierAliases
-	collectAllTargetVars := func(expr ast.Expr, aliases map[types.Object]localCarrierAliases) []*types.Var {
-		var vars []*types.Var
-		ast.Inspect(expr, func(n ast.Node) bool {
-			if _, isLit := n.(*ast.FuncLit); isLit {
-				return false
-			}
-			if ident, ok := n.(*ast.Ident); ok {
-				if obj, ok := resolve(ident); ok {
-					if variable, ok := carrierVar(obj); ok {
-						appendUniqueVars(&vars, []*types.Var{variable})
-					} else {
-						appendUniqueVars(&vars, aliases[obj].all)
-					}
-				}
-			}
-			return true
-		})
-		return vars
-	}
-	collectValueTargetVars := func(v *flowir.Value, aliases map[types.Object]localCarrierAliases) []*types.Var {
-		if v == nil {
+	targetVarsForPlace := func(dst flowir.Place, writeContainer bool) []*types.Var {
+		if dst.Root == flowir.RootBlank {
 			return nil
 		}
-		var vars []*types.Var
-		addObj := func(u *types.Var) {
-			if u == nil {
-				return
+		if dst.Obj != nil {
+			if cv, isC := carrierVar(dst.Obj); isC {
+				return []*types.Var{cv}
 			}
-			if cv, isC := carrierVar(u); isC {
-				appendUniqueVars(&vars, []*types.Var{cv})
-			} else {
-				appendUniqueVars(&vars, aliases[u].all)
+			if placeEntersInterior(dst, writeContainer) {
+				return localAliases[dst.Obj].all
 			}
+			return localAliases[dst.Obj].root
 		}
-		v.WalkValues(func(cur *flowir.Value) bool {
-			switch cur.Kind {
-			case flowir.ValMakeClosure:
-				return false
-			case flowir.ValPlace:
-				addObj(cur.Place.Obj)
-			case flowir.ValAddrOf:
-				addObj(cur.AddrPlace.Obj)
-			case flowir.ValMethodVal:
-				if cur.HasRecvPlace {
-					addObj(cur.RecvPlace.Obj)
-				}
-			case flowir.ValCall:
-				if cur.AutoAddrRecv && cur.HasRecvPlace {
-					addObj(cur.RecvPlace.Obj)
-				}
-				if cur.CallKind == flowir.CallIIFE {
-					return false
-				}
-			}
-			return true
-		})
-		return vars
+		if dst.Root == flowir.RootTransient && dst.Base != nil {
+			return collectValueCarrierVars(audited, stringUnsafe, dst.Base, carrierVar, localAliases, nil)
+		}
+		return nil
 	}
-	targetVars := func(expr ast.Expr, writeContainer bool) []*types.Var {
-		if expr == nil {
-			return nil
+	targetVarsForValue := func(val *flowir.Value, writeContainer bool) (flowir.Place, bool, []*types.Var) {
+		if val == nil {
+			return flowir.Place{}, false, nil
 		}
-		exprBody := flowir.LowerNode(p.TypesInfo, p.Types, expr)
-		if exprBody != nil && len(exprBody.Ops) == 1 && exprBody.Ops[0].Kind == flowir.OpExpr && exprBody.Ops[0].Expr != nil {
-			val := exprBody.Ops[0].Expr
-			switch val.Kind {
-			case flowir.ValPlace:
-				dst := val.Place
-				if dst.Root == flowir.RootBlank {
-					return nil
+		switch val.Kind {
+		case flowir.ValPlace:
+			return val.Place, true, targetVarsForPlace(val.Place, writeContainer)
+		case flowir.ValAddrOf:
+			if val.IsArraySlice && val.AddrPlace.Obj != nil {
+				if cv, isC := carrierVar(val.AddrPlace.Obj); isC {
+					return flowir.Place{}, false, []*types.Var{cv}
 				}
-				if dst.Obj != nil {
-					if cv, isC := carrierVar(dst.Obj); isC {
-						return []*types.Var{cv}
-					}
-					if placeEntersInterior(dst, writeContainer) {
-						return localAliases[dst.Obj].all
-					}
-					return localAliases[dst.Obj].root
+				if placeEntersInterior(val.AddrPlace, false) {
+					return flowir.Place{}, false, localAliases[val.AddrPlace.Obj].all
 				}
-				if dst.Root == flowir.RootTransient && dst.Base != nil {
-					return collectValueTargetVars(dst.Base, localAliases)
-				}
-			case flowir.ValAddrOf:
-				if val.IsArraySlice && val.AddrPlace.Obj != nil {
-					if cv, isC := carrierVar(val.AddrPlace.Obj); isC {
-						return []*types.Var{cv}
-					}
-					if placeEntersInterior(val.AddrPlace, false) {
-						return localAliases[val.AddrPlace.Obj].all
-					}
-					return localAliases[val.AddrPlace.Obj].root
-				}
+				return flowir.Place{}, false, localAliases[val.AddrPlace.Obj].root
 			}
 		}
-		return collectAllTargetVars(expr, localAliases)
+		return flowir.Place{}, false, collectValueCarrierVars(audited, stringUnsafe, val, carrierVar, localAliases, nil)
 	}
-	computeLocalAliases := func(scopeNode ast.Node, parent map[types.Object]localCarrierAliases) map[types.Object]localCarrierAliases {
-		aliased := map[types.Object]localCarrierAliases{}
-		for obj, entry := range parent {
-			aliased[obj] = localCarrierAliases{
-				root: append([]*types.Var(nil), entry.root...),
-				all:  append([]*types.Var(nil), entry.all...),
-			}
-		}
-		lowered := lowerEnclosingScope(p.TypesInfo, p.Types, scopeNode)
-		if lowered == nil {
-			return aliased
-		}
-		memAliases := flowir.BuildScopedMemAliases(lowered, syntaxutil.IsLocalVar, refconfine.TypeHandsOutMutableReach)
-		addrTakenBare := map[*types.Var]bool{}
-		visitAllBodyOps(lowered, func(op *flowir.Op) {
-			checkAddr := func(v *flowir.Value) {
-				if v == nil {
-					return
-				}
-				v.WalkValues(func(cur *flowir.Value) bool {
-					if cur.Kind == flowir.ValAddrOf && !cur.IsArraySlice && cur.AddrPlace.IsBareVar() {
-						addrTakenBare[cur.AddrPlace.Obj] = true
-					}
-					if cur.Kind == flowir.ValMethodVal && cur.AutoAddr && cur.HasRecvPlace && cur.RecvPlace.IsBareVar() {
-						addrTakenBare[cur.RecvPlace.Obj] = true
-					}
-					if cur.Kind == flowir.ValCall && cur.AutoAddrRecv && cur.HasRecvPlace && cur.RecvPlace.IsBareVar() {
-						addrTakenBare[cur.RecvPlace.Obj] = true
-					}
-					return true
-				})
-			}
-			switch op.Kind {
-			case flowir.OpAssign:
-				for _, dst := range op.Dsts {
-					dst.ForEachChildValue(func(cv *flowir.Value) bool { checkAddr(cv); return true })
-				}
-				for _, src := range op.Srcs {
-					checkAddr(src)
-				}
-			case flowir.OpTypeSwitchBind:
-				checkAddr(op.SwitchSrc)
-			case flowir.OpChanSend:
-				op.ChanPlace.ForEachChildValue(func(cv *flowir.Value) bool { checkAddr(cv); return true })
-				checkAddr(op.ChanVal)
-				checkAddr(op.SendVal)
-			case flowir.OpReturn:
-				for _, r := range op.Results {
-					checkAddr(r)
-				}
-			case flowir.OpDefer, flowir.OpGo:
-				checkAddr(op.Call)
-			case flowir.OpExpr:
-				checkAddr(op.Expr)
-			}
+	computeLocalAliases := func(scopeBody *flowir.Body, parent map[types.Object]localCarrierAliases) map[types.Object]localCarrierAliases {
+		aliased, _ := computeBodyCarrierAliases(audited, fc, scopeBody, carrierAliasConfig{
+			parentAliases: parent,
+			allowString:   stringUnsafe,
+			carrierVar:    carrierVar,
+			descendNested: true,
 		})
-
-		addAliases := func(dst types.Object, rootSrcs, allSrcs []*types.Var) bool {
-			if dst == nil || (len(rootSrcs) == 0 && len(allSrcs) == 0) {
-				return false
-			}
-			if _, isC := carrierVar(dst); isC {
-				return false
-			}
-			entry := aliased[dst]
-			changed := false
-			if len(rootSrcs) > 0 && (isRefHeaderType(dst.Type()) || isTypeParamType(dst.Type())) {
-				if appendUniqueVars(&entry.root, rootSrcs) {
-					changed = true
-				}
-				if appendUniqueVars(&entry.all, rootSrcs) {
-					changed = true
-				}
-			}
-			if appendUniqueVars(&entry.all, allSrcs) {
-				changed = true
-			}
-			if changed {
-				aliased[dst] = entry
-			}
-			return changed
-		}
-
-		valSources := func(v *flowir.Value) (rootSrcs, allSrcs []*types.Var) {
-			if v == nil {
-				return nil, nil
-			}
-			allSrcs = collectValueTargetVars(v, aliased)
-			if len(allSrcs) == 0 {
-				return nil, nil
-			}
-			switch v.Kind {
-			case flowir.ValAllocFresh:
-				return nil, allSrcs
-			case flowir.ValPlace:
-				if v.Place.IsBareVar() {
-					if cv, isC := carrierVar(v.Place.Obj); isC {
-						if isRefHeaderType(cv.Type()) || isTypeParamType(cv.Type()) {
-							return []*types.Var{cv}, allSrcs
-						}
-						return nil, allSrcs
-					}
-					return aliased[v.Place.Obj].root, allSrcs
-				}
-				if v.Place.Obj != nil && len(v.Place.Projs) == 1 && v.Place.Projs[0].Kind == flowir.ProjSlice {
-					if cv, isC := carrierVar(v.Place.Obj); isC {
-						return []*types.Var{cv}, allSrcs
-					}
-					return aliased[v.Place.Obj].root, allSrcs
-				}
-				return allSrcs, allSrcs
-			case flowir.ValAddrOf:
-				if v.AddrPlace.Obj != nil {
-					if _, isC := carrierVar(v.AddrPlace.Obj); isC {
-						return allSrcs, allSrcs
-					}
-					if v.IsArraySlice {
-						if placeEntersInterior(v.AddrPlace, false) {
-							return allSrcs, allSrcs
-						}
-						return aliased[v.AddrPlace.Obj].root, allSrcs
-					}
-					if v.AddrPlace.IsBareVar() {
-						return nil, allSrcs
-					}
-					if !placeEntersInterior(v.AddrPlace, false) {
-						return aliased[v.AddrPlace.Obj].root, allSrcs
-					}
-				}
-				return allSrcs, allSrcs
-			default:
-				return allSrcs, allSrcs
-			}
-		}
-
-		propagateMem := func(obj *types.Var, derefStore bool, rootSrcs, allSrcs []*types.Var) bool {
-			if len(memAliases[obj]) == 0 {
-				return false
-			}
-			changed := false
-			visited := map[types.Object]bool{obj: true}
-			queue := []types.Object{obj}
-			for len(queue) > 0 {
-				cur := queue[len(queue)-1]
-				queue = queue[:len(queue)-1]
-				for next := range memAliases[cur] {
-					if visited[next] {
-						continue
-					}
-					visited[next] = true
-					var nextRoot []*types.Var
-					if derefStore {
-						if nv, ok := next.(*types.Var); ok && addrTakenBare[nv] {
-							nextRoot = rootSrcs
-						}
-					}
-					if addAliases(next, nextRoot, allSrcs) {
-						changed = true
-					}
-					queue = append(queue, next)
-				}
-			}
-			return changed
-		}
-
-		bindObj := func(obj *types.Var, composite, inPlace, derefStore bool, rootSrcs, allSrcs []*types.Var) bool {
-			if obj == nil || (len(rootSrcs) == 0 && len(allSrcs) == 0) || !syntaxutil.IsLocalVar(obj) {
-				return false
-			}
-			if !composite && !inPlace && !refconfine.TypeHandsOutMutableReach(obj.Type()) && !isTypeParamType(obj.Type()) {
-				return false
-			}
-			var ownRoot []*types.Var
-			if (!composite && !inPlace) || (derefStore && addrTakenBare[obj]) {
-				ownRoot = rootSrcs
-			}
-			changed := addAliases(obj, ownRoot, allSrcs)
-			if propagateMem(obj, derefStore, rootSrcs, allSrcs) {
-				changed = true
-			}
-			return changed
-		}
-
-		bindPlace := func(dst flowir.Place, rootSrcs, allSrcs []*types.Var, inPlace bool) bool {
-			if len(rootSrcs) == 0 && len(allSrcs) == 0 {
-				return false
-			}
-			derefStore := !inPlace && len(dst.Projs) >= 1 && dst.Projs[len(dst.Projs)-1].Kind == flowir.ProjDeref
-			if dst.Obj != nil {
-				return bindObj(dst.Obj, !dst.IsBareVar(), inPlace, derefStore, rootSrcs, allSrcs)
-			}
-			if dst.Root == flowir.RootTransient && dst.Base != nil {
-				changed := false
-				dst.Base.WalkValues(func(cur *flowir.Value) bool {
-					if cur.Kind == flowir.ValMakeClosure {
-						return false
-					}
-					if cur.Kind == flowir.ValPlace && cur.Place.Obj != nil {
-						if bindObj(cur.Place.Obj, true, !derefStore, derefStore, rootSrcs, allSrcs) {
-							changed = true
-						}
-					} else if cur.Kind == flowir.ValAddrOf && cur.AddrPlace.Obj != nil {
-						if bindObj(cur.AddrPlace.Obj, true, !derefStore, derefStore, rootSrcs, allSrcs) {
-							changed = true
-						}
-					}
-					return true
-				})
-				return changed
-			}
-			return false
-		}
-
-		bindValTarget := func(target *flowir.Value, allSrcs []*types.Var) bool {
-			if target == nil || len(allSrcs) == 0 {
-				return false
-			}
-			if target.Kind == flowir.ValPlace {
-				return bindPlace(target.Place, nil, allSrcs, true)
-			}
-			changed := false
-			target.WalkValues(func(cur *flowir.Value) bool {
-				if cur.Kind == flowir.ValMakeClosure {
-					return false
-				}
-				if cur.Kind == flowir.ValPlace && cur.Place.Obj != nil {
-					if bindObj(cur.Place.Obj, true, true, false, nil, allSrcs) {
-						changed = true
-					}
-				} else if cur.Kind == flowir.ValAddrOf && cur.AddrPlace.Obj != nil {
-					if bindObj(cur.AddrPlace.Obj, true, true, false, nil, allSrcs) {
-						changed = true
-					}
-				}
-				return true
-			})
-			return changed
-		}
-
-		for changed := true; changed; {
-			changed = false
-			var scanCallBinds func(v *flowir.Value)
-			scanCallBinds = func(v *flowir.Value) {
-				if v == nil || v.Kind == flowir.ValMakeClosure {
-					return
-				}
-				if v.Kind == flowir.ValCall && v.CallKind == flowir.CallBuiltin {
-					switch {
-					case v.BuiltinName == "copy" && len(v.Args) == 2:
-						_, allSrcs := valSources(v.Args[1])
-						if bindValTarget(v.Args[0], allSrcs) {
-							changed = true
-						}
-					case v.BuiltinName == "append" && len(v.Args) >= 2:
-						for _, elem := range v.Args[1:] {
-							_, allSrcs := valSources(elem)
-							if bindValTarget(v.Args[0], allSrcs) {
-								changed = true
-							}
-						}
-					}
-				}
-				v.ForEachChildValue(func(ch *flowir.Value) bool {
-					scanCallBinds(ch)
-					return true
-				})
-			}
-			visitAllBodyOps(lowered, func(op *flowir.Op) {
-				switch op.Kind {
-				case flowir.OpAssign:
-					op.ForEachAssignPair(func(_ int, dst flowir.Place, _ bool, src *flowir.Value) bool {
-						rootSrcs, allSrcs := valSources(src)
-						if op.AssignKind == flowir.AssignRange {
-							rootSrcs = allSrcs
-						}
-						if bindPlace(dst, rootSrcs, allSrcs, false) {
-							changed = true
-						}
-						if mapPlace, keyVal, isMapW := dst.AsMapWrite(); isMapW && keyVal != nil {
-							_, keyAll := valSources(keyVal)
-							if bindPlace(mapPlace, nil, keyAll, true) {
-								changed = true
-							}
-						}
-						dst.ForEachChildValue(func(cv *flowir.Value) bool {
-							scanCallBinds(cv)
-							return true
-						})
-						return true
-					})
-					for _, src := range op.Srcs {
-						scanCallBinds(src)
-					}
-				case flowir.OpTypeSwitchBind:
-					if op.SwitchDst != nil && syntaxutil.IsLocalVar(op.SwitchDst) {
-						rootSrcs, allSrcs := valSources(op.SwitchSrc)
-						if bindObj(op.SwitchDst, false, false, false, rootSrcs, allSrcs) {
-							changed = true
-						}
-					}
-					scanCallBinds(op.SwitchSrc)
-				case flowir.OpChanSend:
-					_, sendAll := valSources(op.SendVal)
-					if bindPlace(op.ChanPlace, nil, sendAll, true) {
-						changed = true
-					}
-					scanCallBinds(op.ChanVal)
-					scanCallBinds(op.SendVal)
-				case flowir.OpReturn:
-					for _, r := range op.Results {
-						scanCallBinds(r)
-					}
-				case flowir.OpDefer, flowir.OpGo:
-					scanCallBinds(op.Call)
-				case flowir.OpExpr:
-					scanCallBinds(op.Expr)
-				}
-			})
-		}
 		return aliased
 	}
 
@@ -2902,7 +2128,7 @@ func recordEnvCarryingRegistrations(
 	var pendingEnvParams map[syntaxutil.ParamKey]bool
 	var pendingEnvMethods map[syntaxutil.FuncKey]bool
 	var pendingCarrierLinks map[string]bool
-	var carrying func(expr ast.Expr) bool
+	var carryingValue func(val *flowir.Value) bool
 
 	wantsResolve := func(wants map[syntaxutil.ParamKey]bool, methodWants map[syntaxutil.FuncKey]bool) bool {
 		for w := range wants {
@@ -2944,22 +2170,22 @@ func recordEnvCarryingRegistrations(
 	}
 
 	type singleWriteCacheEntry struct {
-		initExpr ast.Expr
-		ok       bool
+		initVal *flowir.Value
+		ok      bool
 	}
 	singleWriteCache := map[*types.Var]singleWriteCacheEntry{}
-	singleWriteTopLevelInit := func(cv *types.Var) (ast.Expr, bool) {
+	singleWriteTopLevelInit := func(cv *types.Var) (*flowir.Value, bool) {
 		if p.Types == nil || cv == nil || cv.Pkg() != p.Types || cv.Parent() != p.Types.Scope() {
 			return nil, false
 		}
 		if cached, seen := singleWriteCache[cv]; seen {
-			return cached.initExpr, cached.ok
+			return cached.initVal, cached.ok
 		}
-		fail := func() (ast.Expr, bool) {
+		fail := func() (*flowir.Value, bool) {
 			singleWriteCache[cv] = singleWriteCacheEntry{}
 			return nil, false
 		}
-		if refconfine.TypeHandsOutMutableReach(cv.Type()) || refconfine.TypeReachesSyncNoCopyByValue(cv.Type()) {
+		if reachOrStr(cv.Type()) || refconfine.TypeReachesSyncNoCopyByValue(cv.Type()) {
 			return fail()
 		}
 		cvKey := syntaxutil.DynamicVarKey(cv)
@@ -2967,7 +2193,7 @@ func recordEnvCarryingRegistrations(
 			return fail()
 		}
 		defs := 0
-		var initExpr ast.Expr
+		var initVal *flowir.Value
 		mutatedOrAddressed := false
 		scanLowered := func(b *flowir.Body) {
 			if b == nil || mutatedOrAddressed {
@@ -3043,6 +2269,9 @@ func recordEnvCarryingRegistrations(
 			})
 		}
 		for _, file := range p.Syntax {
+			if file == nil {
+				continue
+			}
 			for _, decl := range file.Decls {
 				switch d := decl.(type) {
 				case *ast.GenDecl:
@@ -3055,19 +2284,19 @@ func recordEnvCarryingRegistrations(
 							if nm != nil && p.TypesInfo.Defs[nm] == cv {
 								defs++
 								if d.Tok == token.VAR && len(vs.Names) == len(vs.Values) {
-									initExpr = vs.Values[i]
+									initVal = fc.exprValue(p, vs.Values[i])
 								} else {
 									mutatedOrAddressed = true
 								}
 							}
 						}
 						for _, val := range vs.Values {
-							scanLowered(flowir.LowerNode(p.TypesInfo, p.Types, val))
+							scanLowered(fc.body(p, val))
 						}
 					}
 				case *ast.FuncDecl:
 					if d.Body != nil {
-						scanLowered(flowir.LowerFunc(p.TypesInfo, p.Types, d))
+						scanLowered(fc.funcBody(p, d))
 					}
 				}
 				if mutatedOrAddressed || defs > 1 {
@@ -3075,15 +2304,16 @@ func recordEnvCarryingRegistrations(
 				}
 			}
 		}
-		if defs != 1 || initExpr == nil || mutatedOrAddressed {
+		if defs != 1 || initVal == nil || mutatedOrAddressed {
 			return fail()
 		}
-		singleWriteCache[cv] = singleWriteCacheEntry{initExpr: initExpr, ok: true}
-		return initExpr, true
+		singleWriteCache[cv] = singleWriteCacheEntry{initVal: initVal, ok: true}
+		return initVal, true
 	}
 
 	visitingSingleWriteVars := map[*types.Var]bool{}
 	visitingInitParams := map[syntaxutil.ParamKey]bool{}
+	visitingFuncLits := map[*ast.FuncLit]bool{}
 
 	cloneFuncMap := func(m map[syntaxutil.FuncKey]bool) map[syntaxutil.FuncKey]bool {
 		if m == nil {
@@ -3116,14 +2346,14 @@ func recordEnvCarryingRegistrations(
 		return out
 	}
 
-	carryingAtScope := func(scope ast.Node, expr ast.Expr) bool {
+	carryingAtScope := func(scope ast.Node, val *flowir.Value) bool {
 		prev := enclosingScope
 		snapCalls := cloneFuncMap(pendingEnvCalls)
 		snapParams := cloneParamMap(pendingEnvParams)
 		snapMethods := cloneFuncMap(pendingEnvMethods)
 		snapLinks := cloneStringMap(pendingCarrierLinks)
 		enclosingScope = scope
-		bad := carrying(expr)
+		bad := carryingValue(val)
 		enclosingScope = prev
 		if bad {
 			pendingEnvCalls = snapCalls
@@ -3134,41 +2364,23 @@ func recordEnvCarryingRegistrations(
 		return bad
 	}
 
-	var checkCapturedSigOriginAtScope func(scope ast.Node, expr ast.Expr) bool
+	var checkCapturedSigOriginAtScope func(scope ast.Node, val *flowir.Value) bool
 	var checkInitOnlyParamAtCallSites func(fd *ast.FuncDecl, pIdx int, paramVar *types.Var) bool
 
-	checkCapturedSigOriginAtScope = func(scope ast.Node, expr ast.Expr) bool {
-		if expr == nil {
+	checkCapturedSigOriginAtScope = func(scope ast.Node, val *flowir.Value) bool {
+		if val == nil || val.IsTypeExpr {
 			return false
 		}
-		if !carryingAtScope(scope, expr) {
+		if !carryingAtScope(scope, val) {
 			return true
 		}
 		if !isSyncInitFlowScope(scope) {
 			return false
 		}
-		var targetIdent *ast.Ident
-		switch u := syntaxutil.UnparenExpr(expr).(type) {
-		case *ast.Ident:
-			targetIdent = u
-		case *ast.SelectorExpr:
-			if x, ok := syntaxutil.UnparenExpr(u.X).(*ast.Ident); ok {
-				if _, isPkg := p.TypesInfo.Uses[x].(*types.PkgName); isPkg {
-					targetIdent = u.Sel
-				}
-			}
-		}
-		if targetIdent == nil {
+		if val.Kind != flowir.ValPlace || !val.Place.IsBareVar() || val.Place.Obj == nil {
 			return false
 		}
-		obj, ok := resolve(targetIdent)
-		if !ok {
-			return false
-		}
-		v, ok := obj.(*types.Var)
-		if !ok || v == nil {
-			return false
-		}
+		v := val.Place.Obj
 		if p.Types != nil && v.Pkg() == p.Types && v.Parent() == p.Types.Scope() {
 			if visitingSingleWriteVars[v] {
 				return false
@@ -3187,22 +2399,22 @@ func recordEnvCarryingRegistrations(
 					return checkInitOnlyParamAtCallSites(callerFD, cp.Index, v)
 				}
 			}
-			if !visitingSingleWriteVars[v] && !refconfine.TypeHandsOutMutableReach(v.Type()) {
-				fnBody := flowir.LowerFunc(p.TypesInfo, p.Types, callerFD)
+			if !visitingSingleWriteVars[v] && !reachOrStr(v.Type()) {
+				fnBody := fc.funcBody(p, callerFD)
 				if fnBody != nil && fnBody.OwnsVar(v) && v != fnBody.Recv && !fnBody.ResultSet[v] {
 					if _, isParam := fnBody.ParamIndex[v]; !isParam {
 						defs := 0
-						var initRaw ast.Expr
+						var initVal *flowir.Value
 						bad := false
 						visitAllBodyOps(fnBody, func(op *flowir.Op) {
 							if bad {
 								return
 							}
-							checkAddr := func(val *flowir.Value) {
-								if val == nil || bad {
+							checkAddr := func(sub *flowir.Value) {
+								if sub == nil || bad {
 									return
 								}
-								val.WalkValues(func(cur *flowir.Value) bool {
+								sub.WalkValues(func(cur *flowir.Value) bool {
 									if (cur.Kind == flowir.ValAddrOf && cur.AddrPlace.Obj == v) ||
 										(cur.Kind == flowir.ValMethodVal && cur.AutoAddr && cur.HasRecvPlace && cur.RecvPlace.Obj == v) ||
 										(cur.Kind == flowir.ValCall && cur.AutoAddrRecv && cur.HasRecvPlace && cur.RecvPlace.Obj == v) {
@@ -3216,10 +2428,10 @@ func recordEnvCarryingRegistrations(
 							case flowir.OpAssign:
 								op.ForEachAssignPair(func(_ int, dst flowir.Place, isDef bool, src *flowir.Value) bool {
 									if dst.Obj == v {
-										if dst.IsBareVar() && isDef && src != nil && src.Raw != nil &&
+										if dst.IsBareVar() && isDef && src != nil &&
 											op.AssignKind != flowir.AssignCompound && op.AssignKind != flowir.AssignIncDec {
 											defs++
-											initRaw = src.Raw
+											initVal = src
 										} else {
 											bad = true
 										}
@@ -3251,10 +2463,10 @@ func recordEnvCarryingRegistrations(
 								checkAddr(op.Expr)
 							}
 						})
-						if !bad && defs == 1 && initRaw != nil {
+						if !bad && defs == 1 && initVal != nil {
 							visitingSingleWriteVars[v] = true
 							defer delete(visitingSingleWriteVars, v)
-							return checkCapturedSigOriginAtScope(callerFD, initRaw)
+							return checkCapturedSigOriginAtScope(callerFD, initVal)
 						}
 					}
 				}
@@ -3304,14 +2516,14 @@ func recordEnvCarryingRegistrations(
 				if pIdx >= len(call.Args) {
 					return false
 				}
-				arg := call.Args[pIdx]
+				argVal := fc.exprValue(p, call.Args[pIdx])
 				if refconfine.TypeReachesSyncNoCopyByValue(paramVar.Type()) {
 					return false
 				}
-				if refconfine.TypeCarriesSignature(paramVar.Type()) && !checkCapturedSigOriginAtScope(callerScope, arg) {
+				if refconfine.TypeCarriesSignature(paramVar.Type()) && !checkCapturedSigOriginAtScope(callerScope, argVal) {
 					return false
 				}
-				if refconfine.TypeHandsOutMutableReach(paramVar.Type()) && !isPureFreshDataExpr(p, settledGlobals, arg) {
+				if reachOrStr(paramVar.Type()) && !isPureFreshDataValue(settledGlobals, argVal) {
 					return false
 				}
 				continue
@@ -3325,11 +2537,11 @@ func recordEnvCarryingRegistrations(
 				return false
 			}
 			for ai := pIdx; ai < len(call.Args); ai++ {
-				arg := call.Args[ai]
-				if refconfine.TypeCarriesSignature(elemT) && !checkCapturedSigOriginAtScope(callerScope, arg) {
+				argVal := fc.exprValue(p, call.Args[ai])
+				if refconfine.TypeCarriesSignature(elemT) && !checkCapturedSigOriginAtScope(callerScope, argVal) {
 					return false
 				}
-				if refconfine.TypeHandsOutMutableReach(elemT) && !isPureFreshDataExpr(p, settledGlobals, arg) {
+				if reachOrStr(elemT) && !isPureFreshDataValue(settledGlobals, argVal) {
 					return false
 				}
 			}
@@ -3337,24 +2549,44 @@ func recordEnvCarryingRegistrations(
 		return true
 	}
 
-	checkLocalCarryingInit := func(initExpr ast.Expr) bool {
-		return checkCapturedSigOriginAtScope(enclosingScope, initExpr)
+	checkLocalCarryingInit := func(initVal *flowir.Value) bool {
+		return checkCapturedSigOriginAtScope(enclosingScope, initVal)
 	}
 
-	carrying = func(expr ast.Expr) bool {
-		if expr == nil {
+	carryingValue = func(val *flowir.Value) bool {
+		if val == nil || val.IsTypeExpr {
 			return false
 		}
-		switch e := syntaxutil.UnparenExpr(expr).(type) {
-		case *ast.CompositeLit:
-			return !syntaxutil.EachCompositeLitFlow(p.TypesInfo, e, func(flow ast.Expr, _ bool) bool {
-				return !carrying(flow)
-			})
-		case *ast.UnaryExpr:
-			if e.Op == token.AND {
-				return carrying(e.X)
+		switch val.Kind {
+		case flowir.ValScalarLitOrConst:
+			return false
+		case flowir.ValAllocFresh:
+			switch val.AllocKind {
+			case flowir.AllocMake, flowir.AllocBuiltinNewType:
+				return false
+			case flowir.AllocBuiltinNewExpr:
+				return len(val.Args) != 1 || val.Ellipsis || carryingValue(val.Args[0])
+			case flowir.AllocCompositeLit:
+				for i := range val.CompositeElts {
+					elt := &val.CompositeElts[i]
+					if elt.MapKey != nil && carryingValue(elt.MapKey) {
+						return true
+					}
+					if elt.Index != nil && carryingValue(elt.Index) {
+						return true
+					}
+					if carryingValue(elt.Value) {
+						return true
+					}
+				}
+				return false
 			}
-		case *ast.FuncLit:
+		case flowir.ValMakeClosure:
+			if val.Lit == nil || visitingFuncLits[val.Lit] {
+				return true
+			}
+			visitingFuncLits[val.Lit] = true
+			defer delete(visitingFuncLits, val.Lit)
 			wants := map[syntaxutil.ParamKey]bool{}
 			methodWants := map[syntaxutil.FuncKey]bool{}
 			var checkParamFn func(int, *types.Var) bool
@@ -3371,10 +2603,10 @@ func recordEnvCarryingRegistrations(
 				singleSubjectVars:    singleSubjectVars,
 				settledGlobals:       settledGlobals,
 				currentTargets:       currentTargets,
-				checkCarryingExpr:    checkLocalCarryingInit,
+				checkCarryingValue:   checkLocalCarryingInit,
 				checkEnclosingParam:  checkParamFn,
 			}
-			if !environmentFreeFuncLitWithOrigin(audited, p, e, enclosingScope, wants, methodWants, origin) {
+			if !environmentFreeFuncLitWithOrigin(audited, stringUnsafe, p, fc, val.Lit, enclosingScope, wants, methodWants, origin) {
 				return true
 			}
 			if !wantsResolve(wants, methodWants) {
@@ -3386,104 +2618,84 @@ func recordEnvCarryingRegistrations(
 				}
 			}
 			return false
-		case *ast.BasicLit:
-			return false
-		case *ast.CallExpr:
-			if ident, ok := syntaxutil.UnparenExpr(e.Fun).(*ast.Ident); ok {
-				if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
-					switch ident.Name {
-					case "make":
-						return false
-					case "new":
-						if syntaxutil.IsBuiltinNewType(p.TypesInfo, e) {
-							return false
-						}
-						return len(e.Args) != 1 || carrying(e.Args[0])
-					case "append":
-						for _, arg := range e.Args {
-							if carrying(arg) {
-								return true
-							}
-						}
-						return false
+		case flowir.ValMethodVal:
+			return true
+		case flowir.ValConvert:
+			if !val.IsTypeAssert && val.Arg != nil {
+				if val.Arg.IsNil {
+					return false
+				}
+				if !syntaxutil.IsUnsafePointerType(val.Arg.Type) && val.Type != nil {
+					if val.Arg.Type != nil && types.Identical(types.Unalias(val.Type).Underlying(), types.Unalias(val.Arg.Type).Underlying()) {
+						return carryingValue(val.Arg)
+					}
+					if _, isIface := types.Unalias(val.Type).Underlying().(*types.Interface); isIface {
+						return carryingValue(val.Arg)
 					}
 				}
 			}
-			if tv, ok := p.TypesInfo.Types[e.Fun]; ok && tv.IsType() && len(e.Args) == 1 && !e.Ellipsis.IsValid() {
-				argT := p.TypesInfo.TypeOf(e.Args[0])
-				if argT != nil && types.Identical(types.Unalias(tv.Type).Underlying(), types.Unalias(argT).Underlying()) {
-					return carrying(e.Args[0])
-				}
-				if id, isId := syntaxutil.UnparenExpr(e.Args[0]).(*ast.Ident); isId {
-					if _, isNil := syntaxutil.IdentDefOrUse(p.TypesInfo, id).(*types.Nil); isNil {
-						return false
-					}
-				}
-				if _, isIface := types.Unalias(tv.Type).Underlying().(*types.Interface); isIface {
-					return carrying(e.Args[0])
-				}
-			}
-			if fn, pkgPath := syntaxutil.PlainCalleeFunc(p, e.Fun); fn != nil {
-				calleeFK := syntaxutil.FuncKey{Pkg: pkgPath, Name: fn.Name()}
-				if auditedValuePlane[calleeFK] {
-					for _, arg := range e.Args {
-						if carrying(arg) {
+		case flowir.ValCall:
+			switch val.CallKind {
+			case flowir.CallBuiltin:
+				if val.BuiltinName == "append" {
+					for _, arg := range val.Args {
+						if carryingValue(arg) {
 							return true
 						}
 					}
 					return false
 				}
-				if pendingEnvCalls != nil && refconfine.TypeCarriesSignature(p.TypesInfo.TypeOf(e)) {
-					for _, arg := range e.Args {
-						if carrying(arg) {
-							return true
-						}
-						if argT := p.TypesInfo.TypeOf(arg); argT != nil && refconfine.TypeHandsOutMutableReach(argT) {
-							if !isSettledReachArg(audited, p, settledGlobals, currentTargets, enclosingScope, e, pkgConf, pendingEnvParams, pendingEnvMethods, checkLocalCarryingInit, arg) {
+			case flowir.CallPlain:
+				if !val.IsMethodExprCall && val.CalleeFunc != nil {
+					fn := val.CalleeFunc.Origin()
+					calleeFK := syntaxutil.FuncKey{Pkg: val.CalleePkg, Name: fn.Name()}
+					if auditedValuePlane[calleeFK] {
+						for _, arg := range val.Args {
+							if carryingValue(arg) {
 								return true
 							}
 						}
+						return false
 					}
-					pendingEnvCalls[calleeFK] = true
-					return false
+					if pendingEnvCalls != nil && refconfine.TypeCarriesSignature(val.Type) {
+						for _, arg := range val.Args {
+							if carryingValue(arg) {
+								return true
+							}
+							if arg != nil && arg.Type != nil && reachOrStr(arg.Type) {
+								if !isSettledReachArgValue(audited, stringUnsafe, p, fc, settledGlobals, currentTargets, enclosingScope, val.CallAST, pkgConf, pendingEnvParams, pendingEnvMethods, checkLocalCarryingInit, arg) {
+									return true
+								}
+							}
+						}
+						pendingEnvCalls[calleeFK] = true
+						return false
+					}
 				}
 			}
-		case *ast.Ident:
-			if obj, ok := resolve(e); ok {
-				switch obj.(type) {
-				case *types.Func, *types.Nil, *types.Const:
-					return false
-				}
+		case flowir.ValPlace:
+			if val.IsNil || val.IsConst || val.Place.Root == flowir.RootConstOrNil {
+				return false
 			}
-		case *ast.SelectorExpr:
-			if selection, ok := p.TypesInfo.Selections[e]; ok {
-				switch selection.Kind() {
-				case types.MethodExpr:
-					return false
-				case types.MethodVal:
-					return true
-				}
-				break
-			}
-			if obj, ok := p.TypesInfo.Uses[e.Sel]; ok {
-				switch obj.(type) {
-				case *types.Func, *types.Const:
-					return false
-				}
-			}
-		case *ast.IndexExpr, *ast.IndexListExpr:
-			if fn, _ := syntaxutil.PlainCalleeFunc(p, e); fn != nil {
+			if val.Place.Root == flowir.RootFunc && len(val.Place.Projs) == 0 {
 				return false
 			}
 		}
-		return refconfine.TypeCarriesSignature(p.TypesInfo.TypeOf(syntaxutil.UnparenExpr(expr)))
+		return refconfine.TypeCarriesSignature(val.Type)
 	}
 
-	poisonExemptTargets := func(lhs ast.Expr) {
+	isExemptSeamPlace := func(dst flowir.Place) bool {
+		if dst.Raw == nil || len(exemptSeamNodes) == 0 {
+			return false
+		}
+		return exemptSeamNodes[dst.Raw] || exemptSeamNodes[syntaxutil.UnparenExpr(dst.Raw)]
+	}
+
+	poisonExemptPlace := func(dst flowir.Place) {
 		if fieldPoison == nil {
 			return
 		}
-		for _, variable := range targetVars(lhs, false) {
+		for _, variable := range targetVarsForPlace(dst, false) {
 			key := syntaxutil.DynamicVarKey(variable)
 			if fieldPoison[key] == nil {
 				fieldPoison[key] = map[syntaxutil.FieldParamPoison]bool{}
@@ -3492,47 +2704,36 @@ func recordEnvCarryingRegistrations(
 		}
 	}
 
-	handleStore := func(lhs, rhs ast.Expr, rebindable, writeContainer bool) {
-		if rebindable {
-			if ident, ok := syntaxutil.UnparenExpr(lhs).(*ast.Ident); ok {
-				if obj, ok := resolve(ident); ok {
-					if _, isCarrier := carrierVar(obj); !isCarrier {
-						return
-					}
-				}
-			}
+	flowPos := func(v *flowir.Value) token.Pos {
+		if v != nil && v.Raw != nil {
+			return v.Raw.Pos()
 		}
-		targets := targetVars(lhs, writeContainer)
+		return token.NoPos
+	}
+
+	handleStoreCore := func(dst flowir.Place, hasDst bool, targets []*types.Var, rhs *flowir.Value) {
 		if len(targets) == 0 {
 			return
 		}
-		flows := []ast.Expr{rhs}
-		if call, ok := syntaxutil.UnparenExpr(rhs).(*ast.CallExpr); ok && len(call.Args) > 0 {
-			if ident, ok := syntaxutil.UnparenExpr(call.Fun).(*ast.Ident); ok {
-				if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin && ident.Name == "append" {
-					var baseIdent *ast.Ident
-					switch base := syntaxutil.UnparenExpr(call.Args[0]).(type) {
-					case *ast.Ident:
-						baseIdent = base
-					case *ast.SelectorExpr:
-						if x, ok := base.X.(*ast.Ident); ok {
-							if _, isPkg := p.TypesInfo.Uses[x].(*types.PkgName); isPkg {
-								baseIdent = base.Sel
-							}
-						}
-					}
-					if baseIdent != nil {
-						if obj, ok := resolve(baseIdent); ok {
-							if variable, ok := carrierVar(obj); ok && len(targets) == 1 && variable == targets[0] {
-								flows = call.Args[1:]
-							}
-						}
+		var flows []*flowir.Value
+		if rhs != nil {
+			flows = []*flowir.Value{rhs}
+			if rhs.Kind == flowir.ValCall && rhs.CallKind == flowir.CallBuiltin && rhs.BuiltinName == "append" && len(rhs.Args) > 0 {
+				base := rhs.Args[0]
+				if base != nil && base.Kind == flowir.ValPlace && base.Place.IsBareVar() && base.Place.Obj != nil {
+					if variable, ok := carrierVar(base.Place.Obj); ok && len(targets) == 1 && variable == targets[0] {
+						flows = rhs.Args[1:]
 					}
 				}
 			}
 		}
-		if _, mapKey, ok := syntaxutil.LHSMapWriteKey(p.TypesInfo, lhs); ok {
-			flows = append(flows, mapKey)
+		if hasDst {
+			if _, mapKey, ok := dst.AsMapWrite(); ok && mapKey != nil {
+				flows = append(flows, mapKey)
+			}
+		}
+		if len(flows) == 0 {
+			return
 		}
 		poison := false
 		pendingEnvCalls = map[syntaxutil.FuncKey]bool{}
@@ -3544,13 +2745,13 @@ func recordEnvCarryingRegistrations(
 		var poisonAt, deferredAt token.Pos
 		for _, flow := range flows {
 			beforeCalls, beforeParams, beforeMethods := len(pendingEnvCalls), len(pendingEnvParams), len(pendingEnvMethods)
-			if carrying(flow) {
+			if carryingValue(flow) {
 				poison = true
-				poisonAt = flow.Pos()
+				poisonAt = flowPos(flow)
 				break
 			}
 			if deferredAt == token.NoPos && (len(pendingEnvCalls) > beforeCalls || len(pendingEnvParams) > beforeParams || len(pendingEnvMethods) > beforeMethods) {
-				deferredAt = flow.Pos()
+				deferredAt = flowPos(flow)
 			}
 		}
 		currentTargets = prevTargets
@@ -3617,7 +2818,7 @@ func recordEnvCarryingRegistrations(
 			if fieldDefer != nil {
 				var marks []fieldRegMark
 				for _, flow := range flows {
-					classifyFieldRegistrants(audited, p, lhs, flow, func(m fieldRegMark) {
+					classifyFieldRegistrantsValue(audited, p, fc, dst, hasDst, flow, func(m fieldRegMark) {
 						marks = append(marks, m)
 					})
 				}
@@ -3651,15 +2852,25 @@ func recordEnvCarryingRegistrations(
 		pendingCarrierLinks = nil
 	}
 
-	var walkStores func(body ast.Node, scope ast.Node, aliases map[types.Object]localCarrierAliases)
-	walkStores = func(body ast.Node, scope ast.Node, aliases map[types.Object]localCarrierAliases) {
-		if expr, ok := body.(ast.Expr); ok {
-			if lit, isLit := syntaxutil.UnparenExpr(expr).(*ast.FuncLit); isLit {
-				if lit.Body != nil {
-					walkStores(lit.Body, lit, computeLocalAliases(lit, aliases))
-				}
+	handleStorePlace := func(dst flowir.Place, rhs *flowir.Value, rebindable, writeContainer bool) {
+		if rebindable && dst.IsBareVar() && dst.Obj != nil {
+			if _, isCarrier := carrierVar(dst.Obj); !isCarrier {
 				return
 			}
+		}
+		targets := targetVarsForPlace(dst, writeContainer)
+		handleStoreCore(dst, true, targets, rhs)
+	}
+
+	handleStoreValue := func(lhsVal, rhs *flowir.Value, writeContainer bool) {
+		dst, hasDst, targets := targetVarsForValue(lhsVal, writeContainer)
+		handleStoreCore(dst, hasDst, targets, rhs)
+	}
+
+	var walkStoresBody func(b *flowir.Body, scope ast.Node, aliases map[types.Object]localCarrierAliases)
+	walkStoresBody = func(b *flowir.Body, scope ast.Node, aliases map[types.Object]localCarrierAliases) {
+		if b == nil {
+			return
 		}
 		prevScope := enclosingScope
 		prevAliases := localAliases
@@ -3670,70 +2881,158 @@ func recordEnvCarryingRegistrations(
 			localAliases = prevAliases
 		}()
 
-		ast.Inspect(body, func(n ast.Node) bool {
-			if n == body {
-				return true
+		var scanVal func(v *flowir.Value)
+		scanVal = func(v *flowir.Value) {
+			if v == nil {
+				return
 			}
-			switch n := n.(type) {
-			case *ast.FuncLit:
-				if n.Body != nil {
-					walkStores(n.Body, n, computeLocalAliases(n, aliases))
+			switch v.Kind {
+			case flowir.ValMakeClosure:
+				if v.Closure != nil {
+					walkStoresBody(v.Closure, v.Lit, computeLocalAliases(v.Closure, aliases))
 				}
-				return false
-			case *ast.GoStmt:
-				if n.Call != nil {
-					walkStores(n.Call, n, aliases)
+				return
+			case flowir.ValCall:
+				if v.CallKind == flowir.CallIIFE {
+					for _, a := range v.Args {
+						scanVal(a)
+					}
+					if v.IIFE != nil {
+						var iifeLit *ast.FuncLit
+						if v.CallAST != nil {
+							iifeLit, _ = syntaxutil.UnparenExpr(v.CallAST.Fun).(*ast.FuncLit)
+						}
+						walkStoresBody(v.IIFE, iifeLit, computeLocalAliases(v.IIFE, aliases))
+					}
+					return
 				}
-				return false
-			case *ast.CallExpr:
-				if ident, ok := syntaxutil.UnparenExpr(n.Fun).(*ast.Ident); ok {
-					if _, builtin := p.TypesInfo.Uses[ident].(*types.Builtin); builtin {
-						switch {
-						case ident.Name == "copy" && len(n.Args) == 2:
-							handleStore(n.Args[0], n.Args[1], false, true)
-						case ident.Name == "append" && len(n.Args) > 1:
-							for _, flow := range n.Args[1:] {
-								handleStore(n.Args[0], flow, false, true)
+				if v.CallKind == flowir.CallBuiltin {
+					switch {
+					case v.BuiltinName == "copy" && len(v.Args) == 2:
+						handleStoreValue(v.Args[0], v.Args[1], true)
+					case v.BuiltinName == "append" && len(v.Args) > 1:
+						for _, flow := range v.Args[1:] {
+							handleStoreValue(v.Args[0], flow, true)
+						}
+					}
+				}
+			}
+			v.ForEachChildValue(func(ch *flowir.Value) bool {
+				scanVal(ch)
+				return true
+			})
+		}
+
+		b.ForEachSyncOp(func(op *flowir.Op) bool {
+			switch op.Kind {
+			case flowir.OpAssign:
+				switch op.AssignKind {
+				case flowir.AssignZeroDecl:
+					// Uninitialized declarations store no function-carrying values.
+				case flowir.AssignIncDec:
+					for _, dst := range op.Dsts {
+						if _, mapKey, ok := dst.AsMapWrite(); ok && mapKey != nil {
+							handleStorePlace(dst, nil, false, false)
+						}
+						dst.ForEachChildValue(func(cv *flowir.Value) bool {
+							scanVal(cv)
+							return true
+						})
+					}
+				case flowir.AssignCompound:
+					for i, dst := range op.Dsts {
+						var rhs *flowir.Value
+						if i < len(op.Srcs) && op.Srcs[i] != nil {
+							rhs = op.Srcs[i]
+							if rhs.Kind == flowir.ValCompositeExpr && len(rhs.Args) == 2 {
+								rhs = rhs.Args[1]
 							}
 						}
-					}
-				}
-			case *ast.AssignStmt:
-				if len(n.Lhs) == len(n.Rhs) {
-					for i, lhs := range n.Lhs {
-						if exemptSeamNodes[lhs] {
-							poisonExemptTargets(lhs)
-							continue
+						if isExemptSeamPlace(dst) {
+							poisonExemptPlace(dst)
+						} else if rhs != nil {
+							handleStorePlace(dst, rhs, true, false)
 						}
-						handleStore(lhs, n.Rhs[i], true, false)
+						dst.ForEachChildValue(func(cv *flowir.Value) bool {
+							scanVal(cv)
+							return true
+						})
+						scanVal(rhs)
 					}
-				} else if len(n.Rhs) == 1 {
-					for _, lhs := range n.Lhs {
-						if exemptSeamNodes[lhs] {
-							poisonExemptTargets(lhs)
-							continue
+				case flowir.AssignRange:
+					var rngSrc *flowir.Value
+					if len(op.Srcs) == 1 {
+						rngSrc = op.Srcs[0]
+					}
+					rs, _ := op.StmtAST.(*ast.RangeStmt)
+					isAssignTok := rs != nil && rs.Tok == token.ASSIGN
+					for i, dst := range op.Dsts {
+						isDef := i < len(op.DstDefs) && op.DstDefs[i]
+						if (isAssignTok || !isDef) && rngSrc != nil {
+							handleStorePlace(dst, rngSrc, true, false)
 						}
-						handleStore(lhs, n.Rhs[0], true, false)
+						dst.ForEachChildValue(func(cv *flowir.Value) bool {
+							scanVal(cv)
+							return true
+						})
+					}
+					for _, src := range op.Srcs {
+						scanVal(src)
+					}
+				default:
+					for i, dst := range op.Dsts {
+						if isExemptSeamPlace(dst) {
+							poisonExemptPlace(dst)
+						} else {
+							var rhs *flowir.Value
+							if len(op.Dsts) == len(op.Srcs) {
+								rhs = op.Srcs[i]
+							} else if len(op.Srcs) == 1 {
+								rhs = op.Srcs[0]
+							}
+							if rhs != nil {
+								handleStorePlace(dst, rhs, true, false)
+							}
+						}
+						dst.ForEachChildValue(func(cv *flowir.Value) bool {
+							scanVal(cv)
+							return true
+						})
+					}
+					for _, src := range op.Srcs {
+						scanVal(src)
 					}
 				}
-			case *ast.IncDecStmt:
-				if _, mapKey, ok := syntaxutil.LHSMapWriteKey(p.TypesInfo, n.X); ok {
-					handleStore(n.X, mapKey, false, false)
+			case flowir.OpTypeSwitchBind:
+				if op.CaseAST == nil {
+					scanVal(op.SwitchSrc)
 				}
-			case *ast.RangeStmt:
-				for _, bind := range []ast.Expr{n.Key, n.Value} {
-					if bind != nil && n.Tok == token.ASSIGN {
-						handleStore(bind, n.X, true, false)
-					}
+			case flowir.OpChanSend:
+				handleStoreValue(op.ChanVal, op.SendVal, true)
+				scanVal(op.ChanVal)
+				scanVal(op.SendVal)
+			case flowir.OpReturn:
+				for _, r := range op.Results {
+					scanVal(r)
 				}
-			case *ast.SendStmt:
-				handleStore(n.Chan, n.Value, false, true)
+			case flowir.OpDefer:
+				scanVal(op.Call)
+			case flowir.OpGo:
+				saved := enclosingScope
+				enclosingScope = op.StmtAST
+				scanVal(op.Call)
+				enclosingScope = saved
+			case flowir.OpExpr:
+				scanVal(op.Expr)
 			}
 			return true
 		})
 	}
 
 	for _, file := range p.Syntax {
+		if file == nil {
+			continue
+		}
 		for _, decl := range file.Decls {
 			switch decl := decl.(type) {
 			case *ast.FuncDecl:
@@ -3743,26 +3042,14 @@ func recordEnvCarryingRegistrations(
 						decl.Name.Name != "TestMain" && decl.Name.Name != "_" {
 						currentRegFn = syntaxutil.FuncKey{Pkg: ownPath, Name: decl.Name.Name}
 					}
-					walkStores(decl.Body, decl, computeLocalAliases(decl, nil))
+					b := fc.funcBody(p, decl)
+					walkStoresBody(b, decl, computeLocalAliases(b, nil))
 					currentRegFn = syntaxutil.FuncKey{}
 				}
 			case *ast.GenDecl:
-				for _, spec := range decl.Specs {
-					vs, ok := spec.(*ast.ValueSpec)
-					if !ok {
-						continue
-					}
-					if len(vs.Names) == len(vs.Values) {
-						for i, name := range vs.Names {
-							handleStore(name, vs.Values[i], true, false)
-							walkStores(vs.Values[i], nil, nil)
-						}
-					} else if len(vs.Values) == 1 {
-						for _, name := range vs.Names {
-							handleStore(name, vs.Values[0], true, false)
-						}
-						walkStores(vs.Values[0], nil, nil)
-					}
+				if decl.Tok == token.VAR || decl.Tok == token.CONST {
+					b := fc.body(p, decl)
+					walkStoresBody(b, nil, computeLocalAliases(b, nil))
 				}
 			}
 		}

@@ -134,7 +134,7 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: env: %w", err)
 	}
-	return explainCulprit(sel.SelectionNotice == "", pkgs, pkgPath, varKey, varName, v.session.executionModel.singleSubject(), modCache)
+	return explainCulprit(sel.SelectionNotice == "", pkgs, pkgPath, varKey, varName, v.session.executionModel.singleSubject(), v.session.executionModel.packageProcess(), modCache)
 }
 
 // explainCulprit re-derives every loaded package's fact with mark
@@ -142,7 +142,7 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 // package or a test variant - and assembles the chain, following
 // environment-audit dependency edges to the first locally refused
 // proof.
-func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, varName string, singleSubject bool, modCache string) (Chain, error) {
+func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, varName string, singleSubject, packageProcess bool, modCache string) (Chain, error) {
 	variants := map[string][]*packages.Package{}
 	var order []*packages.Package
 	packages.Visit(roots, func(p *packages.Package) bool {
@@ -155,10 +155,11 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	}, nil)
 
 	type siteObservation struct {
-		key         string
-		enclosingFn syntaxutil.FuncKey
-		literal     bool
-		link        ChainLink
+		key          string
+		enclosingFn  syntaxutil.FuncKey
+		literal      bool
+		stringReturn bool
+		link         ChainLink
 	}
 	type storeObservation struct {
 		key  string
@@ -198,6 +199,15 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 				link:        ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: bareSym(key), Clause: kind, Pos: pos(p, at)},
 			})
 		},
+		StringReturnSite: func(p *packages.Package, key string, fn syntaxutil.FuncKey, literal bool, at token.Pos) {
+			allSites = append(allSites, siteObservation{
+				key:          key,
+				enclosingFn:  fn,
+				literal:      literal,
+				stringReturn: true,
+				link:         ChainLink{Kind: "culprit", Package: p.PkgPath, Symbol: bareSym(key), Clause: "escape", Pos: pos(p, at)},
+			})
+		},
 		ExportedSeamSite: func(p *packages.Package, fn syntaxutil.FuncKey, key string, at token.Pos) {
 			allExportedSeams = append(allExportedSeams, exportedSeamObservation{
 				key:  key,
@@ -214,11 +224,15 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	}
 	facts := map[string][]dynstate.Fact{}
 	var meta []dynstate.GraphPackage
-	seenMetaPkg := map[string]bool{}
+	seenMetaID := map[string]bool{}
 	for _, p := range order {
 		facts[p.PkgPath] = append(facts[p.PkgPath], dynstate.FactOfWithHooks(audited, p, singleSubject, hooks))
-		if !seenMetaPkg[p.PkgPath] {
-			seenMetaPkg[p.PkgPath] = true
+		nodeID := p.ID
+		if nodeID == "" {
+			nodeID = p.PkgPath
+		}
+		if !seenMetaID[nodeID] {
+			seenMetaID[nodeID] = true
 			pkgDir := p.Dir
 			if pkgDir == "" && len(p.GoFiles) > 0 {
 				pkgDir = filepath.Dir(p.GoFiles[0])
@@ -240,15 +254,43 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 			if p.Module != nil && !p.Module.Main && ((pkgDir == "" && modCache == "") || closure.IsPinnedPackageDir(false, pkgDir, modCache)) {
 				class = dynstate.PinnedPackage
 			}
+			var impPaths []string
+			if len(p.Imports) > 0 {
+				impPaths = make([]string, 0, len(p.Imports))
+				for impPath, impPkg := range p.Imports {
+					if impPkg != nil && impPkg.ID != "" {
+						impPaths = append(impPaths, impPkg.ID)
+					} else {
+						impPaths = append(impPaths, impPath)
+					}
+				}
+				sort.Strings(impPaths)
+			}
 			meta = append(meta, dynstate.GraphPackage{
-				ImportPath: p.PkgPath,
+				ImportPath: nodeID,
 				PkgPath:    p.PkgPath,
+				Imports:    impPaths,
 				Class:      class,
 			})
 		}
 	}
-	if dynstate.NonVouchDischargedVars(meta, facts, singleSubject)[varKey] {
+	if dynstate.NonVouchDischargedVarsWithRoots(meta, facts, singleSubject, packageProcess)[varKey] {
 		return Chain{}, nil
+	}
+	resolution := dynstate.NewDeferralResolutionWithRoots(meta, facts, singleSubject || packageProcess, nil)
+	strUnsafePkg := resolution.StringUnsafePackages
+	if len(strUnsafePkg) > 0 {
+		strPassHooks := &syntaxutil.ExplainHookSet{
+			Store:                    hooks.Store,
+			Deferral:                 hooks.Deferral,
+			IncludeStringUnsafeSites: true,
+			StringUnsafeOnly:         true,
+		}
+		for _, p := range order {
+			if strUnsafePkg[p.PkgPath] {
+				dynstate.FactOfWithHooks(audited, p, singleSubject, strPassHooks)
+			}
+		}
 	}
 	blockedSeams := dynstate.BlockedExportedSeams(facts, nil)
 	for _, obs := range allExportedSeams {
@@ -257,7 +299,6 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		}
 	}
 
-	resolution := dynstate.NewDeferralResolution(facts, nil)
 	refRegions := resolution.RefRegions
 	initOnlyFn := resolution.InitOnlyFn
 	isInitOnlyPlain := func(fn syntaxutil.FuncKey) bool {
@@ -280,6 +321,9 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	var collectedSites []ChainLink
 	for _, obs := range allSites {
 		if !linkedKeys[obs.key] {
+			continue
+		}
+		if obs.stringReturn && !resolution.AppliesStringAttributedUse(obs.link.Package, obs.enclosingFn) {
 			continue
 		}
 		if obs.link.Clause == "mutation" && !obs.literal && isInitOnlyPlain(obs.enclosingFn) {
@@ -387,16 +431,24 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	}
 
 	carrying := false
-	for _, fl := range facts {
+	for pkgPath, fl := range facts {
+		applyStr := strUnsafePkg[pkgPath]
 		for _, f := range fl {
 			for _, key := range f.EnvCarrying {
 				if linkedKeys[key] {
 					carrying = true
 				}
 			}
+			if applyStr {
+				for _, key := range f.StringEnvCarrying {
+					if linkedKeys[key] {
+						carrying = true
+					}
+				}
+			}
 		}
 	}
-	edges, refusedFn, refusedPath := envAuditTrail(variants, facts, linkedKeys, varName)
+	edges, refusedFn, refusedPath := envAuditTrailWithMeta(meta, variants, facts, linkedKeys, varName)
 	if !carrying && len(edges) == 0 {
 		return Chain{}, nil
 	}
@@ -405,6 +457,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	if refusedFn != "" && refusedPath != "" {
 		var refusals []ChainLink
 		refusalHooks := &syntaxutil.ExplainHookSet{
+			IncludeStringUnsafeSites: strUnsafePkg[refusedPath],
 			Refusal: func(p *packages.Package, fn string, e ast.Expr, clause string) {
 				if fn != refusedFn || p.PkgPath != refusedPath {
 					return
@@ -424,7 +477,11 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 }
 
 func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]dynstate.Fact, linkedKeys map[string]bool, varName string) ([]ChainLink, string, string) {
-	ea := dynstate.ResolveEnvAudit(facts, nil)
+	return envAuditTrailWithMeta(nil, variants, facts, linkedKeys, varName)
+}
+
+func envAuditTrailWithMeta(meta []dynstate.GraphPackage, variants map[string][]*packages.Package, facts map[string][]dynstate.Fact, linkedKeys map[string]bool, varName string) ([]ChainLink, string, string) {
+	ea := dynstate.ResolveEnvAuditWithMeta(meta, facts, nil)
 	renderEdge := func(key syntaxutil.EnvAuditTarget) (string, string) {
 		if key.IsParam() {
 			return key.Func.Pkg, key.Func.Name + " (parameter " + strconv.Itoa(key.ParamIndex) + ")"
@@ -496,6 +553,7 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 	var directParams []rootedParam
 	var directMethods []rootedMethod
 	for fromPath, fl := range facts {
+		applyStr := ea.StringUnsafePackages[fromPath]
 		for _, f := range fl {
 			for _, use := range f.EnvCallUses {
 				if use.Valid() && linkedKeys[use.Key] && !ea.Resolved[use.Callee] {
@@ -510,6 +568,23 @@ func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]d
 			for _, use := range f.EnvCallMethodUses {
 				if use.Valid() && linkedKeys[use.Key] && !ea.ReadOnly[use.Method] {
 					directMethods = append(directMethods, rootedMethod{from: fromPath, key: use.Key, method: use.Method})
+				}
+			}
+			if applyStr {
+				for _, use := range f.StringEnvCallUses {
+					if use.Valid() && linkedKeys[use.Key] && !ea.Resolved[use.Callee] {
+						callees = append(callees, rootedCallee{from: fromPath, key: use.Key, callee: use.Callee})
+					}
+				}
+				for _, use := range f.StringEnvCallParamUses {
+					if use.Valid() && linkedKeys[use.Key] && !ea.ParamLeakFree[use.Param] {
+						directParams = append(directParams, rootedParam{from: fromPath, key: use.Key, param: use.Param})
+					}
+				}
+				for _, use := range f.StringEnvCallMethodUses {
+					if use.Valid() && linkedKeys[use.Key] && !ea.ReadOnly[use.Method] {
+						directMethods = append(directMethods, rootedMethod{from: fromPath, key: use.Key, method: use.Method})
+					}
 				}
 			}
 		}

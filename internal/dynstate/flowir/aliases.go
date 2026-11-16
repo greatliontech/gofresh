@@ -66,18 +66,77 @@ func buildMemAliases(
 	eligibleVar := func(v *types.Var) bool {
 		return v != nil && !v.IsField() && isLocal(v)
 	}
-	addEdge := func(a, b *types.Var) {
-		if !eligibleVar(a) || !eligibleVar(b) || a == b {
+	type interiorWrite struct {
+		target     *types.Var
+		src        *types.Var
+		deepNested bool
+	}
+	type bareBind struct {
+		dst          *types.Var
+		src          *types.Var
+		extractsElem bool
+	}
+
+	var allVars []*types.Var
+	seenVar := map[*types.Var]bool{}
+	noteVar := func(v *types.Var) bool {
+		if !eligibleVar(v) {
+			return false
+		}
+		if !seenVar[v] {
+			seenVar[v] = true
+			allVars = append(allVars, v)
+		}
+		return true
+	}
+
+	viewFwd := map[*types.Var]map[*types.Var]bool{}
+	allFwd := map[*types.Var]map[*types.Var]bool{}
+	addFwd := func(g map[*types.Var]map[*types.Var]bool, from, to *types.Var) bool {
+		if !noteVar(from) || !noteVar(to) || from == to {
+			return false
+		}
+		if g[from] == nil {
+			g[from] = map[*types.Var]bool{}
+		}
+		if g[from][to] {
+			return false
+		}
+		g[from][to] = true
+		return true
+	}
+
+	var bareBinds []bareBind
+	var interiorWrites []interiorWrite
+	addBareBind := func(dst, src *types.Var, extractsElem bool) {
+		if !noteVar(dst) || !noteVar(src) {
 			return
 		}
-		if adj[a] == nil {
-			adj[a] = map[types.Object]bool{}
+		addFwd(viewFwd, src, dst)
+		addFwd(allFwd, src, dst)
+		if extractsElem {
+			bareBinds = append(bareBinds, bareBind{dst: dst, src: src, extractsElem: true})
 		}
-		if adj[b] == nil {
-			adj[b] = map[types.Object]bool{}
+	}
+	addBidirectional := func(a, b *types.Var) {
+		if !noteVar(a) || !noteVar(b) || a == b {
+			return
 		}
-		adj[a][b] = true
-		adj[b][a] = true
+		addFwd(viewFwd, a, b)
+		addFwd(viewFwd, b, a)
+		addFwd(allFwd, a, b)
+		addFwd(allFwd, b, a)
+	}
+	addInteriorWrite := func(target, src *types.Var, deepNested bool) {
+		if !noteVar(target) || !noteVar(src) {
+			return
+		}
+		addFwd(allFwd, src, target)
+		interiorWrites = append(interiorWrites, interiorWrite{
+			target:     target,
+			src:        src,
+			deepNested: deepNested,
+		})
 	}
 
 	var collectPlaceAddrVars func(p Place, out []*types.Var) []*types.Var
@@ -167,20 +226,17 @@ func buildMemAliases(
 				}
 				v.IIFE.ForEachSyncOp(func(op *Op) bool {
 					if op.Kind == OpReturn {
-						if op.IsNaked {
-							for _, rv := range v.IIFE.Results {
-								if eligibleVar(rv) && (rv.Type() == nil || sharesMem(rv.Type())) {
-									out = append(out, rv)
-								}
-							}
-						} else {
-							for _, r := range op.Results {
-								out = collectValueSources(r, out)
-							}
+						for _, r := range op.Results {
+							out = collectValueSources(r, out)
 						}
 					}
 					return true
 				})
+				for _, rv := range v.IIFE.Results {
+					if eligibleVar(rv) && (rv.Type() == nil || sharesMem(rv.Type())) {
+						out = append(out, rv)
+					}
+				}
 			}
 			if v.AutoAddrRecv && v.HasRecvPlace {
 				out = collectPlaceAddrVars(v.RecvPlace, out)
@@ -193,6 +249,9 @@ func buildMemAliases(
 			return out
 
 		case ValConvert:
+			if !v.IsTypeAssert && v.Arg != nil && isFreshStringSliceCopy(v.Arg.Type, v.Type) {
+				return out
+			}
 			return collectValueSources(v.Arg, out)
 
 		case ValChanRecv:
@@ -207,7 +266,50 @@ func buildMemAliases(
 		return out
 	}
 
-	linkDstToValue := func(dst Place, val *Value) {
+	isBareUnprojectedSource := func(v *Value) bool {
+		if v == nil {
+			return false
+		}
+		if v.Kind == ValPlace && len(v.Place.Projs) == 0 {
+			return true
+		}
+		if v.Kind == ValAddrOf && !v.IsArraySlice && v.AddrPlace.IsBareVar() {
+			return true
+		}
+		return false
+	}
+
+	placeEntersNestedRef := func(p Place) bool {
+		if p.Obj == nil || p.Obj.Type() == nil {
+			return true
+		}
+		if _, isTP := types.Unalias(p.Obj.Type()).(*types.TypeParam); isTP {
+			return true
+		}
+		refHops := 0
+		for _, pr := range p.Projs {
+			switch pr.Kind {
+			case ProjDeref:
+				refHops++
+			case ProjField:
+				if pr.Indirect {
+					refHops++
+				}
+			case ProjIndex, ProjSlice:
+				if pr.BaseType == nil {
+					refHops++
+				} else if _, isArr := types.Unalias(pr.BaseType).Underlying().(*types.Array); !isArr {
+					refHops++
+				}
+			}
+		}
+		if isRefHeaderForMem(p.Obj.Type()) {
+			return refHops >= 2
+		}
+		return refHops >= 1
+	}
+
+	linkDstToValue := func(dst Place, val *Value, rangeAssign bool) {
 		if val == nil {
 			return
 		}
@@ -225,9 +327,19 @@ func buildMemAliases(
 			return
 		}
 		srcVars := collectValueSources(val, nil)
+		if dst.IsBareVar() {
+			extracts := rangeAssign || !isBareUnprojectedSource(val)
+			for _, dv := range dstVars {
+				for _, sv := range srcVars {
+					addBareBind(dv, sv, extracts)
+				}
+			}
+			return
+		}
+		deep := placeEntersNestedRef(dst)
 		for _, dv := range dstVars {
 			for _, sv := range srcVars {
-				addEdge(dv, sv)
+				addInteriorWrite(dv, sv, deep)
 			}
 		}
 	}
@@ -255,20 +367,24 @@ func buildMemAliases(
 					if len(v.Args) == 2 && (v.Args[0].Type == nil || sharesMem(v.Args[0].Type)) {
 						dstVars := collectValueSources(v.Args[0], nil)
 						srcVars := collectValueSources(v.Args[1], nil)
+						deep := !(v.Args[0].Kind == ValPlace && v.Args[0].Place.IsBareVar() &&
+							v.Args[0].Place.Obj != nil && isRefHeaderForMem(v.Args[0].Place.Obj.Type()))
 						for _, dv := range dstVars {
 							for _, sv := range srcVars {
-								addEdge(dv, sv)
+								addInteriorWrite(dv, sv, deep)
 							}
 						}
 					}
 				case "append":
 					if len(v.Args) >= 2 && (v.Args[0].Type == nil || sharesMem(v.Args[0].Type)) {
 						dstVars := collectValueSources(v.Args[0], nil)
+						deep := !(v.Args[0].Kind == ValPlace && v.Args[0].Place.IsBareVar() &&
+							v.Args[0].Place.Obj != nil && isRefHeaderForMem(v.Args[0].Place.Obj.Type()))
 						for _, elem := range v.Args[1:] {
 							srcVars := collectValueSources(elem, nil)
 							for _, dv := range dstVars {
 								for _, sv := range srcVars {
-									addEdge(dv, sv)
+									addInteriorWrite(dv, sv, deep)
 								}
 							}
 						}
@@ -286,13 +402,13 @@ func buildMemAliases(
 				}
 				for i := 0; i < len(participants); i++ {
 					for j := i + 1; j < len(participants); j++ {
-						addEdge(participants[i], participants[j])
+						addBidirectional(participants[i], participants[j])
 					}
 				}
 			}
 			if v.CallKind == CallIIFE && v.IIFE != nil {
 				if len(v.Args) > 0 && len(v.IIFE.Params) > 0 {
-					v.ForEachArgParam(func(arg *Value, slotType types.Type, _ int, pIdx int, ok bool, _ bool) bool {
+					v.ForEachArgParam(func(arg *Value, slotType types.Type, _ int, pIdx int, ok bool, packed bool) bool {
 						if !ok || pIdx >= len(v.IIFE.Params) || v.IIFE.Params[pIdx] == nil {
 							return true
 						}
@@ -301,8 +417,9 @@ func buildMemAliases(
 						}
 						pv := v.IIFE.Params[pIdx]
 						if pv.Type() == nil || sharesMem(pv.Type()) {
+							extracts := packed || !isBareUnprojectedSource(arg)
 							for _, sv := range collectValueSources(arg, nil) {
-								addEdge(pv, sv)
+								addBareBind(pv, sv, extracts)
 							}
 						}
 						return true
@@ -320,15 +437,17 @@ func buildMemAliases(
 	scanOp := func(op *Op) {
 		switch op.Kind {
 		case OpAssign:
+			isRange := op.AssignKind == AssignRange
 			op.ForEachAssignPair(func(_ int, dst Place, _ bool, src *Value) bool {
-				linkDstToValue(dst, src)
+				linkDstToValue(dst, src, isRange)
 				if mapPlace, keyVal, isMapWrite := dst.AsMapWrite(); isMapWrite && keyVal != nil {
 					if keyVal.Type == nil || sharesMem(keyVal.Type) {
 						mapVars := collectPlaceAddrVars(mapPlace, nil)
 						keyVars := collectValueSources(keyVal, nil)
+						deep := placeEntersNestedRef(dst)
 						for _, mv := range mapVars {
 							for _, kv := range keyVars {
-								addEdge(mv, kv)
+								addInteriorWrite(mv, kv, deep)
 							}
 						}
 					}
@@ -339,6 +458,25 @@ func buildMemAliases(
 				})
 				return true
 			})
+			if (op.AssignKind == AssignMulti || op.AssignKind == AssignPlain) && len(op.Dsts) >= 2 && len(op.Srcs) == 1 &&
+				op.Srcs[0] != nil && op.Srcs[0].Kind == ValCall &&
+				(op.Srcs[0].CallAST == nil || !exemptCalls[op.Srcs[0].CallAST]) {
+				var multiDsts []*types.Var
+				for _, dst := range op.Dsts {
+					if dst.Type != nil && !sharesMem(dst.Type) {
+						continue
+					}
+					if dst.IsBareVar() && dst.Obj.Type() != nil && !sharesMem(dst.Obj.Type()) {
+						continue
+					}
+					multiDsts = collectPlaceAddrVars(dst, multiDsts)
+				}
+				for i := 0; i < len(multiDsts); i++ {
+					for j := i + 1; j < len(multiDsts); j++ {
+						addBidirectional(multiDsts[i], multiDsts[j])
+					}
+				}
+			}
 			for _, src := range op.Srcs {
 				scanValue(src)
 			}
@@ -349,8 +487,9 @@ func buildMemAliases(
 		case OpTypeSwitchBind:
 			if op.SwitchDst != nil && op.SwitchSrc != nil && eligibleVar(op.SwitchDst) &&
 				(op.SwitchDst.Type() == nil || sharesMem(op.SwitchDst.Type())) {
+				extracts := !isBareUnprojectedSource(op.SwitchSrc)
 				for _, sv := range collectValueSources(op.SwitchSrc, nil) {
-					addEdge(op.SwitchDst, sv)
+					addBareBind(op.SwitchDst, sv, extracts)
 				}
 			}
 			scanValue(op.SwitchSrc)
@@ -359,9 +498,10 @@ func buildMemAliases(
 			if op.SendVal != nil && (op.SendVal.Type == nil || sharesMem(op.SendVal.Type)) {
 				chanVars := collectPlaceAddrVars(op.ChanPlace, nil)
 				valVars := collectValueSources(op.SendVal, nil)
+				deep := !(op.ChanPlace.IsBareVar() && op.ChanPlace.Obj != nil && isRefHeaderForMem(op.ChanPlace.Obj.Type()))
 				for _, cv := range chanVars {
 					for _, vv := range valVars {
-						addEdge(cv, vv)
+						addInteriorWrite(cv, vv, deep)
 					}
 				}
 			}
@@ -396,5 +536,127 @@ func buildMemAliases(
 	}
 
 	scanBody(body)
+
+	reachFrom := func(g map[*types.Var]map[*types.Var]bool, start *types.Var) map[*types.Var]bool {
+		vis := map[*types.Var]bool{start: true}
+		q := []*types.Var{start}
+		for len(q) > 0 {
+			cur := q[len(q)-1]
+			q = q[:len(q)-1]
+			for nx := range g[cur] {
+				if !vis[nx] {
+					vis[nx] = true
+					q = append(q, nx)
+				}
+			}
+		}
+		return vis
+	}
+
+	for changed := true; changed; {
+		changed = false
+		if len(bareBinds) > 0 || len(interiorWrites) > 0 {
+			allReach := make(map[*types.Var]map[*types.Var]bool, len(allVars))
+			viewReach := make(map[*types.Var]map[*types.Var]bool, len(allVars))
+			for _, u := range allVars {
+				allReach[u] = reachFrom(allFwd, u)
+				viewReach[u] = reachFrom(viewFwd, u)
+			}
+			for _, bb := range bareBinds {
+				for _, u := range allVars {
+					if allReach[u][bb.src] {
+						if addFwd(viewFwd, u, bb.dst) {
+							changed = true
+						}
+						if addFwd(allFwd, u, bb.dst) {
+							changed = true
+						}
+					}
+				}
+			}
+			for _, iw := range interiorWrites {
+				anc := viewReach
+				if iw.deepNested {
+					anc = allReach
+				}
+				for _, u := range allVars {
+					if anc[u][iw.target] {
+						if addFwd(allFwd, iw.src, u) {
+							changed = true
+						}
+					}
+				}
+			}
+		}
+	}
+
+	for _, u := range allVars {
+		desc := reachFrom(allFwd, u)
+		if len(desc) <= 1 {
+			continue
+		}
+		group := make([]*types.Var, 0, len(desc))
+		for v := range desc {
+			group = append(group, v)
+		}
+		for i := 0; i < len(group); i++ {
+			a := group[i]
+			for j := i + 1; j < len(group); j++ {
+				b := group[j]
+				if adj[a] == nil {
+					adj[a] = map[types.Object]bool{}
+				}
+				if adj[b] == nil {
+					adj[b] = map[types.Object]bool{}
+				}
+				adj[a][b] = true
+				adj[b][a] = true
+			}
+		}
+	}
 	return adj
+}
+
+func isRefHeaderForMem(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	switch u := types.Unalias(t).Underlying().(type) {
+	case *types.Pointer, *types.Slice, *types.Map, *types.Chan, *types.Interface:
+		return true
+	case *types.Basic:
+		return u.Kind() == types.UnsafePointer
+	}
+	return false
+}
+
+func isFreshStringSliceCopy(srcType, dstType types.Type) bool {
+	if srcType == nil || dstType == nil {
+		return false
+	}
+	srcT := types.Unalias(srcType)
+	dstT := types.Unalias(dstType)
+	if _, isTP := srcT.(*types.TypeParam); isTP {
+		return false
+	}
+	if _, isTP := dstT.(*types.TypeParam); isTP {
+		return false
+	}
+	isStr := func(t types.Type) bool {
+		b, ok := t.Underlying().(*types.Basic)
+		return ok && b.Info()&types.IsString != 0
+	}
+	isByteOrRuneSlice := func(t types.Type) bool {
+		sl, ok := t.Underlying().(*types.Slice)
+		if !ok {
+			return false
+		}
+		el := types.Unalias(sl.Elem())
+		if _, isTP := el.(*types.TypeParam); isTP {
+			return false
+		}
+		b, ok := el.Underlying().(*types.Basic)
+		return ok && (b.Kind() == types.Byte || b.Kind() == types.Rune)
+	}
+	return (isStr(srcT) && isByteOrRuneSlice(dstT)) || (isByteOrRuneSlice(srcT) && isStr(dstT))
 }

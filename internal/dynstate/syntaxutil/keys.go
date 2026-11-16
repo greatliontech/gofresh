@@ -669,6 +669,7 @@ type OnceMemoTypeFact struct {
 	Constructors   []FuncKey  `json:"constructors"`
 	GuardTypes     []TypeRef  `json:"guardTypes,omitempty"`
 	InputParamDeps []ParamKey `json:"inputParamDeps,omitempty"`
+	ReturnsString  bool       `json:"returnsString,omitempty"`
 }
 
 func (f OnceMemoTypeFact) Valid() bool {
@@ -828,11 +829,14 @@ type DeferralResolvent struct {
 // ExplainHookSet carries the observation callbacks one explain re-derivation
 // arms.
 type ExplainHookSet struct {
-	Site             func(p *packages.Package, kind, key string, fn FuncKey, literal bool, pos token.Pos)
-	ExportedSeamSite func(p *packages.Package, fn FuncKey, key string, pos token.Pos)
-	Store            func(p *packages.Package, key string, pos token.Pos)
-	Deferral         func(p *packages.Package, kind byte, key string, resolvent DeferralResolvent, at token.Pos)
-	Refusal          func(p *packages.Package, fn string, e ast.Expr, clause string)
+	Site                     func(p *packages.Package, kind, key string, fn FuncKey, literal bool, pos token.Pos)
+	StringReturnSite         func(p *packages.Package, key string, fn FuncKey, literal bool, pos token.Pos)
+	ExportedSeamSite         func(p *packages.Package, fn FuncKey, key string, pos token.Pos)
+	Store                    func(p *packages.Package, key string, pos token.Pos)
+	Deferral                 func(p *packages.Package, kind byte, key string, resolvent DeferralResolvent, at token.Pos)
+	Refusal                  func(p *packages.Package, fn string, e ast.Expr, clause string)
+	IncludeStringUnsafeSites bool
+	StringUnsafeOnly         bool
 }
 
 func ExplainMark(hooks *ExplainHookSet, p *packages.Package, kind, key string, at token.Pos) {
@@ -842,6 +846,19 @@ func ExplainMark(hooks *ExplainHookSet, p *packages.Package, kind, key string, a
 func ExplainAttributedMark(hooks *ExplainHookSet, p *packages.Package, kind, key string, fn FuncKey, literal bool, at token.Pos) {
 	if hooks != nil && hooks.Site != nil {
 		hooks.Site(p, kind, key, fn, literal, at)
+	}
+}
+
+func ExplainStringReturnMark(hooks *ExplainHookSet, p *packages.Package, key string, fn FuncKey, literal bool, at token.Pos) {
+	if hooks == nil {
+		return
+	}
+	if hooks.StringReturnSite != nil {
+		hooks.StringReturnSite(p, key, fn, literal, at)
+		return
+	}
+	if hooks.IncludeStringUnsafeSites && hooks.Site != nil {
+		hooks.Site(p, "escape", key, fn, literal, at)
 	}
 }
 

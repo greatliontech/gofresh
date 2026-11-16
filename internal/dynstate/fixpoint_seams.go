@@ -17,26 +17,36 @@ func CarrierLinkGraph(allFacts map[string][]Fact, malformed func(Fact)) map[stri
 // sentinel variables that cannot transmit mutable dynamic state.
 func ActiveCarrierLinkGraph(allFacts map[string][]Fact, resolution *DeferralResolution, malformed func(Fact)) map[string]map[string]bool {
 	linkAdj := map[string]map[string]bool{}
-	for _, facts := range allFacts {
+	addLink := func(fact Fact, link syntaxutil.CarrierLink, apply bool) {
+		if !link.Valid() {
+			if malformed != nil {
+				malformed(fact)
+			}
+			return
+		}
+		if !apply {
+			return
+		}
+		if resolution != nil && (resolution.IsObjectClosed(link.From) || resolution.IsObjectClosed(link.To)) {
+			return
+		}
+		if linkAdj[link.From] == nil {
+			linkAdj[link.From] = map[string]bool{}
+		}
+		if linkAdj[link.To] == nil {
+			linkAdj[link.To] = map[string]bool{}
+		}
+		linkAdj[link.From][link.To] = true
+		linkAdj[link.To][link.From] = true
+	}
+	for pkgPath, facts := range allFacts {
+		applyStr := resolution != nil && resolution.StringUnsafePackages[pkgPath]
 		for _, fact := range facts {
 			for _, link := range fact.CarrierLinks {
-				if !link.Valid() {
-					if malformed != nil {
-						malformed(fact)
-					}
-					continue
-				}
-				if resolution != nil && (resolution.IsObjectClosed(link.From) || resolution.IsObjectClosed(link.To)) {
-					continue
-				}
-				if linkAdj[link.From] == nil {
-					linkAdj[link.From] = map[string]bool{}
-				}
-				if linkAdj[link.To] == nil {
-					linkAdj[link.To] = map[string]bool{}
-				}
-				linkAdj[link.From][link.To] = true
-				linkAdj[link.To][link.From] = true
+				addLink(fact, link, true)
+			}
+			for _, link := range fact.StringCarrierLinks {
+				addLink(fact, link, applyStr)
 			}
 		}
 	}

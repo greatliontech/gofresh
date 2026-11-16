@@ -736,6 +736,200 @@ func Run(s1 []int) []int {
 	})
 }
 
+func TestRapidFlowIRGenDeclSelectorPosAndShadowedNilInvariants(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		shadowNilKind := rapid.IntRange(0, 2).Draw(rt, "shadowNilKind") // 0: predeclared nil, 1: local var nil, 2: local const nil
+		nConstSpecs := rapid.IntRange(1, 4).Draw(rt, "nConstSpecs")
+		nVarSpecs := rapid.IntRange(1, 4).Draw(rt, "nVarSpecs")
+
+		constLines := "\tcBase = 1 << iota\n"
+		wantConstExprOps := 1
+		for i := 0; i < nConstSpecs; i++ {
+			if rapid.Bool().Draw(rt, fmt.Sprintf("constImplicit_%d", i)) {
+				constLines += fmt.Sprintf("\tcImp%d\n", i)
+			} else {
+				constLines += fmt.Sprintf("\tcExp%d = %d + iota\n", i, i+3)
+				wantConstExprOps++
+			}
+		}
+
+		varLines := ""
+		for i := 0; i < nVarSpecs; i++ {
+			switch rapid.IntRange(0, 2).Draw(rt, fmt.Sprintf("varKind_%d", i)) {
+			case 0:
+				varLines += fmt.Sprintf("\tvZero%d []int\n", i)
+			case 1:
+				varLines += fmt.Sprintf("\tvInit%d = []int{%d}\n", i, i)
+			case 2:
+				varLines += fmt.Sprintf("\tvPairA%d, vPairB%d = makePair(%d)\n", i, i, i)
+			}
+		}
+
+		nilSnippet := "\tvar preNil []int = nil\n\t_ = preNil\n"
+		switch shadowNilKind {
+		case 1:
+			nilSnippet = "\tnil := []int{5}\n\t_ = len(nil)\n"
+		case 2:
+			nilSnippet = "\tconst nil = 77\n\t_ = nil\n"
+		}
+
+		src := fmt.Sprintf(`package p
+
+import "slices"
+
+const (
+%s)
+
+var (
+%s)
+
+func makePair(x int) (int, []int) { return x, []int{x} }
+
+type holder struct {
+	items []int
+}
+
+func (h *holder) First() int {
+	if len(h.items) == 0 {
+		return 0
+	}
+	return h.items[0]
+}
+
+func Exercise(in []int) int {
+%s	h := &holder{items: slices.Clone[[]int](in)}
+	ins := slices.Insert[[]int, int](h.items, 0, cBase)
+	return h.First() + len(ins)
+}
+`, constLines, varLines, nilSnippet)
+
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "gen.go", src, parser.ParseComments)
+		if err != nil {
+			rt.Fatalf("parse failed: %v\n%s", err, src)
+		}
+		info := &types.Info{
+			Types:      make(map[ast.Expr]types.TypeAndValue),
+			Defs:       make(map[*ast.Ident]types.Object),
+			Uses:       make(map[*ast.Ident]types.Object),
+			Implicits:  make(map[ast.Node]types.Object),
+			Selections: make(map[*ast.SelectorExpr]*types.Selection),
+			Scopes:     make(map[ast.Node]*types.Scope),
+			Instances:  make(map[*ast.Ident]types.Instance),
+		}
+		pkg, err := (&types.Config{Importer: importer.Default()}).Check("example.com/p", fset, []*ast.File{file}, info)
+		if err != nil {
+			rt.Fatalf("typecheck failed: %v\n%s", err, src)
+		}
+
+		identAtPos := map[token.Pos]types.Object{}
+		ast.Inspect(file, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok {
+				if obj := syntaxutil.IdentDefOrUse(info, id); obj != nil {
+					identAtPos[id.Pos()] = obj
+				}
+			}
+			return true
+		})
+
+		verifyPlaceRootPos := func(pl Place) {
+			if pl.Obj != nil {
+				if !pl.RootPos.IsValid() {
+					rt.Fatalf("Place with Obj=%v had invalid RootPos", pl.Obj)
+				}
+				if gotObj := identAtPos[pl.RootPos]; gotObj != pl.Obj {
+					rt.Fatalf("Place.RootPos resolved to %v, want %v", gotObj, pl.Obj)
+				}
+			}
+		}
+
+		for _, decl := range file.Decls {
+			switch d := decl.(type) {
+			case *ast.GenDecl:
+				b := LowerNode(info, pkg, d)
+				if b == nil {
+					rt.Fatalf("LowerNode(GenDecl %v) returned nil", d.Tok)
+				}
+				if d.Tok == token.CONST {
+					if len(b.Ops) != wantConstExprOps {
+						rt.Fatalf("const GenDecl ops = %d, want %d", len(b.Ops), wantConstExprOps)
+					}
+					for _, op := range b.Ops {
+						if op.Kind != OpExpr || op.Expr == nil || !op.Expr.IsConst {
+							rt.Fatalf("unexpected const op: %+v", op)
+						}
+					}
+				} else if d.Tok == token.VAR {
+					if len(b.Ops) != nVarSpecs {
+						rt.Fatalf("var GenDecl ops = %d, want %d", len(b.Ops), nVarSpecs)
+					}
+					for _, op := range b.Ops {
+						for _, dst := range op.Dsts {
+							verifyPlaceRootPos(dst)
+						}
+					}
+				}
+			case *ast.FuncDecl:
+				if d.Name.Name != "Exercise" {
+					continue
+				}
+				b := LowerFunc(info, pkg, d)
+				sawCloneSel, sawInsertSel, sawMethodSel := false, false, false
+				sawIsNil := false
+				for i := range b.Ops {
+					op := &b.Ops[i]
+					for _, dst := range op.Dsts {
+						verifyPlaceRootPos(dst)
+					}
+					checkVal := func(v *Value) {
+						if v == nil {
+							return
+						}
+						v.WalkValues(func(sub *Value) bool {
+							if sub.Kind == ValPlace {
+								verifyPlaceRootPos(sub.Place)
+							}
+							if sub.Kind == ValAddrOf {
+								verifyPlaceRootPos(sub.AddrPlace)
+							}
+							if sub.IsNil {
+								sawIsNil = true
+							}
+							if sub.Kind == ValCall {
+								if sel := sub.CalleeSelector(); sel != nil {
+									switch sel.Sel.Name {
+									case "Clone":
+										sawCloneSel = true
+									case "Insert":
+										sawInsertSel = true
+									case "First":
+										sawMethodSel = true
+									}
+								}
+							}
+							return true
+						})
+					}
+					for _, s := range op.Srcs {
+						checkVal(s)
+					}
+					for _, r := range op.Results {
+						checkVal(r)
+					}
+					checkVal(op.Expr)
+				}
+				if !sawCloneSel || !sawInsertSel || !sawMethodSel {
+					rt.Fatalf("CalleeSelector missed Clone=%v Insert=%v First=%v", sawCloneSel, sawInsertSel, sawMethodSel)
+				}
+				wantNil := shadowNilKind == 0
+				if sawIsNil != wantNil {
+					rt.Fatalf("shadowNilKind=%d: sawIsNil=%v, want %v", shadowNilKind, sawIsNil, wantNil)
+				}
+			}
+		}
+	})
+}
+
 func FuzzLowerArbitraryGoSource(f *testing.F) {
 	seeds := []string{
 		`package p; func F(x []int) *[]int { return new(x) }`,
@@ -744,6 +938,7 @@ func FuzzLowerArbitraryGoSource(f *testing.F) {
 		`package p; func H(a any) { switch v := a.(type) { case []int: v[0] = 1; default: _ = v } }`,
 		`package p; func Broken(x int) { y := unknownCall(x); *(&y) += ; goto lbl; lbl: }`,
 		`package p; func ChanSel(ch chan *int, p *int) { select { case ch <- p: case q := <-ch: _ = q } }`,
+		`package p; const ( A = 1 << iota; B ); var ( X, Y = 1, 2; Z []int )`,
 	}
 	for _, s := range seeds {
 		f.Add(s)
@@ -784,6 +979,17 @@ func FuzzLowerArbitraryGoSource(f *testing.F) {
 				if b != nil {
 					adj := BuildEnclosingMemAliases(b, syntaxutil.IsLocalVar, refconfine.CallResultHandsOut)
 					assertAliasGraphLaws(t, "FuzzFuncLit", adj, syntaxutil.IsLocalVar)
+				}
+			case *ast.GenDecl, *ast.ValueSpec:
+				b := LowerNode(info, pkg, node)
+				if b != nil {
+					for i := range b.Ops {
+						for _, s := range b.Ops[i].Srcs {
+							if s != nil {
+								_ = s.CalleeSelector()
+							}
+						}
+					}
 				}
 			case ast.Stmt:
 				_ = LowerNode(info, pkg, node)

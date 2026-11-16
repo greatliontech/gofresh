@@ -45,7 +45,8 @@ func LowerFuncLit(info *types.Info, pkg *types.Package, lit *ast.FuncLit) *Body 
 }
 
 // LowerNode lowers an arbitrary AST node (*ast.FuncDecl, *ast.FuncLit,
-// *ast.BlockStmt, or statement/expression subtree) into a canonical Body.
+// *ast.GenDecl, *ast.ValueSpec, *ast.BlockStmt, or statement/expression subtree)
+// into a canonical Body.
 func LowerNode(info *types.Info, pkg *types.Package, node ast.Node) *Body {
 	if info == nil || node == nil {
 		return nil
@@ -55,6 +56,25 @@ func LowerNode(info *types.Info, pkg *types.Package, node ast.Node) *Body {
 		return LowerFunc(info, pkg, n)
 	case *ast.FuncLit:
 		return LowerFuncLit(info, pkg, n)
+	case *ast.GenDecl:
+		b := newBody(n, nil, n.Pos(), n.End())
+		l := &lowerer{info: info, pkg: pkg, body: b}
+		l.lowerGenDecl(n, true)
+		return b
+	case *ast.ValueSpec:
+		b := newBody(n, nil, n.Pos(), n.End())
+		l := &lowerer{info: info, pkg: pkg, body: b}
+		tok := token.VAR
+		for _, nm := range n.Names {
+			if nm != nil && info.Defs[nm] != nil {
+				if _, isConst := info.Defs[nm].(*types.Const); isConst {
+					tok = token.CONST
+				}
+				break
+			}
+		}
+		l.lowerValueSpec(n, tok, true)
+		return b
 	case *ast.BlockStmt:
 		b := newBody(n, n, n.Pos(), n.End())
 		l := &lowerer{info: info, pkg: pkg, body: b}
@@ -124,8 +144,13 @@ func (l *lowerer) populateSigParamsAndResults(ft *ast.FuncType) {
 	}
 	if ft.Results != nil {
 		for _, field := range ft.Results.List {
+			var ftType types.Type
+			if field.Type != nil {
+				ftType = l.info.TypeOf(field.Type)
+			}
 			if len(field.Names) == 0 {
 				l.body.Results = append(l.body.Results, nil)
+				l.body.ResultTypes = append(l.body.ResultTypes, ftType)
 				continue
 			}
 			for _, name := range field.Names {
@@ -133,7 +158,12 @@ func (l *lowerer) populateSigParamsAndResults(ft *ast.FuncType) {
 				if name != nil && name.Name != "_" {
 					v, _ = l.info.Defs[name].(*types.Var)
 				}
+				resType := ftType
+				if v != nil && v.Type() != nil {
+					resType = v.Type()
+				}
 				l.body.Results = append(l.body.Results, v)
+				l.body.ResultTypes = append(l.body.ResultTypes, resType)
 				if v != nil {
 					l.body.ResultSet[v] = true
 				}
@@ -207,60 +237,7 @@ func (l *lowerer) lowerStmt(stmt ast.Stmt, topLevel bool) {
 		if !ok {
 			return
 		}
-		switch gd.Tok {
-		case token.VAR:
-			for _, spec := range gd.Specs {
-				vs, ok := spec.(*ast.ValueSpec)
-				if !ok {
-					continue
-				}
-				dsts := make([]Place, len(vs.Names))
-				defs := make([]bool, len(vs.Names))
-				for i, name := range vs.Names {
-					dsts[i] = l.lowerPlace(name)
-					defs[i] = name != nil && name.Name != "_" && l.info.Defs[name] != nil
-				}
-				if len(vs.Values) == 0 {
-					l.body.Ops = append(l.body.Ops, Op{
-						Kind:           OpAssign,
-						StmtAST:        vs,
-						TopLevelInBody: topLevel,
-						AssignKind:     AssignZeroDecl,
-						Dsts:           dsts,
-						DstDefs:        defs,
-					})
-					continue
-				}
-				srcs := l.lowerValues(vs.Values)
-				kind := AssignPlain
-				if len(dsts) > 1 && len(srcs) == 1 {
-					kind = AssignMulti
-				}
-				l.body.Ops = append(l.body.Ops, Op{
-					Kind:           OpAssign,
-					StmtAST:        vs,
-					TopLevelInBody: topLevel,
-					AssignKind:     kind,
-					Dsts:           dsts,
-					DstDefs:        defs,
-					Srcs:           srcs,
-				})
-			}
-		case token.CONST:
-			for _, spec := range gd.Specs {
-				vs, ok := spec.(*ast.ValueSpec)
-				if !ok {
-					continue
-				}
-				for _, val := range vs.Values {
-					l.body.Ops = append(l.body.Ops, Op{
-						Kind:    OpExpr,
-						StmtAST: vs,
-						Expr:    l.lowerValue(val),
-					})
-				}
-			}
-		}
+		l.lowerGenDecl(gd, topLevel)
 	case *ast.ExprStmt:
 		l.body.Ops = append(l.body.Ops, Op{
 			Kind:           OpExpr,
@@ -306,7 +283,7 @@ func (l *lowerer) lowerStmt(stmt ast.Stmt, topLevel bool) {
 				srcs = []*Value{{
 					Kind: ValCompositeExpr,
 					Type: l.info.TypeOf(s.Lhs[0]),
-					Raw:  s.Rhs[0],
+					Raw:  nil,
 					Args: []*Value{l.lowerValue(s.Lhs[0]), l.lowerValue(s.Rhs[0])},
 				}}
 			} else {
@@ -559,6 +536,68 @@ func (l *lowerer) classifyVarRoot(v *types.Var) RootKind {
 	return RootOuterVar
 }
 
+func (l *lowerer) lowerGenDecl(gd *ast.GenDecl, topLevel bool) {
+	if gd == nil || (gd.Tok != token.VAR && gd.Tok != token.CONST) {
+		return
+	}
+	for _, spec := range gd.Specs {
+		vs, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		l.lowerValueSpec(vs, gd.Tok, topLevel)
+	}
+}
+
+func (l *lowerer) lowerValueSpec(vs *ast.ValueSpec, tok token.Token, topLevel bool) {
+	if vs == nil {
+		return
+	}
+	switch tok {
+	case token.VAR:
+		dsts := make([]Place, len(vs.Names))
+		defs := make([]bool, len(vs.Names))
+		for i, name := range vs.Names {
+			dsts[i] = l.lowerPlace(name)
+			defs[i] = name != nil && name.Name != "_" && l.info.Defs[name] != nil
+		}
+		if len(vs.Values) == 0 {
+			l.body.Ops = append(l.body.Ops, Op{
+				Kind:           OpAssign,
+				StmtAST:        vs,
+				TopLevelInBody: topLevel,
+				AssignKind:     AssignZeroDecl,
+				Dsts:           dsts,
+				DstDefs:        defs,
+			})
+			return
+		}
+		srcs := l.lowerValues(vs.Values)
+		kind := AssignPlain
+		if len(dsts) > 1 && len(srcs) == 1 {
+			kind = AssignMulti
+		}
+		l.body.Ops = append(l.body.Ops, Op{
+			Kind:           OpAssign,
+			StmtAST:        vs,
+			TopLevelInBody: topLevel,
+			AssignKind:     kind,
+			Dsts:           dsts,
+			DstDefs:        defs,
+			Srcs:           srcs,
+		})
+	case token.CONST:
+		for _, val := range vs.Values {
+			l.body.Ops = append(l.body.Ops, Op{
+				Kind:           OpExpr,
+				StmtAST:        vs,
+				TopLevelInBody: topLevel,
+				Expr:           l.lowerValue(val),
+			})
+		}
+	}
+}
+
 func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 	if expr == nil {
 		return Place{}, false
@@ -568,9 +607,10 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 	case *ast.Ident:
 		if e.Name == "_" {
 			return Place{
-				Root: RootBlank,
-				Type: l.info.TypeOf(expr),
-				Raw:  expr,
+				Root:    RootBlank,
+				RootPos: e.Pos(),
+				Type:    l.info.TypeOf(expr),
+				Raw:     expr,
 			}, true
 		}
 		obj := syntaxutil.IdentDefOrUse(l.info, e)
@@ -581,14 +621,16 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 				return Place{}, false
 			}
 			return Place{
-				Root: rk,
-				Obj:  o,
-				Type: l.info.TypeOf(expr),
-				Raw:  expr,
+				Root:    rk,
+				RootPos: e.Pos(),
+				Obj:     o,
+				Type:    l.info.TypeOf(expr),
+				Raw:     expr,
 			}, true
 		case *types.Func:
 			return Place{
 				Root:    RootFunc,
+				RootPos: e.Pos(),
 				Func:    o,
 				FuncPkg: pkgPathOf(o, l.pkg),
 				Type:    l.info.TypeOf(expr),
@@ -597,6 +639,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 		case *types.Const, *types.Nil:
 			return Place{
 				Root:       RootConstOrNil,
+				RootPos:    e.Pos(),
 				ConstOrNil: o,
 				Type:       l.info.TypeOf(expr),
 				Raw:        expr,
@@ -612,14 +655,16 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 				switch o := obj.(type) {
 				case *types.Var:
 					return Place{
-						Root: RootPkgGlobal,
-						Obj:  o,
-						Type: l.info.TypeOf(expr),
-						Raw:  expr,
+						Root:    RootPkgGlobal,
+						RootPos: e.Sel.Pos(),
+						Obj:     o,
+						Type:    l.info.TypeOf(expr),
+						Raw:     expr,
 					}, true
 				case *types.Func:
 					return Place{
 						Root:    RootFunc,
+						RootPos: e.Sel.Pos(),
 						Func:    o,
 						FuncPkg: pkgPathOf(o, l.pkg),
 						Type:    l.info.TypeOf(expr),
@@ -628,6 +673,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 				case *types.Const:
 					return Place{
 						Root:       RootConstOrNil,
+						RootPos:    e.Sel.Pos(),
 						ConstOrNil: o,
 						Type:       l.info.TypeOf(expr),
 						Raw:        expr,
@@ -660,6 +706,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 			fn, _ := sel.Obj().(*types.Func)
 			return Place{
 				Root:         RootFunc,
+				RootPos:      e.Sel.Pos(),
 				Func:         fn,
 				FuncPkg:      pkgPathOf(fn, l.pkg),
 				IsMethodExpr: true,
@@ -748,23 +795,39 @@ func (l *lowerer) lowerPlace(expr ast.Expr) Place {
 	if p, ok := l.tryLowerPlace(expr); ok {
 		return p
 	}
+	var rootPos token.Pos
+	if expr != nil {
+		rootPos = expr.Pos()
+	}
 	return Place{
-		Root: RootTransient,
-		Base: l.lowerValue(expr),
-		Type: l.info.TypeOf(expr),
-		Raw:  expr,
+		Root:    RootTransient,
+		RootPos: rootPos,
+		Base:    l.lowerValue(expr),
+		Type:    l.info.TypeOf(expr),
+		Raw:     expr,
 	}
 }
 
 func (l *lowerer) lowerValue(expr ast.Expr) *Value {
+	v := l.lowerValueRaw(expr)
+	if v != nil && expr != nil {
+		if tv, ok := l.info.Types[syntaxutil.UnparenExpr(expr)]; ok && tv.Value != nil {
+			v.IsConst = true
+		}
+	}
+	return v
+}
+
+func (l *lowerer) lowerValueRaw(expr ast.Expr) *Value {
 	if expr == nil {
 		return nil
 	}
 	if tv, ok := l.info.Types[syntaxutil.UnparenExpr(expr)]; ok && tv.IsType() {
 		return &Value{
-			Kind: ValScalarLitOrConst,
-			Type: tv.Type,
-			Raw:  expr,
+			Kind:       ValScalarLitOrConst,
+			Type:       tv.Type,
+			Raw:        expr,
+			IsTypeExpr: true,
 		}
 	}
 	unp := syntaxutil.UnparenExpr(expr)
@@ -892,10 +955,12 @@ func (l *lowerer) lowerValue(expr ast.Expr) *Value {
 
 	if p, ok := l.tryLowerPlace(expr); ok {
 		if p.Root == RootConstOrNil {
+			_, isNil := p.ConstOrNil.(*types.Nil)
 			return &Value{
-				Kind: ValScalarLitOrConst,
-				Type: l.info.TypeOf(expr),
-				Raw:  expr,
+				Kind:  ValScalarLitOrConst,
+				Type:  l.info.TypeOf(expr),
+				Raw:   expr,
+				IsNil: isNil,
 			}
 		}
 		return &Value{
@@ -983,6 +1048,8 @@ func (l *lowerer) lowerCall(call *ast.CallExpr, outerExpr ast.Expr) *Value {
 		}
 	}
 
+	calleeSel, _ := unwrapCalleeSelector(l.info, call.Fun)
+
 	// 2. Builtin call
 	if b := syntaxutil.LookupBuiltin(l.info, call.Fun); b != nil {
 		switch b.Name() {
@@ -1029,6 +1096,7 @@ func (l *lowerer) lowerCall(call *ast.CallExpr, outerExpr ast.Expr) *Value {
 				Raw:         outerExpr,
 				CallKind:    CallBuiltin,
 				CallAST:     call,
+				CalleeSel:   calleeSel,
 				BuiltinName: b.Name(),
 				Args:        valArgs,
 				Ellipsis:    call.Ellipsis.IsValid(),
@@ -1061,6 +1129,7 @@ func (l *lowerer) lowerCall(call *ast.CallExpr, outerExpr ast.Expr) *Value {
 			Raw:        outerExpr,
 			CallKind:   CallPlain,
 			CallAST:    call,
+			CalleeSel:  calleeSel,
 			CalleeFunc: fn,
 			CalleePkg:  pkgPath,
 			CalleeSig:  sig,
@@ -1070,24 +1139,25 @@ func (l *lowerer) lowerCall(call *ast.CallExpr, outerExpr ast.Expr) *Value {
 	}
 
 	// 5. Method call `x.M(args...)` or method-expression call `(*T).M(recv, args...)`
-	if sel, ok := unwrapCalleeSelector(l.info, call.Fun); ok {
-		if selection := l.info.Selections[sel]; selection != nil {
+	if calleeSel != nil {
+		if selection := l.info.Selections[calleeSel]; selection != nil {
 			switch selection.Kind() {
 			case types.MethodVal:
 				fn, _ := selection.Obj().(*types.Func)
-				rp, hasRP := l.tryLowerPlace(sel.X)
+				rp, hasRP := l.tryLowerPlace(calleeSel.X)
 				return &Value{
 					Kind:         ValCall,
 					Type:         l.info.TypeOf(outerExpr),
 					Raw:          outerExpr,
 					CallKind:     CallMethod,
 					CallAST:      call,
+					CalleeSel:    calleeSel,
 					CalleeFunc:   fn,
 					CalleePkg:    pkgPathOf(fn, l.pkg),
 					CalleeSig:    sigOf(selection.Type()),
 					Selection:    selection,
-					AutoAddrRecv: selectionImplicitlyAddressesRecv(l.info, sel, selection),
-					Recv:         l.lowerValue(sel.X),
+					AutoAddrRecv: selectionImplicitlyAddressesRecv(l.info, calleeSel, selection),
+					Recv:         l.lowerValue(calleeSel.X),
 					RecvPlace:    rp,
 					HasRecvPlace: hasRP,
 					Args:         l.lowerValues(call.Args),
@@ -1103,6 +1173,7 @@ func (l *lowerer) lowerCall(call *ast.CallExpr, outerExpr ast.Expr) *Value {
 						Raw:              outerExpr,
 						CallKind:         CallMethod,
 						CallAST:          call,
+						CalleeSel:        calleeSel,
 						CalleeFunc:       fn,
 						CalleePkg:        pkgPathOf(fn, l.pkg),
 						CalleeSig:        stripMethodExprRecvParam(sigOf(selection.Type())),
@@ -1126,6 +1197,7 @@ func (l *lowerer) lowerCall(call *ast.CallExpr, outerExpr ast.Expr) *Value {
 		Raw:       outerExpr,
 		CallKind:  CallIndirect,
 		CallAST:   call,
+		CalleeSel: calleeSel,
 		Callee:    l.lowerValue(call.Fun),
 		CalleeSig: sigOf(l.info.TypeOf(call.Fun)),
 		Args:      l.lowerValues(call.Args),

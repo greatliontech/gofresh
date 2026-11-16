@@ -26,13 +26,30 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 	envCarrying := map[string]bool{}
 	unattributedMark := map[string]bool{}
 	envCallable := map[string]bool{}
-	for _, facts := range allFacts {
+	malformedFactVars := map[string]bool{}
+	markDeclaresMutated := func(fact Fact) {
+		for _, key := range fact.Declares {
+			mutated[key] = true
+			unattributedMark[key] = true
+			malformedFactVars[key] = true
+		}
+	}
+	coneMeta := coneMetaForView(meta, viewPackage)
+	resolution := NewDeferralResolutionWithRoots(coneMeta, allFacts, singleSubject || packageProcess, markDeclaresMutated)
+	strUnsafePkg := resolution.StringUnsafePackages
+	for pkgPath, facts := range allFacts {
+		applyStr := strUnsafePkg[pkgPath]
 		for _, fact := range facts {
 			for _, key := range fact.Mutates {
 				mutated[key] = true
 			}
 			for _, key := range fact.Escapes {
 				escaped[key] = true
+			}
+			if applyStr {
+				for _, key := range fact.StringEscapes {
+					escaped[key] = true
+				}
 			}
 			if !singleSubject {
 				for _, key := range fact.PoolMutates {
@@ -45,20 +62,21 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 			for _, key := range fact.EnvCarrying {
 				envCarrying[key] = true
 			}
+			if applyStr {
+				for _, key := range fact.StringEnvCarrying {
+					envCarrying[key] = true
+				}
+			}
 			for _, key := range fact.EnvCallable {
 				envCallable[key] = true
 			}
+			if applyStr {
+				for _, key := range fact.StringEnvCallable {
+					envCallable[key] = true
+				}
+			}
 		}
 	}
-	malformedFactVars := map[string]bool{}
-	markDeclaresMutated := func(fact Fact) {
-		for _, key := range fact.Declares {
-			mutated[key] = true
-			unattributedMark[key] = true
-			malformedFactVars[key] = true
-		}
-	}
-	resolution := NewDeferralResolution(allFacts, markDeclaresMutated)
 	envFreeResolved := resolution.EnvFreeResolved
 	readOnly := resolution.ReadOnly
 	paramLeakFree := resolution.ParamLeakFree
@@ -66,7 +84,8 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 	initOnlyFn := resolution.InitOnlyFn
 	initReachFn := resolution.InitReachFn
 
-	for _, facts := range allFacts {
+	for pkgPath, facts := range allFacts {
+		applyStr := strUnsafePkg[pkgPath]
 		for _, fact := range facts {
 			factEnvSet := make(map[string]bool, len(fact.EnvCarrying))
 			for _, key := range fact.EnvCarrying {
@@ -74,6 +93,23 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 			}
 			for _, use := range fact.EnvCarryingFns {
 				if !use.Valid() || !factEnvSet[use.Key] {
+					markDeclaresMutated(fact)
+					for _, key := range fact.Declares {
+						envCarrying[key] = true
+					}
+					if syntaxutil.ValidFactKey(use.Key) {
+						envCarrying[use.Key] = true
+						mutated[use.Key] = true
+						unattributedMark[use.Key] = true
+					}
+				}
+			}
+			factStrEnvSet := make(map[string]bool, len(fact.StringEnvCarrying))
+			for _, key := range fact.StringEnvCarrying {
+				factStrEnvSet[key] = true
+			}
+			for _, use := range fact.StringEnvCarryingFns {
+				if !use.Valid() || !factStrEnvSet[use.Key] {
 					markDeclaresMutated(fact)
 					for _, key := range fact.Declares {
 						envCarrying[key] = true
@@ -133,6 +169,57 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 					continue
 				}
 				if !readOnly[use.Method] {
+					envCarrying[use.Key] = true
+				}
+			}
+			for _, use := range fact.StringEnvCallUses {
+				if !use.Valid() {
+					markDeclaresMutated(fact)
+					for _, key := range fact.Declares {
+						envCarrying[key] = true
+					}
+					if syntaxutil.ValidFactKey(use.Key) {
+						envCarrying[use.Key] = true
+						mutated[use.Key] = true
+						unattributedMark[use.Key] = true
+					}
+					continue
+				}
+				if applyStr && !envFreeResolved[use.Callee] {
+					envCarrying[use.Key] = true
+				}
+			}
+			for _, use := range fact.StringEnvCallParamUses {
+				if !use.Valid() {
+					markDeclaresMutated(fact)
+					for _, key := range fact.Declares {
+						envCarrying[key] = true
+					}
+					if syntaxutil.ValidFactKey(use.Key) {
+						envCarrying[use.Key] = true
+						mutated[use.Key] = true
+						unattributedMark[use.Key] = true
+					}
+					continue
+				}
+				if applyStr && !paramLeakFree[use.Param] {
+					envCarrying[use.Key] = true
+				}
+			}
+			for _, use := range fact.StringEnvCallMethodUses {
+				if !use.Valid() {
+					markDeclaresMutated(fact)
+					for _, key := range fact.Declares {
+						envCarrying[key] = true
+					}
+					if syntaxutil.ValidFactKey(use.Key) {
+						envCarrying[use.Key] = true
+						mutated[use.Key] = true
+						unattributedMark[use.Key] = true
+					}
+					continue
+				}
+				if applyStr && !readOnly[use.Method] {
 					envCarrying[use.Key] = true
 				}
 			}
@@ -309,7 +396,8 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 		mutated[key] = true
 		attributeSite(key, fn)
 	}
-	for _, facts := range allFacts {
+	for pkgPath, facts := range allFacts {
+		applyStr := strUnsafePkg[pkgPath]
 		for _, fact := range facts {
 			factAttrEnv := map[string][]syntaxutil.FuncKey{}
 			for _, use := range fact.EnvCarryingFns {
@@ -317,7 +405,30 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 					factAttrEnv[use.Key] = append(factAttrEnv[use.Key], use.Func)
 				}
 			}
-			for _, key := range fact.EnvCarrying {
+			if applyStr {
+				for _, use := range fact.StringEnvCarryingFns {
+					if use.Valid() {
+						factAttrEnv[use.Key] = append(factAttrEnv[use.Key], use.Func)
+					}
+				}
+			}
+			envKeysToAttr := fact.EnvCarrying
+			if applyStr && len(fact.StringEnvCarrying) > 0 {
+				merged := make([]string, 0, len(fact.EnvCarrying)+len(fact.StringEnvCarrying))
+				seen := make(map[string]bool, len(fact.EnvCarrying)+len(fact.StringEnvCarrying))
+				for _, k := range fact.EnvCarrying {
+					seen[k] = true
+					merged = append(merged, k)
+				}
+				for _, k := range fact.StringEnvCarrying {
+					if !seen[k] {
+						seen[k] = true
+						merged = append(merged, k)
+					}
+				}
+				envKeysToAttr = merged
+			}
+			for _, key := range envKeysToAttr {
 				fns := factAttrEnv[key]
 				if envCallable[key] || len(fns) == 0 {
 					unattributedMark[key] = true
@@ -361,8 +472,43 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 					attributeSite(use.Key, use.Func)
 				}
 			}
+			if applyStr {
+				for _, use := range fact.StringEnvCallUses {
+					if !use.Valid() || envFreeResolved[use.Callee] {
+						continue
+					}
+					if use.Func.IsZero() || envCallable[use.Key] || mayRunAtInit(use.Func) {
+						unattributedMark[use.Key] = true
+					} else {
+						attributeSite(use.Key, use.Func)
+					}
+				}
+				for _, use := range fact.StringEnvCallParamUses {
+					if !use.Valid() || paramLeakFree[use.Param] {
+						continue
+					}
+					if use.Func.IsZero() || envCallable[use.Key] || mayRunAtInit(use.Func) {
+						unattributedMark[use.Key] = true
+					} else {
+						attributeSite(use.Key, use.Func)
+					}
+				}
+				for _, use := range fact.StringEnvCallMethodUses {
+					if !use.Valid() || readOnly[use.Method] {
+						continue
+					}
+					if use.Func.IsZero() || envCallable[use.Key] || mayRunAtInit(use.Func) {
+						unattributedMark[use.Key] = true
+					} else {
+						attributeSite(use.Key, use.Func)
+					}
+				}
+			}
 			for _, use := range fact.AttributedUses {
 				applyAttributedUse(fact, use, true)
+			}
+			for _, use := range fact.StringAttributedUses {
+				applyAttributedUse(fact, use, resolution.AppliesStringAttributedUse(pkgPath, use.Func))
 			}
 			for _, use := range fact.PoolAttributedUses {
 				applyAttributedUse(fact, use, !singleSubject)
@@ -414,10 +560,26 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 				if syntaxutil.ValidFactKey(link.From) {
 					mutated[link.From] = true
 					unattributedMark[link.From] = true
+					malformedFactVars[link.From] = true
 				}
 				if syntaxutil.ValidFactKey(link.To) {
 					mutated[link.To] = true
 					unattributedMark[link.To] = true
+					malformedFactVars[link.To] = true
+				}
+			}
+		}
+		for _, link := range fact.StringCarrierLinks {
+			if !link.Valid() {
+				if syntaxutil.ValidFactKey(link.From) {
+					mutated[link.From] = true
+					unattributedMark[link.From] = true
+					malformedFactVars[link.From] = true
+				}
+				if syntaxutil.ValidFactKey(link.To) {
+					mutated[link.To] = true
+					unattributedMark[link.To] = true
+					malformedFactVars[link.To] = true
 				}
 			}
 		}
@@ -450,7 +612,7 @@ func Compose(meta []GraphPackage, allFacts map[string][]Fact, viewPackage string
 		propagateWithUnattributed(envCarrying)
 	}
 	notOpaque := resolution.NotOpaque
-	discharges := deriveSourceAndAttestedDischarges(meta, allFacts, refRegions, initOnlyFn, paramLeakFree, malformedFactVars, markDeclaresMutated)
+	discharges := deriveSourceAndAttestedDischarges(meta, allFacts, refRegions, initOnlyFn, paramLeakFree, strUnsafePkg, malformedFactVars, markDeclaresMutated)
 	pinnedPkg := discharges.pinnedPkg
 	mutableLocalPkg := discharges.mutableLocalPkg
 	pkgHasMalformedFact := discharges.pkgHasMalformedFact
@@ -778,6 +940,116 @@ func isFactDischargeMalformed(fact Fact) bool {
 			bad = true
 		}
 	}
+	for _, key := range fact.StringEscapes {
+		if !syntaxutil.ValidQualifiedVarKey(key) {
+			bad = true
+		}
+	}
+	for _, q := range fact.StringSinkPkgs {
+		if !syntaxutil.ValidNonEmptyPkgKey(q) {
+			bad = true
+		}
+	}
+	for _, pk := range fact.StringSinkParams {
+		if !pk.Valid() {
+			bad = true
+		}
+	}
+	for _, mk := range fact.StringSinkMethods {
+		if !mk.Valid() {
+			bad = true
+		}
+	}
+	for _, q := range fact.StringCallbackTargets {
+		if !syntaxutil.ValidNonEmptyPkgKey(q) {
+			bad = true
+		}
+	}
+	for _, key := range fact.StringEnvCarrying {
+		if !syntaxutil.ValidQualifiedVarKey(key) {
+			bad = true
+		}
+	}
+	for _, key := range fact.StringEnvCallable {
+		if !syntaxutil.ValidQualifiedVarKey(key) {
+			bad = true
+		}
+	}
+	for _, use := range fact.StringAttributedUses {
+		if !use.Valid() {
+			bad = true
+		}
+	}
+	for _, use := range fact.StringEnvCarryingFns {
+		if !use.Valid() {
+			bad = true
+		}
+	}
+	for _, use := range fact.StringEnvCallUses {
+		if !use.Valid() {
+			bad = true
+		}
+	}
+	for _, use := range fact.StringEnvCallParamUses {
+		if !use.Valid() {
+			bad = true
+		}
+	}
+	for _, use := range fact.StringEnvCallMethodUses {
+		if !use.Valid() {
+			bad = true
+		}
+	}
+	for _, link := range fact.StringCarrierLinks {
+		if !link.Valid() {
+			bad = true
+		}
+	}
+	for _, fn := range fact.StringReturnEnvBlocked {
+		if !fn.Valid() {
+			bad = true
+		}
+	}
+	for _, edge := range fact.StringReturnEnvDeps {
+		if !edge.Valid() {
+			bad = true
+		}
+	}
+	for _, edge := range fact.StringReturnEnvParamDeps {
+		if !edge.Valid() {
+			bad = true
+		}
+	}
+	for _, edge := range fact.StringReturnEnvMethodDeps {
+		if !edge.Valid() {
+			bad = true
+		}
+	}
+	for _, edge := range fact.StringReturnEnvInsertionDeps {
+		if !edge.Valid() {
+			bad = true
+		}
+	}
+	for _, pk := range fact.StringParamInsertionBlocked {
+		if !pk.Valid() {
+			bad = true
+		}
+	}
+	for _, edge := range fact.StringParamInsertionDeps {
+		if !edge.Valid() {
+			bad = true
+		}
+	}
+	for _, edge := range fact.StringParamInsertionParamDeps {
+		if !edge.Valid() {
+			bad = true
+		}
+	}
+	for _, edge := range fact.StringParamInsertionMethodDeps {
+		if !edge.Valid() {
+			bad = true
+		}
+	}
 	for _, key := range fact.SingleSubjectVars {
 		if !syntaxutil.ValidQualifiedVarKey(key) {
 			bad = true
@@ -870,6 +1142,7 @@ func deriveSourceAndAttestedDischarges(
 	refRegions map[syntaxutil.FuncKey]map[syntaxutil.RefRegion]bool,
 	initOnlyFn map[syntaxutil.FuncKey]bool,
 	paramLeakFree map[syntaxutil.ParamKey]bool,
+	strUnsafePkg map[string]bool,
 	malformedFactVars map[string]bool,
 	onMalformedFact func(Fact),
 ) sourceAndAttestedDischarges {
@@ -1165,11 +1438,13 @@ func deriveSourceAndAttestedDischarges(
 	}
 
 	verifiedOnceMemoCtors := map[syntaxutil.TypeRef]map[syntaxutil.FuncKey]bool{}
+	onceMemoReturnsString := map[syntaxutil.TypeRef]bool{}
 	if !anyMalformedMutatedStruct {
 		type onceMemoAgg struct {
-			ctors     map[syntaxutil.FuncKey]bool
-			guards    map[syntaxutil.TypeRef]bool
-			inputDeps map[syntaxutil.ParamKey]bool
+			ctors         map[syntaxutil.FuncKey]bool
+			guards        map[syntaxutil.TypeRef]bool
+			inputDeps     map[syntaxutil.ParamKey]bool
+			returnsString bool
 		}
 		for pkgPath, pkgFacts := range allFacts {
 			if len(pkgFacts) == 0 || out.pkgHasMalformedFact[pkgPath] || (!out.pinnedPkg[pkgPath] && !out.mutableLocalPkg[pkgPath]) {
@@ -1183,9 +1458,10 @@ func deriveSourceAndAttestedDischarges(
 						continue
 					}
 					agg := &onceMemoAgg{
-						ctors:     make(map[syntaxutil.FuncKey]bool, len(mt.Constructors)),
-						guards:    make(map[syntaxutil.TypeRef]bool, len(mt.GuardTypes)),
-						inputDeps: make(map[syntaxutil.ParamKey]bool, len(mt.InputParamDeps)),
+						ctors:         make(map[syntaxutil.FuncKey]bool, len(mt.Constructors)),
+						guards:        make(map[syntaxutil.TypeRef]bool, len(mt.GuardTypes)),
+						inputDeps:     make(map[syntaxutil.ParamKey]bool, len(mt.InputParamDeps)),
+						returnsString: mt.ReturnsString,
 					}
 					for _, c := range mt.Constructors {
 						agg.ctors[c] = true
@@ -1219,6 +1495,7 @@ func deriveSourceAndAttestedDischarges(
 					for pk := range next.inputDeps {
 						prev.inputDeps[pk] = true
 					}
+					prev.returnsString = prev.returnsString || next.returnsString
 				}
 			}
 			for tRef, agg := range common {
@@ -1242,6 +1519,9 @@ func deriveSourceAndAttestedDischarges(
 				}
 				if clean {
 					verifiedOnceMemoCtors[tRef] = agg.ctors
+					if agg.returnsString {
+						onceMemoReturnsString[tRef] = true
+					}
 				}
 			}
 		}
@@ -1259,7 +1539,7 @@ func deriveSourceAndAttestedDischarges(
 		}
 		return m
 	})
-	out.memoDischargedVars = intersectDeclaredVarSet(func(_ string, fact Fact) map[string]bool {
+	out.memoDischargedVars = intersectDeclaredVarSet(func(pkgPath string, fact Fact) map[string]bool {
 		if anyMalformedDirectVarWrite {
 			return nil
 		}
@@ -1272,6 +1552,9 @@ func deriveSourceAndAttestedDischarges(
 		if !anyMalformedNonMethodVarUse && !anyMalformedMutatedStruct {
 			for _, cand := range fact.OnceMemoCandidates {
 				if directVarWritten[cand.Key] || nonMethodVarUsed[cand.Key] {
+					continue
+				}
+				if onceMemoReturnsString[cand.Type] && (strUnsafePkg[pkgPath] || strUnsafePkg[cand.Type.Pkg]) {
 					continue
 				}
 				if ctors := verifiedOnceMemoCtors[cand.Type]; ctors[cand.Constructor] {
@@ -1521,15 +1804,43 @@ func deriveSourceAndAttestedDischarges(
 // (excluding caller vouches, whose derivation chains remain observable on
 // request under REQ-explain-chain).
 func NonVouchDischargedVars(meta []GraphPackage, allFacts map[string][]Fact, singleSubject bool) map[string]bool {
+	return NonVouchDischargedVarsWithRoots(meta, allFacts, singleSubject, false)
+}
+
+// NonVouchDischargedVarsWithRoots returns NonVouchDischargedVars under the
+// given execution-model flags (singleSubject and packageProcess).
+func NonVouchDischargedVarsWithRoots(meta []GraphPackage, allFacts map[string][]Fact, singleSubject, packageProcess bool) map[string]bool {
 	malformedFactVars := map[string]bool{}
 	markMalformed := func(fact Fact) {
 		for _, key := range fact.Declares {
 			malformedFactVars[key] = true
 		}
 	}
-	resolution := NewDeferralResolution(allFacts, markMalformed)
+	resolution := NewDeferralResolutionWithRoots(meta, allFacts, singleSubject || packageProcess, markMalformed)
 	BlockedExportedSeams(allFacts, markMalformed)
-	ActiveCarrierLinkGraph(allFacts, resolution, markMalformed)
+	ActiveCarrierLinkGraph(allFacts, resolution, func(fact Fact) {
+		markMalformed(fact)
+		for _, link := range fact.CarrierLinks {
+			if !link.Valid() {
+				if syntaxutil.ValidFactKey(link.From) {
+					malformedFactVars[link.From] = true
+				}
+				if syntaxutil.ValidFactKey(link.To) {
+					malformedFactVars[link.To] = true
+				}
+			}
+		}
+		for _, link := range fact.StringCarrierLinks {
+			if !link.Valid() {
+				if syntaxutil.ValidFactKey(link.From) {
+					malformedFactVars[link.From] = true
+				}
+				if syntaxutil.ValidFactKey(link.To) {
+					malformedFactVars[link.To] = true
+				}
+			}
+		}
+	})
 	refRegions, initOnlyFn := resolution.RefRegions, resolution.InitOnlyFn
 	for _, facts := range allFacts {
 		for _, fact := range facts {
@@ -1540,6 +1851,15 @@ func NonVouchDischargedVars(meta []GraphPackage, allFacts map[string][]Fact, sin
 			}
 			for _, use := range fact.EnvCarryingFns {
 				if !use.Valid() || !factEnvSet[use.Key] {
+					bad = true
+				}
+			}
+			factStrEnvSet := make(map[string]bool, len(fact.StringEnvCarrying))
+			for _, key := range fact.StringEnvCarrying {
+				factStrEnvSet[key] = true
+			}
+			for _, use := range fact.StringEnvCarryingFns {
+				if !use.Valid() || !factStrEnvSet[use.Key] {
 					bad = true
 				}
 			}
@@ -1554,6 +1874,21 @@ func NonVouchDischargedVars(meta []GraphPackage, allFacts map[string][]Fact, sin
 				}
 			}
 			for _, use := range fact.EnvCallMethodUses {
+				if !use.Valid() {
+					bad = true
+				}
+			}
+			for _, use := range fact.StringEnvCallUses {
+				if !use.Valid() {
+					bad = true
+				}
+			}
+			for _, use := range fact.StringEnvCallParamUses {
+				if !use.Valid() {
+					bad = true
+				}
+			}
+			for _, use := range fact.StringEnvCallMethodUses {
 				if !use.Valid() {
 					bad = true
 				}
@@ -1593,6 +1928,11 @@ func NonVouchDischargedVars(meta []GraphPackage, allFacts map[string][]Fact, sin
 					bad = true
 				}
 			}
+			for _, use := range fact.StringAttributedUses {
+				if !use.Valid() {
+					bad = true
+				}
+			}
 			for _, use := range fact.PoolAttributedUses {
 				if !use.Valid() {
 					bad = true
@@ -1604,7 +1944,7 @@ func NonVouchDischargedVars(meta []GraphPackage, allFacts map[string][]Fact, sin
 		}
 	}
 
-	d := deriveSourceAndAttestedDischarges(meta, allFacts, refRegions, initOnlyFn, resolution.ParamLeakFree, malformedFactVars, markMalformed)
+	d := deriveSourceAndAttestedDischarges(meta, allFacts, refRegions, initOnlyFn, resolution.ParamLeakFree, resolution.StringUnsafePackages, malformedFactVars, markMalformed)
 	discharged := map[string]bool{}
 	for pkgPath, pkgFacts := range allFacts {
 		inGraph := d.pinnedPkg[pkgPath] || d.mutableLocalPkg[pkgPath]
@@ -1631,4 +1971,307 @@ func NonVouchDischargedVars(meta []GraphPackage, allFacts map[string][]Fact, sin
 		}
 	}
 	return discharged
+}
+
+// UpstreamStringUnsafePackages returns the set of package paths in allFacts
+// that reach un-confined string-header unsafe operations (directly, via active
+// cross-package string sinks, or via planted callbacks) or are transitively
+// imported by such a package in meta.
+func UpstreamStringUnsafePackages(meta []GraphPackage, allFacts map[string][]Fact) map[string]bool {
+	conf := resolveConfinementJointLFP(allFacts, nil)
+	envUnsafe, _ := upstreamStringUnsafePackagesWithConfinement(meta, allFacts, conf.paramLeakFree, conf.readOnly, nil)
+	return envUnsafe
+}
+
+func coneMetaForView(meta []GraphPackage, viewPackage string) []GraphPackage {
+	if viewPackage == "" || len(meta) <= 1 {
+		return meta
+	}
+	hasEdges := false
+	byListing := make(map[string]GraphPackage, len(meta))
+	byPkgPath := make(map[string][]string, len(meta))
+	for _, n := range meta {
+		id := n.ImportPath
+		if id == "" {
+			id = n.PkgPath
+		}
+		if id == "" {
+			continue
+		}
+		byListing[id] = n
+		if n.PkgPath != "" {
+			byPkgPath[n.PkgPath] = append(byPkgPath[n.PkgPath], id)
+		}
+		if len(n.Imports) > 0 {
+			hasEdges = true
+		}
+	}
+	if !hasEdges {
+		return meta
+	}
+	seen := map[string]bool{}
+	var walk func(listing string)
+	walk = func(listing string) {
+		if seen[listing] {
+			return
+		}
+		seen[listing] = true
+		node, ok := byListing[listing]
+		if !ok {
+			for _, id := range byPkgPath[listing] {
+				walk(id)
+			}
+			return
+		}
+		if !strings.Contains(listing, " [") {
+			for _, id := range byPkgPath[listing] {
+				if id != listing {
+					walk(id)
+				}
+			}
+		}
+		for _, imp := range node.Imports {
+			walk(imp)
+		}
+	}
+	foundRoot := false
+	for _, node := range meta {
+		root := node.PkgPath
+		if node.ForTest != "" {
+			root = node.ForTest
+		} else if node.TestMain {
+			continue
+		}
+		if root != viewPackage {
+			continue
+		}
+		foundRoot = true
+		id := node.ImportPath
+		if id == "" {
+			id = node.PkgPath
+		}
+		if id != "" {
+			walk(id)
+		}
+	}
+	if !foundRoot {
+		return meta
+	}
+	out := make([]GraphPackage, 0, len(seen))
+	for _, n := range meta {
+		id := n.ImportPath
+		if id == "" {
+			id = n.PkgPath
+		}
+		if seen[id] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func upstreamStringUnsafePackagesWithConfinement(
+	meta []GraphPackage,
+	allFacts map[string][]Fact,
+	paramLeakFree map[syntaxutil.ParamKey]bool,
+	readOnly map[syntaxutil.FuncKey]bool,
+	malformed func(Fact),
+) (map[string]bool, map[string]bool) {
+	direct := map[string]bool{}
+	for pkgPath, facts := range allFacts {
+		for _, fact := range facts {
+			bad := false
+			for _, q := range fact.StringSinkPkgs {
+				if !syntaxutil.ValidNonEmptyPkgKey(q) {
+					bad = true
+				}
+			}
+			for _, pk := range fact.StringSinkParams {
+				if !pk.Valid() {
+					bad = true
+				}
+			}
+			for _, mk := range fact.StringSinkMethods {
+				if !mk.Valid() {
+					bad = true
+				}
+			}
+			for _, q := range fact.StringCallbackTargets {
+				if !syntaxutil.ValidNonEmptyPkgKey(q) {
+					bad = true
+				}
+			}
+			if bad && malformed != nil {
+				malformed(fact)
+			}
+			if fact.HasStringHeaderUnsafe {
+				direct[pkgPath] = true
+			}
+		}
+	}
+	if len(direct) == 0 {
+		return nil, nil
+	}
+	hasEdges := false
+	inMeta := make(map[string]bool, len(meta))
+	byListing := make(map[string]GraphPackage, len(meta))
+	byPkgPath := make(map[string][]string, len(meta))
+	for _, n := range meta {
+		id := n.ImportPath
+		if id == "" {
+			id = n.PkgPath
+		}
+		if id == "" {
+			continue
+		}
+		byListing[id] = n
+		if n.PkgPath != "" {
+			inMeta[n.PkgPath] = true
+			byPkgPath[n.PkgPath] = append(byPkgPath[n.PkgPath], id)
+		} else {
+			inMeta[id] = true
+		}
+		if len(n.Imports) > 0 {
+			hasEdges = true
+		}
+	}
+	if len(meta) == 0 || (len(meta) > 1 && !hasEdges) {
+		out := make(map[string]bool, len(allFacts))
+		for pkgPath := range allFacts {
+			out[pkgPath] = true
+		}
+		return out, out
+	}
+
+	reachesUnsafe := map[string]bool{}
+	retOut := map[string]bool{}
+	for pkgPath := range direct {
+		if inMeta[pkgPath] {
+			reachesUnsafe[pkgPath] = true
+			retOut[pkgPath] = true
+		}
+	}
+	if len(reachesUnsafe) == 0 {
+		return nil, nil
+	}
+
+	for changed := true; changed; {
+		changed = false
+		for pkgPath, facts := range allFacts {
+			if !inMeta[pkgPath] {
+				continue
+			}
+			if reachesUnsafe[pkgPath] {
+				for _, fact := range facts {
+					for _, q := range fact.StringCallbackTargets {
+						if syntaxutil.ValidNonEmptyPkgKey(q) && inMeta[q] && !reachesUnsafe[q] {
+							reachesUnsafe[q] = true
+							changed = true
+						}
+					}
+				}
+				continue
+			}
+			hit := false
+			for _, fact := range facts {
+				for _, q := range fact.StringSinkPkgs {
+					if reachesUnsafe[q] {
+						hit = true
+						break
+					}
+				}
+				if hit {
+					break
+				}
+				for _, pk := range fact.StringSinkParams {
+					if pk.Valid() && reachesUnsafe[pk.Func.Pkg] && !paramLeakFree[pk] {
+						hit = true
+						break
+					}
+				}
+				if hit {
+					break
+				}
+				for _, mk := range fact.StringSinkMethods {
+					if mk.Valid() && reachesUnsafe[mk.Pkg] && !readOnly[mk] {
+						hit = true
+						break
+					}
+				}
+				if hit {
+					break
+				}
+			}
+			if hit {
+				reachesUnsafe[pkgPath] = true
+				changed = true
+			}
+		}
+	}
+
+	out := make(map[string]bool, len(reachesUnsafe))
+	for pkgPath := range reachesUnsafe {
+		out[pkgPath] = true
+	}
+	seenListing := [2]map[string]bool{{}, {}}
+	var walk func(listing string, imported bool)
+	walk = func(listing string, imported bool) {
+		mode := 0
+		if imported {
+			mode = 1
+		}
+		if seenListing[mode][listing] {
+			return
+		}
+		seenListing[mode][listing] = true
+		node, ok := byListing[listing]
+		if !ok {
+			if ids := byPkgPath[listing]; len(ids) > 0 {
+				for _, id := range ids {
+					walk(id, imported)
+				}
+				return
+			}
+			if _, exists := allFacts[listing]; exists {
+				out[listing] = true
+				if imported {
+					retOut[listing] = true
+				}
+			}
+			return
+		}
+		if node.PkgPath != "" {
+			out[node.PkgPath] = true
+			if imported {
+				retOut[node.PkgPath] = true
+			}
+		}
+		if !strings.Contains(listing, " [") {
+			for _, id := range byPkgPath[listing] {
+				if id != listing {
+					walk(id, imported)
+				}
+			}
+		}
+		for _, imp := range node.Imports {
+			walk(imp, true)
+		}
+	}
+	for _, n := range meta {
+		if reachesUnsafe[n.PkgPath] {
+			id := n.ImportPath
+			if id == "" {
+				id = n.PkgPath
+			}
+			if id != "" {
+				walk(id, false)
+			}
+		}
+	}
+	for pkgPath := range reachesUnsafe {
+		for _, id := range byPkgPath[pkgPath] {
+			walk(id, false)
+		}
+	}
+	return out, retOut
 }

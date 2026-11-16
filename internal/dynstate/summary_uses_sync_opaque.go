@@ -7,77 +7,168 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
 
-func walkSyncVarCalls(p *packages.Package, candidates map[*types.Var]bool, evictNonCallUses bool, judgeCall func(v *types.Var, sel *ast.SelectorExpr, call *ast.CallExpr) (admittedMethod, siteConforms bool)) map[*ast.SelectorExpr]bool {
-	if len(candidates) == 0 {
+func walkSyncVarCalls(
+	p *packages.Package,
+	fc *pkgFlowCache,
+	candidates map[*types.Var]bool,
+	evictNonCallUses bool,
+	judgeCall func(v *types.Var, sel *ast.SelectorExpr, callVal *flowir.Value) (admittedMethod, siteConforms bool),
+) map[*ast.SelectorExpr]bool {
+	if len(candidates) == 0 || p == nil || p.TypesInfo == nil {
 		return nil
 	}
-	info := p.TypesInfo
-	receiver := map[*ast.Ident]bool{}
 	conformingBySelector := map[*ast.SelectorExpr]*types.Var{}
-	resolveVarIdent := func(expr ast.Expr) *ast.Ident {
-		switch e := syntaxutil.UnparenExpr(expr).(type) {
-		case *ast.Ident:
-			return e
-		case *ast.SelectorExpr:
-			if x, ok := syntaxutil.UnparenExpr(e.X).(*ast.Ident); ok {
-				if _, isPkg := info.Uses[x].(*types.PkgName); isPkg {
-					return e.Sel
+
+	evict := func(obj *types.Var) {
+		if evictNonCallUses && obj != nil {
+			delete(candidates, obj)
+		}
+	}
+
+	var scanVal func(v *flowir.Value)
+	var scanBody func(b *flowir.Body, topGenDecl bool)
+	scanPlace := func(pl flowir.Place) {
+		if pl.Obj != nil && candidates[pl.Obj] {
+			evict(pl.Obj)
+		}
+		pl.ForEachChildValue(func(cv *flowir.Value) bool {
+			scanVal(cv)
+			return true
+		})
+	}
+	scanVal = func(v *flowir.Value) {
+		if v == nil {
+			return
+		}
+		switch v.Kind {
+		case flowir.ValMakeClosure:
+			if v.Closure != nil {
+				scanBody(v.Closure, false)
+			}
+			return
+		case flowir.ValCall:
+			if v.CallKind == flowir.CallIIFE {
+				for _, a := range v.Args {
+					scanVal(a)
 				}
+				if v.IIFE != nil {
+					scanBody(v.IIFE, false)
+				}
+				return
+			}
+			if v.CallKind == flowir.CallMethod && !v.IsMethodExprCall && v.HasRecvPlace && v.RecvPlace.IsBareVar() && candidates[v.RecvPlace.Obj] {
+				cand := v.RecvPlace.Obj
+				sel := v.CalleeSelector()
+				if sel == nil {
+					delete(candidates, cand)
+				} else {
+					admittedMethod, siteConforms := judgeCall(cand, sel, v)
+					if !admittedMethod {
+						delete(candidates, cand)
+					} else if siteConforms {
+						conformingBySelector[sel] = cand
+					} else if !evictNonCallUses {
+						delete(candidates, cand)
+					}
+				}
+				for _, a := range v.Args {
+					scanVal(a)
+				}
+				return
+			}
+		case flowir.ValPlace:
+			scanPlace(v.Place)
+			return
+		case flowir.ValAddrOf:
+			scanPlace(v.AddrPlace)
+			if v.Low != nil {
+				scanVal(v.Low)
+			}
+			if v.High != nil {
+				scanVal(v.High)
+			}
+			if v.Max != nil {
+				scanVal(v.Max)
+			}
+			return
+		case flowir.ValMethodVal:
+			if v.HasRecvPlace && v.RecvPlace.Obj != nil && candidates[v.RecvPlace.Obj] {
+				evict(v.RecvPlace.Obj)
 			}
 		}
-		return nil
+		v.ForEachChildValue(func(ch *flowir.Value) bool {
+			scanVal(ch)
+			return true
+		})
 	}
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := syntaxutil.UnparenExpr(call.Fun).(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			ident := resolveVarIdent(sel.X)
-			if ident == nil {
-				return true
-			}
-			v, ok := info.Uses[ident].(*types.Var)
-			if !ok || !candidates[v] {
-				return true
-			}
-			admittedMethod, siteConforms := judgeCall(v, sel, call)
-			if !admittedMethod {
-				delete(candidates, v)
-				return true
-			}
-			receiver[ident] = true
-			if siteConforms {
-				conformingBySelector[sel] = v
-			} else if !evictNonCallUses {
-				delete(candidates, v)
+
+	scanBody = func(b *flowir.Body, topGenDecl bool) {
+		if b == nil {
+			return
+		}
+		b.ForEachSyncOp(func(op *flowir.Op) bool {
+			switch op.Kind {
+			case flowir.OpAssign:
+				_, isVS := op.StmtAST.(*ast.ValueSpec)
+				for i, dst := range op.Dsts {
+					isDef := i < len(op.DstDefs) && op.DstDefs[i]
+					if topGenDecl && isVS && isDef && dst.IsBareVar() {
+						continue
+					}
+					scanPlace(dst)
+				}
+				for _, src := range op.Srcs {
+					scanVal(src)
+				}
+			case flowir.OpTypeSwitchBind:
+				scanVal(op.SwitchSrc)
+			case flowir.OpChanSend:
+				scanPlace(op.ChanPlace)
+				scanVal(op.ChanVal)
+				scanVal(op.SendVal)
+			case flowir.OpReturn:
+				for _, r := range op.Results {
+					scanVal(r)
+				}
+			case flowir.OpDefer, flowir.OpGo:
+				scanVal(op.Call)
+			case flowir.OpExpr:
+				scanVal(op.Expr)
 			}
 			return true
 		})
 	}
-	if evictNonCallUses {
-		for _, file := range p.Syntax {
-			ast.Inspect(file, func(n ast.Node) bool {
-				ident, ok := n.(*ast.Ident)
-				if !ok {
-					return true
+
+	for _, file := range p.Syntax {
+		if file == nil {
+			continue
+		}
+		for _, decl := range file.Decls {
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				scanBody(fc.funcBody(p, d), false)
+			case *ast.GenDecl:
+				if d.Tok == token.VAR || d.Tok == token.CONST {
+					scanBody(fc.body(p, d), true)
+				} else if evictNonCallUses {
+					ast.Inspect(d, func(n ast.Node) bool {
+						if id, ok := n.(*ast.Ident); ok {
+							if v, ok := p.TypesInfo.Uses[id].(*types.Var); ok && candidates[v] {
+								delete(candidates, v)
+							}
+						}
+						return true
+					})
 				}
-				v, ok := info.Uses[ident].(*types.Var)
-				if ok && candidates[v] && !receiver[ident] {
-					delete(candidates, v)
-				}
-				return true
-			})
+			}
 		}
 	}
+
 	calls := map[*ast.SelectorExpr]bool{}
 	for sel, v := range conformingBySelector {
 		if candidates[v] {
@@ -87,7 +178,7 @@ func walkSyncVarCalls(p *packages.Package, candidates map[*types.Var]bool, evict
 	return calls
 }
 
-func dataMemoVars(audited bool, p *packages.Package, callIdx *refconfine.CallSiteIndex) map[*types.Var]bool {
+func dataMemoVars(audited bool, p *packages.Package, fc *pkgFlowCache, callIdx *refconfine.CallSiteIndex) map[*types.Var]bool {
 	if p == nil || p.TypesInfo == nil || p.Types == nil {
 		return nil
 	}
@@ -107,11 +198,14 @@ func dataMemoVars(audited bool, p *packages.Package, callIdx *refconfine.CallSit
 	if len(candidates) == 0 {
 		return nil
 	}
-	carrierFree := func(expr ast.Expr) bool {
+	carrierFree := func(arg *flowir.Value) bool {
+		if arg == nil || arg.Raw == nil {
+			return false
+		}
 		if callIdx == nil {
 			callIdx = refconfine.BuildCallSiteIndex(p)
 		}
-		return callIdx.JudgeExpr(expr, func(t types.Type) (bool, bool) {
+		return callIdx.JudgeExpr(arg.Raw, func(t types.Type) (bool, bool) {
 			if !refconfine.TypeMayCarryUnknownDynamic(audited, t) {
 				return true, true
 			}
@@ -120,11 +214,11 @@ func dataMemoVars(audited bool, p *packages.Package, callIdx *refconfine.CallSit
 	}
 	// Evict any sync.Map candidate referenced outside a direct MemoMethod call
 	// (such as `&memo`, `alias := &memo`, or passing `memo` as an argument).
-	walkSyncVarCalls(p, candidates, true, func(_ *types.Var, sel *ast.SelectorExpr, call *ast.CallExpr) (bool, bool) {
+	walkSyncVarCalls(p, fc, candidates, true, func(_ *types.Var, sel *ast.SelectorExpr, callVal *flowir.Value) (bool, bool) {
 		if !auditset.MemoMethod("Map", sel.Sel.Name) {
 			return false, false
 		}
-		for _, arg := range call.Args {
+		for _, arg := range callVal.Args {
 			if !carrierFree(arg) {
 				return false, false
 			}
@@ -134,13 +228,16 @@ func dataMemoVars(audited bool, p *packages.Package, callIdx *refconfine.CallSit
 	return candidates
 }
 
-func provenSharedPools(audited bool, p *packages.Package) (proven map[*types.Var]types.Type, calls map[*ast.SelectorExpr]bool) {
+func provenSharedPools(audited bool, p *packages.Package, fc *pkgFlowCache) (proven map[*types.Var]types.Type, calls map[*ast.SelectorExpr]bool) {
 	proven = map[*types.Var]types.Type{}
 	calls = map[*ast.SelectorExpr]bool{}
-	if p.TypesInfo == nil {
+	if p == nil || p.TypesInfo == nil {
 		return proven, calls
 	}
 	for _, file := range p.Syntax {
+		if file == nil {
+			continue
+		}
 		for _, decl := range file.Decls {
 			gen, ok := decl.(*ast.GenDecl)
 			if !ok || gen.Tok != token.VAR {
@@ -151,40 +248,43 @@ func provenSharedPools(audited bool, p *packages.Package) (proven map[*types.Var
 				if !ok || len(vs.Names) != 1 || len(vs.Values) != 1 {
 					continue
 				}
-				name := vs.Names[0]
-				if name.IsExported() {
+				vsBody := fc.body(p, vs)
+				if vsBody == nil || len(vsBody.Ops) != 1 || vsBody.Ops[0].Kind != flowir.OpAssign ||
+					len(vsBody.Ops[0].Dsts) != 1 || len(vsBody.Ops[0].Srcs) != 1 {
 					continue
 				}
-				variable, ok := p.TypesInfo.Defs[name].(*types.Var)
-				if !ok || variable.Pkg() == nil {
+				dst := vsBody.Ops[0].Dsts[0]
+				if !dst.IsBareVar() || dst.Obj == nil || dst.Obj.Exported() || dst.Obj.Pkg() == nil {
 					continue
 				}
-				named, ok := types.Unalias(variable.Type()).(*types.Named)
+				named, ok := types.Unalias(dst.Obj.Type()).(*types.Named)
 				if !ok || named.Obj() == nil || named.Obj().Pkg() == nil ||
 					named.Obj().Pkg().Path() != "sync" || named.Obj().Name() != "Pool" {
 					continue
 				}
-				lit, ok := syntaxutil.UnparenExpr(vs.Values[0]).(*ast.CompositeLit)
-				if !ok || len(lit.Elts) != 1 {
+				rhs := vsBody.Ops[0].Srcs[0]
+				if rhs == nil || rhs.Kind != flowir.ValAllocFresh || rhs.AllocKind != flowir.AllocCompositeLit || len(rhs.CompositeElts) != 1 {
 					continue
 				}
-				kv, ok := lit.Elts[0].(*ast.KeyValueExpr)
-				if !ok {
+				if _, isPtr := types.Unalias(rhs.Type).Underlying().(*types.Pointer); isPtr {
 					continue
 				}
-				key, ok := kv.Key.(*ast.Ident)
-				if !ok || key.Name != "New" {
+				elt := rhs.CompositeElts[0]
+				if elt.Field == nil || elt.Field.Name() != "New" || elt.Value == nil ||
+					elt.Value.Kind != flowir.ValMakeClosure || elt.Value.Closure == nil {
 					continue
 				}
-				fnLit, ok := syntaxutil.UnparenExpr(kv.Value).(*ast.FuncLit)
-				if !ok {
+				// Preserve keyed `sync.Pool{New: func() any { ... }}` requirement (rejecting unkeyed literals).
+				if lit, ok := syntaxutil.UnparenExpr(vs.Values[0]).(*ast.CompositeLit); !ok || len(lit.Elts) != 1 {
+					continue
+				} else if _, isKV := lit.Elts[0].(*ast.KeyValueExpr); !isKV {
 					continue
 				}
-				content := provenPoolContentType(audited, p, fnLit)
+				content := provenPoolContentType(audited, elt.Value.Lit, elt.Value.Closure)
 				if content == nil {
 					continue
 				}
-				proven[variable] = content
+				proven[dst.Obj] = content
 			}
 		}
 	}
@@ -195,16 +295,14 @@ func provenSharedPools(audited bool, p *packages.Package) (proven map[*types.Var
 	for v := range proven {
 		candidates[v] = true
 	}
-	calls = walkSyncVarCalls(p, candidates, true, func(v *types.Var, sel *ast.SelectorExpr, call *ast.CallExpr) (bool, bool) {
-		selection, ok := p.TypesInfo.Selections[sel]
-		if !ok || selection.Kind() != types.MethodVal {
+	calls = walkSyncVarCalls(p, fc, candidates, true, func(v *types.Var, _ *ast.SelectorExpr, callVal *flowir.Value) (bool, bool) {
+		if callVal.Selection == nil || callVal.Selection.Kind() != types.MethodVal || callVal.CalleeFunc == nil {
 			return false, false
 		}
-		fn, ok := selection.Obj().(*types.Func)
-		if !ok || !refconfine.AuditedPooling(audited, fn) {
+		if !refconfine.AuditedPooling(audited, callVal.CalleeFunc) {
 			return false, false
 		}
-		return true, provenPoolCallConforms(p, fn, call, proven[v])
+		return true, provenPoolCallConforms(callVal.CalleeFunc, callVal, proven[v])
 	})
 	for v := range proven {
 		if !candidates[v] {
@@ -214,8 +312,8 @@ func provenSharedPools(audited bool, p *packages.Package) (proven map[*types.Var
 	return proven, calls
 }
 
-func provenPoolContentType(audited bool, p *packages.Package, lit *ast.FuncLit) types.Type {
-	if lit.Type == nil || lit.Type.Results == nil {
+func provenPoolContentType(audited bool, lit *ast.FuncLit, b *flowir.Body) types.Type {
+	if lit == nil || lit.Type == nil || lit.Type.Results == nil || b == nil {
 		return nil
 	}
 	for _, field := range lit.Type.Results.List {
@@ -225,40 +323,27 @@ func provenPoolContentType(audited bool, p *packages.Package, lit *ast.FuncLit) 
 	}
 	var content types.Type
 	conforming := true
-	ast.Inspect(lit.Body, func(n ast.Node) bool {
-		if !conforming {
-			return false
-		}
-		if _, nested := n.(*ast.FuncLit); nested {
-			return false
-		}
-		if _, deferred := n.(*ast.DeferStmt); deferred {
+	b.ForEachSyncOp(func(op *flowir.Op) bool {
+		switch op.Kind {
+		case flowir.OpDefer:
 			conforming = false
 			return false
-		}
-		ret, ok := n.(*ast.ReturnStmt)
-		if !ok {
-			return true
-		}
-		if len(ret.Results) != 1 {
-			conforming = false
-			return false
-		}
-		tv, ok := p.TypesInfo.Types[ret.Results[0]]
-		if !ok || tv.Type == nil {
-			conforming = false
-			return false
-		}
-		t := tv.Type
-		if basic, isBasic := types.Unalias(t).(*types.Basic); isBasic && basic.Info()&types.IsUntyped != 0 {
-			conforming = false
-			return false
-		}
-		if content == nil {
-			content = t
-		} else if !types.Identical(content, t) {
-			conforming = false
-			return false
+		case flowir.OpReturn:
+			if len(op.Results) != 1 || op.Results[0] == nil || op.Results[0].Type == nil {
+				conforming = false
+				return false
+			}
+			t := op.Results[0].Type
+			if basic, isBasic := types.Unalias(t).(*types.Basic); isBasic && basic.Info()&types.IsUntyped != 0 {
+				conforming = false
+				return false
+			}
+			if content == nil {
+				content = t
+			} else if !types.Identical(content, t) {
+				conforming = false
+				return false
+			}
 		}
 		return true
 	})
@@ -271,31 +356,35 @@ func provenPoolContentType(audited bool, p *packages.Package, lit *ast.FuncLit) 
 	return content
 }
 
-func provenPoolCallConforms(p *packages.Package, fn *types.Func, call *ast.CallExpr, content types.Type) bool {
+func provenPoolCallConforms(fn *types.Func, callVal *flowir.Value, content types.Type) bool {
+	if fn == nil || callVal == nil || callVal.Ellipsis {
+		return false
+	}
 	switch fn.Name() {
 	case "Get":
-		return len(call.Args) == 0
+		return len(callVal.Args) == 0
 	case "Put":
-		if len(call.Args) != 1 {
+		if len(callVal.Args) != 1 || callVal.Args[0] == nil || callVal.Args[0].Type == nil {
 			return false
 		}
-		tv, ok := p.TypesInfo.Types[call.Args[0]]
-		if !ok || tv.Type == nil {
-			return false
-		}
-		return types.Identical(tv.Type, content)
+		return types.Identical(callVal.Args[0].Type, content)
 	default:
 		return false
 	}
 }
 
-func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]bool, refs map[syntaxutil.FuncKey]map[syntaxutil.RefRegion]bool) {
+func recordFunctionReferenceRegions(
+	p *packages.Package,
+	fc *pkgFlowCache,
+	initOnly map[string]bool,
+	refs map[syntaxutil.FuncKey]map[syntaxutil.RefRegion]bool,
+) {
 	if p == nil || p.TypesInfo == nil || p.Types == nil {
 		return
 	}
 	funcKeyOf := func(obj types.Object) (syntaxutil.FuncKey, bool) {
 		fn, ok := obj.(*types.Func)
-		if !ok || fn.Pkg() == nil {
+		if !ok || fn == nil || fn.Pkg() == nil {
 			return syntaxutil.FuncKey{}, false
 		}
 		fn = fn.Origin()
@@ -321,76 +410,113 @@ func recordFunctionReferenceRegions(p *packages.Package, initOnly map[string]boo
 			return syntaxutil.RefRegion{Kind: syntaxutil.RegionProg}
 		}
 	}
-	var scan func(region syntaxutil.RefRegion, root ast.Node)
-	scan = func(region syntaxutil.RefRegion, root ast.Node) {
-		calls := map[*ast.Ident]bool{}
-		ast.Inspect(root, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.FuncLit:
-				if n != root && n.Body != nil {
-					scan(literalRegion(region), n.Body)
-					return false
+
+	var scanBody func(region syntaxutil.RefRegion, b *flowir.Body)
+	var scanVal func(region syntaxutil.RefRegion, v *flowir.Value)
+	scanVal = func(region syntaxutil.RefRegion, v *flowir.Value) {
+		if v == nil {
+			return
+		}
+		switch v.Kind {
+		case flowir.ValMakeClosure:
+			if v.Closure != nil {
+				scanBody(literalRegion(region), v.Closure)
+			}
+			return
+		case flowir.ValCall:
+			switch v.CallKind {
+			case flowir.CallIIFE:
+				for _, a := range v.Args {
+					scanVal(region, a)
 				}
-			case *ast.GoStmt:
-				scan(literalRegion(region), n.Call)
-				return false
-			case *ast.CallExpr:
-				fun := syntaxutil.UnwrapCallee(n.Fun)
-				if ident, ok := fun.(*ast.Ident); ok {
-					if key, ok := funcKeyOf(p.TypesInfo.Uses[ident]); ok {
-						calls[ident] = true
+				if v.IIFE != nil {
+					scanBody(literalRegion(region), v.IIFE)
+				}
+				return
+			case flowir.CallPlain:
+				if !v.IsMethodExprCall && v.CalleeFunc != nil {
+					if key, ok := funcKeyOf(v.CalleeFunc); ok {
 						add(key, region)
 					}
-				}
-				if sel, ok := fun.(*ast.SelectorExpr); ok {
-					if key, ok := funcKeyOf(p.TypesInfo.Uses[sel.Sel]); ok {
-						calls[sel.Sel] = true
-						add(key, region)
+					for _, a := range v.Args {
+						scanVal(region, a)
 					}
+					return
 				}
-			case *ast.Ident:
-				if calls[n] {
-					return true
-				}
-				if key, ok := funcKeyOf(p.TypesInfo.Uses[n]); ok {
+			}
+		case flowir.ValPlace:
+			if v.Place.Root == flowir.RootFunc && v.Place.Func != nil {
+				if key, ok := funcKeyOf(v.Place.Func); ok {
 					add(key, literalRegion(region))
 				}
 			}
+		}
+		v.ForEachChildValue(func(ch *flowir.Value) bool {
+			scanVal(region, ch)
 			return true
 		})
 	}
+	scanBody = func(region syntaxutil.RefRegion, b *flowir.Body) {
+		if b == nil {
+			return
+		}
+		b.ForEachSyncOp(func(op *flowir.Op) bool {
+			if op.Kind == flowir.OpGo {
+				scanVal(literalRegion(region), op.Call)
+				return true
+			}
+			forEachOpTopValues(op, func(v *flowir.Value) {
+				scanVal(region, v)
+			})
+			return true
+		})
+	}
+
 	initReg := syntaxutil.RefRegion{Kind: syntaxutil.RegionInit}
 	progReg := syntaxutil.RefRegion{Kind: syntaxutil.RegionProg}
 	for _, file := range p.Syntax {
+		if file == nil {
+			continue
+		}
 		for _, decl := range file.Decls {
 			switch decl := decl.(type) {
 			case *ast.FuncDecl:
+				if decl.Body == nil {
+					continue
+				}
+				b := fc.funcBody(p, decl)
 				switch {
 				case decl.Recv != nil:
-					if decl.Body != nil {
-						scan(progReg, decl.Body)
-					}
+					scanBody(progReg, b)
 				case decl.Name != nil && (decl.Name.Name == "init" || initOnly[decl.Name.Name]):
-					if decl.Body != nil {
-						scan(initReg, decl.Body)
-					}
+					scanBody(initReg, b)
 				case decl.Name != nil && decl.Name.Name != "_":
-					if decl.Body != nil && p.Types != nil {
-						scan(syntaxutil.RefRegion{Kind: syntaxutil.RegionFunc, Caller: syntaxutil.FuncKey{Pkg: p.Types.Path(), Name: decl.Name.Name}}, decl.Body)
-					}
+					scanBody(syntaxutil.RefRegion{
+						Kind:   syntaxutil.RegionFunc,
+						Caller: syntaxutil.FuncKey{Pkg: p.Types.Path(), Name: decl.Name.Name},
+					}, b)
 				default:
-					if decl.Body != nil {
-						scan(progReg, decl.Body)
-					}
+					scanBody(progReg, b)
 				}
-			default:
-				scan(initReg, decl)
+			case *ast.GenDecl:
+				if decl.Tok == token.VAR || decl.Tok == token.CONST {
+					scanBody(initReg, fc.body(p, decl))
+				} else {
+					ast.Inspect(decl, func(n ast.Node) bool {
+						if id, ok := n.(*ast.Ident); ok {
+							if key, ok := funcKeyOf(p.TypesInfo.Uses[id]); ok {
+								add(key, literalRegion(initReg))
+							}
+						}
+						return true
+					})
+				}
 			}
 		}
 	}
 }
 
-func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool, deps map[string]map[string]bool) {
+func recordOpaqueDynamicVars(p *packages.Package, fc *pkgFlowCache, opaque, breaks map[string]bool, deps map[string]map[string]bool) {
 	if p == nil || p.TypesInfo == nil || p.Types == nil {
 		return
 	}
@@ -402,71 +528,46 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 		_, isInterface := types.Unalias(variable.Type()).Underlying().(*types.Interface)
 		return variable, isInterface
 	}
-	var auditedImmutable func(expr ast.Expr, storeDeps map[string]bool) bool
-	auditedArgument := func(expr ast.Expr, storeDeps map[string]bool) bool {
-		if expr == nil {
+	var auditedImmutable func(v *flowir.Value, storeDeps map[string]bool) bool
+	auditedArgument := func(v *flowir.Value, storeDeps map[string]bool) bool {
+		if v == nil || v.IsTypeExpr {
 			return false
 		}
-		if auditedImmutable(expr, storeDeps) {
+		if auditedImmutable(v, storeDeps) {
 			return true
 		}
-		if storeDeps != nil {
-			var target *ast.Ident
-			switch e := syntaxutil.UnparenExpr(expr).(type) {
-			case *ast.Ident:
-				target = e
-			case *ast.SelectorExpr:
-				if x, ok := syntaxutil.UnparenExpr(e.X).(*ast.Ident); ok {
-					if _, isPkg := p.TypesInfo.Uses[x].(*types.PkgName); isPkg {
-						target = e.Sel
-					}
-				}
-			}
-			if target != nil {
-				if obj, ok := p.TypesInfo.Uses[target]; ok {
-					if variable, ok := interfacePackageVar(obj); ok {
-						storeDeps[syntaxutil.DynamicVarKey(variable)] = true
-						return true
-					}
-				}
+		if storeDeps != nil && v.Kind == flowir.ValPlace && v.Place.IsBareVar() && v.Place.Obj != nil {
+			if variable, ok := interfacePackageVar(v.Place.Obj); ok {
+				storeDeps[syntaxutil.DynamicVarKey(variable)] = true
+				return true
 			}
 		}
 		return false
 	}
-	auditedImmutable = func(expr ast.Expr, storeDeps map[string]bool) bool {
-		expr = syntaxutil.UnparenExpr(expr)
-		if expr == nil {
+	auditedImmutable = func(v *flowir.Value, storeDeps map[string]bool) bool {
+		if v == nil || v.IsTypeExpr {
 			return false
 		}
-		if tv, ok := p.TypesInfo.Types[expr]; ok && tv.Value != nil {
+		if v.IsConst || v.IsNil {
 			return true
 		}
-		if t := p.TypesInfo.TypeOf(expr); t != nil && refconfine.ImmutableRuntimeType(t) {
+		if v.Type != nil && refconfine.ImmutableRuntimeType(v.Type) {
 			return true
 		}
-		switch expr := expr.(type) {
-		case *ast.Ident:
-			return expr.Name == "nil" && p.TypesInfo.Uses[expr] == types.Universe.Lookup("nil")
-		case *ast.CallExpr:
-			fn, pkgPath := syntaxutil.PlainCalleeFunc(p, expr.Fun)
-			if fn == nil {
-				return false
+		if v.Kind == flowir.ValCall && v.CallKind == flowir.CallPlain && !v.IsMethodExprCall && !v.Ellipsis && v.CalleeFunc != nil {
+			if v.CalleePkg == "errors" && v.CalleeFunc.Name() == "New" {
+				return len(v.Args) == 1
 			}
-			if pkgPath == "errors" && fn.Name() == "New" {
-				return len(expr.Args) == 1 && !expr.Ellipsis.IsValid()
-			}
-			if pkgPath == "fmt" && fn.Name() == "Errorf" && !expr.Ellipsis.IsValid() {
-				for _, arg := range expr.Args {
+			if v.CalleePkg == "fmt" && v.CalleeFunc.Name() == "Errorf" {
+				for _, arg := range v.Args {
 					if !auditedArgument(arg, storeDeps) {
 						return false
 					}
 				}
 				return true
 			}
-			return false
-		default:
-			return false
 		}
+		return false
 	}
 
 	failed := map[string]bool{}
@@ -477,16 +578,7 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 		}
 	}
 
-	audit := func(target *ast.Ident, value ast.Expr) {
-		if target == nil {
-			return
-		}
-		obj, ok := p.TypesInfo.Defs[target]
-		if !ok || obj == nil {
-			if obj, ok = p.TypesInfo.Uses[target]; !ok {
-				return
-			}
-		}
+	audit := func(obj types.Object, value *flowir.Value) {
 		if variable, ok := interfacePackageVar(obj); ok {
 			key := syntaxutil.DynamicVarKey(variable)
 			storeDeps := map[string]bool{}
@@ -505,121 +597,100 @@ func recordOpaqueDynamicVars(p *packages.Package, opaque, breaks map[string]bool
 			}
 		}
 	}
-	failSubtree := func(expr ast.Expr) {
-		ast.Inspect(expr, func(n ast.Node) bool {
-			ident, ok := n.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			if obj := syntaxutil.IdentDefOrUse(p.TypesInfo, ident); obj != nil {
-				if variable, ok := interfacePackageVar(obj); ok {
+
+	failValueVars := func(v *flowir.Value) {
+		walkTransientTargetValues(v, func(cur *flowir.Value) {
+			if cur.Kind == flowir.ValPlace && cur.Place.Obj != nil {
+				if variable, ok := interfacePackageVar(cur.Place.Obj); ok {
 					failed[syntaxutil.DynamicVarKey(variable)] = true
 				}
+			} else if cur.Kind == flowir.ValAddrOf && cur.AddrPlace.Obj != nil {
+				if variable, ok := interfacePackageVar(cur.AddrPlace.Obj); ok {
+					failed[syntaxutil.DynamicVarKey(variable)] = true
+				}
+			}
+		})
+	}
+	failPlace := func(pl flowir.Place) {
+		if pl.Obj != nil {
+			if variable, ok := interfacePackageVar(pl.Obj); ok {
+				failed[syntaxutil.DynamicVarKey(variable)] = true
+			}
+			return
+		}
+		if pl.Root == flowir.RootTransient && pl.Base != nil {
+			failValueVars(pl.Base)
+		}
+	}
+	scanAddrOf := func(v *flowir.Value) {
+		if v == nil {
+			return
+		}
+		v.WalkValues(func(cur *flowir.Value) bool {
+			if cur.Kind == flowir.ValAddrOf {
+				failPlace(cur.AddrPlace)
 			}
 			return true
 		})
 	}
-	failTargets := func(expr ast.Expr) {
-		for {
-			switch t := expr.(type) {
-			case *ast.Ident:
-				if obj := syntaxutil.IdentDefOrUse(p.TypesInfo, t); obj != nil {
-					if variable, ok := interfacePackageVar(obj); ok {
-						failed[syntaxutil.DynamicVarKey(variable)] = true
-					}
-				}
-				return
-			case *ast.SelectorExpr:
-				if obj, ok := p.TypesInfo.Uses[t.Sel]; ok {
-					if variable, ok := interfacePackageVar(obj); ok {
-						failed[syntaxutil.DynamicVarKey(variable)] = true
-						return
-					}
-				}
-				expr = t.X
-			case *ast.IndexExpr:
-				expr = t.X
-			case *ast.SliceExpr:
-				expr = t.X
-			case *ast.StarExpr:
-				expr = t.X
-			case *ast.ParenExpr:
-				expr = t.X
-			default:
-				failSubtree(expr)
-				return
-			}
-		}
-	}
 
-	inspectBody := func(root ast.Node) {
-		ast.Inspect(root, func(n ast.Node) bool {
-			switch n := n.(type) {
-			case *ast.ValueSpec:
-				if len(n.Values) == 0 {
-					return true
-				}
-				if len(n.Names) != len(n.Values) {
-					for _, ident := range n.Names {
-						failTargets(ident)
-					}
-					return true
-				}
-				for i, ident := range n.Names {
-					audit(ident, n.Values[i])
-				}
-			case *ast.AssignStmt:
-				if (n.Tok != token.ASSIGN && n.Tok != token.DEFINE) || len(n.Lhs) != len(n.Rhs) {
-					for _, lhs := range n.Lhs {
-						failTargets(lhs)
-					}
-					return true
-				}
-				for i, lhs := range n.Lhs {
-					switch target := syntaxutil.UnparenExpr(lhs).(type) {
-					case *ast.Ident:
-						audit(target, n.Rhs[i])
-					case *ast.SelectorExpr:
-						if base, ok := syntaxutil.UnparenExpr(target.X).(*ast.Ident); ok {
-							if _, isPkg := p.TypesInfo.Uses[base].(*types.PkgName); isPkg {
-								audit(target.Sel, n.Rhs[i])
-								continue
+	inspectBody := func(b *flowir.Body) {
+		if b == nil {
+			return
+		}
+		visitAllBodyOps(b, func(op *flowir.Op) {
+			switch op.Kind {
+			case flowir.OpAssign:
+				switch op.AssignKind {
+				case flowir.AssignZeroDecl:
+					// Uninitialized declaration `var ErrFoo error` leaves zero-value nil intact.
+				case flowir.AssignPlain:
+					if len(op.Dsts) != len(op.Srcs) {
+						for _, dst := range op.Dsts {
+							failPlace(dst)
+						}
+					} else {
+						for i, dst := range op.Dsts {
+							if dst.IsBareVar() && dst.Obj != nil {
+								audit(dst.Obj, op.Srcs[i])
+							} else {
+								failPlace(dst)
 							}
 						}
-						failTargets(lhs)
-					default:
-						failTargets(lhs)
+					}
+				default:
+					for _, dst := range op.Dsts {
+						failPlace(dst)
 					}
 				}
-			case *ast.IncDecStmt:
-				failTargets(n.X)
-			case *ast.UnaryExpr:
-				if n.Op == token.AND {
-					if _, composite := syntaxutil.UnparenExpr(n.X).(*ast.CompositeLit); !composite {
-						failTargets(n.X)
-					}
+				for _, dst := range op.Dsts {
+					dst.ForEachChildValue(func(cv *flowir.Value) bool {
+						scanAddrOf(cv)
+						return true
+					})
 				}
-			case *ast.SliceExpr:
-				if t := p.TypesInfo.TypeOf(n.X); t != nil {
-					if _, isArr := types.Unalias(t).Underlying().(*types.Array); isArr {
-						failTargets(n.X)
-					}
+				for _, src := range op.Srcs {
+					scanAddrOf(src)
 				}
-			case *ast.RangeStmt:
-				if n.Key != nil {
-					failTargets(n.Key)
-				}
-				if n.Value != nil {
-					failTargets(n.Value)
-				}
+			default:
+				forEachOpTopValues(op, scanAddrOf)
 			}
-			return true
 		})
 	}
 
 	for _, file := range p.Syntax {
+		if file == nil {
+			continue
+		}
 		for _, decl := range file.Decls {
-			inspectBody(decl)
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				inspectBody(fc.funcBody(p, d))
+			case *ast.GenDecl:
+				if d.Tok == token.VAR || d.Tok == token.CONST {
+					inspectBody(fc.body(p, d))
+				}
+			}
 		}
 	}
 	for key := range failed {

@@ -442,9 +442,9 @@ an interface value (its concrete object is shared), a channel, or a pointer, map
 or slice reaching a dynamic carrier, or an unsafe pointer — hands shared mutable
 access through the value, so it is judged by use shape, still fail-closed: a read
 that provably cannot write — indexing or iterating the carrier, taking its length
-or capacity, or comparing it — is not mutation, and the indexing and iteration
-discharges hold only when the produced value hands out no mutable reach — a
-pointer, map, slice, channel, or interface anywhere in it refuses; a function
+or capacity, querying its compile-time size, alignment, or field offset, or comparing it — is not mutation, and the indexing and iteration
+discharges hold only when the produced value hands out no mutable reach or raw `uintptr` address (and no string value exposed to un-confined string-header `unsafe` operations in the package, through an active cross-package string sink or planted callback, or in an upstream importer) — a
+pointer, map, slice, channel, interface, or `uintptr` anywhere in it refuses; a function
 value is program code judged where written, not write access (an indexed-out
 map still writes through) — but a signature-carrying value IS its
 environment: a rooted signature-carrying read handed out — returned,
@@ -458,13 +458,22 @@ nothing — and a comma-ok existence read whose extracted
 element lands in a blank is writeless on any carrier — no value is
 produced to hand out — and never for a channel (ranging a channel
 receives); a write through the carrier, growth or deletion, a send or receive, an
-address capture, or a rebinding is mutation; every other use — escaping the value
+address capture, or a rebinding is mutation, whereas index keys and slice bounds
+inside left-hand-side assignment targets or ranged expressions are evaluated as
+rvalue reads under their own use shape rather than treated as mutated targets of
+the assignment or range; every other use — escaping the value
 into a call argument, a store, a return, a binding, a method call on it, or a
 type assertion — is mutation-equivalent, because the receiving code may write
 what it was handed. An address capture reaches the variable's own cell or a
 chain into it; taking the address of a composite literal captures the fresh
 object alone, its element references remaining escapes, while a capture
-nested inside the literal marks through its own shape. A lexically bracketed
+nested inside the literal marks through its own shape; when a local alias holds a
+carrier only in interior reach rather than at its own root header, an access,
+write, or non-carrier-capable address capture staying within the local's own
+single root header (or bare-addressed pointer dereference) marks neither
+mutation nor escape of the embedded carrier, whereas escaping the local, taking a
+carrier-capable address, or crossing into interior reach (including container
+writes through a slice, map, or channel hop) marks its interior carrier set. A lexically bracketed
 save-and-restore or zero-reset write to a same-package non-alias-handing,
 non-mutable-reach package variable (or field thereof, without mixing
 whole-struct and field writes on the same variable) whose address is never
@@ -529,22 +538,22 @@ receiver-derived synchronization primitive is copied by value, no goroutine or
 non-synchronous nested function literal references the receiver or a tainted
 binding, values read
 off it are tracked as the receiver's own — a binding whose type hands out
-mutable reach, carries a signature, or reaches a synchronization primitive by
-value taints its local (a value copy that cannot write back or copy synchronization state flows
-freely), a receiver-rooted read is judged at its outermost selector or index
+mutable reach, carries a raw `uintptr` address (or a string value in a scope reaching or exposing string-header `unsafe` operations), carries a signature, or reaches a synchronization primitive by
+value taints its local (a value copy that cannot write back, reconstruct an unsafe pointer, or copy synchronization state flows
+freely, and compile-time size, alignment, and field-offset queries read types without evaluating runtime memory), a receiver-rooted read is judged at its outermost selector or index
 step by the value it produces — an intermediate reach-bearing step is
 evaluation, not a handout — a conversion of a receiver-reachable value admits
-exactly when its result type hands out no mutable reach and the operand is
+when its result type hands out no mutable reach or raw `uintptr` address (or converts between a string and a fresh byte or rune slice copy, whereas string-header `unsafe` extractions and pointer-to-`unsafe.Pointer` conversions over string-bearing storage refuse) and the operand is
 not a method value (a method value carries its receiver whatever the result
 type says; an aliasing conversion keeps the escape, and a non-blank type-assertion or type-switch narrowing of a non-signature value into a signature-carrying type refuses), a bind whose target
 outlives the body — a package-level variable — refuses whenever the target's
-type hands out mutable reach (a reach-free copy flows; the proof's tracked
+type hands out mutable reach or a raw `uintptr` address (or writes a string-bearing value into a package variable exposed to string-header `unsafe` operations; a reach-free copy flows; the proof's tracked
 bindings die with the body, and an outliving alias escapes it — a sibling
 call's results bound to such a target refuse identically), a write
 through or an escape of a tainted value refuses, and only the method's own
 return position hands one out — a return inside a nested function literal is
 an escape position, since the literal outlives the body carrying what it
-captured and no call-site result judgment sees through a signature — and it chains into sibling receiver-read-only methods, foreign statically dispatched non-interface receiver-read-only methods whose instantiated results hand out no mutable reach, and leak-free plain-function parameters for non-signature-carrying arguments (over conditional method and parameter edges resolved jointly with parameter leak-free proofs at composition, retention proofs remaining intra-package, and go-statement subtrees never deferring) or into
+captured and no call-site result judgment sees through a signature — and it chains into sibling receiver-read-only methods, foreign statically dispatched non-interface receiver-read-only methods whose instantiated results hand out no mutable reach or raw `uintptr` address, and leak-free plain-function parameters for non-signature-carrying arguments (over conditional method and parameter edges resolved jointly with parameter leak-free proofs at composition, retention proofs remaining intra-package, and go-statement subtrees never deferring) or into
 checked synchronization claims under
 REQ-closure-shared-dynamic-state-audited-discharges, a dispatch of an UNEXPORTED method through a
 receiver-reachable interface value chaining into every in-package
@@ -563,7 +572,7 @@ declaration of the method (a member promoting it refuses), while any other
 exported dispatch keeps the escape, a composite being able to promote it
 from a foreign type — and a call to a proven method marks nothing,
 generic receivers included, provided the call site's instantiated result types
-each hand out no mutable reach or have checked immutable-implementation claims
+each hand out no mutable reach or raw `uintptr` address (and no string value in a scope reaching string-header `unsafe` operations) or have checked immutable-implementation claims
 (for reflect.Type this requires runtime-canonical descriptors never written
 after construction, and for reflect.TypeOf a separately checked pure-constructor
 claim at the effect classification tiers; for go/constant.Value this requires
@@ -815,7 +824,7 @@ confined in `T`'s package, every exported field on structs reachable from the
 getter's results restricted to scalars, by-value structs, pointers to non-empty
 named structs, or slices/arrays of non-empty named structs, and `T` together
 with every non-empty named struct reachable in `T`'s type closure guarded
-binary-wide so any non-fresh struct or element mutation across the graph revokes
+binary-wide so any non-fresh struct or element mutation across the graph (or un-confined string-header `unsafe` capability reaching the package directly, through an active cross-package string sink or planted callback, or from an upstream importer when the memoizer hands out string-bearing values, raw `uintptr` addresses being excluded from scalar slots) revokes
 the discharge fail-closed. At the
 effect classification tiers the memo claim covers sync.Map itself and
 its Load, Store, and LoadOrStore — process-memory reads and writes fed by
@@ -1023,7 +1032,8 @@ selection; a familiar type or constructor name supplies none.
 **REQ-closure-shared-dynamic-state-init-aliasing** (invariant): An escape MUST NOT
 discharge by init flow — the alias outlives initialization. Proven
 init-only functions are scanned for escapes under the full use-shape
-rules, including result expressions and named result variables whose types
+rules, including composite or in-place carrier stores into formal parameters
+and result expressions or named result variables whose types
 can hand out carrier-derived state or mutable reach; `init` bodies and
 qualified helpers are scanned exactly for
 alias-creating bindings — an init-flow local bound from a carrier by
@@ -1037,8 +1047,12 @@ generic-instantiated call spellings; a conversion-wrapped or
 func-value spelling refuses fail-closed through the escape backstop
 instead), or
 through a composite target or shared local backing memory (a struct field,
-element, channel send, map key, or indirection store binds its base and
-co-aliased local storage coarsely — the whole base is the carrier),
+element, channel send, map key, type-switch binding, or indirection store
+propagates across co-aliased local backing storage — including pointer
+addressing, value-array slicing, `unsafe.Pointer`/`uintptr` and `unsafe` pointer/slice/string header derivations, `min`/`max` selections, and shared slice/map/channel headers — tracking
+root-header carrier aliases separately from interior-reach carrier aliases so
+writes through bare-addressed pointers reach the addressed local's root header
+while fresh composite holders carry embedded carriers in interior reach),
 chained to a fixpoint,
 is the carrier inside nested program code —
 while init-flow stores and calls stay exempt from the mutation marks;
@@ -1055,7 +1069,7 @@ only provably nil or zero carrier slots and mutable-reach targets and written
 map keys read no external mutable or carrier state, an unproven, dispatched,
 result-handing, or value-bound method keeping the fail-closed escape —
 a bound method value retains its receiver past initialization. An init-flow
-bind or store whose target is itself a carrier — or an init-flow store
+bind or store whose target is itself a carrier (propagated across local aliases, `unsafe` pointer/slice/string header derivations, and `min`/`max` selections, while ignoring compile-time size/alignment/offset operands and slice/string length operands) — or an init-flow store
 of an admitted environment-free closure capturing an init-flow local
 alias of a dynamic-capable package variable, non-directive when declared in the same package — links the two keys as
 one storage — mutation, escape, and environment marks crossing the
@@ -1241,7 +1255,7 @@ connecting a local root to an enclosing-scope variable via mutable
 reach, place address-of, value-array slicing, or implicit
 pointer-receiver method-value addressing, since a shared environment is one
 object under every name it carries and however many carriers its
-closures reach — AND every root in that alias set has a confined origin (excluding channel or function-iterator range bindings, excluding non-scalar enclosing receivers and named results, excluding non-scalar enclosing parameters for directly registered literals outside synchronous init-only helpers while admitting caller-obligated unbroken parameters for returned literals and call-site-verified parameters of unexported synchronous init-only helpers where non-spread variadic calls allocate a fresh slice and spread calls require pure fresh slice data, verifying single-definition unmutated/unaddressed non-directive same-package signature sources with constructor edges propagated, rejecting type-switch narrowing into a signature-carrying type, and requiring mutable-reach local roots to initialize solely from pure fresh data over variable-free append bases, fresh allocations, value-plane clones over clean operands, settled unexported package data, or — in synchronous init flow — dynamic carriers, unbroken and non-directive when declared in the same package, from which neither the literal nor any sibling closure extracts or invokes a carrier, signature, or mutable-reach value, recorded as init-flow carrier links, with any signature-carrying operand boxed into an interface or composite within those roots satisfying this signature audit), with a
+closures reach — AND every root in that alias set has a confined origin (excluding channel or function-iterator range bindings, excluding non-scalar enclosing receivers and named results, excluding non-scalar enclosing parameters for directly registered literals outside synchronous init-only helpers while admitting caller-obligated unbroken parameters for returned literals and call-site-verified parameters of unexported synchronous init-only helpers where non-spread variadic calls allocate a fresh slice and spread calls require pure fresh slice data, verifying single-definition unmutated/unaddressed non-directive same-package signature sources with constructor edges propagated, rejecting type-switch narrowing into a signature-carrying type, and requiring mutable-reach local roots (including raw `uintptr` addresses, and string-bearing values when un-confined string-header `unsafe` capability reaches the package directly, through an active cross-package string sink or planted callback, or from an upstream importer) to initialize solely from pure fresh data over variable-free append bases, fresh allocations, value-plane clones over clean operands, settled unexported package data, or — in synchronous init flow — dynamic carriers, unbroken and non-directive when declared in the same package, from which neither the literal nor any sibling closure extracts or invokes a carrier, signature, or mutable-reach value, recorded as init-flow carrier links, with any signature-carrying operand boxed into an interface or composite within those roots satisfying this signature audit), with a
 reference to the alias set from a go statement's call outside any
 literal refusing outright. A call result whose callee is a plain named
 function — a bare identifier or package-qualified selector,
