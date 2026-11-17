@@ -1,4 +1,4 @@
-package flowir
+package flowir_test
 
 import (
 	"fmt"
@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"testing"
 
+	. "github.com/greatliontech/gofresh/internal/dynstate/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"pgregory.net/rapid"

@@ -114,6 +114,7 @@ type Proj struct {
 	Max       *Value
 	BaseType  types.Type
 	Type      types.Type
+	Raw       ast.Expr
 }
 
 // Place is a normalized memory location or addressable/projected path.
@@ -122,6 +123,7 @@ type Proj struct {
 type Place struct {
 	Root         RootKind
 	RootPos      token.Pos
+	RootRaw      ast.Expr
 	Obj          *types.Var
 	ConstOrNil   types.Object
 	Func         *types.Func
@@ -169,6 +171,11 @@ func (p Place) AsMapWrite() (mapPlace Place, key *Value, ok bool) {
 	prefix := p
 	prefix.Projs = p.Projs[:len(p.Projs)-1]
 	prefix.Type = last.BaseType
+	if len(prefix.Projs) > 0 {
+		prefix.Raw = prefix.Projs[len(prefix.Projs)-1].Raw
+	} else if prefix.RootRaw != nil {
+		prefix.Raw = prefix.RootRaw
+	}
 	return prefix, last.Key, true
 }
 
@@ -563,6 +570,52 @@ func (op *Op) ForEachAssignPair(fn func(idx int, dst Place, isDef bool, src *Val
 		if !fn(i, dst, isDef, src) {
 			return false
 		}
+	}
+	return true
+}
+
+// ForEachValue calls fn for every top-level Value directly referenced by op
+// (including index/slice/transient-base sub-values inside op.Dsts and
+// op.ChanPlace). It does not descend into op.RangeBody or nested closures.
+func (op *Op) ForEachValue(fn func(*Value) bool) bool {
+	if op == nil {
+		return true
+	}
+	visit := func(v *Value) bool {
+		if v == nil {
+			return true
+		}
+		return fn(v)
+	}
+	switch op.Kind {
+	case OpAssign:
+		for _, dst := range op.Dsts {
+			if !dst.ForEachChildValue(visit) {
+				return false
+			}
+		}
+		for _, src := range op.Srcs {
+			if !visit(src) {
+				return false
+			}
+		}
+	case OpTypeSwitchBind:
+		return visit(op.SwitchSrc)
+	case OpChanSend:
+		if !op.ChanPlace.ForEachChildValue(visit) {
+			return false
+		}
+		return visit(op.ChanVal) && visit(op.SendVal)
+	case OpReturn:
+		for _, r := range op.Results {
+			if !visit(r) {
+				return false
+			}
+		}
+	case OpDefer, OpGo:
+		return visit(op.Call)
+	case OpExpr:
+		return visit(op.Expr)
 	}
 	return true
 }

@@ -6,10 +6,12 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 const testBaseRapidSrc = `package rapid
@@ -390,4 +392,31 @@ func TestVerifyPackageGates(t *testing.T) {
 			t.Fatal("VerifyPackage accepted Example ignoring seed")
 		}
 	})
+}
+
+func TestVerifyRealRapidDependency(t *testing.T) {
+	loaded, err := gotool.LoadPackages(
+		t.Context(),
+		packages.NeedName|packages.NeedFiles|packages.NeedCompiledGoFiles|packages.NeedEmbedFiles|packages.NeedEmbedPatterns|packages.NeedSyntax|packages.NeedTypes|packages.NeedTypesInfo|packages.NeedImports|packages.NeedModule|packages.NeedForTest,
+		"../..",
+		os.Environ(),
+		nil,
+		ModulePath,
+	)
+	if err != nil || len(loaded) == 0 {
+		t.Fatalf("LoadPackages(%s): err=%v len=%d", ModulePath, err, len(loaded))
+	}
+	checked := 0
+	for _, p := range loaded {
+		if p == nil || !IsHarnessPath(p.PkgPath) || p.ForTest != "" {
+			continue
+		}
+		checked++
+		if ok, reason := VerifyPackageWithReason(true, p); !ok {
+			t.Fatalf("VerifyPackageWithReason(true, real %s) = false (%s), want true", p.ID, reason)
+		}
+	}
+	if checked == 0 {
+		t.Fatalf("found zero non-test %s packages in %d loaded roots", ModulePath, len(loaded))
+	}
 }

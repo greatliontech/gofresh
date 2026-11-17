@@ -54,6 +54,52 @@ func boundValueRetentionFreeJudged(
 	return boundValueJudged(audited, p, fc, roots, body, wants, nil, methodWants, nil, nil, true, false)
 }
 
+type rootConfinementConfig struct {
+	audited              bool
+	p                    *packages.Package
+	fc                   *pkgFlowCache
+	roots                map[types.Object]bool
+	body                 ast.Node
+	wants                map[syntaxutil.ParamKey]bool
+	returns              *bool
+	methodWants          map[syntaxutil.FuncKey]bool
+	fieldWants           map[syntaxutil.FieldPosKey]bool
+	elemWants            map[syntaxutil.ElemParamUse]bool
+	tolerateRootedStores bool
+	allowCapturedClosure bool
+}
+
+func confineFlowRoots(cfg rootConfinementConfig) bool {
+	if cfg.p == nil || cfg.p.TypesInfo == nil || cfg.body == nil || len(cfg.roots) == 0 {
+		return false
+	}
+	for r := range cfg.roots {
+		if r == nil || refconfine.TypeReachesSyncNoCopyByValue(r.Type()) {
+			return false
+		}
+	}
+	lowered := cfg.fc.body(cfg.p, cfg.body)
+	if lowered == nil {
+		return false
+	}
+	eng := &confinementEngine{
+		audited:              cfg.audited,
+		p:                    cfg.p,
+		fc:                   cfg.fc,
+		rootBody:             lowered,
+		roots:                cfg.roots,
+		tainted:              map[types.Object]bool{},
+		tolerateRootedStores: cfg.tolerateRootedStores,
+		allowCapturedClosure: cfg.allowCapturedClosure,
+		wants:                cfg.wants,
+		returns:              cfg.returns,
+		methodWants:          cfg.methodWants,
+		fieldWants:           cfg.fieldWants,
+		elemWants:            cfg.elemWants,
+	}
+	return eng.run()
+}
+
 func boundValueJudged(
 	audited bool,
 	p *packages.Package,
@@ -68,34 +114,20 @@ func boundValueJudged(
 	tolerateRootedStores bool,
 	allowCapturedClosure bool,
 ) bool {
-	if p == nil || p.TypesInfo == nil || body == nil || len(roots) == 0 {
-		return false
-	}
-	for r := range roots {
-		if r == nil || refconfine.TypeReachesSyncNoCopyByValue(r.Type()) {
-			return false
-		}
-	}
-	lowered := fc.body(p, body)
-	if lowered == nil {
-		return false
-	}
-	eng := &confinementEngine{
+	return confineFlowRoots(rootConfinementConfig{
 		audited:              audited,
 		p:                    p,
 		fc:                   fc,
-		rootBody:             lowered,
 		roots:                roots,
-		tainted:              map[types.Object]bool{},
-		tolerateRootedStores: tolerateRootedStores,
-		allowCapturedClosure: allowCapturedClosure,
+		body:                 body,
 		wants:                wants,
 		returns:              returns,
 		methodWants:          methodWants,
 		fieldWants:           fieldWants,
 		elemWants:            elemWants,
-	}
-	return eng.run()
+		tolerateRootedStores: tolerateRootedStores,
+		allowCapturedClosure: allowCapturedClosure,
+	})
 }
 
 type valueEvalMode uint8
@@ -366,154 +398,14 @@ func (e *confinementEngine) valueSuppliesRoot(v *flowir.Value) bool {
 }
 
 func (e *confinementEngine) propagateTaint() {
-	memAdj := e.fc.scopedBodyInteriorAliases(e.audited, e.rootBody, e.roots)
-	eligible := func(v *types.Var) bool {
-		return v != nil && !v.IsField() && !e.roots[v] && e.typeHandsOut(v.Type())
-	}
-	markVar := func(v *types.Var) bool {
-		if !eligible(v) {
-			return false
-		}
-		changed := false
-		if !e.tainted[v] {
-			e.tainted[v] = true
-			changed = true
-		}
-		for nb := range memAdj[v] {
-			if nv, ok := nb.(*types.Var); ok && eligible(nv) && !e.tainted[nv] {
-				e.tainted[nv] = true
-				changed = true
-			}
-		}
-		return changed
-	}
-	var markTargetVal func(v *flowir.Value) bool
-	markPlaceBase := func(pl flowir.Place) bool {
-		if pl.Obj != nil {
-			return markVar(pl.Obj)
-		}
-		if pl.Root == flowir.RootTransient && pl.Base != nil {
-			return markTargetVal(pl.Base)
-		}
-		return false
-	}
-	markTargetVal = func(v *flowir.Value) bool {
-		if v == nil {
-			return false
-		}
-		didMark := false
-		walkTransientTargetValues(v, func(cur *flowir.Value) {
-			switch cur.Kind {
-			case flowir.ValPlace:
-				if markPlaceBase(cur.Place) {
-					didMark = true
-				}
-			case flowir.ValAddrOf:
-				if markPlaceBase(cur.AddrPlace) {
-					didMark = true
-				}
-			}
-		})
-		return didMark
-	}
-	for changed := true; changed; {
-		changed = false
-		var visitBody func(b *flowir.Body)
-		var visitVal func(v *flowir.Value)
-		visitVal = func(v *flowir.Value) {
-			if v == nil {
-				return
-			}
-			if v.Kind == flowir.ValMakeClosure && v.Closure != nil {
-				visitBody(v.Closure)
-			}
-			if v.Kind == flowir.ValCall {
-				if v.CallKind == flowir.CallBuiltin && v.BuiltinName == "copy" && len(v.Args) == 2 {
-					if e.valueSuppliesRoot(v.Args[1]) && markTargetVal(v.Args[0]) {
-						changed = true
-					}
-				} else if v.CallKind == flowir.CallBuiltin && v.BuiltinName == "append" && len(v.Args) >= 2 {
-					for _, elem := range v.Args[1:] {
-						if e.valueSuppliesRoot(elem) {
-							if markTargetVal(v.Args[0]) {
-								changed = true
-							}
-							break
-						}
-					}
-				} else if v.CallKind == flowir.CallIIFE && v.IIFE != nil {
-					v.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, _ int, pIdx int, ok bool, _ bool) bool {
-						if ok && pIdx < len(v.IIFE.Params) && (slotType == nil || e.typeHandsOut(slotType)) {
-							if pv := v.IIFE.Params[pIdx]; e.valueSuppliesRoot(arg) && markVar(pv) {
-								changed = true
-							}
-						}
-						return true
-					})
-					visitBody(v.IIFE)
-				} else if e.isSyncOnceCall(v) {
-					visitBody(v.Args[0].Closure)
-				}
-			}
-			v.ForEachChildValue(func(child *flowir.Value) bool {
-				visitVal(child)
-				return true
-			})
-		}
-		visitBody = func(b *flowir.Body) {
-			if b == nil {
-				return
-			}
-			b.ForEachSyncOp(func(op *flowir.Op) bool {
-				switch op.Kind {
-				case flowir.OpAssign:
-					op.ForEachAssignPair(func(_ int, dst flowir.Place, _ bool, src *flowir.Value) bool {
-						if src != nil && e.valueSuppliesRoot(src) {
-							if markPlaceBase(dst) {
-								changed = true
-							}
-						}
-						if mapPlace, keyVal, isMapWrite := dst.AsMapWrite(); isMapWrite && keyVal != nil && e.valueSuppliesRoot(keyVal) {
-							if markPlaceBase(mapPlace) {
-								changed = true
-							}
-						}
-						dst.ForEachChildValue(func(cv *flowir.Value) bool {
-							visitVal(cv)
-							return true
-						})
-						return true
-					})
-					for _, src := range op.Srcs {
-						visitVal(src)
-					}
-				case flowir.OpTypeSwitchBind:
-					if e.valueSuppliesRoot(op.SwitchSrc) && markVar(op.SwitchDst) {
-						changed = true
-					}
-					visitVal(op.SwitchSrc)
-				case flowir.OpChanSend:
-					if e.valueSuppliesRoot(op.SendVal) {
-						if markPlaceBase(op.ChanPlace) {
-							changed = true
-						}
-					}
-					visitVal(op.ChanVal)
-					visitVal(op.SendVal)
-				case flowir.OpReturn:
-					for _, r := range op.Results {
-						visitVal(r)
-					}
-				case flowir.OpDefer:
-					visitVal(op.Call)
-				case flowir.OpExpr:
-					visitVal(op.Expr)
-				}
-				return true
-			})
-		}
-		visitBody(e.rootBody)
-	}
+	propagateFlowVarTaint(e.audited, e.fc, e.rootBody, e.tainted, flowVarTaintConfig{
+		exclude:        e.roots,
+		allowOuterVars: true,
+		varTypeFilter:  e.typeHandsOut,
+		iifeSlotFilter: e.typeHandsOut,
+		valTaints:      e.valueSuppliesRoot,
+		isSyncOnceCall: e.isSyncOnceCall,
+	})
 }
 
 func (e *confinementEngine) isExternalSeedVar(v *types.Var) bool {
@@ -588,7 +480,7 @@ func (e *confinementEngine) valueReachesExternal(v *flowir.Value) bool {
 				switch cur.CallKind {
 				case flowir.CallBuiltin:
 					switch cur.BuiltinName {
-					case "make", "Sizeof", "Alignof", "Offsetof":
+					case "Sizeof", "Alignof", "Offsetof":
 						return
 					case "append":
 						for _, a := range cur.Args {
@@ -627,28 +519,50 @@ func (e *confinementEngine) valueReachesExternal(v *flowir.Value) bool {
 	return found
 }
 
-type bodyVarTaintConfig struct {
-	exclude            map[types.Object]bool
-	valTaints          func(*flowir.Value) bool
-	isSyncOnceCall     func(*flowir.Value) bool
-	transientDstExempt func(flowir.Place) bool
-	taintRootReturns   bool
+type flowVarTaintConfig struct {
+	exclude                   map[types.Object]bool
+	allowOuterVars            bool
+	varTypeFilter             func(types.Type) bool
+	iifeSlotFilter            func(types.Type) bool
+	valTaints                 func(*flowir.Value) bool
+	isSyncOnceCall            func(*flowir.Value) bool
+	transientDstExempt        func(flowir.Place) bool
+	reverseFlowAndCallTargets bool
+	taintRootReturns          bool
+	checkAssignDstType        bool
+	checkCopyDstElem          bool
 }
 
-func propagateBodyVarTaint(
+func propagateFlowVarTaint(
 	audited bool,
 	fc *pkgFlowCache,
 	rootBody *flowir.Body,
 	out map[types.Object]bool,
-	cfg bodyVarTaintConfig,
+	cfg flowVarTaintConfig,
 ) {
 	if rootBody == nil || out == nil || cfg.valTaints == nil {
 		return
 	}
 	shares := sharesMemOrSigOrDynamic(audited)
+	slotFilter := cfg.iifeSlotFilter
+	if slotFilter == nil {
+		slotFilter = shares
+	}
 	memAdj := fc.scopedBodyInteriorAliases(audited, rootBody, cfg.exclude)
+	eligible := func(v *types.Var) bool {
+		if v == nil || v.IsField() || cfg.exclude[v] {
+			return false
+		}
+		if !cfg.allowOuterVars && isPkgOrOuterToBody(rootBody, v) {
+			return false
+		}
+		if cfg.varTypeFilter != nil && !cfg.varTypeFilter(v.Type()) {
+			return false
+		}
+		return true
+	}
 	markVar := func(v *types.Var) bool {
-		if v == nil || v.IsField() || cfg.exclude[v] || isPkgOrOuterToBody(rootBody, v) {
+		if !eligible(v) {
 			return false
 		}
 		changed := false
@@ -657,21 +571,65 @@ func propagateBodyVarTaint(
 			changed = true
 		}
 		for nb := range memAdj[v] {
-			if nv, ok := nb.(*types.Var); ok && nv != nil && !nv.IsField() && !cfg.exclude[nv] && !out[nv] && !isPkgOrOuterToBody(rootBody, nv) {
+			if nv, ok := nb.(*types.Var); ok && eligible(nv) && !out[nv] {
 				out[nv] = true
 				changed = true
 			}
 		}
 		return changed
 	}
-	markValVars := func(a *flowir.Value) bool {
-		return markEscapingValueVars(audited, a, markVar)
+	var markTargetVal func(a *flowir.Value) bool
+	var markPlaceBase func(pl flowir.Place) bool
+	if cfg.reverseFlowAndCallTargets {
+		markTargetVal = func(a *flowir.Value) bool {
+			return markEscapingValueVars(audited, a, markVar)
+		}
+		markPlaceBase = func(pl flowir.Place) bool {
+			if pl.Obj != nil {
+				return markVar(pl.Obj)
+			}
+			if pl.Root == flowir.RootTransient && pl.Base != nil &&
+				(cfg.transientDstExempt == nil || !cfg.transientDstExempt(pl)) {
+				return markTargetVal(pl.Base)
+			}
+			return false
+		}
+	} else {
+		markPlaceBase = func(pl flowir.Place) bool {
+			if pl.Obj != nil {
+				return markVar(pl.Obj)
+			}
+			if pl.Root == flowir.RootTransient && pl.Base != nil &&
+				(cfg.transientDstExempt == nil || !cfg.transientDstExempt(pl)) {
+				return markTargetVal(pl.Base)
+			}
+			return false
+		}
+		markTargetVal = func(v *flowir.Value) bool {
+			if v == nil {
+				return false
+			}
+			didMark := false
+			walkTransientTargetValues(v, func(cur *flowir.Value) {
+				switch cur.Kind {
+				case flowir.ValPlace:
+					if markPlaceBase(cur.Place) {
+						didMark = true
+					}
+				case flowir.ValAddrOf:
+					if markPlaceBase(cur.AddrPlace) {
+						didMark = true
+					}
+				}
+			})
+			return didMark
+		}
 	}
 	isPureNonMutatingCall := func(v *flowir.Value) bool {
 		switch v.CallKind {
 		case flowir.CallBuiltin:
 			switch v.BuiltinName {
-			case "make", "new", "len", "cap", "delete", "clear", "copy", "append", "Sizeof", "Alignof", "Offsetof":
+			case "len", "cap", "delete", "clear", "copy", "append", "Sizeof", "Alignof", "Offsetof":
 				return true
 			}
 		case flowir.CallPlain:
@@ -694,14 +652,14 @@ func propagateBodyVarTaint(
 			}
 			if v.Kind == flowir.ValCall {
 				if v.CallKind == flowir.CallBuiltin && v.BuiltinName == "copy" && len(v.Args) == 2 {
-					if v.Args[0] != nil && sliceCopyElemCarriesReachOrDynamic(audited, v.Args[0].Type) &&
-						cfg.valTaints(v.Args[1]) && markValVars(v.Args[0]) {
+					if v.Args[0] != nil && (!cfg.checkCopyDstElem || sliceCopyElemCarriesReachOrDynamic(audited, v.Args[0].Type)) &&
+						cfg.valTaints(v.Args[1]) && markTargetVal(v.Args[0]) {
 						changed = true
 					}
 				} else if v.CallKind == flowir.CallBuiltin && v.BuiltinName == "append" && len(v.Args) >= 2 {
 					for _, elem := range v.Args[1:] {
 						if cfg.valTaints(elem) {
-							if markValVars(v.Args[0]) {
+							if markTargetVal(v.Args[0]) {
 								changed = true
 							}
 							break
@@ -709,7 +667,7 @@ func propagateBodyVarTaint(
 					}
 				} else if v.CallKind == flowir.CallIIFE && v.IIFE != nil {
 					v.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, _ int, pIdx int, ok bool, _ bool) bool {
-						if ok && pIdx < len(v.IIFE.Params) && (slotType == nil || shares(slotType)) {
+						if ok && pIdx < len(v.IIFE.Params) && (slotType == nil || slotFilter(slotType)) {
 							if pv := v.IIFE.Params[pIdx]; pv != nil && cfg.valTaints(arg) && markVar(pv) {
 								changed = true
 							}
@@ -719,7 +677,7 @@ func propagateBodyVarTaint(
 					visitBody(v.IIFE)
 				} else if cfg.isSyncOnceCall != nil && cfg.isSyncOnceCall(v) {
 					visitBody(v.Args[0].Closure)
-				} else if !isPureNonMutatingCall(v) {
+				} else if cfg.reverseFlowAndCallTargets && !isPureNonMutatingCall(v) {
 					if markCallTargetVars(audited, v, markVar) {
 						changed = true
 					}
@@ -738,27 +696,24 @@ func propagateBodyVarTaint(
 				switch op.Kind {
 				case flowir.OpAssign:
 					op.ForEachAssignPair(func(_ int, dst flowir.Place, _ bool, src *flowir.Value) bool {
-						if (dst.Type == nil || shares(dst.Type)) && src != nil && cfg.valTaints(src) {
-							if dst.Obj != nil {
-								if markVar(dst.Obj) {
+						if (!cfg.checkAssignDstType || dst.Type == nil || shares(dst.Type)) && src != nil && cfg.valTaints(src) {
+							if markPlaceBase(dst) {
+								changed = true
+							}
+						}
+						if cfg.reverseFlowAndCallTargets {
+							isExtDst := dst.Obj != nil && !cfg.exclude[dst.Obj] && isPkgOrOuterToBody(rootBody, dst.Obj)
+							if !isExtDst && dst.Root == flowir.RootTransient && dst.Base != nil &&
+								(cfg.transientDstExempt == nil || !cfg.transientDstExempt(dst)) && cfg.valTaints(dst.Base) {
+								isExtDst = true
+							}
+							if isExtDst {
+								if (dst.Type == nil || shares(dst.Type)) && markTargetVal(src) {
 									changed = true
 								}
-							} else if dst.Root == flowir.RootTransient && dst.Base != nil &&
-								(cfg.transientDstExempt == nil || !cfg.transientDstExempt(dst)) && markValVars(dst.Base) {
-								changed = true
-							}
-						}
-						isExtDst := dst.Obj != nil && !cfg.exclude[dst.Obj] && isPkgOrOuterToBody(rootBody, dst.Obj)
-						if !isExtDst && dst.Root == flowir.RootTransient && dst.Base != nil &&
-							(cfg.transientDstExempt == nil || !cfg.transientDstExempt(dst)) && cfg.valTaints(dst.Base) {
-							isExtDst = true
-						}
-						if isExtDst {
-							if (dst.Type == nil || shares(dst.Type)) && markValVars(src) {
-								changed = true
-							}
-							if _, keyVal, isMapWrite := dst.AsMapWrite(); isMapWrite && markValVars(keyVal) {
-								changed = true
+								if _, keyVal, isMapWrite := dst.AsMapWrite(); isMapWrite && markTargetVal(keyVal) {
+									changed = true
+								}
 							}
 						}
 						if mapPlace, keyVal, isMapWrite := dst.AsMapWrite(); isMapWrite && keyVal != nil && cfg.valTaints(keyVal) {
@@ -767,7 +722,7 @@ func propagateBodyVarTaint(
 									changed = true
 								}
 							} else if mapPlace.Root == flowir.RootTransient && mapPlace.Base != nil &&
-								(cfg.transientDstExempt == nil || !cfg.transientDstExempt(dst)) && markValVars(mapPlace.Base) {
+								(cfg.transientDstExempt == nil || !cfg.transientDstExempt(dst)) && markTargetVal(mapPlace.Base) {
 								changed = true
 							}
 						}
@@ -786,10 +741,16 @@ func propagateBodyVarTaint(
 					}
 					visitVal(op.SwitchSrc)
 				case flowir.OpChanSend:
-					if cfg.valTaints(op.SendVal) && markVar(op.ChanPlace.Obj) {
-						changed = true
+					if cfg.valTaints(op.SendVal) {
+						if cfg.reverseFlowAndCallTargets {
+							if markVar(op.ChanPlace.Obj) {
+								changed = true
+							}
+						} else if markPlaceBase(op.ChanPlace) {
+							changed = true
+						}
 					}
-					if markValVars(op.SendVal) {
+					if cfg.reverseFlowAndCallTargets && markTargetVal(op.SendVal) {
 						changed = true
 					}
 					visitVal(op.ChanVal)
@@ -797,7 +758,7 @@ func propagateBodyVarTaint(
 				case flowir.OpReturn:
 					if cfg.taintRootReturns && b == rootBody {
 						for _, r := range op.Results {
-							if markValVars(r) {
+							if markTargetVal(r) {
 								changed = true
 							}
 						}
@@ -808,10 +769,12 @@ func propagateBodyVarTaint(
 				case flowir.OpDefer:
 					visitVal(op.Call)
 				case flowir.OpGo:
-					if markCallTargetVars(audited, op.Call, markVar) {
-						changed = true
+					if cfg.reverseFlowAndCallTargets {
+						if markCallTargetVars(audited, op.Call, markVar) {
+							changed = true
+						}
+						visitVal(op.Call)
 					}
-					visitVal(op.Call)
 				case flowir.OpExpr:
 					visitVal(op.Expr)
 				}
@@ -824,67 +787,81 @@ func propagateBodyVarTaint(
 
 func (e *confinementEngine) propagateExternalReaching() {
 	e.externalReaching = map[types.Object]bool{}
-	propagateBodyVarTaint(e.audited, e.fc, e.rootBody, e.externalReaching, bodyVarTaintConfig{
-		exclude:            e.roots,
-		valTaints:          e.valueReachesExternal,
-		isSyncOnceCall:     e.isSyncOnceCall,
-		transientDstExempt: e.placeIsRooted,
-		taintRootReturns:   true,
+	propagateFlowVarTaint(e.audited, e.fc, e.rootBody, e.externalReaching, flowVarTaintConfig{
+		exclude:                   e.roots,
+		valTaints:                 e.valueReachesExternal,
+		isSyncOnceCall:            e.isSyncOnceCall,
+		transientDstExempt:        e.placeIsRooted,
+		reverseFlowAndCallTargets: true,
+		taintRootReturns:          true,
+		checkAssignDstType:        true,
+		checkCopyDstElem:          true,
 	})
 }
 
-func (e *confinementEngine) valueTouchesAnyRoot(v *flowir.Value) bool {
-	if v == nil {
+func valueTouchesRootSet(v *flowir.Value, isRoot func(types.Object) bool, globalRoots []*types.Var) bool {
+	if v == nil || isRoot == nil {
 		return false
 	}
 	hit := false
-	var walk func(cur *flowir.Value)
-	walk = func(cur *flowir.Value) {
-		if hit || cur == nil {
-			return
+	v.WalkValues(func(cur *flowir.Value) bool {
+		if hit {
+			return false
 		}
 		switch cur.Kind {
 		case flowir.ValPlace:
-			if cur.Place.Obj != nil && e.isRootOrTainted(cur.Place.Obj) {
+			if cur.Place.Obj != nil && isRoot(cur.Place.Obj) {
 				hit = true
-				return
+				return false
 			}
 		case flowir.ValAddrOf:
-			if cur.AddrPlace.Obj != nil && e.isRootOrTainted(cur.AddrPlace.Obj) {
+			if cur.AddrPlace.Obj != nil && isRoot(cur.AddrPlace.Obj) {
 				hit = true
-				return
+				return false
 			}
 		case flowir.ValMethodVal:
-			if cur.HasRecvPlace && cur.RecvPlace.Obj != nil && e.isRootOrTainted(cur.RecvPlace.Obj) {
+			if cur.HasRecvPlace && cur.RecvPlace.Obj != nil && isRoot(cur.RecvPlace.Obj) {
 				hit = true
-				return
+				return false
 			}
 		case flowir.ValMakeClosure:
 			if cur.Closure != nil {
 				for fv := range cur.Closure.FreeVars {
-					if e.isRootOrTainted(fv) {
+					if isRoot(fv) {
 						hit = true
-						return
+						return false
+					}
+				}
+				for _, gv := range globalRoots {
+					if bodyMentionsVar(cur.Closure, gv) {
+						hit = true
+						return false
 					}
 				}
 			}
 		case flowir.ValCall:
 			if cur.CallKind == flowir.CallIIFE && cur.IIFE != nil {
 				for fv := range cur.IIFE.FreeVars {
-					if e.isRootOrTainted(fv) {
+					if isRoot(fv) {
 						hit = true
-						return
+						return false
+					}
+				}
+				for _, gv := range globalRoots {
+					if bodyMentionsVar(cur.IIFE, gv) {
+						hit = true
+						return false
 					}
 				}
 			}
 		}
-		cur.ForEachChildValue(func(child *flowir.Value) bool {
-			walk(child)
-			return !hit
-		})
-	}
-	walk(v)
+		return true
+	})
 	return hit
+}
+
+func (e *confinementEngine) valueTouchesAnyRoot(v *flowir.Value) bool {
+	return valueTouchesRootSet(v, e.isRootOrTainted, nil)
 }
 
 func (e *confinementEngine) bodyTouchesAnyRoot(b *flowir.Body) bool {
@@ -1888,8 +1865,7 @@ func (e *confinementEngine) checkCallArgs(v *flowir.Value) bool {
 			okAll = false
 			return false
 		}
-		handsOutSlot := refconfine.CallResultHandsOut(slotType) ||
-			(paramType != nil && refconfine.CallResultHandsOut(paramType) && refconfine.CallResultHandsOut(slotType))
+		handsOutSlot := refconfine.CallResultHandsOut(slotType)
 		if !handsOutSlot {
 			if !e.checkRootedReadOperand(arg) {
 				okAll = false
@@ -3244,7 +3220,7 @@ func onceFillValueSmuggles(
 				}
 				walkBody(cur.IIFE)
 				return
-			case cur.CallKind == flowir.CallBuiltin && (cur.BuiltinName == "make" || cur.BuiltinName == "Sizeof" || cur.BuiltinName == "Alignof" || cur.BuiltinName == "Offsetof"):
+			case cur.CallKind == flowir.CallBuiltin && (cur.BuiltinName == "Sizeof" || cur.BuiltinName == "Alignof" || cur.BuiltinName == "Offsetof"):
 				return
 			case cur.CallKind == flowir.CallBuiltin && cur.BuiltinName == "append":
 				for _, a := range cur.Args {
@@ -3460,11 +3436,14 @@ func computeOnceFillSmuggledLocals(
 	if recvObj != nil {
 		exclude = map[types.Object]bool{recvObj: true}
 	}
-	propagateBodyVarTaint(audited, fc, doBody, smuggled, bodyVarTaintConfig{
+	propagateFlowVarTaint(audited, fc, doBody, smuggled, flowVarTaintConfig{
 		exclude: exclude,
 		valTaints: func(v *flowir.Value) bool {
 			return onceFillValueSmuggles(audited, doBody, smuggled, admCandidates, recvObj, v)
 		},
+		reverseFlowAndCallTargets: true,
+		checkAssignDstType:        true,
+		checkCopyDstElem:          true,
 	})
 	return smuggled
 }
@@ -3559,74 +3538,6 @@ func propagateReceiverFieldTaint(
 		}
 	}
 	return tainted, valTaints
-}
-
-func isFreshLocalOnceValue(audited bool, v *flowir.Value, freshLocals map[types.Object]bool) bool {
-	if v == nil {
-		return false
-	}
-	isSafeElem := func(el *flowir.Value) bool {
-		if el == nil {
-			return false
-		}
-		if el.Kind == flowir.ValScalarLitOrConst || (el.Kind == flowir.ValPlace && el.Place.Root == flowir.RootConstOrNil) {
-			return true
-		}
-		if el.Type != nil && !sharesMemOrSigOrDynamic(audited)(el.Type) {
-			return true
-		}
-		return isFreshLocalOnceValue(audited, el, freshLocals)
-	}
-	switch v.Kind {
-	case flowir.ValScalarLitOrConst:
-		return true
-	case flowir.ValAllocFresh:
-		if v.Type == nil || refconfine.TypeMayCarryUnknownDynamic(audited, v.Type) || refconfine.TypeCarriesSignature(v.Type) {
-			return false
-		}
-		switch v.AllocKind {
-		case flowir.AllocMake, flowir.AllocBuiltinNewType:
-			return true
-		case flowir.AllocBuiltinNewExpr:
-			return len(v.Args) == 1 && isSafeElem(v.Args[0])
-		case flowir.AllocCompositeLit:
-			for _, ce := range v.CompositeElts {
-				if ce.MapKey != nil && !isSafeElem(ce.MapKey) {
-					return false
-				}
-				if !isSafeElem(ce.Value) {
-					return false
-				}
-			}
-			return true
-		}
-		return false
-	case flowir.ValPlace:
-		return v.Place.IsBareVar() && v.Place.Obj != nil && freshLocals[v.Place.Obj]
-	case flowir.ValConvert:
-		return !v.IsTypeAssert && v.Type != nil &&
-			!refconfine.TypeMayCarryUnknownDynamic(audited, v.Type) &&
-			!refconfine.TypeCarriesSignature(v.Type) &&
-			isFreshLocalOnceValue(audited, v.Arg, freshLocals)
-	case flowir.ValCall:
-		if v.CallKind == flowir.CallBuiltin && v.BuiltinName == "append" && len(v.Args) >= 1 && v.Args[0] != nil {
-			baseOK := (v.Args[0].Kind == flowir.ValPlace && v.Args[0].Place.Root == flowir.RootConstOrNil) ||
-				isFreshLocalOnceValue(audited, v.Args[0], freshLocals)
-			if !baseOK {
-				return false
-			}
-			if v.Ellipsis {
-				return len(v.Args) == 2 && isSafeElem(v.Args[1])
-			}
-			for _, elem := range v.Args[1:] {
-				if !isSafeElem(elem) {
-					return false
-				}
-			}
-			return true
-		}
-	}
-	return false
 }
 
 func computeOnceDoFieldAdmissions(
@@ -3745,245 +3656,11 @@ func computeOnceDoFieldAdmissions(
 		return adm
 	}
 
-	// Compute locals in doBody whose every binding and interior mutation stays freshly allocated.
-	freshLocals := map[types.Object]bool{}
-	localAssignCount := map[types.Object]int{}
-	localNonFresh := map[types.Object]bool{}
 	var excludeRecv map[types.Object]bool
 	if recvObj != nil {
 		excludeRecv = map[types.Object]bool{recvObj: true}
 	}
-	freshMemAdj := fc.scopedBodyInteriorAliases(audited, doBody, excludeRecv)
-	var collectFreshCandidates func(b *flowir.Body)
-	collectFreshCandidates = func(b *flowir.Body) {
-		if b == nil {
-			return
-		}
-		var scanSubVal func(v *flowir.Value)
-		scanSubVal = func(v *flowir.Value) {
-			if v == nil {
-				return
-			}
-			if v.Kind == flowir.ValMakeClosure && v.Closure != nil {
-				collectFreshCandidates(v.Closure)
-			}
-			if v.Kind == flowir.ValCall && v.CallKind == flowir.CallIIFE && v.IIFE != nil {
-				for _, pv := range v.IIFE.Params {
-					if pv != nil {
-						localNonFresh[pv] = true
-					}
-				}
-				collectFreshCandidates(v.IIFE)
-			}
-			v.ForEachChildValue(func(ch *flowir.Value) bool {
-				scanSubVal(ch)
-				return true
-			})
-		}
-		for i := range b.Ops {
-			op := &b.Ops[i]
-			switch op.Kind {
-			case flowir.OpAssign:
-				if op.AssignKind != flowir.AssignPlain {
-					for _, dst := range op.Dsts {
-						if dst.Obj != nil {
-							localNonFresh[dst.Obj] = true
-						}
-					}
-				} else {
-					op.ForEachAssignPair(func(_ int, dst flowir.Place, _ bool, _ *flowir.Value) bool {
-						if dst.IsBareVar() && dst.Obj != nil && dst.Root == flowir.RootLocal {
-							localAssignCount[dst.Obj]++
-						}
-						dst.ForEachChildValue(func(cv *flowir.Value) bool {
-							scanSubVal(cv)
-							return true
-						})
-						return true
-					})
-				}
-				for _, src := range op.Srcs {
-					scanSubVal(src)
-				}
-				if op.AssignKind == flowir.AssignRange && op.RangeBody != nil {
-					collectFreshCandidates(op.RangeBody)
-				}
-			case flowir.OpTypeSwitchBind:
-				if op.SwitchDst != nil {
-					localNonFresh[op.SwitchDst] = true
-				}
-				scanSubVal(op.SwitchSrc)
-			case flowir.OpChanSend:
-				if op.ChanPlace.Obj != nil {
-					localNonFresh[op.ChanPlace.Obj] = true
-				}
-				scanSubVal(op.ChanVal)
-				scanSubVal(op.SendVal)
-			case flowir.OpReturn:
-				for _, r := range op.Results {
-					scanSubVal(r)
-				}
-			case flowir.OpDefer, flowir.OpGo:
-				scanSubVal(op.Call)
-			case flowir.OpExpr:
-				scanSubVal(op.Expr)
-			}
-		}
-	}
-	collectFreshCandidates(doBody)
-	for obj, cnt := range localAssignCount {
-		if cnt > 0 && !localNonFresh[obj] && !adm.smuggledLocals[obj] {
-			freshLocals[obj] = true
-		}
-	}
-	isSafeFreshInteriorElem := func(el *flowir.Value) bool {
-		if el == nil {
-			return false
-		}
-		if el.Kind == flowir.ValScalarLitOrConst || (el.Kind == flowir.ValPlace && el.Place.Root == flowir.RootConstOrNil) {
-			return true
-		}
-		if el.Type != nil && !sharesMemOrSigOrDynamic(audited)(el.Type) {
-			return true
-		}
-		return isFreshLocalOnceValue(audited, el, freshLocals)
-	}
-	evictFreshObj := func(obj types.Object) bool {
-		if obj != nil && freshLocals[obj] {
-			delete(freshLocals, obj)
-			return true
-		}
-		return false
-	}
-	evictFreshVar := func(v *types.Var) bool {
-		if v == nil {
-			return false
-		}
-		return evictFreshObj(v)
-	}
-	evictArgObj := func(a *flowir.Value) bool {
-		return markEscapingValueVars(audited, a, evictFreshVar)
-	}
-	for changed := true; changed; {
-		changed = false
-		for obj := range freshLocals {
-			for nb := range freshMemAdj[obj] {
-				if !freshLocals[nb] && sharesMemOrSigOrDynamic(audited)(nb.Type()) {
-					delete(freshLocals, obj)
-					changed = true
-					break
-				}
-			}
-		}
-		var checkFreshBody func(b *flowir.Body)
-		var checkFreshVal func(v *flowir.Value)
-		checkFreshVal = func(v *flowir.Value) {
-			if v == nil {
-				return
-			}
-			switch v.Kind {
-			case flowir.ValAddrOf:
-				if markEscapingAddrPlaceVars(audited, v.AddrPlace, evictFreshVar) {
-					changed = true
-				}
-			case flowir.ValMethodVal:
-				if v.HasRecvPlace && markEscapingAddrPlaceVars(audited, v.RecvPlace, evictFreshVar) {
-					changed = true
-				}
-				if evictArgObj(v.Recv) {
-					changed = true
-				}
-			case flowir.ValMakeClosure:
-				if v.Closure != nil {
-					checkFreshBody(v.Closure)
-				}
-			case flowir.ValCall:
-				switch {
-				case v.CallKind == flowir.CallIIFE && v.IIFE != nil:
-					checkFreshBody(v.IIFE)
-				case v.CallKind == flowir.CallBuiltin && (v.BuiltinName == "make" || v.BuiltinName == "len" || v.BuiltinName == "cap" || v.BuiltinName == "delete" || v.BuiltinName == "clear" || v.BuiltinName == "Sizeof" || v.BuiltinName == "Alignof" || v.BuiltinName == "Offsetof"):
-				case v.CallKind == flowir.CallBuiltin && v.BuiltinName == "copy" && len(v.Args) == 2:
-					if v.Args[0] != nil && sliceCopyElemCarriesReachOrDynamic(audited, v.Args[0].Type) &&
-						!isFreshLocalOnceValue(audited, v.Args[1], freshLocals) && evictArgObj(v.Args[0]) {
-						changed = true
-					}
-				case v.CallKind == flowir.CallBuiltin && v.BuiltinName == "append" && len(v.Args) >= 1:
-					for _, elem := range v.Args[1:] {
-						if !isSafeFreshInteriorElem(elem) {
-							if evictArgObj(v.Args[0]) {
-								changed = true
-							}
-							break
-						}
-					}
-				case v.CallKind == flowir.CallPlain && !v.IsMethodExprCall && v.CalleeFunc != nil && auditset.ValuePlaneClone(v.CalleePkg, v.CalleeFunc.Name()):
-				default:
-					if markCallTargetVars(audited, v, evictFreshVar) {
-						changed = true
-					}
-				}
-			}
-			v.ForEachChildValue(func(ch *flowir.Value) bool {
-				checkFreshVal(ch)
-				return true
-			})
-		}
-		checkFreshBody = func(b *flowir.Body) {
-			if b == nil {
-				return
-			}
-			for i := range b.Ops {
-				op := &b.Ops[i]
-				switch op.Kind {
-				case flowir.OpAssign:
-					if op.AssignKind == flowir.AssignPlain {
-						op.ForEachAssignPair(func(_ int, dst flowir.Place, _ bool, src *flowir.Value) bool {
-							if dst.Obj != nil && freshLocals[dst.Obj] {
-								if dst.IsBareVar() {
-									if !isFreshLocalOnceValue(audited, src, freshLocals) && evictFreshObj(dst.Obj) {
-										changed = true
-									}
-								} else {
-									if !isSafeFreshInteriorElem(src) && evictFreshObj(dst.Obj) {
-										changed = true
-									}
-									if mapPlace, keyVal, isMapWrite := dst.AsMapWrite(); isMapWrite && mapPlace.Obj != nil &&
-										!isSafeFreshInteriorElem(keyVal) && evictFreshObj(mapPlace.Obj) {
-										changed = true
-									}
-								}
-							}
-							dst.ForEachChildValue(func(cv *flowir.Value) bool {
-								checkFreshVal(cv)
-								return true
-							})
-							return true
-						})
-					}
-					for _, src := range op.Srcs {
-						checkFreshVal(src)
-					}
-					if op.AssignKind == flowir.AssignRange && op.RangeBody != nil {
-						checkFreshBody(op.RangeBody)
-					}
-				case flowir.OpTypeSwitchBind:
-					checkFreshVal(op.SwitchSrc)
-				case flowir.OpChanSend:
-					checkFreshVal(op.ChanVal)
-					checkFreshVal(op.SendVal)
-				case flowir.OpReturn:
-					for _, r := range op.Results {
-						checkFreshVal(r)
-					}
-				case flowir.OpDefer, flowir.OpGo:
-					checkFreshVal(op.Call)
-				case flowir.OpExpr:
-					checkFreshVal(op.Expr)
-				}
-			}
-		}
-		checkFreshBody(doBody)
-	}
+	freshLocals := computeBodyFreshSelfContainedLocals(audited, fc, doBody, excludeRecv, adm.smuggledLocals)
 
 	// Track whole-field stores, fresh whole-field stores, local aliases of each
 	// candidate field, and interior/element mutations in doBody.

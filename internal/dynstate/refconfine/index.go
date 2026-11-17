@@ -11,35 +11,55 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
 
-// PkgIndex holds the precomputed AST, type-use, call-site, and confinement
+// PkgIndex holds the precomputed AST, type-use, call-site, and FlowIR
 // invariants of a type-checked package so intra-package dynamic-state and
-// confinement passes do not repeatedly walk p.Syntax.
+// confinement passes do not repeatedly walk or lower p.Syntax.
 type PkgIndex struct {
-	VarSpecs                 map[*types.Var]*ast.ValueSpec
-	VarGenDecls              map[*types.Var]*ast.GenDecl
-	DefCounts                map[types.Object]int
-	UsesOf                   map[types.Object][]*ast.Ident
-	ParentMap                map[ast.Node]ast.Node
-	EnclFunc                 map[ast.Node]*ast.FuncDecl
-	InFuncLit                map[ast.Node]bool
-	InGoStmt                 map[ast.Node]bool
-	FuncDecls                map[*types.Func]*ast.FuncDecl
-	PlainByName              map[string][]*ast.FuncDecl
-	InitBlocks               []*ast.BlockStmt
-	FuncValueTaken           map[*types.Func]bool
-	CalleeIdents             map[*ast.Ident]bool
-	CalledMethodSels         map[*ast.SelectorExpr]bool
-	DeclBodies               map[*types.Func]*ast.BlockStmt
-	ReturnEnclFunc           map[*ast.ReturnStmt]*types.Func
-	ResultVarFunc            map[*types.Var]*types.Func
-	LitResultVars            map[*types.Var]bool
-	FreshContainerCandidates map[*types.Var]bool
-	CallSites                *CallSiteIndex
-	InitOnly                 map[string]bool
-	FreshLocalStructVars     map[*ast.FuncDecl]map[*types.Var]token.Pos
+	VarSpecs       map[*types.Var]*ast.ValueSpec
+	VarGenDecls    map[*types.Var]*ast.GenDecl
+	DefCounts      map[types.Object]int
+	UsesOf         map[types.Object][]*ast.Ident
+	ParentMap      map[ast.Node]ast.Node
+	EnclFunc       map[ast.Node]*ast.FuncDecl
+	InFuncLit      map[ast.Node]bool
+	InGoStmt       map[ast.Node]bool
+	FuncDecls      map[*types.Func]*ast.FuncDecl
+	PlainByName    map[string][]*ast.FuncDecl
+	FuncValueTaken map[*types.Func]bool
+	CalleeIdents   map[*ast.Ident]bool
+	CallSites      *CallSiteIndex
+	InitOnly       map[string]bool
+
+	flowCache *flowir.PkgCache
+}
+
+// FlowCache returns the package's shared lowered FlowIR cache, constructing it
+// once on first demand.
+func (idx *PkgIndex) FlowCache(p *packages.Package) *flowir.PkgCache {
+	if idx != nil && idx.flowCache != nil {
+		return idx.flowCache
+	}
+	if p == nil || p.TypesInfo == nil {
+		return nil
+	}
+	fc := flowir.NewPkgCache(p.TypesInfo, p.Types, p.Syntax)
+	if idx != nil {
+		idx.flowCache = fc
+	}
+	return fc
+}
+
+// SetFlowCache attaches an existing package FlowIR cache to idx when idx does
+// not already hold one so callers pre-building a FlowIR cache share it across
+// all refconfine and dynstate passes without double lowering.
+func (idx *PkgIndex) SetFlowCache(fc *flowir.PkgCache) {
+	if idx != nil && idx.flowCache == nil && fc != nil {
+		idx.flowCache = fc
+	}
 }
 
 // CallSiteParam identifies a parameter slot of an unexported plain function.
@@ -71,25 +91,18 @@ func BuildPkgIndex(p *packages.Package) *PkgIndex {
 	}
 	info := p.TypesInfo
 	idx := &PkgIndex{
-		VarSpecs:                 map[*types.Var]*ast.ValueSpec{},
-		VarGenDecls:              map[*types.Var]*ast.GenDecl{},
-		DefCounts:                map[types.Object]int{},
-		UsesOf:                   map[types.Object][]*ast.Ident{},
-		ParentMap:                map[ast.Node]ast.Node{},
-		EnclFunc:                 map[ast.Node]*ast.FuncDecl{},
-		InFuncLit:                map[ast.Node]bool{},
-		InGoStmt:                 map[ast.Node]bool{},
-		FuncDecls:                map[*types.Func]*ast.FuncDecl{},
-		PlainByName:              map[string][]*ast.FuncDecl{},
-		FuncValueTaken:           map[*types.Func]bool{},
-		CalleeIdents:             map[*ast.Ident]bool{},
-		CalledMethodSels:         map[*ast.SelectorExpr]bool{},
-		DeclBodies:               map[*types.Func]*ast.BlockStmt{},
-		ReturnEnclFunc:           map[*ast.ReturnStmt]*types.Func{},
-		ResultVarFunc:            map[*types.Var]*types.Func{},
-		LitResultVars:            map[*types.Var]bool{},
-		FreshContainerCandidates: map[*types.Var]bool{},
-		FreshLocalStructVars:     map[*ast.FuncDecl]map[*types.Var]token.Pos{},
+		VarSpecs:       map[*types.Var]*ast.ValueSpec{},
+		VarGenDecls:    map[*types.Var]*ast.GenDecl{},
+		DefCounts:      map[types.Object]int{},
+		UsesOf:         map[types.Object][]*ast.Ident{},
+		ParentMap:      map[ast.Node]ast.Node{},
+		EnclFunc:       map[ast.Node]*ast.FuncDecl{},
+		InFuncLit:      map[ast.Node]bool{},
+		InGoStmt:       map[ast.Node]bool{},
+		FuncDecls:      map[*types.Func]*ast.FuncDecl{},
+		PlainByName:    map[string][]*ast.FuncDecl{},
+		FuncValueTaken: map[*types.Func]bool{},
+		CalleeIdents:   map[*ast.Ident]bool{},
 	}
 	for id, obj := range info.Defs {
 		if id != nil && obj != nil {
@@ -102,40 +115,9 @@ func BuildPkgIndex(p *packages.Package) *PkgIndex {
 		}
 	}
 
-	sigVars := map[*types.Var]bool{}
-	recordFieldList := func(fl *ast.FieldList) {
-		if fl == nil {
-			return
-		}
-		for _, f := range fl.List {
-			for _, nm := range f.Names {
-				if v, ok := info.Defs[nm].(*types.Var); ok && v != nil {
-					sigVars[v] = true
-				}
-			}
-		}
-	}
-	recordFuncResults := func(ft *ast.FuncType, fn *types.Func) {
-		if ft == nil || ft.Results == nil {
-			return
-		}
-		for _, field := range ft.Results.List {
-			for _, nm := range field.Names {
-				if v, ok := info.Defs[nm].(*types.Var); ok && v != nil {
-					if fn != nil {
-						idx.ResultVarFunc[v] = fn
-					} else {
-						idx.LitResultVars[v] = true
-					}
-				}
-			}
-		}
-	}
-
 	for _, file := range p.Syntax {
 		var stack []ast.Node
 		var curFD *ast.FuncDecl
-		var curFnStack []*types.Func
 		litDepth := 0
 		goDepth := 0
 		ast.Inspect(file, func(n ast.Node) bool {
@@ -145,12 +127,10 @@ func BuildPkgIndex(p *packages.Package) *PkgIndex {
 				switch curr.(type) {
 				case *ast.FuncLit:
 					litDepth--
-					curFnStack = curFnStack[:len(curFnStack)-1]
 				case *ast.GoStmt:
 					goDepth--
 				case *ast.FuncDecl:
 					curFD = nil
-					curFnStack = curFnStack[:len(curFnStack)-1]
 				}
 				return false
 			}
@@ -166,53 +146,24 @@ func BuildPkgIndex(p *packages.Package) *PkgIndex {
 			if goDepth > 0 {
 				idx.InGoStmt[n] = true
 			}
-			var activeFn *types.Func
-			if len(curFnStack) > 0 {
-				activeFn = curFnStack[len(curFnStack)-1]
-			}
 			switch x := n.(type) {
 			case *ast.FuncLit:
 				litDepth++
 				idx.InFuncLit[x] = true
-				curFnStack = append(curFnStack, nil)
-				if x.Type != nil {
-					recordFieldList(x.Type.Params)
-					recordFieldList(x.Type.Results)
-				}
-				recordFuncResults(x.Type, nil)
 			case *ast.GoStmt:
 				goDepth++
 				idx.InGoStmt[x] = true
 			case *ast.FuncDecl:
 				curFD = x
 				idx.EnclFunc[x] = x
-				var fn *types.Func
 				if x.Name != nil {
 					if defFn, ok := info.Defs[x.Name].(*types.Func); ok && defFn != nil {
 						idx.FuncDecls[defFn] = x
-						if !(x.Recv == nil && x.Name.Name == "init") {
-							fn = defFn
-							if x.Body != nil {
-								idx.DeclBodies[fn] = x.Body
-							}
-						}
 					}
 				}
-				curFnStack = append(curFnStack, fn)
-				recordFieldList(x.Recv)
-				if x.Type != nil {
-					recordFieldList(x.Type.Params)
-					recordFieldList(x.Type.Results)
-				}
-				recordFuncResults(x.Type, fn)
 				if x.Recv == nil && x.Name != nil {
 					idx.PlainByName[x.Name.Name] = append(idx.PlainByName[x.Name.Name], x)
-					if x.Name.Name == "init" && x.Body != nil {
-						idx.InitBlocks = append(idx.InitBlocks, x.Body)
-					}
 				}
-			case *ast.ReturnStmt:
-				idx.ReturnEnclFunc[x] = activeFn
 			case *ast.CallExpr:
 				if !info.Types[ast.Unparen(x.Fun)].IsType() {
 					switch fun := ast.Unparen(x.Fun).(type) {
@@ -224,9 +175,6 @@ func BuildPkgIndex(p *packages.Package) *PkgIndex {
 							if fun.Sel != nil {
 								idx.CalleeIdents[fun.Sel] = true
 							}
-						}
-						if selInfo != nil && selInfo.Kind() == types.MethodVal {
-							idx.CalledMethodSels[fun] = true
 						}
 					}
 				}
@@ -264,155 +212,9 @@ func BuildPkgIndex(p *packages.Package) *PkgIndex {
 		}
 	}
 
-	populateFreshContainerCandidates(p, sigVars, idx.FreshContainerCandidates)
 	idx.CallSites = BuildCallSiteIndex(p)
 	idx.InitOnly = idx.CallSites.InitOnlyHelpers()
 	return idx
-}
-
-func populateFreshContainerCandidates(p *packages.Package, sigVars map[*types.Var]bool, out map[*types.Var]bool) {
-	info := p.TypesInfo
-	candidates := map[*types.Var]bool{}
-	disqualified := map[*types.Var]bool{}
-
-	isFreshInit := func(v *types.Var, rhs ast.Expr) bool {
-		rhs = ast.Unparen(rhs)
-		if syntaxutil.IsNilIdent(info, rhs) {
-			return true
-		}
-		switch e := rhs.(type) {
-		case *ast.CompositeLit:
-			if t := info.TypeOf(e); t != nil {
-				switch types.Unalias(t).Underlying().(type) {
-				case *types.Slice, *types.Array, *types.Map:
-					return true
-				}
-			}
-		case *ast.CallExpr:
-			if id, isID := ast.Unparen(e.Fun).(*ast.Ident); isID {
-				if b, isB := info.Uses[id].(*types.Builtin); isB {
-					if b.Name() == "make" {
-						return true
-					}
-					if b.Name() == "append" && len(e.Args) > 0 && syntaxutil.LookupIdentVar(info, e.Args[0]) == v {
-						return true
-					}
-				}
-			}
-		}
-		return false
-	}
-
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			switch s := n.(type) {
-			case *ast.ValueSpec:
-				if len(s.Values) == 0 {
-					for _, nm := range s.Names {
-						if v, ok := info.Defs[nm].(*types.Var); ok && v != nil && v.Parent() != nil && v.Parent() != p.Types.Scope() && !sigVars[v] {
-							candidates[v] = true
-						}
-					}
-				} else if len(s.Names) == len(s.Values) {
-					for i, nm := range s.Names {
-						v, ok := info.Defs[nm].(*types.Var)
-						if !ok || v == nil || v.Parent() == nil || v.Parent() == p.Types.Scope() || sigVars[v] {
-							continue
-						}
-						candidates[v] = true
-						if !isFreshInit(v, s.Values[i]) {
-							disqualified[v] = true
-						}
-					}
-				} else {
-					for _, nm := range s.Names {
-						if v, ok := info.Defs[nm].(*types.Var); ok && v != nil {
-							disqualified[v] = true
-						}
-					}
-				}
-
-			case *ast.AssignStmt:
-				if s.Tok != token.DEFINE && s.Tok != token.ASSIGN {
-					for _, lhs := range s.Lhs {
-						if v := syntaxutil.LookupIdentVar(info, lhs); v != nil {
-							disqualified[v] = true
-						}
-					}
-					return true
-				}
-				if len(s.Lhs) == len(s.Rhs) {
-					for i, lhs := range s.Lhs {
-						var v *types.Var
-						if id, isID := ast.Unparen(lhs).(*ast.Ident); isID {
-							if defV, ok := info.Defs[id].(*types.Var); ok && defV != nil {
-								v = defV
-							} else {
-								v = syntaxutil.LookupIdentVar(info, id)
-							}
-						}
-						if v == nil || v.Parent() == nil || v.Parent() == p.Types.Scope() || sigVars[v] {
-							continue
-						}
-						candidates[v] = true
-						if !isFreshInit(v, s.Rhs[i]) {
-							disqualified[v] = true
-						}
-					}
-				} else {
-					for _, lhs := range s.Lhs {
-						if id, isID := ast.Unparen(lhs).(*ast.Ident); isID {
-							if defV, ok := info.Defs[id].(*types.Var); ok && defV != nil {
-								disqualified[defV] = true
-							} else if useV := syntaxutil.LookupIdentVar(info, id); useV != nil {
-								disqualified[useV] = true
-							}
-						}
-					}
-				}
-
-			case *ast.RangeStmt:
-				for _, be := range []ast.Expr{s.Key, s.Value} {
-					if id, isID := ast.Unparen(be).(*ast.Ident); isID {
-						if defV, ok := info.Defs[id].(*types.Var); ok && defV != nil {
-							disqualified[defV] = true
-						} else if useV := syntaxutil.LookupIdentVar(info, id); useV != nil {
-							disqualified[useV] = true
-						}
-					}
-				}
-
-			case *ast.UnaryExpr:
-				if s.Op == token.AND {
-					cur := ast.Unparen(s.X)
-					for {
-						switch inner := cur.(type) {
-						case *ast.IndexExpr:
-							cur = ast.Unparen(inner.X)
-							continue
-						case *ast.SliceExpr:
-							cur = ast.Unparen(inner.X)
-							continue
-						case *ast.SelectorExpr:
-							cur = ast.Unparen(inner.X)
-							continue
-						}
-						break
-					}
-					if v := syntaxutil.LookupIdentVar(info, cur); v != nil {
-						disqualified[v] = true
-					}
-				}
-			}
-			return true
-		})
-	}
-
-	for v := range candidates {
-		if !disqualified[v] {
-			out[v] = true
-		}
-	}
 }
 
 // ParentUnparen returns the closest non-parenthesized ancestor of n in idx.ParentMap.
@@ -441,20 +243,6 @@ func (idx *PkgIndex) SyncEnclFuncDecl(n ast.Node) *ast.FuncDecl {
 // IsSyncInFuncDecl reports whether n executes synchronously inside fd.
 func (idx *PkgIndex) IsSyncInFuncDecl(n ast.Node, fd *ast.FuncDecl) bool {
 	return fd != nil && idx.EnclFunc[n] == fd && !idx.InFuncLit[n] && !idx.InGoStmt[n]
-}
-
-// EnclosingTopStmt returns the top-level statement in body enclosing n, or nil.
-func (idx *PkgIndex) EnclosingTopStmt(body *ast.BlockStmt, n ast.Node) ast.Stmt {
-	cur := n
-	for cur != nil && cur != body {
-		par := idx.ParentMap[cur]
-		if par == body {
-			st, _ := cur.(ast.Stmt)
-			return st
-		}
-		cur = par
-	}
-	return nil
 }
 
 // BuildCallSiteIndex constructs the intra-package direct call-site index for p.

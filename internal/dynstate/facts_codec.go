@@ -269,21 +269,6 @@ type ConeState struct {
 // Cone selects the metadata nodes and the facts of one view package's
 // test-binary graph out of a view-wide gathering.
 func Cone(meta []GraphPackage, byListing map[string]GraphPackage, factsByListing map[string]Fact, viewPackage string) ([]GraphPackage, map[string][]Fact) {
-	in := map[string]bool{}
-	var visit func(listing string)
-	visit = func(listing string) {
-		if in[listing] {
-			return
-		}
-		node, ok := byListing[listing]
-		if !ok {
-			return
-		}
-		in[listing] = true
-		for _, imported := range node.Imports {
-			visit(imported)
-		}
-	}
 	testVariant := false
 	for _, node := range meta {
 		if node.PkgPath == viewPackage && node.ForTest == viewPackage {
@@ -291,11 +276,24 @@ func Cone(meta []GraphPackage, byListing map[string]GraphPackage, factsByListing
 			break
 		}
 	}
+	var roots []string
 	for _, node := range meta {
 		if (node.PkgPath == viewPackage && node.ForTest == "" && !testVariant) || node.ForTest == viewPackage {
-			visit(node.ImportPath)
+			roots = append(roots, node.ImportPath)
 		}
 	}
+	in := map[string]bool{}
+	walkImportCone(
+		roots,
+		func(listing string) ([]string, bool) {
+			node, ok := byListing[listing]
+			return node.Imports, ok
+		},
+		func(listing string) bool {
+			in[listing] = true
+			return true
+		},
+	)
 	var cone []GraphPackage
 	facts := map[string][]Fact{}
 	for _, node := range meta {
@@ -325,35 +323,30 @@ func PinnedBuckets(meta []GraphPackage) (buckets map[string]string, unkeyable ma
 			local[node.ImportPath] = true
 		}
 	}
-	reachable := func(from string) (pinSet map[string]bool, localReached bool) {
-		pinSet = map[string]bool{}
-		seen := map[string]bool{}
-		var walk func(string)
-		walk = func(listing string) {
-			if seen[listing] {
-				return
-			}
-			seen[listing] = true
-			if pin := pins[listing]; pin != "" {
-				pinSet[pin] = true
-			}
-			if local[listing] {
-				localReached = true
-			}
-			for _, imported := range imports[listing] {
-				walk(imported)
-			}
-		}
-		walk(from)
-		return pinSet, localReached
-	}
 	coneByModule := map[string]map[string]bool{}
 	unkeyable = map[string]bool{}
 	for _, node := range meta {
 		if node.Class != PinnedPackage {
 			continue
 		}
-		pinSet, localReached := reachable(node.ImportPath)
+		pinSet := map[string]bool{}
+		localReached := false
+		walkImportCone(
+			[]string{node.ImportPath},
+			func(listing string) ([]string, bool) {
+				imps, ok := imports[listing]
+				return imps, ok
+			},
+			func(listing string) bool {
+				if pin := pins[listing]; pin != "" {
+					pinSet[pin] = true
+				}
+				if local[listing] {
+					localReached = true
+				}
+				return true
+			},
+		)
 		if localReached {
 			unkeyable[node.Pin] = true
 			continue

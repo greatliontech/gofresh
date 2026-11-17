@@ -8,9 +8,9 @@ import (
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 )
 
-func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Var]bool, bool) {
+func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Var]bool, string) {
 	if len(idx.pkgVars) == 0 {
-		return nil, true
+		return nil, ""
 	}
 	pkg := idx.pkg
 	info := idx.info
@@ -29,14 +29,14 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 			if entry.val != nil {
 				cl, ok := ast.Unparen(entry.val).(*ast.CompositeLit)
 				if !ok || len(cl.Elts) != 0 {
-					return nil, false
+					return nil, "non-empty sync.Map initializer"
 				}
 			}
 			categorySyncMap[v] = true
 		case !refconfine.TypeMayCarryUnknownDynamic(audited, vt):
 			// Disallow package-scope mutexes, atomics, or Once primitives.
 			if containsSyncPrimitive(vt, map[types.Type]bool{}) {
-				return nil, false
+				return nil, "sync primitive global"
 			}
 			categoryA[v] = true
 		default:
@@ -45,11 +45,11 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 			// (2) *html/template.Template, or
 			// (3) *Generator with carrier-free type args and unexported fields.
 			if entry.val == nil {
-				return nil, false
+				return nil, "uninitialized category 3C global"
 			}
 			if _, isSig := types.Unalias(vt).Underlying().(*types.Signature); isSig {
 				if !isClosedHarnessFuncInit(info, pkgTypes, entry.val) {
-					return nil, false
+					return nil, "open func global init"
 				}
 				categoryImmutable[v] = true
 			} else if isTemplatePtrType(vt) {
@@ -58,7 +58,7 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 				needsGeneratorImmutability = true
 				categoryImmutable[v] = true
 			} else {
-				return nil, false
+				return nil, "disallowed category 3C global type"
 			}
 		}
 	}
@@ -293,7 +293,7 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 				}
 			}
 			if !okVars {
-				return nil, false
+				return nil, "checkVarUses failed"
 			}
 		}
 	}
@@ -301,7 +301,7 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 	for fn := range syncMapFuncs {
 		fd := idx.declFuncs[fn]
 		if fd == nil || fd.Body == nil {
-			return nil, false
+			return nil, "missing syncMapFunc body"
 		}
 		res := fn.Signature().Results()
 		for i := 0; i < res.Len(); i++ {
@@ -311,7 +311,7 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 			}
 			sawMutableRef := false
 			if !isImmutableHarnessCachedType(audited, pkgTypes, rt, mutatedNamedStructs, &needsGeneratorImmutability, &sawMutableRef, map[types.Type]bool{}) {
-				return nil, false
+				return nil, "mutable syncMapFunc result"
 			}
 			if sawMutableRef {
 				syncMapRefFuncs[fn] = true
@@ -338,26 +338,36 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 			return true
 		})
 		if !okAssert {
-			return nil, false
+			return nil, "mutable syncMapFunc type assert"
 		}
 	}
 
 	var checkedGenStructs map[*types.Named]bool
 	if needsGeneratorImmutability {
 		if !idx.generatorFieldsWriteOnceOK {
-			return nil, false
+			return nil, "generatorFieldsWriteOnceOK false"
 		}
 		var okGenImpl bool
 		checkedGenStructs, okGenImpl = verifyCachedAndGlobalGeneratorImplsImmutable(audited, idx, categoryImmutable, syncMapFuncs)
 		if !okGenImpl {
-			return nil, false
+			return nil, "verifyCachedAndGlobalGeneratorImplsImmutable failed"
 		}
 	}
 
 	isGenPtr := func(t types.Type) bool {
 		return isAnyGeneratorPtrType(pkgTypes, t)
 	}
+	var rejectDetail string
 	if !refconfine.VerifyReadOnlyRefConfinement(pkg, refconfine.Config{
+		OnReject: func(pos token.Pos, clause string) {
+			if rejectDetail == "" {
+				if pos.IsValid() && pkg.Fset != nil {
+					rejectDetail = pkg.Fset.Position(pos).String() + ": " + clause
+				} else {
+					rejectDetail = clause
+				}
+			}
+		},
 		IsImmutablePtr: isGenPtr,
 		SeedStructOrigin: func(orig *types.Named) bool {
 			return orig != nil && orig.Obj() != nil && !orig.Obj().Exported() && checkedGenStructs[orig]
@@ -447,10 +457,13 @@ func verifyHarnessPackageVars(audited bool, idx *harnessPkgIndex) (map[*types.Va
 			return false
 		},
 	}) {
-		return nil, false
+		if rejectDetail != "" {
+			return nil, "refconfine: " + rejectDetail
+		}
+		return nil, "refconfine rejected"
 	}
 
-	return categoryA, true
+	return categoryA, ""
 }
 
 func isAddrOfCarrierFreeFlagField(

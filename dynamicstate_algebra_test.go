@@ -1131,3 +1131,163 @@ func Count() int { return Registry[0]() }
 		}
 	})
 }
+
+func TestExplainDynamicStateSinglePassAnalyzeConeParity(t *testing.T) {
+	t.Run("non-vouch memoizer and single-subject directive discharges yield empty chain", func(t *testing.T) {
+		modCache := t.TempDir()
+		workDir := t.TempDir()
+		pkgs := parseAndTypecheckDAG(t, workDir, map[string]map[string]string{
+			"example.com/p": {
+				"p.go": `package p
+
+import "sync"
+
+var (
+	memoMu sync.RWMutex
+	memo   map[string]int
+)
+
+func Lookup(k string) int {
+	memoMu.RLock()
+	v, ok := memo[k]
+	memoMu.RUnlock()
+	if ok {
+		return v
+	}
+	v = len(k) * 2
+	memoMu.Lock()
+	if memo == nil {
+		memo = make(map[string]int)
+	}
+	memo[k] = v
+	memoMu.Unlock()
+	return v
+}
+
+//gofresh:single-subject
+var scratch = map[string]func(){}
+
+func Touch() {
+	scratch["k"] = nil
+}
+`,
+			},
+		})
+		for _, p := range pkgs {
+			if p.PkgPath == "example.com/p" {
+				p.Module = &packages.Module{Path: "example.com/p", Main: true, Dir: workDir}
+			}
+		}
+		memoChain, err := explainCulprit(true, pkgs, "example.com/p", "example.com/p.memo", "memo", false, false, modCache)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(memoChain.Links) != 0 || memoChain.Arm != "" {
+			t.Fatalf("non-vouch memoizer discharge yielded non-empty explain chain: %+v", memoChain)
+		}
+
+		unattestedScratch, err := explainCulprit(true, pkgs, "example.com/p", "example.com/p.scratch", "scratch", false, false, modCache)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if unattestedScratch.Arm != "mutation" || len(unattestedScratch.Links) == 0 {
+			t.Fatalf("unattested single-subject var lost mutation chain: %+v", unattestedScratch)
+		}
+
+		attestedScratch, err := explainCulprit(true, pkgs, "example.com/p", "example.com/p.scratch", "scratch", true, false, modCache)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(attestedScratch.Links) != 0 || attestedScratch.Arm != "" {
+			t.Fatalf("attested single-subject var yielded non-empty explain chain: %+v", attestedScratch)
+		}
+	})
+
+	t.Run("pinned culprit retains full explain chain for caller-vouch inspection", func(t *testing.T) {
+		modCache := t.TempDir()
+		workDir := t.TempDir()
+		pkgs := parseAndTypecheckDAG(t, workDir, map[string]map[string]string{
+			"example.com/pinned": {
+				"pin.go": `package pinned
+
+var GlobalHook func()
+
+func SetHook(fn func()) {
+	GlobalHook = fn
+}
+`,
+			},
+			"example.com/app": {
+				"app.go": `package app
+
+import "example.com/pinned"
+
+func Run() {
+	pinned.SetHook(nil)
+}
+`,
+			},
+		})
+		for _, p := range pkgs {
+			switch p.PkgPath {
+			case "example.com/pinned":
+				p.Dir = modCache + "/example.com/pinned@v1.0.0"
+				p.Module = &packages.Module{Path: "example.com/pinned", Version: "v1.0.0", Dir: p.Dir}
+			case "example.com/app":
+				p.Dir = workDir
+				p.Module = &packages.Module{Path: "example.com/app", Main: true, Dir: p.Dir}
+			}
+		}
+		chain, err := explainCulprit(true, pkgs, "example.com/pinned", "example.com/pinned.GlobalHook", "GlobalHook", false, false, modCache)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if chain.Arm != "mutation" || len(chain.Links) == 0 {
+			t.Fatalf("pinned culprit lost explain chain: %+v", chain)
+		}
+	})
+
+	t.Run("carrier-linked cross-package environment-audit refusal resolves in single AnalyzeCone pass", func(t *testing.T) {
+		files := map[string]string{
+			"go.mod": "module example.com/explainlink\n\ngo 1.26\n",
+			"src/src.go": `package src
+
+func dirtyGen() func() int {
+	n := 0
+	return func() int {
+		n++
+		return n
+	}
+}
+
+var Source = []func() int{dirtyGen()}
+`,
+			"dst/dst.go": `package dst
+
+import "example.com/explainlink/src"
+
+var Target []func() int
+
+func init() {
+	Target = src.Source
+}
+
+func Count() int { return len(Target) }
+`,
+		}
+		dir := writeModuleTree(t, files)
+		chain := explainView(t, dir, "example.com/explainlink/dst", "Target")
+		if chain.Arm != "environment-audit" || len(chain.Links) < 2 {
+			t.Fatalf("carrier-linked explain chain = %+v, want environment-audit with >=2 links", chain)
+		}
+		hasRefusal := false
+		for _, l := range chain.Links {
+			if l.Kind == "refusal" && l.Symbol == "dirtyGen" {
+				hasRefusal = true
+			}
+		}
+		if !hasRefusal {
+			t.Fatalf("carrier-linked explain chain missing dirtyGen refusal: %+v", chain)
+		}
+	})
+}

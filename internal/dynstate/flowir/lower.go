@@ -210,8 +210,9 @@ func (l *lowerer) lowerSubBlock(blk *ast.BlockStmt) *Body {
 		Recv:       l.body.Recv,
 		Params:     l.body.Params,
 		ParamIndex: l.body.ParamIndex,
-		Results:    l.body.Results,
-		ResultSet:  l.body.ResultSet,
+		Results:     l.body.Results,
+		ResultTypes: l.body.ResultTypes,
+		ResultSet:   l.body.ResultSet,
 		FreeVars:   l.body.FreeVars,
 	}
 	subL := &lowerer{info: l.info, pkg: l.pkg, body: sub}
@@ -609,6 +610,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 			return Place{
 				Root:    RootBlank,
 				RootPos: e.Pos(),
+				RootRaw: e,
 				Type:    l.info.TypeOf(expr),
 				Raw:     expr,
 			}, true
@@ -623,6 +625,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 			return Place{
 				Root:    rk,
 				RootPos: e.Pos(),
+				RootRaw: e,
 				Obj:     o,
 				Type:    l.info.TypeOf(expr),
 				Raw:     expr,
@@ -631,6 +634,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 			return Place{
 				Root:    RootFunc,
 				RootPos: e.Pos(),
+				RootRaw: e,
 				Func:    o,
 				FuncPkg: pkgPathOf(o, l.pkg),
 				Type:    l.info.TypeOf(expr),
@@ -640,6 +644,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 			return Place{
 				Root:       RootConstOrNil,
 				RootPos:    e.Pos(),
+				RootRaw:    e,
 				ConstOrNil: o,
 				Type:       l.info.TypeOf(expr),
 				Raw:        expr,
@@ -657,6 +662,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 					return Place{
 						Root:    RootPkgGlobal,
 						RootPos: e.Sel.Pos(),
+						RootRaw: e,
 						Obj:     o,
 						Type:    l.info.TypeOf(expr),
 						Raw:     expr,
@@ -665,6 +671,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 					return Place{
 						Root:    RootFunc,
 						RootPos: e.Sel.Pos(),
+						RootRaw: e,
 						Func:    o,
 						FuncPkg: pkgPathOf(o, l.pkg),
 						Type:    l.info.TypeOf(expr),
@@ -674,6 +681,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 					return Place{
 						Root:       RootConstOrNil,
 						RootPos:    e.Sel.Pos(),
+						RootRaw:    e,
 						ConstOrNil: o,
 						Type:       l.info.TypeOf(expr),
 						Raw:        expr,
@@ -698,6 +706,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 				Indirect:  sel.Indirect(),
 				BaseType:  l.info.TypeOf(e.X),
 				Type:      l.info.TypeOf(e),
+				Raw:       e,
 			})
 			base.Type = l.info.TypeOf(expr)
 			base.Raw = expr
@@ -707,6 +716,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 			return Place{
 				Root:         RootFunc,
 				RootPos:      e.Sel.Pos(),
+				RootRaw:      e,
 				Func:         fn,
 				FuncPkg:      pkgPathOf(fn, l.pkg),
 				IsMethodExpr: true,
@@ -733,6 +743,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 			Key:      l.lowerValue(e.Index),
 			BaseType: l.info.TypeOf(e.X),
 			Type:     l.info.TypeOf(e),
+			Raw:      e,
 		})
 		base.Type = l.info.TypeOf(expr)
 		base.Raw = expr
@@ -769,6 +780,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 			Max:      maxV,
 			BaseType: l.info.TypeOf(e.X),
 			Type:     l.info.TypeOf(e),
+			Raw:      e,
 		})
 		base.Type = l.info.TypeOf(expr)
 		base.Raw = expr
@@ -783,6 +795,7 @@ func (l *lowerer) tryLowerPlace(expr ast.Expr) (Place, bool) {
 			Kind:     ProjDeref,
 			BaseType: l.info.TypeOf(e.X),
 			Type:     l.info.TypeOf(e),
+			Raw:      e,
 		})
 		base.Type = l.info.TypeOf(expr)
 		base.Raw = expr
@@ -802,6 +815,7 @@ func (l *lowerer) lowerPlace(expr ast.Expr) Place {
 	return Place{
 		Root:    RootTransient,
 		RootPos: rootPos,
+		RootRaw: syntaxutil.UnparenExpr(expr),
 		Base:    l.lowerValue(expr),
 		Type:    l.info.TypeOf(expr),
 		Raw:     expr,

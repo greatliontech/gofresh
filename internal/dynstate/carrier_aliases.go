@@ -177,9 +177,8 @@ func placeEntersInterior(p flowir.Place, writeContainer bool) bool {
 	return false
 }
 
-// visitAllBodyOps visits every synchronous operation in b and recursively
-// descends into nested ValMakeClosure and CallIIFE bodies (plus OpGo call
-// expressions).
+// visitAllBodyOps visits every operation in b (including OpGo) and recursively
+// descends into nested ValMakeClosure and CallIIFE bodies.
 func visitAllBodyOps(b *flowir.Body, fn func(*flowir.Op)) {
 	if b == nil {
 		return
@@ -201,9 +200,7 @@ func visitAllBodyOps(b *flowir.Body, fn func(*flowir.Op)) {
 		})
 	}
 	b.ForEachSyncOp(func(op *flowir.Op) bool {
-		if op.Kind != flowir.OpGo {
-			fn(op)
-		}
+		fn(op)
 		forEachOpTopValues(op, scanVal)
 		return true
 	})
@@ -300,38 +297,13 @@ func walkTransientTargetValues(root *flowir.Value, fn func(*flowir.Value)) {
 }
 
 func forEachOpTopValues(op *flowir.Op, fn func(*flowir.Value)) {
-	if op == nil {
+	if op == nil || fn == nil {
 		return
 	}
-	switch op.Kind {
-	case flowir.OpAssign:
-		for _, dst := range op.Dsts {
-			dst.ForEachChildValue(func(cv *flowir.Value) bool {
-				fn(cv)
-				return true
-			})
-		}
-		for _, src := range op.Srcs {
-			fn(src)
-		}
-	case flowir.OpTypeSwitchBind:
-		fn(op.SwitchSrc)
-	case flowir.OpChanSend:
-		op.ChanPlace.ForEachChildValue(func(cv *flowir.Value) bool {
-			fn(cv)
-			return true
-		})
-		fn(op.ChanVal)
-		fn(op.SendVal)
-	case flowir.OpReturn:
-		for _, r := range op.Results {
-			fn(r)
-		}
-	case flowir.OpDefer, flowir.OpGo:
-		fn(op.Call)
-	case flowir.OpExpr:
-		fn(op.Expr)
-	}
+	op.ForEachValue(func(v *flowir.Value) bool {
+		fn(v)
+		return true
+	})
 }
 
 func transientValueHasUnresolvedTarget(v *flowir.Value) bool {

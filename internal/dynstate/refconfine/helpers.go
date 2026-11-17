@@ -6,6 +6,7 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
 
@@ -140,88 +141,42 @@ func indexValueTypeFromType(t types.Type) types.Type {
 	return t
 }
 
-func callCallErasesSeedStruct(
-	info *types.Info,
-	call *ast.CallExpr,
+func callValueErasesSeedStruct(
+	v *flowir.Value,
 	seedStructTypeViolated func(dstT, srcT types.Type) bool,
 	allowCallArg func(call *ast.CallExpr, argIdx int, arg ast.Expr) bool,
 ) bool {
-	if len(call.Args) == 0 {
+	if v == nil || v.Kind != flowir.ValCall || v.IsConst {
 		return false
 	}
-	if tv, ok := info.Types[call]; ok && tv.Value != nil {
-		return false
-	}
-	fun := ast.Unparen(call.Fun)
-	if b := syntaxutil.LookupBuiltin(info, fun); b != nil {
-		switch b.Name() {
+	if v.CallKind == flowir.CallBuiltin {
+		switch v.BuiltinName {
 		case "len", "cap", "Sizeof", "Alignof", "Offsetof":
 			return false
 		case "append":
-			if len(call.Args) >= 2 {
-				dstSlice := info.TypeOf(call.Args[0])
-				if dstSlice != nil {
-					if sl, okSl := types.Unalias(dstSlice).Underlying().(*types.Slice); okSl {
-						if call.Ellipsis.IsValid() {
-							return seedStructTypeViolated(dstSlice, info.TypeOf(call.Args[1]))
-						}
-						for _, arg := range call.Args[1:] {
-							if seedStructTypeViolated(sl.Elem(), info.TypeOf(arg)) {
-								return true
-							}
+			if len(v.Args) >= 2 && v.Args[0] != nil && v.Args[0].Type != nil {
+				dstSlice := v.Args[0].Type
+				if sl, okSl := types.Unalias(dstSlice).Underlying().(*types.Slice); okSl {
+					if v.Ellipsis {
+						return v.Args[1] != nil && seedStructTypeViolated(dstSlice, v.Args[1].Type)
+					}
+					for _, arg := range v.Args[1:] {
+						if arg != nil && seedStructTypeViolated(sl.Elem(), arg.Type) {
+							return true
 						}
 					}
 				}
 			}
 			return false
-		}
-	}
-	sig, isSig := syntaxutil.UnderlyingType(info.TypeOf(fun)).(*types.Signature)
-	if !isSig {
-		for _, arg := range call.Args {
-			if seedStructTypeViolated(nil, info.TypeOf(arg)) {
-				return true
-			}
-		}
-		return false
-	}
-	var originSig *types.Signature
-	switch fn := fun.(type) {
-	case *ast.Ident:
-		if callee, ok := info.Uses[fn].(*types.Func); ok && callee.Origin() != callee {
-			originSig, _ = callee.Origin().Type().(*types.Signature)
-		}
-	case *ast.SelectorExpr:
-		if fn.Sel != nil {
-			if callee, ok := info.Uses[fn.Sel].(*types.Func); ok && callee.Origin() != callee {
-				originSig, _ = callee.Origin().Type().(*types.Signature)
-			}
-		}
-	case *ast.IndexExpr:
-		if id, isID := ast.Unparen(fn.X).(*ast.Ident); isID {
-			if callee, ok := info.Uses[id].(*types.Func); ok {
-				originSig, _ = callee.Origin().Type().(*types.Signature)
-			}
-		}
-	case *ast.IndexListExpr:
-		if id, isID := ast.Unparen(fn.X).(*ast.Ident); isID {
-			if callee, ok := info.Uses[id].(*types.Func); ok {
-				originSig, _ = callee.Origin().Type().(*types.Signature)
-			}
-		}
-	}
-
-	if len(call.Args) == 1 {
-		if tup, isTup := info.TypeOf(call.Args[0]).(*types.Tuple); isTup {
-			for ti := 0; ti < tup.Len(); ti++ {
-				var dstT types.Type
-				if ti < sig.Params().Len() {
-					dstT = sig.Params().At(ti).Type()
+		default:
+			for i, arg := range v.Args {
+				if arg == nil {
+					continue
 				}
-				if seedStructTypeViolated(dstT, tup.At(ti).Type()) {
-					return true
+				if v.CallAST != nil && i < len(v.CallAST.Args) && allowCallArg != nil && allowCallArg(v.CallAST, i, v.CallAST.Args[i]) {
+					continue
 				}
-				if originSig != nil && ti < originSig.Params().Len() && seedStructTypeViolated(originSig.Params().At(ti).Type(), tup.At(ti).Type()) {
+				if seedStructTypeViolated(nil, arg.Type) {
 					return true
 				}
 			}
@@ -229,42 +184,145 @@ func callCallErasesSeedStruct(
 		}
 	}
 
-	for argIdx, arg := range call.Args {
-		if allowCallArg != nil && allowCallArg(call, argIdx, arg) {
-			continue
+	var originSig *types.Signature
+	if v.CalleeFunc != nil && v.CalleeFunc.Origin() != nil {
+		if sig, ok := v.CalleeFunc.Origin().Type().(*types.Signature); ok && sig != v.CalleeSig {
+			originSig = sig
 		}
-		argT := info.TypeOf(arg)
-		paramIdx := argIdx
-		isNonEllipsisVariadic := false
-		if sig.Variadic() && argIdx >= sig.Params().Len()-1 {
-			paramIdx = sig.Params().Len() - 1
-			isNonEllipsisVariadic = !call.Ellipsis.IsValid()
+	}
+
+	formalOriginSlot := func(sig *types.Signature, paramIdx int, packedVariadic bool) types.Type {
+		if sig == nil || sig.Params() == nil || paramIdx < 0 || paramIdx >= sig.Params().Len() {
+			return nil
 		}
-		var dstT types.Type
-		if paramIdx < sig.Params().Len() {
-			dstT = sig.Params().At(paramIdx).Type()
-			if isNonEllipsisVariadic {
-				if sl, isSl := syntaxutil.UnderlyingType(dstT).(*types.Slice); isSl {
-					dstT = sl.Elem()
+		pt := sig.Params().At(paramIdx).Type()
+		if packedVariadic && pt != nil {
+			if sl, isSl := syntaxutil.UnderlyingType(pt).(*types.Slice); isSl {
+				return sl.Elem()
+			}
+		}
+		return pt
+	}
+
+	if v.IsMethodExprCall {
+		var mExprSig *types.Signature
+		if v.Selection != nil {
+			mExprSig, _ = syntaxutil.UnderlyingType(v.Selection.Type()).(*types.Signature)
+		}
+		if v.Recv != nil && len(v.Args) == 0 && v.CallAST != nil && len(v.CallAST.Args) == 1 && !v.Ellipsis {
+			if tup, isTup := types.Unalias(v.Recv.Type).(*types.Tuple); isTup && tup.Len() > 1 {
+				for ti := 0; ti < tup.Len(); ti++ {
+					packed := mExprSig != nil && mExprSig.Variadic() && mExprSig.Params() != nil && ti >= mExprSig.Params().Len()-1
+					pIdx := ti
+					if packed {
+						pIdx = mExprSig.Params().Len() - 1
+					}
+					dstT := formalOriginSlot(mExprSig, pIdx, packed)
+					if seedStructTypeViolated(dstT, tup.At(ti).Type()) {
+						return true
+					}
+					if originSig != nil {
+						if ti == 0 && originSig.Recv() != nil {
+							if seedStructTypeViolated(originSig.Recv().Type(), tup.At(ti).Type()) {
+								return true
+							}
+						} else if ti > 0 {
+							opIdx := ti - 1
+							oPacked := originSig.Variadic() && originSig.Params() != nil && opIdx >= originSig.Params().Len()-1
+							if oPacked {
+								opIdx = originSig.Params().Len() - 1
+							}
+							if origT := formalOriginSlot(originSig, opIdx, oPacked); origT != nil && seedStructTypeViolated(origT, tup.At(ti).Type()) {
+								return true
+							}
+						}
+					}
+				}
+				return false
+			}
+		}
+		if v.Recv != nil {
+			if !(v.CallAST != nil && len(v.CallAST.Args) > 0 && allowCallArg != nil && allowCallArg(v.CallAST, 0, v.CallAST.Args[0])) {
+				var recvDstT types.Type
+				if mExprSig != nil && mExprSig.Params() != nil && mExprSig.Params().Len() > 0 {
+					recvDstT = mExprSig.Params().At(0).Type()
+				}
+				if seedStructTypeViolated(recvDstT, v.Recv.Type) {
+					return true
+				}
+				if originSig != nil && originSig.Recv() != nil && seedStructTypeViolated(originSig.Recv().Type(), v.Recv.Type) {
+					return true
 				}
 			}
 		}
-		if seedStructTypeViolated(dstT, argT) {
+		violated := false
+		v.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, slotIdx int, paramIdx int, ok bool, packedVariadic bool) bool {
+			rawIdx := slotIdx + 1
+			if v.CallAST != nil && len(v.Args) == len(v.CallAST.Args)-1 && rawIdx < len(v.CallAST.Args) &&
+				allowCallArg != nil && allowCallArg(v.CallAST, rawIdx, v.CallAST.Args[rawIdx]) {
+				return true
+			}
+			var dstT types.Type
+			if ok {
+				dstT = v.FormalParamSlotType(paramIdx, packedVariadic)
+			}
+			if seedStructTypeViolated(dstT, slotType) {
+				violated = true
+				return false
+			}
+			if ok && originSig != nil {
+				if origT := formalOriginSlot(originSig, paramIdx, packedVariadic); origT != nil && seedStructTypeViolated(origT, slotType) {
+					violated = true
+					return false
+				}
+			}
 			return true
-		}
-		if originSig != nil && paramIdx < originSig.Params().Len() {
-			origT := originSig.Params().At(paramIdx).Type()
-			if isNonEllipsisVariadic {
-				if sl, isSl := syntaxutil.UnderlyingType(origT).(*types.Slice); isSl {
-					origT = sl.Elem()
-				}
+		})
+		return violated
+	}
+
+	if v.CalleeSig == nil {
+		for i, arg := range v.Args {
+			if arg == nil {
+				continue
 			}
-			if seedStructTypeViolated(origT, argT) {
+			if v.CallAST != nil && i < len(v.CallAST.Args) && allowCallArg != nil && allowCallArg(v.CallAST, i, v.CallAST.Args[i]) {
+				continue
+			}
+			if seedStructTypeViolated(nil, arg.Type) {
 				return true
 			}
 		}
+		return false
 	}
-	return false
+
+	isTupleUnpack := len(v.Args) == 1 && !v.Ellipsis && v.Args[0] != nil && v.Args[0].Type != nil
+	if isTupleUnpack {
+		_, isTupleUnpack = types.Unalias(v.Args[0].Type).(*types.Tuple)
+	}
+	violated := false
+	v.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, slotIdx int, paramIdx int, ok bool, packedVariadic bool) bool {
+		if !isTupleUnpack && v.CallAST != nil && slotIdx < len(v.CallAST.Args) &&
+			allowCallArg != nil && allowCallArg(v.CallAST, slotIdx, v.CallAST.Args[slotIdx]) {
+			return true
+		}
+		var dstT types.Type
+		if ok {
+			dstT = v.FormalParamSlotType(paramIdx, packedVariadic)
+		}
+		if seedStructTypeViolated(dstT, slotType) {
+			violated = true
+			return false
+		}
+		if ok && originSig != nil {
+			if origT := formalOriginSlot(originSig, paramIdx, packedVariadic); origT != nil && seedStructTypeViolated(origT, slotType) {
+				violated = true
+				return false
+			}
+		}
+		return true
+	})
+	return violated
 }
 
 // IdentIsWrittenOrAddrTaken reports whether id appears on the LHS of an
@@ -305,6 +363,73 @@ func IdentOrExprIsWritten(idx *PkgIndex, target ast.Expr) bool {
 		}
 	}
 	return false
+}
+
+// ExprPrefixIsWrittenOrAddrTaken reports whether expr (or any field, index,
+// slice, or dereference projection rooted at expr) is written, passed as the
+// target of delete/clear/copy/append, or explicitly address-taken.
+func ExprPrefixIsWrittenOrAddrTaken(p *packages.Package, idx *PkgIndex, expr ast.Expr) bool {
+	if p == nil || p.TypesInfo == nil || idx == nil || expr == nil {
+		return false
+	}
+	cur := expr
+	for {
+		par := idx.ParentUnparen(cur)
+		if par == nil {
+			return false
+		}
+		switch x := par.(type) {
+		case *ast.AssignStmt:
+			for _, lhs := range x.Lhs {
+				if ast.Unparen(lhs) == cur {
+					return true
+				}
+			}
+			return false
+		case *ast.IncDecStmt:
+			return ast.Unparen(x.X) == cur
+		case *ast.RangeStmt:
+			return x.Tok == token.ASSIGN && ((x.Key != nil && ast.Unparen(x.Key) == cur) || (x.Value != nil && ast.Unparen(x.Value) == cur))
+		case *ast.UnaryExpr:
+			return x.Op == token.AND && ast.Unparen(x.X) == cur
+		case *ast.CallExpr:
+			if b := syntaxutil.LookupBuiltin(p.TypesInfo, ast.Unparen(x.Fun)); b != nil {
+				switch b.Name() {
+				case "delete", "clear", "copy", "append":
+					return len(x.Args) > 0 && ast.Unparen(x.Args[0]) == cur
+				}
+			}
+			return false
+		case *ast.SelectorExpr:
+			if ast.Unparen(x.X) == cur {
+				if selInfo := p.TypesInfo.Selections[x]; selInfo != nil && selInfo.Kind() == types.FieldVal {
+					cur = x
+					continue
+				}
+			}
+			return false
+		case *ast.IndexExpr:
+			if ast.Unparen(x.X) == cur {
+				cur = x
+				continue
+			}
+			return false
+		case *ast.SliceExpr:
+			if ast.Unparen(x.X) == cur {
+				cur = x
+				continue
+			}
+			return false
+		case *ast.StarExpr:
+			if ast.Unparen(x.X) == cur {
+				cur = x
+				continue
+			}
+			return false
+		default:
+			return false
+		}
+	}
 }
 
 // TouchesAnyNamedStruct reports whether expr dereferences, indexes, or selects

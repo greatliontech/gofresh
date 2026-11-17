@@ -137,9 +137,9 @@ func VerifyPackageWithReason(audited bool, pkg *packages.Package) (bool, string)
 	}
 
 	// Gate 2: Closed package-scope variable categories (returning init-only Category 3A vars).
-	categoryA, okVars := verifyHarnessPackageVars(audited, idx)
-	if !okVars {
-		return false, "verifyHarnessPackageVars failed"
+	categoryA, varsReason := verifyHarnessPackageVars(audited, idx)
+	if varsReason != "" {
+		return false, "verifyHarnessPackageVars failed: " + varsReason
 	}
 
 	// Gate 3: Contextual AST protocol checks (flag.*Var, os.LookupEnv/Getenv, os.Stdout,

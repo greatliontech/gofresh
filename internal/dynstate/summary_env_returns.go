@@ -12,32 +12,96 @@ import (
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
 
-// returnEnvFreeFunctions proves, per plain named function of the package, that
-// every value its return expressions can carry into a carrier is
-// environment-free provided the call's arguments are — the constructor-result
-// admission of the environment-free registration audit.
-func returnEnvFreeFunctions(
+type closureOutflowSummaries struct {
+	returnEnvFree          map[string]bool
+	returnEnvDeps          map[string]map[syntaxutil.FuncKey]bool
+	returnEnvParamDeps     map[string]map[syntaxutil.ParamKey]bool
+	returnEnvMethodDeps    map[string]map[syntaxutil.FuncKey]bool
+	returnFieldDefer       map[string]map[syntaxutil.ReturnFieldParamDefer]bool
+	returnFieldPoison      map[string]map[syntaxutil.ReturnFieldParamPoison]bool
+	paramInsertionFree     map[syntaxutil.ParamKey]bool
+	paramInsertionDeps     map[syntaxutil.ParamKey]map[syntaxutil.EnvAuditTarget]bool
+	paramInsertionParams   map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool
+	paramInsertionMethods  map[syntaxutil.ParamKey]map[syntaxutil.FuncKey]bool
+	returnInsertionCallDep map[string]map[syntaxutil.EnvAuditTarget]bool
+}
+
+type resolvedInsertionState struct {
+	poison     map[types.Object]bool
+	uses       map[types.Object]map[syntaxutil.EnvAuditTarget]bool
+	paramDeps  map[types.Object]map[syntaxutil.ParamKey]bool
+	methodDeps map[types.Object]map[syntaxutil.FuncKey]bool
+}
+
+type outflowEvalCtx struct {
+	insMode      bool
+	resolved     resolvedInsertionState
+	localFree    map[types.Object]int // 0 unknown, 2 free, 3 refused
+	provingDepth map[types.Object]int
+	curDepth     int
+	fnDeps       map[syntaxutil.FuncKey]bool
+	useDeps      map[syntaxutil.EnvAuditTarget]bool
+	paramDeps    map[syntaxutil.ParamKey]bool
+	methodDeps   map[syntaxutil.FuncKey]bool
+	onRefusal    func(*flowir.Value)
+}
+
+func newOutflowEvalCtx(insMode bool, resolved resolvedInsertionState) *outflowEvalCtx {
+	return &outflowEvalCtx{
+		insMode:      insMode,
+		resolved:     resolved,
+		localFree:    map[types.Object]int{},
+		provingDepth: map[types.Object]int{},
+		fnDeps:       map[syntaxutil.FuncKey]bool{},
+		useDeps:      map[syntaxutil.EnvAuditTarget]bool{},
+		paramDeps:    map[syntaxutil.ParamKey]bool{},
+		methodDeps:   map[syntaxutil.FuncKey]bool{},
+	}
+}
+
+func (c *outflowEvalCtx) resetMemo() {
+	clear(c.localFree)
+	clear(c.provingDepth)
+	c.curDepth = 0
+}
+
+func newObjectUnionFind(pairSets ...[][2]types.Object) func(types.Object) types.Object {
+	roots := map[types.Object]types.Object{}
+	var find func(types.Object) types.Object
+	find = func(x types.Object) types.Object {
+		r, ok := roots[x]
+		if !ok || r == x {
+			return x
+		}
+		root := find(r)
+		roots[x] = root
+		return root
+	}
+	for _, pairs := range pairSets {
+		for _, pair := range pairs {
+			a, b := find(pair[0]), find(pair[1])
+			if a != b {
+				roots[a] = b
+			}
+		}
+	}
+	return find
+}
+
+// analyzeClosureOutflowSummaries proves, per plain named function of the
+// package, constructor-result environment freedom (ReturnEnvFree*) and
+// parameter-insertion environment freedom (ParamInsertionFree*) in a single
+// pass over each lowered function body.
+func analyzeClosureOutflowSummaries(
 	audited bool,
 	p *packages.Package,
 	fc *pkgFlowCache,
 	settledGlobals settledGlobalMap,
 	pkgConf *packageConfinementSummary,
 	hooks *syntaxutil.ExplainHookSet,
-) (
-	map[string]bool,
-	map[string]map[syntaxutil.FuncKey]bool,
-	map[string]map[syntaxutil.ParamKey]bool,
-	map[string]map[syntaxutil.FuncKey]bool,
-	map[string]map[syntaxutil.ReturnFieldParamDefer]bool,
-	map[string]map[syntaxutil.ReturnFieldParamPoison]bool,
-	map[syntaxutil.ParamKey]bool,
-	map[syntaxutil.ParamKey]map[syntaxutil.EnvAuditTarget]bool,
-	map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool,
-	map[syntaxutil.ParamKey]map[syntaxutil.FuncKey]bool,
-	map[string]map[syntaxutil.EnvAuditTarget]bool,
-) {
+) closureOutflowSummaries {
 	if p == nil || p.TypesInfo == nil || p.Types == nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil
+		return closureOutflowSummaries{}
 	}
 	ownPath := p.Types.Path()
 	carries := refconfine.TypeCarriesSignature
@@ -350,14 +414,8 @@ func returnEnvFreeFunctions(
 				}
 			}
 
-			type pendingStore struct {
-				robj     types.Object
-				place    flowir.Place
-				source   *flowir.Value
-				isMapKey bool
-			}
-			var pendingStores []pendingStore
-			var pendingAppendSlices []pendingStore
+			var pendingStores []outflowPendingStore
+			var pendingAppendSlices []outflowPendingStore
 			type insertionUse struct {
 				call        *flowir.Value
 				root        types.Object
@@ -374,9 +432,9 @@ func returnEnvFreeFunctions(
 					if !broken && src != nil && dst.Obj != nil {
 						if _, tracked := trackedVar(dst.Obj); tracked {
 							if _, keyVal, isMapW := dst.AsMapWrite(); isMapW && keyVal != nil {
-								pendingStores = append(pendingStores, pendingStore{robj: dst.Obj, place: dst, source: keyVal, isMapKey: true})
+								pendingStores = append(pendingStores, outflowPendingStore{robj: dst.Obj, place: dst, source: keyVal, isMapKey: true})
 							}
-							pendingStores = append(pendingStores, pendingStore{robj: dst.Obj, place: dst, source: src})
+							pendingStores = append(pendingStores, outflowPendingStore{robj: dst.Obj, place: dst, source: src})
 							return
 						}
 					}
@@ -652,7 +710,7 @@ func returnEnvFreeFunctions(
 											}
 										} else {
 											for _, elem := range v.Args[1:] {
-												pendingAppendSlices = append(pendingAppendSlices, pendingStore{
+												pendingAppendSlices = append(pendingAppendSlices, outflowPendingStore{
 													robj:   baseObj,
 													place:  slicePlace,
 													source: elem,
@@ -804,16 +862,6 @@ func returnEnvFreeFunctions(
 									switch arg.CallKind {
 									case flowir.CallBuiltin:
 										switch arg.BuiltinName {
-										case "make":
-											return
-										case "new":
-											if arg.CallAST != nil && syntaxutil.IsBuiltinNewType(p.TypesInfo, arg.CallAST) {
-												return
-											}
-											for _, a := range arg.Args {
-												classifyArg(a, calleeParam, callArgs)
-											}
-											return
 										case "append":
 											for ai, a := range arg.Args {
 												if ai == len(arg.Args)-1 && arg.Ellipsis && a != nil && a.Type != nil {
@@ -843,11 +891,8 @@ func returnEnvFreeFunctions(
 									breakReachIn(arg)
 								}
 							}
-							v.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, slotIdx int, pIdx int, pOK bool, packedVariadic bool) bool {
-								paramType := v.FormalParamSlotType(pIdx, packedVariadic)
-								handsOutSlot := refconfine.CallResultHandsOut(slotType) ||
-									(paramType != nil && refconfine.CallResultHandsOut(paramType) && refconfine.CallResultHandsOut(slotType))
-								if slotType != nil && !handsOutSlot {
+							v.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, slotIdx int, pIdx int, pOK bool, _ bool) bool {
+								if slotType != nil && !refconfine.CallResultHandsOut(slotType) {
 									return true
 								}
 								idx := slotIdx
@@ -962,7 +1007,7 @@ func returnEnvFreeFunctions(
 						for _, dst := range op.Dsts {
 							if _, keyVal, isMapW := dst.AsMapWrite(); isMapW && keyVal != nil && dst.Obj != nil {
 								if _, tr := trackedVar(dst.Obj); tr {
-									pendingStores = append(pendingStores, pendingStore{robj: dst.Obj, place: dst, source: keyVal, isMapKey: true})
+									pendingStores = append(pendingStores, outflowPendingStore{robj: dst.Obj, place: dst, source: keyVal, isMapKey: true})
 								}
 							}
 							bindPlace(dst, nil, true, false)
@@ -1047,43 +1092,8 @@ func returnEnvFreeFunctions(
 				linkBacking(pa.robj, pa.source)
 			}
 
-			aliasRoot := map[types.Object]types.Object{}
-			var aliasFind func(types.Object) types.Object
-			aliasFind = func(x types.Object) types.Object {
-				r, ok := aliasRoot[x]
-				if !ok || r == x {
-					return x
-				}
-				root := aliasFind(r)
-				aliasRoot[x] = root
-				return root
-			}
-			for _, pair := range aliasPairs {
-				a, b := aliasFind(pair[0]), aliasFind(pair[1])
-				if a != b {
-					aliasRoot[a] = b
-				}
-			}
-
-			reachRoot := map[types.Object]types.Object{}
-			var reachFind func(types.Object) types.Object
-			reachFind = func(x types.Object) types.Object {
-				r, ok := reachRoot[x]
-				if !ok || r == x {
-					return x
-				}
-				root := reachFind(r)
-				reachRoot[x] = root
-				return root
-			}
-			for _, pairs := range [][][2]types.Object{aliasPairs, heldPairs} {
-				for _, pair := range pairs {
-					a, b := reachFind(pair[0]), reachFind(pair[1])
-					if a != b {
-						reachRoot[a] = b
-					}
-				}
-			}
+			aliasFind := newObjectUnionFind(aliasPairs)
+			reachFind := newObjectUnionFind(aliasPairs, heldPairs)
 
 			propagateBroken := func() {
 				for changed := true; changed; {
@@ -1104,88 +1114,6 @@ func returnEnvFreeFunctions(
 			}
 			propagateBroken()
 
-			isSliceOrMapType := func(t types.Type) bool {
-				if t == nil {
-					return false
-				}
-				switch types.Unalias(t).Underlying().(type) {
-				case *types.Slice, *types.Map:
-					return true
-				}
-				return false
-			}
-			isStructPtrType := func(t types.Type) bool {
-				if t == nil {
-					return false
-				}
-				ptr, ok := types.Unalias(t).Underlying().(*types.Pointer)
-				if !ok {
-					return false
-				}
-				_, isSt := types.Unalias(ptr.Elem()).Underlying().(*types.Struct)
-				return isSt
-			}
-			isSliceResliceOnlyPlace := func(pl flowir.Place) bool {
-				if pl.Obj == nil || pl.Obj.Type() == nil {
-					return false
-				}
-				if _, isSl := types.Unalias(pl.Obj.Type()).Underlying().(*types.Slice); !isSl {
-					return false
-				}
-				for _, pr := range pl.Projs {
-					if pr.Kind != flowir.ProjSlice {
-						return false
-					}
-				}
-				return true
-			}
-			isElementReadPlace := func(pl flowir.Place) bool {
-				if pl.Obj == nil || len(pl.Projs) == 0 {
-					return false
-				}
-				idxPos := 0
-				for idxPos < len(pl.Projs) && pl.Projs[idxPos].Kind == flowir.ProjSlice {
-					idxPos++
-				}
-				if idxPos >= len(pl.Projs) || pl.Projs[idxPos].Kind != flowir.ProjIndex || pl.Projs[idxPos].BaseType == nil {
-					return false
-				}
-				if idxPos > 0 {
-					if pl.Obj.Type() == nil {
-						return false
-					}
-					if _, isSl := types.Unalias(pl.Obj.Type()).Underlying().(*types.Slice); !isSl {
-						return false
-					}
-				}
-				return isSliceOrMapType(pl.Projs[idxPos].BaseType)
-			}
-			isDirectIndexPlace := func(pl flowir.Place) bool {
-				if pl.Obj == nil || len(pl.Projs) == 0 {
-					return false
-				}
-				last := len(pl.Projs) - 1
-				if pl.Projs[last].Kind != flowir.ProjIndex || pl.Projs[last].BaseType == nil {
-					return false
-				}
-				if !isSliceOrMapType(pl.Projs[last].BaseType) {
-					return false
-				}
-				if last > 0 {
-					if pl.Obj.Type() == nil {
-						return false
-					}
-					if _, isSl := types.Unalias(pl.Obj.Type()).Underlying().(*types.Slice); !isSl {
-						return false
-					}
-					for i := 0; i < last; i++ {
-						if pl.Projs[i].Kind != flowir.ProjSlice {
-							return false
-						}
-					}
-				}
-				return true
-			}
 			var unwrapBareOrResliceVar func(v *flowir.Value, extras *[]*flowir.Value) (types.Object, bool)
 			unwrapBareOrResliceVar = func(v *flowir.Value, extras *[]*flowir.Value) (types.Object, bool) {
 				if v == nil {
@@ -1256,23 +1184,7 @@ func returnEnvFreeFunctions(
 					}
 				}
 			}
-			headerRoot := map[types.Object]types.Object{}
-			var headerFind func(types.Object) types.Object
-			headerFind = func(x types.Object) types.Object {
-				r, ok := headerRoot[x]
-				if !ok || r == x {
-					return x
-				}
-				root := headerFind(r)
-				headerRoot[x] = root
-				return root
-			}
-			for _, pair := range headerPairs {
-				a, b := headerFind(pair[0]), headerFind(pair[1])
-				if a != b {
-					headerRoot[a] = b
-				}
-			}
+			headerFind := newObjectUnionFind(headerPairs)
 
 			embeddedObj := map[types.Object]bool{}
 			markObjEmbedded := func(o *types.Var) {
@@ -1551,201 +1463,20 @@ func returnEnvFreeFunctions(
 				addHeaderCandidate(o)
 			}
 
-			isSelfAppend := func(obj types.Object, src *flowir.Value) bool {
-				return src != nil && src.Kind == flowir.ValCall && src.CallKind == flowir.CallBuiltin &&
-					src.BuiltinName == "append" && len(src.Args) > 0 &&
-					src.Args[0] != nil && src.Args[0].Kind == flowir.ValPlace &&
-					src.Args[0].Place.IsBareVar() && src.Args[0].Place.Obj == obj
-			}
-
-			freshObj := map[types.Object]bool{}
-			elemOwned := map[types.Object]bool{}
-			var srcFresh func(v *flowir.Value) bool
-			srcFresh = func(v *flowir.Value) bool {
-				if v == nil {
-					return false
-				}
-				switch v.Kind {
-				case flowir.ValAllocFresh:
-					switch v.AllocKind {
-					case flowir.AllocMake, flowir.AllocBuiltinNewType, flowir.AllocCompositeLit:
-						return true
-					case flowir.AllocBuiltinNewExpr:
-						return len(v.Args) == 1 && !v.Ellipsis && srcFresh(v.Args[0])
-					}
-					return false
-				case flowir.ValConvert:
-					return !v.IsTypeAssert && v.Arg != nil && !syntaxutil.IsUnsafePointerType(v.Type) && !syntaxutil.IsUnsafePointerType(v.Arg.Type) && srcFresh(v.Arg)
-				case flowir.ValCall:
-					if v.CallKind == flowir.CallBuiltin && v.BuiltinName == "append" {
-						return len(v.Args) > 0 && srcFresh(v.Args[0])
-					}
-					return false
-				case flowir.ValPlace:
-					obj := v.Place.Obj
-					if obj == nil || params[obj] || !freshObj[obj] || localBroken[obj] || rangeBound[obj] {
-						return false
-					}
-					if len(v.Place.Projs) == 0 || isSliceResliceOnlyPlace(v.Place) {
-						return true
-					}
-					if len(v.Place.Projs) == 1 && v.Place.Projs[0].Kind == flowir.ProjIndex && v.Place.Projs[0].BaseType != nil {
-						var elemT types.Type
-						switch u := types.Unalias(v.Place.Projs[0].BaseType).Underlying().(type) {
-						case *types.Map:
-							elemT = u.Elem()
-						case *types.Slice:
-							elemT = u.Elem()
-						}
-						if elemT != nil && (isSliceOrMapType(elemT) || isStructPtrType(elemT)) {
-							return elemOwned[headerFind(obj)]
-						}
-					}
-					return false
-				}
-				return false
-			}
-			var bindConstructsOwnedElems func(hRoot types.Object, v *flowir.Value) bool
-			bindConstructsOwnedElems = func(hRoot types.Object, v *flowir.Value) bool {
-				if v == nil {
-					return false
-				}
-				switch v.Kind {
-				case flowir.ValAllocFresh:
-					switch v.AllocKind {
-					case flowir.AllocMake:
-						return true
-					case flowir.AllocCompositeLit:
-						for i := range v.CompositeElts {
-							if v.CompositeElts[i].Value == nil || !srcFresh(v.CompositeElts[i].Value) {
-								return false
-							}
-						}
-						return true
-					}
-					return false
-				case flowir.ValConvert:
-					return !v.IsTypeAssert && isSliceOrMapType(v.Type) && bindConstructsOwnedElems(hRoot, v.Arg)
-				case flowir.ValCall:
-					if v.CallKind == flowir.CallBuiltin {
-						switch v.BuiltinName {
-						case "make":
-							return true
-						case "append":
-							if v.Ellipsis || len(v.Args) == 0 || !bindConstructsOwnedElems(hRoot, v.Args[0]) {
-								return false
-							}
-							for _, a := range v.Args[1:] {
-								if !srcFresh(a) {
-									return false
-								}
-							}
-							return true
-						}
-					}
-					return false
-				case flowir.ValPlace:
-					obj := v.Place.Obj
-					if obj == nil || headerFind(obj) != hRoot || !freshObj[obj] || localBroken[obj] || rangeBound[obj] {
-						return false
-					}
-					return len(v.Place.Projs) == 0 || isSliceResliceOnlyPlace(v.Place)
-				}
-				return false
-			}
-			for obj, binds := range directBinds {
-				if params[obj] || localBroken[obj] || rangeBound[obj] || len(binds) == 0 {
-					continue
-				}
-				nonSelf := 0
-				for _, b := range binds {
-					if !isSelfAppend(obj, b) {
-						nonSelf++
-					}
-				}
-				if nonSelf > 0 || hasZeroDecl[obj] {
-					freshObj[obj] = true
-				}
-			}
-			for hRoot, members := range headerMembers {
-				if !headerEmbedded[hRoot] && len(members) > 0 {
-					elemOwned[hRoot] = true
-				}
-			}
-			for changed := true; changed; {
-				changed = false
-				for obj, binds := range directBinds {
-					if !freshObj[obj] {
-						continue
-					}
-					for _, b := range binds {
-						if isSelfAppend(obj, b) {
-							continue
-						}
-						if !srcFresh(b) {
-							freshObj[obj] = false
-							changed = true
-							break
-						}
-					}
-				}
-				for hRoot, members := range headerMembers {
-					if !elemOwned[hRoot] {
-						continue
-					}
-					okOwned := !headerEmbedded[hRoot] && len(members) > 0
-					for _, o := range members {
-						if !okOwned {
-							break
-						}
-						if !freshObj[o] || params[o] || localBroken[o] || rangeBound[o] || hasSpreadAppend[o] || len(directBinds[o]) == 0 {
-							okOwned = false
-							break
-						}
-						for _, b := range directBinds[o] {
-							if !bindConstructsOwnedElems(hRoot, b) {
-								okOwned = false
-								break
-							}
-						}
-						if !okOwned {
-							break
-						}
-						for _, iw := range insertionWrites[o] {
-							if !srcFresh(iw) {
-								okOwned = false
-								break
-							}
-						}
-					}
-					if okOwned {
-						for _, ps := range pendingStores {
-							if ps.robj == nil || headerFind(ps.robj) != hRoot || ps.isMapKey {
-								continue
-							}
-							if !isDirectIndexPlace(ps.place) || !srcFresh(ps.source) {
-								okOwned = false
-								break
-							}
-						}
-					}
-					if okOwned {
-						for _, pa := range pendingAppendSlices {
-							if pa.robj == nil || headerFind(pa.robj) != hRoot {
-								continue
-							}
-							if !isSliceResliceOnlyPlace(pa.place) || !srcFresh(pa.source) {
-								okOwned = false
-								break
-							}
-						}
-					}
-					if !okOwned {
-						elemOwned[hRoot] = false
-						changed = true
-					}
-				}
-			}
+			freshObj, _ := computeOutflowFreshOwnedLocals(outflowFreshInput{
+				directBinds:         directBinds,
+				hasZeroDecl:         hasZeroDecl,
+				params:              params,
+				localBroken:         localBroken,
+				rangeBound:          rangeBound,
+				hasSpreadAppend:     hasSpreadAppend,
+				headerMembers:       headerMembers,
+				headerEmbedded:      headerEmbedded,
+				headerFind:          headerFind,
+				insertionWrites:     insertionWrites,
+				pendingStores:       pendingStores,
+				pendingAppendSlices: pendingAppendSlices,
+			})
 
 			deepWrite := func(dst flowir.Place, fresh bool) bool {
 				selectorSeen := false
@@ -1834,10 +1565,6 @@ func returnEnvFreeFunctions(
 				}
 			}
 
-			resolvedUses := map[types.Object]map[syntaxutil.EnvAuditTarget]bool{}
-			resolvedParamDeps := map[types.Object]map[syntaxutil.ParamKey]bool{}
-			resolvedMethodDeps := map[types.Object]map[syntaxutil.FuncKey]bool{}
-			usePoison := map[types.Object]bool{}
 			componentMembers := map[types.Object][]types.Object{}
 			memberSeen := map[types.Object]bool{}
 			collectMember := func(o types.Object) {
@@ -1876,139 +1603,6 @@ func returnEnvFreeFunctions(
 
 			propagateBroken()
 
-			fnDeps := map[syntaxutil.FuncKey]bool{}
-			for callee := range stmtCallDeps {
-				fnDeps[callee] = true
-			}
-			insCallDeps := map[syntaxutil.EnvAuditTarget]bool{}
-			retFnParamDeps := map[syntaxutil.ParamKey]bool{}
-			retFnMethodDeps := map[syntaxutil.FuncKey]bool{}
-			useFold := &insCallDeps
-			paramDepFold := &retFnParamDeps
-			methodDepFold := &retFnMethodDeps
-			foldRootConfinementDeps := func(rRoot types.Object) {
-				for pk := range objParamDeps[rRoot] {
-					(*paramDepFold)[pk] = true
-				}
-				for mk := range objMethodDeps[rRoot] {
-					(*methodDepFold)[mk] = true
-				}
-				for pk := range resolvedParamDeps[rRoot] {
-					(*paramDepFold)[pk] = true
-				}
-				for mk := range resolvedMethodDeps[rRoot] {
-					(*methodDepFold)[mk] = true
-				}
-			}
-			recordFnDep := func(callee syntaxutil.FuncKey) {
-				fnDeps[callee] = true
-			}
-
-			localFree := map[types.Object]int{} // 0 unknown, 2 free, 3 refused
-			provingDepth := map[types.Object]int{}
-			curDepth := 0
-			inInsMode := false
-			visitingLits := map[*ast.FuncLit]bool{}
-
-			var evalFree func(v *flowir.Value) (bool, int)
-			var judgeLocal func(obj types.Object) (bool, int)
-			var judgeParam func(obj types.Object) (bool, int)
-
-			// checkPlainCallReachArg ensures mutable-reach arguments passed to a
-			// constructor or insertion call do not smuggle unverified mutable package
-			// globals, unverified call results, or interface-boxed stateful closures.
-			var checkPlainCallReachArgSeen func(arg *flowir.Value, currentCall *flowir.Value, skipInsertionRoot types.Object, allowInsParam bool, visiting map[types.Object]bool) bool
-			checkPlainCallReachArgSeen = func(arg *flowir.Value, currentCall *flowir.Value, skipInsertionRoot types.Object, allowInsParam bool, visiting map[types.Object]bool) bool {
-				if isPureFreshDataValue(settledGlobals, arg) {
-					return true
-				}
-				return checkPureOrFreshValue(arg, valuePurityPolicy{
-					allowAppend:          true,
-					allowValuePlane:      true,
-					allowRuntimeOps:      true,
-					allowNonMutableReach: true,
-					allowSigLeaf: func(leaf *flowir.Value) bool {
-						okArg, _ := evalFree(leaf)
-						return okArg
-					},
-					allowPlace: func(pv *flowir.Value) bool {
-						if pv.Place.Root == flowir.RootFunc && !pv.Place.IsMethodExpr {
-							return true
-						}
-						if pv.Place.Root == flowir.RootPkgGlobal {
-							return pv.Place.Obj != nil && settledGlobals.hasUnembedded(pv.Place.Obj)
-						}
-						if pv.Place.Root == flowir.RootTransient && pv.Place.Base != nil {
-							return checkPlainCallReachArgSeen(pv.Place.Base, currentCall, skipInsertionRoot, allowInsParam, visiting)
-						}
-						if pv.Place.Obj != nil {
-							obj := pv.Place.Obj
-							if !params[obj] && !syntaxutil.IsLocalVar(obj) {
-								return false
-							}
-							isInsParam := allowInsParam && params[obj]
-							if visiting[obj] {
-								return isInsParam
-							}
-							root := aliasFind(obj)
-							rRoot := reachFind(obj)
-							if isInsParam {
-								if paramRebound[obj] || captureBroken[obj] || usePoison[rRoot] {
-									return false
-								}
-							} else if localBroken[obj] || captureBroken[obj] || usePoison[rRoot] {
-								return false
-							}
-							if !params[obj] && !freshObj[obj] && !hasZeroDecl[obj] && len(localSources[obj]) == 0 {
-								return false
-							}
-							for use := range resolvedUses[rRoot] {
-								(*useFold)[use] = true
-							}
-							foldRootConfinementDeps(rRoot)
-							if !allowInsParam && rRoot != skipInsertionRoot {
-								for _, use := range pendingInsertionUses {
-									if reachFind(use.root) == rRoot && use.call != currentCall {
-										provenLocal, conditional := pkgConf.classifyParam(ownPath, use.calleeParam)
-										if !provenLocal {
-											if !conditional {
-												return false
-											}
-											(*paramDepFold)[use.calleeParam] = true
-										}
-									}
-								}
-							}
-							visiting[obj] = true
-							defer delete(visiting, obj)
-							for _, src := range localSources[obj] {
-								if !checkPlainCallReachArgSeen(src, currentCall, skipInsertionRoot, allowInsParam, visiting) {
-									return false
-								}
-							}
-							for _, st := range sharedWrites[root] {
-								if !checkPlainCallReachArgSeen(st, currentCall, skipInsertionRoot, allowInsParam, visiting) {
-									return false
-								}
-							}
-							for _, st := range sharedInsertionWrites[rRoot] {
-								if !checkPlainCallReachArgSeen(st, currentCall, skipInsertionRoot, allowInsParam, visiting) {
-									return false
-								}
-							}
-							return true
-						}
-						return false
-					},
-				})
-			}
-			checkPlainCallReachArg := func(arg *flowir.Value, currentCall *flowir.Value) bool {
-				return checkPlainCallReachArgSeen(arg, currentCall, nil, false, map[types.Object]bool{})
-			}
-			checkInsStoredReachArg := func(arg *flowir.Value) bool {
-				return checkPlainCallReachArgSeen(arg, nil, nil, true, map[types.Object]bool{})
-			}
-
 			placeProjsAdmitted := func(projs []flowir.Proj) bool {
 				for _, pr := range projs {
 					switch pr.Kind {
@@ -2033,138 +1627,33 @@ func returnEnvFreeFunctions(
 				return true
 			}
 
-			judgeParam = func(obj types.Object) (bool, int) {
-				root := aliasFind(obj)
-				rRoot := reachFind(obj)
-				if inInsMode {
-					if paramRebound[obj] || captureBroken[obj] || usePoison[rRoot] {
-						localFree[obj] = 3
-						return false, math.MaxInt
-					}
-				} else if localBroken[obj] || usePoison[rRoot] {
-					localFree[obj] = 3
-					return false, math.MaxInt
+			visitingLits := map[*ast.FuncLit]bool{}
+			foldRootConfinementDeps := func(ctx *outflowEvalCtx, rRoot types.Object) {
+				for pk := range objParamDeps[rRoot] {
+					ctx.paramDeps[pk] = true
 				}
-				for use := range resolvedUses[rRoot] {
-					(*useFold)[use] = true
+				for mk := range objMethodDeps[rRoot] {
+					ctx.methodDeps[mk] = true
 				}
-				foldRootConfinementDeps(rRoot)
-				switch localFree[obj] {
-				case 2:
-					return true, math.MaxInt
-				case 3:
-					return false, math.MaxInt
+				for pk := range ctx.resolved.paramDeps[rRoot] {
+					ctx.paramDeps[pk] = true
 				}
-				if d, active := provingDepth[obj]; active && d > 0 {
-					return true, d
+				for mk := range ctx.resolved.methodDeps[rRoot] {
+					ctx.methodDeps[mk] = true
 				}
-				myDepth := curDepth + 1
-				curDepth = myDepth
-				provingDepth[obj] = myDepth
-				defer func() {
-					delete(provingDepth, obj)
-					curDepth = myDepth - 1
-				}()
-
-				minCycle := math.MaxInt
-				for _, stored := range sharedWrites[root] {
-					okSt, cyc := evalFree(stored)
-					if !okSt {
-						localFree[obj] = 3
-						return false, math.MaxInt
-					}
-					if cyc < minCycle {
-						minCycle = cyc
-					}
-				}
-				for _, stored := range sharedInsertionWrites[rRoot] {
-					okSt, cyc := evalFree(stored)
-					if !okSt {
-						localFree[obj] = 3
-						return false, math.MaxInt
-					}
-					if cyc < minCycle {
-						minCycle = cyc
-					}
-				}
-				if minCycle >= myDepth {
-					localFree[obj] = 2
-					return true, math.MaxInt
-				}
-				return true, minCycle
 			}
 
-			judgeLocal = func(obj types.Object) (bool, int) {
-				root := aliasFind(obj)
-				rRoot := reachFind(obj)
-				if usePoison[rRoot] {
-					localFree[obj] = 3
-					return false, math.MaxInt
-				}
-				for use := range resolvedUses[rRoot] {
-					(*useFold)[use] = true
-				}
-				foldRootConfinementDeps(rRoot)
-				switch localFree[obj] {
-				case 2:
-					return true, math.MaxInt
-				case 3:
-					return false, math.MaxInt
-				}
-				if d, active := provingDepth[obj]; active && d > 0 {
-					return true, d
-				}
-				if localBroken[obj] {
-					localFree[obj] = 3
-					return false, math.MaxInt
-				}
-				myDepth := curDepth + 1
-				curDepth = myDepth
-				provingDepth[obj] = myDepth
-				defer func() {
-					delete(provingDepth, obj)
-					curDepth = myDepth - 1
-				}()
+			var evalFree func(ctx *outflowEvalCtx, v *flowir.Value) (bool, int)
+			var checkPlainCallReachArgSeen func(ctx *outflowEvalCtx, arg *flowir.Value, currentCall *flowir.Value, skipInsertionRoot types.Object, allowInsParam bool, visiting map[types.Object]bool) bool
 
-				minCycle := math.MaxInt
-				for _, src := range localSources[obj] {
-					okSrc, cyc := evalFree(src)
-					if !okSrc {
-						localFree[obj] = 3
-						return false, math.MaxInt
-					}
-					if cyc < minCycle {
-						minCycle = cyc
-					}
+			evalFree = func(ctx *outflowEvalCtx, v *flowir.Value) (resOK bool, resCyc int) {
+				if ctx.onRefusal != nil {
+					defer func() {
+						if !resOK {
+							ctx.onRefusal(v)
+						}
+					}()
 				}
-				for _, stored := range sharedWrites[root] {
-					okSt, cyc := evalFree(stored)
-					if !okSt {
-						localFree[obj] = 3
-						return false, math.MaxInt
-					}
-					if cyc < minCycle {
-						minCycle = cyc
-					}
-				}
-				for _, stored := range sharedInsertionWrites[rRoot] {
-					okSt, cyc := evalFree(stored)
-					if !okSt {
-						localFree[obj] = 3
-						return false, math.MaxInt
-					}
-					if cyc < minCycle {
-						minCycle = cyc
-					}
-				}
-				if minCycle >= myDepth {
-					localFree[obj] = 2
-					return true, math.MaxInt
-				}
-				return true, minCycle
-			}
-
-			evalFree = func(v *flowir.Value) (bool, int) {
 				if v == nil {
 					return false, math.MaxInt
 				}
@@ -2182,6 +1671,88 @@ func returnEnvFreeFunctions(
 					return true
 				}
 
+				judgeObj := func(obj types.Object, isParam bool) (bool, int) {
+					root := aliasFind(obj)
+					rRoot := reachFind(obj)
+					if isParam {
+						if ctx.insMode {
+							if paramRebound[obj] || captureBroken[obj] || ctx.resolved.poison[rRoot] {
+								ctx.localFree[obj] = 3
+								return false, math.MaxInt
+							}
+						} else if localBroken[obj] || ctx.resolved.poison[rRoot] {
+							ctx.localFree[obj] = 3
+							return false, math.MaxInt
+						}
+					} else if ctx.resolved.poison[rRoot] {
+						ctx.localFree[obj] = 3
+						return false, math.MaxInt
+					}
+					for use := range ctx.resolved.uses[rRoot] {
+						ctx.useDeps[use] = true
+					}
+					foldRootConfinementDeps(ctx, rRoot)
+					switch ctx.localFree[obj] {
+					case 2:
+						return true, math.MaxInt
+					case 3:
+						return false, math.MaxInt
+					}
+					if d, active := ctx.provingDepth[obj]; active && d > 0 {
+						return true, d
+					}
+					if !isParam && localBroken[obj] {
+						ctx.localFree[obj] = 3
+						return false, math.MaxInt
+					}
+					myDepth := ctx.curDepth + 1
+					ctx.curDepth = myDepth
+					ctx.provingDepth[obj] = myDepth
+					defer func() {
+						delete(ctx.provingDepth, obj)
+						ctx.curDepth = myDepth - 1
+					}()
+
+					objMinCycle := math.MaxInt
+					if !isParam {
+						for _, src := range localSources[obj] {
+							okSrc, cyc := evalFree(ctx, src)
+							if !okSrc {
+								ctx.localFree[obj] = 3
+								return false, math.MaxInt
+							}
+							if cyc < objMinCycle {
+								objMinCycle = cyc
+							}
+						}
+					}
+					for _, stored := range sharedWrites[root] {
+						okSt, cyc := evalFree(ctx, stored)
+						if !okSt {
+							ctx.localFree[obj] = 3
+							return false, math.MaxInt
+						}
+						if cyc < objMinCycle {
+							objMinCycle = cyc
+						}
+					}
+					for _, stored := range sharedInsertionWrites[rRoot] {
+						okSt, cyc := evalFree(ctx, stored)
+						if !okSt {
+							ctx.localFree[obj] = 3
+							return false, math.MaxInt
+						}
+						if cyc < objMinCycle {
+							objMinCycle = cyc
+						}
+					}
+					if objMinCycle >= myDepth {
+						ctx.localFree[obj] = 2
+						return true, math.MaxInt
+					}
+					return true, objMinCycle
+				}
+
 				switch v.Kind {
 				case flowir.ValScalarLitOrConst:
 					return true, math.MaxInt
@@ -2194,16 +1765,16 @@ func returnEnvFreeFunctions(
 						if len(v.Args) != 1 {
 							return false, math.MaxInt
 						}
-						return evalFree(v.Args[0])
+						return evalFree(ctx, v.Args[0])
 					case flowir.AllocCompositeLit:
 						for i := range v.CompositeElts {
 							if v.CompositeElts[i].MapKey != nil {
-								if !merge(evalFree(v.CompositeElts[i].MapKey)) {
+								if !merge(evalFree(ctx, v.CompositeElts[i].MapKey)) {
 									return false, math.MaxInt
 								}
 							}
 							if v.CompositeElts[i].Value != nil {
-								if !merge(evalFree(v.CompositeElts[i].Value)) {
+								if !merge(evalFree(ctx, v.CompositeElts[i].Value)) {
 									return false, math.MaxInt
 								}
 							}
@@ -2217,16 +1788,19 @@ func returnEnvFreeFunctions(
 					}
 					visitingLits[v.Lit] = true
 					defer delete(visitingLits, v.Lit)
-					savedInsMode := inInsMode
-					var savedLocalFree map[types.Object]int
-					if savedInsMode {
-						inInsMode = false
-						savedLocalFree = localFree
-						localFree = map[types.Object]int{}
-						defer func() {
-							inInsMode = savedInsMode
-							localFree = savedLocalFree
-						}()
+					litCtx := ctx
+					if ctx.insMode {
+						litCtx = &outflowEvalCtx{
+							insMode:      false,
+							resolved:     ctx.resolved,
+							localFree:    map[types.Object]int{},
+							provingDepth: map[types.Object]int{},
+							fnDeps:       ctx.fnDeps,
+							useDeps:      ctx.useDeps,
+							paramDeps:    ctx.paramDeps,
+							methodDeps:   ctx.methodDeps,
+							onRefusal:    ctx.onRefusal,
+						}
 					}
 					wants := map[syntaxutil.ParamKey]bool{}
 					methodWants := map[syntaxutil.FuncKey]bool{}
@@ -2235,17 +1809,16 @@ func returnEnvFreeFunctions(
 						allowEnclosingParams: true,
 						settledGlobals:       settledGlobals,
 						checkCarryingValue: func(sub *flowir.Value) bool {
-							okSub, _ := evalFree(sub)
+							okSub, _ := evalFree(litCtx, sub)
 							return okSub
 						},
 					}
 					if !environmentFreeFuncLitWithOrigin(audited, p, fc, v.Lit, fd, wants, methodWants, origin) {
 						return false, math.MaxInt
 					}
-					if !classifyWants(wants, methodWants, *paramDepFold, *methodDepFold) {
+					if !classifyWants(wants, methodWants, litCtx.paramDeps, litCtx.methodDeps) {
 						return false, math.MaxInt
 					}
-					// Ensure any captured signature-carrying or mutable-reach outer local/param in fd is also sound.
 					for fv := range v.Closure.FreeVars {
 						if reachOrAddrOrStr(fv.Type()) {
 							fvVal := &flowir.Value{
@@ -2257,7 +1830,7 @@ func returnEnvFreeFunctions(
 									Type: fv.Type(),
 								},
 							}
-							if !checkPlainCallReachArg(fvVal, nil) {
+							if !checkPlainCallReachArgSeen(litCtx, fvVal, nil, nil, false, map[types.Object]bool{}) {
 								return false, math.MaxInt
 							}
 						}
@@ -2265,11 +1838,11 @@ func returnEnvFreeFunctions(
 							continue
 						}
 						if params[fv] {
-							if !merge(judgeParam(fv)) {
+							if !merge(judgeObj(fv, true)) {
 								return false, math.MaxInt
 							}
 						} else if syntaxutil.IsLocalVar(fv) {
-							if !merge(judgeLocal(fv)) {
+							if !merge(judgeObj(fv, false)) {
 								return false, math.MaxInt
 							}
 						}
@@ -2289,14 +1862,14 @@ func returnEnvFreeFunctions(
 							return false, math.MaxInt
 						}
 						if params[obj] {
-							return judgeParam(obj)
+							return judgeObj(obj, true)
 						}
 						if syntaxutil.IsLocalVar(obj) {
-							return judgeLocal(obj)
+							return judgeObj(obj, false)
 						}
 					case flowir.RootTransient:
 						if v.Place.Base != nil {
-							return evalFree(v.Place.Base)
+							return evalFree(ctx, v.Place.Base)
 						}
 					}
 					return false, math.MaxInt
@@ -2305,25 +1878,14 @@ func returnEnvFreeFunctions(
 					if v.IsTypeAssert || v.Arg == nil || syntaxutil.IsUnsafePointerType(v.Arg.Type) {
 						return false, math.MaxInt
 					}
-					return evalFree(v.Arg)
+					return evalFree(ctx, v.Arg)
 
 				case flowir.ValCall:
 					switch v.CallKind {
 					case flowir.CallBuiltin:
-						switch v.BuiltinName {
-						case "make":
-							return true, math.MaxInt
-						case "new":
-							if v.CallAST != nil && syntaxutil.IsBuiltinNewType(p.TypesInfo, v.CallAST) {
-								return true, math.MaxInt
-							}
-							if len(v.Args) == 1 {
-								return evalFree(v.Args[0])
-							}
-							return false, math.MaxInt
-						case "append":
+						if v.BuiltinName == "append" {
 							for _, arg := range v.Args {
-								if !merge(evalFree(arg)) {
+								if !merge(evalFree(ctx, arg)) {
 									return false, math.MaxInt
 								}
 							}
@@ -2337,14 +1899,13 @@ func returnEnvFreeFunctions(
 						}
 						calleeFK := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Name()}
 						isVP := auditset.ValuePlaneClone(calleeFK.Pkg, calleeFK.Name)
-						// Reject passing the same mutable-reach local/param twice to a constructor call.
 						perArg := make([]map[types.Object]bool, len(v.Args))
 						for i, arg := range v.Args {
-							if !merge(evalFree(arg)) {
+							if !merge(evalFree(ctx, arg)) {
 								return false, math.MaxInt
 							}
 							if !isVP {
-								if !checkPlainCallReachArg(arg, v) {
+								if !checkPlainCallReachArgSeen(ctx, arg, v, nil, false, map[types.Object]bool{}) {
 									return false, math.MaxInt
 								}
 								perArg[i] = collectMutableArgRoots(arg)
@@ -2360,7 +1921,7 @@ func returnEnvFreeFunctions(
 									}
 								}
 							}
-							recordFnDep(calleeFK)
+							ctx.fnDeps[calleeFK] = true
 						}
 						return true, minCycle
 					}
@@ -2369,97 +1930,158 @@ func returnEnvFreeFunctions(
 				return false, math.MaxInt
 			}
 
-			free := func(v *flowir.Value) bool {
-				okVal, _ := evalFree(v)
-				return okVal
+			checkPlainCallReachArgSeen = func(ctx *outflowEvalCtx, arg *flowir.Value, currentCall *flowir.Value, skipInsertionRoot types.Object, allowInsParam bool, visiting map[types.Object]bool) bool {
+				if isPureFreshDataValue(settledGlobals, arg) {
+					return true
+				}
+				return checkPureOrFreshValue(arg, valuePurityPolicy{
+					allowAppend:          true,
+					allowValuePlane:      true,
+					allowRuntimeOps:      true,
+					allowNonMutableReach: true,
+					allowSigLeaf: func(leaf *flowir.Value) bool {
+						okArg, _ := evalFree(ctx, leaf)
+						return okArg
+					},
+					allowPlace: func(pv *flowir.Value) bool {
+						if pv.Place.Root == flowir.RootFunc && !pv.Place.IsMethodExpr {
+							return true
+						}
+						if pv.Place.Root == flowir.RootPkgGlobal {
+							return pv.Place.Obj != nil && settledGlobals.hasUnembedded(pv.Place.Obj)
+						}
+						if pv.Place.Root == flowir.RootTransient && pv.Place.Base != nil {
+							return checkPlainCallReachArgSeen(ctx, pv.Place.Base, currentCall, skipInsertionRoot, allowInsParam, visiting)
+						}
+						if pv.Place.Obj != nil {
+							obj := pv.Place.Obj
+							if !params[obj] && !syntaxutil.IsLocalVar(obj) {
+								return false
+							}
+							isInsParam := allowInsParam && params[obj]
+							if visiting[obj] {
+								return isInsParam
+							}
+							root := aliasFind(obj)
+							rRoot := reachFind(obj)
+							if isInsParam {
+								if paramRebound[obj] || captureBroken[obj] || ctx.resolved.poison[rRoot] {
+									return false
+								}
+							} else if localBroken[obj] || captureBroken[obj] || ctx.resolved.poison[rRoot] {
+								return false
+							}
+							if !params[obj] && !freshObj[obj] && !hasZeroDecl[obj] && len(localSources[obj]) == 0 {
+								return false
+							}
+							for use := range ctx.resolved.uses[rRoot] {
+								ctx.useDeps[use] = true
+							}
+							foldRootConfinementDeps(ctx, rRoot)
+							if !allowInsParam && rRoot != skipInsertionRoot {
+								for _, use := range pendingInsertionUses {
+									if reachFind(use.root) == rRoot && use.call != currentCall {
+										provenLocal, conditional := pkgConf.classifyParam(ownPath, use.calleeParam)
+										if !provenLocal {
+											if !conditional {
+												return false
+											}
+											ctx.paramDeps[use.calleeParam] = true
+										}
+									}
+								}
+							}
+							visiting[obj] = true
+							defer delete(visiting, obj)
+							for _, src := range localSources[obj] {
+								if !checkPlainCallReachArgSeen(ctx, src, currentCall, skipInsertionRoot, allowInsParam, visiting) {
+									return false
+								}
+							}
+							for _, st := range sharedWrites[root] {
+								if !checkPlainCallReachArgSeen(ctx, st, currentCall, skipInsertionRoot, allowInsParam, visiting) {
+									return false
+								}
+							}
+							for _, st := range sharedInsertionWrites[rRoot] {
+								if !checkPlainCallReachArgSeen(ctx, st, currentCall, skipInsertionRoot, allowInsParam, visiting) {
+									return false
+								}
+							}
+							return true
+						}
+						return false
+					},
+				})
 			}
 
-			computeResolvedUses := func(insMode bool) (
-				map[types.Object]bool,
-				map[types.Object]map[syntaxutil.EnvAuditTarget]bool,
-				map[types.Object]map[syntaxutil.ParamKey]bool,
-				map[types.Object]map[syntaxutil.FuncKey]bool,
-			) {
-				poison := map[types.Object]bool{}
-				resolved := map[types.Object]map[syntaxutil.EnvAuditTarget]bool{}
-				resParams := map[types.Object]map[syntaxutil.ParamKey]bool{}
-				resMethods := map[types.Object]map[syntaxutil.FuncKey]bool{}
-				prevPoison, prevResolved, prevResP, prevResM, prevInsMode := usePoison, resolvedUses, resolvedParamDeps, resolvedMethodDeps, inInsMode
-				usePoison = poison
-				resolvedUses = resolved
-				resolvedParamDeps = resParams
-				resolvedMethodDeps = resMethods
-				inInsMode = insMode
-
+			computeResolvedUses := func(insMode bool) resolvedInsertionState {
+				if len(pendingInsertionUses) == 0 {
+					return resolvedInsertionState{}
+				}
+				state := resolvedInsertionState{
+					poison:     map[types.Object]bool{},
+					uses:       map[types.Object]map[syntaxutil.EnvAuditTarget]bool{},
+					paramDeps:  map[types.Object]map[syntaxutil.ParamKey]bool{},
+					methodDeps: map[types.Object]map[syntaxutil.FuncKey]bool{},
+				}
 				step := func(record bool) bool {
 					changed := false
 					for _, use := range pendingInsertionUses {
 						rRoot := reachFind(use.root)
-						if poison[rRoot] {
+						if state.poison[rRoot] {
 							continue
 						}
-						argFnDeps := map[syntaxutil.FuncKey]bool{}
-						argUseDeps := map[syntaxutil.EnvAuditTarget]bool{}
-						argParamDeps := map[syntaxutil.ParamKey]bool{}
-						argMethodDeps := map[syntaxutil.FuncKey]bool{}
-						prevRec, prevFold, prevPFold, prevMFold := recordFnDep, useFold, paramDepFold, methodDepFold
-						recordFnDep = func(callee syntaxutil.FuncKey) { argFnDeps[callee] = true }
-						useFold = &argUseDeps
-						paramDepFold = &argParamDeps
-						methodDepFold = &argMethodDeps
-						clear(localFree)
-
+						stepCtx := newOutflowEvalCtx(insMode, state)
 						allFree := true
 						for _, a := range use.args {
-							if !free(a) {
+							if okA, _ := evalFree(stepCtx, a); !okA {
 								allFree = false
 								break
 							}
 							if a != nil && a.Type != nil && reachOrAddrOrStr(a.Type) &&
-								!checkPlainCallReachArgSeen(a, use.call, rRoot, insMode, map[types.Object]bool{}) {
+								!checkPlainCallReachArgSeen(stepCtx, a, use.call, rRoot, insMode, map[types.Object]bool{}) {
 								allFree = false
 								break
 							}
 						}
-						recordFnDep, useFold, paramDepFold, methodDepFold = prevRec, prevFold, prevPFold, prevMFold
-
 						if !allFree {
-							poison[rRoot] = true
+							state.poison[rRoot] = true
 							changed = true
 							continue
 						}
 						if record {
-							if resolved[rRoot] == nil {
-								resolved[rRoot] = map[syntaxutil.EnvAuditTarget]bool{}
+							if state.uses[rRoot] == nil {
+								state.uses[rRoot] = map[syntaxutil.EnvAuditTarget]bool{}
 							}
 							addUse := func(t syntaxutil.EnvAuditTarget) {
-								if !resolved[rRoot][t] {
-									resolved[rRoot][t] = true
+								if !state.uses[rRoot][t] {
+									state.uses[rRoot][t] = true
 									changed = true
 								}
 							}
 							addUse(syntaxutil.ParamAuditTarget(use.calleeParam))
-							for fk := range argFnDeps {
+							for fk := range stepCtx.fnDeps {
 								addUse(syntaxutil.FuncAuditTarget(fk))
 							}
-							for u := range argUseDeps {
+							for u := range stepCtx.useDeps {
 								addUse(u)
 							}
-							for pk := range argParamDeps {
-								if resParams[rRoot] == nil {
-									resParams[rRoot] = map[syntaxutil.ParamKey]bool{}
+							for pk := range stepCtx.paramDeps {
+								if state.paramDeps[rRoot] == nil {
+									state.paramDeps[rRoot] = map[syntaxutil.ParamKey]bool{}
 								}
-								if !resParams[rRoot][pk] {
-									resParams[rRoot][pk] = true
+								if !state.paramDeps[rRoot][pk] {
+									state.paramDeps[rRoot][pk] = true
 									changed = true
 								}
 							}
-							for mk := range argMethodDeps {
-								if resMethods[rRoot] == nil {
-									resMethods[rRoot] = map[syntaxutil.FuncKey]bool{}
+							for mk := range stepCtx.methodDeps {
+								if state.methodDeps[rRoot] == nil {
+									state.methodDeps[rRoot] = map[syntaxutil.FuncKey]bool{}
 								}
-								if !resMethods[rRoot][mk] {
-									resMethods[rRoot][mk] = true
+								if !state.methodDeps[rRoot][mk] {
+									state.methodDeps[rRoot][mk] = true
 									changed = true
 								}
 							}
@@ -2467,131 +2089,98 @@ func returnEnvFreeFunctions(
 					}
 					return changed
 				}
-
-				scratchFnDeps := map[syntaxutil.FuncKey]bool{}
-				scratchUseDeps := map[syntaxutil.EnvAuditTarget]bool{}
-				scratchParamDeps := map[syntaxutil.ParamKey]bool{}
-				scratchMethodDeps := map[syntaxutil.FuncKey]bool{}
-				savedRecordFnDep, savedFold, savedPFold, savedMFold := recordFnDep, useFold, paramDepFold, methodDepFold
-				recordFnDep = func(callee syntaxutil.FuncKey) { scratchFnDeps[callee] = true }
-				useFold = &scratchUseDeps
-				paramDepFold = &scratchParamDeps
-				methodDepFold = &scratchMethodDeps
 				for step(false) {
-					clear(localFree)
 				}
-				recordFnDep, useFold, paramDepFold, methodDepFold = savedRecordFnDep, savedFold, savedPFold, savedMFold
-				clear(localFree)
 				for step(true) {
-					clear(localFree)
 				}
-				clear(localFree)
-
-				usePoison, resolvedUses, resolvedParamDeps, resolvedMethodDeps, inInsMode = prevPoison, prevResolved, prevResP, prevResM, prevInsMode
-				return poison, resolved, resParams, resMethods
+				return state
 			}
 
-			retUsePoison, retResolvedUses, retResParamDeps, retResMethodDeps := computeResolvedUses(false)
-			insUsePoison, insResolvedUses, insResParamDeps, insResMethodDeps := computeResolvedUses(true)
-			usePoison = insUsePoison
-			resolvedUses = insResolvedUses
-			resolvedParamDeps = insResParamDeps
-			resolvedMethodDeps = insResMethodDeps
+			retResolved := computeResolvedUses(false)
+			insResolved := computeResolvedUses(true)
 
 			for obj, idx := range paramIndex {
 				key := syntaxutil.ParamKey{Func: ownFuncKey, Index: idx}
 				root := aliasFind(obj)
 				rRoot := reachFind(obj)
-				if captureBroken[obj] || usePoison[rRoot] {
+				if captureBroken[obj] || insResolved.poison[rRoot] {
 					continue
 				}
-				clear(localFree)
-				collected := map[syntaxutil.EnvAuditTarget]bool{}
-				collectedParams := map[syntaxutil.ParamKey]bool{}
-				collectedMethods := map[syntaxutil.FuncKey]bool{}
-				savedRec, savedF, savedPF, savedMF := recordFnDep, useFold, paramDepFold, methodDepFold
-				recordFnDep = func(callee syntaxutil.FuncKey) { collected[syntaxutil.FuncAuditTarget(callee)] = true }
-				useFold = &collected
-				paramDepFold = &collectedParams
-				methodDepFold = &collectedMethods
-				inInsMode = true
-				foldRootConfinementDeps(rRoot)
+				insCtx := newOutflowEvalCtx(true, insResolved)
+				foldRootConfinementDeps(insCtx, rRoot)
 				okIns := true
-				for _, stored := range append(append([]*flowir.Value{}, sharedWrites[root]...), sharedInsertionWrites[rRoot]...) {
-					if !free(stored) {
-						okIns = false
-						break
+				for _, stores := range [][]*flowir.Value{sharedWrites[root], sharedInsertionWrites[rRoot]} {
+					for _, stored := range stores {
+						if okSt, _ := evalFree(insCtx, stored); !okSt {
+							okIns = false
+							break
+						}
+						if stored != nil && stored.Type != nil && reachOrAddrOrStr(stored.Type) &&
+							!checkPlainCallReachArgSeen(insCtx, stored, nil, nil, true, map[types.Object]bool{}) {
+							okIns = false
+							break
+						}
 					}
-					if stored != nil && stored.Type != nil && reachOrAddrOrStr(stored.Type) &&
-						!checkInsStoredReachArg(stored) {
-						okIns = false
+					if !okIns {
 						break
 					}
 				}
-				inInsMode = false
-				recordFnDep, useFold, paramDepFold, methodDepFold = savedRec, savedF, savedPF, savedMF
 				if !okIns {
 					continue
 				}
-				for use := range resolvedUses[rRoot] {
-					collected[use] = true
+				for fk := range insCtx.fnDeps {
+					insCtx.useDeps[syntaxutil.FuncAuditTarget(fk)] = true
+				}
+				for use := range insResolved.uses[rRoot] {
+					insCtx.useDeps[use] = true
 				}
 				insFree[key] = true
-				if len(collected) > 0 {
-					insDeps[key] = collected
+				if len(insCtx.useDeps) > 0 {
+					insDeps[key] = insCtx.useDeps
 				}
-				if len(collectedParams) > 0 {
-					insParamDeps[key] = collectedParams
+				if len(insCtx.paramDeps) > 0 {
+					insParamDeps[key] = insCtx.paramDeps
 				}
-				if len(collectedMethods) > 0 {
-					insMethodDeps[key] = collectedMethods
+				if len(insCtx.methodDeps) > 0 {
+					insMethodDeps[key] = insCtx.methodDeps
 				}
 			}
-			usePoison = retUsePoison
-			resolvedUses = retResolvedUses
-			resolvedParamDeps = retResParamDeps
-			resolvedMethodDeps = retResMethodDeps
-			clear(localFree)
 
-			emitRefusal := func(v *flowir.Value) {
-				if hooks == nil || hooks.Refusal == nil || v == nil || v.Raw == nil {
-					return
-				}
-				e := syntaxutil.UnparenExpr(v.Raw)
-				clause := "an unrecognized return shape"
-				switch e := e.(type) {
-				case *ast.Ident:
-					obj := p.TypesInfo.Uses[e]
-					if obj == nil {
-						obj = p.TypesInfo.Defs[e]
-					}
-					switch {
-					case obj != nil && localBroken[obj]:
-						clause = "write or capture broke the binding"
-					case obj != nil && usePoison[reachFind(obj)]:
-						clause = "an unjudgeable argument to a deferring call poisoned the storage"
-					case obj != nil && len(sharedWrites[aliasFind(obj)]) > 0:
-						clause = "a stored value refused"
-					default:
-						clause = "a binding source refused"
-					}
-				case *ast.CallExpr:
-					clause = "callee outside the audited set and dependency channel"
-				case *ast.CompositeLit:
-					clause = "a literal element refused"
-				case *ast.SelectorExpr, *ast.IndexExpr, *ast.SliceExpr:
-					clause = "an unadmitted derivation shape"
-				}
-				syntaxutil.ExplainRefusalMark(hooks, p, fd.Name.Name, e, clause)
+			retCtx := newOutflowEvalCtx(false, retResolved)
+			for callee := range stmtCallDeps {
+				retCtx.fnDeps[callee] = true
 			}
 			if hooks != nil && hooks.Refusal != nil {
-				innerEval := evalFree
-				evalFree = func(v *flowir.Value) (bool, int) {
-					r, cyc := innerEval(v)
-					if !r {
-						emitRefusal(v)
+				retCtx.onRefusal = func(v *flowir.Value) {
+					if v == nil || v.Raw == nil {
+						return
 					}
-					return r, cyc
+					e := syntaxutil.UnparenExpr(v.Raw)
+					clause := "an unrecognized return shape"
+					switch e := e.(type) {
+					case *ast.Ident:
+						obj := p.TypesInfo.Uses[e]
+						if obj == nil {
+							obj = p.TypesInfo.Defs[e]
+						}
+						switch {
+						case obj != nil && localBroken[obj]:
+							clause = "write or capture broke the binding"
+						case obj != nil && retResolved.poison[reachFind(obj)]:
+							clause = "an unjudgeable argument to a deferring call poisoned the storage"
+						case obj != nil && len(sharedWrites[aliasFind(obj)]) > 0:
+							clause = "a stored value refused"
+						default:
+							clause = "a binding source refused"
+						}
+					case *ast.CallExpr:
+						clause = "callee outside the audited set and dependency channel"
+					case *ast.CompositeLit:
+						clause = "a literal element refused"
+					case *ast.SelectorExpr, *ast.IndexExpr, *ast.SliceExpr:
+						clause = "an unadmitted derivation shape"
+					}
+					syntaxutil.ExplainRefusalMark(hooks, p, fd.Name.Name, e, clause)
 				}
 			}
 
@@ -2642,7 +2231,7 @@ func returnEnvFreeFunctions(
 						return false
 					}
 					for _, res := range op.Results {
-						if !free(res) {
+						if okRes, _ := evalFree(retCtx, res); !okRes {
 							okRet = false
 							return false
 						}
@@ -2658,22 +2247,34 @@ func returnEnvFreeFunctions(
 				continue
 			}
 			proven[fnKey] = true
-			if len(fnDeps) > 0 {
-				deps[fnKey] = fnDeps
+			if len(retCtx.fnDeps) > 0 {
+				deps[fnKey] = retCtx.fnDeps
 			}
-			if len(retFnParamDeps) > 0 {
-				retParamDeps[fnKey] = retFnParamDeps
+			if len(retCtx.paramDeps) > 0 {
+				retParamDeps[fnKey] = retCtx.paramDeps
 			}
-			if len(retFnMethodDeps) > 0 {
-				retMethodDeps[fnKey] = retFnMethodDeps
+			if len(retCtx.methodDeps) > 0 {
+				retMethodDeps[fnKey] = retCtx.methodDeps
 			}
-			if len(insCallDeps) > 0 {
-				callerInsDeps[fnKey] = insCallDeps
+			if len(retCtx.useDeps) > 0 {
+				callerInsDeps[fnKey] = retCtx.useDeps
 			}
 			recordReturnFieldRegistrants(audited, p, fc, fnKey, body, retDefer, retPoison)
 		}
 	}
-	return proven, deps, retParamDeps, retMethodDeps, retDefer, retPoison, insFree, insDeps, insParamDeps, insMethodDeps, callerInsDeps
+	return closureOutflowSummaries{
+		returnEnvFree:          proven,
+		returnEnvDeps:          deps,
+		returnEnvParamDeps:     retParamDeps,
+		returnEnvMethodDeps:    retMethodDeps,
+		returnFieldDefer:       retDefer,
+		returnFieldPoison:      retPoison,
+		paramInsertionFree:     insFree,
+		paramInsertionDeps:     insDeps,
+		paramInsertionParams:   insParamDeps,
+		paramInsertionMethods:  insMethodDeps,
+		returnInsertionCallDep: callerInsDeps,
+	}
 }
 
 func recordReturnFieldRegistrants(

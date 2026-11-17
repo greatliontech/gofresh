@@ -434,6 +434,63 @@ func recordDynamicGlobalUses(
 			poolDischarged[syntaxutil.DynamicVarKey(variable)] = true
 		}
 	}
+	recordConfinementSinkUses := func(
+		key string,
+		wants map[syntaxutil.ParamKey]bool,
+		methodWants map[syntaxutil.FuncKey]bool,
+		fieldWants map[syntaxutil.FieldPosKey]bool,
+		elemWants map[syntaxutil.ElemParamUse]bool,
+		enclFn syntaxutil.FuncKey,
+		literal bool,
+		pos token.Pos,
+	) {
+		if len(wants) > 0 {
+			if paramUses[key] == nil {
+				paramUses[key] = map[syntaxutil.ParamKey]bool{}
+			}
+			for want := range wants {
+				paramUses[key][want] = true
+				syntaxutil.ExplainDeferralMark(hooks, p, 'p', key, syntaxutil.DeferralResolvent{
+					Param:       want,
+					EnclosingFn: enclFn,
+					Literal:     literal,
+				}, pos)
+			}
+		}
+		if len(methodWants) > 0 {
+			if methodUses[key] == nil {
+				methodUses[key] = map[syntaxutil.FuncKey]bool{}
+			}
+			for want := range methodWants {
+				methodUses[key][want] = true
+				syntaxutil.ExplainDeferralMark(hooks, p, 'm', key, syntaxutil.DeferralResolvent{
+					Method:      want,
+					EnclosingFn: enclFn,
+					Literal:     literal,
+				}, pos)
+			}
+		}
+		if len(fieldWants) > 0 {
+			if fieldUses[key] == nil {
+				fieldUses[key] = map[syntaxutil.FieldPosKey]bool{}
+			}
+			for want := range fieldWants {
+				fp := syntaxutil.FieldPosKey{Owner: key, Field: want.Field, Index: want.Index}
+				fieldUses[key][fp] = true
+				syntaxutil.ExplainDeferralMark(hooks, p, 'f', key, syntaxutil.DeferralResolvent{FieldPos: fp}, pos)
+			}
+		}
+		if len(elemWants) > 0 {
+			if elemUses[key] == nil {
+				elemUses[key] = map[syntaxutil.ElemParamUse]bool{}
+			}
+			for want := range elemWants {
+				eu := syntaxutil.ElemParamUse{Key: key, Owner: want.Owner, Index: want.Index}
+				elemUses[key][eu] = true
+				syntaxutil.ExplainDeferralMark(hooks, p, 'e', key, syntaxutil.DeferralResolvent{ElemUse: eu}, pos)
+			}
+		}
+	}
 	_, provenCalls := provenSharedPools(audited, p, fc)
 
 	var markExemptEscapesVal func(v *flowir.Value)
@@ -1196,44 +1253,7 @@ func recordDynamicGlobalUses(
 										keys = append(keys, syntaxutil.DynamicVarKey(sv))
 									}
 									for _, key := range keys {
-										if paramUses[key] == nil {
-											paramUses[key] = map[syntaxutil.ParamKey]bool{}
-										}
-										for want := range wants {
-											paramUses[key][want] = true
-											syntaxutil.ExplainDeferralMark(hooks, p, 'p', key, syntaxutil.DeferralResolvent{
-												Param:       want,
-												EnclosingFn: currentDeferFn,
-												Literal:     currentDeferLit,
-											}, rngPos)
-										}
-										if len(methodWants) > 0 && methodUses[key] == nil {
-											methodUses[key] = map[syntaxutil.FuncKey]bool{}
-										}
-										for want := range methodWants {
-											methodUses[key][want] = true
-											syntaxutil.ExplainDeferralMark(hooks, p, 'm', key, syntaxutil.DeferralResolvent{
-												Method:      want,
-												EnclosingFn: currentDeferFn,
-												Literal:     currentDeferLit,
-											}, rngPos)
-										}
-										if len(fieldWants) > 0 && fieldUses[key] == nil {
-											fieldUses[key] = map[syntaxutil.FieldPosKey]bool{}
-										}
-										for want := range fieldWants {
-											pos := syntaxutil.FieldPosKey{Owner: key, Field: want.Field, Index: want.Index}
-											fieldUses[key][pos] = true
-											syntaxutil.ExplainDeferralMark(hooks, p, 'f', key, syntaxutil.DeferralResolvent{FieldPos: pos}, rngPos)
-										}
-										if len(elemWants) > 0 && elemUses[key] == nil {
-											elemUses[key] = map[syntaxutil.ElemParamUse]bool{}
-										}
-										for want := range elemWants {
-											eu := syntaxutil.ElemParamUse{Key: key, Owner: want.Owner, Index: want.Index}
-											elemUses[key][eu] = true
-											syntaxutil.ExplainDeferralMark(hooks, p, 'e', key, syntaxutil.DeferralResolvent{ElemUse: eu}, rngPos)
-										}
+										recordConfinementSinkUses(key, wants, methodWants, fieldWants, elemWants, currentDeferFn, currentDeferLit, rngPos)
 									}
 									if returned {
 										pendingReturns = append(pendingReturns, pendingReturnDisposition{
@@ -1796,43 +1816,8 @@ func recordDynamicGlobalUses(
 					if callVal.CallAST != nil {
 						callPos = callVal.CallAST.Pos()
 					}
-					for want := range siteWants {
-						for key := range returnerKeys[fnName] {
-							if paramUses[key] == nil {
-								paramUses[key] = map[syntaxutil.ParamKey]bool{}
-							}
-							paramUses[key][want] = true
-							syntaxutil.ExplainDeferralMark(hooks, p, 'p', key, syntaxutil.DeferralResolvent{Param: want}, callPos)
-						}
-					}
-					for want := range siteMethodWants {
-						for key := range returnerKeys[fnName] {
-							if methodUses[key] == nil {
-								methodUses[key] = map[syntaxutil.FuncKey]bool{}
-							}
-							methodUses[key][want] = true
-							syntaxutil.ExplainDeferralMark(hooks, p, 'm', key, syntaxutil.DeferralResolvent{Method: want}, callPos)
-						}
-					}
-					for want := range siteFieldWants {
-						for key := range returnerKeys[fnName] {
-							if fieldUses[key] == nil {
-								fieldUses[key] = map[syntaxutil.FieldPosKey]bool{}
-							}
-							pos := syntaxutil.FieldPosKey{Owner: key, Field: want.Field, Index: want.Index}
-							fieldUses[key][pos] = true
-							syntaxutil.ExplainDeferralMark(hooks, p, 'f', key, syntaxutil.DeferralResolvent{FieldPos: pos}, callPos)
-						}
-					}
-					for want := range siteElemWants {
-						for key := range returnerKeys[fnName] {
-							if elemUses[key] == nil {
-								elemUses[key] = map[syntaxutil.ElemParamUse]bool{}
-							}
-							eu := syntaxutil.ElemParamUse{Key: key, Owner: want.Owner, Index: want.Index}
-							elemUses[key][eu] = true
-							syntaxutil.ExplainDeferralMark(hooks, p, 'e', key, syntaxutil.DeferralResolvent{ElemUse: eu}, callPos)
-						}
+					for key := range returnerKeys[fnName] {
+						recordConfinementSinkUses(key, siteWants, siteMethodWants, siteFieldWants, siteElemWants, syntaxutil.FuncKey{}, false, callPos)
 					}
 					if siteReturned {
 						if mergeKeys(siteName, returnerKeys[fnName]) {

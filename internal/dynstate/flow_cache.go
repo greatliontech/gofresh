@@ -2,232 +2,81 @@ package dynstate
 
 import (
 	"go/ast"
-	"go/token"
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
 
+type varWriteInfo struct {
+	defs              int
+	initVal           *flowir.Value
+	hasZeroDecl       bool
+	hasNonPlainDef    bool
+	hasPostDefWrite   bool
+	hasChanSend       bool
+	hasExplicitAddr   bool
+	hasAutoAddrMethod bool
+	hasBuiltinMut     bool
+}
+
 // pkgFlowCache caches lowered flowir.Body representations, lowered expression
-// nodes, and scoped local memory-alias graphs across all dynamic-state passes
-// on a single package so each declaration in p.Syntax is lowered at most once.
+// nodes, scoped local memory-alias graphs, and single-write variable summaries
+// across all dynamic-state passes on a single package so each declaration in
+// p.Syntax is lowered at most once.
 type pkgFlowCache struct {
 	audited bool
-	info    *types.Info
-	pkg     *types.Package
+	base    *flowir.PkgCache
 
-	bodies              map[ast.Node]*flowir.Body
-	values              map[ast.Expr]*flowir.Value
 	localCarrierAliases map[*flowir.Body]map[types.Object]map[types.Object]bool
 	interiorAliases     map[*flowir.Body]map[types.Object]map[types.Object]bool
+
+	varWritesReady bool
+	varWrites      map[*types.Var]*varWriteInfo
 
 	declLowerCount int
 	missCount      int
 }
 
 func newPkgFlowCache(audited bool, p *packages.Package) *pkgFlowCache {
+	return newPkgFlowCacheWithIndex(audited, p, nil)
+}
+
+func newPkgFlowCacheWithIndex(audited bool, p *packages.Package, idx *refconfine.PkgIndex) *pkgFlowCache {
 	if p == nil || p.TypesInfo == nil {
 		return nil
 	}
-	fc := &pkgFlowCache{
+	var base *flowir.PkgCache
+	if idx != nil {
+		base = idx.FlowCache(p)
+	} else {
+		base = flowir.NewPkgCache(p.TypesInfo, p.Types, p.Syntax)
+	}
+	if base == nil {
+		return nil
+	}
+	return &pkgFlowCache{
 		audited:             audited,
-		info:                p.TypesInfo,
-		pkg:                 p.Types,
-		bodies:              make(map[ast.Node]*flowir.Body, len(p.Syntax)*8),
-		values:              make(map[ast.Expr]*flowir.Value, len(p.Syntax)*32),
+		base:                base,
 		localCarrierAliases: make(map[*flowir.Body]map[types.Object]map[types.Object]bool),
 		interiorAliases:     make(map[*flowir.Body]map[types.Object]map[types.Object]bool),
-	}
-	for _, file := range p.Syntax {
-		if file == nil {
-			continue
-		}
-		for _, decl := range file.Decls {
-			switch d := decl.(type) {
-			case *ast.FuncDecl:
-				if d.Body == nil {
-					continue
-				}
-				b := flowir.LowerFunc(p.TypesInfo, p.Types, d)
-				fc.declLowerCount++
-				if b != nil {
-					fc.bodies[d] = b
-					fc.bodies[d.Body] = b
-					fc.indexNestedBodies(b)
-				}
-			case *ast.GenDecl:
-				if d.Tok != token.VAR && d.Tok != token.CONST {
-					continue
-				}
-				b := flowir.LowerNode(p.TypesInfo, p.Types, d)
-				fc.declLowerCount++
-				if b != nil {
-					fc.bodies[d] = b
-					fc.indexGenDeclSpecs(d, b)
-					fc.indexNestedBodies(b)
-				}
-			}
-		}
-	}
-	return fc
-}
-
-func (fc *pkgFlowCache) indexGenDeclSpecs(gd *ast.GenDecl, b *flowir.Body) {
-	if gd == nil || b == nil {
-		return
-	}
-	specOps := map[*ast.ValueSpec][]flowir.Op{}
-	for _, op := range b.Ops {
-		if vs, ok := op.StmtAST.(*ast.ValueSpec); ok && vs != nil {
-			specOps[vs] = append(specOps[vs], op)
-		}
-	}
-	for _, spec := range gd.Specs {
-		vs, ok := spec.(*ast.ValueSpec)
-		if !ok || vs == nil {
-			continue
-		}
-		ops := specOps[vs]
-		vsBody := &flowir.Body{
-			AST:        vs,
-			ScopeStart: vs.Pos(),
-			ScopeEnd:   vs.End(),
-			BodyStart:  vs.Pos(),
-			BodyEnd:    vs.End(),
-			Ops:        ops,
-		}
-		fc.bodies[vs] = vsBody
-		if gd.Tok == token.VAR && len(ops) == 1 && ops[0].Kind == flowir.OpAssign && len(ops[0].Srcs) == len(vs.Values) {
-			for i, valExpr := range vs.Values {
-				if valExpr == nil || ops[0].Srcs[i] == nil {
-					continue
-				}
-				fc.bodies[valExpr] = &flowir.Body{
-					AST:        valExpr,
-					ScopeStart: valExpr.Pos(),
-					ScopeEnd:   valExpr.End(),
-					BodyStart:  valExpr.Pos(),
-					BodyEnd:    valExpr.End(),
-					Ops: []flowir.Op{{
-						Kind:    flowir.OpExpr,
-						StmtAST: valExpr,
-						Expr:    ops[0].Srcs[i],
-					}},
-				}
-			}
-		} else if gd.Tok == token.CONST && len(ops) == len(vs.Values) {
-			for i, valExpr := range vs.Values {
-				if valExpr == nil || ops[i].Kind != flowir.OpExpr || ops[i].Expr == nil {
-					continue
-				}
-				fc.bodies[valExpr] = &flowir.Body{
-					AST:        valExpr,
-					ScopeStart: valExpr.Pos(),
-					ScopeEnd:   valExpr.End(),
-					BodyStart:  valExpr.Pos(),
-					BodyEnd:    valExpr.End(),
-					Ops:        []flowir.Op{ops[i]},
-				}
-			}
-		}
+		declLowerCount:      base.DeclLowerCount,
+		missCount:           base.MissCount,
 	}
 }
 
-func (fc *pkgFlowCache) indexNestedBodies(b *flowir.Body) {
-	if fc == nil || b == nil {
-		return
+func (fc *pkgFlowCache) attachToIndex(idx *refconfine.PkgIndex) {
+	if fc != nil && fc.base != nil && idx != nil {
+		idx.SetFlowCache(fc.base)
 	}
-	indexVal := func(v *flowir.Value) {
-		if v == nil {
-			return
-		}
-		v.WalkValues(func(cur *flowir.Value) bool {
-			for raw := cur.Raw; raw != nil; {
-				if _, exists := fc.values[raw]; !exists || raw == cur.Raw {
-					fc.values[raw] = cur
-				}
-				pe, ok := raw.(*ast.ParenExpr)
-				if !ok {
-					break
-				}
-				raw = pe.X
-			}
-			switch cur.Kind {
-			case flowir.ValMakeClosure:
-				if cur.Closure != nil {
-					if cur.Lit != nil {
-						fc.bodies[cur.Lit] = cur.Closure
-						if cur.Lit.Body != nil {
-							fc.bodies[cur.Lit.Body] = cur.Closure
-						}
-					}
-					fc.indexNestedBodies(cur.Closure)
-				}
-			case flowir.ValCall:
-				if cur.CallKind == flowir.CallIIFE && cur.IIFE != nil {
-					if cur.CallAST != nil {
-						if lit, ok := syntaxutil.UnparenExpr(cur.CallAST.Fun).(*ast.FuncLit); ok && lit != nil {
-							fc.bodies[lit] = cur.IIFE
-							if lit.Body != nil {
-								fc.bodies[lit.Body] = cur.IIFE
-							}
-						}
-					}
-					fc.indexNestedBodies(cur.IIFE)
-				}
-			}
-			return true
-		})
-	}
-	for i := range b.Ops {
-		op := &b.Ops[i]
-		switch op.Kind {
-		case flowir.OpAssign:
-			for _, dst := range op.Dsts {
-				dst.ForEachChildValue(func(cv *flowir.Value) bool { indexVal(cv); return true })
-			}
-			for _, src := range op.Srcs {
-				indexVal(src)
-			}
-			if op.AssignKind == flowir.AssignRange && op.RangeBody != nil {
-				if op.RangeBody.Block != nil {
-					fc.bodies[op.RangeBody.Block] = op.RangeBody
-				}
-				fc.indexNestedBodies(op.RangeBody)
-			}
-		case flowir.OpTypeSwitchBind:
-			indexVal(op.SwitchSrc)
-		case flowir.OpChanSend:
-			op.ChanPlace.ForEachChildValue(func(cv *flowir.Value) bool { indexVal(cv); return true })
-			indexVal(op.ChanVal)
-			indexVal(op.SendVal)
-		case flowir.OpReturn:
-			for _, r := range op.Results {
-				indexVal(r)
-			}
-		case flowir.OpDefer:
-			indexVal(op.Call)
-		case flowir.OpGo:
-			if op.StmtAST != nil {
-				fc.bodies[op.StmtAST] = &flowir.Body{
-					AST:        op.StmtAST,
-					ScopeStart: op.StmtAST.Pos(),
-					ScopeEnd:   op.StmtAST.End(),
-					BodyStart:  op.StmtAST.Pos(),
-					BodyEnd:    op.StmtAST.End(),
-					Ops: []flowir.Op{{
-						Kind:    flowir.OpGo,
-						StmtAST: op.StmtAST,
-						Call:    op.Call,
-					}},
-				}
-			}
-			indexVal(op.Call)
-		case flowir.OpExpr:
-			indexVal(op.Expr)
-		}
+}
+
+func (fc *pkgFlowCache) syncStats() {
+	if fc != nil && fc.base != nil {
+		fc.declLowerCount = fc.base.DeclLowerCount
+		fc.missCount = fc.base.MissCount
 	}
 }
 
@@ -248,82 +97,53 @@ func (fc *pkgFlowCache) body(p *packages.Package, node ast.Node) *flowir.Body {
 	if node == nil {
 		return nil
 	}
-	if fc != nil {
-		if b, ok := fc.bodies[node]; ok {
-			return b
-		}
+	if fc != nil && fc.base != nil {
+		b := fc.base.Body(node)
+		fc.syncStats()
+		return b
 	}
 	if p == nil || p.TypesInfo == nil {
 		return nil
 	}
-	b := flowir.LowerNode(p.TypesInfo, p.Types, node)
-	if fc != nil && b != nil {
-		fc.missCount++
-		fc.bodies[node] = b
-		fc.indexNestedBodies(b)
-	}
-	return b
+	return flowir.LowerNode(p.TypesInfo, p.Types, node)
 }
 
 func (fc *pkgFlowCache) funcBody(p *packages.Package, fd *ast.FuncDecl) *flowir.Body {
 	if fd == nil || fd.Body == nil {
 		return nil
 	}
-	if fc != nil {
-		if b, ok := fc.bodies[fd]; ok {
-			return b
-		}
+	if fc != nil && fc.base != nil {
+		b := fc.base.FuncBody(fd)
+		fc.syncStats()
+		return b
 	}
 	if p == nil || p.TypesInfo == nil {
 		return nil
 	}
-	b := flowir.LowerFunc(p.TypesInfo, p.Types, fd)
-	if fc != nil && b != nil {
-		fc.missCount++
-		fc.bodies[fd] = b
-		fc.bodies[fd.Body] = b
-		fc.indexNestedBodies(b)
-	}
-	return b
+	return flowir.LowerFunc(p.TypesInfo, p.Types, fd)
 }
 
 func (fc *pkgFlowCache) litBody(p *packages.Package, lit *ast.FuncLit) *flowir.Body {
 	if lit == nil || lit.Body == nil {
 		return nil
 	}
-	if fc != nil {
-		if b, ok := fc.bodies[lit]; ok {
-			return b
-		}
+	if fc != nil && fc.base != nil {
+		b := fc.base.LitBody(lit)
+		fc.syncStats()
+		return b
 	}
 	if p == nil || p.TypesInfo == nil {
 		return nil
 	}
-	b := flowir.LowerFuncLit(p.TypesInfo, p.Types, lit)
-	if fc != nil && b != nil {
-		fc.missCount++
-		fc.bodies[lit] = b
-		fc.bodies[lit.Body] = b
-		fc.indexNestedBodies(b)
-	}
-	return b
+	return flowir.LowerFuncLit(p.TypesInfo, p.Types, lit)
 }
 
-// exprValue returns the lowered *flowir.Value for expr, hitting the pre-indexed
-// value map for all expressions inside package function and var/const
-// declarations and falling back to expression lowering only for standalone
-// expressions (such as inside type declarations or nil caches).
 func (fc *pkgFlowCache) exprValue(p *packages.Package, expr ast.Expr) *flowir.Value {
 	if expr == nil {
 		return nil
 	}
-	if fc != nil {
-		if v, ok := fc.values[expr]; ok {
-			return v
-		}
-		if b, ok := fc.bodies[expr]; ok && len(b.Ops) == 1 && b.Ops[0].Kind == flowir.OpExpr {
-			return b.Ops[0].Expr
-		}
+	if fc != nil && fc.base != nil {
+		return fc.base.ExprValue(expr)
 	}
 	if p == nil || p.TypesInfo == nil {
 		return nil
@@ -332,12 +152,7 @@ func (fc *pkgFlowCache) exprValue(p *packages.Package, expr ast.Expr) *flowir.Va
 	if b == nil || len(b.Ops) != 1 || b.Ops[0].Kind != flowir.OpExpr {
 		return nil
 	}
-	v := b.Ops[0].Expr
-	if fc != nil && v != nil {
-		fc.values[expr] = v
-		fc.indexNestedBodies(b)
-	}
-	return v
+	return b.Ops[0].Expr
 }
 
 func (fc *pkgFlowCache) scopedLocalCarrierAliases(audited bool, b *flowir.Body, allowObj func(types.Object) bool) map[types.Object]map[types.Object]bool {
@@ -401,4 +216,255 @@ func (fc *pkgFlowCache) scopedBodyInteriorAliases(audited bool, b *flowir.Body, 
 		fc.interiorAliases[b] = adj
 	}
 	return adj
+}
+
+func (fc *pkgFlowCache) ensureVarWriteInfos(p *packages.Package) map[*types.Var]*varWriteInfo {
+	if fc == nil {
+		if p == nil || p.TypesInfo == nil {
+			return nil
+		}
+		fc = newPkgFlowCache(false, p)
+		if fc == nil {
+			return nil
+		}
+	}
+	if fc.varWritesReady {
+		return fc.varWrites
+	}
+	fc.varWritesReady = true
+	fc.varWrites = make(map[*types.Var]*varWriteInfo)
+	if fc.base == nil {
+		return fc.varWrites
+	}
+	var pkgScope *types.Scope
+	if fc.base.Pkg != nil {
+		pkgScope = fc.base.Pkg.Scope()
+	}
+	entry := func(v *types.Var) *varWriteInfo {
+		if v == nil || v.IsField() {
+			return nil
+		}
+		st := fc.varWrites[v]
+		if st == nil {
+			st = &varWriteInfo{}
+			fc.varWrites[v] = st
+		}
+		return st
+	}
+
+	markPlace := func(pl flowir.Place, fn func(*varWriteInfo)) {
+		forEachPlaceRootVar(pl, func(rv *types.Var) {
+			if st := entry(rv); st != nil {
+				fn(st)
+			}
+		})
+	}
+	markValue := func(val *flowir.Value, fn func(*varWriteInfo)) {
+		forEachValueRootVar(val, func(rv *types.Var) {
+			if st := entry(rv); st != nil {
+				fn(st)
+			}
+		})
+	}
+
+	var scanBody func(b *flowir.Body, topGenDecl bool)
+	scanVal := func(v *flowir.Value) {
+		if v == nil {
+			return
+		}
+		v.WalkValues(func(cur *flowir.Value) bool {
+			switch cur.Kind {
+			case flowir.ValAddrOf:
+				markPlace(cur.AddrPlace, func(st *varWriteInfo) { st.hasExplicitAddr = true })
+			case flowir.ValMethodVal:
+				if cur.AutoAddr && cur.HasRecvPlace {
+					markPlace(cur.RecvPlace, func(st *varWriteInfo) { st.hasAutoAddrMethod = true })
+				}
+			case flowir.ValCall:
+				if cur.AutoAddrRecv && cur.HasRecvPlace {
+					markPlace(cur.RecvPlace, func(st *varWriteInfo) { st.hasAutoAddrMethod = true })
+				}
+				if cur.CallKind == flowir.CallBuiltin && len(cur.Args) > 0 && cur.Args[0] != nil {
+					switch cur.BuiltinName {
+					case "delete", "clear", "copy", "append":
+						markValue(cur.Args[0], func(st *varWriteInfo) { st.hasBuiltinMut = true })
+					}
+				}
+				if cur.CallKind == flowir.CallIIFE && cur.IIFE != nil {
+					scanBody(cur.IIFE, false)
+				}
+			case flowir.ValMakeClosure:
+				if cur.Closure != nil {
+					scanBody(cur.Closure, false)
+				}
+			}
+			return true
+		})
+	}
+
+	scanBody = func(b *flowir.Body, topGenDecl bool) {
+		if b == nil {
+			return
+		}
+		for i := range b.Ops {
+			op := &b.Ops[i]
+			op.ForEachValue(func(v *flowir.Value) bool {
+				scanVal(v)
+				return true
+			})
+			switch op.Kind {
+			case flowir.OpAssign:
+				op.ForEachAssignPair(func(_ int, dst flowir.Place, isDef bool, src *flowir.Value) bool {
+					if dst.Obj == nil {
+						markPlace(dst, func(st *varWriteInfo) { st.hasPostDefWrite = true })
+						return true
+					}
+					st := entry(dst.Obj)
+					if st == nil {
+						return true
+					}
+					isOwnScopeDef := isDef && dst.IsBareVar() &&
+						((topGenDecl && pkgScope != nil && dst.Obj.Parent() == pkgScope) ||
+							(!topGenDecl && (pkgScope == nil || dst.Obj.Parent() != pkgScope)))
+					if isOwnScopeDef {
+						switch op.AssignKind {
+						case flowir.AssignPlain:
+							if src != nil {
+								st.defs++
+								st.initVal = src
+							} else {
+								st.hasPostDefWrite = true
+							}
+						case flowir.AssignZeroDecl:
+							st.defs++
+							st.hasZeroDecl = true
+						case flowir.AssignMulti, flowir.AssignRange:
+							st.defs++
+							st.hasNonPlainDef = true
+						default:
+							st.hasPostDefWrite = true
+						}
+					} else {
+						st.hasPostDefWrite = true
+					}
+					return true
+				})
+				if op.AssignKind == flowir.AssignRange && op.RangeBody != nil {
+					scanBody(op.RangeBody, false)
+				}
+			case flowir.OpTypeSwitchBind:
+				if st := entry(op.SwitchDst); st != nil {
+					st.defs++
+					st.hasNonPlainDef = true
+				}
+			case flowir.OpChanSend:
+				if op.ChanVal != nil {
+					markValue(op.ChanVal, func(st *varWriteInfo) { st.hasChanSend = true })
+				} else {
+					markPlace(op.ChanPlace, func(st *varWriteInfo) { st.hasChanSend = true })
+				}
+			}
+		}
+	}
+
+	for _, gd := range fc.base.GenDecls {
+		scanBody(fc.base.Body(gd), true)
+	}
+	for _, fd := range fc.base.FuncDecls {
+		scanBody(fc.base.FuncBody(fd), false)
+	}
+	// Also count package-scope const definitions so shadowed/ill-typed const+var collisions fail closed.
+	if fc.base != nil && fc.base.Info != nil {
+		for _, obj := range fc.base.Info.Defs {
+			if v, ok := obj.(*types.Var); ok && v != nil && !v.IsField() {
+				if st := fc.varWrites[v]; st == nil {
+					fc.varWrites[v] = &varWriteInfo{}
+				}
+			}
+		}
+	}
+	return fc.varWrites
+}
+
+// singleWritePkgGlobalInit returns (initVal, true) when gv is a package-scope
+// variable defined by a single plain initializer in p with zero subsequent
+// writes, interior projection writes, mutating container builtins, channel
+// sends, or explicit/implicit address-takes anywhere in p.
+func (fc *pkgFlowCache) singleWritePkgGlobalInit(p *packages.Package, gv *types.Var) (*flowir.Value, bool) {
+	if gv == nil || p == nil || p.Types == nil || gv.Pkg() != p.Types || gv.Parent() != p.Types.Scope() {
+		return nil, false
+	}
+	st := fc.ensureVarWriteInfos(p)[gv]
+	if st == nil || st.defs != 1 || st.initVal == nil || st.hasZeroDecl || st.hasNonPlainDef ||
+		st.hasPostDefWrite || st.hasChanSend || st.hasExplicitAddr || st.hasAutoAddrMethod || st.hasBuiltinMut {
+		return nil, false
+	}
+	return st.initVal, true
+}
+
+// singleWriteLocalInit returns (initVal, true) when lv is a non-parameter,
+// non-receiver, non-result local variable owned by fnBody and defined by a
+// single plain initializer with zero subsequent writes, mutating container
+// builtins, channel sends, or explicit/implicit address-takes.
+func (fc *pkgFlowCache) singleWriteLocalInit(p *packages.Package, fnBody *flowir.Body, lv *types.Var) (*flowir.Value, bool) {
+	if fnBody == nil || lv == nil || !fnBody.OwnsVar(lv) || lv == fnBody.Recv || fnBody.ResultSet[lv] {
+		return nil, false
+	}
+	if _, isParam := fnBody.ParamIndex[lv]; isParam {
+		return nil, false
+	}
+	st := fc.ensureVarWriteInfos(p)[lv]
+	if st == nil || st.defs != 1 || st.initVal == nil || st.hasZeroDecl || st.hasNonPlainDef ||
+		st.hasPostDefWrite || st.hasChanSend || st.hasExplicitAddr || st.hasAutoAddrMethod || st.hasBuiltinMut {
+		return nil, false
+	}
+	return st.initVal, true
+}
+
+// varHasExplicitWriteOrAddr reports whether v (a package-scope or local
+// variable) lacks a single plain/zero definition or undergoes any
+// post-definition write, projection write, channel send, mutating container
+// builtin (delete/clear/copy/append), or explicit/implicit address-take.
+func (fc *pkgFlowCache) varHasExplicitWriteOrAddr(p *packages.Package, v *types.Var) bool {
+	if v == nil {
+		return true
+	}
+	st := fc.ensureVarWriteInfos(p)[v]
+	if st == nil {
+		return true
+	}
+	return st.defs != 1 || st.hasNonPlainDef || st.hasPostDefWrite || st.hasChanSend ||
+		st.hasExplicitAddr || st.hasAutoAddrMethod || st.hasBuiltinMut
+}
+
+func forEachPlaceRootVar(pl flowir.Place, fn func(*types.Var)) {
+	if pl.Obj != nil {
+		fn(pl.Obj)
+		return
+	}
+	if pl.Root == flowir.RootTransient && pl.Base != nil {
+		forEachValueRootVar(pl.Base, fn)
+	}
+}
+
+func forEachValueRootVar(v *flowir.Value, fn func(*types.Var)) {
+	for v != nil {
+		switch v.Kind {
+		case flowir.ValConvert:
+			if !v.IsTypeAssert && v.Arg != nil && v.Arg.Type != nil {
+				if b, ok := v.Arg.Type.Underlying().(*types.Basic); ok && b.Info()&types.IsString != 0 {
+					return
+				}
+			}
+			v = v.Arg
+		case flowir.ValPlace:
+			forEachPlaceRootVar(v.Place, fn)
+			return
+		case flowir.ValAddrOf:
+			forEachPlaceRootVar(v.AddrPlace, fn)
+			return
+		default:
+			return
+		}
+	}
 }

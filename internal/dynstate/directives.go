@@ -1,7 +1,8 @@
 // Package dynstate derives per-package dynamic-state facts (FactOf,
 // FactOfWithHooks) over a single precomputed refconfine.PkgIndex and composes
-// them across test-binary dependency cones (Compose, NewDeferralResolution,
-// ResolveEnvAudit, BlockedExportedSeams, CarrierLinkGraph).
+// them across test-binary dependency cones (AnalyzeCone, Compose,
+// NonVouchDischargedVars, NewDeferralResolution, ResolveEnvAudit,
+// CarrierLinkGraph).
 package dynstate
 
 import (

@@ -2706,7 +2706,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/dynstate/flowir.TestRapidFlowIRStructuralAndAliasInvariants"
   role: BINDING_ROLE_TESTS
-  shape_hash: "25cb8b5302a9ede1e7a2cbbf45988f412d2ecde963c32502de779ea98b283b0b"
+  shape_hash: "18ea60045a4b3be1fcf0fdc028b3bbd2e8e736bcd3182fa3d21ac34c87c1f958"
 }
 
 bindings {
@@ -2716,7 +2716,7 @@ bindings {
   backend: "go"
   symbol: "github.com/greatliontech/gofresh/internal/dynstate/flowir.TestRapidFlowIRDesugaringEquivalence"
   role: BINDING_ROLE_TESTS
-  shape_hash: "5e25be90b12acd51766f7863dd6dff0d0d5546a29a625a344e112d01d88e60e4"
+  shape_hash: "14fca58b216423fc925462fd8c1984ce99b9edd61bb880a744ea314a5a5deb87"
 }
 
 bindings {

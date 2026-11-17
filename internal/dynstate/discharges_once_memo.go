@@ -188,7 +188,7 @@ func deriveOnceMemoCandidates(
 		if !argsOK {
 			continue
 		}
-		if varHasAnyDirectWriteOrAddr(p, idx, v) || !allIntraPkgVarUsesAreDirectMethodCalls(p, idx, v) {
+		if fc.varHasExplicitWriteOrAddr(p, v) || !allIntraPkgVarUsesAreDirectMethodCalls(p, idx, v) {
 			continue
 		}
 		cand := syntaxutil.OnceMemoVarCandidate{
@@ -484,7 +484,7 @@ func verifyOnceMemoStructType(
 				continue
 			}
 			sel, isSel := idx.ParentUnparen(uid).(*ast.SelectorExpr)
-			if !isSel || sel.Sel != uid || exprIsWrittenOrAddrTaken(p, idx, sel) {
+			if !isSel || sel.Sel != uid || refconfine.ExprPrefixIsWrittenOrAddrTaken(p, idx, sel) {
 				return zero, nil, false
 			}
 		}
@@ -829,7 +829,7 @@ func verifyOnceMemoFieldUsesInGetter(
 	returnedMemoFields := map[*types.Var]bool{}
 	for _, r := range retStmt.Results {
 		sel, isSel := ast.Unparen(r).(*ast.SelectorExpr)
-		if !isSel || exprIsWrittenOrAddrTaken(p, idx, sel) {
+		if !isSel || refconfine.ExprPrefixIsWrittenOrAddrTaken(p, idx, sel) {
 			return false
 		}
 		rid, isRID := ast.Unparen(sel.X).(*ast.Ident)
@@ -1207,7 +1207,7 @@ func verifyOnceMemoResultClosure(
 			if freshstruct.IsRootedAtFreshLocal(p, sel, fresh, freshEsc) || pkgFresh.IsFreshMutationTarget(syncFD, sel) {
 				continue
 			}
-			if exprIsWrittenOrAddrTaken(p, idx, sel) {
+			if refconfine.ExprPrefixIsWrittenOrAddrTaken(p, idx, sel) {
 				return nil, nil, nil, false, false
 			}
 			readSels[sel] = true
@@ -1310,7 +1310,7 @@ func verifyOnceMemoComputeCone(
 					continue
 				}
 				lv, _ := p.TypesInfo.Defs[id].(*types.Var)
-				if isConfinedDirectCallClosureVar(p, idx, lv) {
+				if isConfinedDirectCallClosureVar(p, fc, idx, lv) {
 					res[lv] = lit
 				}
 			}
@@ -1508,7 +1508,7 @@ func verifyOnceMemoComputeCone(
 	}
 
 	_ = needsErrorProof
-	if !verifyConeErrorOrigins(p, idx, doLit, memoFields, memoAssigns, coneFuncs) {
+	if !verifyConeErrorOrigins(p, fc, idx, doLit, memoFields, memoAssigns, coneFuncs) {
 		return false
 	}
 	return true
@@ -1516,6 +1516,7 @@ func verifyOnceMemoComputeCone(
 
 func verifyConeErrorOrigins(
 	p *packages.Package,
+	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
 	doLit *ast.FuncLit,
 	memoFields map[*types.Var]bool,
@@ -1528,6 +1529,7 @@ func verifyConeErrorOrigins(
 	}
 	return verifyConeErrorOriginsInScopes(
 		p,
+		fc,
 		idx,
 		doSig,
 		doLit.Body,
@@ -1542,6 +1544,7 @@ func verifyConeErrorOrigins(
 
 func verifyConeErrorOriginsInScopes(
 	p *packages.Package,
+	fc *pkgFlowCache,
 	idx *refconfine.PkgIndex,
 	rootSig *types.Signature,
 	rootBody *ast.BlockStmt,
@@ -1621,7 +1624,7 @@ func verifyConeErrorOriginsInScopes(
 					continue
 				}
 				lv, _ := p.TypesInfo.Defs[id].(*types.Var)
-				if isConfinedDirectCallClosureVar(p, idx, lv) {
+				if isConfinedDirectCallClosureVar(p, fc, idx, lv) {
 					localClosures[lv] = lit
 				}
 			}
@@ -2079,7 +2082,7 @@ func verifyOnceMemoSiblingMethod(
 					continue
 				}
 				lv, _ := p.TypesInfo.Defs[id].(*types.Var)
-				if isConfinedDirectCallClosureVar(p, idx, lv) {
+				if isConfinedDirectCallClosureVar(p, fc, idx, lv) {
 					localClos[lv] = lit
 				}
 			}
@@ -2325,7 +2328,7 @@ func verifyOnceMemoSiblingMethod(
 		}
 		if isUniverseErrorType(rt) {
 			if !checkedErrors {
-				if !verifyConeErrorOriginsInScopes(p, idx, mSig, mfd.Body, nil, nil, sibConeFuncs, trusted, true, allowRootErrParams) {
+				if !verifyConeErrorOriginsInScopes(p, fc, idx, mSig, mfd.Body, nil, nil, sibConeFuncs, trusted, true, allowRootErrParams) {
 					return false
 				}
 				checkedErrors = true
@@ -2349,7 +2352,7 @@ func verifyOnceMemoSiblingMethod(
 		return false
 	}
 	if sawErrorSink && !checkedErrors {
-		if !verifyConeErrorOriginsInScopes(p, idx, mSig, mfd.Body, nil, nil, sibConeFuncs, trusted, true, allowRootErrParams) {
+		if !verifyConeErrorOriginsInScopes(p, fc, idx, mSig, mfd.Body, nil, nil, sibConeFuncs, trusted, true, allowRootErrParams) {
 			return false
 		}
 	}
@@ -3386,8 +3389,8 @@ func recordOrVerifyOnceMemoParamDep(
 	return false
 }
 
-func isConfinedDirectCallClosureVar(p *packages.Package, idx *refconfine.PkgIndex, lv *types.Var) bool {
-	if lv == nil || idx.DefCounts[lv] != 1 || varHasAnyDirectWriteOrAddr(p, idx, lv) {
+func isConfinedDirectCallClosureVar(p *packages.Package, fc *pkgFlowCache, idx *refconfine.PkgIndex, lv *types.Var) bool {
+	if lv == nil || idx.DefCounts[lv] != 1 || fc.varHasExplicitWriteOrAddr(p, lv) {
 		return false
 	}
 	for _, uid := range idx.UsesOf[lv] {
@@ -3485,7 +3488,7 @@ func verifyReadOnlyCarrierFreeGlobalVar(
 	if requirePureInit && len(vs.Values) == 0 {
 		return false
 	}
-	if varHasAnyDirectWriteOrAddr(p, idx, v) {
+	if fc.varHasExplicitWriteOrAddr(p, v) {
 		return false
 	}
 	if !refconfine.TypeCarriesMutableRef(v.Type()) {
@@ -3512,77 +3515,6 @@ func verifyReadOnlyCarrierFreeGlobalVar(
 			return refconfine.IsDirectMutableRef(v.Type()), true
 		},
 	})
-}
-
-func varHasAnyDirectWriteOrAddr(p *packages.Package, idx *refconfine.PkgIndex, v *types.Var) bool {
-	for _, uid := range idx.UsesOf[v] {
-		if exprIsWrittenOrAddrTaken(p, idx, uid) {
-			return true
-		}
-	}
-	return false
-}
-
-func exprIsWrittenOrAddrTaken(p *packages.Package, idx *refconfine.PkgIndex, expr ast.Expr) bool {
-	cur := expr
-	for {
-		par := idx.ParentUnparen(cur)
-		if par == nil {
-			return false
-		}
-		switch x := par.(type) {
-		case *ast.AssignStmt:
-			for _, lhs := range x.Lhs {
-				if ast.Unparen(lhs) == cur {
-					return true
-				}
-			}
-			return false
-		case *ast.IncDecStmt:
-			return ast.Unparen(x.X) == cur
-		case *ast.RangeStmt:
-			return x.Tok == token.ASSIGN && ((x.Key != nil && ast.Unparen(x.Key) == cur) || (x.Value != nil && ast.Unparen(x.Value) == cur))
-		case *ast.UnaryExpr:
-			return x.Op == token.AND && ast.Unparen(x.X) == cur
-		case *ast.CallExpr:
-			if b := syntaxutil.LookupBuiltin(p.TypesInfo, ast.Unparen(x.Fun)); b != nil {
-				switch b.Name() {
-				case "delete", "clear", "copy", "append":
-					return len(x.Args) > 0 && ast.Unparen(x.Args[0]) == cur
-				}
-			}
-			return false
-		case *ast.SelectorExpr:
-			if ast.Unparen(x.X) == cur {
-				selInfo := p.TypesInfo.Selections[x]
-				if selInfo != nil && selInfo.Kind() == types.FieldVal {
-					cur = x
-					continue
-				}
-			}
-			return false
-		case *ast.IndexExpr:
-			if ast.Unparen(x.X) == cur {
-				cur = x
-				continue
-			}
-			return false
-		case *ast.SliceExpr:
-			if ast.Unparen(x.X) == cur {
-				cur = x
-				continue
-			}
-			return false
-		case *ast.StarExpr:
-			if ast.Unparen(x.X) == cur {
-				cur = x
-				continue
-			}
-			return false
-		default:
-			return false
-		}
-	}
 }
 
 func allIntraPkgVarUsesAreDirectMethodCalls(p *packages.Package, idx *refconfine.PkgIndex, v *types.Var) bool {

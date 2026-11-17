@@ -31,7 +31,7 @@ func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hook
 	if p == nil {
 		return Fact{}
 	}
-	return factOfWithCache(audited, p, newPkgFlowCache(audited, p), singleSubject, hooks)
+	return factOfWithCache(audited, p, nil, singleSubject, hooks)
 }
 
 func factOfWithCache(audited bool, p *packages.Package, fc *pkgFlowCache, singleSubject bool, hooks *syntaxutil.ExplainHookSet) Fact {
@@ -56,7 +56,9 @@ func factOfWithCache(audited bool, p *packages.Package, fc *pkgFlowCache, single
 		initOnly = callIdx.InitOnlyHelpers()
 	}
 	if fc == nil {
-		fc = newPkgFlowCache(audited, p)
+		fc = newPkgFlowCacheWithIndex(audited, p, idx)
+	} else {
+		fc.attachToIndex(idx)
 	}
 	mutated := map[string]bool{}
 	escaped := map[string]bool{}
@@ -338,27 +340,27 @@ func factOfWithCache(audited bool, p *packages.Package, fc *pkgFlowCache, single
 			}
 		}
 		slices.SortFunc(fact.ParamRetentionFreeDeps, syntaxutil.ParamDepEdge.Compare)
-		envFree, envDeps, retParamDeps, retMethodDeps, retFieldDefer, retFieldPoison, insFree, insDeps, insParamDeps, insMethodDeps, callerInsDeps := returnEnvFreeFunctions(audited, p, fc, settledGlobals, &pkgConf, hooks)
+		outflow := analyzeClosureOutflowSummaries(audited, p, fc, settledGlobals, &pkgConf, hooks)
 		pkgPath := p.Types.Path()
-		for fnName := range envFree {
+		for fnName := range outflow.returnEnvFree {
 			fnKey := syntaxutil.FuncKey{Pkg: pkgPath, Name: fnName}
 			fact.ReturnEnvFree = append(fact.ReturnEnvFree, fnKey)
-			for callee := range envDeps[fnName] {
+			for callee := range outflow.returnEnvDeps[fnName] {
 				fact.ReturnEnvDeps = append(fact.ReturnEnvDeps, syntaxutil.FuncDepEdge{Func: fnKey, Callee: callee})
 			}
-			for pk := range retParamDeps[fnName] {
+			for pk := range outflow.returnEnvParamDeps[fnName] {
 				fact.ReturnEnvParamDeps = append(fact.ReturnEnvParamDeps, syntaxutil.FuncParamDepEdge{Func: fnKey, Param: pk})
 			}
-			for mk := range retMethodDeps[fnName] {
+			for mk := range outflow.returnEnvMethodDeps[fnName] {
 				fact.ReturnEnvMethodDeps = append(fact.ReturnEnvMethodDeps, syntaxutil.FuncDepEdge{Func: fnKey, Callee: mk})
 			}
-			for dep := range callerInsDeps[fnName] {
+			for dep := range outflow.returnInsertionCallDep[fnName] {
 				fact.ReturnEnvInsertionDeps = append(fact.ReturnEnvInsertionDeps, syntaxutil.FuncInsertionDepEdge{Func: fnKey, Dep: dep})
 			}
-			for entry := range retFieldDefer[fnName] {
+			for entry := range outflow.returnFieldDefer[fnName] {
 				fact.ReturnFieldParamDefer = append(fact.ReturnFieldParamDefer, entry)
 			}
-			for entry := range retFieldPoison[fnName] {
+			for entry := range outflow.returnFieldPoison[fnName] {
 				fact.ReturnFieldParamPoison = append(fact.ReturnFieldParamPoison, entry)
 			}
 		}
@@ -369,15 +371,15 @@ func factOfWithCache(audited bool, p *packages.Package, fc *pkgFlowCache, single
 		slices.SortFunc(fact.ReturnEnvInsertionDeps, syntaxutil.FuncInsertionDepEdge.Compare)
 		slices.SortFunc(fact.ReturnFieldParamDefer, syntaxutil.ReturnFieldParamDefer.Compare)
 		slices.SortFunc(fact.ReturnFieldParamPoison, syntaxutil.ReturnFieldParamPoison.Compare)
-		for ownKey := range insFree {
+		for ownKey := range outflow.paramInsertionFree {
 			fact.ParamInsertionFree = append(fact.ParamInsertionFree, ownKey)
-			for dep := range insDeps[ownKey] {
+			for dep := range outflow.paramInsertionDeps[ownKey] {
 				fact.ParamInsertionDeps = append(fact.ParamInsertionDeps, syntaxutil.ParamInsertionDepEdge{Param: ownKey, Dep: dep})
 			}
-			for pk := range insParamDeps[ownKey] {
+			for pk := range outflow.paramInsertionParams[ownKey] {
 				fact.ParamInsertionParamDeps = append(fact.ParamInsertionParamDeps, syntaxutil.ParamDepEdge{Own: ownKey, Dep: pk})
 			}
-			for mk := range insMethodDeps[ownKey] {
+			for mk := range outflow.paramInsertionMethods[ownKey] {
 				fact.ParamInsertionMethodDeps = append(fact.ParamInsertionMethodDeps, syntaxutil.ParamMethodDepEdge{Param: ownKey, Method: mk})
 			}
 		}

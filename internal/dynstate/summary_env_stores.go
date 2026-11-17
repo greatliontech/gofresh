@@ -1263,66 +1263,8 @@ func enclosingConfinesRoots(
 		return len(m) > 0
 	}
 
-	var valTouchesAnyRoot func(v *flowir.Value) bool
-	valTouchesAnyRoot = func(v *flowir.Value) bool {
-		if v == nil {
-			return false
-		}
-		hit := false
-		v.WalkValues(func(cur *flowir.Value) bool {
-			if hit {
-				return false
-			}
-			switch cur.Kind {
-			case flowir.ValPlace:
-				if cur.Place.Obj != nil && roots[cur.Place.Obj] {
-					hit = true
-					return false
-				}
-			case flowir.ValAddrOf:
-				if cur.AddrPlace.Obj != nil && roots[cur.AddrPlace.Obj] {
-					hit = true
-					return false
-				}
-			case flowir.ValMethodVal:
-				if cur.HasRecvPlace && cur.RecvPlace.Obj != nil && roots[cur.RecvPlace.Obj] {
-					hit = true
-					return false
-				}
-			case flowir.ValMakeClosure:
-				if cur.Closure != nil {
-					for fv := range cur.Closure.FreeVars {
-						if roots[fv] {
-							hit = true
-							return false
-						}
-					}
-					for _, gv := range globalRoots {
-						if bodyMentionsVar(cur.Closure, gv) {
-							hit = true
-							return false
-						}
-					}
-				}
-			case flowir.ValCall:
-				if cur.CallKind == flowir.CallIIFE && cur.IIFE != nil {
-					for fv := range cur.IIFE.FreeVars {
-						if roots[fv] {
-							hit = true
-							return false
-						}
-					}
-					for _, gv := range globalRoots {
-						if bodyMentionsVar(cur.IIFE, gv) {
-							hit = true
-							return false
-						}
-					}
-				}
-			}
-			return true
-		})
-		return hit
+	valTouchesAnyRoot := func(v *flowir.Value) bool {
+		return valueTouchesRootSet(v, func(o types.Object) bool { return roots[o] }, globalRoots)
 	}
 
 	definedOnce := map[types.Object]bool{}
@@ -1461,14 +1403,11 @@ func enclosingConfinesRoots(
 				}
 				fk := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Origin().Name()}
 				if !auditset.ValuePlaneClone(fk.Pkg, fk.Name) {
-					v.ForEachArgParam(func(a *flowir.Value, slotType types.Type, _ int, pIdx int, pOK bool, packedVariadic bool) bool {
+					v.ForEachArgParam(func(a *flowir.Value, slotType types.Type, _ int, pIdx int, pOK bool, _ bool) bool {
 						if !suppliesMutableRoot(a) {
 							return true
 						}
-						paramType := v.FormalParamSlotType(pIdx, packedVariadic)
-						handsOutSlot := refconfine.CallResultHandsOut(slotType) ||
-							(paramType != nil && refconfine.CallResultHandsOut(paramType) && refconfine.CallResultHandsOut(slotType))
-						if slotType != nil && !handsOutSlot {
+						if slotType != nil && !refconfine.CallResultHandsOut(slotType) {
 							return true
 						}
 						if wants == nil || !pOK {
@@ -2147,146 +2086,18 @@ func recordEnvCarryingRegistrations(
 		return fd.Name.Name == "init" || (!fd.Name.IsExported() && initOnly[fd.Name.Name])
 	}
 
-	type singleWriteCacheEntry struct {
-		initVal *flowir.Value
-		ok      bool
-	}
-	singleWriteCache := map[*types.Var]singleWriteCacheEntry{}
 	singleWriteTopLevelInit := func(cv *types.Var) (*flowir.Value, bool) {
 		if p.Types == nil || cv == nil || cv.Pkg() != p.Types || cv.Parent() != p.Types.Scope() {
 			return nil, false
 		}
-		if cached, seen := singleWriteCache[cv]; seen {
-			return cached.initVal, cached.ok
-		}
-		fail := func() (*flowir.Value, bool) {
-			singleWriteCache[cv] = singleWriteCacheEntry{}
-			return nil, false
-		}
 		if reachOrStr(cv.Type()) || refconfine.TypeReachesSyncNoCopyByValue(cv.Type()) {
-			return fail()
+			return nil, false
 		}
 		cvKey := syntaxutil.DynamicVarKey(cv)
 		if unattestedBroken[cvKey] || singleSubjectVars[cvKey] {
-			return fail()
+			return nil, false
 		}
-		defs := 0
-		var initVal *flowir.Value
-		mutatedOrAddressed := false
-		scanLowered := func(b *flowir.Body) {
-			if b == nil || mutatedOrAddressed {
-				return
-			}
-			visitAllBodyOps(b, func(op *flowir.Op) {
-				if mutatedOrAddressed {
-					return
-				}
-				checkAddrVal := func(v *flowir.Value) {
-					if v == nil || mutatedOrAddressed {
-						return
-					}
-					v.WalkValues(func(cur *flowir.Value) bool {
-						if mutatedOrAddressed {
-							return false
-						}
-						switch cur.Kind {
-						case flowir.ValAddrOf:
-							if cur.AddrPlace.Obj == cv {
-								mutatedOrAddressed = true
-								return false
-							}
-						case flowir.ValMethodVal:
-							if cur.AutoAddr && cur.HasRecvPlace && cur.RecvPlace.Obj == cv {
-								mutatedOrAddressed = true
-								return false
-							}
-						case flowir.ValCall:
-							if cur.AutoAddrRecv && cur.HasRecvPlace && cur.RecvPlace.Obj == cv {
-								mutatedOrAddressed = true
-								return false
-							}
-						}
-						return true
-					})
-				}
-				switch op.Kind {
-				case flowir.OpAssign:
-					for _, dst := range op.Dsts {
-						if dst.Obj == cv {
-							mutatedOrAddressed = true
-							return
-						}
-						dst.ForEachChildValue(func(ch *flowir.Value) bool { checkAddrVal(ch); return !mutatedOrAddressed })
-					}
-					for _, src := range op.Srcs {
-						checkAddrVal(src)
-					}
-				case flowir.OpTypeSwitchBind:
-					if op.SwitchDst == cv {
-						mutatedOrAddressed = true
-						return
-					}
-					checkAddrVal(op.SwitchSrc)
-				case flowir.OpChanSend:
-					if op.ChanPlace.Obj == cv {
-						mutatedOrAddressed = true
-						return
-					}
-					op.ChanPlace.ForEachChildValue(func(ch *flowir.Value) bool { checkAddrVal(ch); return !mutatedOrAddressed })
-					checkAddrVal(op.ChanVal)
-					checkAddrVal(op.SendVal)
-				case flowir.OpReturn:
-					for _, r := range op.Results {
-						checkAddrVal(r)
-					}
-				case flowir.OpDefer, flowir.OpGo:
-					checkAddrVal(op.Call)
-				case flowir.OpExpr:
-					checkAddrVal(op.Expr)
-				}
-			})
-		}
-		for _, file := range p.Syntax {
-			if file == nil {
-				continue
-			}
-			for _, decl := range file.Decls {
-				switch d := decl.(type) {
-				case *ast.GenDecl:
-					for _, spec := range d.Specs {
-						vs, ok := spec.(*ast.ValueSpec)
-						if !ok {
-							continue
-						}
-						for i, nm := range vs.Names {
-							if nm != nil && p.TypesInfo.Defs[nm] == cv {
-								defs++
-								if d.Tok == token.VAR && len(vs.Names) == len(vs.Values) {
-									initVal = fc.exprValue(p, vs.Values[i])
-								} else {
-									mutatedOrAddressed = true
-								}
-							}
-						}
-						for _, val := range vs.Values {
-							scanLowered(fc.body(p, val))
-						}
-					}
-				case *ast.FuncDecl:
-					if d.Body != nil {
-						scanLowered(fc.funcBody(p, d))
-					}
-				}
-				if mutatedOrAddressed || defs > 1 {
-					return fail()
-				}
-			}
-		}
-		if defs != 1 || initVal == nil || mutatedOrAddressed {
-			return fail()
-		}
-		singleWriteCache[cv] = singleWriteCacheEntry{initVal: initVal, ok: true}
-		return initVal, true
+		return fc.singleWritePkgGlobalInit(p, cv)
 	}
 
 	visitingSingleWriteVars := map[*types.Var]bool{}
@@ -2379,74 +2190,10 @@ func recordEnvCarryingRegistrations(
 			}
 			if !visitingSingleWriteVars[v] && !reachOrStr(v.Type()) {
 				fnBody := fc.funcBody(p, callerFD)
-				if fnBody != nil && fnBody.OwnsVar(v) && v != fnBody.Recv && !fnBody.ResultSet[v] {
-					if _, isParam := fnBody.ParamIndex[v]; !isParam {
-						defs := 0
-						var initVal *flowir.Value
-						bad := false
-						visitAllBodyOps(fnBody, func(op *flowir.Op) {
-							if bad {
-								return
-							}
-							checkAddr := func(sub *flowir.Value) {
-								if sub == nil || bad {
-									return
-								}
-								sub.WalkValues(func(cur *flowir.Value) bool {
-									if (cur.Kind == flowir.ValAddrOf && cur.AddrPlace.Obj == v) ||
-										(cur.Kind == flowir.ValMethodVal && cur.AutoAddr && cur.HasRecvPlace && cur.RecvPlace.Obj == v) ||
-										(cur.Kind == flowir.ValCall && cur.AutoAddrRecv && cur.HasRecvPlace && cur.RecvPlace.Obj == v) {
-										bad = true
-										return false
-									}
-									return true
-								})
-							}
-							switch op.Kind {
-							case flowir.OpAssign:
-								op.ForEachAssignPair(func(_ int, dst flowir.Place, isDef bool, src *flowir.Value) bool {
-									if dst.Obj == v {
-										if dst.IsBareVar() && isDef && src != nil &&
-											op.AssignKind != flowir.AssignCompound && op.AssignKind != flowir.AssignIncDec {
-											defs++
-											initVal = src
-										} else {
-											bad = true
-										}
-									}
-									dst.ForEachChildValue(func(cv *flowir.Value) bool { checkAddr(cv); return !bad })
-									return !bad
-								})
-								for _, src := range op.Srcs {
-									checkAddr(src)
-								}
-							case flowir.OpTypeSwitchBind:
-								if op.SwitchDst == v {
-									bad = true
-								}
-								checkAddr(op.SwitchSrc)
-							case flowir.OpChanSend:
-								if op.ChanPlace.Obj == v {
-									bad = true
-								}
-								checkAddr(op.ChanVal)
-								checkAddr(op.SendVal)
-							case flowir.OpReturn:
-								for _, r := range op.Results {
-									checkAddr(r)
-								}
-							case flowir.OpDefer, flowir.OpGo:
-								checkAddr(op.Call)
-							case flowir.OpExpr:
-								checkAddr(op.Expr)
-							}
-						})
-						if !bad && defs == 1 && initVal != nil {
-							visitingSingleWriteVars[v] = true
-							defer delete(visitingSingleWriteVars, v)
-							return checkCapturedSigOriginAtScope(callerFD, initVal)
-						}
-					}
+				if initVal, ok := fc.singleWriteLocalInit(p, fnBody, v); ok {
+					visitingSingleWriteVars[v] = true
+					defer delete(visitingSingleWriteVars, v)
+					return checkCapturedSigOriginAtScope(callerFD, initVal)
 				}
 			}
 		}

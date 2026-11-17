@@ -1,4 +1,4 @@
-package flowir
+package flowir_test
 
 import (
 	"go/ast"
@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	. "github.com/greatliontech/gofresh/internal/dynstate/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )

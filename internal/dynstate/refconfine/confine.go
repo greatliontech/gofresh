@@ -6,6 +6,7 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
 
@@ -118,6 +119,22 @@ type Config struct {
 	// SeedStructOrigin structs are permitted when ForbidNonNilSeedStructPtrCompare
 	// is set.
 	AllowSeedStructMutationInFunc *ast.FuncDecl
+
+	// OnReject optionally receives the source position and diagnostic clause of
+	// the first confinement violation encountered during verification.
+	OnReject func(pos token.Pos, clause string)
+}
+
+func allocCompositeLitAST(v *flowir.Value) *ast.CompositeLit {
+	if v == nil || v.Kind != flowir.ValAllocFresh || v.AllocKind != flowir.AllocCompositeLit || v.Raw == nil {
+		return nil
+	}
+	cur := ast.Unparen(v.Raw)
+	if un, ok := cur.(*ast.UnaryExpr); ok && un.Op == token.AND {
+		cur = ast.Unparen(un.X)
+	}
+	cl, _ := cur.(*ast.CompositeLit)
+	return cl
 }
 
 // VerifyReadOnlyRefConfinement verifies that every protected reference, pointer,
@@ -134,6 +151,10 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 		if idx == nil {
 			return false
 		}
+	}
+	flowCache := idx.FlowCache(p)
+	if flowCache == nil {
+		return false
 	}
 	info := p.TypesInfo
 	isDirectRef := func(t types.Type) bool {
@@ -192,7 +213,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 			return true, true
 		}
 		if isOpaqueIfaceOrTP(et) {
-			if containerExpr != nil && cfg.AllowImmutableInterfaceElem != nil && cfg.AllowImmutableInterfaceElem(containerExpr) {
+			if containerExpr != nil && cfg.AllowImmutableInterfaceElem != nil && cfg.AllowImmutableInterfaceElem(ast.Unparen(containerExpr)) {
 				return false, false
 			}
 			return true, true
@@ -248,20 +269,62 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 		return false
 	}
 
-	selChainHitsSeedStruct := func(sel *ast.SelectorExpr) bool {
-		if cfg.SeedStructOrigin == nil && cfg.CanBeSeedStructCapsule == nil {
+	var placeHitsStructPred func(pl flowir.Place, match func(*types.Named) bool, includeStarRoot bool) bool
+	placeHitsStructPred = func(pl flowir.Place, match func(*types.Named) bool, includeStarRoot bool) bool {
+		if match == nil {
 			return false
 		}
-		cur := ast.Expr(sel)
-		for cur != nil {
-			switch x := ast.Unparen(cur).(type) {
-			case *ast.SelectorExpr:
-				selInfo := info.Selections[x]
-				if selInfo == nil || selInfo.Kind() != types.FieldVal {
+		for i := len(pl.Projs) - 1; i >= 0; i-- {
+			pr := pl.Projs[i]
+			switch pr.Kind {
+			case flowir.ProjField:
+				if pr.Selection == nil || pr.Selection.Kind() != types.FieldVal {
 					return false
 				}
 				hit := false
-				syntaxutil.ForEachSelectionHopStruct(selInfo, func(st *types.Named) {
+				syntaxutil.ForEachSelectionHopStruct(pr.Selection, func(st *types.Named) {
+					if st != nil && (match(st) || match(st.Origin())) {
+						hit = true
+					}
+				})
+				if hit {
+					return true
+				}
+			case flowir.ProjDeref:
+				if includeStarRoot {
+					if st := syntaxutil.DerefNamedStruct(pr.BaseType); st != nil && (match(st) || match(st.Origin())) {
+						return true
+					}
+				}
+			case flowir.ProjIndex:
+				if pr.Type != nil {
+					if st, ok := types.Unalias(pr.Type).(*types.Named); ok && st.Obj() != nil && (match(st) || match(st.Origin())) {
+						return true
+					}
+				}
+			case flowir.ProjSlice:
+			}
+		}
+		if pl.Root == flowir.RootTransient && pl.Base != nil && pl.Base.Kind == flowir.ValAddrOf && pl.Base.IsArraySlice {
+			return placeHitsStructPred(pl.Base.AddrPlace, match, includeStarRoot)
+		}
+		return false
+	}
+
+	var placeChainHitsSeedStruct func(pl flowir.Place) bool
+	placeChainHitsSeedStruct = func(pl flowir.Place) bool {
+		if cfg.SeedStructOrigin == nil && cfg.CanBeSeedStructCapsule == nil {
+			return false
+		}
+		for i := len(pl.Projs) - 1; i >= 0; i-- {
+			pr := pl.Projs[i]
+			switch pr.Kind {
+			case flowir.ProjField:
+				if pr.Selection == nil || pr.Selection.Kind() != types.FieldVal {
+					return false
+				}
+				hit := false
+				syntaxutil.ForEachSelectionHopStruct(pr.Selection, func(st *types.Named) {
 					if isSeedStruct(st) {
 						hit = true
 					}
@@ -269,103 +332,115 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 				if hit {
 					return true
 				}
-				cur = x.X
-			case *ast.IndexExpr:
-				if st := syntaxutil.DerefNamedStruct(info.TypeOf(x)); isSeedStruct(st) {
+			case flowir.ProjIndex:
+				if isSeedStruct(syntaxutil.DerefNamedStruct(pr.Type)) {
 					return true
 				}
-				cur = x.X
-			case *ast.SliceExpr:
-				cur = x.X
-			case *ast.StarExpr:
-				if st := syntaxutil.DerefNamedStruct(info.TypeOf(x.X)); isSeedStruct(st) {
+			case flowir.ProjDeref:
+				if isSeedStruct(syntaxutil.DerefNamedStruct(pr.BaseType)) {
 					return true
 				}
-				cur = x.X
-			default:
-				return false
+			case flowir.ProjSlice:
 			}
+		}
+		if pl.Root == flowir.RootTransient && pl.Base != nil && pl.Base.Kind == flowir.ValAddrOf && pl.Base.IsArraySlice {
+			return placeChainHitsSeedStruct(pl.Base.AddrPlace)
 		}
 		return false
 	}
 
-	selChainHitsPropagatedField := func(sel *ast.SelectorExpr) bool {
+	var placeChainHitsPropagatedField func(pl flowir.Place) bool
+	placeChainHitsPropagatedField = func(pl flowir.Place) bool {
 		if len(propagatedFields) == 0 {
 			return false
 		}
-		cur := ast.Expr(sel)
-		for cur != nil {
-			switch x := ast.Unparen(cur).(type) {
-			case *ast.SelectorExpr:
-				selInfo := info.Selections[x]
-				if selInfo == nil || selInfo.Kind() != types.FieldVal {
+		for i := len(pl.Projs) - 1; i >= 0; i-- {
+			pr := pl.Projs[i]
+			if pr.Kind == flowir.ProjField {
+				if pr.Selection == nil || pr.Selection.Kind() != types.FieldVal {
 					return false
 				}
-				if selectionHitsFieldSet(selInfo, propagatedFields) {
+				if selectionHitsFieldSet(pr.Selection, propagatedFields) {
 					return true
 				}
-				cur = x.X
-			case *ast.IndexExpr:
-				cur = x.X
-			case *ast.SliceExpr:
-				cur = x.X
-			case *ast.StarExpr:
-				cur = x.X
-			default:
-				return false
+			}
+		}
+		if pl.Root == flowir.RootTransient && pl.Base != nil && pl.Base.Kind == flowir.ValAddrOf && pl.Base.IsArraySlice {
+			return placeChainHitsPropagatedField(pl.Base.AddrPlace)
+		}
+		return false
+	}
+
+	var placeHitsPropagated func(pl flowir.Place, includeWholeOrStarStruct bool) bool
+	placeHitsPropagated = func(pl flowir.Place, includeWholeOrStarStruct bool) bool {
+		if len(propagatedStructs) == 0 {
+			return false
+		}
+		if includeWholeOrStarStruct && pl.Type != nil {
+			if st, ok := types.Unalias(pl.Type).(*types.Named); ok && propagatedStructs[st.Origin()] {
+				return true
+			}
+		}
+		for i := len(pl.Projs) - 1; i >= 0; i-- {
+			pr := pl.Projs[i]
+			switch pr.Kind {
+			case flowir.ProjField:
+				if pr.Selection == nil || pr.Selection.Kind() != types.FieldVal {
+					return false
+				}
+				if selectionHitsFieldSet(pr.Selection, propagatedFields) {
+					return true
+				}
+			case flowir.ProjDeref:
+				if includeWholeOrStarStruct {
+					if st := syntaxutil.DerefNamedStruct(pr.BaseType); st != nil && propagatedStructs[st.Origin()] {
+						return true
+					}
+				}
+			}
+		}
+		if pl.Root == flowir.RootTransient && pl.Base != nil && pl.Base.Kind == flowir.ValAddrOf && pl.Base.IsArraySlice {
+			return placeHitsPropagated(pl.Base.AddrPlace, includeWholeOrStarStruct)
+		}
+		return false
+	}
+
+	valueOrPlaceHitsStructPred := func(v *flowir.Value, pl flowir.Place, hasPl bool, match func(*types.Named) bool, includeStarRoot bool) bool {
+		if hasPl {
+			return placeHitsStructPred(pl, match, includeStarRoot)
+		}
+		if v != nil {
+			if v.Kind == flowir.ValPlace {
+				return placeHitsStructPred(v.Place, match, includeStarRoot)
+			}
+			if v.Kind == flowir.ValAddrOf && v.IsArraySlice {
+				return placeHitsStructPred(v.AddrPlace, match, includeStarRoot)
 			}
 		}
 		return false
 	}
 
-	exprHitsPropagated := func(expr ast.Expr, includeWholeOrStarStruct bool) bool {
-		if len(propagatedStructs) == 0 {
-			return false
+	valueOrPlaceHitsPropagated := func(v *flowir.Value, pl flowir.Place, hasPl bool, includeWholeOrStarStruct bool) bool {
+		if hasPl {
+			return placeHitsPropagated(pl, includeWholeOrStarStruct)
 		}
-		if includeWholeOrStarStruct {
-			if t := info.TypeOf(expr); t != nil {
-				if st, ok := types.Unalias(t).(*types.Named); ok && propagatedStructs[st.Origin()] {
-					return true
-				}
+		if v != nil {
+			if v.Kind == flowir.ValPlace {
+				return placeHitsPropagated(v.Place, includeWholeOrStarStruct)
 			}
-		}
-		cur := expr
-		for cur != nil {
-			switch x := ast.Unparen(cur).(type) {
-			case *ast.SelectorExpr:
-				si := info.Selections[x]
-				if si == nil || si.Kind() != types.FieldVal {
-					return false
-				}
-				if selectionHitsFieldSet(si, propagatedFields) {
+			if v.Kind == flowir.ValAddrOf && v.IsArraySlice {
+				return placeHitsPropagated(v.AddrPlace, includeWholeOrStarStruct)
+			}
+			if includeWholeOrStarStruct && v.Type != nil {
+				if st, ok := types.Unalias(v.Type).(*types.Named); ok && propagatedStructs[st.Origin()] {
 					return true
 				}
-				cur = x.X
-			case *ast.StarExpr:
-				if includeWholeOrStarStruct {
-					if st := syntaxutil.DerefNamedStruct(info.TypeOf(x.X)); st != nil && propagatedStructs[st.Origin()] {
-						return true
-					}
-				}
-				cur = x.X
-			case *ast.IndexExpr:
-				cur = x.X
-			case *ast.SliceExpr:
-				cur = x.X
-			default:
-				return false
 			}
 		}
 		return false
 	}
 
 	funcValueTaken := idx.FuncValueTaken
-	calledMethodSels := idx.CalledMethodSels
-	declBodies := idx.DeclBodies
-	returnEnclFunc := idx.ReturnEnclFunc
-	resultVarFunc := idx.ResultVarFunc
-	litResultVars := idx.LitResultVars
-
 	isNonGenericConcretePkgCallee := func(callee *types.Func) bool {
 		if callee == nil || callee.Pkg() != p.Types || callee.Origin() != callee {
 			return false
@@ -373,30 +448,30 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 		sig, ok := callee.Type().(*types.Signature)
 		return ok && sig.TypeParams().Len() == 0 && sig.RecvTypeParams().Len() == 0
 	}
-
-	resolveConcretePkgCallee := func(fun ast.Expr) *types.Func {
-		switch fn := ast.Unparen(fun).(type) {
-		case *ast.Ident:
-			if _, hasInst := info.Instances[fn]; hasInst {
+	resolveConcretePkgCalleeVal := func(v *flowir.Value) *types.Func {
+		if v == nil || v.Kind != flowir.ValCall {
+			return nil
+		}
+		if v.CallKind != flowir.CallPlain && !(v.CallKind == flowir.CallMethod && !v.IsMethodExprCall) {
+			return nil
+		}
+		if v.Selection != nil && v.Selection.Recv() != nil && types.IsInterface(v.Selection.Recv()) {
+			return nil
+		}
+		if v.CalleeSel != nil && v.CalleeSel.Sel != nil {
+			if _, hasInst := info.Instances[v.CalleeSel.Sel]; hasInst {
 				return nil
 			}
-			if callee, ok := info.Uses[fn].(*types.Func); ok && isNonGenericConcretePkgCallee(callee) {
-				return callee
-			}
-		case *ast.SelectorExpr:
-			if fn.Sel != nil {
-				if _, hasInst := info.Instances[fn.Sel]; hasInst {
+		}
+		if v.CallAST != nil {
+			if id, isID := ast.Unparen(v.CallAST.Fun).(*ast.Ident); isID {
+				if _, hasInst := info.Instances[id]; hasInst {
 					return nil
 				}
 			}
-			if selInfo := info.Selections[fn]; selInfo != nil {
-				if (selInfo.Recv() != nil && types.IsInterface(selInfo.Recv())) || selInfo.Kind() == types.MethodExpr {
-					return nil
-				}
-			}
-			if callee, ok := info.Uses[fn.Sel].(*types.Func); ok && isNonGenericConcretePkgCallee(callee) {
-				return callee
-			}
+		}
+		if isNonGenericConcretePkgCallee(v.CalleeFunc) {
+			return v.CalleeFunc
 		}
 		return nil
 	}
@@ -442,17 +517,25 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 		return !types.IsInterface(sig.Recv().Type()) && !pkgIfaceMethodNames[fn.Name()]
 	}
 
-	boundPkgMethodRecv := func(sel *ast.SelectorExpr) (*types.Var, bool) {
-		if sel == nil || calledMethodSels[sel] {
+	hasDeclBody := func(orig *types.Func) bool {
+		if orig == nil {
+			return false
+		}
+		fd := idx.FuncDecls[orig]
+		return fd != nil && fd.Body != nil && !(fd.Recv == nil && fd.Name != nil && fd.Name.Name == "init")
+	}
+
+	boundPkgMethodRecvVal := func(v *flowir.Value) (*types.Var, bool) {
+		if v == nil || v.Kind != flowir.ValMethodVal || v.Selection == nil {
 			return nil, false
 		}
-		if sel.Sel != nil {
+		if sel, isSel := ast.Unparen(v.Raw).(*ast.SelectorExpr); isSel && sel.Sel != nil {
 			if _, hasInst := info.Instances[sel.Sel]; hasInst {
 				return nil, false
 			}
 		}
-		selInfo := info.Selections[sel]
-		if selInfo == nil || selInfo.Kind() != types.MethodVal || selInfo.Recv() == nil || types.IsInterface(selInfo.Recv()) || len(selInfo.Index()) != 1 {
+		selInfo := v.Selection
+		if selInfo.Kind() != types.MethodVal || selInfo.Recv() == nil || types.IsInterface(selInfo.Recv()) || len(selInfo.Index()) != 1 {
 			return nil, false
 		}
 		mObj, ok := selInfo.Obj().(*types.Func)
@@ -460,7 +543,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 			return nil, false
 		}
 		orig := mObj.Origin()
-		if orig == nil || orig.Pkg() != p.Types || declBodies[orig] == nil {
+		if orig == nil || orig.Pkg() != p.Types || !hasDeclBody(orig) {
 			return nil, false
 		}
 		origSig, ok := orig.Type().(*types.Signature)
@@ -469,16 +552,19 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 		}
 		rv := origSig.Recv()
 		if _, recvIsPtr := types.Unalias(rv.Type()).(*types.Pointer); recvIsPtr {
-			xt := info.TypeOf(sel.X)
-			if xt == nil {
+			if v.Recv == nil || v.Recv.Type == nil {
 				return nil, false
 			}
-			if _, xIsPtr := types.Unalias(xt).(*types.Pointer); !xIsPtr {
+			if _, xIsPtr := types.Unalias(v.Recv.Type).(*types.Pointer); !xIsPtr {
 				return nil, false
 			}
 		}
 		if origSig.RecvTypeParams().Len() > 0 {
-			recvSt := syntaxutil.DerefNamedStruct(info.TypeOf(sel.X))
+			var recvT types.Type
+			if v.Recv != nil {
+				recvT = v.Recv.Type
+			}
+			recvSt := syntaxutil.DerefNamedStruct(recvT)
 			if recvSt == nil {
 				return nil, false
 			}
@@ -503,7 +589,7 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 	}
 
 	isAllowedSeedStructCompositeLit := func(cl *ast.CompositeLit) bool {
-		if !cfg.AllowCompositeLitIntoSeedStruct || (cfg.SeedStructOrigin == nil && len(capsuleStructs) == 0) {
+		if cl == nil || !cfg.AllowCompositeLitIntoSeedStruct || (cfg.SeedStructOrigin == nil && len(capsuleStructs) == 0) {
 			return false
 		}
 		lt := info.TypeOf(cl)
@@ -553,14 +639,6 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 		return false
 	}
 
-	indexValueType := func(ix *ast.IndexExpr) types.Type {
-		et := info.TypeOf(ix)
-		if tup, isTup := et.(*types.Tuple); isTup && tup.Len() > 0 {
-			return tup.At(0).Type()
-		}
-		return et
-	}
-
 	type retSlot struct {
 		fn  *types.Func
 		idx int
@@ -573,206 +651,331 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 	taintedRetAnyRef := map[*types.Func]bool{}
 	taintedRetAnyCarrier := map[*types.Func]bool{}
 
-	var classifyExpr func(expr ast.Expr) (isRef bool, isCarrier bool)
-	var classifyMultiReturnSlot func(rhs ast.Expr, slot int, slotType types.Type) (isRef bool, isCarrier bool)
-	var exprMutatesTaintedTarget func(expr ast.Expr) bool
+	var classifyPlace func(pl flowir.Place) (isRef bool, isCarrier bool)
+	var classifyValue func(v *flowir.Value) (isRef bool, isCarrier bool)
+	var classifyMultiReturnSlot func(rhs *flowir.Value, slot int, slotType types.Type) (isRef bool, isCarrier bool)
+	var placeMutatesTaintedTarget func(pl flowir.Place) bool
 
-	isAllowedPropagatedCompositeLit := func(cl *ast.CompositeLit) bool {
-		if !cfg.AllowCompositeLitFieldPropagation || len(propagatedStructs) == 0 {
+	isAllowedPropagatedCompositeLit := func(v *flowir.Value, cl *ast.CompositeLit) bool {
+		if cl == nil || !cfg.AllowCompositeLitFieldPropagation || len(propagatedStructs) == 0 {
 			return false
 		}
 		st := syntaxutil.DerefNamedStruct(info.TypeOf(cl))
 		if st == nil || !propagatedStructs[st.Origin()] {
 			return false
 		}
-		stUnder, okSt := st.Origin().Underlying().(*types.Struct)
-		if !okSt {
-			return false
-		}
-		for ei, elt := range cl.Elts {
-			var fv *types.Var
-			val := elt
-			if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
-				if kid, okID := ast.Unparen(kv.Key).(*ast.Ident); okID {
-					fv, _ = info.Uses[kid].(*types.Var)
-				}
-				val = kv.Value
-			} else if ei < stUnder.NumFields() {
-				fv = stUnder.Field(ei)
-			}
-			if _, vCar := classifyExpr(val); vCar {
-				if fv == nil || !propagatedFields[fv.Origin()] {
+		for i := range v.CompositeElts {
+			elt := &v.CompositeElts[i]
+			if _, vCar := classifyValue(elt.Value); vCar {
+				if elt.Field == nil || !propagatedFields[elt.Field.Origin()] {
 					return false
 				}
 			}
 		}
 		return true
 	}
-	isAllowedStructCompositeLit := func(cl *ast.CompositeLit) bool {
-		return isAllowedSeedStructCompositeLit(cl) || isAllowedPropagatedCompositeLit(cl)
+	isAllowedStructCompositeLit := func(v *flowir.Value) bool {
+		cl := allocCompositeLitAST(v)
+		return isAllowedSeedStructCompositeLit(cl) || isAllowedPropagatedCompositeLit(v, cl)
 	}
 
-	classifyExpr = func(expr ast.Expr) (bool, bool) {
-		expr = ast.Unparen(expr)
-		if expr == nil {
-			return false, false
+	checkSeedExpr := func(expr ast.Expr) (bool, bool, bool) {
+		if cfg.SeedExpr == nil || expr == nil {
+			return false, false, false
 		}
-		if cfg.SeedExpr != nil {
-			if sRef, sCar := cfg.SeedExpr(expr); sRef || sCar {
-				return sRef, sRef || sCar
+		unp := ast.Unparen(expr)
+		if sRef, sCar := cfg.SeedExpr(unp); sRef || sCar {
+			return sRef, sRef || sCar, true
+		}
+		return false, false, false
+	}
+
+	classifyPlacePrefix := func(pl flowir.Place, projCount int) (bool, bool) {
+		var curRef, curCar bool
+		prevRaw := pl.RootRaw
+		if sRef, sCar, ok := checkSeedExpr(pl.RootRaw); ok {
+			curRef, curCar = sRef, sCar
+		} else if projCount == 0 && pl.Raw != nil && ast.Unparen(pl.Raw) != pl.RootRaw {
+			if sRef, sCar, ok := checkSeedExpr(pl.Raw); ok {
+				return sRef, sCar
 			}
 		}
-		switch e := expr.(type) {
-		case *ast.Ident:
-			if v, ok := info.Uses[e].(*types.Var); ok && v != nil {
-				return taintedRef[v], taintedRef[v] || taintedCarrier[v]
+		if !curRef && !curCar {
+			switch pl.Root {
+			case flowir.RootLocal, flowir.RootParam, flowir.RootRecv, flowir.RootResult, flowir.RootOuterVar, flowir.RootPkgGlobal:
+				if pl.Obj != nil {
+					curRef = taintedRef[pl.Obj]
+					curCar = curRef || taintedCarrier[pl.Obj]
+				}
+			case flowir.RootTransient:
+				if pl.Base != nil {
+					curRef, curCar = classifyValue(pl.Base)
+					if pl.Base.Raw != nil {
+						prevRaw = ast.Unparen(pl.Base.Raw)
+					}
+				}
+			}
+		}
+		for i := 0; i < projCount; i++ {
+			pr := pl.Projs[i]
+			if sRef, sCar, ok := checkSeedExpr(pr.Raw); ok {
+				curRef, curCar = sRef, sCar
+				prevRaw = pr.Raw
+				continue
+			}
+			prefix := pl
+			prefix.Projs = pl.Projs[:i+1]
+			prefix.Type = pr.Type
+			prefix.Raw = pr.Raw
+			switch pr.Kind {
+			case flowir.ProjField:
+				if pr.Selection != nil && pr.Selection.Kind() == types.FieldVal {
+					if cfg.IsExemptField != nil && !syntaxutil.SelectionCrossesEmbeddedPointer(pr.Selection) {
+						if fv, isFV := pr.Selection.Obj().(*types.Var); isFV && cfg.IsExemptField(fv) {
+							curRef, curCar = false, false
+							prevRaw = pr.Raw
+							continue
+						}
+					}
+					ft := pr.Selection.Type()
+					if placeChainHitsPropagatedField(prefix) {
+						curRef, curCar = projectedClassify(ft, prevRaw)
+					} else {
+						seeded := false
+						if placeChainHitsSeedStruct(prefix) {
+							if isDirectRef(ft) {
+								curRef, curCar = true, true
+								seeded = true
+							} else if carriesRef(ft) {
+								curRef, curCar = false, true
+								seeded = true
+							}
+						}
+						if !seeded {
+							if curCar {
+								curRef, curCar = projectedClassify(ft, prevRaw)
+							} else {
+								curRef, curCar = false, false
+							}
+						}
+					}
+				} else {
+					curRef, curCar = false, false
+				}
+			case flowir.ProjIndex:
+				if curCar {
+					curRef, curCar = projectedClassify(indexValueTypeFromType(pr.Type), prevRaw)
+				} else {
+					curRef, curCar = false, false
+				}
+			case flowir.ProjSlice:
+				if curRef {
+					curRef, curCar = true, true
+				} else if curCar {
+					curRef, curCar = false, true
+				} else {
+					curRef, curCar = false, false
+				}
+			case flowir.ProjDeref:
+				if curCar {
+					curRef, curCar = projectedClassify(pr.Type, prevRaw)
+				} else {
+					curRef, curCar = false, false
+				}
+			}
+			prevRaw = pr.Raw
+		}
+		return curRef, curCar
+	}
+
+	classifyPlace = func(pl flowir.Place) (bool, bool) {
+		return classifyPlacePrefix(pl, len(pl.Projs))
+	}
+
+	placeMutatesTaintedTarget = func(pl flowir.Place) bool {
+		for i := len(pl.Projs) - 1; i >= 0; i-- {
+			pr := pl.Projs[i]
+			switch pr.Kind {
+			case flowir.ProjDeref:
+				if bRef, _ := classifyPlacePrefix(pl, i); bRef {
+					return true
+				}
+			case flowir.ProjIndex:
+				if pr.BaseType != nil {
+					switch types.Unalias(pr.BaseType).Underlying().(type) {
+					case *types.Slice, *types.Map, *types.Pointer:
+						if bRef, _ := classifyPlacePrefix(pl, i); bRef {
+							return true
+						}
+					}
+				}
+			case flowir.ProjField:
+				if pr.Selection != nil && pr.Selection.Kind() == types.FieldVal {
+					if pr.BaseType != nil {
+						if _, isPtr := types.Unalias(pr.BaseType).Underlying().(*types.Pointer); isPtr {
+							if bRef, _ := classifyPlacePrefix(pl, i); bRef {
+								return true
+							}
+						}
+					}
+					if syntaxutil.SelectionCrossesEmbeddedPointer(pr.Selection) {
+						if _, bCar := classifyPlacePrefix(pl, i); bCar {
+							return true
+						}
+					}
+				}
+			case flowir.ProjSlice:
+			}
+		}
+		if pl.Root == flowir.RootTransient && pl.Base != nil {
+			if pl.Base.Kind == flowir.ValPlace {
+				return placeMutatesTaintedTarget(pl.Base.Place)
+			}
+			if pl.Base.Kind == flowir.ValAddrOf && pl.Base.IsArraySlice {
+				return placeMutatesTaintedTarget(pl.Base.AddrPlace)
+			}
+		}
+		return false
+	}
+
+	valueMutatesTaintedTarget := func(v *flowir.Value) bool {
+		if v == nil {
+			return false
+		}
+		if v.Kind == flowir.ValPlace {
+			return placeMutatesTaintedTarget(v.Place)
+		}
+		if v.Kind == flowir.ValAddrOf && v.IsArraySlice {
+			return placeMutatesTaintedTarget(v.AddrPlace)
+		}
+		return false
+	}
+
+	methodValHasTaintedOrSeedRecv := func(v *flowir.Value) (xRef, xCar, mutX, seedX bool) {
+		if v == nil || v.Recv == nil {
+			return false, false, false, false
+		}
+		xRef, xCar = classifyValue(v.Recv)
+		if v.HasRecvPlace {
+			mutX = placeMutatesTaintedTarget(v.RecvPlace)
+		} else {
+			mutX = valueMutatesTaintedTarget(v.Recv)
+		}
+		rxSt := syntaxutil.DerefNamedStruct(v.Recv.Type)
+		seedX = isSeedStruct(rxSt) || isPropagatedStruct(rxSt)
+		if !seedX && v.HasRecvPlace {
+			seedX = placeChainHitsSeedStruct(v.RecvPlace) || placeChainHitsPropagatedField(v.RecvPlace)
+		}
+		return xRef, xCar, mutX, seedX
+	}
+
+	classifyValue = func(v *flowir.Value) (bool, bool) {
+		if v == nil {
+			return false, false
+		}
+		if sRef, sCar, ok := checkSeedExpr(v.Raw); ok {
+			return sRef, sCar
+		}
+		switch v.Kind {
+		case flowir.ValPlace:
+			return classifyPlace(v.Place)
+
+		case flowir.ValMethodVal:
+			_, xCar, mutX, seedX := methodValHasTaintedOrSeedRecv(v)
+			if xCar || mutX || seedX {
+				if _, okM := boundPkgMethodRecvVal(v); !okM {
+					return true, true
+				}
 			}
 			return false, false
 
-		case *ast.SelectorExpr:
-			selInfo := info.Selections[e]
-			if selInfo != nil && selInfo.Kind() == types.FieldVal {
-				if cfg.IsExemptField != nil && !syntaxutil.SelectionCrossesEmbeddedPointer(selInfo) {
-					if fv, isFV := selInfo.Obj().(*types.Var); isFV && cfg.IsExemptField(fv) {
-						return false, false
-					}
+		case flowir.ValAddrOf:
+			bRef, bCar := classifyPlace(v.AddrPlace)
+			if v.IsArraySlice {
+				if bRef {
+					return true, true
 				}
-				ft := selInfo.Type()
-				if selChainHitsPropagatedField(e) {
-					return projectedClassify(ft, e.X)
-				}
-				if selChainHitsSeedStruct(e) {
-					if isDirectRef(ft) {
-						return true, true
-					}
-					if carriesRef(ft) {
-						return false, true
-					}
-				}
-				_, bCar := classifyExpr(e.X)
 				if bCar {
-					return projectedClassify(ft, e.X)
+					return false, true
 				}
 				return false, false
 			}
-			if selInfo != nil && selInfo.Kind() == types.MethodVal && !calledMethodSels[e] {
-				rxSt := syntaxutil.DerefNamedStruct(info.TypeOf(e.X))
-				if _, bCar := classifyExpr(e.X); bCar || exprMutatesTaintedTarget(e.X) || selChainHitsSeedStruct(e) || selChainHitsPropagatedField(e) || isSeedStruct(rxSt) || isPropagatedStruct(rxSt) {
-					if _, okM := boundPkgMethodRecv(e); !okM {
-						return true, true
-					}
-				}
-			}
-			return false, false
-
-		case *ast.IndexExpr:
-			_, bCar := classifyExpr(e.X)
-			if bCar {
-				return projectedClassify(indexValueType(e), e.X)
-			}
-			return false, false
-
-		case *ast.SliceExpr:
-			bRef, bCar := classifyExpr(e.X)
-			if bRef {
+			if placeMutatesTaintedTarget(v.AddrPlace) {
 				return true, true
 			}
-			if bCar {
+			if bRef || bCar {
 				return false, true
 			}
 			return false, false
 
-		case *ast.StarExpr:
-			_, bCar := classifyExpr(e.X)
-			if bCar {
-				return projectedClassify(info.TypeOf(e), e.X)
+		case flowir.ValChanRecv:
+			if _, cCar := classifyValue(v.Chan); cCar {
+				et := indexValueTypeFromType(v.Type)
+				return isDirectRef(et), true
 			}
 			return false, false
 
-		case *ast.UnaryExpr:
-			if e.Op == token.AND {
-				if cl, isCL := ast.Unparen(e.X).(*ast.CompositeLit); isCL && isAllowedStructCompositeLit(cl) {
-					return false, false
-				}
-				bRef, bCar := classifyExpr(e.X)
-				if exprMutatesTaintedTarget(e.X) {
-					return true, true
-				}
-				if bRef || bCar {
-					return false, true
-				}
+		case flowir.ValAllocFresh:
+			switch v.AllocKind {
+			case flowir.AllocMake, flowir.AllocBuiltinNewType:
 				return false, false
-			}
-			if e.Op == token.ARROW {
-				_, cCar := classifyExpr(e.X)
-				if cCar {
-					et := indexValueTypeFromType(info.TypeOf(e))
-					return isDirectRef(et), true
-				}
-			}
-			return false, false
-
-		case *ast.CompositeLit:
-			if isAllowedStructCompositeLit(e) {
-				return false, false
-			}
-			for _, elt := range e.Elts {
-				val := elt
-				if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
-					if _, kCar := classifyExpr(kv.Key); kCar {
+			case flowir.AllocBuiltinNewExpr:
+				if len(v.Args) == 1 {
+					if _, aCar := classifyValue(v.Args[0]); aCar {
 						return false, true
 					}
-					val = kv.Value
 				}
-				if _, vCar := classifyExpr(val); vCar {
-					return false, true
-				}
-			}
-			return false, false
-
-		case *ast.CallExpr:
-			fun := ast.Unparen(e.Fun)
-			if info.Types[fun].IsType() && len(e.Args) == 1 {
-				aRef, aCar := classifyExpr(e.Args[0])
-				if !aCar {
+				return false, false
+			case flowir.AllocCompositeLit:
+				if isAllowedStructCompositeLit(v) {
 					return false, false
 				}
-				dstT := info.Types[fun].Type
-				if !elemHasHandle(dstT) && !syntaxutil.ContainsUintptr(dstT) {
-					return false, false
-				}
-				return aRef || isDirectRef(dstT), true
-			}
-			if b := syntaxutil.LookupBuiltin(info, fun); b != nil {
-				switch b.Name() {
-				case "make", "len", "cap", "Sizeof", "Alignof", "Offsetof":
-					return false, false
-				case "new":
-					if syntaxutil.IsBuiltinNewType(info, e) {
-						return false, false
-					}
-					if len(e.Args) == 1 {
-						if _, aCar := classifyExpr(e.Args[0]); aCar {
+				for i := range v.CompositeElts {
+					elt := &v.CompositeElts[i]
+					if elt.MapKey != nil {
+						if _, kCar := classifyValue(elt.MapKey); kCar {
 							return false, true
 						}
 					}
-					return false, false
-				case "append":
-					if len(e.Args) == 0 {
-						return false, false
+					if _, vCar := classifyValue(elt.Value); vCar {
+						return false, true
 					}
-					dRef, dCar := classifyExpr(e.Args[0])
+				}
+				return false, false
+			}
+			return false, false
+
+		case flowir.ValConvert:
+			if v.IsTypeAssert {
+				if _, xCar := classifyValue(v.Arg); xCar {
+					return true, true
+				}
+				return false, false
+			}
+			aRef, aCar := classifyValue(v.Arg)
+			if !aCar {
+				return false, false
+			}
+			if !elemHasHandle(v.Type) && !syntaxutil.ContainsUintptr(v.Type) {
+				return false, false
+			}
+			return aRef || isDirectRef(v.Type), true
+
+		case flowir.ValCall:
+			if v.CallKind == flowir.CallBuiltin {
+				if v.BuiltinName == "append" && len(v.Args) > 0 {
+					dRef, dCar := classifyValue(v.Args[0])
 					elemTainted := false
 					var slElem types.Type
-					if sl, ok := syntaxutil.UnderlyingType(info.TypeOf(e)).(*types.Slice); ok {
+					if sl, ok := syntaxutil.UnderlyingType(v.Type).(*types.Slice); ok {
 						slElem = sl.Elem()
 					}
-					for _, arg := range e.Args[1:] {
-						_, aCar := classifyExpr(arg)
+					for _, arg := range v.Args[1:] {
+						_, aCar := classifyValue(arg)
 						if !aCar {
 							continue
 						}
-						if e.Ellipsis.IsValid() {
+						if v.Ellipsis {
 							if elemHasHandle(slElem) {
 								elemTainted = true
 							}
@@ -782,8 +985,9 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 					}
 					return dRef, dRef || dCar || elemTainted
 				}
+				return false, false
 			}
-			if callee := resolveConcretePkgCallee(e.Fun); callee != nil {
+			if callee := resolveConcretePkgCalleeVal(v); callee != nil {
 				if taintedRetAnyRef[callee] || taintedRetAnyCarrier[callee] {
 					return taintedRetAnyRef[callee], true
 				}
@@ -791,81 +995,27 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 			}
 			return false, false
 
-		case *ast.TypeAssertExpr:
-			_, xCar := classifyExpr(e.X)
-			if xCar {
-				return true, true
+		case flowir.ValCompositeExpr:
+			hit := false
+			for _, a := range v.Args {
+				if _, aCar := classifyValue(a); aCar {
+					hit = true
+					break
+				}
+			}
+			if hit {
+				if v.Type == nil || isDirectRef(v.Type) || types.IsInterface(v.Type) {
+					return true, true
+				}
+				if carriesRefOrIface(v.Type) {
+					return false, true
+				}
 			}
 			return false, false
-		}
 
-		hit := false
-		ast.Inspect(expr, func(child ast.Node) bool {
-			if hit || child == nil {
-				return false
-			}
-			if child == expr {
-				return true
-			}
-			if ce, ok := child.(ast.Expr); ok {
-				if _, cCar := classifyExpr(ce); cCar {
-					hit = true
-				}
-				return false
-			}
-			return true
-		})
-		if hit {
-			et := info.TypeOf(expr)
-			if et == nil || isDirectRef(et) || types.IsInterface(et) {
-				return true, true
-			}
-			if carriesRefOrIface(et) {
-				return false, true
-			}
+		default:
+			return false, false
 		}
-		return false, false
-	}
-
-	exprMutatesTaintedTarget = func(expr ast.Expr) bool {
-		expr = ast.Unparen(expr)
-		switch x := expr.(type) {
-		case *ast.StarExpr:
-			if bRef, _ := classifyExpr(x.X); bRef {
-				return true
-			}
-			return exprMutatesTaintedTarget(x.X)
-		case *ast.IndexExpr:
-			xt := info.TypeOf(x.X)
-			if xt != nil {
-				switch types.Unalias(xt).Underlying().(type) {
-				case *types.Slice, *types.Map, *types.Pointer:
-					if bRef, _ := classifyExpr(x.X); bRef {
-						return true
-					}
-				}
-			}
-			return exprMutatesTaintedTarget(x.X)
-		case *ast.SelectorExpr:
-			if selInfo := info.Selections[x]; selInfo != nil && selInfo.Kind() == types.FieldVal {
-				if xt := info.TypeOf(x.X); xt != nil {
-					if _, isPtr := types.Unalias(xt).Underlying().(*types.Pointer); isPtr {
-						if bRef, _ := classifyExpr(x.X); bRef {
-							return true
-						}
-					}
-				}
-				if syntaxutil.SelectionCrossesEmbeddedPointer(selInfo) {
-					if _, bCar := classifyExpr(x.X); bCar {
-						return true
-					}
-				}
-				return exprMutatesTaintedTarget(x.X)
-			}
-		case *ast.SliceExpr:
-			return exprMutatesTaintedTarget(x.X)
-		}
-		return false
 	}
 
 	markVarTaint := func(v *types.Var, addRef, addCar bool) bool {
@@ -884,6 +1034,13 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 		return progressed
 	}
 
+	markContainerIndexWrite := func(dst flowir.Place) bool {
+		if dst.Obj == nil || len(dst.Projs) != 1 || dst.Projs[0].Kind != flowir.ProjIndex {
+			return false
+		}
+		return markVarTaint(dst.Obj, false, true)
+	}
+
 	isEligibleCapsule := func(orig *types.Named) bool {
 		if orig == nil || orig.Obj() == nil || orig.Obj().Pkg() != p.Types || orig.Obj().Exported() || orig.TypeParams().Len() > 0 {
 			return false
@@ -892,39 +1049,121 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 		return isSt && structHasNoExportedFieldsDeep(st)
 	}
 
-	classifyMultiReturnSlot = func(rhs ast.Expr, slot int, slotType types.Type) (bool, bool) {
-		rhs = ast.Unparen(rhs)
+	classifyMultiReturnSlot = func(rhs *flowir.Value, slot int, slotType types.Type) (bool, bool) {
 		if rhs == nil {
 			return false, false
 		}
-		if call, isCall := rhs.(*ast.CallExpr); isCall {
-			if cfg.SeedExpr != nil {
-				if _, sCar := cfg.SeedExpr(call); sCar {
-					if isDirectRef(slotType) {
-						return true, true
-					}
-					if carriesRef(slotType) {
-						return false, true
-					}
-					if isOpaqueIfaceOrTP(slotType) && !types.Identical(slotType, errorType) {
-						return true, true
-					}
-					return false, false
+		if rhs.Kind == flowir.ValCall && rhs.CallAST != nil {
+			if _, sCar, ok := checkSeedExpr(rhs.CallAST); ok && sCar {
+				if isDirectRef(slotType) {
+					return true, true
 				}
+				if carriesRef(slotType) {
+					return false, true
+				}
+				if isOpaqueIfaceOrTP(slotType) && !types.Identical(slotType, errorType) {
+					return true, true
+				}
+				return false, false
 			}
-			if callee := resolveConcretePkgCallee(call.Fun); callee != nil {
+			if callee := resolveConcretePkgCalleeVal(rhs); callee != nil {
 				rk := retSlot{fn: callee, idx: slot}
 				return taintedRetRef[rk], taintedRetRef[rk] || taintedRetCarrier[rk]
 			}
 			return false, false
 		}
-		if _, rCar := classifyExpr(rhs); !rCar || slot != 0 {
+		if _, rCar := classifyValue(rhs); !rCar || slot != 0 {
 			return false, false
 		}
-		if ix, isIX := rhs.(*ast.IndexExpr); isIX {
-			return projectedClassify(slotType, ix.X)
+		if rhs.Kind == flowir.ValPlace && len(rhs.Place.Projs) > 0 {
+			lastIdx := len(rhs.Place.Projs) - 1
+			if rhs.Place.Projs[lastIdx].Kind == flowir.ProjIndex {
+				containerRaw := rhs.Place.RootRaw
+				if lastIdx > 0 {
+					containerRaw = rhs.Place.Projs[lastIdx-1].Raw
+				}
+				return projectedClassify(slotType, containerRaw)
+			}
 		}
 		return projectedClassify(slotType, nil)
+	}
+
+	walkAllBodies := func(visitBody func(b *flowir.Body, enclFunc *types.Func, inSyncAllowed bool) bool) bool {
+		var walkRec func(b *flowir.Body, enclFunc *types.Func, inSyncAllowed bool) bool
+		walkRec = func(b *flowir.Body, enclFunc *types.Func, inSyncAllowed bool) bool {
+			if b == nil {
+				return true
+			}
+			if !visitBody(b, enclFunc, inSyncAllowed) {
+				return false
+			}
+			walkChildClosures := func(v *flowir.Value, childSync bool) bool {
+				if v == nil {
+					return true
+				}
+				cont := true
+				v.WalkValues(func(cur *flowir.Value) bool {
+					if !cont {
+						return false
+					}
+					switch cur.Kind {
+					case flowir.ValMakeClosure:
+						if cur.Closure != nil && !walkRec(cur.Closure, nil, !cfg.ForbidNonNilSeedStructPtrCompare) {
+							cont = false
+							return false
+						}
+					case flowir.ValCall:
+						if cur.CallKind == flowir.CallIIFE && cur.IIFE != nil && !walkRec(cur.IIFE, nil, !cfg.ForbidNonNilSeedStructPtrCompare) {
+							cont = false
+							return false
+						}
+					}
+					return true
+				})
+				return cont
+			}
+			for i := range b.Ops {
+				op := &b.Ops[i]
+				childSync := inSyncAllowed
+				if op.Kind == flowir.OpGo {
+					childSync = !cfg.ForbidNonNilSeedStructPtrCompare
+				}
+				if !op.ForEachValue(func(v *flowir.Value) bool { return walkChildClosures(v, childSync) }) {
+					return false
+				}
+				if op.Kind == flowir.OpAssign && op.AssignKind == flowir.AssignRange && op.RangeBody != nil {
+					if !walkRec(op.RangeBody, enclFunc, inSyncAllowed) {
+						return false
+					}
+				}
+			}
+			return true
+		}
+
+		for _, fd := range flowCache.FuncDecls {
+			b := flowCache.FuncBody(fd)
+			if b == nil {
+				continue
+			}
+			var fn *types.Func
+			if fd.Name != nil && !(fd.Recv == nil && fd.Name.Name == "init") {
+				fn, _ = info.Defs[fd.Name].(*types.Func)
+			}
+			inSync := !cfg.ForbidNonNilSeedStructPtrCompare || (cfg.AllowSeedStructMutationInFunc != nil && fd == cfg.AllowSeedStructMutationInFunc)
+			if !walkRec(b, fn, inSync) {
+				return false
+			}
+		}
+		for _, gd := range flowCache.GenDecls {
+			b := flowCache.Body(gd)
+			if b == nil {
+				continue
+			}
+			if !walkRec(b, nil, !cfg.ForbidNonNilSeedStructPtrCompare) {
+				return false
+			}
+		}
+		return true
 	}
 
 	for {
@@ -938,120 +1177,35 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 		changed := true
 		for changed {
 			changed = false
-			for _, file := range p.Syntax {
-				ast.Inspect(file, func(n ast.Node) bool {
-					if n == nil {
-						return false
-					}
-					switch s := n.(type) {
-					case *ast.SelectorExpr:
-						if selInfo := info.Selections[s]; selInfo != nil && selInfo.Kind() == types.MethodVal && !calledMethodSels[s] {
-							xRef, xCar := classifyExpr(s.X)
-							mutX := exprMutatesTaintedTarget(s.X)
-							rxSt := syntaxutil.DerefNamedStruct(info.TypeOf(s.X))
-							seedX := selChainHitsSeedStruct(s) || selChainHitsPropagatedField(s) || isSeedStruct(rxSt) || isPropagatedStruct(rxSt)
-							if xCar || mutX || seedX {
-								if rv, okM := boundPkgMethodRecv(s); okM {
-									_, recvIsPtr := types.Unalias(rv.Type()).(*types.Pointer)
-									addRef := xRef || mutX || recvIsPtr || isDirectRef(rv.Type())
-									if markVarTaint(rv, addRef, true) {
-										changed = true
-									}
+			taintVal := func(v *flowir.Value) {
+				if v == nil {
+					return
+				}
+				v.WalkValues(func(cur *flowir.Value) bool {
+					switch cur.Kind {
+					case flowir.ValMethodVal:
+						xRef, xCar, mutX, seedX := methodValHasTaintedOrSeedRecv(cur)
+						if xCar || mutX || seedX {
+							if rv, okM := boundPkgMethodRecvVal(cur); okM {
+								_, recvIsPtr := types.Unalias(rv.Type()).(*types.Pointer)
+								addRef := xRef || mutX || recvIsPtr || isDirectRef(rv.Type())
+								if markVarTaint(rv, addRef, true) {
+									changed = true
 								}
 							}
 						}
-
-					case *ast.AssignStmt:
-						if len(s.Lhs) == len(s.Rhs) {
-							for i, lhs := range s.Lhs {
-								rRef, rCar := classifyExpr(s.Rhs[i])
-								if !rCar {
-									continue
-								}
-								if v := syntaxutil.LookupIdentVar(info, lhs); v != nil {
-									if markVarTaint(v, rRef, true) {
-										changed = true
-									}
-								} else if ix, isIX := ast.Unparen(lhs).(*ast.IndexExpr); isIX {
-									if bv := syntaxutil.LookupIdentVar(info, ix.X); bv != nil {
-										if markVarTaint(bv, false, true) {
-											changed = true
-										}
-									}
-								}
-							}
-						} else if len(s.Lhs) > 1 && len(s.Rhs) == 1 {
-							rhsTup, _ := info.TypeOf(s.Rhs[0]).(*types.Tuple)
-							for i, lhs := range s.Lhs {
-								v := syntaxutil.LookupIdentVar(info, lhs)
-								if v == nil {
-									continue
-								}
-								slotT := v.Type()
-								if rhsTup != nil && i < rhsTup.Len() {
-									slotT = rhsTup.At(i).Type()
-								}
-								if pRef, pCar := classifyMultiReturnSlot(s.Rhs[0], i, slotT); pCar {
-									addRef := pRef || isOpaqueIfaceOrTP(v.Type())
-									if markVarTaint(v, addRef, true) {
+					case flowir.ValCall:
+						if cur.CallKind == flowir.CallBuiltin && cur.BuiltinName == "copy" && len(cur.Args) == 2 {
+							if _, srcCar := classifyValue(cur.Args[1]); srcCar {
+								if cur.Args[0] != nil && cur.Args[0].Kind == flowir.ValPlace && cur.Args[0].Place.Obj != nil {
+									if markVarTaint(cur.Args[0].Place.Obj, false, true) {
 										changed = true
 									}
 								}
 							}
+							return true
 						}
-
-					case *ast.ValueSpec:
-						if len(s.Names) == len(s.Values) {
-							for i, nm := range s.Names {
-								rRef, rCar := classifyExpr(s.Values[i])
-								if !rCar {
-									continue
-								}
-								if v, ok := info.Defs[nm].(*types.Var); ok && v != nil {
-									if markVarTaint(v, rRef, true) {
-										changed = true
-									}
-								}
-							}
-						} else if len(s.Names) > 1 && len(s.Values) == 1 {
-							rhsTup, _ := info.TypeOf(s.Values[0]).(*types.Tuple)
-							for i, nm := range s.Names {
-								v, ok := info.Defs[nm].(*types.Var)
-								if !ok || v == nil {
-									continue
-								}
-								slotT := v.Type()
-								if rhsTup != nil && i < rhsTup.Len() {
-									slotT = rhsTup.At(i).Type()
-								}
-								if pRef, pCar := classifyMultiReturnSlot(s.Values[0], i, slotT); pCar {
-									addRef := pRef || isOpaqueIfaceOrTP(v.Type())
-									if markVarTaint(v, addRef, true) {
-										changed = true
-									}
-								}
-							}
-						}
-
-					case *ast.RangeStmt:
-						_, xCar := classifyExpr(s.X)
-						if xCar {
-							for _, bindExpr := range []ast.Expr{s.Key, s.Value} {
-								if bindExpr == nil {
-									continue
-								}
-								if v := syntaxutil.LookupIdentVar(info, bindExpr); v != nil {
-									if pRef, pCar := projectedClassify(v.Type(), s.X); pCar {
-										if markVarTaint(v, pRef, true) {
-											changed = true
-										}
-									}
-								}
-							}
-						}
-
-					case *ast.CallExpr:
-						callee := resolveConcretePkgCallee(s.Fun)
+						callee := resolveConcretePkgCalleeVal(cur)
 						if callee == nil {
 							return true
 						}
@@ -1059,169 +1213,181 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 						if !ok {
 							return true
 						}
-						if sel, isSel := ast.Unparen(s.Fun).(*ast.SelectorExpr); isSel && sig.Recv() != nil {
-							if selInfo := info.Selections[sel]; selInfo != nil && selInfo.Kind() == types.MethodVal {
-								rv := sig.Recv()
-								xRef, xCar := classifyExpr(sel.X)
-								if xCar {
-									addRef := xRef || (isDirectRef(rv.Type()) && exprMutatesTaintedTarget(sel.X))
-									if markVarTaint(rv, addRef, true) {
-										changed = true
-									}
+						if cur.CallKind == flowir.CallMethod && !cur.IsMethodExprCall && sig.Recv() != nil && cur.Recv != nil {
+							rv := sig.Recv()
+							xRef, xCar := classifyValue(cur.Recv)
+							if xCar {
+								mutRecv := false
+								if cur.HasRecvPlace {
+									mutRecv = placeMutatesTaintedTarget(cur.RecvPlace)
+								} else {
+									mutRecv = valueMutatesTaintedTarget(cur.Recv)
+								}
+								addRef := xRef || cur.AutoAddrRecv || (isDirectRef(rv.Type()) && mutRecv)
+								if markVarTaint(rv, addRef, true) {
+									changed = true
 								}
 							}
 						}
-						if len(s.Args) == 1 {
-							if tup, isTup := info.TypeOf(s.Args[0]).(*types.Tuple); isTup {
-								for pi := 0; pi < sig.Params().Len() && pi < tup.Len(); pi++ {
-									sRef, sCar := classifyMultiReturnSlot(s.Args[0], pi, tup.At(pi).Type())
-									if !sCar {
-										continue
-									}
-									pv := sig.Params().At(pi)
-									addRef := sRef || (cfg.AllowIntraPkgInterfaceParam && types.IsInterface(pv.Type()))
-									if markVarTaint(pv, addRef, true) {
-										changed = true
-									}
-								}
+						isTupleUnpack := len(cur.Args) == 1 && !cur.Ellipsis && cur.Args[0] != nil && cur.Args[0].Type != nil
+						if isTupleUnpack {
+							_, isTupleUnpack = types.Unalias(cur.Args[0].Type).(*types.Tuple)
+						}
+						cur.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, slotIdx int, paramIdx int, okP bool, packedVariadic bool) bool {
+							if !okP {
 								return true
 							}
-						}
-						for i, arg := range s.Args {
-							aRef, aCar := classifyExpr(arg)
+							var aRef, aCar bool
+							if isTupleUnpack {
+								aRef, aCar = classifyMultiReturnSlot(arg, slotIdx, slotType)
+							} else {
+								aRef, aCar = classifyValue(arg)
+							}
 							if !aCar {
-								continue
+								return true
 							}
-							paramIdx := i
-							isNonEllipsisVariadic := false
-							if sig.Variadic() && i >= sig.Params().Len()-1 {
-								paramIdx = sig.Params().Len() - 1
-								isNonEllipsisVariadic = !s.Ellipsis.IsValid()
+							pv := sig.Params().At(paramIdx)
+							if packedVariadic {
+								if markVarTaint(pv, false, true) {
+									changed = true
+								}
+							} else {
+								addRef := aRef || (cfg.AllowIntraPkgInterfaceParam && types.IsInterface(pv.Type()))
+								if markVarTaint(pv, addRef, true) {
+									changed = true
+								}
 							}
-							if paramIdx < sig.Params().Len() {
-								pv := sig.Params().At(paramIdx)
-								if isNonEllipsisVariadic {
-									if markVarTaint(pv, false, true) {
+							return true
+						})
+					}
+					return true
+				})
+			}
+
+			walkAllBodies(func(b *flowir.Body, enclFunc *types.Func, _ bool) bool {
+				for i := range b.Ops {
+					op := &b.Ops[i]
+					op.ForEachValue(func(v *flowir.Value) bool { taintVal(v); return true })
+					switch op.Kind {
+					case flowir.OpAssign:
+						switch op.AssignKind {
+						case flowir.AssignPlain:
+							op.ForEachAssignPair(func(_ int, dst flowir.Place, _ bool, src *flowir.Value) bool {
+								rRef, rCar := classifyValue(src)
+								if !rCar {
+									return true
+								}
+								if dst.IsBareVar() {
+									if markVarTaint(dst.Obj, rRef, true) {
 										changed = true
 									}
-								} else {
-									addRef := aRef || (cfg.AllowIntraPkgInterfaceParam && types.IsInterface(pv.Type()))
-									if markVarTaint(pv, addRef, true) {
+								} else if markContainerIndexWrite(dst) {
+									changed = true
+								}
+								return true
+							})
+						case flowir.AssignMulti:
+							if len(op.Srcs) == 1 && op.Srcs[0] != nil {
+								rhs := op.Srcs[0]
+								rhsTup, _ := rhs.Type.(*types.Tuple)
+								for idxDst, dst := range op.Dsts {
+									if !dst.IsBareVar() {
+										continue
+									}
+									slotT := dst.Type
+									if rhsTup != nil && idxDst < rhsTup.Len() {
+										slotT = rhsTup.At(idxDst).Type()
+									}
+									pRef, pCar := classifyMultiReturnSlot(rhs, idxDst, slotT)
+									if !pCar {
+										continue
+									}
+									addRef := pRef || isOpaqueIfaceOrTP(dst.Obj.Type())
+									if markVarTaint(dst.Obj, addRef, true) {
 										changed = true
+									}
+								}
+							}
+						case flowir.AssignRange:
+							if len(op.Srcs) == 1 && op.Srcs[0] != nil {
+								rngX := op.Srcs[0]
+								if _, xCar := classifyValue(rngX); xCar {
+									for _, dst := range op.Dsts {
+										if !dst.IsBareVar() {
+											continue
+										}
+										pRef, pCar := projectedClassify(dst.Type, rngX.Raw)
+										if pCar && markVarTaint(dst.Obj, pRef, true) {
+											changed = true
+										}
 									}
 								}
 							}
 						}
 
-					case *ast.ReturnStmt:
-						fn := returnEnclFunc[s]
-						if !canPropagateReturn(fn) {
-							return true
+					case flowir.OpTypeSwitchBind:
+						if op.SwitchDst != nil {
+							if _, sCar := classifyValue(op.SwitchSrc); sCar {
+								if markVarTaint(op.SwitchDst, true, true) {
+									changed = true
+								}
+							}
 						}
-						if len(s.Results) == 0 {
-							sig := fn.Signature()
-							for ri := 0; ri < sig.Results().Len(); ri++ {
-								rv := sig.Results().At(ri)
-								rk := retSlot{fn: fn, idx: ri}
-								if taintedCarrier[rv] && !taintedRetCarrier[rk] {
-									taintedRetCarrier[rk] = true
-									taintedRetAnyCarrier[fn] = true
-									changed = true
-								}
-								if taintedRef[rv] && !taintedRetRef[rk] {
-									taintedRetRef[rk] = true
-									taintedRetAnyRef[fn] = true
-									changed = true
-								}
-							}
-						} else if len(s.Results) == 1 {
-							if tup, isTup := info.TypeOf(s.Results[0]).(*types.Tuple); isTup {
-								for ri := 0; ri < tup.Len(); ri++ {
-									rRef, rCar := classifyMultiReturnSlot(s.Results[0], ri, tup.At(ri).Type())
-									rk := retSlot{fn: fn, idx: ri}
-									if rCar && !taintedRetCarrier[rk] {
-										taintedRetCarrier[rk] = true
-										taintedRetAnyCarrier[fn] = true
-										changed = true
-									}
-									if rRef && !taintedRetRef[rk] {
-										taintedRetRef[rk] = true
-										taintedRetAnyRef[fn] = true
-										changed = true
-									}
-								}
-								return true
-							}
-							rRef, rCar := classifyExpr(s.Results[0])
-							rk := retSlot{fn: fn, idx: 0}
+
+					case flowir.OpReturn:
+						if !canPropagateReturn(enclFunc) {
+							continue
+						}
+						markRetSlot := func(ri int, rRef, rCar bool) {
+							rk := retSlot{fn: enclFunc, idx: ri}
 							if rCar && !taintedRetCarrier[rk] {
 								taintedRetCarrier[rk] = true
-								taintedRetAnyCarrier[fn] = true
+								taintedRetAnyCarrier[enclFunc] = true
 								changed = true
 							}
 							if rRef && !taintedRetRef[rk] {
 								taintedRetRef[rk] = true
-								taintedRetAnyRef[fn] = true
+								taintedRetAnyRef[enclFunc] = true
 								changed = true
 							}
+						}
+						if op.IsNaked {
+							sig := enclFunc.Signature()
+							for ri := 0; ri < sig.Results().Len(); ri++ {
+								rv := sig.Results().At(ri)
+								markRetSlot(ri, taintedRef[rv], taintedCarrier[rv])
+							}
+						} else if len(op.Results) == 1 && op.Results[0] != nil {
+							if tup, isTup := op.Results[0].Type.(*types.Tuple); isTup {
+								for ri := 0; ri < tup.Len(); ri++ {
+									rRef, rCar := classifyMultiReturnSlot(op.Results[0], ri, tup.At(ri).Type())
+									markRetSlot(ri, rRef, rCar)
+								}
+								continue
+							}
+							rRef, rCar := classifyValue(op.Results[0])
+							markRetSlot(0, rRef, rCar)
 						} else {
-							for ri, r := range s.Results {
-								rRef, rCar := classifyExpr(r)
-								rk := retSlot{fn: fn, idx: ri}
-								if rCar && !taintedRetCarrier[rk] {
-									taintedRetCarrier[rk] = true
-									taintedRetAnyCarrier[fn] = true
-									changed = true
-								}
-								if rRef && !taintedRetRef[rk] {
-									taintedRetRef[rk] = true
-									taintedRetAnyRef[fn] = true
-									changed = true
-								}
+							for ri, r := range op.Results {
+								rRef, rCar := classifyValue(r)
+								markRetSlot(ri, rRef, rCar)
 							}
 						}
 					}
-					return true
-				})
-			}
+				}
+				return true
+			})
 		}
 
 		promoted := false
-		if cfg.AllowCompositeLitIntoSeedStruct && cfg.CanBeSeedStructCapsule != nil {
-			for _, file := range p.Syntax {
-				ast.Inspect(file, func(n ast.Node) bool {
-					cl, isCL := n.(*ast.CompositeLit)
-					if !isCL {
-						return true
-					}
-					st := syntaxutil.DerefNamedStruct(info.TypeOf(cl))
-					if st == nil {
-						return true
-					}
-					orig := st.Origin()
-					if isSeedStruct(orig) || !isEligibleCapsule(orig) || !cfg.CanBeSeedStructCapsule(orig) {
-						return true
-					}
-					for _, elt := range cl.Elts {
-						val := elt
-						if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
-							val = kv.Value
-						}
-						if _, vCar := classifyExpr(val); vCar {
-							capsuleStructs[orig] = true
-							promoted = true
-							break
-						}
-					}
-					return true
-				})
-			}
-		}
-		if cfg.AllowCompositeLitFieldPropagation {
-			for _, file := range p.Syntax {
-				ast.Inspect(file, func(n ast.Node) bool {
-					cl, isCL := n.(*ast.CompositeLit)
-					if !isCL {
+		if (cfg.AllowCompositeLitIntoSeedStruct && cfg.CanBeSeedStructCapsule != nil) || cfg.AllowCompositeLitFieldPropagation {
+			promoteVal := func(v *flowir.Value) {
+				if v == nil {
+					return
+				}
+				v.WalkValues(func(cur *flowir.Value) bool {
+					cl := allocCompositeLitAST(cur)
+					if cl == nil {
 						return true
 					}
 					st := syntaxutil.DerefNamedStruct(info.TypeOf(cl))
@@ -1232,88 +1398,208 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 					if isSeedStruct(orig) || !isEligibleCapsule(orig) {
 						return true
 					}
-					stUnder, okSt := orig.Underlying().(*types.Struct)
-					if !okSt {
-						return true
-					}
-					for ei, elt := range cl.Elts {
-						var fv *types.Var
-						val := elt
-						if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
-							if kid, okID := ast.Unparen(kv.Key).(*ast.Ident); okID {
-								fv, _ = info.Uses[kid].(*types.Var)
+					if cfg.AllowCompositeLitIntoSeedStruct && cfg.CanBeSeedStructCapsule != nil && cfg.CanBeSeedStructCapsule(orig) {
+						for i := range cur.CompositeElts {
+							if _, vCar := classifyValue(cur.CompositeElts[i].Value); vCar {
+								capsuleStructs[orig] = true
+								promoted = true
+								break
 							}
-							val = kv.Value
-						} else if ei < stUnder.NumFields() {
-							fv = stUnder.Field(ei)
 						}
-						if _, vCar := classifyExpr(val); vCar && fv != nil {
-							if !propagatedStructs[orig] {
-								propagatedStructs[orig] = true
-								promoted = true
-							}
-							if !propagatedFields[fv.Origin()] {
-								propagatedFields[fv.Origin()] = true
-								promoted = true
+					}
+					if cfg.AllowCompositeLitFieldPropagation && !isSeedStruct(orig) {
+						for i := range cur.CompositeElts {
+							elt := &cur.CompositeElts[i]
+							if _, vCar := classifyValue(elt.Value); vCar && elt.Field != nil {
+								if !propagatedStructs[orig] {
+									propagatedStructs[orig] = true
+									promoted = true
+								}
+								if !propagatedFields[elt.Field.Origin()] {
+									propagatedFields[elt.Field.Origin()] = true
+									promoted = true
+								}
 							}
 						}
 					}
 					return true
 				})
 			}
+			walkAllBodies(func(b *flowir.Body, _ *types.Func, _ bool) bool {
+				for i := range b.Ops {
+					b.Ops[i].ForEachValue(func(v *flowir.Value) bool { promoteVal(v); return true })
+				}
+				return true
+			})
 		}
 		if !promoted {
 			break
 		}
 	}
 
+	reject := func(pos token.Pos, clause string) bool {
+		if cfg.OnReject != nil {
+			cfg.OnReject(pos, clause)
+		}
+		return false
+	}
+	valPos := func(v *flowir.Value) token.Pos {
+		if v != nil && v.Raw != nil {
+			return v.Raw.Pos()
+		}
+		return token.NoPos
+	}
+
 	// Reject any tainted package-scope variable or disallowed named result variable.
 	for v := range taintedCarrier {
-		if v.Parent() == p.Types.Scope() || litResultVars[v] {
-			return false
+		if v.Parent() == p.Types.Scope() {
+			return reject(v.Pos(), "tainted package-scope variable "+v.Name())
 		}
-		if fn, isRes := resultVarFunc[v]; isRes && !canPropagateReturn(fn) {
-			return false
+	}
+	if !walkAllBodies(func(b *flowir.Body, enclFunc *types.Func, _ bool) bool {
+		if len(b.Results) == 0 {
+			return true
 		}
+		if !canPropagateReturn(enclFunc) {
+			for _, rv := range b.Results {
+				if rv != nil && taintedCarrier[rv] {
+					return reject(rv.Pos(), "tainted named result variable "+rv.Name())
+				}
+			}
+		}
+		return true
+	}) {
+		return false
 	}
 
 	// Identify local container variables whose backing storage is provably freshly
-	// allocated in the declaring function (from precomputed idx.FreshContainerCandidates)
-	// and not directly tainted as a protected reference.
-	localFreshContainer := make(map[*types.Var]bool, len(idx.FreshContainerCandidates))
-	for v := range idx.FreshContainerCandidates {
-		if !taintedRef[v] {
-			localFreshContainer[v] = true
+	// allocated in the declaring body over FlowIR and not directly tainted as a
+	// protected reference.
+	localFreshContainer := map[*types.Var]bool{}
+	{
+		freshCand := map[*types.Var]bool{}
+		freshDisq := map[*types.Var]bool{}
+		isFreshContainerInit := func(v *types.Var, src *flowir.Value) bool {
+			if src == nil || src.IsNil {
+				return true
+			}
+			if src.Kind == flowir.ValAllocFresh {
+				if src.AllocKind == flowir.AllocMake {
+					return true
+				}
+				if src.AllocKind == flowir.AllocCompositeLit && src.Type != nil {
+					switch types.Unalias(src.Type).Underlying().(type) {
+					case *types.Slice, *types.Array, *types.Map:
+						return true
+					}
+				}
+			}
+			if src.Kind == flowir.ValCall && src.CallKind == flowir.CallBuiltin && src.BuiltinName == "append" &&
+				len(src.Args) > 0 && src.Args[0] != nil && src.Args[0].Kind == flowir.ValPlace &&
+				src.Args[0].Place.IsBareVar() && src.Args[0].Place.Obj == v {
+				return true
+			}
+			return false
+		}
+		scanFreshVal := func(v *flowir.Value) {
+			if v == nil {
+				return
+			}
+			v.WalkValues(func(cur *flowir.Value) bool {
+				switch cur.Kind {
+				case flowir.ValAddrOf:
+					if !cur.IsArraySlice && cur.AddrPlace.Obj != nil {
+						freshDisq[cur.AddrPlace.Obj] = true
+					}
+				case flowir.ValCall:
+					if cur.AutoAddrRecv && cur.HasRecvPlace && cur.RecvPlace.Obj != nil {
+						freshDisq[cur.RecvPlace.Obj] = true
+					}
+				case flowir.ValMethodVal:
+					if cur.AutoAddr && cur.HasRecvPlace && cur.RecvPlace.Obj != nil {
+						freshDisq[cur.RecvPlace.Obj] = true
+					}
+				}
+				return true
+			})
+		}
+		walkAllBodies(func(b *flowir.Body, _ *types.Func, _ bool) bool {
+			for i := range b.Ops {
+				op := &b.Ops[i]
+				op.ForEachValue(func(v *flowir.Value) bool { scanFreshVal(v); return true })
+				switch op.Kind {
+				case flowir.OpAssign:
+					switch op.AssignKind {
+					case flowir.AssignZeroDecl:
+						for _, dst := range op.Dsts {
+							if dst.IsBareVar() && dst.Obj != nil {
+								if dst.Root == flowir.RootLocal {
+									freshCand[dst.Obj] = true
+								} else {
+									freshDisq[dst.Obj] = true
+								}
+							}
+						}
+					case flowir.AssignPlain:
+						op.ForEachAssignPair(func(_ int, dst flowir.Place, _ bool, src *flowir.Value) bool {
+							if dst.IsBareVar() && dst.Obj != nil {
+								if dst.Root != flowir.RootLocal {
+									freshDisq[dst.Obj] = true
+									return true
+								}
+								freshCand[dst.Obj] = true
+								if !isFreshContainerInit(dst.Obj, src) {
+									freshDisq[dst.Obj] = true
+								}
+							}
+							return true
+						})
+					case flowir.AssignMulti, flowir.AssignCompound, flowir.AssignIncDec, flowir.AssignRange:
+						for _, dst := range op.Dsts {
+							if dst.IsBareVar() && dst.Obj != nil {
+								freshDisq[dst.Obj] = true
+							}
+						}
+					}
+				case flowir.OpTypeSwitchBind:
+					if op.SwitchDst != nil {
+						freshDisq[op.SwitchDst] = true
+					}
+				}
+			}
+			return true
+		})
+		for v := range freshCand {
+			if !freshDisq[v] && !taintedRef[v] {
+				localFreshContainer[v] = true
+			}
 		}
 	}
 
 	// Track `v = append(v, elem)` statements where v is a fresh local slice variable.
 	selfAssignedAppendCalls := map[*ast.CallExpr]bool{}
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			as, ok := n.(*ast.AssignStmt)
-			if !ok || as.Tok != token.ASSIGN || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
-				return true
+	walkAllBodies(func(b *flowir.Body, _ *types.Func, _ bool) bool {
+		for i := range b.Ops {
+			op := &b.Ops[i]
+			if op.Kind == flowir.OpAssign && op.AssignKind == flowir.AssignPlain &&
+				len(op.Dsts) == 1 && len(op.Srcs) == 1 && len(op.DstDefs) == 1 && !op.DstDefs[0] &&
+				op.Dsts[0].IsBareVar() && localFreshContainer[op.Dsts[0].Obj] {
+				src := op.Srcs[0]
+				if src != nil && src.Kind == flowir.ValCall && src.CallKind == flowir.CallBuiltin &&
+					src.BuiltinName == "append" && src.CallAST != nil && len(src.Args) > 0 &&
+					src.Args[0] != nil && src.Args[0].Kind == flowir.ValPlace &&
+					src.Args[0].Place.IsBareVar() && src.Args[0].Place.Obj == op.Dsts[0].Obj {
+					selfAssignedAppendCalls[src.CallAST] = true
+				}
 			}
-			lv := syntaxutil.LookupIdentVar(info, as.Lhs[0])
-			if lv == nil || !localFreshContainer[lv] {
-				return true
-			}
-			call, ok := ast.Unparen(as.Rhs[0]).(*ast.CallExpr)
-			if !ok || len(call.Args) == 0 {
-				return true
-			}
-			if syntaxutil.LookupIdentVar(info, call.Args[0]) == lv {
-				selfAssignedAppendCalls[call] = true
-			}
-			return true
-		})
-	}
+		}
+		return true
+	})
 
 	// Verify promoted capsule structs have zero direct field writes, whole-struct
 	// dereference writes, or interior field address-takes anywhere in p.Syntax.
 	if len(capsuleStructs) > 0 && !verifyCapsuleStructsWriteFree(p, capsuleStructs) {
-		return false
+		return reject(token.NoPos, "capsule struct write-free check failed")
 	}
 
 	// Verify field-propagated structs cannot be stored in package-scope variables,
@@ -1326,33 +1612,33 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 			switch x := obj.(type) {
 			case *types.Var:
 				if typeMentionsSeedStruct(x.Type(), isPropagatedStruct) {
-					return false
+					return reject(x.Pos(), "field-propagated struct in package-scope variable "+x.Name())
 				}
 			case *types.Func:
 				if x.Exported() && typeMentionsSeedStruct(x.Type(), isPropagatedStruct) {
-					return false
+					return reject(x.Pos(), "field-propagated struct in exported function signature "+x.Name())
 				}
 			case *types.TypeName:
 				if x.Exported() {
 					if typeMentionsSeedStruct(x.Type(), isPropagatedStruct) {
-						return false
+						return reject(x.Pos(), "field-propagated struct in exported type "+x.Name())
 					}
 					if named, isN := types.Unalias(x.Type()).(*types.Named); isN {
 						mset := types.NewMethodSet(types.NewPointer(named))
 						for mi := 0; mi < mset.Len(); mi++ {
 							if m := mset.At(mi).Obj(); m != nil && m.Exported() && typeMentionsSeedStruct(m.Type(), isPropagatedStruct) {
-								return false
+								return reject(m.Pos(), "field-propagated struct in exported method signature "+m.Name())
 							}
 						}
 					}
 				}
 			}
 		}
-		for _, inst := range info.Instances {
+		for id, inst := range info.Instances {
 			if inst.TypeArgs != nil {
 				for ti := 0; ti < inst.TypeArgs.Len(); ti++ {
 					if typeMentionsSeedStruct(inst.TypeArgs.At(ti), isPropagatedStruct) {
-						return false
+						return reject(id.Pos(), "field-propagated struct in generic type argument")
 					}
 				}
 			}
@@ -1400,6 +1686,68 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 		return hit
 	}
 
+	if cfg.ForbidNonNilSeedStructPtrCompare {
+		hasMapWithSeedKey := func(root types.Type) bool {
+			seen := map[types.Type]bool{}
+			hit := false
+			var walk func(t types.Type)
+			walk = func(t types.Type) {
+				if t == nil || hit {
+					return
+				}
+				t = types.Unalias(t)
+				if seen[t] {
+					return
+				}
+				seen[t] = true
+				switch u := t.Underlying().(type) {
+				case *types.Map:
+					if typeContainsPtrToSeedStruct(u.Key()) {
+						hit = true
+						return
+					}
+					walk(u.Key())
+					walk(u.Elem())
+				case *types.Pointer:
+					walk(u.Elem())
+				case *types.Slice:
+					walk(u.Elem())
+				case *types.Array:
+					walk(u.Elem())
+				case *types.Chan:
+					walk(u.Elem())
+				case *types.Struct:
+					for i := 0; i < u.NumFields(); i++ {
+						walk(u.Field(i).Type())
+					}
+				case *types.Signature:
+					if u.Params() != nil {
+						for i := 0; i < u.Params().Len(); i++ {
+							walk(u.Params().At(i).Type())
+						}
+					}
+					if u.Results() != nil {
+						for i := 0; i < u.Results().Len(); i++ {
+							walk(u.Results().At(i).Type())
+						}
+					}
+				}
+			}
+			walk(root)
+			return hit
+		}
+		for expr, tv := range info.Types {
+			if hasMapWithSeedKey(tv.Type) {
+				return reject(expr.Pos(), "map keyed by protected struct pointer")
+			}
+		}
+		for id, obj := range info.Defs {
+			if obj != nil && hasMapWithSeedKey(obj.Type()) {
+				return reject(id.Pos(), "map keyed by protected struct pointer")
+			}
+		}
+	}
+
 	seedStructTypeViolated := func(dstT, srcT types.Type) bool {
 		if cfg.ForbidNonNilSeedStructPtrCompare {
 			if typeMentionsSeedStruct(srcT, isSeedStruct) {
@@ -1433,335 +1781,125 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 		return !types.Identical(d, types.Unalias(srcT))
 	}
 
-	isFreshDefineIdent := func(tok token.Token, lhs ast.Expr) bool {
-		if tok != token.DEFINE {
-			return false
+	checkLHSPlaceOK := func(dst flowir.Place, isFreshDef bool, inSyncAllowed bool) bool {
+		if placeMutatesTaintedTarget(dst) ||
+			(!inSyncAllowed && placeHitsStructPred(dst, isSeedStruct, true)) ||
+			placeHitsPropagated(dst, !isFreshDef) {
+			return reject(dst.RootPos, "mutates tainted or protected target")
 		}
-		id, ok := ast.Unparen(lhs).(*ast.Ident)
-		if !ok {
-			return false
+		if _, key, isMapW := dst.AsMapWrite(); isMapW && key != nil {
+			if _, kCar := classifyValue(key); kCar {
+				return reject(valPos(key), "tainted map key")
+			}
 		}
-		v, ok := info.Defs[id].(*types.Var)
-		return ok && v != nil
+		return true
 	}
 
-	ok := true
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			if !ok || n == nil {
-				return false
+	var checkValueOK func(v *flowir.Value, inSyncAllowed bool) bool
+	checkValueOK = func(v *flowir.Value, inSyncAllowed bool) bool {
+		if v == nil {
+			return true
+		}
+		switch v.Kind {
+		case flowir.ValPlace:
+			return v.Place.ForEachChildValue(func(cv *flowir.Value) bool { return checkValueOK(cv, inSyncAllowed) })
+
+		case flowir.ValCompare:
+			if cfg.ForbidNonNilSeedStructPtrCompare && (v.CompareOp == token.EQL || v.CompareOp == token.NEQ) && v.Left != nil && v.Right != nil {
+				if (isPtrToSeedStruct(v.Left.Type) && !v.Right.IsNil) ||
+					(isPtrToSeedStruct(v.Right.Type) && !v.Left.IsNil) {
+					return reject(valPos(v), "non-nil seed struct pointer comparison")
+				}
 			}
-			inSyncAllowed := !cfg.ForbidNonNilSeedStructPtrCompare || idx.IsSyncInFuncDecl(n, cfg.AllowSeedStructMutationInFunc)
-			switch s := n.(type) {
-			case *ast.BinaryExpr:
-				if cfg.ForbidNonNilSeedStructPtrCompare && (s.Op == token.EQL || s.Op == token.NEQ) {
-					lt := info.TypeOf(s.X)
-					rt := info.TypeOf(s.Y)
-					if (isPtrToSeedStruct(lt) && !syntaxutil.IsNilIdent(info, s.Y)) ||
-						(isPtrToSeedStruct(rt) && !syntaxutil.IsNilIdent(info, s.X)) {
-						ok = false
+			return checkValueOK(v.Left, inSyncAllowed) && checkValueOK(v.Right, inSyncAllowed)
+
+		case flowir.ValMethodVal:
+			if v.Selection != nil && v.Selection.Kind() == types.MethodVal && !v.Selection.Indirect() && SelectionHasPointerReceiver(v.Selection) {
+				if (!inSyncAllowed && valueOrPlaceHitsStructPred(v.Recv, v.RecvPlace, v.HasRecvPlace, isSeedStruct, false)) ||
+					valueOrPlaceHitsPropagated(v.Recv, v.RecvPlace, v.HasRecvPlace, false) {
+					return reject(valPos(v), "auto-addressed pointer-receiver method value on protected struct")
+				}
+			}
+			_, xCar, mutX, seedX := methodValHasTaintedOrSeedRecv(v)
+			if xCar || mutX || seedX {
+				if _, okM := boundPkgMethodRecvVal(v); !okM {
+					return reject(valPos(v), "unapproved bound method value")
+				}
+			}
+			return checkValueOK(v.Recv, inSyncAllowed)
+
+		case flowir.ValAddrOf:
+			if placeMutatesTaintedTarget(v.AddrPlace) ||
+				(!inSyncAllowed && placeHitsStructPred(v.AddrPlace, isSeedStruct, false)) ||
+				placeHitsPropagated(v.AddrPlace, false) {
+				return reject(valPos(v), "address-of or array-slice on tainted or protected place")
+			}
+			return v.ForEachChildValue(func(cv *flowir.Value) bool { return checkValueOK(cv, inSyncAllowed) })
+
+		case flowir.ValChanRecv:
+			if _, cCar := classifyValue(v.Chan); cCar {
+				return reject(valPos(v), "receive from tainted channel")
+			}
+			return checkValueOK(v.Chan, inSyncAllowed)
+
+		case flowir.ValConvert:
+			if v.IsTypeAssert {
+				if _, xCar := classifyValue(v.Arg); xCar {
+					return reject(valPos(v), "type assertion on tainted value")
+				}
+				return checkValueOK(v.Arg, inSyncAllowed)
+			}
+			if v.Arg != nil {
+				if seedStructTypeViolated(v.Type, v.Arg.Type) {
+					return reject(valPos(v), "seed struct conversion violation")
+				}
+				if _, aCar := classifyValue(v.Arg); aCar {
+					if assignErasesTaint(v.Type, v.Arg.Type) {
+						return reject(valPos(v), "conversion erases taint")
+					}
+				}
+			}
+			return checkValueOK(v.Arg, inSyncAllowed)
+
+		case flowir.ValAllocFresh:
+			switch v.AllocKind {
+			case flowir.AllocBuiltinNewType:
+				return true
+			case flowir.AllocBuiltinNewExpr:
+				if len(v.Args) == 1 && v.Args[0] != nil {
+					if seedStructTypeViolated(nil, v.Args[0].Type) {
+						return reject(valPos(v), "new(expr) on protected struct")
+					}
+					if _, aCar := classifyValue(v.Args[0]); aCar {
+						return reject(valPos(v), "new(expr) on tainted value")
+					}
+					return checkValueOK(v.Args[0], inSyncAllowed)
+				}
+				return true
+			case flowir.AllocMake:
+				for _, a := range v.Args {
+					if a == nil {
+						continue
+					}
+					if seedStructTypeViolated(nil, a.Type) {
+						return reject(valPos(a), "make arg seed struct violation")
+					}
+					if _, aCar := classifyValue(a); aCar {
+						return reject(valPos(a), "make arg tainted")
+					}
+					if !checkValueOK(a, inSyncAllowed) {
 						return false
 					}
 				}
-
-			case *ast.SwitchStmt:
-				if cfg.ForbidNonNilSeedStructPtrCompare && s.Tag != nil && isPtrToSeedStruct(info.TypeOf(s.Tag)) && s.Body != nil {
-					for _, st := range s.Body.List {
-						if cc, okCC := st.(*ast.CaseClause); okCC {
-							for _, ce := range cc.List {
-								if !syntaxutil.IsNilIdent(info, ce) {
-									ok = false
-									return false
-								}
-							}
-						}
-					}
+				return true
+			case flowir.AllocCompositeLit:
+				cl := allocCompositeLitAST(v)
+				if cl == nil {
+					return v.ForEachChildValue(func(cv *flowir.Value) bool { return checkValueOK(cv, inSyncAllowed) })
 				}
-
-			case *ast.CaseClause:
-				if cfg.ForbidNonNilSeedStructPtrCompare {
-					for _, ce := range s.List {
-						if !syntaxutil.IsNilIdent(info, ce) && isPtrToSeedStruct(info.TypeOf(ce)) {
-							ok = false
-							return false
-						}
-					}
-				}
-
-			case *ast.MapType:
-				if cfg.ForbidNonNilSeedStructPtrCompare && typeContainsPtrToSeedStruct(info.TypeOf(s.Key)) {
-					ok = false
-					return false
-				}
-
-			case *ast.SelectorExpr:
-				selInfo := info.Selections[s]
-				if selInfo != nil && selInfo.Kind() == types.MethodVal && !selInfo.Indirect() && SelectionHasPointerReceiver(selInfo) {
-					if (!inSyncAllowed && exprHitsStructPred(info, s.X, isSeedStruct, false)) || exprHitsPropagated(s.X, false) {
-						ok = false
-						return false
-					}
-				}
-				if selInfo != nil && selInfo.Kind() == types.MethodVal && !calledMethodSels[s] {
-					rxSt := syntaxutil.DerefNamedStruct(info.TypeOf(s.X))
-					if _, xCar := classifyExpr(s.X); xCar || exprMutatesTaintedTarget(s.X) || selChainHitsSeedStruct(s) || selChainHitsPropagatedField(s) || isSeedStruct(rxSt) || isPropagatedStruct(rxSt) {
-						if _, okM := boundPkgMethodRecv(s); !okM {
-							ok = false
-							return false
-						}
-					}
-				}
-
-			case *ast.TypeAssertExpr:
-				if _, xCar := classifyExpr(s.X); xCar {
-					ok = false
-					return false
-				}
-
-			case *ast.TypeSwitchStmt:
-				switch a := s.Assign.(type) {
-				case *ast.ExprStmt:
-					if ta, isTA := ast.Unparen(a.X).(*ast.TypeAssertExpr); isTA {
-						if _, xCar := classifyExpr(ta.X); xCar {
-							ok = false
-							return false
-						}
-					}
-				case *ast.AssignStmt:
-					if len(a.Rhs) == 1 {
-						if ta, isTA := ast.Unparen(a.Rhs[0]).(*ast.TypeAssertExpr); isTA {
-							if _, xCar := classifyExpr(ta.X); xCar {
-								ok = false
-								return false
-							}
-						}
-					}
-				}
-
-			case *ast.AssignStmt:
-				for _, lhs := range s.Lhs {
-					if exprMutatesTaintedTarget(lhs) ||
-						(!inSyncAllowed && exprHitsStructPred(info, lhs, isSeedStruct, true)) ||
-						exprHitsPropagated(lhs, !isFreshDefineIdent(s.Tok, lhs)) {
-						ok = false
-						return false
-					}
-					if ix, isIX := ast.Unparen(lhs).(*ast.IndexExpr); isIX {
-						if xt := info.TypeOf(ix.X); xt != nil {
-							if _, isMap := types.Unalias(xt).Underlying().(*types.Map); isMap {
-								if _, kCar := classifyExpr(ix.Index); kCar {
-									ok = false
-									return false
-								}
-							}
-						}
-					}
-				}
-				if len(s.Lhs) == len(s.Rhs) {
-					for i, lhs := range s.Lhs {
-						if !syntaxutil.IsBlankIdent(lhs) && seedStructTypeViolated(info.TypeOf(lhs), info.TypeOf(s.Rhs[i])) {
-							ok = false
-							return false
-						}
-						rRef, rCar := classifyExpr(s.Rhs[i])
-						if !rCar {
-							continue
-						}
-						if syntaxutil.IsBlankIdent(lhs) {
-							continue
-						}
-						if v := syntaxutil.LookupIdentVar(info, lhs); v != nil {
-							if assignErasesTaint(v.Type(), info.TypeOf(s.Rhs[i])) {
-								ok = false
-								return false
-							}
-							continue
-						}
-						if ix, isIX := ast.Unparen(lhs).(*ast.IndexExpr); isIX {
-							if bv := syntaxutil.LookupIdentVar(info, ix.X); bv != nil && localFreshContainer[bv] {
-								if !assignErasesTaint(info.TypeOf(ix), info.TypeOf(s.Rhs[i])) {
-									continue
-								}
-							}
-						}
-						if cfg.AllowAssignTarget != nil &&
-							!assignErasesTaint(info.TypeOf(lhs), info.TypeOf(s.Rhs[i])) &&
-							cfg.AllowAssignTarget(lhs, s.Rhs[i], rRef) {
-							continue
-						}
-						ok = false
-						return false
-					}
-				} else if len(s.Lhs) > 1 && len(s.Rhs) == 1 {
-					rhsT := info.TypeOf(s.Rhs[0])
-					rhsTup, _ := rhsT.(*types.Tuple)
-					if rhsTup != nil {
-						for i, lhs := range s.Lhs {
-							if i < rhsTup.Len() && !syntaxutil.IsBlankIdent(lhs) && seedStructTypeViolated(info.TypeOf(lhs), rhsTup.At(i).Type()) {
-								ok = false
-								return false
-							}
-						}
-					} else if !syntaxutil.IsBlankIdent(s.Lhs[0]) && seedStructTypeViolated(info.TypeOf(s.Lhs[0]), rhsT) {
-						ok = false
-						return false
-					}
-					for i, lhs := range s.Lhs {
-						var srcElemT types.Type
-						if rhsTup != nil && i < rhsTup.Len() {
-							srcElemT = rhsTup.At(i).Type()
-						} else {
-							srcElemT = info.TypeOf(lhs)
-						}
-						if _, sCar := classifyMultiReturnSlot(s.Rhs[0], i, srcElemT); !sCar {
-							continue
-						}
-						if syntaxutil.IsBlankIdent(lhs) {
-							continue
-						}
-						v := syntaxutil.LookupIdentVar(info, lhs)
-						if v == nil || assignErasesTaint(v.Type(), srcElemT) {
-							ok = false
-							return false
-						}
-					}
-				}
-
-			case *ast.ValueSpec:
-				if len(s.Names) == len(s.Values) {
-					for i, nm := range s.Names {
-						if nm.Name != "_" {
-							if v, _ := info.Defs[nm].(*types.Var); v != nil && seedStructTypeViolated(v.Type(), info.TypeOf(s.Values[i])) {
-								ok = false
-								return false
-							}
-						}
-						if _, rCar := classifyExpr(s.Values[i]); rCar {
-							if nm.Name == "_" {
-								continue
-							}
-							v, _ := info.Defs[nm].(*types.Var)
-							if v == nil || assignErasesTaint(v.Type(), info.TypeOf(s.Values[i])) {
-								ok = false
-								return false
-							}
-						}
-					}
-				} else if len(s.Names) > 1 && len(s.Values) == 1 {
-					rhsT := info.TypeOf(s.Values[0])
-					rhsTup, _ := rhsT.(*types.Tuple)
-					if rhsTup != nil {
-						for i, nm := range s.Names {
-							if i < rhsTup.Len() && nm.Name != "_" {
-								if v, _ := info.Defs[nm].(*types.Var); v != nil && seedStructTypeViolated(v.Type(), rhsTup.At(i).Type()) {
-									ok = false
-									return false
-								}
-							}
-						}
-					} else if s.Names[0].Name != "_" {
-						if v, _ := info.Defs[s.Names[0]].(*types.Var); v != nil && seedStructTypeViolated(v.Type(), rhsT) {
-							ok = false
-							return false
-						}
-					}
-					for i, nm := range s.Names {
-						var srcElemT types.Type
-						if rhsTup != nil && i < rhsTup.Len() {
-							srcElemT = rhsTup.At(i).Type()
-						} else if v, _ := info.Defs[nm].(*types.Var); v != nil {
-							srcElemT = v.Type()
-						}
-						if _, sCar := classifyMultiReturnSlot(s.Values[0], i, srcElemT); !sCar {
-							continue
-						}
-						if nm.Name == "_" {
-							continue
-						}
-						v, _ := info.Defs[nm].(*types.Var)
-						if v == nil || (srcElemT != nil && assignErasesTaint(v.Type(), srcElemT)) {
-							ok = false
-							return false
-						}
-					}
-				}
-
-			case *ast.IncDecStmt:
-				if exprMutatesTaintedTarget(s.X) || (!inSyncAllowed && exprHitsStructPred(info, s.X, isSeedStruct, true)) || exprHitsPropagated(s.X, true) {
-					ok = false
-					return false
-				}
-
-			case *ast.RangeStmt:
-				if s.Tok == token.ASSIGN {
-					if (s.Key != nil && (exprMutatesTaintedTarget(s.Key) || (!inSyncAllowed && exprHitsStructPred(info, s.Key, isSeedStruct, true)) || exprHitsPropagated(s.Key, true))) ||
-						(s.Value != nil && (exprMutatesTaintedTarget(s.Value) || (!inSyncAllowed && exprHitsStructPred(info, s.Value, isSeedStruct, true)) || exprHitsPropagated(s.Value, true))) {
-						ok = false
-						return false
-					}
-					if _, xCar := classifyExpr(s.X); xCar {
-						for _, bindExpr := range []ast.Expr{s.Key, s.Value} {
-							if bindExpr == nil || syntaxutil.IsBlankIdent(bindExpr) {
-								continue
-							}
-							if _, pCar := projectedClassify(info.TypeOf(bindExpr), s.X); !pCar {
-								continue
-							}
-							if syntaxutil.LookupIdentVar(info, bindExpr) == nil {
-								ok = false
-								return false
-							}
-						}
-					}
-				}
-
-			case *ast.UnaryExpr:
-				if s.Op == token.AND && (exprMutatesTaintedTarget(s.X) || (!inSyncAllowed && exprHitsStructPred(info, s.X, isSeedStruct, false)) || exprHitsPropagated(s.X, false)) {
-					ok = false
-					return false
-				}
-				if s.Op == token.ARROW {
-					if _, cCar := classifyExpr(s.X); cCar {
-						ok = false
-						return false
-					}
-				}
-
-			case *ast.SliceExpr:
-				if t := info.TypeOf(s.X); t != nil {
-					if _, isArr := types.Unalias(t).Underlying().(*types.Array); isArr &&
-						(exprMutatesTaintedTarget(s.X) || (!inSyncAllowed && exprHitsStructPred(info, s.X, isSeedStruct, false)) || exprHitsPropagated(s.X, false)) {
-						ok = false
-						return false
-					}
-				}
-
-			case *ast.SendStmt:
-				if chT := info.TypeOf(s.Chan); chT != nil {
-					if ch, isCh := types.Unalias(chT).Underlying().(*types.Chan); isCh {
-						if seedStructTypeViolated(ch.Elem(), info.TypeOf(s.Value)) {
-							ok = false
-							return false
-						}
-					} else if (cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(info.TypeOf(s.Value), isSeedStruct)) ||
-						(len(propagatedStructs) > 0 && typeMentionsSeedStruct(info.TypeOf(s.Value), isPropagatedStruct)) {
-						ok = false
-						return false
-					}
-				}
-				if _, chCar := classifyExpr(s.Chan); chCar {
-					ok = false
-					return false
-				}
-				if _, vCar := classifyExpr(s.Value); vCar {
-					ok = false
-					return false
-				}
-
-			case *ast.CompositeLit:
-				clT := info.TypeOf(s)
+				clT := info.TypeOf(cl)
 				if clT == nil {
-					return true
+					return v.ForEachChildValue(func(cv *flowir.Value) bool { return checkValueOK(cv, inSyncAllowed) })
 				}
 				baseT := types.Unalias(clT)
 				if ptr, isP := baseT.(*types.Pointer); isP {
@@ -1770,258 +1908,503 @@ func VerifyReadOnlyRefConfinement(p *packages.Package, cfg Config) bool {
 				_, isSlice := baseT.Underlying().(*types.Slice)
 				_, isArray := baseT.Underlying().(*types.Array)
 				_, isMap := baseT.Underlying().(*types.Map)
-				stUnder, isStruct := baseT.Underlying().(*types.Struct)
-				allowedSeedSt := isStruct && isAllowedStructCompositeLit(s)
+				_, isStruct := baseT.Underlying().(*types.Struct)
+				allowedSeedSt := isStruct && isAllowedStructCompositeLit(v)
 
-				for idx, elt := range s.Elts {
-					val := elt
-					var dstElemT types.Type
-					if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
-						if !isStruct {
-							if isMap && seedStructTypeViolated(baseT.Underlying().(*types.Map).Key(), info.TypeOf(kv.Key)) {
-								ok = false
-								return false
-							}
-							if _, kCar := classifyExpr(kv.Key); kCar {
-								ok = false
-								return false
-							}
+				for i := range v.CompositeElts {
+					elt := &v.CompositeElts[i]
+					if elt.MapKey != nil {
+						if isMap && seedStructTypeViolated(baseT.Underlying().(*types.Map).Key(), elt.MapKey.Type) {
+							return reject(valPos(elt.MapKey), "map key seed struct violation")
 						}
-						val = kv.Value
-						if isStruct {
-							if fk, isID := kv.Key.(*ast.Ident); isID {
-								if fv, isV := info.Uses[fk].(*types.Var); isV && fv != nil {
-									dstElemT = fv.Type()
-								}
-							}
-						} else if isMap {
-							dstElemT = baseT.Underlying().(*types.Map).Elem()
+						if _, kCar := classifyValue(elt.MapKey); kCar {
+							return reject(valPos(elt.MapKey), "tainted composite map key")
 						}
-					} else if isStruct && idx < stUnder.NumFields() {
-						dstElemT = stUnder.Field(idx).Type()
+						if !checkValueOK(elt.MapKey, inSyncAllowed) {
+							return false
+						}
 					}
-					if isSlice {
-						dstElemT = baseT.Underlying().(*types.Slice).Elem()
-					} else if isArray {
-						dstElemT = baseT.Underlying().(*types.Array).Elem()
-					}
-					if seedStructTypeViolated(dstElemT, info.TypeOf(val)) {
-						ok = false
+					if elt.Index != nil && !checkValueOK(elt.Index, inSyncAllowed) {
 						return false
 					}
-					if _, vCar := classifyExpr(val); !vCar {
+					if elt.Value == nil {
+						continue
+					}
+					if !checkValueOK(elt.Value, inSyncAllowed) {
+						return false
+					}
+					var dstElemT types.Type
+					switch {
+					case isSlice:
+						dstElemT = baseT.Underlying().(*types.Slice).Elem()
+					case isArray:
+						dstElemT = baseT.Underlying().(*types.Array).Elem()
+					case isMap:
+						dstElemT = baseT.Underlying().(*types.Map).Elem()
+					case isStruct && elt.Field != nil:
+						dstElemT = elt.Field.Type()
+					}
+					if seedStructTypeViolated(dstElemT, elt.Value.Type) {
+						return reject(valPos(elt.Value), "composite element seed struct violation")
+					}
+					if _, vCar := classifyValue(elt.Value); !vCar {
 						continue
 					}
 					if !isSlice && !isArray && !allowedSeedSt {
-						ok = false
-						return false
+						return reject(valPos(elt.Value), "tainted composite element in disallowed type")
 					}
-					if dstElemT == nil || assignErasesTaint(dstElemT, info.TypeOf(val)) {
-						ok = false
-						return false
+					if dstElemT == nil || assignErasesTaint(dstElemT, elt.Value.Type) {
+						return reject(valPos(elt.Value), "composite element erases taint")
 					}
 				}
+				return true
+			}
+			return true
 
-			case *ast.ReturnStmt:
-				fn := returnEnclFunc[s]
-				if len(s.Results) == 1 && (cfg.ForbidNonNilSeedStructPtrCompare || len(propagatedStructs) > 0) {
-					if tup, isTup := info.TypeOf(s.Results[0]).(*types.Tuple); isTup {
-						for ti := 0; ti < tup.Len(); ti++ {
-							rT := tup.At(ti).Type()
-							if fn != nil && fn.Signature().Results() != nil && ti < fn.Signature().Results().Len() {
-								if seedStructTypeViolated(fn.Signature().Results().At(ti).Type(), rT) {
-									ok = false
-									return false
-								}
-							} else if (cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(rT, isSeedStruct)) ||
-								(len(propagatedStructs) > 0 && typeMentionsSeedStruct(rT, isPropagatedStruct)) {
-								ok = false
-								return false
-							}
+		case flowir.ValCall:
+			if !inSyncAllowed && v.CallAST != nil && callMutatesSeedStructContainer(info, v.CallAST, isSeedStruct) {
+				return reject(valPos(v), "call mutates seed struct container")
+			}
+			if v.CallKind == flowir.CallMethod && !v.IsMethodExprCall && v.Selection != nil &&
+				v.Selection.Kind() == types.MethodVal && !v.Selection.Indirect() && SelectionHasPointerReceiver(v.Selection) {
+				if (!inSyncAllowed && valueOrPlaceHitsStructPred(v.Recv, v.RecvPlace, v.HasRecvPlace, isSeedStruct, false)) ||
+					valueOrPlaceHitsPropagated(v.Recv, v.RecvPlace, v.HasRecvPlace, false) {
+					return reject(valPos(v), "auto-addressed pointer-receiver method call on protected struct")
+				}
+			}
+			if callValueErasesSeedStruct(v, seedStructTypeViolated, cfg.AllowCallArg) {
+				return reject(valPos(v), "call arg erases seed struct")
+			}
+
+			if v.CallKind == flowir.CallMethod && !v.IsMethodExprCall && v.Selection != nil && v.Selection.Kind() == types.MethodVal {
+				if _, rCar := classifyValue(v.Recv); rCar {
+					if callee := resolveConcretePkgCalleeVal(v); callee != nil {
+						// Taint propagated to callee's receiver parameter.
+					} else if v.Selection.Recv() != nil && !types.IsInterface(v.Selection.Recv()) && cfg.AllowMethodRecv != nil && v.CallAST != nil && v.CalleeSel != nil {
+						mFn, _ := v.Selection.Obj().(*types.Func)
+						if !cfg.AllowMethodRecv(v.CallAST, mFn, v.CalleeSel.X) {
+							return reject(valPos(v), "disallowed method call on tainted receiver")
 						}
+					} else {
+						return reject(valPos(v), "unapproved method call on tainted receiver")
 					}
 				}
-				for ri, r := range s.Results {
-					if fn != nil {
-						res := fn.Signature().Results()
-						if ri < res.Len() {
-							if seedStructTypeViolated(res.At(ri).Type(), info.TypeOf(r)) {
-								ok = false
-								return false
-							}
-						} else if (cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(info.TypeOf(r), isSeedStruct)) ||
-							(len(propagatedStructs) > 0 && typeMentionsSeedStruct(info.TypeOf(r), isPropagatedStruct)) {
-							ok = false
-							return false
-						}
-					} else if isSeedStruct(syntaxutil.DerefNamedStruct(info.TypeOf(r))) ||
-						(cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(info.TypeOf(r), isSeedStruct)) ||
-						(len(propagatedStructs) > 0 && typeMentionsSeedStruct(info.TypeOf(r), isPropagatedStruct)) {
-						ok = false
-						return false
-					}
-					if _, rCar := classifyExpr(r); !rCar {
+			} else if v.Callee != nil {
+				if _, fCar := classifyValue(v.Callee); fCar {
+					return reject(valPos(v), "indirect call on tainted callee")
+				}
+			}
+
+			if !v.ForEachChildValue(func(cv *flowir.Value) bool { return checkValueOK(cv, inSyncAllowed) }) {
+				return false
+			}
+
+			if v.CallKind == flowir.CallBuiltin {
+				for argIdx, arg := range v.Args {
+					if arg == nil {
 						continue
 					}
-					if !canPropagateReturn(fn) {
-						ok = false
-						return false
-					}
-					res := fn.Signature().Results()
-					if ri >= res.Len() || assignErasesTaint(res.At(ri).Type(), info.TypeOf(r)) {
-						ok = false
-						return false
-					}
-				}
-
-			case *ast.CallExpr:
-				if !inSyncAllowed && callMutatesSeedStructContainer(info, s, isSeedStruct) {
-					ok = false
-					return false
-				}
-				fun := ast.Unparen(s.Fun)
-				if info.Types[fun].IsType() && len(s.Args) == 1 {
-					if seedStructTypeViolated(info.Types[fun].Type, info.TypeOf(s.Args[0])) {
-						ok = false
-						return false
-					}
-					if _, aCar := classifyExpr(s.Args[0]); aCar {
-						if assignErasesTaint(info.Types[fun].Type, info.TypeOf(s.Args[0])) {
-							ok = false
-							return false
-						}
-					}
-					return true
-				}
-
-				if callCallErasesSeedStruct(info, s, seedStructTypeViolated, cfg.AllowCallArg) {
-					ok = false
-					return false
-				}
-
-				if sel, isSel := fun.(*ast.SelectorExpr); isSel {
-					if selInfo := info.Selections[sel]; selInfo != nil && selInfo.Kind() == types.MethodVal {
-						if _, rCar := classifyExpr(sel.X); rCar {
-							if callee := resolveConcretePkgCallee(s.Fun); callee != nil {
-								// Taint propagated to callee's receiver parameter.
-							} else if selInfo.Recv() != nil && !types.IsInterface(selInfo.Recv()) && cfg.AllowMethodRecv != nil {
-								mFn, _ := selInfo.Obj().(*types.Func)
-								if !cfg.AllowMethodRecv(s, mFn, sel.X) {
-									ok = false
-									return false
-								}
-							} else {
-								ok = false
-								return false
-							}
-						}
-					} else if _, fCar := classifyExpr(s.Fun); fCar {
-						ok = false
-						return false
-					}
-				} else if _, fCar := classifyExpr(s.Fun); fCar {
-					ok = false
-					return false
-				}
-
-				for argIdx, arg := range s.Args {
-					aRef, aCar := classifyExpr(arg)
+					aRef, aCar := classifyValue(arg)
 					if !aCar {
 						continue
 					}
-					if b := syntaxutil.LookupBuiltin(info, fun); b != nil {
-						if b.Name() == "len" || b.Name() == "cap" || b.Name() == "Sizeof" || b.Name() == "Alignof" || b.Name() == "Offsetof" {
-							continue
-						}
-						if b.Name() == "append" {
-							if argIdx == 0 {
-								if !aRef && selfAssignedAppendCalls[s] {
-									continue
-								}
-								ok = false
-								return false
+					if v.BuiltinName == "len" || v.BuiltinName == "cap" || v.BuiltinName == "Sizeof" || v.BuiltinName == "Alignof" || v.BuiltinName == "Offsetof" {
+						continue
+					}
+					if v.BuiltinName == "append" {
+						if argIdx == 0 {
+							if !aRef && v.CallAST != nil && selfAssignedAppendCalls[v.CallAST] {
+								continue
 							}
-							if s.Ellipsis.IsValid() {
-								if sl, isSl := syntaxutil.UnderlyingType(info.TypeOf(arg)).(*types.Slice); isSl && !elemHasHandle(sl.Elem()) {
-									continue
-								}
-							} else if selfAssignedAppendCalls[s] {
-								if sl, isSl := syntaxutil.UnderlyingType(info.TypeOf(s)).(*types.Slice); isSl && !assignErasesTaint(sl.Elem(), info.TypeOf(arg)) {
-									continue
-								}
-							}
-							ok = false
-							return false
+							return reject(valPos(arg), "append into non-fresh or tainted-ref slice")
 						}
-						if b.Name() == "copy" && argIdx == 1 {
-							if sl, isSl := syntaxutil.UnderlyingType(info.TypeOf(arg)).(*types.Slice); isSl && !elemHasHandle(sl.Elem()) {
+						if v.Ellipsis {
+							if sl, isSl := syntaxutil.UnderlyingType(arg.Type).(*types.Slice); isSl && !elemHasHandle(sl.Elem()) {
+								continue
+							}
+						} else if v.CallAST != nil && selfAssignedAppendCalls[v.CallAST] {
+							if sl, isSl := syntaxutil.UnderlyingType(v.Type).(*types.Slice); isSl && !assignErasesTaint(sl.Elem(), arg.Type) {
 								continue
 							}
 						}
-						ok = false
+						return reject(valPos(arg), "append of tainted element")
+					}
+					if v.BuiltinName == "copy" && argIdx == 1 {
+						if sl, isSl := syntaxutil.UnderlyingType(arg.Type).(*types.Slice); isSl && !elemHasHandle(sl.Elem()) {
+							continue
+						}
+					}
+					if v.CallAST != nil && argIdx < len(v.CallAST.Args) && cfg.AllowCallArg != nil && cfg.AllowCallArg(v.CallAST, argIdx, v.CallAST.Args[argIdx]) {
+						continue
+					}
+					return reject(valPos(arg), "tainted argument to builtin "+v.BuiltinName)
+				}
+				return true
+			}
+
+			if v.IsMethodExprCall {
+				if v.Recv != nil {
+					if _, rCar := classifyValue(v.Recv); rCar {
+						if !(v.CallAST != nil && len(v.CallAST.Args) > 0 && cfg.AllowCallArg != nil && cfg.AllowCallArg(v.CallAST, 0, v.CallAST.Args[0])) {
+							return reject(valPos(v.Recv), "tainted receiver in method expression call")
+						}
+					}
+				}
+				for i, arg := range v.Args {
+					if arg == nil {
+						continue
+					}
+					if _, aCar := classifyValue(arg); !aCar {
+						continue
+					}
+					rawIdx := i + 1
+					if v.CallAST != nil && rawIdx < len(v.CallAST.Args) && cfg.AllowCallArg != nil && cfg.AllowCallArg(v.CallAST, rawIdx, v.CallAST.Args[rawIdx]) {
+						continue
+					}
+					return reject(valPos(arg), "tainted argument in method expression call")
+				}
+				return true
+			}
+
+			callee := resolveConcretePkgCalleeVal(v)
+			isTupleUnpack := len(v.Args) == 1 && !v.Ellipsis && v.Args[0] != nil && v.Args[0].Type != nil
+			if isTupleUnpack {
+				_, isTupleUnpack = types.Unalias(v.Args[0].Type).(*types.Tuple)
+			}
+			callOK := true
+			v.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, slotIdx int, paramIdx int, okP bool, packedVariadic bool) bool {
+				var aCar bool
+				if isTupleUnpack {
+					_, aCar = classifyMultiReturnSlot(arg, slotIdx, slotType)
+				} else {
+					_, aCar = classifyValue(arg)
+				}
+				if !aCar {
+					return true
+				}
+				if callee != nil {
+					if !okP {
+						callOK = reject(valPos(arg), "missing formal param on intra-pkg call")
+						return false
+					}
+					pt := v.FormalParamSlotType(paramIdx, packedVariadic)
+					if (cfg.AllowIntraPkgInterfaceParam && !packedVariadic && pt != nil && types.IsInterface(pt)) || !assignErasesTaint(pt, slotType) {
+						return true
+					}
+				}
+				if !isTupleUnpack && v.CallAST != nil && slotIdx < len(v.CallAST.Args) && cfg.AllowCallArg != nil && cfg.AllowCallArg(v.CallAST, slotIdx, v.CallAST.Args[slotIdx]) {
+					return true
+				}
+				callOK = reject(valPos(arg), "unapproved tainted call argument")
+				return false
+			})
+			return callOK
+
+		default:
+			return v.ForEachChildValue(func(cv *flowir.Value) bool { return checkValueOK(cv, inSyncAllowed) })
+		}
+	}
+
+	return walkAllBodies(func(b *flowir.Body, enclFunc *types.Func, inSyncAllowed bool) bool {
+		for i := range b.Ops {
+			op := &b.Ops[i]
+			switch op.Kind {
+			case flowir.OpAssign:
+				for _, dst := range op.Dsts {
+					if !dst.ForEachChildValue(func(cv *flowir.Value) bool { return checkValueOK(cv, inSyncAllowed) }) {
+						return false
+					}
+				}
+				for _, src := range op.Srcs {
+					if !checkValueOK(src, inSyncAllowed) {
+						return false
+					}
+				}
+				switch op.AssignKind {
+				case flowir.AssignZeroDecl:
+					for idxDst, dst := range op.Dsts {
+						isDef := idxDst < len(op.DstDefs) && op.DstDefs[idxDst] && dst.IsBareVar()
+						if !checkLHSPlaceOK(dst, isDef, inSyncAllowed) {
+							return false
+						}
+					}
+
+				case flowir.AssignIncDec:
+					for _, dst := range op.Dsts {
+						if !checkLHSPlaceOK(dst, false, inSyncAllowed) {
+							return false
+						}
+					}
+
+				case flowir.AssignCompound:
+					for idxDst, dst := range op.Dsts {
+						if !checkLHSPlaceOK(dst, false, inSyncAllowed) {
+							return false
+						}
+						if idxDst < len(op.Srcs) && op.Srcs[idxDst] != nil && len(op.Srcs[idxDst].Args) == 2 {
+							rhs := op.Srcs[idxDst].Args[1]
+							if rhs != nil {
+								if seedStructTypeViolated(dst.Type, rhs.Type) {
+									return reject(valPos(rhs), "compound assign seed struct violation")
+								}
+								if _, rCar := classifyValue(rhs); rCar {
+									return reject(valPos(rhs), "compound assign tainted rhs")
+								}
+							}
+						}
+					}
+
+				case flowir.AssignPlain:
+					pairsOK := true
+					op.ForEachAssignPair(func(_ int, dst flowir.Place, isDef bool, src *flowir.Value) bool {
+						if !checkLHSPlaceOK(dst, isDef && dst.IsBareVar(), inSyncAllowed) {
+							pairsOK = false
+							return false
+						}
+						if src == nil {
+							return true
+						}
+						if !dst.IsBlank() && seedStructTypeViolated(dst.Type, src.Type) {
+							pairsOK = reject(valPos(src), "assign seed struct violation")
+							return false
+						}
+						rRef, rCar := classifyValue(src)
+						if !rCar || dst.IsBlank() {
+							return true
+						}
+						if dst.IsBareVar() {
+							if assignErasesTaint(dst.Obj.Type(), src.Type) {
+								pairsOK = reject(valPos(src), "assign to bare var erases taint")
+								return false
+							}
+							return true
+						}
+						if len(dst.Projs) == 1 && dst.Projs[0].Kind == flowir.ProjIndex && dst.Obj != nil && localFreshContainer[dst.Obj] {
+							if !assignErasesTaint(dst.Type, src.Type) {
+								return true
+							}
+						}
+						if cfg.AllowAssignTarget != nil && dst.Raw != nil && src.Raw != nil &&
+							!assignErasesTaint(dst.Type, src.Type) &&
+							cfg.AllowAssignTarget(dst.Raw, src.Raw, rRef) {
+							return true
+						}
+						pairsOK = reject(valPos(src), "assign tainted value to non-bare target")
+						return false
+					})
+					if !pairsOK {
 						return false
 					}
 
-					if callee := resolveConcretePkgCallee(s.Fun); callee != nil {
-						sig, okSig := callee.Type().(*types.Signature)
-						if !okSig {
-							ok = false
+				case flowir.AssignMulti:
+					for idxDst, dst := range op.Dsts {
+						isDef := idxDst < len(op.DstDefs) && op.DstDefs[idxDst] && dst.IsBareVar()
+						if !checkLHSPlaceOK(dst, isDef, inSyncAllowed) {
 							return false
 						}
-						if len(s.Args) == 1 {
-							if tup, isTup := info.TypeOf(s.Args[0]).(*types.Tuple); isTup {
-								if tup.Len() != sig.Params().Len() {
-									ok = false
-									return false
-								}
-								erased := false
-								for ti := 0; ti < tup.Len(); ti++ {
-									st := tup.At(ti).Type()
-									if _, sCar := classifyMultiReturnSlot(s.Args[0], ti, st); !sCar {
-										continue
-									}
-									pt := sig.Params().At(ti).Type()
-									if !(cfg.AllowIntraPkgInterfaceParam && pt != nil && types.IsInterface(pt)) && assignErasesTaint(pt, st) {
-										erased = true
-										break
-									}
-								}
-								if !erased {
-									continue
-								}
-								ok = false
-								return false
-							}
-						}
-						paramIdx := argIdx
-						isNonEllipsisVariadic := false
-						if sig.Variadic() && argIdx >= sig.Params().Len()-1 {
-							paramIdx = sig.Params().Len() - 1
-							isNonEllipsisVariadic = !s.Ellipsis.IsValid()
-						}
-						if paramIdx < sig.Params().Len() {
-							pt := sig.Params().At(paramIdx).Type()
-							if isNonEllipsisVariadic {
-								if sl, isSl := types.Unalias(pt).Underlying().(*types.Slice); isSl {
-									pt = sl.Elem()
+					}
+					if len(op.Srcs) == 1 && op.Srcs[0] != nil {
+						rhs := op.Srcs[0]
+						rhsTup, _ := rhs.Type.(*types.Tuple)
+						if rhsTup != nil {
+							for idxDst, dst := range op.Dsts {
+								if idxDst < rhsTup.Len() && !dst.IsBlank() && seedStructTypeViolated(dst.Type, rhsTup.At(idxDst).Type()) {
+									return reject(valPos(rhs), "multi-assign seed struct violation")
 								}
 							}
-							if (cfg.AllowIntraPkgInterfaceParam && pt != nil && types.IsInterface(pt)) || !assignErasesTaint(pt, info.TypeOf(arg)) {
+						} else if len(op.Dsts) > 0 && !op.Dsts[0].IsBlank() && seedStructTypeViolated(op.Dsts[0].Type, rhs.Type) {
+							return reject(valPos(rhs), "comma-ok assign seed struct violation")
+						}
+						for idxDst, dst := range op.Dsts {
+							srcElemT := dst.Type
+							if rhsTup != nil && idxDst < rhsTup.Len() {
+								srcElemT = rhsTup.At(idxDst).Type()
+							}
+							if _, sCar := classifyMultiReturnSlot(rhs, idxDst, srcElemT); !sCar {
 								continue
 							}
+							if dst.IsBlank() {
+								continue
+							}
+							if !dst.IsBareVar() || (srcElemT != nil && assignErasesTaint(dst.Obj.Type(), srcElemT)) {
+								return reject(valPos(rhs), "multi-assign tainted value to non-bare or erasing target")
+							}
 						}
 					}
 
-					if cfg.AllowCallArg != nil && cfg.AllowCallArg(s, argIdx, arg) {
+				case flowir.AssignRange:
+					for idxDst, dst := range op.Dsts {
+						isDef := idxDst < len(op.DstDefs) && op.DstDefs[idxDst]
+						if !isDef && !dst.IsBlank() && !checkLHSPlaceOK(dst, false, inSyncAllowed) {
+							return false
+						}
+					}
+					if len(op.Srcs) == 1 && op.Srcs[0] != nil {
+						rngX := op.Srcs[0]
+						if _, xCar := classifyValue(rngX); xCar {
+							for idxDst, dst := range op.Dsts {
+								isDef := idxDst < len(op.DstDefs) && op.DstDefs[idxDst]
+								if isDef || dst.IsBlank() {
+									continue
+								}
+								if _, pCar := projectedClassify(dst.Type, rngX.Raw); !pCar {
+									continue
+								}
+								if !dst.IsBareVar() {
+									return reject(valPos(rngX), "range over tainted container into non-bare target")
+								}
+							}
+						}
+					}
+				}
+
+			case flowir.OpTypeSwitchBind:
+				if !checkValueOK(op.SwitchSrc, inSyncAllowed) {
+					return false
+				}
+				if _, sCar := classifyValue(op.SwitchSrc); sCar {
+					return reject(valPos(op.SwitchSrc), "type switch on tainted value")
+				}
+				if cfg.ForbidNonNilSeedStructPtrCompare && op.SwitchAST != nil && op.SwitchAST.Body != nil {
+					for _, raw := range op.SwitchAST.Body.List {
+						if cc, okCC := raw.(*ast.CaseClause); okCC {
+							for _, ce := range cc.List {
+								if !syntaxutil.IsNilIdent(info, ce) && isPtrToSeedStruct(info.TypeOf(ce)) {
+									return reject(ce.Pos(), "type switch case on pointer to seed struct")
+								}
+							}
+						}
+					}
+				}
+
+			case flowir.OpChanSend:
+				if !op.ChanPlace.ForEachChildValue(func(cv *flowir.Value) bool { return checkValueOK(cv, inSyncAllowed) }) ||
+					!checkValueOK(op.ChanVal, inSyncAllowed) || !checkValueOK(op.SendVal, inSyncAllowed) {
+					return false
+				}
+				if op.ChanVal != nil && op.SendVal != nil {
+					if ch, isCh := syntaxutil.UnderlyingType(op.ChanVal.Type).(*types.Chan); isCh {
+						if seedStructTypeViolated(ch.Elem(), op.SendVal.Type) {
+							return reject(valPos(op.SendVal), "channel send seed struct violation")
+						}
+					} else if (cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(op.SendVal.Type, isSeedStruct)) ||
+						(len(propagatedStructs) > 0 && typeMentionsSeedStruct(op.SendVal.Type, isPropagatedStruct)) {
+						return reject(valPos(op.SendVal), "channel send mentions protected struct")
+					}
+				}
+				if _, chCar := classifyValue(op.ChanVal); chCar {
+					return reject(valPos(op.ChanVal), "send on tainted channel")
+				}
+				if _, vCar := classifyValue(op.SendVal); vCar {
+					return reject(valPos(op.SendVal), "send of tainted value")
+				}
+
+			case flowir.OpReturn:
+				for _, r := range op.Results {
+					if !checkValueOK(r, inSyncAllowed) {
+						return false
+					}
+				}
+				if len(op.Results) == 1 && op.Results[0] != nil && (cfg.ForbidNonNilSeedStructPtrCompare || len(propagatedStructs) > 0) {
+					if tup, isTup := op.Results[0].Type.(*types.Tuple); isTup {
+						for ti := 0; ti < tup.Len(); ti++ {
+							rT := tup.At(ti).Type()
+							if enclFunc != nil && enclFunc.Signature().Results() != nil && ti < enclFunc.Signature().Results().Len() {
+								if seedStructTypeViolated(enclFunc.Signature().Results().At(ti).Type(), rT) {
+									return reject(valPos(op.Results[0]), "tuple return seed struct violation")
+								}
+							} else if (cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(rT, isSeedStruct)) ||
+								(len(propagatedStructs) > 0 && typeMentionsSeedStruct(rT, isPropagatedStruct)) {
+								return reject(valPos(op.Results[0]), "tuple return mentions protected struct")
+							}
+						}
+					}
+				}
+				for ri, r := range op.Results {
+					if r == nil {
 						continue
 					}
+					if enclFunc != nil {
+						res := enclFunc.Signature().Results()
+						if ri < res.Len() {
+							if seedStructTypeViolated(res.At(ri).Type(), r.Type) {
+								return reject(valPos(r), "return seed struct violation")
+							}
+						} else if (cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(r.Type, isSeedStruct)) ||
+							(len(propagatedStructs) > 0 && typeMentionsSeedStruct(r.Type, isPropagatedStruct)) {
+							return reject(valPos(r), "return mentions protected struct")
+						}
+					} else if isSeedStruct(syntaxutil.DerefNamedStruct(r.Type)) ||
+						(cfg.ForbidNonNilSeedStructPtrCompare && typeMentionsSeedStruct(r.Type, isSeedStruct)) ||
+						(len(propagatedStructs) > 0 && typeMentionsSeedStruct(r.Type, isPropagatedStruct)) {
+						return reject(valPos(r), "closure return mentions protected struct")
+					}
+					if len(op.Results) == 1 {
+						if tup, isTup := r.Type.(*types.Tuple); isTup {
+							for ti := 0; ti < tup.Len(); ti++ {
+								st := tup.At(ti).Type()
+								if _, sCar := classifyMultiReturnSlot(r, ti, st); !sCar {
+									continue
+								}
+								if !canPropagateReturn(enclFunc) {
+									return reject(valPos(r), "disallowed tuple return of tainted value")
+								}
+								res := enclFunc.Signature().Results()
+								if ti >= res.Len() || assignErasesTaint(res.At(ti).Type(), st) {
+									return reject(valPos(r), "tuple return erases taint")
+								}
+							}
+							continue
+						}
+					}
+					if _, rCar := classifyValue(r); !rCar {
+						continue
+					}
+					if !canPropagateReturn(enclFunc) {
+						return reject(valPos(r), "disallowed return of tainted value")
+					}
+					res := enclFunc.Signature().Results()
+					if ri >= res.Len() || assignErasesTaint(res.At(ri).Type(), r.Type) {
+						return reject(valPos(r), "return erases taint")
+					}
+				}
 
-					ok = false
+			case flowir.OpDefer:
+				if !checkValueOK(op.Call, inSyncAllowed) {
+					return false
+				}
+
+			case flowir.OpGo:
+				if !checkValueOK(op.Call, !cfg.ForbidNonNilSeedStructPtrCompare) {
+					return false
+				}
+
+			case flowir.OpExpr:
+				if cfg.ForbidNonNilSeedStructPtrCompare {
+					switch st := op.StmtAST.(type) {
+					case *ast.CaseClause:
+						if op.Expr != nil && !op.Expr.IsNil && isPtrToSeedStruct(op.Expr.Type) {
+							return reject(valPos(op.Expr), "switch case on pointer to seed struct")
+						}
+					case *ast.SwitchStmt:
+						if op.Expr != nil && isPtrToSeedStruct(op.Expr.Type) && st.Body != nil {
+							for _, raw := range st.Body.List {
+								if cc, okCC := raw.(*ast.CaseClause); okCC {
+									for _, ce := range cc.List {
+										if !syntaxutil.IsNilIdent(info, ce) {
+											return reject(ce.Pos(), "switch on pointer to seed struct with non-nil case")
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+				if !checkValueOK(op.Expr, inSyncAllowed) {
 					return false
 				}
 			}
-			return true
-		})
-	}
-	return ok
+		}
+		return true
+	})
 }

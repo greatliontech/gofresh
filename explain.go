@@ -259,16 +259,23 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 			meta = append(meta, dynstate.GraphPackage{
 				ImportPath: nodeID,
 				PkgPath:    p.PkgPath,
+				ForTest:    p.ForTest,
 				Imports:    impPaths,
 				Class:      class,
 			})
 		}
 	}
-	if dynstate.NonVouchDischargedVarsWithRoots(meta, facts, singleSubject, packageProcess)[varKey] {
+	cone := dynstate.AnalyzeCone(dynstate.ConeQuery{
+		Meta:           meta,
+		Facts:          facts,
+		SingleSubject:  singleSubject,
+		PackageProcess: packageProcess,
+	})
+	if cone.NonVouchDischarged[varKey] {
 		return Chain{}, nil
 	}
-	resolution := dynstate.NewDeferralResolution(facts, nil)
-	blockedSeams := dynstate.BlockedExportedSeams(facts, nil)
+	resolution := cone.Deferral
+	blockedSeams := cone.BlockedSeams
 	for _, obs := range allExportedSeams {
 		if blockedSeams[obs.key][obs.fn] {
 			allSites = append(allSites, siteObservation{key: obs.key, link: obs.link})
@@ -280,7 +287,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	isInitOnlyPlain := func(fn syntaxutil.FuncKey) bool {
 		return !fn.IsZero() && refRegions[fn] != nil && initOnlyFn[fn]
 	}
-	linkAdj := dynstate.ActiveCarrierLinkGraph(facts, resolution, nil)
+	linkAdj := cone.LinkAdj
 	linkedKeys := map[string]bool{varKey: true}
 	for changed := len(linkAdj[varKey]) > 0; changed; {
 		changed = false
@@ -413,7 +420,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 			}
 		}
 	}
-	edges, refusedFn, refusedPath := envAuditTrail(variants, facts, linkedKeys, varName)
+	edges, refusedFn, refusedPath := envAuditTrailWith(cone.EnvAudit, variants, facts, linkedKeys, varName)
 	if !carrying && len(edges) == 0 {
 		return Chain{}, nil
 	}
@@ -441,7 +448,10 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 }
 
 func envAuditTrail(variants map[string][]*packages.Package, facts map[string][]dynstate.Fact, linkedKeys map[string]bool, varName string) ([]ChainLink, string, string) {
-	ea := dynstate.ResolveEnvAudit(facts, nil)
+	return envAuditTrailWith(dynstate.ResolveEnvAudit(facts, nil), variants, facts, linkedKeys, varName)
+}
+
+func envAuditTrailWith(ea *dynstate.EnvAuditResolution, variants map[string][]*packages.Package, facts map[string][]dynstate.Fact, linkedKeys map[string]bool, varName string) ([]ChainLink, string, string) {
 	renderEdge := func(key syntaxutil.EnvAuditTarget) (string, string) {
 		if key.IsParam() {
 			return key.Func.Pkg, key.Func.Name + " (parameter " + strconv.Itoa(key.ParamIndex) + ")"
