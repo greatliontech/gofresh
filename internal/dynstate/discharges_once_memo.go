@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
@@ -2002,35 +2003,10 @@ func verifyPureFmtFormatArgs(p *packages.Package, fmtExpr ast.Expr, args []ast.E
 	}
 	fmtStr := constant.StringVal(tv.Value)
 	argIdx := 0
-	for i := 0; i < len(fmtStr); i++ {
-		if fmtStr[i] != '%' {
-			continue
-		}
-		i++
-		if i >= len(fmtStr) {
-			return false
-		}
-		if fmtStr[i] == '%' {
-			continue
-		}
-		// Reject explicit argument indexing %[n] or * width/precision to keep positional matching exact.
-		for i < len(fmtStr) && strings.ContainsRune("+-# 0", rune(fmtStr[i])) {
-			i++
-		}
-		for i < len(fmtStr) && fmtStr[i] >= '0' && fmtStr[i] <= '9' {
-			i++
-		}
-		if i < len(fmtStr) && fmtStr[i] == '.' {
-			i++
-			for i < len(fmtStr) && fmtStr[i] >= '0' && fmtStr[i] <= '9' {
-				i++
-			}
-		}
-		if i >= len(fmtStr) {
-			return false
-		}
-		verb := fmtStr[i]
-		if verb == '[' || verb == '*' || verb == 'p' {
+	ok := auditset.ScanFmtDirectives(fmtStr, func(d auditset.FmtDirective) bool {
+		// Reject explicit argument indexing %[n], dynamic '*' width/precision,
+		// escaped '%*%' forms, and pointer-address verbs (%p, %#v).
+		if d.HasArgIndex || d.DynamicWidth || d.DynamicPrec || d.Verb == '%' || d.ExposesPointerIdentity() {
 			return false
 		}
 		if argIdx >= len(args) {
@@ -2038,17 +2014,12 @@ func verifyPureFmtFormatArgs(p *packages.Package, fmtExpr ast.Expr, args []ast.E
 		}
 		arg := args[argIdx]
 		argIdx++
-		if verb == 'w' {
-			if !isPureErr(arg) {
-				return false
-			}
-			continue
+		if d.Verb == 'w' {
+			return isPureErr(arg)
 		}
-		if !isScalarBasicType(p.TypesInfo.TypeOf(arg)) {
-			return false
-		}
-	}
-	return argIdx == len(args)
+		return isScalarBasicType(p.TypesInfo.TypeOf(arg))
+	})
+	return ok && argIdx == len(args)
 }
 
 func verifyOnceMemoSiblingMethod(
@@ -3713,31 +3684,19 @@ func isLocalBuilderOrBufferAddr(p *packages.Package, expr ast.Expr) bool {
 	if v == nil || v.IsField() || v.Parent() == p.Types.Scope() {
 		return false
 	}
-	return syntaxutil.IsNamedInPkg(v.Type(), "strings", "Builder") ||
-		syntaxutil.IsNamedInPkg(v.Type(), "bytes", "Buffer")
+	named, ok := types.Unalias(v.Type()).(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+		return false
+	}
+	return auditset.InMemoryWriterPointerType(named.Obj().Pkg().Path(), named.Obj().Name())
 }
 
 func isReadOnlyInputSliceStdlibCallee(fn *types.Func) bool {
 	if fn == nil || fn.Pkg() == nil {
 		return false
 	}
-	switch fn.Pkg().Path() {
-	case "bytes":
-		switch fn.Name() {
-		case "Clone", "Contains", "ContainsAny", "ContainsRune", "Count", "Equal", "EqualFold",
-			"HasPrefix", "HasSuffix", "Index", "IndexAny", "IndexByte", "IndexRune",
-			"LastIndex", "LastIndexAny", "LastIndexByte":
-			return true
-		}
-	case "slices":
-		switch fn.Name() {
-		case "Clone", "Contains", "Equal", "Index", "BinarySearch":
-			return true
-		}
-	case "unicode/utf8":
-		return true
-	}
-	return false
+	traits := auditset.DeterministicStdCallTraits(fn.Pkg().Path(), fn.Name())
+	return traits.ReadOnlySliceInspect || traits.ReadOnlySliceCopy
 }
 
 func isPointerIdentityComparison(info *types.Info, x, y ast.Expr) bool {

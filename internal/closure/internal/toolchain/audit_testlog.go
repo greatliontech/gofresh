@@ -98,10 +98,15 @@ func VerifyInternalTestlogPackageAST(files []*ast.File) error {
 	}
 
 	allowedLoggerIdents := map[*ast.Ident]bool{loggerSpec.Names[0]: true}
+	k := NewPackageInactiveKernel(idx, files, nil, nil)
+	pruneStmts := func(fn *ast.FuncDecl, pureVars map[string]bool) []ast.Stmt {
+		stmts, _ := k.PruneBlockStmts(fn.Body.List, fn, pureVars, nil, nil)
+		return stmts
+	}
 
 	// Verify SetLogger(impl Interface): if !logger.CompareAndSwap(nil, &impl) { panic("...") }
 	setFn, _, okSet := idx.VerifyFuncPreamble("", "SetLogger", false, reserved)
-	if !okSet || setFn.Type.Params == nil || setFn.Type.Params.NumFields() != 1 || len(setFn.Type.Params.List) != 1 || (setFn.Type.Results != nil && setFn.Type.Results.NumFields() != 0) || len(setFn.Body.List) != 1 {
+	if !okSet || setFn.Type.Params == nil || setFn.Type.Params.NumFields() != 1 || len(setFn.Type.Params.List) != 1 || (setFn.Type.Results != nil && setFn.Type.Results.NumFields() != 0) {
 		return fmt.Errorf("internal/testlog: invalid SetLogger signature or body")
 	}
 	setParams := paramNamesFlat(setFn.Type.Params)
@@ -111,7 +116,11 @@ func VerifyInternalTestlogPackageAST(files []*ast.File) error {
 	if _, ok := isIdentNamed(setFn.Type.Params.List[0].Type, "Interface"); !ok {
 		return fmt.Errorf("internal/testlog: SetLogger parameter is not Interface")
 	}
-	setIf, ok := setFn.Body.List[0].(*ast.IfStmt)
+	setStmts := pruneStmts(setFn, map[string]bool{setParams[0]: true})
+	if len(setStmts) != 1 {
+		return fmt.Errorf("internal/testlog: invalid SetLogger statement count")
+	}
+	setIf, ok := setStmts[0].(*ast.IfStmt)
 	if !ok || setIf.Init != nil || setIf.Else != nil || len(setIf.Body.List) != 1 {
 		return fmt.Errorf("internal/testlog: SetLogger body is not single CAS guard")
 	}
@@ -148,13 +157,17 @@ func VerifyInternalTestlogPackageAST(files []*ast.File) error {
 
 	// Verify Logger() Interface: impl := logger.Load(); if impl == nil { return nil }; return *impl
 	getFn, _, okGet := idx.VerifyFuncPreamble("", "Logger", false, reserved)
-	if !okGet || (getFn.Type.Params != nil && getFn.Type.Params.NumFields() != 0) || getFn.Type.Results == nil || getFn.Type.Results.NumFields() != 1 || len(getFn.Type.Results.List) != 1 || len(getFn.Type.Results.List[0].Names) != 0 || len(getFn.Body.List) != 3 {
+	if !okGet || (getFn.Type.Params != nil && getFn.Type.Params.NumFields() != 0) || getFn.Type.Results == nil || getFn.Type.Results.NumFields() != 1 || len(getFn.Type.Results.List) != 1 || len(getFn.Type.Results.List[0].Names) != 0 {
 		return fmt.Errorf("internal/testlog: invalid Logger signature or body")
+	}
+	getStmts := pruneStmts(getFn, nil)
+	if len(getStmts) != 3 {
+		return fmt.Errorf("internal/testlog: invalid Logger statement count")
 	}
 	if _, ok := isIdentNamed(getFn.Type.Results.List[0].Type, "Interface"); !ok {
 		return fmt.Errorf("internal/testlog: Logger result is not Interface")
 	}
-	loadAs, ok := getFn.Body.List[0].(*ast.AssignStmt)
+	loadAs, ok := getStmts[0].(*ast.AssignStmt)
 	if !ok || loadAs.Tok != token.DEFINE || len(loadAs.Lhs) != 1 || len(loadAs.Rhs) != 1 {
 		return fmt.Errorf("internal/testlog: Logger missing logger.Load() assignment")
 	}
@@ -167,7 +180,7 @@ func VerifyInternalTestlogPackageAST(files []*ast.File) error {
 		return fmt.Errorf("internal/testlog: Logger does not call logger.Load()")
 	}
 	allowedLoggerIdents[loadLogID] = true
-	nilIf, ok := getFn.Body.List[1].(*ast.IfStmt)
+	nilIf, ok := getStmts[1].(*ast.IfStmt)
 	if !ok || nilIf.Init != nil || nilIf.Else != nil || !condChecksEqErr(nilIf.Cond, ptrID.Name) || len(nilIf.Body.List) != 1 {
 		return fmt.Errorf("internal/testlog: Logger missing nil check")
 	}
@@ -176,7 +189,7 @@ func VerifyInternalTestlogPackageAST(files []*ast.File) error {
 	} else if _, ok := isIdentNamed(nilRet.Results[0], "nil"); !ok {
 		return fmt.Errorf("internal/testlog: Logger nil branch does not return nil")
 	}
-	derefRet, ok := getFn.Body.List[2].(*ast.ReturnStmt)
+	derefRet, ok := getStmts[2].(*ast.ReturnStmt)
 	if !ok || len(derefRet.Results) != 1 {
 		return fmt.Errorf("internal/testlog: Logger missing dereference return")
 	}
@@ -191,7 +204,7 @@ func VerifyInternalTestlogPackageAST(files []*ast.File) error {
 	// Verify Getenv, Open, Stat (and Chdir if declared as a package function).
 	verifyDispatch := func(op string) bool {
 		fn, _, ok := idx.VerifyFuncPreamble("", op, false, reserved)
-		if !ok || fn.Type.Params == nil || fn.Type.Params.NumFields() != 1 || len(fn.Type.Params.List) != 1 || (fn.Type.Results != nil && fn.Type.Results.NumFields() != 0) || len(fn.Body.List) != 1 {
+		if !ok || fn.Type.Params == nil || fn.Type.Params.NumFields() != 1 || len(fn.Type.Params.List) != 1 || (fn.Type.Results != nil && fn.Type.Results.NumFields() != 0) {
 			return false
 		}
 		if _, ok := isIdentNamed(fn.Type.Params.List[0].Type, "string"); !ok {
@@ -201,7 +214,11 @@ func VerifyInternalTestlogPackageAST(files []*ast.File) error {
 		if len(pNames) != 1 || pNames[0] == "" || pNames[0] == "_" || reserved[pNames[0]] || bodyDeclaresAnyIdent(fn.Body, map[string]bool{pNames[0]: true}) {
 			return false
 		}
-		ifs, ok := fn.Body.List[0].(*ast.IfStmt)
+		dStmts := pruneStmts(fn, map[string]bool{pNames[0]: true})
+		if len(dStmts) != 1 {
+			return false
+		}
+		ifs, ok := dStmts[0].(*ast.IfStmt)
 		if !ok || ifs.Init == nil || ifs.Else != nil || len(ifs.Body.List) != 1 {
 			return false
 		}

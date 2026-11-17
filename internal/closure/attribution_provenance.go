@@ -1975,7 +1975,7 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 						calleeNonStdDispatch = false
 					case fnIsStd:
 						calleeNonStdDispatch = true
-					case audited && !calleeHarness && (auditset.PurePackage(calleePath) || auditedStandardCallee(true, calleePath, functionSymbolName(callee), callee)) && isCarrierFreeStaticCall(audited, site, callee):
+					case audited && !calleeHarness && (auditset.PurePackage(calleePath) || auditedStandardCallee(true, calleePath, functionSymbolName(callee), callee) || (sharedProvFP != nil && isAdmittedPureMathSymbol(true, sharedProvFP.pureDelegates, calleePath, callee))) && isCarrierFreeStaticCall(audited, site, callee):
 						calleeNonStdDispatch = false
 					default:
 						calleeNonStdDispatch = true

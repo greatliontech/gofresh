@@ -2,11 +2,14 @@ package cprep
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"pgregory.net/rapid"
 )
 
 func writeTestFile(t *testing.T, dir, rel, content string) {
@@ -216,6 +219,7 @@ func FuzzCPreprocessor(f *testing.F) {
 	f.Add("L\"\\x72\\165\\u006e\" \\\n\"time·nanotime\"\n")
 	f.Add("/* comment */ #include \"hdr.h\" // line\\\ncontinuation\nTEXT ·F(SB), $0\n\tSYSCALL\n")
 	f.Add("const char *s = R\"delim(/* not a comment */)delim\";\n")
+	f.Add("#undef HDR\n#include \"hdr.h\"\n#ifdef COND\n#undef HDR\n#endif\nCALL HDR(SB)\n")
 
 	f.Fuzz(func(t *testing.T, src string) {
 		if len(src) > 4096 {
@@ -228,10 +232,14 @@ func FuzzCPreprocessor(f *testing.F) {
 		_, _ = StripCComments(src)
 		_ = VerifyAssemblyFile("example.com/pkg", "fuzz.s", src, nil)
 
-		rtOut := map[string]bool{}
-		extOut := map[string]bool{}
-		idOut := map[string]bool{}
-		_ = ScanPreprocessedNonGoSymbolRefs("example.com/pkg", []string{src}, []string{src}, rtOut, extOut, idOut)
+		rtOut1, extOut1, idOut1 := map[string]bool{}, map[string]bool{}, map[string]bool{}
+		ov1 := ScanPreprocessedNonGoSymbolRefs("example.com/pkg", []string{src}, []string{src}, rtOut1, extOut1, idOut1)
+		rtOut2, extOut2, idOut2 := map[string]bool{}, map[string]bool{}, map[string]bool{}
+		ov2 := ScanPreprocessedNonGoSymbolRefs("example.com/pkg", []string{src}, []string{src}, rtOut2, extOut2, idOut2)
+		if ov1 != ov2 || !maps.Equal(rtOut1, rtOut2) || !maps.Equal(extOut1, extOut2) || !maps.Equal(idOut1, idOut2) {
+			t.Fatalf("non-deterministic ScanPreprocessedNonGoSymbolRefs: (%v, %v, %v, %v) vs (%v, %v, %v, %v)",
+				ov1, rtOut1, extOut1, idOut1, ov2, rtOut2, extOut2, idOut2)
+		}
 	})
 }
 
@@ -272,4 +280,269 @@ func TestDirectiveAndTokenPrimitives(t *testing.T) {
 	if err != nil || !strings.Contains(preamble, `#include "../cfg.h"`) {
 		t.Fatalf("GoCgoPreamble(adjacent block comments) = (%q, %v), want #include \"../cfg.h\" on single line", preamble, err)
 	}
+}
+
+//gofresh:pure
+func TestSequentialAndConditionalDefineUndefScopingMatrix(t *testing.T) {
+	// 12 sequential blocks redefining and #undef'ing 8 register-alias macros on one multi-operand instruction line
+	// (12^8 = 429,981,696 combinations if accumulated globally, 1 state per line when scoped sequentially).
+	var seqAsm strings.Builder
+	seqAsm.WriteString("#include \"textflag.h\"\nTEXT ·Kernel(SB), NOSPLIT, $0\n")
+	for round := range 12 {
+		for r := range 8 {
+			fmt.Fprintf(&seqAsm, "#define X%d V%d\n", r, (round+r)%32)
+		}
+		seqAsm.WriteString("\tVFA X0, X1, X2, X3, X4, X5, X6, X7\n")
+		for r := range 8 {
+			fmt.Fprintf(&seqAsm, "#undef X%d\n", r)
+		}
+	}
+	seqAsm.WriteString("\tRET\n")
+
+	for _, tc := range []struct {
+		name      string
+		hdrs      []string
+		texts     []string
+		wantRT    []string
+		forbidRT  []string
+		wantExt   []string
+		forbidExt []string
+	}{
+		{
+			name:   "repeated_register_alias_undef_blocks_no_overflow",
+			hdrs:   []string{"#define NOSPLIT 4\n"},
+			texts:  []string{seqAsm.String()},
+			wantRT: nil,
+		},
+		{
+			name: "unconditional_undef_stops_stale_expansion_after_undef",
+			texts: []string{
+				"#define ALIAS other·ActiveBefore\n\tCALL ALIAS(SB)\n#undef ALIAS\n#define ALIAS ·localHelper\n\tCALL ALIAS(SB)\n#undef ALIAS\n",
+			},
+			wantExt: []string{"other.ActiveBefore"},
+		},
+		{
+			name: "conditional_undef_preserves_prior_definition",
+			texts: []string{
+				"#define TARGET runtime·nanotime\n#ifdef UNKNOWN_TAG\n#undef TARGET\n#endif\n\tCALL TARGET(SB)\n",
+			},
+			wantRT: []string{"runtime.nanotime"},
+		},
+		{
+			name: "conditional_redefine_accumulates_both_choices",
+			texts: []string{
+				"#define TARGET other·SymA\n#if SOME_EXPR\n#define TARGET runtime·nanotime\n#endif\n\tCALL TARGET(SB)\n",
+			},
+			wantRT:  []string{"runtime.nanotime"},
+			wantExt: []string{"other.SymA"},
+		},
+		{
+			name: "include_after_undef_restores_exported_header_macro",
+			hdrs: []string{"#define HDR_SYM runtime·nanotime\n"},
+			texts: []string{
+				"#undef HDR_SYM\n#include \"hdr.h\"\n\tCALL HDR_SYM(SB)\n",
+			},
+			wantRT: []string{"runtime.nanotime"},
+		},
+		{
+			name: "include_after_local_override_merges_exported_header_macro",
+			hdrs: []string{"#define HDR_SYM runtime·nanotime\n"},
+			texts: []string{
+				"#define HDR_SYM ·safeLocal\n#include \"hdr.h\"\n\tCALL HDR_SYM(SB)\n",
+			},
+			wantRT: []string{"runtime.nanotime"},
+		},
+		{
+			name: "chained_header_undef_then_include_propagates",
+			hdrs: []string{
+				"#undef CHAIN_SYM\n#include \"h1.h\"\n",
+				"#define CHAIN_SYM runtime·nanotime\n",
+			},
+			texts: []string{
+				"#undef CHAIN_SYM\n#include \"h2.h\"\n\tCALL CHAIN_SYM(SB)\n",
+			},
+			wantRT: []string{"runtime.nanotime"},
+		},
+		{
+			name: "header_transient_undef_does_not_leak_unused_macro",
+			hdrs: []string{
+				"#define TMP_REG other·TransientUnused\n#undef TMP_REG\n#define EXPORTED_SYM other·ExportedUsed\n",
+			},
+			texts: []string{
+				"#include \"hdr.h\"\n\tMOVQ $1, TMP_REG\n\tCALL EXPORTED_SYM(SB)\n",
+			},
+			wantExt:   []string{"other.ExportedUsed"},
+			forbidExt: []string{"other.TransientUnused"},
+		},
+		{
+			name: "stringify_identity_before_later_define_not_clobbered",
+			texts: []string{
+				"#define STR(x) #x\n#define XSTR(x) STR(x)\nextern void sneak(void) __asm__(XSTR(runtime) \".nanotime\");\n#define runtime safe\n",
+			},
+			wantRT: []string{"runtime.nanotime"},
+		},
+		{
+			name: "sibling_file_define_does_not_clobber_stringify_identity",
+			hdrs: []string{"#define runtime safe\n"},
+			texts: []string{
+				"#define STR(x) #x\n#define XSTR(x) STR(x)\n#include <stdint.h>\nextern void sneak(void) __asm__(XSTR(runtime) \".nanotime\");\n",
+				"#define runtime also_safe\n",
+			},
+			wantRT: []string{"runtime.nanotime"},
+		},
+		{
+			name: "header_undef_restores_overridden_stringify_identity",
+			hdrs: []string{"#undef runtime\n"},
+			texts: []string{
+				"#define STR(x) #x\n#define XSTR(x) STR(x)\n#define runtime safe\n#include \"hdr.h\"\nextern void sneak(void) __asm__(XSTR(runtime) \".nanotime\");\n",
+			},
+			wantRT: []string{"runtime.nanotime"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rtOut, extOut, idOut := map[string]bool{}, map[string]bool{}, map[string]bool{}
+			if ScanPreprocessedNonGoSymbolRefs("example.com/self", tc.hdrs, tc.texts, rtOut, extOut, idOut) {
+				t.Fatalf("ScanPreprocessedNonGoSymbolRefs unexpectedly overflowed")
+			}
+			for _, sym := range tc.wantRT {
+				if !rtOut[sym] {
+					t.Fatalf("missing runtime symbol %q in %v", sym, rtOut)
+				}
+			}
+			for _, sym := range tc.forbidRT {
+				if rtOut[sym] {
+					t.Fatalf("unexpected runtime symbol %q in %v", sym, rtOut)
+				}
+			}
+			for _, sym := range tc.wantExt {
+				if !extOut[sym] {
+					t.Fatalf("missing external symbol %q in %v", sym, extOut)
+				}
+			}
+			for _, sym := range tc.forbidExt {
+				if extOut[sym] {
+					t.Fatalf("unexpected external symbol %q in %v", sym, extOut)
+				}
+			}
+		})
+	}
+}
+
+func TestPropertySequentialAndConditionalMacroSymbolSoundness(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		type opKind int
+		const (
+			opDefine opKind = iota
+			opUndef
+			opInclude
+			opUse
+		)
+		type step struct {
+			kind  opKind
+			cond  int // -1 for unconditional, 0..2 for #ifdef C<cond>
+			macro int // 0..2 for M0..M2
+			sym   int // 0..3 for ext·S0..ext·S3
+		}
+
+		hdrKind := [3]int{} // 0: absent, 1: #define, 2: #undef
+		hdrSym := [3]int{}
+		var hdrBuf strings.Builder
+		for m := range 3 {
+			hdrKind[m] = rapid.IntRange(0, 2).Draw(rt, fmt.Sprintf("hdrKind%d", m))
+			hdrSym[m] = rapid.IntRange(0, 3).Draw(rt, fmt.Sprintf("hdrSym%d", m))
+			switch hdrKind[m] {
+			case 1:
+				fmt.Fprintf(&hdrBuf, "#define M%d ext·S%d\n", m, hdrSym[m])
+			case 2:
+				fmt.Fprintf(&hdrBuf, "#undef M%d\n", m)
+			}
+		}
+		siblingText := ""
+		if rapid.Bool().Draw(rt, "hasSiblingRedef") {
+			siblingText = "#define M0 safe0\n#define M1 safe1\n#define M2 safe2\n"
+		}
+
+		nSteps := rapid.IntRange(1, 10).Draw(rt, "nSteps")
+		steps := make([]step, nSteps)
+		var asmBuf strings.Builder
+		asmBuf.WriteString("#define PASTE(a, b) a ## b\n#define XPASTE(a, b) PASTE(a, b)\nTEXT ·Entry(SB), $0\n")
+		for i := range nSteps {
+			st := step{
+				kind:  opKind(rapid.IntRange(0, 3).Draw(rt, fmt.Sprintf("kind%d", i))),
+				cond:  rapid.IntRange(-1, 2).Draw(rt, fmt.Sprintf("cond%d", i)),
+				macro: rapid.IntRange(0, 2).Draw(rt, fmt.Sprintf("macro%d", i)),
+				sym:   rapid.IntRange(0, 3).Draw(rt, fmt.Sprintf("sym%d", i)),
+			}
+			steps[i] = st
+			if st.cond >= 0 {
+				fmt.Fprintf(&asmBuf, "#ifdef C%d\n", st.cond)
+			}
+			switch st.kind {
+			case opDefine:
+				fmt.Fprintf(&asmBuf, "#define M%d ext·S%d\n", st.macro, st.sym)
+			case opUndef:
+				fmt.Fprintf(&asmBuf, "#undef M%d\n", st.macro)
+			case opInclude:
+				asmBuf.WriteString("#include \"hdr.h\"\n")
+			case opUse:
+				fmt.Fprintf(&asmBuf, "\tCALL M%d(SB)\n\tCALL XPASTE(ext·id_, M%d)(SB)\n", st.macro, st.macro)
+			}
+			if st.cond >= 0 {
+				asmBuf.WriteString("#endif\n")
+			}
+		}
+		asmBuf.WriteString("\tRET\n")
+
+		// Concrete preprocessor oracle: evaluate all 2^3 assignments to C0..C2 where
+		// each #include may resolve either to hdr.h or to an unrelated empty header.
+		wantExt := map[string]bool{}
+		for _, includeHitsHdr := range []bool{false, true} {
+			for mask := range 8 {
+				env := [3]int{-1, -1, -1}
+				for _, st := range steps {
+					if st.cond >= 0 && (mask&(1<<st.cond)) == 0 {
+						continue
+					}
+					switch st.kind {
+					case opDefine:
+						env[st.macro] = st.sym
+					case opUndef:
+						env[st.macro] = -1
+					case opInclude:
+						if includeHitsHdr {
+							for m := range 3 {
+								if hdrKind[m] == 1 {
+									env[m] = hdrSym[m]
+								} else if hdrKind[m] == 2 {
+									env[m] = -1
+								}
+							}
+						}
+					case opUse:
+						if env[st.macro] >= 0 {
+							wantExt[fmt.Sprintf("ext.S%d", env[st.macro])] = true
+						} else {
+							wantExt[fmt.Sprintf("ext.id_M%d", st.macro)] = true
+						}
+					}
+				}
+			}
+		}
+
+		texts := []string{asmBuf.String()}
+		if siblingText != "" {
+			texts = append(texts, siblingText)
+		}
+		rtOut, extOut, idOut := map[string]bool{}, map[string]bool{}, map[string]bool{}
+		overflow := ScanPreprocessedNonGoSymbolRefs("example.com/self", []string{hdrBuf.String()}, texts, rtOut, extOut, idOut)
+		if overflow {
+			rt.Fatalf("unexpected overflow on bounded program:\n%s", asmBuf.String())
+		}
+		for sym := range wantExt {
+			if !extOut[sym] {
+				rt.Fatalf("soundness violation: concrete oracle reached %q, got extOut=%v\nhdr:\n%s\nasm:\n%s",
+					sym, extOut, hdrBuf.String(), asmBuf.String())
+			}
+		}
+	})
 }

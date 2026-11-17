@@ -6,19 +6,11 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
-
-// auditedValuePlane names the standard value-plane helpers whose results carry
-// exactly their arguments' values — clone and concatenation shapes with no
-// environment of their own. A closed set: absence keeps the refusal.
-var auditedValuePlane = map[syntaxutil.FuncKey]bool{
-	{Pkg: "slices", Name: "Clone"}:  true,
-	{Pkg: "slices", Name: "Concat"}: true,
-	{Pkg: "maps", Name: "Clone"}:    true,
-}
 
 // settledGlobalMap maps each proven settled unexported package data global to
 // the set of single-definition carrier variables whose top-level initializer
@@ -457,7 +449,7 @@ func settledPackageDataGlobals(
 						}
 						if v.CallKind == flowir.CallPlain && !v.IsMethodExprCall && v.CalleeFunc != nil {
 							fk := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Origin().Name()}
-							if auditedValuePlane[fk] {
+							if auditset.ValuePlaneClone(fk.Pkg, fk.Name) {
 								shallowSafe := !elemHandsOutReach(v.Type)
 								for _, arg := range v.Args {
 									if shallowSafe && arg != nil && arg.Kind == flowir.ValPlace && arg.Place.Obj == g && len(arg.Place.Projs) == 0 {
@@ -1468,7 +1460,7 @@ func enclosingConfinesRoots(
 					break
 				}
 				fk := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Origin().Name()}
-				if !auditedValuePlane[fk] {
+				if !auditset.ValuePlaneClone(fk.Pkg, fk.Name) {
 					v.ForEachArgParam(func(a *flowir.Value, slotType types.Type, _ int, pIdx int, pOK bool, packedVariadic bool) bool {
 						if !suppliesMutableRoot(a) {
 							return true
@@ -2635,7 +2627,7 @@ func recordEnvCarryingRegistrations(
 				if !val.IsMethodExprCall && val.CalleeFunc != nil {
 					fn := val.CalleeFunc.Origin()
 					calleeFK := syntaxutil.FuncKey{Pkg: val.CalleePkg, Name: fn.Name()}
-					if auditedValuePlane[calleeFK] {
+					if auditset.ValuePlaneClone(calleeFK.Pkg, calleeFK.Name) {
 						for _, arg := range val.Args {
 							if carryingValue(arg) {
 								return true

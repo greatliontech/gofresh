@@ -1572,6 +1572,7 @@ type pollFD struct {
 }
 func (fd *pollFD) Read(p []byte) (int, error)  { return 0, io.EOF }
 func (fd *pollFD) Write(p []byte) (int, error) { return len(p), nil }
+func (fd *pollFD) Fchdir() error               { return nil }
 func (fd *pollFD) Close() error                { return nil }
 type file struct {
 	pfd  pollFD
@@ -1733,6 +1734,21 @@ func (file *file) close() error {
 	}
 	return err
 }
+func (f *File) Chdir() error {
+	if err := f.checkValid("chdir"); err != nil {
+		return err
+	}
+	if e := f.pfd.Fchdir(); e != nil {
+		return f.wrapErr("chdir", e)
+	}
+	if l := testlog.Logger(); l != nil {
+		wd, err := Getwd()
+		if err == nil {
+			l.Chdir(wd)
+		}
+	}
+	return nil
+}
 `
 
 const syntheticBufioSrc = `package bufio
@@ -1882,11 +1898,71 @@ import (
 	"flag"
 	"io"
 	"os"
+	"path/filepath"
+	"runtime"
 )
 var testlog = flag.String("test.testlogfile", "", "")
-type common struct{ ctx context.Context }
+type common struct {
+	ctx      context.Context
+	cleanups []func()
+}
 func (c *common) checkFuzzFn(string) {}
+func (c *common) checkParallel()     {}
+func (c *common) Fatal(...any)       {}
+func (c *common) Fatalf(string, ...any) {}
 func (c *common) Context() context.Context { c.checkFuzzFn("Context"); return c.ctx }
+func (c *common) Cleanup(f func()) {
+	c.checkFuzzFn("Cleanup")
+	c.cleanups = append(c.cleanups, f)
+}
+func (c *common) runCleanup() {
+	for len(c.cleanups) > 0 {
+		last := len(c.cleanups) - 1
+		cleanup := c.cleanups[last]
+		c.cleanups = c.cleanups[:last]
+		cleanup()
+	}
+}
+func (c *common) Setenv(key, value string) {
+	c.checkFuzzFn("Setenv")
+	prevValue, ok := os.LookupEnv(key)
+	if err := os.Setenv(key, value); err != nil {
+		c.Fatalf("setenv: %v", err)
+	}
+	if ok {
+		c.Cleanup(func() { os.Setenv(key, prevValue) })
+	} else {
+		c.Cleanup(func() { os.Unsetenv(key) })
+	}
+}
+func (c *common) Chdir(dir string) {
+	c.checkFuzzFn("Chdir")
+	oldwd, err := os.Open(".")
+	if err != nil {
+		c.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		c.Fatal(err)
+	}
+	switch runtime.GOOS {
+	case "windows", "plan9":
+	default:
+		if !filepath.IsAbs(dir) {
+			dir, err = os.Getwd()
+			if err != nil {
+				c.Fatal(err)
+			}
+		}
+		c.Setenv("PWD", dir)
+	}
+	c.Cleanup(func() {
+		err := oldwd.Chdir()
+		oldwd.Close()
+		if err != nil {
+			panic(err)
+		}
+	})
+}
 type testDeps interface {
 	StartTestLog(io.Writer)
 	StopTestLog() error
@@ -1900,6 +1976,10 @@ type InternalTest struct {
 	F    func(*T)
 }
 type T struct{ common }
+func (t *T) Chdir(dir string) {
+	t.checkParallel()
+	t.common.Chdir(dir)
+}
 func MainStart(d testDeps) *M { return &M{deps: d} }
 func runTests(tests []InternalTest) bool {
 	for _, it := range tests {
@@ -1936,6 +2016,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -1955,9 +2037,67 @@ func Init() {
 	matchList = flag.String("test.list", "", "")
 	cpuProfile = flag.String("test.cpuprofile", "", "")
 }
-type common struct{ ctx context.Context }
-func (c *common) checkFuzzFn(string) {}
+type common struct {
+	ctx      context.Context
+	cleanups []func()
+}
+func (c *common) checkFuzzFn(string)    {}
+func (c *common) checkParallel()        {}
+func (c *common) Fatal(...any)          {}
+func (c *common) Fatalf(string, ...any) {}
 func (c *common) Context() context.Context { c.checkFuzzFn("Context"); return c.ctx }
+func (c *common) Cleanup(f func()) {
+	c.checkFuzzFn("Cleanup")
+	c.cleanups = append(c.cleanups, f)
+}
+func (c *common) runCleanup() {
+	for len(c.cleanups) > 0 {
+		last := len(c.cleanups) - 1
+		cleanup := c.cleanups[last]
+		c.cleanups = c.cleanups[:last]
+		cleanup()
+	}
+}
+func (c *common) Setenv(key, value string) {
+	c.checkFuzzFn("Setenv")
+	prevValue, ok := os.LookupEnv(key)
+	if err := os.Setenv(key, value); err != nil {
+		c.Fatalf("setenv: %v", err)
+	}
+	if ok {
+		c.Cleanup(func() { os.Setenv(key, prevValue) })
+	} else {
+		c.Cleanup(func() { os.Unsetenv(key) })
+	}
+}
+func (c *common) Chdir(dir string) {
+	c.checkFuzzFn("Chdir")
+	oldwd, err := os.Open(".")
+	if err != nil {
+		c.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		c.Fatal(err)
+	}
+	switch runtime.GOOS {
+	case "windows", "plan9":
+	default:
+		if !filepath.IsAbs(dir) {
+			dir, err = os.Getwd()
+			if err != nil {
+				c.Fatal(err)
+			}
+		}
+		c.Setenv("PWD", dir)
+	}
+	c.Cleanup(func() {
+		err := oldwd.Chdir()
+		oldwd.Close()
+		if err != nil {
+			panic(err)
+		}
+	})
+}
 type testDeps interface {
 	StartTestLog(io.Writer)
 	StopTestLog() error
@@ -1974,6 +2114,10 @@ type InternalTest struct {
 	F    func(*T)
 }
 type T struct{ common }
+func (t *T) Chdir(dir string) {
+	t.checkParallel()
+	t.common.Chdir(dir)
+}
 func MainStart(d testDeps, tests []InternalTest) *M {
 	Init()
 	return &M{deps: d, tests: tests}

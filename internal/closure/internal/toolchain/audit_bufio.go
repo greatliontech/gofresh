@@ -30,6 +30,11 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 		return fmt.Errorf("bufio: invalid Writer struct declaration")
 	}
 	constPosInt := idx.constPosInt
+	k := NewPackageInactiveKernel(idx, files, nil, nil)
+	pruneFnStmts := func(fn *ast.FuncDecl, pureVars map[string]bool) []ast.Stmt {
+		stmts, _ := k.PruneBlockStmts(fn.Body.List, fn, pureVars, nil, nil)
+		return stmts
+	}
 	writerMethods := idx.typeMethods["Writer"]
 	if writerMethods == nil {
 		writerMethods = map[string]*ast.FuncDecl{}
@@ -42,10 +47,11 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 		return fmt.Errorf("bufio: missing NewWriter or NewWriterSize")
 	}
 	nwParams := paramNamesFlat(nw.Type.Params)
-	if len(nwParams) != 1 || nwParams[0] == "" || nwParams[0] == "_" || len(nw.Body.List) != 1 {
+	nwStmts := pruneFnStmts(nw, nil)
+	if len(nwParams) != 1 || nwParams[0] == "" || nwParams[0] == "_" || len(nwStmts) != 1 {
 		return fmt.Errorf("bufio: unexpected NewWriter shape")
 	}
-	nwRet, ok := nw.Body.List[0].(*ast.ReturnStmt)
+	nwRet, ok := nwStmts[0].(*ast.ReturnStmt)
 	if !ok || len(nwRet.Results) != 1 {
 		return fmt.Errorf("bufio: unexpected NewWriter return")
 	}
@@ -66,7 +72,8 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 	}
 
 	nwsParams := paramNamesFlat(nws.Type.Params)
-	if len(nwsParams) != 2 || nwsParams[0] == "" || nwsParams[0] == "_" || nwsParams[1] == "" || nwsParams[1] == "_" || len(nws.Body.List) < 2 {
+	nwsStmts := pruneFnStmts(nws, nil)
+	if len(nwsParams) != 2 || nwsParams[0] == "" || nwsParams[0] == "_" || nwsParams[1] == "" || nwsParams[1] == "_" || len(nwsStmts) < 2 {
 		return fmt.Errorf("bufio: unexpected NewWriterSize shape")
 	}
 	wParam, sizeParam := nwsParams[0], nwsParams[1]
@@ -74,10 +81,10 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 		return fmt.Errorf("bufio: NewWriterSize mutates w")
 	}
 	nwsPos := 0
-	if len(nws.Body.List) == 4 {
+	if len(nwsStmts) == 4 {
 		// Optional pass-through: b, ok := w.(*Writer); if ok && len(b.buf) >= size { return b }
-		taAssign, ok1 := nws.Body.List[0].(*ast.AssignStmt)
-		taIf, ok2 := nws.Body.List[1].(*ast.IfStmt)
+		taAssign, ok1 := nwsStmts[0].(*ast.AssignStmt)
+		taIf, ok2 := nwsStmts[1].(*ast.IfStmt)
 		if !ok1 || !ok2 || taAssign.Tok != token.DEFINE || len(taAssign.Lhs) != 2 || len(taAssign.Rhs) != 1 || taIf.Init != nil || taIf.Else != nil || len(taIf.Body.List) != 1 {
 			return fmt.Errorf("bufio: NewWriterSize invalid Writer pass-through")
 		}
@@ -129,11 +136,11 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 			return fmt.Errorf("bufio: NewWriterSize pass-through does not return b")
 		}
 		nwsPos = 2
-	} else if len(nws.Body.List) != 2 {
+	} else if len(nwsStmts) != 2 {
 		return fmt.Errorf("bufio: NewWriterSize unexpected statement count")
 	}
 	// Mandatory size clamp: if size <= 0 { size = <posConstOrLit> }
-	if sizeIf, ok := nws.Body.List[nwsPos].(*ast.IfStmt); !ok || sizeIf.Init != nil || sizeIf.Else != nil || len(sizeIf.Body.List) != 1 {
+	if sizeIf, ok := nwsStmts[nwsPos].(*ast.IfStmt); !ok || sizeIf.Init != nil || sizeIf.Else != nil || len(sizeIf.Body.List) != 1 {
 		return fmt.Errorf("bufio: NewWriterSize missing size <= 0 clamp")
 	} else {
 		leCond, ok := unwrapParens(sizeIf.Cond).(*ast.BinaryExpr)
@@ -156,7 +163,7 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 			}
 		}
 	}
-	nwsRet, ok := nws.Body.List[nwsPos+1].(*ast.ReturnStmt)
+	nwsRet, ok := nwsStmts[nwsPos+1].(*ast.ReturnStmt)
 	if !ok || len(nwsRet.Results) != 1 {
 		return fmt.Errorf("bufio: NewWriterSize missing final return")
 	}
@@ -248,15 +255,16 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 		return fmt.Errorf("bufio: missing or invalid (*Writer).Flush")
 	}
 	fRecv := recvVarName(flushFn)
-	if fRecv == "" || len(flushFn.Body.List) != 7 {
+	flushStmts := pruneFnStmts(flushFn, map[string]bool{fRecv: true})
+	if fRecv == "" || len(flushStmts) != 7 {
 		return fmt.Errorf("bufio: (*Writer).Flush has unexpected statement structure")
 	}
 	// Stmt 0: if b.err != nil { return b.err }
-	if !isStickyFieldErrorGuardIf(flushFn.Body.List[0], fRecv, "err") {
+	if !isStickyFieldErrorGuardIf(flushStmts[0], fRecv, "err") {
 		return fmt.Errorf("bufio: Flush missing sticky error guard")
 	}
 	// Stmt 1: if b.n == 0 { return nil }
-	if s1, ok := flushFn.Body.List[1].(*ast.IfStmt); !ok || s1.Init != nil || s1.Else != nil || len(s1.Body.List) != 1 {
+	if s1, ok := flushStmts[1].(*ast.IfStmt); !ok || s1.Init != nil || s1.Else != nil || len(s1.Body.List) != 1 {
 		return fmt.Errorf("bufio: Flush missing empty-buffer check")
 	} else {
 		cond, ok := unwrapParens(s1.Cond).(*ast.BinaryExpr)
@@ -276,7 +284,7 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 	}
 	// Stmt 2: n, err := b.wr.Write(b.buf[0:b.n])
 	var flushNVar, flushErrVar string
-	if s2, ok := flushFn.Body.List[2].(*ast.AssignStmt); !ok || s2.Tok != token.DEFINE || len(s2.Lhs) != 2 || len(s2.Rhs) != 1 {
+	if s2, ok := flushStmts[2].(*ast.AssignStmt); !ok || s2.Tok != token.DEFINE || len(s2.Lhs) != 2 || len(s2.Rhs) != 1 {
 		return fmt.Errorf("bufio: Flush missing b.wr.Write assignment")
 	} else {
 		nID, ok1 := unwrapParens(s2.Lhs[0]).(*ast.Ident)
@@ -305,7 +313,7 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 		}
 	}
 	// Stmt 3: if n < b.n && err == nil { err = io.ErrShortWrite }
-	if s3, ok := flushFn.Body.List[3].(*ast.IfStmt); !ok || s3.Init != nil || s3.Else != nil || len(s3.Body.List) != 1 {
+	if s3, ok := flushStmts[3].(*ast.IfStmt); !ok || s3.Init != nil || s3.Else != nil || len(s3.Body.List) != 1 {
 		return fmt.Errorf("bufio: Flush missing short-write check")
 	} else {
 		andExpr, ok := unwrapParens(s3.Cond).(*ast.BinaryExpr)
@@ -334,7 +342,7 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 		}
 	}
 	// Stmt 4: if err != nil { ...; b.err = err; return err }
-	if s4, ok := flushFn.Body.List[4].(*ast.IfStmt); !ok || s4.Init != nil || s4.Else != nil || condChecksNonZeroErr(s4.Cond) != flushErrVar || len(s4.Body.List) < 2 {
+	if s4, ok := flushStmts[4].(*ast.IfStmt); !ok || s4.Init != nil || s4.Else != nil || condChecksNonZeroErr(s4.Cond) != flushErrVar || len(s4.Body.List) < 2 {
 		return fmt.Errorf("bufio: Flush missing error return branch")
 	} else {
 		if bodyMutatesOrTakesAddrOfAny(&ast.BlockStmt{List: s4.Body.List[:len(s4.Body.List)-1]}, map[string]bool{flushErrVar: true}) {
@@ -356,12 +364,12 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 		}
 	}
 	// Stmt 5 & 6: b.n = 0; return nil
-	if s5, ok := flushFn.Body.List[5].(*ast.AssignStmt); !ok || s5.Tok != token.ASSIGN || len(s5.Lhs) != 1 || len(s5.Rhs) != 1 || !isZeroIntLit(s5.Rhs[0]) {
+	if s5, ok := flushStmts[5].(*ast.AssignStmt); !ok || s5.Tok != token.ASSIGN || len(s5.Lhs) != 1 || len(s5.Rhs) != 1 || !isZeroIntLit(s5.Rhs[0]) {
 		return fmt.Errorf("bufio: Flush missing b.n = 0")
 	} else if _, ok := isSelectorBaseField(s5.Lhs[0], fRecv, "n"); !ok {
 		return fmt.Errorf("bufio: Flush reset target not b.n")
 	}
-	if s6, ok := flushFn.Body.List[6].(*ast.ReturnStmt); !ok || len(s6.Results) != 1 {
+	if s6, ok := flushStmts[6].(*ast.ReturnStmt); !ok || len(s6.Results) != 1 {
 		return fmt.Errorf("bufio: Flush missing final return nil")
 	} else if _, ok := isIdentNamed(s6.Results[0], "nil"); !ok {
 		return fmt.Errorf("bufio: Flush final return not nil")
@@ -375,15 +383,16 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 	}
 	wbRecv := recvVarName(wbFn)
 	wbParams := paramNamesFlat(wbFn.Type.Params)
-	if wbRecv == "" || len(wbParams) != 1 || wbParams[0] == "" || wbParams[0] == "_" || len(wbFn.Body.List) != 5 {
+	wbStmts := pruneFnStmts(wbFn, map[string]bool{wbRecv: true})
+	if wbRecv == "" || len(wbParams) != 1 || wbParams[0] == "" || wbParams[0] == "_" || len(wbStmts) != 5 {
 		return fmt.Errorf("bufio: unexpected WriteByte shape")
 	}
 	// WriteByte[0]: if b.err != nil { return b.err }
-	if !isStickyFieldErrorGuardIf(wbFn.Body.List[0], wbRecv, "err") {
+	if !isStickyFieldErrorGuardIf(wbStmts[0], wbRecv, "err") {
 		return fmt.Errorf("bufio: WriteByte missing sticky b.err guard")
 	}
 	// WriteByte[1]: if b.Available() <= 0 && b.Flush() != nil { return b.err }
-	if wb1, ok := wbFn.Body.List[1].(*ast.IfStmt); !ok || wb1.Init != nil || wb1.Else != nil || len(wb1.Body.List) != 1 {
+	if wb1, ok := wbStmts[1].(*ast.IfStmt); !ok || wb1.Init != nil || wb1.Else != nil || len(wb1.Body.List) != 1 {
 		return fmt.Errorf("bufio: WriteByte missing Available/Flush guard")
 	} else {
 		andC, ok := unwrapParens(wb1.Cond).(*ast.BinaryExpr)
@@ -412,7 +421,7 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 			return fmt.Errorf("bufio: WriteByte Flush guard does not return b.err")
 		}
 	}
-	if as, ok := wbFn.Body.List[2].(*ast.AssignStmt); !ok || as.Tok != token.ASSIGN || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
+	if as, ok := wbStmts[2].(*ast.AssignStmt); !ok || as.Tok != token.ASSIGN || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
 		return fmt.Errorf("bufio: WriteByte missing b.buf[b.n] = c")
 	} else {
 		idx, ok1 := unwrapParens(as.Lhs[0]).(*ast.IndexExpr)
@@ -427,12 +436,12 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 			return fmt.Errorf("bufio: WriteByte index not b.n")
 		}
 	}
-	if inc, ok := wbFn.Body.List[3].(*ast.IncDecStmt); !ok || inc.Tok != token.INC {
+	if inc, ok := wbStmts[3].(*ast.IncDecStmt); !ok || inc.Tok != token.INC {
 		return fmt.Errorf("bufio: WriteByte missing b.n++")
 	} else if _, ok := isSelectorBaseField(inc.X, wbRecv, "n"); !ok {
 		return fmt.Errorf("bufio: WriteByte increment target not b.n")
 	}
-	if wb4, ok := wbFn.Body.List[4].(*ast.ReturnStmt); !ok || len(wb4.Results) != 1 {
+	if wb4, ok := wbStmts[4].(*ast.ReturnStmt); !ok || len(wb4.Results) != 1 {
 		return fmt.Errorf("bufio: WriteByte missing final return nil")
 	} else if _, ok := isIdentNamed(wb4.Results[0], "nil"); !ok {
 		return fmt.Errorf("bufio: WriteByte final return not nil")
@@ -440,16 +449,17 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 
 	wsRecv := recvVarName(wsFn)
 	wsParams := paramNamesFlat(wsFn.Type.Params)
-	if wsRecv == "" || len(wsParams) != 1 || wsParams[0] == "" || wsParams[0] == "_" || len(wsFn.Body.List) != 9 {
+	wsStmts := pruneFnStmts(wsFn, map[string]bool{wsRecv: true})
+	if wsRecv == "" || len(wsParams) != 1 || wsParams[0] == "" || wsParams[0] == "_" || len(wsStmts) != 9 {
 		return fmt.Errorf("bufio: unexpected WriteString shape")
 	}
 	sParam := wsParams[0]
-	if bodyMutatesOrTakesAddrOfAny(&ast.BlockStmt{List: wsFn.Body.List[4:]}, map[string]bool{sParam: true}) {
+	if bodyMutatesOrTakesAddrOfAny(&ast.BlockStmt{List: wsStmts[4:]}, map[string]bool{sParam: true}) {
 		return fmt.Errorf("bufio: WriteString mutates s after loop")
 	}
 	// Stmt 0: var sw io.StringWriter; Stmt 1: tryStringWriter := true; Stmt 2: nn := 0
 	var swVar, trySWVar, nnVar string
-	if ds0, ok := wsFn.Body.List[0].(*ast.DeclStmt); !ok {
+	if ds0, ok := wsStmts[0].(*ast.DeclStmt); !ok {
 		return fmt.Errorf("bufio: WriteString missing var sw io.StringWriter")
 	} else {
 		gd, ok := ds0.Decl.(*ast.GenDecl)
@@ -465,7 +475,7 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 		}
 		swVar = vs.Names[0].Name
 	}
-	if as1, ok := wsFn.Body.List[1].(*ast.AssignStmt); !ok || as1.Tok != token.DEFINE || len(as1.Lhs) != 1 || len(as1.Rhs) != 1 {
+	if as1, ok := wsStmts[1].(*ast.AssignStmt); !ok || as1.Tok != token.DEFINE || len(as1.Lhs) != 1 || len(as1.Rhs) != 1 {
 		return fmt.Errorf("bufio: WriteString missing tryStringWriter := true")
 	} else {
 		id, ok1 := unwrapParens(as1.Lhs[0]).(*ast.Ident)
@@ -475,7 +485,7 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 		}
 		trySWVar = id.Name
 	}
-	if as2, ok := wsFn.Body.List[2].(*ast.AssignStmt); !ok || as2.Tok != token.DEFINE || len(as2.Lhs) != 1 || len(as2.Rhs) != 1 || !isZeroIntLit(as2.Rhs[0]) {
+	if as2, ok := wsStmts[2].(*ast.AssignStmt); !ok || as2.Tok != token.DEFINE || len(as2.Lhs) != 1 || len(as2.Rhs) != 1 || !isZeroIntLit(as2.Rhs[0]) {
 		return fmt.Errorf("bufio: WriteString missing nn := 0")
 	} else {
 		id, ok := unwrapParens(as2.Lhs[0]).(*ast.Ident)
@@ -485,7 +495,7 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 		nnVar = id.Name
 	}
 	// Stmt 3: for len(s) > b.Available() && b.err == nil { ... }
-	if fs3, ok := wsFn.Body.List[3].(*ast.ForStmt); !ok || fs3.Init != nil || fs3.Post != nil || len(fs3.Body.List) != 5 {
+	if fs3, ok := wsStmts[3].(*ast.ForStmt); !ok || fs3.Init != nil || fs3.Post != nil || len(fs3.Body.List) != 5 {
 		return fmt.Errorf("bufio: WriteString missing overflow loop")
 	} else {
 		andC, ok := unwrapParens(fs3.Cond).(*ast.BinaryExpr)
@@ -663,7 +673,7 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 		}
 	}
 	// Stmt 4: if b.err != nil { return nn, b.err }
-	if s4, ok := wsFn.Body.List[4].(*ast.IfStmt); !ok || s4.Init != nil || s4.Else != nil || len(s4.Body.List) != 1 {
+	if s4, ok := wsStmts[4].(*ast.IfStmt); !ok || s4.Init != nil || s4.Else != nil || len(s4.Body.List) != 1 {
 		return fmt.Errorf("bufio: WriteString missing post-loop b.err check")
 	} else {
 		cond, ok := unwrapParens(s4.Cond).(*ast.BinaryExpr)
@@ -688,7 +698,7 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 	}
 	// Stmt 5: n := copy(b.buf[b.n:], s); Stmt 6: b.n += n; Stmt 7: nn += n; Stmt 8: return nn, nil
 	var tailNVar string
-	if s5, ok := wsFn.Body.List[5].(*ast.AssignStmt); !ok || s5.Tok != token.DEFINE || len(s5.Lhs) != 1 || len(s5.Rhs) != 1 {
+	if s5, ok := wsStmts[5].(*ast.AssignStmt); !ok || s5.Tok != token.DEFINE || len(s5.Lhs) != 1 || len(s5.Rhs) != 1 {
 		return fmt.Errorf("bufio: WriteString missing tail copy")
 	} else {
 		nID, ok1 := unwrapParens(s5.Lhs[0]).(*ast.Ident)
@@ -713,7 +723,7 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 		if _, ok := isIdentNamed(cpCall.Args[1], sParam); !ok {
 			return fmt.Errorf("bufio: WriteString tail copy src not s")
 		}
-		s6, ok := wsFn.Body.List[6].(*ast.AssignStmt)
+		s6, ok := wsStmts[6].(*ast.AssignStmt)
 		if !ok || s6.Tok != token.ADD_ASSIGN || len(s6.Lhs) != 1 || len(s6.Rhs) != 1 {
 			return fmt.Errorf("bufio: WriteString missing b.n += n")
 		}
@@ -724,7 +734,7 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 			return fmt.Errorf("bufio: WriteString tail add RHS not n")
 		}
 	}
-	if s7, ok := wsFn.Body.List[7].(*ast.AssignStmt); !ok || s7.Tok != token.ADD_ASSIGN || len(s7.Lhs) != 1 || len(s7.Rhs) != 1 {
+	if s7, ok := wsStmts[7].(*ast.AssignStmt); !ok || s7.Tok != token.ADD_ASSIGN || len(s7.Lhs) != 1 || len(s7.Rhs) != 1 {
 		return fmt.Errorf("bufio: WriteString missing tail nn += n")
 	} else {
 		_, ok1 := isIdentNamed(s7.Lhs[0], nnVar)
@@ -733,7 +743,7 @@ func VerifyBufioWriterAST(files []*ast.File) error {
 			return fmt.Errorf("bufio: WriteString tail nn += n mismatch")
 		}
 	}
-	if s8, ok := wsFn.Body.List[8].(*ast.ReturnStmt); !ok || len(s8.Results) != 2 {
+	if s8, ok := wsStmts[8].(*ast.ReturnStmt); !ok || len(s8.Results) != 2 {
 		return fmt.Errorf("bufio: WriteString missing final return")
 	} else {
 		_, ok1 := isIdentNamed(s8.Results[0], nnVar)

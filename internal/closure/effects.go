@@ -553,14 +553,7 @@ func auditedStandardSymbol(audited bool, pkgPath, name string) bool {
 // channel in the symbol itself
 // (REQ-closure-observability-writer-sink).
 func fmtFprintFamily(audited bool, pkgPath, name string) bool {
-	if !audited || pkgPath != "fmt" {
-		return false
-	}
-	switch name {
-	case "Fprint", "Fprintf", "Fprintln":
-		return true
-	}
-	return false
+	return audited && pkgPath == "fmt" && auditset.FmtWriterFunc(name)
 }
 
 func classBReason(pkgPath, name string) string {

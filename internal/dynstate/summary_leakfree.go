@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
@@ -603,11 +604,11 @@ func (e *confinementEngine) valueReachesExternal(v *flowir.Value) bool {
 						found = true
 						return
 					}
-					fk := syntaxutil.FuncKey{Pkg: cur.CalleePkg, Name: ""}
+					calleeName := ""
 					if cur.CalleeFunc != nil {
-						fk.Name = cur.CalleeFunc.Name()
+						calleeName = cur.CalleeFunc.Name()
 					}
-					if !auditedValuePlane[fk] {
+					if !auditset.ValuePlaneClone(cur.CalleePkg, calleeName) {
 						found = true
 						return
 					}
@@ -675,7 +676,7 @@ func propagateBodyVarTaint(
 			}
 		case flowir.CallPlain:
 			if !v.IsMethodExprCall && v.CalleeFunc != nil {
-				return auditedValuePlane[syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Name()}]
+				return auditset.ValuePlaneClone(v.CalleePkg, v.CalleeFunc.Name())
 			}
 		}
 		return false
@@ -3253,7 +3254,7 @@ func onceFillValueSmuggles(
 					}
 				}
 				return
-			case cur.CallKind == flowir.CallPlain && !cur.IsMethodExprCall && cur.CalleeFunc != nil && auditedValuePlane[syntaxutil.FuncKey{Pkg: cur.CalleePkg, Name: cur.CalleeFunc.Name()}]:
+			case cur.CallKind == flowir.CallPlain && !cur.IsMethodExprCall && cur.CalleeFunc != nil && auditset.ValuePlaneClone(cur.CalleePkg, cur.CalleeFunc.Name()):
 				for _, a := range cur.Args {
 					walk(a)
 					if found {
@@ -3915,7 +3916,7 @@ func computeOnceDoFieldAdmissions(
 							break
 						}
 					}
-				case v.CallKind == flowir.CallPlain && !v.IsMethodExprCall && v.CalleeFunc != nil && auditedValuePlane[syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Name()}]:
+				case v.CallKind == flowir.CallPlain && !v.IsMethodExprCall && v.CalleeFunc != nil && auditset.ValuePlaneClone(v.CalleePkg, v.CalleeFunc.Name()):
 				default:
 					if markCallTargetVars(audited, v, evictFreshVar) {
 						changed = true

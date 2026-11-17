@@ -7,7 +7,20 @@ import (
 	"slices"
 )
 
-func walkOffSurfaceAST(node ast.Node, scope map[string]bool, recIdent, recSel func(string), recQual func(base, sel string)) {
+// WalkLexicalAST traverses node with Go's block-scoped lexical bindings,
+// invoking recIdent on unshadowed identifier references, recSel on field/method
+// selector names over shadowed or compound bases, and recQual on unshadowed
+// `base.sel` qualified references.
+func WalkLexicalAST(node ast.Node, scope map[string]bool, recIdent, recSel func(string), recQual func(base, sel string)) {
+	WalkLexicalASTSkippingIdents(node, scope, nil, recIdent, recSel, recQual)
+}
+
+// WalkLexicalASTSkippingIdents behaves like WalkLexicalAST while skipping
+// pre-verified struct-literal field-key identifiers in skipIdents.
+func WalkLexicalASTSkippingIdents(node ast.Node, scope map[string]bool, skipIdents map[*ast.Ident]bool, recIdent, recSel func(string), recQual func(base, sel string)) {
+	walk := func(subNode ast.Node, subScope map[string]bool) {
+		WalkLexicalASTSkippingIdents(subNode, subScope, skipIdents, recIdent, recSel, recQual)
+	}
 	if node == nil {
 		return
 	}
@@ -15,32 +28,32 @@ func walkOffSurfaceAST(node ast.Node, scope map[string]bool, recIdent, recSel fu
 	case *ast.BlockStmt:
 		sub := maps.Clone(scope)
 		for _, st := range n.List {
-			walkOffSurfaceAST(st, sub, recIdent, recSel, recQual)
+			walk(st, sub)
 		}
 	case *ast.IfStmt:
 		sub := maps.Clone(scope)
 		if n.Init != nil {
-			walkOffSurfaceAST(n.Init, sub, recIdent, recSel, recQual)
+			walk(n.Init, sub)
 		}
-		walkOffSurfaceAST(n.Cond, sub, recIdent, recSel, recQual)
-		walkOffSurfaceAST(n.Body, sub, recIdent, recSel, recQual)
+		walk(n.Cond, sub)
+		walk(n.Body, sub)
 		if n.Else != nil {
-			walkOffSurfaceAST(n.Else, sub, recIdent, recSel, recQual)
+			walk(n.Else, sub)
 		}
 	case *ast.ForStmt:
 		sub := maps.Clone(scope)
 		if n.Init != nil {
-			walkOffSurfaceAST(n.Init, sub, recIdent, recSel, recQual)
+			walk(n.Init, sub)
 		}
 		if n.Cond != nil {
-			walkOffSurfaceAST(n.Cond, sub, recIdent, recSel, recQual)
+			walk(n.Cond, sub)
 		}
 		if n.Post != nil {
-			walkOffSurfaceAST(n.Post, sub, recIdent, recSel, recQual)
+			walk(n.Post, sub)
 		}
-		walkOffSurfaceAST(n.Body, sub, recIdent, recSel, recQual)
+		walk(n.Body, sub)
 	case *ast.RangeStmt:
-		walkOffSurfaceAST(n.X, scope, recIdent, recSel, recQual)
+		walk(n.X, scope)
 		sub := maps.Clone(scope)
 		if n.Tok == token.DEFINE {
 			for _, e := range []ast.Expr{n.Key, n.Value} {
@@ -50,69 +63,69 @@ func walkOffSurfaceAST(node ast.Node, scope map[string]bool, recIdent, recSel fu
 			}
 		} else {
 			if n.Key != nil {
-				walkOffSurfaceAST(n.Key, sub, recIdent, recSel, recQual)
+				walk(n.Key, sub)
 			}
 			if n.Value != nil {
-				walkOffSurfaceAST(n.Value, sub, recIdent, recSel, recQual)
+				walk(n.Value, sub)
 			}
 		}
-		walkOffSurfaceAST(n.Body, sub, recIdent, recSel, recQual)
+		walk(n.Body, sub)
 	case *ast.SwitchStmt:
 		sub := maps.Clone(scope)
 		if n.Init != nil {
-			walkOffSurfaceAST(n.Init, sub, recIdent, recSel, recQual)
+			walk(n.Init, sub)
 		}
 		if n.Tag != nil {
-			walkOffSurfaceAST(n.Tag, sub, recIdent, recSel, recQual)
+			walk(n.Tag, sub)
 		}
 		if n.Body != nil {
 			for _, st := range n.Body.List {
-				walkOffSurfaceAST(st, maps.Clone(sub), recIdent, recSel, recQual)
+				walk(st, maps.Clone(sub))
 			}
 		}
 	case *ast.TypeSwitchStmt:
 		sub := maps.Clone(scope)
 		if n.Init != nil {
-			walkOffSurfaceAST(n.Init, sub, recIdent, recSel, recQual)
+			walk(n.Init, sub)
 		}
 		if as, ok := n.Assign.(*ast.AssignStmt); ok && as.Tok == token.DEFINE && len(as.Lhs) == 1 && len(as.Rhs) == 1 {
-			walkOffSurfaceAST(as.Rhs[0], sub, recIdent, recSel, recQual)
+			walk(as.Rhs[0], sub)
 			if id, okID := unwrapParens(as.Lhs[0]).(*ast.Ident); okID && id.Name != "_" && id.Name != "" {
 				sub[id.Name] = true
 			}
 		} else if n.Assign != nil {
-			walkOffSurfaceAST(n.Assign, sub, recIdent, recSel, recQual)
+			walk(n.Assign, sub)
 		}
 		if n.Body != nil {
 			for _, st := range n.Body.List {
-				walkOffSurfaceAST(st, maps.Clone(sub), recIdent, recSel, recQual)
+				walk(st, maps.Clone(sub))
 			}
 		}
 	case *ast.SelectStmt:
 		if n.Body != nil {
 			for _, st := range n.Body.List {
-				walkOffSurfaceAST(st, maps.Clone(scope), recIdent, recSel, recQual)
+				walk(st, maps.Clone(scope))
 			}
 		}
 	case *ast.CaseClause:
 		for _, e := range n.List {
-			walkOffSurfaceAST(e, scope, recIdent, recSel, recQual)
+			walk(e, scope)
 		}
 		sub := maps.Clone(scope)
 		for _, st := range n.Body {
-			walkOffSurfaceAST(st, sub, recIdent, recSel, recQual)
+			walk(st, sub)
 		}
 	case *ast.CommClause:
 		sub := maps.Clone(scope)
 		if n.Comm != nil {
-			walkOffSurfaceAST(n.Comm, sub, recIdent, recSel, recQual)
+			walk(n.Comm, sub)
 		}
 		for _, st := range n.Body {
-			walkOffSurfaceAST(st, sub, recIdent, recSel, recQual)
+			walk(st, sub)
 		}
 	case *ast.AssignStmt:
 		for _, rhs := range n.Rhs {
-			walkOffSurfaceAST(rhs, scope, recIdent, recSel, recQual)
+			walk(rhs, scope)
 		}
 		if n.Tok == token.DEFINE {
 			for _, lhs := range n.Lhs {
@@ -121,12 +134,12 @@ func walkOffSurfaceAST(node ast.Node, scope map[string]bool, recIdent, recSel fu
 						scope[id.Name] = true
 					}
 				} else {
-					walkOffSurfaceAST(lhs, scope, recIdent, recSel, recQual)
+					walk(lhs, scope)
 				}
 			}
 		} else {
 			for _, lhs := range n.Lhs {
-				walkOffSurfaceAST(lhs, scope, recIdent, recSel, recQual)
+				walk(lhs, scope)
 			}
 		}
 	case *ast.DeclStmt:
@@ -135,10 +148,10 @@ func walkOffSurfaceAST(node ast.Node, scope map[string]bool, recIdent, recSel fu
 				switch sp := spec.(type) {
 				case *ast.ValueSpec:
 					if sp.Type != nil {
-						walkOffSurfaceAST(sp.Type, scope, recIdent, recSel, recQual)
+						walk(sp.Type, scope)
 					}
 					for _, v := range sp.Values {
-						walkOffSurfaceAST(v, scope, recIdent, recSel, recQual)
+						walk(v, scope)
 					}
 					for _, id := range sp.Names {
 						if id.Name != "_" && id.Name != "" {
@@ -159,7 +172,7 @@ func walkOffSurfaceAST(node ast.Node, scope map[string]bool, recIdent, recSel fu
 							}
 						}
 					}
-					walkOffSurfaceAST(sp.Type, sub, recIdent, recSel, recQual)
+					walk(sp.Type, sub)
 				}
 			}
 		}
@@ -170,7 +183,7 @@ func walkOffSurfaceAST(node ast.Node, scope map[string]bool, recIdent, recSel fu
 				if fl != nil {
 					for _, fld := range fl.List {
 						if fld.Type != nil {
-							walkOffSurfaceAST(fld.Type, scope, recIdent, recSel, recQual)
+							walk(fld.Type, scope)
 						}
 						for _, id := range fld.Names {
 							if id.Name != "_" && id.Name != "" {
@@ -182,33 +195,35 @@ func walkOffSurfaceAST(node ast.Node, scope map[string]bool, recIdent, recSel fu
 			}
 		}
 		if n.Body != nil {
-			walkOffSurfaceAST(n.Body, sub, recIdent, recSel, recQual)
+			walk(n.Body, sub)
 		}
 	case *ast.Ident:
-		if n.Name != "_" && !scope[n.Name] {
+		if n.Name != "_" && !skipIdents[n] && !scope[n.Name] && recIdent != nil {
 			recIdent(n.Name)
 		}
 	case *ast.SelectorExpr:
 		if xID, ok := unwrapParens(n.X).(*ast.Ident); ok {
 			if !scope[xID.Name] {
 				if n.Sel != nil {
-					recQual(xID.Name, n.Sel.Name)
-				} else {
+					if recQual != nil {
+						recQual(xID.Name, n.Sel.Name)
+					}
+				} else if recIdent != nil {
 					recIdent(xID.Name)
 				}
 				return
 			}
 		} else {
-			walkOffSurfaceAST(n.X, scope, recIdent, recSel, recQual)
+			walk(n.X, scope)
 		}
-		if n.Sel != nil {
+		if n.Sel != nil && recSel != nil {
 			recSel(n.Sel.Name)
 		}
 	case *ast.StructType:
 		if n.Fields != nil {
 			for _, fld := range n.Fields.List {
 				if fld.Type != nil {
-					walkOffSurfaceAST(fld.Type, scope, recIdent, recSel, recQual)
+					walk(fld.Type, scope)
 				}
 			}
 		}
@@ -216,7 +231,7 @@ func walkOffSurfaceAST(node ast.Node, scope map[string]bool, recIdent, recSel fu
 		if n.Methods != nil {
 			for _, m := range n.Methods.List {
 				if m.Type != nil {
-					walkOffSurfaceAST(m.Type, scope, recIdent, recSel, recQual)
+					walk(m.Type, scope)
 				}
 			}
 		}
@@ -225,13 +240,13 @@ func walkOffSurfaceAST(node ast.Node, scope map[string]bool, recIdent, recSel fu
 			if fl != nil {
 				for _, fld := range fl.List {
 					if fld.Type != nil {
-						walkOffSurfaceAST(fld.Type, scope, recIdent, recSel, recQual)
+						walk(fld.Type, scope)
 					}
 				}
 			}
 		}
 	case *ast.LabeledStmt:
-		walkOffSurfaceAST(n.Stmt, scope, recIdent, recSel, recQual)
+		walk(n.Stmt, scope)
 	case *ast.BranchStmt:
 		// Label ident is not a value/decl reference.
 	default:
@@ -239,10 +254,67 @@ func walkOffSurfaceAST(node ast.Node, scope map[string]bool, recIdent, recSel fu
 			if ch == nil || ch == node {
 				return true
 			}
-			walkOffSurfaceAST(ch, scope, recIdent, recSel, recQual)
+			walk(ch, scope)
 			return false
 		})
 	}
+}
+
+func walkOffSurfaceAST(node ast.Node, scope map[string]bool, recIdent, recSel func(string), recQual func(base, sel string)) {
+	WalkLexicalAST(node, scope, recIdent, recSel, recQual)
+}
+
+// walkNonSelIdents visits all non-SelectorExpr.Sel identifiers in root; when
+// skipStructAndKeyLabels is true, composite-literal keys and struct/interface
+// field/method names are also skipped.
+func walkNonSelIdents(root ast.Node, skipStructAndKeyLabels bool, fn func(*ast.Ident) bool) bool {
+	stopped := false
+	var inspect func(n ast.Node) bool
+	inspect = func(n ast.Node) bool {
+		if stopped || n == nil {
+			return false
+		}
+		switch node := n.(type) {
+		case *ast.SelectorExpr:
+			ast.Inspect(node.X, inspect)
+			return false
+		case *ast.KeyValueExpr:
+			if skipStructAndKeyLabels {
+				ast.Inspect(node.Value, inspect)
+				return false
+			}
+			return true
+		case *ast.StructType:
+			if skipStructAndKeyLabels {
+				if node.Fields != nil {
+					for _, field := range node.Fields.List {
+						ast.Inspect(field.Type, inspect)
+					}
+				}
+				return false
+			}
+			return true
+		case *ast.InterfaceType:
+			if skipStructAndKeyLabels {
+				if node.Methods != nil {
+					for _, field := range node.Methods.List {
+						ast.Inspect(field.Type, inspect)
+					}
+				}
+				return false
+			}
+			return true
+		case *ast.Ident:
+			if !fn(node) {
+				stopped = true
+			}
+			return false
+		default:
+			return true
+		}
+	}
+	ast.Inspect(root, inspect)
+	return !stopped
 }
 
 func allNonSelPropIdentsIn(files []*ast.File, name string, allowed map[*ast.Ident]bool) bool {
@@ -253,27 +325,13 @@ func allNonSelPropIdentsInSet[V any](files []*ast.File, names map[string]V, allo
 	if len(names) == 0 {
 		return true
 	}
-	ok := true
-	var inspect func(n ast.Node) bool
-	inspect = func(n ast.Node) bool {
-		if !ok || n == nil {
-			return false
-		}
-		switch node := n.(type) {
-		case *ast.SelectorExpr:
-			ast.Inspect(node.X, inspect)
-			return false
-		case *ast.Ident:
-			if _, match := names[node.Name]; match && !allowed[node] {
-				ok = false
-			}
-			return false
-		default:
-			return true
-		}
-	}
 	for _, f := range files {
-		ast.Inspect(f, inspect)
+		ok := walkNonSelIdents(f, false, func(id *ast.Ident) bool {
+			if _, match := names[id.Name]; match && !allowed[id] {
+				return false
+			}
+			return true
+		})
 		if !ok {
 			return false
 		}
@@ -286,77 +344,34 @@ func filterNonSelPropIdentsInSet(files []*ast.File, allowedByName map[string]map
 	if len(allowedByName) == 0 {
 		return leaked
 	}
-	var inspect func(n ast.Node) bool
-	inspect = func(n ast.Node) bool {
-		if n == nil {
-			return false
-		}
-		switch node := n.(type) {
-		case *ast.SelectorExpr:
-			ast.Inspect(node.X, inspect)
-			return false
-		case *ast.Ident:
-			if allowed, match := allowedByName[node.Name]; match && !allowed[node] {
-				leaked[node.Name] = true
-			}
-			return false
-		default:
-			return true
-		}
-	}
 	for _, f := range files {
-		ast.Inspect(f, inspect)
+		walkNonSelIdents(f, false, func(id *ast.Ident) bool {
+			if allowed, match := allowedByName[id.Name]; match && !allowed[id] {
+				leaked[id.Name] = true
+			}
+			return true
+		})
 	}
 	return leaked
 }
 
 func walkNonSelectorPropIdents(root ast.Node, fn func(*ast.Ident)) {
-	var inspect func(n ast.Node) bool
-	inspect = func(n ast.Node) bool {
-		if n == nil {
-			return false
-		}
-		switch node := n.(type) {
-		case *ast.SelectorExpr:
-			ast.Inspect(node.X, inspect)
-			return false
-		case *ast.KeyValueExpr:
-			ast.Inspect(node.Value, inspect)
-			return false
-		case *ast.StructType:
-			if node.Fields != nil {
-				for _, field := range node.Fields.List {
-					ast.Inspect(field.Type, inspect)
-				}
-			}
-			return false
-		case *ast.InterfaceType:
-			if node.Methods != nil {
-				for _, field := range node.Methods.List {
-					ast.Inspect(field.Type, inspect)
-				}
-			}
-			return false
-		case *ast.Ident:
-			fn(node)
-			return false
-		default:
-			return true
-		}
-	}
-	ast.Inspect(root, inspect)
+	walkNonSelIdents(root, true, func(id *ast.Ident) bool {
+		fn(id)
+		return true
+	})
 }
 
 func allNonSelectorPropIdentsIn(files []*ast.File, allowedByName map[string]map[*ast.Ident]bool) bool {
 	if len(allowedByName) == 0 {
 		return true
 	}
-	ok := true
 	for _, f := range files {
-		walkNonSelectorPropIdents(f, func(id *ast.Ident) {
+		ok := walkNonSelIdents(f, true, func(id *ast.Ident) bool {
 			if allowed, match := allowedByName[id.Name]; match && !allowed[id] {
-				ok = false
+				return false
 			}
+			return true
 		})
 		if !ok {
 			return false
@@ -369,33 +384,9 @@ func exprReferencesAnyIdent(expr ast.Node, names map[string]bool) bool {
 	if expr == nil || len(names) == 0 {
 		return false
 	}
-	found := false
-	var walk func(n ast.Node)
-	walk = func(n ast.Node) {
-		if found || n == nil {
-			return
-		}
-		switch node := n.(type) {
-		case *ast.SelectorExpr:
-			walk(node.X)
-		case *ast.KeyValueExpr:
-			walk(node.Value)
-		case *ast.Ident:
-			if names[node.Name] {
-				found = true
-			}
-		default:
-			ast.Inspect(node, func(ch ast.Node) bool {
-				if ch == node {
-					return true
-				}
-				walk(ch)
-				return false
-			})
-		}
-	}
-	walk(expr)
-	return found
+	return !walkNonSelIdents(expr, true, func(id *ast.Ident) bool {
+		return !names[id.Name]
+	})
 }
 
 func exprRefsIdentOutsideLen(expr ast.Expr, names map[string]bool) bool {
@@ -434,67 +425,9 @@ func exprRefsIdentOutsideLen(expr ast.Expr, names map[string]bool) bool {
 	return found
 }
 
-func bodyMutatesOrTakesAddrOfAny(body *ast.BlockStmt, protected map[string]bool) bool {
-	if body == nil || len(protected) == 0 {
+func nodeMutatesOrTakesAddrWhere(root ast.Node, match func(ast.Expr) bool) bool {
+	if root == nil {
 		return false
-	}
-	bad := false
-	ast.Inspect(body, func(n ast.Node) bool {
-		if bad || n == nil {
-			return false
-		}
-		switch node := n.(type) {
-		case *ast.AssignStmt:
-			for _, lhs := range node.Lhs {
-				if id, ok := unwrapParens(lhs).(*ast.Ident); ok && protected[id.Name] {
-					bad = true
-					return false
-				}
-			}
-		case *ast.RangeStmt:
-			for _, lhs := range []ast.Expr{node.Key, node.Value} {
-				if lhs != nil {
-					if id, ok := unwrapParens(lhs).(*ast.Ident); ok && protected[id.Name] {
-						bad = true
-						return false
-					}
-				}
-			}
-		case *ast.IncDecStmt:
-			if id, ok := unwrapParens(node.X).(*ast.Ident); ok && protected[id.Name] {
-				bad = true
-				return false
-			}
-		case *ast.UnaryExpr:
-			if node.Op == token.AND {
-				if id, ok := unwrapParens(node.X).(*ast.Ident); ok && protected[id.Name] {
-					bad = true
-					return false
-				}
-			}
-		}
-		return true
-	})
-	return bad
-}
-
-func nodeMutatesOrTakesAddrOfSelector(root ast.Node, baseIdent string, fields map[string]bool) bool {
-	if root == nil || len(fields) == 0 {
-		return false
-	}
-	matchSel := func(expr ast.Expr) bool {
-		if expr == nil {
-			return false
-		}
-		sel, ok := unwrapParens(expr).(*ast.SelectorExpr)
-		if !ok || !fields[sel.Sel.Name] {
-			return false
-		}
-		if baseIdent == "" {
-			return true
-		}
-		id, ok := unwrapParens(sel.X).(*ast.Ident)
-		return ok && id.Name == baseIdent
 	}
 	bad := false
 	ast.Inspect(root, func(n ast.Node) bool {
@@ -504,23 +437,23 @@ func nodeMutatesOrTakesAddrOfSelector(root ast.Node, baseIdent string, fields ma
 		switch node := n.(type) {
 		case *ast.AssignStmt:
 			for _, lhs := range node.Lhs {
-				if matchSel(lhs) {
+				if match(lhs) {
 					bad = true
 					return false
 				}
 			}
 		case *ast.RangeStmt:
-			if matchSel(node.Key) || matchSel(node.Value) {
+			if (node.Key != nil && match(node.Key)) || (node.Value != nil && match(node.Value)) {
 				bad = true
 				return false
 			}
 		case *ast.IncDecStmt:
-			if matchSel(node.X) {
+			if match(node.X) {
 				bad = true
 				return false
 			}
 		case *ast.UnaryExpr:
-			if node.Op == token.AND && matchSel(node.X) {
+			if node.Op == token.AND && match(node.X) {
 				bad = true
 				return false
 			}
@@ -530,45 +463,47 @@ func nodeMutatesOrTakesAddrOfSelector(root ast.Node, baseIdent string, fields ma
 	return bad
 }
 
+func bodyMutatesOrTakesAddrOfAny(body *ast.BlockStmt, protected map[string]bool) bool {
+	if body == nil || len(protected) == 0 {
+		return false
+	}
+	return nodeMutatesOrTakesAddrWhere(body, func(expr ast.Expr) bool {
+		id, ok := unwrapParens(expr).(*ast.Ident)
+		return ok && protected[id.Name]
+	})
+}
+
+func nodeMutatesOrTakesAddrOfSelector(root ast.Node, baseIdent string, fields map[string]bool) bool {
+	if root == nil || len(fields) == 0 {
+		return false
+	}
+	return nodeMutatesOrTakesAddrWhere(root, func(expr ast.Expr) bool {
+		sel, ok := unwrapParens(expr).(*ast.SelectorExpr)
+		if !ok || !fields[sel.Sel.Name] {
+			return false
+		}
+		if baseIdent == "" {
+			return true
+		}
+		id, ok := unwrapParens(sel.X).(*ast.Ident)
+		return ok && id.Name == baseIdent
+	})
+}
+
 func blockOnlySelectsOnIdent(body *ast.BlockStmt, ident string) bool {
 	if body == nil || ident == "" {
 		return true
 	}
-	var shadowed, escaped bool
+	if bodyDeclaresAnyIdent(body, map[string]bool{ident: true}) {
+		return false
+	}
+	escaped := false
 	var walk func(n ast.Node)
 	walk = func(n ast.Node) {
-		if shadowed || escaped || n == nil {
+		if escaped || n == nil {
 			return
 		}
 		switch node := n.(type) {
-		case *ast.ValueSpec:
-			for _, nameID := range node.Names {
-				if nameID.Name == ident {
-					shadowed = true
-					return
-				}
-			}
-			if node.Type != nil {
-				walk(node.Type)
-			}
-			for _, v := range node.Values {
-				walk(v)
-			}
-		case *ast.AssignStmt:
-			if node.Tok == token.DEFINE {
-				for _, lhs := range node.Lhs {
-					if id, ok := unwrapParens(lhs).(*ast.Ident); ok && id.Name == ident {
-						shadowed = true
-						return
-					}
-				}
-			}
-			for _, lhs := range node.Lhs {
-				walk(lhs)
-			}
-			for _, rhs := range node.Rhs {
-				walk(rhs)
-			}
 		case *ast.SelectorExpr:
 			if id, ok := unwrapParens(node.X).(*ast.Ident); ok && id.Name == ident {
 				return
@@ -589,7 +524,7 @@ func blockOnlySelectsOnIdent(body *ast.BlockStmt, ident string) bool {
 		}
 	}
 	walk(body)
-	return !shadowed && !escaped
+	return !escaped
 }
 
 func bodyDeclaresAnyIdent(body *ast.BlockStmt, names map[string]bool) bool {
@@ -754,57 +689,19 @@ func declOrBodyShadowsIdent(f *ast.File, fn *ast.FuncDecl, ident string) bool {
 	if fn == nil {
 		return false
 	}
-	for _, list := range []*ast.FieldList{fn.Recv, fn.Type.Params, fn.Type.Results} {
-		if list == nil {
-			continue
-		}
-		for _, field := range list.List {
-			for _, n := range field.Names {
-				if n.Name == ident {
-					return true
-				}
-			}
-		}
-	}
-	shadowed := false
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		if shadowed || n == nil {
-			return false
-		}
-		switch node := n.(type) {
-		case *ast.AssignStmt:
-			if node.Tok == token.DEFINE {
-				for _, lhs := range node.Lhs {
-					if id, ok := unwrapParens(lhs).(*ast.Ident); ok && id.Name == ident {
-						shadowed = true
-						return false
-					}
-				}
-			}
-		case *ast.ValueSpec:
-			for _, id := range node.Names {
-				if id.Name == ident {
-					shadowed = true
-					return false
-				}
-			}
-		case *ast.TypeSpec:
-			if node.Name.Name == ident {
-				shadowed = true
-				return false
-			}
-		}
-		return true
-	})
-	return shadowed
+	return funcShadowsAnyIdent(fn, map[string]bool{ident: true})
 }
 
 func bodyHasControlFlowOrRecoverBypass(body *ast.BlockStmt) bool {
-	if body == nil {
+	return body != nil && stmtHasControlFlowOrRecoverBypass(body)
+}
+
+func stmtHasControlFlowOrRecoverBypass(root ast.Node) bool {
+	if root == nil {
 		return false
 	}
 	bad := false
-	ast.Inspect(body, func(n ast.Node) bool {
+	ast.Inspect(root, func(n ast.Node) bool {
 		if bad || n == nil {
 			return false
 		}
@@ -915,7 +812,9 @@ func stmtAlwaysTerminates(stmt ast.Stmt) bool {
 			return true
 		}
 		if sel, ok := unwrapParens(call.Fun).(*ast.SelectorExpr); ok && sel.Sel.Name == "Exit" {
-			return true
+			if pkgID, okPkg := unwrapParens(sel.X).(*ast.Ident); okPkg && pkgID.Name == "os" {
+				return true
+			}
 		}
 		return false
 	case *ast.IfStmt:

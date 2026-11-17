@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
@@ -685,7 +686,7 @@ func returnEnvFreeFunctions(
 							break
 						}
 						calleeFK := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Name()}
-						if !auditedValuePlane[calleeFK] {
+						if !auditset.ValuePlaneClone(calleeFK.Pkg, calleeFK.Name) {
 							reaches := carries(v.Type)
 							for _, arg := range v.Args {
 								if reaches {
@@ -830,8 +831,7 @@ func returnEnvFreeFunctions(
 										}
 									case flowir.CallPlain:
 										if arg.CalleeFunc != nil && !arg.IsMethodExprCall {
-											innerFK := syntaxutil.FuncKey{Pkg: arg.CalleePkg, Name: arg.CalleeFunc.Name()}
-											if auditedValuePlane[innerFK] && !elemReach(arg.Type) {
+											if auditset.ValuePlaneClone(arg.CalleePkg, arg.CalleeFunc.Name()) && !elemReach(arg.Type) {
 												return
 											}
 										}
@@ -1358,7 +1358,7 @@ func returnEnvFreeFunctions(
 					case flowir.CallPlain:
 						if v.CalleeFunc != nil && !v.IsMethodExprCall {
 							calleeFK := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Name()}
-							if auditedValuePlane[calleeFK] {
+							if auditset.ValuePlaneClone(calleeFK.Pkg, calleeFK.Name) {
 								for _, arg := range v.Args {
 									var extras []*flowir.Value
 									if _, ok := unwrapBareOrResliceVar(arg, &extras); ok {
@@ -2336,20 +2336,21 @@ func returnEnvFreeFunctions(
 							return false, math.MaxInt
 						}
 						calleeFK := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Name()}
+						isVP := auditset.ValuePlaneClone(calleeFK.Pkg, calleeFK.Name)
 						// Reject passing the same mutable-reach local/param twice to a constructor call.
 						perArg := make([]map[types.Object]bool, len(v.Args))
 						for i, arg := range v.Args {
 							if !merge(evalFree(arg)) {
 								return false, math.MaxInt
 							}
-							if !auditedValuePlane[calleeFK] {
+							if !isVP {
 								if !checkPlainCallReachArg(arg, v) {
 									return false, math.MaxInt
 								}
 								perArg[i] = collectMutableArgRoots(arg)
 							}
 						}
-						if !auditedValuePlane[calleeFK] {
+						if !isVP {
 							for i := 0; i < len(perArg); i++ {
 								for j := i + 1; j < len(perArg); j++ {
 									for r := range perArg[i] {

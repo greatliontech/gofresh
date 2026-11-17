@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
@@ -658,9 +659,10 @@ func isPureMemoCall(p *packages.Package, call *ast.CallExpr, memoFn *types.Func,
 				return false
 			}
 			fmtStr := constant.StringVal(tv.Value)
-			if formatStringExposesPointerIdentity(fmtStr) {
+			if auditset.FormatStringExposesPointerIdentity(fmtStr) {
 				return false
 			}
+			hasReflectTypeArg := false
 			for _, arg := range call.Args[1:] {
 				at := p.TypesInfo.TypeOf(arg)
 				if at == nil {
@@ -669,10 +671,21 @@ func isPureMemoCall(p *packages.Package, call *ast.CallExpr, memoFn *types.Func,
 				if _, isBasic := types.Unalias(at).Underlying().(*types.Basic); isBasic {
 					continue
 				}
-				if syntaxutil.IsNamedInPkg(at, "reflect", "Type") || syntaxutil.IsNamedInPkg(at, "reflect", "Kind") || syntaxutil.IsNamedInPkg(at, "reflect", "StructTag") {
+				if syntaxutil.IsNamedInPkg(at, "reflect", "Type") {
+					hasReflectTypeArg = true
+					continue
+				}
+				if syntaxutil.IsNamedInPkg(at, "reflect", "Kind") || syntaxutil.IsNamedInPkg(at, "reflect", "StructTag") {
 					continue
 				}
 				return false
+			}
+			if hasReflectTypeArg {
+				if !auditset.ScanFmtDirectives(fmtStr, func(d auditset.FmtDirective) bool {
+					return d.InvokesStringerOnly()
+				}) {
+					return false
+				}
 			}
 			return true
 		}
@@ -689,55 +702,6 @@ func isPureMemoCall(p *packages.Package, call *ast.CallExpr, memoFn *types.Func,
 		case "Itoa", "Atoi", "ParseInt", "ParseUint", "ParseBool", "FormatInt", "FormatUint", "Quote":
 			return true
 		}
-	}
-	return false
-}
-
-func formatStringExposesPointerIdentity(fmtStr string) bool {
-	for i := 0; i < len(fmtStr); {
-		if fmtStr[i] != '%' {
-			i++
-			continue
-		}
-		i++
-		if i >= len(fmtStr) {
-			return true
-		}
-		if fmtStr[i] == '%' {
-			i++
-			continue
-		}
-		hasSharp := false
-		for i < len(fmtStr) {
-			c := fmtStr[i]
-			switch {
-			case c == '#':
-				hasSharp = true
-				i++
-			case c == '+' || c == '-' || c == ' ' || c == '0' || c == '.' || c == '*' || (c >= '1' && c <= '9'):
-				i++
-			case c == '[':
-				i++
-				for i < len(fmtStr) && fmtStr[i] != ']' {
-					i++
-				}
-				if i >= len(fmtStr) {
-					return true
-				}
-				i++
-			default:
-				goto checkVerb
-			}
-		}
-	checkVerb:
-		if i >= len(fmtStr) {
-			return true
-		}
-		verb := fmtStr[i]
-		if verb == 'p' || (verb == 'v' && hasSharp) {
-			return true
-		}
-		i++
 	}
 	return false
 }

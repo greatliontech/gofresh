@@ -6,6 +6,7 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
 
@@ -1970,30 +1971,5 @@ func isReadOnlyStdSliceCall(info *types.Info, call *ast.CallExpr) bool {
 	if !ok || fn == nil || fn.Pkg() == nil {
 		return false
 	}
-	switch fn.Pkg().Path() {
-	case "bytes":
-		switch fn.Name() {
-		case "Equal", "EqualFold", "Compare",
-			"Index", "IndexByte", "IndexAny", "IndexRune",
-			"LastIndex", "LastIndexByte", "LastIndexAny",
-			"Contains", "ContainsAny", "ContainsRune",
-			"Count", "HasPrefix", "HasSuffix":
-			return true
-		}
-	case "unicode/utf8":
-		switch fn.Name() {
-		case "Valid", "DecodeRune", "DecodeLastRune", "RuneCount", "FullRune":
-			return true
-		}
-	case "slices":
-		switch fn.Name() {
-		case "Index", "Contains", "Equal", "Compare", "BinarySearch":
-			return true
-		}
-	case "reflect":
-		if fn.Name() == "TypeOf" {
-			return true
-		}
-	}
-	return false
+	return auditset.DeterministicStdCallTraits(fn.Pkg().Path(), fn.Name()).ReadOnlySliceInspect
 }

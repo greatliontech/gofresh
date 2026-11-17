@@ -204,7 +204,7 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 					!osOpenFileMayMutate(callee, pkgPath, symName, call.Common()) &&
 					!syscallOpenMayCreate(pkgPath, symName, call.Common())
 			} else if collect.isSeeds() || (call != nil && call.Common() != nil && (call.Common().IsInvoke() || call.Common().StaticCallee() == nil)) {
-				admittedStdOrDel = fp.isAuditedStandardOrDelegate(pkgPath)
+				admittedStdOrDel = fp.isAuditedStandardOrDelegate(pkgPath) || isAdmittedPureMathSymbol(fp.selectionAudited, fp.pureDelegates, pkgPath, callee)
 			} else {
 				admittedStdOrDel = admitPureDelegateCall(fp.selectionAudited, fp.pureDelegates, pkgPath, callee, call, callerStd, fp)
 			}

@@ -250,4 +250,50 @@ func TestVerifyBufioWriterAST(t *testing.T) {
 	if err := VerifyBufioWriterAST(mustParseTestFiles(t, badWriteByte)); err == nil {
 		t.Fatal("expected WriteByte without sticky error guard to be rejected")
 	}
+
+	// Inner-block short-decl / var shadowing in StopTestLog and custom testing Write must fail.
+	for _, shadowStop := range []string{
+		`package testdeps
+import ("bufio"; "internal/testlog"; "io"; "sync")
+type TestDeps struct{}
+var log struct { mu sync.RWMutex; w *bufio.Writer }
+func (TestDeps) StartTestLog(w io.Writer) { log.w = bufio.NewWriter(w); _, _ = log.w.WriteString("# test log\n"); testlog.SetLogger(log) }
+func (TestDeps) StopTestLog() (err error) { { err := log.w.Flush(); log.w = nil }; return }
+`,
+		`package testdeps
+import ("bufio"; "internal/testlog"; "io"; "sync")
+type TestDeps struct{}
+var log struct { mu sync.RWMutex; w *bufio.Writer }
+func (TestDeps) StartTestLog(w io.Writer) { log.w = bufio.NewWriter(w); _, _ = log.w.WriteString("# test log\n"); testlog.SetLogger(log) }
+func (TestDeps) StopTestLog() error { var err error; { err := log.w.Flush(); log.w = nil }; return err }
+`,
+	} {
+		if err := VerifyTestdepsPackageAST(mustParseTestFiles(t, shadowStop)); err == nil {
+			t.Fatalf("expected StopTestLog with inner-block shadowed err to be rejected:\n%s", shadowStop)
+		}
+	}
+
+	validBinding := testingWriterBinding{fileFields: map[string]bool{"f": true}, sliceVar: "p"}
+	posSrc := "package testing\nimport \"os\"\ntype customWriter struct { f *os.File }\nfunc (w *customWriter) Write(p []byte) (n int, err error) { n, err = w.f.Write(p); return }\n"
+	posFiles := mustParseTestFiles(t, posSrc)
+	posIdx, errPos := indexPackageAST("testing", posFiles, nil, nil)
+	if errPos != nil || !verifyTestingWriterFunc("customWriter", posIdx.typeMethods["customWriter"]["Write"], validBinding, posIdx.topFuncs, posIdx.typeMethods, nil, nil, map[string]bool{}) {
+		t.Fatalf("expected valid customWriter Write to pass, err=%v", errPos)
+	}
+	for _, shadowWriteBody := range []string{
+		`func (w *customWriter) Write(p []byte) (n int, err error) { { n, err := w.f.Write(p) }; return }`,
+		`func (w *customWriter) Write(p []byte) (n int, err error) { { var n, err = w.f.Write(p) }; return }`,
+		`func (w *customWriter) Write(p []byte) (int, error) { var n int; var err error; { n, err := w.f.Write(p) }; return n, err }`,
+		`func (w *customWriter) Write(p []byte) (int, error) { { n1, err1 := w.f.Write(p); _, _ = n1, err1 }; return 0, nil }`,
+	} {
+		wSrc := "package testing\nimport \"os\"\ntype customWriter struct { f *os.File }\n" + shadowWriteBody + "\n"
+		wFiles := mustParseTestFiles(t, wSrc)
+		wIdx, errIdx := indexPackageAST("testing", wFiles, nil, nil)
+		if errIdx != nil {
+			t.Fatal(errIdx)
+		}
+		if verifyTestingWriterFunc("customWriter", wIdx.typeMethods["customWriter"]["Write"], validBinding, wIdx.topFuncs, wIdx.typeMethods, nil, nil, map[string]bool{}) {
+			t.Fatalf("expected customWriter with inner-block shadowed/scoped-out Write results to be rejected: %s", shadowWriteBody)
+		}
+	}
 }

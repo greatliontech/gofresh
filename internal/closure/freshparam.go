@@ -273,12 +273,40 @@ func isAdmittedOSGetwdErrorMethod(audited bool, callee *ssa.Function, fp *freshP
 	return isAdmittedOSGetwdErrorType(audited, callee.Signature.Recv().Type(), fp)
 }
 
+func isAdmittedPureMathSymbol(audited bool, pureDelegates map[string]bool, pkgPath string, callee *ssa.Function) bool {
+	if !audited || pkgPath != "math" || callee == nil || (callee.Signature != nil && callee.Signature.Recv() != nil) {
+		return false
+	}
+	return pureDelegates["math:"+functionSymbolName(callee)]
+}
+
 func admitPureDelegateCall(audited bool, pureDelegates map[string]bool, pkgPath string, callee *ssa.Function, site ssa.CallInstruction, callerStd bool, fp *freshParamAnalysis) bool {
 	if !audited || pkgPath == "" {
 		return false
 	}
 	if isSourceOnlyStandardPackage(true, pkgPath) {
 		return true
+	}
+	if isAdmittedPureMathSymbol(audited, pureDelegates, pkgPath, callee) {
+		if callerStd || site == nil {
+			return true
+		}
+		c := site.Common()
+		if c == nil || c.IsInvoke() {
+			return false
+		}
+		if sc := c.StaticCallee(); sc != nil {
+			return sc == callee
+		}
+		if fp == nil {
+			return false
+		}
+		siteFP := contextCancelMethodFP(site, fp)
+		if !subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), siteFP) {
+			return false
+		}
+		held, ok := closedDynamicTargets(c.Value, siteFP)
+		return ok && held[callee]
 	}
 	if !pureDelegates[pkgPath] {
 		if site == nil || site.Common() == nil || !site.Common().IsInvoke() || !isAdmittedOSGetwdErrorMethod(audited, callee, fp) {

@@ -41,6 +41,11 @@ func Identity() string {
 		purePackages, symbolTables, flagSurface, receivers, syncSymbols,
 		methods(standardSentinelGlobals), reflectImmutableTypes, constantImmutableTypes,
 		auditedLinknameTargets, auditedReadOnlyVarLinknameTargets, classBPackages,
+		fmtWriterFuncs, fmtReaderFuncs,
+		methods(inMemoryWriterTypes), methods(inMemoryReaderTypes),
+		methods(valuePlaneFuncs), methods(readOnlySliceInspectFuncs),
+		methods(readOnlySliceCopyFuncs), methods(inPlaceContainerMutateFuncs),
+		methods(pureScalarOrValueFuncs), pureScalarOrValuePackages,
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -502,11 +507,9 @@ var atomicMethods = map[string][]string{
 	"Uintptr": {"Add", "And", "CompareAndSwap", "Load", "Or", "Store", "Swap"},
 }
 
-// mathSymbols is the audited compile-time constant surface of package math:
+// mathConstants is the compile-time constant surface of package math:
 // architectural integer limit constants and IEEE-754 floating-point constants.
-// All runtime floating-point and transcendental functions in package math
-// remain excluded (REQ-closure-observability-audited-set).
-var mathSymbols = map[string]bool{
+var mathConstants = map[string]bool{
 	"E": true, "Pi": true, "Phi": true,
 	"Sqrt2": true, "SqrtE": true, "SqrtPi": true, "SqrtPhi": true,
 	"Ln2": true, "Log2E": true, "Ln10": true, "Log10E": true,
@@ -519,6 +522,53 @@ var mathSymbols = map[string]bool{
 	"MaxInt64": true, "MinInt64": true,
 	"MaxUint": true, "MaxUint8": true, "MaxUint16": true, "MaxUint32": true, "MaxUint64": true,
 }
+
+// mathPureFuncs is the Tier-1 universally internal/cpu-free IEEE-754 exact
+// function surface of package math across every (GOOS, GOARCH) selection,
+// mechanically re-verified against the selected Go and assembly implementation
+// in the toolchain audit. FMA is excluded because cmd/compile emits a runtime
+// internal/cpu feature branch under amd64 GOAMD64<v3 and arm that changes the
+// quiet-NaN sign bit of FMA(0, Inf, NaN) without moving code guards; CPU-free
+// transcendental functions on the selected target admit at Tier 2 instead
+// (REQ-closure-observability-audited-set, REQ-guard-runtime-relevance).
+var mathPureFuncs = map[string]bool{
+	"Abs": true, "Ceil": true, "Copysign": true, "Dim": true,
+	"Float32bits": true, "Float32frombits": true,
+	"Float64bits": true, "Float64frombits": true,
+	"Floor": true, "Frexp": true, "Hypot": true, "Ilogb": true,
+	"Inf": true, "IsInf": true, "IsNaN": true,
+	"Ldexp": true, "Logb": true, "Max": true, "Min": true,
+	"Mod": true, "Modf": true, "NaN": true,
+	"Nextafter": true, "Nextafter32": true,
+	"Pow10": true, "Remainder": true,
+	"Round": true, "RoundToEven": true,
+	"Signbit": true, "Sqrt": true, "Trunc": true,
+}
+
+// mathSymbols is the Tier-1 audited surface of package math: compile-time
+// constants and universally internal/cpu-free IEEE-754 exact functions.
+var mathSymbols = func() map[string]bool {
+	out := make(map[string]bool, len(mathConstants)+len(mathPureFuncs))
+	maps.Copy(out, mathConstants)
+	maps.Copy(out, mathPureFuncs)
+	return out
+}()
+
+// MathConstant reports whether name is an audited compile-time constant in
+// package math.
+func MathConstant(name string) bool { return mathConstants[name] }
+
+// MathConstants returns the sorted audited compile-time constants in package
+// math.
+func MathConstants() []string { return slices.Sorted(maps.Keys(mathConstants)) }
+
+// MathPureFunc reports whether name is a Tier-1 universally internal/cpu-free
+// function in package math.
+func MathPureFunc(name string) bool { return mathPureFuncs[name] }
+
+// MathPureFuncs returns the sorted Tier-1 universally internal/cpu-free
+// functions in package math.
+func MathPureFuncs() []string { return slices.Sorted(maps.Keys(mathPureFuncs)) }
 
 // fips140Symbols is the audited surface of package crypto/fips140:
 // WithoutEnforcement, which sets a goroutine-local bypass flag around a
@@ -576,6 +626,43 @@ func SymbolPackages() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// PackageSymbols returns the sorted bare-name symbols admitted for pkgPath:
+// the package's symbolTables entry, or for package sync the union of the
+// audited synchronization, pooling, and memo symbol names.
+func PackageSymbols(pkgPath string) []string {
+	if pkgPath == "sync" {
+		var out []string
+		out = append(out, syncNames...)
+		out = append(out, poolNames...)
+		out = append(out, memoNames...)
+		slices.Sort(out)
+		return slices.Compact(out)
+	}
+	table := symbolTables[pkgPath]
+	if len(table) == 0 {
+		return nil
+	}
+	return slices.Sorted(maps.Keys(table))
+}
+
+// PackageMethodAndReceiverNames returns the sorted union of receiver and
+// method names registered in receiverTables for pkgPath.
+func PackageMethodAndReceiverNames(pkgPath string) []string {
+	tables := receiverTables[pkgPath]
+	if len(tables) == 0 {
+		return nil
+	}
+	var out []string
+	for _, table := range tables {
+		for recv, methods := range table {
+			out = append(out, recv)
+			out = append(out, methods...)
+		}
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // filepathSymbols is the audited surface of package path/filepath,
@@ -673,6 +760,23 @@ func MemoName(name string) bool { return slices.Contains(memoNames, name) }
 // belongs to any of the audited sync sets (synchronization, pooling, or memo).
 func SyncSurfaceName(name string) bool {
 	return SyncName(name) || PoolName(name) || MemoName(name)
+}
+
+// SyncTopLevelSymbols returns the sorted package-scope type, interface, and
+// constructor names in package sync across the audited synchronization,
+// pooling, and memo sets.
+func SyncTopLevelSymbols() []string {
+	var out []string
+	for _, table := range []map[string][]string{syncMethods, poolMethods, memoMethods} {
+		for recv := range table {
+			out = append(out, recv)
+		}
+	}
+	for sym := range syncSymbols {
+		out = append(out, sym)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // ReflectImmutable reports whether a reflect type is in the audited

@@ -70,6 +70,25 @@ func leakedGate() bool {
 	if _, ok := gatesWithAsmRef["runtime.traceActive"]; ok {
 		t.Fatalf("expected runtime.traceActive to be excluded when traceState is in nonGoIdents, got %v", gatesWithAsmRef)
 	}
+
+	// Calling a mutator from init(), runtime.main(), or under a shadowed `false` local must disqualify the gate,
+	// whereas calling from an unexported wrapper mutator or under an inactive gate must union its mutators.
+	for _, badCaller := range []string{
+		"\nfunc init() { enableTrace() }\n",
+		"\nfunc main() { enableTrace() }\n",
+		"\nfunc init() { false := true; if false { enableTrace() } }\n",
+	} {
+		badSrc := src + badCaller
+		if got := DiscoverRuntimeInactiveGates(mustParseTestFiles(t, badSrc), []string{badSrc}, nil); got["runtime.traceActive"] != nil {
+			t.Fatalf("expected %q to disqualify runtime.traceActive, got %v", badCaller, got)
+		}
+	}
+	wrapperSrc := src + "\nfunc outerEnableTrace() { enableTrace() }\nfunc guardedEnable() { if flagActive() { enableTrace() } }\n"
+	wrappedGates := DiscoverRuntimeInactiveGates(mustParseTestFiles(t, wrapperSrc), []string{wrapperSrc}, nil)
+	wantTraceDeps := []string{"runtime.enableFlag", "runtime.enableTrace", "runtime.flagState", "runtime.outerEnableTrace", "runtime.traceState"}
+	if !slices.Equal(wrappedGates["runtime.traceActive"], wantTraceDeps) {
+		t.Fatalf("wrapped runtime.traceActive mutators = %v, want %v", wrappedGates["runtime.traceActive"], wantTraceDeps)
+	}
 }
 
 func TestVerifyTestingSubVerifiers(t *testing.T) {

@@ -1242,6 +1242,9 @@ func maximalObservabilityBlocker(audited bool, effect externalEffect) bool {
 	if effect.packagePath == "path/filepath" && effect.symbol == "Join" {
 		return false
 	}
+	if audited && effect.packagePath == "math" {
+		return false
+	}
 	if effect.packagePath == "os" && isOpenFlagSymbol(effect.symbol) {
 		return false
 	}

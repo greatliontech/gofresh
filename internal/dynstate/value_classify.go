@@ -3,6 +3,7 @@ package dynstate
 import (
 	"go/types"
 
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
@@ -172,8 +173,7 @@ func checkPureOrFreshValue(v *flowir.Value, pol valuePurityPolicy) bool {
 			if !pol.allowValuePlane || v.IsMethodExprCall || v.CalleeFunc == nil {
 				return false
 			}
-			fk := syntaxutil.FuncKey{Pkg: v.CalleePkg, Name: v.CalleeFunc.Origin().Name()}
-			if !auditedValuePlane[fk] {
+			if !auditset.ValuePlaneClone(v.CalleePkg, v.CalleeFunc.Origin().Name()) {
 				return false
 			}
 			for _, a := range v.Args {

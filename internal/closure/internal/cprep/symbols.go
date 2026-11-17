@@ -180,26 +180,165 @@ func extractExpandedLineSymbols(text, selfPkg string, runtimeOut, externalOut, i
 	}
 }
 
-func buildLogicalNonGoScanLines(cleaned string, defs map[string][]MacroDef) ([]string, string, bool) {
+func collectExportedMacrosFromText(cleaned string, baseDefs, outDefs map[string][]MacroDef, baseUndefs, outUndefs map[string]bool) bool {
+	cur := map[string][]MacroDef{}
+	condDepth := 0
+	sawInclude := false
+	for _, rawLine := range strings.Split(cleaned, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if !strings.HasPrefix(line, "#") {
+			continue
+		}
+		kw, rest, ok := CutDirectiveKeyword(line)
+		if !ok {
+			continue
+		}
+		switch kw {
+		case "define":
+			if name, def, _, okD := ParseDefineRest(rest); okD && name != "" {
+				wasEmpty := len(cur[name]) == 0
+				AppendMacroDefUnique(cur, name, def)
+				if wasEmpty && condDepth > 0 {
+					EnsureMacroIdentityChoice(cur, name)
+				}
+			}
+		case "undef":
+			if name := LeadingASCIIIdent(strings.TrimSpace(rest)); name != "" {
+				outUndefs[name] = true
+				if condDepth == 0 {
+					delete(cur, name)
+				} else if len(cur[name]) > 0 {
+					EnsureMacroIdentityChoice(cur, name)
+				}
+			}
+		case "include", "include_next":
+			sawInclude = true
+			for name, list := range baseDefs {
+				wasEmpty := len(cur[name]) == 0
+				for _, d := range list {
+					AppendMacroDefUnique(cur, name, d)
+				}
+				if wasEmpty {
+					EnsureMacroIdentityChoice(cur, name)
+				}
+			}
+			for uName := range baseUndefs {
+				if len(cur[uName]) > 0 {
+					EnsureMacroIdentityChoice(cur, uName)
+				}
+			}
+		case "if", "ifdef", "ifndef":
+			condDepth++
+		case "endif":
+			if condDepth > 0 {
+				condDepth--
+			}
+		}
+	}
+	for name, list := range cur {
+		for _, def := range list {
+			AppendMacroDefUnique(outDefs, name, def)
+		}
+	}
+	return sawInclude
+}
+
+func scanCleanedNonGoText(cleaned, selfPkg string, baseDefs map[string][]MacroDef, baseUndefs, runtimeOut, externalOut, identOut map[string]bool) bool {
+	activeDefs := map[string][]MacroDef{}
 	rawLines := strings.Split(cleaned, "\n")
-	out := make([]string, 0, len(rawLines))
+	expandedLines := make([]string, 0, len(rawLines))
 	var nonDirective strings.Builder
 	var pending string
+	condDepth := 0
+
+	expandAndExtract := func(line string) bool {
+		if line == "" {
+			return false
+		}
+		extractExpandedLineSymbols(line, selfPkg, runtimeOut, externalOut, identOut)
+		if len(activeDefs) == 0 {
+			expandedLines = append(expandedLines, line)
+			return false
+		}
+		states, primary, expOverflow := ExpandCPPLineAllChoices(line, activeDefs)
+		if expOverflow {
+			return true
+		}
+		expandedLines = append(expandedLines, primary)
+		for _, st := range states {
+			if st != line {
+				extractExpandedLineSymbols(st, selfPkg, runtimeOut, externalOut, identOut)
+			}
+		}
+		return false
+	}
+
+	flushPending := func() bool {
+		if pending == "" {
+			return false
+		}
+		line := pending
+		pending = ""
+		return expandAndExtract(line)
+	}
+
 	for idx := 0; idx < len(rawLines); idx++ {
 		line := strings.TrimSpace(rawLines[idx])
 		if line == "" {
 			continue
 		}
 		if len(line) > MaxNonGoLogicalLineBytes {
-			return nil, "", true
+			return true
 		}
 		if strings.HasPrefix(line, "#") {
-			if pending != "" {
-				out = append(out, pending)
-				pending = ""
+			if flushPending() {
+				return true
 			}
-			if _, def, _, ok := ParseDefineDirective(line); ok && def.Body != "" {
-				out = append(out, def.Body)
+			kw, rest, ok := CutDirectiveKeyword(line)
+			if !ok {
+				continue
+			}
+			switch kw {
+			case "define":
+				if name, def, _, okD := ParseDefineRest(rest); okD && name != "" {
+					if def.Body != "" && expandAndExtract(def.Body) {
+						return true
+					}
+					wasEmpty := len(activeDefs[name]) == 0
+					AppendMacroDefUnique(activeDefs, name, def)
+					if wasEmpty && condDepth > 0 {
+						EnsureMacroIdentityChoice(activeDefs, name)
+					}
+				}
+			case "undef":
+				if name := LeadingASCIIIdent(strings.TrimSpace(rest)); name != "" {
+					if condDepth == 0 {
+						delete(activeDefs, name)
+					} else if len(activeDefs[name]) > 0 {
+						EnsureMacroIdentityChoice(activeDefs, name)
+					}
+				}
+			case "include", "include_next":
+				for name, list := range baseDefs {
+					wasEmpty := len(activeDefs[name]) == 0
+					for _, d := range list {
+						AppendMacroDefUnique(activeDefs, name, d)
+					}
+					if wasEmpty {
+						EnsureMacroIdentityChoice(activeDefs, name)
+					}
+				}
+				for uName := range baseUndefs {
+					if len(activeDefs[uName]) > 0 {
+						EnsureMacroIdentityChoice(activeDefs, uName)
+					}
+				}
+			case "if", "ifdef", "ifndef":
+				condDepth++
+			case "endif":
+				if condDepth > 0 {
+					condDepth--
+				}
 			}
 			continue
 		}
@@ -210,12 +349,12 @@ func buildLogicalNonGoScanLines(cleaned string, defs map[string][]MacroDef) ([]s
 		} else if len(pending)+1+len(line) <= MaxNonGoLogicalLineBytes {
 			pending = pending + " " + line
 		} else {
-			return nil, "", true
+			return true
 		}
 		if UnquotedParenBalance(pending) > 0 {
 			continue
 		}
-		if TrailingFuncMacroIdentMode(pending, defs, false) {
+		if TrailingFuncMacroIdentMode(pending, activeDefs, false) {
 			peek := idx + 1
 			for peek < len(rawLines) && strings.TrimSpace(rawLines[peek]) == "" {
 				peek++
@@ -224,13 +363,20 @@ func buildLogicalNonGoScanLines(cleaned string, defs map[string][]MacroDef) ([]s
 				continue
 			}
 		}
-		out = append(out, pending)
-		pending = ""
+		if flushPending() {
+			return true
+		}
 	}
-	if pending != "" {
-		out = append(out, pending)
+	if flushPending() {
+		return true
 	}
-	return out, nonDirective.String(), false
+	if nonDirective.Len() > 0 {
+		extractExpandedLineSymbols(nonDirective.String(), selfPkg, runtimeOut, externalOut, identOut)
+	}
+	if len(expandedLines) > 1 {
+		extractExpandedLineSymbols(strings.Join(expandedLines, "\n"), selfPkg, runtimeOut, externalOut, identOut)
+	}
+	return false
 }
 
 // ScanPreprocessedNonGoSymbolRefs preprocesses C/assembly headers and sources
@@ -253,44 +399,30 @@ func ScanPreprocessedNonGoSymbolRefs(selfPkg string, includeHeaders, pkgTexts []
 		prevStrippedHdrs = strippedHdrs
 		prevCleanedTexts = cleanedTexts
 
-		defs := map[string][]MacroDef{}
-		for _, stripped := range strippedHdrs {
-			CollectCPPMacrosFromText(stripped, defs)
+		baseDefs := map[string][]MacroDef{}
+		baseUndefs := map[string]bool{}
+		countMacroState := func(m map[string][]MacroDef, u map[string]bool) int {
+			n := len(u)
+			for _, list := range m {
+				n += len(list)
+			}
+			return n
+		}
+		for {
+			before := countMacroState(baseDefs, baseUndefs)
+			sawInc := false
+			for _, stripped := range strippedHdrs {
+				if collectExportedMacrosFromText(stripped, baseDefs, baseDefs, baseUndefs, baseUndefs) {
+					sawInc = true
+				}
+			}
+			if !sawInc || countMacroState(baseDefs, baseUndefs) == before {
+				break
+			}
 		}
 		for _, cleaned := range cleanedTexts {
-			CollectCPPMacrosFromText(cleaned, defs)
-		}
-		for _, cleaned := range cleanedTexts {
-			logicalLines, nonDirText, overflow := buildLogicalNonGoScanLines(cleaned, defs)
-			if overflow {
+			if scanCleanedNonGoText(cleaned, selfPkg, baseDefs, baseUndefs, runtimeOut, externalOut, identOut) {
 				return true
-			}
-			if nonDirText != "" {
-				extractExpandedLineSymbols(nonDirText, selfPkg, runtimeOut, externalOut, identOut)
-			}
-			expandedLines := make([]string, 0, len(logicalLines))
-			for _, line := range logicalLines {
-				if line == "" {
-					continue
-				}
-				extractExpandedLineSymbols(line, selfPkg, runtimeOut, externalOut, identOut)
-				if len(defs) == 0 {
-					expandedLines = append(expandedLines, line)
-					continue
-				}
-				states, primary, expOverflow := ExpandCPPLineAllChoices(line, defs)
-				if expOverflow {
-					return true
-				}
-				expandedLines = append(expandedLines, primary)
-				for _, st := range states {
-					if st != line {
-						extractExpandedLineSymbols(st, selfPkg, runtimeOut, externalOut, identOut)
-					}
-				}
-			}
-			if len(expandedLines) > 1 {
-				extractExpandedLineSymbols(strings.Join(expandedLines, "\n"), selfPkg, runtimeOut, externalOut, identOut)
 			}
 		}
 	}

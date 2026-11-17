@@ -1757,17 +1757,30 @@ The following families state the properties such derivations must establish:
 
 - Formatting, including fmt's Sprint family, computes from its operands;
   argument methods remain visible to reachability and independently classified.
-- Arithmetic such as math/big and compile-time constants in package `math`
+- Arithmetic such as `math/big`, compile-time constants in package `math`
   (`MaxInt*`, `MinInt*`, `MaxUint*`, `MaxFloat*`, `SmallestNonzeroFloat*`, `Pi`,
-  `E`, `Phi`, `Sqrt*`, `Ln*`, `Log*`) must establish result invariance across
-  any CPU-selected kernels, including relevant native implementations, while
-  runtime floating-point and transcendental functions in package `math` retain
-  their refusal. Memoization and scratch pooling must not introduce an
-  observable input channel. Supplied random sources retain their own input
-  obligations. Any use of approximate arithmetic, such as buffer sizing or
-  iteration seeding, must be shown unable to change the claimed result. A
-  package name does not prove bit-identical kernels or make a native leaf
-  transparent.
+  `E`, `Phi`, `Sqrt*`, `Ln*`, `Log*`), and universally CPU-feature-free IEEE-754
+  exact functions in package `math` (`Abs`, `Ceil`, `Copysign`, `Dim`,
+  `Float32bits`, `Float32frombits`, `Float64bits`, `Float64frombits`, `Floor`,
+  `Frexp`, `Hypot`, `Ilogb`, `Inf`, `IsInf`, `IsNaN`, `Ldexp`, `Logb`, `Max`,
+  `Min`, `Mod`, `Modf`, `NaN`, `Nextafter`, `Nextafter32`, `Pow10`, `Remainder`,
+  `Round`, `RoundToEven`, `Signbit`, `Sqrt`, `Trunc`) must establish result
+  invariance across any CPU-selected kernels, including relevant native and
+  assembly implementations, with no `init` hooks or mutable package globals. At
+  the observability tier (where `BuildConfig` guards the target platform and
+  architecture feature level), additional exported `math` functions (excluding
+  compiler-intrinsic `FMA`, whose compiler-lowered fallback under a fixed
+  `BuildConfig` branches on runtime CPU features) may be admitted only when
+  mechanical pruning of compile-time boolean constants and transitive Go and
+  Plan 9 `.s` call/symbol verification over the selected `math` implementation
+  establish zero runtime `internal/cpu` feature reads and zero writable assembly
+  globals; runtime CPU-feature-dispatched approximations and `FMA` retain their
+  refusal (REQ-guard-runtime-relevance). Memoization and scratch pooling must
+  not introduce an observable input channel. Supplied random sources retain
+  their own input obligations. Any use of approximate arithmetic, such as buffer
+  sizing or iteration seeding, must be shown unable to change the claimed
+  result. A package name does not prove bit-identical kernels or make a native
+  leaf transparent.
 - Fixed-argument time computation, including Date, FixedZone, ParseDuration,
   calendar and clock-field accessors, zone views, rounding, formatting,
   comparison and duration arithmetic, and package-function `time.Unix`,
@@ -1853,8 +1866,10 @@ Local `math/rand.Rand` generators constructed via `math/rand.New` and
 (`Float32`, `Float64`, `Int`, `Int31`, `Int31n`, `Int63`, `Int63n`, `Intn`,
 `Perm`, `Read`, `Seed`, `Shuffle`, `Uint32`, `Uint64`) compute deterministically
 over the caller's seed and the receiver's own state; top-level package sampling
-functions (which read the unseeded global generator) and transcendental
-distributions (`ExpFloat64`, `NormFloat64`, `Zipf`, which reach package `math`)
+functions (which read the unseeded global generator) and non-uniform
+transcendental distributions (`ExpFloat64`, `NormFloat64`, `Zipf`, whose
+exponential/logarithmic and table-driven sampling paths are not admitted in the
+`math/rand` receiver set)
 retain their refusal.
 
 **REQ-closure-observability-declaration-bindings** (invariant): A reference to a type or constant can be execution-free under language
@@ -2074,12 +2089,18 @@ preserve these distinct obligations:
   every entry. Individual directory-stamp reads and stored-stamp comparisons
   are not interrupted, bounded by the recorded directory inventory.
 - **observation-premises** — Coverage, delivery and outcome binding are distinct
-  under REQ-inputs-producer-premises. Delivery establishes that every required
-  observation reaches finalization or its loss prevents supported completion,
-  including failed writes and flushes. A hook name, release label, declaration
-  canary or successful execution cannot establish this. The result owner still
-  supplies the actual harness completion receipt; a delivery derivation supplies
-  no receipt for a particular process.
+  under REQ-inputs-producer-premises. Delivery establishes by mechanical source
+  verification (without Go-version or toolchain-flavor allowlists, pruning only
+  compile-time constant and proven-inactive runtime/function-variable gates)
+  that every required `Getenv`, `Open`, `Stat`, and `Chdir` observation (across
+  both path-based `os.Chdir` and descriptor-based `(*os.File).Chdir`, plus
+  `testing`'s non-parallel `Chdir`/`Setenv`/LIFO `Cleanup` restoration protocol)
+  reaches finalization — whether through buffered `io.Writer` sinks or direct
+  descriptor/runtime line writers — or its write/flush failure is monotonically
+  latched onto `StopTestLog` to prevent supported completion. A hook name,
+  release label, declaration canary or successful execution cannot establish
+  this. The result owner still supplies the actual harness completion receipt; a
+  delivery derivation supplies no receipt for a particular process.
 - **claim-rechecking** — Changed selected content or other claim dependencies
   require rechecking affected derivations under REQ-fresh-dependency-identities,
   never approval by adding a row. Diagnostics identify failed selection

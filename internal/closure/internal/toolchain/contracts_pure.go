@@ -103,7 +103,7 @@ var AllowedPureBoringCipherSelectors = map[string]bool{
 // AllowedPureFIPS140OnlyFIPSSelectors lists the selectors on "crypto/fips140"
 // permitted in crypto/internal/fips140only.
 var AllowedPureFIPS140OnlyFIPSSelectors = map[string]bool{
-	"Enforced": true,
+	"Enforced": auditset.Symbol("crypto/fips140", "Enforced"),
 }
 
 // AllowedPureFIPS140OnlyDRBGSelectors lists the type/predicate selectors on
@@ -122,136 +122,47 @@ var AllowedPureSHAGodebugSettings = map[string]bool{
 	`"#ppc64sha512"`: true,
 }
 
-// AllowedPureFmtSelectors lists the closed set of value-formatting and
+func derivePureSelectorsFromAuditset(base []string, stdlibInternalExtras ...string) map[string]bool {
+	out := make(map[string]bool, len(base)+len(stdlibInternalExtras))
+	for _, sym := range base {
+		out[sym] = true
+	}
+	for _, sym := range stdlibInternalExtras {
+		out[sym] = true
+	}
+	return out
+}
+
+// AllowedPureFmtSelectors derives the closed set of value-formatting and
 // interface/scanner selectors on "fmt" permitted in pure and pure-delegate
-// packages (excluding ambient stdio Print*, Scan*).
-var AllowedPureFmtSelectors = map[string]bool{
-	"Append":       true,
-	"Appendf":      true,
-	"Appendln":     true,
-	"Errorf":       true,
-	"FormatString": true,
-	"Formatter":    true,
-	"Fprint":       true,
-	"Fprintf":      true,
-	"Fprintln":     true,
-	"GoStringer":   true,
-	"ScanState":    true,
-	"Scanner":      true,
-	"Sprint":       true,
-	"Sprintf":      true,
-	"Sprintln":     true,
-	"Sscan":        true,
-	"Sscanf":       true,
-	"Sscanln":      true,
-	"State":        true,
-	"Stringer":     true,
-}
+// packages from auditset.PackageSymbols("fmt") plus writer-first Fprint* and
+// pure formatting/scanning interfaces (excluding ambient stdio Print*, Scan*).
+var AllowedPureFmtSelectors = derivePureSelectorsFromAuditset(
+	auditset.PackageSymbols("fmt"),
+	"Formatter", "Fprint", "Fprintf", "Fprintln",
+	"GoStringer", "ScanState", "Scanner", "Sscan", "Sscanf", "Sscanln", "State",
+)
 
-// AllowedPureMathSelectors lists the closed IEEE-754 bit/rounding/elementary
-// selectors on "math" permitted in pure and pure-delegate packages (excluding
-// platform-libm-sensitive transcendental functions).
-var AllowedPureMathSelectors = map[string]bool{
-	"Abs":                    true,
-	"Ceil":                   true,
-	"Copysign":               true,
-	"Float32bits":            true,
-	"Float32frombits":        true,
-	"Float64bits":            true,
-	"Float64frombits":        true,
-	"Floor":                  true,
-	"Frexp":                  true,
-	"Inf":                    true,
-	"IsInf":                  true,
-	"IsNaN":                  true,
-	"Ldexp":                  true,
-	"Log10":                  true,
-	"Log2":                   true,
-	"Max":                    true,
-	"MaxFloat32":             true,
-	"MaxFloat64":             true,
-	"MaxInt":                 true,
-	"MaxInt8":                true,
-	"MaxInt16":               true,
-	"MaxInt32":               true,
-	"MaxInt64":               true,
-	"MaxUint":                true,
-	"MaxUint8":               true,
-	"MaxUint16":              true,
-	"MaxUint32":              true,
-	"MaxUint64":              true,
-	"Min":                    true,
-	"MinInt":                 true,
-	"MinInt8":                true,
-	"MinInt16":               true,
-	"MinInt32":               true,
-	"MinInt64":               true,
-	"Modf":                   true,
-	"NaN":                    true,
-	"Round":                  true,
-	"RoundToEven":            true,
-	"Signbit":                true,
-	"SmallestNonzeroFloat32": true,
-	"SmallestNonzeroFloat64": true,
-	"Sqrt":                   true,
-	"Trunc":                  true,
-}
+// AllowedPureMathSelectors derives the closed IEEE-754 bit/rounding/elementary
+// selectors on "math" permitted in pure and pure-delegate packages from
+// auditset.PackageSymbols("math") plus Log10 and Log2 (used internally by
+// encoding/json/v2 and math/big).
+var AllowedPureMathSelectors = derivePureSelectorsFromAuditset(
+	auditset.PackageSymbols("math"),
+	"Log10", "Log2",
+)
 
-// AllowedPureReflectSelectors lists the closed set of selectors on "reflect"
-// permitted in pure and pure-delegate packages (excluding MakeFunc, Select, and
-// reflective call/method-by-name dispatch).
-var AllowedPureReflectSelectors = map[string]bool{
-	"Append":          true,
-	"Array":           true,
-	"Bool":            true,
-	"Bytes":           true,
-	"Chan":            true,
-	"Complex128":      true,
-	"Complex64":       true,
-	"Copy":            true,
-	"DeepEqual":       true,
-	"Float32":         true,
-	"Float64":         true,
-	"Func":            true,
-	"Indirect":        true,
-	"Int":             true,
-	"Int16":           true,
-	"Int32":           true,
-	"Int64":           true,
-	"Int8":            true,
-	"Interface":       true,
-	"Invalid":         true,
-	"Kind":            true,
-	"MakeMap":         true,
-	"MakeMapWithSize": true,
-	"MakeSlice":       true,
-	"Map":             true,
-	"MapOf":           true,
-	"New":             true,
-	"Pointer":         true,
-	"PointerTo":       true,
-	"Ptr":             true,
-	"Slice":           true,
-	"SliceOf":         true,
-	"String":          true,
-	"Struct":          true,
-	"StructField":     true,
-	"StructTag":       true,
-	"Type":            true,
-	"TypeAssert":      true,
-	"TypeFor":         true,
-	"TypeOf":          true,
-	"Uint":            true,
-	"Uint16":          true,
-	"Uint32":          true,
-	"Uint64":          true,
-	"Uint8":           true,
-	"Uintptr":         true,
-	"UnsafePointer":   true,
-	"Value":           true,
-	"ValueOf":         true,
-	"Zero":            true,
-}
+// AllowedPureReflectSelectors derives the closed set of selectors on "reflect"
+// permitted in pure and pure-delegate packages from auditset.PackageSymbols("reflect")
+// plus internal value/container helpers used by encoding/* (excluding MakeFunc,
+// Select, and reflective call/method-by-name dispatch).
+var AllowedPureReflectSelectors = derivePureSelectorsFromAuditset(
+	auditset.PackageSymbols("reflect"),
+	"Append", "Bytes", "Copy", "Indirect", "Interface",
+	"MakeMap", "MakeMapWithSize", "MakeSlice", "MapOf",
+	"New", "Pointer", "PointerTo", "Ptr", "Slice", "SliceOf",
+	"TypeAssert", "TypeFor", "UnsafePointer", "Value", "ValueOf", "Zero",
+)
 
 // AllowedPureFilepathliteSyscallSelectors lists the selectors on "syscall"
 // permitted in internal/filepathlite.
@@ -265,114 +176,50 @@ var AllowedPureFilepathliteWindowsSelectors = map[string]bool{
 	"RtlIsDosDeviceName_U": true,
 }
 
-// AllowedPureMathRandSelectors lists the selectors on "math/rand" permitted in
-// math/big (type Rand and deterministic local PRNG constructors New/NewSource).
-var AllowedPureMathRandSelectors = map[string]bool{
-	"New":       true,
-	"NewSource": true,
-	"Rand":      true,
-}
+// AllowedPureMathRandSelectors derives the selectors on "math/rand" permitted
+// in math/big directly from auditset.PackageSymbols("math/rand") (explicit-seed
+// local PRNG constructors New/NewSource and Rand/Source/Source64 types;
+// top-level unseeded sampling functions and transcendental distributions remain
+// excluded).
+var AllowedPureMathRandSelectors = derivePureSelectorsFromAuditset(
+	auditset.PackageSymbols("math/rand"),
+)
 
-// AllowedPureRuntimeSelectors lists the selectors on "runtime" permitted when a
-// pure or pure-delegate package imports "runtime".
-var AllowedPureRuntimeSelectors = map[string]bool{
-	"Caller":    true,
-	"FuncForPC": true,
-	"GOARCH":    true,
-	"GOOS":      true,
-	"Goexit":    true,
-	"KeepAlive": true,
-}
+// AllowedPureRuntimeSelectors derives the selectors on "runtime" permitted when
+// a pure or pure-delegate package imports "runtime" from
+// auditset.PackageSymbols("runtime") plus internal stack/liveness helpers.
+var AllowedPureRuntimeSelectors = derivePureSelectorsFromAuditset(
+	auditset.PackageSymbols("runtime"),
+	"Caller", "FuncForPC", "Goexit", "KeepAlive",
+)
 
-// AllowedPureSyncSelectors lists the closed set of synchronization primitives
-// on "sync" permitted in pure and pure-delegate packages for internal memos and
-// pools.
-var AllowedPureSyncSelectors = map[string]bool{
-	"Cond":       true,
-	"Locker":     true,
-	"Map":        true,
-	"Mutex":      true,
-	"NewCond":    true,
-	"Once":       true,
-	"OnceFunc":   true,
-	"OnceValue":  true,
-	"OnceValues": true,
-	"Pool":       true,
-	"RWMutex":    true,
-	"WaitGroup":  true,
-}
+// AllowedPureSyncSelectors derives the closed set of synchronization primitives
+// on "sync" permitted in pure and pure-delegate packages from
+// auditset.SyncTopLevelSymbols() plus internal OnceFunc/OnceValue/OnceValues
+// and WaitGroup helpers.
+var AllowedPureSyncSelectors = derivePureSelectorsFromAuditset(
+	auditset.SyncTopLevelSymbols(),
+	"OnceFunc", "OnceValue", "OnceValues", "WaitGroup",
+)
 
-// AllowedPureSyncAtomicSelectors lists the closed set of primitives on
-// "sync/atomic" permitted in pure and pure-delegate packages (excluding
-// arbitrary-value atomic.Value and generic atomic.Pointer).
-var AllowedPureSyncAtomicSelectors = map[string]bool{
-	"AddInt32":              true,
-	"AddInt64":              true,
-	"AddUint32":             true,
-	"AddUint64":             true,
-	"AddUintptr":            true,
-	"Bool":                  true,
-	"CompareAndSwapInt32":   true,
-	"CompareAndSwapInt64":   true,
-	"CompareAndSwapPointer": true,
-	"CompareAndSwapUint32":  true,
-	"CompareAndSwapUint64":  true,
-	"CompareAndSwapUintptr": true,
-	"Int32":                 true,
-	"Int64":                 true,
-	"LoadInt32":             true,
-	"LoadInt64":             true,
-	"LoadPointer":           true,
-	"LoadUint32":            true,
-	"LoadUint64":            true,
-	"LoadUintptr":           true,
-	"Uint32":                true,
-	"Uint64":                true,
-	"Uintptr":               true,
-}
+// AllowedPureSyncAtomicSelectors derives the closed set of primitives on
+// "sync/atomic" permitted in pure and pure-delegate packages from
+// auditset.PackageSymbols("sync/atomic") plus internal pointer load/CAS helpers
+// (excluding arbitrary-value atomic.Value and generic atomic.Pointer).
+var AllowedPureSyncAtomicSelectors = derivePureSelectorsFromAuditset(
+	auditset.PackageSymbols("sync/atomic"),
+	"CompareAndSwapPointer", "LoadPointer",
+)
 
-// AllowedPureTimeSelectors lists the closed set of pure value, layout, and
+// AllowedPureTimeSelectors derives the closed set of pure value, layout, and
 // deterministic parsing selectors on "time" permitted in pure and pure-delegate
-// packages (excluding Now, Since, Until, Local, LoadLocation*, timers, Sleep,
-// and unchained Unix* local-zone constructors).
-var AllowedPureTimeSelectors = map[string]bool{
-	"ANSIC":         true,
-	"Date":          true,
-	"DateOnly":      true,
-	"DateTime":      true,
-	"Duration":      true,
-	"FixedZone":     true,
-	"Hour":          true,
-	"Kitchen":       true,
-	"Layout":        true,
-	"Location":      true,
-	"Microsecond":   true,
-	"Millisecond":   true,
-	"Minute":        true,
-	"Month":         true,
-	"Nanosecond":    true,
-	"Parse":         true,
-	"ParseDuration": true,
-	"ParseError":    true,
-	"RFC1123":       true,
-	"RFC1123Z":      true,
-	"RFC3339":       true,
-	"RFC3339Nano":   true,
-	"RFC822":        true,
-	"RFC822Z":       true,
-	"RFC850":        true,
-	"RubyDate":      true,
-	"Second":        true,
-	"Stamp":         true,
-	"StampMicro":    true,
-	"StampMilli":    true,
-	"StampNano":     true,
-	"Time":          true,
-	"TimeOnly":      true,
-	"UTC":           true,
-	"UnixDate":      true,
-	"Weekday":       true,
-}
+// packages from auditset.PackageSymbols("time") plus internal Location, Parse,
+// ParseError, and UTC selectors used by encoding/* (excluding Now, Since,
+// Until, Local, LoadLocation*, timers, Sleep, and unchained Unix* constructors).
+var AllowedPureTimeSelectors = derivePureSelectorsFromAuditset(
+	auditset.PackageSymbols("time"),
+	"Location", "Parse", "ParseError", "UTC",
+)
 
 // IsPureSupportImport reports whether importPath is an approved support import
 // for pkgPath under a closed selector allowlist.

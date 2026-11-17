@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
@@ -792,11 +793,7 @@ func auditedInMemorySinkType(t types.Type) bool {
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
 		return false
 	}
-	switch named.Obj().Pkg().Path() + "." + named.Obj().Name() {
-	case "bytes.Buffer", "strings.Builder":
-		return true
-	}
-	return false
+	return auditset.InMemoryWriterPointerType(named.Obj().Pkg().Path(), named.Obj().Name())
 }
 
 // syntheticInterfaceMethodWrapper reports whether fn is a compiler
