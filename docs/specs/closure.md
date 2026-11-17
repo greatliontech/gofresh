@@ -340,17 +340,40 @@ opaque floor. An assembly-bearing mutable-local package contributes its whole
 directory to the hash, and reached non-toolchain assembly widens the subject
 and blocks its observability proof unless the selection targets `amd64` or
 `arm64`, the owning package has no external cgo
-or non-header native source, and each reached `TEXT` entrypoint (or every `TEXT`
-entrypoint in the package when the subject scan is widened) passes mechanical
-source verification across the package's `.s` and `.h` files under the selected
-architecture's ISA rules: 3-operand `RODATA`-only
-`GLOBL` definitions, zero stores or cross-package references to `(SB)` globals
-(with intra-package `(SB)` references restricted to verified `RODATA` `GLOBL`s),
-zero `TLS`, segment/system-register, or goroutine-register accesses (including
-entry `R14` reads before a full-width overwrite on `amd64`), leaf-only `ABI0`
-control flow with operandless `RET` and branches restricted to local labels or
-branch-target PC-relative offsets on plain
-non-method function stubs with carrier-free and `uintptr`-free Go signatures,
+or non-header native source, the package's `.s` and `.h` files satisfy
+package-level safety (valid preprocessor directives, 3-operand `RODATA`-only
+`GLOBL` definitions non-colliding with Go declarations, literal-only `DATA`
+directives targeting those `RODATA` `GLOBL`s, `$`-prefixed frame sizes and
+only `NOPROF`/`NOSPLIT`/`NOFRAME`/`TOPFRAME` flags on `TEXT` definitions with
+zero `init` `TEXT` definitions,
+and zero stray top-level instructions — leaving pure-Go `init` and sibling
+entrypoints unblocked by unreached unverified `TEXT` symbols, marking
+`Observability.RequiresSingleSubject` whenever any loaded non-standard package
+in the binary retains an unverified assembly entrypoint, undischarged `(SB)`
+symbol reference, linknamed or Go-bodied intra-package assembly callee, or
+carrier-bearing Go assembly stub so shared-process
+execution models refuse fail-closed while single-subject execution admits the
+clean subject, and keeping whole-package write-hazard gates strictly
+conditioned on every `TEXT` symbol in the package passing verification), and
+each reached `TEXT` entrypoint (plus every
+intra-package `TEXT` helper transitively reached via direct `CALL` or tail-jump)
+passes mechanical source verification under the selected architecture's ISA
+rules: zero stores, read-modify-writes, indirect writes, memory/return/stack
+escapes, or address-bit branches on `(SB)` symbol addresses, read-only `(SB)`
+data references (including read-only `BT`/`BTW`/`BTL`/`BTQ` bit tests alongside
+comparison/test mnemonics) restricted to verified assembly `RODATA` `GLOBL`s,
+carrier-free pointer-free and slice-free Go value globals proven free of
+post-initialization writes and address/slice escapes across syntax and SSA across
+all loaded compartments, and writer-free `internal/cpu.HWCap` (while Tier-1
+maximal closure scans continue to treat all non-toolchain `.s` packages as
+unverifiable), zero `TLS`, segment/system-register,
+or goroutine-register accesses (including entry `R14` reads before a full-width
+overwrite on `amd64`), preprocessor-aware `ABI0` control flow with zero
+non-returning fall-off at `TEXT` end, operandless `RET`, and branches/calls
+restricted to local labels, non-escaping PC-relative offsets, or verified
+linkname-free and Go-body-free intra-package `TEXT` helpers on linkname-free
+plain non-method function stubs with
+carrier-free and `uintptr`-free Go signatures,
 and architecture-partitioned instruction/opcode classification admitting pure
 register/stack/memory-argument computation and static CPU-feature queries
 (`amd64` canonical straight-line `CPUID` leaf wrappers loading a `uint32` leaf
@@ -359,8 +382,8 @@ and zero or `uint32` subleaf into `(AX, CX)` and storing unmodified
 statically bounded and leaf-1 `EBX[31:24]`, leaf-`0x0b`/`0x1f`/`0x80000026` `EDX`,
 and leaf-`0x8000001e` per-core APIC/unit topology fields are unused or masked out,
 `amd64` `XGETBV`, `arm64` static feature/ID `MRS`/`MOVD` system-register reads and
-SVE vector-length `WORD` encodings, and Darwin commpage capability bits) under
-the CPU-feature guard split while classifying direct `CPUID` subject roots,
+SVE vector-length `WORD` encodings, and Darwin commpage capability bits) at
+the Tier-2 observability refinement while classifying direct `CPUID` subject roots,
 non-canonical or unmasked `CPUID` uses, hardware counters, RNGs, syscalls, traps,
 transactional or control/system-register operations, per-core APIC ID reads, and
 unrecognized raw opcode emissions as opaque native effects.
@@ -1396,10 +1419,12 @@ declares — fail-closed like every malformed-fact arm. A qualified in-package
 helper's stores stay audited for object-closure exactly as an `init` body's
 are. Function bodies nested in package-level declarations,
 in `init` bodies, or in qualified helpers are program code, not initialization;
-non-Go writes need no rule here — packages built with cgo or unverified
+non-Go writes need no rule here — packages built with cgo or package-unsafe
 assembly sources are already downgraded whole by the native-code and linkage
-blind-spot dispositions, while mechanically verified assembly is barred from
-referencing Go variables or accepting dynamic-carrier types. The toolchain-generated test-main package's registration
+blind-spot dispositions, packages retaining unverified assembly entrypoints
+require single-subject execution (`Observability.RequiresSingleSubject`), and
+mechanically verified assembly is barred from writing Go variables, referencing
+dynamic-carrier Go variables, or accepting dynamic-carrier types. The toolchain-generated test-main package's registration
 tables may be excluded from this mutation judgment only under a checked
 scaffolding claim that they introduce no relevant mutation or dispatch channel
 beyond the declared harness model. Their implementation dependencies remain

@@ -237,10 +237,12 @@ type Observability struct {
 	EffectFree bool
 	// RequiresSingleSubject reports that the subject's own reachability is
 	// clean, while a loaded non-standard package of the test binary contains
-	// an un-confined unsafe.Pointer operation that a sibling subject could
-	// execute in a shared process. Persisted execution-agnostically in Proofs()
-	// memos and enforced by the consumer against SingleSubjectExecution
-	// (REQ-closure-observability-unsafe, REQ-closure-observability-memo).
+	// an un-confined unsafe.Pointer operation or an unverified non-standard
+	// assembly entrypoint/stub that another subject could execute in a shared
+	// process. Persisted execution-agnostically in Proofs() memos and enforced
+	// by the consumer against SingleSubjectExecution
+	// (REQ-closure-observability-unsafe, REQ-closure-blindspot,
+	// REQ-closure-observability-memo).
 	RequiresSingleSubject bool
 	// SharedProcessUnsafeReason carries the deterministic package-scan refusal
 	// diagnostic surfaced when RequiresSingleSubject is true and the caller has
@@ -834,6 +836,9 @@ func (b *tier2Base) ensureBinaryUnsafeEvaluated() {
 				b.binaryUnsafeReason = "package scan: reaches un-confined unsafe.Pointer in " + idx.path
 			}
 		}
+	}
+	if b.binaryUnsafeReason == "" {
+		b.binaryUnsafeReason = b.binaryUnverifiedAsmReason(candidates)
 	}
 }
 

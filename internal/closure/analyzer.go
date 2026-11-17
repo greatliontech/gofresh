@@ -1403,7 +1403,7 @@ func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool)
 				if idx.meta == nil || len(idx.meta.SFiles) == 0 {
 					return false
 				}
-				if _, asmOK := a.verifiedPackageAssemblyFunc(idx.meta, fn); !asmOK {
+				if _, _, asmOK := a.verifiedPackageAssemblyFunc(idx.meta, fn); !asmOK {
 					return false
 				}
 			}
@@ -2194,7 +2194,7 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 			a.recordExternalEffect(effect)
 		}
 		if idx.mutable {
-			if hasCgoCallbackBlindspot(idx.meta) && !a.verifiedPackageAssembly(idx.meta) {
+			if hasCgoCallbackBlindspot(idx.meta) && !a.verifiedPackageAssemblySafe(idx.meta) {
 				modCache := ""
 				if a.h != nil {
 					modCache = a.h.modCache
@@ -2217,7 +2217,7 @@ func (a *tier2Analyzer) addReachedPackageFiles() error {
 				a.requestWiden("cgo callback source in " + idx.id)
 			}
 		}
-		if len(idx.meta.SFiles) == 0 || a.verifiedPackageAssembly(idx.meta) {
+		if len(idx.meta.SFiles) == 0 || a.verifiedPackageAssemblySafe(idx.meta) {
 			continue
 		}
 		// Assembly is never an analysis surface (REQ-closure-blindspot):

@@ -1416,15 +1416,26 @@ func isVerifiedPureRootedAsmStub(audited bool, prog *program, fn *ssa.Function) 
 	}
 	pkgPath := fn.Pkg.Pkg.Path()
 	hazards := nonSSAGlobalHazardsSummary(audited, prog)
-	if hazards == nil || hazards.blockedPkgs[pkgPath] || hazards.linknamedVars[pkgVarKey{pkgPath: pkgPath, name: fn.Name()}] {
+	if hazards == nil || hazards.linknamedVars[pkgVarKey{pkgPath: pkgPath, name: fn.Name()}] {
 		return false
 	}
 	vp := hazards.verifiedAsm[pkgPath]
-	if vp == nil || !vp.OK {
+	if vp == nil || !vp.PackageSafe {
 		return false
 	}
 	sum, ok := vp.Funcs[fn.Name()]
-	return ok && sum.ImpureKind == ""
+	if !ok || !sum.Verified || sum.ImpureKind != "" || !progAsmTextLinkageClean(hazards, prog, pkgPath, fn.Name(), sum.GoCallees) {
+		return false
+	}
+	if sum.CPUIDArgs > 0 && !asmverify.IsCanonicalCPUIDSignature(fn.Signature, sum.CPUIDArgs) {
+		return false
+	}
+	for _, ref := range sum.ExternalSBRefs {
+		if _, refOK := classifyAsmExternalGlobalInProg(audited, prog, ref); !refOK {
+			return false
+		}
+	}
+	return true
 }
 
 func rootedProvenanceIncomplete(audited, harnessAudited bool, prog *program, userPaths map[string]bool, sets ...map[*ssa.Function]bool) bool {

@@ -4177,8 +4177,7 @@ func UseReadCounter() uint64 {
 }
 `)
 
-	// Widened scan importing a mixed pure/impure .s package must refuse because
-	// verifiedPackageAssemblyMaximalPure rejects packages with impure TEXT symbols.
+	// Open-world reflect dispatch importing a mixed pure/impure .s package must refuse.
 	writeFile(t, root, "mixedasmwiden/mixedasmwiden.go", `package mixedasmwiden
 
 import (
@@ -5001,6 +5000,21 @@ TEXT ·BadPermutedSlots(SB), NOSPLIT, $0-24
 		arch string
 		body string
 	}
+	pkgLevelOnly := map[string]bool{
+		"writable-globl": true, "two-op-bss-globl": true, "zero-size-globl": true,
+		"globl-sub-flag": true, "globl-carry-flag": true, "globl-shift-tlsbss": true,
+		"reserved-define": true, "reserved-rdpid": true, "reserved-cntvct": true,
+		"reserved-g": true, "reserved-init-macro": true, "reserved-undef": true,
+		"asm-init-fn": true, "asm-method-text": true,
+		"abiinternal-text": true, "nested-ifdef-text": true, "ifdef-text-spill": true,
+		"sb-data-spaced": true, "colon-globl": true, "reserved-fpcr-macro": true,
+		"unclosed-quote-imm": true,
+	}
+	extRefCases := map[string]asmverify.ExternalSBRef{
+		"middledot-macro-alias": {PkgPath: "example.com/reject", Name: "EvilVar"},
+		"unverified-sb":         {PkgPath: "example.com/reject", Name: "goVar"},
+		"cross-pkg-sb":          {PkgPath: "runtime", Name: "goarm64"},
+	}
 	for caseName, rc := range map[string]rejectCase{
 		"writable-globl":        {"amd64", "#include \"textflag.h\"\nGLOBL ·writable(SB), NOPTR, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
 		"two-op-bss-globl":      {"amd64", "#include \"textflag.h\"\nGLOBL ·bss(SB), $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
@@ -5073,7 +5087,7 @@ TEXT ·BadPermutedSlots(SB), NOSPLIT, $0-24
 		"reserved-fpcr-macro":   {"arm64", "#include \"textflag.h\"\n#define FPCR R0\nTEXT ·F(SB), NOSPLIT, $0-0\n\tRET\n"},
 		"unclosed-quote-imm":    {"amd64", "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ $\"unclosed, AX\n\tRET\n"},
 	} {
-		if _, ok := asmverify.VerifyNonStdFiles(
+		vp, ok := asmverify.VerifyNonStdFiles(
 			rc.arch,
 			"example.com/reject",
 			"/virtual/reject",
@@ -5081,8 +5095,21 @@ TEXT ·BadPermutedSlots(SB), NOSPLIT, $0-24
 			nil,
 			nil,
 			readMem(map[string]string{"bad.s": rc.body}),
-		); ok {
-			t.Errorf("case %s (%s): verifyNonStdAssemblyFiles = true, want false", caseName, rc.arch)
+		)
+		if wantRef, isExt := extRefCases[caseName]; isExt {
+			if !ok || vp == nil || !vp.PackageSafe || !vp.AllTextsVerified || len(vp.Funcs["F"].ExternalSBRefs) != 1 || vp.Funcs["F"].ExternalSBRefs[0] != wantRef {
+				t.Errorf("case %s (%s): got ok=%v vp=%+v, want ExternalSBRefs=[%+v]", caseName, rc.arch, ok, vp, wantRef)
+			}
+			continue
+		}
+		if pkgLevelOnly[caseName] {
+			if ok || (vp != nil && vp.PackageSafe) {
+				t.Errorf("case %s (%s): VerifyNonStdFiles = (ok=%v, vp=%+v), want !PackageSafe", caseName, rc.arch, ok, vp)
+			}
+			continue
+		}
+		if ok && vp != nil && (vp.AllTextsVerified || vp.Funcs["F"].Verified) {
+			t.Errorf("case %s (%s): VerifyNonStdFiles = (ok=%v, vp=%+v), want !AllTextsVerified && !Funcs[F].Verified", caseName, rc.arch, ok, vp)
 		}
 	}
 
@@ -5128,7 +5155,7 @@ TEXT ·QuotePure(SB), NOSPLIT, $0-8
 	if !asmverify.HasUnquotedColon(`$"unclosed`) || !asmverify.HasUnquotedColon(`$'x`) {
 		t.Errorf("hasUnquotedColon failed open on unclosed quote")
 	}
-	if _, okHybrid := asmverify.VerifyNonStdFiles(
+	if vpHybrid, okHybrid := asmverify.VerifyNonStdFiles(
 		"amd64",
 		"example.com/quoteasm",
 		"/virtual/quoteasm",
@@ -5136,8 +5163,8 @@ TEXT ·QuotePure(SB), NOSPLIT, $0-8
 		nil,
 		nil,
 		readMem(map[string]string{"bad.s": "#include \"textflag.h\"\nGLOBL ·lut(SB), RODATA, $8\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMOVQ $\"x\"·lut(SB), AX\n\tRET\n"}),
-	); okHybrid {
-		t.Errorf("verifyNonStdAssemblyFiles admitted malformed quoted-prefix (SB) operand")
+	); okHybrid && vpHybrid != nil && (vpHybrid.AllTextsVerified || vpHybrid.Funcs["F"].Verified) {
+		t.Errorf("verifyNonStdAssemblyFiles admitted malformed quoted-prefix (SB) operand: %+v", vpHybrid)
 	}
 
 	// Width-suffixed system/RNG/TSX/FPU mnemonics and conditional
@@ -5345,7 +5372,7 @@ TEXT ·TrailingSneak(SB), NOSPLIT, $0-8
 			}
 		}
 	}
-	if _, okFuncMacro := asmverify.VerifyNonStdFiles(
+	if vpFuncMacro, okFuncMacro := asmverify.VerifyNonStdFiles(
 		"amd64",
 		"example.com/condfn",
 		"/virtual/condfn",
@@ -5353,8 +5380,8 @@ TEXT ·TrailingSneak(SB), NOSPLIT, $0-8
 		nil,
 		nil,
 		readMem(map[string]string{"condfn.s": "#include \"textflag.h\"\n#ifdef NEVER_DEFINED\n#define MAYBE_SAFE(x) MOVQ $0, AX\n#endif\nTEXT ·F(SB), NOSPLIT, $0-0\n\tMAYBE_SAFE(WORD $0x050f)\n\tRET\n"}),
-	); okFuncMacro {
-		t.Errorf("verifyNonStdAssemblyFiles admitted unexpanded function-like macro invocation")
+	); okFuncMacro && vpFuncMacro != nil && (vpFuncMacro.AllTextsVerified || vpFuncMacro.Funcs["F"].Verified) {
+		t.Errorf("verifyNonStdAssemblyFiles admitted unexpanded function-like macro invocation: %+v", vpFuncMacro)
 	}
 
 	// Multi-compartment typeScopes: a GLOBL colliding with a Go variable in the
@@ -5485,7 +5512,7 @@ TEXT ·TrailingSneak(SB), NOSPLIT, $0-8
 		if dotlessHaz.blockedPkgs["mymod"] {
 			t.Errorf("dotless user module with verified pure .s was blocked")
 		}
-		if dotlessHaz.verifiedAsm["mymod"] == nil || !dotlessHaz.verifiedAsm["mymod"].OK {
+		if dotlessHaz.verifiedAsm["mymod"] == nil || !dotlessHaz.verifiedAsm["mymod"].PackageSafe || !dotlessHaz.verifiedAsm["mymod"].AllTextsVerified {
 			t.Errorf("dotless user module verifiedAsm[\"mymod\"] = %+v, want verified", dotlessHaz.verifiedAsm["mymod"])
 		}
 		if !dotlessHaz.linknamedVars[pkgVarKey{pkgPath: "mymod", name: "hooked"}] {

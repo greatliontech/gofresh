@@ -6,6 +6,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
@@ -251,9 +252,13 @@ func computeRTAAsyncStartupFunctions(result *rta.Result, mask uint64, userPaths 
 }
 
 type nonSSAGlobalHazardSummary struct {
-	blockedPkgs   map[string]bool
-	linknamedVars map[pkgVarKey]bool
-	verifiedAsm   map[string]*asmverify.VerifiedPackage
+	blockedPkgs          map[string]bool
+	linknamedVars        map[pkgVarKey]bool
+	linknamesByTarget    map[string][]pkgVarKey
+	hasMalformedLinkname bool
+	allPkgs              []*packages.Package
+	allPkgsByPath        map[string][]*packages.Package
+	verifiedAsm          map[string]*asmverify.VerifiedPackage
 }
 
 func classifyOtherNativeExt(ext string) (isAsm bool, isCAsmHeader bool, isOtherNative bool) {
@@ -267,6 +272,80 @@ func classifyOtherNativeExt(ext string) (isAsm bool, isCAsmHeader bool, isOtherN
 		return false, false, true
 	default:
 		return false, false, false
+	}
+}
+
+func mergeVerifiedAsmPackage(prev, cur *asmverify.VerifiedPackage) *asmverify.VerifiedPackage {
+	if prev == nil {
+		return cur
+	}
+	if cur == nil {
+		return prev
+	}
+	mergedFuncs := make(map[string]asmverify.TextSummary, len(prev.Funcs)+len(cur.Funcs))
+	for k, v := range prev.Funcs {
+		mergedFuncs[k] = v
+	}
+	for k, v := range cur.Funcs {
+		old, exists := mergedFuncs[k]
+		if !exists {
+			mergedFuncs[k] = v
+			continue
+		}
+		if !old.Verified || !v.Verified {
+			imp := old.ImpureKind
+			if v.ImpureKind != "" && (imp == "" || v.ImpureKind < imp) {
+				imp = v.ImpureKind
+			}
+			mergedFuncs[k] = asmverify.TextSummary{Verified: false, ImpureKind: imp}
+			continue
+		}
+		impure := old.ImpureKind
+		if v.ImpureKind != "" && (impure == "" || v.ImpureKind < impure) {
+			impure = v.ImpureKind
+		}
+		cpuidArgs := old.CPUIDArgs
+		if cpuidArgs != v.CPUIDArgs {
+			cpuidArgs = 0
+			if impure == "" && (old.CPUIDArgs > 0 || v.CPUIDArgs > 0) {
+				impure = "per-core CPUID register"
+			}
+		}
+		if impure != "" {
+			cpuidArgs = 0
+		}
+		ext := slices.Clone(old.ExternalSBRefs)
+		for _, r := range v.ExternalSBRefs {
+			if !slices.Contains(ext, r) {
+				ext = append(ext, r)
+			}
+		}
+		goCallees := slices.Clone(old.GoCallees)
+		for _, gc := range v.GoCallees {
+			if !slices.Contains(goCallees, gc) {
+				goCallees = append(goCallees, gc)
+			}
+		}
+		slices.Sort(goCallees)
+		mergedFuncs[k] = asmverify.TextSummary{
+			Verified:       true,
+			CPUIDArgs:      cpuidArgs,
+			ImpureKind:     impure,
+			ExternalSBRefs: ext,
+			GoCallees:      goCallees,
+		}
+	}
+	rodata := slices.Clone(prev.RodataGoNames)
+	for _, gn := range cur.RodataGoNames {
+		if !slices.Contains(rodata, gn) {
+			rodata = append(rodata, gn)
+		}
+	}
+	return &asmverify.VerifiedPackage{
+		PackageSafe:      prev.PackageSafe && cur.PackageSafe,
+		AllTextsVerified: prev.AllTextsVerified && cur.AllTextsVerified,
+		Funcs:            mergedFuncs,
+		RodataGoNames:    rodata,
 	}
 }
 
@@ -290,6 +369,7 @@ func nonSSAGlobalHazardsSummary(audited bool, p *program) *nonSSAGlobalHazardSum
 		return cached
 	}
 	scopesByPath := map[string][]*types.Package{}
+	allPkgsByPath := map[string][]*packages.Package{}
 	var allVisited []*packages.Package
 	visited := map[*packages.Package]bool{}
 	var collectPkgs func(pkg *packages.Package)
@@ -305,6 +385,7 @@ func nonSSAGlobalHazardsSummary(audited bool, p *program) *nonSSAGlobalHazardSum
 			return
 		}
 		allVisited = append(allVisited, pkg)
+		allPkgsByPath[pkg.PkgPath] = append(allPkgsByPath[pkg.PkgPath], pkg)
 		if pkg.Types != nil {
 			scopesByPath[pkg.PkgPath] = append(scopesByPath[pkg.PkgPath], pkg.Types)
 		}
@@ -314,11 +395,15 @@ func nonSSAGlobalHazardsSummary(audited bool, p *program) *nonSSAGlobalHazardSum
 	}
 
 	blocked := map[string]bool{}
+	hardUnsafeNative := map[string]bool{}
 	linknamed := map[pkgVarKey]bool{}
+	linknamesByTarget := map[string][]pkgVarKey{}
+	hasMalformedLinkname := false
 	verifiedAsm := map[string]*asmverify.VerifiedPackage{}
 	for _, pkg := range allVisited {
 		if pkg.Imports["runtime/cgo"] != nil || pkg.Imports["C"] != nil {
 			blocked[pkg.PkgPath] = true
+			hardUnsafeNative[pkg.PkgPath] = true
 		}
 		var sFiles, hFiles []string
 		hasNonAsmNative := false
@@ -335,6 +420,7 @@ func nonSSAGlobalHazardsSummary(audited bool, p *program) *nonSSAGlobalHazardSum
 		}
 		if hasNonAsmNative || (len(hFiles) > 0 && len(sFiles) == 0) {
 			blocked[pkg.PkgPath] = true
+			hardUnsafeNative[pkg.PkgPath] = true
 		} else if len(sFiles) > 0 {
 			scopes := scopesByPath[pkg.PkgPath]
 			readFn := os.ReadFile
@@ -346,10 +432,17 @@ func nonSSAGlobalHazardsSummary(audited bool, p *program) *nonSSAGlobalHazardSum
 			}
 			if !audited || p.GOARCH == "" || pkg.Dir == "" || (len(pkg.GoFiles) > 0 && len(scopes) == 0) {
 				blocked[pkg.PkgPath] = true
-			} else if vp, asmOK := verifyNonStdAssemblyMemo(p, p.GOARCH, pkg.PkgPath, pkg.Dir, sFiles, hFiles, scopes, readFn); !asmOK || vp == nil {
+				hardUnsafeNative[pkg.PkgPath] = true
+			} else if vp, asmSafe := verifyNonStdAssemblyMemo(p, p.GOARCH, pkg.PkgPath, pkg.Dir, sFiles, hFiles, scopes, readFn); !asmSafe || vp == nil || !vp.PackageSafe {
 				blocked[pkg.PkgPath] = true
-			} else if !blocked[pkg.PkgPath] {
-				verifiedAsm[pkg.PkgPath] = vp
+				hardUnsafeNative[pkg.PkgPath] = true
+			} else {
+				if !vp.AllTextsVerified {
+					blocked[pkg.PkgPath] = true
+				}
+				if !hardUnsafeNative[pkg.PkgPath] {
+					verifiedAsm[pkg.PkgPath] = mergeVerifiedAsmPackage(verifiedAsm[pkg.PkgPath], vp)
+				}
 			}
 		}
 		for _, af := range pkg.Syntax {
@@ -361,14 +454,25 @@ func nonSSAGlobalHazardsSummary(audited bool, p *program) *nonSSAGlobalHazardSum
 					if !strings.Contains(c.Text, "go:linkname") {
 						continue
 					}
-					trimmed := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
-					trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "/*"))
-					trimmed = strings.TrimSpace(strings.TrimSuffix(trimmed, "*/"))
-					restPlain, okPlain := auditset.BoundedToken(trimmed, "go:linkname", " \t")
-					restStd, okStd := auditset.BoundedToken(trimmed, "go:linknamestd", " \t")
+					// Go compiler directives require zero whitespace between '//' (or '/*')
+					// and 'go:'; '// go:linkname ...' with leading whitespace is an ordinary
+					// prose comment ignored by cmd/compile.
+					var trimmed string
+					if body, okLine := strings.CutPrefix(c.Text, "//"); okLine {
+						trimmed = strings.TrimRight(body, " \t\r\n")
+					} else if body, okBlock := strings.CutPrefix(c.Text, "/*"); okBlock {
+						body, _ = strings.CutSuffix(body, "*/")
+						trimmed = strings.TrimRight(body, " \t\r\n")
+					} else {
+						continue
+					}
+					restPlain, okPlain := auditset.BoundedToken(trimmed, "go:linkname", " \t\r\n")
+					restStd, okStd := auditset.BoundedToken(trimmed, "go:linknamestd", " \t\r\n")
 					if !okPlain && !okStd {
 						if trimmed == "go:linkname" || trimmed == "go:linknamestd" {
 							blocked[pkg.PkgPath] = true
+							hardUnsafeNative[pkg.PkgPath] = true
+							hasMalformedLinkname = true
 						}
 						continue
 					}
@@ -377,26 +481,53 @@ func nonSSAGlobalHazardsSummary(audited bool, p *program) *nonSSAGlobalHazardSum
 						rest = restStd
 					}
 					fields := strings.Fields(rest)
-					if len(fields) == 0 {
+					if len(fields) == 0 || len(fields) > 2 {
 						blocked[pkg.PkgPath] = true
+						hardUnsafeNative[pkg.PkgPath] = true
+						hasMalformedLinkname = true
 						continue
 					}
-					linknamed[pkgVarKey{pkgPath: pkg.PkgPath, name: fields[0]}] = true
-					if len(fields) >= 2 {
+					localKey := pkgVarKey{pkgPath: pkg.PkgPath, name: fields[0]}
+					linknamed[localKey] = true
+					if len(fields) == 2 {
 						if dot := strings.LastIndexByte(fields[1], '.'); dot > 0 && dot+1 < len(fields[1]) {
 							linknamed[pkgVarKey{pkgPath: fields[1][:dot], name: fields[1][dot+1:]}] = true
+							if !slices.Contains(linknamesByTarget[fields[1]], localKey) {
+								linknamesByTarget[fields[1]] = append(linknamesByTarget[fields[1]], localKey)
+							}
 						} else {
 							blocked[pkg.PkgPath] = true
+							hardUnsafeNative[pkg.PkgPath] = true
+							hasMalformedLinkname = true
 						}
 					}
 				}
 			}
 		}
 	}
-	for pkgPath := range blocked {
+	for pkgPath := range hardUnsafeNative {
 		delete(verifiedAsm, pkgPath)
 	}
-	summary := &nonSSAGlobalHazardSummary{blockedPkgs: blocked, linknamedVars: linknamed, verifiedAsm: verifiedAsm}
+	summary := &nonSSAGlobalHazardSummary{
+		blockedPkgs:          blocked,
+		linknamedVars:        linknamed,
+		linknamesByTarget:    linknamesByTarget,
+		hasMalformedLinkname: hasMalformedLinkname,
+		allPkgs:              allVisited,
+		allPkgsByPath:        allPkgsByPath,
+		verifiedAsm:          verifiedAsm,
+	}
+	for pkgPath, vp := range verifiedAsm {
+		if vp == nil {
+			continue
+		}
+		for fnName, sum := range vp.Funcs {
+			if !sum.Verified || !progAsmTextLinkageClean(summary, p, pkgPath, fnName, sum.GoCallees) {
+				blocked[pkgPath] = true
+				break
+			}
+		}
+	}
 	if p.Summaries == nil {
 		p.Summaries = make(map[string]any, 2)
 	}
@@ -455,7 +586,7 @@ func (b *tier2Base) pkgFreeOfUnverifiedNativeWriteHazard(idx *pkgIndex) bool {
 		return false
 	}
 	if len(idx.meta.SFiles) > 0 {
-		if _, asmOK := b.verifiedPackageAssembly(idx.meta); !asmOK {
+		if _, asmOK := b.verifiedPackageAssemblyAllTexts(idx.meta); !asmOK {
 			return false
 		}
 	} else if len(idx.meta.HFiles) > 0 {

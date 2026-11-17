@@ -87,7 +87,7 @@ func parseSingleNonStdAsmFile(pkgPath, folded string, localHeaders map[string]st
 			if line == "" {
 				continue
 			}
-			if len(line) > cprep.MaxNonGoLogicalLineBytes {
+			if len(line) > cprep.MaxNonGoLogicalLineBytes || hasUnclosedAsmQuote(line) {
 				return false
 			}
 			if strings.HasPrefix(line, "#") {
@@ -221,11 +221,18 @@ func parseSingleNonStdAsmFile(pkgPath, folded string, localHeaders map[string]st
 		for choiceIdx, expanded := range line.choices {
 			choiceCur := curBlock
 			stmts := splitAsmStatements(expanded)
+			nonEmptyStmts := 0
+			for _, rawS := range stmts {
+				if strings.TrimSpace(rawS) != "" {
+					nonEmptyStmts++
+				}
+			}
 			for _, stmt := range stmts {
 				stmt = strings.TrimSpace(stmt)
 				if stmt == "" {
 					continue
 				}
+				hadLabel := false
 				for {
 					lbl, rest, ok := cutAsmLabel(stmt)
 					if !ok {
@@ -234,6 +241,7 @@ func parseSingleNonStdAsmFile(pkgPath, folded string, localHeaders map[string]st
 					if choiceCur < 0 {
 						return nil, false
 					}
+					hadLabel = true
 					blocks[choiceCur].labels[lbl] = true
 					stmt = strings.TrimSpace(rest)
 				}
@@ -243,7 +251,7 @@ func parseSingleNonStdAsmFile(pkgPath, folded string, localHeaders map[string]st
 				op, rest := splitAsmOp(stmt)
 				switch strings.ToUpper(op) {
 				case "GLOBL":
-					if choiceCur >= 0 && line.condDepth > blocks[choiceCur].openCondDepth {
+					if nonEmptyStmts > 1 || hadLabel || (choiceCur >= 0 && line.condDepth > blocks[choiceCur].openCondDepth) {
 						return nil, false
 					}
 					choiceCur = -1
@@ -260,13 +268,13 @@ func parseSingleNonStdAsmFile(pkgPath, folded string, localHeaders map[string]st
 						pkgRodataSyms[sym] = true
 					}
 				case "DATA":
-					if choiceCur >= 0 && line.condDepth > blocks[choiceCur].openCondDepth {
+					if nonEmptyStmts > 1 || hadLabel || (choiceCur >= 0 && line.condDepth > blocks[choiceCur].openCondDepth) {
 						return nil, false
 					}
 					choiceCur = -1
 					dataDirectives = append(dataDirectives, rest)
 				case "TEXT":
-					if choiceCur >= 0 && line.condDepth > blocks[choiceCur].openCondDepth {
+					if nonEmptyStmts > 1 || hadLabel || (choiceCur >= 0 && line.condDepth > blocks[choiceCur].openCondDepth) {
 						return nil, false
 					}
 					fnName, ok := parseAsmTextHeader(pkgPath, rest)
@@ -484,6 +492,99 @@ func isValidAsmGoSymbolIdent(s string) bool {
 	return true
 }
 
+func isValidAsmImportPath(p string) bool {
+	if p == "" || strings.HasPrefix(p, "/") || strings.HasSuffix(p, "/") || strings.Contains(p, "//") {
+		return false
+	}
+	if strings.ContainsAny(p, " \t+<>()*\"'") {
+		return false
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func parseAsmCallTargetSBRef(pkgPath string, fileIdx int, rawOpnd string) (string, bool) {
+	opnd := strings.TrimSpace(rawOpnd)
+	if strings.HasPrefix(opnd, "$") || !strings.HasSuffix(opnd, "(SB)") || strings.ContainsAny(opnd, `"'`) {
+		return "", false
+	}
+	if (scanAsmTokens(opnd) & (asmTokUnquotedColon | asmTokForbidden | asmTokPC)) != 0 {
+		return "", false
+	}
+	normSym, hasOffset, goName, ok := parseAsmLocalSBRef(pkgPath, strings.TrimSuffix(opnd, "(SB)"))
+	if !ok || hasOffset {
+		return "", false
+	}
+	if goName == "init" || strings.HasPrefix(goName, "init·") || strings.HasPrefix(goName, "init.") ||
+		strings.ContainsRune(goName, '·') || strings.ContainsAny(goName, "()*") {
+		return "", false
+	}
+	if goName != "" {
+		return goName, true
+	}
+	return scopedAsmTextKey(fileIdx, normSym), true
+}
+
+func parseAsmDataSBRef(pkgPath, rawSym string) (localRodataKey string, extRef ExternalSBRef, isAddr bool, ok bool) {
+	rawSym = strings.TrimSpace(rawSym)
+	if strings.HasPrefix(rawSym, "$") {
+		isAddr = true
+		rawSym = strings.TrimSpace(rawSym[1:])
+	}
+	if rawSym == "" {
+		return "", ExternalSBRef{}, false, false
+	}
+	if pkgPrefix, symAndOff, hasDot := strings.Cut(rawSym, "·"); hasDot {
+		pkgPrefix = strings.ReplaceAll(pkgPrefix, "∕", "/")
+		if pkgPrefix != "" && !isValidAsmImportPath(pkgPrefix) {
+			return "", ExternalSBRef{}, false, false
+		}
+		if strings.ContainsRune(symAndOff, '-') {
+			return "", ExternalSBRef{}, false, false
+		}
+		symPart, offExpr, hasPlus := strings.Cut(symAndOff, "+")
+		if hasPlus {
+			if _, offOK := evalConstAsmUintExpr(offExpr); !offOK {
+				return "", ExternalSBRef{}, false, false
+			}
+		}
+		symPart = strings.TrimSpace(symPart)
+		if !isValidAsmGoSymbolIdent(symPart) || symPart == "init" || strings.HasPrefix(symPart, "init.") {
+			return "", ExternalSBRef{}, false, false
+		}
+		targetPkg := pkgPath
+		if pkgPrefix != "" {
+			targetPkg = pkgPrefix
+		}
+		if targetPkg == "" {
+			return "", ExternalSBRef{}, false, false
+		}
+		if targetPkg == pkgPath {
+			return "·" + symPart, ExternalSBRef{PkgPath: pkgPath, Name: symPart}, isAddr, true
+		}
+		return "", ExternalSBRef{PkgPath: targetPkg, Name: symPart}, isAddr, true
+	}
+	if strings.ContainsRune(rawSym, '-') {
+		return "", ExternalSBRef{}, false, false
+	}
+	symPart, offExpr, hasPlus := strings.Cut(rawSym, "+")
+	if hasPlus {
+		if _, offOK := evalConstAsmUintExpr(offExpr); !offOK {
+			return "", ExternalSBRef{}, false, false
+		}
+	}
+	symPart = strings.TrimSpace(symPart)
+	base, isStatic := strings.CutSuffix(symPart, "<>")
+	if !isStatic || !isValidAsmGoSymbolIdent(base) {
+		return "", ExternalSBRef{}, false, false
+	}
+	return "<>" + base, ExternalSBRef{}, isAddr, true
+}
+
 func parseAsmLocalSBRef(pkgPath, rawSym string) (normSym string, hasOffset bool, goName string, ok bool) {
 	rawSym = strings.TrimSpace(rawSym)
 	rawSym = strings.TrimSpace(strings.TrimPrefix(rawSym, "$"))
@@ -576,12 +677,26 @@ func parseAsmGloblRODATA(pkgPath, rest string, typeScopes []*types.Package) (str
 	return normSym, goName, true
 }
 
-func asmFlagsIncludeRODATA(expr string) bool {
+var (
+	asmGloblNamedFlagBits = map[string]uint64{
+		"NOPROF": 1,
+		"DUPOK":  2,
+		"RODATA": 8,
+		"NOPTR":  16,
+	}
+	asmTextNamedFlagBits = map[string]uint64{
+		"NOPROF":   1,
+		"NOSPLIT":  4,
+		"NOFRAME":  512,
+		"TOPFRAME": 2048,
+	}
+)
+
+func parseAsmSymbolFlagMask(expr string, namedBits map[string]uint64, allowedBits uint64) (uint64, bool) {
 	s := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(expr), "$"))
 	if s == "" {
-		return false
+		return 0, false
 	}
-	const allowedBits = uint64(1 | 2 | 8 | 16) // NOPROF | DUPOK | RODATA | NOPTR
 	pos := 0
 	var parseExpr func() (uint64, bool)
 	parseAtom := func() (uint64, bool) {
@@ -620,15 +735,8 @@ func asmFlagsIncludeRODATA(expr string) bool {
 		if tok == "" {
 			return 0, false
 		}
-		switch tok {
-		case "RODATA":
-			return 8, true
-		case "NOPTR":
-			return 16, true
-		case "DUPOK":
-			return 2, true
-		case "NOPROF":
-			return 1, true
+		if bit, ok := namedBits[tok]; ok {
+			return bit, true
 		}
 		v, err := strconv.ParseUint(tok, 0, 64)
 		if err != nil || v&^allowedBits != 0 {
@@ -664,10 +772,22 @@ func asmFlagsIncludeRODATA(expr string) bool {
 		}
 	}
 	mask, ok := parseExpr()
-	if !ok || pos != len(s) {
-		return false
+	if !ok || pos != len(s) || (mask&^allowedBits) != 0 {
+		return 0, false
 	}
-	return (mask&8) != 0 && (mask&^allowedBits) == 0
+	return mask, true
+}
+
+func asmFlagsIncludeRODATA(expr string) bool {
+	const allowedBits = uint64(1 | 2 | 8 | 16) // NOPROF | DUPOK | RODATA | NOPTR
+	mask, ok := parseAsmSymbolFlagMask(expr, asmGloblNamedFlagBits, allowedBits)
+	return ok && (mask&8) != 0
+}
+
+func asmTextFlagsAllowed(expr string) bool {
+	const allowedBits = uint64(1 | 4 | 512 | 2048) // NOPROF | NOSPLIT | NOFRAME | TOPFRAME (never DUPOK or ABI/wrapper flags)
+	_, ok := parseAsmSymbolFlagMask(expr, asmTextNamedFlagBits, allowedBits)
+	return ok
 }
 
 func validateAsmDataDirective(pkgPath, rest string, rodataSyms map[string]bool) bool {
@@ -703,6 +823,24 @@ func validateAsmDataDirective(pkgPath, rest string, rodataSyms map[string]bool) 
 		return false
 	}
 	return true
+}
+
+func hasUnclosedAsmQuote(s string) bool {
+	if !strings.ContainsAny(s, `"'`) {
+		return false
+	}
+	for i := 0; i < len(s); {
+		if s[i] == '"' || s[i] == '\'' {
+			next, closed := cprep.SkipQuotedLiteralChecked(s, i)
+			if !closed {
+				return true
+			}
+			i = next
+			continue
+		}
+		i++
+	}
+	return false
 }
 
 func stripAsmQuotedLiterals(s string) string {
@@ -746,6 +884,14 @@ func parseAsmTextHeader(pkgPath, rest string) (string, bool) {
 	}
 	if goName == "init" || strings.HasPrefix(goName, "init·") || strings.HasPrefix(goName, "init.") ||
 		strings.ContainsRune(goName, '·') || strings.ContainsAny(goName, "()*") {
+		return "", false
+	}
+	if len(operands) == 3 && !asmTextFlagsAllowed(operands[1]) {
+		return "", false
+	}
+	frameOp := strings.TrimSpace(operands[len(operands)-1])
+	if !strings.HasPrefix(frameOp, "$") || strings.TrimSpace(frameOp[1:]) == "" ||
+		strings.Contains(frameOp, "(SB)") || strings.Contains(frameOp, "(TLS)") || strings.ContainsRune(frameOp, '·') {
 		return "", false
 	}
 	if goName != "" {

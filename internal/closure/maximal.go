@@ -461,16 +461,10 @@ func (h *Hasher) viewLoadVariants(pkgPath string) []*packages.Package {
 	return variants
 }
 
-func (h *Hasher) tier2PackageExternalEffects(base *tier2Base, pkg *listPkg, subjectFiltered bool) maximalEffectScan {
+func (h *Hasher) tier2PackageExternalEffects(base *tier2Base, pkg *listPkg) maximalEffectScan {
 	scan := maximalPackageExternalEffects(pkg)
 	if base != nil {
-		asmAdmitted := false
-		if subjectFiltered {
-			_, asmAdmitted = base.verifiedPackageAssembly(pkg)
-		} else {
-			asmAdmitted = base.verifiedPackageAssemblyMaximalPure(pkg)
-		}
-		if asmAdmitted {
+		if _, asmAdmitted := base.verifiedPackageAssembly(pkg); asmAdmitted {
 			filtered := scan.effects[:0]
 			for _, e := range scan.effects {
 				if e.detail == "reaches non-standard assembly" || e.detail == "reaches cgo or native source" {
@@ -1182,14 +1176,6 @@ func chainedTimeUnixSelector(outerCall *ast.CallExpr, aliases map[string]string,
 	return innerSel
 }
 
-// subjectMaximalExternalEffects returns the package scan filtered to
-// package-level/file-level constructs, reached function/method declarations,
-// and package-wide process-state hazards for a closed-world Tier-2 subject
-// (REQ-closure-observability-unsafe).
-func (h *Hasher) subjectMaximalExternalEffects(base *tier2Base, pkgPath string, reachedDecls map[funcDeclKey]bool) ([]externalEffect, error) {
-	return h.subjectMaximalExternalEffectsWithZeroGlobals(base, pkgPath, reachedDecls, nil, nil, nil)
-}
-
 func pkgScopeShadowedUniverseZeroNames(base *tier2Base, pkgPath string) map[string]bool {
 	if base == nil || pkgPath == "" {
 		return nil
@@ -1257,7 +1243,7 @@ func (h *Hasher) subjectMaximalExternalEffectsWithZeroGlobals(base *tier2Base, p
 			record(scan)
 			continue
 		}
-		record(h.tier2PackageExternalEffects(base, &pkg, reachedDecls != nil))
+		record(h.tier2PackageExternalEffects(base, &pkg))
 		pkgScopeShadowed := pkgScopeShadowedUniverseZeroNames(base, srcPath)
 		verifiedLinknameLocals := base.verifiedReadOnlyLinknameLocals(srcPath)
 		pkgConfinedUnsafe := reachedDecls != nil && base.pkgConfinedUnsafe(pkg.ImportPath, srcPath)

@@ -160,132 +160,6 @@ func isReservedNonStdAsmMacroName(name string) bool {
 	return false
 }
 
-func verifyParsedNonStdAsmFile(goarch, pkgPath string, parsed *parsedNonStdAsmFile, pkgRodataSyms map[string]bool, funcs map[string]TextSummary) bool {
-	if parsed == nil || (goarch != "amd64" && goarch != "arm64") {
-		return false
-	}
-	rodataSyms := make(map[string]bool, len(pkgRodataSyms)+len(parsed.fileRodataSyms))
-	for k := range pkgRodataSyms {
-		rodataSyms[k] = true
-	}
-	for k := range parsed.fileRodataSyms {
-		rodataSyms[k] = true
-	}
-
-	// Validate all top-level DATA directives collected in Pass 1 against rodataSyms.
-	for _, dataRest := range parsed.dataDirectives {
-		if !validateAsmDataDirective(pkgPath, dataRest, rodataSyms) {
-			return false
-		}
-	}
-
-	// Pass 2: verify every TEXT block's control flow, (SB) references, and instructions.
-	for _, blk := range parsed.blocks {
-		if rodataSyms["·"+blk.name] || rodataSyms[blk.name] {
-			return false
-		}
-		if goarch == "amd64" && !verifyAMD64EntryR14NotRead(blk) {
-			return false
-		}
-		sum := funcs[blk.name]
-		sawCPUID := false
-		var pendingBytes []byte
-		lastByteEpoch := -1
-		flushBytes := func() {
-			if len(pendingBytes) == 0 {
-				return
-			}
-			if !(goarch == "amd64" && len(pendingBytes) == 3 && pendingBytes[0] == 0x0f && pendingBytes[1] == 0x01 && pendingBytes[2] == 0xd0) {
-				if sum.ImpureKind == "" {
-					sum.ImpureKind = "unverified raw opcode in assembly"
-				}
-			}
-			pendingBytes = pendingBytes[:0]
-			lastByteEpoch = -1
-		}
-		for _, line := range blk.lines {
-			if line.condOp != asmCondNone {
-				flushBytes()
-				continue
-			}
-			if len(pendingBytes) > 0 && line.condEpoch != lastByteEpoch {
-				flushBytes()
-			}
-			for _, expanded := range line.choices {
-				for _, stmt := range splitAsmStatements(expanded) {
-					stmt = strings.TrimSpace(stmt)
-					if stmt == "" {
-						continue
-					}
-					for {
-						_, rest, ok := cutAsmLabel(stmt)
-						if !ok {
-							break
-						}
-						flushBytes()
-						stmt = strings.TrimSpace(rest)
-					}
-					if stmt == "" {
-						continue
-					}
-					op, rest := splitAsmOp(stmt)
-					uop := strings.ToUpper(op)
-					if uop == "TEXT" {
-						flushBytes()
-						continue
-					}
-					if uop == "BYTE" {
-						if goarch != "amd64" || line.condDepth != blk.openCondDepth || len(line.choices) != 1 {
-							flushBytes()
-							if sum.ImpureKind == "" {
-								sum.ImpureKind = "unverified raw opcode in assembly"
-							}
-							continue
-						}
-						b, ok := parseAsmImmByte(rest)
-						if !ok {
-							if sum.ImpureKind == "" {
-								sum.ImpureKind = "unverified raw opcode in assembly"
-							}
-							pendingBytes = pendingBytes[:0]
-							lastByteEpoch = -1
-						} else {
-							pendingBytes = append(pendingBytes, b)
-							lastByteEpoch = line.condEpoch
-						}
-						continue
-					}
-					flushBytes()
-					ok, cpuid, impure := verifyAsmTextInstruction(goarch, pkgPath, uop, rest, blk.labels, rodataSyms)
-					if !ok {
-						return false
-					}
-					if cpuid {
-						sawCPUID = true
-					}
-					if impure != "" && sum.ImpureKind == "" {
-						sum.ImpureKind = impure
-					}
-				}
-			}
-		}
-		flushBytes()
-		if sum.ImpureKind != "" {
-			sum.CPUIDArgs = 0
-		} else if sawCPUID {
-			argCount, okCanonical := verifyCanonicalCPUIDTextBlock(blk)
-			if !okCanonical || (sum.CPUIDArgs != 0 && sum.CPUIDArgs != argCount) {
-				sum.CPUIDArgs = 0
-				sum.ImpureKind = "per-core CPUID register"
-			} else {
-				sum.CPUIDArgs = argCount
-			}
-		}
-		funcs[blk.name] = sum
-	}
-	return true
-}
-
 func isValidAsmMnemonic(uop string) bool {
 	if uop == "" || uop[0] < 'A' || uop[0] > 'Z' {
 		return false
@@ -478,136 +352,226 @@ func isImpureOrSystemAsmMnemonic(goarch, baseOp string) bool {
 	return false
 }
 
-func verifyAsmTextInstruction(goarch, pkgPath, uop, rest string, localLabels, rodataSyms map[string]bool) (ok bool, cpuid bool, impure string) {
+type asmInstrVerifyResult struct {
+	ok      bool
+	cpuid   bool
+	impure  string
+	extRefs []ExternalSBRef
+}
+
+func verifyAsmTextInstruction(goarch, pkgPath string, fileIdx int, uop, rest string, localLabels, rodataSyms, definedTexts map[string]bool) asmInstrVerifyResult {
 	if (goarch != "amd64" && goarch != "arm64") || !isValidAsmMnemonic(uop) || hasForbiddenAsmToken(uop) {
-		return false, false, ""
+		return asmInstrVerifyResult{}
 	}
 	restFlags := scanAsmTokens(rest)
 	if (restFlags & (asmTokUnquotedColon | asmTokForbidden)) != 0 {
-		return false, false, ""
+		return asmInstrVerifyResult{}
 	}
 	unquotedRest := stripAsmQuotedLiterals(rest)
 	if strings.Contains(unquotedRest, "(TLS)") || strings.Contains(uop, "(TLS)") {
-		return false, false, ""
+		return asmInstrVerifyResult{}
 	}
 	baseOp, _, hasDot := strings.Cut(uop, ".")
 	if baseOp == "" || baseOp == "TEXT" || baseOp == "GLOBL" || baseOp == "DATA" ||
 		baseOp == "DUFFCOPY" || baseOp == "DUFFZERO" || baseOp == "END" || baseOp == "XXX" {
-		return false, false, ""
+		return asmInstrVerifyResult{}
 	}
 	if hasDot {
 		switch baseOp {
 		case "BYTE", "WORD", "DWORD", "LONG", "QUAD",
 			"RET", "CPUID", "MRS", "FUNCDATA", "PCDATA", "PCALIGN", "PCALIGNMAX":
-			return false, false, ""
+			return asmInstrVerifyResult{}
 		}
 	}
 	if strings.HasPrefix(baseOp, "RET") {
 		if uop != "RET" || rest != "" {
-			return false, false, ""
+			return asmInstrVerifyResult{}
 		}
-		return true, false, ""
-	}
-	if strings.HasPrefix(baseOp, "CALL") || strings.HasPrefix(baseOp, "IRET") || isForbiddenCallOrJumpMnemonic(baseOp) {
-		return false, false, ""
+		return asmInstrVerifyResult{ok: true}
 	}
 
 	operands := splitAsmOperands(rest)
 
+	// Direct intra-package CALL / BL to a verified package/file TEXT symbol.
+	if isIntraPkgDirectCallOp(goarch, uop, hasDot) {
+		if len(operands) != 1 || (restFlags&asmTokPC) != 0 {
+			return asmInstrVerifyResult{}
+		}
+		targetKey, okTarget := parseAsmCallTargetSBRef(pkgPath, fileIdx, operands[0])
+		if !okTarget || !definedTexts[targetKey] {
+			return asmInstrVerifyResult{}
+		}
+		return asmInstrVerifyResult{ok: true}
+	}
+	if strings.HasPrefix(baseOp, "CALL") || strings.HasPrefix(baseOp, "IRET") || isForbiddenCallOrJumpMnemonic(baseOp) {
+		return asmInstrVerifyResult{}
+	}
+
 	if isAsmBranchMnemonic(uop) || isAsmBranchMnemonic(baseOp) {
 		if len(operands) == 0 {
-			return false, false, ""
+			return asmInstrVerifyResult{}
+		}
+		isUncondJmp := !hasDot && ((goarch == "amd64" && uop == "JMP") || (goarch == "arm64" && uop == "B"))
+		if isUncondJmp && len(operands) == 1 && strings.Contains(operands[0], "(SB)") {
+			if (restFlags & asmTokPC) != 0 {
+				return asmInstrVerifyResult{}
+			}
+			targetKey, okTarget := parseAsmCallTargetSBRef(pkgPath, fileIdx, operands[0])
+			if !okTarget || !definedTexts[targetKey] {
+				return asmInstrVerifyResult{}
+			}
+			return asmInstrVerifyResult{ok: true}
 		}
 		if (restFlags & asmTokPC) != 0 {
 			for _, nonTarget := range operands[:len(operands)-1] {
 				if hasAsmPCToken(nonTarget) {
-					return false, false, ""
+					return asmInstrVerifyResult{}
 				}
 			}
 		}
 		target := strings.TrimSpace(operands[len(operands)-1])
 		if !isLocalAsmBranchTarget(goarch, target, localLabels) {
-			return false, false, ""
+			return asmInstrVerifyResult{}
 		}
 	} else if (restFlags & asmTokPC) != 0 {
-		return false, false, ""
+		return asmInstrVerifyResult{}
 	}
 
+	var extRefs []ExternalSBRef
 	for idx, opnd := range operands {
 		unquotedOpnd := stripAsmQuotedLiterals(opnd)
 		if strings.Contains(unquotedOpnd, "(SB)") {
-			if strings.ContainsAny(opnd, `"'`) || isAsmReadModifyWriteMnemonic(baseOp) {
-				return false, false, ""
+			if strings.ContainsAny(opnd, `"'`) || hasDot || isAsmReadModifyWriteMnemonic(baseOp) || isARM64MemoryStoreMnemonic(baseOp) {
+				return asmInstrVerifyResult{}
 			}
-			if len(operands) == 1 && !strings.HasPrefix(baseOp, "PUSH") && !strings.HasPrefix(baseOp, "PREFETCH") {
-				return false, false, ""
+			if len(operands) == 1 && (!strings.HasPrefix(baseOp, "PUSH") || strings.HasPrefix(strings.TrimSpace(opnd), "$")) && !strings.HasPrefix(baseOp, "PREFETCH") {
+				return asmInstrVerifyResult{}
 			}
 			if len(operands) >= 2 && idx == len(operands)-1 && !isAsmReadOnlyCompareMnemonic(baseOp) {
-				return false, false, ""
+				return asmInstrVerifyResult{}
 			}
 			sbIdx := strings.Index(unquotedOpnd, "(SB)")
 			if sbIdx <= 0 {
-				return false, false, ""
+				return asmInstrVerifyResult{}
 			}
 			tail := strings.TrimSpace(unquotedOpnd[sbIdx+4:])
 			if tail != "" {
 				if !strings.HasPrefix(tail, "(") || !strings.HasSuffix(tail, ")") || strings.Contains(tail, "(SB)") || strings.ContainsRune(tail, '·') {
-					return false, false, ""
+					return asmInstrVerifyResult{}
 				}
 			}
-			normSym, _, _, symOK := parseAsmLocalSBRef(pkgPath, unquotedOpnd[:sbIdx])
-			if !symOK || !rodataSyms[normSym] {
-				return false, false, ""
+			localRodataKey, extRef, _, symOK := parseAsmDataSBRef(pkgPath, unquotedOpnd[:sbIdx])
+			if !symOK {
+				return asmInstrVerifyResult{}
 			}
+			if localRodataKey != "" && rodataSyms[localRodataKey] {
+				continue
+			}
+			if extRef.PkgPath == "" || extRef.Name == "" {
+				return asmInstrVerifyResult{}
+			}
+			extRefs = mergeExternalSBRefs(extRefs, []ExternalSBRef{extRef})
 		} else if strings.ContainsRune(unquotedOpnd, '·') {
-			return false, false, ""
+			return asmInstrVerifyResult{}
 		}
 	}
 
 	if uop == "CPUID" {
 		if goarch != "amd64" || rest != "" {
-			return false, false, ""
+			return asmInstrVerifyResult{}
 		}
-		return true, true, ""
+		return asmInstrVerifyResult{ok: true, cpuid: true, extRefs: extRefs}
 	}
 	if uop == "MRS" {
 		if goarch != "arm64" {
-			return false, false, ""
+			return asmInstrVerifyResult{}
 		}
-		if len(operands) == 2 && isAuditedARM64IDRegName(operands[0]) && isCleanARM64SysRegDestGPR(operands[1]) {
-			return true, false, ""
+		if len(operands) == 2 && isCleanARM64SysRegDestGPR(operands[1]) {
+			if isAuditedARM64IDRegName(operands[0]) {
+				return asmInstrVerifyResult{ok: true, extRefs: extRefs}
+			}
+			return asmInstrVerifyResult{ok: true, impure: "hardware counter, entropy, or system assembly instruction", extRefs: extRefs}
 		}
-		return true, false, "hardware counter, entropy, or system assembly instruction"
+		return asmInstrVerifyResult{ok: false, impure: "hardware counter, entropy, or system assembly instruction", extRefs: extRefs}
 	}
 	if uop == "WORD" {
 		if goarch != "arm64" {
-			return true, false, "unverified raw opcode in assembly"
+			return asmInstrVerifyResult{ok: false, impure: "unverified raw opcode in assembly", extRefs: extRefs}
 		}
 		w, wordOK := parseAsmImmUint32(rest)
 		if !wordOK || !isAuditedARM64WordOpcode(w) {
-			return true, false, "unverified raw opcode in assembly"
+			return asmInstrVerifyResult{ok: false, impure: "unverified raw opcode in assembly", extRefs: extRefs}
 		}
-		return true, false, ""
+		return asmInstrVerifyResult{ok: true, extRefs: extRefs}
 	}
 	if baseOp == "DWORD" || baseOp == "LONG" || baseOp == "QUAD" {
-		return true, false, "unverified raw opcode in assembly"
+		return asmInstrVerifyResult{ok: false, impure: "unverified raw opcode in assembly", extRefs: extRefs}
 	}
 	if isImpureOrSystemAsmMnemonic(goarch, baseOp) {
-		return true, false, "hardware counter, entropy, or system assembly instruction"
+		writeSafe := isRegisterOnlyImpureReadInstruction(goarch, uop, hasDot, rest, operands)
+		return asmInstrVerifyResult{ok: writeSafe, impure: "hardware counter, entropy, or system assembly instruction", extRefs: extRefs}
 	}
 	if (restFlags & asmTokARM64SysReg) != 0 {
-		if goarch == "arm64" && uop == "MOVD" && len(operands) == 2 &&
-			isAuditedARM64IDRegName(operands[0]) && isCleanARM64SysRegDestGPR(operands[1]) {
-			return true, false, ""
+		if goarch == "arm64" && uop == "MOVD" && len(operands) == 2 && isCleanARM64SysRegDestGPR(operands[1]) {
+			if isAuditedARM64IDRegName(operands[0]) {
+				return asmInstrVerifyResult{ok: true, extRefs: extRefs}
+			}
+			if isARM64SystemOrPStateReg(strings.ToUpper(strings.TrimSpace(operands[0]))) {
+				return asmInstrVerifyResult{ok: true, impure: "hardware counter, entropy, or system assembly instruction", extRefs: extRefs}
+			}
 		}
-		return true, false, "hardware counter, entropy, or system assembly instruction"
+		return asmInstrVerifyResult{ok: false, impure: "hardware counter, entropy, or system assembly instruction", extRefs: extRefs}
 	}
-	return true, false, ""
+	return asmInstrVerifyResult{ok: true, extRefs: extRefs}
+}
+
+// isRegisterOnlyImpureReadInstruction reports whether an impure/counter/RNG
+// instruction is mechanically proven free of memory writes, syscalls/traps,
+// control-flow jumps, and processor-mode mutations (writing only GPRs/flags).
+func isRegisterOnlyImpureReadInstruction(goarch, uop string, hasDot bool, rest string, operands []string) bool {
+	if hasDot {
+		return false
+	}
+	if goarch == "amd64" {
+		switch uop {
+		case "RDTSC", "RDTSCP", "RDPMC", "XTEST":
+			return strings.TrimSpace(rest) == ""
+		case "RDPID", "RDRAND", "RDSEED", "RDRANDW", "RDRANDL", "RDRANDQ", "RDSEEDW", "RDSEEDL", "RDSEEDQ":
+			if len(operands) != 1 {
+				return false
+			}
+			idx, _, ok := amd64GPRIndex(operands[0])
+			return ok && idx != 4
+		}
+	}
+	return false
 }
 
 func isAsmReadOnlyCompareMnemonic(uop string) bool {
-	return strings.HasPrefix(uop, "CMP") && !strings.HasPrefix(uop, "CMPXCHG") ||
-		strings.HasPrefix(uop, "TEST") || strings.HasPrefix(uop, "UCOMI") || strings.HasPrefix(uop, "VCOMI")
+	switch uop {
+	case "BT", "BTW", "BTL", "BTQ",
+		"CMP", "CMPB", "CMPW", "CMPL", "CMPQ",
+		"CMN", "CMNW",
+		"TESTB", "TESTW", "TESTL", "TESTQ",
+		"TST", "TSTW",
+		"PTEST", "VPTEST",
+		"COMISS", "COMISD", "UCOMISS", "UCOMISD",
+		"VCOMISS", "VCOMISD", "VUCOMISS", "VUCOMISD",
+		"FCMP", "FCMPS", "FCMPD", "FCMPES", "FCMPED":
+		return true
+	}
+	return false
+}
+
+func isARM64MemoryStoreMnemonic(baseOp string) bool {
+	for _, pfx := range []string{
+		"VST", "SST1", "ST1", "ST2", "ST3", "ST4", "ST64", "STP", "STL", "STUR", "STR", "STM", "STNP", "STTR", "STG", "STZ",
+	} {
+		if strings.HasPrefix(baseOp, pfx) {
+			return true
+		}
+	}
+	return false
 }
 
 func isAsmReadModifyWriteMnemonic(uop string) bool {

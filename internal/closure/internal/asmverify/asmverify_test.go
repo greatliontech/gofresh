@@ -250,7 +250,7 @@ TEXT ·Kernel(SB), NOSPLIT, $0-16
 	}
 	cleanPkg := types.NewPackage("example.com/p", "p")
 	vp, ok := VerifyNonStdFiles("amd64", "example.com/p", "/virtual/p", []string{"lut.s"}, []string{"lut.h"}, []*types.Package{cleanPkg}, readMem)
-	if !ok || vp == nil || !vp.OK {
+	if !ok || vp == nil || !vp.PackageSafe || !vp.AllTextsVerified || !vp.Funcs["Kernel"].Verified {
 		t.Fatalf("VerifyNonStdFiles failed: ok=%v vp=%+v", ok, vp)
 	}
 	if !CheckVerifiedTypeScopes(vp, []*types.Package{cleanPkg}) {

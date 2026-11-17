@@ -2,8 +2,6 @@ package closure
 
 import (
 	"context"
-	"go/ast"
-	"go/token"
 	"go/types"
 	"os"
 	"path/filepath"
@@ -11,14 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
-const verifiedNonStdAsmMemoSummaryKey = "gofresh/verified-nonstd-asm@4"
+const verifiedNonStdAsmMemoSummaryKey = "gofresh/verified-nonstd-asm@5"
 
 func sortedCleanBasenamesKey(files []string) string {
 	if len(files) == 0 {
@@ -37,8 +34,8 @@ func verifyNonStdAssemblyMemo(p *program, goarch, pkgPath, dir string, sFiles, h
 	if p != nil && p.Summaries != nil {
 		if memoMap, ok := p.Summaries[verifiedNonStdAsmMemoSummaryKey].(map[string]*asmverify.VerifiedPackage); ok {
 			if cached, found := memoMap[memoKey]; found && cached != nil {
-				if !cached.OK || !asmverify.CheckVerifiedTypeScopes(cached, typeScopes) {
-					return &asmverify.VerifiedPackage{OK: false}, false
+				if !cached.PackageSafe || !asmverify.CheckVerifiedTypeScopes(cached, typeScopes) {
+					return &asmverify.VerifiedPackage{}, false
 				}
 				return cached, true
 			}
@@ -46,7 +43,7 @@ func verifyNonStdAssemblyMemo(p *program, goarch, pkgPath, dir string, sFiles, h
 	}
 	vp, ok := asmverify.VerifyNonStdFiles(goarch, pkgPath, dir, sFiles, hFiles, typeScopes, read)
 	if !ok || vp == nil {
-		vp = &asmverify.VerifiedPackage{OK: false}
+		vp = &asmverify.VerifiedPackage{}
 	}
 	if p != nil {
 		if p.Summaries == nil {
@@ -59,8 +56,8 @@ func verifyNonStdAssemblyMemo(p *program, goarch, pkgPath, dir string, sFiles, h
 		}
 		memoMap[memoKey] = vp
 	}
-	if !vp.OK || !asmverify.CheckVerifiedTypeScopes(vp, typeScopes) {
-		return &asmverify.VerifiedPackage{OK: false}, false
+	if !vp.PackageSafe || !asmverify.CheckVerifiedTypeScopes(vp, typeScopes) {
+		return &asmverify.VerifiedPackage{}, false
 	}
 	return vp, true
 }
@@ -75,7 +72,7 @@ func (b *tier2Base) verifiedPackageAssembly(pkg *listPkg) (*asmverify.VerifiedPa
 	key := pkg.ImportPath + "\x00" + filepath.Clean(pkg.Dir)
 	if b.verifiedAsm != nil {
 		if cached, ok := b.verifiedAsm[key]; ok {
-			return cached, cached.OK
+			return cached, cached.PackageSafe
 		}
 	}
 	var typeScopes []*types.Package
@@ -89,7 +86,7 @@ func (b *tier2Base) verifiedPackageAssembly(pkg *listPkg) (*asmverify.VerifiedPa
 		if b.verifiedAsm == nil {
 			b.verifiedAsm = make(map[string]*asmverify.VerifiedPackage, 4)
 		}
-		res := &asmverify.VerifiedPackage{OK: false}
+		res := &asmverify.VerifiedPackage{}
 		b.verifiedAsm[key] = res
 		return res, false
 	}
@@ -109,12 +106,14 @@ func (b *tier2Base) verifiedPackageAssembly(pkg *listPkg) (*asmverify.VerifiedPa
 		start = time.Now()
 	}
 	res, ok := verifyNonStdAssemblyMemo(b.prog, b.h.effectiveGOARCH(), srcPath, pkg.Dir, pkg.SFiles, pkg.HFiles, typeScopes, readFn)
-	if !ok {
-		res = &asmverify.VerifiedPackage{OK: false}
+	if !ok || res == nil {
+		res = &asmverify.VerifiedPackage{}
 	}
 	if tracing {
 		trace.Emit(context.Background(), trace.DomainClosure, "asmverify.package.done", srcPath,
-			trace.Bool("ok", res.OK),
+			trace.Bool("ok", res.PackageSafe && res.AllTextsVerified),
+			trace.Bool("package_safe", res.PackageSafe),
+			trace.Bool("all_texts_verified", res.AllTextsVerified),
 			trace.Int("sfiles", len(pkg.SFiles)),
 			trace.Int("hfiles", len(pkg.HFiles)),
 			trace.Int("funcs", len(res.Funcs)),
@@ -125,66 +124,52 @@ func (b *tier2Base) verifiedPackageAssembly(pkg *listPkg) (*asmverify.VerifiedPa
 		b.verifiedAsm = make(map[string]*asmverify.VerifiedPackage, 4)
 	}
 	b.verifiedAsm[key] = res
-	return res, res.OK
+	return res, res.PackageSafe
 }
 
-func (b *tier2Base) verifiedPackageAssemblyMaximalPure(pkg *listPkg) bool {
-	vp, ok := b.verifiedPackageAssembly(pkg)
-	if !ok || vp == nil {
-		return false
+func (b *tier2Base) verifiedPackageAssemblyAllTexts(pkg *listPkg) (*asmverify.VerifiedPackage, bool) {
+	vp, safe := b.verifiedPackageAssembly(pkg)
+	if !safe || vp == nil || !vp.AllTextsVerified {
+		return vp, false
 	}
-	for _, sum := range vp.Funcs {
-		if sum.ImpureKind != "" || sum.CPUIDArgs > 0 {
-			return false
+	for fnName, sum := range vp.Funcs {
+		if !b.isAsmTextLinkageClean(pkg, fnName, sum.GoCallees) {
+			return vp, false
 		}
 	}
-	matchedIdx := false
-	srcPath := pkg.SourcePath()
-	for _, idx := range b.idxByTypes {
-		if idx == nil || (idx.path != srcPath && idx.path != pkg.ImportPath && (idx.meta == nil || idx.meta.Dir != pkg.Dir)) {
-			continue
-		}
-		matchedIdx = true
-		for obj, node := range idx.decls {
-			fnObj, isFn := obj.(*types.Func)
-			fd, isFD := node.(*ast.FuncDecl)
-			if !isFn || !isFD || fd.Body != nil {
-				continue
-			}
-			sig, isSig := fnObj.Type().(*types.Signature)
-			if !isSig || sig.Recv() != nil || sig.TypeParams().Len() > 0 || !asmverify.SignatureCarrierFree(sig) {
-				return false
-			}
-			if _, found := vp.Funcs[fnObj.Name()]; !found {
-				return false
-			}
-		}
-	}
-	return matchedIdx
+	return vp, true
 }
 
-func (a *tier2Analyzer) verifiedPackageAssembly(pkg *listPkg) bool {
+func (a *tier2Analyzer) verifiedPackageAssemblySafe(pkg *listPkg) bool {
 	if a == nil || a.base == nil {
 		return false
 	}
-	_, ok := a.base.verifiedPackageAssembly(pkg)
-	return ok
+	_, safe := a.base.verifiedPackageAssembly(pkg)
+	return safe
 }
 
-func (a *tier2Analyzer) verifiedPackageAssemblyFunc(pkg *listPkg, fn *ssa.Function) (asmverify.TextSummary, bool) {
-	if a == nil || a.base == nil || fn == nil || fn.Signature == nil || fn.Signature.Recv() != nil || fn.TypeParams().Len() > 0 {
-		return asmverify.TextSummary{}, false
+func (b *tier2Base) verifiedPackageAssemblyFunc(pkg *listPkg, fn *ssa.Function) (asmverify.TextSummary, []*types.Var, bool) {
+	if b == nil || fn == nil || fn.Signature == nil || fn.Signature.Recv() != nil || fn.TypeParams().Len() > 0 {
+		return asmverify.TextSummary{}, nil, false
 	}
 	if !asmverify.SignatureCarrierFree(fn.Signature) {
-		return asmverify.TextSummary{}, false
+		return asmverify.TextSummary{}, nil, false
 	}
-	vp, ok := a.base.verifiedPackageAssembly(pkg)
-	if !ok || vp == nil {
-		return asmverify.TextSummary{}, false
+	vp, safe := b.verifiedPackageAssembly(pkg)
+	if !safe || vp == nil {
+		return asmverify.TextSummary{}, nil, false
 	}
 	sum, found := vp.Funcs[fn.Name()]
-	if !found {
-		return asmverify.TextSummary{}, false
+	if !found || !sum.Verified || !b.isAsmTextLinkageClean(pkg, fn.Name(), sum.GoCallees) {
+		return asmverify.TextSummary{}, nil, false
+	}
+	var depVars []*types.Var
+	for _, ref := range sum.ExternalSBRefs {
+		vars, refOK := b.classifyAsmExternalGlobal(ref)
+		if !refOK {
+			return asmverify.TextSummary{}, nil, false
+		}
+		depVars = append(depVars, vars...)
 	}
 	if sum.CPUIDArgs > 0 && !asmverify.IsCanonicalCPUIDSignature(fn.Signature, sum.CPUIDArgs) {
 		sum.CPUIDArgs = 0
@@ -192,18 +177,79 @@ func (a *tier2Analyzer) verifiedPackageAssemblyFunc(pkg *listPkg, fn *ssa.Functi
 			sum.ImpureKind = "per-core CPUID register"
 		}
 	}
-	return sum, true
+	return sum, depVars, true
+}
+
+func (a *tier2Analyzer) verifiedPackageAssemblyFunc(pkg *listPkg, fn *ssa.Function) (asmverify.TextSummary, []*types.Var, bool) {
+	if a == nil || a.base == nil {
+		return asmverify.TextSummary{}, nil, false
+	}
+	return a.base.verifiedPackageAssemblyFunc(pkg, fn)
+}
+
+func (b *tier2Base) binaryUnverifiedAsmReason(candidates []*pkgIndex) string {
+	if b == nil || b.prog == nil {
+		return ""
+	}
+	for _, idx := range candidates {
+		if idx == nil || idx.meta == nil || len(idx.meta.SFiles) == 0 {
+			continue
+		}
+		vp, safe := b.verifiedPackageAssembly(idx.meta)
+		if !safe || vp == nil {
+			continue
+		}
+		// Any unverified TEXT, undischarged ExternalSBRef, or carrier-bearing Go
+		// assembly stub in a package-safe package requires single-subject execution
+		// so neither a sibling subject in PackageExecution nor another package in
+		// GeneralExecution can execute that unverified assembly in the same process.
+		hasUnverified := !vp.AllTextsVerified
+		if !hasUnverified {
+			for fnName, sum := range vp.Funcs {
+				if !b.isAsmTextLinkageClean(idx.meta, fnName, sum.GoCallees) {
+					hasUnverified = true
+					break
+				}
+				for _, ref := range sum.ExternalSBRefs {
+					if _, refOK := b.classifyAsmExternalGlobal(ref); !refOK {
+						hasUnverified = true
+						break
+					}
+				}
+				if hasUnverified {
+					break
+				}
+			}
+		}
+		if !hasUnverified && idx.ssa != nil {
+			for _, mem := range idx.ssa.Members {
+				if fn, isFn := mem.(*ssa.Function); isFn && len(fn.Blocks) == 0 && fn.Synthetic == "" && !parameterizedBody(fn) {
+					if _, _, ok := b.verifiedPackageAssemblyFunc(idx.meta, fn); !ok {
+						hasUnverified = true
+						break
+					}
+				}
+			}
+		}
+		if hasUnverified {
+			return "package scan: reaches unverified non-standard assembly in " + idx.path
+		}
+	}
+	return ""
 }
 
 func (a *tier2Analyzer) scanVerifiedAsmBodylessFunction(fn *ssa.Function, idx *pkgIndex, isRoot bool) {
 	if a == nil || fn == nil || idx == nil || idx.std || idx.meta == nil || len(idx.meta.SFiles) == 0 || len(fn.Blocks) != 0 {
 		return
 	}
-	sum, ok := a.verifiedPackageAssemblyFunc(idx.meta, fn)
+	sum, depVars, ok := a.verifiedPackageAssemblyFunc(idx.meta, fn)
 	if !ok {
 		a.recordExternalEffect(opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly"))
 		a.requestWiden("non-toolchain assembly in " + idx.id)
 		return
+	}
+	for _, v := range depVars {
+		a.enqueueObject(v)
 	}
 	fnName := functionSymbolName(fn)
 	if sum.ImpureKind != "" {
@@ -219,7 +265,7 @@ func (a *tier2Analyzer) classifyVerifiedAsmCallee(callee *ssa.Function, calleeId
 	if callee == nil || calleeIdx == nil || calleeIdx.meta == nil || len(calleeIdx.meta.SFiles) == 0 {
 		return externalEffect{}, false
 	}
-	sum, ok := a.verifiedPackageAssemblyFunc(calleeIdx.meta, callee)
+	sum, _, ok := a.verifiedPackageAssemblyFunc(calleeIdx.meta, callee)
 	if !ok {
 		a.requestWiden("non-toolchain assembly in " + calleeIdx.id)
 		return opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly"), true
@@ -330,122 +376,4 @@ func (b *tier2Base) verifiedReadOnlyLinknameLocals(pkgPath string) map[string]bo
 		}
 	}
 	return out
-}
-
-const nonReadOnlyGlobalsSummaryKey = "gofresh/non-readonly-globals@1"
-
-func nonReadOnlySSAGlobals(p *program) map[*ssa.Global]bool {
-	if p == nil || p.Prog == nil {
-		return nil
-	}
-	if p.Summaries != nil {
-		if cached, ok := p.Summaries[nonReadOnlyGlobalsSummaryKey].(map[*ssa.Global]bool); ok {
-			return cached
-		}
-	}
-	nonRO := map[*ssa.Global]bool{}
-	var ops [16]*ssa.Value
-	for _, fn := range progOrderedFunctions(p) {
-		if fn == nil {
-			continue
-		}
-		for _, blk := range fn.Blocks {
-			for _, instr := range blk.Instrs {
-				if _, ok := instr.(*ssa.DebugRef); ok {
-					continue
-				}
-				for _, op := range instr.Operands(ops[:0]) {
-					if op == nil || *op == nil {
-						continue
-					}
-					g, ok := (*op).(*ssa.Global)
-					if !ok {
-						continue
-					}
-					un, isUn := instr.(*ssa.UnOp)
-					if !isUn || un.Op != token.MUL || un.X != g {
-						nonRO[g] = true
-					}
-				}
-			}
-		}
-	}
-	if p.Summaries == nil {
-		p.Summaries = make(map[string]any, 2)
-	}
-	p.Summaries[nonReadOnlyGlobalsSummaryKey] = nonRO
-	return nonRO
-}
-
-func ssaGlobalStrictlyReadOnly(p *program, g *ssa.Global) bool {
-	if p == nil || g == nil || g.Pkg == nil {
-		return false
-	}
-	return !nonReadOnlySSAGlobals(p)[g]
-}
-
-// astPackageVarReadOnly verifies across every syntax tree of pkg (including
-// uninstantiated generic functions that SSA may not materialize) that v is
-// never assigned, incremented/decremented, bound in a range clause, or
-// address-taken, and (when allowDeclInit is false) carries no ValueSpec
-// initializer.
-func astPackageVarReadOnly(pkg *packages.Package, v *types.Var, allowDeclInit bool) bool {
-	if pkg == nil || v == nil || pkg.TypesInfo == nil {
-		return false
-	}
-	usesVar := func(e ast.Expr) bool {
-		switch x := ast.Unparen(e).(type) {
-		case *ast.Ident:
-			return pkg.TypesInfo.Uses[x] == v || pkg.TypesInfo.Defs[x] == v
-		case *ast.SelectorExpr:
-			return x.Sel != nil && pkg.TypesInfo.Uses[x.Sel] == v
-		}
-		return false
-	}
-	ok := true
-	for _, file := range pkg.Syntax {
-		if file == nil || !ok {
-			continue
-		}
-		ast.Inspect(file, func(n ast.Node) bool {
-			if !ok || n == nil {
-				return false
-			}
-			switch x := n.(type) {
-			case *ast.ValueSpec:
-				for i, id := range x.Names {
-					if pkg.TypesInfo.Defs[id] == v {
-						if !allowDeclInit && (len(x.Values) > i || len(x.Values) > 0) {
-							ok = false
-							return false
-						}
-					}
-				}
-			case *ast.AssignStmt:
-				for _, lhs := range x.Lhs {
-					if usesVar(lhs) {
-						ok = false
-						return false
-					}
-				}
-			case *ast.IncDecStmt:
-				if usesVar(x.X) {
-					ok = false
-					return false
-				}
-			case *ast.RangeStmt:
-				if x.Tok == token.ASSIGN && (usesVar(x.Key) || usesVar(x.Value)) {
-					ok = false
-					return false
-				}
-			case *ast.UnaryExpr:
-				if x.Op == token.AND && usesVar(x.X) {
-					ok = false
-					return false
-				}
-			}
-			return true
-		})
-	}
-	return ok
 }

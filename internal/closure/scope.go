@@ -82,7 +82,7 @@ func (s AnalysisScope) TestingScan() string {
 	return testingScanStrategy + "|" + s.guards()
 }
 
-const rootedFunctionsStrategy = "gofresh/rooted-functions@14"
+const rootedFunctionsStrategy = "gofresh/rooted-functions@15"
 
 // Rooted is the rooted-functions and binary-rooted-functions memo's scope:
 // its strategy version and the guard key (the code guards and the analyzing
