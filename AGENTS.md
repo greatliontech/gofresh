@@ -1,13 +1,13 @@
 # Repository Directives & Compaction Defense
 
-## Compaction Defense & Working Notes (`docs/notes/`)
+## Compaction Defense & Per-Chunk Working Notes (`docs/notes/`)
 
-Context compaction is the primary operational hazard on multi-chunk work. Treat ephemeral conversation memory as volatile and `docs/notes/` in Git as the durable session memory:
+Context compaction is the primary operational hazard on multi-chunk work. Treat ephemeral conversation memory as volatile and `docs/notes/<chunk-slug>.md` in Git as the active chunk's working memory — never as a cumulative multi-chunk append-only log:
 
-1. **Read First After Startup or Compaction:** Always read `docs/plans/plan.md` and `docs/notes/working-notes.md` (when present) before designing or editing code so active chunk boundaries, prior audit findings, rejected dead ends, and user decisions are loaded intact.
-2. **Continuous Updates:** Record every architectural alignment with the user, root-cause diagnosis, soundness or performance audit result, hypothesis, and review disposition in `docs/notes/working-notes.md` as it happens — never defer note-taking until chunk close-out.
-3. **Commit Notes Frequently:** Commit updates to `docs/notes/` and `docs/plans/` in small standalone `docs(notes): ...` / `docs(plan): ...` commits (staging only the intended doc files without sweeping in uncommitted code) whenever an audit, user alignment, or milestone completes.
-4. **Never Pile Cross-Chunk Edits onto an Uncommitted Tree:** Keep each active chunk isolated, adversarially reviewed, verified, and committed before starting the next chunk.
+1. **Per-Chunk Lifecycle (Provide to Reviewer, Delete at Close-Out):** Create one dedicated working-notes file (`docs/notes/<chunk-slug>.md`) per active chunk, promote contracts to `docs/specs/`, mechanism rationale to package/module doc comments (and local constraints to code comments), and tracked deferrals (with concrete `Lands:` slots) to `docs/issues/<slug>.md` **before** final review convergence so those artifacts are reviewed alongside `docs/notes/<chunk-slug>.md`, and **delete `docs/notes/<chunk-slug>.md` at chunk close-out** (staging its deletion in the chunk close-out commit once review converges to `ZERO FINDINGS` and recording process reasoning in the commit message). `docs/notes/` stays empty between chunks; cross-chunk discoveries belong in tracked `docs/issues/<slug>.md` files or `docs/plans/plan.md`.
+2. **Read First After Startup or Compaction:** Always read `docs/plans/plan.md` (when present), any active `docs/notes/<chunk-slug>.md`, and open `docs/issues/` scheduled for the chunk (when present) before designing or editing code so active chunk boundaries, prior audit findings, rejected dead ends, and user decisions are loaded intact.
+3. **Continuous In-Chunk Updates & Standalone Commits:** Record every architectural alignment with the user, root-cause diagnosis, soundness or performance audit result, hypothesis, and review disposition in the active `docs/notes/<chunk-slug>.md` as it happens — never defer note-taking until chunk close-out. Commit standalone `docs(notes): ...` / `docs(plan): ...` updates (staging only the intended doc files without sweeping in uncommitted code) whenever a pre-implementation audit, user alignment, or milestone completes.
+4. **Never Pile Cross-Chunk Edits onto an Uncommitted Tree:** Keep each active chunk isolated, adversarially reviewed, verified, and committed (with its working-notes file deleted) before starting the next chunk.
 
 ## Scope, Authority & First-Principles Architecture
 
