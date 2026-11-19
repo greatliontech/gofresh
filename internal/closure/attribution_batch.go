@@ -67,12 +67,9 @@ type attributedReachability struct {
 	programFunctions       map[*ssa.Function]bool
 	userPaths              map[string]bool
 	subjectRoot            *ssa.Function
-	prog                   *program
-	summary                *callerReferenceSummary
-	// propertyHarnessAudited carries the program-level audit verdict for
-	// the property harness into the per-subject walks: the closed-value
-	// arms consult it so no admission outlives the audit.
-	propertyHarnessAudited bool
+	prog              *program
+	summary           *callerReferenceSummary
+	verifiedHarnesses map[string]*propharness.VerifiedPackage
 }
 
 // defaultProbePackageScope is the package-scope discriminator: it
@@ -195,6 +192,7 @@ type openCandidateSpec struct {
 
 type preparedProgramRTA struct {
 	harnessAudited      bool
+	verifiedHarnesses   map[string]*propharness.VerifiedPackage
 	userPaths           map[string]bool
 	initRoots           []*ssa.Function
 	harnessStdInitRoots []*ssa.Function
@@ -250,7 +248,8 @@ func prepareProgramRTA(
 	collectStepCallbacks func(res *rta.Result, p *preparedProgramRTA) (deltaRoots map[*ssa.Function]uint64, deltaSeeds *rta.Seeds, abort bool, err error),
 ) (preparedProgramRTA, bool, error) {
 	var p preparedProgramRTA
-	p.harnessAudited = propertyHarnessAuditedProg(audited, prog)
+	p.verifiedHarnesses = verifiedHarnessesProg(audited, prog)
+	p.harnessAudited = len(p.verifiedHarnesses) > 0
 	p.userPaths = userModulePaths(prog.Pkgs)
 	// The init-root set is subject-independent; only the test-main prepend
 	// varies by harness. One derivation serves the RTA roots and every
@@ -263,13 +262,13 @@ func prepareProgramRTA(
 	p.enumClosed = map[int]enumerationClosure{}
 	var seeds *rta.Seeds
 	if p.harnessAudited {
-		seeds = newHarnessRTASeeds(p.userPaths, p.harnessStdInitRoots, allMasks)
+		seeds = newHarnessRTASeeds(p.verifiedHarnesses, p.userPaths, p.harnessStdInitRoots, allMasks)
 	}
 	// Populate the whole-program caller-reference summary and shared
 	// subject-independent provenance analysis unconditionally so solo and
 	// batched evaluations share identical program-wide call sites and memos.
 	p.summary = enumerateCallerReferencesForProgram(prog, audited, pureDelegates, p.userPaths, nil)
-	p.provFP = newProvenanceFP(audited, p.harnessAudited, pureDelegates, prog, p.summary, p.userPaths)
+	p.provFP = newProvenanceFP(audited, p.verifiedHarnesses, pureDelegates, prog, p.summary, p.userPaths)
 	if len(openCandidates) > 0 {
 		openRoots := make([]*ssa.Function, 0, len(openCandidates))
 		for root := range openCandidates {
@@ -450,7 +449,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 				if err != nil {
 					return nil, nil, false, err
 				}
-				cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, p.harnessAudited, pureDelegates, p.userPaths, p.summary, subjectRoot, enumerated, enc, prov, mask, res)
+				cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, p.verifiedHarnesses, pureDelegates, p.userPaths, p.summary, subjectRoot, enumerated, enc, prov, mask, res)
 				unclosedCleanup[i] = unclosedCleanup[i] || unclosedCB
 				unclosedFuzz[i] = unclosedFuzz[i] || unclosedFB
 				for _, cb := range cbs {
@@ -531,7 +530,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 			subjectRoot:            prog.Roots[subjects[i].Symbol],
 			prog:                   prog,
 			summary:                summary,
-			propertyHarnessAudited: harnessAudited,
+			verifiedHarnesses:      prep.verifiedHarnesses,
 		}
 		mask := uint64(1) << i
 		subjectRoot := prog.Roots[subjects[i].Symbol]
@@ -695,7 +694,7 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 				}
 			}
 		}
-		reachable[i].rootedIncomplete = unclosedFuzz[i] || rootedProvenanceIncomplete(audited, harnessAudited, prog, userPaths, reachable[i].subjectFunctions, reachable[i].rootedExtraFunctions, reachable[i].testMainFunctions, reachable[i].cleanupFunctions)
+		reachable[i].rootedIncomplete = unclosedFuzz[i] || rootedProvenanceIncomplete(audited, prep.verifiedHarnesses, prog, userPaths, reachable[i].subjectFunctions, reachable[i].rootedExtraFunctions, reachable[i].testMainFunctions, reachable[i].cleanupFunctions)
 	}
 	if tracing {
 		trace.Emit(ctx, trace.DomainClosure, "attribution.batch.done", pkgPath,
@@ -743,9 +742,13 @@ func cachedBaseStartupReachability(ctx context.Context, audited bool, prog *prog
 	for _, fn := range initRoots {
 		initMaskRoots[fn] = startupMask
 	}
-	var initSeeds *rta.Seeds
+	var verified map[string]*propharness.VerifiedPackage
 	if harnessAudited {
-		initSeeds = newHarnessRTASeeds(userPaths, harnessStdInitRoots, startupMask)
+		verified = verifiedHarnessesProg(audited, prog)
+	}
+	var initSeeds *rta.Seeds
+	if len(verified) > 0 {
+		initSeeds = newHarnessRTASeeds(verified, userPaths, harnessStdInitRoots, startupMask)
 	}
 	initRes, err := rta.Analyze(ctx, initMaskRoots, initSeeds)
 	if err != nil {
@@ -785,7 +788,7 @@ func cachedBaseStartupReachability(ctx context.Context, audited bool, prog *prog
 		seenBoxed := map[types.Type]bool{}
 		for _, fn := range orderedStartup {
 			fp := funcPkgPath(fn)
-			if isStdPkgPath(userPaths, fp) || fp == "testing" || propharness.IsHarnessPath(fp) {
+			if isStdPkgPath(userPaths, fp) || fp == "testing" || verified[fp] != nil {
 				continue
 			}
 			for _, b := range fn.Blocks {
@@ -805,7 +808,7 @@ func cachedBaseStartupReachability(ctx context.Context, audited bool, prog *prog
 			var uQueue []*ssa.Function
 			for _, fn := range orderedStartup {
 				fp := funcPkgPath(fn)
-				if !isStdPkgPath(userPaths, fp) && fp != "testing" && !propharness.IsHarnessPath(fp) {
+				if !isStdPkgPath(userPaths, fp) && fp != "testing" && verified[fp] == nil {
 					userStartupFns[fn] = true
 					uQueue = append(uQueue, fn)
 				}
@@ -885,13 +888,17 @@ func partitionHarnessInitRoots(prog *program, harnessAudited bool, userPaths map
 	if prog == nil || prog.Prog == nil {
 		return nil, nil
 	}
-	var nonHarnessReachable map[*types.Package]bool
+	var verified map[string]*propharness.VerifiedPackage
 	if harnessAudited {
+		verified = verifiedHarnessesProg(true, prog)
+	}
+	var nonHarnessReachable map[*types.Package]bool
+	if len(verified) > 0 {
 		nonHarnessReachable = make(map[*types.Package]bool)
 		if len(prog.Pkgs) > 0 {
 			var nonHarnessRoots []*packages.Package
 			for _, pkg := range prog.Pkgs {
-				if pkg == nil || propharness.IsHarnessPath(pkg.PkgPath) {
+				if pkg == nil || verified[pkg.PkgPath] != nil {
 					continue
 				}
 				if pkg.Module != nil || !isStdPkgPath(userPaths, pkg.PkgPath) || pkg.PkgPath == prog.PkgPath || pkg.PkgPath == prog.PkgPath+"_test" || pkg.ForTest == prog.PkgPath || (pkg.Name == "main" && pkg.PkgPath == prog.PkgPath+".test") {
@@ -899,7 +906,7 @@ func partitionHarnessInitRoots(prog *program, harnessAudited bool, userPaths map
 				}
 			}
 			packages.Visit(nonHarnessRoots, func(pkg *packages.Package) bool {
-				if pkg == nil || propharness.IsHarnessPath(pkg.PkgPath) {
+				if pkg == nil || verified[pkg.PkgPath] != nil {
 					return false
 				}
 				if pkg.Types != nil {
@@ -910,7 +917,7 @@ func partitionHarnessInitRoots(prog *program, harnessAudited bool, userPaths map
 		} else {
 			var queue []*types.Package
 			enqueue := func(tp *types.Package) {
-				if tp == nil || nonHarnessReachable[tp] || propharness.IsHarnessPath(tp.Path()) {
+				if tp == nil || nonHarnessReachable[tp] || verified[tp.Path()] != nil {
 					return
 				}
 				nonHarnessReachable[tp] = true
@@ -921,7 +928,7 @@ func partitionHarnessInitRoots(prog *program, harnessAudited bool, userPaths map
 					continue
 				}
 				p := sp.Pkg.Path()
-				if isGeneratedTestMainPackage(prog, sp) || p == prog.PkgPath || p == prog.PkgPath+"_test" || (!propharness.IsHarnessPath(p) && !isStdPkgPath(userPaths, p)) {
+				if isGeneratedTestMainPackage(prog, sp) || p == prog.PkgPath || p == prog.PkgPath+"_test" || (verified[p] == nil && !isStdPkgPath(userPaths, p)) {
 					enqueue(sp.Pkg)
 				}
 			}
@@ -942,7 +949,7 @@ func partitionHarnessInitRoots(prog *program, harnessAudited bool, userPaths map
 		if init == nil {
 			continue
 		}
-		if harnessAudited && p.Pkg != nil && !propharness.IsHarnessPath(p.Pkg.Path()) && !nonHarnessReachable[p.Pkg] {
+		if len(verified) > 0 && p.Pkg != nil && verified[p.Pkg.Path()] == nil && !nonHarnessReachable[p.Pkg] {
 			harnessStdInitRoots = append(harnessStdInitRoots, init)
 			continue
 		}
@@ -951,7 +958,7 @@ func partitionHarnessInitRoots(prog *program, harnessAudited bool, userPaths map
 	return initRoots, harnessStdInitRoots
 }
 
-func newHarnessRTASeeds(userPaths map[string]bool, harnessStdInitRoots []*ssa.Function, masks uint64) *rta.Seeds {
+func newHarnessRTASeeds(verified map[string]*propharness.VerifiedPackage, userPaths map[string]bool, harnessStdInitRoots []*ssa.Function, masks uint64) *rta.Seeds {
 	var stdRoots map[*ssa.Function]uint64
 	if len(harnessStdInitRoots) > 0 && masks != 0 {
 		stdRoots = make(map[*ssa.Function]uint64, len(harnessStdInitRoots))
@@ -960,7 +967,7 @@ func newHarnessRTASeeds(userPaths map[string]bool, harnessStdInitRoots []*ssa.Fu
 		}
 	}
 	return &rta.Seeds{
-		HarnessPkg:      propharness.ModulePath,
+		HarnessPkgs:     harnessPkgSet(verified),
 		UserPkgs:        userPaths,
 		HarnessStdRoots: stdRoots,
 	}
@@ -1042,7 +1049,7 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 			if err != nil {
 				return nil, nil, false, err
 			}
-			cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, p.harnessAudited, pureDelegates, p.userPaths, p.summary, nil, false, enumerationClosure{}, provenance, unionMask, res)
+			cbs, unclosedCB, fbs, unclosedFB := collectTestingHarnessCallbacks(audited, p.verifiedHarnesses, pureDelegates, p.userPaths, p.summary, nil, false, enumerationClosure{}, provenance, unionMask, res)
 			if unclosedCB || unclosedFB {
 				return nil, nil, true, nil
 			}
@@ -1084,7 +1091,7 @@ func binaryReachableUnion(ctx context.Context, audited bool, pureDelegates map[s
 	if !ok {
 		return RootedFunctions{}, nil
 	}
-	if rootedProvenanceIncomplete(audited, prep.harnessAudited, prog, prep.userPaths, provenance) {
+	if rootedProvenanceIncomplete(audited, prep.verifiedHarnesses, prog, prep.userPaths, provenance) {
 		return RootedFunctions{}, nil
 	}
 	fns := make(map[string]bool, len(provenance))

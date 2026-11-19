@@ -12,7 +12,7 @@ import (
 func (efu *efaceUnionHelper) verifyEfaceUnionStructs() {
 	scope := efu.p.Types.Scope()
 	// Step 2: Verify sealed representation-preserving 2-word eface union structs
-	// (such as protoreflect.value / protoreflect.Value).
+	// (such as unexported unsafe.Pointer + scalar value-union representations).
 	for _, name := range scope.Names() {
 		tn, ok := scope.Lookup(name).(*types.TypeName)
 		if !ok || tn == nil || tn.Exported() || tn.IsAlias() {

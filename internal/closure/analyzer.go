@@ -47,6 +47,7 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 	a.skipOriginScan = reachable.instantiatedOrigins
 	a.openWorld = reachable.openWorld
 	a.fresh = newFreshParamAnalysis(h.SelectionAudited(), h.source.pureDelegates, reachable, a.isStdFunction)
+	a.fresh.traceCtx = h.ctx
 	a.enumeratedTypes = reachable.enumeratedTypes
 	a.initBoxedTypes = reachable.initBoxedTypes
 	if reachable.subjectRoot != nil {
@@ -123,19 +124,22 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 			if idx == nil {
 				continue
 			}
-			// A harness function reached via a computed function-value call
-			// keeps the conservative refusal: its body is unscanned and no
-			// static call site exists to gate the crossing arguments. An
-			// anonymous harness function (MakeCheck's wrapped callback) exists
-			// only because a gated harness call in some analyzed flow created
-			// it, and a named harness method reached via interface invoke is
-			// admitted only when every dynamic-carrying invoke argument passes
-			// the boundary gate and every non-harness interface boxing of its
-			// receiver type origin across the subject's RTA-reachable functions
-			// occurs in subject flow over a gate-passing value
+			// A named harness function reached via a computed function-value
+			// call keeps the conservative refusal; an anonymous harness
+			// wrapper closure requires closed arguments and a handed-in handle
+			// parameter when param 0 is a handle/logger type; and a named
+			// harness method reached via interface invoke is admitted only
+			// when invoke arguments and all non-harness boxings of its
+			// receiver origin pass the boundary gate
 			// (REQ-closure-observability-property-harness).
-			if a.propertyHarnessAudited(idx.path) {
-				if target.Parent() == nil && !a.admitPropertyHarnessInvokeTarget(reachable, site, target) {
+			if vp := a.verifiedHarness(idx.path); vp != nil {
+				var ok bool
+				if target.Parent() == nil {
+					ok = a.admitPropertyHarnessInvokeTarget(reachable, site, target)
+				} else {
+					ok = a.admitPropertyHarnessAnonTarget(site, target, vp)
+				}
+				if !ok {
 					a.requestWiden("property harness reached as a dynamic target in " + site.Parent().String())
 				}
 				continue
@@ -378,14 +382,18 @@ func (a *tier2Analyzer) admitPropertyHarnessInvokeTarget(reachable attributedRea
 	if a == nil || site == nil || site.Common() == nil || !site.Common().IsInvoke() || target == nil || target.Signature == nil || target.Signature.Recv() == nil {
 		return false
 	}
-	if isPropertyHarnessExampleCallee(target) {
-		return false
-	}
 	recvNamed := namedOriginDeref(target.Signature.Recv().Type())
-	if recvNamed == nil || recvNamed.Obj() == nil || recvNamed.Obj().Pkg() == nil || !a.propertyHarnessAudited(recvNamed.Obj().Pkg().Path()) {
+	if recvNamed == nil || recvNamed.Obj() == nil || recvNamed.Obj().Pkg() == nil {
 		return false
 	}
-	if !propertyHarnessClosedArgs(site.Common(), a.fresh) {
+	vp := a.verifiedHarness(recvNamed.Obj().Pkg().Path())
+	if vp == nil {
+		return false
+	}
+	if _, isSample := propertyHarnessSeededSampleCallee(vp, target); isSample {
+		return false
+	}
+	if !propertyHarnessClosedArgsForTarget(site.Common(), target, a.fresh) {
 		return false
 	}
 	return a.propertyHarnessReceiverBoxesClosed(reachable, recvNamed)
@@ -416,7 +424,7 @@ func (a *tier2Analyzer) propertyHarnessReceiverBoxesClosed(reachable attributedR
 		if fn == nil || len(fn.Blocks) == 0 {
 			continue
 		}
-		if a.propertyHarnessAudited(funcPkgPath(fn)) {
+		if a.propertyHarnessAudited(ssaFuncOriginPkgPath(fn)) {
 			continue
 		}
 		for _, block := range fn.Blocks {
@@ -1142,35 +1150,34 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		a.recordExternalEffect(harnessEffect)
 		return
 	}
-	if !callerStd && a.propertyHarnessAudited(pkgPath) {
-		if isPropertyHarnessExampleCallee(callee) && !harnessExampleHasExplicitSeed(c) {
-			a.recordExternalEffect(propertyHarnessUnseededExampleEffect())
-		}
-		// The property-harness boundary gate: harness bodies are never
-		// scanned, so every dynamic-carrying argument and bound-closure
-		// capture must be judged here - judged callables become subject
-		// flow through the harness's own dispatch; a judged call passes
-		// silently exactly as the exempted standard harness does
-		// (REQ-closure-observability-property-harness).
-		if !propertyHarnessClosedArgs(c, a.fresh) {
-			a.requestWiden("property-harness argument is not locally closed in " + caller.String())
-		}
-		if mc, ok := c.Value.(*ssa.MakeClosure); ok {
-			for _, b := range mc.Bindings {
-				if b != nil {
-					a.addHarnessArgMethodSets(b.Type())
+	if !callerStd {
+		if vp := a.verifiedHarness(pkgPath); vp != nil {
+			if mk, isSample := propertyHarnessSeededSampleCallee(vp, callee); isSample && !harnessSeededSampleHasExplicitSeed(c) {
+				a.recordExternalEffect(propertyHarnessUnseededSampleEffect(vp, mk))
+			}
+			// The property-harness boundary gate: harness bodies are never
+			// scanned, so every dynamic-carrying argument and bound-closure
+			// capture must be judged here (REQ-closure-observability-property-harness).
+			if !propertyHarnessClosedArgs(c, a.fresh) {
+				a.requestWiden("property-harness argument is not locally closed in " + caller.String())
+			}
+			if mc, ok := c.Value.(*ssa.MakeClosure); ok {
+				for _, b := range mc.Bindings {
+					if b != nil {
+						a.addHarnessArgMethodSets(b.Type())
+					}
 				}
 			}
-		}
-		for _, arg := range c.Args {
-			if arg != nil {
-				a.addHarnessArgMethodSets(arg.Type())
+			for _, arg := range c.Args {
+				if arg != nil {
+					a.addHarnessArgMethodSets(arg.Type())
+				}
 			}
+			for _, ta := range callee.TypeArgs() {
+				a.addHarnessArgMethodSets(ta)
+			}
+			return
 		}
-		for _, ta := range callee.TypeArgs() {
-			a.addHarnessArgMethodSets(ta)
-		}
-		return
 	}
 	if observableFileMethod(callee) {
 		if len(c.Args) != 0 && fileValueFromAdmittedOpen(c.Args[0], make(map[ssa.Value]bool), a.fresh) {

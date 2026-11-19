@@ -444,9 +444,9 @@ func (msc *mutatedStructCollector) scanTypesInfoAndFinalize() ([]syntaxutil.Type
 					return false
 				}
 				pendingConds = append(pendingConds, syntaxutil.ConditionalStructMutation{
-					Struct:                  ownerRef,
-					GuardStruct:             guardRef,
-					RequireDescBuilderGuard: true,
+					Struct:                       ownerRef,
+					GuardStruct:                  guardRef,
+					RequireImmutableCapsuleGuard: true,
 				})
 				return true
 			},

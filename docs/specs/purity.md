@@ -149,7 +149,7 @@ assertion and records under exactly this requirement's
 discipline: the variables whose discharge the attestation
 carried — a pool carrier's admitted `Get`/`Put`, a
 `//gofresh:single-subject`-directed subject-own
-variable, a generated-proto descriptor-cluster variable (or a read-only
+variable, an init-settled builder-and-capsule cluster variable (or a read-only
 package-variable alias inheriting that cluster variable's attested discharge), a culprit scoped
 out by the per-subject reachability judgment —
 reachable from the subject, ride that subject's evidence

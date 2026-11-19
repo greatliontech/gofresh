@@ -1164,7 +1164,7 @@ func isPotentialHarnessCallbackSite(site ssa.CallInstruction) bool {
 	return true
 }
 
-func collectTestingHarnessCallbacks(audited, harnessAudited bool, pureDelegates map[string]bool, userPaths map[string]bool, summary *callerReferenceSummary, subjectRoot *ssa.Function, enumerated bool, enc enumerationClosure, prov map[*ssa.Function]bool, mask uint64, res *rta.Result) (cleanupOut []*ssa.Function, unclosedCleanup bool, fuzzOut []*ssa.Function, unclosedFuzz bool) {
+func collectTestingHarnessCallbacks(audited bool, verifiedHarnesses map[string]*propharness.VerifiedPackage, pureDelegates map[string]bool, userPaths map[string]bool, summary *callerReferenceSummary, subjectRoot *ssa.Function, enumerated bool, enc enumerationClosure, prov map[*ssa.Function]bool, mask uint64, res *rta.Result) (cleanupOut []*ssa.Function, unclosedCleanup bool, fuzzOut []*ssa.Function, unclosedFuzz bool) {
 	seenCleanup := make(map[*ssa.Function]bool)
 	seenFuzz := make(map[*ssa.Function]bool)
 	var lazyFP *freshParamAnalysis
@@ -1207,7 +1207,7 @@ func collectTestingHarnessCallbacks(audited, harnessAudited bool, pureDelegates 
 		reach.enumeratedRoot = enumerated
 		reach.enumeratedRootSites = enc.sites
 		reach.enumeratedFieldStores = enc.fieldStores
-		reach.propertyHarnessAudited = harnessAudited
+		reach.verifiedHarnesses = verifiedHarnesses
 		reach.userPaths = userPaths
 		if summary != nil {
 			reach.prog = summary.prog
@@ -1253,7 +1253,7 @@ func collectTestingHarnessCallbacks(audited, harnessAudited bool, pureDelegates 
 		if cb == nil {
 			return
 		}
-		if cb.Parent() == nil && propharness.IsHarnessPath(funcPkgPath(cb)) {
+		if cb.Parent() == nil && verifiedHarnesses[funcPkgPath(cb)] != nil {
 			markUnclosed(kind)
 			return
 		}
@@ -1438,7 +1438,7 @@ func isVerifiedPureRootedAsmStub(audited bool, prog *program, fn *ssa.Function) 
 	return true
 }
 
-func rootedProvenanceIncomplete(audited, harnessAudited bool, prog *program, userPaths map[string]bool, sets ...map[*ssa.Function]bool) bool {
+func rootedProvenanceIncomplete(audited bool, verifiedHarnesses map[string]*propharness.VerifiedPackage, prog *program, userPaths map[string]bool, sets ...map[*ssa.Function]bool) bool {
 	var space [16]*ssa.Value
 	for _, set := range sets {
 		for fn := range set {
@@ -1456,20 +1456,20 @@ func rootedProvenanceIncomplete(audited, harnessAudited bool, prog *program, use
 				continue
 			}
 			for _, p := range fn.Params {
-				if p != nil && nonStdTypeUsesUnsafePointer(audited, harnessAudited, userPaths, p.Type()) {
+				if p != nil && nonStdTypeUsesUnsafePointer(audited, verifiedHarnesses, userPaths, p.Type()) {
 					return true
 				}
 			}
 			for _, b := range fn.Blocks {
 				for _, instr := range b.Instrs {
-					if v, ok := instr.(ssa.Value); ok && nonStdTypeUsesUnsafePointer(audited, harnessAudited, userPaths, v.Type()) {
+					if v, ok := instr.(ssa.Value); ok && nonStdTypeUsesUnsafePointer(audited, verifiedHarnesses, userPaths, v.Type()) {
 						return true
 					}
 					for _, op := range instr.Operands(space[:0]) {
 						if op == nil || *op == nil {
 							continue
 						}
-						if nonStdTypeUsesUnsafePointer(audited, harnessAudited, userPaths, (*op).Type()) {
+						if nonStdTypeUsesUnsafePointer(audited, verifiedHarnesses, userPaths, (*op).Type()) {
 							return true
 						}
 						if g, ok := (*op).(*ssa.Function); ok {
@@ -1722,7 +1722,7 @@ func isOpaqueStructNamed(n *types.Named) bool {
 	return ok && propharness.StructHasNoExportedFields(st)
 }
 
-func nonStdTypeUsesUnsafePointer(audited, harnessAudited bool, userPaths map[string]bool, t types.Type) bool {
+func nonStdTypeUsesUnsafePointer(audited bool, verifiedHarnesses map[string]*propharness.VerifiedPackage, userPaths map[string]bool, t types.Type) bool {
 	seen := make(map[types.Type]bool)
 	var walk func(types.Type) bool
 	walk = func(cur types.Type) bool {
@@ -1748,7 +1748,7 @@ func nonStdTypeUsesUnsafePointer(audited, harnessAudited bool, userPaths map[str
 					return walk(elem)
 				}
 				if (isStdImportPath(pkgPath) && !userPaths[pkgPath]) ||
-					(harnessAudited && propharness.IsHarnessPath(pkgPath) && isOpaqueStructNamed(tt)) {
+					(verifiedHarnesses[pkgPath] != nil && isOpaqueStructNamed(tt)) {
 					for i := 0; i < tt.TypeArgs().Len(); i++ {
 						if walk(tt.TypeArgs().At(i)) {
 							return true

@@ -7,46 +7,41 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
+	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
 
 // verifyHarnessExportedSurface verifies the exported types, functions, and
-// methods of pkg. Exported package-scope variables are rejected up front in
-// buildHarnessPkgIndex as the single source of truth.
-func verifyHarnessExportedSurface(audited bool, idx *harnessPkgIndex) bool {
-	pkgTypes := idx.pkgTypes
-	info := idx.info
-	allDecls := idx.allDecls
+// methods of a candidate harness package against the closed return grammar and
+// variadic-seed override discipline.
+func verifyHarnessExportedSurface(audited bool, g *harnessGraph) (bool, string) {
+	pkgTypes := g.pkgTypes
+	info := g.info
+	allDecls := g.allDecls
+	sc := g.screen
 	scope := pkgTypes.Scope()
 	if scope == nil {
-		return false
+		return false, "missing package scope"
 	}
 
-	// Exported type T must exist as a struct with zero exported fields.
-	tObj, ok := scope.Lookup("T").(*types.TypeName)
-	if !ok || tObj == nil || !tObj.Exported() {
-		return false
-	}
-	tNamed, ok := types.Unalias(tObj.Type()).(*types.Named)
-	if !ok {
-		return false
-	}
-	tStruct, ok := tNamed.Underlying().(*types.Struct)
-	if !ok || !StructHasNoExportedFields(tStruct) {
-		return false
-	}
-
-	// Exported Check and MakeCheck functions must exist.
-	checkFn, ok := scope.Lookup("Check").(*types.Func)
-	if !ok || checkFn == nil || !checkFn.Exported() {
-		return false
-	}
-	makeCheckFn, ok := scope.Lookup("MakeCheck").(*types.Func)
-	if !ok || makeCheckFn == nil || !makeCheckFn.Exported() {
-		return false
+	// Every discovered variadic-seed sample method must mechanically override its
+	// PRNG seed from seed[0] whenever len(seed) > 0.
+	for mOrig := range sc.seededMethods {
+		fd := allDecls[mOrig]
+		sig := mOrig.Signature()
+		if fd == nil || sig == nil || sig.Params().Len() != 1 {
+			return false, "seeded sample method failed seed-override check: " + mOrig.Name()
+		}
+		baseCall, okOv := verifyGeneratorSeedOverride(info, pkgTypes, fd, sig.Params().At(0))
+		if !okOv {
+			return false, "seeded sample method failed seed-override check: " + mOrig.Name()
+		}
+		if baseCall != nil {
+			sc.seededBaseSeedCalls[baseCall] = true
+		}
 	}
 
 	checkedNamed := map[*types.Named]bool{}
-	var rule2Queue []*types.Named
+	var namedQueue []*types.Named
 	enqueueNamed := func(n *types.Named) {
 		if n == nil {
 			return
@@ -54,7 +49,7 @@ func verifyHarnessExportedSurface(audited bool, idx *harnessPkgIndex) bool {
 		orig := n.Origin()
 		if !checkedNamed[orig] {
 			checkedNamed[orig] = true
-			rule2Queue = append(rule2Queue, orig)
+			namedQueue = append(namedQueue, orig)
 		}
 	}
 
@@ -65,39 +60,57 @@ func verifyHarnessExportedSurface(audited bool, idx *harnessPkgIndex) bool {
 		}
 		switch o := obj.(type) {
 		case *types.Func:
-			sig := o.Signature()
-			if !checkHarnessResultTuple(audited, info, allDecls, pkgTypes, tNamed, o, sig, nil, nil, enqueueNamed) {
-				return false
+			if !checkHarnessResultTuple(audited, g, o, o.Signature(), nil, nil, enqueueNamed) {
+				return false, "disallowed result type on exported func " + o.Name()
 			}
 		case *types.TypeName:
 			if _, isIface := o.Type().Underlying().(*types.Interface); isIface {
 				continue
 			}
-			named, ok := types.Unalias(o.Type()).(*types.Named)
-			if !ok {
-				continue
+			if named, ok := types.Unalias(o.Type()).(*types.Named); ok {
+				enqueueNamed(named)
 			}
-			enqueueNamed(named)
 		}
 	}
 
-	for len(rule2Queue) > 0 {
-		cur := rule2Queue[0]
-		rule2Queue = rule2Queue[1:]
-		if !checkAllExportedMethodsOfNamed(audited, info, allDecls, pkgTypes, tNamed, cur, enqueueNamed) {
-			return false
+	for len(namedQueue) > 0 {
+		cur := namedQueue[0]
+		namedQueue = namedQueue[1:]
+		if !checkAllExportedMethodsOfNamed(audited, g, cur, enqueueNamed) {
+			return false, "disallowed exported method result on type " + cur.Obj().Name()
 		}
 	}
+	return true, ""
+}
 
-	return true
+func discoverReflectSynthFuncs(g *harnessGraph) {
+	if len(g.reflectSynthSeeds) == 0 {
+		return
+	}
+	visited := map[*types.Func]bool{}
+	var queue []*types.Func
+	for fn := range g.reflectSynthSeeds {
+		visited[fn] = true
+		queue = append(queue, fn)
+	}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if cur.Exported() {
+			g.screen.vp.ReflectSynthFuncs[cur.Name()] = true
+		}
+		for caller := range g.strictCallersOf[cur] {
+			if !visited[caller] {
+				visited[caller] = true
+				queue = append(queue, caller)
+			}
+		}
+	}
 }
 
 func checkAllExportedMethodsOfNamed(
 	audited bool,
-	info *types.Info,
-	allDecls map[*types.Func]*ast.FuncDecl,
-	pkgTypes *types.Package,
-	tNamed *types.Named,
+	g *harnessGraph,
 	owner *types.Named,
 	enqueueNamed func(*types.Named),
 ) bool {
@@ -122,10 +135,7 @@ func checkAllExportedMethodsOfNamed(
 		if named, ok := t.(*types.Named); ok {
 			for i := 0; i < named.NumMethods(); i++ {
 				m := named.Method(i)
-				if !m.Exported() {
-					continue
-				}
-				if !checkHarnessResultTuple(audited, info, allDecls, pkgTypes, tNamed, m, m.Signature(), owner, ownerTPs, enqueueNamed) {
+				if m.Exported() && !checkHarnessResultTuple(audited, g, m, m.Signature(), owner, ownerTPs, enqueueNamed) {
 					return false
 				}
 			}
@@ -133,20 +143,14 @@ func checkAllExportedMethodsOfNamed(
 		switch u := t.Underlying().(type) {
 		case *types.Struct:
 			for i := 0; i < u.NumFields(); i++ {
-				f := u.Field(i)
-				if f.Embedded() {
-					if !walk(f.Type()) {
-						return false
-					}
+				if f := u.Field(i); f.Embedded() && !walk(f.Type()) {
+					return false
 				}
 			}
 		case *types.Interface:
 			for i := 0; i < u.NumMethods(); i++ {
 				m := u.Method(i)
-				if !m.Exported() {
-					continue
-				}
-				if !checkHarnessResultTuple(audited, info, allDecls, pkgTypes, tNamed, m, m.Signature(), owner, ownerTPs, enqueueNamed) {
+				if m.Exported() && !checkHarnessResultTuple(audited, g, m, m.Signature(), owner, ownerTPs, enqueueNamed) {
 					return false
 				}
 			}
@@ -158,10 +162,7 @@ func checkAllExportedMethodsOfNamed(
 
 func checkHarnessResultTuple(
 	audited bool,
-	info *types.Info,
-	allDecls map[*types.Func]*ast.FuncDecl,
-	pkgTypes *types.Package,
-	tNamed *types.Named,
+	g *harnessGraph,
 	fnObj *types.Func,
 	sig *types.Signature,
 	recvNamed *types.Named,
@@ -173,7 +174,7 @@ func checkHarnessResultTuple(
 	}
 	results := sig.Results()
 	for i := 0; i < results.Len(); i++ {
-		if !validHarnessExportedResultType(audited, info, allDecls, pkgTypes, tNamed, fnObj, sig, recvNamed, ownerTypeParams, results.At(i).Type(), enqueueNamed) {
+		if !validHarnessExportedResultType(audited, g, fnObj, sig, recvNamed, ownerTypeParams, results.At(i).Type(), enqueueNamed) {
 			return false
 		}
 	}
@@ -182,10 +183,7 @@ func checkHarnessResultTuple(
 
 func validHarnessExportedResultType(
 	audited bool,
-	info *types.Info,
-	allDecls map[*types.Func]*ast.FuncDecl,
-	pkgTypes *types.Package,
-	tNamed *types.Named,
+	g *harnessGraph,
 	fnObj *types.Func,
 	sig *types.Signature,
 	recvNamed *types.Named,
@@ -196,79 +194,48 @@ func validHarnessExportedResultType(
 	if ret == nil {
 		return false
 	}
+	sc := g.screen
+	pkgTypes := g.pkgTypes
 	unaliased := types.Unalias(ret)
 
-	// 1. Type parameter declared on the generic function or generic receiver itself,
-	// provided the callable either requires *T/TB in its parameter list (e.g. Draw),
-	// is a pure 1-parameter identity function (e.g. ID[V](v V) V), or is the
-	// variadic (*Generator[V]).Example(seed ...int) V method verified to override
-	// its PRNG seed from seed[0] when len(seed) > 0.
+	// 1. Type parameter declared on the generic function or generic receiver:
+	// allowed ONLY when guarded by a sealed execution handle (*H where H is a
+	// discovered HandleStruct, or stdlib *testing.T/*testing.B/*testing.F/testing.TB;
+	// NEVER an unsealed HandleIface), a pure 1-arg identity function, or a
+	// verified SeededSampleMethod.
 	if tp, ok := unaliased.(*types.TypeParam); ok {
-		inScope := false
-		if tps := sig.TypeParams(); tps != nil {
-			for i := 0; i < tps.Len(); i++ {
-				if tps.At(i) == tp {
-					inScope = true
-					break
-				}
-			}
-		}
-		if !inScope {
-			if rtps := sig.RecvTypeParams(); rtps != nil {
-				for i := 0; i < rtps.Len(); i++ {
-					if rtps.At(i) == tp {
-						inScope = true
-						break
-					}
-				}
-			}
-		}
-		if !inScope && ownerTypeParams != nil {
-			for i := 0; i < ownerTypeParams.Len(); i++ {
-				if ownerTypeParams.At(i) == tp {
-					inScope = true
-					break
-				}
-			}
-		}
-		if !inScope || fnObj == nil {
+		if !typeParamInCallableScope(tp, sig, ownerTypeParams) || fnObj == nil {
 			return false
 		}
-		if sigRequiresHarnessHandleOrTB(pkgTypes, tNamed, sig) {
+		if sigRequiresSealedHarnessHandle(sc, sig, false) {
 			return true
 		}
-		fd := allDecls[fnObj.Origin()]
+		fd := g.allDecls[fnObj.Origin()]
 		if sig.Recv() == nil && !sig.Variadic() && sig.Params().Len() == 1 && sig.Results().Len() == 1 &&
 			types.Identical(types.Unalias(sig.Params().At(0).Type()), tp) &&
-			isPureIdentityFuncDecl(info, fd, sig.Params().At(0)) {
+			isPureIdentityFuncDecl(g.info, fd, sig.Params().At(0)) {
 			return true
 		}
-		if recvNamed != nil && recvNamed.Origin().Obj() != nil &&
-			recvNamed.Origin().Obj().Pkg() == pkgTypes && recvNamed.Origin().Obj().Name() == "Generator" &&
-			fnObj.Name() == "Example" && sig.Variadic() && sig.Params().Len() == 1 && sig.Results().Len() == 1 &&
-			isTypesIntSlice(sig.Params().At(0).Type()) &&
-			verifyGeneratorExampleSeedOverride(info, fd, sig.Params().At(0)) {
-			return true
-		}
-		return false
+		return sc.seededMethods[fnObj.Origin()]
 	}
 
-	// 0. Pure value results (scalars, strings, and value arrays/structs of them) that neither
-	// carry dynamic dispatch nor hand out pointers, slices, maps, or channels. If a value
-	// struct defined in pkgTypes is returned, enqueue it so any promoted exported methods are checked.
-	if !refconfine.TypeMayCarryUnknownDynamic(audited, ret) && !typeHandsOutMutableAlias(ret, map[types.Type]bool{}) {
+	// 2. Carrier-free value results that hand out zero mutable reach.
+	if !refconfine.TypeMayCarryUnknownDynamic(audited, ret) && !refconfine.TypeHandsOutMutableReach(ret) {
 		if named, ok := unaliased.(*types.Named); ok && named.Obj() != nil && named.Obj().Pkg() == pkgTypes && enqueueNamed != nil {
 			enqueueNamed(named)
 		}
 		return true
 	}
 
-	// 2. Pointer to a struct defined in pkgTypes with zero exported or promoted fields
-	// (*T, *Generator, *Generator[V], etc.), provided all direct and promoted exported
-	// methods on that struct also satisfy this grammar.
+	// 3. Pointer to a struct defined in pkgTypes with zero exported/promoted fields.
+	// Returning a HandleStruct pointer (*H) requires a sealed execution handle in
+	// sig so callers cannot mint a detached *H outside a test execution context.
 	if ptr, ok := unaliased.(*types.Pointer); ok {
 		if named, ok := types.Unalias(ptr.Elem()).(*types.Named); ok && named.Obj() != nil && named.Obj().Pkg() == pkgTypes {
 			if st, ok := named.Underlying().(*types.Struct); ok && StructHasNoExportedFields(st) {
+				if sc.handleStructs[named.Origin()] && !sigRequiresSealedHarnessHandle(sc, sig, true) {
+					return false
+				}
 				if enqueueNamed != nil {
 					enqueueNamed(named)
 				}
@@ -277,29 +244,23 @@ func validHarnessExportedResultType(
 		}
 	}
 
-	// 3. Subtest/fuzz/action callback shapes: func(*testing.T), func(*testing.T, []byte), map[string]func(*T).
-	if fnSig, ok := unaliased.Underlying().(*types.Signature); ok && fnSig.Recv() == nil && fnSig.Results().Len() == 0 && !fnSig.Variadic() {
-		params := fnSig.Params()
-		if params.Len() == 1 && isTestingTPtrType(params.At(0).Type()) {
-			return true
-		}
-		if params.Len() == 2 && isTestingTPtrType(params.At(0).Type()) && isTypesByteSlice(params.At(1).Type()) {
-			return true
-		}
+	// 4. Subtest/fuzz/state-machine callback shapes:
+	// func(*testing.T), func(*testing.T, []byte), or map[string]func(*H).
+	if isTestingWrapperReturnSig(unaliased) {
+		return true
 	}
 	if mp, ok := unaliased.Underlying().(*types.Map); ok {
 		if keyBasic, ok := types.Unalias(mp.Key()).Underlying().(*types.Basic); ok && keyBasic.Kind() == types.String {
 			if valSig, ok := types.Unalias(mp.Elem()).Underlying().(*types.Signature); ok &&
-				valSig.Recv() == nil && valSig.Results().Len() == 0 && !valSig.Variadic() && valSig.Params().Len() == 1 {
-				if ptr, ok := types.Unalias(valSig.Params().At(0).Type()).(*types.Pointer); ok && types.Identical(types.Unalias(ptr.Elem()), tNamed) {
-					return true
-				}
+				valSig.Recv() == nil && valSig.Results().Len() == 0 && !valSig.Variadic() &&
+				valSig.Params().Len() == 1 && sc.isHandleStructPtr(valSig.Params().At(0).Type()) {
+				return true
 			}
 		}
 	}
 
-	// 4. (*T).Context() context.Context and (*T).Output() io.Writer.
-	if recvNamed != nil && recvNamed.Origin() == tNamed.Origin() {
+	// 5. HandleStruct methods returning context.Context or io.Writer.
+	if recvNamed != nil && sc.handleStructs[recvNamed.Origin()] {
 		if named, ok := unaliased.(*types.Named); ok && named.Obj() != nil && named.Obj().Pkg() != nil {
 			p, n := named.Obj().Pkg().Path(), named.Obj().Name()
 			if (p == "context" && n == "Context") || (p == "io" && n == "Writer") {
@@ -311,9 +272,34 @@ func validHarnessExportedResultType(
 	return false
 }
 
-func sigRequiresHarnessHandleOrTB(pkgTypes *types.Package, tNamed *types.Named, sig *types.Signature) bool {
+func typeParamInCallableScope(tp *types.TypeParam, sig *types.Signature, ownerTypeParams *types.TypeParamList) bool {
+	for _, list := range []*types.TypeParamList{sig.TypeParams(), sig.RecvTypeParams(), ownerTypeParams} {
+		if list == nil {
+			continue
+		}
+		for i := 0; i < list.Len(); i++ {
+			if list.At(i) == tp {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// sigRequiresSealedHarnessHandle reports whether sig requires a sealed
+// execution handle (*H where H is a discovered HandleStruct, or stdlib
+// *testing.T/*testing.B/*testing.F/testing.TB). Unsealed package-defined
+// HandleIfaces are intentionally excluded because arbitrary user types may
+// implement them outside a test execution context.
+func sigRequiresSealedHarnessHandle(sc *harnessScreen, sig *types.Signature, checkRecv bool) bool {
 	if sig == nil {
 		return false
+	}
+	isSealed := func(t types.Type) bool {
+		return sc.isHandleStructPtr(t) || isTestingHandlePtrType(t) || isTestingTBType(t)
+	}
+	if checkRecv && sig.Recv() != nil && isSealed(sig.Recv().Type()) {
+		return true
 	}
 	params := sig.Params()
 	n := params.Len()
@@ -321,19 +307,8 @@ func sigRequiresHarnessHandleOrTB(pkgTypes *types.Package, tNamed *types.Named, 
 		n--
 	}
 	for i := 0; i < n; i++ {
-		pt := types.Unalias(params.At(i).Type())
-		if ptr, isP := pt.(*types.Pointer); isP {
-			if named, isN := types.Unalias(ptr.Elem()).(*types.Named); isN && named.Origin() == tNamed.Origin() {
-				return true
-			}
-		}
-		if named, isN := pt.(*types.Named); isN && named.Obj() != nil {
-			if named.Obj().Pkg() == pkgTypes && named.Obj().Name() == "TB" {
-				return true
-			}
-			if named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "testing" && named.Obj().Name() == "TB" {
-				return true
-			}
+		if isSealed(params.At(i).Type()) {
+			return true
 		}
 	}
 	return false
@@ -360,9 +335,9 @@ func isTypesIntSlice(t types.Type) bool {
 	return ok && b.Kind() == types.Int
 }
 
-func verifyGeneratorExampleSeedOverride(info *types.Info, fd *ast.FuncDecl, seedParam *types.Var) bool {
-	if info == nil || fd == nil || fd.Body == nil || seedParam == nil || len(fd.Body.List) < 2 {
-		return false
+func verifyGeneratorSeedOverride(info *types.Info, pkgTypes *types.Package, fd *ast.FuncDecl, seedParam *types.Var) (*ast.CallExpr, bool) {
+	if info == nil || fd == nil || fd.Body == nil || seedParam == nil || len(fd.Body.List) < 3 {
+		return nil, false
 	}
 	isLenSeedPositive := func(cond ast.Expr) bool {
 		bin, ok := ast.Unparen(cond).(*ast.BinaryExpr)
@@ -374,12 +349,8 @@ func verifyGeneratorExampleSeedOverride(info *types.Info, fd *ast.FuncDecl, seed
 			if !isC || len(call.Args) != 1 {
 				return false
 			}
-			id, isID := peelHarnessCallee(call.Fun).(*ast.Ident)
-			if !isID {
-				return false
-			}
-			b, isB := info.Uses[id].(*types.Builtin)
-			if !isB || b.Name() != "len" {
+			b := syntaxutil.LookupBuiltin(info, syntaxutil.UnwrapCallee(call.Fun))
+			if b == nil || b.Name() != "len" {
 				return false
 			}
 			argID, isArgID := ast.Unparen(call.Args[0]).(*ast.Ident)
@@ -398,7 +369,7 @@ func verifyGeneratorExampleSeedOverride(info *types.Info, fd *ast.FuncDecl, seed
 	}
 	isSeedElem0Expr := func(e ast.Expr) bool {
 		cur := ast.Unparen(e)
-		if call, isC := cur.(*ast.CallExpr); isC && len(call.Args) == 1 && info.Types[peelHarnessCallee(call.Fun)].IsType() {
+		if call, isC := cur.(*ast.CallExpr); isC && len(call.Args) == 1 && info.Types[syntaxutil.UnwrapCallee(call.Fun)].IsType() {
 			cur = ast.Unparen(call.Args[0])
 		}
 		idx, isIdx := cur.(*ast.IndexExpr)
@@ -416,23 +387,113 @@ func verifyGeneratorExampleSeedOverride(info *types.Info, fd *ast.FuncDecl, seed
 		v, exact := constant.Int64Val(tv.Value)
 		return exact && v == 0
 	}
+	matchBaseSeedCall := func(e ast.Expr) (*ast.CallExpr, bool) {
+		c, isC := ast.Unparen(e).(*ast.CallExpr)
+		if !isC || c.Ellipsis.IsValid() || len(c.Args) != 0 {
+			return nil, false
+		}
+		callee := resolveHarnessFuncExpr(info, c.Fun)
+		if callee == nil || callee.Pkg() != pkgTypes || callee.Exported() || callee.Signature() == nil || callee.Signature().Recv() != nil {
+			return nil, false
+		}
+		return c, true
+	}
 
-	// Pattern 1 (rapid@v1.3.0): s := baseSeed(); if len(seed) > 0 { s = uint64(seed[0]) }
-	if initAs, okAs := fd.Body.List[0].(*ast.AssignStmt); okAs && initAs.Tok == token.DEFINE && len(initAs.Lhs) == 1 && len(initAs.Rhs) == 1 {
-		if sID, okID := ast.Unparen(initAs.Lhs[0]).(*ast.Ident); okID {
-			if sVar, okV := info.Defs[sID].(*types.Var); okV && sVar != nil {
-				if ifs, okIf := fd.Body.List[1].(*ast.IfStmt); okIf && ifs.Init == nil && ifs.Else == nil &&
-					isLenSeedPositive(ifs.Cond) && ifs.Body != nil && len(ifs.Body.List) == 1 {
-					if ovAs, okOv := ifs.Body.List[0].(*ast.AssignStmt); okOv && ovAs.Tok == token.ASSIGN && len(ovAs.Lhs) == 1 && len(ovAs.Rhs) == 1 {
-						if lhsID, okLID := ast.Unparen(ovAs.Lhs[0]).(*ast.Ident); okLID && info.Uses[lhsID] == sVar && isSeedElem0Expr(ovAs.Rhs[0]) {
-							return true
+	var sVar *types.Var
+	var baseSeedCall *ast.CallExpr
+	switch st0 := fd.Body.List[0].(type) {
+	case *ast.AssignStmt:
+		// Pattern 1: s := baseSeed(); if len(seed) > 0 { s = uint64(seed[0]) }
+		if st0.Tok == token.DEFINE && len(st0.Lhs) == 1 && len(st0.Rhs) == 1 {
+			if sID, okID := ast.Unparen(st0.Lhs[0]).(*ast.Ident); okID {
+				if cand, okV := info.Defs[sID].(*types.Var); okV && cand != nil {
+					if ifs, okIf := fd.Body.List[1].(*ast.IfStmt); okIf && ifs.Init == nil && ifs.Else == nil &&
+						isLenSeedPositive(ifs.Cond) && ifs.Body != nil && len(ifs.Body.List) == 1 {
+						if ovAs, okOv := ifs.Body.List[0].(*ast.AssignStmt); okOv && ovAs.Tok == token.ASSIGN && len(ovAs.Lhs) == 1 && len(ovAs.Rhs) == 1 {
+							if lhsID, okLID := ast.Unparen(ovAs.Lhs[0]).(*ast.Ident); okLID && info.Uses[lhsID] == cand && isSeedElem0Expr(ovAs.Rhs[0]) {
+								if bc, okBC := matchBaseSeedCall(st0.Rhs[0]); okBC {
+									sVar = cand
+									baseSeedCall = bc
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	case *ast.DeclStmt:
+		// Pattern 2: var s uint64; if len(seed) > 0 { s = uint64(seed[0]) } else { s = baseSeed() }
+		gd, okGD := st0.Decl.(*ast.GenDecl)
+		if okGD && gd.Tok == token.VAR && len(gd.Specs) == 1 {
+			if vs, okVS := gd.Specs[0].(*ast.ValueSpec); okVS && len(vs.Names) == 1 && len(vs.Values) == 0 {
+				if cand, okV := info.Defs[vs.Names[0]].(*types.Var); okV && cand != nil {
+					if ifs, okIf := fd.Body.List[1].(*ast.IfStmt); okIf && ifs.Init == nil &&
+						isLenSeedPositive(ifs.Cond) && ifs.Body != nil && len(ifs.Body.List) == 1 {
+						if elseBlk, okEB := ifs.Else.(*ast.BlockStmt); okEB && len(elseBlk.List) == 1 {
+							ovThen, okT := ifs.Body.List[0].(*ast.AssignStmt)
+							ovElse, okE := elseBlk.List[0].(*ast.AssignStmt)
+							if okT && okE && ovThen.Tok == token.ASSIGN && ovElse.Tok == token.ASSIGN &&
+								len(ovThen.Lhs) == 1 && len(ovThen.Rhs) == 1 && len(ovElse.Lhs) == 1 && len(ovElse.Rhs) == 1 {
+								tID, okTID := ast.Unparen(ovThen.Lhs[0]).(*ast.Ident)
+								eID, okEID := ast.Unparen(ovElse.Lhs[0]).(*ast.Ident)
+								if okTID && okEID && info.Uses[tID] == cand && info.Uses[eID] == cand && isSeedElem0Expr(ovThen.Rhs[0]) {
+									if bc, okBC := matchBaseSeedCall(ovElse.Rhs[0]); okBC {
+										sVar = cand
+										baseSeedCall = bc
+									}
+								}
+							}
 						}
 					}
 				}
 			}
 		}
 	}
-	return false
+	if sVar == nil {
+		return nil, false
+	}
+
+	// Ensure sVar is actually read in the remainder of the method body and is
+	// never reassigned or address-taken after statement 1.
+	usedAfter := false
+	reassignedAfter := false
+	for _, rem := range fd.Body.List[2:] {
+		ast.Inspect(rem, func(n ast.Node) bool {
+			if reassignedAfter || n == nil {
+				return false
+			}
+			switch s := n.(type) {
+			case *ast.AssignStmt:
+				for _, lhs := range s.Lhs {
+					if id, ok := ast.Unparen(lhs).(*ast.Ident); ok && (info.Uses[id] == sVar || info.Defs[id] == sVar) {
+						reassignedAfter = true
+						return false
+					}
+				}
+			case *ast.IncDecStmt:
+				if id, ok := ast.Unparen(s.X).(*ast.Ident); ok && info.Uses[id] == sVar {
+					reassignedAfter = true
+					return false
+				}
+			case *ast.UnaryExpr:
+				if s.Op == token.AND {
+					if id, ok := ast.Unparen(s.X).(*ast.Ident); ok && info.Uses[id] == sVar {
+						reassignedAfter = true
+						return false
+					}
+				}
+			case *ast.Ident:
+				if info.Uses[s] == sVar {
+					usedAfter = true
+				}
+			}
+			return true
+		})
+	}
+	if !usedAfter || reassignedAfter {
+		return nil, false
+	}
+	return baseSeedCall, true
 }
 
 func isTestingTPtrType(t types.Type) bool {
@@ -445,37 +506,57 @@ func isTestingTPtrType(t types.Type) bool {
 		named.Obj().Pkg().Path() == "testing" && named.Obj().Name() == "T"
 }
 
-func isTypesByteSlice(t types.Type) bool {
-	sl, ok := types.Unalias(t).Underlying().(*types.Slice)
+func isTestingHandlePtrType(t types.Type) bool {
+	ptr, ok := types.Unalias(t).(*types.Pointer)
 	if !ok {
 		return false
 	}
-	basic, ok := types.Unalias(sl.Elem()).Underlying().(*types.Basic)
-	return ok && basic.Kind() == types.Byte
+	named, ok := types.Unalias(ptr.Elem()).(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "testing" {
+		return false
+	}
+	switch named.Obj().Name() {
+	case "T", "B", "F":
+		return true
+	}
+	return false
 }
 
-func typeHandsOutMutableAlias(t types.Type, seen map[types.Type]bool) bool {
-	if t == nil {
-		return true
-	}
-	t = types.Unalias(t)
-	if seen[t] {
-		return false
-	}
-	seen[t] = true
-	switch u := t.Underlying().(type) {
-	case *types.Basic:
-		return u.Kind() == types.UnsafePointer || u.Kind() == types.Invalid
-	case *types.Array:
-		return typeHandsOutMutableAlias(u.Elem(), seen)
-	case *types.Struct:
-		for i := 0; i < u.NumFields(); i++ {
-			if typeHandsOutMutableAlias(u.Field(i).Type(), seen) {
-				return true
-			}
+func isTestingTBType(t types.Type) bool {
+	named, ok := types.Unalias(t).(*types.Named)
+	return ok && named.Obj() != nil && named.Obj().Pkg() != nil &&
+		named.Obj().Pkg().Path() == "testing" && named.Obj().Name() == "TB"
+}
+
+func resolveHarnessFuncExpr(info *types.Info, e ast.Expr) *types.Func {
+	switch x := syntaxutil.UnwrapCallee(e).(type) {
+	case *ast.Ident:
+		fn, _ := info.Uses[x].(*types.Func)
+		return fn
+	case *ast.SelectorExpr:
+		if sel := info.Selections[x]; sel != nil {
+			fn, _ := sel.Obj().(*types.Func)
+			return fn
 		}
-		return false
-	default:
-		return true
+		if x.Sel != nil {
+			fn, _ := info.Uses[x.Sel].(*types.Func)
+			return fn
+		}
 	}
+	return nil
+}
+
+func recvNamedTypeName(sig *types.Signature) (pkgPath, typeName string) {
+	if sig == nil || sig.Recv() == nil {
+		return "", ""
+	}
+	rt := types.Unalias(sig.Recv().Type())
+	if ptr, ok := rt.(*types.Pointer); ok {
+		rt = types.Unalias(ptr.Elem())
+	}
+	named, ok := rt.(*types.Named)
+	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+		return "", ""
+	}
+	return named.Obj().Pkg().Path(), named.Obj().Name()
 }

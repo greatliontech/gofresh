@@ -90,7 +90,7 @@ func extractForeignWrapperCapStruct(
 func isVerifiedForeignCapsuleSetterCall(
 	p *packages.Package,
 	idx *refconfine.PkgIndex,
-	clusterMsgGoTypes map[*types.Var][]*types.Named,
+	clusterCapsuleElemTypes map[*types.Var][]*types.Named,
 	call *ast.CallExpr,
 	capNamed, wPriv *types.Named,
 ) bool {
@@ -152,7 +152,7 @@ func isVerifiedForeignCapsuleSetterCall(
 		if sliceVar == nil {
 			return nil
 		}
-		goTypes, okCluster := clusterMsgGoTypes[sliceVar]
+		elemTypes, okCluster := clusterCapsuleElemTypes[sliceVar]
 		if !okCluster {
 			return nil
 		}
@@ -161,10 +161,10 @@ func isVerifiedForeignCapsuleSetterCall(
 			return nil
 		}
 		k, okK := constant.Int64Val(tv.Value)
-		if !okK || k < 0 || int(k) >= len(goTypes) {
+		if !okK || k < 0 || int(k) >= len(elemTypes) {
 			return nil
 		}
-		return goTypes[int(k)]
+		return elemTypes[int(k)]
 	}
 
 	var msCall *ast.CallExpr
@@ -230,7 +230,7 @@ func classifyForeignUnsafePtrConvs(
 	p *packages.Package,
 	idx *refconfine.PkgIndex,
 	exempted map[ast.Node]bool,
-	clusterMsgGoTypes map[*types.Var][]*types.Named,
+	clusterCapsuleElemTypes map[*types.Var][]*types.Named,
 ) (map[*ast.CallExpr]foreignPtrConvClass, bool) {
 	classes := map[*ast.CallExpr]foreignPtrConvClass{}
 	if p == nil || p.Types == nil || p.TypesInfo == nil || idx == nil {
@@ -306,7 +306,7 @@ func classifyForeignUnsafePtrConvs(
 					}
 					if types.IsInterface(sig.Recv().Type()) ||
 						syntaxutil.DerefNamedStruct(sig.Recv().Type()) != wPriv ||
-						!isVerifiedForeignCapsuleSetterCall(p, idx, clusterMsgGoTypes, x, capNamed, wPriv) {
+						!isVerifiedForeignCapsuleSetterCall(p, idx, clusterCapsuleElemTypes, x, capNamed, wPriv) {
 						okPair = false
 						return false
 					}

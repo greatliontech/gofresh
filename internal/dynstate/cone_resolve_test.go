@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"pgregory.net/rapid"
 )
@@ -109,15 +108,16 @@ func TestAnalyzeConeAllFactFieldsCorruptionAndForeignPoisonMatrix(t *testing.T) 
 				Constructor: syntaxutil.FuncKey{Pkg: ownerPkg, Name: "NewM"},
 			}}
 		},
-		"HarnessDischarges": func(f *Fact) { f.HarnessDischarges = []string{ownerVar} },
-		"ProtoClusters":     func(f *Fact) { f.ProtoClusters = []protoaudit.ProtoClusterFact{{}} },
+		"HarnessDischarges":    func(f *Fact) { f.HarnessDischarges = []string{ownerVar} },
+		"LazyOnceCapsuleTypes": func(f *Fact) { f.LazyOnceCapsuleTypes = []syntaxutil.LazyOnceCapsuleType{{}} },
+		"InitBuilders":         func(f *Fact) { f.InitBuilders = []syntaxutil.InitBuilderFact{{}} },
+		"InitSettledClusters":  func(f *Fact) { f.InitSettledClusters = []syntaxutil.InitSettledClusterFact{{}} },
 		"ReadOnlyVarAliases": func(f *Fact) {
 			f.ReadOnlyVarAliases = []syntaxutil.ReadOnlyVarAlias{{
 				Key:    "other.pkg.A",
 				Target: ownerVar,
 			}}
 		},
-		"ProtoRuntimeTypes": func(f *Fact) { f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{}} },
 		"StaticCompositeGlobals": func(f *Fact) {
 			f.StaticCompositeGlobals = []syntaxutil.StaticCompositeGlobalFact{{
 				Key:        "other.pkg.Desc",

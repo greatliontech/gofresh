@@ -300,9 +300,9 @@ func unmarshalDefault(s string, fd defval.FieldDesc, allowUnresolvable bool) (de
 		t.Fatalf("conds unexpectedly contained self-package GuardPkg %+v: got %+v", badGuardPkg, conds)
 	}
 	wantDescGuard := syntaxutil.ConditionalStructMutation{
-		Struct:                  syntaxutil.TypeRef{Pkg: "example.com/ext", Name: "Field"},
-		GuardStruct:             syntaxutil.TypeRef{Pkg: "example.com/ext", Name: "defaultValue"},
-		RequireDescBuilderGuard: true,
+		Struct:                       syntaxutil.TypeRef{Pkg: "example.com/ext", Name: "Field"},
+		GuardStruct:                  syntaxutil.TypeRef{Pkg: "example.com/ext", Name: "defaultValue"},
+		RequireImmutableCapsuleGuard: true,
 	}
 	if !slices.Contains(conds, wantDescGuard) {
 		t.Fatalf("conds = %+v, missing %+v", conds, wantDescGuard)

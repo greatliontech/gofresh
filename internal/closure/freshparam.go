@@ -1,12 +1,14 @@
 package closure
 
 import (
+	"context"
 	"go/token"
 	"go/types"
 	"sort"
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
+	"github.com/greatliontech/gofresh/internal/propharness"
 )
 
 // freshParamAnalysis carries fresh-path capabilities across static
@@ -37,15 +39,12 @@ type ssaProgramIndex struct {
 	programSites           map[*ssa.Function][]ssa.CallInstruction
 	programValueRef        map[*ssa.Function]bool
 	programFunctions       map[*ssa.Function]bool
-	unmutatedSentinel      map[*ssa.Global]bool
-	// propertyHarnessAudited carries the program-level audit verdict:
-	// the closed-value walk's harness arms consult it so no admission
-	// outlives the audit.
-	propertyHarnessAudited bool
+	unmutatedSentinel map[*ssa.Global]bool
+	// verifiedHarnesses maps verified property-harness dependency paths in
+	// prog to their discovered protocol surface; empty disables harness arms.
+	verifiedHarnesses map[string]*propharness.VerifiedPackage
 	// selectionAudited is the analysis' toolchain-source audit verdict
-	// (the Hasher's, resolved at construction): the closed-value
-	// walk's audited-set arms consult it exactly as the harness arms
-	// consult propertyHarnessAudited.
+	// (the Hasher's, resolved at construction).
 	selectionAudited bool
 	pureDelegates    map[string]bool
 	// isStd reports whether a function belongs to a standard-library
@@ -111,7 +110,10 @@ func newDynamicMemoQuad() *[4]dynamicMemoTables {
 // subjectQuery holds the per-subject reachability, caller enumeration, and
 // per-subject memo tables.
 type subjectQuery struct {
-	functions map[*ssa.Function]bool
+	traceCtx      context.Context
+	functions     map[*ssa.Function]bool
+	flowFunctions map[*ssa.Function]bool
+	rtaFunctions  map[*ssa.Function]bool
 	// callers lists the attributed static call sites per callee; only
 	// sites inside reachable functions participate.
 	callers map[*ssa.Function][]ssa.CallInstruction
@@ -392,7 +394,7 @@ type freshParamKey struct {
 	idx int
 }
 
-func (s *callerReferenceSummary) ssaIndex(selectionAudited, propertyHarnessAudited bool, pureDelegates, userPaths map[string]bool, isStd func(*ssa.Function) bool) ssaProgramIndex {
+func (s *callerReferenceSummary) ssaIndex(selectionAudited bool, verifiedHarnesses map[string]*propharness.VerifiedPackage, pureDelegates, userPaths map[string]bool, isStd func(*ssa.Function) bool) ssaProgramIndex {
 	if s != nil {
 		if pureDelegates == nil {
 			pureDelegates = s.pureDelegates
@@ -407,12 +409,12 @@ func (s *callerReferenceSummary) ssaIndex(selectionAudited, propertyHarnessAudit
 		}
 	}
 	idx := ssaProgramIndex{
-		propertyHarnessAudited: propertyHarnessAudited,
-		selectionAudited:       selectionAudited,
-		pureDelegates:          pureDelegates,
-		userPaths:              userPaths,
-		summary:                s,
-		isStd:                  isStd,
+		verifiedHarnesses: verifiedHarnesses,
+		selectionAudited:  selectionAudited,
+		pureDelegates:     pureDelegates,
+		userPaths:         userPaths,
+		summary:           s,
+		isStd:             isStd,
 	}
 	if s != nil {
 		idx.prog = s.prog
@@ -427,8 +429,15 @@ func (s *callerReferenceSummary) ssaIndex(selectionAudited, propertyHarnessAudit
 	return idx
 }
 
-func newBitOnlyFreshParamAnalysis(propertyHarnessAudited, selectionAudited bool, pureDelegates map[string]bool, userPaths map[string]bool, summary *callerReferenceSummary, isStd func(*ssa.Function) bool) *freshParamAnalysis {
-	idx := summary.ssaIndex(selectionAudited, propertyHarnessAudited, pureDelegates, userPaths, isStd)
+func newBitOnlyFreshParamAnalysis(includeHarnesses, selectionAudited bool, pureDelegates map[string]bool, userPaths map[string]bool, summary *callerReferenceSummary, isStd func(*ssa.Function) bool) *freshParamAnalysis {
+	var verified map[string]*propharness.VerifiedPackage
+	if includeHarnesses && summary != nil {
+		verified = summary.verifiedHarnesses
+		if verified == nil && summary.prog != nil {
+			verified = verifiedHarnessesProg(selectionAudited, summary.prog)
+		}
+	}
+	idx := summary.ssaIndex(selectionAudited, verified, pureDelegates, userPaths, isStd)
 	// Parameter crossing stays refused on bit-only analyses
 	// (REQ-closure-observability-property-harness).
 	idx.programSites = nil
@@ -567,7 +576,7 @@ func (fp *freshParamAnalysis) canWriteProgMemo(outsideCallee bool, usedSubject b
 
 func newEnumFreshParamAnalysis(audited bool, pureDelegates map[string]bool, userPaths map[string]bool, root *ssa.Function, sites []ssa.CallInstruction, summary *callerReferenceSummary) *freshParamAnalysis {
 	fp := &freshParamAnalysis{
-		ssaProgramIndex: summary.ssaIndex(audited, false, pureDelegates, userPaths, nil),
+		ssaProgramIndex: summary.ssaIndex(audited, nil, pureDelegates, userPaths, nil),
 		subjectQuery: subjectQuery{
 			enumOnly:    true,
 			enumRoot:    root,
@@ -675,7 +684,7 @@ func (fp *freshParamAnalysis) newStructStoreWalkFP(inProgramSites, inFieldStore 
 }
 
 func newFreshParamAnalysis(audited bool, pureDelegates map[string]bool, reach attributedReachability, isStd func(*ssa.Function) bool) *freshParamAnalysis {
-	idx := reach.summary.ssaIndex(audited, reach.propertyHarnessAudited, pureDelegates, reach.userPaths, isStd)
+	idx := reach.summary.ssaIndex(audited, reach.verifiedHarnesses, pureDelegates, reach.userPaths, isStd)
 	if isStd == nil {
 		idx.isStd = nil
 	}
@@ -706,8 +715,9 @@ func newFreshParamAnalysis(audited bool, pureDelegates map[string]bool, reach at
 	fp := &freshParamAnalysis{
 		ssaProgramIndex: idx,
 		subjectQuery: subjectQuery{
-			functions:   reach.functions,
-			callers:     map[*ssa.Function][]ssa.CallInstruction{},
+			functions:    reach.functions,
+			rtaFunctions: reach.rtaFunctions,
+			callers:      map[*ssa.Function][]ssa.CallInstruction{},
 			dynamic:     map[*ssa.Function]bool{},
 			subjectRoot: reach.subjectRoot,
 			argFresh:    map[freshParamKey]bool{},

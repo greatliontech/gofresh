@@ -9,6 +9,125 @@ import (
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
+// IsObjectClosed reports whether key is a declared package variable whose
+// closed sentinel opacity remains unbroken across allFacts.
+func (r *DeferralResolution) IsObjectClosed(key string) bool {
+	return r != nil && r.Declared[key] && !r.NotOpaque[key]
+}
+
+// FieldPopulationProves resolves one field-position use against the carrier's
+// registered population. On failure the second result names the unproven
+// deferred parameter key when one decided it — zero value when a poison, an
+// unresolved constructor, or an unproven carrier owner decided
+// (REQ-closure-shared-dynamic-state, REQ-explain-chain).
+func (r *DeferralResolution) FieldPopulationProves(varKey, field string, idx int) (bool, syntaxutil.ParamKey) {
+	if r == nil {
+		return false, syntaxutil.ParamKey{}
+	}
+	if r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: varKey}] ||
+		r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: varKey, HasPos: true, Field: field, Index: -1}] ||
+		r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: varKey, HasPos: true, Field: field, Index: idx}] {
+		return false, syntaxutil.ParamKey{}
+	}
+	for _, paramKey := range r.FieldDeferAt[syntaxutil.FieldPosKey{Owner: varKey, Field: field, Index: idx}] {
+		if !r.ParamLeakFree[paramKey] {
+			return false, paramKey
+		}
+	}
+	seen := map[syntaxutil.FuncKey]bool{}
+	ctors := r.CtorsOf[varKey]
+	stack := make([]syntaxutil.FuncKey, len(ctors))
+	for i := range ctors {
+		stack[len(ctors)-1-i] = ctors[i]
+	}
+	for len(stack) > 0 {
+		fnKey := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[fnKey] {
+			continue
+		}
+		seen[fnKey] = true
+		if !r.EnvFreeResolved[fnKey] {
+			return false, syntaxutil.ParamKey{}
+		}
+		if r.RetPoisonAt[syntaxutil.ReturnFieldParamPoison{Func: fnKey}] ||
+			r.RetPoisonAt[syntaxutil.ReturnFieldParamPoison{Func: fnKey, HasPos: true, Field: field, Index: -1}] ||
+			r.RetPoisonAt[syntaxutil.ReturnFieldParamPoison{Func: fnKey, HasPos: true, Field: field, Index: idx}] {
+			return false, syntaxutil.ParamKey{}
+		}
+		for _, paramKey := range r.RetDeferAt[syntaxutil.ReturnFieldPosKey{Func: fnKey, Field: field, Index: idx}] {
+			if !r.ParamLeakFree[paramKey] {
+				return false, paramKey
+			}
+		}
+		if deps := r.EnvFreeDeps[fnKey]; len(deps) > 0 {
+			sortedDeps := make([]syntaxutil.FuncKey, 0, len(deps))
+			for dep := range deps {
+				sortedDeps = append(sortedDeps, dep)
+			}
+			slices.SortFunc(sortedDeps, syntaxutil.FuncKey.Compare)
+			for i := len(sortedDeps) - 1; i >= 0; i-- {
+				stack = append(stack, sortedDeps[i])
+			}
+		}
+	}
+	if r.OwnerUnproven[varKey] {
+		return false, syntaxutil.ParamKey{}
+	}
+	return true, syntaxutil.ParamKey{}
+}
+
+func (e *EnvAuditResolution) DepResolved(dep syntaxutil.EnvAuditTarget) bool {
+	if !dep.Valid() {
+		return false
+	}
+	if dep.IsParam() {
+		return e.InsResolved[dep.Param()]
+	}
+	return e.Resolved[dep.Func]
+}
+
+// CarrierLinkGraph builds the symmetric adjacency map of init-flow carrier
+// storage links across allFacts.
+func CarrierLinkGraph(allFacts map[string][]Fact, malformed func(Fact)) map[string]map[string]bool {
+	var validLinks []syntaxutil.CarrierLink
+	for _, facts := range allFacts {
+		for _, fact := range facts {
+			bad := false
+			for _, link := range fact.CarrierLinks {
+				if !link.Valid() {
+					bad = true
+					continue
+				}
+				validLinks = append(validLinks, link)
+			}
+			if bad && malformed != nil {
+				malformed(fact)
+			}
+		}
+	}
+	return buildCarrierLinkGraph(validLinks, nil)
+}
+
+func addMapSet[K, V comparable](m map[K]map[V]bool, k K, v V) {
+	if m[k] == nil {
+		m[k] = map[V]bool{}
+	}
+	m[k][v] = true
+}
+
+func buildCarrierLinkGraph(validLinks []syntaxutil.CarrierLink, resolution *DeferralResolution) map[string]map[string]bool {
+	linkAdj := map[string]map[string]bool{}
+	for _, link := range validLinks {
+		if resolution != nil && (resolution.IsObjectClosed(link.From) || resolution.IsObjectClosed(link.To)) {
+			continue
+		}
+		addMapSet(linkAdj, link.From, link.To)
+		addMapSet(linkAdj, link.To, link.From)
+	}
+	return linkAdj
+}
+
 type coneResolveTables struct {
 	q                           ConeQuery
 	tracing                     bool
@@ -710,7 +829,7 @@ func (crt *coneResolveTables) solveFixedPointsAndAssemble() *ConeAnalysis {
 					out.NonVouchDischarged[key] = true
 					continue
 				}
-				if discharges.isProtoAttestedDischarged(pkgPath, key, crt.q.SingleSubject, crt.malformedFactVars) {
+				if discharges.isClusterAttestedDischarged(pkgPath, key, crt.q.SingleSubject, crt.malformedFactVars) {
 					out.NonVouchDischarged[key] = true
 				}
 			}

@@ -33,6 +33,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
 	prog "github.com/greatliontech/gofresh/internal/closure/internal/program"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/propharness"
 )
 
 // program aliases the internal loader's type so every analysis site keeps
@@ -149,8 +150,8 @@ type Hasher struct {
 	maximalTestingUnfiltered map[string]maximalEffectScan    // per-call unfiltered typed testing-runtime effects by requested package
 	maximalEffects           map[string]maximalEffectsResult // package external-effect scans by requested package
 	maximalFiles             map[string]maximalEffectScan    // per-file effect scans by absolute path
-	maximalParsedFiles       map[string]*parsedMaximalFile   // per-call parsed ASTs and import tables for maximal scans
-	harnessVerdict           map[string]bool                 // mechanical property-harness verification verdicts by package dir
+	maximalParsedFiles       map[string]*parsedMaximalFile            // per-call parsed ASTs and import tables for maximal scans
+	harnessVerdict           map[string]*propharness.VerifiedPackage  // mechanical property-harness verification verdicts by package dir
 	// contribs memoizes per-node closure contributions within ONE
 	// top-level batch call: each public batch entry resets it, so content
 	// is re-observed per call (the Hasher's pinned contract) while subjects

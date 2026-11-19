@@ -2568,27 +2568,34 @@ func FuzzMaximalEffectsMonotonicity(f *testing.F) {
 			t.Fatalf("colliding explicit import aliases did not fail closed: %+v, err=%v", collideScan, err)
 		}
 
-		if !propharness.IsHarnessPath("pgregory.net/rapid") || propharness.IsHarnessPath("testing") {
-			t.Fatal("IsHarnessPath misclassified pgregory.net/rapid vs testing")
+		if !propharness.MayBeHarnessPkgPath("example.com/propcheck") || propharness.MayBeHarnessPkgPath("testing") {
+			t.Fatal("MayBeHarnessPkgPath misclassified example.com/propcheck vs testing")
 		}
 		if propharness.VerifyPackage(false, nil) || propharness.VerifyPackage(true, nil) {
 			t.Fatal("VerifyPackage accepted nil package")
 		}
-		rapidPkg := types.NewPackage("pgregory.net/rapid", "rapid")
-		closedT := types.NewNamed(
-			types.NewTypeName(token.NoPos, rapidPkg, "T", nil),
-			types.NewStruct([]*types.Var{types.NewField(token.NoPos, rapidPkg, "seed", types.Typ[types.Uint64], false)}, nil),
+		harnessPkg := types.NewPackage("example.com/propcheck", "propcheck")
+		closedCtx := types.NewNamed(
+			types.NewTypeName(token.NoPos, harnessPkg, "Context", nil),
+			types.NewStruct([]*types.Var{types.NewField(token.NoPos, harnessPkg, "seed", types.Typ[types.Uint64], false)}, nil),
 			nil,
 		)
-		openT := types.NewNamed(
-			types.NewTypeName(token.NoPos, rapidPkg, "T", nil),
-			types.NewStruct([]*types.Var{types.NewField(token.NoPos, rapidPkg, "Seed", types.Typ[types.Uint64], false)}, nil),
+		openCtx := types.NewNamed(
+			types.NewTypeName(token.NoPos, harnessPkg, "Context", nil),
+			types.NewStruct([]*types.Var{types.NewField(token.NoPos, harnessPkg, "Seed", types.Typ[types.Uint64], false)}, nil),
 			nil,
 		)
-		if !propertyHarnessHandleType(types.NewPointer(closedT)) || propertyHarnessHandleType(types.NewPointer(openT)) {
-			t.Fatal("propertyHarnessHandleType misclassified unexported-field vs exported-field rapid.T")
+		vp := &propharness.VerifiedPackage{
+			PkgPath:       "example.com/propcheck",
+			PkgName:       "propcheck",
+			PrimaryDriver: "Verify",
+			HandleStructs: map[string]bool{"Context": true},
 		}
-		phFact := propertyHarnessFact()
+		verifiedMap := map[string]*propharness.VerifiedPackage{"example.com/propcheck": vp}
+		if !propertyHarnessHandleType(types.NewPointer(closedCtx), verifiedMap) || propertyHarnessHandleType(types.NewPointer(openCtx), verifiedMap) {
+			t.Fatal("propertyHarnessHandleType misclassified unexported-field vs exported-field handle struct")
+		}
+		phFact := propertyHarnessFact(vp)
 		if !phFact.observable || maximalObservabilityBlocker(audited, phFact) {
 			t.Fatalf("propertyHarnessFact = %+v, want observable non-blocker", phFact)
 		}
@@ -2621,7 +2628,7 @@ func FuzzObservabilityLattice(f *testing.F) {
 		}
 		gomaxEff := symbolExternalEffect(externalEffectUnauditedStandard, "runtime", "GOMAXPROCS", "reaches unaudited standard operation runtime.GOMAXPROCS")
 		fileIOEff := symbolExternalEffect(externalEffectFileIO, "os", "Open", "reaches os.Open (file I/O)")
-		phFact := propertyHarnessFact()
+		phFact := propertyHarnessFact(&propharness.VerifiedPackage{PkgPath: "example.com/propcheck", PrimaryDriver: "Verify"})
 		if !preferEffectReason(fileIOEff, gomaxEff) || !preferEffectReason(gomaxEff, phFact) {
 			t.Fatal("preferEffectReason violated cause-preference rank order")
 		}

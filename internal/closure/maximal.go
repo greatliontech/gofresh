@@ -19,7 +19,6 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
@@ -298,7 +297,7 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 		if pkg.Standard || pkg.Module == nil || pkg.IsGeneratedTestMainFor(pkgPath) {
 			continue
 		}
-		if h.propertyHarnessAuditedListPkg(pkgPath, &pkg) {
+		if vp := h.propertyHarnessAuditedListPkg(pkgPath, &pkg); vp != nil {
 			// Audited property-harness surface: its files carry the
 			// harness's own clock, filesystem, and flag protocol, all
 			// covered by the mechanical package verification - the scan
@@ -308,7 +307,7 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 			// never purity - a property run's outcome rides the
 			// harness's log-surfaced configuration, not the sources alone
 			// (REQ-closure-observability-property-harness).
-			record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact()}})
+			record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact(vp)}})
 			continue
 		}
 		if scan, ok, err := h.pinnedEffectScanWithContext(pkg, declaredNames, nonStdPaths, overridesKey); err != nil {
@@ -1228,12 +1227,11 @@ func (h *Hasher) subjectMaximalExternalEffectsWithZeroGlobals(base *tier2Base, p
 		if pkg.Standard || pkg.Module == nil || pkg.IsGeneratedTestMainFor(pkgPath) {
 			continue
 		}
-		if propharness.IsHarnessPath(pkg.ImportPath) &&
-			!listPkgHasNativeOrEmbed(&pkg) &&
-			base != nil &&
-			propertyHarnessAuditedProg(h.SelectionAudited(), base.prog) {
-			record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact()}})
-			continue
+		if !listPkgHasNativeOrEmbed(&pkg) && base != nil {
+			if vp := verifiedHarnessesProg(h.SelectionAudited(), base.prog)[pkg.ImportPath]; vp != nil {
+				record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact(vp)}})
+				continue
+			}
 		}
 		srcPath := pkg.SourcePath()
 		pkgHasZeroGlobals := hasPkgZeroGlobals(startupZeroGlobalDecls, srcPath) || hasPkgZeroGlobals(wholeZeroGlobalDecls, srcPath)

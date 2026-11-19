@@ -404,8 +404,8 @@ the specific variable (REQ-vouch-discharge in
 [purity.md](purity.md); version-pinned dependencies only, the acceptance
 recorded on the evidence), a checked implementation discharge (the synchronization,
 closed static-composite, pooling, mapping, and memoization claims below), the author's
-`//gofresh:single-subject` variable directive and the generated-proto
-descriptor cluster under the caller's attestation, a read-only pointer-sharing
+`//gofresh:single-subject` variable directive and the init-settled
+builder-and-capsule cluster under the caller's attestation, a read-only pointer-sharing
 named-struct package-variable alias inheriting one of those binary-wide
 type-guarded capsule or composite discharges while strictly preserving its
 target's attestation and recording discipline,
@@ -796,19 +796,25 @@ discharge is recorded on the subject's evidence with the
 attestation's other discharges (REQ-vouch-recorded in
 [purity.md](purity.md)).
 
-**REQ-closure-shared-dynamic-state-proto** (invariant): The generated-proto descriptor cluster is an
-implementation claim about build-once descriptor state and lazy message-info
-memoization: the stored values are content-invariant functions of the compiled-in
-schema. Discharge MUST require a checked derivation over the selected generated
-source, its protobuf runtime and all subordinate implementation claims,
+**REQ-closure-shared-dynamic-state-proto** (invariant): An init-settled builder-and-capsule cluster
+(such as a generated schema descriptor cluster) is an
+implementation claim about build-once initialization state and lazy once-memoized
+capsule structures: the stored values are content-invariant functions of compiled-in
+inputs. Discharge MUST require a checked derivation over the selected
+source, its builder and lazy-capsule runtime packages, and all subordinate implementation claims
+(including single-assignment `init()` builder construction, `sync.Once` or atomic-pointer
+capsule initialization dominance before sub-struct pointer handouts, exported-field
+nil-guard initialization, stateless or local-`sync.Once` closure captures, pure snapshot
+validation, immutable capsule guards across interface-typed containers, and post-init
+carrier-write sink isolation across the graph),
 together with the caller's single-subject-process assertion (whereas closed
-static composite service or descriptor tables free of lazy runtime mutation
+static composite tables free of lazy runtime mutation
 discharge attestation-free under
 REQ-closure-shared-dynamic-state-audited-discharges, and read-only
 pointer-sharing named-struct package-variable aliases targeting cluster
-descriptor capsules inherit the attested discharge and record alongside the
+capsules inherit the attested discharge and record alongside the
 cluster variable). A
-generated-file header, generator name or runtime version is neither an author
+generated-file header, package path, field or method name, generator name, or runtime version is neither an author
 assertion nor a proof. The same derivation rules apply to generated and
 handwritten source, pinned dependencies and mutable-local checkouts. A
 load-bearing execution-model assertion remains recorded with its discharged
@@ -2218,48 +2224,57 @@ implementation to verify; a name-inventory canary can detect drift but cannot
 prove the driver body, callback completion or observation delivery.
 
 **REQ-closure-observability-property-harness** (invariant): A property-testing
-harness, including `pgregory.net/rapid`, MUST be summarized at a walk or
-package-scan boundary only under a checked derivation that everything ambient
-in the summarized behavior is
-the harness's own protocol (the run configuration it reads is a caller-owned
-harness run condition like benchmark pacing, the clock it paces by drives only
-its harness-log summary and shrink budget, its failure artifacts are failfile
-replay inputs under `testdata/rapid` or the configured failfile flag and
-failure-reproduction outputs, and its value generation is process-local PRNG
-state seeded by its harness configuration or per-run entropy), and the property callback is subject
+harness package MUST be summarized at a walk or
+package-scan boundary only under a checked derivation over its selected Go
+sources and types (importing `testing`, zero native, assembly, `unsafe`, `embed`,
+or `go:linkname` channels, and exclusively allowed standard-library packages)
+proving that everything ambient in the summarized behavior is
+the harness's own protocol (its run configuration is read solely from
+`<UPPER_PKG>_*` environment variables and `<pkg>.*` flags derived from the
+package's identifier, the clock it paces by drives only its harness-log summary
+and shrink budget, its failure and debug artifacts are failfile replay inputs
+under `testdata/<pkg>` or its configured failfile flag and atomic/diagnostic
+outputs, its value generation uses process-local PRNG state seeded by its harness
+configuration or per-run entropy, and every helper reading ambient clocks,
+entropy, flags, environment-derived state, filesystem failfiles, or `testing`
+mode queries is caller-confined to `init()` or harness execution entrypoints),
+and the property callback is subject
 flow, walked and classified at its own sites through the harness's
-dispatch. Version pins and local-source identity identify the implementation,
-not its protocol semantics. Unsupported harness or subordinate toolchain
+dispatch. Package paths, symbol names, version pins, and local-source identity
+never establish protocol semantics. Unsupported harness or subordinate toolchain
 behavior retains its ordinary classification. Exported functions or methods
-returning a generator type parameter (rather than a generator, handle, error,
-or void) must either require a harness execution handle parameter (`*T` or
-`TB`), be a pure single-argument identity function, or be `(*Generator[V]).Example(seed ...int) V`
-whose body deterministically overrides the base entropy seed whenever `len(seed) > 0`;
-calling `Example` without a statically non-empty explicit seed slice draws
+returning a type parameter (rather than a verified generator, sealed handle, error,
+scalar, or void) must either require a sealed execution handle parameter (a harness
+handle struct with no exported fields, `*testing.T`, or `testing.TB` — never an
+unsealed caller-implementable interface), be a pure single-argument identity function,
+or be a variadic-seed generator sample method whose body deterministically overrides
+the base entropy seed whenever the explicit seed slice is non-empty;
+calling such a sample method without a statically non-empty explicit seed slice draws
 unlogged per-call entropy outside a `testing.TB`-logged property run and
 classifies as non-observable randomness across subject, test-main, and startup
 flows. The checked claim is sound only paired with a
 boundary gate on every flow that can call into the harness — subject,
 test-main, and startup alike: each dynamic-carrying argument of a
 statically dispatched harness call must be judged closed, where the judgment
-admits exactly the subject-closed value walk, the harness's own
-handed-in handle at parameter position (the property harness's `T`
+admits exactly the subject-closed value walk, a handed-in sealed handle at
+parameter position (the property harness's unexported-field handle struct
 and the standard harness's `T`/`B`/`TB` — constructed only by their
-harness behind unexported fields and handed per-invocation; a handle
-loaded from shared state is a sibling invocation's value and refuses
-like any other load), a gate-passing harness call result (the wrapped
-callback and generator values — excluding unseeded `Example` calls — closed for dispatch judgment wherever
-they later cross a gate), and a locally built variadic slice of
+harness and handed per-invocation; a handle loaded from shared state,
+synthesized as `nil`, or passed via an unsealed interface refuses),
+a gate-passing harness call result (excluding unseeded sample calls — closed for
+dispatch judgment wherever it later crosses a gate), and a locally built variadic slice of
 judged elements; every other value — a load from shared mutable
 state, a generator laundered through an ordinary parameter whose
 callers pass unjudged values — widens the subject world. Harness-
-owned TYPES confer no admission by themselves: a gated call's closure
+owned types confer no admission by themselves: a gated call's closure
 is per-subject provenance, never a per-program fact a sibling's flow
 could have supplied. A named harness function reached via a computed
 function-value call keeps the conservative refusal — no static site
 exists to gate the crossing — whereas in subject flow an anonymous
-harness function (the wrapped callback MakeCheck returns) is admitted,
-and a named harness method (other than `Example`) reached via interface invoke is admitted
+harness wrapper closure is admitted only when every dynamic-carrying call
+argument is closed and any leading harness handle or logger parameter receives a
+handed-in sealed handle,
+and a named harness method (other than a variadic-seed sample method) reached via interface invoke is admitted
 only when every dynamic-carrying invoke argument passes the boundary
 gate and every non-harness interface boxing of a type mentioning the
 receiver's origin across the subject's RTA-reachable functions occurs

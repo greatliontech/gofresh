@@ -20,9 +20,9 @@ func isStdImportPathShape(path string) bool {
 }
 
 func (r *attributedRTA) isHarnessInternalStdPkg(pkgPath string) bool {
-	return r.harnessPkg != "" &&
+	return r.hasHarnessPlane() &&
 		pkgPath != "" &&
-		pkgPath != r.harnessPkg &&
+		!r.isHarnessPkg(pkgPath) &&
 		(pkgPath != "testing" || r.harnessOnlyTesting) &&
 		pkgPath != "context" &&
 		!r.userPkgs[pkgPath] &&
@@ -38,7 +38,7 @@ func isExcludedHarnessStdNamed(obj *types.TypeName) bool {
 }
 
 func (r *attributedRTA) isPureHarnessInternalStdType(t types.Type) bool {
-	if r.harnessPkg == "" || t == nil {
+	if !r.hasHarnessPlane() || t == nil {
 		return false
 	}
 	t = types.Unalias(t)
@@ -69,7 +69,7 @@ func (r *attributedRTA) isPureHarnessInternalStdType(t types.Type) bool {
 					return false
 				}
 				p := obj.Pkg().Path()
-				if !isStdImportPathShape(p) || r.userPkgs[p] || p == r.harnessPkg || p == "testing" {
+				if !isStdImportPathShape(p) || r.userPkgs[p] || r.isHarnessPkg(p) || p == "testing" {
 					return false
 				}
 				if r.isHarnessInternalStdPkg(p) {
@@ -318,7 +318,7 @@ func (r *attributedRTA) visitRuntimeType(T types.Type, masks uint64, skip, harne
 					}
 					sites, _ := r.invokeSites.At(I).(map[ssa.CallInstruction]uint64)
 					for site, siteMasks := range sites {
-						if r.funcPkgPath(site.Parent()) == r.harnessPkg {
+						if r.isHarnessPkg(r.funcPkgPath(site.Parent())) {
 							r.addHarnessStdInvokeEdge(site, T, (accessDelta&siteMasks)&^cinfo.masks, true)
 						}
 					}
@@ -330,7 +330,7 @@ func (r *attributedRTA) visitRuntimeType(T types.Type, masks uint64, skip, harne
 					for site, siteMasks := range sites {
 						r.addInvokeEdge(site, T, accessDelta&siteMasks)
 					}
-					if r.harnessPkg != "" {
+					if r.hasHarnessPlane() {
 						hSites, _ := r.harnessInvokeSites.At(I).(map[ssa.CallInstruction]uint64)
 						for site, siteMasks := range hSites {
 							r.addHarnessStdInvokeEdge(site, T, accessDelta&siteMasks, false)

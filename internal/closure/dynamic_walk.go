@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
-	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
@@ -1095,10 +1094,7 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 						return false
 					}
 				}
-			} else if ok && propharness.IsHarnessPath(funcPkgPath(fn)) {
-				if wrapFP == nil || !wrapFP.propertyHarnessAudited {
-					return false
-				}
+			} else if ok && wrapFP != nil && wrapFP.verifiedHarnesses[funcPkgPath(fn)] != nil {
 				for _, binding := range v.Bindings {
 					if binding == nil || !refconfine.TypeMayCarryDynamic(wrapFP.selectionAudited, binding.Type(), map[types.Type]bool{}) {
 						continue
@@ -1333,9 +1329,9 @@ func walkDynamicValueUncached(value ssa.Value, collect *dynamicValueCollector, s
 			}
 			return collect.isSeeds()
 		}
-		// A gate-passing static call into the property harness yields a
-		// closed value: the harness wraps exactly the closed callables
-		// the boundary gate judged (rapid.MakeCheck's returned callback
+		// A gate-passing static call into a verified property harness yields a
+		// closed value: the harness wraps only the closed callables the
+		// boundary gate judged (a subtest wrapper factory's returned callback
 		// feeding the subtest driver is the driving shape).
 		if !collecting && propertyHarnessClosedResult(v, fp) {
 			markDynamicLeaf(fp)

@@ -479,7 +479,7 @@ func (msc *mutatedStructCollector) scanSyntaxFiles() {
 										continue
 									}
 									if isIfaceRecv || (recvSt != nil && recvSt.Obj().Pkg() == capNamed.Obj().Pkg() &&
-										!isVerifiedForeignCapsuleSetterCall(msc.p, msc.idx, msc.clusterMsgGoTypes, x, capNamed, recvSt)) {
+										!isVerifiedForeignCapsuleSetterCall(msc.p, msc.idx, msc.clusterCapsuleElemTypes, x, capNamed, recvSt)) {
 										msc.recordStructAt(x, capNamed)
 									}
 								}

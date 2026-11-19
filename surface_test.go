@@ -416,9 +416,9 @@ func TestExportedSurfaceInventory(t *testing.T) {
 	// root gofresh spells an internal package selector directly in the AST.
 	internalPkgs := map[string]bool{
 		"asmverify": true, "auditset": true, "buildflags": true, "cachefile": true,
-		"closure": true, "cprep": true, "dynstate": true, "flowir": true,
+		"capsule": true, "closure": true, "cprep": true, "dynstate": true, "flowir": true,
 		"freshstruct": true, "gotool": true, "guard": true, "jsonrecord": true,
-		"outcome": true, "propharness": true, "protoaudit": true, "refconfine": true,
+		"outcome": true, "propharness": true, "refconfine": true,
 		"render": true, "runtimeinput": true, "seams": true, "syntaxutil": true,
 		"testenv": true, "testvariant": true, "toolchain": true, "trace": true,
 	}

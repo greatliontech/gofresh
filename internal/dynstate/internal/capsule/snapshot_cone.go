@@ -1,10 +1,11 @@
-package protoaudit
+package capsule
 
 import (
 	"go/ast"
 	"go/constant"
 	"go/token"
 	"go/types"
+	"slices"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
@@ -12,15 +13,98 @@ import (
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
 
+func isZeroArgEmptyIfaceMethod(p *packages.Package, call *ast.CallExpr, extNamed *types.Named) (*ast.SelectorExpr, bool) {
+	if call == nil || len(call.Args) != 0 || call.Ellipsis.IsValid() {
+		return nil, false
+	}
+	sel, isSel := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	if !isSel || sel.Sel == nil || !sel.Sel.IsExported() {
+		return nil, false
+	}
+	selInfo := p.TypesInfo.Selections[sel]
+	if selInfo == nil || selInfo.Kind() != types.MethodVal || syntaxutil.SelectionCrossesEmbeddedPointer(selInfo) {
+		return nil, false
+	}
+	fn, okFn := selInfo.Obj().(*types.Func)
+	if !okFn || fn == nil || !fn.Exported() || fn.Pkg() != extNamed.Obj().Pkg() {
+		return nil, false
+	}
+	sig, okSig := fn.Type().(*types.Signature)
+	if !okSig || sig.Params().Len() != 0 || sig.Results().Len() != 1 {
+		return nil, false
+	}
+	iface, okIf := syntaxutil.UnderlyingType(sig.Results().At(0).Type()).(*types.Interface)
+	if !okIf || iface.NumMethods() != 0 {
+		return nil, false
+	}
+	return sel, true
+}
+
+func isZeroArgByteSliceMethod(p *packages.Package, call *ast.CallExpr, extNamed *types.Named) (*ast.SelectorExpr, bool) {
+	if call == nil || len(call.Args) != 0 || call.Ellipsis.IsValid() {
+		return nil, false
+	}
+	sel, isSel := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	if !isSel || sel.Sel == nil || !sel.Sel.IsExported() {
+		return nil, false
+	}
+	selInfo := p.TypesInfo.Selections[sel]
+	if selInfo == nil || selInfo.Kind() != types.MethodVal || syntaxutil.SelectionCrossesEmbeddedPointer(selInfo) {
+		return nil, false
+	}
+	fn, okFn := selInfo.Obj().(*types.Func)
+	if !okFn || fn == nil || !fn.Exported() || fn.Pkg() != extNamed.Obj().Pkg() {
+		return nil, false
+	}
+	sig, okSig := fn.Type().(*types.Signature)
+	if !okSig || sig.Params().Len() != 0 || sig.Results().Len() != 1 || !syntaxutil.IsByteSliceType(sig.Results().At(0).Type()) {
+		return nil, false
+	}
+	return sel, true
+}
+
+func matchZeroArgBoolMethod(p *packages.Package, call *ast.CallExpr, extNamed *types.Named) (*ast.SelectorExpr, syntaxutil.FuncKey, bool) {
+	if call == nil || len(call.Args) != 0 || call.Ellipsis.IsValid() {
+		return nil, syntaxutil.FuncKey{}, false
+	}
+	sel, isSel := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	if !isSel || sel.Sel == nil || !sel.Sel.IsExported() {
+		return nil, syntaxutil.FuncKey{}, false
+	}
+	selInfo := p.TypesInfo.Selections[sel]
+	if selInfo == nil || selInfo.Kind() != types.MethodVal || syntaxutil.SelectionCrossesEmbeddedPointer(selInfo) {
+		return nil, syntaxutil.FuncKey{}, false
+	}
+	fn, okFn := selInfo.Obj().(*types.Func)
+	if !okFn || fn == nil || !fn.Exported() || fn.Pkg() != extNamed.Obj().Pkg() {
+		return nil, syntaxutil.FuncKey{}, false
+	}
+	sig, okSig := fn.Type().(*types.Signature)
+	if !okSig || sig.Params().Len() != 0 || sig.Results().Len() != 1 {
+		return nil, syntaxutil.FuncKey{}, false
+	}
+	b, okB := syntaxutil.UnderlyingType(sig.Results().At(0).Type()).(*types.Basic)
+	if !okB || b.Kind() != types.Bool {
+		return nil, syntaxutil.FuncKey{}, false
+	}
+	fk := syntaxutil.FuncKey{Pkg: extNamed.Obj().Pkg().Path(), Name: extNamed.Obj().Name() + "." + fn.Name()}
+	if !fk.Valid() {
+		return nil, syntaxutil.FuncKey{}, false
+	}
+	return sel, fk, true
+}
+
 func collectSnapshotGuardedValueFields(
 	p *packages.Package,
 	idx *refconfine.PkgIndex,
-	descFamily map[*types.Named]bool,
+	guardTargetRef syntaxutil.TypeRef,
+	builderFamily map[*types.Named]bool,
 	extraGuards map[syntaxutil.TypeRef]bool,
 	initAndBuildConeFDs map[*ast.FuncDecl]bool,
 	pf *freshstruct.PkgFreshConstructors,
-) map[*types.Var]bool {
+) (map[*types.Var]bool, []syntaxutil.ConditionalStructMutation) {
 	out := map[*types.Var]bool{}
+	condSet := map[syntaxutil.ConditionalStructMutation]bool{}
 	unkeyedNamedLits := map[*types.Named]bool{}
 	for _, file := range p.Syntax {
 		ast.Inspect(file, func(n ast.Node) bool {
@@ -29,7 +113,7 @@ func collectSnapshotGuardedValueFields(
 				return true
 			}
 			named, isN := types.Unalias(p.TypesInfo.TypeOf(cl)).(*types.Named)
-			if !isN || !descFamily[named] {
+			if !isN || !builderFamily[named] {
 				return true
 			}
 			for _, elt := range cl.Elts {
@@ -41,7 +125,7 @@ func collectSnapshotGuardedValueFields(
 			return true
 		})
 	}
-	for ownerNamed := range descFamily {
+	for ownerNamed := range builderFamily {
 		if ownerNamed.Obj() == nil || ownerNamed.Obj().Exported() || unkeyedNamedLits[ownerNamed] {
 			continue
 		}
@@ -145,13 +229,13 @@ func collectSnapshotGuardedValueFields(
 			if !valid || getterFD == nil {
 				continue
 			}
-			sf, okGetter := isSnapshotGuardedValueGetter(p, getterFD, getterRecv, vf, snapFields, getterUses)
+			sf, okGetter := isSnapshotGuardedValueGetter(p, getterFD, getterRecv, vf, extNamed, snapFields, getterUses)
 			if !okGetter || sf == nil {
 				continue
 			}
 			ctorFuncs := map[*types.Func]bool{}
 			for _, ck := range ctorKVs {
-				if !verifySnapshotValueConstructor(p, idx, pf, ck.fd, ownerNamed, vf, sf, ck.kv) {
+				if !verifySnapshotValueConstructor(p, idx, pf, ck.fd, ownerNamed, extNamed, vf, sf, ck.kv) {
 					valid = false
 					break
 				}
@@ -162,13 +246,25 @@ func collectSnapshotGuardedValueFields(
 			if !valid {
 				continue
 			}
-			if !verifyConeSnapshotUses(p, idx, initAndBuildConeFDs, ownerNamed, vf, ctorFuncs, coneUses) {
+			boolMethods, okCone := verifyConeSnapshotUses(p, idx, initAndBuildConeFDs, ownerNamed, extNamed, vf, ctorFuncs, coneUses)
+			if !okCone {
 				continue
+			}
+			for _, mk := range boolMethods {
+				condSet[syntaxutil.ConditionalStructMutation{
+					Struct:                   guardTargetRef,
+					RequireNonMutatingMethod: mk,
+				}] = true
 			}
 			out[vf] = true
 		}
 	}
-	return out
+	var conds []syntaxutil.ConditionalStructMutation
+	for cm := range condSet {
+		conds = append(conds, cm)
+	}
+	slices.SortFunc(conds, syntaxutil.ConditionalStructMutation.Compare)
+	return out, conds
 }
 
 func verifySnapshotValueConstructor(
@@ -177,6 +273,7 @@ func verifySnapshotValueConstructor(
 	pf *freshstruct.PkgFreshConstructors,
 	fd *ast.FuncDecl,
 	ownerNamed *types.Named,
+	extNamed *types.Named,
 	_, sf *types.Var,
 	kv *ast.KeyValueExpr,
 ) bool {
@@ -248,11 +345,11 @@ func verifySnapshotValueConstructor(
 		return false
 	}
 	ifaceCall, isIC := ast.Unparen(ta.X).(*ast.CallExpr)
-	if !isIC || len(ifaceCall.Args) != 0 {
+	if !isIC {
 		return false
 	}
-	ifaceSel, isIS := ast.Unparen(ifaceCall.Fun).(*ast.SelectorExpr)
-	if !isIS || ifaceSel.Sel.Name != "Interface" {
+	ifaceSel, okIfaceM := isZeroArgEmptyIfaceMethod(p, ifaceCall, extNamed)
+	if !okIfaceM {
 		return false
 	}
 	if xid, isXID := ast.Unparen(ifaceSel.X).(*ast.Ident); !isXID || p.TypesInfo.Uses[xid] != vParam {
@@ -302,10 +399,11 @@ func verifyConeSnapshotUses(
 	idx *refconfine.PkgIndex,
 	initAndBuildConeFDs map[*ast.FuncDecl]bool,
 	ownerNamed *types.Named,
+	extNamed *types.Named,
 	_ *types.Var,
 	ctorFuncs map[*types.Func]bool,
 	coneUses []*ast.Ident,
-) bool {
+) ([]syntaxutil.FuncKey, bool) {
 	snapshotProducing := map[*types.Func]bool{}
 	for fn := range ctorFuncs {
 		snapshotProducing[fn] = true
@@ -401,30 +499,31 @@ func verifyConeSnapshotUses(
 			return true
 		})
 		if badHolderWrite {
-			return false
+			return nil, false
 		}
 	}
 	if len(coneUses) == 0 {
-		return true
+		return nil, true
 	}
 
+	var boolMethods []syntaxutil.FuncKey
 	writtenHolders := map[*types.Var]bool{}
 	resolvedHolders := map[*types.Var]bool{}
 	for _, uid := range coneUses {
 		sel, isSel := idx.ParentUnparen(uid).(*ast.SelectorExpr)
 		if !isSel || sel.Sel != uid {
-			return false
+			return nil, false
 		}
 		if un, isUn := idx.ParentUnparen(sel).(*ast.UnaryExpr); isUn && un.Op == token.AND {
-			return false
+			return nil, false
 		}
 		holderSel, isHS := ast.Unparen(sel.X).(*ast.SelectorExpr)
 		if !isHS {
-			return false
+			return nil, false
 		}
 		holderField, _ := p.TypesInfo.Uses[holderSel.Sel].(*types.Var)
 		if holderField == nil || !holderField.IsField() || !types.Identical(types.Unalias(holderField.Type()), ownerNamed) {
-			return false
+			return nil, false
 		}
 		par := idx.ParentUnparen(sel)
 		if as, isAs := par.(*ast.AssignStmt); isAs {
@@ -435,54 +534,55 @@ func verifyConeSnapshotUses(
 			if as.Tok == token.DEFINE && len(as.Lhs) == 1 && len(as.Rhs) == 1 && ast.Unparen(as.Rhs[0]) == sel {
 				ifStmt, isIf := idx.ParentMap[as].(*ast.IfStmt)
 				if !isIf || ifStmt.Init != as || ifStmt.Else != nil || ifStmt.Body == nil || len(ifStmt.Body.List) != 1 {
-					return false
+					return nil, false
 				}
 				vID, okVID := ast.Unparen(as.Lhs[0]).(*ast.Ident)
 				if !okVID {
-					return false
+					return nil, false
 				}
 				vVar, _ := p.TypesInfo.Defs[vID].(*types.Var)
 				if vVar == nil {
-					return false
+					return nil, false
 				}
 				condCall, isCC := ast.Unparen(ifStmt.Cond).(*ast.CallExpr)
-				if !isCC || len(condCall.Args) != 0 {
-					return false
+				if !isCC {
+					return nil, false
 				}
-				condSel, isCS := ast.Unparen(condCall.Fun).(*ast.SelectorExpr)
-				if !isCS || condSel.Sel.Name != "IsValid" {
-					return false
+				condSel, boolMethodKey, okBool := matchZeroArgBoolMethod(p, condCall, extNamed)
+				if !okBool {
+					return nil, false
 				}
 				if xid, isXID := ast.Unparen(condSel.X).(*ast.Ident); !isXID || p.TypesInfo.Uses[xid] != vVar {
-					return false
+					return nil, false
 				}
 				resAs, isRAs := ifStmt.Body.List[0].(*ast.AssignStmt)
 				if !isRAs || resAs.Tok != token.ASSIGN || len(resAs.Lhs) != 1 || len(resAs.Rhs) != 1 {
-					return false
+					return nil, false
 				}
 				if !syntaxutil.SameFieldTargetExpr(p, resAs.Lhs[0], holderSel) {
-					return false
+					return nil, false
 				}
 				resCall, isRC := ast.Unparen(resAs.Rhs[0]).(*ast.CallExpr)
 				if !isRC {
-					return false
+					return nil, false
 				}
 				callee := syntaxutil.ResolveCalledFuncObj(p, resCall.Fun)
 				if callee == nil || !snapshotProducing[callee] {
-					return false
+					return nil, false
 				}
+				boolMethods = append(boolMethods, boolMethodKey)
 				resolvedHolders[holderField] = true
 				continue
 			}
 		}
-		return false
+		return nil, false
 	}
 	for hf := range writtenHolders {
 		if !resolvedHolders[hf] {
-			return false
+			return nil, false
 		}
 	}
-	return true
+	return boolMethods, true
 }
 
 func isSnapshotGuardedValueGetter(
@@ -490,6 +590,7 @@ func isSnapshotGuardedValueGetter(
 	fd *ast.FuncDecl,
 	rv *types.Var,
 	vf *types.Var,
+	extNamed *types.Named,
 	snapFields map[*types.Var]bool,
 	getterUses []*ast.Ident,
 ) (*types.Var, bool) {
@@ -591,11 +692,11 @@ func isSnapshotGuardedValueGetter(
 		return nil, false
 	}
 	bCall, isBC := ast.Unparen(bytesArg).(*ast.CallExpr)
-	if !isBC || len(bCall.Args) != 0 || !syntaxutil.IsByteSliceType(p.TypesInfo.TypeOf(bCall)) {
+	if !isBC {
 		return nil, false
 	}
-	bSel, isBS := ast.Unparen(bCall.Fun).(*ast.SelectorExpr)
-	if !isBS || bSel.Sel.Name != "Bytes" {
+	bSel, okBytesM := isZeroArgByteSliceMethod(p, bCall, extNamed)
+	if !okBytesM {
 		return nil, false
 	}
 	valSel, isVS := ast.Unparen(bSel.X).(*ast.SelectorExpr)

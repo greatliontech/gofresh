@@ -47,14 +47,13 @@ type Result struct {
 type Seeds struct {
 	AddrTaken    map[*ssa.Function]uint64
 	RuntimeTypes []TypeSeed
-	// HarnessPkg, when non-empty, names a mechanically verified
-	// property-testing harness package whose internal standard-library call
-	// graph executes on an isolated runtime-type plane so harness-internal
-	// standard-library error/template/codec types never pollute non-harness
-	// interface invoke sites, while non-stdlib callbacks and methods
-	// dispatched through those standard-library helpers promote back to
-	// Reachable.
-	HarnessPkg      string
+	// HarnessPkgs, when non-empty, names mechanically verified property-testing
+	// harness packages whose internal standard-library call graphs execute on an
+	// isolated runtime-type plane so harness-internal standard-library
+	// error/template/codec types never pollute non-harness interface invoke
+	// sites, while non-stdlib callbacks and methods dispatched through those
+	// standard-library helpers promote back to Reachable.
+	HarnessPkgs     map[string]bool
 	UserPkgs        map[string]bool
 	HarnessStdRoots map[*ssa.Function]uint64
 }
@@ -94,7 +93,7 @@ type attributedRTA struct {
 	result             *Result
 	prog               *ssa.Program
 	hasher             typeutil.Hasher
-	harnessPkg         string
+	harnessPkgs        map[string]bool
 	harnessOnlyTesting bool
 	userPkgs           map[string]bool
 	hasReflect         bool
@@ -190,12 +189,33 @@ func newAttributedRTA(prog *ssa.Program, seeds *Seeds) *attributedRTA {
 	return r
 }
 
+func (r *attributedRTA) hasHarnessPlane() bool {
+	return len(r.harnessPkgs) > 0
+}
+
+func (r *attributedRTA) isHarnessPkg(pkgPath string) bool {
+	return pkgPath != "" && r.harnessPkgs[pkgPath]
+}
+
 func (r *attributedRTA) enableHarnessPlane(seeds *Seeds) {
-	if seeds == nil || seeds.HarnessPkg == "" {
+	if seeds == nil || len(seeds.HarnessPkgs) == 0 {
 		return
 	}
-	if r.harnessPkg == "" {
-		r.harnessPkg = seeds.HarnessPkg
+	wasEmpty := len(r.harnessPkgs) == 0
+	if r.harnessPkgs == nil {
+		r.harnessPkgs = make(map[string]bool, len(seeds.HarnessPkgs))
+	}
+	added := false
+	for p, ok := range seeds.HarnessPkgs {
+		if ok && p != "" && !r.harnessPkgs[p] {
+			r.harnessPkgs[p] = true
+			added = true
+		}
+	}
+	if len(r.harnessPkgs) == 0 {
+		return
+	}
+	if wasEmpty {
 		r.userPkgs = seeds.UserPkgs
 		r.result.HarnessStdReachable = make(map[*ssa.Function]uint64)
 		r.result.HarnessStdTargets = make(map[ssa.CallInstruction]map[*ssa.Function]uint64)
@@ -206,6 +226,8 @@ func (r *attributedRTA) enableHarnessPlane(seeds *Seeds) {
 		r.harnessInvokeSites.SetHasher(r.hasher)
 		r.harnessRuntimeTypes.SetHasher(r.hasher)
 		r.harnessTraversedTypes.SetHasher(r.hasher)
+	} else if added && r.pureHarnessStdTypes != nil {
+		clear(r.pureHarnessStdTypes)
 	}
 	if !r.harnessOnlyTesting {
 		for root, m := range seeds.HarnessStdRoots {
@@ -266,7 +288,7 @@ func (r *attributedRTA) visitFunc(f *ssa.Function, masks uint64, harnessStdPlane
 	// "reflect" and "testing" activate reflective method-value or container-write
 	// propagation.
 	callerPkg := r.funcPkgPath(f)
-	callerIsHarness := !harnessStdPlane && r.harnessPkg != "" && callerPkg == r.harnessPkg
+	callerIsHarness := !harnessStdPlane && r.isHarnessPkg(callerPkg)
 	ignoreReflectCallee := !r.hasReflect || harnessStdPlane || callerPkg == "reflect" || callerPkg == "testing" || strings.HasPrefix(f.Synthetic, "wrapper ")
 	var space [32]*ssa.Value
 	for _, b := range f.Blocks {

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/trace"
 	"pgregory.net/rapid"
@@ -114,7 +113,7 @@ func CallEndpoint(x int) (int, error) {
 		}
 	})
 
-	t.Run("proto_cluster_alias_chain_preserves_single_subject_attestation_tier", func(t *testing.T) {
+	t.Run("cluster_alias_chain_preserves_single_subject_attestation_tier", func(t *testing.T) {
 		initFn := syntaxutil.FuncKey{Pkg: "example.com/pb", Name: "file_x_init"}
 		meta := []GraphPackage{
 			{ImportPath: "example.com/app", PkgPath: "example.com/app", Imports: []string{"example.com/mid"}, Class: MutableLocalPackage},
@@ -124,17 +123,19 @@ func CallEndpoint(x int) (int, error) {
 		}
 		facts := map[string][]Fact{
 			"example.com/rt": {{
-				ProtoRuntimeTypes: []protoaudit.ProtoRuntimeTypeFact{
-					{
-						Type: syntaxutil.TypeRef{Pkg: "example.com/rt", Name: "TypeBuilder"},
-						Role: protoaudit.ProtoRoleBuilder,
-					},
-					{
-						Type:       syntaxutil.TypeRef{Pkg: "example.com/rt", Name: "ExtensionInfo"},
-						Role:       protoaudit.ProtoRoleExtension,
-						GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/rt", Name: "ExtGuard"}},
-					},
-				},
+				InitBuilders: []syntaxutil.InitBuilderFact{{
+					Type:          syntaxutil.TypeRef{Pkg: "example.com/rt", Name: "TypeBuilder"},
+					BuildMethod:   "Build",
+					OutIfaceField: "File",
+					CapsuleSliceFields: []syntaxutil.BuilderSliceSpec{{
+						Field:    "ExtensionInfos",
+						ElemType: syntaxutil.TypeRef{Pkg: "example.com/rt", Name: "ExtensionInfo"},
+					}},
+				}},
+				LazyOnceCapsuleTypes: []syntaxutil.LazyOnceCapsuleType{{
+					Type:       syntaxutil.TypeRef{Pkg: "example.com/rt", Name: "ExtensionInfo"},
+					GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/rt", Name: "ExtGuard"}},
+				}},
 			}},
 			"example.com/pb": {{
 				Declares: []string{"example.com/pb.E_Opt"},
@@ -143,11 +144,17 @@ func CallEndpoint(x int) (int, error) {
 					Callee: initFn,
 					Region: syntaxutil.RefRegion{Kind: syntaxutil.RegionInit},
 				}},
-				ProtoClusters: []protoaudit.ProtoClusterFact{{
-					InitFn:      initFn,
-					Vars:        []string{"example.com/pb.E_Opt"},
-					BuilderType: syntaxutil.TypeRef{Pkg: "example.com/rt", Name: "TypeBuilder"},
-					ExtType:     syntaxutil.TypeRef{Pkg: "example.com/rt", Name: "ExtensionInfo"},
+				InitSettledClusters: []syntaxutil.InitSettledClusterFact{{
+					InitFn:        initFn,
+					Vars:          []string{"example.com/pb.E_Opt"},
+					BuilderType:   syntaxutil.TypeRef{Pkg: "example.com/rt", Name: "TypeBuilder"},
+					BuildMethod:   "Build",
+					OutIfaceField: "File",
+					SliceBindings: []syntaxutil.ClusterCapsuleSliceBinding{{
+						Field:         "ExtensionInfos",
+						CapsuleType:   syntaxutil.TypeRef{Pkg: "example.com/rt", Name: "ExtensionInfo"},
+						StaticLiteral: true,
+					}},
 				}},
 				NoPostInitCarrierWrites: true,
 			}},
@@ -178,7 +185,7 @@ func CallEndpoint(x int) (int, error) {
 			SingleSubject: false,
 		})
 		if acShared.State.Downgraded == "" {
-			t.Fatal("ProtoClusters alias chain unexpectedly discharged without SingleSubject attestation")
+			t.Fatal("InitSettledClusters alias chain unexpectedly discharged without SingleSubject attestation")
 		}
 		for _, k := range []string{"example.com/pb.E_Opt", "example.com/mid.MidExt", "example.com/app.AppExt"} {
 			if acShared.NonVouchDischarged[k] {
@@ -1258,13 +1265,13 @@ doneCopy:
 		implFact := facts["example.com/impl"][0]
 		wantChildGuard := syntaxutil.TypeRef{Pkg: "example.com/impl", Name: "valueCoderFuncs"}
 		sawMsgGuard := false
-		for _, rt := range implFact.ProtoRuntimeTypes {
-			if rt.Type.Name == "MessageInfo" && slices.Contains(rt.GuardTypes, wantChildGuard) {
+		for _, ct := range implFact.LazyOnceCapsuleTypes {
+			if ct.Type.Name == "MessageInfo" && slices.Contains(ct.GuardTypes, wantChildGuard) {
 				sawMsgGuard = true
 			}
 		}
 		if !sawMsgGuard {
-			t.Fatalf("MessageInfo GuardTypes missing value-contained child valueCoderFuncs: %+v", implFact.ProtoRuntimeTypes)
+			t.Fatalf("MessageInfo GuardTypes missing value-contained child valueCoderFuncs: %+v", implFact.LazyOnceCapsuleTypes)
 		}
 		if slices.Contains(implFact.MutatedStructTypes, wantChildGuard) {
 			t.Fatalf("impl MutatedStructTypes unexpectedly marked unaddressed local valueCoderFuncs: %+v", implFact.MutatedStructTypes)
@@ -1356,16 +1363,16 @@ func Run() { impl.Corrupt(pb.AsStringer()) }
 				})
 				implFact := facts["example.com/impl"][0]
 				sawMsg := false
-				for _, rt := range implFact.ProtoRuntimeTypes {
-					if rt.Type.Name == "MessageInfo" {
+				for _, ct := range implFact.LazyOnceCapsuleTypes {
+					if ct.Type.Name == "MessageInfo" {
 						sawMsg = true
-						if rt.CapsuleReflectSafe {
-							t.Fatalf("%s unexpectedly marked MessageInfo CapsuleReflectSafe=true: %+v", tc.name, rt)
+						if ct.CapsuleReflectSafe {
+							t.Fatalf("%s unexpectedly marked MessageInfo CapsuleReflectSafe=true: %+v", tc.name, ct)
 						}
 					}
 				}
 				if !sawMsg {
-					t.Fatalf("%s failed to recognize MessageInfo as ProtoRoleMessage: %+v", tc.name, implFact.ProtoRuntimeTypes)
+					t.Fatalf("%s failed to recognize MessageInfo as LazyOnceCapsuleType: %+v", tc.name, implFact.LazyOnceCapsuleTypes)
 				}
 				ac := AnalyzeCone(ConeQuery{Meta: meta, Facts: facts, ViewPackage: "example.com/app", SingleSubject: true})
 				if ac.NonVouchDischarged["example.com/pb.Msg"] {
@@ -3492,9 +3499,8 @@ func ExtractAddr() uintptr {
 				}},
 			}},
 			"example.com/cappkg": {{
-				ProtoRuntimeTypes: []protoaudit.ProtoRuntimeTypeFact{{
+				LazyOnceCapsuleTypes: []syntaxutil.LazyOnceCapsuleType{{
 					Type:               capRef,
-					Role:               protoaudit.ProtoRoleMessage,
 					CapsuleReflectSafe: true,
 				}},
 				ReflectedIfaceMethodSets: []syntaxutil.ReflectedIfaceFact{{
@@ -3548,12 +3554,12 @@ func (mi *MessageInfo) initOnce() {
 `
 		pkgClean := mustTypecheckPackage(t, "example.com/cappkg", map[string]string{"cap.go": baseCap})
 		factClean := FactOf(true, pkgClean)
-		if len(factClean.ProtoRuntimeTypes) == 0 {
-			t.Fatalf("clean capsule package produced zero ProtoRuntimeTypes")
+		if len(factClean.LazyOnceCapsuleTypes) == 0 {
+			t.Fatalf("clean capsule package produced zero LazyOnceCapsuleTypes")
 		}
-		for _, rt := range factClean.ProtoRuntimeTypes {
-			if !rt.CapsuleReflectSafe {
-				t.Fatalf("clean capsule role was not marked CapsuleReflectSafe: %+v", factClean.ProtoRuntimeTypes)
+		for _, ct := range factClean.LazyOnceCapsuleTypes {
+			if !ct.CapsuleReflectSafe {
+				t.Fatalf("clean capsule was not marked CapsuleReflectSafe: %+v", factClean.LazyOnceCapsuleTypes)
 			}
 		}
 
@@ -3602,12 +3608,12 @@ func (u *iifeUnwrapper) Unwrap(s fmt.Stringer, bad fmt.Stringer) reflect.Value {
 		} {
 			pkgBad := mustTypecheckPackage(t, "example.com/cappkg", map[string]string{"cap.go": baseCap + bad.extra})
 			factBad := FactOf(true, pkgBad)
-			if len(factBad.ProtoRuntimeTypes) == 0 {
-				t.Fatalf("%s produced zero ProtoRuntimeTypes", bad.name)
+			if len(factBad.LazyOnceCapsuleTypes) == 0 {
+				t.Fatalf("%s produced zero LazyOnceCapsuleTypes", bad.name)
 			}
-			for _, rt := range factBad.ProtoRuntimeTypes {
-				if rt.CapsuleReflectSafe {
-					t.Fatalf("%s unexpectedly marked CapsuleReflectSafe: %+v", bad.name, factBad.ProtoRuntimeTypes)
+			for _, ct := range factBad.LazyOnceCapsuleTypes {
+				if ct.CapsuleReflectSafe {
+					t.Fatalf("%s unexpectedly marked CapsuleReflectSafe: %+v", bad.name, factBad.LazyOnceCapsuleTypes)
 				}
 			}
 		}
@@ -3740,17 +3746,17 @@ func (ms *messageState) pointer() pointer { return pointer{p: unsafe.Pointer(ms)
 		if slices.Contains(factClean.MutatedStructTypes, miRef) {
 			t.Fatalf("clean offset-applied capsule wrapper unexpectedly marked MessageInfo mutated: %+v", factClean.MutatedStructTypes)
 		}
-		sawMsgRole := false
-		for _, rt := range factClean.ProtoRuntimeTypes {
-			if rt.Role == protoaudit.ProtoRoleMessage || rt.Role == protoaudit.ProtoRoleExtension {
-				sawMsgRole = true
-				if !rt.CapsuleReflectSafe {
-					t.Fatalf("clean offset-applied capsule wrapper was not marked CapsuleReflectSafe: %+v", factClean.ProtoRuntimeTypes)
+		sawMsgCap := false
+		for _, ct := range factClean.LazyOnceCapsuleTypes {
+			if ct.Type.Name == "MessageInfo" {
+				sawMsgCap = true
+				if !ct.CapsuleReflectSafe {
+					t.Fatalf("clean offset-applied capsule wrapper was not marked CapsuleReflectSafe: %+v", factClean.LazyOnceCapsuleTypes)
 				}
 			}
 		}
-		if !sawMsgRole {
-			t.Fatalf("expected message or extension role on clean capsule wrapper, got %+v", factClean.ProtoRuntimeTypes)
+		if !sawMsgCap {
+			t.Fatalf("expected MessageInfo LazyOnceCapsuleType on clean capsule wrapper, got %+v", factClean.LazyOnceCapsuleTypes)
 		}
 
 		for _, mutCase := range []struct {
@@ -3798,9 +3804,9 @@ func CastArrayPtr(raw unsafe.Pointer) *[1]targetS { return (*[1]targetS)(raw) }
 		} {
 			pkgBad := mustTypecheckPackage(t, "example.com/cappkg", map[string]string{"cap.go": baseWrap + castCase.extra})
 			factBad := FactOf(true, pkgBad)
-			for _, rt := range factBad.ProtoRuntimeTypes {
-				if rt.CapsuleReflectSafe {
-					t.Fatalf("%s unexpectedly marked CapsuleReflectSafe despite unsafe cast reaching mutated struct: %+v", castCase.name, factBad.ProtoRuntimeTypes)
+			for _, ct := range factBad.LazyOnceCapsuleTypes {
+				if ct.CapsuleReflectSafe {
+					t.Fatalf("%s unexpectedly marked CapsuleReflectSafe despite unsafe cast reaching mutated struct: %+v", castCase.name, factBad.LazyOnceCapsuleTypes)
 				}
 			}
 		}
@@ -3830,9 +3836,8 @@ func CastArrayPtr(raw unsafe.Pointer) *[1]targetS { return (*[1]targetS)(raw) }
 					}},
 				}},
 				"example.com/cappkg": {{
-					ProtoRuntimeTypes: []protoaudit.ProtoRuntimeTypeFact{{
+					LazyOnceCapsuleTypes: []syntaxutil.LazyOnceCapsuleType{{
 						Type:                   capRef,
-						Role:                   protoaudit.ProtoRoleMessage,
 						GuardTypes:             []syntaxutil.TypeRef{guardRef},
 						CapsuleReflectSafe:     true,
 						SafePtrWrapperParams:   []syntaxutil.ParamKey{wrapParam},
@@ -4137,9 +4142,9 @@ func (mi *MessageInfo) initOnce() {
 ` + badConv.body,
 			})
 			factBad := FactOf(true, pkgBad)
-			for _, rt := range factBad.ProtoRuntimeTypes {
-				if rt.CapsuleReflectSafe {
-					t.Fatalf("%s unexpectedly marked CapsuleReflectSafe: %+v", badConv.name, factBad.ProtoRuntimeTypes)
+			for _, ct := range factBad.LazyOnceCapsuleTypes {
+				if ct.CapsuleReflectSafe {
+					t.Fatalf("%s unexpectedly marked CapsuleReflectSafe: %+v", badConv.name, factBad.LazyOnceCapsuleTypes)
 				}
 			}
 		}
@@ -4613,9 +4618,9 @@ func UseApplied(ms *messageState, sf reflect.StructField) **targetS {
 }
 ` + rawBody.code + "\n",
 			})
-			for _, rt := range FactOf(true, pkgUnapplied).ProtoRuntimeTypes {
-				if rt.CapsuleReflectSafe {
-					t.Fatalf("%s unexpectedly kept CapsuleReflectSafe: %+v", rawBody.name, rt)
+			for _, ct := range FactOf(true, pkgUnapplied).LazyOnceCapsuleTypes {
+				if ct.CapsuleReflectSafe {
+					t.Fatalf("%s unexpectedly kept CapsuleReflectSafe: %+v", rawBody.name, ct)
 				}
 			}
 		}
@@ -6901,25 +6906,25 @@ func init() {
 			metaAtk, _, factsAtk := mustTypecheckOrderedDAG(t, atk.specs)
 			if atk.name == "legacy_capsule_message_with_unexported_iface_field_extracts_across_package" ||
 				atk.name == "legacy_capsule_other_opaque_struct_smuggling_revokes" {
-				capRTs := factsAtk["example.com/cappkg"][0].ProtoRuntimeTypes
-				if !slices.ContainsFunc(capRTs, func(rt protoaudit.ProtoRuntimeTypeFact) bool {
-					return rt.Type.Name == "MessageInfo" && rt.CapsuleReflectSafe
+				caps := factsAtk["example.com/cappkg"][0].LazyOnceCapsuleTypes
+				if !slices.ContainsFunc(caps, func(ct syntaxutil.LazyOnceCapsuleType) bool {
+					return ct.Type.Name == "MessageInfo" && ct.CapsuleReflectSafe
 				}) {
-					t.Fatalf("expected clean MessageInfo with CapsuleReflectSafe=true in cappkg, got %+v", capRTs)
+					t.Fatalf("expected clean MessageInfo with CapsuleReflectSafe=true in cappkg, got %+v", caps)
 				}
 			}
 			if atk.name == "sibling_internal_reflect_type_constructor_revokes_unexported_capsule_struct" {
-				capRTs := factsAtk["example.com/internal/cappkg"][0].ProtoRuntimeTypes
-				if !slices.ContainsFunc(capRTs, func(rt protoaudit.ProtoRuntimeTypeFact) bool {
-					return rt.Type.Name == "messageInfo" && rt.CapsuleReflectSafe
+				caps := factsAtk["example.com/internal/cappkg"][0].LazyOnceCapsuleTypes
+				if !slices.ContainsFunc(caps, func(ct syntaxutil.LazyOnceCapsuleType) bool {
+					return ct.Type.Name == "messageInfo" && ct.CapsuleReflectSafe
 				}) {
-					t.Fatalf("expected clean unexported messageInfo with CapsuleReflectSafe=true in cappkg, got %+v", capRTs)
+					t.Fatalf("expected clean unexported messageInfo with CapsuleReflectSafe=true in cappkg, got %+v", caps)
 				}
 			}
 			if atk.name == "converter_typeof_foreign_scalar_struct_mutates_static_composite_directly" {
-				capRTs := factsAtk["example.com/cappkg"][0].ProtoRuntimeTypes
-				if slices.ContainsFunc(capRTs, func(rt protoaudit.ProtoRuntimeTypeFact) bool { return rt.CapsuleReflectSafe }) {
-					t.Fatalf("foreign scalar struct TypeOf unexpectedly kept CapsuleReflectSafe=true: %+v", capRTs)
+				caps := factsAtk["example.com/cappkg"][0].LazyOnceCapsuleTypes
+				if slices.ContainsFunc(caps, func(ct syntaxutil.LazyOnceCapsuleType) bool { return ct.CapsuleReflectSafe }) {
+					t.Fatalf("foreign scalar struct TypeOf unexpectedly kept CapsuleReflectSafe=true: %+v", caps)
 				}
 				continue
 			}
@@ -7628,7 +7633,7 @@ func TestPropertyAliasChainAndStaticCompositeTierInvariants(t *testing.T) {
 		}
 
 		// Draw root variable kind in example.com/base:
-		// 0 = StaticCompositeGlobal, 1 = ProtoCluster, 2 = OnceMemoCandidate, 3 = MemoDischarge, 4 = Undischarged.
+		// 0 = StaticCompositeGlobal, 1 = InitSettledCluster, 2 = OnceMemoCandidate, 3 = MemoDischarge, 4 = Undischarged.
 		rootKind := rapid.IntRange(0, 4).Draw(rt, "rootKind")
 		guardMutated := rapid.Bool().Draw(rt, "guardMutated")
 		rootDirectWrite := rapid.Bool().Draw(rt, "rootDirectWrite")
@@ -7664,15 +7669,30 @@ func TestPropertyAliasChainAndStaticCompositeTierInvariants(t *testing.T) {
 				Callee: initFn,
 				Region: syntaxutil.RefRegion{Kind: syntaxutil.RegionInit},
 			}}
-			baseFact.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{
-				{Type: syntaxutil.TypeRef{Pkg: "example.com/base", Name: "TB"}, Role: protoaudit.ProtoRoleBuilder},
-				{Type: syntaxutil.TypeRef{Pkg: "example.com/base", Name: "Ext"}, Role: protoaudit.ProtoRoleExtension, GuardTypes: []syntaxutil.TypeRef{guardType}},
-			}
-			baseFact.ProtoClusters = []protoaudit.ProtoClusterFact{{
-				InitFn:      initFn,
-				Vars:        []string{rootVar},
-				BuilderType: syntaxutil.TypeRef{Pkg: "example.com/base", Name: "TB"},
-				ExtType:     syntaxutil.TypeRef{Pkg: "example.com/base", Name: "Ext"},
+			baseFact.InitBuilders = []syntaxutil.InitBuilderFact{{
+				Type:          syntaxutil.TypeRef{Pkg: "example.com/base", Name: "TB"},
+				BuildMethod:   "Build",
+				OutIfaceField: "File",
+				CapsuleSliceFields: []syntaxutil.BuilderSliceSpec{{
+					Field:    "ExtensionInfos",
+					ElemType: syntaxutil.TypeRef{Pkg: "example.com/base", Name: "Ext"},
+				}},
+			}}
+			baseFact.LazyOnceCapsuleTypes = []syntaxutil.LazyOnceCapsuleType{{
+				Type:       syntaxutil.TypeRef{Pkg: "example.com/base", Name: "Ext"},
+				GuardTypes: []syntaxutil.TypeRef{guardType},
+			}}
+			baseFact.InitSettledClusters = []syntaxutil.InitSettledClusterFact{{
+				InitFn:        initFn,
+				Vars:          []string{rootVar},
+				BuilderType:   syntaxutil.TypeRef{Pkg: "example.com/base", Name: "TB"},
+				BuildMethod:   "Build",
+				OutIfaceField: "File",
+				SliceBindings: []syntaxutil.ClusterCapsuleSliceBinding{{
+					Field:         "ExtensionInfos",
+					CapsuleType:   syntaxutil.TypeRef{Pkg: "example.com/base", Name: "Ext"},
+					StaticLiteral: true,
+				}},
 			}}
 		case 2:
 			baseFact.OnceMemoTypes = []syntaxutil.OnceMemoTypeFact{{
@@ -9453,6 +9473,533 @@ func init() {
 			}
 			if !sawViewDescRefl {
 				t.Fatalf("%s missing causal dynstate.iface.reflected ViewDesc event on example.com/corrupt: events=%+v", tc.name, rec.Events())
+			}
+		})
+	}
+}
+
+func TestNonProtoSyntheticCapsuleClusterConeDischargesAndRefusals(t *testing.T) {
+	const valPkgSrc = `package valpkg
+
+import "unsafe"
+
+type CatalogIface interface {
+	SchemaName() string
+}
+
+type SpecIface interface {
+	SpecID() int
+}
+
+type Datum struct {
+	ptr unsafe.Pointer
+	raw []byte
+	num uint64
+}
+
+func FromBytes(b []byte) Datum { return Datum{raw: b, num: 1} }
+func (d Datum) Present() bool   { return d.num != 0 }
+func (d Datum) AnyVal() any {
+	if d.raw != nil {
+		return d.raw
+	}
+	return d.num
+}
+func (d Datum) RawBytes() []byte { return d.raw }
+`
+
+	const rawBuildSrc = `package rawbuild
+
+import (
+	"bytes"
+	"sync"
+	"sync/atomic"
+
+	"example.com/valpkg"
+)
+
+type datumHolder struct {
+	val  valpkg.Datum
+	snap []byte
+}
+
+func makeDatumHolder(v valpkg.Datum) datumHolder {
+	dh := datumHolder{val: v}
+	if b, ok := v.AnyVal().([]byte); ok {
+		dh.snap = append(([]byte)(nil), b...)
+	}
+	return dh
+}
+
+func (dh *datumHolder) get() valpkg.Datum {
+	if len(dh.snap) > 0 && !bytes.Equal(dh.snap, dh.val.RawBytes()) {
+		panic("mutated snapshot")
+	}
+	return dh.val
+}
+
+type catalogMeta struct {
+	count int
+}
+
+type rawCatalog struct {
+	name string
+	mu   sync.Mutex
+	done uint32
+	sub  catalogMeta
+	tags []TagSpec
+	recs []RecordSpec
+	exts []ExtSpec
+}
+
+func (c *rawCatalog) lazyInit() {
+	if atomic.LoadUint32(&c.done) == 0 {
+		c.initOnce()
+	}
+}
+
+func (c *rawCatalog) initOnce() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.done == 1 {
+		return
+	}
+	c.sub.count = len(c.recs)
+	for i := range c.recs {
+		c.recs[i].resolveDefault()
+	}
+	atomic.StoreUint32(&c.done, 1)
+}
+
+func (c *rawCatalog) SchemaName() string {
+	c.lazyInit()
+	return c.name
+}
+
+func (c *rawCatalog) Meta() *catalogMeta {
+	c.lazyInit()
+	return &c.sub
+}
+
+type TagSpec struct {
+	id int
+}
+
+func (ts *TagSpec) SpecID() int { return ts.id }
+
+type RecordSpec struct {
+	id   int
+	wire []byte
+	Def  datumHolder
+	Note int
+}
+
+func (rs *RecordSpec) SpecID() int { return rs.id }
+
+func (rs *RecordSpec) resolveDefault() {
+	if v := rs.Def.val; v.Present() {
+		rs.Def = makeDatumHolder(v)
+	}
+}
+
+func (rs *RecordSpec) DefaultDatum() valpkg.Datum {
+	return rs.Def.get()
+}
+
+type ExtSpec struct {
+	id int
+}
+
+func (es *ExtSpec) SpecID() int { return es.id }
+
+type RawBundle struct {
+	Catalog     valpkg.CatalogIface
+	TagSpecs    []TagSpec
+	RecordSpecs []RecordSpec
+	ExtSpecs    []ExtSpec
+}
+
+type RawAssembler struct {
+	RawWire []byte
+	NumTags int
+	NumRecs int
+	NumExts int
+}
+
+func (ra RawAssembler) Assemble() RawBundle {
+	cat := &rawCatalog{
+		name: string(ra.RawWire),
+		tags: make([]TagSpec, ra.NumTags),
+		recs: make([]RecordSpec, ra.NumRecs),
+		exts: make([]ExtSpec, ra.NumExts),
+	}
+	for i := range cat.recs {
+		cat.recs[i].wire = append(([]byte)(nil), ra.RawWire...)
+		cat.recs[i].Def = makeDatumHolder(valpkg.FromBytes(cat.recs[i].wire))
+	}
+	return RawBundle{
+		Catalog:     cat,
+		TagSpecs:    cat.tags,
+		RecordSpecs: cat.recs,
+		ExtSpecs:    cat.exts,
+	}
+}
+`
+
+	const schemaCapSrc = `package schemacap
+
+import (
+	"reflect"
+	"sync"
+	"sync/atomic"
+
+	"example.com/valpkg"
+)
+
+type TagCapsule struct {
+	ReflectTyp reflect.Type
+	Spec       valpkg.SpecIface
+}
+
+type recordDetail struct {
+	fieldCount int
+}
+
+type RecordCapsule struct {
+	ReflectTyp reflect.Type
+	Spec       valpkg.SpecIface
+	mu         sync.Mutex
+	done       uint32
+	sub        recordDetail
+}
+
+func (rc *RecordCapsule) init() {
+	if atomic.LoadUint32(&rc.done) == 0 {
+		rc.initSlow()
+	}
+}
+
+func (rc *RecordCapsule) initSlow() {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	if rc.done == 1 {
+		return
+	}
+	rc.sub.fieldCount = rc.Spec.SpecID()
+	atomic.StoreUint32(&rc.done, 1)
+}
+
+func (rc *RecordCapsule) Detail() *recordDetail {
+	rc.init()
+	return &rc.sub
+}
+
+type ExtCapsule struct {
+	GuardSlot any
+	spec      valpkg.SpecIface
+	mu        sync.Mutex
+	done      uint32
+	resolved  int
+}
+
+func InitExtCapsule(ec *ExtCapsule, sp valpkg.SpecIface) {
+	ec.spec = sp
+}
+
+func (ec *ExtCapsule) init() {
+	if atomic.LoadUint32(&ec.done) == 1 {
+		return
+	}
+	ec.initSlow()
+}
+
+func (ec *ExtCapsule) initSlow() {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	if ec.done == 1 {
+		return
+	}
+	if ec.GuardSlot == nil {
+		ec.GuardSlot = ec.spec.SpecID()
+	}
+	ec.resolved = 1
+	atomic.StoreUint32(&ec.done, 1)
+}
+
+func (ec *ExtCapsule) Resolved() int {
+	ec.init()
+	return ec.resolved
+}
+`
+
+	const typeBuildSrc = `package typebuild
+
+import (
+	"reflect"
+
+	"example.com/rawbuild"
+	"example.com/schemacap"
+	"example.com/valpkg"
+)
+
+type BuiltSchema struct {
+	Catalog valpkg.CatalogIface
+}
+
+type SchemaBuilder struct {
+	Sub            rawbuild.RawAssembler
+	TypeSamples    []any
+	TagCapsules    []schemacap.TagCapsule
+	RecordCapsules []schemacap.RecordCapsule
+	ExtCapsules    []schemacap.ExtCapsule
+}
+
+func (b SchemaBuilder) Construct() BuiltSchema {
+	rb := b.Sub.Assemble()
+	if len(b.TagCapsules) != len(rb.TagSpecs) {
+		panic("tag mismatch")
+	}
+	if len(b.RecordCapsules) != len(rb.RecordSpecs) {
+		panic("record mismatch")
+	}
+	if len(b.ExtCapsules) != len(rb.ExtSpecs) {
+		panic("ext mismatch")
+	}
+	for i := range rb.TagSpecs {
+		b.TagCapsules[i].ReflectTyp = reflect.TypeOf(b.TypeSamples[i])
+		b.TagCapsules[i].Spec = &rb.TagSpecs[i]
+	}
+	for i := range rb.RecordSpecs {
+		b.RecordCapsules[i].ReflectTyp = reflect.TypeOf(b.TypeSamples[len(b.TagCapsules)+i])
+		b.RecordCapsules[i].Spec = &rb.RecordSpecs[i]
+	}
+	for i := range rb.ExtSpecs {
+		schemacap.InitExtCapsule(&b.ExtCapsules[i], &rb.ExtSpecs[i])
+	}
+	return BuiltSchema{Catalog: rb.Catalog}
+}
+`
+
+	const genPkgSrc = `package genpkg
+
+import (
+	"example.com/rawbuild"
+	"example.com/schemacap"
+	"example.com/typebuild"
+	"example.com/valpkg"
+)
+
+type SampleTag int
+
+type SampleRecord struct {
+	Code int
+}
+
+var schemaCatalog valpkg.CatalogIface
+
+var rawWire = []byte("schema_v1")
+
+var typeSamples = []any{
+	(SampleTag)(0),
+	(*SampleRecord)(nil),
+}
+
+var tagCaps = make([]schemacap.TagCapsule, 1)
+var recCaps = make([]schemacap.RecordCapsule, 1)
+var extCaps = []schemacap.ExtCapsule{
+	{GuardSlot: (*int32)(nil)},
+}
+
+func init() {
+	schemaInit()
+}
+
+func schemaInit() {
+	if schemaCatalog != nil {
+		return
+	}
+	out := typebuild.SchemaBuilder{
+		Sub: rawbuild.RawAssembler{
+			RawWire: rawWire,
+			NumTags: 1,
+			NumRecs: 1,
+			NumExts: 1,
+		},
+		TypeSamples:    typeSamples,
+		TagCapsules:    tagCaps,
+		RecordCapsules: recCaps,
+		ExtCapsules:    extCaps,
+	}.Construct()
+	schemaCatalog = out.Catalog
+	rawWire = nil
+	typeSamples = nil
+}
+
+func ReadSchemaName() string {
+	return schemaCatalog.SchemaName()
+}
+`
+
+	baseSpecs := func() []orderedPkgSpec {
+		return []orderedPkgSpec{
+			{pkgPath: "example.com/valpkg", src: valPkgSrc},
+			{pkgPath: "example.com/rawbuild", imports: []string{"example.com/valpkg"}, src: rawBuildSrc},
+			{pkgPath: "example.com/schemacap", imports: []string{"example.com/valpkg"}, src: schemaCapSrc},
+			{pkgPath: "example.com/typebuild", imports: []string{"example.com/rawbuild", "example.com/schemacap", "example.com/valpkg"}, src: typeBuildSrc},
+			{pkgPath: "example.com/genpkg", imports: []string{"example.com/rawbuild", "example.com/schemacap", "example.com/typebuild", "example.com/valpkg"}, src: genPkgSrc},
+		}
+	}
+
+	t.Run("positive_single_subject_discharges_and_multi_subject_refuses", func(t *testing.T) {
+		meta, pkgs, _ := mustTypecheckOrderedDAG(t, baseSpecs())
+		facts := make(map[string][]Fact, len(pkgs))
+		for _, p := range pkgs {
+			facts[p.PkgPath] = []Fact{FactOfCtx(context.Background(), true, p)}
+		}
+		acSingle := AnalyzeCone(ConeQuery{Meta: meta, Facts: facts, ViewPackage: "example.com/genpkg", SingleSubject: true})
+		if acSingle.State.Downgraded != "" || len(acSingle.State.RootCulprits) != 0 {
+			t.Fatalf("expected SingleSubject=true clean discharge, got state=%+v", acSingle.State)
+		}
+		for _, wantVar := range []string{
+			"example.com/genpkg.schemaCatalog",
+			"example.com/genpkg.typeSamples",
+			"example.com/genpkg.tagCaps",
+			"example.com/genpkg.recCaps",
+			"example.com/genpkg.extCaps",
+		} {
+			if !acSingle.NonVouchDischarged[wantVar] {
+				t.Fatalf("expected %s in NonVouchDischarged, got %+v", wantVar, acSingle.NonVouchDischarged)
+			}
+		}
+		acMulti := AnalyzeCone(ConeQuery{Meta: meta, Facts: facts, ViewPackage: "example.com/genpkg", SingleSubject: false})
+		if acMulti.State.Downgraded == "" {
+			t.Fatalf("expected SingleSubject=false to retain cluster globals as stateful, got %+v", acMulti.State)
+		}
+	})
+
+	type negConeCase struct {
+		name           string
+		mutatePkg      string
+		oldSnippet     string
+		newSnippet     string
+		extraSnippet   string
+		wantEvent      string
+		wantKind       string
+		wantSymbol     string
+		wantReason     string
+	}
+
+	negCases := []negConeCase{
+		{
+			name:       "a_untyped_nil_guard_slot",
+			mutatePkg:  "example.com/genpkg",
+			oldSnippet: "{GuardSlot: (*int32)(nil)}",
+			newSnippet: "{GuardSlot: nil}",
+			wantEvent:  "dynstate.discharge.reject",
+			wantKind:   "init_cluster",
+			wantSymbol: "example.com/genpkg.schemaInit",
+			wantReason: "missing_exported_write_guard_field",
+		},
+		{
+			name:         "b_non_builder_init_helper_ref",
+			mutatePkg:    "example.com/genpkg",
+			extraSnippet: "\nfunc TouchHelper(ec *schemacap.ExtCapsule, sp valpkg.SpecIface) { schemacap.InitExtCapsule(ec, sp) }\n",
+			wantEvent:    "dynstate.discharge.reject",
+			wantKind:     "capsule_type",
+			wantSymbol:   "example.com/schemacap.ExtCapsule",
+			wantReason:   "non_builder_init_helper_ref",
+		},
+		{
+			name:       "c_omitted_bytes_equal_snapshot_panic",
+			mutatePkg:  "example.com/rawbuild",
+			oldSnippet: "if len(dh.snap) > 0 && !bytes.Equal(dh.snap, dh.val.RawBytes()) {\n\t\tpanic(\"mutated snapshot\")\n\t}",
+			newSnippet: "_ = bytes.Equal",
+			wantEvent:  "dynstate.discharge.reject",
+			wantKind:   "init_builder",
+			wantSymbol: "example.com/typebuild.SchemaBuilder",
+			wantReason: "unverified_sub_builder",
+		},
+		{
+			name:       "d_substruct_addr_before_once_init_dominance",
+			mutatePkg:  "example.com/schemacap",
+			oldSnippet: "func (rc *RecordCapsule) Detail() *recordDetail {\n\trc.init()\n\treturn &rc.sub\n}",
+			newSnippet: "func (rc *RecordCapsule) Detail() *recordDetail {\n\tif rc.done == 99 {\n\t\trc.init()\n\t}\n\treturn &rc.sub\n}",
+			wantEvent:  "dynstate.discharge.reject",
+			wantKind:   "init_cluster",
+			wantSymbol: "example.com/genpkg.schemaInit",
+			wantReason: "unverified_capsule_type",
+		},
+		{
+			name:       "e_misaligned_sample_slice_offset",
+			mutatePkg:  "example.com/typebuild",
+			oldSnippet: "b.RecordCapsules[i].ReflectTyp = reflect.TypeOf(b.TypeSamples[len(b.TagCapsules)+i])",
+			newSnippet: "b.RecordCapsules[i].ReflectTyp = reflect.TypeOf(b.TypeSamples[i])",
+			wantEvent:  "dynstate.discharge.reject",
+			wantKind:   "init_cluster",
+			wantSymbol: "example.com/genpkg.schemaInit",
+			wantReason: "unverified_builder",
+		},
+		{
+			name:         "f_guard_type_mutated",
+			mutatePkg:    "example.com/genpkg",
+			extraSnippet: "\nfunc CorruptGuard(rs *rawbuild.RecordSpec) { rs.Note = 7 }\n",
+			wantEvent:    "dynstate.discharge.reject",
+			wantKind:     "init_builder",
+			wantSymbol:   "example.com/rawbuild.RawAssembler",
+			wantReason:   "guard_type_mutated",
+		},
+	}
+
+	for _, tc := range negCases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := trace.NewRecorder()
+			baseCtx, cancel := context.WithCancel(context.Background())
+			ctx := trace.WithFilteredSink(baseCtx, "dynstate", rec)
+			defer func() {
+				cancel()
+				_ = trace.Enabled(ctx, trace.DomainDynstate, "")
+			}()
+
+			specs := baseSpecs()
+			mutated := false
+			for i := range specs {
+				if specs[i].pkgPath == tc.mutatePkg {
+					if tc.oldSnippet != "" {
+						if !strings.Contains(specs[i].src, tc.oldSnippet) {
+							t.Fatalf("missing oldSnippet in %s", tc.mutatePkg)
+						}
+						specs[i].src = strings.Replace(specs[i].src, tc.oldSnippet, tc.newSnippet, 1)
+					}
+					specs[i].src += tc.extraSnippet
+					mutated = true
+				}
+			}
+			if !mutated {
+				t.Fatalf("mutatePkg %s not found", tc.mutatePkg)
+			}
+
+			meta, pkgs, _ := mustTypecheckOrderedDAG(t, specs)
+			facts := make(map[string][]Fact, len(pkgs))
+			for _, p := range pkgs {
+				facts[p.PkgPath] = []Fact{FactOfCtx(ctx, true, p)}
+			}
+			ac := AnalyzeCone(ConeQuery{Ctx: ctx, Meta: meta, Facts: facts, ViewPackage: "example.com/genpkg", SingleSubject: true})
+			if ac.NonVouchDischarged["example.com/genpkg.schemaCatalog"] {
+				t.Fatalf("%s unexpectedly discharged schemaCatalog: state=%+v nvd=%+v", tc.name, ac.State, ac.NonVouchDischarged)
+			}
+
+			matched := false
+			for _, ev := range rec.ByName(tc.wantEvent) {
+				if ev.StringField("kind") == tc.wantKind &&
+					ev.StringField("symbol") == tc.wantSymbol &&
+					ev.StringField("reason") == tc.wantReason {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				t.Fatalf("%s missing causal %s(kind=%q, symbol=%q, reason=%q); events=%+v",
+					tc.name, tc.wantEvent, tc.wantKind, tc.wantSymbol, tc.wantReason, rec.Events())
 			}
 		})
 	}

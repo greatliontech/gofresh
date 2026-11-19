@@ -8,7 +8,6 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/dynstate"
-	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"go/ast"
 	"go/importer"
@@ -537,11 +536,16 @@ func UsePoolAndHooks() {
 				{
 					Declares:          []string{varKey, protoVar, grpcVar},
 					SingleSubjectVars: []string{varKey},
-					ProtoClusters: []protoaudit.ProtoClusterFact{{
-						InitFn:      protoInitFn,
-						Vars:        []string{protoVar},
-						BuilderType: builderType,
-						MsgType:     msgInfoType,
+					InitSettledClusters: []syntaxutil.InitSettledClusterFact{{
+						InitFn:        protoInitFn,
+						Vars:          []string{protoVar},
+						BuilderType:   builderType,
+						BuildMethod:   "Build",
+						OutIfaceField: "File",
+						SliceBindings: []syntaxutil.ClusterCapsuleSliceBinding{{
+							Field:       "MessageInfos",
+							CapsuleType: msgInfoType,
+						}},
 					}},
 					StaticCompositeGlobals: []syntaxutil.StaticCompositeGlobalFact{{
 						Key:        grpcVar,
@@ -566,16 +570,27 @@ func UsePoolAndHooks() {
 				Mutates:        []string{"gopkg.in/yaml.v3.structMap"},
 			}},
 			"google.golang.org/protobuf/runtime/protoimpl": {{
-				ProtoRuntimeTypes: []protoaudit.ProtoRuntimeTypeFact{
-					{Type: builderType, Role: protoaudit.ProtoRoleBuilder},
-					{Type: msgInfoType, Role: protoaudit.ProtoRoleMessage},
-				},
+				InitBuilders: []syntaxutil.InitBuilderFact{{
+					Type:                 builderType,
+					BuildMethod:          "Build",
+					OutIfaceField:        "File",
+					TypeSampleSliceField: "GoTypes",
+					CapsuleSliceFields: []syntaxutil.BuilderSliceSpec{{
+						Field:       "MessageInfos",
+						ElemType:    msgInfoType,
+						TakesSample: true,
+					}},
+				}},
+				LazyOnceCapsuleTypes: []syntaxutil.LazyOnceCapsuleType{{
+					Type:                   msgInfoType,
+					HasExportedReflectType: true,
+				}},
 			}},
 			"google.golang.org/grpc": {{}},
 		}
 
-		// When singleSubject=true, varKey (SingleSubjectVars), protoVar (ProtoClusters +
-		// ProtoRuntimeTypes), and grpcVar (StaticCompositeGlobals) in example.com/p are discharged,
+		// When singleSubject=true, varKey (SingleSubjectVars), protoVar (InitSettledClusters +
+		// InitBuilders/LazyOnceCapsuleTypes), and grpcVar (StaticCompositeGlobals) in example.com/p are discharged,
 		// and unix.mapper / yaml.structMap are discharged by structural MappingDischarges /
 		// MemoDischarges; depVar depends on hasProof.
 		cone := dynstate.Compose(meta, allFacts, "example.com/p", nil, singleSubject, packageProcess)

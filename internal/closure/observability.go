@@ -20,7 +20,6 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure/internal/rta"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/outcome"
-	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -909,10 +908,14 @@ func immutableEnvironmentMethod(sets ...[]externalEffect) string {
 func testMainObservedEffects(base *tier2Base, reachable attributedReachability) tier2Result {
 	analyzer := base.analyzer()
 	analyzer.fresh = newFreshParamAnalysis(base.h.SelectionAudited(), base.h.source.pureDelegates, reachable, analyzer.isStdFunction)
-	bitFP := newBitOnlyFreshParamAnalysis(reachable.propertyHarnessAudited, base.h.SelectionAudited(), base.h.source.pureDelegates, reachable.userPaths, reachable.summary, analyzer.isStdFunction)
+	bitFP := newBitOnlyFreshParamAnalysis(len(reachable.verifiedHarnesses) > 0, base.h.SelectionAudited(), base.h.source.pureDelegates, reachable.userPaths, reachable.summary, analyzer.isStdFunction)
+	if bitFP.verifiedHarnesses == nil {
+		bitFP.verifiedHarnesses = reachable.verifiedHarnesses
+	}
 	if bitFP.prog == nil {
 		bitFP.prog = base.prog
 	}
+	bitFP.flowFunctions = reachable.functions
 	var ops [16]*ssa.Value
 	for function := range reachable.functions {
 		idx := analyzer.idxForFunction(function)
@@ -1011,7 +1014,7 @@ func recordCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site ssa.Ca
 	// flow exactly as in subject flow: the harness's bodies are unscanned,
 	// so a callable crossing here is judged at the boundary or not at
 	// all (REQ-closure-observability-property-harness).
-	if analyzer.propertyHarnessAudited(pkgPath) {
+	if vp := analyzer.verifiedHarness(pkgPath); vp != nil {
 		flowName := "startup flow"
 		if isTestMain {
 			flowName = "test-main flow"
@@ -1020,8 +1023,8 @@ func recordCallEffect(analyzer *tier2Analyzer, callee *ssa.Function, site ssa.Ca
 			analyzer.requestWiden("property harness reached as a dynamic target in " + flowName)
 		} else if !propertyHarnessClosedArgs(site.Common(), analyzer.fresh) {
 			analyzer.requestWiden("property-harness argument is not locally closed in " + flowName)
-		} else if isPropertyHarnessExampleCallee(callee) && !harnessExampleHasExplicitSeed(site.Common()) {
-			analyzer.recordExternalEffect(propertyHarnessUnseededExampleEffect())
+		} else if mk, isSample := propertyHarnessSeededSampleCallee(vp, callee); isSample && !harnessSeededSampleHasExplicitSeed(site.Common()) {
+			analyzer.recordExternalEffect(propertyHarnessUnseededSampleEffect(vp, mk))
 		}
 		return
 	}
@@ -1052,16 +1055,18 @@ func directExternalEffects(base *tier2Base, reachable attributedReachability) ti
 	analyzer := base.analyzer()
 	// Startup flow deliberately runs without the cross-boundary
 	// fresh-path analysis; the bit-only view carries just the
-	// property-harness audit verdict so the boundary gate's
-	// call-result admission holds here as the spec's every-flow
-	// judgment requires - an initializer composing generators
-	// (rapid.Deriv(rapid.Int())) is the same sanctioned crossing as in
-	// subject flow. Parameter crossing stays refused exactly as with a
-	// nil analysis (REQ-closure-observability-property-harness).
-	analyzer.fresh = newBitOnlyFreshParamAnalysis(reachable.propertyHarnessAudited, analyzer.h.SelectionAudited(), analyzer.h.source.pureDelegates, reachable.userPaths, reachable.summary, analyzer.isStdFunction)
+	// property-harness verification table so the boundary gate's
+	// call-result admission holds for generator composition in init
+	// while parameter crossing stays refused
+	// (REQ-closure-observability-property-harness).
+	analyzer.fresh = newBitOnlyFreshParamAnalysis(len(reachable.verifiedHarnesses) > 0, analyzer.h.SelectionAudited(), analyzer.h.source.pureDelegates, reachable.userPaths, reachable.summary, analyzer.isStdFunction)
+	if analyzer.fresh.verifiedHarnesses == nil {
+		analyzer.fresh.verifiedHarnesses = reachable.verifiedHarnesses
+	}
 	if analyzer.fresh.prog == nil {
 		analyzer.fresh.prog = base.prog
 	}
+	analyzer.fresh.flowFunctions = reachable.functions
 	startupZeroGlobals := startupZeroGlobalsForReach(base, reachable)
 	asyncStartup := asyncOrDynamicStartupFunctionsForBase(base, reachable)
 	var ops [16]*ssa.Value
@@ -1168,7 +1173,7 @@ func dispatchProvenanceClosed(site ssa.CallInstruction, fp *freshParamAnalysis) 
 			receiver := wrapperReceiver(c, callee)
 			return receiver != nil && subjectClosedDynamicValue(receiver, make(map[ssa.Value]bool), siteFP)
 		}
-		if propharness.IsHarnessPath(funcPkgPath(callee)) {
+		if siteFP != nil && siteFP.verifiedHarnesses[funcPkgPath(callee)] != nil {
 			return propertyHarnessClosedArgs(c, siteFP)
 		}
 		if _, isFunc := c.Value.(*ssa.Function); isFunc {
@@ -1217,7 +1222,7 @@ func maximalObservabilityBlocker(audited bool, effect externalEffect) bool {
 	// The property-harness fact keeps the closure verdict unverifiable
 	// without blocking observability: the subject tiers judge every
 	// harness crossing precisely (REQ-closure-observability-property-harness).
-	if effect.kind == externalEffectTestRuntime && propharness.IsHarnessPath(effect.packagePath) {
+	if isPropertyHarnessFact(effect) {
 		return false
 	}
 	// The receiver-escape rejection is package-scan diagnostic, never a

@@ -20,7 +20,7 @@ type freshFuncEntry struct {
 }
 
 // FreshLocalsCache memoizes CollectFreshLocalStructVars per *ast.FuncDecl so
-// protoaudit and CollectMutatedStructTypes share the computed sets without
+// capsule and CollectMutatedStructTypes share the computed sets without
 // rescanning function bodies.
 type FreshLocalsCache struct {
 	p       *packages.Package

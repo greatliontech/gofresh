@@ -4,7 +4,6 @@ import (
 	"context"
 	"sort"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
@@ -19,7 +18,7 @@ type coneDischarges struct {
 	staticCompositeVars    map[string]bool
 	harnessDischargedVars  map[string]bool
 	directiveCovered       map[string]bool
-	protoVerifiedVars      map[string]bool
+	clusterVerifiedVars    map[string]bool
 }
 
 func (d coneDischarges) isAttestationFreeDischarged(pkgPath, key string, malformedVars map[string]bool) bool {
@@ -29,9 +28,9 @@ func (d coneDischarges) isAttestationFreeDischarged(pkgPath, key string, malform
 			d.harnessDischargedVars[key])
 }
 
-func (d coneDischarges) isProtoAttestedDischarged(pkgPath, key string, singleSubject bool, malformedVars map[string]bool) bool {
+func (d coneDischarges) isClusterAttestedDischarged(pkgPath, key string, singleSubject bool, malformedVars map[string]bool) bool {
 	return singleSubject && (d.pinnedPkg[pkgPath] || d.mutableLocalPkg[pkgPath]) &&
-		!malformedVars[key] && d.protoVerifiedVars[key]
+		!malformedVars[key] && d.clusterVerifiedVars[key]
 }
 
 func deriveConeDischarges(
@@ -117,7 +116,8 @@ func deriveConeDischarges(
 		}
 	}
 
-	commonRolesByPkg := map[string]map[rtRoleKey]rtRoleInfo{}
+	commonCapsulesByPkg := map[string]map[syntaxutil.TypeRef]capsuleTypeInfo{}
+	commonBuildersByPkg := map[string]map[builderVariantKey]builderTypeInfo{}
 	nonMutatingMethods := map[syntaxutil.FuncKey]bool{}
 	if !anyMalformedMutatedStruct {
 		for _, pkgPath := range pkgPaths {
@@ -141,97 +141,9 @@ func deriveConeDischarges(
 			for m := range commonMethods {
 				nonMutatingMethods[m] = true
 			}
-
-			commonRolesByPkg[pkgPath] = intersectPackageVariants(
-				pkgFacts,
-				func(fact Fact) map[rtRoleKey]rtRoleInfo {
-					cur := make(map[rtRoleKey]rtRoleInfo, len(fact.ProtoRuntimeTypes))
-					for _, rt := range fact.ProtoRuntimeTypes {
-						if rt.Type.Pkg != pkgPath {
-							continue
-						}
-						ah := make(map[syntaxutil.FuncKey]bool, len(rt.AllowedHelpers))
-						for _, h := range rt.AllowedHelpers {
-							ah[h] = true
-						}
-						gt := make(map[syntaxutil.TypeRef]bool, len(rt.GuardTypes))
-						for _, g := range rt.GuardTypes {
-							gt[g] = true
-						}
-						swp := make(map[syntaxutil.ParamKey]bool, len(rt.SafePtrWrapperParams))
-						for _, pk := range rt.SafePtrWrapperParams {
-							swp[pk] = true
-						}
-						sac := make(map[syntaxutil.FuncKey]bool, len(rt.SafeAtomicPtrCopyFuncs))
-						for _, fk := range rt.SafeAtomicPtrCopyFuncs {
-							sac[fk] = true
-						}
-						cur[rtRoleKey{Type: rt.Type, Role: rt.Role}] = rtRoleInfo{
-							SubBuilder:             rt.SubBuilder,
-							InitHelper:             rt.InitHelper,
-							AllowedHelpers:         ah,
-							GuardTypes:             gt,
-							CapsuleReflectSafe:     rt.CapsuleReflectSafe,
-							SafePtrWrapperParams:   swp,
-							SafeAtomicPtrCopyFuncs: sac,
-						}
-					}
-					return cur
-				},
-				func(prev, next rtRoleInfo) (rtRoleInfo, bool) {
-					if prev.InitHelper != next.InitHelper || prev.SubBuilder != next.SubBuilder {
-						return rtRoleInfo{}, false
-					}
-					for h := range prev.AllowedHelpers {
-						if !next.AllowedHelpers[h] {
-							delete(prev.AllowedHelpers, h)
-						}
-					}
-					for g := range next.GuardTypes {
-						prev.GuardTypes[g] = true
-					}
-					prev.CapsuleReflectSafe = prev.CapsuleReflectSafe && next.CapsuleReflectSafe
-					if !prev.CapsuleReflectSafe {
-						clear(prev.SafePtrWrapperParams)
-						clear(prev.SafeAtomicPtrCopyFuncs)
-					} else {
-						for pk := range prev.SafePtrWrapperParams {
-							if !next.SafePtrWrapperParams[pk] {
-								delete(prev.SafePtrWrapperParams, pk)
-							}
-						}
-						for fk := range prev.SafeAtomicPtrCopyFuncs {
-							if !next.SafeAtomicPtrCopyFuncs[fk] {
-								delete(prev.SafeAtomicPtrCopyFuncs, fk)
-							}
-						}
-					}
-					return prev, true
-				},
-			)
+			commonCapsulesByPkg[pkgPath] = intersectPkgCapsuleTypes(pkgPath, pkgFacts)
+			commonBuildersByPkg[pkgPath] = intersectPkgInitBuilders(pkgPath, pkgFacts)
 		}
-	}
-
-	hasValidDescBuilderCovering := func(guardStruct syntaxutil.TypeRef) bool {
-		for k, cand := range commonRolesByPkg[guardStruct.Pkg] {
-			if k.Role != protoaudit.ProtoRoleDescBuilder {
-				continue
-			}
-			if guardStruct != k.Type && !cand.GuardTypes[guardStruct] {
-				continue
-			}
-			clean := true
-			for g := range cand.GuardTypes {
-				if mutatedStructs[g] {
-					clean = false
-					break
-				}
-			}
-			if clean {
-				return true
-			}
-		}
-		return false
 	}
 
 	importsByPkg := make(map[string][]string, len(meta))
@@ -246,85 +158,15 @@ func deriveConeDischarges(
 	}
 
 	for len(allCondStructMutations) > 0 {
-		safeCapsuleGuardStructs := map[string]map[syntaxutil.TypeRef]bool{}
-		nestedSafeCapsuleStructs := map[string]map[syntaxutil.TypeRef]bool{}
-		safePtrWrapperParams := map[syntaxutil.TypeRef]map[syntaxutil.ParamKey]bool{}
-		safeAtomicPtrCopyFuncs := map[syntaxutil.FuncKey]bool{}
+		var (
+			safeCapsuleGuardStructs  map[string]map[syntaxutil.TypeRef]bool
+			nestedSafeCapsuleStructs map[string]map[syntaxutil.TypeRef]bool
+			safePtrWrapperParams     map[syntaxutil.TypeRef]map[syntaxutil.ParamKey]bool
+			safeAtomicPtrCopyFuncs   map[syntaxutil.FuncKey]bool
+		)
 		if !anyMalformedMutatedStruct {
-			for _, pkgPath := range pkgPaths {
-				anyMsgRoleUnsafeOrMut := false
-				for rk, ri := range commonRolesByPkg[pkgPath] {
-					if rk.Role != protoaudit.ProtoRoleMessage {
-						continue
-					}
-					if !ri.CapsuleReflectSafe || mutatedStructs[rk.Type] {
-						anyMsgRoleUnsafeOrMut = true
-						break
-					}
-					for g := range ri.GuardTypes {
-						if mutatedStructs[g] {
-							anyMsgRoleUnsafeOrMut = true
-							break
-						}
-					}
-					if anyMsgRoleUnsafeOrMut {
-						break
-					}
-				}
-				for rk, ri := range commonRolesByPkg[pkgPath] {
-					if (rk.Role != protoaudit.ProtoRoleMessage && rk.Role != protoaudit.ProtoRoleExtension) ||
-						!ri.CapsuleReflectSafe {
-						continue
-					}
-					if !anyMsgRoleUnsafeOrMut {
-						if nestedSafeCapsuleStructs[pkgPath] == nil {
-							nestedSafeCapsuleStructs[pkgPath] = map[syntaxutil.TypeRef]bool{}
-						}
-						nestedSafeCapsuleStructs[pkgPath][rk.Type] = true
-						for g := range ri.GuardTypes {
-							nestedSafeCapsuleStructs[pkgPath][g] = true
-						}
-					}
-					if mutatedStructs[rk.Type] {
-						continue
-					}
-					guardMut := false
-					for g := range ri.GuardTypes {
-						if mutatedStructs[g] {
-							guardMut = true
-							break
-						}
-					}
-					if guardMut {
-						continue
-					}
-					if safeCapsuleGuardStructs[pkgPath] == nil {
-						safeCapsuleGuardStructs[pkgPath] = map[syntaxutil.TypeRef]bool{}
-					}
-					safeCapsuleGuardStructs[pkgPath][rk.Type] = true
-					for g := range ri.GuardTypes {
-						safeCapsuleGuardStructs[pkgPath][g] = true
-					}
-					if nestedSafeCapsuleStructs[pkgPath] == nil {
-						nestedSafeCapsuleStructs[pkgPath] = map[syntaxutil.TypeRef]bool{}
-					}
-					nestedSafeCapsuleStructs[pkgPath][rk.Type] = true
-					for g := range ri.GuardTypes {
-						nestedSafeCapsuleStructs[pkgPath][g] = true
-					}
-					if len(ri.SafePtrWrapperParams) > 0 {
-						if safePtrWrapperParams[rk.Type] == nil {
-							safePtrWrapperParams[rk.Type] = map[syntaxutil.ParamKey]bool{}
-						}
-						for pk := range ri.SafePtrWrapperParams {
-							safePtrWrapperParams[rk.Type][pk] = true
-						}
-					}
-					for fk := range ri.SafeAtomicPtrCopyFuncs {
-						safeAtomicPtrCopyFuncs[fk] = true
-					}
-				}
-			}
+			safeCapsuleGuardStructs, nestedSafeCapsuleStructs, safePtrWrapperParams, safeAtomicPtrCopyFuncs =
+				collectSafeCapsuleReflectSets(pkgPaths, commonCapsulesByPkg, mutatedStructs)
 		}
 
 		isInactiveCapsuleOrCopyScoped := func(rf syntaxutil.ReflectedIfaceFact) bool {
@@ -868,12 +710,12 @@ func deriveConeDischarges(
 				triggerReason = "guard_pkg_retains_carrier"
 				triggerDetail = cm.GuardPkg
 			}
-			if triggerReason == "" && !cm.GuardStruct.IsZero() && !cm.RequireDescBuilderGuard && mutatedStructs[cm.GuardStruct] {
+			if triggerReason == "" && !cm.GuardStruct.IsZero() && !cm.RequireImmutableCapsuleGuard && mutatedStructs[cm.GuardStruct] {
 				triggerReason = "guard_struct_mutated"
 				triggerDetail = cm.GuardStruct.Key()
 			}
-			if triggerReason == "" && cm.RequireDescBuilderGuard && !hasValidDescBuilderCovering(cm.GuardStruct) {
-				triggerReason = "missing_desc_builder_guard"
+			if triggerReason == "" && cm.RequireImmutableCapsuleGuard && !hasValidImmutableCapsuleGuardCovering(commonBuildersByPkg, mutatedStructs, cm.GuardStruct) {
+				triggerReason = "missing_immutable_capsule_guard"
 				triggerDetail = cm.GuardStruct.Key()
 			}
 			if triggerReason == "" && !cm.RequireNonMutatingMethod.IsZero() && !nonMutatingMethods[cm.RequireNonMutatingMethod] {
@@ -961,7 +803,8 @@ func deriveConeDischarges(
 		paramLeakFree,
 		refRegions,
 		initOnlyFn,
-		commonRolesByPkg,
+		commonCapsulesByPkg,
+		commonBuildersByPkg,
 		&out,
 	)
 	return out

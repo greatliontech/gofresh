@@ -76,6 +76,7 @@ type callerReferenceSummary struct {
 	allFunctions            map[*ssa.Function]bool
 	userPaths               map[string]bool
 	pureDelegates           map[string]bool
+	verifiedHarnesses       map[string]*propharness.VerifiedPackage
 
 	progMemos                 [4]dynamicMemoTables
 	enumMemos                 [4]dynamicMemoTables
@@ -243,14 +244,15 @@ func enumerateCallerReferencesForProgram(prog *program, audited bool, pureDelega
 			wholeProgram = true
 		}
 	}
-	harnessAudited := propertyHarnessAuditedProg(audited, prog)
+	verified := verifiedHarnessesProg(audited, prog)
 	var rootPkgPath string
 	if prog != nil {
 		rootPkgPath = prog.PkgPath
 	}
-	res := enumerateCallerReferencesWithOrdered(audited, harnessAudited, rootPkgPath, userPaths, all, ordered)
+	res := enumerateCallerReferencesWithOrdered(audited, verified, rootPkgPath, userPaths, all, ordered)
 	res.prog = prog
 	res.pureDelegates = pureDelegates
+	res.verifiedHarnesses = verified
 	if prog != nil {
 		if wholeProgram && prog.MutatedGlobals == nil && res.mutatedGlobals != nil {
 			prog.MutatedGlobals = res.mutatedGlobals
@@ -264,10 +266,10 @@ func enumerateCallerReferencesForProgram(prog *program, audited bool, pureDelega
 }
 
 func enumerateCallerReferences(audited bool, userPaths map[string]bool, all map[*ssa.Function]bool) *callerReferenceSummary {
-	return enumerateCallerReferencesWithOrdered(audited, false, "", userPaths, all, nil)
+	return enumerateCallerReferencesWithOrdered(audited, nil, "", userPaths, all, nil)
 }
 
-func enumerateCallerReferencesWithOrdered(audited, harnessAudited bool, rootPkgPath string, userPaths map[string]bool, all map[*ssa.Function]bool, ordered []*ssa.Function) *callerReferenceSummary {
+func enumerateCallerReferencesWithOrdered(audited bool, verifiedHarnesses map[string]*propharness.VerifiedPackage, rootPkgPath string, userPaths map[string]bool, all map[*ssa.Function]bool, ordered []*ssa.Function) *callerReferenceSummary {
 	if ordered == nil {
 		ordered = orderedFunctionsForProgram(all)
 	}
@@ -585,7 +587,7 @@ func enumerateCallerReferencesWithOrdered(audited, harnessAudited bool, rootPkgP
 		structJudgeable := fn.Synthetic == "" || fnIsPromotedWrapper || (audited && fn.Origin() != nil)
 		fnPkg := funcPkgPath(fn)
 		nonStdFrame := !isStdPkgPath(userPaths, fnPkg)
-		nonHarnessUserFrame := nonStdFrame && !(harnessAudited && propharness.IsHarnessPath(fnPkg))
+		nonHarnessUserFrame := nonStdFrame && verifiedHarnesses[fnPkg] == nil
 		hasUserTypes := nonStdFrame || (fnPkg == "strconv" && fn.Synthetic == "")
 		if !hasUserTypes {
 			for cur := fn; cur != nil; cur = cur.Parent() {
@@ -900,7 +902,8 @@ func enumerateCallerReferencesWithOrdered(audited, harnessAudited bool, rootPkgP
 									}
 								}
 								calleeNonStd := !isStdPkgPath(userPaths, calleePkg)
-								if (calleeNonStd && len(callee.Blocks) == 0 && callee.Synthetic == "" && !parameterizedBody(callee)) || isStdDeserializerCall(calleePkg, calleeSym) || (harnessAudited && propharness.IsHarnessPath(calleePkg) && (calleeSym == "Make" || calleeSym == "MakeCustom")) {
+								calleeVP := verifiedHarnesses[calleePkg]
+								if (calleeNonStd && len(callee.Blocks) == 0 && callee.Synthetic == "" && !parameterizedBody(callee)) || isStdDeserializerCall(calleePkg, calleeSym) || (calleeVP != nil && calleeVP.ReflectSynthFuncs[calleeSym]) {
 									for _, arg := range c.Args {
 										if arg != nil {
 											poisonContainedTypes(arg.Type(), fn)
@@ -1552,12 +1555,15 @@ func provenanceBFS(ctx context.Context, audited bool, prog *program, roots []*ss
 	return reach, err
 }
 
-func newProvenanceFP(audited, harnessAudited bool, pureDelegates map[string]bool, prog *program, summary *callerReferenceSummary, userPaths map[string]bool) *freshParamAnalysis {
+func newProvenanceFP(audited bool, verifiedHarnesses map[string]*propharness.VerifiedPackage, pureDelegates map[string]bool, prog *program, summary *callerReferenceSummary, userPaths map[string]bool) *freshParamAnalysis {
 	if summary == nil {
 		summary = lookupSummaryForProg(prog, audited)
 	}
+	if verifiedHarnesses == nil && summary != nil {
+		verifiedHarnesses = summary.verifiedHarnesses
+	}
 	fp := &freshParamAnalysis{
-		ssaProgramIndex: summary.ssaIndex(audited, harnessAudited, pureDelegates, userPaths, nil),
+		ssaProgramIndex: summary.ssaIndex(audited, verifiedHarnesses, pureDelegates, userPaths, nil),
 	}
 	fp.resetDynamicMemos()
 	if summary != nil {
@@ -1763,6 +1769,14 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 			asyncStartup = computeRTAAsyncStartupFunctions(result, mask, userPaths)
 		}
 	}
+	var verified map[string]*propharness.VerifiedPackage
+	if harnessAudited {
+		if sharedProvFP != nil && sharedProvFP.verifiedHarnesses != nil {
+			verified = sharedProvFP.verifiedHarnesses
+		} else {
+			verified = verifiedHarnessesProg(audited, prog)
+		}
+	}
 	var sawHarnessCall bool
 	var dispatchedTargets map[*ssa.Function]bool
 	var harnessCandidateTargets map[*ssa.Function]bool
@@ -1778,7 +1792,7 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 				return true
 			}
 			pkgPath := named.Obj().Pkg().Path()
-			if isStdPkgPath(userPaths, pkgPath) || pkgPath == "testing" || (harnessAudited && propharness.IsHarnessPath(pkgPath)) {
+			if isStdPkgPath(userPaths, pkgPath) || pkgPath == "testing" || verified[pkgPath] != nil {
 				return true
 			}
 			for _, mt := range []types.Type{named, types.NewPointer(named)} {
@@ -1862,7 +1876,7 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 			return provFP
 		}
 		provFPInit = true
-		provFP = newProvenanceFP(audited, harnessAudited, nil, prog, nil, userPaths)
+		provFP = newProvenanceFP(audited, verified, nil, prog, nil, userPaths)
 		return provFP
 	}
 	var opsBuf [8]*ssa.Value
@@ -1895,7 +1909,7 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 		// property harness - is never subject content; its dispatch
 		// targets still traverse, so the caller-supplied callbacks it
 		// runs stay subject flow (REQ-closure-observability-analysis).
-		harnessFrame := fnPath == "testing" || harnessAudited && propharness.IsHarnessPath(fnPath)
+		harnessFrame := fnPath == "testing" || verified[fnPath] != nil
 		if !harnessFrame {
 			reachable[fn] = true
 			if !usedInitBoxed && len(initBoxedTypes) > 0 && len(fn.FreeVars) > 0 &&
@@ -1938,7 +1952,7 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 							if g.Pkg != nil && g.Pkg.Pkg != nil {
 								gPkg = g.Pkg.Pkg.Path()
 							}
-							if gPkg == "testing" || (harnessAudited && propharness.IsHarnessPath(gPkg)) {
+							if gPkg == "testing" || verified[gPkg] != nil {
 								continue
 							}
 							if isStdPkgPath(userPaths, gPkg) && baseStartup != nil && !baseStartup.userTouchedStdGlobals[g] {
@@ -1965,7 +1979,7 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 				}
 				if callee != nil {
 					calleePath := funcPkgPath(callee)
-					calleeHarness := calleePath == "testing" || harnessAudited && propharness.IsHarnessPath(calleePath)
+					calleeHarness := calleePath == "testing" || verified[calleePath] != nil
 					calleeIsStd := isStdPkgPath(userPaths, calleePath)
 					calleeNonStdDispatch := false
 					switch {
@@ -2033,7 +2047,7 @@ func provenanceBFSWithCandidates(ctx context.Context, audited bool, prog *progra
 						if !fnNonStdDispatch && !targetIsStd && !harnessCandidateTargets[target] {
 							continue
 						}
-						targetHarness := targetPath == "testing" || harnessAudited && propharness.IsHarnessPath(targetPath)
+						targetHarness := targetPath == "testing" || verified[targetPath] != nil
 						// User callbacks dispatched from harness frames stay
 						// in the walk by the load's module facts, never by
 						// path shape: a dotless user module's callback

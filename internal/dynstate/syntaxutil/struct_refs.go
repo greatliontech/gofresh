@@ -14,8 +14,8 @@ const unnamedStructPkgSentinel = "@struct"
 
 // TypeRef identifies a package-level named Go struct type by package import path
 // and unqualified type name after unaliasing, or a non-empty unnamed Go struct
-// type (including type aliases to unnamed structs such as protoiface.Methods)
-// by "@struct" and its canonical tag-ignoring structural SHA-256 digest.
+// type (including type aliases to unnamed structs) by "@struct" and its
+// canonical tag-ignoring structural SHA-256 digest.
 type TypeRef struct {
 	Pkg  string `json:"pkg"`
 	Name string `json:"name"`
@@ -385,28 +385,28 @@ func SliceElemStructRef(t types.Type) (TypeRef, bool) {
 
 // ConditionalStructMutation records that Struct must be treated as mutated if
 // GuardPkg can retain pointer/interface carriers after init, if GuardStruct is
-// itself mutated in the composed cone, if RequireDescBuilderGuard is set and
-// GuardStruct is not covered by a verified ProtoRoleDescBuilder in its
-// declaring package, or if RequireNonMutatingMethod is set and that method is
-// not proven non-mutating across all variants of its declaring package.
+// itself mutated in the composed cone, if RequireImmutableCapsuleGuard is set
+// and GuardStruct is not covered by a verified raw immutable-capsule builder in
+// its declaring package, or if RequireNonMutatingMethod is set and that method
+// is not proven non-mutating across all variants of its declaring package.
 type ConditionalStructMutation struct {
-	Struct                   TypeRef  `json:"struct"`
-	GuardPkg                 string   `json:"guardPkg,omitempty"`
-	GuardStruct              TypeRef  `json:"guardStruct,omitempty"`
-	RequireDescBuilderGuard  bool     `json:"requireDescBuilderGuard,omitempty"`
-	RequireNonMutatingMethod FuncKey  `json:"requireNonMutatingMethod,omitempty"`
-	BoxedConcreteMethodSet   string   `json:"boxedConcreteMethodSet,omitempty"`
-	ForeignReflectPkg        string   `json:"foreignReflectPkg,omitempty"`
-	UnlessSafeCapsuleStruct  TypeRef  `json:"unlessSafeCapsuleStruct,omitempty"`
-	UnlessSafeCapsuleParam   ParamKey `json:"unlessSafeCapsuleParam,omitempty"`
-	UnlessSafeAtomicPtrCopy  FuncKey  `json:"unlessSafeAtomicPtrCopy,omitempty"`
+	Struct                       TypeRef  `json:"struct"`
+	GuardPkg                     string   `json:"guardPkg,omitempty"`
+	GuardStruct                  TypeRef  `json:"guardStruct,omitempty"`
+	RequireImmutableCapsuleGuard bool     `json:"requireImmutableCapsuleGuard,omitempty"`
+	RequireNonMutatingMethod     FuncKey  `json:"requireNonMutatingMethod,omitempty"`
+	BoxedConcreteMethodSet       string   `json:"boxedConcreteMethodSet,omitempty"`
+	ForeignReflectPkg            string   `json:"foreignReflectPkg,omitempty"`
+	UnlessSafeCapsuleStruct      TypeRef  `json:"unlessSafeCapsuleStruct,omitempty"`
+	UnlessSafeCapsuleParam       ParamKey `json:"unlessSafeCapsuleParam,omitempty"`
+	UnlessSafeAtomicPtrCopy      FuncKey  `json:"unlessSafeAtomicPtrCopy,omitempty"`
 }
 
 func (c ConditionalStructMutation) Valid() bool {
 	if !c.Struct.Valid() {
 		return false
 	}
-	if c.RequireDescBuilderGuard && c.GuardStruct.IsZero() {
+	if c.RequireImmutableCapsuleGuard && c.GuardStruct.IsZero() {
 		return false
 	}
 	if c.ForeignReflectPkg != "" && !ValidNonEmptyPkgKey(c.ForeignReflectPkg) {
@@ -464,8 +464,8 @@ func (c ConditionalStructMutation) Compare(o ConditionalStructMutation) int {
 	if d := cmp.Compare(c.GuardStruct.Key(), o.GuardStruct.Key()); d != 0 {
 		return d
 	}
-	if c.RequireDescBuilderGuard != o.RequireDescBuilderGuard {
-		if !c.RequireDescBuilderGuard {
+	if c.RequireImmutableCapsuleGuard != o.RequireImmutableCapsuleGuard {
+		if !c.RequireImmutableCapsuleGuard {
 			return -1
 		}
 		return 1

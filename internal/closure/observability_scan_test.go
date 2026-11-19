@@ -14,7 +14,6 @@ import (
 	"github.com/greatliontech/gofresh/internal/propharness"
 	arta "github.com/greatliontech/gofresh/internal/closure/internal/rta"
 	"github.com/greatliontech/gofresh/internal/dynstate"
-	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"go/ast"
@@ -3270,41 +3269,45 @@ func TestRealRapidLazyMutStringer(t *testing.T) {
 			implFact := pbFacts["google.golang.org/protobuf/internal/impl"]
 			descFact := pbFacts["google.golang.org/protobuf/types/descriptorpb"]
 
-			var fdBuilderFact *protoaudit.ProtoRuntimeTypeFact
-			for i := range fdFact.ProtoRuntimeTypes {
-				rt := &fdFact.ProtoRuntimeTypes[i]
-				if rt.Type.Name == "Builder" && rt.Role == protoaudit.ProtoRoleDescBuilder {
-					fdBuilderFact = rt
+			var fdBuilderFact *syntaxutil.InitBuilderFact
+			for i := range fdFact.InitBuilders {
+				bf := &fdFact.InitBuilders[i]
+				if bf.Type.Name == "Builder" && bf.CoversImmutableCapsules {
+					fdBuilderFact = bf
 				}
 			}
 			if fdBuilderFact == nil {
-				t.Fatalf("real protobuf@%s/internal/filedesc ProtoRuntimeTypes = %+v, missing desc_builder Builder", pbVer, fdFact.ProtoRuntimeTypes)
+				t.Fatalf("real protobuf@%s/internal/filedesc InitBuilders = %+v, missing CoversImmutableCapsules Builder", pbVer, fdFact.InitBuilders)
 			}
 			fileGuardRef := syntaxutil.TypeRef{Pkg: "google.golang.org/protobuf/internal/filedesc", Name: "File"}
 			if !slices.Contains(fdBuilderFact.GuardTypes, fileGuardRef) {
 				t.Fatalf("real protobuf@%s/internal/filedesc Builder GuardTypes = %+v, missing File", pbVer, fdBuilderFact.GuardTypes)
 			}
 
-			var ftBuilderFact *protoaudit.ProtoRuntimeTypeFact
-			for i := range ftFact.ProtoRuntimeTypes {
-				rt := &ftFact.ProtoRuntimeTypes[i]
-				if rt.Type.Name == "Builder" && rt.Role == protoaudit.ProtoRoleBuilder {
-					ftBuilderFact = rt
+			var ftBuilderFact *syntaxutil.InitBuilderFact
+			for i := range ftFact.InitBuilders {
+				bf := &ftFact.InitBuilders[i]
+				if bf.Type.Name == "Builder" && len(bf.CapsuleSliceFields) > 0 {
+					ftBuilderFact = bf
 				}
 			}
 			wantSubBuilder := syntaxutil.TypeRef{Pkg: "google.golang.org/protobuf/internal/filedesc", Name: "Builder"}
 			if ftBuilderFact == nil || ftBuilderFact.SubBuilder != wantSubBuilder {
-				t.Fatalf("real protobuf@%s/internal/filetype Builder = %+v, want SubBuilder=%+v", pbVer, ftFact.ProtoRuntimeTypes, wantSubBuilder)
+				t.Fatalf("real protobuf@%s/internal/filetype Builder = %+v, want SubBuilder=%+v", pbVer, ftFact.InitBuilders, wantSubBuilder)
 			}
 
-			roles := map[string]protoaudit.ProtoRuntimeTypeFact{}
-			for _, rt := range implFact.ProtoRuntimeTypes {
-				roles[rt.Type.Name] = rt
+			capsules := map[string]syntaxutil.LazyOnceCapsuleType{}
+			for _, ct := range implFact.LazyOnceCapsuleTypes {
+				capsules[ct.Type.Name] = ct
 			}
-			if roles["EnumInfo"].Role != protoaudit.ProtoRoleEnum ||
-				roles["MessageInfo"].Role != protoaudit.ProtoRoleMessage ||
-				roles["ExtensionInfo"].Role != protoaudit.ProtoRoleExtension {
-				t.Fatalf("real protobuf@%s/internal/impl ProtoRuntimeTypes = %+v", pbVer, implFact.ProtoRuntimeTypes)
+			if _, okEnum := capsules["EnumInfo"]; !okEnum {
+				t.Fatalf("real protobuf@%s/internal/impl LazyOnceCapsuleTypes = %+v, missing EnumInfo", pbVer, implFact.LazyOnceCapsuleTypes)
+			}
+			if _, okMsg := capsules["MessageInfo"]; !okMsg {
+				t.Fatalf("real protobuf@%s/internal/impl LazyOnceCapsuleTypes = %+v, missing MessageInfo", pbVer, implFact.LazyOnceCapsuleTypes)
+			}
+			if extCap, okExt := capsules["ExtensionInfo"]; !okExt || !slices.Contains(extCap.ExportedWriteGuardFields, "ExtensionType") {
+				t.Fatalf("real protobuf@%s/internal/impl ExtensionInfo = %+v, want ExportedWriteGuardFields containing ExtensionType", pbVer, implFact.LazyOnceCapsuleTypes)
 			}
 			var methodsGuardRef syntaxutil.TypeRef
 			for _, imp := range implPkg.Types.Imports() {
@@ -3319,8 +3322,8 @@ func TestRealRapidLazyMutStringer(t *testing.T) {
 				}
 			}
 			atomicNilGuardRef := syntaxutil.TypeRef{Pkg: "google.golang.org/protobuf/internal/impl", Name: "atomicNilMessage"}
-			if !methodsGuardRef.Valid() || !slices.Contains(roles["MessageInfo"].GuardTypes, methodsGuardRef) || !slices.Contains(roles["MessageInfo"].GuardTypes, atomicNilGuardRef) {
-				t.Fatalf("real protobuf@%s/internal/impl MessageInfo GuardTypes = %+v, missing %+v or %+v", pbVer, roles["MessageInfo"].GuardTypes, methodsGuardRef, atomicNilGuardRef)
+			if !methodsGuardRef.Valid() || !slices.Contains(capsules["MessageInfo"].GuardTypes, methodsGuardRef) || !slices.Contains(capsules["MessageInfo"].GuardTypes, atomicNilGuardRef) {
+				t.Fatalf("real protobuf@%s/internal/impl MessageInfo GuardTypes = %+v, missing %+v or %+v", pbVer, capsules["MessageInfo"].GuardTypes, methodsGuardRef, atomicNilGuardRef)
 			}
 
 			allGuarded := map[syntaxutil.TypeRef]string{}
@@ -3330,10 +3333,10 @@ func TestRealRapidLazyMutStringer(t *testing.T) {
 			for _, g := range ftBuilderFact.GuardTypes {
 				allGuarded[g] = "filetype.Builder"
 			}
-			for _, g := range roles["MessageInfo"].GuardTypes {
+			for _, g := range capsules["MessageInfo"].GuardTypes {
 				allGuarded[g] = "impl.MessageInfo"
 			}
-			for _, g := range roles["ExtensionInfo"].GuardTypes {
+			for _, g := range capsules["ExtensionInfo"].GuardTypes {
 				allGuarded[g] = "impl.ExtensionInfo"
 			}
 			var guardHits []string
@@ -3353,8 +3356,8 @@ func TestRealRapidLazyMutStringer(t *testing.T) {
 				t.Fatalf("real protobuf@%s unexpectedly marked guarded structs in MutatedStructTypes:\n  %s", pbVer, strings.Join(guardHits, "\n  "))
 			}
 
-			if len(descFact.ProtoClusters) == 0 {
-				t.Fatalf("real protobuf@%s/types/descriptorpb ProtoClusters = empty, want >= 1", pbVer)
+			if len(descFact.InitSettledClusters) == 0 {
+				t.Fatalf("real protobuf@%s/types/descriptorpb InitSettledClusters = empty, want >= 1", pbVer)
 			}
 			for _, rootPkgPath := range []string{
 				"google.golang.org/protobuf/reflect/protodesc",

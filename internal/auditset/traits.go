@@ -104,8 +104,9 @@ var readOnlySliceCopyFuncs = map[string][]string{
 // reorder elements of a caller-supplied slice in place without user callbacks
 // or ambient channels.
 var inPlaceContainerMutateFuncs = map[string][]string{
-	"slices": {"Reverse", "Sort"},
-	"sort":   {"Float64s", "Ints", "Strings"},
+	"slices":       {"Reverse", "Sort"},
+	"sort":         {"Float64s", "Ints", "Strings"},
+	"unicode/utf8": {"EncodeRune"},
 }
 
 // pureScalarOrValuePackages lists pure-computation standard packages whose

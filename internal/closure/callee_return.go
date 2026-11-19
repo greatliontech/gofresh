@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
-	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -224,7 +223,7 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 		if !fp.programFunctions[callee] || !fp.selectionAudited {
 			fp.markSubjectUsed()
 		}
-		if (!fp.functions[callee] && !fp.programFunctions[callee]) || (callee == fp.enumRoot && !fp.selectionAudited) || (callee.Signature != nil && callee.Signature.Variadic() && !fp.selectionAudited && !fp.inFieldStore && !fp.inProgramSites) || propharness.IsHarnessPath(pkgPath) {
+		if (!fp.functions[callee] && !fp.programFunctions[callee]) || (callee == fp.enumRoot && !fp.selectionAudited) || (callee.Signature != nil && callee.Signature.Variadic() && !fp.selectionAudited && !fp.inFieldStore && !fp.inProgramSites) || fp.verifiedHarnesses[pkgPath] != nil {
 			return reject("nonstd_inadmissible")
 		}
 		if fp.enumOnly && !collect.isSeeds() {

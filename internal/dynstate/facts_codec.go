@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
 
@@ -116,9 +115,10 @@ type Fact struct {
 	OnceMemoTypes              []syntaxutil.OnceMemoTypeFact          `json:"onceMemoTypes,omitempty"`
 	OnceMemoCandidates         []syntaxutil.OnceMemoVarCandidate      `json:"onceMemoCandidates,omitempty"`
 	HarnessDischarges          []string                               `json:"harnessDischarges,omitempty"`
-	ProtoClusters              []protoaudit.ProtoClusterFact          `json:"protoClusters,omitempty"`
+	LazyOnceCapsuleTypes       []syntaxutil.LazyOnceCapsuleType       `json:"lazyOnceCapsuleTypes,omitempty"`
+	InitBuilders               []syntaxutil.InitBuilderFact           `json:"initBuilders,omitempty"`
+	InitSettledClusters        []syntaxutil.InitSettledClusterFact    `json:"initSettledClusters,omitempty"`
 	ReadOnlyVarAliases         []syntaxutil.ReadOnlyVarAlias          `json:"readOnlyVarAliases,omitempty"`
-	ProtoRuntimeTypes          []protoaudit.ProtoRuntimeTypeFact      `json:"protoRuntimeTypes,omitempty"`
 	StaticCompositeGlobals     []syntaxutil.StaticCompositeGlobalFact `json:"staticCompositeGlobals,omitempty"`
 	MutatedStructTypes         []syntaxutil.TypeRef                   `json:"mutatedStructTypes,omitempty"`
 	ConditionalStructMutations []syntaxutil.ConditionalStructMutation `json:"conditionalStructMutations,omitempty"`

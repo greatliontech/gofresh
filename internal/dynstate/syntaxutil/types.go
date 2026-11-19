@@ -375,15 +375,39 @@ func ifaceAdmitsMap(iface *types.Interface, seen map[types.Type]bool) bool {
 	return true
 }
 
-// StructHasExportedIfaceField reports whether st has an exported interface-typed
-// field with the given name.
-func StructHasExportedIfaceField(st *types.Struct, name string) bool {
+// SoleExportedNonEmptyIfaceField returns the unique exported non-empty
+// interface-typed field on st, or nil if st has zero or more than one.
+func SoleExportedNonEmptyIfaceField(st *types.Struct) *types.Var {
+	if st == nil {
+		return nil
+	}
+	var hit *types.Var
+	for i := 0; i < st.NumFields(); i++ {
+		f := st.Field(i)
+		if !f.Exported() {
+			continue
+		}
+		iface, ok := UnderlyingType(f.Type()).(*types.Interface)
+		if !ok || iface.NumMethods() == 0 {
+			continue
+		}
+		if hit != nil {
+			return nil
+		}
+		hit = f
+	}
+	return hit
+}
+
+// StructHasExportedReflectTypeField reports whether st declares at least one
+// exported reflect.Type field.
+func StructHasExportedReflectTypeField(st *types.Struct) bool {
 	if st == nil {
 		return false
 	}
 	for i := 0; i < st.NumFields(); i++ {
 		f := st.Field(i)
-		if f.Exported() && f.Name() == name && types.IsInterface(f.Type()) {
+		if f.Exported() && IsReflectType(f.Type()) {
 			return true
 		}
 	}

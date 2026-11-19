@@ -6,7 +6,6 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -285,7 +284,7 @@ func resolveConcreteMethodTargetsSeen(prog *ssa.Program, recvType types.Type, me
 			if _, isIface := types.Unalias(sig.Recv().Type()).Underlying().(*types.Interface); !isIface {
 				return false
 			}
-			if fnObj.Pkg() != nil && propharness.IsHarnessPath(fnObj.Pkg().Path()) {
+			if fnObj.Pkg() != nil && fp != nil && fp.verifiedHarnesses[fnObj.Pkg().Path()] != nil {
 				return false
 			}
 			named := derefNamedStruct(fp.userPkgPaths(), ct)
@@ -339,7 +338,7 @@ func resolveConcreteMethodTargetsSeen(prog *ssa.Program, recvType types.Type, me
 			}
 			return true
 		} else {
-			if len(declFn.Blocks) == 0 || propharness.IsHarnessPath(funcPkgPath(declFn)) {
+			if len(declFn.Blocks) == 0 || (fp != nil && fp.verifiedHarnesses[funcPkgPath(declFn)] != nil) {
 				return false
 			}
 			if fp.isStdFunc(declFn) {

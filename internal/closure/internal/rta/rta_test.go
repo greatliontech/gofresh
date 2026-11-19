@@ -556,8 +556,8 @@ func RootHarnessErrorAndStringerIsolation() string {
 		rootIso: 1 << 1,
 	}
 	res, err := Analyze(context.Background(), roots, &Seeds{
-		HarnessPkg: "example.com/rtaharness/harness",
-		UserPkgs:   map[string]bool{"example.com/rtaharness/harness": true, "example.com/rtaharness/subj": true},
+		HarnessPkgs: map[string]bool{"example.com/rtaharness/harness": true},
+		UserPkgs:    map[string]bool{"example.com/rtaharness/harness": true, "example.com/rtaharness/subj": true},
 	})
 	if err != nil {
 		t.Fatalf("Analyze: %v", err)
@@ -1045,8 +1045,8 @@ func TestPureHarnessInternalStdTypeNestedExclusions(t *testing.T) {
 	}, nil), nil)
 
 	r := &attributedRTA{
-		harnessPkg: "pgregory.net/rapid",
-		userPkgs:   map[string]bool{"example.com/user": true},
+		harnessPkgs: map[string]bool{"example.com/propcheck": true},
+		userPkgs:    map[string]bool{"example.com/user": true},
 	}
 	if !r.isPureHarnessInternalStdType(pureType) {
 		t.Fatal("isPureHarnessInternalStdType(PureHelper) = false, want true")
@@ -1325,5 +1325,3 @@ func EntryUsed() any {
 		t.Fatalf("Reachable[(*deadItem).Run] = 0 when referencedPool.New() is called, want non-zero")
 	}
 }
-
-

@@ -146,9 +146,9 @@ func CollectMutatedStructTypesWithCapsuleFields(
 	exemptFamilyByFunc map[*ast.FuncDecl]map[*types.Named]bool,
 	exemptReadFields map[*types.Var]bool,
 	foreignReflectFields map[*types.Var]bool,
-	clusterMsgGoTypes map[*types.Var][]*types.Named,
+	clusterCapsuleElemTypes map[*types.Var][]*types.Named,
 ) ([]syntaxutil.TypeRef, []syntaxutil.ConditionalStructMutation, []syntaxutil.ReflectedIfaceFact) {
-	return CollectMutatedStructTypesWithCapsuleFieldsCtx(nil, p, idx, freshCache, confinedCacheMaps, exempted, exemptFamilyByFunc, exemptReadFields, foreignReflectFields, clusterMsgGoTypes)
+	return CollectMutatedStructTypesWithCapsuleFieldsCtx(nil, p, idx, freshCache, confinedCacheMaps, exempted, exemptFamilyByFunc, exemptReadFields, foreignReflectFields, clusterCapsuleElemTypes)
 }
 
 type ctxBoxedIfaceKey struct {
@@ -197,9 +197,9 @@ type mutatedStructCollector struct {
 	confinedCacheMaps    map[*types.Var]map[*ast.FuncDecl]bool
 	exempted             map[ast.Node]bool
 	exemptFamilyByFunc   map[*ast.FuncDecl]map[*types.Named]bool
-	exemptReadFields     map[*types.Var]bool
-	foreignReflectFields map[*types.Var]bool
-	clusterMsgGoTypes    map[*types.Var][]*types.Named
+	exemptReadFields        map[*types.Var]bool
+	foreignReflectFields    map[*types.Var]bool
+	clusterCapsuleElemTypes map[*types.Var][]*types.Named
 
 	traceTarget                        string
 	seen                               map[syntaxutil.TypeRef]bool
@@ -265,7 +265,7 @@ func CollectMutatedStructTypesWithCapsuleFieldsCtx(
 	exemptFamilyByFunc map[*ast.FuncDecl]map[*types.Named]bool,
 	exemptReadFields map[*types.Var]bool,
 	foreignReflectFields map[*types.Var]bool,
-	clusterMsgGoTypes map[*types.Var][]*types.Named,
+	clusterCapsuleElemTypes map[*types.Var][]*types.Named,
 ) ([]syntaxutil.TypeRef, []syntaxutil.ConditionalStructMutation, []syntaxutil.ReflectedIfaceFact) {
 	if p == nil || p.Types == nil || p.TypesInfo == nil || idx == nil {
 		return nil, nil, nil
@@ -283,7 +283,7 @@ func CollectMutatedStructTypesWithCapsuleFieldsCtx(
 		exemptFamilyByFunc:                 exemptFamilyByFunc,
 		exemptReadFields:                   exemptReadFields,
 		foreignReflectFields:               foreignReflectFields,
-		clusterMsgGoTypes:                  clusterMsgGoTypes,
+		clusterCapsuleElemTypes:            clusterCapsuleElemTypes,
 		traceTarget:                        pkgTraceTarget(p),
 		seen:                               map[syntaxutil.TypeRef]bool{},
 		condSeen:                           map[syntaxutil.ConditionalStructMutation]bool{},
@@ -326,7 +326,7 @@ func CollectMutatedStructTypesWithCapsuleFieldsCtx(
 	msc.foreignUnsafeIfaces = map[foreignIfaceKey]bool{}
 	msc.atomicPtrCopyGuards = map[syntaxutil.FuncKey]bool{}
 	msc.safeCapsuleWrapUnsafeConvs, _, _, _, msc.safeRawUintptrConvs = collectSafeCapsuleWrapperUnsafePtrConvs(msc.p, msc.idx, msc.foreignReflectFields)
-	msc.foreignPtrConvClasses, msc.unconfinedForeignUnsafe = classifyForeignUnsafePtrConvs(msc.p, msc.idx, msc.exempted, msc.clusterMsgGoTypes)
+	msc.foreignPtrConvClasses, msc.unconfinedForeignUnsafe = classifyForeignUnsafePtrConvs(msc.p, msc.idx, msc.exempted, msc.clusterCapsuleElemTypes)
 	for _, cls := range msc.foreignPtrConvClasses {
 		if cls.isAtomicPtrCopy && cls.atomicCopyFn.Valid() {
 			msc.atomicPtrCopyGuards[cls.atomicCopyFn] = true
@@ -347,17 +347,17 @@ func CollectMutatedStructTypesWithCapsuleFieldsCtx(
 	msc.confinedContextKeys, msc.confinedContextLookups, msc.mismatchedContextIfaceKeys = collectConfinedContextKeyTypes(msc.p, msc.idx)
 	msc.typeDispatchOnlyAnyParams = collectTypeDispatchOnlyAnyParams(msc.p, msc.idx)
 
-	for msgVar, msgSlice := range msc.clusterMsgGoTypes {
+	for capVar, elemSlice := range msc.clusterCapsuleElemTypes {
 		fallbackCapPkg := ""
-		if msgVar != nil {
-			if sl, isSl := syntaxutil.UnderlyingType(msgVar.Type()).(*types.Slice); isSl {
+		if capVar != nil {
+			if sl, isSl := syntaxutil.UnderlyingType(capVar.Type()).(*types.Slice); isSl {
 				if elemNamed := syntaxutil.DerefNamedStruct(sl.Elem()); elemNamed != nil && elemNamed.Obj() != nil &&
 					elemNamed.Obj().Pkg() != nil && elemNamed.Obj().Pkg() != msc.p.Types && !msc.isTrueStdPkg(elemNamed.Obj().Pkg()) {
 					fallbackCapPkg = elemNamed.Obj().Pkg().Path()
 				}
 			}
 		}
-		for _, msgNamed := range msgSlice {
+		for _, msgNamed := range elemSlice {
 			if msgNamed != nil {
 				capPkg := msc.extractForeignCapsuleWrapperPkg(msgNamed)
 				if capPkg == "" {

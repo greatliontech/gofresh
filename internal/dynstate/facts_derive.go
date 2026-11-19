@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/capsule"
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/seams"
-	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/propharness"
@@ -463,7 +463,7 @@ func factOfWithCacheCtx(ctx context.Context, audited bool, p *packages.Package, 
 	}
 	recordPackageMethodDirectives(p, &fact)
 	if idx != nil {
-		fact.DirectVarWrites = protoaudit.CollectDirectCrossPkgVarWrites(audited, p, idx)
+		fact.DirectVarWrites = capsule.CollectDirectCrossPkgVarWrites(audited, p, idx)
 	}
 	if p.Types != nil && p.Module != nil {
 		if idx != nil {
@@ -473,8 +473,10 @@ func factOfWithCacheCtx(ctx context.Context, audited bool, p *packages.Package, 
 			fact.MemoDischarges = deriveMemoDischarges(ctx, audited, p, fc, idx)
 			var onceMemoExempt map[ast.Node]bool
 			fact.OnceMemoTypes, onceMemoExempt = deriveOnceMemoTypes(ctx, audited, p, fc, idx, freshCache, &pkgConf)
-			if len(fact.Declares) > 0 && propharness.IsHarnessPath(p.PkgPath) && propharness.VerifyPackage(audited, p) {
-				fact.HarnessDischarges = slices.Clone(fact.Declares)
+			if len(fact.Declares) > 0 && propharness.MayBeHarnessPackage(p) {
+				if vp, _ := propharness.VerifyPackageWithIndex(ctx, trace.DomainDynstate, audited, p, idx); vp != nil {
+					fact.HarnessDischarges = slices.Clone(fact.Declares)
+				}
 			}
 			unattestedMutated := make(map[string]bool, len(mutated)+len(poolMutated))
 			for key := range mutated {
@@ -484,25 +486,25 @@ func factOfWithCacheCtx(ctx context.Context, audited bool, p *packages.Package, 
 				unattestedMutated[key] = true
 			}
 			var claimedVars map[*types.Var]bool
-			fact.ProtoClusters, fact.ProtoRuntimeTypes, fact.MutatedStructTypes, fact.ConditionalStructMutations, fact.ReflectedIfaceMethodSets, claimedVars =
-				protoaudit.DeriveProtoAndStructFactsCtx(ctx, audited, p, idx, freshCache, confinedCacheMaps, initOnly, unattestedMutated, onceMemoExempt)
+			fact.InitSettledClusters, fact.InitBuilders, fact.LazyOnceCapsuleTypes, fact.MutatedStructTypes, fact.ConditionalStructMutations, fact.ReflectedIfaceMethodSets, claimedVars =
+				capsule.DeriveCapsuleAndStructFactsCtx(ctx, audited, p, idx, freshCache, confinedCacheMaps, initOnly, unattestedMutated, onceMemoExempt)
 			var exemptAliasIdents map[*ast.Ident]bool
 			fact.ReadOnlyVarAliases, exemptAliasIdents = deriveReadOnlyVarAliases(ctx, audited, p, fc, idx, singleSubjectSet, claimedVars)
 			fact.StaticCompositeGlobals = deriveStaticCompositeGlobals(ctx, audited, p, fc, idx, singleSubjectSet, claimedVars)
 			fact.OnceMemoCandidates = deriveOnceMemoCandidates(ctx, audited, p, fc, idx, singleSubjectSet, exemptAliasIdents)
-			fact.NonMethodVarUses = protoaudit.CollectNonMethodCrossPkgVarUses(audited, p, idx, exemptAliasIdents)
-			fact.NonMutatingMethods = protoaudit.DeriveNonMutatingMethods(audited, p, idx)
+			fact.NonMethodVarUses = capsule.CollectNonMethodCrossPkgVarUses(audited, p, idx, exemptAliasIdents)
+			fact.NonMutatingMethods = capsule.DeriveNonMutatingMethods(audited, p, idx)
 			fact.NoPostInitCarrierWrites, fact.CarrierImportCalls =
-				protoaudit.DeriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
+				capsule.DeriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
 		}
 	} else if idx != nil {
 		freshCache := freshstruct.NewFreshLocalsCache(p, idx)
 		confinedCacheMaps := freshstruct.FindMutexConfinedConstructorCaches(p, idx)
-		fact.NonMethodVarUses = protoaudit.CollectNonMethodCrossPkgVarUses(audited, p, idx, nil)
+		fact.NonMethodVarUses = capsule.CollectNonMethodCrossPkgVarUses(audited, p, idx, nil)
 		fact.MutatedStructTypes, fact.ConditionalStructMutations, fact.ReflectedIfaceMethodSets = freshstruct.CollectMutatedStructTypesWithCapsuleFieldsCtx(ctx, p, idx, freshCache, confinedCacheMaps, nil, nil, nil, nil, nil)
-		fact.NonMutatingMethods = protoaudit.DeriveNonMutatingMethods(audited, p, idx)
+		fact.NonMutatingMethods = capsule.DeriveNonMutatingMethods(audited, p, idx)
 		fact.NoPostInitCarrierWrites, fact.CarrierImportCalls =
-			protoaudit.DeriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
+			capsule.DeriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
 	}
 	if tracing {
 		for _, v := range fact.Mutates {

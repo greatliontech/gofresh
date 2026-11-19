@@ -109,7 +109,7 @@ func (r *attributedRTA) visitAddrTakenFuncWithSig(f *ssa.Function, S *types.Sign
 			}
 		}
 	}
-	if r.harnessPkg != "" {
+	if r.hasHarnessPlane() {
 		hSites, _ := r.harnessDynCallSites.At(S).(map[ssa.CallInstruction]uint64)
 		for site, siteMasks := range hSites {
 			matched := delta & siteMasks
@@ -150,7 +150,7 @@ func (r *attributedRTA) visitHarnessStdAddrTakenFunc(f *ssa.Function, masks uint
 	}
 	sites, _ := r.dynCallSites.At(S).(map[ssa.CallInstruction]uint64)
 	for site, siteMasks := range sites {
-		if r.funcPkgPath(site.Parent()) != r.harnessPkg {
+		if !r.isHarnessPkg(r.funcPkgPath(site.Parent())) {
 			continue
 		}
 		if matched := delta & siteMasks; matched != 0 {
@@ -438,7 +438,7 @@ func (r *attributedRTA) visitDynCall(site ssa.CallInstruction, masks uint64) {
 			}
 		}
 	}
-	if r.harnessPkg != "" && callerPkg == r.harnessPkg {
+	if r.isHarnessPkg(callerPkg) {
 		hFuncs, _ := r.harnessAddrTakenFuncsBySig.At(S).(map[*ssa.Function]uint64)
 		for f, functionMasks := range hFuncs {
 			if matched := delta & functionMasks; matched != 0 {
@@ -514,7 +514,7 @@ func (r *attributedRTA) visitInvoke(site ssa.CallInstruction, masks uint64) {
 	}
 	sites[site] |= delta
 
-	callerIsHarness := r.harnessPkg != "" && r.funcPkgPath(site.Parent()) == r.harnessPkg
+	callerIsHarness := r.isHarnessPkg(r.funcPkgPath(site.Parent()))
 	for _, C := range r.implementations(I) {
 		cinfo := r.concreteTypes.At(C).(*attributedConcreteTypeInfo)
 		// As with function calls, an invoke edge exists only in analyses that

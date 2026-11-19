@@ -2,7 +2,7 @@ package dynstate
 
 import (
 	"context"
-	"slices"
+	"go/token"
 	"sort"
 	"strings"
 	"time"
@@ -62,74 +62,6 @@ type DeferralResolution struct {
 	CtorsOf       map[string][]syntaxutil.FuncKey
 }
 
-// IsObjectClosed reports whether key is a declared package variable whose
-// closed sentinel opacity remains unbroken across allFacts.
-func (r *DeferralResolution) IsObjectClosed(key string) bool {
-	return r != nil && r.Declared[key] && !r.NotOpaque[key]
-}
-
-// FieldPopulationProves resolves one field-position use against the carrier's
-// registered population. On failure the second result names the unproven
-// deferred parameter key when one decided it — zero value when a poison, an
-// unresolved constructor, or an unproven carrier owner decided
-// (REQ-closure-shared-dynamic-state, REQ-explain-chain).
-func (r *DeferralResolution) FieldPopulationProves(varKey, field string, idx int) (bool, syntaxutil.ParamKey) {
-	if r == nil {
-		return false, syntaxutil.ParamKey{}
-	}
-	if r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: varKey}] ||
-		r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: varKey, HasPos: true, Field: field, Index: -1}] ||
-		r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: varKey, HasPos: true, Field: field, Index: idx}] {
-		return false, syntaxutil.ParamKey{}
-	}
-	for _, paramKey := range r.FieldDeferAt[syntaxutil.FieldPosKey{Owner: varKey, Field: field, Index: idx}] {
-		if !r.ParamLeakFree[paramKey] {
-			return false, paramKey
-		}
-	}
-	seen := map[syntaxutil.FuncKey]bool{}
-	ctors := r.CtorsOf[varKey]
-	stack := make([]syntaxutil.FuncKey, len(ctors))
-	for i := range ctors {
-		stack[len(ctors)-1-i] = ctors[i]
-	}
-	for len(stack) > 0 {
-		fnKey := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		if seen[fnKey] {
-			continue
-		}
-		seen[fnKey] = true
-		if !r.EnvFreeResolved[fnKey] {
-			return false, syntaxutil.ParamKey{}
-		}
-		if r.RetPoisonAt[syntaxutil.ReturnFieldParamPoison{Func: fnKey}] ||
-			r.RetPoisonAt[syntaxutil.ReturnFieldParamPoison{Func: fnKey, HasPos: true, Field: field, Index: -1}] ||
-			r.RetPoisonAt[syntaxutil.ReturnFieldParamPoison{Func: fnKey, HasPos: true, Field: field, Index: idx}] {
-			return false, syntaxutil.ParamKey{}
-		}
-		for _, paramKey := range r.RetDeferAt[syntaxutil.ReturnFieldPosKey{Func: fnKey, Field: field, Index: idx}] {
-			if !r.ParamLeakFree[paramKey] {
-				return false, paramKey
-			}
-		}
-		if deps := r.EnvFreeDeps[fnKey]; len(deps) > 0 {
-			sortedDeps := make([]syntaxutil.FuncKey, 0, len(deps))
-			for dep := range deps {
-				sortedDeps = append(sortedDeps, dep)
-			}
-			slices.SortFunc(sortedDeps, syntaxutil.FuncKey.Compare)
-			for i := len(sortedDeps) - 1; i >= 0; i-- {
-				stack = append(stack, sortedDeps[i])
-			}
-		}
-	}
-	if r.OwnerUnproven[varKey] {
-		return false, syntaxutil.ParamKey{}
-	}
-	return true, syntaxutil.ParamKey{}
-}
-
 // EnvAuditResolution is the environment-audit resolution shared by verdict
 // composition and explain: return-environment-free and argument-insertion
 // claims resolve in one least fixed point over their conditional edges
@@ -152,16 +84,6 @@ type EnvAuditResolution struct {
 	ParamMethodDeps map[syntaxutil.ParamKey]map[syntaxutil.FuncKey]bool
 	MethodDeps      map[syntaxutil.FuncKey]map[syntaxutil.FuncKey]bool
 	MethodParamDeps map[syntaxutil.FuncKey]map[syntaxutil.ParamKey]bool
-}
-
-func (e *EnvAuditResolution) DepResolved(dep syntaxutil.EnvAuditTarget) bool {
-	if !dep.Valid() {
-		return false
-	}
-	if dep.IsParam() {
-		return e.InsResolved[dep.Param()]
-	}
-	return e.Resolved[dep.Func]
 }
 
 // Compose runs the shared-dynamic-state judgment for one view package over the
@@ -205,47 +127,6 @@ func ResolveEnvAudit(allFacts map[string][]Fact, malformed func(Fact)) *EnvAudit
 		Facts:       allFacts,
 		OnMalformed: malformed,
 	}).EnvAudit
-}
-
-// CarrierLinkGraph builds the symmetric adjacency map of init-flow carrier
-// storage links across allFacts.
-func CarrierLinkGraph(allFacts map[string][]Fact, malformed func(Fact)) map[string]map[string]bool {
-	var validLinks []syntaxutil.CarrierLink
-	for _, facts := range allFacts {
-		for _, fact := range facts {
-			bad := false
-			for _, link := range fact.CarrierLinks {
-				if !link.Valid() {
-					bad = true
-					continue
-				}
-				validLinks = append(validLinks, link)
-			}
-			if bad && malformed != nil {
-				malformed(fact)
-			}
-		}
-	}
-	return buildCarrierLinkGraph(validLinks, nil)
-}
-
-func addMapSet[K, V comparable](m map[K]map[V]bool, k K, v V) {
-	if m[k] == nil {
-		m[k] = map[V]bool{}
-	}
-	m[k][v] = true
-}
-
-func buildCarrierLinkGraph(validLinks []syntaxutil.CarrierLink, resolution *DeferralResolution) map[string]map[string]bool {
-	linkAdj := map[string]map[string]bool{}
-	for _, link := range validLinks {
-		if resolution != nil && (resolution.IsObjectClosed(link.From) || resolution.IsObjectClosed(link.To)) {
-			continue
-		}
-		addMapSet(linkAdj, link.From, link.To)
-		addMapSet(linkAdj, link.To, link.From)
-	}
-	return linkAdj
 }
 
 // AnalyzeCone validates all Fact fields, solves the joint confinement,
@@ -873,18 +754,35 @@ func AnalyzeCone(q ConeQuery) *ConeAnalysis {
 				}
 			}
 			if len(fact.HarnessDischarges) > 0 {
-				if !propharness.IsHarnessPath(pkgPath) {
+				if !propharness.MayBeHarnessPkgPath(pkgPath) {
 					factBad = true
 				} else {
 					for _, key := range fact.HarnessDischarges {
-						if !syntaxutil.ValidQualifiedVarKey(key) || !strings.HasPrefix(key, prefix) || strings.Contains(key[len(prefix):], ".") {
+						if !syntaxutil.ValidQualifiedVarKey(key) || !strings.HasPrefix(key, prefix) {
+							factBad = true
+							continue
+						}
+						bare := key[len(prefix):]
+						if bare == "" || strings.Contains(bare, ".") || token.IsExported(bare) {
 							factBad = true
 						}
 					}
 				}
 			}
-			for _, c := range fact.ProtoClusters {
-				if !c.Valid() {
+			for _, ct := range fact.LazyOnceCapsuleTypes {
+				if !ct.Valid() || ct.Type.Pkg != pkgPath {
+					factBad = true
+					anyMalformedMutatedStruct = true
+				}
+			}
+			for _, bf := range fact.InitBuilders {
+				if !bf.Valid() || bf.Type.Pkg != pkgPath {
+					factBad = true
+					anyMalformedMutatedStruct = true
+				}
+			}
+			for _, c := range fact.InitSettledClusters {
+				if !c.Valid() || c.InitFn.Pkg != pkgPath {
 					factBad = true
 				}
 			}
@@ -892,11 +790,6 @@ func AnalyzeCone(q ConeQuery) *ConeAnalysis {
 				if !a.Valid() || !strings.HasPrefix(a.Key, prefix) || strings.Contains(a.Key[len(prefix):], ".") {
 					factBad = true
 					anyMalformedNonMethodVarUse = true
-				}
-			}
-			for _, rt := range fact.ProtoRuntimeTypes {
-				if !rt.Valid() {
-					factBad = true
 				}
 			}
 			for _, sg := range fact.StaticCompositeGlobals {

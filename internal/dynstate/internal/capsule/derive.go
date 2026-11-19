@@ -1,0 +1,357 @@
+// Package capsule mechanically derives lazy once-initialized capsule types,
+// raw and sample-aligned immutable builder types, idempotent init-settled
+// builder clusters, non-mutating exported methods, and post-init carrier
+// immutability summaries across a package's syntax.
+package capsule
+
+import (
+	"context"
+	"go/ast"
+	"go/types"
+	"slices"
+
+	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
+	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
+	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/trace"
+)
+
+func pkgTraceTarget(p *packages.Package) string {
+	if p == nil {
+		return ""
+	}
+	if p.PkgPath != "" {
+		return p.PkgPath
+	}
+	if p.Types != nil {
+		return p.Types.Path()
+	}
+	return ""
+}
+
+func emitCapsuleReject(ctx context.Context, p *packages.Package, symbol, reason string, at ast.Node) {
+	target := pkgTraceTarget(p)
+	if !trace.Enabled(ctx, trace.DomainDynstate, target) {
+		return
+	}
+	pos := ""
+	if p != nil && p.Fset != nil && at != nil && at.Pos().IsValid() {
+		pos = p.Fset.Position(at.Pos()).String()
+	}
+	trace.Emit(ctx, trace.DomainDynstate, "dynstate.capsule.reject", target,
+		trace.String("struct", symbol),
+		trace.String("reason", reason),
+		trace.String("pos", pos),
+	)
+}
+
+// DeriveCapsuleAndStructFacts extracts init-settled builder clusters, builder
+// facts, lazy once-capsule facts, and non-exempted struct/interface mutation
+// summaries across p.Syntax.
+func DeriveCapsuleAndStructFacts(
+	audited bool,
+	p *packages.Package,
+	idx *refconfine.PkgIndex,
+	freshCache *freshstruct.FreshLocalsCache,
+	confinedCacheMaps map[*types.Var]map[*ast.FuncDecl]bool,
+	initOnly map[string]bool,
+	mutatedVars map[string]bool,
+	extraExemptNodes map[ast.Node]bool,
+) (
+	[]syntaxutil.InitSettledClusterFact,
+	[]syntaxutil.InitBuilderFact,
+	[]syntaxutil.LazyOnceCapsuleType,
+	[]syntaxutil.TypeRef,
+	[]syntaxutil.ConditionalStructMutation,
+	[]syntaxutil.ReflectedIfaceFact,
+	map[*types.Var]bool,
+) {
+	return DeriveCapsuleAndStructFactsCtx(nil, audited, p, idx, freshCache, confinedCacheMaps, initOnly, mutatedVars, extraExemptNodes)
+}
+
+// DeriveCapsuleAndStructFactsCtx derives init-settled clusters, builders, lazy
+// once-capsules, and struct/interface mutation facts with ctx-scoped
+// trace.DomainDynstate provenance emission.
+func DeriveCapsuleAndStructFactsCtx(
+	ctx context.Context,
+	audited bool,
+	p *packages.Package,
+	idx *refconfine.PkgIndex,
+	freshCache *freshstruct.FreshLocalsCache,
+	confinedCacheMaps map[*types.Var]map[*ast.FuncDecl]bool,
+	initOnly map[string]bool,
+	mutatedVars map[string]bool,
+	extraExemptNodes map[ast.Node]bool,
+) (
+	[]syntaxutil.InitSettledClusterFact,
+	[]syntaxutil.InitBuilderFact,
+	[]syntaxutil.LazyOnceCapsuleType,
+	[]syntaxutil.TypeRef,
+	[]syntaxutil.ConditionalStructMutation,
+	[]syntaxutil.ReflectedIfaceFact,
+	map[*types.Var]bool,
+) {
+	if p == nil || p.Types == nil || p.TypesInfo == nil || len(p.Syntax) == 0 {
+		return nil, nil, nil, nil, nil, nil, nil
+	}
+	if idx == nil {
+		idx = refconfine.BuildPkgIndex(p)
+	}
+	if initOnly == nil {
+		initOnly = idx.InitOnly
+	}
+	if freshCache == nil {
+		freshCache = freshstruct.NewFreshLocalsCache(p, idx)
+	}
+	if confinedCacheMaps == nil {
+		confinedCacheMaps = freshstruct.FindMutexConfinedConstructorCaches(p, idx)
+	}
+	exempted := make(map[ast.Node]bool, len(extraExemptNodes))
+	for n, v := range extraExemptNodes {
+		if v {
+			exempted[n] = true
+		}
+	}
+	exemptFamilyByFunc := map[*ast.FuncDecl]map[*types.Named]bool{}
+	exemptReadFields := map[*types.Var]bool{}
+	foreignReflectFields := map[*types.Var]bool{}
+
+	var clusters []syntaxutil.InitSettledClusterFact
+	var claimedVars map[*types.Var]bool
+	var clusterCapsuleElemTypes map[*types.Var][]*types.Named
+	var builders []syntaxutil.InitBuilderFact
+	var capsules []syntaxutil.LazyOnceCapsuleType
+	var capConds []syntaxutil.ConditionalStructMutation
+
+	if audited {
+		clusters, claimedVars, clusterCapsuleElemTypes = deriveInitSettledClusters(ctx, audited, p, idx, initOnly, exempted)
+		builders, capsules, capConds = deriveBuildersAndCapsules(ctx, p, idx, freshCache, confinedCacheMaps, mutatedVars, exempted, exemptFamilyByFunc, exemptReadFields, foreignReflectFields)
+	}
+	mutatedStructs, condMutations, reflectedIfaces := freshstruct.CollectMutatedStructTypesWithCapsuleFieldsCtx(
+		ctx, p, idx, freshCache, confinedCacheMaps, exempted, exemptFamilyByFunc, exemptReadFields, foreignReflectFields, clusterCapsuleElemTypes,
+	)
+	if len(capsules) > 0 && freshstruct.PkgCastsUnsafePtrToMutatedStructCtx(ctx, p, idx, mutatedStructs, foreignReflectFields) {
+		for i := range capsules {
+			if capsules[i].CapsuleReflectSafe {
+				emitCapsuleReject(ctx, p, capsules[i].Type.Key(), "unsafe_ptr_cast_to_mutated_struct", nil)
+			}
+			capsules[i].CapsuleReflectSafe = false
+			capsules[i].SafePtrWrapperParams = nil
+			capsules[i].SafeAtomicPtrCopyFuncs = nil
+		}
+	}
+	if len(capConds) > 0 {
+		seenCond := make(map[syntaxutil.ConditionalStructMutation]bool, len(condMutations)+len(capConds))
+		merged := make([]syntaxutil.ConditionalStructMutation, 0, len(condMutations)+len(capConds))
+		for _, cm := range condMutations {
+			if cm.Valid() && !seenCond[cm] {
+				seenCond[cm] = true
+				merged = append(merged, cm)
+			}
+		}
+		for _, cm := range capConds {
+			if cm.Valid() && !seenCond[cm] {
+				seenCond[cm] = true
+				merged = append(merged, cm)
+			}
+		}
+		slices.SortFunc(merged, syntaxutil.ConditionalStructMutation.Compare)
+		condMutations = merged
+	}
+	return clusters, builders, capsules, mutatedStructs, condMutations, reflectedIfaces, claimedVars
+}
+
+func deriveBuildersAndCapsules(
+	ctx context.Context,
+	p *packages.Package,
+	idx *refconfine.PkgIndex,
+	freshCache *freshstruct.FreshLocalsCache,
+	confinedCacheMaps map[*types.Var]map[*ast.FuncDecl]bool,
+	mutatedVars map[string]bool,
+	exempted map[ast.Node]bool,
+	exemptFamilyByFunc map[*ast.FuncDecl]map[*types.Named]bool,
+	exemptReadFields map[*types.Var]bool,
+	foreignReflectFields map[*types.Var]bool,
+) ([]syntaxutil.InitBuilderFact, []syntaxutil.LazyOnceCapsuleType, []syntaxutil.ConditionalStructMutation) {
+	type candidate struct {
+		ref   syntaxutil.TypeRef
+		named *types.Named
+		st    *types.Struct
+	}
+	var candidates []candidate
+	for _, name := range p.Types.Scope().Names() {
+		tn, ok := p.Types.Scope().Lookup(name).(*types.TypeName)
+		if !ok || tn.IsAlias() {
+			continue
+		}
+		named, ok := tn.Type().(*types.Named)
+		if !ok {
+			continue
+		}
+		st, ok := named.Underlying().(*types.Struct)
+		if !ok {
+			continue
+		}
+		ref := syntaxutil.TypeRef{Pkg: p.Types.Path(), Name: tn.Name()}
+		if !ref.Valid() {
+			continue
+		}
+		candidates = append(candidates, candidate{ref: ref, named: named, st: st})
+	}
+
+	var builders []syntaxutil.InitBuilderFact
+	var capsules []syntaxutil.LazyOnceCapsuleType
+	var conds []syntaxutil.ConditionalStructMutation
+	builderExempt := map[ast.Node]bool{}
+	builderHelperIdents := map[*ast.Ident]bool{}
+	if confinedCacheMaps == nil {
+		confinedCacheMaps = freshstruct.FindMutexConfinedConstructorCaches(p, idx)
+	}
+
+	for _, c := range candidates {
+		if bf, dbNodes, dbByFunc, rawConds, okRaw := verifyRawCapsuleBuilderType(ctx, p, idx, c.ref, c.named, c.st, mutatedVars, exemptReadFields); okRaw {
+			for n := range dbNodes {
+				exempted[n] = true
+			}
+			for fd, fam := range dbByFunc {
+				for st := range fam {
+					addExemptStructInFunc(exemptFamilyByFunc, fd, st)
+				}
+			}
+			conds = append(conds, rawConds...)
+			builders = append(builders, bf)
+		}
+	}
+
+	for _, c := range candidates {
+		if bf, bNodes, helperIdents, okB := verifySampleCapsuleBuilderType(ctx, p, idx, c.ref, c.named, c.st, mutatedVars); okB {
+			for n := range bNodes {
+				exempted[n] = true
+				builderExempt[n] = true
+			}
+			for id := range helperIdents {
+				builderHelperIdents[id] = true
+			}
+			builders = append(builders, bf)
+		}
+	}
+
+	verifiedLockedRoots := map[*types.Named]bool{}
+	for progress := true; progress; {
+		progress = false
+		for _, c := range candidates {
+			if verifiedLockedRoots[c.named] {
+				continue
+			}
+			capFact, cNodes, cByFunc, cConds, okCap := verifyLockedOnceCapsuleType(
+				nil, p, idx, freshCache, c.ref, c.named, c.st, mutatedVars, builderExempt, builderHelperIdents, verifiedLockedRoots, confinedCacheMaps,
+			)
+			if !okCap {
+				continue
+			}
+			verifiedLockedRoots[c.named] = true
+			progress = true
+			for n := range cNodes {
+				exempted[n] = true
+			}
+			for fd, fam := range cByFunc {
+				for st := range fam {
+					addExemptStructInFunc(exemptFamilyByFunc, fd, st)
+				}
+			}
+			conds = append(conds, cConds...)
+			capsules = append(capsules, capFact)
+		}
+	}
+	if trace.Enabled(ctx, trace.DomainDynstate, pkgTraceTarget(p)) {
+		for _, c := range candidates {
+			if !verifiedLockedRoots[c.named] {
+				_, _, _, _, _ = verifyLockedOnceCapsuleType(
+					ctx, p, idx, freshCache, c.ref, c.named, c.st, mutatedVars, builderExempt, builderHelperIdents, verifiedLockedRoots, confinedCacheMaps,
+				)
+			}
+		}
+	}
+
+	for _, c := range candidates {
+		if verifiedLockedRoots[c.named] {
+			continue
+		}
+		if verifyReadOnlyCapsuleType(p, idx, c.named, c.st, builderExempt, verifiedLockedRoots) {
+			capsules = append(capsules, syntaxutil.LazyOnceCapsuleType{
+				Type:                   c.ref,
+				HasExportedReflectType: syntaxutil.StructHasExportedReflectTypeField(c.st),
+			})
+		}
+	}
+
+	capsuleReflectSafe := false
+	if len(verifiedLockedRoots) > 0 {
+		rejectReason := ""
+		if freshstruct.PkgCanStepUnexportedReflectField(p, idx) {
+			rejectReason = "step_unexported_reflect_field"
+		} else if pkgTakesUnsafeAddrOfMatchingIface(p, idx, verifiedLockedRoots, nil) {
+			rejectReason = "unsafe_addr_matching_iface"
+		} else if !pkgConfinesMatchingIfaceValueOf(p, idx, verifiedLockedRoots, nil) {
+			rejectReason = "unconfined_matching_iface_valueof"
+		} else {
+			capsuleReflectSafe = true
+		}
+		if rejectReason != "" {
+			for root := range verifiedLockedRoots {
+				ref := syntaxutil.TypeRef{Pkg: p.Types.Path(), Name: root.Obj().Name()}
+				emitCapsuleReject(ctx, p, ref.Key(), rejectReason, nil)
+			}
+		}
+	}
+	if capsuleReflectSafe {
+		for i := range capsules {
+			if tn, okTN := p.Types.Scope().Lookup(capsules[i].Type.Name).(*types.TypeName); okTN && tn != nil {
+				if capNamed, okCN := types.Unalias(tn.Type()).(*types.Named); okCN && verifiedLockedRoots[capNamed] {
+					capsules[i].CapsuleReflectSafe = true
+				}
+			}
+		}
+	}
+	if foreignReflectFields != nil && capsuleReflectSafe {
+		for _, c := range candidates {
+			if c.named == nil || c.named.Obj() == nil || c.named.Obj().Exported() || c.named.TypeParams() != nil {
+				continue
+			}
+			if pkgReifiesStructReflectType(p, c.named) || pkgTakesUnsafeAddrOfMatchingIface(p, idx, verifiedLockedRoots, c.named) || !pkgConfinesMatchingIfaceValueOf(p, idx, verifiedLockedRoots, c.named) {
+				continue
+			}
+			for i := 0; i < c.st.NumFields(); i++ {
+				f := c.st.Field(i)
+				if f.Exported() || f.Embedded() {
+					continue
+				}
+				ptr, isP := types.Unalias(f.Type()).(*types.Pointer)
+				if !isP {
+					continue
+				}
+				elem, isN := types.Unalias(ptr.Elem()).(*types.Named)
+				if isN && verifiedLockedRoots[elem] {
+					foreignReflectFields[f] = true
+				}
+			}
+		}
+		atomicCopyFuncs := collectSafeAtomicPtrCopyFuncs(p, idx)
+		for i := range capsules {
+			if !capsules[i].CapsuleReflectSafe {
+				continue
+			}
+			if tn, okTN := p.Types.Scope().Lookup(capsules[i].Type.Name).(*types.TypeName); okTN && tn != nil {
+				if capNamed, okCN := types.Unalias(tn.Type()).(*types.Named); okCN {
+					capsules[i].SafePtrWrapperParams = collectSafePtrWrapperParams(p, idx, capNamed, foreignReflectFields)
+				}
+			}
+			capsules[i].SafeAtomicPtrCopyFuncs = atomicCopyFuncs
+		}
+	}
+
+	slices.SortFunc(builders, syntaxutil.InitBuilderFact.Compare)
+	slices.SortFunc(capsules, syntaxutil.LazyOnceCapsuleType.Compare)
+	return builders, capsules, conds
+}

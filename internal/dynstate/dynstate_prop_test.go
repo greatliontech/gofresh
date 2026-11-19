@@ -1906,43 +1906,83 @@ func TestHarnessDischargesVerificationAndTamperRefusals(t *testing.T) {
 		t.Fatalf("FactOf(audited=true, cleanRapid) HarnessDischarges = %v, want %v", cleanFact.HarnessDischarges, cleanFact.Declares)
 	}
 
+	// 0. Renamed non-rapid harness package with matching <UPPER_PKG>_*, <pkg>.*, and testdata/<pkg>
+	// namespaces and renamed handle/driver/generator symbols earns HarnessDischarges mechanically.
+	const propcheckPath = "example.com/propcheck"
+	propcheckSrc := strings.NewReplacer(
+		"package rapid", "package propcheck",
+		"RAPID_", "PROPCHECK_",
+		`"rapid.`, `"propcheck.`,
+		`"testdata", "rapid"`, `"testdata", "propcheck"`,
+		"func Check(", "func Verify(",
+		"func MakeCheck(", "func BuildVerify(",
+		"Example(seed ...int)", "Sample(seed ...int)",
+	).Replace(syntheticVerifiedRapidSrc)
+	cleanPropcheck := mustTypecheckOrderedPackage(t, propcheckPath, []namedSourceFile{{
+		name: "propcheck.go",
+		src:  propcheckSrc,
+	}})
+	propcheckFact := FactOf(true, cleanPropcheck)
+	assertFactCanonicalAndValid(t, propcheckFact)
+	if len(propcheckFact.HarnessDischarges) == 0 || !reflect.DeepEqual(propcheckFact.HarnessDischarges, propcheckFact.Declares) {
+		t.Fatalf("FactOf(audited=true, cleanPropcheck) HarnessDischarges = %v, want %v", propcheckFact.HarnessDischarges, propcheckFact.Declares)
+	}
+
 	// 1. Unaudited toolchain refuses HarnessDischarges.
 	if unFact := FactOf(false, cleanRapid); len(unFact.HarnessDischarges) != 0 {
 		t.Fatalf("FactOf(audited=false) HarnessDischarges = %v, want empty", unFact.HarnessDischarges)
 	}
-
-	// 2. Non-harness package path with identical source never earns HarnessDischarges.
-	nonHarnessPkg := mustTypecheckOrderedPackage(t, "example.com/notrapid", []namedSourceFile{{
-		name: "rapid.go",
-		src:  syntheticVerifiedRapidSrc,
-	}})
-	if nonFact := FactOf(true, nonHarnessPkg); len(nonFact.HarnessDischarges) != 0 {
-		t.Fatalf("non-harness package earned HarnessDischarges: %v", nonFact.HarnessDischarges)
+	if unPropFact := FactOf(false, cleanPropcheck); len(unPropFact.HarnessDischarges) != 0 {
+		t.Fatalf("FactOf(audited=false, cleanPropcheck) HarnessDischarges = %v, want empty", unPropFact.HarnessDischarges)
 	}
 
-	// 3. Compose discharges clean pgregory.net/rapid under both PackageExecution and SingleSubjectExecution
-	// without emitting VouchDischarges or AttestationDischarges.
+	// 2. Package reading mismatched env/flag/failfile namespaces (package notrapid reading RAPID_*/rapid.*)
+	// never earns HarnessDischarges.
+	nonHarnessPkg := mustTypecheckOrderedPackage(t, "example.com/notrapid", []namedSourceFile{{
+		name: "notrapid.go",
+		src:  strings.Replace(syntheticVerifiedRapidSrc, "package rapid", "package notrapid", 1),
+	}})
+	if nonFact := FactOf(true, nonHarnessPkg); len(nonFact.HarnessDischarges) != 0 {
+		t.Fatalf("mismatched-namespace package earned HarnessDischarges: %v", nonFact.HarnessDischarges)
+	}
+
+	// 3. Compose discharges both clean pgregory.net/rapid and clean example.com/propcheck under both
+	// PackageExecution and SingleSubjectExecution without emitting VouchDischarges or AttestationDischarges.
+	for _, htc := range []struct {
+		path string
+		pin  string
+		fact Fact
+	}{
+		{rapidPath, "pgregory.net/rapid@v1.3.0", cleanFact},
+		{propcheckPath, "example.com/propcheck@v0.4.0", propcheckFact},
+	} {
+		hMeta := []GraphPackage{
+			{ImportPath: "example.com/user", PkgPath: "example.com/user", Imports: []string{htc.path}, Class: MutableLocalPackage},
+			{ImportPath: htc.path, PkgPath: htc.path, Class: PinnedPackage, Pin: htc.pin},
+		}
+		for _, single := range []bool{false, true} {
+			cs := Compose(hMeta, map[string][]Fact{
+				"example.com/user": {{}},
+				htc.path:           {htc.fact},
+			}, "example.com/user", nil, single, !single)
+			if cs.Downgraded != "" || cs.VouchDischarges != "" || cs.AttestationDischarges != "" {
+				t.Fatalf("clean %s Compose(single=%v) = %+v, want clean zero-vouch zero-attestation", htc.path, single, cs)
+			}
+			discharged := NonVouchDischargedVars(hMeta, map[string][]Fact{
+				"example.com/user": {{}},
+				htc.path:           {htc.fact},
+			}, single)
+			for _, k := range htc.fact.Declares {
+				if !discharged[k] {
+					t.Fatalf("%s NonVouchDischargedVars(single=%v) missing %q", htc.path, single, k)
+				}
+			}
+		}
+	}
+
 	meta := []GraphPackage{
 		{ImportPath: "example.com/user", PkgPath: "example.com/user", Imports: []string{rapidPath}, Class: MutableLocalPackage},
 		{ImportPath: rapidPath, PkgPath: rapidPath, Class: PinnedPackage, Pin: "pgregory.net/rapid@v1.3.0"},
-	}
-	for _, single := range []bool{false, true} {
-		cs := Compose(meta, map[string][]Fact{
-			"example.com/user": {{}},
-			rapidPath:          {cleanFact},
-		}, "example.com/user", nil, single, !single)
-		if cs.Downgraded != "" || cs.VouchDischarges != "" || cs.AttestationDischarges != "" {
-			t.Fatalf("clean rapid Compose(single=%v) = %+v, want clean zero-vouch zero-attestation", single, cs)
-		}
-		discharged := NonVouchDischargedVars(meta, map[string][]Fact{
-			"example.com/user": {{}},
-			rapidPath:          {cleanFact},
-		}, single)
-		for _, k := range cleanFact.Declares {
-			if !discharged[k] {
-				t.Fatalf("NonVouchDischargedVars(single=%v) missing %q", single, k)
-			}
-		}
 	}
 
 	// 4. Tampered sources (exported global or //go:embed) refuse HarnessDischarges and downgrade Compose.

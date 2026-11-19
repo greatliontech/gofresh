@@ -187,7 +187,7 @@ func (wpd *wrapperPtrDiscipline) isStructOrCapsuleReflectTypeExpr(expr ast.Expr,
 		}
 		isVerifiedExtCapsuleStruct := false
 		if ownerN.Obj().Exported() {
-			// Exported capsule structs (e.g. ExtensionInfo) whose unexported reflect.Type field is
+			// Exported capsule structs whose unexported reflect.Type field is
 			// populated by an external-only InitHelper or legacy exported-any descriptor field must
 			// have zero intra-package non-empty CompositeLits so intra-package callers cannot forge them.
 			hasIntraLit := false

@@ -1892,6 +1892,20 @@ func TestGeneratedProtoClusterDischarges(t *testing.T) {
 	if hand.Status != Unverifiable || !strings.Contains(hand.Reason, "example.com/view.handHooks is mutated") {
 		t.Fatalf("hand-written verdict = %+v, want the downgrade", hand)
 	}
+
+	// 7. Arbitrary non-protobuf capsule/builder/cluster names discharge identically under single-subject execution.
+	nonProtoRT := map[string]string{
+		"go.mod": "module example.com/schemart\n\ngo 1.26\n",
+		"rt.go":  "package schemart\n\nimport (\n\t\"reflect\"\n\t\"sync\"\n\t\"sync/atomic\"\n)\n\ntype CatalogSpec interface{ SchemaCatalog() }\n\ntype catSpec struct{ raw []byte }\n\nfunc (*catSpec) SchemaCatalog() {}\n\ntype RawSpecInput struct {\n\tPayload []byte\n}\n\ntype AssembleBundle struct {\n\tCatalog CatalogSpec\n}\n\ntype RecordCapsule struct {\n\tSampleType reflect.Type\n\tMeta       any\n\tmu         sync.Mutex\n\tdone       uint32\n\tcached     int\n}\n\nfunc (rc *RecordCapsule) initSlow() {\n\trc.mu.Lock()\n\tdefer rc.mu.Unlock()\n\tif rc.done == 1 {\n\t\treturn\n\t}\n\trc.cached = 7\n\tatomic.StoreUint32(&rc.done, 1)\n}\n\nfunc (rc *RecordCapsule) Cached() int {\n\tif atomic.LoadUint32(&rc.done) == 0 {\n\t\trc.initSlow()\n\t}\n\treturn rc.cached\n}\n\ntype SchemaAssembler struct {\n\tInput          RawSpecInput\n\tTypeSamples    []any\n\tRecordCapsules []RecordCapsule\n}\n\nfunc (sa SchemaAssembler) Assemble() AssembleBundle {\n\tfor i := range sa.RecordCapsules {\n\t\tsa.RecordCapsules[i].SampleType = reflect.TypeOf(sa.TypeSamples[i])\n\t\tsa.RecordCapsules[i].Meta = i\n\t}\n\treturn AssembleBundle{Catalog: &catSpec{raw: sa.Input.Payload}}\n}\n",
+	}
+	writeFileProxyModule(t, proxy, "example.com/schemart", "v0.3.0", nonProtoRT)
+	schemaFP, schemaVerdict := captureCustom(t, map[string]string{
+		"go.mod":    "module example.com/view\n\ngo 1.26\n\nrequire example.com/schemart v0.3.0\n",
+		"schema.go": "package view\n\nimport \"example.com/schemart\"\n\ntype Item struct{ ID int }\n\nvar RootCatalog schemart.CatalogSpec\nvar rawBytes = []byte{1, 2}\nvar itemCapsules = make([]schemart.RecordCapsule, 1)\nvar typeSamples = []any{(*Item)(nil)}\n\nfunc bootstrapCatalog() {\n\tif RootCatalog != nil {\n\t\treturn\n\t}\n\tres := schemart.SchemaAssembler{\n\t\tInput:          schemart.RawSpecInput{Payload: rawBytes},\n\t\tTypeSamples:    typeSamples,\n\t\tRecordCapsules: itemCapsules,\n\t}.Assemble()\n\tRootCatalog = res.Catalog\n\ttypeSamples = nil\n}\n\nfunc init() { bootstrapCatalog() }\n\nfunc F() *schemart.RecordCapsule { return &itemCapsules[0] }\n",
+	}, "F", withSingleSubjectExecution())
+	if schemaVerdict.Status != Valid || !strings.Contains(schemaFP.SingleSubjectDischarges, "example.com/view.itemCapsules") {
+		t.Fatalf("non-protobuf capsule cluster verdict = %+v evidence = %q, want Valid with itemCapsules discharged", schemaVerdict, schemaFP.SingleSubjectDischarges)
+	}
 }
 
 // A package with assembly sources stays downgraded through the closure

@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/trace"
@@ -106,21 +105,6 @@ func intersectDeclaredVariants[V any](
 	return res
 }
 
-type rtRoleKey struct {
-	Type syntaxutil.TypeRef
-	Role string
-}
-
-type rtRoleInfo struct {
-	SubBuilder             syntaxutil.TypeRef
-	InitHelper             syntaxutil.FuncKey
-	AllowedHelpers         map[syntaxutil.FuncKey]bool
-	GuardTypes             map[syntaxutil.TypeRef]bool
-	CapsuleReflectSafe     bool
-	SafePtrWrapperParams   map[syntaxutil.ParamKey]bool
-	SafeAtomicPtrCopyFuncs map[syntaxutil.FuncKey]bool
-}
-
 func populateResolvedConeDischarges(
 	ctx context.Context,
 	coneTargetFor func(string) string,
@@ -138,7 +122,8 @@ func populateResolvedConeDischarges(
 	paramLeakFree map[syntaxutil.ParamKey]bool,
 	refRegions map[syntaxutil.FuncKey]map[syntaxutil.RefRegion]bool,
 	initOnlyFn map[syntaxutil.FuncKey]bool,
-	commonRolesByPkg map[string]map[rtRoleKey]rtRoleInfo,
+	commonCapsulesByPkg map[string]map[syntaxutil.TypeRef]capsuleTypeInfo,
+	commonBuildersByPkg map[string]map[builderVariantKey]builderTypeInfo,
 	out *coneDischarges,
 ) {
 	intersectDeclaredVarSet := func(extract func(pkgPath string, fact Fact) map[string]bool) map[string]bool {
@@ -349,7 +334,7 @@ func populateResolvedConeDischarges(
 		return m
 	})
 	out.harnessDischargedVars = intersectDeclaredVarSet(func(pkgPath string, fact Fact) map[string]bool {
-		if anyMalformedDirectVarWrite || !propharness.IsHarnessPath(pkgPath) {
+		if anyMalformedDirectVarWrite || !isKnownCleanNonStdPkg(pkgPath) || !propharness.MayBeHarnessPkgPath(pkgPath) {
 			return nil
 		}
 		m := make(map[string]bool, len(fact.HarnessDischarges))
@@ -368,131 +353,27 @@ func populateResolvedConeDischarges(
 		return directed
 	})
 
-	verifiedRoles := map[rtRoleKey]rtRoleInfo{}
-	if !anyMalformedMutatedStruct {
-		for _, common := range commonRolesByPkg {
-			for k, info := range common {
-				if k.Role != protoaudit.ProtoRoleBuilder && k.Role != protoaudit.ProtoRoleDescBuilder && mutatedStructs[k.Type] {
-					if tgt := coneTargetFor(k.Type.Pkg); trace.Enabled(ctx, trace.DomainDynstate, tgt) {
-						emitDischargeReject(ctx, tgt, "proto_role", k.Type.Key()+":"+k.Role, "role_struct_mutated", k.Type.Key())
-					}
-					continue
-				}
-				guardMutated := false
-				for g := range info.GuardTypes {
-					if mutatedStructs[g] {
-						guardMutated = true
-						if tgt := coneTargetFor(k.Type.Pkg); trace.Enabled(ctx, trace.DomainDynstate, tgt) {
-							emitDischargeReject(ctx, tgt, "proto_role", k.Type.Key()+":"+k.Role, "guard_type_mutated", g.Key())
-						}
-						break
-					}
-				}
-				if !guardMutated {
-					verifiedRoles[k] = info
-				}
-			}
-		}
-	}
-	for k, info := range verifiedRoles {
-		if k.Role == protoaudit.ProtoRoleBuilder && !info.SubBuilder.IsZero() {
-			if _, ok := verifiedRoles[rtRoleKey{Type: info.SubBuilder, Role: protoaudit.ProtoRoleDescBuilder}]; !ok {
-				if tgt := coneTargetFor(k.Type.Pkg); trace.Enabled(ctx, trace.DomainDynstate, tgt) {
-					emitDischargeReject(ctx, tgt, "proto_role", k.Type.Key()+":"+k.Role, "unverified_sub_builder", info.SubBuilder.Key())
-				}
-				delete(verifiedRoles, k)
-			}
-		}
-	}
-
-	builderAllowedHelperByPkg := map[string]map[syntaxutil.FuncKey]bool{}
-	for k, info := range verifiedRoles {
-		if k.Role == protoaudit.ProtoRoleBuilder && len(info.AllowedHelpers) > 0 {
-			if builderAllowedHelperByPkg[k.Type.Pkg] == nil {
-				builderAllowedHelperByPkg[k.Type.Pkg] = map[syntaxutil.FuncKey]bool{}
-			}
-			for h := range info.AllowedHelpers {
-				builderAllowedHelperByPkg[k.Type.Pkg][h] = true
-			}
-		}
-	}
-	nonBuilderReferencedFn := map[syntaxutil.FuncKey]bool{}
-	for _, pkgPath := range pkgPaths {
-		for _, fact := range allFacts[pkgPath] {
-			for _, edge := range fact.FuncRefs {
-				if edge.Callee.Valid() && !builderAllowedHelperByPkg[pkgPath][edge.Callee] {
-					nonBuilderReferencedFn[edge.Callee] = true
-				}
-			}
-		}
-	}
-	for k, info := range verifiedRoles {
-		if k.Role == protoaudit.ProtoRoleExtension && !info.InitHelper.IsZero() && nonBuilderReferencedFn[info.InitHelper] {
-			if tgt := coneTargetFor(k.Type.Pkg); trace.Enabled(ctx, trace.DomainDynstate, tgt) {
-				emitDischargeReject(ctx, tgt, "proto_role", k.Type.Key()+":"+k.Role, "non_builder_init_helper_ref", info.InitHelper.Display())
-			}
-			delete(verifiedRoles, k)
-		}
-	}
-	hasVerifiedRole := func(t syntaxutil.TypeRef, role string) bool {
-		_, ok := verifiedRoles[rtRoleKey{Type: t, Role: role}]
-		return ok
-	}
-
-	out.protoVerifiedVars = intersectDeclaredVarSet(func(pkgPath string, fact Fact) map[string]bool {
-		if anyMalformedDirectVarWrite {
-			return nil
-		}
-		tgt := coneTargetFor(pkgPath)
-		traced := trace.Enabled(ctx, trace.DomainDynstate, tgt)
-		m := map[string]bool{}
-		for _, c := range fact.ProtoClusters {
-			if c.InitFn.Pkg != pkgPath || refRegions[c.InitFn] == nil || !initOnlyFn[c.InitFn] {
-				if traced {
-					emitDischargeReject(ctx, tgt, "proto_cluster", c.InitFn.Display(), "init_fn_not_init_only", "")
-				}
-				continue
-			}
-			if !hasVerifiedRole(c.BuilderType, protoaudit.ProtoRoleBuilder) {
-				if traced {
-					emitDischargeReject(ctx, tgt, "proto_cluster", c.InitFn.Display(), "unverified_builder_role", c.BuilderType.Key())
-				}
-				continue
-			}
-			if !c.EnumType.IsZero() && !hasVerifiedRole(c.EnumType, protoaudit.ProtoRoleEnum) {
-				if traced {
-					emitDischargeReject(ctx, tgt, "proto_cluster", c.InitFn.Display(), "unverified_enum_role", c.EnumType.Key())
-				}
-				continue
-			}
-			if !c.MsgType.IsZero() && !hasVerifiedRole(c.MsgType, protoaudit.ProtoRoleMessage) {
-				if traced {
-					emitDischargeReject(ctx, tgt, "proto_cluster", c.InitFn.Display(), "unverified_message_role", c.MsgType.Key())
-				}
-				continue
-			}
-			if !c.ExtType.IsZero() && !hasVerifiedRole(c.ExtType, protoaudit.ProtoRoleExtension) {
-				if traced {
-					emitDischargeReject(ctx, tgt, "proto_cluster", c.InitFn.Display(), "unverified_extension_role", c.ExtType.Key())
-				}
-				continue
-			}
-			for _, key := range c.Vars {
-				if !directVarWritten[key] {
-					m[key] = true
-				} else if traced {
-					emitDischargeReject(ctx, tgt, "proto_cluster", key, "direct_var_written", "")
-				}
-			}
-		}
-		return m
-	})
+	out.clusterVerifiedVars = resolveVerifiedClusterDischarges(
+		ctx,
+		coneTargetFor,
+		intersectDeclaredVarSet,
+		pkgPaths,
+		allFacts,
+		anyMalformedMutatedStruct,
+		anyMalformedDirectVarWrite,
+		mutatedStructs,
+		directVarWritten,
+		refRegions,
+		initOnlyFn,
+		commonCapsulesByPkg,
+		commonBuildersByPkg,
+	)
 
 	for changed := len(validAliases) > 0; changed; {
 		changed = false
 		for key, a := range validAliases {
-			if !out.protoVerifiedVars[key] && out.protoVerifiedVars[a.Target] {
-				out.protoVerifiedVars[key] = true
+			if !out.clusterVerifiedVars[key] && out.clusterVerifiedVars[a.Target] {
+				out.clusterVerifiedVars[key] = true
 				changed = true
 			}
 			if !out.staticCompositeVars[key] && out.staticCompositeVars[a.Target] {
@@ -551,18 +432,18 @@ func buildViewConeState(
 		}
 		return true
 	}
-	protoDischargedOut := func(pkgPath, key string) bool {
-		if !d.isProtoAttestedDischarged(pkgPath, key, q.SingleSubject, malformedFactVars) {
+	clusterDischargedOut := func(pkgPath, key string) bool {
+		if !d.isClusterAttestedDischarged(pkgPath, key, q.SingleSubject, malformedFactVars) {
 			return false
 		}
-		if seen := "proto\x00" + pkgPath + "\x00" + key; !dischargedSeen[seen] {
+		if seen := "cluster\x00" + pkgPath + "\x00" + key; !dischargedSeen[seen] {
 			dischargedSeen[seen] = true
 			attestedDischarged[pkgPath] = append(attestedDischarged[pkgPath], key)
 		}
 		return true
 	}
 	isDischarged := func(pkgPath, key string) bool {
-		return vouchedOut(pkgPath, key) || auditedSourceOut(pkgPath, key) || directiveDischargedOut(pkgPath, key) || protoDischargedOut(pkgPath, key)
+		return vouchedOut(pkgPath, key) || auditedSourceOut(pkgPath, key) || directiveDischargedOut(pkgPath, key) || clusterDischargedOut(pkgPath, key)
 	}
 
 	pkgCulprits := map[string][]Culprit{}

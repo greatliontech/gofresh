@@ -77,15 +77,15 @@ func recordFreshVarGuardPkg(sum *freshFuncSummary, v *types.Var, guardPkg string
 	})
 }
 
-func recordFreshVarDescBuilderGuard(sum *freshFuncSummary, v *types.Var, guardStruct syntaxutil.TypeRef) {
+func recordFreshVarImmutableCapsuleGuard(sum *freshFuncSummary, v *types.Var, guardStruct syntaxutil.TypeRef) {
 	if sum == nil || v == nil || !guardStruct.Valid() {
 		return
 	}
 	recordFreshVarCondGuard(sum, v, func(ref syntaxutil.TypeRef) syntaxutil.ConditionalStructMutation {
 		return syntaxutil.ConditionalStructMutation{
-			Struct:                  ref,
-			GuardStruct:             guardStruct,
-			RequireDescBuilderGuard: true,
+			Struct:                       ref,
+			GuardStruct:                  guardStruct,
+			RequireImmutableCapsuleGuard: true,
 		}
 	})
 }

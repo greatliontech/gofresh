@@ -16,7 +16,6 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/seams"
-	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
@@ -490,86 +489,113 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 		{"invalid HarnessDischarges key", func(f *Fact) {
 			f.HarnessDischarges = []string{"bad\x00key"}
 		}},
-		{"non-harness HarnessDischarges", func(f *Fact) {
-			f.HarnessDischarges = []string{"example.com/p.v"}
+		{"exported HarnessDischarges", func(f *Fact) {
+			f.HarnessDischarges = []string{"example.com/p.Exported"}
 		}},
-		{"invalid ProtoClusters empty vars", func(f *Fact) {
-			f.ProtoClusters = []protoaudit.ProtoClusterFact{{
-				InitFn:      validFn,
-				BuilderType: syntaxutil.TypeRef{Pkg: "example.com/rt", Name: "TypeBuilder"},
+		{"foreign-pkg HarnessDischarges", func(f *Fact) {
+			f.HarnessDischarges = []string{"example.com/other.v"}
+		}},
+		{"dotted HarnessDischarges", func(f *Fact) {
+			f.HarnessDischarges = []string{"example.com/p.v.f"}
+		}},
+		{"invalid InitSettledClusters empty vars", func(f *Fact) {
+			f.InitSettledClusters = []syntaxutil.InitSettledClusterFact{{
+				InitFn:        validFn,
+				BuilderType:   syntaxutil.TypeRef{Pkg: "example.com/rt", Name: "TypeBuilder"},
+				BuildMethod:   "Build",
+				OutIfaceField: "File",
 			}}
 		}},
 		{"invalid ReadOnlyVarAliases self-target", func(f *Fact) {
 			f.ReadOnlyVarAliases = []syntaxutil.ReadOnlyVarAlias{{Key: "example.com/p.E", Target: "example.com/p.E"}}
 		}},
-		{"invalid ProtoRuntimeTypes unknown role", func(f *Fact) {
-			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
-				Type: syntaxutil.TypeRef{Pkg: "example.com/p", Name: "MessageInfo"},
-				Role: "unknown",
+		{"invalid LazyOnceCapsuleTypes unnamed type", func(f *Fact) {
+			f.LazyOnceCapsuleTypes = []syntaxutil.LazyOnceCapsuleType{{
+				Type: syntaxutil.TypeRef{Pkg: "@struct", Name: "abc"},
 			}}
 		}},
-		{"invalid ProtoRuntimeTypes builder InitHelper", func(f *Fact) {
-			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
-				Type:       syntaxutil.TypeRef{Pkg: "example.com/p", Name: "TypeBuilder"},
-				Role:       protoaudit.ProtoRoleBuilder,
-				InitHelper: validFn,
+		{"invalid LazyOnceCapsuleTypes mismatched InitHelper pkg", func(f *Fact) {
+			f.LazyOnceCapsuleTypes = []syntaxutil.LazyOnceCapsuleType{{
+				Type:       syntaxutil.TypeRef{Pkg: "example.com/p", Name: "ExtensionInfo"},
+				InitHelper: syntaxutil.FuncKey{Pkg: "example.com/other", Name: "InitExt"},
 			}}
 		}},
-		{"invalid ProtoRuntimeTypes extension AllowedHelpers", func(f *Fact) {
-			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
-				Type:           syntaxutil.TypeRef{Pkg: "example.com/p", Name: "ExtensionInfo"},
-				Role:           protoaudit.ProtoRoleExtension,
-				AllowedHelpers: []syntaxutil.FuncKey{validFn},
+		{"invalid LazyOnceCapsuleTypes unexported guard field", func(f *Fact) {
+			f.LazyOnceCapsuleTypes = []syntaxutil.LazyOnceCapsuleType{{
+				Type:                     syntaxutil.TypeRef{Pkg: "example.com/p", Name: "ExtensionInfo"},
+				ExportedWriteGuardFields: []string{"unexported"},
 			}}
 		}},
-		{"invalid ProtoRuntimeTypes builder malformed SubBuilder", func(f *Fact) {
-			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
-				Type:       syntaxutil.TypeRef{Pkg: "example.com/p", Name: "TypeBuilder"},
-				Role:       protoaudit.ProtoRoleBuilder,
-				SubBuilder: syntaxutil.TypeRef{Pkg: "example.com/p", Name: "a.Builder"},
-			}}
-		}},
-		{"invalid ProtoRuntimeTypes builder malformed GuardTypes", func(f *Fact) {
-			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
-				Type:       syntaxutil.TypeRef{Pkg: "example.com/p", Name: "TypeBuilder"},
-				Role:       protoaudit.ProtoRoleBuilder,
-				GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: ""}},
-			}}
-		}},
-		{"invalid ProtoRuntimeTypes desc_builder empty GuardTypes", func(f *Fact) {
-			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
-				Type: syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Builder"},
-				Role: protoaudit.ProtoRoleDescBuilder,
-			}}
-		}},
-		{"invalid ProtoRuntimeTypes desc_builder non-zero SubBuilder", func(f *Fact) {
-			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
-				Type:       syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Builder"},
-				Role:       protoaudit.ProtoRoleDescBuilder,
-				SubBuilder: syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Sub"},
-				GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "File"}},
-			}}
-		}},
-		{"invalid ProtoRuntimeTypes desc_builder AllowedHelpers", func(f *Fact) {
-			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
-				Type:           syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Builder"},
-				Role:           protoaudit.ProtoRoleDescBuilder,
-				AllowedHelpers: []syntaxutil.FuncKey{validFn},
-				GuardTypes:     []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "File"}},
-			}}
-		}},
-		{"invalid ProtoRuntimeTypes enum GuardTypes", func(f *Fact) {
-			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
-				Type:       syntaxutil.TypeRef{Pkg: "example.com/p", Name: "EnumInfo"},
-				Role:       protoaudit.ProtoRoleEnum,
-				GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "Methods"}},
-			}}
-		}},
-		{"invalid ProtoRuntimeTypes message malformed GuardTypes", func(f *Fact) {
-			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
+		{"invalid LazyOnceCapsuleTypes malformed GuardTypes", func(f *Fact) {
+			f.LazyOnceCapsuleTypes = []syntaxutil.LazyOnceCapsuleType{{
 				Type:       syntaxutil.TypeRef{Pkg: "example.com/p", Name: "MessageInfo"},
-				Role:       protoaudit.ProtoRoleMessage,
 				GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: ""}},
+			}}
+		}},
+		{"invalid InitBuilders malformed SubBuilder", func(f *Fact) {
+			f.InitBuilders = []syntaxutil.InitBuilderFact{{
+				Type:          syntaxutil.TypeRef{Pkg: "example.com/p", Name: "TypeBuilder"},
+				BuildMethod:   "Build",
+				OutIfaceField: "File",
+				SubBuilderField: "File",
+				SubBuilder:    syntaxutil.TypeRef{Pkg: "example.com/p", Name: "a.Builder"},
+				CapsuleSliceFields: []syntaxutil.BuilderSliceSpec{{
+					Field:    "MessageInfos",
+					ElemType: syntaxutil.TypeRef{Pkg: "example.com/p", Name: "MessageInfo"},
+				}},
+			}}
+		}},
+		{"invalid InitBuilders malformed GuardTypes", func(f *Fact) {
+			f.InitBuilders = []syntaxutil.InitBuilderFact{{
+				Type:          syntaxutil.TypeRef{Pkg: "example.com/p", Name: "TypeBuilder"},
+				BuildMethod:   "Build",
+				OutIfaceField: "File",
+				CapsuleSliceFields: []syntaxutil.BuilderSliceSpec{{
+					Field:    "MessageInfos",
+					ElemType: syntaxutil.TypeRef{Pkg: "example.com/p", Name: "MessageInfo"},
+				}},
+				GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: ""}},
+			}}
+		}},
+		{"invalid InitBuilders raw builder empty GuardTypes", func(f *Fact) {
+			f.InitBuilders = []syntaxutil.InitBuilderFact{{
+				Type:                    syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Builder"},
+				BuildMethod:             "Build",
+				OutIfaceField:           "File",
+				CoversImmutableCapsules: true,
+			}}
+		}},
+		{"invalid InitBuilders raw builder non-zero SubBuilder", func(f *Fact) {
+			f.InitBuilders = []syntaxutil.InitBuilderFact{{
+				Type:                    syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Builder"},
+				BuildMethod:             "Build",
+				OutIfaceField:           "File",
+				SubBuilderField:         "Sub",
+				SubBuilder:              syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Sub"},
+				GuardTypes:              []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "File"}},
+				CoversImmutableCapsules: true,
+			}}
+		}},
+		{"invalid InitBuilders raw builder AllowedHelpers", func(f *Fact) {
+			f.InitBuilders = []syntaxutil.InitBuilderFact{{
+				Type:                    syntaxutil.TypeRef{Pkg: "example.com/p", Name: "Builder"},
+				BuildMethod:             "Build",
+				OutIfaceField:           "File",
+				AllowedHelpers:          []syntaxutil.FuncKey{validFn},
+				GuardTypes:              []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "File"}},
+				CoversImmutableCapsules: true,
+			}}
+		}},
+		{"invalid InitBuilders TakesSample without TypeSampleSliceField", func(f *Fact) {
+			f.InitBuilders = []syntaxutil.InitBuilderFact{{
+				Type:          syntaxutil.TypeRef{Pkg: "example.com/p", Name: "TypeBuilder"},
+				BuildMethod:   "Build",
+				OutIfaceField: "File",
+				CapsuleSliceFields: []syntaxutil.BuilderSliceSpec{{
+					Field:       "MessageInfos",
+					ElemType:    syntaxutil.TypeRef{Pkg: "example.com/p", Name: "MessageInfo"},
+					TakesSample: true,
+				}},
 			}}
 		}},
 		{"invalid StaticCompositeGlobals qualified type name", func(f *Fact) {
@@ -610,11 +636,11 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 				GuardStruct: syntaxutil.TypeRef{Pkg: "example.com/dep", Name: "a.b"},
 			}}
 		}},
-		{"invalid ConditionalStructMutations RequireDescBuilderGuard without GuardStruct", func(f *Fact) {
+		{"invalid ConditionalStructMutations RequireImmutableCapsuleGuard without GuardStruct", func(f *Fact) {
 			f.ConditionalStructMutations = []syntaxutil.ConditionalStructMutation{{
-				Struct:                  syntaxutil.TypeRef{Pkg: "example.com/p", Name: "S"},
-				GuardPkg:                "example.com/dep",
-				RequireDescBuilderGuard: true,
+				Struct:                       syntaxutil.TypeRef{Pkg: "example.com/p", Name: "S"},
+				GuardPkg:                     "example.com/dep",
+				RequireImmutableCapsuleGuard: true,
 			}}
 		}},
 		{"invalid ConditionalStructMutations multiple modes", func(f *Fact) {
@@ -664,6 +690,29 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("non-harness pkgPath HarnessDischarges", func(t *testing.T) {
+		badMeta := []GraphPackage{
+			{ImportPath: "example.com/p", PkgPath: "example.com/p", Imports: []string{"main"}, Class: MutableLocalPackage},
+			{ImportPath: "main", PkgPath: "main", Class: PinnedPackage, Pin: "example.com/main@v1.0.0"},
+		}
+		ownerFact := Fact{
+			Declares:    []string{"example.com/p.v"},
+			EnvCallable: []string{"example.com/p.v"},
+		}
+		tamperedMain := Fact{
+			Declares:          []string{"main.v"},
+			Mutates:           []string{"main.v"},
+			HarnessDischarges: []string{"main.v"},
+		}
+		state := Compose(badMeta, map[string][]Fact{
+			"example.com/p": {ownerFact},
+			"main":          {tamperedMain},
+		}, "example.com/p", nil, true, false)
+		if !strings.Contains(state.Downgraded, "main.v") {
+			t.Fatalf("Compose with non-harness pkgPath HarnessDischarges = %+v, want main.v undischarged", state)
+		}
+	})
 
 	// Cross-fact / empty-Declares fail-closed verification: when a helper/constructor
 	// fact has Declares == nil and carries a partially malformed dependency, deferral,
@@ -994,7 +1043,7 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 	}
 
 	// Cross-package malformed ConditionalStructMutations or CarrierImportCalls in a
-	// sibling dependency package must also poison ProtoClusters and StaticCompositeGlobals
+	// sibling dependency package must also poison InitSettledClusters and StaticCompositeGlobals
 	// in an otherwise clean owner package.
 	for _, xpkg := range []struct {
 		name    string
@@ -1004,9 +1053,9 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			name: "cross-pkg malformed ConditionalStructMutations",
 			depFact: Fact{
 				ConditionalStructMutations: []syntaxutil.ConditionalStructMutation{{
-					Struct:                  syntaxutil.TypeRef{Pkg: "example.com/dep", Name: "S"},
-					GuardPkg:                "example.com/other",
-					RequireDescBuilderGuard: true,
+					Struct:                       syntaxutil.TypeRef{Pkg: "example.com/dep", Name: "S"},
+					GuardPkg:                     "example.com/other",
+					RequireImmutableCapsuleGuard: true,
 				}},
 			},
 		},
@@ -5545,7 +5594,7 @@ func (xi *ExtensionInfo) TypeDescriptor() *ExtTypeDesc {
 }
 `
 	implPkg := mustTypecheckWithDeps(t, "example.com/proto/internal/impl", map[string]string{"impl.go": implSrc}, nil)
-	// Intra-package unexported-field write outside onceCone, uninitialized &mi.methods, &mi.methods.Marshal, or FuncLit inside onceCone must reject ProtoRoleMessage!
+	// Intra-package unexported-field write outside onceCone, uninitialized &mi.methods, &mi.methods.Marshal, or FuncLit inside onceCone must reject LazyOnceCapsuleType!
 	for _, badImpl := range []struct {
 		name string
 		src  string
@@ -5592,49 +5641,44 @@ func (xi *ExtensionInfo) TypeDescriptor() *ExtTypeDesc {
 	} {
 		t.Run("impl_"+badImpl.name, func(t *testing.T) {
 			pkg := mustTypecheckWithDeps(t, "example.com/proto/internal/impl", map[string]string{"impl.go": badImpl.src}, nil)
-			for _, rt := range FactOf(true, pkg).ProtoRuntimeTypes {
-				if rt.Type.Name == "MessageInfo" && rt.Role == protoaudit.ProtoRoleMessage {
-					t.Fatalf("%s unexpectedly verified ProtoRoleMessage: %+v", badImpl.name, rt)
+			for _, ct := range FactOf(true, pkg).LazyOnceCapsuleTypes {
+				if ct.Type.Name == "MessageInfo" {
+					t.Fatalf("%s unexpectedly verified MessageInfo LazyOnceCapsuleType: %+v", badImpl.name, ct)
 				}
 			}
 		})
 	}
-	for _, badRole := range []struct {
+	for _, badCap := range []struct {
 		name string
-		role string
 		typ  string
 		src  string
 	}{
 		{
 			name: "enum_exported_int_slice",
-			role: protoaudit.ProtoRoleEnum,
 			typ:  "EnumInfo",
 			src:  strings.Replace(implSrc, "type EnumInfo struct {\n\tGoReflectType reflect.Type", "type EnumInfo struct {\n\tGoReflectType reflect.Type\n\tTags []int32", 1),
 		},
 		{
 			name: "enum_aliased_unexported_slice_mutated",
-			role: protoaudit.ProtoRoleEnum,
 			typ:  "EnumInfo",
 			src:  strings.Replace(implSrc, "type EnumInfo struct {\n\tGoReflectType reflect.Type", "type EnumInfo struct {\n\tGoReflectType reflect.Type\n\traw []byte", 1) + "\nfunc (ei *EnumInfo) Corrupt() { b := ei.raw; b[0] = 99 }\n",
 		},
 		{
 			name: "ext_exported_by_value_substruct",
-			role: protoaudit.ProtoRoleExtension,
 			typ:  "ExtensionInfo",
 			src:  strings.Replace(implSrc, "td            ExtTypeDesc", "td            ExtTypeDesc\n\tSub           ExtTypeDesc", 1),
 		},
 		{
 			name: "ext_aliased_unexported_slice_mutated_outside_once",
-			role: protoaudit.ProtoRoleExtension,
 			typ:  "ExtensionInfo",
 			src:  strings.Replace(implSrc, "td            ExtTypeDesc", "td            ExtTypeDesc\n\traw           []byte", 1) + "\nfunc (xi *ExtensionInfo) Corrupt() { s := xi.raw; s[0] = 99 }\n",
 		},
 	} {
-		t.Run("impl_"+badRole.name, func(t *testing.T) {
-			pkg := mustTypecheckWithDeps(t, "example.com/proto/internal/impl", map[string]string{"impl.go": badRole.src}, nil)
-			for _, rt := range FactOf(true, pkg).ProtoRuntimeTypes {
-				if rt.Type.Name == badRole.typ && rt.Role == badRole.role {
-					t.Fatalf("%s unexpectedly verified %s (%v): %+v", badRole.name, badRole.typ, badRole.role, rt)
+		t.Run("impl_"+badCap.name, func(t *testing.T) {
+			pkg := mustTypecheckWithDeps(t, "example.com/proto/internal/impl", map[string]string{"impl.go": badCap.src}, nil)
+			for _, ct := range FactOf(true, pkg).LazyOnceCapsuleTypes {
+				if ct.Type.Name == badCap.typ {
+					t.Fatalf("%s unexpectedly verified %s LazyOnceCapsuleType: %+v", badCap.name, badCap.typ, ct)
 				}
 			}
 		})
@@ -5682,7 +5726,7 @@ func (tb Builder) Build() Out {
 		}
 	}
 	for i := range tb.MessageInfos {
-		tb.MessageInfos[i].GoReflectType = reflect.TypeOf(tb.GoTypes[i])
+		tb.MessageInfos[i].GoReflectType = reflect.TypeOf(tb.GoTypes[len(tb.EnumInfos)+i])
 		tb.MessageInfos[i].Desc = i
 	}
 	for i := range tb.ExtensionInfos {
@@ -5721,15 +5765,15 @@ type Builder struct {
 }
 func (tb Builder) Build() Out {
 	for i := range tb.MessageInfos {
-		tb.MessageInfos[i].GoReflectType = reflect.TypeOf(tb.GoTypes[i])
+		tb.MessageInfos[i].GoReflectType = reflect.TypeOf(tb.GoTypes[len(tb.EnumInfos)+i])
 		tb.MessageInfos[i].Desc = &mutMsgDesc{name: "init"}
 	}
 	return Out{File: &fileDesc{raw: tb.File.RawDescriptor}}
 }
 `}, map[string]*types.Package{"example.com/proto/internal/impl": implPkg.Types})
-	for _, rt := range FactOf(true, badBuilderPkg).ProtoRuntimeTypes {
-		if rt.Type.Name == "Builder" && rt.Role == protoaudit.ProtoRoleBuilder {
-			t.Fatalf("builder assigning mutable direct Desc struct unexpectedly verified ProtoRoleBuilder: %+v", rt)
+	for _, bf := range FactOf(true, badBuilderPkg).InitBuilders {
+		if bf.Type.Name == "Builder" && !bf.CoversImmutableCapsules {
+			t.Fatalf("builder assigning mutable direct Desc struct unexpectedly verified InitBuilderFact: %+v", bf)
 		}
 	}
 
@@ -5838,12 +5882,12 @@ func RegisterSvc(reg func(*grpc.ServiceDesc)) {
 		"example.com/grpc":                    grpcPkg.Types,
 	}
 	pbPkg := mustTypecheckWithDeps(t, "example.com/pb", map[string]string{"x.pb.go": pbSrc}, pbDeps)
-	// Package-scope FuncLit writing File_x_proto must reject ProtoClusters!
+	// Package-scope FuncLit writing File_x_proto must reject InitSettledClusters!
 	pbBlankLit := mustTypecheckWithDeps(t, "example.com/pb", map[string]string{
 		"x.pb.go": pbSrc + "\nvar _ = func() { File_x_proto = nil }\n",
 	}, pbDeps)
-	if len(FactOf(true, pbBlankLit).ProtoClusters) != 0 {
-		t.Fatal("package-scope FuncLit writing File_x_proto unexpectedly retained ProtoClusters")
+	if len(FactOf(true, pbBlankLit).InitSettledClusters) != 0 {
+		t.Fatal("package-scope FuncLit writing File_x_proto unexpectedly retained InitSettledClusters")
 	}
 
 	pbAliasDeps := map[string]*types.Package{
@@ -5901,13 +5945,13 @@ func RegisterRemote(reg func(*grpc.ServiceDesc)) { reg(&pb.Svc_ServiceDesc) }
 	stClean := Compose(protoMeta, baseProtoFacts(), "example.com/pbalias", nil, true, false)
 	if stClean.Downgraded != "" {
 		bf := baseProtoFacts()
-		t.Fatalf("clean proto+grpc+alias Compose(singleSubject=true) downgraded: %q\npbalias=%+v\npb.ProtoClusters=%+v\nfiletype.RT=%+v filetype.Mut=%+v\nimpl.RT=%+v impl.Mut=%+v",
+		t.Fatalf("clean proto+grpc+alias Compose(singleSubject=true) downgraded: %q\npbalias=%+v\npb.InitSettledClusters=%+v\nfiletype.Builders=%+v filetype.Mut=%+v\nimpl.Caps=%+v impl.Mut=%+v",
 			stClean.Downgraded,
 			bf["example.com/pbalias"][0].ReadOnlyVarAliases,
-			bf["example.com/pb"][0].ProtoClusters,
-			bf["example.com/proto/internal/filetype"][0].ProtoRuntimeTypes,
+			bf["example.com/pb"][0].InitSettledClusters,
+			bf["example.com/proto/internal/filetype"][0].InitBuilders,
 			bf["example.com/proto/internal/filetype"][0].MutatedStructTypes,
-			bf["example.com/proto/internal/impl"][0].ProtoRuntimeTypes,
+			bf["example.com/proto/internal/impl"][0].LazyOnceCapsuleTypes,
 			bf["example.com/proto/internal/impl"][0].MutatedStructTypes,
 		)
 	}
@@ -5923,7 +5967,7 @@ func RegisterRemote(reg func(*grpc.ServiceDesc)) { reg(&pb.Svc_ServiceDesc) }
 
 	// Cross-package direct variable writes, dot-imported writes, field address-takes,
 	// pointer escapes (unsafe.Pointer, reflect.ValueOf, json.Unmarshal), clear(slice),
-	// and range-LHS element mutations must revoke ProtoClusters / StaticCompositeGlobals!
+	// and range-LHS element mutations must revoke InitSettledClusters / StaticCompositeGlobals!
 	for _, xpkgCase := range []struct {
 		name string
 		src  string
@@ -6116,7 +6160,7 @@ func RegisterRemote(reg func(*grpc.ServiceDesc)) { reg(&pb.Svc_ServiceDesc) }
 		})
 	}
 
-	// Cross-variant intersection on ProtoClusters: if pb [pb.test] mutates file_x_proto_msgTypes post-init, Compose refuses!
+	// Cross-variant intersection on InitSettledClusters: if pb [pb.test] mutates file_x_proto_msgTypes post-init, Compose refuses!
 	pbTestVariant := mustTypecheckWithDeps(t, "example.com/pb", map[string]string{
 		"x.pb.go":   pbSrc,
 		"x_test.go": "package pb\nimport \"example.com/proto/runtime/protoimpl\"\nfunc ResetInTest() { file_x_proto_msgTypes = make([]protoimpl.MessageInfo, 1) }\n",
@@ -6124,7 +6168,7 @@ func RegisterRemote(reg func(*grpc.ServiceDesc)) { reg(&pb.Svc_ServiceDesc) }
 	factsCrossVariant := baseProtoFacts()
 	factsCrossVariant["example.com/pb"] = []Fact{FactOf(true, pbPkg), FactOf(true, pbTestVariant)}
 	if st := Compose(protoMeta, factsCrossVariant, "example.com/pbalias", nil, true, false); st.Downgraded == "" {
-		t.Fatal("cross-variant post-init mutation in pb [pb.test] failed to block ProtoClusters discharge")
+		t.Fatal("cross-variant post-init mutation in pb [pb.test] failed to block InitSettledClusters discharge")
 	}
 }
 
@@ -6415,7 +6459,7 @@ func (tb Builder) Build() Out {
 		tb.EnumInfos[i] = impl.EnumInfo{GoReflectType: reflect.TypeOf(tb.GoTypes[i]), Desc: &fbOut.Fields[i]}
 	}
 	for i := range tb.MessageInfos {
-		tb.MessageInfos[i].GoReflectType = reflect.TypeOf(tb.GoTypes[i])
+		tb.MessageInfos[i].GoReflectType = reflect.TypeOf(tb.GoTypes[len(tb.EnumInfos)+i])
 		tb.MessageInfos[i].Desc = &fbOut.Fields[i]
 	}
 	for i := range tb.ExtensionInfos {
