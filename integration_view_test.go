@@ -1717,16 +1717,12 @@ func TestSingleSubjectDirectiveDischarges(t *testing.T) {
 	}
 }
 
-// The generated-proto descriptor cluster: variables declared in a
-// protoc-gen-go generated file discharge under the single-subject
-// attestation with the audited pinned protobuf runtime (header +
-// attestation, the directive's two-leg model), the discharge on
-// Idempotent protobuf descriptor builder clusters and immutable gRPC service
-// descriptor tables discharge under single-subject execution when both the
-// declaring cluster/table and the runtime types satisfy mechanical structural
-// verification across any version or local origin, while unattested runs,
-// tampered runtimes, malformed clusters (even bearing protoc-gen-go headers),
-// and sibling mutable variables remain downgraded
+// Idempotent protobuf descriptor builder clusters discharge under
+// single-subject attestation (recorded on SingleSubjectDischarges), while
+// static composite gRPC service descriptor tables discharge attestation-free
+// across any execution model when mechanically verified; unattested builder
+// clusters, tampered runtimes, malformed clusters (even bearing protoc-gen-go
+// headers), and sibling mutable variables remain downgraded
 // (REQ-closure-shared-dynamic-state-proto, REQ-vouch-recorded).
 func TestGeneratedProtoClusterDischarges(t *testing.T) {
 	if testing.Short() {
@@ -1865,16 +1861,21 @@ func TestGeneratedProtoClusterDischarges(t *testing.T) {
 		t.Fatalf("fake cluster under protoc-gen-go header verdict = %+v, want the downgrade", fakeCluster)
 	}
 
-	// 5. Immutable gRPC ServiceDesc composite literal discharges across versions without header privilege,
+	// 5. Immutable gRPC ServiceDesc composite literal discharges attestation-free across versions and execution modes,
 	// while a fake []func() under protoc-gen-go-grpc header refuses.
 	for _, grpcVer := range []string{"v1.82.1", "v1.99.0"} {
-		grpcFP, grpcVerdict := captureCustom(t, map[string]string{
+		grpcFiles := map[string]string{
 			"go.mod":         "module example.com/view\n\ngo 1.26\n\nrequire google.golang.org/grpc " + grpcVer + "\n",
 			"gen_grpc.pb.go": "package view\n\nimport \"google.golang.org/grpc\"\n\ntype SvcServer interface{ Ping() }\n\nfunc _Svc_Ping_Handler(srv any) error { return nil }\n\nvar Svc_ServiceDesc = grpc.ServiceDesc{\n\tServiceName: \"view.Svc\",\n\tHandlerType: (*SvcServer)(nil),\n\tMethods:     []grpc.MethodDesc{{MethodName: \"Ping\", Handler: _Svc_Ping_Handler}},\n\tStreams:     []grpc.StreamDesc{},\n\tMetadata:    \"x.proto\",\n}\n",
 			"view.go":        "package view\n\nimport \"google.golang.org/grpc\"\n\nfunc F() *grpc.ServiceDesc { return &Svc_ServiceDesc }\n",
-		}, "F", withSingleSubjectExecution())
-		if grpcVerdict.Status != Valid || !strings.Contains(grpcFP.SingleSubjectDischarges, "example.com/view.Svc_ServiceDesc") {
-			t.Fatalf("grpc (%s) verdict = %+v evidence = %q, want Valid with Svc_ServiceDesc recorded", grpcVer, grpcVerdict, grpcFP.SingleSubjectDischarges)
+		}
+		grpcFPGeneral, grpcVerdictGeneral := captureCustom(t, grpcFiles, "F")
+		if grpcVerdictGeneral.Status != Valid || grpcFPGeneral.SingleSubjectDischarges != "" {
+			t.Fatalf("grpc (%s) general verdict = %+v evidence = %q, want attestation-free Valid with empty SingleSubjectDischarges", grpcVer, grpcVerdictGeneral, grpcFPGeneral.SingleSubjectDischarges)
+		}
+		grpcFP, grpcVerdict := captureCustom(t, grpcFiles, "F", withSingleSubjectExecution())
+		if grpcVerdict.Status != Valid || grpcFP.SingleSubjectDischarges != "" {
+			t.Fatalf("grpc (%s) single-subject verdict = %+v evidence = %q, want attestation-free Valid with empty SingleSubjectDischarges", grpcVer, grpcVerdict, grpcFP.SingleSubjectDischarges)
 		}
 	}
 	_, fakeGrpc := captureCustom(t, map[string]string{

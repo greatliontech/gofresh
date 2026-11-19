@@ -120,41 +120,8 @@ func CollectFreshLocalStructVars(
 	isAliasableFieldType := func(t types.Type) bool {
 		return refconfine.TypeCarriesMutableRef(t)
 	}
-	var isFreshFieldInit func(expr ast.Expr) bool
-	isFreshFieldInit = func(expr ast.Expr) bool {
-		expr = ast.Unparen(expr)
-		if syntaxutil.IsNilIdent(p.TypesInfo, expr) {
-			return true
-		}
-		switch e := expr.(type) {
-		case *ast.CompositeLit:
-			for _, elt := range e.Elts {
-				val := elt
-				if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
-					val = kv.Value
-				}
-				if isAliasableFieldType(p.TypesInfo.TypeOf(val)) && !isFreshFieldInit(val) {
-					return false
-				}
-			}
-			return true
-		case *ast.UnaryExpr:
-			if e.Op == token.AND {
-				if cl, ok := ast.Unparen(e.X).(*ast.CompositeLit); ok {
-					return isFreshFieldInit(cl)
-				}
-			}
-		case *ast.CallExpr:
-			if syntaxutil.IsBuiltinNewType(p.TypesInfo, e) {
-				return true
-			}
-			if id, ok := ast.Unparen(e.Fun).(*ast.Ident); ok {
-				if b, isB := p.TypesInfo.Uses[id].(*types.Builtin); isB && b.Name() == "make" {
-					return true
-				}
-			}
-		}
-		return false
+	isFreshFieldInit := func(expr ast.Expr) bool {
+		return IsFreshInlineValue(p, expr)
 	}
 
 	isFreshStructAlloc := func(expr ast.Expr) bool {
@@ -438,6 +405,52 @@ func IsRootedAtFreshLocal(
 	}
 }
 
+// IsFreshInlineValue reports whether expr directly constructs a fresh,
+// unaliased composite, new(T), make(...), or nil value whose reference-carrying
+// elements are themselves recursively fresh inline values.
+func IsFreshInlineValue(p *packages.Package, expr ast.Expr) bool {
+	if p == nil || p.TypesInfo == nil || expr == nil {
+		return false
+	}
+	expr = ast.Unparen(expr)
+	if syntaxutil.IsNilIdent(p.TypesInfo, expr) || syntaxutil.IsTypedNilSliceConv(p, expr) {
+		return true
+	}
+	switch e := expr.(type) {
+	case *ast.CompositeLit:
+		_, isStructComp := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(e)).(*types.Struct)
+		for _, elt := range e.Elts {
+			val := elt
+			if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
+				if !isStructComp && refconfine.TypeCarriesMutableRef(p.TypesInfo.TypeOf(kv.Key)) && !IsFreshInlineValue(p, kv.Key) {
+					return false
+				}
+				val = kv.Value
+			}
+			if refconfine.TypeCarriesMutableRef(p.TypesInfo.TypeOf(val)) && !IsFreshInlineValue(p, val) {
+				return false
+			}
+		}
+		return true
+	case *ast.UnaryExpr:
+		if e.Op == token.AND {
+			if cl, ok := ast.Unparen(e.X).(*ast.CompositeLit); ok {
+				return IsFreshInlineValue(p, cl)
+			}
+		}
+	case *ast.CallExpr:
+		if syntaxutil.IsBuiltinNewType(p.TypesInfo, e) {
+			return true
+		}
+		if id, ok := ast.Unparen(e.Fun).(*ast.Ident); ok {
+			if b, isB := p.TypesInfo.Uses[id].(*types.Builtin); isB && b.Name() == "make" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // FuncBodyHasGoto reports whether body contains any goto statement.
 func FuncBodyHasGoto(body *ast.BlockStmt) bool {
 	if body == nil {
@@ -499,12 +512,13 @@ func IdentReachesMutatedOrAddrPrefix(p *packages.Package, idx *refconfine.PkgInd
 	}
 }
 
-// FindMutexConfinedConstructorCaches identifies unexported map[reflect.Type]T
-// package variables guarded exclusively by an unexported package-scope
-// sync.Mutex in a single entry function and its exclusive helper cone.
+// FindMutexConfinedConstructorCaches identifies unexported single-definition
+// map[reflect.Type]T package variables guarded exclusively by a dedicated
+// unexported single-definition sync.Mutex or sync.RWMutex in a single entry
+// function and its write-locked exclusive intra-package helper cone.
 func FindMutexConfinedConstructorCaches(p *packages.Package, idx *refconfine.PkgIndex) map[*types.Var]map[*ast.FuncDecl]bool {
 	out := map[*types.Var]map[*ast.FuncDecl]bool{}
-	if p == nil || p.Types == nil || p.TypesInfo == nil || idx == nil {
+	if p == nil || p.Types == nil || p.TypesInfo == nil || idx == nil || !syntaxutil.IsTrueStdlibInPkg(p, "reflect") {
 		return out
 	}
 	for _, name := range p.Types.Scope().Names() {
@@ -512,158 +526,16 @@ func FindMutexConfinedConstructorCaches(p *packages.Package, idx *refconfine.Pkg
 		if !isVar || mv == nil || mv.Exported() {
 			continue
 		}
-		mapT, isMap := syntaxutil.UnderlyingType(mv.Type()).(*types.Map)
-		if !isMap || !syntaxutil.IsReflectType(mapT.Key()) {
-			continue
-		}
-		if len(idx.UsesOf[mv]) == 0 {
-			continue
-		}
-		for entryFn, entryFD := range idx.FuncDecls {
-			if entryFn == nil || entryFD == nil || entryFD.Body == nil || len(entryFD.Body.List) < 3 {
-				continue
-			}
-			muVar := matchPkgMutexLockDeferUnlock(p, entryFD.Body.List[0], entryFD.Body.List[1])
-			if muVar == nil || muVar.Exported() || len(idx.UsesOf[muVar]) != 2 {
-				continue
-			}
-			allMuInEntry := true
-			for _, u := range idx.UsesOf[muVar] {
-				if !idx.IsSyncInFuncDecl(u, entryFD) ||
-					!((entryFD.Body.List[0].Pos() <= u.Pos() && u.Pos() < entryFD.Body.List[0].End()) ||
-						(entryFD.Body.List[1].Pos() <= u.Pos() && u.Pos() < entryFD.Body.List[1].End())) {
-					allMuInEntry = false
-					break
-				}
-			}
-			if !allMuInEntry {
-				continue
-			}
-			coneFuncs := refconfine.ComputeExclusiveHelperCone(p, idx, entryFn)
-			coneFDs := map[*ast.FuncDecl]bool{entryFD: true}
-			for cf := range coneFuncs {
-				if cfd := idx.FuncDecls[cf]; cfd != nil {
-					coneFDs[cfd] = true
-				}
-			}
-			allMapOK := true
-			for _, u := range idx.UsesOf[mv] {
-				encl := idx.SyncEnclFuncDecl(u)
-				if !coneFDs[encl] {
-					allMapOK = false
-					break
-				}
-				par := idx.ParentUnparen(u)
-				switch x := par.(type) {
-				case *ast.BinaryExpr:
-					if (x.Op != token.EQL && x.Op != token.NEQ) || (!syntaxutil.IsNilIdent(p.TypesInfo, x.X) && !syntaxutil.IsNilIdent(p.TypesInfo, x.Y)) {
-						allMapOK = false
-					}
-				case *ast.AssignStmt:
-					if len(x.Lhs) == 1 && len(x.Rhs) == 1 && ast.Unparen(x.Lhs[0]) == u {
-						cid, isID := ast.Unparen(x.Rhs[0]).(*ast.CallExpr)
-						blk, isBlk := idx.ParentMap[x].(*ast.BlockStmt)
-						var enclosingIf *ast.IfStmt
-						if isBlk && len(blk.List) == 1 {
-							enclosingIf, _ = idx.ParentMap[blk].(*ast.IfStmt)
-						}
-						condNil := false
-						if enclosingIf != nil && enclosingIf.Else == nil {
-							if bc, isBC := ast.Unparen(enclosingIf.Cond).(*ast.BinaryExpr); isBC && bc.Op == token.EQL {
-								condNil = (syntaxutil.LookupPkgScopeVar(p, bc.X) == mv && syntaxutil.IsNilIdent(p.TypesInfo, bc.Y)) ||
-									(syntaxutil.LookupPkgScopeVar(p, bc.Y) == mv && syntaxutil.IsNilIdent(p.TypesInfo, bc.X))
-							}
-						}
-						if !isID || !isMakeCall(p, cid) || !condNil {
-							allMapOK = false
-						}
-					} else {
-						allMapOK = false
-					}
-				case *ast.IndexExpr:
-					if ast.Unparen(x.X) != u {
-						allMapOK = false
-						break
-					}
-					up := idx.ParentUnparen(x)
-					if as, isAs := up.(*ast.AssignStmt); isAs {
-						if len(as.Lhs) == 1 && ast.Unparen(as.Lhs[0]) == x {
-							continue
-						}
-						if len(as.Rhs) == 1 && ast.Unparen(as.Rhs[0]) == x && len(as.Lhs) == 2 {
-							lid, isID0 := ast.Unparen(as.Lhs[0]).(*ast.Ident)
-							okID, isID1 := ast.Unparen(as.Lhs[1]).(*ast.Ident)
-							ifStmt, isIfInit := idx.ParentMap[as].(*ast.IfStmt)
-							if isID0 && isID1 && isIfInit && ifStmt.Init == as && ifStmt.Else == nil && ifStmt.Body != nil && len(ifStmt.Body.List) == 1 {
-								lv, _ := p.TypesInfo.Defs[lid].(*types.Var)
-								okV, _ := p.TypesInfo.Defs[okID].(*types.Var)
-								condIdent, isCondID := ast.Unparen(ifStmt.Cond).(*ast.Ident)
-								retSt, isRet := ifStmt.Body.List[0].(*ast.ReturnStmt)
-								if lv != nil && okV != nil && isCondID && p.TypesInfo.Uses[condIdent] == okV &&
-									isRet && len(retSt.Results) == 1 {
-									if rid, isRID := ast.Unparen(retSt.Results[0]).(*ast.Ident); isRID && p.TypesInfo.Uses[rid] == lv {
-										for _, lu := range idx.UsesOf[lv] {
-											if IdentReachesMutatedOrAddrPrefix(p, idx, lu) {
-												allMapOK = false
-												break
-											}
-										}
-										continue
-									}
-								}
-							}
-						}
-					}
-					allMapOK = false
-				default:
-					allMapOK = false
-				}
-				if !allMapOK {
-					break
-				}
-			}
-			if allMapOK {
-				out[mv] = coneFDs
-				break
-			}
+		verified, ok := refconfine.VerifyMutexConfinedMap(p, idx, mv, refconfine.MutexMapConfig{
+			AllowNilLazyInit:     true,
+			AllowIntraPkgHelpers: true,
+			KeyPred:              syntaxutil.IsReflectType,
+		})
+		if ok && verified != nil && len(verified.ConeDecls) > 0 {
+			out[mv] = verified.ConeDecls
 		}
 	}
 	return out
-}
-
-func matchPkgMutexLockDeferUnlock(p *packages.Package, s0, s1 ast.Stmt) *types.Var {
-	es0, ok0 := s0.(*ast.ExprStmt)
-	df1, ok1 := s1.(*ast.DeferStmt)
-	if !ok0 || !ok1 {
-		return nil
-	}
-	c0, okC0 := ast.Unparen(es0.X).(*ast.CallExpr)
-	if !okC0 || len(c0.Args) != 0 || len(df1.Call.Args) != 0 {
-		return nil
-	}
-	sel0, okS0 := ast.Unparen(c0.Fun).(*ast.SelectorExpr)
-	sel1, okS1 := ast.Unparen(df1.Call.Fun).(*ast.SelectorExpr)
-	if !okS0 || !okS1 || sel0.Sel.Name != "Lock" || sel1.Sel.Name != "Unlock" {
-		return nil
-	}
-	v0 := syntaxutil.LookupPkgScopeVar(p, sel0.X)
-	v1 := syntaxutil.LookupPkgScopeVar(p, sel1.X)
-	if v0 == nil || v0 != v1 || !syntaxutil.IsNamedInPkg(v0.Type(), "sync", "Mutex") {
-		return nil
-	}
-	return v0
-}
-
-func isMakeCall(p *packages.Package, call *ast.CallExpr) bool {
-	if call == nil {
-		return false
-	}
-	id, ok := ast.Unparen(call.Fun).(*ast.Ident)
-	if !ok {
-		return false
-	}
-	b, isB := p.TypesInfo.Uses[id].(*types.Builtin)
-	return isB && b.Name() == "make"
 }
 
 func fdInConfinedCache(fd *ast.FuncDecl, confinedCacheMaps map[*types.Var]map[*ast.FuncDecl]bool) bool {

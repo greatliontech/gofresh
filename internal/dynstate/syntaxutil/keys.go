@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -86,6 +87,10 @@ func CallableFactKey(fn *types.Func) (FuncKey, bool) {
 type ParamKey struct {
 	Func  FuncKey `json:"func"`
 	Index int     `json:"index"`
+}
+
+func (k ParamKey) IsZero() bool {
+	return k.Func.IsZero() && k.Index == 0
 }
 
 func (k ParamKey) Valid() bool {
@@ -726,6 +731,67 @@ func (c OnceMemoVarCandidate) Compare(o OnceMemoVarCandidate) int {
 		return t
 	}
 	return c.Constructor.Compare(o.Constructor)
+}
+
+// ReadOnlyVarAlias records a non-directive single-definition package-level
+// *NamedStruct variable initialized directly from Target (or &Target for a
+// by-value NamedStruct Target) and free of post-declaration writes, address
+// captures, and mutating builtins in its declaring package.
+type ReadOnlyVarAlias struct {
+	Key               string `json:"key"`
+	Target            string `json:"target"`
+	DirectMethodsOnly bool   `json:"directMethodsOnly,omitempty"`
+}
+
+func (a ReadOnlyVarAlias) Valid() bool {
+	return ValidQualifiedVarKey(a.Key) && ValidQualifiedVarKey(a.Target) && a.Key != a.Target
+}
+
+func (a ReadOnlyVarAlias) Compare(o ReadOnlyVarAlias) int {
+	if c := cmp.Compare(a.Key, o.Key); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(a.Target, o.Target); c != 0 {
+		return c
+	}
+	if a.DirectMethodsOnly != o.DirectMethodsOnly {
+		if !a.DirectMethodsOnly {
+			return -1
+		}
+		return 1
+	}
+	return 0
+}
+
+// StaticCompositeGlobalFact records a closed composite-literal package global
+// rooted at a non-empty non-standard named struct (by value or single-level
+// pointer) whose complete reachable struct/element schema is covered by
+// GuardTypes.
+type StaticCompositeGlobalFact struct {
+	Key        string    `json:"key"`
+	GuardTypes []TypeRef `json:"guardTypes"`
+}
+
+func (f StaticCompositeGlobalFact) Valid() bool {
+	if !ValidQualifiedVarKey(f.Key) || len(f.GuardTypes) == 0 {
+		return false
+	}
+	for i, g := range f.GuardTypes {
+		if !g.Valid() || g.IsUnnamed() {
+			return false
+		}
+		if i > 0 && f.GuardTypes[i-1].Compare(g) >= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (f StaticCompositeGlobalFact) Compare(o StaticCompositeGlobalFact) int {
+	if c := cmp.Compare(f.Key, o.Key); c != 0 {
+		return c
+	}
+	return slices.CompareFunc(f.GuardTypes, o.GuardTypes, TypeRef.Compare)
 }
 
 // FuncDepEdge records a return-environment-free conditional edge from a

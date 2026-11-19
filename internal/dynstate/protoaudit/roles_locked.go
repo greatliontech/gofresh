@@ -265,6 +265,9 @@ func verifyProtoLockedRoleType(
 									for n := range exCAS {
 										casNodesExempt[n] = true
 									}
+									if subRef, okSubRef := syntaxutil.TypeRefOfStruct(sub); okSubRef {
+										casGuardTypes = append(casGuardTypes, subRef)
+									}
 									casGuardTypes = append(casGuardTypes, guardsCAS...)
 								}
 							}
@@ -337,16 +340,26 @@ func verifyProtoLockedRoleType(
 		exempt[n] = true
 	}
 	exemptByFunc := map[*ast.FuncDecl]map[*types.Named]bool{}
+	addProtectedAndValueChildrenExempt := func(fd *ast.FuncDecl, root *types.Named) {
+		addExemptStructInFunc(exemptByFunc, fd, root)
+		syntaxutil.ForEachValueContainedStructType(root, func(vt types.Type) {
+			vtNamed, isN := types.Unalias(vt).(*types.Named)
+			if !isN || vtNamed.Obj() == nil || vtNamed.Obj().Pkg() != p.Types || vtNamed.Obj().Exported() || casHelperStructs[vtNamed] != nil {
+				return
+			}
+			addExemptStructInFunc(exemptByFunc, fd, vtNamed)
+		})
+	}
 	for fn := range onceCone {
 		fd := idx.FuncDecls[fn]
 		if fd == nil || fd.Body == nil || bodyMutatesAnyPackageGlobalWithAllowed(p, fd.Body, mutatedVars, confinedCacheMaps, fd) {
 			return nil, nil, syntaxutil.FuncKey{}, nil, nil, false
 		}
 		for famSt := range family {
-			addExemptStructInFunc(exemptByFunc, fd, famSt)
+			addProtectedAndValueChildrenExempt(fd, famSt)
 		}
 		for chSt := range childProtected {
-			addExemptStructInFunc(exemptByFunc, fd, chSt)
+			addProtectedAndValueChildrenExempt(fd, chSt)
 		}
 	}
 	for casSt, fdCAS := range casHelperStructs {
@@ -355,10 +368,10 @@ func verifyProtoLockedRoleType(
 	var initHelper syntaxutil.FuncKey
 	if builderInitFn != nil {
 		for famSt := range family {
-			addExemptStructInFunc(exemptByFunc, idx.FuncDecls[builderInitFn], famSt)
+			addProtectedAndValueChildrenExempt(idx.FuncDecls[builderInitFn], famSt)
 		}
 		for chSt := range childProtected {
-			addExemptStructInFunc(exemptByFunc, idx.FuncDecls[builderInitFn], chSt)
+			addProtectedAndValueChildrenExempt(idx.FuncDecls[builderInitFn], chSt)
 		}
 		initHelper = syntaxutil.FuncKey{Pkg: p.Types.Path(), Name: builderInitFn.Name()}
 	}
@@ -646,15 +659,64 @@ func verifyLockedStructFamilyDiscipline(
 	}
 	fastInitMethods := collectFastOnceWrapperMethods(p, idx, rootNamed, onceFn, flagField)
 	guardSet := map[syntaxutil.TypeRef]bool{}
+	seenValContained := map[types.Type]bool{}
+	var addValueContainedGuards func(t types.Type) bool
+	addValueContainedGuards = func(t types.Type) bool {
+		if t == nil {
+			return true
+		}
+		t = types.Unalias(t)
+		if seenValContained[t] {
+			return true
+		}
+		seenValContained[t] = true
+		if vtNamed, isN := t.(*types.Named); isN {
+			if vtNamed.Obj() == nil || vtNamed.Obj().Pkg() != p.Types || casHelperStructs[vtNamed] != nil {
+				return true
+			}
+			if vtNamed != rootNamed && !vtNamed.Obj().Exported() {
+				vRef, _, vSt, okV := syntaxutil.TypeRefOfStructFull(vtNamed)
+				if okV && vSt.NumFields() > 0 {
+					if !vRef.Valid() {
+						return false
+					}
+					guardSet[vRef] = true
+				}
+			}
+		} else if _, isSt := t.Underlying().(*types.Struct); isSt {
+			if vRef, _, vSt, okV := syntaxutil.TypeRefOfStructFull(t); okV && vSt.NumFields() > 0 {
+				if !vRef.Valid() {
+					return false
+				}
+				guardSet[vRef] = true
+			}
+		}
+		switch u := t.Underlying().(type) {
+		case *types.Struct:
+			for i := 0; i < u.NumFields(); i++ {
+				if !addValueContainedGuards(u.Field(i).Type()) {
+					return false
+				}
+			}
+		case *types.Array:
+			return addValueContainedGuards(u.Elem())
+		}
+		return true
+	}
 	for st := range allProtected {
-		if st == rootNamed || st.Obj() == nil {
+		if st.Obj() == nil {
 			continue
 		}
-		ref := syntaxutil.TypeRef{Pkg: p.Types.Path(), Name: st.Obj().Name()}
-		if !ref.Valid() {
+		if st != rootNamed {
+			ref := syntaxutil.TypeRef{Pkg: p.Types.Path(), Name: st.Obj().Name()}
+			if !ref.Valid() {
+				return nil, false
+			}
+			guardSet[ref] = true
+		}
+		if !addValueContainedGuards(st) {
 			return nil, false
 		}
-		guardSet[ref] = true
 	}
 	allowExportedWriteInCone := hasDeprecatedExtensionFields(family)
 

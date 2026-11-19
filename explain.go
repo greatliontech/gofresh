@@ -134,15 +134,19 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: env: %w", err)
 	}
-	return explainCulprit(sel.SelectionNotice == "", pkgs, pkgPath, varKey, varName, v.session.executionModel.singleSubject(), v.session.executionModel.packageProcess(), modCache)
+	return explainCulpritCtx(ctx, sel.SelectionNotice == "", pkgs, pkgPath, varKey, varName, v.session.executionModel.singleSubject(), v.session.executionModel.packageProcess(), modCache)
 }
 
-// explainCulprit re-derives every loaded package's fact with mark
+func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, varName string, singleSubject, packageProcess bool, modCache string) (Chain, error) {
+	return explainCulpritCtx(nil, audited, roots, pkgPath, varKey, varName, singleSubject, packageProcess, modCache)
+}
+
+// explainCulpritCtx re-derives every loaded package's fact with mark
 // hooks armed - a culprit's deciding site may sit in an importing
 // package or a test variant - and assembles the chain, following
 // environment-audit dependency edges to the first locally refused
 // proof.
-func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, varName string, singleSubject, packageProcess bool, modCache string) (Chain, error) {
+func explainCulpritCtx(ctx context.Context, audited bool, roots []*packages.Package, pkgPath, varKey, varName string, singleSubject, packageProcess bool, modCache string) (Chain, error) {
 	variants := map[string][]*packages.Package{}
 	var order []*packages.Package
 	packages.Visit(roots, func(p *packages.Package) bool {
@@ -216,7 +220,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 	var meta []dynstate.GraphPackage
 	seenMetaID := map[string]bool{}
 	for _, p := range order {
-		facts[p.PkgPath] = append(facts[p.PkgPath], dynstate.FactOfWithHooks(audited, p, singleSubject, hooks))
+		facts[p.PkgPath] = append(facts[p.PkgPath], dynstate.FactOfWithHooksCtx(ctx, audited, p, singleSubject, hooks))
 		nodeID := p.ID
 		if nodeID == "" {
 			nodeID = p.PkgPath
@@ -266,6 +270,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 		}
 	}
 	cone := dynstate.AnalyzeCone(dynstate.ConeQuery{
+		Ctx:            ctx,
 		Meta:           meta,
 		Facts:          facts,
 		SingleSubject:  singleSubject,
@@ -437,7 +442,7 @@ func explainCulprit(audited bool, roots []*packages.Package, pkgPath, varKey, va
 			},
 		}
 		for _, vp := range variants[refusedPath] {
-			dynstate.FactOfWithHooks(audited, vp, singleSubject, refusalHooks)
+			dynstate.FactOfWithHooksCtx(ctx, audited, vp, singleSubject, refusalHooks)
 		}
 		links = append(links, dedupeLinks(refusals)...)
 	}

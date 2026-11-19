@@ -111,8 +111,9 @@ policy input and gofresh itself never infers a vouch. A vouch names exactly one 
 never a package or a pattern. Session construction accepts the caller-resolved set
 directly on `SessionPolicy.Vouches` without reading any repository vouch file, while
 gofresh exports the entry parser and entry-set reducer (`ParseVouchEntry` and
-`ParseVouchEntries` — parsing each `IMPORT-PATH:VARIABLE` or `<import path>.<Variable>`
-spelling, deduplicating, and sorting the identities, one malformed spelling refusing
+`ParseVouchEntries` — parsing each `IMPORT-PATH:VARIABLE` spelling into its canonical
+`<import path>.<Variable>` identity so dotted module paths never collide with
+package-only spellings, deduplicating, and sorting the identities, one malformed spelling refusing
 the whole set; fail-closed: a vouch suppresses an unverifiable verdict, so a set that
 cannot be parsed whole is never partly honored) so a consumer composing its configured
 vouches supplies one resolved set to the session. The session judges under the supplied
@@ -148,11 +149,13 @@ assertion and records under exactly this requirement's
 discipline: the variables whose discharge the attestation
 carried — a pool carrier's admitted `Get`/`Put`, a
 `//gofresh:single-subject`-directed subject-own
-variable, a generated-proto descriptor-cluster variable, a culprit scoped
+variable, a generated-proto descriptor-cluster variable (or a read-only
+package-variable alias inheriting that cluster variable's attested discharge), a culprit scoped
 out by the per-subject reachability judgment —
 reachable from the subject, ride that subject's evidence
 canonically
 (sorted identities), an inert attestation (no attested discharge reachable from
-the subject) recording nothing, and validity likewise needing no comparison — an
+the subject) and any attestation-free implementation discharge (including closed
+static composite globals, memoizers, and read-only aliases thereof) recording nothing, and validity likewise needing no comparison — an
 unattested session re-marks the variable in the current derivation and refuses
 on its own.

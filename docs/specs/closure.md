@@ -403,9 +403,12 @@ recorded discharge channel of this requirement lifts it: a caller vouch for
 the specific variable (REQ-vouch-discharge in
 [purity.md](purity.md); version-pinned dependencies only, the acceptance
 recorded on the evidence), a checked implementation discharge (the synchronization,
-pooling, mapping, and memoization claims below), the author's
+closed static-composite, pooling, mapping, and memoization claims below), the author's
 `//gofresh:single-subject` variable directive and the generated-proto
-descriptor cluster under the caller's attestation,
+descriptor cluster under the caller's attestation, a read-only pointer-sharing
+named-struct package-variable alias inheriting one of those binary-wide
+type-guarded capsule or composite discharges while strictly preserving its
+target's attestation and recording discipline,
 or the reachability judgments — the attestation-scoped per-subject
 judgment and the unattested-model binary-scoped judgment — each defined
 below with its own bounds and recording discipline, and nothing else.
@@ -633,7 +636,31 @@ the synchronization discharge stands alongside scalar `sync/atomic` types (`Bool
 their scalar receiver methods (`Load`, `Store`, `Add`, `Swap`,
 `CompareAndSwap`, `And`, `Or`), which read and write process-memory scalars fed
 by the analyzed program alone while leaving `atomic.Value` and pointer-atomic
-operations to their own carrier rules.
+operations to their own carrier rules. Alongside synchronization, a closed
+static-composite package global discharges without execution attestation when
+every compilation variant declaring the non-directive variable initializes it
+once as a composite-literal tree rooted at a methodless non-empty non-standard named
+struct (by value or single-level pointer) whose complete reachable field and
+element schema consists solely of non-`uintptr` pure scalars initialized from
+compile-time constants, by-value methodless non-empty non-standard named structs, arrays
+or slices of by-value methodless non-empty non-standard named structs, non-generic
+function signatures bound only to `nil`, `unsafe.Pointer`-free typed `nil`, or
+bare non-generic top-level functions (including signature conversions),
+and interfaces bound only to `nil`, compile-time scalar constants, or
+`unsafe.Pointer`-free typed `nil` values, provided the variable suffers no
+post-declaration write, pointer-root address capture, subplace mutation,
+slicing, or non-scalar subplace escape and none of its reachable named struct
+types undergoes struct or slice/array element mutation anywhere in the analyzed
+binary. Likewise, a non-directive single-definition package variable of
+single-level pointer-to-named-struct type initialized directly from another
+package variable of identical pointer type (or the address of a by-value
+package variable of that named struct type) and free of post-declaration
+writes, address captures, and mutating builtins across all declaring variants
+inherits its target's binary-wide type-guarded capsule, static-composite, or
+once-memoizer discharge (requiring direct-method-call-only references along the
+entire alias chain for once-memoizers, never propagating pool, mapping,
+mutex-map memo, harness, directive, or caller-vouch discharges, and strictly
+preserving whether the target requires and records single-subject attestation).
 
 **REQ-closure-shared-dynamic-state-pool** (invariant): Pooling — `sync.Pool` with its `Get` and `Put`
 operations — MUST have two distinct claims at two tiers, each requiring its own
@@ -773,8 +800,14 @@ attestation's other discharges (REQ-vouch-recorded in
 implementation claim about build-once descriptor state and lazy message-info
 memoization: the stored values are content-invariant functions of the compiled-in
 schema. Discharge MUST require a checked derivation over the selected generated
-source, its protobuf or gRPC runtime and all subordinate implementation claims,
-together with the caller's single-subject-process assertion. A
+source, its protobuf runtime and all subordinate implementation claims,
+together with the caller's single-subject-process assertion (whereas closed
+static composite service or descriptor tables free of lazy runtime mutation
+discharge attestation-free under
+REQ-closure-shared-dynamic-state-audited-discharges, and read-only
+pointer-sharing named-struct package-variable aliases targeting cluster
+descriptor capsules inherit the attested discharge and record alongside the
+cluster variable). A
 generated-file header, generator name or runtime version is neither an author
 assertion nor a proof. The same derivation rules apply to generated and
 handwritten source, pinned dependencies and mutable-local checkouts. A
@@ -818,8 +851,11 @@ mutable-reach argument at that constructor call being an unexported
 single-definition carrier-free package variable free of mutations and
 reference-confined across all remaining uses in its package), where the
 memoizer variable itself is never written or address-taken and every
-non-initializer reference across the analyzed graph is a direct method call on
-`*T`; in `T`'s declaring package (intersected across compilation variants), `T`
+non-initializer reference across the analyzed graph — whether on the root
+variable or along a chain of read-only `*T` package-variable aliases — is a
+direct method call on `*T` (or a read-only `*T` package-variable alias
+initializer whose own downstream references across the graph are all direct
+method calls on `*T`); in `T`'s declaring package (intersected across compilation variants), `T`
 partitions its fields into a single unexported `sync.Once` reachable nowhere
 else and referenced solely by one `recv.once.Do(func() { ... })` statement in a
 two-statement getter method on `*T` with unnamed results that immediately

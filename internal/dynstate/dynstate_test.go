@@ -499,8 +499,8 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 				BuilderType: syntaxutil.TypeRef{Pkg: "example.com/rt", Name: "TypeBuilder"},
 			}}
 		}},
-		{"invalid ProtoExtAliases self-target", func(f *Fact) {
-			f.ProtoExtAliases = []protoaudit.ProtoExtAlias{{Key: "example.com/p.E", Target: "example.com/p.E"}}
+		{"invalid ReadOnlyVarAliases self-target", func(f *Fact) {
+			f.ReadOnlyVarAliases = []syntaxutil.ReadOnlyVarAlias{{Key: "example.com/p.E", Target: "example.com/p.E"}}
 		}},
 		{"invalid ProtoRuntimeTypes unknown role", func(f *Fact) {
 			f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{
@@ -572,10 +572,10 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 				GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: ""}},
 			}}
 		}},
-		{"invalid GrpcServiceVars qualified type name", func(f *Fact) {
-			f.GrpcServiceVars = []protoaudit.GrpcServiceVarFact{{
-				Key:     "example.com/p.Desc",
-				SvcDesc: syntaxutil.TypeRef{Pkg: "example.com/grpc", Name: "a.ServiceDesc"},
+		{"invalid StaticCompositeGlobals qualified type name", func(f *Fact) {
+			f.StaticCompositeGlobals = []syntaxutil.StaticCompositeGlobalFact{{
+				Key:        "example.com/p.Desc",
+				GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/grpc", Name: "a.ServiceDesc"}},
 			}}
 		}},
 		{"invalid MutatedStructTypes empty name", func(f *Fact) {
@@ -921,32 +921,32 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			},
 		},
 		{
-			name: "cross-fact malformed MutatedStructTypes blocks GrpcServiceVars",
+			name: "cross-fact malformed MutatedStructTypes blocks StaticCompositeGlobals",
 			ownerFact: Fact{
 				Declares: []string{"example.com/p.v"},
 				Mutates:  []string{"example.com/p.v"},
-				GrpcServiceVars: []protoaudit.GrpcServiceVarFact{{
-					Key:     "example.com/p.v",
-					SvcDesc: syntaxutil.TypeRef{Pkg: "example.com/grpc", Name: "ServiceDesc"},
+				StaticCompositeGlobals: []syntaxutil.StaticCompositeGlobalFact{{
+					Key:        "example.com/p.v",
+					GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "ServiceDesc"}},
 				}},
 			},
 			helperFact: Fact{
-				MutatedStructTypes: []syntaxutil.TypeRef{{Pkg: "example.com/grpc", Name: ""}},
+				MutatedStructTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: ""}},
 			},
 			check: func(t *testing.T, _ *EnvAuditResolution, _ *DeferralResolution, cs ConeState) {
 				if cs.Downgraded == "" || !cs.CulpritSites["example.com/p.v"].Unattributed {
-					t.Fatalf("expected cross-fact malformed MutatedStructTypes to block GrpcServiceVars: %+v", cs)
+					t.Fatalf("expected cross-fact malformed MutatedStructTypes to block StaticCompositeGlobals: %+v", cs)
 				}
 			},
 		},
 		{
-			name: "cross-fact malformed ConditionalStructMutations blocks GrpcServiceVars",
+			name: "cross-fact malformed ConditionalStructMutations blocks StaticCompositeGlobals",
 			ownerFact: Fact{
 				Declares: []string{"example.com/p.v"},
 				Mutates:  []string{"example.com/p.v"},
-				GrpcServiceVars: []protoaudit.GrpcServiceVarFact{{
-					Key:     "example.com/p.v",
-					SvcDesc: syntaxutil.TypeRef{Pkg: "example.com/grpc", Name: "ServiceDesc"},
+				StaticCompositeGlobals: []syntaxutil.StaticCompositeGlobalFact{{
+					Key:        "example.com/p.v",
+					GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "ServiceDesc"}},
 				}},
 			},
 			helperFact: Fact{
@@ -956,18 +956,18 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			},
 			check: func(t *testing.T, _ *EnvAuditResolution, _ *DeferralResolution, cs ConeState) {
 				if cs.Downgraded == "" || !cs.CulpritSites["example.com/p.v"].Unattributed {
-					t.Fatalf("expected cross-fact malformed ConditionalStructMutations to block GrpcServiceVars: %+v", cs)
+					t.Fatalf("expected cross-fact malformed ConditionalStructMutations to block StaticCompositeGlobals: %+v", cs)
 				}
 			},
 		},
 		{
-			name: "cross-fact malformed CarrierImportCalls blocks GrpcServiceVars",
+			name: "cross-fact malformed CarrierImportCalls blocks StaticCompositeGlobals",
 			ownerFact: Fact{
 				Declares: []string{"example.com/p.v"},
 				Mutates:  []string{"example.com/p.v"},
-				GrpcServiceVars: []protoaudit.GrpcServiceVarFact{{
-					Key:     "example.com/p.v",
-					SvcDesc: syntaxutil.TypeRef{Pkg: "example.com/grpc", Name: "ServiceDesc"},
+				StaticCompositeGlobals: []syntaxutil.StaticCompositeGlobalFact{{
+					Key:        "example.com/p.v",
+					GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "ServiceDesc"}},
 				}},
 			},
 			helperFact: Fact{
@@ -976,7 +976,7 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 			},
 			check: func(t *testing.T, _ *EnvAuditResolution, _ *DeferralResolution, cs ConeState) {
 				if cs.Downgraded == "" || !cs.CulpritSites["example.com/p.v"].Unattributed {
-					t.Fatalf("expected cross-fact malformed CarrierImportCalls to block GrpcServiceVars: %+v", cs)
+					t.Fatalf("expected cross-fact malformed CarrierImportCalls to block StaticCompositeGlobals: %+v", cs)
 				}
 			},
 		},
@@ -994,7 +994,7 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 	}
 
 	// Cross-package malformed ConditionalStructMutations or CarrierImportCalls in a
-	// sibling dependency package must also poison ProtoClusters and GrpcServiceVars
+	// sibling dependency package must also poison ProtoClusters and StaticCompositeGlobals
 	// in an otherwise clean owner package.
 	for _, xpkg := range []struct {
 		name    string
@@ -1049,16 +1049,16 @@ func TestMalformedFactEntriesFailClosedInCompose(t *testing.T) {
 				"example.com/p": {{
 					Declares: []string{"example.com/p.v"},
 					Mutates:  []string{"example.com/p.v"},
-					GrpcServiceVars: []protoaudit.GrpcServiceVarFact{{
-						Key:     "example.com/p.v",
-						SvcDesc: syntaxutil.TypeRef{Pkg: "example.com/grpc", Name: "ServiceDesc"},
+					StaticCompositeGlobals: []syntaxutil.StaticCompositeGlobalFact{{
+						Key:        "example.com/p.v",
+						GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/p", Name: "ServiceDesc"}},
 					}},
 				}},
 				"example.com/dep": {xpkg.depFact},
 			}
 			cs := Compose(xMeta, xFacts, "example.com/p", nil, true, false)
 			if cs.Downgraded == "" {
-				t.Fatalf("%s failed to block GrpcServiceVars across packages: %+v", xpkg.name, cs)
+				t.Fatalf("%s failed to block StaticCompositeGlobals across packages: %+v", xpkg.name, cs)
 			}
 		})
 	}
@@ -5420,8 +5420,8 @@ func (c *capsule) firstOrZero() int {
 		}
 	})
 
-	// 3. Domain 3 (proto & grpc): multi-package type aliases (impl + filetype + protoimpl),
-	// AllowedHelpers / InitHelper cross-package enforcement, ProtoExtAlias fixed-point,
+	// 3. Domain 3 (proto & static composites): multi-package type aliases (impl + filetype + protoimpl),
+	// AllowedHelpers / InitHelper cross-package enforcement, ReadOnlyVarAlias fixed-point,
 	// MutatedStructTypes & DirectVarWrites cross-package revocation, and cross-variant Declares intersection.
 	implSrc := `package impl
 import (
@@ -5889,9 +5889,13 @@ func RegisterRemote(reg func(*grpc.ServiceDesc)) { reg(&pb.Svc_ServiceDesc) }
 			"example.com/grpc":                    {FactOf(true, grpcPkg)},
 		}
 	}
-	// Unattested singleSubject=false must refuse.
+	// Unattested singleSubject=false must refuse protobuf cluster vars while discharging Svc_ServiceDesc attestation-free!
 	if st := Compose(protoMeta, baseProtoFacts(), "example.com/pbalias", nil, false, false); st.Downgraded == "" {
-		t.Fatal("expected singleSubject=false to refuse protobuf cluster and grpc ServiceDesc")
+		t.Fatal("expected singleSubject=false to refuse protobuf cluster")
+	}
+	nonVouchUnattested := NonVouchDischargedVars(protoMeta, baseProtoFacts(), false)
+	if !nonVouchUnattested["example.com/pb.Svc_ServiceDesc"] {
+		t.Fatalf("NonVouchDischargedVars(singleSubject=false) missing Svc_ServiceDesc: %+v", nonVouchUnattested)
 	}
 	// Attested singleSubject=true must discharge all cluster vars, E_Opt, E_Alias, and Svc_ServiceDesc (even with reg(&pb.Svc_ServiceDesc))!
 	stClean := Compose(protoMeta, baseProtoFacts(), "example.com/pbalias", nil, true, false)
@@ -5899,7 +5903,7 @@ func RegisterRemote(reg func(*grpc.ServiceDesc)) { reg(&pb.Svc_ServiceDesc) }
 		bf := baseProtoFacts()
 		t.Fatalf("clean proto+grpc+alias Compose(singleSubject=true) downgraded: %q\npbalias=%+v\npb.ProtoClusters=%+v\nfiletype.RT=%+v filetype.Mut=%+v\nimpl.RT=%+v impl.Mut=%+v",
 			stClean.Downgraded,
-			bf["example.com/pbalias"][0].ProtoExtAliases,
+			bf["example.com/pbalias"][0].ReadOnlyVarAliases,
 			bf["example.com/pb"][0].ProtoClusters,
 			bf["example.com/proto/internal/filetype"][0].ProtoRuntimeTypes,
 			bf["example.com/proto/internal/filetype"][0].MutatedStructTypes,
@@ -5908,15 +5912,18 @@ func RegisterRemote(reg func(*grpc.ServiceDesc)) { reg(&pb.Svc_ServiceDesc) }
 		)
 	}
 	dischargedList := strings.Split(stClean.AttestationDischarges, ",")
-	for _, wantVar := range []string{"example.com/pb.file_x_proto_msgTypes", "example.com/pb.E_Opt", "example.com/pbalias.E_Alias", "example.com/pb.Svc_ServiceDesc"} {
+	for _, wantVar := range []string{"example.com/pb.file_x_proto_msgTypes", "example.com/pb.E_Opt", "example.com/pbalias.E_Alias"} {
 		if !slices.Contains(dischargedList, wantVar) {
 			t.Fatalf("AttestationDischarges = %q, missing %s", stClean.AttestationDischarges, wantVar)
 		}
 	}
+	if slices.Contains(dischargedList, "example.com/pb.Svc_ServiceDesc") {
+		t.Fatalf("AttestationDischarges = %q, unexpectedly recorded attestation-free StaticCompositeGlobal Svc_ServiceDesc", stClean.AttestationDischarges)
+	}
 
 	// Cross-package direct variable writes, dot-imported writes, field address-takes,
 	// pointer escapes (unsafe.Pointer, reflect.ValueOf, json.Unmarshal), clear(slice),
-	// and range-LHS element mutations must revoke ProtoClusters / GrpcServiceVars!
+	// and range-LHS element mutations must revoke ProtoClusters / StaticCompositeGlobals!
 	for _, xpkgCase := range []struct {
 		name string
 		src  string

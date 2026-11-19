@@ -151,23 +151,25 @@ func SelectionCrossesEmbeddedPointer(selInfo *types.Selection) bool {
 	if selInfo == nil || len(selInfo.Index()) <= 1 {
 		return false
 	}
-	cur := DerefNamedStruct(selInfo.Recv())
-	if cur == nil {
-		return false
+	_, st := DerefAnyStructType(selInfo.Recv())
+	if st == nil {
+		return true
 	}
 	indices := selInfo.Index()
 	for i := 0; i+1 < len(indices); i++ {
-		st, ok := cur.Underlying().(*types.Struct)
-		if !ok || indices[i] < 0 || indices[i] >= st.NumFields() {
+		if indices[i] < 0 || indices[i] >= st.NumFields() {
 			return true
 		}
 		ft := types.Unalias(st.Field(indices[i]).Type())
 		if _, isPtr := ft.(*types.Pointer); isPtr {
 			return true
 		}
-		cur = DerefNamedStruct(ft)
-		if cur == nil {
-			return false
+		_, st = DerefAnyStructType(ft)
+		if st == nil {
+			if _, isIf := ft.Underlying().(*types.Interface); isIf {
+				return false
+			}
+			return true
 		}
 	}
 	return false
@@ -398,21 +400,42 @@ func IsStandardLibraryPkgPath(pkgPath string) bool {
 	return !strings.Contains(first, ".")
 }
 
+// IsTrueStdlibInPkg reports whether pkgPath resolves to a genuine standard
+// library package from p's perspective (rejecting dotless user or third-party
+// module packages whose Module metadata is non-nil).
+func IsTrueStdlibInPkg(p *packages.Package, pkgPath string) bool {
+	if !IsStandardLibraryPkgPath(pkgPath) {
+		return false
+	}
+	if p != nil {
+		if p.Types != nil && pkgPath == p.Types.Path() && p.Module != nil {
+			return false
+		}
+		if p.Imports != nil {
+			if imp := p.Imports[pkgPath]; imp != nil && imp.Module != nil {
+				return false
+			}
+		}
+	}
+	return true
+}
 
-// IsReadOnlyEmptyInterfaceCallee reports whether fn is a standard-library
-// function whose empty-interface parameters are inspected without mutation.
-func IsReadOnlyEmptyInterfaceCallee(fn *types.Func) bool {
+// IsReadOnlyEmptyInterfaceCallee reports whether fn resolves in p to a genuine
+// standard-library function whose empty-interface parameters are inspected
+// without mutation and never round-tripped back out as interface values.
+func IsReadOnlyEmptyInterfaceCallee(p *packages.Package, fn *types.Func) bool {
 	if fn == nil || fn.Pkg() == nil {
 		return false
 	}
 	pkgPath := fn.Pkg().Path()
-	firstSeg, _, _ := strings.Cut(pkgPath, "/")
-	if strings.Contains(firstSeg, ".") {
+	if !IsTrueStdlibInPkg(p, pkgPath) {
 		return false
 	}
 	switch pkgPath {
-	case "sync", "sync/atomic", "errors", "log", "log/slog", "testing", "runtime", "context", "cmp":
+	case "log", "testing":
 		return true
+	case "runtime":
+		return fn.Name() == "KeepAlive"
 	case "reflect":
 		return fn.Name() == "TypeOf" || fn.Name() == "DeepEqual"
 	case "fmt":
@@ -528,5 +551,3 @@ func IsFreshStringSliceCopy(srcType, dstType types.Type) bool {
 	}
 	return (isStr(srcT) && isByteOrRuneSlice(dstT)) || (isByteOrRuneSlice(srcT) && isStr(dstT))
 }
-
-

@@ -107,6 +107,14 @@ func assertFactCanonicalAndValid(t testFataler, fact Fact) {
 	checkSortedStrings("PoolMutates", fact.PoolMutates)
 	checkSortedStrings("PoolEscapes", fact.PoolEscapes)
 	checkSortedStrings("HarnessDischarges", fact.HarnessDischarges)
+	for i, rf := range fact.ReflectedIfaceMethodSets {
+		if !rf.Valid() {
+			t.Fatalf("ReflectedIfaceMethodSets[%d] invalid: %+v", i, rf)
+		}
+		if i > 0 && fact.ReflectedIfaceMethodSets[i-1].Compare(rf) >= 0 {
+			t.Fatalf("ReflectedIfaceMethodSets not strictly sorted at %d: %+v", i, fact.ReflectedIfaceMethodSets)
+		}
+	}
 	for _, pair := range []struct {
 		label string
 		xs    []string
@@ -198,6 +206,22 @@ func assertFactCanonicalAndValid(t testFataler, fact Fact) {
 		}
 		if i > 0 && fact.ParamInsertionFree[i-1].Compare(pk) >= 0 {
 			t.Fatalf("ParamInsertionFree not strictly sorted at %d: %+v", i, fact.ParamInsertionFree)
+		}
+	}
+	for i, a := range fact.ReadOnlyVarAliases {
+		if !a.Valid() {
+			t.Fatalf("ReadOnlyVarAliases[%d] invalid: %+v", i, a)
+		}
+		if i > 0 && fact.ReadOnlyVarAliases[i-1].Compare(a) >= 0 {
+			t.Fatalf("ReadOnlyVarAliases not strictly sorted at %d: %+v", i, fact.ReadOnlyVarAliases)
+		}
+	}
+	for i, sg := range fact.StaticCompositeGlobals {
+		if !sg.Valid() {
+			t.Fatalf("StaticCompositeGlobals[%d] invalid: %+v", i, sg)
+		}
+		if i > 0 && fact.StaticCompositeGlobals[i-1].Compare(sg) >= 0 {
+			t.Fatalf("StaticCompositeGlobals not strictly sorted at %d: %+v", i, fact.StaticCompositeGlobals)
 		}
 	}
 	envCarryingSet := make(map[string]bool, len(fact.EnvCarrying))

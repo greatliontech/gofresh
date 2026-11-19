@@ -1,14 +1,14 @@
 package dynstate
 
 import (
+	"context"
 	"go/ast"
-	"go/constant"
 	"go/token"
 	"go/types"
 	"sort"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/auditset"
+	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
@@ -16,39 +16,53 @@ import (
 // deriveMemoDischarges mechanically verifies mutex-guarded reflect.Type
 // structural memoizers whose computed entries are content-invariant and
 // confined to unexported package internals (REQ-closure-shared-dynamic-state-memo).
-func deriveMemoDischarges(audited bool, p *packages.Package, idx *refconfine.PkgIndex) []string {
+func deriveMemoDischarges(ctx context.Context, audited bool, p *packages.Package, fc *pkgFlowCache, idx *refconfine.PkgIndex) []string {
 	if !audited || p == nil || p.Types == nil || p.TypesInfo == nil || len(p.Syntax) == 0 {
 		return nil
 	}
 	if idx == nil {
 		idx = refconfine.BuildPkgIndex(p)
 	}
+	if fc == nil {
+		fc = newPkgFlowCacheWithIndex(audited, p, idx)
+	}
+	target := dynstateTarget(p)
 	var out []string
 	for _, name := range p.Types.Scope().Names() {
 		v, ok := p.Types.Scope().Lookup(name).(*types.Var)
 		if !ok || !refconfine.TypeMayCarryUnknownDynamic(audited, v.Type()) {
 			continue
 		}
-		if verifyMemoVar(audited, p, idx, v) {
-			out = append(out, syntaxutil.DynamicVarKey(v))
+		varKey := syntaxutil.DynamicVarKey(v)
+		okMemo, reason := verifyMemoVarWithReason(audited, p, fc, idx, v)
+		if okMemo {
+			out = append(out, varKey)
+		} else if reason != "not map[reflect.Type]..." {
+			emitDischargeRejectAt(ctx, p, target, "memo", varKey, reason, "", v.Pos())
 		}
 	}
 	sort.Strings(out)
 	return out
 }
 
-func verifyMemoVar(audited bool, p *packages.Package, idx *refconfine.PkgIndex, mapVar *types.Var) bool {
-	ok, _ := verifyMemoVarWithReason(audited, p, idx, mapVar)
+func verifyMemoVar(audited bool, p *packages.Package, fc *pkgFlowCache, idx *refconfine.PkgIndex, mapVar *types.Var) bool {
+	ok, _ := verifyMemoVarWithReason(audited, p, fc, idx, mapVar)
 	return ok
 }
 
-func verifyMemoVarWithReason(audited bool, p *packages.Package, idx *refconfine.PkgIndex, mapVar *types.Var) (bool, string) {
-	if mapVar == nil || mapVar.Exported() || idx.DefCounts[mapVar] != 1 {
-		return false, "nil, exported, or multi-def mapVar"
+func verifyMemoVarWithReason(audited bool, p *packages.Package, fc *pkgFlowCache, idx *refconfine.PkgIndex, mapVar *types.Var) (bool, string) {
+	if mapVar == nil {
+		return false, "not map[reflect.Type]..."
 	}
 	mt, ok := types.Unalias(mapVar.Type()).Underlying().(*types.Map)
 	if !ok || !syntaxutil.IsNamedInPkg(mt.Key(), "reflect", "Type") {
 		return false, "not map[reflect.Type]..."
+	}
+	if mapVar.Exported() || idx.DefCounts[mapVar] != 1 {
+		return false, "nil, exported, or multi-def mapVar"
+	}
+	if !syntaxutil.IsTrueStdlibInPkg(p, "reflect") || !syntaxutil.IsTrueStdlibInPkg(p, "sync") {
+		return false, "non-std reflect or sync"
 	}
 	if refconfine.TypeMayCarryUnknownDynamic(audited, mt.Elem()) {
 		return false, "map elem carries unknown dynamic"
@@ -65,61 +79,576 @@ func verifyMemoVarWithReason(audited bool, p *packages.Package, idx *refconfine.
 		return false, "map elem underlying not struct"
 	}
 
-	vs := idx.VarSpecs[mapVar]
-	if vs == nil || len(vs.Names) != 1 || len(vs.Values) != 1 || !isEmptyMapInitializer(p, vs.Values[0]) {
-		return false, "varSpec not single empty map initializer"
-	}
-
-	// All references to mapVar must lie synchronously inside a single top-level plain function memoFn.
-	uses := idx.UsesOf[mapVar]
-	if len(uses) == 0 {
-		return false, "zero uses of mapVar"
-	}
-	var memoFD *ast.FuncDecl
-	for _, id := range uses {
-		fd := idx.SyncEnclFuncDecl(id)
-		if fd == nil || fd.Recv != nil || fd.Body == nil || fd.Name.Name == "init" {
-			return false, "mapVar use outside plain non-init top-level func"
-		}
-		if memoFD == nil {
-			memoFD = fd
-		} else if memoFD != fd {
-			return false, "mapVar used across multiple functions"
-		}
-	}
-	memoFnObj, ok := p.TypesInfo.Defs[memoFD.Name].(*types.Func)
-	if !ok || memoFnObj == nil {
-		return false, "memoFnObj missing"
-	}
-	memoSig, ok := memoFnObj.Type().(*types.Signature)
-	if !ok || memoSig.TypeParams().Len() > 0 || memoSig.Params().Len() != 1 {
-		return false, "memoSig not 1-param non-generic"
-	}
-	paramVar := memoSig.Params().At(0)
-	if !syntaxutil.IsNamedInPkg(paramVar.Type(), "reflect", "Type") {
-		return false, "paramVar not reflect.Type"
-	}
-	if syntaxutil.VarWrittenOrAddrTakenInBody(p.TypesInfo, memoFD.Body, paramVar) {
-		return false, "paramVar written or addr-taken"
-	}
-
-	// Collect infoNamed and all nested package-local named struct types inside it.
 	protectedStructs := map[*types.Named]bool{}
 	if !collectProtectedMemoStructs(p, infoNamed, protectedStructs) {
 		return false, "collectProtectedMemoStructs failed"
 	}
 
-	// Ensure protectedStructs never appear on exported package surface or interface conversions,
-	// never undergo pointer-identity comparison, and are never mutated outside memoFD.Body.
-	if ok, r := verifyProtectedMemoStructConfinement(p, idx, memoFD, protectedStructs); !ok {
+	verified, ok := refconfine.VerifyMutexConfinedMap(p, idx, mapVar, refconfine.MutexMapConfig{
+		AllowNilLazyInit:     false,
+		AllowIntraPkgHelpers: true,
+		RequireEntryParamKey: true,
+		RequireAtLeastOneSet: true,
+		KeyPred:              syntaxutil.IsReflectType,
+	})
+	if !ok || verified == nil || verified.EntryFunc == nil || verified.EntryDecl == nil || verified.EntryBody == nil {
+		return false, "VerifyMutexConfinedMap failed"
+	}
+
+	memoSig, ok := verified.EntryFunc.Type().(*types.Signature)
+	if !ok || memoSig.Results().Len() == 0 {
+		return false, "memoSig missing results"
+	}
+	needsErrorProof := false
+	for ri := 0; ri < memoSig.Results().Len(); ri++ {
+		rt := memoSig.Results().At(ri).Type()
+		if isUniverseErrorType(rt) {
+			needsErrorProof = true
+			continue
+		}
+		if refconfine.TypeMayCarryUnknownDynamic(audited, rt) {
+			return false, "memoSig result carries unknown dynamic"
+		}
+	}
+
+	if okConf, r := verifyProtectedMemoStructConfinement(p, idx, verified.EntryDecl, protectedStructs); !okConf {
 		return false, "confinement: " + r
 	}
 
-	// Verify lock, map lookup/store, and pure deterministic computation inside memoFD.Body.
-	if ok, r := verifyMemoFunctionBody(p, idx, memoFD, memoFnObj, paramVar, mapVar, protectedStructs); !ok {
+	allowedGlobals := map[*types.Var]bool{}
+	checkedGlobals := map[*types.Var]bool{}
+	allowGlobal := func(gv *types.Var) bool {
+		if gv == nil || gv.Pkg() != p.Types || gv.IsField() || gv.Parent() != p.Types.Scope() {
+			return false
+		}
+		if gv == mapVar || gv == verified.MutexVar {
+			return true
+		}
+		if checkedGlobals[gv] {
+			return allowedGlobals[gv]
+		}
+		checkedGlobals[gv] = true
+		okG := isInitOnlyReflectTypeGlobal(p, fc, idx, gv) ||
+			verifyReadOnlyCarrierFreeGlobalVar(audited, p, fc, idx, gv, nil, true)
+		allowedGlobals[gv] = okG
+		return okG
+	}
+
+	isMuCall := func(call *flowir.Value) bool {
+		if call == nil || call.Kind != flowir.ValCall || call.CallKind != flowir.CallMethod ||
+			call.IsMethodExprCall || len(call.Args) != 0 || call.Ellipsis ||
+			call.CalleePkg != "sync" || call.CalleeFunc == nil ||
+			!call.HasRecvPlace || !call.RecvPlace.IsBareVar() || call.RecvPlace.Obj != verified.MutexVar {
+			return false
+		}
+		switch call.CalleeFunc.Name() {
+		case "Lock", "Unlock", "RLock", "RUnlock":
+			return true
+		default:
+			return false
+		}
+	}
+
+	coneFuncs, localClosures, sawErrorSink, okCone := verifyDeterministicComputeCone(
+		p,
+		fc,
+		idx,
+		idx.FuncDecls,
+		memoSig,
+		verified.EntryBody,
+		conePolicy{
+			audited:                audited,
+			allowMapRange:          false,
+			allowReflectTypeValues: true,
+			allowRecursiveSelf:     verified.EntryFunc,
+			allowedGlobalRead:      allowGlobal,
+			isExemptPkgGlobalWrite: func(_ *flowir.Op, dst flowir.Place) bool { return dst.Obj == mapVar },
+			isExemptCall:           isMuCall,
+		},
+	)
+	if !okCone {
+		return false, "compute cone failed"
+	}
+
+	if needsErrorProof || sawErrorSink {
+		if !verifyFlowIRErrorOrigins(
+			p,
+			fc,
+			memoSig,
+			verified.EntryBody,
+			coneFuncs,
+			localClosures,
+			errorOriginConfig{
+				trustedErrCallees:      map[*types.Func]bool{verified.EntryFunc: true},
+				allowReflectTypeValues: true,
+			},
+		) {
+			return false, "error origins failed"
+		}
+	}
+
+	if okBody, r := verifyMemoProtectedAndPostStoreFlowIR(p, fc, memoSig, infoNamed, protectedStructs, mapVar, verified, coneFuncs, localClosures); !okBody {
 		return false, "body: " + r
 	}
 	return true, ""
+}
+
+func verifyMemoProtectedAndPostStoreFlowIR(
+	p *packages.Package,
+	fc *pkgFlowCache,
+	memoSig *types.Signature,
+	infoNamed *types.Named,
+	protected map[*types.Named]bool,
+	mapVar *types.Var,
+	verified *refconfine.VerifiedMutexMap,
+	coneFuncs map[*types.Func]*ast.FuncDecl,
+	localClosures map[*types.Var]*flowir.Body,
+) (bool, string) {
+	if okEq, r := verifyMemoGetOrComputeEquivalence(p, fc, memoSig, infoNamed, mapVar, verified, coneFuncs); !okEq {
+		return false, r
+	}
+
+	// Check protected struct immutability & field confinement across entryBody, coneFuncs, and localClosures.
+	bodies := make([]*flowir.Body, 0, 1+len(coneFuncs)+len(localClosures))
+	bodies = append(bodies, verified.EntryBody)
+	for _, fd := range coneFuncs {
+		if b := fc.funcBody(p, fd); b != nil {
+			bodies = append(bodies, b)
+		}
+	}
+	for _, cb := range localClosures {
+		if cb != nil {
+			bodies = append(bodies, cb)
+		}
+	}
+	for _, b := range bodies {
+		if reason := checkMemoBodyProtectedSafetyFlowIR(b, protected); reason != "" {
+			return false, reason
+		}
+	}
+	return true, ""
+}
+
+func verifyHelperReturnsFreshNonNilInfo(
+	p *packages.Package,
+	fc *pkgFlowCache,
+	infoNamed *types.Named,
+	fd *ast.FuncDecl,
+	isFreshOrigin func(*flowir.Value) bool,
+) bool {
+	if fd == nil || fd.Name == nil || p == nil || p.TypesInfo == nil {
+		return false
+	}
+	fnObj, _ := p.TypesInfo.Defs[fd.Name].(*types.Func)
+	if fnObj == nil {
+		return false
+	}
+	sig, ok := fnObj.Type().(*types.Signature)
+	if !ok || sig.Recv() != nil || (sig.Results().Len() != 1 && sig.Results().Len() != 2) {
+		return false
+	}
+	if !syntaxutil.IsPtrToNamed(sig.Results().At(0).Type(), infoNamed) {
+		return false
+	}
+	hasErr := sig.Results().Len() == 2
+	if hasErr && !isUniverseErrorType(sig.Results().At(1).Type()) {
+		return false
+	}
+	b := fc.funcBody(p, fd)
+	if b == nil {
+		return false
+	}
+	helperAddrTaken, helperClosureHazard := scanMemoBodyClosureAndAddrHazards(b, nil)
+	if helperClosureHazard {
+		return false
+	}
+	hasBadCtrl := false
+	freshLocals := map[*types.Var]bool{}
+	badLocal := map[*types.Var]bool{}
+	b.ForEachSyncOp(func(op *flowir.Op) bool {
+		if op.Kind == flowir.OpDefer || op.Kind == flowir.OpGo {
+			hasBadCtrl = true
+			return false
+		}
+		if op.Kind == flowir.OpBranch {
+			if bs, ok := op.StmtAST.(*ast.BranchStmt); !ok || bs.Tok == token.GOTO {
+				hasBadCtrl = true
+				return false
+			}
+		}
+		if op.Kind != flowir.OpAssign {
+			return true
+		}
+		if op.AssignKind == flowir.AssignZeroDecl {
+			for _, dst := range op.Dsts {
+				if dst.Obj != nil {
+					badLocal[dst.Obj] = true
+				}
+			}
+			return true
+		}
+		for di, dst := range op.Dsts {
+			if dst.Obj == nil {
+				continue
+			}
+			if !dst.IsBareVar() || dst.Root != flowir.RootLocal || helperAddrTaken[dst.Obj] ||
+				op.AssignKind != flowir.AssignPlain || di >= len(op.Srcs) || !isFreshOrigin(op.Srcs[di]) {
+				badLocal[dst.Obj] = true
+				delete(freshLocals, dst.Obj)
+				continue
+			}
+			if !badLocal[dst.Obj] {
+				freshLocals[dst.Obj] = true
+			}
+		}
+		return true
+	})
+
+	sawFreshReturn := false
+	returnsOK := true
+	b.ForEachSyncOp(func(op *flowir.Op) bool {
+		if op.Kind != flowir.OpReturn {
+			return true
+		}
+		if op.IsNaked || len(op.Results) != sig.Results().Len() {
+			returnsOK = false
+			return false
+		}
+		if hasErr && op.Results[1] != nil && !op.Results[1].IsNil {
+			if op.Results[0] == nil || !op.Results[0].IsNil {
+				returnsOK = false
+				return false
+			}
+			return true
+		}
+		if hasErr && (op.Results[1] == nil || !op.Results[1].IsNil) {
+			returnsOK = false
+			return false
+		}
+		r0 := op.Results[0]
+		if isFreshOrigin(r0) || (r0 != nil && r0.Kind == flowir.ValPlace && r0.Place.IsBareVar() && freshLocals[r0.Place.Obj] && !badLocal[r0.Place.Obj]) {
+			sawFreshReturn = true
+			return true
+		}
+		returnsOK = false
+		return false
+	})
+	return !hasBadCtrl && returnsOK && sawFreshReturn
+}
+
+func scanMemoBodyClosureAndAddrHazards(rootBody *flowir.Body, mapVar *types.Var) (map[*types.Var]bool, bool) {
+	addrTaken := map[*types.Var]bool{}
+	hazard := false
+	var walkBody func(b *flowir.Body, inClosure bool)
+	walkBody = func(b *flowir.Body, inClosure bool) {
+		if b == nil || hazard {
+			return
+		}
+		b.ForEachSyncOp(func(op *flowir.Op) bool {
+			if hazard {
+				return false
+			}
+			if inClosure && (op.Kind == flowir.OpAssign || op.Kind == flowir.OpTypeSwitchBind) {
+				for _, dst := range op.Dsts {
+					if dst.Root == flowir.RootOuterVar || (mapVar != nil && dst.Obj == mapVar) {
+						hazard = true
+						return false
+					}
+				}
+			}
+			op.ForEachValue(func(val *flowir.Value) bool {
+				if val == nil || hazard {
+					return !hazard
+				}
+				val.WalkValues(func(cur *flowir.Value) bool {
+					if hazard || cur == nil {
+						return false
+					}
+					switch cur.Kind {
+					case flowir.ValAddrOf:
+						if !cur.IsArraySlice && len(cur.AddrPlace.Projs) == 0 && cur.AddrPlace.Obj != nil {
+							if inClosure && cur.AddrPlace.Root == flowir.RootOuterVar {
+								hazard = true
+								return false
+							}
+							if !inClosure && cur.AddrPlace.Root == flowir.RootLocal {
+								addrTaken[cur.AddrPlace.Obj] = true
+							}
+						}
+					case flowir.ValMethodVal:
+						if cur.AutoAddr && cur.HasRecvPlace && len(cur.RecvPlace.Projs) == 0 && cur.RecvPlace.Obj != nil {
+							if inClosure && cur.RecvPlace.Root == flowir.RootOuterVar {
+								hazard = true
+								return false
+							}
+							if !inClosure && cur.RecvPlace.Root == flowir.RootLocal {
+								addrTaken[cur.RecvPlace.Obj] = true
+							}
+						}
+					case flowir.ValCall:
+						if cur.AutoAddrRecv && cur.HasRecvPlace && len(cur.RecvPlace.Projs) == 0 && cur.RecvPlace.Obj != nil {
+							if inClosure && cur.RecvPlace.Root == flowir.RootOuterVar {
+								hazard = true
+								return false
+							}
+							if !inClosure && cur.RecvPlace.Root == flowir.RootLocal {
+								addrTaken[cur.RecvPlace.Obj] = true
+							}
+						}
+						if cur.IIFE != nil {
+							walkBody(cur.IIFE, true)
+						}
+					case flowir.ValMakeClosure:
+						if cur.Closure != nil {
+							walkBody(cur.Closure, true)
+						}
+					}
+					return !hazard
+				})
+				return !hazard
+			})
+			return !hazard
+		})
+	}
+	walkBody(rootBody, false)
+	return addrTaken, hazard
+}
+
+func invalidateLoopWrittenFreshVars(p *packages.Package, loopNode ast.Node, cur *memoFlowState) {
+	if p == nil || p.TypesInfo == nil || loopNode == nil || len(cur.freshVars) == 0 {
+		return
+	}
+	dropExprRoot := func(e ast.Expr) {
+		if e == nil {
+			return
+		}
+		if id, ok := ast.Unparen(e).(*ast.Ident); ok {
+			if v, okU := p.TypesInfo.Uses[id].(*types.Var); okU && v != nil {
+				delete(cur.freshVars, v)
+			}
+			if v, okD := p.TypesInfo.Defs[id].(*types.Var); okD && v != nil {
+				delete(cur.freshVars, v)
+			}
+		}
+	}
+	ast.Inspect(loopNode, func(n ast.Node) bool {
+		if len(cur.freshVars) == 0 || n == nil {
+			return false
+		}
+		switch x := n.(type) {
+		case *ast.AssignStmt:
+			for _, lhs := range x.Lhs {
+				dropExprRoot(lhs)
+			}
+		case *ast.IncDecStmt:
+			dropExprRoot(x.X)
+		case *ast.RangeStmt:
+			dropExprRoot(x.Key)
+			dropExprRoot(x.Value)
+		case *ast.ValueSpec:
+			for _, nm := range x.Names {
+				if nm != nil {
+					dropExprRoot(nm)
+				}
+			}
+		case *ast.UnaryExpr:
+			if x.Op == token.AND {
+				dropExprRoot(x.X)
+			}
+		}
+		return true
+	})
+}
+
+func checkMemoBodyProtectedSafetyFlowIR(b *flowir.Body, protected map[*types.Named]bool) string {
+	reason := ""
+	checkVal := func(v *flowir.Value, allowDirectProtectedSliceRange bool) {
+		if v == nil || reason != "" {
+			return
+		}
+		consumedProtectedFieldVals := map[*flowir.Value]bool{}
+		if allowDirectProtectedSliceRange && isProtectedPtrRefFieldPlace(v, protected, false) {
+			consumedProtectedFieldVals[v] = true
+		}
+
+		v.WalkValues(func(cur *flowir.Value) bool {
+			if reason != "" {
+				return false
+			}
+			switch cur.Kind {
+			case flowir.ValAddrOf:
+				if placeTouchesProtectedStruct(cur.AddrPlace, protected) {
+					reason = "addr of or inside protected"
+					return false
+				}
+			case flowir.ValCall:
+				if cur.CallKind == flowir.CallBuiltin && len(cur.Args) > 0 && cur.Args[0] != nil {
+					switch cur.BuiltinName {
+					case "len", "cap":
+						if len(cur.Args) == 1 && !cur.Ellipsis && isProtectedPtrRefFieldPlace(cur.Args[0], protected, true) {
+							consumedProtectedFieldVals[cur.Args[0]] = true
+						}
+					case "delete", "clear", "copy", "append":
+						if valueHitsProtectedStruct(cur.Args[0], protected) {
+							reason = "call mutates protected container"
+							return false
+						}
+					}
+				}
+			case flowir.ValPlace:
+				if !consumedProtectedFieldVals[cur] && placeReadsProtectedPtrRefField(cur.Place, protected) {
+					reason = "ref field selector on protected ptr"
+					return false
+				}
+			}
+			return reason == ""
+		})
+	}
+
+	b.ForEachSyncOp(func(op *flowir.Op) bool {
+		if reason != "" {
+			return false
+		}
+		switch op.Kind {
+		case flowir.OpAssign:
+			for _, dst := range op.Dsts {
+				if placeMutatesPublishedProtected(dst, protected) {
+					reason = "assign mutates published protected"
+					return false
+				}
+				dst.ForEachChildValue(func(cv *flowir.Value) bool {
+					checkVal(cv, false)
+					return reason == ""
+				})
+				if reason != "" {
+					return false
+				}
+			}
+			isRange := op.AssignKind == flowir.AssignRange
+			for _, src := range op.Srcs {
+				checkVal(src, isRange)
+				if reason != "" {
+					return false
+				}
+			}
+		case flowir.OpReturn:
+			for _, r := range op.Results {
+				checkVal(r, false)
+				if reason != "" {
+					return false
+				}
+			}
+		case flowir.OpTypeSwitchBind:
+			checkVal(op.SwitchSrc, false)
+		case flowir.OpExpr:
+			checkVal(op.Expr, false)
+		case flowir.OpDefer, flowir.OpGo:
+			checkVal(op.Call, false)
+		case flowir.OpChanSend:
+			checkVal(op.ChanVal, false)
+			checkVal(op.SendVal, false)
+		}
+		return reason == ""
+	})
+	return reason
+}
+
+func placeTouchesProtectedStruct(pl flowir.Place, protected map[*types.Named]bool) bool {
+	if st := syntaxutil.DerefNamedStruct(pl.Type); st != nil && protected[st.Origin()] {
+		return true
+	}
+	if pl.Obj != nil {
+		if st := syntaxutil.DerefNamedStruct(pl.Obj.Type()); st != nil && protected[st.Origin()] {
+			return true
+		}
+	}
+	for _, pr := range pl.Projs {
+		if st := syntaxutil.DerefNamedStruct(pr.BaseType); st != nil && protected[st.Origin()] {
+			return true
+		}
+		if st := syntaxutil.DerefNamedStruct(pr.Type); st != nil && protected[st.Origin()] {
+			return true
+		}
+	}
+	return false
+}
+
+func valueHitsProtectedStruct(v *flowir.Value, protected map[*types.Named]bool) bool {
+	if v == nil {
+		return false
+	}
+	if st := syntaxutil.DerefNamedStruct(v.Type); st != nil && protected[st.Origin()] {
+		return true
+	}
+	hit := false
+	v.WalkValues(func(cur *flowir.Value) bool {
+		if cur.Kind == flowir.ValPlace && placeTouchesProtectedStruct(cur.Place, protected) {
+			hit = true
+			return false
+		}
+		return true
+	})
+	return hit
+}
+
+func isProtectedPtrRefFieldPlace(v *flowir.Value, protected map[*types.Named]bool, allowMap bool) bool {
+	if v == nil || v.Kind != flowir.ValPlace || len(v.Place.Projs) == 0 {
+		return false
+	}
+	last := v.Place.Projs[len(v.Place.Projs)-1]
+	if last.Kind != flowir.ProjField || last.Selection == nil || !isPtrToAnyProtected(last.Selection.Recv(), protected) {
+		return false
+	}
+	// Ensure no earlier projection step also read an unconsumed *protected map/slice field.
+	for i := 0; i < len(v.Place.Projs)-1; i++ {
+		pr := v.Place.Projs[i]
+		if pr.Kind == flowir.ProjField && pr.Selection != nil && isPtrToAnyProtected(pr.Selection.Recv(), protected) {
+			switch types.Unalias(pr.Type).Underlying().(type) {
+			case *types.Map, *types.Slice:
+				return false
+			}
+		}
+	}
+	switch types.Unalias(last.Type).Underlying().(type) {
+	case *types.Slice:
+		return true
+	case *types.Map:
+		return allowMap
+	default:
+		return false
+	}
+}
+
+func placeReadsProtectedPtrRefField(pl flowir.Place, protected map[*types.Named]bool) bool {
+	for _, pr := range pl.Projs {
+		if pr.Kind == flowir.ProjField && pr.Selection != nil && isPtrToAnyProtected(pr.Selection.Recv(), protected) {
+			switch types.Unalias(pr.Type).Underlying().(type) {
+			case *types.Map, *types.Slice:
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func placeMutatesPublishedProtected(dst flowir.Place, protected map[*types.Named]bool) bool {
+	for _, pr := range dst.Projs {
+		switch pr.Kind {
+		case flowir.ProjDeref:
+			if st := syntaxutil.DerefNamedStruct(pr.BaseType); st != nil && protected[st.Origin()] {
+				return true
+			}
+		case flowir.ProjField:
+			if pr.Selection != nil {
+				if isPtrToAnyProtected(pr.Selection.Recv(), protected) || syntaxutil.SelectionCrossesEmbeddedPointer(pr.Selection) {
+					return true
+				}
+			} else if isPtrToAnyProtected(pr.BaseType, protected) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func collectProtectedMemoStructs(p *packages.Package, root *types.Named, out map[*types.Named]bool) bool {
@@ -218,369 +747,140 @@ func verifyProtectedMemoStructConfinement(
 	})
 }
 
-func verifyMemoFunctionBody(
-	p *packages.Package,
-	idx *refconfine.PkgIndex,
-	memoFD *ast.FuncDecl,
-	memoFnObj *types.Func,
-	paramVar *types.Var,
-	mapVar *types.Var,
-	protected map[*types.Named]bool,
-) (bool, string) {
-	// Identify dedicated package-scope mutex mu referenced exclusively inside memoFD.
-	var muVar *types.Var
-	isRWMutex := false
-	for _, name := range p.Types.Scope().Names() {
-		v, ok := p.Types.Scope().Lookup(name).(*types.Var)
-		if !ok || v.Exported() {
-			continue
-		}
-		rw := syntaxutil.IsNamedInPkg(v.Type(), "sync", "RWMutex")
-		plain := syntaxutil.IsNamedInPkg(v.Type(), "sync", "Mutex")
-		if !rw && !plain {
-			continue
-		}
-		uses := idx.UsesOf[v]
-		if len(uses) == 0 {
-			continue
-		}
-		allInMemo := true
-		for _, id := range uses {
-			if !idx.IsSyncInFuncDecl(id, memoFD) {
-				allInMemo = false
-				break
-			}
-		}
-		if allInMemo {
-			if vs := idx.VarSpecs[v]; vs != nil && len(vs.Values) > 0 {
-				if len(vs.Values) != 1 {
-					return false, "mu multi-value spec"
-				}
-				cl, ok := ast.Unparen(vs.Values[0]).(*ast.CompositeLit)
-				if !ok || len(cl.Elts) != 0 {
-					return false, "mu non-empty initializer"
-				}
-			}
-			if idx.DefCounts[v] != 1 {
-				return false, "mu multi-def"
-			}
-			muVar = v
-			isRWMutex = rw
-			break
-		}
-	}
-	if muVar == nil {
-		return false, "muVar not found"
-	}
-
-	// Verify top-level read-lock lookup + immediate return-if-found + write-lock store in memoFD.Body.List.
-	stmts := memoFD.Body.List
-	if len(stmts) < 7 {
-		return false, "fewer than 7 stmts"
-	}
-	rLockMethod := "Lock"
-	if isRWMutex {
-		rLockMethod = "RLock"
-	}
-	if !syntaxutil.IsMutexMethodStmt(p.TypesInfo, stmts[0], muVar, rLockMethod) && !syntaxutil.IsMutexMethodStmt(p.TypesInfo, stmts[0], muVar, "Lock") {
-		return false, "stmt[0] not lock"
-	}
-	wantRUnlock := "Unlock"
-	if syntaxutil.IsMutexMethodStmt(p.TypesInfo, stmts[0], muVar, "RLock") {
-		wantRUnlock = "RUnlock"
-	}
-	lookupAssign, ok := stmts[1].(*ast.AssignStmt)
-	if !ok || (len(lookupAssign.Lhs) != 1 && len(lookupAssign.Lhs) != 2) || len(lookupAssign.Rhs) != 1 {
-		return false, "stmt[1] not lookup assign"
-	}
-	lookupIdx, ok := ast.Unparen(lookupAssign.Rhs[0]).(*ast.IndexExpr)
-	if !ok || !syntaxutil.IsIdentUsingObj(p.TypesInfo, lookupIdx.X, mapVar) || !syntaxutil.IsIdentUsingObj(p.TypesInfo, lookupIdx.Index, paramVar) {
-		return false, "stmt[1] not M[param]"
-	}
-	lookedUpVar := syntaxutil.LookupIdentVar(p.TypesInfo, lookupAssign.Lhs[0])
-	if lookedUpVar == nil {
-		return false, "lookedUpVar nil"
-	}
-	var foundVar *types.Var
-	if len(lookupAssign.Lhs) == 2 {
-		foundVar = syntaxutil.LookupIdentVar(p.TypesInfo, lookupAssign.Lhs[1])
-		if foundVar == nil {
-			return false, "foundVar nil"
-		}
-	}
-	if !syntaxutil.IsMutexMethodStmt(p.TypesInfo, stmts[2], muVar, wantRUnlock) {
-		return false, "stmt[2] not unlock"
-	}
-	ifFound, ok := stmts[3].(*ast.IfStmt)
-	if !ok || ifFound.Init != nil || ifFound.Else != nil {
-		return false, "stmt[3] not plain if"
-	}
-	if foundVar != nil {
-		if !syntaxutil.IsIdentUsingObj(p.TypesInfo, ifFound.Cond, foundVar) {
-			return false, "stmt[3] cond not foundVar"
-		}
-	} else {
-		be, isBin := ast.Unparen(ifFound.Cond).(*ast.BinaryExpr)
-		if !isBin || be.Op != token.NEQ || !(syntaxutil.IsIdentUsingObj(p.TypesInfo, be.X, lookedUpVar) && syntaxutil.IsNilIdent(p.TypesInfo, be.Y) || syntaxutil.IsIdentUsingObj(p.TypesInfo, be.Y, lookedUpVar) && syntaxutil.IsNilIdent(p.TypesInfo, be.X)) {
-			return false, "stmt[3] cond not != nil"
-		}
-	}
-	if len(ifFound.Body.List) != 1 {
-		return false, "stmt[3] body len != 1"
-	}
-	if _, ok := ifFound.Body.List[0].(*ast.ReturnStmt); !ok {
-		return false, "stmt[3] body not return"
-	}
-
-	// Locate write-lock + M[param] = val + write-unlock near the end of stmts.
-	wLockIdx := -1
-	for i := 4; i < len(stmts); i++ {
-		if syntaxutil.IsMutexMethodStmt(p.TypesInfo, stmts[i], muVar, "Lock") {
-			wLockIdx = i
-			break
-		}
-	}
-	if wLockIdx == -1 || wLockIdx+2 >= len(stmts) {
-		return false, "wLockIdx missing"
-	}
-	storeStmtIdx := wLockIdx + 1
-	afterStoreIdx := wLockIdx + 3
-	if syntaxutil.IsDeferMutexMethodStmt(p.TypesInfo, stmts[wLockIdx+1], muVar, "Unlock") {
-		if wLockIdx+2 >= len(stmts) {
-			return false, "defer unlock missing store"
-		}
-		storeStmtIdx = wLockIdx + 2
-		afterStoreIdx = wLockIdx + 3
-	} else if !syntaxutil.IsMutexMethodStmt(p.TypesInfo, stmts[wLockIdx+2], muVar, "Unlock") {
-		return false, "wUnlock missing"
-	}
-	storeAssign, ok := stmts[storeStmtIdx].(*ast.AssignStmt)
-	if !ok || storeAssign.Tok != token.ASSIGN || len(storeAssign.Lhs) != 1 || len(storeAssign.Rhs) != 1 {
-		return false, "storeAssign invalid"
-	}
-	storeIdx, ok := ast.Unparen(storeAssign.Lhs[0]).(*ast.IndexExpr)
-	if !ok || !syntaxutil.IsIdentUsingObj(p.TypesInfo, storeIdx.X, mapVar) || !syntaxutil.IsIdentUsingObj(p.TypesInfo, storeIdx.Index, paramVar) {
-		return false, "storeIdx not M[param]"
-	}
-
-	// Ensure mapVar and muVar are NEVER referenced outside their exact verified statement positions!
-	allowedMapIdents := map[*ast.Ident]bool{
-		ast.Unparen(lookupIdx.X).(*ast.Ident): true,
-		ast.Unparen(storeIdx.X).(*ast.Ident):  true,
-	}
-	for _, id := range idx.UsesOf[mapVar] {
-		if !allowedMapIdents[id] {
-			return false, "mapVar extra ref"
-		}
-	}
-	allowedMuStmts := map[ast.Stmt]bool{
-		stmts[0]:          true,
-		stmts[2]:          true,
-		stmts[wLockIdx]:   true,
-		stmts[wLockIdx+1]: storeStmtIdx == wLockIdx+2,
-		stmts[wLockIdx+2]: storeStmtIdx == wLockIdx+1,
-	}
-	for _, id := range idx.UsesOf[muVar] {
-		topSt := enclosingTopStmt(memoFD.Body, idx, id)
-		if !allowedMuStmts[topSt] {
-			return false, "muVar extra ref"
-		}
-	}
-
-	for i := afterStoreIdx; i < len(stmts); i++ {
-		ret, ok := stmts[i].(*ast.ReturnStmt)
-		if !ok {
-			return false, "post-store non-return"
-		}
-		for _, r := range ret.Results {
-			if !isPurePostStoreReturnExpr(p, r) {
-				return false, "post-store impure return expr"
-			}
-		}
-	}
-
-	pureBody := true
-	bodyReason := ""
-	ast.Inspect(memoFD.Body, func(n ast.Node) bool {
-		if !pureBody || n == nil {
-			return false
-		}
-		switch x := n.(type) {
-		case *ast.GoStmt, *ast.FuncLit, *ast.SendStmt:
-			pureBody = false
-			bodyReason = "go/funclit/send"
-			return false
-		case *ast.UnaryExpr:
-			if x.Op == token.ARROW {
-				pureBody = false
-				bodyReason = "chan arrow"
-				return false
-			}
-			if x.Op == token.AND {
-				if refconfine.TouchesAnyNamedStruct(p, x.X, protected) {
-					pureBody = false
-					bodyReason = "addr inside protected"
-					return false
-				}
-				if _, isComp := ast.Unparen(x.X).(*ast.CompositeLit); !isComp {
-					if st := syntaxutil.DerefNamedStruct(p.TypesInfo.TypeOf(x.X)); st != nil && protected[st] {
-						pureBody = false
-						bodyReason = "addr of local protected"
-						return false
-					}
-				}
-			}
-		case *ast.RangeStmt:
-			rt := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(x.X))
-			switch rt.(type) {
-			case *types.Slice, *types.Array, *types.Basic:
-			default:
-				pureBody = false
-				bodyReason = "non-slice range"
-				return false
-			}
-			if x.Tok == token.ASSIGN {
-				if (x.Key != nil && exprChainMutatesPublishedProtected(p, x.Key, protected)) ||
-					(x.Value != nil && exprChainMutatesPublishedProtected(p, x.Value, protected)) {
-					pureBody = false
-					bodyReason = "range mutates published"
-					return false
-				}
-			}
-		case *ast.IncDecStmt:
-			if exprChainMutatesPublishedProtected(p, x.X, protected) {
-				pureBody = false
-				bodyReason = "incdec mutates published"
-				return false
-			}
-		case *ast.AssignStmt:
-			for _, lhs := range x.Lhs {
-				if exprChainMutatesPublishedProtected(p, lhs, protected) {
-					pureBody = false
-					bodyReason = "assign mutates published"
-					return false
-				}
-			}
-		case *ast.SelectorExpr:
-			if selInfo := p.TypesInfo.Selections[x]; selInfo != nil && selInfo.Kind() == types.FieldVal && isPtrToAnyProtected(selInfo.Recv(), protected) {
-				switch types.Unalias(selInfo.Type()).Underlying().(type) {
-				case *types.Map, *types.Slice:
-					par := idx.ParentUnparen(x)
-					allowed := false
-					if rng, ok := par.(*ast.RangeStmt); ok && ast.Unparen(rng.X) == x {
-						allowed = true
-					} else if call, ok := par.(*ast.CallExpr); ok && len(call.Args) == 1 && ast.Unparen(call.Args[0]) == x {
-						if b := syntaxutil.LookupBuiltin(p.TypesInfo, call.Fun); b != nil && (b.Name() == "len" || b.Name() == "cap") {
-							allowed = true
-						}
-					}
-					if !allowed {
-						pureBody = false
-						bodyReason = "ref field selector: " + x.Sel.Name
-						return false
-					}
-				}
-			}
-		case *ast.Ident:
-			if v, ok := p.TypesInfo.Uses[x].(*types.Var); ok && v.Pkg() == p.Types && !v.IsField() && v.Parent() == p.Types.Scope() {
-				if v != mapVar && v != muVar && !isInitOnlyReflectTypeGlobal(p, idx, v) {
-					pureBody = false
-					bodyReason = "disallowed pkg var: " + v.Name()
-					return false
-				}
-			}
-		case *ast.CallExpr:
-			if refconfine.CallMutatesNamedStructContainer(p, x, protected) {
-				pureBody = false
-				bodyReason = "call mutates protected container"
-				return false
-			}
-			if !isPureMemoCall(p, x, memoFnObj, muVar) {
-				pureBody = false
-				bodyReason = "impure call"
-				return false
-			}
-		}
-		return true
-	})
-	return pureBody, bodyReason
-}
-
-func isInitOnlyReflectTypeGlobal(p *packages.Package, idx *refconfine.PkgIndex, v *types.Var) bool {
+func isInitOnlyReflectTypeGlobal(p *packages.Package, fc *pkgFlowCache, idx *refconfine.PkgIndex, v *types.Var) bool {
 	if v == nil || v.Exported() || idx.DefCounts[v] != 1 || !syntaxutil.IsNamedInPkg(v.Type(), "reflect", "Type") {
 		return false
 	}
 	if vs := idx.VarSpecs[v]; vs != nil && len(vs.Values) > 0 {
 		return false
 	}
+	st := fc.ensureVarWriteInfos(p)[v]
+	if st == nil || st.defs != 1 || !st.hasZeroDecl || st.hasNonPlainDef ||
+		st.hasExplicitAddr || st.hasAutoAddrMethod || st.hasBuiltinMut || st.hasChanSend {
+		return false
+	}
+
 	wroteInInit := false
-	for _, id := range idx.UsesOf[v] {
-		par := idx.ParentUnparen(id)
-		if un, ok := par.(*ast.UnaryExpr); ok && un.Op == token.AND {
-			return false
+	valid := true
+	checkBody := func(b *flowir.Body, isTopInit bool) {
+		if b == nil || !valid {
+			return
 		}
-		if as, ok := par.(*ast.AssignStmt); ok {
-			isLHS := false
-			for li, l := range as.Lhs {
-				if ast.Unparen(l) == id {
-					isLHS = true
-					fd := idx.SyncEnclFuncDecl(id)
-					if fd == nil || fd.Recv != nil || fd.Name.Name != "init" || as.Tok != token.ASSIGN || li >= len(as.Rhs) {
-						return false
+		var walk func(cur *flowir.Body, syncInit bool)
+		walk = func(cur *flowir.Body, syncInit bool) {
+			if cur == nil || !valid {
+				return
+			}
+			for i := range cur.Ops {
+				op := &cur.Ops[i]
+				if op.Kind == flowir.OpAssign {
+					for di, dst := range op.Dsts {
+						touches := dst.Obj == v
+						if !touches {
+							forEachPlaceRootVar(dst, func(rv *types.Var) {
+								if rv == v {
+									touches = true
+								}
+							})
+						}
+						if !touches {
+							continue
+						}
+						if !syncInit || !dst.IsBareVar() || op.AssignKind != flowir.AssignPlain ||
+							di >= len(op.Srcs) || !isPureReflectTypeDerivationFlowIR(p, op.Srcs[di]) {
+							valid = false
+							return
+						}
+						wroteInInit = true
 					}
-					if !isPureReflectTypeDerivation(p, as.Rhs[li]) {
-						return false
+					if op.AssignKind == flowir.AssignRange && op.RangeBody != nil {
+						walk(op.RangeBody, syncInit)
 					}
-					wroteInInit = true
+				}
+				op.ForEachValue(func(val *flowir.Value) bool {
+					if val == nil {
+						return true
+					}
+					val.WalkValues(func(cv *flowir.Value) bool {
+						if cv.Kind == flowir.ValMakeClosure && cv.Closure != nil {
+							walk(cv.Closure, false)
+						} else if cv.Kind == flowir.ValCall && cv.CallKind == flowir.CallIIFE && cv.IIFE != nil {
+							walk(cv.IIFE, false)
+						}
+						return valid
+					})
+					return valid
+				})
+				if !valid {
+					return
 				}
 			}
-			if isLHS {
-				continue
+		}
+		walk(b, isTopInit)
+	}
+
+	for _, gd := range fc.base.GenDecls {
+		if b := fc.body(p, gd); b != nil {
+			// Skip v's own zero declaration op; reject any write to v inside another package spec.
+			for i := range b.Ops {
+				op := &b.Ops[i]
+				if op.Kind == flowir.OpAssign && op.AssignKind != flowir.AssignZeroDecl {
+					for _, dst := range op.Dsts {
+						if dst.Obj == v {
+							return false
+						}
+					}
+				}
 			}
 		}
-		if inc, ok := par.(*ast.IncDecStmt); ok && ast.Unparen(inc.X) == id {
+	}
+	for _, fd := range fc.base.FuncDecls {
+		isInit := fd != nil && fd.Recv == nil && fd.Name != nil && fd.Name.Name == "init"
+		checkBody(fc.funcBody(p, fd), isInit)
+		if !valid {
 			return false
 		}
 	}
-	return wroteInInit
+	return valid && wroteInInit
 }
 
-func isPureReflectTypeDerivation(p *packages.Package, expr ast.Expr) bool {
-	call, ok := ast.Unparen(expr).(*ast.CallExpr)
-	if !ok {
+func isPureReflectTypeDerivationFlowIR(p *packages.Package, val *flowir.Value) bool {
+	if val == nil || val.Kind != flowir.ValCall {
 		return false
 	}
 	valid := true
 	sawReflectTypeQuery := false
-	ast.Inspect(call, func(n ast.Node) bool {
-		if !valid || n == nil {
+	val.WalkValues(func(cur *flowir.Value) bool {
+		if !valid {
 			return false
 		}
-		switch x := n.(type) {
-		case *ast.FuncLit, *ast.GoStmt:
+		switch cur.Kind {
+		case flowir.ValInvalid, flowir.ValMakeClosure, flowir.ValChanRecv, flowir.ValMethodVal:
 			valid = false
 			return false
-		case *ast.Ident:
-			if v, ok := p.TypesInfo.Uses[x].(*types.Var); ok && v.Pkg() == p.Types && !v.IsField() && v.Parent() == p.Types.Scope() {
+		case flowir.ValPlace:
+			if cur.Place.Root == flowir.RootPkgGlobal {
 				valid = false
 				return false
 			}
-		case *ast.CallExpr:
-			fun := ast.Unparen(x.Fun)
-			if p.TypesInfo.Types[fun].IsType() {
-				return true
-			}
-			sel, isSel := fun.(*ast.SelectorExpr)
-			if !isSel {
+		case flowir.ValAddrOf:
+			if placeTouchesPkgGlobal(p, cur.AddrPlace) {
 				valid = false
 				return false
 			}
-			fn, isFn := p.TypesInfo.Uses[sel.Sel].(*types.Func)
-			if !isFn || fn.Pkg() == nil || fn.Pkg().Path() != "reflect" {
+		case flowir.ValConvert:
+			if cur.IsTypeAssert || syntaxutil.IsUnsafePointerType(cur.Type) {
 				valid = false
 				return false
 			}
-			switch fn.Name() {
+		case flowir.ValCall:
+			if cur.CallKind == flowir.CallIIFE || cur.CallKind == flowir.CallIndirect || cur.IsMethodExprCall ||
+				cur.CalleeFunc == nil || cur.CalleeFunc.Pkg() == nil || cur.CalleeFunc.Pkg().Path() != "reflect" ||
+				!isTrueStdlibInPkg(p, "reflect") {
+				valid = false
+				return false
+			}
+			switch cur.CalleeFunc.Name() {
 			case "TypeOf", "Type", "PtrTo", "PointerTo":
 				sawReflectTypeQuery = true
 			case "ValueOf", "Elem", "Zero":
@@ -589,121 +889,9 @@ func isPureReflectTypeDerivation(p *packages.Package, expr ast.Expr) bool {
 				return false
 			}
 		}
-		return true
+		return valid
 	})
 	return valid && sawReflectTypeQuery
-}
-
-func isPureMemoCall(p *packages.Package, call *ast.CallExpr, memoFn *types.Func, muVar *types.Var) bool {
-	fun := ast.Unparen(call.Fun)
-	if tv := p.TypesInfo.Types[fun]; tv.IsType() {
-		return !syntaxutil.IsUnsafePointerType(tv.Type)
-	}
-	if id, ok := fun.(*ast.Ident); ok {
-		switch obj := p.TypesInfo.Uses[id].(type) {
-		case *types.Builtin:
-			switch obj.Name() {
-			case "len", "cap", "make", "append", "copy", "new":
-				return true
-			}
-			return false
-		case *types.Func:
-			return obj == memoFn
-		}
-		return false
-	}
-	sel, ok := fun.(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	if syntaxutil.IsIdentUsingObj(p.TypesInfo, sel.X, muVar) {
-		switch sel.Sel.Name {
-		case "RLock", "RUnlock", "Lock", "Unlock":
-			return len(call.Args) == 0
-		}
-		return false
-	}
-	fn, ok := p.TypesInfo.Uses[sel.Sel].(*types.Func)
-	if !ok || fn.Pkg() == nil {
-		return false
-	}
-	pkgPath := fn.Pkg().Path()
-	name := fn.Name()
-	if selInfo := p.TypesInfo.Selections[sel]; selInfo != nil {
-		if syntaxutil.IsNamedInPkg(selInfo.Recv(), "reflect", "Type") {
-			switch name {
-			case "Elem", "Field", "Key", "Kind", "Len", "Name", "NumField", "PkgPath",
-				"Implements", "AssignableTo", "ConvertibleTo", "Comparable",
-				"Bits", "Size", "Align", "FieldAlign", "String":
-				return true
-			}
-			return false
-		}
-		if syntaxutil.IsNamedInPkg(selInfo.Recv(), "reflect", "StructTag") {
-			return name == "Get" || name == "Lookup"
-		}
-		if syntaxutil.IsNamedInPkg(selInfo.Recv(), "reflect", "Kind") {
-			return name == "String"
-		}
-		return false
-	}
-	switch pkgPath {
-	case "reflect":
-		return name == "TypeOf" || name == "PtrTo" || name == "PointerTo"
-	case "errors":
-		return name == "New"
-	case "fmt":
-		if (name == "Sprintf" || name == "Errorf") && len(call.Args) >= 1 {
-			tv, ok := p.TypesInfo.Types[call.Args[0]]
-			if !ok || tv.Value == nil || tv.Value.Kind() != constant.String {
-				return false
-			}
-			fmtStr := constant.StringVal(tv.Value)
-			if auditset.FormatStringExposesPointerIdentity(fmtStr) {
-				return false
-			}
-			hasReflectTypeArg := false
-			for _, arg := range call.Args[1:] {
-				at := p.TypesInfo.TypeOf(arg)
-				if at == nil {
-					return false
-				}
-				if _, isBasic := types.Unalias(at).Underlying().(*types.Basic); isBasic {
-					continue
-				}
-				if syntaxutil.IsNamedInPkg(at, "reflect", "Type") {
-					hasReflectTypeArg = true
-					continue
-				}
-				if syntaxutil.IsNamedInPkg(at, "reflect", "Kind") || syntaxutil.IsNamedInPkg(at, "reflect", "StructTag") {
-					continue
-				}
-				return false
-			}
-			if hasReflectTypeArg {
-				if !auditset.ScanFmtDirectives(fmtStr, func(d auditset.FmtDirective) bool {
-					return d.InvokesStringerOnly()
-				}) {
-					return false
-				}
-			}
-			return true
-		}
-		return false
-	case "strings":
-		switch name {
-		case "Split", "SplitN", "Index", "IndexByte", "LastIndex",
-			"ToLower", "ToUpper", "TrimSpace", "Trim", "TrimPrefix", "TrimSuffix",
-			"HasPrefix", "HasSuffix", "Contains", "Cut", "Join", "Replace", "ReplaceAll", "EqualFold":
-			return true
-		}
-	case "strconv":
-		switch name {
-		case "Itoa", "Atoi", "ParseInt", "ParseUint", "ParseBool", "FormatInt", "FormatUint", "Quote":
-			return true
-		}
-	}
-	return false
 }
 
 func isPtrToAnyProtected(t types.Type, protected map[*types.Named]bool) bool {
@@ -715,69 +903,5 @@ func isPtrToAnyProtected(t types.Type, protected map[*types.Named]bool) bool {
 		return false
 	}
 	st := syntaxutil.DerefNamedStruct(ptr.Elem())
-	return st != nil && protected[st]
-}
-
-// exprChainMutatesPublishedProtected reports whether writing to lhs inside memoFD
-// could mutate an already-published protected struct entry (via a pointer to any
-// protected struct, a dereference, or an index/slice chain on a protected struct),
-// while permitting direct field writes on unaliased stack-allocated value structs.
-func exprChainMutatesPublishedProtected(p *packages.Package, lhs ast.Expr, protected map[*types.Named]bool) bool {
-	lhs = ast.Unparen(lhs)
-	switch e := lhs.(type) {
-	case *ast.StarExpr:
-		if st := syntaxutil.DerefNamedStruct(p.TypesInfo.TypeOf(e.X)); st != nil && protected[st] {
-			return true
-		}
-		return exprChainMutatesPublishedProtected(p, e.X, protected)
-	case *ast.IndexExpr:
-		return exprChainMutatesPublishedProtected(p, e.X, protected)
-	case *ast.SliceExpr:
-		return exprChainMutatesPublishedProtected(p, e.X, protected)
-	case *ast.SelectorExpr:
-		if selInfo := p.TypesInfo.Selections[e]; selInfo != nil && selInfo.Kind() == types.FieldVal {
-			if isPtrToAnyProtected(selInfo.Recv(), protected) || syntaxutil.SelectionCrossesEmbeddedPointer(selInfo) {
-				return true
-			}
-			return exprChainMutatesPublishedProtected(p, e.X, protected)
-		}
-	}
-	return false
-}
-
-func enclosingTopStmt(body *ast.BlockStmt, idx *refconfine.PkgIndex, n ast.Node) ast.Stmt {
-	cur := n
-	for cur != nil && cur != body {
-		par := idx.ParentMap[cur]
-		if par == body {
-			st, _ := cur.(ast.Stmt)
-			return st
-		}
-		cur = par
-	}
-	return nil
-}
-
-func isPurePostStoreReturnExpr(p *packages.Package, r ast.Expr) bool {
-	for {
-		r = ast.Unparen(r)
-		if syntaxutil.IsNilIdent(p.TypesInfo, r) {
-			return true
-		}
-		if tv := p.TypesInfo.Types[r]; tv.Value != nil {
-			return true
-		}
-		if v := syntaxutil.LookupIdentVar(p.TypesInfo, r); v != nil && v.Parent() != p.Types.Scope() {
-			return true
-		}
-		sel, ok := r.(*ast.SelectorExpr)
-		if !ok {
-			return false
-		}
-		selInfo := p.TypesInfo.Selections[sel]
-		if selInfo == nil || selInfo.Kind() != types.FieldVal {
-			return false
-		}
-		r = sel.X
-	}
+	return st != nil && protected[st.Origin()]
 }

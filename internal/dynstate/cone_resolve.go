@@ -1,6 +1,7 @@
 package dynstate
 
 import (
+	"context"
 	"slices"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 // ConeQuery specifies one shared-dynamic-state composition, discharge, or
 // explanation query over a package graph's derived facts.
 type ConeQuery struct {
+	Ctx            context.Context
 	Meta           []GraphPackage
 	Facts          map[string][]Fact
 	ViewPackage    string
@@ -251,10 +253,10 @@ func buildCarrierLinkGraph(validLinks []syntaxutil.CarrierLink, resolution *Defe
 // fixed points once, derives source and execution-attested discharges, and
 // (when q.ViewPackage != "") composes the view package's ConeState.
 func AnalyzeCone(q ConeQuery) *ConeAnalysis {
-	var start time.Time
-	tracing := q.ViewPackage != "" && trace.Enabled(nil, trace.DomainDynstate, q.ViewPackage)
+	var traceStart time.Time
+	tracing := q.ViewPackage != "" && trace.Enabled(q.Ctx, trace.DomainDynstate, q.ViewPackage)
 	if tracing {
-		start = time.Now()
+		traceStart = time.Now()
 	}
 
 	allFacts := q.Facts
@@ -886,9 +888,10 @@ func AnalyzeCone(q ConeQuery) *ConeAnalysis {
 					factBad = true
 				}
 			}
-			for _, a := range fact.ProtoExtAliases {
-				if !a.Valid() {
+			for _, a := range fact.ReadOnlyVarAliases {
+				if !a.Valid() || !strings.HasPrefix(a.Key, prefix) || strings.Contains(a.Key[len(prefix):], ".") {
 					factBad = true
+					anyMalformedNonMethodVarUse = true
 				}
 			}
 			for _, rt := range fact.ProtoRuntimeTypes {
@@ -896,8 +899,8 @@ func AnalyzeCone(q ConeQuery) *ConeAnalysis {
 					factBad = true
 				}
 			}
-			for _, gv := range fact.GrpcServiceVars {
-				if !gv.Valid() {
+			for _, sg := range fact.StaticCompositeGlobals {
+				if !sg.Valid() || !strings.HasPrefix(sg.Key, prefix) || strings.Contains(sg.Key[len(prefix):], ".") {
 					factBad = true
 				}
 			}
@@ -913,6 +916,12 @@ func AnalyzeCone(q ConeQuery) *ConeAnalysis {
 				if cm.Valid() {
 					allCondStructMutations = append(allCondStructMutations, cm)
 				} else {
+					factBad = true
+					anyMalformedMutatedStruct = true
+				}
+			}
+			for _, rf := range fact.ReflectedIfaceMethodSets {
+				if !rf.Valid() {
 					factBad = true
 					anyMalformedMutatedStruct = true
 				}
@@ -969,692 +978,47 @@ func AnalyzeCone(q ConeQuery) *ConeAnalysis {
 		}
 	}
 
-	// Stage 2a: Joint confinement least fixed point (ParamLeakFree & ReadOnly).
-	for pk := range paramCandidates {
-		delete(r.ParamLeakFree, pk)
-	}
-	for pk := range poisonedLeakParam {
-		delete(r.ParamLeakFree, pk)
-		delete(paramCandidates, pk)
-		delete(ea.ParamDeps, pk)
-		delete(ea.ParamMethodDeps, pk)
-	}
-	for mk := range methodCandidates {
-		delete(r.ReadOnly, mk)
-	}
-	for mk := range poisonedMethod {
-		delete(r.ReadOnly, mk)
-		delete(methodCandidates, mk)
-		delete(ea.MethodDeps, mk)
-		delete(ea.MethodParamDeps, mk)
-	}
-	for changed := true; changed; {
-		changed = false
-		for pk := range paramCandidates {
-			if r.ParamLeakFree[pk] {
-				continue
-			}
-			ok := true
-			for dep := range ea.ParamDeps[pk] {
-				if !r.ParamLeakFree[dep] {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				for mk := range ea.ParamMethodDeps[pk] {
-					if !r.ReadOnly[mk] {
-						ok = false
-						break
-					}
-				}
-			}
-			if ok {
-				r.ParamLeakFree[pk] = true
-				changed = true
-			}
-		}
-		for mk := range methodCandidates {
-			if r.ReadOnly[mk] {
-				continue
-			}
-			ok := true
-			for dep := range ea.MethodDeps[mk] {
-				if !r.ReadOnly[dep] {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				for pk := range ea.MethodParamDeps[mk] {
-					if !r.ParamLeakFree[pk] {
-						ok = false
-						break
-					}
-				}
-			}
-			if ok {
-				r.ReadOnly[mk] = true
-				changed = true
-			}
-		}
-	}
-
-	// Stage 2b: Parameter retention LFP & closed-object opacity reachability.
-	for pk := range poisonedRetParam {
-		delete(r.ParamRetentionFree, pk)
-		delete(retentionDeps, pk)
-	}
-	syntaxutil.SolveLeastFixedPoint(r.ParamRetentionFree, retentionDeps, func(dep syntaxutil.ParamKey) bool {
-		return r.ParamRetentionFree[dep] || r.ParamLeakFree[dep]
-	})
-	syntaxutil.SolveReachFixedPoint(r.NotOpaque, opaqueDeps, func(dep string) bool {
-		return r.NotOpaque[dep] || !r.Declared[dep]
-	})
-	for key := range escaped {
-		if !r.IsObjectClosed(key) {
-			r.OwnerUnproven[key] = true
-		}
-	}
-
-	// Stage 2c: Environment-audit joint LFP (ReturnEnvFree & ParamInsertionFree).
-	for fnKey := range poisonedEnvFunc {
-		delete(ea.Declared, fnKey)
-	}
-	for paramKey := range poisonedEnvParam {
-		delete(ea.InsDeclared, paramKey)
-	}
-	for changed := true; changed; {
-		changed = false
-		for fnKey := range ea.Declared {
-			if ea.Resolved[fnKey] {
-				continue
-			}
-			ok := true
-			for dep := range ea.RetDeps[fnKey] {
-				if !ea.Resolved[dep] {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				for pk := range ea.RetParamDeps[fnKey] {
-					if !ea.ParamLeakFree[pk] {
-						ok = false
-						break
-					}
-				}
-			}
-			if ok {
-				for mk := range ea.RetMethodDeps[fnKey] {
-					if !ea.ReadOnly[mk] {
-						ok = false
-						break
-					}
-				}
-			}
-			if ok {
-				for dep := range ea.RetInsDeps[fnKey] {
-					if !ea.DepResolved(dep) {
-						ok = false
-						break
-					}
-				}
-			}
-			if ok {
-				ea.Resolved[fnKey] = true
-				changed = true
-			}
-		}
-		for paramKey := range ea.InsDeclared {
-			if ea.InsResolved[paramKey] {
-				continue
-			}
-			ok := true
-			for dep := range ea.InsDeps[paramKey] {
-				if !ea.DepResolved(dep) {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				for pk := range ea.InsParamDeps[paramKey] {
-					if !ea.ParamLeakFree[pk] {
-						ok = false
-						break
-					}
-				}
-			}
-			if ok {
-				for mk := range ea.InsMethodDeps[paramKey] {
-					if !ea.ReadOnly[mk] {
-						ok = false
-						break
-					}
-				}
-			}
-			if ok {
-				ea.InsResolved[paramKey] = true
-				changed = true
-			}
-		}
-	}
-	r.EnvFreeResolved = ea.Resolved
-
-	// Stage 2d: Call-region fixed points (InitOnlyFn & InitReachFn).
-	syntaxutil.SolveLeastFixedPoint(r.InitOnlyFn, r.RefRegions, func(region syntaxutil.RefRegion) bool {
-		if region.Kind == syntaxutil.RegionInit {
-			return true
-		}
-		return region.Kind == syntaxutil.RegionFunc && r.InitOnlyFn[region.Caller]
-	})
-	syntaxutil.SolveReachFixedPoint(r.InitReachFn, r.RefRegions, func(region syntaxutil.RefRegion) bool {
-		if region.Kind == syntaxutil.RegionInit || region.Kind == syntaxutil.RegionProg {
-			return true
-		}
-		return (region.Kind == syntaxutil.RegionFunc || region.Kind == syntaxutil.RegionLitFunc) && r.InitReachFn[region.Caller]
-	})
-
-	// Stage 2e: Blocked exported seams.
-	blockedSeams := map[string]map[syntaxutil.FuncKey]bool{}
-	if hasMalformedSeam {
-		for _, key := range allSeamKeys {
-			addMapSet(blockedSeams, key, syntaxutil.FuncKey{})
-		}
-	} else if len(exportedSeams) > 0 {
-		if len(parallelReached) > 0 && len(revParAdj) > 0 {
-			syntaxutil.PropagateBFS(parallelReached, revParAdj)
-		}
-		for fn := range parallelReached {
-			if fn.Pkg != "*" && !strings.Contains(fn.Name, "#") {
-				nonSeqReached[fn] = true
-			}
-		}
-		if len(nonSeqReached) > 0 && len(seqAdj) > 0 {
-			syntaxutil.PropagateBFS(nonSeqReached, seqAdj)
-		}
-		for _, es := range exportedSeams {
-			if nonSeqReached[es.Func] || (es.RunnerOnly && len(revSeqAdj[es.Func]) > 0) {
-				addMapSet(blockedSeams, es.Key, es.Func)
-			}
-		}
-	}
-
-	// Stage 2f: Active carrier link graph and component population pooling.
-	linkAdj := buildCarrierLinkGraph(validLinks, r)
-	if len(linkAdj) > 0 {
-		visited := map[string]bool{}
-		var components [][]string
-		for _, link := range validLinks {
-			for _, start := range [2]string{link.From, link.To} {
-				if linkAdj[start] == nil || visited[start] {
-					continue
-				}
-				visited[start] = true
-				comp := []string{start}
-				for i := 0; i < len(comp); i++ {
-					for next := range linkAdj[comp[i]] {
-						if !visited[next] {
-							visited[next] = true
-							comp = append(comp, next)
-						}
-					}
-				}
-				if len(comp) > 1 {
-					components = append(components, comp)
-				}
-			}
-		}
-		if len(components) > 0 {
-			compOf := map[string]int{}
-			for idx, comp := range components {
-				for _, k := range comp {
-					compOf[k] = idx + 1
-				}
-			}
-			for _, comp := range components {
-				var pooledCtors []syntaxutil.FuncKey
-				for _, k := range comp {
-					pooledCtors = append(pooledCtors, r.CtorsOf[k]...)
-				}
-				if len(pooledCtors) > 0 {
-					slices.SortFunc(pooledCtors, syntaxutil.FuncKey.Compare)
-					pooledCtors = slices.Compact(pooledCtors)
-					for _, k := range comp {
-						r.CtorsOf[k] = pooledCtors
-					}
-				}
-			}
-			type poisonEntry struct {
-				compIdx int
-				hasPos  bool
-				field   string
-				index   int
-			}
-			var addPoisons []poisonEntry
-			for p := range r.FieldPoisonAt {
-				if cid := compOf[p.Owner]; cid > 0 {
-					addPoisons = append(addPoisons, poisonEntry{compIdx: cid - 1, hasPos: p.HasPos, field: p.Field, index: p.Index})
-				}
-			}
-			for _, pe := range addPoisons {
-				for _, k := range components[pe.compIdx] {
-					r.FieldPoisonAt[syntaxutil.FieldParamPoison{Owner: k, HasPos: pe.hasPos, Field: pe.field, Index: pe.index}] = true
-				}
-			}
-			type deferEntry struct {
-				compIdx int
-				field   string
-				index   int
-				params  []syntaxutil.ParamKey
-			}
-			var addDefers []deferEntry
-			for pos, params := range r.FieldDeferAt {
-				if cid := compOf[pos.Owner]; cid > 0 {
-					addDefers = append(addDefers, deferEntry{compIdx: cid - 1, field: pos.Field, index: pos.Index, params: params})
-				}
-			}
-			for _, de := range addDefers {
-				for _, k := range components[de.compIdx] {
-					targetPos := syntaxutil.FieldPosKey{Owner: k, Field: de.field, Index: de.index}
-					r.FieldDeferAt[targetPos] = append(r.FieldDeferAt[targetPos], de.params...)
-				}
-			}
-		}
-	}
-	for pos, params := range r.FieldDeferAt {
-		slices.SortFunc(params, syntaxutil.ParamKey.Compare)
-		r.FieldDeferAt[pos] = slices.Compact(params)
-	}
-	for pos, params := range r.RetDeferAt {
-		slices.SortFunc(params, syntaxutil.ParamKey.Compare)
-		r.RetDeferAt[pos] = slices.Compact(params)
-	}
-	for key, ctors := range r.CtorsOf {
-		slices.SortFunc(ctors, syntaxutil.FuncKey.Compare)
-		r.CtorsOf[key] = slices.Compact(ctors)
-	}
-
-	// Stage 2g: Unified deferred mark resolution, site attribution, and OwnerUnproven seeding.
-	siteFns := map[string]map[string]bool{}
-	attributeSite := func(key string, fn syntaxutil.FuncKey) {
-		addMapSet(siteFns, key, fn.SiteKey())
-	}
-	mayRunAtInit := func(fn syntaxutil.FuncKey) bool {
-		return r.InitReachFn[fn] || strings.Contains(fn.Name, ".")
-	}
-	isInitOnlyPlain := func(fn syntaxutil.FuncKey) bool {
-		return r.RefRegions[fn] != nil && r.InitOnlyFn[fn]
-	}
-	markEscaped := func(key string) {
-		escaped[key] = true
-		if !r.IsObjectClosed(key) {
-			r.OwnerUnproven[key] = true
-		}
-	}
-	markMutated := func(key string) {
-		mutated[key] = true
-		r.OwnerUnproven[key] = true
-	}
-	applyAttributedUse := func(use syntaxutil.AttributedUse) {
-		if !use.Valid() {
-			return
-		}
-		fn, key := use.Func, use.Key
-		if use.Literal {
-			if use.HasMethod {
-				if r.ReadOnly[use.Method] {
-					return
-				}
-				markMutated(key)
-			} else if use.Escape {
-				markEscaped(key)
-			} else {
-				markMutated(key)
-			}
-			if mayRunAtInit(fn) {
-				unattributedMark[key] = true
-			} else {
-				attributeSite(key, fn)
-			}
-			return
-		}
-		if use.Escape {
-			markEscaped(key)
-			if mayRunAtInit(fn) {
-				unattributedMark[key] = true
-			} else {
-				attributeSite(key, fn)
-			}
-			return
-		}
-		if use.HasMethod {
-			if r.ReadOnly[use.Method] {
-				return
-			}
-			if isInitOnlyPlain(fn) {
-				if !r.ReceiverRetention[use.Method] {
-					markMutated(key)
-					unattributedMark[key] = true
-				}
-				return
-			}
-			markMutated(key)
-			if !r.ReceiverRetention[use.Method] && mayRunAtInit(fn) {
-				unattributedMark[key] = true
-			} else {
-				attributeSite(key, fn)
-			}
-			return
-		}
-		if isInitOnlyPlain(fn) {
-			return
-		}
-		markMutated(key)
-		attributeSite(key, fn)
-	}
-
-	for _, pkgPath := range pkgPaths {
-		for _, fact := range allFacts[pkgPath] {
-			var factAttrEnv map[string][]syntaxutil.FuncKey
-			if len(fact.EnvCarryingFns) > 0 {
-				factAttrEnv = make(map[string][]syntaxutil.FuncKey, len(fact.EnvCarryingFns))
-				for _, use := range fact.EnvCarryingFns {
-					if use.Valid() {
-						factAttrEnv[use.Key] = append(factAttrEnv[use.Key], use.Func)
-					}
-				}
-			}
-			for _, key := range fact.EnvCarrying {
-				if !syntaxutil.ValidFactKey(key) {
-					continue
-				}
-				fns := factAttrEnv[key]
-				if envCallable[key] || len(fns) == 0 {
-					unattributedMark[key] = true
-					continue
-				}
-				for _, fn := range fns {
-					if mayRunAtInit(fn) {
-						unattributedMark[key] = true
-					} else {
-						attributeSite(key, fn)
-					}
-				}
-			}
-			for _, use := range fact.EnvCallUses {
-				if !use.Valid() || r.EnvFreeResolved[use.Callee] {
-					continue
-				}
-				// Keep r.OwnerUnproven[use.Key] unset: FieldPopulationProves
-				// inspects r.CtorsOf[use.Key] directly.
-				envCarrying[use.Key] = true
-				if use.Func.IsZero() || envCallable[use.Key] || mayRunAtInit(use.Func) {
-					unattributedMark[use.Key] = true
-				} else {
-					attributeSite(use.Key, use.Func)
-				}
-			}
-			for _, use := range fact.EnvCallParamUses {
-				if !use.Valid() || r.ParamLeakFree[use.Param] {
-					continue
-				}
-				envCarrying[use.Key] = true
-				r.OwnerUnproven[use.Key] = true
-				if use.Func.IsZero() || envCallable[use.Key] || mayRunAtInit(use.Func) {
-					unattributedMark[use.Key] = true
-				} else {
-					attributeSite(use.Key, use.Func)
-				}
-			}
-			for _, use := range fact.EnvCallMethodUses {
-				if !use.Valid() || r.ReadOnly[use.Method] {
-					continue
-				}
-				envCarrying[use.Key] = true
-				r.OwnerUnproven[use.Key] = true
-				if use.Func.IsZero() || envCallable[use.Key] || mayRunAtInit(use.Func) {
-					unattributedMark[use.Key] = true
-				} else {
-					attributeSite(use.Key, use.Func)
-				}
-			}
-			for _, use := range fact.MethodUses {
-				if use.Valid() && !r.ReadOnly[use.Method] {
-					markMutated(use.Key)
-					unattributedMark[use.Key] = true
-				}
-			}
-			for _, use := range fact.InitMethodUses {
-				if use.Valid() && !r.ReceiverRetention[use.Method] {
-					markEscaped(use.Key)
-					unattributedMark[use.Key] = true
-				}
-			}
-			for _, use := range fact.ParamUses {
-				if !use.Valid() || r.ParamLeakFree[use.Param] {
-					continue
-				}
-				if use.Func.IsZero() {
-					markEscaped(use.Key)
-					unattributedMark[use.Key] = true
-					continue
-				}
-				fn, key := use.Func, use.Key
-				if use.Literal {
-					markEscaped(key)
-					if mayRunAtInit(fn) {
-						unattributedMark[key] = true
-					} else {
-						attributeSite(key, fn)
-					}
-					continue
-				}
-				if isInitOnlyPlain(fn) {
-					if !r.ParamRetentionFree[use.Param] {
-						markEscaped(key)
-						unattributedMark[key] = true
-					}
-					continue
-				}
-				markEscaped(key)
-				if !r.ParamRetentionFree[use.Param] && mayRunAtInit(fn) {
-					unattributedMark[key] = true
-				} else {
-					attributeSite(key, fn)
-				}
-			}
-			for _, use := range fact.InitParamUses {
-				if use.Valid() && use.Func.IsZero() && !r.ParamLeakFree[use.Param] && !r.ParamRetentionFree[use.Param] {
-					markEscaped(use.Key)
-					unattributedMark[use.Key] = true
-				}
-			}
-			for _, use := range fact.AttributedUses {
-				applyAttributedUse(use)
-			}
-			if !q.SingleSubject {
-				for _, use := range fact.PoolAttributedUses {
-					applyAttributedUse(use)
-				}
-			}
-		}
-	}
-	for key, fns := range blockedSeams {
-		markMutated(key)
-		for fn := range fns {
-			if !fn.Valid() || mayRunAtInit(fn) {
-				unattributedMark[key] = true
-			} else {
-				attributeSite(key, fn)
-			}
-		}
-	}
-	for key := range envCarrying {
-		if envCallable[key] {
-			unattributedMark[key] = true
-		}
-	}
-
-	// Stage 2h: Converge OwnerUnproven across LinkAdj, FieldParamUses, and
-	// ElemParamUses (note LinkAdj already excludes IsObjectClosed endpoints),
-	// then evaluate FieldParamUses/ElemParamUses escapes and propagate marks
-	// across LinkAdj.
-	for changed := true; changed; {
-		changed = false
-		for key := range r.OwnerUnproven {
-			for next := range linkAdj[key] {
-				if !r.OwnerUnproven[next] {
-					r.OwnerUnproven[next] = true
-					changed = true
-				}
-			}
-		}
-		for _, use := range validFieldUses {
-			if len(linkAdj[use.Owner]) == 0 {
-				continue
-			}
-			// Neighbor-only propagation: never set r.OwnerUnproven[use.Owner]
-			// from use.Owner's own failed FieldParamUses.
-			if ok, _ := r.FieldPopulationProves(use.Owner, use.Field, use.Index); !ok {
-				for next := range linkAdj[use.Owner] {
-					if !r.OwnerUnproven[next] {
-						r.OwnerUnproven[next] = true
-						changed = true
-					}
-				}
-			}
-		}
-		for _, use := range validElemUses {
-			if r.IsObjectClosed(use.Key) || r.OwnerUnproven[use.Key] {
-				continue
-			}
-			if ok, _ := r.FieldPopulationProves(use.Owner, syntaxutil.ElemPositionField, use.Index); !ok {
-				r.OwnerUnproven[use.Key] = true
-				changed = true
-			}
-		}
-	}
-	for _, use := range validFieldUses {
-		if ok, _ := r.FieldPopulationProves(use.Owner, use.Field, use.Index); !ok {
-			escaped[use.Owner] = true
-			unattributedMark[use.Owner] = true
-		}
-	}
-	for _, use := range validElemUses {
-		if ok, _ := r.FieldPopulationProves(use.Owner, syntaxutil.ElemPositionField, use.Index); !ok {
-			escaped[use.Key] = true
-			unattributedMark[use.Key] = true
-		}
-	}
-	if len(linkAdj) > 0 {
-		propagateWithUnattributed := func(set map[string]bool) {
-			if len(set) == 0 {
-				return
-			}
-			queue := make([]string, 0, len(set))
-			for k := range set {
-				if linkAdj[k] != nil {
-					queue = append(queue, k)
-				}
-			}
-			for len(queue) > 0 {
-				cur := queue[len(queue)-1]
-				queue = queue[:len(queue)-1]
-				for next := range linkAdj[cur] {
-					unattributedMark[next] = true
-					if !set[next] {
-						set[next] = true
-						queue = append(queue, next)
-					}
-				}
-			}
-		}
-		propagateWithUnattributed(mutated)
-		propagateWithUnattributed(escaped)
-		propagateWithUnattributed(envCarrying)
-	}
-
-	out := &ConeAnalysis{
-		Deferral:           r,
-		EnvAudit:           ea,
-		BlockedSeams:       blockedSeams,
-		LinkAdj:            linkAdj,
-		NonVouchDischarged: map[string]bool{},
-	}
-	if len(q.Meta) == 0 && q.ViewPackage == "" {
-		return out
-	}
-
-	// Stage 3: Discharges and view-package ConeState assembly.
-	discharges := deriveConeDischarges(
-		q.Meta,
-		pkgPaths,
-		allFacts,
-		r.RefRegions,
-		r.InitOnlyFn,
-		r.ParamLeakFree,
-		pkgHasMalformedFact,
-		malformedFactVars,
-		mutatedStructs,
-		allCondStructMutations,
-		directVarWritten,
-		nonMethodVarUsed,
-		anyMalformedMutatedStruct,
-		anyMalformedDirectVarWrite,
-		anyMalformedNonMethodVarUse,
-	)
-
-	for _, pkgPath := range pkgPaths {
-		inGraph := discharges.pinnedPkg[pkgPath] || discharges.mutableLocalPkg[pkgPath]
-		if !inGraph || pkgHasMalformedFact[pkgPath] {
-			continue
-		}
-		for _, fact := range allFacts[pkgPath] {
-			for _, key := range fact.Declares {
-				if malformedFactVars[key] {
-					continue
-				}
-				if discharges.mappingDischargedVars[key] || discharges.memoDischargedVars[key] || discharges.harnessDischargedVars[key] {
-					out.NonVouchDischarged[key] = true
-					continue
-				}
-				if q.SingleSubject && discharges.mutableLocalPkg[pkgPath] && discharges.directiveCovered[key] {
-					out.NonVouchDischarged[key] = true
-					continue
-				}
-				if q.SingleSubject && (discharges.protoVerifiedVars[key] || discharges.grpcVerifiedVars[key]) {
-					out.NonVouchDischarged[key] = true
-				}
-			}
-		}
-	}
-
-	if q.ViewPackage == "" {
-		return out
-	}
-
-	out.State = buildViewConeState(
-		q,
-		pkgPaths,
-		allFacts,
-		r.NotOpaque,
-		mutated,
-		escaped,
-		envCarrying,
-		unattributedMark,
-		siteFns,
-		pkgHasMalformedFact,
-		malformedFactVars,
-		discharges,
-	)
-	if tracing {
-		trace.Emit(nil, trace.DomainDynstate, "dynstate.compose.done", q.ViewPackage,
-			trace.Int("cone_pkgs", len(allFacts)),
-			trace.Bool("downgraded", out.State.Downgraded != ""),
-			trace.Int("culprits", len(out.State.RootCulprits)),
-			trace.Int64("dur_ns", time.Since(start).Nanoseconds()),
-		)
-	}
-	return out
+	return (&coneResolveTables{
+		q:                           q,
+		tracing:                     tracing,
+		traceStart:                  traceStart,
+		allFacts:                    allFacts,
+		pkgPaths:                    pkgPaths,
+		r:                           r,
+		ea:                          ea,
+		mutated:                     mutated,
+		escaped:                     escaped,
+		envCarrying:                 envCarrying,
+		envCallable:                 envCallable,
+		unattributedMark:            unattributedMark,
+		malformedFactVars:           malformedFactVars,
+		pkgHasMalformedFact:         pkgHasMalformedFact,
+		paramCandidates:             paramCandidates,
+		methodCandidates:            methodCandidates,
+		poisonedLeakParam:           poisonedLeakParam,
+		poisonedMethod:              poisonedMethod,
+		retentionDeps:               retentionDeps,
+		poisonedRetParam:            poisonedRetParam,
+		opaqueDeps:                  opaqueDeps,
+		poisonedEnvFunc:             poisonedEnvFunc,
+		poisonedEnvParam:            poisonedEnvParam,
+		hasMalformedSeam:            hasMalformedSeam,
+		exportedSeams:               exportedSeams,
+		allSeamKeys:                 allSeamKeys,
+		parallelReached:             parallelReached,
+		nonSeqReached:               nonSeqReached,
+		seqAdj:                      seqAdj,
+		revSeqAdj:                   revSeqAdj,
+		revParAdj:                   revParAdj,
+		validLinks:                  validLinks,
+		validFieldUses:              validFieldUses,
+		validElemUses:               validElemUses,
+		mutatedStructs:              mutatedStructs,
+		directVarWritten:            directVarWritten,
+		nonMethodVarUsed:            nonMethodVarUsed,
+		anyMalformedMutatedStruct:   anyMalformedMutatedStruct,
+		anyMalformedDirectVarWrite:  anyMalformedDirectVarWrite,
+		anyMalformedNonMethodVarUse: anyMalformedNonMethodVarUse,
+		allCondStructMutations:      allCondStructMutations,
+	}).solveFixedPointsAndAssemble()
 }

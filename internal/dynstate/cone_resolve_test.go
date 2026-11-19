@@ -43,7 +43,9 @@ func TestAnalyzeConeAllFactFieldsCorruptionAndForeignPoisonMatrix(t *testing.T) 
 		"ParamLeakFreeMethodDeps":   func(f *Fact) { f.ParamLeakFreeMethodDeps = []syntaxutil.ParamMethodDepEdge{{}} },
 		"ParamRetentionFree":        func(f *Fact) { f.ParamRetentionFree = []syntaxutil.ParamKey{{Index: -1}} },
 		"ParamRetentionFreeDeps":    func(f *Fact) { f.ParamRetentionFreeDeps = []syntaxutil.ParamDepEdge{{}} },
-		"ParamUses":                 func(f *Fact) { f.ParamUses = []syntaxutil.VarParamUse{{Key: ownerVar, Param: syntaxutil.ParamKey{Index: -1}}} },
+		"ParamUses": func(f *Fact) {
+			f.ParamUses = []syntaxutil.VarParamUse{{Key: ownerVar, Param: syntaxutil.ParamKey{Index: -1}}}
+		},
 		"InitParamUses": func(f *Fact) {
 			f.InitParamUses = []syntaxutil.VarParamUse{{
 				Key:   ownerVar,
@@ -51,10 +53,16 @@ func TestAnalyzeConeAllFactFieldsCorruptionAndForeignPoisonMatrix(t *testing.T) 
 				Func:  syntaxutil.FuncKey{Pkg: ownerPkg, Name: "Encl"},
 			}}
 		},
-		"FieldParamUses":         func(f *Fact) { f.FieldParamUses = []syntaxutil.FieldPosKey{{Owner: ownerVar, Index: -1}} },
-		"ElemParamUses":          func(f *Fact) { f.ElemParamUses = []syntaxutil.ElemParamUse{{Key: ownerVar, Owner: ownerVar, Index: -1}} },
-		"FieldParamDefer":        func(f *Fact) { f.FieldParamDefer = []syntaxutil.FieldParamDefer{{Pos: syntaxutil.FieldPosKey{Owner: ownerVar, Field: "F", Index: 0}, Param: syntaxutil.ParamKey{Index: -1}}} },
-		"FieldParamPoison":       func(f *Fact) { f.FieldParamPoison = []syntaxutil.FieldParamPoison{{Owner: ownerVar, HasPos: true, Field: "F", Index: -2}} },
+		"FieldParamUses": func(f *Fact) { f.FieldParamUses = []syntaxutil.FieldPosKey{{Owner: ownerVar, Index: -1}} },
+		"ElemParamUses": func(f *Fact) {
+			f.ElemParamUses = []syntaxutil.ElemParamUse{{Key: ownerVar, Owner: ownerVar, Index: -1}}
+		},
+		"FieldParamDefer": func(f *Fact) {
+			f.FieldParamDefer = []syntaxutil.FieldParamDefer{{Pos: syntaxutil.FieldPosKey{Owner: ownerVar, Field: "F", Index: 0}, Param: syntaxutil.ParamKey{Index: -1}}}
+		},
+		"FieldParamPoison": func(f *Fact) {
+			f.FieldParamPoison = []syntaxutil.FieldParamPoison{{Owner: ownerVar, HasPos: true, Field: "F", Index: -2}}
+		},
 		"ReturnFieldParamDefer":  func(f *Fact) { f.ReturnFieldParamDefer = []syntaxutil.ReturnFieldParamDefer{{}} },
 		"ReturnFieldParamPoison": func(f *Fact) { f.ReturnFieldParamPoison = []syntaxutil.ReturnFieldParamPoison{{}} },
 		"AttributedUses":         func(f *Fact) { f.AttributedUses = []syntaxutil.AttributedUse{{Key: ownerVar}} },
@@ -64,7 +72,9 @@ func TestAnalyzeConeAllFactFieldsCorruptionAndForeignPoisonMatrix(t *testing.T) 
 		"OpaqueDeps":             func(f *Fact) { f.OpaqueDeps = []syntaxutil.OpaqueDep{{Own: ownerVar}} },
 		"CarrierLinks":           func(f *Fact) { f.CarrierLinks = []syntaxutil.CarrierLink{{From: ownerVar}} },
 		"EnvCarrying":            func(f *Fact) { f.EnvCarrying = []string{""} },
-		"EnvCarryingFns":         func(f *Fact) { f.EnvCarryingFns = []syntaxutil.VarFuncUse{{Key: ownerVar, Func: syntaxutil.FuncKey{Pkg: impPkg, Name: "H"}}} },
+		"EnvCarryingFns": func(f *Fact) {
+			f.EnvCarryingFns = []syntaxutil.VarFuncUse{{Key: ownerVar, Func: syntaxutil.FuncKey{Pkg: impPkg, Name: "H"}}}
+		},
 		"EnvCallable":            func(f *Fact) { f.EnvCallable = []string{""} },
 		"EnvCallUses":            func(f *Fact) { f.EnvCallUses = []syntaxutil.EnvCallUse{{Key: ownerVar}} },
 		"EnvCallParamUses":       func(f *Fact) { f.EnvCallParamUses = []syntaxutil.EnvCallParamUse{{Key: ownerVar}} },
@@ -82,16 +92,16 @@ func TestAnalyzeConeAllFactFieldsCorruptionAndForeignPoisonMatrix(t *testing.T) 
 		"ParamInsertionMethodDeps": func(f *Fact) {
 			f.ParamInsertionMethodDeps = []syntaxutil.ParamMethodDepEdge{{}}
 		},
-		"PureMethods":       func(f *Fact) { f.PureMethods = map[string]string{"": "v"} },
-		"ExternalMethods":   func(f *Fact) { f.ExternalMethods = map[string]string{"T.M": ""} },
-		"PoolDischarges":    func(f *Fact) { f.PoolDischarges = []string{"unqualified"} },
-		"PoolMutates":       func(f *Fact) { f.PoolMutates = []string{"unqualified"} },
-		"PoolEscapes":       func(f *Fact) { f.PoolEscapes = []string{"unqualified"} },
+		"PureMethods":        func(f *Fact) { f.PureMethods = map[string]string{"": "v"} },
+		"ExternalMethods":    func(f *Fact) { f.ExternalMethods = map[string]string{"T.M": ""} },
+		"PoolDischarges":     func(f *Fact) { f.PoolDischarges = []string{"unqualified"} },
+		"PoolMutates":        func(f *Fact) { f.PoolMutates = []string{"unqualified"} },
+		"PoolEscapes":        func(f *Fact) { f.PoolEscapes = []string{"unqualified"} },
 		"PoolAttributedUses": func(f *Fact) { f.PoolAttributedUses = []syntaxutil.AttributedUse{{Key: ownerVar}} },
-		"SingleSubjectVars": func(f *Fact) { f.SingleSubjectVars = []string{"unqualified"} },
-		"MappingDischarges": func(f *Fact) { f.MappingDischarges = []string{"unqualified"} },
-		"MemoDischarges":    func(f *Fact) { f.MemoDischarges = []string{"unqualified"} },
-		"OnceMemoTypes":     func(f *Fact) { f.OnceMemoTypes = []syntaxutil.OnceMemoTypeFact{{}} },
+		"SingleSubjectVars":  func(f *Fact) { f.SingleSubjectVars = []string{"unqualified"} },
+		"MappingDischarges":  func(f *Fact) { f.MappingDischarges = []string{"unqualified"} },
+		"MemoDischarges":     func(f *Fact) { f.MemoDischarges = []string{"unqualified"} },
+		"OnceMemoTypes":      func(f *Fact) { f.OnceMemoTypes = []syntaxutil.OnceMemoTypeFact{{}} },
 		"OnceMemoCandidates": func(f *Fact) {
 			f.OnceMemoCandidates = []syntaxutil.OnceMemoVarCandidate{{
 				Key:         "other.pkg.V",
@@ -101,12 +111,25 @@ func TestAnalyzeConeAllFactFieldsCorruptionAndForeignPoisonMatrix(t *testing.T) 
 		},
 		"HarnessDischarges": func(f *Fact) { f.HarnessDischarges = []string{ownerVar} },
 		"ProtoClusters":     func(f *Fact) { f.ProtoClusters = []protoaudit.ProtoClusterFact{{}} },
-		"ProtoExtAliases":   func(f *Fact) { f.ProtoExtAliases = []protoaudit.ProtoExtAlias{{}} },
+		"ReadOnlyVarAliases": func(f *Fact) {
+			f.ReadOnlyVarAliases = []syntaxutil.ReadOnlyVarAlias{{
+				Key:    "other.pkg.A",
+				Target: ownerVar,
+			}}
+		},
 		"ProtoRuntimeTypes": func(f *Fact) { f.ProtoRuntimeTypes = []protoaudit.ProtoRuntimeTypeFact{{}} },
-		"GrpcServiceVars":   func(f *Fact) { f.GrpcServiceVars = []protoaudit.GrpcServiceVarFact{{}} },
+		"StaticCompositeGlobals": func(f *Fact) {
+			f.StaticCompositeGlobals = []syntaxutil.StaticCompositeGlobalFact{{
+				Key:        "other.pkg.Desc",
+				GuardTypes: []syntaxutil.TypeRef{{Pkg: ownerPkg, Name: "Desc"}},
+			}}
+		},
 		"MutatedStructTypes": func(f *Fact) { f.MutatedStructTypes = []syntaxutil.TypeRef{{}} },
 		"ConditionalStructMutations": func(f *Fact) {
 			f.ConditionalStructMutations = []syntaxutil.ConditionalStructMutation{{}}
+		},
+		"ReflectedIfaceMethodSets": func(f *Fact) {
+			f.ReflectedIfaceMethodSets = []syntaxutil.ReflectedIfaceFact{{MethodSet: "b\x1fa"}}
 		},
 		"NoPostInitCarrierWrites": func(f *Fact) {
 			f.NoPostInitCarrierWrites = false
@@ -205,6 +228,44 @@ func TestAnalyzeConeAllFactFieldsCorruptionAndForeignPoisonMatrix(t *testing.T) 
 			}
 		})
 	}
+
+	t.Run("foreign_malformed_alias_revokes_owner_once_memo", func(t *testing.T) {
+		memoType := syntaxutil.TypeRef{Pkg: ownerPkg, Name: "Memo"}
+		ctorFn := syntaxutil.FuncKey{Pkg: ownerPkg, Name: "NewMemo"}
+		ownerFact := Fact{
+			Declares: []string{ownerVar},
+			Escapes:  []string{ownerVar},
+			OnceMemoTypes: []syntaxutil.OnceMemoTypeFact{{
+				Type:         memoType,
+				Constructors: []syntaxutil.FuncKey{ctorFn},
+				GuardTypes:   []syntaxutil.TypeRef{memoType},
+			}},
+			OnceMemoCandidates: []syntaxutil.OnceMemoVarCandidate{{
+				Key:         ownerVar,
+				Type:        memoType,
+				Constructor: ctorFn,
+			}},
+		}
+		impFact := Fact{
+			ReadOnlyVarAliases: []syntaxutil.ReadOnlyVarAlias{{Key: "", Target: ownerVar}},
+		}
+		meta := []GraphPackage{
+			{ImportPath: impPkg, PkgPath: impPkg, Imports: []string{ownerPkg}, Class: MutableLocalPackage},
+			{ImportPath: ownerPkg, PkgPath: ownerPkg, Class: PinnedPackage, Pin: "example.com/owner@v1.0.0"},
+		}
+		res := AnalyzeCone(ConeQuery{
+			Meta:          meta,
+			Facts:         map[string][]Fact{impPkg: {impFact}, ownerPkg: {ownerFact}},
+			ViewPackage:   impPkg,
+			SingleSubject: true,
+		})
+		if res.State.Downgraded == "" {
+			t.Fatalf("foreign malformed ReadOnlyVarAliases failed open in Compose")
+		}
+		if res.NonVouchDischarged[ownerVar] {
+			t.Fatalf("foreign malformed ReadOnlyVarAliases left %s in NonVouchDischarged while Compose downgraded", ownerVar)
+		}
+	})
 }
 
 func TestAnalyzeConeOwnerUnprovenInvariantsAndOpGoWriteTracking(t *testing.T) {
@@ -945,15 +1006,24 @@ func TestPropertyAnalyzeConeWrapperEquivalenceAndMonotonicity(t *testing.T) {
 
 func FuzzAnalyzeConeAllFields(f *testing.F) {
 	seedFact := Fact{
-		Declares:           []string{"example.com/a.V", "example.com/a.Closed"},
-		Mutates:            []string{"example.com/a.V"},
-		Opaque:             []string{"example.com/a.Closed"},
-		Escapes:            []string{"example.com/a.Closed"},
-		MemoDischarges:     []string{"example.com/a.V"},
-		ReturnEnvFree:      []syntaxutil.FuncKey{{Pkg: "example.com/a", Name: "New"}},
-		ParamLeakFree:      []syntaxutil.ParamKey{{Func: syntaxutil.FuncKey{Pkg: "example.com/a", Name: "Read"}, Index: 0}},
-		SingleSubjectVars:  []string{"example.com/a.V"},
-		CarrierLinks:       []syntaxutil.CarrierLink{{From: "example.com/a.V", To: "example.com/b.W"}},
+		Declares:          []string{"example.com/a.V", "example.com/a.Closed", "example.com/a.Alias", "example.com/a.Desc"},
+		Mutates:           []string{"example.com/a.V", "example.com/a.Alias", "example.com/a.Desc"},
+		Opaque:            []string{"example.com/a.Closed"},
+		Escapes:           []string{"example.com/a.Closed"},
+		MemoDischarges:    []string{"example.com/a.V"},
+		ReturnEnvFree:     []syntaxutil.FuncKey{{Pkg: "example.com/a", Name: "New"}},
+		ParamLeakFree:     []syntaxutil.ParamKey{{Func: syntaxutil.FuncKey{Pkg: "example.com/a", Name: "Read"}, Index: 0}},
+		SingleSubjectVars: []string{"example.com/a.V"},
+		CarrierLinks:      []syntaxutil.CarrierLink{{From: "example.com/a.V", To: "example.com/b.W"}},
+		ReadOnlyVarAliases: []syntaxutil.ReadOnlyVarAlias{{
+			Key:               "example.com/a.Alias",
+			Target:            "example.com/a.Desc",
+			DirectMethodsOnly: true,
+		}},
+		StaticCompositeGlobals: []syntaxutil.StaticCompositeGlobalFact{{
+			Key:        "example.com/a.Desc",
+			GuardTypes: []syntaxutil.TypeRef{{Pkg: "example.com/a", Name: "DescTable"}},
+		}},
 	}
 	rawSeed, err := json.Marshal(map[string][]Fact{
 		"example.com/a": {seedFact},

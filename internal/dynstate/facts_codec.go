@@ -117,15 +117,16 @@ type Fact struct {
 	OnceMemoCandidates         []syntaxutil.OnceMemoVarCandidate      `json:"onceMemoCandidates,omitempty"`
 	HarnessDischarges          []string                               `json:"harnessDischarges,omitempty"`
 	ProtoClusters              []protoaudit.ProtoClusterFact          `json:"protoClusters,omitempty"`
-	ProtoExtAliases            []protoaudit.ProtoExtAlias             `json:"protoExtAliases,omitempty"`
+	ReadOnlyVarAliases         []syntaxutil.ReadOnlyVarAlias          `json:"readOnlyVarAliases,omitempty"`
 	ProtoRuntimeTypes          []protoaudit.ProtoRuntimeTypeFact      `json:"protoRuntimeTypes,omitempty"`
-	GrpcServiceVars            []protoaudit.GrpcServiceVarFact        `json:"grpcServiceVars,omitempty"`
+	StaticCompositeGlobals     []syntaxutil.StaticCompositeGlobalFact `json:"staticCompositeGlobals,omitempty"`
 	MutatedStructTypes         []syntaxutil.TypeRef                   `json:"mutatedStructTypes,omitempty"`
 	ConditionalStructMutations []syntaxutil.ConditionalStructMutation `json:"conditionalStructMutations,omitempty"`
-	NoPostInitCarrierWrites     bool                                   `json:"noPostInitCarrierWrites,omitempty"`
-	CarrierImportCalls          []string                               `json:"carrierImportCalls,omitempty"`
-	DirectVarWrites             []string                               `json:"directVarWrites,omitempty"`
-	NonMethodVarUses            []string                               `json:"nonMethodVarUses,omitempty"`
+	ReflectedIfaceMethodSets   []syntaxutil.ReflectedIfaceFact        `json:"reflectedIfaceMethodSets,omitempty"`
+	NoPostInitCarrierWrites    bool                                   `json:"noPostInitCarrierWrites,omitempty"`
+	CarrierImportCalls         []string                               `json:"carrierImportCalls,omitempty"`
+	DirectVarWrites            []string                               `json:"directVarWrites,omitempty"`
+	NonMethodVarUses           []string                               `json:"nonMethodVarUses,omitempty"`
 }
 
 // MethodDirectivesFactOf extracts only the method purity and externality

@@ -225,8 +225,7 @@ func (Widget) External() int { return 2 }
 // A malformed insertion claim marks its fact instead of resolving: a
 // two-segment ParamInsertionFree key (a function key misfiled as a
 // parameter key) must not enter the declared set, where the cross-kind
-// union would let it discharge a return-proof edge it never proved
-// (the chunk-83 review's M2).
+// union would let it discharge a return-proof edge it never proved.
 func TestResolveEnvAuditRefusesMisfiledInsertionKeys(t *testing.T) {
 	fnKey := syntaxutil.FuncKey{Pkg: "example.com/dep", Name: "Make"}
 	badParam := syntaxutil.ParamKey{Func: fnKey, Index: -1}
@@ -544,9 +543,9 @@ func UsePoolAndHooks() {
 						BuilderType: builderType,
 						MsgType:     msgInfoType,
 					}},
-					GrpcServiceVars: []protoaudit.GrpcServiceVarFact{{
-						Key:     grpcVar,
-						SvcDesc: svcDescType,
+					StaticCompositeGlobals: []syntaxutil.StaticCompositeGlobalFact{{
+						Key:        grpcVar,
+						GuardTypes: []syntaxutil.TypeRef{svcDescType},
 					}},
 					FuncRefs: []syntaxutil.FuncRef{{
 						Callee: protoInitFn,
@@ -576,7 +575,7 @@ func UsePoolAndHooks() {
 		}
 
 		// When singleSubject=true, varKey (SingleSubjectVars), protoVar (ProtoClusters +
-		// ProtoRuntimeTypes), and grpcVar (GrpcServiceVars) in example.com/p are discharged,
+		// ProtoRuntimeTypes), and grpcVar (StaticCompositeGlobals) in example.com/p are discharged,
 		// and unix.mapper / yaml.structMap are discharged by structural MappingDischarges /
 		// MemoDischarges; depVar depends on hasProof.
 		cone := dynstate.Compose(meta, allFacts, "example.com/p", nil, singleSubject, packageProcess)
@@ -767,7 +766,7 @@ func TestExplainEnvAuditOutsideScopeEndsAtEdges(t *testing.T) {
 // An insertion condition renders with its parameter context and walks
 // to the refusing site - never a raw NUL, never a spurious edge for a
 // resolved condition, and an unresolved insertion claim's own edges
-// chain onward (REQ-explain-chain; the chunk-83 review's M1).
+// chain onward (REQ-explain-chain).
 func TestExplainEnvAuditInsertionChain(t *testing.T) {
 	const culprit = "example.com/reg.Registry"
 	genFn := syntaxutil.FuncKey{Pkg: "example.com/reg", Name: "Gen"}

@@ -1,16 +1,107 @@
 package freshstruct
 
 import (
+	"context"
 	"go/ast"
 	"go/token"
 	"go/types"
-	"slices"
-	"sort"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
 )
+
+func forEachBodyAndClosureOp(
+	fn *types.Func,
+	fl *ast.FuncLit,
+	declBody *flowir.Body,
+	curBody *flowir.Body,
+	visit func(enclFn *types.Func, enclLit *ast.FuncLit, enclDeclBody *flowir.Body, op *flowir.Op) bool,
+) bool {
+	if curBody == nil {
+		return true
+	}
+	if declBody == nil {
+		declBody = curBody
+	}
+	for i := range curBody.Ops {
+		op := &curBody.Ops[i]
+		if !visit(fn, fl, declBody, op) {
+			return false
+		}
+		stop := false
+		op.ForEachValue(func(root *flowir.Value) bool {
+			root.WalkValues(func(v *flowir.Value) bool {
+				if stop || v == nil {
+					return false
+				}
+				switch v.Kind {
+				case flowir.ValMakeClosure:
+					if v.Closure != nil && !forEachBodyAndClosureOp(nil, v.Lit, v.Closure, v.Closure, visit) {
+						stop = true
+						return false
+					}
+				case flowir.ValCall:
+					if v.CallKind == flowir.CallIIFE && v.IIFE != nil {
+						var iifeLit *ast.FuncLit
+						if v.CallAST != nil {
+							iifeLit, _ = syntaxutil.UnparenExpr(v.CallAST.Fun).(*ast.FuncLit)
+						}
+						if !forEachBodyAndClosureOp(nil, iifeLit, v.IIFE, v.IIFE, visit) {
+							stop = true
+							return false
+						}
+					}
+				}
+				return true
+			})
+			return !stop
+		})
+		if stop {
+			return false
+		}
+		if op.Kind == flowir.OpAssign && op.AssignKind == flowir.AssignRange && op.RangeBody != nil {
+			if !forEachBodyAndClosureOp(fn, fl, declBody, op.RangeBody, visit) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func forEachPkgFlowOp(
+	p *packages.Package,
+	fc *flowir.PkgCache,
+	visit func(enclFn *types.Func, enclLit *ast.FuncLit, enclDeclBody *flowir.Body, op *flowir.Op) bool,
+) bool {
+	if p == nil || p.TypesInfo == nil || fc == nil {
+		return true
+	}
+	for _, fd := range fc.FuncDecls {
+		if fd == nil || fd.Body == nil {
+			continue
+		}
+		var fn *types.Func
+		if fd.Name != nil {
+			fn, _ = p.TypesInfo.Defs[fd.Name].(*types.Func)
+		}
+		b := fc.FuncBody(fd)
+		if !forEachBodyAndClosureOp(fn, nil, b, b, visit) {
+			return false
+		}
+	}
+	for _, gd := range fc.GenDecls {
+		if gd == nil {
+			continue
+		}
+		b := fc.Body(gd)
+		if !forEachBodyAndClosureOp(nil, nil, b, b, visit) {
+			return false
+		}
+	}
+	return true
+}
 
 // CollectMutatedStructTypes summarizes every non-exempted struct/container
 // mutation and conditional struct mutation across p.Syntax.
@@ -23,796 +114,652 @@ func CollectMutatedStructTypes(
 	exemptFamilyByFunc map[*ast.FuncDecl]map[*types.Named]bool,
 	exemptReadFields map[*types.Var]bool,
 ) ([]syntaxutil.TypeRef, []syntaxutil.ConditionalStructMutation) {
+	mut, conds, _ := CollectMutatedStructTypesWithIfaces(p, idx, freshCache, confinedCacheMaps, exempted, exemptFamilyByFunc, exemptReadFields)
+	return mut, conds
+}
+
+// CollectMutatedStructTypesWithIfaces summarizes every non-exempted
+// struct/container mutation, conditional struct mutation, and reflected/erased
+// non-empty interface method-set key across p.Syntax.
+func CollectMutatedStructTypesWithIfaces(
+	p *packages.Package,
+	idx *refconfine.PkgIndex,
+	freshCache *FreshLocalsCache,
+	confinedCacheMaps map[*types.Var]map[*ast.FuncDecl]bool,
+	exempted map[ast.Node]bool,
+	exemptFamilyByFunc map[*ast.FuncDecl]map[*types.Named]bool,
+	exemptReadFields map[*types.Var]bool,
+) ([]syntaxutil.TypeRef, []syntaxutil.ConditionalStructMutation, []syntaxutil.ReflectedIfaceFact) {
+	return CollectMutatedStructTypesWithCapsuleFields(p, idx, freshCache, confinedCacheMaps, exempted, exemptFamilyByFunc, exemptReadFields, nil, nil)
+}
+
+// CollectMutatedStructTypesWithCapsuleFields summarizes every non-exempted
+// struct/container mutation, conditional struct mutation, and reflected/erased
+// non-empty interface method-set key across p.Syntax, tagging unexported
+// capsule back-pointer traversals in foreignReflectFields with ForeignReflectPkg.
+func CollectMutatedStructTypesWithCapsuleFields(
+	p *packages.Package,
+	idx *refconfine.PkgIndex,
+	freshCache *FreshLocalsCache,
+	confinedCacheMaps map[*types.Var]map[*ast.FuncDecl]bool,
+	exempted map[ast.Node]bool,
+	exemptFamilyByFunc map[*ast.FuncDecl]map[*types.Named]bool,
+	exemptReadFields map[*types.Var]bool,
+	foreignReflectFields map[*types.Var]bool,
+	clusterMsgGoTypes map[*types.Var][]*types.Named,
+) ([]syntaxutil.TypeRef, []syntaxutil.ConditionalStructMutation, []syntaxutil.ReflectedIfaceFact) {
+	return CollectMutatedStructTypesWithCapsuleFieldsCtx(nil, p, idx, freshCache, confinedCacheMaps, exempted, exemptFamilyByFunc, exemptReadFields, foreignReflectFields, clusterMsgGoTypes)
+}
+
+type ctxBoxedIfaceKey struct {
+	ctxKey    string
+	methodSet string
+}
+
+type nestedBoxIfaceKey struct {
+	boxKey            string
+	methodSet         string
+	opaqueGuardStruct syntaxutil.TypeRef
+}
+
+type pendingBoxedKey struct {
+	ref       syntaxutil.TypeRef
+	methodSet string
+}
+
+type pendingForeignBoxedKey struct {
+	ref        syntaxutil.TypeRef
+	methodSet  string
+	foreignPkg string
+}
+
+type unsafeCarrierBoxKey struct {
+	boxKey         string
+	opaqueOwnerPkg string
+}
+
+type capsuleCallGuard struct {
+	capStruct    syntaxutil.TypeRef
+	capParam     syntaxutil.ParamKey
+	atomicCopyFn syntaxutil.FuncKey
+}
+
+type foreignIfaceKey struct {
+	guard     capsuleCallGuard
+	methodSet string
+}
+
+type mutatedStructCollector struct {
+	ctx                  context.Context
+	p                    *packages.Package
+	idx                  *refconfine.PkgIndex
+	freshCache           *FreshLocalsCache
+	confinedCacheMaps    map[*types.Var]map[*ast.FuncDecl]bool
+	exempted             map[ast.Node]bool
+	exemptFamilyByFunc   map[*ast.FuncDecl]map[*types.Named]bool
+	exemptReadFields     map[*types.Var]bool
+	foreignReflectFields map[*types.Var]bool
+	clusterMsgGoTypes    map[*types.Var][]*types.Named
+
+	traceTarget                        string
+	seen                               map[syntaxutil.TypeRef]bool
+	condSeen                           map[syntaxutil.ConditionalStructMutation]bool
+	reflectedIfaceSets                 map[string]bool
+	anyErasedNonEmptyIfaces            map[string]bool
+	directReflectedNonEmptyIfaces      map[string]bool
+	deferredParamAnyIfaces             map[string]map[syntaxutil.ParamKey]bool
+	deferredParamAnyUnexportedIfaces   map[string]map[syntaxutil.ParamKey]bool
+	ctxBoxedExported                   map[ctxBoxedIfaceKey]bool
+	ctxBoxedAll                        map[ctxBoxedIfaceKey]bool
+	nestedExportedIfacesInBox          map[nestedBoxIfaceKey]bool
+	nestedAllIfacesInBox               map[nestedBoxIfaceKey]bool
+	nestedAnyInConcreteBoxes           map[string]bool
+	nestedUnexportedAnyInConcreteBoxes map[string]bool
+	sawReflectValueOfAny               bool
+	sawStdMutatingEmptyIfaceCall       bool
+	sawCarrierPanic                    bool
+	sawReflectValueCrossPkgArg         bool
+	sawReflectMutOrEscape              bool
+	sawRawUintptrToUnsafePtr           bool
+	sawFmtPointerIdentityOnAny         bool
+	pkgCrossesAnyBoundary              bool
+	funcParamVars                      map[*types.Var]bool
+	pendingBoxed                       map[pendingBoxedKey]bool
+	pendingForeignBoxed                map[pendingForeignBoxedKey]bool
+	directFlagROStructs                map[syntaxutil.TypeRef]bool
+	unsafePtrCarrierBoxes              map[unsafeCarrierBoxKey]bool
+	safeEfaceUnsafePtrConvs            map[*ast.CallExpr]bool
+	hasEfaceUnion                      bool
+	pkgFresh                           *PkgFreshConstructors
+	addrTakenLocalValStructs           map[*types.Var]bool
+	foreignUnsafeIfaces                map[foreignIfaceKey]bool
+	atomicPtrCopyGuards                map[syntaxutil.FuncKey]bool
+	safeCapsuleWrapUnsafeConvs         map[*ast.CallExpr]bool
+	safeRawUintptrConvs                map[*ast.CallExpr]bool
+	foreignPtrConvClasses              map[*ast.CallExpr]foreignPtrConvClass
+	unconfinedForeignUnsafe            bool
+	sawUnsafeIfaceHeaderBypass         bool
+	confinedSyncMaps                   map[*types.Var]bool
+	confinedSyncMapFields              map[*types.Var]bool
+	confinedSyncPools                  map[*types.Var]bool
+	confinedContextKeys                map[*types.Named]bool
+	confinedContextLookups             map[*types.Named]bool
+	mismatchedContextIfaceKeys         map[*types.Named]bool
+	typeDispatchOnlyAnyParams          map[*types.Var]bool
+	directReflectedUnexportedIfaces    map[string]bool
+	anyErasedUnexportedIfaces          map[string]bool
+	fmtPointerErasedIfaces             map[string]bool
+	directCallFuns                     map[ast.Node]bool
+}
+
+// CollectMutatedStructTypesWithCapsuleFieldsCtx summarizes struct mutations,
+// conditional mutations, and reflected interface facts across p.Syntax with
+// ctx-scoped trace.DomainDynstate provenance emission.
+func CollectMutatedStructTypesWithCapsuleFieldsCtx(
+	ctx context.Context,
+	p *packages.Package,
+	idx *refconfine.PkgIndex,
+	freshCache *FreshLocalsCache,
+	confinedCacheMaps map[*types.Var]map[*ast.FuncDecl]bool,
+	exempted map[ast.Node]bool,
+	exemptFamilyByFunc map[*ast.FuncDecl]map[*types.Named]bool,
+	exemptReadFields map[*types.Var]bool,
+	foreignReflectFields map[*types.Var]bool,
+	clusterMsgGoTypes map[*types.Var][]*types.Named,
+) ([]syntaxutil.TypeRef, []syntaxutil.ConditionalStructMutation, []syntaxutil.ReflectedIfaceFact) {
 	if p == nil || p.Types == nil || p.TypesInfo == nil || idx == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if freshCache == nil {
 		freshCache = NewFreshLocalsCache(p, idx)
 	}
-	seen := map[syntaxutil.TypeRef]bool{}
-	condSeen := map[syntaxutil.ConditionalStructMutation]bool{}
-	recordStructAt := func(at ast.Node, t types.Type) {
-		ref, named, st, ok := syntaxutil.TypeRefOfStructFull(t)
-		if !ok || st == nil || (named == nil && st.NumFields() == 0) || !ref.Valid() {
-			return
-		}
-		if named != nil {
-			if syncFD := idx.SyncEnclFuncDecl(at); syncFD != nil && exemptFamilyByFunc[syncFD][named] {
-				return
-			}
-		}
-		seen[ref] = true
+	msc := &mutatedStructCollector{
+		ctx:                                ctx,
+		p:                                  p,
+		idx:                                idx,
+		freshCache:                         freshCache,
+		confinedCacheMaps:                  confinedCacheMaps,
+		exempted:                           exempted,
+		exemptFamilyByFunc:                 exemptFamilyByFunc,
+		exemptReadFields:                   exemptReadFields,
+		foreignReflectFields:               foreignReflectFields,
+		clusterMsgGoTypes:                  clusterMsgGoTypes,
+		traceTarget:                        pkgTraceTarget(p),
+		seen:                               map[syntaxutil.TypeRef]bool{},
+		condSeen:                           map[syntaxutil.ConditionalStructMutation]bool{},
+		reflectedIfaceSets:                 map[string]bool{},
+		anyErasedNonEmptyIfaces:            map[string]bool{},
+		directReflectedNonEmptyIfaces:      map[string]bool{},
+		deferredParamAnyIfaces:             map[string]map[syntaxutil.ParamKey]bool{},
+		deferredParamAnyUnexportedIfaces:   map[string]map[syntaxutil.ParamKey]bool{},
+		ctxBoxedExported:                   map[ctxBoxedIfaceKey]bool{},
+		ctxBoxedAll:                        map[ctxBoxedIfaceKey]bool{},
+		nestedExportedIfacesInBox:          map[nestedBoxIfaceKey]bool{},
+		nestedAllIfacesInBox:               map[nestedBoxIfaceKey]bool{},
+		nestedAnyInConcreteBoxes:           map[string]bool{},
+		nestedUnexportedAnyInConcreteBoxes: map[string]bool{},
+		funcParamVars:                      collectFuncParamVars(p),
+		pendingBoxed:                       map[pendingBoxedKey]bool{},
+		pendingForeignBoxed:                map[pendingForeignBoxedKey]bool{},
+		directCallFuns:                     map[ast.Node]bool{},
 	}
-	recordNamedContainerAt := func(_ ast.Node, t types.Type) {
-		if t == nil {
-			return
-		}
-		n, isN := types.Unalias(t).(*types.Named)
-		if !isN || n.Obj() == nil || n.Obj().Pkg() == nil || n.Obj().Parent() != n.Obj().Pkg().Scope() {
-			return
-		}
-		switch n.Underlying().(type) {
-		case *types.Slice, *types.Map:
-			ref := syntaxutil.TypeRef{Pkg: n.Obj().Pkg().Path(), Name: n.Obj().Name()}
-			if ref.Valid() {
-				seen[ref] = true
-			}
-		}
+	if pkgExposesEmptyIfaceBoundary(p) {
+		msc.markCrossesAnyBoundary("exported_api_exposes_any", nil, nil)
 	}
-	recordEscapedArgTypes := func(at ast.Node, root types.Type, includeUnexportedFields bool) {
-		syncFD := idx.SyncEnclFuncDecl(at)
-		type visitKey struct {
-			t           types.Type
-			addressable bool
-		}
-		visited := map[visitKey]bool{}
-		var walk func(t types.Type, addressable bool)
-		walk = func(t types.Type, addressable bool) {
-			if t == nil {
-				return
-			}
-			t = types.Unalias(t)
-			if named, isNamed := t.(*types.Named); isNamed && syncFD != nil && exemptFamilyByFunc[syncFD][named] {
-				return
-			}
-			vk := visitKey{t: t, addressable: addressable}
-			if visited[vk] {
-				return
-			}
-			visited[vk] = true
-			if addressable {
-				if _, isSt := t.Underlying().(*types.Struct); isSt {
-					recordStructAt(at, t)
-				}
-			}
-			switch u := t.Underlying().(type) {
-			case *types.Pointer:
-				walk(u.Elem(), true)
-			case *types.Slice:
-				recordNamedContainerAt(at, t)
-				walk(u.Elem(), true)
-			case *types.Map:
-				recordNamedContainerAt(at, t)
-				walk(u.Key(), false)
-				walk(u.Elem(), true)
-			case *types.Chan:
-				walk(u.Elem(), false)
-			case *types.Array:
-				walk(u.Elem(), addressable)
-			case *types.Struct:
-				for i := 0; i < u.NumFields(); i++ {
-					f := u.Field(i)
-					if !includeUnexportedFields && !f.Exported() && !f.Embedded() {
-						if addressable {
-							syntaxutil.ForEachValueContainedStructType(f.Type(), func(vt types.Type) {
-								recordStructAt(at, vt)
-							})
-						} else if refconfine.TypeCarriesMutableRef(f.Type()) {
-							if tNamed, isTN := t.(*types.Named); isTN && tNamed.Obj() != nil && !tNamed.Obj().Exported() {
-								recordStructAt(at, t)
-							}
-						}
-						continue
-					}
-					walk(f.Type(), addressable)
-				}
-			}
-		}
-		walk(root, false)
-	}
-	recordReflectiveArgTypes := func(at ast.Node, root types.Type) {
-		recordEscapedArgTypes(at, root, false)
-	}
-	recordGenericArgTypes := func(at ast.Node, root types.Type) {
-		recordEscapedArgTypes(at, root, true)
+	msc.directFlagROStructs = map[syntaxutil.TypeRef]bool{}
+	msc.unsafePtrCarrierBoxes = map[unsafeCarrierBoxKey]bool{}
+	msc.safeEfaceUnsafePtrConvs = collectSafeEfaceHeaderUnsafePtrConvs(msc.p, msc.idx)
+	msc.hasEfaceUnion = len(msc.safeEfaceUnsafePtrConvs) > 0
+	if msc.hasEfaceUnion && pkgExposesUnsafePointerBoundary(msc.p) {
+		msc.markCrossesAnyBoundary("eface_union_exposes_unsafe_ptr", nil, nil)
 	}
 
-	pkgFresh := ComputePackageFreshConstructors(p, idx, confinedCacheMaps)
-	for cm := range pkgFresh.condGuards {
+	msc.pkgFresh = ComputePackageFreshConstructors(msc.p, msc.idx, msc.confinedCacheMaps)
+	for cm := range msc.pkgFresh.condGuards {
 		if cm.Valid() {
-			condSeen[cm] = true
+			msc.condSeen[cm] = true
 		}
 	}
 
-	getFresh := func(fd *ast.FuncDecl) (map[*types.Var]bool, map[*types.Var]token.Pos) {
-		return freshCache.Get(fd)
-	}
-	isFreshMutTarget := func(fd *ast.FuncDecl, expr ast.Expr, fresh map[*types.Var]bool, freshEsc map[*types.Var]token.Pos) bool {
-		if IsRootedAtFreshLocal(p, expr, fresh, freshEsc) {
-			return true
+	msc.addrTakenLocalValStructs = collectAddrTakenLocalValueStructs(msc.p)
+
+	msc.foreignUnsafeIfaces = map[foreignIfaceKey]bool{}
+	msc.atomicPtrCopyGuards = map[syntaxutil.FuncKey]bool{}
+	msc.safeCapsuleWrapUnsafeConvs, _, _, _, msc.safeRawUintptrConvs = collectSafeCapsuleWrapperUnsafePtrConvs(msc.p, msc.idx, msc.foreignReflectFields)
+	msc.foreignPtrConvClasses, msc.unconfinedForeignUnsafe = classifyForeignUnsafePtrConvs(msc.p, msc.idx, msc.exempted, msc.clusterMsgGoTypes)
+	for _, cls := range msc.foreignPtrConvClasses {
+		if cls.isAtomicPtrCopy && cls.atomicCopyFn.Valid() {
+			msc.atomicPtrCopyGuards[cls.atomicCopyFn] = true
 		}
-		return pkgFresh.IsFreshMutationTarget(fd, expr)
 	}
-	isFreshAddrTarget := func(fd *ast.FuncDecl, inner ast.Expr, fresh map[*types.Var]bool, freshEsc map[*types.Var]token.Pos) bool {
-		if IsRootedAtFreshLocal(p, inner, fresh, freshEsc) {
-			return true
-		}
-		return pkgFresh.IsFreshAddrOrValue(fd, inner)
+	msc.sawUnsafeIfaceHeaderBypass = false
+	if msc.unconfinedForeignUnsafe {
+		msc.sawUnsafeIfaceHeaderBypass = true
+		msc.sawReflectValueOfAny = true
+		msc.sawReflectMutOrEscape = true
+		msc.reflectedIfaceSets[syntaxutil.ReflectFlagROBypassAnyKey] = true
+		msc.reflectedIfaceSets[syntaxutil.ReflectFlagROLocalBypassKey] = true
+		msc.markCrossesAnyBoundary("unconfined_foreign_unsafe", nil, nil)
 	}
 
-	recordMutatedExpr := func(at ast.Node, expr ast.Expr, fresh map[*types.Var]bool, freshEsc map[*types.Var]token.Pos) {
-		syncFD := idx.SyncEnclFuncDecl(at)
-		if isFreshMutTarget(syncFD, expr, fresh, freshEsc) {
-			return
-		}
-		if syncFD != nil && refconfine.IsByValueFieldChainOnExemptFamily(p, expr, exemptFamilyByFunc[syncFD]) {
-			return
-		}
-		cur := ast.Unparen(expr)
-		first := true
-		for {
-			switch e := cur.(type) {
-			case *ast.StarExpr:
-				if first {
-					syntaxutil.ForEachValueContainedStructType(p.TypesInfo.TypeOf(e.X), func(vt types.Type) {
-						recordStructAt(at, vt)
-					})
-					if ptr, isPtr := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(e.X)).(*types.Pointer); isPtr {
-						elem := types.Unalias(ptr.Elem())
-						syntaxutil.ForEachValueContainedStructType(elem, func(vt types.Type) {
-							recordStructAt(at, vt)
-						})
-						if sl, isSl := elem.Underlying().(*types.Slice); isSl {
-							syntaxutil.ForEachValueContainedStructType(sl.Elem(), func(vt types.Type) {
-								recordStructAt(at, vt)
-							})
-						}
-					}
-				}
-				return
-			case *ast.SelectorExpr:
-				if selInfo := p.TypesInfo.Selections[e]; selInfo != nil && selInfo.Kind() == types.FieldVal {
-					syntaxutil.ForEachSelectionHopStructType(selInfo, func(vt types.Type) {
-						recordStructAt(at, vt)
-					})
-					if first {
-						syntaxutil.ForEachValueContainedStructType(selInfo.Type(), func(vt types.Type) {
-							recordStructAt(at, vt)
-						})
-					}
-					if syntaxutil.SelectionCrossesEmbeddedPointer(selInfo) {
-						return
-					}
-					if _, isPtr := types.Unalias(p.TypesInfo.TypeOf(e.X)).(*types.Pointer); isPtr {
-						return
-					}
-					cur = ast.Unparen(e.X)
-					first = false
-					continue
-				}
-				if v, ok := p.TypesInfo.Uses[e.Sel].(*types.Var); ok && v != nil && !v.IsField() {
-					if _, isPtr := types.Unalias(v.Type()).(*types.Pointer); !isPtr {
-						recordNamedContainerAt(at, v.Type())
-						syntaxutil.ForEachValueContainedStructType(v.Type(), func(vt types.Type) {
-							recordStructAt(at, vt)
-						})
-					}
-				}
-				return
-			case *ast.Ident:
-				if v, ok := p.TypesInfo.Uses[e].(*types.Var); ok && v != nil && !v.IsField() &&
-					v.Pkg() != nil && v.Parent() == v.Pkg().Scope() {
-					if _, isPtr := types.Unalias(v.Type()).(*types.Pointer); !isPtr {
-						recordNamedContainerAt(at, v.Type())
-						syntaxutil.ForEachValueContainedStructType(v.Type(), func(vt types.Type) {
-							recordStructAt(at, vt)
-						})
-					}
-				}
-				return
-			case *ast.IndexExpr:
-				if first {
-					syntaxutil.ForEachValueContainedStructType(p.TypesInfo.TypeOf(e), func(vt types.Type) {
-						recordStructAt(at, vt)
-					})
-				}
-				recordNamedContainerAt(at, p.TypesInfo.TypeOf(e.X))
-				cur = ast.Unparen(e.X)
-				first = false
-				continue
-			case *ast.SliceExpr:
-				recordNamedContainerAt(at, p.TypesInfo.TypeOf(e.X))
-				cur = ast.Unparen(e.X)
-				first = false
-				continue
-			default:
-				return
-			}
-		}
-	}
+	msc.confinedSyncMaps, msc.confinedSyncMapFields = collectTypeAssertedSyncMaps(msc.p, msc.idx)
+	msc.confinedSyncPools = collectTypeAssertedSyncPools(msc.p, msc.idx)
+	msc.confinedContextKeys, msc.confinedContextLookups, msc.mismatchedContextIfaceKeys = collectConfinedContextKeyTypes(msc.p, msc.idx)
+	msc.typeDispatchOnlyAnyParams = collectTypeDispatchOnlyAnyParams(msc.p, msc.idx)
 
-	recordUnsafeSliceArg := func(at ast.Node, arg ast.Expr) {
-		argT := p.TypesInfo.TypeOf(arg)
-		recordStructAt(at, argT)
-		if ptr, isPtr := syntaxutil.UnderlyingType(argT).(*types.Pointer); isPtr {
-			syntaxutil.ForEachValueContainedStructType(ptr.Elem(), func(vt types.Type) {
-				recordStructAt(at, vt)
-			})
-		}
-	}
-
-	unexportedForeignRecvStruct := func(callee *types.Func) *types.Named {
-		if callee == nil {
-			return nil
-		}
-		orig := callee.Origin()
-		if orig.Pkg() == nil || orig.Pkg() == p.Types {
-			return nil
-		}
-		sig, okSig := orig.Type().(*types.Signature)
-		if !okSig || sig.Recv() == nil {
-			return nil
-		}
-		ptr, isPtr := types.Unalias(sig.Recv().Type()).(*types.Pointer)
-		if !isPtr {
-			return nil
-		}
-		named, isN := types.Unalias(ptr.Elem()).(*types.Named)
-		if !isN || named.Obj() == nil || named.Obj().Exported() {
-			return nil
-		}
-		if _, isSt := named.Underlying().(*types.Struct); !isSt {
-			return nil
-		}
-		return named
-	}
-
-	directCallFuns := map[ast.Node]bool{}
-	for _, file := range p.Syntax {
-		ast.Inspect(file, func(n ast.Node) bool {
-			if n == nil {
-				return false
-			}
-			if call, ok := n.(*ast.CallExpr); ok {
-				cur := ast.Unparen(call.Fun)
-				directCallFuns[cur] = true
-				switch e := cur.(type) {
-				case *ast.IndexExpr:
-					directCallFuns[ast.Unparen(e.X)] = true
-				case *ast.IndexListExpr:
-					directCallFuns[ast.Unparen(e.X)] = true
+	for msgVar, msgSlice := range msc.clusterMsgGoTypes {
+		fallbackCapPkg := ""
+		if msgVar != nil {
+			if sl, isSl := syntaxutil.UnderlyingType(msgVar.Type()).(*types.Slice); isSl {
+				if elemNamed := syntaxutil.DerefNamedStruct(sl.Elem()); elemNamed != nil && elemNamed.Obj() != nil &&
+					elemNamed.Obj().Pkg() != nil && elemNamed.Obj().Pkg() != msc.p.Types && !msc.isTrueStdPkg(elemNamed.Obj().Pkg()) {
+					fallbackCapPkg = elemNamed.Obj().Pkg().Path()
 				}
 			}
-			if exempted[n] {
-				return true
-			}
-			syncEncl := idx.SyncEnclFuncDecl(n)
-			fresh, freshEsc := getFresh(syncEncl)
-
-			switch x := n.(type) {
-			case *ast.AssignStmt:
-				for i, lhs := range x.Lhs {
-					recordMutatedExpr(x, lhs, fresh, freshEsc)
-					if (syncEncl == nil || syncEncl.Name == nil || syncEncl.Name.Name != "init") && syntaxutil.RootPkgScopeVar(p, lhs) != nil {
-						if len(x.Lhs) == len(x.Rhs) && i < len(x.Rhs) {
-							rhs := x.Rhs[i]
-							if !isFreshAddrTarget(syncEncl, rhs, fresh, freshEsc) && !syntaxutil.IsNilIdent(p.TypesInfo, rhs) && !syntaxutil.IsTypedNilSliceConv(p, rhs) {
-								recordNamedContainerAt(x, p.TypesInfo.TypeOf(rhs))
-							}
-						}
-					}
-				}
-			case *ast.IncDecStmt:
-				recordMutatedExpr(x, x.X, fresh, freshEsc)
-			case *ast.RangeStmt:
-				if x.Tok == token.ASSIGN {
-					if x.Key != nil {
-						recordMutatedExpr(x, x.Key, fresh, freshEsc)
-					}
-					if x.Value != nil {
-						recordMutatedExpr(x, x.Value, fresh, freshEsc)
-					}
-				}
-			case *ast.UnaryExpr:
-				if x.Op == token.AND && !isFreshAddrTarget(syncEncl, x.X, fresh, freshEsc) {
-					inner := ast.Unparen(x.X)
-					switch in := inner.(type) {
-					case *ast.SelectorExpr:
-						if selInfo := p.TypesInfo.Selections[in]; selInfo != nil && selInfo.Kind() == types.FieldVal {
-							_, _, subSt, isSubStruct := syntaxutil.TypeRefOfStructFull(selInfo.Type())
-							if !(isSubStruct && subSt.NumFields() > 0 && !selInfo.Obj().Exported()) && !refconfine.IsPureAtomicLoadArg(p, idx, x) {
-								recordMutatedExpr(x, in, fresh, freshEsc)
-							}
-						}
-					case *ast.IndexExpr:
-						_, _, elemSt, isElemStruct := syntaxutil.TypeRefOfStructFull(p.TypesInfo.TypeOf(in))
-						if !(isElemStruct && elemSt.NumFields() > 0) {
-							recordMutatedExpr(x, in, fresh, freshEsc)
-						}
-					}
-				}
-			case *ast.CallExpr:
-				if tv := p.TypesInfo.Types[x.Fun]; tv.IsType() && len(x.Args) == 1 {
-					dstT := types.Unalias(tv.Type)
-					srcT := types.Unalias(p.TypesInfo.TypeOf(x.Args[0]))
-					if _, isSrcNamed := srcT.(*types.Named); isSrcNamed && !types.Identical(dstT, srcT) &&
-						!isFreshAddrTarget(syncEncl, x.Args[0], fresh, freshEsc) && !syntaxutil.IsNilIdent(p.TypesInfo, x.Args[0]) && !syntaxutil.IsTypedNilSliceConv(p, x.Args[0]) {
-						recordNamedContainerAt(x, srcT)
-					}
-					if syntaxutil.IsUnsafePointerType(dstT) {
-						if !refconfine.IsSafeAtomicPointerValueArg(p, idx, x) && !refconfine.IsPureAtomicLoadInnerConv(p, idx, x) && !isFreshAddrTarget(syncEncl, x.Args[0], fresh, freshEsc) {
-							if ptr, isPtr := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(x.Args[0])).(*types.Pointer); isPtr {
-								syntaxutil.ForEachValueContainedStructType(ptr.Elem(), func(vt types.Type) {
-									recordStructAt(x, vt)
-								})
-							}
-						}
-					} else if dstPtr, isDstPtr := dstT.Underlying().(*types.Pointer); isDstPtr {
-						if srcPtr, isSrcPtr := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(x.Args[0])).(*types.Pointer); isSrcPtr {
-							dstElem := types.Unalias(dstPtr.Elem())
-							srcElem := types.Unalias(srcPtr.Elem())
-							if !types.Identical(dstElem, srcElem) && !isFreshAddrTarget(syncEncl, x.Args[0], fresh, freshEsc) {
-								if _, isSt := srcElem.Underlying().(*types.Struct); isSt {
-									syntaxutil.ForEachValueContainedStructType(srcElem, func(vt types.Type) {
-										recordStructAt(x, vt)
-									})
-								}
-							}
-						}
-					}
-					return true
-				}
-				if cid, isID := ast.Unparen(x.Fun).(*ast.Ident); isID {
-					if b, isB := p.TypesInfo.Uses[cid].(*types.Builtin); isB {
-						switch b.Name() {
-						case "delete", "clear", "copy", "append":
-							if len(x.Args) > 0 {
-								recordMutatedExpr(x, x.Args[0], fresh, freshEsc)
-								if !isFreshAddrTarget(syncEncl, x.Args[0], fresh, freshEsc) && !syntaxutil.IsNilIdent(p.TypesInfo, x.Args[0]) && !syntaxutil.IsTypedNilSliceConv(p, x.Args[0]) {
-									recordNamedContainerAt(x, p.TypesInfo.TypeOf(x.Args[0]))
-								}
-								if (b.Name() == "clear" || b.Name() == "copy" || b.Name() == "append") && !isFreshAddrTarget(syncEncl, x.Args[0], fresh, freshEsc) {
-									if sl, isSl := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(x.Args[0])).(*types.Slice); isSl {
-										syntaxutil.ForEachValueContainedStructType(sl.Elem(), func(vt types.Type) {
-											recordStructAt(x, vt)
-										})
-									}
-								}
-							}
-						case "SliceData":
-							if len(x.Args) > 0 && !isFreshAddrTarget(syncEncl, x.Args[0], fresh, freshEsc) && !syntaxutil.IsNilIdent(p.TypesInfo, x.Args[0]) && !syntaxutil.IsTypedNilSliceConv(p, x.Args[0]) {
-								recordNamedContainerAt(x, p.TypesInfo.TypeOf(x.Args[0]))
-								if sl, isSl := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(x.Args[0])).(*types.Slice); isSl {
-									syntaxutil.ForEachValueContainedStructType(sl.Elem(), func(vt types.Type) {
-										recordStructAt(x, vt)
-									})
-								}
-							}
-						case "Slice":
-							if len(x.Args) > 0 {
-								recordUnsafeSliceArg(x, x.Args[0])
-							}
-						}
-						return true
-					}
-				} else if sel, isSel := ast.Unparen(x.Fun).(*ast.SelectorExpr); isSel {
-					if b, isB := p.TypesInfo.Uses[sel.Sel].(*types.Builtin); isB && len(x.Args) > 0 {
-						switch b.Name() {
-						case "Slice":
-							recordUnsafeSliceArg(x, x.Args[0])
-							return true
-						case "SliceData":
-							if !isFreshAddrTarget(syncEncl, x.Args[0], fresh, freshEsc) && !syntaxutil.IsNilIdent(p.TypesInfo, x.Args[0]) && !syntaxutil.IsTypedNilSliceConv(p, x.Args[0]) {
-								recordNamedContainerAt(x, p.TypesInfo.TypeOf(x.Args[0]))
-								if sl, isSl := syntaxutil.UnderlyingType(p.TypesInfo.TypeOf(x.Args[0])).(*types.Slice); isSl {
-									syntaxutil.ForEachValueContainedStructType(sl.Elem(), func(vt types.Type) {
-										recordStructAt(x, vt)
-									})
-								}
-							}
-							return true
-						}
-					}
-				}
-				if callee := syntaxutil.ResolveCalledFuncObj(p, x.Fun); callee != nil {
-					if recvSt := unexportedForeignRecvStruct(callee); recvSt != nil {
-						if sel, isSel := ast.Unparen(x.Fun).(*ast.SelectorExpr); isSel {
-							if selInfo := p.TypesInfo.Selections[sel]; selInfo != nil {
-								switch selInfo.Kind() {
-								case types.MethodVal:
-									if !isFreshAddrTarget(syncEncl, sel.X, fresh, freshEsc) {
-										recordStructAt(x, recvSt)
-										recordMutatedExpr(x, sel.X, fresh, freshEsc)
-									}
-								case types.MethodExpr:
-									if len(x.Args) == 0 || !isFreshAddrTarget(syncEncl, x.Args[0], fresh, freshEsc) {
-										recordStructAt(x, recvSt)
-										if len(x.Args) > 0 {
-											recordMutatedExpr(x, x.Args[0], fresh, freshEsc)
-										}
-									}
-								}
-							}
-						}
-					}
-					if callee.Pkg() != nil && callee.Pkg().Path() == "reflect" && callee.Name() == "ValueOf" && len(x.Args) == 1 {
-						if !isFreshAddrTarget(syncEncl, x.Args[0], fresh, freshEsc) {
-							recordReflectiveArgTypes(x, p.TypesInfo.TypeOf(x.Args[0]))
-						}
-					} else {
-						origSig, _ := callee.Type().(*types.Signature)
-						isGeneric := origSig != nil && (origSig.TypeParams().Len() > 0 || origSig.RecvTypeParams().Len() > 0)
-						isCmp := callee.Pkg() != nil && callee.Pkg().Path() == "cmp"
-						if sig, okSig := p.TypesInfo.TypeOf(x.Fun).(*types.Signature); okSig {
-							type argEntry struct {
-								expr ast.Expr
-								typ  types.Type
-							}
-							var argEntries []argEntry
-							if len(x.Args) == 1 {
-								if tup, isTup := p.TypesInfo.TypeOf(x.Args[0]).(*types.Tuple); isTup {
-									for ti := 0; ti < tup.Len(); ti++ {
-										argEntries = append(argEntries, argEntry{typ: tup.At(ti).Type()})
-									}
-								}
-							}
-							if argEntries == nil {
-								for _, arg := range x.Args {
-									argEntries = append(argEntries, argEntry{expr: arg, typ: p.TypesInfo.TypeOf(arg)})
-								}
-							}
-							for ai, ae := range argEntries {
-								if ae.expr != nil && isFreshAddrTarget(syncEncl, ae.expr, fresh, freshEsc) {
-									continue
-								}
-								pi := ai
-								if sig.Variadic() && ai >= sig.Params().Len()-1 {
-									pi = sig.Params().Len() - 1
-								}
-								if pi < sig.Params().Len() {
-									pt := types.Unalias(sig.Params().At(pi).Type())
-									if sig.Variadic() && ai >= sig.Params().Len()-1 && !x.Ellipsis.IsValid() {
-										if sl, isSl := pt.Underlying().(*types.Slice); isSl {
-											pt = types.Unalias(sl.Elem())
-										}
-									}
-									if isGeneric && !isCmp && origSig != nil && pi < origSig.Params().Len() {
-										origPT := types.Unalias(origSig.Params().At(pi).Type())
-										if origSig.Variadic() && ai >= origSig.Params().Len()-1 && !x.Ellipsis.IsValid() {
-											if sl, isSl := origPT.Underlying().(*types.Slice); isSl {
-												origPT = types.Unalias(sl.Elem())
-											}
-										}
-										if syntaxutil.TypeMentionsTypeParam(origPT) {
-											recordGenericArgTypes(x, ae.typ)
-											continue
-										}
-									}
-									if !syntaxutil.IsReadOnlyEmptyInterfaceCallee(callee) {
-										if iface, isIf := pt.Underlying().(*types.Interface); isIf && iface.NumMethods() == 0 {
-											recordReflectiveArgTypes(x, ae.typ)
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-			return true
-		})
-	}
-
-	for id, inst := range p.TypesInfo.Instances {
-		if directCallFuns[id] {
-			continue
 		}
-		fnObj, ok := p.TypesInfo.Uses[id].(*types.Func)
-		if !ok || fnObj == nil {
-			continue
-		}
-		orig := fnObj.Origin()
-		if orig.Pkg() != nil && orig.Pkg().Path() == "cmp" {
-			continue
-		}
-		instSig, okInst := syntaxutil.UnderlyingType(inst.Type).(*types.Signature)
-		origSig, okOrig := orig.Type().(*types.Signature)
-		if !okInst || !okOrig {
-			continue
-		}
-		for pi := 0; pi < instSig.Params().Len() && pi < origSig.Params().Len(); pi++ {
-			if syntaxutil.TypeMentionsTypeParam(origSig.Params().At(pi).Type()) {
-				recordGenericArgTypes(id, instSig.Params().At(pi).Type())
-			}
-		}
-	}
-	for selExpr, selInfo := range p.TypesInfo.Selections {
-		if directCallFuns[selExpr] || selInfo == nil || (selInfo.Kind() != types.MethodVal && selInfo.Kind() != types.MethodExpr) {
-			continue
-		}
-		fnObj, ok := selInfo.Obj().(*types.Func)
-		if !ok || fnObj == nil {
-			continue
-		}
-		if recvSt := unexportedForeignRecvStruct(fnObj); recvSt != nil {
-			syncEncl := idx.SyncEnclFuncDecl(selExpr)
-			fresh, freshEsc := getFresh(syncEncl)
-			recordStructAt(selExpr, recvSt)
-			if selInfo.Kind() == types.MethodVal {
-				recordMutatedExpr(selExpr, selExpr.X, fresh, freshEsc)
-			}
-		}
-		orig := fnObj.Origin()
-		origSig, okOrig := orig.Type().(*types.Signature)
-		instSig, okInst := syntaxutil.UnderlyingType(selInfo.Type()).(*types.Signature)
-		if !okOrig || !okInst || origSig.RecvTypeParams().Len() == 0 {
-			continue
-		}
-		offset := 0
-		if selInfo.Kind() == types.MethodExpr {
-			offset = 1
-		}
-		for pi := 0; pi < origSig.Params().Len() && pi+offset < instSig.Params().Len(); pi++ {
-			if syntaxutil.TypeMentionsTypeParam(origSig.Params().At(pi).Type()) {
-				recordGenericArgTypes(selExpr, instSig.Params().At(pi+offset).Type())
-			}
-		}
-	}
-
-	exportedRefSelsByOwner := map[syntaxutil.TypeRef]map[*ast.SelectorExpr]bool{}
-	isStructTrackedPtr := func(t types.Type) bool {
-		if t == nil {
-			return false
-		}
-		ptr, isP := types.Unalias(t).(*types.Pointer)
-		if !isP {
-			return false
-		}
-		_, _, st, ok := syntaxutil.TypeRefOfStructFull(ptr.Elem())
-		return ok && st != nil && st.NumFields() > 0
-	}
-	isNonEmptyStructElemSeq := func(t types.Type) bool {
-		switch u := syntaxutil.UnderlyingType(t).(type) {
-		case *types.Slice:
-			_, _, elemSt, isSt := syntaxutil.TypeRefOfStructFull(u.Elem())
-			return isSt && elemSt.NumFields() > 0
-		case *types.Array:
-			_, _, elemSt, isSt := syntaxutil.TypeRefOfStructFull(u.Elem())
-			return isSt && elemSt.NumFields() > 0
-		}
-		return false
-	}
-	for selExpr, selInfo := range p.TypesInfo.Selections {
-		if selInfo == nil || selInfo.Kind() != types.FieldVal || selInfo.Obj() == nil || !selInfo.Obj().Exported() {
-			continue
-		}
-		if fv, isFV := selInfo.Obj().(*types.Var); isFV && exemptReadFields[fv] {
-			continue
-		}
-		ft := selInfo.Type()
-		if !refconfine.TypeCarriesMutableRefWith(ft, isStructTrackedPtr) || isNonEmptyStructElemSeq(ft) {
-			continue
-		}
-		if refconfine.IsInsideExemptWriteOrAddr(idx, selExpr, exempted) {
-			continue
-		}
-		if parAs, isAs := idx.ParentUnparen(selExpr).(*ast.AssignStmt); isAs {
-			onLHS := false
-			for _, lhs := range parAs.Lhs {
-				if ast.Unparen(lhs) == selExpr {
-					onLHS = true
-					break
+		for _, msgNamed := range msgSlice {
+			if msgNamed != nil {
+				capPkg := msc.extractForeignCapsuleWrapperPkg(msgNamed)
+				if capPkg == "" {
+					capPkg = fallbackCapPkg
 				}
-			}
-			if onLHS {
-				continue
-			}
-		}
-		syncEncl := idx.SyncEnclFuncDecl(selExpr)
-		fresh, freshEsc := getFresh(syncEncl)
-		if isFreshAddrTarget(syncEncl, selExpr, fresh, freshEsc) {
-			continue
-		}
-		syntaxutil.ForEachSelectionHopStruct(selInfo, func(hop *types.Named) {
-			if hop == nil || (syncEncl != nil && exemptFamilyByFunc[syncEncl][hop]) {
-				return
-			}
-			ref, _, hopSt, okHop := syntaxutil.TypeRefOfStructFull(hop)
-			if !okHop || !ref.Valid() || hopSt.NumFields() == 0 || seen[ref] {
-				return
-			}
-			if exportedRefSelsByOwner[ref] == nil {
-				exportedRefSelsByOwner[ref] = map[*ast.SelectorExpr]bool{}
-			}
-			exportedRefSelsByOwner[ref][selExpr] = true
-		})
-	}
-	for ownerRef, selSet := range exportedRefSelsByOwner {
-		if seen[ownerRef] {
-			continue
-		}
-		var pendingConds []syntaxutil.ConditionalStructMutation
-		if !refconfine.VerifyReadOnlyRefConfinement(p, refconfine.Config{
-			Index:                         idx,
-			IsImmutablePtr:                isStructTrackedPtr,
-			AllowReturnFromUnexportedFunc: true,
-			IsExemptField: func(fv *types.Var) bool {
-				return fv != nil && exemptReadFields[fv]
-			},
-			AllowImmutableInterfaceElem: func(containerExpr ast.Expr) bool {
-				ct := p.TypesInfo.TypeOf(containerExpr)
-				if ct == nil {
-					return false
-				}
-				var elemT types.Type
-				switch u := syntaxutil.UnderlyingType(ct).(type) {
-				case *types.Slice:
-					elemT = u.Elem()
-				case *types.Array:
-					elemT = u.Elem()
-				case *types.Map:
-					elemT = u.Elem()
-				default:
-					return false
-				}
-				iface, okI := syntaxutil.UnderlyingType(elemT).(*types.Interface)
-				return okI && iface.NumMethods() > 0
-			},
-			AllowMethodRecv: func(call *ast.CallExpr, callee *types.Func, _ ast.Expr) bool {
-				if callee == nil || call.Ellipsis.IsValid() {
-					return false
-				}
-				orig := callee.Origin()
-				sig, okSig := orig.Type().(*types.Signature)
-				if !okSig || sig.Recv() == nil {
-					return false
-				}
-				recvT := types.Unalias(sig.Recv().Type())
-				if _, isPtr := recvT.(*types.Pointer); isPtr {
-					return false
-				}
-				rn, isRN := recvT.(*types.Named)
-				if !isRN || rn.Obj() == nil || rn.Obj().Pkg() == nil {
-					return false
-				}
-				if _, isSl := rn.Underlying().(*types.Slice); !isSl {
-					return false
-				}
-				for _, a := range call.Args {
-					at := p.TypesInfo.TypeOf(a)
-					if refconfine.TypeContainsRefOrPointerWith(at, isStructTrackedPtr) && !types.Identical(types.Unalias(at), rn) {
-						return false
-					}
-				}
-				for ri := 0; ri < sig.Results().Len(); ri++ {
-					if refconfine.TypeContainsRefOrPointerWith(sig.Results().At(ri).Type(), isStructTrackedPtr) {
-						return false
-					}
-				}
-				sliceRef := syntaxutil.TypeRef{Pkg: rn.Obj().Pkg().Path(), Name: rn.Obj().Name()}
-				if !sliceRef.Valid() {
-					return false
-				}
-				guardPkg := ""
-				if orig.Pkg() != nil {
-					guardPkg = orig.Pkg().Path()
-				}
-				pendingConds = append(pendingConds, syntaxutil.ConditionalStructMutation{
-					Struct:      ownerRef,
-					GuardPkg:    guardPkg,
-					GuardStruct: sliceRef,
-				})
-				return true
-			},
-			SeedExpr: func(expr ast.Expr) (bool, bool) {
-				sel, isSel := ast.Unparen(expr).(*ast.SelectorExpr)
-				if !isSel || !selSet[sel] {
-					return false, false
-				}
-				ft := p.TypesInfo.TypeOf(sel)
-				return refconfine.IsDirectMutableRefWith(ft, isStructTrackedPtr), true
-			},
-			AllowCallArg: func(call *ast.CallExpr, argIdx int, _ ast.Expr) bool {
-				return argIdx == 0 && len(call.Args) == 1 && !call.Ellipsis.IsValid() && syntaxutil.IsReflectTypeOfCall(p, call)
-			},
-			AllowAssignTarget: func(lhs, _ ast.Expr, rhsIsRef bool) bool {
-				if rhsIsRef {
-					return false
-				}
-				sel, isSel := ast.Unparen(lhs).(*ast.SelectorExpr)
-				if !isSel {
-					return false
-				}
-				selInfo := p.TypesInfo.Selections[sel]
-				if selInfo == nil || selInfo.Kind() != types.FieldVal {
-					return false
-				}
-				syncEncl := idx.SyncEnclFuncDecl(lhs)
-				fresh, freshEsc := getFresh(syncEncl)
-				if !isFreshMutTarget(syncEncl, lhs, fresh, freshEsc) {
-					return false
-				}
-				stNamed, isN := types.Unalias(p.TypesInfo.TypeOf(lhs)).(*types.Named)
-				if !isN || !isOpaqueUnexportedForeignStruct(p.Types, stNamed) {
-					return false
-				}
-				guardRef := syntaxutil.TypeRef{Pkg: stNamed.Obj().Pkg().Path(), Name: stNamed.Obj().Name()}
-				if !guardRef.Valid() {
-					return false
-				}
-				pendingConds = append(pendingConds, syntaxutil.ConditionalStructMutation{
-					Struct:                  ownerRef,
-					GuardStruct:             guardRef,
-					RequireDescBuilderGuard: true,
-				})
-				return true
-			},
-		}) {
-			seen[ownerRef] = true
-		} else {
-			for _, cm := range pendingConds {
-				if cm.Valid() {
-					condSeen[cm] = true
+				if capPkg != "" {
+					msc.recordForeignCapsuleMsgIfaces(msgNamed, capPkg)
 				}
 			}
 		}
 	}
 
-	var out []syntaxutil.TypeRef
-	if len(seen) > 0 {
-		out = make([]syntaxutil.TypeRef, 0, len(seen))
-		for ref := range seen {
-			out = append(out, ref)
-		}
-		sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
-	}
-	var condOut []syntaxutil.ConditionalStructMutation
-	if len(condSeen) > 0 {
-		condOut = make([]syntaxutil.ConditionalStructMutation, 0, len(condSeen))
-		for cm := range condSeen {
-			if !seen[cm.Struct] {
-				condOut = append(condOut, cm)
-			}
-		}
-		if len(condOut) == 0 {
-			condOut = nil
-		} else {
-			slices.SortFunc(condOut, syntaxutil.ConditionalStructMutation.Compare)
-		}
-	}
-	return out, condOut
+	msc.directReflectedUnexportedIfaces = map[string]bool{}
+	msc.anyErasedUnexportedIfaces = map[string]bool{}
+	msc.fmtPointerErasedIfaces = map[string]bool{}
+
+	msc.scanSyntaxFiles()
+	return msc.scanTypesInfoAndFinalize()
 }
 
-func isOpaqueUnexportedForeignStruct(curPkg *types.Package, named *types.Named) bool {
-	if named == nil || named.Obj() == nil || named.Obj().Exported() ||
-		named.Obj().Pkg() == nil || named.Obj().Pkg() == curPkg {
-		return false
+func (msc *mutatedStructCollector) resolveStructAt(at ast.Node, t types.Type) (syntaxutil.TypeRef, bool) {
+	ref, named, st, ok := syntaxutil.TypeRefOfStructFull(t)
+	if !ok || st == nil || (named == nil && st.NumFields() == 0) || !ref.Valid() {
+		return syntaxutil.TypeRef{}, false
 	}
-	st, isSt := named.Underlying().(*types.Struct)
-	if !isSt || st.NumFields() == 0 {
-		return false
-	}
-	for i := 0; i < st.NumFields(); i++ {
-		f := st.Field(i)
-		if f.Exported() || f.Embedded() {
-			return false
+	if named != nil {
+		if syncFD := msc.idx.SyncEnclFuncDecl(at); syncFD != nil && msc.exemptFamilyByFunc[syncFD][named] {
+			return syntaxutil.TypeRef{}, false
 		}
 	}
-	mset := types.NewMethodSet(types.NewPointer(named))
-	for i := 0; i < mset.Len(); i++ {
-		if mset.At(i).Obj().Exported() {
-			return false
+	return ref, true
+}
+
+func (msc *mutatedStructCollector) markMutated(ref syntaxutil.TypeRef, reason string, at ast.Node) {
+	if !msc.seen[ref] {
+		msc.seen[ref] = true
+		emitStructMutated(msc.ctx, msc.p, msc.traceTarget, ref, reason, at)
+	}
+}
+
+func (msc *mutatedStructCollector) recordStructAt(at ast.Node, t types.Type) {
+	if ref, ok := msc.resolveStructAt(at, t); ok {
+		msc.markMutated(ref, "direct_or_escaped_mutation", at)
+	}
+}
+
+func (msc *mutatedStructCollector) recordStructSink(at ast.Node, t types.Type, _ string) {
+	msc.recordStructAt(at, t)
+}
+
+func (msc *mutatedStructCollector) recordNamedContainerAt(at ast.Node, t types.Type) {
+	if t == nil {
+		return
+	}
+	n, isN := types.Unalias(t).(*types.Named)
+	if !isN || n.Obj() == nil || n.Obj().Pkg() == nil || n.Obj().Parent() != n.Obj().Pkg().Scope() {
+		return
+	}
+	switch n.Underlying().(type) {
+	case *types.Slice, *types.Map:
+		ref := syntaxutil.TypeRef{Pkg: n.Obj().Pkg().Path(), Name: n.Obj().Name()}
+		if ref.Valid() {
+			msc.markMutated(ref, "named_container_mutation", at)
 		}
 	}
-	return true
+}
+
+func (msc *mutatedStructCollector) isMethodlessStruct(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	if _, isSt := t.Underlying().(*types.Struct); !isSt {
+		return false
+	}
+	return types.NewMethodSet(types.NewPointer(t)).Len() == 0
+}
+
+func (msc *mutatedStructCollector) recordEscapedArgTypesWithSink(at ast.Node, root types.Type, includeUnexportedFields bool, methodlessOnly bool, sink func(ast.Node, types.Type, string)) {
+	syncFD := msc.idx.SyncEnclFuncDecl(at)
+	type visitKey struct {
+		t                 types.Type
+		addressable       bool
+		crossedForeignPkg string
+	}
+	visited := map[visitKey]bool{}
+	var walk func(t types.Type, addressable bool, crossedForeignPkg string)
+	walk = func(t types.Type, addressable bool, crossedForeignPkg string) {
+		if t == nil {
+			return
+		}
+		t = types.Unalias(t)
+		if named, isNamed := t.(*types.Named); isNamed && syncFD != nil && msc.exemptFamilyByFunc[syncFD][named] {
+			return
+		}
+		vk := visitKey{t: t, addressable: addressable, crossedForeignPkg: crossedForeignPkg}
+		if visited[vk] {
+			return
+		}
+		visited[vk] = true
+		if addressable {
+			if _, isSt := t.Underlying().(*types.Struct); isSt && (!methodlessOnly || msc.isMethodlessStruct(t)) {
+				sink(at, t, crossedForeignPkg)
+			}
+		}
+		switch u := t.Underlying().(type) {
+		case *types.Pointer:
+			walk(u.Elem(), true, crossedForeignPkg)
+		case *types.Slice:
+			if !methodlessOnly {
+				msc.recordNamedContainerAt(at, t)
+			}
+			walk(u.Elem(), true, crossedForeignPkg)
+		case *types.Map:
+			if !methodlessOnly {
+				msc.recordNamedContainerAt(at, t)
+			}
+			walk(u.Key(), false, crossedForeignPkg)
+			walk(u.Elem(), true, crossedForeignPkg)
+		case *types.Chan:
+			walk(u.Elem(), false, crossedForeignPkg)
+		case *types.Array:
+			walk(u.Elem(), addressable, crossedForeignPkg)
+		case *types.Signature:
+			for i := 0; i < u.Params().Len(); i++ {
+				walk(u.Params().At(i).Type(), false, crossedForeignPkg)
+			}
+			for i := 0; i < u.Results().Len(); i++ {
+				walk(u.Results().At(i).Type(), false, crossedForeignPkg)
+			}
+		case *types.Struct:
+			for i := 0; i < u.NumFields(); i++ {
+				f := u.Field(i)
+				if msc.exemptReadFields[f] {
+					continue
+				}
+				nextForeignPkg := crossedForeignPkg
+				if nextForeignPkg == "" {
+					if msc.foreignReflectFields[f] {
+						nextForeignPkg = msc.p.Types.Path()
+					} else if !f.Exported() && !f.Embedded() && f.Pkg() != nil && f.Pkg() != msc.p.Types {
+						if tNamed, isTN := t.(*types.Named); isTN && tNamed.Obj() != nil && tNamed.Obj().Pkg() == f.Pkg() {
+							opaqueContainer := true
+							for si := 0; si < u.NumFields(); si++ {
+								sf := u.Field(si)
+								if sf.Exported() && !(sf.Embedded() && isZeroSizedPaddingType(sf.Type())) {
+									opaqueContainer = false
+									break
+								}
+							}
+							if opaqueContainer {
+								if ptr, isP := types.Unalias(f.Type()).(*types.Pointer); isP {
+									if elemN, isN := types.Unalias(ptr.Elem()).(*types.Named); isN && elemN.Obj() != nil && elemN.Obj().Pkg() == f.Pkg() {
+										nextForeignPkg = f.Pkg().Path()
+									}
+								}
+							}
+						}
+					}
+				}
+				if !includeUnexportedFields && !f.Exported() && !f.Embedded() {
+					if addressable && (!methodlessOnly || msc.isMethodlessStruct(t)) {
+						syntaxutil.ForEachValueContainedStructType(f.Type(), func(vt types.Type) {
+							if !methodlessOnly || msc.isMethodlessStruct(vt) {
+								sink(at, vt, nextForeignPkg)
+							}
+						})
+					} else if !methodlessOnly && refconfine.TypeCarriesMutableRef(f.Type()) {
+						if tNamed, isTN := t.(*types.Named); isTN && tNamed.Obj() != nil && !tNamed.Obj().Exported() {
+							sink(at, t, crossedForeignPkg)
+						}
+					}
+					continue
+				}
+				walk(f.Type(), addressable, nextForeignPkg)
+			}
+		}
+	}
+	walk(root, false, "")
+}
+
+func (msc *mutatedStructCollector) recordDirectReflectiveArgTypes(at ast.Node, root types.Type) {
+	msc.recordEscapedArgTypesWithSink(at, root, false, false, msc.recordStructSink)
+	msc.recordEscapedArgTypesWithSink(at, root, true, false, func(node ast.Node, vt types.Type, _ string) {
+		if ref, ok := msc.resolveStructAt(node, vt); ok {
+			msc.directFlagROStructs[ref] = true
+		}
+	})
+}
+
+func (msc *mutatedStructCollector) recordPendingBoxedEntry(ref syntaxutil.TypeRef, methodSet string, crossedForeignPkg string) {
+	pk := pendingBoxedKey{ref: ref, methodSet: methodSet}
+	if crossedForeignPkg != "" {
+		if !msc.pendingBoxed[pk] {
+			msc.pendingForeignBoxed[pendingForeignBoxedKey{ref: ref, methodSet: methodSet, foreignPkg: crossedForeignPkg}] = true
+		}
+	} else {
+		msc.pendingBoxed[pk] = true
+	}
+}
+
+func (msc *mutatedStructCollector) typeCrossesAnyOrEfaceUnion(t types.Type) bool {
+	return typeMentionsEmptyInterfaceWith(t, true) || (msc.hasEfaceUnion && syntaxutil.ContainsUnsafePointer(t))
+}
+
+func (msc *mutatedStructCollector) recordPendingNonEmptyIfaceBox(at ast.Node, syncEncl *ast.FuncDecl, srcT types.Type) {
+	if srcT == nil {
+		return
+	}
+	msc.inspectBoxedConcreteMethodCapabilities(srcT)
+	hasUnsafePtr, unsafeOwnerPkg := containsUnsafePointerWithOpaqueOwner(msc.p.Types, srcT)
+	if hasUnsafePtr && msc.hasEfaceUnion {
+		msc.markCrossesAnyBoundary("boxed_nonempty_eface_union_unsafe_ptr", srcT, at)
+	}
+	msetKey := syntaxutil.ConcreteMethodSetKey(srcT)
+	if msetKey == "" {
+		return
+	}
+	flagROKey := syntaxutil.ReflectFlagROBypassPrefix + msetKey
+	hasAnyWithUnexp, anyOwnerPkg := typeMentionsEmptyIfaceWithOpaqueOwner(msc.p.Types, srcT)
+	if hasUnsafePtr || hasAnyWithUnexp {
+		carrierOwner := ""
+		if hasUnsafePtr && !hasAnyWithUnexp {
+			carrierOwner = unsafeOwnerPkg
+		} else if !hasUnsafePtr && hasAnyWithUnexp {
+			carrierOwner = anyOwnerPkg
+		} else if unsafeOwnerPkg != "" && unsafeOwnerPkg == anyOwnerPkg {
+			carrierOwner = unsafeOwnerPkg
+		}
+		msc.unsafePtrCarrierBoxes[unsafeCarrierBoxKey{boxKey: flagROKey, opaqueOwnerPkg: carrierOwner}] = true
+	}
+	if typeMentionsEmptyInterfaceWith(srcT, false) {
+		msc.nestedAnyInConcreteBoxes[msetKey] = true
+	} else if hasAnyWithUnexp {
+		msc.nestedUnexportedAnyInConcreteBoxes[msetKey] = true
+	}
+	fam := msc.exemptFamilyByFunc[syncEncl]
+	forEachNestedNonEmptyIface(srcT, false, msc.exemptReadFields, msc.foreignReflectFields, fam, func(nif *types.Interface) {
+		if k := syntaxutil.IfaceMethodSetKey(nif); k != "" {
+			nk := nestedBoxIfaceKey{boxKey: msetKey, methodSet: k}
+			msc.nestedExportedIfacesInBox[nk] = true
+			msc.nestedAllIfacesInBox[nk] = true
+		}
+	})
+	forEachNestedNonEmptyIfaceWithGuard(msc.p.Types, srcT, true, msc.exemptReadFields, msc.foreignReflectFields, fam, func(nif *types.Interface, opaqueGuardStruct syntaxutil.TypeRef) {
+		if k := syntaxutil.IfaceMethodSetKey(nif); k != "" {
+			if msc.nestedExportedIfacesInBox[nestedBoxIfaceKey{boxKey: msetKey, methodSet: k}] {
+				return
+			}
+			msc.nestedAllIfacesInBox[nestedBoxIfaceKey{boxKey: msetKey, methodSet: k, opaqueGuardStruct: opaqueGuardStruct}] = true
+		}
+	})
+	msc.recordEscapedArgTypesWithSink(at, srcT, false, true, func(node ast.Node, vt types.Type, crossedForeignPkg string) {
+		if ref, ok := msc.resolveStructAt(node, vt); ok {
+			msc.recordPendingBoxedEntry(ref, msetKey, crossedForeignPkg)
+		}
+	})
+	msc.recordEscapedArgTypesWithSink(at, srcT, true, true, func(node ast.Node, vt types.Type, crossedForeignPkg string) {
+		if ref, ok := msc.resolveStructAt(node, vt); ok {
+			msc.recordPendingBoxedEntry(ref, flagROKey, crossedForeignPkg)
+		}
+	})
+}
+
+func (msc *mutatedStructCollector) recordAnyBoxedArgTypes(at ast.Node, syncEncl *ast.FuncDecl, root types.Type) {
+	msc.recordEscapedArgTypesWithSink(at, root, false, false, msc.recordStructSink)
+	msc.recordEscapedArgTypesWithSink(at, root, true, false, func(node ast.Node, vt types.Type, crossedForeignPkg string) {
+		if ref, ok := msc.resolveStructAt(node, vt); ok && !msc.seen[ref] {
+			msc.recordPendingBoxedEntry(ref, syntaxutil.ReflectFlagROBypassAnyKey, crossedForeignPkg)
+		}
+	})
+	if root != nil && !types.IsInterface(root) {
+		msc.recordPendingNonEmptyIfaceBox(at, syncEncl, root)
+	}
+}
+
+func (msc *mutatedStructCollector) recordGenericArgTypes(at ast.Node, root types.Type) {
+	msc.recordEscapedArgTypesWithSink(at, root, true, false, msc.recordStructSink)
+}
+
+func (msc *mutatedStructCollector) getFresh(fd *ast.FuncDecl) (map[*types.Var]bool, map[*types.Var]token.Pos) {
+	return msc.freshCache.Get(fd)
+}
+
+func (msc *mutatedStructCollector) isFreshMutTarget(fd *ast.FuncDecl, expr ast.Expr, fresh map[*types.Var]bool, freshEsc map[*types.Var]token.Pos) bool {
+	if IsRootedAtFreshLocal(msc.p, expr, fresh, freshEsc) {
+		return true
+	}
+	return msc.pkgFresh.IsFreshMutationTarget(fd, expr)
+}
+
+func (msc *mutatedStructCollector) isFreshAddrTarget(fd *ast.FuncDecl, inner ast.Expr, fresh map[*types.Var]bool, freshEsc map[*types.Var]token.Pos) bool {
+	if IsFreshInlineValue(msc.p, inner) || IsRootedAtFreshLocal(msc.p, inner, fresh, freshEsc) {
+		return true
+	}
+	return msc.pkgFresh.IsFreshAddrOrValue(fd, inner)
+}
+
+func (msc *mutatedStructCollector) isFreshReflectOrBoxTarget(fd *ast.FuncDecl, inner ast.Expr, fresh map[*types.Var]bool, freshEsc map[*types.Var]token.Pos) bool {
+	if !msc.isFreshAddrTarget(fd, inner, fresh, freshEsc) {
+		return false
+	}
+	return !exprCarriesNonFreshInterface(msc.p, inner)
+}
+
+func (msc *mutatedStructCollector) recordMutatedExpr(at ast.Node, expr ast.Expr, fresh map[*types.Var]bool, freshEsc map[*types.Var]token.Pos) {
+	syncFD := msc.idx.SyncEnclFuncDecl(at)
+	if msc.isFreshMutTarget(syncFD, expr, fresh, freshEsc) {
+		return
+	}
+	if syncFD != nil && refconfine.IsByValueFieldChainOnExemptFamily(msc.p, expr, msc.exemptFamilyByFunc[syncFD]) {
+		return
+	}
+	cur := ast.Unparen(expr)
+	first := true
+	for {
+		switch e := cur.(type) {
+		case *ast.StarExpr:
+			if first {
+				syntaxutil.ForEachValueContainedStructType(msc.p.TypesInfo.TypeOf(e.X), func(vt types.Type) {
+					msc.recordStructAt(at, vt)
+				})
+				if ptr, isPtr := syntaxutil.UnderlyingType(msc.p.TypesInfo.TypeOf(e.X)).(*types.Pointer); isPtr {
+					elem := types.Unalias(ptr.Elem())
+					syntaxutil.ForEachValueContainedStructType(elem, func(vt types.Type) {
+						msc.recordStructAt(at, vt)
+					})
+					if sl, isSl := elem.Underlying().(*types.Slice); isSl {
+						syntaxutil.ForEachValueContainedStructType(sl.Elem(), func(vt types.Type) {
+							msc.recordStructAt(at, vt)
+						})
+					}
+				}
+			}
+			return
+		case *ast.SelectorExpr:
+			if selInfo := msc.p.TypesInfo.Selections[e]; selInfo != nil && selInfo.Kind() == types.FieldVal {
+				syntaxutil.ForEachSelectionHopStructType(selInfo, func(vt types.Type) {
+					msc.recordStructAt(at, vt)
+				})
+				if first {
+					syntaxutil.ForEachValueContainedStructType(selInfo.Type(), func(vt types.Type) {
+						msc.recordStructAt(at, vt)
+					})
+				}
+				if syntaxutil.SelectionCrossesEmbeddedPointer(selInfo) {
+					return
+				}
+				if _, isPtr := types.Unalias(msc.p.TypesInfo.TypeOf(e.X)).(*types.Pointer); isPtr {
+					return
+				}
+				cur = ast.Unparen(e.X)
+				first = false
+				continue
+			}
+			if v, ok := msc.p.TypesInfo.Uses[e.Sel].(*types.Var); ok && v != nil && !v.IsField() {
+				if _, isPtr := types.Unalias(v.Type()).(*types.Pointer); !isPtr {
+					msc.recordNamedContainerAt(at, v.Type())
+					syntaxutil.ForEachValueContainedStructType(v.Type(), func(vt types.Type) {
+						msc.recordStructAt(at, vt)
+					})
+				}
+			}
+			return
+		case *ast.Ident:
+			if v, ok := msc.p.TypesInfo.Uses[e].(*types.Var); ok && v != nil && !v.IsField() &&
+				v.Pkg() != nil && v.Parent() == v.Pkg().Scope() {
+				if _, isPtr := types.Unalias(v.Type()).(*types.Pointer); !isPtr {
+					msc.recordNamedContainerAt(at, v.Type())
+					syntaxutil.ForEachValueContainedStructType(v.Type(), func(vt types.Type) {
+						msc.recordStructAt(at, vt)
+					})
+				}
+			}
+			return
+		case *ast.IndexExpr:
+			if first {
+				syntaxutil.ForEachValueContainedStructType(msc.p.TypesInfo.TypeOf(e), func(vt types.Type) {
+					msc.recordStructAt(at, vt)
+				})
+			}
+			msc.recordNamedContainerAt(at, msc.p.TypesInfo.TypeOf(e.X))
+			cur = ast.Unparen(e.X)
+			first = false
+			continue
+		case *ast.SliceExpr:
+			msc.recordNamedContainerAt(at, msc.p.TypesInfo.TypeOf(e.X))
+			cur = ast.Unparen(e.X)
+			first = false
+			continue
+		default:
+			return
+		}
+	}
+}
+
+func (msc *mutatedStructCollector) recordMutatedSlotWrite(at ast.Node, expr ast.Expr, fresh map[*types.Var]bool, freshEsc map[*types.Var]token.Pos) {
+	if isUnaddressedLocalValueStructSlotWrite(msc.p, msc.idx, at, expr, msc.addrTakenLocalValStructs) {
+		return
+	}
+	msc.recordMutatedExpr(at, expr, fresh, freshEsc)
+}
+
+func (msc *mutatedStructCollector) isZeroGuard(g capsuleCallGuard) bool {
+	return g.capStruct.IsZero() && g.atomicCopyFn.IsZero()
 }

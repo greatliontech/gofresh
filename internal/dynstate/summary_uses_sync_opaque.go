@@ -179,18 +179,32 @@ func walkSyncVarCalls(
 }
 
 func dataMemoVars(audited bool, p *packages.Package, fc *pkgFlowCache, callIdx *refconfine.CallSiteIndex) map[*types.Var]bool {
-	if p == nil || p.TypesInfo == nil || p.Types == nil {
+	if p == nil || p.TypesInfo == nil || p.Types == nil || !syntaxutil.IsTrueStdlibInPkg(p, "sync") {
 		return nil
 	}
 	isSyncMap := func(t types.Type) bool {
 		named, ok := types.Unalias(t).(*types.Named)
 		return ok && named.Obj() != nil && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "sync" && named.Obj().Name() == "Map"
 	}
+	writeInfos := fc.ensureVarWriteInfos(p)
+	isEmptySyncMapLit := func(val *flowir.Value) bool {
+		if val == nil || val.Kind != flowir.ValAllocFresh || val.AllocKind != flowir.AllocCompositeLit || len(val.CompositeElts) != 0 {
+			return false
+		}
+		_, isPtr := types.Unalias(val.Type).Underlying().(*types.Pointer)
+		return !isPtr && isSyncMap(val.Type)
+	}
 	candidates := map[*types.Var]bool{}
 	scope := p.Types.Scope()
 	for _, name := range scope.Names() {
 		v, ok := scope.Lookup(name).(*types.Var)
 		if !ok || v.Exported() || !isSyncMap(v.Type()) {
+			continue
+		}
+		st := writeInfos[v]
+		if st == nil || st.defs != 1 || st.hasNonPlainDef || st.hasPostDefWrite ||
+			st.hasExplicitAddr || st.hasChanSend || st.hasBuiltinMut ||
+			(!st.hasZeroDecl && !isEmptySyncMapLit(st.initVal)) {
 			continue
 		}
 		candidates[v] = true

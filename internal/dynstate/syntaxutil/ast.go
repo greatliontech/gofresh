@@ -447,7 +447,7 @@ func IsReflectTypeOfCall(p *packages.Package, expr ast.Expr) bool {
 		return false
 	}
 	fn, ok := p.TypesInfo.Uses[sel.Sel].(*types.Func)
-	return ok && fn.Pkg() != nil && fn.Pkg().Path() == "reflect" && fn.Name() == "TypeOf"
+	return ok && fn.Pkg() != nil && fn.Pkg().Path() == "reflect" && fn.Name() == "TypeOf" && IsTrueStdlibInPkg(p, "reflect")
 }
 
 // ExtractSliceVarOrSubslice resolves expr (either a package-scope var ident or
@@ -577,5 +577,3 @@ func SameFieldTargetExpr(p *packages.Package, a, b ast.Expr) bool {
 	}
 	return false
 }
-
-

@@ -2,6 +2,7 @@ package protoaudit
 
 import (
 	"go/ast"
+	"go/constant"
 	"go/token"
 	"go/types"
 	"sort"
@@ -17,9 +18,10 @@ func deriveProtoClusters(
 	idx *refconfine.PkgIndex,
 	initOnly map[string]bool,
 	exempted map[ast.Node]bool,
-) ([]ProtoClusterFact, []ProtoExtAlias) {
+) ([]ProtoClusterFact, map[*types.Var]bool, map[*types.Var][]*types.Named) {
 	var clusters []ProtoClusterFact
 	claimedVars := map[*types.Var]bool{}
+	clusterMsgGoTypes := map[*types.Var][]*types.Named{}
 
 	var fnObjs []*types.Func
 	for fn := range idx.FuncDecls {
@@ -59,52 +61,117 @@ func deriveProtoClusters(
 		for n := range initExempt {
 			exempted[n] = true
 		}
+		if msgVar, goMsgTypes := extractClusterMsgGoTypes(p, idx, fd); msgVar != nil {
+			clusterMsgGoTypes[msgVar] = goMsgTypes
+		}
 		clusters = append(clusters, cluster)
 	}
+	return clusters, claimedVars, clusterMsgGoTypes
+}
 
-	var aliases []ProtoExtAlias
-	for _, name := range p.Types.Scope().Names() {
-		v, ok := p.Types.Scope().Lookup(name).(*types.Var)
-		if !ok || claimedVars[v] || !refconfine.TypeMayCarryUnknownDynamic(audited, v.Type()) {
+func extractClusterMsgGoTypes(p *packages.Package, idx *refconfine.PkgIndex, fd *ast.FuncDecl) (*types.Var, []*types.Named) {
+	if p == nil || p.TypesInfo == nil || idx == nil || fd == nil || fd.Body == nil {
+		return nil, nil
+	}
+	var builderComp *ast.CompositeLit
+	for _, st := range fd.Body.List {
+		as, isAs := st.(*ast.AssignStmt)
+		if !isAs || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
 			continue
 		}
-		if idx.DefCounts[v] != 1 {
+		call, isCall := ast.Unparen(as.Rhs[0]).(*ast.CallExpr)
+		if !isCall || len(call.Args) != 0 {
 			continue
 		}
-		ptr, isPtr := types.Unalias(v.Type()).(*types.Pointer)
-		if !isPtr || syntaxutil.DerefNamedStruct(ptr.Elem()) == nil {
+		sel, isSel := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+		if !isSel || sel.Sel.Name != "Build" {
 			continue
+		}
+		if comp, isComp := ast.Unparen(sel.X).(*ast.CompositeLit); isComp {
+			builderComp = comp
+			break
+		}
+	}
+	if builderComp == nil {
+		return nil, nil
+	}
+	var goTypesVar, enumTypesVar, msgTypesVar *types.Var
+	for _, elt := range builderComp.Elts {
+		kv, isKV := elt.(*ast.KeyValueExpr)
+		if !isKV {
+			continue
+		}
+		kid, isID := kv.Key.(*ast.Ident)
+		if !isID {
+			continue
+		}
+		switch kid.Name {
+		case "GoTypes":
+			goTypesVar = syntaxutil.LookupPkgScopeVar(p, kv.Value)
+		case "EnumInfos":
+			enumTypesVar = syntaxutil.LookupPkgScopeVar(p, kv.Value)
+		case "MessageInfos":
+			msgTypesVar = syntaxutil.LookupPkgScopeVar(p, kv.Value)
+		}
+	}
+	if msgTypesVar == nil || goTypesVar == nil {
+		return nil, nil
+	}
+	fixedMakeLen := func(v *types.Var) (int, bool) {
+		if v == nil {
+			return 0, true
 		}
 		vs := idx.VarSpecs[v]
-		if vs == nil || len(vs.Names) != 1 || len(vs.Values) != 1 {
-			continue
+		if vs == nil || len(vs.Values) != 1 {
+			return 0, false
 		}
-		sel, isSel := ast.Unparen(vs.Values[0]).(*ast.SelectorExpr)
-		if !isSel {
-			continue
+		c, isC := ast.Unparen(vs.Values[0]).(*ast.CallExpr)
+		if !isC || len(c.Args) != 2 {
+			return 0, false
 		}
-		targetVar, isVar := p.TypesInfo.Uses[sel.Sel].(*types.Var)
-		if !isVar || targetVar.Pkg() == nil || targetVar.Pkg() == p.Types || targetVar.IsField() {
-			continue
+		tv := p.TypesInfo.Types[c.Args[1]]
+		if tv.Value == nil || tv.Value.Kind() != constant.Int {
+			return 0, false
 		}
-		if !types.Identical(types.Unalias(v.Type()), types.Unalias(targetVar.Type())) {
-			continue
+		n, okN := constant.Int64Val(tv.Value)
+		if !okN || n < 0 {
+			return 0, false
 		}
-		if !verifyReadOnlyPtrVarUses(p, idx, v) {
-			continue
-		}
-		aliases = append(aliases, ProtoExtAlias{
-			Key:    syntaxutil.DynamicVarKey(v),
-			Target: syntaxutil.DynamicVarKey(targetVar),
-		})
+		return int(n), true
 	}
-	sort.Slice(aliases, func(i, j int) bool {
-		if aliases[i].Key != aliases[j].Key {
-			return aliases[i].Key < aliases[j].Key
+	numEnums, okE := fixedMakeLen(enumTypesVar)
+	numMsgs, okM := fixedMakeLen(msgTypesVar)
+	if !okE || !okM {
+		return nil, nil
+	}
+	gvs := idx.VarSpecs[goTypesVar]
+	if gvs == nil || len(gvs.Values) != 1 {
+		return nil, nil
+	}
+	gcomp, isGC := ast.Unparen(gvs.Values[0]).(*ast.CompositeLit)
+	if !isGC || numEnums+numMsgs > len(gcomp.Elts) {
+		return nil, nil
+	}
+	res := make([]*types.Named, numMsgs)
+	for k := 0; k < numMsgs; k++ {
+		elt := ast.Unparen(gcomp.Elts[numEnums+k])
+		c, isC := elt.(*ast.CallExpr)
+		if !isC || len(c.Args) != 1 || !syntaxutil.IsNilIdent(p.TypesInfo, c.Args[0]) {
+			continue
 		}
-		return aliases[i].Target < aliases[j].Target
-	})
-	return clusters, aliases
+		tv := p.TypesInfo.Types[ast.Unparen(c.Fun)]
+		if !tv.IsType() || tv.Type == nil {
+			continue
+		}
+		ptr, isP := types.Unalias(tv.Type).(*types.Pointer)
+		if !isP {
+			continue
+		}
+		if named, isN := types.Unalias(ptr.Elem()).(*types.Named); isN && named.Obj() != nil && named.Obj().Pkg() == p.Types {
+			res[k] = named
+		}
+	}
+	return msgTypesVar, res
 }
 
 func verifyProtoClusterInitFunc(

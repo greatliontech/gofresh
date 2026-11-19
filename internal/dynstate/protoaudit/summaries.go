@@ -1,10 +1,11 @@
 // Package protoaudit mechanically verifies generated protobuf descriptor
-// clusters, extension aliases, protobuf runtime struct roles (builder,
-// desc_builder, enum, message, extension), gRPC service descriptors, and
-// post-init carrier immutability across a package's syntax.
+// clusters, protobuf runtime struct roles (builder, desc_builder, enum,
+// message, extension), and post-init carrier immutability across a package's
+// syntax.
 package protoaudit
 
 import (
+	"context"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -17,6 +18,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // Protobuf runtime struct verification roles (REQ-closure-shared-dynamic-state-proto).
@@ -35,12 +37,15 @@ const (
 // remain free of non-fresh mutations across the package graph. SubBuilder names
 // any cross-package raw descriptor builder struct delegated to by Build().
 type ProtoRuntimeTypeFact struct {
-	Type           syntaxutil.TypeRef   `json:"type"`
-	Role           string               `json:"role"`
-	SubBuilder     syntaxutil.TypeRef   `json:"sub_builder,omitempty"`
-	InitHelper     syntaxutil.FuncKey   `json:"init_helper,omitempty"`
-	AllowedHelpers []syntaxutil.FuncKey `json:"allowed_helpers,omitempty"`
-	GuardTypes     []syntaxutil.TypeRef `json:"guard_types,omitempty"`
+	Type                   syntaxutil.TypeRef    `json:"type"`
+	Role                   string                `json:"role"`
+	SubBuilder             syntaxutil.TypeRef    `json:"sub_builder,omitempty"`
+	InitHelper             syntaxutil.FuncKey    `json:"init_helper,omitempty"`
+	AllowedHelpers         []syntaxutil.FuncKey  `json:"allowed_helpers,omitempty"`
+	GuardTypes             []syntaxutil.TypeRef  `json:"guard_types,omitempty"`
+	CapsuleReflectSafe     bool                  `json:"capsule_reflect_safe,omitempty"`
+	SafePtrWrapperParams   []syntaxutil.ParamKey `json:"safe_ptr_wrapper_params,omitempty"`
+	SafeAtomicPtrCopyFuncs []syntaxutil.FuncKey  `json:"safe_atomic_ptr_copy_funcs,omitempty"`
 }
 
 // Valid reports whether f carries a well-formed TypeRef, known role, and
@@ -51,6 +56,22 @@ func (f ProtoRuntimeTypeFact) Valid() bool {
 	}
 	for _, g := range f.GuardTypes {
 		if !g.Valid() {
+			return false
+		}
+	}
+	if f.CapsuleReflectSafe && f.Role != ProtoRoleMessage && f.Role != ProtoRoleExtension {
+		return false
+	}
+	if (len(f.SafePtrWrapperParams) > 0 || len(f.SafeAtomicPtrCopyFuncs) > 0) && !f.CapsuleReflectSafe {
+		return false
+	}
+	for _, pk := range f.SafePtrWrapperParams {
+		if !pk.Valid() {
+			return false
+		}
+	}
+	for _, fk := range f.SafeAtomicPtrCopyFuncs {
+		if !fk.Valid() {
 			return false
 		}
 	}
@@ -114,53 +135,34 @@ func (c ProtoClusterFact) Valid() bool {
 	return true
 }
 
-// ProtoExtAlias records an immutable package-scope extension descriptor alias
-// (var E_X = otherpkg.E_Y) that discharges iff Target discharges as a verified
-// protobuf cluster variable.
-type ProtoExtAlias struct {
-	Key    string `json:"key"`
-	Target string `json:"target"`
-}
-
-// Valid reports whether a names two distinct well-formed variable keys.
-func (a ProtoExtAlias) Valid() bool {
-	return syntaxutil.ValidQualifiedVarKey(a.Key) && syntaxutil.ValidQualifiedVarKey(a.Target) && a.Key != a.Target
-}
-
-// GrpcServiceVarFact records an immutable composite-literal gRPC ServiceDesc
-// package variable paired with its descriptor struct types.
-type GrpcServiceVarFact struct {
-	Key        string             `json:"key"`
-	SvcDesc    syntaxutil.TypeRef `json:"svc_desc"`
-	MethodDesc syntaxutil.TypeRef `json:"method_desc,omitempty"`
-	StreamDesc syntaxutil.TypeRef `json:"stream_desc,omitempty"`
-}
-
-// Valid reports whether g carries well-formed variable and descriptor type keys.
-func (g GrpcServiceVarFact) Valid() bool {
-	if !syntaxutil.ValidQualifiedVarKey(g.Key) || !g.SvcDesc.Valid() {
-		return false
-	}
-	if !g.MethodDesc.IsZero() && !g.MethodDesc.Valid() {
-		return false
-	}
-	if !g.StreamDesc.IsZero() && !g.StreamDesc.Valid() {
-		return false
-	}
-	return true
-}
-
 // DeriveProtoAndStructFacts mechanically extracts protobuf descriptor clusters,
-// extension aliases, runtime struct role proofs, gRPC service descriptors, and
-// non-exempted struct mutations across p.Syntax.
+// runtime struct role proofs, and non-exempted struct mutations across p.Syntax.
 func DeriveProtoAndStructFacts(
 	audited bool,
 	p *packages.Package,
 	idx *refconfine.PkgIndex,
+	freshCache *freshstruct.FreshLocalsCache,
+	confinedCacheMaps map[*types.Var]map[*ast.FuncDecl]bool,
 	initOnly map[string]bool,
 	mutatedVars map[string]bool,
 	extraExemptNodes map[ast.Node]bool,
-) ([]ProtoClusterFact, []ProtoExtAlias, []ProtoRuntimeTypeFact, []GrpcServiceVarFact, []syntaxutil.TypeRef, []syntaxutil.ConditionalStructMutation) {
+) ([]ProtoClusterFact, []ProtoRuntimeTypeFact, []syntaxutil.TypeRef, []syntaxutil.ConditionalStructMutation, []syntaxutil.ReflectedIfaceFact, map[*types.Var]bool) {
+	return DeriveProtoAndStructFactsCtx(nil, audited, p, idx, freshCache, confinedCacheMaps, initOnly, mutatedVars, extraExemptNodes)
+}
+
+// DeriveProtoAndStructFactsCtx derives protobuf clusters, runtime role proofs,
+// and struct/interface mutation facts with ctx-scoped trace.DomainDynstate emission.
+func DeriveProtoAndStructFactsCtx(
+	ctx context.Context,
+	audited bool,
+	p *packages.Package,
+	idx *refconfine.PkgIndex,
+	freshCache *freshstruct.FreshLocalsCache,
+	confinedCacheMaps map[*types.Var]map[*ast.FuncDecl]bool,
+	initOnly map[string]bool,
+	mutatedVars map[string]bool,
+	extraExemptNodes map[ast.Node]bool,
+) ([]ProtoClusterFact, []ProtoRuntimeTypeFact, []syntaxutil.TypeRef, []syntaxutil.ConditionalStructMutation, []syntaxutil.ReflectedIfaceFact, map[*types.Var]bool) {
 	if p == nil || p.Types == nil || p.TypesInfo == nil || len(p.Syntax) == 0 {
 		return nil, nil, nil, nil, nil, nil
 	}
@@ -170,6 +172,12 @@ func DeriveProtoAndStructFacts(
 	if initOnly == nil {
 		initOnly = idx.InitOnly
 	}
+	if freshCache == nil {
+		freshCache = freshstruct.NewFreshLocalsCache(p, idx)
+	}
+	if confinedCacheMaps == nil {
+		confinedCacheMaps = freshstruct.FindMutexConfinedConstructorCaches(p, idx)
+	}
 	exempted := make(map[ast.Node]bool, len(extraExemptNodes))
 	for n, v := range extraExemptNodes {
 		if v {
@@ -178,21 +186,37 @@ func DeriveProtoAndStructFacts(
 	}
 	exemptFamilyByFunc := map[*ast.FuncDecl]map[*types.Named]bool{}
 	exemptReadFields := map[*types.Var]bool{}
+	foreignReflectFields := map[*types.Var]bool{}
 
 	var clusters []ProtoClusterFact
-	var extAliases []ProtoExtAlias
+	var claimedVars map[*types.Var]bool
+	var clusterMsgGoTypes map[*types.Var][]*types.Named
 	var runtimeTypes []ProtoRuntimeTypeFact
-	var grpcVars []GrpcServiceVarFact
 	var protoConds []syntaxutil.ConditionalStructMutation
 
-	freshCache := freshstruct.NewFreshLocalsCache(p, idx)
-	confinedCacheMaps := freshstruct.FindMutexConfinedConstructorCaches(p, idx)
 	if audited {
-		clusters, extAliases = deriveProtoClusters(audited, p, idx, initOnly, exempted)
-		runtimeTypes, protoConds = deriveProtoRuntimeTypes(p, idx, freshCache, confinedCacheMaps, mutatedVars, exempted, exemptFamilyByFunc, exemptReadFields)
-		grpcVars = deriveGrpcServiceVars(audited, p, idx)
+		clusters, claimedVars, clusterMsgGoTypes = deriveProtoClusters(audited, p, idx, initOnly, exempted)
+		runtimeTypes, protoConds = deriveProtoRuntimeTypes(ctx, p, idx, freshCache, confinedCacheMaps, mutatedVars, exempted, exemptFamilyByFunc, exemptReadFields, foreignReflectFields)
 	}
-	mutatedStructs, condMutations := freshstruct.CollectMutatedStructTypes(p, idx, freshCache, confinedCacheMaps, exempted, exemptFamilyByFunc, exemptReadFields)
+	mutatedStructs, condMutations, reflectedIfaces := freshstruct.CollectMutatedStructTypesWithCapsuleFieldsCtx(ctx, p, idx, freshCache, confinedCacheMaps, exempted, exemptFamilyByFunc, exemptReadFields, foreignReflectFields, clusterMsgGoTypes)
+	if len(runtimeTypes) > 0 && freshstruct.PkgCastsUnsafePtrToMutatedStructCtx(ctx, p, idx, mutatedStructs, foreignReflectFields) {
+		target := p.PkgPath
+		if target == "" {
+			target = p.Types.Path()
+		}
+		for i := range runtimeTypes {
+			if runtimeTypes[i].CapsuleReflectSafe && trace.Enabled(ctx, trace.DomainDynstate, target) {
+				trace.Emit(ctx, trace.DomainDynstate, "dynstate.capsule.reject", target,
+					trace.String("struct", runtimeTypes[i].Type.Key()),
+					trace.String("role", runtimeTypes[i].Role),
+					trace.String("reason", "unsafe_ptr_cast_to_mutated_struct"),
+				)
+			}
+			runtimeTypes[i].CapsuleReflectSafe = false
+			runtimeTypes[i].SafePtrWrapperParams = nil
+			runtimeTypes[i].SafeAtomicPtrCopyFuncs = nil
+		}
+	}
 	if len(protoConds) > 0 {
 		seenCond := make(map[syntaxutil.ConditionalStructMutation]bool, len(condMutations)+len(protoConds))
 		merged := make([]syntaxutil.ConditionalStructMutation, 0, len(condMutations)+len(protoConds))
@@ -211,7 +235,7 @@ func DeriveProtoAndStructFacts(
 		slices.SortFunc(merged, syntaxutil.ConditionalStructMutation.Compare)
 		condMutations = merged
 	}
-	return clusters, extAliases, runtimeTypes, grpcVars, mutatedStructs, condMutations
+	return clusters, runtimeTypes, mutatedStructs, condMutations, reflectedIfaces, claimedVars
 }
 
 type intraCandCall struct {
@@ -1026,8 +1050,8 @@ func CollectDirectCrossPkgVarWrites(audited bool, p *packages.Package, idx *refc
 // CollectNonMethodCrossPkgVarUses returns the sorted qualified variable keys of
 // every cross-package dynamic-capable package variable referenced in p.Syntax
 // in any position other than the direct receiver X of a non-promoted method
-// call X.Method(...).
-func CollectNonMethodCrossPkgVarUses(audited bool, p *packages.Package, idx *refconfine.PkgIndex) []string {
+// call X.Method(...) or an exempted direct-methods-only alias initializer.
+func CollectNonMethodCrossPkgVarUses(audited bool, p *packages.Package, idx *refconfine.PkgIndex, exemptUseIdents map[*ast.Ident]bool) []string {
 	if p == nil || p.Types == nil || p.TypesInfo == nil || len(p.Syntax) == 0 {
 		return nil
 	}
@@ -1048,6 +1072,9 @@ func CollectNonMethodCrossPkgVarUses(audited bool, p *packages.Package, idx *ref
 		return ok && ast.Unparen(call.Fun) == mSel
 	}
 	for ident, obj := range p.TypesInfo.Uses {
+		if exemptUseIdents[ident] {
+			continue
+		}
 		v, ok := obj.(*types.Var)
 		if !ok || v == nil || v.IsField() || v.Pkg() == nil || v.Pkg() == p.Types || v.Parent() != v.Pkg().Scope() {
 			continue

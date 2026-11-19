@@ -1,6 +1,7 @@
 package dynstate
 
 import (
+	"context"
 	"go/ast"
 	"go/types"
 	"slices"
@@ -20,7 +21,13 @@ import (
 // FactOf derives one package's execution-agnostic dynamic-state fact from its
 // syntax and type information.
 func FactOf(audited bool, p *packages.Package) Fact {
-	return FactOfWithHooks(audited, p, false, nil)
+	return FactOfWithHooksCtx(nil, audited, p, false, nil)
+}
+
+// FactOfCtx derives one package's execution-agnostic dynamic-state fact,
+// emitting trace.DomainDynstate provenance events to any active sink on ctx.
+func FactOfCtx(ctx context.Context, audited bool, p *packages.Package) Fact {
+	return FactOfWithHooksCtx(ctx, audited, p, false, nil)
 }
 
 // FactOfWithHooks derives one package's dynamic-state fact with optional
@@ -28,19 +35,30 @@ func FactOf(audited bool, p *packages.Package) Fact {
 // singleSubject; singleSubject only suppresses hooks observations at sync.Pool
 // call sites that single-subject attestation discharges.
 func FactOfWithHooks(audited bool, p *packages.Package, singleSubject bool, hooks *syntaxutil.ExplainHookSet) Fact {
+	return FactOfWithHooksCtx(nil, audited, p, singleSubject, hooks)
+}
+
+// FactOfWithHooksCtx derives one package's dynamic-state fact with optional
+// explain observation hooks armed and ctx-scoped trace.DomainDynstate emission.
+func FactOfWithHooksCtx(ctx context.Context, audited bool, p *packages.Package, singleSubject bool, hooks *syntaxutil.ExplainHookSet) Fact {
 	if p == nil {
 		return Fact{}
 	}
-	return factOfWithCache(audited, p, nil, singleSubject, hooks)
+	return factOfWithCacheCtx(ctx, audited, p, nil, singleSubject, hooks)
 }
 
 func factOfWithCache(audited bool, p *packages.Package, fc *pkgFlowCache, singleSubject bool, hooks *syntaxutil.ExplainHookSet) Fact {
+	return factOfWithCacheCtx(nil, audited, p, fc, singleSubject, hooks)
+}
+
+func factOfWithCacheCtx(ctx context.Context, audited bool, p *packages.Package, fc *pkgFlowCache, singleSubject bool, hooks *syntaxutil.ExplainHookSet) Fact {
 	var fact Fact
 	if p == nil {
 		return fact
 	}
 	var start time.Time
-	tracing := trace.Enabled(nil, trace.DomainDynstate, p.PkgPath)
+	target := dynstateTarget(p)
+	tracing := trace.Enabled(ctx, trace.DomainDynstate, target)
 	if tracing {
 		start = time.Now()
 	}
@@ -446,15 +464,15 @@ func factOfWithCache(audited bool, p *packages.Package, fc *pkgFlowCache, single
 	recordPackageMethodDirectives(p, &fact)
 	if idx != nil {
 		fact.DirectVarWrites = protoaudit.CollectDirectCrossPkgVarWrites(audited, p, idx)
-		fact.NonMethodVarUses = protoaudit.CollectNonMethodCrossPkgVarUses(audited, p, idx)
 	}
 	if p.Types != nil && p.Module != nil {
 		if idx != nil {
-			fact.MappingDischarges = deriveMappingDischarges(audited, p, idx)
-			fact.MemoDischarges = deriveMemoDischarges(audited, p, idx)
+			freshCache := freshstruct.NewFreshLocalsCache(p, idx)
+			confinedCacheMaps := freshstruct.FindMutexConfinedConstructorCaches(p, idx)
+			fact.MappingDischarges = deriveMappingDischarges(ctx, audited, p, fc, idx)
+			fact.MemoDischarges = deriveMemoDischarges(ctx, audited, p, fc, idx)
 			var onceMemoExempt map[ast.Node]bool
-			fact.OnceMemoTypes, onceMemoExempt = deriveOnceMemoTypes(audited, p, fc, idx, &pkgConf)
-			fact.OnceMemoCandidates = deriveOnceMemoCandidates(audited, p, fc, idx, singleSubjectSet)
+			fact.OnceMemoTypes, onceMemoExempt = deriveOnceMemoTypes(ctx, audited, p, fc, idx, freshCache, &pkgConf)
 			if len(fact.Declares) > 0 && propharness.IsHarnessPath(p.PkgPath) && propharness.VerifyPackage(audited, p) {
 				fact.HarnessDischarges = slices.Clone(fact.Declares)
 			}
@@ -465,32 +483,41 @@ func factOfWithCache(audited bool, p *packages.Package, fc *pkgFlowCache, single
 			for key := range poolMutated {
 				unattestedMutated[key] = true
 			}
-			fact.ProtoClusters, fact.ProtoExtAliases, fact.ProtoRuntimeTypes, fact.GrpcServiceVars, fact.MutatedStructTypes, fact.ConditionalStructMutations =
-				protoaudit.DeriveProtoAndStructFacts(audited, p, idx, initOnly, unattestedMutated, onceMemoExempt)
+			var claimedVars map[*types.Var]bool
+			fact.ProtoClusters, fact.ProtoRuntimeTypes, fact.MutatedStructTypes, fact.ConditionalStructMutations, fact.ReflectedIfaceMethodSets, claimedVars =
+				protoaudit.DeriveProtoAndStructFactsCtx(ctx, audited, p, idx, freshCache, confinedCacheMaps, initOnly, unattestedMutated, onceMemoExempt)
+			var exemptAliasIdents map[*ast.Ident]bool
+			fact.ReadOnlyVarAliases, exemptAliasIdents = deriveReadOnlyVarAliases(ctx, audited, p, fc, idx, singleSubjectSet, claimedVars)
+			fact.StaticCompositeGlobals = deriveStaticCompositeGlobals(ctx, audited, p, fc, idx, singleSubjectSet, claimedVars)
+			fact.OnceMemoCandidates = deriveOnceMemoCandidates(ctx, audited, p, fc, idx, singleSubjectSet, exemptAliasIdents)
+			fact.NonMethodVarUses = protoaudit.CollectNonMethodCrossPkgVarUses(audited, p, idx, exemptAliasIdents)
 			fact.NonMutatingMethods = protoaudit.DeriveNonMutatingMethods(audited, p, idx)
 			fact.NoPostInitCarrierWrites, fact.CarrierImportCalls =
 				protoaudit.DeriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
 		}
 	} else if idx != nil {
-		fact.MutatedStructTypes, fact.ConditionalStructMutations = freshstruct.CollectMutatedStructTypes(p, idx, nil, nil, nil, nil, nil)
+		freshCache := freshstruct.NewFreshLocalsCache(p, idx)
+		confinedCacheMaps := freshstruct.FindMutexConfinedConstructorCaches(p, idx)
+		fact.NonMethodVarUses = protoaudit.CollectNonMethodCrossPkgVarUses(audited, p, idx, nil)
+		fact.MutatedStructTypes, fact.ConditionalStructMutations, fact.ReflectedIfaceMethodSets = freshstruct.CollectMutatedStructTypesWithCapsuleFieldsCtx(ctx, p, idx, freshCache, confinedCacheMaps, nil, nil, nil, nil, nil)
 		fact.NonMutatingMethods = protoaudit.DeriveNonMutatingMethods(audited, p, idx)
 		fact.NoPostInitCarrierWrites, fact.CarrierImportCalls =
 			protoaudit.DeriveNoPostInitCarrierWrites(audited, p, idx, initOnly, fact.DirectVarWrites)
 	}
 	if tracing {
 		for _, v := range fact.Mutates {
-			trace.Emit(nil, trace.DomainDynstate, "dynstate.var.reject", p.PkgPath,
+			trace.Emit(ctx, trace.DomainDynstate, "dynstate.var.reject", target,
 				trace.String("var", v),
 				trace.String("kind", "mutates"),
 			)
 		}
 		for _, v := range fact.Escapes {
-			trace.Emit(nil, trace.DomainDynstate, "dynstate.var.reject", p.PkgPath,
+			trace.Emit(ctx, trace.DomainDynstate, "dynstate.var.reject", target,
 				trace.String("var", v),
 				trace.String("kind", "escapes"),
 			)
 		}
-		trace.Emit(nil, trace.DomainDynstate, "dynstate.factof.done", p.PkgPath,
+		trace.Emit(ctx, trace.DomainDynstate, "dynstate.factof.done", target,
 			trace.Bool("audited", audited),
 			trace.Int("declares", len(fact.Declares)),
 			trace.Int("mutates", len(fact.Mutates)),

@@ -1,121 +1,42 @@
 package dynstate
 
 import (
-	"slices"
+	"context"
 	"sort"
-	"strings"
 
 	"github.com/greatliontech/gofresh/internal/dynstate/protoaudit"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
-	"github.com/greatliontech/gofresh/internal/propharness"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
-// walkImportCone traverses listing imports depth-first starting from roots,
-// calling visit on each newly seen node present in imports. When visit returns
-// false, traversal does not descend into that node's imports.
-func walkImportCone(roots []string, imports func(string) ([]string, bool), visit func(string) bool) {
-	seen := make(map[string]bool, len(roots))
-	var step func(string)
-	step = func(listing string) {
-		if seen[listing] {
-			return
-		}
-		imps, ok := imports(listing)
-		if !ok {
-			return
-		}
-		seen[listing] = true
-		if !visit(listing) {
-			return
-		}
-		for _, imp := range imps {
-			step(imp)
-		}
-	}
-	for _, root := range roots {
-		step(root)
-	}
-}
-
-func intersectPackageVariants[K comparable, V any](
-	pkgFacts []Fact,
-	extract func(Fact) map[K]V,
-	merge func(prev, next V) (V, bool),
-) map[K]V {
-	if len(pkgFacts) == 0 {
-		return nil
-	}
-	common := extract(pkgFacts[0])
-	for fi := 1; fi < len(pkgFacts); fi++ {
-		cur := extract(pkgFacts[fi])
-		for k, prev := range common {
-			next, ok := cur[k]
-			if !ok {
-				delete(common, k)
-				continue
-			}
-			if merged, keep := merge(prev, next); keep {
-				common[k] = merged
-			} else {
-				delete(common, k)
-			}
-		}
-	}
-	return common
-}
-
-func intersectDeclaredVariants[V any](
-	pkgPaths []string,
-	allFacts map[string][]Fact,
-	pkgHasMalformed map[string]bool,
-	malformedVars map[string]bool,
-	extract func(pkgPath string, fact Fact) map[string]V,
-	equal func(a, b V) bool,
-) map[string]V {
-	res := map[string]V{}
-	for _, pkgPath := range pkgPaths {
-		if pkgHasMalformed[pkgPath] {
-			continue
-		}
-		perKeyVal := map[string]V{}
-		perKeyValid := map[string]bool{}
-		for _, fact := range allFacts[pkgPath] {
-			present := extract(pkgPath, fact)
-			for _, key := range fact.Declares {
-				val, ok := present[key]
-				if prevValid, seen := perKeyValid[key]; seen {
-					if !prevValid || !ok || !equal(perKeyVal[key], val) {
-						perKeyValid[key] = false
-					}
-				} else if ok {
-					perKeyValid[key] = true
-					perKeyVal[key] = val
-				} else {
-					perKeyValid[key] = false
-				}
-			}
-		}
-		for key, valid := range perKeyValid {
-			if valid && !malformedVars[key] {
-				res[key] = perKeyVal[key]
-			}
-		}
-	}
-	return res
-}
-
 type coneDischarges struct {
-	pinnedPkg             map[string]bool
-	mutableLocalPkg       map[string]bool
-	mappingDischargedVars map[string]bool
-	memoDischargedVars    map[string]bool
-	harnessDischargedVars map[string]bool
-	directiveCovered      map[string]bool
-	protoVerifiedVars     map[string]bool
-	grpcVerifiedVars      map[string]bool
+	standardPkg            map[string]bool
+	pinnedPkg              map[string]bool
+	mutableLocalPkg        map[string]bool
+	mappingDischargedVars  map[string]bool
+	memoDischargedVars     map[string]bool
+	onceMemoDischargedVars map[string]bool
+	staticCompositeVars    map[string]bool
+	harnessDischargedVars  map[string]bool
+	directiveCovered       map[string]bool
+	protoVerifiedVars      map[string]bool
+}
+
+func (d coneDischarges) isAttestationFreeDischarged(pkgPath, key string, malformedVars map[string]bool) bool {
+	return (d.pinnedPkg[pkgPath] || d.mutableLocalPkg[pkgPath]) && !malformedVars[key] &&
+		(d.mappingDischargedVars[key] || d.memoDischargedVars[key] ||
+			d.onceMemoDischargedVars[key] || d.staticCompositeVars[key] ||
+			d.harnessDischargedVars[key])
+}
+
+func (d coneDischarges) isProtoAttestedDischarged(pkgPath, key string, singleSubject bool, malformedVars map[string]bool) bool {
+	return singleSubject && (d.pinnedPkg[pkgPath] || d.mutableLocalPkg[pkgPath]) &&
+		!malformedVars[key] && d.protoVerifiedVars[key]
 }
 
 func deriveConeDischarges(
+	ctx context.Context,
+	viewPackage string,
 	meta []GraphPackage,
 	pkgPaths []string,
 	allFacts map[string][]Fact,
@@ -132,17 +53,29 @@ func deriveConeDischarges(
 	anyMalformedDirectVarWrite bool,
 	anyMalformedNonMethodVarUse bool,
 ) coneDischarges {
+	coneTargetFor := func(pkg string) string {
+		if viewPackage != "" {
+			return viewPackage
+		}
+		return pkg
+	}
 	out := coneDischarges{
+		standardPkg:     map[string]bool{},
 		pinnedPkg:       map[string]bool{},
 		mutableLocalPkg: map[string]bool{},
 	}
 	for _, node := range meta {
 		switch node.Class {
+		case StandardPackage:
+			out.standardPkg[node.PkgPath] = true
 		case PinnedPackage:
 			out.pinnedPkg[node.PkgPath] = true
 		case MutableLocalPackage:
 			out.mutableLocalPkg[node.PkgPath] = true
 		}
+	}
+	isKnownCleanNonStdPkg := func(p string) bool {
+		return (out.pinnedPkg[p] || out.mutableLocalPkg[p]) && !out.standardPkg[p] && !pkgHasMalformedFact[p]
 	}
 
 	pkgCannotRetainCarrier := map[string]bool{}
@@ -184,16 +117,6 @@ func deriveConeDischarges(
 		}
 	}
 
-	type rtRoleKey struct {
-		Type syntaxutil.TypeRef
-		Role string
-	}
-	type rtRoleInfo struct {
-		SubBuilder     syntaxutil.TypeRef
-		InitHelper     syntaxutil.FuncKey
-		AllowedHelpers map[syntaxutil.FuncKey]bool
-		GuardTypes     map[syntaxutil.TypeRef]bool
-	}
 	commonRolesByPkg := map[string]map[rtRoleKey]rtRoleInfo{}
 	nonMutatingMethods := map[syntaxutil.FuncKey]bool{}
 	if !anyMalformedMutatedStruct {
@@ -235,11 +158,22 @@ func deriveConeDischarges(
 						for _, g := range rt.GuardTypes {
 							gt[g] = true
 						}
+						swp := make(map[syntaxutil.ParamKey]bool, len(rt.SafePtrWrapperParams))
+						for _, pk := range rt.SafePtrWrapperParams {
+							swp[pk] = true
+						}
+						sac := make(map[syntaxutil.FuncKey]bool, len(rt.SafeAtomicPtrCopyFuncs))
+						for _, fk := range rt.SafeAtomicPtrCopyFuncs {
+							sac[fk] = true
+						}
 						cur[rtRoleKey{Type: rt.Type, Role: rt.Role}] = rtRoleInfo{
-							SubBuilder:     rt.SubBuilder,
-							InitHelper:     rt.InitHelper,
-							AllowedHelpers: ah,
-							GuardTypes:     gt,
+							SubBuilder:             rt.SubBuilder,
+							InitHelper:             rt.InitHelper,
+							AllowedHelpers:         ah,
+							GuardTypes:             gt,
+							CapsuleReflectSafe:     rt.CapsuleReflectSafe,
+							SafePtrWrapperParams:   swp,
+							SafeAtomicPtrCopyFuncs: sac,
 						}
 					}
 					return cur
@@ -255,6 +189,22 @@ func deriveConeDischarges(
 					}
 					for g := range next.GuardTypes {
 						prev.GuardTypes[g] = true
+					}
+					prev.CapsuleReflectSafe = prev.CapsuleReflectSafe && next.CapsuleReflectSafe
+					if !prev.CapsuleReflectSafe {
+						clear(prev.SafePtrWrapperParams)
+						clear(prev.SafeAtomicPtrCopyFuncs)
+					} else {
+						for pk := range prev.SafePtrWrapperParams {
+							if !next.SafePtrWrapperParams[pk] {
+								delete(prev.SafePtrWrapperParams, pk)
+							}
+						}
+						for fk := range prev.SafeAtomicPtrCopyFuncs {
+							if !next.SafeAtomicPtrCopyFuncs[fk] {
+								delete(prev.SafeAtomicPtrCopyFuncs, fk)
+							}
+						}
 					}
 					return prev, true
 				},
@@ -284,28 +234,709 @@ func deriveConeDischarges(
 		return false
 	}
 
+	importsByPkg := make(map[string][]string, len(meta))
+	knownNonStdInMeta := make(map[string]bool, len(meta))
+	if len(allCondStructMutations) > 0 {
+		for _, node := range meta {
+			importsByPkg[node.PkgPath] = append(importsByPkg[node.PkgPath], node.Imports...)
+			if node.Class == PinnedPackage || node.Class == MutableLocalPackage {
+				knownNonStdInMeta[node.PkgPath] = true
+			}
+		}
+	}
+
 	for len(allCondStructMutations) > 0 {
+		safeCapsuleGuardStructs := map[string]map[syntaxutil.TypeRef]bool{}
+		nestedSafeCapsuleStructs := map[string]map[syntaxutil.TypeRef]bool{}
+		safePtrWrapperParams := map[syntaxutil.TypeRef]map[syntaxutil.ParamKey]bool{}
+		safeAtomicPtrCopyFuncs := map[syntaxutil.FuncKey]bool{}
+		if !anyMalformedMutatedStruct {
+			for _, pkgPath := range pkgPaths {
+				anyMsgRoleUnsafeOrMut := false
+				for rk, ri := range commonRolesByPkg[pkgPath] {
+					if rk.Role != protoaudit.ProtoRoleMessage {
+						continue
+					}
+					if !ri.CapsuleReflectSafe || mutatedStructs[rk.Type] {
+						anyMsgRoleUnsafeOrMut = true
+						break
+					}
+					for g := range ri.GuardTypes {
+						if mutatedStructs[g] {
+							anyMsgRoleUnsafeOrMut = true
+							break
+						}
+					}
+					if anyMsgRoleUnsafeOrMut {
+						break
+					}
+				}
+				for rk, ri := range commonRolesByPkg[pkgPath] {
+					if (rk.Role != protoaudit.ProtoRoleMessage && rk.Role != protoaudit.ProtoRoleExtension) ||
+						!ri.CapsuleReflectSafe {
+						continue
+					}
+					if !anyMsgRoleUnsafeOrMut {
+						if nestedSafeCapsuleStructs[pkgPath] == nil {
+							nestedSafeCapsuleStructs[pkgPath] = map[syntaxutil.TypeRef]bool{}
+						}
+						nestedSafeCapsuleStructs[pkgPath][rk.Type] = true
+						for g := range ri.GuardTypes {
+							nestedSafeCapsuleStructs[pkgPath][g] = true
+						}
+					}
+					if mutatedStructs[rk.Type] {
+						continue
+					}
+					guardMut := false
+					for g := range ri.GuardTypes {
+						if mutatedStructs[g] {
+							guardMut = true
+							break
+						}
+					}
+					if guardMut {
+						continue
+					}
+					if safeCapsuleGuardStructs[pkgPath] == nil {
+						safeCapsuleGuardStructs[pkgPath] = map[syntaxutil.TypeRef]bool{}
+					}
+					safeCapsuleGuardStructs[pkgPath][rk.Type] = true
+					for g := range ri.GuardTypes {
+						safeCapsuleGuardStructs[pkgPath][g] = true
+					}
+					if nestedSafeCapsuleStructs[pkgPath] == nil {
+						nestedSafeCapsuleStructs[pkgPath] = map[syntaxutil.TypeRef]bool{}
+					}
+					nestedSafeCapsuleStructs[pkgPath][rk.Type] = true
+					for g := range ri.GuardTypes {
+						nestedSafeCapsuleStructs[pkgPath][g] = true
+					}
+					if len(ri.SafePtrWrapperParams) > 0 {
+						if safePtrWrapperParams[rk.Type] == nil {
+							safePtrWrapperParams[rk.Type] = map[syntaxutil.ParamKey]bool{}
+						}
+						for pk := range ri.SafePtrWrapperParams {
+							safePtrWrapperParams[rk.Type][pk] = true
+						}
+					}
+					for fk := range ri.SafeAtomicPtrCopyFuncs {
+						safeAtomicPtrCopyFuncs[fk] = true
+					}
+				}
+			}
+		}
+
+		isInactiveCapsuleOrCopyScoped := func(rf syntaxutil.ReflectedIfaceFact) bool {
+			return (!rf.UnlessSafeCapsuleStruct.IsZero() && safePtrWrapperParams[rf.UnlessSafeCapsuleStruct][rf.UnlessSafeCapsuleParam]) ||
+				(!rf.UnlessSafeAtomicPtrCopy.IsZero() && safeAtomicPtrCopyFuncs[rf.UnlessSafeAtomicPtrCopy])
+		}
+		localFlagROBypassPkgs := map[string]bool{}
+		for _, pkgPath := range pkgPaths {
+			if out.standardPkg[pkgPath] {
+				continue
+			}
+			pkgFacts := allFacts[pkgPath]
+			if len(pkgFacts) == 0 || pkgHasMalformedFact[pkgPath] {
+				localFlagROBypassPkgs[pkgPath] = true
+				continue
+			}
+			for _, fact := range pkgFacts {
+				for _, rf := range fact.ReflectedIfaceMethodSets {
+					if isInactiveCapsuleOrCopyScoped(rf) {
+						continue
+					}
+					if rf.MethodSet == syntaxutil.ReflectFlagROLocalBypassKey {
+						localFlagROBypassPkgs[pkgPath] = true
+						break
+					}
+				}
+				if localFlagROBypassPkgs[pkgPath] {
+					break
+				}
+			}
+		}
+		anyConeLocalFlagROBypass := len(localFlagROBypassPkgs) > 0
+		actualReflectAny := map[string]bool{}
+		actualReflectAnyFlagRO := map[string]bool{}
+		reachSeedReflectAny := map[string]bool{}
+		reachSeedReflectAnyFlagRO := map[string]bool{}
+		leaksAnyUpwardPkgs := map[string]bool{}
+		rvBoundaryEscapePkgs := map[string]bool{}
+		anyConeReflectAny := false
+		anyConeFlagROBypass := false
+		type ctxBoxedEntry struct {
+			pkg string
+			rf  syntaxutil.ReflectedIfaceFact
+		}
+		var unsafeCarrierBoxed []ctxBoxedEntry
+		for _, pkgPath := range pkgPaths {
+			if out.standardPkg[pkgPath] {
+				continue
+			}
+			pkgFacts := allFacts[pkgPath]
+			if len(pkgFacts) == 0 || pkgHasMalformedFact[pkgPath] {
+				actualReflectAny[pkgPath] = true
+				actualReflectAnyFlagRO[pkgPath] = true
+				reachSeedReflectAny[pkgPath] = true
+				reachSeedReflectAnyFlagRO[pkgPath] = true
+				leaksAnyUpwardPkgs[pkgPath] = true
+				rvBoundaryEscapePkgs[pkgPath] = true
+				anyConeReflectAny = true
+				anyConeFlagROBypass = true
+				continue
+			}
+			for _, fact := range pkgFacts {
+				for _, rf := range fact.ReflectedIfaceMethodSets {
+					if isInactiveCapsuleOrCopyScoped(rf) {
+						continue
+					}
+					if rf.ReflectValueBoundaryEscape {
+						rvBoundaryEscapePkgs[pkgPath] = true
+					}
+					if rf.UnsafePtrCarrierBoxed != "" {
+						if rf.Valid() {
+							unsafeCarrierBoxed = append(unsafeCarrierBoxed, ctxBoxedEntry{pkg: pkgPath, rf: rf})
+						}
+						continue
+					}
+					if rf.ContextValueBoxed != "" || rf.NestedInConcreteBox != "" {
+						continue
+					}
+					switch rf.MethodSet {
+					case syntaxutil.EmptyIfaceMethodSetKey:
+						if rf.ReflectsEmptyIfaceLocally || !rf.LeaksEmptyIfaceUpward {
+							reachSeedReflectAny[pkgPath] = true
+							actualReflectAny[pkgPath] = true
+							anyConeReflectAny = true
+						}
+						if rf.LeaksEmptyIfaceUpward {
+							leaksAnyUpwardPkgs[pkgPath] = true
+						}
+					case syntaxutil.ReflectFlagROBypassAnyKey:
+						actualReflectAny[pkgPath] = true
+						actualReflectAnyFlagRO[pkgPath] = true
+						reachSeedReflectAny[pkgPath] = true
+						reachSeedReflectAnyFlagRO[pkgPath] = true
+						anyConeReflectAny = true
+						anyConeFlagROBypass = true
+					}
+				}
+			}
+		}
+		makeReachPred := func(direct map[string]bool) func(string, map[string]bool) bool {
+			memo := map[string]bool{}
+			done := map[string]bool{}
+			var reach func(pkg string, visiting map[string]bool) bool
+			reach = func(pkg string, visiting map[string]bool) bool {
+				if !knownNonStdInMeta[pkg] || direct[pkg] {
+					return true
+				}
+				if done[pkg] {
+					return memo[pkg]
+				}
+				if visiting[pkg] {
+					return false
+				}
+				visiting[pkg] = true
+				hit := false
+				for _, imp := range importsByPkg[pkg] {
+					if !out.standardPkg[imp] && reach(imp, visiting) {
+						hit = true
+						break
+					}
+				}
+				delete(visiting, pkg)
+				done[pkg] = true
+				memo[pkg] = hit
+				return hit
+			}
+			return reach
+		}
+
+		var coneReflectedIfaces []string
+		coneReflectedProviders := map[string]map[string]bool{}
+		seenRefIface := map[string]bool{}
+		addConeReflectedWith := func(ms, prov, reason, detail string) {
+			if ms == "" {
+				return
+			}
+			if !seenRefIface[ms] {
+				seenRefIface[ms] = true
+				coneReflectedIfaces = append(coneReflectedIfaces, ms)
+			}
+			if coneReflectedProviders[ms] == nil {
+				coneReflectedProviders[ms] = map[string]bool{}
+			}
+			if !coneReflectedProviders[ms][prov] {
+				coneReflectedProviders[ms][prov] = true
+				if tgt := coneTargetFor(prov); trace.Enabled(ctx, trace.DomainDynstate, tgt) {
+					trace.Emit(ctx, trace.DomainDynstate, "dynstate.iface.cone_active", tgt,
+						trace.String("method_set", ms),
+						trace.String("provider", prov),
+						trace.String("reason", reason),
+						trace.String("detail", detail),
+					)
+				}
+			}
+		}
+		addConeReflected := func(ms, prov string) {
+			addConeReflectedWith(ms, prov, "direct_or_erased", "")
+		}
+		promotedUnsafeCarriers := make([]bool, len(unsafeCarrierBoxed))
+		for resolveChanged := true; resolveChanged; {
+			resolveChanged = false
+			if anyConeReflectAny {
+				for pkgPath := range leaksAnyUpwardPkgs {
+					reachSeedReflectAny[pkgPath] = true
+				}
+			}
+			if anyConeFlagROBypass {
+				for pkgPath := range leaksAnyUpwardPkgs {
+					reachSeedReflectAnyFlagRO[pkgPath] = true
+				}
+			}
+			pkgReachesReflectAny := makeReachPred(reachSeedReflectAny)
+			pkgReachesReflectAnyFlagRO := makeReachPred(reachSeedReflectAnyFlagRO)
+
+			var ctxBoxed []ctxBoxedEntry
+			for _, pkgPath := range pkgPaths {
+				for _, fact := range allFacts[pkgPath] {
+					for _, rf := range fact.ReflectedIfaceMethodSets {
+						if !rf.Valid() || rf.UnsafePtrCarrierBoxed != "" || isInactiveCapsuleOrCopyScoped(rf) {
+							continue
+						}
+						if rf.ContextValueBoxed != "" || rf.NestedInConcreteBox != "" {
+							ctxBoxed = append(ctxBoxed, ctxBoxedEntry{pkg: pkgPath, rf: rf})
+							continue
+						}
+						if rf.MethodSet == syntaxutil.EmptyIfaceMethodSetKey {
+							if rf.ReflectValueBoundaryEscape && anyConeLocalFlagROBypass {
+								if !anyConeReflectAny || !anyConeFlagROBypass {
+									anyConeReflectAny = true
+									anyConeFlagROBypass = true
+									resolveChanged = true
+								}
+								for bp := range localFlagROBypassPkgs {
+									if !actualReflectAny[bp] || !actualReflectAnyFlagRO[bp] || !reachSeedReflectAny[bp] || !reachSeedReflectAnyFlagRO[bp] {
+										actualReflectAny[bp] = true
+										actualReflectAnyFlagRO[bp] = true
+										reachSeedReflectAny[bp] = true
+										reachSeedReflectAnyFlagRO[bp] = true
+										resolveChanged = true
+									}
+									addConeReflected(syntaxutil.ReflectFlagROBypassAnyKey, bp)
+								}
+							}
+							continue
+						}
+						if rf.MethodSet == syntaxutil.ReflectFlagROBypassAnyKey || rf.MethodSet == syntaxutil.ReflectRawUintptrToPtrKey {
+							addConeReflected(rf.MethodSet, pkgPath)
+							continue
+						}
+						if rf.MethodSet == syntaxutil.ContextKeyTheftMethodSetKey {
+							thiefActive := len(rf.UnlessParamLeakFree) == 0
+							for _, pk := range rf.UnlessParamLeakFree {
+								if !paramLeakFree[pk] {
+									thiefActive = true
+									break
+								}
+							}
+							if thiefActive {
+								if anyConeReflectAny {
+									addConeReflected(syntaxutil.ContextKeyTheftMethodSetKey, "*")
+								}
+								if anyConeFlagROBypass {
+									addConeReflected(syntaxutil.ContextKeyTheftFlagROKey, "*")
+								}
+							}
+							continue
+						}
+						if rf.UnexportedIfaceField {
+							viaErased := len(rf.UnlessParamLeakFree) == 0 && rf.ErasedToEmptyIface && anyConeFlagROBypass
+							viaRV := len(rf.UnlessParamLeakFree) == 0 && rf.ReflectValueBoundaryEscape && anyConeLocalFlagROBypass
+							if len(rf.UnlessParamLeakFree) > 0 {
+								for _, pk := range rf.UnlessParamLeakFree {
+									if !paramLeakFree[pk] {
+										if rf.ErasedToEmptyIface && pkgReachesReflectAnyFlagRO(pk.Func.Pkg, map[string]bool{}) {
+											viaErased = true
+										}
+										if rf.ReflectValueBoundaryEscape && anyConeLocalFlagROBypass && pkgReachesReflectAny(pk.Func.Pkg, map[string]bool{}) {
+											viaRV = true
+										}
+									}
+								}
+							}
+							if viaErased {
+								for bp := range actualReflectAnyFlagRO {
+									addConeReflected(rf.MethodSet, bp)
+									addConeReflected(syntaxutil.ReflectFlagROBypassPrefix+rf.MethodSet, bp)
+								}
+							}
+							if viaRV {
+								for bp := range localFlagROBypassPkgs {
+									addConeReflected(rf.MethodSet, bp)
+									addConeReflected(syntaxutil.ReflectFlagROBypassPrefix+rf.MethodSet, bp)
+								}
+							}
+							continue
+						}
+						active := len(rf.UnlessParamLeakFree) == 0
+						flagROViaErased := len(rf.UnlessParamLeakFree) == 0 && rf.ErasedToEmptyIface && anyConeFlagROBypass
+						flagROViaRV := len(rf.UnlessParamLeakFree) == 0 && rf.ReflectValueBoundaryEscape && anyConeLocalFlagROBypass
+						if len(rf.UnlessParamLeakFree) > 0 {
+							for _, pk := range rf.UnlessParamLeakFree {
+								if !paramLeakFree[pk] {
+									if pkgReachesReflectAny(pk.Func.Pkg, map[string]bool{}) {
+										active = true
+									}
+									if rf.ErasedToEmptyIface && pkgReachesReflectAnyFlagRO(pk.Func.Pkg, map[string]bool{}) {
+										flagROViaErased = true
+									}
+								}
+							}
+							if active && rf.ReflectValueBoundaryEscape && anyConeLocalFlagROBypass {
+								flagROViaRV = true
+							}
+						}
+						if active {
+							addConeReflected(rf.MethodSet, pkgPath)
+							if rf.ErasedToEmptyIface {
+								for ap := range actualReflectAny {
+									addConeReflected(rf.MethodSet, ap)
+								}
+							}
+						}
+						if flagROViaErased {
+							for bp := range actualReflectAnyFlagRO {
+								addConeReflected(syntaxutil.ReflectFlagROBypassPrefix+rf.MethodSet, bp)
+							}
+						}
+						if flagROViaRV {
+							for bp := range localFlagROBypassPkgs {
+								addConeReflected(syntaxutil.ReflectFlagROBypassPrefix+rf.MethodSet, bp)
+							}
+						}
+					}
+				}
+			}
+			for ctxChanged := len(ctxBoxed) > 0; ctxChanged; {
+				ctxChanged = false
+				for _, cb := range ctxBoxed {
+					if cb.rf.NestedInConcreteBox != "" {
+						flagBoxKey := syntaxutil.ReflectFlagROBypassPrefix + cb.rf.NestedInConcreteBox
+						plainProvs := map[string]bool{}
+						flagProvs := map[string]bool{}
+						isExemptOpaqueGuardProv := func(prov string) bool {
+							if !cb.rf.NestedOpaqueStruct.IsZero() {
+								return cb.rf.NestedOpaqueStruct.Pkg == prov && nestedSafeCapsuleStructs[prov][cb.rf.NestedOpaqueStruct]
+							}
+							return cb.pkg == prov && len(safeCapsuleGuardStructs[prov]) > 0
+						}
+						for _, ms := range coneReflectedIfaces {
+							if !cb.rf.UnexportedIfaceField && syntaxutil.MethodSetSubset(ms, cb.rf.NestedInConcreteBox) {
+								for prov := range coneReflectedProviders[ms] {
+									if !isExemptOpaqueGuardProv(prov) {
+										plainProvs[prov] = true
+									}
+								}
+							}
+							if syntaxutil.MethodSetSubset(ms, flagBoxKey) {
+								for prov := range coneReflectedProviders[ms] {
+									if !isExemptOpaqueGuardProv(prov) {
+										flagProvs[prov] = true
+									}
+								}
+							}
+						}
+						plainHit := !cb.rf.UnexportedIfaceField && len(plainProvs) > 0
+						flagHit := len(flagProvs) > 0
+						if cb.rf.MethodSet == syntaxutil.EmptyIfaceMethodSetKey {
+							if plainHit {
+								if !anyConeReflectAny || !reachSeedReflectAny[cb.pkg] {
+									anyConeReflectAny = true
+									reachSeedReflectAny[cb.pkg] = true
+									resolveChanged = true
+								}
+								if anyConeLocalFlagROBypass || anyConeFlagROBypass {
+									if !anyConeFlagROBypass || !reachSeedReflectAnyFlagRO[cb.pkg] {
+										anyConeFlagROBypass = true
+										reachSeedReflectAnyFlagRO[cb.pkg] = true
+										resolveChanged = true
+									}
+								}
+								for prov := range plainProvs {
+									if !actualReflectAny[prov] || !reachSeedReflectAny[prov] {
+										actualReflectAny[prov] = true
+										reachSeedReflectAny[prov] = true
+										resolveChanged = true
+									}
+									if anyConeLocalFlagROBypass || anyConeFlagROBypass {
+										if !anyConeFlagROBypass || !actualReflectAnyFlagRO[prov] || !reachSeedReflectAnyFlagRO[prov] {
+											anyConeFlagROBypass = true
+											actualReflectAnyFlagRO[prov] = true
+											reachSeedReflectAnyFlagRO[prov] = true
+											resolveChanged = true
+										}
+										if !seenRefIface[syntaxutil.ReflectFlagROBypassAnyKey] {
+											ctxChanged = true
+										}
+										addConeReflectedWith(syntaxutil.ReflectFlagROBypassAnyKey, prov, "nested_any_plain", cb.pkg)
+									}
+								}
+							}
+							if flagHit {
+								if !anyConeReflectAny || !anyConeFlagROBypass || !reachSeedReflectAny[cb.pkg] || !reachSeedReflectAnyFlagRO[cb.pkg] {
+									anyConeReflectAny = true
+									anyConeFlagROBypass = true
+									reachSeedReflectAny[cb.pkg] = true
+									reachSeedReflectAnyFlagRO[cb.pkg] = true
+									resolveChanged = true
+								}
+								for prov := range flagProvs {
+									if !actualReflectAny[prov] || !actualReflectAnyFlagRO[prov] || !reachSeedReflectAny[prov] || !reachSeedReflectAnyFlagRO[prov] {
+										actualReflectAny[prov] = true
+										actualReflectAnyFlagRO[prov] = true
+										reachSeedReflectAny[prov] = true
+										reachSeedReflectAnyFlagRO[prov] = true
+										resolveChanged = true
+									}
+									if !seenRefIface[syntaxutil.ReflectFlagROBypassAnyKey] {
+										ctxChanged = true
+									}
+									addConeReflectedWith(syntaxutil.ReflectFlagROBypassAnyKey, prov, "nested_any_flag", cb.pkg)
+								}
+							}
+							continue
+						}
+						if plainHit || flagHit {
+							for prov := range plainProvs {
+								if !coneReflectedProviders[cb.rf.MethodSet][prov] {
+									ctxChanged = true
+								}
+								addConeReflectedWith(cb.rf.MethodSet, prov, "nested_in_box_plain", cb.pkg)
+							}
+							for prov := range flagProvs {
+								if !coneReflectedProviders[cb.rf.MethodSet][prov] {
+									ctxChanged = true
+								}
+								addConeReflectedWith(cb.rf.MethodSet, prov, "nested_in_box_flag", cb.pkg)
+							}
+						}
+						plainEscapesRV := false
+						for prov := range plainProvs {
+							if prov == "*" || rvBoundaryEscapePkgs[prov] || leaksAnyUpwardPkgs[prov] {
+								plainEscapesRV = true
+								break
+							}
+						}
+						if flagHit || (plainHit && plainEscapesRV && (anyConeFlagROBypass || anyConeLocalFlagROBypass)) {
+							flagKey := syntaxutil.ReflectFlagROBypassPrefix + cb.rf.MethodSet
+							for prov := range flagProvs {
+								if !coneReflectedProviders[flagKey][prov] {
+									ctxChanged = true
+								}
+								addConeReflectedWith(flagKey, prov, "nested_in_box_flag", cb.pkg)
+							}
+							if plainHit && plainEscapesRV {
+								for bp := range localFlagROBypassPkgs {
+									if len(safeCapsuleGuardStructs[bp]) == 0 {
+										if !coneReflectedProviders[flagKey][bp] {
+											ctxChanged = true
+										}
+										addConeReflectedWith(flagKey, bp, "nested_in_box_rv_escape", cb.pkg)
+									}
+								}
+								for bp := range actualReflectAnyFlagRO {
+									if len(safeCapsuleGuardStructs[bp]) == 0 {
+										if !coneReflectedProviders[flagKey][bp] {
+											ctxChanged = true
+										}
+										addConeReflectedWith(flagKey, bp, "nested_in_box_rv_escape", cb.pkg)
+									}
+								}
+							}
+						}
+						continue
+					}
+					if cb.rf.ContextValueBoxed == syntaxutil.ReflectRawUintptrToPtrKey {
+						if seenRefIface[syntaxutil.ReflectRawUintptrToPtrKey] {
+							if cb.rf.MethodSet == syntaxutil.EmptyIfaceMethodSetKey {
+								if !anyConeReflectAny || !anyConeFlagROBypass ||
+									!actualReflectAny[cb.pkg] || !actualReflectAnyFlagRO[cb.pkg] ||
+									!reachSeedReflectAny[cb.pkg] || !reachSeedReflectAnyFlagRO[cb.pkg] {
+									anyConeReflectAny = true
+									anyConeFlagROBypass = true
+									actualReflectAny[cb.pkg] = true
+									actualReflectAnyFlagRO[cb.pkg] = true
+									reachSeedReflectAny[cb.pkg] = true
+									reachSeedReflectAnyFlagRO[cb.pkg] = true
+									resolveChanged = true
+								}
+								if !seenRefIface[syntaxutil.ReflectFlagROBypassAnyKey] {
+									ctxChanged = true
+								}
+								addConeReflected(syntaxutil.ReflectFlagROBypassAnyKey, cb.pkg)
+							} else {
+								flagKey := syntaxutil.ReflectFlagROBypassPrefix + cb.rf.MethodSet
+								if !seenRefIface[cb.rf.MethodSet] || !seenRefIface[flagKey] {
+									ctxChanged = true
+								}
+								addConeReflected(cb.rf.MethodSet, "*")
+								addConeReflected(flagKey, "*")
+							}
+						}
+						continue
+					}
+					ctxFlagRO := syntaxutil.ReflectFlagROBypassPrefix + cb.rf.ContextValueBoxed
+					ctxBypassed := seenRefIface[ctxFlagRO]
+					if !ctxBypassed {
+						for _, ms := range coneReflectedIfaces {
+							if syntaxutil.MethodSetSubset(ms, ctxFlagRO) {
+								ctxBypassed = true
+								break
+							}
+						}
+					}
+					if (seenRefIface[syntaxutil.ContextKeyTheftMethodSetKey] && !cb.rf.UnexportedIfaceField) ||
+						seenRefIface[syntaxutil.ContextKeyTheftFlagROKey] || ctxBypassed {
+						if !seenRefIface[cb.rf.MethodSet] {
+							ctxChanged = true
+						}
+						addConeReflected(cb.rf.MethodSet, "*")
+					}
+					if seenRefIface[syntaxutil.ContextKeyTheftFlagROKey] ||
+						(seenRefIface[syntaxutil.ContextKeyTheftMethodSetKey] && !cb.rf.UnexportedIfaceField && anyConeLocalFlagROBypass) ||
+						(ctxBypassed && (anyConeFlagROBypass || anyConeLocalFlagROBypass)) {
+						flagKey := syntaxutil.ReflectFlagROBypassPrefix + cb.rf.MethodSet
+						if !seenRefIface[flagKey] {
+							ctxChanged = true
+						}
+						addConeReflected(flagKey, "*")
+					}
+				}
+			}
+			for ui, ub := range unsafeCarrierBoxed {
+				if promotedUnsafeCarriers[ui] {
+					continue
+				}
+				ownerPkg := ub.pkg
+				if ub.rf.NestedOpaqueOwnerPkg != "" {
+					ownerPkg = ub.rf.NestedOpaqueOwnerPkg
+				}
+				matched := false
+				matchedProvs := map[string]bool{}
+				for _, ms := range coneReflectedIfaces {
+					if syntaxutil.MethodSetSubset(ms, ub.rf.UnsafePtrCarrierBoxed) {
+						for prov := range coneReflectedProviders[ms] {
+							if len(safeCapsuleGuardStructs[prov]) == 0 || ownerPkg != prov {
+								matched = true
+								matchedProvs[prov] = true
+							}
+						}
+					}
+				}
+				if matched {
+					promotedUnsafeCarriers[ui] = true
+					resolveChanged = true
+					anyConeReflectAny = true
+					anyConeFlagROBypass = true
+					reachSeedReflectAny[ub.pkg] = true
+					reachSeedReflectAnyFlagRO[ub.pkg] = true
+					if len(matchedProvs) == 0 {
+						matchedProvs[ub.pkg] = true
+					}
+					for prov := range matchedProvs {
+						actualReflectAny[prov] = true
+						actualReflectAnyFlagRO[prov] = true
+						reachSeedReflectAny[prov] = true
+						reachSeedReflectAnyFlagRO[prov] = true
+						addConeReflectedWith(syntaxutil.ReflectFlagROBypassAnyKey, prov, "unsafe_carrier_box", ub.pkg+"|owner="+ownerPkg)
+					}
+				}
+			}
+		}
+
 		changed := false
 		for _, cm := range allCondStructMutations {
 			if mutatedStructs[cm.Struct] {
 				continue
 			}
-			triggered := false
+			triggerReason := ""
+			triggerDetail := ""
 			if cm.GuardPkg != "" && !pkgCannotRetainCarrier[cm.GuardPkg] {
-				triggered = true
+				triggerReason = "guard_pkg_retains_carrier"
+				triggerDetail = cm.GuardPkg
 			}
-			if !triggered && !cm.GuardStruct.IsZero() && !cm.RequireDescBuilderGuard && mutatedStructs[cm.GuardStruct] {
-				triggered = true
+			if triggerReason == "" && !cm.GuardStruct.IsZero() && !cm.RequireDescBuilderGuard && mutatedStructs[cm.GuardStruct] {
+				triggerReason = "guard_struct_mutated"
+				triggerDetail = cm.GuardStruct.Key()
 			}
-			if !triggered && cm.RequireDescBuilderGuard && !hasValidDescBuilderCovering(cm.GuardStruct) {
-				triggered = true
+			if triggerReason == "" && cm.RequireDescBuilderGuard && !hasValidDescBuilderCovering(cm.GuardStruct) {
+				triggerReason = "missing_desc_builder_guard"
+				triggerDetail = cm.GuardStruct.Key()
 			}
-			if !triggered && !cm.RequireNonMutatingMethod.IsZero() && !nonMutatingMethods[cm.RequireNonMutatingMethod] {
-				triggered = true
+			if triggerReason == "" && !cm.RequireNonMutatingMethod.IsZero() && !nonMutatingMethods[cm.RequireNonMutatingMethod] {
+				triggerReason = "method_mutates"
+				triggerDetail = cm.RequireNonMutatingMethod.Display()
 			}
-			if triggered {
+			if triggerReason == "" && cm.BoxedConcreteMethodSet == "" && cm.ForeignReflectPkg != "" && !safeCapsuleGuardStructs[cm.ForeignReflectPkg][cm.Struct] {
+				triggerReason = "foreign_reflect_pkg_unsafe"
+				triggerDetail = cm.ForeignReflectPkg
+			}
+			if triggerReason == "" && !cm.UnlessSafeCapsuleStruct.IsZero() && !safePtrWrapperParams[cm.UnlessSafeCapsuleStruct][cm.UnlessSafeCapsuleParam] {
+				triggerReason = "unsafe_ptr_wrapper_param"
+				triggerDetail = cm.UnlessSafeCapsuleStruct.Key()
+			}
+			if triggerReason == "" && !cm.UnlessSafeAtomicPtrCopy.IsZero() && !safeAtomicPtrCopyFuncs[cm.UnlessSafeAtomicPtrCopy] {
+				triggerReason = "unsafe_atomic_ptr_copy"
+				triggerDetail = cm.UnlessSafeAtomicPtrCopy.Display()
+			}
+			if triggerReason == "" && cm.BoxedConcreteMethodSet != "" {
+				for _, ifaceMS := range coneReflectedIfaces {
+					if !syntaxutil.MethodSetSubset(ifaceMS, cm.BoxedConcreteMethodSet) {
+						continue
+					}
+					if ifaceMS != syntaxutil.ReflectFlagROBypassAnyKey && ifaceMS != syntaxutil.ReflectRawUintptrToPtrKey {
+						provs := coneReflectedProviders[ifaceMS]
+						if !provs["*"] && len(provs) == 1 {
+							var onlyProv string
+							for pv := range provs {
+								onlyProv = pv
+							}
+							guardPkg := cm.ForeignReflectPkg
+							if guardPkg == "" && !cm.Struct.IsUnnamed() {
+								guardPkg = cm.Struct.Pkg
+							}
+							if (guardPkg == "" || guardPkg == onlyProv) && safeCapsuleGuardStructs[onlyProv][cm.Struct] {
+								continue
+							}
+						}
+					}
+					triggerReason = "boxed_iface_reflected"
+					triggerDetail = ifaceMS
+					break
+				}
+			}
+			if triggerReason != "" {
 				mutatedStructs[cm.Struct] = true
 				changed = true
+				if tgt := coneTargetFor(cm.Struct.Pkg); trace.Enabled(ctx, trace.DomainDynstate, tgt) {
+					var provList []string
+					if triggerReason == "boxed_iface_reflected" {
+						for prov := range coneReflectedProviders[triggerDetail] {
+							provList = append(provList, prov)
+						}
+						sort.Strings(provList)
+					}
+					trace.Emit(ctx, trace.DomainDynstate, "dynstate.cond_mut.trigger", tgt,
+						trace.String("struct", cm.Struct.Key()),
+						trace.String("reason", triggerReason),
+						trace.String("detail", triggerDetail),
+						trace.String("foreign_pkg", cm.ForeignReflectPkg),
+						trace.Strings("providers", provList),
+					)
+				}
 			}
 		}
 		if !changed {
@@ -313,535 +944,25 @@ func deriveConeDischarges(
 		}
 	}
 
-	intersectDeclaredVarSet := func(extract func(pkgPath string, fact Fact) map[string]bool) map[string]bool {
-		return intersectDeclaredVariants(
-			pkgPaths,
-			allFacts,
-			pkgHasMalformedFact,
-			malformedFactVars,
-			extract,
-			func(a, b bool) bool { return a == b },
-		)
-	}
-
-	verifiedOnceMemoCtors := map[syntaxutil.TypeRef]map[syntaxutil.FuncKey]bool{}
-	if !anyMalformedMutatedStruct {
-		type onceMemoAgg struct {
-			ctors     map[syntaxutil.FuncKey]bool
-			guards    map[syntaxutil.TypeRef]bool
-			inputDeps map[syntaxutil.ParamKey]bool
-		}
-		for _, pkgPath := range pkgPaths {
-			pkgFacts := allFacts[pkgPath]
-			if len(pkgFacts) == 0 || pkgHasMalformedFact[pkgPath] || (!out.pinnedPkg[pkgPath] && !out.mutableLocalPkg[pkgPath]) {
-				continue
-			}
-			common := intersectPackageVariants(
-				pkgFacts,
-				func(fact Fact) map[syntaxutil.TypeRef]*onceMemoAgg {
-					cur := make(map[syntaxutil.TypeRef]*onceMemoAgg, len(fact.OnceMemoTypes))
-					for _, mt := range fact.OnceMemoTypes {
-						if mt.Type.Pkg != pkgPath {
-							continue
-						}
-						agg := &onceMemoAgg{
-							ctors:     make(map[syntaxutil.FuncKey]bool, len(mt.Constructors)),
-							guards:    make(map[syntaxutil.TypeRef]bool, len(mt.GuardTypes)),
-							inputDeps: make(map[syntaxutil.ParamKey]bool, len(mt.InputParamDeps)),
-						}
-						for _, c := range mt.Constructors {
-							agg.ctors[c] = true
-						}
-						for _, g := range mt.GuardTypes {
-							agg.guards[g] = true
-						}
-						for _, pk := range mt.InputParamDeps {
-							agg.inputDeps[pk] = true
-						}
-						cur[mt.Type] = agg
-					}
-					return cur
-				},
-				func(prev, next *onceMemoAgg) (*onceMemoAgg, bool) {
-					for c := range prev.ctors {
-						if !next.ctors[c] {
-							delete(prev.ctors, c)
-						}
-					}
-					for g := range next.guards {
-						prev.guards[g] = true
-					}
-					for pk := range next.inputDeps {
-						prev.inputDeps[pk] = true
-					}
-					return prev, true
-				},
-			)
-			for tRef, agg := range common {
-				if len(agg.ctors) == 0 || mutatedStructs[tRef] {
-					continue
-				}
-				clean := true
-				for g := range agg.guards {
-					if mutatedStructs[g] {
-						clean = false
-						break
-					}
-				}
-				if clean {
-					for pk := range agg.inputDeps {
-						if !paramLeakFree[pk] {
-							clean = false
-							break
-						}
-					}
-				}
-				if clean {
-					verifiedOnceMemoCtors[tRef] = agg.ctors
-				}
-			}
-		}
-	}
-
-	out.mappingDischargedVars = intersectDeclaredVarSet(func(_ string, fact Fact) map[string]bool {
-		if anyMalformedDirectVarWrite {
-			return nil
-		}
-		m := make(map[string]bool, len(fact.MappingDischarges))
-		for _, key := range fact.MappingDischarges {
-			if !directVarWritten[key] {
-				m[key] = true
-			}
-		}
-		return m
-	})
-	out.memoDischargedVars = intersectDeclaredVarSet(func(_ string, fact Fact) map[string]bool {
-		if anyMalformedDirectVarWrite {
-			return nil
-		}
-		m := make(map[string]bool, len(fact.MemoDischarges)+len(fact.OnceMemoCandidates))
-		for _, key := range fact.MemoDischarges {
-			if !directVarWritten[key] {
-				m[key] = true
-			}
-		}
-		if !anyMalformedNonMethodVarUse && !anyMalformedMutatedStruct {
-			for _, cand := range fact.OnceMemoCandidates {
-				if directVarWritten[cand.Key] || nonMethodVarUsed[cand.Key] {
-					continue
-				}
-				if ctors := verifiedOnceMemoCtors[cand.Type]; ctors[cand.Constructor] {
-					m[cand.Key] = true
-				}
-			}
-		}
-		return m
-	})
-	out.harnessDischargedVars = intersectDeclaredVarSet(func(pkgPath string, fact Fact) map[string]bool {
-		if anyMalformedDirectVarWrite || !propharness.IsHarnessPath(pkgPath) {
-			return nil
-		}
-		m := make(map[string]bool, len(fact.HarnessDischarges))
-		for _, key := range fact.HarnessDischarges {
-			if !directVarWritten[key] {
-				m[key] = true
-			}
-		}
-		return m
-	})
-	out.directiveCovered = intersectDeclaredVarSet(func(_ string, fact Fact) map[string]bool {
-		directed := make(map[string]bool, len(fact.SingleSubjectVars))
-		for _, key := range fact.SingleSubjectVars {
-			directed[key] = true
-		}
-		return directed
-	})
-
-	verifiedRoles := map[rtRoleKey]rtRoleInfo{}
-	if !anyMalformedMutatedStruct {
-		for _, common := range commonRolesByPkg {
-			for k, info := range common {
-				if k.Role != protoaudit.ProtoRoleBuilder && k.Role != protoaudit.ProtoRoleDescBuilder && mutatedStructs[k.Type] {
-					continue
-				}
-				guardMutated := false
-				for g := range info.GuardTypes {
-					if mutatedStructs[g] {
-						guardMutated = true
-						break
-					}
-				}
-				if !guardMutated {
-					verifiedRoles[k] = info
-				}
-			}
-		}
-	}
-	for k, info := range verifiedRoles {
-		if k.Role == protoaudit.ProtoRoleBuilder && !info.SubBuilder.IsZero() {
-			if _, ok := verifiedRoles[rtRoleKey{Type: info.SubBuilder, Role: protoaudit.ProtoRoleDescBuilder}]; !ok {
-				delete(verifiedRoles, k)
-			}
-		}
-	}
-
-	builderAllowedHelperByPkg := map[string]map[syntaxutil.FuncKey]bool{}
-	for k, info := range verifiedRoles {
-		if k.Role == protoaudit.ProtoRoleBuilder && len(info.AllowedHelpers) > 0 {
-			if builderAllowedHelperByPkg[k.Type.Pkg] == nil {
-				builderAllowedHelperByPkg[k.Type.Pkg] = map[syntaxutil.FuncKey]bool{}
-			}
-			for h := range info.AllowedHelpers {
-				builderAllowedHelperByPkg[k.Type.Pkg][h] = true
-			}
-		}
-	}
-	nonBuilderReferencedFn := map[syntaxutil.FuncKey]bool{}
-	for _, pkgPath := range pkgPaths {
-		for _, fact := range allFacts[pkgPath] {
-			for _, edge := range fact.FuncRefs {
-				if edge.Callee.Valid() && !builderAllowedHelperByPkg[pkgPath][edge.Callee] {
-					nonBuilderReferencedFn[edge.Callee] = true
-				}
-			}
-		}
-	}
-	for k, info := range verifiedRoles {
-		if k.Role == protoaudit.ProtoRoleExtension && !info.InitHelper.IsZero() && nonBuilderReferencedFn[info.InitHelper] {
-			delete(verifiedRoles, k)
-		}
-	}
-	hasVerifiedRole := func(t syntaxutil.TypeRef, role string) bool {
-		_, ok := verifiedRoles[rtRoleKey{Type: t, Role: role}]
-		return ok
-	}
-
-	out.protoVerifiedVars = intersectDeclaredVarSet(func(pkgPath string, fact Fact) map[string]bool {
-		if anyMalformedDirectVarWrite {
-			return nil
-		}
-		m := map[string]bool{}
-		for _, c := range fact.ProtoClusters {
-			if c.InitFn.Pkg != pkgPath || refRegions[c.InitFn] == nil || !initOnlyFn[c.InitFn] {
-				continue
-			}
-			if !hasVerifiedRole(c.BuilderType, protoaudit.ProtoRoleBuilder) {
-				continue
-			}
-			if !c.EnumType.IsZero() && !hasVerifiedRole(c.EnumType, protoaudit.ProtoRoleEnum) {
-				continue
-			}
-			if !c.MsgType.IsZero() && !hasVerifiedRole(c.MsgType, protoaudit.ProtoRoleMessage) {
-				continue
-			}
-			if !c.ExtType.IsZero() && !hasVerifiedRole(c.ExtType, protoaudit.ProtoRoleExtension) {
-				continue
-			}
-			for _, key := range c.Vars {
-				if !directVarWritten[key] {
-					m[key] = true
-				}
-			}
-		}
-		return m
-	})
-
-	if !anyMalformedDirectVarWrite {
-		extAliasTargets := intersectDeclaredVariants(
-			pkgPaths,
-			allFacts,
-			pkgHasMalformedFact,
-			malformedFactVars,
-			func(_ string, fact Fact) map[string]string {
-				byKey := make(map[string]string, len(fact.ProtoExtAliases))
-				for _, a := range fact.ProtoExtAliases {
-					if !directVarWritten[a.Key] {
-						byKey[a.Key] = a.Target
-					}
-				}
-				return byKey
-			},
-			func(a, b string) bool { return a == b },
-		)
-		for changed := len(extAliasTargets) > 0; changed; {
-			changed = false
-			for key, target := range extAliasTargets {
-				if !out.protoVerifiedVars[key] && out.protoVerifiedVars[target] {
-					out.protoVerifiedVars[key] = true
-					changed = true
-				}
-			}
-		}
-	}
-
-	out.grpcVerifiedVars = intersectDeclaredVarSet(func(_ string, fact Fact) map[string]bool {
-		if anyMalformedMutatedStruct || anyMalformedDirectVarWrite {
-			return nil
-		}
-		m := make(map[string]bool, len(fact.GrpcServiceVars))
-		for _, gv := range fact.GrpcServiceVars {
-			if mutatedStructs[gv.SvcDesc] {
-				continue
-			}
-			if !gv.MethodDesc.IsZero() && mutatedStructs[gv.MethodDesc] {
-				continue
-			}
-			if !gv.StreamDesc.IsZero() && mutatedStructs[gv.StreamDesc] {
-				continue
-			}
-			if directVarWritten[gv.Key] {
-				continue
-			}
-			m[gv.Key] = true
-		}
-		return m
-	})
-	return out
-}
-
-func buildViewConeState(
-	q ConeQuery,
-	pkgPaths []string,
-	allFacts map[string][]Fact,
-	notOpaque map[string]bool,
-	mutated map[string]bool,
-	escaped map[string]bool,
-	envCarrying map[string]bool,
-	unattributedMark map[string]bool,
-	siteFns map[string]map[string]bool,
-	pkgHasMalformedFact map[string]bool,
-	malformedFactVars map[string]bool,
-	d coneDischarges,
-) ConeState {
-	var state ConeState
-	vouchDischarged := map[string][]string{}
-	attestedDischarged := map[string][]string{}
-	dischargedSeen := map[string]bool{}
-
-	vouchedOut := func(pkgPath, key string) bool {
-		if !q.Vouches[key] || !d.pinnedPkg[pkgPath] {
-			return false
-		}
-		if seen := "vouch\x00" + pkgPath + "\x00" + key; !dischargedSeen[seen] {
-			dischargedSeen[seen] = true
-			vouchDischarged[pkgPath] = append(vouchDischarged[pkgPath], key)
-		}
-		return true
-	}
-	auditedSourceOut := func(pkgPath, key string) bool {
-		return (d.pinnedPkg[pkgPath] || d.mutableLocalPkg[pkgPath]) && !malformedFactVars[key] &&
-			(d.mappingDischargedVars[key] || d.memoDischargedVars[key] || d.harnessDischargedVars[key])
-	}
-	directiveDischargedOut := func(pkgPath, key string) bool {
-		if !q.SingleSubject || !d.mutableLocalPkg[pkgPath] || !d.directiveCovered[key] || malformedFactVars[key] {
-			return false
-		}
-		if seen := "directive\x00" + pkgPath + "\x00" + key; !dischargedSeen[seen] {
-			dischargedSeen[seen] = true
-			attestedDischarged[pkgPath] = append(attestedDischarged[pkgPath], key)
-		}
-		return true
-	}
-	protoGrpcDischargedOut := func(pkgPath, key string) bool {
-		if !q.SingleSubject || (!d.pinnedPkg[pkgPath] && !d.mutableLocalPkg[pkgPath]) || malformedFactVars[key] {
-			return false
-		}
-		if !d.protoVerifiedVars[key] && !d.grpcVerifiedVars[key] {
-			return false
-		}
-		if seen := "proto\x00" + pkgPath + "\x00" + key; !dischargedSeen[seen] {
-			dischargedSeen[seen] = true
-			attestedDischarged[pkgPath] = append(attestedDischarged[pkgPath], key)
-		}
-		return true
-	}
-	isDischarged := func(pkgPath, key string) bool {
-		return vouchedOut(pkgPath, key) || auditedSourceOut(pkgPath, key) || directiveDischargedOut(pkgPath, key) || protoGrpcDischargedOut(pkgPath, key)
-	}
-
-	pkgCulprits := map[string][]Culprit{}
-	culpritSeen := map[string]bool{}
-	channelFor := func(pkgPath, key string) CulpritChannel {
-		if d.mutableLocalPkg[pkgPath] {
-			switch {
-			case q.PackageProcess && d.directiveCovered[key]:
-				return ChannelRestructureUnbackedDirective
-			case q.PackageProcess:
-				return ChannelRestructureDirectiveSingleSubjectOnly
-			default:
-				return ChannelRestructureOrDirective
-			}
-		}
-		if envCarrying[key] {
-			return ChannelCallerVouchEnvFree
-		}
-		return ChannelCallerVouch
-	}
-	recordCulprit := func(pkgPath, key string, verb CulpritVerb) {
-		if seen := pkgPath + "\x00" + key; !culpritSeen[seen] {
-			culpritSeen[seen] = true
-			pkgCulprits[pkgPath] = append(pkgCulprits[pkgPath], Culprit{
-				PkgPath: pkgPath,
-				Key:     key,
-				Verb:    verb,
-				Channel: channelFor(pkgPath, key),
-			})
-		}
-	}
-
-	for _, pkgPath := range pkgPaths {
-		var escapedKeys, envKeys []string
-		for _, fact := range allFacts[pkgPath] {
-			for _, key := range fact.Declares {
-				if !syntaxutil.ValidFactKey(key) {
-					continue
-				}
-				isMut := mutated[key]
-				isEsc := escaped[key] && notOpaque[key]
-				isEnv := envCarrying[key]
-				if !isMut && !isEsc && !isEnv {
-					continue
-				}
-				if isDischarged(pkgPath, key) {
-					continue
-				}
-				if isMut {
-					recordCulprit(pkgPath, key, CulpritMutated)
-				} else if isEsc {
-					escapedKeys = append(escapedKeys, key)
-				} else if isEnv {
-					envKeys = append(envKeys, key)
-				}
-			}
-		}
-		for _, key := range escapedKeys {
-			recordCulprit(pkgPath, key, CulpritEscapes)
-		}
-		for _, key := range envKeys {
-			recordCulprit(pkgPath, key, CulpritEnvCarrying)
-		}
-	}
-
-	evidenceDischarged := map[string][]string{}
-	evidenceSeen := map[string]bool{}
-	if q.SingleSubject {
-		for _, pkgPath := range pkgPaths {
-			if pkgHasMalformedFact[pkgPath] {
-				continue
-			}
-			for _, fact := range allFacts[pkgPath] {
-				for _, key := range fact.PoolDischarges {
-					if malformedFactVars[key] {
-						continue
-					}
-					if seen := pkgPath + "\x00" + key; !evidenceSeen[seen] {
-						evidenceSeen[seen] = true
-						evidenceDischarged[pkgPath] = append(evidenceDischarged[pkgPath], key)
-					}
-				}
-			}
-		}
-	}
-	for pkgPath, keys := range attestedDischarged {
-		for _, key := range keys {
-			if seen := pkgPath + "\x00" + key; !evidenceSeen[seen] {
-				evidenceSeen[seen] = true
-				evidenceDischarged[pkgPath] = append(evidenceDischarged[pkgPath], key)
-			}
-		}
-	}
-
-	imports := make(map[string][]string, len(q.Meta))
-	classes := make(map[string]PackageClass, len(q.Meta))
-	pkgPathOf := make(map[string]string, len(q.Meta))
-	var roots []string
-	for _, node := range q.Meta {
-		imports[node.ImportPath] = node.Imports
-		classes[node.ImportPath] = node.Class
-		pkgPathOf[node.ImportPath] = node.PkgPath
-		root := node.PkgPath
-		if node.ForTest != "" {
-			root = node.ForTest
-		} else if node.TestMain {
-			continue
-		}
-		if root == q.ViewPackage {
-			roots = append(roots, node.ImportPath)
-		}
-	}
-	slices.SortFunc(roots, func(a, b string) int {
-		aExt := pkgPathOf[a] != q.ViewPackage
-		bExt := pkgPathOf[b] != q.ViewPackage
-		if aExt != bExt {
-			if !aExt {
-				return -1
-			}
-			return 1
-		}
-		return strings.Compare(a, b)
-	})
-	roots = slices.Compact(roots)
-
-	vouchAcc := map[string]bool{}
-	evidenceAcc := map[string]bool{}
-	walkImportCone(
-		roots,
-		func(listing string) ([]string, bool) {
-			imps, ok := imports[listing]
-			return imps, ok
-		},
-		func(listing string) bool {
-			if classes[listing] == StandardPackage {
-				return false
-			}
-			pkgPath := pkgPathOf[listing]
-			if culprits := pkgCulprits[pkgPath]; len(culprits) > 0 {
-				if state.Downgraded == "" {
-					pkg, sym := culprits[0].SubjectParts()
-					state.Downgraded = culprits[0].ReasonBody()
-					state.CulpritPkg = pkg
-					state.CulpritSym = sym
-				}
-				state.RootCulprits = append(state.RootCulprits, culprits...)
-			}
-			for _, key := range vouchDischarged[pkgPath] {
-				vouchAcc[key] = true
-			}
-			for _, key := range evidenceDischarged[pkgPath] {
-				evidenceAcc[key] = true
-			}
-			return true
-		},
+	populateResolvedConeDischarges(
+		ctx,
+		coneTargetFor,
+		isKnownCleanNonStdPkg,
+		pkgPaths,
+		allFacts,
+		pkgHasMalformedFact,
+		malformedFactVars,
+		anyMalformedMutatedStruct,
+		anyMalformedDirectVarWrite,
+		anyMalformedNonMethodVarUse,
+		mutatedStructs,
+		directVarWritten,
+		nonMethodVarUsed,
+		paramLeakFree,
+		refRegions,
+		initOnlyFn,
+		commonRolesByPkg,
+		&out,
 	)
-
-	if len(state.RootCulprits) > 0 {
-		state.CulpritSites = make(map[string]CulpritSiteSet, len(state.RootCulprits))
-		for _, culprit := range state.RootCulprits {
-			if _, done := state.CulpritSites[culprit.Key]; done {
-				continue
-			}
-			fns := siteFns[culprit.Key]
-			state.CulpritSites[culprit.Key] = CulpritSiteSet{
-				Fns:          fns,
-				Unattributed: unattributedMark[culprit.Key] || len(fns) == 0,
-			}
-		}
-	}
-	if len(vouchAcc) > 0 {
-		keys := make([]string, 0, len(vouchAcc))
-		for key := range vouchAcc {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		state.VouchDischarges = strings.Join(keys, ",")
-	}
-	if len(evidenceAcc) > 0 {
-		keys := make([]string, 0, len(evidenceAcc))
-		for key := range evidenceAcc {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		state.AttestationDischarges = strings.Join(keys, ",")
-	}
-	return state
+	return out
 }
