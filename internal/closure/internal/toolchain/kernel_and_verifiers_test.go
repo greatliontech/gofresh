@@ -1,11 +1,13 @@
 package toolchain
 
 import (
+	"archive/zip"
 	"context"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -909,6 +911,8 @@ func FuzzToolchainMathDebugAndKernelVerifiers(f *testing.F) {
 	f.Add(validRuntimeDebugModSrc, "// empty\n")
 	f.Add(validRuntimeModinfoSrc, "")
 	f.Add("package math\nfunc Sin(x float64) float64 { return x }\n", "TEXT ·Sin(SB),$0\n\tCPUID\n\tRET\n")
+	f.Add("package scannerhooks\nimport \"go/token\"\nvar StringEnd func(scanner any) token.Pos\n", "")
+	f.Add("package scanner\nimport (\"fmt\"; \"go/internal/scannerhooks\"; \"go/token\"; \"io\")\ntype Scanner struct { stringEnd token.Pos }\nfunc init() { scannerhooks.StringEnd = func(s any) token.Pos { return s.(*Scanner).stringEnd } }\nfunc PrintError(w io.Writer, err error) { fmt.Fprintf(w, \"%v\", err) }\n", "")
 
 	f.Fuzz(func(t *testing.T, goSrc, asmSrc string) {
 		ctx := context.Background()
@@ -944,6 +948,9 @@ func FuzzToolchainMathDebugAndKernelVerifiers(f *testing.F) {
 		}
 		if (VerifyGoTokenPackageAST(files) == nil) != (VerifyGoTokenPackageAST(files) == nil) {
 			t.Fatalf("non-deterministic VerifyGoTokenPackageAST")
+		}
+		if (VerifyGoScannerHooksPackageAST(files) == nil) != (VerifyGoScannerHooksPackageAST(files) == nil) {
+			t.Fatalf("non-deterministic VerifyGoScannerHooksPackageAST")
 		}
 		if (VerifyGoScannerPackageAST(files) == nil) != (VerifyGoScannerPackageAST(files) == nil) {
 			t.Fatalf("non-deterministic VerifyGoScannerPackageAST")
@@ -1006,6 +1013,12 @@ func TestGOROOTTabwriterAndSyntaxPackageVerifiers(t *testing.T) {
 		{"go/scanner", VerifyGoScannerPackageAST},
 		{"go/ast", VerifyGoASTPackageAST},
 		{"go/parser", VerifyGoParserPackageAST},
+	}
+	if _, err := os.Stat(filepath.Join(runtime.GOROOT(), "src", "go", "internal", "scannerhooks")); err == nil {
+		cases = append(cases, struct {
+			pkgPath string
+			verify  func([]*ast.File) error
+		}{"go/internal/scannerhooks", VerifyGoScannerHooksPackageAST})
 	}
 	for _, tc := range cases {
 		t.Run(tc.pkgPath, func(t *testing.T) {
@@ -1106,8 +1119,10 @@ func TestVerifyTabwriterPackageASTMutations(t *testing.T) {
 			wantSub: "unexpected init function",
 		},
 		{
-			name:    "mutable_pkg_var",
-			mutate:  func(s string) string { return strings.Replace(s, "return len(buf), nil", "newline[0] = 'x'\n\treturn len(buf), nil", 1) },
+			name: "mutable_pkg_var",
+			mutate: func(s string) string {
+				return strings.Replace(s, "return len(buf), nil", "newline[0] = 'x'\n\treturn len(buf), nil", 1)
+			},
 			wantSub: "forbidden mutation or address-of package var newline",
 		},
 		{
@@ -1116,13 +1131,17 @@ func TestVerifyTabwriterPackageASTMutations(t *testing.T) {
 			wantSub: "forbidden field hook type on Writer",
 		},
 		{
-			name:    "call_to_dump",
-			mutate:  func(s string) string { return strings.Replace(s, "return len(buf), nil", "b.dump()\n\treturn len(buf), nil", 1) },
+			name: "call_to_dump",
+			mutate: func(s string) string {
+				return strings.Replace(s, "return len(buf), nil", "b.dump()\n\treturn len(buf), nil", 1)
+			},
 			wantSub: "forbidden selector reference .dump",
 		},
 		{
-			name:    "builtin_print_outside_dump",
-			mutate:  func(s string) string { return strings.Replace(s, "return len(buf), nil", "println(len(buf))\n\treturn len(buf), nil", 1) },
+			name: "builtin_print_outside_dump",
+			mutate: func(s string) string {
+				return strings.Replace(s, "return len(buf), nil", "println(len(buf))\n\treturn len(buf), nil", 1)
+			},
 			wantSub: "forbidden builtin println in Write",
 		},
 	}
@@ -1133,6 +1152,276 @@ func TestVerifyTabwriterPackageASTMutations(t *testing.T) {
 				t.Fatalf("got err=%v, want substring %q", err, tc.wantSub)
 			}
 		})
+	}
+}
+
+func TestVerifyGo126ScannerHooksScannerAndParserAST(t *testing.T) {
+	const validHooksSrc = `package scannerhooks
+
+import "go/token"
+
+var StringEnd func(scanner any) token.Pos
+`
+	if err := VerifyGoScannerHooksPackageAST(mustParseTestFiles(t, validHooksSrc)); err != nil {
+		t.Fatalf("validHooksSrc rejected: %v", err)
+	}
+	for _, neg := range []struct {
+		name string
+		src  string
+	}{
+		{"initialized_var", "package scannerhooks\nimport \"go/token\"\nvar StringEnd = func(any) token.Pos { return 0 }\n"},
+		{"blank_var_side_effect", validHooksSrc + "\nvar _ = func() int { StringEnd = func(any) token.Pos { return 1 }; return 0 }()\n"},
+		{"extra_const", validHooksSrc + "\nconst Extra = 1\n"},
+		{"extra_var", validHooksSrc + "\nvar Extra int\n"},
+		{"extra_func", validHooksSrc + "\nfunc Helper() {}\n"},
+		{"wrong_sig", "package scannerhooks\nimport \"go/token\"\nvar StringEnd func(int) token.Pos\n"},
+		{"bad_import", "package scannerhooks\nimport (\"go/token\"; \"os\")\nvar _ = os.ErrInvalid\nvar StringEnd func(any) token.Pos\n"},
+	} {
+		t.Run("hooks_"+neg.name, func(t *testing.T) {
+			if err := VerifyGoScannerHooksPackageAST(mustParseTestFiles(t, neg.src)); err == nil {
+				t.Fatalf("expected %s to fail VerifyGoScannerHooksPackageAST", neg.name)
+			}
+		})
+	}
+	if err := VerifyGoScannerHooksPackageAST(mustParseTestFiles(t,
+		"package scannerhooks\nimport \"go/token\"\n",
+		"package scannerhooks\nvar StringEnd func(any) token.Pos\n",
+	)); err == nil {
+		t.Fatal("expected split scannerhooks without go/token import in decl file to fail")
+	}
+
+	const validGo126ScannerSrc = `package scanner
+
+import (
+	"fmt"
+	"go/internal/scannerhooks"
+	"go/token"
+	"io"
+)
+
+type Error struct{}
+
+var _ error = (*Error)(nil)
+
+type Scanner struct {
+	stringEnd token.Pos
+}
+
+func init() {
+	scannerhooks.StringEnd = func(scanner any) token.Pos {
+		return scanner.(*Scanner).stringEnd
+	}
+}
+
+func PrintError(w io.Writer, err error) {
+	fmt.Fprintf(w, "%v", err)
+}
+`
+	if err := VerifyGoScannerPackageAST(mustParseTestFiles(t, validGo126ScannerSrc)); err != nil {
+		t.Fatalf("validGo126ScannerSrc rejected: %v", err)
+	}
+	for _, neg := range []struct {
+		name   string
+		mutate func(string) string
+	}{
+		{"dup_init", func(s string) string { return s + "\nfunc init() {}\n" }},
+		{"wrong_lhs", func(s string) string {
+			return strings.Replace(s, "scannerhooks.StringEnd =", "scannerhooks.Other =", 1)
+		}},
+		{"wrong_assert_type", func(s string) string { return strings.Replace(s, "(*Scanner)", "(*token.File)", 1) }},
+		{"non_init_ref", func(s string) string {
+			return s + "\nfunc leak(s *Scanner) token.Pos { return scannerhooks.StringEnd(s) }\n"
+		}},
+		{"type_decl_scannerhooks_ref", func(s string) string {
+			return s + "\ntype hidden scannerhooks.Hook\n"
+		}},
+		{"const_decl_scannerhooks_ref", func(s string) string {
+			return s + "\nconst hidden = scannerhooks.Const\n"
+		}},
+		{"blank_var_hook_write", func(s string) string {
+			sNoInit := strings.Replace(s, "func init() {\n\tscannerhooks.StringEnd = func(scanner any) token.Pos {\n\t\treturn scanner.(*Scanner).stringEnd\n\t}\n}\n", "", 1)
+			return sNoInit + "\nvar _ = func() int { scannerhooks.StringEnd = func(any) token.Pos { return 7 }; return 0 }()\n"
+		}},
+		{"multi_return_blank_var", func(s string) string {
+			return s + "\nvar _, _ = fmt.Printf(\"x\")\n"
+		}},
+	} {
+		t.Run("scanner_"+neg.name, func(t *testing.T) {
+			if err := VerifyGoScannerPackageAST(mustParseTestFiles(t, neg.mutate(validGo126ScannerSrc))); err == nil {
+				t.Fatalf("expected %s to fail VerifyGoScannerPackageAST", neg.name)
+			}
+		})
+	}
+
+	const validGo126ParserAddon = `package parser
+
+import (
+	"go/internal/scannerhooks"
+	"go/scanner"
+	"go/token"
+)
+
+func stringEndOf(s *scanner.Scanner) token.Pos {
+	return scannerhooks.StringEnd(s)
+}
+`
+	const parserMainFor126 = `package parser
+
+import (
+	"fmt"
+	"go/ast"
+	"go/scanner"
+	"go/token"
+	"io"
+	"io/fs"
+	"os"
+)
+
+type Mode uint
+
+const (
+	PackageClauseOnly Mode = 1 << iota
+	ImportsOnly
+	ParseComments
+	Trace
+)
+
+type parser struct {
+	trace   bool
+	scanner scanner.Scanner
+}
+
+func (p *parser) init(fset *token.FileSet, src []byte, mode Mode) {
+	p.trace = mode&Trace != 0
+	_ = stringEndOf(&p.scanner)
+}
+
+func (p *parser) printTrace(a ...any) {
+	fmt.Println(a...)
+}
+
+func readSource(filename string, src any) ([]byte, error) {
+	if src != nil {
+		if s, ok := src.(string); ok {
+			return []byte(s), nil
+		}
+		if r, ok := src.(io.Reader); ok {
+			return io.ReadAll(r)
+		}
+		return nil, fmt.Errorf("invalid source")
+	}
+	return os.ReadFile(filename)
+}
+
+func ParseFile(fset *token.FileSet, filename string, src any, mode Mode) (*ast.File, error) {
+	text, err := readSource(filename, src)
+	if err != nil {
+		return nil, err
+	}
+	var p parser
+	p.init(fset, text, mode)
+	return &ast.File{}, nil
+}
+
+func ParseDir(fset *token.FileSet, path string, filter func(fs.FileInfo) bool, mode Mode) (map[string]*ast.Package, error) {
+	_, _ = os.ReadDir(path)
+	return nil, nil
+}
+
+func ParseExprFrom(fset *token.FileSet, filename string, src any, mode Mode) (ast.Expr, error) {
+	text, err := readSource(filename, src)
+	if err != nil {
+		return nil, err
+	}
+	var p parser
+	p.init(fset, text, mode)
+	return nil, nil
+}
+
+func ParseExpr(x string) (ast.Expr, error) {
+	return ParseExprFrom(token.NewFileSet(), "", []byte(x), 0)
+}
+`
+	if err := VerifyGoParserPackageAST(mustParseTestFiles(t, parserMainFor126, validGo126ParserAddon)); err != nil {
+		t.Fatalf("validGo126Parser rejected: %v", err)
+	}
+	for _, badAddon := range []string{
+		strings.Replace(validGo126ParserAddon, "return scannerhooks.StringEnd(s)", "scannerhooks.StringEnd = nil\n\treturn 0", 1),
+		strings.Replace(validGo126ParserAddon, "return scannerhooks.StringEnd(s)", "fn := scannerhooks.StringEnd\n\treturn fn(s)", 1),
+		strings.Replace(validGo126ParserAddon, "scannerhooks.StringEnd(s)", "scannerhooks.Other(s)", 1),
+		strings.Replace(validGo126ParserAddon, "\t\"go/internal/scannerhooks\"\n", "", 1),
+		validGo126ParserAddon + "\nvar _ = stringEndOf(nil)\n",
+	} {
+		if err := VerifyGoParserPackageAST(mustParseTestFiles(t, parserMainFor126, badAddon)); err == nil {
+			t.Fatalf("expected mutated parser addon %q to fail VerifyGoParserPackageAST", badAddon)
+		}
+	}
+
+	// If a cached Go 1.26 toolchain archive is available in GOMODCACHE, verify its real stdlib ASTs too.
+	modCache := os.Getenv("GOMODCACHE")
+	if modCache == "" {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			modCache = filepath.Join(home, "go", "pkg", "mod")
+		}
+	}
+	if modCache != "" {
+		matches, _ := filepath.Glob(filepath.Join(modCache, "cache", "download", "golang.org", "toolchain", "@v", "v0.0.1-go1.26.*.zip"))
+		for _, zipPath := range matches {
+			zr, err := zip.OpenReader(zipPath)
+			if err != nil {
+				continue
+			}
+			parseZipPkg := func(pkgRel string) []*ast.File {
+				fset := token.NewFileSet()
+				var out []*ast.File
+				wantDir := "src/" + pkgRel + "/"
+				for _, zf := range zr.File {
+					_, after, ok := strings.Cut(zf.Name, "/")
+					if !ok || !strings.HasPrefix(after, wantDir) {
+						continue
+					}
+					rest := strings.TrimPrefix(after, wantDir)
+					if strings.Contains(rest, "/") || !strings.HasSuffix(rest, ".go") || strings.HasSuffix(rest, "_test.go") {
+						continue
+					}
+					rc, err := zf.Open()
+					if err != nil {
+						t.Fatalf("open %s: %v", zf.Name, err)
+					}
+					raw, err := io.ReadAll(rc)
+					_ = rc.Close()
+					if err != nil {
+						t.Fatalf("read %s: %v", zf.Name, err)
+					}
+					parsed, err := parser.ParseFile(fset, rest, raw, 0)
+					if err != nil {
+						t.Fatalf("parse %s: %v", zf.Name, err)
+					}
+					out = append(out, parsed)
+				}
+				return out
+			}
+			if files := parseZipPkg("go/internal/scannerhooks"); len(files) > 0 {
+				if err := VerifyGoScannerHooksPackageAST(files); err != nil {
+					_ = zr.Close()
+					t.Fatalf("%s go/internal/scannerhooks failed: %v", filepath.Base(zipPath), err)
+				}
+			}
+			if files := parseZipPkg("go/scanner"); len(files) > 0 {
+				if err := VerifyGoScannerPackageAST(files); err != nil {
+					_ = zr.Close()
+					t.Fatalf("%s go/scanner failed: %v", filepath.Base(zipPath), err)
+				}
+			}
+			if files := parseZipPkg("go/parser"); len(files) > 0 {
+				if err := VerifyGoParserPackageAST(files); err != nil {
+					_ = zr.Close()
+					t.Fatalf("%s go/parser failed: %v", filepath.Base(zipPath), err)
+				}
+			}
+			_ = zr.Close()
+			break
+		}
 	}
 }
 
@@ -1340,18 +1629,24 @@ func ParseExpr(x string) (ast.Expr, error) {
 		wantSub string
 	}{
 		{
-			name:    "unguarded_printTrace",
-			mutate:  func(s string) string { return strings.Replace(s, "if p.trace {\n\t\tdefer un(trace(p, \"step\"))\n\t}", "p.printTrace(\"leak\")", 1) },
+			name: "unguarded_printTrace",
+			mutate: func(s string) string {
+				return strings.Replace(s, "if p.trace {\n\t\tdefer un(trace(p, \"step\"))\n\t}", "p.printTrace(\"leak\")", 1)
+			},
 			wantSub: "unguarded .printTrace reference in parser.step",
 		},
 		{
-			name:    "funclit_inside_if_trace_unguarded",
-			mutate:  func(s string) string { return strings.Replace(s, "defer un(trace(p, \"step\"))", "fn := func() { p.printTrace(\"leak\") }\n\t\tfn()", 1) },
+			name: "funclit_inside_if_trace_unguarded",
+			mutate: func(s string) string {
+				return strings.Replace(s, "defer un(trace(p, \"step\"))", "fn := func() { p.printTrace(\"leak\") }\n\t\tfn()", 1)
+			},
 			wantSub: "unguarded .printTrace reference in parser.step",
 		},
 		{
-			name:    "debug_resolve_enabled",
-			mutate:  func(s string) string { return strings.Replace(s, "const debugResolve = false", "const debugResolve = true", 1) },
+			name: "debug_resolve_enabled",
+			mutate: func(s string) string {
+				return strings.Replace(s, "const debugResolve = false", "const debugResolve = true", 1)
+			},
 			wantSub: "unguarded .trace reference in resolver.run",
 		},
 		{
@@ -1365,18 +1660,24 @@ func ParseExpr(x string) (ast.Expr, error) {
 			wantSub: "ParseExpr must pass mode 0",
 		},
 		{
-			name:    "parsefile_nil_readsource",
-			mutate:  func(s string) string { return strings.Replace(s, "readSource(filename, src)", "readSource(filename, nil)", 1) },
+			name: "parsefile_nil_readsource",
+			mutate: func(s string) string {
+				return strings.Replace(s, "readSource(filename, src)", "readSource(filename, nil)", 1)
+			},
 			wantSub: "readSource in ParseFile must forward src",
 		},
 		{
-			name:    "parsefile_forced_trace_init",
-			mutate:  func(s string) string { return strings.Replace(s, "p.init(nil, text, mode)", "p.init(nil, text, mode|Trace)", 1) },
+			name: "parsefile_forced_trace_init",
+			mutate: func(s string) string {
+				return strings.Replace(s, "p.init(nil, text, mode)", "p.init(nil, text, mode|Trace)", 1)
+			},
 			wantSub: ".init in ParseFile must forward mode",
 		},
 		{
-			name:    "parsefile_readsource_alias",
-			mutate:  func(s string) string { return strings.Replace(s, "text, err := readSource(filename, src)", "rs := readSource\n\t_, _ = rs(filename, nil)\n\ttext, err := readSource(filename, src)", 1) },
+			name: "parsefile_readsource_alias",
+			mutate: func(s string) string {
+				return strings.Replace(s, "text, err := readSource(filename, src)", "rs := readSource\n\t_, _ = rs(filename, nil)\n\ttext, err := readSource(filename, src)", 1)
+			},
 			wantSub: "without aliasing",
 		},
 		{
@@ -1403,4 +1704,3 @@ func ParseExpr(x string) (ast.Expr, error) {
 		})
 	}
 }
-

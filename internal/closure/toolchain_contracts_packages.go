@@ -197,17 +197,24 @@ func verifyOffSurfacePackageWithIO(ctx context.Context, lp listedPackage, pkgInc
 	directRuntime := map[string]bool{}
 	seedCrossMap := map[toolchain.OffSurfaceCrossEdge]bool{}
 	var linkDirectives []toolchain.OffSurfaceLinkDirective
+	touchesScannerHooks := false
 
 	readRes, _, ioErr := readListedPackageFiles(ctx, lp, listedPackageReadOptions{
 		parseCgoComments:       true,
 		unparseableFailsClosed: true,
 		onNonGoFile: func(_, ext string, raw []byte) error {
+			if toolchain.RawMentionsScannerHooks(raw) {
+				touchesScannerHooks = true
+			}
 			if ext == ".syso" {
 				cprep.CollectRawBytesRuntimeSymbolRefs(raw, directRuntime)
 			}
 			return nil
 		},
 		onGoSource: func(_, text string) error {
+			if toolchain.DirectiveTouchesScannerHooks(text) {
+				touchesScannerHooks = true
+			}
 			toolchain.ScanOffSurfaceGoDirectives(text, directRuntime, func(localSym, target string) {
 				linkDirectives = append(linkDirectives, toolchain.OffSurfaceLinkDirective{LocalSym: localSym, Target: target})
 			})
@@ -219,6 +226,12 @@ func verifyOffSurfacePackageWithIO(ctx context.Context, lp listedPackage, pkgInc
 	}
 	if readRes.hasUnparseable {
 		directRuntime["runtime.*"] = true
+		touchesScannerHooks = true
+	}
+	for _, pre := range readRes.cgoPreambles {
+		if toolchain.RawMentionsScannerHooks([]byte(pre)) {
+			touchesScannerHooks = true
+		}
 	}
 	nonGoTexts := append(readRes.nonGoTexts, readRes.cgoPreambles...)
 	if len(nonGoTexts) > 0 {
@@ -229,11 +242,16 @@ func verifyOffSurfacePackageWithIO(ctx context.Context, lp listedPackage, pkgInc
 		}
 		if vErr != nil {
 			directRuntime["runtime.*"] = true
+			touchesScannerHooks = true
 		} else {
 			if cprep.ScanPreprocessedNonGoSymbolRefs(lp.ImportPath, readRes.mergeIncludeHeaders(incHdrs), nonGoTexts, directRuntime, extAsm, nil) {
 				directRuntime["runtime.*"] = true
+				touchesScannerHooks = true
 			}
 			for ext := range extAsm {
+				if strings.Contains(ext, "scannerhooks") {
+					touchesScannerHooks = true
+				}
 				if tPkg, tSym, ok := cprep.SplitLinknameTarget(ext); ok && tPkg != lp.ImportPath {
 					seedCrossMap[toolchain.OffSurfaceCrossEdge{Pkg: tPkg, Sym: tSym}] = true
 				}
@@ -243,7 +261,11 @@ func verifyOffSurfacePackageWithIO(ctx context.Context, lp listedPackage, pkgInc
 	if err := verifyTrackedPackageDigestUnmoved(ctx, lp, readRes.readCache); err != nil {
 		return toolchain.OffSurfaceVerdict{}, err
 	}
-	return toolchain.BuildOffSurfaceGraph(lp.ImportPath, readRes.parsed, linkDirectives, directRuntime, seedCrossMap), nil
+	ov := toolchain.BuildOffSurfaceGraph(lp.ImportPath, readRes.parsed, linkDirectives, directRuntime, seedCrossMap)
+	if touchesScannerHooks {
+		ov.TouchesScannerHooks = true
+	}
+	return ov, nil
 }
 
 // verifyListedPackage checks the structural AST and directive contracts for one
@@ -351,6 +373,9 @@ func verifyPureCandidateWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 			if err != nil {
 				return verifiedPackageVerdict{}, err, nil
 			}
+			if importPath == "go/internal/scannerhooks" {
+				return verifiedPackageVerdict{}, fmt.Errorf("%s: forbidden import of go/internal/scannerhooks", lp.ImportPath), nil
+			}
 			if !toolchain.IsPureSupportImport(lp.ImportPath, importPath) && !auditset.PurePackage(importPath) {
 				delegateSet[importPath] = true
 			}
@@ -373,7 +398,7 @@ func listedSurfaceMustHaveGoFiles(importPath string) bool {
 	case "os", "internal/testlog", "testing", "testing/internal/testdeps",
 		"runtime", "runtime/debug", "sync", "reflect", "time", "math", "math/rand",
 		"context", "crypto/fips140", "path/filepath",
-		"text/tabwriter", "go/token", "go/scanner", "go/ast", "go/parser":
+		"text/tabwriter", "go/token", "go/internal/scannerhooks", "go/scanner", "go/ast", "go/parser":
 		return true
 	}
 	return false
@@ -381,7 +406,7 @@ func listedSurfaceMustHaveGoFiles(importPath string) bool {
 
 func isGoOnlyVerifiedSurfacePkg(importPath string) bool {
 	switch importPath {
-	case "text/tabwriter", "go/token", "go/scanner", "go/ast", "go/parser":
+	case "text/tabwriter", "go/token", "go/internal/scannerhooks", "go/scanner", "go/ast", "go/parser":
 		return true
 	}
 	return false
@@ -414,6 +439,9 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 		requireGoFiles:      listedSurfaceMustHaveGoFiles(lp.ImportPath),
 		parseCgoComments:    true,
 		onNonGoFile: func(_, ext string, raw []byte) error {
+			if lp.ImportPath != "go/internal/scannerhooks" && toolchain.RawMentionsScannerHooks(raw) {
+				externalPullTargets["go/internal/scannerhooks.*"] = true
+			}
 			if lp.ImportPath == "runtime" {
 				if ext == ".syso" {
 					cprep.CollectRuntimeIdentsAndMachO(raw, runtimeNonGoIdents)
@@ -511,6 +539,25 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 	}
 
 	allNonGoTexts := append(readRes.nonGoTexts, readRes.cgoPreambles...)
+	if lp.ImportPath != "go/internal/scannerhooks" {
+		for _, pre := range readRes.cgoPreambles {
+			if toolchain.RawMentionsScannerHooks([]byte(pre)) {
+				externalPullTargets["go/internal/scannerhooks.*"] = true
+			}
+		}
+	}
+	if lp.ImportPath != "go/internal/scannerhooks" && lp.ImportPath != "go/scanner" && lp.ImportPath != "go/parser" {
+		for _, f := range readRes.parsed {
+			for _, imp := range f.Imports {
+				if imp == nil || imp.Path == nil {
+					continue
+				}
+				if importPath, err := strconv.Unquote(imp.Path.Value); err == nil && importPath == "go/internal/scannerhooks" {
+					return verifiedPackageVerdict{}, fmt.Errorf("%s: forbidden import of go/internal/scannerhooks", lp.ImportPath), nil
+				}
+			}
+		}
+	}
 	if lp.ImportPath == "runtime" && len(allNonGoTexts) > 0 {
 		if cprep.ScanPreprocessedNonGoSymbolRefs(lp.ImportPath, readRes.mergeIncludeHeaders(runtimeIncludeHdrs), allNonGoTexts, nil, externalPullTargets, runtimeNonGoIdents) {
 			return verifiedPackageVerdict{}, fmt.Errorf("%s: non-Go macro expansion budget exceeded", lp.ImportPath), nil
@@ -547,6 +594,10 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 		}
 	case "go/token":
 		if err := toolchain.VerifyGoTokenPackageAST(readRes.parsed); err != nil {
+			return verifiedPackageVerdict{}, err, nil
+		}
+	case "go/internal/scannerhooks":
+		if err := toolchain.VerifyGoScannerHooksPackageAST(readRes.parsed); err != nil {
 			return verifiedPackageVerdict{}, err, nil
 		}
 	case "go/scanner":

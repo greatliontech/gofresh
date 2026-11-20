@@ -24,9 +24,16 @@ var (
 	}
 	goTokenReservedIdents = reservedIdentsForImports(allowedGoTokenImports)
 
+	allowedGoScannerHooksImports = map[string]bool{
+		"go/token": true,
+	}
+	goScannerHooksReservedIdents = map[string]bool{
+		"token": true, "any": true,
+	}
+
 	allowedGoScannerImports = map[string]bool{
-		"bytes": true, "fmt": true, "go/token": true, "io": true,
-		"path/filepath": true, "sort": true, "strconv": true,
+		"bytes": true, "fmt": true, "go/internal/scannerhooks": true, "go/token": true,
+		"io": true, "path/filepath": true, "sort": true, "strconv": true,
 		"unicode": true, "unicode/utf8": true,
 	}
 	goScannerReservedIdents = reservedIdentsForImports(allowedGoScannerImports)
@@ -40,7 +47,7 @@ var (
 
 	allowedGoParserImports = map[string]bool{
 		"bytes": true, "errors": true, "fmt": true, "go/ast": true,
-		"go/build/constraint": true, "go/scanner": true, "go/token": true,
+		"go/build/constraint": true, "go/internal/scannerhooks": true, "go/scanner": true, "go/token": true,
 		"io": true, "io/fs": true, "os": true, "path/filepath": true, "strings": true,
 	}
 	goParserReservedIdents = reservedIdentsForImports(allowedGoParserImports)
@@ -65,6 +72,9 @@ func VerifyGoTokenPackageAST(files []*ast.File) error {
 	}
 	if len(idx.bodylessFuncs) > 0 || len(idx.dupTopFuncs) > 0 || idx.anyDupTypeMethod {
 		return fmt.Errorf("go/token: bodyless or duplicate function declaration")
+	}
+	if err := idx.VerifyBlankVarInitsPure("go/token"); err != nil {
+		return err
 	}
 
 	varNames := map[string]bool{}
@@ -201,6 +211,111 @@ func VerifyGoTokenPackageAST(files []*ast.File) error {
 	return nil
 }
 
+// VerifyGoScannerHooksPackageAST verifies the structural AST contract for
+// go/internal/scannerhooks (present in Go 1.26, where go/scanner's init binds
+// StringEnd once to read Scanner.stringEnd for go/parser).
+func VerifyGoScannerHooksPackageAST(files []*ast.File) error {
+	if len(files) == 0 {
+		return fmt.Errorf("go/internal/scannerhooks: no AST files")
+	}
+	if err := verifyClosedPackageImports("go/internal/scannerhooks", files, allowedGoScannerHooksImports); err != nil {
+		return err
+	}
+	idx, err := indexPackageAST("go/internal/scannerhooks", files, goScannerHooksReservedIdents, allowedGoScannerHooksImports)
+	if err != nil {
+		return err
+	}
+	if idx.hasInitFunc || len(idx.bodylessFuncs) > 0 || len(idx.topFuncs) > 0 || len(idx.typeMethods) > 0 ||
+		len(idx.typeSpecs) > 0 || idx.pkgDeclCounts["any"] > 0 || len(idx.blankVarInits) > 0 || idx.hasMultiReturnBlankVar ||
+		len(idx.pkgValueCounts) != 1 || idx.pkgValueCounts["StringEnd"] != 1 || len(idx.pkgVarCounts) != 1 {
+		return fmt.Errorf("go/internal/scannerhooks: unexpected declarations outside zero-initialized StringEnd")
+	}
+	vs, ok := idx.zeroInitPkgVars["StringEnd"]
+	if !ok || len(vs.Names) != 1 || len(vs.Values) != 0 || !idx.hasFileImport(idx.pkgVarFiles["StringEnd"], "go/token") || !isScannerHooksStringEndFuncType(vs.Type) {
+		return fmt.Errorf("go/internal/scannerhooks: StringEnd must be zero-initialized func(any) token.Pos")
+	}
+	return nil
+}
+
+func isAnyOrEmptyInterfaceType(expr ast.Expr) bool {
+	switch t := unwrapParens(expr).(type) {
+	case *ast.Ident:
+		return t.Name == "any"
+	case *ast.InterfaceType:
+		return !t.Incomplete && (t.Methods == nil || len(t.Methods.List) == 0)
+	default:
+		return false
+	}
+}
+
+func isScannerHooksStringEndFuncType(expr ast.Expr) bool {
+	ft, ok := unwrapParens(expr).(*ast.FuncType)
+	if !ok || ft.TypeParams != nil || ft.Params == nil || ft.Params.NumFields() != 1 || len(ft.Params.List) != 1 ||
+		ft.Results == nil || ft.Results.NumFields() != 1 || len(ft.Results.List) != 1 || len(ft.Results.List[0].Names) != 0 {
+		return false
+	}
+	if !isAnyOrEmptyInterfaceType(ft.Params.List[0].Type) {
+		return false
+	}
+	_, okPos := isSelectorBaseField(ft.Results.List[0].Type, "token", "Pos")
+	return okPos
+}
+
+func verifyScannerHooksStringEndInit(fn *ast.FuncDecl, idx *PackageASTIndex) (*ast.Ident, error) {
+	if fn.Type == nil || fn.Type.TypeParams != nil || (fn.Type.Params != nil && fn.Type.Params.NumFields() != 0) || fn.Type.Results != nil {
+		return nil, fmt.Errorf("go/scanner: invalid init signature")
+	}
+	if f := idx.funcFile[fn]; f == nil || !idx.fileImports[f]["go/internal/scannerhooks"] || !idx.fileImports[f]["go/token"] {
+		return nil, fmt.Errorf("go/scanner: init must reside in a file importing go/internal/scannerhooks and go/token")
+	}
+	if idx.pkgDeclCounts["any"] > 0 || !idx.isUniqueLocalType("Scanner") || idx.nonAliasStructSpec["Scanner"] == nil ||
+		funcShadowsAnyIdent(fn, map[string]bool{"scannerhooks": true, "token": true, "Scanner": true, "any": true}) {
+		return nil, fmt.Errorf("go/scanner: shadowed or missing Scanner/scannerhooks/token/any in init")
+	}
+	if fn.Body == nil || len(fn.Body.List) != 1 {
+		return nil, fmt.Errorf("go/scanner: init must contain a single StringEnd assignment")
+	}
+	as, ok := fn.Body.List[0].(*ast.AssignStmt)
+	if !ok || as.Tok != token.ASSIGN || len(as.Lhs) != 1 || len(as.Rhs) != 1 {
+		return nil, fmt.Errorf("go/scanner: init statement must be a single assignment")
+	}
+	lhsBaseID, okLHS := isSelectorBaseField(as.Lhs[0], "scannerhooks", "StringEnd")
+	if !okLHS {
+		return nil, fmt.Errorf("go/scanner: init must assign solely to scannerhooks.StringEnd")
+	}
+	fl, okFL := unwrapParens(as.Rhs[0]).(*ast.FuncLit)
+	if !okFL || !isScannerHooksStringEndFuncType(fl.Type) || fl.Body == nil || len(fl.Body.List) != 1 {
+		return nil, fmt.Errorf("go/scanner: scannerhooks.StringEnd initializer must be single-return func(any) token.Pos")
+	}
+	pName := paramIdentAt(fl.Type.Params, 0)
+	if pName == "" || pName == "_" || pName == "Scanner" || pName == "token" || pName == "scannerhooks" {
+		return nil, fmt.Errorf("go/scanner: invalid parameter name %q in scannerhooks.StringEnd literal", pName)
+	}
+	ret, okRet := fl.Body.List[0].(*ast.ReturnStmt)
+	if !okRet || len(ret.Results) != 1 {
+		return nil, fmt.Errorf("go/scanner: scannerhooks.StringEnd literal must return one expression")
+	}
+	sel, okSel := unwrapParens(ret.Results[0]).(*ast.SelectorExpr)
+	if !okSel || sel.Sel == nil || sel.Sel.Name == "" {
+		return nil, fmt.Errorf("go/scanner: scannerhooks.StringEnd literal must return a Scanner field")
+	}
+	ta, okTA := unwrapParens(sel.X).(*ast.TypeAssertExpr)
+	if !okTA || ta.Type == nil {
+		return nil, fmt.Errorf("go/scanner: scannerhooks.StringEnd literal must type-assert parameter to *Scanner")
+	}
+	if _, okParam := isIdentNamed(ta.X, pName); !okParam {
+		return nil, fmt.Errorf("go/scanner: scannerhooks.StringEnd type assertion must read parameter %s", pName)
+	}
+	star, okStar := unwrapParens(ta.Type).(*ast.StarExpr)
+	if !okStar {
+		return nil, fmt.Errorf("go/scanner: scannerhooks.StringEnd type assertion must target *Scanner")
+	}
+	if _, okSc := isIdentNamed(star.X, "Scanner"); !okSc {
+		return nil, fmt.Errorf("go/scanner: scannerhooks.StringEnd type assertion must target *Scanner")
+	}
+	return lhsBaseID, nil
+}
+
 // VerifyGoScannerPackageAST verifies the structural AST contract for go/scanner.
 func VerifyGoScannerPackageAST(files []*ast.File) error {
 	if len(files) == 0 {
@@ -213,8 +328,11 @@ func VerifyGoScannerPackageAST(files []*ast.File) error {
 	if err != nil {
 		return err
 	}
-	if idx.hasInitFunc || len(idx.bodylessFuncs) > 0 || len(idx.dupTopFuncs) > 0 || idx.anyDupTypeMethod {
-		return fmt.Errorf("go/scanner: unexpected init, bodyless, or duplicate function declaration")
+	if len(idx.bodylessFuncs) > 0 || len(idx.dupTopFuncs) > 0 || idx.anyDupTypeMethod {
+		return fmt.Errorf("go/scanner: bodyless or duplicate function declaration")
+	}
+	if err := idx.VerifyBlankVarInitsPure("go/scanner"); err != nil {
+		return err
 	}
 	if err := verifyReadOnlyByteSlicePkgVars("go/scanner", idx, files); err != nil {
 		return err
@@ -228,6 +346,8 @@ func VerifyGoScannerPackageAST(files []*ast.File) error {
 		return fmt.Errorf("go/scanner: PrintError first parameter must be io.Writer")
 	}
 
+	allowedScannerHooksIdents := map[*ast.Ident]bool{}
+	initCount := 0
 	for _, f := range files {
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
@@ -236,6 +356,18 @@ func VerifyGoScannerPackageAST(files []*ast.File) error {
 			}
 			if err := verifyNoConcurrencyOrBuiltinPrint("go/scanner", fn); err != nil {
 				return err
+			}
+			if fn.Recv == nil && fn.Name.Name == "init" {
+				initCount++
+				if initCount > 1 {
+					return fmt.Errorf("go/scanner: multiple init functions forbidden")
+				}
+				lhsBaseID, err := verifyScannerHooksStringEndInit(fn, idx)
+				if err != nil {
+					return err
+				}
+				allowedScannerHooksIdents[lhsBaseID] = true
+				continue
 			}
 			isPrintError := fn == printErrFn
 			var qErr error
@@ -281,6 +413,9 @@ func VerifyGoScannerPackageAST(files []*ast.File) error {
 			}
 		}
 	}
+	if !allNonSelPropIdentsIn(files, "scannerhooks", allowedScannerHooksIdents) {
+		return fmt.Errorf("go/scanner: forbidden reference to scannerhooks outside StringEnd init")
+	}
 	return nil
 }
 
@@ -298,6 +433,9 @@ func VerifyGoASTPackageAST(files []*ast.File) error {
 	}
 	if idx.hasInitFunc || len(idx.bodylessFuncs) > 0 || len(idx.dupTopFuncs) > 0 || idx.anyDupTypeMethod {
 		return fmt.Errorf("go/ast: unexpected init, bodyless, or duplicate function declaration")
+	}
+	if err := idx.VerifyBlankVarInitsPure("go/ast"); err != nil {
+		return err
 	}
 
 	varNames := map[string]bool{}
@@ -452,7 +590,6 @@ func verifyGoASTFuncBody(fn *ast.FuncDecl, recvName string, isTopPrint, isPosOrE
 	return qErr
 }
 
-
 func isStringTokenMapType(expr ast.Expr) bool {
 	mt, ok := unwrapParens(expr).(*ast.MapType)
 	if !ok {
@@ -481,4 +618,3 @@ func isReadOnlyCommentPtrLit(expr ast.Expr) bool {
 	lit, okLit := unwrapParens(cl.Elts[1]).(*ast.BasicLit)
 	return okLit && lit.Kind == token.STRING
 }
-

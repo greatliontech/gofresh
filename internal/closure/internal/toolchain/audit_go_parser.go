@@ -23,6 +23,9 @@ func VerifyGoParserPackageAST(files []*ast.File) error {
 	if idx.hasInitFunc || len(idx.bodylessFuncs) > 0 || len(idx.dupTopFuncs) > 0 || idx.anyDupTypeMethod {
 		return fmt.Errorf("go/parser: unexpected init, bodyless, or duplicate function declaration")
 	}
+	if err := idx.VerifyBlankVarInitsPure("go/parser"); err != nil {
+		return err
+	}
 	if !verifyGoParserTraceConstBit(files) {
 		return fmt.Errorf("go/parser: Trace constant bit (1 << 3) mismatch")
 	}
@@ -39,6 +42,9 @@ func VerifyGoParserPackageAST(files []*ast.File) error {
 		varNames[name] = true
 	}
 	if err := verifyPkgVarsNeverMutatedOrAddressed("go/parser", files, varNames, nil); err != nil {
+		return err
+	}
+	if err := verifyGoParserScannerHooksCallOnly(idx, files); err != nil {
 		return err
 	}
 
@@ -401,6 +407,10 @@ func verifyGoParserFuncBody(fn *ast.FuncDecl, kernel *PackageInactiveKernel) err
 				if !auditset.Symbol("go/scanner", sel) {
 					qErr = fmt.Errorf("go/parser: forbidden scanner.%s in %s", sel, fnKey)
 				}
+			case "scannerhooks":
+				if sel != "StringEnd" {
+					qErr = fmt.Errorf("go/parser: forbidden scannerhooks.%s in %s", sel, fnKey)
+				}
 			case "token":
 				if !auditset.Symbol("go/token", sel) {
 					qErr = fmt.Errorf("go/parser: forbidden token.%s in %s", sel, fnKey)
@@ -528,7 +538,6 @@ func isIdentNonNilCond(expr ast.Expr, ident string) bool {
 	return okX && okNil
 }
 
-
 func isTokenBoolMapLit(expr ast.Expr) bool {
 	cl, ok := unwrapParens(expr).(*ast.CompositeLit)
 	if !ok {
@@ -574,4 +583,30 @@ func isNewASTObjectCall(expr ast.Expr) bool {
 	}
 	_, okObj := isSelectorBaseField(call.Args[0], "ast", "Object")
 	return okObj
+}
+
+func verifyGoParserScannerHooksCallOnly(idx *PackageASTIndex, files []*ast.File) error {
+	for _, f := range files {
+		allowedIdents := map[*ast.Ident]bool{}
+		if idx.hasFileImport(f, "go/internal/scannerhooks") {
+			ast.Inspect(f, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok || call.Ellipsis.IsValid() || len(call.Args) != 1 {
+					return true
+				}
+				sel, okSel := unwrapParens(call.Fun).(*ast.SelectorExpr)
+				if !okSel || sel.Sel == nil || sel.Sel.Name != "StringEnd" {
+					return true
+				}
+				if id, okID := unwrapParens(sel.X).(*ast.Ident); okID && id.Name == "scannerhooks" {
+					allowedIdents[id] = true
+				}
+				return true
+			})
+		}
+		if !allNonSelPropIdentsIn([]*ast.File{f}, "scannerhooks", allowedIdents) {
+			return fmt.Errorf("go/parser: scannerhooks referenced outside 1-arg scannerhooks.StringEnd(...) call")
+		}
+	}
+	return nil
 }

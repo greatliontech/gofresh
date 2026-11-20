@@ -45,6 +45,9 @@ func VerifyInternalTestlogPackageAST(files []*ast.File) error {
 	if idx.hasInitFunc || idx.hasMethods || len(idx.bodylessFuncs) > 0 || len(idx.dupTopFuncs) > 0 {
 		return fmt.Errorf("internal/testlog: invalid function or method declarations")
 	}
+	if err := idx.VerifyBlankVarInitsPure("internal/testlog"); err != nil {
+		return err
+	}
 	is := idx.uniqueTypeSpec("Interface")
 	if is == nil || idx.pkgDeclCounts["Interface"] != 1 || idx.pkgVarCounts["logger"] != 1 || idx.pkgDeclCounts["logger"] != 1 {
 		return fmt.Errorf("internal/testlog: missing or duplicate Interface/logger declarations")

@@ -10,6 +10,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/closure/internal/toolchain"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/testvariant"
+	"github.com/greatliontech/gofresh/internal/trace"
 	"go/parser"
 	"go/token"
 	"os"
@@ -2760,6 +2761,7 @@ func TestDirEntriesMatch(t *testing.T) {
 }
 
 func TestToolchainSurfaceVerifiesReadBuildInfoAndSyntaxPackages(t *testing.T) {
+	isolateProofCache(t)
 	seeded := map[string]verifiedPackageVerdict{}
 	sd := sourceDigests{
 		Packages:  map[string]string{},
@@ -2794,5 +2796,115 @@ func TestToolchainSurfaceVerifiesReadBuildInfoAndSyntaxPackages(t *testing.T) {
 		if len(failed) != 0 || ioErr != nil || ctxErr != nil || !pureDel["runtime/debug:ReadBuildInfo"] {
 			t.Fatalf("ReadBuildInfo not admitted when both runtime/debug and runtime.ModinfoVerified succeed: failed=%v delegates=%v", failed, pureDel)
 		}
+
+		// When go/internal/scannerhooks is in the audited surface, an off-surface go/*
+		// package importing it must fail go/internal/scannerhooks.
+		offDir := t.TempDir()
+		mkOffLP := func(sub, importPath string, files map[string]string) listedPackage {
+			d := filepath.Join(offDir, sub)
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			var names []string
+			for name, content := range files {
+				if err := os.WriteFile(filepath.Join(d, name), []byte(content), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				names = append(names, name)
+			}
+			slices.Sort(names)
+			lp := listedPackage{ImportPath: importPath, Dir: d, Files: names}
+			dig, err := digestListedPackageBuffered(t.Context(), lp, make([]byte, 4096))
+			if err != nil {
+				t.Fatal(err)
+			}
+			lp.digest = dig
+			return lp
+		}
+
+		if err := verifyListedPackage(mkOffLP("surf_goversion", "go/version", map[string]string{
+			"v.go": "package version\nimport \"go/internal/scannerhooks\"\nfunc init() { scannerhooks.StringEnd = nil }\n",
+		})); err == nil {
+			t.Fatal("in-surface go/version importing scannerhooks admitted")
+		}
+		if err := verifyListedPurePackage(mkOffLP("pure_strings", "strings", map[string]string{
+			"s.go": "package strings\nimport \"go/internal/scannerhooks\"\nvar _ = scannerhooks.StringEnd\n",
+		})); err == nil {
+			t.Fatal("pure package strings importing scannerhooks admitted")
+		}
+
+		cleanLP := mkOffLP("clean", "go/printer", map[string]string{"p.go": "package printer\nfunc F() {}\n"})
+		badImportLP := mkOffLP("bad_import", "go/printer", map[string]string{
+			"p.go": "package printer\nimport \"go/internal/scannerhooks\"\nfunc init() { scannerhooks.StringEnd = nil }\n",
+		})
+		badLinkLP := mkOffLP("bad_link", "net/http/internal", map[string]string{
+			"h.go": "package internal\nimport _ \"unsafe\"\n//go:linkname hook go/internal/scannerhooks.StringEnd\nvar hook any\n",
+		})
+		badUnparseLP := mkOffLP("bad_unparse", "go/printer", map[string]string{
+			"p.go": "package printer\nimport \"go/internal/scannerhooks\"\nfunc (\n",
+		})
+
+		hooksDig := "seed-hooks"
+		sd.Packages["go/internal/scannerhooks"] = hooksDig
+		sd.inventory["go/internal/scannerhooks"] = listedPackage{ImportPath: "go/internal/scannerhooks", Audited: true, digest: hooksDig}
+		seeded[verifiedPackageMemoKey("go/internal/scannerhooks", hooksDig)] = verifiedPackageVerdict{OK: true}
+
+		sd.inventory["go/printer"] = cleanLP
+		failed, _, ioErr, ctxErr = verifyToolchainSurfaceAndDelegatesWithIO(t.Context(), sd)
+		if len(failed) != 0 || ioErr != nil || ctxErr != nil {
+			t.Fatalf("clean off-surface go/printer unexpectedly failed scannerhooks: failed=%v ioErr=%v ctxErr=%v", failed, ioErr, ctxErr)
+		}
+
+		assertScannerHooksRejected := func(label, wantCulprit, wantReason string) {
+			t.Helper()
+			rec := trace.NewRecorder()
+			tCtx := trace.WithSink(t.Context(), rec)
+			gotFailed, _, gotIO, gotCtx := verifyToolchainSurfaceAndDelegatesWithIO(tCtx, sd)
+			if !slices.Equal(gotFailed, []string{"go/internal/scannerhooks"}) || gotIO != nil || gotCtx != nil {
+				t.Fatalf("%s: failed=%v ioErr=%v ctxErr=%v, want [go/internal/scannerhooks]", label, gotFailed, gotIO, gotCtx)
+			}
+			saw := false
+			for _, ev := range rec.ByName("scannerhooks_confinement_error") {
+				if ev.Target != "go/internal/scannerhooks" {
+					continue
+				}
+				var gotCulprit, gotReason string
+				for _, f := range ev.Fields {
+					switch f.Key {
+					case "culprit":
+						gotCulprit = f.Str
+					case "reason":
+						gotReason = f.Str
+					}
+				}
+				if gotCulprit == wantCulprit && gotReason == wantReason {
+					saw = true
+				}
+			}
+			if !saw {
+				t.Fatalf("%s: missing scannerhooks_confinement_error trace culprit=%q reason=%q; events=%+v",
+					label, wantCulprit, wantReason, rec.ByName("scannerhooks_confinement_error"))
+			}
+		}
+
+		sd.inventory["go/printer"] = badImportLP
+		assertScannerHooksRejected("off-surface import", "go/printer", "offsurface_touches_scannerhooks")
+
+		sd.inventory["go/printer"] = badUnparseLP
+		assertScannerHooksRejected("off-surface unparseable", "go/printer", "offsurface_touches_scannerhooks")
+
+		sd.inventory["go/printer"] = cleanLP
+		sd.inventory["net/http/internal"] = badLinkLP
+		assertScannerHooksRejected("off-surface non-go/* linkname", "net/http/internal", "offsurface_touches_scannerhooks")
+		delete(sd.inventory, "net/http/internal")
+
+		goVerDig := "seed-goversion-link"
+		sd.Packages["go/version"] = goVerDig
+		sd.inventory["go/version"] = listedPackage{ImportPath: "go/version", Audited: true, digest: goVerDig}
+		seeded[verifiedPackageMemoKey("go/version", goVerDig)] = verifiedPackageVerdict{
+			OK:                    true,
+			ExternalLinknamePulls: []string{"go/internal/scannerhooks.StringEnd"},
+		}
+		assertScannerHooksRejected("in-surface external linkname pull", "go/version", "surface_external_pull")
 	})
 }

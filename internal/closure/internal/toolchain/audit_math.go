@@ -80,6 +80,9 @@ func VerifyMathPackage(ctx context.Context, files []*ast.File, goSrcs []string, 
 	if len(idx.typeSpecs) > 0 {
 		return nil, fmt.Errorf("math: unexpected type declarations")
 	}
+	if err := idx.VerifyBlankVarInitsPure("math"); err != nil {
+		return nil, err
+	}
 
 	anyLinknameLocals := map[string]bool{}
 	for _, src := range goSrcs {

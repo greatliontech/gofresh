@@ -471,6 +471,13 @@ func verifyToolchainSurfaceAndDelegatesWithIO(ctx context.Context, d sourceDiges
 			return nil, nil, ioE, ctxE
 		}
 	}
+	if d.Packages["go/internal/scannerhooks"] != "" && !failedSet["go/internal/scannerhooks"] {
+		if failHooks, ioE, ctxE := verifyScannerHooksConfinement(ctx, d, policy, pkgIncludeSalt, keys, surfaceVerdicts, pureDelegates, delegateVerdicts); ioE != nil || ctxE != nil {
+			return nil, nil, ioE, ctxE
+		} else if failHooks {
+			failedSet["go/internal/scannerhooks"] = true
+		}
+	}
 	verifiedLineWriters := map[string]bool{}
 	if hasVerifiedRuntime {
 		for _, w := range rtVerdict.VerifiedRuntimeLineWriters {
@@ -727,6 +734,84 @@ func collectOffSurfaceStartupRuntimePulls(ctx context.Context, d sourceDigests, 
 		pulledRuntimeTargets,
 	)
 	return nil, nil
+}
+
+func externalPullTouchesScannerHooks(ext string) bool {
+	if ext == "go/internal/scannerhooks.*" || strings.HasPrefix(ext, "go/internal/scannerhooks.") {
+		return true
+	}
+	tPkg, _, ok := cprep.SplitLinknameTarget(ext)
+	return ok && tPkg == "go/internal/scannerhooks"
+}
+
+func emitScannerHooksConfinementError(ctx context.Context, culprit, reason string) {
+	if trace.Enabled(ctx, trace.DomainToolchain, "go/internal/scannerhooks") {
+		trace.Emit(ctx, trace.DomainToolchain, "scannerhooks_confinement_error", "go/internal/scannerhooks",
+			trace.String("culprit", culprit),
+			trace.String("reason", reason),
+		)
+	}
+}
+
+func verifyScannerHooksConfinement(
+	ctx context.Context,
+	d sourceDigests,
+	policy, pkgIncludeSalt string,
+	surfaceKeys []string,
+	surfaceVerdicts map[string]verifiedPackageVerdict,
+	pureDelegates map[string]bool,
+	delegateVerdicts map[string]verifiedPackageVerdict,
+) (failed bool, ioErr error, ctxErr error) {
+	for _, pkg := range surfaceKeys {
+		if pkg == "go/internal/scannerhooks" {
+			continue
+		}
+		for _, ext := range surfaceVerdicts[pkg].ExternalLinknamePulls {
+			if externalPullTouchesScannerHooks(ext) {
+				emitScannerHooksConfinementError(ctx, pkg, "surface_external_pull")
+				return true, nil, nil
+			}
+		}
+	}
+	delKeys := sortedKeys(pureDelegates)
+	for _, delPkg := range delKeys {
+		for _, ext := range delegateVerdicts[delPkg].ExternalLinknamePulls {
+			if externalPullTouchesScannerHooks(ext) {
+				emitScannerHooksConfinementError(ctx, delPkg, "delegate_external_pull")
+				return true, nil, nil
+			}
+		}
+	}
+	invKeys := make([]string, 0, len(d.inventory))
+	for pkg := range d.inventory {
+		if d.Packages[pkg] != "" || pureDelegates[pkg] {
+			continue
+		}
+		invKeys = append(invKeys, pkg)
+	}
+	slices.Sort(invKeys)
+	for _, pkg := range invKeys {
+		if err := ctx.Err(); err != nil {
+			return false, nil, err
+		}
+		lp := d.inventory[pkg]
+		if lp.digest == "" {
+			emitScannerHooksConfinementError(ctx, pkg, "missing_offsurface_digest")
+			return true, nil, nil
+		}
+		ov, err := verifyOffSurfacePackageMemoized(ctx, lp, policy, pkgIncludeSalt)
+		if err != nil {
+			if cErr := ctx.Err(); cErr != nil {
+				return false, nil, cErr
+			}
+			return false, err, nil
+		}
+		if ov.TouchesScannerHooks {
+			emitScannerHooksConfinementError(ctx, pkg, "offsurface_touches_scannerhooks")
+			return true, nil, nil
+		}
+	}
+	return false, nil, nil
 }
 
 type selectionDegradation struct {

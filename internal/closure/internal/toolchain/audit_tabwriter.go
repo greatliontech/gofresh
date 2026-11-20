@@ -52,6 +52,9 @@ func VerifyTabwriterPackageAST(files []*ast.File) error {
 	if len(idx.dupTopFuncs) > 0 || idx.anyDupTypeMethod {
 		return fmt.Errorf("text/tabwriter: duplicate function or method declaration")
 	}
+	if err := idx.VerifyBlankVarInitsPure("text/tabwriter"); err != nil {
+		return err
+	}
 	if err := verifyReadOnlyByteSlicePkgVars("text/tabwriter", idx, files); err != nil {
 		return err
 	}

@@ -39,7 +39,7 @@ func emitHarnessGateReject(fp *freshParamAnalysis, target *ssa.Function, argIdx 
 		argStr = arg.String()
 	}
 	trace.Emit(ctx, trace.DomainClosure, "closure.propharness.gate_reject", subj,
-		trace.String("target", tgtName),
+		trace.String("callee", tgtName),
 		trace.Int("arg_idx", argIdx),
 		trace.String("arg", argStr),
 		trace.String("reason", reason),
@@ -439,16 +439,19 @@ func nonHarnessDynamicCallMayPassBadHandle(fn *ssa.Function, paramIdx int, fp *f
 							return true, "bad_dyncall_caller:" + caller.String() + ":" + det
 						}
 					} else if paramIdx >= 1 {
+						// Method-expression thunks have Signature.Recv() == nil: concrete T.M thunks
+						// reject earlier at user_static_site_plus_dyn_ref, non-harness Iface.M thunks
+						// reject via their internal c.IsInvoke() + !hasRecv arm above, and harness
+						// HarnessIface.M thunks reject as dynamic harness targets on indirect calls
+						// and at propertyHarnessClosedArgsForTarget on direct static calls. Only
+						// bound-method closures (such as StateMachine.Check stored in a harness map)
+						// share fn's receiverless parameter list at dynamic call sites.
 						if csig.Params().Len() == fn.Signature.Params().Len() && sigNoRecvIdentical(csig, fn.Signature) {
 							if paramIdx-1 >= len(c.Args) {
 								return true, "bad_boundcall_arity:" + caller.String()
 							}
 							if okH, det := authenticHarnessHandleValueDetail(c.Args[paramIdx-1], fp, visiting); !okH {
 								return true, "bad_boundcall_caller:" + caller.String() + ":" + det
-							}
-						} else if csig.Params().Len() == fn.Signature.Params().Len()+1 && paramIdx < len(c.Args) {
-							if okH, det := authenticHarnessHandleValueDetail(c.Args[paramIdx], fp, visiting); !okH {
-								return true, "bad_thunkcall_caller:" + caller.String() + ":" + det
 							}
 						}
 					}

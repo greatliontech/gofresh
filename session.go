@@ -172,7 +172,7 @@ const ClosureStrategy = closure.IdentityStrategy
 // classification change bumps it, so persistently memoized analyses and
 // recorded proofs from the prior interpretation refuse instead of serving
 // under semantics they were not computed by.
-const ObservationRTA = "gofresh/observation-rta@83"
+const ObservationRTA = "gofresh/observation-rta@84"
 
 // BuildDescription describes compilation, not the environment of the resulting
 // program. Inputs is explicitly present (possibly empty): the executor accepts
@@ -388,14 +388,14 @@ func NewSession(ctx context.Context, build BuildDescription, policy SessionPolic
 		Inputs:      append([]string{}, inputs...),
 	}
 	s := &Session{
-		build:               owned,
-		assumePure:          func(subject Subject) bool { return pure[subject] || (assumePure != nil && assumePure(subject)) },
-		buildFlags:          flags,
-		buildInputs:         inputs,
-		dir:                 buildDir,
-		env:                 buildEnv,
-		evidenceRoot:        evidenceRoot,
-		analysisBudget:      policy.AnalysisBudget,
+		build:          owned,
+		assumePure:     func(subject Subject) bool { return pure[subject] || (assumePure != nil && assumePure(subject)) },
+		buildFlags:     flags,
+		buildInputs:    inputs,
+		dir:            buildDir,
+		env:            buildEnv,
+		evidenceRoot:   evidenceRoot,
+		analysisBudget: policy.AnalysisBudget,
 		runner:         gotool.Runner{Prepare: policy.PrepareCommand},
 		progress:       policy.Progress,
 		sortedVouches:  vouches,

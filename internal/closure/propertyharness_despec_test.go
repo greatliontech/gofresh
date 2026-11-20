@@ -165,6 +165,24 @@ func Verify(l Logger, fn func(*Context)) {
 	runVerify(l, fn)
 }
 
+type StateRunner interface {
+	Check(*Context)
+}
+
+type StateComparator interface {
+	Compare(*Context) int
+}
+
+func StateActions(sr StateRunner) map[string]func(*Context) {
+	return map[string]func(*Context){"": sr.Check}
+}
+
+func (c *Context) Repeat(actions map[string]func(*Context)) {
+	for _, act := range actions {
+		act(c)
+	}
+}
+
 func BuildVerify(fn func(*Context)) func(*testing.T) {
 	return func(t *testing.T) { runVerify(t, fn) }
 }
@@ -257,6 +275,7 @@ func PureStdCallbackBypass() int {
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -545,6 +564,78 @@ func TestCrossCallerNil(t *testing.T) {
 	}
 	TestCrossCalledTarget(nil)
 }
+
+type cleanStateRunner struct {
+	v int64
+}
+
+func (s *cleanStateRunner) Check(c *propcheck.Context) {
+	if s.v < 0 {
+		c.Fatalf("negative")
+	}
+}
+
+func TestStateRunnerAlongsideUnrelated2ArgDynCall(t *testing.T) {
+	fns := []func(int, int) int{func(a, b int) int { return a + b }}
+	_ = fns[0](1, 2)
+	propcheck.Verify(t, func(c *propcheck.Context) {
+		c.Repeat(propcheck.StateActions(&cleanStateRunner{v: 1}))
+	})
+}
+
+type localStateComparator interface {
+	Compare(*propcheck.Context) int
+}
+
+type thunkBadStateRunner struct{}
+
+func (s *thunkBadStateRunner) Compare(c *propcheck.Context) int {
+	c.Fatalf("bad")
+	return 0
+}
+
+func TestStateRunnerMethodThunkWithNilHandle(t *testing.T) {
+	propcheck.Verify(t, func(c *propcheck.Context) {
+		_ = c
+		_, _ = slices.BinarySearchFunc(
+			[]localStateComparator{&thunkBadStateRunner{}},
+			(*propcheck.Context)(nil),
+			localStateComparator.Compare,
+		)
+	})
+}
+
+type badHarnessThunkRunner struct{}
+
+func (s *badHarnessThunkRunner) Check(c *propcheck.Context) {
+	c.Fatalf("bad")
+}
+
+func TestHarnessIfaceMethodThunkWithNilHandle(t *testing.T) {
+	propcheck.Verify(t, func(c *propcheck.Context) {
+		_ = c
+		(propcheck.StateRunner.Check)(&badHarnessThunkRunner{}, (*propcheck.Context)(nil))
+	})
+}
+
+func TestHarnessIfaceDynSliceMethodThunkWithNilHandle(t *testing.T) {
+	propcheck.Verify(t, func(c *propcheck.Context) {
+		_ = c
+		fns := []func(propcheck.StateRunner, *propcheck.Context){propcheck.StateRunner.Check}
+		fns[0](&badHarnessThunkRunner{}, (*propcheck.Context)(nil))
+	})
+}
+
+func TestHarnessIfaceStdDynamicMethodThunkWithNilHandle(t *testing.T) {
+	propcheck.Verify(t, func(c *propcheck.Context) {
+		_ = c
+		_, _ = slices.BinarySearchFunc(
+			[]propcheck.StateComparator{&thunkBadStateRunner{}},
+			(*propcheck.Context)(nil),
+			propcheck.StateComparator.Compare,
+		)
+	})
+}
 `)
 
 	rec := trace.NewRecorder()
@@ -586,6 +677,11 @@ func TestCrossCallerNil(t *testing.T) {
 		{Package: "example.com/app", Symbol: "helperFakeContextRoot"},
 		{Package: "example.com/app", Symbol: "TestCrossCallerNil"},
 		{Package: "example.com/app", Symbol: "TestCrossCalledTarget"},
+		{Package: "example.com/app", Symbol: "TestStateRunnerAlongsideUnrelated2ArgDynCall"},
+		{Package: "example.com/app", Symbol: "TestStateRunnerMethodThunkWithNilHandle"},
+		{Package: "example.com/app", Symbol: "TestHarnessIfaceMethodThunkWithNilHandle"},
+		{Package: "example.com/app", Symbol: "TestHarnessIfaceDynSliceMethodThunkWithNilHandle"},
+		{Package: "example.com/app", Symbol: "TestHarnessIfaceStdDynamicMethodThunkWithNilHandle"},
 	}
 
 	maxFacts, _, err := h.ComputeMaximalFactsBatch([]Subject{{Package: "example.com/app", Symbol: "TestVerifyClean"}})
@@ -657,6 +753,11 @@ func TestCrossCallerNil(t *testing.T) {
 		{symbol: "helperFakeContextRoot", observable: false, wantReason: "property-harness argument is not locally closed"},
 		{symbol: "TestCrossCallerNil", observable: false},
 		{symbol: "TestCrossCalledTarget", observable: true, effectFree: true},
+		{symbol: "TestStateRunnerAlongsideUnrelated2ArgDynCall", observable: true, effectFree: true},
+		{symbol: "TestStateRunnerMethodThunkWithNilHandle", observable: false, wantReason: "property-harness argument is not locally closed"},
+		{symbol: "TestHarnessIfaceMethodThunkWithNilHandle", observable: false, wantReason: "property-harness argument is not locally closed"},
+		{symbol: "TestHarnessIfaceDynSliceMethodThunkWithNilHandle", observable: false, wantReason: "subject reachability is not closed"},
+		{symbol: "TestHarnessIfaceStdDynamicMethodThunkWithNilHandle", observable: false, wantReason: "property harness reached as a dynamic target"},
 	}
 	for _, tc := range cases {
 		got := proofs[Subject{Package: "example.com/app", Symbol: tc.symbol}]
@@ -667,6 +768,34 @@ func TestCrossCallerNil(t *testing.T) {
 		if tc.wantReason != "" && !strings.Contains(got.Reason, tc.wantReason) {
 			t.Errorf("%s: Reason = %q, want substring %q", tc.symbol, got.Reason, tc.wantReason)
 		}
+	}
+
+	sawThunkGateReject := false
+	for _, ev := range rec.ByName("closure.propharness.gate_reject") {
+		if ev.Target != "TestStateRunnerMethodThunkWithNilHandle" {
+			continue
+		}
+		var gotCallee, gotReason, gotDetail string
+		for _, f := range ev.Fields {
+			switch f.Key {
+			case "callee":
+				gotCallee = f.Str
+			case "reason":
+				gotReason = f.Str
+			case "detail":
+				gotDetail = f.Str
+			}
+		}
+		if gotCallee == "(*example.com/propcheck.Context).Fatalf" &&
+			gotReason == "unauthentic_handle_arg" &&
+			strings.Contains(gotDetail, "harness_struct_param_dyncall:bad_invoke_caller:") &&
+			strings.Contains(gotDetail, "nil:*example.com/propcheck.Context") {
+			sawThunkGateReject = true
+		}
+	}
+	if !sawThunkGateReject {
+		t.Errorf("TestStateRunnerMethodThunkWithNilHandle: missing expected closure.propharness.gate_reject event; events=%+v",
+			rec.ByName("closure.propharness.gate_reject"))
 	}
 
 	for _, sym := range []string{

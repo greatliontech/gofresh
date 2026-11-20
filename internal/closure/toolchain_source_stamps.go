@@ -188,7 +188,7 @@ var harnessPremisePackages = []string{"internal/testlog", "testing", "testing/in
 // toolchainVerifierVersion versions the structural stdlib boundary verifier.
 // Bumping this invalidates cached package verification verdicts and moves
 // AdmissionPolicy.
-const toolchainVerifierVersion = "gofresh/toolchain-verifier@20"
+const toolchainVerifierVersion = "gofresh/toolchain-verifier@22"
 
 // selectedFiles are the non-test files the build selects for a package
 // under the listing's selection, sorted by name; test files never.

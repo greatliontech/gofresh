@@ -8590,11 +8590,16 @@ func TestBenchmarkIterationCountIsHarnessPacing(t *testing.T) {
 // Impure or unverified non-standard assembly blocks the observation proof:
 // a leaf body executing a hardware counter (`RDTSC`) refuses with the symbol's
 // decoded native effect on supported ISAs (or the conservative non-toolchain
-// assembly floor elsewhere), while a non-leaf `CALL`-bearing `.s` file widens
-// and refuses naming the non-toolchain assembly.
+// assembly floor elsewhere), an intra-package call to a verified pure `TEXT`
+// helper admits on `amd64`/`arm64`, and an intra-package call to a Go-bodied
+// function widens and refuses naming the non-toolchain assembly.
 func TestNonStandardAssemblyBlocksObservationProof(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a module fixture and runs the engine over it")
+	}
+	callOp := "CALL"
+	if runtime.GOARCH == "arm64" {
+		callOp = "BL"
 	}
 	t.Run("impure-leaf", func(t *testing.T) {
 		dir := writeViewModule(t, "package view\n\nfunc F()\n")
@@ -8623,9 +8628,33 @@ func TestNonStandardAssemblyBlocksObservationProof(t *testing.T) {
 			t.Fatalf("impure leaf assembly proof = %+v, want refused containing %q", fingerprint.ObservationProof, wantSubstr)
 		}
 	})
-	t.Run("unverified-call", func(t *testing.T) {
+	t.Run("verified-intra-package-call", func(t *testing.T) {
 		dir := writeViewModule(t, "package view\n\nfunc Helper()\nfunc F()\n")
-		assembly := "#include \"textflag.h\"\nTEXT ·Helper(SB), NOSPLIT, $0-0\n\tRET\nTEXT ·F(SB), NOSPLIT, $0-0\n\tCALL ·Helper(SB)\n\tRET\n"
+		assembly := "#include \"textflag.h\"\nTEXT ·Helper(SB), NOSPLIT, $0-0\n\tRET\nTEXT ·F(SB), NOSPLIT, $0-0\n\t" + callOp + " ·Helper(SB)\n\tRET\n"
+		if err := os.WriteFile(filepath.Join(dir, "view.s"), []byte(assembly), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		engine, err := newEngine(withDir(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		subject := Subject{Package: "example.com/view", Symbol: "F"}
+		view, err := engine.newView(context.Background(), []Subject{subject}, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fingerprint, err := view.captureObserved(context.Background(), subject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantObservable := runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64"
+		if fingerprint.ObservationProof.Observable != wantObservable {
+			t.Fatalf("verified intra-package call assembly proof = %+v, want Observable=%v", fingerprint.ObservationProof, wantObservable)
+		}
+	})
+	t.Run("unverified-call", func(t *testing.T) {
+		dir := writeViewModule(t, "package view\n\nfunc Helper() {}\nfunc F()\n")
+		assembly := "#include \"textflag.h\"\nTEXT ·F(SB), NOSPLIT, $0-0\n\t" + callOp + " ·Helper(SB)\n\tRET\n"
 		if err := os.WriteFile(filepath.Join(dir, "view.s"), []byte(assembly), 0o644); err != nil {
 			t.Fatal(err)
 		}

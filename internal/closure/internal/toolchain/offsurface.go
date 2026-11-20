@@ -1,6 +1,7 @@
 package toolchain
 
 import (
+	"bytes"
 	"go/ast"
 	"go/token"
 	"maps"
@@ -29,22 +30,23 @@ type OffSurfaceUnaliasedSel struct {
 // OffSurfaceVerdict summarizes an off-surface standard-library package's
 // declaration graph, startup seeds, and runtime linkname pulls.
 type OffSurfaceVerdict struct {
-	PackageName        string                              `json:"packageName,omitempty"`
-	DirectRuntimePulls []string                            `json:"directRuntimePulls,omitempty"`
-	RuntimePullByDecl  map[string]string                   `json:"runtimePullByDecl,omitempty"`
-	LocalEdges         map[string][]string                 `json:"localEdges,omitempty"`
-	LocalSels          map[string][]string                 `json:"localSels,omitempty"`
-	MethodsByType      map[string][]string                 `json:"methodsByType,omitempty"`
-	CrossEdges         map[string][]OffSurfaceCrossEdge    `json:"crossEdges,omitempty"`
-	UnaliasedSels      map[string][]OffSurfaceUnaliasedSel `json:"unaliasedSels,omitempty"`
-	DotImports         []string                            `json:"dotImports,omitempty"`
-	DotImportIdents    map[string][]string                 `json:"dotImportIdents,omitempty"`
-	SeedDecls          []string                            `json:"seedDecls,omitempty"`
-	SeedSels           []string                            `json:"seedSels,omitempty"`
-	SeedCrossEdges     []OffSurfaceCrossEdge               `json:"seedCrossEdges,omitempty"`
-	SeedUnaliasedSels  []OffSurfaceUnaliasedSel            `json:"seedUnaliasedSels,omitempty"`
-	SeedDotIdents      []string                            `json:"seedDotIdents,omitempty"`
-	DeclaredNames      []string                            `json:"declaredNames,omitempty"`
+	PackageName         string                              `json:"packageName,omitempty"`
+	TouchesScannerHooks bool                                `json:"touchesScannerHooks,omitempty"`
+	DirectRuntimePulls  []string                            `json:"directRuntimePulls,omitempty"`
+	RuntimePullByDecl   map[string]string                   `json:"runtimePullByDecl,omitempty"`
+	LocalEdges          map[string][]string                 `json:"localEdges,omitempty"`
+	LocalSels           map[string][]string                 `json:"localSels,omitempty"`
+	MethodsByType       map[string][]string                 `json:"methodsByType,omitempty"`
+	CrossEdges          map[string][]OffSurfaceCrossEdge    `json:"crossEdges,omitempty"`
+	UnaliasedSels       map[string][]OffSurfaceUnaliasedSel `json:"unaliasedSels,omitempty"`
+	DotImports          []string                            `json:"dotImports,omitempty"`
+	DotImportIdents     map[string][]string                 `json:"dotImportIdents,omitempty"`
+	SeedDecls           []string                            `json:"seedDecls,omitempty"`
+	SeedSels            []string                            `json:"seedSels,omitempty"`
+	SeedCrossEdges      []OffSurfaceCrossEdge               `json:"seedCrossEdges,omitempty"`
+	SeedUnaliasedSels   []OffSurfaceUnaliasedSel            `json:"seedUnaliasedSels,omitempty"`
+	SeedDotIdents       []string                            `json:"seedDotIdents,omitempty"`
+	DeclaredNames       []string                            `json:"declaredNames,omitempty"`
 }
 
 // OffSurfaceLinkDirective represents a two-argument //go:linkname directive in
@@ -52,6 +54,13 @@ type OffSurfaceVerdict struct {
 type OffSurfaceLinkDirective struct {
 	LocalSym string
 	Target   string
+}
+
+// RawMentionsScannerHooks reports whether raw native/object/cgo bytes mention
+// go/internal/scannerhooks under plain or linker-escaped spelling.
+func RawMentionsScannerHooks(raw []byte) bool {
+	return bytes.Contains(raw, []byte("go/internal/scannerhooks")) ||
+		bytes.Contains(raw, []byte("go%2finternal%2fscannerhooks"))
 }
 
 // BuildOffSurfaceGraph constructs an OffSurfaceVerdict from parsed Go files,
@@ -72,6 +81,11 @@ func BuildOffSurfaceGraph(importPath string, parsed []*ast.File, linkDirectives 
 		UnaliasedSels:     map[string][]OffSurfaceUnaliasedSel{},
 		DotImportIdents:   map[string][]string{},
 	}
+	for ce := range seedCrossMap {
+		if ce.Pkg == "go/internal/scannerhooks" {
+			out.TouchesScannerHooks = true
+		}
+	}
 	declaredSet := map[string]bool{}
 	bodylessFuncs := map[string]bool{}
 	concreteFuncs := map[string]bool{}
@@ -81,6 +95,13 @@ func BuildOffSurfaceGraph(importPath string, parsed []*ast.File, linkDirectives 
 	for _, f := range parsed {
 		if out.PackageName == "" && f.Name != nil {
 			out.PackageName = f.Name.Name
+		}
+		for _, imp := range f.Imports {
+			if imp != nil && imp.Path != nil {
+				if p, err := strconv.Unquote(imp.Path.Value); err == nil && p == "go/internal/scannerhooks" {
+					out.TouchesScannerHooks = true
+				}
+			}
 		}
 		for _, decl := range f.Decls {
 			switch d := decl.(type) {
@@ -134,7 +155,13 @@ func BuildOffSurfaceGraph(importPath string, parsed []*ast.File, linkDirectives 
 			if strings.HasPrefix(ld.Target, "runtime") {
 				directRuntime["runtime.*"] = true
 			}
+			if strings.Contains(ld.Target, "scannerhooks") {
+				out.TouchesScannerHooks = true
+			}
 			continue
+		}
+		if tPkg == "go/internal/scannerhooks" && importPath != "go/internal/scannerhooks" {
+			out.TouchesScannerHooks = true
 		}
 		isPureBodylessPull := bodylessFuncs[ld.LocalSym] && !concreteFuncs[ld.LocalSym] && !varDecls[ld.LocalSym]
 		if tPkg == "runtime" {

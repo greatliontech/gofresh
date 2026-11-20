@@ -33,33 +33,35 @@ func sortedKeys(set map[string]bool) []string {
 // PackageASTIndex indexes package-level declarations, per-file imports, and
 // method sets across a parsed standard-library package's AST files.
 type PackageASTIndex struct {
-	fileImports        map[*ast.File]map[string]bool
-	fileImportNames    map[*ast.File]map[string]bool
-	funcFile           map[*ast.FuncDecl]*ast.File
-	funcDeclsByName    map[string][]*ast.FuncDecl
-	topFuncs           map[string]*ast.FuncDecl
-	dupTopFuncs        map[string]bool
-	typeMethods        map[string]map[string]*ast.FuncDecl
-	dupTypeMethods     map[string]map[string]bool
-	anyDupTypeMethod   bool
-	typeSpecs          map[string]*ast.TypeSpec
-	typeSpecFile       map[*ast.TypeSpec]*ast.File
-	typeSpecCounts     map[string]int
-	nonAliasStructSpec map[string]*ast.TypeSpec
-	pkgDeclCounts      map[string]int
-	pkgValueCounts     map[string]int
-	pkgVarSpecs        map[string]*ast.ValueSpec
-	pkgVarFiles        map[string]*ast.File
-	pkgVarCounts       map[string]int
-	constPosInt        map[string]bool
-	zeroInitPkgVars    map[string]*ast.ValueSpec
-	zeroInitBoolVars   map[string]bool
-	initPkgVars        map[string]ast.Expr
-	initPkgVarFile     map[string]*ast.File
-	varDeclIdents      map[string]map[*ast.Ident]bool
-	hasInitFunc        bool
-	hasMethods         bool
-	bodylessFuncs      []*ast.FuncDecl
+	fileImports            map[*ast.File]map[string]bool
+	fileImportNames        map[*ast.File]map[string]bool
+	funcFile               map[*ast.FuncDecl]*ast.File
+	funcDeclsByName        map[string][]*ast.FuncDecl
+	topFuncs               map[string]*ast.FuncDecl
+	dupTopFuncs            map[string]bool
+	typeMethods            map[string]map[string]*ast.FuncDecl
+	dupTypeMethods         map[string]map[string]bool
+	anyDupTypeMethod       bool
+	typeSpecs              map[string]*ast.TypeSpec
+	typeSpecFile           map[*ast.TypeSpec]*ast.File
+	typeSpecCounts         map[string]int
+	nonAliasStructSpec     map[string]*ast.TypeSpec
+	pkgDeclCounts          map[string]int
+	pkgValueCounts         map[string]int
+	pkgVarSpecs            map[string]*ast.ValueSpec
+	pkgVarFiles            map[string]*ast.File
+	pkgVarCounts           map[string]int
+	constPosInt            map[string]bool
+	zeroInitPkgVars        map[string]*ast.ValueSpec
+	zeroInitBoolVars       map[string]bool
+	initPkgVars            map[string]ast.Expr
+	initPkgVarFile         map[string]*ast.File
+	varDeclIdents          map[string]map[*ast.Ident]bool
+	blankVarInits          []ast.Expr
+	hasMultiReturnBlankVar bool
+	hasInitFunc            bool
+	hasMethods             bool
+	bodylessFuncs          []*ast.FuncDecl
 }
 
 // indexPackageAST indexes package-level declarations, imports, and method sets
@@ -132,6 +134,13 @@ func indexPackageAST(pkgName string, files []*ast.File, reserved map[string]bool
 								idx.constPosInt[id.Name] = true
 							}
 							if id.Name == "_" {
+								if d.Tok == token.VAR && len(sp.Values) > 0 {
+									if len(sp.Values) == len(sp.Names) {
+										idx.blankVarInits = append(idx.blankVarInits, sp.Values[i])
+									} else {
+										idx.hasMultiReturnBlankVar = true
+									}
+								}
 								continue
 							}
 							idx.pkgDeclCounts[id.Name]++
@@ -247,6 +256,88 @@ func (idx *PackageASTIndex) hasAnyImport(importPath string) bool {
 		}
 	}
 	return false
+}
+
+func (idx *PackageASTIndex) anyFileHasImportName(name string) bool {
+	if idx == nil {
+		return false
+	}
+	for _, m := range idx.fileImportNames {
+		if m[name] {
+			return true
+		}
+	}
+	return false
+}
+
+func (idx *PackageASTIndex) isUniqueLocalType(name string) bool {
+	return idx != nil && name != "" && name != "_" &&
+		idx.typeSpecCounts[name] == 1 && idx.pkgDeclCounts[name] == 1 &&
+		idx.pkgValueCounts[name] == 0 && idx.topFuncs[name] == nil &&
+		!idx.anyFileHasImportName(name)
+}
+
+// VerifyBlankVarInitsPure checks that every package-level blank variable
+// initializer (var _ = <expr>) in idx is a side-effect-free compile-time
+// assertion literal or nil/zero local-type conversion.
+func (idx *PackageASTIndex) VerifyBlankVarInitsPure(pkgName string) error {
+	if idx == nil {
+		return fmt.Errorf("%s: nil AST index", pkgName)
+	}
+	if idx.hasMultiReturnBlankVar {
+		return fmt.Errorf("%s: multi-return blank package var initializer forbidden", pkgName)
+	}
+	for _, expr := range idx.blankVarInits {
+		if !idx.isPureBlankVarInitExpr(expr) {
+			return fmt.Errorf("%s: unapproved blank package var initializer", pkgName)
+		}
+	}
+	return nil
+}
+
+func (idx *PackageASTIndex) isPureBlankVarInitExpr(expr ast.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	switch e := unwrapParens(expr).(type) {
+	case *ast.BasicLit:
+		return true
+	case *ast.Ident:
+		return (e.Name == "nil" || e.Name == "true" || e.Name == "false") &&
+			idx.pkgDeclCounts[e.Name] == 0 && !idx.anyFileHasImportName(e.Name)
+	case *ast.CallExpr:
+		if e.Ellipsis.IsValid() || len(e.Args) != 1 {
+			return false
+		}
+		argID, okArg := unwrapParens(e.Args[0]).(*ast.Ident)
+		if !okArg || argID.Name != "nil" || idx.pkgDeclCounts["nil"] != 0 || idx.anyFileHasImportName("nil") {
+			return false
+		}
+		fun := unwrapParens(e.Fun)
+		if star, okStar := fun.(*ast.StarExpr); okStar {
+			fun = unwrapParens(star.X)
+		}
+		tID, okT := fun.(*ast.Ident)
+		return okT && idx.isUniqueLocalType(tID.Name)
+	case *ast.CompositeLit:
+		if len(e.Elts) != 0 {
+			return false
+		}
+		tID, okT := unwrapParens(e.Type).(*ast.Ident)
+		return okT && idx.isUniqueLocalType(tID.Name)
+	case *ast.UnaryExpr:
+		if e.Op != token.AND {
+			return false
+		}
+		cl, okCL := unwrapParens(e.X).(*ast.CompositeLit)
+		if !okCL || len(cl.Elts) != 0 {
+			return false
+		}
+		tID, okT := unwrapParens(cl.Type).(*ast.Ident)
+		return okT && idx.isUniqueLocalType(tID.Name)
+	default:
+		return false
+	}
 }
 
 func (idx *PackageASTIndex) uniqueTypeSpec(name string) *ast.TypeSpec {
@@ -591,8 +682,61 @@ func ScanOffSurfaceGoDirectives(src string, directRuntime map[string]bool, onTwo
 	}
 }
 
+// DirectiveTouchesScannerHooks reports whether any Go compiler directive in src
+// is malformed/unparseable or references go/internal/scannerhooks.
+func DirectiveTouchesScannerHooks(src string) bool {
+	fset := token.NewFileSet()
+	file := fset.AddFile("", fset.Base(), len(src))
+	scanErr := false
+	var s scanner.Scanner
+	s.Init(file, []byte(src), func(_ token.Position, _ string) {
+		scanErr = true
+	}, scanner.ScanComments)
+	for {
+		_, tok, lit := s.Scan()
+		if tok == token.EOF {
+			break
+		}
+		if tok != token.COMMENT {
+			continue
+		}
+		if strings.HasPrefix(lit, "/*go:") {
+			return true
+		}
+		if strings.HasPrefix(lit, "//go:cgo_") && strings.Contains(lit, "scannerhooks") {
+			return true
+		}
+		if !strings.HasPrefix(lit, "//go:linkname") {
+			continue
+		}
+		line := strings.TrimSuffix(lit, "\r")
+		if strings.ContainsRune(line, '\r') {
+			return true
+		}
+		_, plain := auditset.BoundedToken(line, "//go:linkname", " \t")
+		_, std := auditset.BoundedToken(line, "//go:linknamestd", " \t")
+		fields := strings.Fields(line)
+		if (!plain && !std) || (len(fields) != 2 && len(fields) != 3) {
+			return true
+		}
+		if len(fields) == 3 {
+			if tPkg, _, ok := cprep.SplitLinknameTarget(fields[2]); ok {
+				if tPkg == "go/internal/scannerhooks" {
+					return true
+				}
+			} else if strings.Contains(fields[2], "scannerhooks") {
+				return true
+			}
+		}
+	}
+	return scanErr
+}
+
 // CollectGoLinknameTargets records runtime.* and cross-package linkname targets in src.
 func CollectGoLinknameTargets(selfPkg, src string, runtimeOut, externalOut map[string]bool) {
+	if externalOut != nil && selfPkg != "go/internal/scannerhooks" && DirectiveTouchesScannerHooks(src) {
+		externalOut["go/internal/scannerhooks.*"] = true
+	}
 	ScanOffSurfaceGoDirectives(src, runtimeOut, func(_, target string) {
 		if strings.HasPrefix(target, "runtime.") {
 			if runtimeOut != nil {

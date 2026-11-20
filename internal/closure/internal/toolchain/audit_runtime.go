@@ -650,32 +650,17 @@ func DiscoverRuntimeInactiveGates(files []*ast.File, goSrcs []string, nonGoIdent
 		return out, found
 	}
 
-	var resolveMutatorTargets func(mName string, visiting map[string]bool) ([]string, bool)
-	resolveMutatorTargets = func(mName string, visiting map[string]bool) ([]string, bool) {
-		if visiting[mName] || !isValidUnexportedMutatorDecl(mName) {
+	resolveMutatorTargets := func(mName string) ([]string, bool) {
+		if !isValidUnexportedMutatorDecl(mName) {
 			return nil, false
 		}
-		nextVis := make(map[string]bool, len(visiting)+1)
-		for k, v := range visiting {
-			nextVis[k] = v
-		}
-		nextVis[mName] = true
 		deps := map[string]bool{"runtime." + mName: true}
 		for _, cs := range mutatorDirectCallSites[mName] {
-			if gDeps, okG := nodeGuardedByProvenFalseIf(cs.caller, cs.call); okG {
-				for _, d := range gDeps {
-					deps[d] = true
-				}
-				continue
-			}
-			if cs.caller == nil || cs.caller.Recv != nil || cs.caller.Name == nil {
+			gDeps, okG := nodeGuardedByProvenFalseIf(cs.caller, cs.call)
+			if !okG {
 				return nil, false
 			}
-			cDeps, okC := resolveMutatorTargets(cs.caller.Name.Name, nextVis)
-			if !okC {
-				return nil, false
-			}
-			for _, d := range cDeps {
+			for _, d := range gDeps {
 				deps[d] = true
 			}
 		}
@@ -689,7 +674,7 @@ func DiscoverRuntimeInactiveGates(files []*ast.File, goSrcs []string, nonGoIdent
 			depSet := map[string]bool{"runtime." + sName: true}
 			mutatorsValid := true
 			for mName := range mutatorSetByState[sName] {
-				mDeps, okM := resolveMutatorTargets(mName, nil)
+				mDeps, okM := resolveMutatorTargets(mName)
 				if !okM {
 					mutatorsValid = false
 					break
@@ -720,7 +705,7 @@ func DiscoverRuntimeInactiveGates(files []*ast.File, goSrcs []string, nonGoIdent
 					continue
 				}
 				if site.fn.Recv == nil && site.fn.Name != nil {
-					if mDeps, okM := resolveMutatorTargets(site.fn.Name.Name, nil); okM {
+					if mDeps, okM := resolveMutatorTargets(site.fn.Name.Name); okM {
 						for _, d := range mDeps {
 							depSet[d] = true
 						}

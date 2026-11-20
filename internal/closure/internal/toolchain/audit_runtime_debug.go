@@ -110,6 +110,9 @@ func VerifyRuntimeDebugPackage(ctx context.Context, files []*ast.File, goSrcs []
 	if len(idx.pkgVarCounts) > 0 {
 		return fmt.Errorf("runtime/debug: unexpected package-level variable declarations")
 	}
+	if err := idx.VerifyBlankVarInitsPure("runtime/debug"); err != nil {
+		return err
+	}
 	if len(idx.dupTopFuncs) > 0 || idx.anyDupTypeMethod {
 		return fmt.Errorf("runtime/debug: duplicate function or method declarations")
 	}
