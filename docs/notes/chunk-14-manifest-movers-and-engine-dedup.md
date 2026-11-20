@@ -1,0 +1,42 @@
+# Chunk 14 Working Notes: Single-Pass Manifest Digest/Mover Consolidation, Endpoint-Preserving `CheckingUnit.Close` Fast Path & Root Engine Deduplication
+
+## Governing Contracts & Scope
+
+- **Plan:** `docs/plans/plan.md` lines 67–70 (final chunk in `gofresh`).
+- **Scheduled Issue:** `docs/issues/moved-inputs-memoization-and-checking-close-short-circuit.md` (plus `docs/issues/README.md`, leaving `docs/issues/` empty at close-out).
+- **Specs:**
+  - `docs/specs/evidence.md`: `REQ-fresh-result-model`, `REQ-fresh-authority-account`, `REQ-fresh-checking-unit`, `REQ-fresh-package-unit`
+  - `docs/specs/runtime-inputs.md`: `REQ-inputs-guard`, `REQ-inputs-path-identities`, `REQ-inputs-observation-coherence`, `REQ-inputs-context`, `REQ-inputs-adoption`, `REQ-inputs-bracket-coverage`
+  - `docs/specs/purity.md`: `REQ-purity-override` (`guard-drift`, `producing-motion`)
+  - No spec text changes required; all `955` stipulator bindings remain untouched.
+
+## Derived Invariants & Design
+
+1. **Comparable `runtimeinput.State` + Single-Pass Mover Attribution (`internal/runtimeinput/manifest.go`, `observation.go`, `validate.go`, `checking.go`, `view.go`)**:
+   - `runtimeinput.State` remains a pure, slice-free Go-comparable struct (`observed != state`, `before == after`, `current != state`).
+   - `populateManifestDigestsWithModuleRoot(ctx, m, moduleDir, moduleRoot, env, alreadySorted, computeMovers)` computes each `m.Env[i]` and `m.Paths[i]` digest once; when `computeMovers && entry.Digest != "" && d != entry.Digest`, it appends `"env "+entry.Name` or `"path "+entry.displayPath()` to `moved []string` in canonical manifest order before overwriting `entry.Digest`.
+   - `CurrentWithMovers` / `currentWithMoversAndNormalizedEnvContext` return `(State, []string, error)` from that single pass; `Current` and stipulator-bound `currentWithNormalizedEnvContext` delegate with `computeMovers: false`; `MovedInputs` delegates directly to `populateManifestDigestsWithModuleRoot` without re-encoding `State`; `Adopt` uses `currentWithMoversAndNormalizedEnvContext` with zero second pass.
+   - Root `gofresh` introduces endpoint-scoped `runtimeEndpoint` (`states []runtimeinput.State`, `byManifest map[string]runtimeEval`, `moverMemo map[string][]string`) per point-in-time evaluation (`before` in `checkRecords`, `after` in `checkRecords`, and per-pass `compareAttachedObservations` — never shared across `before`/`after` or pre-run/post-run passes, preserving `producing-motion` and `guard-drift`).
+   - When `v.runtimeCurrent == nil`, `evaluateRuntimeManifest` calls `runtimeinput.CurrentWithMovers` once per distinct manifest (`hasMovers: true`), so `withEndpointMovedInputs` and `compareAttachedObservations` read `eval.movers` in `O(1)` with zero second disk/SHA-256 reads. When `v.runtimeCurrent != nil` (synthetic test hooks), `hasMovers` is `false` and `moversFromEndpoint` falls back to endpoint-scoped `moverMemo` (`<= 1` `movedInputsForView` call per distinct manifest per endpoint).
+
+2. **Redundant Work Elimination Across `internal/runtimeinput` & Root `gofresh`**:
+   - **Triple `sortManifest`**: `decode` already sorts and validates decoded manifests (`alreadySorted: true`); `finalizeManifestState` only sorts/compacts `m.Unverifiable` (the sole slice `fromTestLogStream` can append after `populateManifestDigests`) and calls `encodeSorted` without re-sorting `Subjects`/`Env`/`Paths`; `convertIdentityKinds` drops its pre-`stateFromManifest` `sortManifest` call.
+   - **`OutcomeSupportSet` / `HasOutcomeSupport` Repeated Decodes**: `checkRecords` memoizes `runtimeinput.OutcomeSupportSet(rec.RuntimeInputs)` per distinct non-empty manifest across the batch (`admittedObservationWithSupport`), and `Unit.recordObservation` (`unit.go`) caches `supported` on `finalizedProcessObservation` so `u.account()` / `u.Account()` does not re-decode the manifest on repeated reads.
+   - **Redundant `EvalSymlinks(moduleDir)`**: Share resolved `(absModuleDir, moduleRoot)` across `newPathClassifier` (`newPathClassifierWithModuleRoot` for `FileInputEligibility` where `root` is already `EvalSymlinks`-resolved, and `fromTestLogStream` passing `classifier.resolvedModule` into `populateManifestDigestsWithModuleRoot` and `cfg.bracket.ephemera`), `convertIdentityKinds`, and `Merge`.
+   - **Wasted `sha256.New()` Framing Writes in `fingerprintBracketRoot`**: Pass `nil` `hash.Hash` from `fingerprintBracketRoot` into stipulator-bound `hashPath`; guard `fprintf`, `writeStat`, and `dirHashFiltered`'s internal directory framing `sha256.New()` on `h != nil` so bracket root fingerprinting performs zero discarded `sha256` / `fmt.Fprintf` framing allocations while still populating `root.facts` and `root.members`.
+   - **Unused `_ bool` on `validateObservation`**: Drop unused `bool` parameter across `validateObservation` and its 3 callers in `observation.go`.
+
+3. **Endpoint-Preserving `CheckingUnit.Close` Fast Path (`checking.go`)**:
+   - Add `terminalStale bool` on `recordCheck`.
+   - In `CheckingUnit.close`: when `!slot.result.evaluated`, set `records[i].refusal = slot.result.verdict`; when `slot.result.evaluated && slot.result.verdict.Status == Stale`, set `records[i].terminalStale = true` and `records[i].refusal = slot.result.verdict`.
+   - In `checkRecordsWithEndpoints`: `terminalStale` slots set `results[i].evaluated = true`, `results[i].verdict = record.refusal`, and `hasRuntime = hasRuntime || record.Recorded.RuntimeInputs != ""`, so they still participate in `before` and `after` `observeRecordInputs` and `closeCheckWindow` (`REQ-fresh-checking-unit`, `TestCheckingUnitCandidatesAndLifecycle`), while skipping `admittedObservation*`, proof selection (`ensureObservable`), `decideAfterClosure*`, `withEndpointMovedInputs`, and `runtimeMotionAt`.
+
+4. **Root Engine & Internal Helper Deduplication**:
+   - `scan.go`: Unify culprit-discharge writeback into `applyRootedCulpritDischarge`, delete dead `(*viewDynamicState).methodDirectives` (updating `dynamicstate_algebra_test.go` to call `dynstate.MethodDirectives` directly and dropping unused `"go/types"` from `scan.go`), and collapse `scanViewSubjects` / `scanViewSubjectsWithMemo` / `scanViewSubjectsWithLocalMemo` into one `scanViewSubjects`.
+   - `validate.go` & `view.go`: Linearize `Snapshot.Validate` (preserving stipulator-bound `validateObserved`, `validateApplicabilityChecks`, `validateApplicabilityBatches`), extract `newSnapshotShell` + `v.cloneShell` and `emitTwoPassDiff` / `emitTwoPassStringsDiff`, remove `os.Environ()` (and `"os"` import) from `validate.go`, and add `"validate.go"` to `TestPublicPackagesReadNoAmbientEnvironment` in `surface_test.go`.
+   - `session.go`, `view.go`, `provenance.go`, `internal/gotool`, `internal/guard`, `internal/cachefile`: Wire `s.sortedVouches` in `Session.analysisScope` (keeping `dynamicStateVouches` fallback for direct-struct test literals and updating `frontend_harness_test.go`), use `snapshot.Lookup`/`snapshot.Value` in `completeBuildEnvironment` (updating `environment_hermetic_test.go` to `gotool.EnvSnapshotFromValues` and dropping `"encoding/json"` from `session.go`), share `gotool.PrimedEnvReaderFromValues` / `primedBuildReader` across `session.go`/`provenance.go` plus `captureWithSnapshot` in `internal/guard/guard.go`, and deduplicate `cachefile.Prune` / `PreviewPrune` onto `pruneStore`.
+
+## Stipulator-Bound Production Symbols in Touched Files (Must Preserve Homes & Signatures)
+
+- `internal/runtimeinput`: `Merge`, `currentWithNormalizedEnvContext`, `FromTestLog`, `fromTestLog`, `CaptureBracket`, `Incomplete`, `WithScratchNamespace`, `withBuildCacheRoot`, `resolveRoots`, `usableGuardRootOutside`, `withEphemeralTempRoot`, `tempRootFromEnv`, `usableTempRoot`, `withToolchainRoot`, `withModuleCacheRoot`, `guardRootOption`, `usableGuardRoot`, `refusalAttribution`, `ProducerFrame.Observe`, `ProducerFrame.ObserveInputs`, `CaptureProducerFrame`, `Current`, `WithBracket`, `hashPath`, `movedBracketRoot`, `FileInputEligibility`.
+- Root `gofresh`: `Session.Snapshot`, `Session.SnapshotFor`, `Snapshot.CheckObserved`, `Snapshot.CheckObservedBatch`, `Snapshot.observedFingerprintLocked`, `Snapshot.Validate`, `Snapshot.validateObserved`, `Snapshot.ensureObservable`, `Snapshot.prepareOutcomeSupport`, `Snapshot.checkInertTestVariantExtension`, `Snapshot.validateApplicabilityChecks`, `Snapshot.validateApplicabilityBatches`, `Snapshot.retainApplicabilityCheck`, `Snapshot.Sibling`, `Snapshot.checkRecords`, `Snapshot.runtimeMotion`, `RuntimeBinding.ProducerSnapshot`.
