@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"go/types"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -44,15 +43,7 @@ func storeScanFacts(scope, key string, payload any) {
 // metadata graph, one coherent typed load, memoized version-pinned facts, and
 // budget-bounded reachability discharges (REQ-fresh-coherent-view,
 // REQ-fresh-context, REQ-closure-shared-dynamic-state-reachability).
-func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
-	return scanViewSubjectsWithMemo(ctx, hasher, scope, buildFlags, budget, true, pkgPaths...)
-}
-
-func scanViewSubjectsWithMemo(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, useScanMemo bool, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
-	return scanViewSubjectsWithLocalMemo(ctx, hasher, scope, buildFlags, budget, useScanMemo, nil, pkgPaths...)
-}
-
-func scanViewSubjectsWithLocalMemo(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, useScanMemo bool, localFacts *localFactMemo, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
+func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, useScanMemo bool, localFacts *localFactMemo, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
 	scope = hasher.SetAnalysisScope(scope)
 	factScope := scope.Facts()
 	singleSubject, packageProcess := scope.SingleSubject, scope.PackageProcess
@@ -403,13 +394,6 @@ type viewDynamicState struct {
 	drifted               map[string]bool
 }
 
-func (s *viewDynamicState) methodDirectives(viewPackage string, m *types.Func) (pureKey, externalKey string) {
-	if s == nil {
-		return "", ""
-	}
-	return dynstate.MethodDirectives(s.cones, viewPackage, m)
-}
-
 // dischargeUnreachableCulprits applies the single-subject reachability
 // scoping of the shared-dynamic-state judgment (REQ-closure-shared-dynamic-state).
 func dischargeUnreachableCulprits(ctx, analysisCtx context.Context, hasher *closure.Hasher, state *viewDynamicState, scan *subjectScan) (cut map[Subject]bool, err error) {
@@ -436,23 +420,7 @@ func dischargeUnreachableCulprits(ctx, analysisCtx context.Context, hasher *clos
 			continue
 		}
 		surviving, culprit, dischargedKeys := dischargeCulprits(proof, state, subject.Package)
-		if surviving == "" {
-			delete(scan.downgradeReason, subject)
-			delete(scan.downgradeCulprit, subject)
-		} else {
-			scan.downgradeReason[subject] = sharedDynamicStatePrefix + surviving
-			scan.downgradeCulprit[subject] = culprit
-		}
-		if len(dischargedKeys) > 0 {
-			d := scan.discharges[subject]
-			for _, key := range strings.Split(d.singleSubject, ",") {
-				if key != "" {
-					dischargedKeys[key] = true
-				}
-			}
-			d.singleSubject = joinDischargedKeys(dischargedKeys)
-			scan.discharges[subject] = d
-		}
+		applyRootedCulpritDischarge(scan, subject, surviving, culprit, dischargedKeys, true)
 	}
 	return nil, nil
 }
@@ -504,21 +472,46 @@ func dischargeBinaryUnreachableCulprits(ctx, analysisCtx context.Context, hasher
 		}
 		surviving, culprit, dischargedKeys := dischargeCulprits(proof, state, path)
 		for _, subject := range packageSubjects[path] {
-			if surviving == "" {
-				delete(scan.downgradeReason, subject)
-				delete(scan.downgradeCulprit, subject)
-			} else {
-				scan.downgradeReason[subject] = sharedDynamicStatePrefix + surviving
-				scan.downgradeCulprit[subject] = culprit
-			}
-			if len(dischargedKeys) > 0 {
-				d := scan.discharges[subject]
-				d.packageProcess = joinDischargedKeys(dischargedKeys)
-				scan.discharges[subject] = d
-			}
+			applyRootedCulpritDischarge(scan, subject, surviving, culprit, dischargedKeys, false)
 		}
 	}
 	return nil, nil
+}
+
+func applyRootedCulpritDischarge(scan *subjectScan, subject Subject, surviving string, culprit Subject, dischargedKeys map[string]bool, singleSubject bool) {
+	if surviving == "" {
+		delete(scan.downgradeReason, subject)
+		delete(scan.downgradeCulprit, subject)
+	} else {
+		scan.downgradeReason[subject] = sharedDynamicStatePrefix + surviving
+		scan.downgradeCulprit[subject] = culprit
+	}
+	if len(dischargedKeys) == 0 {
+		return
+	}
+	d := scan.discharges[subject]
+	if singleSubject {
+		d.singleSubject = mergeDischargedKeys(d.singleSubject, dischargedKeys)
+	} else {
+		d.packageProcess = joinDischargedKeys(dischargedKeys)
+	}
+	scan.discharges[subject] = d
+}
+
+func mergeDischargedKeys(existing string, added map[string]bool) string {
+	if existing == "" {
+		return joinDischargedKeys(added)
+	}
+	merged := make(map[string]bool, len(added)+4)
+	for key := range added {
+		merged[key] = true
+	}
+	for _, key := range strings.Split(existing, ",") {
+		if key != "" {
+			merged[key] = true
+		}
+	}
+	return joinDischargedKeys(merged)
 }
 
 // dischargeCulprits walks one package's root culprits against a

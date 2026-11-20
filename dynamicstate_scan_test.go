@@ -142,7 +142,7 @@ func runScanVouched(t *testing.T, scope, dir string, vouches map[string]bool, pk
 		analysis.Vouches = append(analysis.Vouches, v)
 	}
 	analysis = hasher.SetAnalysisScope(analysis)
-	scan, _, _, err := scanViewSubjectsWithMemo(context.Background(), hasher, analysis, nil, 0, false, pkgPaths...)
+	scan, _, _, err := scanViewSubjects(context.Background(), hasher, analysis, nil, 0, false, nil, pkgPaths...)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -723,7 +723,7 @@ func fromTestLogStream(ctx context.Context, br *bufio.Reader, moduleDir, package
 			addUnverifiable(&m, unverifiableSeen, reason)
 		}
 	}
-	pathUnverifiable, pathReason, err := populateManifestDigests(ctx, &m, moduleDir, normalized)
+	pathUnverifiable, pathReason, _, err := populateManifestDigestsWithModuleRoot(ctx, &m, moduleDir, classifier.resolvedModule, normalized, false, false)
 	if err != nil {
 		return Observation{}, err
 	}

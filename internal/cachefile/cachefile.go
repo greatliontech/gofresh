@@ -239,20 +239,16 @@ func recordWriteAndEnforce(gofreshRoot, path string, size int64) {
 // and abandoned keys participate alongside active classes. Unreadable or
 // unremovable entries are counted in SkippedEntries without aborting collection.
 func Prune(maxBytes int64) (PruneReport, error) {
-	cache, err := storeRoot()
-	if err != nil {
-		return PruneReport{}, err
-	}
-	gofreshRoot := filepath.Join(cache, "gofresh")
-	target := max(maxBytes, 0)
-	pruneMu.Lock()
-	defer pruneMu.Unlock()
-	return pruneDirLocked(gofreshRoot, target, "", false)
+	return pruneStore(maxBytes, false)
 }
 
 // PreviewPrune reports the PruneReport that Prune(maxBytes) would produce
 // without removing any files or directories.
 func PreviewPrune(maxBytes int64) (PruneReport, error) {
+	return pruneStore(maxBytes, true)
+}
+
+func pruneStore(maxBytes int64, dryRun bool) (PruneReport, error) {
 	cache, err := storeRoot()
 	if err != nil {
 		return PruneReport{}, err
@@ -261,7 +257,7 @@ func PreviewPrune(maxBytes int64) (PruneReport, error) {
 	target := max(maxBytes, 0)
 	pruneMu.Lock()
 	defer pruneMu.Unlock()
-	return pruneDirLocked(gofreshRoot, target, "", true)
+	return pruneDirLocked(gofreshRoot, target, "", dryRun)
 }
 
 type diskEntry struct {

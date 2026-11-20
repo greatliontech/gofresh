@@ -22,7 +22,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -80,15 +79,10 @@ func CaptureGuards(ctx context.Context, build BuildDescription, runtimeEnv []str
 	if runtimeEnv == nil {
 		runtimeEnv = build.Environment
 	}
-	var snapshot *gotool.EnvSnapshot
-	if build.GoEnv != nil {
-		var err error
-		snapshot, err = gotool.EnvSnapshotFromValues(build.GoEnv)
-		if err != nil {
-			return Guards{}, err
-		}
+	reader, err := primedBuildReader(build, prepare)
+	if err != nil {
+		return Guards{}, err
 	}
-	reader := gotool.PrimedEnvReader(gotool.Runner{Prepare: firstPrepare(prepare)}, gotool.Coordinate(build.Directory), build.Environment, snapshot)
 	inputs := make([]string, 0, len(build.Flags)+len(build.Inputs))
 	for _, flag := range build.Flags {
 		inputs = append(inputs, "flag="+flag)
@@ -97,6 +91,10 @@ func CaptureGuards(ctx context.Context, build BuildDescription, runtimeEnv []str
 		inputs = append(inputs, "input="+input)
 	}
 	return guard.Capture(ctx, reader, runtimeEnv, kind, inputs...)
+}
+
+func primedBuildReader(build BuildDescription, prepare []func(*exec.Cmd)) (*gotool.EnvReader, error) {
+	return gotool.PrimedEnvReaderFromValues(gotool.Runner{Prepare: firstPrepare(prepare)}, build.Directory, build.Environment, build.GoEnv)
 }
 
 // TestVariantBindingStrategy versions the base-package binding derivation on
@@ -264,12 +262,11 @@ type Session struct {
 	runner             gotool.Runner
 	progress           func(Progress)
 	deferredCheckClose bool
-	// dynamicStateVouches is the caller's vouch set: canonical
+	// sortedVouches is the caller's canonical sorted vouch set:
 	// "<import path>.<Variable>" identities of version-pinned dependency
 	// variables the caller accepts as stable after initialization
 	// (REQ-vouch-input). Empty means no vouches.
-	dynamicStateVouches map[string]bool
-	sortedVouches       []string
+	sortedVouches []string
 	// executionModel holds the caller's positive execution-model
 	// attestation; the zero value is GeneralExecution, which supplies no
 	// positive assertion.
@@ -356,13 +353,6 @@ func NewSession(ctx context.Context, build BuildDescription, policy SessionPolic
 	if err != nil {
 		return nil, err
 	}
-	var vouchMap map[string]bool
-	if len(vouches) > 0 {
-		vouchMap = make(map[string]bool, len(vouches))
-		for _, v := range vouches {
-			vouchMap[v] = true
-		}
-	}
 	pure := make(map[Subject]bool, len(policy.PureSubjects))
 	for _, subject := range policy.PureSubjects {
 		if subject.Package == "" || subject.Symbol == "" {
@@ -406,11 +396,10 @@ func NewSession(ctx context.Context, build BuildDescription, policy SessionPolic
 		env:                 buildEnv,
 		evidenceRoot:        evidenceRoot,
 		analysisBudget:      policy.AnalysisBudget,
-		runner:              gotool.Runner{Prepare: policy.PrepareCommand},
-		progress:            policy.Progress,
-		dynamicStateVouches: vouchMap,
-		sortedVouches:       vouches,
-		executionModel:      policy.Execution,
+		runner:         gotool.Runner{Prepare: policy.PrepareCommand},
+		progress:       policy.Progress,
+		sortedVouches:  vouches,
+		executionModel: policy.Execution,
 	}
 	passReader := s.newPassReader()
 	snapshot, err := passReader.Snapshot(ctx)
@@ -618,14 +607,10 @@ func completeBuildEnvironment(ctx context.Context, snapshot *gotool.EnvSnapshot,
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	var values map[string]string
 	if snapshot == nil {
 		return "", fmt.Errorf("gofresh: build description has no environment snapshot")
 	}
-	if err := json.Unmarshal(snapshot.JSON, &values); err != nil {
-		return "", err
-	}
-	gcc, ok := values["GOGCCFLAGS"]
+	gcc, ok := snapshot.Lookup("GOGCCFLAGS")
 	if !ok {
 		return "", fmt.Errorf("gofresh: build description has no GOGCCFLAGS")
 	}
@@ -655,15 +640,15 @@ func completeBuildEnvironment(ctx context.Context, snapshot *gotool.EnvSnapshot,
 	fmt.Fprintf(h, "%d:", len(completeBuildGoEnvKeys))
 	for _, key := range completeBuildGoEnvKeys {
 		write(key)
-		write(values[key])
+		write(snapshot.Value(key))
 	}
-	if gowork := values["GOWORK"]; gowork != "" && gowork != "off" {
+	if gowork := snapshot.Value("GOWORK"); gowork != "" && gowork != "off" {
 		write("gowork=on")
 	} else {
 		write("gowork=off")
 	}
 	sequence(flags)
-	path := values["GOENV"]
+	path := snapshot.Value("GOENV")
 	if path == "" || path == "off" {
 		write("no-environment-file")
 	} else {

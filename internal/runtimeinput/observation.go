@@ -105,7 +105,7 @@ type processObservation struct {
 // evidence too; callers judge outcome support separately. Zero-process merge
 // evidence is refused.
 func CompletedState(observation Observation) (State, error) {
-	if err := validateObservation(observation, false); err != nil {
+	if err := validateObservation(observation); err != nil {
 		return State{}, err
 	}
 	if len(observation.processes) == 0 {
@@ -298,7 +298,7 @@ func convertIdentityKinds(ctx context.Context, observation Observation, moduleDi
 	if err := ctx.Err(); err != nil {
 		return Observation{}, err
 	}
-	if err := validateObservation(observation, false); err != nil {
+	if err := validateObservation(observation); err != nil {
 		return Observation{}, err
 	}
 	state := observation.State
@@ -313,6 +313,7 @@ func convertIdentityKinds(ctx context.Context, observation Observation, moduleDi
 	if err != nil {
 		return Observation{}, fmt.Errorf("runtimeinputs: module dir: %w", err)
 	}
+	moduleRoot := resolveModuleRoot(absModuleDir)
 	validationEnv := normalized
 	outPkgDir := observation.pkgDir
 	if observation.pkgDir != "" {
@@ -324,7 +325,7 @@ func convertIdentityKinds(ctx context.Context, observation Observation, moduleDi
 			outPkgDir = pwd
 		}
 	}
-	current, m, err := currentAndManifestWithNormalizedEnv(ctx, state.Manifest, moduleDir, validationEnv)
+	current, m, err := currentAndManifestWithModuleRoot(ctx, state.Manifest, absModuleDir, moduleRoot, validationEnv)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -354,8 +355,7 @@ func convertIdentityKinds(ctx context.Context, observation Observation, moduleDi
 		convertedPaths = upsertPath(convertedPaths, convertedIndex, pathInput{pathID: conversion.convert(moduleDir, path), Metadata: entry.Metadata})
 	}
 	m.Paths = convertedPaths
-	sortManifest(&m)
-	converted, err := stateFromManifest(ctx, m, moduleDir, normalized)
+	converted, err := stateFromManifestWithModuleRoot(ctx, m, moduleDir, moduleRoot, normalized)
 	if err != nil {
 		return Observation{}, err
 	}
@@ -441,7 +441,7 @@ func sealObservationWithPkgDir(state State, processes []processObservation, empt
 	return observation
 }
 
-func validateObservation(observation Observation, _ bool) error {
+func validateObservation(observation Observation) error {
 	if len(observation.processes) == 0 {
 		if observation.empty && observation.pkgDir == "" && observation.State.OK && observation.State.Manifest != "" && observation.State.Digest != "" {
 			if sealObservation(observation.State, nil, true).seal == observation.seal {
@@ -482,20 +482,15 @@ func Adopt(encoded, moduleDir, process string, env []string) (Observation, error
 	if err != nil {
 		return Observation{}, err
 	}
-	current, err := currentWithNormalizedEnvContext(ctx, encoded, moduleDir, normalized)
+	current, movers, err := currentWithMoversAndNormalizedEnvContext(ctx, encoded, moduleDir, normalized)
 	if err != nil {
 		return Observation{}, err
 	}
 	if current.Manifest != encoded {
-		movers, moveErr := MovedInputs(ctx, encoded, moduleDir, env)
-		switch {
-		case moveErr != nil:
-			return Observation{}, fmt.Errorf("runtimeinputs: adopted manifest moved; attribution unavailable: %w", moveErr)
-		case len(movers) > 0:
+		if len(movers) > 0 {
 			return Observation{}, fmt.Errorf("runtimeinputs: adopted manifest moved: %s", strings.Join(movers, ", "))
-		default:
-			return Observation{}, errors.New("runtimeinputs: adopted manifest moved")
 		}
+		return Observation{}, errors.New("runtimeinputs: adopted manifest moved")
 	}
 	return newObservation(current, process, "adopted"), nil
 }
@@ -514,6 +509,19 @@ func Merge(moduleDir string, env []string, observations ...Observation) (Observa
 	if err != nil {
 		return Observation{}, err
 	}
+	var absModuleDir, moduleRoot string
+	resolveDir := func() error {
+		if absModuleDir != "" {
+			return nil
+		}
+		var absErr error
+		absModuleDir, absErr = filepath.Abs(moduleDir)
+		if absErr != nil {
+			return fmt.Errorf("runtimeinputs: module dir: %w", absErr)
+		}
+		moduleRoot = resolveModuleRoot(absModuleDir)
+		return nil
+	}
 	merged := manifest{Version: manifestVersion}
 	supported := true
 	envSeen := map[string]bool{}
@@ -521,7 +529,7 @@ func Merge(moduleDir string, env []string, observations ...Observation) (Observa
 	unverifiableSeen := map[string]bool{}
 	processes := map[string]processObservation{}
 	for i, observation := range observations {
-		if err := validateObservation(observation, false); err != nil {
+		if err := validateObservation(observation); err != nil {
 			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
 		}
 		for _, record := range observation.processes {
@@ -534,7 +542,10 @@ func Merge(moduleDir string, env []string, observations ...Observation) (Observa
 		if !input.OK || input.Manifest == "" || input.Digest == "" {
 			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d is incomplete", i)
 		}
-		current, m, err := currentAndManifestWithNormalizedEnv(ctx, input.Manifest, moduleDir, normalized)
+		if err := resolveDir(); err != nil {
+			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
+		}
+		current, m, err := currentAndManifestWithModuleRoot(ctx, input.Manifest, absModuleDir, moduleRoot, normalized)
 		if err != nil {
 			return Observation{}, fmt.Errorf("runtimeinputs: merge input %d: %w", i, err)
 		}
@@ -564,7 +575,10 @@ func Merge(moduleDir string, env []string, observations ...Observation) (Observa
 	} else {
 		merged.Subjects = nil
 	}
-	state, err := stateFromManifest(ctx, merged, moduleDir, normalized)
+	if err := resolveDir(); err != nil {
+		return Observation{}, err
+	}
+	state, err := stateFromManifestWithModuleRoot(ctx, merged, absModuleDir, moduleRoot, normalized)
 	if err != nil {
 		return Observation{}, err
 	}

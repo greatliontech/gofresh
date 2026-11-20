@@ -76,7 +76,7 @@ func TestSessionOwnsItsDescriptions(t *testing.T) {
 	if !s.assumePure(Subject{Package: "example.com/p", Symbol: "F"}) || s.assumePure(pure[0]) {
 		t.Fatal("purity set borrowed")
 	}
-	if !s.dynamicStateVouches["example.com/dep.State"] || s.dynamicStateVouches["example.com/dep.Other"] {
+	if !slices.Contains(s.sortedVouches, "example.com/dep.State") || slices.Contains(s.sortedVouches, "example.com/dep.Other") {
 		t.Fatal("vouch set borrowed")
 	}
 	projection := &Snapshot{session: s, kind: CodeResult, packages: []string{"example.com/p"}}

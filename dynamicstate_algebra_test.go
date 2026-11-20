@@ -179,7 +179,7 @@ func (Widget) External() int { return 2 }
 		t.Fatalf("fact lost method directives: %+v", restored)
 	}
 
-	state := &viewDynamicState{cones: map[string]map[string][]dynstate.Fact{"example.com/factsrc": {"example.com/factsrc": {restored}}}}
+	cones := map[string]map[string][]dynstate.Fact{"example.com/factsrc": {"example.com/factsrc": {restored}}}
 	widget, ok := plain.Scope().Lookup("Widget").(*types.TypeName)
 	if !ok {
 		t.Fatal("Widget type missing")
@@ -188,7 +188,7 @@ func (Widget) External() int { return 2 }
 	var pureKey, externalKey string
 	for i := 0; i < methods.Len(); i++ {
 		method := methods.At(i).Obj().(*types.Func)
-		p, x := state.methodDirectives("example.com/factsrc", method)
+		p, x := dynstate.MethodDirectives(cones, "example.com/factsrc", method)
 		if method.Name() == "Pure" {
 			pureKey = p
 		}

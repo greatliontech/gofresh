@@ -157,8 +157,7 @@ func Capture(ctx context.Context, reader *gotool.EnvReader, runtimeEnv []string,
 	if err != nil {
 		return Guards{}, err
 	}
-	pass := gotool.PrimedEnvReader(reader.Runner, reader.Dir, normalized, snapshot)
-	guards, err := captureFor(ctx, pass, kind, buildInputs, gatherFacts, func() string { return runtimeConfig(normalizedRuntime) })
+	guards, err := captureWithSnapshot(ctx, snapshot, normalized, kind, buildInputs, gatherFacts, func() string { return runtimeConfig(normalizedRuntime) })
 	if traced {
 		trace.Emit(ctx, trace.DomainRuntimeInput, "guard.capture.done", reader.Dir,
 			trace.String("toolchain", guards.Toolchain),
@@ -176,15 +175,18 @@ func captureFor(ctx context.Context, reader *gotool.EnvReader, kind Kind, buildI
 	if kind != CodeResult && kind != Measurement {
 		return Guards{}, fmt.Errorf("guard: invalid result kind %d", kind)
 	}
-	env := reader.Env
-	// Both code guards read the pass's one snapshot — the parsed values a
-	// direct probe would return, so neither can drift and the pass pays one
-	// spawn: the toolchain guard is the snapshot's GOVERSION with the
-	// host platform, `go version`'s own line minus its prefix.
 	snapshot, err := reader.Snapshot(ctx)
 	if err != nil {
 		return Guards{}, err
 	}
+	return captureWithSnapshot(ctx, snapshot, reader.Env, kind, buildInputs, machine, runtimeGuard)
+}
+
+func captureWithSnapshot(ctx context.Context, snapshot *gotool.EnvSnapshot, env []string, kind Kind, buildInputs []string, machine func() (MachineFacts, error), runtimeGuard func() string) (Guards, error) {
+	// Both code guards read the pass's one snapshot — the parsed values a
+	// direct probe would return, so neither can drift and the pass pays one
+	// spawn: the toolchain guard is the snapshot's GOVERSION with the
+	// host platform, `go version`'s own line minus its prefix.
 	tc, err := toolchainOf(snapshot)
 	if err != nil {
 		return Guards{}, err

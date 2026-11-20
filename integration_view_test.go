@@ -823,7 +823,7 @@ func TestSingleSubjectDirectiveConfersNothingOnDependency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scan, _, _, err := scanViewSubjects(context.Background(), hasher, attestedScope(DynamicStateStrategy+"|dep-directive|cfg"), nil, 0, "example.com/dirhost")
+	scan, _, _, err := scanViewSubjects(context.Background(), hasher, attestedScope(DynamicStateStrategy+"|dep-directive|cfg"), nil, 0, true, nil, "example.com/dirhost")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4918,7 +4918,7 @@ func TestRuntimeRevalidationUsesEvidenceRoot(t *testing.T) {
 			t.Fatal(err)
 		}
 		view := &Snapshot{moduleDir: member, session: e}
-		st, err := view.currentRuntimeContext(context.Background(), Fingerprint{RuntimeInputs: state.Manifest}, map[string]runtimeinput.State{})
+		st, err := view.currentRuntimeEndpoint(context.Background(), Fingerprint{RuntimeInputs: state.Manifest}, map[string]runtimeEval{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -5008,7 +5008,7 @@ func TestRuntimeRevalidationUsesProducerEnv(t *testing.T) {
 		snapshot := &Snapshot{session: session, kind: CodeResult}
 		binding := bindTestRuntime(t, snapshot, RuntimeDescription{Environment: runtimeEnv})
 		view := &Snapshot{moduleDir: dir, session: session, runtime: &binding.runtime}
-		st, err := view.currentRuntimeContext(context.Background(), Fingerprint{RuntimeInputs: state.Manifest}, map[string]runtimeinput.State{})
+		st, err := view.currentRuntimeEndpoint(context.Background(), Fingerprint{RuntimeInputs: state.Manifest}, map[string]runtimeEval{})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -50,7 +50,7 @@ func TestSessionAcceptsTheResolvedVouchSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.dynamicStateVouches) != 2 || !s.dynamicStateVouches["example.com/a.b.State"] || !s.dynamicStateVouches["example.com/dep.Other"] {
+	if !slices.Equal(s.sortedVouches, []string{"example.com/a.b.State", "example.com/dep.Other"}) {
 		t.Fatal("resolved vouch set changed at session admission")
 	}
 	for _, value := range []string{"", "example.com/dep:State", "example.com/dep", "example.com/dep.", "example.com/dep.not-a-name", "example.com/pkg/x"} {

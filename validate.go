@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -44,7 +43,7 @@ func (v *Snapshot) Validate(ctx context.Context) (opErr error) {
 	v.mu.Lock()
 	v.sealed = true
 	hasObserved := len(v.capturedObserved) != 0
-	hasApplicability := len(v.applicabilityChecks) != 0
+	checks := slices.Clone(v.applicabilityChecks)
 	identities := make(map[Subject]runtimeinput.State)
 	var identitySubjects []Subject
 	for _, subject := range v.subjects {
@@ -71,68 +70,46 @@ func (v *Snapshot) Validate(ctx context.Context) (opErr error) {
 			}
 		}()
 	}
-	// The view validates whatever it captured: observation proofs pull
-	// in the observed arm, and a maximal-only producer the base
-	// comparison - the engine owns the dispatch exactly as it owns the
-	// capture strategy.
-	if hasObserved && hasApplicability {
-		var unavailable error
-		subjects, expected, attached, err := v.prepareObservedValidation()
+	// The view validates whatever it captured: observation proofs and retained
+	// applicability checks share one seeded validation view; a maximal-only
+	// producer runs one comparison-only re-observation (REQ-fresh-coherent-view).
+	var unavailable error
+	if !hasObserved && len(checks) == 0 {
+		if err := deferValidationUnavailability(v.reobserveBase(ctx), &unavailable); err != nil {
+			return err
+		}
+		return v.resolveValidationUnavailable(ctx, nil, unavailable)
+	}
+	var (
+		subjects []Subject
+		expected map[Subject]closure.Observability
+		attached map[Subject]runtimeinput.State
+	)
+	if hasObserved {
+		var err error
+		subjects, expected, attached, err = v.prepareObservedValidation()
 		if err != nil {
 			return err
 		}
-		current, err := v.newSeededValidationView(ctx)
-		if err != nil {
-			return err
-		}
-		if err := deferValidationUnavailability(v.validateObservedWithSeeded(ctx, current, subjects, expected, attached), &unavailable); err != nil {
-			return err
-		}
-		v.mu.RLock()
-		checks := append([]applicabilityCheck(nil), v.applicabilityChecks...)
-		v.mu.RUnlock()
-		if len(checks) > 0 {
-			if err := deferValidationUnavailability(v.validateApplicabilityBatches(ctx, current, checks), &unavailable); err != nil {
-				return err
-			}
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		return unavailable
 	}
-	if hasObserved || hasApplicability {
-		var unavailable error
-		if hasObserved {
-			if err := deferValidationUnavailability(v.validateObserved(ctx), &unavailable); err != nil {
-				return err
-			}
-		}
-		if hasApplicability {
-			if err := deferValidationUnavailability(v.validateApplicabilityChecks(ctx), &unavailable); err != nil {
-				return err
-			}
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		return unavailable
-	}
-	// A comparison-only observation reads once: these facts are never
-	// recorded, so a torn read can only compare unequal and refuse - the
-	// safe direction - while an equal torn read is the contract-excluded
-	// restore interval (REQ-fresh-coherent-view's record/compare
-	// asymmetry). The agreement pair is load-bearing exactly where an
-	// observation becomes the record: view construction.
-	observation, err := v.observe(ctx)
+	current, err := v.newSeededValidationView(ctx)
 	if err != nil {
 		return err
 	}
-	var unavailable error
-	if err := deferValidationUnavailability(v.compareObservationContext(ctx, observation), &unavailable); err != nil {
+	if hasObserved {
+		if err := deferValidationUnavailability(v.validateObservedWithSeeded(ctx, current, subjects, expected, attached), &unavailable); err != nil {
+			return err
+		}
+	}
+	if len(checks) > 0 {
+		if err := deferValidationUnavailability(v.validateApplicabilityBatches(ctx, current, checks), &unavailable); err != nil {
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return v.resolveValidationUnavailable(ctx, nil, unavailable)
+	return unavailable
 }
 
 // newSeededValidationView builds the validation arm's view from one fresh
@@ -155,22 +132,7 @@ func (v *Snapshot) newSeededValidationView(ctx context.Context) (*Snapshot, erro
 	}
 	v.mu.RLock()
 	defer v.mu.RUnlock()
-	current := &Snapshot{
-		session:              v.session,
-		parent:               v.parent,
-		runtime:              v.runtime,
-		runtimeCurrent:       v.runtimeCurrent,
-		subjects:             v.subjects,
-		requests:             v.requests,
-		packages:             v.packages,
-		moduleDir:            v.moduleDir,
-		kind:                 v.kind,
-		facts:                v.facts,
-		observable:           make(map[Subject]closure.Observability, len(v.subjects)),
-		capturedObserved:     make(map[Subject]bool, len(v.subjects)),
-		attachedObservations: make(map[Subject]runtimeinput.State, len(v.subjects)),
-	}
-	return current, nil
+	return v.cloneShell(v.subjects, v.requests, v.packages, v.facts), nil
 }
 
 func (v *Snapshot) prepareObservedValidation() ([]Subject, map[Subject]closure.Observability, map[Subject]runtimeinput.State, error) {
@@ -428,6 +390,23 @@ func describeObservability(o closure.Observability) string {
 	return "not observable: " + o.Reason
 }
 
+type runtimeEval struct {
+	state     runtimeinput.State
+	movers    []string
+	hasMovers bool
+}
+
+// runtimeEndpoint holds one point-in-time runtime-input evaluation pass:
+// Go-comparable States per record, single-pass movers per manifest when
+// evaluated via CurrentWithMovers, and a pass-scoped fallback memo for
+// synthetic runtimeCurrent test hooks. Never shared across before/after or
+// pre-run/post-run endpoints.
+type runtimeEndpoint struct {
+	states     []runtimeinput.State
+	byManifest map[string]runtimeEval
+	moverMemo  map[string][]string
+}
+
 // movedInputsForView attributes against the view's own environment, degrading
 // to no attribution on an engine-less view (the direct-construct test shape).
 func movedInputsForView(ctx context.Context, v *Snapshot, encoded string) ([]string, error) {
@@ -438,20 +417,56 @@ func movedInputsForView(ctx context.Context, v *Snapshot, encoded string) ([]str
 }
 
 // runtimeCheck is the view's one runtime-input check: the injected seam
-// where a test set one, else its bound runtime or session environment, else — on
-// a session-less view, the direct-construct test shape — the ambient
-// environment.
+// where a test set one, else its bound runtime or session environment (or an
+// empty environment on a session-less direct-construct test view).
 func (v *Snapshot) runtimeCheck() func(context.Context, string, string) (runtimeinput.State, error) {
 	if v.runtimeCurrent != nil {
 		return v.runtimeCurrent
 	}
 	return func(ctx context.Context, encoded, root string) (runtimeinput.State, error) {
-		env := os.Environ()
+		var env []string
 		if v.session != nil {
 			env = v.evidenceEnv()
 		}
 		return runtimeinput.Current(ctx, encoded, root, env)
 	}
+}
+
+func (v *Snapshot) evaluateRuntimeManifest(ctx context.Context, encoded, root string) (runtimeEval, error) {
+	if v.runtimeCurrent != nil {
+		state, err := v.runtimeCurrent(ctx, encoded, root)
+		return runtimeEval{state: state}, err
+	}
+	var env []string
+	if v.session != nil {
+		env = v.evidenceEnv()
+	}
+	state, movers, err := runtimeinput.CurrentWithMovers(ctx, encoded, root, env)
+	return runtimeEval{state: state, movers: movers, hasMovers: true}, err
+}
+
+func (v *Snapshot) moversFromEndpoint(ctx context.Context, encoded string, ep *runtimeEndpoint) []string {
+	if v.session == nil || encoded == "" {
+		return nil
+	}
+	if ep != nil {
+		if eval, ok := ep.byManifest[encoded]; ok && eval.hasMovers {
+			return eval.movers
+		}
+		if ep.moverMemo != nil {
+			if movers, cached := ep.moverMemo[encoded]; cached {
+				return movers
+			}
+		}
+	}
+	movers, err := movedInputsForView(ctx, v, encoded)
+	if err != nil {
+		return nil
+	}
+	if ep != nil && ep.moverMemo != nil {
+		ep.moverMemo[encoded] = movers
+	}
+	return movers
 }
 
 // observedGuardDir is the directory a guard observation captures in —
@@ -477,11 +492,15 @@ func (v *Snapshot) evidenceRoot() string {
 // undecodable or moverless manifests — an older recording regenerates either
 // way — and gains "(moved: …)" whenever attribution is derivable.
 func (v *Snapshot) withMovedInputs(ctx context.Context, verdict Verdict, recorded Fingerprint) Verdict {
+	return v.withEndpointMovedInputs(ctx, verdict, recorded, nil)
+}
+
+func (v *Snapshot) withEndpointMovedInputs(ctx context.Context, verdict Verdict, recorded Fingerprint, ep *runtimeEndpoint) Verdict {
 	if verdict.Status != Stale || verdict.Ground.Cause.Kind != RuntimeInputsCause || recorded.RuntimeInputs == "" || v.session == nil {
 		return verdict
 	}
-	movers, err := movedInputsForView(ctx, v, recorded.RuntimeInputs)
-	if err != nil || len(movers) == 0 {
+	movers := v.moversFromEndpoint(ctx, recorded.RuntimeInputs, ep)
+	if len(movers) == 0 {
 		return verdict
 	}
 	verdict.Reason = "runtimeinputs (moved: " + render.CappedList(movers) + ")"
@@ -503,29 +522,32 @@ func requireCompletedAttachments(attached map[Subject]runtimeinput.State, subjec
 
 func (v *Snapshot) compareAttachedObservations(ctx context.Context, attached map[Subject]runtimeinput.State, subjects []Subject) error {
 	// One evaluation per distinct encoded manifest per pass: the observed
-	// state is a function of (manifest, module, env) alone, so subjects
-	// sharing a manifest share it - the same amplification collapse the
-	// check window carries, on the producer path. The memo is per-call
-	// on purpose: the second validation pass must re-evaluate to prove
-	// the inputs stable across the re-analysis window.
+	// state and movers are functions of (manifest, module, env) alone, so
+	// subjects sharing a manifest share both - the same amplification
+	// collapse the check window carries, on the producer path. The memo is
+	// per-call on purpose: the second validation pass must re-evaluate to
+	// prove the inputs stable across the re-analysis window.
 	if err := requireCompletedAttachments(attached, subjects); err != nil {
 		return err
 	}
-	observedByManifest := map[string]runtimeinput.State{}
+	ep := runtimeEndpoint{
+		byManifest: map[string]runtimeEval{},
+		moverMemo:  map[string][]string{},
+	}
 	for _, subject := range subjects {
 		state := attached[subject]
-		observed, evaluated := observedByManifest[state.Manifest]
+		eval, evaluated := ep.byManifest[state.Manifest]
 		if !evaluated {
 			var err error
-			observed, err = v.runtimeCheck()(ctx, state.Manifest, v.evidenceRoot())
+			eval, err = v.evaluateRuntimeManifest(ctx, state.Manifest, v.evidenceRoot())
 			if err != nil {
 				return err
 			}
-			observedByManifest[state.Manifest] = observed
+			ep.byManifest[state.Manifest] = eval
 		}
-		if observed != state {
+		if eval.state != state {
 			detail := ""
-			if movers, moveErr := movedInputsForView(ctx, v, state.Manifest); moveErr == nil && len(movers) > 0 {
+			if movers := v.moversFromEndpoint(ctx, state.Manifest, &ep); len(movers) > 0 {
 				detail = " (moved: " + render.CappedList(movers) + ")"
 			}
 			return fmt.Errorf("%w: runtime inputs for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, detail)
@@ -584,13 +606,9 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if trace.Enabled(ctx, trace.DomainView, "") {
-			trace.Emit(ctx, trace.DomainView, "two_pass_diff", "",
-				trace.String("diff_field", "guards"),
-				trace.String("first_value", fmt.Sprintf("%+v", baseGuards)),
-				trace.String("second_value", fmt.Sprintf("%+v", current.guards)),
-			)
-		}
+		emitTwoPassDiff(ctx, nil, func() (string, string, string) {
+			return "guards", fmt.Sprintf("%+v", baseGuards), fmt.Sprintf("%+v", current.guards)
+		})
 		return fmt.Errorf("%w: guards%s (%s)", ErrViewChanged, during, differingGuard(current.guards, baseGuards))
 	}
 	if err := ctx.Err(); err != nil {
@@ -600,13 +618,7 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if trace.Enabled(ctx, trace.DomainView, "") {
-			trace.Emit(ctx, trace.DomainView, "two_pass_diff", "",
-				trace.String("diff_field", "source_files"),
-				trace.Strings("first_value", base.sourceFiles),
-				trace.Strings("second_value", current.sourceFiles),
-			)
-		}
+		emitTwoPassStringsDiff(ctx, nil, "source_files", base.sourceFiles, current.sourceFiles)
 		return fmt.Errorf("%w: maximal source identities%s", ErrViewChanged, movedIdentitySuffix(base.sourceFiles, current.sourceFiles, base.fileDigests, current.fileDigests))
 	}
 	var unjudged []Subject
@@ -618,17 +630,7 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if trace.AnyEnabled() {
-				target := subject.Package + "." + subject.Symbol
-				if trace.Enabled(ctx, trace.DomainView, target) {
-					trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
-						trace.String("diff_field", "subject_source_files"),
-						trace.String("subject", target),
-						trace.Strings("first_value", base.sourceFilesBySubject[subject]),
-						trace.Strings("second_value", current.sourceFilesBySubject[subject]),
-					)
-				}
-			}
+			emitTwoPassStringsDiff(ctx, &subject, "subject_source_files", base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject])
 			return fmt.Errorf("%w: maximal source identities for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject], base.fileDigests, current.fileDigests))
 		}
 		// A budget cut in either observation compares with the
@@ -642,18 +644,9 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if trace.AnyEnabled() {
-				target := subject.Package + "." + subject.Symbol
-				if trace.Enabled(ctx, trace.DomainView, target) {
-					diffField, firstVal, secondVal := diffSubjectFacts(base.maximal[subject], current.maximal[subject], cutHere)
-					trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
-						trace.String("diff_field", diffField),
-						trace.String("subject", target),
-						trace.String("first_value", firstVal),
-						trace.String("second_value", secondVal),
-					)
-				}
-			}
+			emitTwoPassDiff(ctx, &subject, func() (string, string, string) {
+				return diffSubjectFacts(base.maximal[subject], current.maximal[subject], cutHere)
+			})
 			return fmt.Errorf("%w: closure for %s.%s%s%s", ErrViewChanged, subject.Package, subject.Symbol, during, movedIdentitySuffix(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject], base.fileDigests, current.fileDigests))
 		}
 		if !construction && cutHere && !current.maximal[subject].equal(base.maximal[subject], false) {
@@ -663,17 +656,7 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if trace.AnyEnabled() {
-				target := subject.Package + "." + subject.Symbol
-				if trace.Enabled(ctx, trace.DomainView, target) {
-					trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
-						trace.String("diff_field", "purity"),
-						trace.String("subject", target),
-						trace.String("first_value", base.purity[subject]),
-						trace.String("second_value", current.purity[subject]),
-					)
-				}
-			}
+			emitTwoPassStringDiff(ctx, &subject, "purity", base.purity[subject], current.purity[subject])
 			return fmt.Errorf("%w: purity for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, during)
 		}
 		if construction {
@@ -681,51 +664,21 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				if trace.AnyEnabled() {
-					target := subject.Package + "." + subject.Symbol
-					if trace.Enabled(ctx, trace.DomainView, target) {
-						trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
-							trace.String("diff_field", "vouch_discharges"),
-							trace.String("subject", target),
-							trace.String("first_value", base.vouchDischarges[subject]),
-							trace.String("second_value", current.vouchDischarges[subject]),
-						)
-					}
-				}
+				emitTwoPassStringDiff(ctx, &subject, "vouch_discharges", base.vouchDischarges[subject], current.vouchDischarges[subject])
 				return fmt.Errorf("%w: vouch discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 			}
 			if !cutHere && base.discharges[subject].singleSubject != current.discharges[subject].singleSubject {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				if trace.AnyEnabled() {
-					target := subject.Package + "." + subject.Symbol
-					if trace.Enabled(ctx, trace.DomainView, target) {
-						trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
-							trace.String("diff_field", "single_subject_discharges"),
-							trace.String("subject", target),
-							trace.String("first_value", base.discharges[subject].singleSubject),
-							trace.String("second_value", current.discharges[subject].singleSubject),
-						)
-					}
-				}
+				emitTwoPassStringDiff(ctx, &subject, "single_subject_discharges", base.discharges[subject].singleSubject, current.discharges[subject].singleSubject)
 				return fmt.Errorf("%w: single-subject attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 			}
 			if !cutHere && base.discharges[subject].packageProcess != current.discharges[subject].packageProcess {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				if trace.AnyEnabled() {
-					target := subject.Package + "." + subject.Symbol
-					if trace.Enabled(ctx, trace.DomainView, target) {
-						trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
-							trace.String("diff_field", "package_process_discharges"),
-							trace.String("subject", target),
-							trace.String("first_value", base.discharges[subject].packageProcess),
-							trace.String("second_value", current.discharges[subject].packageProcess),
-						)
-					}
-				}
+				emitTwoPassStringDiff(ctx, &subject, "package_process_discharges", base.discharges[subject].packageProcess, current.discharges[subject].packageProcess)
 				return fmt.Errorf("%w: package-process attestation discharges for %s.%s during construction", ErrViewChanged, subject.Package, subject.Symbol)
 			}
 			if current.cut[subject] && !base.cut[subject] {
@@ -735,17 +688,7 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 				if err := ctx.Err(); err != nil {
 					return err
 				}
-				if trace.AnyEnabled() {
-					target := subject.Package + "." + subject.Symbol
-					if trace.Enabled(ctx, trace.DomainView, target) {
-						trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
-							trace.String("diff_field", "subject_source_files"),
-							trace.String("subject", target),
-							trace.Strings("first_value", base.sourceFilesBySubject[subject]),
-							trace.Strings("second_value", current.sourceFilesBySubject[subject]),
-						)
-					}
-				}
+				emitTwoPassStringsDiff(ctx, &subject, "subject_source_files", base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject])
 				return fmt.Errorf("%w: maximal source identities for %s.%s during construction%s", ErrViewChanged, subject.Package, subject.Symbol, movedIdentitySuffix(base.sourceFilesBySubject[subject], current.sourceFilesBySubject[subject], base.fileDigests, current.fileDigests))
 			}
 		}
@@ -754,13 +697,7 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if trace.Enabled(ctx, trace.DomainView, "") {
-			trace.Emit(ctx, trace.DomainView, "two_pass_diff", "",
-				trace.String("diff_field", "source_files"),
-				trace.Strings("first_value", base.sourceFiles),
-				trace.Strings("second_value", current.sourceFiles),
-			)
-		}
+		emitTwoPassStringsDiff(ctx, nil, "source_files", base.sourceFiles, current.sourceFiles)
 		// The construction race is the one refusal with no reproduction
 		// path afterward, so naming here matters most.
 		return fmt.Errorf("%w: maximal source identities during construction%s", ErrViewChanged, movedIdentitySuffix(base.sourceFiles, current.sourceFiles, base.fileDigests, current.fileDigests))
@@ -772,6 +709,67 @@ func compareObservations(ctx context.Context, subjects []Subject, base *observat
 		return fmt.Errorf("%w: the dynamic-state discharge for %s was cut by the analysis budget (%s)", ErrAnalysisUnavailable, countNoun(len(unjudged), "subject"), subjectNames(unjudged))
 	}
 	return ctx.Err()
+}
+
+func emitTwoPassStringDiff(ctx context.Context, subject *Subject, diffField, firstVal, secondVal string) {
+	emitTwoPassDiff(ctx, subject, func() (string, string, string) {
+		return diffField, firstVal, secondVal
+	})
+}
+
+func emitTwoPassDiff(ctx context.Context, subject *Subject, compute func() (string, string, string)) {
+	if !trace.AnyEnabled() {
+		return
+	}
+	target := ""
+	if subject != nil {
+		target = subject.Package + "." + subject.Symbol
+	}
+	if !trace.Enabled(ctx, trace.DomainView, target) {
+		return
+	}
+	diffField, firstVal, secondVal := compute()
+	if subject != nil {
+		trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
+			trace.String("diff_field", diffField),
+			trace.String("subject", target),
+			trace.String("first_value", firstVal),
+			trace.String("second_value", secondVal),
+		)
+		return
+	}
+	trace.Emit(ctx, trace.DomainView, "two_pass_diff", "",
+		trace.String("diff_field", diffField),
+		trace.String("first_value", firstVal),
+		trace.String("second_value", secondVal),
+	)
+}
+
+func emitTwoPassStringsDiff(ctx context.Context, subject *Subject, diffField string, firstVal, secondVal []string) {
+	if !trace.AnyEnabled() {
+		return
+	}
+	target := ""
+	if subject != nil {
+		target = subject.Package + "." + subject.Symbol
+	}
+	if !trace.Enabled(ctx, trace.DomainView, target) {
+		return
+	}
+	if subject != nil {
+		trace.Emit(ctx, trace.DomainView, "two_pass_diff", target,
+			trace.String("diff_field", diffField),
+			trace.String("subject", target),
+			trace.Strings("first_value", firstVal),
+			trace.Strings("second_value", secondVal),
+		)
+		return
+	}
+	trace.Emit(ctx, trace.DomainView, "two_pass_diff", "",
+		trace.String("diff_field", diffField),
+		trace.Strings("first_value", firstVal),
+		trace.Strings("second_value", secondVal),
+	)
 }
 
 // subjectNames spells subjects for a refusal, bounded at four.

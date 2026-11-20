@@ -13,6 +13,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/outcome"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/testvariant"
+	"github.com/greatliontech/gofresh/internal/trace"
 	"github.com/greatliontech/stipulator/stipulate/structural"
 	"go/ast"
 	"go/parser"
@@ -20,6 +21,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"pgregory.net/rapid"
 	"reflect"
 	"runtime"
 	"slices"
@@ -2333,13 +2335,519 @@ func TestAnalysisScopeWiresTheStrategyConstants(t *testing.T) {
 	if plain.Proofs() != "" || plain.Facts() != "" || plain.Scan() != "" || plain.TestingScan() != "" {
 		t.Fatal("reported guards without source dependencies armed a memo")
 	}
-	attested := (&engine{executionModel: SingleSubjectExecution, dynamicStateVouches: map[string]bool{"example.com/dep:Hooks": true, "a.example/x:Y": true}}).analysisScope(guards)
+	attested := (&engine{executionModel: SingleSubjectExecution, sortedVouches: []string{"a.example/x:Y", "example.com/dep:Hooks"}}).analysisScope(guards)
 	pkgAttested := (&engine{executionModel: PackageExecution}).analysisScope(guards)
-	slices.Sort(attested.Vouches)
 	if !attested.SingleSubject || attested.PackageProcess || pkgAttested.SingleSubject || !pkgAttested.PackageProcess || plain.SingleSubject || plain.PackageProcess || !slices.Equal(attested.Vouches, []string{"a.example/x:Y", "example.com/dep:Hooks"}) || len(plain.Vouches) != 0 {
 		t.Fatalf("assertion axes not preserved: plain=%+v attested=%+v pkgAttested=%+v", plain, attested, pkgAttested)
 	}
 	if attested.ProofStrategy != plain.ProofStrategy || attested.FactStrategy != plain.FactStrategy || attested.Toolchain != plain.Toolchain || attested.BuildConfig != plain.BuildConfig {
 		t.Fatal("assertions moved an unrelated scope axis")
+	}
+}
+
+func TestBatchRuntimeMoverDeduplicationAndEndpointIsolation(t *testing.T) {
+	dir := t.TempDir()
+	fixture := filepath.Join(dir, "fixture.txt")
+	if err := os.WriteFile(fixture, []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := []string{"BATCH_ENV=initial", "PATH=/bin"}
+	bracket, err := runtimeinput.CaptureBracket(t.Context(), dir, []string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs, err := runtimeinput.FromTestLog([]byte("getenv BATCH_ENV\nopen fixture.txt\n"), dir, dir, env,
+		runtimeinput.WithCompletedProcess("batch-worker"), runtimeinput.WithBracket(bracket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordedState, err := runtimeinput.CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const batchSize = 12
+	subjects := make([]Subject, batchSize)
+	maximal := make(map[Subject]subjectFacts, batchSize)
+	cl := closure.Closure{Hash: "core-hash", TestVariants: "tv-hash", ToolchainContent: "tc-content", AdmissionPolicy: "audit"}
+	baseGuards := guard.Guards{Toolchain: "go1.27 linux/amd64", BuildConfig: "bc"}
+	for i := range subjects {
+		subjects[i] = Subject{Package: "example.com/batch", Symbol: fmt.Sprintf("TestSubj%d", i)}
+		maximal[subjects[i]] = testSubjectFacts(cl)
+	}
+	newView := func() *Snapshot {
+		return &Snapshot{
+			session:              &Session{dir: dir, env: env, deferredCheckClose: true},
+			subjects:             subjects,
+			moduleDir:            dir,
+			kind:                 CodeResult,
+			facts:                &observationFacts{maximal: maximal, guards: baseGuards, purity: map[Subject]string{}, vouchDischarges: map[Subject]string{}, discharges: map[Subject]attestationDischarges{}},
+			observable:           map[Subject]closure.Observability{},
+			capturedObserved:     map[Subject]bool{},
+			attachedObservations: map[Subject]runtimeinput.State{},
+		}
+	}
+
+	// 1. Production checkRecords path: 12 subjects sharing one manifest evaluate
+	// CurrentWithMovers once in before and once in after, with zero extra MovedInputs passes.
+	if err := os.WriteFile(fixture, []byte("after"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	v := newView()
+	records := make([]recordCheck, batchSize)
+	baseFP := Fingerprint{
+		MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants,
+		ToolchainContent: cl.ToolchainContent, AdmissionPolicy: cl.AdmissionPolicy,
+		Guards: baseGuards, DynamicStateStrategy: DynamicStateStrategy, ClosureStrategy: ClosureStrategy,
+		RuntimeInputs: recordedState.Manifest, RuntimeDigest: recordedState.Digest,
+		ResultKind: CodeResult,
+	}
+	for i, s := range subjects {
+		records[i] = recordCheck{Candidate: Candidate{Subject: s, Recorded: baseFP}}
+	}
+	rec := trace.NewRecorder()
+	ctx := trace.WithSink(t.Context(), rec)
+	results, err := v.checkRecords(ctx, records, true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, res := range results {
+		if res.verdict.Status != Stale || res.verdict.Ground.Cause != (Cause{Kind: RuntimeInputsCause, Condition: Changed}) || res.verdict.Reason != "runtimeinputs (moved: path fixture.txt)" {
+			t.Fatalf("subject %d verdict = %+v, want stale naming path fixture.txt", i, res.verdict)
+		}
+	}
+	if got := len(rec.ByName("manifest.eval")); got != 2 {
+		t.Fatalf("checkRecords across %d subjects ran %d manifest.eval passes, want 2 (1 before + 1 after)", batchSize, got)
+	}
+
+	// 2. Producer compareAttachedObservations path: single-pass movers with 1 manifest.eval.
+	rec.Reset()
+	attached := make(map[Subject]runtimeinput.State, batchSize)
+	for _, s := range subjects {
+		attached[s] = recordedState
+	}
+	err = v.compareAttachedObservations(ctx, attached, subjects)
+	if !errors.Is(err, ErrViewChanged) || !strings.Contains(err.Error(), "(moved: path fixture.txt)") {
+		t.Fatalf("compareAttachedObservations err = %v, want ErrViewChanged naming path fixture.txt", err)
+	}
+	if got := len(rec.ByName("manifest.eval")); got != 1 {
+		t.Fatalf("compareAttachedObservations ran %d manifest.eval passes, want 1", got)
+	}
+
+	// 3. Synthetic runtimeCurrent fallback + endpoint isolation (before unmoved, after moved):
+	// after's moverMemo deduplicates across all subjects without inheriting stale before state.
+	if err := os.WriteFile(fixture, []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	movedState, _, err := runtimeinput.CurrentWithMovers(t.Context(), recordedState.Manifest, dir, []string{"BATCH_ENV=initial", "PATH=/bin"})
+	if err != nil || movedState != recordedState {
+		t.Fatalf("restored state mismatch: %+v %v", movedState, err)
+	}
+	vHook := newView()
+	hookCalls := 0
+	vHook.runtimeCurrent = func(_ context.Context, _, _ string) (runtimeinput.State, error) {
+		hookCalls++
+		if hookCalls == 1 {
+			return recordedState, nil
+		}
+		if err := os.WriteFile(fixture, []byte("moved-mid-window"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		st := recordedState
+		st.Digest = strings.Repeat("f", 32)
+		return st, nil
+	}
+	rec.Reset()
+	hookResults, err := vHook.checkRecords(ctx, records[:8], true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, res := range hookResults {
+		if res.verdict.Status != Stale || res.verdict.Reason != "runtimeinputs (moved: path fixture.txt)" {
+			t.Fatalf("hook subject %d verdict = %+v, want stale naming path fixture.txt", i, res.verdict)
+		}
+	}
+	if hookCalls != 2 {
+		t.Fatalf("hookCalls = %d, want 2 (1 before + 1 after)", hookCalls)
+	}
+	if got := len(rec.ByName("manifest.eval")); got != 1 {
+		t.Fatalf("fallback moverMemo ran %d manifest.eval passes across 8 subjects, want 1", got)
+	}
+}
+
+func TestCheckingUnitCloseFastPathProperty(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		obsSubj := Subject{Package: "example.com/fastclose", Symbol: "TestObs"}
+		pureSubj := Subject{Package: "example.com/fastclose", Symbol: "TestPure"}
+		liveSubj := Subject{Package: "example.com/fastclose", Symbol: "TestLive"}
+		subjects := []Subject{obsSubj, pureSubj, liveSubj}
+		requests := []closure.Subject{
+			{Package: obsSubj.Package, Symbol: obsSubj.Symbol},
+			{Package: pureSubj.Package, Symbol: pureSubj.Symbol},
+			{Package: liveSubj.Package, Symbol: liveSubj.Symbol},
+		}
+		cl := closure.Closure{
+			Hash: "core", TestVariants: "tv-cur", ToolchainContent: "stdlib",
+			AdmissionPolicy: "audit", Unverifiable: true, Reason: "reads fixture",
+		}
+		baseGuards := guard.Guards{Toolchain: "go1.27 linux/amd64", BuildConfig: "bc"}
+		nSlots := rapid.IntRange(1, 8).Draw(rt, "n_slots")
+
+		// Kinds: 0 = !evaluated (closure mismatch on obsSubj),
+		// 1 = terminalStale (evaluated stale on obsSubj with inert applicability; obsSubj is NEVER pre-populated in current.observable),
+		// 2 = Unverifiable (evaluated non-stale on obsSubj without applicability),
+		// 3 = Valid (purity override on pureSubj),
+		// 4 = Valid (live selected slot on liveSubj with pre-populated observability).
+		slotKinds := make([]int, nSlots)
+		for i := range slotKinds {
+			slotKinds[i] = rapid.IntRange(0, 3).Draw(rt, fmt.Sprintf("slot_%d", i))
+		}
+		if rapid.Bool().Draw(rt, "include_live_selection") {
+			slotKinds[rapid.IntRange(0, nSlots-1).Draw(rt, "live_idx")] = 4
+		}
+
+		reads := map[string]int{}
+		currentDigests := map[string]string{}
+		preciseCalls := 0
+		current := &Snapshot{
+			session:   &Session{deferredCheckClose: true},
+			subjects:  subjects,
+			requests:  requests,
+			packages:  []string{obsSubj.Package},
+			moduleDir: "/virtual",
+			kind:      CodeResult,
+			facts: &observationFacts{
+				maximal: map[Subject]subjectFacts{
+					obsSubj:  testSubjectFacts(cl),
+					pureSubj: testSubjectFacts(cl),
+					liveSubj: testSubjectFacts(cl),
+				},
+				guards:          baseGuards,
+				purity:          map[Subject]string{pureSubj: "caller assertion"},
+				vouchDischarges: map[Subject]string{},
+				discharges:      map[Subject]attestationDischarges{},
+			},
+			observable: map[Subject]closure.Observability{
+				liveSubj: {Observable: true, EffectFree: true},
+			},
+			runtimeCurrent: func(_ context.Context, manifest, _ string) (runtimeinput.State, error) {
+				reads[manifest]++
+				return runtimeinput.State{OK: true, Manifest: manifest, Digest: currentDigests[manifest]}, nil
+			},
+			beforePreciseAnalysis: func() {
+				preciseCalls++
+			},
+		}
+
+		slots := make([]checkingSlot, nSlots)
+		expectedReads := map[string]int{}
+		for i, k := range slotKinds {
+			manifest := fmt.Sprintf("m-%d", i%3)
+			currentDigests[manifest] = "recorded"
+			subj := obsSubj
+			if k == 3 {
+				subj = pureSubj
+			} else if k == 4 {
+				subj = liveSubj
+			}
+			fp := Fingerprint{
+				MaximalClosure: cl.Hash, TestVariantClosure: cl.TestVariants,
+				ToolchainContent: cl.ToolchainContent, AdmissionPolicy: cl.AdmissionPolicy,
+				Guards: baseGuards, DynamicStateStrategy: DynamicStateStrategy, ClosureStrategy: ClosureStrategy,
+				RuntimeInputs: manifest, RuntimeDigest: "recorded", ResultKind: CodeResult,
+				ObservationAssertion: "caller assertion",
+				ObservationProof:     ObservationProof{Strategy: ObservationRTA, Subject: subj, Observable: true},
+			}
+			fp.ObservationProof.Evidence = observationProofEvidenceFull(fp, true, false)
+
+			switch k {
+			case 0: // !evaluated
+				fp.MaximalClosure = "old-core"
+				opening := current.judgmentFor(subj, refusal(Stale, ClosureCause, Changed, "closure"))
+				slots[i] = checkingSlot{
+					record: recordCheck{Candidate: Candidate{Subject: subj, Recorded: fp}, observed: true},
+					result: recordResult{verdict: opening, evaluated: false},
+				}
+			case 1: // terminalStale on obsSubj (whose observability is unpopulated, so any leak fires beforePreciseAnalysis!)
+				fp.InertTestVariantApplicability = InertTestVariantApplicability{InertTestVariantExtension, cl.TestVariants}
+				fp.ObservationProof.Evidence = observationProofEvidenceFull(fp, true, false)
+				opening := current.judgmentFor(subj, refusal(Stale, RuntimeInputsCause, Unavailable, "runtimeinputs"))
+				slots[i] = checkingSlot{
+					record: recordCheck{Candidate: Candidate{Subject: subj, Recorded: fp}, observed: true},
+					result: recordResult{verdict: opening, evaluated: true},
+				}
+				expectedReads[manifest] = 2
+			case 2: // Unverifiable
+				fp.ObservationAssertion = ""
+				fp.ObservationProof = ObservationProof{}
+				st := runtimeinput.State{OK: true, Manifest: manifest, Digest: "recorded"}
+				opening := current.judgmentFor(subj, decideAfterClosure(fp, cl, baseGuards, st, CodeResult, PurityAuthority{}))
+				slots[i] = checkingSlot{
+					record: recordCheck{Candidate: Candidate{Subject: subj, Recorded: fp}, observed: true},
+					result: recordResult{verdict: opening, evaluated: true, before: st, after: st},
+				}
+				expectedReads[manifest] = 2
+			case 3: // Valid via caller purity on pureSubj
+				fp.PurityAssertion = "caller assertion"
+				fp.ObservationAssertion = ""
+				fp.ObservationProof = ObservationProof{}
+				st := runtimeinput.State{OK: true, Manifest: manifest, Digest: "recorded"}
+				opening := current.judgmentFor(subj, decideAfterClosure(fp, cl, baseGuards, st, CodeResult, PurityAuthority{Recorded: CallerPurity, Current: CallerPurity}))
+				slots[i] = checkingSlot{
+					record: recordCheck{Candidate: Candidate{Subject: subj, Recorded: fp}, observed: true},
+					result: recordResult{verdict: opening, evaluated: true, before: st, after: st},
+				}
+				expectedReads[manifest] = 2
+			case 4: // Valid via inert applicability + observation lift on liveSubj
+				fp.InertTestVariantApplicability = InertTestVariantApplicability{InertTestVariantExtension, cl.TestVariants}
+				fp.ObservationProof.Evidence = observationProofEvidenceFull(fp, true, false)
+				st := runtimeinput.State{OK: true, Manifest: manifest, Digest: "recorded"}
+				slots[i] = checkingSlot{
+					record: recordCheck{Candidate: Candidate{Subject: subj, Recorded: fp}, observed: true},
+					result: recordResult{verdict: Verdict{Status: Valid}, evaluated: true, selected: true, before: st, after: st},
+				}
+				expectedReads[manifest] = 2
+			}
+		}
+
+		u := &CheckingUnit{view: current, slots: slices.Clone(slots)}
+		checked, unavailable, err := u.closeSlots(context.Background(), current)
+		if err != nil || unavailable != nil {
+			rt.Fatalf("closeSlots = (%v, %v), want nil errors", unavailable, err)
+		}
+		if preciseCalls != 0 {
+			rt.Fatalf("preciseCalls = %d, want 0 (terminalStale slots on uncached obsSubj must never trigger ensureObservable)", preciseCalls)
+		}
+		if !reflect.DeepEqual(reads, expectedReads) {
+			rt.Fatalf("endpoint reads = %v, want %v", reads, expectedReads)
+		}
+		for i, orig := range slots {
+			got := checked[i]
+			if got.Index != i || got.Subject != orig.record.Subject {
+				rt.Fatalf("slot %d metadata = %+v, want index %d subject %v", i, got, i, orig.record.Subject)
+			}
+			if orig.result.verdict.Status == Stale {
+				if got.Verdict != orig.result.verdict {
+					rt.Fatalf("slot %d (kind=%d) terminalStale verdict mutated: got %+v, want %+v", i, slotKinds[i], got.Verdict, orig.result.verdict)
+				}
+			} else if slotKinds[i] == 3 || slotKinds[i] == 4 {
+				if got.Verdict.Status != Valid {
+					rt.Fatalf("slot %d (kind=%d) lost validity: %+v", i, slotKinds[i], got.Verdict)
+				}
+			} else if slotKinds[i] == 2 && got.Verdict.Status != Unverifiable {
+				rt.Fatalf("slot %d (kind=2) verdict = %+v, want unverifiable", i, got.Verdict)
+			}
+		}
+	})
+}
+
+func TestCheckingUnitCloseFastPathEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/closefast\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "p.go"), []byte("package closefast\n\nimport \"os\"\n\nfunc ReadCfg() string { return os.Getenv(\"CLOSEFAST_CFG\") }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "purepkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "purepkg", "pure.go"), []byte("package purepkg\n\nfunc PureAdd(a, b int) int { return a + b }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fixture := filepath.Join(dir, "input.txt")
+	if err := os.WriteFile(fixture, []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env, err := gotool.EnvForCommand(os.Environ(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bracket, err := runtimeinput.CaptureBracket(t.Context(), dir, []string{"."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs, err := runtimeinput.FromTestLog([]byte("open input.txt\n"), dir, dir, env,
+		runtimeinput.WithCompletedProcess("worker"), runtimeinput.WithBracket(bracket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	recordedRT, err := runtimeinput.CompletedState(obs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	session, err := NewSession(t.Context(), BuildDescription{Directory: dir, Environment: env, Inputs: []string{}}, SessionPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readSubj := Subject{Package: "example.com/closefast", Symbol: "ReadCfg"}
+	pureSubj := Subject{Package: "example.com/closefast/purepkg", Symbol: "PureAdd"}
+	snap, err := session.Snapshot(t.Context(), []Subject{readSubj, pureSubj}, CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fps, err := snap.CaptureBatch(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := snap.BindRuntime(t.Context(), RuntimeDescription{Directory: dir, Environment: env})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := binding.BeginCheck([]Subject{readSubj, pureSubj})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer u.Abort()
+	preciseRuns := 0
+	u.view.beforePreciseAnalysis = func() { preciseRuns++ }
+
+	// Move input.txt so historical candidates become Stale at CheckBatch, then
+	// restore input.txt before Close to prove Close neither re-runs proof
+	// selection nor resurrects terminal Stale verdicts while still closing endpoints.
+	if err := os.WriteFile(fixture, []byte("v2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleFP := fps[readSubj]
+	staleFP.RuntimeInputs = recordedRT.Manifest
+	staleFP.RuntimeDigest = recordedRT.Digest
+	staleFP.InertTestVariantApplicability = InertTestVariantApplicability{InertTestVariantExtension, staleFP.TestVariantClosure}
+	staleFP.ObservationAssertion = "caller assertion"
+	staleFP.ObservationProof = ObservationProof{Strategy: ObservationRTA, Subject: readSubj, Observable: true}
+	staleFP.ObservationProof.Evidence = observationProofEvidenceFull(staleFP, true, false)
+
+	validFP := fps[pureSubj]
+	var candidates []Candidate
+	for range 6 {
+		candidates = append(candidates, Candidate{Subject: readSubj, Recorded: staleFP})
+	}
+	candidates = append(candidates, Candidate{Subject: pureSubj, Recorded: validFP})
+
+	opening, err := u.CheckBatch(t.Context(), candidates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 6 {
+		if opening[i].Verdict.Status != Stale || !strings.Contains(opening[i].Verdict.Reason, "moved: path input.txt") {
+			t.Fatalf("opening[%d] = %+v, want stale naming path input.txt", i, opening[i].Verdict)
+		}
+	}
+	if opening[6].Verdict.Status != Valid {
+		t.Fatalf("opening[6] = %+v, want valid", opening[6].Verdict)
+	}
+	if preciseRuns != 0 {
+		t.Fatalf("CheckBatch ran precise analysis %d times on guard-stale slots, want 0", preciseRuns)
+	}
+
+	// Restore input.txt before Close: without terminalStale, staleFP's restored
+	// RuntimeDigest + InertTestVariantApplicability would select ensureObservable!
+	if err := os.WriteFile(fixture, []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := trace.NewRecorder()
+	closeCtx := trace.WithSink(t.Context(), rec)
+	closed, err := u.Close(closeCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preciseRuns != 0 {
+		t.Fatalf("Close ran precise analysis %d times on terminalStale slots, want 0", preciseRuns)
+	}
+	fastEvents := rec.ByName("checking.close.fast_stale")
+	if len(fastEvents) != 1 {
+		t.Fatalf("checking.close.fast_stale events = %+v, want 1 event", fastEvents)
+	}
+	totalSlots, okTotal := fastEvents[0].IntField("total_slots")
+	staleSlots, okStale := fastEvents[0].IntField("terminal_stale_slots")
+	if !okTotal || totalSlots != 7 || !okStale || staleSlots != 6 {
+		t.Fatalf("checking.close.fast_stale fields = %+v, want total=7 stale=6", fastEvents[0])
+	}
+	if evalCount := len(rec.ByName("manifest.eval")); evalCount != 2 {
+		t.Fatalf("Close ran %d manifest.eval passes, want 2 (1 before + 1 after endpoint)", evalCount)
+	}
+	for i := range 6 {
+		if closed[i].Verdict != opening[i].Verdict {
+			t.Fatalf("closed[%d] verdict = %+v, want preserved opening stale %+v", i, closed[i].Verdict, opening[i].Verdict)
+		}
+	}
+	if closed[6].Verdict.Status != Valid {
+		t.Fatalf("closed[6] verdict = %+v, want valid", closed[6].Verdict)
+	}
+}
+
+func TestOutcomeSupportMemoizationAndRootConsolidationHelpers(t *testing.T) {
+	// 1. applyRootedCulpritDischarge: singleSubject merges without mutating caller map;
+	// packageProcess sets packageProcess; surviving=="" clears downgrade fields.
+	subj := Subject{Package: "example.com/pkg", Symbol: "F"}
+	culprit := Subject{Package: "example.com/dep", Symbol: "Global"}
+	scan := &subjectScan{
+		downgradeReason:  map[Subject]string{subj: sharedDynamicStatePrefix + "initial"},
+		downgradeCulprit: map[Subject]Subject{subj: culprit},
+		discharges:       map[Subject]attestationDischarges{subj: {singleSubject: "a.Var,c.Var"}},
+	}
+	callerMap := map[string]bool{"b.Var": true}
+	applyRootedCulpritDischarge(scan, subj, "", Subject{}, callerMap, true)
+	if len(callerMap) != 1 || !callerMap["b.Var"] {
+		t.Fatalf("applyRootedCulpritDischarge mutated caller map: %v", callerMap)
+	}
+	if _, ok := scan.downgradeReason[subj]; ok {
+		t.Fatalf("surviving==\"\" left downgradeReason: %v", scan.downgradeReason)
+	}
+	if _, ok := scan.downgradeCulprit[subj]; ok {
+		t.Fatalf("surviving==\"\" left downgradeCulprit: %v", scan.downgradeCulprit)
+	}
+	if got := scan.discharges[subj].singleSubject; got != "a.Var,b.Var,c.Var" {
+		t.Fatalf("merged singleSubject discharges = %q, want a.Var,b.Var,c.Var", got)
+	}
+	applyRootedCulpritDischarge(scan, subj, "dep.Global is mutated", culprit, callerMap, false)
+	if scan.downgradeReason[subj] != sharedDynamicStatePrefix+"dep.Global is mutated" || scan.downgradeCulprit[subj] != culprit {
+		t.Fatalf("surviving culprit not recorded: reason=%q culprit=%+v", scan.downgradeReason[subj], scan.downgradeCulprit[subj])
+	}
+	if got := scan.discharges[subj].packageProcess; got != "b.Var" {
+		t.Fatalf("packageProcess discharges = %q, want b.Var", got)
+	}
+
+	// 2. Session.analysisScope returns an owned copy of sortedVouches.
+	sess := &Session{
+		sortedVouches: []string{"a.example/p.V1", "b.example/q.V2"},
+	}
+	scope := sess.analysisScope(guard.Guards{Toolchain: "tc", BuildConfig: "bc"})
+	if !slices.Equal(scope.Vouches, []string{"a.example/p.V1", "b.example/q.V2"}) {
+		t.Fatalf("scope.Vouches = %v", scope.Vouches)
+	}
+	scope.Vouches[0] = "mutated"
+	if sess.sortedVouches[0] != "a.example/p.V1" {
+		t.Fatalf("mutating scope.Vouches aliased Session.sortedVouches: %v", sess.sortedVouches)
+	}
+
+	// 3. primedBuildReader refuses empty GoEnv maps consistently across CaptureGuards and ResolveToolchainSelection.
+	emptyBuild := BuildDescription{
+		Directory:   t.TempDir(),
+		Environment: []string{"PATH=/bin"},
+		GoEnv:       map[string]string{},
+	}
+	if _, err := CaptureGuards(t.Context(), emptyBuild, nil, CodeResult); err == nil {
+		t.Fatal("CaptureGuards accepted empty GoEnv map")
+	}
+	if _, err := ResolveToolchainSelection(t.Context(), emptyBuild); err == nil {
+		t.Fatal("ResolveToolchainSelection accepted empty GoEnv map")
+	}
+
+	// 4. Unit.account caches decoded OutcomeSupportSet across repeated Account() reads.
+	u := &Unit{
+		execution: &unitExecution{
+			process:      ProcessDescription{Identity: "worker"},
+			observed:     map[Subject]bool{subj: true},
+			fingerprints: map[Subject]Fingerprint{subj: {MaximalClosure: "c", ToolchainContent: "tc", AdmissionPolicy: "ap"}},
+			observation: finalizedProcessObservation{
+				inputs: runtimeinput.State{OK: true, Manifest: "invalid-base64-manifest", Digest: strings.Repeat("a", 32)},
+			},
+		},
+	}
+	acc1, ok1 := u.Account()
+	acc2, ok2 := u.Account()
+	if !ok1 || !ok2 || acc1.Observation != IdentityObservation || acc2.Observation != IdentityObservation || !u.execution.observation.supportedDecoded {
+		t.Fatalf("Account caching = (%+v, %+v, decoded=%v)", acc1, acc2, u.execution.observation.supportedDecoded)
 	}
 }

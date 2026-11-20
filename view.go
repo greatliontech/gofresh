@@ -124,19 +124,30 @@ func (s *Session) observeSnapshot(ctx context.Context, subjects []Subject, modul
 		return nil, err
 	}
 
-	v := &Snapshot{
+	return newSnapshotShell(s, unique, requests, packages, moduleDir, kind, &first), nil
+}
+
+func newSnapshotShell(s *Session, subjects []Subject, requests []closure.Subject, packages []string, moduleDir string, kind Kind, facts *observationFacts) *Snapshot {
+	return &Snapshot{
 		session:              s,
-		subjects:             unique,
+		subjects:             subjects,
 		requests:             requests,
 		packages:             packages,
 		moduleDir:            moduleDir,
 		kind:                 kind,
-		facts:                &first,
-		observable:           make(map[Subject]closure.Observability, len(unique)),
-		capturedObserved:     make(map[Subject]bool, len(unique)),
-		attachedObservations: make(map[Subject]runtimeinput.State, len(unique)),
+		facts:                facts,
+		observable:           make(map[Subject]closure.Observability, len(subjects)),
+		capturedObserved:     make(map[Subject]bool, len(subjects)),
+		attachedObservations: make(map[Subject]runtimeinput.State, len(subjects)),
 	}
-	return v, nil
+}
+
+func (v *Snapshot) cloneShell(subjects []Subject, requests []closure.Subject, packages []string, facts *observationFacts) *Snapshot {
+	shell := newSnapshotShell(v.session, subjects, requests, packages, v.moduleDir, v.kind, facts)
+	shell.parent = v.parent
+	shell.runtime = v.runtime
+	shell.runtimeCurrent = v.runtimeCurrent
+	return shell
 }
 
 // observationFacts is one generation's immutable observation: derived
@@ -264,7 +275,7 @@ func (s *Session) observeView(ctx context.Context, subjects []Subject, requests 
 	scope := hasher.SetAnalysisScope(s.analysisScope(guards))
 	emitFactScopeViewHook(scope.Facts())
 	emitScanScopeViewHook(scope.Scan())
-	scan, source, cut, err := scanViewSubjectsWithLocalMemo(ctx, hasher, scope, s.buildFlags, s.analysisBudget, true, &s.localFacts, packages...)
+	scan, source, cut, err := scanViewSubjects(ctx, hasher, scope, s.buildFlags, s.analysisBudget, true, &s.localFacts, packages...)
 	if err != nil {
 		return observationFacts{}, err
 	}
@@ -732,34 +743,33 @@ func (v *Snapshot) purityMatches(recorded Fingerprint, subject Subject) PurityAu
 	return PurityAuthority{Recorded: purityAttribution(recorded.PurityAssertion), Current: purityAttribution(v.facts.purity[subject])}
 }
 
-func (v *Snapshot) currentRuntimeContext(ctx context.Context, recorded Fingerprint, shared map[string]runtimeinput.State) (runtimeinput.State, error) {
+func (v *Snapshot) currentRuntimeEndpoint(ctx context.Context, recorded Fingerprint, shared map[string]runtimeEval) (runtimeinput.State, error) {
 	if err := ctx.Err(); err != nil {
 		return runtimeinput.State{}, err
 	}
-	var rt runtimeinput.State
-	var err error
-	if recorded.RuntimeInputs != "" {
-		// An unevaluable runtime-input guard is absence of proof: Stale, never
-		// valid (REQ-guard-completeness).
-		current := v.runtimeCheck()
-		if cached, ok := shared[recorded.RuntimeInputs]; ok {
-			return cached, nil
+	if recorded.RuntimeInputs == "" {
+		return runtimeinput.State{}, nil
+	}
+	// An unevaluable runtime-input guard is absence of proof: Stale, never
+	// valid (REQ-guard-completeness).
+	if cached, ok := shared[recorded.RuntimeInputs]; ok {
+		return cached.state, nil
+	}
+	eval, err := v.evaluateRuntimeManifest(ctx, recorded.RuntimeInputs, v.evidenceRoot())
+	if err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return runtimeinput.State{}, contextErr
 		}
-		if rt, err = current(ctx, recorded.RuntimeInputs, v.evidenceRoot()); err != nil {
-			if contextErr := ctx.Err(); contextErr != nil {
-				return runtimeinput.State{}, contextErr
-			}
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return runtimeinput.State{}, err
-			}
-			rt = runtimeinput.State{}
-		}
-		if err := ctx.Err(); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return runtimeinput.State{}, err
 		}
-		shared[recorded.RuntimeInputs] = rt
+		eval = runtimeEval{hasMovers: v.runtimeCurrent == nil}
 	}
-	return rt, nil
+	if err := ctx.Err(); err != nil {
+		return runtimeinput.State{}, err
+	}
+	shared[recorded.RuntimeInputs] = eval
+	return eval.state, nil
 }
 
 // scopeSubjects derives one view scope — the deduplicated subjects,
@@ -905,37 +915,27 @@ func (v *Snapshot) Sibling(subjects []Subject) (*Snapshot, error) {
 	if len(observable) > 0 {
 		siblingCut = v.cutUnavailable
 	}
-	return &Snapshot{
-		session:   v.session,
-		parent:    rootParent,
-		runtime:   v.runtime,
-		subjects:  unique,
-		requests:  requests,
-		packages:  packages,
-		moduleDir: v.moduleDir,
-		kind:      v.kind,
-		facts: &observationFacts{
-			snapshot:             v.facts.snapshot,
-			reader:               v.facts.reader,
-			maximal:              maximal,
-			source:               v.facts.source,
-			guards:               v.facts.guards,
-			purity:               purity,
-			vouchDischarges:      vouchDischarges,
-			discharges:           discharges,
-			cut:                  cut,
-			sourceFiles:          sourceFiles,
-			sourceFilesBySubject: sourceFilesBySubject,
-			fileDigests:          v.facts.fileDigests,
-			testVariantLedgers:   ledgers,
-		},
-		observable:           observable,
-		capturedObserved:     capturedObserved,
-		applicabilityChecks:  applicabilityChecks,
-		attachedObservations: make(map[Subject]runtimeinput.State, len(unique)),
-		cutUnavailable:       siblingCut,
-		runtimeCurrent:       v.runtimeCurrent,
-	}, nil
+	shell := v.cloneShell(unique, requests, packages, &observationFacts{
+		snapshot:             v.facts.snapshot,
+		reader:               v.facts.reader,
+		maximal:              maximal,
+		source:               v.facts.source,
+		guards:               v.facts.guards,
+		purity:               purity,
+		vouchDischarges:      vouchDischarges,
+		discharges:           discharges,
+		cut:                  cut,
+		sourceFiles:          sourceFiles,
+		sourceFilesBySubject: sourceFilesBySubject,
+		fileDigests:          v.facts.fileDigests,
+		testVariantLedgers:   ledgers,
+	})
+	shell.parent = rootParent
+	shell.observable = observable
+	shell.capturedObserved = capturedObserved
+	shell.applicabilityChecks = applicabilityChecks
+	shell.cutUnavailable = siblingCut
+	return shell, nil
 }
 
 // guards composes the immutable capture without putting execution-specific facts
@@ -997,15 +997,11 @@ func (f *observationFacts) takeCut(other observationFacts, subject Subject) {
 // so attested and unattested sessions never serve each other's facts
 // (REQ-closure-dynamic-state-memo) — and the caller's vouch set.
 func (s *Session) analysisScope(guards guard.Guards) closure.AnalysisScope {
-	vouches := make([]string, 0, len(s.dynamicStateVouches))
-	for v := range s.dynamicStateVouches {
-		vouches = append(vouches, v)
-	}
 	return closure.AnalysisScope{
 		ProofStrategy: ObservationRTA, FactStrategy: DynamicStateStrategy,
 		Toolchain: guards.Toolchain, BuildConfig: guards.BuildConfig,
 		SingleSubject: s.executionModel.singleSubject(), PackageProcess: s.executionModel.packageProcess(),
-		Vouches: vouches,
+		Vouches: slices.Clone(s.sortedVouches),
 	}
 }
 

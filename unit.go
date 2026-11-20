@@ -595,9 +595,11 @@ func (u *Unit) Account() (ProcessAccount, bool) {
 // finalizedProcessObservation holds only the facts that cannot be recovered from
 // registration and submission. It never retains a sealed producing observation.
 type finalizedProcessObservation struct {
-	inputs      runtimeinput.State
-	reason      string
-	attribution string
+	inputs           runtimeinput.State
+	reason           string
+	attribution      string
+	supported        map[string]bool
+	supportedDecoded bool
 }
 
 func (u *Unit) account() (ProcessAccount, bool) {
@@ -621,7 +623,11 @@ func (u *Unit) account() (ProcessAccount, bool) {
 			if len(x.observed) == 0 {
 				disposition = IdentityObservation
 			} else {
-				supported := runtimeinput.OutcomeSupportSet(x.observation.inputs.Manifest)
+				if !x.observation.supportedDecoded {
+					x.observation.supported = runtimeinput.OutcomeSupportSet(x.observation.inputs.Manifest)
+					x.observation.supportedDecoded = true
+				}
+				supported := x.observation.supported
 				for subject := range x.observed {
 					// Attachment adds only runtime inputs and their digest; neither
 					// is part of the prepared outcome-subject identity.

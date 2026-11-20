@@ -50,11 +50,14 @@ type CheckedCandidate struct {
 }
 
 // recordCheck separates per-record historical policy from the subject-shared
-// current proof inventory. A prepared refusal needs no runtime observation.
+// current proof inventory. A prepared refusal needs no runtime observation; a
+// terminalStale record still closes its runtime-input interval endpoints while
+// skipping proof selection, mover attribution, and motion re-judgment.
 type recordCheck struct {
 	Candidate
-	observed bool
-	refusal  Verdict
+	observed      bool
+	terminalStale Verdict
+	refusal       Verdict
 }
 
 type recordResult struct {
@@ -105,9 +108,14 @@ func (v *Snapshot) prepareCandidates(candidates []Candidate) error {
 }
 
 // observeRecordInputs owns one endpoint cache, including normalized fail-closed
-// evaluation errors. No cache survives this call or crosses a runtime binding.
-func (v *Snapshot) observeRecordInputs(ctx context.Context, records []recordCheck, results []recordResult) ([]runtimeinput.State, error) {
-	shared := map[string]runtimeinput.State{}
+// evaluation errors and single-pass movers. No cache survives this call or
+// crosses a runtime binding.
+func (v *Snapshot) observeRecordInputs(ctx context.Context, records []recordCheck, results []recordResult) (runtimeEndpoint, error) {
+	ep := runtimeEndpoint{
+		states:     make([]runtimeinput.State, len(records)),
+		byManifest: map[string]runtimeEval{},
+		moverMemo:  map[string][]string{},
+	}
 	if v.session != nil && v.session.progress != nil {
 		for i, record := range records {
 			if results[i].evaluated && record.Recorded.RuntimeInputs != "" {
@@ -116,25 +124,28 @@ func (v *Snapshot) observeRecordInputs(ctx context.Context, records []recordChec
 			}
 		}
 	}
-	states := make([]runtimeinput.State, len(records))
 	for i, record := range records {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return runtimeEndpoint{}, err
 		}
 		if results[i].evaluated {
 			var err error
-			states[i], err = v.currentRuntimeContext(ctx, record.Recorded, shared)
+			ep.states[i], err = v.currentRuntimeEndpoint(ctx, record.Recorded, ep.byManifest)
 			if err != nil {
-				return nil, err
+				return runtimeEndpoint{}, err
 			}
 		}
 	}
-	return states, ctx.Err()
+	return ep, ctx.Err()
 }
 
 // runtimeMotion preserves demonstrated staleness even if an input returns to its
 // recorded value. A newly deciding refusal starts with no accepted authority.
 func (v *Snapshot) runtimeMotion(ctx context.Context, candidate Candidate, prior Verdict, before, after runtimeinput.State) Verdict {
+	return v.runtimeMotionAt(ctx, candidate, prior, before, after, nil)
+}
+
+func (v *Snapshot) runtimeMotionAt(ctx context.Context, candidate Candidate, prior Verdict, before, after runtimeinput.State, ep *runtimeEndpoint) Verdict {
 	if candidate.Recorded.RuntimeInputs == "" || before == after || prior.Status == Stale {
 		return prior
 	}
@@ -142,25 +153,38 @@ func (v *Snapshot) runtimeMotion(ctx context.Context, candidate Candidate, prior
 	if !failed {
 		moved = refusal(Stale, RuntimeInputsCause, Changed, "runtimeinputs")
 	}
-	return v.judgmentFor(candidate.Subject, v.withMovedInputs(ctx, moved, candidate.Recorded))
+	return v.judgmentFor(candidate.Subject, v.withEndpointMovedInputs(ctx, moved, candidate.Recorded, ep))
 }
 
 // checkRecords is the one ordered checking kernel. Callers prepare the whole
 // batch before entering. Current proofs are subject-scoped; admission, runtime
 // spans, selected obligations and answers are always indexed by record.
 func (v *Snapshot) checkRecords(ctx context.Context, records []recordCheck, deferClose, retain bool) (results []recordResult, opErr error) {
+	results, _, _, opErr = v.checkRecordsWithEndpoints(ctx, records, deferClose, retain)
+	return results, opErr
+}
+
+func (v *Snapshot) checkRecordsWithEndpoints(ctx context.Context, records []recordCheck, deferClose, retain bool) (results []recordResult, before, after runtimeEndpoint, opErr error) {
 	ctx, done := v.session.beginOperation(ctx)
 	defer done(&opErr)
 	if ctx == nil {
-		return nil, errors.New("gofresh: nil checking context")
+		return nil, runtimeEndpoint{}, runtimeEndpoint{}, errors.New("gofresh: nil checking context")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, runtimeEndpoint{}, runtimeEndpoint{}, err
 	}
 	results = make([]recordResult, len(records))
 	positives := make([]ObservationAuthority, len(records))
+	var outcomeSets map[string]map[string]bool
+	singleSubject := v.session != nil && v.session.executionModel.singleSubject()
 	hasRuntime := false
 	for i, record := range records {
+		if record.terminalStale.Status != "" {
+			results[i].evaluated = true
+			results[i].verdict = record.terminalStale
+			hasRuntime = hasRuntime || record.Recorded.RuntimeInputs != ""
+			continue
+		}
 		cl := v.facts.closure(record.Subject)
 		verdict, refused := record.refusal, record.refusal.Status != ""
 		if !refused {
@@ -173,25 +197,40 @@ func (v *Snapshot) checkRecords(ctx context.Context, records []recordCheck, defe
 		results[i].evaluated = true
 		hasRuntime = hasRuntime || record.Recorded.RuntimeInputs != ""
 		if record.observed {
-			positives[i] = admittedObservationForModel(record.Recorded, record.Subject, cl, v.session != nil && v.session.executionModel.singleSubject())
+			positives[i] = admittedObservationWithSupport(record.Recorded, record.Subject, cl, singleSubject, func(target string) bool {
+				encoded := record.Recorded.RuntimeInputs
+				if encoded == "" {
+					return false
+				}
+				if outcomeSets == nil {
+					outcomeSets = map[string]map[string]bool{}
+				}
+				supported, cached := outcomeSets[encoded]
+				if !cached {
+					supported = runtimeinput.OutcomeSupportSet(encoded)
+					outcomeSets[encoded] = supported
+				}
+				return supported[target]
+			})
 		}
 	}
 	emitRuntimeWindowViewHook()
-	before, err := v.observeRecordInputs(ctx, records, results)
+	var err error
+	before, err = v.observeRecordInputs(ctx, records, results)
 	if err != nil {
-		return nil, err
+		return nil, runtimeEndpoint{}, runtimeEndpoint{}, err
 	}
 	selected := make([]bool, len(records))
 	seen := map[Subject]bool{}
 	var proofs []Subject
 	for i, record := range records {
-		if !results[i].evaluated || !record.observed {
+		if !results[i].evaluated || record.terminalStale.Status != "" || !record.observed {
 			continue
 		}
 		cl, rec := v.facts.closure(record.Subject), record.Recorded
 		pure := v.purityMatches(rec, record.Subject)
-		ordinary := decideAfterClosure(rec, cl, v.guards(), before[i], v.kind, pure)
-		if ordinary.Status == Unverifiable && positives[i].accepted() && rec.InertTestVariantApplicability != (InertTestVariantApplicability{}) && decideAfterClosureObserved(rec, cl, v.guards(), before[i], v.kind, pure, positives[i]).Status == Valid {
+		ordinary := decideAfterClosure(rec, cl, v.guards(), before.states[i], v.kind, pure)
+		if ordinary.Status == Unverifiable && positives[i].accepted() && rec.InertTestVariantApplicability != (InertTestVariantApplicability{}) && decideAfterClosureObserved(rec, cl, v.guards(), before.states[i], v.kind, pure, positives[i]).Status == Valid {
 			selected[i] = true
 			if !seen[record.Subject] {
 				seen[record.Subject] = true
@@ -200,10 +239,10 @@ func (v *Snapshot) checkRecords(ctx context.Context, records []recordCheck, defe
 		}
 	}
 	if err := v.ensureObservable(ctx, proofs); err != nil {
-		return nil, err
+		return nil, runtimeEndpoint{}, runtimeEndpoint{}, err
 	}
 	for i, record := range records {
-		if !results[i].evaluated {
+		if !results[i].evaluated || record.terminalStale.Status != "" {
 			continue
 		}
 		if selected[i] {
@@ -224,27 +263,29 @@ func (v *Snapshot) checkRecords(ctx context.Context, records []recordCheck, defe
 		}
 		cl, rec := v.facts.closure(record.Subject), record.Recorded
 		pure := v.purityMatches(rec, record.Subject)
-		verdict := decideAfterClosure(rec, cl, v.guards(), before[i], v.kind, pure)
+		verdict := decideAfterClosure(rec, cl, v.guards(), before.states[i], v.kind, pure)
 		if record.observed {
-			verdict = decideAfterClosureObserved(rec, cl, v.guards(), before[i], v.kind, pure, positives[i])
+			verdict = decideAfterClosureObserved(rec, cl, v.guards(), before.states[i], v.kind, pure, positives[i])
 		}
-		results[i].verdict = v.withMovedInputs(ctx, verdict, rec)
+		results[i].verdict = v.withEndpointMovedInputs(ctx, verdict, rec, &before)
 	}
-	after, err := v.observeRecordInputs(ctx, records, results)
+	after, err = v.observeRecordInputs(ctx, records, results)
 	if err != nil {
-		return nil, err
+		return nil, runtimeEndpoint{}, runtimeEndpoint{}, err
 	}
 	if err := v.closeCheckWindow(ctx, hasRuntime, deferClose); err != nil {
-		return nil, err
+		return nil, runtimeEndpoint{}, runtimeEndpoint{}, err
 	}
 	for i, record := range records {
 		result := &results[i]
-		result.before, result.after = before[i], after[i]
-		result.verdict = v.judgmentFor(record.Subject, v.runtimeMotion(ctx, record.Candidate, result.verdict, before[i], after[i]))
-		result.selected = selected[i] && positives[i].CurrentApplicability && result.verdict.Status == Valid
-		if retain && result.selected {
-			if err := v.retainApplicabilityCheck(ctx, record.Recorded, record.Subject, true); err != nil {
-				return nil, err
+		result.before, result.after = before.states[i], after.states[i]
+		if record.terminalStale.Status == "" {
+			result.verdict = v.judgmentFor(record.Subject, v.runtimeMotionAt(ctx, record.Candidate, result.verdict, before.states[i], after.states[i], &after))
+			result.selected = selected[i] && positives[i].CurrentApplicability && result.verdict.Status == Valid
+			if retain && result.selected {
+				if err := v.retainApplicabilityCheck(ctx, record.Recorded, record.Subject, true); err != nil {
+					return nil, runtimeEndpoint{}, runtimeEndpoint{}, err
+				}
 			}
 		}
 		if trace.AnyEnabled() {
@@ -259,7 +300,7 @@ func (v *Snapshot) checkRecords(ctx context.Context, records []recordCheck, defe
 			}
 		}
 	}
-	return results, ctx.Err()
+	return results, before, after, ctx.Err()
 }
 
 func (v *Snapshot) checkMap(ctx context.Context, recorded map[Subject]Fingerprint, observed, deferClose bool) (map[Subject]Verdict, error) {
@@ -522,16 +563,37 @@ func (u *CheckingUnit) close(ctx context.Context) ([]CheckedCandidate, error) {
 	if err != nil {
 		return nil, err
 	}
+	checked, unavailable, err := u.closeSlots(ctx, current)
+	if err != nil {
+		return nil, err
+	}
+	if err := u.view.closeValidationReobservation(ctx, current, unavailable); err != nil {
+		return nil, err
+	}
+	return checked, nil
+}
+
+func (u *CheckingUnit) closeSlots(ctx context.Context, current *Snapshot) ([]CheckedCandidate, error, error) {
 	records := make([]recordCheck, len(u.slots))
+	staleSlots := 0
 	for i, slot := range u.slots {
 		records[i] = slot.record
 		if !slot.result.evaluated {
 			records[i].refusal = slot.result.verdict
+		} else if slot.result.verdict.Status == Stale {
+			records[i].terminalStale = slot.result.verdict
+			staleSlots++
 		}
 	}
-	results, err := current.checkRecords(ctx, records, true, false)
+	if staleSlots > 0 && trace.Enabled(ctx, trace.DomainSession, u.view.moduleDir) {
+		trace.Emit(ctx, trace.DomainSession, "checking.close.fast_stale", u.view.moduleDir,
+			trace.Int("total_slots", len(u.slots)),
+			trace.Int("terminal_stale_slots", staleSlots),
+		)
+	}
+	results, before, after, err := current.checkRecordsWithEndpoints(ctx, records, true, false)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var unavailable error
 	checked := make([]CheckedCandidate, len(u.slots))
@@ -540,8 +602,8 @@ func (u *CheckingUnit) close(ctx context.Context) ([]CheckedCandidate, error) {
 		if slot.result.verdict.Status == Stale {
 			result.verdict = slot.result.verdict
 		} else if slot.result.evaluated {
-			result.verdict = current.runtimeMotion(ctx, slot.record.Candidate, result.verdict, slot.result.before, result.before)
-			result.verdict = current.runtimeMotion(ctx, slot.record.Candidate, result.verdict, slot.result.after, result.after)
+			result.verdict = current.runtimeMotionAt(ctx, slot.record.Candidate, result.verdict, slot.result.before, result.before, &before)
+			result.verdict = current.runtimeMotionAt(ctx, slot.record.Candidate, result.verdict, slot.result.after, result.after, &after)
 		}
 		if (slot.extension && slot.result.verdict.Status == Valid || slot.result.selected) && result.verdict.Status != Valid {
 			if result.verdict.Status == Unverifiable && result.unavailable != nil {
@@ -549,16 +611,13 @@ func (u *CheckingUnit) close(ctx context.Context) ([]CheckedCandidate, error) {
 					unavailable = result.unavailable
 				}
 			} else {
-				return nil, fmt.Errorf("%w: applicability for candidate %d (%s.%s): %s", ErrViewChanged, i, slot.record.Subject.Package, slot.record.Subject.Symbol, result.verdict.Reason)
+				return nil, nil, fmt.Errorf("%w: applicability for candidate %d (%s.%s): %s", ErrViewChanged, i, slot.record.Subject.Package, slot.record.Subject.Symbol, result.verdict.Reason)
 			}
 		}
 		slot.result = result
 		checked[i] = slot.checked(i)
 	}
-	if err := u.view.closeValidationReobservation(ctx, current, unavailable); err != nil {
-		return nil, err
-	}
-	return checked, nil
+	return checked, unavailable, nil
 }
 
 // CheckBatchWithLedgers checks a batch of candidates and, for any candidate

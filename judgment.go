@@ -175,6 +175,12 @@ func admittedObservation(rec Fingerprint, subject Subject, cl closure.Closure) O
 }
 
 func admittedObservationForModel(rec Fingerprint, subject Subject, cl closure.Closure, singleSubject bool) ObservationAuthority {
+	return admittedObservationWithSupport(rec, subject, cl, singleSubject, func(target string) bool {
+		return runtimeinput.HasOutcomeSupport(rec.RuntimeInputs, target)
+	})
+}
+
+func admittedObservationWithSupport(rec Fingerprint, subject Subject, cl closure.Closure, singleSubject bool, hasOutcomeSupport func(string) bool) ObservationAuthority {
 	compatible, effectFree, reqSingleSubject := compatibleObservationProofFull(rec, subject)
 	if !compatible || rec.AdmissionPolicy != cl.AdmissionPolicy || !rec.ObservationProof.Observable {
 		return ObservationAuthority{}
@@ -182,7 +188,7 @@ func admittedObservationForModel(rec Fingerprint, subject Subject, cl closure.Cl
 	if reqSingleSubject && !singleSubject {
 		return ObservationAuthority{}
 	}
-	if runtimeinput.HasOutcomeSupport(rec.RuntimeInputs, outcomeSubject(rec, subject)) {
+	if hasOutcomeSupport(outcomeSubject(rec, subject)) {
 		return ObservationAuthority{Assertion: rec.ObservationAssertion, ProofStrategy: rec.ObservationProof.Strategy, OutcomeMethod: outcome.Method, SingleSubject: reqSingleSubject}
 	}
 	if effectFree {

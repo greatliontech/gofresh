@@ -42,13 +42,20 @@ type pathClassifier struct {
 }
 
 func newPathClassifier(moduleDir string, cfg testLogConfig) (pathClassifier, error) {
+	resolvedModule, resolvedOK := resolveModuleRootStatus(moduleDir)
+	return newPathClassifierWithModuleRoot(moduleDir, resolvedModule, resolvedOK, cfg)
+}
+
+func newPathClassifierWithModuleRoot(moduleDir, resolvedModule string, moduleResolvedOK bool, cfg testLogConfig) (pathClassifier, error) {
 	// A module tree lying inside a declared ephemeral root does not
 	// surrender its identities: module-relative reads are content-bearing
 	// surface, never external temp machinery, so they keep their records
 	// and the temp admissions never fire on them — declaring the system
 	// temp directory stays sound for a repository checked out beneath it
 	// (REQ-inputs-ephemeral-root).
-	resolvedModule := resolveModuleRoot(moduleDir)
+	if resolvedModule == "" {
+		resolvedModule, moduleResolvedOK = resolveModuleRootStatus(moduleDir)
+	}
 	ephemeralRoots, err := resolveEphemeralRoots(cfg.ephemeralRoots, moduleDir, resolvedModule)
 	if err != nil {
 		return pathClassifier{}, err
@@ -59,7 +66,7 @@ func newPathClassifier(moduleDir string, cfg testLogConfig) (pathClassifier, err
 		cfg:             cfg,
 		guardRoots:      resolveGuardRoots(cfg.guardRoots),
 		ephemeralRoots:  ephemeralRoots,
-		ephemera:        cfg.bracket.ephemera(cfg.scratchNamespaces),
+		ephemera:        cfg.bracket.ephemeraWithModuleRoot(cfg.scratchNamespaces, resolvedModule, moduleResolvedOK),
 		guardMemo:       map[string]bool{},
 		scratchMemo:     map[string]bool{},
 		ephemeraMemo:    map[string]bool{},
@@ -323,7 +330,7 @@ func FileInputEligibility(ctx context.Context, treeRoot, pkgDir, file string, in
 	if err != nil {
 		return FileEligibility{}, err
 	}
-	classifier, err := newPathClassifier(root, cfg)
+	classifier, err := newPathClassifierWithModuleRoot(root, root, true, cfg)
 	if err != nil {
 		return FileEligibility{}, err
 	}

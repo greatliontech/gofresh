@@ -4,7 +4,6 @@ package gofresh
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/gotool"
@@ -32,11 +31,11 @@ func TestCompleteBuildDescriptionIdentity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		data, err := json.Marshal(values)
+		snapshot, err := gotool.EnvSnapshotFromValues(values)
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := completeBuildEnvironment(ctx, &gotool.EnvSnapshot{JSON: data}, dir, normalized)
+		got, err := completeBuildEnvironment(ctx, snapshot, dir, normalized)
 		if err != nil {
 			t.Fatal(err)
 		}

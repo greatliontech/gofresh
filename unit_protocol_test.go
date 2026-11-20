@@ -594,13 +594,13 @@ func (v *Snapshot) observeRuntimeInputs(ctx context.Context, recorded map[Subjec
 		records[i].Candidate = candidate
 		results[i].evaluated = true
 	}
-	states, err := v.observeRecordInputs(ctx, records, results)
+	endpoint, err := v.observeRecordInputs(ctx, records, results)
 	if err != nil {
 		return nil, err
 	}
 	observed := make(map[Subject]runtimeinput.State, len(candidates))
 	for i, candidate := range candidates {
-		observed[candidate.Subject] = states[i]
+		observed[candidate.Subject] = endpoint.states[i]
 	}
 	return observed, nil
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/jsonrecord"
 	"github.com/greatliontech/gofresh/internal/outcome"
+	"github.com/greatliontech/gofresh/internal/trace"
 )
 
 // Version 4 separates demonstrated producing-span movement from inferred
@@ -93,6 +94,23 @@ func Current(ctx context.Context, encoded, moduleDir string, env []string) (Stat
 	return currentWithNormalizedEnvContext(ctx, encoded, moduleDir, normalized)
 }
 
+// CurrentWithMovers recomputes the runtime-input digest and moved-input
+// attributions for an encoded manifest in a single pass under moduleDir and
+// env, with caller-owned cancellation.
+func CurrentWithMovers(ctx context.Context, encoded, moduleDir string, env []string) (State, []string, error) {
+	if ctx == nil {
+		return State{OK: false}, nil, errors.New("runtimeinputs: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return State{OK: false}, nil, err
+	}
+	normalized, err := normalizeEnvironment(env)
+	if err != nil {
+		return State{OK: false}, nil, err
+	}
+	return currentWithMoversAndNormalizedEnvContext(ctx, encoded, moduleDir, normalized)
+}
+
 func normalizeEnvironment(env []string) ([]string, error) {
 	normalized, err := gotool.NormalizeEnv(env)
 	if err != nil {
@@ -102,20 +120,37 @@ func normalizeEnvironment(env []string) ([]string, error) {
 }
 
 func currentWithNormalizedEnvContext(ctx context.Context, encoded, moduleDir string, env []string) (State, error) {
-	state, _, err := currentAndManifestWithNormalizedEnv(ctx, encoded, moduleDir, env)
+	state, _, _, err := currentManifestAndMovers(ctx, encoded, moduleDir, "", env, false)
 	return state, err
 }
 
-func currentAndManifestWithNormalizedEnv(ctx context.Context, encoded, moduleDir string, env []string) (State, manifest, error) {
+func currentWithMoversAndNormalizedEnvContext(ctx context.Context, encoded, moduleDir string, env []string) (State, []string, error) {
+	state, _, movers, err := currentManifestAndMovers(ctx, encoded, moduleDir, "", env, true)
+	return state, movers, err
+}
+
+func currentAndManifestWithModuleRoot(ctx context.Context, encoded, moduleDir, moduleRoot string, env []string) (State, manifest, error) {
+	state, m, _, err := currentManifestAndMovers(ctx, encoded, moduleDir, moduleRoot, env, false)
+	return state, m, err
+}
+
+func currentManifestAndMovers(ctx context.Context, encoded, moduleDir, moduleRoot string, env []string, computeMovers bool) (State, manifest, []string, error) {
 	if err := ctx.Err(); err != nil {
-		return State{OK: false}, manifest{}, err
+		return State{OK: false}, manifest{}, nil, err
 	}
 	m, err := decode(encoded)
 	if err != nil {
-		return State{OK: false}, manifest{}, err
+		return State{OK: false}, manifest{}, nil, err
 	}
-	state, err := stateFromManifest(ctx, m, moduleDir, env)
-	return state, m, err
+	pathUnverifiable, pathReason, movers, err := populateManifestDigestsWithModuleRoot(ctx, &m, moduleDir, moduleRoot, env, true, computeMovers)
+	if err != nil {
+		return State{OK: false}, manifest{}, nil, err
+	}
+	state, err := finalizeSortedManifestState(m, pathUnverifiable, pathReason)
+	if err != nil {
+		return State{OK: false}, manifest{}, nil, err
+	}
+	return state, m, movers, nil
 }
 
 // envEntryDigest digests one environment input: presence and value, names
@@ -138,43 +173,56 @@ func pathEntryDigest(ctx context.Context, id pathID, path, moduleRoot string, me
 	return hex.EncodeToString(h.Sum(nil))[:32], unverifiable, reason, nil
 }
 
-// populateManifestDigests computes every input's current digest in canonical
-// order and writes it into m's entries. Separating digest computation from
-// finalizeManifestState allows fromTestLog to update m.BracketMoved and
-// m.Unverifiable after bracket revalidation without re-reading any input after
-// the bracket closes (REQ-inputs-value-binding).
-func populateManifestDigests(ctx context.Context, m *manifest, moduleDir string, env []string) (bool, string, error) {
+// populateManifestDigestsWithModuleRoot computes every input's current digest
+// in canonical order, optionally recording moved-input attributions against
+// non-empty prior digests in the same pass, and writes the new digests into m.
+// Separating digest computation from finalizeManifestState allows fromTestLog
+// to update m.BracketMoved and m.Unverifiable after bracket revalidation
+// without re-reading any input after the bracket closes (REQ-inputs-value-binding).
+func populateManifestDigestsWithModuleRoot(ctx context.Context, m *manifest, moduleDir, moduleRoot string, env []string, alreadySorted, computeMovers bool) (bool, string, []string, error) {
 	// The fold runs in canonical order regardless of the caller's collection
-	// order — encode re-sorts anyway, and a fold that disagreed with the
-	// encoded order would silently decouple digest from manifest.
-	sortManifest(m)
-	moduleDir, err := filepath.Abs(moduleDir)
-	if err != nil {
-		return false, "", err
+	// order — a fold that disagreed with the encoded order would silently
+	// decouple digest from manifest.
+	if !alreadySorted {
+		sortManifest(m)
 	}
-	moduleRoot := resolveModuleRoot(moduleDir)
+	absDir, err := filepath.Abs(moduleDir)
+	if err != nil {
+		return false, "", nil, fmt.Errorf("runtimeinputs: module dir: %w", err)
+	}
+	if moduleRoot == "" {
+		moduleRoot = resolveModuleRoot(absDir)
+	}
+	var moved []string
 	for i, entry := range m.Env {
 		if err := ctx.Err(); err != nil {
-			return false, "", err
+			return false, "", nil, err
 		}
-		m.Env[i].Digest = envEntryDigest(env, entry.Name)
+		d := envEntryDigest(env, entry.Name)
+		if computeMovers && entry.Digest != "" && d != entry.Digest {
+			moved = append(moved, "env "+entry.Name)
+		}
+		m.Env[i].Digest = d
 	}
 	var unverifiable bool
 	var reason string
 	for i, entry := range m.Paths {
 		if err := ctx.Err(); err != nil {
-			return false, "", err
+			return false, "", nil, err
 		}
-		path, err := materializePath(moduleDir, entry.pathID)
+		path, err := materializePath(absDir, entry.pathID)
 		if err != nil {
-			return false, "", err
+			return false, "", nil, err
 		}
 		// Manifest hashing never filters: exclusion is per identity, never per
 		// content (REQ-inputs-exclusions), so a recorded directory identity
 		// digests everything its hash walks.
 		d, pathUnverifiable, pathReason, err := pathEntryDigest(ctx, entry.pathID, path, moduleRoot, entry.Metadata)
 		if err != nil {
-			return false, "", err
+			return false, "", nil, err
+		}
+		if computeMovers && entry.Digest != "" && d != entry.Digest {
+			moved = append(moved, "path "+entry.displayPath())
 		}
 		m.Paths[i].Digest = d
 		if pathUnverifiable {
@@ -185,21 +233,35 @@ func populateManifestDigests(ctx context.Context, m *manifest, moduleDir string,
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return false, "", err
+		return false, "", nil, err
 	}
-	return unverifiable, reason, nil
+	if trace.Enabled(ctx, trace.DomainRuntimeInput, absDir) {
+		trace.Emit(ctx, trace.DomainRuntimeInput, "manifest.eval", absDir,
+			trace.Int("env_count", len(m.Env)),
+			trace.Int("path_count", len(m.Paths)),
+			trace.Int("moved_count", len(moved)),
+			trace.Strings("movers", moved),
+		)
+	}
+	return unverifiable, reason, moved, nil
 }
 
 // finalizeManifestState encodes m with its already-populated entry digests and
-// computes the combined manifest digest in memory.
+// computes the combined manifest digest in memory. Only m.Unverifiable may gain
+// clauses between populateManifestDigestsWithModuleRoot and finalization.
 func finalizeManifestState(m manifest, pathUnverifiable bool, pathReason string) (State, error) {
-	sortManifest(&m)
+	sort.Strings(m.Unverifiable)
+	m.Unverifiable = compact(m.Unverifiable)
+	return finalizeSortedManifestState(m, pathUnverifiable, pathReason)
+}
+
+func finalizeSortedManifestState(m manifest, pathUnverifiable bool, pathReason string) (State, error) {
 	unverifiable := len(m.Unverifiable) > 0 || pathUnverifiable
 	reason := firstReason(m.Unverifiable)
 	if reason == "" {
 		reason = pathReason
 	}
-	encoded, err := encode(m)
+	encoded, err := encodeSorted(m)
 	if err != nil {
 		return State{}, err
 	}
@@ -216,15 +278,19 @@ func finalizeManifestState(m manifest, pathUnverifiable bool, pathReason string)
 // stateFromManifest computes every input's current digest, writes it into the
 // manifest's entries, folds the combined digest over identities and entry
 // digests, and encodes — construction and check share it, so a recorded
-// manifest whose inputs are unmoved re-encodes byte-identically
+// manifest whose inputs are unmoved re-encodes byte-identical
 // (REQ-inputs-guard) and per-input attribution falls out of comparing a
 // recorded entry's digest with the recomputed one.
 func stateFromManifest(ctx context.Context, m manifest, moduleDir string, env []string) (State, error) {
-	pathUnverifiable, pathReason, err := populateManifestDigests(ctx, &m, moduleDir, env)
+	return stateFromManifestWithModuleRoot(ctx, m, moduleDir, "", env)
+}
+
+func stateFromManifestWithModuleRoot(ctx context.Context, m manifest, moduleDir, moduleRoot string, env []string) (State, error) {
+	pathUnverifiable, pathReason, _, err := populateManifestDigestsWithModuleRoot(ctx, &m, moduleDir, moduleRoot, env, false, false)
 	if err != nil {
 		return State{OK: false}, err
 	}
-	return finalizeManifestState(m, pathUnverifiable, pathReason)
+	return finalizeSortedManifestState(m, pathUnverifiable, pathReason)
 }
 
 func manifestDigest(m manifest) string {
@@ -296,6 +362,10 @@ func compact[T comparable](values []T) []T {
 
 func encode(m manifest) (string, error) {
 	sortManifest(&m)
+	return encodeSorted(m)
+}
+
+func encodeSorted(m manifest) (string, error) {
 	if err := validateManifest(m); err != nil {
 		return "", err
 	}
@@ -368,6 +438,9 @@ func MovedInputs(ctx context.Context, encoded, moduleDir string, env []string) (
 	if ctx == nil {
 		return nil, errors.New("runtimeinputs: nil context")
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	m, err := decode(encoded)
 	if err != nil {
 		return nil, err
@@ -376,37 +449,8 @@ func MovedInputs(ctx context.Context, encoded, moduleDir string, env []string) (
 	if err != nil {
 		return nil, err
 	}
-	abs, err := filepath.Abs(moduleDir)
-	if err != nil {
-		return nil, fmt.Errorf("runtimeinputs: module dir: %w", err)
-	}
-	moduleRoot := resolveModuleRoot(abs)
-	var moved []string
-	for _, entry := range m.Env {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if envEntryDigest(normalized, entry.Name) != entry.Digest {
-			moved = append(moved, "env "+entry.Name)
-		}
-	}
-	for _, entry := range m.Paths {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		path, err := materializePath(abs, entry.pathID)
-		if err != nil {
-			return nil, err
-		}
-		d, _, _, err := pathEntryDigest(ctx, entry.pathID, path, moduleRoot, entry.Metadata)
-		if err != nil {
-			return nil, err
-		}
-		if d != entry.Digest {
-			moved = append(moved, "path "+entry.displayPath())
-		}
-	}
-	return moved, nil
+	_, _, moved, err := populateManifestDigestsWithModuleRoot(ctx, &m, moduleDir, "", normalized, true, true)
+	return moved, err
 }
 
 // Paths returns every path identity in a canonical manifest as an absolute path,
@@ -565,5 +609,8 @@ func validatePathID(id pathID) error {
 }
 
 func fprintf(w io.Writer, format string, args ...any) {
+	if w == nil {
+		return
+	}
 	_, _ = fmt.Fprintf(w, format, args...)
 }

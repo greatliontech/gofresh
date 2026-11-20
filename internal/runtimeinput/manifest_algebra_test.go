@@ -3,6 +3,7 @@ package runtimeinput
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io/fs"
 	"math/rand"
@@ -16,8 +17,11 @@ import (
 	"strings"
 	"testing"
 	"testing/quick"
+	"time"
 
 	"github.com/greatliontech/gofresh/internal/outcome"
+	"github.com/greatliontech/gofresh/internal/trace"
+	"pgregory.net/rapid"
 )
 
 // adoptTestState re-evaluates a manifest of identities against the current
@@ -1581,4 +1585,277 @@ func TestScratchNamespaceBoundaryAndSymlinkEscapes(t *testing.T) {
 			t.Fatalf("obs.Attribution = %q, want moved member %s", obs.Attribution, wantQuoted)
 		}
 	})
+}
+
+func TestCurrentWithMoversAndAdoptSinglePassProperty(t *testing.T) {
+	if _, _, err := CurrentWithMovers(nil, "", t.TempDir(), nil); err == nil {
+		t.Fatal("CurrentWithMovers accepted nil context")
+	}
+	if _, err := MovedInputs(nil, "", t.TempDir(), nil); err == nil {
+		t.Fatal("MovedInputs accepted nil context")
+	}
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := CurrentWithMovers(cancelledCtx, "", t.TempDir(), nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("CurrentWithMovers cancelled = %v, want context.Canceled", err)
+	}
+	if _, err := MovedInputs(cancelledCtx, "", t.TempDir(), nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("MovedInputs cancelled = %v, want context.Canceled", err)
+	}
+
+	rapid.Check(t, func(rt *rapid.T) {
+		root := t.TempDir()
+		modDir := filepath.Join(root, "mod")
+		extDir := filepath.Join(root, "ext")
+		if err := os.MkdirAll(filepath.Join(modDir, "data"), 0o755); err != nil {
+			rt.Fatal(err)
+		}
+		if err := os.MkdirAll(extDir, 0o755); err != nil {
+			rt.Fatal(err)
+		}
+
+		envNames := []string{"ALPHA_CFG", "BETA_CFG", "GAMMA_CFG"}
+		var initEnv []string
+		var logLines []string
+		for _, name := range envNames {
+			if rapid.Bool().Draw(rt, "obs_"+name) {
+				logLines = append(logLines, "getenv "+name)
+			}
+			if rapid.Bool().Draw(rt, "set_"+name) {
+				initEnv = append(initEnv, name+"="+rapid.StringMatching(`[a-z0-9]{1,5}`).Draw(rt, "val_"+name))
+			}
+		}
+
+		type fileSpec struct {
+			relPath  string
+			absPath  string
+			exists   bool
+			metadata bool
+		}
+		specs := []fileSpec{
+			{relPath: "data/open.txt", absPath: filepath.Join(modDir, "data", "open.txt"), exists: rapid.Bool().Draw(rt, "open_exists"), metadata: false},
+			{relPath: "data/stat.txt", absPath: filepath.Join(modDir, "data", "stat.txt"), exists: rapid.Bool().Draw(rt, "stat_exists"), metadata: true},
+			{absPath: filepath.Join(extDir, "ext.txt"), exists: rapid.Bool().Draw(rt, "ext_exists"), metadata: rapid.Bool().Draw(rt, "ext_meta")},
+		}
+		baseTime := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+		for i, sp := range specs {
+			if sp.exists {
+				if err := os.WriteFile(sp.absPath, []byte(fmt.Sprintf("v1-%d", i)), 0o644); err != nil {
+					rt.Fatal(err)
+				}
+				if err := os.Chtimes(sp.absPath, baseTime, baseTime); err != nil {
+					rt.Fatal(err)
+				}
+			}
+			if rapid.Bool().Draw(rt, fmt.Sprintf("record_file_%d", i)) {
+				target := sp.absPath
+				if sp.relPath != "" {
+					target = sp.relPath
+				}
+				op := "open"
+				if sp.metadata {
+					op = "stat"
+				}
+				logLines = append(logLines, op+" "+target)
+			}
+		}
+
+		bracket, err := CaptureBracket(context.Background(), modDir, []string{"data", extDir})
+		if err != nil {
+			rt.Fatal(err)
+		}
+		obs, err := FromTestLog([]byte(strings.Join(logLines, "\n")+"\n"), modDir, modDir, initEnv,
+			WithCompletedProcess("worker"), WithBracket(bracket))
+		if err != nil {
+			rt.Fatal(err)
+		}
+		recorded, err := CompletedState(obs)
+		if err != nil {
+			rt.Fatal(err)
+		}
+
+		// Apply random post-recording mutations to environment and files.
+		var curEnv []string
+		for _, name := range envNames {
+			switch rapid.IntRange(0, 2).Draw(rt, "mut_"+name) {
+			case 0:
+				// Leave unset.
+			case 1:
+				for _, kv := range initEnv {
+					if strings.HasPrefix(kv, name+"=") {
+						curEnv = append(curEnv, kv)
+					}
+				}
+			case 2:
+				curEnv = append(curEnv, name+"=mutated_"+rapid.StringMatching(`[a-z]{1,4}`).Draw(rt, "mval_"+name))
+			}
+		}
+		laterTime := baseTime.Add(10 * time.Second)
+		for i, sp := range specs {
+			switch rapid.IntRange(0, 3).Draw(rt, fmt.Sprintf("fmut_%d", i)) {
+			case 0:
+				// Unchanged.
+			case 1:
+				// Rewrite content.
+				if err := os.WriteFile(sp.absPath, []byte(fmt.Sprintf("v2-%d", i)), 0o644); err != nil {
+					rt.Fatal(err)
+				}
+			case 2:
+				// Remove if present.
+				_ = os.Remove(sp.absPath)
+			case 3:
+				// Touch mtime only when existing (moves stat-bound, preserves open-only).
+				if _, statErr := os.Stat(sp.absPath); statErr == nil {
+					if err := os.Chtimes(sp.absPath, laterTime, laterTime); err != nil {
+						rt.Fatal(err)
+					}
+				}
+			}
+		}
+
+		rec := trace.NewRecorder()
+		tracedCtx := trace.WithSink(context.Background(), rec)
+		gotState, gotMovers, err := CurrentWithMovers(tracedCtx, recorded.Manifest, modDir, curEnv)
+		if err != nil {
+			rt.Fatal(err)
+		}
+		evalEvents := rec.ByName("manifest.eval")
+		if len(evalEvents) != 1 {
+			rt.Fatalf("CurrentWithMovers emitted %d manifest.eval events, want 1", len(evalEvents))
+		}
+		movedCount, ok := evalEvents[0].IntField("moved_count")
+		if !ok || movedCount != int64(len(gotMovers)) || !slices.Equal(evalEvents[0].StringsField("movers"), gotMovers) {
+			rt.Fatalf("manifest.eval event = %+v, want movers %v", evalEvents[0], gotMovers)
+		}
+
+		wantState, err := Current(context.Background(), recorded.Manifest, modDir, curEnv)
+		if err != nil {
+			rt.Fatal(err)
+		}
+		wantMovers, err := MovedInputs(context.Background(), recorded.Manifest, modDir, curEnv)
+		if err != nil {
+			rt.Fatal(err)
+		}
+		if gotState != wantState {
+			rt.Fatalf("CurrentWithMovers state = %+v, want %+v", gotState, wantState)
+		}
+		if !slices.Equal(gotMovers, wantMovers) {
+			rt.Fatalf("CurrentWithMovers movers = %v, want %v", gotMovers, wantMovers)
+		}
+		if (len(gotMovers) > 0) != (gotState.Digest != recorded.Digest) {
+			rt.Fatalf("mover/digest mismatch: movers=%v gotDigest=%s recDigest=%s", gotMovers, gotState.Digest, recorded.Digest)
+		}
+		if (len(gotMovers) > 0) != (gotState.Manifest != recorded.Manifest) {
+			rt.Fatalf("mover/manifest mismatch: movers=%v", gotMovers)
+		}
+
+		adopted, adoptErr := Adopt(recorded.Manifest, modDir, "adopter", curEnv)
+		if len(gotMovers) == 0 {
+			if adoptErr != nil || adopted.State != recorded {
+				rt.Fatalf("unmoved Adopt = (%+v, %v), want recorded state", adopted, adoptErr)
+			}
+		} else {
+			wantSubstr := "adopted manifest moved: " + strings.Join(gotMovers, ", ")
+			if adoptErr == nil || !strings.Contains(adoptErr.Error(), wantSubstr) {
+				rt.Fatalf("moved Adopt err = %v, want substring %q", adoptErr, wantSubstr)
+			}
+		}
+	})
+}
+
+func TestBracketFingerprintNilHashStreamPreservesFactsAndEphemera(t *testing.T) {
+	root := t.TempDir()
+	realMod := filepath.Join(root, "realmod")
+	if err := os.MkdirAll(filepath.Join(realMod, "sub", "excluded"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	modLink := filepath.Join(root, "modlink")
+	if err := os.Symlink(realMod, modLink); err != nil {
+		t.Fatal(err)
+	}
+	trackedFile := filepath.Join(realMod, "sub", "tracked.txt")
+	directFile := filepath.Join(realMod, "direct.txt")
+	excludedFile := filepath.Join(realMod, "sub", "excluded", "noise.txt")
+	baseTime := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.WriteFile(trackedFile, []byte("initial"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(trackedFile, baseTime, baseTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(directFile, []byte("1234567"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(directFile, baseTime, baseTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(excludedFile, []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("tracked.txt", filepath.Join(realMod, "sub", "alias.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	bracket, err := CaptureBracket(t.Context(), modLink, []string{".", "direct.txt", "absent"}, WithBracketExcludedPaths("sub/excluded"))
+	if err != nil || bracket.Reason() != "" {
+		t.Fatalf("CaptureBracket = (reason=%q, err=%v), want clean capture", bracket.Reason(), err)
+	}
+	fileOnlyBracket, err := CaptureBracket(t.Context(), modLink, []string{"direct.txt"})
+	if err != nil || fileOnlyBracket.Reason() != "" {
+		t.Fatalf("fileOnlyBracket = (reason=%q, err=%v), want clean capture", fileOnlyBracket.Reason(), err)
+	}
+
+	ns, err := compileScratchNamespace("sub", "tmp-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolvedMod, ok := resolveModuleRootStatus(modLink)
+	if !ok {
+		t.Fatal("expected symlinked module root to resolve")
+	}
+	ephDirect := bracket.ephemera([]scratchNamespace{ns})
+	ephShared := bracket.ephemeraWithModuleRoot([]scratchNamespace{ns}, resolvedMod, true)
+	if !reflect.DeepEqual(ephDirect, ephShared) {
+		t.Fatalf("ephemeraWithModuleRoot = %+v, want %+v", ephShared, ephDirect)
+	}
+
+	// Excluded noise does not move the bracket.
+	if err := os.WriteFile(excludedFile, []byte("v2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, moved, reason, err := bracket.revalidate(t.Context(), modLink)
+	if err != nil || !unchanged || moved || reason != "" {
+		t.Fatalf("revalidate after excluded edit = (%v, %v, %q, %v), want unchanged", unchanged, moved, reason, err)
+	}
+
+	// Same-size, same-mtime edit on direct regular-file bracket root must move via contentFact alone.
+	if err := os.WriteFile(directFile, []byte("7654321"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(directFile, baseTime, baseTime); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, moved, reason, err = fileOnlyBracket.revalidate(t.Context(), modLink)
+	if err != nil || unchanged || !moved || !strings.Contains(reason, "direct.txt") {
+		t.Fatalf("fileOnlyBracket revalidate after same-stat content edit = (%v, %v, %q, %v), want moved naming direct.txt", unchanged, moved, reason, err)
+	}
+	// Restore directFile before testing directory member contentFact in isolation.
+	if err := os.WriteFile(directFile, []byte("1234567"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(directFile, baseTime, baseTime); err != nil {
+		t.Fatal(err)
+	}
+
+	// Same-size, same-mtime edit on directory member must move via dirHashFiltered contentFact alone.
+	if err := os.WriteFile(trackedFile, []byte("changed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(trackedFile, baseTime, baseTime); err != nil {
+		t.Fatal(err)
+	}
+	unchanged, moved, reason, err = bracket.revalidate(t.Context(), modLink)
+	if err != nil || unchanged || !moved || !strings.Contains(reason, "sub/tracked.txt") {
+		t.Fatalf("revalidate after same-stat tracked edit = (%v, %v, %q, %v), want moved naming sub/tracked.txt", unchanged, moved, reason, err)
+	}
 }

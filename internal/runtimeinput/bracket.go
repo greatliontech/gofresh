@@ -324,7 +324,6 @@ func fingerprintBracketRoot(ctx context.Context, moduleDir, moduleRoot string, i
 	if err != nil {
 		return bracketRoot{}, "", err
 	}
-	h := sha256.New()
 	root.facts = newPathFacts()
 	visit := func(rel string) {
 		if root.members == nil {
@@ -335,8 +334,9 @@ func fingerprintBracketRoot(ctx context.Context, moduleDir, moduleRoot string, i
 	// The bracket fingerprint always binds full state: its job is span
 	// integrity — detecting any mid-span modification, a content-restoring
 	// one included — so the metadata the persisted-reuse identity drops is
-	// exactly what it must keep (REQ-inputs-observation-class).
-	_, reason, err := hashPath(ctx, h, id, p, moduleRoot, bracketSkip(id, exclusions), visit, false, true, root.facts)
+	// exactly what it must keep (REQ-inputs-observation-class). Passing a nil
+	// hash stream skips discarded framing writes while populating root.facts.
+	_, reason, err := hashPath(ctx, nil, id, p, moduleRoot, bracketSkip(id, exclusions), visit, false, true, root.facts)
 	if ctx.Err() != nil {
 		return bracketRoot{}, "", ctx.Err()
 	}

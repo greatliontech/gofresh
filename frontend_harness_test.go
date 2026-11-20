@@ -64,17 +64,13 @@ func withAssumePure(pred func(Subject) bool) option {
 
 func withDynamicStateVouches(identities ...string) option {
 	return func(e *Session) {
-		if len(identities) == 0 {
-			return
-		}
-		if e.dynamicStateVouches == nil {
-			e.dynamicStateVouches = make(map[string]bool, len(identities))
-		}
 		for _, identity := range identities {
 			if identity != "" {
-				e.dynamicStateVouches[identity] = true
+				e.sortedVouches = append(e.sortedVouches, identity)
 			}
 		}
+		slices.Sort(e.sortedVouches)
+		e.sortedVouches = slices.Compact(e.sortedVouches)
 	}
 }
 
@@ -622,7 +618,14 @@ func inMemorySnapshotForSubject(dir string, subject Subject, opts ...option) (*S
 		return nil, nil, false
 	}
 	singleSubject, packageProcess := e.executionModel.singleSubject(), e.executionModel.packageProcess()
-	state, _, ok := buildInMemoryViewDynamicState(pkgs, []string{subject.Package}, e.dynamicStateVouches, singleSubject, packageProcess)
+	var vouches map[string]bool
+	if len(e.sortedVouches) > 0 {
+		vouches = make(map[string]bool, len(e.sortedVouches))
+		for _, v := range e.sortedVouches {
+			vouches[v] = true
+		}
+	}
+	state, _, ok := buildInMemoryViewDynamicState(pkgs, []string{subject.Package}, vouches, singleSubject, packageProcess)
 	if !ok {
 		return nil, nil, false
 	}
@@ -639,23 +642,7 @@ func inMemorySnapshotForSubject(dir string, subject Subject, opts ...option) (*S
 			}
 			if proof := rooted[req]; proof.Complete {
 				surviving, culprit, dischargedKeys := dischargeCulprits(proof, state, subject.Package)
-				if surviving == "" {
-					delete(scan.downgradeReason, subject)
-					delete(scan.downgradeCulprit, subject)
-				} else {
-					scan.downgradeReason[subject] = sharedDynamicStatePrefix + surviving
-					scan.downgradeCulprit[subject] = culprit
-				}
-				if len(dischargedKeys) > 0 {
-					d := scan.discharges[subject]
-					for _, key := range strings.Split(d.singleSubject, ",") {
-						if key != "" {
-							dischargedKeys[key] = true
-						}
-					}
-					d.singleSubject = joinDischargedKeys(dischargedKeys)
-					scan.discharges[subject] = d
-				}
+				applyRootedCulpritDischarge(scan, subject, surviving, culprit, dischargedKeys, true)
 			}
 		}
 	} else if packageProcess {
@@ -666,18 +653,7 @@ func inMemorySnapshotForSubject(dir string, subject Subject, opts ...option) (*S
 			}
 			if proof.Complete {
 				surviving, culprit, dischargedKeys := dischargeCulprits(proof, state, subject.Package)
-				if surviving == "" {
-					delete(scan.downgradeReason, subject)
-					delete(scan.downgradeCulprit, subject)
-				} else {
-					scan.downgradeReason[subject] = sharedDynamicStatePrefix + surviving
-					scan.downgradeCulprit[subject] = culprit
-				}
-				if len(dischargedKeys) > 0 {
-					d := scan.discharges[subject]
-					d.packageProcess = joinDischargedKeys(dischargedKeys)
-					scan.discharges[subject] = d
-				}
+				applyRootedCulpritDischarge(scan, subject, surviving, culprit, dischargedKeys, false)
 			}
 		}
 	}
@@ -713,24 +689,15 @@ func inMemorySnapshotForSubject(dir string, subject Subject, opts ...option) (*S
 			purity[subject] = "source directive"
 		}
 	}
-	v := &Snapshot{
-		session:   e,
-		subjects:  []Subject{subject},
-		packages:  []string{subject.Package},
-		moduleDir: dir,
-		kind:      CodeResult,
-		facts: &observationFacts{
-			maximal:            map[Subject]subjectFacts{subject: maximal},
-			guards:             guard.Guards{Toolchain: "inmem-toolchain", BuildConfig: "inmem-buildconfig"},
-			purity:             purity,
-			vouchDischarges:    scan.vouchDischarges,
-			discharges:         scan.discharges,
-			testVariantLedgers: map[string]testvariant.TestVariantLedger{subject.Package: {}},
-		},
-		observable:           map[Subject]closure.Observability{},
-		capturedObserved:     map[Subject]bool{},
-		attachedObservations: map[Subject]runtimeinput.State{},
-	}
+	req := closure.Subject{Package: subject.Package, Symbol: subject.Symbol}
+	v := newSnapshotShell(e, []Subject{subject}, []closure.Subject{req}, []string{subject.Package}, dir, CodeResult, &observationFacts{
+		maximal:            map[Subject]subjectFacts{subject: maximal},
+		guards:             guard.Guards{Toolchain: "inmem-toolchain", BuildConfig: "inmem-buildconfig"},
+		purity:             purity,
+		vouchDischarges:    scan.vouchDischarges,
+		discharges:         scan.discharges,
+		testVariantLedgers: map[string]testvariant.TestVariantLedger{subject.Package: {}},
+	})
 	return v, pkgs, true
 }
 

@@ -135,14 +135,19 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleRoot string,
 	if machineProjected(id) {
 		facts, err := currentMachineFacts()
 		if err != nil {
-			fprintf(h, "path %s %s machine-unhashable\n", id.Kind, id.Path)
+			if h != nil {
+				fprintf(h, "path %s %s machine-unhashable\n", id.Kind, id.Path)
+			}
 			return true, "unhashable runtime input: " + id.displayPath(), nil
 		}
-		fprintf(h, "path %s %s machine %s\n", id.Kind, id.Path, facts.Fingerprint())
+		fp := facts.Fingerprint()
+		if h != nil {
+			fprintf(h, "path %s %s machine %s\n", id.Kind, id.Path, fp)
+		}
 		// Every allowlisted source gathers the same complete projection. Its
 		// bracket comparison key is source-independent; its root retains source
 		// attribution and exclusions. Manifest framing above stays path-specific.
-		observed.put("", machineFact, facts.Fingerprint())
+		observed.put("", machineFact, fp)
 		return false, "", nil
 	}
 	var preResolved string
@@ -157,11 +162,15 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleRoot string,
 	info, err := statRuntimePath(p)
 	if os.IsNotExist(err) {
 		observed.put(p, followedStatFact, "missing")
-		fprintf(h, "path %s %s missing\n", id.Kind, id.Path)
+		if h != nil {
+			fprintf(h, "path %s %s missing\n", id.Kind, id.Path)
+		}
 		return false, "", nil
 	}
 	if err != nil {
-		fprintf(h, "path %s %s unhashable\n", id.Kind, id.Path)
+		if h != nil {
+			fprintf(h, "path %s %s unhashable\n", id.Kind, id.Path)
+		}
 		return true, "unhashable runtime input: " + id.displayPath(), nil
 	}
 	observed.stat(p, followedStatFact, info, metadata)
@@ -170,15 +179,21 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleRoot string,
 		var external bool
 		target, external, err = resolvedTarget(p, moduleRoot, preResolved)
 		if err != nil {
-			fprintf(h, "path %s %s unhashable-target\n", id.Kind, id.Path)
+			if h != nil {
+				fprintf(h, "path %s %s unhashable-target\n", id.Kind, id.Path)
+			}
 			return true, "unhashable runtime input: " + id.displayPath(), nil
 		}
 		if external {
 			if info.IsDir() {
-				fprintf(h, "path %s %s external-dir\n", id.Kind, id.Path)
+				if h != nil {
+					fprintf(h, "path %s %s external-dir\n", id.Kind, id.Path)
+				}
 				return true, "external directory input: " + id.displayPath() + attributionSeparator + resolvedTargetAttribution(id.Path, target), nil
 			}
-			fprintf(h, "path %s %s external-target\n", id.Kind, id.Path)
+			if h != nil {
+				fprintf(h, "path %s %s external-target\n", id.Kind, id.Path)
+			}
 			return true, "external runtime input target: " + id.displayPath() + attributionSeparator + resolvedTargetAttribution(id.Path, target), nil
 		}
 	} else if info.IsDir() && !existenceBindsExternalDirs {
@@ -192,15 +207,21 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleRoot string,
 		if preResolved != "" {
 			target = preResolved
 		} else if target, err = filepath.EvalSymlinks(p); err != nil {
-			fprintf(h, "path %s %s unhashable-target\n", id.Kind, id.Path)
+			if h != nil {
+				fprintf(h, "path %s %s unhashable-target\n", id.Kind, id.Path)
+			}
 			return true, "unhashable runtime input: " + id.displayPath(), nil
 		}
 		if volatileOSPath(target) {
-			fprintf(h, "path %s %s volatile-target\n", id.Kind, id.Path)
+			if h != nil {
+				fprintf(h, "path %s %s volatile-target\n", id.Kind, id.Path)
+			}
 			return true, "bracket root resolves into a volatile OS root: " + p, nil
 		}
 		if reason := containsVolatileOSRoot(target); reason != "" {
-			fprintf(h, "path %s %s volatile-target\n", id.Kind, id.Path)
+			if h != nil {
+				fprintf(h, "path %s %s volatile-target\n", id.Kind, id.Path)
+			}
 			return true, "bracket root resolves to a tree that " + reason + ": " + p, nil
 		}
 	}
@@ -210,18 +231,24 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleRoot string,
 		writeStat(h, info, metadata)
 		sum, err := fileHash(ctx, target)
 		if err != nil {
-			fprintf(h, "path %s %s unhashable\n", id.Kind, id.Path)
+			if h != nil {
+				fprintf(h, "path %s %s unhashable\n", id.Kind, id.Path)
+			}
 			return true, "unhashable runtime input: " + id.displayPath(), nil
 		}
-		fprintf(h, "path %s %s file %x\n", id.Kind, id.Path, sum)
+		if h != nil {
+			fprintf(h, "path %s %s file %x\n", id.Kind, id.Path, sum)
+		}
 		observed.put(p, contentFact, hex.EncodeToString(sum[:]))
 		return false, "", nil
 	case info.IsDir() && (id.Kind == pathRel || !existenceBindsExternalDirs):
-		sum, unv, reason, err := dirHashFiltered(ctx, target, id.displayPath(), skip, visit, metadata, observed)
+		sum, unv, reason, err := dirHashFiltered(ctx, target, id.displayPath(), skip, visit, metadata, h != nil, observed)
 		if err != nil {
 			return false, "", err
 		}
-		fprintf(h, "path %s %s dir %x\n", id.Kind, id.Path, sum)
+		if h != nil {
+			fprintf(h, "path %s %s dir %x\n", id.Kind, id.Path, sum)
+		}
 		return unv, reason, nil
 	case info.IsDir():
 		// An absolute external directory binds existence alone as a
@@ -234,19 +261,28 @@ func hashPath(ctx context.Context, h hash.Hash, id pathID, p, moduleRoot string,
 		// ingest's own classify-to-digest window, the clause's accepted
 		// residual (REQ-inputs-external-dir-existence). A bracket root
 		// took the walk above.
-		fprintf(h, "path %s %s direxists\n", id.Kind, id.Path)
+		if h != nil {
+			fprintf(h, "path %s %s direxists\n", id.Kind, id.Path)
+		}
 		return false, "", nil
 	default:
-		fprintf(h, "path %s %s unhashable-mode %s\n", id.Kind, id.Path, mode.String())
+		if h != nil {
+			fprintf(h, "path %s %s unhashable-mode %s\n", id.Kind, id.Path, mode.String())
+		}
 		return true, "unhashable runtime input: " + id.displayPath(), nil
 	}
 }
 
-func resolveModuleRoot(moduleDir string) string {
+func resolveModuleRootStatus(moduleDir string) (string, bool) {
 	if resolved, err := filepath.EvalSymlinks(moduleDir); err == nil {
-		return resolved
+		return resolved, true
 	}
-	return moduleDir
+	return moduleDir, false
+}
+
+func resolveModuleRoot(moduleDir string) string {
+	resolved, _ := resolveModuleRootStatus(moduleDir)
+	return resolved
 }
 
 func resolvedTarget(path, moduleRoot, preResolved string) (string, bool, error) {
@@ -265,6 +301,9 @@ func resolvedTarget(path, moduleRoot, preResolved string) (string, bool, error) 
 }
 
 func writeStat(h hash.Hash, info os.FileInfo, metadata bool) {
+	if h == nil {
+		return
+	}
 	if metadata {
 		fprintf(h, "stat %d %x %d %t\n", info.Size(), uint64(info.Mode()), info.ModTime().UnixNano(), info.IsDir())
 		return
@@ -319,8 +358,11 @@ func fileHash(ctx context.Context, path string) ([32]byte, error) {
 // walk-relative path), never under the walked absolute position, so
 // the clause is the same from any checkout
 // (REQ-inputs-refusal-attribution's spelling rule).
-func dirHashFiltered(ctx context.Context, root, display string, skip func(rel string) bool, visit func(rel string), metadata bool, observed *pathFacts) ([32]byte, bool, string, error) {
-	h := sha256.New()
+func dirHashFiltered(ctx context.Context, root, display string, skip func(rel string) bool, visit func(rel string), metadata, needDigest bool, observed *pathFacts) ([32]byte, bool, string, error) {
+	var h hash.Hash
+	if needDigest {
+		h = sha256.New()
+	}
 	// A failed listing withholds completeness, not the names it did expose.
 	var listings map[string][]string
 	var failedListings map[string]bool
@@ -405,7 +447,9 @@ func dirHashFiltered(ctx context.Context, root, display string, skip func(rel st
 			// dropped fields guard nothing a subject could observe, and
 			// keeping them would make a completed process's own restored
 			// scratch churn indistinguishable from real drift.
-			fprintf(h, "dir %s/ mode %x\n", rel, uint64(info.Mode()))
+			if h != nil {
+				fprintf(h, "dir %s/ mode %x\n", rel, uint64(info.Mode()))
+			}
 		case info.Mode().IsRegular():
 			writeStat(h, info, metadata)
 			sum, err := fileHash(ctx, path)
@@ -416,7 +460,9 @@ func dirHashFiltered(ctx context.Context, root, display string, skip func(rel st
 				}
 				return nil
 			}
-			fprintf(h, "file %s %x\n", rel, sum)
+			if h != nil {
+				fprintf(h, "file %s %x\n", rel, sum)
+			}
 			observed.put(path, contentFact, hex.EncodeToString(sum[:]))
 		case info.Mode()&os.ModeSymlink != 0:
 			writeStat(h, info, metadata)
@@ -428,14 +474,18 @@ func dirHashFiltered(ctx context.Context, root, display string, skip func(rel st
 				}
 				return nil
 			}
-			fprintf(h, "symlink %s %s\n", rel, target)
+			if h != nil {
+				fprintf(h, "symlink %s %s\n", rel, target)
+			}
 			observed.put(path, linkFact, target)
 		default:
 			unverifiable = true
 			if reason == "" {
 				reason = "unhashable runtime directory entry: " + representableReasonName(member(path))
 			}
-			fprintf(h, "unhashable %s %s\n", rel, info.Mode().String())
+			if h != nil {
+				fprintf(h, "unhashable %s %s\n", rel, info.Mode().String())
+			}
 		}
 		return nil
 	})
@@ -453,6 +503,8 @@ func dirHashFiltered(ctx context.Context, root, display string, skip func(rel st
 		observed.listing(path, filepath.ToSlash(offset), names, !failedListings[path])
 	}
 	var sum [32]byte
-	copy(sum[:], h.Sum(nil))
+	if h != nil {
+		copy(sum[:], h.Sum(nil))
+	}
 	return sum, unverifiable, reason, nil
 }

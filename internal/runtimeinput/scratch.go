@@ -218,6 +218,10 @@ type ephemeraRoot struct {
 // absolute root can match one, and its reads stay observed, the safe
 // direction.
 func (b *Bracket) ephemera(namespaces []scratchNamespace) bracketEphemera {
+	return b.ephemeraWithModuleRoot(namespaces, "", false)
+}
+
+func (b *Bracket) ephemeraWithModuleRoot(namespaces []scratchNamespace, resolvedModule string, moduleResolvedOK bool) bracketEphemera {
 	e := bracketEphemera{}
 	if b == nil || b.reason != "" || len(namespaces) == 0 {
 		return e
@@ -229,11 +233,17 @@ func (b *Bracket) ephemera(namespaces []scratchNamespace) bracketEphemera {
 			continue
 		}
 		lexBase := filepath.Join(b.moduleDir, filepath.FromSlash(root.id.Path))
-		resolved, err := filepath.EvalSymlinks(lexBase)
-		if err != nil {
-			// An unresolvable root (absent, or broken along its chain)
-			// grants no admission: its reads stay observed.
-			continue
+		var resolved string
+		if moduleResolvedOK && lexBase == b.moduleDir && resolvedModule != "" {
+			resolved = resolvedModule
+		} else {
+			var err error
+			resolved, err = filepath.EvalSymlinks(lexBase)
+			if err != nil {
+				// An unresolvable root (absent, or broken along its chain)
+				// grants no admission: its reads stay observed.
+				continue
+			}
 		}
 		e.roots = append(e.roots, ephemeraRoot{id: root.id, lexBase: lexBase, resolved: resolved, members: root.members})
 	}

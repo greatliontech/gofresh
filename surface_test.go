@@ -33,7 +33,7 @@ import (
 //gofresh:pure
 func TestPublicPackagesReadNoAmbientEnvironment(t *testing.T) {
 	roots := []string{"internal"}
-	files := []string{"checking.go", "explain.go", "fingerprint.go", "judgment.go", "provenance.go", "runtimeinputs.go", "unit.go", "vouchfile.go"}
+	files := []string{"checking.go", "explain.go", "fingerprint.go", "judgment.go", "provenance.go", "runtimeinputs.go", "unit.go", "validate.go", "vouchfile.go"}
 	for _, root := range roots {
 		if err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {

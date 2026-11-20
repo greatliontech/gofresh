@@ -176,6 +176,20 @@ func PrimedEnvReader(r Runner, dir string, env []string, snapshot *EnvSnapshot) 
 	return reader
 }
 
+// PrimedEnvReaderFromValues constructs a pass-scoped EnvReader over Coordinate(dir)
+// and env, priming it with EnvSnapshotFromValues(goEnv) when goEnv is non-nil.
+func PrimedEnvReaderFromValues(r Runner, dir string, env []string, goEnv map[string]string) (*EnvReader, error) {
+	var snapshot *EnvSnapshot
+	if goEnv != nil {
+		var err error
+		snapshot, err = EnvSnapshotFromValues(goEnv)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return PrimedEnvReader(r, Coordinate(dir), env, snapshot), nil
+}
+
 // Snapshot returns the pass's snapshot, taking it on the first call. A
 // snapshot that failed is the reader's answer for its lifetime — the
 // pass fails closed rather than re-probing an environment that refused
