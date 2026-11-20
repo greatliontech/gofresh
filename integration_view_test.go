@@ -9658,3 +9658,68 @@ func Arm() {
 		}
 	}
 }
+
+func TestExplainDynamicStateAndScanOverDotTestMainModule(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds a .test module fixture and runs Snapshot + ExplainDynamicState")
+	}
+	isolateProofCache(t)
+	dir := writeModuleTree(t, map[string]string{
+		"go.mod": "module example.test\n\ngo 1.26\n",
+		"dep/dep.go": `package dep
+
+var SharedHook func()
+
+func Bump() { SharedHook = func() {} }
+`,
+		"main.go": `package main
+
+import "example.test/dep"
+
+func MutateFromMain() { dep.Bump() }
+
+func SubjectFn(x int) int { return x + 1 }
+`,
+		"main_test.go": `package main
+
+import "testing"
+
+func TestSubjectFn(t *testing.T) {
+	if SubjectFn(1) != 2 {
+		t.Fatal("unexpected")
+	}
+}
+`,
+	})
+	subj := Subject{Package: "example.test", Symbol: "SubjectFn"}
+	sess, err := NewSession(context.Background(), BuildDescription{
+		Directory:   dir,
+		Environment: os.Environ(),
+		Inputs:      []string{},
+	}, SessionPolicy{Execution: GeneralExecution})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := sess.Snapshot(context.Background(), []Subject{subj}, CodeResult)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp, err := snap.Capture(context.Background(), subj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := snap.Check(context.Background(), fp, subj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Status != Unverifiable || verdict.Ground.Cause.Kind != SharedDynamicStateCause || verdict.Ground.Cause.Culprit != (Subject{Package: "example.test/dep", Symbol: "SharedHook"}) {
+		t.Fatalf("verdict = %+v, want Unverifiable SharedDynamicStateCause on example.test/dep.SharedHook", verdict)
+	}
+	chain, err := snap.ExplainDynamicState(context.Background(), "example.test/dep", "SharedHook")
+	if err != nil {
+		t.Fatalf("ExplainDynamicState(example.test/dep.Shared): %v", err)
+	}
+	if chain.Arm != "mutation" || len(chain.Links) == 0 {
+		t.Fatalf("ExplainDynamicState chain = %+v, want non-empty cross-package mutation chain", chain)
+	}
+}

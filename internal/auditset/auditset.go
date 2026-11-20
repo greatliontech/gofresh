@@ -46,6 +46,8 @@ func Identity() string {
 		methods(valuePlaneFuncs), methods(readOnlySliceInspectFuncs),
 		methods(readOnlySliceCopyFuncs), methods(inPlaceContainerMutateFuncs),
 		methods(pureScalarOrValueFuncs), pureScalarOrValuePackages,
+		pureHashPackages, goASTNodeInterfaces,
+		methods(writerFirstExtraStdFuncs), goParserSourceFuncs,
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
@@ -167,15 +169,17 @@ var reflectImmutableTypes = map[string]bool{"Type": true}
 // unexported methods (implementsValue).
 var constantImmutableTypes = map[string]bool{"Value": true}
 
-// fmtSymbols is the audited surface of package fmt: the Sprint and
-// Append families and Errorf — value-to-value formatting whose
-// arguments' methods stay visible to reachability — and the Stringer
-// name; the Print family is classified output and the Scan family
-// input, so only the pure remainder is here
+// fmtSymbols is the audited surface of package fmt: the Sprint, Append,
+// and Sscan families and Errorf — value-to-value formatting and string
+// scanning whose arguments' methods stay visible to reachability — plus
+// the formatting/scanning state interfaces; Print/Fprint are classified
+// output and Scan/Fscan input, so only the pure remainder is here
 // (REQ-closure-observability-audited-set).
 var fmtSymbols = map[string]bool{
 	"Sprint": true, "Sprintf": true, "Sprintln": true, "Errorf": true,
-	"Append": true, "Appendf": true, "Appendln": true, "FormatString": true, "Stringer": true,
+	"Append": true, "Appendf": true, "Appendln": true, "FormatString": true,
+	"Sscan": true, "Sscanf": true, "Sscanln": true,
+	"Formatter": true, "GoStringer": true, "ScanState": true, "Scanner": true, "State": true, "Stringer": true,
 }
 
 // The name unions the closure tiers' symbol predicates read, computed
@@ -200,7 +204,8 @@ var purePackages = map[string]bool{
 	"crypto/hmac": true, "crypto/md5": true, "crypto/sha1": true, "crypto/sha256": true, "crypto/sha512": true, "crypto/subtle": true,
 	"encoding": true, "encoding/asn1": true, "encoding/base32": true, "encoding/base64": true, "encoding/binary": true, "encoding/csv": true,
 	"encoding/hex": true, "encoding/json": true, "encoding/pem": true, "encoding/xml": true,
-	"errors": true, "hash": true, "hash/adler32": true, "hash/crc32": true, "hash/crc64": true, "hash/fnv": true,
+	"errors": true, "go/build/constraint": true,
+	"hash": true, "hash/adler32": true, "hash/crc32": true, "hash/crc64": true, "hash/fnv": true,
 	"io": true, "io/fs": true, "iter": true, "maps": true, "math/big": true, "math/bits": true,
 	"path": true, "regexp": true, "regexp/syntax": true,
 	"slices": true, "sort": true, "strconv": true, "strings": true, "text/scanner": true,
@@ -226,11 +231,13 @@ func PurePackages() []string {
 // admissions to its method tables. ReceiverPackages and Identity both derive
 // from this map so adding a receiver table updates both automatically.
 var receiverTables = map[string][]map[string][]string{
-	"math/rand":   {randMethods},
-	"reflect":     {reflectMethods},
-	"sync":        {syncMethods, poolMethods, memoMethods},
-	"sync/atomic": {atomicMethods},
-	"time":        {timeMethods},
+	"go/ast":        {goASTMethods},
+	"math/rand":     {randMethods},
+	"reflect":       {reflectMethods},
+	"runtime/debug": {runtimeDebugMethods},
+	"sync":          {syncMethods, poolMethods, memoMethods},
+	"sync/atomic":   {atomicMethods},
+	"time":          {timeMethods},
 }
 
 // ReceiverPackages lists the packages whose receiver tables this set
@@ -457,16 +464,22 @@ var flagSymbols = func() map[string]bool {
 var symbolTables = map[string]map[string]bool{
 	"context":        contextSymbols,
 	"crypto/fips140": fips140Symbols,
+	"flag":           flagSymbols,
 	"fmt":            fmtSymbols,
+	"go/ast":         goASTSymbols,
+	"go/parser":      goParserSymbols,
+	"go/scanner":     goScannerSymbols,
+	"go/token":       goTokenSymbols,
 	"math":           mathSymbols,
+	"math/rand":      randSymbols,
+	"net/url":        urlSymbols,
+	"path/filepath":  filepathSymbols,
 	"reflect":        reflectSymbols,
 	"runtime":        runtimeSymbols,
+	"runtime/debug":  runtimeDebugSymbols,
 	"sync/atomic":    atomicSymbols,
+	"text/tabwriter": tabwriterSymbols,
 	"time":           timeSymbols,
-	"path/filepath":  filepathSymbols,
-	"net/url":        urlSymbols,
-	"flag":           flagSymbols,
-	"math/rand":      randSymbols,
 }
 
 // runtimeSymbols is the audited compile-time constant surface of package
@@ -895,31 +908,4 @@ func namesWithSymbols(set map[string][]string, symbols map[string]bool) []string
 	}
 	slices.Sort(out)
 	return slices.Compact(out)
-}
-
-// BoundedToken reports whether text begins with marker as a whole token
-// — marker followed by end of text or by one of the bound bytes — and
-// returns the remainder after the marker. A directive or token prefix
-// matched this way can never be shadowed by a longer name sharing its
-// prefix; each caller names the delimiter bytes its grammar allows.
-func BoundedToken(text, marker, bounds string) (rest string, ok bool) {
-	if !strings.HasPrefix(text, marker) {
-		return "", false
-	}
-	rest = text[len(marker):]
-	if rest == "" || strings.IndexByte(bounds, rest[0]) >= 0 {
-		return rest, true
-	}
-	return "", false
-}
-
-// IsGeneratedMarker reports whether text is a standard Go generated-file marker
-// line (`^// Code generated .* DO NOT EDIT\.$` over the line's trimmed text),
-// retained in the canonical member token form.
-func IsGeneratedMarker(text string) bool {
-	trimmed := strings.TrimSpace(text)
-	return strings.HasPrefix(trimmed, "// Code generated ") &&
-		strings.HasSuffix(trimmed, " DO NOT EDIT.") &&
-		len(trimmed) >= len("// Code generated  DO NOT EDIT.") &&
-		!strings.ContainsAny(trimmed, "\r\n")
 }

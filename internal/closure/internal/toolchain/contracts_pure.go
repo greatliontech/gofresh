@@ -135,12 +135,11 @@ func derivePureSelectorsFromAuditset(base []string, stdlibInternalExtras ...stri
 
 // AllowedPureFmtSelectors derives the closed set of value-formatting and
 // interface/scanner selectors on "fmt" permitted in pure and pure-delegate
-// packages from auditset.PackageSymbols("fmt") plus writer-first Fprint* and
-// pure formatting/scanning interfaces (excluding ambient stdio Print*, Scan*).
+// packages from auditset.PackageSymbols("fmt") plus writer-first Fprint*
+// (excluding ambient stdio Print* and Scan*/Fscan*).
 var AllowedPureFmtSelectors = derivePureSelectorsFromAuditset(
 	auditset.PackageSymbols("fmt"),
-	"Formatter", "Fprint", "Fprintf", "Fprintln",
-	"GoStringer", "ScanState", "Scanner", "Sscan", "Sscanf", "Sscanln", "State",
+	"Fprint", "Fprintf", "Fprintln",
 )
 
 // AllowedPureMathSelectors derives the closed IEEE-754 bit/rounding/elementary

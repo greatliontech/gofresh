@@ -2,8 +2,10 @@ package closure
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"go/types"
+	"os"
 	"sort"
 	"strings"
 	"unicode"
@@ -391,4 +393,251 @@ func InMemoryBinaryRootedFunctions(ctx context.Context, audited bool, pkgs []*pa
 	}
 	sort.Slice(subjects, func(i, j int) bool { return subjects[i].Symbol < subjects[j].Symbol })
 	return binaryReachableUnion(ctx, audited, nil, prog, subjects)
+}
+
+func (h *Hasher) loadCached(pkgPath string) (*program, error) {
+	return h.loadCachedContext(h.ctx, pkgPath)
+}
+
+type batchPreparer struct {
+	h          *Hasher
+	candidates func() []string
+	attempted  bool
+	prepared   *progpkg.Prepared
+}
+
+func (bp *batchPreparer) prepare(ctx context.Context) (*progpkg.Prepared, error) {
+	if bp == nil {
+		return nil, nil
+	}
+	if !bp.attempted {
+		bp.attempted = true
+		var err error
+		bp.prepared, err = bp.h.prepareBatch(ctx, bp.candidates())
+		if err != nil {
+			return nil, err
+		}
+	}
+	return bp.prepared, nil
+}
+
+func (bp *batchPreparer) release(pkgPath string) {
+	if bp != nil && bp.prepared != nil {
+		bp.prepared.Release(pkgPath)
+	}
+}
+
+func (h *Hasher) loadCachedContext(ctx context.Context, pkgPath string) (*program, error) {
+	return h.loadCachedFrom(ctx, pkgPath, nil)
+}
+
+func (h *Hasher) bindProgramReader(p *program) {
+	if h == nil || p == nil {
+		return
+	}
+	p.GOARCH = h.effectiveGOARCH()
+	p.ReadSource = func(dir, fullPath string) ([]byte, error) {
+		if h.underCache(dir) {
+			return os.ReadFile(fullPath)
+		}
+		fb, err := h.readFile(fullPath)
+		if err != nil {
+			return nil, err
+		}
+		return fb.content, nil
+	}
+}
+
+func (h *Hasher) loadCachedFrom(ctx context.Context, pkgPath string, bp *batchPreparer) (*program, error) {
+	if p, ok := h.progs[pkgPath]; ok {
+		if p != nil && p.Prog == nil && len(p.Pkgs) > 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			built, err := progpkg.FromPackages(ctx, pkgPath, p.Pkgs)
+			if err != nil {
+				return nil, err
+			}
+			h.bindProgramReader(built)
+			h.progs[pkgPath] = built
+			return built, nil
+		}
+		h.bindProgramReader(p)
+		return p, nil
+	}
+	if err, ok := h.progErrs[pkgPath]; ok {
+		return nil, err
+	}
+	h.emitProgress("load", pkgPath)
+	if h.loadProgramOnMiss != nil {
+		if p, ok, err := h.loadProgramOnMiss(ctx, h, pkgPath); ok {
+			if err != nil {
+				if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+					h.progErrs[pkgPath] = err
+				}
+				return nil, err
+			}
+			h.bindProgramReader(p)
+			h.progs[pkgPath] = p
+			return p, nil
+		}
+	}
+	prepared, err := bp.prepare(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer bp.release(pkgPath)
+	var p *program
+	if prepared != nil && prepared.HasRoots(pkgPath) {
+		p, err = prepared.Build(ctx, pkgPath)
+	} else {
+		p, err = progpkg.Load(ctx, h.dir, h.packageEnv, h.buildFlags, pkgPath)
+	}
+	if err != nil {
+		if ctx.Err() == nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			h.progErrs[pkgPath] = err
+		}
+		return nil, err
+	}
+	h.bindProgramReader(p)
+	h.progs[pkgPath] = p
+	return p, nil
+}
+
+func (h *Hasher) releaseProgram(pkgPath string) {
+	if p := h.progs[pkgPath]; p != nil {
+		delete(h.progs, pkgPath)
+	}
+}
+
+func (h *Hasher) prepareBatch(ctx context.Context, uncached []string) (*progpkg.Prepared, error) {
+	if len(uncached) <= 1 {
+		return nil, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+	}
+	prepared, err := progpkg.Prepare(ctx, h.dir, h.packageEnv, h.buildFlags, uncached...)
+	if err != nil {
+		if cause := ctx.Err(); cause != nil {
+			return nil, fmt.Errorf("closure: analysis cancelled: %w", cause)
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+		}
+		return nil, nil
+	}
+	return prepared, nil
+}
+
+type packageBatch struct {
+	path        string
+	closureHash string
+	subjects    []Subject
+	memoSymbols map[string]bool
+}
+
+func runSubjectBatch[V any](
+	h *Hasher,
+	ctx context.Context,
+	subjects []Subject,
+	servedKind string,
+	loadMemo func(pkgPath string) (string, map[string]V),
+	runGroup func(group *packageBatch, bp *batchPreparer, results map[Subject]V) error,
+) (map[Subject]V, error) {
+	results := make(map[Subject]V, len(subjects))
+	byPackage := map[string]*packageBatch{}
+	var groups []*packageBatch
+	seen := map[Subject]bool{}
+	for _, subject := range subjects {
+		if seen[subject] {
+			continue
+		}
+		seen[subject] = true
+		group := byPackage[subject.Package]
+		if group == nil {
+			group = &packageBatch{path: subject.Package}
+			byPackage[subject.Package] = group
+			groups = append(groups, group)
+		}
+		group.subjects = append(group.subjects, subject)
+	}
+	memoByGroup := make(map[*packageBatch]map[string]V, len(groups))
+	memoChecked := make(map[*packageBatch]bool, len(groups))
+	resolveGroupMemo := func(group *packageBatch) map[string]V {
+		if !memoChecked[group] && ctx.Err() == nil {
+			memoChecked[group] = true
+			var m map[string]V
+			group.closureHash, m = loadMemo(group.path)
+			memoByGroup[group] = m
+		}
+		return memoByGroup[group]
+	}
+	currentIdx := 0
+	bp := &batchPreparer{
+		h: h,
+		candidates: func() []string {
+			var uncached []string
+			for _, g := range groups[currentIdx:] {
+				if ctx.Err() != nil {
+					break
+				}
+				if _, ok := h.progs[g.path]; ok {
+					continue
+				}
+				if _, failed := h.progErrs[g.path]; failed {
+					continue
+				}
+				memo := resolveGroupMemo(g)
+				allMemoized := len(memo) > 0
+				if allMemoized {
+					for _, s := range g.subjects {
+						if _, ok := memo[s.Symbol]; !ok {
+							allMemoized = false
+							break
+						}
+					}
+				}
+				if !allMemoized {
+					uncached = append(uncached, g.path)
+				}
+			}
+			return uncached
+		},
+	}
+	for i, group := range groups {
+		currentIdx = i
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+		}
+		memo := resolveGroupMemo(group)
+		if len(memo) > 0 {
+			group.memoSymbols = make(map[string]bool, len(memo))
+			for sym := range memo {
+				group.memoSymbols[sym] = true
+			}
+			remaining := group.subjects[:0:0]
+			for _, subject := range group.subjects {
+				if val, ok := memo[subject.Symbol]; ok {
+					results[subject] = val
+					continue
+				}
+				remaining = append(remaining, subject)
+			}
+			if len(remaining) < len(group.subjects) {
+				h.Served(servedKind, group.path)
+			}
+			group.subjects = remaining
+			if len(group.subjects) == 0 {
+				continue
+			}
+		}
+		if err := runGroup(group, bp, results); err != nil {
+			return nil, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("closure: analysis cancelled: %w", err)
+	}
+	return results, nil
 }

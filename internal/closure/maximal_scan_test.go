@@ -481,29 +481,29 @@ func TestMaximalUnauditedOperationNamesThePreferredDiagnostic(t *testing.T) {
 		return filename
 	}
 	named := write("unaudited.go", `package effects
-import "fmt"
-type wrap struct{ s fmt.State }
+import ("fmt"; "reflect")
+type wrap struct{ s reflect.Value }
 func F(w wrap) string { return fmt.Sprintf("%v", w.s) }
 `)
 	scan, err := maximalFileEffects(true, named)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scan.preferred != "reaches unaudited standard operation fmt.State" {
+	if scan.preferred != "reaches unaudited standard operation reflect.Value" {
 		t.Fatalf("preferred diagnostic = %q, want the unaudited operation named - the name-free fallback hides the sink", scan.preferred)
 	}
 	first := write("unaudited_two.go", `package effects
-import "fmt"
+import "reflect"
 type pair struct {
-	a fmt.State
-	b fmt.Formatter
+	a reflect.Value
+	b reflect.Method
 }
 `)
 	scan, err = maximalFileEffects(true, first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scan.preferred != "reaches unaudited standard operation fmt.Formatter" {
+	if scan.preferred != "reaches unaudited standard operation reflect.Method" {
 		t.Fatalf("preferred diagnostic = %q, want the lexicographic least within the rank", scan.preferred)
 	}
 	fallback := write("pure_only.go", `package effects
@@ -1354,7 +1354,7 @@ func referenceMaximalFileReason(filename string) (string, error) {
 	if strings.Contains(string(content), "//go:wasmimport") {
 		return "reaches go:wasmimport", nil
 	}
-	if strings.Contains(string(content), "//go:linkname") && !auditedLinknamesOnly(true, string(content)) {
+	if hasRawGoLinkname(string(content)) && !auditedLinknamesOnly(true, string(content)) {
 		return "reaches go:linkname (opaque linkage)", nil
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), filename, content, parser.ImportsOnly)
@@ -1446,7 +1446,7 @@ func referenceMaximalFileReason(filename string) (string, error) {
 						reason = classified
 						return false
 					}
-					if pkgPath != "testing" && !(pkgPath == "unsafe" && (sel.Sel.Name == "Sizeof" || sel.Sel.Name == "Alignof" || sel.Sel.Name == "Offsetof")) && !flagRegistrationSymbol(pkgPath, sel.Sel.Name) && !auditedStandardSymbol(true, pkgPath, sel.Sel.Name) && (auditset.AlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) && unauditedReason == "" {
+					if pkgPath != "testing" && !(pkgPath == "unsafe" && (sel.Sel.Name == "Sizeof" || sel.Sel.Name == "Alignof" || sel.Sel.Name == "Offsetof")) && !flagRegistrationSymbol(pkgPath, sel.Sel.Name) && !admittedPureStandardOrDelegateSymbol(true, nil, pkgPath, sel.Sel.Name) && (auditset.AlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) && unauditedReason == "" {
 						unauditedReason = "reaches unaudited standard operation " + pkgPath + "." + sel.Sel.Name
 					}
 				}
@@ -1531,7 +1531,7 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 		effect.unrefinable = true
 		scan.add(effect)
 	}
-	if strings.Contains(string(content), "//go:linkname") && !auditedLinknamesOnly(true, string(content)) {
+	if hasRawGoLinkname(string(content)) && !auditedLinknamesOnly(true, string(content)) {
 		scan.add(opaqueExternalEffect(externalEffectLinkage, "reaches go:linkname (opaque linkage)"))
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), filename, content, 0)
@@ -1613,7 +1613,7 @@ func referenceMaximalFileEffects(filename string) (maximalEffectScan, error) {
 			// mirrors the production compile-time unsafe intrinsic admission
 		} else if flagRegistrationSymbol(pkgPath, sel.Sel.Name) {
 			// mirrors the production flag-registration admission
-		} else if pkgPath != "testing" && !auditedStandardSymbol(true, pkgPath, sel.Sel.Name) && (auditset.AlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) {
+		} else if pkgPath != "testing" && !admittedPureStandardOrDelegateSymbol(true, nil, pkgPath, sel.Sel.Name) && (auditset.AlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isSourceOnlyStandardPackage(true, pkgPath)) {
 			scan.add(symbolExternalEffect(externalEffectUnauditedStandard, pkgPath, sel.Sel.Name, "reaches unaudited standard operation "+pkgPath+"."+sel.Sel.Name))
 		}
 		return true

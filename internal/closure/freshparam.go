@@ -4,8 +4,8 @@ import (
 	"context"
 	"go/token"
 	"go/types"
+	"slices"
 	"sort"
-	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/gofresh/internal/propharness"
@@ -39,7 +39,8 @@ type ssaProgramIndex struct {
 	programSites           map[*ssa.Function][]ssa.CallInstruction
 	programValueRef        map[*ssa.Function]bool
 	programFunctions       map[*ssa.Function]bool
-	unmutatedSentinel map[*ssa.Global]bool
+	closures               map[*ssa.Function][]*ssa.MakeClosure
+	unmutatedSentinel      map[*ssa.Global]bool
 	// verifiedHarnesses maps verified property-harness dependency paths in
 	// prog to their discovered protocol surface; empty disables harness arms.
 	verifiedHarnesses map[string]*propharness.VerifiedPackage
@@ -110,7 +111,7 @@ func newDynamicMemoQuad() *[4]dynamicMemoTables {
 // subjectQuery holds the per-subject reachability, caller enumeration, and
 // per-subject memo tables.
 type subjectQuery struct {
-	traceCtx      context.Context
+	traceCtx         context.Context
 	functions     map[*ssa.Function]bool
 	flowFunctions map[*ssa.Function]bool
 	rtaFunctions  map[*ssa.Function]bool
@@ -248,124 +249,6 @@ func isAuditedStdAliasValue(audited bool, v ssa.Value) bool {
 	return false
 }
 
-func isAdmittedOSGetwdErrorType(audited bool, ct types.Type, fp *freshParamAnalysis) bool {
-	if !audited || ct == nil || fp == nil || fp.summary == nil || fp.summary.userMutatesOSWrapperError {
-		return false
-	}
-	u := types.Unalias(ct)
-	if ptr, ok := u.(*types.Pointer); ok {
-		named, ok := types.Unalias(ptr.Elem()).(*types.Named)
-		if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
-			return false
-		}
-		pkgPath, name := named.Obj().Pkg().Path(), named.Obj().Name()
-		return (pkgPath == "os" && name == "SyscallError") || ((pkgPath == "io/fs" || pkgPath == "os") && name == "PathError") || (pkgPath == "syscall" && name == "Errno")
-	}
-	named, ok := u.(*types.Named)
-	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
-		return false
-	}
-	return named.Obj().Pkg().Path() == "syscall" && named.Obj().Name() == "Errno"
-}
-
-func isAdmittedOSGetwdErrorMethod(audited bool, callee *ssa.Function, fp *freshParamAnalysis) bool {
-	if !audited || callee == nil || callee.Name() != "Error" || callee.Signature == nil || callee.Signature.Recv() == nil {
-		return false
-	}
-	return isAdmittedOSGetwdErrorType(audited, callee.Signature.Recv().Type(), fp)
-}
-
-func isAdmittedPureMathSymbol(audited bool, pureDelegates map[string]bool, pkgPath string, callee *ssa.Function) bool {
-	if !audited || pkgPath != "math" || callee == nil || (callee.Signature != nil && callee.Signature.Recv() != nil) {
-		return false
-	}
-	return pureDelegates["math:"+functionSymbolName(callee)]
-}
-
-func admitPureDelegateCall(audited bool, pureDelegates map[string]bool, pkgPath string, callee *ssa.Function, site ssa.CallInstruction, callerStd bool, fp *freshParamAnalysis) bool {
-	if !audited || pkgPath == "" {
-		return false
-	}
-	if isSourceOnlyStandardPackage(true, pkgPath) {
-		return true
-	}
-	if isAdmittedPureMathSymbol(audited, pureDelegates, pkgPath, callee) {
-		if callerStd || site == nil {
-			return true
-		}
-		c := site.Common()
-		if c == nil || c.IsInvoke() {
-			return false
-		}
-		if sc := c.StaticCallee(); sc != nil {
-			return sc == callee
-		}
-		if fp == nil {
-			return false
-		}
-		siteFP := contextCancelMethodFP(site, fp)
-		if !subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), siteFP) {
-			return false
-		}
-		held, ok := closedDynamicTargets(c.Value, siteFP)
-		return ok && held[callee]
-	}
-	if !pureDelegates[pkgPath] {
-		if site == nil || site.Common() == nil || !site.Common().IsInvoke() || !isAdmittedOSGetwdErrorMethod(audited, callee, fp) {
-			return false
-		}
-		siteFP := contextCancelMethodFP(site, fp)
-		if !subjectClosedDynamicValue(site.Common().Value, make(map[ssa.Value]bool), siteFP) {
-			return false
-		}
-		held, ok := closedInvokeTargets(site, siteFP)
-		return ok && held[callee]
-	}
-	if callerStd || isInternalStdPackagePath(pkgPath) {
-		return true
-	}
-	if site == nil || callee == nil {
-		return false
-	}
-	c := site.Common()
-	if c == nil {
-		return false
-	}
-	if c.IsInvoke() {
-		if fp == nil {
-			return false
-		}
-		siteFP := contextCancelMethodFP(site, fp)
-		if !subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), siteFP) {
-			return false
-		}
-		held, ok := closedInvokeTargets(site, siteFP)
-		return ok && held[callee]
-	}
-	if sc := c.StaticCallee(); sc != nil {
-		if sc != callee {
-			return false
-		}
-		if strings.HasPrefix(callee.Synthetic, "bound ") {
-			mc, ok := c.Value.(*ssa.MakeClosure)
-			return ok && len(mc.Bindings) > 0 && isAuditedStdAliasValue(audited, mc.Bindings[0])
-		}
-		if len(c.Args) > 0 && ((callee.Signature != nil && callee.Signature.Recv() != nil) || strings.HasPrefix(callee.Synthetic, "thunk ")) {
-			return isAuditedStdAliasValue(audited, c.Args[0])
-		}
-		return false
-	}
-	if fp == nil {
-		return false
-	}
-	siteFP := contextCancelMethodFP(site, fp)
-	if !subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), siteFP) {
-		return false
-	}
-	held, ok := closedDynamicTargets(c.Value, siteFP)
-	return ok && held[callee]
-}
-
 func (fp *freshParamAnalysis) userPkgPaths() map[string]bool {
 	if fp == nil {
 		return nil
@@ -425,6 +308,7 @@ func (s *callerReferenceSummary) ssaIndex(selectionAudited bool, verifiedHarness
 		idx.programSites = s.sites
 		idx.programValueRef = s.valueRef
 		idx.programFunctions = s.allFunctions
+		idx.closures = s.closures
 	}
 	return idx
 }
@@ -443,6 +327,7 @@ func newBitOnlyFreshParamAnalysis(includeHarnesses, selectionAudited bool, pureD
 	idx.programSites = nil
 	idx.programValueRef = nil
 	idx.programFunctions = nil
+	idx.closures = nil
 	if isStd == nil {
 		idx.isStd = nil
 	}
@@ -718,11 +603,11 @@ func newFreshParamAnalysis(audited bool, pureDelegates map[string]bool, reach at
 			functions:    reach.functions,
 			rtaFunctions: reach.rtaFunctions,
 			callers:      map[*ssa.Function][]ssa.CallInstruction{},
-			dynamic:     map[*ssa.Function]bool{},
-			subjectRoot: reach.subjectRoot,
-			argFresh:    map[freshParamKey]bool{},
-			usesOK:      map[freshParamKey]bool{},
-			state:       &freshParamState{},
+			dynamic:      map[*ssa.Function]bool{},
+			subjectRoot:  reach.subjectRoot,
+			argFresh:     map[freshParamKey]bool{},
+			usesOK:       map[freshParamKey]bool{},
+			state:        &freshParamState{},
 		},
 	}
 	fp.resetDynamicMemos()
@@ -746,6 +631,34 @@ func newFreshParamAnalysis(audited bool, pureDelegates map[string]bool, reach at
 	return fp
 }
 
+func (fp *freshParamAnalysis) localClosureSitesClosed(fn *ssa.Function) bool {
+	if fp == nil || !fp.selectionAudited || fn == nil || fn.Signature == nil || fn.Signature.Recv() != nil || fn.Signature.Variadic() {
+		return false
+	}
+	if fp.summary == nil || !fp.summary.strictLocalFunc[fn] || fp.programSites == nil || fp.programValueRef[fn] || len(fp.programSites[fn]) == 0 {
+		return false
+	}
+	if len(fn.FreeVars) > 0 && len(fp.closures[fn]) == 0 {
+		return false
+	}
+	return true
+}
+
+func (fp *freshParamAnalysis) appendLocalClosureSites(fn *ssa.Function, sites []ssa.CallInstruction) []ssa.CallInstruction {
+	if !fp.localClosureSitesClosed(fn) {
+		return sites
+	}
+	for _, site := range fp.programSites[fn] {
+		if site == nil || site.Common() == nil || site.Common().IsInvoke() || !fp.functions[site.Parent()] {
+			continue
+		}
+		if !slices.Contains(sites, site) {
+			sites = append(sites, site)
+		}
+	}
+	return sites
+}
+
 func (fp *freshParamAnalysis) callersOf(fn *ssa.Function) []ssa.CallInstruction {
 	if fp == nil || fn == nil || !fp.functions[fn] {
 		return nil
@@ -760,6 +673,7 @@ func (fp *freshParamAnalysis) callersOf(fn *ssa.Function) []ssa.CallInstruction 
 				sites = append(sites, site)
 			}
 		}
+		sites = fp.appendLocalClosureSites(fn, sites)
 		if fp.callers != nil {
 			fp.callers[fn] = sites
 		}
@@ -779,10 +693,15 @@ func (fp *freshParamAnalysis) ensureAllCallers() {
 			if _, ok := fp.callers[callee]; ok {
 				continue
 			}
+			var sites []ssa.CallInstruction
 			for _, site := range fp.summary.allStaticSites[callee] {
 				if fp.functions[site.Parent()] {
-					fp.callers[callee] = append(fp.callers[callee], site)
+					sites = append(sites, site)
 				}
+			}
+			sites = fp.appendLocalClosureSites(callee, sites)
+			if len(sites) > 0 {
+				fp.callers[callee] = sites
 			}
 		}
 		return
@@ -798,6 +717,11 @@ func (fp *freshParamAnalysis) ensureAllCallers() {
 					fp.callers[callee] = append(fp.callers[callee], site)
 				}
 			}
+		}
+	}
+	for callee := range fp.functions {
+		if sites := fp.appendLocalClosureSites(callee, fp.callers[callee]); len(sites) > 0 {
+			fp.callers[callee] = sites
 		}
 	}
 }
@@ -821,7 +745,7 @@ func (fp *freshParamAnalysis) resolve() {
 	}
 	var keys []sortKey
 	for fn, sites := range fp.callers {
-		if len(sites) == 0 || !fp.paramCrossingEligible(fn) || fp.dynamic[fn] || len(fn.FreeVars) != 0 || fn.Signature.Variadic() {
+		if len(sites) == 0 || !fp.paramCrossingEligible(fn) || ((fp.dynamic[fn] || len(fn.FreeVars) != 0) && !fp.localClosureSitesClosed(fn)) || fn.Signature.Variadic() {
 			continue
 		}
 		var fnName string
@@ -853,11 +777,8 @@ func (fp *freshParamAnalysis) resolve() {
 
 // paramCrossingEligible is the one caller-boundary refusal set every
 // parameter crossing shares: the function must be attributed, not
-// dynamically targeted, capture-free, and non-variadic - the shapes no
-// caller enumeration can discipline (the one-site-classifier
-// collapse; a function with attributed callers is always attributed
-// itself, so the membership check is equivalent for the walks that
-// previously omitted it).
+// dynamically targeted (unless closed via non-escaping programSites),
+// capture-disciplined, and non-variadic.
 func (fp *freshParamAnalysis) paramCrossingEligible(fn *ssa.Function) bool {
 	if fp == nil || fn == nil {
 		return false
@@ -866,11 +787,11 @@ func (fp *freshParamAnalysis) paramCrossingEligible(fn *ssa.Function) bool {
 		fp.markSubjectUsed()
 	}
 	if len(fn.FreeVars) != 0 {
-		if !fp.selectionAudited || fp.programSites == nil || fp.programValueRef[fn] {
+		if !fp.selectionAudited || fp.programSites == nil || fp.programValueRef[fn] || len(fp.closures[fn]) == 0 {
 			return false
 		}
 	}
-	dynRefusalCond := fn != fp.enumRoot && (!fp.selectionAudited || fp.programSites == nil || fp.programValueRef[fn] || (fn.Signature == nil || (fn.Signature.Recv() == nil && len(fn.FreeVars) == 0 && len(fp.programSites[fn]) == 0)))
+	dynRefusalCond := fn != fp.enumRoot && (!fp.selectionAudited || fp.programSites == nil || fp.programValueRef[fn] || (fn.Signature == nil || (fn.Signature.Recv() == nil && len(fp.programSites[fn]) == 0)))
 	if dynRefusalCond {
 		if fp.dynamic[fn] {
 			fp.markSubjectUsed()
@@ -899,7 +820,7 @@ func (fp *freshParamAnalysis) paramCrossingEligible(fn *ssa.Function) bool {
 // carry: the shared crossing refusals plus variadic, out-of-range, and
 // non-string parameters.
 func (fp *freshParamAnalysis) paramEligible(fn *ssa.Function, idx int) bool {
-	if !fp.paramCrossingEligible(fn) || fp.dynamic[fn] || len(fn.FreeVars) != 0 || fn.Signature.Variadic() {
+	if !fp.paramCrossingEligible(fn) || ((fp.dynamic[fn] || len(fn.FreeVars) != 0) && !fp.localClosureSitesClosed(fn)) || fn.Signature.Variadic() {
 		return false
 	}
 	if idx < 0 || idx >= len(fn.Params) {
@@ -979,16 +900,34 @@ func (fp *freshParamAnalysis) paramUsesObservableMemo(key freshParamKey, inProgr
 }
 
 // boundaryCrossingObservable admits passing a fresh capability into a
-// static non-standard callee: every attributed call site of the callee
-// must pass fresh at each position the value occupies, and the
-// parameter's uses inside the callee must stay within the graph.
+// static non-standard callee or a non-escaping closed local function/closure:
+// every attributed call site of the callee must pass fresh at each position
+// the value occupies, and the parameter's uses inside the callee must stay
+// within the graph.
 func (fp *freshParamAnalysis) boundaryCrossingObservable(site ssa.CallInstruction, pathValue ssa.Value, inProgress map[freshParamKey]bool) bool {
-	if fp == nil || site == nil || site.Common() == nil {
+	if fp == nil || site == nil || site.Common() == nil || site.Common().IsInvoke() {
 		return false
 	}
-	callee := site.Common().StaticCallee()
-	if callee == nil || fp.isStdFunc(callee) {
-		return false
+	var callees []*ssa.Function
+	if callee := site.Common().StaticCallee(); callee != nil {
+		if fp.isStdFunc(callee) {
+			return false
+		}
+		callees = []*ssa.Function{callee}
+	} else {
+		if !fp.selectionAudited || site.Common().Value == pathValue || !subjectClosedDynamicValue(site.Common().Value, make(map[ssa.Value]bool), fp) {
+			return false
+		}
+		targets, ok := closedDynamicTargets(site.Common().Value, fp)
+		if !ok || len(targets) == 0 {
+			return false
+		}
+		for target := range targets {
+			if target == nil || fp.isStdFunc(target) || !fp.localClosureSitesClosed(target) {
+				return false
+			}
+			callees = append(callees, target)
+		}
 	}
 	found := false
 	for i, arg := range site.Common().Args {
@@ -996,13 +935,15 @@ func (fp *freshParamAnalysis) boundaryCrossingObservable(site ssa.CallInstructio
 			continue
 		}
 		found = true
-		key := freshParamKey{fn: callee, idx: i}
-		// The two fixpoint directions keep separate in-progress
-		// namespaces: inProgress here is the uses direction's, and the
-		// arg direction starts its own chain - a key mid-evaluation for
-		// uses is not an arg-direction cycle.
-		if !fp.paramArgFreshMemo(key, map[freshParamKey]bool{}) || !fp.paramUsesObservableMemo(key, inProgress) {
-			return false
+		for _, callee := range callees {
+			key := freshParamKey{fn: callee, idx: i}
+			// The two fixpoint directions keep separate in-progress
+			// namespaces: inProgress here is the uses direction's, and the
+			// arg direction starts its own chain - a key mid-evaluation for
+			// uses is not an arg-direction cycle.
+			if !fp.paramArgFreshMemo(key, map[freshParamKey]bool{}) || !fp.paramUsesObservableMemo(key, inProgress) {
+				return false
+			}
 		}
 	}
 	return found

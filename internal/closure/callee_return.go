@@ -1,52 +1,15 @@
 package closure
 
 import (
-	"go/constant"
 	"go/token"
 	"go/types"
 	"slices"
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
-
-func liveCalleeBlocks(fn *ssa.Function) []*ssa.BasicBlock {
-	if fn == nil || len(fn.Blocks) == 0 {
-		return nil
-	}
-	seen := make(map[*ssa.BasicBlock]bool, len(fn.Blocks))
-	queue := []*ssa.BasicBlock{fn.Blocks[0]}
-	seen[fn.Blocks[0]] = true
-	for i := 0; i < len(queue); i++ {
-		b := queue[i]
-		if len(b.Instrs) > 0 {
-			if ifInstr, ok := b.Instrs[len(b.Instrs)-1].(*ssa.If); ok && len(b.Succs) == 2 {
-				if c, ok := ifInstr.Cond.(*ssa.Const); ok && c.Value != nil && c.Value.Kind() == constant.Bool {
-					succ := b.Succs[1]
-					if constant.BoolVal(c.Value) {
-						succ = b.Succs[0]
-					}
-					if !seen[succ] {
-						seen[succ] = true
-						queue = append(queue, succ)
-					}
-					continue
-				}
-			}
-		}
-		for _, succ := range b.Succs {
-			if !seen[succ] {
-				seen[succ] = true
-				queue = append(queue, succ)
-			}
-		}
-	}
-	if fn.Recover != nil && !seen[fn.Recover] {
-		queue = append(queue, fn.Recover)
-	}
-	return queue
-}
 
 // staticCallResultDynamicValue steps through a static call's returned SSA
 // expressions when the callee belongs to the audited standard-library
@@ -157,7 +120,7 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 			if callee != nil {
 				calleeName = callee.String()
 			}
-			trace.Emit(nil, trace.DomainClosure, "closure.callee.reject", calleeName,
+			trace.Emit(fp.emitCtx(), trace.DomainClosure, "closure.callee.reject", calleeName,
 				trace.String("caller", callerName),
 				trace.Int("tuple_index", tupleIndex),
 				trace.String("gate", gate),
@@ -166,13 +129,14 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 		return false
 	}
 	isAdmittedOSGetwd := callee != nil && fp != nil && fp.selectionAudited && fp.isStdFunc(callee) && funcPkgPath(callee) == "os" && functionSymbolName(callee) == "Getwd" && tupleIndex == 1 && len(callArgs) == 0
+	isAdmittedGoParserReturn := callee != nil && fp != nil && fp.selectionAudited && fp.isStdFunc(callee) && funcPkgPath(callee) == "go/parser" && (functionSymbolName(callee) == "ParseExpr" || auditset.GoParserSourceFunc(functionSymbolName(callee)))
 	if callee == nil {
 		return reject("nil_callee")
 	}
-	if callee.Synthetic != "" && callee.Origin() == nil && !isPromotedWrapper(callee) && !isBoundMethodWrapper(callee) && !strings.HasPrefix(callee.Synthetic, "wrapper ") && !isAdmittedOSGetwd {
+	if callee.Synthetic != "" && callee.Origin() == nil && !isPromotedWrapper(callee) && !isBoundMethodWrapper(callee) && !strings.HasPrefix(callee.Synthetic, "wrapper ") && !isAdmittedOSGetwd && !isAdmittedGoParserReturn {
 		return reject("synthetic")
 	}
-	if len(callee.Blocks) == 0 && !isAdmittedOSGetwd {
+	if len(callee.Blocks) == 0 && !isAdmittedOSGetwd && !isAdmittedGoParserReturn {
 		return reject("no_blocks")
 	}
 	if !calleeFreeVarsClosed(callee, fp) {
@@ -203,9 +167,10 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 					!osOpenFileMayMutate(callee, pkgPath, symName, call.Common()) &&
 					!syscallOpenMayCreate(pkgPath, symName, call.Common())
 			} else if collect.isSeeds() || (call != nil && call.Common() != nil && (call.Common().IsInvoke() || call.Common().StaticCallee() == nil)) {
-				admittedStdOrDel = fp.isAuditedStandardOrDelegate(pkgPath) || isAdmittedPureMathSymbol(fp.selectionAudited, fp.pureDelegates, pkgPath, callee)
+				isInv := call != nil && call.Common() != nil && call.Common().IsInvoke()
+				admittedStdOrDel = admittedResolvedStandardOrDelegateCallee(fp.selectionAudited, fp.pureDelegates, nil, "", pkgPath, callee, isInv, fp)
 			} else {
-				admittedStdOrDel = admitPureDelegateCall(fp.selectionAudited, fp.pureDelegates, pkgPath, callee, call, callerStd, fp)
+				admittedStdOrDel = admittedPureStandardOrDelegateCallee(fp.selectionAudited, fp.pureDelegates, false, nil, "", pkgPath, callee, call, callerStd, fp)
 			}
 			if !admittedStdOrDel {
 				symName := functionSymbolName(callee)
@@ -240,7 +205,11 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 			}
 		}
 	}
-	if len(callArgs) != len(callee.Params) {
+	expectedParams := len(callee.Params)
+	if isAdmittedGoParserReturn && expectedParams == 0 && callee.Signature != nil {
+		expectedParams = callee.Signature.Params().Len()
+	}
+	if len(callArgs) != expectedParams {
 		return reject("arity_mismatch")
 	}
 	boundRecvCall := call != nil && call.Common() != nil && !call.Common().IsInvoke() && call.Common().StaticCallee() == nil && callee.Signature != nil && callee.Signature.Recv() != nil && len(callArgs) > 0 && callArgs[0] == nil
@@ -403,6 +372,11 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 		}
 		return reject("os_getwd_concrete_types")
 	}
+	if fp != nil && fp.selectionAudited && fp.isStdFunc(callee) {
+		if okP, handled := goParserCallReturnDynamicValue(callee, pkgPath, functionSymbolName(callee), tupleIndex, collect, fp); handled {
+			return okP
+		}
+	}
 	bindings := make(map[*ssa.Parameter]ssa.Value, len(fp.callBindings)+len(callee.Params))
 	for k, v := range fp.callBindings {
 		bindings[k] = v
@@ -427,7 +401,7 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 		}
 	}
 	hasReturn := false
-	for _, block := range liveCalleeBlocks(callee) {
+	for _, block := range liveBlocks(callee, nil) {
 		for _, instr := range block.Instrs {
 			ret, ok := instr.(*ssa.Return)
 			if !ok {
@@ -458,6 +432,11 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 			if !walkDynamicValue(res, collect, calleeSeenMap, calleeDone, &calleeFP) && !collect.isSeeds() {
 				return reject("return_val_unclosed")
 			}
+			if !collect.isSeeds() && fp != nil && (fp.enumOnly || fp.inFieldStore || fp.inProgramSites) && fp.isStdFunc(callee) && tupleIndex >= 0 && len(ret.Results) > 1 && res != nil && res.Type() != nil && typeMayCarryDynamicTop(fp.selectionAudited, res.Type()) {
+				if okSib, sibGate := siblingTupleResultsConfined(callee, pkgPath, tupleIndex, ret.Results, fp); !okSib {
+					return reject(sibGate)
+				}
+			}
 			if res != nil && res.Type() != nil {
 				var walkContainer func(ssa.Value, map[ssa.Value]bool, *freshParamAnalysis, func(ssa.Value) bool) bool
 				if _, isSlice := types.Unalias(res.Type()).Underlying().(*types.Slice); isSlice {
@@ -483,6 +462,112 @@ func calleeResultDynamicValue(call *ssa.Call, callee *ssa.Function, callArgs []s
 		return reject("no_return")
 	}
 	return true
+}
+
+func siblingTupleResultsConfined(callee *ssa.Function, pkgPath string, tupleIndex int, results []ssa.Value, fp *freshParamAnalysis) (bool, string) {
+	var ssaProg *ssa.Program
+	if callee != nil {
+		ssaProg = callee.Prog
+	}
+	for j, sib := range results {
+		if j == tupleIndex || sib == nil || sib.Type() == nil {
+			continue
+		}
+		if !(fp.ignoreContextValuePayload && pkgPath == "context" && callee.Name() == "WithCancelCause" && tupleIndex == 0 && j == 1) {
+			_, sibIface := types.Unalias(sib.Type()).Underlying().(*types.Interface)
+			if isMutableStdCarrierAllocType(fp.selectionAudited, sib.Type(), !sibIface) {
+				return false, "sibling_tuple_mutator"
+			}
+		}
+		if siblingValueTouchesMutatedGlobal(sib, fp.prog, ssaProg, 0) {
+			return false, "sibling_closure_global_mutated"
+		}
+	}
+	return true, ""
+}
+
+func siblingValueTouchesMutatedGlobal(v ssa.Value, p *program, ssaProg *ssa.Program, depth int) bool {
+	if v == nil || ssaProg == nil || depth > 4 {
+		return false
+	}
+	switch sv := v.(type) {
+	case *ssa.Global:
+		return mutatedGlobalsForProgram(p, ssaProg)[sv]
+	case *ssa.MakeClosure:
+		for _, b := range sv.Bindings {
+			if siblingValueTouchesMutatedGlobal(b, p, ssaProg, depth+1) {
+				return true
+			}
+		}
+		if fn, ok := sv.Fn.(*ssa.Function); ok {
+			return closureFnTouchesMutatedGlobal(fn, p, ssaProg, map[*ssa.Function]bool{})
+		}
+	case *ssa.Function:
+		return closureFnTouchesMutatedGlobal(sv, p, ssaProg, map[*ssa.Function]bool{})
+	case *ssa.Phi:
+		for _, e := range sv.Edges {
+			if siblingValueTouchesMutatedGlobal(e, p, ssaProg, depth+1) {
+				return true
+			}
+		}
+	case *ssa.ChangeType:
+		return siblingValueTouchesMutatedGlobal(sv.X, p, ssaProg, depth+1)
+	case *ssa.Convert:
+		return siblingValueTouchesMutatedGlobal(sv.X, p, ssaProg, depth+1)
+	case *ssa.MakeInterface:
+		return siblingValueTouchesMutatedGlobal(sv.X, p, ssaProg, depth+1)
+	case *ssa.ChangeInterface:
+		return siblingValueTouchesMutatedGlobal(sv.X, p, ssaProg, depth+1)
+	case *ssa.UnOp:
+		return siblingValueTouchesMutatedGlobal(sv.X, p, ssaProg, depth+1)
+	case *ssa.Call:
+		if callee := sv.Common().StaticCallee(); callee != nil {
+			for _, blk := range callee.Blocks {
+				for _, instr := range blk.Instrs {
+					if ret, ok := instr.(*ssa.Return); ok {
+						for _, r := range ret.Results {
+							if siblingValueTouchesMutatedGlobal(r, p, ssaProg, depth+1) {
+								return true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+func closureFnTouchesMutatedGlobal(fn *ssa.Function, p *program, ssaProg *ssa.Program, seen map[*ssa.Function]bool) bool {
+	if fn == nil || ssaProg == nil || seen[fn] {
+		return false
+	}
+	seen[fn] = true
+	mutated := mutatedGlobalsForProgram(p, ssaProg)
+	if len(mutated) == 0 {
+		return false
+	}
+	var opBuf [16]*ssa.Value
+	for _, blk := range fn.Blocks {
+		for _, instr := range blk.Instrs {
+			for _, opPtr := range instr.Operands(opBuf[:0]) {
+				if opPtr == nil || *opPtr == nil {
+					continue
+				}
+				switch op := (*opPtr).(type) {
+				case *ssa.Global:
+					if mutated[op] {
+						return true
+					}
+				case *ssa.MakeClosure:
+					if inner, ok := op.Fn.(*ssa.Function); ok && closureFnTouchesMutatedGlobal(inner, p, ssaProg, seen) {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func walkCallResultContainerWithFP(site ssa.CallInstruction, retIdx, numResults int, visited map[ssa.Value]bool, fp *freshParamAnalysis, walkVal func(ssa.Value) bool, walkContainer func(ssa.Value, map[ssa.Value]bool, *freshParamAnalysis, func(ssa.Value) bool) bool) bool {
@@ -639,179 +724,57 @@ func calleeParamMayAffectTupleResult(fp *freshParamAnalysis, callee *ssa.Functio
 
 func paramFlowsOutsideContextValuePayload(fp *freshParamAnalysis, val ssa.Value, callee *ssa.Function, tupleIndex int, seen map[ssa.Value]bool, paramSeen map[paramTupleKey]bool) bool {
 	audited := fp != nil && fp.selectionAudited
-	if val == nil {
-		return true
-	}
-	if seen[val] {
-		return false
-	}
-	seen[val] = true
-	refs := val.Referrers()
-	if refs == nil {
-		return true
-	}
-	for _, ref := range *refs {
-		switch r := ref.(type) {
-		case *ssa.DebugRef:
-		case *ssa.Return:
-			if !returnExcludesTupleIndex(r, val, callee, tupleIndex) {
-				return true
-			}
-		case *ssa.BinOp:
-			if r.Op != token.EQL && r.Op != token.NEQ {
-				return true
-			}
-		case *ssa.Field:
-			if r.X != val {
-				return true
-			}
-			if carrierFreeValueUsesTuple(audited, r, nil, callee, tupleIndex) {
-				continue
-			}
-			if paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
-				return true
-			}
-		case *ssa.FieldAddr:
-			if r.X != val {
-				return true
-			}
-			if carrierFreeFieldAddrTuple(audited, r, nil, callee, tupleIndex) {
-				continue
-			}
-			if paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
-				return true
-			}
-		case *ssa.Store:
-			if r.Val != val || r.Addr == val {
-				return true
-			}
-			var alloc *ssa.Alloc
-			switch a := r.Addr.(type) {
-			case *ssa.Alloc:
-				alloc = a
+	var policy valueSinkPolicy
+	policy = valueSinkPolicy{
+		callee:         callee,
+		tupleIndex:     tupleIndex,
+		allowEqCompare: true,
+		onRef: func(cur ssa.Value, ref ssa.Instruction, curSeen map[ssa.Value]bool) (bool, bool) {
+			switch r := ref.(type) {
+			case *ssa.Field:
+				if r.X != cur {
+					return true, true
+				}
+				if carrierFreeValueUsesTuple(audited, r, nil, callee, tupleIndex) {
+					return false, true
+				}
+				return valueFlowsOutsideAllowedSinks(r, policy, curSeen), true
 			case *ssa.FieldAddr:
-				alloc, _ = a.X.(*ssa.Alloc)
-			}
-			if alloc == nil || allocFlowsOutsideContextValuePayload(fp, alloc, callee, tupleIndex, seen, paramSeen) {
-				return true
-			}
-		case *ssa.UnOp:
-			if r.Op != token.MUL || r.X != val || paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
-				return true
-			}
-		case *ssa.MakeInterface:
-			if r.X != val {
-				return true
-			}
-			if valueOnlyReturnedOutsideTupleIndex(r, callee, tupleIndex, make(map[ssa.Value]bool)) {
-				continue
-			}
-			if paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
-				return true
-			}
-		case *ssa.ChangeInterface:
-			if r.X != val {
-				return true
-			}
-			if valueOnlyReturnedOutsideTupleIndex(r, callee, tupleIndex, make(map[ssa.Value]bool)) {
-				continue
-			}
-			if paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
-				return true
-			}
-		case *ssa.Phi:
-			if valueOnlyReturnedOutsideTupleIndex(r, callee, tupleIndex, make(map[ssa.Value]bool)) {
-				continue
-			}
-			if paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
-				return true
-			}
-		case *ssa.MakeClosure:
-			if !closureCaptureOnlyReturnedOutsideTupleIndex(r, val, callee, tupleIndex) {
-				return true
-			}
-		case ssa.CallInstruction:
-			if _, isGo := r.(*ssa.Go); isGo || r.Common() == nil || r.Common().IsInvoke() {
-				return true
-			}
-			subCallee := r.Common().StaticCallee()
-			if subCallee == nil || len(r.Common().Args) != len(subCallee.Params) {
-				return true
-			}
-			subTupleIndices := callResultSubTupleIndices(r, callee, tupleIndex)
-			for i, arg := range r.Common().Args {
-				if arg == val {
-					for _, subIdx := range subTupleIndices {
-						if calleeParamMayAffectTupleResult(fp, subCallee, i, subIdx, paramSeen) {
-							return true
+				if r.X != cur {
+					return true, true
+				}
+				if carrierFreeFieldAddrTuple(audited, r, nil, callee, tupleIndex) {
+					return false, true
+				}
+				return valueFlowsOutsideAllowedSinks(r, policy, curSeen), true
+			case *ssa.UnOp:
+				if r.Op != token.MUL || r.X != cur {
+					return true, true
+				}
+				return valueFlowsOutsideAllowedSinks(r, policy, curSeen), true
+			case ssa.CallInstruction:
+				if _, isGo := r.(*ssa.Go); isGo || r.Common() == nil || r.Common().IsInvoke() {
+					return true, true
+				}
+				subCallee := r.Common().StaticCallee()
+				if subCallee == nil || len(r.Common().Args) != len(subCallee.Params) {
+					return true, true
+				}
+				subTupleIndices := callResultSubTupleIndices(r, callee, tupleIndex)
+				for i, arg := range r.Common().Args {
+					if arg == cur {
+						for _, subIdx := range subTupleIndices {
+							if calleeParamMayAffectTupleResult(fp, subCallee, i, subIdx, paramSeen) {
+								return true, true
+							}
 						}
 					}
 				}
+				return false, true
+			default:
+				return false, false
 			}
-		default:
-			return true
-		}
+		},
 	}
-	return false
-}
-
-func allocFlowsOutsideContextValuePayload(fp *freshParamAnalysis, alloc *ssa.Alloc, callee *ssa.Function, tupleIndex int, seen map[ssa.Value]bool, paramSeen map[paramTupleKey]bool) bool {
-	if alloc == nil {
-		return true
-	}
-	if seen[alloc] {
-		return false
-	}
-	seen[alloc] = true
-	refs := alloc.Referrers()
-	if refs == nil {
-		return true
-	}
-	for _, ref := range *refs {
-		switch r := ref.(type) {
-		case *ssa.DebugRef:
-		case *ssa.Return:
-			if !returnExcludesTupleIndex(r, alloc, callee, tupleIndex) {
-				return true
-			}
-		case *ssa.Store:
-			if r.Addr != alloc || r.Val == alloc {
-				return true
-			}
-		case *ssa.FieldAddr:
-			if r.X != alloc || r.Referrers() == nil {
-				return true
-			}
-			for _, fref := range *r.Referrers() {
-				switch fr := fref.(type) {
-				case *ssa.DebugRef:
-				case *ssa.Store:
-					if fr.Addr != r || fr.Val == r {
-						return true
-					}
-				case *ssa.UnOp:
-					if fr.Op != token.MUL || fr.X != r || paramFlowsOutsideContextValuePayload(fp, fr, callee, tupleIndex, seen, paramSeen) {
-						return true
-					}
-				default:
-					return true
-				}
-			}
-		case *ssa.UnOp:
-			if r.Op != token.MUL || r.X != alloc || paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
-				return true
-			}
-		case *ssa.MakeInterface:
-			if r.X != alloc || paramFlowsOutsideContextValuePayload(fp, r, callee, tupleIndex, seen, paramSeen) {
-				return true
-			}
-		case *ssa.MakeClosure:
-			if !closureCaptureOnlyReturnedOutsideTupleIndex(r, alloc, callee, tupleIndex) {
-				return true
-			}
-		default:
-			return true
-		}
-	}
-	return false
+	return valueFlowsOutsideAllowedSinks(val, policy, seen)
 }

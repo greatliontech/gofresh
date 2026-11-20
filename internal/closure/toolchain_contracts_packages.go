@@ -371,8 +371,17 @@ func verifyPureCandidateWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 func listedSurfaceMustHaveGoFiles(importPath string) bool {
 	switch importPath {
 	case "os", "internal/testlog", "testing", "testing/internal/testdeps",
-		"runtime", "sync", "reflect", "time", "math", "math/rand",
-		"context", "crypto/fips140", "path/filepath":
+		"runtime", "runtime/debug", "sync", "reflect", "time", "math", "math/rand",
+		"context", "crypto/fips140", "path/filepath",
+		"text/tabwriter", "go/token", "go/scanner", "go/ast", "go/parser":
+		return true
+	}
+	return false
+}
+
+func isGoOnlyVerifiedSurfacePkg(importPath string) bool {
+	switch importPath {
+	case "text/tabwriter", "go/token", "go/scanner", "go/ast", "go/parser":
 		return true
 	}
 	return false
@@ -387,6 +396,7 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 		return verifyPureCandidateWithIOAndSalt(ctx, lp, pkgIncludeSalt)
 	}
 	isHarnessPkg := lp.ImportPath == "os" || lp.ImportPath == "internal/testlog" || lp.ImportPath == "testing/internal/testdeps" || lp.ImportPath == "testing"
+	isGoOnlyPkg := isGoOnlyVerifiedSurfacePkg(lp.ImportPath)
 
 	runtimePullTargets := map[string]bool{}
 	externalPullTargets := map[string]bool{}
@@ -399,8 +409,8 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 	selfPushLinknames := map[string]bool{}
 
 	readRes, vErr, iErr := readListedPackageFiles(ctx, lp, listedPackageReadOptions{
-		forbidAnyNonGoFiles: isHarnessPkg,
-		forbidNativeFiles:   lp.ImportPath == "math",
+		forbidAnyNonGoFiles: isHarnessPkg || isGoOnlyPkg,
+		forbidNativeFiles:   lp.ImportPath == "math" || lp.ImportPath == "runtime/debug",
 		requireGoFiles:      listedSurfaceMustHaveGoFiles(lp.ImportPath),
 		parseCgoComments:    true,
 		onNonGoFile: func(_, ext string, raw []byte) error {
@@ -427,6 +437,11 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 			}
 			if isHarnessPkg {
 				if err := toolchain.VerifyHarnessFileDirectives(lp.ImportPath, text, runtimePullLinknames, selfPushLinknames, harnessRuntimePullMap, harnessAnyLinknameLocals); err != nil {
+					return fmt.Errorf("%s/%s: %w", lp.ImportPath, name, err)
+				}
+			}
+			if isGoOnlyPkg {
+				if err := toolchain.VerifyNoForeignDirectives(lp.ImportPath, text); err != nil {
 					return fmt.Errorf("%s/%s: %w", lp.ImportPath, name, err)
 				}
 			}
@@ -521,6 +536,31 @@ func verifyListedPackageWithIOAndSalt(ctx context.Context, lp listedPackage, pkg
 	case "runtime":
 		verdict.InactiveRuntimeGates = toolchain.DiscoverRuntimeInactiveGates(readRes.parsed, readRes.goSrcs, runtimeNonGoIdents)
 		verdict.VerifiedRuntimeLineWriters = toolchain.DiscoverVerifiedRuntimeLineWriters(readRes.parsed, readRes.goSrcs)
+		verdict.ModinfoVerified = toolchain.VerifyRuntimeModinfoAST(readRes.parsed, readRes.goSrcs, runtimeNonGoIdents) == nil
+	case "runtime/debug":
+		if err := toolchain.VerifyRuntimeDebugPackage(ctx, readRes.parsed, readRes.goSrcs, readRes.asmSources, readRes.selectedHeaders); err != nil {
+			return verifiedPackageVerdict{}, err, nil
+		}
+	case "text/tabwriter":
+		if err := toolchain.VerifyTabwriterPackageAST(readRes.parsed); err != nil {
+			return verifiedPackageVerdict{}, err, nil
+		}
+	case "go/token":
+		if err := toolchain.VerifyGoTokenPackageAST(readRes.parsed); err != nil {
+			return verifiedPackageVerdict{}, err, nil
+		}
+	case "go/scanner":
+		if err := toolchain.VerifyGoScannerPackageAST(readRes.parsed); err != nil {
+			return verifiedPackageVerdict{}, err, nil
+		}
+	case "go/ast":
+		if err := toolchain.VerifyGoASTPackageAST(readRes.parsed); err != nil {
+			return verifiedPackageVerdict{}, err, nil
+		}
+	case "go/parser":
+		if err := toolchain.VerifyGoParserPackageAST(readRes.parsed); err != nil {
+			return verifiedPackageVerdict{}, err, nil
+		}
 	case "os":
 		reqGates, err := toolchain.VerifyOSPackageAST(readRes.parsed, harnessRuntimePullMap, harnessAnyLinknameLocals)
 		if err != nil {

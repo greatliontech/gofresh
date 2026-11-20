@@ -241,7 +241,7 @@ func observableFreshPathUses(value ssa.Value, seen map[ssa.Value]bool, fp *fresh
 }
 
 func observableFreshPathConsumer(site ssa.CallInstruction, pathValue ssa.Value, fp *freshParamAnalysis, inProgress map[freshParamKey]bool) bool {
-	if site == nil || site.Common() == nil || site.Common().StaticCallee() == nil {
+	if site == nil || site.Common() == nil {
 		return false
 	}
 	if _, concurrent := site.(*ssa.Go); concurrent {
@@ -250,16 +250,19 @@ func observableFreshPathConsumer(site ssa.CallInstruction, pathValue ssa.Value, 
 	if blockInCycle(site.Block()) {
 		return false
 	}
-	call := site.Common()
-	callee := call.StaticCallee()
-	pkgPath, name := funcPkgPath(callee), functionSymbolName(callee)
-	// Crossing into a static user function is admitted when every
-	// attributed call site of the callee passes fresh at the value's
+	// Crossing into a static or closed-local user function is admitted when
+	// every attributed call site of the callee passes fresh at the value's
 	// positions and the parameter's uses stay within the graph
 	// (REQ-inputs-fresh-mutation's boundary extension).
 	if fp.boundaryCrossingObservable(site, pathValue, inProgress) {
 		return true
 	}
+	call := site.Common()
+	callee := call.StaticCallee()
+	if callee == nil {
+		return false
+	}
+	pkgPath, name := funcPkgPath(callee), functionSymbolName(callee)
 	if pkgPath != "os" || len(call.Args) == 0 || call.Args[0] != pathValue {
 		return false
 	}
@@ -311,104 +314,6 @@ func freshPathStoreFeedsJoin(store *ssa.Store, pathValue ssa.Value, seen map[ssa
 		}
 	}
 	return false
-}
-
-func forEachLocalSliceAllocStore(v ssa.Value, allowDebugRef bool, visit func(idx *ssa.IndexAddr, val ssa.Value) bool) (*ssa.Slice, *types.Array, bool) {
-	slice, ok := v.(*ssa.Slice)
-	if !ok || slice.X == nil {
-		return nil, nil, false
-	}
-	alloc, ok := slice.X.(*ssa.Alloc)
-	if !ok || alloc.Referrers() == nil {
-		return nil, nil, false
-	}
-	var arr *types.Array
-	if ptr, ok := types.Unalias(alloc.Type()).Underlying().(*types.Pointer); ok {
-		arr, _ = types.Unalias(ptr.Elem()).Underlying().(*types.Array)
-	}
-	for _, ref := range *alloc.Referrers() {
-		switch r := ref.(type) {
-		case *ssa.DebugRef:
-			if !allowDebugRef {
-				return nil, nil, false
-			}
-		case *ssa.Slice:
-			if r != slice {
-				return nil, nil, false
-			}
-		case *ssa.IndexAddr:
-			if r.X != alloc || r.Referrers() == nil {
-				return nil, nil, false
-			}
-			for _, elem := range *r.Referrers() {
-				switch e := elem.(type) {
-				case *ssa.DebugRef:
-					if !allowDebugRef {
-						return nil, nil, false
-					}
-				case *ssa.Store:
-					if e.Addr != r || (visit != nil && !visit(r, e.Val)) {
-						return nil, nil, false
-					}
-				default:
-					return nil, nil, false
-				}
-			}
-		default:
-			return nil, nil, false
-		}
-	}
-	return slice, arr, true
-}
-
-func fixedVariadicArgs(site *ssa.Call) ([]ssa.Value, bool) {
-	if site == nil || site.Common() == nil || len(site.Common().Args) != 1 {
-		return nil, false
-	}
-	var args []ssa.Value
-	seenIdxAddr := map[*ssa.IndexAddr]bool{}
-	slice, array, ok := forEachLocalSliceAllocStore(site.Common().Args[0], true, func(ref *ssa.IndexAddr, val ssa.Value) bool {
-		if seenIdxAddr[ref] || val == nil {
-			return false
-		}
-		seenIdxAddr[ref] = true
-		if args == nil {
-			ptr, ok := ref.X.Type().Underlying().(*types.Pointer)
-			if !ok {
-				return false
-			}
-			arr, ok := ptr.Elem().Underlying().(*types.Array)
-			if !ok || arr.Len() < 1 || arr.Len() > 64 {
-				return false
-			}
-			args = make([]ssa.Value, int(arr.Len()))
-		}
-		index, ok := constInt(ref.Index)
-		if !ok || index < 0 || index >= int64(len(args)) || args[index] != nil {
-			return false
-		}
-		args[index] = val
-		return true
-	})
-	if !ok || array == nil || array.Len() < 1 || array.Len() > 64 || len(args) != int(array.Len()) {
-		return nil, false
-	}
-	for _, arg := range args {
-		if arg == nil {
-			return nil, false
-		}
-	}
-	if slice.Referrers() == nil {
-		return nil, false
-	}
-	for _, ref := range *slice.Referrers() {
-		if call, ok := ref.(*ssa.Call); !ok || call != site {
-			if _, debug := ref.(*ssa.DebugRef); !debug {
-				return nil, false
-			}
-		}
-	}
-	return args, true
 }
 
 func safeFreshPathComponent(value ssa.Value) bool {

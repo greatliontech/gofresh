@@ -3,67 +3,9 @@ package closure
 import (
 	"go/token"
 	"go/types"
-	"slices"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
 )
-
-// cellOf resolves a load's address to the local allocation it names —
-// the allocation itself, or a free variable bound to it by every
-// closure creation of its function (a free variable bound to different
-// cells across creations names none). Nothing else is a cell.
-func cellOf(addr ssa.Value, seen map[ssa.Value]bool) *ssa.Alloc {
-	switch a := addr.(type) {
-	case *ssa.Alloc:
-		return a
-	case *ssa.FieldAddr:
-		return cellOf(a.X, seen)
-	case *ssa.IndexAddr:
-		return cellOf(a.X, seen)
-	case *ssa.FreeVar:
-		if seen[a] {
-			return nil
-		}
-		seen[a] = true
-		var cell *ssa.Alloc
-		index := slices.Index(a.Parent().FreeVars, a)
-		if index < 0 {
-			return nil
-		}
-		for _, mk := range closureCreations(a.Parent()) {
-			// A creation binding this free variable to a different cell
-			// than another creation did names none: one closure body,
-			// two cells — the fail-closed backstop no fixture
-			// constructs.
-			if index >= len(mk.Bindings) {
-				return nil
-			}
-			bound := cellOf(mk.Bindings[index], seen)
-			if bound == nil || (cell != nil && bound != cell) {
-				return nil
-			}
-			cell = bound
-		}
-		return cell
-	}
-	return nil
-}
-
-// closureCreations lists the MakeClosure instructions creating fn.
-func closureCreations(fn *ssa.Function) []*ssa.MakeClosure {
-	var creations []*ssa.MakeClosure
-	if fn == nil || fn.Parent() == nil {
-		return nil
-	}
-	for _, block := range fn.Parent().Blocks {
-		for _, instr := range block.Instrs {
-			if mk, ok := instr.(*ssa.MakeClosure); ok && mk.Fn == fn {
-				creations = append(creations, mk)
-			}
-		}
-	}
-	return creations
-}
 
 // walkLoadCellReferrers walks every referrer of the local cell backing loadAddr,
 // failing closed on any address escape or non-zero whole-struct overwrite when
@@ -71,39 +13,6 @@ func closureCreations(fn *ssa.Function) []*ssa.MakeClosure {
 // can populate loadAddr.
 func walkLoadCellReferrers(loadAddr ssa.Value, walkVal func(ssa.Value) bool) bool {
 	return walkLoadCellReferrersWithFP(loadAddr, nil, walkVal)
-}
-
-func structElemCellOf(addr ssa.Value, seen map[ssa.Value]bool) *ssa.Alloc {
-	switch a := addr.(type) {
-	case *ssa.Alloc:
-		return a
-	case *ssa.IndexAddr:
-		return structElemCellOf(a.X, seen)
-	case *ssa.Slice:
-		return structElemCellOf(a.X, seen)
-	case *ssa.FreeVar:
-		if seen[a] {
-			return nil
-		}
-		seen[a] = true
-		var cell *ssa.Alloc
-		index := slices.Index(a.Parent().FreeVars, a)
-		if index < 0 {
-			return nil
-		}
-		for _, mk := range closureCreations(a.Parent()) {
-			if index >= len(mk.Bindings) {
-				return nil
-			}
-			bound := structElemCellOf(mk.Bindings[index], seen)
-			if bound == nil || (cell != nil && bound != cell) {
-				return nil
-			}
-			cell = bound
-		}
-		return cell
-	}
-	return nil
 }
 
 func walkLoadCellReferrersWithFP(loadAddr ssa.Value, fp *freshParamAnalysis, walkVal func(ssa.Value) bool) bool {

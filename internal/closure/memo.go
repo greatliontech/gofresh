@@ -328,7 +328,7 @@ func (h *Hasher) binaryRootedMemo(pkgPath string) (closureHash string, inventory
 // unsafe.Offsetof, unsafe.Sizeof) from unaudited standard operation effects.
 // @30 admits the 31 universally internal/cpu-free IEEE-754 exact math
 // functions into the audited symbol set alongside math's 30 constants.
-const effectScanStrategy = "gofresh/effect-scan@31"
+const effectScanStrategy = "gofresh/effect-scan@32"
 
 // effectScanScope is the memo's full scope: the strategy version, the
 // analyzing frontend, complete selected source and admission policy. A Boolean

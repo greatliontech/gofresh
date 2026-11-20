@@ -23,6 +23,7 @@ import (
 
 type verifiedPackageVerdict struct {
 	OK                           bool                `json:"ok"`
+	ModinfoVerified              bool                `json:"modinfoVerified,omitempty"`
 	Delegates                    []string            `json:"delegates,omitempty"`
 	PureMathFuncs                []string            `json:"pureMathFuncs,omitempty"`
 	InactiveRuntimeGates         map[string][]string `json:"inactiveRuntimeGates,omitempty"`
@@ -525,6 +526,9 @@ func verifyToolchainSurfaceAndDelegatesWithIO(ctx context.Context, d sourceDiges
 		for _, fnName := range surfaceVerdicts["math"].PureMathFuncs {
 			pureDelegates["math:"+fnName] = true
 		}
+	}
+	if _, hasVerifiedDebug := surfaceVerdicts["runtime/debug"]; !failedSet["runtime/debug"] && hasVerifiedDebug && hasVerifiedRuntime && rtVerdict.ModinfoVerified {
+		pureDelegates["runtime/debug:ReadBuildInfo"] = true
 	}
 
 	if len(failedSet) == 0 {

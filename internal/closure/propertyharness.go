@@ -235,7 +235,7 @@ func propertyHarnessSeededSampleCallee(vp *propharness.VerifiedPackage, callee *
 	if vp == nil || callee == nil || len(vp.SeededSampleMethods) == 0 {
 		return propharness.MethodKey{}, false
 	}
-	methodName := strings.TrimSuffix(strings.TrimSuffix(functionSymbolName(callee), "$bound"), "$thunk")
+	methodName := baseFunctionSymbolName(callee)
 	var recvNamed *types.Named
 	if callee.Signature != nil && callee.Signature.Recv() != nil {
 		recvNamed = namedOriginDeref(callee.Signature.Recv().Type())
@@ -266,7 +266,7 @@ func harnessSeededSampleHasExplicitSeed(c *ssa.CallCommon) bool {
 	if callee == nil || callee.Signature == nil || !callee.Signature.Variadic() || len(c.Args) == 0 {
 		return false
 	}
-	slice, arr, ok := forEachLocalSliceAllocStore(c.Args[len(c.Args)-1], false, nil)
+	slice, arr, ok := forEachLocalSliceAllocStore(c.Args[len(c.Args)-1], nil)
 	if !ok || arr == nil || arr.Len() < 1 {
 		return false
 	}
@@ -353,7 +353,7 @@ func verifiedHarnessesProg(audited bool, p *program) map[string]*propharness.Ver
 			return false
 		}
 		if pkg.PkgPath == p.PkgPath || pkg.PkgPath == p.PkgPath+"_test" || pkg.ForTest == p.PkgPath ||
-			(pkg.Name == "main" && pkg.PkgPath == p.PkgPath+".test") {
+			IsGeneratedTestMainPackage(pkg) {
 			return true
 		}
 		if rejected[pkg.PkgPath] {

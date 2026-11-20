@@ -23,56 +23,6 @@ type asmExternalGlobalVerdict struct {
 	ok   bool
 }
 
-func nonReadOnlySSAGlobals(p *program) map[*ssa.Global]bool {
-	if p == nil || p.Prog == nil {
-		return nil
-	}
-	if p.Summaries != nil {
-		if cached, ok := p.Summaries[nonReadOnlyGlobalsSummaryKey].(map[*ssa.Global]bool); ok {
-			return cached
-		}
-	}
-	nonRO := map[*ssa.Global]bool{}
-	var ops [16]*ssa.Value
-	for _, fn := range progOrderedFunctions(p) {
-		if fn == nil {
-			continue
-		}
-		for _, blk := range fn.Blocks {
-			for _, instr := range blk.Instrs {
-				if _, ok := instr.(*ssa.DebugRef); ok {
-					continue
-				}
-				for _, op := range instr.Operands(ops[:0]) {
-					if op == nil || *op == nil {
-						continue
-					}
-					g, ok := (*op).(*ssa.Global)
-					if !ok {
-						continue
-					}
-					un, isUn := instr.(*ssa.UnOp)
-					if !isUn || un.Op != token.MUL || un.X != g {
-						nonRO[g] = true
-					}
-				}
-			}
-		}
-	}
-	if p.Summaries == nil {
-		p.Summaries = make(map[string]any, 2)
-	}
-	p.Summaries[nonReadOnlyGlobalsSummaryKey] = nonRO
-	return nonRO
-}
-
-func ssaGlobalStrictlyReadOnly(p *program, g *ssa.Global) bool {
-	if p == nil || g == nil || g.Pkg == nil {
-		return false
-	}
-	return !nonReadOnlySSAGlobals(p)[g]
-}
-
 // progAsmTextLinkageClean verifies that neither fnName nor any intra-package
 // Go-named TEXT callee in goCallees carries a go:linkname binding across the
 // loaded program, and that no intra-package Go-named TEXT callee resolves to a

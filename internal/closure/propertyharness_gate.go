@@ -180,12 +180,11 @@ func isAuthenticTestingSubtestCallback(fn *ssa.Function, fp *freshParamAnalysis,
 	}
 
 	if len(fn.FreeVars) > 0 {
-		if fp.summary != nil && fp.summary.nonClosureRef[fn] {
-			return false
-		}
 		var mcs []*ssa.MakeClosure
-		if fp.summary != nil {
-			mcs = fp.summary.closureRefs[fn]
+		if fp.closures != nil {
+			mcs = fp.closures[fn]
+		} else if fp.summary != nil {
+			mcs = fp.summary.closures[fn]
 		} else {
 			mcs = closureCreations(fn)
 		}
@@ -728,10 +727,9 @@ func typeMayCarryCallable(t types.Type, verified map[string]*propharness.Verifie
 }
 
 func harnessVariadicClosed(v ssa.Value, fp *freshParamAnalysis) bool {
-	_, _, ok := forEachLocalSliceAllocStore(v, false, func(_ *ssa.IndexAddr, val ssa.Value) bool {
+	return variadicSliceElementsAll(v, func(val ssa.Value) bool {
 		return propertyHarnessClosedValue(val, fp)
 	})
-	return ok
 }
 
 func targetRequiresAuthenticHandleParam(target *ssa.Function, argIdx int, isInvoke bool, isBoundRecv bool, verified map[string]*propharness.VerifiedPackage) bool {

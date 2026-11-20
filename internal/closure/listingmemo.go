@@ -7,13 +7,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
-	"golang.org/x/mod/modfile"
-
-	"github.com/greatliontech/gofresh/internal/buildflags"
 	"github.com/greatliontech/gofresh/internal/cachefile"
 )
 
@@ -40,7 +36,7 @@ const listingDirName = "listing"
 // record's Go shape rides the scope on its own (listingShape), so a
 // field added to the listing's package type retires older entries
 // without a version bump.
-const listingRecordVersion = 3
+const listingRecordVersion = 4
 
 // listingRecord is one persisted listing with the inputs it was derived
 // from: file digests by absolute path, effective entry classifications by
@@ -127,15 +123,8 @@ func (h *Hasher) listingScope() string {
 	if h.ToolchainContent() == "" {
 		return ""
 	}
-	goFlags, err := buildflags.Fields(h.snapshot.Value("GOFLAGS"))
-	if err != nil {
+	if hasExplicitModfileFlag(h.snapshot.Value("GOFLAGS"), h.buildFlags) {
 		return ""
-	}
-	for _, flag := range append(goFlags, h.buildFlags...) {
-		name := strings.TrimLeft(flag, "-")
-		if name == "modfile" || strings.HasPrefix(name, "modfile=") {
-			return ""
-		}
 	}
 	sum := sha256.Sum256([]byte(h.snapshot.Identity()))
 	return "listing|" + strconv.Itoa(listingRecordVersion) + "|" + listingShape + "|" + hex.EncodeToString(sum[:16]) + "|" + h.ToolchainContent() + "|" + h.dir + "|" + strings.Join(h.buildFlags, "\x00")
@@ -201,185 +190,46 @@ func (h *Hasher) storeListing(pkgPath string, pkgs []listPkg) {
 
 // listingInputs derives the input record of pkgPath's listing: every
 // mutable-local package directory's entry names and source-kind file
-// bytes, the trees under its embed patterns, the module files of every
-// module the module graph reads — each module contributing a package
-// (vendored nodes carry no module directory and ride the vendor tree),
-// every module the workspace uses, and the target of every local
-// replacement those files name — the vendor manifest of the main module
-// and of the workspace root, the workspace file the snapshot resolved
-// (or its absence along the ancestor chain), and the absence of a
-// module file between the working directory and the main module root. False when no main module
-// contains the working directory, or a module or workspace file
-// carries a directive this build cannot parse (reported as a
-// diagnostic on every pass the condition holds): the pass stays
-// unmodelled and spawns.
+// bytes, the trees under its embed patterns, and every module/workspace
+// file and absent sentinel collected by collectModuleInputs. False when
+// no main module contains the working directory, or a module or
+// workspace file cannot be parsed or safely modelled.
 func (h *Hasher) listingInputs(pkgPath string, pkgs []listPkg) (*listingRecord, bool) {
-	rec := &listingRecord{Version: listingRecordVersion, Files: map[string]string{}, Dirs: map[string][]listingEntry{}}
-	absent := map[string]bool{}
-	addFile := func(path string) ([]byte, bool) {
-		if _, done := rec.Files[path]; done || absent[path] {
-			return nil, true
+	modFiles, absentPaths, ok := h.collectModuleInputs(moduleInputOptions{
+		requireMainModule:  true,
+		emitUnmodelledDiag: true,
+		diagPkgPath:        pkgPath,
+		pkgPaths:           []string{pkgPath},
+	}, [][]listPkg{pkgs})
+	if !ok {
+		return nil, false
+	}
+	rec := &listingRecord{
+		Version: listingRecordVersion,
+		Files:   modFiles,
+		Dirs:    map[string][]listingEntry{},
+		Absent:  absentPaths,
+	}
+	addSourceFile := func(path string) bool {
+		path = filepath.Clean(path)
+		if _, done := rec.Files[path]; done {
+			return true
 		}
 		fb, err := h.readFile(path)
 		if err != nil {
-			if os.IsNotExist(err) {
-				absent[path] = true
-				return nil, true
-			}
-			return nil, false
+			return false
 		}
 		rec.Files[path] = fb.digest()
-		return fb.content, true
-	}
-	// addModule records a module directory's go.mod and go.sum and, from
-	// the go.mod, the module file of every local replacement target —
-	// requirements the graph reads without any package of the target
-	// entering this listing.
-	modules := map[string]bool{}
-	addModule := func(dir string) bool {
-		dir = filepath.Clean(dir)
-		if modules[dir] {
-			return true
-		}
-		modules[dir] = true
-		// The module file is read here regardless of whether an earlier
-		// record (a replacement target's) already digested it: the
-		// replace scan below must run once per module, not once per
-		// first sighting of its file.
-		goMod := filepath.Join(dir, "go.mod")
-		if _, ok := addFile(goMod); !ok {
-			return false
-		}
-		if _, ok := addFile(filepath.Join(dir, "go.sum")); !ok {
-			return false
-		}
-		if absent[goMod] {
-			return true
-		}
-		fb, err := h.readFile(goMod)
-		if err != nil {
-			return os.IsNotExist(err)
-		}
-		f, err := modfile.Parse(goMod, fb.content, nil)
-		if err != nil {
-			h.emitDiagnostic("listing-unmodelled", pkgPath, goMod+": "+err.Error()+"; the listing is spawned every pass")
-			return false
-		}
-		for _, r := range f.Replace {
-			if r.New.Version != "" {
-				continue
-			}
-			target := r.New.Path
-			if !filepath.IsAbs(target) {
-				target = filepath.Join(dir, target)
-			}
-			if _, ok := addFile(filepath.Join(target, "go.mod")); !ok {
-				return false
-			}
-		}
 		return true
 	}
-	var mainDirs []string
 	for _, p := range pkgs {
 		if p.Standard || p.Module == nil || h.pinnedPackage(&p) || p.IsGeneratedTestMainFor(pkgPath) {
 			continue
 		}
-		if p.Module.Dir != "" {
-			if p.Module.Main && !modules[filepath.Clean(p.Module.Dir)] {
-				mainDirs = append(mainDirs, filepath.Clean(p.Module.Dir))
-			}
-			if !addModule(p.Module.Dir) {
-				return nil, false
-			}
-		}
-		if !recordPackageDirInputs(p.Dir, &p, rec.Dirs, func(path string) bool {
-			_, ok := addFile(path)
-			return ok
-		}) {
+		if !recordPackageDirInputs(p.Dir, &p, rec.Dirs, addSourceFile) {
 			return nil, false
 		}
 	}
-	dir := filepath.Clean(h.dir)
-	if !filepath.IsAbs(dir) {
-		abs, err := filepath.Abs(dir)
-		if err != nil {
-			return nil, false
-		}
-		dir = abs
-	}
-	mainDir := ""
-	for _, candidate := range mainDirs {
-		if (dir == candidate || strings.HasPrefix(dir, candidate+string(filepath.Separator))) && len(candidate) > len(mainDir) {
-			mainDir = candidate
-		}
-	}
-	if mainDir == "" {
-		return nil, false
-	}
-	for d := dir; d != mainDir; d = filepath.Dir(d) {
-		absent[filepath.Join(d, "go.mod")] = true
-	}
-	if _, ok := addFile(filepath.Join(mainDir, "vendor", "modules.txt")); !ok {
-		return nil, false
-	}
-	switch work := h.snapshot.Value("GOWORK"); work {
-	case "off":
-	case "":
-		for d := dir; ; d = filepath.Dir(d) {
-			absent[filepath.Join(d, "go.work")] = true
-			if filepath.Dir(d) == d {
-				break
-			}
-		}
-	default:
-		content, ok := addFile(work)
-		if !ok {
-			return nil, false
-		}
-		if content == nil {
-			h.emitDiagnostic("listing-unmodelled", pkgPath, work+": the workspace file the environment resolved is absent; the listing is spawned every pass")
-			return nil, false
-		}
-		if _, ok := addFile(strings.TrimSuffix(work, ".work") + ".work.sum"); !ok {
-			return nil, false
-		}
-		wf, err := modfile.ParseWork(work, content, nil)
-		if err != nil {
-			h.emitDiagnostic("listing-unmodelled", pkgPath, work+": "+err.Error()+"; the listing is spawned every pass")
-			return nil, false
-		}
-		workDir := filepath.Dir(work)
-		// `go work vendor` writes the manifest at the workspace root,
-		// which is never a module directory.
-		if _, ok := addFile(filepath.Join(workDir, "vendor", "modules.txt")); !ok {
-			return nil, false
-		}
-		for _, use := range wf.Use {
-			target := use.Path
-			if !filepath.IsAbs(target) {
-				target = filepath.Join(workDir, target)
-			}
-			if !addModule(target) {
-				return nil, false
-			}
-		}
-		for _, r := range wf.Replace {
-			if r.New.Version != "" {
-				continue
-			}
-			target := r.New.Path
-			if !filepath.IsAbs(target) {
-				target = filepath.Join(workDir, target)
-			}
-			if _, ok := addFile(filepath.Join(target, "go.mod")); !ok {
-				return nil, false
-			}
-		}
-	}
-	for path := range absent {
-		rec.Absent = append(rec.Absent, path)
-	}
-	sort.Strings(rec.Absent)
 	return rec, true
 }
 

@@ -2758,3 +2758,41 @@ func TestDirEntriesMatch(t *testing.T) {
 		t.Fatal("missing directory returned nil error")
 	}
 }
+
+func TestToolchainSurfaceVerifiesReadBuildInfoAndSyntaxPackages(t *testing.T) {
+	seeded := map[string]verifiedPackageVerdict{}
+	sd := sourceDigests{
+		Packages:  map[string]string{},
+		inventory: map[string]listedPackage{},
+	}
+	for _, root := range auditedSurfaceTables() {
+		first, _, _ := strings.Cut(root, "/")
+		if strings.Contains(first, ".") {
+			continue
+		}
+		d := "seed-modinfo-" + root
+		sd.Packages[root] = d
+		sd.inventory[root] = listedPackage{ImportPath: root, Audited: true, digest: d}
+		seeded[verifiedPackageMemoKey(root, d)] = verifiedPackageVerdict{OK: true}
+	}
+	withClosureTestHooks(analysisTestHookSet{
+		packageVerdictOverride: func(memoKey string) (verifiedPackageVerdict, bool) {
+			v, ok := seeded[memoKey]
+			return v, ok
+		},
+	}, func() {
+		failed, pureDel, ioErr, ctxErr := verifyToolchainSurfaceAndDelegatesWithIO(t.Context(), sd)
+		if len(failed) != 0 || ioErr != nil || ctxErr != nil {
+			t.Fatalf("unexpected surface failure: failed=%v ioErr=%v ctxErr=%v", failed, ioErr, ctxErr)
+		}
+		if pureDel["runtime/debug:ReadBuildInfo"] {
+			t.Fatal("ReadBuildInfo admitted when runtime.ModinfoVerified is false")
+		}
+
+		seeded[verifiedPackageMemoKey("runtime", sd.Packages["runtime"])] = verifiedPackageVerdict{OK: true, ModinfoVerified: true}
+		failed, pureDel, ioErr, ctxErr = verifyToolchainSurfaceAndDelegatesWithIO(t.Context(), sd)
+		if len(failed) != 0 || ioErr != nil || ctxErr != nil || !pureDel["runtime/debug:ReadBuildInfo"] {
+			t.Fatalf("ReadBuildInfo not admitted when both runtime/debug and runtime.ModinfoVerified succeed: failed=%v delegates=%v", failed, pureDel)
+		}
+	})
+}

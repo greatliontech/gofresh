@@ -8,11 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-	"strings"
 
-	"golang.org/x/mod/modfile"
-
-	"github.com/greatliontech/gofresh/internal/buildflags"
 	"github.com/greatliontech/gofresh/internal/dynstate"
 )
 
@@ -60,7 +56,7 @@ func (h *Hasher) GraphMetadata(pkgPaths ...string) ([]GraphPackage, error) {
 				ForTest:    p.ForTest,
 				Imports:    append([]string(nil), p.Imports...),
 			}
-			if p.Name == "main" && strings.HasSuffix(p.ImportPath, ".test") {
+			if p.IsGeneratedTestMainFor(pkgPath) {
 				node.TestMain = true
 			}
 			switch {
@@ -78,192 +74,16 @@ func (h *Hasher) GraphMetadata(pkgPaths ...string) ([]GraphPackage, error) {
 	return nodes, nil
 }
 
-func (h *Hasher) moduleGraphInputs(freshDisk bool, listed [][]listPkg) (map[string]string, []string, bool) {
-	if h == nil || h.snapshot == nil {
-		return nil, nil, false
-	}
-	goFlags, err := buildflags.Fields(h.snapshot.Value("GOFLAGS"))
-	if err != nil {
-		return nil, nil, false
-	}
-	for _, flag := range append(goFlags, h.buildFlags...) {
-		name := strings.TrimLeft(flag, "-")
-		if name == "modfile" || strings.HasPrefix(name, "modfile=") {
-			return nil, nil, false
-		}
-	}
-	readOne := h.readFile
-	if freshDisk {
-		readOne = readBytes
-	}
-	modFiles := map[string]string{}
-	modContents := map[string][]byte{}
-	absentFiles := map[string]bool{}
-	recordFile := func(path string) ([]byte, bool) {
-		path = filepath.Clean(path)
-		if absentFiles[path] {
-			return nil, true
-		}
-		if content, ok := modContents[path]; ok {
-			return content, true
-		}
-		fb, err := readOne(path)
-		if err != nil {
-			if os.IsNotExist(err) {
-				absentFiles[path] = true
-				return nil, true
-			}
-			return nil, false
-		}
-		modFiles[path] = fb.digest()
-		modContents[path] = fb.content
-		return fb.content, true
-	}
-	seenModules := map[string]bool{}
-	var recordModule func(dir string) bool
-	recordModule = func(dir string) bool {
-		dir = filepath.Clean(dir)
-		if dir == "" || seenModules[dir] {
-			return true
-		}
-		seenModules[dir] = true
-		goMod := filepath.Join(dir, "go.mod")
-		content, ok := recordFile(goMod)
-		if !ok {
-			return false
-		}
-		if _, ok := recordFile(filepath.Join(dir, "go.sum")); !ok {
-			return false
-		}
-		if _, ok := recordFile(filepath.Join(dir, "vendor", "modules.txt")); !ok {
-			return false
-		}
-		if content == nil {
-			return true
-		}
-		f, err := modfile.Parse(goMod, content, nil)
-		if err != nil {
-			return false
-		}
-		for _, r := range f.Replace {
-			if r.New.Version != "" {
-				continue
-			}
-			target := r.New.Path
-			if !filepath.IsAbs(target) {
-				target = filepath.Join(dir, target)
-			}
-			if !recordModule(target) {
-				return false
-			}
-		}
-		return true
-	}
-	var mainDirs []string
-	for _, pkgs := range listed {
-		for _, p := range pkgs {
-			if p.Standard || p.Module == nil || h.pinnedPackage(&p) || (p.Name == "main" && strings.HasSuffix(p.ImportPath, ".test")) {
-				continue
-			}
-			if p.Module.Dir != "" {
-				cleanModDir := filepath.Clean(p.Module.Dir)
-				if p.Module.Main {
-					mainDirs = append(mainDirs, cleanModDir)
-				}
-				if !recordModule(cleanModDir) {
-					return nil, nil, false
-				}
-			}
-		}
-	}
-	if gomod := h.snapshot.Value("GOMOD"); gomod != "" && gomod != os.DevNull {
-		if !recordModule(filepath.Dir(gomod)) {
-			return nil, nil, false
-		}
-	}
-	dir := filepath.Clean(h.dir)
-	if !filepath.IsAbs(dir) {
-		abs, err := filepath.Abs(dir)
-		if err != nil {
-			return nil, nil, false
-		}
-		dir = abs
-	}
-	mainDir := ""
-	for _, candidate := range mainDirs {
-		if (dir == candidate || strings.HasPrefix(dir, candidate+string(filepath.Separator))) && len(candidate) > len(mainDir) {
-			mainDir = candidate
-		}
-	}
-	if mainDir != "" {
-		for d := dir; d != mainDir; d = filepath.Dir(d) {
-			if _, ok := recordFile(filepath.Join(d, "go.mod")); !ok {
-				return nil, nil, false
-			}
-			if filepath.Dir(d) == d {
-				break
-			}
-		}
-	}
-	switch work := h.snapshot.Value("GOWORK"); work {
-	case "off":
-	case "":
-		for d := dir; ; d = filepath.Dir(d) {
-			if _, ok := recordFile(filepath.Join(d, "go.work")); !ok {
-				return nil, nil, false
-			}
-			if filepath.Dir(d) == d {
-				break
-			}
-		}
-	default:
-		content, ok := recordFile(work)
-		if !ok || content == nil {
-			return nil, nil, false
-		}
-		if _, ok := recordFile(strings.TrimSuffix(work, ".work") + ".work.sum"); !ok {
-			return nil, nil, false
-		}
-		workDir := filepath.Dir(work)
-		if _, ok := recordFile(filepath.Join(workDir, "vendor", "modules.txt")); !ok {
-			return nil, nil, false
-		}
-		wf, err := modfile.ParseWork(work, content, nil)
-		if err != nil {
-			return nil, nil, false
-		}
-		for _, use := range wf.Use {
-			target := use.Path
-			if !filepath.IsAbs(target) {
-				target = filepath.Join(workDir, target)
-			}
-			if !recordModule(target) {
-				return nil, nil, false
-			}
-		}
-		for _, r := range wf.Replace {
-			if r.New.Version != "" {
-				continue
-			}
-			target := r.New.Path
-			if !filepath.IsAbs(target) {
-				target = filepath.Join(workDir, target)
-			}
-			if !recordModule(target) {
-				return nil, nil, false
-			}
-		}
-	}
-	absentPaths := make([]string, 0, len(absentFiles))
-	for path := range absentFiles {
-		absentPaths = append(absentPaths, path)
-	}
-	sort.Strings(absentPaths)
-	return modFiles, absentPaths, true
+func (h *Hasher) moduleGraphInputs(freshDisk bool, pkgPaths []string, listed [][]listPkg) (map[string]string, []string, bool) {
+	return h.collectModuleInputs(moduleInputOptions{
+		freshDisk:         freshDisk,
+		requireMainModule: true,
+		pkgPaths:          pkgPaths,
+	}, listed)
 }
 
-func (h *Hasher) moduleGraphDigest(freshDisk bool, listed [][]listPkg) (string, bool) {
-	modFiles, absentPaths, ok := h.moduleGraphInputs(freshDisk, listed)
+func (h *Hasher) moduleGraphDigest(freshDisk bool, pkgPaths []string, listed [][]listPkg) (string, bool) {
+	modFiles, absentPaths, ok := h.moduleGraphInputs(freshDisk, pkgPaths, listed)
 	if !ok {
 		return "", false
 	}
@@ -310,7 +130,7 @@ func (h *Hasher) SnapshotScanInputs(pkgPaths ...string) TreeDigestSnapshot {
 		}
 		listed = append(listed, pkgs)
 	}
-	modFiles, absentPaths, ok := h.moduleGraphInputs(false, listed)
+	modFiles, absentPaths, ok := h.moduleGraphInputs(false, pkgPaths, listed)
 	if !ok {
 		return TreeDigestSnapshot{}
 	}
@@ -336,9 +156,10 @@ func (h *Hasher) SnapshotScanInputs(pkgPaths ...string) TreeDigestSnapshot {
 		files[full] = fb.digest()
 		return true
 	}
-	for _, pkgs := range listed {
+	for i, pkgs := range listed {
+		pkgPath := pkgPaths[i]
 		for _, p := range pkgs {
-			if p.Standard || p.Module == nil || h.pinnedPackage(&p) || (p.Name == "main" && strings.HasSuffix(p.ImportPath, ".test")) {
+			if p.Standard || p.Module == nil || h.pinnedPackage(&p) || p.IsGeneratedTestMainFor(pkgPath) {
 				continue
 			}
 			cleanDir := filepath.Clean(p.Dir)
@@ -438,7 +259,7 @@ func (h *Hasher) MutableFactKeys(factScope string, meta []GraphPackage, freshDis
 			if err := h.contextErr(); err != nil {
 				return nil, nil
 			}
-			if p.Standard || p.Module == nil || h.pinnedPackage(&p) || (p.Name == "main" && strings.HasSuffix(p.ImportPath, ".test")) {
+			if p.Standard || p.Module == nil || h.pinnedPackage(&p) || p.IsGeneratedTestMainFor(pkgPath) {
 				continue
 			}
 			if _, recorded := localPkgDigest[p.ImportPath]; recorded {
@@ -496,7 +317,7 @@ func (h *Hasher) MutableFactKeys(factScope string, meta []GraphPackage, freshDis
 		}
 	}
 
-	modDigest, ok := h.moduleGraphDigest(freshDisk, listed)
+	modDigest, ok := h.moduleGraphDigest(freshDisk, pkgPaths, listed)
 	if !ok {
 		return nil, nil
 	}

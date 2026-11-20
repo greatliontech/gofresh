@@ -872,7 +872,7 @@ func TestFingerprintDataShape(t *testing.T) {
 }
 
 func TestObservationRTAVersion(t *testing.T) {
-	if ObservationRTA != "gofresh/observation-rta@74" {
+	if ObservationRTA != "gofresh/observation-rta@75" {
 		t.Fatalf("ObservationRTA = %q, want content- and policy-bound proof evidence", ObservationRTA)
 	}
 }
@@ -884,7 +884,7 @@ func TestDynamicStateStrategyVersion(t *testing.T) {
 }
 
 func TestClosureStrategyVersion(t *testing.T) {
-	if ClosureStrategy != "gofresh/closure@1 gofresh/canonical-member@3 gofresh/variant-parse@2" {
+	if ClosureStrategy != "gofresh/closure@2 gofresh/canonical-member@3 gofresh/variant-parse@2" {
 		t.Fatalf("ClosureStrategy = %q, want the composition of the fold, canonical-member, and compartment derivations", ClosureStrategy)
 	}
 }

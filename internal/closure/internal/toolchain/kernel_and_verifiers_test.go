@@ -6,6 +6,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -936,6 +939,22 @@ func FuzzToolchainMathDebugAndKernelVerifiers(f *testing.F) {
 		_ = DiscoverRuntimeInactiveGates(files, srcs, nil)
 		_ = DiscoverVerifiedRuntimeLineWriters(files, srcs)
 		_ = VerifyTestingChdirAST(files)
+		if (VerifyTabwriterPackageAST(files) == nil) != (VerifyTabwriterPackageAST(files) == nil) {
+			t.Fatalf("non-deterministic VerifyTabwriterPackageAST")
+		}
+		if (VerifyGoTokenPackageAST(files) == nil) != (VerifyGoTokenPackageAST(files) == nil) {
+			t.Fatalf("non-deterministic VerifyGoTokenPackageAST")
+		}
+		if (VerifyGoScannerPackageAST(files) == nil) != (VerifyGoScannerPackageAST(files) == nil) {
+			t.Fatalf("non-deterministic VerifyGoScannerPackageAST")
+		}
+		if (VerifyGoASTPackageAST(files) == nil) != (VerifyGoASTPackageAST(files) == nil) {
+			t.Fatalf("non-deterministic VerifyGoASTPackageAST")
+		}
+		if (VerifyGoParserPackageAST(files) == nil) != (VerifyGoParserPackageAST(files) == nil) {
+			t.Fatalf("non-deterministic VerifyGoParserPackageAST")
+		}
+		_ = VerifyNoForeignDirectives("text/tabwriter", goSrc)
 		for _, decl := range parsed.Decls {
 			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Body != nil {
 				_, _ = BuildStmtCFG(fn.Body.List)
@@ -943,3 +962,445 @@ func FuzzToolchainMathDebugAndKernelVerifiers(f *testing.F) {
 		}
 	})
 }
+
+func loadGOROOTPkgAST(t *testing.T, pkgPath string) ([]*ast.File, []string) {
+	t.Helper()
+	dir := filepath.Join(runtime.GOROOT(), "src", filepath.FromSlash(pkgPath))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", dir, err)
+	}
+	fset := token.NewFileSet()
+	var files []*ast.File
+	var srcs []string
+	for _, ent := range entries {
+		name := ent.Name()
+		if ent.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", name, err)
+		}
+		src := string(raw)
+		f, err := parser.ParseFile(fset, name, src, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("ParseFile(%s): %v", name, err)
+		}
+		files = append(files, f)
+		srcs = append(srcs, src)
+	}
+	if len(files) == 0 {
+		t.Fatalf("no Go files loaded for %s", pkgPath)
+	}
+	return files, srcs
+}
+
+func TestGOROOTTabwriterAndSyntaxPackageVerifiers(t *testing.T) {
+	cases := []struct {
+		pkgPath string
+		verify  func([]*ast.File) error
+	}{
+		{"text/tabwriter", VerifyTabwriterPackageAST},
+		{"go/token", VerifyGoTokenPackageAST},
+		{"go/scanner", VerifyGoScannerPackageAST},
+		{"go/ast", VerifyGoASTPackageAST},
+		{"go/parser", VerifyGoParserPackageAST},
+	}
+	for _, tc := range cases {
+		t.Run(tc.pkgPath, func(t *testing.T) {
+			files, srcs := loadGOROOTPkgAST(t, tc.pkgPath)
+			for _, src := range srcs {
+				if err := VerifyNoForeignDirectives(tc.pkgPath, src); err != nil {
+					t.Fatalf("VerifyNoForeignDirectives(%s) failed: %v", tc.pkgPath, err)
+				}
+			}
+			if err := tc.verify(files); err != nil {
+				t.Fatalf("verifier failed on active GOROOT %s: %v", tc.pkgPath, err)
+			}
+		})
+	}
+
+	constraintFiles, constraintSrcs := loadGOROOTPkgAST(t, "go/build/constraint")
+	for _, src := range constraintSrcs {
+		if err := VerifyFileLinknameDirectives("go/build/constraint", src); err != nil {
+			t.Fatalf("VerifyFileLinknameDirectives(go/build/constraint) failed: %v", err)
+		}
+	}
+	if err := VerifyPurePackageAST("go/build/constraint", constraintFiles); err != nil {
+		t.Fatalf("VerifyPurePackageAST(go/build/constraint) failed: %v", err)
+	}
+}
+
+const validTabwriterSyntheticSrc = `package tabwriter
+
+import (
+	"fmt"
+	"io"
+	"unicode/utf8"
+)
+
+var newline = []byte{'\n'}
+
+type cell struct {
+	size  int
+	width int
+}
+
+type Writer struct {
+	output io.Writer
+	minwidth int
+	tabwidth int
+	padding int
+	padbytes [8]byte
+	flags uint
+	buf []byte
+	pos int
+	cell cell
+	lines [][]cell
+}
+
+func NewWriter(output io.Writer, minwidth, tabwidth, padding int, padchar byte, flags uint) *Writer {
+	return new(Writer).Init(output, minwidth, tabwidth, padding, padchar, flags)
+}
+
+func (b *Writer) Init(output io.Writer, minwidth, tabwidth, padding int, padchar byte, flags uint) *Writer {
+	b.output = output
+	b.minwidth = minwidth + utf8.RuneSelf
+	_ = fmt.Sprintf("%d", padding)
+	return b
+}
+
+func (b *Writer) dump() {
+	print("debug")
+}
+
+func (b *Writer) Write(buf []byte) (n int, err error) {
+	return len(buf), nil
+}
+
+func (b *Writer) Flush() error {
+	_, err := b.output.Write(newline)
+	return err
+}
+`
+
+func TestVerifyTabwriterPackageASTMutations(t *testing.T) {
+	if err := VerifyTabwriterPackageAST(mustParseTestFiles(t, validTabwriterSyntheticSrc)); err != nil {
+		t.Fatalf("valid synthetic tabwriter rejected: %v", err)
+	}
+
+	negCases := []struct {
+		name    string
+		mutate  func(string) string
+		wantSub string
+	}{
+		{
+			name:    "unapproved_import",
+			mutate:  func(s string) string { return strings.Replace(s, "\"io\"", "\"io\"\n\t\"os\"", 1) },
+			wantSub: "unapproved import \"os\"",
+		},
+		{
+			name:    "init_func",
+			mutate:  func(s string) string { return s + "\nfunc init() {}\n" },
+			wantSub: "unexpected init function",
+		},
+		{
+			name:    "mutable_pkg_var",
+			mutate:  func(s string) string { return strings.Replace(s, "return len(buf), nil", "newline[0] = 'x'\n\treturn len(buf), nil", 1) },
+			wantSub: "forbidden mutation or address-of package var newline",
+		},
+		{
+			name:    "func_field_on_writer",
+			mutate:  func(s string) string { return strings.Replace(s, "pos int", "pos int\n\thook func()", 1) },
+			wantSub: "forbidden field hook type on Writer",
+		},
+		{
+			name:    "call_to_dump",
+			mutate:  func(s string) string { return strings.Replace(s, "return len(buf), nil", "b.dump()\n\treturn len(buf), nil", 1) },
+			wantSub: "forbidden selector reference .dump",
+		},
+		{
+			name:    "builtin_print_outside_dump",
+			mutate:  func(s string) string { return strings.Replace(s, "return len(buf), nil", "println(len(buf))\n\treturn len(buf), nil", 1) },
+			wantSub: "forbidden builtin println in Write",
+		},
+	}
+	for _, tc := range negCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := VerifyTabwriterPackageAST(mustParseTestFiles(t, tc.mutate(validTabwriterSyntheticSrc)))
+			if err == nil || !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("got err=%v, want substring %q", err, tc.wantSub)
+			}
+		})
+	}
+}
+
+func TestVerifySyntaxPackagesNegativeMutations(t *testing.T) {
+	t.Run("go_token_post_init_keywords_write", func(t *testing.T) {
+		src := `package token
+import "strconv"
+type Token int
+type FileSet struct { base int }
+var tokens = [...]string{0: "ILLEGAL"}
+var keywords map[string]Token
+func init() { keywords = make(map[string]Token); keywords[tokens[0]] = 0 }
+func Mutate(s string) { keywords[s] = Token(len(strconv.Itoa(1))) }
+`
+		err := VerifyGoTokenPackageAST(mustParseTestFiles(t, src))
+		if err == nil || !strings.Contains(err.Error(), "forbidden mutation or address-of package var keywords in Mutate") {
+			t.Fatalf("got err=%v, want keywords mutation rejection", err)
+		}
+	})
+
+	t.Run("go_token_generic_fileset_rejected", func(t *testing.T) {
+		src := `package token
+type FileSet[T any] struct { base T }
+`
+		err := VerifyGoTokenPackageAST(mustParseTestFiles(t, src))
+		if err == nil || !strings.Contains(err.Error(), "FileSet must be a non-generic non-alias struct") {
+			t.Fatalf("got err=%v, want generic FileSet rejection", err)
+		}
+	})
+
+	t.Run("go_token_exported_fileset_field_rejected", func(t *testing.T) {
+		src := `package token
+type FileSet struct { Exported int }
+`
+		err := VerifyGoTokenPackageAST(mustParseTestFiles(t, src))
+		if err == nil || !strings.Contains(err.Error(), "FileSet must not expose exported field") {
+			t.Fatalf("got err=%v, want exported FileSet field rejection", err)
+		}
+	})
+
+	t.Run("go_scanner_fprintf_outside_printerror", func(t *testing.T) {
+		src := `package scanner
+import (
+	"fmt"
+	"io"
+	"path/filepath"
+)
+func PrintError(w io.Writer, err error) { fmt.Fprintf(w, "%v", err) }
+func ScanHelper(p string) string {
+	fmt.Fprintf(nil, "%s", filepath.Clean(p))
+	return p
+}
+`
+		err := VerifyGoScannerPackageAST(mustParseTestFiles(t, src))
+		if err == nil || !strings.Contains(err.Error(), "forbidden fmt.Fprintf in ScanHelper") {
+			t.Fatalf("got err=%v, want fmt.Fprintf confinement error", err)
+		}
+	})
+
+	t.Run("go_scanner_filepath_evalsymlinks", func(t *testing.T) {
+		src := `package scanner
+import (
+	"fmt"
+	"io"
+	"path/filepath"
+)
+func PrintError(w io.Writer, err error) { fmt.Fprintf(w, "%v", err) }
+func BadPath(p string) (string, error) { return filepath.EvalSymlinks(p) }
+`
+		err := VerifyGoScannerPackageAST(mustParseTestFiles(t, src))
+		if err == nil || !strings.Contains(err.Error(), "forbidden filepath.EvalSymlinks in BadPath") {
+			t.Fatalf("got err=%v, want filepath.EvalSymlinks rejection", err)
+		}
+	})
+
+	t.Run("go_ast_os_outside_print", func(t *testing.T) {
+		src := `package ast
+import (
+	"go/token"
+	"io"
+	"os"
+	"reflect"
+)
+type FieldFilter func(string, reflect.Value) bool
+type Ident struct{ NamePos token.Pos }
+func (x *Ident) Pos() token.Pos { return x.NamePos }
+func (x *Ident) End() token.Pos { return x.NamePos }
+func Fprint(w io.Writer, fset *token.FileSet, x any, f FieldFilter) error { return nil }
+func Print(fset *token.FileSet, x any) error { return Fprint(os.Stdout, fset, x, nil) }
+func Leak() { _ = os.Stdout }
+`
+		err := VerifyGoASTPackageAST(mustParseTestFiles(t, src))
+		if err == nil || !strings.Contains(err.Error(), "forbidden os.Stdout in Leak") {
+			t.Fatalf("got err=%v, want os confinement error", err)
+		}
+	})
+
+	t.Run("go_ast_impure_pos_method", func(t *testing.T) {
+		src := `package ast
+import (
+	"fmt"
+	"go/token"
+	"io"
+	"os"
+	"reflect"
+)
+type FieldFilter func(string, reflect.Value) bool
+type Ident struct{ NamePos token.Pos }
+func (x *Ident) Pos() token.Pos { _ = fmt.Sprintf("x"); return x.NamePos }
+func (x *Ident) End() token.Pos { return x.NamePos }
+func Fprint(w io.Writer, fset *token.FileSet, x any, f FieldFilter) error { return nil }
+func Print(fset *token.FileSet, x any) error { return Fprint(os.Stdout, fset, x, nil) }
+`
+		err := VerifyGoASTPackageAST(mustParseTestFiles(t, src))
+		if err == nil || !strings.Contains(err.Error(), "forbidden fmt.Sprintf in Ident.Pos") {
+			t.Fatalf("got err=%v, want Pos() purity error", err)
+		}
+	})
+
+	const baseValidParserSrc = `package parser
+import (
+	"errors"
+	"fmt"
+	"go/ast"
+	"go/token"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+)
+type Mode uint
+const (
+	PackageClauseOnly Mode = 1 << iota
+	ImportsOnly
+	ParseComments
+	Trace
+)
+const debugResolve = false
+type parser struct { trace bool }
+func (p *parser) init(file *token.File, src []byte, mode Mode) {
+	p.trace = mode&Trace != 0
+}
+func (p *parser) printTrace(a ...any) { fmt.Println(a...) }
+func trace(p *parser, msg string) *parser { p.printTrace(msg); return p }
+func un(p *parser) { p.printTrace(")") }
+func (p *parser) step() {
+	if p.trace {
+		defer un(trace(p, "step"))
+	}
+}
+type resolver struct{}
+func (r *resolver) trace(msg string) { fmt.Println(msg) }
+func (r *resolver) run() {
+	if debugResolve {
+		r.trace("x")
+	}
+}
+func readSource(filename string, src any) ([]byte, error) {
+	if src != nil {
+		switch s := src.(type) {
+		case string:
+			return []byte(s), nil
+		case []byte:
+			return s, nil
+		case io.Reader:
+			return io.ReadAll(s)
+		}
+		return nil, errors.New("invalid source")
+	}
+	return os.ReadFile(filename)
+}
+func ParseFile(fset *token.FileSet, filename string, src any, mode Mode) (*ast.File, error) {
+	text, err := readSource(filename, src)
+	if err != nil {
+		return nil, err
+	}
+	var p parser
+	p.init(nil, text, mode)
+	return nil, nil
+}
+func ParseDir(fset *token.FileSet, path string, filter func(fs.FileInfo) bool, mode Mode) (map[string]*ast.Package, error) {
+	_, err := os.ReadDir(filepath.Join(path, "."))
+	return nil, err
+}
+func ParseExprFrom(fset *token.FileSet, filename string, src any, mode Mode) (ast.Expr, error) {
+	text, err := readSource(filename, src)
+	if err != nil {
+		return nil, err
+	}
+	var p parser
+	p.init(nil, text, mode)
+	return nil, nil
+}
+func ParseExpr(x string) (ast.Expr, error) {
+	return ParseExprFrom(token.NewFileSet(), "", []byte(x), 0)
+}
+`
+	if err := VerifyGoParserPackageAST(mustParseTestFiles(t, baseValidParserSrc)); err != nil {
+		t.Fatalf("baseValidParserSrc rejected: %v", err)
+	}
+
+	parserNeg := []struct {
+		name    string
+		mutate  func(string) string
+		wantSub string
+	}{
+		{
+			name:    "unguarded_printTrace",
+			mutate:  func(s string) string { return strings.Replace(s, "if p.trace {\n\t\tdefer un(trace(p, \"step\"))\n\t}", "p.printTrace(\"leak\")", 1) },
+			wantSub: "unguarded .printTrace reference in parser.step",
+		},
+		{
+			name:    "funclit_inside_if_trace_unguarded",
+			mutate:  func(s string) string { return strings.Replace(s, "defer un(trace(p, \"step\"))", "fn := func() { p.printTrace(\"leak\") }\n\t\tfn()", 1) },
+			wantSub: "unguarded .printTrace reference in parser.step",
+		},
+		{
+			name:    "debug_resolve_enabled",
+			mutate:  func(s string) string { return strings.Replace(s, "const debugResolve = false", "const debugResolve = true", 1) },
+			wantSub: "unguarded .trace reference in resolver.run",
+		},
+		{
+			name:    "os_in_non_nil_readsource",
+			mutate:  func(s string) string { return strings.Replace(s, "return []byte(s), nil", "return os.ReadFile(s)", 1) },
+			wantSub: "forbidden os.ReadFile inside readSource non-nil branch",
+		},
+		{
+			name:    "parseexpr_nonzero_mode",
+			mutate:  func(s string) string { return strings.Replace(s, "[]byte(x), 0)", "[]byte(x), Trace)", 1) },
+			wantSub: "ParseExpr must pass mode 0",
+		},
+		{
+			name:    "parsefile_nil_readsource",
+			mutate:  func(s string) string { return strings.Replace(s, "readSource(filename, src)", "readSource(filename, nil)", 1) },
+			wantSub: "readSource in ParseFile must forward src",
+		},
+		{
+			name:    "parsefile_forced_trace_init",
+			mutate:  func(s string) string { return strings.Replace(s, "p.init(nil, text, mode)", "p.init(nil, text, mode|Trace)", 1) },
+			wantSub: ".init in ParseFile must forward mode",
+		},
+		{
+			name:    "parsefile_readsource_alias",
+			mutate:  func(s string) string { return strings.Replace(s, "text, err := readSource(filename, src)", "rs := readSource\n\t_, _ = rs(filename, nil)\n\ttext, err := readSource(filename, src)", 1) },
+			wantSub: "without aliasing",
+		},
+		{
+			name:    "trace_iota_broken_by_intermediate_const",
+			mutate:  func(s string) string { return strings.Replace(s, "\tImportsOnly\n", "\tImportsOnly = 99\n", 1) },
+			wantSub: "Trace constant bit (1 << 3) mismatch",
+		},
+		{
+			name:    "foreign_linkname_directive",
+			mutate:  func(s string) string { return s + "\n//go:linkname ParseExpr runtime.evil\n" },
+			wantSub: "forbidden linkname directive",
+		},
+	}
+	for _, tc := range parserNeg {
+		t.Run(tc.name, func(t *testing.T) {
+			mut := tc.mutate(baseValidParserSrc)
+			err := VerifyNoForeignDirectives("go/parser", mut)
+			if err == nil {
+				err = VerifyGoParserPackageAST(mustParseTestFiles(t, mut))
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("got err=%v, want substring %q", err, tc.wantSub)
+			}
+		})
+	}
+}
+

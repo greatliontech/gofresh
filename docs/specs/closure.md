@@ -51,10 +51,15 @@ change silently.
 **REQ-closure-coverage** (invariant): The source closure of a subject MUST include
 not only the functions its call graph reaches but every constant, type, and
 package-level variable those functions reference, the initialization of every
-package contributing a reached declaration, and the files embedded and read through
-them — so that flipping a referenced constant, changing a referenced type's layout,
-editing an `init` side effect the subject observes, or editing an embedded data file
-moves the closure hash even when every function body is byte-identical.
+package contributing a reached declaration, the files embedded and read through
+them, and, whenever `runtime/debug` participates in the dependency graph, the
+mutable-local module and workspace manifests (`go.mod`, `go.sum`, `go.work`,
+`go.work.sum`, and `vendor/modules.txt`) from which the Go build embeds module,
+dependency-checksum, vendor, and default-`GODEBUG` metadata — so that flipping a referenced constant, changing a
+referenced type's layout, editing an `init` side effect the subject observes,
+editing an embedded data file, or editing module metadata read through
+`runtime/debug.ReadBuildInfo` moves the closure hash even when every function
+body is byte-identical.
 
 **REQ-closure-stdlib-cut** (behavior): The closure MUST exclude standard-library
 declarations from the hash while still traversing call edges through them — the
@@ -81,7 +86,11 @@ preserve the source guard separately from implementation refinement:
 - **maximal-identity** — The default source guard is the maximal selected
   test-binary closure of each subject's package, hashing every non-standard
   dependency whole — each member by its canonical form where
-  REQ-closure-canonical-member affords one, by its bytes otherwise — and salting
+  REQ-closure-canonical-member affords one, by its bytes otherwise — together
+  with the mutable-local module and workspace manifests (`go.mod`, `go.sum`,
+  `go.work`, `go.work.sum`, and `vendor/modules.txt`) whenever `runtime/debug`
+  enters the dependency graph (whose existing manifest files also join the
+  view's source-file inventory under REQ-fresh-view-source-identities), and salting
   that package closure with the subject identity. The subject package's own
   test-variant nodes' source members are excluded from that core hash: their
   production members already ride the base package's contribution, and their
@@ -1822,8 +1831,12 @@ claim and its dependencies govern the file fold and precise walks; a fold
 unable to resolve the declaration or discharge a premise cannot grant it.
 The following families state the properties such derivations must establish:
 
-- Formatting, including fmt's Sprint family, computes from its operands;
-  argument methods remain visible to reachability and independently classified.
+- Formatting and string scanning, including fmt's Sprint, Append, Errorf, and
+  Sscan families, compute from their operands; formatted and scanned argument
+  methods (`String`, `GoString`, `Error`, `Format`, `Scan`) remain visible to
+  reachability and independently classified, while writer-first formatting and
+  reader-first scanning (`Fprint*`, `Fscan*`) require proven in-memory stream
+  operands under REQ-closure-observability-writer-sink.
 - Arithmetic such as `math/big`, compile-time constants in package `math`
   (`MaxInt*`, `MinInt*`, `MaxUint*`, `MaxFloat*`, `SmallestNonzeroFloat*`, `Pi`,
   `E`, `Phi`, `Sqrt*`, `Ln*`, `Log*`), and universally CPU-feature-free IEEE-754
@@ -1920,6 +1933,31 @@ The following families state the properties such derivations must establish:
   packages admitted only when initialized by a single static `errors.New` store
   in synthetic package variable initialization with no other writes — `func
   init()` bodies included — or address-taking across the analyzed program).
+- Go syntax, token, scanner, AST, and parser computation (`go/build/constraint`,
+  `go/token`, `go/scanner`, `go/ast`, and `go/parser`) must establish
+  process-memory computation over caller-supplied source buffers and syntax
+  trees under checked derivations over the selected standard-library
+  implementation: `go/parser.ParseExpr` computes over its string argument;
+  `go/parser.ParseFile` and `go/parser.ParseExprFrom` admit at the observability
+  tier only when `src` provably originates at non-nil `MakeInterface` values over
+  `string`, `[]byte`, non-reader concrete types, or admitted in-memory
+  `io.Reader` operands (REQ-closure-observability-writer-sink) and `mode`
+  excludes `parser.Trace`; `go/scanner.PrintError` requires an admitted
+  in-memory `io.Writer` operand; `go/parser.ParseDir`, `src == nil` file reads,
+  `parser.Trace`, `go/ast.Print`, and reflection-dispatching `go/ast.Fprint`
+  retain their filesystem, output, and reflection refusals.
+- Build-info parsing and embedded module metadata (`runtime/debug`):
+  `ParseBuildInfo` and `(*BuildInfo).String` compute deterministically over
+  caller-supplied strings and structs under a checked `runtime/debug`
+  derivation; `ReadBuildInfo` admits only when both `runtime/debug` and
+  `runtime`'s `modinfo` backing storage satisfy checked source derivations, the
+  closure folds mutable-local module and workspace metadata (`go.mod`, `go.sum`,
+  `go.work`, `go.work.sum`, `vendor/modules.txt`), and effective `-buildvcs`
+  resolution across `GOFLAGS` and explicit build flags omits VCS revision and
+  dirty-tree stamping
+  (`-buildvcs=false` on `package main` at the maximal tier; `-buildvcs=false` or
+  `-buildvcs=auto` on test binaries at the observability tier; `-buildvcs=true`
+  or unparseable flags refused under REQ-fresh-commit-independent).
 
 **REQ-closure-observability-entropy** (invariant): Entropy operations, including crypto/rand's Read, Text, Prime and Int and
 unseeded math/rand sources, MUST retain their input classification unless a checked
@@ -2060,29 +2098,37 @@ stored into a standard variable is never proven (the standard bodies
 load it unscanned), and every other shape keeps the mark-and-poison
 judgment.
 
-**REQ-closure-observability-writer-sink** (invariant): One value-computation claim
-(REQ-closure-observability-audited-set) is operand-sensitive: fmt's
-writer-first print family (Fprint, Fprintf, Fprintln) MUST be
-Sprint-equivalent value computation only when checked formatting semantics hold
-and the writer
-operand provably pins every dynamic type it can carry to a sink with a checked
-in-memory-write or no-op discard claim — including `*bytes.Buffer`,
-`*strings.Builder`, or an unmutated `io.Discard` sentinel global only
-when the selected implementation proves that writes append to process memory
-(or discard without effect) and acquire nothing ambient — judged by a closed-value
-walk under the dispatch admissions' discipline: the pinning MakeInterface's
-concrete type decides, subject-attributed parameter crossing included, and
-startup flow, carrying no subject attribution, closes locally constructed
-writers only; an unproven writer — an interface-typed value the walk
-cannot trace to pinning MakeInterfaces (a loaded interface, a call result,
-any mixed or enumeration-refused provenance) — keeps the formatted-output
-classification, while a concrete `*bytes.Buffer`/`*strings.Builder`
-expression pins regardless of which instance it denotes (which instance
-receives the bytes never changes which write runs — the footing a direct
-write with the same checked receiver claim already has), a dynamically reached Fprint keeps it
-regardless of site arguments (they belong to the dynamic signature, not
-fmt's shape), and the maximal scan's package-level Fprint finding, blind to
-operands, narrows to a diagnostic so the writer-sensitive tiers decide.
+**REQ-closure-observability-writer-sink** (invariant): Stream-parameterized
+standard operations (REQ-closure-observability-audited-set) — writer-first
+formatting (`fmt.Fprint`, `fmt.Fprintf`, `fmt.Fprintln`, and
+`go/scanner.PrintError`) and reader-first scanning (`fmt.Fscan`, `fmt.Fscanf`,
+`fmt.Fscanln`, and `io.Reader` sources passed to `go/parser.ParseFile` and
+`go/parser.ParseExprFrom`) — MUST be admitted as pure in-memory value
+computation only when checked implementation semantics hold and the stream
+operand provably pins every dynamic type and wrapper instance it can carry to an
+in-memory stream or no-op discard sink that acquires nothing ambient: for
+writers, `*bytes.Buffer`, `*strings.Builder`, an unmutated `io.Discard` sentinel
+global, carrier-free concrete `hash.Hash` implementations from verified pure
+hash packages (`crypto/md5`, `crypto/sha1`, `crypto/sha256`, `crypto/sha512`,
+`crypto/internal/fips140/sha256`, `crypto/internal/fips140/sha512`,
+`crypto/internal/fips140/sha3`, `hash/adler32`, `hash/crc32`, `hash/crc64`,
+`hash/fnv`, plus `crypto/hmac` constructed over closed pure hash factories;
+process-seeded `hash/maphash` excluded), and alias-confined `*bufio.Writer` and
+`*text/tabwriter.Writer` instances whose construction and every `Reset`/`Init`
+rebind (and `ReadFrom` reader) recursively target admitted in-memory streams
+without escaping to unverified code capable of type-asserting and rebinding the
+wrapper; for readers, `*strings.Reader`, `*bytes.Reader`, `*bytes.Buffer`, and
+alias-confined `*bufio.Reader` instances whose construction and every `Reset`
+rebind (and `WriteTo` writer) recursively target admitted in-memory streams.
+Stream provenance is judged by the closed-value walk under the dispatch
+admissions' discipline: concrete non-wrapper types pin directly, interface-typed
+operands require pinning `MakeInterface` (or unmutated sentinel) origins with
+subject-attributed parameter and closure-capture crossings, and startup flow
+closes locally constructed streams without subject attribution; an unproven
+interface stream or escaping wrapper retains its output or input classification,
+dynamically reached calls retain their classification regardless of site
+arguments, and the maximal scan's operand-blind findings narrow to diagnostics
+so the operand-sensitive tiers decide.
 
 **REQ-closure-observability-toolchain-key** (invariant): Toolchain evidence MUST
 preserve these distinct obligations:
@@ -2345,13 +2391,18 @@ from the return expressions of a static call to an audited
 standard-library function (or to `context.Context.Err()` on a closed standard
 context receiver when `context.Canceled` is unmutated, or to `os.Getwd()` /
 `path/filepath.Abs` for `error.Error()` dispatch when the `os` sentinel error
-globals and `os.PathError` / `os.SyscallError` wrappers are unmutated) or a
+globals and `os.PathError` / `os.SyscallError` wrappers are unmutated, or to
+`go/parser.ParseExpr` / admitted `go/parser.ParseExprFrom` resolving concrete
+`*go/ast.*` expression types) or a
 reached non-recursive, non-variadic,
 non-dynamically-targeted in-module function whose dynamic-carrying arguments
 themselves close under the closed-value walk, or
-from a parameter whose function is not dynamically targeted, closes over
-nothing, is not variadic (or, for non-function parameters under audited
-toolchain selection, whose variadic slice argument closes under the walk),
+from a parameter of a non-escaping function or local closure (including closures
+with enumerable `MakeClosure` free-variable bindings and closures invoked
+exclusively through confined local cells, `Phi`s, or `FreeVar`s with zero value
+escape outside call-target positions) that is not variadic (or, for non-function
+parameters under audited toolchain selection, whose variadic slice argument
+closes under the walk),
 and has at least one subject-attributed call
 site, every such site feeding a subject-closed value (zero enumerable
 callers is absence of provenance, refused, never a vacuous pass), with
@@ -2359,7 +2410,11 @@ an interface invoke's target set narrowed to the concrete types its
 closed operand wraps when every resolved method has an analyzed or
 audited body (including promoted interface method wrappers on concrete structs
 that embed an interface whose embedded field is populated exclusively by
-closed stores) — the
+closed stores, and `go/ast` node interfaces `ast.Node`, `ast.Expr`, `ast.Stmt`,
+`ast.Decl`, and `ast.Spec` under an audited closed-world program only when
+binary-wide declared, operand, `MakeInterface`, and runtime-type inspection
+proves zero non-`go/ast` concrete types implement that interface, defeating
+external interface-embedding method overrides) — the
 crossing holding for every closed-world subject whatever its own enumeration
 state, an iterator's yield bound by the subject's range statement or call the
 canonical shape, and the subject-attributed sites being the subject's own
@@ -2638,15 +2693,18 @@ edit can include it; a non-regular or dangling entry contributes its
 classification without source bytes, so retyping it cannot serve an old
 listing), the entry classifications of every directory under its embed
 patterns' roots (membership the listing resolves), the module files
-of every module the module graph reads — go.mod and go.sum of each
-module contributing a package (a vendored node rides the vendor tree),
-of every module the workspace uses, and the go.mod of every local
-replacement target those files name, package or no package of it in
-the listing — the vendor manifest of the main module and, under a
-workspace, of the workspace root, the workspace file and its sum file
-as the environment resolved them or the workspace file's absence along
-the directory's ancestors, and the absence of a module
-file between the working directory and the main module root; the
+of every module the module graph reads — go.mod, go.sum, and vendor/modules.txt
+of each module contributing a package (a vendored node rides the vendor tree),
+of the active GOMOD module when resolved, of every module the workspace uses,
+and transitively of every local replacement target those module or workspace
+files name, package or no package of it in the listing — the vendor manifest of
+the main module and, under a workspace, of the workspace root, the workspace
+file and its sum file as the environment resolved them or the workspace file's
+absence along the directory's ancestors, and, along every intermediate directory
+between the working directory and the outermost containing module root, the
+content of each existing nested submodule go.mod (with its module graph) or the
+verified absence (via Lstat; dangling symlinks fail closed) of each go.mod that
+did not exist at capture time; the
 toolchain-generated test main's own bytes may be derived outside this listing
 memo, but any inputs selecting its graph or supporting a harness claim remain
 dependencies of their respective judgments;

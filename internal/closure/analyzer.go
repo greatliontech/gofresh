@@ -1,21 +1,12 @@
 package closure
 
 import (
-	"fmt"
-	"go/ast"
-	"go/constant"
-	"go/token"
 	"go/types"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
-	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
-	"github.com/greatliontech/gofresh/internal/propharness"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -56,6 +47,15 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 	a.startupOnly = syncStartupOnlyFunctionsForBase(base, reachable)
 	a.zeroGlobals = startupZeroGlobalsForReach(base, reachable)
 	a.zeroGlobalDecls = zeroGlobalDeclKeys(a.zeroGlobals)
+	targetPkgPath := ""
+	if a.prog != nil {
+		targetPkgPath = a.prog.PkgPath
+	}
+	for _, extra := range [][]types.Type{reachable.enumeratedTypes, reachable.initBoxedTypes} {
+		for _, ct := range extra {
+			a.checkMakeInterfaceStdHooks(nil, nil, ct)
+		}
+	}
 	extraSubjectTargets := map[*ssa.Function]bool{}
 	for site, targets := range reachable.dynamicTargets {
 		if !reachable.functions[site.Parent()] {
@@ -65,35 +65,10 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 		if (callerIdx == nil && !isAnalyzableUnnamedWrapper(site.Parent())) || (callerIdx != nil && callerIdx.testMain) {
 			continue
 		}
-		// The enumeration's targets, narrowed to what the operand can
-		// hold where the closed-value walk names the functions: a
-		// recursive local closure's call reaches its own closure, not
-		// every closure of its signature in the mask
-		// (REQ-closure-observability-dispatch).
 		targets = narrowedTargets(site, targets, a.fresh)
 		if len(targets) == 0 {
 			continue
 		}
-		// The subject-determined dispatch admission: a site whose
-		// enumerated target set is non-empty and wholly classifiable -
-		// audited harness methods or analyzed functions of indexed
-		// packages - does not widen when its operand's dynamic types are
-		// fully determined by the subject's own flow
-		// (REQ-closure-observability-dispatch). The operand proof is the
-		// soundness pillar: it puts the runtime callee's concrete type
-		// inside the enumerated set, so the admission never outruns
-		// classification. An unindexed target refuses the admission.
-		// The guards are the admission's fail-closed backstops. The len
-		// and index arms are structurally unreachable: dynamicTargets
-		// never carries an empty set (the per-site map is created on
-		// first insert) and every RTA target resolves an index today -
-		// they encode the spec's non-empty and analyzed-content clauses
-		// against SSA shapes this derivation has not seen. The test-main
-		// arm is different: test-main targets exist (the generated
-		// package's testDeps method set), but their invoke sites sit in
-		// testing frames the subject-frame filter above already cut, so
-		// the arm backstops the caller-side filter rather than an
-		// impossible shape.
 		if a.rtaResolved[site] && !a.openWorld && len(targets) != 0 {
 			admitted := true
 			for target := range targets {
@@ -124,14 +99,6 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 			if idx == nil {
 				continue
 			}
-			// A named harness function reached via a computed function-value
-			// call keeps the conservative refusal; an anonymous harness
-			// wrapper closure requires closed arguments and a handed-in handle
-			// parameter when param 0 is a handle/logger type; and a named
-			// harness method reached via interface invoke is admitted only
-			// when invoke arguments and all non-harness boxings of its
-			// receiver origin pass the boundary gate
-			// (REQ-closure-observability-property-harness).
 			if vp := a.verifiedHarness(idx.path); vp != nil {
 				var ok bool
 				if target.Parent() == nil {
@@ -159,16 +126,21 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 					continue
 				}
 			}
-			if !ok && !callerStd && !admitPureDelegateCall(h.SelectionAudited(), h.source.pureDelegates, idx.path, target, site, callerStd, a.fresh) {
-				// The audited-pure admissions hold for an enumerated
-				// dynamic target exactly as for a static callee - the
-				// admission is a property of the operation, not of the
-				// call form (REQ-closure-observability-audited-set).
-				name := functionSymbolName(target)
-				if !auditedStandardCallee(h.SelectionAudited(), idx.path, name, target) {
-					effect = unauditedStandardEffect(idx.path, name)
-					ok = true
+			forceCheckStdTarget := idx.path == "net/url"
+			if !ok && (!callerStd || forceCheckStdTarget) && !admittedPureStandardOrDelegateCallee(h.SelectionAudited(), h.source.pureDelegates, false, h, targetPkgPath, idx.path, target, site, callerStd && !forceCheckStdTarget, a.fresh) {
+				if tracing {
+					callerName := ""
+					if site != nil && site.Parent() != nil {
+						callerName = site.Parent().String()
+					}
+					trace.Emit(h.ctx, trace.DomainClosure, "closure.rta_std.reject", subj,
+						trace.String("caller", callerName),
+						trace.String("callee", target.String()),
+						trace.String("reason", "unaudited_rta_target"),
+					)
 				}
+				effect = unauditedStandardEffect(idx.path, functionSymbolName(target))
+				ok = true
 			}
 			if ok {
 				a.recordExternalEffect(effect)
@@ -241,585 +213,6 @@ func (h *Hasher) tier2ReachableWithObjects(base *tier2Base, reachable attributed
 	return res, a.seenObjects, nil
 }
 
-type cachedNodeRefs struct {
-	objs  []types.Object
-	types []types.Type
-	hasIf bool
-}
-
-type pkgIndex struct {
-	pkg            *packages.Package
-	ssa            *ssa.Package
-	meta           *listPkg
-	id             string
-	path           string
-	std            bool
-	testMain       bool
-	cache          bool
-	mutable        bool
-	decls          map[types.Object]ast.Node
-	nodeRefs       map[ast.Node]*cachedNodeRefs
-	vars           []ast.Node
-	inits          []ast.Node
-	wasmImport     bool
-	linknames      map[types.Object]string
-	linknameByName map[string]string
-	funcKeys       map[types.Object]funcDeclKey
-}
-
-// tier2Base is the immutable package/source index shared by every subject in
-// one package analysis view. The AST, type, linkname, and package lookup maps
-// are expensive to build but independent of a subject's reachable set.
-type tier2Base struct {
-	h                *Hasher
-	buildFlags       []string
-	prog             *program
-	metas            []listPkg
-	metaByPath       map[string]*listPkg
-	idxByTypes       map[*types.Package]*pkgIndex
-	objByName        map[string]types.Object
-	objsByLinkTarget map[string][]types.Object
-	// flagBacked marks package-level variables carrying flag-registered
-	// state, judged at every registration call site program-wide by
-	// flagRegistrationFacts. Their values change at flag.Parse -
-	// command-line state the test log cannot audit - so a subject-flow
-	// or test-main-flow reference is the covert channel's read side.
-	// flagUntraceable records, per package path, a registration whose
-	// registered storage the judgment could not trace - such a package
-	// blocks every subject sharing the program
-	// (REQ-closure-observability-flag-registration). Both computed once per base.
-	flagBacked      map[*ssa.Global]bool
-	flagUntraceable map[string]string
-	// flagProven records the carriers — constructor values and the loads
-	// of their one package-level holder — of every FlagSet the program
-	// itself closes, judged by flagSetProvenance: registrations on such
-	// a set mark and poison nothing, and its Parse and registrations are
-	// admitted in the flow that proves them
-	// (REQ-closure-observability-flag-registration's FlagSet provenance rule).
-	flagProven             map[ssa.Value]flagSetKind
-	baseStartupResultDone  [2]bool
-	baseStartupResult      [2]tier2Result
-	baseStartupZeroDone    bool
-	baseStartupZeroGlobals map[*ssa.Global]bool
-	baseStartupAsyncDone   bool
-	baseStartupAsyncOrDyn  map[*ssa.Function]bool
-	baseStartupObjsDone    [2]bool
-	baseStartupObjs        [2]map[types.Object]bool
-	wholeZeroDone          bool
-	wholeZeroGlobals       map[*ssa.Global]bool
-	verifiedAsm            map[string]*asmverify.VerifiedPackage
-	unsafeValueType        map[types.Type]bool
-	unsafeElemType         map[types.Type]bool
-	ifaceMethodDone        map[types.Type]bool
-	ifaceMethodObjs        map[types.Type][]*types.Func
-	binaryUnsafeDone       bool
-	binaryUnsafeReason     string
-	pkgUnsafeKnown         map[string]bool
-	pkgUnsafeHazard        map[string]bool
-}
-
-type tier2Analyzer struct {
-	base       *tier2Base
-	h          *Hasher
-	buildFlags []string
-	prog       *program
-	metas      []listPkg
-	metaByPath map[string]*listPkg
-	flagBacked map[*ssa.Global]bool
-	flagProven map[ssa.Value]flagSetKind
-	// skipOriginScan marks parameterized origins whose rooted
-	// instantiations carry the concrete forms of every site: the
-	// open-over-T origin body is never scanned, whatever path reaches it
-	// (the reach loop, the object drain, a static-callee walk) - its
-	// declaration still contributes.
-	skipOriginScan   map[*ssa.Function]bool
-	idxByTypes       map[*types.Package]*pkgIndex
-	objByName        map[string]types.Object
-	objsByLinkTarget map[string][]types.Object
-
-	seenObjects map[types.Object]bool
-	objectQueue []types.Object
-	// seenTypes dedups the type walk by type identity: recursive types
-	// self-reference through one instance, so pointer keys break cycles;
-	// structurally identical distinct instances re-walk harmlessly
-	// (enqueueObject dedups), and the TypeString render this key replaced
-	// dominated the walk's allocations.
-	seenTypes   map[types.Type]bool
-	filePkgs    map[*pkgIndex]bool
-	rtaReach    map[*ssa.Function]bool
-	rtaResolved map[ssa.CallInstruction]bool
-	// subjectDeterminedInvokes marks invoke sites whose RTA-enumerated
-	// target set is wholly classifiable - audited harness methods
-	// (admitted harness facts) or analyzed functions of indexed packages
-	// (their bodies classify their own effects into the subject): the
-	// dispatch shape an unresolved invoke may take without widening the
-	// subject world, provided its operand proves subject-determined.
-	subjectDeterminedInvokes map[ssa.CallInstruction]bool
-	// fresh carries the subject's cross-boundary fresh-path analysis;
-	// nil outside per-subject reachability walks (maximal tier,
-	// startup effects), where the intraprocedural grammar alone applies.
-	fresh                *freshParamAnalysis
-	enumeratedTypes      []types.Type
-	initBoxedTypes       []types.Type
-	harnessRecvBoxClosed map[*types.Named]bool
-	subjectRoots         map[*ssa.Function]bool
-	startupOnly          map[*ssa.Function]bool
-	zeroGlobals          map[*ssa.Global]bool
-	zeroGlobalDecls      map[pkgVarKey]bool
-	openWorld            bool
-	scanned              map[*ssa.Function]bool
-	scannedNodes         map[ast.Node]bool
-	seenIfaceBoxTypes    map[types.Type]bool
-	effects              []externalEffect
-
-	widen        bool
-	widenReason  string
-	unverifiable bool
-	selected     externalEffect
-}
-
-func (a *tier2Analyzer) admitPropertyHarnessInvokeTarget(reachable attributedReachability, site ssa.CallInstruction, target *ssa.Function) bool {
-	if a == nil || site == nil || site.Common() == nil || !site.Common().IsInvoke() || target == nil || target.Signature == nil || target.Signature.Recv() == nil {
-		return false
-	}
-	recvNamed := namedOriginDeref(target.Signature.Recv().Type())
-	if recvNamed == nil || recvNamed.Obj() == nil || recvNamed.Obj().Pkg() == nil {
-		return false
-	}
-	vp := a.verifiedHarness(recvNamed.Obj().Pkg().Path())
-	if vp == nil {
-		return false
-	}
-	if _, isSample := propertyHarnessSeededSampleCallee(vp, target); isSample {
-		return false
-	}
-	if !propertyHarnessClosedArgsForTarget(site.Common(), target, a.fresh) {
-		return false
-	}
-	return a.propertyHarnessReceiverBoxesClosed(reachable, recvNamed)
-}
-
-func (a *tier2Analyzer) propertyHarnessReceiverBoxesClosed(reachable attributedReachability, recvOrigin *types.Named) bool {
-	if recvOrigin == nil {
-		return false
-	}
-	if a.harnessRecvBoxClosed != nil {
-		if ok, cached := a.harnessRecvBoxClosed[recvOrigin]; cached {
-			return ok
-		}
-	} else {
-		a.harnessRecvBoxClosed = make(map[*types.Named]bool, 4)
-	}
-	for _, t := range reachable.enumeratedTypes {
-		if typeContainsNamedOrigin(t, recvOrigin) {
-			a.harnessRecvBoxClosed[recvOrigin] = false
-			return false
-		}
-	}
-	rtaFns := reachable.rtaFunctions
-	if rtaFns == nil {
-		rtaFns = reachable.functions
-	}
-	for fn := range rtaFns {
-		if fn == nil || len(fn.Blocks) == 0 {
-			continue
-		}
-		if a.propertyHarnessAudited(ssaFuncOriginPkgPath(fn)) {
-			continue
-		}
-		for _, block := range fn.Blocks {
-			for _, instr := range block.Instrs {
-				mi, ok := instr.(*ssa.MakeInterface)
-				if !ok || mi.X == nil || !typeContainsNamedOrigin(mi.X.Type(), recvOrigin) {
-					continue
-				}
-				if !reachable.functions[fn] {
-					a.harnessRecvBoxClosed[recvOrigin] = false
-					return false
-				}
-				xt := types.Unalias(mi.X.Type())
-				if namedOriginDeref(xt) == recvOrigin {
-					if !propertyHarnessClosedValue(mi.X, a.fresh) {
-						a.harnessRecvBoxClosed[recvOrigin] = false
-						return false
-					}
-					continue
-				}
-				if sl, isSlice := xt.(*types.Slice); isSlice && namedOriginDeref(sl.Elem()) == recvOrigin {
-					if !harnessVariadicClosed(mi.X, a.fresh) {
-						a.harnessRecvBoxClosed[recvOrigin] = false
-						return false
-					}
-					continue
-				}
-				a.harnessRecvBoxClosed[recvOrigin] = false
-				return false
-			}
-		}
-	}
-	a.harnessRecvBoxClosed[recvOrigin] = true
-	return true
-}
-
-func namedOriginDeref(t types.Type) *types.Named {
-	if t == nil {
-		return nil
-	}
-	t = types.Unalias(t)
-	if ptr, ok := t.(*types.Pointer); ok {
-		t = types.Unalias(ptr.Elem())
-	}
-	if named, ok := t.(*types.Named); ok && named != nil {
-		return named.Origin()
-	}
-	return nil
-}
-
-func typeContainsNamedOrigin(t types.Type, origin *types.Named) bool {
-	if t == nil || origin == nil {
-		return false
-	}
-	seen := make(map[types.Type]bool)
-	var walk func(types.Type) bool
-	walk = func(cur types.Type) bool {
-		if cur == nil {
-			return false
-		}
-		cur = types.Unalias(cur)
-		if seen[cur] {
-			return false
-		}
-		seen[cur] = true
-		switch tt := cur.(type) {
-		case *types.Named:
-			if tt.Origin() == origin {
-				return true
-			}
-			for i := 0; i < tt.TypeArgs().Len(); i++ {
-				if walk(tt.TypeArgs().At(i)) {
-					return true
-				}
-			}
-			return walk(tt.Underlying())
-		case *types.Pointer:
-			return walk(tt.Elem())
-		case *types.Slice:
-			return walk(tt.Elem())
-		case *types.Array:
-			return walk(tt.Elem())
-		case *types.Map:
-			return walk(tt.Key()) || walk(tt.Elem())
-		case *types.Chan:
-			return walk(tt.Elem())
-		case *types.Struct:
-			for i := 0; i < tt.NumFields(); i++ {
-				if walk(tt.Field(i).Type()) {
-					return true
-				}
-			}
-		case *types.Signature:
-			for _, tuple := range []*types.Tuple{tt.Params(), tt.Results()} {
-				for i := 0; tuple != nil && i < tuple.Len(); i++ {
-					if walk(tuple.At(i).Type()) {
-						return true
-					}
-				}
-			}
-		case *types.Interface:
-			for i := 0; i < tt.NumMethods(); i++ {
-				if walk(tt.Method(i).Type()) {
-					return true
-				}
-			}
-		case *types.Tuple:
-			for i := 0; i < tt.Len(); i++ {
-				if walk(tt.At(i).Type()) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	return walk(t)
-}
-
-func newTier2Base(h *Hasher, prog *program, metas []listPkg) *tier2Base {
-	h.bindProgramReader(prog)
-	a := &tier2Analyzer{
-		h:                h,
-		buildFlags:       append([]string(nil), h.buildFlags...),
-		prog:             prog,
-		metas:            metas,
-		metaByPath:       map[string]*listPkg{},
-		idxByTypes:       map[*types.Package]*pkgIndex{},
-		objByName:        map[string]types.Object{},
-		objsByLinkTarget: map[string][]types.Object{},
-	}
-	for i := range metas {
-		m := &metas[i]
-		a.metaByPath[m.ImportPath] = m
-	}
-	for _, p := range prog.Pkgs {
-		idx := a.buildIndex(p)
-		if idx == nil {
-			continue
-		}
-		if p.Types != nil {
-			a.idxByTypes[p.Types] = idx
-		}
-		for obj := range idx.decls {
-			if obj == nil || obj.Pkg() == nil || obj.Name() == "" {
-				continue
-			}
-			a.objByName[obj.Pkg().Path()+"."+obj.Name()] = obj
-		}
-		for obj, target := range idx.linknames {
-			a.addReverseLinkname(target, obj)
-		}
-		if idx.pkg != nil && idx.pkg.Types != nil {
-			for name, target := range idx.linknameByName {
-				if obj := idx.pkg.Types.Scope().Lookup(name); obj != nil {
-					a.addReverseLinkname(target, obj)
-				}
-			}
-		}
-	}
-	return &tier2Base{
-		h:                h,
-		buildFlags:       a.buildFlags,
-		prog:             prog,
-		metas:            metas,
-		metaByPath:       a.metaByPath,
-		idxByTypes:       a.idxByTypes,
-		objByName:        a.objByName,
-		objsByLinkTarget: a.objsByLinkTarget,
-		unsafeValueType:  map[types.Type]bool{},
-		unsafeElemType:   map[types.Type]bool{},
-		ifaceMethodDone:  map[types.Type]bool{},
-		ifaceMethodObjs:  map[types.Type][]*types.Func{},
-	}
-}
-
-func (b *tier2Base) analyzer() *tier2Analyzer {
-	flagBacked, _ := b.flagRegistrationFacts()
-	return &tier2Analyzer{
-		base:                     b,
-		flagProven:               b.flagProven,
-		h:                        b.h,
-		buildFlags:               b.buildFlags,
-		prog:                     b.prog,
-		metas:                    b.metas,
-		metaByPath:               b.metaByPath,
-		idxByTypes:               b.idxByTypes,
-		objByName:                b.objByName,
-		objsByLinkTarget:         b.objsByLinkTarget,
-		flagBacked:               flagBacked,
-		seenObjects:              map[types.Object]bool{},
-		seenTypes:                map[types.Type]bool{},
-		filePkgs:                 map[*pkgIndex]bool{},
-		rtaReach:                 map[*ssa.Function]bool{},
-		rtaResolved:              map[ssa.CallInstruction]bool{},
-		subjectDeterminedInvokes: map[ssa.CallInstruction]bool{},
-		scanned:                  map[*ssa.Function]bool{},
-		scannedNodes:             map[ast.Node]bool{},
-		seenIfaceBoxTypes:        map[types.Type]bool{},
-	}
-}
-
-func (a *tier2Analyzer) addReverseLinkname(target string, obj types.Object) {
-	if target == "" || obj == nil {
-		return
-	}
-	for _, existing := range a.objsByLinkTarget[target] {
-		if existing == obj {
-			return
-		}
-	}
-	a.objsByLinkTarget[target] = append(a.objsByLinkTarget[target], obj)
-}
-
-func (a *tier2Analyzer) buildIndex(p *packages.Package) *pkgIndex {
-	if p == nil || p.Types == nil {
-		return nil
-	}
-	meta := a.metaForPackage(p)
-	path := p.Types.Path()
-	std := p.Module == nil && isStdImportPath(path)
-	if meta != nil {
-		std = meta.Standard
-	}
-	idx := &pkgIndex{
-		pkg:            p,
-		ssa:            a.prog.Prog.Package(p.Types),
-		meta:           meta,
-		id:             p.ID,
-		path:           path,
-		std:            std,
-		testMain:       p.Name == "main" && path == a.prog.PkgPath+".test",
-		decls:          map[types.Object]ast.Node{},
-		nodeRefs:       map[ast.Node]*cachedNodeRefs{},
-		linknames:      map[types.Object]string{},
-		linknameByName: map[string]string{},
-		funcKeys:       map[types.Object]funcDeclKey{},
-	}
-	if meta != nil {
-		idx.cache = meta.Module != nil && !meta.Module.Main && a.h.underCache(meta.Dir)
-	} else if p.Module != nil {
-		idx.cache = !p.Module.Main && a.h.underCache(p.Dir)
-	}
-	idx.mutable = !idx.std && !idx.testMain && !idx.cache
-	if idx.id == "" {
-		idx.id = path
-	}
-
-	for _, f := range p.Syntax {
-		fileDir := filepath.Clean(p.Dir)
-		if p.Fset != nil {
-			if tf := p.Fset.File(f.Pos()); tf != nil && tf.Name() != "" {
-				fileDir = filepath.Clean(filepath.Dir(tf.Name()))
-			}
-		}
-		pkgClause := ""
-		if f.Name != nil {
-			pkgClause = f.Name.Name
-		}
-		for _, cg := range f.Comments {
-			for _, c := range cg.List {
-				if !strings.Contains(c.Text, "go:linkname") && !strings.Contains(c.Text, "go:wasmimport") {
-					continue
-				}
-				text := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
-				text = strings.TrimSpace(strings.TrimPrefix(text, "/*"))
-				text = strings.TrimSpace(strings.TrimSuffix(text, "*/"))
-				fields := strings.Fields(text)
-				if len(fields) >= 3 && (fields[0] == "go:linkname" || fields[0] == "go:linknamestd") {
-					if prev := idx.linknameByName[fields[1]]; prev != "" && prev != fields[2] {
-						idx.linknameByName[fields[1]] = "<conflict>"
-					} else {
-						idx.linknameByName[fields[1]] = fields[2]
-					}
-				}
-				if strings.HasPrefix(text, "go:wasmimport") {
-					idx.wasmImport = true
-				}
-			}
-		}
-		for _, decl := range f.Decls {
-			switch d := decl.(type) {
-			case *ast.FuncDecl:
-				if d.Name.Name == "init" {
-					idx.inits = append(idx.inits, d)
-				}
-				if obj := p.TypesInfo.Defs[d.Name]; obj != nil {
-					idx.decls[obj] = d
-					if key, ok := funcDeclKeyForAST(fileDir, pkgClause, d); ok {
-						idx.funcKeys[obj] = key
-					}
-				}
-				for local, target := range linknamesFromDoc(d.Doc) {
-					if obj := p.Types.Scope().Lookup(local); obj != nil {
-						idx.linknames[obj] = target
-					}
-				}
-			case *ast.GenDecl:
-				genLinknames := linknamesFromDoc(d.Doc)
-				for local, target := range genLinknames {
-					if obj := p.Types.Scope().Lookup(local); obj != nil {
-						idx.linknames[obj] = target
-					}
-				}
-				for _, spec := range d.Specs {
-					switch s := spec.(type) {
-					case *ast.ValueSpec:
-						specLinknames := linknamesFromDoc(s.Doc)
-						for local, target := range specLinknames {
-							if obj := p.Types.Scope().Lookup(local); obj != nil {
-								idx.linknames[obj] = target
-							}
-						}
-						node := ast.Node(s)
-						if d.Tok == token.CONST {
-							// A later const spec can inherit expression/type/iota context from
-							// earlier specs, so a used const hashes the whole group.
-							node = d
-						}
-						if d.Tok == token.VAR {
-							idx.vars = append(idx.vars, s)
-							if len(genLinknames) > 0 {
-								node = d
-							}
-						}
-						for _, name := range s.Names {
-							if obj := p.TypesInfo.Defs[name]; obj != nil {
-								idx.decls[obj] = node
-								if d.Tok == token.CONST && name.Name != "" && name.Name != "_" {
-									idx.funcKeys[obj] = funcDeclKey{
-										dir:       fileDir,
-										pkgClause: pkgClause,
-										name:      name.Name,
-									}
-								}
-							}
-						}
-					case *ast.TypeSpec:
-						if obj := p.TypesInfo.Defs[s.Name]; obj != nil {
-							addTypeDeclaration(idx, obj, s)
-							if s.Name != nil && s.Name.Name != "" && s.Name.Name != "_" {
-								key := funcDeclKey{
-									dir:       fileDir,
-									pkgClause: pkgClause,
-									name:      s.Name.Name,
-								}
-								idx.funcKeys[obj] = key
-								if iface, ok := obj.Type().Underlying().(*types.Interface); ok {
-									iface.Complete()
-									for i := 0; i < iface.NumExplicitMethods(); i++ {
-										idx.funcKeys[iface.ExplicitMethod(i)] = key
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-	return idx
-}
-
-func addTypeDeclaration(idx *pkgIndex, obj types.Object, node ast.Node) {
-	if idx == nil || obj == nil || node == nil {
-		return
-	}
-	idx.decls[obj] = node
-	underlying := obj.Type().Underlying()
-	iface, ok := underlying.(*types.Interface)
-	if !ok {
-		return
-	}
-	iface.Complete()
-	for i := 0; i < iface.NumExplicitMethods(); i++ {
-		idx.decls[iface.ExplicitMethod(i)] = node
-	}
-}
-
-func (a *tier2Analyzer) metaForPackage(p *packages.Package) *listPkg {
-	for _, key := range []string{p.ID, p.PkgPath} {
-		if key == "" {
-			continue
-		}
-		if m := a.metaByPath[key]; m != nil {
-			return m
-		}
-	}
-	if p.Types != nil {
-		if m := a.metaByPath[p.Types.Path()]; m != nil {
-			return m
-		}
-	}
-	return nil
-}
-
 func (a *tier2Analyzer) addFunction(fn *ssa.Function) {
 	if fn == nil {
 		return
@@ -850,13 +243,6 @@ func (a *tier2Analyzer) addFunction(fn *ssa.Function) {
 		return
 	}
 	if parent := fn.Parent(); parent != nil {
-		// An anonymous function is its parent's content and its own
-		// body: a drained frame's nested closure executes whenever the
-		// frame's value is called, so its body is scanned here — the
-		// parent alone would leave its effects unseen. A parent frame is
-		// enqueued only when RTA or startup flow reached it; an anonymous
-		// closure returned by a closed helper can execute after its
-		// parent returned without re-entering the parent's unreached body.
 		if a.rtaReach[parent] || initFlowFrame(parent) {
 			a.addFunction(parent)
 		} else if idx.cache {
@@ -893,9 +279,6 @@ func (a *tier2Analyzer) scanFunction(fn *ssa.Function) {
 		return
 	}
 	if idx != nil && a.propertyHarnessAudited(idx.path) {
-		// Audited property-harness surface: bodies are never walked -
-		// the boundary gate at the call site is the whole judgment
-		// (REQ-closure-observability-property-harness).
 		return
 	}
 	isStd := idx != nil && idx.std
@@ -1027,11 +410,6 @@ func (a *tier2Analyzer) scanValue(callerIdx *pkgIndex, v ssa.Value) {
 	switch x := v.(type) {
 	case *ssa.Global:
 		if obj := x.Object(); obj != nil {
-			// No source-only exemption here, deliberately: the
-			// audited-pure packages (io, encoding/xml, ...) depend on
-			// this arm flagging their exported mutable vars (io.EOF,
-			// xml.HTMLEntity) - exempting them would unsound the
-			// audited set.
 			objStd := false
 			if obj.Pkg() != nil {
 				if objIdx := a.idxByTypes[obj.Pkg()]; objIdx != nil {
@@ -1048,6 +426,9 @@ func (a *tier2Analyzer) scanValue(callerIdx *pkgIndex, v ssa.Value) {
 			a.enqueueObject(obj)
 		}
 	case *ssa.Function:
+		if !(callerIdx != nil && callerIdx.std) && funcPkgPath(x) == "go/ast" && baseFunctionSymbolName(x) == "String" && !auditedStandardMethod(a.h.SelectionAudited(), x) {
+			a.recordExternalEffect(unauditedStandardEffect("go/ast", "String"))
+		}
 		a.addFunction(x)
 	}
 }
@@ -1061,17 +442,13 @@ func isOSFileType(t types.Type) bool {
 }
 
 func (a *tier2Analyzer) scanInstruction(idx *pkgIndex, caller *ssa.Function, instr ssa.Instruction, fromRTA, suppressNestedFileIO bool) {
-	// A reference to a flag-backed package variable is the registration
-	// channel's read side: the value changes at flag.Parse -
-	// command-line input the test log cannot audit - and an address
-	// escaping into the flow can only be read or laundered, so the
-	// operand reference itself refuses
-	// (REQ-closure-observability-flag-registration).
 	var fnZeroGlobals map[*ssa.Global]bool
 	if a.startupOnly[caller] {
 		fnZeroGlobals = a.zeroGlobals
 	}
+	callerStd := idx != nil && idx.std
 	recordFlagBackedReferences(a.flagBacked, fnZeroGlobals, a.recordExternalEffect, instr)
+	a.checkInstructionStdHooks(caller, callerStd, instr)
 	switch x := instr.(type) {
 	case ssa.CallInstruction:
 		a.scanCall(idx, caller, x, fromRTA, suppressNestedFileIO)
@@ -1093,8 +470,6 @@ func testingRuntimeFieldEffect(t types.Type, index int) (externalEffect, bool) {
 		t = pointer.Elem()
 	}
 	named, ok := types.Unalias(t).(*types.Named)
-	// The pacing field is B's alone: BenchmarkResult and the fuzz result
-	// declare an N too, and neither is the harness's count.
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "testing" || named.Obj().Name() != "B" {
 		return externalEffect{}, false
 	}
@@ -1103,9 +478,6 @@ func testingRuntimeFieldEffect(t types.Type, index int) (externalEffect, bool) {
 		return externalEffect{}, false
 	}
 	if name := structure.Field(index).Name(); name == "N" {
-		// The harness's iteration count is benchmark pacing: an
-		// admitted harness fact, never an input
-		// (REQ-closure-observability-benchmark-pacing).
 		return harnessPacingEffect("B.N"), true
 	}
 	return externalEffect{}, false
@@ -1136,12 +508,6 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		return
 	}
 	pkgPath, name := funcPkgPath(callee), functionSymbolName(callee)
-	// A synthetic interface-method wrapper — any interface, the harness
-	// included — performs the real dispatch inside a body no walk scans,
-	// so the receiver's provenance is judged at the call site: a wrapper
-	// over sibling-planted shared state refuses exactly as the direct
-	// invoke would, while a subject-closed receiver keeps the wrapped
-	// method's ordinary classification.
 	if !callerStd && syntheticInterfaceMethodWrapper(callee) && !dispatchProvenanceClosed(site, a.fresh) {
 		a.requestWiden("interface dispatch on unattributable state in " + caller.String())
 		return
@@ -1155,9 +521,6 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 			if mk, isSample := propertyHarnessSeededSampleCallee(vp, callee); isSample && !harnessSeededSampleHasExplicitSeed(c) {
 				a.recordExternalEffect(propertyHarnessUnseededSampleEffect(vp, mk))
 			}
-			// The property-harness boundary gate: harness bodies are never
-			// scanned, so every dynamic-carrying argument and bound-closure
-			// capture must be judged here (REQ-closure-observability-property-harness).
 			if !propertyHarnessClosedArgs(c, a.fresh) {
 				a.requestWiden("property-harness argument is not locally closed in " + caller.String())
 			}
@@ -1192,14 +555,7 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 		if callerStd && (effect.kind == externalEffectFilesystemMutation || effect.kind == externalEffectPathMutation) {
 			return
 		}
-		// The flag package's own prints are help-path only - usage
-		// output, Parse errors, and redefinition panics - none of which
-		// execute in a run that neither fails Parse nor prints help; a
-		// redefinition panic crashes loudly, never a silent input. The
-		// registration admission would otherwise be defeated by the
-		// internals it statically reaches
-		// (REQ-closure-observability-flag-registration).
-		if callerIdx != nil && callerIdx.path == "flag" && effect.kind == externalEffectFormattedOutput {
+		if callerIdx != nil && (callerIdx.path == "flag" || callerIdx.path == "go/ast" || callerIdx.path == "go/scanner") && effect.kind == externalEffectFormattedOutput {
 			return
 		}
 		if !(suppressNestedFileIO && effect.kind == externalEffectFileIO) {
@@ -1215,19 +571,16 @@ func (a *tier2Analyzer) scanCall(callerIdx *pkgIndex, caller *ssa.Function, site
 	}
 }
 
-// classifyCalleeEffect is the one callee-classification ladder every
-// direct-call tier consults - the classB table, the unaudited-standard
-// fallback, the file-handle mutation arms, and the writer-sink
-// admission, in that order. Tier-specific consequences (observable
-// flags, suppressions, widens, harness admissions) stay at the call
-// sites, so the ladder can never drift one arm at a time between the
-// subject scan and the startup cascade (the one-site-classifier
-// collapse). The writer-sink leg applies to the static leg alone: a
-// dynamically reached Fprint's site arguments belong to the dynamic
-// signature, and only the fresh-analysis view in force decides which
-// writers close.
 func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name string, c *ssa.CallCommon, site ssa.CallInstruction, callerStd bool) (externalEffect, bool) {
-	if timeUnixCallChainedToUTCOrFixedZone(a.h.SelectionAudited(), callee, pkgPath, name, c, site) {
+	audited := a.h.SelectionAudited()
+	if timeUnixCallChainedToUTCOrFixedZone(audited, callee, pkgPath, name, c, site) {
+		return externalEffect{}, false
+	}
+	targetPkgPath := ""
+	if a.prog != nil {
+		targetPkgPath = a.prog.PkgPath
+	}
+	if admittedGatedStandardSymbol(audited, !callerStd, a.h, targetPkgPath, callee, pkgPath, name, c, site, a.fresh) {
 		return externalEffect{}, false
 	}
 	effect, classified := classBEffect(pkgPath, name)
@@ -1236,15 +589,10 @@ func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name
 		effect, classified = a.classifyVerifiedAsmCallee(callee, calleeIdx, c, site)
 	}
 	if !classified && c.StaticCallee() == callee && flagProvenSetUse(a.flagProven, pkgPath, name, c) {
-		// Parse and registration on a set the program itself closes:
-		// the parsed values are the program's own literals, the
-		// storage ordinary state — judged program-wide by
-		// flagSetProvenance, which admits the site only in the flow
-		// that proves the set (REQ-closure-observability-flag-registration's
-		// FlagSet provenance rule).
 		return externalEffect{}, false
 	}
-	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(a.h.SelectionAudited(), pkgPath) && !admitPureDelegateCall(a.h.SelectionAudited(), a.h.source.pureDelegates, pkgPath, callee, site, callerStd, a.fresh) && !auditedStandardCallee(a.h.SelectionAudited(), pkgPath, name, callee) {
+	if !classified && name != "init" && !callerStd && calleeIdx != nil && calleeIdx.std && !isStandardFallbackExempt(audited, pkgPath) &&
+		!admittedPureStandardOrDelegateCallee(audited, a.h.source.pureDelegates, false, a.h, targetPkgPath, pkgPath, callee, site, callerStd, a.fresh) {
 		effect = unauditedStandardEffect(pkgPath, name)
 		classified = true
 	}
@@ -1256,26 +604,9 @@ func (a *tier2Analyzer) classifyCalleeEffect(callee *ssa.Function, pkgPath, name
 		effect = symbolExternalEffect(externalEffectFilesystemMutation, pkgPath, name, "reaches "+pkgPath+"."+name+" (filesystem mutation)")
 		classified = true
 	}
-	if classified && fmtFprintFamily(a.h.SelectionAudited(), pkgPath, name) && c.StaticCallee() == callee && len(c.Args) != 0 &&
-		inMemoryFormattedSink(c.Args[0], make(map[ssa.Value]bool), map[ssa.Value]bool{}, a.fresh) {
-		// Sprint-equivalent: the writer provably pins an audited
-		// in-memory sink, so the formatted bytes never leave process
-		// memory (the writer-sink admission). Argument methods stay
-		// visible to reachability exactly as for the Sprint family.
-		classified = false
-	}
 	return effect, classified
 }
 
-// timeUnixCallChainedToUTCOrFixedZone reports whether site is a direct call to
-// time.Unix, time.UnixMilli, or time.UnixMicro whose returned time.Time is
-// consumed exclusively as the receiver of a direct (time.Time).UTC() call or a
-// direct (time.Time).In(loc) call whose loc argument is constructed by
-// time.FixedZone. Although time.Unix constructs a Time tagged with time.Local,
-// neither Unix nor Time.UTC nor Time.In consults or initializes the local zone
-// descriptor (Time.abs only forces local-zone lookup when the receiver's
-// location remains Local), so immediate re-tagging into UTC or a fixed zone is
-// pure arithmetic (REQ-closure-observability-audited-set).
 func timeUnixCallChainedToUTCOrFixedZone(audited bool, callee *ssa.Function, pkgPath, name string, c *ssa.CallCommon, site ssa.CallInstruction) bool {
 	if !audited || pkgPath != "time" || (name != "Unix" && name != "UnixMilli" && name != "UnixMicro") {
 		return false
@@ -1351,24 +682,17 @@ func locFromFixedZone(audited bool, v ssa.Value, seen map[ssa.Value]bool) bool {
 	}
 }
 
-// dispatchAdmitted is the one predicate deciding whether a computed call
-// or interface invoke is admitted without widening the subject world
-// (REQ-closure-observability-dispatch): the world must be closed, the
-// dispatch operand must be closed under the subject's own flow, and the
-// site's target set must be wholly analyzed/admitted — either through
-// RTA enumeration (every enumerated target an audited harness logging
-// method or an indexed non-test-main function) or, for a computed call
-// outside RTA, through the operand's own closed function-value set
-// (every held function an indexed non-standard, non-cached, non-test-main
-// function outside the property harness).
 func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool) bool {
 	if a.openWorld {
 		return false
 	}
 	c := site.Common()
-	siteFP := contextCancelMethodFP(site, a.fresh)
-	if c == nil || !subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), siteFP) {
+	if c == nil {
 		return false
+	}
+	siteFP := contextCancelMethodFP(site, a.fresh)
+	if !subjectClosedDynamicValue(c.Value, make(map[ssa.Value]bool), siteFP) {
+		return c.IsInvoke() && a.closedGoASTNodeTargets(site, fromRTA)
 	}
 	if fromRTA && a.subjectDeterminedInvokes[site] {
 		return true
@@ -1381,6 +705,10 @@ func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool)
 		held, ok = closedDynamicTargets(c.Value, siteFP)
 	}
 	if ok {
+		targetPkgPath := ""
+		if a.prog != nil {
+			targetPkgPath = a.prog.PkgPath
+		}
 		for fn := range held {
 			idx := a.idxForFunction(fn)
 			if idx == nil {
@@ -1397,7 +725,8 @@ func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool)
 					return false
 				}
 				callerStd := site != nil && site.Parent() != nil && a.isStdFunction(site.Parent())
-				if !admitPureDelegateCall(a.h.SelectionAudited(), a.h.source.pureDelegates, idx.path, fn, site, callerStd, siteFP) && !auditedStandardCallee(a.h.SelectionAudited(), idx.path, functionSymbolName(fn), fn) {
+				forceCheckStdTarget := idx.path == "go/ast" || idx.path == "net/url"
+				if (!callerStd || forceCheckStdTarget) && !admittedResolvedStandardOrDelegateCallee(a.h.SelectionAudited(), a.h.source.pureDelegates, a.h, targetPkgPath, idx.path, fn, c.IsInvoke(), siteFP) {
 					return false
 				}
 				if _, classB := classBEffectForFunction(fn); classB {
@@ -1431,16 +760,15 @@ func (a *tier2Analyzer) dispatchAdmitted(site ssa.CallInstruction, fromRTA bool)
 		}
 		return true
 	}
-	return false
+	return c.IsInvoke() && a.closedGoASTNodeTargets(site, fromRTA)
 }
 
-// stdBodyCut reports a standard-library body whose classification is
-// complete at its call sites, so the walk never descends: classified
-// file-I/O operations, atomic observability operations, and the
-// harness's logging, pacing, subtest-driver, and fuzz-driver families -
-// one membership list, so the category grows in one place
-// (the one-site-classifier collapse).
 func stdBodyCut(audited bool, fn *ssa.Function, classified externalEffect, classifiedOK bool) bool {
+	if audited && fn != nil && funcPkgPath(fn) == "go/parser" {
+		if sym := functionSymbolName(fn); sym == "ParseExpr" || auditset.GoParserSourceFunc(sym) {
+			return true
+		}
+	}
 	return classifiedOK && classified.kind == externalEffectFileIO ||
 		atomicObservabilityOperation(fn) || harnessBodyCut(audited, fn)
 }
@@ -1476,114 +804,6 @@ func (a *tier2Analyzer) addInterfaceMethodSet(t types.Type) {
 			a.base.ifaceMethodObjs[t] = funcs
 		}
 	}
-}
-
-func (a *tier2Analyzer) addHarnessArgMethodSets(t types.Type) {
-	isStdOrHarnessPkg := func(pkg *types.Package) bool {
-		if pkg == nil {
-			return false
-		}
-		if idx := a.idxByTypes[pkg]; idx != nil {
-			return idx.std || a.propertyHarnessAudited(idx.path)
-		}
-		return isStdImportPath(pkg.Path()) || a.propertyHarnessAudited(pkg.Path())
-	}
-	enqueueNamedMethods := func(named *types.Named) {
-		if named == nil || named.Obj() == nil || named.Obj().Pkg() == nil || isStdOrHarnessPkg(named.Obj().Pkg()) {
-			return
-		}
-		for _, mt := range []types.Type{named, types.NewPointer(named)} {
-			set := types.NewMethodSet(mt)
-			for i := 0; i < set.Len(); i++ {
-				if fn, ok := set.At(i).Obj().(*types.Func); ok {
-					a.enqueueObject(fn)
-				}
-			}
-		}
-	}
-	var ifaces []*types.Interface
-	seenArg := map[types.Type]bool{}
-	var collectArgTypes func(types.Type)
-	collectArgTypes = func(cur types.Type) {
-		if cur == nil {
-			return
-		}
-		cur = types.Unalias(cur)
-		if ssaOpaqueHandle(cur) || seenArg[cur] {
-			return
-		}
-		seenArg[cur] = true
-		switch tt := cur.(type) {
-		case *types.Named:
-			for i := 0; i < tt.TypeArgs().Len(); i++ {
-				collectArgTypes(tt.TypeArgs().At(i))
-			}
-			if iface, isIf := tt.Underlying().(*types.Interface); isIf {
-				ifaces = append(ifaces, iface)
-				return
-			}
-			if tt.Obj() != nil && isStdOrHarnessPkg(tt.Obj().Pkg()) {
-				return
-			}
-			enqueueNamedMethods(tt)
-			collectArgTypes(tt.Underlying())
-		case *types.Interface:
-			ifaces = append(ifaces, tt)
-		case *types.Pointer:
-			collectArgTypes(tt.Elem())
-		case *types.Slice:
-			collectArgTypes(tt.Elem())
-		case *types.Array:
-			collectArgTypes(tt.Elem())
-		case *types.Chan:
-			collectArgTypes(tt.Elem())
-		case *types.Map:
-			collectArgTypes(tt.Key())
-			collectArgTypes(tt.Elem())
-		case *types.Signature:
-			for _, tuple := range []*types.Tuple{tt.Params(), tt.Results()} {
-				for i := 0; tuple != nil && i < tuple.Len(); i++ {
-					collectArgTypes(tuple.At(i).Type())
-				}
-			}
-		case *types.Struct:
-			for i := 0; i < tt.NumFields(); i++ {
-				collectArgTypes(tt.Field(i).Type())
-			}
-		case *types.Tuple:
-			for i := 0; i < tt.Len(); i++ {
-				collectArgTypes(tt.At(i).Type())
-			}
-		}
-	}
-	collectArgTypes(t)
-	if len(ifaces) == 0 || (len(a.enumeratedTypes) == 0 && len(a.initBoxedTypes) == 0) {
-		return
-	}
-	seenCand := map[types.Type]bool{}
-	walkCandidates := func(cands []types.Type) {
-		for _, ct := range cands {
-			walkTypeGraph(ct, true, seenCand, func(cur types.Type) bool {
-				named, ok := cur.(*types.Named)
-				if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
-					return true
-				}
-				if _, isIf := named.Underlying().(*types.Interface); isIf {
-					return true
-				}
-				ptrType := types.NewPointer(named)
-				for _, iface := range ifaces {
-					if types.Implements(named, iface) || types.Implements(ptrType, iface) {
-						enqueueNamedMethods(named)
-						break
-					}
-				}
-				return true
-			})
-		}
-	}
-	walkCandidates(a.enumeratedTypes)
-	walkCandidates(a.initBoxedTypes)
 }
 
 func (a *tier2Analyzer) hasNonStdNamedType(t types.Type) bool {
@@ -1688,14 +908,6 @@ func (a *tier2Analyzer) addObject(obj types.Object) {
 	}
 	if node == nil {
 		if _, ok := obj.(*types.Func); ok {
-			// A func object with no source decl node is source-free: buildIndex
-			// records a decl for every FuncDecl (incl. asm bodies and generic
-			// origins), so this is a synthetic/instantiated func whose real body,
-			// if any, is hashed through RTA (addFunction resolves fn.Origin() for
-			// every reachable instantiation — incl. methods RTA marks reachable
-			// when their concrete type is converted to an interface). Hashing its
-			// signature suffices; widening here would only lose precision. A
-			// non-func with no node is genuinely missing source → widen.
 			a.addType(obj.Type())
 			return
 		}
@@ -1708,784 +920,4 @@ func (a *tier2Analyzer) addObject(obj types.Object) {
 	if ssaFn != nil {
 		a.scanFunction(ssaFn)
 	}
-}
-
-func originObject(obj types.Object) types.Object {
-	fn, ok := obj.(*types.Func)
-	if !ok {
-		return obj
-	}
-	if origin := fn.Origin(); origin != nil {
-		return origin
-	}
-	return obj
-}
-
-func (a *tier2Analyzer) addReverseLinknameTargets(obj types.Object) {
-	if obj == nil || obj.Pkg() == nil {
-		return
-	}
-	key := obj.Pkg().Path() + "." + obj.Name()
-	for _, linked := range a.objsByLinkTarget[key] {
-		if linked != obj {
-			a.enqueueObject(linked)
-		}
-	}
-}
-
-func (a *tier2Analyzer) scanBodylessNonStdFunction(fn *ssa.Function, idx *pkgIndex, isSubjectRoot bool) {
-	if a == nil || fn == nil || len(fn.Blocks) != 0 || idx == nil || idx.std {
-		return
-	}
-	a.markFilePackage(idx)
-	hasLinkname := false
-	if obj := fn.Object(); obj != nil {
-		if target := a.linknameTarget(idx, obj); target != "" {
-			hasLinkname = true
-			if !(a.base != nil && a.base.isVerifiedReadOnlyLinknameVar(idx, obj, target)) {
-				a.addLinknameTarget(target)
-			}
-		}
-	}
-	if idx.meta != nil && len(idx.meta.SFiles) > 0 {
-		a.scanVerifiedAsmBodylessFunction(fn, idx, isSubjectRoot)
-	} else if !hasLinkname {
-		a.requestWiden("bodyless non-standard function in " + idx.id)
-	}
-}
-
-func (a *tier2Analyzer) linknameTarget(idx *pkgIndex, obj types.Object) string {
-	if idx == nil || obj == nil {
-		return ""
-	}
-	docTarget := idx.linknames[obj]
-	fileTarget := idx.linknameByName[obj.Name()]
-	if docTarget != "" && fileTarget != "" && docTarget != fileTarget {
-		return "<conflict>"
-	}
-	if docTarget != "" {
-		return docTarget
-	}
-	return fileTarget
-}
-
-func (a *tier2Analyzer) addLinknameTarget(target string) {
-	lastDot := strings.LastIndexByte(target, '.')
-	if lastDot < 0 {
-		a.requestWiden("unresolved go:linkname target " + target)
-		return
-	}
-	pkgPath, name := target[:lastDot], target[lastDot+1:]
-	obj := a.objByName[pkgPath+"."+name]
-	isStd := isStdImportPath(pkgPath)
-	if obj != nil && obj.Pkg() != nil {
-		if idx := a.idxByTypes[obj.Pkg()]; idx != nil {
-			isStd = idx.std
-		}
-	} else if m, ok := a.metaByPath[pkgPath]; ok {
-		isStd = m.Standard
-	}
-	var effect externalEffect
-	var classified bool
-	if isStd || !isStdImportPath(pkgPath) {
-		effect, classified = classBEffect(pkgPath, name)
-	}
-	if !classified && isStd {
-		effect = symbolExternalEffect(externalEffectLinkage, pkgPath, name, "reaches standard linkname target "+target)
-		classified = true
-	}
-	if classified {
-		a.recordExternalEffect(effect)
-	}
-	if obj == nil {
-		a.requestWiden("unresolved go:linkname target " + target)
-		return
-	}
-	a.enqueueObject(obj)
-}
-
-// walkTypeGraph visits the types reachable from t through the structural
-// edges listed here — element, key, field, parameter, result, underlying,
-// and (when typeArgs is set) type-argument — Unalias-normalized, each
-// type at most once per seen map. Interfaces are deliberately terminal:
-// their embedded and method types stay unwalked, and the carrier rule
-// judges interface-typed state separately — adding interface edges would
-// move verdicts. visit returning false stops the whole walk. Callers own
-// seen: the analyzer's addType shares one map across calls so a type
-// reached once is never re-walked; the per-call predicates pass fresh
-// maps. The typeArgs edge stays addType-only: the predicates never
-// walked it, and widening their reach could move a verdict.
-func walkTypeGraph(t types.Type, typeArgs bool, seen map[types.Type]bool, visit func(types.Type) bool) {
-	stop := false
-	var walk func(types.Type)
-	walk = func(t types.Type) {
-		if t == nil || stop {
-			return
-		}
-		t = types.Unalias(t)
-		if ssaOpaqueHandle(t) {
-			return
-		}
-		if seen[t] {
-			return
-		}
-		seen[t] = true
-		if !visit(t) {
-			stop = true
-			return
-		}
-		switch tt := t.(type) {
-		case *types.Named:
-			if typeArgs {
-				for i := 0; i < tt.TypeArgs().Len(); i++ {
-					walk(tt.TypeArgs().At(i))
-				}
-			}
-			walk(tt.Underlying())
-		case *types.Pointer:
-			walk(tt.Elem())
-		case *types.Slice:
-			walk(tt.Elem())
-		case *types.Array:
-			walk(tt.Elem())
-		case *types.Map:
-			walk(tt.Key())
-			walk(tt.Elem())
-		case *types.Chan:
-			walk(tt.Elem())
-		case *types.Signature:
-			for _, tuple := range []*types.Tuple{tt.Params(), tt.Results()} {
-				for i := 0; tuple != nil && i < tuple.Len(); i++ {
-					walk(tuple.At(i).Type())
-				}
-			}
-		case *types.Struct:
-			for i := 0; i < tt.NumFields(); i++ {
-				walk(tt.Field(i).Type())
-			}
-		case *types.Tuple:
-			for i := 0; i < tt.Len(); i++ {
-				walk(tt.At(i).Type())
-			}
-		}
-	}
-	walk(t)
-}
-
-// ssaOpaqueHandle recognizes the builder's two internal tokens and the
-// standard library's sync.notifyList wait-queue handle inside sync.Cond.
-// None represents a user source pointer operation, and their operands and
-// callbacks remain independently scanned.
-func ssaOpaqueHandle(t types.Type) bool {
-	n, ok := t.(*types.Named)
-	if !ok || n.Obj().Pkg() == nil {
-		return false
-	}
-	if n.Obj().Pkg().Path() == "sync" && n.Obj().Name() == "notifyList" {
-		return true
-	}
-	if n.Obj().Pkg().Path() != "$ssa" || n.Underlying() != types.Typ[types.UnsafePointer] {
-		return false
-	}
-	return n.Obj().Name() == "rangeIter" || n.Obj().Name() == "deferStack"
-}
-
-// addValueType walks one SSA value's type and widens on a reachable
-// unsafe pointer anywhere in it — the one judgment every value-typed
-// scan site shares; std packages carry the toolchain guard instead.
-func (a *tier2Analyzer) addValueType(idx *pkgIndex, v ssa.Value) {
-	t := v.Type()
-	a.addType(t)
-	if !a.valueTypeUsesUnsafePointer(t) {
-		return
-	}
-	if idx == nil && v.Parent() != nil {
-		idx = a.idxForFunction(v.Parent())
-	}
-	unindexedWrapper := idx == nil && v.Parent() != nil && isAnalyzableUnnamedWrapper(v.Parent())
-	if unindexedWrapper || (idx != nil && !idx.std) {
-		pkgID := "<synthetic>"
-		if idx != nil {
-			pkgID = idx.id
-		}
-		a.requestWiden("unsafe pointer reachable in " + pkgID)
-	}
-}
-
-func (a *tier2Analyzer) valueTypeUsesUnsafePointer(t types.Type) bool {
-	if t == nil {
-		return false
-	}
-	if a != nil && a.base != nil && a.base.unsafeValueType != nil {
-		if v, ok := a.base.unsafeValueType[t]; ok {
-			return v
-		}
-	}
-	res := false
-	if tuple, ok := types.Unalias(t).(*types.Tuple); ok {
-		for i := 0; i < tuple.Len(); i++ {
-			elem := tuple.At(i).Type()
-			if a.typeUsesUnsafePointer(elem) && !isOSFileType(elem) {
-				res = true
-				break
-			}
-		}
-	} else {
-		res = a.typeUsesUnsafePointer(t) && !isOSFileType(t)
-	}
-	if a != nil && a.base != nil && a.base.unsafeValueType != nil {
-		a.base.unsafeValueType[t] = res
-	}
-	return res
-}
-
-func (a *tier2Analyzer) isOpaquePropertyHarnessStruct(n *types.Named) bool {
-	if a == nil || n == nil || n.Obj() == nil || n.Obj().Pkg() == nil {
-		return false
-	}
-	if !a.propertyHarnessAudited(n.Obj().Pkg().Path()) {
-		return false
-	}
-	st, ok := n.Underlying().(*types.Struct)
-	return ok && propharness.StructHasNoExportedFields(st)
-}
-
-func (a *tier2Analyzer) typeUsesUnsafePointer(t types.Type) bool {
-	if t == nil {
-		return false
-	}
-	if a == nil {
-		return typeUsesUnsafePointer(t)
-	}
-	if a.base != nil && a.base.unsafeElemType != nil {
-		if v, ok := a.base.unsafeElemType[t]; ok {
-			return v
-		}
-	}
-	seen := make(map[types.Type]bool)
-	var walk func(types.Type) bool
-	walk = func(cur types.Type) bool {
-		if cur == nil {
-			return false
-		}
-		cur = types.Unalias(cur)
-		if a.base != nil && a.base.unsafeElemType != nil {
-			if v, ok := a.base.unsafeElemType[cur]; ok {
-				return v
-			}
-		}
-		if ssaOpaqueHandle(cur) || seen[cur] {
-			return false
-		}
-		seen[cur] = true
-		switch tt := cur.(type) {
-		case *types.Basic:
-			return tt.Kind() == types.UnsafePointer
-		case *types.Named:
-			if obj := tt.Obj(); obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == "unsafe" && obj.Name() == "Pointer" {
-				return true
-			}
-			if a.isOpaquePropertyHarnessStruct(tt) {
-				for i := 0; i < tt.TypeArgs().Len(); i++ {
-					if walk(tt.TypeArgs().At(i)) {
-						return true
-					}
-				}
-				return false
-			}
-			return walk(tt.Underlying())
-		case *types.Pointer:
-			return walk(tt.Elem())
-		case *types.Slice:
-			return walk(tt.Elem())
-		case *types.Array:
-			return walk(tt.Elem())
-		case *types.Map:
-			return walk(tt.Key()) || walk(tt.Elem())
-		case *types.Chan:
-			return walk(tt.Elem())
-		case *types.Signature:
-			for _, tuple := range []*types.Tuple{tt.Params(), tt.Results()} {
-				for i := 0; tuple != nil && i < tuple.Len(); i++ {
-					if walk(tuple.At(i).Type()) {
-						return true
-					}
-				}
-			}
-		case *types.Struct:
-			for i := 0; i < tt.NumFields(); i++ {
-				if walk(tt.Field(i).Type()) {
-					return true
-				}
-			}
-		case *types.Tuple:
-			for i := 0; i < tt.Len(); i++ {
-				if walk(tt.At(i).Type()) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	res := walk(t)
-	if a.base != nil && a.base.unsafeElemType != nil {
-		a.base.unsafeElemType[t] = res
-	}
-	return res
-}
-
-// addType enqueues every named type the walked structure carries. The
-// walk Unalias-normalizes, so alias targets are enqueued even when the
-// alias never appears in scanned syntax — a reach-widening whose only
-// possible divergence direction is conservative: enqueues add scans,
-// scans add effects and widens, never the reverse.
-func (a *tier2Analyzer) addType(t types.Type) {
-	if t == nil || a.seenTypes[t] {
-		return
-	}
-	u := types.Unalias(t)
-	if a.seenTypes[u] {
-		a.seenTypes[t] = true
-		return
-	}
-	walkTypeGraph(u, true, a.seenTypes, func(t types.Type) bool {
-		if named, ok := t.(*types.Named); ok {
-			a.enqueueObject(named.Obj())
-		}
-		return true
-	})
-	a.seenTypes[t] = true
-}
-
-func (idx *pkgIndex) cachedRefsForNode(node ast.Node) *cachedNodeRefs {
-	if idx == nil || node == nil || idx.pkg == nil || idx.pkg.TypesInfo == nil {
-		return nil
-	}
-	if idx.nodeRefs != nil {
-		if refs := idx.nodeRefs[node]; refs != nil {
-			return refs
-		}
-	} else {
-		idx.nodeRefs = map[ast.Node]*cachedNodeRefs{}
-	}
-	refs := &cachedNodeRefs{}
-	seenObj := map[types.Object]bool{}
-	seenType := map[types.Type]bool{}
-	addObj := func(obj types.Object) {
-		if obj != nil && !seenObj[obj] {
-			seenObj[obj] = true
-			refs.objs = append(refs.objs, obj)
-		}
-	}
-	addTyp := func(t types.Type) {
-		if t != nil && !seenType[t] {
-			seenType[t] = true
-			refs.types = append(refs.types, t)
-		}
-	}
-	ast.Inspect(node, func(n ast.Node) bool {
-		switch x := n.(type) {
-		case *ast.IfStmt:
-			if x.Init == nil && x.Body != nil {
-				refs.hasIf = true
-			}
-		case *ast.Ident:
-			if obj := idx.pkg.TypesInfo.Uses[x]; obj != nil {
-				addObj(obj)
-				addTyp(obj.Type())
-			}
-		case *ast.SelectorExpr:
-			if sel := idx.pkg.TypesInfo.Selections[x]; sel != nil {
-				addObj(sel.Obj())
-				addTyp(sel.Recv())
-			}
-		}
-		return true
-	})
-	idx.nodeRefs[node] = refs
-	return refs
-}
-
-func (a *tier2Analyzer) scanNodeRefs(idx *pkgIndex, node ast.Node, startupOnly bool) {
-	if idx == nil || node == nil || idx.pkg.TypesInfo == nil {
-		return
-	}
-	refs := idx.cachedRefsForNode(node)
-	if refs == nil {
-		return
-	}
-	var skippedBody map[*ast.BlockStmt]bool
-	if startupOnly && len(a.zeroGlobalDecls) > 0 && refs.hasIf {
-		ast.Inspect(node, func(n ast.Node) bool {
-			if _, isFuncLit := n.(*ast.FuncLit); isFuncLit {
-				return false
-			}
-			if ifStmt, ok := n.(*ast.IfStmt); ok && ifStmt.Init == nil && ifStmt.Body != nil && ifCondRequiresNonZeroGlobalTyped(ifStmt.Cond, idx.pkg.TypesInfo, a.zeroGlobalDecls) {
-				if skippedBody == nil {
-					skippedBody = make(map[*ast.BlockStmt]bool)
-				}
-				skippedBody[ifStmt.Body] = true
-			}
-			return true
-		})
-	}
-	if len(skippedBody) == 0 {
-		if a.scannedNodes[node] {
-			return
-		}
-		if a.scannedNodes != nil {
-			a.scannedNodes[node] = true
-		}
-		for _, obj := range refs.objs {
-			a.enqueueObject(obj)
-		}
-		for _, t := range refs.types {
-			a.addType(t)
-		}
-		return
-	}
-	ast.Inspect(node, func(n ast.Node) bool {
-		if blk, ok := n.(*ast.BlockStmt); ok && skippedBody[blk] {
-			return false
-		}
-		switch x := n.(type) {
-		case *ast.Ident:
-			if obj := idx.pkg.TypesInfo.Uses[x]; obj != nil {
-				a.enqueueObject(obj)
-				a.addType(obj.Type())
-			}
-		case *ast.SelectorExpr:
-			if sel := idx.pkg.TypesInfo.Selections[x]; sel != nil {
-				a.enqueueObject(sel.Obj())
-				a.addType(sel.Recv())
-			}
-		}
-		return true
-	})
-}
-
-func (a *tier2Analyzer) markPackage(idx *pkgIndex) {
-	if idx != nil && idx.mutable {
-		a.filePkgs[idx] = true
-	}
-}
-
-func (a *tier2Analyzer) markFilePackage(idx *pkgIndex) {
-	if idx != nil && (idx.mutable || idx.cache) {
-		a.filePkgs[idx] = true
-	}
-}
-
-func (a *tier2Analyzer) addReachedPackageFiles() error {
-	pkgs := make([]*pkgIndex, 0, len(a.filePkgs))
-	for idx := range a.filePkgs {
-		pkgs = append(pkgs, idx)
-	}
-	sort.Slice(pkgs, func(i, j int) bool { return pkgs[i].id < pkgs[j].id })
-	for _, idx := range pkgs {
-		if err := a.contextErr(); err != nil {
-			return err
-		}
-		if idx.meta == nil {
-			a.requestWiden("missing file metadata for " + idx.id)
-			continue
-		}
-		if idx.wasmImport {
-			effect := opaqueExternalEffect(externalEffectLinkage, "reaches go:wasmimport")
-			effect.unrefinable = true
-			a.recordExternalEffect(effect)
-		}
-		if hasExternalCgoMeta(idx.meta) {
-			effect := opaqueExternalEffect(externalEffectNative, "reaches cgo external library")
-			effect.unrefinable = true
-			a.recordExternalEffect(effect)
-		}
-		if idx.mutable {
-			if hasCgoCallbackBlindspot(idx.meta) && !a.verifiedPackageAssemblySafe(idx.meta) {
-				modCache := ""
-				if a.h != nil {
-					modCache = a.h.modCache
-				}
-				if root := cgoIncludeRootOutsideDir(idx.meta, modCache); root != "" {
-					return fmt.Errorf("closure: cgo include root outside package dir: %s", root)
-				}
-				// The blindspot's bytes ride the maximal hash; the
-				// analyzer keeps only the escape checks — error
-				// conditions — and the widen.
-				all, err := allPackageFiles(a.contextErr, idx.meta.Dir)
-				if err != nil {
-					return err
-				}
-				if include, err := cgoEscapingInclude(idx.meta, all); err != nil {
-					return err
-				} else if include != "" {
-					return fmt.Errorf("closure: cgo include escapes package dir: %s", include)
-				}
-				a.requestWiden("cgo callback source in " + idx.id)
-			}
-		}
-		if len(idx.meta.SFiles) == 0 || a.verifiedPackageAssemblySafe(idx.meta) {
-			continue
-		}
-		// Assembly is never an analysis surface (REQ-closure-blindspot):
-		// the package's effect blocks the observability proof and the
-		// subject widens to the maximal closure, whose hash covers the
-		// package directory whole. Only mutable-local and cache packages
-		// enter this loop — toolchain assembly rides the toolchain guard.
-		a.recordExternalEffect(opaqueExternalEffect(externalEffectNative, "reaches non-standard assembly"))
-		a.requestWiden("non-toolchain assembly in " + idx.id)
-	}
-	return nil
-}
-
-// requestWiden keeps the lexicographically least reason: widen sites fire
-// in map-driven walk order, and the reason lands verbatim in persisted
-// proofs, so the selection must be a deterministic function of the reason
-// SET (the recorded-evidence stability REQ-closure-observability-memo
-// binds).
-func (a *tier2Analyzer) requestWiden(reason string) {
-	if !a.widen || reason < a.widenReason {
-		a.widen = true
-		a.widenReason = reason
-	}
-}
-
-// recordExternalEffect collects the effect and keeps the legacy
-// single-reason projection's selection through the one shared
-// comparator - rank strata, lexicographic ties - so the projection can
-// never drift from the maximal instance's order
-// (the one-site-classifier collapse; REQ-closure-observability-cause-order).
-func (a *tier2Analyzer) recordExternalEffect(effect externalEffect) {
-	a.collectExternalEffect(effect)
-	if !a.unverifiable || preferEffectReason(effect, a.selected) {
-		a.selected = effect
-	}
-	a.unverifiable = true
-}
-
-func (a *tier2Analyzer) collectExternalEffect(effect externalEffect) bool {
-	before := len(a.effects)
-	a.effects = appendExternalEffect(a.effects, effect)
-	return len(a.effects) != before
-}
-
-// effectCauseRank is the one cause-preference order both diagnostic
-// projections share: the legacy single-reason projection keeps the
-// highest-ranked recorded effect, and the observation proof's refusal
-// names the highest-ranked blocking effect. Structural findings and
-// mutations outrank the generic file read, which outranks ambient
-// formatting and environment, which outrank the unaudited and
-// test-runtime classifications; the audited harness fact is strictly
-// weakest — it flips the legacy projection when it is the only effect
-// but never displaces a causal classification.
-func effectCauseRank(effect externalEffect) int {
-	if effect.kind == externalEffectTestRuntime && effect.observable {
-		return -1
-	}
-	if effect.packagePath == "" && effect.kind == externalEffectTestRuntime {
-		// The receiver-escape structural finding carries the
-		// test-runtime kind but no symbol: it names the mechanism
-		// directly and ranks with the structural findings, never with
-		// the down-ranked test-runtime classification. Every other
-		// symbol-free structural finding (linkage, native, cgo) already
-		// ranks top through the kind default below.
-		return 4
-	}
-	switch effect.kind {
-	case externalEffectUnauditedStandard, externalEffectTestRuntime:
-		return 0
-	case externalEffectFormattedOutput, externalEffectEnvironment:
-		return 1
-	case externalEffectFileIO:
-		return 3
-	default:
-		return 4
-	}
-}
-
-func isStandardFallbackExempt(audited bool, pkgPath string) bool {
-	// The testing harness itself is selected infrastructure. Its externally
-	// observable helpers are classified before this fallback. The
-	// hand-folded "testing" stays beside the source-only set on purpose,
-	// outside the audited-set tables (internal/auditset): exempting the
-	// harness from the unaudited-standard fallback is not an admission
-	// of its symbols, so it must never read as one — this is the
-	// family's deliberate third spelling, not a consolidation miss.
-	return pkgPath == "testing" || isSourceOnlyStandardPackage(audited, pkgPath)
-}
-
-func (a *tier2Analyzer) result() tier2Result {
-	effects := append([]externalEffect(nil), a.effects...)
-	// The accumulation order follows type/object walks that range over
-	// maps; the proof's refusal names the highest-ranked blocking effect
-	// with the projection order as tie-break, so the projection sorts
-	// under a total order — recomputation must reproduce diagnostics
-	// byte-for-byte (the recorded-evidence stability
-	// REQ-closure-observability-memo binds).
-	sort.Slice(effects, func(i, j int) bool { return effectLess(effects[i], effects[j]) })
-	return tier2Result{effects: effects, widen: a.widen, widenReason: a.widenReason, unverifiable: a.unverifiable, reason: a.selected.reason}
-}
-
-// effectLess is a total order over effects: field-lexicographic. The
-// accumulator dedups by struct equality, so no two list elements compare
-// equal and the sort is fully deterministic.
-func effectLess(a, b externalEffect) bool {
-	if a.kind != b.kind {
-		return a.kind < b.kind
-	}
-	if a.packagePath != b.packagePath {
-		return a.packagePath < b.packagePath
-	}
-	if a.symbol != b.symbol {
-		return a.symbol < b.symbol
-	}
-	if a.detail != b.detail {
-		return a.detail < b.detail
-	}
-	if a.reason != b.reason {
-		return a.reason < b.reason
-	}
-	if a.unrefinable != b.unrefinable {
-		return b.unrefinable
-	}
-	return !a.observable && b.observable
-}
-
-func classBEffectForFunction(fn *ssa.Function) (externalEffect, bool) {
-	if fn == nil {
-		return externalEffect{}, false
-	}
-	return classBEffect(funcPkgPath(fn), functionSymbolName(fn))
-}
-
-func functionSymbolName(fn *ssa.Function) string {
-	if obj := fn.Object(); obj != nil {
-		return obj.Name()
-	}
-	if origin := fn.Origin(); origin != nil {
-		if obj := origin.Object(); obj != nil {
-			return obj.Name()
-		}
-		return origin.Name()
-	}
-	return fn.Name()
-}
-
-func classBReasonForFunction(fn *ssa.Function) string {
-	effect, ok := classBEffectForFunction(fn)
-	if !ok {
-		return ""
-	}
-	return effect.reason
-}
-
-func osOpenFileMayMutate(callee *ssa.Function, pkgPath, name string, c *ssa.CallCommon) bool {
-	if pkgPath != "os" || name != "OpenFile" {
-		return false
-	}
-	flags, known := openFileFlagsForCallee(callee, c)
-	return !known || openFileFlagsMutate(flags)
-}
-
-func openFileFlags(c *ssa.CallCommon) (int64, bool) {
-	if c == nil {
-		return 0, false
-	}
-	return openFileFlagsForCallee(c.StaticCallee(), c)
-}
-
-func openFileFlagsForCallee(callee *ssa.Function, c *ssa.CallCommon) (int64, bool) {
-	flagArg := 1
-	if callee != nil && callee.Signature != nil && callee.Signature.Recv() != nil {
-		flagArg = 2
-	}
-	if c == nil || len(c.Args) <= flagArg {
-		return 0, false
-	}
-	return constInt(c.Args[flagArg])
-}
-
-func openFileFlagsMutate(flags int64) bool {
-	const mutatingFlags = int64(os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREATE | os.O_TRUNC)
-	return flags&mutatingFlags != 0
-}
-
-func ordinaryOpenFileFlagsObservable(flags int64) bool {
-	return flags == 0
-}
-
-func recognizedOpenFileFlags(callee *ssa.Function, flags int64) bool {
-	if callee == nil || callee.Object() == nil || callee.Object().Pkg() == nil {
-		return false
-	}
-	scope := callee.Object().Pkg().Scope()
-	var mask int64
-	var writeOnly, readWrite int64
-	for _, name := range []string{"O_WRONLY", "O_RDWR", "O_APPEND", "O_CREATE", "O_EXCL", "O_SYNC", "O_TRUNC"} {
-		object, ok := scope.Lookup(name).(*types.Const)
-		if !ok {
-			return false
-		}
-		value, ok := constant.Int64Val(object.Val())
-		if !ok {
-			return false
-		}
-		mask |= value
-		if name == "O_WRONLY" {
-			writeOnly = value
-		}
-		if name == "O_RDWR" {
-			readWrite = value
-		}
-	}
-	access := flags & (writeOnly | readWrite)
-	return flags&^mask == 0 && (access == 0 || access == writeOnly || access == readWrite)
-}
-
-func syscallOpenMayCreate(pkgPath, name string, c *ssa.CallCommon) bool {
-	if pkgPath != "syscall" && pkgPath != "golang.org/x/sys/unix" {
-		return false
-	}
-	flagArg := -1
-	switch name {
-	case "Open":
-		flagArg = 1
-	case "Openat":
-		flagArg = 2
-	default:
-		return false
-	}
-	if c == nil || flagArg >= len(c.Args) {
-		return true
-	}
-	v, ok := c.Args[flagArg].(*ssa.Const)
-	if !ok {
-		return true
-	}
-	flags, ok := constant.Int64Val(v.Value)
-	if !ok {
-		return true
-	}
-	return flags&int64(os.O_CREATE) != 0
-}
-
-func (a *tier2Analyzer) idxForFunction(fn *ssa.Function) *pkgIndex {
-	return idxForFunctionIn(a.idxByTypes, fn)
-}
-
-func (a *tier2Analyzer) isStdFunction(fn *ssa.Function) bool {
-	if fn == nil {
-		return false
-	}
-	if idx := a.idxForFunction(fn); idx != nil {
-		return idx.std
-	}
-	if isUnnamedStructPromotedWrapper(fn) {
-		return false
-	}
-	return isStdImportPath(funcPkgPath(fn))
-}
-
-func (b *tier2Base) idxForFunction(fn *ssa.Function) *pkgIndex {
-	return idxForFunctionIn(b.idxByTypes, fn)
 }

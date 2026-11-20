@@ -58,9 +58,14 @@ func TestAuditedSymbolPredicatesReadTheSharedTables(t *testing.T) {
 	// the symbol tables (the pure remainder); the two sets are disjoint,
 	// the classifier consulted first at every site, so an overlap would
 	// be a silent false refusal.
-	for _, name := range []string{"Scan", "Scanf", "Scanln", "Fscan", "Fscanf", "Fscanln", "Sscan", "Sscanf", "Sscanln", "Print", "Printf", "Println", "Fprint", "Fprintf", "Fprintln"} {
+	for _, name := range []string{"Scan", "Scanf", "Scanln", "Fscan", "Fscanf", "Fscanln", "Print", "Printf", "Println", "Fprint", "Fprintf", "Fprintln"} {
 		if auditset.Symbol("fmt", name) {
 			t.Errorf("fmt.%s is a classified effect and an audited symbol", name)
+		}
+	}
+	for _, name := range []string{"Sscan", "Sscanf", "Sscanln", "Formatter", "GoStringer", "ScanState", "Scanner", "State"} {
+		if !auditset.Symbol("fmt", name) {
+			t.Errorf("fmt.%s not admitted in fmt symbol table", name)
 		}
 	}
 	for _, name := range []string{"Type", "TypeOf", "DeepEqual", "Elem", "Kind", "NumField", "Struct", "Get"} {
@@ -1055,10 +1060,15 @@ func TestAuditedPureStandardBounds(t *testing.T) {
 		{"time", "NewTimer"}, {"time", "NewTicker"}, {"time", "Parse"}, {"time", "ParseInLocation"},
 		{"time", "Reset"}, {"time", "Stop"},
 		{"math/big", "NewInt"}, {"math/big", "Int"},
-		{"fmt", "State"}, {"fmt", "Print"}, {"fmt", "Formatter"},
+		{"fmt", "Print"}, {"fmt", "Fprint"}, {"fmt", "Scan"}, {"fmt", "Fscan"},
 	} {
 		if classBPureStandard(true, tc.pkg, tc.name) {
 			t.Errorf("classBPureStandard(true, %s, %s) = true, want outside the audited set", tc.pkg, tc.name)
+		}
+	}
+	for _, name := range []string{"State", "Formatter", "GoStringer", "Scanner", "ScanState", "Sscan", "Sscanf", "Sscanln"} {
+		if !classBPureStandard(true, "fmt", name) {
+			t.Errorf("classBPureStandard(true, fmt, %s) = false, want admitted in fmt symbol table", name)
 		}
 	}
 	if !classBPureStandard(true, "reflect", "DeepEqual") {

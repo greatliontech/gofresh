@@ -64,6 +64,7 @@ type Module struct {
 	Path    string
 	Version string
 	Dir     string
+	GoMod   string
 	Main    bool
 	Replace *Module
 }

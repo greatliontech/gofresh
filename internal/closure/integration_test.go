@@ -3620,3 +3620,79 @@ func TestFixturePreparationLifetimeAndFailureIsolation(t *testing.T) {
 		}
 	})
 }
+
+func TestListingMemoServesNestedWorkspaceModulesAndTransitiveReplaces(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spawns the go command over nested workspace and transitive replace fixtures")
+	}
+	isolateProofCache(t)
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"go.work":           "go 1.26\n\nuse (\n\t.\n\t./sub\n\t./sub/leaf\n)\n\nreplace example.com/wrep1 => ./wrep1\n",
+		"go.mod":            "module example.com/wsroot\n\ngo 1.26\n\nrequire example.com/rep1 v0.0.0\n\nreplace example.com/rep1 => ./rep1\n",
+		"root.go":           "package wsroot\n\nfunc Root() int { return 1 }\n",
+		"sub/go.mod":        "module example.com/wsroot/sub\n\ngo 1.26\n",
+		"sub/sub.go":        "package sub\n\nfunc Sub() int { return 2 }\n",
+		"sub/leaf/go.mod":   "module example.com/wsroot/sub/leaf\n\ngo 1.26\n",
+		"sub/leaf/leaf.go":  "package leaf\n\nfunc Leaf() int { return 3 }\n",
+		"rep1/go.mod":       "module example.com/rep1\n\ngo 1.26\n\nrequire example.com/rep2 v0.0.0\n\nreplace example.com/rep2 => ../rep2\n",
+		"rep1/r1.go":        "package rep1\n\nfunc R1() int { return 4 }\n",
+		"rep2/go.mod":       "module example.com/rep2\n\ngo 1.26\n",
+		"rep2/r2.go":        "package rep2\n\nfunc R2() int { return 5 }\n",
+		"wrep1/go.mod":      "module example.com/wrep1\n\ngo 1.26\n\nrequire example.com/wrep2 v0.0.0\n\nreplace example.com/wrep2 => ../wrep2\n",
+		"wrep1/w1.go":       "package wrep1\n\nfunc W1() int { return 6 }\n",
+		"wrep2/go.mod":      "module example.com/wrep2\n\ngo 1.26\n",
+		"wrep2/w2.go":       "package wrep2\n\nfunc W2() int { return 7 }\n",
+	})
+	leafDir := filepath.Join(root, "sub", "leaf")
+	env := listingEnv("", "")
+	snapshot := snapshotFor(t, leafDir, env)
+	if got := snapshot.Value("GOWORK"); got != filepath.Join(root, "go.work") {
+		t.Fatalf("GOWORK = %q, want %q", got, filepath.Join(root, "go.work"))
+	}
+
+	// Cold pass from nested submodule leafDir listing ancestor module example.com/wsroot.
+	_, spawns, h, err := listFrom(t, leafDir, "example.com/wsroot", env, snapshot)
+	if err != nil || spawns != 1 {
+		t.Fatalf("cold nested workspace list: spawns=%d err=%v", spawns, err)
+	}
+	// Warm pass must hit the listing memo (spawns == 0) because intermediate sub/go.mod
+	// and sub/leaf/go.mod are recorded in rec.Files rather than rec.Absent.
+	_, spawns, _, err = listFrom(t, leafDir, "example.com/wsroot", env, snapshot)
+	if err != nil || spawns != 0 {
+		t.Fatalf("warm nested workspace list missed memo: spawns=%d err=%v", spawns, err)
+	}
+
+	var stored listingRecord
+	if !cachefile.Load(listingDirName, h.listingScope(), "example.com/wsroot", &stored) {
+		t.Fatal("expected persisted listingRecord")
+	}
+	for _, rel := range []string{"sub/go.mod", "sub/leaf/go.mod", "rep2/go.mod", "wrep2/go.mod"} {
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		if stored.Files[full] == "" || slices.Contains(stored.Absent, full) {
+			t.Fatalf("%s missing from Files or present in Absent: files=%v absent=%v", rel, stored.Files, stored.Absent)
+		}
+	}
+
+	// Edits to nested submodule go.mod and transitive local replace targets must invalidate the memo.
+	for _, rel := range []string{"sub/go.mod", "sub/leaf/go.mod", "rep2/go.mod", "wrep2/go.mod"} {
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		orig, err := os.ReadFile(full)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, append(slices.Clone(orig), []byte("\n// edited\n")...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, spawns, _, err = listFrom(t, leafDir, "example.com/wsroot", env, snapshot)
+		if restoreErr := os.WriteFile(full, orig, 0o644); restoreErr != nil {
+			t.Fatal(restoreErr)
+		}
+		if err != nil || spawns != 1 {
+			t.Fatalf("edit to %s did not invalidate listing memo: spawns=%d err=%v", rel, spawns, err)
+		}
+		if _, spawns, _, err = listFrom(t, leafDir, "example.com/wsroot", env, snapshot); err != nil || spawns != 1 {
+			t.Fatalf("re-prime after restoring %s: spawns=%d err=%v", rel, spawns, err)
+		}
+	}
+}

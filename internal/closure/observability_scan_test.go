@@ -11,11 +11,11 @@ import (
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/cachefile"
 	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
-	"github.com/greatliontech/gofresh/internal/propharness"
 	arta "github.com/greatliontech/gofresh/internal/closure/internal/rta"
 	"github.com/greatliontech/gofresh/internal/dynstate"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/propharness"
 	"go/ast"
 	"go/importer"
 	"go/parser"
@@ -2285,8 +2285,9 @@ func TestCalleeParameterClosesThroughAttributedSites(t *testing.T) {
 		// A variadic callee refuses at its parameter; its non-variadic twin closes.
 		{"variadicparam", "package variadicparam\n\nfunc each(y func(int) bool, rest ...int) { y(1) }\n\nfunc Subject() int {\n\ttotal := 0\n\teach(" + closure + ", 1, 2)\n\treturn total\n}\n", "computed function call in example.com/cross/variadicparam.each calling parameter y"},
 		{"fixedparam", "package fixedparam\n\nfunc each(y func(int) bool, rest int) { y(rest) }\n\nfunc Subject() int {\n\ttotal := 0\n\teach(" + closure + ", 1)\n\treturn total\n}\n", ""},
-		// A capturing callee refuses: its closure over captured state would run unjudged.
-		{"capturing", "package capturing\n\nfunc Subject() int {\n\tlimit := 3\n\tseq := func(yield func(int) bool) {\n\t\tfor i := 0; i < limit; i++ {\n\t\t\tif !yield(i) {\n\t\t\t\treturn\n\t\t\t}\n\t\t}\n\t}\n\ttotal := 0\n\tseq(" + closure + ")\n\treturn total\n}\n", "computed function call in example.com/cross/capturing.Subject$1 calling parameter yield"},
+		// A non-escaping local capturing closure closes its parameter across attributed MakeClosure call sites; an escaping capturing closure keeps the refusal.
+		{"capturing", "package capturing\n\nfunc Subject() int {\n\tlimit := 3\n\tseq := func(yield func(int) bool) {\n\t\tfor i := 0; i < limit; i++ {\n\t\t\tif !yield(i) {\n\t\t\t\treturn\n\t\t\t}\n\t\t}\n\t}\n\ttotal := 0\n\tseq(" + closure + ")\n\treturn total\n}\n", ""},
+		{"capturingescaped", "package capturingescaped\n\nvar leaked func(func(int) bool)\n\nfunc Subject() int {\n\tlimit := 3\n\tseq := func(yield func(int) bool) {\n\t\tfor i := 0; i < limit; i++ {\n\t\t\tif !yield(i) {\n\t\t\t\treturn\n\t\t\t}\n\t\t}\n\t}\n\tleaked = seq\n\ttotal := 0\n\tseq(" + closure + ")\n\treturn total\n}\n", "computed function call in example.com/cross/capturingescaped.Subject$1 calling parameter yield"},
 		// A callee also reached as a dynamic target refuses at its parameter: its provenance is not its static sites alone — the clause's discipline, pinned here by a verdict flip (the dynamic dispatch passes a map-loaded callback the static site never shows; the whole-mask target drag still scans that callback's body, so the flip is provenance, not a missed effect). The subject's bool parameter carries no dynamic reach, so the subject stays closed-world and the refusal is the callee's.
 		{"dyntargeted", "package dyntargeted\n\n" + seq + "\nfunc other(yield func(int) bool) { yield(7) }\n\nvar hooks = map[string]func(int) bool{\"a\": func(v int) bool { return v < 2 }}\n\nfunc Subject(pick bool) int {\n\ttotal := 0\n\tseq(" + closure + ")\n\tother(" + closure + ")\n\trun := seq\n\tif pick {\n\t\trun = other\n\t}\n\trun(hooks[\"a\"])\n\treturn total\n}\n", "computed function call in example.com/cross/dyntargeted.other calling parameter yield"},
 		// A subject-frame site passing a value the walk cannot close refuses.
@@ -6266,7 +6267,7 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "observablefresh", subject: "TestFreshPathHelperLeak"},
 		{fixture: "observablefresh", subject: "TestFreshPathHelperDirectGo"},
 		{fixture: "observablefresh", subject: "TestFreshPathHelperInLoop"},
-		{fixture: "observablefresh", subject: "TestFreshPathHelperClosureCallee"},
+		{fixture: "observablefresh", subject: "TestFreshPathHelperClosureCallee", observable: true},
 		{fixture: "observablefresh", subject: "TestFreshFileProbeEscape", reason: "reaches os.OpenFile (filesystem mutation)"},
 		{fixture: "observablefresh", subject: "TestFreshFileNameEscape", reason: "reaches os.OpenFile (filesystem mutation)"},
 		{fixture: "observablefresh", subject: "TestFreshPathGlobalEscape", reason: "testing.TempDir"},
@@ -6307,16 +6308,16 @@ func TestReadOnlyObservabilityProof(t *testing.T) {
 		{fixture: "initglobaldispatch", subject: "TestRead", observable: true},
 		// The writer-sink admission: fmt's writer-first print family is
 		// Sprint-equivalent when the writer provably pins an audited
-		// in-memory sink; every unproven provenance — call results, phi
-		// escapes, mixed helper callers — keeps the formatted-output
-		// refusal (REQ-closure-observability-writer-sink).
+		// in-memory sink (including closed helper returns and phi merges);
+		// unverified writer types keep the formatted-output refusal
+		// (REQ-closure-observability-writer-sink).
 		{fixture: "fmtsink", subject: "TestFprintfBuffer", observable: true},
 		{fixture: "fmtsink", subject: "TestFprintlnBuilder", observable: true},
 		{fixture: "fmtsink", subject: "TestFprintfHelperBuffer", observable: true},
 		{fixture: "fmtsink", subject: "TestFprintfPhiBuffers", observable: true},
-		{fixture: "fmtsink", subject: "TestFprintfCallResult", reason: "fmt.Fprintf"},
-		{fixture: "fmtsink", subject: "TestFprintfPhiCallEscape", reason: "fmt.Fprintf"},
-		{fixture: "fmtsink", subject: "TestFprintfHelperMixed", reason: "fmt.Fprintf"},
+		{fixture: "fmtsink", subject: "TestFprintfCallResult", observable: true},
+		{fixture: "fmtsink", subject: "TestFprintfPhiCallEscape", observable: true},
+		{fixture: "fmtsink", subject: "TestFprintfHelperMixed", observable: true},
 		{fixture: "fmtsink", subject: "TestFprintfLocalWriterType", reason: "fmt.Fprintf"},
 		{fixture: "fmtsink", subject: "TestFprintfGlobalBuffer", observable: true},
 		{fixture: "fmtsink", subject: "TestFprintfFieldBuffer", observable: true},

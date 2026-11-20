@@ -137,44 +137,24 @@ func linknamesFromDoc(doc *ast.CommentGroup) map[string]string {
 		return nil
 	}
 	var out map[string]string
-	for _, c := range doc.List {
-		if !strings.Contains(c.Text, "go:linkname") {
-			continue
+	forEachGoLinknameDirective([]*ast.CommentGroup{doc}, func(local, target string, valid bool) {
+		if !valid || target == "" {
+			return
 		}
-		text := strings.TrimSpace(strings.TrimPrefix(c.Text, "//"))
-		text = strings.TrimSpace(strings.TrimPrefix(text, "/*"))
-		text = strings.TrimSpace(strings.TrimSuffix(text, "*/"))
-		fields := strings.Fields(text)
-		if len(fields) >= 3 && (fields[0] == "go:linkname" || fields[0] == "go:linknamestd") {
-			if out == nil {
-				out = map[string]string{}
-			}
-			if prev := out[fields[1]]; prev != "" && prev != fields[2] {
-				out[fields[1]] = "<conflict>"
-			} else {
-				out[fields[1]] = fields[2]
-			}
+		if out == nil {
+			out = map[string]string{}
 		}
-	}
+		if prev := out[local]; prev != "" && prev != target {
+			out[local] = "<conflict>"
+		} else {
+			out[local] = target
+		}
+	})
 	return out
 }
 
 func typeUsesUnsafePointer(t types.Type) bool {
-	found := false
-	walkTypeGraph(t, false, map[types.Type]bool{}, func(t types.Type) bool {
-		if basic, ok := t.(*types.Basic); ok && basic.Kind() == types.UnsafePointer {
-			found = true
-			return false
-		}
-		if n, ok := t.(*types.Named); ok {
-			if obj := n.Obj(); obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == "unsafe" && obj.Name() == "Pointer" {
-				found = true
-				return false
-			}
-		}
-		return true
-	})
-	return found
+	return typeUsesUnsafePointerWith(t, false, nil, nil)
 }
 
 func hasExternalCgo(flags []string) bool {

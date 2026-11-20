@@ -4,21 +4,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"github.com/greatliontech/gofresh/internal/auditset"
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"go/types"
 	"os"
-	"path"
 	"path/filepath"
-	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
@@ -50,10 +44,7 @@ func (h *Hasher) ComputeMaximalBatch(subjects []Subject) (map[Subject]Closure, m
 
 // ComputeMaximalFactsBatch returns caller-owned maximal identities and complete
 // conservative blocker classifications for every subject, together with the
-// mutable source paths described by ComputeMaximalBatch. Each blocker's scope is
-// the subject's whole selected test-binary source closure, not an individual
-// occurrence or a precise reachability result. One call observes one generation
-// through the same listing, source fold and effect scan as ComputeMaximalBatch.
+// mutable source paths described by ComputeMaximalBatch.
 func (h *Hasher) ComputeMaximalFactsBatch(subjects []Subject) (map[Subject]MaximalFacts, map[Subject][]string, error) {
 	if err := h.contextErr(); err != nil {
 		return nil, nil, err
@@ -97,16 +88,12 @@ func (h *Hasher) ComputeMaximalFactsBatch(subjects []Subject) (map[Subject]Maxim
 		if err != nil {
 			return nil, nil, err
 		}
-		// Selection attribution belongs to the preferred closure diagnostic;
-		// the complete effect facts retain the scan's unattributed values.
 		base := newMaximalFacts(MaximalIdentity{
 			ToolchainContent: h.ToolchainContent(),
 			AdmissionPolicy:  h.AdmissionPolicy(),
 			TestVariants:     h.testVariants[pkgPath].Hash,
 		}, effects, AttributeSelection(reason, h.SelectionAttribution()))
 		for _, subject := range byPackage[pkgPath] {
-			// Sort the package's classification set once, but return independent
-			// caller-owned slices for each subject.
 			facts := base.Clone()
 			facts.Identity.Hash = maximalSubjectHash(hash, subject)
 			results[subject] = facts
@@ -124,131 +111,180 @@ func maximalSubjectHash(packageHash string, subject Subject) string {
 	return hex.EncodeToString(sum[:])[:32]
 }
 
-// InMemoryMaximalFacts computes the maximal closure facts for subject directly
-// from pre-parsed and typechecked in-memory packages without invoking `go list`.
-func InMemoryMaximalFacts(audited bool, pkgs []*packages.Package, subject Subject) (MaximalFacts, error) {
-	pkgPath := subject.Package
-	declaredNames := make(map[string]string, len(pkgs)*2)
-	nonStdPaths := make(map[string]bool, len(pkgs))
-	for _, p := range pkgs {
-		if p.PkgPath != "" && p.Name != "" {
-			declaredNames[p.PkgPath] = p.Name
-		}
-		if p.Module != nil && p.PkgPath != "" {
-			nonStdPaths[p.PkgPath] = true
-		}
-		for impPath, impPkg := range p.Imports {
-			if impPkg != nil && impPkg.Name != "" {
-				declaredNames[impPath] = impPkg.Name
-			}
-		}
-	}
-	var effects []externalEffect
-	var candidates []externalEffect
-	var fallback string
-	record := func(scan maximalEffectScan) {
-		for _, effect := range scan.effects {
-			effects = appendExternalEffect(effects, effect)
-			candidates = appendExternalEffect(candidates, effect)
-		}
-		for _, candidate := range scan.importCandidates {
-			candidates = appendExternalEffect(candidates, candidate)
-		}
-		if len(scan.effects) == 0 && len(scan.importCandidates) == 0 && scan.preferred != "" && (fallback == "" || scan.preferred < fallback) {
-			fallback = scan.preferred
-		}
-	}
-	var testingScan maximalEffectScan
-	for _, pkg := range pkgs {
-		if pkg.PkgPath != pkgPath && pkg.ForTest != pkgPath {
-			continue
-		}
-		for _, file := range pkg.Syntax {
-			ast.Inspect(file, func(node ast.Node) bool {
-				selector, ok := node.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				var object types.Object
-				if selection := pkg.TypesInfo.Selections[selector]; selection != nil {
-					object = selection.Obj()
-				} else {
-					object = pkg.TypesInfo.Uses[selector.Sel]
-				}
-				if object == nil || object.Pkg() == nil || object.Pkg().Path() != "testing" {
-					return true
-				}
-				if effect, ok := classBEffect("testing", object.Name()); ok {
-					testingScan.add(effect)
-				}
-				return true
-			})
-		}
-	}
-	testingScan.preferred = preferredEffectReason(testingScan.effects)
-	record(testingScan)
-
-	inCone := map[*packages.Package]bool{}
-	var ordered []*packages.Package
-	var visit func(p *packages.Package)
-	visit = func(p *packages.Package) {
-		if p == nil || p.Module == nil || inCone[p] {
-			return
-		}
-		inCone[p] = true
-		ordered = append(ordered, p)
-		impPaths := make([]string, 0, len(p.Imports))
-		for impPath := range p.Imports {
-			impPaths = append(impPaths, impPath)
-		}
-		slices.Sort(impPaths)
-		for _, impPath := range impPaths {
-			visit(p.Imports[impPath])
-		}
-	}
-	for _, p := range pkgs {
-		if p.PkgPath == pkgPath || p.ForTest == pkgPath {
-			visit(p)
-		}
-	}
-	seenFiles := map[string]bool{}
-	coreHasher := sha256.New()
-	for _, p := range ordered {
-		for _, fullPath := range p.CompiledGoFiles {
-			if seenFiles[fullPath] {
-				continue
-			}
-			seenFiles[fullPath] = true
-			content, err := os.ReadFile(fullPath)
-			if err != nil {
-				return MaximalFacts{}, err
-			}
-			_, _ = coreHasher.Write(content)
-			scan, err := maximalFileEffectsContentWithContextFiltered(audited, fullPath, content, declaredNames, nonStdPaths, nil)
-			if err != nil {
-				return MaximalFacts{}, err
-			}
-			record(scan)
-		}
-	}
-	selected := preferredEffectReason(candidates)
-	if selected == "" {
-		selected = fallback
-	}
-	coreDigest := hex.EncodeToString(coreHasher.Sum(nil))[:32]
-	return newMaximalFacts(MaximalIdentity{
-		Hash:             maximalSubjectHash(coreDigest, subject),
-		ToolchainContent: "inmem-stdlib",
-		AdmissionPolicy:  "inmem-audit",
-	}, effects, selected), nil
-}
-
 // maximalEffectsResult memoizes one package's complete external-effect scan
 // within a Hasher: the scan depends only on the package's listed sources, so
 // every subject sharing the package shares one scan.
 type maximalEffectsResult struct {
 	effects  []externalEffect
 	selected string
+}
+
+type packageGraphWalkOptions struct {
+	filtered               bool
+	base                   *tier2Base
+	reachedDecls           map[funcDeclKey]bool
+	startupOnlyDecls       map[funcDeclKey]bool
+	startupZeroGlobalDecls map[pkgVarKey]bool
+	wholeZeroGlobalDecls   map[pkgVarKey]bool
+}
+
+func filterScanForTier1ReadBuildInfo(scan maximalEffectScan) maximalEffectScan {
+	if len(scan.effects) == 0 {
+		return scan
+	}
+	var filtered []externalEffect
+	removed := false
+	for _, e := range scan.effects {
+		if e.kind == externalEffectUnauditedStandard && e.packagePath == "runtime/debug" && e.symbol == "ReadBuildInfo" {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	if !removed {
+		return scan
+	}
+	scan.effects = filtered
+	scan.preferred = preferredEffectReason(append(append([]externalEffect(nil), scan.effects...), scan.importCandidates...))
+	if scan.preferred == "" {
+		scan.preferred = "reaches runtime/debug (potential external dependence)"
+	}
+	return scan
+}
+
+func (h *Hasher) walkPackageGraphEffects(pkgPath string, opts packageGraphWalkOptions) ([]externalEffect, string, error) {
+	pkgs, err := h.list(pkgPath)
+	if err != nil {
+		return nil, "", err
+	}
+	basePkgName := ""
+	if !opts.filtered {
+		for _, p := range pkgs {
+			if p.ImportPath == pkgPath && p.ForTest == "" {
+				basePkgName = p.Name
+				break
+			}
+		}
+	}
+	admitTier1ReadBuildInfo := !opts.filtered && h.admitsTier1ReadBuildInfo(pkgPath, basePkgName)
+
+	var effects []externalEffect
+	var candidates []externalEffect
+	var fallback string
+	record := func(scan maximalEffectScan) {
+		if admitTier1ReadBuildInfo {
+			scan = filterScanForTier1ReadBuildInfo(scan)
+		}
+		for _, effect := range scan.effects {
+			effects = appendExternalEffect(effects, effect)
+			if !opts.filtered {
+				candidates = appendExternalEffect(candidates, effect)
+			}
+		}
+		if !opts.filtered {
+			for _, candidate := range scan.importCandidates {
+				candidates = appendExternalEffect(candidates, candidate)
+			}
+			if len(scan.effects) == 0 && len(scan.importCandidates) == 0 && scan.preferred != "" && (fallback == "" || scan.preferred < fallback) {
+				fallback = scan.preferred
+			}
+		}
+	}
+
+	testingEffects, err := h.maximalTestingTypeEffectsFiltered(opts.base, pkgPath, opts.reachedDecls)
+	if err != nil {
+		return nil, "", err
+	}
+	record(testingEffects)
+
+	declaredNames := listedDeclaredNames(pkgs)
+	nonStdPaths := listedNonStandardPaths(pkgs)
+	overridesKey := scanOverridesKey(declaredNames, nonStdPaths)
+	audited := h.SelectionAudited()
+	for _, pkg := range pkgs {
+		if err := h.contextErr(); err != nil {
+			return nil, "", err
+		}
+		if pkg.Standard || pkg.Module == nil || pkg.IsGeneratedTestMainFor(pkgPath) {
+			continue
+		}
+		if opts.filtered {
+			if !listPkgHasNativeOrEmbed(&pkg) && opts.base != nil {
+				if vp := verifiedHarnessesProg(audited, opts.base.prog)[pkg.ImportPath]; vp != nil {
+					record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact(vp)}})
+					continue
+				}
+			}
+		} else if vp := h.propertyHarnessAuditedListPkg(pkgPath, &pkg); vp != nil {
+			record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact(vp)}})
+			continue
+		}
+
+		srcPath := pkg.SourcePath()
+		pkgHasZeroGlobals := opts.filtered && (hasPkgZeroGlobals(opts.startupZeroGlobalDecls, srcPath) || hasPkgZeroGlobals(opts.wholeZeroGlobalDecls, srcPath))
+		if scan, ok, err := h.pinnedEffectScanWithContext(pkg, declaredNames, nonStdPaths, overridesKey); err != nil {
+			return nil, "", err
+		} else if ok && (!opts.filtered || (!hasFilterableMaximalBlocker(audited, scan.effects) && !(pkgHasZeroGlobals && hasAnyMaximalBlocker(audited, scan.effects)))) {
+			record(scan)
+			continue
+		}
+
+		if opts.filtered {
+			record(h.tier2PackageExternalEffects(opts.base, &pkg))
+		} else {
+			record(maximalPackageExternalEffects(&pkg))
+		}
+
+		var pkgScopeShadowed, verifiedLinknameLocals map[string]bool
+		pkgConfinedUnsafe := false
+		if opts.filtered {
+			pkgScopeShadowed = pkgScopeShadowedUniverseZeroNames(opts.base, srcPath)
+			verifiedLinknameLocals = opts.base.verifiedReadOnlyLinknameLocals(srcPath)
+			pkgConfinedUnsafe = opts.reachedDecls != nil && opts.base.pkgConfinedUnsafe(pkg.ImportPath, srcPath)
+		}
+
+		files := append(append([]string(nil), pkg.GoFiles...), pkg.CgoFiles...)
+		for _, name := range files {
+			if err := h.contextErr(); err != nil {
+				return nil, "", err
+			}
+			fullPath := filepath.Join(pkg.Dir, name)
+			unfiltered, err := h.maximalFileEffectsCachedWithContext(pkg.ImportPath, fullPath, declaredNames, nonStdPaths, overridesKey)
+			if err != nil {
+				return nil, "", err
+			}
+			if !opts.filtered || (!hasFilterableMaximalBlocker(audited, unfiltered.effects) && !(pkgHasZeroGlobals && hasAnyMaximalBlocker(audited, unfiltered.effects))) {
+				record(unfiltered)
+				continue
+			}
+			var content []byte
+			if h.underCache(pkg.Dir) {
+				content, err = os.ReadFile(fullPath)
+			} else {
+				var fb fileBytes
+				fb, err = h.readFile(fullPath)
+				content = fb.content
+			}
+			if err != nil {
+				return nil, "", err
+			}
+			parsed, err := h.parsedMaximalFile(fullPath, content, declaredNames, nonStdPaths, overridesKey)
+			if err != nil {
+				return nil, "", err
+			}
+			scan := maximalFileEffectsParsed(audited, parsed, nonStdPaths, opts.reachedDecls, opts.startupOnlyDecls, srcPath, opts.startupZeroGlobalDecls, opts.wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals, pkgConfinedUnsafe)
+			record(scan)
+		}
+	}
+	if !opts.filtered {
+		h.flushFileMemos()
+		selected := preferredEffectReason(candidates)
+		if selected == "" {
+			selected = fallback
+		}
+		return effects, selected, nil
+	}
+	return effects, "", nil
 }
 
 // maximalExternalEffects returns the package's complete external-effect scan.
@@ -258,96 +294,64 @@ func (h *Hasher) maximalExternalEffects(pkgPath string) ([]externalEffect, strin
 	if cached, ok := h.maximalEffects[pkgPath]; ok {
 		return cached.effects, cached.selected, nil
 	}
-	pkgs, err := h.list(pkgPath)
+	effects, selected, err := h.walkPackageGraphEffects(pkgPath, packageGraphWalkOptions{})
 	if err != nil {
 		return nil, "", err
-	}
-	var effects []externalEffect
-	// candidates pools the diagnostic candidates - the effect union
-	// plus every scan's plain-import candidates; fallback carries the
-	// lexicographically least preferred among candidate-less scans
-	// (potential-external fallbacks), naming a dependence only when no
-	// scan backed a real blocker or candidate.
-	var candidates []externalEffect
-	var fallback string
-	record := func(scan maximalEffectScan) {
-		for _, effect := range scan.effects {
-			effects = appendExternalEffect(effects, effect)
-			candidates = appendExternalEffect(candidates, effect)
-		}
-		for _, candidate := range scan.importCandidates {
-			candidates = appendExternalEffect(candidates, candidate)
-		}
-		if len(scan.effects) == 0 && len(scan.importCandidates) == 0 && scan.preferred != "" && (fallback == "" || scan.preferred < fallback) {
-			fallback = scan.preferred
-		}
-	}
-	testingEffects, err := h.maximalTestingTypeEffects(pkgPath)
-	if err != nil {
-		return nil, "", err
-	}
-	record(testingEffects)
-	declaredNames := listedDeclaredNames(pkgs)
-	nonStdPaths := listedNonStandardPaths(pkgs)
-	overridesKey := scanOverridesKey(declaredNames, nonStdPaths)
-	for _, pkg := range pkgs {
-		if err := h.contextErr(); err != nil {
-			return nil, "", err
-		}
-		if pkg.Standard || pkg.Module == nil || pkg.IsGeneratedTestMainFor(pkgPath) {
-			continue
-		}
-		if vp := h.propertyHarnessAuditedListPkg(pkgPath, &pkg); vp != nil {
-			// Audited property-harness surface: its files carry the
-			// harness's own clock, filesystem, and flag protocol, all
-			// covered by the mechanical package verification - the scan
-			// backstop exempts them exactly as it exempts the standard
-			// library's. The recorded fact keeps the package
-			// unverifiable-by-hash: the verification admits observation,
-			// never purity - a property run's outcome rides the
-			// harness's log-surfaced configuration, not the sources alone
-			// (REQ-closure-observability-property-harness).
-			record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact(vp)}})
-			continue
-		}
-		if scan, ok, err := h.pinnedEffectScanWithContext(pkg, declaredNames, nonStdPaths, overridesKey); err != nil {
-			return nil, "", err
-		} else if ok {
-			record(scan)
-			continue
-		}
-		record(maximalPackageExternalEffects(&pkg))
-		files := append(append([]string(nil), pkg.GoFiles...), pkg.CgoFiles...)
-		for _, name := range files {
-			if err := h.contextErr(); err != nil {
-				return nil, "", err
-			}
-			scan, err := h.maximalFileEffectsCachedWithContext(pkg.ImportPath, filepath.Join(pkg.Dir, name), declaredNames, nonStdPaths, overridesKey)
-			if err != nil {
-				return nil, "", err
-			}
-			record(scan)
-		}
-	}
-	h.flushFileMemos()
-	// The maximal diagnostic owes the shared cause-preference order:
-	// one selection over the whole candidate pool, rank strata with the
-	// lexicographic tie-break; the import fallback
-	// names a potential dependence only for a candidate-less closure.
-	selected := preferredEffectReason(candidates)
-	if selected == "" {
-		selected = fallback
 	}
 	h.maximalEffects[pkgPath] = maximalEffectsResult{effects: effects, selected: selected}
 	return effects, selected, nil
 }
 
+func (h *Hasher) subjectMaximalExternalEffectsWithZeroGlobals(base *tier2Base, pkgPath string, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool) ([]externalEffect, error) {
+	tracing := trace.Enabled(h.ctx, trace.DomainClosure, pkgPath)
+	var start time.Time
+	if tracing {
+		start = time.Now()
+	}
+	effects, _, err := h.walkPackageGraphEffects(pkgPath, packageGraphWalkOptions{
+		filtered:               true,
+		base:                   base,
+		reachedDecls:           reachedDecls,
+		startupOnlyDecls:       startupOnlyDecls,
+		startupZeroGlobalDecls: startupZeroGlobalDecls,
+		wholeZeroGlobalDecls:   wholeZeroGlobalDecls,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if tracing {
+		trace.Emit(h.ctx, trace.DomainClosure, "maximal.subject.done", pkgPath,
+			trace.Int("effects", len(effects)),
+			trace.Bool("filtered", reachedDecls != nil),
+			trace.Int64("elapsed_ns", time.Since(start).Nanoseconds()),
+		)
+	}
+	return effects, nil
+}
+
+func pkgScopeShadowedUniverseZeroNames(base *tier2Base, pkgPath string) map[string]bool {
+	if base == nil || pkgPath == "" {
+		return nil
+	}
+	var out map[string]bool
+	for tp, idx := range base.idxByTypes {
+		if tp == nil || idx == nil || idx.path != pkgPath || tp.Scope() == nil {
+			continue
+		}
+		for _, kw := range []string{"nil", "false"} {
+			if tp.Scope().Lookup(kw) != nil {
+				if out == nil {
+					out = make(map[string]bool, 2)
+				}
+				out[kw] = true
+			}
+		}
+	}
+	return out
+}
+
 // maximalFileEffectsCached memoizes one file's effect scan within a Hasher
-// — a file shared by several packages' closures is read and parsed once
-// — and serves it from the persistent per-file memo under the file's
-// content digest when the store holds it: the bytes are read and
-// digested every pass, the parse only on a miss
-// (REQ-closure-effect-scan-memo).
+// and serves it from the persistent per-file memo under the file's content digest.
 func (h *Hasher) maximalFileEffectsCached(pkgPath, path string) (maximalEffectScan, error) {
 	return h.maximalFileEffectsCachedWithNames(pkgPath, path, nil, "")
 }
@@ -363,10 +367,6 @@ func (h *Hasher) maximalFileEffectsCachedWithContext(pkgPath, path string, decla
 	}
 	dir := filepath.Dir(path)
 	if h.underCache(dir) {
-		// A module-cache file: immutable under its pin, folded by the
-		// package-level effect-scan memo, and read only when that memo
-		// misses — it takes no per-file entry and no place in the
-		// call's content cache.
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return maximalEffectScan{}, err
@@ -403,13 +403,7 @@ func (h *Hasher) maximalFileEffectsCachedWithContext(pkgPath, path string, decla
 }
 
 // preferEffectReason reports whether candidate displaces current as the
-// preferred diagnostic: higher cause rank first, lexicographic least
-// within a rank - exactly the shared cause-preference order with the
-// legacy projection's tie-break, so the maximal instance and the
-// legacy projection order every tie identically
-// (REQ-closure-observability-cause-order). The unrefinable bit takes no
-// tie-break leg: no consumer reads the selected reason's refinability,
-// so a privilege here would be an order this diagnostic alone obeys.
+// preferred diagnostic: higher cause rank first, lexicographic least within a rank.
 func preferEffectReason(candidate, current externalEffect) bool {
 	candidateRank, currentRank := effectCauseRank(candidate), effectCauseRank(current)
 	if candidateRank != currentRank {
@@ -418,11 +412,7 @@ func preferEffectReason(candidate, current externalEffect) bool {
 	return candidate.reason < current.reason
 }
 
-// preferredEffectReason selects the diagnostic over an effect set under
-// preferEffectReason; empty when no effect carries a reason. An
-// effect-backed reason names a real blocker, so a caller with any
-// backed reason never consults an import fallback
-// (REQ-closure-observability-cause-order).
+// preferredEffectReason selects the diagnostic over an effect set under preferEffectReason.
 func preferredEffectReason(effects []externalEffect) string {
 	var best externalEffect
 	found := false
@@ -441,9 +431,6 @@ func (h *Hasher) maximalTestingTypeEffects(pkgPath string) (maximalEffectScan, e
 	return h.maximalTestingTypeEffectsFiltered(nil, pkgPath, nil)
 }
 
-// viewLoadVariants selects, from the shared view load, the packages a private
-// load of pkgPath with Tests would return as pkgPath's own variants — nil when
-// no shared load is set or it does not cover pkgPath, signalling fallback.
 func (h *Hasher) viewLoadVariants(pkgPath string) []*packages.Package {
 	if h.viewLoad == nil {
 		return nil
@@ -500,794 +487,6 @@ func maximalPackageExternalEffects(pkg *listPkg) maximalEffectScan {
 	return scan
 }
 
-// importAlias is one import declaration's resolved alias and path, shared
-// by the preferred-reason derivation and the effect collection so the scan
-// unquotes each import once.
-type importAlias struct {
-	alias   string
-	pkgPath string
-}
-
-// maximalFileEffects is the per-file external-effect scan: a pure function
-// of the file's bytes. One read and one parse serve both the effect
-// collection and the preferred-reason derivation
-// (equivalence-pinned by TestFileEffectScanMatchesTwoPassReference).
-func maximalFileEffects(audited bool, filename string) (maximalEffectScan, error) {
-	fb, err := readBytes(filename)
-	if err != nil {
-		return maximalEffectScan{}, err
-	}
-	return maximalFileEffectsContent(audited, filename, fb.content)
-}
-
-// maximalFileEffectsContent is the scan over bytes already read.
-func maximalFileEffectsContent(audited bool, filename string, content []byte) (maximalEffectScan, error) {
-	return maximalFileEffectsContentWithNames(audited, filename, content, nil)
-}
-
-// maximalFileEffectsContentWithNames scans file bytes using declaredNames
-// (when supplied by the package listing) to bind unnamed imports to their
-// actual declared package names before falling back to path derivation.
-func maximalFileEffectsContentWithNames(audited bool, filename string, content []byte, declaredNames map[string]string) (maximalEffectScan, error) {
-	return maximalFileEffectsContentWithNamesFiltered(audited, filename, content, declaredNames, nil)
-}
-
-func maximalFileEffectsContentWithNamesFiltered(audited bool, filename string, content []byte, declaredNames map[string]string, reachedDecls map[funcDeclKey]bool) (maximalEffectScan, error) {
-	return maximalFileEffectsContentWithContextFiltered(audited, filename, content, declaredNames, nil, reachedDecls)
-}
-
-func maximalFileEffectsContentWithContextFiltered(audited bool, filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool, reachedDecls map[funcDeclKey]bool) (maximalEffectScan, error) {
-	return maximalFileEffectsContentWithZeroGlobals(audited, filename, content, declaredNames, nonStdPaths, reachedDecls, nil, "", nil, nil, nil, nil)
-}
-
-type parsedMaximalFile struct {
-	filename      string
-	dir           string
-	pkgClause     string
-	text          string
-	hasWasmImport bool
-	file          *ast.File
-	imports       []importAlias
-	aliases       map[string]string
-	stdAliases    map[string]string
-	collisions    []string
-	importNames   map[string]bool
-	testMainDecl  *ast.FuncDecl
-	handleTypes   map[string]bool
-	localNames    map[*ast.FuncDecl]map[string]bool
-}
-
-func parseMaximalFile(filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool) (*parsedMaximalFile, error) {
-	text := string(content)
-	hasWasmImport := strings.Contains(text, "//go:wasmimport")
-	// The walks read identifiers by name and imports from file.Imports;
-	// object resolution is unused, so skipping it saves its allocations.
-	file, err := parser.ParseFile(token.NewFileSet(), filename, content, parser.SkipObjectResolution)
-	if err != nil {
-		return nil, fmt.Errorf("closure: parse %s: %w", filename, err)
-	}
-	imports := make([]importAlias, 0, len(file.Imports))
-	aliases := make(map[string]string, len(file.Imports))
-	var collisions []string
-	// Three tiers bind an identifier at this syntactic tier, a lower
-	// never displacing a higher: an explicit alias is ground truth; an
-	// unnamed import's declared package name from the listing (when
-	// known) or last path element is the primary; a trailing
-	// major-version element without a known declared name additionally
-	// derives the element before it as a secondary, bound only where
-	// unclaimed and unique. A clash within a tier is what the language
-	// forbids and refuses the file fail-closed, except two derived
-	// version-element primaries, whose identifiers live on their
-	// secondaries (REQ-closure-observability-declaration-bindings).
-	secondaries := map[string][]string{}
-	versioned := map[string]bool{}
-	explicit := map[string]bool{}
-	for _, spec := range file.Imports {
-		pkgPath, err := strconv.Unquote(spec.Path.Value)
-		if err != nil {
-			return nil, fmt.Errorf("closure: parse import in %s: %w", filename, err)
-		}
-		alias := path.Base(pkgPath)
-		if spec.Name != nil {
-			alias = spec.Name.Name
-			if prior, taken := aliases[alias]; taken && explicit[alias] && prior != pkgPath && alias != "_" && alias != "." {
-				collisions = append(collisions, "import name collision at the file scan: "+prior+" and "+pkgPath+" both bind "+alias)
-			}
-			explicit[alias] = true
-			aliases[alias] = pkgPath
-			imports = append(imports, importAlias{alias: alias, pkgPath: pkgPath})
-			continue
-		}
-		if declared := declaredNames[pkgPath]; declared != "" {
-			alias = declared
-		} else if derived := implicitImportName(pkgPath); derived != alias {
-			secondaries[derived] = append(secondaries[derived], pkgPath)
-			versioned[pkgPath] = true
-		}
-		imports = append(imports, importAlias{alias: alias, pkgPath: pkgPath})
-		if explicit[alias] {
-			continue
-		}
-		if prior, taken := aliases[alias]; taken && prior != pkgPath && alias != "_" && alias != "." && !(versioned[prior] && versioned[pkgPath]) {
-			collisions = append(collisions, "import name collision at the file scan: "+prior+" and "+pkgPath+" both bind "+alias)
-		}
-		aliases[alias] = pkgPath
-	}
-	for name, paths := range secondaries {
-		if _, claimed := aliases[name]; !claimed && len(paths) == 1 {
-			aliases[name] = paths[0]
-		}
-	}
-	stdAliases := aliases
-	if len(nonStdPaths) > 0 {
-		stdAliases = make(map[string]string, len(aliases))
-		for alias, pkgPath := range aliases {
-			if !(isStdImportPath(pkgPath) && nonStdPaths[pkgPath]) {
-				stdAliases[alias] = pkgPath
-			}
-		}
-	}
-	pkgClause := ""
-	if file.Name != nil {
-		pkgClause = file.Name.Name
-	}
-	return &parsedMaximalFile{
-		filename:      filename,
-		dir:           filepath.Clean(filepath.Dir(filename)),
-		pkgClause:     pkgClause,
-		text:          text,
-		hasWasmImport: hasWasmImport,
-		file:          file,
-		imports:       imports,
-		aliases:       aliases,
-		stdAliases:    stdAliases,
-		collisions:    collisions,
-		importNames:   fileImportNames(file, declaredNames),
-		testMainDecl:  userTestMainDecl(file, stdAliases),
-		handleTypes:   testingHandleTypeNames(file, stdAliases),
-	}, nil
-}
-
-func (p *parsedMaximalFile) funcLocals(fn *ast.FuncDecl) map[string]bool {
-	if fn == nil {
-		return nil
-	}
-	if p.localNames != nil {
-		if names, ok := p.localNames[fn]; ok {
-			return names
-		}
-	}
-	names := funcLocalDeclaredNames(fn)
-	if p.localNames == nil {
-		p.localNames = make(map[*ast.FuncDecl]map[string]bool)
-	}
-	p.localNames[fn] = names
-	return names
-}
-
-func (h *Hasher) parsedMaximalFile(filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool, overridesKey string) (*parsedMaximalFile, error) {
-	cacheKey := filename + overridesKey
-	if h != nil && h.maximalParsedFiles != nil {
-		if parsed, ok := h.maximalParsedFiles[cacheKey]; ok {
-			return parsed, nil
-		}
-	}
-	parsed, err := parseMaximalFile(filename, content, declaredNames, nonStdPaths)
-	if err != nil {
-		return nil, err
-	}
-	if h != nil && h.maximalParsedFiles != nil {
-		h.maximalParsedFiles[cacheKey] = parsed
-	}
-	return parsed, nil
-}
-
-func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, content []byte, declaredNames map[string]string, nonStdPaths map[string]bool, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, filePkgPath string, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed, verifiedLinknameLocals map[string]bool) (maximalEffectScan, error) {
-	parsed, err := parseMaximalFile(filename, content, declaredNames, nonStdPaths)
-	if err != nil {
-		return maximalEffectScan{}, err
-	}
-	return maximalFileEffectsParsed(audited, parsed, nonStdPaths, reachedDecls, startupOnlyDecls, filePkgPath, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals, false), nil
-}
-
-func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPaths map[string]bool, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, filePkgPath string, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed, verifiedLinknameLocals map[string]bool, pkgConfinedUnsafe bool) maximalEffectScan {
-	file := parsed.file
-	text := parsed.text
-	hasWasmImport := parsed.hasWasmImport
-	hasLinkname := strings.Contains(text, "//go:linkname") && !auditedLinknamesWithLocals(audited, text, verifiedLinknameLocals)
-	var scan maximalEffectScan
-	// The preferred diagnostic derives from the same single walk's
-	// effect set under the shared cause-preference order
-	// (preferredEffectReason); the potential-external import fallback
-	// names a dependence only for an effect-less file
-	// (REQ-closure-observability-cause-order).
-	potentialExternal := ""
-	if hasWasmImport {
-		effect := opaqueExternalEffect(externalEffectLinkage, "reaches go:wasmimport")
-		effect.unrefinable = true
-		scan.add(effect)
-	}
-	if hasLinkname {
-		scan.add(opaqueExternalEffect(externalEffectLinkage, "reaches go:linkname (opaque linkage)"))
-	}
-	for _, collision := range parsed.collisions {
-		scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, collision))
-	}
-	for _, imp := range parsed.imports {
-		if isStdImportPath(imp.pkgPath) && nonStdPaths[imp.pkgPath] {
-			continue
-		}
-		if imp.pkgPath == "testing" {
-			if imp.alias == "." {
-				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches testing (potential external dependence)"))
-				potentialExternal = imp.pkgPath
-			}
-			continue
-		}
-		if auditset.AlwaysExternalPackage(imp.pkgPath) && imp.alias != "." && imp.alias != "_" {
-			// A plain always-external import is a diagnostic candidate
-			// only: the dot and blank spellings record the effect
-			// itself below.
-			scan.importCandidates = appendExternalEffect(scan.importCandidates, trueExternalEffect(imp.pkgPath))
-		}
-		if imp.alias == "." && packageHasClassifiedExternalAPI(imp.pkgPath) && potentialExternal == "" {
-			potentialExternal = imp.pkgPath
-		}
-		if potentialExternal == "" && !(imp.alias == "_" && imp.pkgPath == "unsafe") && isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(audited, imp.pkgPath) {
-			potentialExternal = imp.pkgPath
-		}
-		// Blank-importing the compiler pseudo-package "unsafe" (required for
-		// //go:linkname directives, which are classified independently above)
-		// executes no package init and introduces no unqualified identifiers;
-		// dot-importing "unsafe" remains blocked.
-		if imp.alias == "." || (imp.alias == "_" && imp.pkgPath != "unsafe") {
-			if auditset.AlwaysExternalPackage(imp.pkgPath) {
-				scan.add(trueExternalEffect(imp.pkgPath))
-			} else if packageHasClassifiedExternalAPI(imp.pkgPath) || isStdImportPath(imp.pkgPath) && !isSourceOnlyStandardPackage(audited, imp.pkgPath) {
-				scan.add(opaqueExternalEffect(externalEffectUnauditedStandard, "reaches "+imp.pkgPath+" (potential external dependence)"))
-			}
-		}
-	}
-	stdAliases := parsed.stdAliases
-	// The canonical test-main epilogue is harness protocol, not an
-	// unaudited operation: os.Exit inside the user TestMain(*testing.M)
-	// declaration is admitted exactly as the observed test-main walk
-	// admits it - it runs post-bracket and adds no input channel to any
-	// subject's execution (REQ-closure-observability-testmain-exit).
-	testMainDecl := parsed.testMainDecl
-	inTestMain := func(node ast.Node) bool {
-		return testMainDecl != nil && node.Pos() >= testMainDecl.Pos() && node.End() <= testMainDecl.End()
-	}
-	unreachedDecls := unreachedASTDecls(parsed.dir, parsed.pkgClause, file, testMainDecl, reachedDecls)
-	inUnreachedDecl := func(node ast.Node) bool {
-		for _, d := range unreachedDecls {
-			if node.Pos() >= d.Pos() && node.End() <= d.End() {
-				return true
-			}
-		}
-		return false
-	}
-	deadInBinaryBody, deadForSubjectBody := deadZeroGlobalIfBodiesParsed(parsed, filePkgPath, startupOnlyDecls, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed)
-	inDeadForSubjectBody := func(node ast.Node) bool {
-		for blk := range deadForSubjectBody {
-			if node.Pos() >= blk.Pos() && node.End() <= blk.End() {
-				return true
-			}
-		}
-		return false
-	}
-	addSelEffect := func(sel *ast.SelectorExpr, effect externalEffect) {
-		if (inUnreachedDecl(sel) || inDeadForSubjectBody(sel)) && !packageWideMaximalHazardForPkg(effect, pkgConfinedUnsafe) {
-			return
-		}
-		scan.add(effect)
-	}
-	allowedTimeUnixChained := map[*ast.SelectorExpr]bool{}
-	ast.Inspect(file, func(node ast.Node) bool {
-		if blk, ok := node.(*ast.BlockStmt); ok && deadInBinaryBody[blk] {
-			return false
-		}
-		if audited {
-			if outerCall, ok := node.(*ast.CallExpr); ok {
-				if innerSel := chainedTimeUnixSelector(outerCall, stdAliases, reachedDecls != nil); innerSel != nil {
-					allowedTimeUnixChained[innerSel] = true
-				}
-			}
-		}
-		if sel, ok := node.(*ast.SelectorExpr); ok {
-			if ident, ok := sel.X.(*ast.Ident); ok {
-				pkgPath := stdAliases[ident.Name]
-				if pkgPath == "" {
-					return true
-				}
-				if allowedTimeUnixChained[sel] {
-					return true
-				}
-				if effect, ok := classBEffect(pkgPath, sel.Sel.Name); ok {
-					addSelEffect(sel, effect)
-				} else if pkgPath == "os" && sel.Sel.Name == "Exit" && inTestMain(sel) {
-					// admitted test-main epilogue
-				} else if isCompileTimeUnsafeIntrinsic(pkgPath, sel.Sel.Name) {
-					// Go language compile-time layout intrinsics (unsafe.Alignof,
-					// unsafe.Offsetof, unsafe.Sizeof) evaluate strictly to compile-time
-					// uintptr constants determined by (MaximalClosure, Toolchain,
-					// BuildConfig) without executing runtime code or dereferencing
-					// runtime memory; operand syntax continues to be walked below
-					// (REQ-closure-observability-unsafe).
-				} else if flagRegistrationSymbol(pkgPath, sel.Sel.Name) {
-					// flag registration is a process-local registry
-					// mutation; the name-based admission is sound
-					// because the registration-facts sink judgment
-					// guards every call site program-wide - traced
-					// storage refuses on reference, an untraceable
-					// sink poisons the package
-					// (REQ-closure-observability-flag-registration).
-				} else if !auditedStandardSymbol(audited, pkgPath, sel.Sel.Name) && (auditset.AlwaysExternalPackage(pkgPath) || isStdImportPath(pkgPath) && !isStandardFallbackExempt(audited, pkgPath)) {
-					addSelEffect(sel, unauditedStandardEffect(pkgPath, sel.Sel.Name))
-				}
-			}
-		}
-		return true
-	})
-	var testingSkipped map[*ast.BlockStmt]bool
-	if len(deadInBinaryBody) > 0 || len(deadForSubjectBody) > 0 {
-		testingSkipped = make(map[*ast.BlockStmt]bool, len(deadInBinaryBody)+len(deadForSubjectBody))
-		for blk := range deadInBinaryBody {
-			testingSkipped[blk] = true
-		}
-		for blk := range deadForSubjectBody {
-			testingSkipped[blk] = true
-		}
-	}
-	for _, effect := range testingMethodEffectsFilteredWithHandles(file, stdAliases, parsed.handleTypes, unreachedDecls, testingSkipped) {
-		scan.add(effect)
-	}
-	scan.preferred = preferredEffectReason(append(append([]externalEffect(nil), scan.effects...), scan.importCandidates...))
-	if scan.preferred == "" && potentialExternal != "" {
-		scan.preferred = "reaches " + potentialExternal + " (potential external dependence)"
-	}
-	return scan
-}
-
-func isCompileTimeUnsafeIntrinsic(pkgPath, name string) bool {
-	return pkgPath == "unsafe" && refconfine.IsCompileTimeUnsafeBuiltinName(name)
-}
-
-func hasPkgZeroGlobals(zeroGlobalDecls map[pkgVarKey]bool, pkgPath string) bool {
-	if len(zeroGlobalDecls) == 0 || pkgPath == "" {
-		return false
-	}
-	for k := range zeroGlobalDecls {
-		if k.pkgPath == pkgPath {
-			return true
-		}
-	}
-	return false
-}
-
-func deadZeroGlobalIfBodiesParsed(parsed *parsedMaximalFile, pkgPath string, startupOnlyDecls map[funcDeclKey]bool, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed map[string]bool) (deadInBinary, deadForSubject map[*ast.BlockStmt]bool) {
-	hasStartup := hasPkgZeroGlobals(startupZeroGlobalDecls, pkgPath)
-	hasWhole := hasPkgZeroGlobals(wholeZeroGlobalDecls, pkgPath)
-	if parsed == nil || parsed.file == nil || pkgPath == "" || (!hasStartup && !hasWhole) {
-		return nil, nil
-	}
-	for _, decl := range parsed.file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Body == nil || fn == parsed.testMainDecl || (fn.Name != nil && fn.Name.Name == "TestMain") {
-			continue
-		}
-		isInitDecl := fn.Recv == nil && fn.Name != nil && fn.Name.Name == "init"
-		isStartupOnlyDecl := false
-		if isInitDecl {
-			isStartupOnlyDecl = hasStartup
-		} else if key, ok := funcDeclKeyForAST(parsed.dir, parsed.pkgClause, fn); ok && startupOnlyDecls[key] {
-			isStartupOnlyDecl = true
-		}
-		if !hasWhole && !isStartupOnlyDecl {
-			continue
-		}
-		shadowed := mergeShadowedNames(pkgScopeShadowed, parsed.importNames, parsed.funcLocals(fn))
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			if _, isFuncLit := n.(*ast.FuncLit); isFuncLit {
-				return false
-			}
-			ifStmt, ok := n.(*ast.IfStmt)
-			if !ok || ifStmt.Init != nil || ifStmt.Body == nil {
-				return true
-			}
-			if (hasWhole && ifCondRequiresNonZeroGlobal(ifStmt.Cond, pkgPath, shadowed, wholeZeroGlobalDecls)) ||
-				(isInitDecl && isStartupOnlyDecl && hasStartup && ifCondRequiresNonZeroGlobal(ifStmt.Cond, pkgPath, shadowed, startupZeroGlobalDecls)) {
-				if deadInBinary == nil {
-					deadInBinary = make(map[*ast.BlockStmt]bool)
-				}
-				deadInBinary[ifStmt.Body] = true
-			} else if isStartupOnlyDecl && hasStartup && ifCondRequiresNonZeroGlobal(ifStmt.Cond, pkgPath, shadowed, startupZeroGlobalDecls) {
-				if deadForSubject == nil {
-					deadForSubject = make(map[*ast.BlockStmt]bool)
-				}
-				deadForSubject[ifStmt.Body] = true
-			}
-			return true
-		})
-	}
-	return deadInBinary, deadForSubject
-}
-
-func fileImportNames(file *ast.File, declaredNames map[string]string) map[string]bool {
-	if file == nil || len(file.Imports) == 0 {
-		return nil
-	}
-	var out map[string]bool
-	for _, spec := range file.Imports {
-		if spec == nil {
-			continue
-		}
-		name := ""
-		if spec.Name != nil {
-			name = spec.Name.Name
-		} else if spec.Path != nil {
-			if pkgPath, err := strconv.Unquote(spec.Path.Value); err == nil {
-				if declared := declaredNames[pkgPath]; declared != "" {
-					name = declared
-				} else {
-					name = implicitImportName(pkgPath)
-				}
-			}
-		}
-		if name != "" && name != "_" && name != "." {
-			if out == nil {
-				out = make(map[string]bool, len(file.Imports))
-			}
-			out[name] = true
-		}
-	}
-	return out
-}
-
-func mergeShadowedNames(maps ...map[string]bool) map[string]bool {
-	total := 0
-	for _, m := range maps {
-		total += len(m)
-	}
-	if total == 0 {
-		return nil
-	}
-	out := make(map[string]bool, total)
-	for _, m := range maps {
-		for k, v := range m {
-			if v {
-				out[k] = true
-			}
-		}
-	}
-	return out
-}
-
-func funcLocalDeclaredNames(fn *ast.FuncDecl) map[string]bool {
-	var names map[string]bool
-	add := func(ident *ast.Ident) {
-		if ident == nil || ident.Name == "" || ident.Name == "_" {
-			return
-		}
-		if names == nil {
-			names = make(map[string]bool)
-		}
-		names[ident.Name] = true
-	}
-	addFieldList := func(fl *ast.FieldList) {
-		if fl == nil {
-			return
-		}
-		for _, f := range fl.List {
-			for _, id := range f.Names {
-				add(id)
-			}
-		}
-	}
-	addFieldList(fn.Recv)
-	if fn.Type != nil {
-		addFieldList(fn.Type.TypeParams)
-		addFieldList(fn.Type.Params)
-		addFieldList(fn.Type.Results)
-	}
-	if fn.Body != nil {
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			switch x := n.(type) {
-			case *ast.ValueSpec:
-				for _, id := range x.Names {
-					add(id)
-				}
-			case *ast.TypeSpec:
-				add(x.Name)
-			case *ast.AssignStmt:
-				if x.Tok == token.DEFINE {
-					for _, lhs := range x.Lhs {
-						if id, ok := lhs.(*ast.Ident); ok {
-							add(id)
-						}
-					}
-				}
-			case *ast.RangeStmt:
-				if x.Tok == token.DEFINE {
-					if id, ok := x.Key.(*ast.Ident); ok {
-						add(id)
-					}
-					if id, ok := x.Value.(*ast.Ident); ok {
-						add(id)
-					}
-				}
-			case *ast.FuncLit:
-				if x.Type != nil {
-					addFieldList(x.Type.TypeParams)
-					addFieldList(x.Type.Params)
-					addFieldList(x.Type.Results)
-				}
-			}
-			return true
-		})
-	}
-	return names
-}
-
-func ifCondRequiresNonZeroGlobal(expr ast.Expr, pkgPath string, shadowed map[string]bool, zeroGlobalDecls map[pkgVarKey]bool) bool {
-	if expr == nil || pkgPath == "" || len(zeroGlobalDecls) == 0 {
-		return false
-	}
-	return ifCondRequiresNonZeroGlobalWith(
-		expr,
-		func(id *ast.Ident) bool {
-			return id != nil && (id.Name == "nil" || id.Name == "false") && !shadowed[id.Name]
-		},
-		func(id *ast.Ident) bool {
-			if id == nil || id.Name == "" || shadowed[id.Name] {
-				return false
-			}
-			return zeroGlobalDecls[pkgVarKey{pkgPath: pkgPath, name: id.Name}]
-		},
-	)
-}
-
-func ifCondRequiresNonZeroGlobalTyped(expr ast.Expr, info *types.Info, zeroGlobalDecls map[pkgVarKey]bool) bool {
-	if expr == nil || info == nil || len(zeroGlobalDecls) == 0 {
-		return false
-	}
-	return ifCondRequiresNonZeroGlobalWith(
-		expr,
-		func(id *ast.Ident) bool {
-			if id == nil || (id.Name != "nil" && id.Name != "false") {
-				return false
-			}
-			u := types.Universe.Lookup(id.Name)
-			return u != nil && info.Uses[id] == u
-		},
-		func(id *ast.Ident) bool {
-			if id == nil || id.Name == "" {
-				return false
-			}
-			v, ok := info.Uses[id].(*types.Var)
-			if !ok || v == nil || v.IsField() || v.Pkg() == nil || v.Parent() != v.Pkg().Scope() {
-				return false
-			}
-			return zeroGlobalDecls[pkgVarKey{pkgPath: v.Pkg().Path(), name: v.Name()}]
-		},
-	)
-}
-
-func ifCondRequiresNonZeroGlobalWith(expr ast.Expr, isUniverseZeroIdent, isZeroGlobalIdent func(*ast.Ident) bool) bool {
-	isZeroIdentExpr := func(e ast.Expr) bool {
-		id, ok := ast.Unparen(e).(*ast.Ident)
-		return ok && isZeroGlobalIdent(id)
-	}
-	isZeroLiteralExpr := func(e ast.Expr) bool {
-		switch x := ast.Unparen(e).(type) {
-		case *ast.Ident:
-			return isUniverseZeroIdent != nil && isUniverseZeroIdent(x)
-		case *ast.BasicLit:
-			switch x.Kind {
-			case token.INT, token.FLOAT, token.IMAG:
-				v, err := strconv.ParseFloat(x.Value, 64)
-				return err == nil && v == 0
-			case token.STRING:
-				s, err := strconv.Unquote(x.Value)
-				return err == nil && s == ""
-			}
-		}
-		return false
-	}
-	switch x := ast.Unparen(expr).(type) {
-	case *ast.Ident:
-		return isZeroIdentExpr(x)
-	case *ast.StarExpr:
-		return isZeroIdentExpr(x.X)
-	case *ast.BinaryExpr:
-		switch x.Op {
-		case token.LAND:
-			return ifCondRequiresNonZeroGlobalWith(x.X, isUniverseZeroIdent, isZeroGlobalIdent) ||
-				ifCondRequiresNonZeroGlobalWith(x.Y, isUniverseZeroIdent, isZeroGlobalIdent)
-		case token.LOR:
-			return ifCondRequiresNonZeroGlobalWith(x.X, isUniverseZeroIdent, isZeroGlobalIdent) &&
-				ifCondRequiresNonZeroGlobalWith(x.Y, isUniverseZeroIdent, isZeroGlobalIdent)
-		case token.NEQ:
-			return (isZeroIdentExpr(x.X) && isZeroLiteralExpr(x.Y)) ||
-				(isZeroIdentExpr(x.Y) && isZeroLiteralExpr(x.X))
-		}
-	}
-	return false
-}
-
-func isASTTimeFixedZoneCall(expr ast.Expr, aliases map[string]string) bool {
-	call, ok := ast.Unparen(expr).(*ast.CallExpr)
-	if !ok || len(call.Args) != 2 || call.Ellipsis.IsValid() {
-		return false
-	}
-	sel, ok := ast.Unparen(call.Fun).(*ast.SelectorExpr)
-	if !ok || sel.Sel == nil || sel.Sel.Name != "FixedZone" {
-		return false
-	}
-	ident, ok := sel.X.(*ast.Ident)
-	return ok && aliases[ident.Name] == "time"
-}
-
-func chainedTimeUnixSelector(outerCall *ast.CallExpr, aliases map[string]string, hasSSAFlow bool) *ast.SelectorExpr {
-	if outerCall == nil || outerCall.Ellipsis.IsValid() {
-		return nil
-	}
-	outerSel, ok := ast.Unparen(outerCall.Fun).(*ast.SelectorExpr)
-	if !ok || outerSel.Sel == nil {
-		return nil
-	}
-	switch outerSel.Sel.Name {
-	case "UTC":
-		if len(outerCall.Args) != 0 {
-			return nil
-		}
-	case "In":
-		if len(outerCall.Args) != 1 || (!hasSSAFlow && !isASTTimeFixedZoneCall(outerCall.Args[0], aliases)) {
-			return nil
-		}
-	default:
-		return nil
-	}
-	innerCall, ok := ast.Unparen(outerSel.X).(*ast.CallExpr)
-	if !ok || innerCall.Ellipsis.IsValid() {
-		return nil
-	}
-	innerSel, ok := ast.Unparen(innerCall.Fun).(*ast.SelectorExpr)
-	if !ok || innerSel.Sel == nil {
-		return nil
-	}
-	ident, ok := innerSel.X.(*ast.Ident)
-	if !ok || aliases[ident.Name] != "time" {
-		return nil
-	}
-	switch innerSel.Sel.Name {
-	case "Unix":
-		if len(innerCall.Args) != 2 {
-			return nil
-		}
-	case "UnixMilli", "UnixMicro":
-		if len(innerCall.Args) != 1 {
-			return nil
-		}
-	default:
-		return nil
-	}
-	return innerSel
-}
-
-func pkgScopeShadowedUniverseZeroNames(base *tier2Base, pkgPath string) map[string]bool {
-	if base == nil || pkgPath == "" {
-		return nil
-	}
-	var out map[string]bool
-	for tp, idx := range base.idxByTypes {
-		if tp == nil || idx == nil || idx.path != pkgPath || tp.Scope() == nil {
-			continue
-		}
-		for _, kw := range []string{"nil", "false"} {
-			if tp.Scope().Lookup(kw) != nil {
-				if out == nil {
-					out = make(map[string]bool, 2)
-				}
-				out[kw] = true
-			}
-		}
-	}
-	return out
-}
-
-func (h *Hasher) subjectMaximalExternalEffectsWithZeroGlobals(base *tier2Base, pkgPath string, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool) ([]externalEffect, error) {
-	tracing := trace.Enabled(h.ctx, trace.DomainClosure, pkgPath)
-	var start time.Time
-	if tracing {
-		start = time.Now()
-	}
-	pkgs, err := h.list(pkgPath)
-	if err != nil {
-		return nil, err
-	}
-	var effects []externalEffect
-	record := func(scan maximalEffectScan) {
-		for _, effect := range scan.effects {
-			effects = appendExternalEffect(effects, effect)
-		}
-	}
-	testingEffects, err := h.maximalTestingTypeEffectsFiltered(base, pkgPath, reachedDecls)
-	if err != nil {
-		return nil, err
-	}
-	record(testingEffects)
-	declaredNames := listedDeclaredNames(pkgs)
-	nonStdPaths := listedNonStandardPaths(pkgs)
-	overridesKey := scanOverridesKey(declaredNames, nonStdPaths)
-	for _, pkg := range pkgs {
-		if err := h.contextErr(); err != nil {
-			return nil, err
-		}
-		if pkg.Standard || pkg.Module == nil || pkg.IsGeneratedTestMainFor(pkgPath) {
-			continue
-		}
-		if !listPkgHasNativeOrEmbed(&pkg) && base != nil {
-			if vp := verifiedHarnessesProg(h.SelectionAudited(), base.prog)[pkg.ImportPath]; vp != nil {
-				record(maximalEffectScan{effects: []externalEffect{propertyHarnessFact(vp)}})
-				continue
-			}
-		}
-		srcPath := pkg.SourcePath()
-		pkgHasZeroGlobals := hasPkgZeroGlobals(startupZeroGlobalDecls, srcPath) || hasPkgZeroGlobals(wholeZeroGlobalDecls, srcPath)
-		if scan, ok, err := h.pinnedEffectScanWithContext(pkg, declaredNames, nonStdPaths, overridesKey); err != nil {
-			return nil, err
-		} else if ok && !hasFilterableMaximalBlocker(h.SelectionAudited(), scan.effects) && !(pkgHasZeroGlobals && hasAnyMaximalBlocker(h.SelectionAudited(), scan.effects)) {
-			record(scan)
-			continue
-		}
-		record(h.tier2PackageExternalEffects(base, &pkg))
-		pkgScopeShadowed := pkgScopeShadowedUniverseZeroNames(base, srcPath)
-		verifiedLinknameLocals := base.verifiedReadOnlyLinknameLocals(srcPath)
-		pkgConfinedUnsafe := reachedDecls != nil && base.pkgConfinedUnsafe(pkg.ImportPath, srcPath)
-		files := append(append([]string(nil), pkg.GoFiles...), pkg.CgoFiles...)
-		for _, name := range files {
-			if err := h.contextErr(); err != nil {
-				return nil, err
-			}
-			fullPath := filepath.Join(pkg.Dir, name)
-			unfiltered, err := h.maximalFileEffectsCachedWithContext(pkg.ImportPath, fullPath, declaredNames, nonStdPaths, overridesKey)
-			if err != nil {
-				return nil, err
-			}
-			if !hasFilterableMaximalBlocker(h.SelectionAudited(), unfiltered.effects) && !(pkgHasZeroGlobals && hasAnyMaximalBlocker(h.SelectionAudited(), unfiltered.effects)) {
-				record(unfiltered)
-				continue
-			}
-			var content []byte
-			if h.underCache(pkg.Dir) {
-				content, err = os.ReadFile(fullPath)
-			} else {
-				var fb fileBytes
-				fb, err = h.readFile(fullPath)
-				content = fb.content
-			}
-			if err != nil {
-				return nil, err
-			}
-			parsed, err := h.parsedMaximalFile(fullPath, content, declaredNames, nonStdPaths, overridesKey)
-			if err != nil {
-				return nil, err
-			}
-			scan := maximalFileEffectsParsed(h.SelectionAudited(), parsed, nonStdPaths, reachedDecls, startupOnlyDecls, srcPath, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals, pkgConfinedUnsafe)
-			record(scan)
-		}
-	}
-	if tracing {
-		trace.Emit(h.ctx, trace.DomainClosure, "maximal.subject.done", pkgPath,
-			trace.Int("effects", len(effects)),
-			trace.Bool("filtered", reachedDecls != nil),
-			trace.Int64("elapsed_ns", time.Since(start).Nanoseconds()),
-		)
-	}
-	return effects, nil
-}
-
 func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath string, reachedDecls map[funcDeclKey]bool) (maximalEffectScan, error) {
 	if cached, ok := h.maximalTesting[pkgPath]; ok && (reachedDecls == nil || !hasFilterableMaximalBlocker(h.SelectionAudited(), cached.effects)) {
 		return cached, nil
@@ -1300,11 +499,6 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 	scope := ""
 	key := ""
 	if reachedDecls == nil {
-		// The persistent memo serves before any type-environment load: the
-		// scan is a pure function of (scope, package test-binary closure), so
-		// a hit under the complete key is byte-equivalent to recomputation
-		// (REQ-closure-testing-scan-memo). A hash-derivation failure disables
-		// the memo for the package — fail-open to recomputation.
 		scope = h.testingScanScope()
 		if scope != "" {
 			if k, err := h.testBinaryClosureKey(pkgPath); err == nil {
@@ -1421,459 +615,6 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 	return scan, nil
 }
 
-// testingMethodEffectsFiltered returns the file's testing-runtime effects.
-func testingMethodEffectsFiltered(file *ast.File, aliases map[string]string, unreachedDecls []ast.Node) []externalEffect {
-	return testingMethodEffectsFilteredWithSkipped(file, aliases, unreachedDecls, nil)
-}
-
-func testingMethodEffectsFilteredWithSkipped(file *ast.File, aliases map[string]string, unreachedDecls []ast.Node, skippedBody map[*ast.BlockStmt]bool) []externalEffect {
-	if file == nil {
-		return nil
-	}
-	return testingMethodEffectsFilteredWithHandles(file, aliases, testingHandleTypeNames(file, aliases), unreachedDecls, skippedBody)
-}
-
-func testingMethodEffectsFilteredWithHandles(file *ast.File, aliases map[string]string, handleTypes map[string]bool, unreachedDecls []ast.Node, skippedBody map[*ast.BlockStmt]bool) []externalEffect {
-	if file == nil {
-		return nil
-	}
-	var effects []externalEffect
-	for _, declaration := range file.Decls {
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Type.Params == nil || function.Body == nil {
-			continue
-		}
-		receivers := map[string]bool{}
-		for _, field := range function.Type.Params.List {
-			if isTestingHandleType(field.Type, aliases, handleTypes) {
-				for _, name := range field.Names {
-					receivers[name.Name] = true
-				}
-			}
-		}
-		if len(receivers) == 0 {
-			continue
-		}
-		unreached := slices.Contains(unreachedDecls, ast.Node(function))
-		addTestingEffect := func(effect externalEffect) {
-			if unreached && !packageWideMaximalHazard(effect) {
-				return
-			}
-			effects = appendExternalEffect(effects, effect)
-		}
-		// One body walk collects both the parent map and the name-propagation
-		// edges; the fixed point then iterates the small edge list instead of
-		// re-walking the whole body per round. The fixed point is
-		// order-independent, so the collection order only bounds round count
-		// (equivalence-pinned by
-		// TestFileEffectScanMatchesTwoPassReference's backward rows).
-		type propagation struct{ from, to string }
-		var edges []propagation
-		parents := make(map[ast.Node]ast.Node)
-		var stack []ast.Node
-		ast.Inspect(function.Body, func(node ast.Node) bool {
-			if node == nil {
-				stack = stack[:len(stack)-1]
-				return false
-			}
-			if blk, ok := node.(*ast.BlockStmt); ok && skippedBody[blk] {
-				return false
-			}
-			if len(stack) != 0 {
-				parents[node] = stack[len(stack)-1]
-			}
-			stack = append(stack, node)
-			if specification, ok := node.(*ast.ValueSpec); ok {
-				for i, value := range specification.Values {
-					if name, ok := identifierName(value); ok && i < len(specification.Names) {
-						edges = append(edges, propagation{from: name, to: specification.Names[i].Name})
-					}
-				}
-			}
-			assignment, ok := node.(*ast.AssignStmt)
-			if !ok {
-				return true
-			}
-			for i, rhs := range assignment.Rhs {
-				name, ok := identifierName(rhs)
-				if !ok || i >= len(assignment.Lhs) {
-					continue
-				}
-				if lhs, ok := assignment.Lhs[i].(*ast.Ident); ok {
-					edges = append(edges, propagation{from: name, to: lhs.Name})
-				}
-			}
-			return true
-		})
-		changed := true
-		for changed {
-			changed = false
-			for _, edge := range edges {
-				if receivers[edge.from] && !receivers[edge.to] {
-					receivers[edge.to] = true
-					changed = true
-				}
-			}
-		}
-		escape := opaqueExternalEffect(externalEffectTestRuntime, "testing runtime value escapes analyzable receiver")
-		ast.Inspect(function.Body, func(node ast.Node) bool {
-			if blk, ok := node.(*ast.BlockStmt); ok && skippedBody[blk] {
-				return false
-			}
-			switch node := node.(type) {
-			case *ast.AssignStmt:
-				for i, rhs := range node.Rhs {
-					name, ok := identifierName(rhs)
-					if ok && receivers[name] && i < len(node.Lhs) {
-						if _, ok := node.Lhs[i].(*ast.Ident); !ok {
-							addTestingEffect(escape)
-						}
-					}
-				}
-			case *ast.CallExpr:
-				for _, argument := range node.Args {
-					if name, ok := identifierName(argument); ok && receivers[name] {
-						addTestingEffect(escape)
-					}
-				}
-			case *ast.ReturnStmt:
-				for _, result := range node.Results {
-					if name, ok := identifierName(result); ok && receivers[name] {
-						addTestingEffect(escape)
-					}
-				}
-			case *ast.Ident:
-				if receivers[node.Name] && !testingIdentifierUseSupported(node, parents) {
-					addTestingEffect(escape)
-				}
-			}
-			selector, ok := node.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			receiver, ok := selector.X.(*ast.Ident)
-			if !ok || !receivers[receiver.Name] {
-				return true
-			}
-			if effect, ok := classBEffect("testing", selector.Sel.Name); ok {
-				addTestingEffect(effect)
-			}
-			return true
-		})
-	}
-	return effects
-}
-
-func testingIdentifierUseSupported(identifier *ast.Ident, parents map[ast.Node]ast.Node) bool {
-	var node ast.Node = identifier
-	parent := parents[node]
-	for {
-		parenthesized, ok := parent.(*ast.ParenExpr)
-		if !ok || parenthesized.X != node {
-			break
-		}
-		node = parent
-		parent = parents[node]
-	}
-	switch parent := parent.(type) {
-	case *ast.Field:
-		return true
-	case *ast.SelectorExpr:
-		return parent.X == node
-	case *ast.AssignStmt:
-		for i, lhs := range parent.Lhs {
-			if lhs == node {
-				return true
-			}
-			if i < len(parent.Rhs) && ast.Unparen(parent.Rhs[i]) == identifier {
-				_, ok := lhs.(*ast.Ident)
-				return ok
-			}
-		}
-	case *ast.ValueSpec:
-		for _, name := range parent.Names {
-			if name == identifier {
-				return true
-			}
-		}
-		for i, value := range parent.Values {
-			if ast.Unparen(value) == identifier {
-				return i < len(parent.Names)
-			}
-		}
-	}
-	return false
-}
-
-func identifierName(expression ast.Expr) (string, bool) {
-	expression = ast.Unparen(expression)
-	identifier, ok := expression.(*ast.Ident)
-	if !ok {
-		return "", false
-	}
-	return identifier.Name, true
-}
-
-func testingHandleTypeNames(file *ast.File, aliases map[string]string) map[string]bool {
-	handles := map[string]bool{}
-	changed := true
-	for changed {
-		changed = extendTestingHandleTypeNames(file, aliases, handles)
-	}
-	return handles
-}
-
-func extendTestingHandleTypeNames(file *ast.File, aliases map[string]string, handles map[string]bool) bool {
-	changed := false
-	for _, declaration := range file.Decls {
-		general, ok := declaration.(*ast.GenDecl)
-		if !ok || general.Tok != token.TYPE {
-			continue
-		}
-		for _, specification := range general.Specs {
-			typeSpec, ok := specification.(*ast.TypeSpec)
-			if ok && !handles[typeSpec.Name.Name] && isTestingHandleType(typeSpec.Type, aliases, handles) {
-				handles[typeSpec.Name.Name] = true
-				changed = true
-			}
-		}
-	}
-	return changed
-}
-
-func isTestingHandleType(expression ast.Expr, aliases map[string]string, handles map[string]bool) bool {
-	switch expression := expression.(type) {
-	case *ast.StarExpr:
-		return isTestingHandleType(expression.X, aliases, handles)
-	case *ast.Ident:
-		return handles[expression.Name]
-	case *ast.SelectorExpr:
-		qualifier, ok := expression.X.(*ast.Ident)
-		if !ok || aliases[qualifier.Name] != "testing" {
-			return false
-		}
-		switch expression.Sel.Name {
-		case "T", "B", "F", "M":
-			return true
-		}
-	case *ast.StructType:
-		for _, field := range expression.Fields.List {
-			if isTestingHandleType(field.Type, aliases, handles) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// isSourceOnlyStandardPackage is the deliberately small set whose public
-// operations cannot directly acquire process-external state. Unknown standard
-// packages fail closed to package-wide unverifiability; additions require a
-// source audit, not an API-name heuristic — and the whole set is gated on the
-// verified toolchain source (toolchainaudit.go): the audit is a property of
-// verified standard-library source, so an unverified surface keeps every
-// package's fail-closed classification.
-func isSourceOnlyStandardPackage(audited bool, pkgPath string) bool {
-	if !audited {
-		return false
-	}
-	// The audited-pure set: packages that are bit-deterministic pure
-	// computation for every consumer of this audit - the observability
-	// tier and the maximal unverifiable-dependence
-	// marker share it, so membership demands the strongest reading:
-	// every ambient effect must enter via a flagged constructor or
-	// global of an effect-bearing package, no testlog-invisible input
-	// channel, and no machine-variant results. Deliberately excluded:
-	// reflect (defeats static reachability - auditing it would unsound
-	// the proof itself); flag (registration returns pointers whose
-	// values change at Parse, a testlog-invisible covert input channel);
-	// encoding/gob (Register mutates a package-global registry - the
-	// same registration-shaped covert channel: a subject's decode
-	// outcome can depend on a sibling's prior Register call);
-	// math and math/cmplx (CPU-dispatched implementations vary results
-	// across machines — math/big is a member on its own audit: software
-	// arbitrary-precision arithmetic whose CPU-selected kernels compute
-	// bit-identical integer results, whose only state is invisible
-	// memoization and scratch pooling, and whose only entropy is the
-	// caller's *rand.Rand or a value-seeded source); sync
-	// and sync/atomic (sync.Pool is runtime-backed and GC-coupled);
-	// time, math/rand, hash/maphash (ambient clock and entropy); and
-	// every I/O-acquiring package
-	// (REQ-closure-observability-audited-set). The set itself is one table
-	// in internal/auditset beside the other audited sets.
-	return auditset.PurePackage(pkgPath)
-}
-
-func auditedLinknamesOnly(audited bool, text string) bool {
-	return auditedLinknamesWithLocals(audited, text, nil)
-}
-
-func auditedLinknamesWithLocals(audited bool, text string, verifiedLocals map[string]bool) bool {
-	rest := text
-	for {
-		i := strings.Index(rest, "//go:linkname")
-		if i < 0 {
-			return true
-		}
-		if !audited {
-			// The audited targets are claims about runtime/syscall
-			// source; an unlisted surface keeps the opaque-linkage
-			// floor for every directive-bearing file
-			// (REQ-closure-observability-toolchain-key
-			// keying clause).
-			return false
-		}
-		line := rest[i:]
-		if j := strings.IndexByte(line, '\n'); j >= 0 {
-			rest = line[j:]
-			line = line[:j]
-		} else {
-			rest = ""
-		}
-		// The directive name is a whole token — the same bound the
-		// generated-header match keeps (internal/auditset): a space or
-		// tab, the byte grammar of a gofmt'd directive, deliberately
-		// narrower than a Unicode field split — a directive followed by
-		// any other whitespace refuses.
-		_, plain := auditset.BoundedToken(line, "//go:linkname", " \t")
-		_, std := auditset.BoundedToken(line, "//go:linknamestd", " \t")
-		if !plain && !std {
-			return false
-		}
-		fields := strings.Fields(line)
-		if len(fields) != 3 {
-			return false
-		}
-		_, isROVarTarget := auditset.AuditedReadOnlyVarLinknameTarget(fields[2])
-		if !auditset.AuditedLinknameTarget(fields[2]) && !(len(verifiedLocals) > 0 && verifiedLocals[fields[1]] && isROVarTarget) {
-			return false
-		}
-	}
-}
-
-func packageHasClassifiedExternalAPI(pkgPath string) bool {
-	return auditset.ClassBPackage(pkgPath)
-}
-
-// implicitImportName is the fallback identifier derived from an import
-// path when no package listing supplies the declared package name: the
-// path's last element, past a trailing major-version element
-// (math/rand/v2 declares rand; pinned against the toolchain's own names).
-func implicitImportName(pkgPath string) string {
-	base := path.Base(pkgPath)
-	if len(base) > 1 && base[0] == 'v' && strings.TrimLeft(base[1:], "0123456789") == "" {
-		if dir := path.Dir(pkgPath); dir != "." && dir != "/" {
-			return path.Base(dir)
-		}
-	}
-	return base
-}
-
-func listedDeclaredNames(pkgs []listPkg) map[string]string {
-	if len(pkgs) == 0 {
-		return nil
-	}
-	names := make(map[string]string, len(pkgs))
-	for _, p := range pkgs {
-		if p.Name == "" || p.Name == "main" || strings.HasSuffix(p.Name, "_test") {
-			continue
-		}
-		src := p.SourcePath()
-		if existing, exists := names[src]; exists && existing != p.Name {
-			names[src] = ""
-		} else {
-			names[src] = p.Name
-		}
-	}
-	return names
-}
-
-func listedNonStandardPaths(pkgs []listPkg) map[string]bool {
-	if len(pkgs) == 0 {
-		return nil
-	}
-	var out map[string]bool
-	for _, p := range pkgs {
-		if p.Standard || p.Module == nil {
-			continue
-		}
-		if src := p.SourcePath(); src != "" && isStdImportPath(src) {
-			if out == nil {
-				out = make(map[string]bool)
-			}
-			out[src] = true
-		}
-	}
-	return out
-}
-
-func declaredOverridesKey(declaredNames map[string]string) string {
-	return scanOverridesKey(declaredNames, nil)
-}
-
-func scanOverridesKey(declaredNames map[string]string, nonStdPaths map[string]bool) string {
-	if len(declaredNames) == 0 && len(nonStdPaths) == 0 {
-		return ""
-	}
-	var overrides []string
-	for pkgPath, name := range declaredNames {
-		if name == "" {
-			continue
-		}
-		if name != path.Base(pkgPath) || implicitImportName(pkgPath) != path.Base(pkgPath) {
-			overrides = append(overrides, pkgPath+"="+name)
-		}
-	}
-	for pkgPath := range nonStdPaths {
-		if isStdImportPath(pkgPath) {
-			overrides = append(overrides, "nonstd:"+pkgPath)
-		}
-	}
-	if len(overrides) == 0 {
-		return ""
-	}
-	slices.Sort(overrides)
-	sum := sha256.Sum256([]byte(strings.Join(overrides, "\x00")))
-	return "\x00" + hex.EncodeToString(sum[:16])
-}
-
-func trueReason(pkgPath string) string {
-	return trueExternalEffect(pkgPath).reason
-}
-
-// trueExternalEffect names an always-external package's effect; it is
-// meaningful for auditset.AlwaysExternalPackage members alone, which both
-// call sites gate on.
-func trueExternalEffect(pkgPath string) externalEffect {
-	switch {
-	case pkgPath == "plugin":
-		return symbolExternalEffect(externalEffectPlugin, pkgPath, "", "reaches plugin")
-	case auditset.NetworkPackage(pkgPath):
-		return symbolExternalEffect(externalEffectNetwork, pkgPath, "", "reaches "+pkgPath+" (network I/O)")
-	default:
-		return symbolExternalEffect(externalEffectNative, pkgPath, "", "reaches "+pkgPath+" (external system call)")
-	}
-}
-
-// pinnedEffectScan serves a version-pinned package's per-file effect-scan
-// fold from the persistent memo, deriving and storing it on a miss
-// (REQ-closure-effect-scan-memo). Only the per-file fold persists — it is
-// a pure syntactic function of the key's pinned inputs. The package-level
-// facts (assembly, system objects, cgo linkage metadata) are functions of
-// the live listing's build configuration, which the key does not carry, so
-// every pass recomputes them from the listing in hand — zero file reads —
-// and folds the served scans in. Both folds order and dedup exactly as the
-// inline loop's global fold: effect dedup is first-occurrence-wins, and
-// the preferred fold is a total order (opaqueness, then the
-// lexicographically smaller reason), so per-package folding then
-// cross-package folding equals the flat fold. A mutable-local package
-// returns ok=false and takes the read path: the classification is
-// directory-based — resolved source outside the module cache, the same
-// rule the closure contribution pin applies — and the version leg
-// additionally excludes modules reporting no version at all (the main
-// and workspace modules, which pinnedPackage's Main leg also excludes),
-// whose pin would carry no signal. The caller guarantees
-// pkg.Module != nil.
 func (h *Hasher) pinnedEffectScan(pkg listPkg) (maximalEffectScan, bool, error) {
 	return h.pinnedEffectScanWithNames(pkg, nil, "")
 }
@@ -1922,11 +663,65 @@ func (h *Hasher) pinnedEffectScanWithContext(pkg listPkg, declaredNames map[stri
 	return composite, true, nil
 }
 
+func auditedLinknamesOnly(audited bool, text string) bool {
+	return auditedLinknamesWithLocals(audited, text, nil)
+}
+
+func auditedLinknamesWithLocals(audited bool, text string, verifiedLocals map[string]bool) bool {
+	rest := text
+	for {
+		iLine := strings.Index(rest, "//go:linkname")
+		iBlock := strings.Index(rest, "/*go:linkname")
+		i := iLine
+		if i < 0 || (iBlock >= 0 && iBlock < i) {
+			i = iBlock
+		}
+		if i < 0 {
+			return true
+		}
+		if !audited {
+			// The audited targets are claims about runtime/syscall
+			// source; an unlisted surface keeps the opaque-linkage
+			// floor for every directive-bearing file
+			// (REQ-closure-observability-toolchain-key keying clause).
+			return false
+		}
+		var comment string
+		if i == iBlock {
+			afterOpen := rest[i+2:]
+			end := strings.Index(afterOpen, "*/")
+			if end < 0 {
+				return false
+			}
+			comment = rest[i : i+2+end+2]
+			if strings.ContainsAny(comment, "\r\n") {
+				return false
+			}
+			rest = afterOpen[end+2:]
+		} else {
+			line := rest[i:]
+			if j := strings.IndexByte(line, '\n'); j >= 0 {
+				rest = line[j+1:]
+				line = line[:j]
+			} else {
+				rest = ""
+			}
+			comment = strings.TrimRight(line, " \t\r")
+		}
+		local, target, matched, valid := parseGoLinknameDirectiveComment(comment)
+		if !matched || !valid || target == "" {
+			return false
+		}
+		_, isROVarTarget := auditset.AuditedReadOnlyVarLinknameTarget(target)
+		if !auditset.AuditedLinknameTarget(target) && !(len(verifiedLocals) > 0 && verifiedLocals[local] && isROVarTarget) {
+			return false
+		}
+	}
+}
+
 // userTestMainDecl returns the file's user TestMain declaration - a
 // top-level func TestMain with exactly one parameter of syntactic type
-// *testing.M under the file's own testing import alias - or nil. The
-// syntactic shape is the harness contract: the toolchain only calls a
-// TestMain matching it.
+// *testing.M under the file's own testing import alias - or nil.
 func userTestMainDecl(file *ast.File, aliases map[string]string) *ast.FuncDecl {
 	for _, decl := range file.Decls {
 		fd, ok := decl.(*ast.FuncDecl)
@@ -1940,8 +735,6 @@ func userTestMainDecl(file *ast.File, aliases map[string]string) *ast.FuncDecl {
 		if !ok {
 			continue
 		}
-		// Both harness shapes: *testing.M under the file's own import
-		// alias, and bare *M under a dot-imported testing.
 		switch x := star.X.(type) {
 		case *ast.SelectorExpr:
 			pkgIdent, ok := x.X.(*ast.Ident)

@@ -5,7 +5,6 @@ import (
 	"slices"
 
 	"github.com/greatliontech/go-x-tools/go/ssa"
-	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -151,7 +150,7 @@ func closedInvokeTargets(site ssa.CallInstruction, fp *freshParamAnalysis) (map[
 					recvTypeStr = c.Value.Type().String()
 				}
 			}
-			trace.Emit(nil, trace.DomainClosure, "closure.invoke.unclosed", site.Parent().String(),
+			trace.Emit(fp.emitCtx(), trace.DomainClosure, "closure.invoke.unclosed", site.Parent().String(),
 				trace.String("method", methodStr),
 				trace.String("recv", recvStr),
 				trace.String("recv_type", recvTypeStr),
@@ -178,7 +177,16 @@ func closedInvokeTargets(site ssa.CallInstruction, fp *freshParamAnalysis) (map[
 	if !walkDynamicValue(c.Value, &dynamicValueCollector{types: concreteTypes}, map[ssa.Value]bool{}, nil, collectFP) || (len(concreteTypes) == 0 && !allowEmptyConcrete) {
 		return fail("collect_concrete_types")
 	}
-	targets, ok := resolveConcreteMethodTargets(site.Parent().Prog, c.Value.Type(), c.Method, concreteTypes, collectFP)
+	hmacReceiverAdmitted := false
+	if fp != nil && fp.selectionAudited && c.Value != nil {
+		for ct := range concreteTypes {
+			if isHMAC, _, okH := classifyStatefulStreamType(ct, streamKindWriter); okH && isHMAC {
+				hmacReceiverAdmitted, _ = inMemoryStreamValue(c.Value, streamKindWriter, collectFP, 0, nil)
+				break
+			}
+		}
+	}
+	targets, ok := resolveConcreteMethodTargetsSeen(site.Parent().Prog, c.Value.Type(), c.Method, concreteTypes, collectFP, hmacReceiverAdmitted, map[types.Type]bool{})
 	if !ok {
 		return fail("resolve_method_targets")
 	}
@@ -216,10 +224,10 @@ func isDirectNilOnlyParam(v ssa.Value, fp *freshParamAnalysis) bool {
 }
 
 func resolveConcreteMethodTargets(prog *ssa.Program, recvType types.Type, method *types.Func, concreteTypes map[types.Type]bool, fp *freshParamAnalysis) (map[*ssa.Function]bool, bool) {
-	return resolveConcreteMethodTargetsSeen(prog, recvType, method, concreteTypes, fp, map[types.Type]bool{})
+	return resolveConcreteMethodTargetsSeen(prog, recvType, method, concreteTypes, fp, false, map[types.Type]bool{})
 }
 
-func resolveConcreteMethodTargetsSeen(prog *ssa.Program, recvType types.Type, method *types.Func, concreteTypes map[types.Type]bool, fp *freshParamAnalysis, seenTypes map[types.Type]bool) (map[*ssa.Function]bool, bool) {
+func resolveConcreteMethodTargetsSeen(prog *ssa.Program, recvType types.Type, method *types.Func, concreteTypes map[types.Type]bool, fp *freshParamAnalysis, hmacReceiverAdmitted bool, seenTypes map[types.Type]bool) (map[*ssa.Function]bool, bool) {
 	if prog == nil || method == nil {
 		return nil, false
 	}
@@ -329,7 +337,7 @@ func resolveConcreteMethodTargetsSeen(prog *ssa.Program, recvType types.Type, me
 			if len(embeddedTypes) == 0 {
 				return true
 			}
-			embeddedTargets, ok := resolveConcreteMethodTargetsSeen(prog, sig.Recv().Type(), fnObj, embeddedTypes, &fieldFP, seenTypes)
+			embeddedTargets, ok := resolveConcreteMethodTargetsSeen(prog, sig.Recv().Type(), fnObj, embeddedTypes, &fieldFP, false, seenTypes)
 			if !ok {
 				return false
 			}
@@ -373,7 +381,7 @@ func resolveConcreteMethodTargetsSeen(prog *ssa.Program, recvType types.Type, me
 							if errMethod == nil {
 								errMethod = fnObj
 							}
-							innerTargets, ok := resolveConcreteMethodTargetsSeen(prog, st.Field(2).Type(), errMethod, innerTypes, &fieldFP, seenTypes)
+							innerTargets, ok := resolveConcreteMethodTargetsSeen(prog, st.Field(2).Type(), errMethod, innerTypes, &fieldFP, false, seenTypes)
 							if !ok {
 								return false
 							}
@@ -382,11 +390,13 @@ func resolveConcreteMethodTargetsSeen(prog *ssa.Program, recvType types.Type, me
 							}
 						}
 					} else {
-						if typeMayCarryDynamicTop(audited, ct) && (len(declFn.Params) == 0 || paramMaySupplyDynamicSeen(audited, fp.userPkgPaths(), declFn.Params[0], nil, make(map[*ssa.Parameter]bool))) {
+						isHMAC, _, okH := classifyStatefulStreamType(ct, streamKindWriter)
+						admittedHashRecv := isAdmittedPureHashConcreteType(audited, ct) || (hmacReceiverAdmitted && okH && isHMAC)
+						if !admittedHashRecv && typeMayCarryDynamicTop(audited, ct) && (len(declFn.Params) == 0 || paramMaySupplyDynamicSeen(audited, fp.userPkgPaths(), declFn.Params[0], nil, make(map[*ssa.Parameter]bool))) {
 							return false
 						}
 						declPkg := funcPkgPath(declFn)
-						if !fp.isAuditedStandardOrDelegate(declPkg) && !auditedStandardCallee(audited, declPkg, functionSymbolName(declFn), declFn) {
+						if !admittedHashRecv && !fp.isAuditedStandardOrDelegate(declPkg) && !auditedStandardCallee(audited, declPkg, functionSymbolName(declFn), declFn) {
 							return false
 						}
 					}
@@ -435,87 +445,6 @@ func resolveConcreteMethodTargetsSeen(prog *ssa.Program, recvType types.Type, me
 		}
 	}
 	return targets, true
-}
-
-func auditedIOWrapperTypeName(t types.Type) string {
-	if ptr, ok := types.Unalias(t).(*types.Pointer); ok {
-		t = ptr.Elem()
-	}
-	named, ok := types.Unalias(t).(*types.Named)
-	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "io" {
-		return ""
-	}
-	switch name := named.Obj().Name(); name {
-	case "nopCloser", "nopCloserWriterTo", "LimitedReader", "teeReader", "multiReader", "multiWriter", "eofReader":
-		return name
-	default:
-		return ""
-	}
-}
-
-func isAuditedStandardIOWrapperType(t types.Type) bool {
-	return auditedIOWrapperTypeName(t) != ""
-}
-
-func auditedIOWrapperResultDynamicValue(callee *ssa.Function, tupleIndex int, collect *dynamicValueCollector, fp *freshParamAnalysis) (ok, skip bool) {
-	if callee == nil || callee.Signature == nil || callee.Signature.Recv() == nil {
-		return false, false
-	}
-	typeName := auditedIOWrapperTypeName(callee.Signature.Recv().Type())
-	if typeName == "" {
-		return false, false
-	}
-	var sentinelName string
-	switch typeName {
-	case "nopCloser":
-		switch callee.Name() {
-		case "Read", "Close":
-		default:
-			return false, false
-		}
-	case "nopCloserWriterTo":
-		switch callee.Name() {
-		case "Read", "Close", "WriteTo":
-		default:
-			return false, false
-		}
-	case "teeReader":
-		if callee.Name() != "Read" {
-			return false, false
-		}
-	case "LimitedReader", "multiReader", "eofReader":
-		if callee.Name() != "Read" {
-			return false, false
-		}
-		sentinelName = "EOF"
-	case "multiWriter":
-		switch callee.Name() {
-		case "Write", "WriteString":
-			sentinelName = "ErrShortWrite"
-		default:
-			return false, false
-		}
-	default:
-		return false, false
-	}
-	if sentinelName != "" && tupleIndex != 0 {
-		if callee.Pkg == nil || fp == nil {
-			return collect.isSeeds(), true
-		}
-		g := callee.Pkg.Var(sentinelName)
-		if g == nil || !isUnmutatedStandardSentinelGlobal(fp.prog, g, "io", sentinelName) {
-			return collect.isSeeds(), true
-		}
-		if collect.collecting() && collect.types != nil {
-			if !sentinelGlobalConcreteTypes(g, collect.types) && !collect.isSeeds() {
-				return false, true
-			}
-		}
-	}
-	if !collect.collecting() {
-		markDynamicLeaf(fp)
-	}
-	return true, true
 }
 
 // narrowedTargets returns a dynamic call's or interface invoke's targets
@@ -659,15 +588,17 @@ func attributedParameterArgs(param *ssa.Parameter, fp *freshParamAnalysis) ([]ss
 		fp.markSubjectUsed()
 	}
 	if isSigParam && !fp.inFieldStore && !fp.inProgramSites {
-		if (!fp.functions[fn] && (!fp.selectionAudited || fp.enumOnly || fp.programValueRef[fn] || len(fp.programSites[fn]) == 0)) || fp.dynamic[fn] || len(fn.FreeVars) != 0 || fn.Signature.Variadic() {
+		localClosed := !fp.enumOnly && fp.localClosureSitesClosed(fn)
+		if ((!fp.functions[fn] || fp.dynamic[fn] || len(fn.FreeVars) != 0) && !localClosed) || fn.Signature.Variadic() {
 			return nil, false, false
 		}
 	}
 	isEnumSigParam := fp.enumOnly && !fp.inFieldStore && !fp.inProgramSites && isSigParam
 	perSubjectSigParam := isSigParam && !fp.inFieldStore && !fp.inProgramSites && !fp.enumOnly && fp.functions[fn] && (len(sites) > 0 || !fp.selectionAudited)
-	needProgramSites := (len(sites) == 0 || len(fn.FreeVars) != 0 || (fn != fp.enumRoot && (fp.inProgramSites || fp.inFieldStore || fp.enumOnly || fp.dynamic[fn]))) && !isEnumSigParam && !perSubjectSigParam
+	localSubjectSites := !fp.inFieldStore && !fp.inProgramSites && !fp.enumOnly && fp.functions[fn] && fp.localClosureSitesClosed(fn) && len(sites) > 0
+	needProgramSites := (len(sites) == 0 || ((len(fn.FreeVars) != 0 || (fn != fp.enumRoot && fp.dynamic[fn])) && !localSubjectSites) || (fn != fp.enumRoot && (fp.inProgramSites || fp.inFieldStore || fp.enumOnly))) && !isEnumSigParam && !perSubjectSigParam
 	if needProgramSites {
-		if fp.programSites == nil || fp.programValueRef[fn] || (len(fn.FreeVars) != 0 && !fp.selectionAudited) {
+		if fp.programSites == nil || fp.programValueRef[fn] || (len(fn.FreeVars) != 0 && (!fp.selectionAudited || len(fp.closures[fn]) == 0)) {
 			return nil, false, false
 		}
 		sites = fp.programSites[fn]
@@ -696,6 +627,9 @@ func attributedParameterArgs(param *ssa.Parameter, fp *freshParamAnalysis) ([]ss
 			}
 			args = append(args, siteArgs[idx-1])
 			continue
+		}
+		if site.Common().StaticCallee() == nil && (fn.Signature == nil || fn.Signature.Recv() != nil || fn.Signature.Variadic()) {
+			return nil, false, false
 		}
 		siteArgs := site.Common().Args
 		if idx >= len(siteArgs) {
@@ -733,16 +667,35 @@ func attributedFreeVarBindings(fv *ssa.FreeVar, fp *freshParamAnalysis) ([]ssa.V
 		return bindings, false, true
 	}
 	var mcs []*ssa.MakeClosure
-	if fp.summary != nil {
+	if fp.closures != nil {
+		mcs = fp.closures[fn]
+	} else if fp.summary != nil {
 		if fp.summary.nonClosureRef[fn] {
 			return nil, false, false
 		}
-		mcs = fp.summary.closureRefs[fn]
+		mcs = fp.summary.closures[fn]
 	} else if fn.Parent() != nil {
 		mcs = closureCreations(fn)
 	}
 	if len(mcs) == 0 {
 		return nil, false, false
+	}
+	filterSubjectOnly := !fp.programValueRef[fn] && !fp.inProgramSites && !fp.inFieldStore && !fp.enumOnly && len(fp.functions) > 0
+	if filterSubjectOnly {
+		fp.markSubjectUsed()
+		bindings := make([]ssa.Value, 0, len(mcs))
+		for _, mc := range mcs {
+			if mc == nil || idx >= len(mc.Bindings) || mc.Bindings[idx] == nil {
+				return nil, false, false
+			}
+			if fp.functions[mc.Parent()] {
+				bindings = append(bindings, mc.Bindings[idx])
+			}
+		}
+		if len(bindings) == 0 {
+			return nil, false, false
+		}
+		return bindings, false, true
 	}
 	usedProgramSites := fn.Parent() == nil || (fp.inProgramSites && !fp.inFieldStore && len(fp.callBindings) == 0 && len(fp.calleeSeen) == 0)
 	bindings := make([]ssa.Value, 0, len(mcs))
@@ -761,38 +714,6 @@ func attributedFreeVarBindings(fv *ssa.FreeVar, fp *freshParamAnalysis) ([]ssa.V
 		bindings = append(bindings, mc.Bindings[idx])
 	}
 	return bindings, usedProgramSites, true
-}
-
-// inMemoryFormattedSink reports whether a fmt writer operand provably
-// pins every dynamic type it can carry to an audited in-memory sink —
-// *bytes.Buffer or *strings.Builder — so the formatted bytes never leave
-// process memory and the call is Sprint-equivalent value computation
-// (REQ-closure-observability-writer-sink). The
-// concrete type at each pinning MakeInterface decides alone: which
-// buffer instance receives the bytes never changes which Write runs, and
-// mutation of shared memory is the shared-dynamic-state rules' domain,
-// not an ambient effect — the same footing as a direct Write on that
-// buffer. Everything unpinned — loads, call results, globals, function
-// values — fails closed, and a parameter crosses only through the
-// attributed-caller discipline the dispatch walks share.
-func inMemoryFormattedSink(value ssa.Value, seen, done map[ssa.Value]bool, fp *freshParamAnalysis) bool {
-	return walkDynamicValue(value, &dynamicValueCollector{sinkOnly: true}, seen, done, fp)
-}
-
-// auditedInMemorySinkType admits exactly the two standard sinks whose
-// Write appends to process memory and acquires nothing ambient. Both
-// implement io.Writer on the pointer receiver only, so the pointer form
-// is the whole surface.
-func auditedInMemorySinkType(t types.Type) bool {
-	pointer, ok := types.Unalias(t).(*types.Pointer)
-	if !ok {
-		return false
-	}
-	named, ok := types.Unalias(pointer.Elem()).(*types.Named)
-	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
-		return false
-	}
-	return auditset.InMemoryWriterPointerType(named.Obj().Pkg().Path(), named.Obj().Name())
 }
 
 // syntheticInterfaceMethodWrapper reports whether fn is a compiler
@@ -834,12 +755,13 @@ func isHarnessContextCall(call *ssa.Call, seen, done map[ssa.Value]bool, fp *fre
 	if fp == nil || !fp.selectionAudited || call == nil || call.Common() == nil || call.Parent() == nil || call.Parent().Prog == nil {
 		return false
 	}
+	ssaProg := call.Parent().Prog
 	c := call.Common()
 	if c.IsInvoke() {
 		if c.Method == nil || c.Method.Name() != "Context" || c.Method.Pkg() == nil || c.Method.Pkg().Path() != "testing" {
 			return false
 		}
-		return closedHarnessContextReceiver(c.Value, call.Parent().Prog, fp)
+		return closedHarnessContextReceiver(c.Value, ssaProg, fp) && programContextCanceledUnmutated(fp.prog, ssaProg)
 	}
 	callee := c.StaticCallee()
 	if callee == nil || funcPkgPath(callee) != "testing" || callee.Name() != "Context" {
@@ -847,10 +769,37 @@ func isHarnessContextCall(call *ssa.Call, seen, done map[ssa.Value]bool, fp *fre
 	}
 	if syntheticInterfaceMethodWrapper(callee) {
 		recv := wrapperReceiver(c, callee)
-		return closedHarnessContextReceiver(recv, call.Parent().Prog, fp)
+		return closedHarnessContextReceiver(recv, ssaProg, fp) && programContextCanceledUnmutated(fp.prog, ssaProg)
 	}
 	_, ok := harnessCalleeEffect(fp.selectionAudited, callee, false)
-	return ok
+	return ok && programContextCanceledUnmutated(fp.prog, ssaProg)
+}
+
+func findProgramContextPackage(ssaProg *ssa.Program) *ssa.Package {
+	if ssaProg == nil {
+		return nil
+	}
+	if pkg := ssaProg.ImportedPackage("context"); pkg != nil && pkg.Pkg != nil {
+		return pkg
+	}
+	for _, pkg := range ssaProg.AllPackages() {
+		if pkg != nil && pkg.Pkg != nil && pkg.Pkg.Path() == "context" {
+			return pkg
+		}
+	}
+	return nil
+}
+
+func programContextCanceledUnmutated(p *program, ssaProg *ssa.Program) bool {
+	if ssaProg == nil {
+		return false
+	}
+	if pkg := findProgramContextPackage(ssaProg); pkg != nil {
+		if g := pkg.Var("Canceled"); g != nil {
+			return isUnmutatedStandardSentinelGlobal(p, g, "context", "Canceled")
+		}
+	}
+	return true
 }
 
 func closedHarnessContextReceiver(recv ssa.Value, prog *ssa.Program, fp *freshParamAnalysis) bool {
@@ -881,18 +830,7 @@ func harnessCancelCtxType(call *ssa.Call) types.Type {
 }
 
 func programCancelCtxType(prog *ssa.Program) types.Type {
-	if prog == nil {
-		return nil
-	}
-	if pkg := prog.ImportedPackage("context"); pkg != nil && pkg.Pkg != nil {
-		if obj := pkg.Pkg.Scope().Lookup("cancelCtx"); obj != nil {
-			return types.NewPointer(obj.Type())
-		}
-	}
-	for _, pkg := range prog.AllPackages() {
-		if pkg == nil || pkg.Pkg == nil || pkg.Pkg.Path() != "context" {
-			continue
-		}
+	if pkg := findProgramContextPackage(prog); pkg != nil {
 		if obj := pkg.Pkg.Scope().Lookup("cancelCtx"); obj != nil {
 			return types.NewPointer(obj.Type())
 		}

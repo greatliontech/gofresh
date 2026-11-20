@@ -2,6 +2,7 @@ package auditset
 
 import (
 	"slices"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -364,4 +365,199 @@ func FormatStringExposesPointerIdentity(fmtStr string) bool {
 	return !ScanFmtDirectives(fmtStr, func(d FmtDirective) bool {
 		return !d.ExposesPointerIdentity()
 	})
+}
+
+// pureHashPackages lists verified deterministic hash packages whose concrete
+// hash.Hash implementations compute purely over process memory without ambient
+// seeds (hash/maphash is excluded).
+var pureHashPackages = map[string]bool{
+	"crypto/internal/fips140/sha256": true,
+	"crypto/internal/fips140/sha3":   true,
+	"crypto/internal/fips140/sha512": true,
+	"crypto/md5":                     true,
+	"crypto/sha1":                    true,
+	"crypto/sha256":                  true,
+	"crypto/sha512":                  true,
+	"hash/adler32":                   true,
+	"hash/crc32":                     true,
+	"hash/crc64":                     true,
+	"hash/fnv":                       true,
+}
+
+// PureHashPackage reports whether pkgPath is an audited seed-free deterministic
+// hash package.
+func PureHashPackage(pkgPath string) bool { return pureHashPackages[pkgPath] }
+
+// goASTNodeInterfaces lists package go/ast's syntax-node interfaces.
+var goASTNodeInterfaces = map[string]bool{
+	"Decl": true, "Expr": true, "Node": true, "Spec": true, "Stmt": true,
+}
+
+// GoASTNodeInterface reports whether name is one of go/ast's syntax-node
+// interfaces (Node, Expr, Stmt, Decl, Spec).
+func GoASTNodeInterface(name string) bool { return goASTNodeInterfaces[name] }
+
+var writerFirstExtraStdFuncs = map[string][]string{
+	"go/scanner": {"PrintError"},
+}
+
+// WriterFirstStdFunc reports whether pkgPath.name is a standard-library
+// function whose first argument is its output io.Writer sink.
+func WriterFirstStdFunc(pkgPath, name string) bool {
+	return (pkgPath == "fmt" && FmtWriterFunc(name)) || slices.Contains(writerFirstExtraStdFuncs[pkgPath], name)
+}
+
+var goParserSourceFuncs = map[string]bool{
+	"ParseExprFrom": true,
+	"ParseFile":     true,
+}
+
+// GoParserSourceFunc reports whether name is a go/parser entry point whose src
+// parameter selects between in-memory source (src != nil) and filesystem reads
+// (src == nil).
+func GoParserSourceFunc(name string) bool { return goParserSourceFuncs[name] }
+
+// tabwriterSymbols is the audited surface of package text/tabwriter: the Writer
+// filter, its constructor and formatting methods, and its flag/escape constants.
+var tabwriterSymbols = map[string]bool{
+	"Writer": true, "NewWriter": true, "Init": true, "Write": true, "Flush": true,
+	"FilterHTML": true, "StripEscape": true, "AlignRight": true, "DiscardEmptyColumns": true,
+	"TabIndent": true, "Debug": true, "Escape": true,
+}
+
+// goTokenSymbols is the audited surface of package go/token: Token, Pos,
+// Position, File, FileSet, all lexical token and precedence constants, and all
+// pure methods (excluding (*FileSet).Read and (*FileSet).Write, which invoke
+// arbitrary func(any) error serialization callbacks).
+var goTokenSymbols = map[string]bool{
+	"Token": true, "Pos": true, "NoPos": true, "Position": true, "File": true, "FileSet": true,
+	"NewFileSet": true, "Lookup": true, "IsExported": true, "IsKeyword": true, "IsIdentifier": true,
+	"LowestPrec": true, "UnaryPrec": true, "HighestPrec": true,
+	"ILLEGAL": true, "EOF": true, "COMMENT": true,
+	"IDENT": true, "INT": true, "FLOAT": true, "IMAG": true, "CHAR": true, "STRING": true,
+	"ADD": true, "SUB": true, "MUL": true, "QUO": true, "REM": true,
+	"AND": true, "OR": true, "XOR": true, "SHL": true, "SHR": true, "AND_NOT": true,
+	"ADD_ASSIGN": true, "SUB_ASSIGN": true, "MUL_ASSIGN": true, "QUO_ASSIGN": true, "REM_ASSIGN": true,
+	"AND_ASSIGN": true, "OR_ASSIGN": true, "XOR_ASSIGN": true, "SHL_ASSIGN": true, "SHR_ASSIGN": true, "AND_NOT_ASSIGN": true,
+	"LAND": true, "LOR": true, "ARROW": true, "INC": true, "DEC": true,
+	"EQL": true, "LSS": true, "GTR": true, "ASSIGN": true, "NOT": true,
+	"NEQ": true, "LEQ": true, "GEQ": true, "DEFINE": true, "ELLIPSIS": true,
+	"LPAREN": true, "LBRACK": true, "LBRACE": true, "COMMA": true, "PERIOD": true,
+	"RPAREN": true, "RBRACK": true, "RBRACE": true, "SEMICOLON": true, "COLON": true,
+	"BREAK": true, "CASE": true, "CHAN": true, "CONST": true, "CONTINUE": true,
+	"DEFAULT": true, "DEFER": true, "ELSE": true, "FALLTHROUGH": true, "FOR": true,
+	"FUNC": true, "GO": true, "GOTO": true, "IF": true, "IMPORT": true,
+	"INTERFACE": true, "MAP": true, "PACKAGE": true, "RANGE": true, "RETURN": true,
+	"SELECT": true, "STRUCT": true, "SWITCH": true, "TYPE": true, "VAR": true, "TILDE": true,
+	"String": true, "Precedence": true, "IsLiteral": true, "IsOperator": true, "IsValid": true,
+	"Name": true, "Base": true, "Size": true, "End": true, "LineCount": true,
+	"AddLine": true, "MergeLine": true, "Lines": true, "SetLines": true, "SetLinesForContent": true,
+	"LineStart": true, "AddLineInfo": true, "AddLineColumnInfo": true, "Offset": true, "Line": true,
+	"PositionFor": true, "AddFile": true, "AddExistingFiles": true, "RemoveFile": true, "Iterate": true,
+}
+
+// goScannerSymbols is the audited bare-name surface of package go/scanner:
+// Scanner, Error, ErrorList, ErrorHandler, Mode, ScanComments, and their pure
+// methods (PrintError is writer-gated via WriterFirstStdFunc).
+var goScannerSymbols = map[string]bool{
+	"Error": true, "ErrorList": true, "ErrorHandler": true, "Mode": true, "ScanComments": true, "Scanner": true,
+	"Add": true, "Reset": true, "Len": true, "Swap": true, "Less": true,
+	"Sort": true, "RemoveMultiples": true, "Err": true, "Init": true, "Scan": true, "End": true,
+}
+
+// goASTSymbols is the audited bare-name surface of package go/ast: all syntax
+// node, comment, directive, visitor, scope, and filter types, constants, and
+// pure operations. Print and Fprint (which reflect via reflect.ValueOf/FieldFilter
+// and iterate unsorted Scope maps), NotNilFilter, deprecated unsorted-map
+// NewPackage / Importer, and bare String (shared with pointer-exposing
+// CommentMap.String and Scope.String) are excluded; pure Ident.String and
+// ObjKind.String live in goASTMethods.
+var goASTSymbols = map[string]bool{
+	"Node": true, "Expr": true, "Stmt": true, "Decl": true, "Spec": true, "Visitor": true,
+	"Comment": true, "CommentGroup": true, "CommentMap": true, "Directive": true, "DirectiveArg": true,
+	"Field": true, "FieldList": true, "BadExpr": true, "Ident": true, "Ellipsis": true, "BasicLit": true,
+	"FuncLit": true, "CompositeLit": true, "ParenExpr": true, "SelectorExpr": true, "IndexExpr": true,
+	"IndexListExpr": true, "SliceExpr": true, "TypeAssertExpr": true, "CallExpr": true, "StarExpr": true,
+	"UnaryExpr": true, "BinaryExpr": true, "KeyValueExpr": true, "ArrayType": true, "StructType": true,
+	"FuncType": true, "InterfaceType": true, "MapType": true, "ChanType": true, "ChanDir": true, "SEND": true, "RECV": true,
+	"BadStmt": true, "DeclStmt": true, "EmptyStmt": true, "LabeledStmt": true, "ExprStmt": true,
+	"SendStmt": true, "IncDecStmt": true, "AssignStmt": true, "GoStmt": true, "DeferStmt": true,
+	"ReturnStmt": true, "BranchStmt": true, "BlockStmt": true, "IfStmt": true, "CaseClause": true,
+	"SwitchStmt": true, "TypeSwitchStmt": true, "CommClause": true, "SelectStmt": true, "ForStmt": true, "RangeStmt": true,
+	"ImportSpec": true, "ValueSpec": true, "TypeSpec": true, "BadDecl": true, "GenDecl": true, "FuncDecl": true,
+	"File": true, "Package": true, "Scope": true, "Object": true, "ObjKind": true,
+	"Bad": true, "Pkg": true, "Con": true, "Typ": true, "Var": true, "Fun": true, "Lbl": true,
+	"Filter": true, "FieldFilter": true, "MergeMode": true,
+	"FilterFuncDuplicates": true, "FilterUnassociatedComments": true, "FilterImportDuplicates": true,
+	"Pos": true, "End": true, "Text": true, "NumFields": true, "IsExported": true, "NewIdent": true,
+	"Inspect": true, "Preorder": true, "PreorderStack": true, "Walk": true, "Visit": true,
+	"NewCommentMap": true, "Update": true, "Comments": true, "ParseDirective": true, "ParseArgs": true,
+	"SortImports": true, "FileExports": true, "PackageExports": true,
+	"FilterDecl": true, "FilterFile": true, "FilterPackage": true, "MergePackageFiles": true,
+	"NewScope": true, "Insert": true, "Lookup": true, "NewObj": true, "IsGenerated": true, "Unparen": true,
+}
+
+var goASTMethods = map[string][]string{
+	"Ident":   {"String"},
+	"ObjKind": {"String"},
+}
+
+// GoASTMethod reports whether a go/ast receiver's method is in the audited
+// receiver-qualified set.
+func GoASTMethod(receiver, method string) bool {
+	return slices.Contains(goASTMethods[receiver], method)
+}
+
+// goParserSymbols is the audited unconditional bare-name surface of package
+// go/parser: Mode, its flag constants, and in-memory ParseExpr (ParseFile and
+// ParseExprFrom are source-gated via GoParserSourceFunc; ParseDir is refused).
+var goParserSymbols = map[string]bool{
+	"Mode": true, "PackageClauseOnly": true, "ImportsOnly": true, "ParseComments": true,
+	"Trace": true, "DeclarationErrors": true, "SpuriousErrors": true,
+	"SkipObjectResolution": true, "AllErrors": true, "ParseExpr": true,
+}
+
+// runtimeDebugSymbols is the audited unconditional bare-name surface of package
+// runtime/debug: pure string parser ParseBuildInfo and the BuildInfo, Module,
+// and BuildSetting value shapes (ReadBuildInfo is gated on -buildvcs and
+// runtime.modinfo; GC/stack/crash operations are excluded).
+var runtimeDebugSymbols = map[string]bool{
+	"ParseBuildInfo": true, "BuildInfo": true, "Module": true, "BuildSetting": true,
+}
+
+var runtimeDebugMethods = map[string][]string{
+	"BuildInfo": {"String"},
+}
+
+// RuntimeDebugMethod reports whether a runtime/debug receiver's method is in
+// the audited receiver-qualified set.
+func RuntimeDebugMethod(receiver, method string) bool {
+	return slices.Contains(runtimeDebugMethods[receiver], method)
+}
+
+// BoundedToken reports whether text begins with marker as a whole token
+// — marker followed by end of text or by one of the bound bytes — and
+// returns the remainder after the marker. A directive or token prefix
+// matched this way can never be shadowed by a longer name sharing its
+// prefix; each caller names the delimiter bytes its grammar allows.
+func BoundedToken(text, marker, bounds string) (rest string, ok bool) {
+	if !strings.HasPrefix(text, marker) {
+		return "", false
+	}
+	rest = text[len(marker):]
+	if rest == "" || strings.IndexByte(bounds, rest[0]) >= 0 {
+		return rest, true
+	}
+	return "", false
+}
+
+// IsGeneratedMarker reports whether text is a standard Go generated-file marker
+// line (`^// Code generated .* DO NOT EDIT\.$` over the line's trimmed text),
+// retained in the canonical member token form.
+func IsGeneratedMarker(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	return strings.HasPrefix(trimmed, "// Code generated ") &&
+		strings.HasSuffix(trimmed, " DO NOT EDIT.") &&
+		len(trimmed) >= len("// Code generated  DO NOT EDIT.") &&
+		!strings.ContainsAny(trimmed, "\r\n")
 }

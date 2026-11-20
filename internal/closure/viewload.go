@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
@@ -50,7 +52,7 @@ func LoadViewPackages(ctx context.Context, reader *gotool.EnvReader, buildFlags 
 // a roots-only load cannot express — a test-cycle intermediate
 // recompilation ("r [a.test]") exists only inside a test binary's graph, so
 // its syntax is reachable solely through a dependency-expanded load of the
-// tested package.
+// tested package, and ExplainDynamicState walks cross-package dependency syntax.
 func LoadViewGraph(ctx context.Context, reader *gotool.EnvReader, buildFlags []string, pkgPaths ...string) (*ViewLoad, error) {
 	return loadView(ctx, reader, buildFlags, true, pkgPaths...)
 }
@@ -107,4 +109,103 @@ func loadView(ctx context.Context, reader *gotool.EnvReader, buildFlags []string
 		return nil, err
 	}
 	return &ViewLoad{pkgs: pkgs}, nil
+}
+
+// LoadedPackageDirs resolves p's effective package directory and module
+// directory across GoFiles, OtherFiles, EmbedFiles, and Module.Replace.
+func LoadedPackageDirs(p *packages.Package) (pkgDir, modDir string) {
+	if p == nil {
+		return "", ""
+	}
+	if p.Module != nil {
+		modDir = p.Module.Dir
+		if p.Module.Replace != nil && p.Module.Replace.Dir != "" {
+			modDir = p.Module.Replace.Dir
+		}
+	}
+	pkgDir = p.Dir
+	if pkgDir == "" && len(p.GoFiles) > 0 {
+		pkgDir = filepath.Dir(p.GoFiles[0])
+	}
+	if pkgDir == "" && len(p.OtherFiles) > 0 {
+		pkgDir = filepath.Dir(p.OtherFiles[0])
+	}
+	if pkgDir == "" && len(p.EmbedFiles) > 0 {
+		pkgDir = filepath.Dir(p.EmbedFiles[0])
+	}
+	if pkgDir == "" {
+		pkgDir = modDir
+	}
+	return pkgDir, modDir
+}
+
+// ClassifyLoadedPackage classifies p into StandardPackage, PinnedPackage, or
+// MutableLocalPackage under modCache, returning the module-cache-relative pin
+// identity when pinned.
+func ClassifyLoadedPackage(p *packages.Package, modCache string) (PackageClass, string) {
+	if p == nil || p.Module == nil {
+		return StandardPackage, ""
+	}
+	pkgDir, modDir := LoadedPackageDirs(p)
+	if !p.Module.Main && ((pkgDir == "" && modCache == "") || IsPinnedPackageDir(false, pkgDir, modCache)) {
+		pin := ""
+		if modDir != "" && modCache != "" {
+			pin = filepath.ToSlash(strings.TrimPrefix(filepath.Clean(modDir), filepath.Clean(modCache)+string(filepath.Separator)))
+		}
+		return PinnedPackage, pin
+	}
+	return MutableLocalPackage, ""
+}
+
+// ClassifyLoadedPackage classifies p under h's module cache.
+func (h *Hasher) ClassifyLoadedPackage(p *packages.Package) (PackageClass, string) {
+	if h == nil {
+		return ClassifyLoadedPackage(p, "")
+	}
+	return ClassifyLoadedPackage(p, h.modCache)
+}
+
+// LoadedListingID returns the canonical listing graph identity for p, matching
+// go list's ImportPath (including test-variant suffixes when ForTest is set).
+func LoadedListingID(p *packages.Package) string {
+	if p == nil {
+		return ""
+	}
+	if p.ID != "" {
+		return p.ID
+	}
+	if p.ForTest != "" {
+		return p.PkgPath + " [" + p.ForTest + ".test]"
+	}
+	return p.PkgPath
+}
+
+// IsGeneratedTestMainPackage reports whether p is a toolchain-generated test
+// main package rather than a user-authored package main in a .test module.
+func IsGeneratedTestMainPackage(p *packages.Package) bool {
+	if p == nil || p.Name != "main" {
+		return false
+	}
+	target, ok := strings.CutSuffix(LoadedListingID(p), ".test")
+	if !ok || target == "" {
+		return false
+	}
+	for _, imp := range p.Imports {
+		if imp != nil && imp.ForTest == target {
+			return true
+		}
+	}
+	if len(p.GoFiles) == 1 && filepath.Base(p.GoFiles[0]) == "_testmain.go" {
+		return true
+	}
+	if len(p.CompiledGoFiles) == 1 && filepath.Base(p.CompiledGoFiles[0]) == "_testmain.go" {
+		return true
+	}
+	return p.Dir == "" && len(p.GoFiles) == 0 && len(p.CompiledGoFiles) == 0 && len(p.Syntax) == 0
+}
+
+// IsGeneratedTestMainPackageFor reports whether p is the toolchain-generated
+// test main specifically for pkgPath's test binary.
+func IsGeneratedTestMainPackageFor(p *packages.Package, pkgPath string) bool {
+	return pkgPath != "" && LoadedListingID(p) == pkgPath+".test" && IsGeneratedTestMainPackage(p)
 }

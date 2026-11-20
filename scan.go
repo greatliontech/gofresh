@@ -40,17 +40,10 @@ func storeScanFacts(scope, key string, payload any) {
 	cachefile.Store(scanFactsDirName, scope, key, payload)
 }
 
-// scanViewSubjects performs one observation pass's whole subject scan: the
-// metadata graph names every node and its mutability class, one typed load
-// covers the view packages' variants and every mutable-local graph package,
-// the dynamic-state derivation serves version-pinned facts from the memo, and
-// the subject walk reads that one load (REQ-fresh-coherent-view). The typed
-// load is installed on the hasher for the pass's sibling consumers. An empty
-// factScope disables fact persistence, never the derivation. budget bounds
-// the reachability discharges' precise analysis (zero: unbounded); a pass
-// the budget cuts leaves every culprit standing and persists no scan facts
-// of a package it cut — cut is the set of subjects it left undischarged
-// (REQ-fresh-context, REQ-closure-shared-dynamic-state-reachability).
+// scanViewSubjects performs one observation pass's subject scan across the
+// metadata graph, one coherent typed load, memoized version-pinned facts, and
+// budget-bounded reachability discharges (REQ-fresh-coherent-view,
+// REQ-fresh-context, REQ-closure-shared-dynamic-state-reachability).
 func scanViewSubjects(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
 	return scanViewSubjectsWithMemo(ctx, hasher, scope, buildFlags, budget, true, pkgPaths...)
 }
@@ -61,21 +54,14 @@ func scanViewSubjectsWithMemo(ctx context.Context, hasher *closure.Hasher, scope
 
 func scanViewSubjectsWithLocalMemo(ctx context.Context, hasher *closure.Hasher, scope closure.AnalysisScope, buildFlags []string, budget time.Duration, useScanMemo bool, localFacts *localFactMemo, pkgPaths ...string) (*subjectScan, *closure.ViewLoad, map[Subject]bool, error) {
 	scope = hasher.SetAnalysisScope(scope)
-	// The scope is the one source of the attestations and the vouches:
-	// what keys a memo is what the derivation applies.
 	factScope := scope.Facts()
 	singleSubject, packageProcess := scope.SingleSubject, scope.PackageProcess
 	vouches := make(map[string]bool, len(scope.Vouches))
 	for _, v := range scope.Vouches {
 		vouches[v] = true
 	}
-	// The scan memo: a view package whose scan the persistent store
-	// already holds under this scope and its current package scan key
-	// serves its subjects' outputs whole and takes no part in the typed
-	// load, the derivation, or the discharges below — every output is a
-	// pure function of the package's typed test-binary program, which
-	// the key pins byte for byte (REQ-closure-scan-memo). A key that
-	// cannot derive, or an entry that cannot load, recomputes.
+	// Packages with a valid persistent scan entry under (scanScope, key) serve
+	// whole without participating in the typed load or discharges (REQ-closure-scan-memo).
 	scanScope := scope.Scan()
 	if !useScanMemo || isScanMemoOffViewHook() {
 		scanScope = ""
@@ -99,8 +85,6 @@ func scanViewSubjectsWithLocalMemo(ctx context.Context, hasher *closure.Hasher, 
 	if len(misses) == 0 {
 		return scanFromEntries(served), nil, nil, nil
 	}
-	// Every listing, load, and derivation below reads the misses' graph
-	// alone; a served package's cone costs the pass nothing.
 	pkgPaths = misses
 	meta, err := hasher.GraphMetadata(pkgPaths...)
 	if err != nil {
@@ -110,13 +94,6 @@ func scanViewSubjectsWithLocalMemo(ctx context.Context, hasher *closure.Hasher, 
 	for _, pkgPath := range pkgPaths {
 		requested[pkgPath] = true
 	}
-	// A test variant of a module-cache-resident view package: the view
-	// packages are the only test-expanded ones, and a subject package
-	// inside the read-only cache has no runnable tests to vouch for it —
-	// refused from the listing, before the typed load below is paid, and
-	// named rather than surfaced as a coverage gap. A pinned view package
-	// with no test files carries no variant and derives through the
-	// pinned-fact path as before.
 	for _, node := range meta {
 		if node.Class == closure.PinnedPackage && node.ForTest != "" && requested[node.ForTest] && (node.PkgPath == node.ForTest || node.PkgPath == node.ForTest+"_test") {
 			return nil, nil, nil, fmt.Errorf("gofresh: view package %s resolves into the module cache; module-cache-resident subjects are unsupported", node.ForTest)
@@ -128,12 +105,6 @@ func scanViewSubjectsWithLocalMemo(ctx context.Context, hasher *closure.Hasher, 
 		seenPattern[pkgPath] = true
 	}
 	for _, node := range meta {
-		// Plain mutable-local graph packages load as patterns; test
-		// variants of the view packages load through the view patterns, and
-		// an intermediate recompilation ("r [a.test]") is scanned from its
-		// own compilation via the dependency-expanded fallback load in
-		// deriveViewDynamicState — a plain stand-in would miss variant-only
-		// resolution and need not even compile.
 		if node.Class != closure.MutableLocalPackage || node.TestMain || node.ForTest != "" || seenPattern[node.PkgPath] {
 			continue
 		}
@@ -165,39 +136,19 @@ func scanViewSubjectsWithLocalMemo(ctx context.Context, hasher *closure.Hasher, 
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	// The discharges' reachability analysis is precise analysis under
-	// the caller's budget: bounded here alone — the listing, the typed
-	// load, the derivation, and the closure fold stay under the
-	// operation's own context (REQ-fresh-context).
 	analysisCtx, cancelBudget := analysisBound(ctx, budget)
 	defer cancelBudget()
 	var cut map[Subject]bool
 	emitBeforeDischargeViewHook()
 	if singleSubject {
-		// The attestation-gated reachability scoping: per downgraded
-		// subject, a culprit whose every marking site is provably
-		// outside the subject's rooted flow discharges — no proof, no
-		// discharge (REQ-closure-shared-dynamic-state).
 		if cut, err = dischargeUnreachableCulprits(ctx, analysisCtx, hasher, state, scan); err != nil {
 			return nil, nil, nil, err
 		}
 	} else if packageProcess {
-		// The package-process attestation's binary-scoped reachability
-		// judgment: every measured process is the subject package's own
-		// test binary, so sibling subjects are themselves harness roots
-		// of the analyzed binary, and a culprit no harness root's
-		// post-init flow can reach is init-determined for every subject
-		// of the binary — no proof, no discharge
-		// (REQ-closure-shared-dynamic-state).
 		if cut, err = dischargeBinaryUnreachableCulprits(ctx, analysisCtx, hasher, state, scan); err != nil {
 			return nil, nil, nil, err
 		}
 	}
-	// Persist each missed package's outputs now that the discharges have
-	// finished shaping them, then fold the served packages' in. A package
-	// the budget cut persists nothing: its undischarged shape is the
-	// budget's, not the program's, and the next pass derives it cold;
-	// the other missed packages' facts are the program's and persist.
 	cutPackages := map[string]bool{}
 	for subject := range cut {
 		cutPackages[subject.Package] = true
@@ -320,37 +271,21 @@ func scanFromEntries(served map[string]packageScanEntry) *subjectScan {
 	return scan
 }
 
-// subjectScan is one observation pass's subject-walk result: enumeration,
-// directive purity, per-subject dynamic-signature marks, and the subjects
-// whose identity collapsed distinct declarations.
+// subjectScan holds one observation pass's subject-walk outputs across
+// directive purity, open-world terms (REQ-closure-refusal-channels),
+// shared-dynamic-state downgrades (REQ-closure-shared-dynamic-state-reason),
+// load-bearing vouches/attestations (REQ-vouch-recorded), and duplicate
+// variant declarations (REQ-purity-directive).
 type subjectScan struct {
-	pure  map[Subject]bool
-	known map[Subject]bool
-	// openWorld maps each open-world subject to the term conferring its
-	// openness (REQ-closure-analysis's openness rule), the refusal's
-	// named identity; a closed subject is absent
-	// (REQ-closure-refusal-channels).
-	openWorld map[Subject]string
-	external  map[Subject]bool
-	// downgradeReason maps each subject of a shared-dynamic-state
-	// downgraded package to the refusal reason naming the owning package
-	// and variable (REQ-closure-shared-dynamic-state-reason).
+	pure             map[Subject]bool
+	known            map[Subject]bool
+	openWorld        map[Subject]string
+	external         map[Subject]bool
 	downgradeReason  map[Subject]string
 	downgradeCulprit map[Subject]Subject
-	// vouchDischarges maps each subject to the canonical sorted
-	// comma-joined caller-vouch identities that discharged would-be
-	// culprits reachable from its package (REQ-vouch-recorded).
-	vouchDischarges map[Subject]string
-	// discharges maps each subject to the positive execution-model
-	// attestations' load-bearing discharge sets (single-subject and
-	// package-process) reachable from its package (REQ-vouch-recorded).
-	discharges map[Subject]attestationDischarges
-	// ambiguous holds, per subject whose identity is declared more than
-	// once across the package and its test variants, the message naming
-	// both declarations. Capture is refused for exactly these subjects —
-	// no directive or assertion can be attributed to one declaration —
-	// while sibling subjects scan normally (REQ-purity-directive).
-	ambiguous map[Subject]string
+	vouchDischarges  map[Subject]string
+	discharges       map[Subject]attestationDischarges
+	ambiguous        map[Subject]string
 }
 
 func (s *subjectScan) directivePure(subject Subject) bool { return s.pure[subject] }
@@ -651,37 +586,18 @@ func loadedPackageMatchesImports(hasher *closure.Hasher, pkg *packages.Package, 
 		if impPkg == nil {
 			return false
 		}
-		modDir := ""
-		if impPkg.Module != nil {
-			modDir = impPkg.Module.Dir
-			if impPkg.Module.Replace != nil && impPkg.Module.Replace.Dir != "" {
-				modDir = impPkg.Module.Replace.Dir
-			}
-		}
-		pkgDir := impPkg.Dir
-		if pkgDir == "" && len(impPkg.GoFiles) > 0 {
-			pkgDir = filepath.Dir(impPkg.GoFiles[0])
-		}
-		if pkgDir == "" && len(impPkg.OtherFiles) > 0 {
-			pkgDir = filepath.Dir(impPkg.OtherFiles[0])
-		}
-		if pkgDir == "" && len(impPkg.EmbedFiles) > 0 {
-			pkgDir = filepath.Dir(impPkg.EmbedFiles[0])
-		}
-		if pkgDir == "" {
-			pkgDir = modDir
+		pkgDir, modDir := closure.LoadedPackageDirs(impPkg)
+		gotClass, gotPin := hasher.ClassifyLoadedPackage(impPkg)
+		if gotClass != impNode.Class {
+			return false
 		}
 		switch impNode.Class {
 		case closure.PinnedPackage:
-			if impPkg.Module == nil || impPkg.Module.Main || modDir == "" || pkgDir == "" || !hasher.IsPinnedDir(false, pkgDir) || hasher.ModulePinForDir(modDir) != impNode.Pin {
+			if modDir == "" || pkgDir == "" || gotPin != impNode.Pin {
 				return false
 			}
 		case closure.MutableLocalPackage:
-			if impPkg.Module == nil || pkgDir == "" || hasher.IsPinnedDir(impPkg.Module.Main, pkgDir) {
-				return false
-			}
-		case closure.StandardPackage:
-			if impPkg.Module != nil {
+			if pkgDir == "" {
 				return false
 			}
 		}
@@ -779,13 +695,10 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 	var rootLocals []localPkgEntry
 	matched := map[string]bool{}
 	for _, pkg := range load.Packages() {
-		if pkg.Name == "main" && strings.HasSuffix(pkg.PkgPath, ".test") {
+		if closure.IsGeneratedTestMainPackage(pkg) {
 			continue
 		}
-		listing := pkg.PkgPath
-		if pkg.ForTest != "" {
-			listing = pkg.PkgPath + " [" + pkg.ForTest + ".test]"
-		}
+		listing := closure.LoadedListingID(pkg)
 		node, ok := nodesByListing[listing]
 		if !ok {
 			if pkg.ForTest != "" {
@@ -839,13 +752,10 @@ func deriveViewDynamicState(ctx context.Context, hasher *closure.Hasher, factSco
 		}
 		var interEntries []localPkgEntry
 		packages.Visit(graphLoad.Packages(), nil, func(pkg *packages.Package) {
-			if pkg.Name == "main" && strings.HasSuffix(pkg.PkgPath, ".test") {
+			if closure.IsGeneratedTestMainPackage(pkg) {
 				return
 			}
-			listing := pkg.PkgPath
-			if pkg.ForTest != "" {
-				listing = pkg.PkgPath + " [" + pkg.ForTest + ".test]"
-			}
+			listing := closure.LoadedListingID(pkg)
 			node, ok := nodesByListing[listing]
 			if !ok {
 				if pkg.ForTest != "" && seenTested[pkg.ForTest] && pkg.Module != nil {

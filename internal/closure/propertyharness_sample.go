@@ -97,25 +97,6 @@ func fnSetCallsSeededSample(fns map[*ssa.Function]bool, vp *propharness.Verified
 	return false
 }
 
-func localAllocRoot(addr ssa.Value, localAllocs map[*ssa.Alloc]bool) bool {
-	for addr != nil {
-		switch a := addr.(type) {
-		case *ssa.Alloc:
-			return localAllocs[a]
-		case *ssa.FieldAddr:
-			addr = a.X
-		case *ssa.IndexAddr:
-			if _, isPtr := types.Unalias(a.X.Type()).Underlying().(*types.Pointer); !isPtr {
-				return false
-			}
-			addr = a.X
-		default:
-			return false
-		}
-	}
-	return false
-}
-
 func isSyncInitOnlySSAFunc(fn *ssa.Function, summary *callerReferenceSummary, seen map[*ssa.Function]bool) bool {
 	if fn == nil || fn.Parent() != nil {
 		return false
@@ -315,15 +296,7 @@ func ssaFormattingMethodIsMutationFree(fn *ssa.Function, userPaths map[string]bo
 							if cnst, isConst := a.(*ssa.Const); isConst && cnst.IsNil() {
 								continue
 							}
-							allBasic := true
-							_, _, peeled := forEachLocalSliceAllocStore(a, false, func(_ *ssa.IndexAddr, elem ssa.Value) bool {
-								if !isBasicFormatVal(elem) {
-									allBasic = false
-									return false
-								}
-								return true
-							})
-							if !peeled || !allBasic {
+							if !variadicSliceElementsAll(a, isBasicFormatVal) {
 								return false, "fmt_vararg:" + instr.String()
 							}
 							continue
@@ -393,19 +366,14 @@ func seededSampleFlowFormattingSafe(c *ssa.CallCommon, target *ssa.Function, fp 
 				continue
 			}
 			if isVar && i == len(c.Args)-1 {
-				allOK := true
-				_, _, peeled := forEachLocalSliceAllocStore(arg, false, func(_ *ssa.IndexAddr, elem ssa.Value) bool {
+				peeled, allOK := peelVariadicCallArg(arg, func(elem ssa.Value) bool {
 					if elem == nil {
 						return true
 					}
 					if cnst, isConst := elem.(*ssa.Const); isConst && cnst.IsNil() {
 						return true
 					}
-					if !add(peelHandleIdentity(elem).Type()) {
-						allOK = false
-						return false
-					}
-					return true
+					return add(peelHandleIdentity(elem).Type())
 				})
 				if !allOK {
 					return false
@@ -615,7 +583,7 @@ func seededSampleFlowFormattingSafe(c *ssa.CallCommon, target *ssa.Function, fp 
 				continue
 			}
 			if isVar && i == len(c.Args)-1 {
-				if _, _, peeled := forEachLocalSliceAllocStore(arg, false, func(_ *ssa.IndexAddr, elem ssa.Value) bool {
+				if peeled, _ := peelVariadicCallArg(arg, func(elem ssa.Value) bool {
 					seedVal(elem)
 					return okAll
 				}); peeled {

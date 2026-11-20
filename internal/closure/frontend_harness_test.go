@@ -21,8 +21,8 @@ import (
 	"testing"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/gotool"
 	progpkg "github.com/greatliontech/gofresh/internal/closure/internal/program"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 	"github.com/greatliontech/gofresh/internal/trace"
@@ -157,6 +157,11 @@ func buildInMemorySSAFromFiles(ctx context.Context, virtualDir, pkgMain string, 
 		Path: "example.com",
 		Dir:  resolvedDir,
 		Main: true,
+	}
+	if gomod := filepath.Join(resolvedDir, "go.mod"); gomod != "" {
+		if _, statErr := os.Stat(gomod); statErr == nil {
+			mod.GoMod = gomod
+		}
 	}
 	var metas []listPkg
 	reachesUnix := false
@@ -387,22 +392,22 @@ func supplyRegisteredFixtures(t testing.TB, h *Hasher, pkgPaths ...string) {
 }
 
 type scannedDirPkg struct {
-	pkgPath        string
-	pkgDir         string
-	pkgName        string
-	baseGo         []string
-	testGo         []string
-	xtestGo        []string
-	hFiles         []string
-	sFiles         []string
-	sysoFiles      []string
-	baseEmbed      []string
-	testEmbed      []string
-	xtestEmbed     []string
-	baseImports    []string
-	testImports    []string
-	xtestImports   []string
-	allFilesInDir  map[string]string
+	pkgPath       string
+	pkgDir        string
+	pkgName       string
+	baseGo        []string
+	testGo        []string
+	xtestGo       []string
+	hFiles        []string
+	sFiles        []string
+	sysoFiles     []string
+	baseEmbed     []string
+	testEmbed     []string
+	xtestEmbed    []string
+	baseImports   []string
+	testImports   []string
+	xtestImports  []string
+	allFilesInDir map[string]string
 }
 
 func uniqueSortedStrings(s []string) []string {
@@ -455,9 +460,10 @@ func primeHasherIntoState(t testing.TB, h *Hasher, dir string, st *inMemoryHashe
 		return
 	}
 	mod := &listMod{
-		Path: modPath,
-		Dir:  dir,
-		Main: true,
+		Path:  modPath,
+		Dir:   dir,
+		GoMod: filepath.Join(dir, "go.mod"),
+		Main:  true,
 	}
 
 	bctx := build.Default
@@ -717,6 +723,7 @@ func primeHasherIntoState(t testing.TB, h *Hasher, dir string, st *inMemoryHashe
 				metas = append(metas, listPkg{
 					ImportPath: imp,
 					Name:       implicitImportName(imp),
+					Standard:   isStdImportPath(imp),
 				})
 			}
 		}
@@ -2241,7 +2248,7 @@ func TestMemoScopesKeyOnTheOneFrontendSpelling(t *testing.T) {
 	if strings.Contains(IdentityStrategy, frontend) {
 		t.Fatalf("the identity strategy %q composes the analyzing frontend", IdentityStrategy)
 	}
-	if want := "gofresh/closure@1 gofresh/canonical-member@3 gofresh/variant-parse@2"; IdentityStrategy != want {
+	if want := "gofresh/closure@2 gofresh/canonical-member@3 gofresh/variant-parse@2"; IdentityStrategy != want {
 		t.Fatalf("the identity strategy is %q, want the composed %q — a derivation moved, or a bump was reverted; update the golden consciously", IdentityStrategy, want)
 	}
 	allowed := map[string]bool{"AnalyzingFrontend": true, "resolveSelection": true, "toolchainSourceScope": true, "NewAt": true}

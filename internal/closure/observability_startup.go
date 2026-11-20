@@ -1,20 +1,18 @@
 package closure
 
 import (
+	"context"
 	"go/constant"
 	"go/token"
 	"go/types"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
+	"maps"
+	"sort"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
 
-	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
 	"github.com/greatliontech/gofresh/internal/closure/internal/rta"
+	"github.com/greatliontech/gofresh/internal/propharness"
 )
 
 type pkgVarKey struct {
@@ -90,29 +88,24 @@ func isImmediateSyncMakeClosureCall(site ssa.CallInstruction) bool {
 	return true
 }
 
-func asyncOrDynamicStartupFunctions(reach attributedReachability) map[*ssa.Function]bool {
-	if len(reach.startupFunctions) == 0 {
-		return nil
-	}
+func collectAsyncOrDynamicStartup(
+	isReachable func(*ssa.Function) bool,
+	forEachReachable func(func(*ssa.Function)),
+	forEachSiteTargets func(ssa.CallInstruction, func(*ssa.Function)),
+	forEachRootDynTargets func(func(*ssa.Function)),
+) map[*ssa.Function]bool {
 	var queue []*ssa.Function
 	marked := map[*ssa.Function]bool{}
 	enqueue := func(fn *ssa.Function) {
-		if fn != nil && !marked[fn] && reach.startupFunctions[fn] {
+		if fn != nil && !marked[fn] && isReachable(fn) {
 			marked[fn] = true
 			queue = append(queue, fn)
 		}
 	}
-	for site, targets := range reach.startupDynamicTargets {
-		if site == nil || !reach.startupFunctions[site.Parent()] || isImmediateSyncMakeClosureCall(site) {
-			continue
-		}
-		for target := range targets {
-			enqueue(target)
-		}
-	}
-	for fn := range reach.startupFunctions {
+	forEachRootDynTargets(enqueue)
+	forEachReachable(func(fn *ssa.Function) {
 		if fn == nil {
-			continue
+			return
 		}
 		for _, blk := range fn.Blocks {
 			for _, instr := range blk.Instrs {
@@ -123,12 +116,10 @@ func asyncOrDynamicStartupFunctions(reach attributedReachability) map[*ssa.Funct
 				if callee := goSite.Common().StaticCallee(); callee != nil {
 					enqueue(callee)
 				}
-				for target := range reach.startupDynamicTargets[goSite] {
-					enqueue(target)
-				}
+				forEachSiteTargets(goSite, enqueue)
 			}
 		}
-	}
+	})
 	for len(queue) > 0 {
 		fn := queue[0]
 		queue = queue[1:]
@@ -141,13 +132,40 @@ func asyncOrDynamicStartupFunctions(reach attributedReachability) map[*ssa.Funct
 				if callee := site.Common().StaticCallee(); callee != nil {
 					enqueue(callee)
 				}
-				for target := range reach.startupDynamicTargets[site] {
-					enqueue(target)
-				}
+				forEachSiteTargets(site, enqueue)
 			}
 		}
 	}
 	return marked
+}
+
+func asyncOrDynamicStartupFunctions(reach attributedReachability) map[*ssa.Function]bool {
+	if len(reach.startupFunctions) == 0 {
+		return nil
+	}
+	return collectAsyncOrDynamicStartup(
+		func(fn *ssa.Function) bool { return reach.startupFunctions[fn] },
+		func(visit func(*ssa.Function)) {
+			for fn := range reach.startupFunctions {
+				visit(fn)
+			}
+		},
+		func(site ssa.CallInstruction, visit func(*ssa.Function)) {
+			for target := range reach.startupDynamicTargets[site] {
+				visit(target)
+			}
+		},
+		func(enqueue func(*ssa.Function)) {
+			for site, targets := range reach.startupDynamicTargets {
+				if site == nil || !reach.startupFunctions[site.Parent()] || isImmediateSyncMakeClosureCall(site) {
+					continue
+				}
+				for target := range targets {
+					enqueue(target)
+				}
+			}
+		},
+	)
 }
 
 func asyncOrDynamicStartupFunctionsForBase(base *tier2Base, reach attributedReachability) map[*ssa.Function]bool {
@@ -189,616 +207,35 @@ func computeRTAAsyncStartupFunctions(result *rta.Result, mask uint64, userPaths 
 	if result == nil || len(result.Reachable) == 0 {
 		return nil
 	}
-	var queue []*ssa.Function
-	marked := map[*ssa.Function]bool{}
-	enqueue := func(fn *ssa.Function) {
-		if fn != nil && !marked[fn] && result.Reachable[fn]&mask != 0 {
-			marked[fn] = true
-			queue = append(queue, fn)
-		}
-	}
-	for site, targets := range result.Targets {
-		if site == nil || result.Reachable[site.Parent()]&mask == 0 || isStdPkgPath(userPaths, funcPkgPath(site.Parent())) || isImmediateSyncMakeClosureCall(site) {
-			continue
-		}
-		for target, tmask := range targets {
-			if tmask&mask != 0 {
-				enqueue(target)
+	return collectAsyncOrDynamicStartup(
+		func(fn *ssa.Function) bool { return result.Reachable[fn]&mask != 0 },
+		func(visit func(*ssa.Function)) {
+			for fn, fmask := range result.Reachable {
+				if fn != nil && fmask&mask != 0 {
+					visit(fn)
+				}
 			}
-		}
-	}
-	for fn, fmask := range result.Reachable {
-		if fn == nil || fmask&mask == 0 {
-			continue
-		}
-		for _, blk := range fn.Blocks {
-			for _, instr := range blk.Instrs {
-				goSite, ok := instr.(*ssa.Go)
-				if !ok || goSite.Common() == nil {
+		},
+		func(site ssa.CallInstruction, visit func(*ssa.Function)) {
+			for target, tmask := range result.Targets[site] {
+				if tmask&mask != 0 {
+					visit(target)
+				}
+			}
+		},
+		func(enqueue func(*ssa.Function)) {
+			for site, targets := range result.Targets {
+				if site == nil || result.Reachable[site.Parent()]&mask == 0 || isStdPkgPath(userPaths, funcPkgPath(site.Parent())) || isImmediateSyncMakeClosureCall(site) {
 					continue
 				}
-				if callee := goSite.Common().StaticCallee(); callee != nil {
-					enqueue(callee)
-				}
-				for target, tmask := range result.Targets[goSite] {
+				for target, tmask := range targets {
 					if tmask&mask != 0 {
 						enqueue(target)
 					}
 				}
 			}
-		}
-	}
-	for len(queue) > 0 {
-		fn := queue[0]
-		queue = queue[1:]
-		for _, blk := range fn.Blocks {
-			for _, instr := range blk.Instrs {
-				site, ok := instr.(ssa.CallInstruction)
-				if !ok || site.Common() == nil {
-					continue
-				}
-				if callee := site.Common().StaticCallee(); callee != nil {
-					enqueue(callee)
-				}
-				for target, tmask := range result.Targets[site] {
-					if tmask&mask != 0 {
-						enqueue(target)
-					}
-				}
-			}
-		}
-	}
-	return marked
-}
-
-type nonSSAGlobalHazardSummary struct {
-	blockedPkgs          map[string]bool
-	linknamedVars        map[pkgVarKey]bool
-	linknamesByTarget    map[string][]pkgVarKey
-	hasMalformedLinkname bool
-	allPkgs              []*packages.Package
-	allPkgsByPath        map[string][]*packages.Package
-	verifiedAsm          map[string]*asmverify.VerifiedPackage
-}
-
-func classifyOtherNativeExt(ext string) (isAsm bool, isCAsmHeader bool, isOtherNative bool) {
-	if ext == ".s" {
-		return true, false, false
-	}
-	switch strings.ToLower(ext) {
-	case ".h":
-		return false, true, false
-	case ".s", ".sx", ".hh", ".hpp", ".hxx", ".c", ".cc", ".cpp", ".cxx", ".m", ".mm", ".f", ".for", ".f90", ".syso", ".swig", ".swigcxx":
-		return false, false, true
-	default:
-		return false, false, false
-	}
-}
-
-func mergeVerifiedAsmPackage(prev, cur *asmverify.VerifiedPackage) *asmverify.VerifiedPackage {
-	if prev == nil {
-		return cur
-	}
-	if cur == nil {
-		return prev
-	}
-	mergedFuncs := make(map[string]asmverify.TextSummary, len(prev.Funcs)+len(cur.Funcs))
-	for k, v := range prev.Funcs {
-		mergedFuncs[k] = v
-	}
-	for k, v := range cur.Funcs {
-		old, exists := mergedFuncs[k]
-		if !exists {
-			mergedFuncs[k] = v
-			continue
-		}
-		if !old.Verified || !v.Verified {
-			imp := old.ImpureKind
-			if v.ImpureKind != "" && (imp == "" || v.ImpureKind < imp) {
-				imp = v.ImpureKind
-			}
-			mergedFuncs[k] = asmverify.TextSummary{Verified: false, ImpureKind: imp}
-			continue
-		}
-		impure := old.ImpureKind
-		if v.ImpureKind != "" && (impure == "" || v.ImpureKind < impure) {
-			impure = v.ImpureKind
-		}
-		cpuidArgs := old.CPUIDArgs
-		if cpuidArgs != v.CPUIDArgs {
-			cpuidArgs = 0
-			if impure == "" && (old.CPUIDArgs > 0 || v.CPUIDArgs > 0) {
-				impure = "per-core CPUID register"
-			}
-		}
-		if impure != "" {
-			cpuidArgs = 0
-		}
-		ext := slices.Clone(old.ExternalSBRefs)
-		for _, r := range v.ExternalSBRefs {
-			if !slices.Contains(ext, r) {
-				ext = append(ext, r)
-			}
-		}
-		goCallees := slices.Clone(old.GoCallees)
-		for _, gc := range v.GoCallees {
-			if !slices.Contains(goCallees, gc) {
-				goCallees = append(goCallees, gc)
-			}
-		}
-		slices.Sort(goCallees)
-		mergedFuncs[k] = asmverify.TextSummary{
-			Verified:       true,
-			CPUIDArgs:      cpuidArgs,
-			ImpureKind:     impure,
-			ExternalSBRefs: ext,
-			GoCallees:      goCallees,
-		}
-	}
-	rodata := slices.Clone(prev.RodataGoNames)
-	for _, gn := range cur.RodataGoNames {
-		if !slices.Contains(rodata, gn) {
-			rodata = append(rodata, gn)
-		}
-	}
-	return &asmverify.VerifiedPackage{
-		PackageSafe:      prev.PackageSafe && cur.PackageSafe,
-		AllTextsVerified: prev.AllTextsVerified && cur.AllTextsVerified,
-		Funcs:            mergedFuncs,
-		RodataGoNames:    rodata,
-	}
-}
-
-func nonSSAGlobalHazards(audited bool, p *program) (map[string]bool, map[pkgVarKey]bool) {
-	sum := nonSSAGlobalHazardsSummary(audited, p)
-	if sum == nil {
-		return nil, nil
-	}
-	return sum.blockedPkgs, sum.linknamedVars
-}
-
-func nonSSAGlobalHazardsSummary(audited bool, p *program) *nonSSAGlobalHazardSummary {
-	if p == nil || len(p.Pkgs) == 0 {
-		return nil
-	}
-	cacheKey := "nonSSAGlobalHazards:unaudited"
-	if audited {
-		cacheKey = "nonSSAGlobalHazards:audited"
-	}
-	if cached, ok := p.Summaries[cacheKey].(*nonSSAGlobalHazardSummary); ok && cached != nil {
-		return cached
-	}
-	scopesByPath := map[string][]*types.Package{}
-	allPkgsByPath := map[string][]*packages.Package{}
-	var allVisited []*packages.Package
-	visited := map[*packages.Package]bool{}
-	var collectPkgs func(pkg *packages.Package)
-	collectPkgs = func(pkg *packages.Package) {
-		if pkg == nil || visited[pkg] {
-			return
-		}
-		visited[pkg] = true
-		for _, imp := range pkg.Imports {
-			collectPkgs(imp)
-		}
-		if pkg.PkgPath == "" || (pkg.Module == nil && isStdImportPath(pkg.PkgPath)) {
-			return
-		}
-		allVisited = append(allVisited, pkg)
-		allPkgsByPath[pkg.PkgPath] = append(allPkgsByPath[pkg.PkgPath], pkg)
-		if pkg.Types != nil {
-			scopesByPath[pkg.PkgPath] = append(scopesByPath[pkg.PkgPath], pkg.Types)
-		}
-	}
-	for _, root := range p.Pkgs {
-		collectPkgs(root)
-	}
-
-	blocked := map[string]bool{}
-	hardUnsafeNative := map[string]bool{}
-	linknamed := map[pkgVarKey]bool{}
-	linknamesByTarget := map[string][]pkgVarKey{}
-	hasMalformedLinkname := false
-	verifiedAsm := map[string]*asmverify.VerifiedPackage{}
-	for _, pkg := range allVisited {
-		if pkg.Imports["runtime/cgo"] != nil || pkg.Imports["C"] != nil {
-			blocked[pkg.PkgPath] = true
-			hardUnsafeNative[pkg.PkgPath] = true
-		}
-		var sFiles, hFiles []string
-		hasNonAsmNative := false
-		for _, f := range pkg.OtherFiles {
-			isAsm, isHdr, isOther := classifyOtherNativeExt(filepath.Ext(f))
-			switch {
-			case isAsm:
-				sFiles = append(sFiles, f)
-			case isHdr:
-				hFiles = append(hFiles, f)
-			case isOther:
-				hasNonAsmNative = true
-			}
-		}
-		if hasNonAsmNative || (len(hFiles) > 0 && len(sFiles) == 0) {
-			blocked[pkg.PkgPath] = true
-			hardUnsafeNative[pkg.PkgPath] = true
-		} else if len(sFiles) > 0 {
-			scopes := scopesByPath[pkg.PkgPath]
-			readFn := os.ReadFile
-			if p.ReadSource != nil {
-				pkgDir := pkg.Dir
-				readFn = func(fullPath string) ([]byte, error) {
-					return p.ReadSource(pkgDir, fullPath)
-				}
-			}
-			if !audited || p.GOARCH == "" || pkg.Dir == "" || (len(pkg.GoFiles) > 0 && len(scopes) == 0) {
-				blocked[pkg.PkgPath] = true
-				hardUnsafeNative[pkg.PkgPath] = true
-			} else if vp, asmSafe := verifyNonStdAssemblyMemo(p, p.GOARCH, pkg.PkgPath, pkg.Dir, sFiles, hFiles, scopes, readFn); !asmSafe || vp == nil || !vp.PackageSafe {
-				blocked[pkg.PkgPath] = true
-				hardUnsafeNative[pkg.PkgPath] = true
-			} else {
-				if !vp.AllTextsVerified {
-					blocked[pkg.PkgPath] = true
-				}
-				if !hardUnsafeNative[pkg.PkgPath] {
-					verifiedAsm[pkg.PkgPath] = mergeVerifiedAsmPackage(verifiedAsm[pkg.PkgPath], vp)
-				}
-			}
-		}
-		for _, af := range pkg.Syntax {
-			if af == nil {
-				continue
-			}
-			for _, cg := range af.Comments {
-				for _, c := range cg.List {
-					if !strings.Contains(c.Text, "go:linkname") {
-						continue
-					}
-					// Go compiler directives require zero whitespace between '//' (or '/*')
-					// and 'go:'; '// go:linkname ...' with leading whitespace is an ordinary
-					// prose comment ignored by cmd/compile.
-					var trimmed string
-					if body, okLine := strings.CutPrefix(c.Text, "//"); okLine {
-						trimmed = strings.TrimRight(body, " \t\r\n")
-					} else if body, okBlock := strings.CutPrefix(c.Text, "/*"); okBlock {
-						body, _ = strings.CutSuffix(body, "*/")
-						trimmed = strings.TrimRight(body, " \t\r\n")
-					} else {
-						continue
-					}
-					restPlain, okPlain := auditset.BoundedToken(trimmed, "go:linkname", " \t\r\n")
-					restStd, okStd := auditset.BoundedToken(trimmed, "go:linknamestd", " \t\r\n")
-					if !okPlain && !okStd {
-						if trimmed == "go:linkname" || trimmed == "go:linknamestd" {
-							blocked[pkg.PkgPath] = true
-							hardUnsafeNative[pkg.PkgPath] = true
-							hasMalformedLinkname = true
-						}
-						continue
-					}
-					rest := restPlain
-					if okStd {
-						rest = restStd
-					}
-					fields := strings.Fields(rest)
-					if len(fields) == 0 || len(fields) > 2 {
-						blocked[pkg.PkgPath] = true
-						hardUnsafeNative[pkg.PkgPath] = true
-						hasMalformedLinkname = true
-						continue
-					}
-					localKey := pkgVarKey{pkgPath: pkg.PkgPath, name: fields[0]}
-					linknamed[localKey] = true
-					if len(fields) == 2 {
-						if dot := strings.LastIndexByte(fields[1], '.'); dot > 0 && dot+1 < len(fields[1]) {
-							linknamed[pkgVarKey{pkgPath: fields[1][:dot], name: fields[1][dot+1:]}] = true
-							if !slices.Contains(linknamesByTarget[fields[1]], localKey) {
-								linknamesByTarget[fields[1]] = append(linknamesByTarget[fields[1]], localKey)
-							}
-						} else {
-							blocked[pkg.PkgPath] = true
-							hardUnsafeNative[pkg.PkgPath] = true
-							hasMalformedLinkname = true
-						}
-					}
-				}
-			}
-		}
-	}
-	for pkgPath := range hardUnsafeNative {
-		delete(verifiedAsm, pkgPath)
-	}
-	summary := &nonSSAGlobalHazardSummary{
-		blockedPkgs:          blocked,
-		linknamedVars:        linknamed,
-		linknamesByTarget:    linknamesByTarget,
-		hasMalformedLinkname: hasMalformedLinkname,
-		allPkgs:              allVisited,
-		allPkgsByPath:        allPkgsByPath,
-		verifiedAsm:          verifiedAsm,
-	}
-	for pkgPath, vp := range verifiedAsm {
-		if vp == nil {
-			continue
-		}
-		for fnName, sum := range vp.Funcs {
-			if !sum.Verified || !progAsmTextLinkageClean(summary, p, pkgPath, fnName, sum.GoCallees) {
-				blocked[pkgPath] = true
-				break
-			}
-		}
-	}
-	if p.Summaries == nil {
-		p.Summaries = make(map[string]any, 2)
-	}
-	p.Summaries[cacheKey] = summary
-	return summary
-}
-
-func startupZeroGlobalsForReach(base *tier2Base, reach attributedReachability) map[*ssa.Global]bool {
-	audited := base != nil && base.h != nil && base.h.SelectionAudited()
-	if reach.baseStartup && base != nil {
-		if !base.baseStartupZeroDone {
-			base.baseStartupZeroGlobals = filterBaseVerifiedZeroGlobals(base, unmutatedZeroGlobalsForFunctions(audited, base.prog, reach.userPaths, startupInitFunctions(reach)))
-			base.baseStartupZeroDone = true
-		}
-		return base.baseStartupZeroGlobals
-	}
-	return filterBaseVerifiedZeroGlobals(base, unmutatedZeroGlobalsForFunctions(audited, base.prog, reach.userPaths, startupInitFunctions(reach)))
-}
-
-func wholeZeroGlobalsForBase(base *tier2Base, userPaths map[string]bool) map[*ssa.Global]bool {
-	if base == nil || base.prog == nil {
-		return nil
-	}
-	if !base.wholeZeroDone {
-		audited := base.h != nil && base.h.SelectionAudited()
-		if summary := lookupSummaryForProg(base.prog, audited); summary != nil && len(summary.allFunctions) == len(progAllFunctions(base.prog)) {
-			blockedPkgs, linknamedVars := nonSSAGlobalHazards(audited, base.prog)
-			var candidates map[*ssa.Global]bool
-			for g := range summary.zeroCandidateGlobals {
-				if g == nil || g.Pkg == nil || g.Pkg.Pkg == nil {
-					continue
-				}
-				pkgPath := g.Pkg.Pkg.Path()
-				if blockedPkgs[pkgPath] || linknamedVars[pkgVarKey{pkgPath: pkgPath, name: g.Name()}] {
-					continue
-				}
-				if candidates == nil {
-					candidates = make(map[*ssa.Global]bool, len(summary.zeroCandidateGlobals))
-				}
-				candidates[g] = true
-			}
-			base.wholeZeroGlobals = filterBaseVerifiedZeroGlobals(base, candidates)
-		} else {
-			base.wholeZeroGlobals = filterBaseVerifiedZeroGlobals(base, unmutatedZeroGlobalsForFunctions(audited, base.prog, userPaths, progAllFunctions(base.prog)))
-		}
-		base.wholeZeroDone = true
-	}
-	return base.wholeZeroGlobals
-}
-
-func (b *tier2Base) pkgFreeOfUnverifiedNativeWriteHazard(idx *pkgIndex) bool {
-	if b == nil || idx == nil || idx.std || idx.meta == nil {
-		return false
-	}
-	if hasExternalCgoMeta(idx.meta) || len(idx.meta.SysoFiles) != 0 || hasNonHeaderNativeSource(idx.meta) {
-		return false
-	}
-	if len(idx.meta.SFiles) > 0 {
-		if _, asmOK := b.verifiedPackageAssemblyAllTexts(idx.meta); !asmOK {
-			return false
-		}
-	} else if len(idx.meta.HFiles) > 0 {
-		return false
-	}
-	return true
-}
-
-func filterBaseVerifiedZeroGlobals(base *tier2Base, zeroGlobals map[*ssa.Global]bool) map[*ssa.Global]bool {
-	if base == nil || len(zeroGlobals) == 0 {
-		return zeroGlobals
-	}
-	var out map[*ssa.Global]bool
-	for g := range zeroGlobals {
-		if g == nil || g.Pkg == nil || g.Pkg.Pkg == nil {
-			continue
-		}
-		pkgPath := g.Pkg.Pkg.Path()
-		if len(base.objsByLinkTarget[pkgPath+"."+g.Name()]) > 0 {
-			continue
-		}
-		idx := base.idxByTypes[g.Pkg.Pkg]
-		if !base.pkgFreeOfUnverifiedNativeWriteHazard(idx) {
-			continue
-		}
-		if idx.linknameByName[g.Name()] != "" {
-			continue
-		}
-		if obj := g.Object(); obj != nil && idx.linknames[obj] != "" {
-			continue
-		}
-		if out == nil {
-			out = make(map[*ssa.Global]bool, len(zeroGlobals))
-		}
-		out[g] = true
-	}
-	return out
-}
-
-func zeroGlobalDeclKeys(zeroGlobals map[*ssa.Global]bool) map[pkgVarKey]bool {
-	if len(zeroGlobals) == 0 {
-		return nil
-	}
-	out := make(map[pkgVarKey]bool, len(zeroGlobals))
-	for g := range zeroGlobals {
-		if g != nil && g.Pkg != nil && g.Pkg.Pkg != nil && g.Name() != "" {
-			out[pkgVarKey{pkgPath: g.Pkg.Pkg.Path(), name: g.Name()}] = true
-		}
-	}
-	return out
-}
-
-func isZeroSSAConst(v ssa.Value) bool {
-	c, ok := v.(*ssa.Const)
-	if !ok {
-		return false
-	}
-	if c.Value == nil {
-		return true
-	}
-	switch c.Value.Kind() {
-	case constant.Bool:
-		return !constant.BoolVal(c.Value)
-	case constant.Int, constant.Float, constant.Complex:
-		return constant.Sign(c.Value) == 0
-	case constant.String:
-		return constant.StringVal(c.Value) == ""
-	default:
-		return false
-	}
-}
-
-// unmutatedZeroGlobalsForFunctions identifies non-standard package-level
-// globals that are referenced in the given reachable function sets (including
-// their package initializers) exclusively through direct loads (*g) or zero
-// stores, and are free of non-SSA write channels (cgo, unverified assembly, or
-// //go:linkname). Because Go zero-initializes package variables and lowers
-// package-level initializer expressions into init(), any global with no
-// non-zero store and no address escape in the reachable flow is invariant zero
-// throughout that flow.
-func unmutatedZeroGlobalsForFunctions(audited bool, p *program, userPaths map[string]bool, sets ...map[*ssa.Function]bool) map[*ssa.Global]bool {
-	blockedPkgs, linknamedVars := nonSSAGlobalHazards(audited, p)
-	seen := map[*ssa.Global]bool{}
-	mutated := map[*ssa.Global]bool{}
-	visitedFn := map[*ssa.Function]bool{}
-	visitedPkgInit := map[*ssa.Package]bool{}
-	var ops [16]*ssa.Value
-	var scanFn func(fn *ssa.Function)
-	scanFn = func(fn *ssa.Function) {
-		if fn == nil || visitedFn[fn] || isStdNonUserFunction(fn, userPaths) {
-			return
-		}
-		visitedFn[fn] = true
-		for _, blk := range fn.Blocks {
-			for _, instr := range blk.Instrs {
-				if _, ok := instr.(*ssa.DebugRef); ok {
-					continue
-				}
-				for _, op := range instr.Operands(ops[:0]) {
-					if op == nil || *op == nil {
-						continue
-					}
-					g, ok := (*op).(*ssa.Global)
-					if !ok || g.Pkg == nil || g.Pkg.Pkg == nil {
-						continue
-					}
-					pkgPath := g.Pkg.Pkg.Path()
-					if isStdImportPath(pkgPath) && !userPaths[pkgPath] {
-						continue
-					}
-					if blockedPkgs[pkgPath] || linknamedVars[pkgVarKey{pkgPath: pkgPath, name: g.Name()}] {
-						mutated[g] = true
-						continue
-					}
-					seen[g] = true
-					switch x := instr.(type) {
-					case *ssa.UnOp:
-						if x.Op != token.MUL || x.X != g {
-							mutated[g] = true
-						}
-					case *ssa.Store:
-						if x.Addr != g || x.Val == g || !isZeroSSAConst(x.Val) {
-							mutated[g] = true
-						}
-					default:
-						mutated[g] = true
-					}
-				}
-			}
-		}
-	}
-	scanPkgInit := func(pkg *ssa.Package) {
-		if pkg == nil || visitedPkgInit[pkg] {
-			return
-		}
-		visitedPkgInit[pkg] = true
-		initFn := pkg.Func("init")
-		if initFn == nil {
-			return
-		}
-		initQueue := []*ssa.Function{initFn}
-		seenInit := map[*ssa.Function]bool{initFn: true}
-		enqueueInit := func(fn *ssa.Function) {
-			if fn == nil || seenInit[fn] || isStdNonUserFunction(fn, userPaths) {
-				return
-			}
-			seenInit[fn] = true
-			initQueue = append(initQueue, fn)
-		}
-		for len(initQueue) > 0 {
-			cur := initQueue[0]
-			initQueue = initQueue[1:]
-			scanFn(cur)
-			for _, blk := range cur.Blocks {
-				for _, instr := range blk.Instrs {
-					if mc, ok := instr.(*ssa.MakeClosure); ok {
-						if closureFn, _ := mc.Fn.(*ssa.Function); closureFn != nil {
-							enqueueInit(closureFn)
-						}
-					}
-					if site, ok := instr.(ssa.CallInstruction); ok && site.Common() != nil {
-						if callee := site.Common().StaticCallee(); callee != nil {
-							enqueueInit(callee)
-						}
-					}
-				}
-			}
-		}
-	}
-	for _, set := range sets {
-		for fn := range set {
-			if isStdNonUserFunction(fn, userPaths) {
-				continue
-			}
-			scanFn(fn)
-			if fn != nil {
-				scanPkgInit(fn.Pkg)
-			}
-		}
-	}
-	for g := range seen {
-		scanPkgInit(g.Pkg)
-	}
-	var out map[*ssa.Global]bool
-	for g := range seen {
-		if !mutated[g] {
-			if out == nil {
-				out = make(map[*ssa.Global]bool)
-			}
-			out[g] = true
-		}
-	}
-	return out
-}
-
-func rtaUnmutatedZeroGlobals(audited bool, p *program, result *rta.Result, mask uint64, userPaths map[string]bool) map[*ssa.Global]bool {
-	if result == nil || len(result.Reachable) == 0 {
-		return nil
-	}
-	var funcs map[*ssa.Function]bool
-	for fn, masks := range result.Reachable {
-		if masks&mask != 0 && !isStdNonUserFunction(fn, userPaths) {
-			if funcs == nil {
-				funcs = make(map[*ssa.Function]bool)
-			}
-			funcs[fn] = true
-		}
-	}
-	if len(funcs) == 0 {
-		return nil
-	}
-	return unmutatedZeroGlobalsForFunctions(audited, p, userPaths, funcs)
+		},
+	)
 }
 
 func isBoolSSAConst(v ssa.Value) (bool, bool) {
@@ -807,6 +244,34 @@ func isBoolSSAConst(v ssa.Value) (bool, bool) {
 		return false, false
 	}
 	return constant.BoolVal(c.Value), true
+}
+
+func condMayFoldToBoolConst(v ssa.Value, depth int) bool {
+	if v == nil || depth > 4 {
+		return false
+	}
+	for v != nil {
+		v = unwrapBoolSSAConv(v)
+		if u, ok := v.(*ssa.UnOp); ok && u.Op == token.NOT {
+			v = u.X
+			continue
+		}
+		break
+	}
+	if _, ok := isBoolSSAConst(v); ok {
+		return true
+	}
+	if phi, isPhi := v.(*ssa.Phi); isPhi {
+		for _, edge := range phi.Edges {
+			if condMayFoldToBoolConst(edge, depth+1) {
+				return true
+			}
+		}
+	}
+	if bin, isBin := v.(*ssa.BinOp); isBin && (bin.Op == token.EQL || bin.Op == token.NEQ) && bin.X != nil && isBooleanSSAType(bin.X.Type()) {
+		return condMayFoldToBoolConst(bin.X, depth+1) || condMayFoldToBoolConst(bin.Y, depth+1)
+	}
+	return false
 }
 
 // boolLattice encodes the powerset 𝒫({false, true}):
@@ -835,10 +300,11 @@ func evalBoolLatticeNot(v boolLattice) boolLattice {
 }
 
 // liveBlocks returns fn.Blocks with basic blocks pruned via sparse conditional
-// constant propagation (SCCP) over boolLattice when they are only reachable
-// across conditional branches (including short-circuit && / || *ssa.Phi merges)
-// that are compile-time boolean constants or require a reachability-invariant
-// zero global in zeroGlobals to hold a non-zero value.
+// constant propagation (SCCP) over boolLattice when they are orphan blocks or
+// only reachable across conditional branches (including negated and
+// short-circuit && / || *ssa.Phi merges) that fold to boolean constants or
+// require a reachability-invariant zero global in zeroGlobals to hold a
+// non-zero value.
 func liveBlocks(fn *ssa.Function, zeroGlobals map[*ssa.Global]bool) []*ssa.BasicBlock {
 	if fn == nil || len(fn.Blocks) <= 1 {
 		if fn == nil {
@@ -849,19 +315,14 @@ func liveBlocks(fn *ssa.Function, zeroGlobals map[*ssa.Global]bool) []*ssa.Basic
 	checkZeroGlobals := len(zeroGlobals) > 0
 	hasPrunableCond := false
 	hasZeroGlobalLoad := false
-	for _, blk := range fn.Blocks {
+	for i, blk := range fn.Blocks {
+		if i > 0 && blk != fn.Recover && len(blk.Preds) == 0 {
+			hasPrunableCond = true
+		}
 		if len(blk.Instrs) > 0 {
 			if ifInstr, ok := blk.Instrs[len(blk.Instrs)-1].(*ssa.If); ok && len(blk.Succs) == 2 {
-				cond := unwrapBoolSSAConv(ifInstr.Cond)
-				if _, ok := isBoolSSAConst(cond); ok {
+				if condMayFoldToBoolConst(ifInstr.Cond, 0) {
 					hasPrunableCond = true
-				} else if phi, isPhi := cond.(*ssa.Phi); isPhi {
-					for _, predEdge := range phi.Edges {
-						if _, ok := isBoolSSAConst(unwrapBoolSSAConv(predEdge)); ok {
-							hasPrunableCond = true
-							break
-						}
-					}
 				}
 			}
 		}
@@ -1085,4 +546,270 @@ func isBooleanSSAType(t types.Type) bool {
 	}
 	b, ok := t.Underlying().(*types.Basic)
 	return ok && b.Info()&types.IsBoolean != 0
+}
+
+type baseStartupReachSummary struct {
+	startupFunctions      map[*ssa.Function]bool
+	startupDynamicTargets map[ssa.CallInstruction]map[*ssa.Function]bool
+	initBoxedTypes        []types.Type
+	userTouchedStdGlobals map[*ssa.Global]bool
+}
+
+func cloneDynamicTargetMap(src map[ssa.CallInstruction]map[*ssa.Function]bool) map[ssa.CallInstruction]map[*ssa.Function]bool {
+	out := make(map[ssa.CallInstruction]map[*ssa.Function]bool, len(src))
+	for site, targets := range src {
+		out[site] = maps.Clone(targets)
+	}
+	return out
+}
+
+func cachedBaseStartupReachability(ctx context.Context, audited bool, prog *program, initRoots, harnessStdInitRoots []*ssa.Function, harnessAudited bool, userPaths map[string]bool) (*baseStartupReachSummary, error) {
+	cacheKey := "baseStartupReach:0:0"
+	switch {
+	case audited && harnessAudited:
+		cacheKey = "baseStartupReach:1:1"
+	case audited:
+		cacheKey = "baseStartupReach:1:0"
+	case harnessAudited:
+		cacheKey = "baseStartupReach:0:1"
+	}
+	if prog != nil {
+		if cached, ok := prog.Summaries[cacheKey].(*baseStartupReachSummary); ok && cached != nil {
+			return cached, nil
+		}
+	}
+	const startupMask uint64 = 1
+	initMaskRoots := make(map[*ssa.Function]uint64, len(initRoots))
+	for _, fn := range initRoots {
+		initMaskRoots[fn] = startupMask
+	}
+	var verified map[string]*propharness.VerifiedPackage
+	if harnessAudited {
+		verified = verifiedHarnessesProg(audited, prog)
+	}
+	var initSeeds *rta.Seeds
+	if len(verified) > 0 {
+		initSeeds = newHarnessRTASeeds(verified, userPaths, harnessStdInitRoots, startupMask)
+	}
+	initRes, err := rta.Analyze(ctx, initMaskRoots, initSeeds)
+	if err != nil {
+		return nil, err
+	}
+	startupFns, err := provenanceReachableStartup(ctx, audited, prog, initRoots, startupMask, initRes, harnessAudited, userPaths)
+	if err != nil {
+		return nil, err
+	}
+	startupTargets := make(map[ssa.CallInstruction]map[*ssa.Function]bool)
+	for site, targets := range initRes.Targets {
+		callee := site.Common().StaticCallee()
+		if !startupFns[site.Parent()] || callee != nil && funcPkgPath(callee) == "testing" {
+			continue
+		}
+		for target, masks := range targets {
+			if masks&startupMask != 0 && initRes.Reachable[target]&startupMask != 0 {
+				projected := startupTargets[site]
+				if projected == nil {
+					projected = make(map[*ssa.Function]bool)
+					startupTargets[site] = projected
+				}
+				projected[target] = true
+			}
+		}
+	}
+	var initBoxedTypes []types.Type
+	var userTouchedStdGlobals map[*ssa.Global]bool
+	if harnessAudited {
+		orderedStartup := make([]*ssa.Function, 0, len(startupFns))
+		for fn := range startupFns {
+			if fn != nil {
+				orderedStartup = append(orderedStartup, fn)
+			}
+		}
+		sort.Slice(orderedStartup, func(i, j int) bool { return lessSSAFunctionOrder(orderedStartup[i], orderedStartup[j]) })
+		seenBoxed := map[types.Type]bool{}
+		for _, fn := range orderedStartup {
+			fp := funcPkgPath(fn)
+			if isStdPkgPath(userPaths, fp) || fp == "testing" || verified[fp] != nil {
+				continue
+			}
+			for _, b := range fn.Blocks {
+				for _, instr := range b.Instrs {
+					if mi, isMI := instr.(*ssa.MakeInterface); isMI && mi.X != nil && mi.X.Type() != nil {
+						xt := mi.X.Type()
+						if !seenBoxed[xt] {
+							seenBoxed[xt] = true
+							initBoxedTypes = append(initBoxedTypes, xt)
+						}
+					}
+				}
+			}
+		}
+		if len(initBoxedTypes) > 0 {
+			userStartupFns := make(map[*ssa.Function]bool)
+			var uQueue []*ssa.Function
+			for _, fn := range orderedStartup {
+				fp := funcPkgPath(fn)
+				if !isStdPkgPath(userPaths, fp) && fp != "testing" && verified[fp] == nil {
+					userStartupFns[fn] = true
+					uQueue = append(uQueue, fn)
+				}
+			}
+			for len(uQueue) > 0 {
+				cur := uQueue[0]
+				uQueue = uQueue[1:]
+				for _, b := range cur.Blocks {
+					for _, instr := range b.Instrs {
+						site, ok := instr.(ssa.CallInstruction)
+						if !ok || site.Common() == nil {
+							continue
+						}
+						if callee := site.Common().StaticCallee(); callee != nil {
+							if startupFns[callee] && !userStartupFns[callee] {
+								userStartupFns[callee] = true
+								uQueue = append(uQueue, callee)
+							}
+						} else {
+							for t := range startupTargets[site] {
+								if startupFns[t] && !userStartupFns[t] {
+									userStartupFns[t] = true
+									uQueue = append(uQueue, t)
+								}
+							}
+						}
+					}
+				}
+			}
+			var opsBuf [8]*ssa.Value
+			for _, fn := range orderedStartup {
+				if !userStartupFns[fn] {
+					continue
+				}
+				fp := funcPkgPath(fn)
+				isOwnInit := initFlowFrame(fn)
+				for _, b := range fn.Blocks {
+					for _, instr := range b.Instrs {
+						for _, op := range instr.Operands(opsBuf[:0]) {
+							if op == nil {
+								continue
+							}
+							g, ok := (*op).(*ssa.Global)
+							if !ok || g == nil || g.Pkg == nil || g.Pkg.Pkg == nil {
+								continue
+							}
+							gPkg := g.Pkg.Pkg.Path()
+							if !isStdPkgPath(userPaths, gPkg) || (isOwnInit && fp == gPkg) {
+								continue
+							}
+							if userTouchedStdGlobals == nil {
+								userTouchedStdGlobals = make(map[*ssa.Global]bool)
+							}
+							userTouchedStdGlobals[g] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	summary := &baseStartupReachSummary{
+		startupFunctions:      startupFns,
+		startupDynamicTargets: startupTargets,
+		initBoxedTypes:        initBoxedTypes,
+		userTouchedStdGlobals: userTouchedStdGlobals,
+	}
+	if prog != nil && ctx.Err() == nil {
+		if prog.Summaries == nil {
+			prog.Summaries = make(map[string]any, 4)
+		}
+		prog.Summaries[cacheKey] = summary
+	}
+	return summary, nil
+}
+
+func partitionHarnessInitRoots(prog *program, harnessAudited bool, userPaths map[string]bool) (initRoots, harnessStdInitRoots []*ssa.Function) {
+	if prog == nil || prog.Prog == nil {
+		return nil, nil
+	}
+	var verified map[string]*propharness.VerifiedPackage
+	if harnessAudited {
+		verified = verifiedHarnessesProg(true, prog)
+	}
+	var nonHarnessReachable map[*types.Package]bool
+	if len(verified) > 0 {
+		nonHarnessReachable = make(map[*types.Package]bool)
+		if len(prog.Pkgs) > 0 {
+			var nonHarnessRoots []*packages.Package
+			for _, pkg := range prog.Pkgs {
+				if pkg == nil || verified[pkg.PkgPath] != nil {
+					continue
+				}
+				if pkg.Module != nil || !isStdPkgPath(userPaths, pkg.PkgPath) || pkg.PkgPath == prog.PkgPath || pkg.PkgPath == prog.PkgPath+"_test" || pkg.ForTest == prog.PkgPath || IsGeneratedTestMainPackage(pkg) {
+					nonHarnessRoots = append(nonHarnessRoots, pkg)
+				}
+			}
+			packages.Visit(nonHarnessRoots, func(pkg *packages.Package) bool {
+				if pkg == nil || verified[pkg.PkgPath] != nil {
+					return false
+				}
+				if pkg.Types != nil {
+					nonHarnessReachable[pkg.Types] = true
+				}
+				return true
+			}, nil)
+		} else {
+			var queue []*types.Package
+			enqueue := func(tp *types.Package) {
+				if tp == nil || nonHarnessReachable[tp] || verified[tp.Path()] != nil {
+					return
+				}
+				nonHarnessReachable[tp] = true
+				queue = append(queue, tp)
+			}
+			for _, sp := range prog.Prog.AllPackages() {
+				if sp == nil || sp.Pkg == nil {
+					continue
+				}
+				p := sp.Pkg.Path()
+				if isGeneratedTestMainPackage(prog, sp) || p == prog.PkgPath || p == prog.PkgPath+"_test" || (verified[p] == nil && !isStdPkgPath(userPaths, p)) {
+					enqueue(sp.Pkg)
+				}
+			}
+			for len(queue) > 0 {
+				cur := queue[0]
+				queue = queue[1:]
+				for _, imp := range cur.Imports() {
+					enqueue(imp)
+				}
+			}
+		}
+	}
+	for _, p := range prog.Prog.AllPackages() {
+		if isGeneratedTestMainPackage(prog, p) {
+			continue
+		}
+		init := p.Func("init")
+		if init == nil {
+			continue
+		}
+		if len(verified) > 0 && p.Pkg != nil && verified[p.Pkg.Path()] == nil && !nonHarnessReachable[p.Pkg] {
+			harnessStdInitRoots = append(harnessStdInitRoots, init)
+			continue
+		}
+		initRoots = append(initRoots, init)
+	}
+	return initRoots, harnessStdInitRoots
+}
+
+func newHarnessRTASeeds(verified map[string]*propharness.VerifiedPackage, userPaths map[string]bool, harnessStdInitRoots []*ssa.Function, masks uint64) *rta.Seeds {
+	var stdRoots map[*ssa.Function]uint64
+	if len(harnessStdInitRoots) > 0 && masks != 0 {
+		stdRoots = make(map[*ssa.Function]uint64, len(harnessStdInitRoots))
+		for _, fn := range harnessStdInitRoots {
+			stdRoots[fn] |= masks
+		}
+	}
+	return &rta.Seeds{
+		HarnessPkgs:     harnessPkgSet(verified),
+		UserPkgs:        userPaths,
+		HarnessStdRoots: stdRoots,
+	}
 }

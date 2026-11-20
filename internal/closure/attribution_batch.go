@@ -2,21 +2,17 @@ package closure
 
 import (
 	"context"
-	"go/token"
 	"go/types"
 	"maps"
 	"math/bits"
-	"slices"
 	"sort"
 	"strings"
 	"time"
 	"unsafe"
 
-	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
-	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
-	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/closure/internal/rta"
+	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -67,9 +63,9 @@ type attributedReachability struct {
 	programFunctions       map[*ssa.Function]bool
 	userPaths              map[string]bool
 	subjectRoot            *ssa.Function
-	prog              *program
-	summary           *callerReferenceSummary
-	verifiedHarnesses map[string]*propharness.VerifiedPackage
+	prog                   *program
+	summary                *callerReferenceSummary
+	verifiedHarnesses      map[string]*propharness.VerifiedPackage
 }
 
 // defaultProbePackageScope is the package-scope discriminator: it
@@ -268,6 +264,7 @@ func prepareProgramRTA(
 	// subject-independent provenance analysis unconditionally so solo and
 	// batched evaluations share identical program-wide call sites and memos.
 	p.summary = enumerateCallerReferencesForProgram(prog, audited, pureDelegates, p.userPaths, nil)
+	p.summary.ctx = ctx
 	p.provFP = newProvenanceFP(audited, p.verifiedHarnesses, pureDelegates, prog, p.summary, p.userPaths)
 	if len(openCandidates) > 0 {
 		openRoots := make([]*ssa.Function, 0, len(openCandidates))
@@ -707,272 +704,6 @@ func attributedReachableSetsOnce(ctx context.Context, audited bool, pureDelegate
 	return reachable, nil
 }
 
-type baseStartupReachSummary struct {
-	startupFunctions      map[*ssa.Function]bool
-	startupDynamicTargets map[ssa.CallInstruction]map[*ssa.Function]bool
-	initBoxedTypes        []types.Type
-	userTouchedStdGlobals map[*ssa.Global]bool
-}
-
-func cloneDynamicTargetMap(src map[ssa.CallInstruction]map[*ssa.Function]bool) map[ssa.CallInstruction]map[*ssa.Function]bool {
-	out := make(map[ssa.CallInstruction]map[*ssa.Function]bool, len(src))
-	for site, targets := range src {
-		out[site] = maps.Clone(targets)
-	}
-	return out
-}
-
-func cachedBaseStartupReachability(ctx context.Context, audited bool, prog *program, initRoots, harnessStdInitRoots []*ssa.Function, harnessAudited bool, userPaths map[string]bool) (*baseStartupReachSummary, error) {
-	cacheKey := "baseStartupReach:0:0"
-	switch {
-	case audited && harnessAudited:
-		cacheKey = "baseStartupReach:1:1"
-	case audited:
-		cacheKey = "baseStartupReach:1:0"
-	case harnessAudited:
-		cacheKey = "baseStartupReach:0:1"
-	}
-	if prog != nil {
-		if cached, ok := prog.Summaries[cacheKey].(*baseStartupReachSummary); ok && cached != nil {
-			return cached, nil
-		}
-	}
-	const startupMask uint64 = 1
-	initMaskRoots := make(map[*ssa.Function]uint64, len(initRoots))
-	for _, fn := range initRoots {
-		initMaskRoots[fn] = startupMask
-	}
-	var verified map[string]*propharness.VerifiedPackage
-	if harnessAudited {
-		verified = verifiedHarnessesProg(audited, prog)
-	}
-	var initSeeds *rta.Seeds
-	if len(verified) > 0 {
-		initSeeds = newHarnessRTASeeds(verified, userPaths, harnessStdInitRoots, startupMask)
-	}
-	initRes, err := rta.Analyze(ctx, initMaskRoots, initSeeds)
-	if err != nil {
-		return nil, err
-	}
-	startupFns, err := provenanceReachableStartup(ctx, audited, prog, initRoots, startupMask, initRes, harnessAudited, userPaths)
-	if err != nil {
-		return nil, err
-	}
-	startupTargets := make(map[ssa.CallInstruction]map[*ssa.Function]bool)
-	for site, targets := range initRes.Targets {
-		callee := site.Common().StaticCallee()
-		if !startupFns[site.Parent()] || callee != nil && funcPkgPath(callee) == "testing" {
-			continue
-		}
-		for target, masks := range targets {
-			if masks&startupMask != 0 && initRes.Reachable[target]&startupMask != 0 {
-				projected := startupTargets[site]
-				if projected == nil {
-					projected = make(map[*ssa.Function]bool)
-					startupTargets[site] = projected
-				}
-				projected[target] = true
-			}
-		}
-	}
-	var initBoxedTypes []types.Type
-	var userTouchedStdGlobals map[*ssa.Global]bool
-	if harnessAudited {
-		orderedStartup := make([]*ssa.Function, 0, len(startupFns))
-		for fn := range startupFns {
-			if fn != nil {
-				orderedStartup = append(orderedStartup, fn)
-			}
-		}
-		sort.Slice(orderedStartup, func(i, j int) bool { return lessSSAFunctionOrder(orderedStartup[i], orderedStartup[j]) })
-		seenBoxed := map[types.Type]bool{}
-		for _, fn := range orderedStartup {
-			fp := funcPkgPath(fn)
-			if isStdPkgPath(userPaths, fp) || fp == "testing" || verified[fp] != nil {
-				continue
-			}
-			for _, b := range fn.Blocks {
-				for _, instr := range b.Instrs {
-					if mi, isMI := instr.(*ssa.MakeInterface); isMI && mi.X != nil && mi.X.Type() != nil {
-						xt := mi.X.Type()
-						if !seenBoxed[xt] {
-							seenBoxed[xt] = true
-							initBoxedTypes = append(initBoxedTypes, xt)
-						}
-					}
-				}
-			}
-		}
-		if len(initBoxedTypes) > 0 {
-			userStartupFns := make(map[*ssa.Function]bool)
-			var uQueue []*ssa.Function
-			for _, fn := range orderedStartup {
-				fp := funcPkgPath(fn)
-				if !isStdPkgPath(userPaths, fp) && fp != "testing" && verified[fp] == nil {
-					userStartupFns[fn] = true
-					uQueue = append(uQueue, fn)
-				}
-			}
-			for len(uQueue) > 0 {
-				cur := uQueue[0]
-				uQueue = uQueue[1:]
-				for _, b := range cur.Blocks {
-					for _, instr := range b.Instrs {
-						site, ok := instr.(ssa.CallInstruction)
-						if !ok || site.Common() == nil {
-							continue
-						}
-						if callee := site.Common().StaticCallee(); callee != nil {
-							if startupFns[callee] && !userStartupFns[callee] {
-								userStartupFns[callee] = true
-								uQueue = append(uQueue, callee)
-							}
-						} else {
-							for t := range startupTargets[site] {
-								if startupFns[t] && !userStartupFns[t] {
-									userStartupFns[t] = true
-									uQueue = append(uQueue, t)
-								}
-							}
-						}
-					}
-				}
-			}
-			var opsBuf [8]*ssa.Value
-			for _, fn := range orderedStartup {
-				if !userStartupFns[fn] {
-					continue
-				}
-				fp := funcPkgPath(fn)
-				isOwnInit := initFlowFrame(fn)
-				for _, b := range fn.Blocks {
-					for _, instr := range b.Instrs {
-						for _, op := range instr.Operands(opsBuf[:0]) {
-							if op == nil {
-								continue
-							}
-							g, ok := (*op).(*ssa.Global)
-							if !ok || g == nil || g.Pkg == nil || g.Pkg.Pkg == nil {
-								continue
-							}
-							gPkg := g.Pkg.Pkg.Path()
-							if !isStdPkgPath(userPaths, gPkg) || (isOwnInit && fp == gPkg) {
-								continue
-							}
-							if userTouchedStdGlobals == nil {
-								userTouchedStdGlobals = make(map[*ssa.Global]bool)
-							}
-							userTouchedStdGlobals[g] = true
-						}
-					}
-				}
-			}
-		}
-	}
-	summary := &baseStartupReachSummary{
-		startupFunctions:      startupFns,
-		startupDynamicTargets: startupTargets,
-		initBoxedTypes:        initBoxedTypes,
-		userTouchedStdGlobals: userTouchedStdGlobals,
-	}
-	if prog != nil && ctx.Err() == nil {
-		if prog.Summaries == nil {
-			prog.Summaries = make(map[string]any, 4)
-		}
-		prog.Summaries[cacheKey] = summary
-	}
-	return summary, nil
-}
-
-func partitionHarnessInitRoots(prog *program, harnessAudited bool, userPaths map[string]bool) (initRoots, harnessStdInitRoots []*ssa.Function) {
-	if prog == nil || prog.Prog == nil {
-		return nil, nil
-	}
-	var verified map[string]*propharness.VerifiedPackage
-	if harnessAudited {
-		verified = verifiedHarnessesProg(true, prog)
-	}
-	var nonHarnessReachable map[*types.Package]bool
-	if len(verified) > 0 {
-		nonHarnessReachable = make(map[*types.Package]bool)
-		if len(prog.Pkgs) > 0 {
-			var nonHarnessRoots []*packages.Package
-			for _, pkg := range prog.Pkgs {
-				if pkg == nil || verified[pkg.PkgPath] != nil {
-					continue
-				}
-				if pkg.Module != nil || !isStdPkgPath(userPaths, pkg.PkgPath) || pkg.PkgPath == prog.PkgPath || pkg.PkgPath == prog.PkgPath+"_test" || pkg.ForTest == prog.PkgPath || (pkg.Name == "main" && pkg.PkgPath == prog.PkgPath+".test") {
-					nonHarnessRoots = append(nonHarnessRoots, pkg)
-				}
-			}
-			packages.Visit(nonHarnessRoots, func(pkg *packages.Package) bool {
-				if pkg == nil || verified[pkg.PkgPath] != nil {
-					return false
-				}
-				if pkg.Types != nil {
-					nonHarnessReachable[pkg.Types] = true
-				}
-				return true
-			}, nil)
-		} else {
-			var queue []*types.Package
-			enqueue := func(tp *types.Package) {
-				if tp == nil || nonHarnessReachable[tp] || verified[tp.Path()] != nil {
-					return
-				}
-				nonHarnessReachable[tp] = true
-				queue = append(queue, tp)
-			}
-			for _, sp := range prog.Prog.AllPackages() {
-				if sp == nil || sp.Pkg == nil {
-					continue
-				}
-				p := sp.Pkg.Path()
-				if isGeneratedTestMainPackage(prog, sp) || p == prog.PkgPath || p == prog.PkgPath+"_test" || (verified[p] == nil && !isStdPkgPath(userPaths, p)) {
-					enqueue(sp.Pkg)
-				}
-			}
-			for len(queue) > 0 {
-				cur := queue[0]
-				queue = queue[1:]
-				for _, imp := range cur.Imports() {
-					enqueue(imp)
-				}
-			}
-		}
-	}
-	for _, p := range prog.Prog.AllPackages() {
-		if isGeneratedTestMainPackage(prog, p) {
-			continue
-		}
-		init := p.Func("init")
-		if init == nil {
-			continue
-		}
-		if len(verified) > 0 && p.Pkg != nil && verified[p.Pkg.Path()] == nil && !nonHarnessReachable[p.Pkg] {
-			harnessStdInitRoots = append(harnessStdInitRoots, init)
-			continue
-		}
-		initRoots = append(initRoots, init)
-	}
-	return initRoots, harnessStdInitRoots
-}
-
-func newHarnessRTASeeds(verified map[string]*propharness.VerifiedPackage, userPaths map[string]bool, harnessStdInitRoots []*ssa.Function, masks uint64) *rta.Seeds {
-	var stdRoots map[*ssa.Function]uint64
-	if len(harnessStdInitRoots) > 0 && masks != 0 {
-		stdRoots = make(map[*ssa.Function]uint64, len(harnessStdInitRoots))
-		for _, fn := range harnessStdInitRoots {
-			stdRoots[fn] |= masks
-		}
-	}
-	return &rta.Seeds{
-		HarnessPkgs:     harnessPkgSet(verified),
-		UserPkgs:        userPaths,
-		HarnessStdRoots: stdRoots,
-	}
-}
-
 // binaryReachableUnion computes the binary-wide union of every harness root's
 // post-initialization attributed reach in a single all-roots RTA and provenance
 // walk (REQ-closure-shared-dynamic-state-reachability).
@@ -1164,123 +895,4 @@ func isTestingBLaunch(fn *ssa.Function) bool {
 func auditedHarnessSubtestDriver(audited bool, fn *ssa.Function) bool {
 	_, ok := harnessCalleeEffect(audited, fn, false)
 	return ok && functionSymbolName(fn) == "Run"
-}
-
-func lessSSAFunctionOrder(a, b *ssa.Function) bool {
-	if a == b {
-		return false
-	}
-	if a.Name() != b.Name() {
-		return a.Name() < b.Name()
-	}
-	pa, pb := funcPkgPath(a), funcPkgPath(b)
-	if pa != pb {
-		return pa < pb
-	}
-	if a.Pos() != b.Pos() {
-		return a.Pos() < b.Pos()
-	}
-	return a.String() < b.String()
-}
-
-func progAllFunctions(p *program) map[*ssa.Function]bool {
-	if p == nil || p.Prog == nil {
-		return nil
-	}
-	if p.AllFunctions != nil {
-		return p.AllFunctions
-	}
-	p.AllFunctions = ssautil.AllFunctions(p.Prog)
-	return p.AllFunctions
-}
-
-type orderedFuncKey struct {
-	fn      *ssa.Function
-	name    string
-	pkgPath string
-	pos     token.Pos
-}
-
-func progOrderedFunctions(p *program) []*ssa.Function {
-	if p == nil || p.Prog == nil {
-		return nil
-	}
-	if p.OrderedFunctions != nil {
-		return p.OrderedFunctions
-	}
-	p.OrderedFunctions = orderedFunctionsForProgram(progAllFunctions(p))
-	return p.OrderedFunctions
-}
-
-func progInstancesByOrigin(p *program) map[*ssa.Function][]*ssa.Function {
-	if p == nil || p.Prog == nil {
-		return nil
-	}
-	if p.Summaries != nil {
-		if cached, ok := p.Summaries["instancesByOrigin"].(map[*ssa.Function][]*ssa.Function); ok && cached != nil {
-			return cached
-		}
-	}
-	out := make(map[*ssa.Function][]*ssa.Function)
-	for _, fn := range progOrderedFunctions(p) {
-		if fn != nil && fn.Origin() != nil && fn.Origin() != fn {
-			orig := fn.Origin()
-			out[orig] = append(out[orig], fn)
-		}
-	}
-	if p.Summaries == nil {
-		p.Summaries = make(map[string]any, 4)
-	}
-	p.Summaries["instancesByOrigin"] = out
-	return out
-}
-
-func orderedFunctionsForProgram(all map[*ssa.Function]bool) []*ssa.Function {
-	keys := make([]orderedFuncKey, 0, len(all))
-	for fn := range all {
-		if fn != nil {
-			keys = append(keys, orderedFuncKey{
-				fn:      fn,
-				name:    fn.Name(),
-				pkgPath: funcPkgPath(fn),
-				pos:     fn.Pos(),
-			})
-		}
-	}
-	slices.SortFunc(keys, func(a, b orderedFuncKey) int {
-		if a.fn == b.fn {
-			return 0
-		}
-		if a.name != b.name {
-			if a.name < b.name {
-				return -1
-			}
-			return 1
-		}
-		if a.pkgPath != b.pkgPath {
-			if a.pkgPath < b.pkgPath {
-				return -1
-			}
-			return 1
-		}
-		if a.pos != b.pos {
-			if a.pos < b.pos {
-				return -1
-			}
-			return 1
-		}
-		sa, sb := a.fn.String(), b.fn.String()
-		if sa < sb {
-			return -1
-		}
-		if sa > sb {
-			return 1
-		}
-		return 0
-	})
-	ordered := make([]*ssa.Function, len(keys))
-	for i := range keys {
-		ordered[i] = keys[i].fn
-	}
-	return ordered
 }

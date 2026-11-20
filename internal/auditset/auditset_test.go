@@ -3,12 +3,18 @@ package auditset
 import (
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
 	"go/token"
 	"go/types"
 	"maps"
 	"math"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"pgregory.net/rapid"
@@ -70,8 +76,17 @@ func TestAuditedSetsAreExactlyTheAuditedContents(t *testing.T) {
 	if !RandMethod("Rand", "Intn") || !RandMethod("Rand", "Float64") || !RandMethod("rngSource", "Int63") || RandMethod("Rand", "ExpFloat64") || RandMethod("Rand", "NormFloat64") || RandMethod("Zipf", "Uint64") {
 		t.Fatal("rand method predicate wrong")
 	}
-	if !slices.Equal(slices.Sorted(maps.Keys(fmtSymbols)), []string{"Append", "Appendf", "Appendln", "Errorf", "FormatString", "Sprint", "Sprintf", "Sprintln", "Stringer"}) {
+	if !slices.Equal(slices.Sorted(maps.Keys(fmtSymbols)), []string{"Append", "Appendf", "Appendln", "Errorf", "FormatString", "Formatter", "GoStringer", "ScanState", "Scanner", "Sprint", "Sprintf", "Sprintln", "Sscan", "Sscanf", "Sscanln", "State", "Stringer"}) {
 		t.Fatalf("fmt symbols = %v", slices.Sorted(maps.Keys(fmtSymbols)))
+	}
+	if !PurePackage("go/build/constraint") {
+		t.Fatal("go/build/constraint missing from purePackages")
+	}
+	if !RuntimeDebugMethod("BuildInfo", "String") || RuntimeDebugMethod("Module", "String") || Symbol("runtime/debug", "ReadBuildInfo") || Symbol("runtime/debug", "String") || !Symbol("runtime/debug", "ParseBuildInfo") {
+		t.Fatal("runtime/debug symbol or method predicate wrong")
+	}
+	if !GoASTMethod("Ident", "String") || !GoASTMethod("ObjKind", "String") || GoASTMethod("CommentMap", "String") || GoASTMethod("Scope", "String") || Symbol("go/ast", "String") {
+		t.Fatal("go/ast receiver-qualified String predicate wrong")
 	}
 	if !slices.Equal(slices.Sorted(maps.Keys(fips140Symbols)), []string{"Enforced", "WithoutEnforcement"}) {
 		t.Fatalf("fips140 symbols = %v", slices.Sorted(maps.Keys(fips140Symbols)))
@@ -217,7 +232,7 @@ func TestIdentityCoversFlagSurfaceRolesAndReceiverTables(t *testing.T) {
 	if base == "" {
 		t.Fatal("Identity returned empty string")
 	}
-	if got := ReceiverPackages(); !slices.Equal(got, []string{"math/rand", "reflect", "sync", "sync/atomic", "time"}) {
+	if got := ReceiverPackages(); !slices.Equal(got, []string{"go/ast", "math/rand", "reflect", "runtime/debug", "sync", "sync/atomic", "time"}) {
 		t.Fatalf("ReceiverPackages() = %v", got)
 	}
 
@@ -236,7 +251,7 @@ func TestIdentityCoversFlagSurfaceRolesAndReceiverTables(t *testing.T) {
 
 func TestIdentityCoversAdmissionInventories(t *testing.T) {
 	base := Identity()
-	for _, table := range []map[string]bool{purePackages, reflectImmutableTypes, constantImmutableTypes, symbolTables["reflect"], auditedLinknameTargets, classBPackages, fmtWriterFuncs, fmtReaderFuncs, pureScalarOrValuePackages} {
+	for _, table := range []map[string]bool{purePackages, reflectImmutableTypes, constantImmutableTypes, symbolTables["reflect"], symbolTables["go/ast"], symbolTables["go/parser"], symbolTables["go/scanner"], symbolTables["go/token"], symbolTables["runtime/debug"], symbolTables["text/tabwriter"], auditedLinknameTargets, classBPackages, fmtWriterFuncs, fmtReaderFuncs, pureScalarOrValuePackages, pureHashPackages, goASTNodeInterfaces, goParserSourceFuncs} {
 		defer delete(table, "identity-test")
 		table["identity-test"] = true
 		changed := Identity()
@@ -252,7 +267,7 @@ func TestIdentityCoversAdmissionInventories(t *testing.T) {
 	if changedRO == base || Identity() != base {
 		t.Fatal("auditedReadOnlyVarLinknameTargets did not key its identity")
 	}
-	for _, table := range []map[string][]string{syncMethods, poolMethods, memoMethods, timeMethods, reflectMethods, randMethods, atomicMethods, standardSentinelGlobals, inMemoryWriterTypes, inMemoryReaderTypes, valuePlaneFuncs, readOnlySliceInspectFuncs, readOnlySliceCopyFuncs, inPlaceContainerMutateFuncs, pureScalarOrValueFuncs} {
+	for _, table := range []map[string][]string{syncMethods, poolMethods, memoMethods, timeMethods, reflectMethods, randMethods, atomicMethods, goASTMethods, runtimeDebugMethods, standardSentinelGlobals, inMemoryWriterTypes, inMemoryReaderTypes, valuePlaneFuncs, readOnlySliceInspectFuncs, readOnlySliceCopyFuncs, inPlaceContainerMutateFuncs, pureScalarOrValueFuncs, writerFirstExtraStdFuncs} {
 		defer delete(table, "identity-test")
 		table["identity-test"] = []string{"Second", "First"}
 		changed := Identity()
@@ -268,7 +283,7 @@ func TestIdentityCoversAdmissionInventories(t *testing.T) {
 }
 
 func TestUnifiedSurfaceAndTraitQueries(t *testing.T) {
-	if got := PackageSymbols("fmt"); !slices.Equal(got, []string{"Append", "Appendf", "Appendln", "Errorf", "FormatString", "Sprint", "Sprintf", "Sprintln", "Stringer"}) {
+	if got := PackageSymbols("fmt"); !slices.Equal(got, []string{"Append", "Appendf", "Appendln", "Errorf", "FormatString", "Formatter", "GoStringer", "ScanState", "Scanner", "Sprint", "Sprintf", "Sprintln", "Sscan", "Sscanf", "Sscanln", "State", "Stringer"}) {
 		t.Fatalf("PackageSymbols(fmt) = %v", got)
 	}
 	syncSyms := PackageSymbols("sync")
@@ -502,6 +517,160 @@ func TestIsGeneratedMarker(t *testing.T) {
 	} {
 		if got := IsGeneratedMarker(tc.text); got != tc.want {
 			t.Errorf("IsGeneratedMarker(%q) = %v, want %v", tc.text, got, tc.want)
+		}
+	}
+}
+
+func TestSyntaxTabwriterHashAndBuildInfoPredicatesAndGOROOTPartition(t *testing.T) {
+	for _, pkg := range []string{
+		"crypto/md5", "crypto/sha1", "crypto/sha256", "crypto/sha512",
+		"crypto/internal/fips140/sha256", "crypto/internal/fips140/sha512", "crypto/internal/fips140/sha3",
+		"hash/adler32", "hash/crc32", "hash/crc64", "hash/fnv",
+	} {
+		if !PureHashPackage(pkg) {
+			t.Errorf("PureHashPackage(%q) = false, want true", pkg)
+		}
+	}
+	for _, nonPureHash := range []string{"hash/maphash", "hash", "crypto/hmac", "crypto/rand"} {
+		if PureHashPackage(nonPureHash) {
+			t.Errorf("PureHashPackage(%q) = true, want false", nonPureHash)
+		}
+	}
+
+	for _, iface := range []string{"Node", "Expr", "Stmt", "Decl", "Spec"} {
+		if !GoASTNodeInterface(iface) {
+			t.Errorf("GoASTNodeInterface(%q) = false, want true", iface)
+		}
+	}
+	for _, other := range []string{"Visitor", "File", "Ident", ""} {
+		if GoASTNodeInterface(other) {
+			t.Errorf("GoASTNodeInterface(%q) = true, want false", other)
+		}
+	}
+
+	if !WriterFirstStdFunc("fmt", "Fprintf") || !WriterFirstStdFunc("fmt", "Fprint") || !WriterFirstStdFunc("fmt", "Fprintln") ||
+		!WriterFirstStdFunc("go/scanner", "PrintError") ||
+		WriterFirstStdFunc("go/ast", "Fprint") || WriterFirstStdFunc("go/ast", "Print") ||
+		WriterFirstStdFunc("fmt", "Sprintf") || WriterFirstStdFunc("go/scanner", "Scan") {
+		t.Fatal("WriterFirstStdFunc classification mismatch")
+	}
+
+	if !GoParserSourceFunc("ParseFile") || !GoParserSourceFunc("ParseExprFrom") ||
+		GoParserSourceFunc("ParseExpr") || GoParserSourceFunc("ParseDir") {
+		t.Fatal("GoParserSourceFunc classification mismatch")
+	}
+
+	// Verify exact partition of exported symbols and methods on exported types in $GOROOT/src.
+	exclusions := map[string]map[string]bool{
+		"text/tabwriter": {},
+		"go/token":       {"Read": true, "Write": true},
+		"go/scanner":     {"PrintError": true},
+		"go/ast": {
+			"Print": true, "Fprint": true, "NotNilFilter": true,
+			"NewPackage": true, "Importer": true, "String": true,
+		},
+		"go/parser": {"ParseFile": true, "ParseExprFrom": true, "ParseDir": true},
+		"runtime/debug": {
+			"ReadBuildInfo": true, "String": true,
+			"CrashOptions": true, "FreeOSMemory": true, "GCStats": true,
+			"PrintStack": true, "ReadGCStats": true, "SetCrashOutput": true,
+			"SetGCPercent": true, "SetMaxStack": true, "SetMaxThreads": true,
+			"SetMemoryLimit": true, "SetPanicOnFault": true, "SetTraceback": true,
+			"Stack": true, "WriteHeapDump": true,
+		},
+	}
+
+	goroot := runtime.GOROOT()
+	fset := token.NewFileSet()
+	for pkgPath, excluded := range exclusions {
+		dir := filepath.Join(goroot, "src", filepath.FromSlash(pkgPath))
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read %s: %v", dir, err)
+		}
+		exportedTypes := map[string]bool{}
+		var files []*ast.File
+		for _, ent := range entries {
+			if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".go") || strings.HasSuffix(ent.Name(), "_test.go") {
+				continue
+			}
+			f, err := parser.ParseFile(fset, filepath.Join(dir, ent.Name()), nil, 0)
+			if err != nil {
+				t.Fatalf("parse %s/%s: %v", pkgPath, ent.Name(), err)
+			}
+			files = append(files, f)
+			for _, decl := range f.Decls {
+				gd, ok := decl.(*ast.GenDecl)
+				if !ok || gd.Tok != token.TYPE {
+					continue
+				}
+				for _, sp := range gd.Specs {
+					ts := sp.(*ast.TypeSpec)
+					if ts.Name != nil && ast.IsExported(ts.Name.Name) {
+						exportedTypes[ts.Name.Name] = true
+					}
+				}
+			}
+		}
+		seen := map[string]bool{}
+		for _, f := range files {
+			for _, decl := range f.Decls {
+				switch d := decl.(type) {
+				case *ast.GenDecl:
+					for _, sp := range d.Specs {
+						switch s := sp.(type) {
+						case *ast.ValueSpec:
+							for _, id := range s.Names {
+								if ast.IsExported(id.Name) {
+									seen[id.Name] = true
+								}
+							}
+						case *ast.TypeSpec:
+							if s.Name != nil && ast.IsExported(s.Name.Name) {
+								seen[s.Name.Name] = true
+								if iface, ok := ast.Unparen(s.Type).(*ast.InterfaceType); ok && iface.Methods != nil {
+									for _, m := range iface.Methods.List {
+										for _, id := range m.Names {
+											if ast.IsExported(id.Name) {
+												seen[id.Name] = true
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				case *ast.FuncDecl:
+					if d.Name == nil || !ast.IsExported(d.Name.Name) {
+						continue
+					}
+					if d.Recv == nil {
+						seen[d.Name.Name] = true
+						continue
+					}
+					if len(d.Recv.List) == 1 {
+						rt := ast.Unparen(d.Recv.List[0].Type)
+						if st, ok := rt.(*ast.StarExpr); ok {
+							rt = ast.Unparen(st.X)
+						}
+						if id, ok := rt.(*ast.Ident); ok && exportedTypes[id.Name] {
+							seen[d.Name.Name] = true
+						}
+					}
+				}
+			}
+		}
+		for sym := range seen {
+			admitted := Symbol(pkgPath, sym)
+			isExcluded := excluded[sym]
+			if admitted == isExcluded {
+				t.Errorf("%s.%s: Symbol=%v, excluded=%v (must be in exactly one)", pkgPath, sym, admitted, isExcluded)
+			}
+		}
+		for sym := range symbolTables[pkgPath] {
+			if !seen[sym] {
+				t.Errorf("%s.%s listed in symbolTables[%q] but not found in GOROOT/src", pkgPath, sym, pkgPath)
+			}
 		}
 	}
 }

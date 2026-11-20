@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -101,7 +100,6 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 	}
 	v.mu.RLock()
 	dir := v.moduleDir
-	env := v.session.env
 	flags := v.session.buildFlags
 	patterns := append([]string(nil), v.packages...)
 	var snapshot *gotool.EnvSnapshot
@@ -112,21 +110,33 @@ func (v *Snapshot) ExplainDynamicState(ctx context.Context, pkgPath, varName str
 	if len(patterns) == 0 {
 		patterns = []string{pkgPath}
 	}
-	pkgs, err := gotool.LoadPackages(ctx, packages.LoadAllSyntax|packages.NeedForTest|packages.NeedModule|packages.NeedEmbedFiles|packages.NeedEmbedPatterns, dir, env, flags, patterns...)
+	loadDir := dir
+	if loadDir == "" {
+		loadDir = v.session.dir
+	}
+	loadReader := gotool.NewEnvReader(v.session.runner, loadDir, v.session.env)
+	if snapshot != nil {
+		loadReader = gotool.PrimedEnvReader(v.session.runner, loadDir, v.session.env, snapshot)
+	}
+	load, err := closure.LoadViewGraph(ctx, loadReader, flags, patterns...)
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: load: %w", err)
 	}
+	pkgs := load.Packages()
 	for _, p := range pkgs {
 		if len(p.Errors) > 0 {
 			return Chain{}, fmt.Errorf("explain: load %s: %v", p.PkgPath, p.Errors[0])
 		}
 	}
 	varKey := pkgPath + "." + varName
-	reader := v.session.newPassReader()
-	if snapshot != nil {
-		reader = gotool.PrimedEnvReader(v.session.runner, v.session.dir, v.session.env, snapshot)
+	reader := loadReader
+	if v.session.dir != "" && v.session.dir != loadDir {
+		reader = v.session.newPassReader()
+		if snapshot != nil {
+			reader = gotool.PrimedEnvReader(v.session.runner, v.session.dir, v.session.env, snapshot)
+		}
 	}
-	sel, err := resolveToolchainSelection(ctx, reader, v.session.buildFlags...)
+	sel, err := resolveToolchainSelection(ctx, reader, flags...)
 	if err != nil {
 		return Chain{}, fmt.Errorf("explain: toolchain selection: %w", err)
 	}
@@ -150,7 +160,7 @@ func explainCulpritCtx(ctx context.Context, audited bool, roots []*packages.Pack
 	variants := map[string][]*packages.Package{}
 	var order []*packages.Package
 	packages.Visit(roots, func(p *packages.Package) bool {
-		if p.Module == nil || (p.Name == "main" && strings.HasSuffix(p.PkgPath, ".test")) {
+		if p.Module == nil || closure.IsGeneratedTestMainPackage(p) {
 			return true
 		}
 		variants[p.PkgPath] = append(variants[p.PkgPath], p)
@@ -221,39 +231,16 @@ func explainCulpritCtx(ctx context.Context, audited bool, roots []*packages.Pack
 	seenMetaID := map[string]bool{}
 	for _, p := range order {
 		facts[p.PkgPath] = append(facts[p.PkgPath], dynstate.FactOfWithHooksCtx(ctx, audited, p, singleSubject, hooks))
-		nodeID := p.ID
-		if nodeID == "" {
-			nodeID = p.PkgPath
-		}
+		nodeID := closure.LoadedListingID(p)
 		if !seenMetaID[nodeID] {
 			seenMetaID[nodeID] = true
-			pkgDir := p.Dir
-			if pkgDir == "" && len(p.GoFiles) > 0 {
-				pkgDir = filepath.Dir(p.GoFiles[0])
-			}
-			if pkgDir == "" && len(p.OtherFiles) > 0 {
-				pkgDir = filepath.Dir(p.OtherFiles[0])
-			}
-			if pkgDir == "" && len(p.EmbedFiles) > 0 {
-				pkgDir = filepath.Dir(p.EmbedFiles[0])
-			}
-			if pkgDir == "" && p.Module != nil {
-				if p.Module.Replace != nil && p.Module.Replace.Dir != "" {
-					pkgDir = p.Module.Replace.Dir
-				} else {
-					pkgDir = p.Module.Dir
-				}
-			}
-			class := dynstate.MutableLocalPackage
-			if p.Module != nil && !p.Module.Main && ((pkgDir == "" && modCache == "") || closure.IsPinnedPackageDir(false, pkgDir, modCache)) {
-				class = dynstate.PinnedPackage
-			}
+			class, pin := closure.ClassifyLoadedPackage(p, modCache)
 			var impPaths []string
 			if len(p.Imports) > 0 {
 				impPaths = make([]string, 0, len(p.Imports))
 				for impPath, impPkg := range p.Imports {
-					if impPkg != nil && impPkg.ID != "" {
-						impPaths = append(impPaths, impPkg.ID)
+					if impPkg != nil {
+						impPaths = append(impPaths, closure.LoadedListingID(impPkg))
 					} else {
 						impPaths = append(impPaths, impPath)
 					}
@@ -266,6 +253,7 @@ func explainCulpritCtx(ctx context.Context, audited bool, roots []*packages.Pack
 				ForTest:    p.ForTest,
 				Imports:    impPaths,
 				Class:      class,
+				Pin:        pin,
 			})
 		}
 	}
