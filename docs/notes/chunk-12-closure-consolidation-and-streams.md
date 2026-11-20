@@ -106,6 +106,24 @@
 8. **`R1-F8` (`[LOW]`, confirmed & fixed) — `moduleGraphInputs` under symlinked `h.dir`**:
    - *Diagnosis*: When `h.dir` traversed a symlink while `GOMOD` resolved to the real path, `isDirWithin(dir, candidate)` failed and `requireMainModule: false` returned `ok = true` without recording intermediate `go.mod` sentinels.
    - *Fix*: Set `requireMainModule: true` in `moduleGraphInputs` (`dynamicstate.go`) and resolved `EvalSymlinks(dir)` in `collectModuleInputs` (`module_inputs.go`) so both logical and physical `go.work` and intermediate `go.mod` chains are recorded.
-   - *Regression test*: Symlinked `h.dir` `SnapshotScanInputs` + mid-load `sub/go.mod` creation check in `TestNestedWorkspaceListingAndModuleInputs` (`memo_scope_test.go`).
+   - *Regression test*: Symlinked `h.dir` `SnapshotScanInputs` + mid-load `sub/go.mod` creation check in `TestCollectModuleInputsNestedWorkspaceTransitiveReplacesAndDanglingSymlink` (`memo_scope_test.go`).
+
+## 5. Round 2 Adversarial Review Dispositions (`R2-F1..R2-F3`)
+
+1. **`R2-F1` (`[HIGH]`, confirmed & fixed) — `checkMakeInterfaceStdHooks` bypasses via `ast.Visitor -> any` widening and `*ssa.TypeAssert` interface assertions**:
+   - *Diagnosis*: `isGoASTTraversalInterfaceType` exempted boxing into `go/ast.Visitor` while `walkValueTypes` omitted `"Visitor"` from its `go/ast` named-type switch, and `scanInstruction` / `walkDirectFlowEffects` checked `*ssa.MakeInterface` and `*ssa.ChangeInterface` without checking `*ssa.TypeAssert` to an interface type (`n.(any)`).
+   - *Fix*: Added `"Visitor"` to the `go/ast` named-type switch in `checkMakeInterfaceStdHooks` and extracted shared `(*tier2Analyzer).checkInstructionStdHooks` (`parser_and_ast.go`) covering `*ssa.MakeInterface`, `*ssa.ChangeInterface`, and interface-target `*ssa.TypeAssert` across `scanInstruction` (`analyzer.go`) and `walkDirectFlowEffects` (`observability.go`).
+   - *Regression tests*: `TestFmtSprintWidenedASTVisitorRejected`, `TestFmtSprintTypeAssertedASTNodeRejected`, and concrete `*ast.GenDecl` type-assertion positive control (`stream_and_consolidation_test.go`).
+
+2. **`R2-F2` (`[HIGH]`, confirmed & fixed) — Cross-scope `stdAlloc` / `MakeInterface` seed under-approximation on mutable/rebindable stdlib carrier structs & `rootedFunctionsStrategy` bump**:
+   - *Diagnosis*: `walkDynamicValueUncached` (`case *ssa.Alloc:` and `case *ssa.MakeInterface:` `carriesInner`) treated stdlib heap allocations (`tabwriter.NewWriter`, `bufio.NewWriter*`/`NewReader*`/`NewScanner`, `io.LimitReader`) as closed leaves from constructor arguments alone even in cross-scope walks (`fp.enumOnly || fp.inFieldStore || fp.inProgramSites`), missing post-construction in-place `.Init`/`.Reset`/`.Split` or exported-field carrier mutations (`tw.Init(envWriter{}, ...)`, `lr.R = envReader{}`) in callers outside the subject's cone.
+   - *Fix*: Added `isMutableStdCarrierAllocType` (`dynamic_walk.go`, detecting exported dynamic-carrying struct fields and exported `Init`/`Reset`/`Split` methods accepting dynamic-carrying parameters mechanically from `go/types`) to both `case *ssa.Alloc:` (`stdAlloc`) and `case *ssa.MakeInterface:` (`carriesInner`) when `fp.enumOnly || fp.inFieldStore || fp.inProgramSites`, and bumped `rootedFunctionsStrategy` (`16 -> 17` in `scope.go`).
+   - *Regression test*: `TestSubjectEnumerationRebindableStdWrapperRefused` (`EmitTabwriter`, `Report.EmitMethod`, `EmitBufioWriter`, `EmitLimitedReader`, plus immutable `EmitSectionReader` positive control across `ComputeObservabilityBatch` and `ComputeRootedFunctions`).
+
+3. **`R2-F3` (`[MEDIUM]`, confirmed & fixed) — Unbounded recursion on cyclic stream wrappers + cross-call `Phi` helper origin memoization**:
+   - *Diagnosis*: `walkCallOrigin` and `verifyHMACNewCall` passed literal `1` rather than `curDepth+1` into recursive `inMemoryStreamValue` / `verifyWrapperRootConfined` calls, allowing loop-carried `Phi` wrappers (`w = bufio.NewWriter(w)`) and self-wrapping `hmac.New` factories to recurse unboundedly; additionally, `visited[cur]` in `verifyStatefulStreamOrigin` was shared across distinct `callBindings` frames (`Phi(idWriter(bwGood), idWriter(bwBad))`).
+   - *Fix*: Threaded `curDepth+1` (`curDepth > 16` bound) across `walkOrigin`, `walkCallOrigin`, `verifyHMACNewCall`, `inMemoryStreamValue`, and `verifyWrapperRootConfined`, replaced unconditional `visited` cycle acceptance with DFS `inStack` cycle rejection (`"cyclic_stream_origin"`), and restricted `topMemo` to top-level frames (`len(curFP.callBindings) == 0 && len(curStack) == 0`).
+   - *Regression tests*: `TestLoopWrappedBufioWriterRejected`, `TestRecursiveHMACFactoryRejected`, and `TestPhiSameHelperTwoBufioArgsRejected` (`stream_and_consolidation_test.go`).
+
 
 
