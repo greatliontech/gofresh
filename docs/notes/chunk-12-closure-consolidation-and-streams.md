@@ -125,5 +125,13 @@
    - *Fix*: Threaded `curDepth+1` (`curDepth > 16` bound) across `walkOrigin`, `walkCallOrigin`, `verifyHMACNewCall`, `inMemoryStreamValue`, and `verifyWrapperRootConfined`, replaced unconditional `visited` cycle acceptance with DFS `inStack` cycle rejection (`"cyclic_stream_origin"`), and restricted `topMemo` to top-level frames (`len(curFP.callBindings) == 0 && len(curStack) == 0`).
    - *Regression tests*: `TestLoopWrappedBufioWriterRejected`, `TestRecursiveHMACFactoryRejected`, and `TestPhiSameHelperTwoBufioArgsRejected` (`stream_and_consolidation_test.go`).
 
+## 6. Round 3 Adversarial Review Dispositions (`R3-F1`)
+
+1. **`R3-F1` (`[HIGH]`, confirmed & fixed) — Generalize `isMutableStdCarrierAllocType` from `Init`/`Reset`/`Split` to exported API surface (`container/list`, `io.Pipe`, preserving `context.cancelCtx`)**:
+   - *Diagnosis*: `isMutableStdCarrierAllocType` checked only `case "Init", "Reset", "Split":` and top-level fields, missing `(*container/list.List).PushBack(v any)` / `Front() *Element` and `(*io.PipeReader).CloseWithError(err error)`. Walking unexported fields unconditionally would falsely classify `context.cancelCtx` (`done atomic.Value`) as externally mutable; restricting recursion to the exported surface (exported fields on exported structs + same-package struct results of exported methods + exported methods accepting `typeMayCarryDynamicTop` parameters, excluding `WriteTo`, `ReadFrom`, `strings.WriteString`, and `context.Value`) matches Go package encapsulation.
+   - *Fix*: Updated `isMutableStdCarrierAllocType` (`dynamic_walk.go`, `971` LOC) to walk exported fields and exported method signatures/results.
+   - *Regression tests*: `TestSubjectEnumerationRebindableStdWrapperRefused` (`FormatListFront`, `FormatPipeErr`, `EmitNopCloser`) and `TestIsMutableStdCarrierAllocTypeStructuralMatrix` (`stream_and_consolidation_test.go`).
+
+
 
 
