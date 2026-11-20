@@ -1,6 +1,7 @@
 package runtimeinput
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -56,14 +57,16 @@ func captureGuards(frame ProducerFrame, ctx context.Context, path string, in Pro
 	if err := ctx.Err(); err != nil {
 		return Observation{}, "", err
 	}
-	log, reason, err := readProducerLog(ctx, path)
+	in.Env = slices.Clone(in.Env)
+	file, br, reason, err := openProducerCapture(ctx, path)
 	if err != nil {
 		return Observation{}, "", err
 	}
 	if reason != "" {
 		return frame.incomplete(ctx, in, reason)
 	}
-	return frame.captureBytes(ctx, log, in)
+	defer file.Close()
+	return frame.captureStream(ctx, br, in, nil, false)
 }
 
 // The facade's completed path reproduces the hand-assembled conjunction
@@ -558,7 +561,10 @@ func TestReadProducerLogRetainsCaptureFailureAndCancellation(t *testing.T) {
 	}{
 		{"", 0}, {missing, 1}, {good, 4},
 	} {
-		_, _, err := readProducerLog(&cancelAfterChecks{Context: context.Background(), after: tc.after}, tc.path)
+		f, _, _, err := openProducerCapture(&cancelAfterChecks{Context: context.Background(), after: tc.after}, tc.path)
+		if f != nil {
+			_ = f.Close()
+		}
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancel after %d checks at %q: %v", tc.after, tc.path, err)
 		}
@@ -569,14 +575,24 @@ func TestReadProducerLogRetainsCaptureFailureAndCancellation(t *testing.T) {
 		{filepath.Join(t.TempDir(), "bad\x00path"), "bad\\x00path"},
 		{t.TempDir(), "capture unreadable"},
 	} {
-		data, reason, err := readProducerLog(context.Background(), tc.path)
-		if err != nil || len(data) != 0 || !strings.Contains(reason, tc.want) {
-			t.Fatalf("capture %q: data=%q reason=%q err=%v; want %q", tc.path, data, reason, err, tc.want)
+		f, _, reason, err := openProducerCapture(context.Background(), tc.path)
+		if f != nil {
+			_ = f.Close()
+		}
+		if err != nil || !strings.Contains(reason, tc.want) {
+			t.Fatalf("capture %q: file=%v reason=%q err=%v; want %q", tc.path, f, reason, err, tc.want)
 		}
 	}
-	data, reason, err := readProducerLog(context.Background(), good)
-	if err != nil || reason != "" || string(data) != "# test log\ngetenv VALUE\n" {
-		t.Fatalf("valid capture lost: %q %q %v", data, reason, err)
+	f, br, reason, err := openProducerCapture(context.Background(), good)
+	if f != nil {
+		defer f.Close()
+	}
+	if err != nil || reason != "" || f == nil || br == nil {
+		t.Fatalf("valid capture lost: %v %q %v", f, reason, err)
+	}
+	rest, err := io.ReadAll(br)
+	if err != nil || string(rest) != "getenv VALUE\n" {
+		t.Fatalf("valid capture body lost: %q %v", rest, err)
 	}
 }
 
@@ -584,7 +600,7 @@ func TestEnvironmentLogChecksCancellationBeforeScreening(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	for _, log := range []string{"", "# test log\n", "open fixture\n"} {
-		if _, err := environmentLog(ctx, []byte(log)); !errors.Is(err, context.Canceled) {
+		if _, err := drainAndScreenCapture(ctx, bufio.NewReader(strings.NewReader(log)), true); !errors.Is(err, context.Canceled) {
 			t.Fatalf("cancelled screen of %q: %v", log, err)
 		}
 	}
@@ -594,6 +610,9 @@ func TestReadProducerLogClosesItsFile(t *testing.T) {
 	if _, err := os.Stat("/proc/self/fd"); err != nil {
 		t.Skip("requires /proc/self/fd")
 	}
+	root, dir := producerModule(t)
+	frame := CaptureProducerFrame(context.Background(), root, dir, FrameOptions{})
+	in := supportedIngest(t, frame, "worker", producerEnv(dir))
 	good := writeTestlog(t, "")
 	alias := filepath.Join(t.TempDir(), "alias")
 	if err := os.Symlink(filepath.Dir(good), alias); err != nil {
@@ -619,7 +638,16 @@ func TestReadProducerLogClosesItsFile(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, reason, err := readProducerLog(tc.ctx, tc.path)
+			var reason string
+			if tc.cancelled || tc.rejected {
+				var f *os.File
+				f, _, reason, err = openProducerCapture(tc.ctx, tc.path)
+				if f != nil {
+					_ = f.Close()
+				}
+			} else {
+				_, reason, err = frame.Observe(tc.ctx, tc.path, in)
+			}
 			if tc.cancelled {
 				if !errors.Is(err, context.Canceled) {
 					t.Fatalf("cancelled capture: %v", err)
@@ -973,7 +1001,7 @@ func TestCaptureCancellationCannotBecomeIncompleteEvidence(t *testing.T) {
 		t.Fatalf("early refusal recorded cancellation: %+v %q %v", obs, reason, err)
 	}
 	screen := &cancelAfterChecks{Context: context.Background(), after: 8}
-	if _, err := environmentLog(screen, []byte(strings.Repeat("getenv VALUE\n", 64))); !errors.Is(err, context.Canceled) {
+	if _, err := drainAndScreenCapture(screen, bufio.NewReader(strings.NewReader(strings.Repeat("getenv VALUE\n", 64))), true); !errors.Is(err, context.Canceled) {
 		t.Fatalf("operation screen ignored cancellation: %v", err)
 	}
 	// OS errors may contain arbitrary path bytes. Their attribution must not

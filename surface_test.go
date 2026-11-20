@@ -517,6 +517,7 @@ func TestExportedSurfaceInventory(t *testing.T) {
 		reflect.TypeFor[RuntimeState](),
 		reflect.TypeFor[Bracket](),
 		reflect.TypeFor[ScratchNamespace](),
+		reflect.TypeFor[TrackedChdirSupport](),
 		reflect.TypeFor[Guards](),
 		reflect.TypeFor[TestVariantLedger](),
 	} {

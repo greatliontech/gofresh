@@ -74,6 +74,8 @@ type tier2Base struct {
 	binaryUnsafeReason     string
 	pkgUnsafeKnown         map[string]bool
 	pkgUnsafeHazard        map[string]bool
+	binaryChdirDone        bool
+	binaryChdirSafe        bool
 }
 
 type tier2Analyzer struct {

@@ -63,7 +63,11 @@ proof's integrity evidence), producing capture, check admission, and current
 applicability extension require the caller's single-subject-process
 execution attestation (`SingleSubjectExecution`), refusing shared-process capture
 and cross-mode replay fail-closed and recording `SingleSubject` on the accepted
-`ObservationAuthority`. Unknown,
+`ObservationAuthority`. Likewise, tracked-`chdir` unsealing during test-log
+finalization requires an unforgeable analysis-issued `TrackedChdirSupport`
+capability bound to the execution's `ProducerFrame` span, root, and package
+directory; zero, mismatched, or unproven capabilities retain fail-closed
+untracked `chdir` sealing. Unknown,
 absent or incompatible support supplies no positive evidence. Hashes, seals,
 successful decoding, set union and current reconstruction establish none of
 the missing historical premises. Explicit purity keeps its specified override

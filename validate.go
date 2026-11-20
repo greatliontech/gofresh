@@ -128,10 +128,11 @@ func (v *Snapshot) Validate(ctx context.Context) (opErr error) {
 	if err != nil {
 		return err
 	}
-	if err := v.compareObservationContext(ctx, observation); err != nil {
+	var unavailable error
+	if err := deferValidationUnavailability(v.compareObservationContext(ctx, observation), &unavailable); err != nil {
 		return err
 	}
-	return ctx.Err()
+	return v.resolveValidationUnavailable(ctx, nil, unavailable)
 }
 
 // newSeededValidationView builds the validation arm's view from one fresh
@@ -278,6 +279,9 @@ func deferValidationUnavailability(err error, unavailable *error) error {
 
 func (v *Snapshot) resolveValidationUnavailable(ctx context.Context, current *Snapshot, unavailable error) error {
 	for _, held := range []*Snapshot{v, current} {
+		if held == nil {
+			continue
+		}
 		held.mu.RLock()
 		cut := held.cutUnavailable
 		held.mu.RUnlock()

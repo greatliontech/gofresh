@@ -801,24 +801,26 @@ func ParseAndTypecheckDAGWithStdlib(t testing.TB, env []string, virtualDir strin
 
 // ParseAndTypecheckDAGWithStdlibErr is the error-returning form of
 // ParseAndTypecheckDAGWithStdlib for callers without a testing.TB handle.
-// When virtualDir is empty, a temporary directory is allocated and registered
-// for removal by CleanupShared.
-func ParseAndTypecheckDAGWithStdlibErr(env []string, virtualDir string, filesByPkg map[string]map[string]string) ([]*packages.Package, string, error) {
+// When virtualDir is empty, a temporary directory is allocated and removed by
+// the returned cleanup function (or immediately when parsing/typechecking fails).
+func ParseAndTypecheckDAGWithStdlibErr(env []string, virtualDir string, filesByPkg map[string]map[string]string) ([]*packages.Package, string, func(), error) {
+	cleanup := func() {}
 	if virtualDir == "" {
 		tmp, err := os.MkdirTemp("", "gofresh-inmem-pkg-*")
 		if err != nil {
-			return nil, "", err
+			return nil, "", nil, err
 		}
-		sharedOverlaysMu.Lock()
-		sharedOverlayDirs = append(sharedOverlayDirs, tmp)
-		sharedOverlaysMu.Unlock()
+		cleanup = sync.OnceFunc(func() {
+			_ = os.RemoveAll(tmp)
+		})
 		virtualDir = tmp
 	}
 	pkgs, err := parseAndTypecheckDAG(env, virtualDir, nil, filesByPkg, true)
 	if err != nil {
-		return nil, "", err
+		cleanup()
+		return nil, "", nil, err
 	}
-	return pkgs, virtualDir, nil
+	return pkgs, virtualDir, cleanup, nil
 }
 
 type parsedPkgUnit struct {

@@ -1,10 +1,12 @@
 package runtimeinput
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,6 +27,11 @@ type OutcomeBinding = outcome.Binding
 // Only the analysis view constructs support; the zero value grants none.
 type OutcomeSupport = outcome.Support
 
+// TrackedChdirSupport is an opaque analysis-derived capability certifying that
+// the producing test binary satisfies the toolchain and binary-graph premises
+// for balanced LIFO testing.Chdir excursion tracking. The zero value grants none.
+type TrackedChdirSupport = outcome.TrackedChdirSupport
+
 // CompletionReceipt records the result owner's terminal harness judgment.
 // Normal completion includes ordinarily completed failing tests; it does not
 // establish operation outcomes. The zero value grants no completion premise.
@@ -41,7 +48,10 @@ type CompletionReceipt struct {
 // would seal "no runtime inputs observed" over a run that observed
 // freely. The trailing newline is part of the proof: the runtime writes
 // the full line, so a capture truncated inside it never ingests.
-var testlogHeader = []byte("# test log\n")
+var (
+	testlogHeaderLine = []byte("# test log")
+	getenvLinePrefix  = []byte("getenv ")
+)
 
 // ProducerFrame is the resolved frame one producer process's completed
 // observation is captured and ingested under: the tree root and package
@@ -132,8 +142,9 @@ type ProducerIngest struct {
 	// Completion and Outcome are independent premises bound to this process,
 	// environment and frame. Neither the receipt nor the capture supplies the
 	// other's missing evidence.
-	Completion CompletionReceipt
-	Outcome    OutcomeSupport
+	Completion   CompletionReceipt
+	Outcome      OutcomeSupport
+	TrackedChdir TrackedChdirSupport
 	// ScratchRoot declares a per-run scratch root the producer minted
 	// for the process. This declares a filesystem-root admission, never an
 	// environment projection: Env still carries the value actually delivered
@@ -187,7 +198,7 @@ func (f ProducerFrame) observe(ctx context.Context, testlogPath string, in Produ
 	// Bind and finalize from one owned environment, even when a runner hook
 	// updates the caller's configuration while resolving classification roots.
 	in.Env = slices.Clone(in.Env)
-	binding, reason := f.completionPremise(in)
+	normalized, binding, reason := f.completionPremiseNormalized(in)
 	if reason == "" && requireOutcomes {
 		reason = in.Outcome.Reason(binding)
 	}
@@ -195,25 +206,18 @@ func (f ProducerFrame) observe(ctx context.Context, testlogPath string, in Produ
 		in.Outcome = OutcomeSupport{}
 	}
 	if reason != "" {
-		return f.incomplete(ctx, in, reason)
+		return f.incompleteNormalized(ctx, in, normalized, reason)
 	}
-	log, reason, err := readProducerLog(ctx, testlogPath)
+	file, br, reason, err := openProducerCapture(ctx, testlogPath)
 	if err != nil {
 		return Observation{}, "", err
 	}
 	if reason != "" {
-		return f.incomplete(ctx, in, reason)
+		return f.incompleteNormalized(ctx, in, normalized, reason)
 	}
-	if requireOutcomes {
-		allowed, err := environmentLog(ctx, log)
-		if err != nil {
-			return Observation{}, "", err
-		}
-		if !allowed {
-			return f.incomplete(ctx, in, "operation-outcome support does not cover the captured operations")
-		}
-	}
-	observation, reason, err := f.captureBytes(ctx, log, in)
+	defer file.Close()
+
+	observation, reason, err := f.captureStream(ctx, br, in, normalized, requireOutcomes)
 	if err != nil || reason != "" {
 		return observation, reason, err
 	}
@@ -224,14 +228,33 @@ func (f ProducerFrame) observe(ctx context.Context, testlogPath string, in Produ
 }
 
 func (f ProducerFrame) incomplete(ctx context.Context, in ProducerIngest, reason string) (Observation, string, error) {
+	return f.incompleteNormalized(ctx, in, nil, reason)
+}
+
+func (f ProducerFrame) incompleteNormalized(ctx context.Context, in ProducerIngest, normalized []string, reason string) (Observation, string, error) {
 	if err := ctx.Err(); err != nil {
 		return Observation{}, "", err
 	}
-	observation, err := incompleteContext(ctx, f.Root, in.Identity, reason, in.Env)
+	var observation Observation
+	var err error
+	if normalized != nil {
+		observation, err = incompleteNormalizedContext(ctx, f.Root, in.Identity, reason, normalized)
+	} else {
+		observation, err = incompleteContext(ctx, f.Root, in.Identity, reason, in.Env)
+	}
 	if err := ctx.Err(); err != nil {
 		return Observation{}, "", err
 	}
 	return observation, reason, err
+}
+
+// PrepareTrackedChdir binds an analysis-verified tracked-chdir capability to
+// this pre-execution frame when the frame carries a valid bracket.
+func (f ProducerFrame) PrepareTrackedChdir(safe bool) TrackedChdirSupport {
+	if f.bracket == nil {
+		return TrackedChdirSupport{}
+	}
+	return outcome.PrepareTrackedChdir(f.span, f.Root, f.PkgDir, safe)
 }
 
 // Completion records the caller's verified terminal disposition for this frame,
@@ -249,18 +272,23 @@ func (f ProducerFrame) Completion(process string, env []string, reason string) (
 // view. Its value is not a support constructor; it supplies execution
 // coordinates only.
 func (f ProducerFrame) OutcomeBinding(process string, env []string) (OutcomeBinding, error) {
+	_, binding, err := f.outcomeBindingNormalized(process, env)
+	return binding, err
+}
+
+func (f ProducerFrame) outcomeBindingNormalized(process string, env []string) ([]string, OutcomeBinding, error) {
 	if err := validateProcess(process); err != nil {
-		return OutcomeBinding{}, err
+		return nil, OutcomeBinding{}, err
 	}
 	normalized, err := normalizeEnvironment(env)
 	if err != nil {
-		return OutcomeBinding{}, err
+		return nil, OutcomeBinding{}, err
 	}
 	// NormalizeEnv rejects NUL bytes, so this delimiter frames the original
 	// bytes injectively, including Linux environment values that are not UTF-8.
 	// JSON strings would replace those bytes and equate distinct executions.
 	digest := sha256.Sum256([]byte(strings.Join(normalized, "\x00")))
-	return outcome.Bind(f.span, process, hex.EncodeToString(digest[:]), f.Root, f.PkgDir), nil
+	return normalized, outcome.Bind(f.span, process, hex.EncodeToString(digest[:]), f.Root, f.PkgDir), nil
 }
 
 // HasOutcomeSupport reports whether a canonical manifest retains support for
@@ -287,46 +315,35 @@ func OutcomeSupportSet(encoded string) map[string]bool {
 }
 
 func (f ProducerFrame) completionPremise(in ProducerIngest) (OutcomeBinding, string) {
+	_, binding, reason := f.completionPremiseNormalized(in)
+	return binding, reason
+}
+
+func (f ProducerFrame) completionPremiseNormalized(in ProducerIngest) ([]string, OutcomeBinding, string) {
 	if in.Completion.binding == (OutcomeBinding{}) {
-		return OutcomeBinding{}, "process completion receipt unavailable"
+		return nil, OutcomeBinding{}, "process completion receipt unavailable"
 	}
-	binding, err := f.OutcomeBinding(in.Identity, in.Env)
+	normalized, binding, err := f.outcomeBindingNormalized(in.Identity, in.Env)
 	if err != nil {
-		return OutcomeBinding{}, fmt.Sprintf("process binding invalid: %v", err)
+		return nil, OutcomeBinding{}, fmt.Sprintf("process binding invalid: %v", err)
 	}
 	if in.Completion.binding != binding {
-		return OutcomeBinding{}, "process completion receipt belongs to a different execution or environment"
+		return normalized, OutcomeBinding{}, "process completion receipt belongs to a different execution or environment"
 	}
 	if in.Completion.reason != "" {
-		return OutcomeBinding{}, in.Completion.reason
+		return normalized, OutcomeBinding{}, in.Completion.reason
 	}
-	return binding, ""
+	return normalized, binding, ""
 }
 
-func environmentLog(ctx context.Context, log []byte) (bool, error) {
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-	for _, line := range strings.Split(string(log), "\n") {
-		if err := ctx.Err(); err != nil {
-			return false, err
-		}
-		if line == "" || line == "# test log" {
-			continue
-		}
-		if !strings.HasPrefix(line, "getenv ") {
-			return false, nil
-		}
-	}
-	return true, nil
-}
+const producerCaptureBufSize = 64 * 1024
 
-func readProducerLog(ctx context.Context, testlogPath string) ([]byte, string, error) {
+func openProducerCapture(ctx context.Context, testlogPath string) (*os.File, *bufio.Reader, string, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, "", err
+		return nil, nil, "", err
 	}
 	if testlogPath == "" {
-		return nil, "testlog capture unavailable: no capture file was attached to the process", nil
+		return nil, nil, "testlog capture unavailable: no capture file was attached to the process", nil
 	}
 	openPath := testlogPath
 	if filepath.IsAbs(testlogPath) {
@@ -335,29 +352,71 @@ func readProducerLog(ctx context.Context, testlogPath string) ([]byte, string, e
 		}
 	}
 	file, err := os.Open(openPath)
-	if file != nil {
-		defer file.Close()
-	}
 	if err := ctx.Err(); err != nil {
-		return nil, "", err
+		if file != nil {
+			_ = file.Close()
+		}
+		return nil, nil, "", err
 	}
 	if os.IsNotExist(err) {
-		return nil, "test process produced no runtime-input log", nil
+		return nil, nil, "test process produced no runtime-input log", nil
 	}
 	if err != nil {
-		return nil, fmt.Sprintf("testlog capture unreadable: %q", err.Error()), nil
+		return nil, nil, fmt.Sprintf("testlog capture unreadable: %q", err.Error()), nil
 	}
-	log, err := io.ReadAll(captureReader{ctx: ctx, Reader: file})
+	br := bufio.NewReaderSize(captureReader{ctx: ctx, Reader: file}, producerCaptureBufSize)
+	var scratch []byte
+	raw, hasNL, eof, readErr := nextTestLogLineBytes(br, &scratch)
 	if err := ctx.Err(); err != nil {
-		return nil, "", err
+		_ = file.Close()
+		return nil, nil, "", err
 	}
-	if err != nil {
-		return nil, fmt.Sprintf("testlog capture unreadable: %q", err.Error()), nil
+	if readErr != nil {
+		_ = file.Close()
+		return nil, nil, fmt.Sprintf("testlog capture unreadable: %q", readErr.Error()), nil
 	}
-	if !bytes.HasPrefix(log, testlogHeader) {
-		return nil, "capture file carries no test-log header; the test binary never opened it", nil
+	if eof || !hasNL || !bytes.Equal(raw, testlogHeaderLine) {
+		if drainReason, drainErr := drainAndScreenCapture(ctx, br, false); drainErr != nil {
+			_ = file.Close()
+			return nil, nil, "", drainErr
+		} else if drainReason != "" {
+			_ = file.Close()
+			return nil, nil, drainReason, nil
+		}
+		_ = file.Close()
+		return nil, nil, "capture file carries no test-log header; the test binary never opened it", nil
 	}
-	return log, "", nil
+	return file, br, "", nil
+}
+
+func drainAndScreenCapture(ctx context.Context, br *bufio.Reader, requireEnvOnly bool) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	var scratch []byte
+	unsupported := false
+	for {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		raw, _, eof, err := nextTestLogLineBytes(br, &scratch)
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		if err != nil {
+			return fmt.Sprintf("testlog capture unreadable: %q", err.Error()), nil
+		}
+		if eof {
+			break
+		}
+		if requireEnvOnly && len(raw) != 0 && !bytes.Equal(raw, testlogHeaderLine) && !bytes.HasPrefix(raw, getenvLinePrefix) {
+			unsupported = true
+		}
+	}
+	if unsupported {
+		return errUnsupportedOutcomeOp.Error(), nil
+	}
+	return "", nil
 }
 
 // captureReader checks the caller's context on both sides of each read, so a
@@ -378,31 +437,42 @@ func (r captureReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// captureBytes constructs the identity guard with the subject keys Observe has
-// already validated against the execution premises and raw operation model.
-// With no supplied keys it constructs identity-only evidence. Classification
-// itself never authorizes an outcome-support marker.
-func (f ProducerFrame) captureBytes(ctx context.Context, log []byte, in ProducerIngest) (Observation, string, error) {
+// captureStream constructs the identity guard from an opened header-verified
+// testlog stream, preserving exact REQ-inputs-producer-facade refusal
+// precedence (Steps 4 and 6 outranking Steps 7-9) without whole-file buffering.
+func (f ProducerFrame) captureStream(ctx context.Context, br *bufio.Reader, in ProducerIngest, normalized []string, requireOutcomes bool) (Observation, string, error) {
 	if err := ctx.Err(); err != nil {
 		return Observation{}, "", err
 	}
-	incomplete := func(reason string) (Observation, string, error) { return f.incomplete(ctx, in, reason) }
+	if normalized == nil {
+		var err error
+		normalized, err = normalizeEnvironment(in.Env)
+		if err != nil {
+			return Observation{}, "", err
+		}
+	}
+	incomplete := func(reason string) (Observation, string, error) {
+		return f.incompleteNormalized(ctx, in, normalized, reason)
+	}
+	incompleteAfterDrain := func(fallbackReason string) (Observation, string, error) {
+		drainReason, drainErr := drainAndScreenCapture(ctx, br, requireOutcomes)
+		if drainErr != nil {
+			return Observation{}, "", drainErr
+		}
+		if drainReason != "" {
+			return incomplete(drainReason)
+		}
+		return incomplete(fallbackReason)
+	}
 	if f.bracket == nil {
 		reason := f.reason
 		if reason == "" {
 			reason = "no observation bracket was captured"
 		}
-		return incomplete(reason)
-	}
-	// The validated PWD and the PWD the classification later reads come
-	// from the same lookup over the same normalized environment - a
-	// parallel scan could diverge from the environment policy's key semantics.
-	normalized, err := normalizeEnvironment(in.Env)
-	if err != nil {
-		return Observation{}, "", err
+		return incompleteAfterDrain(reason)
 	}
 	if reason := producerPWDProblem(f.PkgDir, normalized); reason != "" {
-		return incomplete(reason)
+		return incompleteAfterDrain(reason)
 	}
 	fireProducerBeforeRoots()
 	roots, err := resolveRoots(ctx, in.Roots, in.Runner, f.Root, f.PkgDir, normalized)
@@ -412,20 +482,32 @@ func (f ProducerFrame) captureBytes(ctx context.Context, log []byte, in Producer
 			// durable record names the environment for it.
 			return Observation{}, "", ctx.Err()
 		}
-		return incomplete(fmt.Sprintf("classification roots unresolved under the process environment: %v", err))
+		return incompleteAfterDrain(fmt.Sprintf("classification roots unresolved under the process environment: %v", err))
 	}
+	trackedChdir := outcome.MatchesTrackedChdir(in.TrackedChdir, f.span, f.Root, f.PkgDir)
 	opts := []TestLogOption{
 		WithCompletedProcess(in.Identity),
 		WithBracket(*f.bracket),
-		func(cfg *testLogConfig) { cfg.outcomeSubjects = in.Outcome.Subjects() },
+		func(cfg *testLogConfig) {
+			cfg.outcomeSubjects = in.Outcome.Subjects()
+			cfg.trackedChdir = trackedChdir
+			cfg.requireEnvOnly = requireOutcomes
+		},
 	}
 	opts = append(opts, producerClassificationOptions(roots, f.Root, in.ScratchRoot, in.ExcludedPaths, in.ScratchNamespaces)...)
-	observation, err := fromTestLog(ctx, log, f.Root, f.PkgDir, in.Env, opts...)
+	observation, err := fromTestLogStream(ctx, br, f.Root, f.PkgDir, normalized, opts...)
 	if err := ctx.Err(); err != nil {
 		return Observation{}, "", err
 	}
 	if err != nil {
-		return incomplete(fmt.Sprintf("testlog ingestion failed: %v", err))
+		var readErr captureReadError
+		if errors.As(err, &readErr) {
+			return incomplete(fmt.Sprintf("testlog capture unreadable: %q", readErr.Error()))
+		}
+		if errors.Is(err, errUnsupportedOutcomeOp) {
+			return incomplete(errUnsupportedOutcomeOp.Error())
+		}
+		return incompleteAfterDrain(fmt.Sprintf("testlog ingestion failed: %v", err))
 	}
 	return observation, "", nil
 }

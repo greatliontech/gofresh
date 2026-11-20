@@ -38,6 +38,7 @@ type Observability struct {
 	EffectFree                bool
 	RequiresSingleSubject     bool
 	SharedProcessUnsafeReason string
+	TrackedChdirSafe          bool
 }
 
 // ImmutableEnvironmentOutcomes identifies the derivation for an empty effect
@@ -120,27 +121,46 @@ func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, resu
 		rooted = append(rooted, subject)
 	}
 	group.subjects = rooted
-	if len(group.subjects) == 0 {
-		if memoArmed {
-			storeMemo(memoScope, closureHash, unrooted)
-			h.persisted.proofs++
+	stampUnrooted := func(base *tier2Base) {
+		if len(unrooted) == 0 || !base.binaryTrackedChdirSafe() {
+			return
 		}
-		if rootedMemoArmed && len(unrootedRooted) > 0 {
-			storeRootedMemo(rootedScope, closureHash, unrootedRooted)
+		for sym, proof := range unrooted {
+			proof.TrackedChdirSafe = true
+			unrooted[sym] = proof
 		}
-		return nil
+		for subject, proof := range results {
+			if subject.Package == group.path && unrooted[subject.Symbol].Reason != "" {
+				proof.TrackedChdirSafe = true
+				results[subject] = proof
+			}
+		}
 	}
 	metas, err := h.list(group.path)
 	if err != nil {
+		if h.ctx != nil {
+			if ctxErr := h.ctx.Err(); ctxErr != nil {
+				return fmt.Errorf("closure: analysis cancelled: %w", ctxErr)
+			}
+		}
 		return err
 	}
 	base := newTier2Base(h, prog, metas)
+	stampUnrooted(base)
+	if h.ctx != nil {
+		if err := h.ctx.Err(); err != nil {
+			return fmt.Errorf("closure: analysis cancelled: %w", err)
+		}
+	}
 	if memoArmed && len(unrooted) > 0 {
 		storeMemo(memoScope, closureHash, unrooted)
 		h.persisted.proofs++
 	}
 	if rootedMemoArmed && len(unrootedRooted) > 0 {
 		storeRootedMemo(rootedScope, closureHash, unrootedRooted)
+	}
+	if len(group.subjects) == 0 {
+		return nil
 	}
 	slicesCount := (len(group.subjects) + maxAttributedSubjects - 1) / maxAttributedSubjects
 	for start := 0; start < len(group.subjects); start += maxAttributedSubjects {
@@ -206,7 +226,7 @@ func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, resu
 				}
 				full := reachable[i].unavailable
 				h.emitDiagnostic("analysis-unavailable", subject.Package, subject.Symbol+": "+full)
-				result := Observability{Observable: false, Reason: unsupportedShapeReason}
+				result := Observability{Observable: false, Reason: unsupportedShapeReason, TrackedChdirSafe: base.binaryTrackedChdirSafe()}
 				results[subject] = result
 				sliceProofs[subject.Symbol] = result
 				continue
@@ -239,6 +259,15 @@ func (h *Hasher) observabilityGroup(group *packageBatch, bp *batchPreparer, resu
 }
 
 func (h *Hasher) observabilityFromReachability(base *tier2Base, pkgPath string, reach attributedReachability) (Observability, error) {
+	out, err := h.observabilityFromReachabilityCore(base, pkgPath, reach)
+	if err != nil {
+		return Observability{}, err
+	}
+	out.TrackedChdirSafe = base.binaryTrackedChdirSafe()
+	return out, nil
+}
+
+func (h *Hasher) observabilityFromReachabilityCore(base *tier2Base, pkgPath string, reach attributedReachability) (Observability, error) {
 	subjectReach := reach
 	subjectReach.functions = subjectReach.subjectFunctions
 	subjectResult, subjectObjects, err := h.tier2ReachableWithObjects(base, subjectReach)

@@ -901,6 +901,10 @@ func (v *Snapshot) Sibling(subjects []Subject) (*Snapshot, error) {
 			applicabilityChecks = append(applicabilityChecks, check)
 		}
 	}
+	var siblingCut error
+	if len(observable) > 0 {
+		siblingCut = v.cutUnavailable
+	}
 	return &Snapshot{
 		session:   v.session,
 		parent:    rootParent,
@@ -929,6 +933,7 @@ func (v *Snapshot) Sibling(subjects []Subject) (*Snapshot, error) {
 		capturedObserved:     capturedObserved,
 		applicabilityChecks:  applicabilityChecks,
 		attachedObservations: make(map[Subject]runtimeinput.State, len(unique)),
+		cutUnavailable:       siblingCut,
 		runtimeCurrent:       v.runtimeCurrent,
 	}, nil
 }

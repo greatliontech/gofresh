@@ -262,3 +262,127 @@ TEXT ·Kernel(SB), NOSPLIT, $0-16
 		t.Errorf("CheckVerifiedTypeScopes admitted colliding RODATA symbol")
 	}
 }
+
+func TestVerifyTrapArg0SyscallTrampolineMatrix(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		goarch string
+		src    string
+		want   bool
+	}{
+		{
+			name:   "amd64_jmp_syscall",
+			goarch: "amd64",
+			src:    "TEXT ·Syscall(SB),NOSPLIT,$0-56\n\tJMP syscall·Syscall(SB)\n",
+			want:   true,
+		},
+		{
+			name:   "amd64_jmp_rawsyscall6",
+			goarch: "amd64",
+			src:    "TEXT ·RawSyscall6(SB),NOSPLIT,$0-80\n\tJMP syscall·RawSyscall6(SB)\n",
+			want:   true,
+		},
+		{
+			name:   "arm64_b_syscall6",
+			goarch: "arm64",
+			src:    "TEXT ·Syscall6(SB),NOSPLIT,$0-80\n\tB syscall·Syscall6(SB)\n",
+			want:   true,
+		},
+		{
+			name:   "amd64_syscall_no_error",
+			goarch: "amd64",
+			src: `TEXT ·SyscallNoError(SB),NOSPLIT,$0-48
+	CALL runtime·entersyscall(SB)
+	MOVQ a1+8(FP), DI
+	MOVQ a2+16(FP), SI
+	MOVQ a3+24(FP), DX
+	MOVQ $0, R10
+	MOVQ $0, R8
+	MOVQ $0, R9
+	MOVQ trap+0(FP), AX
+	SYSCALL
+	MOVQ AX, r1+32(FP)
+	MOVQ DX, r2+40(FP)
+	CALL runtime·exitsyscall(SB)
+	RET
+`,
+			want: true,
+		},
+		{
+			name:   "arm64_syscall_no_error",
+			goarch: "arm64",
+			src: `TEXT ·SyscallNoError(SB),NOSPLIT,$0-48
+	BL runtime·entersyscall(SB)
+	MOVD a1+8(FP), R0
+	MOVD a2+16(FP), R1
+	MOVD a3+24(FP), R2
+	MOVD $0, R3
+	MOVD $0, R4
+	MOVD $0, R5
+	MOVD trap+0(FP), R8
+	SVC
+	MOVD R0, r1+32(FP)
+	MOVD R1, r2+40(FP)
+	BL runtime·exitsyscall(SB)
+	RET
+`,
+			want: true,
+		},
+		{
+			name:   "amd64_reject_jmp_chdir",
+			goarch: "amd64",
+			src:    "TEXT ·Sneaky(SB),NOSPLIT,$0-24\n\tJMP syscall·Chdir(SB)\n",
+			want:   false,
+		},
+		{
+			name:   "amd64_reject_const_trap",
+			goarch: "amd64",
+			src:    "TEXT ·Sneaky(SB),NOSPLIT,$0-24\n\tMOVQ $80, AX\n\tSYSCALL\n\tRET\n",
+			want:   false,
+		},
+		{
+			name:   "amd64_reject_missing_trap_load",
+			goarch: "amd64",
+			src:    "TEXT ·Sneaky(SB),NOSPLIT,$0-24\n\tMOVQ a1+8(FP), DI\n\tSYSCALL\n\tRET\n",
+			want:   false,
+		},
+		{
+			name:   "amd64_reject_entersyscall_after_move",
+			goarch: "amd64",
+			src:    "TEXT ·Sneaky(SB),NOSPLIT,$0-24\n\tMOVQ trap+0(FP), AX\n\tCALL runtime·entersyscall(SB)\n\tSYSCALL\n\tRET\n",
+			want:   false,
+		},
+		{
+			name:   "amd64_reject_nonzero_fp_offset_for_trap",
+			goarch: "amd64",
+			src:    "TEXT ·Sneaky(SB),NOSPLIT,$0-24\n\tMOVQ a1+8(FP), AX\n\tSYSCALL\n\tRET\n",
+			want:   false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg := types.NewPackage("example.com/sys", "sys")
+			readMem := func(full string) ([]byte, error) {
+				if filepath.Base(full) == "sys.s" {
+					return []byte("#include \"textflag.h\"\n" + tc.src), nil
+				}
+				return nil, os.ErrNotExist
+			}
+			vp, ok := VerifyNonStdFiles(tc.goarch, "example.com/sys", "/virtual/sys", []string{"sys.s"}, nil, []*types.Package{pkg}, readMem)
+			if !ok || vp == nil || !vp.PackageSafe {
+				t.Fatalf("VerifyNonStdFiles failed: ok=%v vp=%+v", ok, vp)
+			}
+			var gotSum TextSummary
+			for _, s := range vp.Funcs {
+				gotSum = s
+			}
+			if gotSum.Verified {
+				t.Fatalf("syscall trampoline must remain Verified=false for purity, got %+v", gotSum)
+			}
+			if gotSum.ForwardsTrapArg0Syscall != tc.want {
+				t.Fatalf("ForwardsTrapArg0Syscall = %v, want %v (summary=%+v)", gotSum.ForwardsTrapArg0Syscall, tc.want, gotSum)
+			}
+		})
+	}
+}

@@ -10,6 +10,12 @@ import (
 	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
+func TestMain(m *testing.M) {
+	code := m.Run()
+	CleanupShared()
+	os.Exit(code)
+}
+
 func TestOverlayGOROOTUnlinksHardlinkedSourceBeforeWrite(t *testing.T) {
 	t.Parallel()
 	env := os.Environ()
@@ -175,5 +181,65 @@ func TestParseAndTypecheckDAGWithStdlibIsolatesArchSizes(t *testing.T) {
 	}
 	if stdlibEnvCacheKey(normA) == stdlibEnvCacheKey(normB) {
 		t.Fatal("stdlibEnvCacheKey collided across distinct GOARCH values")
+	}
+}
+
+func TestParseAndTypecheckDAGWithStdlibErrExplicitCleanupAndErrorCleanup(t *testing.T) {
+	isolatedTmp := t.TempDir()
+	t.Setenv("TMPDIR", isolatedTmp)
+	env := os.Environ()
+	validFiles := map[string]map[string]string{
+		"example.com/ok": {
+			"ok.go": "package ok\nfunc Value() int { return 7 }\n",
+		},
+	}
+
+	pkgs, dir, cleanup, err := ParseAndTypecheckDAGWithStdlibErr(env, "", validFiles)
+	if err != nil {
+		t.Fatalf("ParseAndTypecheckDAGWithStdlibErr valid: %v", err)
+	}
+	if len(pkgs) != 1 || dir == "" || cleanup == nil {
+		t.Fatalf("unexpected valid return: pkgs=%d dir=%q cleanup=%v", len(pkgs), dir, cleanup != nil)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("expected allocated virtualDir %q to exist before cleanup: %v", dir, err)
+	}
+	// CleanupShared must not touch caller-owned ParseAndTypecheckDAGWithStdlibErr dirs.
+	CleanupShared()
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("CleanupShared removed explicit-cleanup virtualDir %q prematurely: %v", dir, err)
+	}
+	cleanup()
+	cleanup() // idempotent
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("expected cleanup() to remove %q, got err=%v", dir, err)
+	}
+
+	// On typecheck/parse error, temporary virtualDir must be removed immediately.
+	brokenFiles := map[string]map[string]string{
+		"example.com/bad": {
+			"bad.go": "package bad\nfunc Broken() int { return \"not-an-int\" }\n",
+		},
+	}
+	if _, _, _, err := ParseAndTypecheckDAGWithStdlibErr(env, "", brokenFiles); err == nil {
+		t.Fatal("expected error on ill-typed fixture")
+	}
+	entries, err := os.ReadDir(isolatedTmp)
+	if err != nil {
+		t.Fatalf("ReadDir(TMPDIR): %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("leaked temp entries after failed ParseAndTypecheckDAGWithStdlibErr: %v", entries)
+	}
+
+	// Caller-supplied virtualDir is never removed by the returned cleanup.
+	callerDir := t.TempDir()
+	_, retDir, callerCleanup, err := ParseAndTypecheckDAGWithStdlibErr(env, callerDir, validFiles)
+	if err != nil || retDir != callerDir || callerCleanup == nil {
+		t.Fatalf("caller virtualDir failed: dir=%q err=%v", retDir, err)
+	}
+	callerCleanup()
+	if _, err := os.Stat(callerDir); err != nil {
+		t.Fatalf("callerCleanup removed caller-owned virtualDir %q: %v", callerDir, err)
 	}
 }

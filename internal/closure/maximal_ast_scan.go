@@ -203,10 +203,10 @@ func maximalFileEffectsContentWithZeroGlobals(audited bool, filename string, con
 	if err != nil {
 		return maximalEffectScan{}, err
 	}
-	return maximalFileEffectsParsed(audited, parsed, nonStdPaths, reachedDecls, startupOnlyDecls, filePkgPath, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals, false), nil
+	return maximalFileEffectsParsed(audited, parsed, nonStdPaths, reachedDecls, startupOnlyDecls, filePkgPath, startupZeroGlobalDecls, wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals, false, false), nil
 }
 
-func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPaths map[string]bool, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, filePkgPath string, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed, verifiedLinknameLocals map[string]bool, pkgConfinedUnsafe bool) maximalEffectScan {
+func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPaths map[string]bool, reachedDecls, startupOnlyDecls map[funcDeclKey]bool, filePkgPath string, startupZeroGlobalDecls, wholeZeroGlobalDecls map[pkgVarKey]bool, pkgScopeShadowed, verifiedLinknameLocals map[string]bool, pkgConfinedUnsafe, trackedChdirSafe bool) maximalEffectScan {
 	file := parsed.file
 	text := parsed.text
 	hasWasmImport := parsed.hasWasmImport
@@ -293,7 +293,7 @@ func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPat
 		return false
 	}
 	addSelEffect := func(sel *ast.SelectorExpr, effect externalEffect) {
-		if (inUnreachedDecl(sel) || inDeadForSubjectBody(sel)) && !packageWideMaximalHazardForPkg(effect, pkgConfinedUnsafe) {
+		if (inUnreachedDecl(sel) || inDeadForSubjectBody(sel)) && !packageWideMaximalHazardForPkg(audited, effect, pkgConfinedUnsafe, trackedChdirSafe) {
 			return
 		}
 		scan.add(effect)
@@ -355,7 +355,7 @@ func maximalFileEffectsParsed(audited bool, parsed *parsedMaximalFile, nonStdPat
 			testingSkipped[blk] = true
 		}
 	}
-	for _, effect := range testingMethodEffectsFilteredWithHandles(file, stdAliases, parsed.handleTypes, unreachedDecls, testingSkipped) {
+	for _, effect := range testingMethodEffectsFilteredWithHandles(audited, trackedChdirSafe, file, stdAliases, parsed.handleTypes, unreachedDecls, testingSkipped) {
 		scan.add(effect)
 	}
 	scan.preferred = preferredEffectReason(append(append([]externalEffect(nil), scan.effects...), scan.importCandidates...))
@@ -700,10 +700,10 @@ func testingMethodEffectsFilteredWithSkipped(file *ast.File, aliases map[string]
 	if file == nil {
 		return nil
 	}
-	return testingMethodEffectsFilteredWithHandles(file, aliases, testingHandleTypeNames(file, aliases), unreachedDecls, skippedBody)
+	return testingMethodEffectsFilteredWithHandles(false, false, file, aliases, testingHandleTypeNames(file, aliases), unreachedDecls, skippedBody)
 }
 
-func testingMethodEffectsFilteredWithHandles(file *ast.File, aliases map[string]string, handleTypes map[string]bool, unreachedDecls []ast.Node, skippedBody map[*ast.BlockStmt]bool) []externalEffect {
+func testingMethodEffectsFilteredWithHandles(audited, trackedChdirSafe bool, file *ast.File, aliases map[string]string, handleTypes map[string]bool, unreachedDecls []ast.Node, skippedBody map[*ast.BlockStmt]bool) []externalEffect {
 	if file == nil {
 		return nil
 	}
@@ -726,7 +726,7 @@ func testingMethodEffectsFilteredWithHandles(file *ast.File, aliases map[string]
 		}
 		unreached := slices.Contains(unreachedDecls, ast.Node(function))
 		addTestingEffect := func(effect externalEffect) {
-			if unreached && !packageWideMaximalHazard(effect) {
+			if unreached && !packageWideMaximalHazardForPkg(audited, effect, false, trackedChdirSafe) {
 				return
 			}
 			effects = appendExternalEffect(effects, effect)

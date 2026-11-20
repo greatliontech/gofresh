@@ -44,9 +44,16 @@ func TestMain(m *testing.M) {
 	if err == nil {
 		_ = os.Setenv("XDG_CACHE_HOME", tmp)
 	}
+	tmpRun, err := os.MkdirTemp("", "gofresh-closure-tmp-*")
+	if err == nil {
+		_ = os.Setenv("TMPDIR", tmpRun)
+	}
 	code := m.Run()
 	if tmp != "" {
 		_ = os.RemoveAll(tmp)
+	}
+	if tmpRun != "" {
+		_ = os.RemoveAll(tmpRun)
 	}
 	testenv.CleanupShared()
 	os.Exit(code)
@@ -82,7 +89,9 @@ func cachedUnixListPkgOnce() *listPkg {
 	if entries, err := os.ReadDir(dir); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() && strings.HasSuffix(e.Name(), ".s") {
-				sFiles = append(sFiles, e.Name())
+				if matched, mErr := build.Default.MatchFile(dir, e.Name()); mErr == nil && matched {
+					sFiles = append(sFiles, e.Name())
+				}
 			}
 		}
 	}
@@ -136,20 +145,21 @@ func extractEmbedMatches(af *ast.File, available []string) []string {
 	return out
 }
 
-func buildInMemorySSAFromFiles(ctx context.Context, virtualDir, pkgMain string, filesByPkg map[string]map[string]string) (*progpkg.Program, []listPkg, []*packages.Package, error) {
+func buildInMemorySSAFromFiles(ctx context.Context, virtualDir, pkgMain string, filesByPkg map[string]map[string]string) (*progpkg.Program, []listPkg, []*packages.Package, func(), error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	pkgs, resolvedDir, err := testenv.ParseAndTypecheckDAGWithStdlibErr(os.Environ(), virtualDir, filesByPkg)
+	pkgs, resolvedDir, cleanup, err := testenv.ParseAndTypecheckDAGWithStdlibErr(os.Environ(), virtualDir, filesByPkg)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	prog, err := progpkg.FromPackages(ctx, pkgMain, pkgs)
 	if err != nil {
-		return nil, nil, nil, err
+		cleanup()
+		return nil, nil, nil, nil, err
 	}
 	prog.GOARCH = runtime.GOARCH
 
@@ -303,7 +313,7 @@ func buildInMemorySSAFromFiles(ctx context.Context, virtualDir, pkgMain string, 
 			metas = append(metas, *uMeta)
 		}
 	}
-	return prog, metas, pkgs, nil
+	return prog, metas, pkgs, cleanup, nil
 }
 
 // buildInMemorySSA constructs a *program.Program, []listPkg metadata slice, and
@@ -314,9 +324,12 @@ func buildInMemorySSA(t testing.TB, virtualDir, pkgMain string, filesByPkg map[s
 	if virtualDir == "" {
 		virtualDir = t.TempDir()
 	}
-	prog, metas, pkgs, err := buildInMemorySSAFromFiles(context.Background(), virtualDir, pkgMain, filesByPkg)
+	prog, metas, pkgs, cleanup, err := buildInMemorySSAFromFiles(context.Background(), virtualDir, pkgMain, filesByPkg)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if cleanup != nil {
+		t.Cleanup(cleanup)
 	}
 	return prog, metas, pkgs
 }
@@ -333,8 +346,9 @@ func supplyInMemoryPackage(t testing.TB, h *Hasher, pkgMain string, filesByPkg m
 }
 
 type cachedRegisteredFixture struct {
-	prog  *progpkg.Program
-	metas []listPkg
+	prog    *progpkg.Program
+	metas   []listPkg
+	cleanup func()
 }
 
 func cloneRegisteredFixtureProgram(src *progpkg.Program) *progpkg.Program {
@@ -347,29 +361,30 @@ func cloneRegisteredFixtureProgram(src *progpkg.Program) *progpkg.Program {
 	return &cloned
 }
 
-func loadRegisteredInMemoryFixture(ctx context.Context, cache map[string]cachedRegisteredFixture, pkgPath string) (*progpkg.Program, []listPkg, bool, error) {
+func loadRegisteredInMemoryFixture(ctx context.Context, cache map[string]cachedRegisteredFixture, pkgPath string) (*progpkg.Program, []listPkg, func(), bool, error) {
 	filesByPkg, ok := inMemoryFixtureRegistry[pkgPath]
 	if !ok {
-		return nil, nil, false, nil
+		return nil, nil, nil, false, nil
 	}
 	if ctx != nil {
 		if err := ctx.Err(); err != nil {
-			return nil, nil, true, err
+			return nil, nil, nil, true, err
 		}
 	}
 	if cache != nil {
 		if cached, found := cache[pkgPath]; found {
-			return cloneRegisteredFixtureProgram(cached.prog), cached.metas, true, nil
+			return cloneRegisteredFixtureProgram(cached.prog), slices.Clone(cached.metas), nil, true, nil
 		}
 	}
-	prog, metas, _, err := buildInMemorySSAFromFiles(ctx, "", pkgPath, filesByPkg)
+	prog, metas, _, cleanup, err := buildInMemorySSAFromFiles(ctx, "", pkgPath, filesByPkg)
 	if err != nil {
-		return nil, nil, true, err
+		return nil, nil, nil, true, err
 	}
 	if cache != nil {
-		cache[pkgPath] = cachedRegisteredFixture{prog: prog, metas: metas}
+		cache[pkgPath] = cachedRegisteredFixture{prog: prog, metas: metas, cleanup: cleanup}
+		return cloneRegisteredFixtureProgram(prog), slices.Clone(metas), nil, true, nil
 	}
-	return cloneRegisteredFixtureProgram(prog), metas, true, nil
+	return cloneRegisteredFixtureProgram(prog), slices.Clone(metas), cleanup, true, nil
 }
 
 func supplyRegisteredFixtures(t testing.TB, h *Hasher, pkgPaths ...string) {
@@ -380,9 +395,12 @@ func supplyRegisteredFixtures(t testing.TB, h *Hasher, pkgPaths ...string) {
 			continue
 		}
 		seen[pkgPath] = true
-		prog, metas, ok, err := loadRegisteredInMemoryFixture(h.ctx, nil, pkgPath)
+		prog, metas, cleanup, ok, err := loadRegisteredInMemoryFixture(h.ctx, nil, pkgPath)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if cleanup != nil {
+			t.Cleanup(cleanup)
 		}
 		if ok {
 			h.progs[pkgPath] = prog
@@ -428,6 +446,7 @@ func primeHasherFromDir(t testing.TB, h *Hasher, dir string) {
 	}
 	var st *inMemoryHasherState
 	if h != nil && h.listOnMiss != nil {
+		h.listOnMiss(nil, "")
 		st = newInMemoryHasherState()
 		bindInMemoryHasherState(h, st)
 	}
@@ -862,8 +881,24 @@ func (st *inMemoryHasherState) lookupPrimedPkg(h *Hasher, pkgPath string) ([]*pa
 	return pkgs, metas, len(pkgs) > 0
 }
 
+func (st *inMemoryHasherState) cleanup() {
+	if st == nil {
+		return
+	}
+	for _, entry := range st.fixtures {
+		if entry.cleanup != nil {
+			entry.cleanup()
+		}
+	}
+	clear(st.fixtures)
+}
+
 func bindInMemoryHasherState(h *Hasher, st *inMemoryHasherState) {
 	h.listOnMiss = func(h *Hasher, pkgPath string) ([]listPkg, bool) {
+		if h == nil && pkgPath == "" {
+			st.cleanup()
+			return nil, false
+		}
 		if h == nil || h.runner.Prepare != nil || len(h.buildFlags) > 0 {
 			return nil, false
 		}
@@ -871,7 +906,7 @@ func bindInMemoryHasherState(h *Hasher, st *inMemoryHasherState) {
 			return nil, false
 		}
 		if h.dir == "" {
-			if _, metas, ok, err := loadRegisteredInMemoryFixture(h.ctx, st.fixtures, pkgPath); ok && err == nil {
+			if _, metas, _, ok, err := loadRegisteredInMemoryFixture(h.ctx, st.fixtures, pkgPath); ok && err == nil {
 				return metas, true
 			}
 			return nil, false
@@ -890,7 +925,7 @@ func bindInMemoryHasherState(h *Hasher, st *inMemoryHasherState) {
 			return nil, false, nil
 		}
 		if h.dir == "" {
-			if inMemProg, metas, ok, err := loadRegisteredInMemoryFixture(ctx, st.fixtures, pkgPath); ok {
+			if inMemProg, metas, _, ok, err := loadRegisteredInMemoryFixture(ctx, st.fixtures, pkgPath); ok {
 				if err == nil && h.lists[pkgPath] == nil {
 					h.lists[pkgPath] = metas
 				}
@@ -920,7 +955,7 @@ func bindInMemoryHasherState(h *Hasher, st *inMemoryHasherState) {
 			return nil
 		}
 		if h.dir == "" {
-			if inMemProg, _, ok, err := loadRegisteredInMemoryFixture(h.ctx, st.fixtures, pkgPath); ok && err == nil {
+			if inMemProg, _, _, ok, err := loadRegisteredInMemoryFixture(h.ctx, st.fixtures, pkgPath); ok && err == nil {
 				return inMemProg
 			}
 			return nil
@@ -947,6 +982,9 @@ func markHasherEligible(h *Hasher) {
 func unprimeHasher(h *Hasher) {
 	if h == nil {
 		return
+	}
+	if h.listOnMiss != nil {
+		h.listOnMiss(nil, "")
 	}
 	h.listOnMiss = nil
 	h.loadProgramOnMiss = nil
@@ -1077,13 +1115,15 @@ func unauditedTagGOROOT(t *testing.T) string {
 // would grow peak memory with the table instead of the largest single
 // test binary.
 func computeTier2ResultAndReach(h *Hasher, pkgPath, symbol string) (tier2Result, map[string]bool, error) {
-	_, retainList := h.lists[pkgPath]
-	if _, ok := h.progs[pkgPath]; ok {
-		retainList = true
-	}
+	origList, hadList := h.lists[pkgPath]
+	_, hadProg := h.progs[pkgPath]
 	defer func() {
-		if !retainList {
-			delete(h.lists, pkgPath)
+		if !hadProg {
+			if hadList {
+				h.lists[pkgPath] = origList
+			} else {
+				delete(h.lists, pkgPath)
+			}
 		}
 	}()
 	prog := h.progs[pkgPath]
@@ -1096,9 +1136,12 @@ func computeTier2ResultAndReach(h *Hasher, pkgPath, symbol string) (tier2Result,
 		h.progs[pkgPath] = built
 	}
 	if prog == nil {
-		if inMemProg, metas, ok, err := loadRegisteredInMemoryFixture(h.ctx, nil, pkgPath); ok {
+		if inMemProg, metas, cleanup, ok, err := loadRegisteredInMemoryFixture(h.ctx, nil, pkgPath); ok {
 			if err != nil {
 				return tier2Result{}, nil, err
+			}
+			if cleanup != nil {
+				defer cleanup()
 			}
 			prog = inMemProg
 			h.lists[pkgPath] = metas
@@ -1244,7 +1287,7 @@ func (f *fixturePrograms) acquire(pkgPath string) error {
 		var err error
 		handled := false
 		f.ssaBuilds++
-		if inMemProg, metas, ok, inMemErr := loadRegisteredInMemoryFixture(f.h.ctx, f.fixtures, pkgPath); ok {
+		if inMemProg, metas, _, ok, inMemErr := loadRegisteredInMemoryFixture(f.h.ctx, f.fixtures, pkgPath); ok {
 			handled = true
 			p, err = inMemProg, inMemErr
 			if err == nil {
@@ -1293,6 +1336,11 @@ func (f *fixturePrograms) releaseProgram() {
 
 func (f *fixturePrograms) release() {
 	f.releaseProgram()
+	for _, entry := range f.fixtures {
+		if entry.cleanup != nil {
+			entry.cleanup()
+		}
+	}
 	f.fixtures = nil
 	f.prepared = nil
 	f.roster = nil

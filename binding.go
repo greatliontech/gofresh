@@ -256,6 +256,73 @@ func (v *Snapshot) prepareOutcomeSupport(ctx context.Context, frame runtimeinput
 	return outcome.Prepare(binding, subjects, reason), fingerprints, nil
 }
 
+// PrepareTrackedChdirSupport derives a frame-bound TrackedChdirSupport
+// capability for pkg under this snapshot when the analyzed test binary
+// satisfies the toolchain and binary-graph premises for balanced LIFO
+// testing.Chdir excursion tracking.
+func (v *Snapshot) PrepareTrackedChdirSupport(ctx context.Context, frame ProducerFrame, pkg string) (TrackedChdirSupport, error) {
+	return v.prepareTrackedChdirSupport(ctx, frame.frame, pkg)
+}
+
+func (v *Snapshot) prepareTrackedChdirSupport(ctx context.Context, frame runtimeinput.ProducerFrame, pkg string) (support runtimeinput.TrackedChdirSupport, opErr error) {
+	if ctx == nil {
+		return runtimeinput.TrackedChdirSupport{}, errors.New("gofresh: nil tracked-chdir preparation context")
+	}
+	if v == nil || v.facts == nil || v.session == nil {
+		return runtimeinput.TrackedChdirSupport{}, errors.New("gofresh: uninitialized snapshot")
+	}
+	ctx, done := v.session.beginOperation(ctx)
+	defer done(&opErr)
+	if err := ctx.Err(); err != nil {
+		return runtimeinput.TrackedChdirSupport{}, err
+	}
+	if !slices.Contains(v.packages, pkg) {
+		return runtimeinput.TrackedChdirSupport{}, fmt.Errorf("gofresh: package %q is outside the snapshot", pkg)
+	}
+	if frame.Reason() != "" {
+		return runtimeinput.TrackedChdirSupport{}, nil
+	}
+	var probe Subject
+	haveProbe := false
+	v.mu.RLock()
+	if v.sealed {
+		v.mu.RUnlock()
+		return runtimeinput.TrackedChdirSupport{}, errViewSealed
+	}
+	for _, s := range v.subjects {
+		if s.Package != pkg {
+			continue
+		}
+		if proof, ok := v.observable[s]; ok {
+			v.mu.RUnlock()
+			return frame.PrepareTrackedChdir(proof.TrackedChdirSafe), nil
+		}
+		if !haveProbe {
+			probe = s
+			haveProbe = true
+		}
+	}
+	v.mu.RUnlock()
+	if !haveProbe {
+		return runtimeinput.TrackedChdirSupport{}, nil
+	}
+	if err := v.ensureObservable(ctx, []Subject{probe}); err != nil {
+		if errors.Is(err, ErrAnalysisUnavailable) {
+			return runtimeinput.TrackedChdirSupport{}, nil
+		}
+		return runtimeinput.TrackedChdirSupport{}, err
+	}
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	if v.sealed {
+		return runtimeinput.TrackedChdirSupport{}, errViewSealed
+	}
+	if err := ctx.Err(); err != nil {
+		return runtimeinput.TrackedChdirSupport{}, err
+	}
+	return frame.PrepareTrackedChdir(v.observable[probe].TrackedChdirSafe), nil
+}
+
 func outcomeSubject(fingerprint Fingerprint, subject Subject) string {
 	// A string-array encoding is total; it frames every field and uses the
 	// manifest's canonical escaping without another serialization grammar.

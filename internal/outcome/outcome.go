@@ -89,3 +89,28 @@ func (s Support) Reason(binding Binding) string {
 
 // Subjects returns an independent copy of this preparation's subject identities.
 func (s Support) Subjects() []string { return slices.Clone(s.subjects) }
+
+// TrackedChdirSupport is an opaque analysis-derived capability certifying that
+// the producing test binary satisfies the toolchain and binary-graph premises
+// for balanced LIFO testing.Chdir excursion tracking. The zero value grants none,
+// and it carries no exported methods so root type promotion exposes no internal
+// coordinate types.
+type TrackedChdirSupport struct {
+	span      *Span
+	root      string
+	directory string
+}
+
+// PrepareTrackedChdir constructs a frame-bound TrackedChdirSupport capability.
+func PrepareTrackedChdir(span *Span, root, directory string, safe bool) TrackedChdirSupport {
+	if !safe || span == nil || root == "" || directory == "" {
+		return TrackedChdirSupport{}
+	}
+	return TrackedChdirSupport{span: span, root: root, directory: directory}
+}
+
+// MatchesTrackedChdir reports whether s authorizes tracked chdir excursions for
+// the given pre-execution frame coordinates.
+func MatchesTrackedChdir(s TrackedChdirSupport, span *Span, root, directory string) bool {
+	return s.span != nil && s.span == span && s.root == root && s.directory == directory
+}

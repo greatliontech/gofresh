@@ -2212,7 +2212,14 @@ preserve these distinct obligations:
   descriptor/runtime line writers — or its write/flush failure is monotonically
   latched onto `StopTestLog` to prevent supported completion. A hook name,
   release label, declaration canary or successful execution cannot establish
-  this. The result owner still supplies the actual harness completion receipt; a
+  this. When `observation-premises` holds and the analyzed test binary's
+  non-standard packages reach no raw `Chdir`/`Fchdir`/`Chroot`/`PivotRoot`/`Unshare`/`Exec`/`SetCurrentDirectory` or
+  unverified `Syscall`, no non-`testing.TB` `Chdir` interface dispatch, no
+  `PWD`-mutating `Setenv`/`Unsetenv`/`Clearenv`, no cgo, no unverified
+  assembly, no startup or test-main `testing.Chdir`, and only intact symlink-free `testing.Chdir` targets (`Observability.TrackedChdirSafe`),
+  unreached sibling `testing.Chdir` declarations do not widen subject-scoped
+  Tier-2 package scans, while any subject reaching `testing.Chdir` itself
+  remains unobservable. The result owner still supplies the actual harness completion receipt; a
   delivery derivation supplies no receipt for a particular process.
 - **claim-rechecking** — Changed selected content or other claim dependencies
   require rechecking affected derivations under REQ-fresh-dependency-identities,

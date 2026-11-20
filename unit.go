@@ -117,6 +117,7 @@ type unitExecution struct {
 	env           []string
 	frame         runtimeinput.ProducerFrame
 	support       runtimeinput.OutcomeSupport
+	trackedChdir  runtimeinput.TrackedChdirSupport
 	fingerprints  map[Subject]Fingerprint
 	observed      map[Subject]bool
 	outcomeReason string
@@ -228,6 +229,7 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 	u.mu.Unlock()
 	frame := runtimeinput.CaptureProducerFrame(preparing, sess.evidenceRootFor(sess.dir), dir, runtimeinput.FrameOptions{BracketPaths: process.BracketPaths, ExcludedPaths: process.ExcludedPaths})
 	var support runtimeinput.OutcomeSupport
+	var trackedChdir runtimeinput.TrackedChdirSupport
 	fingerprints, err := u.view.CaptureBatch(preparing)
 	observed := make(map[Subject]bool)
 	if err == nil && !u.identityOnly {
@@ -251,6 +253,9 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 				fingerprints[subject] = all[subject]
 			}
 		}
+	}
+	if err == nil && (len(observed) != 0 || u.identityOnly || process.Capture != "") {
+		trackedChdir, err = u.view.prepareTrackedChdirSupport(preparing, frame, build.pkg)
 	}
 	if preparing.Err() != nil {
 		err = preparing.Err()
@@ -277,7 +282,7 @@ func (u *Unit) Register(ctx context.Context, build BuildBinding, process Process
 		u.phase = unitFailed
 		return Contribution{}, err
 	}
-	x.frame, x.support, x.fingerprints, x.outcomeReason = frame, support, fingerprints, support.Reason(binding)
+	x.frame, x.support, x.trackedChdir, x.fingerprints, x.outcomeReason = frame, support, trackedChdir, fingerprints, support.Reason(binding)
 	x.observed = observed
 	if u.identityOnly {
 		x.outcomeReason = "identity-only execution selected"
@@ -478,7 +483,7 @@ func (u *Unit) Close(ctx context.Context) (result Finalized, err error) {
 			return Finalized{}, err
 		}
 		s := u.snapshot.session
-		in := runtimeinput.ProducerIngest{Identity: x.process.Identity, Env: x.env, Runner: s.runner, Roots: &s.roots, Completion: receipt, Outcome: x.support, ScratchRoot: x.process.ScratchRoot, ExcludedPaths: x.process.ExcludedPaths, ScratchNamespaces: x.process.ScratchNamespaces}
+		in := runtimeinput.ProducerIngest{Identity: x.process.Identity, Env: x.env, Runner: s.runner, Roots: &s.roots, Completion: receipt, Outcome: x.support, TrackedChdir: x.trackedChdir, ScratchRoot: x.process.ScratchRoot, ExcludedPaths: x.process.ExcludedPaths, ScratchNamespaces: x.process.ScratchNamespaces}
 		var observationReason string
 		if x.outcomeReason == "" {
 			observation, observationReason, err = x.frame.Observe(ctx, x.process.Capture, in)

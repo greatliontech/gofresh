@@ -137,6 +137,16 @@ func FromTestLog(data []byte, moduleDir, workingDir string, env []string, opts .
 	return runtimeinput.FromTestLog(data, moduleDir, workingDir, env, opts...)
 }
 
+// FromTestLogFile streams a Go testlog file from disk into a sealed runtime-input observation.
+func FromTestLogFile(ctx context.Context, path, moduleDir, workingDir string, env []string, opts ...TestLogOption) (Observation, error) {
+	return runtimeinput.FromTestLogFile(ctx, path, moduleDir, workingDir, env, opts...)
+}
+
+// TrackedChdirSupport is an opaque analysis-derived capability certifying that
+// the producing test binary satisfies the toolchain and binary-graph premises
+// for balanced LIFO testing.Chdir excursion tracking. The zero value grants none.
+type TrackedChdirSupport = runtimeinput.TrackedChdirSupport
+
 // InputRoots memoizes classification-root snapshots across one judged run
 // (REQ-inputs-observation-coherence, REQ-inputs-producer-facade).
 // The zero value is ready for use; a nil pointer resolves unmemoized.
@@ -179,6 +189,7 @@ type ProducerIngest struct {
 	PrepareCommand    func(*exec.Cmd)
 	Roots             *InputRoots
 	IncompleteReason  string
+	TrackedChdir      TrackedChdirSupport
 	ScratchRoot       string
 	ExcludedPaths     []string
 	ScratchNamespaces []ScratchNamespace
@@ -197,6 +208,7 @@ func (f ProducerFrame) ObserveInputs(ctx context.Context, testlogPath string, in
 		Runner:            gotool.Runner{Prepare: in.PrepareCommand},
 		Roots:             in.Roots,
 		Completion:        receipt,
+		TrackedChdir:      in.TrackedChdir,
 		ScratchRoot:       in.ScratchRoot,
 		ExcludedPaths:     in.ExcludedPaths,
 		ScratchNamespaces: in.ScratchNamespaces,

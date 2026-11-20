@@ -7,13 +7,14 @@ import (
 	"go/types"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
 )
 
 // NonStdAsmVerifierVersion identifies the non-standard assembly verifier version.
-const NonStdAsmVerifierVersion = "gofresh/nonstd-asm-verifier@5"
+const NonStdAsmVerifierVersion = "gofresh/nonstd-asm-verifier@6"
 
 // ExternalSBRef identifies a read-only non-RODATA or cross-package (SB) data
 // symbol referenced by an assembly TEXT block.
@@ -25,11 +26,12 @@ type ExternalSBRef struct {
 // TextSummary summarizes the verification and purity classification of one
 // assembly TEXT symbol.
 type TextSummary struct {
-	Verified       bool
-	CPUIDArgs      int // 1 or 2 for canonical CPUID wrappers; 0 otherwise
-	ImpureKind     string
-	ExternalSBRefs []ExternalSBRef
-	GoCallees      []string // sorted transitive Go-visible intra-package TEXT callees
+	Verified                bool
+	CPUIDArgs               int // 1 or 2 for canonical CPUID wrappers; 0 otherwise
+	ForwardsTrapArg0Syscall bool
+	ImpureKind              string
+	ExternalSBRefs          []ExternalSBRef
+	GoCallees               []string // sorted transitive Go-visible intra-package TEXT callees
 }
 
 // VerifiedPackage records the verified assembly summary for a package's .s and .h files.
@@ -374,15 +376,17 @@ func mergeGoCallees(dst, more []string, direct string) []string {
 }
 
 type localTextVerifyEntry struct {
-	key        string
-	goName     string
-	cfgs       []*asmBlockCFG
-	callees    []string
-	goCallees  []string
-	localOK    bool
-	cpuidArgs  int
-	impureKind string
-	extRefs    []ExternalSBRef
+	key                     string
+	goName                  string
+	blockCount              int
+	cfgs                    []*asmBlockCFG
+	callees                 []string
+	goCallees               []string
+	localOK                 bool
+	cpuidArgs               int
+	forwardsTrapArg0Syscall bool
+	impureKind              string
+	extRefs                 []ExternalSBRef
 }
 
 func verifyParsedNonStdAsmPackage(goarch, pkgPath string, parsedFiles []*parsedNonStdAsmFile, pkgRodataSyms map[string]bool, rodataGoNames []string) (*VerifiedPackage, bool) {
@@ -437,6 +441,12 @@ func verifyParsedNonStdAsmPackage(goarch, pkgPath string, parsedFiles []*parsedN
 				}
 				entries[key] = ent
 				orderedKeys = append(orderedKeys, key)
+			}
+			ent.blockCount++
+			if ent.blockCount == 1 && ent.goName != "" {
+				ent.forwardsTrapArg0Syscall = verifyTrapArg0SyscallTrampoline(goarch, blk)
+			} else {
+				ent.forwardsTrapArg0Syscall = false
 			}
 			blkCFG, blkSum, okBlk := verifySingleAsmTextBlock(goarch, pkgPath, fileIdx, blk, rodataSyms, definedTexts)
 			if blkSum.ImpureKind != "" && (ent.impureKind == "" || blkSum.ImpureKind < ent.impureKind) {
@@ -570,8 +580,9 @@ func verifyParsedNonStdAsmPackage(goarch, pkgPath string, parsedFiles []*parsedN
 		}
 		if !verified[k] {
 			funcs[ent.goName] = TextSummary{
-				Verified:   false,
-				ImpureKind: ent.impureKind,
+				Verified:                false,
+				ForwardsTrapArg0Syscall: ent.blockCount == 1 && ent.forwardsTrapArg0Syscall,
+				ImpureKind:              ent.impureKind,
 			}
 			continue
 		}
@@ -716,4 +727,174 @@ func verifySingleAsmTextBlock(goarch, pkgPath string, fileIdx int, blk asmTextBl
 	}
 	sum.Verified = true
 	return cfg, sum, true
+}
+
+// verifyTrapArg0SyscallTrampoline reports whether blk is a single-entry linear
+// syscall trampoline that either tail-jumps directly to a stdlib syscall
+// trampoline or loads 0(FP) directly into the architecture's syscall-number
+// register (AX on amd64, R8 on arm64) without overwriting it before SYSCALL/SVC.
+func verifyTrapArg0SyscallTrampoline(goarch string, blk asmTextBlock) bool {
+	if len(blk.labels) != 0 {
+		return false
+	}
+	var stmts [][2]string
+	for _, line := range blk.lines {
+		if line.condOp != asmCondNone || line.condDepth != blk.openCondDepth || len(line.choices) != 1 {
+			return false
+		}
+		for _, stmt := range splitAsmStatements(line.choices[0]) {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			if _, _, hasLabel := cutAsmLabel(stmt); hasLabel {
+				return false
+			}
+			op, rest := splitAsmOp(stmt)
+			uop := strings.ToUpper(op)
+			if uop == "TEXT" {
+				continue
+			}
+			stmts = append(stmts, [2]string{uop, strings.TrimSpace(rest)})
+		}
+	}
+	if len(stmts) == 0 {
+		return false
+	}
+	if len(stmts) == 1 {
+		jmpOp := "JMP"
+		if goarch == "arm64" {
+			jmpOp = "B"
+		}
+		if stmts[0][0] != jmpOp {
+			return false
+		}
+		switch stmts[0][1] {
+		case "syscall·Syscall(SB)", "syscall·Syscall6(SB)", "syscall·RawSyscall(SB)", "syscall·RawSyscall6(SB)":
+			return true
+		default:
+			return false
+		}
+	}
+	if stmts[len(stmts)-1][0] != "RET" || stmts[len(stmts)-1][1] != "" {
+		return false
+	}
+	var movOp, callOp, trapOp, trapReg string
+	var argRegs, retRegs map[string]bool
+	switch goarch {
+	case "amd64":
+		movOp, callOp, trapOp, trapReg = "MOVQ", "CALL", "SYSCALL", "AX"
+		argRegs = map[string]bool{"DI": true, "SI": true, "DX": true, "R10": true, "R8": true, "R9": true, "AX": true}
+		retRegs = map[string]bool{"AX": true, "DX": true}
+	case "arm64":
+		movOp, callOp, trapOp, trapReg = "MOVD", "BL", "SVC", "R8"
+		argRegs = map[string]bool{"R0": true, "R1": true, "R2": true, "R3": true, "R4": true, "R5": true, "R8": true}
+		retRegs = map[string]bool{"R0": true, "R1": true}
+	default:
+		return false
+	}
+	phase := 0
+	sawMove := false
+	loadedTrapReg := false
+	sawEnter := false
+	sawExit := false
+	for _, st := range stmts[:len(stmts)-1] {
+		uop, rest := st[0], st[1]
+		if phase == 0 {
+			switch uop {
+			case callOp:
+				if sawEnter || sawMove || rest != "runtime·entersyscall(SB)" {
+					return false
+				}
+				sawEnter = true
+			case movOp:
+				src, dst, ok := splitTwoAsmOperands(rest)
+				if !ok || !argRegs[dst] {
+					return false
+				}
+				if dst == trapReg {
+					if !isAsmFPSlotOffset(src, 0) {
+						return false
+					}
+					loadedTrapReg = true
+				} else if src != "$0" && !isPositiveAsmFPSlot(src) {
+					return false
+				}
+				sawMove = true
+			case trapOp:
+				if !loadedTrapReg {
+					return false
+				}
+				if goarch == "amd64" && rest != "" {
+					return false
+				}
+				if goarch == "arm64" && rest != "" && rest != "$0" {
+					return false
+				}
+				phase = 1
+			default:
+				return false
+			}
+		} else {
+			switch uop {
+			case movOp:
+				if sawExit {
+					return false
+				}
+				src, dst, ok := splitTwoAsmOperands(rest)
+				if !ok || !retRegs[src] || !isPositiveAsmFPSlot(dst) {
+					return false
+				}
+			case callOp:
+				if sawExit || rest != "runtime·exitsyscall(SB)" {
+					return false
+				}
+				sawExit = true
+			default:
+				return false
+			}
+		}
+	}
+	return phase == 1
+}
+
+func splitTwoAsmOperands(rest string) (string, string, bool) {
+	a, b, ok := strings.Cut(rest, ",")
+	if !ok || strings.Contains(b, ",") {
+		return "", "", false
+	}
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return "", "", false
+	}
+	return a, b, true
+}
+
+func parseAsmFPSlotOffset(op string) (int, bool) {
+	base, ok := strings.CutSuffix(strings.TrimSpace(op), "(FP)")
+	if !ok || base == "" {
+		return 0, false
+	}
+	offStr := base
+	if name, off, hasPlus := strings.Cut(base, "+"); hasPlus {
+		if name == "" || cprep.LeadingASCIIIdent(name) != name {
+			return 0, false
+		}
+		offStr = off
+	}
+	n, err := strconv.Atoi(offStr)
+	if err != nil || n < 0 || n%8 != 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+func isAsmFPSlotOffset(op string, want int) bool {
+	n, ok := parseAsmFPSlotOffset(op)
+	return ok && n == want
+}
+
+func isPositiveAsmFPSlot(op string) bool {
+	n, ok := parseAsmFPSlotOffset(op)
+	return ok && n >= 8
 }

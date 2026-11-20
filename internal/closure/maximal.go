@@ -237,10 +237,12 @@ func (h *Hasher) walkPackageGraphEffects(pkgPath string, opts packageGraphWalkOp
 
 		var pkgScopeShadowed, verifiedLinknameLocals map[string]bool
 		pkgConfinedUnsafe := false
+		trackedChdirSafe := false
 		if opts.filtered {
 			pkgScopeShadowed = pkgScopeShadowedUniverseZeroNames(opts.base, srcPath)
 			verifiedLinknameLocals = opts.base.verifiedReadOnlyLinknameLocals(srcPath)
 			pkgConfinedUnsafe = opts.reachedDecls != nil && opts.base.pkgConfinedUnsafe(pkg.ImportPath, srcPath)
+			trackedChdirSafe = opts.reachedDecls != nil && opts.base.binaryTrackedChdirSafe()
 		}
 
 		files := append(append([]string(nil), pkg.GoFiles...), pkg.CgoFiles...)
@@ -272,7 +274,7 @@ func (h *Hasher) walkPackageGraphEffects(pkgPath string, opts packageGraphWalkOp
 			if err != nil {
 				return nil, "", err
 			}
-			scan := maximalFileEffectsParsed(audited, parsed, nonStdPaths, opts.reachedDecls, opts.startupOnlyDecls, srcPath, opts.startupZeroGlobalDecls, opts.wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals, pkgConfinedUnsafe)
+			scan := maximalFileEffectsParsed(audited, parsed, nonStdPaths, opts.reachedDecls, opts.startupOnlyDecls, srcPath, opts.startupZeroGlobalDecls, opts.wholeZeroGlobalDecls, pkgScopeShadowed, verifiedLinknameLocals, pkgConfinedUnsafe, trackedChdirSafe)
 			record(scan)
 		}
 	}
@@ -375,7 +377,7 @@ func (h *Hasher) maximalFileEffectsCachedWithContext(pkgPath, path string, decla
 		if err != nil {
 			return maximalEffectScan{}, err
 		}
-		scan := maximalFileEffectsParsed(h.SelectionAudited(), parsed, nonStdPaths, nil, nil, "", nil, nil, nil, nil, false)
+		scan := maximalFileEffectsParsed(h.SelectionAudited(), parsed, nonStdPaths, nil, nil, "", nil, nil, nil, nil, false, false)
 		h.maximalFiles[cacheKey] = scan
 		return scan, nil
 	}
@@ -396,7 +398,7 @@ func (h *Hasher) maximalFileEffectsCachedWithContext(pkgPath, path string, decla
 	if err != nil {
 		return maximalEffectScan{}, err
 	}
-	scan := maximalFileEffectsParsed(h.SelectionAudited(), parsed, nonStdPaths, nil, nil, "", nil, nil, nil, nil, false)
+	scan := maximalFileEffectsParsed(h.SelectionAudited(), parsed, nonStdPaths, nil, nil, "", nil, nil, nil, nil, false, false)
 	h.recordFileScan(dir, digestKey, scan)
 	h.maximalFiles[cacheKey] = scan
 	return scan, nil
@@ -546,6 +548,8 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 	}
 	var scan maximalEffectScan
 	var unfilteredScan maximalEffectScan
+	trackedChdirSafe := reachedDecls != nil && base.binaryTrackedChdirSafe()
+	audited := h.SelectionAudited()
 	for _, pkg := range loaded {
 		if pkg.PkgPath != pkgPath && pkg.ForTest != pkgPath {
 			continue
@@ -593,7 +597,7 @@ func (h *Hasher) maximalTestingTypeEffectsFiltered(base *tier2Base, pkgPath stri
 				effect, ok := classBEffect("testing", object.Name())
 				if ok {
 					unfilteredScan.add(effect)
-					if !inUnreachedDecl(selector) || packageWideMaximalHazard(effect) {
+					if !inUnreachedDecl(selector) || packageWideMaximalHazardForPkg(audited, effect, false, trackedChdirSafe) {
 						scan.add(effect)
 					}
 				}

@@ -444,8 +444,15 @@ func isConditionallyConfinedUnsafeSymbol(effect externalEffect) bool {
 	return effect.packagePath == "unsafe" && (effect.symbol == "StringData" || effect.symbol == "Slice")
 }
 
-func packageWideMaximalHazardForPkg(effect externalEffect, pkgConfinedUnsafe bool) bool {
+func isConditionallyTrackedChdirSymbol(audited bool, effect externalEffect) bool {
+	return audited && effect.packagePath == "testing" && effect.symbol == "Chdir"
+}
+
+func packageWideMaximalHazardForPkg(audited bool, effect externalEffect, pkgConfinedUnsafe, trackedChdirSafe bool) bool {
 	if pkgConfinedUnsafe && isConditionallyConfinedUnsafeSymbol(effect) {
+		return false
+	}
+	if trackedChdirSafe && isConditionallyTrackedChdirSymbol(audited, effect) {
 		return false
 	}
 	return packageWideMaximalHazard(effect)
@@ -453,7 +460,7 @@ func packageWideMaximalHazardForPkg(effect externalEffect, pkgConfinedUnsafe boo
 
 func hasFilterableMaximalBlocker(audited bool, effects []externalEffect) bool {
 	for _, effect := range effects {
-		if maximalObservabilityBlocker(audited, effect) && (!packageWideMaximalHazard(effect) || isConditionallyConfinedUnsafeSymbol(effect)) {
+		if maximalObservabilityBlocker(audited, effect) && (!packageWideMaximalHazard(effect) || isConditionallyConfinedUnsafeSymbol(effect) || isConditionallyTrackedChdirSymbol(audited, effect)) {
 			return true
 		}
 	}

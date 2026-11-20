@@ -547,31 +547,43 @@ without the bracket in hand.
 **REQ-inputs-observation-disposition** (invariant): Runtime-manifest
 unverifiability MUST NOT be suppressible by an observability proof. Malformed or
 unrecognized records, incomplete observations, and recorded refusals for `stat`
-metadata, `chdir`, process-local `PWD`, unrepresentable identities, unhashable
+metadata, untracked or unbalanced `chdir`, process-local `PWD`, unrepresentable identities, unhashable
 values, external directories or symlink targets, and unknown or caller-supplied
 reasons all remain unverifiable. Thus proof can replace only the
 closure-level conservatism for its admitted effects; the manifest must independently
 be complete, recognized, and fully hashable. A guard-covered read
 (REQ-inputs-guard-covered) is outside this invariant's subject matter: it never
 becomes a recorded observation, so there is no disposition to suppress — the covering
-guard, not a proof, carries its evidence.
+guard, not a proof, carries its evidence. Likewise, when ingest holds an
+analysis-issued tracked-`chdir` capability bound to the execution frame and the
+initial environment carries truthful `PWD` naming the package directory, a
+balanced LIFO `testing.Chdir` excursion over unambiguous clean absolute `chdir`
+targets elides unambiguous scratch/guard-covered targets and records remaining
+non-excluded targets as ordinary bracket-covered path inputs without recording a
+`"working-directory change"` refusal; any missing capability, untracked `chdir`,
+non-absolute or ambiguous `chdir` target, or non-empty restoration stack at EOF
+records `"working-directory change"` (and seals `"process-local environment
+input: PWD"` if `PWD` was consulted during an untracked or unbalanced change).
 
 **REQ-inputs-path-congruence** (invariant): A validity-bearing observed path identity
 MUST materialize to the same filesystem object under the checker that the producing
 operation addressed under kernel path-walk semantics. The observation is
 unverifiable when this cannot be established, including any raw path with a `..`
 component that may cross a symlink before lexical cleaning and any relative path
-after a working-directory change. Lexical normalization alone never discharges this
+after an untracked or ambiguous working-directory change. Lexical normalization alone never discharges this
 obligation. A `..`-carrying raw path discharges it when every directory the
 traversal steps back across — the resolution base's own components included —
 lstats at observation ingest as an existing non-symlink directory: no crossing can
 then rebind, so the kernel walk and the lexical cleaning name the same object, and
 a symlink the traversal does not itself step back across is an ordinary path
 identity walked identically by the producer and by every later
-materialization of the recorded path. A mid-run change of a crossed component is the same one-process-run-wide
+materialization of the recorded path. Under an active tracked-`chdir` capability
+whose preceding `chdir` targets are clean unambiguous absolute paths, relative
+`open` and `stat` operands resolve against the tracked clean absolute working
+directory and evaluate parent-traversal congruence from that base. A mid-run change of a crossed component is the same one-process-run-wide
 residual the scratch admission accepts. Any verification failure — a symlink, a
 non-directory, a vanished component, an unusable base — keeps the fail-closed
-seal, as does every relative read after a working-directory change.
+seal, as does every relative read after an untracked or ambiguous working-directory change.
 
 **REQ-inputs-fresh-mutation** (invariant): The fresh-mutation observability extension MAY admit
 a filesystem mutation only when subject-local value and alias analysis proves its
@@ -644,11 +656,16 @@ of an external stat, and the identity a chdir target would record all
 discharge silently when the raw observed identity is excluded — because a
 disposition-first ordering would make exactly the surfaces the exclusion
 exists to cover unexcludable (a root listing opened by a parent-directory
-fsync walk is the field case). The exclusion consult matches the raw observed
+fsync walk is the field case). Under an active tracked-`chdir` capability,
+unambiguous root/scratch elisions (REQ-inputs-guard-covered,
+REQ-inputs-ephemeral-root, REQ-inputs-scratch-namespace, REQ-inputs-null-sink)
+apply to unambiguous `chdir` targets ahead of exclusions and classification just
+as they do to `open` and `stat`, while leaving `cwd` LIFO stack tracking intact.
+The exclusion consult matches the raw observed
 identity with the same module-relative-else-absolute normalization
 classification itself applies, so declaring and matching agree with or
 without a refusal. Observation-kind seals that are not per-path dispositions
-— a chdir's working-directory seal — are never discharged by excluding the
+— an untracked or unbalanced chdir's working-directory seal — are never discharged by excluding the
 path they ride with.
 Environment identities are never excludable through path exclusions.
 
@@ -1056,14 +1073,18 @@ read can consume, the proof's metadata-method block being the backstop — and
 the entry digest binds the observed state thereafter — an admission decided at
 parse time, so the bracket never removes a recorded reason), a directory or symlink resolving
 outside the module (the existence-bound stat form of an external directory
-excepted, REQ-inputs-external-dir-existence), a relative path under a
+excepted, REQ-inputs-external-dir-existence), a relative path under an untracked or ambiguous
 working-directory change the run stream cannot confirm was absent, or `PWD` whose value the Go test harness derives separately
 for each package process — MUST be treated as unverifiable rather than valid, since an
 input identity that cannot be pinned under the shared checking environment is not
 proof of a stable input. One `PWD` posture is bounded: a
 frozen environment carrying `PWD` equal to the package directory the process spawned
-in records the name and digest of that actual value as an environment input.
+in records the name and digest of that actual value as an environment input, and
+retains that boundedness across balanced `testing.Chdir` excursions backed by an
+analysis-issued tracked-`chdir` capability (whose verified `Setenv("PWD", ...)`
+bookkeeping logs `PWD`, pinning the package directory, and restores both `cwd`
+and `PWD` before any sibling subject executes).
 The frame binds this execution, not a persisted directory shared by future
 sessions; a changed PWD therefore moves the runtime-input guard independently
 of unchanged compilation inputs. Any other posture,
-including an absent or divergent `PWD`, seals as before.
+including an absent or divergent `PWD`, an untracked working-directory change, or an unbalanced excursion, seals as before.

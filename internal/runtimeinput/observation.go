@@ -139,6 +139,22 @@ func incompleteContext(ctx context.Context, moduleDir, process, reason string, e
 	if err != nil {
 		return Observation{}, err
 	}
+	return incompleteNormalizedContext(ctx, moduleDir, process, reason, normalized)
+}
+
+func incompleteNormalizedContext(ctx context.Context, moduleDir, process, reason string, normalized []string) (Observation, error) {
+	if ctx == nil {
+		return Observation{}, errors.New("runtimeinputs: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return Observation{}, err
+	}
+	if err := validateProcess(process); err != nil {
+		return Observation{}, err
+	}
+	if strings.TrimSpace(reason) == "" {
+		return Observation{}, fmt.Errorf("runtimeinputs: incomplete observation needs a reason")
+	}
 	state, err := stateFromManifest(ctx, manifest{Version: manifestVersion, Unverifiable: []string{reason}}, moduleDir, normalized)
 	if err != nil {
 		return Observation{}, err

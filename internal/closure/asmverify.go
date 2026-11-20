@@ -15,7 +15,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
-const verifiedNonStdAsmMemoSummaryKey = "gofresh/verified-nonstd-asm@5"
+const verifiedNonStdAsmMemoSummaryKey = "gofresh/verified-nonstd-asm@6"
 
 func sortedCleanBasenamesKey(files []string) string {
 	if len(files) == 0 {
