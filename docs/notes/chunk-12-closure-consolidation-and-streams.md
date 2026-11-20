@@ -132,6 +132,14 @@
    - *Fix*: Updated `isMutableStdCarrierAllocType` (`dynamic_walk.go`, `971` LOC) to walk exported fields and exported method signatures/results.
    - *Regression tests*: `TestSubjectEnumerationRebindableStdWrapperRefused` (`FormatListFront`, `FormatPipeErr`, `EmitNopCloser`) and `TestIsMutableStdCarrierAllocTypeStructuralMatrix` (`stream_and_consolidation_test.go`).
 
+## 7. Round 4 Adversarial Review Dispositions (`R4-F1`)
+
+1. **`R4-F1` (`[HIGH]`, confirmed & fixed) — `isMutableStdCarrierAllocType` addressability, concrete-reachability, and reference-sharing lattice (`errors.Join` / `fmt.Errorf` `Unwrap() []error`, `*p = *p2` overwrites, exported aliases, and promoted embedded fields)**:
+   - *Diagnosis*: Checking `unaliasedDerefNamedPkgPath(rt) == pkgPath` on exported method results missed slice/map/channel/cross-package reference-sharing results such as `(*errors.joinError).Unwrap() []error` and `(*fmt.wrapErrors).Unwrap() []error` (`err.(interface{ Unwrap() []error }).Unwrap()[0] = envErr{}`), addressable concrete-reachable carrier structs (`*io.SectionReader`, exported aliases, or unboxed `*unexported`) allow whole-struct dereference overwrite (`*sr = *io.NewSectionReader(...)`), and concrete-reachable structs embedding unexported structs expose promoted exported carrier fields.
+   - *Fix*: Extracted `isMutableStdCarrierAllocType(audited, t, concrete)` + `isTypeAssertableOutsidePkg` + `hasExportedPkgAlias` into `directives_and_types.go` (`646` LOC) and `isCrossScopeMutableStdAlloc` (emitting `closure.std_alloc.mutable` via `fp.traceCtx()`, threading `ctx` onto `callerReferenceSummary`) in `dynamic_walk.go` (`893` LOC): tracks `(cur, addr, concrete)` across pointer/slice/map/channel/array/struct/named types, flags whole-value overwrite on `addr && concrete && typeMayCarryDynamicTop`, checks exported method sets (params + non-interface results as `concrete=true`), and walks exported + embedded-promoted fields on concrete-reachable structs while keeping encapsulated stdlib-boxed unexported carriers (`io.NopCloser`, `context.WithValue`, `context.WithCancel`) immutable.
+   - *Regression tests*: `FormatJoinedErr`, `FormatMultiWrappedErr`, `EmitSectionReaderOverwrite`, `EmitNopCloser`, and `FormatValueCtxErr` (+ `closure.std_alloc.mutable` trace assertion) in `TestSubjectEnumerationRebindableStdWrapperRefused`, plus 7-cell `TestIsMutableStdCarrierAllocTypeStructuralMatrix`.
+
+
 
 
 
