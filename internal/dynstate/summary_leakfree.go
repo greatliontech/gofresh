@@ -10,9 +10,9 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func boundValueLeakFreeJudged(
@@ -833,7 +833,7 @@ func valueTouchesRootSet(v *flowir.Value, isRoot func(types.Object) bool, global
 					}
 				}
 				for _, gv := range globalRoots {
-					if bodyMentionsVar(cur.Closure, gv) {
+					if flowir.BodyMentionsVar(cur.Closure, gv) {
 						hit = true
 						return false
 					}
@@ -848,7 +848,7 @@ func valueTouchesRootSet(v *flowir.Value, isRoot func(types.Object) bool, global
 					}
 				}
 				for _, gv := range globalRoots {
-					if bodyMentionsVar(cur.IIFE, gv) {
+					if flowir.BodyMentionsVar(cur.IIFE, gv) {
 						hit = true
 						return false
 					}
@@ -1974,7 +1974,6 @@ func (c *packageConfinementSummary) classifyMethod(ownPath string, mk syntaxutil
 
 func resolveLocalParamDeps(ownPath string, proven map[syntaxutil.ParamKey]bool, allWants map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool, satisfied func(syntaxutil.ParamKey) bool) map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool {
 	conditional := map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool{}
-	deps := map[syntaxutil.ParamKey]map[syntaxutil.ParamKey]bool{}
 	for key, wants := range allWants {
 		crossPackage := false
 		for want := range wants {
@@ -1983,45 +1982,12 @@ func resolveLocalParamDeps(ownPath string, proven map[syntaxutil.ParamKey]bool, 
 				break
 			}
 		}
-		if crossPackage {
-			deps[key] = wants
-		} else {
+		if !crossPackage {
 			conditional[key] = wants
 		}
 	}
 	syntaxutil.SolveLeastFixedPoint(proven, conditional, satisfied)
-	for key, needs := range conditional {
-		if satisfied(key) {
-			continue
-		}
-		edges := map[syntaxutil.ParamKey]bool{}
-		for need := range needs {
-			if !satisfied(need) {
-				edges[need] = true
-			}
-		}
-		if len(edges) > 0 {
-			deps[key] = edges
-		}
-	}
-	for key, wants := range deps {
-		if satisfied(key) {
-			delete(deps, key)
-			continue
-		}
-		edges := map[syntaxutil.ParamKey]bool{}
-		for need := range wants {
-			if !satisfied(need) {
-				edges[need] = true
-			}
-		}
-		if len(edges) > 0 {
-			deps[key] = edges
-		} else {
-			delete(deps, key)
-		}
-	}
-	return deps
+	return syntaxutil.PruneUnsatisfiedDeps(allWants, satisfied, satisfied)
 }
 
 func receiverRetentionFreeMethods(audited bool, p *packages.Package, fc *pkgFlowCache, readOnlyLocal map[string]bool) map[string]bool {
@@ -2569,49 +2535,39 @@ func solvePackageConfinement(audited bool, p *packages.Package, fc *pkgFlowCache
 	// Solve intra-package (readOnlyLocal, paramProven) jointly to a single
 	// least fixed point so mutual recursion across Param <-> Method refuses
 	// while acyclic intra-package chains prove unconditionally at fact time.
-	for changed := true; changed; {
-		changed = false
-		for key := range methods {
-			if disqualified[key] || readOnlyLocal[key] || len(mForeignMethodWants[key]) > 0 {
-				continue
-			}
-			ok := true
-			for pk := range mParamWants[key] {
-				if !paramProven[pk] {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				readOnlyLocal[key] = true
-				changed = true
-			}
-		}
-		for key := range pCandidate {
-			if paramProven[key] {
-				continue
-			}
-			ok := true
-			for pk := range pParamWants[key] {
-				if !paramProven[pk] {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				for mk := range pMethodWants[key] {
-					if mk.Pkg != ownPath || !readOnlyLocal[mk.Name] {
-						ok = false
-						break
-					}
-				}
-			}
-			if ok {
-				paramProven[key] = true
-				changed = true
-			}
+	methodCandidates := make(map[string]bool, len(methods))
+	for key := range methods {
+		if !disqualified[key] && len(mForeignMethodWants[key]) == 0 {
+			methodCandidates[key] = true
 		}
 	}
+	syntaxutil.SolveBipartiteLFP(
+		readOnlyLocal,
+		methodCandidates,
+		func(key string) bool {
+			for pk := range mParamWants[key] {
+				if !paramProven[pk] {
+					return false
+				}
+			}
+			return true
+		},
+		paramProven,
+		pCandidate,
+		func(key syntaxutil.ParamKey) bool {
+			for pk := range pParamWants[key] {
+				if !paramProven[pk] {
+					return false
+				}
+			}
+			for mk := range pMethodWants[key] {
+				if mk.Pkg != ownPath || !readOnlyLocal[mk.Name] {
+					return false
+				}
+			}
+			return true
+		},
+	)
 
 	// Prune methods whose intra-package parameter prerequisites failed
 	// outright (so dead intra-package method candidates emit no spurious
@@ -2764,57 +2720,44 @@ func solvePackageConfinement(audited bool, p *packages.Package, fc *pkgFlowCache
 	for k := range paramProven {
 		condParam[k] = true
 	}
-	for changed := true; changed; {
-		changed = false
-		for key := range methods {
-			if disqualified[key] || condReadOnly[key] {
-				continue
-			}
-			ok := true
-			for fk := range mForeignMethodWants[key] {
-				if fk.Pkg == ownPath && !condReadOnly[fk.Name] {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				for pk := range mParamWants[key] {
-					if pk.Func.Pkg == ownPath && !condParam[pk] {
-						ok = false
-						break
-					}
-				}
-			}
-			if ok {
-				condReadOnly[key] = true
-				changed = true
-			}
-		}
-		for key := range pCandidate {
-			if condParam[key] {
-				continue
-			}
-			ok := true
-			for pk := range pParamWants[key] {
-				if pk.Func.Pkg == ownPath && !condParam[pk] {
-					ok = false
-					break
-				}
-			}
-			if ok {
-				for mk := range pMethodWants[key] {
-					if mk.Pkg == ownPath && !condReadOnly[mk.Name] {
-						ok = false
-						break
-					}
-				}
-			}
-			if ok {
-				condParam[key] = true
-				changed = true
-			}
+	condMethodCandidates := make(map[string]bool, len(methods))
+	for key := range methods {
+		if !disqualified[key] {
+			condMethodCandidates[key] = true
 		}
 	}
+	syntaxutil.SolveBipartiteLFP(
+		condReadOnly,
+		condMethodCandidates,
+		func(key string) bool {
+			for fk := range mForeignMethodWants[key] {
+				if fk.Pkg == ownPath && !condReadOnly[fk.Name] {
+					return false
+				}
+			}
+			for pk := range mParamWants[key] {
+				if pk.Func.Pkg == ownPath && !condParam[pk] {
+					return false
+				}
+			}
+			return true
+		},
+		condParam,
+		pCandidate,
+		func(key syntaxutil.ParamKey) bool {
+			for pk := range pParamWants[key] {
+				if pk.Func.Pkg == ownPath && !condParam[pk] {
+					return false
+				}
+			}
+			for mk := range pMethodWants[key] {
+				if mk.Pkg == ownPath && !condReadOnly[mk.Name] {
+					return false
+				}
+			}
+			return true
+		},
+	)
 
 	out.readOnly = readOnlyLocal
 	out.condReadOnly = condReadOnly
@@ -2953,29 +2896,6 @@ func collectPackageOnceFieldUsage(
 		})
 	}
 	return onceSites, fieldRefIdents, disqualifiedOnceFields, aliasedInitOnceFields
-}
-
-func funcBodyHasGotoOutsideClosures(body *ast.BlockStmt) bool {
-	if body == nil {
-		return false
-	}
-	found := false
-	var walk func(n ast.Node) bool
-	walk = func(n ast.Node) bool {
-		if found || n == nil {
-			return false
-		}
-		if _, isLit := n.(*ast.FuncLit); isLit {
-			return false
-		}
-		if br, ok := n.(*ast.BranchStmt); ok && br.Tok == token.GOTO {
-			found = true
-			return false
-		}
-		return true
-	}
-	ast.Inspect(body, walk)
-	return found
 }
 
 func identInPostDoAsyncSubtree(methodBody *ast.BlockStmt, afterPos token.Pos, target *ast.Ident) bool {
@@ -3562,7 +3482,8 @@ func computeOnceDoFieldAdmissions(
 		freshFillFields:    map[*types.Var]bool{},
 		freshTainted:       map[types.Object]bool{},
 	}
-	if methodDecl == nil || methodDecl.Body == nil || doCall == nil || doLit == nil || doLit.Body == nil || funcBodyHasGotoOutsideClosures(methodDecl.Body) {
+	methodBody := fc.funcBody(p, methodDecl)
+	if methodDecl == nil || methodDecl.Body == nil || doCall == nil || doLit == nil || doLit.Body == nil || methodBody == nil || methodBody.HasGoto {
 		adm.smuggledLocals = computeOnceFillSmuggledLocals(audited, fc, doBody, adm.candidates, recvObj)
 		return adm
 	}

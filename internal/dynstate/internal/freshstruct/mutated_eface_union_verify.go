@@ -5,8 +5,8 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func (efu *efaceUnionHelper) verifyEfaceUnionStructs() {
@@ -373,7 +373,7 @@ func (efu *efaceUnionHelper) verifyEfaceUnionStructs() {
 				break
 			}
 			enclBody := innermostFuncOrLitBody(efu.idx, sel)
-			if enclBody == nil || blockHasGotoOrLabel(enclBody) {
+			if enclBody == nil || cachedScopeHasGotoOrLabel(efu.p, efu.idx, enclBody) {
 				dataUsesOK = false
 				break
 			}
@@ -651,7 +651,7 @@ func (efu *efaceUnionHelper) verifyEfaceUnionStructs() {
 						return false
 					}
 					enclBody := innermostFuncOrLitBody(efu.idx, call)
-					if enclBody == nil || blockHasGotoOrLabel(enclBody) {
+					if enclBody == nil || cachedScopeHasGotoOrLabel(efu.p, efu.idx, enclBody) {
 						return false
 					}
 					_, cc := findEnclosingTypSwitchCase(call, callRecv)
@@ -708,7 +708,7 @@ func (efu *efaceUnionHelper) verifyEfaceUnionStructs() {
 					break
 				}
 				enclBody := innermostFuncOrLitBody(efu.idx, call)
-				if enclBody == nil || blockHasGotoOrLabel(enclBody) {
+				if enclBody == nil || cachedScopeHasGotoOrLabel(efu.p, efu.idx, enclBody) {
 					helpersOK = false
 					break
 				}

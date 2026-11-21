@@ -5,8 +5,8 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func (wpd *wrapperPtrDiscipline) isSafeCapsuleGoReflectTypeInitExpr(expr ast.Expr, visiting map[types.Object]bool) bool {
@@ -81,7 +81,7 @@ func (wpd *wrapperPtrDiscipline) isSafeCapsuleGoReflectTypeInitExpr(expr ast.Exp
 			}
 		}
 		enclScope := declaringFuncOrLitBody(wpd.idx, e, v.Pos())
-		if enclScope == nil || blockHasGoto(enclScope) {
+		if enclScope == nil || cachedScopeHasGoto(wpd.p, wpd.idx, enclScope) {
 			return false
 		}
 		sawWrite := false

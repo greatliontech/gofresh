@@ -487,3 +487,29 @@ func MutOther(u *unrelated)             { delete(u.m, "k"); clear(u.sl) }
 		}
 	}
 }
+
+func TestVerifyReadOnlyRefConfinementPanicRecoverNamedResult(t *testing.T) {
+	pkg := mustTypecheckPkg(t, "example.com/panicres", `package panicres
+
+type holder struct {
+	items []int
+}
+
+func LeakViaPanicRecover(h *holder) (out []int) {
+	defer func() { _ = recover() }()
+	out = h.items
+	panic("done")
+}
+`)
+	holderNamed := pkg.Types.Scope().Lookup("holder").(*types.TypeName).Type().(*types.Named)
+	var gotClause string
+	ok := VerifyReadOnlyRefConfinement(pkg, Config{
+		SeedStructOrigin: func(n *types.Named) bool { return n == holderNamed },
+		OnReject: func(_ token.Pos, clause string) {
+			gotClause = clause
+		},
+	})
+	if ok || gotClause != "tainted named result variable out" {
+		t.Fatalf("VerifyReadOnlyRefConfinement = (%v, %q), want (false, %q)", ok, gotClause, "tainted named result variable out")
+	}
+}

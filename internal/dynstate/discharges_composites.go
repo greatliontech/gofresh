@@ -8,8 +8,8 @@ import (
 	"slices"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func singlePointerToPkgScopeNamedStruct(t types.Type) (*types.Named, *types.Struct, bool) {
@@ -292,7 +292,7 @@ func deriveStaticCompositeGlobals(
 		return nil
 	}
 
-	writeInfos := fc.ensureVarWriteInfos(p)
+	writeInfos := fc.varWriteInfos(p)
 	var out []syntaxutil.StaticCompositeGlobalFact
 	scope := p.Types.Scope()
 	for _, name := range scope.Names() {
@@ -324,8 +324,8 @@ func deriveStaticCompositeGlobals(
 			continue
 		}
 		stWrite := writeInfos[v]
-		if stWrite == nil || stWrite.defs != 1 || stWrite.initVal == nil || stWrite.hasZeroDecl ||
-			stWrite.hasNonPlainDef || stWrite.hasPostDefWrite || stWrite.hasChanSend || stWrite.hasBuiltinMut {
+		if stWrite == nil || stWrite.Defs != 1 || stWrite.InitVal == nil || stWrite.HasZeroDecl ||
+			stWrite.HasNonPlainDef || stWrite.HasPostDefWrite || stWrite.HasChanSend || stWrite.HasBuiltinMut {
 			emitDischargeRejectAt(ctx, p, target, "static_composite", varKey, "mutated_or_non_plain_global", "", v.Pos())
 			continue
 		}

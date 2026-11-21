@@ -15,7 +15,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
 	"github.com/greatliontech/gofresh/internal/closure/internal/rta"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
+	"github.com/greatliontech/gofresh/internal/refconfine"
 )
 
 const verifiedUserSentinelGlobalsSummaryKey = "gofresh/user-sentinel-globals@1"

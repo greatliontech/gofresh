@@ -8,7 +8,7 @@ import (
 	"github.com/greatliontech/go-x-tools/go/ssa"
 
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/propharness"
 )
 

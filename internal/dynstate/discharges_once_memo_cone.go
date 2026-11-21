@@ -7,10 +7,10 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
+	"github.com/greatliontech/gofresh/internal/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func verifyOnceMemoConstructor(
@@ -24,7 +24,8 @@ func verifyOnceMemoConstructor(
 	named *types.Named,
 	inputFields map[*types.Var]bool,
 ) bool {
-	if !pkgFresh.ReturnsFreshAllocation(fd) || funcBodyHasGotoOutsideClosures(fd.Body) {
+	ctorBody := fc.funcBody(p, fd)
+	if !pkgFresh.ReturnsFreshAllocation(fd) || ctorBody == nil || ctorBody.HasGoto {
 		return false
 	}
 	paramSet := map[*types.Var]bool{}
@@ -760,7 +761,11 @@ func funcSlotReturnsFreshScalarSlice(
 	slotIdx int,
 	seen map[*ast.FuncDecl]bool,
 ) bool {
-	if fd == nil || fd.Body == nil || slotIdx < 0 || seen[fd] || funcBodyHasGotoOutsideClosures(fd.Body) {
+	if fd == nil || fd.Body == nil || slotIdx < 0 || seen[fd] {
+		return false
+	}
+	b := fc.funcBody(p, fd)
+	if b == nil || b.HasGoto {
 		return false
 	}
 	fn, _ := p.TypesInfo.Defs[fd.Name].(*types.Func)
@@ -778,11 +783,6 @@ func funcSlotReturnsFreshScalarSlice(
 
 	seen[fd] = true
 	defer delete(seen, fd)
-
-	b := fc.funcBody(p, fd)
-	if b == nil {
-		return false
-	}
 
 	var allOps []*flowir.Op
 	var collectOps func(cur *flowir.Body)
@@ -818,11 +818,11 @@ func funcSlotReturnsFreshScalarSlice(
 			return false
 		}
 		if forbidVar != nil {
-			if v.Recv != nil && exprMentionsVar(p.TypesInfo, v.Recv.Raw, forbidVar) {
+			if v.Recv != nil && flowir.ValueMentionsVar(v.Recv, forbidVar) {
 				return false
 			}
 			for _, a := range v.Args {
-				if a != nil && exprMentionsVar(p.TypesInfo, a.Raw, forbidVar) {
+				if a != nil && flowir.ValueMentionsVar(a, forbidVar) {
 					return false
 				}
 			}
@@ -865,7 +865,7 @@ func funcSlotReturnsFreshScalarSlice(
 		case flowir.ValCall:
 			if v.CallKind == flowir.CallBuiltin && v.BuiltinName == "append" && len(v.Args) >= 1 {
 				for _, a := range v.Args[1:] {
-					if selfVar != nil && a != nil && exprMentionsVar(p.TypesInfo, a.Raw, selfVar) {
+					if selfVar != nil && a != nil && flowir.ValueMentionsVar(a, selfVar) {
 						return nil, false
 					}
 				}

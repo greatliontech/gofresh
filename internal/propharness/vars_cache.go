@@ -5,8 +5,8 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func verifyCachedAndGlobalGeneratorImplsImmutable(
@@ -386,30 +386,21 @@ func verifyFreshUnaliasedLocalAtStore(
 	}
 	body := fd.Body
 	storePos := storeCall.Pos()
+	if g.idx == nil || g.pkg == nil {
+		return nil, false
+	}
+	if fb := g.idx.FlowCache(g.pkg).FuncBody(fd); fb == nil || fb.HasGoto {
+		return nil, false
+	}
 
-	hasGoto := false
 	defCounts := map[*types.Var]int{}
 	declPosByVar := map[*types.Var]token.Pos{}
 	var loops []ast.Node
-	var indexBody func(n ast.Node, inLit bool)
-	indexBody = func(n ast.Node, inLit bool) {
-		if hasGoto || n == nil {
-			return
+	ast.Inspect(body, func(n ast.Node) bool {
+		if n == nil {
+			return false
 		}
 		switch x := n.(type) {
-		case *ast.FuncLit:
-			if x.Type != nil {
-				indexBody(x.Type, true)
-			}
-			if x.Body != nil {
-				indexBody(x.Body, true)
-			}
-			return
-		case *ast.BranchStmt:
-			if !inLit && x.Tok == token.GOTO {
-				hasGoto = true
-				return
-			}
 		case *ast.ForStmt, *ast.RangeStmt:
 			loops = append(loops, x)
 		case *ast.Ident:
@@ -418,21 +409,8 @@ func verifyFreshUnaliasedLocalAtStore(
 				declPosByVar[v] = x.Pos()
 			}
 		}
-		ast.Inspect(n, func(child ast.Node) bool {
-			if hasGoto || child == nil {
-				return false
-			}
-			if child == n {
-				return true
-			}
-			indexBody(child, inLit)
-			return false
-		})
-	}
-	indexBody(body, false)
-	if hasGoto {
-		return nil, false
-	}
+		return true
+	})
 
 	sigVars := map[*types.Var]bool{}
 	recordFL := func(fl *ast.FieldList) {

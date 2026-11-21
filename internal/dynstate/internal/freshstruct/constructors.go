@@ -7,8 +7,8 @@ import (
 	"maps"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 type freshVarState struct {
@@ -42,7 +42,7 @@ type PkgFreshConstructors struct {
 // nil, a direct fresh allocation, or a live unescaped fresh local variable on
 // its primary result across every return path.
 func (pf *PkgFreshConstructors) ReturnsFreshAllocation(fd *ast.FuncDecl) bool {
-	if pf == nil || pf.p == nil || pf.p.TypesInfo == nil || fd == nil || fd.Body == nil || FuncBodyHasGoto(fd.Body) {
+	if pf == nil || pf.p == nil || pf.p.TypesInfo == nil || pf.idx == nil || fd == nil || fd.Body == nil || pf.idx.FlowCache(pf.p).FuncBody(fd).HasGotoAnywhere() {
 		return false
 	}
 	sum := pf.funcs[fd]
@@ -331,8 +331,9 @@ func ComputePackageFreshConstructors(
 
 	var allFDs []*ast.FuncDecl
 	eligibleUnexported := map[*types.Func]*ast.FuncDecl{}
+	flowCache := idx.FlowCache(p)
 	for fn, fd := range idx.FuncDecls {
-		if fn == nil || fd == nil || fd.Body == nil || FuncBodyHasGoto(fd.Body) {
+		if fn == nil || fd == nil || fd.Body == nil || flowCache == nil || flowCache.FuncBody(fd).HasGotoAnywhere() {
 			continue
 		}
 		hasGo := false

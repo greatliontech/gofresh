@@ -7,8 +7,8 @@ import (
 	"go/types"
 	"strings"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func isMakeChanCall(info *types.Info, e ast.Expr) bool {

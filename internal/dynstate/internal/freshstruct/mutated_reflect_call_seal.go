@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func pkgHasReflectCallFileHazard(p *packages.Package) bool {
@@ -583,27 +583,6 @@ func collectStrictConcreteUnexportedStructs(
 		return len(out) > 0
 	})
 	return out
-}
-
-func blockHasGotoLabelOrFallthrough(root ast.Node) bool {
-	if blockHasGotoOrLabel(root) {
-		return true
-	}
-	found := false
-	ast.Inspect(root, func(n ast.Node) bool {
-		if found || n == nil {
-			return false
-		}
-		if _, isLit := n.(*ast.FuncLit); isLit && n != root {
-			return false
-		}
-		if bs, isB := n.(*ast.BranchStmt); isB && bs.Tok == token.FALLTHROUGH {
-			found = true
-			return false
-		}
-		return true
-	})
-	return found
 }
 
 func isTrivialIndexOperand(idxExpr ast.Expr, info *types.Info) bool {

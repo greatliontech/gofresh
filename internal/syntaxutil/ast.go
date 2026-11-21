@@ -1,5 +1,5 @@
-// Package syntaxutil provides shared AST, go/types, place-spine, declaration-key,
-// and monotone fixed-point primitives across the dynamic-state analysis packages.
+// Package syntaxutil provides shared AST, go/types, declaration-key, and
+// monotone fixed-point primitives across gofresh's static-analysis packages.
 package syntaxutil
 
 import (
@@ -576,4 +576,33 @@ func SameFieldTargetExpr(p *packages.Package, a, b ast.Expr) bool {
 		return okV && iv != nil && iv == p.TypesInfo.Uses[ib] && !iv.IsField() && iv.Parent() != p.Types.Scope()
 	}
 	return false
+}
+
+// NodeHasGotoOrLabel reports whether root contains any synchronous goto branch
+// or labeled statement without entering nested *ast.FuncLit bodies.
+func NodeHasGotoOrLabel(root ast.Node) bool {
+	if root == nil {
+		return false
+	}
+	hit := false
+	ast.Inspect(root, func(n ast.Node) bool {
+		if hit || n == nil {
+			return false
+		}
+		if _, isFL := n.(*ast.FuncLit); isFL && n != root {
+			return false
+		}
+		switch s := n.(type) {
+		case *ast.LabeledStmt:
+			hit = true
+			return false
+		case *ast.BranchStmt:
+			if s.Tok == token.GOTO {
+				hit = true
+				return false
+			}
+		}
+		return true
+	})
+	return hit
 }

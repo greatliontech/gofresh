@@ -10,9 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	. "github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	. "github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
+	"pgregory.net/rapid"
 )
 
 func mustTypecheck(t *testing.T, src string) (*token.FileSet, *ast.File, *types.Package, *types.Info) {
@@ -675,5 +676,470 @@ func AddParen(x int) int {
 	}
 	if compSrc.Args[1].Kind != ValPlace || compSrc.Args[1].Raw == nil {
 		t.Fatalf("AssignCompound Args[1] = %+v, want ValPlace with non-nil Raw", compSrc.Args[1])
+	}
+}
+
+func TestBodyHazardFlagsAndSignatureFuncLitCacheMatrix(t *testing.T) {
+	const src = `package p
+
+import "unsafe"
+
+type TypeWithLit [unsafe.Sizeof(func() {
+	goto L
+L:
+})]byte
+
+func Clean() {}
+
+func ClosureGotoOnly() {
+	_ = func() {
+		goto L
+	L:
+	}
+}
+
+func RangeGoto(xs []int) {
+	for range xs {
+		goto Done
+	}
+Done:
+}
+
+func FallthroughAndDefer(x int) {
+	defer func() {}()
+	switch x {
+	case 1:
+		fallthrough
+	default:
+	}
+}
+
+func LabeledBreakAndGo(xs []int) {
+	go func() {}()
+Outer:
+	for range xs {
+		break Outer
+	}
+}
+`
+	_, file, pkg, info := mustTypecheck(t, src)
+	cache := NewPkgCache(info, pkg, []*ast.File{file})
+	if cache.DeclLowerCount != 5 {
+		t.Fatalf("DeclLowerCount = %d, want 5", cache.DeclLowerCount)
+	}
+	// Pre-indexed FuncLit inside TypeWithLit must hit cache with 0 MissCount.
+	var typeLit *ast.FuncLit
+	ast.Inspect(file.Decls[1], func(n ast.Node) bool {
+		if fl, ok := n.(*ast.FuncLit); ok {
+			typeLit = fl
+			return false
+		}
+		return true
+	})
+	if typeLit == nil {
+		t.Fatal("missing FuncLit in TypeWithLit")
+	}
+	tlBody := cache.LitBody(typeLit)
+	if tlBody == nil || !tlBody.HasGoto || !tlBody.HasLabel || cache.MissCount != 0 {
+		t.Fatalf("typeLit body = %+v, MissCount = %d", tlBody, cache.MissCount)
+	}
+
+	cases := []struct {
+		name              string
+		hasGoto           bool
+		hasNestedGoto     bool
+		hasGotoAnywhere   bool
+		hasLabel          bool
+		hasGotoOrLabel    bool
+		hasFallthrough    bool
+		hasGotoLabelOrFT  bool
+		hasLabeledBranch  bool
+		hasUnstructuredBr bool
+		hasDefer          bool
+		hasGo             bool
+	}{
+		{name: "Clean"},
+		{name: "ClosureGotoOnly", hasNestedGoto: true, hasGotoAnywhere: true},
+		{name: "RangeGoto", hasGoto: true, hasGotoAnywhere: true, hasLabel: true, hasGotoOrLabel: true, hasGotoLabelOrFT: true, hasLabeledBranch: true, hasUnstructuredBr: true},
+		{name: "FallthroughAndDefer", hasFallthrough: true, hasGotoLabelOrFT: true, hasUnstructuredBr: true, hasDefer: true},
+		{name: "LabeledBreakAndGo", hasLabel: true, hasGotoOrLabel: true, hasGotoLabelOrFT: true, hasLabeledBranch: true, hasUnstructuredBr: true, hasGo: true},
+	}
+	for _, tc := range cases {
+		b := cache.FuncBody(findFuncDecl(t, file, tc.name))
+		if b == nil {
+			t.Fatalf("%s: nil body", tc.name)
+		}
+		if b.HasGoto != tc.hasGoto || b.HasNestedGoto != tc.hasNestedGoto || b.HasGotoAnywhere() != tc.hasGotoAnywhere ||
+			b.HasLabel != tc.hasLabel || b.HasGotoOrLabel() != tc.hasGotoOrLabel ||
+			b.HasFallthrough != tc.hasFallthrough || b.HasGotoLabelOrFallthrough() != tc.hasGotoLabelOrFT ||
+			b.HasLabeledBranch != tc.hasLabeledBranch || b.HasUnstructuredBranch() != tc.hasUnstructuredBr ||
+			b.HasDefer != tc.hasDefer || b.HasGo != tc.hasGo {
+			t.Fatalf("%s mismatch: got goto=%v nested=%v any=%v label=%v ft=%v labBr=%v defer=%v go=%v",
+				tc.name, b.HasGoto, b.HasNestedGoto, b.HasGotoAnywhere(), b.HasLabel, b.HasFallthrough, b.HasLabeledBranch, b.HasDefer, b.HasGo)
+		}
+	}
+}
+
+func TestPropertyBodyHazardFlagsMatchASTOracle(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		emitGoto := rapid.Bool().Draw(rt, "emitGoto")
+		emitLabelOnly := !emitGoto && rapid.Bool().Draw(rt, "emitLabelOnly")
+		emitRangeGoto := !emitGoto && !emitLabelOnly && rapid.Bool().Draw(rt, "emitRangeGoto")
+		emitFallthrough := rapid.Bool().Draw(rt, "emitFallthrough")
+		emitLabeledBreak := rapid.Bool().Draw(rt, "emitLabeledBreak")
+		emitDefer := rapid.Bool().Draw(rt, "emitDefer")
+		emitGo := rapid.Bool().Draw(rt, "emitGo")
+		closureGoto := rapid.Bool().Draw(rt, "closureGoto")
+		iifeGoto := rapid.Bool().Draw(rt, "iifeGoto")
+		typeExprGoto := rapid.Bool().Draw(rt, "typeExprGoto")
+
+		var sb strings.Builder
+		sb.WriteString("package p\n")
+		if typeExprGoto {
+			sb.WriteString("import \"unsafe\"\n")
+		}
+		sb.WriteString("func F(xs []int, n int) {\n")
+
+		if emitDefer {
+			sb.WriteString("\tdefer func() {}()\n")
+		}
+		if emitGo {
+			sb.WriteString("\tgo func() {}()\n")
+		}
+		if emitFallthrough {
+			sb.WriteString("\tswitch n { case 0: fallthrough; default: }\n")
+		}
+		if emitLabeledBreak {
+			sb.WriteString("Loop:\n\tfor range xs { break Loop }\n")
+		}
+		if closureGoto {
+			sb.WriteString("\t_ = func() { goto CL; CL: }\n")
+		} else {
+			sb.WriteString("\t_ = func() { defer func() {}() }\n")
+		}
+		if iifeGoto {
+			sb.WriteString("\tfunc() { goto IL; IL: }()\n")
+		}
+		if typeExprGoto {
+			sb.WriteString("\tfor range xs { _ = [unsafe.Sizeof(func() { goto TL; TL: })]byte{} }\n")
+		}
+		if emitGoto {
+			sb.WriteString("\tgoto Target\nTarget:\n")
+		} else if emitLabelOnly {
+			sb.WriteString("UnusedLabel:\n\tfor { break UnusedLabel }\n")
+		} else if emitRangeGoto {
+			sb.WriteString("\tfor range xs { goto AfterRange }\nAfterRange:\n")
+		}
+		sb.WriteString("}\n")
+
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "p.go", sb.String(), 0)
+		if err != nil {
+			rt.Fatalf("parse failed: %v\n%s", err, sb.String())
+		}
+		info := &types.Info{
+			Types:      make(map[ast.Expr]types.TypeAndValue),
+			Defs:       make(map[*ast.Ident]types.Object),
+			Uses:       make(map[*ast.Ident]types.Object),
+			Selections: make(map[*ast.SelectorExpr]*types.Selection),
+			Instances:  make(map[*ast.Ident]types.Instance),
+			Implicits:  make(map[ast.Node]types.Object),
+		}
+		pkg, err := (&types.Config{Importer: importer.Default()}).Check("p", fset, []*ast.File{file}, info)
+		if err != nil {
+			rt.Fatalf("check failed: %v\n%s", err, sb.String())
+		}
+		var fd *ast.FuncDecl
+		for _, d := range file.Decls {
+			if fn, ok := d.(*ast.FuncDecl); ok {
+				fd = fn
+				break
+			}
+		}
+		b := LowerFunc(info, pkg, fd)
+		cachedB := NewPkgCache(info, pkg, []*ast.File{file}).FuncBody(fd)
+
+		var wantGoto, wantNestedGoto, wantLabel, wantFT, wantLabBr, wantDefer, wantGo bool
+		var walkAST func(n ast.Node, inLit bool)
+		walkAST = func(n ast.Node, inLit bool) {
+			if n == nil {
+				return
+			}
+			switch s := n.(type) {
+			case *ast.FuncLit:
+				if s.Type != nil {
+					walkAST(s.Type, true)
+				}
+				if s.Body != nil {
+					for _, st := range s.Body.List {
+						walkAST(st, true)
+					}
+				}
+				return
+			case *ast.LabeledStmt:
+				if !inLit {
+					wantLabel = true
+				}
+			case *ast.DeferStmt:
+				if !inLit {
+					wantDefer = true
+				}
+			case *ast.GoStmt:
+				if !inLit {
+					wantGo = true
+				}
+			case *ast.BranchStmt:
+				if s.Tok == token.GOTO {
+					if inLit {
+						wantNestedGoto = true
+					} else {
+						wantGoto = true
+					}
+				}
+				if !inLit && s.Tok == token.FALLTHROUGH {
+					wantFT = true
+				}
+				if !inLit && s.Label != nil {
+					wantLabBr = true
+				}
+			}
+			ast.Inspect(n, func(ch ast.Node) bool {
+				if ch == nil || ch == n {
+					return ch == n
+				}
+				walkAST(ch, inLit)
+				return false
+			})
+		}
+		walkAST(fd.Body, false)
+
+		for _, got := range []*Body{b, cachedB} {
+			if got.HasGoto != wantGoto || got.HasNestedGoto != wantNestedGoto ||
+				got.HasGotoAnywhere() != (wantGoto || wantNestedGoto) ||
+				got.HasLabel != wantLabel || got.HasFallthrough != wantFT ||
+				got.HasLabeledBranch != wantLabBr || got.HasDefer != wantDefer || got.HasGo != wantGo {
+				rt.Fatalf("oracle mismatch on:\n%s\ngot: %+v", sb.String(), got)
+			}
+		}
+	})
+}
+
+func TestVarWriteInfosPlaceEntersInteriorAndMentionsMatrix(t *testing.T) {
+	const src = `package p
+
+type Box[T any] struct {
+	val T
+	ptr *int
+}
+
+type Counter struct{ n int }
+
+func (c *Counter) Inc() { c.n++ }
+
+var (
+	CleanGlobal      = []int{1, 2}
+	MutatedGlobal    = []int{3}
+	ZeroGlobal       []int
+	AutoAddrGlobal   = Counter{n: 1}
+	ExplicitAddrGlob = 7
+	ChanGlobal       = make(chan int, 1)
+	BuiltinMutGlobal = map[string]int{"a": 1}
+	StrCopyGlobal    = "hello"
+)
+
+func Ops(in *Box[int]) int {
+	MutatedGlobal[0] = 9
+	AutoAddrGlobal.Inc()
+	_ = &ExplicitAddrGlob
+	ChanGlobal <- 1
+	delete(BuiltinMutGlobal, "a")
+	clear([]byte(StrCopyGlobal))
+	cleanLocal := 42
+	mutLocal := 1
+	mutLocal++
+	box := Box[int]{val: cleanLocal}
+	fn := func() int {
+		return in.val + box.val
+	}
+	res := func() int {
+		return cleanLocal
+	}()
+	p := &in.ptr
+	_ = p
+	return fn() + res + mutLocal
+}
+`
+	_, file, pkg, info := mustTypecheck(t, src)
+	cache := NewPkgCache(info, pkg, []*ast.File{file})
+
+	cleanGV := pkg.Scope().Lookup("CleanGlobal").(*types.Var)
+	mutGVVar := pkg.Scope().Lookup("MutatedGlobal").(*types.Var)
+	zeroGV := pkg.Scope().Lookup("ZeroGlobal").(*types.Var)
+	autoAddrGV := pkg.Scope().Lookup("AutoAddrGlobal").(*types.Var)
+	explicitAddrGV := pkg.Scope().Lookup("ExplicitAddrGlob").(*types.Var)
+	chanGV := pkg.Scope().Lookup("ChanGlobal").(*types.Var)
+	builtinMutGV := pkg.Scope().Lookup("BuiltinMutGlobal").(*types.Var)
+	strCopyGV := pkg.Scope().Lookup("StrCopyGlobal").(*types.Var)
+
+	if initV, ok := cache.SingleWritePkgGlobalInit(cleanGV); !ok || initV == nil {
+		t.Fatalf("CleanGlobal SingleWritePkgGlobalInit = (%v, %v), want non-nil, true", initV, ok)
+	}
+	if cache.VarHasExplicitWriteOrAddr(cleanGV) {
+		t.Fatal("CleanGlobal unexpectedly reported written/addressed")
+	}
+	if initV, ok := cache.SingleWritePkgGlobalInit(strCopyGV); !ok || initV == nil || cache.VarHasExplicitWriteOrAddr(strCopyGV) {
+		t.Fatalf("StrCopyGlobal should remain clean across fresh []byte(StrCopyGlobal) copy: (%v, %v)", initV, ok)
+	}
+	for _, hazardGV := range []*types.Var{mutGVVar, autoAddrGV, explicitAddrGV, chanGV, builtinMutGV} {
+		if _, ok := cache.SingleWritePkgGlobalInit(hazardGV); ok || !cache.VarHasExplicitWriteOrAddr(hazardGV) {
+			t.Fatalf("%s should reject SingleWritePkgGlobalInit and report written/addressed", hazardGV.Name())
+		}
+	}
+	if _, ok := cache.SingleWritePkgGlobalInit(zeroGV); ok || cache.VarHasExplicitWriteOrAddr(zeroGV) {
+		t.Fatal("ZeroGlobal should reject SingleWritePkgGlobalInit (no initializer) while having zero post-decl writes")
+	}
+
+	opsFD := findFuncDecl(t, file, "Ops")
+	opsBody := cache.FuncBody(opsFD)
+	var cleanLocal, mutLocal *types.Var
+	for id, obj := range info.Defs {
+		if id.Name == "cleanLocal" {
+			cleanLocal = obj.(*types.Var)
+		} else if id.Name == "mutLocal" {
+			mutLocal = obj.(*types.Var)
+		}
+	}
+	if _, ok := cache.SingleWriteLocalInit(opsBody, cleanLocal); !ok {
+		t.Fatal("cleanLocal SingleWriteLocalInit = false, want true")
+	}
+	if _, ok := cache.SingleWriteLocalInit(opsBody, mutLocal); ok || !cache.VarHasExplicitWriteOrAddr(mutLocal) {
+		t.Fatal("mutLocal should reject SingleWriteLocalInit and report written")
+	}
+
+	boxOrigin := pkg.Scope().Lookup("Box").Type().(*types.Named)
+	valField := boxOrigin.Underlying().(*types.Struct).Field(0)
+	if !BodyMentionsVar(opsBody, valField) {
+		t.Fatal("BodyMentionsVar missed instantiated generic struct field Box.val")
+	}
+	if !BodyMentionsVar(opsBody, cleanLocal) {
+		t.Fatal("BodyMentionsVar missed cleanLocal inside closure/IIFE")
+	}
+	if !BodyMentionsVars(opsBody, map[*types.Var]bool{valField: true}) || BodyMentionsVars(opsBody, nil) {
+		t.Fatal("BodyMentionsVars failed positive or empty-target check")
+	}
+	if !OpMentionsVars(&opsBody.Ops[0], map[*types.Var]bool{mutGVVar: true}) {
+		t.Fatal("OpMentionsVars missed MutatedGlobal write")
+	}
+	if !ValueMentionsVars(opsBody.Ops[len(opsBody.Ops)-1].Results[0], map[*types.Var]bool{mutLocal: true}) {
+		t.Fatal("ValueMentionsVars missed mutLocal in return expression")
+	}
+
+	// PlaceEntersInterior: `MutatedGlobal[0]` crosses 1 hop on a slice header (single-hop header -> false),
+	// whereas `&in.ptr` dereferences `*Box` (1 hop) and projects `.ptr`; dereferencing `*in.ptr` would cross 2 hops.
+	sliceElemDst := opsBody.Ops[0].Dsts[0]
+	if PlaceEntersInterior(sliceElemDst, false) {
+		t.Fatal("PlaceEntersInterior(slice[0], false) = true, want false (1st hop of slice header)")
+	}
+	if !PlaceEntersInterior(sliceElemDst, true) {
+		t.Fatal("PlaceEntersInterior(slice[0], true) = false, want true (container write beyond 1st hop)")
+	}
+
+	var syncCount, allCount int
+	VisitSyncAndIIFEOps(opsBody, func(*Op) { syncCount++ })
+	VisitAllOps(opsBody, func(*Op) { allCount++ })
+	if allCount <= syncCount {
+		t.Fatalf("VisitAllOps (%d) should exceed VisitSyncAndIIFEOps (%d) due to uncalled closure", allCount, syncCount)
+	}
+}
+
+func TestTypeExpressionFuncLitIndexingAndPromotedEmbeddedPtrAliases(t *testing.T) {
+	const src = `package p
+
+import "unsafe"
+
+type Inner struct{ ptr *int }
+type Holder struct{ in *Inner }
+type Outer struct{ *Holder }
+
+type NestedSig [unsafe.Sizeof(func(a [unsafe.Sizeof(func() {
+	goto InnerLbl
+InnerLbl:
+})]byte) {})]byte
+
+var VarTypeLit [unsafe.Sizeof(func(q *Inner) (out int) {
+	var p *Inner
+	var a any = p
+	_ = a
+	return 0
+})]byte
+
+func LocalTypeExprGoto(xs []int) {
+	for range xs {
+		_ = [unsafe.Sizeof(func() {
+			goto LocalLbl
+		LocalLbl:
+		})]byte{}
+	}
+}
+
+func LinkViaPromotedEmbeddedPtr() {
+	h := &Holder{}
+	o := &Outer{}
+	in := &Inner{}
+	o.Holder = h
+	o.in = in
+}
+`
+	_, file, pkg, info := mustTypecheck(t, src)
+	cache := NewPkgCache(info, pkg, []*ast.File{file})
+
+	// Every FuncLit anywhere in file (type decls, nested FuncLit signatures,
+	// var ValueSpec.Type, and expression types) must be pre-indexed with full
+	// LowerFuncLit metadata and zero cache misses on both LitBody(lit) and Body(lit.Body).
+	litCount := 0
+	ast.Inspect(file, func(n ast.Node) bool {
+		lit, ok := n.(*ast.FuncLit)
+		if !ok {
+			return true
+		}
+		litCount++
+		b1 := cache.LitBody(lit)
+		b2 := cache.Body(lit.Body)
+		if b1 == nil || b1 != b2 || b1.FuncLit != lit || b1.ScopeStart != lit.Pos() || cache.MissCount != 0 {
+			t.Fatalf("FuncLit #%d not pre-indexed cleanly: b1=%+v b2=%+v MissCount=%d", litCount, b1, b2, cache.MissCount)
+		}
+		return true
+	})
+	if litCount != 4 {
+		t.Fatalf("visited %d FuncLits, want 4", litCount)
+	}
+
+	localTypeGotoFD := findFuncDecl(t, file, "LocalTypeExprGoto")
+	for _, b := range []*Body{cache.FuncBody(localTypeGotoFD), LowerFunc(info, pkg, localTypeGotoFD)} {
+		if !b.HasNestedGoto || !b.HasGotoAnywhere() || b.HasGoto || len(b.Ops) != 1 || b.Ops[0].RangeBody == nil || !b.Ops[0].RangeBody.HasNestedGoto {
+			t.Fatalf("LocalTypeExprGoto hazard flags = %+v, want HasNestedGoto=true on both func and RangeBody", b)
+		}
+	}
+
+	// 2-hop write through promoted embedded pointer (`o.in = in` on `*Outer -> *Holder -> in`)
+	// mutates `h.in` and must link `h` and `in` in BuildLocalMemAliases.
+	linkFD := findFuncDecl(t, file, "LinkViaPromotedEmbeddedPtr")
+	linkBody := cache.FuncBody(linkFD)
+	adj := BuildScopedMemAliases(linkBody, func(types.Object) bool { return true }, func(types.Type) bool { return true })
+	var hVar, inVar *types.Var
+	for id, obj := range info.Defs {
+		v, ok := obj.(*types.Var)
+		if !ok || v.IsField() {
+			continue
+		}
+		switch id.Name {
+		case "h":
+			hVar = v
+		case "in":
+			inVar = v
+		}
+	}
+	if hVar == nil || inVar == nil || !adj[inVar][hVar] || !adj[hVar][inVar] {
+		t.Fatalf("BuildLocalMemAliases missed 2-hop promoted embedded pointer write o.in = in: adj=%v", adj)
 	}
 }

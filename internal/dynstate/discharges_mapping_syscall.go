@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/refconfine"
 )
 
 func verifyMapperInitValueFlowIR(
@@ -256,17 +256,17 @@ func isMapperAllowedHelperGlobalFlowIR(p *packages.Package, fc *pkgFlowCache, id
 	if !isErr && !isUintptr {
 		return false
 	}
-	st := fc.ensureVarWriteInfos(p)[v]
-	if st == nil || st.defs != 1 || st.hasNonPlainDef || st.hasPostDefWrite || st.hasBuiltinMut || st.hasChanSend {
+	st := fc.varWriteInfos(p)[v]
+	if st == nil || st.Defs != 1 || st.HasNonPlainDef || st.HasPostDefWrite || st.HasBuiltinMut || st.HasChanSend {
 		return false
 	}
 	if isUintptr {
-		return st.hasZeroDecl && st.initVal == nil
+		return st.HasZeroDecl && st.InitVal == nil
 	}
-	if st.hasExplicitAddr || st.hasZeroDecl || st.initVal == nil || st.initVal.Type == nil {
+	if st.HasExplicitAddr || st.HasZeroDecl || st.InitVal == nil || st.InitVal.Type == nil {
 		return false
 	}
-	return !refconfine.TypeMayCarryUnknownDynamic(true, st.initVal.Type)
+	return !refconfine.TypeMayCarryUnknownDynamic(true, st.InitVal.Type)
 }
 
 func hasKernelLinkageDirective(p *packages.Package, fd *ast.FuncDecl) bool {

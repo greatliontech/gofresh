@@ -8,9 +8,9 @@ import (
 	"maps"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func pkgConfinesAllReflectValueCalls(
@@ -221,7 +221,7 @@ func pkgConfinesAllReflectValueCalls(
 				}
 				return true
 			})
-			if funcDeclHasCall[fd] && blockHasGotoLabelOrFallthrough(fd.Body) {
+			if funcDeclHasCall[fd] && fc.FuncBody(fd).HasGotoLabelOrFallthrough() {
 				emitExtractEscape(ctx, p, traceTarget, "reflect_call_unstructured_cf", "", fd)
 				return false
 			}
@@ -357,7 +357,7 @@ func pkgConfinesAllReflectValueCalls(
 		}
 		opsByNode := map[ast.Node][]*flowir.Op{}
 		rangeBodyByStmt := map[*ast.RangeStmt]*flowir.Body{}
-		structuredOK := !blockHasGotoLabelOrFallthrough(fd.Body)
+		structuredOK := !b.HasGotoLabelOrFallthrough()
 		var idxBody func(curB *flowir.Body)
 		idxBody = func(curB *flowir.Body) {
 			if curB == nil {

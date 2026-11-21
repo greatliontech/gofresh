@@ -4,9 +4,9 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // localCarrierAliases separates carriers aliased directly at a local's own
@@ -41,19 +41,6 @@ func appendUniqueVars(dst *[]*types.Var, srcs []*types.Var) bool {
 	return changed
 }
 
-func isRefHeaderType(t types.Type) bool {
-	if t == nil {
-		return false
-	}
-	switch u := types.Unalias(t).Underlying().(type) {
-	case *types.Pointer, *types.Slice, *types.Map, *types.Chan, *types.Interface:
-		return true
-	case *types.Basic:
-		return u.Kind() == types.UnsafePointer
-	}
-	return false
-}
-
 func isTypeParamType(t types.Type) bool {
 	if t == nil {
 		return false
@@ -86,194 +73,6 @@ func addrOfSubplaceCanAliasCarrier(audited bool, v *flowir.Value) bool {
 	return v.AddrPlace.Type == nil || canAliasCarrierType(audited, v.AddrPlace.Type)
 }
 
-// placeEntersInterior reports whether accessing or writing through p (with
-// writeContainer true for container-mutating operations such as delete, clear,
-// channel send, or channel receive) crosses beyond p.Obj's own single-hop
-// reference header into interior reach.
-func placeEntersInterior(p flowir.Place, writeContainer bool) bool {
-	if p.Obj == nil || p.Obj.Type() == nil || isTypeParamType(p.Obj.Type()) {
-		return true
-	}
-	usedHeader := !isRefHeaderType(p.Obj.Type())
-	crossHop := func() bool {
-		if usedHeader {
-			return true
-		}
-		usedHeader = true
-		return false
-	}
-	for _, proj := range p.Projs {
-		if proj.BaseType == nil || isTypeParamType(proj.BaseType) {
-			return true
-		}
-		baseU := types.Unalias(proj.BaseType).Underlying()
-		switch proj.Kind {
-		case flowir.ProjDeref:
-			if crossHop() {
-				return true
-			}
-		case flowir.ProjIndex:
-			switch baseU.(type) {
-			case *types.Array:
-				// Inline array element: no pointer/header indirection.
-			case *types.Pointer, *types.Slice, *types.Map:
-				if crossHop() {
-					return true
-				}
-			default:
-				return true
-			}
-		case flowir.ProjSlice:
-			switch baseU.(type) {
-			case *types.Slice, *types.Array:
-				// Re-slicing a slice or inline array yields a slice view without an extra hop.
-			case *types.Pointer:
-				if crossHop() {
-					return true
-				}
-			default:
-				return true
-			}
-		case flowir.ProjField:
-			cur := baseU
-			if ptr, isPtr := cur.(*types.Pointer); isPtr {
-				if crossHop() {
-					return true
-				}
-				cur = types.Unalias(ptr.Elem()).Underlying()
-			}
-			if proj.Selection == nil {
-				return true
-			}
-			idx := proj.Selection.Index()
-			for _, fi := range idx[:len(idx)-1] {
-				st, ok := cur.(*types.Struct)
-				if !ok || fi < 0 || fi >= st.NumFields() {
-					return true
-				}
-				ft := st.Field(fi).Type()
-				if isTypeParamType(ft) {
-					return true
-				}
-				fu := types.Unalias(ft).Underlying()
-				if ptr, isPtr := fu.(*types.Pointer); isPtr {
-					if crossHop() {
-						return true
-					}
-					cur = types.Unalias(ptr.Elem()).Underlying()
-				} else {
-					cur = fu
-				}
-			}
-		default:
-			return true
-		}
-	}
-	if writeContainer {
-		if crossHop() {
-			return true
-		}
-	}
-	return false
-}
-
-// visitAllBodyOps visits every operation in b (including OpGo) and recursively
-// descends into nested ValMakeClosure and CallIIFE bodies.
-func visitAllBodyOps(b *flowir.Body, fn func(*flowir.Op)) {
-	if b == nil {
-		return
-	}
-	var scanVal func(v *flowir.Value)
-	scanVal = func(v *flowir.Value) {
-		if v == nil {
-			return
-		}
-		if v.Kind == flowir.ValMakeClosure && v.Closure != nil {
-			visitAllBodyOps(v.Closure, fn)
-		}
-		if v.Kind == flowir.ValCall && v.CallKind == flowir.CallIIFE && v.IIFE != nil {
-			visitAllBodyOps(v.IIFE, fn)
-		}
-		v.ForEachChildValue(func(ch *flowir.Value) bool {
-			scanVal(ch)
-			return true
-		})
-	}
-	b.ForEachSyncOp(func(op *flowir.Op) bool {
-		fn(op)
-		forEachOpTopValues(op, scanVal)
-		return true
-	})
-}
-
-// visitSyncAndIIFEOps visits every synchronous non-OpGo operation in b and
-// recursively descends into synchronous CallIIFE bodies without entering
-// uncalled ValMakeClosure bodies or spawned goroutines.
-func visitSyncAndIIFEOps(b *flowir.Body, fn func(*flowir.Op)) {
-	if b == nil {
-		return
-	}
-	var scanVal func(v *flowir.Value)
-	scanVal = func(v *flowir.Value) {
-		if v == nil || v.Kind == flowir.ValMakeClosure {
-			return
-		}
-		if v.Kind == flowir.ValCall && v.CallKind == flowir.CallIIFE {
-			for _, a := range v.Args {
-				scanVal(a)
-			}
-			if v.IIFE != nil {
-				visitSyncAndIIFEOps(v.IIFE, fn)
-			}
-			return
-		}
-		v.ForEachChildValue(func(ch *flowir.Value) bool {
-			scanVal(ch)
-			return true
-		})
-	}
-	b.ForEachSyncOp(func(op *flowir.Op) bool {
-		if op.Kind == flowir.OpGo {
-			return true
-		}
-		fn(op)
-		forEachOpTopValues(op, scanVal)
-		return true
-	})
-}
-
-func forEachIIFEReturnValue(v *flowir.Value, fn func(*flowir.Value)) {
-	if v == nil || v.Kind != flowir.ValCall || v.CallKind != flowir.CallIIFE || v.IIFE == nil || fn == nil {
-		return
-	}
-	for _, rv := range v.IIFE.Results {
-		if rv == nil {
-			continue
-		}
-		fn(&flowir.Value{
-			Kind: flowir.ValPlace,
-			Type: rv.Type(),
-			Place: flowir.Place{
-				Root:    flowir.RootResult,
-				RootPos: rv.Pos(),
-				Obj:     rv,
-				Type:    rv.Type(),
-			},
-		})
-	}
-	v.IIFE.ForEachSyncOp(func(op *flowir.Op) bool {
-		if op.Kind != flowir.OpReturn {
-			return true
-		}
-		for _, res := range op.Results {
-			if res != nil {
-				fn(res)
-			}
-		}
-		return true
-	})
-}
-
 func walkTransientTargetValues(root *flowir.Value, fn func(*flowir.Value)) {
 	if root == nil || fn == nil {
 		return
@@ -284,7 +83,7 @@ func walkTransientTargetValues(root *flowir.Value, fn func(*flowir.Value)) {
 			return
 		}
 		if cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallIIFE {
-			forEachIIFEReturnValue(cur, walk)
+			flowir.ForEachIIFEReturnValue(cur, walk)
 			return
 		}
 		fn(cur)
@@ -410,7 +209,7 @@ func collectValueCarrierVarsWithOpts(
 			return
 		}
 		if cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallIIFE {
-			forEachIIFEReturnValue(cur, walk)
+			flowir.ForEachIIFEReturnValue(cur, walk)
 			return
 		}
 		switch cur.Kind {
@@ -481,7 +280,7 @@ func valueCarrierSources(
 	case flowir.ValPlace:
 		if v.Place.IsBareVar() {
 			if cv, isC := carrierVar(v.Place.Obj); isC {
-				if isRefHeaderType(cv.Type()) || isTypeParamType(cv.Type()) {
+				if syntaxutil.IsRefHeaderType(cv.Type()) || isTypeParamType(cv.Type()) {
 					return []*types.Var{cv}, allSrcs
 				}
 				return nil, allSrcs
@@ -501,7 +300,7 @@ func valueCarrierSources(
 				return allSrcs, allSrcs
 			}
 			if v.IsArraySlice {
-				if placeEntersInterior(v.AddrPlace, false) {
+				if flowir.PlaceEntersInterior(v.AddrPlace, false) {
 					return allSrcs, allSrcs
 				}
 				return aliases[v.AddrPlace.Obj].root, allSrcs
@@ -509,7 +308,7 @@ func valueCarrierSources(
 			if v.AddrPlace.IsBareVar() {
 				return nil, allSrcs
 			}
-			if !placeEntersInterior(v.AddrPlace, false) {
+			if !flowir.PlaceEntersInterior(v.AddrPlace, false) {
 				return aliases[v.AddrPlace.Obj].root, allSrcs
 			}
 		}
@@ -517,7 +316,7 @@ func valueCarrierSources(
 	case flowir.ValCall:
 		if v.CallKind == flowir.CallIIFE && v.IIFE != nil {
 			var rSrcs []*types.Var
-			forEachIIFEReturnValue(v, func(retVal *flowir.Value) {
+			flowir.ForEachIIFEReturnValue(v, func(retVal *flowir.Value) {
 				rs, _ := valueCarrierSources(audited, retVal, carrierVar, aliases, skipMethodRecv, skipNonBuiltinCalls)
 				appendUniqueVars(&rSrcs, rs)
 			})
@@ -612,7 +411,7 @@ func collectValueLinkVars(
 			}
 		case flowir.ValCall:
 			if cur.CallKind == flowir.CallIIFE {
-				forEachIIFEReturnValue(cur, walk)
+				flowir.ForEachIIFEReturnValue(cur, walk)
 			} else if cur.CallKind == flowir.CallBuiltin {
 				switch cur.BuiltinName {
 				case "append", "Add", "min", "max":
@@ -683,9 +482,9 @@ func computeBodyCarrierAliases(
 
 	visitOps := func(fn func(*flowir.Op)) {
 		if cfg.descendNested {
-			visitAllBodyOps(b, fn)
+			flowir.VisitAllOps(b, fn)
 		} else {
-			visitSyncAndIIFEOps(b, fn)
+			flowir.VisitSyncAndIIFEOps(b, fn)
 		}
 	}
 
@@ -734,7 +533,7 @@ func computeBodyCarrierAliases(
 		}
 		entry := aliased[dst]
 		changed := false
-		if len(rootSrcs) > 0 && (isRefHeaderType(dst.Type()) || isTypeParamType(dst.Type())) {
+		if len(rootSrcs) > 0 && (syntaxutil.IsRefHeaderType(dst.Type()) || isTypeParamType(dst.Type())) {
 			if appendUniqueVars(&entry.root, rootSrcs) {
 				changed = true
 			}
@@ -927,7 +726,7 @@ func computeBodyCarrierAliases(
 				for _, a := range cur.Args {
 					walk(a)
 				}
-				forEachIIFEReturnValue(cur, walk)
+				flowir.ForEachIIFEReturnValue(cur, walk)
 				return
 			}
 			if cur.Kind == flowir.ValMethodVal {

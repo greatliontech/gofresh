@@ -12,8 +12,8 @@ import (
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/capsule"
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/seams"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
@@ -78,6 +78,7 @@ func factOfWithCacheCtx(ctx context.Context, audited bool, p *packages.Package, 
 	} else {
 		fc.attachToIndex(idx)
 	}
+	defer fc.syncStats()
 	mutated := map[string]bool{}
 	escaped := map[string]bool{}
 	methodUses := map[string]map[syntaxutil.FuncKey]bool{}

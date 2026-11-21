@@ -7,9 +7,8 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func collectFastOnceWrapperMethods(
@@ -41,7 +40,7 @@ func collectFastOnceWrapperMethods(
 		if recvVar == nil || !syntaxutil.IsPtrToNamed(recvVar.Type(), rootNamed) {
 			continue
 		}
-		if stmtsEstablishOnceInitOnVar(p, fd.Body, recvVar, nil, 0, fd.Body.End(), flagField, onceFn, nil) {
+		if stmtsEstablishOnceInitOnVar(p, idx, fd, recvVar, nil, 0, fd.Body.End(), flagField, onceFn, nil) {
 			out[m] = true
 		}
 	}
@@ -170,7 +169,7 @@ func localPtrDominatedByOnceInit(
 		return false
 	}
 
-	return stmtsEstablishOnceInitOnVar(p, fd.Body, targetVar, getterFn, defEnd, beforePos, flagField, onceFn, fastInitMethods)
+	return stmtsEstablishOnceInitOnVar(p, idx, fd, targetVar, getterFn, defEnd, beforePos, flagField, onceFn, fastInitMethods)
 }
 
 func onceConeSetForGetter(p *packages.Package, idx *refconfine.PkgIndex, onceFn *types.Func) map[*types.Func]bool {
@@ -524,7 +523,8 @@ func isDetachedAtomicStoreOnField(
 
 func stmtsEstablishOnceInitOnVar(
 	p *packages.Package,
-	body *ast.BlockStmt,
+	idx *refconfine.PkgIndex,
+	fd *ast.FuncDecl,
 	targetVar *types.Var,
 	getterFn *types.Func,
 	afterPos, beforePos token.Pos,
@@ -532,9 +532,10 @@ func stmtsEstablishOnceInitOnVar(
 	onceFn *types.Func,
 	fastInitMethods map[*types.Func]bool,
 ) bool {
-	if body == nil || freshstruct.FuncBodyHasGoto(body) {
+	if fd == nil || fd.Body == nil || idx.FlowCache(p).FuncBody(fd).HasGotoAnywhere() {
 		return false
 	}
+	body := fd.Body
 	matchesTargetRecv := func(expr ast.Expr) bool {
 		expr = ast.Unparen(expr)
 		if getterFn == nil {

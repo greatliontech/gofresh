@@ -2704,9 +2704,9 @@ bindings {
   content_hash: "f52d89ab92c1a228f9781a86c3490b45422f431dd058becb2c0b9775e1b08444"
   source_hash: "f5ca982cde215a869c5c1c2981cfe4fb1e8b274f82e7fa1a89490c93740c9e1d"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/internal/dynstate/flowir.TestRapidFlowIRStructuralAndAliasInvariants"
+  symbol: "github.com/greatliontech/gofresh/internal/flowir.TestRapidFlowIRStructuralAndAliasInvariants"
   role: BINDING_ROLE_TESTS
-  shape_hash: "18ea60045a4b3be1fcf0fdc028b3bbd2e8e736bcd3182fa3d21ac34c87c1f958"
+  shape_hash: "2e4a72e97271728db539b5f155731ed9c71a1b202afb1d00970cc60c4556577c"
 }
 
 bindings {
@@ -2714,9 +2714,9 @@ bindings {
   content_hash: "f52d89ab92c1a228f9781a86c3490b45422f431dd058becb2c0b9775e1b08444"
   source_hash: "f5ca982cde215a869c5c1c2981cfe4fb1e8b274f82e7fa1a89490c93740c9e1d"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/internal/dynstate/flowir.TestRapidFlowIRDesugaringEquivalence"
+  symbol: "github.com/greatliontech/gofresh/internal/flowir.TestRapidFlowIRDesugaringEquivalence"
   role: BINDING_ROLE_TESTS
-  shape_hash: "14fca58b216423fc925462fd8c1984ce99b9edd61bb880a744ea314a5a5deb87"
+  shape_hash: "d23678eea6fc4a2e81de32f5f047b48001082f830540de055c46c72781ea08c1"
 }
 
 bindings {
@@ -2914,9 +2914,9 @@ bindings {
   content_hash: "d54a1c27763cd1495f53d8645f912838d703b7b347c1e9f8e87aec95c8b20981"
   source_hash: "c78010321cde67cf0abcfb06d5da687ca83bcb11271b58c209e5d8e1b05a85d6"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/internal/dynstate/refconfine.TestUnsafeLayoutAndPackageHazardMatrix"
+  symbol: "github.com/greatliontech/gofresh/internal/refconfine.TestUnsafeLayoutAndPackageHazardMatrix"
   role: BINDING_ROLE_TESTS
-  shape_hash: "a31f4f96786fe69084d77d9a37c0e1732337a5e40bd4a10b8e9457e4ba604cc4"
+  shape_hash: "252649e1f0684ec6bc0abb82106be05eb2941ec6b8f4fb12a38e5c005f5a54dc"
 }
 
 bindings {
@@ -2924,9 +2924,9 @@ bindings {
   content_hash: "d54a1c27763cd1495f53d8645f912838d703b7b347c1e9f8e87aec95c8b20981"
   source_hash: "c78010321cde67cf0abcfb06d5da687ca83bcb11271b58c209e5d8e1b05a85d6"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/internal/dynstate/refconfine.TestPropertyIsomorphicAndScalarBitcastByteLayoutOracle"
+  symbol: "github.com/greatliontech/gofresh/internal/refconfine.TestPropertyIsomorphicAndScalarBitcastByteLayoutOracle"
   role: BINDING_ROLE_TESTS
-  shape_hash: "702bb4e8af0b6d5bc1c021f8597c3c52500aa203624e47a03c4a828fd6649cd4"
+  shape_hash: "81818484d9ec94cd76301c5a672d01572764aa96de65a6b1bd2b50a00db8cc50"
 }
 
 bindings {
@@ -2934,9 +2934,9 @@ bindings {
   content_hash: "d54a1c27763cd1495f53d8645f912838d703b7b347c1e9f8e87aec95c8b20981"
   source_hash: "c78010321cde67cf0abcfb06d5da687ca83bcb11271b58c209e5d8e1b05a85d6"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/internal/dynstate/refconfine.FuzzPackageHasUnconfinedUnsafeMemoryHazard"
+  symbol: "github.com/greatliontech/gofresh/internal/refconfine.FuzzPackageHasUnconfinedUnsafeMemoryHazard"
   role: BINDING_ROLE_TESTS
-  shape_hash: "500b9863b80ea84f467fa470386d3998c3427de6756b3a06742420e270ae3ce9"
+  shape_hash: "4485580bde377deb139296bb71f4f5292a821def9cb763c9f2753c93974eb7c8"
 }
 
 bindings {
@@ -2994,9 +2994,9 @@ bindings {
   content_hash: "12d455f81e29368843c159764b289946fb2611dc50b79b150273e8d7145f83fc"
   source_hash: "daf7a92e6e5cbdaf7b41c5f1144fbf2018f2d45605bc5d1cd23a90dec62193f3"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/internal/dynstate/refconfine.TestVerifyBodyLockRegionsAndMutexMapMatrix"
+  symbol: "github.com/greatliontech/gofresh/internal/refconfine.TestVerifyBodyLockRegionsAndMutexMapMatrix"
   role: BINDING_ROLE_TESTS
-  shape_hash: "31bbceda6deda19849c4f2f9d9256d88eb04936649a326e9bc984a7e87952419"
+  shape_hash: "67a9418400c6855b56adad2c4abbc37cf331b8475154645e0e6e3f5e1d4bdac8"
 }
 
 bindings {
@@ -3004,9 +3004,9 @@ bindings {
   content_hash: "12d455f81e29368843c159764b289946fb2611dc50b79b150273e8d7145f83fc"
   source_hash: "daf7a92e6e5cbdaf7b41c5f1144fbf2018f2d45605bc5d1cd23a90dec62193f3"
   backend: "go"
-  symbol: "github.com/greatliontech/gofresh/internal/dynstate/refconfine.TestPropertyVerifyBodyLockRegionsPathSimulationOracle"
+  symbol: "github.com/greatliontech/gofresh/internal/refconfine.TestPropertyVerifyBodyLockRegionsPathSimulationOracle"
   role: BINDING_ROLE_TESTS
-  shape_hash: "3903183daed23d80486c670db957e82714fb9ac8baa1705e38a5edc6dcd906fa"
+  shape_hash: "2df635d51d55bdee0d7e655f43d8d3d1e9cd2d0cf564c7e4aa035dc68125c4a5"
 }
 
 bindings {

@@ -12,7 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // ExportedSeamMarkHook is an optional callback invoked when an exported

@@ -6,7 +6,7 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func extractTypedAtomicSlotElem(p *packages.Package, arg0 ast.Expr) (types.Type, bool) {

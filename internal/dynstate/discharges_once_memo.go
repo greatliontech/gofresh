@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
+	"github.com/greatliontech/gofresh/internal/flowir"
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -701,11 +701,12 @@ func matchOnceMemoGetterDoCall(
 	if !ok || ast.Unparen(doCall.Fun) != doSel || len(doCall.Args) != 1 || doCall.Ellipsis.IsValid() {
 		return nil, nil, nil, nil, false
 	}
+	flowCache := idx.FlowCache(p)
 	doLit, ok := ast.Unparen(doCall.Args[0]).(*ast.FuncLit)
 	if !ok || doLit.Body == nil || doLit.Type == nil ||
 		(doLit.Type.Params != nil && len(doLit.Type.Params.List) > 0) ||
 		(doLit.Type.Results != nil && len(doLit.Type.Results.List) > 0) ||
-		funcBodyHasGotoOutsideClosures(doLit.Body) {
+		flowCache == nil || flowCache.LitBody(doLit) == nil || flowCache.LitBody(doLit).HasGoto {
 		return nil, nil, nil, nil, false
 	}
 	doStmt, ok := idx.ParentUnparen(doCall).(*ast.ExprStmt)
@@ -716,7 +717,7 @@ func matchOnceMemoGetterDoCall(
 	if !ok || getterFD.Body == nil || getterFD.Type == nil || idx.ParentMap[doStmt] != getterFD.Body ||
 		getterFD.Recv == nil || len(getterFD.Recv.List) != 1 || len(getterFD.Recv.List[0].Names) != 1 ||
 		p.TypesInfo.Defs[getterFD.Recv.List[0].Names[0]] != recvVar ||
-		funcBodyHasGotoOutsideClosures(getterFD.Body) {
+		flowCache.FuncBody(getterFD) == nil || flowCache.FuncBody(getterFD).HasGoto {
 		return nil, nil, nil, nil, false
 	}
 	if getterFD.Type.Results != nil {
@@ -763,7 +764,7 @@ func extractOnceMemoFields(
 			return true
 		}
 		hit := false
-		forEachPlaceRootVar(pl, func(rv *types.Var) {
+		flowir.ForEachPlaceRootVar(pl, func(rv *types.Var) {
 			if rv == getterRecv {
 				hit = true
 			}

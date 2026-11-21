@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"debug/elf"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8677,6 +8679,27 @@ func TestNonStandardAssemblyBlocksObservationProof(t *testing.T) {
 	})
 }
 
+func minimalRelocatableSyso() []byte {
+	machine := elf.EM_X86_64
+	if runtime.GOARCH == "arm64" {
+		machine = elf.EM_AARCH64
+	}
+	hdr := elf.Header64{
+		Ident:     [16]byte{0x7f, 'E', 'L', 'F', byte(elf.ELFCLASS64), byte(elf.ELFDATA2LSB), byte(elf.EV_CURRENT)},
+		Type:      uint16(elf.ET_REL),
+		Machine:   uint16(machine),
+		Version:   uint32(elf.EV_CURRENT),
+		Shoff:     64,
+		Ehsize:    64,
+		Shentsize: 64,
+		Shnum:     1,
+	}
+	var buf bytes.Buffer
+	_ = binary.Write(&buf, binary.LittleEndian, &hdr)
+	_ = binary.Write(&buf, binary.LittleEndian, &elf.Section64{})
+	return buf.Bytes()
+}
+
 // An opaque system object is permanently unauditable: the subject
 // checks unverifiable with a native cause named - the lexicographic
 // least of the package's native findings under the shared
@@ -8686,7 +8709,7 @@ func TestSystemObjectRemainsOpaque(t *testing.T) {
 		t.Skip("builds a module fixture and runs the engine over it")
 	}
 	dir := writeViewModule(t, "package view\n\nfunc F() {}\n")
-	if err := os.WriteFile(filepath.Join(dir, "view.syso"), []byte("opaque system object"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "view.syso"), minimalRelocatableSyso(), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	engine, err := newEngine(withDir(dir))

@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // CarrierWalkPolicy parameterizes WalkDynamicCarrier across the three carrier

@@ -2,7 +2,7 @@ package gofresh
 
 import (
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"go/ast"
 	"go/token"
 	"go/types"

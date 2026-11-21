@@ -6,8 +6,8 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func (wpd *wrapperPtrDiscipline) initOffsetAndCapsuleStructs() {
@@ -171,7 +171,7 @@ func (wpd *wrapperPtrDiscipline) isNonZeroStructExpr(expr ast.Expr, targetNamed 
 			return true
 		}
 		fd := wpd.idx.FuncDecls[callee]
-		if fd == nil || fd.Body == nil || blockHasGoto(fd.Body) {
+		if fd == nil || fd.Body == nil || cachedScopeHasGoto(wpd.p, wpd.idx, fd.Body) {
 			return false
 		}
 		structVisiting[callee] = true
@@ -265,7 +265,7 @@ func (wpd *wrapperPtrDiscipline) isNonZeroStructExpr(expr ast.Expr, targetNamed 
 			return false
 		}
 		enclScope := declaringFuncOrLitBody(wpd.idx, se, v.Pos())
-		if enclScope == nil || blockHasGoto(enclScope) {
+		if enclScope == nil || cachedScopeHasGoto(wpd.p, wpd.idx, enclScope) {
 			return false
 		}
 		sawWrite := false
@@ -425,7 +425,7 @@ func (wpd *wrapperPtrDiscipline) isProvenNonZeroOffset(expr ast.Expr, visiting m
 			return true
 		}
 		fd := wpd.idx.FuncDecls[callee]
-		if fd == nil || fd.Body == nil || blockHasGoto(fd.Body) {
+		if fd == nil || fd.Body == nil || cachedScopeHasGoto(wpd.p, wpd.idx, fd.Body) {
 			return false
 		}
 		visiting[callee] = true
@@ -535,7 +535,7 @@ func (wpd *wrapperPtrDiscipline) isProvenNonZeroOffset(expr ast.Expr, visiting m
 			return false
 		}
 		enclScope := declaringFuncOrLitBody(wpd.idx, e, v.Pos())
-		if enclScope == nil || blockHasGoto(enclScope) {
+		if enclScope == nil || cachedScopeHasGoto(wpd.p, wpd.idx, enclScope) {
 			return false
 		}
 		sawWrite := false
@@ -591,7 +591,7 @@ func (wpd *wrapperPtrDiscipline) isProvenNonZeroOffset(expr ast.Expr, visiting m
 			return false
 		}
 		if hasZeroVarDecl {
-			if blockHasGotoOrLabel(enclScope) {
+			if cachedScopeHasGotoOrLabel(wpd.p, wpd.idx, enclScope) {
 				return false
 			}
 			for _, uid := range wpd.idx.UsesOf[v] {

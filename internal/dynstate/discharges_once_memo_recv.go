@@ -7,9 +7,9 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func verifyOnceMemoMethodRecvConfinement(
@@ -42,23 +42,20 @@ func verifyOnceMemoMethodRecvConfinement(
 			return false
 		}
 	}
-	if isGetter {
-		if doStmt == nil {
-			return false
-		}
-		doIdx := slices.Index(mfd.Body.List, ast.Stmt(doStmt))
-		if doIdx < 0 {
-			return false
-		}
-		for _, pre := range mfd.Body.List[:doIdx] {
-			if exprMentionsAnyVar(p.TypesInfo, pre, memoFields) {
-				return false
-			}
-		}
-	}
 	b := fc.funcBody(p, mfd)
 	if b == nil {
 		return false
+	}
+	if isGetter {
+		if doStmt == nil || slices.Index(mfd.Body.List, ast.Stmt(doStmt)) < 0 {
+			return false
+		}
+		for i := range b.Ops {
+			op := &b.Ops[i]
+			if op.StmtAST != nil && op.StmtAST.Pos() < doStmt.Pos() && flowir.OpMentionsVars(op, memoFields) {
+				return false
+			}
+		}
 	}
 	return verifyOnceMemoRecvUsesInBody(
 		audited,
@@ -186,7 +183,7 @@ func verifyOnceMemoRecvUsesInBody(
 			switch v.Kind {
 			case flowir.ValAddrOf, flowir.ValMethodVal:
 				if (v.Kind == flowir.ValAddrOf && isRecvVar(v.AddrPlace.Obj)) ||
-					(v.Kind == flowir.ValMethodVal && ((v.Recv != nil && valueTouchesVars(v.Recv, recvAliases)) || (v.HasRecvPlace && isRecvVar(v.RecvPlace.Obj)))) {
+					(v.Kind == flowir.ValMethodVal && ((v.Recv != nil && flowir.ValueMentionsVars(v.Recv, recvAliases)) || (v.HasRecvPlace && isRecvVar(v.RecvPlace.Obj)))) {
 					ok = false
 					return
 				}
@@ -370,13 +367,13 @@ func verifyOnceMemoRecvUsesInBody(
 				checkValueTree(op.ChanVal, false)
 				checkValueTree(op.SendVal, false)
 			case flowir.OpGo:
-				if op.Call != nil && valueTouchesVars(op.Call, recvAliases) {
+				if op.Call != nil && flowir.ValueMentionsVars(op.Call, recvAliases) {
 					ok = false
 					return
 				}
 				checkValueTree(op.Call, false)
 			case flowir.OpDefer:
-				if op.Call != nil && valueTouchesVars(op.Call, recvAliases) {
+				if op.Call != nil && flowir.ValueMentionsVars(op.Call, recvAliases) {
 					ok = false
 					return
 				}
@@ -684,87 +681,4 @@ func isBasicStringType(t types.Type) bool {
 	}
 	b, ok := types.Unalias(t).Underlying().(*types.Basic)
 	return ok && (b.Info()&types.IsString) != 0
-}
-
-func exprMentionsVar(info *types.Info, expr ast.Expr, target *types.Var) bool {
-	if info == nil || expr == nil || target == nil {
-		return false
-	}
-	hit := false
-	ast.Inspect(expr, func(n ast.Node) bool {
-		if hit || n == nil {
-			return false
-		}
-		if id, ok := n.(*ast.Ident); ok && info.Uses[id] == target {
-			hit = true
-			return false
-		}
-		return true
-	})
-	return hit
-}
-
-func exprMentionsAnyVar(info *types.Info, node ast.Node, targets map[*types.Var]bool) bool {
-	if info == nil || node == nil || len(targets) == 0 {
-		return false
-	}
-	hit := false
-	ast.Inspect(node, func(n ast.Node) bool {
-		if hit || n == nil {
-			return false
-		}
-		if id, ok := n.(*ast.Ident); ok {
-			if v, okV := info.Uses[id].(*types.Var); okV && targets[v] {
-				hit = true
-				return false
-			}
-		}
-		return true
-	})
-	return hit
-}
-
-func valueTouchesVars(v *flowir.Value, vars map[*types.Var]bool) bool {
-	if v == nil || len(vars) == 0 {
-		return false
-	}
-	hit := false
-	v.WalkValues(func(cur *flowir.Value) bool {
-		if hit {
-			return false
-		}
-		switch cur.Kind {
-		case flowir.ValPlace:
-			if vars[cur.Place.Obj] {
-				hit = true
-				return false
-			}
-		case flowir.ValAddrOf:
-			if vars[cur.AddrPlace.Obj] {
-				hit = true
-				return false
-			}
-		case flowir.ValMethodVal:
-			if cur.HasRecvPlace && vars[cur.RecvPlace.Obj] {
-				hit = true
-				return false
-			}
-		case flowir.ValCall:
-			if cur.HasRecvPlace && vars[cur.RecvPlace.Obj] {
-				hit = true
-				return false
-			}
-		case flowir.ValMakeClosure:
-			if cur.Closure != nil {
-				for fv := range cur.Closure.FreeVars {
-					if vars[fv] {
-						hit = true
-						return false
-					}
-				}
-			}
-		}
-		return true
-	})
-	return hit
 }

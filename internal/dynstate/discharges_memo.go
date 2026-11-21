@@ -8,9 +8,9 @@ import (
 	"sort"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // deriveMemoDischarges mechanically verifies mutex-guarded reflect.Type
@@ -262,19 +262,12 @@ func verifyHelperReturnsFreshNonNilInfo(
 	if helperClosureHazard {
 		return false
 	}
-	hasBadCtrl := false
+	hasBadCtrl := b.HasDefer || b.HasGo || b.HasGoto
 	freshLocals := map[*types.Var]bool{}
 	badLocal := map[*types.Var]bool{}
 	b.ForEachSyncOp(func(op *flowir.Op) bool {
-		if op.Kind == flowir.OpDefer || op.Kind == flowir.OpGo {
-			hasBadCtrl = true
+		if hasBadCtrl {
 			return false
-		}
-		if op.Kind == flowir.OpBranch {
-			if bs, ok := op.StmtAST.(*ast.BranchStmt); !ok || bs.Tok == token.GOTO {
-				hasBadCtrl = true
-				return false
-			}
 		}
 		if op.Kind != flowir.OpAssign {
 			return true
@@ -754,9 +747,9 @@ func isInitOnlyReflectTypeGlobal(p *packages.Package, fc *pkgFlowCache, idx *ref
 	if vs := idx.VarSpecs[v]; vs != nil && len(vs.Values) > 0 {
 		return false
 	}
-	st := fc.ensureVarWriteInfos(p)[v]
-	if st == nil || st.defs != 1 || !st.hasZeroDecl || st.hasNonPlainDef ||
-		st.hasExplicitAddr || st.hasAutoAddrMethod || st.hasBuiltinMut || st.hasChanSend {
+	st := fc.varWriteInfos(p)[v]
+	if st == nil || st.Defs != 1 || !st.HasZeroDecl || st.HasNonPlainDef ||
+		st.HasExplicitAddr || st.HasAutoAddrMethod || st.HasBuiltinMut || st.HasChanSend {
 		return false
 	}
 
@@ -777,7 +770,7 @@ func isInitOnlyReflectTypeGlobal(p *packages.Package, fc *pkgFlowCache, idx *ref
 					for di, dst := range op.Dsts {
 						touches := dst.Obj == v
 						if !touches {
-							forEachPlaceRootVar(dst, func(rv *types.Var) {
+							flowir.ForEachPlaceRootVar(dst, func(rv *types.Var) {
 								if rv == v {
 									touches = true
 								}

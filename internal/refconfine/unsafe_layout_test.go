@@ -2016,6 +2016,27 @@ func Wrap(n int) *TypeParamList {
 			targetPkg:  "example.com/p",
 			wantHazard: true,
 		},
+		{
+			name: "local_addr_isomorphic_cast_in_loop_reuses_outer_local_hazard",
+			specs: []inMemPkgSpec{{
+				pkgPath: "example.com/p",
+				files: map[string]string{"p.go": `package p
+import "unsafe"
+type TypeParam struct { idx int }
+type TypeParamList struct { tparams []*TypeParam }
+func WrapInLoop() []*TypeParamList {
+	tpars := make([]*TypeParam, 2)
+	var out []*TypeParamList
+	for i := 0; i < 2; i++ {
+		tpars[0] = &TypeParam{idx: i}
+		out = append(out, (*TypeParamList)(unsafe.Pointer(&tpars)))
+	}
+	return out
+}`},
+			}},
+			targetPkg:  "example.com/p",
+			wantHazard: true,
+		},
 	}
 
 	for _, tc := range cases {

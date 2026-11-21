@@ -6,8 +6,8 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // IsDirectMutableRef reports whether t is directly a slice, map, pointer,

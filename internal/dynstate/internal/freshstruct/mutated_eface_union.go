@@ -6,8 +6,8 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 type sentinelKind uint8
@@ -88,7 +88,7 @@ func (efu *efaceUnionHelper) extractSingleAddrEmptyIfaceLocal(convCall *ast.Call
 		return nil, nil, false
 	}
 	encl := innermostFuncOrLitBody(efu.idx, convCall)
-	if encl == nil || blockHasGotoOrLabel(encl) {
+	if encl == nil || cachedScopeHasGotoOrLabel(efu.p, efu.idx, encl) {
 		return nil, nil, false
 	}
 	for _, u := range efu.idx.UsesOf[v] {
@@ -216,7 +216,7 @@ func collectSafeEfaceHeaderUnsafePtrConvs(p *packages.Package, idx *refconfine.P
 		if !isEmptyInterfaceType(sig.Params().At(0).Type()) || !syntaxutil.IsUnsafePointerType(sig.Results().At(0).Type()) {
 			continue
 		}
-		if len(fd.Body.List) != 1 || blockHasGotoOrLabel(fd.Body) {
+		if len(fd.Body.List) != 1 || cachedScopeHasGotoOrLabel(efu.p, efu.idx, fd.Body) {
 			continue
 		}
 		ret, isRet := fd.Body.List[0].(*ast.ReturnStmt)

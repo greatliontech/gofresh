@@ -8,9 +8,9 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 type conePolicy struct {
@@ -43,7 +43,7 @@ func verifyDeterministicComputeCone(
 	if p == nil || p.Types == nil || p.TypesInfo == nil || idx == nil || rootSig == nil || rootBody == nil {
 		return nil, nil, false, false
 	}
-	if bodyHasGoto(rootBody) {
+	if rootBody.HasGoto {
 		return nil, nil, false, false
 	}
 	if policy.allowReflectTypeValues && !isTrueStdlibInPkg(p, "reflect") {
@@ -63,14 +63,14 @@ func verifyDeterministicComputeCone(
 	for len(queue) > 0 {
 		unit := queue[0]
 		queue = queue[1:]
-		if unit.sig == nil || unit.body == nil || bodyHasGoto(unit.body) {
+		if unit.sig == nil || unit.body == nil || unit.body.HasGoto {
 			return nil, nil, false, false
 		}
 
 		localClos, allowedClosureVals := collectConfinedLocalClosuresInBody(p, fc, idx, unit.body)
 		for lv, closBody := range localClos {
 			closSig, okSig := lv.Type().Underlying().(*types.Signature)
-			if !okSig || closBody == nil || bodyHasGoto(closBody) {
+			if !okSig || closBody == nil || closBody.HasGoto {
 				return nil, nil, false, false
 			}
 			if _, seen := localClosures[lv]; !seen {
@@ -126,7 +126,7 @@ func verifyDeterministicComputeCone(
 						if fnObj.Pkg() == p.Types {
 							cfd := funcDecls[fnObj]
 							cbody := fc.funcBody(p, cfd)
-							if cfd == nil || cbody == nil || bodyHasGoto(cbody) {
+							if cfd == nil || cbody == nil || cbody.HasGoto {
 								okUnit = false
 								return false
 							}
@@ -268,7 +268,7 @@ func verifyDeterministicComputeCone(
 							csig, okSig := callee.Type().(*types.Signature)
 							cfd := funcDecls[callee]
 							cbody := fc.funcBody(p, cfd)
-							if !okSig || cfd == nil || cbody == nil || bodyHasGoto(cbody) {
+							if !okSig || cfd == nil || cbody == nil || cbody.HasGoto {
 								okUnit = false
 								return false
 							}
@@ -395,23 +395,6 @@ func verifyDeterministicComputeCone(
 	return coneFuncs, localClosures, sawErrorSink, true
 }
 
-func bodyHasGoto(b *flowir.Body) bool {
-	if b == nil {
-		return true
-	}
-	hit := false
-	b.ForEachSyncOp(func(op *flowir.Op) bool {
-		if op.Kind == flowir.OpBranch {
-			if bs, ok := op.StmtAST.(*ast.BranchStmt); !ok || bs.Tok == token.GOTO {
-				hit = true
-				return false
-			}
-		}
-		return true
-	})
-	return hit
-}
-
 func collectConfinedLocalClosuresInBody(
 	p *packages.Package,
 	fc *pkgFlowCache,
@@ -448,7 +431,7 @@ func placeTouchesPkgGlobal(p *packages.Package, pl flowir.Place) bool {
 		return true
 	}
 	hit := false
-	forEachPlaceRootVar(pl, func(rv *types.Var) {
+	flowir.ForEachPlaceRootVar(pl, func(rv *types.Var) {
 		if rv != nil && !rv.IsField() && rv.Pkg() != nil && rv.Parent() == rv.Pkg().Scope() {
 			hit = true
 		}
@@ -467,7 +450,7 @@ func valueTouchesPkgGlobal(p *packages.Package, val *flowir.Value) bool {
 		return false
 	}
 	hit := false
-	forEachValueRootVar(val, func(rv *types.Var) {
+	flowir.ForEachValueRootVar(val, func(rv *types.Var) {
 		if rv != nil && !rv.IsField() && rv.Pkg() != nil && rv.Parent() == rv.Pkg().Scope() {
 			hit = true
 		}

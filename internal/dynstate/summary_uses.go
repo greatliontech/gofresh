@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 type pendingReturnDisposition struct {
@@ -161,7 +161,7 @@ func recordDynamicGlobalUses(
 			}
 			entry := aliasedLocals[pl.Obj]
 			vars := entry.root
-			if placeEntersInterior(pl, writeContainer) {
+			if flowir.PlaceEntersInterior(pl, writeContainer) {
 				vars = entry.all
 			}
 			markMutatedVars(vars, pl.RootPos)
@@ -189,7 +189,7 @@ func recordDynamicGlobalUses(
 					return
 				}
 				if cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallIIFE {
-					forEachIIFEReturnValue(cur, walk)
+					flowir.ForEachIIFEReturnValue(cur, walk)
 					return
 				}
 				if cur.Kind == flowir.ValPlace {
@@ -223,7 +223,7 @@ func recordDynamicGlobalUses(
 				return
 			}
 			if cur.Kind == flowir.ValCall && cur.CallKind == flowir.CallIIFE {
-				forEachIIFEReturnValue(cur, walk)
+				flowir.ForEachIIFEReturnValue(cur, walk)
 				return
 			}
 			if cur.Kind == flowir.ValPlace {
@@ -295,7 +295,7 @@ func recordDynamicGlobalUses(
 						rootSrcs = nil
 					}
 					entry := paramSeeds[param]
-					if len(rootSrcs) > 0 && (isRefHeaderType(param.Type()) || isTypeParamType(param.Type())) {
+					if len(rootSrcs) > 0 && (syntaxutil.IsRefHeaderType(param.Type()) || isTypeParamType(param.Type())) {
 						if appendUniqueVars(&entry.root, rootSrcs) {
 							paramSeedGrowth = true
 						}
@@ -508,7 +508,7 @@ func recordDynamicGlobalUses(
 			} else {
 				entry := aliasedLocals[pl.Obj]
 				vars := entry.root
-				if placeEntersInterior(pl, false) || canAliasCarrierType(audited, vt) || isTypeParamType(vt) {
+				if flowir.PlaceEntersInterior(pl, false) || canAliasCarrierType(audited, vt) || isTypeParamType(vt) {
 					vars = entry.all
 				}
 				markEscapedVars(vars, pl.RootPos)
@@ -525,7 +525,7 @@ func recordDynamicGlobalUses(
 			for _, a := range v.Args {
 				markExemptEscapesVal(a)
 			}
-			forEachIIFEReturnValue(v, markExemptEscapesVal)
+			flowir.ForEachIIFEReturnValue(v, markExemptEscapesVal)
 			return
 		}
 		isStrBuiltin := v.Kind == flowir.ValCall && v.CallKind == flowir.CallBuiltin &&
@@ -822,7 +822,7 @@ func recordDynamicGlobalUses(
 			}
 			entry := aliasedLocals[pl.Obj]
 			vars := entry.root
-			if placeEntersInterior(pl, false) || canAliasCarrierType(audited, vt) || isTypeParamType(vt) {
+			if flowir.PlaceEntersInterior(pl, false) || canAliasCarrierType(audited, vt) || isTypeParamType(vt) {
 				vars = entry.all
 			}
 			markEscapedVars(vars, pl.RootPos)
@@ -876,7 +876,7 @@ func recordDynamicGlobalUses(
 					} else {
 						entry := aliasedLocals[v.AddrPlace.Obj]
 						vars := entry.root
-						canAlias := placeEntersInterior(v.AddrPlace, false) || addrOfSubplaceCanAliasCarrier(audited, v)
+						canAlias := flowir.PlaceEntersInterior(v.AddrPlace, false) || addrOfSubplaceCanAliasCarrier(audited, v)
 						if canAlias {
 							vars = entry.all
 						}

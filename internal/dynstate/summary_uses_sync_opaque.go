@@ -7,9 +7,9 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func walkSyncVarCalls(
@@ -186,7 +186,7 @@ func dataMemoVars(audited bool, p *packages.Package, fc *pkgFlowCache, callIdx *
 		named, ok := types.Unalias(t).(*types.Named)
 		return ok && named.Obj() != nil && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == "sync" && named.Obj().Name() == "Map"
 	}
-	writeInfos := fc.ensureVarWriteInfos(p)
+	writeInfos := fc.varWriteInfos(p)
 	isEmptySyncMapLit := func(val *flowir.Value) bool {
 		if val == nil || val.Kind != flowir.ValAllocFresh || val.AllocKind != flowir.AllocCompositeLit || len(val.CompositeElts) != 0 {
 			return false
@@ -202,9 +202,9 @@ func dataMemoVars(audited bool, p *packages.Package, fc *pkgFlowCache, callIdx *
 			continue
 		}
 		st := writeInfos[v]
-		if st == nil || st.defs != 1 || st.hasNonPlainDef || st.hasPostDefWrite ||
-			st.hasExplicitAddr || st.hasChanSend || st.hasBuiltinMut ||
-			(!st.hasZeroDecl && !isEmptySyncMapLit(st.initVal)) {
+		if st == nil || st.Defs != 1 || st.HasNonPlainDef || st.HasPostDefWrite ||
+			st.HasExplicitAddr || st.HasChanSend || st.HasBuiltinMut ||
+			(!st.HasZeroDecl && !isEmptySyncMapLit(st.InitVal)) {
 			continue
 		}
 		candidates[v] = true
@@ -652,7 +652,7 @@ func recordOpaqueDynamicVars(p *packages.Package, fc *pkgFlowCache, opaque, brea
 		if b == nil {
 			return
 		}
-		visitAllBodyOps(b, func(op *flowir.Op) {
+		flowir.VisitAllOps(b, func(op *flowir.Op) {
 			switch op.Kind {
 			case flowir.OpAssign:
 				switch op.AssignKind {

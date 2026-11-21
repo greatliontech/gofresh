@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
+	"github.com/greatliontech/gofresh/internal/refconfine"
 )
 
 // importAlias is one import declaration's resolved alias and path, shared

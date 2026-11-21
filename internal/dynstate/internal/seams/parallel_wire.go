@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func (g *parGraph) wireNodeSelf(id int, n ast.Node) {

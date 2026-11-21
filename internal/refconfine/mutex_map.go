@@ -6,8 +6,8 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // IsEmptyMapInitValue reports whether val lowers an empty map allocation
@@ -601,20 +601,7 @@ func bodyCallsAnyFunc(b *flowir.Body, targets map[*types.Func]bool) bool {
 }
 
 func bodyHasGotoOrCallsEntry(b *flowir.Body, entryFn *types.Func) bool {
-	if b == nil {
-		return true
-	}
-	bad := false
-	b.ForEachSyncOp(func(op *flowir.Op) bool {
-		if op.Kind == flowir.OpBranch {
-			if bs, ok := op.StmtAST.(*ast.BranchStmt); !ok || bs.Tok == token.GOTO {
-				bad = true
-				return false
-			}
-		}
-		return true
-	})
-	if bad {
+	if b == nil || b.HasGoto {
 		return true
 	}
 	return entryFn != nil && bodyCallsAnyFunc(b, map[*types.Func]bool{entryFn: true})

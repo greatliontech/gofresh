@@ -6,8 +6,8 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func pkgReifiesStructReflectType(p *packages.Package, target *types.Named) bool {
@@ -368,14 +368,14 @@ func pkgConfinesMatchingIfaceValueOf(p *packages.Package, idx *refconfine.PkgInd
 				}
 			}
 			if sawReturn {
+				if idx.FlowCache(p).FuncBody(enclFD).HasGotoAnywhere() {
+					ok = false
+					return false
+				}
 				var earliestRetPos token.Pos
-				hasGoto := false
 				ast.Inspect(enclFD.Body, func(bn ast.Node) bool {
 					if bn == nil {
 						return false
-					}
-					if br, isBr := bn.(*ast.BranchStmt); isBr && br.Tok == token.GOTO {
-						hasGoto = true
 					}
 					if retS, isRet := bn.(*ast.ReturnStmt); isRet && retS.Pos() >= call.Pos() {
 						if !earliestRetPos.IsValid() || retS.Pos() < earliestRetPos {
@@ -402,7 +402,7 @@ func pkgConfinesMatchingIfaceValueOf(p *packages.Package, idx *refconfine.PkgInd
 					})
 					return reassigned
 				}
-				if hasGoto || !earliestRetPos.IsValid() {
+				if !earliestRetPos.IsValid() {
 					ok = false
 					return false
 				}

@@ -12,9 +12,9 @@ import (
 	"testing"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"pgregory.net/rapid"
 )
 
@@ -25,6 +25,7 @@ func TestPkgFlowCacheZeroMissAndDeclarationCountInvariant(t *testing.T) {
 import (
 	"errors"
 	"sync"
+	"unsafe"
 )
 
 const (
@@ -47,6 +48,12 @@ var (
 			return make([]byte, 8)
 		},
 	}
+	sizeofTypeLit [unsafe.Sizeof(func(q *int) (out int) {
+		var p *int
+		var a any = p
+		_ = a
+		return 0
+	})]byte
 )
 
 type memoDoc struct {
@@ -72,6 +79,8 @@ func ExternalBodyless(x int) int
 `,
 		"b.go": `package flowcache
 
+import "unsafe"
+
 func init() {
 	initHelper(CarrierSlice)
 }
@@ -85,6 +94,11 @@ func GenericRead[T ~[]func()](in T) int {
 }
 
 func ExerciseAllConstructs(ch chan int, box any) (namedOut int) {
+	_ = [unsafe.Sizeof(func() {
+		var p *int
+		var a any = p
+		_ = a
+	})]byte{}
 	b := sharedPool.Get().([]byte)
 	b = b[:0]
 	sharedPool.Put(b)

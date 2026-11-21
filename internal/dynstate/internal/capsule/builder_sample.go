@@ -9,9 +9,8 @@ import (
 	"sort"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func verifySampleCapsuleBuilderType(
@@ -96,7 +95,7 @@ func verifySampleCapsuleBuilderType(
 	if buildFD == nil || buildFD.Body == nil {
 		return syntaxutil.InitBuilderFact{}, nil, nil, false
 	}
-	if hasTakesSample && freshstruct.FuncBodyHasGoto(buildFD.Body) {
+	if hasTakesSample && idx.FlowCache(p).FuncBody(buildFD).HasGotoAnywhere() {
 		emitCapsuleReject(ctx, p, ownerRef.Key(), "sample_builder_body_has_goto", buildFD)
 		return syntaxutil.InitBuilderFact{}, nil, nil, false
 	}

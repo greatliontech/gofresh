@@ -7,9 +7,9 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // settledGlobalMap maps each proven settled unexported package data global to
@@ -341,7 +341,7 @@ func settledPackageDataGlobals(
 						if !ok || vs == ownSpec {
 							continue
 						}
-						if bodyMentionsVar(fc.body(p, vs), carrier) {
+						if flowir.BodyMentionsVar(fc.body(p, vs), carrier) {
 							return false
 						}
 					}
@@ -349,7 +349,7 @@ func settledPackageDataGlobals(
 					if d.Body == nil || d.Name == nil {
 						continue
 					}
-					if !bodyMentionsVar(fc.funcBody(p, d), carrier) {
+					if !flowir.BodyMentionsVar(fc.funcBody(p, d), carrier) {
 						continue
 					}
 					wants := map[syntaxutil.ParamKey]bool{}
@@ -396,7 +396,7 @@ func settledPackageDataGlobals(
 							embedsRawData = true
 						}
 					case flowir.ValConvert:
-						if syntaxutil.IsUnsafePointerType(v.Type) && valueMentionsVar(v.Arg, g) {
+						if syntaxutil.IsUnsafePointerType(v.Type) && flowir.ValueMentionsVar(v.Arg, g) {
 							okSpec = false
 							return
 						}
@@ -406,12 +406,12 @@ func settledPackageDataGlobals(
 							return
 						}
 					case flowir.ValMethodVal:
-						if v.Recv != nil && valueMentionsVar(v.Recv, g) {
+						if v.Recv != nil && flowir.ValueMentionsVar(v.Recv, g) {
 							okSpec = false
 							return
 						}
 					case flowir.ValMakeClosure:
-						if v.Lit != nil && bodyMentionsVar(v.Closure, g) {
+						if v.Lit != nil && flowir.BodyMentionsVar(v.Closure, g) {
 							wants := map[syntaxutil.ParamKey]bool{}
 							mw := map[syntaxutil.FuncKey]bool{}
 							if !enclosingConfinesRoots(audited, p, fc, v.Lit, nil, nil, map[types.Object]bool{g: true}, wants, mw, nil) ||
@@ -423,7 +423,7 @@ func settledPackageDataGlobals(
 						return
 					case flowir.ValCall:
 						if v.CallKind == flowir.CallIIFE {
-							if valueMentionsVar(v, g) {
+							if flowir.ValueMentionsVar(v, g) {
 								okSpec = false
 							}
 							return
@@ -431,7 +431,7 @@ func settledPackageDataGlobals(
 						if v.CallKind == flowir.CallBuiltin {
 							switch v.BuiltinName {
 							case "StringData", "String":
-								if valueMentionsVar(v, g) {
+								if flowir.ValueMentionsVar(v, g) {
 									okSpec = false
 								}
 								return
@@ -460,7 +460,7 @@ func settledPackageDataGlobals(
 								return
 							}
 							v.ForEachArgParam(func(arg *flowir.Value, slotType types.Type, _ int, pIdx int, pOK bool, packedVariadic bool) bool {
-								if !okSpec || !valueMentionsVar(arg, g) {
+								if !okSpec || !flowir.ValueMentionsVar(arg, g) {
 									return okSpec
 								}
 								paramType := v.FormalParamSlotType(pIdx, packedVariadic)
@@ -516,7 +516,7 @@ func settledPackageDataGlobals(
 							return
 						}
 						for _, arg := range v.Args {
-							if valueMentionsVar(arg, g) && (reachOrStr(g.Type()) || (v.AutoAddrRecv && v.HasRecvPlace && v.RecvPlace.Obj == g)) {
+							if flowir.ValueMentionsVar(arg, g) && (reachOrStr(g.Type()) || (v.AutoAddrRecv && v.HasRecvPlace && v.RecvPlace.Obj == g)) {
 								okSpec = false
 								return
 							}
@@ -569,7 +569,7 @@ func settledPackageDataGlobals(
 			usedInFuncDecl := false
 			specUses := 0
 			for dep := range settled {
-				if dep == g || !reachOrStr(dep.Type()) || !valueMentionsVar(candidates[g], dep) {
+				if dep == g || !reachOrStr(dep.Type()) || !flowir.ValueMentionsVar(candidates[g], dep) {
 					continue
 				}
 				for c := range settled[dep] {
@@ -593,7 +593,7 @@ func settledPackageDataGlobals(
 					}
 					switch d := decl.(type) {
 					case *ast.FuncDecl:
-						if d.Body == nil || !bodyMentionsVar(fc.funcBody(p, d), g) {
+						if d.Body == nil || !flowir.BodyMentionsVar(fc.funcBody(p, d), g) {
 							continue
 						}
 						usedInFuncDecl = true
@@ -621,14 +621,14 @@ func settledPackageDataGlobals(
 									if p.TypesInfo.Defs[nm] == g {
 										continue
 									}
-									if i < len(vs.Values) && valueMentionsVar(fc.exprValue(p, vs.Values[i]), g) {
+									if i < len(vs.Values) && flowir.ValueMentionsVar(fc.exprValue(p, vs.Values[i]), g) {
 										keep = false
 										break
 									}
 								}
 								continue
 							}
-							if !bodyMentionsVar(fc.body(p, vs), g) {
+							if !flowir.BodyMentionsVar(fc.body(p, vs), g) {
 								continue
 							}
 							specUses++
@@ -658,114 +658,6 @@ func settledPackageDataGlobals(
 		}
 	}
 	return settled
-}
-
-func bodyMentionsVar(b *flowir.Body, target *types.Var) bool {
-	if b == nil || target == nil {
-		return false
-	}
-	hit := false
-	checkLocalVal := func(v *flowir.Value) {
-		if hit || v == nil {
-			return
-		}
-		v.WalkValues(func(cur *flowir.Value) bool {
-			if hit {
-				return false
-			}
-			switch cur.Kind {
-			case flowir.ValPlace:
-				if cur.Place.Obj == target {
-					hit = true
-					return false
-				}
-			case flowir.ValAddrOf:
-				if cur.AddrPlace.Obj == target {
-					hit = true
-					return false
-				}
-			case flowir.ValMethodVal:
-				if cur.HasRecvPlace && cur.RecvPlace.Obj == target {
-					hit = true
-					return false
-				}
-			case flowir.ValCall:
-				if cur.AutoAddrRecv && cur.HasRecvPlace && cur.RecvPlace.Obj == target {
-					hit = true
-					return false
-				}
-			}
-			return true
-		})
-	}
-	visitAllBodyOps(b, func(op *flowir.Op) {
-		if hit {
-			return
-		}
-		switch op.Kind {
-		case flowir.OpAssign:
-			for _, dst := range op.Dsts {
-				if dst.Obj == target {
-					hit = true
-					return
-				}
-			}
-		case flowir.OpTypeSwitchBind:
-			if op.SwitchDst == target {
-				hit = true
-				return
-			}
-		case flowir.OpChanSend:
-			if op.ChanPlace.Obj == target {
-				hit = true
-				return
-			}
-		}
-		forEachOpTopValues(op, checkLocalVal)
-	})
-	return hit
-}
-
-func valueMentionsVar(v *flowir.Value, target *types.Var) bool {
-	if v == nil || target == nil {
-		return false
-	}
-	hit := false
-	v.WalkValues(func(cur *flowir.Value) bool {
-		if hit {
-			return false
-		}
-		switch cur.Kind {
-		case flowir.ValPlace:
-			if cur.Place.Obj == target {
-				hit = true
-				return false
-			}
-		case flowir.ValAddrOf:
-			if cur.AddrPlace.Obj == target {
-				hit = true
-				return false
-			}
-		case flowir.ValMethodVal:
-			if cur.HasRecvPlace && cur.RecvPlace.Obj == target {
-				hit = true
-				return false
-			}
-		case flowir.ValMakeClosure:
-			if bodyMentionsVar(cur.Closure, target) {
-				hit = true
-				return false
-			}
-		case flowir.ValCall:
-			if (cur.AutoAddrRecv && cur.HasRecvPlace && cur.RecvPlace.Obj == target) ||
-				(cur.CallKind == flowir.CallIIFE && bodyMentionsVar(cur.IIFE, target)) {
-				hit = true
-				return false
-			}
-		}
-		return true
-	})
-	return hit
 }
 
 func closureExtractsNoCarrierFromRoots(audited bool, b *flowir.Body, carrierAliasRoots map[types.Object]bool) bool {
@@ -1222,7 +1114,7 @@ func enclosingConfinesRoots(
 					}
 				}
 				for _, gv := range globalRoots {
-					if reachOrSyncOrStr(gv.Type()) && bodyMentionsVar(v.Closure, gv) {
+					if reachOrSyncOrStr(gv.Type()) && flowir.BodyMentionsVar(v.Closure, gv) {
 						out[gv] = true
 					}
 				}
@@ -1330,7 +1222,7 @@ func enclosingConfinesRoots(
 				}
 			}
 			for _, gv := range globalRoots {
-				if bodyMentionsVar(v.Closure, gv) {
+				if flowir.BodyMentionsVar(v.Closure, gv) {
 					subRoots[gv] = true
 				}
 			}
@@ -1668,7 +1560,7 @@ func enclosingConfinesRoots(
 				}
 			}
 		}
-		visitAllBodyOps(enclBody, func(op *flowir.Op) {
+		flowir.VisitAllOps(enclBody, func(op *flowir.Op) {
 			if !sound {
 				return
 			}
@@ -1999,7 +1891,7 @@ func recordEnvCarryingRegistrations(
 			if cv, isC := carrierVar(dst.Obj); isC {
 				return []*types.Var{cv}
 			}
-			if placeEntersInterior(dst, writeContainer) {
+			if flowir.PlaceEntersInterior(dst, writeContainer) {
 				return localAliases[dst.Obj].all
 			}
 			return localAliases[dst.Obj].root
@@ -2021,7 +1913,7 @@ func recordEnvCarryingRegistrations(
 				if cv, isC := carrierVar(val.AddrPlace.Obj); isC {
 					return flowir.Place{}, false, []*types.Var{cv}
 				}
-				if placeEntersInterior(val.AddrPlace, false) {
+				if flowir.PlaceEntersInterior(val.AddrPlace, false) {
 					return flowir.Place{}, false, localAliases[val.AddrPlace.Obj].all
 				}
 				return flowir.Place{}, false, localAliases[val.AddrPlace.Obj].root

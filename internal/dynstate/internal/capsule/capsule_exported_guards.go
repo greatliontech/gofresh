@@ -8,8 +8,8 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func isNilComparableType(t types.Type) bool {
@@ -170,7 +170,7 @@ func deriveOnceExportedWriteGuardFields(
 	}
 
 	onceFD := idx.FuncDecls[onceFn]
-	if onceFD == nil || onceFD.Body == nil || onceFD.Recv == nil || len(onceFD.Recv.List) != 1 || len(onceFD.Recv.List[0].Names) != 1 || freshstruct.FuncBodyHasGoto(onceFD.Body) {
+	if onceFD == nil || onceFD.Body == nil || onceFD.Recv == nil || len(onceFD.Recv.List) != 1 || len(onceFD.Recv.List[0].Names) != 1 || idx.FlowCache(p).FuncBody(onceFD).HasGotoAnywhere() {
 		return nil, nil, firstExpWriteNode, false
 	}
 	onceRecv, _ := p.TypesInfo.Defs[onceFD.Recv.List[0].Names[0]].(*types.Var)

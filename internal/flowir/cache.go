@@ -5,7 +5,7 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // PkgCache lowers every FuncDecl and VAR/CONST GenDecl across a package's AST
@@ -21,6 +21,9 @@ type PkgCache struct {
 
 	bodies map[ast.Node]*Body
 	values map[ast.Expr]*Value
+
+	varWritesReady bool
+	varWrites      map[*types.Var]*VarWriteInfo
 
 	DeclLowerCount int
 	MissCount      int
@@ -69,8 +72,31 @@ func NewPkgCache(info *types.Info, pkg *types.Package, files []*ast.File) *PkgCa
 				}
 			}
 		}
+		c.indexUnindexedFuncLits(file)
 	}
 	return c
+}
+
+func (c *PkgCache) indexUnindexedFuncLits(file *ast.File) {
+	if c == nil || file == nil {
+		return
+	}
+	ast.Inspect(file, func(n ast.Node) bool {
+		lit, ok := n.(*ast.FuncLit)
+		if !ok || lit == nil {
+			return true
+		}
+		if _, exists := c.bodies[lit]; !exists {
+			if lb := LowerFuncLit(c.Info, c.Pkg, lit); lb != nil {
+				c.bodies[lit] = lb
+				if lit.Body != nil {
+					c.bodies[lit.Body] = lb
+				}
+				c.indexNestedBodies(lb)
+			}
+		}
+		return true
+	})
 }
 
 func (c *PkgCache) indexGenDeclSpecs(gd *ast.GenDecl, b *Body) {

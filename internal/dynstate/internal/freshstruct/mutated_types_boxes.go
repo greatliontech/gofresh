@@ -5,8 +5,8 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func (msc *mutatedStructCollector) isOpaqueForeignWrapperField(callConv *ast.CallExpr, ownerT types.Type, st *types.Struct, f *types.Var) (capsuleCallGuard, bool) {

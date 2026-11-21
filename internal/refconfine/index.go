@@ -1,8 +1,8 @@
 // Package refconfine provides the unified package syntax and call-site index
 // (PkgIndex, CallSiteIndex), dynamic-carrier and mutable-reference type
-// classifiers, and the read-only reference confinement verifier
-// (VerifyReadOnlyRefConfinement) shared by dynamic-state fact derivation,
-// structural discharges, and protobuf/fresh-struct verifiers.
+// classifiers, lock-region and unsafe-layout verifiers, and the FlowIR-native
+// read-only reference confinement solver (VerifyReadOnlyRefConfinement) shared
+// across gofresh's static-analysis packages.
 package refconfine
 
 import (
@@ -11,8 +11,8 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // PkgIndex holds the precomputed AST, type-use, call-site, and FlowIR

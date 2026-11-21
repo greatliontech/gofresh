@@ -3,7 +3,157 @@ package flowir
 import (
 	"go/ast"
 	"go/types"
+
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
+
+// CollectPlaceBackingVars appends eligible root variables whose storage backs p
+// to out, descending into transient base values when p is a transient projection.
+func CollectPlaceBackingVars(
+	p Place,
+	sharesMem func(types.Type) bool,
+	eligibleVar func(*types.Var) bool,
+	descendClosures bool,
+	exemptCalls map[*ast.CallExpr]bool,
+	out []*types.Var,
+) []*types.Var {
+	if p.Obj != nil {
+		if eligibleVar == nil || eligibleVar(p.Obj) {
+			out = append(out, p.Obj)
+		}
+		return out
+	}
+	if p.Root == RootTransient && p.Base != nil {
+		return CollectBackingVars(p.Base, sharesMem, eligibleVar, descendClosures, exemptCalls, out)
+	}
+	return out
+}
+
+// CollectBackingVars appends eligible variables whose backing memory can flow
+// into v to out, stopping at non-memory-bearing types, fresh zero/make
+// allocations, and concrete string <-> []byte/[]rune copying conversions.
+func CollectBackingVars(
+	v *Value,
+	sharesMem func(types.Type) bool,
+	eligibleVar func(*types.Var) bool,
+	descendClosures bool,
+	exemptCalls map[*ast.CallExpr]bool,
+	out []*types.Var,
+) []*types.Var {
+	if v == nil {
+		return out
+	}
+	if v.Kind == ValCall && v.CallAST != nil && exemptCalls[v.CallAST] {
+		return out
+	}
+	if v.Type != nil && sharesMem != nil && !sharesMem(v.Type) {
+		return out
+	}
+	isEligible := func(u *types.Var) bool {
+		return u != nil && !u.IsField() && (eligibleVar == nil || eligibleVar(u))
+	}
+	switch v.Kind {
+	case ValPlace:
+		if v.Place.Obj != nil {
+			if isEligible(v.Place.Obj) && (v.Place.Obj.Type() == nil || sharesMem == nil || sharesMem(v.Place.Obj.Type())) {
+				out = append(out, v.Place.Obj)
+			}
+		} else if v.Place.Root == RootTransient && v.Place.Base != nil {
+			out = CollectBackingVars(v.Place.Base, sharesMem, eligibleVar, descendClosures, exemptCalls, out)
+		}
+		// Index keys and slice bounds are scalar indices and do not supply
+		// the projected value's backing storage.
+		return out
+
+	case ValAddrOf:
+		return CollectPlaceBackingVars(v.AddrPlace, sharesMem, isEligible, descendClosures, exemptCalls, out)
+
+	case ValMethodVal:
+		if v.AutoAddr && v.HasRecvPlace {
+			out = CollectPlaceBackingVars(v.RecvPlace, sharesMem, isEligible, descendClosures, exemptCalls, out)
+		}
+		return CollectBackingVars(v.Recv, sharesMem, eligibleVar, descendClosures, exemptCalls, out)
+
+	case ValAllocFresh:
+		switch v.AllocKind {
+		case AllocMake, AllocBuiltinNewType:
+			return out
+		case AllocBuiltinNewExpr:
+			for _, a := range v.Args {
+				out = CollectBackingVars(a, sharesMem, eligibleVar, descendClosures, exemptCalls, out)
+			}
+			return out
+		case AllocCompositeLit:
+			for i := range v.CompositeElts {
+				elt := &v.CompositeElts[i]
+				if elt.MapKey != nil {
+					out = CollectBackingVars(elt.MapKey, sharesMem, eligibleVar, descendClosures, exemptCalls, out)
+				}
+				if elt.Value != nil {
+					out = CollectBackingVars(elt.Value, sharesMem, eligibleVar, descendClosures, exemptCalls, out)
+				}
+			}
+			return out
+		}
+
+	case ValMakeClosure:
+		if descendClosures && v.Closure != nil {
+			for fv := range v.Closure.FreeVars {
+				if isEligible(fv) {
+					out = append(out, fv)
+				}
+			}
+		}
+		return out
+
+	case ValCall:
+		if v.CallKind == CallIIFE && v.IIFE != nil {
+			for fv := range v.IIFE.FreeVars {
+				if isEligible(fv) {
+					out = append(out, fv)
+				}
+			}
+			v.IIFE.ForEachSyncOp(func(op *Op) bool {
+				if op.Kind == OpReturn {
+					for _, r := range op.Results {
+						out = CollectBackingVars(r, sharesMem, eligibleVar, descendClosures, exemptCalls, out)
+					}
+				}
+				return true
+			})
+			for _, rv := range v.IIFE.Results {
+				if isEligible(rv) && (rv.Type() == nil || sharesMem == nil || sharesMem(rv.Type())) {
+					out = append(out, rv)
+				}
+			}
+		}
+		if v.AutoAddrRecv && v.HasRecvPlace {
+			out = CollectPlaceBackingVars(v.RecvPlace, sharesMem, isEligible, descendClosures, exemptCalls, out)
+		}
+		out = CollectBackingVars(v.Recv, sharesMem, eligibleVar, descendClosures, exemptCalls, out)
+		out = CollectBackingVars(v.Callee, sharesMem, eligibleVar, descendClosures, exemptCalls, out)
+		for _, a := range v.Args {
+			out = CollectBackingVars(a, sharesMem, eligibleVar, descendClosures, exemptCalls, out)
+		}
+		return out
+
+	case ValConvert:
+		if !v.IsTypeAssert && v.Arg != nil && syntaxutil.IsFreshStringSliceCopy(v.Arg.Type, v.Type) {
+			return out
+		}
+		return CollectBackingVars(v.Arg, sharesMem, eligibleVar, descendClosures, exemptCalls, out)
+
+	case ValChanRecv:
+		return CollectBackingVars(v.Chan, sharesMem, eligibleVar, descendClosures, exemptCalls, out)
+
+	case ValCompositeExpr:
+		for _, a := range v.Args {
+			out = CollectBackingVars(a, sharesMem, eligibleVar, descendClosures, exemptCalls, out)
+		}
+		return out
+	}
+	return out
+}
 
 // BuildLocalMemAliases constructs the symmetric local backing-memory sharing
 // graph across synchronous operations of body (excluding nested uncalled
@@ -139,131 +289,11 @@ func buildMemAliases(
 		})
 	}
 
-	var collectPlaceAddrVars func(p Place, out []*types.Var) []*types.Var
-	var collectValueSources func(v *Value, out []*types.Var) []*types.Var
-
-	collectPlaceAddrVars = func(p Place, out []*types.Var) []*types.Var {
-		if p.Obj != nil && eligibleVar(p.Obj) {
-			out = append(out, p.Obj)
-			return out
-		}
-		if p.Root == RootTransient && p.Base != nil {
-			return collectValueSources(p.Base, out)
-		}
-		return out
+	collectPlaceAddrVars := func(p Place, out []*types.Var) []*types.Var {
+		return CollectPlaceBackingVars(p, sharesMem, eligibleVar, descendNested, exemptCalls, out)
 	}
-
-	collectValueSources = func(v *Value, out []*types.Var) []*types.Var {
-		if v == nil {
-			return out
-		}
-		if v.Kind == ValCall && v.CallAST != nil && exemptCalls[v.CallAST] {
-			return out
-		}
-		if v.Type != nil && !sharesMem(v.Type) {
-			return out
-		}
-		switch v.Kind {
-		case ValPlace:
-			if v.Place.Obj != nil {
-				if eligibleVar(v.Place.Obj) && (v.Place.Obj.Type() == nil || sharesMem(v.Place.Obj.Type())) {
-					out = append(out, v.Place.Obj)
-				}
-			} else if v.Place.Root == RootTransient && v.Place.Base != nil {
-				out = collectValueSources(v.Place.Base, out)
-			}
-			// Index keys and slice bounds are scalar indices and do not supply
-			// the projected value's backing storage.
-			return out
-
-		case ValAddrOf:
-			return collectPlaceAddrVars(v.AddrPlace, out)
-
-		case ValMethodVal:
-			if v.AutoAddr && v.HasRecvPlace {
-				out = collectPlaceAddrVars(v.RecvPlace, out)
-			}
-			return collectValueSources(v.Recv, out)
-
-		case ValAllocFresh:
-			switch v.AllocKind {
-			case AllocMake, AllocBuiltinNewType:
-				return out
-			case AllocBuiltinNewExpr:
-				for _, a := range v.Args {
-					out = collectValueSources(a, out)
-				}
-				return out
-			case AllocCompositeLit:
-				for i := range v.CompositeElts {
-					elt := &v.CompositeElts[i]
-					if elt.MapKey != nil {
-						out = collectValueSources(elt.MapKey, out)
-					}
-					if elt.Value != nil {
-						out = collectValueSources(elt.Value, out)
-					}
-				}
-				return out
-			}
-
-		case ValMakeClosure:
-			if descendNested && v.Closure != nil {
-				for fv := range v.Closure.FreeVars {
-					if eligibleVar(fv) {
-						out = append(out, fv)
-					}
-				}
-			}
-			return out
-
-		case ValCall:
-			if v.CallKind == CallIIFE && v.IIFE != nil {
-				for fv := range v.IIFE.FreeVars {
-					if eligibleVar(fv) {
-						out = append(out, fv)
-					}
-				}
-				v.IIFE.ForEachSyncOp(func(op *Op) bool {
-					if op.Kind == OpReturn {
-						for _, r := range op.Results {
-							out = collectValueSources(r, out)
-						}
-					}
-					return true
-				})
-				for _, rv := range v.IIFE.Results {
-					if eligibleVar(rv) && (rv.Type() == nil || sharesMem(rv.Type())) {
-						out = append(out, rv)
-					}
-				}
-			}
-			if v.AutoAddrRecv && v.HasRecvPlace {
-				out = collectPlaceAddrVars(v.RecvPlace, out)
-			}
-			out = collectValueSources(v.Recv, out)
-			out = collectValueSources(v.Callee, out)
-			for _, a := range v.Args {
-				out = collectValueSources(a, out)
-			}
-			return out
-
-		case ValConvert:
-			if !v.IsTypeAssert && v.Arg != nil && isFreshStringSliceCopy(v.Arg.Type, v.Type) {
-				return out
-			}
-			return collectValueSources(v.Arg, out)
-
-		case ValChanRecv:
-			return collectValueSources(v.Chan, out)
-
-		case ValCompositeExpr:
-			for _, a := range v.Args {
-				out = collectValueSources(a, out)
-			}
-			return out
-		}
-		return out
+	collectValueSources := func(v *Value, out []*types.Var) []*types.Var {
+		return CollectBackingVars(v, sharesMem, eligibleVar, descendNested, exemptCalls, out)
 	}
 
 	isBareUnprojectedSource := func(v *Value) bool {
@@ -277,36 +307,6 @@ func buildMemAliases(
 			return true
 		}
 		return false
-	}
-
-	placeEntersNestedRef := func(p Place) bool {
-		if p.Obj == nil || p.Obj.Type() == nil {
-			return true
-		}
-		if _, isTP := types.Unalias(p.Obj.Type()).(*types.TypeParam); isTP {
-			return true
-		}
-		refHops := 0
-		for _, pr := range p.Projs {
-			switch pr.Kind {
-			case ProjDeref:
-				refHops++
-			case ProjField:
-				if pr.Indirect {
-					refHops++
-				}
-			case ProjIndex, ProjSlice:
-				if pr.BaseType == nil {
-					refHops++
-				} else if _, isArr := types.Unalias(pr.BaseType).Underlying().(*types.Array); !isArr {
-					refHops++
-				}
-			}
-		}
-		if isRefHeaderForMem(p.Obj.Type()) {
-			return refHops >= 2
-		}
-		return refHops >= 1
 	}
 
 	linkDstToValue := func(dst Place, val *Value, rangeAssign bool) {
@@ -336,7 +336,7 @@ func buildMemAliases(
 			}
 			return
 		}
-		deep := placeEntersNestedRef(dst)
+		deep := PlaceEntersInterior(dst, false)
 		for _, dv := range dstVars {
 			for _, sv := range srcVars {
 				addInteriorWrite(dv, sv, deep)
@@ -368,7 +368,7 @@ func buildMemAliases(
 						dstVars := collectValueSources(v.Args[0], nil)
 						srcVars := collectValueSources(v.Args[1], nil)
 						deep := !(v.Args[0].Kind == ValPlace && v.Args[0].Place.IsBareVar() &&
-							v.Args[0].Place.Obj != nil && isRefHeaderForMem(v.Args[0].Place.Obj.Type()))
+							v.Args[0].Place.Obj != nil && syntaxutil.IsRefHeaderType(v.Args[0].Place.Obj.Type()))
 						for _, dv := range dstVars {
 							for _, sv := range srcVars {
 								addInteriorWrite(dv, sv, deep)
@@ -379,7 +379,7 @@ func buildMemAliases(
 					if len(v.Args) >= 2 && (v.Args[0].Type == nil || sharesMem(v.Args[0].Type)) {
 						dstVars := collectValueSources(v.Args[0], nil)
 						deep := !(v.Args[0].Kind == ValPlace && v.Args[0].Place.IsBareVar() &&
-							v.Args[0].Place.Obj != nil && isRefHeaderForMem(v.Args[0].Place.Obj.Type()))
+							v.Args[0].Place.Obj != nil && syntaxutil.IsRefHeaderType(v.Args[0].Place.Obj.Type()))
 						for _, elem := range v.Args[1:] {
 							srcVars := collectValueSources(elem, nil)
 							for _, dv := range dstVars {
@@ -444,7 +444,7 @@ func buildMemAliases(
 					if keyVal.Type == nil || sharesMem(keyVal.Type) {
 						mapVars := collectPlaceAddrVars(mapPlace, nil)
 						keyVars := collectValueSources(keyVal, nil)
-						deep := placeEntersNestedRef(dst)
+						deep := PlaceEntersInterior(dst, false)
 						for _, mv := range mapVars {
 							for _, kv := range keyVars {
 								addInteriorWrite(mv, kv, deep)
@@ -498,7 +498,7 @@ func buildMemAliases(
 			if op.SendVal != nil && (op.SendVal.Type == nil || sharesMem(op.SendVal.Type)) {
 				chanVars := collectPlaceAddrVars(op.ChanPlace, nil)
 				valVars := collectValueSources(op.SendVal, nil)
-				deep := !(op.ChanPlace.IsBareVar() && op.ChanPlace.Obj != nil && isRefHeaderForMem(op.ChanPlace.Obj.Type()))
+				deep := !(op.ChanPlace.IsBareVar() && op.ChanPlace.Obj != nil && syntaxutil.IsRefHeaderType(op.ChanPlace.Obj.Type()))
 				for _, cv := range chanVars {
 					for _, vv := range valVars {
 						addInteriorWrite(cv, vv, deep)
@@ -615,48 +615,4 @@ func buildMemAliases(
 		}
 	}
 	return adj
-}
-
-func isRefHeaderForMem(t types.Type) bool {
-	if t == nil {
-		return false
-	}
-	switch u := types.Unalias(t).Underlying().(type) {
-	case *types.Pointer, *types.Slice, *types.Map, *types.Chan, *types.Interface:
-		return true
-	case *types.Basic:
-		return u.Kind() == types.UnsafePointer
-	}
-	return false
-}
-
-func isFreshStringSliceCopy(srcType, dstType types.Type) bool {
-	if srcType == nil || dstType == nil {
-		return false
-	}
-	srcT := types.Unalias(srcType)
-	dstT := types.Unalias(dstType)
-	if _, isTP := srcT.(*types.TypeParam); isTP {
-		return false
-	}
-	if _, isTP := dstT.(*types.TypeParam); isTP {
-		return false
-	}
-	isStr := func(t types.Type) bool {
-		b, ok := t.Underlying().(*types.Basic)
-		return ok && b.Info()&types.IsString != 0
-	}
-	isByteOrRuneSlice := func(t types.Type) bool {
-		sl, ok := t.Underlying().(*types.Slice)
-		if !ok {
-			return false
-		}
-		el := types.Unalias(sl.Elem())
-		if _, isTP := el.(*types.TypeParam); isTP {
-			return false
-		}
-		b, ok := el.Underlying().(*types.Basic)
-		return ok && (b.Kind() == types.Byte || b.Kind() == types.Rune)
-	}
-	return (isStr(srcT) && isByteOrRuneSlice(dstT)) || (isByteOrRuneSlice(srcT) && isStr(dstT))
 }

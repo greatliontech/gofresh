@@ -5,7 +5,7 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func (wpd *wrapperPtrDiscipline) verifyCallSiteSinks() (bool, map[*types.Func]bool) {
@@ -645,7 +645,7 @@ func (wpd *wrapperPtrDiscipline) methodLoadsForeignCapsuleField(mfn *types.Func,
 		return true
 	}
 	mfd := wpd.idx.FuncDecls[mfn]
-	if mfd == nil || mfd.Body == nil || blockHasGoto(mfd.Body) || mfd.Recv == nil || len(mfd.Recv.List) != 1 || len(mfd.Recv.List[0].Names) != 1 {
+	if mfd == nil || mfd.Body == nil || cachedScopeHasGoto(wpd.p, wpd.idx, mfd.Body) || mfd.Recv == nil || len(mfd.Recv.List) != 1 || len(mfd.Recv.List[0].Names) != 1 {
 		return false
 	}
 	mRecv, _ := wpd.p.TypesInfo.Defs[mfd.Recv.List[0].Names[0]].(*types.Var)

@@ -205,6 +205,21 @@ func IsUnsafePointerType(t types.Type) bool {
 	return ok && b.Kind() == types.UnsafePointer
 }
 
+// IsRefHeaderType reports whether t's underlying type is a single-hop reference
+// header (pointer, slice, map, channel, interface, or unsafe.Pointer).
+func IsRefHeaderType(t types.Type) bool {
+	if t == nil {
+		return false
+	}
+	switch u := UnderlyingType(t).(type) {
+	case *types.Pointer, *types.Slice, *types.Map, *types.Chan, *types.Interface:
+		return true
+	case *types.Basic:
+		return u.Kind() == types.UnsafePointer
+	}
+	return false
+}
+
 // IsErrorType reports whether t is identical to the predeclared error type.
 func IsErrorType(t types.Type) bool {
 	if t == nil {

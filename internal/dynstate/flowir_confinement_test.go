@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func TestFlowIRNewExprVsNewTypeAndTypeSwitchImplicitConfinement(t *testing.T) {

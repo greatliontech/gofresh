@@ -7,8 +7,8 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func isProvablyNilVarExpr(p *packages.Package, idx *refconfine.PkgIndex, expr ast.Expr) bool {
@@ -32,7 +32,7 @@ func isProvablyNilVarExpr(p *packages.Package, idx *refconfine.PkgIndex, expr as
 		}
 	}
 	enclBody := innermostFuncOrLitBody(idx, uid)
-	if enclBody == nil || blockHasGotoOrLabel(enclBody) {
+	if enclBody == nil || cachedScopeHasGotoOrLabel(p, idx, enclBody) {
 		return false
 	}
 	var prev ast.Node = uid
@@ -153,52 +153,28 @@ func declaringFuncOrLitBody(idx *refconfine.PkgIndex, n ast.Node, declPos token.
 	return nil
 }
 
-func blockHasGoto(root ast.Node) bool {
-	if root == nil {
-		return false
-	}
-	hit := false
-	ast.Inspect(root, func(n ast.Node) bool {
-		if hit || n == nil {
-			return false
-		}
-		if _, isFL := n.(*ast.FuncLit); isFL && n != root {
-			return false
-		}
-		if s, isB := n.(*ast.BranchStmt); isB && s.Tok == token.GOTO {
-			hit = true
-			return false
-		}
+func cachedScopeHasGoto(p *packages.Package, idx *refconfine.PkgIndex, blk *ast.BlockStmt) bool {
+	if blk == nil || idx == nil {
 		return true
-	})
-	return hit
+	}
+	fc := idx.FlowCache(p)
+	if fc == nil {
+		return true
+	}
+	b := fc.Body(blk)
+	return b == nil || b.HasGoto
 }
 
-func blockHasGotoOrLabel(root ast.Node) bool {
-	if root == nil {
-		return false
-	}
-	hit := false
-	ast.Inspect(root, func(n ast.Node) bool {
-		if hit || n == nil {
-			return false
-		}
-		if _, isFL := n.(*ast.FuncLit); isFL && n != root {
-			return false
-		}
-		switch s := n.(type) {
-		case *ast.LabeledStmt:
-			hit = true
-			return false
-		case *ast.BranchStmt:
-			if s.Tok == token.GOTO {
-				hit = true
-				return false
-			}
-		}
+func cachedScopeHasGotoOrLabel(p *packages.Package, idx *refconfine.PkgIndex, blk *ast.BlockStmt) bool {
+	if blk == nil || idx == nil {
 		return true
-	})
-	return hit
+	}
+	fc := idx.FlowCache(p)
+	if fc == nil {
+		return true
+	}
+	b := fc.Body(blk)
+	return b == nil || b.HasGotoOrLabel()
 }
 
 func isConstBoolVal(p *packages.Package, expr ast.Expr, want bool) bool {
@@ -217,10 +193,10 @@ func isUnreachableConstIfBranch(p *packages.Package, idx *refconfine.PkgIndex, n
 	if !isIf {
 		return false
 	}
-	if ifs.Body == n && isConstBoolVal(p, ifs.Cond, false) && !blockHasGotoOrLabel(n) {
+	if ifs.Body == n && isConstBoolVal(p, ifs.Cond, false) && !syntaxutil.NodeHasGotoOrLabel(n) {
 		return true
 	}
-	if ifs.Else != nil && ifs.Else == n && isConstBoolVal(p, ifs.Cond, true) && !blockHasGotoOrLabel(n) {
+	if ifs.Else != nil && ifs.Else == n && isConstBoolVal(p, ifs.Cond, true) && !syntaxutil.NodeHasGotoOrLabel(n) {
 		return true
 	}
 	return false
@@ -340,7 +316,7 @@ func collectTypeAssertedSyncPools(p *packages.Package, idx *refconfine.PkgIndex)
 		return taT, true
 	}
 	verifyNewFuncLit := func(fl *ast.FuncLit, putTypes *[]types.Type) bool {
-		if fl == nil || fl.Body == nil || blockHasGotoOrLabel(fl.Body) {
+		if fl == nil || fl.Body == nil || cachedScopeHasGotoOrLabel(p, idx, fl.Body) {
 			return false
 		}
 		sawReturn := false

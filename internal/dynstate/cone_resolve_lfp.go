@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -192,57 +192,38 @@ func (crt *coneResolveTables) solveFixedPointsAndAssemble() *ConeAnalysis {
 		delete(crt.ea.MethodDeps, mk)
 		delete(crt.ea.MethodParamDeps, mk)
 	}
-	for changed := true; changed; {
-		changed = false
-		for pk := range crt.paramCandidates {
-			if crt.r.ParamLeakFree[pk] {
-				continue
-			}
-			ok := true
+	syntaxutil.SolveBipartiteLFP(
+		crt.r.ParamLeakFree,
+		crt.paramCandidates,
+		func(pk syntaxutil.ParamKey) bool {
 			for dep := range crt.ea.ParamDeps[pk] {
 				if !crt.r.ParamLeakFree[dep] {
-					ok = false
-					break
+					return false
 				}
 			}
-			if ok {
-				for mk := range crt.ea.ParamMethodDeps[pk] {
-					if !crt.r.ReadOnly[mk] {
-						ok = false
-						break
-					}
+			for mk := range crt.ea.ParamMethodDeps[pk] {
+				if !crt.r.ReadOnly[mk] {
+					return false
 				}
 			}
-			if ok {
-				crt.r.ParamLeakFree[pk] = true
-				changed = true
-			}
-		}
-		for mk := range crt.methodCandidates {
-			if crt.r.ReadOnly[mk] {
-				continue
-			}
-			ok := true
+			return true
+		},
+		crt.r.ReadOnly,
+		crt.methodCandidates,
+		func(mk syntaxutil.FuncKey) bool {
 			for dep := range crt.ea.MethodDeps[mk] {
 				if !crt.r.ReadOnly[dep] {
-					ok = false
-					break
+					return false
 				}
 			}
-			if ok {
-				for pk := range crt.ea.MethodParamDeps[mk] {
-					if !crt.r.ParamLeakFree[pk] {
-						ok = false
-						break
-					}
+			for pk := range crt.ea.MethodParamDeps[mk] {
+				if !crt.r.ParamLeakFree[pk] {
+					return false
 				}
 			}
-			if ok {
-				crt.r.ReadOnly[mk] = true
-				changed = true
-			}
-		}
-	}
+			return true
+		},
+	)
 
 	// Stage 2b: Parameter retention LFP & closed-object opacity reachability.
 	for pk := range crt.poisonedRetParam {
@@ -268,81 +249,53 @@ func (crt *coneResolveTables) solveFixedPointsAndAssemble() *ConeAnalysis {
 	for paramKey := range crt.poisonedEnvParam {
 		delete(crt.ea.InsDeclared, paramKey)
 	}
-	for changed := true; changed; {
-		changed = false
-		for fnKey := range crt.ea.Declared {
-			if crt.ea.Resolved[fnKey] {
-				continue
-			}
-			ok := true
+	syntaxutil.SolveBipartiteLFP(
+		crt.ea.Resolved,
+		crt.ea.Declared,
+		func(fnKey syntaxutil.FuncKey) bool {
 			for dep := range crt.ea.RetDeps[fnKey] {
 				if !crt.ea.Resolved[dep] {
-					ok = false
-					break
+					return false
 				}
 			}
-			if ok {
-				for pk := range crt.ea.RetParamDeps[fnKey] {
-					if !crt.ea.ParamLeakFree[pk] {
-						ok = false
-						break
-					}
+			for pk := range crt.ea.RetParamDeps[fnKey] {
+				if !crt.ea.ParamLeakFree[pk] {
+					return false
 				}
 			}
-			if ok {
-				for mk := range crt.ea.RetMethodDeps[fnKey] {
-					if !crt.ea.ReadOnly[mk] {
-						ok = false
-						break
-					}
+			for mk := range crt.ea.RetMethodDeps[fnKey] {
+				if !crt.ea.ReadOnly[mk] {
+					return false
 				}
 			}
-			if ok {
-				for dep := range crt.ea.RetInsDeps[fnKey] {
-					if !crt.ea.DepResolved(dep) {
-						ok = false
-						break
-					}
+			for dep := range crt.ea.RetInsDeps[fnKey] {
+				if !crt.ea.DepResolved(dep) {
+					return false
 				}
 			}
-			if ok {
-				crt.ea.Resolved[fnKey] = true
-				changed = true
-			}
-		}
-		for paramKey := range crt.ea.InsDeclared {
-			if crt.ea.InsResolved[paramKey] {
-				continue
-			}
-			ok := true
+			return true
+		},
+		crt.ea.InsResolved,
+		crt.ea.InsDeclared,
+		func(paramKey syntaxutil.ParamKey) bool {
 			for dep := range crt.ea.InsDeps[paramKey] {
 				if !crt.ea.DepResolved(dep) {
-					ok = false
-					break
+					return false
 				}
 			}
-			if ok {
-				for pk := range crt.ea.InsParamDeps[paramKey] {
-					if !crt.ea.ParamLeakFree[pk] {
-						ok = false
-						break
-					}
+			for pk := range crt.ea.InsParamDeps[paramKey] {
+				if !crt.ea.ParamLeakFree[pk] {
+					return false
 				}
 			}
-			if ok {
-				for mk := range crt.ea.InsMethodDeps[paramKey] {
-					if !crt.ea.ReadOnly[mk] {
-						ok = false
-						break
-					}
+			for mk := range crt.ea.InsMethodDeps[paramKey] {
+				if !crt.ea.ReadOnly[mk] {
+					return false
 				}
 			}
-			if ok {
-				crt.ea.InsResolved[paramKey] = true
-				changed = true
-			}
-		}
-	}
+			return true
+		},
+	)
 	crt.r.EnvFreeResolved = crt.ea.Resolved
 
 	// Stage 2d: Call-region fixed points (InitOnlyFn & InitReachFn).

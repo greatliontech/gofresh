@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 	"github.com/greatliontech/gofresh/internal/trace"
 	"pgregory.net/rapid"
 )

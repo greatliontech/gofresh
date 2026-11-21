@@ -10,8 +10,8 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 type freshFuncEntry struct {
@@ -64,7 +64,7 @@ func CollectFreshLocalStructVars(
 	if p == nil || p.Types == nil || p.TypesInfo == nil || idx == nil || fd == nil || fd.Body == nil {
 		return nil, nil
 	}
-	if FuncBodyHasGoto(fd.Body) {
+	if idx.FlowCache(p).FuncBody(fd).HasGotoAnywhere() {
 		return nil, nil
 	}
 
@@ -449,25 +449,6 @@ func IsFreshInlineValue(p *packages.Package, expr ast.Expr) bool {
 		}
 	}
 	return false
-}
-
-// FuncBodyHasGoto reports whether body contains any goto statement.
-func FuncBodyHasGoto(body *ast.BlockStmt) bool {
-	if body == nil {
-		return false
-	}
-	hasGoto := false
-	ast.Inspect(body, func(n ast.Node) bool {
-		if hasGoto || n == nil {
-			return false
-		}
-		if br, ok := n.(*ast.BranchStmt); ok && br.Tok == token.GOTO {
-			hasGoto = true
-			return false
-		}
-		return true
-	})
-	return hasGoto
 }
 
 // IdentReachesMutatedOrAddrPrefix reports whether id is the root of a field or

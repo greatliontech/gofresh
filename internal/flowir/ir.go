@@ -2,7 +2,7 @@
 // normalized intra-procedural representation of places, values, and memory or
 // control-flow operations.
 //
-// Fact derivation in dynstate summarizes each package before downstream
+// Static analyses across gofresh summarize each package before downstream
 // importers or generic type instantiations exist, including uninstantiated
 // generic declarations whose bodies go/ssa leaves empty. Lowering AST +
 // go/types once per body lets confinement, freshness, and aliasing analyses
@@ -15,7 +15,7 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // Body is the lowered intra-procedural representation of a function, function
@@ -38,6 +38,44 @@ type Body struct {
 
 	Ops      []Op
 	FreeVars map[*types.Var]bool
+
+	// Synchronous control-flow hazard flags for b's own scope (including
+	// RangeBody sub-blocks, excluding nested FuncLit closures/IIFEs).
+	HasGoto          bool
+	HasLabel         bool
+	HasFallthrough   bool
+	HasLabeledBranch bool
+	HasDefer         bool
+	HasGo            bool
+
+	// HasNestedGoto reports whether any nested FuncLit inside b (including
+	// closures, IIFEs, and compile-time type expressions) contains a goto
+	// statement.
+	HasNestedGoto bool
+}
+
+// HasGotoAnywhere reports whether b or any nested FuncLit inside b contains a
+// goto statement.
+func (b *Body) HasGotoAnywhere() bool {
+	return b != nil && (b.HasGoto || b.HasNestedGoto)
+}
+
+// HasGotoOrLabel reports whether b's own synchronous scope (excluding nested
+// FuncLits) contains a goto branch or labeled statement.
+func (b *Body) HasGotoOrLabel() bool {
+	return b != nil && (b.HasGoto || b.HasLabel)
+}
+
+// HasGotoLabelOrFallthrough reports whether b's own synchronous scope
+// (excluding nested FuncLits) contains a goto, labeled statement, or fallthrough.
+func (b *Body) HasGotoLabelOrFallthrough() bool {
+	return b != nil && (b.HasGoto || b.HasLabel || b.HasFallthrough)
+}
+
+// HasUnstructuredBranch reports whether b's own synchronous scope (excluding
+// nested FuncLits) contains a goto, fallthrough, or labeled break/continue/goto.
+func (b *Body) HasUnstructuredBranch() bool {
+	return b != nil && (b.HasGoto || b.HasFallthrough || b.HasLabeledBranch)
 }
 
 // OwnsVar reports whether v is lexically declared within b's scope.

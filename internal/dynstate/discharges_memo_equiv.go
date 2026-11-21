@@ -8,9 +8,9 @@ import (
 	"slices"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 type memoFlowState struct {
@@ -136,19 +136,16 @@ func verifyMemoGetOrComputeEquivalence(
 		if b == nil || badBranch {
 			return
 		}
+		if b.HasUnstructuredBranch() {
+			badBranch = true
+			return
+		}
 		for i := range b.Ops {
 			op := &b.Ops[i]
 			totalOps++
 			if op.StmtAST == nil {
 				badBranch = true
 				return
-			}
-			if op.Kind == flowir.OpBranch {
-				bs, ok := op.StmtAST.(*ast.BranchStmt)
-				if !ok || bs.Tok == token.GOTO || bs.Tok == token.FALLTHROUGH || bs.Label != nil {
-					badBranch = true
-					return
-				}
 			}
 			opsByNode[op.StmtAST] = append(opsByNode[op.StmtAST], op)
 			if op.Kind == flowir.OpAssign && op.AssignKind == flowir.AssignRange && op.RangeBody != nil {

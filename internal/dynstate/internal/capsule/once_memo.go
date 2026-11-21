@@ -7,8 +7,8 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func rootPkgScopeVar(p *packages.Package, expr ast.Expr) *types.Var {
@@ -335,7 +335,7 @@ func findLocalSyncOnceMemoizerCandidates(
 	idx *refconfine.PkgIndex,
 	fd *ast.FuncDecl,
 ) map[*ast.FuncLit]*types.Var {
-	if fd == nil || fd.Body == nil || freshstruct.FuncBodyHasGoto(fd.Body) {
+	if fd == nil || fd.Body == nil || idx.FlowCache(p).FuncBody(fd).HasGotoAnywhere() {
 		return nil
 	}
 	uninitLocals := map[*types.Var]bool{}

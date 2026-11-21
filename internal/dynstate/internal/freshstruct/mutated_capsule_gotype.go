@@ -6,8 +6,8 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/refconfine"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 func (wpd *wrapperPtrDiscipline) isZeroConstOffset(expr ast.Expr) bool {
@@ -264,7 +264,7 @@ func (wpd *wrapperPtrDiscipline) isStructOrCapsuleReflectTypeExpr(expr ast.Expr,
 					return true
 				}
 				enclSc := declaringFuncOrLitBody(wpd.idx, rx, lv.Pos())
-				if enclSc == nil || blockHasGoto(enclSc) {
+				if enclSc == nil || cachedScopeHasGoto(wpd.p, wpd.idx, enclSc) {
 					return false
 				}
 				locVis[lv] = true
@@ -444,7 +444,7 @@ func (wpd *wrapperPtrDiscipline) isStructOrCapsuleReflectTypeExpr(expr ast.Expr,
 			}
 		}
 		enclScope := declaringFuncOrLitBody(wpd.idx, e, v.Pos())
-		if enclScope == nil || blockHasGoto(enclScope) {
+		if enclScope == nil || cachedScopeHasGoto(wpd.p, wpd.idx, enclScope) {
 			return false
 		}
 		sawWrite := false
@@ -829,7 +829,7 @@ func (wpd *wrapperPtrDiscipline) isSafeLegacyReflectValueSource(rvExpr ast.Expr,
 					}
 					return true
 				}
-				if pi != 0 || fd.Body == nil || len(fd.Body.List) == 0 || blockHasGoto(fd.Body) ||
+				if pi != 0 || fd.Body == nil || len(fd.Body.List) == 0 || cachedScopeHasGoto(wpd.p, wpd.idx, fd.Body) ||
 					fd.Recv == nil || len(fd.Recv.List) != 1 || len(fd.Recv.List[0].Names) != 1 {
 					return false
 				}
@@ -943,7 +943,7 @@ func (wpd *wrapperPtrDiscipline) isSafeLegacyReflectValueSource(rvExpr ast.Expr,
 			}
 		}
 		enclScope := declaringFuncOrLitBody(wpd.idx, re, v.Pos())
-		if enclScope == nil || blockHasGoto(enclScope) {
+		if enclScope == nil || cachedScopeHasGoto(wpd.p, wpd.idx, enclScope) {
 			return false
 		}
 		sawWrite := false

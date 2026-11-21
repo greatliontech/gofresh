@@ -6,8 +6,8 @@ import (
 	"go/types"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/dynstate/flowir"
-	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/flowir"
+	"github.com/greatliontech/gofresh/internal/syntaxutil"
 )
 
 // LockTargetKind classifies the mutex root tracked by VerifyBodyLockRegions.
@@ -247,16 +247,13 @@ func VerifyBodyLockRegions(
 		if b == nil || hasBadBranch {
 			return
 		}
+		if b.HasUnstructuredBranch() {
+			hasBadBranch = true
+			return
+		}
 		for i := range b.Ops {
 			op := &b.Ops[i]
 			totalOps++
-			if op.Kind == flowir.OpBranch {
-				bs, ok := op.StmtAST.(*ast.BranchStmt)
-				if !ok || bs.Tok == token.GOTO || bs.Tok == token.FALLTHROUGH || bs.Label != nil {
-					hasBadBranch = true
-					return
-				}
-			}
 			if op.StmtAST == nil {
 				hasBadBranch = true
 				return
