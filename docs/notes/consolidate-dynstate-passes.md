@@ -22,7 +22,7 @@
    - `discharges_mapping.go` (`1,005` LOC) -> `discharges_mapping.go` (`469` LOC) + `discharges_mapping_body.go` (`542` LOC), retiring dead `verifyMappingVar` wrapper; also retired dead `verifyMemoVar` wrapper from `discharges_memo.go`.
    - `discharges_once_memo_cone.go` (`1,011` LOC) -> `discharges_once_memo_ctor.go` (`420` LOC) + `discharges_once_memo_cone.go` (`605` LOC); retired duplicate `isUniverseErrorType` from `discharges_once_memo_recv.go` in favor of `syntaxutil.IsErrorType` across 40 call sites.
 
-4. **Mutation Probe Verification (`9/9` Killed, `0` Survivors):**
+4. **Mutation Probe Verification (`11/11` Killed, `0` Survivors):**
    - `1_allowNonMutableReach_sigLeafGate` (`value_classify.go`) -> killed by `SmuggledLocalClosureHook` (`TestUnifiedValueClassifierStoresAndReturnsEdgeCases`).
    - `2_preserveAppendBasePlace` (`value_classify.go`) -> killed by `SmuggleAppendSpareCap` (`TestUnifiedValueClassifierStoresAndReturnsEdgeCases`).
    - `3_ignoreSizeAndIndexArgs_AllocMake` (`value_classify.go`) -> killed by `BuildSizedFuncSlice` (`TestUnifiedValueClassifierStoresAndReturnsEdgeCases`).
@@ -31,7 +31,20 @@
    - `6_outflowAnalyzer_insModeParamGuard` (`summary_env_returns_eval.go`) -> killed by `InsertReboundFnParam` (`TestUnifiedValueClassifierStoresAndReturnsEdgeCases`).
    - `7_globalUseScanner_useSinkScopeFlush` (`summary_uses_returns.go`) -> killed by `TestPropertyAttributedEncloserReachabilityAndForeclosureTheorem`.
    - `8_carrierAliasSolver_propagateMem` (`carrier_aliases.go`) -> killed by `TestPropertyLocalCarrierAliasAndSiblingFieldStateDriftOracle`.
-   - `9_envRegScanner_wantsResolve` (`summary_env_stores.go`) -> killed by `UnconfinedParamHook` (`TestUnifiedValueClassifierStoresAndReturnsEdgeCases`).
+   - `9_pkgConf_resolveWants` (`confinement_pkg_solve.go`) -> killed by `UnconfinedParamHook` (`TestUnifiedValueClassifierStoresAndReturnsEdgeCases`).
+   - `10_onceMemo_ValInvalid_failClosed` (`confinement_once_memo.go`) -> killed by `TestUnifiedValueClassifierStoresAndReturnsEdgeCases`.
+   - `11_skipContainerElems_AllocCompositeLit` (`value_classify.go`) -> killed by `TestConfinementAndRegistrationMatrix`.
+
+## Round 1 Adversarial Review Dispositions
+
+- **Finding 1 (`[LOW]` Behavioral — Introduced):** Confirmed & Fixed. Removed `forbidUnsafeSizeBuiltins` from `valuePurityPolicy` (`value_classify.go`) and `flow_fresh.go` so compile-time `unsafe.Sizeof`/`Alignof`/`Offsetof` queries evaluate uniformly across direct and wrapped constant expressions; added `onceLayoutMemo.Get` and `BuildLayoutFuncSlice` regression checks in `flowir_unification_test.go`.
+- **Finding 2 (`[LOW]` Behavioral / Fail-Closed Guard — Adjacent):** Confirmed & Fixed. Hardened `checkOnceMemoValueTree` (`confinement_once_memo.go`) to fail closed on `flowir.ValInvalid`, nil-body `ValMakeClosure`, and nil-body `CallIIFE`; added direct unit assertions and mutation probe `10_onceMemo_ValInvalid_failClosed`.
+- **Finding 3 (`[LOW]` Consolidation — Introduced):** Confirmed & Fixed. Replaced `skipAppendElemCheck` with `skipContainerElems` across `AllocCompositeLit` and `append`, decoupled `ignoreSizeAndIndexArgs` strictly to `AllocMake` size/cap arguments and `AllocCompositeLit` index keys, unified `AllocCompositeLit`'s element loop, and kept `v.ElemType == nil` unconditionally fail-closed; added probe `11_skipContainerElems_AllocCompositeLit`.
+- **Finding 4 (`[LOW]` Consolidation — Introduced):** Confirmed & Fixed. Unified parameter/method confinement want resolution into `(*packageConfinementSummary).resolveWants` (`confinement_pkg_solve.go`), and unified `enclReachOrStr`/`outflowReachOrAddrOrStr` and `elemHandsOutReach`/`outflowElemReach` into `typeHandsOutReachOrAddr` and `containerElemHandsOutReach` (`value_classify.go`).
+- **Finding 5 (`[LOW]` Consolidation — Introduced):** Confirmed & Fixed. Unified `placeMapKeysSmuggle` and `placeMapKeysSmuggleInOnceFill` in `confinement_engine.go` into a single `(*confinementEngine).placeMapKeysSmuggle(pl, allowEmptyCarrier, reachKeySmuggles)`.
+- **Finding 6 (`[LOW]` Consolidation / Redundant State — Introduced):** Confirmed & Fixed. Removed duplicate `judgedRangeVars` from `globalBodyWalk` (`summary_uses_walk.go`), using `w.s.activeJudgedRangeVars` as the single source of truth.
+- **Finding 7 (`[NIT]` Vestigial Plumbing — Adjacent):** Confirmed & Fixed. Removed unused `needsErrorProof` return value and parameter across `discharges_once_memo_ctor.go`, `discharges_once_memo.go`, and `discharges_once_memo_cone.go`.
+- **Finding 8 (`[NIT]` Consolidation — Adjacent):** Confirmed & Fixed. Expressed `mapperBodyReassignsOrAddrsRecv`, `countFieldMentionsInBody`, and `pkgHasStructDerefWriteFlowIR` in `discharges_mapping_body.go` via `flowir.VisitAllOps`.
 
 ## Execution & Verification Checklist
 - [x] Unify `evalFreshAllocValue` into `checkPureOrFreshValue` (`value_classify.go`, `flow_fresh.go`).
