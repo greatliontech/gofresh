@@ -33,7 +33,7 @@
    - `8_carrierAliasSolver_propagateMem` (`carrier_aliases.go`) -> killed by `TestPropertyLocalCarrierAliasAndSiblingFieldStateDriftOracle`.
    - `9_pkgConf_resolveWants` (`confinement_pkg_solve.go`) -> killed by `UnconfinedParamHook` (`TestUnifiedValueClassifierStoresAndReturnsEdgeCases`).
    - `10_onceMemo_ValInvalid_failClosed` (`confinement_once_memo.go`) -> killed by `TestUnifiedValueClassifierStoresAndReturnsEdgeCases`.
-   - `11_skipContainerElems_AllocCompositeLit` (`value_classify.go`) -> killed by `TestConfinementAndRegistrationMatrix`.
+   - `11_skipContainerElems_AllocCompositeLit` (`value_classify.go`) -> killed by `BuildFreshPtrHolder` (`TestUnifiedValueClassifierStoresAndReturnsEdgeCases`).
 
 ## Round 1 Adversarial Review Dispositions
 
