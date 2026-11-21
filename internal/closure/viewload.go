@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/buildflags"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
@@ -76,7 +75,7 @@ func loadView(ctx context.Context, reader *gotool.EnvReader, buildFlags []string
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}
-	if err := buildflags.Validate(ctx, reader, buildFlags); err != nil {
+	if err := gotool.ValidateBuildFlags(ctx, reader, buildFlags); err != nil {
 		return nil, err
 	}
 	mode := packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |

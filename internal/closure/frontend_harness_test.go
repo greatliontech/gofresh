@@ -37,7 +37,7 @@ import (
 // into the fresh XDG_CACHE_HOME.
 func TestMain(m *testing.M) {
 	trace.Refresh(os.Getenv(trace.EnvTrace), os.Getenv(trace.EnvTraceFile))
-	if cache, err := gotool.GoBuildCache(context.Background(), os.Environ()); err == nil && cache != "" {
+	if cache, err := testenv.GoBuildCache(context.Background(), os.Environ()); err == nil && cache != "" {
 		_ = os.Setenv("GOCACHE", cache)
 	}
 	tmp, err := os.MkdirTemp("", "gofresh-closure-test-cache-*")
@@ -1083,7 +1083,7 @@ func cgoEnabled(t *testing.T) bool {
 
 func isolateProofCache(t *testing.T) {
 	t.Helper()
-	cache, err := gotool.GoBuildCache(context.Background(), os.Environ())
+	cache, err := testenv.GoBuildCache(context.Background(), os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}

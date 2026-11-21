@@ -13,14 +13,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
 	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 )
 
 type memCompartmentSource map[string]string
 
-func (m memCompartmentSource) ReadFile(path string) ([]byte, [32]byte, error) {
+func (m memCompartmentSource) readFile(path string) ([]byte, [32]byte, error) {
 	s, ok := m[path]
 	if !ok {
 		return nil, [32]byte{}, os.ErrNotExist
@@ -338,7 +337,7 @@ func TestA(t *testing.T) {
 			t.Fatalf("types.Check: %v", err)
 		}
 
-		// Compute real TestVariantLedger via compartment.ComputeIdentity + AddBaseBindings.
+		// Compute real TestVariantLedger via testvariant.ComputeIdentity + AddBaseBindings.
 		srcMap := memCompartmentSource{
 			"prod.go":   prodSrc,
 			"a_test.go": aSrc,
@@ -348,11 +347,11 @@ func TestA(t *testing.T) {
 			"a_test.go": true,
 			"b_test.go": true,
 		}
-		id, err := compartment.ComputeIdentity("", []string{"a_test.go", "b_test.go"}, compiledGo, nil, nil, srcMap, nil)
+		id, err := testvariant.ComputeIdentity("", []string{"a_test.go", "b_test.go"}, compiledGo, nil, nil, srcMap.readFile, nil)
 		if err != nil {
 			t.Fatalf("ComputeIdentity: %v", err)
 		}
-		if err := compartment.AddBaseBindings(&id, []string{"prod.go"}, map[string]string{"testing": "testing"}, srcMap, nil); err != nil {
+		if err := testvariant.AddBaseBindings(&id, []string{"prod.go"}, map[string]string{"testing": "testing"}, srcMap.readFile, nil); err != nil {
 			t.Fatalf("AddBaseBindings: %v", err)
 		}
 

@@ -4,11 +4,10 @@ import (
 	"context"
 	"fmt"
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
 	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
-	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
-	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
+	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/propharness"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 	"go/ast"
@@ -117,7 +116,7 @@ func TestCgoFilesEnterBaseBindingEvidence(t *testing.T) {
 			{ImportPath: pkg, Name: "p", Dir: dir, Module: module, GoFiles: []string{"plain.go"}, CgoFiles: []string{"cgo.go"}},
 			{ImportPath: pkg + " [" + pkg + ".test]", ForTest: pkg, Name: "p", Dir: dir, Module: module, GoFiles: []string{"plain.go", "p_test.go"}, CgoFiles: []string{"cgo.go"}},
 		}},
-		testVariants: map[string]compartment.Identity{},
+		testVariants: map[string]testvariant.Identity{},
 		fileDigests:  map[string]string{},
 		contents:     map[string]fileBytes{},
 	}
@@ -153,14 +152,14 @@ func TestBindingResolutionPreservesSharedParseMemo(t *testing.T) {
 		"p_test.go": "package p\nimport \"example.com/dependency\"\nfunc Helper() int { return selected.Value }\n",
 	})
 	h := &Hasher{fileMemo: newFileMemos(), contents: map[string]fileBytes{}}
-	memo := variantParseMemo{h: h, dir: dir, pkgPath: "example.com/p"}
+	parseFn := h.variantParseFile(dir, "example.com/p")
 	var first testvariant.TestVariantLedger
 	for _, name := range []string{"selected", "renamed", ""} {
-		identity, err := compartment.ComputeIdentity(dir, []string{"p_test.go"}, map[string]bool{"p_test.go": true}, nil, nil, h, memo)
+		identity, err := testvariant.ComputeIdentity(dir, []string{"p_test.go"}, map[string]bool{"p_test.go": true}, nil, nil, h.readFileSum, parseFn)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := compartment.AddBaseBindings(&identity, []string{"p.go"}, map[string]string{"example.com/dependency": name}, h, memo); err != nil {
+		if err := testvariant.AddBaseBindings(&identity, []string{"p.go"}, map[string]string{"example.com/dependency": name}, h.readFileSum, parseFn); err != nil {
 			t.Fatal(err)
 		}
 		h.flushFileMemos()
@@ -2383,7 +2382,7 @@ func TestPropMutableLocalContentSensitivity(t *testing.T) {
 func TestParseListError(t *testing.T) {
 	const stream = `{"ImportPath":"ok/pkg","Dir":"/x","Module":{"Main":true}}
 {"ImportPath":"bad/pkg","Error":{"Err":"cannot find package"}}`
-	if _, err := listing.Parse(strings.NewReader(stream)); err == nil {
+	if _, err := gotool.ParseListing(strings.NewReader(stream)); err == nil {
 		t.Error("expected error when a package reports a load Error")
 	}
 }

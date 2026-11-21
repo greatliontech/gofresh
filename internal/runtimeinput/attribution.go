@@ -1,6 +1,7 @@
 package runtimeinput
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,9 +10,18 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"github.com/greatliontech/gofresh/internal/render"
 )
+
+// listCap is the number of names a bounded list shows before folding the
+// remainder into a count — enough to act on, never a wall.
+const listCap = 3
+
+func cappedList(names []string) string {
+	if len(names) <= listCap {
+		return strings.Join(names, ", ")
+	}
+	return strings.Join(names[:listCap], ", ") + fmt.Sprintf(", and %d more", len(names)-listCap)
+}
 
 // attributionSeparator divides a refusal's clause from its attribution
 // (REQ-inputs-refusal-attribution).
@@ -220,10 +230,10 @@ func bracketMoveAttribution(moduleDir string, captured, now bracketRoot) string 
 	sort.Strings(removed)
 	var parts []string
 	if len(added) > 0 {
-		parts = append(parts, "added: "+render.CappedList(memberListNames(added)))
+		parts = append(parts, "added: "+cappedList(memberListNames(added)))
 	}
 	if len(removed) > 0 {
-		parts = append(parts, "removed: "+render.CappedList(memberListNames(removed)))
+		parts = append(parts, "removed: "+cappedList(memberListNames(removed)))
 	}
 	if len(parts) == 0 {
 		p, err := materializePath(moduleDir, captured.id)
@@ -252,7 +262,7 @@ func bracketMoveAttribution(moduleDir string, captured, now bracketRoot) string 
 				names = append(names, memberListName(t.rel)+" ("+t.mod.UTC().Format(time.RFC3339Nano)+")")
 			}
 			if len(names) > 0 {
-				parts = append(parts, "recently touched: "+render.CappedList(names))
+				parts = append(parts, "recently touched: "+cappedList(names))
 			}
 		}
 	}

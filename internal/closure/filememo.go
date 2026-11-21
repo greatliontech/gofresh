@@ -2,11 +2,10 @@ package closure
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"os"
 
 	"github.com/greatliontech/gofresh/internal/cachefile"
-	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
-	"github.com/greatliontech/gofresh/internal/closure/internal/digest"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 )
 
@@ -49,8 +48,17 @@ type fileBytes struct {
 	sum     [32]byte
 }
 
+// shortDigestSum encodes the shared 128-bit truncated SHA-256 hex digest.
+func shortDigestSum(sum [32]byte) string {
+	return hex.EncodeToString(sum[:16])
+}
+
+func shortDigest(content []byte) string {
+	return shortDigestSum(sha256.Sum256(content))
+}
+
 // digest is the shared truncated content-digest form of the bytes.
-func (f fileBytes) digest() string { return digest.FromSum(f.sum) }
+func (f fileBytes) digest() string { return shortDigestSum(f.sum) }
 
 // readBytes reads one file and digests it — the one read-and-sum every
 // consumer shares.
@@ -189,41 +197,30 @@ func (h *Hasher) recordFileScan(dir, digest string, scan maximalEffectScan) {
 	h.fileMemo.scans.record(h.effectScanScope(), dir, digest, effectScanPayload{Effects: encodeEffects(scan.effects), ImportCandidates: encodeEffects(scan.importCandidates), Selected: scan.preferred})
 }
 
-// The two seams the compartment computation reads through: the Hasher
-// is its Source, variantParseMemo its ParseMemo.
-var (
-	_ compartment.Source    = (*Hasher)(nil)
-	_ compartment.ParseMemo = variantParseMemo{}
-)
-
-// Parsed and Record implement compartment.ParseMemo over the parse memo,
-// keyed by the file's name within its directory and its content digest.
-type variantParseMemo struct {
-	h            *Hasher
-	dir, pkgPath string
-}
-
-func (m variantParseMemo) Parsed(name, digest string) ([]testvariant.TestVariantDeclaration, testvariant.TestVariantFileHeader, bool) {
-	if m.h.fileMemo == nil {
-		return nil, testvariant.TestVariantFileHeader{}, false
+// variantParseFile returns a ParseFileFunc backed by the per-directory
+// variant-parse memo, keyed by the file's name within its directory and its
+// content digest.
+func (h *Hasher) variantParseFile(dir, pkgPath string) testvariant.ParseFileFunc {
+	return func(name, digest string, content []byte) ([]testvariant.TestVariantDeclaration, testvariant.TestVariantFileHeader, error) {
+		if h.fileMemo != nil {
+			// No pending consult: a compartment's members are distinct names,
+			// and the fold flushes after each identity, so no member is asked
+			// twice before its merge.
+			if payload, ok, _ := h.fileMemo.parses.lookup(variantParseScope(), dir, name+"\x00"+digest, false); ok {
+				h.Served("compartment parse", pkgPath)
+				return payload.Declarations, payload.Header, nil
+			}
+		}
+		declarations, header, err := testvariant.ParseFile(name, content)
+		if err != nil {
+			return nil, testvariant.TestVariantFileHeader{}, err
+		}
+		emitVariantParseHook(name)
+		if h.fileMemo != nil {
+			h.fileMemo.parses.record(variantParseScope(), dir, name+"\x00"+digest, variantParsePayload{Declarations: declarations, Header: header})
+		}
+		return declarations, header, nil
 	}
-	// No pending consult: a compartment's members are distinct names,
-	// and the fold flushes after each identity, so no member is asked
-	// twice before its merge.
-	payload, ok, _ := m.h.fileMemo.parses.lookup(variantParseScope(), m.dir, name+"\x00"+digest, false)
-	if !ok {
-		return nil, testvariant.TestVariantFileHeader{}, false
-	}
-	m.h.Served("compartment parse", m.pkgPath)
-	return payload.Declarations, payload.Header, true
-}
-
-func (m variantParseMemo) Record(name, digest string, declarations []testvariant.TestVariantDeclaration, header testvariant.TestVariantFileHeader) {
-	emitVariantParseHook(name)
-	if m.h.fileMemo == nil {
-		return
-	}
-	m.h.fileMemo.parses.record(variantParseScope(), m.dir, name+"\x00"+digest, variantParsePayload{Declarations: declarations, Header: header})
 }
 
 // flushFileMemos merges the pass's pending derivations into their
@@ -241,9 +238,7 @@ func (h *Hasher) flushFileMemos() {
 	}
 }
 
-// ReadFile implements compartment.Source over the Hasher's once-per-pass
-// reads.
-func (h *Hasher) ReadFile(path string) ([]byte, [32]byte, error) {
+func (h *Hasher) readFileSum(path string) ([]byte, [32]byte, error) {
 	fb, err := h.readFile(path)
 	return fb.content, fb.sum, err
 }

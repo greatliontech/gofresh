@@ -20,7 +20,6 @@ import (
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/closure/internal/asmverify"
 	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
-	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
 	"github.com/greatliontech/gofresh/internal/closure/internal/toolchain"
 	"github.com/greatliontech/gofresh/internal/gotool"
 )
@@ -434,7 +433,7 @@ func (h *Hasher) listUnvalidated(pkgPath string) ([]listPkg, error) {
 	if err != nil {
 		return nil, err
 	}
-	pkgs, err := listing.Parse(bytes.NewReader(out))
+	pkgs, err := gotool.ParseListing(bytes.NewReader(out))
 	if err != nil {
 		return nil, err
 	}

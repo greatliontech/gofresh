@@ -210,12 +210,12 @@ func observationProofEvidenceFull(recorded Fingerprint, effectFree, reqSingleSub
 	maximalClosure, assertion := recorded.MaximalClosure, recorded.ObservationAssertion
 	if !effectFree && !reqSingleSubject {
 		sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s%d:%s%t%d:%s%d:%s%d:%s", len(maximalClosure), maximalClosure, len(assertion), assertion, len(proof.Strategy), proof.Strategy, len(proof.Subject.Package), proof.Subject.Package, len(proof.Subject.Symbol), proof.Subject.Symbol, proof.Observable, len(proof.Reason), proof.Reason, len(recorded.ToolchainContent), recorded.ToolchainContent, len(recorded.AdmissionPolicy), recorded.AdmissionPolicy))
-		return hex.EncodeToString(sum[:])[:32]
+		return hex.EncodeToString(sum[:16])
 	}
 	if !reqSingleSubject {
 		sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s%d:%s%t%t%d:%s%d:%s%d:%s", len(maximalClosure), maximalClosure, len(assertion), assertion, len(proof.Strategy), proof.Strategy, len(proof.Subject.Package), proof.Subject.Package, len(proof.Subject.Symbol), proof.Subject.Symbol, proof.Observable, effectFree, len(proof.Reason), proof.Reason, len(recorded.ToolchainContent), recorded.ToolchainContent, len(recorded.AdmissionPolicy), recorded.AdmissionPolicy))
-		return hex.EncodeToString(sum[:])[:32]
+		return hex.EncodeToString(sum[:16])
 	}
 	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s%d:%s%d:%s%t%t:ss:%t%d:%s%d:%s%d:%s", len(maximalClosure), maximalClosure, len(assertion), assertion, len(proof.Strategy), proof.Strategy, len(proof.Subject.Package), proof.Subject.Package, len(proof.Subject.Symbol), proof.Subject.Symbol, proof.Observable, effectFree, reqSingleSubject, len(proof.Reason), proof.Reason, len(recorded.ToolchainContent), recorded.ToolchainContent, len(recorded.AdmissionPolicy), recorded.AdmissionPolicy))
-	return hex.EncodeToString(sum[:])[:32]
+	return hex.EncodeToString(sum[:16])
 }

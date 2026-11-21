@@ -244,7 +244,7 @@ func (s *Session) observeView(ctx context.Context, subjects []Subject, requests 
 	inputs := s.guardInputs()
 	guardKind := kind
 	if s.build.Directory != "" {
-		identity, err := completeBuildEnvironment(ctx, snapshot, s.dir, s.env)
+		identity, err := guard.CompleteBuildEnvironment(ctx, snapshot, s.dir, s.env)
 		if err != nil {
 			return observationFacts{}, err
 		}

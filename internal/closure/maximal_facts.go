@@ -262,7 +262,7 @@ func InMemoryMaximalFacts(audited bool, pkgs []*packages.Package, subject Subjec
 	if selected == "" {
 		selected = fallback
 	}
-	coreDigest := hex.EncodeToString(coreHasher.Sum(nil))[:32]
+	coreDigest := hex.EncodeToString(coreHasher.Sum(nil)[:16])
 	return newMaximalFacts(MaximalIdentity{
 		Hash:             maximalSubjectHash(coreDigest, subject),
 		ToolchainContent: "inmem-stdlib",

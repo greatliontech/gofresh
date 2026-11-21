@@ -10,45 +10,21 @@ import (
 
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
-// PackageClass is the mutability class of one graph package's source, the
-// same discrimination the closure hash applies to its contributions:
-// standard-library source rides the toolchain guard, module-cache source is
-// pinned by its version, and everything else — main module, local replace,
-// workspace sibling, vendored copy — is mutable-local and must be observed by
-// content on every pass (REQ-closure-mutable-local, REQ-closure-pinned-dep).
-type PackageClass int
+// PackageClass is the mutability class of one graph package's source.
+type PackageClass = gotool.PackageClass
 
 const (
-	MutableLocalPackage PackageClass = iota
-	StandardPackage
-	PinnedPackage
+	MutableLocalPackage = gotool.MutableLocalPackage
+	StandardPackage     = gotool.StandardPackage
+	PinnedPackage       = gotool.PinnedPackage
 )
 
 // GraphPackage is one node of a view's test-binary package graph as the
-// metadata listing names it: enough identity to classify, key, and walk the
-// graph without loading any syntax.
-type GraphPackage struct {
-	// ImportPath is the listing identity; a test-variant recompilation
-	// carries the bracket suffix ("p [p.test]").
-	ImportPath string
-	// PkgPath is the import path the type checker reports for the node —
-	// ImportPath with any variant suffix stripped.
-	PkgPath string
-	// ForTest names the tested package for a test-variant node, "" otherwise.
-	ForTest string
-	// TestMain marks the toolchain-generated test main package.
-	TestMain bool
-	// Imports are the node's resolved import identities (listing form).
-	Imports []string
-	// Class is the node's source-mutability class.
-	Class PackageClass
-	// Pin is the module-cache-relative module directory ("modpath@version",
-	// replace-correct) for a PinnedPackage — the same identity the closure
-	// hash pins the module by. Empty otherwise.
-	Pin string
-}
+// metadata listing names it.
+type GraphPackage = gotool.GraphPackage
 
 // Fact is the per-package summary the shared-dynamic-state derivation extracts
 // from one typed package and memoizes for version-pinned modules

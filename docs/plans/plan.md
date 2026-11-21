@@ -1,11 +1,11 @@
 # Gofresh Principled Repackaging, IR/Lattice Consolidation & Generation-2 Protocol Plan
 
 ## Chunk 1: Foundation & Leaf Package Consolidation (`internal/gotool`, `internal/guard`, `internal/testvariant`, `internal/testenv`, `internal/auditset`)
-- [ ] Retire `internal/closure/internal/digest` and `internal/render`, standardizing 128-bit SHA-256 hex encoding (`sum[:16]`) and moving `CappedList` to its callers
-- [ ] Merge `internal/buildflags`, `internal/closure/internal/listing`, and `GraphPackage`/`PackageClass` into `internal/gotool`; move test-only `GoBuildCache`/`PreserveBuildCache` into `internal/testenv` and split `internal/testenv/frontend.go` (`<= ~1,050` LOC)
-- [ ] Move `completeBuildEnvironment` and `normalizedGCCFlags` from `session.go` into `internal/guard` (`guard/buildenv.go`)
-- [ ] Merge `internal/closure/internal/compartment` into `internal/testvariant`, removing the cycle-breaking `compartment.Source` and `compartment.ParseMemo` interfaces in favor of pure `testvariant.ParseFile` memoized by callers
-- [ ] Consolidate ad-hoc stdlib purity switches onto `internal/auditset`, split `internal/auditset/auditset.go` into cohesive files, update `.stipulator/policy.textproto`, and retarget/pin affected static `stipulator` bindings
+- [x] Retire `internal/closure/internal/digest` and `internal/render`, standardizing 128-bit SHA-256 hex encoding (`sum[:16]`) and moving `CappedList` to its callers
+- [x] Merge `internal/buildflags`, `internal/closure/internal/listing`, and `GraphPackage`/`PackageClass` into `internal/gotool`; move test-only `GoBuildCache`/`PreserveBuildCache` into `internal/testenv` and split `internal/testenv/frontend.go` (`<= ~1,050` LOC)
+- [x] Move `completeBuildEnvironment` and `normalizedGCCFlags` from `session.go` into `internal/guard` (`guard/buildenv.go`)
+- [x] Merge `internal/closure/internal/compartment` into `internal/testvariant`, removing the cycle-breaking `compartment.Source` and `compartment.ParseMemo` interfaces in favor of pure `testvariant.ParseFile` memoized by callers
+- [x] Consolidate ad-hoc stdlib purity switches onto `internal/auditset`, split `internal/auditset/auditset.go` into cohesive files, update `.stipulator/policy.textproto`, and retarget/pin affected static `stipulator` bindings
 
 ## Chunk 2: Shared Static-Analysis Foundations & `flowir` / `refconfine` Kernel Consolidation (`internal/syntaxutil`, `internal/flowir`, `internal/refconfine`)
 - [ ] Promote `internal/dynstate/syntaxutil`, `internal/dynstate/flowir`, and `internal/dynstate/refconfine` to top-level `internal/syntaxutil`, `internal/flowir`, and `internal/refconfine`, removing sideways imports into `internal/dynstate/*` from `closure`, `propharness`, and root `gofresh`

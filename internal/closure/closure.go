@@ -24,12 +24,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/greatliontech/gofresh/internal/buildflags"
-	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
-	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
 	prog "github.com/greatliontech/gofresh/internal/closure/internal/program"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/propharness"
+	"github.com/greatliontech/gofresh/internal/testvariant"
 )
 
 // program aliases the internal loader's type so every analysis site keeps
@@ -166,8 +164,8 @@ type Hasher struct {
 	// and arming discipline as contribs: nil until a batch entry arms
 	// them, reset per call.
 	testBinaryKeys map[string]string
-	variantScope   map[string]compartment.Identity
-	testVariants   map[string]compartment.Identity     // test-variant compartments by requested package
+	variantScope   map[string]testvariant.Identity
+	testVariants   map[string]testvariant.Identity     // test-variant compartments by requested package
 	fileDigests    map[string]string                   // per-file content digests from the closure's own reads, by absolute path
 	contents       map[string]fileBytes                // per-file bytes and digest, read once per batch call (readFile); nil outside one
 	fileMemo       *fileMemos                          // the per-file effect-scan and compartment-parse memos
@@ -266,7 +264,7 @@ func NewAt(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) 
 	if err != nil {
 		return nil, fmt.Errorf("closure: %w", err)
 	}
-	if err := buildflags.Validate(ctx, reader, buildFlags); err != nil {
+	if err := gotool.ValidateBuildFlags(ctx, reader, buildFlags); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -283,7 +281,7 @@ func NewAt(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) 
 	if mc == "" {
 		return nil, errors.New("closure: empty GOMODCACHE")
 	}
-	buildVCS, bvcsErr := buildflags.EffectiveBuildVCS(snapshot.Value("GOFLAGS"), buildFlags)
+	buildVCS, bvcsErr := gotool.EffectiveBuildVCS(snapshot.Value("GOFLAGS"), buildFlags)
 	if bvcsErr != nil {
 		buildVCS = "invalid"
 	}
@@ -300,7 +298,7 @@ func NewAt(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) 
 		buildFlags: append([]string(nil), buildFlags...), buildVCS: buildVCS, hasFoldedModMetadata: map[string]bool{}, snapshot: snapshot,
 		selectionResolved: true, selection: selection, source: source,
 		progs: map[string]*program{}, progErrs: map[string]error{}, lists: map[string][]listPkg{}, maximalTesting: map[string]maximalEffectScan{},
-		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]compartment.Identity{},
+		maximalEffects: map[string]maximalEffectsResult{}, maximalFiles: map[string]maximalEffectScan{}, testVariants: map[string]testvariant.Identity{},
 		fileDigests: map[string]string{}, fileMemo: newFileMemos(),
 	}, nil
 }
@@ -312,7 +310,7 @@ func NewAt(ctx context.Context, reader *gotool.EnvReader, buildFlags ...string) 
 func (h *Hasher) resetCallScope() {
 	h.contribs = map[string]depContribution{}
 	h.testBinaryKeys = map[string]string{}
-	h.variantScope = map[string]compartment.Identity{}
+	h.variantScope = map[string]testvariant.Identity{}
 	h.hasFoldedModMetadata = map[string]bool{}
 	// The bytes a call reads are that call's tree generation: the cache
 	// is armed here and dropped when the call returns (the batch entries
@@ -334,11 +332,11 @@ func (h *Hasher) resetCallScope() {
 	}
 }
 
-// The go-list graph vocabulary lives in internal/listing; the aliases keep
+// The go-list graph vocabulary lives in internal/gotool; the aliases keep
 // the package-local names every analysis site uses.
 type (
-	listPkg = listing.Package
-	listMod = listing.Module
+	listPkg = gotool.ListedPackage
+	listMod = gotool.ListedModule
 )
 
 // maximalHash returns the Tier-1 closure hash for the test binary of pkgPath:
@@ -413,7 +411,7 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 		if err := h.contextErr(); err != nil {
 			return nil, nil, err
 		}
-		if compartment.OwnVariantOf(p, pkgPath, compartmentDir) {
+		if p.OwnVariantOf(pkgPath, compartmentDir) {
 			if compartmentDir == "" {
 				compartmentDir = p.Dir
 			}
@@ -476,11 +474,12 @@ func (h *Hasher) maximalContributionsAndFiles(pkgPath string) ([]string, []strin
 	identity, cached := h.variantScope[pkgPath]
 	if !cached {
 		var err error
-		identity, err = compartment.ComputeIdentity(compartmentDir, testOnly, compiledGo, embeddedData, h.fileDigests, h, variantParseMemo{h: h, dir: compartmentDir, pkgPath: pkgPath})
+		parseFn := h.variantParseFile(compartmentDir, pkgPath)
+		identity, err = testvariant.ComputeIdentity(compartmentDir, testOnly, compiledGo, embeddedData, h.fileDigests, h.readFileSum, parseFn)
 		if err != nil {
 			return nil, nil, err
 		}
-		if err := compartment.AddBaseBindings(&identity, baseGo, importNames, h, variantParseMemo{h: h, dir: compartmentDir, pkgPath: pkgPath}); err != nil {
+		if err := testvariant.AddBaseBindings(&identity, baseGo, importNames, h.readFileSum, parseFn); err != nil {
 			return nil, nil, err
 		}
 		h.flushFileMemos()
@@ -684,7 +683,7 @@ func hashContributions(pkgPath string, contribs []string) (string, error) {
 		}
 		_, _ = h.Write([]byte(contribution))
 	}
-	return hex.EncodeToString(h.Sum(nil))[:32], nil
+	return hex.EncodeToString(h.Sum(nil)[:16]), nil
 }
 
 // contribution returns this package's contribution to the closure, or "" if it
@@ -759,7 +758,7 @@ func (h *Hasher) contributionAndFilesFor(pkgPath string, p listPkg) (string, []s
 			return "", nil, err
 		}
 	}
-	files = listing.UniqueStrings(files)
+	files = gotool.UniqueStrings(files)
 	// The members whose canonical form is their contribution: compiled
 	// Go members that no directive embeds; every other member — data,
 	// C, assembly, a compiled member embedded as data too, the rest of
@@ -869,5 +868,5 @@ func hashFilesWith(dir string, files []string, canonicalMembers map[string]bool,
 			digests[path] = fb.digest()
 		}
 	}
-	return hex.EncodeToString(hasher.Sum(nil))[:32], nil
+	return hex.EncodeToString(hasher.Sum(nil)[:16]), nil
 }

@@ -364,5 +364,5 @@ func runtimeConfig(env []string) string {
 // fingerprints.
 func digest(s string) string {
 	sum := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(sum[:])[:32]
+	return hex.EncodeToString(sum[:16])
 }

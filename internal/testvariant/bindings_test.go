@@ -1,12 +1,10 @@
-package compartment
+package testvariant
 
 import (
 	"encoding/json"
 	"fmt"
 	"reflect"
 	"testing"
-
-	"github.com/greatliontech/gofresh/internal/testvariant"
 )
 
 func TestInertnessPreservesExistingBindings(t *testing.T) {
@@ -42,7 +40,7 @@ func TestInertnessPreservesExistingBindings(t *testing.T) {
 				after = "package p\nimport _ \"one\"\nfunc F() {}\n"
 			}
 			a, b := parseLedger(t, "p_test.go", before), parseLedger(t, "p_test.go", after)
-			if got := testvariant.DiffTestVariantLedgers(a, b).Inert(); got != tc.inert {
+			if got := DiffTestVariantLedgers(a, b).Inert(); got != tc.inert {
 				t.Fatalf("inert = %v, want %v", got, tc.inert)
 			}
 		})
@@ -51,19 +49,19 @@ func TestInertnessPreservesExistingBindings(t *testing.T) {
 
 func TestBindingEvidenceFailsClosedAndClones(t *testing.T) {
 	l := parseLedger(t, "p_test.go", "package p\nimport x \"one\"\nfunc F() { x.F() }\n")
-	for _, damage := range []func(*testvariant.TestVariantLedger){
-		func(l *testvariant.TestVariantLedger) { l.BindingStrategy = "" },
-		func(l *testvariant.TestVariantLedger) { l.BindingStrategy = "future" },
-		func(l *testvariant.TestVariantLedger) { l.FileHeaders[0].Bindings = nil },
-		func(l *testvariant.TestVariantLedger) { l.FileHeaders[0].Bindings.Imports[0].Name = "" },
-		func(l *testvariant.TestVariantLedger) {
+	for _, damage := range []func(*TestVariantLedger){
+		func(l *TestVariantLedger) { l.BindingStrategy = "" },
+		func(l *TestVariantLedger) { l.BindingStrategy = "future" },
+		func(l *TestVariantLedger) { l.FileHeaders[0].Bindings = nil },
+		func(l *TestVariantLedger) { l.FileHeaders[0].Bindings.Imports[0].Name = "" },
+		func(l *TestVariantLedger) {
 			l.FileHeaders[0].Bindings = nil
 			l.FileHeaders[0].Embedded = true
 		},
 	} {
 		bad := l.Clone()
 		damage(&bad)
-		if testvariant.DiffTestVariantLedgers(bad, l).Inert() || testvariant.DiffTestVariantLedgers(l, bad).Inert() {
+		if DiffTestVariantLedgers(bad, l).Inert() || DiffTestVariantLedgers(l, bad).Inert() {
 			t.Fatal("missing/unknown evidence accepted")
 		}
 	}
@@ -74,7 +72,7 @@ func TestBindingEvidenceFailsClosedAndClones(t *testing.T) {
 	if reflect.DeepEqual(copy, l) || l.FileHeaders[0].Bindings.Imports[0].Path != "one" || l.BaseFiles[0].Bindings.References[0] == "changed" {
 		t.Fatal("clone shares binding storage")
 	}
-	if (testvariant.TestVariantDelta{}).Inert() {
+	if (TestVariantDelta{}).Inert() {
 		t.Fatal("zero delta supplied binding proof")
 	}
 }
@@ -89,30 +87,30 @@ func TestBindingLedgerRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var back testvariant.TestVariantLedger
+	var back TestVariantLedger
 	if err := json.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(before, back) {
 		t.Fatal("binding evidence lost in JSON round trip")
 	}
-	if testvariant.DiffTestVariantLedgers(back, after).Inert() {
+	if DiffTestVariantLedgers(back, after).Inert() {
 		t.Fatal("persisted base reference failed to reject shadow")
 	}
 	// An adapter predating the binding fields cannot supply proof merely by
 	// round-tripping the fields it knows.
 	legacy, err := json.Marshal(struct {
-		Declarations []testvariant.TestVariantDeclaration
-		FileHeaders  []testvariant.TestVariantFileHeader
+		Declarations []TestVariantDeclaration
+		FileHeaders  []TestVariantFileHeader
 	}{before.Declarations, before.FileHeaders})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var old testvariant.TestVariantLedger
+	var old TestVariantLedger
 	if err := json.Unmarshal(legacy, &old); err != nil {
 		t.Fatal(err)
 	}
-	if testvariant.DiffTestVariantLedgers(old, before).Inert() {
+	if DiffTestVariantLedgers(old, before).Inert() {
 		t.Fatal("legacy adapter silently supplied binding proof")
 	}
 }
@@ -145,7 +143,7 @@ func FuzzBindingGrowth(f *testing.F) {
 		after.Declarations = append(after.Declarations, added.Declarations...)
 		after.FileHeaders = append(after.FileHeaders, added.FileHeaders...)
 		want := pkg != "p" || seed&8 != 0
-		if got := testvariant.DiffTestVariantLedgers(before, after).Inert(); got != want {
+		if got := DiffTestVariantLedgers(before, after).Inert(); got != want {
 			t.Fatalf("seed %d, shadow %s: inert %v, want %v", seed, names[i], got, want)
 		}
 	})

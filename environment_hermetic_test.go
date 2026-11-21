@@ -7,6 +7,7 @@ import (
 	"errors"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/guard"
 	"go/token"
 	"go/types"
 	"os"
@@ -35,7 +36,7 @@ func TestCompleteBuildDescriptionIdentity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := completeBuildEnvironment(ctx, snapshot, dir, normalized)
+		got, err := guard.CompleteBuildEnvironment(ctx, snapshot, dir, normalized)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -139,13 +140,13 @@ func TestGeneratedCompilerFlagNormalization(t *testing.T) {
 		"-fdebug-prefix-map=/tmp/go-build123=/somewhere-else",
 		"-ffile-prefix-map=/tmp/go-build123=/tmp/go-build -fdebug-prefix-map=/tmp/go-build456=/tmp/go-build",
 	} {
-		if _, err := normalizedGCCFlags(text); err == nil {
+		if _, err := guard.NormalizedGCCFlags(text); err == nil {
 			t.Fatalf("ambiguous compiler mapping admitted: %q", text)
 		}
 	}
 	for _, prefix := range []string{"-ffile-prefix-map=", "-fdebug-prefix-map="} {
 		work := filepath.Join(t.TempDir(), "two spaces", "go-build123")
-		flags, err := normalizedGCCFlags("'-DVALUE=two  spaces' '" + prefix + work + "=/tmp/go-build'")
+		flags, err := guard.NormalizedGCCFlags("'-DVALUE=two  spaces' '" + prefix + work + "=/tmp/go-build'")
 		if err != nil || len(flags) != 2 || flags[0] != "-DVALUE=two  spaces" || flags[1] != prefix+"<generated-work-directory>=/tmp/go-build" {
 			t.Fatalf("quoted compiler fields: %q %v", flags, err)
 		}

@@ -11,9 +11,59 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/greatliontech/gofresh/internal/gotool"
 )
+
+// GoBuildCache resolves the effective Go build cache from an explicit
+// environment before a caller changes XDG_CACHE_HOME. Only Go determines the
+// default, including any GOENV configuration.
+func GoBuildCache(ctx context.Context, env []string) (string, error) {
+	normalized, err := gotool.NormalizeEnv(env)
+	if err != nil {
+		return "", err
+	}
+	return goBuildCache(normalized, func() (string, error) {
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		reader := gotool.NewEnvReader(gotool.Runner{}, "", normalized)
+		snapshot, err := reader.Snapshot(ctx)
+		if err != nil {
+			return "", err
+		}
+		return snapshot.Value("GOCACHE"), nil
+	})
+}
+
+// PreserveBuildCache returns a normalized environment with GOCACHE explicitly
+// pinned to the effective Go build cache resolved from env, so isolating
+// XDG_CACHE_HOME in hermetic tests does not cold-rebuild the standard library.
+func PreserveBuildCache(ctx context.Context, env []string) ([]string, error) {
+	normalized, err := gotool.NormalizeEnv(env)
+	if err != nil {
+		return nil, err
+	}
+	cache, err := GoBuildCache(ctx, normalized)
+	if err != nil {
+		return nil, err
+	}
+	return gotool.SetEnv(normalized, "GOCACHE", cache), nil
+}
+
+func goBuildCache(env []string, lookup func() (string, error)) (string, error) {
+	if cache, _ := gotool.LookupEnv(env, "GOCACHE"); cache != "" {
+		return cache, nil
+	}
+	cache, err := lookup()
+	if err != nil {
+		return "", fmt.Errorf("test environment: determine Go build cache: %w", err)
+	}
+	if cache == "" {
+		return "", fmt.Errorf("test environment: go env supplied no GOCACHE")
+	}
+	return cache, nil
+}
 
 var (
 	hostGOROOTMu sync.Mutex
@@ -222,7 +272,7 @@ func SharedGOROOTOverlay(t testing.TB, key string, env []string, overlays map[st
 
 func overlayRootEnv(t testing.TB, dstRoot string, baseEnv []string) (string, []string) {
 	t.Helper()
-	preserved, err := gotool.PreserveBuildCache(context.Background(), baseEnv)
+	preserved, err := PreserveBuildCache(context.Background(), baseEnv)
 	if err != nil {
 		t.Fatal(err)
 	}

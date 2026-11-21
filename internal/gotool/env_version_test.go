@@ -2,7 +2,6 @@ package gotool
 
 import (
 	"context"
-	"errors"
 	"go/version"
 	"os"
 	"path/filepath"
@@ -154,43 +153,6 @@ func TestCoordinateDegrades(t *testing.T) {
 	}
 	if got := Coordinate("relative/missing"); got == "relative/missing" || got == "" {
 		t.Fatalf("Coordinate(missing relative) = %q, want an absolute spelling", got)
-	}
-}
-
-func TestPreserveBuildCachePinsEffectiveCache(t *testing.T) {
-	for _, configured := range []string{t.TempDir(), "off"} {
-		cache, err := goBuildCache([]string{"GOCACHE=" + configured}, func() (string, error) {
-			t.Fatal("explicit cache caused a toolchain query")
-			return "", nil
-		})
-		if err != nil || cache != configured {
-			t.Fatalf("cache = %q, err = %v", cache, err)
-		}
-	}
-	for _, cause := range []error{nil, errors.New("toolchain unavailable")} {
-		cache, err := goBuildCache([]string{}, func() (string, error) { return "", cause })
-		if err == nil || err.Error() == "" || (cause != nil && !errors.Is(err, cause)) || cache != "" {
-			t.Fatalf("lookup %v: cache = %q, err = %v", cause, cache, err)
-		}
-	}
-	base := SetEnv(os.Environ(), "GOCACHE", "")
-	preserved, err := PreserveBuildCache(t.Context(), base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pinned, ok := LookupEnv(preserved, "GOCACHE")
-	if !ok || pinned == "" {
-		t.Fatalf("PreserveBuildCache did not pin GOCACHE: %v", preserved)
-	}
-	for _, env := range [][]string{{"GOCACHE=a", "GOCACHE=b"}, {"malformed"}} {
-		if _, err := GoBuildCache(t.Context(), env); err == nil {
-			t.Fatalf("GoBuildCache(%v) succeeded on invalid env", env)
-		}
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, err := GoBuildCache(ctx, []string{"GOCACHE=", "GOENV=off"}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("GoBuildCache(canceled) = %v, want context.Canceled", err)
 	}
 }
 

@@ -1,14 +1,15 @@
-package buildflags
+package gotool
 
 import (
 	"fmt"
 	"strings"
 )
 
-// Fields follows the Go command's quoted argument grammar. A leading quote
-// delimits one whole field with literal contents; interior quotes are ordinary
-// bytes. This is neither shell expansion nor the tool response-file grammar.
-func Fields(text string) ([]string, error) {
+// QuotedFields follows the Go command's quoted argument grammar. A leading
+// quote delimits one whole field with literal contents; interior quotes are
+// ordinary bytes. This is neither shell expansion nor the tool response-file
+// grammar.
+func QuotedFields(text string) ([]string, error) {
 	var fields []string
 	for {
 		text = strings.TrimLeft(text, " \t\r\n")
@@ -33,11 +34,11 @@ func Fields(text string) ([]string, error) {
 	}
 }
 
-// Join encodes whole arguments for Fields, which treats quoted contents
-// literally and has no escape syntax. A word needing quotes that contains both
-// quote characters cannot be represented and is refused. NUL cannot be passed
-// to a process and is refused as well.
-func Join(fields []string) (string, error) {
+// JoinQuotedFields encodes whole arguments for QuotedFields, which treats
+// quoted contents literally and has no escape syntax. A word needing quotes
+// that contains both quote characters cannot be represented and is refused.
+// NUL cannot be passed to a process and is refused as well.
+func JoinQuotedFields(fields []string) (string, error) {
 	encoded := make([]string, len(fields))
 	for i, field := range fields {
 		if strings.IndexByte(field, 0) >= 0 {

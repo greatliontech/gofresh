@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/greatliontech/gofresh/internal/gotool"
+	"github.com/greatliontech/gofresh/internal/testenv"
 )
 
 func TestUnitAndProducerFacadeRealTestingChdirEndToEnd(t *testing.T) {
@@ -273,7 +274,7 @@ func TestRawOSChdir(t *testing.T) {
 }
 
 func TestPrepareTrackedChdirSupportCutUnavailableAndProgressAccounting(t *testing.T) {
-	if cache, err := gotool.GoBuildCache(t.Context(), os.Environ()); err == nil && cache != "" {
+	if cache, err := testenv.GoBuildCache(t.Context(), os.Environ()); err == nil && cache != "" {
 		t.Setenv("GOCACHE", cache)
 	}
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())

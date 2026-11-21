@@ -16,6 +16,7 @@ import (
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
+	"github.com/greatliontech/gofresh/internal/testenv"
 	"go/types"
 )
 
@@ -28,7 +29,7 @@ func TestWholeSystemUnsafeExecutionModesMemoAndReplay(t *testing.T) {
 	}
 
 	// Preserve GOCACHE before isolating XDG_CACHE_HOME so child go commands do not cold-rebuild stdlib.
-	goCache, err := gotool.GoBuildCache(context.Background(), os.Environ())
+	goCache, err := testenv.GoBuildCache(context.Background(), os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}

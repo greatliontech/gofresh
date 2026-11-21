@@ -1,6 +1,7 @@
 package auditset
 
 import (
+	"go/types"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -560,4 +561,273 @@ func IsGeneratedMarker(text string) bool {
 		strings.HasSuffix(trimmed, " DO NOT EDIT.") &&
 		len(trimmed) >= len("// Code generated  DO NOT EDIT.") &&
 		!strings.ContainsAny(trimmed, "\r\n")
+}
+
+// nonRetainingStdPackages lists standard-library packages whose functions and
+// methods never retain caller-supplied carrier values in package-scope state
+// after initialization.
+var nonRetainingStdPackages = map[string]bool{
+	"bytes":           true,
+	"cmp":             true,
+	"encoding/binary": true,
+	"errors":          true,
+	"fmt":             true,
+	"go/token":        true,
+	"hash/fnv":        true,
+	"io":              true,
+	"math":            true,
+	"math/bits":       true,
+	"slices":          true,
+	"sort":            true,
+	"strconv":         true,
+	"strings":         true,
+	"unicode":         true,
+	"unicode/utf16":   true,
+	"unicode/utf8":    true,
+}
+
+var nonRetainingSyncReceivers = map[string]bool{
+	"Mutex":   true,
+	"Once":    true,
+	"RWMutex": true,
+}
+
+var nonRetainingAtomicPrefixes = map[string]bool{
+	"Load": true,
+}
+
+var nonRetainingAtomicFuncs = map[string]bool{
+	"AddInt32":    true,
+	"AddInt64":    true,
+	"AddUint32":   true,
+	"AddUint64":   true,
+	"StoreInt32":  true,
+	"StoreUint32": true,
+}
+
+var retainingReflectExcludedPrefixes = map[string]bool{
+	"Make": true,
+	"Set":  true,
+}
+
+var retainingReflectExcludedFuncs = map[string]bool{
+	"Append":      true,
+	"AppendSlice": true,
+	"Call":        true,
+	"CallSlice":   true,
+	"Clear":       true,
+	"Close":       true,
+	"Copy":        true,
+	"Grow":        true,
+	"NewAt":       true,
+	"Recv":        true,
+	"Select":      true,
+	"Send":        true,
+	"SliceAt":     true,
+	"Swapper":     true,
+	"TryRecv":     true,
+	"TrySend":     true,
+}
+
+// NonRetainingStdCallee reports whether standard-library function or method fn
+// is audited not to write or retain caller-supplied dynamic-carrier arguments
+// into standard-library package-scope state after initialization.
+func NonRetainingStdCallee(fn *types.Func) bool {
+	if fn == nil || fn.Pkg() == nil {
+		return false
+	}
+	pkgPath := fn.Pkg().Path()
+	if nonRetainingStdPackages[pkgPath] {
+		return true
+	}
+	name := fn.Name()
+	switch pkgPath {
+	case "reflect":
+		if retainingReflectExcludedFuncs[name] {
+			return false
+		}
+		for prefix := range retainingReflectExcludedPrefixes {
+			if strings.HasPrefix(name, prefix) {
+				return false
+			}
+		}
+		return true
+	case "sync":
+		return ReceiverMethod(fn, "sync", func(receiver, _ string) bool {
+			return nonRetainingSyncReceivers[receiver]
+		})
+	case "sync/atomic":
+		if nonRetainingAtomicFuncs[name] {
+			return true
+		}
+		for prefix := range nonRetainingAtomicPrefixes {
+			if strings.HasPrefix(name, prefix) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+var nonMutatingAtomicLoadFuncs = map[string]bool{
+	"LoadInt32":   true,
+	"LoadInt64":   true,
+	"LoadUint32":  true,
+	"LoadUint64":  true,
+	"LoadUintptr": true,
+}
+
+var nonMutatingAtomicLoadReceivers = map[string]bool{
+	"Bool":    true,
+	"Int32":   true,
+	"Int64":   true,
+	"Pointer": true,
+	"Uint32":  true,
+	"Uint64":  true,
+	"Uintptr": true,
+}
+
+var nonMutatingValuePackages = map[string]bool{
+	"errors":        true,
+	"go/token":      true,
+	"math":          true,
+	"math/bits":     true,
+	"path":          true,
+	"strconv":       true,
+	"strings":       true,
+	"unicode":       true,
+	"unicode/utf16": true,
+}
+
+var nonMutatingExtraSliceFuncs = map[string][]string{
+	"cmp":           {"Compare", "Less"},
+	"reflect":       {"PointerTo", "PtrTo", "TypeFor", "TypeOf"},
+	"strings":       {"Join"},
+	"unicode/utf16": {"Decode", "Encode"},
+}
+
+var nonMutatingValueReceiverTypes = map[string][]string{
+	"go/token": {"Pos", "Position", "Token"},
+	"reflect":  {"ChanDir", "Kind", "StructTag"},
+	"time":     {"Duration", "Month", "Time", "Weekday"},
+}
+
+var nonMutatingValueReceiverMethods = map[string][]string{
+	"go/token": {"IsKeyword", "IsLiteral", "IsOperator", "IsValid", "Precedence", "String"},
+	"reflect":  {"Get", "Lookup", "String"},
+	"time": {
+		"Abs", "Add", "AddDate", "After", "Before", "Clock", "Compare", "Day", "Equal",
+		"Format", "Hours", "ISOWeek", "In", "IsZero", "Microseconds", "Milliseconds",
+		"Minutes", "Nanoseconds", "Round", "Seconds", "String", "Sub", "Truncate",
+		"UTC", "Unix", "UnixMicro", "UnixMilli", "UnixNano", "Year", "YearDay",
+		"Zone", "ZoneBounds",
+	},
+}
+
+func sigParamsValueOnly(sig *types.Signature) bool {
+	if sig == nil {
+		return false
+	}
+	seen := map[types.Type]bool{}
+	ok := true
+	var walk func(t types.Type)
+	walk = func(t types.Type) {
+		if t == nil || !ok {
+			return
+		}
+		t = types.Unalias(t)
+		if seen[t] {
+			return
+		}
+		seen[t] = true
+		switch u := t.Underlying().(type) {
+		case *types.Basic:
+			if u.Kind() == types.UnsafePointer {
+				ok = false
+			}
+		case *types.Array:
+			walk(u.Elem())
+		case *types.Struct:
+			for i := 0; i < u.NumFields(); i++ {
+				walk(u.Field(i).Type())
+			}
+		default:
+			ok = false
+		}
+	}
+	for i := 0; i < sig.Params().Len(); i++ {
+		walk(sig.Params().At(i).Type())
+		if !ok {
+			return false
+		}
+	}
+	return ok
+}
+
+// NonMutatingStdCallee reports whether standard-library function or method fn
+// is audited to perform zero mutations on its receiver, its arguments (including
+// spare slice capacity), and package-scope state.
+func NonMutatingStdCallee(fn *types.Func) bool {
+	if fn == nil || fn.Pkg() == nil {
+		return false
+	}
+	sig, ok := fn.Type().(*types.Signature)
+	if !ok {
+		return false
+	}
+	pkgPath, name := fn.Pkg().Path(), fn.Name()
+	if sig.Recv() != nil {
+		if pkgPath == "sync/atomic" {
+			return name == "Load" && ReceiverMethod(fn, "sync/atomic", func(receiver, _ string) bool {
+				return nonMutatingAtomicLoadReceivers[receiver]
+			})
+		}
+		if pkgPath == "reflect" && ReceiverMethod(fn, "reflect", ReflectMethod) {
+			return true
+		}
+		rt := types.Unalias(sig.Recv().Type())
+		if _, isPtr := rt.(*types.Pointer); isPtr {
+			return false
+		}
+		named, isNamed := rt.(*types.Named)
+		if !isNamed || named.Obj() == nil {
+			return false
+		}
+		if !slices.Contains(nonMutatingValueReceiverTypes[pkgPath], named.Obj().Name()) {
+			return false
+		}
+		if !slices.Contains(nonMutatingValueReceiverMethods[pkgPath], name) {
+			return false
+		}
+		return sigParamsValueOnly(sig)
+	}
+	if pkgPath == "sync/atomic" {
+		return nonMutatingAtomicLoadFuncs[name]
+	}
+	if slices.Contains(readOnlySliceInspectFuncs[pkgPath], name) ||
+		slices.Contains(readOnlySliceCopyFuncs[pkgPath], name) ||
+		ValuePlaneClone(pkgPath, name) ||
+		slices.Contains(nonMutatingExtraSliceFuncs[pkgPath], name) {
+		return true
+	}
+	if !nonMutatingValuePackages[pkgPath] {
+		return false
+	}
+	switch pkgPath {
+	case "errors":
+		if name != "New" {
+			return false
+		}
+	case "go/token":
+		if name != "IsExported" && name != "IsIdentifier" && name != "IsKeyword" && name != "Lookup" {
+			return false
+		}
+	case "math":
+		if !MathPureFunc(name) {
+			return false
+		}
+	}
+	return sigParamsValueOnly(sig)
 }

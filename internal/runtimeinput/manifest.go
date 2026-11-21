@@ -159,7 +159,7 @@ func envEntryDigest(env []string, name string) string {
 	value, ok := gotool.LookupEnv(env, name)
 	valueHash := sha256.Sum256([]byte(value))
 	sum := sha256.Sum256(fmt.Appendf(nil, "%t %x", ok, valueHash))
-	return hex.EncodeToString(sum[:])[:32]
+	return hex.EncodeToString(sum[:16])
 }
 
 // pathEntryDigest digests one path input's observed object state through the
@@ -170,7 +170,7 @@ func pathEntryDigest(ctx context.Context, id pathID, path, moduleRoot string, me
 	if err != nil {
 		return "", false, "", err
 	}
-	return hex.EncodeToString(h.Sum(nil))[:32], unverifiable, reason, nil
+	return hex.EncodeToString(h.Sum(nil)[:16]), unverifiable, reason, nil
 }
 
 // populateManifestDigestsWithModuleRoot computes every input's current digest
@@ -314,7 +314,7 @@ func manifestDigest(m manifest) string {
 	for _, reason := range m.Unverifiable {
 		fprintf(h, "unverifiable %s\n", reason)
 	}
-	return hex.EncodeToString(h.Sum(nil))[:32]
+	return hex.EncodeToString(h.Sum(nil)[:16])
 }
 
 func addUnverifiable(m *manifest, seen map[string]bool, reason string) {

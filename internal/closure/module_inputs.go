@@ -8,7 +8,7 @@ import (
 
 	"golang.org/x/mod/modfile"
 
-	"github.com/greatliontech/gofresh/internal/buildflags"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
 type moduleInputOptions struct {
@@ -20,7 +20,7 @@ type moduleInputOptions struct {
 }
 
 func hasExplicitModfileFlag(goflagsEnv string, explicit []string) bool {
-	goFlags, err := buildflags.Fields(goflagsEnv)
+	goFlags, err := gotool.QuotedFields(goflagsEnv)
 	if err != nil {
 		return true
 	}

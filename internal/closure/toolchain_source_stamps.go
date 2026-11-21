@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
+	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
 
@@ -91,8 +91,8 @@ var implicitLinkPackages = []string{"runtime/race", "runtime/msan", "runtime/asa
 // standard package they reach — the listing's transitive dependencies
 // (Deps, which carry what the pseudo-import C pulls) and imports, with
 // no exclusion.
-func auditedSurface(std []listing.Package) []string {
-	byPath := make(map[string]listing.Package, len(std))
+func auditedSurface(std []gotool.ListedPackage) []string {
+	byPath := make(map[string]gotool.ListedPackage, len(std))
 	for _, p := range std {
 		byPath[p.ImportPath] = p
 	}
@@ -192,7 +192,7 @@ const toolchainVerifierVersion = "gofresh/toolchain-verifier@22"
 
 // selectedFiles are the non-test files the build selects for a package
 // under the listing's selection, sorted by name; test files never.
-func selectedFiles(p listing.Package) []string {
+func selectedFiles(p gotool.ListedPackage) []string {
 	var files []string
 	for _, class := range [][]string{p.GoFiles, p.CgoFiles, p.CFiles, p.CXXFiles, p.MFiles, p.HFiles, p.FFiles, p.SFiles, p.SwigFiles, p.SwigCXXFiles, p.SysoFiles, p.EmbedFiles} {
 		files = append(files, class...)

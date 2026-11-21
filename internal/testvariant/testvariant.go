@@ -1,8 +1,8 @@
-// Package testvariant is the vocabulary of a package's test-variant
-// compartment (REQ-closure-test-variant-ledger): the declaration
-// ledger persisted beside a compartment hash, the delta between two
-// ledgers and its inertness classification, and the empty compartment's
-// identity. The compartment's computation lives with the closure engine.
+// Package testvariant computes and classifies a package's test-variant
+// compartment (REQ-closure-test-variant-ledger): the compartment hash and
+// syntax-only declaration ledger derived from one read of each file, the delta
+// between two ledgers and its universal and per-subject inertness judgments,
+// and the empty compartment's identity.
 package testvariant
 
 import (

@@ -9,7 +9,6 @@ import (
 
 	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/closure/internal/cprep"
-	"github.com/greatliontech/gofresh/internal/closure/internal/digest"
 )
 
 // A compiled Go member contributes its CANONICAL FORM to the closure
@@ -160,7 +159,7 @@ func canonicalDigest(content []byte) (string, bool) {
 		fmt.Fprintf(hasher, "%s\x00%s\n", it.tok, it.lit)
 	}
 	sum := sha256.Sum256(hasher.Sum(nil))
-	return digest.FromSum(sum), true
+	return shortDigestSum(sum), true
 }
 
 // tokenItem is one scanned token: its kind, literal, and the lines it

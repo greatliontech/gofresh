@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/greatliontech/gofresh/internal/auditset"
-	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
-	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
 	"github.com/greatliontech/gofresh/internal/closure/internal/toolchain"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/testvariant"
@@ -44,7 +42,7 @@ func TestSyntheticTestPackageCannotReplaceAnImportBinding(t *testing.T) {
 	for _, copies := range [][]listPkg{{real, synthetic, real}, {synthetic, real, synthetic}} {
 		h := &Hasher{lists: map[string][]listPkg{pkg: append([]listPkg{
 			{ImportPath: pkg, Name: "p", Dir: dir, Module: module, GoFiles: []string{"p.go"}},
-		}, copies...)}, testVariants: map[string]compartment.Identity{}}
+		}, copies...)}, testVariants: map[string]testvariant.Identity{}}
 		ledger, err := h.TestVariantLedger(pkg)
 		if err != nil {
 			t.Fatal(err)
@@ -521,7 +519,7 @@ func TestDigestFilesFramesBinaryContentsUnambiguously(t *testing.T) {
 // Every non-test file class the build selects joins the digest, sorted
 // and deduplicated (test files are never listed in these classes).
 func TestSelectedFilesCoversEveryBuildClass(t *testing.T) {
-	p := listing.Package{
+	p := gotool.ListedPackage{
 		GoFiles: []string{"z.go", "a.go"}, CgoFiles: []string{"c.go"}, CFiles: []string{"x.c"}, CXXFiles: []string{"y.cc"},
 		MFiles: []string{"m.m"}, HFiles: []string{"h.h"}, FFiles: []string{"f.f"}, SFiles: []string{"s.s"},
 		SwigFiles: []string{"w.swig"}, SwigCXXFiles: []string{"w.swigcxx"}, SysoFiles: []string{"o.syso"}, EmbedFiles: []string{"e.txt", "a.go"},
@@ -554,7 +552,7 @@ func TestAuditedSurfaceDerivesTheDelegates(t *testing.T) {
 	if !contains(tables, "golang.org/x/sys/unix") {
 		t.Error("the class-B table names golang.org/x/sys/unix; the listing keeps it off the toolchain's surface")
 	}
-	std := []listing.Package{
+	std := []gotool.ListedPackage{
 		{ImportPath: "strings", Standard: true, Imports: []string{"internal/bytealg", "unsafe", "runtime", "internal/abi", "unicode/utf8", "example.com/notstd"}},
 		{ImportPath: "internal/bytealg", Standard: true, Imports: []string{"internal/cpu", "internal/secondlevel"}},
 		{ImportPath: "internal/secondlevel", Standard: true, Imports: []string{"internal/thirdlevel", "internal/runtime/atomic"}},
@@ -1856,13 +1854,13 @@ func FuzzClosureCoverageAndMutableLocalIdentity(f *testing.F) {
 		if !compiled[goFile] || !canonical[goFile] || !embedded[embedFile] || canonical[embedFile] {
 			t.Fatalf("memberKinds misclassified compiled/embedded/canonical: %v %v %v", compiled, embedded, canonical)
 		}
-		emptyComp, err := compartment.ComputeIdentity(pkgDir, nil, nil, nil, nil, h, nil)
+		emptyComp, err := testvariant.ComputeIdentity(pkgDir, nil, nil, nil, nil, h.readFileSum, nil)
 		if err != nil || emptyComp.Hash == "" {
-			t.Fatalf("empty compartment.ComputeIdentity = (%+v, %v)", emptyComp, err)
+			t.Fatalf("empty testvariant.ComputeIdentity = (%+v, %v)", emptyComp, err)
 		}
-		compId, err := compartment.ComputeIdentity(pkgDir, []string{testFile}, map[string]bool{testFile: true}, nil, map[string]string{}, h, nil)
+		compId, err := testvariant.ComputeIdentity(pkgDir, []string{testFile}, map[string]bool{testFile: true}, nil, map[string]string{}, h.readFileSum, nil)
 		if err != nil || compId.Hash == "" || compId.Hash == emptyComp.Hash || !slices.Equal(compId.Files, []string{testFile}) {
-			t.Fatalf("compartment.ComputeIdentity = (%+v, %v), want non-empty test-variant hash over [%s]", compId, err, testFile)
+			t.Fatalf("testvariant.ComputeIdentity = (%+v, %v), want non-empty test-variant hash over [%s]", compId, err, testFile)
 		}
 
 		isPinned := h.pinnedPackage(&lp)
@@ -1893,7 +1891,7 @@ func FuzzClosureCoverageAndMutableLocalIdentity(f *testing.F) {
 			if err != nil || contribAfterTestEdit != contrib1 {
 				t.Fatalf("test-variant edit moved core contribution: %q vs %q (err=%v)", contribAfterTestEdit, contrib1, err)
 			}
-			compId2, err := compartment.ComputeIdentity(pkgDir, []string{testFile}, map[string]bool{testFile: true}, nil, map[string]string{}, h, nil)
+			compId2, err := testvariant.ComputeIdentity(pkgDir, []string{testFile}, map[string]bool{testFile: true}, nil, map[string]string{}, h.readFileSum, nil)
 			if err != nil || compId2.Hash == compId.Hash {
 				t.Fatalf("test-variant edit did not move compartment hash: %q", compId.Hash)
 			}

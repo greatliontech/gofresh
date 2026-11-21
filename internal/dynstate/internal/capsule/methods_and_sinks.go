@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
+	"github.com/greatliontech/gofresh/internal/auditset"
 	"github.com/greatliontech/gofresh/internal/dynstate/internal/freshstruct"
 	"github.com/greatliontech/gofresh/internal/dynstate/refconfine"
 	"github.com/greatliontech/gofresh/internal/dynstate/syntaxutil"
@@ -156,6 +157,19 @@ func DeriveNonMutatingMethods(audited bool, p *packages.Package, idx *refconfine
 				}
 				callee = callee.Origin()
 				if sig, okSig := callee.Type().(*types.Signature); okSig && sig.Recv() != nil && types.IsInterface(sig.Recv().Type()) {
+					rt := types.Unalias(sig.Recv().Type())
+					named, isNamed := rt.(*types.Named)
+					if !isNamed || named.Obj() == nil || named.Obj().Pkg() == nil {
+						okLocal = false
+						return false
+					}
+					ifacePkg, ifaceName := named.Obj().Pkg().Path(), named.Obj().Name()
+					immutableIface := (ifacePkg == "reflect" && auditset.ReflectImmutable(ifaceName)) ||
+						(ifacePkg == "go/constant" && auditset.ConstantImmutable(ifaceName))
+					if !immutableIface {
+						okLocal = false
+						return false
+					}
 					for _, arg := range x.Args {
 						if refconfine.TypeContainsRefOrPointer(p.TypesInfo.TypeOf(arg)) {
 							okLocal = false
@@ -164,7 +178,7 @@ func DeriveNonMutatingMethods(audited bool, p *packages.Package, idx *refconfine
 					}
 					return true
 				}
-				if isPureNonRetainingStdCallee(callee) && callee.Name() != "Lock" && !strings.HasPrefix(callee.Name(), "Store") && !strings.HasPrefix(callee.Name(), "Add") && callee.Name() != "Put" {
+				if auditset.NonMutatingStdCallee(callee) {
 					return true
 				}
 				if callee.Pkg() == p.Types {
@@ -233,38 +247,6 @@ func DeriveNonMutatingMethods(audited bool, p *packages.Package, idx *refconfine
 	}
 	slices.SortFunc(out, syntaxutil.FuncKey.Compare)
 	return out
-}
-
-func isPureNonRetainingStdCallee(fn *types.Func) bool {
-	if fn == nil || fn.Pkg() == nil {
-		return false
-	}
-	switch fn.Pkg().Path() {
-	case "bytes", "cmp", "encoding/binary", "errors", "fmt", "go/token", "hash/fnv",
-		"io", "math", "math/bits", "slices", "sort", "strconv", "strings",
-		"unicode", "unicode/utf16", "unicode/utf8":
-		return true
-	case "reflect":
-		name := fn.Name()
-		if strings.HasPrefix(name, "Set") || strings.HasPrefix(name, "Make") || name == "Append" || name == "AppendSlice" || name == "Copy" || name == "Call" || name == "CallSlice" || name == "Swapper" {
-			return false
-		}
-		return true
-	case "sync":
-		if sig, ok := fn.Type().(*types.Signature); ok && sig.Recv() != nil {
-			rt := sig.Recv().Type()
-			if ptr, isP := types.Unalias(rt).(*types.Pointer); isP {
-				rt = ptr.Elem()
-			}
-			if syntaxutil.IsNamedInPkg(rt, "sync", "Mutex") || syntaxutil.IsNamedInPkg(rt, "sync", "RWMutex") || syntaxutil.IsNamedInPkg(rt, "sync", "Once") || syntaxutil.IsNamedInPkg(rt, "sync", "Pool") {
-				return true
-			}
-		}
-		return false
-	case "sync/atomic":
-		return strings.HasPrefix(fn.Name(), "Load") || fn.Name() == "AddInt32" || fn.Name() == "AddUint32" || fn.Name() == "AddInt64" || fn.Name() == "AddUint64" || fn.Name() == "StoreUint32" || fn.Name() == "StoreInt32"
-	}
-	return false
 }
 
 func containsSyncOrAtomicCarrier(root types.Type) bool {
@@ -457,6 +439,7 @@ func DeriveNoPostInitCarrierWrites(
 	}
 
 	mutableRefPkgUses := map[*ast.Ident]bool{}
+	validatedPoolVars := map[*types.Var]bool{}
 	scope := p.Types.Scope()
 	for _, name := range scope.Names() {
 		v, ok := scope.Lookup(name).(*types.Var)
@@ -497,6 +480,7 @@ func DeriveNoPostInitCarrierWrites(
 					return false, nil
 				}
 			}
+			validatedPoolVars[v] = true
 			continue
 		}
 		if containsSyncOrAtomicCarrier(vt) {
@@ -567,7 +551,7 @@ func DeriveNoPostInitCarrierWrites(
 	recordDepCallee := func(orig *types.Func) bool {
 		depPkg := orig.Pkg().Path()
 		if syntaxutil.IsStandardLibraryPkgPath(depPkg) {
-			return isPureNonRetainingStdCallee(orig)
+			return auditset.NonRetainingStdCallee(orig)
 		}
 		depSet[depPkg] = true
 		return true
@@ -620,6 +604,13 @@ func DeriveNoPostInitCarrierWrites(
 			orig := callee.Origin()
 			if orig.Pkg() == nil || orig.Pkg() == p.Types {
 				return true
+			}
+			if sel, isSel := ast.Unparen(call.Fun).(*ast.SelectorExpr); isSel {
+				if rid, isID := ast.Unparen(sel.X).(*ast.Ident); isID {
+					if uv, ok := p.TypesInfo.Uses[rid].(*types.Var); ok && validatedPoolVars[uv] {
+						return true
+					}
+				}
 			}
 			passesCarrier := false
 			if sel, isSel := ast.Unparen(call.Fun).(*ast.SelectorExpr); isSel {

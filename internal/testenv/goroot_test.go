@@ -2,6 +2,7 @@ package testenv
 
 import (
 	"context"
+	"errors"
 	"go/types"
 	"os"
 	"path/filepath"
@@ -168,9 +169,6 @@ func TestParseAndTypecheckDAGWithStdlibIsolatesArchSizes(t *testing.T) {
 	if b64 != "64" || b32 != "32" {
 		t.Fatalf("StdIntBits = (amd64=%s, 386=%s), want (64, 32)", b64, b32)
 	}
-	if got := envLastValue([]string{"GOARCH=amd64", "GOARCH=386"}, "GOARCH"); got != "386" {
-		t.Fatalf("envLastValue = %q, want 386", got)
-	}
 	normA, err := gotool.NormalizeEnv(gotool.SetEnv(baseEnv, "GOARCH", "amd64"))
 	if err != nil {
 		t.Fatalf("NormalizeEnv(amd64): %v", err)
@@ -241,5 +239,42 @@ func TestParseAndTypecheckDAGWithStdlibErrExplicitCleanupAndErrorCleanup(t *test
 	callerCleanup()
 	if _, err := os.Stat(callerDir); err != nil {
 		t.Fatalf("callerCleanup removed caller-owned virtualDir %q: %v", callerDir, err)
+	}
+}
+
+func TestPreserveBuildCachePinsEffectiveCache(t *testing.T) {
+	for _, configured := range []string{t.TempDir(), "off"} {
+		cache, err := goBuildCache([]string{"GOCACHE=" + configured}, func() (string, error) {
+			t.Fatal("explicit cache caused a toolchain query")
+			return "", nil
+		})
+		if err != nil || cache != configured {
+			t.Fatalf("cache = %q, err = %v", cache, err)
+		}
+	}
+	for _, cause := range []error{nil, errors.New("toolchain unavailable")} {
+		cache, err := goBuildCache([]string{}, func() (string, error) { return "", cause })
+		if err == nil || err.Error() == "" || (cause != nil && !errors.Is(err, cause)) || cache != "" {
+			t.Fatalf("lookup %v: cache = %q, err = %v", cause, cache, err)
+		}
+	}
+	base := gotool.SetEnv(os.Environ(), "GOCACHE", "")
+	preserved, err := PreserveBuildCache(t.Context(), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, ok := gotool.LookupEnv(preserved, "GOCACHE")
+	if !ok || pinned == "" {
+		t.Fatalf("PreserveBuildCache did not pin GOCACHE: %v", preserved)
+	}
+	for _, env := range [][]string{{"GOCACHE=a", "GOCACHE=b"}, {"malformed"}} {
+		if _, err := GoBuildCache(t.Context(), env); err == nil {
+			t.Fatalf("GoBuildCache(%v) succeeded on invalid env", env)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := GoBuildCache(ctx, []string{"GOCACHE=", "GOENV=off"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("GoBuildCache(canceled) = %v, want context.Canceled", err)
 	}
 }

@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/greatliontech/go-x-tools/go/packages"
-	"github.com/greatliontech/gofresh/internal/buildflags"
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/dynstate"
 	"github.com/greatliontech/gofresh/internal/gotool"
@@ -176,7 +175,7 @@ func newEngineContext(ctx context.Context, opts ...option) (eng *Session, err er
 			return nil, fmt.Errorf("gofresh: build flag %q passed as opaque input; use WithBuildFlags", input)
 		}
 	}
-	if err := buildflags.Validate(ctx, e.newPassReader(), e.buildFlags); err != nil {
+	if err := gotool.ValidateBuildFlags(ctx, e.newPassReader(), e.buildFlags); err != nil {
 		return nil, err
 	}
 	return e, nil
@@ -387,7 +386,7 @@ func cgoEnabled(t *testing.T) bool {
 
 func isolateProofCache(t *testing.T) {
 	t.Helper()
-	cache, err := gotool.GoBuildCache(context.Background(), os.Environ())
+	cache, err := testenv.GoBuildCache(context.Background(), os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1032,7 +1031,7 @@ func compileSharedTestBinaryOnce(t testing.TB, pkgDir string, buildFlags ...stri
 	}
 	sharedTestBinaryDirs = append(sharedTestBinaryDirs, tmpDir)
 	binPath := filepath.Join(tmpDir, "pkg.test")
-	env, err := gotool.PreserveBuildCache(context.Background(), os.Environ())
+	env, err := testenv.PreserveBuildCache(context.Background(), os.Environ())
 	if err != nil {
 		t.Fatal(err)
 	}

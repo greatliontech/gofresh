@@ -18,8 +18,6 @@ import (
 	"github.com/greatliontech/go-x-tools/go/packages"
 	"github.com/greatliontech/go-x-tools/go/ssa"
 	"github.com/greatliontech/go-x-tools/go/ssa/ssautil"
-	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
-	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
@@ -122,8 +120,8 @@ func Prepare(ctx context.Context, dir string, env, buildFlags []string, pkgPaths
 		}
 		ownVariants := map[string]*packages.Package{}
 		for _, root := range roots {
-			meta := listing.Package{ImportPath: root.ID, Name: root.Name, Dir: root.Dir, ForTest: root.ForTest}
-			if compartment.OwnVariantOf(meta, path, base.Dir) {
+			meta := gotool.ListedPackage{ImportPath: root.ID, Name: root.Name, Dir: root.Dir, ForTest: root.ForTest}
+			if meta.OwnVariantOf(path, base.Dir) {
 				ownVariants[root.ID] = root
 			}
 		}
@@ -140,7 +138,7 @@ func Prepare(ctx context.Context, dir string, env, buildFlags []string, pkgPaths
 		var selected []*packages.Package
 		var main bool
 		for _, root := range roots {
-			meta := listing.Package{ImportPath: root.ID, Name: root.Name, Dir: root.Dir, ForTest: root.ForTest}
+			meta := gotool.ListedPackage{ImportPath: root.ID, Name: root.Name, Dir: root.Dir, ForTest: root.ForTest}
 			generated := false
 			if meta.IsGeneratedTestMainFor(path) {
 				// Name and ID only locate a candidate in a multi-root load.

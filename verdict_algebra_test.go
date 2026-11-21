@@ -880,7 +880,7 @@ func TestObservationRTAVersion(t *testing.T) {
 }
 
 func TestDynamicStateStrategyVersion(t *testing.T) {
-	if DynamicStateStrategy != "gofresh/dynamic-state@98" {
+	if DynamicStateStrategy != "gofresh/dynamic-state@99" {
 		t.Fatalf("DynamicStateStrategy = %q, want the typed dynamic-state fact and summary derivation", DynamicStateStrategy)
 	}
 }

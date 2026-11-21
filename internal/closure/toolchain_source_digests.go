@@ -16,7 +16,6 @@ import (
 	"strings"
 
 	"github.com/greatliontech/gofresh/internal/cachefile"
-	"github.com/greatliontech/gofresh/internal/closure/internal/listing"
 	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
@@ -336,8 +335,8 @@ func verifyReadPackageDigest(ctx context.Context, p listedPackage, cache map[str
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func listSurface(std []listing.Package) (surfaceListing, error) {
-	byPath := make(map[string]listing.Package, len(std))
+func listSurface(std []gotool.ListedPackage) (surfaceListing, error) {
+	byPath := make(map[string]gotool.ListedPackage, len(std))
 	for _, p := range std {
 		byPath[p.ImportPath] = p
 	}
@@ -630,7 +629,7 @@ func toolchainSourceDigests(ctx context.Context, runner gotool.Runner, dir strin
 		if err != nil {
 			return sourceDigests{}, fmt.Errorf("listing the standard library: %w", err)
 		}
-		std, err := listing.Parse(bytes.NewReader(out))
+		std, err := gotool.ParseListing(bytes.NewReader(out))
 		if err != nil {
 			return sourceDigests{}, fmt.Errorf("listing the standard library: %w", err)
 		}

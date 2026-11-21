@@ -19,7 +19,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/greatliontech/gofresh/internal/guard"
-	"github.com/greatliontech/gofresh/internal/render"
 )
 
 // bracketTree builds a module tree with file, directory, symlink, and absent
@@ -760,8 +759,8 @@ func TestBracketMoveAttributionNamesTheMove(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if reason := revalidateReason(t, b, moduleDir); !strings.Contains(reason, ", and 1 more") || strings.Count(reason, ".go (") != render.ListCap {
-		t.Fatalf("four-member content edit = %q, want %d named members and the remainder counted", reason, render.ListCap)
+	if reason := revalidateReason(t, b, moduleDir); !strings.Contains(reason, ", and 1 more") || strings.Count(reason, ".go (") != listCap {
+		t.Fatalf("four-member content edit = %q, want %d named members and the remainder counted", reason, listCap)
 	}
 
 	moduleDir, root = build(t)
@@ -1530,5 +1529,28 @@ func TestBracketSealBindsMembershipKnowledgeAndScope(t *testing.T) {
 	}
 	if err := b.checkSealed(); err != nil {
 		t.Fatal("test copies changed original capture", err)
+	}
+}
+
+// cappedList shows every name up to the cap and folds the remainder into a
+// count exactly when there is one: at the cap itself nothing is folded, one
+// past it one is.
+func TestCappedListFoldsOnlyPastTheCap(t *testing.T) {
+	names := []string{"a", "b", "c", "d", "e"}
+	cases := []struct {
+		n    int
+		want string
+	}{
+		{0, ""},
+		{1, "a"},
+		{listCap - 1, "a, b"},
+		{listCap, "a, b, c"},
+		{listCap + 1, "a, b, c, and 1 more"},
+		{listCap + 2, "a, b, c, and 2 more"},
+	}
+	for _, c := range cases {
+		if got := cappedList(names[:c.n]); got != c.want {
+			t.Errorf("cappedList(%d names) = %q, want %q", c.n, got, c.want)
+		}
 	}
 }

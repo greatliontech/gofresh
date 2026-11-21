@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/greatliontech/gofresh/internal/gotool"
 	"github.com/greatliontech/gofresh/internal/testenv"
 	"go/ast"
 	"go/parser"
@@ -24,7 +23,7 @@ import (
 // memo (REQ-closure-observability-memo) keys under it, and shared state
 // would let one run's proofs leak into another's assertions.
 func TestMain(m *testing.M) {
-	cache, err := gotool.GoBuildCache(context.Background(), os.Environ())
+	cache, err := testenv.GoBuildCache(context.Background(), os.Environ())
 	if err != nil {
 		panic(err)
 	}

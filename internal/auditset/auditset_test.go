@@ -251,7 +251,15 @@ func TestIdentityCoversFlagSurfaceRolesAndReceiverTables(t *testing.T) {
 
 func TestIdentityCoversAdmissionInventories(t *testing.T) {
 	base := Identity()
-	for _, table := range []map[string]bool{purePackages, reflectImmutableTypes, constantImmutableTypes, symbolTables["reflect"], symbolTables["go/ast"], symbolTables["go/parser"], symbolTables["go/scanner"], symbolTables["go/token"], symbolTables["runtime/debug"], symbolTables["text/tabwriter"], auditedLinknameTargets, classBPackages, fmtWriterFuncs, fmtReaderFuncs, pureScalarOrValuePackages, pureHashPackages, goASTNodeInterfaces, goParserSourceFuncs} {
+	for _, table := range []map[string]bool{
+		purePackages, reflectImmutableTypes, constantImmutableTypes,
+		symbolTables["reflect"], symbolTables["go/ast"], symbolTables["go/parser"], symbolTables["go/scanner"], symbolTables["go/token"], symbolTables["runtime/debug"], symbolTables["text/tabwriter"],
+		auditedLinknameTargets, classBPackages, fmtWriterFuncs, fmtReaderFuncs,
+		pureScalarOrValuePackages, pureHashPackages, goASTNodeInterfaces, goParserSourceFuncs,
+		nonRetainingStdPackages, nonRetainingSyncReceivers, nonRetainingAtomicPrefixes, nonRetainingAtomicFuncs,
+		retainingReflectExcludedPrefixes, retainingReflectExcludedFuncs,
+		nonMutatingAtomicLoadFuncs, nonMutatingAtomicLoadReceivers, nonMutatingValuePackages,
+	} {
 		defer delete(table, "identity-test")
 		table["identity-test"] = true
 		changed := Identity()
@@ -267,7 +275,13 @@ func TestIdentityCoversAdmissionInventories(t *testing.T) {
 	if changedRO == base || Identity() != base {
 		t.Fatal("auditedReadOnlyVarLinknameTargets did not key its identity")
 	}
-	for _, table := range []map[string][]string{syncMethods, poolMethods, memoMethods, timeMethods, reflectMethods, randMethods, atomicMethods, goASTMethods, runtimeDebugMethods, standardSentinelGlobals, inMemoryWriterTypes, inMemoryReaderTypes, valuePlaneFuncs, readOnlySliceInspectFuncs, readOnlySliceCopyFuncs, inPlaceContainerMutateFuncs, pureScalarOrValueFuncs, writerFirstExtraStdFuncs} {
+	for _, table := range []map[string][]string{
+		syncMethods, poolMethods, memoMethods, timeMethods, reflectMethods, randMethods, atomicMethods,
+		goASTMethods, runtimeDebugMethods, standardSentinelGlobals, inMemoryWriterTypes, inMemoryReaderTypes,
+		valuePlaneFuncs, readOnlySliceInspectFuncs, readOnlySliceCopyFuncs, inPlaceContainerMutateFuncs,
+		pureScalarOrValueFuncs, writerFirstExtraStdFuncs, nonMutatingExtraSliceFuncs,
+		nonMutatingValueReceiverTypes, nonMutatingValueReceiverMethods,
+	} {
 		defer delete(table, "identity-test")
 		table["identity-test"] = []string{"Second", "First"}
 		changed := Identity()
@@ -671,6 +685,149 @@ func TestSyntaxTabwriterHashAndBuildInfoPredicatesAndGOROOTPartition(t *testing.
 			if !seen[sym] {
 				t.Errorf("%s.%s listed in symbolTables[%q] but not found in GOROOT/src", pkgPath, sym, pkgPath)
 			}
+		}
+	}
+}
+
+func TestNonRetainingStdCalleeMatrix(t *testing.T) {
+	freeFn := func(pkgPath, name string) *types.Func {
+		pkg := types.NewPackage(pkgPath, "p")
+		return types.NewFunc(token.NoPos, pkg, name, types.NewSignatureType(nil, nil, nil, nil, nil, false))
+	}
+	methodFn := func(pkgPath, recvName, name string, ptr bool) *types.Func {
+		pkg := types.NewPackage(pkgPath, "p")
+		obj := types.NewTypeName(token.NoPos, pkg, recvName, nil)
+		named := types.NewNamed(obj, types.NewStruct(nil, nil), nil)
+		var recv types.Type = named
+		if ptr {
+			recv = types.NewPointer(named)
+		}
+		sig := types.NewSignatureType(types.NewVar(token.NoPos, pkg, "r", recv), nil, nil, nil, nil, false)
+		return types.NewFunc(token.NoPos, pkg, name, sig)
+	}
+	if NonRetainingStdCallee(nil) || NonRetainingStdCallee(types.NewFunc(token.NoPos, nil, "F", types.NewSignatureType(nil, nil, nil, nil, nil, false))) {
+		t.Fatal("nil or universe function admitted")
+	}
+	for _, wantTrue := range []*types.Func{
+		freeFn("strings", "TrimSpace"),
+		freeFn("slices", "Clone"),
+		freeFn("reflect", "TypeOf"),
+		methodFn("reflect", "Value", "Kind", false),
+		methodFn("sync", "Mutex", "Lock", true),
+		methodFn("sync", "RWMutex", "RLock", true),
+		methodFn("sync", "Once", "Do", true),
+		freeFn("sync/atomic", "LoadInt64"),
+		freeFn("sync/atomic", "AddInt32"),
+		freeFn("sync/atomic", "StoreUint32"),
+		methodFn("sync/atomic", "Pointer", "Load", true),
+	} {
+		if !NonRetainingStdCallee(wantTrue) {
+			t.Fatalf("NonRetainingStdCallee(%v) = false, want true", wantTrue)
+		}
+	}
+	for _, wantFalse := range []*types.Func{
+		freeFn("os", "Open"),
+		freeFn("sync", "OnceFunc"),
+		methodFn("sync", "Map", "Store", true),
+		methodFn("sync", "Pool", "Get", true),
+		methodFn("sync", "Pool", "Put", true),
+		methodFn("sync/atomic", "Pointer", "Store", true),
+		freeFn("sync/atomic", "StorePointer"),
+		freeFn("sync/atomic", "SwapPointer"),
+		freeFn("reflect", "MakeFunc"),
+		freeFn("reflect", "Append"),
+		freeFn("reflect", "Copy"),
+		freeFn("reflect", "NewAt"),
+		freeFn("reflect", "Select"),
+		freeFn("reflect", "SliceAt"),
+		freeFn("reflect", "Swapper"),
+		methodFn("reflect", "Value", "Set", false),
+		methodFn("reflect", "Value", "SetMapIndex", false),
+		methodFn("reflect", "Value", "Call", false),
+		methodFn("reflect", "Value", "CallSlice", false),
+		methodFn("reflect", "Value", "Clear", false),
+		methodFn("reflect", "Value", "Close", false),
+		methodFn("reflect", "Value", "Grow", false),
+		methodFn("reflect", "Value", "Recv", false),
+		methodFn("reflect", "Value", "Send", false),
+		methodFn("reflect", "Value", "TryRecv", false),
+		methodFn("reflect", "Value", "TrySend", false),
+	} {
+		if NonRetainingStdCallee(wantFalse) {
+			t.Fatalf("NonRetainingStdCallee(%v) = true, want false", wantFalse)
+		}
+	}
+}
+
+func TestNonMutatingStdCalleeMatrix(t *testing.T) {
+	freeFn := func(pkgPath, name string, params ...types.Type) *types.Func {
+		pkg := types.NewPackage(pkgPath, "p")
+		vars := make([]*types.Var, len(params))
+		for i, pt := range params {
+			vars[i] = types.NewVar(token.NoPos, pkg, "p", pt)
+		}
+		return types.NewFunc(token.NoPos, pkg, name, types.NewSignatureType(nil, nil, nil, types.NewTuple(vars...), nil, false))
+	}
+	methodFn := func(pkgPath, recvName, name string, ptr bool, params ...types.Type) *types.Func {
+		pkg := types.NewPackage(pkgPath, "p")
+		obj := types.NewTypeName(token.NoPos, pkg, recvName, nil)
+		named := types.NewNamed(obj, types.NewStruct(nil, nil), nil)
+		var recv types.Type = named
+		if ptr {
+			recv = types.NewPointer(named)
+		}
+		vars := make([]*types.Var, len(params))
+		for i, pt := range params {
+			vars[i] = types.NewVar(token.NoPos, pkg, "p", pt)
+		}
+		sig := types.NewSignatureType(types.NewVar(token.NoPos, pkg, "r", recv), nil, nil, types.NewTuple(vars...), nil, false)
+		return types.NewFunc(token.NoPos, pkg, name, sig)
+	}
+	byteSlice := types.NewSlice(types.Typ[types.Byte])
+	intSlice := types.NewSlice(types.Typ[types.Int])
+	strSlice := types.NewSlice(types.Typ[types.String])
+	anySlice := types.NewSlice(types.NewInterfaceType(nil, nil))
+
+	for _, wantTrue := range []*types.Func{
+		freeFn("bytes", "Equal", byteSlice, byteSlice),
+		freeFn("bytes", "Clone", byteSlice),
+		freeFn("slices", "Equal", intSlice, intSlice),
+		freeFn("slices", "Clone", intSlice),
+		freeFn("strings", "TrimSpace", types.Typ[types.String]),
+		freeFn("strings", "Join", strSlice, types.Typ[types.String]),
+		freeFn("strconv", "Itoa", types.Typ[types.Int]),
+		freeFn("math", "Sqrt", types.Typ[types.Float64]),
+		freeFn("errors", "New", types.Typ[types.String]),
+		freeFn("reflect", "TypeOf", types.NewInterfaceType(nil, nil)),
+		freeFn("sync/atomic", "LoadUint32", types.NewPointer(types.Typ[types.Uint32])),
+		methodFn("sync/atomic", "Uint32", "Load", true),
+		methodFn("sync/atomic", "Pointer", "Load", true),
+		methodFn("reflect", "StructTag", "Get", false, types.Typ[types.String]),
+		methodFn("time", "Time", "Format", false, types.Typ[types.String]),
+	} {
+		if !NonMutatingStdCallee(wantTrue) {
+			t.Fatalf("NonMutatingStdCallee(%v) = false, want true", wantTrue)
+		}
+	}
+	for _, wantFalse := range []*types.Func{
+		freeFn("slices", "Reverse", intSlice),
+		freeFn("slices", "Sort", intSlice),
+		freeFn("sort", "Ints", intSlice),
+		freeFn("unicode/utf8", "EncodeRune", byteSlice, types.Typ[types.Rune]),
+		freeFn("strconv", "AppendInt", byteSlice, types.Typ[types.Int64], types.Typ[types.Int]),
+		freeFn("fmt", "Sprintf", types.Typ[types.String], anySlice),
+		freeFn("math", "Sin", types.Typ[types.Float64]),
+		methodFn("bytes", "Buffer", "Reset", true),
+		methodFn("sync", "Mutex", "Unlock", true),
+		methodFn("sync", "RWMutex", "RLock", true),
+		methodFn("sync", "Once", "Do", true),
+		methodFn("sync", "Pool", "Get", true),
+		methodFn("sync/atomic", "Uint32", "Store", true, types.Typ[types.Uint32]),
+		methodFn("reflect", "Value", "Clear", false),
+		methodFn("time", "Time", "AppendFormat", false, byteSlice, types.Typ[types.String]),
+	} {
+		if NonMutatingStdCallee(wantFalse) {
+			t.Fatalf("NonMutatingStdCallee(%v) = true, want false", wantFalse)
 		}
 	}
 }

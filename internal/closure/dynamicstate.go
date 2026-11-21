@@ -9,27 +9,21 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/greatliontech/gofresh/internal/dynstate"
+	"github.com/greatliontech/gofresh/internal/gotool"
 )
 
-// PackageClass is the mutability class of one graph package's source, the
-// same discrimination the closure hash applies to its contributions:
-// standard-library source rides the toolchain guard, module-cache source is
-// pinned by its version, and everything else — main module, local replace,
-// workspace sibling, vendored copy — is mutable-local and must be observed by
-// content on every pass (REQ-closure-mutable-local, REQ-closure-pinned-dep).
-type PackageClass = dynstate.PackageClass
+// PackageClass is the mutability class of one graph package's source.
+type PackageClass = gotool.PackageClass
 
 const (
-	MutableLocalPackage = dynstate.MutableLocalPackage
-	StandardPackage     = dynstate.StandardPackage
-	PinnedPackage       = dynstate.PinnedPackage
+	MutableLocalPackage = gotool.MutableLocalPackage
+	StandardPackage     = gotool.StandardPackage
+	PinnedPackage       = gotool.PinnedPackage
 )
 
 // GraphPackage is one node of a view's test-binary package graph as the
-// metadata listing names it: enough identity to classify, key, and walk the
-// graph without loading any syntax.
-type GraphPackage = dynstate.GraphPackage
+// metadata listing names it.
+type GraphPackage = gotool.GraphPackage
 
 // GraphMetadata returns the deduplicated test-binary package graphs of
 // pkgPaths from the metadata listing — the same listing the closure hash

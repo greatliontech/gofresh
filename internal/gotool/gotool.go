@@ -1,9 +1,11 @@
 // Package gotool runs the go command line tool under one complete
 // normalized environment (env.go), surfacing stderr on failure;
-// reads go's environment once per pass (EnvReader); resolves a
-// directory to its one canonical coordinate (CanonicalDir, Coordinate);
-// and reads a toolchain version's language series, pair, and release
-// tags through the canonical grammar (LanguageSeries, ParseGoVersion,
+// reads go's environment once per pass (EnvReader); validates and parses
+// Go build flags and quoted argument fields (flags.go, quoted.go); decodes
+// `go list -json` package graphs and source-mutability classes (listing.go);
+// resolves a directory to its one canonical coordinate (CanonicalDir,
+// Coordinate); and reads a toolchain version's language series, pair, and
+// release tags through the canonical grammar (LanguageSeries, ParseGoVersion,
 // ReleaseTags).
 package gotool
 

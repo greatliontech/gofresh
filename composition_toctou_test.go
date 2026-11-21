@@ -711,7 +711,7 @@ func TestReadFixture(t *testing.T) {
 
 	t.Run("corrupted_truncated_and_bitflipped_xdg_cache_home_recovers_cleanly", func(t *testing.T) {
 		// Preserve GOCACHE before isolating XDG_CACHE_HOME so child go commands do not cold-rebuild stdlib.
-		goCache, err := gotool.GoBuildCache(context.Background(), os.Environ())
+		goCache, err := testenv.GoBuildCache(context.Background(), os.Environ())
 		if err != nil {
 			t.Fatal(err)
 		}

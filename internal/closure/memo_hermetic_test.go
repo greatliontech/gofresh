@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/greatliontech/gofresh/internal/cachefile"
-	"github.com/greatliontech/gofresh/internal/closure/internal/compartment"
-	"github.com/greatliontech/gofresh/internal/closure/internal/digest"
 	"github.com/greatliontech/gofresh/internal/testvariant"
 	"os"
 	"path/filepath"
@@ -232,7 +230,7 @@ func TestBatchEntriesDiscardStaleTestBinaryKeys(t *testing.T) {
 	}
 	third.SetAnalysisScope(AnalysisScope{ProofStrategy: "p", Toolchain: "scope-a", BuildConfig: "build"})
 	third.testBinaryKeys = map[string]string{"example.com/memo": "stale-key"}
-	third.variantScope = map[string]compartment.Identity{"example.com/memo": {Hash: "stale-compartment"}}
+	third.variantScope = map[string]testvariant.Identity{"example.com/memo": {Hash: "stale-compartment"}}
 	batched, _, err := third.ComputeMaximalBatch(subjects)
 	if err != nil {
 		t.Fatal(err)
@@ -737,24 +735,24 @@ func TestCompartmentParsesServeOnTheScanKeyPath(t *testing.T) {
 // serves it back, so a served ledger is exactly the persisted form.
 type recordingMemo struct{ entries map[string][]byte }
 
-func (m *recordingMemo) Parsed(name, digest string) ([]testvariant.TestVariantDeclaration, testvariant.TestVariantFileHeader, bool) {
-	raw, ok := m.entries[name+"\x00"+digest]
-	if !ok {
-		return nil, testvariant.TestVariantFileHeader{}, false
+func (m *recordingMemo) parse(name, digest string, content []byte) ([]testvariant.TestVariantDeclaration, testvariant.TestVariantFileHeader, error) {
+	if raw, ok := m.entries[name+"\x00"+digest]; ok {
+		var payload variantParsePayload
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil, testvariant.TestVariantFileHeader{}, err
+		}
+		return payload.Declarations, payload.Header, nil
 	}
-	var payload variantParsePayload
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		panic(err)
+	declarations, header, err := testvariant.ParseFile(name, content)
+	if err != nil {
+		return nil, testvariant.TestVariantFileHeader{}, err
 	}
-	return payload.Declarations, payload.Header, true
-}
-
-func (m *recordingMemo) Record(name, digest string, declarations []testvariant.TestVariantDeclaration, header testvariant.TestVariantFileHeader) {
 	raw, err := json.Marshal(variantParsePayload{Declarations: declarations, Header: header})
 	if err != nil {
-		panic(err)
+		return nil, testvariant.TestVariantFileHeader{}, err
 	}
 	m.entries[name+"\x00"+digest] = raw
+	return declarations, header, nil
 }
 
 // A compartment identity built from served derivations equals one built
@@ -776,18 +774,18 @@ func TestCompartmentParseRoundTripsThroughThePersistedForm(t *testing.T) {
 	names := []string{"a_test.go", "b_test.go", "data.txt"}
 	compiled := map[string]bool{"a_test.go": true, "b_test.go": true}
 	embedded := map[string]bool{"data.txt": true, "b_test.go": true}
-	want, err := compartment.ComputeIdentity(dir, names, compiled, embedded, nil, nil, nil)
+	want, err := testvariant.ComputeIdentity(dir, names, compiled, embedded, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	memo := &recordingMemo{entries: map[string][]byte{}}
-	if _, err := compartment.ComputeIdentity(dir, names, compiled, embedded, nil, nil, memo); err != nil {
+	if _, err := testvariant.ComputeIdentity(dir, names, compiled, embedded, nil, nil, memo.parse); err != nil {
 		t.Fatal(err)
 	}
 	if len(memo.entries) != 2 {
 		t.Fatalf("recorded %d derivations, want the two compiled members", len(memo.entries))
 	}
-	got, err := compartment.ComputeIdentity(dir, names, compiled, embedded, nil, nil, memo)
+	got, err := testvariant.ComputeIdentity(dir, names, compiled, embedded, nil, nil, memo.parse)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -811,7 +809,7 @@ func digestOf(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return digest.Content(content)
+	return shortDigest(content)
 }
 
 // A module-cache file takes no per-file entry and no place in the call's

@@ -108,7 +108,7 @@ func (h *Hasher) ComputeMaximalFactsBatch(subjects []Subject) (map[Subject]Maxim
 
 func maximalSubjectHash(packageHash string, subject Subject) string {
 	sum := sha256.Sum256(fmt.Appendf(nil, "%d:%s%d:%s%d:%s", len(packageHash), packageHash, len(subject.Package), subject.Package, len(subject.Symbol), subject.Symbol))
-	return hex.EncodeToString(sum[:])[:32]
+	return hex.EncodeToString(sum[:16])
 }
 
 // maximalEffectsResult memoizes one package's complete external-effect scan

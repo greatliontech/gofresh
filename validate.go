@@ -11,10 +11,18 @@ import (
 
 	"github.com/greatliontech/gofresh/internal/closure"
 	"github.com/greatliontech/gofresh/internal/guard"
-	"github.com/greatliontech/gofresh/internal/render"
 	"github.com/greatliontech/gofresh/internal/runtimeinput"
 	"github.com/greatliontech/gofresh/internal/trace"
 )
+
+const movedListCap = 3
+
+func cappedList(names []string) string {
+	if len(names) <= movedListCap {
+		return strings.Join(names, ", ")
+	}
+	return strings.Join(names[:movedListCap], ", ") + fmt.Sprintf(", and %d more", len(names)-movedListCap)
+}
 
 // Validate re-observes the Snapshot's complete subject set under the caller's
 // context and reports ErrViewChanged when any source closure, guard, or purity
@@ -357,7 +365,7 @@ func movedIdentitySuffix(captured, current []string, capturedDigests, currentDig
 		return ""
 	}
 	sort.Strings(moved)
-	return " (moved: " + render.CappedList(moved) + ")"
+	return " (moved: " + cappedList(moved) + ")"
 }
 
 // differingGuard names the first environment guard whose two construction
@@ -503,7 +511,7 @@ func (v *Snapshot) withEndpointMovedInputs(ctx context.Context, verdict Verdict,
 	if len(movers) == 0 {
 		return verdict
 	}
-	verdict.Reason = "runtimeinputs (moved: " + render.CappedList(movers) + ")"
+	verdict.Reason = "runtimeinputs (moved: " + cappedList(movers) + ")"
 	return verdict
 }
 
@@ -548,7 +556,7 @@ func (v *Snapshot) compareAttachedObservations(ctx context.Context, attached map
 		if eval.state != state {
 			detail := ""
 			if movers := v.moversFromEndpoint(ctx, state.Manifest, &ep); len(movers) > 0 {
-				detail = " (moved: " + render.CappedList(movers) + ")"
+				detail = " (moved: " + cappedList(movers) + ")"
 			}
 			return fmt.Errorf("%w: runtime inputs for %s.%s%s", ErrViewChanged, subject.Package, subject.Symbol, detail)
 		}
